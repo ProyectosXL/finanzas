@@ -20,60 +20,72 @@
     <meta http-equiv='pragma' content='no-cache'>
     <title>Remitos pendientes de cobro</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css" integrity="sha384-xOolHFLEh07PJGoPkLv1IbcEPTNtaed2xpHsD9ESMhqIYd0nLMwNLD69Npy4HI+N" crossorigin="anonymous">
-
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.5.2/css/bootstrap.css">
-        <link rel="stylesheet" href="https://cdn.datatables.net/1.12.1/css/dataTables.bootstrap4.min.css" class="rel">
-        <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.3.0/css/responsive.dataTables.min.css" class="rel">
-
-        <!-- Bootstrap Icons -->
-        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.9.1/font/bootstrap-icons.css">
-
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.12.1/css/dataTables.bootstrap4.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.3.0/css/responsive.dataTables.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.9.1/font/bootstrap-icons.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="css/style.css">
-
-    </link>
+    <link rel="stylesheet" href="css/remitosPendientesDeCobro.css">
 
     </head>
 
     <body>
 
-    <div class="alert">
-        <div class="page-wrapper bg-secondary p-b-100 pt-2 font-robo">
-            <div class="wrapper wrapper--w680">
-                <div style="color:white; text-align:center">
-                    <h6>Remitos pendientes de cobro</h6>
+    <div class="page-wrapper">
+
+        <div class="main-card">
+            <div class="card-header-section">
+                <i class="bi bi-cash"></i>
+                <h3>Remitos pendientes de cobro</h3>
+            </div>
+
+            <div id="user" hidden><?= $_GET['userName'] ?></div>
+            
+            <div class="info-grid">
+                <div class="info-item">
+                    <label>Total deuda</label>
+                    <input type="text" id="totalDeuda" readonly>
                 </div>
-                <div class="card card-1">
-                    
-                    <div class="row" style="margin-left:1rem">
-                        <h3><i class="bi bi-cash" style="margin-right:20px;font-size:50px"></i>Remitos pendientes de cobro</h3>
-                    </div>
-                    <div id="user" hidden><?= $_GET['userName'] ?></div>
-                    <div class="row" style="margin-left:50px;margin-top">
-                        <div><label>Total deuda: </label><input class="form-control" type="text" id="totalDeuda" readonly></div>
-                        <div id="divImporteAabonar" style="margin-left: 1rem"><label>Importe a abonar:</label><input class="form-control" type="text" id="importeAbonar" readonly></div>
-                        <div id="divImporteConDescuento" style="margin-left: 1rem"> <label>Importe con Descuento:</label><input class="form-control" type="text" id="importeConDescuento" readonly></div>
-                        <div style="margin-left: 1rem"><label>% Descuento:</label><input class="form-control" type="text" id="descuento" onchange="calcularDescuento()" placeholder="Colocar números enteros"></div>
-                        <div style="margin-top: 2rem; margin-left: 0.5rem"><button class="btn btn-primary" value="" id="btnConfirmar">Confirmar <i class="bi bi-check-square"></i></button></div>
-                        <div style="margin-top: 2rem; margin-left: 1rem"><button class="btn btn-success btn_exportar" id="btnExport"><i class="fa fa-file-excel-o"></i>Exportar<i class="bi bi-file-earmark-excel"></i></button></div>
-                    </div>
+                <div class="info-item" id="divImporteAabonar">
+                    <label>Importe a abonar</label>
+                    <input type="text" id="importeAbonar" readonly>
+                </div>
+                <div class="info-item" id="divImporteConDescuento">
+                    <label>Importe con Descuento</label>
+                    <input type="text" id="importeConDescuento" readonly>
+                </div>
+                <div class="info-item">
+                    <label>% Descuento</label>
+                    <input type="text" id="descuento" onchange="calcularDescuento()" placeholder="Colocar números enteros">
+                </div>
+                <div class="info-item actions-buttons">
+                    <button class="btn-modern btn-primary-modern" value="" id="btnConfirmar">
+                        <i class="bi bi-check-square"></i>
+                        Confirmar
+                    </button>
+                </div>
+                <div class="info-item actions-buttons">
+                    <button class="btn-modern btn-success-modern btn_exportar" id="btnExport">
+                        <i class="bi bi-file-earmark-excel"></i>
+                        Exportar
+                    </button>
+                </div>
+            </div>
 
-                    <div class="row" style="margin-left: 1rem;margin-top:1rem">
-                        <div hidden id="codClient"><?= $_GET['codClient'] ?></div>
-                        <div style="width: 500px">
-                            <h5><strong>Cliente : <p style="color: red;"><?= $detalleDeRemito[0]['RAZON_SOCI'] ?></p></strong></h5>
-                        </div>
-                    </div>
+            <div hidden id="codClient"><?= $_GET['codClient'] ?></div>
+            
+            <div class="client-info">
+                <h5>Cliente: <span class="client-name"><?= $detalleDeRemito[0]['RAZON_SOCI'] ?></span></h5>
+            </div>
 
-
-                    <table class="table table-striped table-bordered" id="myTable" style="width: 99%;" cellspacing="0" data-page-length="100">
+            <div class="table-container">
+                <table class="table table-striped table-bordered" id="myTable" cellspacing="0" data-page-length="100">
                         <thead class="thead-dark">
                             <tr>
-                                <th style="position: sticky; top: 0; z-index: 10; width: 200px;text-align:center" class="col-1">FECHA</th>
-                                <th style="position: sticky; top: 0; z-index: 10;text-align:center">CLIENTE</th>
-                                <th style="position: sticky; top: 0; z-index: 10;text-align:center">REMITO</th>
-                                <th style="position: sticky; top: 0; z-index: 10;text-align:center">MONTO</th>
-                                <th style="position: sticky; top: 0; z-index: 10;text-align:center"></th>
+                                <th>FECHA</th>
+                                <th>CLIENTE</th>
+                                <th>REMITO</th>
+                                <th>MONTO</th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -86,7 +98,7 @@
                                 echo "<td style='text-align:center' >" . $value['FECHA_MOV']->format('Y-m-d') . "</td>";
                                 echo "<td style='text-align:center' >" . $value['RAZON_SOCI'] . "</td>";
                                 echo "<td style='text-align:center' >" . $value['N_COMP'] . "</td>";
-                                echo "<td style='text-align:center' id='monto'>" . $value['IMPORTE_TO'] . "</td>";
+                                echo "<td style='text-align:center' id='monto' attr-realValue='" . $value['IMPORTE_TO'] . "'>" . $value['IMPORTE_TO'] . "</td>";
                                 echo "<td style='text-align:center;width:20px' ><input type='checkbox' style='width:20px' onchange='checkMonto()' ></td>";
                                 echo "</tr>";
                             }
@@ -95,12 +107,9 @@
 
                         </tbody>
                     </table>
-
                 </div>
             </div>
-
-
-
+        </div>
 
             <script src="//cdn.jsdelivr.net/npm/sweetalert2@11"></script>
             <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
@@ -132,20 +141,20 @@
                     ]
                 });
 
-
-
                 let total = 0;
 
                 todosLosMontos.forEach(e => {
-
-                    total = total + parseInt(e.getAttribute("attr-realValue"))
-                    
+                    const valor = parseInt(e.getAttribute("attr-realValue"));
+                    if (!isNaN(valor)) {
+                        total += valor;
+                    }
                 }); 
-                document.querySelector("#totalDeuda").value = "$ "+total.toLocaleString('de-De', {
-                style: 'decimal',
-                maximumFractionDigits: 0,
-                minimumFractionDigits: 0
-            });
+                
+                document.querySelector("#totalDeuda").value = "$ " + total.toLocaleString('es-AR', {
+                    style: 'decimal',
+                    maximumFractionDigits: 0,
+                    minimumFractionDigits: 0
+                });
                 
         });
             

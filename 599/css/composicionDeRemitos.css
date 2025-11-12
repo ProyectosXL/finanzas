@@ -1,0 +1,376 @@
+/* Estilo minimalista para Composición de Remitos */
+:root {
+    --primary-color: #000000;
+    --secondary-color: #333333;
+    --success-color: #27ae60;
+    --border-color: #e0e0e0;
+    --light-bg: #f5f5f5;
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    --border-radius: 4px;
+    --transition: all 0.2s ease;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: #f5f5f5;
+    min-height: 100vh;
+    padding: 15px;
+}
+
+.page-wrapper {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.page-header {
+    background: white;
+    border-radius: var(--border-radius);
+    padding: 12px 20px;
+    margin-bottom: 15px;
+    box-shadow: var(--card-shadow);
+    border-bottom: 2px solid var(--primary-color);
+}
+
+.page-header h1 {
+    color: var(--primary-color);
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0;
+}
+
+.main-card {
+    background: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--card-shadow);
+    padding: 20px;
+    margin-bottom: 15px;
+}
+
+.card-header-section {
+    display: flex;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.card-header-section i {
+    font-size: 24px;
+    color: var(--primary-color);
+    margin-right: 10px;
+}
+
+.card-header-section h3 {
+    color: var(--primary-color);
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.stat-card {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 20px;
+    box-shadow: var(--card-shadow);
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    transition: var(--transition);
+}
+
+.stat-card:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.stat-icon {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: var(--light-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.stat-icon i {
+    font-size: 24px;
+    color: var(--primary-color);
+}
+
+.stat-card.efectivo .stat-icon {
+    background: #d4edda;
+}
+
+.stat-card.efectivo .stat-icon i {
+    color: var(--success-color);
+}
+
+.stat-card.cheque .stat-icon {
+    background: #d1ecf1;
+}
+
+.stat-card.cheque .stat-icon i {
+    color: #0c5460;
+}
+
+.stat-content {
+    flex: 1;
+}
+
+.stat-card-header {
+    font-size: 11px;
+    font-weight: 600;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 5px;
+}
+
+.stat-card-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--primary-color);
+    line-height: 1;
+}
+
+.cobranza-section {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.cobranza-item {
+    background: var(--light-bg);
+    border-radius: var(--border-radius);
+    padding: 12px;
+    border-left: 3px solid var(--primary-color);
+}
+
+.cobranza-item.efectivo {
+    border-left-color: var(--success-color);
+}
+
+.cobranza-item.cheque {
+    border-left-color: var(--primary-color);
+}
+
+.cobranza-item label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: block;
+    margin-bottom: 5px;
+}
+
+.cobranza-item input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--primary-color);
+    background-color: white;
+}
+
+.actions-section {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 15px;
+}
+
+.btn-modern {
+    padding: 8px 16px;
+    border: 1px solid var(--success-color);
+    border-radius: var(--border-radius);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.btn-modern i {
+    font-size: 14px;
+}
+
+.btn-success-modern {
+    background: var(--success-color);
+    color: white;
+}
+
+.btn-success-modern:hover {
+    background: #229954;
+}
+
+.btn-edit {
+    background: var(--primary-color);
+    color: white;
+    padding: 6px 12px;
+    border: none;
+    border-radius: var(--border-radius);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.btn-edit:hover {
+    background: var(--secondary-color);
+}
+
+.table-container {
+    overflow-x: auto;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+}
+
+#myTable {
+    width: 100% !important;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+#myTable thead th {
+    background: var(--primary-color);
+    color: white;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    padding: 10px 8px;
+    border: none;
+}
+
+#myTable tbody tr {
+    transition: var(--transition);
+}
+
+#myTable tbody tr:hover {
+    background-color: var(--light-bg);
+}
+
+#myTable tbody td {
+    padding: 10px 8px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--secondary-color);
+    font-size: 13px;
+}
+
+#myTable tbody td:last-child {
+    text-align: center;
+}
+
+/* Columnas específicas */
+#myTable tbody td:nth-child(2),
+#myTable tbody td:nth-child(3) {
+    font-weight: 600;
+}
+
+/* DataTables customization */
+.dataTables_wrapper {
+    margin-top: 20px;
+}
+
+.dataTables_wrapper .dataTables_length,
+.dataTables_wrapper .dataTables_filter {
+    margin-bottom: 15px;
+}
+
+.dataTables_wrapper .dataTables_length {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.dataTables_wrapper .dataTables_length label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+}
+
+.dataTables_wrapper .dataTables_length select,
+.dataTables_wrapper .dataTables_filter input {
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 6px 10px;
+    font-size: 13px;
+    margin: 0 5px;
+}
+
+.dataTables_wrapper .dataTables_info {
+    padding-top: 12px;
+}
+
+.dataTables_wrapper .dataTables_paginate {
+    padding-top: 12px;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button {
+    border-radius: var(--border-radius);
+    padding: 6px 10px;
+    margin: 0 2px;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button.current {
+    background: var(--primary-color);
+    color: white !important;
+    border: 1px solid var(--primary-color);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .cobranza-section {
+        grid-template-columns: 1fr;
+    }
+    
+    .card-header-section {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    .card-header-section i {
+        margin-right: 0;
+        margin-bottom: 10px;
+    }
+    
+    .actions-section {
+        justify-content: center;
+    }
+}
+
+@media (max-width: 992px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+}

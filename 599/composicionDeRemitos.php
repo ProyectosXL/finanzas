@@ -70,50 +70,70 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Composicion De Remitos</title>
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css" integrity="sha384-xOolHFLEh07PJGoPkLv1IbcEPTNtaed2xpHsD9ESMhqIYd0nLMwNLD69Npy4HI+N" crossorigin="anonymous">
-
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.5.2/css/bootstrap.css">
-        <link rel="stylesheet" href="https://cdn.datatables.net/1.12.1/css/dataTables.bootstrap4.min.css" class="rel">
-        <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.3.0/css/responsive.dataTables.min.css" class="rel">
-
-        <!-- Bootstrap Icons -->
+        <link rel="stylesheet" href="https://cdn.datatables.net/1.12.1/css/dataTables.bootstrap4.min.css">
+        <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.3.0/css/responsive.dataTables.min.css">
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.9.1/font/bootstrap-icons.css">
-
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-
-        </link>
+        <link rel="stylesheet" href="css/composicionDeRemitos.css">
 
     </head>
 
     <body>
 
-        <div class="alert">
-            <div class="page-wrapper bg-secondary p-b-100 pt-2 font-robo">
-                    <div class="wrapper wrapper--w680"><div style="color:white; text-align:center"><h6>Composición de Remitos</h6></div>
-                    <div class="card card-1 mb-2">
-                        
-                        <div style="margin-left: 2rem"><h3><i class="bi bi-cash"></i> Composición de saldo a cobrar</h3></div>
-                                <div  id="user" hidden><?=$userName; ?></div>
-                                <div class="row" style="margin-left: 20rem">
-                                        <div><h5>Total deuda : <input class="form-control" type="text" id='sumValorDeuda' readonly></h5></div>
-                                    <div style="margin-left: 2rem; margin-top: 2rem;"><h5>Cobranza:
-                                        <div style="margin-left: 7rem;">
-                                            <div style="margin-top: -3.8rem;"><label>Efectivo</label><input class="form-control" style="width: 10rem"type="text" placeholder="Efectivo" id="efectivo" value="<?= '$'.number_format($totalEfectivo, 0, ',', '.')?>" readonly></div>
-                                            <div style="margin-top: -4.4rem; margin-left: 10.5rem;"><label>Cheque</label><input class="form-control" style="width: 10rem" type="text" placeholder="Cheques" id="cheques" value="<?= '$'.number_format($totalCheque, 0, ',', '.')?>" readonly></h5></div>
-                                            <div style="margin-top: 1.7rem; margin-left: 1rem;"><button class="btn btn-success btn_exportar" id="btnExport"><i class="fa fa-file-excel-o"></i> Exportar<i class="bi bi-file-earmark-excel"></i></button></div>
-                                        </div>
-                                    </div>
-                                </div>
-                        
-                        </div>
-                    
+        <div class="page-wrapper">
+            <div class="main-card">
+                <div class="card-header-section">
+                    <i class="bi bi-cash"></i>
+                    <h3>Composición de saldo a cobrar</h3>
+                </div>
+
+                <div id="user" hidden><?=$userName; ?></div>
                 
-                        <table class="table table-striped table-bordered" id="myTable" style="width: 99%;" cellspacing="0" data-page-length="100">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="bi bi-cash-stack"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-card-header">Total Deuda</div>
+                            <div class="stat-card-value" id="sumValorDeuda">$0</div>
+                        </div>
+                    </div>
+                    <div class="stat-card efectivo">
+                        <div class="stat-icon">
+                            <i class="bi bi-wallet2"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-card-header">Efectivo</div>
+                            <div class="stat-card-value"><?= '$'.number_format($totalEfectivo, 0, ',', '.')?></div>
+                        </div>
+                    </div>
+                    <div class="stat-card cheque">
+                        <div class="stat-icon">
+                            <i class="bi bi-credit-card"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-card-header">Cheques</div>
+                            <div class="stat-card-value"><?= '$'.number_format($totalCheque, 0, ',', '.')?></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="actions-section">
+                    <button class="btn-modern btn-success-modern btn_exportar" id="btnExport">
+                        <i class="bi bi-file-earmark-excel"></i>
+                        Exportar
+                    </button>
+                </div>
+        
+                <div class="table-container">
+                    <table class="table table-striped table-bordered" id="myTable" cellspacing="0" data-page-length="100">
                             <thead class="thead-dark">
                                 <tr>
-                                    <th style="position: sticky; top: 0; z-index: 10; width: 600px;text-align:center" class="col-4">CLIENTE</th>
-                                    <th style="position: sticky; top: 0; z-index: 10;text-align:center">A COBRAR</th>
-                                    <th style="position: sticky; top: 0; z-index: 10;text-align:center">COBRADO</th>
-                                    <th style="position: sticky; top: 0; z-index: 10;text-align:center"></th>
+                                    <th>CLIENTE</th>
+                                    <th>A COBRAR</th>
+                                    <th>COBRADO</th>
+                                    <th></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -125,7 +145,7 @@
                                             echo "<td style='text-align:center' id='colCobrado'>".$b['totalCobrado']."</td>";
                                             if($b['totalDeuda'] > 0){
 
-                                                echo "<td style='text-align:center'><button class ='btn-success' onclick='verDetalle(this)'><i class='bi bi-pencil-square'></i></button></td>";
+                                                echo "<td style='text-align:center'><button class='btn-edit' onclick='verDetalle(this)'><i class='bi bi-pencil-square'></i> Ver</button></td>";
                                             }else{
                                                 echo "<td style='text-align:center'></td>";
 
@@ -135,10 +155,10 @@
                                     ?> 
                         
                             </tbody>
+                        </table>
                     </div>
+                </div>
             </div>
-        </div>
-        </table>
 
 
         <script src="//cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -160,25 +180,35 @@
     <script>
 
             $(document).ready(function() {
+                // Primero calcular el total antes de formatear
+                const totalDeudas = document.querySelectorAll("#colDeuda");
+                let valorTotalDeudas = 0;
+                
+                totalDeudas.forEach(e => {
+                    const valor = parseInt(e.getAttribute("attr-realValue"));
+                    if (!isNaN(valor)) {
+                        valorTotalDeudas += valor;
+                    }
+                });
+
+                // Actualizar el total de deuda
+                const elementoTotal = document.querySelector("#sumValorDeuda");
+                if (elementoTotal) {
+                    elementoTotal.textContent = "$ " + valorTotalDeudas.toLocaleString('es-AR', {
+                        style: 'decimal',
+                        maximumFractionDigits: 0,
+                        minimumFractionDigits: 0
+                    });
+                }
+
+                // Luego formatear los números de la tabla
                 parseNumber();
 
+                // Finalmente inicializar DataTable
                 $('#myTable').DataTable({
                     responsive: true,
-                    buttons: [
-                'copy', 'csv', 'excel', 'pdf', 'print'
-            ],
+                    buttons: ['copy', 'csv', 'excel', 'pdf', 'print']
                 });
-            const totalDeudas = document.querySelectorAll("#colDeuda");
-            let valorTotalDeudas = 0
-            totalDeudas.forEach(e => {
-                valorTotalDeudas = valorTotalDeudas + parseInt(e.getAttribute("attr-realValue"));
-            });
-
-            document.querySelector("#sumValorDeuda").value = "$ "+valorTotalDeudas.toLocaleString('de-De', {
-                style: 'decimal',
-                maximumFractionDigits: 0,
-                minimumFractionDigits: 0
-            });;
             });
 
     </script>

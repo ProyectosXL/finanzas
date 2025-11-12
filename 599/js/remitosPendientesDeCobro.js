@@ -70,15 +70,24 @@ btnConfirmar.addEventListener("click",function (){
 
         Swal.fire({
             icon: 'warning',
-            title: 'No se cargó % de descuento, desea continuar?',
+            title: 'Descuento no especificado',
+            text: 'No se ha ingresado un porcentaje de descuento. ¿Desea continuar sin aplicar descuento?',
             showDenyButton: true,
-            confirmButtonText: 'Aceptar',
+            confirmButtonText: 'Continuar',
             denyButtonText: 'Cancelar',
+            confirmButtonColor: '#007bff',
+            denyButtonColor: '#6c757d'
         }).then((result) => {
 
             if (result.isConfirmed) {
 
-                Swal.fire('Guardado!', '', 'success').then((result)=>{
+                Swal.fire({
+                    icon: 'success',
+                    title: '¡Confirmado!',
+                    text: 'Procesando cobro sin descuento...',
+                    timer: 1500,
+                    showConfirmButton: false
+                }).then((result)=>{
                     let montoTotalDeuda = document.querySelector("#totalDeuda").value
                     let importeAbonar = document.querySelector("#importeAbonar").value
                     let codCliente = document.querySelector("#codClient").textContent
@@ -89,13 +98,25 @@ btnConfirmar.addEventListener("click",function (){
 
 
             } else if (result.isDenied) {
-                Swal.fire('El proceso fue cancelado', '', 'info')
+                Swal.fire({
+                    icon: 'info',
+                    title: 'Operación cancelada',
+                    text: 'No se realizó ningún cambio',
+                    timer: 2000,
+                    showConfirmButton: false
+                });
             }
         })
 
     }else{
 
-        Swal.fire('Guardado!', '', 'success').then((result)=>{
+        Swal.fire({
+            icon: 'success',
+            title: '¡Confirmado!',
+            text: 'Procesando cobro con descuento...',
+            timer: 1500,
+            showConfirmButton: false
+        }).then((result)=>{
             
             let montoTotalDeuda = document.querySelector("#totalDeuda").value;
             let importe = document.querySelector("#importeAbonar").value.replace(/[$.]/g, "");
