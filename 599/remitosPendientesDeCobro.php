@@ -55,7 +55,7 @@
                 </div>
                 <div class="info-item">
                     <label>% Descuento</label>
-                    <input type="text" id="descuento" onchange="calcularDescuento()" placeholder="Colocar números enteros">
+                    <input type="text" id="descuento" onchange="calcularDescuento()" placeholder="Ej: 5 o 5,50">
                 </div>
                 <div class="info-item actions-buttons">
                     <button class="btn-modern btn-primary-modern" value="" id="btnConfirmar">
@@ -85,7 +85,12 @@
                                 <th>CLIENTE</th>
                                 <th>REMITO</th>
                                 <th>MONTO</th>
-                                <th></th>
+                                <th>
+                                    <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                                        <span style="font-size: 10px; text-transform: uppercase;">Seleccionar</span>
+                                        <input type="checkbox" id="checkTodos" style="width:18px; height:18px; cursor: pointer;" onchange="toggleTodos(this)">
+                                    </div>
+                                </th>
                             </tr>
                         </thead>
                         <tbody>

@@ -1,8 +1,8 @@
 <?php 
-session_start(); 
+/*session_start(); 
 if(!isset($_GET['userName'])){
 	header("Location:http://192.168.0.13:8000/");
-}else{
+}else{*/
     include_once "controller/traerEquis.php";
     $cheques = traerCheques();
     
@@ -16,88 +16,120 @@ if(!isset($_GET['userName'])){
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Valores A Rendir</title>
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css" integrity="sha384-xOolHFLEh07PJGoPkLv1IbcEPTNtaed2xpHsD9ESMhqIYd0nLMwNLD69Npy4HI+N" crossorigin="anonymous">
-
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.5.2/css/bootstrap.css">
-        <link rel="stylesheet" href="https://cdn.datatables.net/1.12.1/css/dataTables.bootstrap4.min.css" class="rel">
-        <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.3.0/css/responsive.dataTables.min.css" class="rel">
-
-        <!-- Bootstrap Icons -->
+        <link rel="stylesheet" href="https://cdn.datatables.net/1.12.1/css/dataTables.bootstrap4.min.css">
+        <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.3.0/css/responsive.dataTables.min.css">
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.9.1/font/bootstrap-icons.css">
-
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-        <link rel="stylesheet" href="css/style.css">
-
-        </link>
-
+        <link rel="stylesheet" href="css/valoresRendir.css">
     </head>
 
     <body>
 
-        <div class="alert">
-            <div class="page-wrapper bg-secondary p-b-100 pt-2 font-robo">
-                <div class="wrapper wrapper--w680"><div style="color:white; text-align:center"><h6>Valores A Rendir</h6></div>
-                    <div class="card card-1">
-                        
-                        <div class="row" style="margin-left:50px">
-                            <h3><i class="bi bi-cash" style="margin-right:20px;font-size:50px"></i>Valores A Rendir</h3>
-                        </div>
+        <div class="page-wrapper">
+            <div class="main-card">
+                <div class="card-header-section">
+                    <i class="bi bi-cash"></i>
+                    <h3>Valores A Rendir</h3>
+                </div>
 
-                        <div class="row ml-4">
-                            <div><h5>Total efectivo: <input class="form-control" type="text" id="totalEfectivo" value="0,00" readonly></h5></div>
-                            <div class="ml-4"><h5>Total Cheques: <input class="form-control" type="text" id="totalCheque" value="0,00" readonly></h5></div>
-                            <div style="margin-top: 1.5rem; margin-left: 60%;"><button class="btn btn-success btn_exportar" id="btnExport" onclick="rendir()"><i class="fa fa-file-excel-o"></i> Rendir <i class="bi bi-check2-circle"></i></button></div>
+                <div class="stats-grid">
+                    <div class="stat-card efectivo">
+                        <div class="stat-icon">
+                            <i class="bi bi-wallet2"></i>
                         </div>
+                        <div class="stat-content">
+                            <div class="stat-card-header">Total Efectivo</div>
+                            <div class="stat-card-value" id="totalEfectivo">$0</div>
+                        </div>
+                    </div>
+                    <div class="stat-card cheque">
+                        <div class="stat-icon">
+                            <i class="bi bi-credit-card"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-card-header">Total Cheques</div>
+                            <div class="stat-card-value" id="totalCheque">$0</div>
+                        </div>
+                    </div>
+                </div>
 
-                        <table class="table table-striped table-bordered" id="myTable" style="width: 99%;" cellspacing="0" data-page-length="100">
-                            <thead class="thead-dark">
-                                <tr style="text-align:center">
-                                    <th style=" width: 600px;text-align:center" class="col-1">CLIENTE</th>
-                                    <th style="text-align:center">MONTO A COBRAR</th>
-                                    <th style="text-align:center">MONTO COBRADO</th>
-                                    <th style="text-align:center">EFECTIVO</th>
-                                    <th style="text-align:center">CHEQUES</th>
-                                    <th style="width: 100px;text-align:center"></th>
+                <div class="actions-section">
+                    <button class="btn-modern btn-success-modern" id="btnExport" onclick="rendir()">
+                        <i class="bi bi-check2-circle"></i>
+                        Rendir
+                    </button>
+                </div>
+
+                <div class="table-container">
+                    <table class="table table-striped table-bordered" id="myTable" cellspacing="0" data-page-length="100">
+                        <thead class="thead-dark">
+                            <tr>
+                                <th>CLIENTE</th>
+                                <th>MONTO A COBRAR</th>
+                                <th>MONTO COBRADO</th>
+                                <th>EFECTIVO</th>
+                                <th>CHEQUES</th>
+                                <th>SELECCIONAR</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($cheques as $key => $value) {
+                                $descuento = isset($descuento) ? $descuento : 0;
+                                $importe = $value['IMPORTE_TO'] - $descuento;
+                            ?>
+                                <tr>
+                                    <td><?php echo $value['nombre_cliente'] ?></td>
+                                    <td>$<?php echo number_format($value['IMPORTE_TO'], 0, ',', '.') ?></td>
+                                    <td>$<?php echo number_format($value['importe_total'], 0, ',', '.') ?></td>
+                                    <td id="importeEfectivo"><?php echo $value['importe_efectivo'] ?></td>
+                                    <td id="importeCheque"><?php echo $value['importe_cheque'] ?></td>
+                                    <td id="idCobro" hidden><?php echo $value['ID'] ?></td>
+                                    <td id="userName" hidden><?= isset($_GET['userName']) ? $_GET['userName'] : "" ?></td>  
+                                    <td>
+                                        <div class="checkbox-container">
+                                            <input type="checkbox" name="a" id="checkCalcularTotales" class="modern-checkbox" onchange="calcularTotales(this)">
+                                        </div>
+                                    </td>
                                 </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($cheques as $key => $value) {
-        
-                                    $descuento = isset($descuento) ? $descuento : 0;
-        
-                                    $importe = $value['IMPORTE_TO'] - $descuento;
-                
-                                ?>
-                                    <tr style="text-align:center">
-                                        <td><?php echo $value['nombre_cliente'] ?></td>
-                                        <td ><?php echo  '$'.number_format($value['IMPORTE_TO'], 0, ',', '.') ?></td>
-                                        <td ><?php echo  '$'.number_format($value['importe_total'], 0, ',', '.') ?></td>
-                                        <td id="importeEfectivo"><?php echo $value['importe_efectivo'] ?></td>
-                                        <td id="importeCheque"><?php echo $value['importe_cheque'] ?></td>
-                                        <td id="idCobro" hidden><?php echo $value['ID'] ?></td>
-                                        <td id="userName" hidden><?= isset($_GET['userName']) ? $_GET['userName'] : "" ?></td>  
-                                        <td><input type="checkbox" name="a" id="checkCalcularTotales" style="width:20px;height:20px;" onchange="calcularTotales(this)"></td>
-                                    </tr>
-
-                                <?php } ?>
-                        
-                            </tbody>
-                    
+                            <?php } ?>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
+        <script src="//cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+        <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
+        <script src="https://cdn.datatables.net/1.12.1/js/jquery.dataTables.min.js"></script>
+        <script src="https://cdn.datatables.net/1.12.1/js/dataTables.bootstrap4.min.js"></script>
+        <script src="https://cdn.datatables.net/responsive/2.3.0/js/dataTables.responsive.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js" integrity="sha384-Piv4xVNRyMGpqkS2by6br4gNJ7DXjqk09RmUpJ8jgGtD7zP9yug3goQfGII0yAns" crossorigin="anonymous"></script>
+        <script src="js/valoresArendir.js"></script>
 
-
-
-            </table>
-            <script src="//cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-            
-            <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
-            <script src="js/valoresArendir.js"></script>
-        
+        <script>
+            $(document).ready(function() {
+                $('#myTable').DataTable({
+                    responsive: true,
+                    language: {
+                        lengthMenu: "Mostrar _MENU_ registros por página",
+                        zeroRecords: "No se encontraron resultados",
+                        info: "Mostrando página _PAGE_ de _PAGES_",
+                        infoEmpty: "No hay registros disponibles",
+                        infoFiltered: "(filtrado de _MAX_ registros totales)",
+                        search: "Buscar:",
+                        paginate: {
+                            first: "Primero",
+                            last: "Último",
+                            next: "Siguiente",
+                            previous: "Anterior"
+                        }
+                    }
+                });
+            });
+        </script>
 
     </body>
 
     </html>
 <?php
-}
+//}
 ?>

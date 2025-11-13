@@ -19,17 +19,22 @@ const parseNumber = ()=>{
 
 const checkMonto = ()=>{
 
-    const todosLosCheck = document.querySelectorAll('input[type="checkbox"]');
+    const todosLosCheck = document.querySelectorAll('tbody input[type="checkbox"]');
     let totalMontosCheck = 0;
+    let checkedCount = 0;
 
     todosLosCheck.forEach(e => {
         if(e.checked){
-
+            checkedCount++;
             totalMontosCheck = totalMontosCheck + parseInt(e.parentElement.parentElement.childNodes[3].getAttribute("attr-realValue"))
         }
     });
 
-
+    // Actualizar el estado del checkbox "Seleccionar Todos"
+    const checkTodos = document.querySelector("#checkTodos");
+    if(checkTodos) {
+        checkTodos.checked = checkedCount === todosLosCheck.length && todosLosCheck.length > 0;
+    }
 
         
  
@@ -48,7 +53,7 @@ const checkMonto = ()=>{
 
 btnConfirmar.addEventListener("click",function (){
 
-    const todosLosCheck = document.querySelectorAll('input[type="checkbox"]');
+    const todosLosCheck = document.querySelectorAll('tbody input[type="checkbox"]');
     let userName = document.querySelector("#user").textContent;
     let totalMontosCheck = ""
 
@@ -122,14 +127,17 @@ btnConfirmar.addEventListener("click",function (){
             let importe = document.querySelector("#importeAbonar").value.replace(/[$.]/g, "");
             let descuento = document.querySelector("#descuento").value;
             descuento = descuento.replace("%","");
+            // Convertir coma a punto para soportar decimales
+            descuento = descuento.replace(",",".");
 
             let porcentaje = 0;
 
             if(descuento != "" && descuento != 0){
-                porcentaje = ( parseInt(importe)  *  parseInt(descuento)  ) / 100;
+                // Usar parseFloat para soportar decimales
+                porcentaje = ( parseFloat(importe)  *  parseFloat(descuento)  ) / 100;
             }
 
-            let importeAbonar = parseInt(importe) - parseInt(porcentaje);
+            let importeAbonar = Math.round(parseFloat(importe) - porcentaje);
 
             let codCliente = document.querySelector("#codClient").textContent
 
@@ -146,16 +154,19 @@ const calcularDescuento = ()=>{
     let montoTotalDeuda = document.querySelector("#totalDeuda").value;
     let descuento = document.querySelector("#descuento").value;
     descuento = descuento.replace("%","");
+    // Convertir coma a punto para soportar decimales
+    descuento = descuento.replace(",",".");
     let importe = document.querySelector("#importeAbonar").value.replace(/[$.]/g, "");
 
     let porcentaje = 0;
 
     if(descuento != "" && descuento != 0){
 
-        porcentaje = ( parseInt(importe)  *  parseInt(descuento)  ) / 100;
+        // Usar parseFloat para soportar decimales
+        porcentaje = ( parseFloat(importe)  *  parseFloat(descuento)  ) / 100;
 
 
-        let importeAbonar = parseInt(importe) - parseInt(porcentaje);
+        let importeAbonar = Math.round(parseFloat(importe) - porcentaje);
         document.querySelector("#importeConDescuento").setAttribute("attr-realValue", importeAbonar);
         document.querySelector("#importeConDescuento").value = "$" +  importeAbonar.toLocaleString('de-De', {
             style: 'decimal',
@@ -171,4 +182,16 @@ const calcularDescuento = ()=>{
 
     }
 
+}
+
+// Función para seleccionar/deseleccionar todos los checkboxes
+const toggleTodos = (checkboxMaster) => {
+    const todosLosCheck = document.querySelectorAll('tbody input[type="checkbox"]');
+    
+    todosLosCheck.forEach(checkbox => {
+        checkbox.checked = checkboxMaster.checked;
+    });
+    
+    // Recalcular el total después de marcar/desmarcar todos
+    checkMonto();
 }
