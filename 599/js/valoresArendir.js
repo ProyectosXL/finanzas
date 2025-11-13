@@ -2,11 +2,8 @@
 document.addEventListener("DOMContentLoaded", () => {
           
 
-    let importeEfectivo = document.querySelectorAll("#importeEfectivo");
-    let importeCheque = document.querySelectorAll("#importeCheque");
-    let totalChequeInput = document.querySelector("#totalCheque");
-
-
+    let importeEfectivo = document.querySelectorAll(".importeEfectivo");
+    let importeCheque = document.querySelectorAll(".importeCheque");
 
     importeEfectivo.forEach(element => {
         element.setAttribute("attr-realValue", parseFloat(element.textContent))
@@ -20,30 +17,31 @@ document.addEventListener("DOMContentLoaded", () => {
 
     });
 
-    totalEfectivo.value = parseNumber(totalEfectivo.value);
-
-
 });
 
-const calcularTotales = (row) =>{
-    let todosLosCheck = document.querySelectorAll("#checkCalcularTotales");
+const calcularTotales = (checkbox) =>{
+    let todosLosCheck = document.querySelectorAll(".checkCalcularTotales");
     let totalEfectivoInput = document.querySelector("#totalEfectivo");
     let totalChequeInput = document.querySelector("#totalCheque");
-    let totalEfectivo = "00,00"
-    let totalCheque = "00,00"
+    let totalEfectivo = 0;
+    let totalCheque = 0;
 
     todosLosCheck.forEach(element => {
 
         if(element.checked){
-
-            totalEfectivo = parseFloat(totalEfectivo) +  parseFloat(element.parentElement.parentElement.childNodes[7].getAttribute("attr-realValue"))
-            totalCheque = parseFloat(totalCheque)    + parseFloat(element.parentElement.parentElement.childNodes[9].getAttribute("attr-realValue"))
+            let row = element.closest('tr');
+            let cells = row.querySelectorAll('td');
+            
+            // cells[3] = EFECTIVO, cells[4] = CHEQUES
+            totalEfectivo += parseFloat(cells[3].getAttribute("attr-realValue")) || 0;
+            totalCheque += parseFloat(cells[4].getAttribute("attr-realValue")) || 0;
         }
     });
+    
     totalEfectivoParseado = parseNumber(totalEfectivo);
     totalChequeParseado = parseNumber(totalCheque);
-    totalEfectivoInput.value = "$ " + totalEfectivoParseado
-    totalChequeInput.value = "$ " + totalChequeParseado
+    totalEfectivoInput.textContent = "$ " + totalEfectivoParseado
+    totalChequeInput.textContent = "$ " + totalChequeParseado
 
 };
 
@@ -57,28 +55,28 @@ const rendir = () => {
         confirmButtonText: 'Aceptar',
         denyButtonText: 'Cancelar',
     }).then((result) => {
-        / Read more about isConfirmed, isDenied below /
+        /* Read more about isConfirmed, isDenied below */
         if (result.isConfirmed) {
-            let todosLosCheck = document.querySelectorAll("#checkCalcularTotales");
+            let todosLosCheck = document.querySelectorAll(".checkCalcularTotales");
     
             let idCobroEnCadena = ""
             todosLosCheck.forEach(element => {
 
                 if(element.checked){
-
+                    let row = element.closest('tr');
+                    let idCobro = row.getAttribute('data-id-cobro');
+                    
                     if(idCobroEnCadena == ""){
-
-                        idCobroEnCadena = element.parentElement.parentElement.childNodes[11].textContent 
-
+                        idCobroEnCadena = idCobro;
                     }else{
-
-                        idCobroEnCadena =  idCobroEnCadena + "-" + element.parentElement.parentElement.childNodes[11].textContent 
+                        idCobroEnCadena = idCobroEnCadena + "-" + idCobro;
                     }
                 }
             });
 
             let arrayDeCobros = idCobroEnCadena.split("-");
-            let userName = document.querySelector("#userName").textContent;
+            let primerRow = document.querySelector('tr[data-username]');
+            let userName = primerRow ? primerRow.getAttribute('data-username') : '';
           
             $.ajax({
                 url: "controller/rendirValores.php",

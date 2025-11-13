@@ -77,17 +77,15 @@ if(!isset($_GET['userName'])){
                                 $descuento = isset($descuento) ? $descuento : 0;
                                 $importe = $value['IMPORTE_TO'] - $descuento;
                             ?>
-                                <tr>
+                                <tr data-id-cobro="<?php echo $value['ID'] ?>" data-username="<?= isset($_GET['userName']) ? $_GET['userName'] : '' ?>">
                                     <td><?php echo $value['nombre_cliente'] ?></td>
                                     <td>$<?php echo number_format($value['IMPORTE_TO'], 0, ',', '.') ?></td>
                                     <td>$<?php echo number_format($value['importe_total'], 0, ',', '.') ?></td>
-                                    <td id="importeEfectivo"><?php echo $value['importe_efectivo'] ?></td>
-                                    <td id="importeCheque"><?php echo $value['importe_cheque'] ?></td>
-                                    <td id="idCobro" hidden><?php echo $value['ID'] ?></td>
-                                    <td id="userName" hidden><?= isset($_GET['userName']) ? $_GET['userName'] : "" ?></td>  
+                                    <td class="importeEfectivo"><?php echo $value['importe_efectivo'] ?></td>
+                                    <td class="importeCheque"><?php echo $value['importe_cheque'] ?></td>
                                     <td>
                                         <div class="checkbox-container">
-                                            <input type="checkbox" name="a" id="checkCalcularTotales" class="modern-checkbox" onchange="calcularTotales(this)">
+                                            <input type="checkbox" name="a" class="checkCalcularTotales modern-checkbox" onchange="calcularTotales(this)">
                                         </div>
                                     </td>
                                 </tr>
