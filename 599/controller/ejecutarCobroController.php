@@ -3,6 +3,7 @@ include_once __DIR__."/../class/remitoEquis.php";
 
 $remitos = $_POST['remitos'];
 $cobroEfectivo = $_POST['cobroEfectivo'] > 0 ? $_POST['cobroEfectivo'] : 0;
+$cobroDeposito = $_POST['cobroDeposito'] > 0 ? $_POST['cobroDeposito'] : 0;
 $cobroCheque = $_POST['cobroCheque'] > 0 ? $_POST['cobroCheque'] : 0;
 $saldoCobrar = $_POST['saldoCobrar'] > 0 ? $_POST['saldoCobrar'] : 0;
 $montoACobrar = $_POST['montoACobrar'];
@@ -14,7 +15,7 @@ $username = $_POST['username'];
 
 $idCheques = explode(",", $postCheques);
 
-$importeTotal = $cobroEfectivo + $cobroCheque; 
+$importeTotal = $cobroEfectivo + $cobroDeposito + $cobroCheque; 
 $montoTotal = $montoACobrar - $saldoCobrar;
 $remitoEquis = new RemitoEquis();
 
@@ -28,7 +29,7 @@ if($existeCobro) {
 }
 
 
-$idCobro = $remitoEquis->guardarCobro($codClient, $cobroEfectivo, $cobroCheque, $importeTotal,$nombreCliente, $valorDescontado, $username);
+$idCobro = $remitoEquis->guardarCobro($codClient, $cobroEfectivo, $cobroCheque, $importeTotal, $nombreCliente, $valorDescontado, $username, $cobroDeposito);
 
 
 foreach ($idCheques as $value) {

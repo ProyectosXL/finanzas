@@ -63,6 +63,14 @@
 
                     <div class="form-item">
                         <label>
+                            <i class="bi bi-bank"></i>
+                            Cobro Depósito
+                        </label>
+                        <input type="text" id="cobroDeposito" onchange="setearValores()" placeholder="Ingrese monto en depósito">
+                    </div>
+
+                    <div class="form-item">
+                        <label>
                             <i class="bi bi-credit-card"></i>
                             Cobro Cheque
                         </label>

@@ -15,6 +15,7 @@ const completarModal = (codClient) => {
 const confirmarCobro = (codClient) => {
 
     let cobroEfectivo = document.querySelector("#cobroEfectivo").getAttribute("attr-valorReal");
+    let cobroDeposito = document.querySelector("#cobroDeposito").getAttribute("attr-valorReal");
     let cobroCheque = document.querySelector("#cobroCheque").getAttribute("attr-valorReal");
     let montoACobrar = document.querySelector("#montoACobrar").getAttribute("attr-valorReal");
     let saldoCobrar = document.querySelector("#saldoCobrar").getAttribute("attr-valorReal");
@@ -41,7 +42,7 @@ const confirmarCobro = (codClient) => {
         })
     }
 
-    if (cobroEfectivo < 1 && cobroCheque < 1) {
+    if (cobroEfectivo < 1 && cobroCheque < 1 && cobroDeposito < 1) {
         Swal.fire({
             icon: 'error',
             title: 'Error de carga',
@@ -71,6 +72,7 @@ const confirmarCobro = (codClient) => {
                     data: {
                         remitos: arrayDeRemitos,
                         cobroEfectivo: cobroEfectivo,
+                        cobroDeposito: cobroDeposito,
                         cobroCheque: cobroCheque,
                         saldoCobrar: saldoCobrar,
                         montoACobrar: montoACobrar,
@@ -115,8 +117,7 @@ const calcularSaldo = () => {
 
     efectivo = document.querySelector("#cobroEfectivo");
 
-
-
+    let deposito = document.querySelector("#cobroDeposito");
 
     let cheque = document.querySelector("#cobroCheque");
 
@@ -128,12 +129,17 @@ const calcularSaldo = () => {
         efectivo.value = 0;
     }
 
+    if (deposito.getAttribute("attr-valorreal") == "" || deposito.getAttribute("attr-valorreal") == null) {
+        deposito.setAttribute("attr-valorreal", 0);
+        deposito.value = 0;
+    }
+
     if (cheque.getAttribute("attr-valorreal") == "") {
         cheque.setAttribute("attr-valorreal", 0);
         cheque.value = 0;
     }
 
-    let total = parseInt(montoACobrar) - (parseInt(efectivo.getAttribute("attr-valorreal")) + parseInt(cheque.getAttribute("attr-valorreal")));
+    let total = parseInt(montoACobrar) - (parseInt(efectivo.getAttribute("attr-valorreal")) + parseInt(deposito.getAttribute("attr-valorreal")) + parseInt(cheque.getAttribute("attr-valorreal")));
 
     saldoCobrar.value = `$ ${parseNumber(total)} `
     saldoCobrar.setAttribute("attr-valorReal", total);
@@ -360,12 +366,17 @@ const parseNumber = (number) => {
 const setearValores = () => {
 
     let efectivo = document.querySelector("#cobroEfectivo");
+    let deposito = document.querySelector("#cobroDeposito");
     let cheque = document.querySelector("#cobroCheque");
 
 
     if (efectivo.value == "") {
 
         efectivo.value = 0;
+    }
+    if (deposito.value == "") {
+
+        deposito.value = 0;
     }
     if (cheque.value == "") {
 
@@ -375,10 +386,14 @@ const setearValores = () => {
 
 
     efectivo.setAttribute("attr-valorreal", efectivo.value.replace(/[$.]/g, ""));
+    deposito.setAttribute("attr-valorreal", deposito.value.replace(/[$.]/g, ""));
     cheque.setAttribute("attr-valorreal", cheque.value.replace(/[$.]/g, ""));
 
     nuevoValor = parseNumber(efectivo.value.replace(/[$.]/g, ""));
     efectivo.value = "$" + nuevoValor;
+
+    nuevoValorDeposito = parseNumber(deposito.value.replace(/[$.]/g, ""));
+    deposito.value = "$" + nuevoValorDeposito;
 
     nuevoValorCheque = parseNumber(cheque.value.replace(/[$.]/g, ""));
     cheque.value = "$" + nuevoValorCheque;
@@ -439,8 +454,10 @@ const updateChequesModal = () =>{
                         }
                     });
         
+                    let montoLimpio = cheque[0]['monto'].toString().replace(/[$.]/g, '');
+                    
                     nuevaFila = nuevaFila + `</select></td>
-                    <td style="text-align:center"><input type="text" style="width:120px" value = "$${parseNumber(cheque[0]['monto'])}" onchange="calcularUpdateMontoCheque(this)" id="updateMontoCheque"></td>
+                    <td style="text-align:center"><input type="text" style="width:120px" value = "${montoLimpio}" onchange="calcularUpdateMontoCheque(this)" id="updateMontoCheque"></td>
                     <td style="text-align:center"><input type="text" style="width:120px" value ="${cheque[0]['num_cheque']}"></td>
                      <td style="text-align:center"><input type="date" style="width:120px" value="${dateFormat}"></td>
                     </tr>`;
@@ -463,7 +480,18 @@ const updateCheque = () => {
     todosLosCheques.forEach(element => {
     let id = element.childNodes[1].textContent;
     let banco = element.childNodes[3].childNodes[0].value;
-    let monto = parseInt(element.childNodes[5].childNodes[0].value.replace(/[$.]/g, ""));
+    let montoInput = element.childNodes[5].childNodes[0].value;
+    let monto = parseInt(montoInput.toString().replace(/[$.]/g, ""));
+    
+    if (isNaN(monto) || monto < 0) {
+        Swal.fire({
+            icon: 'error',
+            title: 'Error',
+            text: 'El monto ingresado no es válido'
+        });
+        return;
+    }
+    
     let nroCheque = element.childNodes[7].childNodes[0].value;
     let fechaCheque = element.childNodes[9].childNodes[0].value;
 
