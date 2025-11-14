@@ -1,0 +1,302 @@
+/* Estilo minimalista para Consulta de Remitos */
+:root {
+    --primary-color: #000000;
+    --secondary-color: #333333;
+    --success-color: #27ae60;
+    --primary-blue: #007bff;
+    --danger-color: #dc3545;
+    --warning-color: #ffc107;
+    --purple-color: #6f42c1;
+    --border-color: #e0e0e0;
+    --light-bg: #f5f5f5;
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    --border-radius: 4px;
+    --transition: all 0.2s ease;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: #f5f5f5;
+    min-height: 100vh;
+    padding: 15px;
+}
+
+.page-wrapper {
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+.main-card {
+    background: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--card-shadow);
+    padding: 20px;
+    margin-bottom: 15px;
+}
+
+.card-header-section {
+    display: flex;
+    align-items: center;
+    margin-bottom: 25px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--primary-color);
+}
+
+.card-header-section i {
+    font-size: 28px;
+    color: var(--primary-color);
+    margin-right: 12px;
+}
+
+.card-header-section h3 {
+    color: var(--primary-color);
+    font-size: 22px;
+    font-weight: 600;
+    margin: 0;
+}
+
+/* Filters Section */
+.filters-section {
+    background: var(--light-bg);
+    padding: 20px;
+    border-radius: var(--border-radius);
+    margin-bottom: 20px;
+}
+
+.filters-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+.filter-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.filter-item label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.filter-item label i {
+    font-size: 13px;
+}
+
+.filter-item input,
+.filter-item select {
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    font-size: 14px;
+    color: var(--primary-color);
+    background-color: white;
+    transition: var(--transition);
+}
+
+.filter-item input:focus,
+.filter-item select:focus {
+    outline: none;
+    border-color: var(--primary-blue);
+}
+
+.filter-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    align-items: center;
+    margin-top: 15px;
+}
+
+.btn-filter {
+    padding: 10px 20px;
+    border: none;
+    border-radius: var(--border-radius);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.btn-filter.btn-primary {
+    background: var(--primary-blue);
+    color: white;
+}
+
+.btn-filter.btn-primary:hover {
+    background: #0056b3;
+}
+
+.btn-filter.btn-success {
+    background: var(--success-color);
+    color: white;
+}
+
+.btn-filter.btn-success:hover {
+    background: #229954;
+}
+
+/* Table Container */
+.table-container {
+    overflow-x: auto;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+    margin-top: 20px;
+}
+
+#myTable {
+    width: 100% !important;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 0;
+}
+
+#myTable thead th {
+    background: var(--primary-color);
+    color: white;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    padding: 12px 10px;
+    border: none;
+}
+
+#myTable tbody tr {
+    transition: var(--transition);
+}
+
+#myTable tbody tr:hover {
+    background-color: var(--light-bg);
+}
+
+#myTable tbody td {
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--secondary-color);
+    font-size: 13px;
+}
+
+#myTable tbody td:last-child {
+    text-align: center;
+}
+
+/* Status Icons */
+.status-icon {
+    font-size: 22px;
+    cursor: pointer;
+}
+
+.status-icon.rendido {
+    color: var(--success-color);
+}
+
+.status-icon.cobrado {
+    color: var(--warning-color);
+}
+
+.status-icon.debe {
+    color: var(--danger-color);
+}
+
+.status-icon.anulado {
+    color: var(--purple-color);
+}
+
+/* DataTables customization */
+.dataTables_wrapper {
+    margin-top: 20px;
+}
+
+.dataTables_wrapper .dataTables_length,
+.dataTables_wrapper .dataTables_filter {
+    margin-bottom: 15px;
+}
+
+.dataTables_wrapper .dataTables_length {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.dataTables_wrapper .dataTables_length label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+}
+
+.dataTables_wrapper .dataTables_length select,
+.dataTables_wrapper .dataTables_filter input {
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 6px 10px;
+    font-size: 13px;
+    margin: 0 5px;
+}
+
+.dataTables_wrapper .dataTables_info {
+    padding-top: 12px;
+}
+
+.dataTables_wrapper .dataTables_paginate {
+    padding-top: 12px;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button {
+    border-radius: var(--border-radius);
+    padding: 6px 10px;
+    margin: 0 2px;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button.current {
+    background: var(--primary-color);
+    color: white !important;
+    border: 1px solid var(--primary-color);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .filters-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .filter-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .btn-filter {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .card-header-section {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    .card-header-section i {
+        margin-right: 0;
+        margin-bottom: 10px;
+    }
+}
