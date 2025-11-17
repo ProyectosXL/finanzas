@@ -75,7 +75,7 @@ body {
 
 .stats-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 15px;
     margin-bottom: 20px;
 }
@@ -126,6 +126,14 @@ body {
 
 .stat-card.cheque .stat-icon i {
     color: #0c5460;
+}
+
+.stat-card.deposito .stat-icon {
+    background: #fff3cd;
+}
+
+.stat-card.deposito .stat-icon i {
+    color: #856404;
 }
 
 .stat-content {
@@ -371,6 +379,6 @@ body {
 
 @media (max-width: 992px) {
     .stats-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, 1fr);
     }
 }

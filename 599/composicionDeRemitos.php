@@ -18,10 +18,12 @@
 
     $totalEfectivo = 0;
     $totalCheque = 0;
+    $totalDeposito = 0;
 
     foreach ($valores as  $value) {
         $totalEfectivo = $totalEfectivo + $value['importe_efectivo'];
         $totalCheque = $totalCheque + $value['importe_cheque'];
+        $totalDeposito = $totalDeposito + $value['importe_deposito'];
     } 
 
     foreach ($todosLosRemitos as $remito => $value) {
@@ -69,6 +71,7 @@
         <meta http-equiv="X-UA-Compatible" content="IE=edge">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Composicion De Remitos</title>
+        <link rel="icon" type="image/jpeg" href="../images/logo.jpg">
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css" integrity="sha384-xOolHFLEh07PJGoPkLv1IbcEPTNtaed2xpHsD9ESMhqIYd0nLMwNLD69Npy4HI+N" crossorigin="anonymous">
         <link rel="stylesheet" href="https://cdn.datatables.net/1.12.1/css/dataTables.bootstrap4.min.css">
         <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.3.0/css/responsive.dataTables.min.css">
@@ -115,6 +118,15 @@
                         <div class="stat-content">
                             <div class="stat-card-header">Cheques</div>
                             <div class="stat-card-value"><?= '$'.number_format($totalCheque, 0, ',', '.')?></div>
+                        </div>
+                    </div>
+                    <div class="stat-card deposito">
+                        <div class="stat-icon">
+                            <i class="bi bi-bank"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-card-header">Depósito</div>
+                            <div class="stat-card-value"><?= '$'.number_format($totalDeposito, 0, ',', '.')?></div>
                         </div>
                     </div>
                 </div>
