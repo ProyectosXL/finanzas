@@ -57,7 +57,17 @@ btnConfirmar.addEventListener("click",function (){
     let userName = document.querySelector("#user").textContent;
     let totalMontosCheck = ""
 
-    todosLosCheck.forEach(e => {
+    console.log("=== DEBUG: INICIO DE CONFIRMACIÓN ===");
+    console.log("Total de checkboxes encontrados:", todosLosCheck.length);
+
+    todosLosCheck.forEach((e, index) => {
+
+        console.log(`Checkbox ${index + 1}:`, {
+            checked: e.checked,
+            remito: e.parentElement.parentElement.childNodes[2].textContent,
+            fecha: e.parentElement.parentElement.childNodes[0].textContent,
+            monto: e.parentElement.parentElement.childNodes[3].textContent
+        });
 
         if(e.checked){
             if(totalMontosCheck == ""){
@@ -68,6 +78,10 @@ btnConfirmar.addEventListener("click",function (){
         }
 
     });
+
+    console.log("Remitos seleccionados (cadena):", totalMontosCheck);
+    console.log("Remitos seleccionados (array):", totalMontosCheck.split("-"));
+    console.log("=== FIN DEBUG ===");
 
     sessionStorage.setItem("Remitos", totalMontosCheck);
     // let descuento = document.querySelector("#descuento").getAttribute("attr-realValue");

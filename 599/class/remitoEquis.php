@@ -96,20 +96,36 @@ class RemitoEquis {
     public function cambiarEstado ($remito) {
    
         $cid = $this->conn->conectar('central');
-
         
-        $sql = "UPDATE SJ_EQUIS_TABLE SET CHEQUEADO = '1' ,FECHA_CHEQUEADO =getdate() WHERE N_COMP = '$remito'";
+        // Primero verificar que el remito no esté ya chequeado
+        $sqlCheck = "SELECT CHEQUEADO FROM SJ_EQUIS_TABLE WHERE N_COMP = '$remito'";
+        $stmtCheck = sqlsrv_query($cid, $sqlCheck);
+        
+        if ($stmtCheck) {
+            $row = sqlsrv_fetch_array($stmtCheck, SQLSRV_FETCH_ASSOC);
+            if ($row && $row['CHEQUEADO'] == 1) {
+                // Ya está chequeado, no hacer nada
+                return false;
+            }
+        }
+        
+        $sql = "UPDATE SJ_EQUIS_TABLE SET CHEQUEADO = '1', FECHA_CHEQUEADO = GETDATE() WHERE N_COMP = '$remito' AND (CHEQUEADO IS NULL OR CHEQUEADO = 0)";
 
         try {
             $stmt = sqlsrv_query($cid, $sql);
+            
+            if ($stmt === false) {
+                return false;
+            }
+            
+            // Verificar que se actualizó al menos una fila
+            $rowsAffected = sqlsrv_rows_affected($stmt);
+            return $rowsAffected > 0;
     
         }
         catch (\Throwable $th) {
-
-            die("Error en sqlsrv_exec");
-
+            return false;
         }
-
 
     }
 
@@ -258,20 +274,35 @@ class RemitoEquis {
 
         $cid = $this->conn->conectar('central');
         
-        $sql = "INSERT INTO sj_administracion_cobros_por_remito (id_cobro, num_rem,rendido,fecha_rendido) VALUES ('$idCobro', '$remito','0',getdate())";
+        // Verificar que no exista ya este registro
+        $sqlCheck = "SELECT COUNT(*) as total FROM sj_administracion_cobros_por_remito WHERE id_cobro = '$idCobro' AND num_rem = '$remito'";
+        $stmtCheck = sqlsrv_query($cid, $sqlCheck);
+        
+        if ($stmtCheck) {
+            $row = sqlsrv_fetch_array($stmtCheck, SQLSRV_FETCH_ASSOC);
+            if ($row && $row['total'] > 0) {
+                // Ya existe, no insertar duplicado
+                return false;
+            }
+        }
+        
+        $sql = "INSERT INTO sj_administracion_cobros_por_remito (id_cobro, num_rem, rendido, fecha_rendido) VALUES ('$idCobro', '$remito', '0', GETDATE())";
    
         try {
 
             $stmt = sqlsrv_query($cid, $sql);
-
-            return true;
-    
+            
+            if ($stmt === false) {
+                return false;
+            }
+            
+            // Verificar que se insertó correctamente
+            $rowsAffected = sqlsrv_rows_affected($stmt);
+            return $rowsAffected > 0;
     
         }
         catch (\Throwable $th) {
-
-            die("Error en sqlsrv_exec");
-
+            return false;
         }
 
     }

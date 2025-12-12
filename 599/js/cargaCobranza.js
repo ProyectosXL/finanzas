@@ -64,6 +64,18 @@ const confirmarCobro = (codClient) => {
                 let remitosEnCadena = sessionStorage.getItem("Remitos");
                 var arrayDeRemitos = remitosEnCadena.split("-");
 
+                console.log("=== DEBUG: CONFIRMACIÓN DE COBRO ===");
+                console.log("Remitos en cadena:", remitosEnCadena);
+                console.log("Array de remitos:", arrayDeRemitos);
+                console.log("Cantidad de remitos:", arrayDeRemitos.length);
+                console.log("Código Cliente:", codClient);
+                console.log("Cobro Efectivo:", cobroEfectivo);
+                console.log("Cobro Depósito:", cobroDeposito);
+                console.log("Cobro Cheque:", cobroCheque);
+                console.log("Monto a Cobrar:", montoACobrar);
+                console.log("Valor Descontado:", valorDescontado);
+                console.log("=== FIN DEBUG ===");
+
                 // espacio
 
                 $.ajax({

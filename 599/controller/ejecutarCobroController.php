@@ -39,35 +39,69 @@ foreach ($idCheques as $value) {
 }
 
 
-foreach ($remitos as $num => $remito) {
+// Validar que existan remitos a procesar
+if (empty($remitos) || count($remitos) == 0) {
+    echo 0;
+    die();
+}
 
+foreach ($remitos as $num => $remito) {
+    // Limpiar espacios y validar que el remito no esté vacío
+    $remito = trim($remito);
+    if (empty($remito)) {
+        continue;
+    }
+    
     if($num == 0){
         $remitosParceados = $remitosParceados."'$remito'";
     } else{
-
         $remitosParceados = $remitosParceados.",'$remito'";
     }
-    
 }
-
-
 
 $remitosDetalle = $remitoEquis->traerRemito($remitosParceados);
 
-foreach ($remitosDetalle as $detalle) {
+// Validar que se obtuvieron remitos de la BD
+if (empty($remitosDetalle) || count($remitosDetalle) == 0) {
+    echo 0;
+    die();
+}
 
-    if( (intval($montoTotal) + intval($valorDescontado)) >= intval($detalle['IMPORTE_TO'])){
+// Validar que la cantidad coincida
+if (count($remitosDetalle) != count($remitos)) {
+    // Advertencia: cantidad no coincide
+}
 
+$remitosProcessados = 0;
+$remitosFallidos = 0;
 
-        $remitoEquis->cambiarEstado($detalle['N_COMP']);
-
-        $remitoEquis->guardarCobroRemito($idCobro, $detalle['N_COMP']);
-
-        $montoTotal = intval($montoTotal) - intval($detalle['IMPORTE_TO']);
-            
+foreach ($remitosDetalle as $index => $detalle) {
+    
+    // Verificar si ya está chequeado
+    if (isset($detalle['CHEQUEADO']) && $detalle['CHEQUEADO'] == 1) {
+        $remitosFallidos++;
+        continue;
     }
+    
+    try {
+        // Intentar cambiar estado
+        $estadoCambiado = $remitoEquis->cambiarEstado($detalle['N_COMP']);
         
+        // Intentar guardar cobro por remito
+        $cobroGuardado = $remitoEquis->guardarCobroRemito($idCobro, $detalle['N_COMP']);
         
+        if ($estadoCambiado && $cobroGuardado) {
+            $remitosProcessados++;
+            
+            // Restar del monto total solo si se procesó correctamente
+            $montoTotal = intval($montoTotal) - intval($detalle['IMPORTE_TO']);
+        } else {
+            $remitosFallidos++;
+        }
+        
+    } catch (Exception $e) {
+        $remitosFallidos++;
+    }
 }
 
 echo 1;
