@@ -65,7 +65,7 @@ class ReporteRemitos {
         FROM VentasMes V
         LEFT JOIN RemitosAgrupados R
             ON V.FECHA = R.FECHA
-        WHERE V.FECHA >= DATEADD(MONTH, -24, GETDATE())
+        WHERE V.FECHA >= DATEADD(MONTH, -64, GETDATE())
         ORDER BY V.FECHA ASC
         ";
         
