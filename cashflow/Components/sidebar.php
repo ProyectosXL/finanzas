@@ -74,7 +74,6 @@
                 <ul class="category-items">
                     <li><a href="#" class="menu-link" data-tab="proveedores_exterior"><span>Proveedores Exterior</span></a></li>
                     <li><a href="#" class="menu-link" data-tab="crono_nacionalizacion"><span>Crono Nacionalización</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="nacionalizacion_2"><span>Nacionalización (2)</span></a></li>
                     <li><a href="#" class="menu-link" data-tab="despachante_asesor"><span>Despachante y Asesor</span></a></li>
                 </ul>
             </div>
