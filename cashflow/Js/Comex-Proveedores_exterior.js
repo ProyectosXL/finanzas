@@ -187,8 +187,8 @@ function generarEncabezados() {
         mesActualHeader.textContent = 'Próximos 11 Meses';
         mesActualHeader.setAttribute('colspan', '11');
         
-        // Generar encabezados de los próximos 11 meses
-        for (var i = 0; i < 11; i++) {
+        // Generar encabezados de los próximos 11 meses (empezando desde el mes siguiente)
+        for (var i = 1; i <= 11; i++) {
             var fechaMes = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
             var mesAbrev = fechaMes.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
             headerHTML += `<th class="month-column">${mesAbrev.charAt(0).toUpperCase() + mesAbrev.slice(1)}</th>`;
@@ -270,7 +270,7 @@ function generarFilasDatos() {
             // Vista meses: solo 11 meses (excluyendo las primeras 4 semanas)
             var mesPago = item.FECHA_EST_PAGO ? item.FECHA_EST_PAGO.substring(0, 7) : '';
             
-            for (var i = 0; i < 11; i++) {
+            for (var i = 1; i <= 11; i++) {
                 var fechaMes = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
                 var mesKey = fechaMes.getFullYear() + '-' + String(fechaMes.getMonth() + 1).padStart(2, '0');
                 var esMesPago = mesPago === mesKey;
@@ -335,7 +335,7 @@ function generarFilaTotales() {
         
     } else {
         // Vista de meses: solo 11 meses (excluyendo primeras 4 semanas)
-        for (var i = 0; i < 11; i++) {
+        for (var i = 1; i <= 11; i++) {
             var fechaMes = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
             var mesKey = fechaMes.getFullYear() + '-' + String(fechaMes.getMonth() + 1).padStart(2, '0');
             
