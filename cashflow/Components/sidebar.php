@@ -49,7 +49,7 @@
                 </div>
                 <i class="fas fa-chevron-down category-arrow"></i>
             </a>
-            <div class="collapse show" id="menuIngresos">
+            <div class="collapse" id="menuIngresos">
                 <ul class="category-items">
                     <li><a href="#" class="menu-link" data-tab="ventas"><span>Ventas</span></a></li>
                     <li><a href="#" class="menu-link" data-tab="saldos"><span>Saldos</span></a></li>

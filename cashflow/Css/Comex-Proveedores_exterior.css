@@ -1,0 +1,170 @@
+/* Comex - Proveedores Exterior CSS */
+/* Siguiendo exactamente el estilo del sistema */
+
+.tab-proveedores_exterior {
+    /* El padding ya viene del content-area */
+}
+
+/* Las cards ya funcionan con Bootstrap 5 del main.css */
+
+/* Loading Spinner */
+.loading-spinner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+}
+
+.spinner {
+    border: 3px solid var(--border-light, #eef0f5);
+    border-top: 3px solid var(--primary-color, #3366ff);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.loading-spinner p {
+    margin-top: 15px;
+    color: var(--text-muted, #8c93a8);
+    font-size: 13px;
+}
+
+/* Table Headers Especiales */
+#tablaProveedoresExterior thead th {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 10px 8px;
+    white-space: nowrap;
+}
+
+.table-group-divider {
+    border-top: 2px solid var(--border-color, #e2e5ed);
+}
+
+/* Anchos específicos de columnas */
+#tablaProveedoresExterior tbody td:nth-child(1),
+#tablaProveedoresExterior thead th:nth-child(1) {
+    min-width: 200px;
+    max-width: 300px;
+}
+
+#tablaProveedoresExterior tbody td:nth-child(5),
+#tablaProveedoresExterior thead th:nth-child(5) {
+    min-width: 140px;
+}
+
+#tablaProveedoresExterior tbody td:nth-child(6),
+#tablaProveedoresExterior thead th:nth-child(6),
+#tablaProveedoresExterior tbody td:nth-child(7),
+#tablaProveedoresExterior thead th:nth-child(7) {
+    min-width: 110px;
+}
+
+/* Columnas de días, semanas y meses */
+.day-column,
+.week-column,
+.month-column {
+    min-width: 70px;
+    text-align: center;
+    font-size: 10px;
+}
+
+.week-column {
+    min-width: 100px;
+}
+
+/* Celdas con valores */
+.cell-with-value {
+    background-color: #e3f2fd !important;
+    font-weight: 600;
+    color: var(--primary-color, #3366ff);
+}
+
+/* Fechas confirmadas y estimadas */
+.fecha-confirmada {
+    background-color: #e8f5e9;
+}
+
+.fecha-estimada {
+    background-color: #fff8e1;
+}
+
+/* Indicador de confirmación */
+.confirm-indicator {
+    display: inline-block;
+    padding: 2px 6px;
+    font-size: 9px;
+    font-weight: 600;
+    border-radius: 3px;
+    margin-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.confirm-indicator.confirmed {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.confirm-indicator.estimated {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
+}
+
+/* Currency formatting */
+.currency {
+    font-variant-numeric: tabular-nums;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    text-align: right;
+}
+
+/* Fila de totales */
+#tablaProveedoresExterior tfoot tr {
+    background-color: #f8f9fa;
+    border-top: 2px solid var(--primary-color, #3366ff);
+    font-weight: 700;
+}
+
+#tablaProveedoresExterior tfoot td {
+    padding: 12px 8px;
+    font-size: 13px;
+}
+
+#tablaProveedoresExterior tfoot .total-label {
+    text-align: right;
+    color: var(--text-primary, #1a1d29);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+#tablaProveedoresExterior tfoot .cell-with-value {
+    background-color: #cfe2ff !important;
+    color: #084298;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .kpi-card {
+        margin-bottom: 12px;
+    }
+    
+    .table {
+        font-size: 11px;
+    }
+    
+    .table thead th {
+        font-size: 10px;
+        padding: 8px 6px;
+    }
+}
