@@ -56,7 +56,7 @@
         <div class="card-header d-flex justify-content-between align-items-center">
             <div>
                 <h5 class="mb-0">Proveedores Exterior</h5>
-                <small class="text-muted">Importaciones pendientes ordenadas por ETD</small>
+                <small class="text-muted">Importaciones pendientes ordenadas por fecha de pago</small>
             </div>
             <div class="d-flex gap-2">
                 <div class="btn-group" role="group">
@@ -93,7 +93,11 @@
                                 <th rowspan="2">Valor FOB (USD)</th>
                                 <th rowspan="2">ETD</th>
                                 <th rowspan="2">ETA</th>
-                                <th rowspan="2">Fecha Est. Pago</th>
+                                <th rowspan="2">
+                                    Fecha Est. Pago
+                                    <i class="fas fa-pen-to-square ms-1" style="font-size: 10px;" 
+                                       title="Click para editar"></i>
+                                </th>
                                 <th colspan="31" class="table-group-divider" id="mesActualHeader">Días del Mes</th>
                             </tr>
                             <tr id="headerRowSub">
@@ -115,5 +119,7 @@
         </div>
     </div>
 </div>
+
+<?php include __DIR__ . '/../Components/help_modal_comex.php'; ?>
 
 <script src="Js/Comex-Proveedores_exterior.js?v=<?php echo time(); ?>"></script>

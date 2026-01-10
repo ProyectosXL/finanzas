@@ -1,5 +1,6 @@
 /**
  * Comex - Proveedores Exterior JavaScript
+ * Incluye funcionalidad de edición de Fecha Est. Pago
  */
 
 (function() {
@@ -187,8 +188,8 @@ function generarEncabezados() {
         mesActualHeader.textContent = 'Próximos 11 Meses';
         mesActualHeader.setAttribute('colspan', '11');
         
-        // Generar encabezados de los próximos 11 meses (empezando desde el mes siguiente)
-        for (var i = 1; i <= 11; i++) {
+        // Generar encabezados de los próximos 11 meses
+        for (var i = 0; i < 11; i++) {
             var fechaMes = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
             var mesAbrev = fechaMes.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
             headerHTML += `<th class="month-column">${mesAbrev.charAt(0).toUpperCase() + mesAbrev.slice(1)}</th>`;
@@ -244,9 +245,30 @@ function generarFilasDatos() {
                     <span class="confirm-indicator ${etaConfirm ? 'confirmed' : 'estimated'}">${etaConfirm ? 'Conf' : 'Est'}</span>
                  </td>`;
         
-        html += `<td class="center">${formatDate(item.FECHA_EST_PAGO)}</td>`;
+        // FECHA_EST_PAGO - Editable
+        var fechaPagoEfectiva = item.FECHA_PAGO_EFECTIVA || item.FECHA_EST_PAGO || '-';
+        var esEditada = item.FECHA_PAGO_EDIT != null;
+        var fechaOriginal = item.FECHA_EST_PAGO || '-';
         
-        var fechaPago = item.FECHA_EST_PAGO ? new Date(item.FECHA_EST_PAGO) : null;
+        html += `<td class="center fecha-pago-cell ${esEditada ? 'fecha-editada' : ''}" 
+                     data-id="${item.ID}" 
+                     data-fecha-orig="${item.FECHA_EST_PAGO || ''}" 
+                     data-fecha-edit="${item.FECHA_PAGO_EDIT || ''}"
+                     onclick="editarFechaPago(this)">
+                    <div class="fecha-pago-display">
+                        <span class="fecha-value">${formatDate(fechaPagoEfectiva)}</span>
+                        ${esEditada ? '<span class="badge-fecha-editada">Editada</span>' : ''}
+                        <i class="fas fa-pen fecha-pago-icon"></i>
+                    </div>
+                    ${esEditada ? `
+                        <div class="fecha-tooltip">
+                            <span class="fecha-tooltip-label">Fecha Original</span>
+                            <span class="fecha-tooltip-value">${formatDate(fechaOriginal)}</span>
+                        </div>
+                    ` : ''}
+                 </td>`;
+        
+        var fechaPago = fechaPagoEfectiva !== '-' ? new Date(fechaPagoEfectiva) : null;
         if (fechaPago) fechaPago.setHours(0, 0, 0, 0);
         
         if (vistaActual === 'semanas') {
@@ -268,9 +290,9 @@ function generarFilasDatos() {
             
         } else {
             // Vista meses: solo 11 meses (excluyendo las primeras 4 semanas)
-            var mesPago = item.FECHA_EST_PAGO ? item.FECHA_EST_PAGO.substring(0, 7) : '';
+            var mesPago = fechaPagoEfectiva !== '-' ? fechaPagoEfectiva.substring(0, 7) : '';
             
-            for (var i = 1; i <= 11; i++) {
+            for (var i = 0; i < 11; i++) {
                 var fechaMes = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
                 var mesKey = fechaMes.getFullYear() + '-' + String(fechaMes.getMonth() + 1).padStart(2, '0');
                 var esMesPago = mesPago === mesKey;
@@ -318,8 +340,9 @@ function generarFilaTotales() {
             var totalDia = 0;
             if (datosProveedores && datosProveedores.items) {
                 datosProveedores.items.forEach(function(item) {
-                    if (item.FECHA_EST_PAGO) {
-                        var fechaPago = new Date(item.FECHA_EST_PAGO);
+                    var fechaPagoEfectiva = item.FECHA_PAGO_EFECTIVA || item.FECHA_EST_PAGO;
+                    if (fechaPagoEfectiva) {
+                        var fechaPago = new Date(fechaPagoEfectiva);
                         fechaPago.setHours(0, 0, 0, 0);
                         if (fechaPago.getTime() === fechaDia.getTime()) {
                             totalDia += parseFloat(item.VALOR_FOB_DOLAR) || 0;
@@ -335,17 +358,18 @@ function generarFilaTotales() {
         
     } else {
         // Vista de meses: solo 11 meses (excluyendo primeras 4 semanas)
-        for (var i = 1; i <= 11; i++) {
+        for (var i = 0; i < 11; i++) {
             var fechaMes = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
             var mesKey = fechaMes.getFullYear() + '-' + String(fechaMes.getMonth() + 1).padStart(2, '0');
             
             var totalMes = 0;
             if (datosProveedores && datosProveedores.items) {
                 datosProveedores.items.forEach(function(item) {
-                    if (item.FECHA_EST_PAGO) {
-                        var mesPago = item.FECHA_EST_PAGO.substring(0, 7);
+                    var fechaPagoEfectiva = item.FECHA_PAGO_EFECTIVA || item.FECHA_EST_PAGO;
+                    if (fechaPagoEfectiva) {
+                        var mesPago = fechaPagoEfectiva.substring(0, 7);
                         if (mesPago === mesKey) {
-                            var fechaPago = new Date(item.FECHA_EST_PAGO);
+                            var fechaPago = new Date(fechaPagoEfectiva);
                             fechaPago.setHours(0, 0, 0, 0);
                             // Solo incluir si está después de las 4 semanas
                             if (fechaPago >= fecha28Dias) {
@@ -388,8 +412,9 @@ function calcularResumenes() {
             var valor = parseFloat(item.VALOR_FOB_DOLAR) || 0;
             totalGeneral += valor;
             
-            if (item.FECHA_EST_PAGO) {
-                var fechaPago = new Date(item.FECHA_EST_PAGO);
+            var fechaPagoEfectiva = item.FECHA_PAGO_EFECTIVA || item.FECHA_EST_PAGO;
+            if (fechaPagoEfectiva) {
+                var fechaPago = new Date(fechaPagoEfectiva);
                 fechaPago.setHours(0, 0, 0, 0);
                 
                 // Total 4 semanas: incluir si está dentro de los próximos 28 días
@@ -411,6 +436,94 @@ function calcularResumenes() {
 }
 
 /**
+ * Permite editar la fecha de pago
+ * @param {HTMLElement} cell Celda donde se hizo click
+ */
+window.editarFechaPago = function(cell) {
+    // Evitar edición múltiple
+    if (cell.querySelector('input')) {
+        return;
+    }
+    
+    var idMg = cell.dataset.id;
+    var fechaOrig = cell.dataset.fechaOrig;
+    var fechaEdit = cell.dataset.fechaEdit || fechaOrig;
+    
+    // Guardar contenido original
+    var originalContent = cell.innerHTML;
+    
+    // Crear input date
+    var input = document.createElement('input');
+    input.type = 'date';
+    input.className = 'fecha-pago-input';
+    
+    // Normalizar la fecha para evitar problemas de zona horaria
+    if (fechaEdit || fechaOrig) {
+        var fechaParaInput = fechaEdit || fechaOrig;
+        // Asegurar formato YYYY-MM-DD sin conversión de timezone
+        if (fechaParaInput && fechaParaInput !== '-') {
+            input.value = fechaParaInput.split('T')[0]; // Tomar solo la parte de fecha
+        }
+    }
+    
+    // Reemplazar contenido con input
+    cell.innerHTML = '';
+    cell.appendChild(input);
+    input.focus();
+    
+    // Handler para guardar
+    var guardarFecha = function() {
+        var nuevaFecha = input.value;
+        
+        if (!nuevaFecha) {
+            cell.innerHTML = originalContent;
+            return;
+        }
+        
+        // Mostrar loading
+        cell.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        
+        // Enviar al servidor
+        fetch('Controller/ComexController.php?action=updateFechaPago', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                id_mg: idMg,
+                fecha_pago_orig: fechaOrig,
+                fecha_pago_edit: nuevaFecha
+            })
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (result.success) {
+                // Recargar datos para reflejar el cambio
+                cargarDatos();
+            } else {
+                alert('Error al guardar: ' + result.message);
+                cell.innerHTML = originalContent;
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error de conexión al guardar la fecha');
+            cell.innerHTML = originalContent;
+        });
+    };
+    
+    // Events
+    input.addEventListener('blur', guardarFecha);
+    input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            guardarFecha();
+        } else if (e.key === 'Escape') {
+            cell.innerHTML = originalContent;
+        }
+    });
+};
+
+/**
  * Formatea un valor como moneda USD
  */
 function formatCurrency(value) {
@@ -425,16 +538,17 @@ function formatCurrency(value) {
  * Formatea una fecha
  */
 function formatDate(dateString) {
-    if (!dateString) return '-';
+    if (!dateString || dateString === '-') return '-';
     
-    var date = new Date(dateString);
-    if (isNaN(date.getTime())) return '-';
+    // Evitar problemas de timezone usando la fecha directamente
+    var parts = dateString.split('T')[0].split('-');
+    if (parts.length !== 3) return '-';
     
-    return date.toLocaleDateString('es-AR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric'
-    });
+    var year = parts[0];
+    var month = parts[1];
+    var day = parts[2];
+    
+    return day + '/' + month + '/' + year;
 }
 
 /**
