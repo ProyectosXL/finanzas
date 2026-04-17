@@ -43,7 +43,7 @@ class ReporteRemitos {
                 EOMONTH(A.FECHA_MOV) AS FECHA,
                 SUM(CAST(A.IMPORTE_TO AS FLOAT)) AS IMPORTE_REMITOS,
                 SUM(CAST(A.IMPORTE_TO AS FLOAT) / D.Comprador) AS IMPORTE_USD
-            FROM [XL-TANGO].LAKER_SA.DBO.STA14 A    
+            FROM [XL-TANGO].LAKER_SA.DBO.SJ_VIEW_STA14 A    
             LEFT JOIN DolarCierreMes D  
                 ON D.Anio = YEAR(A.FECHA_MOV)  
                AND D.Mes  = MONTH(A.FECHA_MOV)  
@@ -131,7 +131,7 @@ class ReporteRemitos {
             A.N_COMP AS N_REMITO,    
             CAST(A.IMPORTE_TO AS FLOAT) AS IMPORTE_PESOS,    
             CAST(A.IMPORTE_TO AS FLOAT) / D.Comprador AS IMPORTE_USD    
-        FROM [XL-TANGO].LAKER_SA.DBO.STA14 A    
+        FROM [XL-TANGO].LAKER_SA.DBO.SJ_VIEW_STA14 A    
         INNER JOIN [XL-TANGO].LAKER_SA.DBO.SJ_VIEW_GVA14 B     
             ON A.COD_PRO_CL = B.COD_CLIENT    
         LEFT JOIN DolarCierreMes D  
