@@ -1,3 +1,19 @@
+const calcularEquivDolares = () => {
+    const importe    = parseFloat((document.querySelector("#importeDolares").value    || "0").replace(",", ".")) || 0;
+    const cotizacion = parseFloat((document.querySelector("#cotizacionDolar").value   || "0").replace(",", ".")) || 0;
+    const equivalente = Math.round(importe * cotizacion);
+    const campo = document.querySelector("#equivDolaresEnPesos");
+    campo.value = equivalente > 0
+        ? "$ " + equivalente.toLocaleString('de-De', { maximumFractionDigits: 0, minimumFractionDigits: 0 })
+        : "";
+    calcularSaldo();
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+    document.querySelector("#importeDolares").addEventListener("input",  calcularEquivDolares);
+    document.querySelector("#cotizacionDolar").addEventListener("input", calcularEquivDolares);
+});
+
 const completarModal = (codClient) => {
 
     traerCheques(codClient);
@@ -23,7 +39,17 @@ const confirmarCobro = (codClient) => {
     let idCheques = localStorage.getItem("idCheques");
     let valorDescontado = parseInt(document.querySelector("#valorDescontado").textContent);
     let username = document.querySelector("#user").textContent;
+    let importeDolares  = parseFloat((document.querySelector("#importeDolares")?.value  || "0").replace(",", ".")) || 0;
+    let cotizacionDolar = parseFloat((document.querySelector("#cotizacionDolar")?.value || "0").replace(",", ".")) || 0;
 
+    if (importeDolares > 0 && cotizacionDolar <= 0) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'Cotización requerida',
+            text: 'Ingresó un importe en U$S pero la cotización es obligatoria y debe ser mayor a cero.'
+        });
+        return;
+    }
 
     if (parseInt(montoACobrar) != parseInt(saldoCobrar)) {
         Swal.fire({
@@ -42,7 +68,7 @@ const confirmarCobro = (codClient) => {
         })
     }
 
-    if (cobroEfectivo < 1 && cobroCheque < 1 && cobroDeposito < 1) {
+    if (cobroEfectivo < 1 && cobroCheque < 1 && cobroDeposito < 1 && importeDolares < 1) {
         Swal.fire({
             icon: 'error',
             title: 'Error de carga',
@@ -92,7 +118,9 @@ const confirmarCobro = (codClient) => {
                         idCheque: idCheques,
                         nombreCliente: nombreCliente,
                         valorDescontado: valorDescontado,
-                        username:username
+                        username: username,
+                        importe_dolares: importeDolares,
+                        cotizacion_dolar: cotizacionDolar
 
                     },
                     success: function (data) {
@@ -146,12 +174,17 @@ const calcularSaldo = () => {
         deposito.value = 0;
     }
 
-    if (cheque.getAttribute("attr-valorreal") == "") {
+    if (cheque.getAttribute("attr-valorreal") == "" || cheque.getAttribute("attr-valorreal") == null) {
         cheque.setAttribute("attr-valorreal", 0);
         cheque.value = 0;
     }
 
-    let total = parseInt(montoACobrar) - (parseInt(efectivo.getAttribute("attr-valorreal")) + parseInt(deposito.getAttribute("attr-valorreal")) + parseInt(cheque.getAttribute("attr-valorreal")));
+    const equivDolares = parseFloat(
+        (document.querySelector("#equivDolaresEnPesos")?.value || "0")
+            .replace(/[$.]/g, "").replace(/\./g, "").replace(",", ".")
+    ) || 0;
+
+    let total = parseInt(montoACobrar) - (parseInt(efectivo.getAttribute("attr-valorreal")) + parseInt(deposito.getAttribute("attr-valorreal")) + parseInt(cheque.getAttribute("attr-valorreal")) + Math.round(equivDolares));
 
     saldoCobrar.value = `$ ${parseNumber(total)} `
     saldoCobrar.setAttribute("attr-valorReal", total);

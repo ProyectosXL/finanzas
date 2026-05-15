@@ -52,6 +52,15 @@ if(!isset($_GET['userName'])){
                             <div class="stat-card-value" id="totalCheque">$0</div>
                         </div>
                     </div>
+                    <div class="stat-card dolar">
+                        <div class="stat-icon">
+                            <i class="bi bi-currency-dollar"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-card-header">Total Dólares</div>
+                            <div class="stat-card-value" id="totalDolares">U$S 0</div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="actions-section">
@@ -70,6 +79,8 @@ if(!isset($_GET['userName'])){
                                 <th>MONTO COBRADO</th>
                                 <th>EFECTIVO</th>
                                 <th>CHEQUES</th>
+                                <th>U$S</th>
+                                <th>COTIZACIÓN</th>
                                 <th>SELECCIONAR</th>
                             </tr>
                         </thead>
@@ -84,6 +95,8 @@ if(!isset($_GET['userName'])){
                                     <td>$<?php echo number_format($value['importe_total'], 0, ',', '.') ?></td>
                                     <td class="importeEfectivo"><?php echo $value['importe_efectivo'] ?></td>
                                     <td class="importeCheque"><?php echo $value['importe_cheque'] ?></td>
+                                    <td class="importeDolares"><?php echo $value['importe_dolares'] > 0 ? $value['importe_dolares'] : 0 ?></td>
+                                    <td class="cotizacionDolar"><?php echo $value['cotizacion_dolar'] > 0 ? number_format($value['cotizacion_dolar'], 2, ',', '.') : '—' ?></td>
                                     <td>
                                         <div class="checkbox-container">
                                             <input type="checkbox" name="a" class="checkCalcularTotales modern-checkbox" onchange="calcularTotales(this)">

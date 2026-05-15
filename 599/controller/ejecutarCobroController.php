@@ -12,10 +12,13 @@ $postCheques = $_POST['idCheque'];
 $nombreCliente = $_POST['nombreCliente'];
 $valorDescontado = $_POST['valorDescontado'];
 $username = $_POST['username'];
+$importeDolares  = isset($_POST['importe_dolares'])  ? floatval($_POST['importe_dolares'])  : 0;
+$cotizacionDolar = isset($_POST['cotizacion_dolar']) ? floatval($_POST['cotizacion_dolar']) : 0;
 
 $idCheques = explode(",", $postCheques);
 
-$importeTotal = $cobroEfectivo + $cobroDeposito + $cobroCheque; 
+$equivalentePesos = round($importeDolares * $cotizacionDolar);
+$importeTotal = $cobroEfectivo + $cobroDeposito + $cobroCheque + $equivalentePesos;
 $montoTotal = $montoACobrar - $saldoCobrar;
 $remitoEquis = new RemitoEquis();
 
@@ -29,7 +32,7 @@ if($existeCobro) {
 }
 
 
-$idCobro = $remitoEquis->guardarCobro($codClient, $cobroEfectivo, $cobroCheque, $importeTotal, $nombreCliente, $valorDescontado, $username, $cobroDeposito);
+$idCobro = $remitoEquis->guardarCobro($codClient, $cobroEfectivo, $cobroCheque, $importeTotal, $nombreCliente, $valorDescontado, $username, $cobroDeposito, $importeDolares, $cotizacionDolar);
 
 
 foreach ($idCheques as $value) {

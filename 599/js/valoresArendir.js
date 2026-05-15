@@ -1,48 +1,43 @@
 
 document.addEventListener("DOMContentLoaded", () => {
-          
 
-    let importeEfectivo = document.querySelectorAll(".importeEfectivo");
-    let importeCheque = document.querySelectorAll(".importeCheque");
-
-    importeEfectivo.forEach(element => {
-        element.setAttribute("attr-realValue", parseFloat(element.textContent))
-        element.textContent ="$" +  parseNumber(element.textContent);
-
+    document.querySelectorAll(".importeEfectivo").forEach(element => {
+        element.setAttribute("attr-realValue", parseFloat(element.textContent) || 0);
+        element.textContent = "$" + parseNumber(element.textContent);
     });
 
-    importeCheque.forEach(element => {
-        element.setAttribute("attr-realValue", parseFloat(element.textContent))
-        element.textContent ="$" + parseNumber(element.textContent);
+    document.querySelectorAll(".importeCheque").forEach(element => {
+        element.setAttribute("attr-realValue", parseFloat(element.textContent) || 0);
+        element.textContent = "$" + parseNumber(element.textContent);
+    });
 
+    document.querySelectorAll(".importeDolares").forEach(element => {
+        const val = parseFloat(element.textContent) || 0;
+        element.setAttribute("attr-realValue", val);
+        element.textContent = val > 0 ? "U$S " + parseNumber(val) : "—";
     });
 
 });
 
-const calcularTotales = (checkbox) =>{
+const calcularTotales = (checkbox) => {
     let todosLosCheck = document.querySelectorAll(".checkCalcularTotales");
-    let totalEfectivoInput = document.querySelector("#totalEfectivo");
-    let totalChequeInput = document.querySelector("#totalCheque");
     let totalEfectivo = 0;
     let totalCheque = 0;
+    let totalDolares = 0;
 
     todosLosCheck.forEach(element => {
-
-        if(element.checked){
-            let row = element.closest('tr');
-            let cells = row.querySelectorAll('td');
-            
-            // cells[3] = EFECTIVO, cells[4] = CHEQUES
+        if (element.checked) {
+            let cells = element.closest('tr').querySelectorAll('td');
+            // cells[3]=EFECTIVO, cells[4]=CHEQUES, cells[5]=U$S
             totalEfectivo += parseFloat(cells[3].getAttribute("attr-realValue")) || 0;
-            totalCheque += parseFloat(cells[4].getAttribute("attr-realValue")) || 0;
+            totalCheque   += parseFloat(cells[4].getAttribute("attr-realValue")) || 0;
+            totalDolares  += parseFloat(cells[5].getAttribute("attr-realValue")) || 0;
         }
     });
-    
-    totalEfectivoParseado = parseNumber(totalEfectivo);
-    totalChequeParseado = parseNumber(totalCheque);
-    totalEfectivoInput.textContent = "$ " + totalEfectivoParseado
-    totalChequeInput.textContent = "$ " + totalChequeParseado
 
+    document.querySelector("#totalEfectivo").textContent = "$ " + parseNumber(totalEfectivo);
+    document.querySelector("#totalCheque").textContent   = "$ " + parseNumber(totalCheque);
+    document.querySelector("#totalDolares").textContent  = "U$S " + parseNumber(totalDolares);
 };
 
 

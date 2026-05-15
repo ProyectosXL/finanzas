@@ -5,6 +5,7 @@
     --success-color: #27ae60;
     --efectivo-color: #3498db;
     --cheque-color: #9b59b6;
+    --dolar-color: #e67e22;
     --primary-blue: #007bff;
     --danger-color: #dc3545;
     --border-color: #e0e0e0;
@@ -93,6 +94,10 @@ body {
     border-left: 4px solid var(--cheque-color);
 }
 
+.stat-card.dolar {
+    border-left: 4px solid var(--dolar-color);
+}
+
 .stat-icon {
     width: 50px;
     height: 50px;
@@ -111,6 +116,11 @@ body {
 .cheque .stat-icon {
     background: rgba(155, 89, 182, 0.1);
     color: var(--cheque-color);
+}
+
+.dolar .stat-icon {
+    background: rgba(230, 126, 34, 0.1);
+    color: var(--dolar-color);
 }
 
 .stat-icon i {

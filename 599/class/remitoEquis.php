@@ -238,11 +238,11 @@ class RemitoEquis {
 
     }
 
-    public function guardarCobro ($cod_client, $importe_efectivo, $importe_cheque, $importe_total, $nombreCliente, $valorDescontado, $username, $importe_deposito = 0 ) {
-        
+    public function guardarCobro ($cod_client, $importe_efectivo, $importe_cheque, $importe_total, $nombreCliente, $valorDescontado, $username, $importe_deposito = 0, $importeDolares = 0, $cotizacionDolar = 0 ) {
+
         $cid = $this->conn->conectar('central');
-        
-        $sql = "INSERT INTO sj_administracion_cobros (cod_client, importe_efectivo, importe_cheque, importe_total, rendido, nombre_cliente, descuento, user_cobro, importe_deposito) VALUES ('$cod_client', '$importe_efectivo', '$importe_cheque', '$importe_total','0','$nombreCliente', '$valorDescontado ', '$username', '$importe_deposito')SELECT SCOPE_IDENTITY()";
+
+        $sql = "INSERT INTO sj_administracion_cobros (cod_client, importe_efectivo, importe_cheque, importe_total, rendido, nombre_cliente, descuento, user_cobro, importe_deposito, importe_dolares, cotizacion_dolar) VALUES ('$cod_client', '$importe_efectivo', '$importe_cheque', '$importe_total','0','$nombreCliente', '$valorDescontado ', '$username', '$importe_deposito', '$importeDolares', '$cotizacionDolar')SELECT SCOPE_IDENTITY()";
 
         try {
 
@@ -340,10 +340,11 @@ class RemitoEquis {
 
         $cid = $this->conn->conectar('central');
         
-        $sql = "SELECT ID, cod_client, MAX(importe_efectivo) importe_efectivo, MAX(importe_cheque) importe_cheque, importe_total, fecha_cobro, rendido, 
-                nombre_cliente, descuento, user_rinde, SUM(IMPORTE_TO) IMPORTE_TO FROM
+        $sql = "SELECT ID, cod_client, MAX(importe_efectivo) importe_efectivo, MAX(importe_cheque) importe_cheque, importe_total, fecha_cobro, rendido,
+                nombre_cliente, descuento, user_rinde, SUM(IMPORTE_TO) IMPORTE_TO,
+                MAX(importe_dolares) importe_dolares, MAX(cotizacion_dolar) cotizacion_dolar FROM
                 (
-                SELECT A.*,C.IMPORTE_TO FROM sj_administracion_cobros A 
+                SELECT A.*,C.IMPORTE_TO FROM sj_administracion_cobros A
                 INNER JOIN sj_administracion_cobros_por_remito B ON A.ID = B.id_cobro
                 INNER JOIN SJ_EQUIS_TABLE C ON B.num_rem = C.N_COMP collate Latin1_General_BIN
                 WHERE A.rendido = 0

@@ -73,7 +73,7 @@
             </div>
 
             <div hidden id="codClient"><?= $_GET['codClient'] ?></div>
-            
+
             <div class="client-info">
                 <h5>Cliente: <span class="client-name"><?= $detalleDeRemito[0]['RAZON_SOCI'] ?></span></h5>
             </div>

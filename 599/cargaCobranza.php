@@ -6,7 +6,6 @@
     include_once "controller/traerEquis.php";
     $detalleRemito = traerDetalle($_GET['codCliente']);
     $cliente = $detalleRemito[0]['RAZON_SOCI'];
-
     ?>
 
     <!DOCTYPE html>
@@ -44,47 +43,85 @@
                     <span id="cliente" attr-cliente="<?= $cliente?>"><?= $cliente?></span>
                 </div>
 
-                <div class="form-grid">
-                    <div class="form-item">
-                        <label>
-                            <i class="bi bi-currency-dollar"></i>
-                            Monto a Cobrar
-                        </label>
-                        <input type="text" value="$<?= number_format($_GET['importeAbonar'], 0, ',', '.') ?>" readonly id="montoACobrar" attr-valorReal="<?= $_GET['importeAbonar'] ?>">
-                        <div hidden id="valorDescontado"><?= $_GET['valorDescontado']?></div>
+                <div class="monto-section">
+                    <div class="monto-label">
+                        <i class="bi bi-currency-dollar"></i>
+                        Monto a Cobrar
                     </div>
+                    <input type="text" value="$<?= number_format($_GET['importeAbonar'], 0, ',', '.') ?>" readonly id="montoACobrar" attr-valorReal="<?= $_GET['importeAbonar'] ?>">
+                    <div hidden id="valorDescontado"><?= $_GET['valorDescontado']?></div>
+                </div>
 
-                    <div class="form-item">
-                        <label>
-                            <i class="bi bi-wallet2"></i>
-                            Cobro Efectivo
-                        </label>
-                        <input type="text" id="cobroEfectivo" onchange="setearValores()" placeholder="Ingrese monto en efectivo">
+                <div class="payment-section">
+                    <div class="section-header">
+                        <i class="bi bi-cash-stack"></i>
+                        <span>Pago en Pesos</span>
                     </div>
-
-                    <div class="form-item">
-                        <label>
-                            <i class="bi bi-bank"></i>
-                            Cobro Depósito
-                        </label>
-                        <input type="text" id="cobroDeposito" onchange="setearValores()" placeholder="Ingrese monto en depósito">
-                    </div>
-
-                    <div class="form-item">
-                        <label>
-                            <i class="bi bi-credit-card"></i>
-                            Cobro Cheque
-                        </label>
-                        <div class="input-with-button">
-                            <input type="text" id="cobroCheque" readonly>
-                            <button class="btn-icon btn-success" data-toggle="modal" data-target="#exampleModal" onclick="completarModal('<?= $_GET['codCliente'] ?>')" id="botonCheques" title="Agregar cheque">
-                                <i class="bi bi-plus-lg"></i>
-                            </button>
-                            <button class="btn-icon btn-primary" data-toggle="modal" data-target="#editarChequeModal" onclick="updateChequesModal()" id="botonEditarCheques" hidden title="Editar cheque">
-                                <i class="bi bi-pencil"></i>
-                            </button>
+                    <div class="payment-grid">
+                        <div class="form-item">
+                            <label>
+                                <i class="bi bi-wallet2"></i>
+                                Cobro Pesos ($)
+                            </label>
+                            <input type="text" id="cobroEfectivo" onchange="setearValores()" placeholder="Ingrese monto en pesos">
                         </div>
-                        <div hidden id="idCheque"></div>
+
+                        <div class="form-item">
+                            <label>
+                                <i class="bi bi-bank"></i>
+                                Cobro Depósito
+                            </label>
+                            <input type="text" id="cobroDeposito" onchange="setearValores()" placeholder="Ingrese monto en depósito">
+                        </div>
+
+                        <div class="form-item">
+                            <label>
+                                <i class="bi bi-credit-card"></i>
+                                Cobro Cheque
+                            </label>
+                            <div class="input-with-button">
+                                <input type="text" id="cobroCheque" readonly>
+                                <button class="btn-icon btn-success" data-toggle="modal" data-target="#exampleModal" onclick="completarModal('<?= $_GET['codCliente'] ?>')" id="botonCheques" title="Agregar cheque">
+                                    <i class="bi bi-plus-lg"></i>
+                                </button>
+                                <button class="btn-icon btn-primary" data-toggle="modal" data-target="#editarChequeModal" onclick="updateChequesModal()" id="botonEditarCheques" hidden title="Editar cheque">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                            </div>
+                            <div hidden id="idCheque"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="payment-section">
+                    <div class="section-header">
+                        <i class="bi bi-currency-exchange"></i>
+                        <span>Pago en Dólares</span>
+                    </div>
+                    <div class="payment-grid">
+                        <div class="form-item">
+                            <label>
+                                <i class="bi bi-currency-exchange"></i>
+                                Cobro Dólares (U$S)
+                            </label>
+                            <input type="text" id="importeDolares" placeholder="0,00">
+                        </div>
+
+                        <div class="form-item">
+                            <label>
+                                <i class="bi bi-arrow-left-right"></i>
+                                Cotización
+                            </label>
+                            <input type="text" id="cotizacionDolar" placeholder="Ej: 1250,50">
+                        </div>
+
+                        <div class="form-item">
+                            <label>
+                                <i class="bi bi-calculator"></i>
+                                Equivalente en $
+                            </label>
+                            <input type="text" id="equivDolaresEnPesos" readonly placeholder="—">
+                        </div>
                     </div>
                 </div>
 
