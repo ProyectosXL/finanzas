@@ -20,7 +20,7 @@ class DotEnv
         $this->path = $path;
     }
 
-    private function load() :void
+    public function load() :void
     {
         if (!is_readable($this->path)) {
              throw new \RuntimeException(sprintf('%s file is not readable', $this->path));
@@ -47,7 +47,7 @@ class DotEnv
     }
 
     public function listVars(){
-        (new DotEnv(__DIR__ . '/../.env'))->load();
+        $this->load();
 
         $vars = array(
 
