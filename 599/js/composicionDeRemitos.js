@@ -1,29 +1,38 @@
 
 const parseNumber = ()=>{
 
-    let allDeuda = document.querySelectorAll("#colDeuda");
-    let allCobrado = document.querySelectorAll("#colCobrado");
+    let allDeuda = document.querySelectorAll(".col-deuda");
+    let allCobrado = document.querySelectorAll(".col-cobrado");
 
     allDeuda.forEach(deuda => {
-        let valor = parseInt(deuda.textContent);
-        valor = valor.toLocaleString('de-De', {
-            style: 'decimal',
-            maximumFractionDigits: 0,
-            minimumFractionDigits: 0
-        });
-        deuda.textContent = "$ "+valor;
+        const rawValue = parseInt(deuda.getAttribute("attr-realValue") || deuda.textContent);
+        if (rawValue === 0) {
+            deuda.closest("tr").classList.add("fila-saldada");
+            deuda.textContent = "—";
+        } else {
+            let valor = rawValue.toLocaleString('de-De', {
+                style: 'decimal',
+                maximumFractionDigits: 0,
+                minimumFractionDigits: 0
+            });
+            deuda.textContent = "$ " + valor;
+        }
     });
 
     allCobrado.forEach(cobrado => {
         let valor = parseInt(cobrado.textContent);
-        valor = valor.toLocaleString('de-De', {
-            style: 'decimal',
-            maximumFractionDigits: 0,
-            minimumFractionDigits: 0
-        });
-        cobrado.textContent = "$ "+valor;
+        if (isNaN(valor) || valor === 0) {
+            cobrado.textContent = "—";
+            cobrado.style.color = "#aaa";
+        } else {
+            valor = valor.toLocaleString('de-De', {
+                style: 'decimal',
+                maximumFractionDigits: 0,
+                minimumFractionDigits: 0
+            });
+            cobrado.textContent = "$ " + valor;
+        }
     });
-
 
 }
 

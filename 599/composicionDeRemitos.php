@@ -19,12 +19,14 @@
     $totalEfectivo = 0;
     $totalCheque = 0;
     $totalDeposito = 0;
+    $totalDolares = 0;
 
     foreach ($valores as  $value) {
         $totalEfectivo = $totalEfectivo + $value['importe_efectivo'];
         $totalCheque = $totalCheque + $value['importe_cheque'];
         $totalDeposito = $totalDeposito + $value['importe_deposito'];
-    } 
+        $totalDolares = $totalDolares + $value['importe_dolares'];
+    }
 
     foreach ($todosLosRemitos as $remito => $value) {
         $totalDeuda = 0;
@@ -92,69 +94,102 @@
 
                 <div id="user" hidden><?=$userName; ?></div>
                 
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <i class="bi bi-cash-stack"></i>
+                <div class="stats-wrapper">
+
+                    <!-- Pendiente de cobro -->
+                    <div class="stats-group pendiente-group">
+                        <div class="group-label">
+                            <i class="bi bi-clock-history"></i>
+                            Pendiente de cobro
                         </div>
-                        <div class="stat-content">
-                            <div class="stat-card-header">Total Deuda</div>
-                            <div class="stat-card-value" id="sumValorDeuda">$0</div>
-                        </div>
-                    </div>
-                    <div class="stat-card efectivo">
-                        <div class="stat-icon">
-                            <i class="bi bi-wallet2"></i>
-                        </div>
-                        <div class="stat-content">
-                            <div class="stat-card-header">Efectivo</div>
-                            <div class="stat-card-value"><?= '$'.number_format($totalEfectivo, 0, ',', '.')?></div>
-                        </div>
-                    </div>
-                    <div class="stat-card cheque">
-                        <div class="stat-icon">
-                            <i class="bi bi-credit-card"></i>
-                        </div>
-                        <div class="stat-content">
-                            <div class="stat-card-header">Cheques</div>
-                            <div class="stat-card-value"><?= '$'.number_format($totalCheque, 0, ',', '.')?></div>
+                        <div class="stat-card deuda-card">
+                            <div class="stat-icon">
+                                <i class="bi bi-cash-stack"></i>
+                            </div>
+                            <div class="stat-content">
+                                <div class="stat-card-header">Total a cobrar</div>
+                                <div class="stat-card-value" id="sumValorDeuda">$0</div>
+                            </div>
                         </div>
                     </div>
-                    <div class="stat-card deposito">
-                        <div class="stat-icon">
-                            <i class="bi bi-bank"></i>
+
+                    <div class="stats-divider"></div>
+
+                    <!-- Cobrado sin rendir -->
+                    <div class="stats-group cobrado-group">
+                        <div class="group-label">
+                            <i class="bi bi-check2-circle"></i>
+                            Cobrado sin rendir
                         </div>
-                        <div class="stat-content">
-                            <div class="stat-card-header">Depósito</div>
-                            <div class="stat-card-value"><?= '$'.number_format($totalDeposito, 0, ',', '.')?></div>
+                        <div class="cobrado-subgrid">
+                            <div class="stat-card efectivo">
+                                <div class="stat-icon">
+                                    <i class="bi bi-wallet2"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <div class="stat-card-header">Efectivo</div>
+                                    <div class="stat-card-value"><?= '$'.number_format($totalEfectivo, 0, ',', '.')?></div>
+                                </div>
+                            </div>
+                            <div class="stat-card cheque">
+                                <div class="stat-icon">
+                                    <i class="bi bi-credit-card"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <div class="stat-card-header">Cheques</div>
+                                    <div class="stat-card-value"><?= '$'.number_format($totalCheque, 0, ',', '.')?></div>
+                                </div>
+                            </div>
+                            <div class="stat-card deposito">
+                                <div class="stat-icon">
+                                    <i class="bi bi-bank"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <div class="stat-card-header">Depósito</div>
+                                    <div class="stat-card-value"><?= '$'.number_format($totalDeposito, 0, ',', '.')?></div>
+                                </div>
+                            </div>
+                            <div class="stat-card dolares">
+                                <div class="stat-icon">
+                                    <i class="bi bi-currency-dollar"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <div class="stat-card-header">Dólares</div>
+                                    <div class="stat-card-value"><?= 'U$S '.number_format($totalDolares, 0, ',', '.')?></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
+
                 </div>
 
-                <div class="actions-section">
-                    <button class="btn-modern btn-success-modern btn_exportar" id="btnExport">
-                        <i class="bi bi-file-earmark-excel"></i>
-                        Exportar
-                    </button>
-                </div>
-        
+                <!-- botón inyectado por JS junto al buscador de DataTables -->
+                <button class="btn-modern btn-success-modern btn_exportar" id="btnExport" style="display:none">
+                    <i class="bi bi-file-earmark-excel"></i>
+                    Exportar
+                </button>
+
                 <div class="table-container">
                     <table class="table table-striped table-bordered" id="myTable" cellspacing="0" data-page-length="100">
                             <thead class="thead-dark">
                                 <tr>
-                                    <th>CLIENTE</th>
-                                    <th>A COBRAR</th>
-                                    <th>COBRADO</th>
-                                    <th></th>
+                                    <th class="th-cliente">CLIENTE</th>
+                                    <th class="th-deuda">
+                                        <i class="bi bi-exclamation-circle me-1"></i> A COBRAR
+                                    </th>
+                                    <th class="th-cobrado">
+                                        <i class="bi bi-check-circle me-1"></i> COBRADO
+                                    </th>
+                                    <th class="th-accion"></th>
                                 </tr>
                             </thead>
                             <tbody>
                                     <?php 
                                         foreach($newArray as $b){
                                             echo "<tr>";
-                                            echo "<td style='text-align:center' attr-codClient='".$b['codCliente']."'>".$b['nombreCliente']."</td>";
-                                            echo "<td style='text-align:center;' id='colDeuda' attr-realValue=".$b['totalDeuda'].">".$b['totalDeuda']."</td>";
-                                            echo "<td style='text-align:center' id='colCobrado'>".$b['totalCobrado']."</td>";
+                                            echo "<td class='td-cliente' attr-codClient='".$b['codCliente']."'>".$b['nombreCliente']."</td>";
+                                            echo "<td class='col-deuda' attr-realValue=".$b['totalDeuda'].">".$b['totalDeuda']."</td>";
+                                            echo "<td class='col-cobrado'>".$b['totalCobrado']."</td>";
                                             if($b['totalDeuda'] > 0){
 
                                                 echo "<td style='text-align:center'><button class='btn-edit' onclick='verDetalle(this)'><i class='bi bi-pencil-square'></i> Ver</button></td>";
@@ -192,18 +227,13 @@
     <script>
 
             $(document).ready(function() {
-                // Primero calcular el total antes de formatear
-                const totalDeudas = document.querySelectorAll("#colDeuda");
+                // Calcular total de deuda antes de formatear
                 let valorTotalDeudas = 0;
-                
-                totalDeudas.forEach(e => {
+                document.querySelectorAll(".col-deuda").forEach(e => {
                     const valor = parseInt(e.getAttribute("attr-realValue"));
-                    if (!isNaN(valor)) {
-                        valorTotalDeudas += valor;
-                    }
+                    if (!isNaN(valor)) valorTotalDeudas += valor;
                 });
 
-                // Actualizar el total de deuda
                 const elementoTotal = document.querySelector("#sumValorDeuda");
                 if (elementoTotal) {
                     elementoTotal.textContent = "$ " + valorTotalDeudas.toLocaleString('es-AR', {
@@ -213,13 +243,22 @@
                     });
                 }
 
-                // Luego formatear los números de la tabla
+                // Formatear números de la tabla
                 parseNumber();
 
-                // Finalmente inicializar DataTable
+                // Inicializar DataTable
                 $('#myTable').DataTable({
-                    responsive: true,
-                    buttons: ['copy', 'csv', 'excel', 'pdf', 'print']
+                    scrollY: "60vh",
+                    scrollCollapse: true,
+                    paging: false,
+                    language: { search: "", info: "Mostrando _TOTAL_ clientes" },
+                    initComplete: function() {
+                        // Mover el botón exportar junto al buscador
+                        var $btn = $('#btnExport').detach().css('display', '');
+                        $('.dataTables_filter').prepend($btn);
+                        // Corregir alineación (después de que el DOM esté listo)
+                        this.api().columns.adjust();
+                    }
                 });
             });
 
