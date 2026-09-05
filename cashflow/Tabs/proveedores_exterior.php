@@ -82,7 +82,7 @@
             </div>
             
             <div class="table-wrapper" id="tableWrapper" style="display: none;">
-                <div class="table-responsive">
+                <div class="table-responsive tabla-temporal">
                     <table id="tablaProveedoresExterior" class="table table-hover mb-0">
                         <thead>
                             <tr>
