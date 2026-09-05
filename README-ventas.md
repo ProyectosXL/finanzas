@@ -77,9 +77,28 @@ No se mezclan nunca:
 | Calendario | Para qué | Regla |
 | --- | --- | --- |
 | **Comercial** | Estimación de venta | Todos los días del año excepto los del parámetro `feriados_comercio` (`25/12`, `01/01`, `26/09`). Sábados y domingos **sí** tienen venta: las sucursales abren. |
-| **Bancario** | Acreditación de cobranza | `RO_T_CALENDARIO.DIA_LABORAL = 1`, en el servidor `apps`. Excluye sábados, domingos y feriados nacionales. |
+| **Bancario** | Acreditación de cobranza | `RO_T_CALENDARIO.DIA_LABORAL = 1`, en la conexión `power`. Excluye sábados, domingos y feriados nacionales. |
 
 Como el divisor de la venta diaria descuenta los feriados de comercio, el total mensual se conserva. Como los sábados y domingos de cobranza se corren al lunes, la cobranza se concentra los lunes: es un **efecto del corrimiento**, no una regla aparte.
+
+### Pestaña Análisis de Ventas
+
+Dos bloques, **ninguno abierto por canal**:
+
+**1. Proyección de Venta por Mes** — 12 meses: el actual + 11.
+
+| Columna | Qué es |
+| --- | --- |
+| Mes-Año | Mes proyectado (`sept-26`, `oct-26`, …) |
+| Año Previo | Venta neta real del mismo mes, **dos** años atrás. Sólo sirve para la comparación. |
+| Año Anterior | Venta neta real del mismo mes, **un** año atrás. Es la **base** de la proyección. |
+| Var. Interanual | `Año Anterior / Año Previo − 1` |
+| Índice de Variación | Editable. Se guarda contra el `(año, mes)` **del mes proyectado**. |
+| Venta Proyectada | `Año Anterior × (1 + Índice) × (1 + IVA)` |
+
+La venta proyectada de esta tabla y la de la grilla de Proyección salen del **mismo helper** (`Ventas::baseMensual()`), así que no se pueden desincronizar.
+
+**2. Control de Facturación** — por mes: `Facturas`, `Remitos` y `Total`. Es sólo un bloque de control para contrastar contra el tablero; los remitos **no** entran en la proyección.
 
 ### Superposición tramo / meses
 
@@ -95,7 +114,7 @@ Los 28 días se muestran en columnas diarias y la columna del mes acumula **úni
 
 ## Conexiones
 
-Todo el módulo se conecta a **`central`**, con una única excepción: la lectura del calendario bancario, que va a **`apps`** (`POWER_BI_CONTROL.RO_T_CALENDARIO`).
+Todo el módulo se conecta a **`central`**, con una única excepción: la lectura del calendario bancario, que va a la conexión **`power`** (host de apps, base `DATABASE_POWER`), donde vive `RO_T_CALENDARIO`.
 
 `RO_T_CALENDARIO` está poblada hasta 2027 y se sigue extendiendo. Si el motor pide una fecha que no existe, **no rompe**: asume hábil de lunes a viernes y devuelve un warning, que la pestaña muestra arriba de la grilla.
 

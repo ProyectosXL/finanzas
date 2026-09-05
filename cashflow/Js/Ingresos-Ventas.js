@@ -90,7 +90,7 @@
             .then(function(data) {
                 datosAnalisis = data;
                 generarTablaAnalisis();
-                generarTablaRemitos();
+                generarTablaFacturacion();
                 mostrar('loadingAnalisis', false);
                 mostrar('wrapperAnalisis', true);
                 ajustarStickyHeaders();
@@ -101,81 +101,87 @@
             });
     }
 
+    /**
+     * Tabla de proyección por mes: 12 meses (el actual + 11), sin apertura
+     * por canal.
+     *
+     *   Venta Proyectada = Venta Año Anterior × (1 + Índice) × (1 + IVA)
+     *   Var. Interanual  = Año Anterior / Año Previo − 1
+     */
     function generarTablaAnalisis() {
-        var canales = datosAnalisis.canales;
-        var filas = datosAnalisis.ventas;
+        var filas = datosAnalisis.proyeccion;
+        var totales = datosAnalisis.proyeccion_totales;
 
-        var header = '<th class="col-canal">Mes</th>';
-
-        canales.forEach(function(canal) {
-            header += '<th class="text-end">' + titulo(canal) + '</th>';
-        });
-
-        header += '<th class="text-end">Total</th>';
-        header += '<th class="text-end">Año Anterior</th>';
-        header += '<th class="text-center">Var. Interanual</th>';
-        header += '<th class="text-center">Índice de Variación ' +
-                  '<i class="fas fa-pen-to-square ms-1" style="font-size: 10px;" title="Click para editar"></i></th>';
+        var header =
+            '<th class="col-canal">Mes-Año</th>' +
+            '<th class="text-end">Año Previo</th>' +
+            '<th class="text-end">Año Anterior</th>' +
+            '<th class="text-center">Var. Interanual</th>' +
+            '<th class="text-center">Índice de Variación ' +
+                '<i class="fas fa-pen-to-square ms-1" style="font-size: 10px;" title="Click para editar"></i>' +
+            '</th>' +
+            '<th class="text-end">Venta Proyectada</th>';
 
         document.getElementById('analisisHeader').innerHTML = header;
 
         if (!filas.length) {
             document.getElementById('analisisBody').innerHTML =
-                '<tr><td colspan="' + (canales.length + 5) + '" class="text-center text-muted py-4">' +
+                '<tr><td colspan="6" class="text-center text-muted py-4">' +
                 'No hay historial cargado. Corré el SP SJ_CASHFLOW_VENTAS_HIST.</td></tr>';
             document.getElementById('analisisTotals').innerHTML = '';
             return;
         }
 
         var html = '';
-        var totales = {};
-        var totalGeneral = 0;
-
-        canales.forEach(function(canal) { totales[canal] = 0; });
 
         filas.forEach(function(fila) {
             html += '<tr>';
             html += '<td class="col-canal fw-semibold">' + fila.label + '</td>';
 
-            canales.forEach(function(canal) {
-                var valor = fila.canales[canal] || 0;
-                totales[canal] += valor;
-                html += '<td class="currency">' + formatCurrency(valor) + '</td>';
-            });
+            html += '<td class="currency text-muted" title="' + fila.label_anio_previo + '">' +
+                    formatCurrency(fila.neto_anio_previo) + '</td>';
 
-            totalGeneral += fila.total;
-            html += '<td class="currency fw-semibold">' + formatCurrency(fila.total) + '</td>';
-            html += '<td class="currency text-muted">' + formatCurrency(fila.total_anio_anterior) + '</td>';
+            html += '<td class="currency" title="' + fila.label_anio_anterior +
+                    ' — base de la proyección">' +
+                    formatCurrency(fila.neto_anio_anterior) + '</td>';
+
             html += '<td class="text-center">' + badgeVariacion(fila.variacion) + '</td>';
             html += celdaIndice(fila);
+
+            html += '<td class="currency fw-semibold cell-with-value">' +
+                    formatCurrency(fila.venta_proyectada) +
+                    (fila.estimado
+                        ? ' <i class="fas fa-triangle-exclamation text-warning ms-1" ' +
+                          'title="El mismo mes del año anterior no tiene datos: mes estimado."></i>'
+                        : '') +
+                    '</td>';
+
             html += '</tr>';
         });
 
         document.getElementById('analisisBody').innerHTML = html;
 
-        var totalsHtml = '<td class="col-canal total-label">TOTALES</td>';
-
-        canales.forEach(function(canal) {
-            totalsHtml += '<td class="currency">' + formatCurrency(totales[canal]) + '</td>';
-        });
-
-        totalsHtml += '<td class="currency">' + formatCurrency(totalGeneral) + '</td>';
-        totalsHtml += '<td colspan="3"></td>';
+        var totalsHtml =
+            '<td class="col-canal total-label">TOTALES</td>' +
+            '<td class="currency">' + formatCurrency(totales.neto_anio_previo) + '</td>' +
+            '<td class="currency">' + formatCurrency(totales.neto_anio_anterior) + '</td>' +
+            '<td colspan="2"></td>' +
+            '<td class="currency">' + formatCurrency(totales.con_iva) + '</td>';
 
         document.getElementById('analisisTotals').innerHTML = totalsHtml;
     }
 
     /**
      * Celda del índice de variación.
-     * El índice de una fila histórica es el que proyecta ESE MISMO MES DEL AÑO
-     * SIGUIENTE, así que se guarda contra (anio_indice, mes).
+     * El índice se guarda contra el (año, mes) del MES PROYECTADO, que es la
+     * misma clave que usa el motor de proyección.
      */
     function celdaIndice(fila) {
-        var editado = (fila.indice !== null && fila.indice !== undefined);
-        var valor = editado ? fila.indice : 0;
+        var editado = !!fila.indice_editado;
+        var valor = fila.indice || 0;
 
         return '<td class="center indice-cell ' + (editado ? 'fecha-editada' : '') + '"' +
-               ' data-anio="' + fila.anio_indice + '"' +
+               ' data-anio="' + fila.anio + '"' +
                ' data-mes="' + fila.mes + '"' +
                ' data-indice="' + valor + '"' +
                ' onclick="editarIndice(this)">' +
@@ -186,65 +192,45 @@
                    '</div>' +
                    '<div class="fecha-tooltip">' +
                        '<span class="fecha-tooltip-label">Proyecta</span>' +
-                       '<span class="fecha-tooltip-value">' + fila.label_indice + '</span>' +
+                       '<span class="fecha-tooltip-value">' + fila.label + '</span>' +
                    '</div>' +
                '</td>';
     }
 
-    function generarTablaRemitos() {
-        var canales = datosAnalisis.canales;
-        var filas = datosAnalisis.remitos;
-
-        var header = '<th class="col-canal">Mes</th>';
-
-        canales.forEach(function(canal) {
-            header += '<th class="text-end">' + titulo(canal) + '</th>';
-        });
-
-        header += '<th class="text-end">Total</th>';
-
-        document.getElementById('remitosHeader').innerHTML = header;
+    /**
+     * Bloque de control de facturación: facturas y remitos por mes, sin
+     * apertura por canal. No entra en la proyección.
+     */
+    function generarTablaFacturacion() {
+        var filas = datosAnalisis.facturacion;
+        var totales = datosAnalisis.facturacion_totales;
 
         if (!filas.length) {
-            document.getElementById('remitosBody').innerHTML =
-                '<tr><td colspan="' + (canales.length + 2) + '" class="text-center text-muted py-4">' +
-                'No hay remitos cargados en el período.</td></tr>';
-            document.getElementById('remitosTotals').innerHTML = '';
+            document.getElementById('facturacionBody').innerHTML =
+                '<tr><td colspan="4" class="text-center text-muted py-4">' +
+                'No hay facturación cargada en el período.</td></tr>';
+            document.getElementById('facturacionTotals').innerHTML = '';
             return;
         }
 
         var html = '';
-        var totales = {};
-        var totalGeneral = 0;
-
-        canales.forEach(function(canal) { totales[canal] = 0; });
 
         filas.forEach(function(fila) {
             html += '<tr>';
             html += '<td class="col-canal fw-semibold">' + fila.label + '</td>';
-
-            canales.forEach(function(canal) {
-                var valor = fila.canales[canal] || 0;
-                totales[canal] += valor;
-                html += '<td class="currency">' + formatCurrency(valor) + '</td>';
-            });
-
-            totalGeneral += fila.total;
+            html += '<td class="currency">' + formatCurrency(fila.facturas) + '</td>';
+            html += '<td class="currency">' + formatCurrency(fila.remitos) + '</td>';
             html += '<td class="currency fw-semibold">' + formatCurrency(fila.total) + '</td>';
             html += '</tr>';
         });
 
-        document.getElementById('remitosBody').innerHTML = html;
+        document.getElementById('facturacionBody').innerHTML = html;
 
-        var totalsHtml = '<td class="col-canal total-label">TOTALES</td>';
-
-        canales.forEach(function(canal) {
-            totalsHtml += '<td class="currency">' + formatCurrency(totales[canal]) + '</td>';
-        });
-
-        totalsHtml += '<td class="currency">' + formatCurrency(totalGeneral) + '</td>';
-
-        document.getElementById('remitosTotals').innerHTML = totalsHtml;
+        document.getElementById('facturacionTotals').innerHTML =
+            '<td class="col-canal total-label">TOTALES</td>' +
+            '<td class="currency">' + formatCurrency(totales.facturas) + '</td>' +
+            '<td class="currency">' + formatCurrency(totales.remitos) + '</td>' +
+            '<td class="currency">' + formatCurrency(totales.total) + '</td>';
     }
 
     /**

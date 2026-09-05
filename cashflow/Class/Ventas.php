@@ -27,7 +27,7 @@ require_once __DIR__ . '/Parametros.php';
  *                domingos incluidos, las sucursales abren) excepto los feriados
  *                de comercio del parametro 'feriados_comercio'.
  *   Bancario  -> acreditacion de cobranza. RO_T_CALENDARIO.DIA_LABORAL = 1 en
- *                el servidor 'apps'. Excluye sabados, domingos y feriados
+ *                la conexion 'power'. Excluye sabados, domingos y feriados
  *                nacionales.
  *
  * Como el divisor de la venta diaria descuenta los feriados de comercio, el
@@ -420,22 +420,22 @@ class Ventas {
     /**
      * Mapa de dias bancarios habiles.
      *
-     * Unica lectura del modulo fuera de 'central': la tabla vive en el servidor
-     * 'apps', base POWER_BI_CONTROL.
+     * Unica lectura del modulo fuera de 'central': RO_T_CALENDARIO vive en la
+     * conexion 'power' (host de apps, base DATABASE_POWER).
      *
      * La tabla esta poblada hasta 2027 y se sigue extendiendo. Si el motor pide
-     * una fecha que no existe, no se rompe: esHabilBancario() asume habil de
-     * lunes a viernes y registra un warning.
+     * una fecha que no existe, no se rompe: proximoHabil() asume habil de lunes
+     * a viernes y registra un warning.
      *
      * @param string $desde Fecha inicial 'Y-m-d'
      * @param string $hasta Fecha final 'Y-m-d'
      * @return array Mapa 'Y-m-d' => bool
      */
     public function getDiasHabiles($desde, $hasta) {
-        $cid = $this->conn->conectar('apps');
+        $cid = $this->conn->conectar('power');
 
         if (!$cid) {
-            throw new Exception('No se pudo conectar al servidor de calendario (apps)');
+            throw new Exception('No se pudo conectar al servidor de calendario (power)');
         }
 
         $sql = "SELECT FECHA, DIA_LABORAL
@@ -572,27 +572,8 @@ class Ventas {
             $cursor->modify('+1 day');
         }
 
-        // Tramo mensual: mes de hoy + los siguientes (horizonteMeses - 1)
-        $meses = [];
-        $mesesIdx = [];
-
-        for ($i = 0; $i < $horizonteMeses; $i++) {
-            $ref = new DateTime($hoy->format('Y-m-01'));
-            $ref->modify("+$i month");
-
-            $clave = $ref->format('Y-m');
-            $anio = intval($ref->format('Y'));
-            $mes = intval($ref->format('n'));
-
-            $meses[] = [
-                'clave' => $clave,
-                'anio' => $anio,
-                'mes' => $mes,
-                'label' => self::$mesesAbrev[$mes] . ' ' . $ref->format('y')
-            ];
-
-            $mesesIdx[$clave] = count($meses) - 1;
-        }
+        // Tramo mensual: mes actual + los siguientes (horizonteMeses - 1)
+        $meses = $this->ejeMeses($horizonteMeses);
 
         // Ventana de generacion de venta: desde hoy hasta el fin del ultimo mes
         $ultimoMes = $meses[count($meses) - 1];
@@ -621,30 +602,22 @@ class Ventas {
         }
 
         /* ---- 4. Base mensual y participacion por mes ---------------------- */
-        $baseMensual = [];
+        // La base mensual la calcula el mismo helper que usa getAnalisisVentas(),
+        // para que la venta proyectada del Analisis y la de la grilla de
+        // Proyeccion no se puedan desincronizar.
+        $baseMensual = $this->baseMensual($meses, $hist, $indices, $alicuotaIva, $feriadosMMDD);
         $particMensual = [];
 
         foreach ($meses as $m) {
             $clave = $m['clave'];
             $anioAnt = $m['anio'] - 1;
             $porCanalAnt = isset($hist[$anioAnt][$m['mes']]) ? $hist[$anioAnt][$m['mes']] : [];
-
-            $totalAnt = 0;
-
-            foreach (Parametros::CANALES as $canal) {
-                $totalAnt += isset($porCanalAnt[$canal]) ? $porCanalAnt[$canal] : 0;
-            }
-
-            $indice = isset($indices[$clave]) ? $indices[$clave] : 0;
-            $netoProy = $totalAnt * (1 + $indice);
-            $conIva = $netoProy * (1 + $alicuotaIva);
+            $totalAnt = $baseMensual[$clave]['neto_anio_anterior'];
 
             // Fallback: sin datos del anio anterior o venta total no positiva.
             // Un total negativo (mes dominado por notas de credito) produce
             // participaciones sin sentido, asi que dispara el mismo respaldo.
-            $estimado = ($totalAnt <= 0);
-
-            $calc = $estimado
+            $calc = $baseMensual[$clave]['estimado']
                 ? $respaldo
                 : $this->participacionDesde($porCanalAnt, $totalAnt);
 
@@ -652,19 +625,6 @@ class Ventas {
                 $calc,
                 isset($particEdit['MENSUAL'][$clave]) ? $particEdit['MENSUAL'][$clave] : []
             );
-
-            $baseMensual[$clave] = [
-                'clave' => $clave,
-                'anio' => $m['anio'],
-                'mes' => $m['mes'],
-                'label' => $m['label'],
-                'neto_anio_anterior' => $totalAnt,
-                'indice' => $indice,
-                'neto_proyectado' => $netoProy,
-                'con_iva' => $conIva,
-                'estimado' => $estimado,
-                'dias_vendibles' => $this->diasVendibles($m['anio'], $m['mes'], $feriadosMMDD)
-            ];
         }
 
         /* ---- 5. Participacion del tramo de 28 dias ------------------------ */
@@ -831,6 +791,107 @@ class Ventas {
         $resultado['warnings'] = $this->warnings;
 
         return $resultado;
+    }
+
+    /**
+     * Eje de meses del horizonte: mes ACTUAL + los siguientes (horizonte - 1).
+     * Con horizonte 12 son el mes actual mas 11.
+     *
+     * @param int $horizonteMeses Cantidad de meses del horizonte
+     * @return array Lista de meses con clave, anio, mes y label
+     */
+    private function ejeMeses($horizonteMeses) {
+        $hoy = new DateTime('today');
+        $meses = [];
+
+        for ($i = 0; $i < $horizonteMeses; $i++) {
+            $ref = new DateTime($hoy->format('Y-m-01'));
+            $ref->modify("+$i month");
+
+            $mes = intval($ref->format('n'));
+
+            $meses[] = [
+                'clave' => $ref->format('Y-m'),
+                'anio' => intval($ref->format('Y')),
+                'mes' => $mes,
+                'label' => self::$mesesAbrev[$mes] . '-' . $ref->format('y')
+            ];
+        }
+
+        return $meses;
+    }
+
+    /**
+     * Base mensual de la proyeccion, sin apertura por canal:
+     *
+     *   neto_anio_anterior = venta neta real del MISMO MES del anio anterior
+     *   neto_proyectado    = neto_anio_anterior * (1 + indice)
+     *   con_iva            = neto_proyectado * (1 + alicuota_iva)
+     *
+     * Es la unica implementacion de la formula: la usan tanto la grilla de
+     * Proyeccion como la tabla de Analisis de Ventas.
+     *
+     * @param array $meses Eje devuelto por ejeMeses()
+     * @param array $hist Historico indexado [anio][mes][canal] => importe
+     * @param array $indices Mapa 'Y-m' => indice
+     * @param float $alicuotaIva Alicuota de IVA
+     * @param array $feriadosMMDD Feriados de comercio 'MM-DD'
+     * @return array Mapa 'Y-m' => base del mes
+     */
+    private function baseMensual($meses, $hist, $indices, $alicuotaIva, $feriadosMMDD) {
+        $base = [];
+
+        foreach ($meses as $m) {
+            $clave = $m['clave'];
+            $anioAnt = $m['anio'] - 1;
+            $anioPrev = $m['anio'] - 2;
+
+            $totalAnt = $this->totalMes($hist, $anioAnt, $m['mes']);
+            $totalPrev = $this->totalMes($hist, $anioPrev, $m['mes']);
+
+            $indice = isset($indices[$clave]) ? $indices[$clave] : 0;
+            $netoProy = $totalAnt * (1 + $indice);
+
+            $base[$clave] = [
+                'clave' => $clave,
+                'anio' => $m['anio'],
+                'mes' => $m['mes'],
+                'label' => $m['label'],
+                'anio_anterior' => $anioAnt,
+                'label_anio_anterior' => self::$mesesAbrev[$m['mes']] . '-' . substr((string)$anioAnt, 2),
+                'neto_anio_anterior' => $totalAnt,
+                'anio_previo' => $anioPrev,
+                'label_anio_previo' => self::$mesesAbrev[$m['mes']] . '-' . substr((string)$anioPrev, 2),
+                'neto_anio_previo' => $totalPrev,
+                // Variacion interanual entre los dos anios reales: cuanto crecio
+                // el anio base contra el anterior a el.
+                'variacion' => ($totalPrev > 0) ? (($totalAnt / $totalPrev) - 1) : null,
+                'indice' => $indice,
+                'neto_proyectado' => $netoProy,
+                'con_iva' => $netoProy * (1 + $alicuotaIva),
+                'estimado' => ($totalAnt <= 0),
+                'dias_vendibles' => $this->diasVendibles($m['anio'], $m['mes'], $feriadosMMDD)
+            ];
+        }
+
+        return $base;
+    }
+
+    /**
+     * Suma la venta neta de los cuatro canales de un mes del historico
+     * @param array $hist Historico indexado [anio][mes][canal]
+     * @param int $anio Anio a leer
+     * @param int $mes Mes a leer
+     * @return float Total del mes
+     */
+    private function totalMes($hist, $anio, $mes) {
+        $total = 0;
+
+        foreach (Parametros::CANALES as $canal) {
+            $total += isset($hist[$anio][$mes][$canal]) ? $hist[$anio][$mes][$canal] : 0;
+        }
+
+        return $total;
     }
 
     /**
@@ -1198,17 +1259,41 @@ class Ventas {
        ==================================================================== */
 
     /**
-     * Datos de la sub-pestana Analisis de Ventas: historico por mes y canal,
-     * variacion interanual, indices editables y el bloque de control de remitos.
+     * Datos de la sub-pestana Analisis de Ventas.
      *
-     * @param int $anioDesde Anio minimo a incluir
+     * Devuelve dos bloques, ninguno abierto por canal:
+     *
+     * 1. PROYECCION POR MES (12 meses: el actual + 11). Por cada mes:
+     *      anio previo    -> venta neta real del mismo mes, dos anios atras
+     *      anio anterior  -> venta neta real del mismo mes, un anio atras.
+     *                        Es la BASE de la proyeccion.
+     *      variacion      -> cuanto crecio el anio anterior contra el previo
+     *      indice         -> editable, se guarda contra (anio, mes) del mes
+     *                        proyectado
+     *      proyectada     -> neto_anio_anterior * (1 + indice) * (1 + IVA)
+     *
+     * 2. CONTROL DE FACTURACION: por mes, el total facturado y el total
+     *    remitido con su suma. Es solo un bloque de control para contrastar
+     *    contra el tablero; los remitos NO entran en la proyeccion.
+     *
+     * @param int $anioDesde Anio minimo del bloque de control de facturacion
      * @return array Estructura para el front
      */
     public function getAnalisisVentas($anioDesde) {
         $anioDesde = intval($anioDesde);
 
-        $facturas = $this->getHistoricoVentas($anioDesde);
-        $remitos = $this->getRemitosControl($anioDesde);
+        $map = $this->parametros->getParametrosMap();
+        $horizonteMeses = Parametros::ent($map, 'horizonte_meses');
+        $alicuotaIva = Parametros::num($map, 'alicuota_iva');
+        $feriadosMMDD = $this->parametros->getFeriadosComercio($map);
+
+        // Historico completo: la variacion interanual necesita dos anios hacia
+        // atras respecto del mes proyectado.
+        $hist = [];
+
+        foreach ($this->getHistoricoVentas() as $row) {
+            $hist[$row['ANIO']][$row['MES']][$row['CANAL']] = $row['IMPORTE_NETO'];
+        }
 
         $indices = [];
 
@@ -1216,106 +1301,104 @@ class Ventas {
             $indices[sprintf('%04d-%02d', $row['ANIO'], $row['MES'])] = $row['INDICE'];
         }
 
-        // El comparativo interanual necesita el anio previo al primero mostrado
-        $histCompleto = [];
-
-        foreach ($this->getHistoricoVentas() as $row) {
-            $histCompleto[$row['ANIO']][$row['MES']][$row['CANAL']] = $row['IMPORTE_NETO'];
-        }
+        /* ---- 1. Proyeccion por mes --------------------------------------- */
+        $meses = $this->ejeMeses($horizonteMeses);
+        $base = $this->baseMensual($meses, $hist, $indices, $alicuotaIva, $feriadosMMDD);
 
         $filas = [];
+        $totales = [
+            'neto_anio_previo' => 0,
+            'neto_anio_anterior' => 0,
+            'con_iva' => 0
+        ];
 
-        foreach ($facturas as $row) {
+        foreach ($meses as $m) {
+            $b = $base[$m['clave']];
+
+            $filas[] = [
+                'clave' => $b['clave'],
+                'anio' => $b['anio'],
+                'mes' => $b['mes'],
+                'label' => $b['label'],
+                'anio_previo' => $b['anio_previo'],
+                'label_anio_previo' => $b['label_anio_previo'],
+                'neto_anio_previo' => $b['neto_anio_previo'],
+                'anio_anterior' => $b['anio_anterior'],
+                'label_anio_anterior' => $b['label_anio_anterior'],
+                'neto_anio_anterior' => $b['neto_anio_anterior'],
+                'variacion' => $b['variacion'],
+                'indice' => $b['indice'],
+                'indice_editado' => isset($indices[$b['clave']]),
+                'venta_proyectada' => $b['con_iva'],
+                'estimado' => $b['estimado']
+            ];
+
+            $totales['neto_anio_previo'] += $b['neto_anio_previo'];
+            $totales['neto_anio_anterior'] += $b['neto_anio_anterior'];
+            $totales['con_iva'] += $b['con_iva'];
+        }
+
+        /* ---- 2. Control de facturacion ----------------------------------- */
+        // Facturas y remitos por mes, sin apertura por canal.
+        $control = [];
+
+        foreach ($this->getHistoricoVentas($anioDesde) as $row) {
             $clave = sprintf('%04d-%02d', $row['ANIO'], $row['MES']);
 
-            if (!isset($filas[$clave])) {
-                $filas[$clave] = $this->filaAnalisisVacia($row['ANIO'], $row['MES'], $indices);
+            if (!isset($control[$clave])) {
+                $control[$clave] = $this->filaControlVacia($row['ANIO'], $row['MES']);
             }
 
-            $filas[$clave]['canales'][$row['CANAL']] = $row['IMPORTE_NETO'];
-            $filas[$clave]['total'] += $row['IMPORTE_NETO'];
+            $control[$clave]['facturas'] += $row['IMPORTE_NETO'];
         }
 
-        foreach ($filas as $clave => $fila) {
-            $anioAnt = $fila['anio'] - 1;
-            $totalAnt = 0;
-
-            if (isset($histCompleto[$anioAnt][$fila['mes']])) {
-                foreach (Parametros::CANALES as $canal) {
-                    $totalAnt += isset($histCompleto[$anioAnt][$fila['mes']][$canal])
-                        ? $histCompleto[$anioAnt][$fila['mes']][$canal]
-                        : 0;
-                }
-            }
-
-            $filas[$clave]['total_anio_anterior'] = $totalAnt;
-            $filas[$clave]['variacion'] = ($totalAnt > 0)
-                ? (($fila['total'] / $totalAnt) - 1)
-                : null;
-        }
-
-        ksort($filas);
-
-        // Bloque de control de remitos, separado: no entra en la proyeccion
-        $filasRemitos = [];
-
-        foreach ($remitos as $row) {
+        foreach ($this->getRemitosControl($anioDesde) as $row) {
             $clave = sprintf('%04d-%02d', $row['ANIO'], $row['MES']);
 
-            if (!isset($filasRemitos[$clave])) {
-                $filasRemitos[$clave] = $this->filaAnalisisVacia($row['ANIO'], $row['MES'], $indices);
+            if (!isset($control[$clave])) {
+                $control[$clave] = $this->filaControlVacia($row['ANIO'], $row['MES']);
             }
 
-            $filasRemitos[$clave]['canales'][$row['CANAL']] = $row['IMPORTE_NETO'];
-            $filasRemitos[$clave]['total'] += $row['IMPORTE_NETO'];
+            $control[$clave]['remitos'] += $row['IMPORTE_NETO'];
         }
 
-        ksort($filasRemitos);
+        ksort($control);
+
+        $totalesControl = ['facturas' => 0, 'remitos' => 0, 'total' => 0];
+
+        foreach ($control as $clave => $fila) {
+            $control[$clave]['total'] = $fila['facturas'] + $fila['remitos'];
+            $totalesControl['facturas'] += $fila['facturas'];
+            $totalesControl['remitos'] += $fila['remitos'];
+            $totalesControl['total'] += $control[$clave]['total'];
+        }
 
         return [
-            'canales' => Parametros::CANALES,
             'anio_desde' => $anioDesde,
-            'ventas' => array_values($filas),
-            'remitos' => array_values($filasRemitos)
+            'horizonte_meses' => $horizonteMeses,
+            'alicuota_iva' => $alicuotaIva,
+            'proyeccion' => $filas,
+            'proyeccion_totales' => $totales,
+            'facturacion' => array_values($control),
+            'facturacion_totales' => $totalesControl
         ];
     }
 
     /**
-     * Arma una fila vacia del analisis.
-     *
-     * El indice que se muestra en la fila NO es el del mes historico sino el del
-     * MISMO MES DEL ANIO SIGUIENTE, que es el que esa fila proyecta:
-     *     VentaProyectada(mes M, anio A+1) = VentaReal(mes M, anio A) * (1 + indice)
-     * Por eso se devuelve tambien el anio destino, para que el front sepa que
-     * clave (anio, mes) esta editando.
-     *
-     * @param int $anio Anio de la fila historica
+     * Arma una fila vacia del bloque de control de facturacion
+     * @param int $anio Anio de la fila
      * @param int $mes Mes de la fila
-     * @param array $indices Mapa 'Y-m' => indice
      * @return array Fila inicializada
      */
-    private function filaAnalisisVacia($anio, $mes, $indices) {
-        $clave = sprintf('%04d-%02d', $anio, $mes);
-        $anioDestino = $anio + 1;
-        $claveDestino = sprintf('%04d-%02d', $anioDestino, $mes);
-        $canales = [];
-
-        foreach (Parametros::CANALES as $canal) {
-            $canales[$canal] = 0;
-        }
-
+    private function filaControlVacia($anio, $mes) {
         return [
-            'clave' => $clave,
+            'clave' => sprintf('%04d-%02d', $anio, $mes),
             'anio' => $anio,
             'mes' => $mes,
-            'label' => self::$mesesAbrev[$mes] . ' ' . substr((string)$anio, 2),
-            'canales' => $canales,
-            'total' => 0,
-            'total_anio_anterior' => 0,
-            'variacion' => null,
-            'anio_indice' => $anioDestino,
-            'label_indice' => self::$mesesAbrev[$mes] . ' ' . substr((string)$anioDestino, 2),
-            'indice' => isset($indices[$claveDestino]) ? $indices[$claveDestino] : null
+            'label' => self::$mesesAbrev[$mes] . '-' . substr((string)$anio, 2),
+            'facturas' => 0,
+            'remitos' => 0,
+            'total' => 0
         ];
     }
 

@@ -29,11 +29,11 @@
             <div class="card mb-4">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <div>
-                        <h5 class="mb-0">Venta Neta Histórica por Mes y Canal</h5>
+                        <h5 class="mb-0">Proyección de Venta por Mes</h5>
                         <small class="text-muted">
-                            Importe neto sin IVA, sólo facturas
+                            Mes actual + 11. La base es la venta neta real del mismo mes del año anterior
                             <i class="fas fa-info-circle ms-1"
-                               title="Click en el índice de variación para editarlo. El índice proyecta el mismo mes del año siguiente."></i>
+                               title="Venta Proyectada = Venta del Año Anterior × (1 + Índice) × (1 + IVA). Click en el índice para editarlo."></i>
                         </small>
                     </div>
                     <div class="d-flex gap-2">
@@ -73,27 +73,32 @@
                 </div>
             </div>
 
-            <!-- Bloque de control: remitos. NO entra en la proyección. -->
+            <!-- Bloque de control de facturación. NO entra en la proyección. -->
             <div class="card mb-4 bloque-control">
                 <div class="card-header">
                     <h5 class="mb-0">
                         <i class="fas fa-clipboard-check me-1"></i>
-                        Control de Remitos
+                        Control de Facturación
                     </h5>
                     <small class="text-muted">
-                        Total de remitos por mes y canal. <strong>No entra en la proyección</strong>:
+                        Facturas y remitos por mes. <strong>No entra en la proyección</strong>:
                         existe únicamente para contrastar el total contra el tablero.
                     </small>
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive tabla-temporal">
-                        <table id="tablaRemitos" class="table table-hover mb-0">
+                        <table id="tablaFacturacion" class="table table-hover mb-0">
                             <thead>
-                                <tr id="remitosHeader"></tr>
+                                <tr>
+                                    <th class="col-canal">Mes-Año</th>
+                                    <th class="text-end">Facturas</th>
+                                    <th class="text-end">Remitos</th>
+                                    <th class="text-end">Total</th>
+                                </tr>
                             </thead>
-                            <tbody id="remitosBody"></tbody>
+                            <tbody id="facturacionBody"></tbody>
                             <tfoot class="table-light">
-                                <tr id="remitosTotals"></tr>
+                                <tr id="facturacionTotals"></tr>
                             </tfoot>
                         </table>
                     </div>
