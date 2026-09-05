@@ -55,7 +55,7 @@ class RemitoEquis {
 
     }
 
-
+    
     public function traerDetalle($codClient){
 
         $cid = $this->conn->conectar('central');

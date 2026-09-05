@@ -218,7 +218,9 @@
     };
 
     function getFileName(settings) {
-        return ( settings.filename ? settings.filename : "table2excel" );
+        var name = settings.filename ? settings.filename : "table2excel";
+        var ext  = settings.fileext  ? settings.fileext  : ".xls";
+        return name.indexOf(".") !== -1 ? name : name + ext;
     }
 
     // Removes all img tags

@@ -101,6 +101,17 @@ class Conexion{
 
             $cid = sqlsrv_connect($serverDB[0], $params);
 
+            if ($cid === false) {
+                $errors = sqlsrv_errors();
+                $errorMsg = "Error al conectar a la base de datos [$nameServer] en el servidor " . $serverDB[0] . ". Detalles: ";
+                if ($errors) {
+                    foreach ($errors as $err) {
+                        $errorMsg .= "SQLSTATE: ".$err['SQLSTATE'].", Código: ".$err['code'].", Mensaje: ".$err['message'].". ";
+                    }
+                }
+                die($errorMsg);
+            }
+
             return $cid;
             
         } catch (PDOException $e) {

@@ -9,6 +9,7 @@ class DotEnv
      * @var string
      */
     protected $path;
+    protected $values = [];
 
 
     public function __construct(string $path)
@@ -38,6 +39,8 @@ class DotEnv
             $name = trim($name);
             $value = trim($value);
 
+            $this->values[$name] = $value;
+
             if (!array_key_exists($name, $_SERVER) && !array_key_exists($name, $_ENV)) {
                 putenv(sprintf('%s=%s', $name, $value));
                 $_ENV[$name] = $value;
@@ -49,23 +52,40 @@ class DotEnv
     public function listVars(){
         $this->load();
 
+        $getVal = function($key) {
+            if (isset($this->values[$key])) {
+                return $this->values[$key];
+            }
+            $val = getenv($key);
+            if ($val !== false) {
+                return $val;
+            }
+            if (isset($_ENV[$key])) {
+                return $_ENV[$key];
+            }
+            if (isset($_SERVER[$key])) {
+                return $_SERVER[$key];
+            }
+            return '';
+        };
+
         $vars = array(
 
-            'HOST_CENTRAL' => getenv('HOST_CENTRAL'),
-            'HOST_LOCALES' => getenv('HOST_LOCALES'),
-            'HOST_APPS' => getenv('HOST_APPS'),
-            'DATABASE_CENTRAL' => getenv('DATABASE_CENTRAL'),
-            'DATABASE_LOCALES' => getenv('DATABASE_LOCALES'),
-            'DATABASE_TANGOBIS' => getenv('DATABASE_TANGOBIS'),
-            'DATABASE_UY' => getenv('DATABASE_UY'),
-            'DATABASE_SUC_UY' => getenv('DATABASE_SUC_UY'),
-            'DATABASE_APPS' => getenv('DATABASE_APPS'),
-            'USER' => getenv('USER'),
-            'PASS' => getenv('PASS'),
-            'PASS_LOCALES' => getenv('PASS_LOCALES'),
-            'CHARACTER' => getenv('CHARACTER'),
+            'HOST_CENTRAL' => $getVal('HOST_CENTRAL'),
+            'HOST_LOCALES' => $getVal('HOST_LOCALES'),
+            'HOST_APPS' => $getVal('HOST_APPS'),
+            'DATABASE_CENTRAL' => $getVal('DATABASE_CENTRAL'),
+            'DATABASE_LOCALES' => $getVal('DATABASE_LOCALES'),
+            'DATABASE_TANGOBIS' => $getVal('DATABASE_TANGOBIS'),
+            'DATABASE_UY' => $getVal('DATABASE_UY'),
+            'DATABASE_SUC_UY' => $getVal('DATABASE_SUC_UY'),
+            'DATABASE_APPS' => $getVal('DATABASE_APPS'),
+            'USER' => $getVal('USER'),
+            'PASS' => $getVal('PASS'),
+            'PASS_LOCALES' => $getVal('PASS_LOCALES'),
+            'CHARACTER' => $getVal('CHARACTER'),
 
-            'ENV' => getenv('ENV'),
+            'ENV' => $getVal('ENV'),
 
         );
 

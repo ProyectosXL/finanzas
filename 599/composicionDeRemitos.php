@@ -180,7 +180,7 @@
                                     <th class="th-cobrado">
                                         <i class="bi bi-check-circle me-1"></i> COBRADO
                                     </th>
-                                    <th class="th-accion"></th>
+                                    <th class="th-accion noExl"></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -192,9 +192,9 @@
                                             echo "<td class='col-cobrado'>".$b['totalCobrado']."</td>";
                                             if($b['totalDeuda'] > 0){
 
-                                                echo "<td style='text-align:center'><button class='btn-edit' onclick='verDetalle(this)'><i class='bi bi-pencil-square'></i> Ver</button></td>";
+                                                echo "<td class='noExl' style='text-align:center'><button class='btn-edit' onclick='verDetalle(this)'><i class='bi bi-pencil-square'></i> Ver</button></td>";
                                             }else{
-                                                echo "<td style='text-align:center'></td>";
+                                                echo "<td class='noExl' style='text-align:center'></td>";
 
                                             }
                                             echo "</tr>";

@@ -51,12 +51,10 @@ $("#btnExport").click(function() {
         this.setAttribute('value',$(this).val());
     });
 
-    $("table").table2excel({
-
-        // exclude CSS class
+    $('#myTable').table2excel({
         exclude: ".noExl",
         name: "Worksheet Name",
-        filename: "Remitos", //do not include extension
-        fileext: ".xls", // file extension
+        filename: "Remitos.xls",
+        fileext: ".xls",
     });
 });
