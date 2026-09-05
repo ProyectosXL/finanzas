@@ -514,10 +514,7 @@ class Ventas {
      * @return array Grilla resuelta lista para el front
      */
     public function proyectarVentas() {
-        $motor = $this->calcular(false);
-        unset($motor['cobranza']);
-
-        return $motor;
+        return $this->calcular(false);
     }
 
     /**
