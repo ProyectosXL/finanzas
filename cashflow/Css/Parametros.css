@@ -1,0 +1,145 @@
+/* Parámetros CSS */
+/* Sigue el estilo del sistema. Pensado para crecer con secciones de otros módulos. */
+
+.tab-parametros {
+    /* El padding ya viene del content-area */
+}
+
+/* ========================================
+   LOADING SPINNER
+   ======================================== */
+
+.tab-parametros .loading-spinner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+}
+
+.tab-parametros .spinner {
+    border: 3px solid var(--border-light, #eef0f5);
+    border-top: 3px solid var(--primary-color, #3366ff);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.tab-parametros .loading-spinner p {
+    margin-top: 15px;
+    color: var(--text-muted, #8c93a8);
+    font-size: 13px;
+}
+
+/* ========================================
+   TARJETA DE PARÁMETRO
+   ======================================== */
+
+.param-card {
+    border: 1px solid var(--border-color, #e2e5ed);
+    border-radius: 8px;
+    padding: 14px 16px;
+    background: var(--bg-white, #ffffff);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
+}
+
+.param-card.param-guardado {
+    border-color: var(--success-color, #28a745);
+    box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.1);
+    transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.param-clave {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary, #1a1d29);
+}
+
+.param-descripcion {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+    line-height: 1.4;
+    min-height: 30px;
+}
+
+.param-input {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.param-hint {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+    font-style: italic;
+}
+
+/* ========================================
+   MIX DE COBRO
+   ======================================== */
+
+.tab-parametros .table thead th {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 10px 16px;
+    white-space: nowrap;
+}
+
+.mix-input {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+/* Fila de subtotal por canal */
+.fila-suma-canal td {
+    background-color: #f8f9fc;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+.fila-suma-canal.suma-invalida td {
+    background-color: rgba(220, 53, 69, 0.08);
+    color: var(--danger-color, #dc3545);
+}
+
+.fila-suma-canal.suma-valida td {
+    color: var(--success-color, #28a745);
+}
+
+/* Separador visual entre canales */
+.mix-canal-inicio td {
+    border-top: 2px solid var(--border-color, #e2e5ed);
+}
+
+/* ========================================
+   INDICADOR DE SUMA
+   ======================================== */
+
+.suma-participacion {
+    font-size: 14px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    padding: 6px 12px;
+    border-radius: 6px;
+    white-space: nowrap;
+}
+
+.suma-participacion.suma-ok {
+    background-color: rgba(40, 167, 69, 0.1);
+    color: var(--success-color, #28a745);
+}
+
+.suma-participacion.suma-error {
+    background-color: rgba(220, 53, 69, 0.1);
+    color: var(--danger-color, #dc3545);
+}

@@ -84,6 +84,7 @@ function updateHeader(tabName) {
     const titles = {
         'resumen': 'Resumen',
         'dashboard': 'Dashboard',
+        'parametros': 'Parámetros',
         'ventas': 'Ventas',
         'saldos': 'Saldos',
         'echeqs': 'Echeqs',

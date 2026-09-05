@@ -1284,14 +1284,23 @@ class Ventas {
     }
 
     /**
-     * Arma una fila vacia del analisis
-     * @param int $anio Anio de la fila
+     * Arma una fila vacia del analisis.
+     *
+     * El indice que se muestra en la fila NO es el del mes historico sino el del
+     * MISMO MES DEL ANIO SIGUIENTE, que es el que esa fila proyecta:
+     *     VentaProyectada(mes M, anio A+1) = VentaReal(mes M, anio A) * (1 + indice)
+     * Por eso se devuelve tambien el anio destino, para que el front sepa que
+     * clave (anio, mes) esta editando.
+     *
+     * @param int $anio Anio de la fila historica
      * @param int $mes Mes de la fila
      * @param array $indices Mapa 'Y-m' => indice
      * @return array Fila inicializada
      */
     private function filaAnalisisVacia($anio, $mes, $indices) {
         $clave = sprintf('%04d-%02d', $anio, $mes);
+        $anioDestino = $anio + 1;
+        $claveDestino = sprintf('%04d-%02d', $anioDestino, $mes);
         $canales = [];
 
         foreach (Parametros::CANALES as $canal) {
@@ -1307,7 +1316,9 @@ class Ventas {
             'total' => 0,
             'total_anio_anterior' => 0,
             'variacion' => null,
-            'indice' => isset($indices[$clave]) ? $indices[$clave] : null
+            'anio_indice' => $anioDestino,
+            'label_indice' => self::$mesesAbrev[$mes] . ' ' . substr((string)$anioDestino, 2),
+            'indice' => isset($indices[$claveDestino]) ? $indices[$claveDestino] : null
         ];
     }
 
