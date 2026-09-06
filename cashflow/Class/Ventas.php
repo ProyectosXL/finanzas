@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/Parametros.php';
+require_once __DIR__ . '/Horizonte.php';
 
 /**
  * Ventas
@@ -47,11 +48,8 @@ require_once __DIR__ . '/Parametros.php';
  */
 class Ventas {
 
-    /** Abreviaturas de mes para los rotulos de columna */
-    private static $mesesAbrev = [
-        1 => 'Ene', 2 => 'Feb', 3 => 'Mar', 4 => 'Abr',  5 => 'May',  6 => 'Jun',
-        7 => 'Jul', 8 => 'Ago', 9 => 'Sep', 10 => 'Oct', 11 => 'Nov', 12 => 'Dic'
-    ];
+    /* El eje temporal y los rotulos de mes viven en Horizonte, que es el mismo
+       eje que consolida el Cashflow: ver Horizonte::labelMes(). */
 
     /** Avisos no fatales acumulados durante el calculo (se devuelven en el JSON) */
     private $warnings = [];
@@ -558,36 +556,19 @@ class Ventas {
         }
 
         /* ---- 2. Ejes temporales ------------------------------------------ */
-        $hoy = new DateTime('today');
+        // El eje lo arma Horizonte, que es exactamente el mismo eje sobre el
+        // que consolida el Cashflow. Tener dos implementaciones las haria
+        // desincronizarse. Ademas resuelve el dia de referencia UNA sola vez
+        // para las dos ramas del eje.
+        $horizonte = new Horizonte($horizonteDias, $horizonteMeses, $feriadosMMDD);
 
-        // Tramo diario: hoy .. hoy + horizonteDias - 1
-        $dias = [];
-        $diasSet = [];
-        $cursor = clone $hoy;
+        $hoy     = new DateTime($horizonte->hoy());
+        $dias    = $horizonte->dias();
+        $diasSet = $horizonte->diasSet();
+        $meses   = $horizonte->meses();
 
-        for ($i = 0; $i < $horizonteDias; $i++) {
-            $fecha = $cursor->format('Y-m-d');
-            $esFeriado = in_array($cursor->format('m-d'), $feriadosMMDD);
-
-            $dias[] = [
-                'fecha' => $fecha,
-                'label' => intval($cursor->format('j')) . '/' . intval($cursor->format('n')),
-                'mes_clave' => $cursor->format('Y-m'),
-                'feriado_comercio' => $esFeriado
-            ];
-
-            $diasSet[$fecha] = true;
-            $cursor->modify('+1 day');
-        }
-
-        // Tramo mensual: mes actual + los siguientes (horizonteMeses - 1)
-        $meses = $this->ejeMeses($horizonteMeses);
-
-        // Ventana de generacion de venta: desde hoy hasta el fin del ultimo mes
-        $ultimoMes = $meses[count($meses) - 1];
-        $ventanaFin = (new DateTime($ultimoMes['clave'] . '-01'))
-            ->modify('last day of this month')
-            ->format('Y-m-d');
+        // Ventana de generacion de venta: desde hoy hasta el fin del eje
+        $ventanaFin = $horizonte->fin();
 
         /* ---- 3. Historico y ediciones ------------------------------------- */
         $hist = [];
@@ -802,34 +783,6 @@ class Ventas {
     }
 
     /**
-     * Eje de meses del horizonte: mes ACTUAL + los siguientes (horizonte - 1).
-     * Con horizonte 12 son el mes actual mas 11.
-     *
-     * @param int $horizonteMeses Cantidad de meses del horizonte
-     * @return array Lista de meses con clave, anio, mes y label
-     */
-    private function ejeMeses($horizonteMeses) {
-        $hoy = new DateTime('today');
-        $meses = [];
-
-        for ($i = 0; $i < $horizonteMeses; $i++) {
-            $ref = new DateTime($hoy->format('Y-m-01'));
-            $ref->modify("+$i month");
-
-            $mes = intval($ref->format('n'));
-
-            $meses[] = [
-                'clave' => $ref->format('Y-m'),
-                'anio' => intval($ref->format('Y')),
-                'mes' => $mes,
-                'label' => self::$mesesAbrev[$mes] . '-' . $ref->format('y')
-            ];
-        }
-
-        return $meses;
-    }
-
-    /**
      * Base mensual de la proyeccion, sin apertura por canal:
      *
      *   neto_anio_anterior = venta neta real del MISMO MES del anio anterior
@@ -839,7 +792,7 @@ class Ventas {
      * Es la unica implementacion de la formula: la usan tanto la grilla de
      * Proyeccion como la tabla de Analisis de Ventas.
      *
-     * @param array $meses Eje devuelto por ejeMeses()
+     * @param array $meses Eje devuelto por Horizonte::meses()
      * @param array $hist Historico indexado [anio][mes][canal] => importe
      * @param array $indices Mapa 'Y-m' => indice
      * @param float $alicuotaIva Alicuota de IVA
@@ -866,10 +819,10 @@ class Ventas {
                 'mes' => $m['mes'],
                 'label' => $m['label'],
                 'anio_anterior' => $anioAnt,
-                'label_anio_anterior' => self::$mesesAbrev[$m['mes']] . '-' . substr((string)$anioAnt, 2),
+                'label_anio_anterior' => Horizonte::labelMes($anioAnt, $m['mes']),
                 'neto_anio_anterior' => $totalAnt,
                 'anio_previo' => $anioPrev,
-                'label_anio_previo' => self::$mesesAbrev[$m['mes']] . '-' . substr((string)$anioPrev, 2),
+                'label_anio_previo' => Horizonte::labelMes($anioPrev, $m['mes']),
                 'neto_anio_previo' => $totalPrev,
                 // Variacion interanual entre los dos anios reales: cuanto crecio
                 // el anio base contra el anterior a el.
@@ -1310,7 +1263,9 @@ class Ventas {
         }
 
         /* ---- 1. Proyeccion por mes --------------------------------------- */
-        $meses = $this->ejeMeses($horizonteMeses);
+        // Analisis es solo mensual: se pide el eje con el tramo diario en cero
+        // para no exigir 'horizonte_dias', que esta pantalla no usa.
+        $meses = (new Horizonte(0, $horizonteMeses, $feriadosMMDD))->meses();
         $base = $this->baseMensual($meses, $hist, $indices, $alicuotaIva, $feriadosMMDD);
 
         $filas = [];
@@ -1407,7 +1362,7 @@ class Ventas {
             'clave' => sprintf('%04d-%02d', $anio, $mes),
             'anio' => $anio,
             'mes' => $mes,
-            'label' => self::$mesesAbrev[$mes] . '-' . substr((string)$anio, 2),
+            'label' => Horizonte::labelMes($anio, $mes),
             'facturas' => 0,
             'remitos' => 0,
             'total' => 0
