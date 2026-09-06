@@ -1,80 +1,60 @@
 <?php
 /**
  * CashflowController.php
- * Controlador principal para operaciones del Cashflow
+ * Endpoint del tablero de Cashflow.
+ *
+ * Antes este archivo era una clase base con helpers de conexion y formato que
+ * NADIE requeria ni extendia: codigo muerto. Se reemplaza por un script con
+ * switch($action), que es la forma que tienen todos los controllers de este
+ * modulo (VentasController, ComexController, ParametrosController), y deja el
+ * par Class/Cashflow.php <-> Controller/CashflowController.php alineado con
+ * Ventas y Comex.
+ *
+ * Solo lectura. La administracion de la estructura vive en
+ * CashflowEstructuraController, para que la configuracion y el calculo queden
+ * separados.
  */
 
-require_once __DIR__ . '/../../class/conexion.php';
+error_reporting(E_ALL);
+ini_set('display_errors', 0);   // que un warning de PHP no ensucie el JSON
 
-class CashflowController {
-    
-    private $conexion;
-    
-    public function __construct() {
-        $this->conexion = new Conexion();
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+header('Content-Type: application/json');
+
+try {
+    require_once __DIR__ . '/../Class/Cashflow.php';
+
+    $action = isset($_GET['action']) ? $_GET['action'] : '';
+
+    $cashflow = new Cashflow();
+
+    switch ($action) {
+
+        case 'getTablero':
+            echo json_encode([
+                'success' => true,
+                'data' => $cashflow->proyectar()
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        default:
+            echo json_encode([
+                'success' => false,
+                'message' => 'Acción no válida. Acción recibida: ' . $action
+            ], JSON_UNESCAPED_UNICODE);
     }
-    
-    /**
-     * Obtiene la conexión a la base de datos central
-     * @return resource Conexión SQL Server
-     */
-    protected function getConexionCentral() {
-        return $this->conexion->conectar('central');
-    }
-    
-    /**
-     * Obtiene la conexión a la base de datos de apps
-     * @return resource Conexión SQL Server
-     */
-    protected function getConexionApps() {
-        return $this->conexion->conectar('apps');
-    }
-    
-    /**
-     * Ejecuta una consulta y retorna los resultados como array
-     * @param string $sql Query SQL
-     * @param resource $conn Conexión
-     * @param array $params Parámetros opcionales
-     * @return array Resultados
-     */
-    protected function executeQuery($sql, $conn, $params = []) {
-        $stmt = sqlsrv_query($conn, $sql, $params);
-        
-        if ($stmt === false) {
-            return ['error' => sqlsrv_errors()];
-        }
-        
-        $results = [];
-        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            $results[] = $row;
-        }
-        
-        sqlsrv_free_stmt($stmt);
-        
-        return $results;
-    }
-    
-    /**
-     * Formatea un valor como moneda
-     * @param float $value Valor
-     * @param string $currency Moneda (ARS, USD)
-     * @return string Valor formateado
-     */
-    public static function formatCurrency($value, $currency = 'ARS') {
-        $symbol = ($currency === 'USD') ? 'U$S ' : '$ ';
-        return $symbol . number_format($value, 2, ',', '.');
-    }
-    
-    /**
-     * Formatea una fecha
-     * @param mixed $date Fecha
-     * @param string $format Formato de salida
-     * @return string Fecha formateada
-     */
-    public static function formatDate($date, $format = 'd/m/Y') {
-        if ($date instanceof DateTime) {
-            return $date->format($format);
-        }
-        return date($format, strtotime($date));
-    }
+
+} catch (Exception $e) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Error: ' . $e->getMessage()
+    ], JSON_UNESCAPED_UNICODE);
+} catch (Throwable $e) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Error fatal: ' . $e->getMessage()
+    ], JSON_UNESCAPED_UNICODE);
 }
