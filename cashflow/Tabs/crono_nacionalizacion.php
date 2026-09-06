@@ -1,5 +1,5 @@
 <?php $tabName = 'Crono Nacionalización'; ?>
-<link rel="stylesheet" href="Css/Comex-Crono_nacionalizacion.css">
+<link rel="stylesheet" href="Css/Comex-Crono_nacionalizacion.css?v=<?php echo time(); ?>">
 
 <div class="tab-crono_nacionalizacion">
     
@@ -86,7 +86,7 @@
             </div>
             
             <div class="table-wrapper" id="tableWrapper" style="display: none;">
-                <div class="table-responsive">
+                <div class="table-responsive tabla-temporal">
                     <table id="tablaCronoNacionalizacion" class="table table-hover mb-0">
                         <thead>
                             <tr>

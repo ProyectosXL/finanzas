@@ -38,6 +38,14 @@
             </a>
         </div>
 
+        <!-- Parámetros - Nivel raíz: va absorbiendo los parámetros de todos los módulos -->
+        <div class="menu-item-main">
+            <a href="#" class="menu-link" data-tab="parametros">
+                <i class="fas fa-sliders"></i>
+                <span>Parámetros</span>
+            </a>
+        </div>
+
         <div class="menu-divider"></div>
 
         <!-- Categoría: Ingresos -->

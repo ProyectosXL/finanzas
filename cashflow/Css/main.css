@@ -300,6 +300,97 @@ body {
 }
 
 /* ========================================
+   TABLAS CON EJE TEMPORAL - HEADER FIJO
+   ========================================
+   Compartido por todas las pestañas con columnas de días/meses: Ventas,
+   Crono Nacionalización y Proveedores Exterior. No duplicar por pestaña.
+
+   El problema que resuelve: .table-responsive no tenía altura acotada, así que
+   position: sticky no tenía contra qué pegarse y el thead se perdía al
+   scrollear. Acotando la altura, el sticky pega contra el contenedor.
+
+   Se usa junto a .table-responsive:
+       <div class="table-responsive tabla-temporal">
+   ======================================== */
+
+.tabla-temporal {
+    max-height: calc(100vh - 320px);
+    overflow: auto;
+}
+
+/* El fondo tiene que ser OPACO o se transparenta el contenido al scrollear.
+   Es el mismo --bg-light que ya usa .table thead th, pero explícito: un
+   background heredado o transparente deja ver las filas pasar por debajo. */
+.tabla-temporal .table thead th {
+    position: sticky;
+    z-index: 3;
+    background-color: var(--bg-light);
+    /* border-collapse: collapse hace que los bordes no viajen con la celda
+       sticky, así que el borde se dibuja como sombra interior */
+    box-shadow: inset 0 -1px 0 var(--border-color);
+}
+
+/* Son dos filas de header (la de columnas fijas con rowspan y la de
+   días/meses), así que necesitan top distinto. --thead-row1-height la calcula
+   ajustarStickyHeaders() en main.js midiendo la altura real de la primera fila;
+   el 38px es sólo el valor de arranque. */
+.tabla-temporal .table thead tr:first-child th {
+    top: 0;
+}
+
+.tabla-temporal .table thead tr:nth-child(2) th {
+    top: var(--thead-row1-height, 38px);
+}
+
+/* Primera columna descriptiva fija en horizontal: con 28 columnas de días la
+   tabla scrollea mucho a lo ancho y se pierde de vista a qué fila corresponde
+   cada número. */
+.tabla-temporal .table tbody td:first-child,
+.tabla-temporal .table tfoot td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background-color: var(--bg-white);
+}
+
+.tabla-temporal .table tfoot td:first-child {
+    background-color: #f8f9fa;
+}
+
+/* Intersección de header y columna fija: tiene que quedar por encima de ambos */
+.tabla-temporal .table thead th:first-child {
+    left: 0;
+    z-index: 5;
+}
+
+/* Segunda columna fija (tabla de cobranza: Canal + Medio de Pago) */
+.tabla-temporal .table tbody td.col-medio,
+.tabla-temporal .table tfoot td.col-medio {
+    position: sticky;
+    left: var(--col-fija-1-width, 150px);
+    z-index: 2;
+    background-color: var(--bg-white);
+}
+
+.tabla-temporal .table thead th.col-medio {
+    left: var(--col-fija-1-width, 150px);
+    z-index: 5;
+}
+
+/* El tfoot de totales también queda fijo abajo mientras se scrollea */
+.tabla-temporal .table tfoot td {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    background-color: #f8f9fa;
+}
+
+.tabla-temporal .table tfoot td:first-child,
+.tabla-temporal .table tfoot td.col-medio {
+    z-index: 4;
+}
+
+/* ========================================
    ACTIVITY LIST
    ======================================== */
 

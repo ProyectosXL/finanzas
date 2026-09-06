@@ -1,5 +1,5 @@
 <?php $tabName = 'Proveedores Exterior'; ?>
-<link rel="stylesheet" href="Css/Comex-Proveedores_exterior.css">
+<link rel="stylesheet" href="Css/Comex-Proveedores_exterior.css?v=<?php echo time(); ?>">
 
 <div class="tab-proveedores_exterior">
     
@@ -82,7 +82,7 @@
             </div>
             
             <div class="table-wrapper" id="tableWrapper" style="display: none;">
-                <div class="table-responsive">
+                <div class="table-responsive tabla-temporal">
                     <table id="tablaProveedoresExterior" class="table table-hover mb-0">
                         <thead>
                             <tr>

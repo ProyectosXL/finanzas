@@ -17,6 +17,7 @@ $tab = isset($_POST['tab']) ? $_POST['tab'] : '';
 $validTabs = [
     'resumen',
     'dashboard',
+    'parametros',
     'ventas',
     'saldos',
     'echeqs',

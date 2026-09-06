@@ -1,5 +1,5 @@
 <?php $tabName = 'Cobranzas FR'; ?>
-<link rel="stylesheet" href="Css/Ingresos-Cobranzas_fr.css">
+<link rel="stylesheet" href="Css/Ingresos-Cobranzas_fr.css?v=<?php echo time(); ?>">
 
 <div class="tab-cobranzas_fr">
     

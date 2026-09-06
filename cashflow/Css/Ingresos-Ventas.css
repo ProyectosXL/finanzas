@@ -1,0 +1,436 @@
+/* Ingresos - Ventas CSS */
+/* Sigue exactamente el estilo del sistema (ver Comex-Crono_nacionalizacion.css) */
+
+.tab-ventas {
+    /* El padding ya viene del content-area */
+}
+
+/* ========================================
+   SUB-PESTAÑAS
+   ======================================== */
+
+.tab-ventas .nav-tabs {
+    border-bottom: 1px solid var(--border-color, #e2e5ed);
+}
+
+.tab-ventas .nav-tabs .nav-link {
+    color: var(--text-secondary, #5a6178);
+    font-size: 13px;
+    font-weight: 600;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 18px;
+}
+
+.tab-ventas .nav-tabs .nav-link:hover {
+    color: var(--primary-color, #3366ff);
+    border-bottom-color: var(--border-color, #e2e5ed);
+}
+
+.tab-ventas .nav-tabs .nav-link.active {
+    color: var(--primary-color, #3366ff);
+    background: transparent;
+    border-bottom-color: var(--primary-color, #3366ff);
+}
+
+/* ========================================
+   LOADING SPINNER
+   ======================================== */
+
+.tab-ventas .loading-spinner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+}
+
+.tab-ventas .spinner {
+    border: 3px solid var(--border-light, #eef0f5);
+    border-top: 3px solid var(--primary-color, #3366ff);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.tab-ventas .loading-spinner p {
+    margin-top: 15px;
+    color: var(--text-muted, #8c93a8);
+    font-size: 13px;
+}
+
+/* ========================================
+   TABLAS
+   ======================================== */
+
+.tab-ventas .table thead th {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 10px 8px;
+    white-space: nowrap;
+}
+
+.tab-ventas .table-group-divider {
+    border-top: 2px solid var(--border-color, #e2e5ed);
+}
+
+/* Sub-rótulo del encabezado: aclara la base de cada columna de importe.
+   Las históricas son netas y la proyectada lleva IVA; sin esto la diferencia
+   entre una y otra no se entiende. */
+.tab-ventas .th-sub {
+    display: block;
+    margin-top: 3px;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: 0.2px;
+    text-transform: none;
+    color: var(--text-muted, #8c93a8);
+}
+
+.tab-ventas .th-sub-iva {
+    color: var(--primary-color, #3366ff);
+    font-weight: 700;
+}
+
+/* Columnas descriptivas */
+.tab-ventas .col-canal {
+    min-width: 150px;
+    white-space: nowrap;
+}
+
+.tab-ventas .col-medio {
+    min-width: 140px;
+    white-space: nowrap;
+}
+
+/* Columnas de días y meses */
+.tab-ventas .day-column,
+.tab-ventas .month-column {
+    min-width: 92px;
+    text-align: center;
+    font-size: 10px;
+}
+
+/* Currency */
+.tab-ventas .currency {
+    font-variant-numeric: tabular-nums;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    text-align: right;
+    white-space: nowrap;
+}
+
+/* Celdas con valor */
+.tab-ventas .cell-with-value {
+    background-color: #e3f2fd;
+    font-weight: 600;
+    color: var(--primary-color, #3366ff);
+}
+
+/* Feriado de comercio: sin venta estimada */
+.tab-ventas .col-feriado {
+    background-color: #f3f0ff;
+    color: #6f42c1;
+    text-align: center;
+}
+
+.tab-ventas thead .col-feriado {
+    background-color: #ede7ff;
+    color: #6f42c1;
+}
+
+/* Subtotales por canal */
+.tab-ventas .fila-subtotal td {
+    background-color: #f8f9fc;
+    font-weight: 600;
+    color: var(--text-secondary, #5a6178);
+}
+
+/* Totales */
+.tab-ventas tfoot tr,
+.tab-ventas .fila-total td {
+    background-color: #f8f9fa;
+    font-weight: 700;
+}
+
+.tab-ventas tfoot tr:first-child td {
+    border-top: 2px solid var(--primary-color, #3366ff);
+}
+
+.tab-ventas tfoot td {
+    padding: 12px 8px;
+    font-size: 13px;
+}
+
+.tab-ventas .total-label {
+    text-align: left;
+    color: var(--text-primary, #1a1d29);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tab-ventas tfoot .cell-with-value {
+    background-color: #cfe2ff;
+    color: #084298;
+}
+
+/* Fila de neteo de prechequeado: cableada en cero */
+.tab-ventas .fila-neteo td {
+    background-color: #fffaf0;
+    font-weight: 500;
+    font-style: italic;
+    color: var(--text-muted, #8c93a8);
+}
+
+/* Cobranza neta */
+.tab-ventas .fila-neta td {
+    background-color: #e8f5e9;
+    border-top: 2px solid var(--success-color, #28a745);
+}
+
+.tab-ventas .fila-neta .cell-with-value {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+/* ========================================
+   BLOQUE DE CONTROL DE REMITOS
+   ======================================== */
+
+.bloque-control {
+    border-left: 4px solid var(--warning-color, #f0ad4e);
+}
+
+.bloque-control .card-header {
+    background-color: #fffaf0;
+}
+
+/* ========================================
+   PARTICIPACIÓN POR CANAL
+   ======================================== */
+
+.partic-card {
+    border: 1px solid var(--border-color, #e2e5ed);
+    border-radius: 8px;
+    padding: 14px 16px;
+    background: var(--bg-white, #ffffff);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    height: 100%;
+}
+
+.partic-card.partic-editada {
+    background-color: #fff8e1;
+    border-left: 3px solid #ff9800;
+}
+
+.partic-canal {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary, #1a1d29);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.partic-calc {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+}
+
+.partic-label {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.partic-valor {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-secondary, #5a6178);
+    font-variant-numeric: tabular-nums;
+}
+
+.partic-edit {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.partic-input {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+/* Indicador en vivo de la suma */
+.suma-participacion {
+    font-size: 14px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    padding: 6px 12px;
+    border-radius: 6px;
+    white-space: nowrap;
+}
+
+.suma-participacion.suma-ok {
+    background-color: rgba(40, 167, 69, 0.1);
+    color: var(--success-color, #28a745);
+}
+
+.suma-participacion.suma-error {
+    background-color: rgba(220, 53, 69, 0.1);
+    color: var(--danger-color, #dc3545);
+}
+
+/* ========================================
+   ÍNDICE DE VARIACIÓN EDITABLE
+   ======================================== */
+
+.indice-cell {
+    position: relative;
+    cursor: pointer;
+    text-align: center;
+    padding: 8px !important;
+}
+
+.indice-display {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.indice-value {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+.indice-icon {
+    color: var(--text-muted, #8c93a8);
+    font-size: 11px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.indice-cell:hover .indice-icon {
+    opacity: 1;
+}
+
+.indice-cell.fecha-editada {
+    background-color: #fff8e1;
+    border-left: 3px solid #ff9800;
+}
+
+.indice-input {
+    width: 100%;
+    padding: 4px 8px;
+    border: 1px solid var(--primary-color, #3366ff);
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: var(--font-family);
+    text-align: right;
+}
+
+.indice-input:focus {
+    outline: none;
+    border-color: var(--primary-color, #3366ff);
+    box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1);
+}
+
+.badge-fecha-editada {
+    display: inline-block;
+    padding: 3px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    background-color: #ff9800;
+    color: white;
+    border-radius: 4px;
+}
+
+/* Tooltip (mismo patrón que Comex) */
+.tab-ventas .fecha-tooltip {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    pointer-events: none;
+    z-index: 1000;
+    box-shadow: 0 8px 16px rgba(102, 126, 234, 0.4);
+}
+
+.tab-ventas .fecha-tooltip::before {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: #764ba2;
+}
+
+.tab-ventas .fecha-tooltip-label {
+    display: block;
+    font-size: 10px;
+    opacity: 0.9;
+    margin-bottom: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tab-ventas .fecha-tooltip-value {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.indice-cell:hover .fecha-tooltip {
+    opacity: 1;
+    visibility: visible;
+    bottom: calc(100% + 8px);
+}
+
+/* ========================================
+   VARIACIÓN INTERANUAL
+   ======================================== */
+
+.badge-variacion {
+    display: inline-block;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 4px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.variacion-positiva {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.variacion-negativa {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}

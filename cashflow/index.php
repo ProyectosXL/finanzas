@@ -22,8 +22,8 @@ session_start();
     <link href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css" rel="stylesheet">
     
     <!-- Custom CSS -->
-    <link href="Css/sidebar.css" rel="stylesheet">
-    <link href="Css/main.css" rel="stylesheet">
+    <link href="Css/sidebar.css?v=<?php echo time(); ?>" rel="stylesheet">
+    <link href="Css/main.css?v=<?php echo time(); ?>" rel="stylesheet">
 </head>
 <body>
 
