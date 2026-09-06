@@ -517,19 +517,23 @@ class Ventas {
 
     /**
      * Grilla de venta proyectada: 28 dias + 12 meses.
+     *
+     * @param Horizonte|null $horizonte Eje a usar; null lo arma de parametros
      * @return array Grilla resuelta lista para el front
      */
-    public function proyectarVentas() {
-        return $this->calcular(false);
+    public function proyectarVentas($horizonte = null) {
+        return $this->calcular(false, $horizonte);
     }
 
     /**
      * Grilla de cobranza proyectada: aplica mix, plazos y corrimiento a dia
      * bancario habil sobre la venta diaria.
+     *
+     * @param Horizonte|null $horizonte Eje a usar; null lo arma de parametros
      * @return array Grilla resuelta lista para el front
      */
-    public function proyectarCobranzas() {
-        return $this->calcular(true);
+    public function proyectarCobranzas($horizonte = null) {
+        return $this->calcular(true, $horizonte);
     }
 
     /**
@@ -537,9 +541,13 @@ class Ventas {
      * grilla ya resuelta.
      *
      * @param bool $conCobranza Si true tambien resuelve la cobranza
+     * @param Horizonte|null $horizonte Eje a usar. La pestana Ventas no lo pasa
+     *        y se arma de parametros; el Cashflow SI lo pasa, para que la serie
+     *        de Ventas caiga exactamente en las mismas columnas sobre las que
+     *        el resto del tablero consolida.
      * @return array Estructura completa de la proyeccion
      */
-    private function calcular($conCobranza) {
+    private function calcular($conCobranza, $horizonte = null) {
         $this->warnings = [];
 
         /* ---- 1. Parametros ------------------------------------------------ */
@@ -551,16 +559,25 @@ class Ventas {
         $feriadosMMDD   = $this->parametros->getFeriadosComercio($map);
         $respaldo       = $this->parametros->getParticipacionRespaldo($map);
 
-        if ($horizonteDias < 1 || $horizonteMeses < 1) {
-            throw new Exception('El horizonte de proyeccion debe ser mayor a cero');
-        }
-
         /* ---- 2. Ejes temporales ------------------------------------------ */
         // El eje lo arma Horizonte, que es exactamente el mismo eje sobre el
         // que consolida el Cashflow. Tener dos implementaciones las haria
         // desincronizarse. Ademas resuelve el dia de referencia UNA sola vez
         // para las dos ramas del eje.
-        $horizonte = new Horizonte($horizonteDias, $horizonteMeses, $feriadosMMDD);
+        if ($horizonte instanceof Horizonte) {
+            // Eje inyectado por el Cashflow: manda el suyo, para que la serie
+            // caiga en las mismas columnas que el resto del tablero. Sin esto,
+            // un pedido que cruzara la medianoche armaria dos ejes corridos un
+            // dia entre si.
+            $horizonteDias  = $horizonte->cantidadDias();
+            $horizonteMeses = $horizonte->cantidadMeses();
+        } else {
+            if ($horizonteDias < 1 || $horizonteMeses < 1) {
+                throw new Exception('El horizonte de proyeccion debe ser mayor a cero');
+            }
+
+            $horizonte = new Horizonte($horizonteDias, $horizonteMeses, $feriadosMMDD);
+        }
 
         $hoy     = new DateTime($horizonte->hoy());
         $dias    = $horizonte->dias();
