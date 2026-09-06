@@ -17,6 +17,11 @@
     var datosProyeccion = null;
     var vistaActual = 'semanas'; // 'semanas' o 'meses'
 
+    // Etiqueta en reposo del botón de guardar participación. El botón vive en el
+    // card-header, FUERA del bloque que se regenera al recalcular, así que su
+    // estado no se repone solo: hay que reponerlo explícitamente.
+    var HTML_BTN_GUARDAR_PARTIC = '<i class="fas fa-floppy-disk me-1"></i> Guardar';
+
     function inicializar() {
         console.log('Inicializando Ingresos - Ventas');
 
@@ -361,6 +366,9 @@
         })
         .catch(function(error) {
             mostrar('loadingProyeccion', false);
+            // Si el recálculo falla, el bloque no se re-renderiza: hay que soltar
+            // el botón acá o queda con el spinner para siempre.
+            resetBotonParticipacion();
             mostrarError('Error al calcular la proyección: ' + error.message);
         });
     }
@@ -633,6 +641,9 @@
 
         document.getElementById('gridParticipacion').innerHTML = html;
 
+        // El botón está fuera de este grid, así que no se repone con el innerHTML
+        resetBotonParticipacion();
+
         mostrar('avisoTramoEstimado', !!datosProyeccion.participacion.tramo28_estimado);
 
         // Validación en vivo de la suma
@@ -696,7 +707,6 @@
 
         var ancla = datosProyeccion.participacion.tramo28_ancla; // 'YYYY-MM'
         var btn = document.getElementById('btnGuardarParticipacion');
-        var textoOriginal = btn.innerHTML;
 
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Guardando...';
@@ -708,14 +718,30 @@
             valores: valores
         })
         .then(function() {
-            // Recalcula venta y cobranza sin recargar la página
+            // El guardado salió bien: se marca con el check y se recalcula venta
+            // y cobranza sin recargar la página. La etiqueta en reposo la repone
+            // generarParticipacion() cuando termina de re-renderizar.
+            btn.innerHTML = '<i class="fas fa-check me-1"></i> Guardado';
             cargarProyeccion();
         })
         .catch(function(error) {
             alert('Error al guardar la participación: ' + error.message);
-            btn.disabled = false;
-            btn.innerHTML = textoOriginal;
+            resetBotonParticipacion();
+            validarParticipacion();
         });
+    }
+
+    /**
+     * Devuelve el botón de guardar participación a su estado de reposo.
+     * Se llama en cada render y también si falla el recálculo, para que nunca
+     * quede colgado mostrando el spinner.
+     */
+    function resetBotonParticipacion() {
+        var btn = document.getElementById('btnGuardarParticipacion');
+
+        if (btn) {
+            btn.innerHTML = HTML_BTN_GUARDAR_PARTIC;
+        }
     }
 
     /* ================================================================
