@@ -138,6 +138,19 @@ Ningún valor de negocio está escrito en el código. Todo sale de `RO_T_CASHFLO
 | `respaldo_mayoristas` | `0.140` | Participación de respaldo |
 | `respaldo_ecommerce` | `0.085` | Participación de respaldo |
 
+### Mix de cobro: alta e inhabilitación
+
+Los medios de pago se administran desde **Parámetros → Mix de Cobro y Plazos**:
+
+- **Agregar medio**: canal, nombre y días de acreditación. Entra **inhabilitado y en 0%**, para no romper el 100% del canal en el momento del alta. Para usarlo hay que activarlo y reacomodar los porcentajes.
+- **Inhabilitar**: el switch de la columna *Activo*. Un medio inhabilitado **no se usa en la proyección y no aparece en la tabla de cobranza**, pero sigue visible en Parámetros para poder reactivarlo. No se borra el dato.
+
+Reglas que valida el sistema (en el front y de nuevo en el servidor):
+
+- Los medios **activos** de cada canal deben sumar 100%. Los inhabilitados no suman, sin importar qué porcentaje tengan guardado.
+- Un canal no puede quedarse **sin ningún medio activo**: su venta no se convertiría en cobranza y el importe desaparecería del cashflow.
+- No se puede repetir el mismo medio de pago dentro de un canal.
+
 Mix de cobro inicial (cada canal suma 100%):
 
 | Canal | Medio de pago | % Mix | Días acreditación |

@@ -114,9 +114,9 @@ try {
                 throw new Exception('Faltan parametros obligatorios');
             }
 
-            // Validacion en el servidor: el mix de cada canal debe sumar 100%.
-            // Se valida sobre el estado resultante, no sobre lo que manda el
-            // cliente sin contrastar.
+            // Validacion en el servidor: los medios ACTIVOS de cada canal deben
+            // sumar 100%. Se valida sobre el estado resultante, no sobre lo que
+            // manda el cliente sin contrastar.
             $actual = $parametros->getMixCobro();
             $porId = [];
 
@@ -131,17 +131,27 @@ try {
             $simulado = [];
 
             foreach ($actual as $row) {
-                if (isset($porId[intval($row['ID'])])) {
-                    $row['PORCENTAJE'] = floatval($porId[intval($row['ID'])]['porcentaje']);
+                $id = intval($row['ID']);
+
+                if (isset($porId[$id])) {
+                    $row['PORCENTAJE'] = floatval($porId[$id]['porcentaje']);
+                    $row['ACTIVO'] = !empty($porId[$id]['activo']) ? 1 : 0;
                 }
 
                 $simulado[] = $row;
             }
 
             foreach (Parametros::validarMix($simulado) as $canal => $check) {
+                if ($check['activos'] === 0) {
+                    throw new Exception(
+                        'El canal ' . $canal . ' quedaria sin ningun medio de pago activo: '
+                        . 'su venta no se convertiria en cobranza.'
+                    );
+                }
+
                 if (!$check['valido']) {
                     throw new Exception(
-                        'El mix del canal ' . $canal . ' debe sumar 100%. Suma resultante: '
+                        'El mix activo del canal ' . $canal . ' debe sumar 100%. Suma resultante: '
                         . number_format($check['suma'] * 100, 4, ',', '.') . '%'
                     );
                 }
@@ -152,6 +162,7 @@ try {
                     $fila['id'],
                     $fila['porcentaje'],
                     $fila['dias_acreditacion'],
+                    !empty($fila['activo']),
                     usuarioActual()
                 );
             }
@@ -159,6 +170,30 @@ try {
             echo json_encode([
                 'success' => true,
                 'message' => 'Mix de cobro guardado correctamente'
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'addMixCobro':
+            $data = bodyJson();
+
+            if (!isset($data['canal']) || !isset($data['medio_pago'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            // Entra inhabilitado y en 0%: activarlo es un paso aparte que exige
+            // reacomodar el canal para que vuelva a sumar 100%.
+            $id = $parametros->addMixCobro(
+                $data['canal'],
+                $data['medio_pago'],
+                isset($data['dias_acreditacion']) ? $data['dias_acreditacion'] : 0,
+                usuarioActual()
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Medio de pago agregado. Queda inhabilitado y en 0%: '
+                           . 'activalo y reacomoda los porcentajes del canal para guardar.',
+                'data' => ['id' => $id]
             ], JSON_UNESCAPED_UNICODE);
             break;
 

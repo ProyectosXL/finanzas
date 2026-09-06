@@ -193,10 +193,11 @@ class Parametros {
      * @param int $id ID de la fila en RO_T_CASHFLOW_VENTAS_MIX
      * @param float $porcentaje Porcentaje del mix (0 a 1)
      * @param int $diasAcreditacion Dias hasta la acreditacion
+     * @param bool $activo Si el medio se usa en la proyeccion
      * @param string|null $usuario Usuario que edita (todavia no hay login)
      * @return bool True si se guardo correctamente
      */
-    public function saveMixCobro($id, $porcentaje, $diasAcreditacion, $usuario = null) {
+    public function saveMixCobro($id, $porcentaje, $diasAcreditacion, $activo = true, $usuario = null) {
         $cid = $this->conn->conectar('central');
 
         if (!$cid) {
@@ -204,10 +205,19 @@ class Parametros {
         }
 
         $sql = "UPDATE RO_T_CASHFLOW_VENTAS_MIX
-                SET PORCENTAJE = ?, DIAS_ACREDITACION = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                SET PORCENTAJE = ?, DIAS_ACREDITACION = ?, ACTIVO = ?,
+                    FECHA_UPDATE = GETDATE(), USUARIO = ?
                 WHERE ID = ?";
 
-        $stmt = sqlsrv_query($cid, $sql, [$porcentaje, $diasAcreditacion, $usuario, $id]);
+        $params = [
+            floatval($porcentaje),
+            intval($diasAcreditacion),
+            $activo ? 1 : 0,
+            $usuario,
+            intval($id)
+        ];
+
+        $stmt = sqlsrv_query($cid, $sql, $params);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al guardar el mix de cobro'));
@@ -219,21 +229,135 @@ class Parametros {
     }
 
     /**
-     * Valida que el mix de cada canal sume 100%
+     * Agrega un medio de pago nuevo al mix de un canal.
+     *
+     * Entra desactivado y en cero: activarlo obliga a reacomodar los
+     * porcentajes del canal para que vuelvan a sumar 100%, y esa validacion
+     * corre al guardar. Asi agregar un medio nunca deja el mix invalido.
+     *
+     * @param string $canal Canal del modelo
+     * @param string $medioPago Nombre del medio de pago
+     * @param int $diasAcreditacion Dias hasta la acreditacion
+     * @param string|null $usuario Usuario que edita (todavia no hay login)
+     * @return int ID de la fila creada
+     */
+    public function addMixCobro($canal, $medioPago, $diasAcreditacion, $usuario = null) {
+        $canal = trim($canal);
+        $medioPago = trim($medioPago);
+
+        if (!in_array($canal, self::CANALES)) {
+            throw new Exception('Canal invalido: ' . $canal);
+        }
+
+        if ($medioPago === '') {
+            throw new Exception('El medio de pago no puede estar vacio');
+        }
+
+        if (mb_strlen($medioPago) > 30) {
+            throw new Exception('El medio de pago no puede superar los 30 caracteres');
+        }
+
+        $dias = intval($diasAcreditacion);
+
+        if ($dias < 0) {
+            throw new Exception('Los dias de acreditacion no pueden ser negativos');
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        // La tabla tiene UNIQUE (CANAL, MEDIO_PAGO): se chequea antes para dar
+        // un mensaje entendible en vez del error del indice.
+        $sqlCheck = "SELECT ID, ACTIVO FROM RO_T_CASHFLOW_VENTAS_MIX
+                     WHERE CANAL = ? AND MEDIO_PAGO = ?";
+        $stmtCheck = sqlsrv_query($cid, $sqlCheck, [$canal, $medioPago]);
+
+        if ($stmtCheck === false) {
+            throw new Exception($this->errorSql('Error al verificar el medio de pago'));
+        }
+
+        $existe = sqlsrv_fetch_array($stmtCheck, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmtCheck);
+
+        if ($existe) {
+            $estado = intval($existe['ACTIVO']) === 1 ? 'activo' : 'inhabilitado';
+            throw new Exception(
+                'El canal ' . $canal . ' ya tiene el medio de pago "' . $medioPago
+                . '" (' . $estado . ')'
+            );
+        }
+
+        $sqlOrden = "SELECT ISNULL(MAX(ORDEN), 0) + 1 AS SIGUIENTE FROM RO_T_CASHFLOW_VENTAS_MIX";
+        $stmtOrden = sqlsrv_query($cid, $sqlOrden);
+
+        if ($stmtOrden === false) {
+            throw new Exception($this->errorSql('Error al calcular el orden'));
+        }
+
+        $filaOrden = sqlsrv_fetch_array($stmtOrden, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmtOrden);
+
+        $orden = intval($filaOrden['SIGUIENTE']);
+
+        $sql = "INSERT INTO RO_T_CASHFLOW_VENTAS_MIX
+                    (CANAL, MEDIO_PAGO, PORCENTAJE, DIAS_ACREDITACION, ACTIVO, ORDEN,
+                     FECHA_UPDATE, USUARIO)
+                OUTPUT INSERTED.ID
+                VALUES (?, ?, 0, ?, 0, ?, GETDATE(), ?)";
+
+        $stmt = sqlsrv_query($cid, $sql, [$canal, $medioPago, $dias, $orden, $usuario]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al agregar el medio de pago'));
+        }
+
+        $nuevo = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        return intval($nuevo['ID']);
+    }
+
+    /**
+     * Valida que el mix de cada canal sume 100%.
+     *
+     * Cuenta UNICAMENTE los medios activos: son los unicos que el motor usa
+     * para convertir venta en cobranza. Un medio inhabilitado no suma, sin
+     * importar que porcentaje tenga guardado.
+     *
+     * Un canal sin ningun medio activo tambien es invalido: su venta no se
+     * convertiria en cobranza y el importe desapareceria del cashflow.
+     *
      * @param array $mix Listado devuelto por getMixCobro()
-     * @return array Mapa CANAL => ['suma' => float, 'valido' => bool]
+     * @return array Mapa CANAL => ['suma', 'valido', 'activos']
      */
     public static function validarMix($mix) {
         $sumas = [];
+        $activos = [];
+
+        // Se parte de los cuatro canales del modelo: un canal que quedo sin
+        // ninguna fila tiene que salir invalido, no ausente del resultado.
+        foreach (self::CANALES as $canal) {
+            $sumas[$canal] = 0;
+            $activos[$canal] = 0;
+        }
 
         foreach ($mix as $row) {
             $canal = $row['CANAL'];
 
             if (!isset($sumas[$canal])) {
                 $sumas[$canal] = 0;
+                $activos[$canal] = 0;
+            }
+
+            if (intval($row['ACTIVO']) !== 1) {
+                continue;
             }
 
             $sumas[$canal] += floatval($row['PORCENTAJE']);
+            $activos[$canal]++;
         }
 
         $resultado = [];
@@ -241,7 +365,8 @@ class Parametros {
         foreach ($sumas as $canal => $suma) {
             $resultado[$canal] = [
                 'suma' => $suma,
-                'valido' => abs($suma - 1) < 0.000001
+                'activos' => $activos[$canal],
+                'valido' => ($activos[$canal] > 0) && (abs($suma - 1) < 0.000001)
             ];
         }
 

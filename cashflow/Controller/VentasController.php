@@ -134,6 +134,7 @@ try {
                 $data['id'],
                 $data['porcentaje'],
                 $data['dias_acreditacion'],
+                isset($data['activo']) ? (bool)$data['activo'] : true,
                 usuarioActual()
             );
 

@@ -121,6 +121,47 @@
     border-top: 2px solid var(--border-color, #e2e5ed);
 }
 
+/* Medio inhabilitado: sigue visible acá para poder reactivarlo, pero no se usa
+   en la proyección ni aparece en la tabla de cobranza. */
+.mix-inactivo td {
+    background-color: #fafbfc;
+    color: var(--text-muted, #8c93a8);
+}
+
+.mix-inactivo td:nth-child(2) {
+    text-decoration: line-through;
+    text-decoration-color: var(--text-muted, #8c93a8);
+}
+
+.mix-inactivo .input-group-text {
+    color: var(--text-muted, #8c93a8);
+}
+
+/* Switch de activo */
+.mix-activo {
+    cursor: pointer;
+}
+
+.form-switch .mix-activo {
+    width: 2.2em;
+    height: 1.1em;
+    margin-left: 0;
+}
+
+/* Formulario de alta de medio de pago */
+#formNuevoMedio {
+    background-color: var(--bg-light, #f8f9fc);
+}
+
+#formNuevoMedio .form-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary, #5a6178);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 4px;
+}
+
 /* ========================================
    INDICADOR DE SUMA
    ======================================== */

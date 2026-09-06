@@ -390,11 +390,12 @@ class Ventas {
      * @param int $id ID de la fila
      * @param float $porcentaje Porcentaje del mix (0 a 1)
      * @param int $diasAcreditacion Dias hasta la acreditacion
+     * @param bool $activo Si el medio se usa en la proyeccion
      * @param string|null $usuario Usuario que edita (todavia no hay login)
      * @return bool True si se guardo correctamente
      */
-    public function saveMixCobro($id, $porcentaje, $diasAcreditacion, $usuario = null) {
-        return $this->parametros->saveMixCobro($id, $porcentaje, $diasAcreditacion, $usuario);
+    public function saveMixCobro($id, $porcentaje, $diasAcreditacion, $activo = true, $usuario = null) {
+        return $this->parametros->saveMixCobro($id, $porcentaje, $diasAcreditacion, $activo, $usuario);
     }
 
     /**

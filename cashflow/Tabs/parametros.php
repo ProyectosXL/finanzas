@@ -50,13 +50,55 @@
                     <h5 class="mb-0">Mix de Cobro y Plazos</h5>
                     <small class="text-muted">
                         Porcentaje y días de acreditación por canal y medio de pago.
-                        El mix de cada canal debe sumar 100%.
+                        Los medios <strong>activos</strong> de cada canal deben sumar 100%;
+                        los inhabilitados no se usan en la proyección ni aparecen en la
+                        tabla de cobranza.
                     </small>
                 </div>
-                <button id="btnGuardarMix" class="btn btn-sm btn-primary" disabled>
-                    <i class="fas fa-floppy-disk me-1"></i> Guardar Mix
-                </button>
+                <div class="d-flex gap-2">
+                    <button id="btnNuevoMedio" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-plus me-1"></i> Agregar medio
+                    </button>
+                    <button id="btnGuardarMix" class="btn btn-sm btn-primary" disabled>
+                        <i class="fas fa-floppy-disk me-1"></i> Guardar Mix
+                    </button>
+                </div>
             </div>
+
+            <!-- Alta de medio de pago -->
+            <div class="card-body border-bottom" id="formNuevoMedio" style="display: none;">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label form-label-sm">Canal</label>
+                        <select id="nuevoCanal" class="form-select form-select-sm">
+                            <!-- Se genera dinámicamente -->
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label form-label-sm">Medio de Pago</label>
+                        <input type="text" id="nuevoMedio" class="form-control form-control-sm"
+                               maxlength="30" placeholder="Ej: Mercado Pago">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label form-label-sm">Días Acreditación</label>
+                        <input type="number" id="nuevoDias" class="form-control form-control-sm"
+                               min="0" step="1" value="0">
+                    </div>
+                    <div class="col-md-2 d-flex gap-2">
+                        <button id="btnAgregarMedio" class="btn btn-sm btn-primary flex-fill">
+                            <i class="fas fa-check me-1"></i> Agregar
+                        </button>
+                        <button id="btnCancelarMedio" class="btn btn-sm btn-outline-secondary">
+                            <i class="fas fa-xmark"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="param-hint mt-2">
+                    El medio nuevo entra <strong>inhabilitado y en 0%</strong>. Para usarlo,
+                    activalo y reacomodá los porcentajes del canal hasta que sumen 100%.
+                </div>
+            </div>
+
             <div class="card-body p-0">
                 <div class="table-responsive">
                     <table id="tablaMix" class="table table-hover mb-0">
@@ -64,8 +106,9 @@
                             <tr>
                                 <th>Canal</th>
                                 <th>Medio de Pago</th>
-                                <th class="text-center" style="width: 180px;">% Mix</th>
-                                <th class="text-center" style="width: 180px;">Días Acreditación</th>
+                                <th class="text-center" style="width: 110px;">Activo</th>
+                                <th class="text-center" style="width: 170px;">% Mix</th>
+                                <th class="text-center" style="width: 170px;">Días Acreditación</th>
                             </tr>
                         </thead>
                         <tbody id="mixBody">
