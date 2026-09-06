@@ -82,6 +82,24 @@
     border-top: 2px solid var(--border-color, #e2e5ed);
 }
 
+/* Sub-rótulo del encabezado: aclara la base de cada columna de importe.
+   Las históricas son netas y la proyectada lleva IVA; sin esto la diferencia
+   entre una y otra no se entiende. */
+.tab-ventas .th-sub {
+    display: block;
+    margin-top: 3px;
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    text-transform: none;
+    color: var(--text-muted, #8c93a8);
+}
+
+.tab-ventas .th-sub-iva {
+    color: var(--primary-color, #3366ff);
+    font-weight: 700;
+}
+
 /* Columnas descriptivas */
 .tab-ventas .col-canal {
     min-width: 150px;

@@ -111,16 +111,23 @@
     function generarTablaAnalisis() {
         var filas = datosAnalisis.proyeccion;
         var totales = datosAnalisis.proyeccion_totales;
+        var iva = datosAnalisis.alicuota_iva || 0;
 
+        // Las tres columnas de importe NO están en la misma base: las dos
+        // históricas son netas y la proyectada lleva IVA. Se aclara en el
+        // encabezado, que era de donde salía la confusión.
         var header =
             '<th class="col-canal">Mes-Año</th>' +
-            '<th class="text-end">Año Previo</th>' +
-            '<th class="text-end">Año Anterior</th>' +
+            '<th class="text-end">Año Previo' +
+                '<span class="th-sub">neto s/ IVA</span></th>' +
+            '<th class="text-end">Año Anterior' +
+                '<span class="th-sub">neto s/ IVA &middot; base</span></th>' +
             '<th class="text-center">Var. Interanual</th>' +
             '<th class="text-center">Índice de Variación ' +
                 '<i class="fas fa-pen-to-square ms-1" style="font-size: 10px;" title="Click para editar"></i>' +
-            '</th>' +
-            '<th class="text-end">Venta Proyectada</th>';
+                '<span class="th-sub">aplicado sobre el año anterior</span></th>' +
+            '<th class="text-end">Venta Proyectada' +
+                '<span class="th-sub th-sub-iva">CON IVA ' + formatPercentCorto(iva) + '</span></th>';
 
         document.getElementById('analisisHeader').innerHTML = header;
 
@@ -148,7 +155,14 @@
             html += '<td class="text-center">' + badgeVariacion(fila.variacion) + '</td>';
             html += celdaIndice(fila);
 
-            html += '<td class="currency fw-semibold cell-with-value">' +
+            // El tooltip muestra la cuenta completa: de dónde sale la diferencia
+            // contra el neto del año anterior.
+            var cuenta = formatCurrency(fila.neto_anio_anterior) +
+                         ' × (1 + ' + formatPercentCorto(fila.indice) + ')' +
+                         ' × (1 + IVA ' + formatPercentCorto(iva) + ')' +
+                         ' = ' + formatCurrency(fila.venta_proyectada);
+
+            html += '<td class="currency fw-semibold cell-with-value" title="' + cuenta + '">' +
                     formatCurrency(fila.venta_proyectada) +
                     (fila.estimado
                         ? ' <i class="fas fa-triangle-exclamation text-warning ms-1" ' +
@@ -163,10 +177,13 @@
 
         var totalsHtml =
             '<td class="col-canal total-label">TOTALES</td>' +
-            '<td class="currency">' + formatCurrency(totales.neto_anio_previo) + '</td>' +
-            '<td class="currency">' + formatCurrency(totales.neto_anio_anterior) + '</td>' +
+            '<td class="currency" title="Neto sin IVA">' +
+                formatCurrency(totales.neto_anio_previo) + '</td>' +
+            '<td class="currency" title="Neto sin IVA">' +
+                formatCurrency(totales.neto_anio_anterior) + '</td>' +
             '<td colspan="2"></td>' +
-            '<td class="currency">' + formatCurrency(totales.con_iva) + '</td>';
+            '<td class="currency" title="Con IVA ' + formatPercentCorto(iva) + '">' +
+                formatCurrency(totales.con_iva) + '</td>';
 
         document.getElementById('analisisTotals').innerHTML = totalsHtml;
     }
@@ -763,6 +780,16 @@
         return num.toLocaleString('es-AR', {
             minimumFractionDigits: 2,
             maximumFractionDigits: 4
+        }) + '%';
+    }
+
+    /** Porcentaje sin decimales sobrantes: 0.21 -> "21%", 0.215 -> "21,5%" */
+    function formatPercentCorto(value) {
+        var num = (parseFloat(value) || 0) * 100;
+
+        return num.toLocaleString('es-AR', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2
         }) + '%';
     }
 

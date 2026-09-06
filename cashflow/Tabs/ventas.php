@@ -31,9 +31,10 @@
                     <div>
                         <h5 class="mb-0">Proyección de Venta por Mes</h5>
                         <small class="text-muted">
-                            Mes actual + 11. La base es la venta neta real del mismo mes del año anterior
+                            Mes actual + 11 &middot;
+                            <strong>Venta Proyectada = Año Anterior (neto) &times; (1 + Índice) &times; (1 + IVA)</strong>
                             <i class="fas fa-info-circle ms-1"
-                               title="Venta Proyectada = Venta del Año Anterior × (1 + Índice) × (1 + IVA). Click en el índice para editarlo."></i>
+                               title="Las columnas de años son NETAS sin IVA. La Venta Proyectada lleva IVA: por eso es mayor aunque el índice sea 0%. Click en el índice para editarlo."></i>
                         </small>
                     </div>
                     <div class="d-flex gap-2">
@@ -154,7 +155,7 @@
                         </div>
                         <div class="kpi-card-value" id="kpiVentaHorizonte">$ 0,00</div>
                         <div class="kpi-card-footer">
-                            <span class="text-muted">Horizonte completo</span>
+                            <span class="text-muted">Venta estimada con IVA</span>
                         </div>
                     </div>
                 </div>

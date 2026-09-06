@@ -1329,6 +1329,10 @@ class Ventas {
                 'variacion' => $b['variacion'],
                 'indice' => $b['indice'],
                 'indice_editado' => isset($indices[$b['clave']]),
+                // Paso intermedio: ya tiene el indice aplicado pero todavia no
+                // el IVA. Es lo que hace visible de donde sale la diferencia
+                // entre el neto del anio anterior y la venta proyectada.
+                'neto_proyectado' => $b['neto_proyectado'],
                 'venta_proyectada' => $b['con_iva'],
                 'estimado' => $b['estimado']
             ];

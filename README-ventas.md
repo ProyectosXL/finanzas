@@ -87,14 +87,16 @@ Dos bloques, **ninguno abierto por canal**:
 
 **1. Proyección de Venta por Mes** — 12 meses: el actual + 11.
 
-| Columna | Qué es |
-| --- | --- |
-| Mes-Año | Mes proyectado (`sept-26`, `oct-26`, …) |
-| Año Previo | Venta neta real del mismo mes, **dos** años atrás. Sólo sirve para la comparación. |
-| Año Anterior | Venta neta real del mismo mes, **un** año atrás. Es la **base** de la proyección. |
-| Var. Interanual | `Año Anterior / Año Previo − 1` |
-| Índice de Variación | Editable. Se guarda contra el `(año, mes)` **del mes proyectado**. |
-| Venta Proyectada | `Año Anterior × (1 + Índice) × (1 + IVA)` |
+| Columna | Base | Qué es |
+| --- | --- | --- |
+| Mes-Año | — | Mes proyectado (`sept-26`, `oct-26`, …) |
+| Año Previo | **neto s/ IVA** | Venta neta real del mismo mes, **dos** años atrás. Sólo sirve para la comparación. |
+| Año Anterior | **neto s/ IVA** | Venta neta real del mismo mes, **un** año atrás. Es la **base** de la proyección. |
+| Var. Interanual | — | `Año Anterior / Año Previo − 1` |
+| Índice de Variación | — | Editable. Se guarda contra el `(año, mes)` **del mes proyectado**. |
+| Venta Proyectada | **con IVA** | `Año Anterior × (1 + Índice) × (1 + IVA)` |
+
+> **Ojo con la base**: las dos columnas de años son **netas sin IVA** y la Venta Proyectada **lleva IVA**. Por eso, aunque el índice esté en 0%, la proyectada es mayor que el año anterior: la diferencia es exactamente la alícuota. El encabezado de cada columna lo aclara y el tooltip de cada celda proyectada muestra la cuenta completa.
 
 La venta proyectada de esta tabla y la de la grilla de Proyección salen del **mismo helper** (`Ventas::baseMensual()`), así que no se pueden desincronizar.
 
