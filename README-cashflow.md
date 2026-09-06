@@ -24,15 +24,36 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 
 ---
 
-## Ejecución del script
+## Ejecución de los scripts
+
+En este orden, contra `central`:
 
 ```sql
--- sql/cashflow_estructura.sql
+-- 1. sql/cashflow_estructura.sql
+-- 2. sql/cashflow_estructura_disponibilidades.sql
 ```
 
-Crea `RO_T_CASHFLOW_CONF_SECCION` y `RO_T_CASHFLOW_CONF_FILA`, siembra las siete secciones del Excel con sus filas, y agrega el parámetro `comex_tipo_cambio_usd`. Es reejecutable: las tablas se crean sólo si no existen y las semillas entran por `MERGE`, así que no duplica ni pisa nada ya editado.
+El primero crea `RO_T_CASHFLOW_CONF_SECCION` y `RO_T_CASHFLOW_CONF_FILA`, siembra la estructura y agrega el parámetro `comex_tipo_cambio_usd`.
 
-Si el script no se corrió, la pantalla **no falla**: muestra un aviso diciendo que hay que correrlo.
+El segundo la reorganiza en **Disponibilidades + Ventas por canal**, que es la forma del Excel original (ver más abajo). No borra nada: las filas que reemplaza quedan inhabilitadas y visibles en el editor.
+
+Los dos son reejecutables y no pisan nada ya editado. Si no se corrieron, la pantalla **no falla**: muestra un aviso diciendo que hay que correrlos.
+
+---
+
+## Las tres vistas
+
+| Vista | Qué muestra |
+| --- | --- |
+| **Días** | Las columnas diarias del tramo (`horizonte_dias`) |
+| **Meses** | Las columnas mensuales (`horizonte_meses`) |
+| **Período completo** | Las dos ramas juntas, en orden cronológico |
+
+**Los indicadores miden exactamente las columnas que se están mirando**, y la columna Total también. Antes eran siempre del tramo diario, aunque la pantalla mostrara los meses: el número no describía nada de lo que había en pantalla.
+
+El **Disponible Inicial** es el único que no varía: es con cuánto se arranca hoy, un hecho del presente y no del período que uno elige mirar. Por eso su tarjeta va marcada aparte.
+
+Una trampa que la pantalla enuncia explícitamente: **la vista Meses no cubre el horizonte completo.** Las columnas mensuales acumulan sólo los días que quedan *fuera* del tramo diario, así que su total es el del tramo mensual y no el de todo. La barra debajo de los indicadores dice en cada vista qué período se está midiendo.
 
 ---
 
@@ -97,11 +118,11 @@ No hay ninguna referencia fila a fila guardada. El alcance es **posicional**, re
 | `SALDO_INICIAL` | Nada: muestra el saldo de apertura que arrastra el motor |
 | `INGRESO` | Suma (+1) |
 | `EGRESO` | Resta (−1) |
-| `SUBTOTAL` | Las filas de movimiento de su sección y de las secciones hijas |
-| `FLUJO_NETO` | Las filas de movimiento de secciones `MOVIMIENTO` que estén **por encima** |
-| `SALDO_FINAL` | Lo mismo, más las secciones `SALDO` |
+| `SUBTOTAL` | Las filas de movimiento **y de saldo inicial** de su sección y de las secciones hijas |
+| `FLUJO_NETO` | Las filas de movimiento que estén **por encima** |
+| `SALDO_FINAL` | Lo mismo, más el arrastre del saldo |
 
-Y `SECCION.ROL` ∈ `{SALDO, MOVIMIENTO, DERIVADO}` dice cómo participa cada sección.
+**El `ROL` de la sección no participa del cálculo.** Quien decide cómo participa una fila es su `TIPO`; el `ROL` (`SALDO` / `MOVIMIENTO` / `DERIVADO`) quedó para agrupar y para los avisos del validador. Antes sí participaba, y eso hacía imposible una sección que contuviera a la vez el saldo en bancos y las cobranzas — que es exactamente lo que tiene el Excel.
 
 Como no hay referencias guardadas, **no puede haber referencias colgadas ni ciclos entre filas**, y renombrar una sección no rompe ninguna fórmula.
 
@@ -115,6 +136,41 @@ Que `FLUJO_NETO` sume "lo que está por encima" es lo que permite configurar un 
 `COMPUTA = 0` es lo que resuelve la fila **Ventas** del Excel: es venta, no es caja (la caja es la fila *Cobros*), y contar las dos sería duplicar. Se modela como un `INGRESO` que no computa, y no como un tipo aparte, para que conserve el signo y el formato de las filas de su sección.
 
 **No hay columna de signo**: lo determina el `TIPO`. Una columna aparte permitiría configurar "un Ingreso que resta", que no significa nada.
+
+---
+
+## La estructura del Excel
+
+El cuadro original no tiene una sección "Ingresos". Tiene dos bloques:
+
+**1. Disponibilidades** — el saldo en bancos **más** todo lo que entra por cobranzas (echeqs, cobranzas electrónicas, franquicias, mayoristas, dólares de la cuenta comitente, exportaciones, caja de locales). Su subtotal es la fila *Disponible*:
+
+```
+Disponible(8/9) = SaldoInicial(8/9) + Echeqs + CobElec + CobFranq
+                = 157.226.313 + 59.779.740 + 20.863.853 + 31.863.324
+                = 269.733.230
+```
+
+Es decir: **el subtotal incluye la fila de saldo**. Por eso un `SUBTOTAL` suma las filas de saldo inicial de su alcance.
+
+**2. Ventas** — la cobranza sobre ventas estimadas, **abierta por canal** (Locales, Franquicias, Mayoristas, Ecommerce). Su subtotal es *Ingresos Venta*.
+
+Y el arrastre cierra entre los dos bloques:
+
+```
+SaldoInicial(9/9) = Disponible(8/9) + IngresosVenta(8/9) − egresos
+                  = 269.733.230 + 70.280.833 = 340.014.063
+```
+
+Por eso la fila de saldo inicial muestra el arrastre de la columna anterior **más** lo que aporte su proveedor en ésta.
+
+> **Por qué las filas de Ventas son la cobranza y no la venta**: en el Excel siguen el calendario bancario (los fines de semana no tienen columna y el lunes concentra el acumulado), que es el comportamiento de la cobranza con corrimiento a día hábil. Si se quisiera ver la venta, se cambia el origen de cada fila desde Parámetros: el proveedor expone las dos series por canal.
+
+### Totales y aperturas no se mezclan
+
+`VentasProvider` expone diez series: cobranza y venta, totales y abiertas por los cuatro canales. Las cuatro por canal suman exactamente el total.
+
+Activar a la vez la serie total y sus componentes cuenta **dos veces** el mismo importe, y la regla de origen repetido no lo ve, porque son series distintas. El registro declara la relación en `componentes` y el validador la rechaza.
 
 ---
 
@@ -209,6 +265,7 @@ Cubren el eje temporal y su secuencia cronológica, el validador de la estructur
 
 ```
 sql/cashflow_estructura.sql                 Las dos tablas de configuración + semilla
+sql/cashflow_estructura_disponibilidades.sql  Reorganiza en Disponibilidades + Ventas
 cashflow/Class/Horizonte.php                Eje temporal, compartido con Ventas
 cashflow/Class/CashflowProvider.php         Contrato de proveedor
 cashflow/Class/CashflowRegistry.php         Registro de orígenes de datos
@@ -235,6 +292,8 @@ Eliminado: `Tabs/resumen.php`.
 
 ## Pendientes conocidos
 
+- **Tres filas del Excel no tienen de dónde salir.** *Dólares Cuenta Comitente*, *Exportaciones* y *Caja Locales* las tipea una persona en el Excel (Tesorería, Silvina, Dan). Acá el origen de datos es únicamente por proveedor, así que hasta que exista el módulo que las alimente se muestran en cero y el tablero avisa. Quedan declaradas para que el cuadro tenga la forma completa. Si hicieran falta cargadas a mano, habría que sumar un tipo de origen manual, que hoy el módulo no tiene.
+- **El neteo de cheques adelantados sólo se aplica a la serie total de cobranza.** No viene abierto por canal. Hoy da lo mismo porque es cero; cuando exista el origen habrá que decidir cómo se distribuye entre canales, y ese criterio es de negocio.
 - **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** para traer la razón social. El tablero no lo sufre, porque usa `getCobranzasFRTotales()`, pero la pestaña Cobranzas FR sí.
 - **`VentasController?action=saveMixCobro` puede grabar un mix que Parámetros rechazaría**: no valida el 100%. Es anterior a este trabajo.
 - `pedir()` está duplicado en `Ingresos-Ventas.js` y `Parametros.js`. El código nuevo usa `pedirJson()` de `main.js`; sacar las dos copias viejas es un cambio aparte.
