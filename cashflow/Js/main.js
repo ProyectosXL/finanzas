@@ -160,7 +160,6 @@ function loadTab(tabName) {
 function updateHeader(tabName) {
     const titles = {
         'cashflow': 'Cashflow',
-        'resumen': 'Resumen',
         'dashboard': 'Dashboard',
         'parametros': 'Parámetros',
         'ventas': 'Ventas',

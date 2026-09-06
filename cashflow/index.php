@@ -38,7 +38,7 @@ session_start();
         <!-- Content Area -->
         <div class="content-area">
             <div id="tabContent">
-                <?php include 'Tabs/resumen.php'; ?>
+                <?php include 'Tabs/cashflow.php'; ?>
             </div>
         </div>
     </div>
