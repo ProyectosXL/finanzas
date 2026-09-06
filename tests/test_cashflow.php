@@ -353,6 +353,47 @@ chequear('pero un subtotal de solo movimientos ahi es cero',
 chequear('el total de un subtotal con saldo no es una suma: es el cierre',
     90.0, $px2['DISPONIBLE']['total_tramo']);
 
+// Las filas de arrastre quedan marcadas, para que la pantalla pueda explicar
+// que su numero NO es un dato cargado en la fila.
+chequear('la fila de saldo esta marcada como arrastre', true, $px2['SALDO_BANCOS']['arrastre']);
+chequear('el subtotal que la incluye tambien', true, $px2['DISPONIBLE']['arrastre']);
+chequear('un subtotal de solo movimientos NO', false, $px2['ING_VENTA']['arrastre']);
+chequear('una fila de ingreso comun tampoco', false, $px2['COB_FR']['arrastre']);
+
+// FLUJO_NETO tambien tiene celdas en null fuera de secuencia, pero es un FLUJO
+// y su total SI es una suma. Con el criterio de "tiene nulls" daba el flujo de
+// una sola columna en lugar del acumulado.
+seccion('el flujo neto se suma aunque tenga nulls');
+
+$estFlujo = new EstructuraFalsa();
+$estFlujo->secciones = [
+    seccionConf('DISPO', 'Disponibilidades', 'SALDO', 10),
+    seccionConf('RES', 'Resultados', 'DERIVADO', 20),
+];
+$estFlujo->filas = [
+    filaConf(1, 'SALDO_BANCOS', 'DISPO', 'SALDO_INICIAL', 10, 'SALDOS', 'DISPONIBLE'),
+    filaConf(2, 'COB', 'DISPO', 'INGRESO', 20, 'COBRANZAS_FR', 'COBRANZA'),
+    filaConf(3, 'FLUJO', 'RES', 'FLUJO_NETO', 10),
+    filaConf(4, 'SALDO_FIN', 'RES', 'SALDO_FINAL', 20),
+];
+
+$motorF = new CashflowFalso($estFlujo, $par28);
+$motorF->series = [
+    'SALDOS' => ['DISPONIBLE' => serieCon($hX)],
+    'COBRANZAS_FR' => ['COBRANZA' => serieCon($hX,
+        ['2026-09-06' => 10, '2026-09-07' => 20], ['2026-10' => 100])],
+];
+
+$tf = $motorF->proyectar();
+$pf = porCodigo($tf);
+
+chequear('el flujo neto tiene null fuera de secuencia', null, $pf['FLUJO']['meses']['2026-09']);
+chequear('pero su total del tramo es la SUMA, no la ultima columna',
+    30.0, $pf['FLUJO']['total_tramo']);
+chequear('y el del horizonte tambien suma', 130.0, $pf['FLUJO']['total_horizonte']);
+chequear('el flujo neto no esta marcado como arrastre', false, $pf['FLUJO']['arrastre']);
+chequear('el saldo final si, y su total es el cierre', 130.0, $pf['SALDO_FIN']['total_horizonte']);
+
 /* ================================================================
    Un resultado intermedio suma solo lo que tiene por encima
    ================================================================ */

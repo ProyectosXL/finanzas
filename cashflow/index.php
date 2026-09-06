@@ -26,7 +26,7 @@ session_start();
     <link href="Css/main.css?v=<?php echo time(); ?>" rel="stylesheet">
 </head>
 <body>
-
+  
     <!-- Sidebar -->
     <?php include 'Components/sidebar.php'; ?>
 

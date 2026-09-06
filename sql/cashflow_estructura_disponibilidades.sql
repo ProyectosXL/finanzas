@@ -13,7 +13,7 @@
    1. DISPONIBILIDADES: el saldo en bancos MAS todo lo que entra por cobranzas
       (echeqs, cobranzas electronicas, franquicias, mayoristas, dolares de la
       cuenta comitente, exportaciones, caja de locales). Su subtotal es la fila
-      "Disponible".
+      "Total Disponibilidades".
 
       Verificado contra el Excel:
           Disponible(8/9) = SaldoInicial(8/9) + Echeqs + CobElec + CobFranq
@@ -23,7 +23,8 @@
       filas de saldo inicial dentro del alcance de un subtotal.
 
    2. VENTAS: la cobranza sobre ventas estimadas, ABIERTA POR CANAL (Locales,
-      Franquicias, Mayoristas, Ecommerce). Su subtotal es "Ingresos Venta".
+      Franquicias, Mayoristas, Ecommerce). Son los ingresos teoricos. Su
+      subtotal es "Total Ventas".
 
       Y el arrastre cierra entre los dos bloques:
           SaldoInicial(9/9) = Disponible(8/9) + IngresosVenta(8/9) - egresos
@@ -72,17 +73,19 @@ BEGIN
        primera fila del bloque de disponibilidades. */
     UPDATE dbo.RO_T_CASHFLOW_CONF_FILA
     SET SECCION = 'DISPONIBILIDADES',
-        NOMBRE = 'Saldo Inicial (bancos)',
+        NOMBRE = 'Saldo Inicial',
         ORDEN = 10,
         FECHA_UPDATE = GETDATE()
     WHERE CODIGO = 'DISPONIBLE';
 
     UPDATE dbo.RO_T_CASHFLOW_CONF_FILA
-    SET SECCION = 'DISPONIBILIDADES', ORDEN = 20, FECHA_UPDATE = GETDATE()
+    SET SECCION = 'DISPONIBILIDADES', NOMBRE = 'Echeqs en cartera',
+        ORDEN = 20, FECHA_UPDATE = GETDATE()
     WHERE CODIGO = 'ECHEQS';
 
     UPDATE dbo.RO_T_CASHFLOW_CONF_FILA
-    SET SECCION = 'DISPONIBILIDADES', ORDEN = 30, FECHA_UPDATE = GETDATE()
+    SET SECCION = 'DISPONIBILIDADES', NOMBRE = 'Cobranzas Pagos Electronicos',
+        ORDEN = 30, FECHA_UPDATE = GETDATE()
     WHERE CODIGO = 'COB_ELECTRONICOS';
 
     UPDATE dbo.RO_T_CASHFLOW_CONF_FILA
@@ -99,13 +102,13 @@ BEGIN
     VALUES
         ('DOLARES_COMITENTE', 'Dolares Cuenta Comitente', 'DISPONIBILIDADES', 'INGRESO', 1,
             'DOLARES_COMITENTE', 'DISPONIBLE', 60, 1),
-        ('EXPORTACIONES', 'Exportaciones', 'DISPONIBILIDADES', 'INGRESO', 1,
+        ('EXPORTACIONES', 'Exportaciones Tasky', 'DISPONIBILIDADES', 'INGRESO', 1,
             'EXPORTACIONES', 'COBRANZA', 70, 1),
         ('CAJA_LOCALES', 'Caja Locales', 'DISPONIBILIDADES', 'INGRESO', 1,
             'CAJA_LOCALES', 'DEPOSITOS', 80, 1),
         /* El subtotal del bloque. Incluye la fila de saldo: es el "Disponible"
            del Excel. */
-        ('SUB_DISPONIBLE', 'Disponible', 'DISPONIBILIDADES', 'SUBTOTAL', 0,
+        ('SUB_DISPONIBLE', 'Total Disponibilidades', 'DISPONIBILIDADES', 'SUBTOTAL', 0,
             NULL, NULL, 90, 1);
 
     /* ---- 4. Ventas, abierta por canal ---------------------------------- */
@@ -126,7 +129,7 @@ BEGIN
             'VENTAS', 'COBRANZA_MAYORISTAS', 30, 1),
         ('VTA_ECOMMERCE', 'Ecommerce', 'VENTAS', 'INGRESO', 1,
             'VENTAS', 'COBRANZA_ECOMMERCE', 40, 1),
-        ('SUB_INGRESOS_VENTA', 'Ingresos Venta', 'VENTAS', 'SUBTOTAL', 0,
+        ('SUB_INGRESOS_VENTA', 'Total Ventas', 'VENTAS', 'SUBTOTAL', 0,
             NULL, NULL, 50, 1);
 
     /* ---- 5. Inhabilitar lo que quedo reemplazado ----------------------- */
@@ -178,3 +181,4 @@ BEGIN
     PRINT 'La seccion DISPONIBILIDADES ya existe: no se hizo nada.';
 END
 GO
+ 

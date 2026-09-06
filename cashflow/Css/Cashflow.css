@@ -190,3 +190,10 @@
 .tab-cashflow .cf-kpi-periodo {
     color: #6c757d;
 }
+
+/* Marca de arrastre: la fila muestra un saldo que calcula el motor, no un dato
+   cargado en ella. Se distingue del ícono de "sin datos" porque significan
+   cosas opuestas. */
+.tab-cashflow .cf-marca-arrastre {
+    color: #6b8fb5;
+}

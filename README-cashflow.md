@@ -143,7 +143,7 @@ Que `FLUJO_NETO` sume "lo que está por encima" es lo que permite configurar un 
 
 El cuadro original no tiene una sección "Ingresos". Tiene dos bloques:
 
-**1. Disponibilidades** — el saldo en bancos **más** todo lo que entra por cobranzas (echeqs, cobranzas electrónicas, franquicias, mayoristas, dólares de la cuenta comitente, exportaciones, caja de locales). Su subtotal es la fila *Disponible*:
+**1. Disponibilidades** — el saldo en bancos **más** todo lo que entra por cobranzas (echeqs, cobranzas electrónicas, franquicias, mayoristas, dólares de la cuenta comitente, exportaciones, caja de locales). Su subtotal es la fila *Total Disponibilidades*:
 
 ```
 Disponible(8/9) = SaldoInicial(8/9) + Echeqs + CobElec + CobFranq
@@ -153,12 +153,12 @@ Disponible(8/9) = SaldoInicial(8/9) + Echeqs + CobElec + CobFranq
 
 Es decir: **el subtotal incluye la fila de saldo**. Por eso un `SUBTOTAL` suma las filas de saldo inicial de su alcance.
 
-**2. Ventas** — la cobranza sobre ventas estimadas, **abierta por canal** (Locales, Franquicias, Mayoristas, Ecommerce). Su subtotal es *Ingresos Venta*.
+**2. Ventas** — la cobranza sobre ventas estimadas, **abierta por canal** (Locales, Franquicias, Mayoristas, Ecommerce). Su subtotal es *Total Ventas*. **Son los ingresos teóricos**: la cobranza estimada por canal, no la venta.
 
 Y el arrastre cierra entre los dos bloques:
 
 ```
-SaldoInicial(9/9) = Disponible(8/9) + IngresosVenta(8/9) − egresos
+SaldoInicial(9/9) = TotalDisponibilidades(8/9) + TotalVentas(8/9) − egresos
                   = 269.733.230 + 70.280.833 = 340.014.063
 ```
 
@@ -292,6 +292,7 @@ Eliminado: `Tabs/resumen.php`.
 
 ## Pendientes conocidos
 
+- **El disponible inicial arranca en cero.** El módulo Saldos no existe, así que la fila *Saldo Inicial* no tiene de dónde tomar el dinero que hay hoy en los bancos. Lo que muestra es el **arrastre**: la caja que se va acumulando con los ingresos proyectados. Las filas de arrastre llevan un ícono que lo aclara y el tablero lo avisa arriba, porque leer esos saldos como disponibilidad real sería un error caro.
 - **Tres filas del Excel no tienen de dónde salir.** *Dólares Cuenta Comitente*, *Exportaciones* y *Caja Locales* las tipea una persona en el Excel (Tesorería, Silvina, Dan). Acá el origen de datos es únicamente por proveedor, así que hasta que exista el módulo que las alimente se muestran en cero y el tablero avisa. Quedan declaradas para que el cuadro tenga la forma completa. Si hicieran falta cargadas a mano, habría que sumar un tipo de origen manual, que hoy el módulo no tiene.
 - **El neteo de cheques adelantados sólo se aplica a la serie total de cobranza.** No viene abierto por canal. Hoy da lo mismo porque es cero; cuando exista el origen habrá que decidir cómo se distribuye entre canales, y ese criterio es de negocio.
 - **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** para traer la razón social. El tablero no lo sufre, porque usa `getCobranzasFRTotales()`, pero la pestaña Cobranzas FR sí.

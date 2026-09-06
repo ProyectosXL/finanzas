@@ -447,7 +447,13 @@
         var nombre = escapar(f.nombre);
         var marca = '';
 
-        if (f.sin_datos) {
+        // Una fila de arrastre muestra un número que NO viene de su módulo: es
+        // el saldo que se acumula columna a columna. Sin decirlo, se lee como
+        // si alguien hubiera cargado datos ahí.
+        if (f.arrastre) {
+            marca = ' <i class="fas fa-arrow-right-arrow-left cf-marca cf-marca-arrastre" title="'
+                + escapar(textoArrastre(f)) + '"></i>';
+        } else if (f.sin_datos) {
             marca = ' <i class="fas fa-circle-info cf-marca" title="Todavía no hay datos para esta fila"></i>';
         } else if (!f.computa && !f.derivada) {
             marca = ' <i class="fas fa-eye cf-marca" title="Informativa: se muestra pero no entra en ninguna suma"></i>';
@@ -462,6 +468,28 @@
         }
 
         return nombre + marca;
+    }
+
+    /**
+     * Qué explicar en una fila de arrastre. Si además su módulo de origen no
+     * existe, hay que decir las dos cosas: que el horizonte arranca en cero, y
+     * que lo que se ve es la caja que se va acumulando.
+     */
+    function textoArrastre(f) {
+        var base = 'Arrastre: el saldo con el que arranca cada columna. '
+            + 'No es un dato cargado en esta fila.';
+
+        if (f.tipo === 'SALDO_INICIAL' && f.sin_datos) {
+            return base + ' Su módulo de origen todavía no existe, así que el horizonte '
+                + 'arranca en cero y lo que se ve es la caja acumulada por los ingresos.';
+        }
+
+        if (f.tipo === 'SUBTOTAL') {
+            return 'Incluye la fila de saldo de su sección, así que arrastra: '
+                + 'no es la suma de lo cargado en las filas de arriba.';
+        }
+
+        return base;
     }
 
     function celdaHtml(valor, col, i) {

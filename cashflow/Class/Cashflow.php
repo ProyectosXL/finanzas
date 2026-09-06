@@ -109,6 +109,8 @@ class Cashflow {
         /* ---- 5. Filas calculadas y arrastre del saldo -------------------- */
         $this->resolverDerivadas($h, $secciones, $resueltas);
 
+        $this->avisarAperturaEnCero($resueltas);
+
         /* ---- 6. Totales -------------------------------------------------- */
         $columnas = $h->secuencia();
         $ultimaDia = $this->ultimaColumnaDiaria($columnas);
@@ -241,6 +243,11 @@ class Cashflow {
                 'computa' => (intval($f['COMPUTA']) === 1),
                 'derivada' => CashflowEstructura::esDerivada($tipo),
                 'es_saldo' => CashflowEstructura::esSaldo($tipo),
+                // Si lo que la fila MUESTRA lo calcula el arrastre y no su
+                // proveedor. Lo marca resolverDerivadas(). Sin esto, una fila
+                // de saldo sin modulo de origen aparece con numeros y con el
+                // icono de "sin datos" al mismo tiempo, que se contradicen.
+                'arrastre' => false,
                 'origen' => null,
                 'tab' => null,
                 'moneda_origen' => null,
@@ -299,6 +306,35 @@ class Cashflow {
         }
 
         return $resueltas;
+    }
+
+    /**
+     * Avisa cuando el horizonte arranca sin saldo de apertura.
+     *
+     * Es el aviso mas importante del tablero mientras no exista el modulo de
+     * Saldos: sin el, los saldos que se ven no son plata en el banco sino la
+     * caja que se va acumulando con los ingresos proyectados. Leer esos numeros
+     * como disponibilidad real seria un error caro.
+     *
+     * @param array $resueltas
+     */
+    private function avisarAperturaEnCero($resueltas) {
+        foreach ($resueltas as $f) {
+            if ($f['tipo'] !== 'SALDO_INICIAL') {
+                continue;
+            }
+
+            if (!$f['sin_datos']) {
+                continue;
+            }
+
+            $this->warnings[] = 'El disponible inicial arranca en CERO porque su módulo de '
+                . 'origen todavía no existe. Los saldos que muestra el tablero son la caja que '
+                . 'se acumula con los ingresos proyectados, no el dinero que hay hoy en los '
+                . 'bancos.';
+
+            return;
+        }
     }
 
     /**
@@ -386,6 +422,7 @@ class Cashflow {
                 $resueltas[$i] = $this->volcar(
                     $resueltas[$i], $todas, $aperturaMostrada, $enSecuencia
                 );
+                $resueltas[$i]['arrastre'] = true;
             }
         }
 
@@ -412,6 +449,7 @@ class Cashflow {
             // indefinicion: en una columna que no cubre dias futuros va en null
             // y no en cero, igual que la fila de saldo.
             $conSaldo = $this->alcanceTieneSaldo($resueltas, $alcance);
+            $resueltas[$i]['arrastre'] = $conSaldo;
 
             foreach ($todas as $col) {
                 if ($conSaldo && !isset($enSecuencia[$col])) {
@@ -447,6 +485,10 @@ class Cashflow {
             }
 
             $resueltas[$i] = $this->volcar($resueltas[$i], $todas, $mapa, $enSecuencia);
+
+            if ($f['tipo'] === 'SALDO_FINAL') {
+                $resueltas[$i]['arrastre'] = true;
+            }
         }
 
         $this->apertura = $apertura;
@@ -609,7 +651,12 @@ class Cashflow {
 
         // Un subtotal que arrastra saldo tampoco se puede sumar: su total es el
         // valor de la ultima columna del tramo, no la suma de todas.
-        if ($this->tieneNulos($f)) {
+        //
+        // El criterio es la marca de ARRASTRE y no "tiene celdas en null":
+        // FLUJO_NETO tambien tiene nulls fuera de secuencia, pero es un flujo y
+        // SI se suma. Con el criterio de los nulls su total daba el flujo de una
+        // sola columna en lugar del acumulado.
+        if ($f['tipo'] === 'SUBTOTAL' && !empty($f['arrastre'])) {
             $f['total_tramo'] = $this->valor($f, $ultimaDia);
             $f['total_meses'] = $this->valor($f, $ultima);
             $f['total_horizonte'] = $this->valor($f, $ultima);
@@ -620,22 +667,6 @@ class Cashflow {
         $f['total_tramo'] = array_sum(array_map('floatval', $f['dias']));
         $f['total_meses'] = array_sum(array_map('floatval', $f['meses']));
         $f['total_horizonte'] = $f['total_tramo'] + $f['total_meses'];
-    }
-
-    /**
-     * Si la fila tiene alguna celda en null, senal de que arrastra saldo y por
-     * lo tanto no se puede sumar.
-     */
-    private function tieneNulos($f) {
-        foreach (['dias', 'meses'] as $rama) {
-            foreach ($f[$rama] as $v) {
-                if ($v === null) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     /**
