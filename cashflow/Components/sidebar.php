@@ -22,6 +22,14 @@
     </div>
 
     <div class="sidebar-menu">
+        <!-- Cashflow - Tablero de consolidación, pestaña principal -->
+        <div class="menu-item-main">
+            <a href="#" class="menu-link" data-tab="cashflow">
+                <i class="fas fa-table-cells"></i>
+                <span>Cashflow</span>
+            </a>
+        </div>
+
         <!-- Resumen - Siempre visible destacado -->
         <div class="menu-item-main">
             <a href="#" class="menu-link active" data-tab="resumen">
