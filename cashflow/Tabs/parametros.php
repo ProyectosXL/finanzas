@@ -1,5 +1,5 @@
 <?php $tabName = 'Parámetros'; ?>
-<link rel="stylesheet" href="Css/Parametros.css">
+<link rel="stylesheet" href="Css/Parametros.css?v=<?php echo time(); ?>">
 
 <div class="tab-parametros">
 

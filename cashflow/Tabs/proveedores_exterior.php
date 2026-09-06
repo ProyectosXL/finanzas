@@ -1,5 +1,5 @@
 <?php $tabName = 'Proveedores Exterior'; ?>
-<link rel="stylesheet" href="Css/Comex-Proveedores_exterior.css">
+<link rel="stylesheet" href="Css/Comex-Proveedores_exterior.css?v=<?php echo time(); ?>">
 
 <div class="tab-proveedores_exterior">
     

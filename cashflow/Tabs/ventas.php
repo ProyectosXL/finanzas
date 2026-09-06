@@ -1,5 +1,5 @@
 <?php $tabName = 'Ventas'; ?>
-<link rel="stylesheet" href="Css/Ingresos-Ventas.css">
+<link rel="stylesheet" href="Css/Ingresos-Ventas.css?v=<?php echo time(); ?>">
 
 <div class="tab-ventas">
 

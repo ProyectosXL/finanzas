@@ -88,9 +88,10 @@
 .tab-ventas .th-sub {
     display: block;
     margin-top: 3px;
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 500;
-    letter-spacing: 0.3px;
+    line-height: 1.2;
+    letter-spacing: 0.2px;
     text-transform: none;
     color: var(--text-muted, #8c93a8);
 }

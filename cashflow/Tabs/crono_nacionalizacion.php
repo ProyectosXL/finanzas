@@ -1,5 +1,5 @@
 <?php $tabName = 'Crono Nacionalización'; ?>
-<link rel="stylesheet" href="Css/Comex-Crono_nacionalizacion.css">
+<link rel="stylesheet" href="Css/Comex-Crono_nacionalizacion.css?v=<?php echo time(); ?>">
 
 <div class="tab-crono_nacionalizacion">
     
