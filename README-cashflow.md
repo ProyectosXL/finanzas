@@ -115,7 +115,7 @@ No hay ninguna referencia fila a fila guardada. El alcance es **posicional**, re
 
 | `FILA.TIPO` | Qué suma |
 | --- | --- |
-| `SALDO_INICIAL` | Nada: muestra el saldo de apertura que arrastra el motor |
+| `SALDO_INICIAL` | Nada: es una fila de DATOS, muestra lo que devuelve su módulo de origen |
 | `INGRESO` | Suma (+1) |
 | `EGRESO` | Resta (−1) |
 | `SUBTOTAL` | Las filas de movimiento **y de saldo inicial** de su sección y de las secciones hijas |
@@ -162,7 +162,15 @@ SaldoInicial(9/9) = TotalDisponibilidades(8/9) + TotalVentas(8/9) − egresos
                   = 269.733.230 + 70.280.833 = 340.014.063
 ```
 
-Por eso la fila de saldo inicial muestra el arrastre de la columna anterior **más** lo que aporte su proveedor en ésta.
+### El Saldo Inicial es una fila de datos, no un cálculo
+
+La fila *Saldo Inicial* muestra **lo que devuelve su módulo de origen (la pestaña Saldos) y nada más**. No arrastra.
+
+El Excel lo confirma: el 1/9 tiene `Saldo Inicial = 0` justo después de un `Disponible` de 118 millones. Si fuera un arrastre, ahí habría 118 millones. Es un dato que carga Tesorería, y donde no cargaron nada, va cero.
+
+El arrastre sigue existiendo, pero lo muestra **sólo `SALDO_FINAL`**, que es la posición proyectada. Los saldos que cargue el módulo de Saldos entran a ese arrastre como aporte, así que cuando exista, la posición arranca del dinero real.
+
+> **Decisión pendiente para cuando exista el módulo de Saldos**: si un saldo bancario cargado en una fecha intermedia **se suma** al arrastre o lo **reemplaza**. Hoy el motor suma. Con el Excel a la vista parece que debería reemplazar, pero sin datos no tiene sentido inventar la semántica.
 
 > **Por qué las filas de Ventas son la cobranza y no la venta**: en el Excel siguen el calendario bancario (los fines de semana no tienen columna y el lunes concentra el acumulado), que es el comportamiento de la cobranza con corrimiento a día hábil. Si se quisiera ver la venta, se cambia el origen de cada fila desde Parámetros: el proveedor expone las dos series por canal.
 
@@ -292,7 +300,7 @@ Eliminado: `Tabs/resumen.php`.
 
 ## Pendientes conocidos
 
-- **El disponible inicial arranca en cero.** El módulo Saldos no existe, así que la fila *Saldo Inicial* no tiene de dónde tomar el dinero que hay hoy en los bancos. Lo que muestra es el **arrastre**: la caja que se va acumulando con los ingresos proyectados. Las filas de arrastre llevan un ícono que lo aclara y el tablero lo avisa arriba, porque leer esos saldos como disponibilidad real sería un error caro.
+- **El saldo de apertura arranca en cero.** El módulo Saldos no existe, así que la fila *Saldo Inicial* se muestra en cero: es una fila de datos y no tiene de dónde tomarlos. En consecuencia el *Saldo Final* arranca de cero y muestra la caja que generan los ingresos proyectados, no la posición real de los bancos. El tablero lo avisa arriba, porque leer esos saldos como disponibilidad real sería un error caro.
 - **Tres filas del Excel no tienen de dónde salir.** *Dólares Cuenta Comitente*, *Exportaciones* y *Caja Locales* las tipea una persona en el Excel (Tesorería, Silvina, Dan). Acá el origen de datos es únicamente por proveedor, así que hasta que exista el módulo que las alimente se muestran en cero y el tablero avisa. Quedan declaradas para que el cuadro tenga la forma completa. Si hicieran falta cargadas a mano, habría que sumar un tipo de origen manual, que hoy el módulo no tiene.
 - **El neteo de cheques adelantados sólo se aplica a la serie total de cobranza.** No viene abierto por canal. Hoy da lo mismo porque es cero; cuando exista el origen habrá que decidir cómo se distribuye entre canales, y ese criterio es de negocio.
 - **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** para traer la razón social. El tablero no lo sufre, porque usa `getCobranzasFRTotales()`, pero la pestaña Cobranzas FR sí.

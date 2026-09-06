@@ -328,10 +328,10 @@ class Cashflow {
                 continue;
             }
 
-            $this->warnings[] = 'El disponible inicial arranca en CERO porque su módulo de '
-                . 'origen todavía no existe. Los saldos que muestra el tablero son la caja que '
-                . 'se acumula con los ingresos proyectados, no el dinero que hay hoy en los '
-                . 'bancos.';
+            $this->warnings[] = 'La fila "' . $f['nombre'] . '" se muestra en CERO porque el '
+                . 'módulo que la alimenta todavía no está desarrollado. Como no hay saldo de '
+                . 'apertura, el Saldo Final arranca de cero: muestra la caja que generan los '
+                . 'ingresos proyectados, no la posición real de los bancos.';
 
             return;
         }
@@ -403,38 +403,17 @@ class Cashflow {
             $cierre[$col] = $saldo;
         }
 
-        /* ---- 2. Fila de saldo inicial ------------------------------------ */
-        // Muestra el saldo con el que ARRANCA la columna: el arrastre de la
-        // columna anterior mas lo que aporte su proveedor en esta.
-        //
-        // No muestra el valor crudo del proveedor. En la primera columna las dos
-        // cosas coinciden (el arrastre viene en cero), y de ahi en adelante lo
-        // que se ve es el cierre de la columna anterior, que es como se lee el
-        // "Saldo Inicial" del Excel.
-        $aperturaMostrada = [];
-
-        foreach ($columnas as $col) {
-            $aperturaMostrada[$col] = $apertura[$col] + $aporte[$col];
-        }
-
-        foreach ($resueltas as $i => $f) {
-            if ($f['tipo'] === 'SALDO_INICIAL') {
-                $resueltas[$i] = $this->volcar(
-                    $resueltas[$i], $todas, $aperturaMostrada, $enSecuencia
-                );
-                $resueltas[$i]['arrastre'] = true;
-            }
-        }
-
-        /* ---- 3. Subtotales ----------------------------------------------- */
+        /* ---- 2. Subtotales ----------------------------------------------- */
         // Alcance: su seccion y las secciones hijas, sin limite posicional (un
         // subtotal abarca toda su seccion, este donde este puesto dentro de
         // ella).
         //
         // Suman los movimientos Y las filas de saldo inicial que caigan en su
-        // alcance. Eso es lo que permite reproducir el "Disponible" del Excel,
-        // que es el saldo en bancos mas las cobranzas del dia, todo en una
-        // seccion.
+        // alcance. Eso es lo que reproduce el "Disponible" del Excel, que es el
+        // saldo en bancos mas las cobranzas del dia, todo en una seccion.
+        //
+        // La fila de saldo NO se toca: muestra lo que devolvio su modulo de
+        // origen. Es una fila de DATOS, no un calculo (ver la nota del paso 3).
         foreach ($resueltas as $i => $f) {
             if ($f['tipo'] !== 'SUBTOTAL') {
                 continue;
@@ -445,18 +424,7 @@ class Cashflow {
                 true
             );
 
-            // Si el alcance incluye una fila de saldo, el subtotal hereda su
-            // indefinicion: en una columna que no cubre dias futuros va en null
-            // y no en cero, igual que la fila de saldo.
-            $conSaldo = $this->alcanceTieneSaldo($resueltas, $alcance);
-            $resueltas[$i]['arrastre'] = $conSaldo;
-
             foreach ($todas as $col) {
-                if ($conSaldo && !isset($enSecuencia[$col])) {
-                    $resueltas[$i] = $this->ponerValor($resueltas[$i], $col, null);
-                    continue;
-                }
-
                 $valor = $this->sumarMovimientos($resueltas, $col, $alcance, null)
                     + $this->sumarSaldoMostrado($resueltas, $col, $alcance);
 
@@ -464,7 +432,19 @@ class Cashflow {
             }
         }
 
-        /* ---- 4. Flujo neto y saldo final --------------------------------- */
+        /* ---- 3. Flujo neto y saldo final --------------------------------- */
+        // La fila SALDO_INICIAL es una fila de DATOS: muestra lo que devuelve su
+        // modulo de origen (la pestana Saldos) y nada mas. Antes mostraba el
+        // arrastre, y eso estaba mal: una fila alimentada por un modulo que
+        // todavia no existe tiene que verse en cero, no con la caja acumulada.
+        // El Excel lo confirma, el 1/9 tiene Saldo Inicial en cero justo despues
+        // de un Disponible de 118 millones: si fuera arrastre ahi habria 118
+        // millones.
+        //
+        // El arrastre sigue existiendo, pero solo lo muestra SALDO_FINAL, que es
+        // la posicion proyectada. Y los saldos que cargue el modulo de Saldos
+        // entran a ese arrastre como aporte, asi que cuando exista, la posicion
+        // arranca del dinero real.
         // Suman lo que esta POR ENCIMA de ellas. Con una sola fila de resultado
         // al final del cuadro eso equivale al total, pero es lo que permite
         // poner un resultado intermedio (por ejemplo un "Resultado Operativo"
@@ -602,17 +582,6 @@ class Cashflow {
         return $total;
     }
 
-    /** @return bool Si el alcance contiene alguna fila de saldo inicial */
-    private function alcanceTieneSaldo($resueltas, $alcance) {
-        foreach ($resueltas as $f) {
-            if ($f['tipo'] === 'SALDO_INICIAL' && isset($alcance[$f['seccion']])) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     /* ====================================================================
        TOTALES Y KPI
        ==================================================================== */
@@ -645,21 +614,6 @@ class Cashflow {
                 $f['total_meses'] = $this->valor($f, $ultima);
                 $f['total_horizonte'] = $this->valor($f, $ultima);
             }
-
-            return;
-        }
-
-        // Un subtotal que arrastra saldo tampoco se puede sumar: su total es el
-        // valor de la ultima columna del tramo, no la suma de todas.
-        //
-        // El criterio es la marca de ARRASTRE y no "tiene celdas en null":
-        // FLUJO_NETO tambien tiene nulls fuera de secuencia, pero es un flujo y
-        // SI se suma. Con el criterio de los nulls su total daba el flujo de una
-        // sola columna en lugar del acumulado.
-        if ($f['tipo'] === 'SUBTOTAL' && !empty($f['arrastre'])) {
-            $f['total_tramo'] = $this->valor($f, $ultimaDia);
-            $f['total_meses'] = $this->valor($f, $ultima);
-            $f['total_horizonte'] = $this->valor($f, $ultima);
 
             return;
         }

@@ -476,20 +476,9 @@
      * que lo que se ve es la caja que se va acumulando.
      */
     function textoArrastre(f) {
-        var base = 'Arrastre: el saldo con el que arranca cada columna. '
-            + 'No es un dato cargado en esta fila.';
-
-        if (f.tipo === 'SALDO_INICIAL' && f.sin_datos) {
-            return base + ' Su módulo de origen todavía no existe, así que el horizonte '
-                + 'arranca en cero y lo que se ve es la caja acumulada por los ingresos.';
-        }
-
-        if (f.tipo === 'SUBTOTAL') {
-            return 'Incluye la fila de saldo de su sección, así que arrastra: '
-                + 'no es la suma de lo cargado en las filas de arriba.';
-        }
-
-        return base;
+        return 'Arrastre: la posición proyectada al cierre de cada columna. '
+            + 'Es el saldo de apertura más todo lo que se movió hasta acá, '
+            + 'no un dato cargado en esta fila.';
     }
 
     function celdaHtml(valor, col, i) {

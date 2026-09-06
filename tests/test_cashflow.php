@@ -149,15 +149,21 @@ chequear('el flujo neto es la suma de los subtotales',
 
 seccion('arrastre del saldo');
 
-// La fila de saldo inicial muestra el arrastre de la columna anterior MAS lo
-// que aporte su proveedor en esta. En la primera columna las dos cosas
-// coinciden, porque el arrastre viene en cero.
-chequear('el saldo inicial del primer dia es lo que aporto el proveedor',
+// La fila de saldo inicial es una fila de DATOS: muestra lo que devuelve su
+// modulo de origen y nada mas. NO muestra el arrastre. Un modulo que todavia no
+// existe tiene que verse en cero.
+chequear('el saldo inicial muestra lo que dio su proveedor',
     1000.0, $p['DISPONIBLE']['dias']['2026-09-06']);
+chequear('y cero donde el proveedor no dio nada, sin arrastrar',
+    0.0, $p['DISPONIBLE']['dias']['2026-09-07']);
+chequear('la fila de saldo inicial NO esta marcada como arrastre',
+    false, $p['DISPONIBLE']['arrastre']);
+
+// El arrastre sigue existiendo, pero solo lo muestra el saldo final
 chequear('saldo final del 06/09 = 1000 de apertura + 100',
     1100.0, $p['SALDO_FIN']['dias']['2026-09-06']);
-chequear('el saldo inicial del 07/09 es el cierre del 06/09',
-    1100.0, $p['DISPONIBLE']['dias']['2026-09-07']);
+chequear('el saldo final SI esta marcado como arrastre',
+    true, $p['SALDO_FIN']['arrastre']);
 chequear('saldo final del 07/09 = 1100 + 150', 1250.0, $p['SALDO_FIN']['dias']['2026-09-07']);
 chequear('un dia sin movimiento mantiene el saldo',
     1250.0, $p['SALDO_FIN']['dias']['2026-09-08']);
@@ -259,9 +265,12 @@ $t2 = $motor2->proyectar();
 $p2 = porCodigo($t2);
 
 chequear('la columna queda marcada fuera de secuencia', false, $t2['meses'][0]['en_secuencia']);
+// Null es para las filas que dependen del arrastre: ahi no hay posicion que
+// mostrar. Una fila de DATOS, en cambio, muestra lo que tiene, que es cero.
 chequear('el saldo final ahi es null, no cero', null, $p2['SALDO_FIN']['meses']['2026-09']);
-chequear('el saldo inicial tambien', null, $p2['DISPONIBLE']['meses']['2026-09']);
 chequear('y el flujo neto tambien', null, $p2['FLUJO']['meses']['2026-09']);
+chequear('pero el saldo inicial, que es una fila de datos, va en cero',
+    0.0, $p2['DISPONIBLE']['meses']['2026-09']);
 chequear('la columna siguiente si tiene valor', 1100.0, $p2['SALDO_FIN']['meses']['2026-10']);
 
 /* ================================================================
@@ -324,10 +333,16 @@ chequear('Ingresos Venta no incluye el saldo: son 70',
     70.0, $px['ING_VENTA']['dias']['2026-09-06']);
 chequear('Saldo Final = Disponible + Ingresos Venta = 119 + 70',
     189.0, $px['SALDO_FIN']['dias']['2026-09-06']);
-chequear('y al dia siguiente el saldo inicial arrastra ese cierre',
-    189.0, $px['SALDO_BANCOS']['dias']['2026-09-07']);
-chequear('con lo que Disponible del dia 2 tambien arrastra',
-    189.0, $px['DISPONIBLE']['dias']['2026-09-07']);
+
+// El saldo en bancos es un dato de Tesoreria: si no cargaron nada al dia
+// siguiente, va en cero. NO hereda el cierre del dia anterior.
+chequear('al dia siguiente el saldo en bancos va en cero, no arrastra',
+    0.0, $px['SALDO_BANCOS']['dias']['2026-09-07']);
+chequear('y su subtotal tampoco arrastra', 0.0, $px['DISPONIBLE']['dias']['2026-09-07']);
+
+// El arrastre lo lleva el saldo final, que si acumula
+chequear('el saldo final del dia 2 sigue acumulando', 189.0,
+    $px['SALDO_FIN']['dias']['2026-09-07']);
 
 // El subtotal que arrastra saldo hereda su indefinicion fuera de secuencia
 $parX = new ParametrosFalsos();
@@ -346,19 +361,22 @@ $motorX2->series = [
 $tx2 = $motorX2->proyectar();
 $px2 = porCodigo($tx2);
 
-chequear('un subtotal que incluye saldo es null fuera de secuencia, no cero',
-    null, $px2['DISPONIBLE']['meses']['2026-09']);
-chequear('pero un subtotal de solo movimientos ahi es cero',
+// Como la fila de saldo ya no arrastra, su subtotal es una suma comun y en una
+// columna fuera de secuencia da cero, no null.
+chequear('el subtotal con saldo es cero fuera de secuencia',
+    0.0, $px2['DISPONIBLE']['meses']['2026-09']);
+chequear('igual que uno de solo movimientos',
     0.0, $px2['ING_VENTA']['meses']['2026-09']);
-chequear('el total de un subtotal con saldo no es una suma: es el cierre',
-    90.0, $px2['DISPONIBLE']['total_tramo']);
+chequear('y su total es una suma', 90.0, $px2['DISPONIBLE']['total_tramo']);
 
-// Las filas de arrastre quedan marcadas, para que la pantalla pueda explicar
-// que su numero NO es un dato cargado en la fila.
-chequear('la fila de saldo esta marcada como arrastre', true, $px2['SALDO_BANCOS']['arrastre']);
-chequear('el subtotal que la incluye tambien', true, $px2['DISPONIBLE']['arrastre']);
-chequear('un subtotal de solo movimientos NO', false, $px2['ING_VENTA']['arrastre']);
+// Solo el saldo final queda marcado como arrastre: es el unico que muestra un
+// numero que no viene de su fila.
+chequear('la fila de saldo inicial NO esta marcada como arrastre',
+    false, $px2['SALDO_BANCOS']['arrastre']);
+chequear('el subtotal que la incluye tampoco', false, $px2['DISPONIBLE']['arrastre']);
+chequear('un subtotal de solo movimientos tampoco', false, $px2['ING_VENTA']['arrastre']);
 chequear('una fila de ingreso comun tampoco', false, $px2['COB_FR']['arrastre']);
+chequear('el saldo final SI', true, $px2['SALDO_FIN']['arrastre']);
 
 // FLUJO_NETO tambien tiene celdas en null fuera de secuencia, pero es un FLUJO
 // y su total SI es una suma. Con el criterio de "tiene nulls" daba el flujo de
