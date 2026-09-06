@@ -154,3 +154,39 @@
 .tab-cashflow #cfKpis .kpi-card {
     height: 100%;
 }
+
+/* ---- Vista de período completo ---- */
+
+/* Segundo rótulo de grupo (el tramo mensual). No se puede pegar a la izquierda
+   como el primero, porque su posición depende de cuántas columnas diarias haya;
+   queda alineado a la izquierda de su propio bloque. */
+.tab-cashflow .cf-col-periodo-2 {
+    text-align: left;
+    font-weight: 600;
+}
+
+/* Donde termina el tramo diario y arranca el mensual */
+.tab-cashflow .cf-inicio-meses {
+    border-left: 2px solid #b6cfe8;
+}
+
+/* ---- Barra de período activo ---- */
+
+.tab-cashflow .cf-periodo-activo {
+    background-color: #eaf2fb;
+    border: 1px solid #cfe0f2;
+    border-radius: 6px;
+    padding: 7px 12px;
+    font-size: 0.82rem;
+    color: #3c5a7a;
+}
+
+/* El indicador que no cambia con la vista: se distingue de los demás para que
+   no se lea como si midiera el período seleccionado. */
+.tab-cashflow .cf-kpi-fijo {
+    border-left: 3px solid #b6cfe8;
+}
+
+.tab-cashflow .cf-kpi-periodo {
+    color: #6c757d;
+}

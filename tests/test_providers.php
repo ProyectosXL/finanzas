@@ -117,8 +117,15 @@ foreach ($disponibles as $meta) {
 
     $series = $prov->series($hReal);
 
-    chequear("$codigo devuelve las series que declara el registro",
-        array_keys($meta['series']), array_keys($series));
+    // Se compara el CONJUNTO y no el orden: el motor busca las series por
+    // clave, asi que el orden en que el proveedor las arma no importa.
+    $declaradas = array_keys($meta['series']);
+    $devueltas = array_keys($series);
+    sort($declaradas);
+    sort($devueltas);
+
+    chequear("$codigo devuelve exactamente las series que declara el registro",
+        $declaradas, $devueltas);
 
     foreach ($series as $nombre => $s) {
         chequear("$codigo/$nombre: claves diarias completas",

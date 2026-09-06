@@ -18,14 +18,19 @@
 
     <!-- Indicadores -->
     <div class="row g-3 mb-3" id="cfKpis" style="display: none;">
+        <!-- El Disponible Inicial es el ÚNICO que no cambia con la vista: es con
+             cuánto se arranca hoy, un hecho del presente y no del período que se
+             elige mirar. Lleva un ícono de ancla y el pie lo aclara. -->
         <div class="col-6 col-md-4 col-xl-2">
-            <div class="kpi-card">
+            <div class="kpi-card cf-kpi-fijo">
                 <div class="kpi-card-header">
                     <span class="kpi-card-title">Disponible Inicial</span>
-                    <div class="kpi-card-icon blue"><i class="fas fa-wallet"></i></div>
+                    <div class="kpi-card-icon blue"><i class="fas fa-anchor"></i></div>
                 </div>
                 <div class="kpi-card-value" id="cfKpiApertura">$ 0,00</div>
-                <div class="kpi-card-footer"><span class="text-muted">Al inicio del período</span></div>
+                <div class="kpi-card-footer">
+                    <span class="text-muted">Hoy, no varía con la vista</span>
+                </div>
             </div>
         </div>
 
@@ -36,7 +41,7 @@
                     <div class="kpi-card-icon green"><i class="fas fa-arrow-trend-up"></i></div>
                 </div>
                 <div class="kpi-card-value" id="cfKpiIngresos">$ 0,00</div>
-                <div class="kpi-card-footer"><span class="text-muted" id="cfKpiTramoLabel">Tramo diario</span></div>
+                <div class="kpi-card-footer"><span class="cf-kpi-periodo"></span></div>
             </div>
         </div>
 
@@ -47,7 +52,7 @@
                     <div class="kpi-card-icon orange"><i class="fas fa-arrow-trend-down"></i></div>
                 </div>
                 <div class="kpi-card-value" id="cfKpiEgresos">$ 0,00</div>
-                <div class="kpi-card-footer"><span class="text-muted">Tramo diario</span></div>
+                <div class="kpi-card-footer"><span class="cf-kpi-periodo"></span></div>
             </div>
         </div>
 
@@ -58,7 +63,7 @@
                     <div class="kpi-card-icon blue"><i class="fas fa-scale-balanced"></i></div>
                 </div>
                 <div class="kpi-card-value" id="cfKpiFlujo">$ 0,00</div>
-                <div class="kpi-card-footer"><span class="text-muted">Ingresos menos egresos</span></div>
+                <div class="kpi-card-footer"><span class="cf-kpi-periodo"></span></div>
             </div>
         </div>
 
@@ -69,7 +74,7 @@
                     <div class="kpi-card-icon green"><i class="fas fa-flag-checkered"></i></div>
                 </div>
                 <div class="kpi-card-value" id="cfKpiCierre">$ 0,00</div>
-                <div class="kpi-card-footer"><span class="text-muted" id="cfKpiCierreHorizonte">&nbsp;</span></div>
+                <div class="kpi-card-footer"><span class="text-muted" id="cfKpiCierreCuando">&nbsp;</span></div>
             </div>
         </div>
 
@@ -86,6 +91,10 @@
             </div>
         </div>
     </div>
+
+    <!-- Qué período están midiendo los indicadores. Cambia con la vista, y es
+         lo que evita leer un número creyendo que cubre otro tramo. -->
+    <div class="cf-periodo-activo mb-3" id="cfPeriodoActivo" style="display: none;"></div>
 
     <!-- Avisos del motor: módulos sin construir, importes fuera del horizonte,
          errores de configuración. -->
@@ -104,6 +113,9 @@
                     </button>
                     <button id="cfBtnMeses" class="btn btn-sm btn-outline-secondary">
                         <i class="fas fa-calendar-alt me-1"></i> Meses
+                    </button>
+                    <button id="cfBtnCompleto" class="btn btn-sm btn-outline-secondary">
+                        <i class="fas fa-calendar me-1"></i> Período completo
                     </button>
                 </div>
                 <button id="cfBtnRefresh" class="btn btn-sm btn-outline-primary">

@@ -149,8 +149,11 @@ chequear('el flujo neto es la suma de los subtotales',
 
 seccion('arrastre del saldo');
 
-chequear('el saldo inicial del primer dia es cero: el aporte entra ese dia',
-    0.0, $p['DISPONIBLE']['dias']['2026-09-06']);
+// La fila de saldo inicial muestra el arrastre de la columna anterior MAS lo
+// que aporte su proveedor en esta. En la primera columna las dos cosas
+// coinciden, porque el arrastre viene en cero.
+chequear('el saldo inicial del primer dia es lo que aporto el proveedor',
+    1000.0, $p['DISPONIBLE']['dias']['2026-09-06']);
 chequear('saldo final del 06/09 = 1000 de apertura + 100',
     1100.0, $p['SALDO_FIN']['dias']['2026-09-06']);
 chequear('el saldo inicial del 07/09 es el cierre del 06/09',
@@ -176,26 +179,61 @@ chequear('se cumple cierre[n] == apertura[n+1]', false, $descuadre);
 seccion('totales');
 
 chequear('total del tramo del flujo = 100 + 150 + 0', 250.0, $p['FLUJO']['total_tramo']);
+chequear('total mensual del flujo = 0 + 400 + 0', 400.0, $p['FLUJO']['total_meses']);
 chequear('total del horizonte del flujo = 250 + 400', 650.0, $p['FLUJO']['total_horizonte']);
 chequear('el total de una fila de saldo NO es una suma: es el cierre del tramo',
     1250.0, $p['SALDO_FIN']['total_tramo']);
 chequear('y el del horizonte es el cierre final', 1650.0, $p['SALDO_FIN']['total_horizonte']);
 chequear('la fila esta marcada como de saldo', true, $p['SALDO_FIN']['es_saldo']);
 chequear('el saldo inicial informa la apertura del horizonte',
-    0.0, $p['DISPONIBLE']['total_horizonte']);
+    1000.0, $p['DISPONIBLE']['total_horizonte']);
 
-seccion('KPI');
+seccion('KPI por vista: cada uno mide las columnas que se estan mirando');
 
 // ingresos y egresos son MAGNITUDES positivas, como se muestran en una tarjeta
-chequear('ingresos del tramo', 300.0, $t['kpi']['ingresos_tramo']);
-chequear('egresos del tramo, en positivo', 50.0, $t['kpi']['egresos_tramo']);
-chequear('flujo del tramo = 300 - 50', 250.0, $t['kpi']['flujo_tramo']);
-chequear('el KPI de flujo coincide con la fila del tablero',
-    $p['FLUJO']['total_tramo'], $t['kpi']['flujo_tramo']);
-chequear('saldo de cierre del tramo', 1250.0, $t['kpi']['saldo_cierre_tramo']);
-chequear('saldo de cierre del horizonte', 1650.0, $t['kpi']['saldo_cierre_horizonte']);
-chequear('el saldo mas bajo proyectado', 1100.0, $t['kpi']['minimo']['valor']);
-chequear('y cuando ocurre', 'DIA|2026-09-06', $t['kpi']['minimo']['columna']);
+$kd = $t['kpi']['dias'];
+$km = $t['kpi']['meses'];
+$kc = $t['kpi']['completo'];
+
+chequear('dias: ingresos', 300.0, $kd['ingresos']);
+chequear('dias: egresos en positivo', 50.0, $kd['egresos']);
+chequear('dias: flujo = 300 - 50', 250.0, $kd['flujo']);
+chequear('dias: el KPI coincide con el total de la fila del tablero',
+    $p['FLUJO']['total_tramo'], $kd['flujo']);
+chequear('dias: saldo de cierre', 1250.0, $kd['saldo_cierre']);
+chequear('dias: el saldo mas bajo', 1100.0, $kd['minimo']['valor']);
+chequear('dias: y cuando ocurre', 'DIA|2026-09-06', $kd['minimo']['columna']);
+chequear('dias: cuenta las columnas', 3, $kd['columnas']);
+
+chequear('meses: ingresos son OTROS (los del tramo mensual)', 500.0, $km['ingresos']);
+chequear('meses: egresos', 100.0, $km['egresos']);
+chequear('meses: flujo = 500 - 100', 400.0, $km['flujo']);
+chequear('meses: el KPI coincide con el total mensual de la fila',
+    $p['FLUJO']['total_meses'], $km['flujo']);
+chequear('meses: saldo de cierre es el final del horizonte', 1650.0, $km['saldo_cierre']);
+chequear('meses: el minimo es el de su propio tramo', 1250.0, $km['minimo']['valor']);
+
+chequear('completo: ingresos son la suma de los dos', 800.0, $kc['ingresos']);
+chequear('completo: egresos', 150.0, $kc['egresos']);
+chequear('completo: flujo coincide con el total del horizonte',
+    $p['FLUJO']['total_horizonte'], $kc['flujo']);
+chequear('completo: saldo de cierre', 1650.0, $kc['saldo_cierre']);
+chequear('completo: el minimo es el mas bajo de todos', 1100.0, $kc['minimo']['valor']);
+chequear('completo: cuenta todas las columnas', 6, $kc['columnas']);
+
+// El saldo de apertura es el UNICO que no varia: es con cuanto se arranca hoy.
+chequear('la apertura no varia entre vistas (dias vs meses)',
+    $kd['saldo_apertura'], $km['saldo_apertura']);
+chequear('la apertura no varia entre vistas (dias vs completo)',
+    $kd['saldo_apertura'], $kc['saldo_apertura']);
+chequear('y es lo que aporto el proveedor de saldos', 1000.0, $kd['saldo_apertura']);
+
+// Cada vista dice sobre que periodo esta midiendo
+chequear('dias: rotulo del periodo', 'Del 6/9 al 8/9', $kd['periodo']);
+chequear('meses: el rotulo aclara que va despues del tramo diario',
+    true, strpos($km['periodo'], 'despues del tramo diario') !== false);
+chequear('completo: el rotulo dice que es todo el horizonte',
+    true, strpos($kc['periodo'], 'todo el horizonte') !== false);
 
 /* ================================================================
    Columna fuera de la secuencia: null, no cero.
@@ -241,6 +279,79 @@ chequear('el tablero se arma igual', 8, count($t3['filas']));
 chequear('la fila queda marcada sin datos', true, $p3['COBROS']['sin_datos']);
 chequear('y se muestra en cero', 0.0, $p3['COBROS']['dias']['2026-09-06']);
 chequear('el saldo final tambien es cero', 0.0, $p3['SALDO_FIN']['dias']['2026-09-06']);
+
+/* ================================================================
+   La estructura del Excel: el saldo en bancos vive DENTRO de la
+   seccion de disponibilidades, y el subtotal "Disponible" lo incluye.
+
+   Del Excel original:
+     Disponible(8/9) = SaldoInicial(8/9) + Echeqs + CobElec + CobFranq
+     SaldoInicial(9/9) = Disponible(8/9) + IngresosVenta(8/9) - egresos
+   ================================================================ */
+seccion('estructura del Excel: subtotal que incluye el saldo');
+
+$estExcel = new EstructuraFalsa();
+$estExcel->secciones = [
+    seccionConf('DISPO', 'Disponibilidades', 'SALDO', 10),
+    seccionConf('VTAS', 'Ventas', 'MOVIMIENTO', 20),
+    seccionConf('RES', 'Resultados', 'DERIVADO', 30),
+];
+$estExcel->filas = [
+    filaConf(1, 'SALDO_BANCOS', 'DISPO', 'SALDO_INICIAL', 10, 'SALDOS', 'DISPONIBLE'),
+    filaConf(2, 'ECHEQS', 'DISPO', 'INGRESO', 20, 'ECHEQS', 'A_COBRAR'),
+    filaConf(3, 'COB_FR', 'DISPO', 'INGRESO', 30, 'COBRANZAS_FR', 'COBRANZA'),
+    filaConf(4, 'DISPONIBLE', 'DISPO', 'SUBTOTAL', 40),
+    filaConf(5, 'VTA_LOCALES', 'VTAS', 'INGRESO', 10, 'VENTAS', 'COBRANZA_LOCALES'),
+    filaConf(6, 'ING_VENTA', 'VTAS', 'SUBTOTAL', 20),
+    filaConf(7, 'SALDO_FIN', 'RES', 'SALDO_FINAL', 10),
+];
+
+$motorX = new CashflowFalso($estExcel, new ParametrosFalsos());
+$motorX->series = [
+    'SALDOS' => ['DISPONIBLE' => serieCon($h, ['2026-09-06' => 90])],
+    'ECHEQS' => ['A_COBRAR' => serieCon($h, ['2026-09-06' => 4])],
+    'COBRANZAS_FR' => ['COBRANZA' => serieCon($h, ['2026-09-06' => 25])],
+    'VENTAS' => ['COBRANZA_LOCALES' => serieCon($h, ['2026-09-06' => 70])],
+];
+
+$tx = $motorX->proyectar();
+$px = porCodigo($tx);
+
+chequear('el saldo en bancos se muestra', 90.0, $px['SALDO_BANCOS']['dias']['2026-09-06']);
+chequear('Disponible = saldo + echeqs + cobranzas = 90 + 4 + 25',
+    119.0, $px['DISPONIBLE']['dias']['2026-09-06']);
+chequear('Ingresos Venta no incluye el saldo: son 70',
+    70.0, $px['ING_VENTA']['dias']['2026-09-06']);
+chequear('Saldo Final = Disponible + Ingresos Venta = 119 + 70',
+    189.0, $px['SALDO_FIN']['dias']['2026-09-06']);
+chequear('y al dia siguiente el saldo inicial arrastra ese cierre',
+    189.0, $px['SALDO_BANCOS']['dias']['2026-09-07']);
+chequear('con lo que Disponible del dia 2 tambien arrastra',
+    189.0, $px['DISPONIBLE']['dias']['2026-09-07']);
+
+// El subtotal que arrastra saldo hereda su indefinicion fuera de secuencia
+$parX = new ParametrosFalsos();
+$parX->dias = 28;
+$parX->meses = 2;
+
+$hX = new Horizonte(28, 2, [], new DateTime('2026-09-06'));
+$motorX2 = new CashflowFalso($estExcel, $parX);
+$motorX2->series = [
+    'SALDOS' => ['DISPONIBLE' => serieCon($hX, ['2026-09-06' => 90])],
+    'ECHEQS' => ['A_COBRAR' => serieCon($hX)],
+    'COBRANZAS_FR' => ['COBRANZA' => serieCon($hX)],
+    'VENTAS' => ['COBRANZA_LOCALES' => serieCon($hX)],
+];
+
+$tx2 = $motorX2->proyectar();
+$px2 = porCodigo($tx2);
+
+chequear('un subtotal que incluye saldo es null fuera de secuencia, no cero',
+    null, $px2['DISPONIBLE']['meses']['2026-09']);
+chequear('pero un subtotal de solo movimientos ahi es cero',
+    0.0, $px2['ING_VENTA']['meses']['2026-09']);
+chequear('el total de un subtotal con saldo no es una suma: es el cierre',
+    90.0, $px2['DISPONIBLE']['total_tramo']);
 
 /* ================================================================
    Un resultado intermedio suma solo lo que tiene por encima

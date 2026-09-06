@@ -54,8 +54,25 @@ class CashflowRegistry {
             'disponible' => true,
             'tab' => 'ventas',
             'series' => [
-                'COBRANZA' => 'Cobranza estimada sobre ventas futuras',
-                'VENTA' => 'Venta proyectada (informativa, no es caja)'
+                'COBRANZA' => 'Cobranza estimada, total',
+                'COBRANZA_LOCALES' => 'Cobranza estimada - Locales',
+                'COBRANZA_FRANQUICIAS' => 'Cobranza estimada - Franquicias',
+                'COBRANZA_MAYORISTAS' => 'Cobranza estimada - Mayoristas',
+                'COBRANZA_ECOMMERCE' => 'Cobranza estimada - Ecommerce',
+                'VENTA' => 'Venta proyectada, total (no es caja)',
+                'VENTA_LOCALES' => 'Venta proyectada - Locales (no es caja)',
+                'VENTA_FRANQUICIAS' => 'Venta proyectada - Franquicias (no es caja)',
+                'VENTA_MAYORISTAS' => 'Venta proyectada - Mayoristas (no es caja)',
+                'VENTA_ECOMMERCE' => 'Venta proyectada - Ecommerce (no es caja)'
+            ],
+            // Una serie total y sus componentes NO pueden estar activas a la
+            // vez: seria contar dos veces el mismo importe. El validador de la
+            // estructura lo rechaza a partir de esto.
+            'componentes' => [
+                'COBRANZA' => ['COBRANZA_LOCALES', 'COBRANZA_FRANQUICIAS',
+                               'COBRANZA_MAYORISTAS', 'COBRANZA_ECOMMERCE'],
+                'VENTA' => ['VENTA_LOCALES', 'VENTA_FRANQUICIAS',
+                            'VENTA_MAYORISTAS', 'VENTA_ECOMMERCE']
             ]
         ],
 
@@ -207,6 +224,40 @@ class CashflowRegistry {
             'disponible' => false,
             'tab' => 'otros_socios',
             'series' => ['MOVIMIENTOS' => 'Otros movimientos']
+        ],
+
+        /* ---- Filas del Excel que hoy se cargan a mano ----------------------
+           En el Excel original estas filas las tipea una persona (Tesoreria,
+           Silvina, Dan, Alejandro). El modulo resuelve el origen de datos
+           unicamente por proveedor, asi que hasta que exista el modulo que las
+           alimente se muestran en cero y el tablero avisa. Quedan declaradas
+           para que la estructura del cuadro este completa. */
+
+        'DOLARES_COMITENTE' => [
+            'nombre' => 'Dolares Cuenta Comitente',
+            'descripcion' => 'Dolares disponibles en la cuenta comitente',
+            'moneda' => 'USD',
+            'disponible' => false,
+            'tab' => 'saldos',
+            'series' => ['DISPONIBLE' => 'Dolares en cuenta comitente']
+        ],
+
+        'CAJA_LOCALES' => [
+            'nombre' => 'Caja Locales',
+            'descripcion' => 'Deposito de la recaudacion de los locales propios',
+            'moneda' => 'ARS',
+            'disponible' => false,
+            'tab' => 'saldos',
+            'series' => ['DEPOSITOS' => 'Depositos de caja de locales']
+        ],
+
+        'EXPORTACIONES' => [
+            'nombre' => 'Exportaciones',
+            'descripcion' => 'Cobranza de exportaciones',
+            'moneda' => 'USD',
+            'disponible' => false,
+            'tab' => 'saldos',
+            'series' => ['COBRANZA' => 'Cobranza de exportaciones']
         ]
     ];
 

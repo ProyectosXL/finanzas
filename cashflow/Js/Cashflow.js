@@ -24,21 +24,33 @@
     'use strict';
 
     var datos = null;
-    var vista = 'dias';   // 'dias' o 'meses'
+
+    /**
+     * 'dias'     -> las 28 columnas diarias
+     * 'meses'    -> las 12 columnas mensuales
+     * 'completo' -> las dos ramas juntas, el período entero
+     */
+    var vista = 'dias';
+
+    var VISTAS = ['dias', 'meses', 'completo'];
+
+    var BOTONES = {
+        dias: 'cfBtnDias',
+        meses: 'cfBtnMeses',
+        completo: 'cfBtnCompleto'
+    };
 
     function inicializar() {
-        var btnDias = document.getElementById('cfBtnDias');
-        var btnMeses = document.getElementById('cfBtnMeses');
         var btnRefresh = document.getElementById('cfBtnRefresh');
         var btnExport = document.getElementById('cfBtnExport');
 
-        if (btnDias) {
-            btnDias.addEventListener('click', function() { cambiarVista('dias'); });
-        }
+        VISTAS.forEach(function(v) {
+            var b = document.getElementById(BOTONES[v]);
 
-        if (btnMeses) {
-            btnMeses.addEventListener('click', function() { cambiarVista('meses'); });
-        }
+            if (b) {
+                b.addEventListener('click', function() { cambiarVista(v); });
+            }
+        });
 
         if (btnRefresh) {
             btnRefresh.addEventListener('click', cargar);
@@ -95,11 +107,9 @@
 
         vista = nueva;
 
-        var btnDias = document.getElementById('cfBtnDias');
-        var btnMeses = document.getElementById('cfBtnMeses');
-
-        activar(btnDias, vista === 'dias');
-        activar(btnMeses, vista === 'meses');
+        VISTAS.forEach(function(v) {
+            activar(document.getElementById(BOTONES[v]), vista === v);
+        });
 
         pintarKpis();
         pintarGrilla();
@@ -155,26 +165,39 @@
        INDICADORES
        ================================================================ */
 
+    /**
+     * Los indicadores miden exactamente las columnas que se están mirando: el
+     * backend los devuelve ya resueltos por vista y acá sólo se elige el bloque.
+     *
+     * El único que NO cambia es el Disponible Inicial: es con cuánto se arranca
+     * hoy, un hecho del presente y no del período que se elige mirar.
+     */
     function pintarKpis() {
-        var k = datos.kpi;
-        var enMeses = (vista === 'meses');
+        var k = datos.kpi[vista];
+
+        if (!k) {
+            return;
+        }
 
         kpi('cfKpiApertura', k.saldo_apertura);
-        kpi('cfKpiIngresos', k.ingresos_tramo);
-        kpi('cfKpiEgresos', k.egresos_tramo);
-        kpi('cfKpiFlujo', k.flujo_tramo);
+        kpi('cfKpiIngresos', k.ingresos);
+        kpi('cfKpiEgresos', k.egresos);
+        kpi('cfKpiFlujo', k.flujo);
+        kpi('cfKpiCierre', k.saldo_cierre);
 
-        // Los KPI de ingresos, egresos y flujo son SIEMPRE del tramo diario: es
-        // el horizonte sobre el que se decide. El rótulo lo aclara.
-        texto('cfKpiTramoLabel', 'Próximos ' + datos.horizonte_dias + ' días');
+        pintarSigno('cfKpiFlujo', k.flujo);
+        pintarSigno('cfKpiCierre', k.saldo_cierre);
 
-        kpi('cfKpiCierre', enMeses ? k.saldo_cierre_horizonte : k.saldo_cierre_tramo);
-        texto('cfKpiCierreHorizonte', enMeses
-            ? 'A ' + datos.horizonte_meses + ' meses'
-            : 'A ' + datos.horizonte_dias + ' días');
+        // El pie de las tarjetas de flujo dice cuántas columnas se están sumando
+        var pies = document.querySelectorAll('#cfKpis .cf-kpi-periodo');
+        var unidad = (vista === 'meses') ? ' meses' : (vista === 'dias' ? ' días' : ' columnas');
 
-        pintarSigno('cfKpiFlujo', k.flujo_tramo);
-        pintarSigno('cfKpiCierre', enMeses ? k.saldo_cierre_horizonte : k.saldo_cierre_tramo);
+        Array.prototype.forEach.call(pies, function(el) {
+            el.textContent = k.columnas + unidad;
+        });
+
+        var cols = columnas();
+        texto('cfKpiCierreCuando', cols.length ? 'Al ' + cols[cols.length - 1].label : '');
 
         if (k.minimo) {
             kpi('cfKpiMinimo', k.minimo.valor);
@@ -184,6 +207,32 @@
             texto('cfKpiMinimo', '—');
             texto('cfKpiMinimoCuando', 'Sin datos');
         }
+
+        pintarPeriodoActivo(k);
+    }
+
+    /**
+     * Barra que enuncia el período medido. Es lo que evita leer un número
+     * creyendo que cubre otro tramo: en la vista Meses las columnas mensuales
+     * acumulan sólo los días que quedan FUERA del tramo diario, así que su total
+     * no es el del horizonte completo.
+     */
+    function pintarPeriodoActivo(k) {
+        var el = document.getElementById('cfPeriodoActivo');
+
+        if (!el) {
+            return;
+        }
+
+        var etiquetas = { dias: 'Días', meses: 'Meses', completo: 'Período completo' };
+
+        el.innerHTML =
+            '<i class="fas fa-calendar-check me-2"></i>'
+            + '<strong>' + escapar(etiquetas[vista]) + '</strong>'
+            + ' &middot; los indicadores y la columna Total miden '
+            + escapar(k.periodo.charAt(0).toLowerCase() + k.periodo.slice(1)) + '.';
+
+        el.style.display = '';
     }
 
     /**
@@ -222,19 +271,19 @@
     /** Columnas de la vista actual, ya normalizadas */
     function columnas() {
         if (vista === 'meses') {
-            return datos.meses.map(function(m) {
-                return {
-                    rama: 'meses',
-                    clave: m.clave,
-                    label: m.label,
-                    enSecuencia: m.en_secuencia,
-                    nota: m.parcial
-                        ? 'Acumula sólo los días de este mes que quedan fuera del tramo diario'
-                        : ''
-                };
-            });
+            return colsMeses();
         }
 
+        if (vista === 'completo') {
+            // El período entero, en orden cronológico: primero el tramo diario
+            // y después el mensual, que arranca donde termina el diario.
+            return colsDias().concat(colsMeses());
+        }
+
+        return colsDias();
+    }
+
+    function colsDias() {
         return datos.dias.map(function(d) {
             return {
                 rama: 'dias',
@@ -247,6 +296,34 @@
         });
     }
 
+    function colsMeses() {
+        return datos.meses.map(function(m) {
+            return {
+                rama: 'meses',
+                clave: m.clave,
+                label: m.label,
+                enSecuencia: m.en_secuencia,
+                mensual: true,
+                nota: m.parcial
+                    ? 'Acumula sólo los días de este mes que quedan fuera del tramo diario'
+                    : ''
+            };
+        });
+    }
+
+    /** El total que corresponde a la vista: cada uno suma sus propias columnas */
+    function totalDeVista(f) {
+        if (vista === 'meses') {
+            return f.total_meses;
+        }
+
+        if (vista === 'completo') {
+            return f.total_horizonte;
+        }
+
+        return f.total_tramo;
+    }
+
     function pintarGrilla() {
         var cols = columnas();
 
@@ -255,30 +332,60 @@
     }
 
     function pintarEncabezado(cols) {
-        var titulo = (vista === 'meses')
-            ? 'Próximos ' + datos.horizonte_meses + ' meses'
-            : 'Próximos ' + datos.horizonte_dias + ' días';
-
         // El rótulo del período va alineado a la izquierda y pegado como
         // segunda columna fija. Centrado sobre 28 columnas quedaba a unos
         // 1500px a la derecha, o sea fuera de la pantalla, y la fila se veía
         // vacía.
+        var grupos = '';
+
+        if (vista === 'completo') {
+            // Dos rótulos, uno por tramo: en la vista completa conviven las dos
+            // ramas del eje y hay que ver dónde termina una y arranca la otra.
+            var nDias = datos.dias.length;
+
+            grupos =
+                '<th colspan="' + nDias + '" class="table-group-divider cf-col-periodo">'
+                    + 'Próximos ' + datos.horizonte_dias + ' días'
+                + '</th>'
+                + '<th colspan="' + (cols.length - nDias) + '" '
+                    + 'class="table-group-divider cf-col-periodo-2">'
+                    + 'Meses siguientes'
+                + '</th>';
+        } else {
+            var titulo = (vista === 'meses')
+                ? 'Próximos ' + datos.horizonte_meses + ' meses'
+                : 'Próximos ' + datos.horizonte_dias + ' días';
+
+            grupos = '<th colspan="' + cols.length + '" '
+                + 'class="table-group-divider cf-col-periodo">' + escapar(titulo) + '</th>';
+        }
+
         document.getElementById('cfHeaderTop').innerHTML =
             '<th rowspan="2" class="cf-col-concepto">Concepto</th>' +
-            '<th colspan="' + cols.length + '" class="table-group-divider cf-col-periodo">' +
-                escapar(titulo) +
-            '</th>' +
+            grupos +
             '<th rowspan="2" class="text-end cf-col-total">Total</th>';
 
-        document.getElementById('cfHeaderSub').innerHTML = cols.map(function(c) {
-            var clases = ['text-end'];
-
-            if (!c.enSecuencia) { clases.push('cf-col-fuera'); }
-            if (c.feriado) { clases.push('cf-col-feriado'); }
-
-            return '<th class="' + clases.join(' ') + '"' + tip(c.nota) + '>'
-                + escapar(c.label) + '</th>';
+        document.getElementById('cfHeaderSub').innerHTML = cols.map(function(c, i) {
+            return '<th class="' + clasesColumna(c, i).concat(['text-end']).join(' ') + '"'
+                + tip(c.nota) + '>' + escapar(c.label) + '</th>';
         }).join('');
+    }
+
+    /**
+     * Clases de una columna. En la vista completa se marca la primera columna
+     * mensual, para que se vea donde termina el tramo diario.
+     */
+    function clasesColumna(c, i) {
+        var clases = [];
+
+        if (!c.enSecuencia) { clases.push('cf-col-fuera'); }
+        if (c.feriado) { clases.push('cf-col-feriado'); }
+
+        if (vista === 'completo' && c.mensual && i === datos.dias.length) {
+            clases.push('cf-inicio-meses');
+        }
+
+        return clases;
     }
 
     function pintarFilas(cols) {
@@ -315,11 +422,11 @@
         if (!f.computa && !f.derivada) { clases.push('cf-informativa'); }
         if (f.sin_datos) { clases.push('cf-sin-datos'); }
 
-        var celdas = cols.map(function(c) {
-            return celdaHtml(f[c.rama][c.clave], c);
+        var celdas = cols.map(function(c, i) {
+            return celdaHtml(f[c.rama][c.clave], c, i);
         }).join('');
 
-        var total = (vista === 'meses') ? f.total_horizonte : f.total_tramo;
+        var total = totalDeVista(f);
 
         return '<tr class="' + clases.join(' ') + '">' +
             '<td class="cf-col-concepto" title="' + escapar(f.nombre) + '">' +
@@ -357,11 +464,8 @@
         return nombre + marca;
     }
 
-    function celdaHtml(valor, col) {
-        var clases = ['text-end'];
-
-        if (!col.enSecuencia) { clases.push('cf-col-fuera'); }
-        if (col.feriado) { clases.push('cf-col-feriado'); }
+    function celdaHtml(valor, col, i) {
+        var clases = clasesColumna(col, i).concat(['text-end']);
 
         // null no es cero: es una columna que no representa ningún día futuro.
         if (valor === null || valor === undefined) {

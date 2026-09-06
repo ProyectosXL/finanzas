@@ -12,7 +12,10 @@ require_once __DIR__ . '/../cashflow/Class/CashflowEstructura.php';
 $PROVS = [
     'VENTAS' => [
         'codigo' => 'VENTAS', 'nombre' => 'Ventas', 'disponible' => true,
-        'series' => ['COBRANZA' => 'Cobranza', 'VENTA' => 'Venta']
+        'series' => ['COBRANZA' => 'Cobranza', 'VENTA' => 'Venta',
+                     'COBRANZA_LOCALES' => 'Cobranza Locales',
+                     'COBRANZA_FRANQUICIAS' => 'Cobranza Franquicias'],
+        'componentes' => ['COBRANZA' => ['COBRANZA_LOCALES', 'COBRANZA_FRANQUICIAS']]
     ],
     'SALDOS' => [
         'codigo' => 'SALDOS', 'nombre' => 'Saldos', 'disponible' => false,
@@ -151,6 +154,38 @@ chequear('una inhabilitada no cuenta para el doble conteo',
 // Una fila inhabilitada sin origen tampoco molesta
 $r = CashflowEstructura::validar($secciones, [fil(1, 'A', 'ING', 'INGRESO', null, null, 0)], $PROVS);
 chequear('fila inhabilitada sin origen no es error', false, hayError($r, 'no tiene origen'));
+
+seccion('total y apertura por canal a la vez');
+
+// La regla de origen repetido no ve esto, porque son series DISTINTAS: hace
+// falta la relacion total-componentes que declara el registro.
+$r = CashflowEstructura::validar(
+    $secciones,
+    [fil(1, 'TOTAL', 'ING', 'INGRESO', 'VENTAS', 'COBRANZA'),
+     fil(2, 'LOCALES', 'ING', 'INGRESO', 'VENTAS', 'COBRANZA_LOCALES')],
+    $PROVS
+);
+chequear('el total y una de sus partes activas a la vez', true, hayError($r, 'sus partes'));
+chequear('y eso invalida la estructura', false, $r['valido']);
+
+// Los canales entre si NO se pisan
+$r = CashflowEstructura::validar(
+    $secciones,
+    [fil(1, 'LOC', 'ING', 'INGRESO', 'VENTAS', 'COBRANZA_LOCALES'),
+     fil(2, 'FR', 'ING', 'INGRESO', 'VENTAS', 'COBRANZA_FRANQUICIAS')],
+    $PROVS
+);
+chequear('dos canales distintos no se pisan', false, hayError($r, 'sus partes'));
+chequear('la estructura por canal es valida', true, $r['valido']);
+
+// Si el total esta inhabilitado, no hay conflicto
+$r = CashflowEstructura::validar(
+    $secciones,
+    [fil(1, 'TOTAL', 'ING', 'INGRESO', 'VENTAS', 'COBRANZA', 0),
+     fil(2, 'LOCALES', 'ING', 'INGRESO', 'VENTAS', 'COBRANZA_LOCALES')],
+    $PROVS
+);
+chequear('un total inhabilitado no entra en conflicto', false, hayError($r, 'sus partes'));
 
 seccion('reglas de conjunto');
 

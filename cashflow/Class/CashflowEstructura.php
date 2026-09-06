@@ -535,6 +535,30 @@ class CashflowEstructura {
                 . 'aperturas distintas. Dejá una sola.');
         }
 
+        // Una serie total y sus componentes activas al mismo tiempo cuentan dos
+        // veces el mismo importe, y la regla de origen repetido no lo ve, porque
+        // son series distintas. El registro declara la relacion en
+        // 'componentes'; por ejemplo la cobranza total de Ventas contra sus
+        // cuatro canales.
+        foreach ($origenesUsados as $par => $nombreFila) {
+            list($prov, $serie) = explode('|', $par, 2);
+
+            if (empty($providers[$prov]['componentes'][$serie])) {
+                continue;
+            }
+
+            foreach ($providers[$prov]['componentes'][$serie] as $componente) {
+                $parComponente = $prov . '|' . $componente;
+
+                if (isset($origenesUsados[$parComponente])) {
+                    self::error($r, 'La fila "' . $nombreFila . '" trae el total de '
+                        . $providers[$prov]['nombre'] . ' y "' . $origenesUsados[$parComponente]
+                        . '" trae una de sus partes: el importe se contaría dos veces. '
+                        . 'Dejá activo el total o la apertura, no los dos.');
+                }
+            }
+        }
+
         // Un SUBTOTAL que no suma nada muestra cero y se lee como un error del
         // sistema. Se mira la seccion y sus descendientes, porque el subtotal
         // abarca en cascada.

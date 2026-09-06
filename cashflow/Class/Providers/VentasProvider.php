@@ -2,29 +2,37 @@
 
 require_once __DIR__ . '/../CashflowProvider.php';
 require_once __DIR__ . '/../Ventas.php';
+require_once __DIR__ . '/../Parametros.php';
 
 /**
  * VentasProvider
  * Alimenta el tablero de Cashflow con las series del modulo de Ventas.
  *
  * SERIES
- *   COBRANZA -> la caja: cobranza estimada sobre ventas futuras, ya con el mix
- *               de medios de pago, los plazos de acreditacion y el corrimiento
- *               a dia bancario habil aplicados. Neta del neteo de cheques
- *               adelantados.
- *   VENTA    -> la venta proyectada con IVA. NO es caja: se muestra como fila
- *               informativa (COMPUTA=0 en la configuracion) para poder leer el
- *               cuadro contra el Excel sin contarla dos veces.
+ *   COBRANZA            -> la caja: cobranza estimada sobre ventas futuras, ya
+ *                          con el mix de medios de pago, los plazos de
+ *                          acreditacion y el corrimiento a dia bancario habil
+ *                          aplicados. Neta del neteo de cheques adelantados.
+ *   COBRANZA_<CANAL>    -> lo mismo, abierto por canal
+ *   VENTA               -> la venta proyectada con IVA. NO es caja: se muestra
+ *                          como fila informativa (COMPUTA=0) para poder leer el
+ *                          cuadro contra el Excel sin contarla dos veces.
+ *   VENTA_<CANAL>       -> lo mismo, abierto por canal
+ *
+ * OJO CON MEZCLAR TOTALES Y CANALES: poner en el tablero la fila del total y
+ * las de los canales al mismo tiempo cuenta dos veces el mismo importe. El
+ * registro declara esa relacion en 'componentes' y el validador de la
+ * estructura lo rechaza.
  *
  * UNA SOLA PASADA
  * Ventas::proyectarCobranzas() resuelve venta y cobranza en el mismo recorrido,
- * asi que las dos series salen de una unica llamada. Es un calculo caro (lee el
- * historico, los indices, la participacion y el calendario bancario, y recorre
- * dia x canal x medio de pago), y por eso el motor pide las series de un
- * proveedor una sola vez por pedido y no una vez por fila.
+ * asi que las diez series salen de una unica llamada. Es un calculo caro (lee
+ * el historico, los indices, la participacion y el calendario bancario, y
+ * recorre dia x canal x medio de pago), y por eso el motor pide las series de
+ * un proveedor una sola vez por pedido y no una vez por fila.
  *
- * Se le inyecta el eje del tablero para que la serie caiga exactamente en las
- * mismas columnas sobre las que consolida el resto del Cashflow.
+ * Se le inyecta el eje del tablero para que las series caigan exactamente en
+ * las mismas columnas sobre las que consolida el resto del Cashflow.
  *
  * NO se cruza con COBRANZAS_FR: ese modulo trae cobranza REAL de facturas ya
  * emitidas y este proyecta cobranza de ventas FUTURAS. Se suman a proposito.
@@ -48,22 +56,56 @@ class VentasProvider extends CashflowProvider {
             }
         }
 
-        return [
+        $series = [
             'COBRANZA' => $this->cobranzaNeta($p),
             'VENTA' => [
                 'dias' => $p['venta']['total_dias'],
                 'meses' => $p['venta']['total_meses']
             ]
         ];
+
+        /* ---- Apertura por canal ------------------------------------------ */
+        // La cobranza por canal sale de los subtotales que ya calcula el motor
+        // de Ventas; la venta por canal, de su grilla por canal.
+        $canales = isset($p['canales']) ? $p['canales'] : Parametros::CANALES;
+
+        foreach ($canales as $canal) {
+            $series['COBRANZA_' . $canal] = [
+                'dias' => $this->porCanal($p['cobranza'], 'subtotal_dias', $canal),
+                'meses' => $this->porCanal($p['cobranza'], 'subtotal_meses', $canal)
+            ];
+
+            $series['VENTA_' . $canal] = [
+                'dias' => $this->porCanal($p['venta'], 'dias', $canal),
+                'meses' => $this->porCanal($p['venta'], 'meses', $canal)
+            ];
+        }
+
+        return $series;
     }
 
     /**
-     * Cobranza menos el neteo de cheques adelantados.
+     * @param array $grilla Bloque 'venta' o 'cobranza' del payload
+     * @param string $rama Nombre de la rama por canal
+     * @param string $canal
+     * @return array Mapa clave => importe, o vacio si el canal no esta
+     */
+    private function porCanal($grilla, $rama, $canal) {
+        return isset($grilla[$rama][$canal]) ? $grilla[$rama][$canal] : [];
+    }
+
+    /**
+     * Cobranza total menos el neteo de cheques adelantados.
      *
      * El neteo hoy devuelve siempre cero porque su vista origen todavia no
      * existe (ver Ventas::getNeteoPrechequeado). Se resta igual, cableado, para
      * que el dia que se enchufe el origen el tablero quede correcto solo, sin
      * tener que acordarse de tocar esto.
+     *
+     * SOLO SE APLICA A LA SERIE TOTAL. El neteo no viene abierto por canal, asi
+     * que las series COBRANZA_<CANAL> son brutas. Hoy da lo mismo porque el
+     * neteo es cero; cuando exista el origen habra que decidir como se
+     * distribuye entre canales, y ese criterio es de negocio y no del tablero.
      *
      * @param array $p Payload de Ventas::proyectarCobranzas()
      * @return array ['dias' => [...], 'meses' => [...]]

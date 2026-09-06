@@ -46,6 +46,11 @@ class Cashflow {
     /** @var array Avisos no fatales que se devuelven en el JSON */
     private $warnings = [];
 
+    /** Arrastre resuelto, indexado por columna. Lo llena resolverDerivadas(). */
+    private $apertura = [];
+    private $aporte = [];
+    private $cierre = [];
+
     /**
      * Las dependencias se pueden inyectar para poder probar el arrastre del
      * saldo y las filas calculadas con una estructura controlada, sin depender
@@ -125,7 +130,7 @@ class Cashflow {
             'secuencia' => $columnas,
             'secciones' => $this->salidaSecciones($secciones),
             'filas' => $this->salidaFilas($resueltas),
-            'kpi' => $this->calcularKpi($h, $resueltas, $ultimaDia, $ultima),
+            'kpi' => $this->calcularKpi($h, $resueltas),
             'warnings' => $this->warnings
         ];
     }
@@ -337,17 +342,62 @@ class Cashflow {
      * @param array $resueltas Por referencia
      */
     private function resolverDerivadas($h, $secciones, &$resueltas) {
-        $rolPorSeccion = [];
-
-        foreach ($secciones as $s) {
-            $rolPorSeccion[$s['CODIGO']] = $s['ROL'];
-        }
-
         $columnas = $h->secuencia();
         $enSecuencia = array_fill_keys($columnas, true);
         $todas = $this->todasLasColumnas($h);
 
-        /* ---- Subtotales: alcance = su seccion y sus descendientes -------- */
+        /* ---- 1. Arrastre del saldo --------------------------------------- */
+        // Va PRIMERO porque los subtotales pueden abarcar la fila de saldo
+        // inicial, y para eso necesitan que su valor ya este resuelto.
+        //
+        // El arrastre usa el flujo COMPLETO de cada columna: es el movimiento
+        // real de caja del periodo, independiente de donde esten puestas las
+        // filas de resultado.
+        $saldo = 0;
+        $apertura = [];
+        $cierre = [];
+        $aporte = [];
+
+        foreach ($columnas as $col) {
+            $flujoTotal = $this->sumarMovimientos($resueltas, $col, null, null);
+            $aporte[$col] = $this->sumarAporteSaldo($resueltas, $col);
+
+            $apertura[$col] = $saldo;
+            $saldo += $aporte[$col] + $flujoTotal;
+            $cierre[$col] = $saldo;
+        }
+
+        /* ---- 2. Fila de saldo inicial ------------------------------------ */
+        // Muestra el saldo con el que ARRANCA la columna: el arrastre de la
+        // columna anterior mas lo que aporte su proveedor en esta.
+        //
+        // No muestra el valor crudo del proveedor. En la primera columna las dos
+        // cosas coinciden (el arrastre viene en cero), y de ahi en adelante lo
+        // que se ve es el cierre de la columna anterior, que es como se lee el
+        // "Saldo Inicial" del Excel.
+        $aperturaMostrada = [];
+
+        foreach ($columnas as $col) {
+            $aperturaMostrada[$col] = $apertura[$col] + $aporte[$col];
+        }
+
+        foreach ($resueltas as $i => $f) {
+            if ($f['tipo'] === 'SALDO_INICIAL') {
+                $resueltas[$i] = $this->volcar(
+                    $resueltas[$i], $todas, $aperturaMostrada, $enSecuencia
+                );
+            }
+        }
+
+        /* ---- 3. Subtotales ----------------------------------------------- */
+        // Alcance: su seccion y las secciones hijas, sin limite posicional (un
+        // subtotal abarca toda su seccion, este donde este puesto dentro de
+        // ella).
+        //
+        // Suman los movimientos Y las filas de saldo inicial que caigan en su
+        // alcance. Eso es lo que permite reproducir el "Disponible" del Excel,
+        // que es el saldo en bancos mas las cobranzas del dia, todo en una
+        // seccion.
         foreach ($resueltas as $i => $f) {
             if ($f['tipo'] !== 'SUBTOTAL') {
                 continue;
@@ -358,50 +408,30 @@ class Cashflow {
                 true
             );
 
-            // El subtotal abarca TODA su seccion, sin importar en que posicion
-            // de la seccion este puesto, asi que no lleva limite posicional.
+            // Si el alcance incluye una fila de saldo, el subtotal hereda su
+            // indefinicion: en una columna que no cubre dias futuros va en null
+            // y no en cero, igual que la fila de saldo.
+            $conSaldo = $this->alcanceTieneSaldo($resueltas, $alcance);
+
             foreach ($todas as $col) {
-                $resueltas[$i] = $this->ponerValor(
-                    $resueltas[$i],
-                    $col,
-                    $this->sumarMovimientos($resueltas, $col, $rolPorSeccion, $alcance, null)
-                );
+                if ($conSaldo && !isset($enSecuencia[$col])) {
+                    $resueltas[$i] = $this->ponerValor($resueltas[$i], $col, null);
+                    continue;
+                }
+
+                $valor = $this->sumarMovimientos($resueltas, $col, $alcance, null)
+                    + $this->sumarSaldoMostrado($resueltas, $col, $alcance);
+
+                $resueltas[$i] = $this->ponerValor($resueltas[$i], $col, $valor);
             }
         }
 
-        /* ---- Arrastre del saldo ------------------------------------------ */
-        // El arrastre usa el flujo COMPLETO de cada columna: es el movimiento
-        // real de caja del periodo, independiente de donde esten puestas las
-        // filas de resultado.
-        $saldo = 0;
-        $apertura = [];
-        $cierre = [];
-        $aporte = [];
-
-        foreach ($columnas as $col) {
-            $flujoTotal = $this->sumarMovimientos($resueltas, $col, $rolPorSeccion, null, null);
-            $aporte[$col] = $this->sumarAporteSaldo($resueltas, $col, $rolPorSeccion);
-
-            $apertura[$col] = $saldo;
-            $saldo += $aporte[$col] + $flujoTotal;
-            $cierre[$col] = $saldo;
-        }
-
-        /* ---- Filas que dependen del arrastre ----------------------------- */
-        // FLUJO_NETO y SALDO_FINAL suman lo que esta POR ENCIMA de ellas. Con
-        // una sola fila de resultado al final del cuadro eso equivale al total,
-        // pero es lo que permite poner un resultado intermedio (por ejemplo un
-        // "Resultado Operativo" antes de los ajustes) desde la configuracion y
-        // que de bien, sin tocar el motor.
+        /* ---- 4. Flujo neto y saldo final --------------------------------- */
+        // Suman lo que esta POR ENCIMA de ellas. Con una sola fila de resultado
+        // al final del cuadro eso equivale al total, pero es lo que permite
+        // poner un resultado intermedio (por ejemplo un "Resultado Operativo"
+        // antes de los ajustes) desde la configuracion y que de bien.
         foreach ($resueltas as $i => $f) {
-            if ($f['tipo'] === 'SALDO_INICIAL') {
-                // Ojo: la fila NO muestra lo que devolvio su proveedor, sino el
-                // saldo de apertura corriente. El importe del proveedor ya se
-                // consumio como aporte en la primera columna del arrastre.
-                $resueltas[$i] = $this->volcar($resueltas[$i], $todas, $apertura, $enSecuencia);
-                continue;
-            }
-
             if ($f['tipo'] !== 'FLUJO_NETO' && $f['tipo'] !== 'SALDO_FINAL') {
                 continue;
             }
@@ -409,7 +439,7 @@ class Cashflow {
             $mapa = [];
 
             foreach ($columnas as $col) {
-                $hasta = $this->sumarMovimientos($resueltas, $col, $rolPorSeccion, null, $i);
+                $hasta = $this->sumarMovimientos($resueltas, $col, null, $i);
 
                 $mapa[$col] = ($f['tipo'] === 'FLUJO_NETO')
                     ? $hasta
@@ -418,6 +448,10 @@ class Cashflow {
 
             $resueltas[$i] = $this->volcar($resueltas[$i], $todas, $mapa, $enSecuencia);
         }
+
+        $this->apertura = $apertura;
+        $this->aporte = $aporte;
+        $this->cierre = $cierre;
 
         /* ---- Chequeo del invariante -------------------------------------- */
         // El cierre de una columna tiene que ser la apertura de la siguiente. Si
@@ -436,19 +470,24 @@ class Cashflow {
     }
 
     /**
-     * Suma el flujo de una columna: filas de movimiento con COMPUTA=1 que estan
-     * en secciones ROL='MOVIMIENTO'.
+     * Suma el flujo de una columna: las filas de movimiento con COMPUTA = 1.
+     *
+     * EL ROL DE LA SECCION NO PARTICIPA. Antes se exigia que la seccion fuera
+     * ROL='MOVIMIENTO', y eso impedia armar la estructura del Excel, donde la
+     * seccion de disponibilidades contiene a la vez la fila de saldo en bancos y
+     * las filas de cobranzas. Quien decide como participa una fila es su TIPO;
+     * el ROL de la seccion quedo sólo para agrupar y para los avisos del
+     * validador.
      *
      * @param array $resueltas
      * @param string $col Id de columna
-     * @param array $rolPorSeccion
      * @param array|null $alcance Codigos de seccion a considerar, o null para todas
      * @param int|null $limite Indice tope: solo las filas ANTERIORES a esa
      *        posicion. null para no limitar. Es lo que hace posicional el
      *        alcance de FLUJO_NETO y SALDO_FINAL.
      * @return float
      */
-    private function sumarMovimientos($resueltas, $col, $rolPorSeccion, $alcance, $limite = null) {
+    private function sumarMovimientos($resueltas, $col, $alcance, $limite = null) {
         $total = 0;
 
         foreach ($resueltas as $pos => $f) {
@@ -464,12 +503,6 @@ class Cashflow {
                 continue;
             }
 
-            $rol = isset($rolPorSeccion[$f['seccion']]) ? $rolPorSeccion[$f['seccion']] : null;
-
-            if ($rol !== 'MOVIMIENTO') {
-                continue;
-            }
-
             if ($alcance !== null && !isset($alcance[$f['seccion']])) {
                 continue;
             }
@@ -481,15 +514,35 @@ class Cashflow {
     }
 
     /**
-     * Aporte de saldo de una columna: lo que devolvieron los proveedores de las
-     * filas SALDO_INICIAL. Es distinto de lo que la fila MUESTRA.
+     * Aporte de saldo de una columna: lo que devolvieron los PROVEEDORES de las
+     * filas SALDO_INICIAL, que es distinto de lo que la fila termina mostrando.
      *
      * @param array $resueltas
      * @param string $col
-     * @param array $rolPorSeccion
      * @return float
      */
-    private function sumarAporteSaldo($resueltas, $col, $rolPorSeccion) {
+    private function sumarAporteSaldo($resueltas, $col) {
+        $total = 0;
+
+        foreach ($resueltas as $f) {
+            if ($f['tipo'] === 'SALDO_INICIAL') {
+                $total += $this->valor($f, $col);
+            }
+        }
+
+        return $total;
+    }
+
+    /**
+     * Suma lo que MUESTRAN las filas de saldo inicial de un alcance. Se usa para
+     * los subtotales, que en el Excel incluyen el saldo en bancos.
+     *
+     * @param array $resueltas
+     * @param string $col
+     * @param array $alcance
+     * @return float
+     */
+    private function sumarSaldoMostrado($resueltas, $col, $alcance) {
         $total = 0;
 
         foreach ($resueltas as $f) {
@@ -497,9 +550,7 @@ class Cashflow {
                 continue;
             }
 
-            $rol = isset($rolPorSeccion[$f['seccion']]) ? $rolPorSeccion[$f['seccion']] : null;
-
-            if ($rol !== 'SALDO') {
+            if (!isset($alcance[$f['seccion']])) {
                 continue;
             }
 
@@ -507,6 +558,17 @@ class Cashflow {
         }
 
         return $total;
+    }
+
+    /** @return bool Si el alcance contiene alguna fila de saldo inicial */
+    private function alcanceTieneSaldo($resueltas, $alcance) {
+        foreach ($resueltas as $f) {
+            if ($f['tipo'] === 'SALDO_INICIAL' && isset($alcance[$f['seccion']])) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /* ====================================================================
@@ -528,60 +590,152 @@ class Cashflow {
     private function calcularTotales($h, &$f, $ultimaDia, $ultima) {
         if ($f['es_saldo']) {
             if ($f['tipo'] === 'SALDO_INICIAL') {
-                // La apertura del horizonte: con que saldo se arranca.
+                // La apertura del horizonte: con que saldo se arranca. Es el
+                // mismo numero en las tres vistas.
                 $columnas = $h->secuencia();
                 $primera = empty($columnas) ? null : $columnas[0];
 
                 $f['total_tramo'] = $this->valor($f, $primera);
+                $f['total_meses'] = $f['total_tramo'];
                 $f['total_horizonte'] = $f['total_tramo'];
             } else {
                 $f['total_tramo'] = $this->valor($f, $ultimaDia);
+                $f['total_meses'] = $this->valor($f, $ultima);
                 $f['total_horizonte'] = $this->valor($f, $ultima);
             }
 
             return;
         }
 
+        // Un subtotal que arrastra saldo tampoco se puede sumar: su total es el
+        // valor de la ultima columna del tramo, no la suma de todas.
+        if ($this->tieneNulos($f)) {
+            $f['total_tramo'] = $this->valor($f, $ultimaDia);
+            $f['total_meses'] = $this->valor($f, $ultima);
+            $f['total_horizonte'] = $this->valor($f, $ultima);
+
+            return;
+        }
+
         $f['total_tramo'] = array_sum(array_map('floatval', $f['dias']));
-        $f['total_horizonte'] = $f['total_tramo']
-            + array_sum(array_map('floatval', $f['meses']));
+        $f['total_meses'] = array_sum(array_map('floatval', $f['meses']));
+        $f['total_horizonte'] = $f['total_tramo'] + $f['total_meses'];
     }
 
     /**
-     * Indicadores de cabecera.
+     * Si la fila tiene alguna celda en null, senal de que arrastra saldo y por
+     * lo tanto no se puede sumar.
+     */
+    private function tieneNulos($f) {
+        foreach (['dias', 'meses'] as $rama) {
+            foreach ($f[$rama] as $v) {
+                if ($v === null) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Indicadores de cabecera, UNO POR VISTA.
+     *
+     * Los indicadores tienen que medir exactamente las columnas que se estan
+     * mirando: si la pantalla muestra los meses, un indicador calculado sobre el
+     * tramo diario no describe nada de lo que hay en pantalla.
+     *
+     *   'dias'     -> las columnas diarias
+     *   'meses'    -> las columnas mensuales (que acumulan sólo los dias fuera
+     *                 del tramo, asi que es un tramo distinto y no el total)
+     *   'completo' -> todas
+     *
+     * El saldo de apertura es el UNICO que no varia: es con cuanto se arranca
+     * hoy, un hecho del presente y no del periodo que se elige mirar.
      *
      * @param Horizonte $h
      * @param array $resueltas
-     * @param string|null $ultimaDia
-     * @param string|null $ultima
-     * @return array
+     * @return array Mapa vista => indicadores
      */
-    private function calcularKpi($h, $resueltas, $ultimaDia, $ultima) {
-        $kpi = [
-            'saldo_apertura' => 0,
-            'ingresos_tramo' => 0,
-            'egresos_tramo' => 0,
-            'flujo_tramo' => 0,
-            'saldo_cierre_tramo' => 0,
-            'saldo_cierre_horizonte' => 0,
-            'minimo' => null
-        ];
+    private function calcularKpi($h, $resueltas) {
+        $secuencia = $h->secuencia();
+        $enSecuencia = array_fill_keys($secuencia, true);
 
-        $columnas = $h->secuencia();
-        $primera = empty($columnas) ? null : $columnas[0];
+        $colsDias = [];
+        $colsMeses = [];
+
+        // Solo las columnas que representan dias futuros: las otras no aportan
+        // nada y ademas tienen null.
+        foreach ($h->dias() as $d) {
+            if (isset($enSecuencia['DIA|' . $d['fecha']])) {
+                $colsDias[] = 'DIA|' . $d['fecha'];
+            }
+        }
+
+        foreach ($h->meses() as $m) {
+            if (isset($enSecuencia['MES|' . $m['clave']])) {
+                $colsMeses[] = 'MES|' . $m['clave'];
+            }
+        }
+
+        $apertura = $this->aperturaHorizonte($resueltas, $secuencia);
+
+        return [
+            'dias' => $this->kpiDe($resueltas, $colsDias, $apertura, 'dias'),
+            'meses' => $this->kpiDe($resueltas, $colsMeses, $apertura, 'meses'),
+            'completo' => $this->kpiDe($resueltas, array_merge($colsDias, $colsMeses),
+                $apertura, 'completo')
+        ];
+    }
+
+    /** Con cuanto arranca el horizonte. No depende de la vista. */
+    private function aperturaHorizonte($resueltas, $secuencia) {
+        $primera = empty($secuencia) ? null : $secuencia[0];
 
         foreach ($resueltas as $f) {
             if ($f['tipo'] === 'SALDO_INICIAL') {
-                $kpi['saldo_apertura'] = $this->valor($f, $primera);
+                return $this->valor($f, $primera);
             }
+        }
 
+        return 0;
+    }
+
+    /**
+     * Indicadores de un conjunto de columnas.
+     *
+     * @param array $resueltas
+     * @param array $cols Columnas del periodo, en orden cronologico
+     * @param float $apertura Saldo con el que arranca el horizonte
+     * @param string $vista Para el rotulo
+     * @return array
+     */
+    private function kpiDe($resueltas, $cols, $apertura, $vista) {
+        $kpi = [
+            'saldo_apertura' => $apertura,
+            'ingresos' => 0,
+            'egresos' => 0,
+            'flujo' => 0,
+            'saldo_cierre' => 0,
+            'minimo' => null,
+            'periodo' => $this->rotuloPeriodo($cols, $vista),
+            'columnas' => count($cols)
+        ];
+
+        if (empty($cols)) {
+            return $kpi;
+        }
+
+        $ultima = $cols[count($cols) - 1];
+
+        foreach ($resueltas as $f) {
             if ($f['tipo'] === 'SALDO_FINAL') {
-                $kpi['saldo_cierre_tramo'] = $this->valor($f, $ultimaDia);
-                $kpi['saldo_cierre_horizonte'] = $this->valor($f, $ultima);
+                $kpi['saldo_cierre'] = $this->valor($f, $ultima);
 
-                // El peor saldo proyectado y cuando ocurre. Es el dato mas util
-                // de un tablero de tesoreria y sale gratis del arrastre.
-                foreach ($columnas as $col) {
+                // El peor saldo proyectado del periodo y cuando ocurre. Es el
+                // dato mas util de un tablero de tesoreria y sale gratis del
+                // arrastre.
+                foreach ($cols as $col) {
                     $v = $this->valor($f, $col);
 
                     if ($kpi['minimo'] === null || $v < $kpi['minimo']['valor']) {
@@ -592,24 +746,63 @@ class Cashflow {
                         ];
                     }
                 }
+
+                continue;
             }
 
             if (!$f['computa'] || !in_array($f['tipo'], CashflowEstructura::TIPOS_MOVIMIENTO, true)) {
                 continue;
             }
 
-            $tramo = array_sum(array_map('floatval', $f['dias']));
+            $suma = 0;
 
+            foreach ($cols as $col) {
+                $suma += $this->valor($f, $col);
+            }
+
+            // Se acumulan como MAGNITUDES positivas, que es como se leen en una
+            // tarjeta ("Egresos: $ 289 M"). El signo lo pone el flujo.
             if ($f['tipo'] === 'INGRESO') {
-                $kpi['ingresos_tramo'] += $tramo;
+                $kpi['ingresos'] += $suma;
             } else {
-                $kpi['egresos_tramo'] += $tramo;
+                $kpi['egresos'] += $suma;
             }
         }
 
-        $kpi['flujo_tramo'] = $kpi['ingresos_tramo'] - $kpi['egresos_tramo'];
+        $kpi['flujo'] = $kpi['ingresos'] - $kpi['egresos'];
 
         return $kpi;
+    }
+
+    /**
+     * Rotulo del periodo que cubre un conjunto de columnas, para que el
+     * indicador diga sobre que esta midiendo.
+     *
+     * @param array $cols
+     * @param string $vista
+     * @return string
+     */
+    private function rotuloPeriodo($cols, $vista) {
+        if (empty($cols)) {
+            return 'Sin columnas';
+        }
+
+        $desde = $this->rotulo($cols[0]);
+        $hasta = $this->rotulo($cols[count($cols) - 1]);
+
+        if ($vista === 'dias') {
+            return 'Del ' . $desde . ' al ' . $hasta;
+        }
+
+        if ($vista === 'meses') {
+            // Se aclara que el tramo mensual arranca DESPUES del diario: la
+            // primera columna mensual acumula sólo los dias del mes que quedan
+            // fuera del tramo, asi que este numero no es el del horizonte
+            // completo.
+            return 'De ' . $desde . ' a ' . $hasta . ', despues del tramo diario';
+        }
+
+        return 'Del ' . $desde . ' a ' . $hasta . ', todo el horizonte';
     }
 
     /* ====================================================================
