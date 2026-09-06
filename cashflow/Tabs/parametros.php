@@ -21,6 +21,9 @@
 
     <div id="wrapperParametros" style="display: none;">
 
+        <!-- Avisos de configuración pendiente (migraciones sin correr) -->
+        <div id="avisosParametros"></div>
+
         <!-- Sub-pestañas por módulo.
              PARA AGREGAR UN MÓDULO: sumar acá el <li> y su tab-pane, declarar el
              módulo en Parametros::$modulos y cargar sus parámetros con ese

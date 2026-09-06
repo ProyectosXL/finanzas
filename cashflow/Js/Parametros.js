@@ -32,6 +32,32 @@
         return null;
     }
 
+    /** Avisos de configuración pendiente (por ejemplo, una migración sin correr) */
+    function pintarAvisos() {
+        var cont = document.getElementById('avisosParametros');
+
+        if (!cont) {
+            return;
+        }
+
+        var avisos = (datos && datos.avisos) || [];
+
+        if (!avisos.length) {
+            cont.innerHTML = '';
+            return;
+        }
+
+        var html = '';
+
+        avisos.forEach(function(a) {
+            html += '<div class="alert alert-warning py-2 px-3 mb-2">' +
+                    '<i class="fas fa-triangle-exclamation me-1"></i><small>' +
+                    escapar(a) + '</small></div>';
+        });
+
+        cont.innerHTML = html;
+    }
+
     /** Muestra bajo las sub-pestañas qué afecta el módulo activo */
     function pintarDescripcion() {
         var cont = document.getElementById('descripcionVentas');
@@ -116,6 +142,7 @@
                     throw new Error('El backend no devolvió el módulo VENTAS');
                 }
 
+                pintarAvisos();
                 pintarDescripcion();
                 generarGenerales();
                 generarMix();

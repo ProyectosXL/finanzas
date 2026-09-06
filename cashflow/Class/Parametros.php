@@ -83,9 +83,68 @@ class Parametros {
         return $modulos;
     }
 
+    /**
+     * Cache del chequeo de la columna MODULO.
+     * null = todavia no se consulto, true/false = resultado.
+     */
+    private $tieneModulo = null;
+
     function __construct(){
         require_once __DIR__.'/../../class/conexion.php';
         $this->conn = new Conexion;
+    }
+
+    /**
+     * Indica si RO_T_CASHFLOW_PARAMETROS ya tiene la columna MODULO.
+     *
+     * La columna se agrega con sql/migracion_parametros_modulo.sql. Mientras no
+     * este, el modulo sigue funcionando: se asume que todos los parametros son
+     * de VENTAS (que es lo que son hoy) y se avisa por pantalla. Sin esto la
+     * pestana moria con un 'Invalid column name' de ODBC.
+     *
+     * @param resource $cid Conexion abierta a central
+     * @return bool True si la columna existe
+     */
+    private function tieneColumnaModulo($cid) {
+        if ($this->tieneModulo !== null) {
+            return $this->tieneModulo;
+        }
+
+        $sql = "SELECT COL_LENGTH('dbo.RO_T_CASHFLOW_PARAMETROS', 'MODULO') AS LARGO";
+        $stmt = sqlsrv_query($cid, $sql);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar la columna MODULO'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->tieneModulo = ($row !== null && $row !== false && $row['LARGO'] !== null);
+
+        return $this->tieneModulo;
+    }
+
+    /**
+     * Avisos de configuracion pendiente, para mostrar en la pestana
+     * @return array Lista de mensajes
+     */
+    public function getAvisos() {
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $avisos = [];
+
+        if (!$this->tieneColumnaModulo($cid)) {
+            $avisos[] = 'Falta la columna MODULO en RO_T_CASHFLOW_PARAMETROS. '
+                      . 'Los parámetros se están mostrando todos como Ventas. '
+                      . 'Corré sql/migracion_parametros_modulo.sql para agruparlos por módulo.';
+        }
+
+        return $avisos;
     }
 
     /**
@@ -101,8 +160,13 @@ class Parametros {
             throw new Exception('No se pudo conectar a la base de datos');
         }
 
-        $sql = "SELECT CLAVE, VALOR, TIPO_DATO, DESCRIPCION, MODULO, GRUPO,
-                       FECHA_UPDATE, USUARIO
+        // Mientras la columna MODULO no exista, se consulta sin ella y se asume
+        // VENTAS: asi la pestana funciona igual antes de correr la migracion.
+        $tieneModulo = $this->tieneColumnaModulo($cid);
+
+        $sql = "SELECT CLAVE, VALOR, TIPO_DATO, DESCRIPCION, "
+             . ($tieneModulo ? "MODULO, " : "")
+             . "GRUPO, FECHA_UPDATE, USUARIO
                 FROM RO_T_CASHFLOW_PARAMETROS";
         $where = [];
         $params = [];
@@ -112,7 +176,7 @@ class Parametros {
             $params[] = $grupo;
         }
 
-        if ($modulo !== null) {
+        if ($modulo !== null && $tieneModulo) {
             $where[] = "MODULO = ?";
             $params[] = $modulo;
         }
@@ -121,7 +185,7 @@ class Parametros {
             $sql .= " WHERE " . implode(' AND ', $where);
         }
 
-        $sql .= " ORDER BY MODULO, GRUPO, CLAVE";
+        $sql .= " ORDER BY " . ($tieneModulo ? "MODULO, " : "") . "GRUPO, CLAVE";
 
         $stmt = sqlsrv_query($cid, $sql, $params);
 
@@ -135,6 +199,12 @@ class Parametros {
             if (isset($row['FECHA_UPDATE']) && $row['FECHA_UPDATE'] instanceof DateTime) {
                 $row['FECHA_UPDATE'] = $row['FECHA_UPDATE']->format('Y-m-d');
             }
+
+            if (!$tieneModulo) {
+                // Todos los parametros que existen hoy son del modulo de ventas
+                $row['MODULO'] = 'VENTAS';
+            }
+
             $v[] = $row;
         }
 

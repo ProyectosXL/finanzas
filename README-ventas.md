@@ -29,6 +29,16 @@ Crea las seis tablas y carga las semillas:
 
 Es idempotente: las tablas se crean sólo si no existen y las semillas entran por `MERGE`, así que se puede volver a correr sin duplicar ni pisar valores ya editados.
 
+### 1.b Migración: columna MODULO
+
+Sólo si `RO_T_CASHFLOW_PARAMETROS` ya existía de una versión anterior:
+
+```sql
+-- sql/migracion_parametros_modulo.sql
+```
+
+Agrega la columna `MODULO` que usa la pestaña Parámetros para agrupar por módulo, y marca como `VENTAS` los parámetros ya cargados. Es idempotente y no toca ningún `VALOR`. El mismo bloque ya viene dentro de `ventas_proyeccion.sql`: alcanza con correr cualquiera de los dos.
+
 ### 2. Stored procedure
 
 ```sql
@@ -129,6 +139,8 @@ Ningún valor de negocio está escrito en el código. Todo sale de `RO_T_CASHFLO
 ### Agrupados por módulo
 
 La pestaña se organiza en **sub-pestañas, una por módulo**, para que se entienda de un vistazo qué afecta cada valor. Hoy existe sólo **Ventas**; la columna `MODULO` de `RO_T_CASHFLOW_PARAMETROS` es la que atribuye cada parámetro a su pestaña.
+
+> Si la tabla se creó con una versión anterior del script, la columna `MODULO` no existe todavía. Corré **`sql/migracion_parametros_modulo.sql`** (idempotente, no toca ningún valor ya editado). Mientras no lo hagas, la pestaña **igual funciona**: muestra todos los parámetros como Ventas y avisa arriba que falta la migración.
 
 **Para agregar un módulo** hacen falta tres cosas:
 

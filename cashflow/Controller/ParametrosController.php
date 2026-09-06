@@ -59,7 +59,8 @@ try {
                 'success' => true,
                 'data' => [
                     'canales' => Parametros::CANALES,
-                    'modulos' => $parametros->getModulosConDatos()
+                    'modulos' => $parametros->getModulosConDatos(),
+                    'avisos' => $parametros->getAvisos()
                 ]
             ], JSON_UNESCAPED_UNICODE);
             break;
