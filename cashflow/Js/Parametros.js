@@ -10,6 +10,37 @@
 
     var datos = null;
 
+    // Módulo que se está renderizando. Hoy la pestaña sólo tiene Ventas; cuando
+    // se sumen otros módulos, cada sub-pestaña resuelve el suyo con buscarModulo().
+    var modulo = null;
+
+    /**
+     * Busca un módulo del payload por su código
+     * @param {string} codigo Código del módulo (VENTAS, ...)
+     */
+    function buscarModulo(codigo) {
+        if (!datos || !datos.modulos) {
+            return null;
+        }
+
+        for (var i = 0; i < datos.modulos.length; i++) {
+            if (datos.modulos[i].codigo === codigo) {
+                return datos.modulos[i];
+            }
+        }
+
+        return null;
+    }
+
+    /** Muestra bajo las sub-pestañas qué afecta el módulo activo */
+    function pintarDescripcion() {
+        var cont = document.getElementById('descripcionVentas');
+
+        if (cont && modulo.descripcion) {
+            cont.innerHTML = '<i class="fas fa-circle-info me-1"></i>' + escapar(modulo.descripcion);
+        }
+    }
+
     // Cómo se edita cada parámetro general. Los porcentajes se muestran en % y
     // se guardan en tasa; el resto va tal cual.
     var FORMATO = {
@@ -77,6 +108,15 @@
         pedir('Controller/ParametrosController.php?action=getTodo')
             .then(function(data) {
                 datos = data;
+                // Los parámetros vienen agrupados por módulo: cada sub-pestaña
+                // muestra los que afectan a esa pestaña de la aplicación.
+                modulo = buscarModulo('VENTAS');
+
+                if (!modulo) {
+                    throw new Error('El backend no devolvió el módulo VENTAS');
+                }
+
+                pintarDescripcion();
                 generarGenerales();
                 generarMix();
                 generarRespaldo();
@@ -96,7 +136,7 @@
     function generarGenerales() {
         var html = '';
 
-        datos.generales.forEach(function(param) {
+        modulo.generales.forEach(function(param) {
             var fmt = FORMATO[param.CLAVE] || { tipo: 'texto', sufijo: '', paso: null };
             var valor = param.VALOR;
 
@@ -181,7 +221,7 @@
         var html = '';
         var canalAnterior = null;
 
-        datos.mix.forEach(function(fila) {
+        modulo.mix.forEach(function(fila) {
             var esNuevoCanal = (fila.CANAL !== canalAnterior);
 
             // Cerrar el canal anterior con su fila de suma
@@ -461,7 +501,7 @@
     function generarRespaldo() {
         var html = '';
 
-        datos.respaldo.forEach(function(param) {
+        modulo.respaldo.forEach(function(param) {
             var canal = param.CLAVE.replace('respaldo_', '');
 
             html += '<div class="col-md-6 col-lg-3">' +

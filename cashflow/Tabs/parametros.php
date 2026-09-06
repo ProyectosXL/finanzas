@@ -7,9 +7,9 @@
         <i class="fas fa-circle-info mt-1"></i>
         <div>
             <small>
-                Los valores de esta pestaña alimentan las fórmulas del módulo:
-                no hay ninguna constante escrita en el código. Cambiar un plazo de
-                acreditación o la alícuota recalcula la proyección de Ventas.
+                Los parámetros están agrupados por la pestaña que afectan.
+                Ninguna de estas constantes está escrita en el código: cambiar un
+                plazo de acreditación o la alícuota recalcula la proyección.
             </small>
         </div>
     </div>
@@ -20,6 +20,24 @@
     </div>
 
     <div id="wrapperParametros" style="display: none;">
+
+        <!-- Sub-pestañas por módulo.
+             PARA AGREGAR UN MÓDULO: sumar acá el <li> y su tab-pane, declarar el
+             módulo en Parametros::$modulos y cargar sus parámetros con ese
+             MODULO en RO_T_CASHFLOW_PARAMETROS. -->
+        <ul class="nav nav-tabs mb-3" id="parametrosTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tabParamVentasBtn" data-bs-toggle="tab"
+                        data-bs-target="#paneParamVentas" type="button" role="tab">
+                    <i class="fas fa-arrow-trend-up me-1"></i> Ventas
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content">
+        <div class="tab-pane fade show active" id="paneParamVentas" role="tabpanel">
+
+        <div class="modulo-descripcion mb-3" id="descripcionVentas"></div>
 
         <!-- ========================================================
              GENERALES
@@ -145,7 +163,10 @@
             </div>
         </div>
 
-    </div>
-</div>
+        </div><!-- /paneParamVentas -->
+        </div><!-- /tab-content -->
+
+    </div><!-- /wrapperParametros -->
+</div><!-- /tab-parametros -->
 
 <script src="Js/Parametros.js?v=<?php echo time(); ?>"></script>

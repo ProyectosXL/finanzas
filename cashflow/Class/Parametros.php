@@ -17,33 +17,111 @@ class Parametros {
     /** Canales del modelo, en el orden en que se muestran */
     const CANALES = ['LOCALES', 'FRANQUICIAS', 'MAYORISTAS', 'ECOMMERCE'];
 
+    /**
+     * Modulos que expone la pestana Parametros, en el orden de las sub-pestanas.
+     *
+     * Cada parametro declara a que MODULO pertenece, asi se ve de un vistazo que
+     * pestana afecta cada valor. 'secciones' dice que bloques renderiza el front
+     * para ese modulo.
+     *
+     * PARA AGREGAR UN MODULO: sumar la entrada aca, cargar sus parametros con
+     * ese MODULO en RO_T_CASHFLOW_PARAMETROS y agregar el <li> y el tab-pane en
+     * Tabs/parametros.php.
+     */
+    private static $modulos = [
+        'VENTAS' => [
+            'nombre' => 'Ventas',
+            'icono' => 'fa-arrow-trend-up',
+            'descripcion' => 'Alimentan la proyección de ventas y cobranzas de la pestaña Ventas',
+            'secciones' => ['generales', 'mix', 'respaldo']
+        ]
+    ];
+
+    /**
+     * Devuelve los modulos declarados, con su codigo incluido
+     * @return array Lista de modulos
+     */
+    public static function getModulos() {
+        $v = [];
+
+        foreach (self::$modulos as $codigo => $modulo) {
+            $modulo['codigo'] = $codigo;
+            $v[] = $modulo;
+        }
+
+        return $v;
+    }
+
+    /**
+     * Devuelve los modulos con los datos de cada una de sus secciones, listo
+     * para que el front pinte una sub-pestana por modulo.
+     *
+     * @return array Lista de modulos con sus secciones resueltas
+     */
+    public function getModulosConDatos() {
+        $modulos = [];
+
+        foreach (self::getModulos() as $modulo) {
+            $codigo = $modulo['codigo'];
+
+            foreach ($modulo['secciones'] as $seccion) {
+                if ($seccion === 'generales') {
+                    $modulo['generales'] = $this->getParametros('GENERAL', $codigo);
+                } elseif ($seccion === 'respaldo') {
+                    $modulo['respaldo'] = $this->getParametros('RESPALDO', $codigo);
+                } elseif ($seccion === 'mix') {
+                    // El mix vive en su propia tabla, no en la de clave/valor
+                    $mix = $this->getMixCobro();
+                    $modulo['mix'] = $mix;
+                    $modulo['mix_validacion'] = self::validarMix($mix);
+                }
+            }
+
+            $modulos[] = $modulo;
+        }
+
+        return $modulos;
+    }
+
     function __construct(){
         require_once __DIR__.'/../../class/conexion.php';
         $this->conn = new Conexion;
     }
 
     /**
-     * Devuelve todos los parametros, opcionalmente filtrados por grupo
+     * Devuelve los parametros, opcionalmente filtrados por grupo y/o modulo
      * @param string|null $grupo Grupo a filtrar (GENERAL, RESPALDO, ...)
+     * @param string|null $modulo Modulo a filtrar (VENTAS, ...)
      * @return array Listado de parametros
      */
-    public function getParametros($grupo = null) {
+    public function getParametros($grupo = null, $modulo = null) {
         $cid = $this->conn->conectar('central');
 
         if (!$cid) {
             throw new Exception('No se pudo conectar a la base de datos');
         }
 
-        $sql = "SELECT CLAVE, VALOR, TIPO_DATO, DESCRIPCION, GRUPO, FECHA_UPDATE, USUARIO
+        $sql = "SELECT CLAVE, VALOR, TIPO_DATO, DESCRIPCION, MODULO, GRUPO,
+                       FECHA_UPDATE, USUARIO
                 FROM RO_T_CASHFLOW_PARAMETROS";
+        $where = [];
         $params = [];
 
         if ($grupo !== null) {
-            $sql .= " WHERE GRUPO = ?";
+            $where[] = "GRUPO = ?";
             $params[] = $grupo;
         }
 
-        $sql .= " ORDER BY GRUPO, CLAVE";
+        if ($modulo !== null) {
+            $where[] = "MODULO = ?";
+            $params[] = $modulo;
+        }
+
+        if (count($where)) {
+            $sql .= " WHERE " . implode(' AND ', $where);
+        }
+
+        $sql .= " ORDER BY MODULO, GRUPO, CLAVE";
 
         $stmt = sqlsrv_query($cid, $sql, $params);
 

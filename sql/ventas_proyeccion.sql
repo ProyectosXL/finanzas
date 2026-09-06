@@ -143,6 +143,9 @@ GO
    de los modulos, por eso lleva GRUPO.
    Ningun valor de negocio debe estar hardcodeado en el codigo: todo sale de aca.
    ---------------------------------------------------------------------------- */
+/* MODULO identifica a que pestana pertenece el parametro, para que en la
+   pestana Parametros se vea agrupado por modulo y se entienda que afecta cada
+   valor. GRUPO es la seccion dentro del modulo (GENERAL, RESPALDO, ...). */
 IF OBJECT_ID('dbo.RO_T_CASHFLOW_PARAMETROS', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.RO_T_CASHFLOW_PARAMETROS (
@@ -150,6 +153,7 @@ BEGIN
         VALOR        VARCHAR(200) NOT NULL,
         TIPO_DATO    VARCHAR(20)  NOT NULL CONSTRAINT DF_PARAMETROS_TIPO DEFAULT ('DECIMAL'),
         DESCRIPCION  VARCHAR(200) NULL,
+        MODULO       VARCHAR(30)  NOT NULL CONSTRAINT DF_PARAMETROS_MODULO DEFAULT ('VENTAS'),
         GRUPO        VARCHAR(50)  NULL,
         FECHA_UPDATE DATETIME     NOT NULL CONSTRAINT DF_PARAMETROS_FUPD DEFAULT (GETDATE()),
         USUARIO      VARCHAR(50)  NULL,
@@ -158,26 +162,42 @@ BEGIN
 END
 GO
 
+/* Si la tabla ya existia sin MODULO (se creo con una version anterior de este
+   script), se agrega y se marcan como VENTAS los parametros ya cargados, que
+   son todos del modulo de ventas. Es idempotente. */
+IF OBJECT_ID('dbo.RO_T_CASHFLOW_PARAMETROS', 'U') IS NOT NULL
+   AND COL_LENGTH('dbo.RO_T_CASHFLOW_PARAMETROS', 'MODULO') IS NULL
+BEGIN
+    ALTER TABLE dbo.RO_T_CASHFLOW_PARAMETROS
+        ADD MODULO VARCHAR(30) NOT NULL
+            CONSTRAINT DF_PARAMETROS_MODULO DEFAULT ('VENTAS');
+END
+GO
+
 MERGE dbo.RO_T_CASHFLOW_PARAMETROS AS T
 USING (VALUES
-    ('alicuota_iva',            '0.21',           'DECIMAL', 'Alicuota de IVA aplicada a la venta neta proyectada', 'GENERAL'),
-    ('dias_prechequeado',       '0',              'INT',     'Dias a restar a la fecha del cheque para obtener la fecha teorica de factura', 'GENERAL'),
-    ('horizonte_dias',          '28',             'INT',     'Cantidad de dias del tramo diario de la proyeccion', 'GENERAL'),
-    ('horizonte_meses',         '12',             'INT',     'Cantidad de meses del horizonte de proyeccion', 'GENERAL'),
+    ('alicuota_iva',            '0.21',           'DECIMAL', 'Alicuota de IVA aplicada a la venta neta proyectada', 'VENTAS', 'GENERAL'),
+    ('dias_prechequeado',       '0',              'INT',     'Dias a restar a la fecha del cheque para obtener la fecha teorica de factura', 'VENTAS', 'GENERAL'),
+    ('horizonte_dias',          '28',             'INT',     'Cantidad de dias del tramo diario de la proyeccion', 'VENTAS', 'GENERAL'),
+    ('horizonte_meses',         '12',             'INT',     'Cantidad de meses del horizonte de proyeccion', 'VENTAS', 'GENERAL'),
     /* Feriados de comercio: unicos dias del anio sin venta estimada.
        Formato MM-DD separado por coma. Se aplican a todos los anios. */
-    ('feriados_comercio',       '12-25,01-01,09-26', 'CSV',  'Feriados de comercio (MM-DD) sin venta estimada', 'GENERAL'),
+    ('feriados_comercio',       '12-25,01-01,09-26', 'CSV',  'Feriados de comercio (MM-DD) sin venta estimada', 'VENTAS', 'GENERAL'),
     /* Participacion fija de respaldo: se usa cuando el mes del anio anterior
        no tiene datos o su venta total es cero. Debe sumar 1. */
-    ('respaldo_locales',        '0.410',          'DECIMAL', 'Participacion de respaldo - Locales', 'RESPALDO'),
-    ('respaldo_franquicias',    '0.365',          'DECIMAL', 'Participacion de respaldo - Franquicias', 'RESPALDO'),
-    ('respaldo_mayoristas',     '0.140',          'DECIMAL', 'Participacion de respaldo - Mayoristas', 'RESPALDO'),
-    ('respaldo_ecommerce',      '0.085',          'DECIMAL', 'Participacion de respaldo - Ecommerce', 'RESPALDO')
-) AS S (CLAVE, VALOR, TIPO_DATO, DESCRIPCION, GRUPO)
+    ('respaldo_locales',        '0.410',          'DECIMAL', 'Participacion de respaldo - Locales', 'VENTAS', 'RESPALDO'),
+    ('respaldo_franquicias',    '0.365',          'DECIMAL', 'Participacion de respaldo - Franquicias', 'VENTAS', 'RESPALDO'),
+    ('respaldo_mayoristas',     '0.140',          'DECIMAL', 'Participacion de respaldo - Mayoristas', 'VENTAS', 'RESPALDO'),
+    ('respaldo_ecommerce',      '0.085',          'DECIMAL', 'Participacion de respaldo - Ecommerce', 'VENTAS', 'RESPALDO')
+) AS S (CLAVE, VALOR, TIPO_DATO, DESCRIPCION, MODULO, GRUPO)
     ON T.CLAVE = S.CLAVE
 WHEN NOT MATCHED BY TARGET THEN
-    INSERT (CLAVE, VALOR, TIPO_DATO, DESCRIPCION, GRUPO)
-    VALUES (S.CLAVE, S.VALOR, S.TIPO_DATO, S.DESCRIPCION, S.GRUPO);
+    INSERT (CLAVE, VALOR, TIPO_DATO, DESCRIPCION, MODULO, GRUPO)
+    VALUES (S.CLAVE, S.VALOR, S.TIPO_DATO, S.DESCRIPCION, S.MODULO, S.GRUPO)
+/* Reasigna el modulo si el parametro se habia cargado sin el. No toca VALOR:
+   nunca pisa un valor que el usuario ya edito. */
+WHEN MATCHED AND (T.MODULO IS NULL OR T.MODULO = '') THEN
+    UPDATE SET T.MODULO = S.MODULO;
 GO
 
 /* ----------------------------------------------------------------------------

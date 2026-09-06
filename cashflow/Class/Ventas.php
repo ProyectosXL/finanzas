@@ -401,10 +401,11 @@ class Ventas {
     /**
      * Parametros generales del modulo
      * @param string|null $grupo Grupo a filtrar
+     * @param string|null $modulo Modulo a filtrar
      * @return array Listado de parametros
      */
-    public function getParametros($grupo = null) {
-        return $this->parametros->getParametros($grupo);
+    public function getParametros($grupo = null, $modulo = null) {
+        return $this->parametros->getParametros($grupo, $modulo);
     }
 
     /**

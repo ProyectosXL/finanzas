@@ -126,6 +126,18 @@ Todo el módulo se conecta a **`central`**, con una única excepción: la lectur
 
 Ningún valor de negocio está escrito en el código. Todo sale de `RO_T_CASHFLOW_PARAMETROS` y `RO_T_CASHFLOW_VENTAS_MIX`, y se edita desde la pestaña **Parámetros**.
 
+### Agrupados por módulo
+
+La pestaña se organiza en **sub-pestañas, una por módulo**, para que se entienda de un vistazo qué afecta cada valor. Hoy existe sólo **Ventas**; la columna `MODULO` de `RO_T_CASHFLOW_PARAMETROS` es la que atribuye cada parámetro a su pestaña.
+
+**Para agregar un módulo** hacen falta tres cosas:
+
+1. Cargar sus parámetros con ese `MODULO` en `RO_T_CASHFLOW_PARAMETROS`.
+2. Declararlo en `Parametros::$modulos` (nombre, ícono, descripción y qué secciones muestra).
+3. Agregar el `<li>` y el `tab-pane` en `Tabs/parametros.php`.
+
+Las secciones disponibles son `generales` (clave/valor del grupo `GENERAL`), `respaldo` (grupo `RESPALDO`) y `mix` (la tabla `RO_T_CASHFLOW_VENTAS_MIX`).
+
 | Clave | Semilla | Qué controla |
 | --- | --- | --- |
 | `alicuota_iva` | `0.21` | IVA sobre la venta neta proyectada |

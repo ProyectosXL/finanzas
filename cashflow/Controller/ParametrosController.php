@@ -52,17 +52,14 @@ try {
 
     switch ($action) {
         case 'getTodo':
-            // Una sola llamada para pintar la pestana completa
-            $mix = $parametros->getMixCobro();
-
+            // Una sola llamada para pintar la pestana completa, agrupada por
+            // modulo: cada sub-pestana muestra los parametros que afectan a esa
+            // pestana de la aplicacion.
             echo json_encode([
                 'success' => true,
                 'data' => [
                     'canales' => Parametros::CANALES,
-                    'generales' => $parametros->getParametros('GENERAL'),
-                    'respaldo' => $parametros->getParametros('RESPALDO'),
-                    'mix' => $mix,
-                    'mix_validacion' => Parametros::validarMix($mix)
+                    'modulos' => $parametros->getModulosConDatos()
                 ]
             ], JSON_UNESCAPED_UNICODE);
             break;
