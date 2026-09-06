@@ -119,6 +119,66 @@ class Ingresos {
     }
 
     /**
+     * Cobranza de franquicias agregada por fecha de cobro, para el tablero de
+     * Cashflow.
+     *
+     * POR QUE NO REUSA getCobranzasFR($summary = true)
+     * Ese metodo agrupa por cliente y fecha, y despues por CADA fila consulta
+     * la razon social en GVA14, en otra conexion. Son N consultas para traer un
+     * dato que el tablero no muestra: el Cashflow solo necesita fecha e
+     * importe. Aca eso es un unico GROUP BY sin salir de la conexion 'apps'.
+     *
+     * getCobranzasFR se deja intacto: la pestana Cobranzas FR depende de su
+     * forma actual.
+     *
+     * Mismos filtros que la pestana: propuestas no rechazadas ni canceladas ni
+     * pagadas ni vencidas, y con fecha de pago desde hoy. Las notas de credito
+     * restan.
+     *
+     * @return array Filas ['FECHA' => 'Y-m-d', 'IMPORTE' => float]
+     */
+    public function getCobranzasFRTotales() {
+        $cid = $this->conn->conectar('apps');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos de apps');
+        }
+
+        $sql = "SELECT
+                    p.fecha_propuesta_pago AS FECHA,
+                    SUM(CASE WHEN i.t_comp_factura LIKE '%NC%'
+                             THEN -i.importe_neto ELSE i.importe_neto END) AS IMPORTE
+                FROM FP_propuestas_pago p
+                INNER JOIN FP_propuestas_pago_items i ON p.id = i.id_propuesta
+                WHERE p.estado NOT IN ('RECHAZADA', 'CANCELADA', 'PAGADO', 'VENCIDA')
+                AND p.fecha_propuesta_pago >= CAST(GETDATE() AS DATE)
+                GROUP BY p.fecha_propuesta_pago
+                ORDER BY p.fecha_propuesta_pago ASC";
+
+        $stmt = sqlsrv_query($cid, $sql);
+
+        if ($stmt === false) {
+            throw new Exception('Error al leer la cobranza de franquicias: ' . print_r(sqlsrv_errors(), true));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            if ($row['FECHA'] instanceof DateTime) {
+                $row['FECHA'] = $row['FECHA']->format('Y-m-d');
+            }
+
+            $row['IMPORTE'] = floatval($row['IMPORTE']);
+
+            $v[] = $row;
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $v;
+    }
+
+    /**
      * Procesa los datos para agrupar por períodos (igual que Comex)
      */
     public function procesarCobranzasPorPeriodo($data) {
