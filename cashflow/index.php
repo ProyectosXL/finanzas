@@ -26,7 +26,7 @@ session_start();
     <link href="Css/main.css?v=<?php echo time(); ?>" rel="stylesheet">
 </head>
 <body>
-
+  
     <!-- Sidebar -->
     <?php include 'Components/sidebar.php'; ?>
 
@@ -38,7 +38,7 @@ session_start();
         <!-- Content Area -->
         <div class="content-area">
             <div id="tabContent">
-                <?php include 'Tabs/resumen.php'; ?>
+                <?php include 'Tabs/cashflow.php'; ?>
             </div>
         </div>
     </div>

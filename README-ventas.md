@@ -8,7 +8,7 @@ Rama: `feature/ventas-proyeccion`
 
 ## Orden de ejecución de los scripts
 
-Los scripts **no se ejecutaron contra ninguna base**. Corrélos a mano, en este orden, contra `central`:
+Estos scripts **ya se ejecutaron** contra `central`. Quedan documentados porque son reejecutables (las tablas se crean sólo si no existen y las semillas entran por `MERGE`), así que sirven para levantar el módulo en otra base. Si es el caso, corrélos a mano en este orden:
 
 ### 1. Tablas y semillas
 
@@ -254,4 +254,21 @@ La clase `.tabla-temporal` (en `Css/main.css`, **no duplicada por pestaña**) ac
 
 `ajustarStickyHeaders()` en `Js/main.js` mide el alto **real** de la primera fila del `thead` y lo publica como `--thead-row1-height`: las celdas con `rowspan="2"` abarcan las dos filas, así que un `offsetHeight` directo daría un valor falso. Un `MutationObserver` sobre `#tabContent` lo re-mide cuando las tablas se generan por AJAX, de modo que no hubo que tocar el JS de cada pestaña.
 
-Aplicado a Ventas, Crono Nacionalización y Proveedores Exterior.
+Aplicado a Ventas, Crono Nacionalización, Proveedores Exterior y Cashflow.
+
+---
+
+## Relación con el módulo Cashflow
+
+Ventas es uno de los proveedores de datos del tablero de Cashflow. Expone dos series a través del contrato común:
+
+| Serie | Qué es |
+| --- | --- |
+| `COBRANZA` | La caja: cobranza estimada sobre ventas futuras, ya neta del neteo de cheques adelantados |
+| `VENTA` | La venta proyectada con IVA. **No es caja**: en el tablero es una fila informativa que no entra en ninguna suma |
+
+Las dos salen de una única llamada a `proyectarCobranzas()`, que resuelve venta y cobranza en la misma pasada.
+
+`proyectarVentas()` y `proyectarCobranzas()` aceptan un `Horizonte` opcional. La pestaña Ventas no lo pasa y arma el suyo desde los parámetros; el Cashflow **sí** lo pasa, para que la serie caiga exactamente en las mismas columnas sobre las que consolida el resto del tablero.
+
+Ver `README-cashflow.md`.

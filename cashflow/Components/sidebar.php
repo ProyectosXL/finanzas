@@ -22,11 +22,12 @@
     </div>
 
     <div class="sidebar-menu">
-        <!-- Resumen - Siempre visible destacado -->
+        <!-- Cashflow - Tablero de consolidación. Es la pestaña principal y la
+             que carga index.php por defecto. Reemplaza al viejo Resumen. -->
         <div class="menu-item-main">
-            <a href="#" class="menu-link active" data-tab="resumen">
-                <i class="fas fa-tachometer-alt"></i>
-                <span>Resumen</span>
+            <a href="#" class="menu-link active" data-tab="cashflow">
+                <i class="fas fa-table-cells"></i>
+                <span>Cashflow</span>
             </a>
         </div>
 

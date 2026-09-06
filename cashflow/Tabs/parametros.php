@@ -25,16 +25,25 @@
         <div id="avisosParametros"></div>
 
         <!-- Sub-pestañas por módulo.
-             PARA AGREGAR UN MÓDULO: sumar acá el <li> y su tab-pane, declarar el
-             módulo en Parametros::$modulos y cargar sus parámetros con ese
-             MODULO en RO_T_CASHFLOW_PARAMETROS. -->
+             La lista se genera desde Parametros::$modulos, así que PARA AGREGAR
+             UN MÓDULO alcanza con declararlo ahí y sumar su tab-pane más abajo.
+             getModulos() es estático y no toca la base. -->
+        <?php
+            require_once __DIR__ . '/../Class/Parametros.php';
+            $modulosParam = Parametros::getModulos();
+        ?>
         <ul class="nav nav-tabs mb-3" id="parametrosTabs" role="tablist">
-            <li class="nav-item" role="presentation">
-                <button class="nav-link active" id="tabParamVentasBtn" data-bs-toggle="tab"
-                        data-bs-target="#paneParamVentas" type="button" role="tab">
-                    <i class="fas fa-arrow-trend-up me-1"></i> Ventas
-                </button>
-            </li>
+            <?php foreach ($modulosParam as $i => $m): ?>
+                <?php $slug = ucfirst(strtolower($m['codigo'])); ?>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link <?php echo $i === 0 ? 'active' : ''; ?>"
+                            id="tabParam<?php echo $slug; ?>Btn" data-bs-toggle="tab"
+                            data-bs-target="#paneParam<?php echo $slug; ?>" type="button" role="tab">
+                        <i class="fas <?php echo htmlspecialchars($m['icono']); ?> me-1"></i>
+                        <?php echo htmlspecialchars($m['nombre']); ?>
+                    </button>
+                </li>
+            <?php endforeach; ?>
         </ul>
 
         <div class="tab-content">
@@ -167,9 +176,21 @@
         </div>
 
         </div><!-- /paneParamVentas -->
+
+        <!-- Estructura del tablero de Cashflow.
+             Va en su propio archivo y con su propio JS: no comparte nada con
+             los bloques de Ventas, y así un problema acá no puede llevarse
+             puesta la pestaña que ya funciona. Sus clases llevan el prefijo
+             cfe- porque Parametros.js busca .param-input, .mix-* y .respaldo-*
+             en TODO el documento. -->
+        <div class="tab-pane fade" id="paneParamCashflow" role="tabpanel">
+            <?php include __DIR__ . '/parametros_estructura.php'; ?>
+        </div>
+
         </div><!-- /tab-content -->
 
     </div><!-- /wrapperParametros -->
 </div><!-- /tab-parametros -->
 
 <script src="Js/Parametros.js?v=<?php echo time(); ?>"></script>
+<script src="Js/Parametros-Estructura.js?v=<?php echo time(); ?>"></script>

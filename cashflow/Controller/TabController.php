@@ -15,7 +15,7 @@ $tab = isset($_POST['tab']) ? $_POST['tab'] : '';
 
 // Lista de tabs válidos
 $validTabs = [
-    'resumen',
+    'cashflow',
     'dashboard',
     'parametros',
     'ventas',

@@ -1,0 +1,199 @@
+/* ========================================
+   CASHFLOW - TABLERO DE CONSOLIDACION
+   ========================================
+   El header fijo y la primera columna congelada NO se definen acá: vienen de
+   .tabla-temporal en Css/main.css, compartido con Ventas, Crono Nacionalización
+   y Proveedores Exterior. Este archivo sólo agrega lo propio del tablero.
+   ======================================== */
+
+.tab-cashflow .cf-avisos ul {
+    padding-left: 1.1rem;
+    font-size: 0.85rem;
+}
+
+.tab-cashflow .cf-avisos {
+    padding: 0.75rem 1rem;
+}
+
+/* ---- Columnas ---- */
+
+.tab-cashflow .cf-col-concepto {
+    min-width: 230px;
+    max-width: 230px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tab-cashflow .cf-col-total {
+    min-width: 130px;
+    font-weight: 600;
+    background-color: var(--bg-light);
+}
+
+/* El rótulo del período queda pegado a la derecha de la columna Concepto, que
+   mide 230px fijos. Centrado sobre las 28 columnas de días caía fuera de la
+   pantalla y la fila del encabezado se veía vacía. */
+.tab-cashflow .cf-col-periodo {
+    text-align: left;
+    left: 230px;
+    z-index: 4;
+    font-weight: 600;
+}
+
+.tab-cashflow table td,
+.tab-cashflow table th {
+    padding: 7px 12px;
+    font-size: 0.84rem;
+}
+
+.tab-cashflow table td {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---- Filas de sección ---- */
+
+.tab-cashflow .cf-seccion td {
+    background-color: #eef1f6;
+    font-weight: 700;
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted, #6c757d);
+    padding: 6px 12px;
+}
+
+/* ---- Tipos de fila ---- */
+
+.tab-cashflow .cf-tipo-subtotal td,
+.tab-cashflow .cf-tipo-flujo_neto td,
+.tab-cashflow .cf-tipo-saldo_final td,
+.tab-cashflow .cf-tipo-saldo_inicial td {
+    font-weight: 600;
+    background-color: #fafbfc;
+}
+
+.tab-cashflow .cf-tipo-subtotal td {
+    border-top: 1px solid var(--border-color, #dee2e6);
+}
+
+/* Las dos filas que cierran el cuadro: son lo que se mira primero. */
+.tab-cashflow .cf-tipo-flujo_neto td,
+.tab-cashflow .cf-tipo-saldo_final td {
+    background-color: #eaf2fb;
+}
+
+.tab-cashflow .cf-tipo-saldo_final td {
+    border-top: 2px solid #b6cfe8;
+}
+
+/* Informativa: se ve, pero no entra en ninguna suma. Se atenúa para que no se
+   confunda con una fila de caja. */
+.tab-cashflow .cf-informativa td {
+    color: #8a94a3;
+    font-style: italic;
+}
+
+/* Sin origen de datos todavía */
+.tab-cashflow .cf-sin-datos .cf-col-concepto {
+    color: #97a1ae;
+}
+
+.tab-cashflow .cf-marca {
+    font-size: 0.7rem;
+    color: #97a1ae;
+    margin-left: 2px;
+}
+
+/* ---- Valores ---- */
+
+.tab-cashflow .cf-negativo {
+    color: #c0392b;
+}
+
+.tab-cashflow .cf-cero {
+    color: #c5cbd3;
+}
+
+/* Una columna que no cubre ningún día futuro. Se atenúa entera para que se lea
+   de un vistazo que ahí no hay proyección, y no un cero real. */
+.tab-cashflow .cf-col-fuera {
+    background-color: #f4f5f7 !important;
+    color: #a8b0ba;
+}
+
+.tab-cashflow .cf-nulo {
+    color: #c5cbd3;
+}
+
+/* Feriado de comercio: no se estima venta ese día */
+.tab-cashflow .cf-col-feriado {
+    background-color: #fdf7ec;
+}
+
+/* ---- Enlace al módulo de origen ---- */
+
+.tab-cashflow .cf-link {
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px dotted #adb5bd;
+}
+
+.tab-cashflow .cf-link:hover {
+    color: var(--primary-color, #0d6efd);
+    border-bottom-color: currentColor;
+}
+
+/* ---- KPI ---- */
+
+.tab-cashflow .kpi-card-value.cf-negativo {
+    color: #c0392b;
+}
+
+.tab-cashflow #cfKpis .kpi-card {
+    height: 100%;
+}
+
+/* ---- Vista de período completo ---- */
+
+/* Segundo rótulo de grupo (el tramo mensual). No se puede pegar a la izquierda
+   como el primero, porque su posición depende de cuántas columnas diarias haya;
+   queda alineado a la izquierda de su propio bloque. */
+.tab-cashflow .cf-col-periodo-2 {
+    text-align: left;
+    font-weight: 600;
+}
+
+/* Donde termina el tramo diario y arranca el mensual */
+.tab-cashflow .cf-inicio-meses {
+    border-left: 2px solid #b6cfe8;
+}
+
+/* ---- Barra de período activo ---- */
+
+.tab-cashflow .cf-periodo-activo {
+    background-color: #eaf2fb;
+    border: 1px solid #cfe0f2;
+    border-radius: 6px;
+    padding: 7px 12px;
+    font-size: 0.82rem;
+    color: #3c5a7a;
+}
+
+/* El indicador que no cambia con la vista: se distingue de los demás para que
+   no se lea como si midiera el período seleccionado. */
+.tab-cashflow .cf-kpi-fijo {
+    border-left: 3px solid #b6cfe8;
+}
+
+.tab-cashflow .cf-kpi-periodo {
+    color: #6c757d;
+}
+
+/* Marca de arrastre: la fila muestra un saldo que calcula el motor, no un dato
+   cargado en ella. Se distingue del ícono de "sin datos" porque significan
+   cosas opuestas. */
+.tab-cashflow .cf-marca-arrastre {
+    color: #6b8fb5;
+}

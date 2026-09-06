@@ -159,7 +159,7 @@ function loadTab(tabName) {
  */
 function updateHeader(tabName) {
     const titles = {
-        'resumen': 'Resumen',
+        'cashflow': 'Cashflow',
         'dashboard': 'Dashboard',
         'parametros': 'Parámetros',
         'ventas': 'Ventas',
@@ -219,6 +219,64 @@ function initComponents() {
     // Tooltips
     const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
     tooltipTriggerList.forEach(el => new bootstrap.Tooltip(el));
+}
+
+/**
+ * Pide JSON a un controller y devuelve directamente el payload.
+ *
+ * Todos los endpoints del módulo responden {success, data|message}. Esta
+ * función desenvuelve ese sobre: quien la llama recibe el dato o una excepción
+ * con el mensaje del servidor.
+ *
+ * Lee .text() y después JSON.parse a propósito: si PHP emite un fatal, la
+ * respuesta es HTML y no JSON, y así el error que llega es legible en lugar de
+ * un "Unexpected token <".
+ *
+ * NOTA: Ingresos-Ventas.js y Parametros.js tienen cada uno su propia copia
+ * local de esto, anterior a esta función. Quedan como están para no tocar dos
+ * pestañas que funcionan; el código nuevo usa ésta, y la limpieza de las dos
+ * copias es un cambio aparte.
+ *
+ * @param {string} url - URL relativa a cashflow/
+ * @param {Object} [body] - Si se pasa, va como POST con cuerpo JSON
+ * @returns {Promise<any>} El contenido de 'data'
+ */
+function pedirJson(url, body) {
+    var opciones = {};
+
+    if (body) {
+        opciones = {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        };
+    }
+
+    return fetch(url, opciones)
+        .then(function(r) {
+            if (!r.ok) {
+                throw new Error('Error HTTP: ' + r.status);
+            }
+
+            return r.text();
+        })
+        .then(function(texto) {
+            var resultado;
+
+            try {
+                resultado = JSON.parse(texto);
+            } catch (e) {
+                console.error('Respuesta no JSON:', texto);
+                throw new Error('Respuesta inválida del servidor. Revisá la consola.');
+            }
+
+            if (!resultado.success) {
+                console.error('Error del servidor:', resultado);
+                throw new Error(resultado.message || 'Error desconocido');
+            }
+
+            return resultado.data;
+        });
 }
 
 /**
