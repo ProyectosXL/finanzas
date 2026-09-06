@@ -192,7 +192,16 @@
                     '</div>';
         });
 
-        document.getElementById('gridGenerales').innerHTML = html;
+        // Los ids de esta pestaña son globales y únicos: si el bloque no está
+        // en el DOM, hay que salir en vez de romper. Antes esto reventaba el
+        // resto del pintado.
+        var gridGenerales = document.getElementById('gridGenerales');
+
+        if (!gridGenerales) {
+            return;
+        }
+
+        gridGenerales.innerHTML = html;
 
         // Guardado al salir del campo
         document.querySelectorAll('#gridGenerales .param-input').forEach(function(input) {
@@ -390,7 +399,11 @@
             }
         });
 
-        document.getElementById('btnGuardarMix').disabled = !todoValido;
+        var btnGuardarMix = document.getElementById('btnGuardarMix');
+
+        if (btnGuardarMix) {
+            btnGuardarMix.disabled = !todoValido;
+        }
 
         return todoValido;
     }
@@ -545,7 +558,13 @@
                     '</div>';
         });
 
-        document.getElementById('gridRespaldo').innerHTML = html;
+        var gridRespaldo = document.getElementById('gridRespaldo');
+
+        if (!gridRespaldo) {
+            return;
+        }
+
+        gridRespaldo.innerHTML = html;
 
         document.querySelectorAll('.respaldo-input').forEach(function(input) {
             input.addEventListener('input', validarRespaldo);
@@ -574,7 +593,11 @@
                 ' (' + (desvio > 0 ? '+' : '') + desvio.toFixed(2) + ')';
         }
 
-        document.getElementById('btnGuardarRespaldo').disabled = !valido;
+        var btnGuardarRespaldo = document.getElementById('btnGuardarRespaldo');
+
+        if (btnGuardarRespaldo) {
+            btnGuardarRespaldo.disabled = !valido;
+        }
 
         return valido;
     }

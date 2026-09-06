@@ -161,6 +161,9 @@ $r = CashflowEstructura::validar(
     $PROVS
 );
 chequear('mas de un saldo inicial activo', true, hayError($r, 'más de una fila de saldo inicial'));
+// Que el mensaje aparezca no alcanza: si no baja la bandera 'valido', el error
+// se muestra pero guardar() lo deja pasar igual. Paso exactamente eso.
+chequear('y ademas invalida la estructura', false, $r['valido']);
 
 $r = CashflowEstructura::validar(
     [sec('ING', 'MOVIMIENTO', 10)],

@@ -25,8 +25,14 @@ class Parametros {
      * para ese modulo.
      *
      * PARA AGREGAR UN MODULO: sumar la entrada aca, cargar sus parametros con
-     * ese MODULO en RO_T_CASHFLOW_PARAMETROS y agregar el <li> y el tab-pane en
-     * Tabs/parametros.php.
+     * ese MODULO en RO_T_CASHFLOW_PARAMETROS y agregar el tab-pane en
+     * Tabs/parametros.php. El <li> de la sub-pestana ya se genera solo a partir
+     * de esta lista.
+     *
+     * Un modulo puede traer sus datos por su cuenta en vez de declarar
+     * 'secciones': es lo que hace CASHFLOW, que pide su estructura a su propio
+     * endpoint. Con 'secciones' vacio, getModulosConDatos() no resuelve nada
+     * para el, y asi esta clase no tiene que saber nada del Cashflow.
      */
     private static $modulos = [
         'VENTAS' => [
@@ -34,6 +40,14 @@ class Parametros {
             'icono' => 'fa-arrow-trend-up',
             'descripcion' => 'Alimentan la proyección de ventas y cobranzas de la pestaña Ventas',
             'secciones' => ['generales', 'mix', 'respaldo']
+        ],
+        'CASHFLOW' => [
+            'nombre' => 'Cashflow',
+            'icono' => 'fa-table-cells',
+            'descripcion' => 'Definen qué secciones y qué filas tiene el tablero de Cashflow, '
+                . 'y de qué módulo saca sus datos cada fila',
+            'secciones' => [],
+            'endpoint' => 'Controller/CashflowEstructuraController.php'
         ]
     ];
 

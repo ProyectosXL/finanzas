@@ -530,9 +530,9 @@ class CashflowEstructura {
 
         /* ---- Reglas de conjunto ----------------------------------------- */
         if (count($saldosIniciales) > 1) {
-            $r['errores'][] = 'Hay más de una fila de saldo inicial activa ('
+            self::error($r, 'Hay más de una fila de saldo inicial activa ('
                 . implode(', ', $saldosIniciales) . '): el arrastre del saldo tomaría dos '
-                . 'aperturas distintas. Dejá una sola.';
+                . 'aperturas distintas. Dejá una sola.');
         }
 
         // Un SUBTOTAL que no suma nada muestra cero y se lee como un error del
@@ -653,6 +653,18 @@ class CashflowEstructura {
         }
     }
 
+    /**
+     * Error que no pertenece a una fila ni a una seccion en particular.
+     *
+     * Va por aca y no empujando a $r['errores'] a mano: escribir el mensaje sin
+     * bajar la bandera 'valido' deja un error que se muestra pero no bloquea el
+     * guardado, que es justamente lo contrario de lo que se quiere.
+     */
+    private static function error(&$r, $mensaje) {
+        $r['valido'] = false;
+        $r['errores'][] = $mensaje;
+    }
+
     private static function errorFila(&$r, $id, $mensaje) {
         $r['valido'] = false;
         $r['errores'][] = $mensaje;
@@ -685,6 +697,417 @@ class CashflowEstructura {
         if (isset($r['por_seccion'][$codigo])) {
             $r['por_seccion'][$codigo]['advertencias'][] = $mensaje;
         }
+    }
+
+    /* ====================================================================
+       ESCRITURA
+
+       Sobre crear filas: que Parametros::saveParametro se niegue a crear no es
+       un precedente a imitar aca. Esa negativa existe porque cada fila de
+       RO_T_CASHFLOW_PARAMETROS tiene codigo que la lee (Parametros::num lanza
+       si falta la clave), asi que una clave inventada por el usuario seria dato
+       muerto. Las filas de CONF_FILA son lo contrario: son datos puros, sin
+       codigo detras. Crearlas es justamente el punto de todo el modulo.
+
+       Lo que NO existe es la baja: se inhabilita con ACTIVO = 0, igual que en
+       todo el resto del sistema.
+       ==================================================================== */
+
+    /**
+     * Alta de una seccion. Entra INHABILITADA y ultima.
+     *
+     * @param string $nombre
+     * @param string $rol SALDO, MOVIMIENTO o DERIVADO
+     * @param string|null $usuario
+     * @return string El codigo asignado
+     */
+    public function addSeccion($nombre, $rol, $usuario = null) {
+        $nombre = trim((string) $nombre);
+
+        if ($nombre === '') {
+            throw new Exception('La sección necesita un nombre');
+        }
+
+        if (!in_array($rol, self::ROLES, true)) {
+            throw new Exception('El rol "' . $rol . '" no es válido');
+        }
+
+        $codigo = self::slug($nombre);
+
+        if (!self::codigoValido($codigo)) {
+            throw new Exception('Con el nombre "' . $nombre . '" no se puede armar un código '
+                . 'interno válido. Usá al menos una letra.');
+        }
+
+        $cid = $this->conexion();
+
+        // El UNIQUE lo garantiza la clave primaria, pero se chequea antes para
+        // dar un mensaje entendible en lugar del error del indice.
+        $stmt = sqlsrv_query($cid,
+            "SELECT NOMBRE, ACTIVO FROM RO_T_CASHFLOW_CONF_SECCION WHERE CODIGO = ?", [$codigo]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar la sección'));
+        }
+
+        $existe = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        if ($existe) {
+            throw new Exception('Ya existe una sección con el código ' . $codigo
+                . ' ("' . $existe['NOMBRE'] . '", '
+                . (intval($existe['ACTIVO']) === 1 ? 'activa' : 'inhabilitada') . ')');
+        }
+
+        $sql = "INSERT INTO RO_T_CASHFLOW_CONF_SECCION
+                    (CODIGO, NOMBRE, ROL, ID_PADRE, ORDEN, ACTIVO, FECHA_UPDATE, USUARIO)
+                VALUES (?, ?, ?, NULL,
+                    (SELECT ISNULL(MAX(ORDEN), 0) + 10 FROM RO_T_CASHFLOW_CONF_SECCION),
+                    0, GETDATE(), ?)";
+
+        $stmt = sqlsrv_query($cid, $sql, [$codigo, $nombre, $rol, $usuario]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al crear la sección'));
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $codigo;
+    }
+
+    /**
+     * Alta de una fila. Entra INHABILITADA y ultima de su seccion.
+     *
+     * Que entre inhabilitada no es un detalle: una fila inhabilitada NO puede
+     * invalidar la estructura, asi que el alta no necesita validar el arbol
+     * completo ni puede romper un tablero que estaba bien. Es el mismo criterio
+     * con el que Parametros::addMixCobro da de alta un medio de pago en 0% e
+     * inhabilitado.
+     *
+     * @param string $nombre
+     * @param string $seccion Codigo de seccion
+     * @param string $tipo
+     * @param string|null $usuario
+     * @return array ['id' => int, 'codigo' => string]
+     */
+    public function addFila($nombre, $seccion, $tipo, $usuario = null) {
+        $nombre = trim((string) $nombre);
+
+        if ($nombre === '') {
+            throw new Exception('La fila necesita un nombre');
+        }
+
+        if (!in_array($tipo, self::TIPOS, true)) {
+            throw new Exception('El tipo "' . $tipo . '" no es válido');
+        }
+
+        $codigo = self::slug($nombre);
+
+        if (!self::codigoValido($codigo)) {
+            throw new Exception('Con el nombre "' . $nombre . '" no se puede armar un código '
+                . 'interno válido. Usá al menos una letra.');
+        }
+
+        $cid = $this->conexion();
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT CODIGO FROM RO_T_CASHFLOW_CONF_SECCION WHERE CODIGO = ?", [$seccion]);
+
+        if ($stmt === false || !sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            throw new Exception('La sección "' . $seccion . '" no existe');
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT NOMBRE, ACTIVO FROM RO_T_CASHFLOW_CONF_FILA WHERE CODIGO = ?", [$codigo]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar la fila'));
+        }
+
+        $existe = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        if ($existe) {
+            throw new Exception('Ya existe una fila con el código ' . $codigo
+                . ' ("' . $existe['NOMBRE'] . '", '
+                . (intval($existe['ACTIVO']) === 1 ? 'activa' : 'inhabilitada') . ')');
+        }
+
+        $sql = "INSERT INTO RO_T_CASHFLOW_CONF_FILA
+                    (CODIGO, NOMBRE, SECCION, TIPO, COMPUTA, ORIGEN_PROVIDER, ORIGEN_SERIE,
+                     ORDEN, ACTIVO, FECHA_UPDATE, USUARIO)
+                OUTPUT INSERTED.ID
+                VALUES (?, ?, ?, ?, 1, NULL, NULL,
+                    (SELECT ISNULL(MAX(ORDEN), 0) + 10 FROM RO_T_CASHFLOW_CONF_FILA WHERE SECCION = ?),
+                    0, GETDATE(), ?)";
+
+        $stmt = sqlsrv_query($cid, $sql, [$codigo, $nombre, $seccion, $tipo, $seccion, $usuario]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al crear la fila'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        return ['id' => intval($row['ID']), 'codigo' => $codigo];
+    }
+
+    /**
+     * Guarda la estructura completa.
+     *
+     * EL ORDEN LO DEFINE LA POSICION EN EL ARREGLO, no un campo que mande el
+     * cliente: el servidor renumera desde cero con (indice+1)*10. Renumerar
+     * siempre hace que el orden se repare solo, y elimina de raiz los ordenes
+     * duplicados, los huecos y toda la logica de intercambio.
+     *
+     * ES LA PRIMERA TRANSACCION DEL PROYECTO, y es a proposito. En el resto del
+     * codigo las escrituras de varias filas van sueltas, y ademas
+     * Conexion::conectar() abre una conexion NUEVA en cada llamada, asi que
+     * cada fila confirma por separado. Para un porcentaje eso es una molestia
+     * recuperable; para un renumerado de estructura no lo es: una falla a mitad
+     * de camino dejaria ordenes duplicados y secciones renombradas con filas
+     * huerfanas. Por eso aca se abre UNA conexion y todo va en una transaccion.
+     *
+     * @param array $secciones En el orden en que se muestran
+     * @param array $filas En el orden en que se muestran
+     * @param string|null $usuario
+     * @return array El resultado de validar(), con las advertencias
+     */
+    public function guardar($secciones, $filas, $usuario = null) {
+        if (!$this->tablasCreadas()) {
+            throw new Exception('No existen las tablas de estructura. '
+                . 'Corré sql/cashflow_estructura.sql.');
+        }
+
+        $actualSecciones = $this->getSecciones(false);
+        $actualFilas = $this->getFilas(false);
+
+        $this->verificarSincronia($actualSecciones, $actualFilas, $secciones, $filas);
+
+        // Se valida el estado RESULTANTE, no lo que manda el cliente sin
+        // contrastar: un envio parcial no puede colar una estructura invalida.
+        $simSecciones = $this->simularSecciones($actualSecciones, $secciones);
+        $simFilas = $this->simularFilas($actualFilas, $filas);
+
+        $val = self::validar($simSecciones, $simFilas);
+
+        if (!$val['valido']) {
+            throw new Exception(implode(' ', $val['errores']));
+        }
+
+        $cid = $this->conexion();
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo iniciar la transacción'));
+        }
+
+        try {
+            $orden = 0;
+
+            foreach ($secciones as $s) {
+                $orden += 10;
+
+                $sql = "UPDATE RO_T_CASHFLOW_CONF_SECCION
+                        SET NOMBRE = ?, ROL = ?, ID_PADRE = ?, ORDEN = ?, ACTIVO = ?,
+                            FECHA_UPDATE = GETDATE(), USUARIO = ?
+                        WHERE CODIGO = ?";
+
+                $params = [
+                    trim($s['nombre']),
+                    $s['rol'],
+                    empty($s['id_padre']) ? null : $s['id_padre'],
+                    $orden,
+                    !empty($s['activo']) ? 1 : 0,
+                    $usuario,
+                    $s['codigo']
+                ];
+
+                if (sqlsrv_query($cid, $sql, $params) === false) {
+                    throw new Exception($this->errorSql('Error al guardar la sección '
+                        . $s['codigo']));
+                }
+            }
+
+            // El orden de las filas se renumera DENTRO de cada seccion
+            $ordenPorSeccion = [];
+
+            foreach ($filas as $f) {
+                $seccion = $f['seccion'];
+
+                if (!isset($ordenPorSeccion[$seccion])) {
+                    $ordenPorSeccion[$seccion] = 0;
+                }
+
+                $ordenPorSeccion[$seccion] += 10;
+
+                // CODIGO no se actualiza nunca: es la clave con la que se
+                // referencia la fila. Si quedo mal, se inhabilita y se crea otra.
+                $sql = "UPDATE RO_T_CASHFLOW_CONF_FILA
+                        SET NOMBRE = ?, SECCION = ?, TIPO = ?, COMPUTA = ?,
+                            ORIGEN_PROVIDER = ?, ORIGEN_SERIE = ?, ORDEN = ?, ACTIVO = ?,
+                            FECHA_UPDATE = GETDATE(), USUARIO = ?
+                        WHERE ID = ?";
+
+                $derivada = self::esDerivada($f['tipo']);
+
+                $params = [
+                    trim($f['nombre']),
+                    $seccion,
+                    $f['tipo'],
+                    !empty($f['computa']) ? 1 : 0,
+                    ($derivada || empty($f['origen_provider'])) ? null : $f['origen_provider'],
+                    ($derivada || empty($f['origen_serie'])) ? null : $f['origen_serie'],
+                    $ordenPorSeccion[$seccion],
+                    !empty($f['activo']) ? 1 : 0,
+                    $usuario,
+                    intval($f['id'])
+                ];
+
+                if (sqlsrv_query($cid, $sql, $params) === false) {
+                    throw new Exception($this->errorSql('Error al guardar la fila '
+                        . $f['nombre']));
+                }
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar el guardado'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+            throw $e;
+        }
+
+        return $val;
+    }
+
+    /**
+     * Rechaza el guardado si alguien agrego o quito filas desde que se cargo la
+     * pantalla. Sin esto, un alta hecha en otra pestana se quedaria sin orden o
+     * se perderia.
+     */
+    private function verificarSincronia($actualSecciones, $actualFilas, $secciones, $filas) {
+        $idsDb = [];
+
+        foreach ($actualFilas as $f) {
+            $idsDb[intval($f['ID'])] = true;
+        }
+
+        $idsIn = [];
+
+        foreach ($filas as $f) {
+            $idsIn[intval($f['id'])] = true;
+        }
+
+        $codsDb = [];
+
+        foreach ($actualSecciones as $s) {
+            $codsDb[$s['CODIGO']] = true;
+        }
+
+        $codsIn = [];
+
+        foreach ($secciones as $s) {
+            $codsIn[$s['codigo']] = true;
+        }
+
+        if (count(array_diff_key($idsDb, $idsIn)) > 0
+            || count(array_diff_key($idsIn, $idsDb)) > 0
+            || count(array_diff_key($codsDb, $codsIn)) > 0
+            || count(array_diff_key($codsIn, $codsDb)) > 0) {
+            throw new Exception('La pantalla está desactualizada: alguien agregó o quitó '
+                . 'filas o secciones. Recargá antes de guardar.');
+        }
+    }
+
+    /** Superpone las secciones que llegan sobre las de la base */
+    private function simularSecciones($actual, $entrantes) {
+        $porCodigo = [];
+
+        foreach ($entrantes as $s) {
+            $porCodigo[$s['codigo']] = $s;
+        }
+
+        $sim = [];
+        $orden = 0;
+
+        foreach ($entrantes as $e) {
+            $orden += 10;
+
+            foreach ($actual as $a) {
+                if ($a['CODIGO'] !== $e['codigo']) {
+                    continue;
+                }
+
+                $a['NOMBRE'] = trim($e['nombre']);
+                $a['ROL'] = $e['rol'];
+                $a['ID_PADRE'] = empty($e['id_padre']) ? null : $e['id_padre'];
+                $a['ORDEN'] = $orden;
+                $a['ACTIVO'] = !empty($e['activo']) ? 1 : 0;
+                $sim[] = $a;
+                break;
+            }
+        }
+
+        return $sim;
+    }
+
+    /** Superpone las filas que llegan sobre las de la base */
+    private function simularFilas($actual, $entrantes) {
+        $porId = [];
+
+        foreach ($actual as $a) {
+            $porId[intval($a['ID'])] = $a;
+        }
+
+        $sim = [];
+        $ordenPorSeccion = [];
+
+        foreach ($entrantes as $e) {
+            $id = intval($e['id']);
+
+            if (!isset($porId[$id])) {
+                continue;
+            }
+
+            $a = $porId[$id];
+            $derivada = self::esDerivada($e['tipo']);
+
+            if (!isset($ordenPorSeccion[$e['seccion']])) {
+                $ordenPorSeccion[$e['seccion']] = 0;
+            }
+
+            $ordenPorSeccion[$e['seccion']] += 10;
+
+            $a['NOMBRE'] = trim($e['nombre']);
+            $a['SECCION'] = $e['seccion'];
+            $a['TIPO'] = $e['tipo'];
+            $a['COMPUTA'] = !empty($e['computa']) ? 1 : 0;
+            $a['ORIGEN_PROVIDER'] = ($derivada || empty($e['origen_provider']))
+                ? null : $e['origen_provider'];
+            $a['ORIGEN_SERIE'] = ($derivada || empty($e['origen_serie']))
+                ? null : $e['origen_serie'];
+            $a['ORDEN'] = $ordenPorSeccion[$e['seccion']];
+            $a['ACTIVO'] = !empty($e['activo']) ? 1 : 0;
+
+            $sim[] = $a;
+        }
+
+        return $sim;
+    }
+
+    /** Conexion a central, con el error ya traducido */
+    private function conexion() {
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        return $cid;
     }
 
     /**

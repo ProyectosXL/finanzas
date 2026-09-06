@@ -223,3 +223,64 @@
     background-color: rgba(220, 53, 69, 0.1);
     color: var(--danger-color, #dc3545);
 }
+
+/* ========================================
+   ESTRUCTURA DEL CASHFLOW
+   ========================================
+   Prefijo cfe- en todo: Parametros.js busca .param-input, .mix-* y .respaldo-*
+   en TODO el documento, no dentro de su panel, así que reusar esos nombres
+   haría que los dos paneles se pisen en silencio.
+   ======================================== */
+
+.tab-parametros .cfe table td,
+.tab-parametros .cfe table th {
+    padding: 6px 10px;
+    font-size: 0.83rem;
+    vertical-align: middle;
+}
+
+.tab-parametros .cfe .cfe-codigo {
+    font-size: 0.75rem;
+    color: #6c757d;
+}
+
+.tab-parametros .cfe .cfe-orden {
+    white-space: nowrap;
+}
+
+.tab-parametros .cfe .cfe-mover,
+.tab-parametros .cfe .cfe-mover-sec {
+    font-size: 0.95rem;
+    line-height: 1;
+    text-decoration: none;
+    color: #6c757d;
+    padding: 0 3px !important;
+}
+
+.tab-parametros .cfe .cfe-mover:hover,
+.tab-parametros .cfe .cfe-mover-sec:hover {
+    color: var(--primary-color, #0d6efd);
+}
+
+/* Fila de agrupación por sección dentro del editor */
+.tab-parametros .cfe .cfe-grupo td {
+    background-color: #eef1f6;
+    font-weight: 700;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #6c757d;
+}
+
+/* Inhabilitada: se atenúa y se tacha, no se esconde. Mismo criterio que
+   .mix-inactivo: nunca se borra un dato, y hay que poder reactivarlo. */
+.tab-parametros .cfe .cfe-inactiva td {
+    background-color: #fafbfc;
+    color: #97a1ae;
+}
+
+.tab-parametros .cfe .cfe-inactiva .cfe-nombre,
+.tab-parametros .cfe .cfe-inactiva .cfe-sec-nombre {
+    text-decoration: line-through;
+    color: #97a1ae;
+}
