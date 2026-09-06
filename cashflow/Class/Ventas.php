@@ -435,7 +435,13 @@ class Ventas {
         $cid = $this->conn->conectar('power');
 
         if (!$cid) {
-            throw new Exception('No se pudo conectar al servidor de calendario (power)');
+            // conectar() devuelve false y manda el detalle al error_log. Se
+            // rescata aca para que el motivo real (login, base inexistente,
+            // servidor inaccesible) llegue al front en vez de un mensaje
+            // generico que no permite diagnosticar nada.
+            throw new Exception($this->errorSql(
+                'No se pudo conectar al calendario bancario (conexion "power")'
+            ));
         }
 
         $sql = "SELECT FECHA, DIA_LABORAL
