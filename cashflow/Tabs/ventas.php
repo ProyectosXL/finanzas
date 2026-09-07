@@ -32,9 +32,9 @@
                         <h5 class="mb-0">Proyección de Venta por Mes</h5>
                         <small class="text-muted">
                             Mes actual + 11 &middot;
-                            <strong>Venta Proyectada = Año Anterior (neto) &times; (1 + Índice) &times; (1 + IVA)</strong>
+                            <strong>Venta Proyectada = Año Anterior (neto) &times; (1 + Variación) &times; (1 + IVA)</strong>
                             <i class="fas fa-info-circle ms-1"
-                               title="Las columnas de años son NETAS sin IVA. La Venta Proyectada lleva IVA: por eso es mayor aunque el índice sea 0%. Click en el índice para editarlo."></i>
+                               title="Las columnas de años son NETAS sin IVA. La Venta Proyectada lleva IVA: por eso es mayor aunque la variación sea 0%. Click en el % para editarlo."></i>
                         </small>
                     </div>
                     <div class="d-flex gap-2">

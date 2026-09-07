@@ -110,7 +110,7 @@
      * Tabla de proyección por mes: 12 meses (el actual + 11), sin apertura
      * por canal.
      *
-     *   Venta Proyectada = Venta Año Anterior × (1 + Índice) × (1 + IVA)
+     *   Venta Proyectada = Venta Año Anterior × (1 + Variación) × (1 + IVA)
      *   Var. Interanual  = Año Anterior / Año Previo − 1
      */
     function generarTablaAnalisis() {
@@ -128,9 +128,9 @@
             '<th class="text-end">Año Anterior' +
                 '<span class="th-sub">neto s/ IVA &middot; base</span></th>' +
             '<th class="text-center">Var. Interanual</th>' +
-            '<th class="text-center">Índice de Variación ' +
+            '<th class="text-center">% de Variación ' +
                 '<i class="fas fa-pen-to-square ms-1" style="font-size: 10px;" title="Click para editar"></i>' +
-                '<span class="th-sub">aplicado sobre el año anterior</span></th>' +
+                '<span class="th-sub">9 = +9% sobre el año anterior</span></th>' +
             '<th class="text-end">Venta Proyectada' +
                 '<span class="th-sub th-sub-iva">CON IVA ' + formatPercentCorto(iva) + '</span></th>';
 
@@ -194,9 +194,9 @@
     }
 
     /**
-     * Celda del índice de variación.
-     * El índice se guarda contra el (año, mes) del MES PROYECTADO, que es la
-     * misma clave que usa el motor de proyección.
+     * Celda del % de variación.
+     * Se guarda contra el (año, mes) del MES PROYECTADO, que es la misma clave
+     * que usa el motor de proyección.
      */
     function celdaIndice(fila) {
         var editado = !!fila.indice_editado;
@@ -256,7 +256,11 @@
     }
 
     /**
-     * Edición del índice de variación, mismo patrón de celda editable que Comex.
+     * Edición del % de variación, mismo patrón de celda editable que Comex.
+     *
+     * Se tipea el porcentaje (9) y se guarda la tasa (0,09). El sufijo "%" del
+     * input-group está para que esa convención se vea sin tener que deducirla:
+     * era de donde salía la duda de si había que ingresar 9 o 1,09.
      */
     window.editarIndice = function(cell) {
         if (cell.querySelector('input')) {
@@ -271,12 +275,24 @@
         var input = document.createElement('input');
         input.type = 'number';
         input.step = '0.01';
-        input.className = 'indice-input';
+        input.className = 'form-control indice-input';
         // Se edita en porcentaje y se guarda en tasa
         input.value = (actual * 100).toFixed(2);
 
+        // Mismo input-group que la participación del tramo. El listener sigue
+        // colgado del input, no del grupo, así que el blur/Enter no cambia:
+        // hasta un click sobre el sufijo dispara el blur y guarda.
+        var sufijo = document.createElement('span');
+        sufijo.className = 'input-group-text';
+        sufijo.textContent = '%';
+
+        var grupo = document.createElement('div');
+        grupo.className = 'input-group input-group-sm';
+        grupo.appendChild(input);
+        grupo.appendChild(sufijo);
+
         cell.innerHTML = '';
-        cell.appendChild(input);
+        cell.appendChild(grupo);
         input.focus();
         input.select();
 
@@ -311,7 +327,7 @@
                 }
             })
             .catch(function(error) {
-                alert('Error al guardar el índice: ' + error.message);
+                alert('Error al guardar el % de variación: ' + error.message);
                 cell.innerHTML = originalContent;
             });
         };

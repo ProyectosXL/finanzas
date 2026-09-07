@@ -293,7 +293,7 @@
 }
 
 /* ========================================
-   ÍNDICE DE VARIACIÓN EDITABLE
+   % DE VARIACIÓN EDITABLE
    ======================================== */
 
 .indice-cell {
@@ -331,11 +331,21 @@
     border-left: 3px solid #ff9800;
 }
 
+/* El input vive dentro de un input-group con el sufijo "%". Se acota el grupo
+   para que la celda no se estire: el encabezado de la columna ya es el más
+   ancho de la tabla. */
+.indice-cell .input-group {
+    max-width: 130px;
+    margin: 0 auto;
+}
+
 .indice-input {
-    width: 100%;
+    /* En un flex de Bootstrap el width: 100% le pelea el lugar al sufijo */
+    flex: 1 1 auto;
+    min-width: 0;
     padding: 4px 8px;
     border: 1px solid var(--primary-color, #3366ff);
-    border-radius: 4px;
+    border-radius: 4px 0 0 4px;
     font-size: 13px;
     font-family: var(--font-family);
     text-align: right;
@@ -345,6 +355,18 @@
     outline: none;
     border-color: var(--primary-color, #3366ff);
     box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1);
+    /* El focus de Bootstrap manda el input arriba y le tapa el borde al
+       sufijo; se lo devuelve al sufijo, que queda a la derecha. */
+    z-index: 3;
+}
+
+.indice-cell .input-group-text {
+    padding: 4px 8px;
+    font-size: 13px;
+    font-family: var(--font-family);
+    border: 1px solid var(--primary-color, #3366ff);
+    border-left: none;
+    border-radius: 0 4px 4px 0;
 }
 
 .badge-fecha-editada {

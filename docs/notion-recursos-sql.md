@@ -26,7 +26,7 @@ Todos los objetos se crean con `sql/ventas_proyeccion.sql` y `sql/SJ_CASHFLOW_VE
 
 **Base**: LAKER_SA
 
-**Descripción**: Índice de variación que el usuario edita por mes desde la pestaña Ventas para proyectar la venta sobre el mismo mes del año anterior, según la fórmula VentaNetaProyectada = VentaNetaReal(año anterior) × (1 + índice). Es un único índice por mes del horizonte, no por canal, y se guarda contra el año y mes del mes proyectado. Un mes sin registro se proyecta con índice cero, es decir, igual al año anterior.
+**Descripción**: Variación que el usuario edita por mes desde la pestaña Ventas (rotulada ahí como "% de Variación") para proyectar la venta sobre el mismo mes del año anterior, según la fórmula VentaNetaProyectada = VentaNetaReal(año anterior) × (1 + variación). La columna INDICE guarda la tasa, no el porcentaje: en pantalla se ingresa 9 y acá queda 0.09. Es un único valor por mes del horizonte, no por canal, y se guarda contra el año y mes del mes proyectado. Un mes sin registro se proyecta con variación cero, es decir, igual al año anterior.
 
 ---
 
