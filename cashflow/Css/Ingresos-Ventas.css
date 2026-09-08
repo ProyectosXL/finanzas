@@ -456,3 +456,79 @@
     color: #721c24;
     border: 1px solid #f5c6cb;
 }
+
+/* ========================================
+   CARD COLAPSABLE
+   No habia un patron previo de card colapsable en el modulo: este es el que
+   define uno. El encabezado entero es el disparador -no solo el chevron- para
+   que el area de click sea la que el usuario ya intenta apretar; el <button>
+   se despinta hasta quedar igual que un card-header comun.
+   ======================================== */
+
+.tab-ventas .card-colapsable .card-header {
+    /* El padding lo pone el boton, que ocupa todo el header */
+    overflow: hidden;
+}
+
+.tab-ventas .card-toggle {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100%;
+    padding: 16px 20px;
+    background: none;
+    border: none;
+    text-align: left;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.tab-ventas .card-toggle:hover {
+    background-color: rgba(51, 102, 255, 0.04);
+}
+
+.tab-ventas .card-toggle:focus-visible {
+    outline: 2px solid var(--primary-color, #3366ff);
+    outline-offset: -2px;
+}
+
+.tab-ventas .card-toggle-chevron {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-muted, #8c93a8);
+    transition: transform 0.2s ease;
+}
+
+/* Cerrado apunta a la derecha, abierto hacia abajo. Bootstrap pone .collapsed
+   en el disparador mientras el bloque esta cerrado. */
+.tab-ventas .card-toggle.collapsed .card-toggle-chevron {
+    transform: rotate(-90deg);
+}
+
+.tab-ventas .card-toggle-texto {
+    display: block;
+}
+
+/* ========================================
+   MES PARCIAL EN LA TENDENCIA
+   ======================================== */
+
+.tab-ventas .fila-parcial {
+    background-color: #fffdf5;
+}
+
+.tab-ventas .badge-parcial {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 2px 7px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeeba;
+    border-radius: 4px;
+    cursor: help;
+}

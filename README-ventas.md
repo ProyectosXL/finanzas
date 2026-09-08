@@ -93,9 +93,24 @@ Como el divisor de la venta diaria descuenta los feriados de comercio, el total 
 
 ### Pestaña Análisis de Ventas
 
-Dos bloques, **ninguno abierto por canal**:
+Tres bloques, **ninguno abierto por canal**:
 
-**1. Proyección de Venta por Mes** — 12 meses: el actual + 11.
+**1. Tendencia — Últimos 6 Meses** *(colapsable, cerrado por defecto)* — venta neta contra el mismo período del año anterior.
+
+| Columna | Base | Qué es |
+| --- | --- | --- |
+| Mes | — | Los 6 meses que terminan en el mes de la última fecha cargada |
+| Venta Neta | **neto s/ IVA** | Venta real del mes |
+| Mismo Período Año Anterior | **neto s/ IVA** | Venta real del mismo tramo, un año atrás |
+| Var. Interanual | — | `Venta Neta / Año Anterior − 1`, o guion si el año anterior no es positivo |
+
+> **Por qué necesita un histórico diario**: el mes en curso está incompleto. Contra un mes entero del año anterior la variación saldría siempre hundida, porque enfrentaría los días transcurridos contra treinta. Este bloque sale de `RO_T_CASHFLOW_VENTAS_HIST_DIA` (SP `RO_SP_CASHFLOW_VENTAS_HIST_DIA`), que guarda la venta al grano de día, y **recorta el año anterior a los mismos días**. La fila del mes incompleto lleva el badge `parcial` y el rango de días comparados.
+
+El día de corte es la **última fecha cargada**, no "ayer" calculado: el origen se actualiza de madrugada, así que normalmente da ayer, pero si el job no corrió el encabezado lo dice ("parcial al 03/09") en vez de comparar un mes contra unos pocos días. La ventana se ancla en el mes de esa fecha, con lo cual **toda fila que se muestra tiene dato**: el día 1 de mes salen seis meses cerrados y ninguna fila parcial.
+
+Esta tabla **no** alimenta la proyección: la base de cálculo sigue siendo la tabla mensual. Sus importes son netos y no se comparan contra la Venta Proyectada del bloque siguiente, que lleva IVA.
+
+**2. Proyección de Venta por Mes** — 12 meses: el actual + 11.
 
 | Columna | Base | Qué es |
 | --- | --- | --- |
@@ -110,7 +125,7 @@ Dos bloques, **ninguno abierto por canal**:
 
 La venta proyectada de esta tabla y la de la grilla de Proyección salen del **mismo helper** (`Ventas::baseMensual()`), así que no se pueden desincronizar.
 
-**2. Control de Facturación** — por mes: `Facturas`, `Remitos` y `Total`. Es sólo un bloque de control para contrastar contra el tablero; los remitos **no** entran en la proyección.
+**3. Control de Facturación** — por mes: `Facturas`, `Remitos` y `Total`. Es sólo un bloque de control para contrastar contra el tablero; los remitos **no** entran en la proyección.
 
 ### Superposición tramo / meses
 

@@ -2,7 +2,7 @@
 
 Documentación para Notion, con la estructura del inventario de recursos SQL.
 
-Todos los objetos se crean con `sql/ventas_proyeccion.sql` y `sql/SJ_CASHFLOW_VENTAS_HIST.sql`.
+Todos los objetos se crean con `sql/ventas_proyeccion.sql`, `sql/SJ_CASHFLOW_VENTAS_HIST.sql` y `sql/RO_SP_CASHFLOW_VENTAS_HIST_DIA.sql`.
 
 ---
 
@@ -15,6 +15,18 @@ Todos los objetos se crean con `sql/ventas_proyeccion.sql` y `sql/SJ_CASHFLOW_VE
 **Base**: LAKER_SA
 
 **Descripción**: Histórico de ventas consolidado por año, mes, canal y tipo de comprobante, que el módulo de Flujo de Fondos usa como única base de cálculo para proyectar la venta futura. La puebla el stored procedure SJ_CASHFLOW_VENTAS_HIST leyendo Tango y los locales propios. Discrimina FACTURA de REMITO: la proyección usa exclusivamente las facturas, mientras que los remitos se guardan sólo como bloque de control para contrastar el total contra el tablero. Los cuatro canales del modelo son LOCALES, FRANQUICIAS, MAYORISTAS y ECOMMERCE. Los importes son netos sin IVA y las notas de crédito restan en el mes en que se emitieron.
+
+---
+
+- **Módulo**: Ingresos — Ventas
+
+        **Tabla: RO_T_CASHFLOW_VENTAS_HIST_DIA**
+
+**Servidor**: XL-TANGO
+
+**Base**: LAKER_SA
+
+**Descripción**: Histórico de ventas al grano de día, canal y tipo de comprobante. La puebla el stored procedure RO_SP_CASHFLOW_VENTAS_HIST_DIA. Existe porque RO_T_CASHFLOW_VENTAS_HIST agrega al grano de mes, y con ese grano el mes en curso sólo se puede comparar contra un mes completo del año anterior: la variación sale siempre hundida porque enfrenta los días transcurridos contra treinta. Con el grano diario el año anterior se recorta a los mismos días. NO alimenta la proyección, cuya base de cálculo sigue siendo la tabla mensual: se usa únicamente en el bloque de tendencias de la sub-pestaña Análisis de Ventas. Hoy sólo guarda facturas; la columna TIPO_COMPROBANTE se conserva para que sumar remitos sea un cambio de SP y no una migración.
 
 ---
 
@@ -92,6 +104,20 @@ Todos los objetos se crean con `sql/ventas_proyeccion.sql` y `sql/SJ_CASHFLOW_VE
 
 ---
 
+- **Módulo**: Ingresos — Ventas
+
+        **Stored Procedure: RO_SP_CASHFLOW_VENTAS_HIST_DIA**
+
+**Servidor**: XL-TANGO
+
+**Base**: LAKER_SA
+
+**Descripción**: Consolida el histórico de ventas y lo persiste en RO_T_CASHFLOW_VENTAS_HIST_DIA agregado por fecha, canal y tipo de comprobante. Está basado en SJ_CASHFLOW_VENTAS_HIST y conserva sus joins y sus filtros, con tres diferencias: guarda sólo facturas, por lo que omite la parte de remitos 599 (STA14 + STA20), que es la única que produce REMITO; agrega al grano de día; y no expande el rango a meses completos, porque al grano de día el DELETE más INSERT del rango exacto ya es seguro. Sin argumentos procesa desde treinta días atrás hasta ayer: el origen se actualiza de madrugada, así que el último día cerrado es el anterior y pedir hasta hoy grabaría un día a medio cargar. La carga inicial tiene que arrancar el día 1 del mes más viejo que muestra el bloque de tendencias menos un año, porque cada mes se compara contra el mismo mes del año anterior. Las partes A, C y D son una copia deliberada de las del SP mensual: si se toca un filtro en uno, hay que tocarlo en el otro.
+
+**Ejecución**: mismo job diario de SQL Server Agent que SJ_CASHFLOW_VENTAS_HIST.
+
+---
+
 ## Dependencia externa (no la crea este módulo)
 
 - **Módulo**: Ingresos — Ventas
@@ -147,6 +173,7 @@ Todos los objetos se crean con `sql/ventas_proyeccion.sql` y `sql/SJ_CASHFLOW_VE
 | Objeto | Tipo | Servidor | Base |
 | --- | --- | --- | --- |
 | RO_T_CASHFLOW_VENTAS_HIST | Tabla | XL-TANGO | LAKER_SA |
+| RO_T_CASHFLOW_VENTAS_HIST_DIA | Tabla | XL-TANGO | LAKER_SA |
 | RO_T_CASHFLOW_VENTAS_INDICE | Tabla | XL-TANGO | LAKER_SA |
 | RO_T_CASHFLOW_VENTAS_PARTIC | Tabla | XL-TANGO | LAKER_SA |
 | RO_T_CASHFLOW_VENTAS_MIX | Tabla | XL-TANGO | LAKER_SA |
@@ -155,4 +182,5 @@ Todos los objetos se crean con `sql/ventas_proyeccion.sql` y `sql/SJ_CASHFLOW_VE
 | RO_T_CASHFLOW_CONF_SECCION | Tabla | XL-TANGO | LAKER_SA |
 | RO_T_CASHFLOW_CONF_FILA | Tabla | XL-TANGO | LAKER_SA |
 | SJ_CASHFLOW_VENTAS_HIST | Stored Procedure | XL-TANGO | LAKER_SA |
+| RO_SP_CASHFLOW_VENTAS_HIST_DIA | Stored Procedure | XL-TANGO | LAKER_SA |
 | RO_T_CALENDARIO | Tabla (lectura, externa) | XL-APPS | POWER_BI_CONTROL |

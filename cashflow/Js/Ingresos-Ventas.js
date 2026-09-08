@@ -94,6 +94,7 @@
         pedir('Controller/VentasController.php?action=getAnalisisVentas&anioDesde=2025')
             .then(function(data) {
                 datosAnalisis = data;
+                generarTablaTendencias();
                 generarTablaAnalisis();
                 generarTablaFacturacion();
                 mostrar('loadingAnalisis', false);
@@ -104,6 +105,96 @@
                 mostrar('loadingAnalisis', false);
                 mostrarError('Error al cargar el análisis de ventas: ' + error.message);
             });
+    }
+
+    /**
+     * Tendencia de los últimos meses contra el mismo período del año anterior.
+     *
+     * Sale del histórico DIARIO, no del mensual: el mes en curso se compara
+     * contra los mismos días del año anterior. Contra el mes entero la variación
+     * daría siempre hundida, porque enfrentaría los días transcurridos contra
+     * treinta.
+     *
+     * Los importes son NETOS: la Venta Proyectada de la tabla de abajo lleva
+     * IVA, así que las dos tablas no se comparan entre sí. El th-sub lo dice en
+     * cada columna, que es el mismo recurso que ya usa el análisis.
+     */
+    function generarTablaTendencias() {
+        var filas = datosAnalisis.tendencias || [];
+        var totales = datosAnalisis.tendencias_totales;
+        var corte = datosAnalisis.tendencias_dia_corte;
+
+        document.getElementById('tendenciasHeader').innerHTML =
+            '<th class="col-canal">Mes</th>' +
+            '<th class="text-end">Venta Neta' +
+                '<span class="th-sub">neto s/ IVA</span></th>' +
+            '<th class="text-end">Mismo Período Año Anterior' +
+                '<span class="th-sub">neto s/ IVA</span></th>' +
+            '<th class="text-center">Var. Interanual</th>';
+
+        var elCorte = document.getElementById('tendenciasCorte');
+
+        if (!filas.length) {
+            // La tabla diaria es nueva: si el SP todavía no corrió, el bloque
+            // sale vacío pero el resto de la pantalla sigue andando.
+            document.getElementById('tendenciasBody').innerHTML =
+                '<tr><td colspan="4" class="text-center text-muted py-4">' +
+                'No hay histórico diario cargado. Corré el SP RO_SP_CASHFLOW_VENTAS_HIST_DIA.</td></tr>';
+            document.getElementById('tendenciasTotals').innerHTML = '';
+            elCorte.textContent = '';
+            return;
+        }
+
+        var ultima = filas[filas.length - 1];
+
+        elCorte.innerHTML = '&middot; ' +
+            (ultima.parcial ? 'parcial al ' : 'al ') + fechaCorta(corte);
+
+        var html = '';
+
+        filas.forEach(function(fila) {
+            // El rango de días es lo que explica por qué un mes parcial tiene un
+            // importe más chico: sin eso el número se lee como una caída.
+            var rango = 'días 1 al ' + fila.dias;
+
+            html += '<tr' + (fila.parcial ? ' class="fila-parcial"' : '') + '>';
+            html += '<td class="col-canal fw-semibold">' + fila.label +
+                    (fila.parcial
+                        ? ' <span class="badge-parcial" title="Mes incompleto: ' + rango + '">parcial</span>'
+                        : '') +
+                    '</td>';
+
+            html += '<td class="currency" title="' + fila.label + ' — ' + rango + '">' +
+                    formatCurrency(fila.neto) + '</td>';
+
+            html += '<td class="currency text-muted" title="' + fila.label_anio_anterior +
+                    ' — días 1 al ' + fila.dias_anio_anterior + '">' +
+                    formatCurrency(fila.neto_anio_anterior) + '</td>';
+
+            html += '<td class="text-center">' + badgeVariacion(fila.variacion) + '</td>';
+            html += '</tr>';
+        });
+
+        document.getElementById('tendenciasBody').innerHTML = html;
+
+        document.getElementById('tendenciasTotals').innerHTML =
+            '<td class="col-canal total-label">TOTALES</td>' +
+            '<td class="currency" title="Neto sin IVA">' +
+                formatCurrency(totales.neto) + '</td>' +
+            '<td class="currency" title="Neto sin IVA">' +
+                formatCurrency(totales.neto_anio_anterior) + '</td>' +
+            '<td class="text-center">' + badgeVariacion(totales.variacion) + '</td>';
+    }
+
+    /** '2026-09-06' -> '06/09'. Se corta el string: nunca new Date() sobre un ISO. */
+    function fechaCorta(iso) {
+        if (!iso) {
+            return '';
+        }
+
+        var p = String(iso).split('-');
+
+        return p[2] + '/' + p[1];
     }
 
     /**

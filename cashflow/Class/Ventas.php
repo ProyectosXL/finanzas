@@ -132,6 +132,89 @@ class Ventas {
     }
 
     /**
+     * Ultima fecha cargada en el historico diario.
+     *
+     * Es el dia de corte del bloque de tendencias. Se lee del dato y no se
+     * calcula como "ayer" a proposito: el origen se actualiza de madrugada, asi
+     * que en condiciones normales da ayer, pero si el job no corrio el bloque
+     * tiene que decir hasta cuando llega de verdad en vez de comparar un mes
+     * entero contra los pocos dias que si se cargaron.
+     *
+     * @return DateTime|null Ultima fecha con venta, o null si no hay historico
+     */
+    private function ultimaFechaHistoricoDia() {
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $sql = "SELECT MAX(FECHA) AS ULTIMA
+                FROM RO_T_CASHFLOW_VENTAS_HIST_DIA
+                WHERE TIPO_COMPROBANTE = ?";
+
+        $stmt = sqlsrv_query($cid, $sql, ['FACTURA']);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer el historico diario de ventas'));
+        }
+
+        $ultima = null;
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+
+        if ($row && $row['ULTIMA'] instanceof DateTime) {
+            $ultima = $row['ULTIMA'];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $ultima;
+    }
+
+    /**
+     * Venta neta diaria de un rango, ya sumada sobre los cuatro canales.
+     *
+     * El bloque de tendencias no abre por canal, asi que se suma en la consulta
+     * y el resto del calculo trabaja sobre una serie plana 'Y-m-d' => importe.
+     *
+     * @param string $desde Fecha inicial 'Y-m-d'
+     * @param string $hasta Fecha final 'Y-m-d'
+     * @return array Mapa 'Y-m-d' => importe neto del dia
+     */
+    private function serieDiariaHistorica($desde, $hasta) {
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $sql = "SELECT FECHA, SUM(IMPORTE_NETO) AS NETO
+                FROM RO_T_CASHFLOW_VENTAS_HIST_DIA
+                WHERE TIPO_COMPROBANTE = ?
+                  AND FECHA BETWEEN ? AND ?
+                GROUP BY FECHA
+                ORDER BY FECHA";
+
+        $stmt = sqlsrv_query($cid, $sql, ['FACTURA', $desde, $hasta]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer el historico diario de ventas'));
+        }
+
+        $serie = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            if ($row['FECHA'] instanceof DateTime) {
+                $serie[$row['FECHA']->format('Y-m-d')] = floatval($row['NETO']);
+            }
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $serie;
+    }
+
+    /**
      * Indices de variacion por mes
      * @return array Listado de indices
      */
@@ -1357,6 +1440,18 @@ class Ventas {
             $totalesControl['total'] += $control[$clave]['total'];
         }
 
+        /* ---- 3. Tendencia de los ultimos meses --------------------------- */
+        // Viaja en el mismo payload para que el front siga haciendo una sola
+        // llamada. Se aisla en un try porque se apoya en una tabla nueva: si el
+        // SP RO_SP_CASHFLOW_VENTAS_HIST_DIA todavia no corrio en el entorno, el
+        // bloque sale vacio pero la pantalla, que ya funcionaba, no se cae.
+        try {
+            $tendencias = $this->getTendencias();
+        } catch (Exception $e) {
+            $tendencias = self::tendenciasVacias();
+            $this->warnings[] = 'No se pudo leer el historico diario de ventas: ' . $e->getMessage();
+        }
+
         return [
             'anio_desde' => $anioDesde,
             'horizonte_meses' => $horizonteMeses,
@@ -1364,7 +1459,167 @@ class Ventas {
             'proyeccion' => $filas,
             'proyeccion_totales' => $totales,
             'facturacion' => array_values($control),
-            'facturacion_totales' => $totalesControl
+            'facturacion_totales' => $totalesControl,
+            'tendencias' => $tendencias['filas'],
+            'tendencias_totales' => $tendencias['totales'],
+            'tendencias_dia_corte' => $tendencias['dia_corte']
+        ];
+    }
+
+    /**
+     * Tendencia de los ultimos meses cerrados contra el mismo mes del anio
+     * anterior, sin apertura por canal.
+     *
+     * POR QUE NECESITA EL HISTORICO DIARIO
+     * El mes en curso esta incompleto. Contra un mes entero del anio anterior
+     * la variacion sale siempre hundida, porque enfrenta los dias transcurridos
+     * contra treinta. Con RO_T_CASHFLOW_VENTAS_HIST_DIA el anio anterior se
+     * recorta a los MISMOS dias y la comparacion es pareja.
+     *
+     * La ventana se ancla en el mes de la ultima fecha cargada, no en el mes de
+     * hoy: asi toda fila que se muestra tiene dato. El 1 de mes, cuando el corte
+     * todavia cae en el mes anterior, salen seis meses cerrados y ninguna fila
+     * parcial.
+     *
+     * Los importes son NETOS sin IVA, igual que las columnas historicas de la
+     * tabla de proyeccion.
+     *
+     * @param int $cantidadMeses Cantidad de meses a mostrar
+     * @return array dia_corte, filas y totales
+     */
+    public function getTendencias($cantidadMeses = 6) {
+        $cantidadMeses = max(1, intval($cantidadMeses));
+        $corte = $this->ultimaFechaHistoricoDia();
+
+        if ($corte === null) {
+            return self::tendenciasVacias();
+        }
+
+        // Se lee desde el dia 1 del mes mas viejo mostrado MENOS UN ANIO, que es
+        // lo que necesita la comparacion interanual, y hasta el corte.
+        $desde = new DateTime($corte->format('Y-m-01'));
+        $desde->modify('-' . ($cantidadMeses - 1) . ' month');
+        $desde->modify('-1 year');
+
+        $serie = $this->serieDiariaHistorica(
+            $desde->format('Y-m-d'),
+            $corte->format('Y-m-d')
+        );
+
+        return self::armarTendencias($serie, $cantidadMeses, $corte->format('Y-m-d'));
+    }
+
+    /**
+     * Arma el bloque de tendencias a partir de una serie diaria plana.
+     *
+     * Separado de la lectura para poder verificarlo sin base: el recorte del mes
+     * parcial y el criterio de "sin dato" son justamente lo delicado.
+     *
+     * Un mes CERRADO se compara contra el mes completo del anio anterior. El mes
+     * PARCIAL se compara contra los dias 1..corte de ese mismo mes del anio
+     * anterior, acotando el corte a los dias que ese mes realmente tuvo: un
+     * corte el 31 de marzo contra febrero pediria un dia inexistente.
+     *
+     * La variacion es null -no cero- cuando el anio anterior no es positivo. Es
+     * el mismo criterio de baseMensual(), y es lo que hace que el front pinte un
+     * guion en lugar de un 0% que se leeria como "no cambio".
+     *
+     * @param array $serieDia Mapa 'Y-m-d' => importe neto del dia
+     * @param int $cantidadMeses Cantidad de meses a mostrar
+     * @param string $fechaCorte Ultima fecha con dato, 'Y-m-d'
+     * @return array dia_corte, filas y totales
+     */
+    public static function armarTendencias($serieDia, $cantidadMeses, $fechaCorte) {
+        $corte = new DateTime($fechaCorte);
+        $diaCorte = intval($corte->format('j'));
+
+        $ancla = new DateTime($corte->format('Y-m-01'));
+        $primero = clone $ancla;
+        $primero->modify('-' . ($cantidadMeses - 1) . ' month');
+
+        $filas = [];
+        $totales = ['neto' => 0, 'neto_anio_anterior' => 0, 'variacion' => null];
+
+        for ($i = 0; $i < $cantidadMeses; $i++) {
+            $ref = clone $primero;
+            $ref->modify("+$i month");
+
+            $anio = intval($ref->format('Y'));
+            $mes = intval($ref->format('n'));
+            $diasDelMes = intval($ref->format('t'));
+
+            // Parcial solo el mes del corte, y solo si el corte no llego al
+            // ultimo dia: un corte el 31 cierra el mes.
+            $esAncla = ($ref->format('Y-m') === $ancla->format('Y-m'));
+            $parcial = ($esAncla && $diaCorte < $diasDelMes);
+            $hasta = $parcial ? $diaCorte : $diasDelMes;
+
+            $anioAnt = $anio - 1;
+            $diasMesAnt = intval(
+                (new DateTime(sprintf('%04d-%02d-01', $anioAnt, $mes)))->format('t')
+            );
+            $hastaAnt = $parcial ? min($hasta, $diasMesAnt) : $diasMesAnt;
+
+            $neto = self::sumarDias($serieDia, $anio, $mes, $hasta);
+            $netoAnt = self::sumarDias($serieDia, $anioAnt, $mes, $hastaAnt);
+
+            $filas[] = [
+                'clave' => sprintf('%04d-%02d', $anio, $mes),
+                'anio' => $anio,
+                'mes' => $mes,
+                'label' => Horizonte::labelMes($anio, $mes),
+                'neto' => $neto,
+                'anio_anterior' => $anioAnt,
+                'label_anio_anterior' => Horizonte::labelMes($anioAnt, $mes),
+                'neto_anio_anterior' => $netoAnt,
+                'variacion' => ($netoAnt > 0) ? (($neto / $netoAnt) - 1) : null,
+                'parcial' => $parcial,
+                // Dias efectivamente comparados de cada lado. En un mes parcial
+                // son los que explican por que el importe es mas chico.
+                'dias' => $hasta,
+                'dias_anio_anterior' => $hastaAnt
+            ];
+
+            $totales['neto'] += $neto;
+            $totales['neto_anio_anterior'] += $netoAnt;
+        }
+
+        if ($totales['neto_anio_anterior'] > 0) {
+            $totales['variacion'] = ($totales['neto'] / $totales['neto_anio_anterior']) - 1;
+        }
+
+        return [
+            'dia_corte' => $corte->format('Y-m-d'),
+            'filas' => $filas,
+            'totales' => $totales
+        ];
+    }
+
+    /**
+     * Suma la serie diaria del dia 1 al dia $hasta de un mes
+     * @param array $serieDia Mapa 'Y-m-d' => importe
+     * @param int $anio Anio a sumar
+     * @param int $mes Mes a sumar
+     * @param int $hasta Ultimo dia inclusive
+     * @return float Total del tramo
+     */
+    private static function sumarDias($serieDia, $anio, $mes, $hasta) {
+        $total = 0;
+
+        for ($d = 1; $d <= $hasta; $d++) {
+            $clave = sprintf('%04d-%02d-%02d', $anio, $mes, $d);
+            $total += isset($serieDia[$clave]) ? $serieDia[$clave] : 0;
+        }
+
+        return $total;
+    }
+
+    /** @return array Bloque de tendencias sin datos */
+    private static function tendenciasVacias() {
+        return [
+            'dia_corte' => null,
+            'filas' => [],
+            'totales' => ['neto' => 0, 'neto_anio_anterior' => 0, 'variacion' => null]
         ];
     }
 

@@ -26,6 +26,42 @@
              ============================================================ -->
         <div class="tab-pane fade show active" id="paneAnalisis" role="tabpanel">
 
+            <!-- Tendencia de los últimos meses. Va colapsada: informa el pasado,
+                 la pantalla es la proyección de abajo. -->
+            <div class="card mb-4 card-colapsable">
+                <div class="card-header p-0">
+                    <button class="card-toggle collapsed" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#bloqueTendencias"
+                            aria-expanded="false" aria-controls="bloqueTendencias">
+                        <i class="fas fa-chevron-down card-toggle-chevron"></i>
+                        <span class="card-toggle-texto">
+                            <h5 class="mb-0">Tendencia &mdash; Últimos 6 Meses</h5>
+                            <small class="text-muted">
+                                Venta <strong>neta sin IVA</strong> contra el mismo período del año anterior
+                                <span id="tendenciasCorte"></span>
+                                <i class="fas fa-info-circle ms-1"
+                                   title="El mes en curso se compara contra los MISMOS días del año anterior, no contra el mes entero. Los importes son netos sin IVA: no se comparan contra la Venta Proyectada, que sí lo lleva."></i>
+                            </small>
+                        </span>
+                    </button>
+                </div>
+                <div class="collapse" id="bloqueTendencias">
+                    <div class="card-body p-0">
+                        <div class="table-responsive tabla-temporal">
+                            <table id="tablaTendencias" class="table table-hover mb-0">
+                                <thead>
+                                    <tr id="tendenciasHeader"></tr>
+                                </thead>
+                                <tbody id="tendenciasBody"></tbody>
+                                <tfoot class="table-light">
+                                    <tr id="tendenciasTotals"></tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="card mb-4">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <div>

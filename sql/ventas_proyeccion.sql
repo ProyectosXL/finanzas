@@ -232,3 +232,39 @@ BEGIN
         INCLUDE (IMPORTE, CANAL);
 END
 GO
+
+/* ----------------------------------------------------------------------------
+   7. RO_T_CASHFLOW_VENTAS_HIST_DIA
+   Historico de ventas al grano de DIA / canal / tipo de comprobante.
+   Lo puebla el SP RO_SP_CASHFLOW_VENTAS_HIST_DIA.
+
+   Existe porque RO_T_CASHFLOW_VENTAS_HIST agrega al grano de MES, y con eso el
+   mes en curso solo se puede comparar contra un mes completo del anio anterior:
+   la comparacion sale siempre hundida porque enfrenta 6 dias contra 30. Este
+   grano permite recortar el anio anterior a los mismos dias transcurridos.
+
+   NO alimenta la proyeccion: la base de calculo sigue siendo la tabla mensual.
+   Se usa solo en el bloque de tendencias de la sub-pestania Analisis de Ventas.
+
+   TIPO_COMPROBANTE queda aunque hoy solo se carguen facturas: mantiene las dos
+   tablas con la misma forma y deja que sumar remitos sea un cambio de SP y no
+   una migracion.
+   ---------------------------------------------------------------------------- */
+IF OBJECT_ID('dbo.RO_T_CASHFLOW_VENTAS_HIST_DIA', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.RO_T_CASHFLOW_VENTAS_HIST_DIA (
+        FECHA            DATE           NOT NULL,
+        CANAL            VARCHAR(20)    NOT NULL,
+        TIPO_COMPROBANTE VARCHAR(20)    NOT NULL,
+        IMPORTE_NETO     DECIMAL(18,4)  NOT NULL CONSTRAINT DF_VENTAS_HIST_DIA_IMPORTE DEFAULT (0),
+        CANTIDAD         FLOAT          NOT NULL CONSTRAINT DF_VENTAS_HIST_DIA_CANTIDAD DEFAULT (0),
+        FECHA_CARGA      DATETIME       NOT NULL CONSTRAINT DF_VENTAS_HIST_DIA_FCARGA DEFAULT (GETDATE()),
+        CONSTRAINT PK_RO_T_CASHFLOW_VENTAS_HIST_DIA
+            PRIMARY KEY CLUSTERED (FECHA, CANAL, TIPO_COMPROBANTE)
+    );
+
+    CREATE NONCLUSTERED INDEX IX_RO_T_CASHFLOW_VENTAS_HIST_DIA_TIPO
+        ON dbo.RO_T_CASHFLOW_VENTAS_HIST_DIA (TIPO_COMPROBANTE, FECHA)
+        INCLUDE (CANAL, IMPORTE_NETO, CANTIDAD);
+END
+GO
