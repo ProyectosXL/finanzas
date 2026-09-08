@@ -71,6 +71,28 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        case 'getVentaAcumulada':
+            // Accion aparte y NO dentro de getAnalisisVentas: la pestana se
+            // carga lazy la primera vez que se abre, asi la pantalla que ya
+            // funcionaba no paga la consulta cruzada al linked server del tipo
+            // de cambio, que quizas nadie mire.
+            $anio = isset($_GET['anio']) ? intval($_GET['anio']) : null;
+
+            echo json_encode([
+                'success' => true,
+                'data' => $ventas->getVentaAcumulada($anio)
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'getVentaBalance':
+            // Tambien lazy: son doce meses de proyeccion que la pestana
+            // Analisis no necesita para dibujarse.
+            echo json_encode([
+                'success' => true,
+                'data' => $ventas->getVentaBalance()
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         case 'saveParticipacion':
             $data = bodyJson();
 

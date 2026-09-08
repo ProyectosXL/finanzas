@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/Parametros.php';
 require_once __DIR__ . '/Horizonte.php';
+require_once __DIR__ . '/Cotizacion.php';
 
 /**
  * Ventas
@@ -671,12 +672,7 @@ class Ventas {
         $ventanaFin = $horizonte->fin();
 
         /* ---- 3. Historico y ediciones ------------------------------------- */
-        $hist = [];
-
-        foreach ($this->getHistoricoVentas() as $row) {
-            $hist[$row['ANIO']][$row['MES']][$row['CANAL']] = $row['IMPORTE_NETO'];
-        }
-
+        $hist = $this->historicoIndexado();
         $indices = [];
 
         foreach ($this->getIndices() as $row) {
@@ -907,8 +903,8 @@ class Ventas {
             $anioAnt = $m['anio'] - 1;
             $anioPrev = $m['anio'] - 2;
 
-            $totalAnt = $this->totalMes($hist, $anioAnt, $m['mes']);
-            $totalPrev = $this->totalMes($hist, $anioPrev, $m['mes']);
+            $totalAnt = self::totalMes($hist, $anioAnt, $m['mes']);
+            $totalPrev = self::totalMes($hist, $anioPrev, $m['mes']);
 
             $indice = isset($indices[$clave]) ? $indices[$clave] : 0;
             $netoProy = $totalAnt * (1 + $indice);
@@ -945,7 +941,7 @@ class Ventas {
      * @param int $mes Mes a leer
      * @return float Total del mes
      */
-    private function totalMes($hist, $anio, $mes) {
+    private static function totalMes($hist, $anio, $mes) {
         $total = 0;
 
         foreach (Parametros::CANALES as $canal) {
@@ -1350,12 +1346,7 @@ class Ventas {
 
         // Historico completo: la variacion interanual necesita dos anios hacia
         // atras respecto del mes proyectado.
-        $hist = [];
-
-        foreach ($this->getHistoricoVentas() as $row) {
-            $hist[$row['ANIO']][$row['MES']][$row['CANAL']] = $row['IMPORTE_NETO'];
-        }
-
+        $hist = $this->historicoIndexado();
         $indices = [];
 
         foreach ($this->getIndices() as $row) {
@@ -1621,6 +1612,408 @@ class Ventas {
             'filas' => [],
             'totales' => ['neto' => 0, 'neto_anio_anterior' => 0, 'variacion' => null]
         ];
+    }
+
+    /* ====================================================================
+       VENTA ACUMULADA (anio calendario, real, neta, pesos y dolares)
+       ==================================================================== */
+
+    /**
+     * Venta REAL acumulada del anio calendario, NETA SIN IVA, en pesos y en
+     * dolares.
+     *
+     * DE DONDE SALE CADA MES
+     * ----------------------
+     *   meses cerrados -> RO_T_CASHFLOW_VENTAS_HIST, solo FACTURA. Los remitos
+     *                     no entran, igual que en toda la proyeccion.
+     *   mes en curso   -> RO_T_CASHFLOW_VENTAS_HIST_DIA recortado a la ultima
+     *                     fecha cargada, porque en la tabla mensual esta
+     *                     incompleto. La fila lo dice con el badge 'parcial'.
+     *
+     * Igual que el bloque de tendencias, el mes en curso se muestra SOLO si el
+     * historico diario llego a el: si el corte todavia cae en el mes anterior,
+     * la fila no se dibuja en vez de mostrar un cero que se leeria como "no
+     * vendimos nada".
+     *
+     * LOS DOLARES
+     * -----------
+     * Cada mes se valua a SU propio tipo de cambio de cierre y el acumulado en
+     * dolares es la SUMA de los meses ya valuados. No es el acumulado en pesos
+     * dividido por un tipo de cambio: eso seria reexpresar la serie a moneda de
+     * hoy, otra cuenta. Un mes sin cotizacion queda en null -no en cero- y no
+     * corta el acumulado de los meses que si la tienen.
+     *
+     * @param int|null $anio Anio calendario; null = el anio en curso
+     * @return array Estructura para el front
+     */
+    public function getVentaAcumulada($anio = null) {
+        $this->warnings = [];
+
+        $hoy = new DateTime('today');
+        $anioActual = intval($hoy->format('Y'));
+        $anio = ($anio === null) ? $anioActual : intval($anio);
+
+        if ($anio > $anioActual) {
+            throw new Exception('El anio pedido todavia no empezo: ' . $anio);
+        }
+
+        /* ---- 1. Meses cerrados: tabla mensual ---------------------------- */
+        $hist = $this->historicoIndexado($anio);
+        $netoMensual = [];
+
+        for ($mes = 1; $mes <= 12; $mes++) {
+            $netoMensual[$mes] = self::totalMes($hist, $anio, $mes);
+        }
+
+        /* ---- 2. Mes en curso: historico diario recortado al corte -------- */
+        // Un anio ya cerrado no tiene mes en curso: sale entero de la mensual.
+        $mesActual = ($anio === $anioActual) ? intval($hoy->format('n')) : null;
+        $mesParcial = null;
+        $fechaCorte = null;
+        $serieDia = [];
+
+        if ($mesActual !== null) {
+            // Se aisla en un try por la misma razon que getTendencias(): se
+            // apoya en la tabla diaria, que es nueva. Si no esta, la pantalla
+            // muestra los meses cerrados y avisa.
+            try {
+                $corte = $this->ultimaFechaHistoricoDia();
+
+                if ($corte !== null && $corte->format('Y-m') === $hoy->format('Y-m')) {
+                    $mesParcial = $mesActual;
+                    $fechaCorte = $corte->format('Y-m-d');
+                    $serieDia = $this->serieDiariaHistorica(
+                        $hoy->format('Y-m-01'),
+                        $fechaCorte
+                    );
+                }
+            } catch (Exception $e) {
+                $this->warnings[] = 'No se pudo leer el historico diario de ventas: '
+                    . $e->getMessage() . ' El mes en curso no se muestra.';
+            }
+        }
+
+        $mesHasta = ($mesActual === null)
+            ? 12
+            : ($mesParcial === null ? $mesActual - 1 : $mesActual);
+
+        /* ---- 3. Tipo de cambio de cierre de cada mes --------------------- */
+        // Mismo criterio que el bloque de tendencias con la tabla diaria: si la
+        // vista todavia no existe en el entorno, la pantalla sale sin la parte
+        // en dolares y lo avisa, en vez de caerse.
+        $tc = [];
+
+        if ($mesHasta >= 1) {
+            try {
+                $tc = (new Cotizacion())->mapaMensual(
+                    Cotizacion::clave($anio, 1),
+                    Cotizacion::clave($anio, $mesHasta)
+                );
+
+                if (count($tc) === 0) {
+                    $this->warnings[] = 'La vista ' . Cotizacion::VISTA
+                        . ' no tiene cotizaciones para ' . $anio
+                        . '. La tabla sale sin la parte en dolares.';
+                }
+            } catch (Exception $e) {
+                $this->warnings[] = 'No se pudo leer el tipo de cambio: '
+                    . $e->getMessage() . ' La tabla sale sin la parte en dolares.';
+            }
+        }
+
+        $armado = self::armarVentaAcumulada(
+            $anio, $mesHasta, $netoMensual, $serieDia, $mesParcial, $fechaCorte, $tc
+        );
+
+        $armado['warnings'] = $this->warnings;
+
+        return $armado;
+    }
+
+    /**
+     * Arma la tabla de venta acumulada a partir de datos ya leidos.
+     *
+     * Separado de la lectura para poder verificarlo sin base, igual que
+     * armarTendencias(): lo delicado es justamente la valuacion mes a mes y el
+     * tratamiento de un mes sin cotizacion.
+     *
+     * @param int $anio Anio calendario
+     * @param int $mesHasta Ultimo mes a mostrar (0 = ninguno)
+     * @param array $netoMensual Mapa mes(int) => neto real del mes cerrado
+     * @param array $serieDia Mapa 'Y-m-d' => neto del dia, para el mes en curso
+     * @param int|null $mesParcial Mes que sale de la serie diaria, o null
+     * @param string|null $fechaCorte Ultima fecha con dato diario, 'Y-m-d'
+     * @param array $tc Mapa 'YYYY-MM' => tipo de cambio de cierre
+     * @return array Estructura para el front
+     */
+    public static function armarVentaAcumulada(
+        $anio, $mesHasta, $netoMensual, $serieDia, $mesParcial, $fechaCorte, $tc
+    ) {
+        $anio = intval($anio);
+        $mesHasta = max(0, min(12, intval($mesHasta)));
+        $mesParcial = ($mesParcial === null) ? null : intval($mesParcial);
+
+        $diaCorte = ($fechaCorte === null)
+            ? 0
+            : intval((new DateTime($fechaCorte))->format('j'));
+
+        $filas = [];
+        $acum = 0;
+        $acumUsd = 0;
+        $valuados = 0;
+        $sinTc = 0;
+
+        for ($mes = 1; $mes <= $mesHasta; $mes++) {
+            $clave = Cotizacion::clave($anio, $mes);
+            $parcial = ($mesParcial !== null && $mesParcial === $mes);
+
+            // El mes en curso sale de la serie diaria recortada al corte; los
+            // cerrados, de la tabla mensual.
+            $neto = $parcial
+                ? self::sumarDias($serieDia, $anio, $mes, $diaCorte)
+                : (isset($netoMensual[$mes]) ? floatval($netoMensual[$mes]) : 0);
+
+            $acum += $neto;
+
+            $tcMes = (isset($tc[$clave]) && floatval($tc[$clave]) > 0)
+                ? floatval($tc[$clave])
+                : null;
+
+            // Cada mes a SU tipo de cambio, y el acumulado en dolares es la suma
+            // de los meses valuados. Un mes sin cotizacion queda en null y el
+            // acumulado sigue con los que si tienen.
+            $netoUsd = ($tcMes === null) ? null : ($neto / $tcMes);
+
+            if ($netoUsd === null) {
+                $sinTc++;
+            } else {
+                $acumUsd += $netoUsd;
+                $valuados++;
+            }
+
+            $filas[] = [
+                'clave' => $clave,
+                'anio' => $anio,
+                'mes' => $mes,
+                'label' => Horizonte::labelMes($anio, $mes),
+                'neto' => $neto,
+                'acumulado' => $acum,
+                'tc' => $tcMes,
+                'neto_usd' => $netoUsd,
+                // Antes del primer mes valuado el acumulado en dolares no es
+                // cero: no hay dato. Un cero se leeria como "no vendimos nada".
+                'acumulado_usd' => ($valuados > 0) ? $acumUsd : null,
+                'parcial' => $parcial,
+                'dias' => $parcial ? $diaCorte : 0
+            ];
+        }
+
+        return [
+            'anio' => $anio,
+            'mes_hasta' => $mesHasta,
+            'dia_corte' => $fechaCorte,
+            'filas' => $filas,
+            'totales' => [
+                'neto' => $acum,
+                'neto_usd' => ($valuados > 0) ? $acumUsd : null,
+                'meses' => $mesHasta,
+                'meses_sin_tc' => $sinTc
+            ],
+            // Sin ninguna cotizacion la pantalla se dibuja sin las columnas de
+            // dolares en vez de mostrar una columna entera de guiones.
+            'usd_disponible' => ($valuados > 0)
+        ];
+    }
+
+    /* ====================================================================
+       VENTA BALANCE (1/8 al 31/7, real + proyectado, con IVA)
+       ==================================================================== */
+
+    /**
+     * Venta del anio balance en curso -1/8 al 31/7-, doce meses de agosto a
+     * julio, TODO CON IVA.
+     *
+     *   meses cerrados        -> venta real neta * (1 + alicuota_iva), 'REAL'
+     *   mes en curso y los
+     *   que siguen            -> venta proyectada de baseMensual(), que ya
+     *                            viene con IVA, 'PROYECTADO'
+     *
+     * POR QUE TODO CON IVA
+     * Es lo que hace sumables las dos mitades. Mezclar un tramo neto con un
+     * tramo con IVA daria un total que no es ninguna de las dos cosas.
+     *
+     * POR QUE EL EJE NO USA 'horizonte_meses'
+     * Ese parametro es editable: si alguien lo baja a 6, el balance saldria
+     * cortado a la mitad. El eje se ancla al inicio del balance y son siempre
+     * doce meses. La venta proyectada igual sale de baseMensual(), el MISMO
+     * helper que usa la pestana Cashflow, asi que las dos no se pueden
+     * desincronizar.
+     *
+     * @return array Estructura para el front
+     */
+    public function getVentaBalance() {
+        $this->warnings = [];
+
+        $map = $this->parametros->getParametrosMap();
+        $alicuotaIva = Parametros::num($map, 'alicuota_iva');
+        $feriadosMMDD = $this->parametros->getFeriadosComercio($map);
+
+        $hoy = new DateTime('today');
+        $inicio = self::inicioBalance($hoy);
+
+        // Doce meses fijos anclados al 1/8 del balance en curso.
+        $horizonte = new Horizonte(0, 12, $feriadosMMDD, new DateTime($inicio));
+        $meses = $horizonte->meses();
+
+        $hist = $this->historicoIndexado();
+        $indices = [];
+
+        foreach ($this->getIndices() as $row) {
+            $indices[Cotizacion::clave($row['ANIO'], $row['MES'])] = $row['INDICE'];
+        }
+
+        $base = $this->baseMensual($meses, $hist, $indices, $alicuotaIva, $feriadosMMDD);
+        $netoReal = [];
+
+        foreach ($meses as $m) {
+            $netoReal[$m['clave']] = self::totalMes($hist, $m['anio'], $m['mes']);
+        }
+
+        $armado = self::armarVentaBalance(
+            $meses, $base, $netoReal, $alicuotaIva, $hoy->format('Y-m')
+        );
+
+        $armado['alicuota_iva'] = $alicuotaIva;
+        $armado['generado'] = $hoy->format('Y-m-d');
+        $armado['warnings'] = $this->warnings;
+
+        return $armado;
+    }
+
+    /**
+     * Primer dia del anio balance en curso.
+     *
+     * El balance corre del 1/8 al 31/7. En agosto o despues, el balance en
+     * curso arranco el 1/8 de este anio; antes de agosto, el 1/8 del anterior.
+     *
+     * @param DateTime $hoy Dia de referencia
+     * @return string '1 de agosto' del anio que corresponda, 'Y-m-d'
+     */
+    public static function inicioBalance($hoy) {
+        $anio = intval($hoy->format('Y'));
+        $mes = intval($hoy->format('n'));
+
+        return sprintf('%04d-08-01', ($mes >= 8) ? $anio : ($anio - 1));
+    }
+
+    /**
+     * Arma la tabla del balance a partir de datos ya leidos.
+     *
+     * Separado de la lectura para poder verificarlo sin base: el corte entre
+     * real y proyectado es lo que decide el total del balance.
+     *
+     * @param array $meses Eje devuelto por Horizonte::meses(), agosto a julio
+     * @param array $base Base mensual devuelta por baseMensual(), con IVA
+     * @param array $netoReal Mapa 'Y-m' => venta real NETA del mes
+     * @param float $alicuotaIva Alicuota para grosar la parte real
+     * @param string $mesActualClave Mes en curso, 'Y-m'
+     * @return array Estructura para el front
+     */
+    public static function armarVentaBalance($meses, $base, $netoReal, $alicuotaIva, $mesActualClave) {
+        $alicuotaIva = floatval($alicuotaIva);
+
+        $filas = [];
+        $acum = 0;
+        $totales = [
+            'venta' => 0,
+            'real' => 0,
+            'proyectado' => 0,
+            'meses_real' => 0,
+            'meses_proyectado' => 0
+        ];
+
+        foreach ($meses as $m) {
+            $clave = $m['clave'];
+
+            // MES CERRADO = estrictamente anterior al mes actual. El mes en
+            // curso va SIEMPRE proyectado, aunque el historico ya tenga venta
+            // cargada: un mes a medio facturar sumado contra once meses
+            // completos hunde el total del balance y nadie lo nota.
+            // Las claves son 'Y-m', asi que la comparacion de strings ordena
+            // igual que las fechas.
+            $cerrado = ($clave < $mesActualClave);
+
+            if ($cerrado) {
+                // La venta real viene NETA: se la grosa con la alicuota que
+                // llega por parametro para que sea sumable con la proyectada.
+                $neto = isset($netoReal[$clave]) ? floatval($netoReal[$clave]) : 0;
+                $venta = $neto * (1 + $alicuotaIva);
+                $origen = 'REAL';
+                $estimado = false;
+            } else {
+                // baseMensual() ya devuelve el mes con IVA.
+                $neto = isset($base[$clave]) ? floatval($base[$clave]['neto_proyectado']) : 0;
+                $venta = isset($base[$clave]) ? floatval($base[$clave]['con_iva']) : 0;
+                $origen = 'PROYECTADO';
+                $estimado = isset($base[$clave]) ? (bool) $base[$clave]['estimado'] : false;
+            }
+
+            $acum += $venta;
+
+            $filas[] = [
+                'clave' => $clave,
+                'anio' => $m['anio'],
+                'mes' => $m['mes'],
+                'label' => $m['label'],
+                'origen' => $origen,
+                'neto' => $neto,
+                'venta' => $venta,
+                'acumulado' => $acum,
+                'estimado' => $estimado
+            ];
+
+            $totales['venta'] += $venta;
+
+            if ($cerrado) {
+                $totales['real'] += $venta;
+                $totales['meses_real']++;
+            } else {
+                $totales['proyectado'] += $venta;
+                $totales['meses_proyectado']++;
+            }
+        }
+
+        $hayMeses = (count($meses) > 0);
+        $ultimo = $hayMeses ? $meses[count($meses) - 1] : null;
+
+        return [
+            'inicio' => $hayMeses ? ($meses[0]['clave'] . '-01') : null,
+            'fin' => $hayMeses
+                ? (new DateTime($ultimo['clave'] . '-01'))
+                    ->modify('last day of this month')
+                    ->format('Y-m-d')
+                : null,
+            'mes_actual' => $mesActualClave,
+            'filas' => $filas,
+            'totales' => $totales
+        ];
+    }
+
+    /**
+     * Historico de facturas indexado [anio][mes][canal] => importe neto.
+     * Es la forma en la que lo consumen baseMensual() y totalMes().
+     *
+     * @param int|null $anioDesde Anio minimo a leer, o null para todo
+     * @return array Historico indexado
+     */
+    private function historicoIndexado($anioDesde = null) {
+        $hist = [];
+
+        foreach ($this->getHistoricoVentas($anioDesde) as $row) {
+            $hist[$row['ANIO']][$row['MES']][$row['CANAL']] = $row['IMPORTE_NETO'];
+        }
+
+        return $hist;
     }
 
     /**
