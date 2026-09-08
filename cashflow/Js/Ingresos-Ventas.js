@@ -537,14 +537,27 @@
         return (vistaActual === 'semanas') ? grilla.total_dias : grilla.total_meses;
     }
 
-    function generarEncabezado(idHeaderSub, idPeriodoHeader) {
+    /**
+     * Encabezado de columnas, compartido por Venta y Cobranza.
+     *
+     * @param conTooltip Sólo Venta lo pide: el tooltip describe la apertura por
+     *        canal de la venta de esa columna, que en Cobranza no aplica.
+     */
+    function generarEncabezado(idHeaderSub, idPeriodoHeader, conTooltip) {
         var cols = columnas();
         var headerHTML = '';
 
-        cols.forEach(function(col) {
-            headerHTML += '<th class="' + col.css + (col.feriado ? ' col-feriado' : '') + '"' +
+        cols.forEach(function(col, i) {
+            // El tooltip es de columnas de MES: en la vista de semanas las
+            // columnas son días y no hay participación que abrir.
+            var tip = (conTooltip && vistaActual === 'meses')
+                ? tooltipParticipacion(col.clave, i, cols.length)
+                : '';
+
+            headerHTML += '<th class="' + col.css + (col.feriado ? ' col-feriado' : '') +
+                          (tip ? ' th-participacion' : '') + '"' +
                           (col.feriado ? ' title="Feriado de comercio: sin venta estimada"' : '') +
-                          '>' + col.label + '</th>';
+                          '>' + col.label + tip + '</th>';
         });
 
         document.getElementById(idHeaderSub).innerHTML = headerHTML;
@@ -558,8 +571,135 @@
         return cols;
     }
 
+    /**
+     * Días que la columna de un mes realmente cubre.
+     *
+     * NO es "el mes menos el tramo": la ventana de proyección arranca HOY, así
+     * que los días anteriores del mes en curso no aportan nada. Tomarlos como
+     * cubiertos haría que el tooltip prometiera un rango que el importe no
+     * contiene.
+     *
+     * @return array Números de día, en orden
+     */
+    function diasDeColumnaMes(clave) {
+        var partes = clave.split('-');
+        // Constructor numérico, no parseo de ISO: el día 0 del mes siguiente es
+        // el último del mes pedido.
+        var ultimo = new Date(parseInt(partes[0], 10), parseInt(partes[1], 10), 0).getDate();
+        var hoy = datosProyeccion.generado;
+
+        var enTramo = {};
+
+        datosProyeccion.dias.forEach(function(d) {
+            enTramo[d.fecha] = true;
+        });
+
+        var lista = [];
+
+        for (var d = 1; d <= ultimo; d++) {
+            // Comparación de strings 'Y-m-d': ordena igual que las fechas y
+            // evita new Date() sobre un ISO.
+            var fecha = clave + '-' + (d < 10 ? '0' + d : d);
+
+            if (fecha < hoy || enTramo[fecha]) {
+                continue;
+            }
+
+            lista.push(d);
+        }
+
+        return lista;
+    }
+
+    /**
+     * Tooltip de participación por canal de una columna de mes.
+     *
+     * El % sale del cociente de los importes y no de participacion.mensual: los
+     * overrides mensuales se guardan sin la validación del 100% que sí tiene el
+     * tramo, así que la participación guardada podría no sumar 100 al lado de
+     * importes que sí lo hacen. El cociente siempre concuerda con los números
+     * que el tooltip muestra al lado.
+     *
+     * Dentro del tramo rige participacion.tramo28, pero acá no entra: la columna
+     * del mes sólo contiene los días de FUERA del tramo, y todos ellos se
+     * calcularon con la participación mensual.
+     */
+    function tooltipParticipacion(clave, indice, cantidad) {
+        var venta = datosProyeccion.venta;
+        var canales = datosProyeccion.canales;
+        var total = (venta.total_meses && venta.total_meses[clave]) || 0;
+        var dias = diasDeColumnaMes(clave);
+
+        var mes = null;
+
+        datosProyeccion.meses.forEach(function(m) {
+            if (m.clave === clave) {
+                mes = m;
+            }
+        });
+
+        var label = mes ? mes.label : clave;
+        var cuerpo;
+
+        if (!dias.length) {
+            // El primer mes puede quedar entero dentro del tramo de 28 días.
+            cuerpo = '<div class="tip-vacio">Todos sus días están en el tramo ' +
+                     'de 28 días: se muestran en las columnas diarias.</div>';
+        } else if (total <= 0) {
+            cuerpo = '<div class="tip-vacio">Sin venta estimada en la columna.</div>';
+        } else {
+            cuerpo = '';
+
+            canales.forEach(function(canal) {
+                var importe = (venta.meses[canal] && venta.meses[canal][clave]) || 0;
+
+                cuerpo += '<div class="tip-fila">' +
+                              '<span class="tip-canal">' + titulo(canal) + '</span>' +
+                              '<span class="tip-importe">' + formatCurrency(importe) + '</span>' +
+                              '<span class="tip-pct">' + formatPercentCorto(importe / total) + '</span>' +
+                          '</div>';
+            });
+
+            cuerpo += '<div class="tip-fila tip-total">' +
+                          '<span class="tip-canal">Total</span>' +
+                          '<span class="tip-importe">' + formatCurrency(total) + '</span>' +
+                          '<span class="tip-pct">100%</span>' +
+                      '</div>';
+        }
+
+        // El rango es lo que hace entendible un mes recortado: sin él, el importe
+        // más chico se lee como una caída de venta y no como menos días.
+        var rango;
+
+        if (!dias.length) {
+            rango = 'sin días propios';
+        } else if (dias.length === diasDelMes(clave)) {
+            rango = 'mes completo';
+        } else {
+            rango = 'días ' + dias[0] + ' al ' + dias[dias.length - 1] +
+                    ' &middot; fuera del tramo de 28 días';
+        }
+
+        // Las últimas columnas se anclan a la derecha o el tooltip se corta
+        // contra el borde del contenedor, que tiene overflow.
+        var alineacion = (indice >= cantidad - 3) ? ' tip-derecha' : '';
+
+        return '<div class="participacion-tooltip' + alineacion + '">' +
+                   '<div class="tip-titulo">' + label +
+                       '<span class="tip-rango">' + rango + '</span></div>' +
+                   cuerpo +
+               '</div>';
+    }
+
+    /** Cantidad de días de un mes 'YYYY-MM' */
+    function diasDelMes(clave) {
+        var partes = clave.split('-');
+
+        return new Date(parseInt(partes[0], 10), parseInt(partes[1], 10), 0).getDate();
+    }
+
     function generarTablaVenta() {
-        var cols = generarEncabezado('ventaHeaderSub', 'ventaPeriodoHeader');
+        var cols = generarEncabezado('ventaHeaderSub', 'ventaPeriodoHeader', true);
         var canales = datosProyeccion.canales;
         var grilla = rama(datosProyeccion.venta);
         var totales = ramaTotal(datosProyeccion.venta);

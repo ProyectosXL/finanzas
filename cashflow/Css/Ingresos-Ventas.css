@@ -532,3 +532,133 @@
     border-radius: 4px;
     cursor: help;
 }
+
+/* ========================================
+   TOOLTIP DE PARTICIPACIÓN POR MES
+   Mismo patrón visual que .fecha-tooltip, pero vive en un <th> sticky dentro de
+   un contenedor con overflow, y eso cambia tres cosas:
+
+     1. Abre HACIA ABAJO. .tabla-temporal tiene max-height y overflow: auto, así
+        que hacia arriba -como el del índice- quedaría fuera y se recortaría.
+     2. El <th> sticky tiene z-index propio y por eso crea contexto de
+        apilamiento: subir el z-index del tooltip no lo saca de ahí y la columna
+        siguiente lo taparía. Se sube el <th> en hover, que arrastra su subárbol.
+     3. Se ancla al borde de la columna, con variante a la derecha para las
+        últimas, o se corta contra el borde del contenedor.
+   ======================================== */
+
+.tab-ventas .th-participacion {
+    cursor: help;
+}
+
+/* El <th> ya es sticky con z-index 3 (main.css); en hover se lo levanta para
+   que su tooltip pase por encima de las columnas que siguen. */
+.tab-ventas .th-participacion:hover {
+    z-index: 20;
+}
+
+.tab-ventas .participacion-tooltip {
+    position: absolute;
+    top: calc(100% + 10px);
+    left: 0;
+    min-width: 260px;
+    padding: 10px 14px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: normal;
+    text-align: left;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.2s ease;
+    pointer-events: none;
+    box-shadow: 0 8px 16px rgba(102, 126, 234, 0.4);
+}
+
+.tab-ventas .participacion-tooltip.tip-derecha {
+    left: auto;
+    right: 0;
+}
+
+.tab-ventas .th-participacion:hover .participacion-tooltip {
+    opacity: 1;
+    visibility: visible;
+    top: calc(100% + 8px);
+}
+
+.tab-ventas .participacion-tooltip::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 16px;
+    border: 6px solid transparent;
+    border-bottom-color: #667eea;
+}
+
+.tab-ventas .participacion-tooltip.tip-derecha::before {
+    left: auto;
+    right: 16px;
+}
+
+.tab-ventas .tip-titulo {
+    font-size: 13px;
+    font-weight: 700;
+    padding-bottom: 6px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.tab-ventas .tip-rango {
+    display: block;
+    margin-top: 2px;
+    font-size: 10px;
+    font-weight: 500;
+    opacity: 0.9;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.tab-ventas .tip-fila {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 2px 0;
+}
+
+.tab-ventas .tip-canal {
+    flex: 1 1 auto;
+}
+
+.tab-ventas .tip-importe,
+.tab-ventas .tip-pct {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.tab-ventas .tip-importe {
+    flex: 0 0 auto;
+    font-weight: 600;
+}
+
+.tab-ventas .tip-pct {
+    flex: 0 0 46px;
+    opacity: 0.9;
+}
+
+.tab-ventas .tip-total {
+    margin-top: 5px;
+    padding-top: 5px;
+    border-top: 1px solid rgba(255, 255, 255, 0.25);
+    font-weight: 700;
+}
+
+.tab-ventas .tip-vacio {
+    white-space: normal;
+    max-width: 240px;
+    line-height: 1.4;
+    opacity: 0.92;
+}

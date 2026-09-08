@@ -131,6 +131,12 @@ La venta proyectada de esta tabla y la de la grilla de Proyección salen del **m
 
 Los 28 días se muestran en columnas diarias y la columna del mes acumula **únicamente** los días que quedaron fuera del tramo. Nada se cuenta dos veces.
 
+En la vista **Meses**, el encabezado de cada mes de la tabla *Venta Proyectada* abre al hover la **participación por canal de esa columna**: canal, importe y % del total, más el rango de días que la columna cubre. Ese rango es lo que hace legible un mes recortado — un importe más chico son menos días, no una caída de venta.
+
+El rango **no** es "el mes menos el tramo": la ventana de proyección arranca hoy, así que los días anteriores del mes en curso no aportan nada y no se cuentan como cubiertos. Un mes que queda íntegramente dentro del tramo lo dice en lugar de mostrar ceros.
+
+Los porcentajes del tooltip salen del **cociente de los importes**, no de la participación guardada: los overrides mensuales se graban sin la validación del 100% que sí tiene el tramo, y el cociente siempre concuerda con los importes que están al lado. Dentro del tramo rige `tramo28`, pero no entra en este tooltip: la columna del mes contiene sólo días de fuera del tramo, calculados todos con la participación mensual.
+
 ### Participación por canal
 
 - **Tramo de 28 días**: se calcula desde el mismo período del año anterior y el usuario puede editarla. La suma de los cuatro canales debe dar exactamente 100%; si no da, el guardado queda bloqueado y se muestra el desvío. La validación corre también en el servidor.

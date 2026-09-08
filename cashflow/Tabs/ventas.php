@@ -266,7 +266,7 @@
                         <small class="text-muted">
                             Venta con IVA por canal
                             <i class="fas fa-info-circle ms-1"
-                               title="Los días del tramo se muestran en columnas diarias. La columna del mes acumula únicamente los días que quedaron fuera del tramo: nada se cuenta dos veces."></i>
+                               title="Los días del tramo se muestran en columnas diarias. La columna del mes acumula únicamente los días que quedaron fuera del tramo: nada se cuenta dos veces. En la vista Meses, el encabezado de cada mes abre la participación por canal de esa columna."></i>
                         </small>
                     </div>
                     <div class="d-flex gap-2">
