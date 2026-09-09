@@ -277,6 +277,40 @@ El motor verifica que `cierre[n] == apertura[n+1]`; si no da, deja un aviso y no
 
 ---
 
+## El menú lateral y el estado de cada pestaña
+
+La lista de pestañas y el estado de cada una salen de `Class/Menu.php`; `Components/sidebar.php` sólo dibuja. Antes eran veintiséis enlaces escritos a mano e iguales entre sí, y por eso no se podía ver de un vistazo qué está hecho.
+
+**Tres estados, no dos:**
+
+| Estado | Qué significa | Cómo se ve |
+| --- | --- | --- |
+| `datos` | La pestaña lee del sistema. Se puede confiar en lo que muestra | Normal, sin marca |
+| `maqueta` | **Dibuja pero los números son de ejemplo** | Ícono ámbar 📐 |
+| `pendiente` | Todavía no se desarrolló; muestra el aviso de *en construcción* | Atenuada, ícono 🪖 |
+
+**El estado del medio es el que importa, y es el que faltaba.** Hoy lo tiene el **Dashboard**: no tiene una sola llamada al servidor, así que sus números están escritos a mano. Un placeholder es honesto —dice que no está hecho—; una maqueta es peor, porque tiene la forma de una pantalla terminada y números que parecen reales. Meterla en la misma bolsa que las pestañas con datos sería el error caro que este módulo evita en todos lados.
+
+Una pestaña con datos **no se marca**: es el caso normal y marcarlo sería ruido. Las pendientes siguen siendo clickeables, porque el aviso de *en construcción* es información útil.
+
+### El placeholder se detecta, no se declara
+
+`datos` y `maqueta` son un juicio y van declarados. Pero si el archivo de la pestaña todavía incluye `Components/tab_placeholder.php`, el estado **baja** a `pendiente` sin importar lo declarado.
+
+La guarda va en esa dirección a propósito: lo que hay que evitar es que el menú **prometa datos que no existen**. Así una declaración que quedó vieja se corrige sola, y lo peor que puede pasar es que una pestaña recién terminada siga figurando como pendiente hasta que alguien actualice la lista — un error visible y sin consecuencias.
+
+### El contador de cada categoría
+
+Cada categoría muestra `n/m`: cuántas de sus pestañas tienen datos del sistema. Sirve para ver el avance sin abrirla, y **cuenta sólo `datos`** —una maqueta no suma—, que es lo que hace que el número sea confiable. Hoy: Ingresos 3/6, Comercio Exterior 2/3, y el resto en cero.
+
+### Parámetros va al pie
+
+No es un módulo de datos como los de arriba: es la configuración de todos ellos. Arriba competía por atención con el tablero, que es la pantalla que se abre para trabajar.
+
+Los ítems de las categorías ahora tienen ícono propio, así que el sangrado de 44px que hacía de guía visual se reduce y el ícono ocupa ese lugar, alineándolos con las pestañas de nivel raíz.
+
+---
+
 ## Administración desde Parámetros
 
 Sub-pestaña **Parámetros → Cashflow**. Permite crear filas y secciones, renombrarlas, cambiarles la sección, reordenarlas, habilitarlas e inhabilitarlas.
@@ -349,6 +383,7 @@ sql/cashflow_saldos.sql                     Tablas del modulo Saldos (README-sal
 cashflow/Class/Horizonte.php                Eje temporal, compartido con Ventas
 cashflow/Class/EjeVista.php                 Las tres vistas: columnas, totales y periodo
 cashflow/Js/eje-vistas.js                   Su contraparte en el front (cargado en index.php)
+cashflow/Class/Menu.php                     Menu lateral y estado de cada pestana
 cashflow/Class/CashflowProvider.php         Contrato de proveedor
 cashflow/Class/CashflowRegistry.php         Registro de orígenes de datos
 cashflow/Class/CashflowEstructura.php       Configuración: lectura, validación y CRUD
@@ -379,6 +414,8 @@ Eliminado: `Tabs/resumen.php`.
 - **Dos filas del Excel no tienen de dónde salir.** *Dólares Cuenta Comitente* y *Exportaciones* las tipea una persona en el Excel (Tesorería, Silvina, Dan). Acá el origen de datos es únicamente por proveedor, así que hasta que exista el módulo que las alimente se muestran en cero y el tablero avisa. Quedan declaradas para que el cuadro tenga la forma completa. Si hicieran falta cargadas a mano, habría que sumar un tipo de origen manual, que hoy el módulo no tiene. *Caja Locales* ya salió de esta lista: la alimenta el módulo Saldos.
 - **El neteo de cheques adelantados sólo se aplica a la serie total de cobranza.** No viene abierto por canal. Hoy da lo mismo porque es cero; cuando exista el origen habrá que decidir cómo se distribuye entre canales, y ese criterio es de negocio.
 - **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** para traer la razón social. El tablero no lo sufre, porque usa `getCobranzasFRTotales()`, pero la pestaña Cobranzas FR sí.
+- **El Dashboard es una maqueta**: no tiene ninguna llamada al servidor, sus números están escritos a mano. El menú lo marca como tal. Cuando se construya de verdad, hay que pasarlo a `datos` en `Class/Menu.php`.
+- **`nacionalizacion_2` está en `$validTabs` de `TabController` pero no tiene archivo ni entrada de menú.** Es configuración muerta: nadie puede llegar ahí, y si llegara vería el placeholder.
 - **`VentasController?action=saveMixCobro` puede grabar un mix que Parámetros rechazaría**: no valida el 100%. Es anterior a este trabajo.
 - `pedir()` está duplicado en `Ingresos-Ventas.js` y `Parametros.js`. El código nuevo usa `pedirJson()` de `main.js`; sacar las dos copias viejas es un cambio aparte.
 - Sin login: todo se graba con `USUARIO = NULL`. La costura ya está puesta.
