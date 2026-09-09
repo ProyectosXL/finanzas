@@ -361,14 +361,13 @@
                         </small>
                     </div>
                     <div class="d-flex gap-2">
-                        <div class="btn-group" role="group">
-                            <button id="btnVistaSemanasProy" class="btn btn-sm btn-primary">
-                                <i class="fas fa-calendar-week me-1"></i> Semanas
-                            </button>
-                            <button id="btnVistaMesesProy" class="btn btn-sm btn-outline-secondary">
-                                <i class="fas fa-calendar-alt me-1"></i> Meses
-                            </button>
-                        </div>
+                        <!-- Los tres botones los dibuja Js/eje-vistas.js, el
+                             mismo componente que el tablero: la grilla de
+                             proyección y la fila del Cashflow que sale de ella
+                             no pueden medir períodos distintos.
+                             Los botones gobiernan las DOS tablas de este bloque,
+                             Venta y Cobranza. -->
+                        <div id="vistasProy"></div>
                         <button id="btnRefreshProyeccion" class="btn btn-sm btn-outline-primary">
                             <i class="fas fa-sync-alt me-1"></i> Actualizar
                         </button>
@@ -377,6 +376,14 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- Qué período se está midiendo. La vista Meses no cubre el
+                     horizonte completo: sus columnas acumulan sólo los días que
+                     quedan fuera del tramo diario. -->
+                <div class="card-body py-2 border-bottom">
+                    <small class="text-muted" id="periodoProy"></small>
+                </div>
+
                 <div class="card-body p-0">
                     <div class="loading-spinner" id="loadingProyeccion">
                         <div class="spinner"></div>
@@ -389,7 +396,8 @@
                                 <thead>
                                     <tr>
                                         <th rowspan="2" class="col-canal">Canal</th>
-                                        <th colspan="28" class="table-group-divider" id="ventaPeriodoHeader">Período</th>
+                                        <!-- El rótulo y el colspan los pone el JS según la vista activa -->
+                                        <th colspan="1" class="table-group-divider" id="ventaPeriodoHeader">Período</th>
                                     </tr>
                                     <tr id="ventaHeaderSub"></tr>
                                 </thead>
@@ -422,7 +430,8 @@
                                     <th rowspan="2" class="col-medio">Medio de Pago</th>
                                     <th rowspan="2" class="text-center">Mix</th>
                                     <th rowspan="2" class="text-center">Días</th>
-                                    <th colspan="28" class="table-group-divider" id="cobPeriodoHeader">Período</th>
+                                    <!-- El rótulo y el colspan los pone el JS según la vista activa -->
+                                    <th colspan="1" class="table-group-divider" id="cobPeriodoHeader">Período</th>
                                 </tr>
                                 <tr id="cobHeaderSub"></tr>
                             </thead>
