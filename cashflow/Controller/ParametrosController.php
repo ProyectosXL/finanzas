@@ -237,6 +237,117 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* ================================================================
+           MODULO SALDOS
+
+           El ABM vive en Class/Saldos.php, que es la clase duena de esas
+           tablas, y sigue el mismo patron que el mix de cobro: un add que
+           chequea la clave natural antes de insertar, un save que no crea, y
+           ninguna baja fisica.
+           ================================================================ */
+
+        case 'addCuentaSaldo':
+            $data = bodyJson();
+
+            if (!isset($data['tipo']) || !isset($data['nombre']) || !isset($data['moneda'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/Saldos.php';
+
+            $id = (new Saldos())->addCuenta(
+                $data['tipo'],
+                $data['nombre'],
+                $data['moneda'],
+                usuarioActual()
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Cuenta agregada. Queda activa y sin saldo cargado: '
+                           . 'se muestra como "sin cargar" hasta la próxima carga.',
+                'data' => ['id' => $id]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'saveCuentasSaldo':
+            $data = bodyJson();
+
+            if (!isset($data['filas']) || !is_array($data['filas'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/Saldos.php';
+
+            $saldos = new Saldos();
+
+            foreach ($data['filas'] as $fila) {
+                if (!isset($fila['id'])) {
+                    throw new Exception('Falta el ID de una cuenta');
+                }
+
+                $saldos->saveCuenta(
+                    $fila['id'],
+                    isset($fila['nombre']) ? $fila['nombre'] : '',
+                    isset($fila['moneda']) ? $fila['moneda'] : 'ARS',
+                    !empty($fila['activo']),
+                    usuarioActual()
+                );
+            }
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Cuentas guardadas correctamente'
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'saveSucursalesSaldo':
+            $data = bodyJson();
+
+            if (!isset($data['filas']) || !is_array($data['filas'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/Saldos.php';
+
+            $saldos = new Saldos();
+
+            foreach ($data['filas'] as $fila) {
+                if (!isset($fila['nro_sucursal'])) {
+                    throw new Exception('Falta el número de una sucursal');
+                }
+
+                $saldos->saveSucursal(
+                    $fila['nro_sucursal'],
+                    isset($fila['gestion']) ? $fila['gestion'] : 'DEPOSITA',
+                    isset($fila['reserva']) ? $fila['reserva'] : 0,
+                    usuarioActual()
+                );
+            }
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Locales guardados correctamente'
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'sincronizarSucursales':
+            require_once __DIR__ . '/../Class/Saldos.php';
+
+            // Trae los locales propios habilitados desde el servidor de
+            // locales. NO pisa la gestion ni la reserva ya cargadas, y a los
+            // que desaparecen del origen los inhabilita en lugar de borrarlos.
+            $r = (new Saldos())->sincronizarSucursales(usuarioActual());
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Locales sincronizados: ' . $r['altas'] . ' nuevos, '
+                           . $r['reactivadas'] . ' reactivados, ' . $r['bajas']
+                           . ' inhabilitados. La gestión y la reserva ya cargadas no se tocaron.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         default:
             echo json_encode([
                 'success' => false,

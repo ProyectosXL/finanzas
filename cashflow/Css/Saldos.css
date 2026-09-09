@@ -1,0 +1,161 @@
+/* ============================================================================
+   PESTANA SALDOS
+   Estilos propios de las dos sub-pestanas: disponible inicial y caja de locales.
+
+   Las tarjetas y las tablas base salen de Css/main.css; aca va solo lo que
+   distingue a esta pantalla. Todo va prefijado con .tab-saldos o con .sal-
+   porque los selectores del modulo son globales al documento.
+   ============================================================================ */
+
+.tab-saldos .loading-spinner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+}
+
+.tab-saldos .spinner {
+    border: 3px solid var(--border-light, #eef0f5);
+    border-top: 3px solid var(--primary-color, #3366ff);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.tab-saldos .loading-spinner p {
+    margin-top: 15px;
+    color: var(--text-muted, #8c93a8);
+    font-size: 13px;
+}
+
+/* Falta en main.css y la usa la tarjeta de "Aporta al Cashflow" */
+.tab-saldos .kpi-card-icon.purple {
+    background: rgba(111, 66, 193, 0.1);
+    color: #6f42c1;
+}
+
+/* La tarjeta que dice cuanto entra realmente al tablero va marcada aparte: es
+   el unico numero de la pantalla que el Cashflow consume. */
+.tab-saldos .kpi-card-destacada {
+    border-color: #6f42c1;
+    box-shadow: 0 0 0 1px rgba(111, 66, 193, 0.12);
+}
+
+/* Una fecha y hora no entran en 24px sin romper la tarjeta */
+.tab-saldos .kpi-card-value-sm {
+    font-size: 17px;
+}
+
+/* ========================================
+   TABLAS
+   ======================================== */
+
+.tab-saldos .sal-saldo {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.tab-saldos .sal-subtitulo {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+    font-weight: 400;
+    margin-top: 2px;
+}
+
+.tab-saldos .sal-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--bg-light, #f5f6fa);
+    font-size: 11px;
+    color: var(--text-secondary, #5a6178);
+}
+
+.tab-saldos .sal-origen {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+/* La fecha de carga de cada dato. Es la regla transversal del relevamiento:
+   tiene que verse siempre, asi que va atenuada pero nunca escondida. */
+.tab-saldos .sal-fecha-carga {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+    white-space: nowrap;
+}
+
+/* Una cuenta sin ninguna carga NO es una cuenta en cero. Se atenua la fila para
+   que la diferencia se vea de un vistazo. */
+.tab-saldos .sal-sin-cargar {
+    background: var(--bg-light, #f8f9fc);
+}
+
+.tab-saldos .sal-sin-cargar td {
+    opacity: 0.7;
+}
+
+/* El error POR CUENTA que devuelve la API en una respuesta 200. Se muestra
+   siempre: descartarlo haria leer "no se pudo consultar" como "saldo cero". */
+.tab-saldos .sal-error {
+    color: var(--danger-color, #dc3545);
+}
+
+/* El efectivo de tesoreria no se tipea: lo resuelve el sistema al guardar */
+.tab-saldos .sal-consulta {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary, #5a6178);
+    font-style: italic;
+}
+
+/* Un local en Envia se ve, pero se ve DISTINTO: su efectivo no entra al
+   cashflow, y una fila igual a las demas invitaria a sumarla. */
+.tab-saldos .sal-envia {
+    background: rgba(240, 173, 78, 0.06);
+}
+
+.tab-saldos .sal-negativo {
+    color: var(--danger-color, #dc3545);
+}
+
+.tab-saldos .sal-no-aporta {
+    color: var(--text-muted, #8c93a8);
+}
+
+.tab-saldos .sal-neto,
+.tab-saldos .sal-aporta {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.tab-saldos .sal-aporta {
+    font-weight: 600;
+}
+
+.tab-saldos .sal-fila-total td {
+    border-top: 2px solid var(--border-color, #e2e5ed);
+    font-variant-numeric: tabular-nums;
+}
+
+.tab-saldos tfoot .sal-fila-total:first-child td {
+    border-top: 2px solid var(--border-color, #e2e5ed);
+}
+
+.tab-saldos tfoot .sal-fila-total + .sal-fila-total td {
+    border-top: 1px solid var(--border-light, #eef0f5);
+}
+
+/* Los inputs de la grilla no tienen que agrandar la fila */
+.tab-saldos .table .form-control-sm,
+.tab-saldos .table .form-select-sm {
+    font-size: 12px;
+    padding: 3px 8px;
+}
