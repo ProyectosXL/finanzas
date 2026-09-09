@@ -115,17 +115,34 @@ class CashflowRegistry {
             ]
         ],
 
-        /* ---- Modulos que todavia no existen -------------------------------- */
-        /* Rinden cero y el tablero avisa. Ver la nota del encabezado. */
-
+        /* SaldosProvider sirve dos codigos, igual que ComexProvider: cada
+           instancia corre solo la consulta de su serie. Van separados porque
+           leen dos servidores distintos, y asi una caida del servidor de
+           locales no se lleva puesto el disponible bancario. */
         'SALDOS' => [
             'nombre' => 'Saldos',
-            'descripcion' => 'Disponible inicial en bancos y caja',
+            'descripcion' => 'Disponible inicial en bancos, Mercado Pago y efectivo de tesoreria',
+            'archivo' => 'Providers/SaldosProvider.php',
+            'clase' => 'SaldosProvider',
             'moneda' => 'ARS',
-            'disponible' => false,
+            'disponible' => true,
             'tab' => 'saldos',
             'series' => ['DISPONIBLE' => 'Disponible al inicio']
         ],
+
+        'CAJA_LOCALES' => [
+            'nombre' => 'Caja Locales',
+            'descripcion' => 'Deposito de la recaudacion de los locales propios',
+            'archivo' => 'Providers/SaldosProvider.php',
+            'clase' => 'SaldosProvider',
+            'moneda' => 'ARS',
+            'disponible' => true,
+            'tab' => 'saldos',
+            'series' => ['DEPOSITOS' => 'Depositos de caja de locales']
+        ],
+
+        /* ---- Modulos que todavia no existen -------------------------------- */
+        /* Rinden cero y el tablero avisa. Ver la nota del encabezado. */
 
         'ECHEQS' => [
             'nombre' => 'Echeqs',
@@ -240,15 +257,6 @@ class CashflowRegistry {
             'disponible' => false,
             'tab' => 'saldos',
             'series' => ['DISPONIBLE' => 'Dolares en cuenta comitente']
-        ],
-
-        'CAJA_LOCALES' => [
-            'nombre' => 'Caja Locales',
-            'descripcion' => 'Deposito de la recaudacion de los locales propios',
-            'moneda' => 'ARS',
-            'disponible' => false,
-            'tab' => 'saldos',
-            'series' => ['DEPOSITOS' => 'Depositos de caja de locales']
         ],
 
         'EXPORTACIONES' => [

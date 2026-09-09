@@ -50,6 +50,22 @@ if (!class_exists('Conexion')) {
             $this->prefix = ($this->env == 'DEV') ? '[XL-LAKERBIS].locales_lakers.dbo.' : '';
         }
 
+        /**
+         * Prefijo con el que hay que nombrar las tablas del servidor de
+         * locales. En ENV=DEV se alcanzan por linked server y llevan el nombre
+         * de cuatro partes; en PROD el prefijo es vacio.
+         *
+         * El valor ya existia como propiedad privada y lo usa buscarLocal();
+         * esto solo lo expone para que un modulo pueda armar su consulta con la
+         * misma regla en lugar de repetir la condicion sobre ENV.
+         *
+         * @return string
+         */
+        public function prefijoLocales()
+        {
+            return $this->prefix;
+        }
+
         private function servidor($nameServer)
         {
 
