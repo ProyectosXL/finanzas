@@ -43,6 +43,9 @@ class Cashflow {
     /** @var CashflowEstructura */
     private $estructura;
 
+    /** @var Horizonte|null Eje inyectado. null = se arma desde los parametros */
+    private $horizonte;
+
     /** @var array Avisos no fatales que se devuelven en el JSON */
     private $warnings = [];
 
@@ -56,12 +59,26 @@ class Cashflow {
      * saldo y las filas calculadas con una estructura controlada, sin depender
      * de lo que haya cargado en las tablas. En uso normal no se pasa nada.
      *
+     * EL EJE TAMBIEN SE PUEDE INYECTAR, y hace falta para poder probar. El
+     * arrastre depende de QUE DIA ES HOY: el eje arranca hoy, asi que un
+     * escenario con importes en fechas fijas deja de tener sentido en cuanto
+     * pasa esa fecha. Sin esta costura las pruebas del motor caducaban solas -y
+     * de hecho caducaron-, con lo cual la parte mas delicada del modulo se
+     * quedaba sin red justo cuando mas se la necesita.
+     *
+     * Es la misma costura que ya tienen Ventas::proyectarVentas() y
+     * proyectarCobranzas(), que aceptan un Horizonte opcional para que el
+     * Cashflow pueda consolidarlas sobre sus mismas columnas.
+     *
      * @param CashflowEstructura|null $estructura
      * @param Parametros|null $parametros
+     * @param Horizonte|null $horizonte Eje a usar. null lo arma desde los
+     *        parametros, que es el uso normal.
      */
-    function __construct($estructura = null, $parametros = null) {
+    function __construct($estructura = null, $parametros = null, $horizonte = null) {
         $this->parametros = ($parametros === null) ? new Parametros() : $parametros;
         $this->estructura = ($estructura === null) ? new CashflowEstructura() : $estructura;
+        $this->horizonte = ($horizonte instanceof Horizonte) ? $horizonte : null;
     }
 
     /**
@@ -73,8 +90,11 @@ class Cashflow {
         $this->warnings = [];
 
         /* ---- 1. Eje temporal --------------------------------------------- */
-        $map = $this->parametros->getParametrosMap();
-        $h = Horizonte::desdeParametros($this->parametros, $map);
+        // Si lo inyectaron, manda el inyectado: es lo que permite fijar el dia
+        // de referencia en las pruebas. En uso normal sale de los parametros.
+        $h = ($this->horizonte !== null)
+            ? $this->horizonte
+            : Horizonte::desdeParametros($this->parametros);
 
         /* ---- 2. Estructura configurada ----------------------------------- */
         foreach ($this->estructura->getAvisos() as $aviso) {

@@ -100,7 +100,7 @@ $est->filas = [
 
 $h = new Horizonte(3, 3, [], new DateTime('2026-09-06'));
 
-$motor = new CashflowFalso($est, new ParametrosFalsos());
+$motor = new CashflowFalso($est, new ParametrosFalsos(), $h);
 $motor->series = [
     'SALDOS' => ['DISPONIBLE' => serieCon($h, ['2026-09-06' => 1000])],
     'VENTAS' => [
@@ -112,6 +112,23 @@ $motor->series = [
 
 $t = $motor->proyectar();
 $p = porCodigo($t);
+
+seccion('el eje inyectado manda');
+
+// Esta es la costura que sostiene TODO el resto del archivo. El arrastre del
+// saldo depende de que dia es hoy, asi que un escenario con importes en fechas
+// fijas solo tiene sentido si el motor usa el eje del escenario y no la fecha
+// real. Sin esto las pruebas del motor caducan solas al pasar la fecha -y
+// caducaron-. Se verifica explicito para que, si alguien saca la inyeccion, el
+// mensaje de falla diga por que fallan las otras noventa.
+chequear('el tablero se genero en el dia del escenario', '2026-09-06', $t['generado']);
+chequear('la primera columna diaria es la del escenario', '2026-09-06', $t['dias'][0]['fecha']);
+
+$sinEje = new CashflowFalso($est, new ParametrosFalsos());
+$sinEje->series = [];
+
+chequear('sin eje inyectado el motor usa el dia real',
+    (new DateTime('today'))->format('Y-m-d'), $sinEje->proyectar()['generado']);
 
 seccion('eje del tablero');
 
@@ -254,7 +271,7 @@ $par28->meses = 2;
 
 $h2 = new Horizonte(28, 2, [], new DateTime('2026-09-06'));
 
-$motor2 = new CashflowFalso($est, $par28);
+$motor2 = new CashflowFalso($est, $par28, $h2);
 $motor2->series = [
     'SALDOS' => ['DISPONIBLE' => serieCon($h2, ['2026-09-06' => 1000])],
     'VENTAS' => ['COBRANZA' => serieCon($h2, ['2026-09-06' => 100]), 'VENTA' => serieCon($h2)],
@@ -278,7 +295,7 @@ chequear('la columna siguiente si tiene valor', 1100.0, $p2['SALDO_FIN']['meses'
    ================================================================ */
 seccion('modulo sin datos');
 
-$motor3 = new CashflowFalso($est, new ParametrosFalsos());
+$motor3 = new CashflowFalso($est, new ParametrosFalsos(), $h);
 $motor3->series = [];
 
 $t3 = $motor3->proyectar();
@@ -315,7 +332,7 @@ $estExcel->filas = [
     filaConf(7, 'SALDO_FIN', 'RES', 'SALDO_FINAL', 10),
 ];
 
-$motorX = new CashflowFalso($estExcel, new ParametrosFalsos());
+$motorX = new CashflowFalso($estExcel, new ParametrosFalsos(), $h);
 $motorX->series = [
     'SALDOS' => ['DISPONIBLE' => serieCon($h, ['2026-09-06' => 90])],
     'ECHEQS' => ['A_COBRAR' => serieCon($h, ['2026-09-06' => 4])],
@@ -350,7 +367,7 @@ $parX->dias = 28;
 $parX->meses = 2;
 
 $hX = new Horizonte(28, 2, [], new DateTime('2026-09-06'));
-$motorX2 = new CashflowFalso($estExcel, $parX);
+$motorX2 = new CashflowFalso($estExcel, $parX, $hX);
 $motorX2->series = [
     'SALDOS' => ['DISPONIBLE' => serieCon($hX, ['2026-09-06' => 90])],
     'ECHEQS' => ['A_COBRAR' => serieCon($hX)],
@@ -395,7 +412,7 @@ $estFlujo->filas = [
     filaConf(4, 'SALDO_FIN', 'RES', 'SALDO_FINAL', 20),
 ];
 
-$motorF = new CashflowFalso($estFlujo, $par28);
+$motorF = new CashflowFalso($estFlujo, $par28, $hX);
 $motorF->series = [
     'SALDOS' => ['DISPONIBLE' => serieCon($hX)],
     'COBRANZAS_FR' => ['COBRANZA' => serieCon($hX,
@@ -431,7 +448,7 @@ $est2->filas = [
     filaConf(4, 'TOTAL', 'RES2', 'FLUJO_NETO', 10),
 ];
 
-$motor4 = new CashflowFalso($est2, new ParametrosFalsos());
+$motor4 = new CashflowFalso($est2, new ParametrosFalsos(), $h);
 $motor4->series = [
     'VENTAS' => ['COBRANZA' => serieCon($h, ['2026-09-06' => 100])],
     'COMEX_PROV_EXT' => ['PAGOS' => serieCon($h, ['2026-09-06' => 30])],
