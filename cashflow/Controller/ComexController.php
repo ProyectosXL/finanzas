@@ -11,19 +11,46 @@ header('Content-Type: application/json');
 
 try {
     require_once __DIR__ . '/../Class/Comex.php';
+    require_once __DIR__ . '/../Class/EjeVista.php';
+    require_once __DIR__ . '/../Class/Parametros.php';
 
     // Obtener acción del request
     $action = isset($_GET['action']) ? $_GET['action'] : '';
 
     $comex = new Comex();
 
+    /**
+     * Eje temporal de las pestañas, el mismo del tablero.
+     *
+     * Sale de horizonte_dias y horizonte_meses, así que estas pestañas dejan de
+     * tener su ventana propia -eran los días del mes en curso y doce meses
+     * fijos- y muestran exactamente el período que se está proyectando.
+     *
+     * @return Horizonte
+     */
+    function ejeDelModulo() {
+        static $h = null;
+
+        if ($h === null) {
+            $h = Horizonte::desdeParametros(new Parametros());
+        }
+
+        return $h;
+    }
+
     switch ($action) {
         case 'getProveedoresExterior':
-            $datos = $comex->getProveedoresExterior();
-            $resultado = $comex->procesarDatosPorPeriodo($datos);
+            // Los importes de esta pestaña están en DÓLARES y así se muestran:
+            // no hay conversión acá. La conversión a pesos la hace
+            // ComexProvider, que es quien alimenta el tablero.
             echo json_encode([
                 'success' => true,
-                'data' => $resultado
+                'data' => EjeVista::armar(
+                    ejeDelModulo(),
+                    $comex->getProveedoresExterior(),
+                    'FECHA_PAGO_EFECTIVA',
+                    'VALOR_FOB_DOLAR'
+                )
             ], JSON_UNESCAPED_UNICODE);
             break;
             
@@ -58,11 +85,16 @@ try {
             break;
             
         case 'getCronoNacionalizacion':
-            $datos = $comex->getCronoNacionalizacion();
-            $resultado = $comex->procesarCronoNacPorPeriodo($datos);
+            // IMPORTE_EST viene de un LEFT JOIN sobre la estimación, así que
+            // puede ser nulo: esos casos suman cero y no distorsionan.
             echo json_encode([
                 'success' => true,
-                'data' => $resultado
+                'data' => EjeVista::armar(
+                    ejeDelModulo(),
+                    $comex->getCronoNacionalizacion(),
+                    'FECHA_NAC_EFECTIVA',
+                    'IMPORTE_EST'
+                )
             ], JSON_UNESCAPED_UNICODE);
             break;
             

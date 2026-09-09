@@ -1,3 +1,46 @@
+<?php
+    /**
+     * Menú lateral.
+     *
+     * La lista de pestañas y el estado de cada una salen de Class/Menu.php: acá
+     * sólo se dibuja. Antes eran veintiséis enlaces escritos a mano e iguales
+     * entre sí, y por eso no se podía ver de un vistazo qué está hecho.
+     *
+     * TRES ESTADOS, no dos. El del medio es el que importa: una pestaña puede
+     * estar dibujada y tener los números escritos a mano (el Dashboard), lo que
+     * es peor que un placeholder — un placeholder avisa, una maqueta se lee como
+     * un dato real. Ver la nota del encabezado de Class/Menu.php.
+     */
+    require_once __DIR__ . '/../Class/Menu.php';
+
+    $menu = Menu::estructura();
+
+    /**
+     * Un enlace del menú, con la marca de su estado.
+     *
+     * @param array $item Item resuelto por Menu::estructura()
+     * @param bool $activo Si arranca marcado como activo
+     * @return string
+     */
+    function menuLink($item, $activo = false) {
+        $clases = 'menu-link menu-' . $item['estado'] . ($activo ? ' active' : '');
+
+        $html = '<a href="#" class="' . $clases . '" data-tab="'
+            . htmlspecialchars($item['tab']) . '"'
+            . ($item['titulo'] !== '' ? ' title="' . htmlspecialchars($item['titulo']) . '"' : '')
+            . '>'
+            . '<i class="fas ' . htmlspecialchars($item['icono']) . ' menu-icono"></i>'
+            . '<span>' . htmlspecialchars($item['nombre']) . '</span>';
+
+        // La marca del estado va a la derecha y sólo cuando hay algo que decir:
+        // una pestaña con datos es el caso normal y no se marca.
+        if ($item['icono_estado'] !== '') {
+            $html .= '<i class="fas ' . htmlspecialchars($item['icono_estado']) . ' menu-marca"></i>';
+        }
+
+        return $html . '</a>';
+    }
+?>
 <!-- Sidebar Toggle Button (visible when collapsed) -->
 <button class="sidebar-toggle" id="sidebarToggle">
     <i class="fas fa-bars"></i>
@@ -22,129 +65,64 @@
     </div>
 
     <div class="sidebar-menu">
-        <!-- Cashflow - Tablero de consolidación. Es la pestaña principal y la
-             que carga index.php por defecto. Reemplaza al viejo Resumen. -->
-        <div class="menu-item-main">
-            <a href="#" class="menu-link active" data-tab="cashflow">
-                <i class="fas fa-table-cells"></i>
-                <span>Cashflow</span>
-            </a>
-        </div>
 
-        <!-- Dashboard -->
-        <div class="menu-item-main">
-            <a href="#" class="menu-link" data-tab="dashboard">
-                <i class="fas fa-chart-pie"></i>
-                <span>Dashboard</span>
-            </a>
-        </div>
-
-        <!-- Parámetros - Nivel raíz: va absorbiendo los parámetros de todos los módulos -->
-        <div class="menu-item-main">
-            <a href="#" class="menu-link" data-tab="parametros">
-                <i class="fas fa-sliders"></i>
-                <span>Parámetros</span>
-            </a>
-        </div>
+        <!-- Pestañas de nivel raíz. Cashflow es la que carga index.php. -->
+        <?php foreach ($menu['principales'] as $i => $item): ?>
+            <div class="menu-item-main">
+                <?php echo menuLink($item, $i === 0); ?>
+            </div>
+        <?php endforeach; ?>
 
         <div class="menu-divider"></div>
 
-        <!-- Categoría: Ingresos -->
-        <div class="menu-category">
-            <a href="#" class="category-header" data-bs-toggle="collapse" data-bs-target="#menuIngresos">
-                <div class="category-title">
-                    <i class="fas fa-arrow-trend-up"></i>
-                    <span>Ingresos</span>
+        <!-- Categorías.
+             El contador dice cuántas pestañas de la categoría tienen datos, para
+             ver el avance sin abrirla. -->
+        <?php foreach ($menu['categorias'] as $cat): ?>
+            <div class="menu-category">
+                <a href="#" class="category-header<?php echo $cat['abierta'] ? '' : ' collapsed'; ?>"
+                   data-bs-toggle="collapse" data-bs-target="#menu<?php echo $cat['codigo']; ?>">
+                    <div class="category-title">
+                        <i class="fas <?php echo htmlspecialchars($cat['icono']); ?>"></i>
+                        <span><?php echo htmlspecialchars($cat['nombre']); ?></span>
+                        <span class="category-avance<?php echo $cat['con_datos'] === 0 ? ' avance-vacio' : ''; ?>"
+                              title="<?php echo $cat['con_datos']; ?> de <?php echo $cat['total']; ?> pestañas con datos del sistema">
+                            <?php echo $cat['con_datos']; ?>/<?php echo $cat['total']; ?>
+                        </span>
+                    </div>
+                    <i class="fas fa-chevron-down category-arrow"></i>
+                </a>
+                <div class="collapse<?php echo $cat['abierta'] ? ' show' : ''; ?>"
+                     id="menu<?php echo $cat['codigo']; ?>">
+                    <ul class="category-items">
+                        <?php foreach ($cat['items'] as $item): ?>
+                            <li><?php echo menuLink($item); ?></li>
+                        <?php endforeach; ?>
+                    </ul>
                 </div>
-                <i class="fas fa-chevron-down category-arrow"></i>
-            </a>
-            <div class="collapse" id="menuIngresos">
-                <ul class="category-items">
-                    <li><a href="#" class="menu-link" data-tab="ventas"><span>Ventas</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="saldos"><span>Saldos</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="echeqs"><span>Echeqs</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="cobranzas_fr"><span>Cobranzas FR</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="cobranzas_may"><span>Cobranzas May</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="cob_electronicos"><span>Cob. Electrónicos</span></a></li>
-                </ul>
             </div>
-        </div>
+        <?php endforeach; ?>
 
-        <!-- Categoría: Comercio Exterior -->
-        <div class="menu-category">
-            <a href="#" class="category-header collapsed" data-bs-toggle="collapse" data-bs-target="#menuComex">
-                <div class="category-title">
-                    <i class="fas fa-ship"></i>
-                    <span>Comercio Exterior</span>
-                </div>
-                <i class="fas fa-chevron-down category-arrow"></i>
-            </a>
-            <div class="collapse" id="menuComex">
-                <ul class="category-items">
-                    <li><a href="#" class="menu-link" data-tab="proveedores_exterior"><span>Proveedores Exterior</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="crono_nacionalizacion"><span>Crono Nacionalización</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="despachante_asesor"><span>Despachante y Asesor</span></a></li>
-                </ul>
-            </div>
-        </div>
+        <!-- Al pie: Parámetros. No es un módulo de datos como los de arriba, es
+             la configuración de todos ellos. -->
+        <div class="menu-divider"></div>
 
-        <!-- Categoría: Proveedores -->
-        <div class="menu-category">
-            <a href="#" class="category-header collapsed" data-bs-toggle="collapse" data-bs-target="#menuProveedores">
-                <div class="category-title">
-                    <i class="fas fa-truck"></i>
-                    <span>Proveedores</span>
-                </div>
-                <i class="fas fa-chevron-down category-arrow"></i>
-            </a>
-            <div class="collapse" id="menuProveedores">
-                <ul class="category-items">
-                    <li><a href="#" class="menu-link" data-tab="proveedores_locales"><span>Proveedores Locales</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="cronograma"><span>Cronograma</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="logistica_local"><span>Logística Local</span></a></li>
-                </ul>
+        <?php foreach ($menu['pie'] as $item): ?>
+            <div class="menu-item-main">
+                <?php echo menuLink($item); ?>
             </div>
-        </div>
+        <?php endforeach; ?>
+    </div>
 
-        <!-- Categoría: RRHH y Operativos -->
-        <div class="menu-category">
-            <a href="#" class="category-header collapsed" data-bs-toggle="collapse" data-bs-target="#menuRRHH">
-                <div class="category-title">
-                    <i class="fas fa-users"></i>
-                    <span>RRHH y Operativos</span>
-                </div>
-                <i class="fas fa-chevron-down category-arrow"></i>
-            </a>
-            <div class="collapse" id="menuRRHH">
-                <ul class="category-items">
-                    <li><a href="#" class="menu-link" data-tab="haberes"><span>Haberes</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="impuestos"><span>Impuestos</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="alquileres"><span>Alquileres</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="seguros"><span>Seguros</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="llaves_renov"><span>Llaves y Renov. Contratos</span></a></li>
-                </ul>
-            </div>
-        </div>
-
-        <!-- Categoría: Financiero -->
-        <div class="menu-category">
-            <a href="#" class="category-header collapsed" data-bs-toggle="collapse" data-bs-target="#menuFinanciero">
-                <div class="category-title">
-                    <i class="fas fa-landmark"></i>
-                    <span>Financiero</span>
-                </div>
-                <i class="fas fa-chevron-down category-arrow"></i>
-            </a>
-            <div class="collapse" id="menuFinanciero">
-                <ul class="category-items">
-                    <li><a href="#" class="menu-link" data-tab="pagos_tarjetas"><span>Pagos con Tarjetas y Otros</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="otros_socios"><span>Otros Socios y No Prog.</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="bopreal"><span>Bopreal</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="prestamos"><span>Préstamos</span></a></li>
-                    <li><a href="#" class="menu-link" data-tab="pagos_div"><span>Pagos Div. Marzo</span></a></li>
-                </ul>
-            </div>
-        </div>
+    <!-- Referencia de las marcas. Sin esto, los íconos de la derecha son
+         adornos: hay que decir qué significan. -->
+    <div class="sidebar-leyenda">
+        <span class="leyenda-item">
+            <i class="fas fa-pen-ruler"></i> Maqueta
+        </span>
+        <span class="leyenda-item">
+            <i class="fas fa-hard-hat"></i> Pendiente
+        </span>
     </div>
 
     <div class="sidebar-footer">

@@ -11,6 +11,8 @@ header('Content-Type: application/json');
 
 try {
     require_once __DIR__ . '/../Class/Ingresos.php';
+    require_once __DIR__ . '/../Class/EjeVista.php';
+    require_once __DIR__ . '/../Class/Parametros.php';
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
     $ingresos = new Ingresos();
@@ -18,11 +20,18 @@ try {
     switch ($action) {
         case 'getCobranzasFR':
             $summary = isset($_GET['type']) && $_GET['type'] === 'deepdive' ? false : true;
-            $datos = $ingresos->getCobranzasFR($summary);
-            $resultado = $ingresos->procesarCobranzasPorPeriodo($datos);
+
+            // El eje sale de horizonte_dias y horizonte_meses, el mismo del
+            // tablero: esta pestaña deja de tener su ventana propia -eran los
+            // dias del mes en curso y doce meses fijos-.
             echo json_encode([
                 'success' => true,
-                'data' => $resultado
+                'data' => EjeVista::armar(
+                    Horizonte::desdeParametros(new Parametros()),
+                    $ingresos->getCobranzasFR($summary),
+                    'Cobro',
+                    'importe_neto'
+                )
             ], JSON_UNESCAPED_UNICODE);
             break;
             

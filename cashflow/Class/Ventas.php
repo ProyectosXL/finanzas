@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/Parametros.php';
 require_once __DIR__ . '/Horizonte.php';
+require_once __DIR__ . '/EjeVista.php';
 require_once __DIR__ . '/Cotizacion.php';
 
 /**
@@ -818,6 +819,12 @@ class Ventas {
             'alicuota_iva' => $alicuotaIva,
             'dias' => $dias,
             'meses' => $meses,
+            // Las tres vistas del eje, con sus columnas y su rotulo de periodo.
+            // Salen de EjeVista, el mismo criterio que el tablero y el resto de
+            // las pestanas: asi la grilla de proyeccion no puede ofrecer vistas
+            // distintas ni medir un periodo distinto del que enuncia.
+            'vistas' => EjeVista::vistas($horizonte),
+            'secuencia' => $horizonte->secuencia(),
             'base_mensual' => array_values($baseMensual),
             'participacion' => [
                 'tramo28' => $particTramo,

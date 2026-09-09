@@ -177,6 +177,15 @@
 
         </div><!-- /paneParamVentas -->
 
+        <!-- Parámetros del módulo Saldos: bancos y cuentas, otros saldos y la
+             gestión de caja de cada local. Mismo criterio que el editor de
+             estructura: archivo y JS propios, y clases con prefijo sp- porque
+             Parametros.js busca .param-input, .mix-* y .respaldo-* en TODO el
+             documento. -->
+        <div class="tab-pane fade" id="paneParamSaldos" role="tabpanel">
+            <?php include __DIR__ . '/parametros_saldos.php'; ?>
+        </div>
+
         <!-- Estructura del tablero de Cashflow.
              Va en su propio archivo y con su propio JS: no comparte nada con
              los bloques de Ventas, y así un problema acá no puede llevarse
@@ -193,4 +202,5 @@
 </div><!-- /tab-parametros -->
 
 <script src="Js/Parametros.js?v=<?php echo time(); ?>"></script>
+<script src="Js/Parametros-Saldos.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Estructura.js?v=<?php echo time(); ?>"></script>

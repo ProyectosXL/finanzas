@@ -58,5 +58,9 @@ session_start();
     <!-- Custom JS -->
     <script src="Js/sidebar.js"></script>
     <script src="Js/main.js"></script>
+    <!-- Las tres vistas del eje temporal (Días / Meses / Período completo).
+         Va acá y no en cada pestaña porque lo usan todas las que tienen eje, y
+         las pestañas se cargan por AJAX. -->
+    <script src="Js/eje-vistas.js?v=<?php echo time(); ?>"></script>
 </body>
 </html>

@@ -41,6 +41,13 @@ class Parametros {
             'descripcion' => 'Alimentan la proyección de ventas y cobranzas de la pestaña Ventas',
             'secciones' => ['generales', 'mix', 'respaldo']
         ],
+        'SALDOS' => [
+            'nombre' => 'Saldos',
+            'icono' => 'fa-wallet',
+            'descripcion' => 'Bancos y cuentas, otros saldos y la gestión de caja de cada local. '
+                . 'Alimentan la pestaña Saldos y las filas Saldo Inicial y Caja Locales del tablero',
+            'secciones' => ['generales', 'cuentas', 'sucursales']
+        ],
         'CASHFLOW' => [
             'nombre' => 'Cashflow',
             'icono' => 'fa-table-cells',
@@ -77,6 +84,7 @@ class Parametros {
 
         foreach (self::getModulos() as $modulo) {
             $codigo = $modulo['codigo'];
+            $modulo['avisos'] = [];
 
             foreach ($modulo['secciones'] as $seccion) {
                 if ($seccion === 'generales') {
@@ -88,6 +96,21 @@ class Parametros {
                     $mix = $this->getMixCobro();
                     $modulo['mix'] = $mix;
                     $modulo['mix_validacion'] = self::validarMix($mix);
+                } elseif ($seccion === 'cuentas' || $seccion === 'sucursales') {
+                    // Las dos tablas de parametros de Saldos las lee su propia
+                    // clase: son tablas del modulo Saldos y tener una segunda
+                    // consulta aca las dejaria desincronizadas. Van dentro de un
+                    // try porque su script puede no haberse corrido todavia, y
+                    // eso no puede tumbar la pestana entera de Parametros.
+                    try {
+                        $modulo[$seccion] = ($seccion === 'cuentas')
+                            ? $this->saldos()->getCuentas(false)
+                            : array_values($this->saldos()->getParametrosSucursales(false));
+                    } catch (Throwable $e) {
+                        $modulo[$seccion] = [];
+                        $modulo['avisos'][] = 'No se pudieron leer los parámetros de Saldos: '
+                            . $e->getMessage();
+                    }
                 }
             }
 
@@ -98,10 +121,33 @@ class Parametros {
     }
 
     /**
+     * Puerta al modulo Saldos, para las secciones de Parametros que administran
+     * sus tablas.
+     *
+     * El require va aca y no arriba porque Saldos ya requiere esta clase: con
+     * los dos requires en la cabecera habria un ciclo de carga. Lazy tambien
+     * evita pagar la carga del modulo cuando la pestana solo mira Ventas.
+     *
+     * @return Saldos
+     */
+    private function saldos() {
+        require_once __DIR__ . '/Saldos.php';
+
+        if ($this->saldos === null) {
+            $this->saldos = new Saldos();
+        }
+
+        return $this->saldos;
+    }
+
+    /**
      * Cache del chequeo de la columna MODULO.
      * null = todavia no se consulto, true/false = resultado.
      */
     private $tieneModulo = null;
+
+    /** @var Saldos|null Puerta al modulo Saldos; la resuelve saldos() */
+    private $saldos = null;
 
     function __construct(){
         require_once __DIR__.'/../../class/conexion.php';

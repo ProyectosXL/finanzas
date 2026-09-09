@@ -284,3 +284,48 @@
     text-decoration: line-through;
     color: #97a1ae;
 }
+
+/* ============================================================================
+   MODULO SALDOS
+   Sub-pestana Parametros -> Saldos. Prefijo sp- para no chocar con los
+   selectores globales que busca Parametros.js (.param-input, .mix-*,
+   .respaldo-*).
+   ============================================================================ */
+
+/* Una cuenta o un local inhabilitado NO se borra: se sigue viendo, atenuado,
+   para poder reactivarlo. Es la misma idea que .mix-inactivo. */
+.sp-saldos .sp-inactiva {
+    opacity: 0.55;
+}
+
+.sp-saldos .sp-inactiva input,
+.sp-saldos .sp-inactiva select {
+    background: var(--bg-light, #f5f6fa);
+}
+
+/* Los campos que va a completar la integracion con Interbanking. Se muestran
+   vacios a proposito: asi se ve que existen desde ahora y que estan pendientes,
+   en lugar de que la columna aparezca el dia que alguien la agregue. */
+.sp-saldos .sp-api {
+    font-size: 11px;
+    color: var(--text-secondary, #5a6178);
+}
+
+.sp-saldos .sp-origen {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: var(--text-muted, #8c93a8);
+}
+
+.sp-saldos .sp-fecha {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+    white-space: nowrap;
+}
+
+.sp-saldos .table .form-control-sm,
+.sp-saldos .table .form-select-sm {
+    font-size: 12px;
+    padding: 3px 8px;
+}

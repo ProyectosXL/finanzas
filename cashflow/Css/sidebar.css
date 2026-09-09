@@ -353,3 +353,113 @@
         display: none;
     }
 }
+
+/* ============================================================================
+   ICONOS Y ESTADO DE CADA PESTANA
+
+   Los tres estados salen de Class/Menu.php:
+     datos     -> la pestana lee del sistema. Es el caso normal y NO se marca:
+                  marcar lo normal es ruido.
+     maqueta   -> dibuja pero los numeros son de ejemplo. Se marca en ambar,
+                  porque es el caso peligroso: tiene la forma de una pantalla
+                  terminada.
+     pendiente -> todavia no se desarrollo. Se atenua.
+   ============================================================================ */
+
+/* Los items de categoria ahora tienen icono propio. El sangrado de 44px existia
+   justamente porque no lo tenian y hacia de guia visual; con icono se reduce y
+   el icono ocupa ese lugar, que ademas alinea los sub-items con las pestanas de
+   nivel raiz. */
+.category-items .menu-link {
+    padding-left: 20px;
+    gap: 10px;
+}
+
+.sidebar .menu-link .menu-icono {
+    font-size: 13px;
+    width: 18px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.sidebar .menu-item-main .menu-link .menu-icono {
+    font-size: 16px;
+    width: 20px;
+}
+
+/* La marca del estado va contra el borde derecho */
+.sidebar .menu-link .menu-marca {
+    margin-left: auto;
+    font-size: 10px;
+    width: auto;
+    opacity: 0.75;
+    flex-shrink: 0;
+}
+
+/* Maqueta: el estado que hay que poder ver. Un placeholder avisa solo; una
+   maqueta con numeros escritos a mano se lee como un dato real. */
+.sidebar .menu-maqueta .menu-marca {
+    color: var(--warning-color, #f0ad4e);
+    opacity: 1;
+}
+
+/* Pendiente: se atenua pero NO se deshabilita. La pestana abre y muestra el
+   aviso de en construccion, que es informacion util. */
+.sidebar .menu-pendiente {
+    opacity: 0.55;
+}
+
+.sidebar .menu-pendiente:hover {
+    opacity: 0.85;
+}
+
+.sidebar .menu-pendiente .menu-marca {
+    color: var(--text-muted, #8c93a8);
+}
+
+/* Contador de avance de la categoria: cuantas de sus pestanas tienen datos.
+   Sirve para ver el estado sin abrirla. */
+.category-avance {
+    margin-left: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: rgba(51, 102, 255, 0.1);
+    color: var(--primary-color, #3366ff);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Una categoria sin ninguna pestana con datos no se pinta de color: seria
+   destacar un cero. */
+.category-avance.avance-vacio {
+    background: var(--bg-light, #f5f6fa);
+    color: var(--text-muted, #8c93a8);
+}
+
+/* Referencia de las marcas, al pie. Sin esto los iconos son adornos. */
+.sidebar-leyenda {
+    display: flex;
+    gap: 14px;
+    justify-content: center;
+    flex-wrap: wrap;
+    padding: 10px 16px;
+    border-top: 1px solid var(--border-color);
+    font-size: 10px;
+    color: var(--text-muted, #8c93a8);
+}
+
+.sidebar-leyenda .leyenda-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+/* Colapsado: solo quedan los iconos, asi que la marca, el contador y la leyenda
+   no tienen lugar donde mostrarse. */
+.sidebar.collapsed .menu-marca,
+.sidebar.collapsed .category-avance,
+.sidebar.collapsed .sidebar-leyenda {
+    display: none;
+}

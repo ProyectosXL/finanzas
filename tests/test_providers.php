@@ -16,7 +16,7 @@ seccion('registro de proveedores');
 
 chequear('Ventas esta registrado', true, CashflowRegistry::existe('VENTAS'));
 chequear('y disponible', true, CashflowRegistry::disponible('VENTAS'));
-chequear('Saldos esta registrado pero no construido', false, CashflowRegistry::disponible('SALDOS'));
+chequear('Echeqs esta registrado pero no construido', false, CashflowRegistry::disponible('ECHEQS'));
 chequear('un proveedor inventado no existe', false, CashflowRegistry::existe('NO_EXISTE'));
 chequear('serie valida', true, CashflowRegistry::serieExiste('VENTAS', 'COBRANZA'));
 chequear('serie que no ofrece', false, CashflowRegistry::serieExiste('VENTAS', 'CUALQUIERA'));
@@ -30,8 +30,8 @@ chequear('todos() no expone la clase interna', false, isset($todos[0]['clase']))
 
 $disponibles = array_values(array_filter($todos, function ($p) { return $p['disponible']; }));
 
-chequear('hay 4 modulos con datos reales', 4, count($disponibles));
-chequear('un modulo sin construir no se instancia', null, CashflowRegistry::instanciar('SALDOS'));
+chequear('hay 6 modulos con datos reales', 6, count($disponibles));
+chequear('un modulo sin construir no se instancia', null, CashflowRegistry::instanciar('ECHEQS'));
 chequear('un modulo inexistente tampoco', null, CashflowRegistry::instanciar('NO_EXISTE'));
 
 // Toda entrada del registro tiene que estar completa: si falta un dato, el

@@ -177,49 +177,4 @@ class Ingresos {
 
         return $v;
     }
-
-    /**
-     * Procesa los datos para agrupar por períodos (igual que Comex)
-     */
-    public function procesarCobranzasPorPeriodo($data) {
-        $resultado = [
-            'items' => $data,
-            'totales_dias' => [],
-            'totales_meses' => []
-        ];
-
-        $mesActual = date('Y-m');
-        $diasEnMes = date('t');
-        
-        for ($i = 1; $i <= $diasEnMes; $i++) {
-            $resultado['totales_dias'][$i] = 0;
-        }
-
-        for ($i = 0; $i < 12; $i++) {
-            $fecha = date('Y-m', strtotime("+$i month"));
-            $resultado['totales_meses'][$fecha] = 0;
-        }
-
-        foreach ($data as $item) {
-            $fechaPago = $item['Cobro'] ?? null;
-            
-            if ($fechaPago) {
-                $monto = floatval($item['importe_neto']);
-                
-                if (substr($fechaPago, 0, 7) == $mesActual) {
-                    $dia = intval(substr($fechaPago, 8, 2));
-                    if (isset($resultado['totales_dias'][$dia])) {
-                        $resultado['totales_dias'][$dia] += $monto;
-                    }
-                }
-                
-                $mesPago = substr($fechaPago, 0, 7);
-                if (isset($resultado['totales_meses'][$mesPago])) {
-                    $resultado['totales_meses'][$mesPago] += $monto;
-                }
-            }
-        }
-
-        return $resultado;
-    }
 }

@@ -17,7 +17,16 @@
     var datosProyeccion = null;
     var datosAcumulada = null;
     var datosBalance = null;
-    var vistaActual = 'semanas'; // 'semanas' o 'meses'
+
+    /**
+     * Las tres vistas del eje temporal de la grilla de proyección, manejadas por
+     * Js/eje-vistas.js. Antes eran dos, Semanas y Meses, con el estado y los
+     * botones acá.
+     *
+     * NO se confunde con vistaAnual: eso es otra dimensión, elige QUÉ se mide
+     * (venta cashflow, acumulada o balance) y no sobre qué período.
+     */
+    var vistas = null;
 
     // Vista activa del card "Proyección de Venta por Mes":
     // 'cashflow' | 'acumulada' | 'balance'. Las tres NO comparten la base, así
@@ -40,8 +49,6 @@
         var btnExportAnalisis = document.getElementById('btnExportAnalisis');
         var btnRefreshProyeccion = document.getElementById('btnRefreshProyeccion');
         var btnExportProyeccion = document.getElementById('btnExportProyeccion');
-        var btnVistaSemanas = document.getElementById('btnVistaSemanasProy');
-        var btnVistaMeses = document.getElementById('btnVistaMesesProy');
         var btnGuardarPartic = document.getElementById('btnGuardarParticipacion');
         var tabProyeccionBtn = document.getElementById('tabProyeccionBtn');
 
@@ -61,19 +68,15 @@
                 exportarExcel('tablaVenta', 'Proyeccion_Ventas');
             });
         }
-        if (btnVistaSemanas) {
-            btnVistaSemanas.addEventListener('click', function() {
-                cambiarVista('semanas');
-            });
-        }
-        if (btnVistaMeses) {
-            btnVistaMeses.addEventListener('click', function() {
-                cambiarVista('meses');
-            });
-        }
         if (btnGuardarPartic) {
             btnGuardarPartic.addEventListener('click', guardarParticipacion);
         }
+
+        vistas = crearEjeVistas({
+            botones: 'vistasProy',
+            periodo: 'periodoProy',
+            alCambiar: cambiarVista
+        });
 
         // La proyección se calcula recién cuando se abre la sub-pestaña
         if (tabProyeccionBtn) {
@@ -858,6 +861,10 @@
             datosProyeccion.kpi = res[1].kpi;
             datosProyeccion.warnings = res[1].warnings || [];
 
+            // El controlador de vistas se entera del eje antes de que se
+            // dibujen las grillas: es el que decide qué columnas se muestran.
+            vistas.usar(datosProyeccion);
+
             generarParticipacion();
             generarTablaVenta();
             generarTablaCobranza();
@@ -880,24 +887,7 @@
         });
     }
 
-    function cambiarVista(vista) {
-        vistaActual = vista;
-
-        var btnSemanas = document.getElementById('btnVistaSemanasProy');
-        var btnMeses = document.getElementById('btnVistaMesesProy');
-
-        if (vista === 'semanas') {
-            btnSemanas.classList.remove('btn-outline-secondary');
-            btnSemanas.classList.add('btn-primary');
-            btnMeses.classList.remove('btn-primary');
-            btnMeses.classList.add('btn-outline-secondary');
-        } else {
-            btnMeses.classList.remove('btn-outline-secondary');
-            btnMeses.classList.add('btn-primary');
-            btnSemanas.classList.remove('btn-primary');
-            btnSemanas.classList.add('btn-outline-secondary');
-        }
-
+    function cambiarVista() {
         if (datosProyeccion) {
             generarTablaVenta();
             generarTablaCobranza();
@@ -905,36 +895,80 @@
         }
     }
 
-    /** Columnas del eje temporal según la vista activa */
+    /**
+     * Columnas del eje temporal según la vista activa.
+     *
+     * CADA COLUMNA LLEVA SU RAMA ('dias' o 'meses'). Antes la vista elegía una
+     * rama entera y todas las columnas salían de ahí; con la vista Período
+     * completo conviven las dos en la misma tabla, así que la rama pasa a ser
+     * un dato de la columna y no del estado de la pantalla. Es lo que permite
+     * que un mismo bucle dibuje las tres vistas.
+     */
     function columnas() {
-        if (vistaActual === 'semanas') {
-            return datosProyeccion.dias.map(function(d) {
-                return {
+        var vista = vistas.activa();
+        var cols = [];
+
+        if (vista === 'dias' || vista === 'completo') {
+            datosProyeccion.dias.forEach(function(d) {
+                cols.push({
+                    rama: 'dias',
                     clave: d.fecha,
                     label: d.label,
                     feriado: d.feriado_comercio,
                     css: 'day-column'
-                };
+                });
             });
         }
 
-        return datosProyeccion.meses.map(function(m) {
-            return {
-                clave: m.clave,
-                label: m.label,
-                feriado: false,
-                css: 'month-column'
-            };
-        });
+        if (vista === 'meses' || vista === 'completo') {
+            datosProyeccion.meses.forEach(function(m) {
+                cols.push({
+                    rama: 'meses',
+                    clave: m.clave,
+                    label: m.label,
+                    feriado: false,
+                    css: 'month-column'
+                });
+            });
+        }
+
+        return cols;
     }
 
-    /** Rama de la grilla que corresponde a la vista activa */
-    function rama(grilla) {
-        return (vistaActual === 'semanas') ? grilla.dias : grilla.meses;
+    /**
+     * Importe de una fila de la grilla en una columna.
+     *
+     * La rama la manda la COLUMNA, así que sirve igual para las tres vistas.
+     *
+     * @param grilla El bloque completo (venta o cobranza), con sus dos ramas
+     * @param clave Canal o clave de fila
+     * @param col Columna devuelta por columnas()
+     */
+    function valorEn(grilla, clave, col) {
+        var r = grilla[col.rama];
+
+        return (r && r[clave] && r[clave][col.clave]) || 0;
     }
 
-    function ramaTotal(grilla) {
-        return (vistaActual === 'semanas') ? grilla.total_dias : grilla.total_meses;
+    /** Total de una columna, de la rama que corresponda */
+    function totalEn(grilla, col) {
+        var t = grilla['total_' + col.rama];
+
+        return (t && t[col.clave]) || 0;
+    }
+
+    /** Subtotal de un canal en una columna */
+    function subtotalEn(grilla, canal, col) {
+        var s = grilla['subtotal_' + col.rama];
+
+        return (s && s[canal] && s[canal][col.clave]) || 0;
+    }
+
+    /** Neteo de cheques adelantados de una columna */
+    function neteoEn(grilla, col) {
+        var n = grilla.neteo_prechequeado && grilla.neteo_prechequeado[col.rama];
+
+        return (n && n[col.clave]) || 0;
     }
 
     /**
@@ -948,9 +982,11 @@
         var headerHTML = '';
 
         cols.forEach(function(col, i) {
-            // El tooltip es de columnas de MES: en la vista de semanas las
-            // columnas son días y no hay participación que abrir.
-            var tip = (conTooltip && vistaActual === 'meses')
+            // El tooltip abre la participación por canal y es de columnas de
+            // MES: en una columna diaria no hay participación que abrir. Se
+            // decide por la rama de la columna y no por la vista, así que en la
+            // vista Período completo lo llevan sólo las mensuales.
+            var tip = (conTooltip && col.rama === 'meses')
                 ? tooltipParticipacion(col.clave, i, cols.length)
                 : '';
 
@@ -964,9 +1000,9 @@
 
         var periodoHeader = document.getElementById(idPeriodoHeader);
         periodoHeader.setAttribute('colspan', cols.length);
-        periodoHeader.textContent = (vistaActual === 'semanas')
-            ? 'Próximos ' + datosProyeccion.horizonte_dias + ' Días (4 Semanas)'
-            : 'Próximos ' + datosProyeccion.horizonte_meses + ' Meses';
+        periodoHeader.textContent = datosProyeccion.vistas
+            ? datosProyeccion.vistas[vistas.activa()].label
+            : '';
 
         return cols;
     }
@@ -1101,8 +1137,7 @@
     function generarTablaVenta() {
         var cols = generarEncabezado('ventaHeaderSub', 'ventaPeriodoHeader', true);
         var canales = datosProyeccion.canales;
-        var grilla = rama(datosProyeccion.venta);
-        var totales = ramaTotal(datosProyeccion.venta);
+        var venta = datosProyeccion.venta;
 
         var html = '';
 
@@ -1111,8 +1146,7 @@
             html += '<td class="col-canal fw-semibold">' + titulo(canal) + '</td>';
 
             cols.forEach(function(col) {
-                var valor = (grilla[canal] && grilla[canal][col.clave]) || 0;
-                html += celdaValor(valor, col.feriado);
+                html += celdaValor(valorEn(venta, canal, col), col.feriado);
             });
 
             html += '</tr>';
@@ -1123,7 +1157,7 @@
         var totalsHtml = '<td class="col-canal total-label">TOTAL VENTA</td>';
 
         cols.forEach(function(col) {
-            totalsHtml += celdaValor(totales[col.clave] || 0, col.feriado);
+            totalsHtml += celdaValor(totalEn(venta, col), col.feriado);
         });
 
         document.getElementById('ventaTotals').innerHTML = totalsHtml;
@@ -1133,12 +1167,6 @@
         var cols = generarEncabezado('cobHeaderSub', 'cobPeriodoHeader');
         var canales = datosProyeccion.canales;
         var cob = datosProyeccion.cobranza;
-        var grilla = rama(cob);
-        var subtotales = (vistaActual === 'semanas') ? cob.subtotal_dias : cob.subtotal_meses;
-        var totales = ramaTotal(cob);
-        var neteo = (vistaActual === 'semanas')
-            ? cob.neteo_prechequeado.dias
-            : cob.neteo_prechequeado.meses;
 
         var html = '';
 
@@ -1157,8 +1185,7 @@
                 html += '<td class="text-center text-muted">' + fila.dias_acreditacion + '</td>';
 
                 cols.forEach(function(col) {
-                    var valor = (grilla[fila.clave] && grilla[fila.clave][col.clave]) || 0;
-                    html += celdaValor(valor, false);
+                    html += celdaValor(valorEn(cob, fila.clave, col), false);
                 });
 
                 html += '</tr>';
@@ -1170,8 +1197,7 @@
             html += '<td colspan="2"></td>';
 
             cols.forEach(function(col) {
-                var valor = (subtotales[canal] && subtotales[canal][col.clave]) || 0;
-                html += celdaValor(valor, false);
+                html += celdaValor(subtotalEn(cob, canal, col), false);
             });
 
             html += '</tr>';
@@ -1184,7 +1210,7 @@
         foot += '<td class="col-canal total-label" colspan="4">COBRANZA PROYECTADA</td>';
 
         cols.forEach(function(col) {
-            foot += celdaValor(totales[col.clave] || 0, false);
+            foot += celdaValor(totalEn(cob, col), false);
         });
 
         foot += '</tr>';
@@ -1197,7 +1223,8 @@
                 '</td>';
 
         cols.forEach(function(col) {
-            foot += '<td class="currency text-muted">' + formatCurrency(-(neteo[col.clave] || 0)) + '</td>';
+            foot += '<td class="currency text-muted">'
+                + formatCurrency(-neteoEn(cob, col)) + '</td>';
         });
 
         foot += '</tr>';
@@ -1206,8 +1233,7 @@
         foot += '<td class="col-canal total-label" colspan="4">COBRANZA NETA</td>';
 
         cols.forEach(function(col) {
-            var neto = (totales[col.clave] || 0) - (neteo[col.clave] || 0);
-            foot += celdaValor(neto, false);
+            foot += celdaValor(totalEn(cob, col) - neteoEn(cob, col), false);
         });
 
         foot += '</tr>';

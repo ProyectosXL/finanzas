@@ -26,30 +26,28 @@
     var datos = null;
 
     /**
-     * 'dias'     -> las 28 columnas diarias
-     * 'meses'    -> las 12 columnas mensuales
-     * 'completo' -> las dos ramas juntas, el período entero
+     * Las tres vistas las maneja Js/eje-vistas.js, el mismo componente que usan
+     * las pestañas de detalle: el tablero y la pestaña que explica una de sus
+     * filas no pueden medir períodos distintos.
+     *
+     * ESTA PANTALLA DIBUJA UNA COLUMNA MÁS que las otras, y es a propósito: las
+     * columnas que no representan ningún día futuro -la del mes en curso cuando
+     * el tramo diario arranca hoy- se muestran con un guión sobre fondo gris,
+     * porque las filas de arrastre tienen que poder decir "acá no hay posición
+     * que mostrar". Las pestañas de detalle no tienen filas de arrastre y no las
+     * necesitan. Por eso la lista de columnas se arma acá, sobre el eje, y del
+     * componente compartido se toman el estado de la vista, el rótulo del
+     * período y el total que corresponde.
      */
-    var vista = 'dias';
-
-    var VISTAS = ['dias', 'meses', 'completo'];
-
-    var BOTONES = {
-        dias: 'cfBtnDias',
-        meses: 'cfBtnMeses',
-        completo: 'cfBtnCompleto'
-    };
+    var vistas = null;
 
     function inicializar() {
         var btnRefresh = document.getElementById('cfBtnRefresh');
         var btnExport = document.getElementById('cfBtnExport');
 
-        VISTAS.forEach(function(v) {
-            var b = document.getElementById(BOTONES[v]);
-
-            if (b) {
-                b.addEventListener('click', function() { cambiarVista(v); });
-            }
+        vistas = crearEjeVistas({
+            botones: 'cfVistas',
+            alCambiar: cambiarVista
         });
 
         if (btnRefresh) {
@@ -82,6 +80,8 @@
             .then(function(data) {
                 datos = data;
 
+                vistas.usar(datos);
+
                 pintarAvisos();
                 pintarKpis();
                 pintarGrilla();
@@ -100,16 +100,10 @@
             });
     }
 
-    function cambiarVista(nueva) {
-        if (vista === nueva || !datos) {
+    function cambiarVista() {
+        if (!datos) {
             return;
         }
-
-        vista = nueva;
-
-        VISTAS.forEach(function(v) {
-            activar(document.getElementById(BOTONES[v]), vista === v);
-        });
 
         pintarKpis();
         pintarGrilla();
@@ -117,15 +111,6 @@
         if (typeof window.ajustarStickyHeaders === 'function') {
             window.ajustarStickyHeaders();
         }
-    }
-
-    function activar(boton, activo) {
-        if (!boton) {
-            return;
-        }
-
-        boton.classList.toggle('btn-primary', activo);
-        boton.classList.toggle('btn-outline-secondary', !activo);
     }
 
     /* ================================================================
@@ -173,6 +158,7 @@
      * hoy, un hecho del presente y no del período que se elige mirar.
      */
     function pintarKpis() {
+        var vista = vistas.activa();
         var k = datos.kpi[vista];
 
         if (!k) {
@@ -228,7 +214,7 @@
 
         el.innerHTML =
             '<i class="fas fa-calendar-check me-2"></i>'
-            + '<strong>' + escapar(etiquetas[vista]) + '</strong>'
+            + '<strong>' + escapar(etiquetas[vistas.activa()]) + '</strong>'
             + ' &middot; los indicadores y la columna Total miden '
             + escapar(k.periodo.charAt(0).toLowerCase() + k.periodo.slice(1)) + '.';
 
@@ -270,11 +256,11 @@
 
     /** Columnas de la vista actual, ya normalizadas */
     function columnas() {
-        if (vista === 'meses') {
+        if (vistas.activa() === 'meses') {
             return colsMeses();
         }
 
-        if (vista === 'completo') {
+        if (vistas.activa() === 'completo') {
             // El período entero, en orden cronológico: primero el tramo diario
             // y después el mensual, que arranca donde termina el diario.
             return colsDias().concat(colsMeses());
@@ -311,17 +297,13 @@
         });
     }
 
-    /** El total que corresponde a la vista: cada uno suma sus propias columnas */
+    /**
+     * El total que corresponde a la vista: cada uno suma sus propias columnas.
+     * Lo resuelve el componente compartido, así que el tablero y las pestañas de
+     * detalle no pueden discrepar sobre qué total va con qué vista.
+     */
     function totalDeVista(f) {
-        if (vista === 'meses') {
-            return f.total_meses;
-        }
-
-        if (vista === 'completo') {
-            return f.total_horizonte;
-        }
-
-        return f.total_tramo;
+        return vistas.total(f);
     }
 
     function pintarGrilla() {
@@ -336,6 +318,7 @@
         // segunda columna fija. Centrado sobre 28 columnas quedaba a unos
         // 1500px a la derecha, o sea fuera de la pantalla, y la fila se veía
         // vacía.
+        var vista = vistas.activa();
         var grupos = '';
 
         if (vista === 'completo') {
@@ -381,7 +364,7 @@
         if (!c.enSecuencia) { clases.push('cf-col-fuera'); }
         if (c.feriado) { clases.push('cf-col-feriado'); }
 
-        if (vista === 'completo' && c.mensual && i === datos.dias.length) {
+        if (vistas.activa() === 'completo' && c.mensual && i === datos.dias.length) {
             clases.push('cf-inicio-meses');
         }
 
@@ -463,7 +446,11 @@
         }
 
         if (f.tab) {
-            return '<a href="#" class="cf-link" data-ir-a="' + escapar(f.tab) + '">'
+            // data-sub-tab lo lee el JS de la pestaña destino para abrirse en la
+            // vista correcta: hay módulos con más de una, y llegar a la primera
+            // deja al usuario sin el detalle del número que clickeó.
+            return '<a href="#" class="cf-link" data-ir-a="' + escapar(f.tab) + '"'
+                + (f.subtab ? ' data-sub-tab="' + escapar(f.subtab) + '"' : '') + '>'
                 + nombre + '</a>' + marca;
         }
 
@@ -505,6 +492,11 @@
      * Los enlaces del tablero disparan el click del ítem del menú lateral en
      * lugar de cargar la pestaña por su cuenta: así se reusa toda la navegación
      * de main.js, incluido el estado activo del menú.
+     *
+     * La sub-pestaña se deja anotada en window.cfSubTabDestino y NO se abre
+     * desde acá: loadTab() carga por AJAX y no avisa cuándo terminó, así que el
+     * destino todavía no está en el DOM. Lo lee el JS de la pestaña destino
+     * cuando arranca, que es el único momento en que existe con certeza.
      */
     function conectarEnlaces() {
         var enlaces = document.querySelectorAll('#cfBody .cf-link');
@@ -516,9 +508,12 @@
                 var destino = a.getAttribute('data-ir-a');
                 var item = document.querySelector('.menu-link[data-tab="' + destino + '"]');
 
-                if (item) {
-                    item.click();
+                if (!item) {
+                    return;
                 }
+
+                window.cfSubTabDestino = a.getAttribute('data-sub-tab') || null;
+                item.click();
             });
         });
     }

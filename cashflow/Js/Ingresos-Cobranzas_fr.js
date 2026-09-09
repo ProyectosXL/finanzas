@@ -1,25 +1,35 @@
 /**
  * Ingresos - Cobranzas FR JavaScript
  * Con soporte para Resumen (predeterminado) y Deep Dive (aperturado por comprobante)
+ *
+ * LAS TRES VISTAS LAS MANEJA eje-vistas.js — ver la nota del encabezado de
+ * Comex-Proveedores_exterior.js. Esta pestaña tenía el mismo criterio propio,
+ * con las columnas calculadas en el navegador. Ahora el eje y los importes por
+ * columna vienen resueltos de Class/EjeVista.php, sobre horizonte_dias y
+ * horizonte_meses.
+ *
+ * El modo Resumen / Deep Dive es OTRA cosa y no se toca: define el GRANO de las
+ * filas (por cliente o por comprobante), no el período que se está mirando. Son
+ * dos ejes independientes y se combinan.
  */
 
 (function() {
     'use strict';
-    
+
     let datosCobranzas = null;
-    let vistaActual = 'semanas'; // 'semanas' o 'meses'
     let modoVista = 'resumen'; // 'resumen' o 'deepdive'
+
+    /** Controlador de las tres vistas, compartido con el resto del módulo */
+    let vistas = null;
 
     function inicializar() {
         console.log('Inicializando Ingresos - Cobranzas FR');
-        
+
         var btnResumen = document.getElementById('btnVistaResumenCob');
         var btnDeepDive = document.getElementById('btnVistaDeepDiveCob');
-        var btnVistaSemanas = document.getElementById('btnVistaSemanasCob');
-        var btnVistaMeses = document.getElementById('btnVistaMesesCob');
         var btnRefresh = document.getElementById('btnRefreshCob');
         var btnExport = document.getElementById('btnExportCob');
-        
+
         if (btnResumen) {
             btnResumen.addEventListener('click', function() {
                 cambiarModo('resumen');
@@ -30,18 +40,12 @@
                 cambiarModo('deepdive');
             });
         }
-        
-        if (btnVistaSemanas) {
-            btnVistaSemanas.classList.add('btn-primary');
-            btnVistaSemanas.addEventListener('click', function() {
-                cambiarVista('semanas');
-            });
-        }
-        if (btnVistaMeses) {
-            btnVistaMeses.addEventListener('click', function() {
-                cambiarVista('meses');
-            });
-        }
+
+        vistas = crearEjeVistas({
+            botones: 'vistasCob',
+            periodo: 'periodoCob',
+            alCambiar: generarTabla
+        });
 
         if (btnRefresh) {
             btnRefresh.addEventListener('click', cargarDatos);
@@ -61,6 +65,14 @@
         cargarDatos();
     }
     
+    function texto(id, valor) {
+        var el = document.getElementById(id);
+
+        if (el) {
+            el.textContent = valor;
+        }
+    }
+
     function filtrarTabla() {
         var term = document.getElementById('busquedaCob').value.toLowerCase();
         var rows = document.querySelectorAll('#tableBodyCob tr');
@@ -103,24 +115,6 @@
         cargarDatos();
     }
 
-    function cambiarVista(vista) {
-        vistaActual = vista;
-        var btnSemanas = document.getElementById('btnVistaSemanasCob');
-        var btnMeses = document.getElementById('btnVistaMesesCob');
-        
-        if (vista === 'semanas') {
-            btnSemanas.classList.replace('btn-outline-secondary', 'btn-primary');
-            btnMeses.classList.replace('btn-primary', 'btn-outline-secondary');
-        } else {
-            btnMeses.classList.replace('btn-outline-secondary', 'btn-primary');
-            btnSemanas.classList.replace('btn-primary', 'btn-outline-secondary');
-        }
-        
-        if (datosCobranzas) {
-            generarTabla();
-        }
-    }
-
     function cargarDatos() {
         mostrarCargando(true);
         fetch(`Controller/IngresosController.php?action=getCobranzasFR&type=${modoVista}`)
@@ -131,8 +125,14 @@
             .then(result => {
                 if (result.success) {
                     datosCobranzas = result.data;
+
+                    // El controlador de vistas se entera del eje nuevo antes de
+                    // que se dibuje la tabla.
+                    vistas.usar(datosCobranzas);
+
                     generarTabla();
                     calcularResumenes();
+                    pintarAvisos();
                     mostrarCargando(false);
                 } else {
                     mostrarError('Error al cargar datos: ' + result.message);
@@ -144,62 +144,84 @@
             });
     }
 
+    /**
+     * Los avisos del backend: lo que quedó fuera del horizonte o sin fecha.
+     * Antes se descartaba en silencio.
+     */
+    function pintarAvisos() {
+        var cont = document.getElementById('avisosCob');
+
+        if (!cont) {
+            return;
+        }
+
+        var avisos = (datosCobranzas && datosCobranzas.warnings) || [];
+
+        cont.innerHTML = avisos.length
+            ? '<div class="alert alert-warning py-2 px-3 mb-3"><small>'
+                + '<i class="fas fa-triangle-exclamation me-1"></i>'
+                + avisos.join(' ') + '</small></div>'
+            : '';
+    }
+
     function generarTabla() {
-        if (!datosCobranzas || !datosCobranzas.items) {
+        if (!datosCobranzas || !datosCobranzas.filas) {
             mostrarError('No hay datos para mostrar');
             return;
         }
-        
+
         generarEncabezados();
         generarFilasDatos();
         generarFilaTotales();
     }
 
+    /**
+     * Encabezados de la tabla.
+     *
+     * Las columnas del eje salen del payload; acá no se calcula ninguna fecha.
+     * El modo Resumen / Deep Dive sigue manejándose con la clase del <table>,
+     * porque es otra dimensión: cambia el grano de las filas, no el período.
+     */
     function generarEncabezados() {
         const headerRowSub = document.getElementById('headerRowSubCob');
         const mesActualHeader = document.getElementById('mesActualHeaderCob');
         const table = document.getElementById('tablaCobranzasFR');
-        
-        // Ajustar th's del thead principal
-        const mainHeaderRow = table.querySelector('thead tr:first-child');
-        const isResumen = (modoVista === 'resumen');
-        
-        // Columnas a ocultar: FECHA (idx 2), T_COMP (idx 3), N_COMP (idx 4), DESC (idx 5), DIAS (idx 6)
-        // Usaremos CSS para ocultarlas de forma limpia
-        table.classList.toggle('modo-resumen', isResumen);
-        
-        let headerHTML = '';
-        var hoy = new Date();
-        
-        if (vistaActual === 'semanas') {
-            mesActualHeader.textContent = 'Próximos 28 Días (4 Semanas)';
-            mesActualHeader.setAttribute('colspan', '28');
-            for (var i = 0; i < 28; i++) {
-                var fecha = new Date(hoy);
-                fecha.setDate(hoy.getDate() + i);
-                headerHTML += `<th class="day-column">${fecha.getDate()}/${fecha.getMonth() + 1}</th>`;
+
+        table.classList.toggle('modo-resumen', modoVista === 'resumen');
+
+        var cols = vistas.columnas();
+        var headerHTML = '';
+
+        cols.forEach(function(col) {
+            var esMes = vistas.esMes(col);
+            var meta = vistas.meta(col) || {};
+            var clases = [esMes ? 'month-column' : 'day-column'];
+            var titulo = '';
+
+            if (esMes && meta.parcial) {
+                clases.push('col-parcial');
+                titulo = 'Este mes está recortado: sus primeros días están en el tramo diario';
             }
-        } else {
-            mesActualHeader.textContent = 'Próximos 11 Meses';
-            mesActualHeader.setAttribute('colspan', '11');
-            for (var i = 0; i < 11; i++) {
-                var fechaMes = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
-                var mesAbrev = fechaMes.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
-                headerHTML += `<th class="month-column">${mesAbrev.charAt(0).toUpperCase() + mesAbrev.slice(1)}</th>`;
-            }
-        }
+
+            headerHTML += '<th class="' + clases.join(' ') + '"'
+                + (titulo ? ' title="' + titulo + '"' : '') + '>'
+                + vistas.rotulo(col) + '</th>';
+        });
+
+        headerHTML += '<th class="total-column">Total</th>';
+
+        mesActualHeader.textContent = datosCobranzas.vistas[vistas.activa()].label;
+        mesActualHeader.setAttribute('colspan', String(cols.length + 1));
+
         headerRowSub.innerHTML = headerHTML;
     }
 
     function generarFilasDatos() {
         var tableBody = document.getElementById('tableBodyCob');
-        var hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-        
+        var cols = vistas.columnas();
         var html = '';
-        const isResumen = (modoVista === 'resumen');
-        
-        datosCobranzas.items.forEach(function(item) {
+
+        datosCobranzas.filas.forEach(function(item) {
             html += '<tr>';
             html += `<td>${item.COD_CLI || ''}</td>`;
             html += `<td>${item.RAZON_SOC || ''}</td>`;
@@ -216,111 +238,103 @@
             html += `<td class="currency">${formatCurrency(item.importe_neto)}</td>`;
             html += `<td class="center"><span class="badge-cobro">${formatDate(item.Cobro)}</span></td>`;
             
-            var fechaPago = item.Cobro ? new Date(item.Cobro) : null;
-            if (fechaPago) fechaPago.setHours(0, 0, 0, 0);
-            
-            if (vistaActual === 'semanas') {
-                for (var i = 0; i < 28; i++) {
-                    var fechaDia = new Date(hoy);
-                    fechaDia.setDate(hoy.getDate() + i);
-                    var esMismoDia = fechaPago && fechaPago.getTime() === fechaDia.getTime();
-                    var valor = esMismoDia ? item.importe_neto : 0;
-                    html += `<td class="currency ${valor != 0 ? 'cell-with-value' : ''}">${valor != 0 ? formatCurrency(valor) : ''}</td>`;
-                }
-            } else {
-                var mesPago = item.Cobro ? item.Cobro.substring(0, 7) : '';
-                for (var i = 0; i < 11; i++) {
-                    var fechaMes = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
-                    var mesKey = fechaMes.getFullYear() + '-' + String(fechaMes.getMonth() + 1).padStart(2, '0');
-                    var valorMes = (mesPago === mesKey) ? item.importe_neto : 0;
-                    html += `<td class="currency ${valorMes != 0 ? 'cell-with-value' : ''}">${valorMes != 0 ? formatCurrency(valorMes) : ''}</td>`;
-                }
-            }
+            // Los importes por columna ya vienen resueltos: la regla de "día O
+            // mes, nunca las dos" la aplicó el backend, una sola vez.
+            cols.forEach(function(col) {
+                var valor = Number(vistas.valor(item, col)) || 0;
+
+                html += '<td class="currency ' + (valor != 0 ? 'cell-with-value' : '') + '">'
+                    + (valor != 0 ? formatCurrency(valor) : '') + '</td>';
+            });
+
+            var total = vistas.total(item);
+
+            html += '<td class="currency total-column">'
+                + (total != 0 ? formatCurrency(total) : '') + '</td>';
+
             html += '</tr>';
         });
         tableBody.innerHTML = html;
     }
 
+    /**
+     * Fila de totales.
+     *
+     * Es la única pestaña cuyos totales NO salen directo del payload: acá el
+     * pie tiene que respetar el buscador, así que se suman las filas que pasan
+     * el filtro. Pero se suman los importes YA AGRUPADOS por el backend, no
+     * reinterpretando fechas: la regla de "día O mes" sigue estando en un solo
+     * lugar y lo único que se hace acá es filtrar.
+     */
     function generarFilaTotales() {
         var totalsRow = document.getElementById('totalsRowCob');
-        var hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-        
-        const isResumen = (modoVista === 'resumen');
-        const colspan = isResumen ? 5 : 10;
-        
-        // Obtener solo filas visibles para el total
-        var rows = Array.from(document.querySelectorAll('#tableBodyCob tr')).filter(r => r.style.display !== 'none');
-        
+        var colspan = (modoVista === 'resumen') ? 5 : 10;
+        var cols = vistas.columnas();
+        var visibles = filasFiltradas();
+
         var html = `<td colspan="${colspan}" class="total-label">TOTALES</td>`;
-        
-        if (vistaActual === 'semanas') {
-            for (var i = 0; i < 28; i++) {
-                var fechaDia = new Date(hoy);
-                fechaDia.setDate(hoy.getDate() + i);
-                var totalDia = 0;
-                
-                rows.forEach(function(row, idx) {
-                    var item = datosCobranzas.items[idx]; // Cuidado, esto asume que el orden es el mismo
-                    // Mejor volver a calcular basado en los datos de las filas o pasar el item
-                });
-                
-                // Opción más segura: Iterar sobre los datos originales filtrando por el buscador
-                var term = document.getElementById('busquedaCob').value.toLowerCase();
-                datosCobranzas.items.forEach(function(item) {
-                    var cod = (item.COD_CLI || '').toLowerCase();
-                    var rs = (item.RAZON_SOC || '').toLowerCase();
-                    if (cod.includes(term) || rs.includes(term)) {
-                        var fp = new Date(item.Cobro);
-                        fp.setHours(0, 0, 0, 0);
-                        if (fp.getTime() === fechaDia.getTime()) totalDia += parseFloat(item.importe_neto) || 0;
-                    }
-                });
-                html += `<td class="currency ${totalDia != 0 ? 'cell-with-value' : ''}">${totalDia != 0 ? formatCurrency(totalDia) : ''}</td>`;
-            }
-        } else {
-            var term = document.getElementById('busquedaCob').value.toLowerCase();
-            for (var i = 0; i < 11; i++) {
-                var fechaMes = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
-                var mesKey = fechaMes.getFullYear() + '-' + String(fechaMes.getMonth() + 1).padStart(2, '0');
-                var totalMes = 0;
-                datosCobranzas.items.forEach(function(item) {
-                    var cod = (item.COD_CLI || '').toLowerCase();
-                    var rs = (item.RAZON_SOC || '').toLowerCase();
-                    if (cod.includes(term) || rs.includes(term)) {
-                        var mp = item.Cobro.substring(0, 7);
-                        if (mp === mesKey) totalMes += parseFloat(item.importe_neto) || 0;
-                    }
-                });
-                html += `<td class="currency ${totalMes != 0 ? 'cell-with-value' : ''}">${totalMes != 0 ? formatCurrency(totalMes) : ''}</td>`;
-            }
-        }
+
+        cols.forEach(function(col) {
+            var total = 0;
+
+            visibles.forEach(function(item) {
+                total += Number(vistas.valor(item, col)) || 0;
+            });
+
+            html += '<td class="currency ' + (total != 0 ? 'cell-with-value' : '') + '">'
+                + (total != 0 ? formatCurrency(total) : '') + '</td>';
+        });
+
+        var granTotal = 0;
+
+        visibles.forEach(function(item) {
+            granTotal += vistas.total(item);
+        });
+
+        html += '<td class="currency total-column">'
+            + (granTotal != 0 ? formatCurrency(granTotal) : '') + '</td>';
+
         totalsRow.innerHTML = html;
     }
 
-    function calcularResumenes() {
-        var hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-        var fecha28Dias = new Date(hoy);
-        fecha28Dias.setDate(hoy.getDate() + 28);
-        var fecha11Meses = new Date(hoy.getFullYear(), hoy.getMonth() + 11, 31);
-        
-        var total4Semanas = 0;
-        var total11Meses = 0;
-        var totalGeneral = 0;
-        
-        datosCobranzas.items.forEach(function(item) {
-            var valor = parseFloat(item.importe_neto) || 0;
-            totalGeneral += valor;
-            var fp = new Date(item.Cobro);
-            fp.setHours(0, 0, 0, 0);
-            if (fp < fecha28Dias) total4Semanas += valor;
-            else if (fp < fecha11Meses) total11Meses += valor;
+    /** Las filas que pasan el buscador, con el mismo criterio que filtrarTabla() */
+    function filasFiltradas() {
+        var input = document.getElementById('busquedaCob');
+        var term = input ? input.value.toLowerCase() : '';
+
+        if (!term) {
+            return datosCobranzas.filas;
+        }
+
+        return datosCobranzas.filas.filter(function(item) {
+            return (item.COD_CLI || '').toLowerCase().includes(term)
+                || (item.RAZON_SOC || '').toLowerCase().includes(term);
         });
-        
-        document.getElementById('total4semanasCob').textContent = formatCurrency(total4Semanas);
-        document.getElementById('total11mesesCob').textContent = formatCurrency(total11Meses);
-        document.getElementById('totalGeneralCob').textContent = formatCurrency(totalGeneral);
+    }
+
+    /**
+     * Indicadores de cabecera.
+     *
+     * Los tres miden los tres períodos de las vistas, así que cada tarjeta se
+     * corresponde con un botón. Antes se recalculaban con su propia ventana de
+     * 28 días y 11 meses, distinta de la del encabezado y la del backend.
+     */
+    function calcularResumenes() {
+        var totales = (datosCobranzas && datosCobranzas.totales) || {};
+
+        document.getElementById('total4semanasCob').textContent =
+            formatCurrency(totales.total_tramo || 0);
+        document.getElementById('total11mesesCob').textContent =
+            formatCurrency(totales.total_meses || 0);
+        document.getElementById('totalGeneralCob').textContent =
+            formatCurrency(totales.total_horizonte || 0);
+
+        var vs = (datosCobranzas && datosCobranzas.vistas) || {};
+
+        texto('rotulo4semanasCob', vs.dias ? vs.dias.periodo : '');
+        texto('rotulo11mesesCob', vs.meses ? vs.meses.periodo : '');
+        texto('rotuloGeneralCob', vs.completo ? vs.completo.periodo : '');
+
         document.getElementById('summarySectionCob').style.display = 'flex';
     }
 

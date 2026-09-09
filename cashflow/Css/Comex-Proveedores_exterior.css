@@ -282,3 +282,29 @@
         gap: 2px;
     }
 }
+
+/* ============================================================================
+   LAS TRES VISTAS
+   Columna de total y marca de mes recortado. Ver Js/eje-vistas.js.
+   ============================================================================ */
+
+/* El total de la fila suma las columnas de la VISTA ACTIVA, no siempre el
+   horizonte completo. Va destacado porque es el numero que se lee primero. */
+.tab-proveedores_exterior .total-column {
+    background: var(--bg-light, #f5f6fa);
+    font-weight: 600;
+    border-left: 2px solid var(--border-color, #e2e5ed);
+    white-space: nowrap;
+}
+
+/* Un mes cuya columna cubre solo parte del mes -el resto de sus dias esta en el
+   tramo diario-. Sin la marca, un importe mas chico se lee como una caida de
+   pagos y no como menos dias cubiertos. */
+.tab-proveedores_exterior .col-parcial {
+    font-style: italic;
+}
+
+.tab-proveedores_exterior .col-parcial::after {
+    content: '*';
+    opacity: 0.6;
+}

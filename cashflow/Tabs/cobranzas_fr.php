@@ -2,50 +2,57 @@
 <link rel="stylesheet" href="Css/Ingresos-Cobranzas_fr.css?v=<?php echo time(); ?>">
 
 <div class="tab-cobranzas_fr">
-    
-    <!-- KPI Cards Row -->
+
+    <!-- Lo que quedó fuera del horizonte o sin fecha. Antes se descartaba en
+         silencio, así que la tabla podía informar de menos sin decirlo. -->
+    <div id="avisosCob"></div>
+
+    <!-- KPI Cards Row.
+         Las tres tarjetas miden los tres períodos de las tres vistas, así que
+         cada una se corresponde con un botón. El rótulo lo escribe el JS con el
+         período real, que depende del horizonte configurado. -->
     <div class="row g-3 mb-4" id="summarySectionCob" style="display: none;">
         <div class="col-md-6 col-lg-4">
             <div class="kpi-card">
                 <div class="kpi-card-header">
-                    <span class="kpi-card-title">Próximas 4 Semanas</span>
+                    <span class="kpi-card-title">Vista Días</span>
                     <div class="kpi-card-icon blue">
-                        <i class="fas fa-calendar-week"></i>
+                        <i class="fas fa-calendar-day"></i>
                     </div>
                 </div>
                 <div class="kpi-card-value" id="total4semanasCob">$ 0.00</div>
                 <div class="kpi-card-footer">
-                    <span class="text-muted">Desde hoy</span>
+                    <span class="text-muted" id="rotulo4semanasCob">Tramo diario</span>
                 </div>
             </div>
         </div>
-        
+
         <div class="col-md-6 col-lg-4">
             <div class="kpi-card">
                 <div class="kpi-card-header">
-                    <span class="kpi-card-title">Próximos 11 Meses</span>
+                    <span class="kpi-card-title">Vista Meses</span>
                     <div class="kpi-card-icon orange">
                         <i class="fas fa-calendar-alt"></i>
                     </div>
                 </div>
                 <div class="kpi-card-value" id="total11mesesCob">$ 0.00</div>
                 <div class="kpi-card-footer">
-                    <span class="text-muted">Proyección anual</span>
+                    <span class="text-muted" id="rotulo11mesesCob">Después del tramo diario</span>
                 </div>
             </div>
         </div>
-        
+
         <div class="col-md-6 col-lg-4">
             <div class="kpi-card">
                 <div class="kpi-card-header">
-                    <span class="kpi-card-title">Total General</span>
+                    <span class="kpi-card-title">Período Completo</span>
                     <div class="kpi-card-icon green">
                         <i class="fas fa-hand-holding-usd"></i>
                     </div>
                 </div>
                 <div class="kpi-card-value" id="totalGeneralCob">$ 0.00</div>
                 <div class="kpi-card-footer">
-                    <span class="text-muted">Todas las cobranzas FR</span>
+                    <span class="text-muted" id="rotuloGeneralCob">Todo el horizonte</span>
                 </div>
             </div>
         </div>
@@ -77,14 +84,10 @@
                         <i class="fas fa-search-plus me-1"></i> Deep Dive
                     </button>
                 </div>
-                <div class="btn-group" role="group">
-                    <button id="btnVistaSemanasCob" class="btn btn-sm btn-outline-secondary">
-                        <i class="fas fa-calendar-week me-1"></i> Semanas
-                    </button>
-                    <button id="btnVistaMesesCob" class="btn btn-sm btn-outline-secondary">
-                        <i class="fas fa-calendar-alt me-1"></i> Meses
-                    </button>
-                </div>
+                <!-- Los tres botones los dibuja Js/eje-vistas.js. El grupo de
+                     Resumen / Deep Dive de al lado es otra dimensión: cambia el
+                     grano de las filas, no el período. -->
+                <div id="vistasCob"></div>
                 <button id="btnRefreshCob" class="btn btn-sm btn-outline-primary">
                     <i class="fas fa-sync-alt me-1"></i> Actualizar
                 </button>
@@ -93,6 +96,13 @@
                 </button>
             </div>
         </div>
+
+        <!-- Qué período se está midiendo. La vista Meses no cubre el horizonte
+             completo, y sin esto su total se lee como el total de todo. -->
+        <div class="card-body py-2 border-bottom">
+            <small class="text-muted" id="periodoCob"></small>
+        </div>
+
         <div class="card-body p-0">
             <div class="loading-spinner" id="loadingSpinnerCob">
                 <div class="spinner"></div>
@@ -113,7 +123,9 @@
                                 <th rowspan="2">Importe Bruto</th>
                                 <th rowspan="2">Importe Neto</th>
                                 <th rowspan="2">Cobro</th>
-                                <th colspan="31" class="table-group-divider" id="mesActualHeaderCob">Días del Mes</th>
+                                <!-- El rótulo y el colspan los pone el JS según
+                                     la vista activa. -->
+                                <th colspan="1" class="table-group-divider" id="mesActualHeaderCob">Días</th>
                             </tr>
                             <tr id="headerRowSubCob">
                                 <!-- Los días se generan dinámicamente -->

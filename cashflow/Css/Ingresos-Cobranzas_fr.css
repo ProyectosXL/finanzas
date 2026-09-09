@@ -155,3 +155,28 @@
 .modo-resumen tbody td:nth-child(7) {
     display: none !important;
 }
+
+/* ============================================================================
+   LAS TRES VISTAS
+   Columna de total y marca de mes recortado. Ver Js/eje-vistas.js.
+   ============================================================================ */
+
+/* El total de la fila suma las columnas de la VISTA ACTIVA, no siempre el
+   horizonte completo. */
+.tab-cobranzas_fr .total-column {
+    background: var(--bg-light, #f5f6fa);
+    font-weight: 600;
+    border-left: 2px solid var(--border-color, #e2e5ed);
+    white-space: nowrap;
+}
+
+/* Un mes cuya columna cubre solo parte del mes: el resto de sus dias esta en el
+   tramo diario. Sin la marca, un importe mas chico se lee como una caida. */
+.tab-cobranzas_fr .col-parcial {
+    font-style: italic;
+}
+
+.tab-cobranzas_fr .col-parcial::after {
+    content: '*';
+    opacity: 0.6;
+}

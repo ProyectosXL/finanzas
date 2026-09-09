@@ -31,17 +31,20 @@ En este orden, contra `central`:
 ```sql
 -- 1. sql/cashflow_estructura.sql
 -- 2. sql/cashflow_estructura_disponibilidades.sql
+-- 3. sql/cashflow_saldos.sql   (alimenta Saldo Inicial y Caja Locales)
 ```
 
 El primero crea `RO_T_CASHFLOW_CONF_SECCION` y `RO_T_CASHFLOW_CONF_FILA`, siembra la estructura y agrega el parámetro `comex_tipo_cambio_usd`.
 
 El segundo la reorganiza en **Disponibilidades + Ventas por canal**, que es la forma del Excel original (ver más abajo). No borra nada: las filas que reemplaza quedan inhabilitadas y visibles en el editor.
 
-Los dos son reejecutables y no pisan nada ya editado. Si no se corrieron, la pantalla **no falla**: muestra un aviso diciendo que hay que correrlos.
+El tercero crea las tablas del módulo Saldos, que es el que llena las filas *Saldo Inicial* y *Caja Locales*. Se puede correr en cualquier momento; sin él, esas dos filas van en cero y el tablero avisa. Ver `README-saldos.md`.
+
+Los tres son reejecutables y no pisan nada ya editado. Si no se corrieron, la pantalla **no falla**: muestra un aviso diciendo que hay que correrlos.
 
 ---
 
-## Las tres vistas
+## Las tres vistas — el criterio de TODO el módulo
 
 | Vista | Qué muestra |
 | --- | --- |
@@ -49,11 +52,71 @@ Los dos son reejecutables y no pisan nada ya editado. Si no se corrieron, la pan
 | **Meses** | Las columnas mensuales (`horizonte_meses`) |
 | **Período completo** | Las dos ramas juntas, en orden cronológico |
 
+**No son las tres vistas del tablero: son las de todas las pantallas con eje temporal.** El criterio vive en un solo lugar por capa:
+
+| Capa | Archivo | Qué resuelve |
+| --- | --- | --- |
+| Cálculo | `Class/EjeVista.php` | Qué columnas tiene cada vista, qué total le corresponde y qué período mide |
+| Presentación | `Js/eje-vistas.js` | Dibuja los botones, mantiene la vista activa y entrega las columnas visibles |
+
+Las usan **Cashflow, Ventas, Proveedores Exterior, Crono Nacionalización y Cobranzas FR**.
+
 **Los indicadores miden exactamente las columnas que se están mirando**, y la columna Total también. Antes eran siempre del tramo diario, aunque la pantalla mostrara los meses: el número no describía nada de lo que había en pantalla.
 
 El **Disponible Inicial** es el único que no varía: es con cuánto se arranca hoy, un hecho del presente y no del período que uno elige mirar. Por eso su tarjeta va marcada aparte.
 
 Una trampa que la pantalla enuncia explícitamente: **la vista Meses no cubre el horizonte completo.** Las columnas mensuales acumulan sólo los días que quedan *fuera* del tramo diario, así que su total es el del tramo mensual y no el de todo. La barra debajo de los indicadores dice en cada vista qué período se está midiendo.
+
+### Un importe va a un día O a un mes, nunca a los dos
+
+La columna de un mes acumula **únicamente** los días de ese mes que quedaron fuera del tramo diario. Lo implementa `Horizonte::agrupar()` y es lo que hace que las tres vistas sean sumables entre sí:
+
+```
+total_horizonte = total_tramo + total_meses     (sin repetir nada)
+```
+
+### Qué había antes, y por qué esto no es cosmético
+
+El criterio estaba escrito **cuatro veces y de tres formas**. El tablero lo tenía bien, en métodos privados del motor. Las otras tres pestañas tenían cada una su `procesar*PorPeriodo()` copiado y pegado, con tres defectos que no se veían:
+
+1. **La vista de días mostraba los días del mes en curso**, los ya pasados incluidos, mientras el encabezado decía *"Próximos 28 Días"*. El título no describía la tabla.
+2. **Un importe del mes en curso se contaba en la vista de días Y en la columna de su mes.** Las dos vistas no reconciliaban entre sí.
+3. **La ventana era fija** —el mes actual y doce meses— e **ignoraba `horizonte_dias` y `horizonte_meses`**, que son parámetros editables. Y lo que caía afuera **se descartaba sin avisar**.
+
+Ahora los importes por columna los resuelve el backend una sola vez, y lo que queda fuera del horizonte o sin fecha se informa arriba de la tabla.
+
+### Para agregar una pestaña con eje temporal
+
+Backend, en el controller:
+
+```php
+$payload = EjeVista::armar(
+    Horizonte::desdeParametros(new Parametros()),
+    $items,            // los registros crudos
+    'FECHA_PAGO',      // campo con la fecha
+    'IMPORTE'          // campo con el importe
+);
+```
+
+Front, en el JS de la pestaña:
+
+```js
+var vistas = crearEjeVistas({
+    botones: 'misBotones',      // id del contenedor de los botones
+    periodo: 'miPeriodo',       // id del cartel que dice qué se está midiendo
+    alCambiar: dibujarTabla
+});
+
+vistas.usar(payload);           // cada vez que llegan datos
+vistas.columnas()               // las columnas visibles
+vistas.rotulo(col)              // '6/9' o 'Oct-26'
+vistas.valor(fila, col)         // el importe de esa fila en esa columna
+vistas.total(fila)              // el total que corresponde a la vista activa
+```
+
+No hay que calcular fechas en el navegador ni decidir qué columnas van en cada vista: eso ya está resuelto y probado.
+
+> **El tablero dibuja una columna más que las demás pantallas**, y es a propósito: las columnas que no representan ningún día futuro se muestran con un guión sobre fondo gris, porque sus filas de arrastre tienen que poder decir *"acá no hay posición que mostrar"*. Las pestañas de detalle no tienen filas de arrastre y no las necesitan. Del componente compartido toman igual el estado de la vista, el rótulo del período y el total.
 
 ---
 
@@ -105,7 +168,7 @@ Esa división es lo importante: hace cumplir por construcción la regla de que *
 
 Van igual en el registro, con `'disponible' => false` y sin clase. Una fila que los apunte se muestra **en cero** y el tablero avisa, en vez de desaparecer del cuadro: así la pantalla tiene desde el primer día la forma completa del Excel y se ve qué falta. Cuando el módulo exista, se escribe su proveedor y se da vuelta el flag; la fila ya está configurada y se llena sola.
 
-Hoy tienen datos reales cuatro: **Ventas**, **Cobranzas FR**, **Proveedores Exterior** y **Nacionalizaciones**. Los otros doce están declarados y rinden cero.
+Hoy tienen datos reales seis: **Ventas**, **Cobranzas FR**, **Proveedores Exterior**, **Nacionalizaciones**, **Saldos** y **Caja Locales**. Los otros diez están declarados y rinden cero.
 
 ---
 
@@ -168,9 +231,9 @@ La fila *Saldo Inicial* muestra **lo que devuelve su módulo de origen (la pesta
 
 El Excel lo confirma: el 1/9 tiene `Saldo Inicial = 0` justo después de un `Disponible` de 118 millones. Si fuera un arrastre, ahí habría 118 millones. Es un dato que carga Tesorería, y donde no cargaron nada, va cero.
 
-El arrastre sigue existiendo, pero lo muestra **sólo `SALDO_FINAL`**, que es la posición proyectada. Los saldos que cargue el módulo de Saldos entran a ese arrastre como aporte, así que cuando exista, la posición arranca del dinero real.
+El arrastre sigue existiendo, pero lo muestra **sólo `SALDO_FINAL`**, que es la posición proyectada. Los saldos que carga el módulo de Saldos entran a ese arrastre como aporte, así que la posición arranca del dinero real en cuanto haya una carga.
 
-> **Decisión pendiente para cuando exista el módulo de Saldos**: si un saldo bancario cargado en una fecha intermedia **se suma** al arrastre o lo **reemplaza**. Hoy el motor suma. Con el Excel a la vista parece que debería reemplazar, pero sin datos no tiene sentido inventar la semántica.
+> **La decisión que estaba pendiente**: si un saldo cargado en una fecha intermedia **se suma** al arrastre o lo **reemplaza**. El motor sigue sumando, y el módulo de Saldos se acomoda a eso: devuelve el saldo **en la columna de su fecha y en cero en el resto del eje**, así que aporta una sola vez y no hay nada que reemplazar. Si algún día se cargan dos saldos de fechas distintas dentro del mismo horizonte, los dos se sumarían: ahí sí habría que decidir la semántica de reemplazo. Ver `README-saldos.md`.
 
 > **Por qué las filas de Ventas son la cobranza y no la venta**: en el Excel siguen el calendario bancario (los fines de semana no tienen columna y el lunes concentra el acumulado), que es el comportamiento de la cobranza con corrimiento a día hábil. Si se quisiera ver la venta, se cambia el origen de cada fila desde Parámetros: el proveedor expone las dos series por canal.
 
@@ -211,6 +274,40 @@ El motor verifica que `cierre[n] == apertura[n+1]`; si no da, deja un aviso y no
 
 - **Una columna fuera de la secuencia devuelve `null`, no cero**, y se dibuja con un guión sobre fondo gris. Un cero en *Saldo Final* se leería como "proyectamos cero pesos de caja", que sería mentira.
 - **El total de una fila de saldo no es una suma.** Sumar saldos de apertura no significa nada: el total del tramo es el saldo al cierre del tramo, y el del horizonte el saldo al final de todo.
+
+---
+
+## El menú lateral y el estado de cada pestaña
+
+La lista de pestañas y el estado de cada una salen de `Class/Menu.php`; `Components/sidebar.php` sólo dibuja. Antes eran veintiséis enlaces escritos a mano e iguales entre sí, y por eso no se podía ver de un vistazo qué está hecho.
+
+**Tres estados, no dos:**
+
+| Estado | Qué significa | Cómo se ve |
+| --- | --- | --- |
+| `datos` | La pestaña lee del sistema. Se puede confiar en lo que muestra | Normal, sin marca |
+| `maqueta` | **Dibuja pero los números son de ejemplo** | Ícono ámbar 📐 |
+| `pendiente` | Todavía no se desarrolló; muestra el aviso de *en construcción* | Atenuada, ícono 🪖 |
+
+**El estado del medio es el que importa, y es el que faltaba.** Hoy lo tiene el **Dashboard**: no tiene una sola llamada al servidor, así que sus números están escritos a mano. Un placeholder es honesto —dice que no está hecho—; una maqueta es peor, porque tiene la forma de una pantalla terminada y números que parecen reales. Meterla en la misma bolsa que las pestañas con datos sería el error caro que este módulo evita en todos lados.
+
+Una pestaña con datos **no se marca**: es el caso normal y marcarlo sería ruido. Las pendientes siguen siendo clickeables, porque el aviso de *en construcción* es información útil.
+
+### El placeholder se detecta, no se declara
+
+`datos` y `maqueta` son un juicio y van declarados. Pero si el archivo de la pestaña todavía incluye `Components/tab_placeholder.php`, el estado **baja** a `pendiente` sin importar lo declarado.
+
+La guarda va en esa dirección a propósito: lo que hay que evitar es que el menú **prometa datos que no existen**. Así una declaración que quedó vieja se corrige sola, y lo peor que puede pasar es que una pestaña recién terminada siga figurando como pendiente hasta que alguien actualice la lista — un error visible y sin consecuencias.
+
+### El contador de cada categoría
+
+Cada categoría muestra `n/m`: cuántas de sus pestañas tienen datos del sistema. Sirve para ver el avance sin abrirla, y **cuenta sólo `datos`** —una maqueta no suma—, que es lo que hace que el número sea confiable. Hoy: Ingresos 3/6, Comercio Exterior 2/3, y el resto en cero.
+
+### Parámetros va al pie
+
+No es un módulo de datos como los de arriba: es la configuración de todos ellos. Arriba competía por atención con el tablero, que es la pantalla que se abre para trabajar.
+
+Los ítems de las categorías ahora tienen ícono propio, así que el sangrado de 44px que hacía de guía visual se reduce y el ícono ocupa ese lugar, alineándolos con las pestañas de nivel raíz.
 
 ---
 
@@ -265,7 +362,15 @@ php tests/run.php              # todo
 php tests/run.php horizonte    # filtra por nombre de archivo
 ```
 
-Cubren el eje temporal y su secuencia cronológica, el validador de la estructura regla por regla, el arrastre del saldo con números conocidos, y que un proveedor que lanza, que devuelve basura o que devuelve `null` no pueda tumbar el tablero. Las que necesitan SQL Server se saltean solas si no hay conexión.
+Cubren el eje temporal y su secuencia cronológica, las tres vistas y su criterio de columnas y totales, el validador de la estructura regla por regla, el arrastre del saldo con números conocidos, el módulo Saldos, y que un proveedor que lanza, que devuelve basura o que devuelve `null` no pueda tumbar el tablero. Las que necesitan SQL Server se saltean solas si no hay conexión.
+
+**El motor acepta un `Horizonte` inyectado, y hace falta para poder probarlo.** El arrastre del saldo depende de qué día es hoy, así que un escenario con importes en fechas fijas deja de tener sentido en cuanto pasa esa fecha. Sin esa costura las pruebas del motor caducaban solas —y caducaron: 48 casos empezaron a devolver `null` al pasar el 06/09/2026, y la parte más delicada del módulo se quedó sin red. Es la misma costura que ya tenían `Ventas::proyectarVentas()` y `proyectarCobranzas()`.
+
+```php
+new Cashflow($estructura, $parametros, $horizonte)   // el horizonte es opcional
+```
+
+`test_cashflow.php` verifica la costura de forma explícita, para que si alguien la saca el mensaje de falla diga por qué fallan las otras noventa.
 
 ---
 
@@ -274,7 +379,11 @@ Cubren el eje temporal y su secuencia cronológica, el validador de la estructur
 ```
 sql/cashflow_estructura.sql                 Las dos tablas de configuración + semilla
 sql/cashflow_estructura_disponibilidades.sql  Reorganiza en Disponibilidades + Ventas
+sql/cashflow_saldos.sql                     Tablas del modulo Saldos (README-saldos.md)
 cashflow/Class/Horizonte.php                Eje temporal, compartido con Ventas
+cashflow/Class/EjeVista.php                 Las tres vistas: columnas, totales y periodo
+cashflow/Js/eje-vistas.js                   Su contraparte en el front (cargado en index.php)
+cashflow/Class/Menu.php                     Menu lateral y estado de cada pestana
 cashflow/Class/CashflowProvider.php         Contrato de proveedor
 cashflow/Class/CashflowRegistry.php         Registro de orígenes de datos
 cashflow/Class/CashflowEstructura.php       Configuración: lectura, validación y CRUD
@@ -282,6 +391,7 @@ cashflow/Class/Cashflow.php                 El motor
 cashflow/Class/Providers/VentasProvider.php
 cashflow/Class/Providers/ComexProvider.php
 cashflow/Class/Providers/IngresosProvider.php
+cashflow/Class/Providers/SaldosProvider.php   Disponible inicial y caja de locales
 cashflow/Controller/CashflowController.php            getTablero
 cashflow/Controller/CashflowEstructuraController.php  CRUD de la estructura
 cashflow/Tabs/cashflow.php                  La pantalla
@@ -300,10 +410,12 @@ Eliminado: `Tabs/resumen.php`.
 
 ## Pendientes conocidos
 
-- **El saldo de apertura arranca en cero.** El módulo Saldos no existe, así que la fila *Saldo Inicial* se muestra en cero: es una fila de datos y no tiene de dónde tomarlos. En consecuencia el *Saldo Final* arranca de cero y muestra la caja que generan los ingresos proyectados, no la posición real de los bancos. El tablero lo avisa arriba, porque leer esos saldos como disponibilidad real sería un error caro.
-- **Tres filas del Excel no tienen de dónde salir.** *Dólares Cuenta Comitente*, *Exportaciones* y *Caja Locales* las tipea una persona en el Excel (Tesorería, Silvina, Dan). Acá el origen de datos es únicamente por proveedor, así que hasta que exista el módulo que las alimente se muestran en cero y el tablero avisa. Quedan declaradas para que el cuadro tenga la forma completa. Si hicieran falta cargadas a mano, habría que sumar un tipo de origen manual, que hoy el módulo no tiene.
+- **El saldo de apertura ya no arranca en cero, pero depende de que alguien cargue.** El módulo Saldos existe (ver `README-saldos.md`) y alimenta *Saldo Inicial*. Mientras no haya ninguna carga, o mientras la última quede vieja, la fila va en cero o desactualizada y **el tablero lo avisa con la fecha del dato**: leer esos saldos como disponibilidad real sería un error caro.
+- **Dos filas del Excel no tienen de dónde salir.** *Dólares Cuenta Comitente* y *Exportaciones* las tipea una persona en el Excel (Tesorería, Silvina, Dan). Acá el origen de datos es únicamente por proveedor, así que hasta que exista el módulo que las alimente se muestran en cero y el tablero avisa. Quedan declaradas para que el cuadro tenga la forma completa. Si hicieran falta cargadas a mano, habría que sumar un tipo de origen manual, que hoy el módulo no tiene. *Caja Locales* ya salió de esta lista: la alimenta el módulo Saldos.
 - **El neteo de cheques adelantados sólo se aplica a la serie total de cobranza.** No viene abierto por canal. Hoy da lo mismo porque es cero; cuando exista el origen habrá que decidir cómo se distribuye entre canales, y ese criterio es de negocio.
 - **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** para traer la razón social. El tablero no lo sufre, porque usa `getCobranzasFRTotales()`, pero la pestaña Cobranzas FR sí.
+- **El Dashboard es una maqueta**: no tiene ninguna llamada al servidor, sus números están escritos a mano. El menú lo marca como tal. Cuando se construya de verdad, hay que pasarlo a `datos` en `Class/Menu.php`.
+- **`nacionalizacion_2` está en `$validTabs` de `TabController` pero no tiene archivo ni entrada de menú.** Es configuración muerta: nadie puede llegar ahí, y si llegara vería el placeholder.
 - **`VentasController?action=saveMixCobro` puede grabar un mix que Parámetros rechazaría**: no valida el 100%. Es anterior a este trabajo.
 - `pedir()` está duplicado en `Ingresos-Ventas.js` y `Parametros.js`. El código nuevo usa `pedirJson()` de `main.js`; sacar las dos copias viejas es un cambio aparte.
 - Sin login: todo se graba con `USUARIO = NULL`. La costura ya está puesta.

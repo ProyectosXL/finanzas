@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/Parametros.php';
 require_once __DIR__ . '/Horizonte.php';
+require_once __DIR__ . '/EjeVista.php';
 require_once __DIR__ . '/CashflowRegistry.php';
 require_once __DIR__ . '/CashflowEstructura.php';
 
@@ -43,6 +44,9 @@ class Cashflow {
     /** @var CashflowEstructura */
     private $estructura;
 
+    /** @var Horizonte|null Eje inyectado. null = se arma desde los parametros */
+    private $horizonte;
+
     /** @var array Avisos no fatales que se devuelven en el JSON */
     private $warnings = [];
 
@@ -56,12 +60,26 @@ class Cashflow {
      * saldo y las filas calculadas con una estructura controlada, sin depender
      * de lo que haya cargado en las tablas. En uso normal no se pasa nada.
      *
+     * EL EJE TAMBIEN SE PUEDE INYECTAR, y hace falta para poder probar. El
+     * arrastre depende de QUE DIA ES HOY: el eje arranca hoy, asi que un
+     * escenario con importes en fechas fijas deja de tener sentido en cuanto
+     * pasa esa fecha. Sin esta costura las pruebas del motor caducaban solas -y
+     * de hecho caducaron-, con lo cual la parte mas delicada del modulo se
+     * quedaba sin red justo cuando mas se la necesita.
+     *
+     * Es la misma costura que ya tienen Ventas::proyectarVentas() y
+     * proyectarCobranzas(), que aceptan un Horizonte opcional para que el
+     * Cashflow pueda consolidarlas sobre sus mismas columnas.
+     *
      * @param CashflowEstructura|null $estructura
      * @param Parametros|null $parametros
+     * @param Horizonte|null $horizonte Eje a usar. null lo arma desde los
+     *        parametros, que es el uso normal.
      */
-    function __construct($estructura = null, $parametros = null) {
+    function __construct($estructura = null, $parametros = null, $horizonte = null) {
         $this->parametros = ($parametros === null) ? new Parametros() : $parametros;
         $this->estructura = ($estructura === null) ? new CashflowEstructura() : $estructura;
+        $this->horizonte = ($horizonte instanceof Horizonte) ? $horizonte : null;
     }
 
     /**
@@ -73,8 +91,11 @@ class Cashflow {
         $this->warnings = [];
 
         /* ---- 1. Eje temporal --------------------------------------------- */
-        $map = $this->parametros->getParametrosMap();
-        $h = Horizonte::desdeParametros($this->parametros, $map);
+        // Si lo inyectaron, manda el inyectado: es lo que permite fijar el dia
+        // de referencia en las pruebas. En uso normal sale de los parametros.
+        $h = ($this->horizonte !== null)
+            ? $this->horizonte
+            : Horizonte::desdeParametros($this->parametros);
 
         /* ---- 2. Estructura configurada ----------------------------------- */
         foreach ($this->estructura->getAvisos() as $aviso) {
@@ -123,18 +144,16 @@ class Cashflow {
         unset($f);
 
         /* ---- 7. Salida --------------------------------------------------- */
-        return [
-            'generado' => $h->hoy(),
-            'horizonte_dias' => $h->cantidadDias(),
-            'horizonte_meses' => $h->cantidadMeses(),
-            'dias' => $this->ejeDias($h),
-            'meses' => $this->ejeMeses($h),
-            'secuencia' => $columnas,
+        // El eje y las tres vistas los describe EjeVista, que es el criterio
+        // compartido con las pestanas de detalle: el tablero y la pestana que
+        // explica una de sus filas no pueden describir el eje de dos formas
+        // distintas ni medir periodos distintos.
+        return array_merge(EjeVista::eje($h), [
             'secciones' => $this->salidaSecciones($secciones),
             'filas' => $this->salidaFilas($resueltas),
             'kpi' => $this->calcularKpi($h, $resueltas),
             'warnings' => $this->warnings
-        ];
+        ]);
     }
 
     /* ====================================================================
@@ -250,6 +269,10 @@ class Cashflow {
                 'arrastre' => false,
                 'origen' => null,
                 'tab' => null,
+                // Sub-pestana dentro de 'tab', para los modulos que tienen mas
+                // de una vista. Sin esto el enlace del tablero abre la pestana
+                // en su primera vista, que puede no ser la que produjo el numero.
+                'subtab' => null,
                 'moneda_origen' => null,
                 'tipo_cambio' => null,
                 'dias' => $vacia['dias'],
@@ -278,6 +301,7 @@ class Cashflow {
 
             if ($meta !== null) {
                 $fila['tab'] = isset($meta['tab']) ? $meta['tab'] : null;
+                $fila['subtab'] = isset($meta['subtab']) ? $meta['subtab'] : null;
             }
 
             if (!isset($series[$prov][$serie])) {
@@ -760,34 +784,16 @@ class Cashflow {
     }
 
     /**
-     * Rotulo del periodo que cubre un conjunto de columnas, para que el
-     * indicador diga sobre que esta midiendo.
+     * Rotulo del periodo que cubre un conjunto de columnas.
+     * Delega en EjeVista para que el tablero y las pestanas de detalle no
+     * puedan describir el mismo periodo de dos formas.
      *
      * @param array $cols
      * @param string $vista
      * @return string
      */
     private function rotuloPeriodo($cols, $vista) {
-        if (empty($cols)) {
-            return 'Sin columnas';
-        }
-
-        $desde = $this->rotulo($cols[0]);
-        $hasta = $this->rotulo($cols[count($cols) - 1]);
-
-        if ($vista === 'dias') {
-            return 'Del ' . $desde . ' al ' . $hasta;
-        }
-
-        if ($vista === 'meses') {
-            // Se aclara que el tramo mensual arranca DESPUES del diario: la
-            // primera columna mensual acumula sólo los dias del mes que quedan
-            // fuera del tramo, asi que este numero no es el del horizonte
-            // completo.
-            return 'De ' . $desde . ' a ' . $hasta . ', despues del tramo diario';
-        }
-
-        return 'Del ' . $desde . ' a ' . $hasta . ', todo el horizonte';
+        return EjeVista::rotuloPeriodo($cols, $vista);
     }
 
     /* ====================================================================
@@ -865,71 +871,17 @@ class Cashflow {
 
     /** 'DIA|2026-09-06' => ['dias', '2026-09-06'] */
     private function partir($col) {
-        if (strpos($col, 'DIA|') === 0) {
-            return ['dias', substr($col, 4)];
-        }
-
-        return ['meses', substr($col, 4)];
+        return EjeVista::partir($col);
     }
 
     /** Rotulo legible de una columna, para los mensajes */
     private function rotulo($col) {
-        list($rama, $clave) = $this->partir($col);
-
-        if ($rama === 'dias') {
-            $t = strtotime($clave);
-
-            return intval(date('j', $t)) . '/' . intval(date('n', $t));
-        }
-
-        $partes = explode('-', $clave);
-
-        return Horizonte::labelMes(intval($partes[0]), intval($partes[1]));
+        return EjeVista::rotulo($col);
     }
 
     /** Formato de importe para los mensajes de aviso */
     private function plata($n) {
         return '$ ' . number_format(floatval($n), 2, ',', '.');
-    }
-
-    /** Eje de dias con la marca de si entra en la secuencia cronologica */
-    private function ejeDias($h) {
-        $enSecuencia = array_fill_keys($h->secuencia(), true);
-        $v = [];
-
-        foreach ($h->dias() as $d) {
-            $d['en_secuencia'] = isset($enSecuencia['DIA|' . $d['fecha']]);
-            $v[] = $d;
-        }
-
-        return $v;
-    }
-
-    /**
-     * Eje de meses. 'parcial' marca los meses cuya columna acumula solo una
-     * parte del mes, porque el resto de sus dias esta en el tramo diario.
-     */
-    private function ejeMeses($h) {
-        $enSecuencia = array_fill_keys($h->secuencia(), true);
-        $diasPorMes = [];
-
-        foreach ($h->dias() as $d) {
-            if (!isset($diasPorMes[$d['mes_clave']])) {
-                $diasPorMes[$d['mes_clave']] = 0;
-            }
-
-            $diasPorMes[$d['mes_clave']]++;
-        }
-
-        $v = [];
-
-        foreach ($h->meses() as $m) {
-            $m['en_secuencia'] = isset($enSecuencia['MES|' . $m['clave']]);
-            $m['parcial'] = isset($diasPorMes[$m['clave']]);
-            $v[] = $m;
-        }
-
-        return $v;
     }
 
     /** Secciones en el formato del JSON */
