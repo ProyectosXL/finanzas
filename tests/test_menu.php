@@ -109,6 +109,8 @@ chequear('Cashflow tiene datos', Menu::DATOS, $porTab['cashflow']['estado']);
 chequear('Ventas tiene datos', Menu::DATOS, $porTab['ventas']['estado']);
 chequear('Saldos tiene datos', Menu::DATOS, $porTab['saldos']['estado']);
 chequear('Cobranzas FR tiene datos', Menu::DATOS, $porTab['cobranzas_fr']['estado']);
+chequear('Cob. Electronicos tiene datos',
+    Menu::DATOS, $porTab['cob_electronicos']['estado']);
 
 // El caso que motivo tener tres estados y no dos: el Dashboard DIBUJA, asi que
 // no es un placeholder, pero no tiene una sola llamada al servidor. Marcarlo
@@ -154,7 +156,8 @@ foreach ($menu['categorias'] as $cat) {
     $porCategoria[$cat['codigo']] = $cat;
 }
 
-chequear('Ingresos tiene 3 de 6 con datos', 3, $porCategoria['Ingresos']['con_datos']);
+// Ventas, Saldos, Cobranzas FR y Cob. Electronicos.
+chequear('Ingresos tiene 4 de 6 con datos', 4, $porCategoria['Ingresos']['con_datos']);
 chequear('y son 6 en total', 6, $porCategoria['Ingresos']['total']);
 // Comercio Exterior queda completa: sus dos pestanas tienen datos. Despachante
 // y Asesor se dio de baja del menu porque no se usa mas.

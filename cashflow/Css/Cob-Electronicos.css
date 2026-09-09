@@ -1,0 +1,319 @@
+/* ============================================================================
+   PESTANA COB. ELECTRONICOS
+   Estilos propios de la pantalla de acreditaciones de las procesadoras de pago.
+
+   Las tarjetas y las tablas base salen de Css/main.css; aca va solo lo que
+   distingue a esta pantalla. Todo va prefijado con .tab-cobel o con .cobel-
+   porque los selectores del modulo son globales al documento.
+   ============================================================================ */
+
+.tab-cobel .loading-spinner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+}
+
+.tab-cobel .spinner {
+    border: 3px solid var(--border-light, #eef0f5);
+    border-top: 3px solid var(--primary-color, #3366ff);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.tab-cobel .loading-spinner p {
+    margin-top: 15px;
+    color: var(--text-muted, #8c93a8);
+    font-size: 13px;
+}
+
+/* Falta en main.css y la usa la tarjeta del importe neto */
+.tab-cobel .kpi-card-icon.purple {
+    background: rgba(111, 66, 193, 0.1);
+    color: #6f42c1;
+}
+
+/* El neto es el UNICO numero de esta pantalla que el tablero consume: va
+   marcado aparte para que no se confunda con el bruto, que es mas grande y
+   nunca llega al banco. */
+.tab-cobel .kpi-card-destacada {
+    border-color: #6f42c1;
+    box-shadow: 0 0 0 1px rgba(111, 66, 193, 0.12);
+}
+
+.tab-cobel .kpi-card-value-sm {
+    font-size: 17px;
+}
+
+/* ========================================
+   FILTROS Y ENCABEZADOS
+   ======================================== */
+
+.tab-cobel .cobel-filtros {
+    padding: 12px 16px;
+    background: var(--bg-light, #f8f9fc);
+}
+
+.tab-cobel .cobel-eje {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+    white-space: nowrap;
+}
+
+.tab-cobel .cobel-subtitulo {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+    font-weight: 400;
+    margin-top: 2px;
+}
+
+.tab-cobel h6.cobel-subtitulo {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary, #5a6178);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 8px;
+}
+
+/* ========================================
+   TABLAS
+   ======================================== */
+
+.tab-cobel .cobel-num {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.tab-cobel .cobel-neto {
+    font-weight: 600;
+}
+
+/* La tasa y el neto los calcula el servidor: se muestran distinto de los
+   valores editables, para que se vea que no son campos de carga. */
+.tab-cobel .cobel-calculado {
+    color: var(--text-secondary, #5a6178);
+    font-style: italic;
+}
+
+.tab-cobel .cobel-origen {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+/* Un movimiento POSTERIOR al eje se VE, pero se ve distinto: es plata informada
+   que el tablero todavia no muestra, y una fila igual a las demas invitaria a
+   sumarla al total del tablero. */
+.tab-cobel .cobel-fuera-eje {
+    background: rgba(220, 53, 69, 0.05);
+}
+
+/* Una acreditacion YA OCURRIDA no es un problema: ya paso y la informa el saldo
+   bancario. Va atenuada y en gris, no en rojo. Por defecto ni se muestra. */
+.tab-cobel .cobel-acreditada {
+    background: var(--bg-light, #f8f9fc);
+}
+
+.tab-cobel .cobel-acreditada td {
+    opacity: 0.7;
+}
+
+.tab-cobel .cobel-marca {
+    font-size: 10px;
+    color: var(--danger-color, #dc3545);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-top: 2px;
+}
+
+.tab-cobel .cobel-marca-neutra {
+    font-size: 10px;
+    color: var(--text-muted, #8c93a8);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-top: 2px;
+}
+
+.tab-cobel .cobel-marca-inline {
+    font-size: 10px;
+    color: var(--danger-color, #dc3545);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.tab-cobel .cobel-marca-inline-neutra {
+    font-size: 10px;
+    color: var(--text-muted, #8c93a8);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.tab-cobel .cobel-editando {
+    background: rgba(51, 102, 255, 0.05);
+}
+
+.tab-cobel .cobel-fila-total td {
+    border-top: 2px solid var(--border-color, #e2e5ed);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Los inputs de la grilla no tienen que agrandar la fila */
+.tab-cobel .table .form-control-sm,
+.tab-cobel .table .form-select-sm {
+    font-size: 12px;
+    padding: 3px 8px;
+}
+
+.tab-cobel .btn-link {
+    padding: 0 4px;
+    text-decoration: none;
+}
+
+/* ========================================
+   VISTA PREVIA Y NOTAS
+   ======================================== */
+
+/* El neto que se va a guardar, antes de guardarlo. Dice explicitamente que el
+   calculo que vale es el del servidor. */
+.tab-cobel .cobel-preview {
+    font-size: 12px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--bg-light, #f5f6fa);
+    color: var(--text-secondary, #5a6178);
+}
+
+.tab-cobel .cobel-nota {
+    font-size: 12px;
+    color: var(--text-muted, #8c93a8);
+    line-height: 1.5;
+}
+
+/* El cuadro por dia puede tener muchas filas: se acota y scrollea, en lugar de
+   empujar el resto de la pantalla hacia abajo. */
+.tab-cobel .cobel-cuadro {
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+/* ========================================
+   IMPORTADOR
+
+   El panel se abre sobre la tabla y muestra el diff ANTES de escribir. El
+   resumen va primero y en chips, porque lo primero que hay que poder ver es si
+   el archivo trae algo nuevo o no; el detalle solo lista lo que cambia.
+   ======================================== */
+
+.tab-cobel .cobel-importador {
+    background: var(--bg-light, #f8f9fc);
+}
+
+.tab-cobel .cobel-diff {
+    border-top: 1px solid var(--border-color, #e2e5ed);
+    padding-top: 12px;
+}
+
+.tab-cobel .cobel-diff-titulo {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary, #5a6178);
+    margin-bottom: 8px;
+}
+
+.tab-cobel .cobel-diff-subtitulo {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--text-muted, #8c93a8);
+    margin: 12px 0 4px;
+}
+
+.tab-cobel .cobel-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.tab-cobel .cobel-chip {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    background: #fff;
+    border: 1px solid var(--border-color, #e2e5ed);
+    color: var(--text-secondary, #5a6178);
+}
+
+.tab-cobel .cobel-chip-ok {
+    border-color: rgba(40, 167, 69, 0.4);
+    color: #1e7e34;
+}
+
+.tab-cobel .cobel-chip-aviso {
+    border-color: rgba(240, 173, 78, 0.6);
+    color: #a1670a;
+}
+
+.tab-cobel .cobel-chip-error {
+    border-color: rgba(220, 53, 69, 0.5);
+    color: #b02a37;
+}
+
+.tab-cobel .cobel-diff-totales {
+    font-size: 12px;
+    margin-top: 8px;
+    color: var(--text-secondary, #5a6178);
+}
+
+.tab-cobel .cobel-diff-aviso {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+    margin-top: 4px;
+    line-height: 1.4;
+}
+
+/* La tabla del diff puede ser larga: se acota y scrollea dentro del panel */
+.tab-cobel .cobel-diff-tabla {
+    max-height: 300px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid var(--border-color, #e2e5ed);
+    border-radius: 6px;
+    margin-top: 8px;
+}
+
+.tab-cobel .cobel-fila-alta { background: rgba(40, 167, 69, 0.05); }
+.tab-cobel .cobel-fila-cambio { background: rgba(240, 173, 78, 0.08); }
+.tab-cobel .cobel-fila-error { background: rgba(220, 53, 69, 0.07); }
+.tab-cobel .cobel-fila-baja { background: var(--bg-light, #f8f9fc); }
+
+.tab-cobel .cobel-estado {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: var(--bg-light, #f5f6fa);
+    color: var(--text-secondary, #5a6178);
+    white-space: nowrap;
+}
+
+.tab-cobel .cobel-estado-alta { background: rgba(40, 167, 69, 0.15); color: #1e7e34; }
+.tab-cobel .cobel-estado-cambio { background: rgba(240, 173, 78, 0.2); color: #a1670a; }
+.tab-cobel .cobel-estado-error { background: rgba(220, 53, 69, 0.15); color: #b02a37; }
+
+/* El motivo es la parte util del diff: dice QUE cambia, no solo que cambia */
+.tab-cobel .cobel-motivo {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+}

@@ -186,6 +186,16 @@
             <?php include __DIR__ . '/parametros_saldos.php'; ?>
         </div>
 
+        <!-- Parámetros del módulo Cob. Electrónicos: procesadoras de pago y las
+             alícuotas de retención con las que se calcula el importe neto de
+             cada acreditación. El id del pane sale de
+             ucfirst(strtolower($codigo)), que es lo que usa el <li> generado
+             arriba. Mismo criterio que Saldos: archivo y JS propios, y clases
+             con prefijo pce-. -->
+        <div class="tab-pane fade" id="paneParamCob_electronicos" role="tabpanel">
+            <?php include __DIR__ . '/parametros_cob_electronicos.php'; ?>
+        </div>
+
         <!-- Estructura del tablero de Cashflow.
              Va en su propio archivo y con su propio JS: no comparte nada con
              los bloques de Ventas, y así un problema acá no puede llevarse
@@ -203,4 +213,5 @@
 
 <script src="Js/Parametros.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Saldos.js?v=<?php echo time(); ?>"></script>
+<script src="Js/Parametros-Cob-Electronicos.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Estructura.js?v=<?php echo time(); ?>"></script>
