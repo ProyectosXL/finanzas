@@ -345,12 +345,22 @@ class Saldos {
      * LA FECHA DE IMPUTACION ES LA FECHA DEL SALDO, SIN CORRIMIENTOS. No hay
      * regla de dia habil ni calendario de feriados: cuando la sucursal deposita,
      * el movimiento queda registrado en Tango, y como la consulta corre todos
-     * los dias el dato se actualiza solo. Correrlo a dia habil inventaria una
-     * fecha que el sistema ya conoce.
+     * los dias el dato se actualiza solo. Un saldo de domingo se imputa el
+     * domingo; correrlo al lunes inventaria una fecha que el sistema ya conoce.
      *
-     * Un saldo con fecha anterior al eje queda en 'fuera_horizonte' y NO se
-     * reubica: el corrimiento es justamente lo que esta prohibido en esta serie.
-     * El tablero informa el importe, asi que no desaparece en silencio.
+     * UN SALDO CON FECHA ANTERIOR AL EJE SE IMPUTA EN LA PRIMERA COLUMNA, igual
+     * que el disponible inicial. La consulta NO devuelve depositos: devuelve el
+     * SALDO DE CAJA de cada local, o sea plata que todavia esta en el cajon y
+     * que no llego al banco. Que Tango la haya registrado ayer no la convierte
+     * en un movimiento ya consumido: sigue estando, y va a entrar al banco. Si
+     * se descartara por tener fecha de ayer, la fila se veria en cero justo
+     * cuando hay plata para depositar -que es lo que pasaba-, y encima el
+     * importe no aparece en ningun otro lado del tablero, porque el saldo
+     * bancario de la pestana 1 recien lo va a mostrar cuando se acredite.
+     *
+     * Reubicar NO es el corrimiento que el relevamiento prohibe: eso era mover
+     * una fecha DENTRO del eje a otra por dia habil o feriado, y no se hace. El
+     * aviso dice de que fecha es el saldo, para que nadie lo lea como de hoy.
      *
      * @param array $filas Filas devueltas por armarSaldosLocales()['filas']
      * @param Horizonte $h
@@ -362,10 +372,15 @@ class Saldos {
         $serie['sin_fecha'] = 0;
         $serie['moneda_origen'] = 'ARS';
         $serie['tipo_cambio'] = null;
+        $serie['warnings'] = [];
 
         if (!is_array($filas)) {
             return $serie;
         }
+
+        $hoy = $h->hoy();
+        $reubicado = 0;
+        $fechaMasVieja = null;
 
         foreach ($filas as $f) {
             $importe = floatval(isset($f['aporta']) ? $f['aporta'] : 0);
@@ -374,19 +389,56 @@ class Saldos {
                 continue;
             }
 
-            $fecha = isset($f['fecha_saldo']) ? $f['fecha_saldo'] : null;
+            $fecha = Horizonte::normalizarFecha(isset($f['fecha_saldo']) ? $f['fecha_saldo'] : null);
 
             if ($fecha === null) {
                 $serie['sin_fecha'] += $importe;
                 continue;
             }
 
-            if (!$h->acumular($serie, $fecha, $importe)) {
+            $destino = self::destinoEnEje($fecha, $hoy);
+
+            if ($destino !== $fecha) {
+                $reubicado += $importe;
+
+                if ($fechaMasVieja === null || $fecha < $fechaMasVieja) {
+                    $fechaMasVieja = $fecha;
+                }
+            }
+
+            if (!$h->acumular($serie, $destino, $importe)) {
                 $serie['fuera_horizonte'] += $importe;
             }
         }
 
+        if ($reubicado != 0) {
+            $serie['warnings'][] = 'Caja Locales: ' . self::plata($reubicado) . ' salen del último '
+                . 'saldo de caja registrado, del ' . self::fechaCorta($fechaMasVieja) . ', y se '
+                . 'imputan en la primera columna del horizonte. Es plata que todavía está en el '
+                . 'local y que no llegó al banco.';
+        }
+
         return $serie;
+    }
+
+    /**
+     * Columna del eje en la que hay que imputar un importe fechado.
+     *
+     * El eje arranca HOY, asi que una fecha anterior no tiene columna propia.
+     * Las dos series de este modulo describen PLATA QUE EXISTE AHORA -un saldo
+     * bancario, el efectivo de un cajon-, no movimientos ya ocurridos, asi que
+     * una fecha pasada significa "esto ya es cierto hoy" y va a la apertura del
+     * horizonte. Descartarla mostraria cero teniendo el dato.
+     *
+     * Una fecha que SI cae dentro del eje no se toca nunca: no hay corrimiento
+     * a dia habil ni tratamiento de feriados en ninguna de las dos series.
+     *
+     * @param string $fecha 'Y-m-d' del dato
+     * @param string $hoy 'Y-m-d', primer dia del eje
+     * @return string 'Y-m-d' de la columna destino
+     */
+    private static function destinoEnEje($fecha, $hoy) {
+        return ($fecha < $hoy) ? $hoy : $fecha;
     }
 
     /**
@@ -452,8 +504,8 @@ class Saldos {
 
             // El eje arranca hoy: un saldo anterior es la apertura del horizonte
             // y va a la primera columna. Se guarda de que fecha era para
-            // poder decirlo.
-            $destino = ($fecha < $hoy) ? $hoy : $fecha;
+            // poder decirlo. Misma regla que la serie de locales.
+            $destino = self::destinoEnEje($fecha, $hoy);
 
             if ($destino !== $fecha) {
                 $reubicado += $importe;

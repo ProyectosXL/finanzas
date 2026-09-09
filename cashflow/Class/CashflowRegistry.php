@@ -138,6 +138,11 @@ class CashflowRegistry {
             'moneda' => 'ARS',
             'disponible' => true,
             'tab' => 'saldos',
+            // La pestana Saldos tiene dos sub-pestanas y este proveedor alimenta
+            // la SEGUNDA. Sin esto, el enlace del tablero abre Saldos en la
+            // primera y el usuario no encuentra el detalle del numero que
+            // acababa de clickear.
+            'subtab' => 'locales',
             'series' => ['DEPOSITOS' => 'Depositos de caja de locales']
         ],
 

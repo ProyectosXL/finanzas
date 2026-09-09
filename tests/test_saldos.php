@@ -172,14 +172,32 @@ $domingo = [[
 chequear('un saldo de domingo tampoco se corre al lunes',
     500000.0, Saldos::armarSerieLocales($domingo, $h)['dias']['2026-09-13']);
 
-// Lo que cae afuera del eje se informa: un tablero que muestra de menos sin
-// decirlo es peor que uno que falla.
-$viejo = [[
-    'nro_sucursal' => 10, 'fecha_saldo' => '2026-08-30', 'aporta' => 400000
+// El caso que se veia en cero teniendo plata para depositar: la consulta trae
+// el saldo de caja de AYER, porque es el ultimo que Tango registro. Esa plata
+// sigue en el cajon del local y no llego al banco, asi que se imputa en la
+// apertura del horizonte y no se descarta. Reubicar no es el corrimiento que el
+// relevamiento prohibe: eso era mover una fecha DENTRO del eje por dia habil.
+$ayer = [[
+    'nro_sucursal' => 10, 'fecha_saldo' => '2026-09-05', 'aporta' => 400000
 ]];
 
-chequear('un saldo anterior al eje se informa como fuera de horizonte',
-    400000.0, floatval(Saldos::armarSerieLocales($viejo, $h)['fuera_horizonte']));
+$serieAyer = Saldos::armarSerieLocales($ayer, $h);
+
+chequear('un saldo de caja anterior al eje se imputa en la primera columna',
+    400000.0, $serieAyer['dias']['2026-09-06']);
+chequear('y no se descarta como fuera de horizonte',
+    0.0, floatval($serieAyer['fuera_horizonte']));
+chequear('con un aviso que dice de que fecha es el saldo',
+    true, strpos(implode(' ', $serieAyer['warnings']), '05/09/2026') !== false);
+
+// Lo que cae DESPUES del eje si queda afuera: es una fecha futura que el
+// horizonte no cubre, no un dato que ya es cierto hoy.
+$futuro = [[
+    'nro_sucursal' => 10, 'fecha_saldo' => '2028-01-15', 'aporta' => 400000
+]];
+
+chequear('un saldo posterior al eje si se informa como fuera de horizonte',
+    400000.0, floatval(Saldos::armarSerieLocales($futuro, $h)['fuera_horizonte']));
 
 /* ================================================================
    La serie del disponible inicial
@@ -290,6 +308,13 @@ seccion('el proveedor esta registrado bajo los dos codigos');
 
 chequear('SALDOS esta disponible', true, CashflowRegistry::disponible('SALDOS'));
 chequear('CAJA_LOCALES tambien', true, CashflowRegistry::disponible('CAJA_LOCALES'));
+
+// El enlace del tablero tiene que llevar a la sub-pestana que produjo el
+// numero, no a la primera de la pestana.
+chequear('CAJA_LOCALES apunta a la pestana Saldos',
+    'saldos', CashflowRegistry::meta('CAJA_LOCALES')['tab']);
+chequear('y a su sub-pestana de locales',
+    'locales', CashflowRegistry::meta('CAJA_LOCALES')['subtab']);
 chequear('la serie DISPONIBLE existe', true,
     CashflowRegistry::serieExiste('SALDOS', 'DISPONIBLE'));
 chequear('la serie DEPOSITOS existe', true,

@@ -123,9 +123,17 @@ Existía porque en el Excel las cajas se actualizaban una vez por semana, así q
 
 ### La fecha de imputación
 
-**Es la fecha del saldo que devuelve la consulta, sin corrimientos.** No hay regla de día de semana ni tratamiento de feriados: cuando la sucursal deposita, el movimiento queda registrado en Tango, y como la consulta corre todos los días el dato se actualiza solo. Un saldo de domingo se imputa el domingo.
+**Es la fecha del saldo que devuelve la consulta, sin corrimientos.** No hay regla de día de semana ni tratamiento de feriados: cuando la sucursal deposita, el movimiento queda registrado en Tango, y como la consulta corre todos los días el dato se actualiza solo. Un saldo de domingo se imputa el domingo y no se mueve al lunes.
 
-> **Consecuencia conocida**: si el último saldo de una sucursal es anterior a hoy, cae **fuera del eje** y el tablero lo informa en el aviso de *fuera de horizonte* en lugar de moverlo. Es deliberado: el corrimiento es exactamente lo que está prohibido en esta serie. Si en la práctica la consulta viniera atrasada de forma sistemática, la decisión de reubicar es de negocio y hay que tomarla explícitamente.
+### Un saldo con fecha anterior a hoy se imputa en la primera columna
+
+El eje del tablero arranca hoy, y en la práctica **el último saldo que Tango tiene registrado es el de ayer**: la consulta no devuelve depósitos, devuelve el **saldo de caja** de cada local. Esa plata sigue en el cajón y todavía no llegó al banco, así que se imputa en la apertura del horizonte, con un aviso que dice de qué fecha es el saldo.
+
+Descartarla mostraba la fila en cero justo cuando había millones para depositar, y el importe **no aparecía en ningún otro lado del tablero**: el saldo bancario de la Pestaña 1 recién lo va a mostrar cuando se acredite.
+
+> **Reubicar no es el corrimiento que el relevamiento prohíbe.** Lo prohibido es mover una fecha que **sí** cae dentro del eje a otra por día hábil o feriado, y eso no se hace en ninguna de las dos series. Acá se trata una fecha que **no tiene columna** porque ya pasó. Es la misma regla que aplica el disponible inicial, y vive en un solo lugar: `Saldos::destinoEnEje()`. Las dos series describen **plata que existe ahora** —un saldo bancario, el efectivo de un cajón—, no movimientos ya ocurridos, así que una fecha pasada significa "esto ya es cierto hoy".
+
+Una fecha **posterior** al eje sí queda `fuera_horizonte` y se informa: ésa es una fecha que el horizonte no cubre, no un dato que ya es cierto.
 
 ### Una fila por sucursal, no por cuenta
 
@@ -261,10 +269,15 @@ Es lo más fácil de romper en silencio. La fila `DISPONIBLE` es de tipo `SALDO_
 
 ### Un saldo con fecha anterior al eje abre el horizonte
 
-`DISPONIBLE` y `DEPOSITOS` tratan distinto una fecha pasada, y no es una inconsistencia:
+Las dos series aplican la misma regla, en un solo lugar (`Saldos::destinoEnEje()`): una fecha anterior a hoy no tiene columna propia y va a la apertura del horizonte, con aviso; una fecha dentro del eje no se toca nunca.
 
-- Un **depósito** del viernes pasado es un movimiento que ya ocurrió y que el tablero no tiene que volver a contar → queda `fuera_horizonte` y se informa.
-- El **saldo** del viernes pasado **es la plata que hay hoy en la cuenta** → se imputa en la primera columna, que es la apertura del horizonte, con un aviso que dice de qué fecha es. Dejarlo afuera arrancaría el tablero en cero, que es justamente el problema que este módulo viene a resolver.
+Vale para las dos porque las dos describen **plata que existe ahora** —un saldo bancario, el efectivo en el cajón de un local—, no movimientos ya ocurridos. Dejarlas afuera arrancaría el tablero en cero teniendo el dato, que es justamente el problema que este módulo viene a resolver.
+
+### El enlace del tablero abre la sub-pestaña correcta
+
+La fila *Caja Locales* la produce la **segunda** sub-pestaña, así que su entrada del registro declara `'subtab' => 'locales'` además de `'tab' => 'saldos'`. El motor lo pasa en la fila, `Cashflow.js` lo deja en `window.cfSubTabDestino` antes de navegar y `Saldos.js` lo consume al arrancar.
+
+El tablero **no** activa la sub-pestaña por su cuenta: `loadTab()` carga por AJAX y no avisa cuándo terminó, así que en el momento del click el destino todavía no existe en el DOM. Se consume una sola vez, para que un cambio de pestaña posterior no vuelva a saltar ahí.
 
 ### Nunca tumba el tablero
 
@@ -311,7 +324,7 @@ En `ENV = DEV` las tablas de locales se alcanzan por linked server con el nombre
 php tests/run.php saldos
 ```
 
-70 casos, todos sin base salvo la última sección, que se saltea sola. Los criterios viven en **helpers estáticos puros**, al estilo de `Ventas::armarTendencias()`: lo delicado de este módulo no son las consultas sino las decisiones.
+75 casos, todos sin base salvo la última sección, que se saltea sola. Los criterios viven en **helpers estáticos puros**, al estilo de `Ventas::armarTendencias()`: lo delicado de este módulo no son las consultas sino las decisiones.
 
 | Qué se verifica | Helper |
 | --- | --- |
@@ -319,6 +332,8 @@ php tests/run.php saldos
 | Un neto negativo aporta cero, no negativo | `armarSaldosLocales()` |
 | El neto es saldo menos reserva, sin ajuste impositivo | `armarSaldosLocales()` |
 | El importe se imputa en la fecha del saldo, sin corrimientos (ni de fin de semana) | `armarSerieLocales()` |
+| Un saldo de caja de ayer se imputa en la primera columna, con aviso; uno posterior al eje queda fuera | `armarSerieLocales()` |
+| El enlace del tablero lleva a la sub-pestaña de locales | `CashflowRegistry` |
 | "Última carga" con dos cargas el mismo día, y con la misma marca de tiempo | `ultimaCarga()` |
 | El saldo queda en la columna de su fecha y en cero en las otras 27 | `armarSerieDisponible()` |
 | Un saldo viejo abre el horizonte en la primera columna, con aviso | `armarSerieDisponible()` |

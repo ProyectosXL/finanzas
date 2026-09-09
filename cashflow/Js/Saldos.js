@@ -48,6 +48,35 @@
         }
 
         cargarSaldos();
+        abrirSubTabPedida();
+    }
+
+    /**
+     * Si se llegó acá desde la fila "Caja Locales" del tablero, se abre
+     * directamente la sub-pestaña de locales.
+     *
+     * El destino lo deja Cashflow.js en window.cfSubTabDestino antes de navegar:
+     * loadTab() carga la pestaña por AJAX y no avisa cuándo terminó, así que el
+     * tablero no puede activar una pestaña que todavía no existe en el DOM. Se
+     * consume una sola vez, para que un cambio de pestaña posterior no vuelva a
+     * saltar acá.
+     */
+    function abrirSubTabPedida() {
+        var destino = window.cfSubTabDestino;
+
+        window.cfSubTabDestino = null;
+
+        if (destino !== 'locales') {
+            return;
+        }
+
+        var btn = document.getElementById('tabLocalesBtn');
+
+        if (btn && window.bootstrap && bootstrap.Tab) {
+            bootstrap.Tab.getOrCreateInstance(btn).show();
+        } else if (btn) {
+            btn.click();
+        }
     }
 
     if (document.readyState === 'loading') {

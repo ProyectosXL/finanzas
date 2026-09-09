@@ -250,6 +250,10 @@ class Cashflow {
                 'arrastre' => false,
                 'origen' => null,
                 'tab' => null,
+                // Sub-pestana dentro de 'tab', para los modulos que tienen mas
+                // de una vista. Sin esto el enlace del tablero abre la pestana
+                // en su primera vista, que puede no ser la que produjo el numero.
+                'subtab' => null,
                 'moneda_origen' => null,
                 'tipo_cambio' => null,
                 'dias' => $vacia['dias'],
@@ -278,6 +282,7 @@ class Cashflow {
 
             if ($meta !== null) {
                 $fila['tab'] = isset($meta['tab']) ? $meta['tab'] : null;
+                $fila['subtab'] = isset($meta['subtab']) ? $meta['subtab'] : null;
             }
 
             if (!isset($series[$prov][$serie])) {

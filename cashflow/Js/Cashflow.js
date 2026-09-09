@@ -463,7 +463,11 @@
         }
 
         if (f.tab) {
-            return '<a href="#" class="cf-link" data-ir-a="' + escapar(f.tab) + '">'
+            // data-sub-tab lo lee el JS de la pestaña destino para abrirse en la
+            // vista correcta: hay módulos con más de una, y llegar a la primera
+            // deja al usuario sin el detalle del número que clickeó.
+            return '<a href="#" class="cf-link" data-ir-a="' + escapar(f.tab) + '"'
+                + (f.subtab ? ' data-sub-tab="' + escapar(f.subtab) + '"' : '') + '>'
                 + nombre + '</a>' + marca;
         }
 
@@ -505,6 +509,11 @@
      * Los enlaces del tablero disparan el click del ítem del menú lateral en
      * lugar de cargar la pestaña por su cuenta: así se reusa toda la navegación
      * de main.js, incluido el estado activo del menú.
+     *
+     * La sub-pestaña se deja anotada en window.cfSubTabDestino y NO se abre
+     * desde acá: loadTab() carga por AJAX y no avisa cuándo terminó, así que el
+     * destino todavía no está en el DOM. Lo lee el JS de la pestaña destino
+     * cuando arranca, que es el único momento en que existe con certeza.
      */
     function conectarEnlaces() {
         var enlaces = document.querySelectorAll('#cfBody .cf-link');
@@ -516,9 +525,12 @@
                 var destino = a.getAttribute('data-ir-a');
                 var item = document.querySelector('.menu-link[data-tab="' + destino + '"]');
 
-                if (item) {
-                    item.click();
+                if (!item) {
+                    return;
                 }
+
+                window.cfSubTabDestino = a.getAttribute('data-sub-tab') || null;
+                item.click();
             });
         });
     }
