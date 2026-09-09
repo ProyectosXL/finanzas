@@ -29,9 +29,15 @@ require_once __DIR__ . '/../CobElectronicos.php';
  * la informa el saldo bancario de la pestana Saldos. Reubicarla en la apertura
  * del horizonte la contaria dos veces.
  *
- * Entonces queda FUERA del eje, se suma a 'fuera_horizonte' y se avisa con el
- * importe y la fecha; nunca se descarta en silencio. Igual se ve en la pantalla,
- * en su fila, marcada. El criterio esta en CobElectronicos::ubicacionEnEje().
+ * Entonces queda FUERA del alcance del modulo, y NO se avisa ni se suma a
+ * 'fuera_horizonte': no es plata que el tablero informe de menos, es plata que
+ * el tablero informa por otra fila. Avisarla todos los dias seria ruido sobre
+ * algo que ya paso y que no hay que hacer. Igual se ve en la pantalla, en su
+ * fila, marcada, si uno pide verla.
+ *
+ * Lo POSTERIOR al horizonte si va a 'fuera_horizonte' y si se avisa: esa plata
+ * todavia no entro a ninguna cuenta y ninguna otra fila la muestra. El criterio
+ * esta en CobElectronicos::ubicacionEnEje().
  *
  * ESTA FILA NO SE CRUZA CON VENTAS
  * --------------------------------
@@ -44,8 +50,8 @@ require_once __DIR__ . '/../CobElectronicos.php';
  * calcular() puede lanzar; series() lo envuelve. Ademas se atrapan los casos
  * propios para poder rendir cero CON UN AVISO QUE DIGA QUE PASO, en lugar del
  * mensaje generico de la clase base: el script SQL sin correr, ninguna
- * procesadora cargada, procesadoras que perdieron sus alicuotas vigentes y
- * movimientos fuera del horizonte.
+ * procesadora cargada, ningun movimiento pendiente, procesadoras que perdieron
+ * sus alicuotas vigentes y movimientos posteriores al horizonte.
  */
 class CobElectronicosProvider extends CashflowProvider {
 
@@ -97,15 +103,28 @@ class CobElectronicosProvider extends CashflowProvider {
             return $this->vacia();
         }
 
-        $movimientos = $modulo->getMovimientos();
+        // Se piden solo los movimientos DESDE el inicio del eje: los anteriores
+        // ya se acreditaron y estan informados en el saldo bancario, asi que no
+        // entran al tablero ni se avisan. El filtro es una optimizacion; la
+        // regla vive igual en CobElectronicos::armarSerie() y esta probada, para
+        // que no dependa de que el llamador se acuerde de filtrar.
+        $movimientos = $modulo->getMovimientos(['desde' => $h->hoy()]);
 
-        // Un cero no dice si no hay movimientos o si los que hay no entran al
-        // eje. Se distingue, igual que hace ComexProvider con las
-        // nacionalizaciones.
+        // Un cero no dice si no hay movimientos, si los que hay ya se
+        // acreditaron, o si los datos son cero. Se distingue, igual que hace
+        // ComexProvider con las nacionalizaciones. La segunda consulta corre
+        // SOLO en el caso vacio, que es cuando hace falta la explicacion.
         if (empty($movimientos)) {
-            $this->avisar('Cobranzas Pagos Electronicos: hay ' . count($procesadoras)
-                . ' procesadora(s) configuradas pero ningun movimiento cargado todavia, asi que '
-                . 'la fila va en cero. Cargalos en la pestana Cob. Electronicos.');
+            $cargados = count($modulo->getMovimientos());
+
+            $this->avisar($cargados > 0
+                ? ('Cobranzas Pagos Electronicos: los ' . $cargados . ' movimientos cargados '
+                    . 'tienen fecha de acreditacion anterior al horizonte, asi que ya estan '
+                    . 'informados en el saldo bancario y la fila va en cero. No hay '
+                    . 'acreditaciones pendientes cargadas.')
+                : ('Cobranzas Pagos Electronicos: hay ' . count($procesadoras)
+                    . ' procesadora(s) configuradas pero ningun movimiento cargado todavia, asi '
+                    . 'que la fila va en cero. Cargalos en la pestana Cob. Electronicos.'));
 
             return $this->vacia();
         }
@@ -124,11 +143,20 @@ class CobElectronicosProvider extends CashflowProvider {
 
         $serie['warnings'] = [];
 
+        // Una fila en cero teniendo movimientos cargados es lo unico que hay que
+        // explicar siempre. Cual es el motivo se decide con los escalares de la
+        // serie y no con el filtro de la consulta, para que el aviso sea el
+        // correcto sin importar como se hayan pedido los movimientos.
         if (array_sum($serie['dias']) == 0 && array_sum($serie['meses']) == 0) {
-            $this->avisar('Cobranzas Pagos Electronicos: los ' . count($movimientos)
-                . ' movimientos cargados quedan todos fuera del horizonte, asi que la fila va en '
-                . 'cero. Los que ya se acreditaron estan informados en el saldo bancario de la '
-                . 'pestana Saldos.');
+            $yaAcreditado = isset($serie['ya_acreditado']) ? $serie['ya_acreditado'] : 0;
+
+            $this->avisar(($yaAcreditado != 0 && $serie['fuera_horizonte'] == 0)
+                ? ('Cobranzas Pagos Electronicos: los movimientos cargados ya se acreditaron, '
+                    . 'asi que estan informados en el saldo bancario y la fila va en cero. No hay '
+                    . 'acreditaciones pendientes cargadas.')
+                : ('Cobranzas Pagos Electronicos: los ' . count($movimientos) . ' movimientos '
+                    . 'pendientes tienen fecha posterior al final del horizonte, asi que la fila '
+                    . 'va en cero. Se ven igual en la pestana Cob. Electronicos.'));
         }
 
         return $serie;

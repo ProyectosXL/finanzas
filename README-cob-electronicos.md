@@ -8,7 +8,7 @@ Rama: `feature/cob-electronicos`
 
 ## La idea en una línea
 
-**El neto no se tipea: se calcula, se persiste, y la tasa con la que se calculó se guarda al lado.**
+**El neto no se tipea: se calcula, se persiste, y la tasa con la que se calculó se guarda al lado.** La carga se hace a mano o importando la planilla de la procesadora, que muestra las diferencias antes de escribir.
 
 ```
 Movimiento (procesadora, importe bruto, fecha de acreditacion)
@@ -78,7 +78,7 @@ El recálculo escribe **en una transacción**: a mitad de camino quedaría una p
 
 ---
 
-## Un movimiento con fecha anterior al eje **no** abre el horizonte
+## Un movimiento con fecha anterior al eje **no** abre el horizonte, y tampoco se avisa
 
 **Es lo inverso a lo que hace Saldos, y es a propósito.**
 
@@ -87,13 +87,25 @@ El recálculo escribe **en una transacción**: a mitad de camino quedaría una p
 | | Qué describe el dato | Qué se hace con una fecha pasada |
 | --- | --- | --- |
 | **Saldos** | Plata que **existe ahora**: un saldo bancario, el efectivo del cajón de un local | Se reubica en la apertura del horizonte. Una fecha pasada significa *"esto ya es cierto hoy"* |
-| **Cob. Electrónicos** | Un **movimiento ya ocurrido**: esa acreditación ya entró a la cuenta | Queda **fuera del eje**, en `fuera_horizonte`, con aviso |
+| **Cob. Electrónicos** | Un **movimiento ya ocurrido**: esa acreditación ya entró a la cuenta | Queda **fuera del alcance del módulo**, sin aviso |
 
 El motivo es concreto: una acreditación con fecha pasada **ya la informa el saldo bancario de la pestaña Saldos**. Reubicarla en la apertura del horizonte la contaría **dos veces** — una como saldo y otra como cobranza futura.
 
-Nunca se descarta en silencio: el importe va a `fuera_horizonte`, el aviso dice el total y la fecha más vieja, y **la fila se ve igual en la pantalla**, en su lugar, marcada y con el motivo. Un total de pantalla más grande que el del tablero tiene que tener explicación en la misma pantalla.
+### Y por qué no se avisa, si la regla general es no descartar nada en silencio
 
-Una fecha **posterior** al eje también queda fuera, con su propio aviso: ésa es una fecha que el horizonte no cubre.
+`fuera_horizonte` existe para una cosa: decir cuánta plata el tablero **debería** mostrar y no muestra. Una acreditación ya ocurrida no es eso. No le falta al tablero: **el tablero la muestra por otra fila**, la del saldo bancario. Contarla en `fuera_horizonte` haría que el tablero avisara todos los días por algo que ya pasó y sobre lo que no hay nada que hacer, y ese aviso taparía los que sí piden una acción.
+
+Así que lo ya acreditado:
+
+- no suma a la serie —eso nunca cambió, contarlo sería duplicar—,
+- **no suma a `fuera_horizonte` ni deja aviso**,
+- **no se muestra en la pestaña por defecto**: se trae con el switch *"Ver también las ya acreditadas"*, y ahí la fila se marca de forma neutra, en gris. No es un problema, ya pasó.
+
+> Esto es un cambio de criterio respecto de la primera versión del módulo, que lo informaba como `fuera_horizonte` con aviso. La regla *"nunca se descarta en silencio"* sigue en pie para lo que el tablero deja de mostrar; lo que cambió es la lectura de este caso, que no es uno de esos.
+
+Una fecha **posterior** al eje sí va a `fuera_horizonte` y sí deja aviso, con el importe y la fecha: **ésa** es plata que todavía no entró a ninguna cuenta y que ninguna otra fila del tablero muestra. La fila se ve en la pantalla marcada en rojo. Las dos marcas son distintas a propósito.
+
+Cuando la fila del tablero queda en **cero** teniendo movimientos cargados, el proveedor igual lo explica —*"los movimientos cargados ya se acreditaron, así que no hay acreditaciones pendientes"*—, porque un cero sin explicación es exactamente lo que este módulo evita. La diferencia es que explica el cero, no reclama por el pasado.
 
 > **El corte por fecha es explícito y no se delega a `Horizonte::acumular()`.** Una fecha del mes en curso anterior a hoy —un 1/9 con el eje arrancando el 6/9— caería en la columna del mes `2026-09`, que existe en el eje pero que el tablero **ni siquiera incluye en el arrastre** (`Horizonte::secuencia()` la deja afuera porque no representa ningún día futuro). El importe quedaría en una columna que nadie suma. Con el corte por fecha en `CobElectronicos::ubicacionEnEje()`, el criterio no depende de cómo quede armado el eje. Tiene prueba propia.
 
@@ -109,17 +121,106 @@ Queda dicho acá con esas palabras para que no aparezca como "bug" más adelante
 
 ## De dónde sale el dato
 
-**Carga manual en pantalla ahora; importación del archivo de la procesadora después.**
+**Carga manual en pantalla, o importación de la planilla de la procesadora.** Las dos conviven: el formulario manual se mantiene siempre, como respaldo y para una corrección puntual.
 
-Se aplicó el mismo criterio que Saldos con la API de Interbanking: **las columnas de la importación se crean desde el día uno y quedan en `NULL`**, para que enchufarla no obligue a migrar datos. El formulario manual se mantiene siempre, como respaldo.
+Las tres columnas que la importación necesita se crearon desde el día uno —mismo criterio que Saldos con la API de Interbanking—, así que enchufarla no obligó a migrar ningún dato:
 
-| Columna | Hoy | Después |
+| Columna | Carga manual | Importación |
 | --- | --- | --- |
-| `ORIGEN_DATO` | `'MANUAL'` | `'ARCHIVO'` / `'API'` |
-| `ID_EXTERNO` | `NULL` | Identificador de la liquidación en la procesadora |
-| `ARCHIVO_ORIGEN` | `NULL` | Nombre del archivo importado |
+| `ORIGEN_DATO` | `'MANUAL'` | `'ARCHIVO'` (y `'API'` queda para el día que haya una) |
+| `ID_EXTERNO` | `NULL` | Número de liquidación de la procesadora, si el archivo lo trae |
+| `ARCHIVO_ORIGEN` | `NULL` | Nombre del archivo que se importó |
 
-**`ID_EXTERNO` es la clave con la que la importación va a reconocer un movimiento ya cargado a mano.** Va con índice único **filtrado** por procesadora (`WHERE ID_EXTERNO IS NOT NULL`), igual que el `CBU` de Saldos: hoy está en `NULL` en todas las filas, y un `UNIQUE` común de SQL Server admite un solo `NULL`.
+**`ID_EXTERNO` es la clave con la que la importación reconoce un movimiento ya cargado.** Va con índice único **filtrado** por procesadora (`WHERE ID_EXTERNO IS NOT NULL`), igual que el `CBU` de Saldos: sigue estando en `NULL` en todas las filas cargadas a mano, y un `UNIQUE` común de SQL Server admite un solo `NULL`.
+
+---
+
+## El importador
+
+### Por qué existe
+
+Cargar treinta acreditaciones por semana a mano hace que la pantalla se actualice poco, y **una pantalla que se actualiza poco muestra un tablero viejo**. El problema no era tipear: era tener que comparar el archivo de la procesadora contra lo ya cargado, fila por fila, para saber qué había cambiado. El importador da vuelta eso: se sube el archivo completo y **el módulo dice qué cambiaría**.
+
+### Dos pasos, y el segundo no confía en el primero
+
+**Previsualizar** no escribe nada: lee el archivo, lo compara con lo cargado y devuelve el diff. **Confirmar** aplica.
+
+El segundo paso **vuelve a leer la base, vuelve a validar cada fila y vuelve a calcular el diff con el mismo helper puro**. Del navegador llegan sólo los datos de entrada del archivo —procesadora, bruto, fecha, número de liquidación, observaciones—, los mismos que se tipearían a mano; **la tasa y el neto los sigue calculando el servidor**. Si entre la previsualización y la confirmación cambió algo —otro usuario cargó un movimiento, alguien editó una alícuota—, lo que se aplica es el diff contra el estado real y no contra el que se dibujó.
+
+Que el diff viva en un helper puro (`compararImportacion()`) es lo que hace posible eso: se calcula dos veces con la misma regla. Si viviera dentro de la escritura, la pantalla mostraría una cosa y el servidor haría otra.
+
+### Por qué CSV y no `.xlsx`
+
+Leer un `.xlsx` sin librerías necesita la extensión `zip` de PHP. En este servidor el `php_zip.dll` **está instalado pero la extensión está comentada en `php.ini`**: habilitarla es tocar la configuración del servidor, reiniciar Apache, y dejar el módulo dependiendo de que ese cambio esté hecho en cada entorno. Excel abre y guarda CSV nativamente (*Archivo → Guardar como → CSV UTF-8*), así que el costo para el usuario es un paso y el módulo no depende de nada.
+
+Si igual suben un `.xlsx`, el parser **lo detecta por su firma** (un `.xlsx` es un ZIP y empieza con `PK`) y responde con la instrucción de cómo convertirlo, en lugar de fallar con un archivo lleno de bytes binarios. Lo mismo con un `.xls` antiguo.
+
+### La plantilla se descarga y vuelve a entrar
+
+La plantilla va con BOM de UTF-8 y separador `;`, que es lo que Excel en español abre en columnas sin preguntar nada. Sin el BOM, Excel muestra los acentos rotos; con coma, mete todo en una sola columna.
+
+**Trae dos filas de ejemplo cargables**, no comentadas: una plantilla con el ejemplo comentado obliga a adivinar el formato del número y de la fecha, que es justo donde falla una importación. Una prueba verifica que la plantilla que se descarga vuelva a entrar por el parser — si no, el formato que se propone no sería el que se acepta.
+
+Las columnas y sus sinónimos se definen **una sola vez** (`columnasImportacion()`), y de ahí salen la plantilla, el mapeo del encabezado y la ayuda de la pantalla. Con tres listas separadas, se desincronizan en el primer cambio.
+
+| Columna | Obligatoria | Sinónimos aceptados |
+| --- | --- | --- |
+| `PROCESADORA` | sí | `RAZON_SOCIAL`, `RAZON_SOC` |
+| `IMPORTE_BRUTO` | sí | `IMPORTE`, `BRUTO` |
+| `FECHA_ACREDITACION` | sí | `FECHA`, `COBRO`, `FECHA_COBRO` |
+| `ID_EXTERNO` | no | `LIQUIDACION`, `NRO_LIQUIDACION` |
+| `OBSERVACIONES` | no | `OBSERVACION`, `NOTAS` |
+
+Los sinónimos incluyen **los nombres de la hoja original** (`RAZON_SOC`, `Importe`, `Cobro`) para poder pegar las columnas del Excel viejo sin renombrar nada. Los títulos se comparan sin acentos, sin espacios y sin mayúsculas, y una columna de más no molesta — una columna de neto en el archivo, por ejemplo, **se ignora**: el neto lo calcula el servidor, y eso tiene prueba.
+
+### El formato del número y de la fecha no lo tiene que saber el usuario
+
+El parser acepta lo que exporta Excel en cualquiera de las dos configuraciones regionales:
+
+- `1069326,00` y `1069326.00`; `3.757.900,50` y `3,757,900.50`. Con los dos separadores presentes, el que está más a la derecha es el decimal. Con uno solo, es decimal salvo que aparezca más de una vez.
+- `07/09/2026`, `2026-09-07`, `7-9-2026`, `07/09/26`, y el **serial de Excel** (`46000`) acotado a 1954–2064, que es la red para una columna que quedó con formato número.
+
+Lo que **no** se adivina: una fecha que no existe (`31/02/2026`) o sin año devuelve `null`, y la fila queda como error **con su número de línea**. Y un importe que no es un número devuelve `null` y no cero: la diferencia entre *"no es un número"* y *"es cero"* es lo que hace que la fila sea un error en vez de un movimiento de cero pesos.
+
+### Cómo se reconoce un movimiento ya cargado
+
+| Si la fila del archivo… | La clave es |
+| --- | --- |
+| trae `ID_EXTERNO` | (procesadora, `ID_EXTERNO`) — la clave de verdad |
+| no lo trae | (procesadora, fecha de acreditación) |
+
+Con `ID_EXTERNO` **manda el número de liquidación por encima de la fecha**, y eso resuelve el caso en que la procesadora **reprograma** una acreditación: el movimiento se reconoce y se actualiza la fecha, en lugar de proponer un alta y dejar el viejo colgado.
+
+**Dos filas con la misma clave y sin `ID_EXTERNO` son un error, no un aviso.** Dos liquidaciones el mismo día son legítimas —por eso la tabla no tiene `UNIQUE (procesadora, fecha)`—, pero sin el número no hay forma de saber cuál de las dos corresponde a cuál de las cargadas. El error pide llenar `ID_EXTERNO` en las dos, que es la solución real, y dice contra qué línea choca.
+
+### Los seis resultados posibles de una fila
+
+| Estado | Qué pasa |
+| --- | --- |
+| **nueva** | No estaba cargada → se inserta, con `ORIGEN_DATO = 'ARCHIVO'` y el nombre del archivo |
+| **cambia** | Cambió el importe bruto o la fecha → se actualiza y **se recalcula la tasa y el neto** |
+| **igual** | Ya estaba cargada idéntica → **no se toca**. Pisarle `FECHA_UPDATE` a todo lo que el archivo repite dejaría la columna diciendo que se editó todo en cada importación, igual que el diff de las sucursales de Saldos |
+| **ya acreditada** | Fecha anterior al inicio del eje → **no se importa** y no es un error. El archivo de la procesadora siempre trae el histórico, y cargarlo no aporta nada |
+| **problema** | Procesadora inexistente o inhabilitada, importe no numérico o ≤ 0, fecha ilegible, sin alícuota vigente, clave repetida |
+| **ya no viene** | Está cargado y el archivo no lo trae → **candidato a baja** |
+
+Sólo se comparan el bruto y la fecha, que son los datos de entrada. La tasa y el neto no se comparan: son derivados, y si cambiaron sin que cambie el bruto es porque cambió la alícuota — y eso lo resuelve el recálculo de pendientes, no una importación.
+
+### Con un solo error no se importa nada
+
+El archivo es la fuente de verdad. Importar la mitad deja un estado que **la próxima importación no puede explicar**: las filas que quedaron afuera aparecerían como altas nuevas, mezcladas con las de verdad. Así que el botón queda deshabilitado y el aviso dice qué corregir, con la línea de cada problema.
+
+Todo lo que sí se importa va **en una transacción**, por lo mismo.
+
+### Las bajas: lo que hace que no haya que comparar a mano
+
+Sin esto, una acreditación que la procesadora dio de baja se queda para siempre en el tablero, porque ninguna importación la menciona.
+
+El alcance está acotado a propósito, y es la parte delicada: sólo se consideran los movimientos **de las procesadoras que vienen en el archivo**, con fecha **dentro del período que el archivo cubre**, y **desde el inicio del eje** —lo ya acreditado no se toca nunca, ni declarando un período largo—. Un archivo parcial no puede proponer dar de baja lo que no estaba mirando.
+
+Y la baja **nunca se aplica sola**: se lista, hay que marcar la casilla y además confirmar.
+
+> **El período se puede declarar, y hay un caso en que hace falta.** Si no se declara, se infiere de las fechas de las filas del archivo. Eso cubre lo habitual, pero **no** el caso en que la procesadora da de baja la **primera** o la **última** acreditación del período: esa fecha desaparece del archivo, así que el rango inferido se encoge y el movimiento cargado queda justo afuera de la ventana. Los dos campos *"el archivo cubre desde / hasta"* existen para eso — el usuario sabe qué período exportó. **Nunca se adivina**: sin declararlo, esa baja simplemente no se propone, y el panel dice qué ventana se usó y si la declaró el usuario o se infirió. Verificado con datos reales: con la ventana inferida, cero bajas; declarando el período, aparece la que el archivo dejó de traer.
 
 ---
 
@@ -179,6 +280,8 @@ Una sola pestaña, sin sub-pestañas.
 
 La tasa y el neto se muestran en cursiva y atenuados, y en la fila en edición se reemplazan por la leyenda *"la tasa y el neto se recalculan al guardar"*. Convertirlos en inputs sería ofrecer editar un número que el servidor va a descartar.
 
+Las acreditaciones **ya ocurridas no se muestran**: el filtro arranca en el inicio del eje y hay un switch para traerlas. Es lo que hace que el total de la pantalla coincida con el del tablero sin tener que explicar una diferencia. Cuando se traen, van en gris y marcadas *"ya acreditada"* — la marca es neutra, no roja: no son un problema.
+
 El formulario de alta dibuja una **vista previa del neto** mientras se tipea, y dice explícitamente que el definitivo lo calcula el servidor con la alícuota vigente a la fecha elegida. La previa usa la tasa vigente **a hoy**, que es la que trae el payload; si la fecha de acreditación cae en otra vigencia, el mensaje del guardado informa la que se usó de verdad.
 
 El alta sólo ofrece las procesadoras **activas y con alícuota vigente**: son las únicas que pueden calcular un neto, y ofrecer las otras llevaría a un rechazo del servidor después de tipear todo el movimiento. El **filtro**, en cambio, ofrece todas, incluidas las inhabilitadas: puede haber movimientos de una procesadora que después se dio de baja, y no poder filtrarlos los esconde.
@@ -191,7 +294,7 @@ Es la agrupación que consume el tablero: suma de netos por fecha de acreditaci�
 
 Las dos agrupaciones son la misma suma vista de dos formas, así que **dan el mismo total**, y ese total es el neto y nunca el bruto. Las tres cosas están probadas juntas, porque son el invariante que habría que romper para que la pantalla y el tablero no cierren.
 
-Los días que no entran al eje se ven **marcados**, no escondidos, con la nota de por qué.
+Los días **posteriores** al eje se ven marcados en rojo, no escondidos, con la nota de por qué. Los ya acreditados —cuando se los trae con el switch— van en gris.
 
 ---
 
@@ -213,6 +316,12 @@ El formulario muestra la **suma resultante** antes de guardar y **bloquea el bot
 
 El campo de concepto es libre, con los ya usados como sugerencia: el concepto no es un enum cerrado.
 
+### El resultado del guardado se muestra en la pantalla, no en un alert
+
+Guardar una alícuota puede recalcular movimientos, y lo que hay que mostrar de eso es una **tabla**: qué movimiento, con qué tasa antes y después, con qué neto antes y después, y la diferencia. Una tabla en un `alert()` con saltos de línea no se puede leer ni comparar, y desaparece con un click justo cuando uno quiere seguir mirándola.
+
+Así que el resultado va a un panel arriba de las dos secciones, con esa tabla, la tasa total vigente que quedó, el porcentaje del bruto que va a acreditar un movimiento nuevo, y los avisos del recálculo. Queda a la vista mientras se sigue trabajando. El texto se escapa: los nombres de las procesadoras los tipea un usuario.
+
 ---
 
 ## El proveedor
@@ -229,10 +338,14 @@ El campo de concepto es libre, con los ya usados como sugerencia: el concepto no
 | --- | --- |
 | El script SQL no se corrió | El nombre del script que hay que correr |
 | No hay ninguna procesadora cargada | Dónde cargarlas |
-| Hay procesadoras pero ningún movimiento | Distingue *"no hay datos"* de *"los datos son cero"*, igual que Nacionalizaciones |
+| Hay procesadoras pero ningún movimiento pendiente | Distingue *"no hay datos"*, *"ya se acreditaron todos"* y *"los datos son cero"*. La segunda consulta corre **sólo** en el caso vacío, que es cuando hace falta la explicación |
 | Un movimiento cuya procesadora perdió sus alícuotas vigentes | Que **suma igual, con el neto que ya tenía guardado**, pero que no se van a poder cargar movimientos nuevos |
-| Movimientos fuera del horizonte | El importe, la fecha, y **por qué** no entran |
-| Todo lo cargado cae fuera del horizonte | Que la fila va en cero y que lo ya acreditado está en el saldo bancario |
+| Movimientos **posteriores** al horizonte | El importe, la fecha, y por qué no entran |
+| La fila queda en cero teniendo movimientos | El motivo del cero: o ya se acreditaron todos, o son todos posteriores al eje. Se decide con los escalares de la serie y **no** con el filtro de la consulta, para que el aviso sea el correcto sin importar cómo se pidieron los movimientos |
+
+Lo ya acreditado **no genera aviso**. Ver la sección de arriba.
+
+Los movimientos se piden **desde el inicio del eje**, que es una optimización: la regla vive igual en `armarSerie()` y está probada, así que no depende de que el llamador se acuerde de filtrar.
 
 Un movimiento cuya procesadora perdió sus alícuotas **sigue aportando su neto persistido**, y eso está bien: es el neto que se informó. Lo que hace falta saber es que de ahí en adelante esa procesadora no puede calcular nada nuevo — si no, el error aparece recién cuando alguien intenta cargar un movimiento.
 
@@ -273,7 +386,7 @@ php tests/run.php cob_electronicos
 php tests/run.php
 ```
 
-123 casos, todos sin base salvo la última sección, que se saltea sola. Los criterios viven en **helpers estáticos puros**, al estilo de `Saldos::armarSaldosLocales()`: lo delicado de este módulo no son las consultas sino las decisiones.
+226 casos, todos sin base salvo la última sección, que se saltea sola. Los criterios viven en **helpers estáticos puros**, al estilo de `Saldos::armarSaldosLocales()`: lo delicado de este módulo no son las consultas sino las decisiones.
 
 | Qué se verifica | Helper |
 | --- | --- |
@@ -291,16 +404,44 @@ php tests/run.php
 | Reenviar la misma tasa no cuenta como cambio (tolerancia de `DECIMAL(9,6)`) | `planRecalculo()` |
 | Sin alícuotas no se recalcula nada y se avisa que conservan su tasa | `planRecalculo()` |
 | El neto se imputa en la fecha de acreditación, **sin corrimientos** (probado con un sábado) | `armarSerie()` |
-| Un movimiento anterior al eje queda `fuera_horizonte` con aviso, y **no** se reubica en la primera columna | `armarSerie()` |
+| Un movimiento anterior al eje **no** se reubica en la primera columna | `armarSerie()` |
+| Y **no** suma a `fuera_horizonte` ni deja aviso; se devuelve aparte como dato | `armarSerie()` |
+| Con sólo movimientos ya acreditados, la serie va en cero y muda | `armarSerie()` |
 | Una fecha del mes en curso anterior a hoy también queda afuera | `ubicacionEnEje()` |
-| Un movimiento posterior al eje queda `fuera_horizonte` con su propio aviso | `armarSerie()` |
+| Un movimiento posterior al eje sí queda `fuera_horizonte`, con su aviso y su importe | `armarSerie()` |
+| `fuera_eje` cuenta sólo lo posterior; lo ya acreditado se cuenta aparte | `armarMovimientos()` |
 | La suma diaria y la mensual coinciden entre sí y con la suma de netos | `agruparPorDia()` / `agruparPorMes()` |
 | **El total del cuadro son netos, nunca brutos** | `agruparPorDia()` |
 | Dos movimientos de la misma procesadora y fecha se avisan y **siguen estando los dos** | `armarMovimientos()` |
 | Cada fila queda marcada con su ubicación en el eje | `armarMovimientos()` |
 | Sin tablas creadas, el proveedor rinde cero **con un aviso que dice qué falta**, y no el genérico de la clase base | `CobElectronicosProvider` |
-| Sin procesadoras, sin movimientos, y con todo fuera del eje: cero con aviso propio en cada caso | `CobElectronicosProvider` |
-| El eje más lo que quedó afuera son todos los netos | `CobElectronicosProvider` |
+| Sin procesadoras, sin movimientos, y con todo ya acreditado: cero con aviso propio en cada caso | `CobElectronicosProvider` |
+| Con todo ya acreditado, el aviso explica el cero y **no** menciona nada anterior | `CobElectronicosProvider` |
+| El eje más lo posterior son todos los netos pendientes | `CobElectronicosProvider` |
+
+Del importador:
+
+| Qué se verifica | Helper |
+| --- | --- |
+| Los importes se leen en las dos configuraciones regionales de Excel, con y sin separador de miles, con símbolo de moneda | `numeroDesdePlanilla()` |
+| Un vacío o un texto devuelven `null` y **no** cero | `numeroDesdePlanilla()` |
+| Las fechas se leen en cinco formatos, incluido el serial de Excel | `fechaDesdePlanilla()` |
+| Una fecha que no existe o sin año **no se adivina** | `fechaDesdePlanilla()` |
+| **La plantilla que se descarga vuelve a entrar por el parser** | `plantillaCsv()` + `parsearPlanilla()` |
+| El separador se detecta solo (`;` y `,`) | `parsearPlanilla()` |
+| Acepta los títulos de la hoja original (`RAZON_SOC`, `Importe`, `Cobro`) | `parsearPlanilla()` |
+| Las filas vacías que Excel deja abajo se saltean; falta de columna obligatoria y archivo sin datos avisan | `parsearPlanilla()` |
+| Un `.xlsx` se detecta por su firma y el mensaje dice cómo convertirlo | `parsearPlanilla()` |
+| Alta, cambio de importe, cambio de fecha, sin cambios y ya acreditada, cada uno con su motivo | `compararImportacion()` |
+| **El neto de una columna del archivo se ignora**: lo calcula el servidor | `compararImportacion()` |
+| Las seis clases de fila inválida se rechazan, cada una con su motivo y su línea | `compararImportacion()` |
+| Con un solo error **no se importa nada**, y el aviso dice por qué es todo o nada | `compararImportacion()` |
+| Dos filas con la misma clave sin `ID_EXTERNO` son un error que pide llenarlo, y dice contra qué línea choca | `compararImportacion()` |
+| Con `ID_EXTERNO`, dos liquidaciones del mismo día entran las dos | `compararImportacion()` |
+| Una acreditación reprogramada se reconoce por su `ID_EXTERNO` aunque cambie la fecha, sin proponer un alta | `compararImportacion()` |
+| Las bajas se proponen sólo dentro de la ventana y de las procesadoras del archivo, nunca sobre lo ya acreditado ni sobre otra procesadora | `compararImportacion()` |
+| Con la ventana inferida, una baja anterior a la primera fila **no** se propone; declarando el período, sí | `compararImportacion()` |
+| Un archivo que no cambia nada lo dice y no se puede importar | `compararImportacion()` |
 
 La sección contra la base verifica además que el cuadro de la pestaña y la serie del proveedor digan lo mismo: el neto de la pantalla tiene que ser el del tablero **más** lo que quedó fuera del horizonte.
 
@@ -319,6 +460,12 @@ Con los dos scripts ya corridos:
 | Serie del proveedor | 516.698.068,64 en el eje, `fuera_horizonte` en cero, sin avisos |
 | Fila del tablero | *Cobranzas Pagos Electrónicos* con 516.698.068,64 y el mismo detalle por día (9/9: 35.200.603,31) |
 | Reejecutabilidad de la migración | Una segunda corrida no insertaría nada: 34 filas *"Ya estaba cargado"* + 4 *"Ya acreditado"*. Verificado corriendo su diagnóstico **sin la escritura** |
+| Importador, contra los 34 movimientos reales | Un archivo armado desde lo cargado, con una fila de más, una con otro importe y una quitada: el diff dijo **1 alta, 1 cambio, 14 iguales, 1 ya acreditada, 0 errores**, con la diferencia de neto exacta. Con la ventana inferida, 0 bajas; declarando el período, propuso la única que el archivo dejó de traer. **Nada se escribió**: 34 movimientos antes y después |
+| Los endpoints por HTTP, contra Apache | La plantilla baja con `text/csv; charset=UTF-8`, su `Content-Disposition` y el BOM. `getPestana` responde el filtro efectivo (`desde` = inicio del eje, por defecto). La previsualización con una subida real `multipart` detectó el cambio contra la fila cargada, ignoró la ya acreditada y rechazó la procesadora inexistente |
+| El "todo o nada" lo hace cumplir el servidor | Confirmando **con las filas con problemas incluidas**, el servidor respondió *"El archivo tiene 1 fila(s) con problemas, así que no se importó nada"* y la base quedó en 34 movimientos. La regla no depende de que el navegador filtre nada |
+| Las tres sentencias de escritura del importador | `INSERT` con `ORIGEN_DATO='ARCHIVO'` + `ID_EXTERNO` + `ARCHIVO_ORIGEN`, `UPDATE` y baja lógica, ejecutadas contra la base real y **deshechas con un `rollback` explícito**: las tres válidas, el índice único filtrado de `ID_EXTERNO` rechazó un segundo movimiento con el mismo número de liquidación, y la tabla volvió a 34 filas |
+
+Lo único que queda sin ejecutar es una importación real de punta a punta, porque escribiría en producción: es el paso 6 del plan de abajo.
 
 El `.env` del entorno apunta a `ENV=PROD`, así que los dos scripts se corrieron desde SSMS y no desde acá; las verificaciones de arriba son todas de sólo lectura.
 
@@ -333,12 +480,14 @@ Todavía no hay login. Las tres tablas tienen `USUARIO VARCHAR(50) NULL` y hoy s
 ## Cómo probarlo a mano
 
 1. **Correr el DDL.** `sql/cashflow_cob_electronicos.sql` contra `central`. Mirar el cuadro final: Payway y Mercado Pago tienen que salir con `CONCEPTOS_VIGENTES = 2`, `TASA_TOTAL = 0.031000` y `ESTADO = OK`. **Correrlo una segunda vez**: el cuadro tiene que dar exactamente lo mismo y no aparecer filas duplicadas.
-2. **Cargar una alícuota.** Parámetros → Cob. Electrónicos. En *Alícuotas*, botón del lápiz en la fila `IIBB` de Payway → carga una vigencia nueva del 3% desde hoy. El recuadro tiene que anticipar la suma resultante (3,6%) y el mensaje del guardado tiene que decir cuántos movimientos pendientes se recalcularon. La fila vieja queda como `histórica`, no desaparece.
+2. **Cargar una alícuota.** Parámetros → Cob. Electrónicos. En *Alícuotas*, botón del lápiz en la fila `IIBB` de Payway → carga una vigencia nueva del 3% desde hoy. El recuadro tiene que anticipar la suma resultante (3,6%), y arriba tiene que aparecer el **panel verde con la tabla** del recálculo: qué movimientos cambiaron, con qué tasa antes y después y con qué diferencia de neto. La fila vieja queda como `histórica`, no desaparece.
 3. **Dar de alta un movimiento.** Pestaña Cob. Electrónicos → *Nuevo movimiento*. Payway, 1.000.000, fecha de mañana. La vista previa tiene que mostrar el neto estimado, y el mensaje del guardado el neto definitivo con la tasa usada. **Comprobar que el neto no se puede tipear**: la columna es texto en cursiva, no un input.
 4. **Verlo en el cuadro diario.** Abajo, *Acreditaciones por día y por mes*: la fecha de mañana con su neto. El total de las dos tablas tiene que ser el mismo, y el mismo que la tarjeta *Importe Neto*.
 5. **Verlo llegar al tablero.** Pestaña Cashflow, sección Disponibilidades, fila *Cobranzas Pagos Electrónicos*: el mismo neto en la columna de esa fecha. Clickeando el importe se vuelve a esta pestaña.
-6. **Probar el caso del Excel.** Cargar un movimiento con fecha **anterior a hoy**: la fila aparece marcada *"ya acreditada · fuera del horizonte"*, el aviso de arriba explica que ya está en el saldo bancario, y el tablero **no** la muestra. Y desde Parámetros, intentar activar una procesadora nueva sin alícuotas: el switch está deshabilitado y el tooltip dice por qué.
-7. **La migración, al final.** `sql/cashflow_cob_electronicos_migracion.sql`, después de verificar con Tesorería los tres movimientos sin fórmula. Revisar los dos cuadros que imprime y correrlo una segunda vez: el segundo cuadro tiene que decir *"Ya estaba cargado"* en todas las filas.
+6. **Importar una planilla.** *Importar planilla* → *Descargar plantilla* → abrila en Excel, dejá las dos filas de ejemplo o pegá las acreditaciones reales, guardá como CSV y subila. *Ver diferencias* tiene que mostrar los chips del resumen y la tabla de lo que cambia **sin haber escrito nada**. Confirmá, y comprobá que la tabla de arriba y el cuadro diario se actualizan. Después **volvé a subir el mismo archivo**: tiene que decir que no cambia nada y dejar el botón deshabilitado — eso es lo que permite importar seguido sin miedo.
+7. **Probar las bajas del importador.** Sacá una fila del medio del archivo y volvé a subirlo: aparece en *"Cargados que el archivo no trae"* con su importe, y la baja **no** se aplica salvo que marques la casilla. Si la fila que sacás es la primera o la última del período, completá *el archivo cubre desde / hasta* para que la detecte; el panel dice qué ventana usó y si la declaraste vos.
+8. **Probar el caso del Excel.** Cargá un movimiento con fecha **anterior a hoy**: no aparece en la tabla —el filtro arranca en el inicio del eje— y **el tablero no avisa nada**. Prendé *"Ver también las ya acreditadas"* y ahí sí se ve, en gris y marcada. Y desde Parámetros, intentá activar una procesadora nueva sin alícuotas: el switch está deshabilitado y el tooltip dice por qué.
+9. **La migración, al final.** `sql/cashflow_cob_electronicos_migracion.sql`, después de verificar con Tesorería los tres movimientos sin fórmula. Revisar los dos cuadros que imprime y correrlo una segunda vez: el segundo cuadro tiene que decir *"Ya estaba cargado"* en todas las filas.
 
 ---
 
@@ -358,6 +507,8 @@ cashflow/Css/Cob-Electronicos.css
 tests/test_cob_electronicos.php
 ```
 
-Modificados: `Class/CashflowRegistry.php` (`disponible => true` y la clase del proveedor) · `Class/Parametros.php` (módulo `COB_ELECTRONICOS` y sus dos secciones) · `Controller/ParametrosController.php` (ABM de procesadoras y alícuotas) · `Tabs/parametros.php` (el `tab-pane` y el script) · `Css/Parametros.css` (los estilos `pce-`) · `Class/Menu.php` (estado `DATOS`) · `tests/test_providers.php` (siete módulos) · `tests/test_menu.php` (el contador de Ingresos).
+Modificados: `Class/CashflowRegistry.php` (`disponible => true` y la clase del proveedor) · `Class/Parametros.php` (módulo `COB_ELECTRONICOS` y sus dos secciones) · `Controller/ParametrosController.php` (ABM de procesadoras y alícuotas) · `Tabs/parametros.php` (el `tab-pane` y el script) · `Css/Parametros.css` (los estilos `pce-`, incluido el panel de resultado) · `Class/Menu.php` (estado `DATOS`) · `tests/test_providers.php` (siete módulos) · `tests/test_menu.php` (el contador de Ingresos).
+
+El importador no agregó archivos: la plantilla, el parseo y el diff viven en `Class/CobElectronicos.php` con el resto de los criterios del módulo, sus dos endpoints en `Controller/CobElectronicosController.php`, y su panel en la pestaña. **Ninguna dependencia nueva**: el CSV se lee con `str_getcsv` y la conversión de codificación con `mbstring`, que ya estaba en uso.
 
 Ver `README-cashflow.md` y `README-saldos.md`.

@@ -331,16 +331,29 @@ chequear('el que cae fuera del tramo diario va a la columna de su mes',
 // bancario, asi que reubicarla la contaria dos veces.
 chequear('un movimiento ya acreditado no se reubica en la primera columna',
     0.0, $serie['dias']['2026-09-06']);
-chequear('queda en fuera_horizonte, junto con el posterior al eje',
-    775200.0, $serie['fuera_horizonte']);
-chequear('y no se descarta en silencio: hay dos avisos', 2, count($serie['warnings']));
-chequear('el aviso del ya acreditado explica el doble conteo',
-    true, strpos($serie['warnings'][0], 'dos veces') !== false);
-chequear('y dice de que fecha es',
-    true, strpos($serie['warnings'][0], '02/09/2026') !== false);
+
+// Y TAMPOCO SE AVISA NI SUMA A fuera_horizonte. No es plata que el tablero
+// informe de menos: es plata que el tablero informa por otra fila, la del saldo
+// bancario. Avisarla todos los dias seria ruido sobre algo que ya paso.
+chequear('lo ya acreditado no suma a fuera_horizonte', 290700.0, $serie['fuera_horizonte']);
+chequear('se devuelve aparte, como dato informativo', 484500.0, $serie['ya_acreditado']);
+chequear('y no deja ningun aviso por eso: solo queda el del posterior',
+    1, count($serie['warnings']));
 chequear('el aviso del posterior dice que no tiene columna',
-    true, strpos($serie['warnings'][1], 'posterior') !== false);
-chequear('con el importe', true, strpos($serie['warnings'][1], '290.700,00') !== false);
+    true, strpos($serie['warnings'][0], 'posterior') !== false);
+chequear('con el importe', true, strpos($serie['warnings'][0], '290.700,00') !== false);
+chequear('y ninguno menciona el doble conteo de lo ya acreditado',
+    false, strpos(implode(' ', $serie['warnings']), 'dos veces') !== false);
+
+// Con SOLO movimientos ya acreditados la serie queda en cero y muda: no hay
+// nada que hacer con eso.
+$soloAcreditados = CobElectronicos::armarSerie(
+    CobElectronicos::armarMovimientos([$paraSerie[2]], $h)['filas'], $h);
+
+chequear('con solo movimientos ya acreditados la serie va en cero',
+    0.0, array_sum($soloAcreditados['dias']));
+chequear('sin nada en fuera_horizonte', 0.0, $soloAcreditados['fuera_horizonte']);
+chequear('y sin ningun aviso', 0, count($soloAcreditados['warnings']));
 
 chequear('la moneda de origen es pesos', 'ARS', $serie['moneda_origen']);
 chequear('y no hay tipo de cambio que informar', null, $serie['tipo_cambio']);
@@ -408,8 +421,15 @@ chequear('el total bruto', 3800000.0, $armado['totales']['bruto']);
 chequear('el total neto', 3682200.0, $armado['totales']['neto']);
 chequear('lo retenido es la diferencia', 117800.0, $armado['totales']['retenido']);
 chequear('y se cuentan los movimientos', 4, $armado['totales']['movimientos']);
-chequear('se informa cuanto queda fuera del eje', 775200.0, $armado['totales']['fuera_eje']);
-chequear('y cuantos movimientos son', 2, $armado['totales']['fuera_eje_movimientos']);
+
+// 'fuera_eje' es SOLO lo posterior: es lo unico que el tablero deja de mostrar
+// teniendo que mostrarlo. Lo ya acreditado se cuenta aparte.
+chequear('se informa cuanto queda posterior al eje', 290700.0, $armado['totales']['fuera_eje']);
+chequear('y cuantos movimientos son', 1, $armado['totales']['fuera_eje_movimientos']);
+chequear('lo ya acreditado se cuenta aparte', 484500.0, $armado['totales']['ya_acreditado']);
+chequear('con su propio conteo', 1, $armado['totales']['ya_acreditado_movimientos']);
+chequear('y no genera aviso', false,
+    strpos(implode(' ', $armado['avisos']), 'ya está informada') !== false);
 
 chequear('hay un total por procesadora', 2, count($armado['por_procesadora']));
 chequear('el de Mercado Pago suma sus dos movimientos',
@@ -543,12 +563,14 @@ chequear('los movimientos siguen sumando su neto guardado',
     969000.0, $s['dias']['2026-09-12']);
 chequear('se avisa que la procesadora perdio sus alicuotas', true,
     strpos($avisos, 'no tiene alicuotas vigentes') !== false);
-chequear('y tambien lo que quedo fuera del horizonte', true,
-    strpos($avisos, 'fuera del horizonte') !== false ||
-    strpos($avisos, 'anterior al inicio del horizonte') !== false);
+chequear('y tambien lo posterior al horizonte', true,
+    strpos($avisos, 'posterior al final del horizonte') !== false);
+chequear('pero nada de lo ya acreditado', false,
+    strpos($avisos, 'anterior') !== false);
 
-// 5. Todo lo cargado cae fuera del horizonte. Cero, pero con explicacion.
-$todoAfuera = proveedorConDoble(function ($f) {
+// 5. Todo lo cargado ya se acredito. La fila va en cero y el aviso explica el
+//    cero -que es lo unico que hay que explicar-, sin reclamar nada del pasado.
+$todoAcreditado = proveedorConDoble(function ($f) {
     $f->procesadoras = [['ID' => 1, 'RAZON_SOCIAL' => 'Payway', 'ACTIVO' => 1]];
     $f->alicuotas = [1 => [
         ['ID' => 1, 'CONCEPTO' => 'IIBB', 'ALICUOTA' => 0.031,
@@ -561,12 +583,14 @@ $todoAfuera = proveedorConDoble(function ($f) {
     ];
 });
 
-$s = $todoAfuera->series($h)['COBRANZA'];
+$s = $todoAcreditado->series($h)['COBRANZA'];
 
-chequear('con todo fuera del horizonte la fila va en cero', 0.0, array_sum($s['dias']));
-chequear('el importe no se descarta en silencio', 969.0, $s['fuera_horizonte']);
-chequear('y el aviso remite al saldo bancario', true,
-    strpos(implode(' ', $todoAfuera->warnings()), 'saldo bancario') !== false);
+chequear('con todo ya acreditado la fila va en cero', 0.0, array_sum($s['dias']));
+chequear('y no queda nada en fuera_horizonte', 0.0, $s['fuera_horizonte']);
+chequear('el aviso explica el cero remitiendo al saldo bancario', true,
+    strpos(implode(' ', $todoAcreditado->warnings()), 'saldo bancario') !== false);
+chequear('y dice que no hay acreditaciones pendientes', true,
+    strpos(implode(' ', $todoAcreditado->warnings()), 'pendientes') !== false);
 
 // 6. El camino normal: la serie del proveedor es la suma de netos.
 $normal = proveedorConDoble(function ($f) use ($paraSerie, $alicuotas) {
@@ -582,13 +606,410 @@ chequear('la serie devuelve las claves diarias del eje', 28, count($s['dias']));
 chequear('y las mensuales', 12, count($s['meses']));
 chequear('el total del eje es la suma de netos que entran',
     2907000.0, array_sum($s['dias']) + array_sum($s['meses']));
-chequear('y lo que no entra queda informado', 775200.0, $s['fuera_horizonte']);
-chequear('el eje mas lo de afuera son todos los netos',
-    3682200.0, array_sum($s['dias']) + array_sum($s['meses']) + $s['fuera_horizonte']);
+chequear('y lo posterior al eje queda informado', 290700.0, $s['fuera_horizonte']);
+chequear('el eje mas lo posterior son todos los netos pendientes',
+    3197700.0, array_sum($s['dias']) + array_sum($s['meses']) + $s['fuera_horizonte']);
 
 // El proveedor devuelve la serie que declara el registro, y una sola.
 chequear('devuelve exactamente la serie del registro',
     ['COBRANZA'], array_keys($normal->series($h)));
+
+/* ================================================================
+   IMPORTADOR: leer la planilla
+   ================================================================ */
+seccion('los importes de una planilla, en cualquier configuracion regional');
+
+// Lo que exporta Excel en espanol y lo que exporta en ingles. El usuario no
+// tiene que saber en cual esta.
+chequear('coma decimal', 1069326.0, CobElectronicos::numeroDesdePlanilla('1069326,00'));
+chequear('punto decimal', 1069326.0, CobElectronicos::numeroDesdePlanilla('1069326.00'));
+chequear('miles con punto y decimal con coma',
+    3757900.50, CobElectronicos::numeroDesdePlanilla('3.757.900,50'));
+chequear('miles con coma y decimal con punto',
+    3757900.50, CobElectronicos::numeroDesdePlanilla('3,757,900.50'));
+chequear('solo miles con punto', 1648264.0, CobElectronicos::numeroDesdePlanilla('1.648.264'));
+chequear('con simbolo de moneda y espacios',
+    1234.56, CobElectronicos::numeroDesdePlanilla(' $ 1.234,56 '));
+chequear('un entero pelado', 99000.0, CobElectronicos::numeroDesdePlanilla('99000'));
+chequear('un negativo se lee negativo', -500.0, CobElectronicos::numeroDesdePlanilla('-500'));
+
+// null y no cero: la diferencia entre "no es un numero" y "es cero" es lo que
+// hace que la fila sea un error en vez de un movimiento de cero pesos.
+chequear('vacio no es cero', null, CobElectronicos::numeroDesdePlanilla(''));
+chequear('un texto tampoco', null, CobElectronicos::numeroDesdePlanilla('no aplica'));
+
+seccion('las fechas de una planilla');
+
+chequear('dd/mm/aaaa', '2026-09-07', CobElectronicos::fechaDesdePlanilla('07/09/2026'));
+chequear('aaaa-mm-dd', '2026-09-07', CobElectronicos::fechaDesdePlanilla('2026-09-07'));
+chequear('dd-mm-aaaa', '2026-09-07', CobElectronicos::fechaDesdePlanilla('7-9-2026'));
+chequear('dos digitos de anio', '2026-09-07', CobElectronicos::fechaDesdePlanilla('07/09/26'));
+chequear('con hora al final', '2026-09-07',
+    CobElectronicos::fechaDesdePlanilla('2026-09-07 00:00:00'));
+
+// Una fecha que no existe NO se adivina: la fila queda como error, con su linea.
+chequear('el 31 de febrero no existe', null, CobElectronicos::fechaDesdePlanilla('31/02/2026'));
+chequear('una fecha sin anio no se completa', null,
+    CobElectronicos::fechaDesdePlanilla('07/09'));
+chequear('vacio es null', null, CobElectronicos::fechaDesdePlanilla(''));
+
+// El serial de Excel es la red para una columna que quedo con formato numero.
+chequear('el serial de Excel se convierte con base 1899-12-30',
+    date('Y-m-d', strtotime('1899-12-30 +46000 day')),
+    CobElectronicos::fechaDesdePlanilla('46000'));
+
+seccion('el parseo de la planilla');
+
+// La plantilla que se descarga tiene que poder volver a entrar: si no, el
+// formato que se propone no es el que el parser acepta.
+$plantilla = CobElectronicos::plantillaCsv('2026-09-09');
+$leido = CobElectronicos::parsearPlanilla($plantilla);
+
+chequear('la plantilla vuelve a entrar por el parser', 2, count($leido['filas']));
+chequear('con el separador que usa Excel en espanol', ';', $leido['separador']);
+chequear('y la primera fila de ejemplo es cargable',
+    'Payway', $leido['filas'][0]['procesadora']);
+chequear('la segunda trae numero de liquidacion',
+    'LIQ-00123', $leido['filas'][1]['id_externo']);
+
+// Un CSV con coma, que es lo que exporta Excel en ingles.
+$conComas = "PROCESADORA,IMPORTE_BRUTO,FECHA_ACREDITACION\nPayway,1069326.00,2026-09-10\n";
+
+chequear('el separador coma se detecta solo',
+    ',', CobElectronicos::parsearPlanilla($conComas)['separador']);
+
+// Los titulos de la hoja original, para poder pegar una columna del Excel viejo
+// sin renombrar nada.
+$comoElExcel = "RAZON_SOC;Importe;Cobro\nMercado Pago;35.257.406,00;09/09/2026\n";
+$leidoExcel = CobElectronicos::parsearPlanilla($comoElExcel);
+
+chequear('acepta los titulos del Excel original',
+    'Mercado Pago', $leidoExcel['filas'][0]['procesadora']);
+chequear('con su importe', '35.257.406,00', $leidoExcel['filas'][0]['importe_bruto']);
+
+// Las lineas vacias que Excel deja debajo de los datos no son un error.
+$conVacias = "PROCESADORA;IMPORTE_BRUTO;FECHA_ACREDITACION\nPayway;100;2026-09-10\n;;\n;;\n";
+
+chequear('las filas vacias se saltean', 1,
+    count(CobElectronicos::parsearPlanilla($conVacias)['filas']));
+
+chequearLanza('sin una columna obligatoria no se puede leer el archivo', function () {
+    CobElectronicos::parsearPlanilla("PROCESADORA;IMPORTE_BRUTO\nPayway;100\n");
+});
+
+chequearLanza('un archivo sin filas de datos avisa', function () {
+    CobElectronicos::parsearPlanilla("PROCESADORA;IMPORTE_BRUTO;FECHA_ACREDITACION\n");
+});
+
+// Un .xlsx es un ZIP: se detecta por su firma para poder decir QUE HACER, en
+// lugar de fallar con un archivo lleno de bytes binarios.
+try {
+    CobElectronicos::parsearPlanilla("PK\x03\x04algo binario");
+    $mensajeXlsx = '';
+} catch (Throwable $e) {
+    $mensajeXlsx = $e->getMessage();
+}
+
+chequear('un .xlsx se detecta', true, strpos($mensajeXlsx, '.xlsx') !== false);
+chequear('y el mensaje dice como convertirlo',
+    true, strpos($mensajeXlsx, 'CSV') !== false);
+
+/* ================================================================
+   IMPORTADOR: que cambiaria
+   ================================================================ */
+seccion('el diff de una importacion');
+
+$procesadorasImp = [
+    ['ID' => 1, 'RAZON_SOCIAL' => 'Payway', 'ACTIVO' => 1],
+    ['ID' => 2, 'RAZON_SOCIAL' => 'Mercado Pago', 'ACTIVO' => 1],
+    ['ID' => 3, 'RAZON_SOCIAL' => 'Naranja X', 'ACTIVO' => 0]
+];
+
+$alicuotasImp = [1 => $alicuotas, 2 => $alicuotas, 3 => $alicuotas];
+
+/** Lo que ya esta cargado: dos acreditaciones de Payway */
+$cargados = [
+    ['id' => 10, 'id_procesadora' => 1, 'procesadora' => 'Payway',
+     'importe_bruto' => 1000000.0, 'fecha_acreditacion' => '2026-09-10',
+     'tasa_aplicada' => 0.031, 'importe_neto' => 969000.0, 'id_externo' => null,
+     'origen_dato' => 'MANUAL'],
+    ['id' => 11, 'id_procesadora' => 1, 'procesadora' => 'Payway',
+     'importe_bruto' => 500000.0, 'fecha_acreditacion' => '2026-09-11',
+     'tasa_aplicada' => 0.031, 'importe_neto' => 484500.0, 'id_externo' => null,
+     'origen_dato' => 'MANUAL']
+];
+
+/** Arma las filas crudas de un archivo, como las devuelve el parser */
+function filaArchivo($linea, $procesadora, $bruto, $fecha, $idExterno = '', $obs = '') {
+    return [
+        'linea' => $linea,
+        'procesadora' => $procesadora,
+        'importe_bruto' => $bruto,
+        'fecha_acreditacion' => $fecha,
+        'id_externo' => $idExterno,
+        'observaciones' => $obs
+    ];
+}
+
+$archivo = [
+    // Igual a lo cargado: no se toca
+    filaArchivo(2, 'Payway', '1000000,00', '10/09/2026'),
+    // El importe cambio
+    filaArchivo(3, 'Payway', '600000,00', '11/09/2026'),
+    // Nueva
+    filaArchivo(4, 'Mercado Pago', '2000000,00', '12/09/2026'),
+    // Ya acreditada: no se importa y no es error
+    filaArchivo(5, 'Payway', '300000,00', '01/09/2026')
+];
+
+$diff = CobElectronicos::compararImportacion($archivo, $cargados, $procesadorasImp,
+    $alicuotasImp, '2026-09-06');
+
+chequear('una fila identica no se toca', 1, $diff['resumen']['sin_cambios']);
+chequear('una fila con otro importe es un cambio', 1, $diff['resumen']['cambios']);
+chequear('una fila que no estaba es un alta', 1, $diff['resumen']['altas']);
+chequear('una fila ya acreditada no se importa', 1, $diff['resumen']['ya_acreditadas']);
+chequear('y no cuenta como error', 0, $diff['resumen']['errores']);
+chequear('se puede importar', true, $diff['puede_importar']);
+
+$porLinea = [];
+
+foreach ($diff['filas'] as $f) {
+    $porLinea[$f['linea']] = $f;
+}
+
+chequear('el alta trae el neto ya calculado por el servidor',
+    1938000.0, $porLinea[4]['importe_neto']);
+chequear('con la tasa vigente a su fecha', 0.031, $porLinea[4]['tasa_aplicada']);
+chequear('el cambio dice el neto anterior', 484500.0, $porLinea[3]['neto_anterior']);
+chequear('y el nuevo', 581400.0, $porLinea[3]['importe_neto']);
+chequear('con la diferencia', 96900.0, $porLinea[3]['diferencia']);
+chequear('el motivo dice que cambio',
+    true, strpos($porLinea[3]['motivo'], 'importe bruto pasa') !== false);
+chequear('el cambio queda enganchado al movimiento cargado', 11, $porLinea[3]['id']);
+chequear('la fila ya acreditada explica por que no se importa',
+    true, strpos($porLinea[5]['motivo'], 'saldo bancario') !== false);
+chequear('el neto que se agrega es el del alta', 1938000.0, $diff['resumen']['neto_altas']);
+chequear('y la diferencia de los cambios va aparte', 96900.0,
+    $diff['resumen']['neto_diferencia']);
+chequear('el rango del archivo se informa', '2026-09-10', $diff['rango']['desde']);
+chequear('de punta a punta', '2026-09-12', $diff['rango']['hasta']);
+
+seccion('el neto nunca sale del archivo');
+
+// Una columna de neto en el archivo se ignora: el titulo no esta mapeado y el
+// neto lo calcula el servidor. Es la misma regla que la carga manual.
+$conNeto = "PROCESADORA;IMPORTE_BRUTO;FECHA_ACREDITACION;IMPORTE_NETO\n"
+    . "Payway;1000000,00;12/09/2026;999999999\n";
+
+$diffNeto = CobElectronicos::compararImportacion(
+    CobElectronicos::parsearPlanilla($conNeto)['filas'],
+    [], $procesadorasImp, $alicuotasImp, '2026-09-06');
+
+chequear('el neto del archivo se ignora', 969000.0, $diffNeto['filas'][0]['importe_neto']);
+
+seccion('las filas que el importador rechaza');
+
+$conErrores = [
+    filaArchivo(2, 'Procesadora Inventada', '1000', '10/09/2026'),
+    filaArchivo(3, 'Naranja X', '1000', '10/09/2026'),
+    filaArchivo(4, 'Payway', '0', '10/09/2026'),
+    filaArchivo(5, 'Payway', 'mil pesos', '10/09/2026'),
+    filaArchivo(6, 'Payway', '1000', 'el jueves'),
+    filaArchivo(7, '', '1000', '10/09/2026')
+];
+
+$diffErr = CobElectronicos::compararImportacion($conErrores, [], $procesadorasImp,
+    $alicuotasImp, '2026-09-06');
+
+chequear('las seis filas quedan como error', 6, $diffErr['resumen']['errores']);
+chequear('y con un solo error no se importa NADA', false, $diffErr['puede_importar']);
+chequear('el aviso explica por que es todo o nada',
+    true, strpos(implode(' ', $diffErr['avisos']), 'a medias') !== false);
+
+$porLineaErr = [];
+
+foreach ($diffErr['filas'] as $f) {
+    $porLineaErr[$f['linea']] = $f;
+}
+
+chequear('una procesadora que no existe dice donde darla de alta',
+    true, strpos($porLineaErr[2]['motivo'], 'Parámetros') !== false);
+chequear('una procesadora inhabilitada no admite movimientos',
+    true, strpos($porLineaErr[3]['motivo'], 'inhabilitada') !== false);
+chequear('un importe en cero se rechaza',
+    true, strpos($porLineaErr[4]['motivo'], 'mayor a cero') !== false);
+chequear('un importe que no es numero se rechaza',
+    true, strpos($porLineaErr[5]['motivo'], 'no es un número') !== false);
+chequear('una fecha que no se entiende dice que formato usar',
+    true, strpos($porLineaErr[6]['motivo'], 'dd/mm/aaaa') !== false);
+chequear('sin procesadora no hay fila', true,
+    strpos($porLineaErr[7]['motivo'], 'Falta la procesadora') !== false);
+
+// Cada fila devuelve lo que vino EN EL ARCHIVO. Es lo que permite que la
+// confirmacion mande la misma entrada -las filas con problemas incluidas- y que
+// el servidor vuelva a rechazarlas: el "con un solo error no se importa nada" lo
+// hace cumplir el servidor y no el navegador.
+chequear('la fila conserva el valor crudo del archivo',
+    'mil pesos', $porLineaErr[5]['crudo']['importe_bruto']);
+chequear('y volver a pasarla por el diff la rechaza igual', 1,
+    CobElectronicos::compararImportacion(
+        [array_merge(['linea' => 5], $porLineaErr[5]['crudo'])],
+        [], $procesadorasImp, $alicuotasImp, '2026-09-06')['resumen']['errores']);
+
+// Sin alicuota vigente a esa fecha no se puede calcular el neto: es la misma
+// regla que la carga manual, aplicada al archivo.
+$sinAli = CobElectronicos::compararImportacion(
+    [filaArchivo(2, 'Payway', '1000', '10/09/2026')],
+    [], $procesadorasImp, [], '2026-09-06');
+
+chequear('sin alicuota vigente la fila del archivo se rechaza',
+    1, $sinAli['resumen']['errores']);
+chequear('con el motivo', true,
+    strpos($sinAli['filas'][0]['motivo'], 'alícuota') !== false);
+
+seccion('dos liquidaciones el mismo dia');
+
+// Dos filas con la misma clave y sin ID_EXTERNO son un ERROR y no un aviso: sin
+// el numero de liquidacion no hay forma de saber cual es cual.
+$repetidas = [
+    filaArchivo(2, 'Payway', '1000', '10/09/2026'),
+    filaArchivo(3, 'Payway', '2000', '10/09/2026')
+];
+
+$diffRep = CobElectronicos::compararImportacion($repetidas, [], $procesadorasImp,
+    $alicuotasImp, '2026-09-06');
+
+chequear('la segunda queda como error', 1, $diffRep['resumen']['errores']);
+chequear('y el mensaje pide llenar ID_EXTERNO',
+    true, strpos($diffRep['filas'][1]['motivo'], 'ID_EXTERNO') !== false);
+chequear('diciendo con que linea choca',
+    true, strpos($diffRep['filas'][1]['motivo'], 'línea 2') !== false);
+
+// Con ID_EXTERNO, las dos entran.
+$conExterno = [
+    filaArchivo(2, 'Payway', '1000', '10/09/2026', 'LIQ-1'),
+    filaArchivo(3, 'Payway', '2000', '10/09/2026', 'LIQ-2')
+];
+
+$diffExt = CobElectronicos::compararImportacion($conExterno, [], $procesadorasImp,
+    $alicuotasImp, '2026-09-06');
+
+chequear('con numero de liquidacion las dos son altas', 2, $diffExt['resumen']['altas']);
+chequear('y ninguna es error', 0, $diffExt['resumen']['errores']);
+
+// El ID_EXTERNO manda sobre la fecha: es el caso de una acreditacion
+// reprogramada por la procesadora.
+$cargadoConExterno = [
+    ['id' => 20, 'id_procesadora' => 1, 'procesadora' => 'Payway',
+     'importe_bruto' => 1000.0, 'fecha_acreditacion' => '2026-09-10',
+     'tasa_aplicada' => 0.031, 'importe_neto' => 969.0, 'id_externo' => 'LIQ-1',
+     'origen_dato' => 'ARCHIVO']
+];
+
+$diffMovida = CobElectronicos::compararImportacion(
+    [filaArchivo(2, 'Payway', '1000', '15/09/2026', 'LIQ-1')],
+    $cargadoConExterno, $procesadorasImp, $alicuotasImp, '2026-09-06');
+
+chequear('una acreditacion reprogramada se reconoce por su numero de liquidacion',
+    1, $diffMovida['resumen']['cambios']);
+chequear('y el motivo dice que se movio la fecha',
+    true, strpos($diffMovida['filas'][0]['motivo'], 'fecha pasa') !== false);
+chequear('sin proponer un alta', 0, $diffMovida['resumen']['altas']);
+
+seccion('lo que el archivo ya no trae');
+
+// ES LO QUE HACE QUE NO HAYA QUE COMPARAR A MANO: una acreditacion que la
+// procesadora dio de baja se queda para siempre si ninguna importacion la
+// menciona.
+$cargadosBaja = [
+    // Dentro del rango del archivo y de su procesadora: candidato
+    ['id' => 30, 'id_procesadora' => 1, 'procesadora' => 'Payway',
+     'importe_bruto' => 700000.0, 'fecha_acreditacion' => '2026-09-11',
+     'tasa_aplicada' => 0.031, 'importe_neto' => 678300.0, 'id_externo' => null,
+     'origen_dato' => 'ARCHIVO'],
+    // Otra procesadora: el archivo no la estaba mirando
+    ['id' => 31, 'id_procesadora' => 2, 'procesadora' => 'Mercado Pago',
+     'importe_bruto' => 800000.0, 'fecha_acreditacion' => '2026-09-11',
+     'tasa_aplicada' => 0.031, 'importe_neto' => 775200.0, 'id_externo' => null,
+     'origen_dato' => 'MANUAL'],
+    // Fuera del rango de fechas del archivo
+    ['id' => 32, 'id_procesadora' => 1, 'procesadora' => 'Payway',
+     'importe_bruto' => 900000.0, 'fecha_acreditacion' => '2026-09-25',
+     'tasa_aplicada' => 0.031, 'importe_neto' => 872100.0, 'id_externo' => null,
+     'origen_dato' => 'MANUAL'],
+    // Ya acreditada: no se toca nunca
+    ['id' => 33, 'id_procesadora' => 1, 'procesadora' => 'Payway',
+     'importe_bruto' => 100000.0, 'fecha_acreditacion' => '2026-09-02',
+     'tasa_aplicada' => 0.031, 'importe_neto' => 96900.0, 'id_externo' => null,
+     'origen_dato' => 'MANUAL']
+];
+
+$diffBajas = CobElectronicos::compararImportacion(
+    [filaArchivo(2, 'Payway', '1000000', '10/09/2026'),
+     filaArchivo(3, 'Payway', '1000000', '12/09/2026')],
+    $cargadosBaja, $procesadorasImp, $alicuotasImp, '2026-09-06');
+
+chequear('solo se propone dar de baja lo que el archivo cubria', 1,
+    $diffBajas['resumen']['bajas']);
+chequear('y es el que cae dentro de su rango y su procesadora', 30,
+    $diffBajas['bajas'][0]['id']);
+chequear('el motivo dice el rango que el archivo cubre',
+    true, strpos($diffBajas['bajas'][0]['motivo'], '10/09/2026') !== false);
+chequear('el aviso avisa que la baja no se aplica sola',
+    true, strpos(implode(' ', $diffBajas['avisos']), 'expresamente') !== false);
+chequear('el neto que se daria de baja se informa', 678300.0,
+    $diffBajas['resumen']['neto_bajas']);
+
+// EL CASO QUE EL RANGO INFERIDO NO PUEDE VER: la procesadora dio de baja la
+// PRIMERA acreditacion del periodo, asi que esa fecha ya no esta en el archivo y
+// el rango inferido arranca despues. Sin declarar el periodo, esa baja no se
+// propone -y no se adivina-.
+$diffPrimeraCaida = CobElectronicos::compararImportacion(
+    [filaArchivo(2, 'Payway', '1000000', '12/09/2026')],
+    $cargadosBaja, $procesadorasImp, $alicuotasImp, '2026-09-06');
+
+chequear('con el rango inferido, una baja anterior a la primera fila no se propone',
+    0, $diffPrimeraCaida['resumen']['bajas']);
+chequear('y se informa que la ventana se infirio',
+    false, $diffPrimeraCaida['ventana']['declarada']);
+
+// Declarando el periodo -que el usuario conoce, es el que exporto- si se ve.
+$diffPeriodo = CobElectronicos::compararImportacion(
+    [filaArchivo(2, 'Payway', '1000000', '12/09/2026')],
+    $cargadosBaja, $procesadorasImp, $alicuotasImp, '2026-09-06',
+    ['desde' => '2026-09-07', 'hasta' => '2026-09-20']);
+
+chequear('declarando el periodo, la baja aparece', 1, $diffPeriodo['resumen']['bajas']);
+chequear('y es la que el archivo dejo de traer', 30, $diffPeriodo['bajas'][0]['id']);
+chequear('la ventana queda marcada como declarada',
+    true, $diffPeriodo['ventana']['declarada']);
+chequear('con las fechas declaradas', '2026-09-07', $diffPeriodo['ventana']['desde']);
+
+// Ni siquiera declarando un periodo largo se toca lo ya acreditado: el corte por
+// el inicio del eje manda sobre el periodo.
+$diffPeriodoLargo = CobElectronicos::compararImportacion(
+    [filaArchivo(2, 'Payway', '1000000', '12/09/2026')],
+    $cargadosBaja, $procesadorasImp, $alicuotasImp, '2026-09-06',
+    ['desde' => '2026-01-01', 'hasta' => '2026-12-31']);
+
+$idsBaja = array_map(function ($b) { return $b['id']; }, $diffPeriodoLargo['bajas']);
+
+chequear('un periodo largo no alcanza lo ya acreditado',
+    false, in_array(33, $idsBaja, true));
+chequear('pero si el resto de la procesadora dentro del periodo',
+    true, in_array(32, $idsBaja, true));
+chequear('y nunca las de otra procesadora', false, in_array(31, $idsBaja, true));
+
+// Un archivo que no cambia nada lo dice, en lugar de dejar el boton habilitado.
+$sinNada = CobElectronicos::compararImportacion(
+    [filaArchivo(2, 'Payway', '1000000,00', '10/09/2026')],
+    [$cargados[0]], $procesadorasImp, $alicuotasImp, '2026-09-06');
+
+chequear('un archivo que no cambia nada no se puede importar',
+    false, $sinNada['puede_importar']);
+chequear('y lo dice', true,
+    strpos(implode(' ', $sinNada['avisos']), 'no cambia nada') !== false);
 
 /* ================================================================
    Contra datos reales

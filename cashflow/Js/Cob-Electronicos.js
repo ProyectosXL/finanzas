@@ -10,10 +10,18 @@
  * devuelve el guardado, calculado por CobElectronicos::importeNeto() con la
  * alícuota vigente a la fecha de acreditación.
  *
- * Un movimiento que queda fuera del horizonte se ve igual, en su fila, marcado
- * y con el motivo. Nunca se esconde: es plata informada que el tablero no
- * muestra, y esconderla haría que el total de la pantalla y el del tablero no
- * cerraran sin explicación.
+ * Un movimiento POSTERIOR al horizonte se ve igual, en su fila, marcado y con el
+ * motivo: es plata informada que el tablero todavía no muestra, y esconderla
+ * haría que el total de la pantalla y el del tablero no cerraran sin
+ * explicación.
+ *
+ * Las acreditaciones YA OCURRIDAS, en cambio, no se muestran por defecto: ya
+ * pasaron, ya entraron a la cuenta y las informa el saldo bancario. Se traen con
+ * el switch, y ahí se marcan de forma neutra —no son un problema—.
+ *
+ * El importador va en dos pasos: se sube el archivo, se muestran las
+ * diferencias contra lo cargado y recién después se escribe. Es lo que permite
+ * actualizar seguido sin comparar fila por fila.
  */
 
 (function() {
@@ -26,6 +34,11 @@
     // Id del movimiento que se está editando en la grilla, o null
     var editando = null;
 
+    // Lo último que devolvió la previsualización del importador. Se guarda para
+    // poder confirmarlo, pero el servidor vuelve a calcular el diff igual: esto
+    // es lo que se está mostrando, no lo que se va a escribir.
+    var importacion = null;
+
     function inicializar() {
         conectar('btnRefreshCobel', function() { cargar(); });
         conectar('btnNuevoMovimiento', function() { modoAlta(true); });
@@ -33,6 +46,16 @@
         conectar('btnAgregarMovimiento', agregarMovimiento);
         conectar('btnFiltrar', function() { cargar(); });
         conectar('btnLimpiarFiltro', limpiarFiltro);
+
+        conectar('btnImportar', function() { panelImportar(true); });
+        conectar('btnCerrarImportar', function() { panelImportar(false); });
+        conectar('btnPrevisualizar', previsualizar);
+
+        var verAcreditadas = document.getElementById('verAcreditadas');
+
+        if (verAcreditadas) {
+            verAcreditadas.addEventListener('change', function() { cargar(); });
+        }
 
         ['nuevoProcesadora', 'nuevoBruto', 'nuevoFecha'].forEach(function(id) {
             var el = document.getElementById(id);
@@ -86,6 +109,7 @@
         var proc = valor('filtroProcesadora');
         var desde = valor('filtroDesde');
         var hasta = valor('filtroHasta');
+        var verAcreditadas = document.getElementById('verAcreditadas');
 
         var partes = [];
 
@@ -101,6 +125,10 @@
             partes.push('hasta=' + encodeURIComponent(hasta));
         }
 
+        if (verAcreditadas && verAcreditadas.checked) {
+            partes.push('incluir_acreditadas=1');
+        }
+
         return partes.length ? ('&' + partes.join('&')) : '';
     }
 
@@ -108,6 +136,13 @@
         setValor('filtroProcesadora', '0');
         setValor('filtroDesde', '');
         setValor('filtroHasta', '');
+
+        var verAcreditadas = document.getElementById('verAcreditadas');
+
+        if (verAcreditadas) {
+            verAcreditadas.checked = false;
+        }
+
         cargar();
     }
 
@@ -135,10 +170,12 @@
             ? ('Es lo que el tablero consume · retención ' + tasaMedia(t))
             : 'Lo que entra a la cuenta');
 
+        // Sólo lo POSTERIOR al eje. Lo ya acreditado no cuenta acá: no le falta
+        // al tablero, lo informa el saldo bancario.
         texto('cobelFueraEje', (t.fuera_eje_movimientos > 0) ? pesos(t.fuera_eje) : '—');
         texto('cobelDetalleFuera', (t.fuera_eje_movimientos > 0)
-            ? (t.fuera_eje_movimientos + ' movimiento(s) que el tablero no muestra')
-            : 'Todo lo cargado entra al horizonte');
+            ? (t.fuera_eje_movimientos + ' movimiento(s) más allá del eje del tablero')
+            : 'Todo lo pendiente entra al horizonte');
 
         var eje = datos.eje || {};
 
@@ -246,9 +283,13 @@
     }
 
     function filaLectura(f) {
-        var fuera = !f.entra_al_tablero;
+        // Dos marcas distintas y no una: una acreditación posterior al eje es
+        // algo que hay que mirar (el tablero no la muestra todavía), y una ya
+        // acreditada no es un problema, ya pasó.
+        var clase = (f.ubicacion_eje === 'POSTERIOR') ? ' class="cobel-fuera-eje"'
+            : ((f.ubicacion_eje === 'ANTERIOR') ? ' class="cobel-acreditada"' : '');
 
-        return '<tr data-mov="' + f.id + '"' + (fuera ? ' class="cobel-fuera-eje"' : '') + '>' +
+        return '<tr data-mov="' + f.id + '"' + clase + '>' +
             '<td class="fw-semibold">' + escapar(f.procesadora) + subtitulo(f) + '</td>' +
             '<td class="text-end cobel-num">' + pesos(f.importe_bruto) + '</td>' +
             '<td class="text-center">' + fecha(f.fecha_acreditacion) + marcaEje(f) + '</td>' +
@@ -328,16 +369,17 @@
     /**
      * La marca de por qué un movimiento no entra al tablero.
      *
-     * Se dice el motivo y no sólo "fuera del horizonte": una fecha pasada no es
-     * un error de carga, es plata que ya entró y que el saldo bancario de la
-     * pestaña Saldos ya informa. Sin el motivo, la marca se lee como un dato mal
-     * cargado.
+     * Se dice el motivo y no sólo "fuera del horizonte", y las dos marcas son
+     * distintas a propósito: una fecha pasada no es un error de carga ni algo
+     * que haya que resolver —es plata que ya entró y que el saldo bancario ya
+     * informa—, mientras que una fecha posterior al eje sí es plata que el
+     * tablero todavía no puede mostrar.
      */
     function marcaEje(f) {
         if (f.ubicacion_eje === 'ANTERIOR') {
-            return '<div class="cobel-marca" title="Ya se acreditó: esa plata está en la cuenta ' +
-                   'y la informa el saldo bancario de la pestaña Saldos. Sumarla acá la contaría ' +
-                   'dos veces.">ya acreditada · fuera del horizonte</div>';
+            return '<div class="cobel-marca-neutra" title="Ya se acreditó: esa plata está en la ' +
+                   'cuenta y la informa el saldo bancario de la pestaña Saldos. Sumarla acá la ' +
+                   'contaría dos veces.">ya acreditada</div>';
         }
 
         if (f.ubicacion_eje === 'POSTERIOR') {
@@ -533,6 +575,353 @@
     }
 
     /* ================================================================
+       IMPORTADOR
+
+       Dos pasos: previsualizar (no escribe nada) y confirmar. El diff que se
+       muestra lo calcula el servidor, y lo vuelve a calcular al confirmar
+       contra el estado real de la base: acá no se decide nada.
+       ================================================================ */
+
+    function panelImportar(abrir) {
+        mostrar('panelImportar', abrir);
+
+        if (!abrir) {
+            importacion = null;
+            document.getElementById('resultadoImportar').innerHTML = '';
+        }
+    }
+
+    function previsualizar() {
+        var input = document.getElementById('archivoImportar');
+
+        if (!input || !input.files || !input.files.length) {
+            avisar('Elegí el archivo .csv que querés importar.');
+            return;
+        }
+
+        var datosForm = new FormData();
+
+        datosForm.append('archivo', input.files[0]);
+
+        // El período que cubre el archivo es opcional: sólo amplía la ventana en
+        // la que se pueden proponer bajas. Ver la nota de la pestaña.
+        datosForm.append('periodo_desde', valor('periodoDesde'));
+        datosForm.append('periodo_hasta', valor('periodoHasta'));
+
+        conBoton('btnPrevisualizar', function() {
+            return subirArchivo(URL_COBEL + '?action=previsualizarImportacion', datosForm)
+                .then(function(diff) {
+                    importacion = diff;
+                    pintarDiff(diff);
+                })
+                .catch(function(error) {
+                    // El error se muestra EN EL PANEL y no en un alert: los
+                    // mensajes del parser dicen la línea y qué corregir, y en un
+                    // alert no se pueden leer con el archivo al lado.
+                    importacion = null;
+                    document.getElementById('resultadoImportar').innerHTML =
+                        '<div class="alert alert-danger py-2 px-3 mt-3 mb-0"><small>' +
+                        '<i class="fas fa-circle-exclamation me-1"></i>' +
+                        escapar(error.message) + '</small></div>';
+                });
+        }, 'No se pudo leer el archivo');
+    }
+
+    /**
+     * Dibuja el diff: primero el resumen, después sólo las filas que cambian.
+     *
+     * Las que no cambian y las ya acreditadas van como número y no como lista:
+     * son la mayoría de un archivo, y listarlas taparía las tres que importan.
+     */
+    function pintarDiff(diff) {
+        var r = diff.resumen || {};
+        var cont = document.getElementById('resultadoImportar');
+        var html = '';
+
+        html += '<div class="cobel-diff mt-3">';
+
+        var ventana = diff.ventana || {};
+
+        html += '<div class="cobel-diff-titulo">' +
+            '<i class="fas fa-code-compare me-1"></i>' +
+            escapar(diff.archivo || 'archivo') + ' · ' + (r.filas || 0) + ' fila(s) leídas' +
+            (diff.rango && diff.rango.desde
+                ? (' · acreditaciones del ' + fecha(diff.rango.desde) + ' al ' +
+                   fecha(diff.rango.hasta))
+                : '') +
+            '</div>';
+
+        // Qué ventana se usó para buscar bajas, y si la declaró el usuario o se
+        // infirió. Es lo que explica por qué una baja aparece o no aparece.
+        if (ventana.desde) {
+            html += '<div class="cobel-diff-aviso">Se buscaron bajas entre el ' +
+                fecha(ventana.desde) + ' y el ' + fecha(ventana.hasta) +
+                (ventana.declarada
+                    ? ' (el período que declaraste).'
+                    : ' (inferido de las fechas del archivo; si la procesadora dio de baja la ' +
+                      'primera o la última acreditación del período, completá desde/hasta para ' +
+                      'poder verla).') +
+                '</div>';
+        }
+
+        html += '<div class="cobel-chips">' +
+            chip('altas', r.altas, 'nuevas', 'ok') +
+            chip('cambios', r.cambios, 'con cambios', 'aviso') +
+            chip('sin_cambios', r.sin_cambios, 'ya cargadas igual', 'neutro') +
+            chip('ya_acreditadas', r.ya_acreditadas, 'ya acreditadas', 'neutro') +
+            chip('bajas', r.bajas, 'ya no vienen', 'aviso') +
+            chip('errores', r.errores, 'con problemas', 'error') +
+            '</div>';
+
+        if (r.altas > 0 || r.cambios > 0) {
+            html += '<div class="cobel-diff-totales">' +
+                'Neto que se agrega: <strong>' + pesos(r.neto_altas) + '</strong>' +
+                (r.cambios > 0
+                    ? (' · diferencia de neto en los cambios: <strong>' +
+                       pesos(r.neto_diferencia) + '</strong>')
+                    : '') +
+                '</div>';
+        }
+
+        (diff.avisos || []).forEach(function(a) {
+            html += '<div class="cobel-diff-aviso">· ' + escapar(a) + '</div>';
+        });
+
+        html += tablaDiff(diff);
+        html += tablaBajas(diff);
+
+        // El botón se habilita con lo que dijo el servidor, no con una cuenta
+        // hecha acá: es el servidor el que valida y el que va a rechazar.
+        var puede = !!diff.puede_importar;
+
+        html += '<div class="d-flex align-items-center gap-3 mt-3 flex-wrap">';
+
+        if ((r.bajas || 0) > 0) {
+            html += '<div class="form-check">' +
+                '<input class="form-check-input" type="checkbox" id="aplicarBajas">' +
+                '<label class="form-check-label" for="aplicarBajas">' +
+                'Dar de baja los ' + r.bajas + ' que el archivo no trae' +
+                '</label></div>';
+        }
+
+        html += '<button id="btnConfirmarImportar" class="btn btn-sm btn-success"' +
+            (puede ? '' : ' disabled') + '>' +
+            '<i class="fas fa-check me-1"></i> Confirmar importación</button>';
+
+        if (!puede) {
+            html += '<span class="text-muted"><small>' +
+                ((r.errores > 0)
+                    ? 'Corregí las filas con problemas y volvé a subir el archivo.'
+                    : 'No hay nada que aplicar.') +
+                '</small></span>';
+        }
+
+        html += '</div></div>';
+
+        cont.innerHTML = html;
+
+        conectar('btnConfirmarImportar', confirmarImportacion);
+    }
+
+    function chip(clave, cantidad, rotulo, tono) {
+        if (!cantidad) {
+            return '';
+        }
+
+        return '<span class="cobel-chip cobel-chip-' + tono + '">' +
+               '<strong>' + cantidad + '</strong> ' + rotulo + '</span>';
+    }
+
+    /** Sólo las filas que cambian algo o que están mal */
+    function tablaDiff(diff) {
+        var filas = (diff.filas || []).filter(function(f) {
+            return f.estado === 'ALTA' || f.estado === 'CAMBIO' || f.estado === 'ERROR';
+        });
+
+        if (!filas.length) {
+            return '';
+        }
+
+        var html = '<div class="table-responsive cobel-diff-tabla">' +
+            '<table class="table table-sm mb-0"><thead><tr>' +
+            '<th style="width: 60px;">Línea</th><th>Procesadora</th>' +
+            '<th class="text-end">Importe bruto</th><th class="text-center">Acreditación</th>' +
+            '<th class="text-end">Neto</th><th>Qué pasa</th>' +
+            '</tr></thead><tbody>';
+
+        filas.forEach(function(f) {
+            var clase = (f.estado === 'ERROR') ? 'cobel-fila-error'
+                : (f.estado === 'CAMBIO' ? 'cobel-fila-cambio' : 'cobel-fila-alta');
+
+            html += '<tr class="' + clase + '">' +
+                '<td>' + f.linea + '</td>' +
+                '<td>' + escapar(f.procesadora || '—') +
+                    (f.id_externo
+                        ? '<div class="cobel-subtitulo">Liq. ' + escapar(f.id_externo) + '</div>'
+                        : '') + '</td>' +
+                '<td class="text-end cobel-num">' +
+                    (f.estado === 'ERROR' ? '—' : pesos(f.importe_bruto)) + '</td>' +
+                '<td class="text-center">' +
+                    (f.fecha_acreditacion ? fecha(f.fecha_acreditacion) : '—') + '</td>' +
+                '<td class="text-end cobel-num">' +
+                    (f.estado === 'ERROR' ? '—' : pesos(f.importe_neto)) +
+                    (f.estado === 'CAMBIO'
+                        ? '<div class="cobel-subtitulo">antes ' + pesos(f.neto_anterior) +
+                          ' · ' + signo(f.diferencia) + '</div>'
+                        : '') + '</td>' +
+                '<td><span class="cobel-estado cobel-estado-' + f.estado.toLowerCase() + '">' +
+                    etiquetaEstado(f.estado) + '</span> ' +
+                    '<span class="cobel-motivo">' + escapar(f.motivo || '') + '</span></td>' +
+            '</tr>';
+        });
+
+        return html + '</tbody></table></div>';
+    }
+
+    /** Los cargados que el archivo no trae. Se listan siempre: la baja es opt-in */
+    function tablaBajas(diff) {
+        var bajas = diff.bajas || [];
+
+        if (!bajas.length) {
+            return '';
+        }
+
+        var html = '<div class="cobel-diff-subtitulo">Cargados que el archivo no trae</div>' +
+            '<div class="table-responsive cobel-diff-tabla">' +
+            '<table class="table table-sm mb-0"><thead><tr>' +
+            '<th>Procesadora</th><th class="text-center">Acreditación</th>' +
+            '<th class="text-end">Importe bruto</th><th class="text-end">Neto</th>' +
+            '<th>Origen</th>' +
+            '</tr></thead><tbody>';
+
+        bajas.forEach(function(b) {
+            html += '<tr class="cobel-fila-baja">' +
+                '<td>' + escapar(b.procesadora) + '</td>' +
+                '<td class="text-center">' + fecha(b.fecha_acreditacion) + '</td>' +
+                '<td class="text-end cobel-num">' + pesos(b.importe_bruto) + '</td>' +
+                '<td class="text-end cobel-num">' + pesos(b.importe_neto) + '</td>' +
+                '<td>' + etiquetaOrigen(b.origen_dato) + '</td>' +
+            '</tr>';
+        });
+
+        return html + '</tbody></table></div>';
+    }
+
+    function confirmarImportacion() {
+        if (!importacion) {
+            return;
+        }
+
+        var bajas = document.getElementById('aplicarBajas');
+        var aplicarBajas = !!(bajas && bajas.checked);
+
+        if (aplicarBajas && !confirm('Se van a dar de baja ' +
+                (importacion.bajas || []).length + ' movimiento(s) que el archivo no trae.\n\n' +
+                'No se borran: quedan inhabilitados y salen del tablero. Si el archivo era ' +
+                'parcial, cancelá y volvé a subirlo completo.')) {
+            return;
+        }
+
+        // Se mandan los valores TAL COMO VINIERON EN EL ARCHIVO, y TODAS las
+        // filas, incluidas las que tienen problemas. Dos motivos:
+        //
+        //   · el servidor vuelve a calcular el mismo diff con la misma entrada,
+        //     así que lo que se aplica es lo que se mostró;
+        //   · el "con un solo error no se importa nada" lo hace cumplir el
+        //     servidor y no este archivo. Si acá se filtraran las filas con
+        //     problemas, el resto se importaría y quedaría un archivo cargado a
+        //     medias, que es justo lo que la regla evita.
+        //
+        // La tasa y el neto no viajan: los calcula el servidor.
+        var filas = (importacion.filas || []).map(function(f) {
+            var c = f.crudo || {};
+
+            return {
+                linea: f.linea,
+                procesadora: c.procesadora,
+                importe_bruto: c.importe_bruto,
+                fecha_acreditacion: c.fecha_acreditacion,
+                id_externo: c.id_externo,
+                observaciones: c.observaciones
+            };
+        });
+
+        conBoton('btnConfirmarImportar', function() {
+            return pedirJson(URL_COBEL + '?action=confirmarImportacion', {
+                filas: filas,
+                archivo: importacion.archivo,
+                aplicar_bajas: aplicarBajas,
+                // El mismo período con el que se previsualizó: si no, las bajas
+                // que se aplican no serían las que se mostraron.
+                periodo_desde: valor('periodoDesde'),
+                periodo_hasta: valor('periodoHasta')
+            }).then(function(r) {
+                var a = r.aplicado || {};
+
+                panelImportar(false);
+                setValor('archivoImportar', '');
+                notificar('Importación aplicada: ' + (a.altas || 0) + ' alta(s), ' +
+                    (a.cambios || 0) + ' cambio(s)' +
+                    (a.bajas ? (' y ' + a.bajas + ' baja(s)') : '') + '.');
+                cargar();
+            });
+        }, 'No se pudo importar');
+    }
+
+    /**
+     * Sube un archivo y desenvuelve el sobre {success, data|message}.
+     *
+     * No usa pedirJson() porque eso serializa el cuerpo como JSON, y un archivo
+     * va como multipart. El manejo del sobre es el mismo, incluido leer el texto
+     * antes de parsearlo: si PHP emite un fatal, el error que llega es legible.
+     */
+    function subirArchivo(url, formData) {
+        return fetch(url, { method: 'POST', body: formData })
+            .then(function(r) {
+                if (!r.ok) {
+                    throw new Error('Error HTTP: ' + r.status);
+                }
+
+                return r.text();
+            })
+            .then(function(texto) {
+                var resultado;
+
+                try {
+                    resultado = JSON.parse(texto);
+                } catch (e) {
+                    console.error('Respuesta no JSON:', texto);
+                    throw new Error('Respuesta inválida del servidor. Revisá la consola.');
+                }
+
+                if (!resultado.success) {
+                    throw new Error(resultado.message || 'Error desconocido');
+                }
+
+                return resultado.data;
+            });
+    }
+
+    function etiquetaEstado(estado) {
+        var estados = {
+            'ALTA': 'nueva',
+            'CAMBIO': 'cambia',
+            'SIN_CAMBIOS': 'igual',
+            'YA_ACREDITADA': 'ya acreditada',
+            'ERROR': 'problema'
+        };
+
+        return estados[estado] || estado;
+    }
+
+    /** '+ $ 1.000,00' / '− $ 1.000,00', para una diferencia */
+    function signo(valor) {
+        var n = parseFloat(valor) || 0;
+
+        return (n >= 0 ? '+ ' : '− ') + pesos(Math.abs(n));
+    }
+
+    /* ================================================================
        TOTALES Y CUADROS
        ================================================================ */
 
@@ -571,11 +960,17 @@
 
         document.getElementById('bodyPorDia').innerHTML = dias.length
             ? dias.map(function(d) {
-                  var fuera = !d.entra_al_tablero;
+                  var anterior = (eje.desde && d.fecha < eje.desde);
+                  var fuera = !d.entra_al_tablero && !anterior;
 
-                  return '<tr' + (fuera ? ' class="cobel-fuera-eje"' : '') + '>' +
+                  return '<tr' + (fuera ? ' class="cobel-fuera-eje"'
+                                        : (anterior ? ' class="cobel-acreditada"' : '')) + '>' +
                       '<td>' + fecha(d.fecha) +
-                          (fuera ? ' <span class="cobel-marca-inline">fuera</span>' : '') + '</td>' +
+                          (fuera
+                              ? ' <span class="cobel-marca-inline">posterior</span>'
+                              : (anterior
+                                  ? ' <span class="cobel-marca-inline-neutra">ya acreditada</span>'
+                                  : '')) + '</td>' +
                       '<td class="text-center">' + d.movimientos + '</td>' +
                       '<td class="text-end cobel-num">' + pesos(d.neto) + '</td>' +
                   '</tr>';

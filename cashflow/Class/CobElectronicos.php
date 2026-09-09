@@ -346,13 +346,20 @@ class CobElectronicos {
      *     pestana Saldos. Reubicarla en la apertura del horizonte la contaria
      *     DOS VECES.
      *
+     * Y NO SE AVISA NI SE CUENTA COMO IMPORTE FUERA DEL HORIZONTE. Una
+     * acreditacion ya ocurrida no es plata que el tablero informe de menos: es
+     * plata que el tablero informa POR OTRA FILA, la del saldo bancario. Avisar
+     * de ella todos los dias seria ruido sobre algo que ya paso y que no hay que
+     * hacer. Por eso queda fuera del alcance del modulo, sin aviso.
+     *
      * Tampoco se delega la decision a Horizonte::acumular(): una fecha del mes
      * en curso anterior a hoy caeria en la columna de su mes, que es una columna
      * que el tablero ni siquiera incluye en el arrastre. El corte por fecha es
      * explicito para que no dependa de como quede armado el eje.
      *
-     * Una fecha POSTERIOR al eje tambien queda afuera, con su propio aviso: es
-     * una fecha que el horizonte no cubre.
+     * Una fecha POSTERIOR al eje SI se informa y SI va a 'fuera_horizonte': esa
+     * plata todavia no entro a ninguna cuenta y ninguna otra fila del tablero la
+     * muestra, asi que callarla seria informar de menos.
      *
      * @param string $fecha 'Y-m-d' de acreditacion
      * @param Horizonte $h
@@ -378,10 +385,14 @@ class CobElectronicos {
      * Marca cada fila con su ubicacion en el eje y deja los avisos de los dos
      * casos que hay que ver sin recorrer la tabla:
      *
-     *   - movimientos que NO entran al tablero, con el importe y la fecha
+     *   - movimientos POSTERIORES al horizonte, con el importe y la fecha
      *   - dos movimientos de la misma procesadora y la misma fecha, que se
      *     AVISAN y NO se bloquean: puede haber dos liquidaciones el mismo dia, y
      *     el aviso alcanza para detectar el pegado doble
+     *
+     * Los movimientos YA ACREDITADOS -fecha anterior al eje- se marcan en su
+     * fila pero NO generan aviso: ya pasaron, y su importe ya esta informado en
+     * el saldo bancario. Ver ubicacionEnEje().
      *
      * @param array $movimientos Filas normalizadas por filaMovimiento()
      * @param Horizonte $h
@@ -396,13 +407,16 @@ class CobElectronicos {
             'neto' => 0,
             'retenido' => 0,
             'movimientos' => 0,
+            // 'fuera_eje' es SOLO lo posterior al horizonte: es lo unico que el
+            // tablero deja de mostrar teniendo que mostrarlo. Lo ya acreditado
+            // se cuenta aparte y no se avisa.
             'fuera_eje' => 0,
-            'fuera_eje_movimientos' => 0
+            'fuera_eje_movimientos' => 0,
+            'ya_acreditado' => 0,
+            'ya_acreditado_movimientos' => 0
         ];
 
-        $fueraAnterior = 0;
         $fueraPosterior = 0;
-        $fechaMasVieja = null;
         $duplicados = [];
         $vistos = [];
 
@@ -427,19 +441,13 @@ class CobElectronicos {
             $totales['retenido'] += $fila['retenido'];
             $totales['movimientos']++;
 
-            if ($ubicacion !== 'DENTRO') {
+            if ($ubicacion === 'ANTERIOR') {
+                $totales['ya_acreditado'] += $neto;
+                $totales['ya_acreditado_movimientos']++;
+            } elseif ($ubicacion === 'POSTERIOR') {
                 $totales['fuera_eje'] += $neto;
                 $totales['fuera_eje_movimientos']++;
-
-                if ($ubicacion === 'ANTERIOR') {
-                    $fueraAnterior += $neto;
-
-                    if ($fecha !== null && ($fechaMasVieja === null || $fecha < $fechaMasVieja)) {
-                        $fechaMasVieja = $fecha;
-                    }
-                } else {
-                    $fueraPosterior += $neto;
-                }
+                $fueraPosterior += $neto;
             }
 
             $nombre = (string) (isset($m['procesadora']) ? $m['procesadora'] : '');
@@ -475,14 +483,8 @@ class CobElectronicos {
 
         $avisos = [];
 
-        if ($fueraAnterior != 0) {
-            $avisos[] = 'Hay ' . self::plata($fueraAnterior) . ' de acreditaciones con fecha '
-                . 'anterior al inicio del horizonte (la más vieja, del '
-                . self::fechaCorta($fechaMasVieja) . '). No entran al tablero a propósito: son '
-                . 'movimientos ya ocurridos y esa plata ya está informada en el saldo bancario '
-                . 'de la pestaña Saldos. Sumarlas acá las contaría dos veces.';
-        }
-
+        // Lo YA ACREDITADO no genera aviso: ya paso, ya entro a la cuenta y ya
+        // esta informado en el saldo bancario. La fila igual queda marcada.
         if ($fueraPosterior != 0) {
             $avisos[] = 'Hay ' . self::plata($fueraPosterior) . ' de acreditaciones con fecha '
                 . 'posterior al final del horizonte: se ven en la tabla pero el tablero todavía '
@@ -600,9 +602,20 @@ class CobElectronicos {
      * procesadora es la fecha en que el dinero entra, y correrla al lunes
      * inventaria una fecha que el dato ya trae.
      *
-     * Lo que cae fuera del eje va a 'fuera_horizonte' CON AVISO y nunca se
-     * descarta en silencio. Ver ubicacionEnEje() para por que una fecha pasada
-     * no abre el horizonte, a diferencia de Saldos.
+     * LO POSTERIOR AL HORIZONTE va a 'fuera_horizonte' CON AVISO: esa plata
+     * todavia no entro a ninguna cuenta y ninguna otra fila del tablero la
+     * muestra, asi que callarla seria informar de menos.
+     *
+     * LO YA ACREDITADO -fecha anterior al eje- queda fuera del alcance, sin
+     * aviso y SIN sumar a 'fuera_horizonte'. No es plata que el tablero informe
+     * de menos: es plata que el tablero informa por otra fila, la del saldo
+     * bancario de la pestana Saldos. Contarla en 'fuera_horizonte' haria que el
+     * tablero avisara todos los dias por algo que ya paso y que no hay que
+     * hacer. Ver ubicacionEnEje() para por que, a diferencia de Saldos, una
+     * fecha pasada tampoco abre el horizonte.
+     *
+     * 'ya_acreditado' se devuelve igual, para que quien quiera mostrarlo pueda:
+     * es un escalar informativo y el contrato lo ignora.
      *
      * @param array $filas Filas de armarMovimientos()['filas']
      * @param Horizonte $h
@@ -615,10 +628,9 @@ class CobElectronicos {
         $serie['moneda_origen'] = 'ARS';
         $serie['tipo_cambio'] = null;
         $serie['warnings'] = [];
+        $serie['ya_acreditado'] = 0;
 
-        $anterior = 0;
         $posterior = 0;
-        $fechaMasVieja = null;
         $fechaMasNueva = null;
 
         foreach (is_array($filas) ? $filas : [] as $f) {
@@ -639,14 +651,10 @@ class CobElectronicos {
 
             $ubicacion = self::ubicacionEnEje($fecha, $h);
 
+            // Ya acreditado: fuera del alcance del modulo, sin aviso y sin sumar
+            // a fuera_horizonte. Lo informa el saldo bancario.
             if ($ubicacion === 'ANTERIOR') {
-                $serie['fuera_horizonte'] += $importe;
-                $anterior += $importe;
-
-                if ($fechaMasVieja === null || $fecha < $fechaMasVieja) {
-                    $fechaMasVieja = $fecha;
-                }
-
+                $serie['ya_acreditado'] += $importe;
                 continue;
             }
 
@@ -658,14 +666,6 @@ class CobElectronicos {
                     $fechaMasNueva = $fecha;
                 }
             }
-        }
-
-        if ($anterior != 0) {
-            $serie['warnings'][] = 'Cobranzas Pagos Electronicos: ' . self::plata($anterior)
-                . ' netos tienen fecha de acreditacion anterior al inicio del horizonte (la mas '
-                . 'vieja, del ' . self::fechaCorta($fechaMasVieja) . ') y NO entran al tablero. '
-                . 'Es a proposito: ya se acreditaron, asi que esa plata ya esta informada en el '
-                . 'saldo bancario de la pestana Saldos y sumarla aca la contaria dos veces.';
         }
 
         if ($posterior != 0) {
@@ -779,6 +779,965 @@ class CobElectronicos {
             'acreditados' => $acreditados,
             'avisos' => $avisos
         ];
+    }
+
+    /* ====================================================================
+       IMPORTACION DESDE PLANILLA
+
+       POR QUE EXISTE: la carga a mano de veinte o treinta acreditaciones por
+       semana hace que la pantalla se actualice poco, y una pantalla que se
+       actualiza poco muestra un tablero viejo. Con el importador, el archivo de
+       la procesadora se sube completo y el modulo DICE QUE CAMBIO, en lugar de
+       obligar a comparar fila por fila contra lo que ya estaba cargado.
+
+       POR QUE CSV Y NO .XLSX: leer un .xlsx sin librerias necesita la extension
+       zip de PHP, que en este servidor esta instalada pero NO habilitada
+       (extension=zip comentada en php.ini). Habilitarla es tocar la
+       configuracion del servidor y reiniciar Apache, y ademas dejaria el modulo
+       dependiendo de que ese cambio este hecho en cada entorno. Excel abre y
+       guarda CSV nativamente -Archivo -> Guardar como -> CSV UTF-8-, asi que el
+       costo para el usuario es un paso y el modulo no depende de nada. Si suben
+       un .xlsx igual, el parser lo detecta por su firma y lo dice.
+
+       Todo el criterio vive en helpers PUROS: el parseo de la planilla y el
+       diff contra lo cargado se prueban sin base ni archivos.
+       ==================================================================== */
+
+    /** Separadores que puede traer un CSV exportado de Excel */
+    const SEPARADORES = [';', ',', "\t", '|'];
+
+    /**
+     * Las columnas de la planilla, con sus sinonimos aceptados.
+     *
+     * Es la UNICA definicion: de aca salen la plantilla que se descarga, el
+     * mapeo del encabezado al parsear y la ayuda de la pantalla. Con tres
+     * listas distintas, la plantilla y el parser se desincronizan en el primer
+     * cambio.
+     *
+     * Los sinonimos incluyen los nombres que usa la hoja original (RAZON_SOC,
+     * Importe, Cobro) para que se pueda pegar una columna del Excel viejo sin
+     * renombrar nada.
+     *
+     * @return array Mapa campo => ['titulo', 'obligatoria', 'ayuda', 'sinonimos']
+     */
+    public static function columnasImportacion() {
+        return [
+            'procesadora' => [
+                'titulo' => 'PROCESADORA',
+                'obligatoria' => true,
+                'ayuda' => 'Razon social, tal como figura en Parametros. Tiene que estar activa.',
+                'sinonimos' => ['PROCESADORA', 'RAZON_SOCIAL', 'RAZON_SOC', 'RAZONSOCIAL']
+            ],
+            'importe_bruto' => [
+                'titulo' => 'IMPORTE_BRUTO',
+                'obligatoria' => true,
+                'ayuda' => 'Importe bruto informado, sin separador de miles. Ej: 1069326,00',
+                'sinonimos' => ['IMPORTE_BRUTO', 'IMPORTE', 'BRUTO', 'IMPORTEBRUTO']
+            ],
+            'fecha_acreditacion' => [
+                'titulo' => 'FECHA_ACREDITACION',
+                'obligatoria' => true,
+                'ayuda' => 'Fecha en que se acredita. dd/mm/aaaa o aaaa-mm-dd.',
+                'sinonimos' => ['FECHA_ACREDITACION', 'FECHA', 'COBRO', 'FECHA_COBRO',
+                                'FECHAACREDITACION']
+            ],
+            'id_externo' => [
+                'titulo' => 'ID_EXTERNO',
+                'obligatoria' => false,
+                'ayuda' => 'Numero de liquidacion de la procesadora. Opcional, pero es lo que '
+                    . 'permite reconocer un movimiento ya cargado y distinguir dos '
+                    . 'liquidaciones del mismo dia.',
+                'sinonimos' => ['ID_EXTERNO', 'LIQUIDACION', 'ID_LIQUIDACION', 'IDEXTERNO',
+                                'NRO_LIQUIDACION']
+            ],
+            'observaciones' => [
+                'titulo' => 'OBSERVACIONES',
+                'obligatoria' => false,
+                'ayuda' => 'Opcional, hasta 200 caracteres.',
+                'sinonimos' => ['OBSERVACIONES', 'OBSERVACION', 'NOTAS', 'COMENTARIOS']
+            ]
+        ];
+    }
+
+    /**
+     * La plantilla que se descarga, con dos filas de ejemplo.
+     *
+     * Va con BOM de UTF-8 y separador ';': es lo que Excel en espanol abre en
+     * columnas sin preguntar nada. Sin el BOM, Excel muestra los acentos rotos;
+     * con coma como separador, mete todo en una sola columna.
+     *
+     * Las dos filas de ejemplo se cargan: son datos validos con la forma
+     * esperada. Una plantilla con la fila de ejemplo comentada obliga a
+     * adivinar el formato del numero y de la fecha, que es justo donde falla una
+     * importacion.
+     *
+     * @param string $ejemploFecha 'Y-m-d' de la primera fila de ejemplo
+     * @return string Contenido del archivo
+     */
+    public static function plantillaCsv($ejemploFecha = null) {
+        $columnas = self::columnasImportacion();
+        $titulos = [];
+
+        foreach ($columnas as $c) {
+            $titulos[] = $c['titulo'];
+        }
+
+        $fecha = ($ejemploFecha === null) ? date('Y-m-d') : substr((string) $ejemploFecha, 0, 10);
+        $manana = date('d/m/Y', strtotime($fecha . ' +1 day'));
+        $pasado = date('d/m/Y', strtotime($fecha . ' +2 day'));
+
+        $filas = [
+            $titulos,
+            ['Payway', '1069326,00', $manana, '', 'Ejemplo: borrar esta fila'],
+            ['Mercado Pago', '35257406,00', $pasado, 'LIQ-00123',
+             'Ejemplo: con numero de liquidacion']
+        ];
+
+        $csv = "\xEF\xBB\xBF";   // BOM, para que Excel respete los acentos
+
+        foreach ($filas as $fila) {
+            $csv .= implode(';', $fila) . "\r\n";
+        }
+
+        return $csv;
+    }
+
+    /**
+     * Lee el contenido de una planilla CSV y devuelve las filas crudas.
+     *
+     * Detecta el separador y acepta los formatos de numero y de fecha que
+     * exporta Excel en cualquiera de los dos idiomas: el usuario no tiene que
+     * saber en que configuracion regional esta su Excel.
+     *
+     * NO valida contra la base: eso es compararImportacion(). Aca solo se
+     * resuelve la forma del archivo.
+     *
+     * @param string $contenido Contenido del archivo subido
+     * @return array ['filas' => [...], 'errores' => [...], 'separador' => string]
+     */
+    public static function parsearPlanilla($contenido) {
+        $contenido = (string) $contenido;
+
+        // Un .xlsx es un ZIP: empieza con 'PK'. Se detecta para poder decir que
+        // hacer, en lugar de fallar con un archivo lleno de bytes binarios.
+        if (substr($contenido, 0, 2) === 'PK') {
+            throw new Exception('El archivo es un .xlsx y este servidor no puede leerlo. '
+                . 'Abrilo en Excel y guardalo como CSV (Archivo → Guardar como → '
+                . 'CSV UTF-8 delimitado por comas). El contenido es el mismo.');
+        }
+
+        if (substr($contenido, 0, 8) === "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1") {
+            throw new Exception('El archivo es un .xls antiguo y este servidor no puede leerlo. '
+                . 'Abrilo en Excel y guardalo como CSV UTF-8.');
+        }
+
+        // BOM de UTF-8: si queda, el primer titulo no matchea con nada.
+        if (substr($contenido, 0, 3) === "\xEF\xBB\xBF") {
+            $contenido = substr($contenido, 3);
+        }
+
+        // Excel en Windows guarda en la codificacion del sistema si no se elige
+        // CSV UTF-8. Se convierte para que una razon social con acento no quede
+        // como basura y no matchee con la procesadora.
+        if (!mb_check_encoding($contenido, 'UTF-8')) {
+            $contenido = mb_convert_encoding($contenido, 'UTF-8', 'Windows-1252');
+        }
+
+        $lineas = preg_split('/\r\n|\r|\n/', $contenido);
+        $lineas = array_values(array_filter($lineas, function ($l) {
+            return trim($l) !== '';
+        }));
+
+        if (empty($lineas)) {
+            throw new Exception('El archivo está vacío');
+        }
+
+        $separador = self::detectarSeparador($lineas[0]);
+        $mapa = self::mapearEncabezado(str_getcsv($lineas[0], $separador));
+
+        $filas = [];
+        $errores = [];
+
+        for ($i = 1; $i < count($lineas); $i++) {
+            $celdas = str_getcsv($lineas[$i], $separador);
+            $fila = ['linea' => $i + 1];
+            $vacia = true;
+
+            foreach ($mapa as $campo => $indice) {
+                $valor = isset($celdas[$indice]) ? trim((string) $celdas[$indice]) : '';
+                $fila[$campo] = $valor;
+
+                if ($valor !== '') {
+                    $vacia = false;
+                }
+            }
+
+            // Una fila con separadores y nada mas es lo que deja Excel debajo de
+            // los datos: se saltea en silencio, no es un error del usuario.
+            if ($vacia) {
+                continue;
+            }
+
+            $filas[] = $fila;
+        }
+
+        if (empty($filas)) {
+            throw new Exception('El archivo no tiene ninguna fila de datos. La primera fila es '
+                . 'el encabezado y abajo van los movimientos.');
+        }
+
+        return ['filas' => $filas, 'errores' => $errores, 'separador' => $separador];
+    }
+
+    /**
+     * Separador de un CSV: el que mas veces aparece en el encabezado.
+     *
+     * Excel en espanol exporta con ';' y en ingles con ','. Adivinarlo es mas
+     * barato que hacer que el usuario lo declare, y si se equivoca el
+     * encabezado no matchea y el error lo dice.
+     *
+     * @param string $encabezado
+     * @return string
+     */
+    private static function detectarSeparador($encabezado) {
+        $mejor = ';';
+        $max = -1;
+
+        foreach (self::SEPARADORES as $sep) {
+            $n = substr_count($encabezado, $sep);
+
+            if ($n > $max) {
+                $max = $n;
+                $mejor = $sep;
+            }
+        }
+
+        return $mejor;
+    }
+
+    /**
+     * Empareja los titulos del archivo con los campos del modulo.
+     *
+     * La comparacion es sin acentos, sin espacios y sin mayusculas, y acepta los
+     * sinonimos de columnasImportacion(): el usuario no tiene que escribir el
+     * titulo exacto, y una columna de mas no molesta.
+     *
+     * @param array $titulos Celdas de la primera fila
+     * @return array Mapa campo => indice de columna
+     */
+    private static function mapearEncabezado($titulos) {
+        $columnas = self::columnasImportacion();
+        $mapa = [];
+
+        foreach ($titulos as $i => $titulo) {
+            $normalizado = self::normalizarTitulo($titulo);
+
+            foreach ($columnas as $campo => $def) {
+                if (isset($mapa[$campo])) {
+                    continue;
+                }
+
+                foreach ($def['sinonimos'] as $sinonimo) {
+                    if ($normalizado === self::normalizarTitulo($sinonimo)) {
+                        $mapa[$campo] = $i;
+                        break 2;
+                    }
+                }
+            }
+        }
+
+        $faltan = [];
+
+        foreach ($columnas as $campo => $def) {
+            if ($def['obligatoria'] && !isset($mapa[$campo])) {
+                $faltan[] = $def['titulo'];
+            }
+        }
+
+        if (!empty($faltan)) {
+            throw new Exception('Al archivo le faltan columnas obligatorias: '
+                . implode(', ', $faltan) . '. Descargá la plantilla y usá sus encabezados. '
+                . 'Se encontraron: ' . implode(', ', array_map('strval', $titulos)) . '.');
+        }
+
+        return $mapa;
+    }
+
+    /** Titulo de columna comparable: sin acentos, sin espacios, en mayusculas */
+    private static function normalizarTitulo($titulo) {
+        $t = mb_strtoupper(trim((string) $titulo), 'UTF-8');
+
+        $t = str_replace(
+            ['Á', 'É', 'Í', 'Ó', 'Ú', 'Ü', 'Ñ'],
+            ['A', 'E', 'I', 'O', 'U', 'U', 'N'],
+            $t
+        );
+
+        return preg_replace('/[^A-Z0-9]/', '', $t);
+    }
+
+    /**
+     * Lleva a float un importe tipeado en una planilla.
+     *
+     * Acepta lo que exporta Excel en las dos configuraciones regionales:
+     * '1069326,00' y '1069326.00'. Con los DOS separadores presentes, el que
+     * este mas a la derecha es el decimal y el otro es de miles ('3.757.900,50').
+     * Con UN solo separador se toma como decimal, salvo que aparezca mas de una
+     * vez, que solo puede ser separador de miles ('1.648.264').
+     *
+     * Un solo punto o coma con tres decimales -'1.648'- es genuinamente
+     * ambiguo, asi que la plantilla pide el importe SIN separador de miles.
+     *
+     * @param string $valor
+     * @return float|null null si no es un numero
+     */
+    public static function numeroDesdePlanilla($valor) {
+        $v = trim((string) $valor);
+
+        // Simbolos de moneda, espacios y espacios finos que pega Excel
+        $v = str_replace(['$', ' ', "\xc2\xa0", "\xe2\x80\xaf", 'ARS', 'AR$'], '', $v);
+
+        if ($v === '') {
+            return null;
+        }
+
+        $negativo = (strpos($v, '-') !== false) || (strpos($v, '(') !== false);
+        $v = preg_replace('/[^0-9.,]/', '', $v);
+
+        if ($v === '' || !preg_match('/[0-9]/', $v)) {
+            return null;
+        }
+
+        $puntos = substr_count($v, '.');
+        $comas = substr_count($v, ',');
+
+        if ($puntos > 0 && $comas > 0) {
+            $decimal = (strrpos($v, '.') > strrpos($v, ',')) ? '.' : ',';
+            $miles = ($decimal === '.') ? ',' : '.';
+            $v = str_replace($miles, '', $v);
+            $v = str_replace($decimal, '.', $v);
+        } elseif ($comas > 1) {
+            $v = str_replace(',', '', $v);
+        } elseif ($puntos > 1) {
+            $v = str_replace('.', '', $v);
+        } elseif ($comas === 1) {
+            $v = str_replace(',', '.', $v);
+        }
+
+        if (!is_numeric($v)) {
+            return null;
+        }
+
+        return $negativo ? -abs(floatval($v)) : floatval($v);
+    }
+
+    /**
+     * Lleva a 'Y-m-d' una fecha tipeada en una planilla.
+     *
+     * Acepta 'dd/mm/aaaa', 'dd-mm-aaaa', 'aaaa-mm-dd', 'dd/mm/aa' y el SERIAL de
+     * Excel. El serial se acepta acotado -del 1954 al 2064- porque una columna
+     * que quedo con formato numero exporta '46265' en lugar de la fecha, y sin
+     * esto la importacion falla con un mensaje que no ayuda. La hoja original
+     * trae fechas reales, asi que este camino es una red y no la norma.
+     *
+     * Una fecha ambigua NO se adivina: 'dd/mm' sin anio devuelve null y la fila
+     * queda como error, con su numero de linea.
+     *
+     * @param string $valor
+     * @return string|null 'Y-m-d' o null
+     */
+    public static function fechaDesdePlanilla($valor) {
+        $v = trim((string) $valor);
+
+        if ($v === '') {
+            return null;
+        }
+
+        // aaaa-mm-dd o aaaa/mm/dd, con hora opcional
+        if (preg_match('/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/', $v, $m)) {
+            return self::armarFecha($m[1], $m[2], $m[3]);
+        }
+
+        // dd/mm/aaaa, dd-mm-aaaa, dd.mm.aaaa y su version de dos digitos
+        if (preg_match('/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})/', $v, $m)) {
+            $anio = intval($m[3]);
+
+            if ($anio < 100) {
+                $anio += ($anio < 70) ? 2000 : 1900;
+            }
+
+            return self::armarFecha($anio, $m[2], $m[1]);
+        }
+
+        // Serial de Excel. La base es 1899-12-30 por el bug del anio 1900 que
+        // Excel conserva a proposito.
+        if (preg_match('/^\d{5}$/', $v)) {
+            $serial = intval($v);
+
+            if ($serial >= 20000 && $serial <= 60000) {
+                return date('Y-m-d', strtotime('1899-12-30 +' . $serial . ' day'));
+            }
+        }
+
+        return null;
+    }
+
+    /** Valida y arma 'Y-m-d'. Devuelve null si la fecha no existe */
+    private static function armarFecha($anio, $mes, $dia) {
+        $anio = intval($anio);
+        $mes = intval($mes);
+        $dia = intval($dia);
+
+        if (!checkdate($mes, $dia, $anio)) {
+            return null;
+        }
+
+        return sprintf('%04d-%02d-%02d', $anio, $mes, $dia);
+    }
+
+    /**
+     * Compara lo que trae el archivo contra lo que ya esta cargado y dice QUE
+     * CAMBIARIA. No escribe nada.
+     *
+     * Es el corazon del importador y es un helper PURO, por el mismo motivo que
+     * planRecalculo(): el diff se tiene que poder mostrar antes de confirmar y
+     * volver a calcular al confirmar, y las dos veces tiene que dar lo mismo.
+     * Si el diff viviera dentro de la escritura, la pantalla mostraria una cosa
+     * y el servidor haria otra.
+     *
+     * LA CLAVE CON LA QUE SE RECONOCE UN MOVIMIENTO YA CARGADO:
+     *
+     *   - Si la fila trae ID_EXTERNO, es (procesadora, ID_EXTERNO). Es la clave
+     *     de verdad: el numero de liquidacion de la procesadora.
+     *   - Si no, es (procesadora, fecha de acreditacion). Alcanza para el caso
+     *     normal -una liquidacion por dia y por procesadora- y es lo que
+     *     permite importar un archivo que no trae el numero.
+     *
+     * DOS FILAS CON LA MISMA CLAVE EN EL ARCHIVO SON UN ERROR, no un aviso. Dos
+     * liquidaciones del mismo dia son legitimas, pero sin ID_EXTERNO no hay
+     * forma de saber cual de las dos corresponde a cual de las cargadas: el
+     * error pide llenar ID_EXTERNO, que es la solucion real.
+     *
+     * LAS FILAS YA ACREDITADAS -fecha anterior al inicio del eje- NO SE
+     * IMPORTAN. El archivo de la procesadora siempre va a traer el historico, y
+     * cargarlo no aporta nada: esa plata ya esta informada en el saldo bancario.
+     * Se cuentan aparte para que el resumen no mienta sobre el tamano del
+     * archivo.
+     *
+     * EL PERIODO QUE CUBRE EL ARCHIVO SE PUEDE DECLARAR, y si no se declara se
+     * infiere de las fechas que traen sus filas. La diferencia se ve cuando la
+     * procesadora da de baja la PRIMERA o la ULTIMA acreditacion del periodo:
+     * esa fecha desaparece del archivo, asi que el rango inferido se encoge y el
+     * movimiento cargado queda justo afuera de la ventana. Declarar el periodo
+     * -que el usuario conoce, es el que exporto- es lo que permite detectarla.
+     * Nunca se adivina: sin declararlo, esa baja simplemente no se propone.
+     *
+     * @param array $filasArchivo Filas de parsearPlanilla()['filas']
+     * @param array $existentes Movimientos activos normalizados (filaMovimiento())
+     * @param array $procesadoras Filas de getProcesadoras(false)
+     * @param array $alicuotas Mapa id_procesadora => filas de alicuotas
+     * @param string $inicioEje 'Y-m-d' del primer dia del eje del tablero
+     * @param array $periodo ['desde' => 'Y-m-d', 'hasta' => 'Y-m-d'] declarado
+     * @return array Diff completo
+     */
+    public static function compararImportacion($filasArchivo, $existentes, $procesadoras,
+                                               $alicuotas, $inicioEje, $periodo = []) {
+        $porNombre = [];
+
+        foreach (is_array($procesadoras) ? $procesadoras : [] as $p) {
+            $porNombre[self::claveNombre($p['RAZON_SOCIAL'])] = $p;
+        }
+
+        // Los cargados, indexados por las dos claves posibles.
+        $porExterno = [];
+        $porFecha = [];
+
+        foreach (is_array($existentes) ? $existentes : [] as $m) {
+            if (!empty($m['id_externo'])) {
+                $porExterno[$m['id_procesadora'] . '|' . trim((string) $m['id_externo'])] = $m;
+            }
+
+            $porFecha[$m['id_procesadora'] . '|' . $m['fecha_acreditacion']][] = $m;
+        }
+
+        $filas = [];
+        $vistas = [];
+        $tocados = [];
+        $inicioEje = substr((string) $inicioEje, 0, 10);
+
+        $resumen = [
+            'altas' => 0, 'cambios' => 0, 'sin_cambios' => 0,
+            'ya_acreditadas' => 0, 'errores' => 0,
+            'neto_altas' => 0, 'neto_diferencia' => 0
+        ];
+
+        $minFecha = null;
+        $maxFecha = null;
+
+        foreach (is_array($filasArchivo) ? $filasArchivo : [] as $cruda) {
+            $fila = self::filaImportacion($cruda, $porNombre, $alicuotas, $inicioEje);
+
+            if ($fila['estado'] !== 'ERROR' && $fila['estado'] !== 'YA_ACREDITADA') {
+                $clave = self::claveImportacion($fila);
+
+                if (isset($vistas[$clave])) {
+                    $fila['estado'] = 'ERROR';
+                    $fila['motivo'] = 'Esta fila repite la clave de la línea '
+                        . $vistas[$clave] . ' (misma procesadora y misma fecha). Si son dos '
+                        . 'liquidaciones distintas del mismo día, completá ID_EXTERNO en las dos '
+                        . 'para poder diferenciarlas.';
+                } else {
+                    $vistas[$clave] = $fila['linea'];
+
+                    $existente = self::buscarExistente($fila, $porExterno, $porFecha, $tocados);
+
+                    if ($existente === null) {
+                        $fila['estado'] = 'ALTA';
+                        $fila['motivo'] = 'No estaba cargada.';
+                    } else {
+                        $tocados[$existente['id']] = true;
+                        $fila = self::compararContraExistente($fila, $existente);
+                    }
+                }
+            }
+
+            // El rango describe lo que el archivo trae PARA IMPORTAR, asi que no
+            // incluye las filas ya acreditadas. Importa doble: es lo que se
+            // muestra en el resumen y es la ventana dentro de la cual se pueden
+            // proponer bajas, y una ventana estirada hacia el pasado propondria
+            // dar de baja algo que el archivo no estaba mirando.
+            if ($fila['estado'] !== 'ERROR' && $fila['estado'] !== 'YA_ACREDITADA'
+                && $fila['fecha_acreditacion'] !== null) {
+                if ($minFecha === null || $fila['fecha_acreditacion'] < $minFecha) {
+                    $minFecha = $fila['fecha_acreditacion'];
+                }
+
+                if ($maxFecha === null || $fila['fecha_acreditacion'] > $maxFecha) {
+                    $maxFecha = $fila['fecha_acreditacion'];
+                }
+            }
+
+            switch ($fila['estado']) {
+                case 'ALTA':
+                    $resumen['altas']++;
+                    $resumen['neto_altas'] += $fila['importe_neto'];
+                    break;
+                case 'CAMBIO':
+                    $resumen['cambios']++;
+                    $resumen['neto_diferencia'] += $fila['diferencia'];
+                    break;
+                case 'SIN_CAMBIOS':
+                    $resumen['sin_cambios']++;
+                    break;
+                case 'YA_ACREDITADA':
+                    $resumen['ya_acreditadas']++;
+                    break;
+                default:
+                    $resumen['errores']++;
+            }
+
+            $filas[] = $fila;
+        }
+
+        // El periodo declarado manda sobre el inferido: el usuario sabe que
+        // exporto, y el archivo solo puede mostrar las fechas que quedaron.
+        $periodo = is_array($periodo) ? $periodo : [];
+
+        $ventanaDesde = isset($periodo['desde'])
+            ? Horizonte::normalizarFecha($periodo['desde']) : null;
+        $ventanaHasta = isset($periodo['hasta'])
+            ? Horizonte::normalizarFecha($periodo['hasta']) : null;
+
+        $declarado = ($ventanaDesde !== null || $ventanaHasta !== null);
+
+        if ($ventanaDesde === null) {
+            $ventanaDesde = $minFecha;
+        }
+
+        if ($ventanaHasta === null) {
+            $ventanaHasta = $maxFecha;
+        }
+
+        $bajas = self::bajasCandidatas($existentes, $filas, $tocados, $ventanaDesde,
+            $ventanaHasta, $inicioEje);
+
+        $resumen['bajas'] = count($bajas);
+        $resumen['neto_bajas'] = 0;
+
+        foreach ($bajas as $b) {
+            $resumen['neto_bajas'] += $b['importe_neto'];
+        }
+
+        $resumen['neto_altas'] = round($resumen['neto_altas'], 4);
+        $resumen['neto_diferencia'] = round($resumen['neto_diferencia'], 4);
+        $resumen['neto_bajas'] = round($resumen['neto_bajas'], 4);
+        $resumen['filas'] = count($filas);
+
+        return [
+            'filas' => $filas,
+            'bajas' => $bajas,
+            'resumen' => $resumen,
+            'rango' => ['desde' => $minFecha, 'hasta' => $maxFecha],
+            // La ventana dentro de la cual se pueden proponer bajas, y si la
+            // declaro el usuario o se infirio del archivo. Se devuelve para que
+            // la pantalla lo pueda decir: es lo que explica por que una baja
+            // aparece o no aparece.
+            'ventana' => [
+                'desde' => $ventanaDesde,
+                'hasta' => $ventanaHasta,
+                'declarada' => $declarado
+            ],
+            // Con un solo error NO se importa nada. El archivo es la fuente de
+            // verdad, y una importacion a medias deja un estado que el proximo
+            // diff no puede explicar: aparecerian como altas las filas que
+            // quedaron afuera, mezcladas con las nuevas de verdad.
+            'puede_importar' => ($resumen['errores'] === 0
+                && ($resumen['altas'] + $resumen['cambios'] + $resumen['bajas']) > 0),
+            'avisos' => self::avisosImportacion($resumen)
+        ];
+    }
+
+    /**
+     * Valida una fila del archivo y le calcula la tasa y el neto.
+     *
+     * El neto se calcula ACA con la misma formula de siempre: una importacion no
+     * es una excepcion a la regla de que el neto no se acepta de afuera. Si el
+     * archivo trajera una columna de neto, se ignoraria.
+     *
+     * @return array Fila con 'estado' ERROR / YA_ACREDITADA, o lista para clasificar
+     */
+    private static function filaImportacion($cruda, $porNombre, $alicuotas, $inicioEje) {
+        $fila = [
+            'linea' => isset($cruda['linea']) ? intval($cruda['linea']) : 0,
+            // Los valores TAL COMO VINIERON en el archivo. Se devuelven para que
+            // la confirmacion pueda mandar exactamente la misma entrada y el
+            // servidor vuelva a calcular el mismo diff -incluidas las filas con
+            // problemas, que es lo que hace que el "todo o nada" no dependa de
+            // que el navegador las filtre-.
+            'crudo' => [
+                'procesadora' => (string) (isset($cruda['procesadora'])
+                    ? $cruda['procesadora'] : ''),
+                'importe_bruto' => (string) (isset($cruda['importe_bruto'])
+                    ? $cruda['importe_bruto'] : ''),
+                'fecha_acreditacion' => (string) (isset($cruda['fecha_acreditacion'])
+                    ? $cruda['fecha_acreditacion'] : ''),
+                'id_externo' => (string) (isset($cruda['id_externo'])
+                    ? $cruda['id_externo'] : ''),
+                'observaciones' => (string) (isset($cruda['observaciones'])
+                    ? $cruda['observaciones'] : '')
+            ],
+            'procesadora' => trim((string) (isset($cruda['procesadora'])
+                ? $cruda['procesadora'] : '')),
+            'id_procesadora' => 0,
+            'importe_bruto' => 0,
+            'fecha_acreditacion' => null,
+            'id_externo' => trim((string) (isset($cruda['id_externo'])
+                ? $cruda['id_externo'] : '')),
+            'observaciones' => trim((string) (isset($cruda['observaciones'])
+                ? $cruda['observaciones'] : '')),
+            'tasa_aplicada' => 0,
+            'importe_neto' => 0,
+            'id' => null,
+            'bruto_anterior' => null,
+            'fecha_anterior' => null,
+            'neto_anterior' => null,
+            'diferencia' => 0,
+            'estado' => 'ALTA',
+            'motivo' => ''
+        ];
+
+        $error = function ($fila, $motivo) {
+            $fila['estado'] = 'ERROR';
+            $fila['motivo'] = $motivo;
+
+            return $fila;
+        };
+
+        if ($fila['procesadora'] === '') {
+            return $error($fila, 'Falta la procesadora.');
+        }
+
+        $clave = self::claveNombre($fila['procesadora']);
+
+        if (!isset($porNombre[$clave])) {
+            return $error($fila, 'La procesadora "' . $fila['procesadora'] . '" no está cargada. '
+                . 'Dala de alta en Parámetros → Cob. Electrónicos o corregí el nombre en el '
+                . 'archivo.');
+        }
+
+        $procesadora = $porNombre[$clave];
+        $fila['id_procesadora'] = intval($procesadora['ID']);
+        // Se guarda la razon social CANONICA, la de la base, y no la que vino en
+        // el archivo: asi la pantalla no muestra dos escrituras del mismo nombre.
+        $fila['procesadora'] = $procesadora['RAZON_SOCIAL'];
+
+        if (intval($procesadora['ACTIVO']) !== 1) {
+            return $error($fila, 'La procesadora "' . $fila['procesadora'] . '" está '
+                . 'inhabilitada, así que no admite movimientos nuevos.');
+        }
+
+        $bruto = self::numeroDesdePlanilla(isset($cruda['importe_bruto'])
+            ? $cruda['importe_bruto'] : '');
+
+        if ($bruto === null) {
+            return $error($fila, 'El importe bruto "' . (isset($cruda['importe_bruto'])
+                ? $cruda['importe_bruto'] : '') . '" no es un número.');
+        }
+
+        if ($bruto <= 0) {
+            return $error($fila, 'El importe bruto tiene que ser mayor a cero.');
+        }
+
+        $fila['importe_bruto'] = $bruto;
+
+        $fecha = self::fechaDesdePlanilla(isset($cruda['fecha_acreditacion'])
+            ? $cruda['fecha_acreditacion'] : '');
+
+        if ($fecha === null) {
+            return $error($fila, 'La fecha de acreditación "' . (isset($cruda['fecha_acreditacion'])
+                ? $cruda['fecha_acreditacion'] : '') . '" no se entiende. Usá dd/mm/aaaa o '
+                . 'aaaa-mm-dd.');
+        }
+
+        $fila['fecha_acreditacion'] = $fecha;
+
+        if (mb_strlen($fila['id_externo']) > 60) {
+            return $error($fila, 'El ID_EXTERNO no puede superar los 60 caracteres.');
+        }
+
+        if (mb_strlen($fila['observaciones']) > 200) {
+            $fila['observaciones'] = mb_substr($fila['observaciones'], 0, 200);
+        }
+
+        // Ya acreditada: no se importa y no es un error. Ver la nota de
+        // compararImportacion().
+        if ($fecha < $inicioEje) {
+            $fila['estado'] = 'YA_ACREDITADA';
+            $fila['motivo'] = 'Se acreditó el ' . self::fechaCorta($fecha)
+                . ', antes del inicio del horizonte: ya está informada en el saldo bancario, '
+                . 'así que no se importa.';
+
+            return $fila;
+        }
+
+        $r = self::tasaRetencion(
+            isset($alicuotas[$fila['id_procesadora']]) ? $alicuotas[$fila['id_procesadora']] : [],
+            $fecha
+        );
+
+        if ($r['conceptos'] === 0) {
+            return $error($fila, '"' . $fila['procesadora'] . '" no tiene ninguna alícuota '
+                . 'vigente al ' . self::fechaCorta($fecha) . ', así que no se puede calcular el '
+                . 'importe neto.');
+        }
+
+        if ($r['tasa'] >= 1) {
+            return $error($fila, 'Las alícuotas vigentes de "' . $fila['procesadora'] . '" al '
+                . self::fechaCorta($fecha) . ' suman ' . self::porcentaje($r['tasa'])
+                . ': el neto saldría cero o negativo.');
+        }
+
+        $fila['tasa_aplicada'] = $r['tasa'];
+        $fila['importe_neto'] = self::importeNeto($bruto, $r['tasa']);
+
+        return $fila;
+    }
+
+    /** La clave con la que el archivo identifica una fila. Ver compararImportacion() */
+    private static function claveImportacion($fila) {
+        return ($fila['id_externo'] !== '')
+            ? ('E|' . $fila['id_procesadora'] . '|' . $fila['id_externo'])
+            : ('F|' . $fila['id_procesadora'] . '|' . $fila['fecha_acreditacion']);
+    }
+
+    /**
+     * Busca el movimiento ya cargado que corresponde a una fila del archivo.
+     *
+     * Con ID_EXTERNO manda el ID_EXTERNO -incluso si la fecha cambio, que es
+     * justamente el caso en que la procesadora reprograma una acreditacion-. Sin
+     * el, se busca por (procesadora, fecha) y se saltean los ya emparejados, por
+     * si hay mas de uno cargado ese dia.
+     *
+     * @param array $fila
+     * @param array $porExterno
+     * @param array $porFecha
+     * @param array $tocados Mapa id => true de los ya emparejados
+     * @return array|null
+     */
+    private static function buscarExistente($fila, $porExterno, $porFecha, $tocados) {
+        if ($fila['id_externo'] !== '') {
+            $clave = $fila['id_procesadora'] . '|' . $fila['id_externo'];
+
+            if (isset($porExterno[$clave])) {
+                return $porExterno[$clave];
+            }
+        }
+
+        $clave = $fila['id_procesadora'] . '|' . $fila['fecha_acreditacion'];
+
+        if (!isset($porFecha[$clave])) {
+            return null;
+        }
+
+        foreach ($porFecha[$clave] as $m) {
+            if (isset($tocados[$m['id']])) {
+                continue;
+            }
+
+            // Un cargado que YA tiene otro ID_EXTERNO no es este movimiento: es
+            // otra liquidacion del mismo dia.
+            if ($fila['id_externo'] !== '' && !empty($m['id_externo'])
+                && trim((string) $m['id_externo']) !== $fila['id_externo']) {
+                continue;
+            }
+
+            return $m;
+        }
+
+        return null;
+    }
+
+    /**
+     * Decide si una fila del archivo cambia algo del movimiento ya cargado.
+     *
+     * Se comparan el bruto y la fecha, que son los dos datos de entrada. La tasa
+     * y el neto NO se comparan: son derivados, y si cambiaron sin que cambie el
+     * bruto es porque cambio la alicuota, y eso lo resuelve el recalculo de
+     * pendientes y no una importacion.
+     *
+     * El importe se compara con tolerancia de un centavo: la columna es
+     * DECIMAL(19,4) y el valor da la vuelta por un CSV.
+     */
+    private static function compararContraExistente($fila, $existente) {
+        $fila['id'] = $existente['id'];
+        $fila['bruto_anterior'] = $existente['importe_bruto'];
+        $fila['fecha_anterior'] = $existente['fecha_acreditacion'];
+        $fila['neto_anterior'] = $existente['importe_neto'];
+        $fila['diferencia'] = round($fila['importe_neto'] - $existente['importe_neto'], 4);
+
+        $cambioImporte = (abs($existente['importe_bruto'] - $fila['importe_bruto']) > 0.005);
+        $cambioFecha = ($existente['fecha_acreditacion'] !== $fila['fecha_acreditacion']);
+
+        if (!$cambioImporte && !$cambioFecha) {
+            $fila['estado'] = 'SIN_CAMBIOS';
+            $fila['motivo'] = 'Ya estaba cargado igual.';
+
+            return $fila;
+        }
+
+        $motivos = [];
+
+        if ($cambioImporte) {
+            $motivos[] = 'el importe bruto pasa de ' . self::plata($existente['importe_bruto'])
+                . ' a ' . self::plata($fila['importe_bruto']);
+        }
+
+        if ($cambioFecha) {
+            $motivos[] = 'la fecha pasa del ' . self::fechaCorta($existente['fecha_acreditacion'])
+                . ' al ' . self::fechaCorta($fila['fecha_acreditacion']);
+        }
+
+        $fila['estado'] = 'CAMBIO';
+        $fila['motivo'] = ucfirst(implode(' y ', $motivos)) . '.';
+
+        return $fila;
+    }
+
+    /**
+     * Los movimientos cargados que el archivo NO trae, y que por lo tanto la
+     * procesadora ya no informa.
+     *
+     * ES LO QUE HACE QUE NO HAYA QUE COMPARAR A MANO. Sin esto, una acreditacion
+     * que la procesadora dio de baja se queda para siempre en el tablero, porque
+     * ninguna importacion la menciona.
+     *
+     * EL ALCANCE ES ACOTADO A PROPOSITO, y esto es lo delicado de la funcion:
+     * solo se consideran los movimientos de las procesadoras que vienen en el
+     * archivo, con fecha DENTRO de la ventana que el archivo cubre, y desde el
+     * inicio del eje. Un archivo parcial -una sola procesadora, una sola semana-
+     * no puede proponer dar de baja lo que no estaba mirando.
+     *
+     * Y la baja NUNCA se aplica sola: se ofrece y hay que confirmarla.
+     *
+     * @param string|null $desde Inicio de la ventana que cubre el archivo
+     * @param string|null $hasta Fin de la ventana
+     * @return array Movimientos candidatos, con el motivo
+     */
+    private static function bajasCandidatas($existentes, $filas, $tocados, $desde, $hasta,
+                                            $inicioEje) {
+        if ($desde === null || $hasta === null) {
+            return [];
+        }
+
+        $procesadorasArchivo = [];
+
+        foreach ($filas as $f) {
+            if ($f['estado'] !== 'ERROR' && $f['id_procesadora'] > 0) {
+                $procesadorasArchivo[$f['id_procesadora']] = true;
+            }
+        }
+
+        $bajas = [];
+
+        foreach (is_array($existentes) ? $existentes : [] as $m) {
+            if (isset($tocados[$m['id']])) {
+                continue;
+            }
+
+            if (!isset($procesadorasArchivo[$m['id_procesadora']])) {
+                continue;
+            }
+
+            $fecha = $m['fecha_acreditacion'];
+
+            if ($fecha === null || $fecha < $inicioEje
+                || $fecha < $desde || $fecha > $hasta) {
+                continue;
+            }
+
+            $m['motivo'] = 'Está cargado pero el archivo no lo trae, y su fecha cae dentro del '
+                . 'período que el archivo cubre (' . self::fechaCorta($desde) . ' al '
+                . self::fechaCorta($hasta) . ').';
+
+            $bajas[] = $m;
+        }
+
+        return $bajas;
+    }
+
+    /** Avisos del resumen de una importacion */
+    private static function avisosImportacion($resumen) {
+        $avisos = [];
+
+        if ($resumen['errores'] > 0) {
+            $avisos[] = 'Hay ' . $resumen['errores'] . ' fila(s) con problemas, así que no se '
+                . 'importa nada hasta corregirlas. Un archivo importado a medias deja un estado '
+                . 'que la próxima importación no puede explicar.';
+        }
+
+        if ($resumen['ya_acreditadas'] > 0) {
+            $avisos[] = $resumen['ya_acreditadas'] . ' fila(s) del archivo ya se acreditaron y no '
+                . 'se importan: esa plata ya está informada en el saldo bancario de la pestaña '
+                . 'Saldos.';
+        }
+
+        if ($resumen['bajas'] > 0) {
+            $avisos[] = 'Hay ' . $resumen['bajas'] . ' movimiento(s) cargados que el archivo no '
+                . 'trae. Se pueden dar de baja, pero hay que marcarlo expresamente: si el archivo '
+                . 'era parcial, esas acreditaciones siguen siendo válidas.';
+        }
+
+        if ($resumen['errores'] === 0 && $resumen['altas'] === 0 && $resumen['cambios'] === 0
+            && $resumen['bajas'] === 0) {
+            $avisos[] = 'El archivo no cambia nada de lo que ya está cargado.';
+        }
+
+        return $avisos;
+    }
+
+    /** Razon social comparable: sin espacios repetidos, sin acentos y en mayusculas */
+    private static function claveNombre($razonSocial) {
+        return self::normalizarTitulo(self::normalizarRazonSocial($razonSocial));
     }
 
     /* ====================================================================
@@ -1091,7 +2050,13 @@ class CobElectronicos {
      * "no entra al tablero" de cada fila describa exactamente el eje que el
      * tablero esta usando y no otro.
      *
-     * @param array $filtros ['id_procesadora', 'desde', 'hasta']
+     * POR DEFECTO NO SE MUESTRAN LAS ACREDITACIONES YA OCURRIDAS. Ya pasaron, ya
+     * entraron a la cuenta y estan informadas en el saldo bancario: no hay nada
+     * que hacer con ellas, y tenerlas en la tabla todos los dias solo hace que
+     * el total de la pantalla no coincida con el del tablero. Se ven con el
+     * filtro 'incluir_acreditadas', que la pantalla ofrece como un switch.
+     *
+     * @param array $filtros ['id_procesadora', 'desde', 'hasta', 'incluir_acreditadas']
      * @return array
      */
     public function getPestana($filtros = []) {
@@ -1103,20 +2068,10 @@ class CobElectronicos {
             $avisos[] = 'No se pudo verificar la configuración del módulo: ' . $e->getMessage();
         }
 
-        $procesadoras = [];
-        $alicuotas = [];
-        $movimientos = [];
-
-        try {
-            $procesadoras = $this->getProcesadoras(false);
-            $alicuotas = $this->getAlicuotas(true);
-            $movimientos = $this->getMovimientos($filtros);
-        } catch (Throwable $e) {
-            $avisos[] = 'No se pudieron leer los movimientos: ' . $e->getMessage();
-        }
-
         require_once __DIR__ . '/Parametros.php';
 
+        // El eje se resuelve ANTES de leer los movimientos, porque es el que
+        // define desde cuando se muestran.
         $h = null;
 
         try {
@@ -1129,6 +2084,37 @@ class CobElectronicos {
                 . 'así que la marca de qué movimientos entran al tablero puede no coincidir con '
                 . 'el tablero.';
             $h = new Horizonte(28, 12);
+        }
+
+        // Sin filtro explicito, la tabla arranca en el inicio del eje: lo
+        // anterior ya se acredito y no hay nada que hacer con eso. El switch
+        // 'incluir_acreditadas' lo trae de vuelta cuando alguien quiere verlo.
+        $incluirAcreditadas = !empty($filtros['incluir_acreditadas']);
+
+        $desde = isset($filtros['desde']) ? Horizonte::normalizarFecha($filtros['desde']) : null;
+        $hasta = isset($filtros['hasta']) ? Horizonte::normalizarFecha($filtros['hasta']) : null;
+
+        if ($desde === null && !$incluirAcreditadas) {
+            $desde = $h->hoy();
+        }
+
+        $consulta = [
+            'id_procesadora' => isset($filtros['id_procesadora'])
+                ? intval($filtros['id_procesadora']) : 0,
+            'desde' => $desde,
+            'hasta' => $hasta
+        ];
+
+        $procesadoras = [];
+        $alicuotas = [];
+        $movimientos = [];
+
+        try {
+            $procesadoras = $this->getProcesadoras(false);
+            $alicuotas = $this->getAlicuotas(true);
+            $movimientos = $this->getMovimientos($consulta);
+        } catch (Throwable $e) {
+            $avisos[] = 'No se pudieron leer los movimientos: ' . $e->getMessage();
         }
 
         $armado = self::armarMovimientos($movimientos, $h);
@@ -1167,13 +2153,16 @@ class CobElectronicos {
             'por_procesadora' => $armado['por_procesadora'],
             'por_dia' => self::agruparPorDia($armado['filas']),
             'por_mes' => self::agruparPorMes($armado['filas']),
+            // Se devuelve el filtro EFECTIVO, incluido el 'desde' que puso el
+            // servidor: si la pantalla mostrara el campo vacio, el usuario
+            // leeria la tabla como si fueran todos los movimientos.
             'filtros' => [
-                'id_procesadora' => isset($filtros['id_procesadora'])
-                    ? intval($filtros['id_procesadora']) : 0,
-                'desde' => isset($filtros['desde'])
-                    ? Horizonte::normalizarFecha($filtros['desde']) : null,
-                'hasta' => isset($filtros['hasta'])
-                    ? Horizonte::normalizarFecha($filtros['hasta']) : null
+                'id_procesadora' => $consulta['id_procesadora'],
+                'desde' => $consulta['desde'],
+                'hasta' => $consulta['hasta'],
+                'incluir_acreditadas' => $incluirAcreditadas,
+                'desde_por_defecto' => ($desde === $h->hoy()
+                    && !isset($filtros['desde']) && !$incluirAcreditadas)
             ],
             'avisos' => array_merge($avisos, $armado['avisos'])
         ];
@@ -1188,6 +2177,225 @@ class CobElectronicos {
         }
 
         return $v;
+    }
+
+    /* ====================================================================
+       IMPORTACION: PREVISUALIZAR Y CONFIRMAR
+
+       SON DOS PASOS Y NO UNO. El primero no escribe nada: lee el archivo, lo
+       compara con lo cargado y devuelve que cambiaria. El segundo aplica.
+
+       El segundo paso NO confia en lo que muestra la pantalla: vuelve a leer la
+       base, vuelve a validar cada fila y vuelve a calcular el diff con el mismo
+       helper puro. El cliente manda los DATOS DE ENTRADA del archivo -los mismos
+       que tipearia a mano-, y la tasa y el neto los sigue calculando el
+       servidor. Si entre la previsualizacion y la confirmacion cambio algo -otro
+       usuario cargo un movimiento, alguien edito una alicuota-, lo que se aplica
+       es el diff contra el estado real, no contra el que se dibujo.
+       ==================================================================== */
+
+    /**
+     * Lee un archivo subido y devuelve que cambiaria, sin escribir nada.
+     *
+     * @param string $contenido Contenido del archivo
+     * @param string $archivo Nombre del archivo, para el resumen
+     * @param array $periodo Periodo que cubre el archivo, si se declaro
+     * @return array Diff de compararImportacion(), con el nombre del archivo
+     */
+    public function previsualizarImportacion($contenido, $archivo = '', $periodo = []) {
+        if (!$this->tablasCreadas()) {
+            throw new Exception('No existen las tablas del módulo Cob. Electrónicos. '
+                . 'Corré sql/cashflow_cob_electronicos.sql.');
+        }
+
+        $parseado = self::parsearPlanilla($contenido);
+        $diff = $this->diffImportacion($parseado['filas'], $periodo);
+
+        $diff['archivo'] = (string) $archivo;
+        $diff['separador'] = ($parseado['separador'] === "\t") ? 'tabulacion'
+            : $parseado['separador'];
+
+        return $diff;
+    }
+
+    /**
+     * Aplica una importacion: altas, cambios y -si se pide- las bajas.
+     *
+     * TODO EN UNA TRANSACCION. A mitad de camino quedarian algunas
+     * acreditaciones actualizadas y otras no, y la proxima importacion mostraria
+     * un diff que no describe ni el archivo viejo ni el nuevo.
+     *
+     * CON UN SOLO ERROR NO SE IMPORTA NADA. El archivo es la fuente de verdad:
+     * importar la mitad deja un estado que el proximo diff no puede explicar,
+     * porque las filas que quedaron afuera aparecerian como altas nuevas.
+     *
+     * @param array $filas Filas del archivo, tal como las devolvio la
+     *        previsualizacion (los datos de entrada, no la tasa ni el neto)
+     * @param string $archivo Nombre del archivo, se guarda en ARCHIVO_ORIGEN
+     * @param bool $aplicarBajas Si se dan de baja los cargados que el archivo
+     *        no trae. Por defecto NO: un archivo parcial no puede borrar nada
+     * @param string|null $usuario
+     * @param array $periodo Periodo que cubre el archivo, si se declaro. Tiene
+     *        que ser el MISMO que se uso al previsualizar, o las bajas que se
+     *        aplican no serian las que se mostraron
+     * @return array El diff aplicado, con lo que efectivamente se escribio
+     */
+    public function importar($filas, $archivo = '', $aplicarBajas = false, $usuario = null,
+                             $periodo = []) {
+        if (!$this->tablasCreadas()) {
+            throw new Exception('No existen las tablas del módulo Cob. Electrónicos. '
+                . 'Corré sql/cashflow_cob_electronicos.sql.');
+        }
+
+        if (!is_array($filas) || empty($filas)) {
+            throw new Exception('No llegó ninguna fila para importar');
+        }
+
+        // Se vuelve a calcular el diff contra el estado REAL de la base.
+        $diff = $this->diffImportacion($filas, $periodo);
+
+        if ($diff['resumen']['errores'] > 0) {
+            throw new Exception('El archivo tiene ' . $diff['resumen']['errores'] . ' fila(s) con '
+                . 'problemas, así que no se importó nada. Corregilas y volvé a previsualizar.');
+        }
+
+        if (!$diff['puede_importar'] && !($aplicarBajas && $diff['resumen']['bajas'] > 0)) {
+            throw new Exception('El archivo no cambia nada de lo que ya está cargado.');
+        }
+
+        $archivo = substr(trim((string) $archivo), 0, 120);
+        $archivo = ($archivo === '') ? null : $archivo;
+
+        $cid = $this->conectar('central');
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo iniciar la transacción'));
+        }
+
+        $aplicado = ['altas' => 0, 'cambios' => 0, 'bajas' => 0];
+
+        try {
+            $sqlAlta = "INSERT INTO RO_T_CASHFLOW_COBEL_MOVIMIENTO
+                            (ID_PROCESADORA, IMPORTE_BRUTO, FECHA_ACREDITACION, TASA_APLICADA,
+                             IMPORTE_NETO, ORIGEN_DATO, ID_EXTERNO, ARCHIVO_ORIGEN,
+                             OBSERVACIONES, ACTIVO, FECHA_ALTA, FECHA_UPDATE, USUARIO)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, GETDATE(), GETDATE(), ?)";
+
+            $sqlCambio = "UPDATE RO_T_CASHFLOW_COBEL_MOVIMIENTO
+                          SET IMPORTE_BRUTO = ?, FECHA_ACREDITACION = ?, TASA_APLICADA = ?,
+                              IMPORTE_NETO = ?, ORIGEN_DATO = ?, ID_EXTERNO = ?,
+                              ARCHIVO_ORIGEN = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                          WHERE ID = ? AND ACTIVO = 1";
+
+            foreach ($diff['filas'] as $f) {
+                if ($f['estado'] === 'ALTA') {
+                    $ok = sqlsrv_query($cid, $sqlAlta, [
+                        $f['id_procesadora'], $f['importe_bruto'], $f['fecha_acreditacion'],
+                        $f['tasa_aplicada'], $f['importe_neto'], self::ORIGEN_ARCHIVO,
+                        ($f['id_externo'] === '' ? null : $f['id_externo']), $archivo,
+                        ($f['observaciones'] === '' ? null : $f['observaciones']), $usuario
+                    ]);
+
+                    if ($ok === false) {
+                        throw new Exception($this->errorSql('Error al importar la línea '
+                            . $f['linea']));
+                    }
+
+                    $aplicado['altas']++;
+                    continue;
+                }
+
+                // SIN_CAMBIOS no se escribe: pisarle FECHA_UPDATE a todo lo que
+                // el archivo repite dejaria la columna diciendo que se edito
+                // todo en cada importacion, igual que el diff de las sucursales
+                // de Saldos.
+                if ($f['estado'] !== 'CAMBIO') {
+                    continue;
+                }
+
+                $ok = sqlsrv_query($cid, $sqlCambio, [
+                    $f['importe_bruto'], $f['fecha_acreditacion'], $f['tasa_aplicada'],
+                    $f['importe_neto'], self::ORIGEN_ARCHIVO,
+                    ($f['id_externo'] === '' ? null : $f['id_externo']), $archivo,
+                    $usuario, $f['id']
+                ]);
+
+                if ($ok === false) {
+                    throw new Exception($this->errorSql('Error al actualizar el movimiento '
+                        . $f['id'] . ' (línea ' . $f['linea'] . ')'));
+                }
+
+                $aplicado['cambios']++;
+            }
+
+            if ($aplicarBajas) {
+                $sqlBaja = "UPDATE RO_T_CASHFLOW_COBEL_MOVIMIENTO
+                            SET ACTIVO = 0, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                            WHERE ID = ? AND ACTIVO = 1";
+
+                foreach ($diff['bajas'] as $b) {
+                    if (sqlsrv_query($cid, $sqlBaja, [$usuario, $b['id']]) === false) {
+                        throw new Exception($this->errorSql('Error al dar de baja el movimiento '
+                            . $b['id']));
+                    }
+
+                    $aplicado['bajas']++;
+                }
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar la importación'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+            throw $e;
+        }
+
+        $diff['aplicado'] = $aplicado;
+        $diff['archivo'] = $archivo;
+
+        return $diff;
+    }
+
+    /**
+     * El diff de una importacion contra el estado actual de la base.
+     *
+     * Lo usan la previsualizacion y la confirmacion, para que las dos comparen
+     * con la misma regla. La decision de que cambia vive en el helper puro
+     * compararImportacion(); esto solo junta los datos que necesita.
+     *
+     * @param array $filasCrudas Filas del archivo
+     * @param array $periodo Periodo declarado que cubre el archivo
+     * @return array
+     */
+    private function diffImportacion($filasCrudas, $periodo = []) {
+        return self::compararImportacion(
+            $filasCrudas,
+            $this->getMovimientos(),
+            $this->getProcesadoras(false),
+            $this->getAlicuotasPorProcesadora(),
+            $this->inicioEje(),
+            $periodo
+        );
+    }
+
+    /**
+     * Primer dia del eje del tablero: es el corte a partir del cual una
+     * acreditacion todavia no ocurrio.
+     *
+     * Si el horizonte no se puede leer se usa hoy, que es el mismo dia con el
+     * que arranca el eje en el caso normal: es preferible a no poder importar.
+     *
+     * @return string 'Y-m-d'
+     */
+    private function inicioEje() {
+        require_once __DIR__ . '/Parametros.php';
+
+        try {
+            return Horizonte::desdeParametros(new Parametros())->hoy();
+        } catch (Throwable $e) {
+            return date('Y-m-d');
+        }
     }
 
     /* ====================================================================

@@ -292,9 +292,9 @@
                 .then(function() {
                     setValor('nuevaRazonSocial', '');
                     mostrar('formProcesadora', false);
-                    alert('Procesadora agregada. Queda INACTIVA: cargale una alícuota y después ' +
-                          'activala. Sin alícuota vigente sus movimientos no podrían calcular el ' +
-                          'importe neto.');
+                    mostrarResultado('Procesadora agregada, y queda INACTIVA: cargale una '
+                        + 'alícuota en la sección de abajo y después activala. Sin alícuota '
+                        + 'vigente sus movimientos no podrían calcular el importe neto.', null);
                     cargar();
                 });
         }, 'No se pudo agregar la procesadora');
@@ -514,7 +514,8 @@
             }).then(function(r) {
                 mostrar('formAlicuota', false);
                 setValor('nuevaAliPorcentaje', '');
-                alert(mensajeRecalculo(r));
+                mostrarResultado('Alícuota guardada como vigencia nueva: la anterior queda en el '
+                    + 'histórico y los movimientos que se calcularon con ella la conservan.', r);
                 cargar();
             });
         }, 'No se pudo guardar la alícuota');
@@ -530,43 +531,121 @@
         conBotonEl(boton, function() {
             return pedirJson(URL_PARAM + '?action=bajaAlicuotaCobel', { id: id })
                 .then(function(r) {
-                    alert(mensajeRecalculo(r));
+                    mostrarResultado('Alícuota dada de baja: deja de regir, pero la fila queda '
+                        + 'en el histórico.', r);
                     cargar();
                 });
         }, 'No se pudo dar de baja la alícuota');
     }
 
     /**
-     * Qué dejó el recálculo automático de los pendientes.
+     * Muestra qué dejó el guardado, con el detalle del recálculo automático.
      *
-     * Se informa siempre, incluso cuando no cambió nada: un recálculo que no se
+     * Se informa SIEMPRE, incluso cuando no cambió nada: un recálculo que no se
      * informa es un cambio de importes en silencio, y era la mitad del problema
      * del Excel corriendo al revés.
+     *
+     * Va en un panel de la pantalla y no en un alert porque lo que hay que
+     * mostrar es una TABLA —qué movimiento, con qué tasa antes y después, con
+     * qué diferencia de neto— y una tabla en un alert no se puede leer ni
+     * comparar. Además queda a la vista mientras se sigue trabajando, que es
+     * cuando sirve.
+     *
+     * @param {string} titulo Qué se guardó
+     * @param {Object} r Respuesta del servidor
      */
-    function mensajeRecalculo(r) {
-        var rec = (r && r.recalculo) || {};
-        var cambios = (rec.cambios || []).length;
+    function mostrarResultado(titulo, r) {
+        var cont = document.getElementById('resultadoCobel');
 
-        if (!cambios) {
-            return 'Alícuota guardada. No cambió el neto de ningún movimiento pendiente' +
-                   (rec.acreditados
-                       ? ' (los ' + rec.acreditados + ' ya acreditados no se tocan).'
-                       : '.');
+        if (!cont) {
+            return;
         }
 
-        var detalle = (rec.cambios || []).slice(0, 8).map(function(c) {
-            return '  · ' + fechaCorta(c.fecha_acreditacion) + '  ' +
-                   porcentaje(c.tasa_anterior) + ' → ' + porcentaje(c.tasa_nueva) + '   ' +
-                   pesos(c.neto_anterior) + ' → ' + pesos(c.neto_nuevo);
-        }).join('\n');
+        var rec = (r && r.recalculo) || {};
+        var cambios = rec.cambios || [];
+        var html = '';
 
-        return 'Alícuota guardada.\n\n' +
-               'Se recalcularon ' + cambios + ' movimiento(s) pendiente(s), con una diferencia ' +
-               'total de ' + pesos(rec.diferencia) + ' en el neto:\n\n' + detalle +
-               ((rec.cambios || []).length > 8 ? '\n  · …' : '') +
-               '\n\nLos ' + (rec.acreditados || 0) + ' movimiento(s) ya acreditados no se ' +
-               'tocaron: conservan la tasa con la que se calcularon.' +
-               ((rec.avisos || []).length ? '\n\n' + rec.avisos.join('\n') : '');
+        html += '<div class="pce-resultado">';
+        html += '<div class="pce-resultado-titulo">' +
+            '<i class="fas fa-circle-check me-1"></i>' + escapar(titulo) + '</div>';
+
+        // Sin respuesta que detallar -un alta de procesadora, que todavia no
+        // tiene movimientos- alcanza con el titulo. Decir "no cambio ningun
+        // pendiente" ahi seria contestar una pregunta que nadie hizo.
+        if (!r) {
+            cont.innerHTML = html + '</div>';
+            cont.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+            return;
+        }
+
+        if (r.tasa_total !== undefined && r.tasa_total !== null) {
+            html += '<div class="pce-resultado-linea">La tasa total vigente de esa procesadora ' +
+                'es ahora del <strong>' + porcentaje(r.tasa_total) + '</strong>, así que una ' +
+                'acreditación nueva va a acreditar el <strong>' +
+                porcentaje(1 - parseFloat(r.tasa_total)) + '</strong> de su importe bruto.</div>';
+        }
+
+        if (!cambios.length) {
+            html += '<div class="pce-resultado-linea">No cambió el importe neto de ningún ' +
+                'movimiento pendiente.' +
+                (rec.acreditados
+                    ? (' Los ' + rec.acreditados + ' ya acreditados no se tocan: conservan la ' +
+                       'tasa con la que se calcularon.')
+                    : '') +
+                '</div>';
+        } else {
+            html += '<div class="pce-resultado-linea">Se recalcularon <strong>' +
+                cambios.length + '</strong> movimiento(s) pendiente(s), con una diferencia total ' +
+                'de <strong>' + signo(rec.diferencia) + '</strong> en el neto.' +
+                (rec.acreditados
+                    ? (' Los ' + rec.acreditados + ' ya acreditados <strong>no se tocaron</strong>.')
+                    : '') +
+                '</div>';
+
+            html += '<div class="table-responsive pce-resultado-tabla">' +
+                '<table class="table table-sm mb-0"><thead><tr>' +
+                '<th>Procesadora</th><th class="text-center">Acreditación</th>' +
+                '<th class="text-end">Bruto</th><th class="text-center">Tasa</th>' +
+                '<th class="text-end">Neto</th><th class="text-end">Diferencia</th>' +
+                '</tr></thead><tbody>';
+
+            cambios.forEach(function(c) {
+                var baja = (parseFloat(c.diferencia) || 0) < 0;
+
+                html += '<tr>' +
+                    '<td>' + escapar(c.procesadora) + '</td>' +
+                    '<td class="text-center">' + fechaCorta(c.fecha_acreditacion) + '</td>' +
+                    '<td class="text-end pce-num">' + pesos(c.importe_bruto) + '</td>' +
+                    '<td class="text-center pce-num">' + porcentaje(c.tasa_anterior) +
+                        ' <i class="fas fa-arrow-right pce-flecha"></i> ' +
+                        porcentaje(c.tasa_nueva) + '</td>' +
+                    '<td class="text-end pce-num">' + pesos(c.neto_anterior) +
+                        ' <i class="fas fa-arrow-right pce-flecha"></i> <strong>' +
+                        pesos(c.neto_nuevo) + '</strong></td>' +
+                    '<td class="text-end pce-num ' + (baja ? 'text-danger' : 'text-success') +
+                        '">' + signo(c.diferencia) + '</td>' +
+                '</tr>';
+            });
+
+            html += '</tbody></table></div>';
+        }
+
+        (rec.avisos || []).forEach(function(a) {
+            html += '<div class="pce-resultado-aviso">· ' + escapar(a) + '</div>';
+        });
+
+        html += '</div>';
+
+        cont.innerHTML = html;
+        cont.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    /** '+ $ 1.000,00' / '− $ 1.000,00', para una diferencia */
+    function signo(valor) {
+        var n = parseFloat(valor) || 0;
+
+        return (n >= 0 ? '+ ' : '− ') + pesos(Math.abs(n));
     }
 
     /* ================================================================

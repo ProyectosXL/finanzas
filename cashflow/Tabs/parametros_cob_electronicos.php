@@ -22,6 +22,14 @@
 
     <div id="avisosParamCobel"></div>
 
+    <!--
+        Resultado del último guardado. Va acá y no en un alert porque lo que hay
+        que mostrar es una tabla: qué movimientos pendientes se recalcularon, con
+        qué tasa antes y después y qué diferencia de neto. Un alert con saltos de
+        línea no se puede leer, no se puede comparar y desaparece con un click.
+    -->
+    <div id="resultadoCobel"></div>
+
     <div class="loading-spinner" id="loadingParamCobel">
         <div class="spinner"></div>
         <p>Cargando parámetros de Cob. Electrónicos...</p>

@@ -18,10 +18,15 @@
         tipear: aceptarlos del navegador permitiría guardar cualquier número
         como si fuera el calculado.
 
-      · Un movimiento con fecha anterior al inicio del horizonte NO entra al
-        tablero, y no es un error: ya se acreditó, así que esa plata ya está
-        informada en el saldo bancario de la pestaña Saldos. Se ve igual, en su
-        fila, marcada.
+      · Las acreditaciones ya ocurridas —fecha anterior al inicio del
+        horizonte— NO se muestran ni se avisan: ya pasaron, ya entraron a la
+        cuenta y están informadas en el saldo bancario de la pestaña Saldos. Se
+        ven con el switch "Ver también las ya acreditadas".
+
+      · La carga se puede hacer a mano o importando el archivo de la
+        procesadora. El importador muestra las diferencias contra lo cargado
+        ANTES de escribir: es lo que permite actualizar seguido sin comparar
+        fila por fila.
 
       · Esta fila NO se cruza con "Cobros s/ ventas estimadas" de Ventas, por
         decisión del negocio. No hay deducción ni prorrateo entre las dos.
@@ -74,17 +79,22 @@
             </div>
         </div>
 
+        <!-- Sólo lo POSTERIOR al horizonte: es lo único que el tablero deja de
+             mostrar teniendo que mostrarlo. Lo ya acreditado no cuenta acá,
+             porque no falta en el tablero: lo informa el saldo bancario. -->
         <div class="col-md-6 col-lg-3">
             <div class="kpi-card">
                 <div class="kpi-card-header">
-                    <span class="kpi-card-title">Fuera del Horizonte</span>
+                    <span class="kpi-card-title">Posterior al Horizonte</span>
                     <div class="kpi-card-icon" style="background: rgba(220,53,69,.1); color: #dc3545;">
                         <i class="fas fa-calendar-xmark"></i>
                     </div>
                 </div>
                 <div class="kpi-card-value kpi-card-value-sm" id="cobelFueraEje">—</div>
                 <div class="kpi-card-footer">
-                    <span class="text-muted" id="cobelDetalleFuera">Netos que el tablero no muestra</span>
+                    <span class="text-muted" id="cobelDetalleFuera">
+                        Netos con fecha más allá del eje
+                    </span>
                 </div>
             </div>
         </div>
@@ -108,6 +118,9 @@
             <div class="d-flex gap-2">
                 <button id="btnRefreshCobel" class="btn btn-sm btn-outline-primary">
                     <i class="fas fa-sync-alt me-1"></i> Actualizar
+                </button>
+                <button id="btnImportar" class="btn btn-sm btn-outline-primary">
+                    <i class="fas fa-file-import me-1"></i> Importar planilla
                 </button>
                 <button id="btnNuevoMovimiento" class="btn btn-sm btn-primary">
                     <i class="fas fa-plus me-1"></i> Nuevo movimiento
@@ -155,6 +168,79 @@
             <div class="cobel-preview mt-2" id="previewNeto"></div>
         </div>
 
+        <!-- ========================================================
+             IMPORTADOR
+             ========================================================
+             Dos pasos: previsualizar y confirmar. El primero no escribe nada.
+             Es lo que permite actualizar seguido sin tener que comparar a mano
+             qué cambió respecto de lo ya cargado.
+        -->
+        <div class="card-body border-bottom cobel-importador" id="panelImportar"
+             style="display: none;">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                <div>
+                    <h6 class="mb-1">Importar desde planilla</h6>
+                    <small class="text-muted">
+                        Bajá la plantilla, pegá las acreditaciones y subila. Se muestra
+                        <strong>qué cambiaría</strong> y recién después se escribe. Excel guarda
+                        CSV desde <em>Archivo → Guardar como → CSV UTF-8</em>.
+                    </small>
+                </div>
+                <a href="Controller/CobElectronicosController.php?action=plantilla"
+                   class="btn btn-sm btn-outline-secondary" download>
+                    <i class="fas fa-file-arrow-down me-1"></i> Descargar plantilla
+                </a>
+            </div>
+
+            <div class="row g-2 align-items-end mt-2">
+                <div class="col-md-4">
+                    <label class="form-label form-label-sm">Archivo (.csv)</label>
+                    <input type="file" id="archivoImportar" class="form-control form-control-sm"
+                           accept=".csv,.txt,text/csv">
+                </div>
+                <!--
+                    El período que cubre el archivo es OPCIONAL y sirve para una
+                    sola cosa: detectar las acreditaciones que la procesadora dio
+                    de baja. Si la que desapareció era la primera o la última del
+                    período, su fecha ya no está en el archivo, así que el rango
+                    que se puede inferir se encoge y ese movimiento queda justo
+                    afuera. Declararlo —el usuario sabe qué exportó— es lo que
+                    permite verlo. Nunca se adivina.
+                -->
+                <div class="col-md-2">
+                    <label class="form-label form-label-sm">El archivo cubre desde</label>
+                    <input type="date" id="periodoDesde" class="form-control form-control-sm">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label form-label-sm">hasta</label>
+                    <input type="date" id="periodoHasta" class="form-control form-control-sm">
+                </div>
+                <div class="col-md-4 d-flex gap-2">
+                    <button id="btnPrevisualizar" class="btn btn-sm btn-primary">
+                        <i class="fas fa-eye me-1"></i> Ver diferencias
+                    </button>
+                    <button id="btnCerrarImportar" class="btn btn-sm btn-outline-secondary">
+                        <i class="fas fa-xmark"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="cobel-nota mt-2">
+                Columnas: <strong>PROCESADORA</strong>, <strong>IMPORTE_BRUTO</strong> y
+                <strong>FECHA_ACREDITACION</strong> son obligatorias;
+                <strong>ID_EXTERNO</strong> (el número de liquidación) y
+                <strong>OBSERVACIONES</strong> son opcionales. El importe neto y la tasa
+                <strong>no van en el archivo</strong>: los calcula el servidor. Las filas ya
+                acreditadas se ignoran, y si hay un solo error no se importa nada.
+                Completar <em>desde / hasta</em> sólo hace falta para detectar acreditaciones que
+                la procesadora dio de baja al principio o al final del período: si no se completa,
+                el período se infiere de las fechas del archivo.
+            </div>
+
+            <!-- El resultado de la previsualización y la confirmación -->
+            <div id="resultadoImportar"></div>
+        </div>
+
         <div class="card-body p-0">
             <div class="cobel-filtros border-bottom">
                 <div class="row g-2 align-items-end">
@@ -182,6 +268,20 @@
                     </div>
                     <div class="col-md-2 text-md-end">
                         <span class="cobel-eje" id="cobelEje"></span>
+                    </div>
+                    <!-- Las ya acreditadas no se muestran por defecto: ya
+                         pasaron y no hay nada que hacer con ellas. El switch
+                         existe para poder auditarlas, no para trabajar. -->
+                    <div class="col-12">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   id="verAcreditadas">
+                            <label class="form-check-label cobel-eje" for="verAcreditadas">
+                                Ver también las ya acreditadas (fecha anterior al horizonte).
+                                No entran al tablero: esa plata ya está informada en el saldo
+                                bancario de la pestaña Saldos.
+                            </label>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -291,11 +391,11 @@
             <div class="cobel-nota mt-3">
                 <i class="fas fa-circle-info me-1"></i>
                 Las dos agrupaciones son la misma suma de netos vista de dos formas, así que dan el
-                mismo total. Las filas marcadas quedan <strong>fuera del horizonte</strong> del
-                tablero: las anteriores a
-                <span id="cobelDesde" class="fw-semibold">hoy</span> ya se acreditaron y están
-                informadas en el saldo bancario de la pestaña Saldos, así que sumarlas acá las
-                contaría dos veces.
+                mismo total. El horizonte del tablero arranca el
+                <span id="cobelDesde" class="fw-semibold">hoy</span>: lo anterior ya se acreditó y
+                lo informa el saldo bancario de la pestaña Saldos, así que sumarlo acá lo contaría
+                dos veces. Una fila marcada es una acreditación con fecha
+                <strong>posterior</strong> al eje, que el tablero todavía no puede mostrar.
             </div>
         </div>
     </div>
