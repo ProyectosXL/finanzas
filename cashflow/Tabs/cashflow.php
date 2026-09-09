@@ -107,17 +107,11 @@
                 <small class="text-muted" id="cfSubtitulo">Consolidado de todos los módulos</small>
             </div>
             <div class="d-flex gap-2">
-                <div class="btn-group" role="group">
-                    <button id="cfBtnDias" class="btn btn-sm btn-primary">
-                        <i class="fas fa-calendar-day me-1"></i> Días
-                    </button>
-                    <button id="cfBtnMeses" class="btn btn-sm btn-outline-secondary">
-                        <i class="fas fa-calendar-alt me-1"></i> Meses
-                    </button>
-                    <button id="cfBtnCompleto" class="btn btn-sm btn-outline-secondary">
-                        <i class="fas fa-calendar me-1"></i> Período completo
-                    </button>
-                </div>
+                <!-- Los tres botones los dibuja Js/eje-vistas.js, el mismo
+                     componente que usan las pestañas de detalle: el tablero y la
+                     pestaña que explica una de sus filas no pueden ofrecer
+                     vistas distintas ni medir períodos distintos. -->
+                <div id="cfVistas"></div>
                 <button id="cfBtnRefresh" class="btn btn-sm btn-outline-primary">
                     <i class="fas fa-sync-alt me-1"></i> Actualizar
                 </button>
