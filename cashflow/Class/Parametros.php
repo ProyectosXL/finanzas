@@ -140,14 +140,14 @@ class Parametros {
         return $this->saldos;
     }
 
-    /** @var Saldos|null */
-    private $saldos = null;
-
     /**
      * Cache del chequeo de la columna MODULO.
      * null = todavia no se consulto, true/false = resultado.
      */
     private $tieneModulo = null;
+
+    /** @var Saldos|null Puerta al modulo Saldos; la resuelve saldos() */
+    private $saldos = null;
 
     function __construct(){
         require_once __DIR__.'/../../class/conexion.php';

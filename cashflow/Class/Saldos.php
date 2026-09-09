@@ -1550,7 +1550,7 @@ class Saldos {
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), ?)";
 
             foreach ($armado['filas'] as $f) {
-                $params = [
+                $valores = [
                     $idCarga,
                     $f['nro_sucursal'],
                     $f['desc_sucursal'],
@@ -1567,7 +1567,7 @@ class Saldos {
                     $usuario
                 ];
 
-                if (sqlsrv_query($cid, $sql, $params) === false) {
+                if (sqlsrv_query($cid, $sql, $valores) === false) {
                     throw new Exception($this->errorSql('Error al guardar el local '
                         . $f['nro_sucursal']));
                 }
