@@ -220,6 +220,37 @@ chequear('sin total en pesos', 0.0, $a['totales']['neto']);
 chequear('sin total en dolares', null, $a['totales']['neto_usd']);
 
 /* ================================================================
+   RANGO DE MESES DEL TIPO DE CAMBIO
+   ================================================================ */
+seccion('el rango de meses se expande al ultimo dia del mes final');
+
+// Es lo que garantiza que entre la cotizacion de CIERRE del ultimo mes: un
+// rango cortado en el dia 1 se perderia justamente el dato que se busca.
+$r = Cotizacion::rango('2026-01', '2026-02');
+
+chequear('arranca el dia 1 del mes inicial', '2026-01-01', $r['desde']);
+chequear('y termina el ultimo dia del final, no el primero', '2026-02-28', $r['hasta']);
+
+$r = Cotizacion::rango('2024-02', '2024-02');
+
+chequear('un febrero bisiesto llega al 29', '2024-02-29', $r['hasta']);
+
+$r = Cotizacion::rango('2026-03-15', '2026-04-02');
+
+chequear('tambien acepta fechas completas', '2026-03-01', $r['desde']);
+chequear('y las lleva al cierre del mes final', '2026-04-30', $r['hasta']);
+
+chequear('la clave de mes lleva el cero adelante', '2026-07', Cotizacion::clave(2026, 7));
+
+chequearLanza('un mes invalido no pasa en silencio', function() {
+    Cotizacion::rango('2026-13', '2026-13');
+});
+
+chequearLanza('ni un rango al reves', function() {
+    Cotizacion::rango('2026-05', '2026-02');
+});
+
+/* ================================================================
    VENTA BALANCE
    ================================================================ */
 seccion('el anio balance corre del 1/8 al 31/7');
