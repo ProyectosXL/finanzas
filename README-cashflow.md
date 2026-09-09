@@ -44,7 +44,7 @@ Los tres son reejecutables y no pisan nada ya editado. Si no se corrieron, la pa
 
 ---
 
-## Las tres vistas
+## Las tres vistas — el criterio de TODO el módulo
 
 | Vista | Qué muestra |
 | --- | --- |
@@ -52,11 +52,71 @@ Los tres son reejecutables y no pisan nada ya editado. Si no se corrieron, la pa
 | **Meses** | Las columnas mensuales (`horizonte_meses`) |
 | **Período completo** | Las dos ramas juntas, en orden cronológico |
 
+**No son las tres vistas del tablero: son las de todas las pantallas con eje temporal.** El criterio vive en un solo lugar por capa:
+
+| Capa | Archivo | Qué resuelve |
+| --- | --- | --- |
+| Cálculo | `Class/EjeVista.php` | Qué columnas tiene cada vista, qué total le corresponde y qué período mide |
+| Presentación | `Js/eje-vistas.js` | Dibuja los botones, mantiene la vista activa y entrega las columnas visibles |
+
+Las usan **Cashflow, Ventas, Proveedores Exterior, Crono Nacionalización y Cobranzas FR**.
+
 **Los indicadores miden exactamente las columnas que se están mirando**, y la columna Total también. Antes eran siempre del tramo diario, aunque la pantalla mostrara los meses: el número no describía nada de lo que había en pantalla.
 
 El **Disponible Inicial** es el único que no varía: es con cuánto se arranca hoy, un hecho del presente y no del período que uno elige mirar. Por eso su tarjeta va marcada aparte.
 
 Una trampa que la pantalla enuncia explícitamente: **la vista Meses no cubre el horizonte completo.** Las columnas mensuales acumulan sólo los días que quedan *fuera* del tramo diario, así que su total es el del tramo mensual y no el de todo. La barra debajo de los indicadores dice en cada vista qué período se está midiendo.
+
+### Un importe va a un día O a un mes, nunca a los dos
+
+La columna de un mes acumula **únicamente** los días de ese mes que quedaron fuera del tramo diario. Lo implementa `Horizonte::agrupar()` y es lo que hace que las tres vistas sean sumables entre sí:
+
+```
+total_horizonte = total_tramo + total_meses     (sin repetir nada)
+```
+
+### Qué había antes, y por qué esto no es cosmético
+
+El criterio estaba escrito **cuatro veces y de tres formas**. El tablero lo tenía bien, en métodos privados del motor. Las otras tres pestañas tenían cada una su `procesar*PorPeriodo()` copiado y pegado, con tres defectos que no se veían:
+
+1. **La vista de días mostraba los días del mes en curso**, los ya pasados incluidos, mientras el encabezado decía *"Próximos 28 Días"*. El título no describía la tabla.
+2. **Un importe del mes en curso se contaba en la vista de días Y en la columna de su mes.** Las dos vistas no reconciliaban entre sí.
+3. **La ventana era fija** —el mes actual y doce meses— e **ignoraba `horizonte_dias` y `horizonte_meses`**, que son parámetros editables. Y lo que caía afuera **se descartaba sin avisar**.
+
+Ahora los importes por columna los resuelve el backend una sola vez, y lo que queda fuera del horizonte o sin fecha se informa arriba de la tabla.
+
+### Para agregar una pestaña con eje temporal
+
+Backend, en el controller:
+
+```php
+$payload = EjeVista::armar(
+    Horizonte::desdeParametros(new Parametros()),
+    $items,            // los registros crudos
+    'FECHA_PAGO',      // campo con la fecha
+    'IMPORTE'          // campo con el importe
+);
+```
+
+Front, en el JS de la pestaña:
+
+```js
+var vistas = crearEjeVistas({
+    botones: 'misBotones',      // id del contenedor de los botones
+    periodo: 'miPeriodo',       // id del cartel que dice qué se está midiendo
+    alCambiar: dibujarTabla
+});
+
+vistas.usar(payload);           // cada vez que llegan datos
+vistas.columnas()               // las columnas visibles
+vistas.rotulo(col)              // '6/9' o 'Oct-26'
+vistas.valor(fila, col)         // el importe de esa fila en esa columna
+vistas.total(fila)              // el total que corresponde a la vista activa
+```
+
+No hay que calcular fechas en el navegador ni decidir qué columnas van en cada vista: eso ya está resuelto y probado.
+
+> **El tablero dibuja una columna más que las demás pantallas**, y es a propósito: las columnas que no representan ningún día futuro se muestran con un guión sobre fondo gris, porque sus filas de arrastre tienen que poder decir *"acá no hay posición que mostrar"*. Las pestañas de detalle no tienen filas de arrastre y no las necesitan. Del componente compartido toman igual el estado de la vista, el rótulo del período y el total.
 
 ---
 
@@ -268,7 +328,15 @@ php tests/run.php              # todo
 php tests/run.php horizonte    # filtra por nombre de archivo
 ```
 
-Cubren el eje temporal y su secuencia cronológica, el validador de la estructura regla por regla, el arrastre del saldo con números conocidos, y que un proveedor que lanza, que devuelve basura o que devuelve `null` no pueda tumbar el tablero. Las que necesitan SQL Server se saltean solas si no hay conexión.
+Cubren el eje temporal y su secuencia cronológica, las tres vistas y su criterio de columnas y totales, el validador de la estructura regla por regla, el arrastre del saldo con números conocidos, el módulo Saldos, y que un proveedor que lanza, que devuelve basura o que devuelve `null` no pueda tumbar el tablero. Las que necesitan SQL Server se saltean solas si no hay conexión.
+
+**El motor acepta un `Horizonte` inyectado, y hace falta para poder probarlo.** El arrastre del saldo depende de qué día es hoy, así que un escenario con importes en fechas fijas deja de tener sentido en cuanto pasa esa fecha. Sin esa costura las pruebas del motor caducaban solas —y caducaron: 48 casos empezaron a devolver `null` al pasar el 06/09/2026, y la parte más delicada del módulo se quedó sin red. Es la misma costura que ya tenían `Ventas::proyectarVentas()` y `proyectarCobranzas()`.
+
+```php
+new Cashflow($estructura, $parametros, $horizonte)   // el horizonte es opcional
+```
+
+`test_cashflow.php` verifica la costura de forma explícita, para que si alguien la saca el mensaje de falla diga por qué fallan las otras noventa.
 
 ---
 
@@ -279,6 +347,8 @@ sql/cashflow_estructura.sql                 Las dos tablas de configuración + s
 sql/cashflow_estructura_disponibilidades.sql  Reorganiza en Disponibilidades + Ventas
 sql/cashflow_saldos.sql                     Tablas del modulo Saldos (README-saldos.md)
 cashflow/Class/Horizonte.php                Eje temporal, compartido con Ventas
+cashflow/Class/EjeVista.php                 Las tres vistas: columnas, totales y periodo
+cashflow/Js/eje-vistas.js                   Su contraparte en el front (cargado en index.php)
 cashflow/Class/CashflowProvider.php         Contrato de proveedor
 cashflow/Class/CashflowRegistry.php         Registro de orígenes de datos
 cashflow/Class/CashflowEstructura.php       Configuración: lectura, validación y CRUD
@@ -307,7 +377,6 @@ Eliminado: `Tabs/resumen.php`.
 
 - **El saldo de apertura ya no arranca en cero, pero depende de que alguien cargue.** El módulo Saldos existe (ver `README-saldos.md`) y alimenta *Saldo Inicial*. Mientras no haya ninguna carga, o mientras la última quede vieja, la fila va en cero o desactualizada y **el tablero lo avisa con la fecha del dato**: leer esos saldos como disponibilidad real sería un error caro.
 - **Dos filas del Excel no tienen de dónde salir.** *Dólares Cuenta Comitente* y *Exportaciones* las tipea una persona en el Excel (Tesorería, Silvina, Dan). Acá el origen de datos es únicamente por proveedor, así que hasta que exista el módulo que las alimente se muestran en cero y el tablero avisa. Quedan declaradas para que el cuadro tenga la forma completa. Si hicieran falta cargadas a mano, habría que sumar un tipo de origen manual, que hoy el módulo no tiene. *Caja Locales* ya salió de esta lista: la alimenta el módulo Saldos.
-- **`tests/test_cashflow.php` falla desde que pasó el 06/09/2026.** Es anterior a este trabajo. Sus escenarios fijan el eje en `hoy = 2026-09-06`, pero `Cashflow::proyectar()` arma su propio `Horizonte` con la fecha real, así que esas columnas ya no están en el eje y las filas derivadas devuelven `null`. `Cashflow` acepta inyectar la estructura y los parámetros pero no el horizonte; darle esa costura arregla los 48 casos de una.
 - **El neteo de cheques adelantados sólo se aplica a la serie total de cobranza.** No viene abierto por canal. Hoy da lo mismo porque es cero; cuando exista el origen habrá que decidir cómo se distribuye entre canales, y ese criterio es de negocio.
 - **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** para traer la razón social. El tablero no lo sufre, porque usa `getCobranzasFRTotales()`, pero la pestaña Cobranzas FR sí.
 - **`VentasController?action=saveMixCobro` puede grabar un mix que Parámetros rechazaría**: no valida el 100%. Es anterior a este trabajo.
