@@ -327,6 +327,10 @@
         mostrar('loadingLocales', true, 'flex');
         mostrar('wrapperLocales', false);
 
+        // El aviso del guardado anterior no sobrevive a una recarga de datos:
+        // se refiere a un guardado puntual, no al estado de la pantalla.
+        ocultarLuegoDe('avisoGuardadoLocales', 6000);
+
         pedirJson(URL_SALDOS + '?action=getLocales')
             .then(function(data) {
                 datosLocales = data;
@@ -499,7 +503,17 @@
             // Los saldos y las fechas no viajan: el servidor los relee de la
             // consulta. Sólo van la gestión y la reserva, que es lo editable.
             return pedirJson(URL_SALDOS + '?action=guardarCargaLocales', { filas: filas })
-                .then(function() {
+                .then(function(data) {
+                    // Lo que importa avisar es cuántos parámetros cambiaron:
+                    // es lo que el tablero va a usar de ahora en más. La foto
+                    // del histórico se guarda siempre y no es noticia.
+                    if (data && data.parametros > 0) {
+                        texto('avisoGuardadoLocales',
+                            data.parametros + ' local(es) con la gestión o la reserva ' +
+                            'actualizadas. El tablero ya usa estos valores.');
+                        mostrar('avisoGuardadoLocales', true, 'inline-block');
+                    }
+
                     cargarLocales();
                 });
         }, 'No se pudo guardar la carga de locales');
@@ -560,6 +574,19 @@
         if (el) {
             el.addEventListener('click', fn);
         }
+    }
+
+    /** Esconde un cartel pasado un rato, si todavía está visible */
+    function ocultarLuegoDe(id, ms) {
+        var el = document.getElementById(id);
+
+        if (!el || el.style.display === 'none') {
+            return;
+        }
+
+        setTimeout(function() {
+            mostrar(id, false);
+        }, ms);
     }
 
     function filaTotal(rotulo, valor) {

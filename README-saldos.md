@@ -179,6 +179,23 @@ Con `MAX(FECHA)` sobre el detalle, **dos cargas el mismo día** —que es lo que
 
 Lo mismo con `MONEDA` en el detalle de saldos: se copia de la cuenta en el momento de la carga y no se lee por `JOIN`, para que corregir la moneda de una cuenta no reescriba el significado del histórico.
 
+### Qué guarda el botón *Guardar* de la Pestaña 2
+
+**Las dos cosas, en una sola transacción:**
+
+1. **El parámetro** (`RO_T_CASHFLOW_SALDOS_SUCURSAL`), con la gestión y la reserva que quedaron en pantalla. Es el mismo dato que se edita en Parámetros → Saldos: un solo lugar, editable desde los dos lados. **Es lo que el tablero va a usar de ahí en adelante.**
+2. **La foto** (`RO_T_CASHFLOW_SALDOS_LOCAL`), con la gestión y la reserva efectivas de esa carga.
+
+El **saldo no viaja desde el navegador**: al guardar, el servidor vuelve a correr la consulta y toma de ahí el saldo y la fecha. Del cliente se aceptan únicamente los dos valores editables. Si el saldo viniera del cliente, se podría grabar un número inventado como si fuera lo que dice Tango.
+
+> **Antes sólo se guardaba la foto, y eso hacía que editar la reserva en esta pantalla no sirviera para nada**: no persistía —al recargar volvía el valor viejo— y el tablero no la veía, porque `SaldosProvider` lee el parámetro vigente y no la última carga. Los campos editables eran un simulador disfrazado de formulario.
+
+**Sólo se escriben las sucursales que cambiaron.** La pantalla manda las veinte en cada guardado; sin el diff (`Saldos::resolverOverrides()`), cada guardado les pisaría `FECHA_UPDATE` y `USUARIO` a todas y la columna *Última edición* de Parámetros dejaría de significar algo. La reserva se compara con tolerancia: la columna es `DECIMAL(19,4)` y el valor da la vuelta por JSON y por un input numérico, así que una comparación estricta reportaría cambios que no existen.
+
+Las dos escrituras van en la **misma transacción**: separadas, una falla a mitad de camino dejaría la reserva cambiada sin la foto que la explica, o al revés. Por eso el parámetro se escribe con el `$cid` de la transacción y no llamando a `saveSucursal()`, que abre su propia conexión — mismo criterio que `CashflowEstructura::guardar()`.
+
+Editar una sucursal que la consulta devuelve pero que **nunca se sincronizó** le crea la fila de parámetro (`UPSERT`). La alternativa sería que el `UPDATE` no afectara ninguna fila y la edición se perdiera en silencio.
+
 ---
 
 ## Mapeo campo por campo contra la API de Interbanking
@@ -302,7 +319,7 @@ Sub-pestaña **Parámetros → Saldos**, con tres secciones.
 
 **Locales** trae la lista desde `SUCURSALES_LAKERS` con el botón *Sincronizar con locales*. La sincronización **nunca pisa `GESTION` ni `RESERVA`** —son valores que cargó una persona— y a las sucursales que desaparecen del origen las marca `ACTIVO = 0` en lugar de borrarlas.
 
-Los valores editables de la Pestaña 2 salen de acá como default y se pueden pisar en la carga; el valor efectivo queda guardado junto con el histórico.
+**La gestión y la reserva se editan en los dos lados y son el mismo dato.** Esta sección y la Pestaña 2 escriben la misma tabla: acá se administra la lista completa, y en la Pestaña 2 se corrigen mirando los saldos del día, que es el momento en que uno se da cuenta de que una reserva está mal. El valor efectivo de cada carga queda además en el histórico. Ver *Qué guarda el botón Guardar de la Pestaña 2*.
 
 ---
 
@@ -324,7 +341,7 @@ En `ENV = DEV` las tablas de locales se alcanzan por linked server con el nombre
 php tests/run.php saldos
 ```
 
-75 casos, todos sin base salvo la última sección, que se saltea sola. Los criterios viven en **helpers estáticos puros**, al estilo de `Ventas::armarTendencias()`: lo delicado de este módulo no son las consultas sino las decisiones.
+85 casos, todos sin base salvo la última sección, que se saltea sola. Los criterios viven en **helpers estáticos puros**, al estilo de `Ventas::armarTendencias()`: lo delicado de este módulo no son las consultas sino las decisiones.
 
 | Qué se verifica | Helper |
 | --- | --- |
@@ -334,6 +351,9 @@ php tests/run.php saldos
 | El importe se imputa en la fecha del saldo, sin corrimientos (ni de fin de semana) | `armarSerieLocales()` |
 | Un saldo de caja de ayer se imputa en la primera columna, con aviso; uno posterior al eje queda fuera | `armarSerieLocales()` |
 | El enlace del tablero lleva a la sub-pestaña de locales | `CashflowRegistry` |
+| Reenviar los mismos valores no cuenta como cambio; sólo se escribe lo que se tocó | `resolverOverrides()` |
+| Una sucursal sin parámetro cuenta como cambio, para que el `UPSERT` la cree | `resolverOverrides()` |
+| Una gestión inválida o una reserva negativa cortan antes de abrir la transacción | `resolverOverrides()` |
 | "Última carga" con dos cargas el mismo día, y con la misma marca de tiempo | `ultimaCarga()` |
 | El saldo queda en la columna de su fecha y en cero en las otras 27 | `armarSerieDisponible()` |
 | Un saldo viejo abre el horizonte en la primera columna, con aviso | `armarSerieDisponible()` |

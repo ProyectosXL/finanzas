@@ -422,6 +422,75 @@ class Saldos {
     }
 
     /**
+     * Superpone lo que el usuario dejo en la pantalla sobre los parametros
+     * vigentes, y separa QUE CAMBIO de lo que llego igual.
+     *
+     * La pantalla manda las 20 sucursales en cada guardado, no solo las que se
+     * tocaron: sin el diff, cada guardado le pisaria FECHA_UPDATE y USUARIO a
+     * todas, y la columna "Ultima edicion" de Parametros dejaria de significar
+     * algo -diria que alguien edito los veinte locales el mismo segundo, todas
+     * las veces-.
+     *
+     * La reserva se compara con tolerancia porque la columna es DECIMAL(19,4) y
+     * el valor da la vuelta por JSON y por un input numerico: una comparacion
+     * estricta reportaria cambios que no existen.
+     *
+     * Valida aca y no en el bucle de escritura para que un valor invalido corte
+     * ANTES de abrir la transaccion.
+     *
+     * @param array $actuales Mapa NRO_SUCURSAL => fila del parametro
+     * @param array $overrides [['nro_sucursal', 'gestion', 'reserva'], ...]
+     * @return array ['params' => mapa resultante, 'cambios' => lista de los que cambiaron]
+     */
+    public static function resolverOverrides($actuales, $overrides) {
+        $params = is_array($actuales) ? $actuales : [];
+        $cambios = [];
+
+        foreach ((is_array($overrides) ? $overrides : []) as $o) {
+            $nro = intval(isset($o['nro_sucursal']) ? $o['nro_sucursal'] : 0);
+
+            if ($nro === 0) {
+                continue;
+            }
+
+            $gestion = strtoupper(trim((string) (isset($o['gestion']) ? $o['gestion'] : '')));
+
+            if ($gestion !== self::DEPOSITA && $gestion !== self::ENVIA) {
+                throw new Exception('Gestión inválida para el local ' . $nro . ': "' . $gestion
+                    . '". Sólo puede ser Deposita o Envía.');
+            }
+
+            $reserva = floatval(isset($o['reserva']) ? $o['reserva'] : 0);
+
+            if ($reserva < 0) {
+                throw new Exception('La reserva del local ' . $nro . ' no puede ser negativa');
+            }
+
+            $antes = isset($params[$nro]) ? $params[$nro] : null;
+
+            $distinto = ($antes === null)
+                || (strtoupper(trim((string) $antes['GESTION'])) !== $gestion)
+                || (abs(floatval($antes['RESERVA']) - $reserva) > 0.0001);
+
+            $params[$nro] = [
+                'NRO_SUCURSAL' => $nro,
+                'GESTION' => $gestion,
+                'RESERVA' => $reserva
+            ];
+
+            if ($distinto) {
+                $cambios[] = [
+                    'nro_sucursal' => $nro,
+                    'gestion' => $gestion,
+                    'reserva' => $reserva
+                ];
+            }
+        }
+
+        return ['params' => $params, 'cambios' => $cambios];
+    }
+
+    /**
      * Columna del eje en la que hay que imputar un importe fechado.
      *
      * El eje arranca HOY, asi que una fecha anterior no tiene columna propia.
@@ -1529,15 +1598,37 @@ class Saldos {
      * consulta en el momento de guardar. Del cliente se aceptan unicamente la
      * gestion y la reserva, que son los dos valores editables.
      *
-     * GESTION Y RESERVA SE GUARDAN EFECTIVAS, y no solo el parametro vigente.
-     * Es lo que permite reconstruir una carga vieja despues de que alguien
-     * cambie la reserva de una sucursal: recalcularla con la reserva de hoy
-     * daria un neto que nunca existio.
+     * GUARDA LAS DOS COSAS: el parametro y la foto.
+     *
+     *   - El PARAMETRO (RO_T_CASHFLOW_SALDOS_SUCURSAL) se actualiza con lo que
+     *     el usuario dejo en la pantalla, y solo en las sucursales que
+     *     efectivamente cambiaron.
+     *   - La FOTO (RO_T_CASHFLOW_SALDOS_LOCAL) guarda la gestion y la reserva
+     *     EFECTIVAS de esta carga.
+     *
+     * Que el parametro se guarde aca no es redundante con Parametros -> Saldos:
+     * es el mismo dato en el mismo lugar, editable desde los dos lados. Antes
+     * solo se guardaba la foto, y eso hacia que editar la reserva en esta
+     * pantalla no sirviera para NADA: no persistia -al recargar volvia el valor
+     * viejo- y el tablero no la veia, porque SaldosProvider lee el parametro
+     * vigente y no la ultima carga. Los campos editables eran un simulador
+     * disfrazado de formulario.
+     *
+     * La foto sigue existiendo porque la reserva no esta en Tango y el parametro
+     * cambia: sin ella no se puede reconstruir que mostro el tablero un dia
+     * pasado, porque recalcularlo con la reserva de hoy daria un neto que nunca
+     * existio.
+     *
+     * LAS DOS ESCRITURAS VAN EN LA MISMA TRANSACCION. Si se separaran, una falla
+     * a mitad de camino dejaria la reserva cambiada sin la foto que la explica,
+     * o al revés. Por eso el parametro se escribe con el $cid de la transaccion
+     * y no llamando a saveSucursal(), que abre su propia conexion: mismo
+     * criterio que CashflowEstructura::guardar().
      *
      * @param array $overrides [['nro_sucursal' => int, 'gestion' => str, 'reserva' => float], ...]
      * @param string|null $observaciones
      * @param string|null $usuario
-     * @return array ['id' => int, 'filas' => int]
+     * @return array ['id' => int, 'filas' => int, 'parametros' => int]
      */
     public function guardarCargaLocales($overrides, $observaciones, $usuario = null) {
         if (!$this->tablasCreadas()) {
@@ -1552,35 +1643,20 @@ class Saldos {
                 . 'no hay nada que guardar.');
         }
 
-        // Los parametros vigentes son la base; lo que el usuario piso en la
-        // pantalla los reemplaza para ESTA carga.
-        $params = $this->getParametrosSucursales(true);
+        // Los parametros vigentes son la base; lo que el usuario dejo en la
+        // pantalla los reemplaza, y ademas queda guardado.
+        $actuales = $this->getParametrosSucursales(true);
+        $resuelto = self::resolverOverrides($actuales, $overrides);
 
-        foreach ((is_array($overrides) ? $overrides : []) as $o) {
-            $nro = intval(isset($o['nro_sucursal']) ? $o['nro_sucursal'] : 0);
+        $params = $resuelto['params'];
+        $cambios = $resuelto['cambios'];
 
-            if ($nro === 0) {
-                continue;
-            }
+        // La descripcion para un alta de parametro sale de la consulta, que es
+        // la que conoce el nombre del local.
+        $descripciones = [];
 
-            $gestion = strtoupper(trim((string) (isset($o['gestion']) ? $o['gestion'] : '')));
-
-            if ($gestion !== self::DEPOSITA && $gestion !== self::ENVIA) {
-                throw new Exception('Gestión inválida para el local ' . $nro . ': "' . $gestion
-                    . '". Sólo puede ser Deposita o Envía.');
-            }
-
-            $reserva = floatval(isset($o['reserva']) ? $o['reserva'] : 0);
-
-            if ($reserva < 0) {
-                throw new Exception('La reserva del local ' . $nro . ' no puede ser negativa');
-            }
-
-            $params[$nro] = [
-                'NRO_SUCURSAL' => $nro,
-                'GESTION' => $gestion,
-                'RESERVA' => $reserva
-            ];
+        foreach (self::agruparPorSucursal($consulta) as $nro => $s) {
+            $descripciones[$nro] = $s['desc_sucursal'];
         }
 
         $armado = self::armarSaldosLocales($consulta, $params);
@@ -1592,6 +1668,18 @@ class Saldos {
         }
 
         try {
+            foreach ($cambios as $c) {
+                $this->guardarSucursalEnTransaccion(
+                    $cid,
+                    $c['nro_sucursal'],
+                    $c['gestion'],
+                    $c['reserva'],
+                    isset($descripciones[$c['nro_sucursal']])
+                        ? $descripciones[$c['nro_sucursal']] : ('Local ' . $c['nro_sucursal']),
+                    $usuario
+                );
+            }
+
             $idCarga = $this->insertarCabecera($cid, self::CARGA_LOCALES, 'CONSULTA',
                 $observaciones, $usuario);
 
@@ -1633,7 +1721,61 @@ class Saldos {
             throw $e;
         }
 
-        return ['id' => $idCarga, 'filas' => count($armado['filas'])];
+        return [
+            'id' => $idCarga,
+            'filas' => count($armado['filas']),
+            'parametros' => count($cambios)
+        ];
+    }
+
+    /**
+     * Escribe el parametro de una sucursal con la conexion de una transaccion en
+     * curso.
+     *
+     * Es un UPSERT: si la sucursal todavia no tiene fila de parametro -porque
+     * nadie corrio la sincronizacion- se crea. La alternativa seria que el
+     * UPDATE no afectara ninguna fila y el cambio se perdiera en silencio, que
+     * es peor: el local salio de la consulta, o sea que existe.
+     *
+     * No reusa saveSucursal() a proposito: ese metodo abre su propia conexion
+     * (Conexion::conectar() abre una nueva en cada llamada) y quedaria FUERA de
+     * la transaccion de la carga.
+     *
+     * @param resource $cid Conexion con la transaccion abierta
+     * @param int $nro
+     * @param string $gestion Ya validada
+     * @param float $reserva Ya validada
+     * @param string $descripcion Nombre del local, para el caso de alta
+     * @param string|null $usuario
+     */
+    private function guardarSucursalEnTransaccion($cid, $nro, $gestion, $reserva,
+                                                  $descripcion, $usuario) {
+        $sql = "UPDATE RO_T_CASHFLOW_SALDOS_SUCURSAL
+                SET GESTION = ?, RESERVA = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                WHERE NRO_SUCURSAL = ?";
+
+        $stmt = sqlsrv_query($cid, $sql, [$gestion, $reserva, $usuario, $nro]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al guardar la gestión del local ' . $nro));
+        }
+
+        $afectadas = sqlsrv_rows_affected($stmt);
+        sqlsrv_free_stmt($stmt);
+
+        if ($afectadas > 0) {
+            return;
+        }
+
+        $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_SUCURSAL
+                    (NRO_SUCURSAL, DESC_SUCURSAL, GESTION, RESERVA, ACTIVO,
+                     FECHA_UPDATE, USUARIO)
+                VALUES (?, ?, ?, ?, 1, GETDATE(), ?)";
+
+        if (sqlsrv_query($cid, $sql,
+            [$nro, $descripcion, $gestion, $reserva, $usuario]) === false) {
+            throw new Exception($this->errorSql('Error al crear el parámetro del local ' . $nro));
+        }
     }
 
     /**

@@ -96,10 +96,19 @@ try {
                 usuarioActual()
             );
 
+            $mensaje = 'Guardado: ' . $r['filas'] . ' locales en el histórico';
+
+            // Se informa cuantos parametros cambiaron porque eso es lo que
+            // afecta al tablero de ahora en mas. Cero cambios tambien se dice:
+            // "guardado" sin mas dejaria la duda de si la edicion tomo efecto.
+            $mensaje .= ($r['parametros'] > 0)
+                ? ' y ' . $r['parametros'] . ' local(es) con la gestión o la reserva '
+                    . 'actualizadas, que es lo que va a usar el tablero.'
+                : '. No cambió ninguna gestión ni reserva.';
+
             echo json_encode([
                 'success' => true,
-                'message' => 'Carga de locales guardada (' . $r['filas'] . ' locales). '
-                           . 'Quedaron registradas la gestión y la reserva efectivas del día.',
+                'message' => $mensaje,
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

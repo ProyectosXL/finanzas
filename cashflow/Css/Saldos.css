@@ -159,3 +159,12 @@
     font-size: 12px;
     padding: 3px 8px;
 }
+
+/* Confirmacion de lo que dejo un guardado. Va al lado del boton y se va sola:
+   describe un guardado puntual, no el estado de la pantalla. */
+.tab-saldos .sal-aviso-guardado {
+    font-size: 11px;
+    color: var(--success-color, #28a745);
+    max-width: 320px;
+    line-height: 1.3;
+}

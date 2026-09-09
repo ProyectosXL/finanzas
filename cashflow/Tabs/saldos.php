@@ -232,18 +232,29 @@
             <div class="card-header d-flex justify-content-between align-items-center">
                 <div>
                     <h5 class="mb-0">Caja de los locales propios</h5>
+                    <!--
+                        Qué guarda el botón, dicho en la pantalla. El saldo NO se
+                        edita ni viaja: al guardar, el servidor lo vuelve a leer
+                        de la consulta. Lo único editable son los dos valores que
+                        no están en Tango.
+                    -->
                     <small class="text-muted">
-                        <strong>Gestión</strong> y <strong>Reserva</strong> se editan acá y salen
-                        por defecto de Parámetros → Saldos. Sólo los locales en
-                        <em>Deposita</em> entran al cashflow, y un neto negativo aporta cero.
+                        El <strong>saldo</strong> sale sólo de la consulta y no se edita.
+                        <strong>Gestión</strong> y <strong>Reserva</strong> se editan acá:
+                        <em>Guardar</em> las deja como valor por defecto del local —es el mismo
+                        dato que Parámetros → Saldos— y guarda la foto del día en el histórico.
+                        Sólo los locales en <em>Deposita</em> entran al cashflow, y un neto
+                        negativo aporta cero.
                     </small>
                 </div>
-                <div class="d-flex gap-2">
+                <div class="d-flex gap-2 align-items-center">
+                    <span id="avisoGuardadoLocales" class="sal-aviso-guardado" style="display: none;"></span>
                     <button id="btnRefreshLocales" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
-                    <button id="btnGuardarLocales" class="btn btn-sm btn-success">
-                        <i class="fas fa-floppy-disk me-1"></i> Guardar carga
+                    <button id="btnGuardarLocales" class="btn btn-sm btn-success"
+                            title="Guarda la gestión y la reserva del local, y la foto del día en el histórico">
+                        <i class="fas fa-floppy-disk me-1"></i> Guardar
                     </button>
                 </div>
             </div>

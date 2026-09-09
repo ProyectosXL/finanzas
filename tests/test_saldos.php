@@ -148,6 +148,77 @@ chequear('el total de saldo en caja incluye a todos', 1980000.0,
 chequear('se cuentan los que depositan', 3, $armado['totales']['depositan']);
 chequear('y los que envian', 1, $armado['totales']['envian']);
 
+seccion('editar gestion y reserva en la pestana guarda el parametro');
+
+// La pantalla manda las 20 sucursales en cada guardado, no solo las que se
+// tocaron. Sin el diff, cada guardado le pisaria FECHA_UPDATE y USUARIO a todas
+// y la columna "Ultima edicion" de Parametros dejaria de significar algo.
+$vigentes = [
+    10 => ['NRO_SUCURSAL' => 10, 'GESTION' => 'DEPOSITA', 'RESERVA' => 200000],
+    40 => ['NRO_SUCURSAL' => 40, 'GESTION' => 'DEPOSITA', 'RESERVA' => 150000],
+    55 => ['NRO_SUCURSAL' => 55, 'GESTION' => 'ENVIA',    'RESERVA' => 100000]
+];
+
+$sinTocar = [
+    ['nro_sucursal' => 10, 'gestion' => 'DEPOSITA', 'reserva' => 200000],
+    ['nro_sucursal' => 40, 'gestion' => 'DEPOSITA', 'reserva' => 150000],
+    ['nro_sucursal' => 55, 'gestion' => 'ENVIA',    'reserva' => 100000]
+];
+
+$r = Saldos::resolverOverrides($vigentes, $sinTocar);
+
+chequear('reenviar los mismos valores no cuenta como cambio', 0, count($r['cambios']));
+
+$tocados = [
+    ['nro_sucursal' => 10, 'gestion' => 'DEPOSITA', 'reserva' => 300000],  // cambia reserva
+    ['nro_sucursal' => 40, 'gestion' => 'ENVIA',    'reserva' => 150000],  // cambia gestion
+    ['nro_sucursal' => 55, 'gestion' => 'ENVIA',    'reserva' => 100000]   // igual
+];
+
+$r = Saldos::resolverOverrides($vigentes, $tocados);
+
+chequear('solo se escriben los que cambiaron', 2, count($r['cambios']));
+chequear('el primero es el de la reserva nueva', 10, $r['cambios'][0]['nro_sucursal']);
+chequear('con el valor nuevo', 300000.0, floatval($r['cambios'][0]['reserva']));
+chequear('el segundo es el de la gestion nueva', 'ENVIA', $r['cambios'][1]['gestion']);
+
+// El valor efectivo de la carga es el que quedo, no el vigente de antes: es lo
+// que hace reproducible la foto del historico.
+chequear('el parametro resultante lleva el valor nuevo',
+    300000.0, floatval($r['params'][10]['RESERVA']));
+
+// Una sucursal que la consulta devuelve pero que nunca se sincronizo no tiene
+// parametro: editarla es un cambio, y el UPSERT le crea la fila. Si esto no
+// contara como cambio, el UPDATE no afectaria nada y la edicion se perderia en
+// silencio.
+$r = Saldos::resolverOverrides([], [
+    ['nro_sucursal' => 90, 'gestion' => 'ENVIA', 'reserva' => 50000]
+]);
+
+chequear('una sucursal sin parametro cuenta como cambio', 1, count($r['cambios']));
+
+// La reserva da la vuelta por JSON y por un input numerico contra una columna
+// DECIMAL(19,4): una comparacion estricta reportaria cambios que no existen.
+$r = Saldos::resolverOverrides(
+    [10 => ['NRO_SUCURSAL' => 10, 'GESTION' => 'DEPOSITA', 'RESERVA' => '200000.0000']],
+    [['nro_sucursal' => 10, 'gestion' => 'deposita', 'reserva' => '200000']]
+);
+
+chequear('el mismo importe escrito distinto no es un cambio', 0, count($r['cambios']));
+
+// Los valores invalidos cortan ANTES de abrir la transaccion de la carga.
+chequearLanza('una gestion invalida no se guarda', function () use ($vigentes) {
+    Saldos::resolverOverrides($vigentes, [
+        ['nro_sucursal' => 10, 'gestion' => 'CUALQUIERA', 'reserva' => 0]
+    ]);
+});
+
+chequearLanza('una reserva negativa tampoco', function () use ($vigentes) {
+    Saldos::resolverOverrides($vigentes, [
+        ['nro_sucursal' => 10, 'gestion' => 'DEPOSITA', 'reserva' => -1]
+    ]);
+});
+
 seccion('la serie de caja de locales');
 
 $serieLoc = Saldos::armarSerieLocales($armado['filas'], $h);
