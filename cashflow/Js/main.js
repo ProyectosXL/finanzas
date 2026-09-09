@@ -171,7 +171,6 @@ function updateHeader(tabName) {
         'proveedores_exterior': 'Proveedores Exterior',
         'crono_nacionalizacion': 'Crono Nacionalización',
         'nacionalizacion_2': 'Nacionalización (2)',
-        'despachante_asesor': 'Despachante y Asesor',
         'proveedores_locales': 'Proveedores Locales',
         'cronograma': 'Cronograma',
         'logistica_local': 'Logística Local',

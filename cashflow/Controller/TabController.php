@@ -27,7 +27,6 @@ $validTabs = [
     'proveedores_exterior',
     'crono_nacionalizacion',
     'nacionalizacion_2',
-    'despachante_asesor',
     'proveedores_locales',
     'cronograma',
     'logistica_local',

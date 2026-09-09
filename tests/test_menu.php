@@ -38,8 +38,8 @@ foreach ($menu['categorias'] as $cat) {
     $todos = array_merge($todos, $cat['items']);
 }
 
-// 2 arriba + 22 en las cinco categorias + 1 al pie
-chequear('el menu tiene los 25 items', 25, count($todos));
+// 2 arriba + 21 en las cinco categorias + 1 al pie
+chequear('el menu tiene los 24 items', 24, count($todos));
 
 $incompletos = [];
 
@@ -156,7 +156,10 @@ foreach ($menu['categorias'] as $cat) {
 
 chequear('Ingresos tiene 3 de 6 con datos', 3, $porCategoria['Ingresos']['con_datos']);
 chequear('y son 6 en total', 6, $porCategoria['Ingresos']['total']);
-chequear('Comex tiene 2 de 3', 2, $porCategoria['Comex']['con_datos']);
+// Comercio Exterior queda completa: sus dos pestanas tienen datos. Despachante
+// y Asesor se dio de baja del menu porque no se usa mas.
+chequear('Comex tiene sus 2 pestanas con datos', 2, $porCategoria['Comex']['con_datos']);
+chequear('y son 2 en total, ya sin Despachante', 2, $porCategoria['Comex']['total']);
 chequear('Proveedores todavia no tiene ninguna', 0, $porCategoria['Proveedores']['con_datos']);
 
 // El contador cuenta SOLO las que tienen datos: una maqueta no cuenta, que es

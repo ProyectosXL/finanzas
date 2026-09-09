@@ -113,8 +113,7 @@ class Menu {
             'abierta' => false,
             'items' => [
                 ['tab' => 'proveedores_exterior',  'nombre' => 'Proveedores Exterior',   'icono' => 'fa-earth-americas',       'estado' => self::DATOS],
-                ['tab' => 'crono_nacionalizacion', 'nombre' => 'Crono Nacionalización',  'icono' => 'fa-file-invoice-dollar',  'estado' => self::DATOS],
-                ['tab' => 'despachante_asesor',    'nombre' => 'Despachante y Asesor',   'icono' => 'fa-user-tie',             'estado' => self::PENDIENTE]
+                ['tab' => 'crono_nacionalizacion', 'nombre' => 'Crono Nacionalización',  'icono' => 'fa-file-invoice-dollar',  'estado' => self::DATOS]
             ]
         ],
         [
