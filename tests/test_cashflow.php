@@ -253,8 +253,10 @@ chequear('y es lo que aporto el proveedor de saldos', 1000.0, $kd['saldo_apertur
 
 // Cada vista dice sobre que periodo esta midiendo
 chequear('dias: rotulo del periodo', 'Del 6/9 al 8/9', $kd['periodo']);
+// Con tilde: es texto que ve el usuario en la barra de periodo, y la regla del
+// repo es que esos strings llevan tilde. El rotulo lo arma EjeVista.
 chequear('meses: el rotulo aclara que va despues del tramo diario',
-    true, strpos($km['periodo'], 'despues del tramo diario') !== false);
+    true, strpos($km['periodo'], 'después del tramo diario') !== false);
 chequear('completo: el rotulo dice que es todo el horizonte',
     true, strpos($kc['periodo'], 'todo el horizonte') !== false);
 
