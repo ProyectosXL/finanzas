@@ -64,6 +64,16 @@ EXEC SJ_CASHFLOW_VENTAS_HIST;   -- últimos 30 días
 
 **Sobre el rango**: la tabla destino agrega al grano de mes, así que el SP expande internamente el rango al primer día del mes de `@Desde` y al último día del mes de `@Hasta`. Sin eso, un rango a mitad de mes borraría el mes entero y sólo repondría la porción pedida. Es lo que lo hace reejecutable sin perder importe ni duplicar filas.
 
+### 4. Vista del tipo de cambio
+
+```sql
+-- sql/RO_V_DOLAR_OFICIAL_BCRA.sql
+```
+
+Hace `DROP` + `CREATE` de la vista, así que también es reejecutable. Devuelve **una fila por año/mes** con la cotización del **último día cargado** de ese mes, o sea el tipo de cambio de cierre; para el mes en curso, la última disponible.
+
+La usa la sub-pestaña **Venta Acumulada**. Si no está creada, esa pestaña **igual funciona**: sale sólo en pesos y avisa arriba. Ver la clase `Cotizacion` más abajo.
+
 ---
 
 ## Modelo de cálculo
@@ -110,7 +120,19 @@ El día de corte es la **última fecha cargada**, no "ayer" calculado: el origen
 
 Esta tabla **no** alimenta la proyección: la base de cálculo sigue siendo la tabla mensual. Sus importes son netos y no se comparan contra la Venta Proyectada del bloque siguiente, que lleva IVA.
 
-**2. Proyección de Venta por Mes** — 12 meses: el actual + 11.
+**2. Proyección de Venta por Mes** — el card tiene **tres sub-pestañas** (tercer nivel de navegación, dentro del card):
+
+| Sub-pestaña | Período | Base | Dato |
+| --- | --- | --- | --- |
+| **Venta Cashflow** *(abre por defecto)* | Mes actual + 11 | netos contra proyectada **con IVA** | La que alimenta la proyección |
+| **Venta Acumulada** | Año calendario en curso | **neto s/ IVA** | Venta **real**, en pesos y en dólares |
+| **Venta Balance** | 1/8 al 31/7 en curso | **con IVA** | Real de meses cerrados + proyectado |
+
+> **Las tres no están en la misma base y no se comparan entre sí.** Cada una lo declara en el subtítulo del card —que cambia con la pestaña activa— y lo repite en el `th-sub` de cada columna de importe.
+
+Las dos vistas nuevas se piden **lazy**, recién cuando se abre su pestaña (`getVentaAcumulada` y `getVentaBalance`), igual que la sub-pestaña Proyección. Así la pantalla que ya funcionaba no paga la consulta cruzada al linked server del tipo de cambio, que quizás nadie mire.
+
+#### 2.a Venta Cashflow
 
 | Columna | Base | Qué es |
 | --- | --- | --- |
@@ -124,6 +146,42 @@ Esta tabla **no** alimenta la proyección: la base de cálculo sigue siendo la t
 > **Ojo con la base**: las dos columnas de años son **netas sin IVA** y la Venta Proyectada **lleva IVA**. Por eso, aunque la variación esté en 0%, la proyectada es mayor que el año anterior: la diferencia es exactamente la alícuota. El encabezado de cada columna lo aclara y el tooltip de cada celda proyectada muestra la cuenta completa.
 
 La venta proyectada de esta tabla y la de la grilla de Proyección salen del **mismo helper** (`Ventas::baseMensual()`), así que no se pueden desincronizar.
+
+#### 2.b Venta Acumulada
+
+Venta **real** del año calendario en curso, acumulada, **neta sin IVA**, en pesos y en dólares. Filas de enero al mes en curso.
+
+| Columna | Base | Qué es |
+| --- | --- | --- |
+| Mes | — | Enero al mes en curso |
+| Venta Neta | **neto s/ IVA** | Venta real del mes |
+| Acumulado | **neto s/ IVA** | Acumulado del año en pesos |
+| T/C | — | Cotización del **último día** del mes (cierre) |
+| Venta Neta USD | **neto s/ IVA** | `Venta Neta / T/C del mes` |
+| Acumulado USD | **neto s/ IVA** | **Suma de los meses ya valuados** |
+
+Los **meses cerrados** salen de `RO_T_CASHFLOW_VENTAS_HIST` (sólo `FACTURA`: los remitos no entran, igual que en toda la proyección). El **mes en curso** está incompleto en la tabla mensual, así que sale de `RO_T_CASHFLOW_VENTAS_HIST_DIA` recortado a la última fecha cargada, y la fila lleva el badge `parcial al dd/mm`, igual que el bloque de tendencias. Si el corte todavía cae en el mes anterior, la fila del mes en curso **no se dibuja**: así toda fila que se muestra tiene dato.
+
+> **Cada mes se valúa a SU propio tipo de cambio de cierre y los dólares se suman después.** El acumulado en dólares **no** es el acumulado en pesos dividido por un tipo de cambio: eso sería reexpresar toda la serie a moneda de hoy, que con inflación da un número completamente distinto. Está dicho en el tooltip de las columnas de dólares.
+
+Un mes **sin cotización** muestra un guion —no un cero— y **no corta** el acumulado de los meses que sí la tienen; el total avisa cuántos meses quedaron sin valuar. Si la vista del tipo de cambio no está disponible en el entorno, la tabla sale **sólo en pesos** con un warning arriba, en vez de una columna entera de guiones.
+
+#### 2.c Venta Balance
+
+Año balance **1/8 al 31/7** en curso: si el mes actual es >= 8 va del 1/8 de este año al 31/7 del que viene; si no, del 1/8 del año pasado al 31/7 de este. Doce filas, de agosto a julio, **todo con IVA** para que las dos mitades sean sumables.
+
+| Columna | Base | Qué es |
+| --- | --- | --- |
+| Mes | — | Agosto a julio |
+| Origen | — | `Real` / `Proyectado` |
+| Venta | **con IVA** | Real: `neto × (1 + alícuota)`. Proyectado: la venta proyectada, que ya lleva IVA. |
+| Acumulado | **con IVA** | Acumulado del balance |
+
+Al pie, el total del balance con el desglose de cuánto es real y cuánto proyectado. **Sólo pesos.**
+
+> **El mes en curso siempre es proyectado**, aunque el histórico ya tenga venta cargada. "Mes cerrado" es un mes **estrictamente anterior** al mes actual: un mes a medio facturar sumado contra meses completos hunde el total del balance y no se nota.
+
+El eje **no** usa `horizonte_meses` —es un parámetro editable y con 6 el balance saldría cortado a la mitad—: son doce meses fijos anclados al inicio del balance (`new Horizonte(0, 12, $feriados, new DateTime($inicioBalance))`). La venta proyectada igual sale de `Ventas::baseMensual()`, el **mismo helper** que la pestaña Cashflow, así que las dos no se pueden desincronizar.
 
 **3. Control de Facturación** — por mes: `Facturas`, `Remitos` y `Total`. Es sólo un bloque de control para contrastar contra el tablero; los remitos **no** entran en la proyección.
 
@@ -150,6 +208,25 @@ Los porcentajes del tooltip salen del **cociente de los importes**, no de la par
 Todo el módulo se conecta a **`central`**, con una única excepción: la lectura del calendario bancario, que va a la conexión **`power`** (host de apps, base `DATABASE_POWER`), donde vive `RO_T_CALENDARIO`.
 
 `RO_T_CALENDARIO` está poblada hasta 2027 y se sigue extendiendo. Si el motor pide una fecha que no existe, **no rompe**: asume hábil de lunes a viernes y devuelve un warning, que la pestaña muestra arriba de la grilla.
+
+El tipo de cambio se lee también desde `central`, pero la vista `RO_V_DOLAR_OFICIAL_BCRA` resuelve por **linked server** contra `[XL-APPS]`. O sea que puede fallar aunque `central` responda perfecto —es lo que pasa en una máquina de desarrollo sin acceso a ese host—, y por eso se lee siempre envuelta en try/catch.
+
+## Tipo de cambio — la clase `Cotizacion`
+
+`cashflow/Class/Cotizacion.php` es el **único punto de acceso al tipo de cambio de todo el cashflow**, no sólo de Ventas: cualquier bloque que necesite mostrar importes en dólares lo pide acá, para que exista una sola lectura del origen y un solo criterio.
+
+| Método | Devuelve |
+| --- | --- |
+| `mapaMensual($desde, $hasta)` | Mapa `'YYYY-MM' => float` con el T/C de cierre de cada mes del rango |
+| `delMes($anio, $mes)` | `float\|null` — el T/C de cierre de un mes puntual |
+
+Tres criterios, y los tres importan:
+
+- **Cada mes se valúa a su propio T/C de cierre**, y los importes en dólares se suman recién después. Dividir un acumulado en pesos por un único tipo de cambio es otra cuenta —reexpresar la serie a moneda de hoy— y con inflación no se parece en nada.
+- Un mes **sin cotización** devuelve `null`, **no cero**. Un cero se leería como "el dólar valía cero" y, además, dividir por él revienta.
+- Si la vista **no existe** en el entorno, los métodos lanzan y el llamador sigue sin la parte en dólares con un warning. Es el mismo criterio que ya se aplicó a `getTendencias()` cuando dependía de una tabla nueva.
+
+Los meses sin cotización **no están** en el mapa: la clave ausente es lo que distingue "no hay dato" de "el dato es cero".
 
 ---
 
@@ -249,7 +326,9 @@ Todavía no hay login. Todas las tablas tienen `USUARIO VARCHAR(50) NULL` y hoy 
 ```
 sql/ventas_proyeccion.sql               DDL de las 6 tablas + semillas
 sql/SJ_CASHFLOW_VENTAS_HIST.sql         Stored procedure del histórico
+sql/RO_V_DOLAR_OFICIAL_BCRA.sql         Vista del T/C de cierre por mes
 cashflow/Class/Ventas.php               Motor de proyección
+cashflow/Class/Cotizacion.php           Tipo de cambio — punto de acceso del cashflow
 cashflow/Class/Parametros.php           Parámetros y mix de cobro
 cashflow/Controller/VentasController.php
 cashflow/Controller/ParametrosController.php
