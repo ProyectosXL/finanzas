@@ -146,6 +146,22 @@ class CashflowRegistry {
             'series' => ['DEPOSITOS' => 'Depositos de caja de locales']
         ],
 
+        /* Suma NETOS, nunca brutos: la diferencia son las retenciones de la
+           procesadora, que no llegan al banco. Y a diferencia de SaldosProvider,
+           un movimiento con fecha anterior al eje NO abre el horizonte: es un
+           movimiento ya ocurrido y esa plata ya la informa el saldo bancario.
+           Ver README-cob-electronicos.md. */
+        'COB_ELECTRONICOS' => [
+            'nombre' => 'Cobranzas Electronicas',
+            'descripcion' => 'Acreditaciones de medios electronicos de pago, netas de retenciones',
+            'archivo' => 'Providers/CobElectronicosProvider.php',
+            'clase' => 'CobElectronicosProvider',
+            'moneda' => 'ARS',
+            'disponible' => true,
+            'tab' => 'cob_electronicos',
+            'series' => ['COBRANZA' => 'Cobranzas electronicas']
+        ],
+
         /* ---- Modulos que todavia no existen -------------------------------- */
         /* Rinden cero y el tablero avisa. Ver la nota del encabezado. */
 
@@ -165,15 +181,6 @@ class CashflowRegistry {
             'disponible' => false,
             'tab' => 'cobranzas_may',
             'series' => ['COBRANZA' => 'Cobranza real de mayoristas']
-        ],
-
-        'COB_ELECTRONICOS' => [
-            'nombre' => 'Cobranzas Electronicas',
-            'descripcion' => 'Acreditaciones de medios electronicos de pago',
-            'moneda' => 'ARS',
-            'disponible' => false,
-            'tab' => 'cob_electronicos',
-            'series' => ['COBRANZA' => 'Cobranzas electronicas']
         ],
 
         'PROV_LOCALES' => [

@@ -42,6 +42,51 @@ function bodyJson() {
     return $data;
 }
 
+/**
+ * Mensaje de un guardado de alicuota, con la tasa resultante y lo que dejo el
+ * recalculo de los pendientes.
+ *
+ * @param array $r Resultado de CobElectronicos::addAlicuota()
+ * @return string
+ */
+function mensajeAlicuota($r) {
+    return 'Alícuota guardada como vigencia nueva: la anterior queda en el histórico. '
+        . 'La tasa total vigente de esa procesadora es ahora del '
+        . number_format($r['tasa_total'] * 100, 4, ',', '.') . '%. '
+        . mensajeRecalculo($r['recalculo']);
+}
+
+/**
+ * Que dejo el recalculo automatico de los movimientos pendientes.
+ *
+ * Se informa SIEMPRE, incluso cuando no cambio nada: un recalculo que no se
+ * informa es un cambio de importes en silencio.
+ *
+ * @param array $rec Resultado de CobElectronicos::recalcularPendientes()
+ * @return string
+ */
+function mensajeRecalculo($rec) {
+    $cambios = isset($rec['cambios']) ? count($rec['cambios']) : 0;
+    $acreditados = isset($rec['acreditados']) ? intval($rec['acreditados']) : 0;
+
+    $mensaje = ($cambios === 0)
+        ? 'No cambió el importe neto de ningún movimiento pendiente.'
+        : 'Se recalcularon ' . $cambios . ' movimiento(s) pendiente(s), con una diferencia total '
+            . 'de $ ' . number_format(isset($rec['diferencia']) ? $rec['diferencia'] : 0, 2, ',', '.')
+            . ' en el neto.';
+
+    if ($acreditados > 0) {
+        $mensaje .= ' Los ' . $acreditados . ' movimiento(s) ya acreditados no se tocaron: '
+            . 'conservan la tasa con la que se calcularon.';
+    }
+
+    foreach (isset($rec['avisos']) ? $rec['avisos'] : [] as $a) {
+        $mensaje .= ' ' . $a;
+    }
+
+    return $mensaje;
+}
+
 try {
     require_once __DIR__ . '/../Class/Parametros.php';
 
@@ -344,6 +389,125 @@ try {
                 'message' => 'Locales sincronizados: ' . $r['altas'] . ' nuevos, '
                            . $r['reactivadas'] . ' reactivados, ' . $r['bajas']
                            . ' inhabilitados. La gestión y la reserva ya cargadas no se tocaron.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           MODULO COB. ELECTRONICOS
+
+           El ABM vive en Class/CobElectronicos.php, que es la clase duena de
+           esas tablas, con el mismo patron que Saldos: un add que chequea la
+           clave natural antes de insertar, un save que no crea, y ninguna baja
+           fisica.
+
+           Dos particularidades de este modulo, las dos del lado de la clase:
+             - una procesadora nueva entra INACTIVA y no se puede activar sin
+               alicuota vigente;
+             - guardar o dar de baja una alicuota RECALCULA los movimientos
+               pendientes, y el resultado vuelve en la respuesta para que la
+               pantalla pueda decir que cambio.
+           ================================================================ */
+
+        case 'addProcesadoraCobel':
+            $data = bodyJson();
+
+            if (!isset($data['razon_social'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/CobElectronicos.php';
+
+            $id = (new CobElectronicos())->addProcesadora(
+                $data['razon_social'],
+                usuarioActual()
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Procesadora agregada. Queda inactiva hasta que tenga al menos una '
+                           . 'alícuota vigente: sin alícuota, sus movimientos no podrían calcular '
+                           . 'el importe neto.',
+                'data' => ['id' => $id]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'saveProcesadorasCobel':
+            $data = bodyJson();
+
+            if (!isset($data['filas']) || !is_array($data['filas'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/CobElectronicos.php';
+
+            $cobel = new CobElectronicos();
+
+            foreach ($data['filas'] as $fila) {
+                if (!isset($fila['id'])) {
+                    throw new Exception('Falta el ID de una procesadora');
+                }
+
+                // Activar una procesadora sin alicuotas vigentes lo rechaza la
+                // clase: es el invariante del modulo, no una validacion de
+                // pantalla.
+                $cobel->saveProcesadora(
+                    $fila['id'],
+                    isset($fila['razon_social']) ? $fila['razon_social'] : '',
+                    !empty($fila['activo']),
+                    usuarioActual()
+                );
+            }
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Procesadoras guardadas correctamente'
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'addAlicuotaCobel':
+            $data = bodyJson();
+
+            if (!isset($data['id_procesadora']) || !isset($data['concepto'])
+                || !isset($data['alicuota']) || !isset($data['vigencia_desde'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/CobElectronicos.php';
+
+            // SIEMPRE INSERTA UNA VIGENCIA NUEVA: no pisa la anterior, asi los
+            // movimientos ya informados conservan su tasa.
+            $r = (new CobElectronicos())->addAlicuota(
+                $data['id_procesadora'],
+                $data['concepto'],
+                $data['alicuota'],
+                $data['vigencia_desde'],
+                usuarioActual()
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => mensajeAlicuota($r),
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'bajaAlicuotaCobel':
+            $data = bodyJson();
+
+            if (!isset($data['id'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/CobElectronicos.php';
+
+            // Baja LOGICA. Deja de regir, pero la fila queda: es lo que explica
+            // con que tasa se calculo un movimiento de ese periodo.
+            $r = (new CobElectronicos())->bajaAlicuota($data['id'], usuarioActual());
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Alícuota dada de baja. ' . mensajeRecalculo($r['recalculo']),
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

@@ -32,6 +32,7 @@ En este orden, contra `central`:
 -- 1. sql/cashflow_estructura.sql
 -- 2. sql/cashflow_estructura_disponibilidades.sql
 -- 3. sql/cashflow_saldos.sql   (alimenta Saldo Inicial y Caja Locales)
+-- 4. sql/cashflow_cob_electronicos.sql  (alimenta Cobranzas Pagos Electrónicos)
 ```
 
 El primero crea `RO_T_CASHFLOW_CONF_SECCION` y `RO_T_CASHFLOW_CONF_FILA`, siembra la estructura y agrega el parámetro `comex_tipo_cambio_usd`.
@@ -40,7 +41,9 @@ El segundo la reorganiza en **Disponibilidades + Ventas por canal**, que es la f
 
 El tercero crea las tablas del módulo Saldos, que es el que llena las filas *Saldo Inicial* y *Caja Locales*. Se puede correr en cualquier momento; sin él, esas dos filas van en cero y el tablero avisa. Ver `README-saldos.md`.
 
-Los tres son reejecutables y no pisan nada ya editado. Si no se corrieron, la pantalla **no falla**: muestra un aviso diciendo que hay que correrlos.
+El cuarto crea las tablas del módulo Cob. Electrónicos, que llena la fila *Cobranzas Pagos Electrónicos*. Mismo criterio: sin él la fila va en cero y el tablero avisa. Los movimientos del Excel los carga aparte `sql/cashflow_cob_electronicos_migracion.sql`. Ver `README-cob-electronicos.md`.
+
+Los cuatro son reejecutables y no pisan nada ya editado. Si no se corrieron, la pantalla **no falla**: muestra un aviso diciendo que hay que correrlos.
 
 ---
 
@@ -168,7 +171,7 @@ Esa división es lo importante: hace cumplir por construcción la regla de que *
 
 Van igual en el registro, con `'disponible' => false` y sin clase. Una fila que los apunte se muestra **en cero** y el tablero avisa, en vez de desaparecer del cuadro: así la pantalla tiene desde el primer día la forma completa del Excel y se ve qué falta. Cuando el módulo exista, se escribe su proveedor y se da vuelta el flag; la fila ya está configurada y se llena sola.
 
-Hoy tienen datos reales seis: **Ventas**, **Cobranzas FR**, **Proveedores Exterior**, **Nacionalizaciones**, **Saldos** y **Caja Locales**. Los otros diez están declarados y rinden cero.
+Hoy tienen datos reales siete: **Ventas**, **Cobranzas FR**, **Proveedores Exterior**, **Nacionalizaciones**, **Saldos**, **Caja Locales** y **Cobranzas Electrónicas**. Los otros nueve están declarados y rinden cero.
 
 ---
 

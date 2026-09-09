@@ -48,6 +48,14 @@ class Parametros {
                 . 'Alimentan la pestaña Saldos y las filas Saldo Inicial y Caja Locales del tablero',
             'secciones' => ['generales', 'cuentas', 'sucursales']
         ],
+        'COB_ELECTRONICOS' => [
+            'nombre' => 'Cob. Electrónicos',
+            'icono' => 'fa-credit-card',
+            'descripcion' => 'Procesadoras de pago y las alícuotas de retención con las que se '
+                . 'calcula el importe neto de cada acreditación. Alimentan la pestaña '
+                . 'Cob. Electrónicos y la fila Cobranzas Pagos Electrónicos del tablero',
+            'secciones' => ['procesadoras', 'alicuotas']
+        ],
         'CASHFLOW' => [
             'nombre' => 'Cashflow',
             'icono' => 'fa-table-cells',
@@ -111,6 +119,29 @@ class Parametros {
                         $modulo['avisos'][] = 'No se pudieron leer los parámetros de Saldos: '
                             . $e->getMessage();
                     }
+                } elseif ($seccion === 'procesadoras' || $seccion === 'alicuotas') {
+                    // Mismo criterio que Saldos: las tablas son del modulo
+                    // Cob. Electronicos y las lee su propia clase.
+                    //
+                    // Las alicuotas se piden con el historico completo (no solo
+                    // las activas): la vigencia vieja es lo que explica por que
+                    // un movimiento de la semana pasada tiene otra tasa, y
+                    // esconderla haria que ese neto pareciera un error.
+                    try {
+                        $modulo[$seccion] = ($seccion === 'procesadoras')
+                            ? $this->cobElectronicos()->getProcesadoras(false)
+                            : $this->cobElectronicos()->getAlicuotas(false);
+
+                        if ($seccion === 'procesadoras') {
+                            foreach ($this->cobElectronicos()->getAvisos() as $a) {
+                                $modulo['avisos'][] = $a;
+                            }
+                        }
+                    } catch (Throwable $e) {
+                        $modulo[$seccion] = [];
+                        $modulo['avisos'][] = 'No se pudieron leer los parámetros de '
+                            . 'Cob. Electrónicos: ' . $e->getMessage();
+                    }
                 }
             }
 
@@ -141,6 +172,23 @@ class Parametros {
     }
 
     /**
+     * Puerta al modulo Cob. Electronicos, para las secciones de Parametros que
+     * administran sus tablas. Mismo criterio -y mismo motivo del require lazy-
+     * que saldos().
+     *
+     * @return CobElectronicos
+     */
+    private function cobElectronicos() {
+        require_once __DIR__ . '/CobElectronicos.php';
+
+        if ($this->cobElectronicos === null) {
+            $this->cobElectronicos = new CobElectronicos();
+        }
+
+        return $this->cobElectronicos;
+    }
+
+    /**
      * Cache del chequeo de la columna MODULO.
      * null = todavia no se consulto, true/false = resultado.
      */
@@ -148,6 +196,9 @@ class Parametros {
 
     /** @var Saldos|null Puerta al modulo Saldos; la resuelve saldos() */
     private $saldos = null;
+
+    /** @var CobElectronicos|null Puerta al modulo; la resuelve cobElectronicos() */
+    private $cobElectronicos = null;
 
     function __construct(){
         require_once __DIR__.'/../../class/conexion.php';

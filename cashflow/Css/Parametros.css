@@ -329,3 +329,88 @@
     font-size: 12px;
     padding: 3px 8px;
 }
+
+/* ============================================================================
+   MODULO COB. ELECTRONICOS
+   Sub-pestana Parametros -> Cob. Electronicos. Prefijo pce- por el mismo motivo
+   que sp-: Parametros.js busca sus selectores en TODO el documento.
+   ============================================================================ */
+
+/* Una procesadora o una vigencia de alicuota inhabilitada NO se borra: se
+   sigue viendo, atenuada. */
+.pce-cobel .pce-inactiva {
+    opacity: 0.55;
+}
+
+.pce-cobel .pce-inactiva input,
+.pce-cobel .pce-inactiva select {
+    background: var(--bg-light, #f5f6fa);
+}
+
+.pce-cobel .pce-num {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.pce-cobel .pce-fecha {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+    white-space: nowrap;
+}
+
+/* El desglose de conceptos debajo de la tasa total: es lo que hace auditable de
+   donde sale ese porcentaje. */
+.pce-cobel .pce-detalle {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+}
+
+/* Una procesadora sin alicuotas vigentes no puede calcular el neto de ningun
+   movimiento, asi que su tasa NO se muestra como 0%: un cero se leeria como
+   "no le retienen nada". */
+.pce-cobel .pce-sin-alicuota {
+    font-size: 11px;
+    color: var(--danger-color, #dc3545);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.pce-cobel .pce-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--bg-light, #f5f6fa);
+    font-size: 11px;
+    color: var(--text-secondary, #5a6178);
+}
+
+.pce-cobel .pce-badge-vigente {
+    background: rgba(40, 167, 69, 0.12);
+    color: #1e7e34;
+}
+
+.pce-cobel .pce-badge-baja {
+    background: rgba(220, 53, 69, 0.1);
+    color: #b02a37;
+}
+
+/* La suma que va a quedar vigente, antes de guardar. Con suma >= 100% el neto
+   saldria cero o negativo y el boton se bloquea. */
+.pce-cobel .pce-suma {
+    font-size: 12px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--bg-light, #f5f6fa);
+    color: var(--text-secondary, #5a6178);
+}
+
+.pce-cobel .table .form-control-sm,
+.pce-cobel .table .form-select-sm {
+    font-size: 12px;
+    padding: 3px 8px;
+}
+
+.pce-cobel .btn-link {
+    padding: 0 4px;
+    text-decoration: none;
+}
