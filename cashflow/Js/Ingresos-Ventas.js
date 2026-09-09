@@ -15,7 +15,18 @@
 
     var datosAnalisis = null;
     var datosProyeccion = null;
+    var datosAcumulada = null;
+    var datosBalance = null;
     var vistaActual = 'semanas'; // 'semanas' o 'meses'
+
+    // Vista activa del card "Proyección de Venta por Mes":
+    // 'cashflow' | 'acumulada' | 'balance'. Las tres NO comparten la base, así
+    // que de esto dependen el subtítulo, el refresh y el export.
+    var vistaAnual = 'cashflow';
+
+    // Subtítulo de la vista Cashflow: se guarda el que viene del HTML en vez de
+    // repetirlo acá, para que la vista existente quede exactamente igual.
+    var subtituloCashflow = '';
 
     // Etiqueta en reposo del botón de guardar participación. El botón vive en el
     // card-header, FUERA del bloque que se regenera al recalcular, así que su
@@ -34,13 +45,13 @@
         var btnGuardarPartic = document.getElementById('btnGuardarParticipacion');
         var tabProyeccionBtn = document.getElementById('tabProyeccionBtn');
 
+        // Los dos botones viven en el card-header, que es compartido por las
+        // tres vistas anuales: actúan sobre la que esté abierta.
         if (btnRefreshAnalisis) {
-            btnRefreshAnalisis.addEventListener('click', cargarAnalisis);
+            btnRefreshAnalisis.addEventListener('click', refrescarVistaAnual);
         }
         if (btnExportAnalisis) {
-            btnExportAnalisis.addEventListener('click', function() {
-                exportarExcel('tablaAnalisis', 'Analisis_Ventas');
-            });
+            btnExportAnalisis.addEventListener('click', exportarVistaAnual);
         }
         if (btnRefreshProyeccion) {
             btnRefreshProyeccion.addEventListener('click', cargarProyeccion);
@@ -73,6 +84,7 @@
             });
         }
 
+        inicializarVistasAnuales();
         cargarAnalisis();
     }
 
@@ -346,6 +358,387 @@
             '<td class="currency">' + formatCurrency(totales.total) + '</td>';
     }
 
+    /* ================================================================
+       VISTAS ANUALES DEL CARD "PROYECCIÓN DE VENTA POR MES"
+
+       Tres pestañas dentro del card. Venta Cashflow es la que alimenta la
+       proyección y abre por defecto; las otras dos son lecturas anuales del
+       dato real y se piden recién cuando se abre su pestaña -mismo criterio
+       lazy que la sub-pestaña Proyección-, así la pantalla que ya funcionaba no
+       paga una consulta que quizás nadie mire.
+
+       LAS TRES NO ESTÁN EN LA MISMA BASE: Cashflow compara netos contra una
+       proyectada con IVA, Acumulada es toda neta y Balance es todo con IVA. El
+       subtítulo del card y el th-sub de cada columna lo dicen.
+       ================================================================ */
+
+    /**
+     * Por qué el acumulado en dólares no es el acumulado en pesos dividido por
+     * un tipo de cambio. Es la diferencia entre una serie histórica en dólares y
+     * una reexpresión a moneda de hoy, y va en el tooltip de la columna.
+     */
+    var TIP_VALUACION = 'Cada mes se valúa a SU propio tipo de cambio de cierre ' +
+        'y el acumulado en dólares es la suma de los meses ya valuados. NO es el ' +
+        'acumulado en pesos dividido por un tipo de cambio: eso sería reexpresar ' +
+        'toda la serie a moneda de hoy, que es otra cuenta.';
+
+    var TIP_BALANCE = 'Los meses cerrados son venta real neta grosada por IVA; ' +
+        'el mes en curso y los siguientes son la venta proyectada, que ya lleva ' +
+        'IVA. El mes en curso va SIEMPRE proyectado, aunque tenga venta cargada: ' +
+        'un mes a medio facturar sumado contra meses completos hundiría el total.';
+
+    function inicializarVistasAnuales() {
+        var subtitulo = document.getElementById('ventaAnualSubtitulo');
+
+        if (subtitulo) {
+            subtituloCashflow = subtitulo.innerHTML;
+        }
+
+        colgarVistaAnual('tabVentaCashflowBtn', 'cashflow');
+        colgarVistaAnual('tabVentaAcumuladaBtn', 'acumulada');
+        colgarVistaAnual('tabVentaBalanceBtn', 'balance');
+    }
+
+    function colgarVistaAnual(idBoton, vista) {
+        var btn = document.getElementById(idBoton);
+
+        if (!btn) {
+            return;
+        }
+
+        btn.addEventListener('shown.bs.tab', function() {
+            vistaAnual = vista;
+            actualizarSubtituloAnual();
+            pintarWarningsAnuales();
+
+            if (vista === 'acumulada' && !datosAcumulada) {
+                cargarAcumulada();
+            } else if (vista === 'balance' && !datosBalance) {
+                cargarBalance();
+            }
+
+            ajustarStickyHeaders();
+        });
+    }
+
+    /** El botón Actualizar recarga la vista abierta, no las tres */
+    function refrescarVistaAnual() {
+        if (vistaAnual === 'acumulada') {
+            cargarAcumulada();
+        } else if (vistaAnual === 'balance') {
+            cargarBalance();
+        } else {
+            cargarAnalisis();
+        }
+    }
+
+    function exportarVistaAnual() {
+        if (vistaAnual === 'acumulada') {
+            exportarExcel('tablaAcumulada', 'Venta_Acumulada');
+        } else if (vistaAnual === 'balance') {
+            exportarExcel('tablaBalance', 'Venta_Balance');
+        } else {
+            exportarExcel('tablaAnalisis', 'Analisis_Ventas');
+        }
+    }
+
+    /**
+     * Subtítulo del card: período y base de la vista activa.
+     *
+     * Es el lugar donde se declara que Acumulada es neta y Balance lleva IVA.
+     * Sin eso, tres tablas de importes mensuales una al lado de la otra se leen
+     * como comparables y no lo son.
+     */
+    function actualizarSubtituloAnual() {
+        var el = document.getElementById('ventaAnualSubtitulo');
+
+        if (!el) {
+            return;
+        }
+
+        if (vistaAnual === 'acumulada') {
+            el.innerHTML = subtituloAcumulada();
+        } else if (vistaAnual === 'balance') {
+            el.innerHTML = subtituloBalance();
+        } else {
+            el.innerHTML = subtituloCashflow;
+        }
+    }
+
+    function subtituloAcumulada() {
+        var anio = datosAcumulada ? datosAcumulada.anio : '';
+        var corte = (datosAcumulada && datosAcumulada.dia_corte)
+            ? ' &middot; parcial al ' + fechaCorta(datosAcumulada.dia_corte)
+            : '';
+
+        return 'Venta <strong>real</strong> acumulada ' +
+               (anio ? 'del año ' + anio : 'del año en curso') +
+               ' &middot; <strong>neta sin IVA</strong>, en pesos y en dólares' + corte +
+               '<i class="fas fa-info-circle ms-1" title="' + TIP_VALUACION + '"></i>';
+    }
+
+    function subtituloBalance() {
+        var iva = datosBalance ? (datosBalance.alicuota_iva || 0) : 0;
+        var periodo = (datosBalance && datosBalance.inicio)
+            ? fechaLarga(datosBalance.inicio) + ' al ' + fechaLarga(datosBalance.fin)
+            : '1/8 al 31/7';
+
+        return 'Año balance ' + periodo +
+               ' &middot; real de los meses cerrados + proyectado &middot; ' +
+               '<strong>todo CON IVA' + (datosBalance ? ' ' + formatPercentCorto(iva) : '') +
+               '</strong>' +
+               '<i class="fas fa-info-circle ms-1" title="' + TIP_BALANCE + '"></i>';
+    }
+
+    /** Warnings de la vista anual activa, con el mismo bloque de siempre */
+    function pintarWarningsAnuales() {
+        var datos = (vistaAnual === 'acumulada')
+            ? datosAcumulada
+            : ((vistaAnual === 'balance') ? datosBalance : null);
+
+        pintarWarnings('warningsVentaAnual', datos ? datos.warnings : []);
+    }
+
+    /* ---------------------------------------------------------------
+       VENTA ACUMULADA
+       --------------------------------------------------------------- */
+
+    function cargarAcumulada() {
+        mostrar('loadingAcumulada', true);
+        mostrar('wrapperAcumulada', false);
+
+        pedir('Controller/VentasController.php?action=getVentaAcumulada')
+            .then(function(data) {
+                datosAcumulada = data;
+                generarTablaAcumulada();
+                actualizarSubtituloAnual();
+                pintarWarningsAnuales();
+                mostrar('loadingAcumulada', false);
+                mostrar('wrapperAcumulada', true);
+                ajustarStickyHeaders();
+            })
+            .catch(function(error) {
+                mostrar('loadingAcumulada', false);
+                mostrarError('Error al cargar la venta acumulada: ' + error.message);
+            });
+    }
+
+    /**
+     * Venta real acumulada del año calendario, neta sin IVA, en pesos y en
+     * dólares.
+     *
+     * Las columnas de dólares se muestran sólo si hubo cotizaciones: si la vista
+     * RO_V_DOLAR_OFICIAL_BCRA no está disponible, la tabla sale en pesos y el
+     * warning de arriba dice por qué, en vez de mostrar una columna entera de
+     * guiones.
+     */
+    function generarTablaAcumulada() {
+        var filas = datosAcumulada.filas || [];
+        var totales = datosAcumulada.totales;
+        var conUsd = !!datosAcumulada.usd_disponible;
+
+        var header =
+            '<th class="col-canal">Mes</th>' +
+            '<th class="text-end">Venta Neta' +
+                '<span class="th-sub">neto s/ IVA</span></th>' +
+            '<th class="text-end">Acumulado' +
+                '<span class="th-sub">neto s/ IVA</span></th>';
+
+        if (conUsd) {
+            header +=
+                '<th class="text-center" title="' + TIP_VALUACION + '">T/C' +
+                    '<span class="th-sub">cierre del mes</span></th>' +
+                '<th class="text-end" title="' + TIP_VALUACION + '">Venta Neta USD' +
+                    '<span class="th-sub">neto s/ IVA &middot; a su T/C</span></th>' +
+                '<th class="text-end" title="' + TIP_VALUACION + '">Acumulado USD' +
+                    '<span class="th-sub">suma de meses valuados</span></th>';
+        }
+
+        document.getElementById('acumuladaHeader').innerHTML = header;
+
+        var columnas = conUsd ? 6 : 3;
+
+        if (!filas.length) {
+            document.getElementById('acumuladaBody').innerHTML =
+                '<tr><td colspan="' + columnas + '" class="text-center text-muted py-4">' +
+                'Todavía no hay ningún mes con venta cargada en el año.</td></tr>';
+            document.getElementById('acumuladaTotals').innerHTML = '';
+            return;
+        }
+
+        var html = '';
+
+        filas.forEach(function(fila) {
+            // El mes en curso está incompleto: sale del histórico diario y el
+            // badge dice hasta qué día llega. Sin eso, el importe más chico se
+            // lee como una caída de venta.
+            var tip = fila.parcial
+                ? 'Mes en curso: días 1 al ' + fila.dias +
+                  '. Sale del histórico diario, no de la tabla mensual.'
+                : '';
+
+            html += '<tr' + (fila.parcial ? ' class="fila-parcial"' : '') + '>';
+            html += '<td class="col-canal fw-semibold">' + fila.label +
+                    (fila.parcial
+                        ? ' <span class="badge-parcial" title="' + tip + '">parcial al ' +
+                          fechaCorta(datosAcumulada.dia_corte) + '</span>'
+                        : '') +
+                    '</td>';
+
+            html += '<td class="currency"' + (tip ? ' title="' + tip + '"' : '') + '>' +
+                    formatCurrency(fila.neto) + '</td>';
+            html += '<td class="currency fw-semibold">' + formatCurrency(fila.acumulado) + '</td>';
+
+            if (conUsd) {
+                // Un mes sin cotización muestra un guion, no un cero: la
+                // diferencia entre "no hay dato" y "el dato es cero".
+                html += '<td class="text-center text-muted">' + numeroOGuion(fila.tc) + '</td>';
+                html += '<td class="currency">' + usdOGuion(fila.neto_usd) + '</td>';
+                html += '<td class="currency fw-semibold">' + usdOGuion(fila.acumulado_usd) + '</td>';
+            }
+
+            html += '</tr>';
+        });
+
+        document.getElementById('acumuladaBody').innerHTML = html;
+
+        var totalsHtml =
+            '<td class="col-canal total-label">TOTAL DEL AÑO</td>' +
+            '<td class="currency" title="Neto sin IVA">' + formatCurrency(totales.neto) + '</td>' +
+            '<td class="currency" title="Neto sin IVA">' + formatCurrency(totales.neto) + '</td>';
+
+        if (conUsd) {
+            // Si algún mes quedó sin cotización, el total en dólares no
+            // contiene esos meses y hay que decirlo.
+            var tipTotal = totales.meses_sin_tc > 0
+                ? 'No incluye ' + totales.meses_sin_tc + ' mes(es) sin cotización.'
+                : 'Suma de los meses valuados a su propio tipo de cambio de cierre.';
+
+            totalsHtml +=
+                '<td class="text-center text-muted">&mdash;</td>' +
+                '<td class="currency" title="' + tipTotal + '">' +
+                    usdOGuion(totales.neto_usd) + '</td>' +
+                '<td class="currency" title="' + tipTotal + '">' +
+                    usdOGuion(totales.neto_usd) + '</td>';
+        }
+
+        document.getElementById('acumuladaTotals').innerHTML = totalsHtml;
+    }
+
+    /* ---------------------------------------------------------------
+       VENTA BALANCE
+       --------------------------------------------------------------- */
+
+    function cargarBalance() {
+        mostrar('loadingBalance', true);
+        mostrar('wrapperBalance', false);
+
+        pedir('Controller/VentasController.php?action=getVentaBalance')
+            .then(function(data) {
+                datosBalance = data;
+                generarTablaBalance();
+                actualizarSubtituloAnual();
+                pintarWarningsAnuales();
+                mostrar('loadingBalance', false);
+                mostrar('wrapperBalance', true);
+                ajustarStickyHeaders();
+            })
+            .catch(function(error) {
+                mostrar('loadingBalance', false);
+                mostrarError('Error al cargar la venta del balance: ' + error.message);
+            });
+    }
+
+    /**
+     * Año balance 1/8 al 31/7: doce meses, real de los meses cerrados más
+     * proyectado del resto.
+     *
+     * TODO CON IVA, y por eso las dos mitades son sumables. El pie muestra el
+     * total y cuánto de él es real y cuánto proyectado: un total de balance sin
+     * ese desglose no dice qué parte todavía puede cambiar.
+     */
+    function generarTablaBalance() {
+        var filas = datosBalance.filas || [];
+        var totales = datosBalance.totales;
+        var iva = datosBalance.alicuota_iva || 0;
+        var subIva = '<span class="th-sub th-sub-iva">CON IVA ' + formatPercentCorto(iva) + '</span>';
+
+        document.getElementById('balanceHeader').innerHTML =
+            '<th class="col-canal">Mes</th>' +
+            '<th class="text-center">Origen' +
+                '<span class="th-sub">real / proyectado</span></th>' +
+            '<th class="text-end">Venta' + subIva + '</th>' +
+            '<th class="text-end">Acumulado' + subIva + '</th>';
+
+        if (!filas.length) {
+            document.getElementById('balanceBody').innerHTML =
+                '<tr><td colspan="4" class="text-center text-muted py-4">' +
+                'No hay datos del año balance.</td></tr>';
+            document.getElementById('balanceFoot').innerHTML = '';
+            return;
+        }
+
+        var html = '';
+
+        filas.forEach(function(fila) {
+            var real = (fila.origen === 'REAL');
+
+            html += '<tr' + (real ? '' : ' class="fila-proyectada"') + '>';
+            html += '<td class="col-canal fw-semibold">' + fila.label + '</td>';
+            html += '<td class="text-center">' + badgeOrigen(fila.origen) + '</td>';
+
+            html += '<td class="currency' + (real ? '' : ' cell-with-value') + '">' +
+                    formatCurrency(fila.venta) +
+                    (fila.estimado
+                        ? ' <i class="fas fa-triangle-exclamation text-warning ms-1" ' +
+                          'title="El mismo mes del año anterior no tiene datos: mes estimado."></i>'
+                        : '') +
+                    '</td>';
+
+            html += '<td class="currency fw-semibold">' + formatCurrency(fila.acumulado) + '</td>';
+            html += '</tr>';
+        });
+
+        document.getElementById('balanceBody').innerHTML = html;
+
+        var foot = '';
+
+        foot += '<tr class="fila-desglose">';
+        foot += '<td class="col-canal" colspan="2">Real &mdash; ' +
+                totales.meses_real + ' mes(es) cerrado(s)</td>';
+        foot += '<td class="currency">' + formatCurrency(totales.real) + '</td>';
+        foot += '<td></td>';
+        foot += '</tr>';
+
+        foot += '<tr class="fila-desglose">';
+        foot += '<td class="col-canal" colspan="2">Proyectado &mdash; ' +
+                totales.meses_proyectado + ' mes(es), desde el mes en curso</td>';
+        foot += '<td class="currency">' + formatCurrency(totales.proyectado) + '</td>';
+        foot += '<td></td>';
+        foot += '</tr>';
+
+        foot += '<tr class="fila-total">';
+        foot += '<td class="col-canal total-label" colspan="2">TOTAL BALANCE</td>';
+        foot += '<td class="currency" title="Con IVA ' + formatPercentCorto(iva) + '">' +
+                formatCurrency(totales.venta) + '</td>';
+        foot += '<td class="currency" title="Con IVA ' + formatPercentCorto(iva) + '">' +
+                formatCurrency(totales.venta) + '</td>';
+        foot += '</tr>';
+
+        document.getElementById('balanceFoot').innerHTML = foot;
+    }
+
+    function badgeOrigen(origen) {
+        if (origen === 'REAL') {
+            return '<span class="badge-origen badge-origen-real" ' +
+                   'title="Mes cerrado: venta real neta grosada por IVA">Real</span>';
+        }
+
+        return '<span class="badge-origen badge-origen-proyectado" ' +
+               'title="Venta proyectada, ya con IVA. El mes en curso va siempre acá.">' +
+               'Proyectado</span>';
+    }
+
     /**
      * Edición del % de variación, mismo patrón de celda editable que Comex.
      *
@@ -415,6 +808,13 @@
 
                 if (datosProyeccion) {
                     cargarProyeccion();
+                }
+
+                // El balance también proyecta con el índice: si la pestaña ya
+                // estaba cargada, quedaría mostrando la venta vieja. La
+                // acumulada no, que es todo dato real.
+                if (datosBalance) {
+                    cargarBalance();
                 }
             })
             .catch(function(error) {
@@ -834,17 +1234,31 @@
     }
 
     function generarWarnings() {
-        var cont = document.getElementById('warningsProyeccion');
-        var warnings = datosProyeccion.warnings || [];
+        pintarWarnings('warningsProyeccion', datosProyeccion.warnings);
+    }
 
-        if (!warnings.length) {
+    /**
+     * Bloque de avisos no fatales, compartido por la proyección y por las
+     * vistas anuales: un origen de datos que todavía no existe en el entorno no
+     * tiene que caer la pantalla, pero sí decirse.
+     */
+    function pintarWarnings(idContenedor, warnings) {
+        var cont = document.getElementById(idContenedor);
+
+        if (!cont) {
+            return;
+        }
+
+        var lista = warnings || [];
+
+        if (!lista.length) {
             cont.innerHTML = '';
             return;
         }
 
         var html = '';
 
-        warnings.forEach(function(w) {
+        lista.forEach(function(w) {
             html += '<div class="alert alert-warning py-2 px-3 mb-2">' +
                     '<i class="fas fa-triangle-exclamation me-1"></i><small>' + w + '</small></div>';
         });
@@ -1064,6 +1478,51 @@
             minimumFractionDigits: 0,
             maximumFractionDigits: 2
         }) + '%';
+    }
+
+    /** Importe en dólares. Se distingue del peso por el prefijo, no por el color. */
+    function formatUsd(value) {
+        var num = parseFloat(value) || 0;
+
+        return 'US$ ' + num.toLocaleString('es-AR', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+    }
+
+    /**
+     * Un valor ausente se pinta como guion y NO como cero.
+     * En la venta acumulada eso distingue un mes sin cotización cargada de un
+     * mes que efectivamente no vendió nada.
+     */
+    function usdOGuion(value) {
+        if (value === null || value === undefined) {
+            return '<span class="text-muted" title="Sin cotización para el mes">&mdash;</span>';
+        }
+
+        return formatUsd(value);
+    }
+
+    function numeroOGuion(value) {
+        if (value === null || value === undefined) {
+            return '<span title="Sin cotización para el mes">&mdash;</span>';
+        }
+
+        return (parseFloat(value) || 0).toLocaleString('es-AR', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+    }
+
+    /** '2026-08-01' -> '01/08/2026'. Se corta el string: nunca new Date(). */
+    function fechaLarga(iso) {
+        if (!iso) {
+            return '';
+        }
+
+        var p = String(iso).split('-');
+
+        return p[2] + '/' + p[1] + '/' + p[0];
     }
 
     function badgeVariacion(variacion) {

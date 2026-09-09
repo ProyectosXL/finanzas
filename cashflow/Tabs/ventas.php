@@ -62,50 +62,141 @@
                 </div>
             </div>
 
-            <div class="card mb-4">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <div>
-                        <h5 class="mb-0">Proyección de Venta por Mes</h5>
-                        <small class="text-muted">
-                            Mes actual + 11 &middot;
-                            <strong>Venta Proyectada = Año Anterior (neto) &times; (1 + Variación) &times; (1 + IVA)</strong>
-                            <i class="fas fa-info-circle ms-1"
-                               title="Las columnas de años son NETAS sin IVA. La Venta Proyectada lleva IVA: por eso es mayor aunque la variación sea 0%. Click en el % para editarlo."></i>
-                        </small>
-                    </div>
-                    <div class="d-flex gap-2">
-                        <button id="btnRefreshAnalisis" class="btn btn-sm btn-outline-primary">
-                            <i class="fas fa-sync-alt me-1"></i> Actualizar
-                        </button>
-                        <button id="btnExportAnalisis" class="btn btn-sm btn-success">
-                            <i class="fas fa-file-excel me-1"></i> Exportar
-                        </button>
-                    </div>
-                </div>
-                <div class="card-body p-0">
-                    <div class="loading-spinner" id="loadingAnalisis">
-                        <div class="spinner"></div>
-                        <p>Cargando datos...</p>
+            <!-- ============================================================
+                 PROYECCIÓN DE VENTA POR MES — tres vistas anuales
+
+                 El tercer nivel de navegación vive DENTRO del card. Venta
+                 Cashflow es la que abre por defecto y es la que alimenta la
+                 proyección; las otras dos son lecturas anuales del dato real y
+                 se cargan recién cuando se abre su pestaña.
+
+                 LAS TRES NO ESTÁN EN LA MISMA BASE: Cashflow compara netos
+                 contra una proyectada con IVA, Acumulada es toda neta y Balance
+                 es todo con IVA. Cada una lo dice en su subtítulo y en el th-sub
+                 de sus columnas.
+                 ============================================================ -->
+            <div class="card mb-4" id="cardVentaAnual">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <h5 class="mb-0">Proyección de Venta por Mes</h5>
+                            <!-- El subtítulo cambia con la pestaña activa: es
+                                 donde se declara el período y la base. -->
+                            <small class="text-muted" id="ventaAnualSubtitulo">
+                                Mes actual + 11 &middot;
+                                <strong>Venta Proyectada = Año Anterior (neto) &times; (1 + Variación) &times; (1 + IVA)</strong>
+                                <i class="fas fa-info-circle ms-1"
+                                   title="Las columnas de años son NETAS sin IVA. La Venta Proyectada lleva IVA: por eso es mayor aunque la variación sea 0%. Click en el % para editarlo."></i>
+                            </small>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button id="btnRefreshAnalisis" class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-sync-alt me-1"></i> Actualizar
+                            </button>
+                            <button id="btnExportAnalisis" class="btn btn-sm btn-success">
+                                <i class="fas fa-file-excel me-1"></i> Exportar
+                            </button>
+                        </div>
                     </div>
 
-                    <div id="wrapperAnalisis" style="display: none;">
-                        <div class="table-responsive tabla-temporal">
-                            <table id="tablaAnalisis" class="table table-hover mb-0">
-                                <thead>
-                                    <tr id="analisisHeader">
-                                        <!-- Se genera dinámicamente -->
-                                    </tr>
-                                </thead>
-                                <tbody id="analisisBody">
-                                    <!-- Se genera dinámicamente -->
-                                </tbody>
-                                <tfoot class="table-light">
-                                    <tr id="analisisTotals">
-                                        <!-- Se genera dinámicamente -->
-                                    </tr>
-                                </tfoot>
-                            </table>
+                    <ul class="nav nav-tabs nav-tabs-card mt-3" id="ventaAnualTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="tabVentaCashflowBtn" data-bs-toggle="tab"
+                                    data-bs-target="#paneVentaCashflow" type="button" role="tab">
+                                <i class="fas fa-chart-line me-1"></i> Venta Cashflow
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="tabVentaAcumuladaBtn" data-bs-toggle="tab"
+                                    data-bs-target="#paneVentaAcumulada" type="button" role="tab">
+                                <i class="fas fa-layer-group me-1"></i> Venta Acumulada
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="tabVentaBalanceBtn" data-bs-toggle="tab"
+                                    data-bs-target="#paneVentaBalance" type="button" role="tab">
+                                <i class="fas fa-scale-balanced me-1"></i> Venta Balance
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+                <div class="card-body p-0">
+                    <!-- Warnings no fatales de las vistas anuales: el tipo de
+                         cambio o el histórico diario que todavía no están. -->
+                    <div id="warningsVentaAnual"></div>
+
+                    <div class="tab-content">
+
+                        <!-- Venta Cashflow: la tabla que alimenta la proyección -->
+                        <div class="tab-pane fade show active" id="paneVentaCashflow" role="tabpanel">
+                            <div class="loading-spinner" id="loadingAnalisis">
+                                <div class="spinner"></div>
+                                <p>Cargando datos...</p>
+                            </div>
+
+                            <div id="wrapperAnalisis" style="display: none;">
+                                <div class="table-responsive tabla-temporal">
+                                    <table id="tablaAnalisis" class="table table-hover mb-0">
+                                        <thead>
+                                            <tr id="analisisHeader">
+                                                <!-- Se genera dinámicamente -->
+                                            </tr>
+                                        </thead>
+                                        <tbody id="analisisBody">
+                                            <!-- Se genera dinámicamente -->
+                                        </tbody>
+                                        <tfoot class="table-light">
+                                            <tr id="analisisTotals">
+                                                <!-- Se genera dinámicamente -->
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
+
+                        <!-- Venta Acumulada: año calendario, real, neta, $ y USD -->
+                        <div class="tab-pane fade" id="paneVentaAcumulada" role="tabpanel">
+                            <div class="loading-spinner" id="loadingAcumulada">
+                                <div class="spinner"></div>
+                                <p>Cargando venta acumulada...</p>
+                            </div>
+
+                            <div id="wrapperAcumulada" style="display: none;">
+                                <div class="table-responsive tabla-temporal">
+                                    <table id="tablaAcumulada" class="table table-hover mb-0">
+                                        <thead>
+                                            <tr id="acumuladaHeader"></tr>
+                                        </thead>
+                                        <tbody id="acumuladaBody"></tbody>
+                                        <tfoot class="table-light">
+                                            <tr id="acumuladaTotals"></tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Venta Balance: 1/8 al 31/7, real + proyectado, con IVA -->
+                        <div class="tab-pane fade" id="paneVentaBalance" role="tabpanel">
+                            <div class="loading-spinner" id="loadingBalance">
+                                <div class="spinner"></div>
+                                <p>Cargando venta del balance...</p>
+                            </div>
+
+                            <div id="wrapperBalance" style="display: none;">
+                                <div class="table-responsive tabla-temporal">
+                                    <table id="tablaBalance" class="table table-hover mb-0">
+                                        <thead>
+                                            <tr id="balanceHeader"></tr>
+                                        </thead>
+                                        <tbody id="balanceBody"></tbody>
+                                        <tfoot class="table-light" id="balanceFoot"></tfoot>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
                     </div>
                 </div>
             </div>
