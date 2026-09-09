@@ -31,13 +31,16 @@ En este orden, contra `central`:
 ```sql
 -- 1. sql/cashflow_estructura.sql
 -- 2. sql/cashflow_estructura_disponibilidades.sql
+-- 3. sql/cashflow_saldos.sql   (alimenta Saldo Inicial y Caja Locales)
 ```
 
 El primero crea `RO_T_CASHFLOW_CONF_SECCION` y `RO_T_CASHFLOW_CONF_FILA`, siembra la estructura y agrega el parámetro `comex_tipo_cambio_usd`.
 
 El segundo la reorganiza en **Disponibilidades + Ventas por canal**, que es la forma del Excel original (ver más abajo). No borra nada: las filas que reemplaza quedan inhabilitadas y visibles en el editor.
 
-Los dos son reejecutables y no pisan nada ya editado. Si no se corrieron, la pantalla **no falla**: muestra un aviso diciendo que hay que correrlos.
+El tercero crea las tablas del módulo Saldos, que es el que llena las filas *Saldo Inicial* y *Caja Locales*. Se puede correr en cualquier momento; sin él, esas dos filas van en cero y el tablero avisa. Ver `README-saldos.md`.
+
+Los tres son reejecutables y no pisan nada ya editado. Si no se corrieron, la pantalla **no falla**: muestra un aviso diciendo que hay que correrlos.
 
 ---
 
@@ -105,7 +108,7 @@ Esa división es lo importante: hace cumplir por construcción la regla de que *
 
 Van igual en el registro, con `'disponible' => false` y sin clase. Una fila que los apunte se muestra **en cero** y el tablero avisa, en vez de desaparecer del cuadro: así la pantalla tiene desde el primer día la forma completa del Excel y se ve qué falta. Cuando el módulo exista, se escribe su proveedor y se da vuelta el flag; la fila ya está configurada y se llena sola.
 
-Hoy tienen datos reales cuatro: **Ventas**, **Cobranzas FR**, **Proveedores Exterior** y **Nacionalizaciones**. Los otros doce están declarados y rinden cero.
+Hoy tienen datos reales seis: **Ventas**, **Cobranzas FR**, **Proveedores Exterior**, **Nacionalizaciones**, **Saldos** y **Caja Locales**. Los otros diez están declarados y rinden cero.
 
 ---
 
@@ -168,9 +171,9 @@ La fila *Saldo Inicial* muestra **lo que devuelve su módulo de origen (la pesta
 
 El Excel lo confirma: el 1/9 tiene `Saldo Inicial = 0` justo después de un `Disponible` de 118 millones. Si fuera un arrastre, ahí habría 118 millones. Es un dato que carga Tesorería, y donde no cargaron nada, va cero.
 
-El arrastre sigue existiendo, pero lo muestra **sólo `SALDO_FINAL`**, que es la posición proyectada. Los saldos que cargue el módulo de Saldos entran a ese arrastre como aporte, así que cuando exista, la posición arranca del dinero real.
+El arrastre sigue existiendo, pero lo muestra **sólo `SALDO_FINAL`**, que es la posición proyectada. Los saldos que carga el módulo de Saldos entran a ese arrastre como aporte, así que la posición arranca del dinero real en cuanto haya una carga.
 
-> **Decisión pendiente para cuando exista el módulo de Saldos**: si un saldo bancario cargado en una fecha intermedia **se suma** al arrastre o lo **reemplaza**. Hoy el motor suma. Con el Excel a la vista parece que debería reemplazar, pero sin datos no tiene sentido inventar la semántica.
+> **La decisión que estaba pendiente**: si un saldo cargado en una fecha intermedia **se suma** al arrastre o lo **reemplaza**. El motor sigue sumando, y el módulo de Saldos se acomoda a eso: devuelve el saldo **en la columna de su fecha y en cero en el resto del eje**, así que aporta una sola vez y no hay nada que reemplazar. Si algún día se cargan dos saldos de fechas distintas dentro del mismo horizonte, los dos se sumarían: ahí sí habría que decidir la semántica de reemplazo. Ver `README-saldos.md`.
 
 > **Por qué las filas de Ventas son la cobranza y no la venta**: en el Excel siguen el calendario bancario (los fines de semana no tienen columna y el lunes concentra el acumulado), que es el comportamiento de la cobranza con corrimiento a día hábil. Si se quisiera ver la venta, se cambia el origen de cada fila desde Parámetros: el proveedor expone las dos series por canal.
 
@@ -274,6 +277,7 @@ Cubren el eje temporal y su secuencia cronológica, el validador de la estructur
 ```
 sql/cashflow_estructura.sql                 Las dos tablas de configuración + semilla
 sql/cashflow_estructura_disponibilidades.sql  Reorganiza en Disponibilidades + Ventas
+sql/cashflow_saldos.sql                     Tablas del modulo Saldos (README-saldos.md)
 cashflow/Class/Horizonte.php                Eje temporal, compartido con Ventas
 cashflow/Class/CashflowProvider.php         Contrato de proveedor
 cashflow/Class/CashflowRegistry.php         Registro de orígenes de datos
@@ -282,6 +286,7 @@ cashflow/Class/Cashflow.php                 El motor
 cashflow/Class/Providers/VentasProvider.php
 cashflow/Class/Providers/ComexProvider.php
 cashflow/Class/Providers/IngresosProvider.php
+cashflow/Class/Providers/SaldosProvider.php   Disponible inicial y caja de locales
 cashflow/Controller/CashflowController.php            getTablero
 cashflow/Controller/CashflowEstructuraController.php  CRUD de la estructura
 cashflow/Tabs/cashflow.php                  La pantalla
@@ -300,8 +305,9 @@ Eliminado: `Tabs/resumen.php`.
 
 ## Pendientes conocidos
 
-- **El saldo de apertura arranca en cero.** El módulo Saldos no existe, así que la fila *Saldo Inicial* se muestra en cero: es una fila de datos y no tiene de dónde tomarlos. En consecuencia el *Saldo Final* arranca de cero y muestra la caja que generan los ingresos proyectados, no la posición real de los bancos. El tablero lo avisa arriba, porque leer esos saldos como disponibilidad real sería un error caro.
-- **Tres filas del Excel no tienen de dónde salir.** *Dólares Cuenta Comitente*, *Exportaciones* y *Caja Locales* las tipea una persona en el Excel (Tesorería, Silvina, Dan). Acá el origen de datos es únicamente por proveedor, así que hasta que exista el módulo que las alimente se muestran en cero y el tablero avisa. Quedan declaradas para que el cuadro tenga la forma completa. Si hicieran falta cargadas a mano, habría que sumar un tipo de origen manual, que hoy el módulo no tiene.
+- **El saldo de apertura ya no arranca en cero, pero depende de que alguien cargue.** El módulo Saldos existe (ver `README-saldos.md`) y alimenta *Saldo Inicial*. Mientras no haya ninguna carga, o mientras la última quede vieja, la fila va en cero o desactualizada y **el tablero lo avisa con la fecha del dato**: leer esos saldos como disponibilidad real sería un error caro.
+- **Dos filas del Excel no tienen de dónde salir.** *Dólares Cuenta Comitente* y *Exportaciones* las tipea una persona en el Excel (Tesorería, Silvina, Dan). Acá el origen de datos es únicamente por proveedor, así que hasta que exista el módulo que las alimente se muestran en cero y el tablero avisa. Quedan declaradas para que el cuadro tenga la forma completa. Si hicieran falta cargadas a mano, habría que sumar un tipo de origen manual, que hoy el módulo no tiene. *Caja Locales* ya salió de esta lista: la alimenta el módulo Saldos.
+- **`tests/test_cashflow.php` falla desde que pasó el 06/09/2026.** Es anterior a este trabajo. Sus escenarios fijan el eje en `hoy = 2026-09-06`, pero `Cashflow::proyectar()` arma su propio `Horizonte` con la fecha real, así que esas columnas ya no están en el eje y las filas derivadas devuelven `null`. `Cashflow` acepta inyectar la estructura y los parámetros pero no el horizonte; darle esa costura arregla los 48 casos de una.
 - **El neteo de cheques adelantados sólo se aplica a la serie total de cobranza.** No viene abierto por canal. Hoy da lo mismo porque es cero; cuando exista el origen habrá que decidir cómo se distribuye entre canales, y ese criterio es de negocio.
 - **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** para traer la razón social. El tablero no lo sufre, porque usa `getCobranzasFRTotales()`, pero la pestaña Cobranzas FR sí.
 - **`VentasController?action=saveMixCobro` puede grabar un mix que Parámetros rechazaría**: no valida el 100%. Es anterior a este trabajo.
