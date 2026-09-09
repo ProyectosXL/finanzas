@@ -1,79 +1,53 @@
 /**
  * Comex - Crono Nacionalización JavaScript
  * Gestión de cronograma de nacionalización con fechas editables
+ *
+ * LAS TRES VISTAS LAS MANEJA eje-vistas.js — ver la nota del encabezado de
+ * Comex-Proveedores_exterior.js: esta pestaña tenía el mismo criterio propio,
+ * con las columnas calculadas en el navegador y un backend que agrupaba por día
+ * del mes en curso. Ahora el eje y los importes por columna vienen resueltos de
+ * Class/EjeVista.php, sobre horizonte_dias y horizonte_meses.
  */
 
 (function() {
     'use strict';
-    
+
     let datosCrono = null;
-    let totalesDias = {};
-    let totalesMeses = {};
-    let vistaActual = 'semanas'; // 'semanas' o 'meses'
+
+    /** Controlador de las tres vistas, compartido con el resto del módulo */
+    let vistas = null;
 
     // Inicializar inmediatamente (para pestañas cargadas dinámicamente)
     function inicializar() {
         console.log('Inicializando Comex - Crono Nacionalización');
-        
+
         // Verificar que los elementos existen antes de agregar listeners
         var btnRefresh = document.getElementById('btnRefresh');
         var btnExport = document.getElementById('btnExport');
-        var btnVistaSemanas = document.getElementById('btnVistaSemanas');
-        var btnVistaMeses = document.getElementById('btnVistaMeses');
-        
+
         if (btnRefresh) {
             btnRefresh.addEventListener('click', cargarDatos);
         }
         if (btnExport) {
             btnExport.addEventListener('click', exportarExcel);
         }
-        if (btnVistaSemanas) {
-            btnVistaSemanas.addEventListener('click', function() {
-                cambiarVista('semanas');
-            });
-        }
-        if (btnVistaMeses) {
-            btnVistaMeses.addEventListener('click', function() {
-                cambiarVista('meses');
-            });
-        }
-        
+
+        vistas = crearEjeVistas({
+            botones: 'vistasCronoNac',
+            periodo: 'periodoCronoNac',
+            alCambiar: generarTabla
+        });
+
         // Cargar datos automáticamente
         cargarDatos();
     }
-    
+
     // Ejecutar cuando el DOM esté listo O inmediatamente si ya está listo
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', inicializar);
     } else {
         // DOM ya está listo, ejecutar inmediatamente
         inicializar();
-    }
-
-    /**
-     * Cambia entre vista de semanas y meses
-     */
-    function cambiarVista(vista) {
-        vistaActual = vista;
-        
-        var btnSemanas = document.getElementById('btnVistaSemanas');
-        var btnMeses = document.getElementById('btnVistaMeses');
-        
-        if (vista === 'semanas') {
-            btnSemanas.classList.remove('btn-outline-secondary');
-            btnSemanas.classList.add('btn-primary');
-            btnMeses.classList.remove('btn-primary');
-            btnMeses.classList.add('btn-outline-secondary');
-        } else {
-            btnMeses.classList.remove('btn-outline-secondary');
-            btnMeses.classList.add('btn-primary');
-            btnSemanas.classList.remove('btn-primary');
-            btnSemanas.classList.add('btn-outline-secondary');
-        }
-        
-        if (datosCrono) {
-            generarTabla();
-        }
     }
 
     /**
@@ -95,13 +69,16 @@
                     var result = JSON.parse(text);
                     if (result.success) {
                         datosCrono = result.data;
-                        totalesDias = result.data.totales_dias || {};
-                        totalesMeses = result.data.totales_meses || {};
-                        
+
                         console.log('Datos cargados:', datosCrono);
-                        
+
+                        // El controlador de vistas se entera del eje nuevo antes
+                        // de que se dibuje la tabla.
+                        vistas.usar(datosCrono);
+
                         generarTabla();
                         calcularResumenes();
+                        pintarAvisos();
                         mostrarCargando(false);
                     } else {
                         console.error('Error al cargar datos:', result);
@@ -132,96 +109,106 @@
             return;
         }
         
-        if (!datosCrono.items) {
-            console.error('datosCrono.items no existe');
+        if (!datosCrono.filas) {
+            console.error('datosCrono.filas no existe');
             mostrarError('Estructura de datos incorrecta');
             return;
         }
-        
-        if (datosCrono.items.length === 0) {
+
+        if (datosCrono.filas.length === 0) {
             console.warn('No hay items para mostrar');
             mostrarError('No hay registros para el período seleccionado');
             return;
         }
-        
-        console.log('Generando tabla con', datosCrono.items.length, 'items');
-        
+
+        console.log('Generando tabla con', datosCrono.filas.length, 'items');
+
         generarEncabezados();
         generarFilasDatos();
         generarFilaTotales();
     }
 
     /**
-     * Genera los encabezados dinámicos de la tabla
+     * Los avisos del backend: lo que quedó fuera del horizonte o sin fecha.
+     * Antes se descartaba en silencio.
+     */
+    function pintarAvisos() {
+        var cont = document.getElementById('avisosCronoNac');
+
+        if (!cont) {
+            return;
+        }
+
+        var avisos = (datosCrono && datosCrono.warnings) || [];
+
+        cont.innerHTML = avisos.length
+            ? '<div class="alert alert-warning py-2 px-3 mb-3"><small>'
+                + '<i class="fas fa-triangle-exclamation me-1"></i>'
+                + avisos.join(' ') + '</small></div>'
+            : '';
+    }
+
+    /**
+     * Genera los encabezados dinámicos de la tabla.
+     *
+     * Las columnas salen del eje que resolvió el backend: acá no se calcula
+     * ninguna fecha, así que el encabezado no puede describir un período
+     * distinto del que muestran las celdas.
      */
     function generarEncabezados() {
-        console.log('generarEncabezados() llamada - Vista:', vistaActual);
-        
         const headerRowSub = document.getElementById('headerRowSub');
         const periodoHeader = document.getElementById('periodoHeader');
-        
+
         if (!headerRowSub || !periodoHeader) {
             console.error('Elementos de encabezado no encontrados');
             return;
         }
-        
-        let headerHTML = '';
-        var hoy = new Date();
-        
-        if (vistaActual === 'semanas') {
-            // Vista de 4 semanas = 28 días individuales
-            periodoHeader.textContent = 'Próximos 28 Días (4 Semanas)';
-            periodoHeader.setAttribute('colspan', '28');
-            
-            // Generar 28 columnas de días
-            for (var i = 0; i < 28; i++) {
-                var fecha = new Date(hoy);
-                fecha.setDate(hoy.getDate() + i);
-                var diaNum = fecha.getDate();
-                var mesNum = fecha.getMonth() + 1;
-                
-                headerHTML += `<th class="day-column">${diaNum}/${mesNum}</th>`;
+
+        var cols = vistas.columnas();
+        var headerHTML = '';
+
+        cols.forEach(function(col) {
+            var esMes = vistas.esMes(col);
+            var meta = vistas.meta(col) || {};
+            var clases = [esMes ? 'month-column' : 'day-column'];
+            var titulo = '';
+
+            // Un mes recortado tiene que decirlo: un importe más chico son
+            // menos días cubiertos, no una caída.
+            if (esMes && meta.parcial) {
+                clases.push('col-parcial');
+                titulo = 'Este mes está recortado: sus primeros días están en el tramo diario';
             }
-            
-        } else {
-            // Vista de meses: solo 11 meses (sin días)
-            periodoHeader.textContent = 'Próximos 11 Meses';
-            periodoHeader.setAttribute('colspan', '11');
-            
-            // Generar encabezados de los próximos 11 meses
-            for (var i = 0; i < 11; i++) {
-                var fechaMes = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
-                var mesAbrev = fechaMes.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
-                headerHTML += `<th class="month-column">${mesAbrev.charAt(0).toUpperCase() + mesAbrev.slice(1)}</th>`;
-            }
-        }
-        
+
+            headerHTML += '<th class="' + clases.join(' ') + '"'
+                + (titulo ? ' title="' + titulo + '"' : '') + '>'
+                + vistas.rotulo(col) + '</th>';
+        });
+
+        // El total suma EXACTAMENTE las columnas de la vista activa.
+        headerHTML += '<th class="total-column">Total</th>';
+
+        periodoHeader.textContent = datosCrono.vistas[vistas.activa()].label;
+        periodoHeader.setAttribute('colspan', String(cols.length + 1));
+
         headerRowSub.innerHTML = headerHTML;
-        console.log('Encabezados generados correctamente');
     }
 
     /**
      * Genera las filas de datos
      */
     function generarFilasDatos() {
-        console.log('generarFilasDatos() llamada - Vista:', vistaActual);
-        
         var tableBody = document.getElementById('tableBody');
-        
+
         if (!tableBody) {
             console.error('tableBody no encontrado');
             return;
         }
-        
-        var hoy = new Date();
-        hoy.setHours(0, 0, 0, 0); // Normalizar a medianoche
-        
-        var fecha28Dias = new Date(hoy);
-        fecha28Dias.setDate(hoy.getDate() + 28);
-        
+
+        var cols = vistas.columnas();
         var html = '';
-        
-        datosCrono.items.forEach(function(item, index) {
+
+        datosCrono.filas.forEach(function(item, index) {
             html += '<tr>';
             
             // Columnas fijas
@@ -269,171 +256,91 @@
                         ` : ''}
                      </td>`;
             
-            var fechaPago = fechaNacEfectiva !== '-' ? new Date(fechaNacEfectiva) : null;
-            if (fechaPago) fechaPago.setHours(0, 0, 0, 0);
-            
-            if (vistaActual === 'semanas') {
-                // Vista semanas: 28 días individuales
-                for (var i = 0; i < 28; i++) {
-                    var fechaDia = new Date(hoy);
-                    fechaDia.setDate(hoy.getDate() + i);
-                    
-                    var esMismoDia = false;
-                    if (fechaPago) {
-                        esMismoDia = fechaPago.getTime() === fechaDia.getTime();
-                    }
-                    
-                    var valor = esMismoDia ? (item.IMPORTE_EST || 0) : 0;
-                    html += `<td class="currency ${valor > 0 ? 'cell-with-value' : ''}">
-                                ${valor > 0 ? formatCurrency(valor) : ''}
-                             </td>`;
-                }
-                
-            } else {
-                // Vista meses: solo 11 meses (excluyendo las primeras 4 semanas)
-                var mesPago = fechaNacEfectiva !== '-' ? fechaNacEfectiva.substring(0, 7) : '';
-                
-                for (var i = 0; i < 11; i++) {
-                    var fechaMes = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
-                    var mesKey = fechaMes.getFullYear() + '-' + String(fechaMes.getMonth() + 1).padStart(2, '0');
-                    var esMesPago = mesPago === mesKey;
-                    
-                    var valorMes = 0;
-                    if (esMesPago) {
-                        // Verificar que la fecha de pago no esté dentro de las primeras 4 semanas (28 días)
-                        if (fechaPago && fechaPago >= fecha28Dias) {
-                            valorMes = item.IMPORTE_EST || 0;
-                        }
-                    }
-                    
-                    html += `<td class="currency ${valorMes > 0 ? 'cell-with-value' : ''}">
-                                ${valorMes > 0 ? formatCurrency(valorMes) : ''}
-                             </td>`;
-                }
-            }
-            
+            // Los importes por columna ya vienen resueltos: la regla de "día O
+            // mes, nunca las dos" la aplicó el backend, una sola vez.
+            cols.forEach(function(col) {
+                var valor = Number(vistas.valor(item, col)) || 0;
+
+                html += '<td class="currency ' + (valor > 0 ? 'cell-with-value' : '') + '">'
+                    + (valor > 0 ? formatCurrency(valor) : '') + '</td>';
+            });
+
+            var total = vistas.total(item);
+
+            html += '<td class="currency total-column">'
+                + (total > 0 ? formatCurrency(total) : '') + '</td>';
+
             html += '</tr>';
         });
-        
+
         tableBody.innerHTML = html;
-        console.log('Filas de datos generadas:', datosCrono.items.length, 'filas');
     }
 
     /**
-     * Genera la fila de totales
+     * Genera la fila de totales.
+     *
+     * Los totales salen del payload y no se recalculan acá recorriendo los
+     * items: recalcularlos era una tercera copia de la regla de "día O mes",
+     * que además se podía desincronizar de las celdas que tiene arriba.
      */
     function generarFilaTotales() {
         var totalsRow = document.getElementById('totalsRow');
-        var hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-        
-        var fecha28Dias = new Date(hoy);
-        fecha28Dias.setDate(hoy.getDate() + 28);
-        
-        var html = '<td colspan="9" class="total-label">TOTALES</td>';
-        
-        if (vistaActual === 'semanas') {
-            // Totales por día (28 días)
-            for (var i = 0; i < 28; i++) {
-                var fechaDia = new Date(hoy);
-                fechaDia.setDate(hoy.getDate() + i);
-                
-                var totalDia = 0;
-                if (datosCrono && datosCrono.items) {
-                    datosCrono.items.forEach(function(item) {
-                        var fechaNacEfectiva = item.FECHA_NAC_EFECTIVA || item.FECHA_NAC;
-                        if (fechaNacEfectiva) {
-                            var fechaPago = new Date(fechaNacEfectiva);
-                            fechaPago.setHours(0, 0, 0, 0);
-                            if (fechaPago.getTime() === fechaDia.getTime()) {
-                                totalDia += parseFloat(item.IMPORTE_EST) || 0;
-                            }
-                        }
-                    });
-                }
-                
-                html += `<td class="currency ${totalDia > 0 ? 'cell-with-value' : ''}">
-                            ${totalDia > 0 ? formatCurrency(totalDia) : ''}
-                         </td>`;
-            }
-            
-        } else {
-            // Vista de meses: solo 11 meses (excluyendo primeras 4 semanas)
-            for (var i = 0; i < 11; i++) {
-                var fechaMes = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
-                var mesKey = fechaMes.getFullYear() + '-' + String(fechaMes.getMonth() + 1).padStart(2, '0');
-                
-                var totalMes = 0;
-                if (datosCrono && datosCrono.items) {
-                    datosCrono.items.forEach(function(item) {
-                        var fechaNacEfectiva = item.FECHA_NAC_EFECTIVA || item.FECHA_NAC;
-                        if (fechaNacEfectiva) {
-                            var mesPago = fechaNacEfectiva.substring(0, 7);
-                            if (mesPago === mesKey) {
-                                var fechaPago = new Date(fechaNacEfectiva);
-                                fechaPago.setHours(0, 0, 0, 0);
-                                // Solo incluir si está después de las 4 semanas
-                                if (fechaPago >= fecha28Dias) {
-                                    totalMes += parseFloat(item.IMPORTE_EST) || 0;
-                                }
-                            }
-                        }
-                    });
-                }
-                
-                html += `<td class="currency ${totalMes > 0 ? 'cell-with-value' : ''}">
-                            ${totalMes > 0 ? formatCurrency(totalMes) : ''}
-                         </td>`;
-            }
+
+        if (!totalsRow) {
+            return;
         }
-        
+
+        var totales = datosCrono.totales || {};
+        var html = '<td colspan="9" class="total-label">TOTALES</td>';
+
+        vistas.columnas().forEach(function(col) {
+            var valor = Number(vistas.valor(totales, col)) || 0;
+
+            html += '<td class="currency ' + (valor > 0 ? 'cell-with-value' : '') + '">'
+                + (valor > 0 ? formatCurrency(valor) : '') + '</td>';
+        });
+
+        var total = vistas.total(totales);
+
+        html += '<td class="currency total-column">'
+            + (total > 0 ? formatCurrency(total) : '') + '</td>';
+
         totalsRow.innerHTML = html;
     }
 
     /**
-     * Calcula y muestra los resúmenes
+     * Indicadores de cabecera.
+     *
+     * Los tres miden exactamente los tres períodos de las vistas, así que cada
+     * tarjeta se corresponde con un botón. Antes se recalculaban acá con su
+     * propia ventana de 28 días y 11 meses, que no era la del encabezado ni la
+     * del backend.
      */
     function calcularResumenes() {
-        var hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-        
-        // Calcular fecha de fin de 4 semanas (28 días)
-        var fecha28Dias = new Date(hoy);
-        fecha28Dias.setDate(hoy.getDate() + 28);
-        
-        // Calcular fecha de fin de 11 meses
-        var fecha11Meses = new Date(hoy.getFullYear(), hoy.getMonth() + 11, 31);
-        
-        var total4Semanas = 0;
-        var total11Meses = 0;
-        var totalGeneral = 0;
-        
-        if (datosCrono && datosCrono.items) {
-            datosCrono.items.forEach(function(item) {
-                var valor = parseFloat(item.IMPORTE_EST) || 0;
-                totalGeneral += valor;
-                
-                var fechaNacEfectiva = item.FECHA_NAC_EFECTIVA || item.FECHA_NAC;
-                if (fechaNacEfectiva) {
-                    var fechaPago = new Date(fechaNacEfectiva);
-                    fechaPago.setHours(0, 0, 0, 0);
-                    
-                    // Total 4 semanas: incluir si está dentro de los próximos 28 días
-                    if (fechaPago < fecha28Dias) {
-                        total4Semanas += valor;
-                    }
-                    // Total 11 meses: incluir si está después de los 28 días y antes del fin de 11 meses
-                    else if (fechaPago < fecha11Meses) {
-                        total11Meses += valor;
-                    }
-                }
-            });
-        }
-        
-        document.getElementById('total4semanas').textContent = formatCurrency(total4Semanas);
-        document.getElementById('total11meses').textContent = formatCurrency(total11Meses);
-        document.getElementById('totalGeneral').textContent = formatCurrency(totalGeneral);
+        var totales = (datosCrono && datosCrono.totales) || {};
+
+        document.getElementById('total4semanas').textContent =
+            formatCurrency(totales.total_tramo || 0);
+        document.getElementById('total11meses').textContent =
+            formatCurrency(totales.total_meses || 0);
+        document.getElementById('totalGeneral').textContent =
+            formatCurrency(totales.total_horizonte || 0);
+
+        var vs = (datosCrono && datosCrono.vistas) || {};
+
+        texto('rotulo4semanas', vs.dias ? vs.dias.periodo : '');
+        texto('rotulo11meses', vs.meses ? vs.meses.periodo : '');
+        texto('rotuloGeneral', vs.completo ? vs.completo.periodo : '');
+
         document.getElementById('summarySection').style.display = 'flex';
+    }
+
+    function texto(id, valor) {
+        var el = document.getElementById(id);
+
+        if (el) {
+            el.textContent = valor;
+        }
     }
 
     /**

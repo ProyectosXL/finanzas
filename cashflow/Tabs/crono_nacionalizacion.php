@@ -2,50 +2,57 @@
 <link rel="stylesheet" href="Css/Comex-Crono_nacionalizacion.css?v=<?php echo time(); ?>">
 
 <div class="tab-crono_nacionalizacion">
-    
-    <!-- KPI Cards Row -->
+
+    <!-- Lo que quedó fuera del horizonte o sin fecha. Antes se descartaba en
+         silencio, así que la tabla podía informar de menos sin decirlo. -->
+    <div id="avisosCronoNac"></div>
+
+    <!-- KPI Cards Row.
+         Las tres tarjetas miden los tres períodos de las tres vistas, así que
+         cada una se corresponde con un botón. El rótulo lo escribe el JS con el
+         período real, que depende del horizonte configurado. -->
     <div class="row g-3 mb-4" id="summarySection" style="display: none;">
         <div class="col-md-6 col-lg-4">
             <div class="kpi-card">
                 <div class="kpi-card-header">
-                    <span class="kpi-card-title">Próximas 4 Semanas</span>
+                    <span class="kpi-card-title">Vista Días</span>
                     <div class="kpi-card-icon blue">
-                        <i class="fas fa-calendar-week"></i>
+                        <i class="fas fa-calendar-day"></i>
                     </div>
                 </div>
                 <div class="kpi-card-value" id="total4semanas">$ 0.00</div>
                 <div class="kpi-card-footer">
-                    <span class="text-muted">Pagos de nacionalización</span>
+                    <span class="text-muted" id="rotulo4semanas">Tramo diario</span>
                 </div>
             </div>
         </div>
-        
+
         <div class="col-md-6 col-lg-4">
             <div class="kpi-card">
                 <div class="kpi-card-header">
-                    <span class="kpi-card-title">Próximos 11 Meses</span>
+                    <span class="kpi-card-title">Vista Meses</span>
                     <div class="kpi-card-icon orange">
                         <i class="fas fa-calendar-alt"></i>
                     </div>
                 </div>
                 <div class="kpi-card-value" id="total11meses">$ 0.00</div>
                 <div class="kpi-card-footer">
-                    <span class="text-muted">Proyección anual</span>
+                    <span class="text-muted" id="rotulo11meses">Después del tramo diario</span>
                 </div>
             </div>
         </div>
-        
+
         <div class="col-md-6 col-lg-4">
             <div class="kpi-card">
                 <div class="kpi-card-header">
-                    <span class="kpi-card-title">Total General</span>
+                    <span class="kpi-card-title">Período Completo</span>
                     <div class="kpi-card-icon green">
                         <i class="fas fa-file-invoice-dollar"></i>
                     </div>
                 </div>
                 <div class="kpi-card-value" id="totalGeneral">$ 0.00</div>
                 <div class="kpi-card-footer">
-                    <span class="text-muted">Todas las nacionalizaciones</span>
+                    <span class="text-muted" id="rotuloGeneral">Todo el horizonte</span>
                 </div>
             </div>
         </div>
@@ -63,14 +70,9 @@
                 </small>
             </div>
             <div class="d-flex gap-2">
-                <div class="btn-group" role="group">
-                    <button id="btnVistaSemanas" class="btn btn-sm btn-primary">
-                        <i class="fas fa-calendar-week me-1"></i> Semanas
-                    </button>
-                    <button id="btnVistaMeses" class="btn btn-sm btn-outline-secondary">
-                        <i class="fas fa-calendar-alt me-1"></i> Meses
-                    </button>
-                </div>
+                <!-- Los tres botones los dibuja Js/eje-vistas.js a partir del
+                     eje que resolvió el backend. -->
+                <div id="vistasCronoNac"></div>
                 <button id="btnRefresh" class="btn btn-sm btn-outline-primary">
                     <i class="fas fa-sync-alt me-1"></i> Actualizar
                 </button>
@@ -79,6 +81,13 @@
                 </button>
             </div>
         </div>
+
+        <!-- Qué período se está midiendo. La vista Meses no cubre el horizonte
+             completo, y sin esto su total se lee como el total de todo. -->
+        <div class="card-body py-2 border-bottom">
+            <small class="text-muted" id="periodoCronoNac"></small>
+        </div>
+
         <div class="card-body p-0">
             <div class="loading-spinner" id="loadingSpinner">
                 <div class="spinner"></div>
@@ -103,7 +112,9 @@
                                     <i class="fas fa-pen-to-square ms-1" style="font-size: 10px;" 
                                        title="Click para editar"></i>
                                 </th>
-                                <th colspan="28" class="table-group-divider" id="periodoHeader">Período</th>
+                                <!-- El rótulo y el colspan los pone el JS según
+                                     la vista activa. -->
+                                <th colspan="1" class="table-group-divider" id="periodoHeader">Días</th>
                             </tr>
                             <tr id="headerRowSub">
                                 <!-- Los días/meses se generan dinámicamente -->
