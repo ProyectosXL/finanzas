@@ -17,6 +17,19 @@ try {
     $action = isset($_GET['action']) ? $_GET['action'] : '';
     $ingresos = new Ingresos();
 
+    /** El cuerpo JSON de un POST */
+    $bodyJson = function () {
+        $crudo = file_get_contents('php://input');
+        $data = json_decode($crudo, true);
+
+        return is_array($data) ? $data : [];
+    };
+
+    /** Usuario de sesion. Todavia no hay login: hoy graba NULL. */
+    $usuarioActual = function () {
+        return isset($_SESSION['usuario']) ? $_SESSION['usuario'] : null;
+    };
+
     switch ($action) {
         case 'getCobranzasFR':
             $summary = isset($_GET['type']) && $_GET['type'] === 'deepdive' ? false : true;
@@ -49,7 +62,56 @@ try {
                 )
             ], JSON_UNESCAPED_UNICODE);
             break;
-            
+
+        /* ================================================================
+           FECHA DE COBRO MANUAL POR COMPROBANTE
+
+           La validacion de la fecha se hace ACA de nuevo, aunque el input del
+           navegador lleve `min` en el dia de hoy: lo que manda el navegador es
+           un pedido, no una autorizacion. Vive en
+           Ingresos::validarFechaCobroManual().
+           ================================================================ */
+
+        case 'saveFechaCobroManual':
+            $data = $bodyJson();
+
+            foreach (['t_comp', 'n_comp', 'fecha_cobro'] as $campo) {
+                if (!isset($data[$campo]) || $data[$campo] === '') {
+                    throw new Exception('Falta el campo ' . $campo
+                        . ' para guardar la fecha de cobro.');
+                }
+            }
+
+            $fecha = $ingresos->saveFechaManualFR(
+                isset($data['cod_cliente']) ? $data['cod_cliente'] : '',
+                $data['t_comp'],
+                $data['n_comp'],
+                $data['fecha_cobro'],
+                $usuarioActual()
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Fecha de cobro guardada.',
+                'data' => ['fecha_cobro' => $fecha]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'deleteFechaCobroManual':
+            $data = $bodyJson();
+
+            if (empty($data['t_comp']) || empty($data['n_comp'])) {
+                throw new Exception('Falta el comprobante cuya fecha manual hay que borrar.');
+            }
+
+            $ingresos->deleteFechaManualFR($data['t_comp'], $data['n_comp']);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'La fecha vuelve a calcularse con el PPP del cliente.'
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         default:
             echo json_encode([
                 'success' => false,

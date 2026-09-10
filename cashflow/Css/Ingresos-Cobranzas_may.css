@@ -64,7 +64,8 @@
 
 /* Segunda fila de encabezados (días/meses) */
 #tablaCobranzasMay thead tr:nth-child(2) th {
-    top: 38px;
+    /* Lo mide ajustarStickyHeaders() en main.js. Ver Ingresos-Cobranzas_fr.css */
+    top: var(--thead-row1-height, 38px);
 }
 
 .table-group-divider {

@@ -62,9 +62,13 @@
     top: 0;
 }
 
-/* Segunda fila de encabezados (días/meses) */
+/* Segunda fila de encabezados (días/meses).
+   El alto de la primera fila lo mide ajustarStickyHeaders() en main.js: las
+   celdas con rowspan="2" abarcan las dos filas, así que un valor escrito acá
+   se desalinea en cuanto un encabezado ocupa dos renglones. El 38px es sólo
+   el arranque, hasta que el JS mide. */
 #tablaCobranzasFR thead tr:nth-child(2) th {
-    top: 38px; /* Ajustar según el alto de la primera fila */
+    top: var(--thead-row1-height, 38px);
 }
 
 .table-group-divider {
@@ -232,3 +236,36 @@
     color: #856404 !important;
 }
 
+
+/* ============================================================================
+   FECHA DE COBRO MANUAL
+
+   La fecha proyectada sale de FECHA_EMIS + PPP, que es un promedio. Cuando
+   alguien la pisa a mano, la celda tiene que verse distinta: si no, dos filas
+   con la misma fecha en pantalla estarían diciendo cosas distintas -una
+   estimada y una pactada- y no habría forma de saber cuál es cuál.
+   ============================================================================ */
+
+#tablaCobranzasFR .cob-celda-cobro {
+    min-width: 175px;
+}
+
+#tablaCobranzasFR .cob-input-fecha {
+    font-size: 11px;
+    padding: 2px 6px;
+    min-width: 118px;
+}
+
+#tablaCobranzasFR .cob-fecha-manual .cob-input-fecha {
+    border-color: #0d6efd;
+    background-color: #e7f1ff;
+    font-weight: 600;
+    color: #084298;
+}
+
+/* En el Resumen no hay comprobante que editar, así que la marca va al lado del
+   código de cliente: dice que alguna de sus facturas no sale del PPP. */
+#tablaCobranzasFR .cob-marca-manual {
+    font-size: 10px;
+    vertical-align: super;
+}

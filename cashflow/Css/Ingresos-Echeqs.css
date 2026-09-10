@@ -60,7 +60,8 @@
 }
 
 #tablaEcheqs thead tr:nth-child(1) th { top: 0; }
-#tablaEcheqs thead tr:nth-child(2) th { top: 38px; }
+/* El alto de la primera fila lo mide ajustarStickyHeaders() en main.js */
+#tablaEcheqs thead tr:nth-child(2) th { top: var(--thead-row1-height, 38px); }
 
 #tablaEcheqs tbody td:nth-child(4),
 #tablaEcheqs thead th:nth-child(4) {

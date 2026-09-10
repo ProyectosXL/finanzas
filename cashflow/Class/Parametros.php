@@ -749,7 +749,6 @@ class Parametros {
         $ingresos = new Ingresos();
 
         $ppps = $ingresos->getPPPClientes();
-        $escalas = $ingresos->getEscalasDescuento();
         $paramsClientes = $ingresos->getParametrosClientes();
 
         $cid = $this->conn->conectar('central');
@@ -771,16 +770,6 @@ class Parametros {
 
             $pppInfo = $ppps[$cod] ?? null;
             $paramInfo = $paramsClientes[$cod] ?? null;
-            $escalasCli = $escalas[$cod] ?? [];
-
-            // Aplanar escalas para la vista
-            $escalasLista = [];
-            foreach ($escalasCli as $medio => $tramos) {
-                foreach ($tramos as $t) {
-                    $t['medio_pago'] = $medio;
-                    $escalasLista[] = $t;
-                }
-            }
 
             $pppCalc = $pppInfo ? intval($pppInfo['ppp_calculado']) : 0;
             $pppMan = ($pppInfo && $pppInfo['ppp_manual'] !== null) ? intval($pppInfo['ppp_manual']) : ($paramInfo['ppp_manual'] ?? null);
@@ -794,10 +783,12 @@ class Parametros {
                 'ppp_manual' => $pppMan,
                 'ppp_efectivo' => $pppEfectivo,
                 'cant_cobros' => $cantCobros,
+                // Informativo: desde que la escala de descuento es general, el
+                // medio de pago NO entra en el calculo del porcentaje. Se sigue
+                // mostrando y editando porque describe como opera el cliente.
                 'medio_pago_default' => $paramInfo['medio_pago'] ?? 'ECHEQ',
                 'dias_pp_max' => $paramInfo['dias_pp_max'] ?? 0,
-                'desc_pp_max' => $paramInfo['desc_pp_max'] ?? 0,
-                'escalas' => $escalasLista
+                'desc_pp_max' => $paramInfo['desc_pp_max'] ?? 0
             ];
         }
         sqlsrv_free_stmt($stmt);
@@ -891,83 +882,112 @@ class Parametros {
         return true;
     }
 
+    /* ====================================================================
+       ESCALA DE DESCUENTO GENERAL
+
+       Es UNA escala para todos los clientes, sin medio de pago. Antes habia
+       una por cliente y por medio en RO_T_CASHFLOW_COBRANZAS_PARAM_DESC: esa
+       tabla queda con sus datos pero ya no se lee. Ver README-cobranzas-fr.md.
+
+       Toda la escala se guarda de una sola vez y no tramo por tramo. Es la
+       unica forma de poder validar que no se solape ni deje huecos: un tramo
+       aislado no dice nada, la escala completa si. Va en una transaccion
+       porque el guardado reemplaza los tramos, y una escala a medio escribir
+       dejaria facturas sin descuento sin que nadie se entere.
+       ==================================================================== */
+
     /**
-     * Guarda o crea un tramo de escala de descuento para un cliente.
-     * 
-     * @param int|null $id ID del tramo (0 para nuevo)
-     * @param string $codCliente Código de cliente
-     * @param string $medioPago Medio de pago ('ECHEQ', 'TRANSFERENCIA')
-     * @param int $diasDesde Días inicio del tramo
-     * @param int $diasHasta Días fin del tramo
-     * @param float $porcentajeDesc Porcentaje de descuento (ej: 8.00)
-     * @param string|null $usuario Usuario que realiza la acción
-     * @return int ID de la escala
+     * La escala general, tal como la muestra el editor.
+     *
+     * @return array Lista de tramos ordenados por dias_desde
      */
-    public function saveEscalaDescuento($id, $codCliente, $medioPago, $diasDesde, $diasHasta, $porcentajeDesc, $usuario = null) {
-        $cid = $this->conn->conectar('central');
-        if (!$cid) {
-            throw new Exception('No se pudo conectar a la base de datos central');
-        }
+    public function getEscalaDescuentoGeneral() {
+        require_once __DIR__ . '/Ingresos.php';
 
-        $cod = strtoupper(trim($codCliente));
-        $medio = strtoupper(trim($medioPago ?: 'ECHEQ'));
-        $dDesde = intval($diasDesde);
-        $dHasta = intval($diasHasta);
-        $porc = floatval($porcentajeDesc);
+        $ingresos = new Ingresos();
 
-        if ($dDesde < 0 || $dHasta < $dDesde) {
-            throw new Exception('El rango de días no es válido: Días Desde debe ser >= 0 y <= Días Hasta');
-        }
-
-        if ($porc < 0 || $porc > 100) {
-            throw new Exception('El porcentaje de descuento debe estar entre 0% y 100%');
-        }
-
-        if ($id && intval($id) > 0) {
-            $sql = "UPDATE RO_T_CASHFLOW_COBRANZAS_PARAM_DESC 
-                    SET COD_CLIENT = ?, MEDIO_PAGO = ?, DIAS_DESDE = ?, DIAS_HASTA = ?, PORCENTAJE_DESC = ?, ACTIVO = 1, FECHA_UPDATE = GETDATE(), USUARIO = ? 
-                    WHERE ID = ?";
-            $params = [$cod, $medio, $dDesde, $dHasta, $porc, $usuario, intval($id)];
-            $stmt = sqlsrv_query($cid, $sql, $params);
-            if ($stmt === false) {
-                throw new Exception($this->errorSql('Error al actualizar escala de descuento'));
-            }
-            sqlsrv_free_stmt($stmt);
-            return intval($id);
-        } else {
-            $sql = "INSERT INTO RO_T_CASHFLOW_COBRANZAS_PARAM_DESC (COD_CLIENT, MEDIO_PAGO, DIAS_DESDE, DIAS_HASTA, PORCENTAJE_DESC, ACTIVO, FECHA_UPDATE, USUARIO) 
-                    OUTPUT INSERTED.ID
-                    VALUES (?, ?, ?, ?, ?, 1, GETDATE(), ?)";
-            $params = [$cod, $medio, $dDesde, $dHasta, $porc, $usuario];
-            $stmt = sqlsrv_query($cid, $sql, $params);
-            if ($stmt === false) {
-                throw new Exception($this->errorSql('Error al insertar escala de descuento'));
-            }
-            $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
-            sqlsrv_free_stmt($stmt);
-            return intval($row['ID']);
-        }
+        return $ingresos->getEscalasDescuento();
     }
 
     /**
-     * Elimina (baja lógica o física) una escala de descuento.
-     * 
-     * @param int $id ID de la escala
-     * @return bool True si se eliminó
+     * Reemplaza la escala general completa.
+     *
+     * VALIDA EN EL SERVIDOR. El JS espeja la validacion para poder bloquear el
+     * boton y explicar por que, pero el endpoint es alcanzable sin pasar por la
+     * pantalla: es el mismo criterio del editor de estructura del tablero.
+     *
+     * @param array $tramos Lista con dias_desde, dias_hasta, porcentaje_desc
+     * @param string|null $usuario
+     * @return array La escala guardada
      */
-    public function deleteEscalaDescuento($id) {
+    public function saveEscalaDescuentoGeneral($tramos, $usuario = null) {
+        require_once __DIR__ . '/Ingresos.php';
+
+        $lista = is_array($tramos) ? array_values($tramos) : [];
+
+        if (empty($lista)) {
+            throw new Exception('La escala no puede quedar vacía: sin tramos, '
+                . 'todas las facturas irían con 0% de descuento.');
+        }
+
+        $errores = Ingresos::validarEscala($lista);
+
+        if (!empty($errores)) {
+            throw new Exception(implode(' ', $errores));
+        }
+
         $cid = $this->conn->conectar('central');
+
         if (!$cid) {
             throw new Exception('No se pudo conectar a la base de datos central');
         }
 
-        $sql = "DELETE FROM RO_T_CASHFLOW_COBRANZAS_PARAM_DESC WHERE ID = ?";
-        $stmt = sqlsrv_query($cid, $sql, [intval($id)]);
-        if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al eliminar escala de descuento'));
+        usort($lista, function ($a, $b) {
+            return intval($a['dias_desde']) - intval($b['dias_desde']);
+        });
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción de la escala'));
         }
-        sqlsrv_free_stmt($stmt);
-        return true;
+
+        try {
+            // Baja logica de lo que habia: la escala vieja queda para poder
+            // auditar con que porcentajes se proyecto hasta hoy.
+            $stmt = sqlsrv_query($cid,
+                "UPDATE RO_T_CASHFLOW_COBRANZAS_ESCALA_DESC
+                 SET ACTIVO = 0, USUARIO = ?, FECHA_MOD = GETDATE()
+                 WHERE ACTIVO = 1",
+                [$usuario]);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al dar de baja la escala anterior'));
+            }
+
+            sqlsrv_free_stmt($stmt);
+
+            foreach ($lista as $t) {
+                $stmt = sqlsrv_query($cid,
+                    "INSERT INTO RO_T_CASHFLOW_COBRANZAS_ESCALA_DESC
+                        (DIAS_DESDE, DIAS_HASTA, PORCENTAJE_DESC, ACTIVO, USUARIO, FECHA_MOD)
+                     VALUES (?, ?, ?, 1, ?, GETDATE())",
+                    [intval($t['dias_desde']), intval($t['dias_hasta']),
+                     floatval($t['porcentaje_desc']), $usuario]);
+
+                if ($stmt === false) {
+                    throw new Exception($this->errorSql('Error al guardar un tramo de la escala'));
+                }
+
+                sqlsrv_free_stmt($stmt);
+            }
+
+            sqlsrv_commit($cid);
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return $this->getEscalaDescuentoGeneral();
     }
 
     /**
