@@ -608,7 +608,8 @@ class Ventas {
      * @param array $meses Lista de claves 'Y-m' del tramo mensual
      * @return array ['dias' => mapa, 'meses' => mapa, 'total' => float,
      *                'canales' => mapa canal => ['dias','meses'],
-     *                'fuera_horizonte' => float, 'fuera_de_cartera' => float]
+     *                'fuera_horizonte' => float, 'sin_canal' => float,
+     *                'fuera_de_cartera' => float]
      */
     public function getNeteoPrechequeado($dias = [], $meses = []) {
         $diasPrecheq = 0;
