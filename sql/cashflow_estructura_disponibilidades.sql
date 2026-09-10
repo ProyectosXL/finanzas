@@ -111,11 +111,25 @@ BEGIN
     WHERE CODIGO = 'COBRANZAS_MAY';
 
     /* ---- 3. Filas nuevas de Disponibilidades --------------------------- */
+    /* DOLARES_COMITENTE puede venir ya sembrado por cashflow_estructura.sql:
+       desde que tiene pantalla propia, la semilla lo crea en INGRESOS. Por eso
+       va con MERGE y no con INSERT -CODIGO es UNIQUE- y por eso su serie es
+       'INGRESO': un INSERT a secas reventaria en una instalacion nueva. */
+    MERGE dbo.RO_T_CASHFLOW_CONF_FILA AS T
+    USING (VALUES
+        ('DOLARES_COMITENTE', 'Dolares Cuenta Comitente', 'DOLARES_COMITENTE', 'INGRESO', 60)
+    ) AS S (CODIGO, NOMBRE, PROVIDER, SERIE, ORDEN)
+        ON T.CODIGO = S.CODIGO
+    WHEN MATCHED THEN
+        UPDATE SET SECCION = 'DISPONIBILIDADES', ORDEN = S.ORDEN, FECHA_UPDATE = GETDATE()
+    WHEN NOT MATCHED BY TARGET THEN
+        INSERT (CODIGO, NOMBRE, SECCION, TIPO, COMPUTA, ORIGEN_PROVIDER, ORIGEN_SERIE, ORDEN, ACTIVO)
+        VALUES (S.CODIGO, S.NOMBRE, 'DISPONIBILIDADES', 'INGRESO', 1,
+                S.PROVIDER, S.SERIE, S.ORDEN, 1);
+
     INSERT INTO dbo.RO_T_CASHFLOW_CONF_FILA
         (CODIGO, NOMBRE, SECCION, TIPO, COMPUTA, ORIGEN_PROVIDER, ORIGEN_SERIE, ORDEN, ACTIVO)
     VALUES
-        ('DOLARES_COMITENTE', 'Dolares Cuenta Comitente', 'DISPONIBILIDADES', 'INGRESO', 1,
-            'DOLARES_COMITENTE', 'DISPONIBLE', 60, 1),
         ('EXPORTACIONES', 'Exportaciones Tasky', 'DISPONIBILIDADES', 'INGRESO', 1,
             'EXPORTACIONES', 'COBRANZA', 70, 1),
         ('CAJA_LOCALES', 'Caja Locales', 'DISPONIBILIDADES', 'INGRESO', 1,

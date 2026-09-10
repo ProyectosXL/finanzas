@@ -270,28 +270,34 @@ class CashflowRegistry {
             'series' => ['MOVIMIENTOS' => 'Otros movimientos']
         ],
 
-        /* ---- Filas del Excel que hoy se cargan a mano ----------------------
+        /* ---- Filas del Excel que se cargan a mano --------------------------
            En el Excel original estas filas las tipea una persona (Tesoreria,
-           Silvina, Dan, Alejandro). El modulo resuelve el origen de datos
-           unicamente por proveedor, asi que hasta que exista el modulo que las
-           alimente se muestran en cero y el tablero avisa. Quedan declaradas
-           para que la estructura del cuadro este completa. */
+           Silvina, Dan, Alejandro). Dolares Cuenta Comitente ya tiene su
+           pantalla; Exportaciones todavia no, asi que se muestra en cero y el
+           tablero avisa. Queda declarada para que el cuadro este completo. */
 
+        /* La carga es en DOLARES y la conversion a pesos la hace el proveedor
+           con el oficial del BCRA, igual que ComexProvider: el motor nunca ve
+           dolares. Es un INGRESO y no una disponibilidad: entra al flujo en la
+           fecha que se le carga y no arrastra. */
         'DOLARES_COMITENTE' => [
             'nombre' => 'Dolares Cuenta Comitente',
-            'descripcion' => 'Dolares disponibles en la cuenta comitente',
+            'descripcion' => 'Dolares disponibles en la cuenta comitente, cargados a mano',
+            'archivo' => 'Providers/OtrosIngresosProvider.php',
+            'clase' => 'OtrosIngresosProvider',
             'moneda' => 'USD',
-            'disponible' => false,
-            'tab' => 'saldos',
-            'series' => ['DISPONIBLE' => 'Dolares en cuenta comitente']
+            'disponible' => true,
+            'tab' => 'dolares_comitente',
+            'series' => ['INGRESO' => 'Dolares cuenta comitente']
         ],
 
         'EXPORTACIONES' => [
-            'nombre' => 'Exportaciones',
-            'descripcion' => 'Cobranza de exportaciones',
+            'nombre' => 'Exportaciones Tasky',
+            'descripcion' => 'Cobranza de exportaciones. Tasky es la razon social del grupo '
+                . 'en Uruguay',
             'moneda' => 'USD',
             'disponible' => false,
-            'tab' => 'saldos',
+            'tab' => 'exportaciones_tasky',
             'series' => ['COBRANZA' => 'Cobranza de exportaciones']
         ]
     ];

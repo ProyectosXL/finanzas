@@ -103,7 +103,25 @@ class Menu {
                 ['tab' => 'echeqs',           'nombre' => 'Echeqs',             'icono' => 'fa-money-check-dollar',  'estado' => self::DATOS],
                 ['tab' => 'cobranzas_fr',     'nombre' => 'Cobranzas FR',       'icono' => 'fa-hand-holding-dollar', 'estado' => self::DATOS],
                 ['tab' => 'cobranzas_may',    'nombre' => 'Cobranzas May',      'icono' => 'fa-warehouse',           'estado' => self::DATOS],
-                ['tab' => 'cob_electronicos', 'nombre' => 'Cob. Electrónicos',  'icono' => 'fa-credit-card',         'estado' => self::DATOS]
+                ['tab' => 'cob_electronicos', 'nombre' => 'Cob. Electrónicos',  'icono' => 'fa-credit-card',         'estado' => self::DATOS],
+                ['tab' => 'exportaciones_tasky', 'nombre' => 'Exportaciones Tasky', 'icono' => 'fa-file-export',   'estado' => self::PENDIENTE]
+            ]
+        ],
+        /* Otros Ingresos va DESPUES de Ingresos y aparte: Ingresos agrupa lo
+           que sale de un circuito del sistema -ventas, cobranzas, echeqs- y
+           aca va lo que se tipea. La diferencia importa al leer un numero: en
+           una fila de Ingresos un cero es "no hay movimientos", y en una de
+           estas es "nadie cargo nada todavia".
+
+           Arranca cerrada porque hoy tiene un solo item; queda armada para que
+           sumar un concepto nuevo sea agregar una pestana. */
+        [
+            'codigo' => 'OtrosIngresos',
+            'nombre' => 'Otros Ingresos',
+            'icono' => 'fa-coins',
+            'abierta' => false,
+            'items' => [
+                ['tab' => 'dolares_comitente', 'nombre' => 'Dólares Cuenta Comitente', 'icono' => 'fa-dollar-sign', 'estado' => self::DATOS]
             ]
         ],
         [

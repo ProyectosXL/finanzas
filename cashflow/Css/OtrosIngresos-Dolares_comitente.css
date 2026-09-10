@@ -1,0 +1,77 @@
+/* ============================================================================
+   OTROS INGRESOS - DOLARES CUENTA COMITENTE
+   ============================================================================ */
+
+.tab-dolares_comitente .loading-spinner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+}
+
+.tab-dolares_comitente .spinner {
+    border: 3px solid var(--border-light, #eef0f5);
+    border-top: 3px solid #2e7d32;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.tab-dolares_comitente .loading-spinner p {
+    margin-top: 15px;
+    color: var(--text-muted, #8c93a8);
+    font-size: 13px;
+}
+
+#tablaDolares thead th {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 10px 12px;
+    white-space: nowrap;
+}
+
+#tablaDolares .currency,
+#tablaHistorialDol .currency {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Los importes van en dólares y NO en pesos: la conversión la hace el tablero
+   con el oficial del BCRA del mes de cada carga. El color verde los distingue
+   de cualquier importe en pesos de las otras pantallas. */
+.dol-importe {
+    color: #1b5e20;
+    font-weight: 600;
+}
+
+.dol-alta {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+    white-space: nowrap;
+}
+
+.dol-subtitulo {
+    font-size: 10px;
+    color: var(--text-muted, #8c93a8);
+}
+
+/* Una carga pisada se atenúa: sigue siendo un dato real -es lo que explica por
+   qué el número de esa fecha era otro-, pero no es el que usa el tablero. */
+.dol-pisada {
+    opacity: 0.6;
+}
+
+.dol-pisada .dol-importe {
+    color: var(--text-muted, #8c93a8);
+    font-weight: 400;
+    text-decoration: line-through;
+}

@@ -208,6 +208,12 @@ USING (VALUES
         'COB_ELECTRONICOS', 'COBRANZA', 50),
     ('ECHEQS', 'Echeqs a cobrar', 'INGRESOS', 'INGRESO', 1,
         'ECHEQS', 'A_COBRAR', 60),
+    /* Se carga a mano en Otros Ingresos -> Dolares Cuenta Comitente. Es un
+       INGRESO y no una disponibilidad: el importe entra al flujo en la fecha
+       que se le carga y no arrastra. La carga es en dolares y la conversion a
+       pesos la hace el proveedor. Ver sql/cashflow_dolares_comitente.sql. */
+    ('DOLARES_COMITENTE', 'Dolares Cuenta Comitente', 'INGRESOS', 'INGRESO', 1,
+        'DOLARES_COMITENTE', 'INGRESO', 65),
     ('SUB_INGRESOS', 'Total Ingresos', 'INGRESOS', 'SUBTOTAL', 0,
         NULL, NULL, 70),
 

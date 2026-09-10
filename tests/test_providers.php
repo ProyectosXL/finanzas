@@ -36,8 +36,9 @@ chequear('todos() no expone la clase interna', false, isset($todos[0]['clase']))
 $disponibles = array_values(array_filter($todos, function ($p) { return $p['disponible']; }));
 
 // Ventas, Cobranzas FR, Cobranzas May, Proveedores Exterior, Nacionalizaciones,
-// Saldos, Caja Locales, Cobranzas Electronicas y Echeqs.
-chequear('hay 9 modulos con datos reales', 9, count($disponibles));
+// Saldos, Caja Locales, Cobranzas Electronicas, Echeqs y Dolares Cuenta
+// Comitente.
+chequear('hay 10 modulos con datos reales', 10, count($disponibles));
 chequear('un modulo sin construir no se instancia',
     null, CashflowRegistry::instanciar('HABERES'));
 chequear('un modulo inexistente tampoco', null, CashflowRegistry::instanciar('NO_EXISTE'));
