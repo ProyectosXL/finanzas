@@ -587,6 +587,10 @@ try {
                 'success' => true,
                 'message' => 'Cliente dado de baja. No se borró: queda inhabilitado, sus cheques '
                            . 'salen del listado y dejan de netear la cobranza proyectada.'
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
            MODULO COBRANZAS (PPP y Escalas de Descuento por Cliente)
            ================================================================ */
 

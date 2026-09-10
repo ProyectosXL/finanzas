@@ -203,7 +203,11 @@
              prefijo ppq-. -->
         <div class="tab-pane fade" id="paneParamPrechequeado" role="tabpanel">
             <?php include __DIR__ . '/parametros_prechequeado.php'; ?>
-        <!-- Parámetros del módulo Cobranzas: PPP calculado y editable, y escalas de descuento por cliente -->
+        </div>
+
+        <!-- Parámetros del módulo Cobranzas: PPP calculado y editable, y
+             escalas de descuento por cliente. Mismo criterio que los anteriores:
+             archivo y JS propios, y clases con prefijo pcob-. -->
         <div class="tab-pane fade" id="paneParamCobranzas" role="tabpanel">
             <?php include __DIR__ . '/parametros_cobranzas.php'; ?>
         </div>

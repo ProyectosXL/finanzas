@@ -18,8 +18,10 @@ chequear('Ventas esta registrado', true, CashflowRegistry::existe('VENTAS'));
 chequear('y disponible', true, CashflowRegistry::disponible('VENTAS'));
 chequear('Echeqs esta registrado', true, CashflowRegistry::existe('ECHEQS'));
 chequear('y construido', true, CashflowRegistry::disponible('ECHEQS'));
-chequear('Cobranzas May esta registrado pero no construido',
-    false, CashflowRegistry::disponible('COBRANZAS_MAY'));
+chequear('Cobranzas May esta registrado', true, CashflowRegistry::existe('COBRANZAS_MAY'));
+chequear('y tambien construido', true, CashflowRegistry::disponible('COBRANZAS_MAY'));
+chequear('Haberes esta registrado pero no construido',
+    false, CashflowRegistry::disponible('HABERES'));
 chequear('un proveedor inventado no existe', false, CashflowRegistry::existe('NO_EXISTE'));
 chequear('serie valida', true, CashflowRegistry::serieExiste('VENTAS', 'COBRANZA'));
 chequear('serie que no ofrece', false, CashflowRegistry::serieExiste('VENTAS', 'CUALQUIERA'));
@@ -33,15 +35,11 @@ chequear('todos() no expone la clase interna', false, isset($todos[0]['clase']))
 
 $disponibles = array_values(array_filter($todos, function ($p) { return $p['disponible']; }));
 
-// Ventas, Cobranzas FR, Proveedores Exterior, Nacionalizaciones, Saldos,
-// Caja Locales, Cobranzas Electronicas y Echeqs.
-chequear('hay 8 modulos con datos reales', 8, count($disponibles));
-chequear('un modulo sin construir no se instancia',
-    null, CashflowRegistry::instanciar('COBRANZAS_MAY'));
 // Ventas, Cobranzas FR, Cobranzas May, Proveedores Exterior, Nacionalizaciones,
-// Saldos, Caja Locales y Cobranzas Electronicas.
-chequear('hay 8 modulos con datos reales', 8, count($disponibles));
-chequear('un modulo sin construir no se instancia', null, CashflowRegistry::instanciar('ECHEQS'));
+// Saldos, Caja Locales, Cobranzas Electronicas y Echeqs.
+chequear('hay 9 modulos con datos reales', 9, count($disponibles));
+chequear('un modulo sin construir no se instancia',
+    null, CashflowRegistry::instanciar('HABERES'));
 chequear('un modulo inexistente tampoco', null, CashflowRegistry::instanciar('NO_EXISTE'));
 
 // Toda entrada del registro tiene que estar completa: si falta un dato, el

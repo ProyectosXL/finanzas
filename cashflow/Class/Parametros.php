@@ -63,6 +63,7 @@ class Parametros {
                 . 'de Echeqs → Venta Cobrada Anticipada, que es de donde sale el neteo de '
                 . 'cheques adelantados de la cobranza proyectada de Ventas',
             'secciones' => ['prechequeado']
+        ],
         'COBRANZAS' => [
             'nombre' => 'Cobranzas',
             'icono' => 'fa-hand-holding-dollar',
@@ -169,6 +170,8 @@ class Parametros {
                     } catch (Throwable $e) {
                         $modulo[$seccion] = [];
                         $modulo['avisos'][] = 'No se pudieron leer los clientes pre-chequeados: '
+                            . $e->getMessage();
+                    }
                 } elseif ($seccion === 'cobranzas_clientes') {
                     try {
                         $modulo['cobranzas_clientes'] = $this->getCobranzasClientesConfig();
