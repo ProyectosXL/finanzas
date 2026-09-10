@@ -2059,7 +2059,7 @@ class CobElectronicos {
      * @param array $filtros ['id_procesadora', 'desde', 'hasta', 'incluir_acreditadas']
      * @return array
      */
-    public function getPestana($filtros = []) {
+    public function getPestana($filtros = [], $h = null) {
         $avisos = [];
 
         try {
@@ -2072,18 +2072,18 @@ class CobElectronicos {
 
         // El eje se resuelve ANTES de leer los movimientos, porque es el que
         // define desde cuando se muestran.
-        $h = null;
-
-        try {
-            $h = Horizonte::desdeParametros(new Parametros());
-        } catch (Throwable $e) {
-            // Sin el horizonte no se puede decir que entra al tablero, pero la
-            // tabla de movimientos si se puede mostrar. Se usa un eje de
-            // respaldo y se avisa, en vez de dejar la pantalla en blanco.
-            $avisos[] = 'No se pudo leer el horizonte del tablero (' . $e->getMessage() . '), '
-                . 'así que la marca de qué movimientos entran al tablero puede no coincidir con '
-                . 'el tablero.';
-            $h = new Horizonte(28, 12);
+        if ($h === null) {
+            try {
+                $h = Horizonte::desdeParametros(new Parametros());
+            } catch (Throwable $e) {
+                // Sin el horizonte no se puede decir que entra al tablero, pero la
+                // tabla de movimientos si se puede mostrar. Se usa un eje de
+                // respaldo y se avisa, en vez de dejar la pantalla en blanco.
+                $avisos[] = 'No se pudo leer el horizonte del tablero (' . $e->getMessage() . '), '
+                    . 'así que la marca de qué movimientos entran al tablero puede no coincidir con '
+                    . 'el tablero.';
+                $h = new Horizonte(28, 12);
+            }
         }
 
         // Sin filtro explicito, la tabla arranca en el inicio del eje: lo

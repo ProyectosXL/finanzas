@@ -20,6 +20,7 @@ try {
     switch ($action) {
         case 'getCobranzasFR':
             $summary = isset($_GET['type']) && $_GET['type'] === 'deepdive' ? false : true;
+            $origen = isset($_GET['origen']) ? $_GET['origen'] : 'todos';
 
             // El eje sale de horizonte_dias y horizonte_meses, el mismo del
             // tablero: esta pestaña deja de tener su ventana propia -eran los
@@ -28,7 +29,21 @@ try {
                 'success' => true,
                 'data' => EjeVista::armar(
                     Horizonte::desdeParametros(new Parametros()),
-                    $ingresos->getCobranzasFR($summary),
+                    $ingresos->getCobranzasFR($summary, $origen),
+                    'Cobro',
+                    'importe_neto'
+                )
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'getCobranzasMay':
+            $summary = isset($_GET['type']) && $_GET['type'] === 'deepdive' ? false : true;
+
+            echo json_encode([
+                'success' => true,
+                'data' => EjeVista::armar(
+                    Horizonte::desdeParametros(new Parametros()),
+                    $ingresos->getCobranzasMay($summary),
                     'Cobro',
                     'importe_neto'
                 )

@@ -56,6 +56,12 @@ class Parametros {
                 . 'Cob. Electrónicos y la fila Cobranzas Pagos Electrónicos del tablero',
             'secciones' => ['procesadoras', 'alicuotas']
         ],
+        'COBRANZAS' => [
+            'nombre' => 'Cobranzas',
+            'icono' => 'fa-hand-holding-dollar',
+            'descripcion' => 'Plazos promedio de pago (PPP) calculados y editables, y escalas de descuento por cliente',
+            'secciones' => ['cobranzas_clientes']
+        ],
         'CASHFLOW' => [
             'nombre' => 'Cashflow',
             'icono' => 'fa-table-cells',
@@ -141,6 +147,14 @@ class Parametros {
                         $modulo[$seccion] = [];
                         $modulo['avisos'][] = 'No se pudieron leer los parámetros de '
                             . 'Cob. Electrónicos: ' . $e->getMessage();
+                    }
+                } elseif ($seccion === 'cobranzas_clientes') {
+                    try {
+                        $modulo['cobranzas_clientes'] = $this->getCobranzasClientesConfig();
+                    } catch (Throwable $e) {
+                        $modulo['cobranzas_clientes'] = [];
+                        $modulo['avisos'][] = 'No se pudieron leer los parámetros de Cobranzas: '
+                            . $e->getMessage();
                     }
                 }
             }
@@ -678,6 +692,238 @@ class Parametros {
         }
 
         return $feriados;
+    }
+
+    /**
+     * Devuelve la lista completa de clientes franquicia con su PPP calculado,
+     * su PPP manual/editable, su PPP efectivo y sus escalas de descuento configuradas.
+     * 
+     * @return array Listado de configuración por cliente
+     */
+    public function getCobranzasClientesConfig() {
+        require_once __DIR__ . '/Ingresos.php';
+        $ingresos = new Ingresos();
+
+        $ppps = $ingresos->getPPPClientes();
+        $escalas = $ingresos->getEscalasDescuento();
+        $paramsClientes = $ingresos->getParametrosClientes();
+
+        $cid = $this->conn->conectar('central');
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos central');
+        }
+
+        // Obtener todas las franquicias desde GVA14
+        $sql = "SELECT COD_CLIENT, RAZON_SOCI FROM GVA14 WHERE COD_CLIENT LIKE 'FR%' ORDER BY COD_CLIENT";
+        $stmt = sqlsrv_query($cid, $sql);
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer clientes de GVA14'));
+        }
+
+        $clientes = [];
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $cod = strtoupper(trim($row['COD_CLIENT']));
+            $razon = trim($row['RAZON_SOCI']);
+
+            $pppInfo = $ppps[$cod] ?? null;
+            $paramInfo = $paramsClientes[$cod] ?? null;
+            $escalasCli = $escalas[$cod] ?? [];
+
+            // Aplanar escalas para la vista
+            $escalasLista = [];
+            foreach ($escalasCli as $medio => $tramos) {
+                foreach ($tramos as $t) {
+                    $t['medio_pago'] = $medio;
+                    $escalasLista[] = $t;
+                }
+            }
+
+            $pppCalc = $pppInfo ? intval($pppInfo['ppp_calculado']) : 0;
+            $pppMan = ($pppInfo && $pppInfo['ppp_manual'] !== null) ? intval($pppInfo['ppp_manual']) : ($paramInfo['ppp_manual'] ?? null);
+            $cantCobros = $pppInfo ? intval($pppInfo['cant_cobros']) : 0;
+            $pppEfectivo = ($pppMan !== null && $pppMan > 0) ? $pppMan : ($pppCalc > 0 ? $pppCalc : ($paramInfo['dias_pp_max'] ?? 30));
+
+            $clientes[] = [
+                'cod_cliente' => $cod,
+                'razon_social' => $razon,
+                'ppp_calculado' => $pppCalc,
+                'ppp_manual' => $pppMan,
+                'ppp_efectivo' => $pppEfectivo,
+                'cant_cobros' => $cantCobros,
+                'medio_pago_default' => $paramInfo['medio_pago'] ?? 'ECHEQ',
+                'dias_pp_max' => $paramInfo['dias_pp_max'] ?? 0,
+                'desc_pp_max' => $paramInfo['desc_pp_max'] ?? 0,
+                'escalas' => $escalasLista
+            ];
+        }
+        sqlsrv_free_stmt($stmt);
+
+        return $clientes;
+    }
+
+    /**
+     * Guarda o actualiza el PPP manual de un cliente en RO_T_PARAMETROS_DESC_CLIENTES.
+     * 
+     * @param string $codCliente Código de cliente
+     * @param int|null $pppManual Valor del PPP manual (o null para volver al calculado)
+     * @param string|null $usuario Usuario que realiza la acción
+     * @return bool True si se guardó
+     */
+    public function savePPPManual($codCliente, $pppManual, $usuario = null) {
+        $cid = $this->conn->conectar('central');
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos central');
+        }
+
+        $cod = strtoupper(trim($codCliente));
+        $val = ($pppManual !== null && $pppManual !== '' && intval($pppManual) > 0) ? intval($pppManual) : null;
+
+        // Verificar si existe en RO_T_PARAMETROS_DESC_CLIENTES
+        $sqlCheck = "SELECT ID FROM RO_T_PARAMETROS_DESC_CLIENTES WHERE COD_CLIENT = ?";
+        $stmtCheck = sqlsrv_query($cid, $sqlCheck, [$cod]);
+        $exists = ($stmtCheck !== false) ? sqlsrv_fetch_array($stmtCheck, SQLSRV_FETCH_ASSOC) : false;
+        if ($stmtCheck !== false) sqlsrv_free_stmt($stmtCheck);
+
+        if ($exists) {
+            $sql = "UPDATE RO_T_PARAMETROS_DESC_CLIENTES 
+                    SET PPP_MANUAL = ?, FECHA_MOD = GETDATE() 
+                    WHERE COD_CLIENT = ?";
+            $params = [$val, $cod];
+        } else {
+            $sql = "INSERT INTO RO_T_PARAMETROS_DESC_CLIENTES (COD_CLIENT, PPP_MANUAL, DIAS_PP_MAX, DESC_PP_MAX, MEDIO_PAGO_DEFAULT, FECHA_MOD) 
+                    VALUES (?, ?, 30, 0.08, 'ECHEQ', GETDATE())";
+            $params = [$cod, $val];
+        }
+
+        $stmt = sqlsrv_query($cid, $sql, $params);
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al guardar el PPP manual'));
+        }
+        sqlsrv_free_stmt($stmt);
+
+        return true;
+    }
+
+    /**
+     * Guarda o actualiza el medio de pago por defecto de un cliente en RO_T_PARAMETROS_DESC_CLIENTES.
+     * 
+     * @param string $codCliente Código de cliente
+     * @param string $medioPago Medio de pago ('ECHEQ', 'TRANSFERENCIA')
+     * @param string|null $usuario Usuario que realiza la acción
+     * @return bool True si se guardó
+     */
+    public function saveMedioPagoCliente($codCliente, $medioPago, $usuario = null) {
+        $cid = $this->conn->conectar('central');
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos central');
+        }
+
+        $cod = strtoupper(trim($codCliente));
+        $medio = strtoupper(trim($medioPago ?: 'ECHEQ'));
+
+        // Verificar si existe en RO_T_PARAMETROS_DESC_CLIENTES
+        $sqlCheck = "SELECT ID FROM RO_T_PARAMETROS_DESC_CLIENTES WHERE COD_CLIENT = ?";
+        $stmtCheck = sqlsrv_query($cid, $sqlCheck, [$cod]);
+        $exists = ($stmtCheck !== false) ? sqlsrv_fetch_array($stmtCheck, SQLSRV_FETCH_ASSOC) : false;
+        if ($stmtCheck !== false) sqlsrv_free_stmt($stmtCheck);
+
+        if ($exists) {
+            $sql = "UPDATE RO_T_PARAMETROS_DESC_CLIENTES 
+                    SET MEDIO_PAGO_DEFAULT = ?, FECHA_MOD = GETDATE() 
+                    WHERE COD_CLIENT = ?";
+            $params = [$medio, $cod];
+        } else {
+            $sql = "INSERT INTO RO_T_PARAMETROS_DESC_CLIENTES (COD_CLIENT, PPP_MANUAL, DIAS_PP_MAX, DESC_PP_MAX, MEDIO_PAGO_DEFAULT, FECHA_MOD) 
+                    VALUES (?, NULL, 30, 0.08, ?, GETDATE())";
+            $params = [$cod, $medio];
+        }
+
+        $stmt = sqlsrv_query($cid, $sql, $params);
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al guardar el medio de pago'));
+        }
+        sqlsrv_free_stmt($stmt);
+
+        return true;
+    }
+
+    /**
+     * Guarda o crea un tramo de escala de descuento para un cliente.
+     * 
+     * @param int|null $id ID del tramo (0 para nuevo)
+     * @param string $codCliente Código de cliente
+     * @param string $medioPago Medio de pago ('ECHEQ', 'TRANSFERENCIA')
+     * @param int $diasDesde Días inicio del tramo
+     * @param int $diasHasta Días fin del tramo
+     * @param float $porcentajeDesc Porcentaje de descuento (ej: 8.00)
+     * @param string|null $usuario Usuario que realiza la acción
+     * @return int ID de la escala
+     */
+    public function saveEscalaDescuento($id, $codCliente, $medioPago, $diasDesde, $diasHasta, $porcentajeDesc, $usuario = null) {
+        $cid = $this->conn->conectar('central');
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos central');
+        }
+
+        $cod = strtoupper(trim($codCliente));
+        $medio = strtoupper(trim($medioPago ?: 'ECHEQ'));
+        $dDesde = intval($diasDesde);
+        $dHasta = intval($diasHasta);
+        $porc = floatval($porcentajeDesc);
+
+        if ($dDesde < 0 || $dHasta < $dDesde) {
+            throw new Exception('El rango de días no es válido: Días Desde debe ser >= 0 y <= Días Hasta');
+        }
+
+        if ($porc < 0 || $porc > 100) {
+            throw new Exception('El porcentaje de descuento debe estar entre 0% y 100%');
+        }
+
+        if ($id && intval($id) > 0) {
+            $sql = "UPDATE RO_T_CASHFLOW_COBRANZAS_PARAM_DESC 
+                    SET COD_CLIENT = ?, MEDIO_PAGO = ?, DIAS_DESDE = ?, DIAS_HASTA = ?, PORCENTAJE_DESC = ?, ACTIVO = 1, FECHA_UPDATE = GETDATE(), USUARIO = ? 
+                    WHERE ID = ?";
+            $params = [$cod, $medio, $dDesde, $dHasta, $porc, $usuario, intval($id)];
+            $stmt = sqlsrv_query($cid, $sql, $params);
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al actualizar escala de descuento'));
+            }
+            sqlsrv_free_stmt($stmt);
+            return intval($id);
+        } else {
+            $sql = "INSERT INTO RO_T_CASHFLOW_COBRANZAS_PARAM_DESC (COD_CLIENT, MEDIO_PAGO, DIAS_DESDE, DIAS_HASTA, PORCENTAJE_DESC, ACTIVO, FECHA_UPDATE, USUARIO) 
+                    OUTPUT INSERTED.ID
+                    VALUES (?, ?, ?, ?, ?, 1, GETDATE(), ?)";
+            $params = [$cod, $medio, $dDesde, $dHasta, $porc, $usuario];
+            $stmt = sqlsrv_query($cid, $sql, $params);
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al insertar escala de descuento'));
+            }
+            $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+            sqlsrv_free_stmt($stmt);
+            return intval($row['ID']);
+        }
+    }
+
+    /**
+     * Elimina (baja lógica o física) una escala de descuento.
+     * 
+     * @param int $id ID de la escala
+     * @return bool True si se eliminó
+     */
+    public function deleteEscalaDescuento($id) {
+        $cid = $this->conn->conectar('central');
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos central');
+        }
+
+        $sql = "DELETE FROM RO_T_CASHFLOW_COBRANZAS_PARAM_DESC WHERE ID = ?";
+        $stmt = sqlsrv_query($cid, $sql, [intval($id)]);
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al eliminar escala de descuento'));
+        }
+        sqlsrv_free_stmt($stmt);
+        return true;
     }
 
     /**

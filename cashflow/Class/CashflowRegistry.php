@@ -78,14 +78,21 @@ class CashflowRegistry {
 
         'COBRANZAS_FR' => [
             'nombre' => 'Cobranzas Franquicias',
-            'descripcion' => 'Cobranza real de facturas ya emitidas a franquicias',
+            'descripcion' => 'Cobranza de facturas a franquicias (Real y Proyectada con PPP)',
             'archivo' => 'Providers/IngresosProvider.php',
             'clase' => 'IngresosProvider',
             'moneda' => 'ARS',
             'disponible' => true,
             'tab' => 'cobranzas_fr',
             'series' => [
-                'COBRANZA' => 'Cobranza real de franquicias'
+                'COBRANZA' => 'Cobranza total franquicias (Real + Proyectada)',
+                'COBRANZA_REAL' => 'Cobranza real de franquicias',
+                'COBRANZA_PROYECTADA' => 'Cobranza proyectada de pendientes (PPP)',
+                'COBRANZA_TOTAL' => 'Cobranza total franquicias (Real + Proyectada)'
+            ],
+            'componentes' => [
+                'COBRANZA_TOTAL' => ['COBRANZA_REAL', 'COBRANZA_PROYECTADA'],
+                'COBRANZA' => ['COBRANZA_REAL', 'COBRANZA_PROYECTADA']
             ]
         ],
 
@@ -176,11 +183,13 @@ class CashflowRegistry {
 
         'COBRANZAS_MAY' => [
             'nombre' => 'Cobranzas Mayoristas',
-            'descripcion' => 'Cobranza real de facturas ya emitidas a mayoristas',
+            'descripcion' => 'Cobranza proyectada de facturas pendientes a mayoristas (+60 días)',
+            'archivo' => 'Providers/IngresosProvider.php',
+            'clase' => 'IngresosProvider',
             'moneda' => 'ARS',
-            'disponible' => false,
+            'disponible' => true,
             'tab' => 'cobranzas_may',
-            'series' => ['COBRANZA' => 'Cobranza real de mayoristas']
+            'series' => ['COBRANZA' => 'Cobranza proyectada de mayoristas']
         ],
 
         'PROV_LOCALES' => [

@@ -1041,7 +1041,7 @@ chequear('devuelve solo numeros', 0, count($noNumericos));
 // El payload de la pestana tiene que armarse aunque el script no se haya
 // corrido: en ese caso avisa y muestra la tabla vacia.
 $modulo = new CobElectronicos();
-$pestana = $modulo->getPestana();
+$pestana = $modulo->getPestana([], $h);
 
 chequear('el payload de la pestana trae sus claves', true,
     isset($pestana['filas']) && isset($pestana['por_dia']) && isset($pestana['por_mes'])

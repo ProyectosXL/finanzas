@@ -1,13 +1,7 @@
-/**
- * Ingresos - Cobranzas FR JavaScript
+﻿/**
+ * Ingresos - Cobranzas Mayoristas JavaScript
  * Con soporte para Resumen (predeterminado) y Deep Dive (aperturado por comprobante)
- * y doble matriz: Real a Cobrar vs Pendientes Proyectados (con cálculo de PPP).
- *
- * LAS TRES VISTAS LAS MANEJA eje-vistas.js — ver la nota del encabezado de
- * Comex-Proveedores_exterior.js. Esta pestaña tenía el mismo criterio propio,
- * con las columnas calculadas en el navegador. Ahora el eje y los importes por
- * columna vienen resueltos de Class/EjeVista.php, sobre horizonte_dias y
- * horizonte_meses.
+ * y proyección a 60 días (o plazo configurado en parámetros).
  */
 
 (function() {
@@ -15,20 +9,17 @@
 
     let datosCobranzas = null;
     let modoVista = 'resumen'; // 'resumen' o 'deepdive'
-    let modoOrigen = 'real';   // 'real' o 'proyectado'
 
     /** Controlador de las tres vistas, compartido con el resto del módulo */
     let vistas = null;
 
     function inicializar() {
-        console.log('Inicializando Ingresos - Cobranzas FR');
+        console.log('Inicializando Ingresos - Cobranzas May');
 
-        var btnResumen = document.getElementById('btnVistaResumenCob');
-        var btnDeepDive = document.getElementById('btnVistaDeepDiveCob');
-        var tabReal = document.getElementById('tabRealCobBtn');
-        var tabProy = document.getElementById('tabProyCobBtn');
-        var btnRefresh = document.getElementById('btnRefreshCob');
-        var btnExport = document.getElementById('btnExportCob');
+        var btnResumen = document.getElementById('btnVistaResumenCobMay');
+        var btnDeepDive = document.getElementById('btnVistaDeepDiveCobMay');
+        var btnRefresh = document.getElementById('btnRefreshCobMay');
+        var btnExport = document.getElementById('btnExportCobMay');
 
         if (btnResumen) {
             btnResumen.addEventListener('click', function() {
@@ -41,20 +32,9 @@
             });
         }
 
-        if (tabReal) {
-            tabReal.addEventListener('click', function() {
-                cambiarOrigen('real');
-            });
-        }
-        if (tabProy) {
-            tabProy.addEventListener('click', function() {
-                cambiarOrigen('proyectado');
-            });
-        }
-
         vistas = crearEjeVistas({
-            botones: 'vistasCob',
-            periodo: 'periodoCob',
+            botones: 'vistasCobMay',
+            periodo: 'periodoCobMay',
             alCambiar: generarTabla
         });
 
@@ -66,7 +46,7 @@
         }
 
         // Buscador rápido
-        var inputBusqueda = document.getElementById('busquedaCob');
+        var inputBusqueda = document.getElementById('busquedaCobMay');
         if (inputBusqueda) {
             inputBusqueda.addEventListener('keyup', function() {
                 filtrarTabla();
@@ -85,8 +65,8 @@
     }
 
     function filtrarTabla() {
-        var term = document.getElementById('busquedaCob').value.toLowerCase();
-        var rows = document.querySelectorAll('#tableBodyCob tr');
+        var term = document.getElementById('busquedaCobMay').value.toLowerCase();
+        var rows = document.querySelectorAll('#tableBodyCobMay tr');
         
         rows.forEach(function(row) {
             var text = row.textContent.toLowerCase();
@@ -111,8 +91,8 @@
         if (modo === modoVista) return;
         modoVista = modo;
         
-        var btnResumen = document.getElementById('btnVistaResumenCob');
-        var btnDeepDive = document.getElementById('btnVistaDeepDiveCob');
+        var btnResumen = document.getElementById('btnVistaResumenCobMay');
+        var btnDeepDive = document.getElementById('btnVistaDeepDiveCobMay');
         
         if (modo === 'resumen') {
             btnResumen.classList.add('btn-primary', 'active');
@@ -129,38 +109,9 @@
         cargarDatos();
     }
 
-    function cambiarOrigen(origen) {
-        if (origen === modoOrigen) return;
-        modoOrigen = origen;
-
-        var tabReal = document.getElementById('tabRealCobBtn');
-        var tabProy = document.getElementById('tabProyCobBtn');
-        var titulo = document.getElementById('tituloMatrizCob');
-        var subtitulo = document.getElementById('subtituloMatrizCob');
-        var thCobro = document.getElementById('thCobroCob');
-        var thImporteNeto = document.getElementById('thImporteNetoCob');
-
-        if (tabReal) tabReal.classList.toggle('active', origen === 'real');
-        if (tabProy) tabProy.classList.toggle('active', origen === 'proyectado');
-
-        if (origen === 'proyectado') {
-            if (titulo) titulo.innerHTML = 'Cobranzas FR &mdash; <span class="text-warning-emphasis">Pendientes Proyectados</span>';
-            if (subtitulo) subtitulo.textContent = 'Facturas pendientes calculadas con Plazo Promedio de Pago (PPP)';
-            if (thCobro) thCobro.textContent = 'F. Prob. Cobro';
-            if (thImporteNeto) thImporteNeto.textContent = 'Importe Neto Proy.';
-        } else {
-            if (titulo) titulo.innerHTML = 'Cobranzas FR &mdash; <span class="text-success">Real a Cobrar</span>';
-            if (subtitulo) subtitulo.textContent = 'Propuestas de pago confirmadas por fecha de cobro';
-            if (thCobro) thCobro.textContent = 'Cobro';
-            if (thImporteNeto) thImporteNeto.textContent = 'Importe Neto';
-        }
-
-        cargarDatos();
-    }
-
     function cargarDatos() {
         mostrarCargando(true);
-        fetch(`Controller/IngresosController.php?action=getCobranzasFR&type=${modoVista}&origen=${modoOrigen}`)
+        fetch(`Controller/IngresosController.php?action=getCobranzasMay&type=${modoVista}`)
             .then(response => {
                 if (!response.ok) throw new Error('Error HTTP: ' + response.status);
                 return response.json();
@@ -169,8 +120,6 @@
                 if (result.success) {
                     datosCobranzas = result.data;
 
-                    // El controlador de vistas se entera del eje nuevo antes de
-                    // que se dibuje la tabla.
                     vistas.usar(datosCobranzas);
 
                     generarTabla();
@@ -191,7 +140,7 @@
      * Los avisos del backend: lo que quedó fuera del horizonte o sin fecha.
      */
     function pintarAvisos() {
-        var cont = document.getElementById('avisosCob');
+        var cont = document.getElementById('avisosCobMay');
 
         if (!cont) {
             return;
@@ -221,9 +170,9 @@
      * Encabezados de la tabla.
      */
     function generarEncabezados() {
-        const headerRowSub = document.getElementById('headerRowSubCob');
-        const mesActualHeader = document.getElementById('mesActualHeaderCob');
-        const table = document.getElementById('tablaCobranzasFR');
+        const headerRowSub = document.getElementById('headerRowSubCobMay');
+        const mesActualHeader = document.getElementById('mesActualHeaderCobMay');
+        const table = document.getElementById('tablaCobranzasMay');
 
         table.classList.toggle('modo-resumen', modoVista === 'resumen');
 
@@ -255,23 +204,15 @@
     }
 
     function generarFilasDatos() {
-        var tableBody = document.getElementById('tableBodyCob');
+        var tableBody = document.getElementById('tableBodyCobMay');
         var cols = vistas.columnas();
         var html = '';
 
         datosCobranzas.filas.forEach(function(item) {
-            var esProy = (item.TIPO_REGISTRO === 'PROYECCION');
-            var trClase = esProy ? 'fila-proyeccion' : '';
+            html += `<tr class="fila-proyeccion-may">`;
             
-            html += `<tr class="${trClase}">`;
-            
-            // Columna Tipo
-            if (esProy) {
-                var pppInfo = item.PPP ? `PPP: ${item.PPP} días` : '';
-                html += `<td class="center"><span class="badge-proyeccion" title="${pppInfo}"><i class="fas fa-clock me-1"></i>PROYECCIÓN</span></td>`;
-            } else {
-                html += `<td class="center"><span class="badge-real" title="Propuesta"><i class="fas fa-check me-1"></i>REAL</span></td>`;
-            }
+            var plazoInfo = item.Dias ? `Plazo: ${item.Dias} días` : '';
+            html += `<td class="center"><span class="badge-may" title="${plazoInfo}"><i class="fas fa-clock me-1"></i>PROY</span></td>`;
 
             html += `<td><strong>${item.COD_CLI || ''}</strong></td>`;
             html += `<td>${item.RAZON_SOC || ''}</td>`;
@@ -280,22 +221,21 @@
             html += `<td class="center col-detail">${formatDate(item.FECHA)}</td>`;
             html += `<td class="center col-detail">${item.T_COMP || ''}</td>`;
             html += `<td class="center col-detail">${item.N_COMP || ''}</td>`;
-            html += `<td class="center col-detail">${item.Desc || ''}</td>`;
-            html += `<td class="center col-detail">${item.Dias || 0}</td>`;
+            html += `<td class="center col-detail">${item.Desc || '0%'}</td>`;
+            html += `<td class="center col-detail">${item.Dias || 60}</td>`;
             
             // Columnas siempre visibles
             html += `<td class="currency">${formatCurrency(item.importe_bruto)}</td>`;
             html += `<td class="currency fw-bold">${formatCurrency(item.importe_neto)}</td>`;
             
-            var badgeCobroClase = esProy ? 'badge-proyeccion' : 'badge-cobro';
-            html += `<td class="center"><span class="${badgeCobroClase}">${formatDate(item.Cobro)}</span></td>`;
+            html += `<td class="center"><span class="badge-cobro-may">${formatDate(item.Cobro)}</span></td>`;
             
             // Columnas del eje temporal
             cols.forEach(function(col) {
                 var valor = Number(vistas.valor(item, col)) || 0;
                 var cellClass = '';
                 if (valor != 0) {
-                    cellClass = esProy ? 'cell-with-proy' : 'cell-with-value';
+                    cellClass = 'cell-with-value';
                 }
 
                 html += '<td class="currency ' + cellClass + '">'
@@ -304,7 +244,7 @@
 
             var total = vistas.total(item);
 
-            html += '<td class="currency total-column ' + (esProy ? 'text-warning-emphasis' : '') + '">'
+            html += '<td class="currency total-column">'
                 + (total != 0 ? formatCurrency(total) : '') + '</td>';
 
             html += '</tr>';
@@ -316,7 +256,7 @@
      * Fila de totales.
      */
     function generarFilaTotales() {
-        var totalsRow = document.getElementById('totalsRowCob');
+        var totalsRow = document.getElementById('totalsRowCobMay');
         var colspan = (modoVista === 'resumen') ? 6 : 11;
         var cols = vistas.columnas();
         var visibles = filasFiltradas();
@@ -348,7 +288,7 @@
 
     /** Las filas que pasan el buscador */
     function filasFiltradas() {
-        var input = document.getElementById('busquedaCob');
+        var input = document.getElementById('busquedaCobMay');
         var term = input ? input.value.toLowerCase() : '';
 
         if (!term) {
@@ -358,7 +298,6 @@
         return datosCobranzas.filas.filter(function(item) {
             return (item.COD_CLI || '').toLowerCase().includes(term)
                 || (item.RAZON_SOC || '').toLowerCase().includes(term)
-                || (item.TIPO_REGISTRO || '').toLowerCase().includes(term)
                 || (item.N_COMP || '').toLowerCase().includes(term);
         });
     }
@@ -369,20 +308,20 @@
     function calcularResumenes() {
         var totales = (datosCobranzas && datosCobranzas.totales) || {};
 
-        document.getElementById('total4semanasCob').textContent =
+        document.getElementById('total4semanasCobMay').textContent =
             formatCurrency(totales.total_tramo || 0);
-        document.getElementById('total11mesesCob').textContent =
+        document.getElementById('total11mesesCobMay').textContent =
             formatCurrency(totales.total_meses || 0);
-        document.getElementById('totalGeneralCob').textContent =
+        document.getElementById('totalGeneralCobMay').textContent =
             formatCurrency(totales.total_horizonte || 0);
 
         var vs = (datosCobranzas && datosCobranzas.vistas) || {};
 
-        texto('rotulo4semanasCob', vs.dias ? vs.dias.periodo : '');
-        texto('rotulo11mesesCob', vs.meses ? vs.meses.periodo : '');
-        texto('rotuloGeneralCob', vs.completo ? vs.completo.periodo : '');
+        texto('rotulo4semanasCobMay', vs.dias ? vs.dias.periodo : '');
+        texto('rotulo11mesesCobMay', vs.meses ? vs.meses.periodo : '');
+        texto('rotuloGeneralCobMay', vs.completo ? vs.completo.periodo : '');
 
-        document.getElementById('summarySectionCob').style.display = 'flex';
+        document.getElementById('summarySectionCobMay').style.display = 'flex';
     }
 
     function formatCurrency(value) {
@@ -402,8 +341,8 @@
     }
 
     function mostrarCargando(mostrar) {
-        document.getElementById('loadingSpinnerCob').style.display = mostrar ? 'flex' : 'none';
-        document.getElementById('tableWrapperCob').style.display = mostrar ? 'none' : 'block';
+        document.getElementById('loadingSpinnerCobMay').style.display = mostrar ? 'flex' : 'none';
+        document.getElementById('tableWrapperCobMay').style.display = mostrar ? 'none' : 'block';
     }
 
     function mostrarError(mensaje) {
@@ -412,13 +351,13 @@
     }
 
     function exportarExcel() {
-        var tabla = document.getElementById('tablaCobranzasFR').cloneNode(true);
+        var tabla = document.getElementById('tablaCobranzasMay').cloneNode(true);
         var html = tabla.outerHTML;
         var blob = new Blob([html], { type: 'application/vnd.ms-excel' });
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a');
         a.href = url;
-        a.download = 'Cobranzas_FR_' + new Date().toISOString().split('T')[0] + '.xls';
+        a.download = 'Cobranzas_May_' + new Date().toISOString().split('T')[0] + '.xls';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
