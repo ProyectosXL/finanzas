@@ -120,27 +120,29 @@ chequear('el Dashboard esta marcado como maqueta', Menu::MAQUETA, $porTab['dashb
 chequear('y su tooltip lo dice',
     true, strpos($porTab['dashboard']['titulo'], 'de ejemplo') !== false);
 
-chequear('Echeqs esta pendiente', Menu::PENDIENTE, $porTab['echeqs']['estado']);
+chequear('Echeqs tiene datos', Menu::DATOS, $porTab['echeqs']['estado']);
+chequear('Cobranzas May esta pendiente', Menu::PENDIENTE, $porTab['cobranzas_may']['estado']);
 chequear('Haberes esta pendiente', Menu::PENDIENTE, $porTab['haberes']['estado']);
 
 // Una pestana con datos NO se marca: marcar el caso normal es ruido.
 chequear('una pestana con datos no lleva marca', '', $porTab['ventas']['icono_estado']);
 chequear('ni tooltip', '', $porTab['ventas']['titulo']);
-chequear('una pendiente si lleva marca', true, $porTab['echeqs']['icono_estado'] !== '');
+chequear('una pendiente si lleva marca', true, $porTab['cobranzas_may']['icono_estado'] !== '');
 
 seccion('el placeholder se detecta y baja el estado declarado');
 
 // Es la guarda que evita que el menu prometa datos que no existen. Va en una
 // sola direccion: nunca SUBE un estado, solo lo baja.
-chequear('una pestana placeholder se detecta', true, Menu::esPlaceholder('echeqs'));
+chequear('una pestana placeholder se detecta', true, Menu::esPlaceholder('cobranzas_may'));
 chequear('una pestana construida no', false, Menu::esPlaceholder('ventas'));
+chequear('Echeqs ya no es un placeholder', false, Menu::esPlaceholder('echeqs'));
 chequear('una pestana que no existe cuenta como pendiente',
     true, Menu::esPlaceholder('no_existe_esta_pestana'));
 
 chequear('declarar datos sobre un placeholder no alcanza: baja a pendiente',
-    Menu::PENDIENTE, Menu::estado('echeqs', Menu::DATOS));
+    Menu::PENDIENTE, Menu::estado('cobranzas_may', Menu::DATOS));
 chequear('declarar maqueta sobre un placeholder tambien baja',
-    Menu::PENDIENTE, Menu::estado('echeqs', Menu::MAQUETA));
+    Menu::PENDIENTE, Menu::estado('cobranzas_may', Menu::MAQUETA));
 chequear('sobre una pestana construida manda lo declarado',
     Menu::DATOS, Menu::estado('ventas', Menu::DATOS));
 chequear('y una maqueta construida queda como maqueta',
@@ -156,8 +158,8 @@ foreach ($menu['categorias'] as $cat) {
     $porCategoria[$cat['codigo']] = $cat;
 }
 
-// Ventas, Saldos, Cobranzas FR y Cob. Electronicos.
-chequear('Ingresos tiene 4 de 6 con datos', 4, $porCategoria['Ingresos']['con_datos']);
+// Ventas, Saldos, Echeqs, Cobranzas FR y Cob. Electronicos.
+chequear('Ingresos tiene 5 de 6 con datos', 5, $porCategoria['Ingresos']['con_datos']);
 chequear('y son 6 en total', 6, $porCategoria['Ingresos']['total']);
 // Comercio Exterior queda completa: sus dos pestanas tienen datos. Despachante
 // y Asesor se dio de baja del menu porque no se usa mas.

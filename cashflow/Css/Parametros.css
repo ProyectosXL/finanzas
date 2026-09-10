@@ -404,6 +404,36 @@
     color: var(--text-secondary, #5a6178);
 }
 
+/* ========================================
+   PRE-CHEQUEADO
+   Maestro de clientes con venta cobrada anticipada.
+   ======================================== */
+
+.ppq-prechequeado .ppq-inactivo {
+    opacity: 0.55;
+}
+
+.ppq-prechequeado .ppq-fecha {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+    white-space: nowrap;
+}
+
+.ppq-prechequeado .ppq-subtitulo {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+}
+
+/* Un cliente activo sin cheques vivos NO se muestra como un cero: un cero se
+   leeria como "este cliente no debe nada", cuando lo mas probable es que el
+   codigo no sea el que se queria cargar. */
+.ppq-prechequeado .ppq-sin-cheques {
+    font-size: 11px;
+    color: var(--danger-color, #dc3545);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
 .pce-cobel .table .form-control-sm,
 .pce-cobel .table .form-select-sm {
     font-size: 12px;

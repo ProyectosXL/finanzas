@@ -291,15 +291,44 @@ Mix de cobro inicial (cada canal suma 100%):
 
 ## Neteo de cheques adelantados
 
-El circuito está **cableado y apagado**: la vista origen todavía no existe.
+**El circuito está enchufado.** Hay clientes que entregan los echeqs *antes* de que se les facture: esa venta futura ya está cobrada y proyectarla de nuevo la contaría dos veces.
 
-- `RO_T_CASHFLOW_VENTAS_PRECHEQ` creada y vacía
-- parámetro `dias_prechequeado`
-- `Ventas::getNeteoPrechequeado()` devuelve cero
-- `case getNeteoPrechequeado` en el controller
-- fila en la tabla de cobranza mostrando `0`
+| Pieza | Qué hace |
+| --- | --- |
+| `Echeqs → Venta Cobrada Anticipada` | Dónde se tilda qué cheques netean |
+| `Parámetros → Pre-chequeado` | Qué clientes operan con la modalidad |
+| `RO_V_CASHFLOW_VENTAS_PRECHEQ` | La vista origen. La crea `sql/echeqs_prechequeado.sql` |
+| `dias_prechequeado` | Cuántos días antes del cheque se emite la factura |
+| `Ventas::getNeteoPrechequeado()` | Reparte el importe contra el eje y avisa lo que no entra |
 
-Cuando exista la vista, sólo hay que enchufar el origen de datos en `getNeteoPrechequeado()`. La lógica futura está documentada ahí y en el DDL: se toma la fecha del cheque, se le restan `dias_prechequeado` días para obtener la fecha teórica de la factura, y el importe se resta de la cobranza proyectada de esa fecha o de ese mes.
+```
+FECHA_TEORICA_FACTURA = FECHA_CHEQUE − dias_prechequeado
+```
+
+El importe cae en el bucket diario de esa fecha, o en el mensual si quedó fuera del tramo diario: es la misma regla de `Horizonte::ubicar()` que usa el resto del módulo, no una copia.
+
+`RO_T_CASHFLOW_VENTAS_PRECHEQ` **ya no es el origen** y no tiene lector. Queda creada porque puede tener filas en algún ambiente. Ver `sql/ventas_proyeccion.sql` §6.
+
+### Tres cosas que el neteo avisa en vez de callar
+
+- **Lo que cae antes del inicio del eje.** Con `dias_prechequeado > 0` la fecha teórica puede quedar en el pasado, y ahí no hay columna donde restar. Va a un aviso con el monto.
+- **Lo que no se pudo imputar a un canal.** El canal sale del prefijo del código de cliente (`Echeqs::canalDeCliente()`): `F` es Franquicias y `L` es Locales. Si algún importe no mapea, se resta sólo del total y el aviso dice por cuánta plata la fila total y su apertura por canal no reconcilian.
+- **Lo que sale de cheques que ya no están en cartera.** Ver abajo.
+
+### El punto abierto: los cheques con `ESTADO = 'A'`
+
+Los cheques en `'C'` cierran solos: entran por la fila *Echeqs en cartera* y salen por el neteo, neto cero. Los `'A'` **no**: la sub-pestaña de cartera no los muestra, así que ninguna fila del tablero los suma, y el neteo sí los resta.
+
+Verificado contra la base: `'A'` en `dbo.SBA14` es **aplicado**, o sea que el cheque ya salió de cartera. Todos los `'A'` con fecha futura traen `FECHA_SAL` y `T_COMP_SAL` informados, y se reparten en dos casos:
+
+| `T_COMP_SAL` | Qué pasó | Dónde está esa plata |
+| --- | --- | --- |
+| `O/P` (187 de 250) | Endosado a un proveedor en una orden de pago | En ningún lado del tablero: nunca va a entrar al banco |
+| `BDE` (60 de 250) | Depositado en una boleta de depósito | Todavía en ningún lado: es un cheque diferido depositado, no acreditado |
+
+**En ninguno de los dos casos el importe está reflejado en Saldos**, así que hoy el tablero perdería esa plata: no la cuenta como ingreso y además la descuenta de la cobranza proyectada. `Ventas::getNeteoPrechequeado()` deja un aviso con el monto exacto y el pie de la sub-pestaña lo muestra abierto por estado.
+
+**Antes de encender el neteo en producción** —es decir, antes de cargar clientes en Parámetros → Pre-chequeado— hay que decidir qué hacer con esos cheques. La corrección probablemente sea una serie más del proveedor de Echeqs, pero no está escrita porque el criterio es de negocio.
 
 ---
 

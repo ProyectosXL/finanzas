@@ -100,7 +100,7 @@ class Menu {
             'items' => [
                 ['tab' => 'ventas',           'nombre' => 'Ventas',             'icono' => 'fa-cart-shopping',       'estado' => self::DATOS],
                 ['tab' => 'saldos',           'nombre' => 'Saldos',             'icono' => 'fa-wallet',              'estado' => self::DATOS],
-                ['tab' => 'echeqs',           'nombre' => 'Echeqs',             'icono' => 'fa-money-check-dollar',  'estado' => self::PENDIENTE],
+                ['tab' => 'echeqs',           'nombre' => 'Echeqs',             'icono' => 'fa-money-check-dollar',  'estado' => self::DATOS],
                 ['tab' => 'cobranzas_fr',     'nombre' => 'Cobranzas FR',       'icono' => 'fa-hand-holding-dollar', 'estado' => self::DATOS],
                 ['tab' => 'cobranzas_may',    'nombre' => 'Cobranzas May',      'icono' => 'fa-warehouse',           'estado' => self::PENDIENTE],
                 ['tab' => 'cob_electronicos', 'nombre' => 'Cob. Electrónicos',  'icono' => 'fa-credit-card',         'estado' => self::DATOS]

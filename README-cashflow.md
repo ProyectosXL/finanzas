@@ -33,6 +33,7 @@ En este orden, contra `central`:
 -- 2. sql/cashflow_estructura_disponibilidades.sql
 -- 3. sql/cashflow_saldos.sql   (alimenta Saldo Inicial y Caja Locales)
 -- 4. sql/cashflow_cob_electronicos.sql  (alimenta Cobranzas Pagos Electrónicos)
+-- 5. sql/echeqs_prechequeado.sql        (venta cobrada anticipada y su neteo)
 ```
 
 El primero crea `RO_T_CASHFLOW_CONF_SECCION` y `RO_T_CASHFLOW_CONF_FILA`, siembra la estructura y agrega el parámetro `comex_tipo_cambio_usd`.
@@ -43,7 +44,9 @@ El tercero crea las tablas del módulo Saldos, que es el que llena las filas *Sa
 
 El cuarto crea las tablas del módulo Cob. Electrónicos, que llena la fila *Cobranzas Pagos Electrónicos*. Mismo criterio: sin él la fila va en cero y el tablero avisa. Los movimientos del Excel los carga aparte `sql/cashflow_cob_electronicos_migracion.sql`. Ver `README-cob-electronicos.md`.
 
-Los cuatro son reejecutables y no pisan nada ya editado. Si no se corrieron, la pantalla **no falla**: muestra un aviso diciendo que hay que correrlos.
+El quinto crea el maestro de clientes que operan con **venta cobrada anticipada** y la vista de la que sale el neteo de cheques adelantados de Ventas. **La fila *Echeqs en cartera* no lo necesita**: sale entera de Tango y funciona igual sin él. Lo que no funciona sin él es la segunda sub-pestaña de Echeqs, que avisa y no rompe.
+
+Los cinco son reejecutables y no pisan nada ya editado. Si no se corrieron, la pantalla **no falla**: muestra un aviso diciendo que hay que correrlos.
 
 ---
 
@@ -171,7 +174,7 @@ Esa división es lo importante: hace cumplir por construcción la regla de que *
 
 Van igual en el registro, con `'disponible' => false` y sin clase. Una fila que los apunte se muestra **en cero** y el tablero avisa, en vez de desaparecer del cuadro: así la pantalla tiene desde el primer día la forma completa del Excel y se ve qué falta. Cuando el módulo exista, se escribe su proveedor y se da vuelta el flag; la fila ya está configurada y se llena sola.
 
-Hoy tienen datos reales siete: **Ventas**, **Cobranzas FR**, **Proveedores Exterior**, **Nacionalizaciones**, **Saldos**, **Caja Locales** y **Cobranzas Electrónicas**. Los otros nueve están declarados y rinden cero.
+Hoy tienen datos reales ocho: **Ventas**, **Cobranzas FR**, **Proveedores Exterior**, **Nacionalizaciones**, **Saldos**, **Caja Locales**, **Cobranzas Electrónicas** y **Echeqs**. Los otros ocho están declarados y rinden cero.
 
 ---
 
@@ -383,6 +386,7 @@ new Cashflow($estructura, $parametros, $horizonte)   // el horizonte es opcional
 sql/cashflow_estructura.sql                 Las dos tablas de configuración + semilla
 sql/cashflow_estructura_disponibilidades.sql  Reorganiza en Disponibilidades + Ventas
 sql/cashflow_saldos.sql                     Tablas del modulo Saldos (README-saldos.md)
+sql/echeqs_prechequeado.sql                 Maestro de pre-chequeado + vista del neteo
 cashflow/Class/Horizonte.php                Eje temporal, compartido con Ventas
 cashflow/Class/EjeVista.php                 Las tres vistas: columnas, totales y periodo
 cashflow/Js/eje-vistas.js                   Su contraparte en el front (cargado en index.php)
@@ -395,6 +399,11 @@ cashflow/Class/Providers/VentasProvider.php
 cashflow/Class/Providers/ComexProvider.php
 cashflow/Class/Providers/IngresosProvider.php
 cashflow/Class/Providers/SaldosProvider.php   Disponible inicial y caja de locales
+cashflow/Class/Echeqs.php                   Cheques en cartera y venta cobrada anticipada
+cashflow/Class/Providers/EcheqsProvider.php   Solo la serie de cartera: ver su encabezado
+cashflow/Controller/EcheqsController.php    Listados y marcado de cheques
+cashflow/Tabs/echeqs.php                    Las dos sub-pestanas
+cashflow/Tabs/parametros_prechequeado.php   Maestro de clientes pre-chequeados
 cashflow/Controller/CashflowController.php            getTablero
 cashflow/Controller/CashflowEstructuraController.php  CRUD de la estructura
 cashflow/Tabs/cashflow.php                  La pantalla
@@ -415,7 +424,7 @@ Eliminado: `Tabs/resumen.php`.
 
 - **El saldo de apertura ya no arranca en cero, pero depende de que alguien cargue.** El módulo Saldos existe (ver `README-saldos.md`) y alimenta *Saldo Inicial*. Mientras no haya ninguna carga, o mientras la última quede vieja, la fila va en cero o desactualizada y **el tablero lo avisa con la fecha del dato**: leer esos saldos como disponibilidad real sería un error caro.
 - **Dos filas del Excel no tienen de dónde salir.** *Dólares Cuenta Comitente* y *Exportaciones* las tipea una persona en el Excel (Tesorería, Silvina, Dan). Acá el origen de datos es únicamente por proveedor, así que hasta que exista el módulo que las alimente se muestran en cero y el tablero avisa. Quedan declaradas para que el cuadro tenga la forma completa. Si hicieran falta cargadas a mano, habría que sumar un tipo de origen manual, que hoy el módulo no tiene. *Caja Locales* ya salió de esta lista: la alimenta el módulo Saldos.
-- **El neteo de cheques adelantados sólo se aplica a la serie total de cobranza.** No viene abierto por canal. Hoy da lo mismo porque es cero; cuando exista el origen habrá que decidir cómo se distribuye entre canales, y ese criterio es de negocio.
+- **El neteo de cheques adelantados de un cheque `ESTADO = 'A'` no lo compensa ninguna fila del tablero.** Un cheque en cartera cierra solo: suma en *Echeqs en cartera* y resta de la cobranza de Ventas. Uno ya aplicado —depositado o endosado a un proveedor— no lo suma nadie, así que el tablero perdería ese importe. Está avisado por `Ventas::getNeteoPrechequeado()` y abierto por estado en el pie de la sub-pestaña, y hay que resolverlo **antes** de cargar clientes en Parámetros → Pre-chequeado. El detalle de lo verificado contra la base está en `README-ventas.md`.
 - **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** para traer la razón social. El tablero no lo sufre, porque usa `getCobranzasFRTotales()`, pero la pestaña Cobranzas FR sí.
 - **El Dashboard es una maqueta**: no tiene ninguna llamada al servidor, sus números están escritos a mano. El menú lo marca como tal. Cuando se construya de verdad, hay que pasarlo a `datos` en `Class/Menu.php`.
 - **`nacionalizacion_2` está en `$validTabs` de `TabController` pero no tiene archivo ni entrada de menú.** Es configuración muerta: nadie puede llegar ahí, y si llegara vería el placeholder.

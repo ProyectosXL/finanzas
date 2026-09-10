@@ -1218,8 +1218,11 @@
         foot += '<tr class="fila-neteo">';
         foot += '<td class="col-canal" colspan="4">' +
                 'Neteo cheques adelantados ' +
-                '<i class="fas fa-plug-circle-xmark ms-1" ' +
-                'title="Circuito cableado y apagado: la vista origen todavía no existe, así que el neteo devuelve cero."></i>' +
+                '<i class="fas fa-circle-info ms-1" ' +
+                'title="Sale de Echeqs → Venta Cobrada Anticipada: los cheques tildados ahí ' +
+                'ya cobraron una venta futura, así que se restan de la cobranza proyectada de ' +
+                'la fecha teórica de esa factura (fecha del cheque menos el parámetro ' +
+                'dias_prechequeado)."></i>' +
                 '</td>';
 
         cols.forEach(function(col) {

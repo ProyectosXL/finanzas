@@ -13,7 +13,11 @@ require_once __DIR__ . '/../Parametros.php';
  *                          con el mix de medios de pago, los plazos de
  *                          acreditacion y el corrimiento a dia bancario habil
  *                          aplicados. Neta del neteo de cheques adelantados.
- *   COBRANZA_<CANAL>    -> lo mismo, abierto por canal
+ *   COBRANZA_<CANAL>    -> lo mismo, abierto por canal, y TAMBIEN neta: el
+ *                          neteo se imputa al canal del cliente que entrego el
+ *                          cheque. Las cuatro siguen sumando exactamente el
+ *                          total, que es lo que hace que el tablero de igual
+ *                          armado con la fila total o con la apertura.
  *   VENTA               -> la venta proyectada con IVA. NO es caja: se muestra
  *                          como fila informativa (COMPUTA=0) para poder leer el
  *                          cuadro contra el Excel sin contarla dos veces.
@@ -70,10 +74,12 @@ class VentasProvider extends CashflowProvider {
         $canales = isset($p['canales']) ? $p['canales'] : Parametros::CANALES;
 
         foreach ($canales as $canal) {
-            $series['COBRANZA_' . $canal] = [
-                'dias' => $this->porCanal($p['cobranza'], 'subtotal_dias', $canal),
-                'meses' => $this->porCanal($p['cobranza'], 'subtotal_meses', $canal)
-            ];
+            // La cobranza por canal tambien va NETA. Cuando el neteo era siempre
+            // cero daba lo mismo, pero en cuanto deja de serlo, restarlo solo del
+            // total hace que la fila total y su apertura por canal dejen de
+            // reconciliar, y en silencio: quien arme el tablero con las filas por
+            // canal veria cobranza de mas.
+            $series['COBRANZA_' . $canal] = $this->netoDelCanal($p, $canal);
 
             $series['VENTA_' . $canal] = [
                 'dias' => $this->porCanal($p['venta'], 'dias', $canal),
@@ -95,17 +101,56 @@ class VentasProvider extends CashflowProvider {
     }
 
     /**
+     * Cobranza de un canal, neta del neteo imputado a ESE canal.
+     *
+     * El canal de un cheque adelantado se deriva del prefijo del codigo de
+     * cliente, en Echeqs::canalDeCliente(). Un importe que no se pueda imputar a
+     * ningun canal se resta solo del total, y Ventas deja un aviso diciendo por
+     * cuanta plata el cuadro no cierra: lo que no puede pasar es que no cierre y
+     * nadie lo diga.
+     *
+     * @param array $p Payload de Ventas::proyectarCobranzas()
+     * @param string $canal
+     * @return array ['dias' => [...], 'meses' => [...]]
+     */
+    private function netoDelCanal($p, $canal) {
+        $neteo = isset($p['cobranza']['neteo_prechequeado']['canales'][$canal])
+            ? $p['cobranza']['neteo_prechequeado']['canales'][$canal]
+            : ['dias' => [], 'meses' => []];
+
+        return [
+            'dias' => $this->restar(
+                $this->porCanal($p['cobranza'], 'subtotal_dias', $canal), $neteo['dias']),
+            'meses' => $this->restar(
+                $this->porCanal($p['cobranza'], 'subtotal_meses', $canal), $neteo['meses'])
+        ];
+    }
+
+    /**
+     * Resta un mapa de otro, clave por clave. Las claves que el segundo no trae
+     * quedan como estaban.
+     *
+     * @param array $bruto
+     * @param array $aRestar
+     * @return array
+     */
+    private function restar($bruto, $aRestar) {
+        foreach ($bruto as $clave => $monto) {
+            if (isset($aRestar[$clave])) {
+                $bruto[$clave] = $monto - $aRestar[$clave];
+            }
+        }
+
+        return $bruto;
+    }
+
+    /**
      * Cobranza total menos el neteo de cheques adelantados.
      *
-     * El neteo hoy devuelve siempre cero porque su vista origen todavia no
-     * existe (ver Ventas::getNeteoPrechequeado). Se resta igual, cableado, para
-     * que el dia que se enchufe el origen el tablero quede correcto solo, sin
-     * tener que acordarse de tocar esto.
-     *
-     * SOLO SE APLICA A LA SERIE TOTAL. El neteo no viene abierto por canal, asi
-     * que las series COBRANZA_<CANAL> son brutas. Hoy da lo mismo porque el
-     * neteo es cero; cuando exista el origen habra que decidir como se
-     * distribuye entre canales, y ese criterio es de negocio y no del tablero.
+     * El origen del neteo son los cheques marcados en la sub-pestana Echeqs ->
+     * Venta Cobrada Anticipada: ventas que el cliente ya pago con echeqs
+     * entregados por adelantado y que por lo tanto no se van a volver a cobrar.
+     * Ver Ventas::getNeteoPrechequeado().
      *
      * @param array $p Payload de Ventas::proyectarCobranzas()
      * @return array ['dias' => [...], 'meses' => [...]]

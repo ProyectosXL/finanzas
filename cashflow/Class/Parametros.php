@@ -56,6 +56,14 @@ class Parametros {
                 . 'Cob. Electrónicos y la fila Cobranzas Pagos Electrónicos del tablero',
             'secciones' => ['procesadoras', 'alicuotas']
         ],
+        'PRECHEQUEADO' => [
+            'nombre' => 'Pre-chequeado',
+            'icono' => 'fa-money-check-dollar',
+            'descripcion' => 'Qué clientes operan con venta cobrada anticipada. Acota el listado '
+                . 'de Echeqs → Venta Cobrada Anticipada, que es de donde sale el neteo de '
+                . 'cheques adelantados de la cobranza proyectada de Ventas',
+            'secciones' => ['prechequeado']
+        ],
         'CASHFLOW' => [
             'nombre' => 'Cashflow',
             'icono' => 'fa-table-cells',
@@ -142,6 +150,22 @@ class Parametros {
                         $modulo['avisos'][] = 'No se pudieron leer los parámetros de '
                             . 'Cob. Electrónicos: ' . $e->getMessage();
                     }
+                } elseif ($seccion === 'prechequeado') {
+                    // Mismo criterio que los dos anteriores: la tabla es del
+                    // modulo Echeqs y la lee su propia clase. Se piden TODOS los
+                    // clientes, tambien los inhabilitados, porque el editor tiene
+                    // que poder reactivar una baja.
+                    try {
+                        $modulo[$seccion] = $this->echeqs()->getClientesPrechequeado(false);
+
+                        foreach ($this->echeqs()->getAvisos() as $a) {
+                            $modulo['avisos'][] = $a;
+                        }
+                    } catch (Throwable $e) {
+                        $modulo[$seccion] = [];
+                        $modulo['avisos'][] = 'No se pudieron leer los clientes pre-chequeados: '
+                            . $e->getMessage();
+                    }
                 }
             }
 
@@ -189,6 +213,23 @@ class Parametros {
     }
 
     /**
+     * Puerta al modulo Echeqs, para la sub-pestana que administra el maestro de
+     * clientes pre-chequeados. Mismo criterio -y mismo motivo del require lazy-
+     * que saldos() y cobElectronicos().
+     *
+     * @return Echeqs
+     */
+    private function echeqs() {
+        require_once __DIR__ . '/Echeqs.php';
+
+        if ($this->echeqs === null) {
+            $this->echeqs = new Echeqs();
+        }
+
+        return $this->echeqs;
+    }
+
+    /**
      * Cache del chequeo de la columna MODULO.
      * null = todavia no se consulto, true/false = resultado.
      */
@@ -199,6 +240,9 @@ class Parametros {
 
     /** @var CobElectronicos|null Puerta al modulo; la resuelve cobElectronicos() */
     private $cobElectronicos = null;
+
+    /** @var Echeqs|null Puerta al modulo Echeqs; la resuelve echeqs() */
+    private $echeqs = null;
 
     function __construct(){
         require_once __DIR__.'/../../class/conexion.php';
