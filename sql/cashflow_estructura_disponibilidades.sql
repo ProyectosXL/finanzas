@@ -88,9 +88,23 @@ BEGIN
         ORDEN = 30, FECHA_UPDATE = GETDATE()
     WHERE CODIGO = 'COB_ELECTRONICOS';
 
+    /* La cobranza de franquicias esta PARTIDA en dos filas -real y proyectada-
+       desde sql/cashflow_estructura_split_cobranzas_fr.sql. Se mueven las tres
+       porque cual de ellas existe depende de por donde llego la base: una
+       instalacion nueva nace con las dos hijas y sin la total, y una que venia
+       de antes tiene la total (ya inhabilitada) mas las dos hijas. Un UPDATE
+       que no encuentra fila no hace nada, asi que los tres corren siempre. */
     UPDATE dbo.RO_T_CASHFLOW_CONF_FILA
     SET SECCION = 'DISPONIBILIDADES', ORDEN = 40, FECHA_UPDATE = GETDATE()
     WHERE CODIGO = 'COBRANZAS_FR';
+
+    UPDATE dbo.RO_T_CASHFLOW_CONF_FILA
+    SET SECCION = 'DISPONIBILIDADES', ORDEN = 40, FECHA_UPDATE = GETDATE()
+    WHERE CODIGO = 'COBRANZAS_FR_REAL';
+
+    UPDATE dbo.RO_T_CASHFLOW_CONF_FILA
+    SET SECCION = 'DISPONIBILIDADES', ORDEN = 45, FECHA_UPDATE = GETDATE()
+    WHERE CODIGO = 'COBRANZAS_FR_PROY';
 
     UPDATE dbo.RO_T_CASHFLOW_CONF_FILA
     SET SECCION = 'DISPONIBILIDADES', ORDEN = 50, FECHA_UPDATE = GETDATE()

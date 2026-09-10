@@ -1,12 +1,69 @@
 <?php
 
+/**
+ * Ingresos
+ * Cobranza de franquicias (real y proyectada) y de mayoristas.
+ *
+ * LA INVARIANTE ENTRE REAL Y PROYECTADO
+ * -------------------------------------
+ * Las dos pestanas de Cobranzas FR se reparten el mismo universo de facturas y
+ * la particion tiene que ser EXACTA: cada comprobante esta en una o en la otra,
+ * nunca en las dos y nunca en ninguna.
+ *
+ *   Real a Cobrar        -> comprobantes de propuestas en estado 'ACEPTADA'
+ *   Pendientes Proyectados -> todo lo demas, o sea las facturas PEN de Tango
+ *                             MENOS las que ya cuenta Real ('ACEPTADA') y
+ *                             menos las ya cobradas ('PAGADO')
+ *
+ * Los estados reales de FP_propuestas_pago son exactamente tres: 'ACEPTADA',
+ * 'PAGADO' y 'PENDIENTE_APROBACION_CLIENTE'. Una factura en una propuesta que
+ * todavia espera la aprobacion del cliente NO es cobranza comprometida, asi que
+ * no la cuenta Real; y por eso mismo TIENE que volver a la proyeccion. Si las
+ * dos consultas no son complementarias, esas facturas desaparecen de las dos
+ * pestanas y la plata se evapora en silencio.
+ *
+ * La invariante vive repartida entre getCobranzasFR() / getCobranzasFRTotales()
+ * (lo que cuenta Real) y getCobranzasFRPendientesProyectadas() (lo que excluye
+ * la proyeccion). Estan comentadas de los dos lados a proposito: son dos
+ * consultas separadas que se tienen que mover juntas.
+ *
+ * getPPPClientes() usa 'PAGADO' y no participa de esto: es el historico con el
+ * que se calcula el plazo promedio, no el universo a cobrar.
+ */
 class Ingresos {
+
+    /**
+     * Estados de propuesta que cuenta la cobranza REAL.
+     * El complemento de esta lista es lo que vuelve a la proyeccion; ver
+     * $estadosYaContados y el encabezado de la clase.
+     */
+    const ESTADOS_REAL = ['ACEPTADA'];
+
+    /**
+     * Estados de propuesta cuyos comprobantes NO tienen que volver a la
+     * proyeccion: 'ACEPTADA' porque ya la cuenta Real, 'PAGADO' porque ya se
+     * cobro. Es el complemento exacto de ESTADOS_REAL mas lo ya cobrado.
+     */
+    const ESTADOS_YA_CONTADOS = ['ACEPTADA', 'PAGADO'];
 
     private $conn;
 
     function __construct(){
         require_once __DIR__.'/../../class/conexion.php';
         $this->conn = new Conexion;
+    }
+
+    /**
+     * Lista de estados lista para intercalar en un IN (...) de SQL.
+     * Las dos constantes son literales del codigo, no entrada del usuario: no
+     * hay nada que parametrizar. Existe para que la lista este escrita una sola
+     * vez y las consultas de Real y de la proyeccion no se puedan desalinear.
+     *
+     * @param array $estados
+     * @return string
+     */
+    private static function inSql($estados) {
+        return "'" . implode("', '", $estados) . "'";
     }
 
     /**
@@ -230,11 +287,18 @@ class Ingresos {
             throw new Exception('No se pudo conectar a la base de datos');
         }
 
-        // 1. Obtener comprobantes ya en propuestas activas para excluirlos
-        $sql_prop = "SELECT items.t_comp_factura, items.n_comp_factura 
-                     FROM FP_propuestas_pago_items items 
-                     JOIN FP_propuestas_pago propuestas ON items.id_propuesta = propuestas.id 
-                     WHERE propuestas.estado NOT IN ('RECHAZADA', 'CANCELADA', 'PAGADO', 'VENCIDA')";
+        // 1. Comprobantes que NO tienen que volver a la proyeccion.
+        //    INVARIANTE: esta exclusion es el complemento exacto de lo que
+        //    cuenta la cobranza real. Real cuenta ESTADOS_REAL ('ACEPTADA'), y
+        //    aca se excluye eso mas 'PAGADO', que ya se cobro. Una factura en
+        //    una propuesta PENDIENTE_APROBACION_CLIENTE no la cuenta Real, asi
+        //    que TIENE que aparecer aca: si las dos consultas se desalinean,
+        //    esas facturas desaparecen de las dos pestanas y la plata se
+        //    evapora en silencio. Ver getCobranzasFR() y el encabezado.
+        $sql_prop = "SELECT items.t_comp_factura, items.n_comp_factura
+                     FROM FP_propuestas_pago_items items
+                     JOIN FP_propuestas_pago propuestas ON items.id_propuesta = propuestas.id
+                     WHERE propuestas.estado IN (" . self::inSql(self::ESTADOS_YA_CONTADOS) . ")";
         $stmt_prop = sqlsrv_query($cid_apps, $sql_prop);
         $en_propuestas = [];
         if ($stmt_prop !== false) {
@@ -392,8 +456,14 @@ class Ingresos {
                 throw new Exception('No se pudo conectar a la base de datos');
             }
 
+            // INVARIANTE: Real cuenta UNICAMENTE las propuestas ACEPTADAS. El
+            // complemento -lo que espera aprobacion del cliente- vuelve a la
+            // proyeccion; la exclusion esta en
+            // getCobranzasFRPendientesProyectadas() y las dos se mueven juntas.
+            $estadosReal = self::inSql(self::ESTADOS_REAL);
+
             if ($summary) {
-                $sql_items = "SELECT 
+                $sql_items = "SELECT
                                 p.cod_cliente as COD_CLI,
                                 p.fecha_propuesta_pago as Cobro,
                                 SUM(CASE WHEN i.t_comp_factura LIKE '%NC%' THEN -i.importe_bruto ELSE i.importe_bruto END) as importe_bruto,
@@ -405,7 +475,7 @@ class Ingresos {
                                 '0%' as [Desc]
                             FROM FP_propuestas_pago p
                             INNER JOIN FP_propuestas_pago_items i ON p.id = i.id_propuesta
-                            WHERE p.estado NOT IN ('RECHAZADA', 'CANCELADA', 'PAGADO', 'VENCIDA')
+                            WHERE p.estado IN ($estadosReal)
                             AND p.fecha_propuesta_pago >= CAST(GETDATE() AS DATE)
                             GROUP BY p.cod_cliente, p.fecha_propuesta_pago
                             ORDER BY p.fecha_propuesta_pago ASC";
@@ -420,7 +490,7 @@ class Ingresos {
                                 i.importe_neto
                             FROM FP_propuestas_pago p
                             INNER JOIN FP_propuestas_pago_items i ON p.id = i.id_propuesta
-                            WHERE p.estado NOT IN ('RECHAZADA', 'CANCELADA', 'PAGADO', 'VENCIDA')
+                            WHERE p.estado IN ($estadosReal)
                             AND p.fecha_propuesta_pago >= CAST(GETDATE() AS DATE)
                             ORDER BY p.fecha_propuesta_pago ASC";
             }
@@ -509,13 +579,17 @@ class Ingresos {
         if ($origen === 'todos' || $origen === 'real') {
             $cid = $this->conn->conectar('apps');
             if ($cid) {
+                // Mismo criterio que getCobranzasFR(): solo propuestas
+                // ACEPTADAS. Ver la invariante en el encabezado de la clase.
+                $estadosReal = self::inSql(self::ESTADOS_REAL);
+
                 $sql = "SELECT
                             p.fecha_propuesta_pago AS FECHA,
                             SUM(CASE WHEN i.t_comp_factura LIKE '%NC%'
                                      THEN -i.importe_neto ELSE i.importe_neto END) AS IMPORTE
                         FROM FP_propuestas_pago p
                         INNER JOIN FP_propuestas_pago_items i ON p.id = i.id_propuesta
-                        WHERE p.estado NOT IN ('RECHAZADA', 'CANCELADA', 'PAGADO', 'VENCIDA')
+                        WHERE p.estado IN ($estadosReal)
                         AND p.fecha_propuesta_pago >= CAST(GETDATE() AS DATE)
                         GROUP BY p.fecha_propuesta_pago
                         ORDER BY p.fecha_propuesta_pago ASC";
