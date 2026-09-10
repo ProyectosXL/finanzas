@@ -566,7 +566,12 @@
     }
 
     function formatDate(dateString) {
-        if (!dateString || dateString === '-' || dateString === 'N/A') return dateString;
+        // Una fila agrupada del Resumen no trae fecha de emisión ni de cobro:
+        // son distintas en cada comprobante del cliente, así que
+        // EjeVista::armarAgrupado() las descarta en vez de mostrar la de una
+        // factura cualquiera. Ver la nota de esa función.
+        if (dateString === undefined || dateString === null || dateString === '') return '';
+        if (dateString === '-' || dateString === 'N/A') return dateString;
         var parts = dateString.split(' ')[0].split('-');
         if (parts.length !== 3) return dateString;
         return parts[2] + '/' + parts[1] + '/' + parts[0];

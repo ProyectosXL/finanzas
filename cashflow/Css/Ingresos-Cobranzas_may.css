@@ -149,7 +149,12 @@
 .modo-resumen tfoot td:nth-child(5),
 .modo-resumen tfoot td:nth-child(6),
 .modo-resumen tfoot td:nth-child(7),
-.modo-resumen tfoot td:nth-child(8) {
+.modo-resumen tfoot td:nth-child(8),
+/* Y la columna Cobro (la 11): ver la nota equivalente en
+   Ingresos-Cobranzas_fr.css. */
+.modo-resumen thead tr:first-child th:nth-child(11),
+.modo-resumen tbody td:nth-child(11),
+.modo-resumen tfoot td:nth-child(11) {
     display: none !important;
 }
 

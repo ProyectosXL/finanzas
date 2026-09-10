@@ -351,7 +351,10 @@
     }
 
     function formatDate(dateString) {
-        if (!dateString || dateString === '-' || dateString === 'N/A') return dateString;
+        // Una fila agrupada del Resumen no trae fecha: es distinta en cada
+        // comprobante del cliente. Ver EjeVista::armarAgrupado().
+        if (dateString === undefined || dateString === null || dateString === '') return '';
+        if (dateString === '-' || dateString === 'N/A') return dateString;
         var parts = dateString.split(' ')[0].split('-');
         if (parts.length !== 3) return dateString;
         return parts[2] + '/' + parts[1] + '/' + parts[0];

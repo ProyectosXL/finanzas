@@ -66,6 +66,7 @@ Todos son reejecutables y no pisan nada ya editado. Si no se corrieron, la panta
 | Capa | Archivo | Qué resuelve |
 | --- | --- | --- |
 | Cálculo | `Class/EjeVista.php` | Qué columnas tiene cada vista, qué total le corresponde y qué período mide |
+| Cálculo | `Class/EjeVista.php` — `armarAgrupado()` | Lo mismo, pero con una fila por **grupo** en vez de una por item |
 | Presentación | `Js/eje-vistas.js` | Dibuja los botones, mantiene la vista activa y entrega las columnas visibles |
 
 Las usan **Cashflow, Ventas, Proveedores Exterior, Crono Nacionalización y Cobranzas FR**.
@@ -124,6 +125,25 @@ vistas.total(fila)              // el total que corresponde a la vista activa
 ```
 
 No hay que calcular fechas en el navegador ni decidir qué columnas van en cada vista: eso ya está resuelto y probado.
+
+#### Cuando la fila no es un item, sino un grupo
+
+`armar()` resuelve **una** fecha por fila. Un resumen por cliente necesita otra cosa: una fila con importes en **varias** columnas a la vez, porque las facturas de ese cliente se cobran en fechas distintas. Para eso está `armarAgrupado()`:
+
+```php
+$payload = EjeVista::armarAgrupado(
+    $h, $items,
+    'COD_CLI',        // por qué campo se agrupa
+    'Cobro',          // la fecha de cada item
+    'importe_neto',   // el importe que va al eje; siempre se suma
+    1,                // factor
+    ['importe_bruto'] // otros campos numéricos a sumar
+);
+```
+
+Devuelve **el mismo payload** que `armar()` —eje, vistas, totales y descartes—, así que el front es idéntico. Sin esto, un resumen tiene dos salidas y las dos son malas: agrupar por cliente + fecha (y entonces un cliente con cobros en tres fechas ocupa tres filas), o agrupar sólo por cliente y quedarse con una sola fecha, tirando la ubicación temporal del resto de la plata.
+
+Los campos descriptivos que **difieren** dentro del grupo se descartan en vez de tomar el del primer item: una fila que dijera "FAC 0001-123" cuando en realidad son doce comprobantes es peor que una celda vacía. Lo usan los Resumen de **Cobranzas FR** y **Cobranzas May**.
 
 > **El tablero dibuja una columna más que las demás pantallas**, y es a propósito: las columnas que no representan ningún día futuro se muestran con un guión sobre fondo gris, porque sus filas de arrastre tienen que poder decir *"acá no hay posición que mostrar"*. Las pestañas de detalle no tienen filas de arrastre y no las necesitan. Del componente compartido toman igual el estado de la vista, el rótulo del período y el total.
 

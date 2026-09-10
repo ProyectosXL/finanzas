@@ -594,13 +594,19 @@ class Ingresos {
     }
 
     /**
-     * Obtiene los comprobantes pendientes proyectados (FAC en estado PEN fuera de propuestas activas).
-     * Calcula para cada uno la fecha probable de cobro = FECHA_EMIS + PPP, y el descuento según la escala de días.
-     * 
-     * @param bool $summary Si es true, agrupa por cliente y fecha probable de cobro
+     * Los comprobantes pendientes proyectados: FAC en estado PEN que no cuenta
+     * la cobranza real ni estan ya cobrados.
+     *
+     * Devuelve SIEMPRE una fila por comprobante, con su fecha de cobro. El
+     * resumen por cliente lo hace EjeVista::armarAgrupado(), que suma las
+     * series contra el eje y por lo tanto NO pierde la fecha de cada factura:
+     * es lo que ubica cada importe en su columna de la grilla. Antes esta
+     * funcion tenia un modo resumen que agrupaba por cliente + fecha, y eso
+     * obligaba a que un cliente con cobros en tres fechas ocupara tres filas.
+     *
      * @return array Listado de comprobantes proyectados
      */
-    public function getCobranzasFRPendientesProyectadas($summary = false) {
+    public function getCobranzasFRPendientesProyectadas() {
         $cid_apps = $this->conn->conectar('apps');
         $cid_central = $this->conn->conectar('central');
 
@@ -723,45 +729,7 @@ class Ingresos {
         }
         sqlsrv_free_stmt($stmt_fac);
 
-        if (!$summary) {
-            return $itemsProyectados;
-        }
-
-        // Si es modo resumen, agrupar por cliente y fecha probable de cobro
-        $agrupados = [];
-        foreach ($itemsProyectados as $item) {
-            $grupoKey = $item['COD_CLI'] . '|' . $item['Cobro'];
-            if (!isset($agrupados[$grupoKey])) {
-                $agrupados[$grupoKey] = [
-                    'COD_CLI' => $item['COD_CLI'],
-                    'RAZON_SOC' => $item['RAZON_SOC'],
-                    'FECHA' => 'N/A',
-                    'T_COMP' => 'PROY',
-                    'N_COMP' => 'VARIOS',
-                    'Desc' => $item['Desc'],
-                    'Dias' => $item['Dias'],
-                    'PPP' => $item['PPP'],
-                    'importe_bruto' => 0.0,
-                    'importe_neto' => 0.0,
-                    'Cobro' => $item['Cobro'],
-                    'FECHA_MANUAL' => false,
-                    'TIPO_REGISTRO' => 'PROYECCION'
-                ];
-            }
-
-            $agrupados[$grupoKey]['importe_bruto'] += $item['importe_bruto'];
-            $agrupados[$grupoKey]['importe_neto'] += $item['importe_neto'];
-
-            // El resumen no muestra comprobantes, asi que la marca es "alguna
-            // de las facturas de este cliente tiene fecha cargada a mano". Sin
-            // ella, el resumen y el deep dive contarian la misma plata con
-            // criterios distintos y no habria forma de saberlo desde arriba.
-            if (!empty($item['FECHA_MANUAL'])) {
-                $agrupados[$grupoKey]['FECHA_MANUAL'] = true;
-            }
-        }
-
-        return array_values($agrupados);
+        return $itemsProyectados;
     }
 
     /**
@@ -771,7 +739,15 @@ class Ingresos {
      *   - 'real': Solo propuestas reales
      *   - 'proyectado': Solo facturas pendientes proyectadas con PPP
      * 
-     * @param bool $summary Si es true, agrupa por cliente y fecha
+     * Devuelve SIEMPRE una fila por comprobante, con su fecha de cobro. El
+     * resumen por cliente lo hace EjeVista::armarAgrupado() en el controller.
+     *
+     * $summary ya no agrupa: lo unico que decide es cuanto detalle se trae. En
+     * resumen no hace falta la fecha de emision de cada comprobante, y esa es
+     * la parte cara -una consulta a GVA12 por fila-, asi que se saltea. Ver el
+     * pendiente conocido en README-cashflow.md.
+     *
+     * @param bool $summary Si es true, se omite el detalle por comprobante
      * @param string $origen 'todos', 'real', o 'proyectado'
      * @return array Listado de filas para la grilla
      */
@@ -793,38 +769,24 @@ class Ingresos {
             // getCobranzasFRPendientesProyectadas() y las dos se mueven juntas.
             $estadosReal = self::inSql(self::ESTADOS_REAL);
 
-            if ($summary) {
-                $sql_items = "SELECT
-                                p.cod_cliente as COD_CLI,
-                                p.fecha_propuesta_pago as Cobro,
-                                SUM(CASE WHEN i.t_comp_factura LIKE '%NC%' THEN -i.importe_bruto ELSE i.importe_bruto END) as importe_bruto,
-                                SUM(CASE WHEN i.t_comp_factura LIKE '%NC%' THEN -i.importe_neto ELSE i.importe_neto END) as importe_neto,
-                                'RESUMEN' as T_COMP,
-                                'VARIOS' as N_COMP,
-                                'N/A' as FECHA,
-                                '0' as Dias,
-                                '0%' as [Desc]
-                            FROM FP_propuestas_pago p
-                            INNER JOIN FP_propuestas_pago_items i ON p.id = i.id_propuesta
-                            WHERE p.estado IN ($estadosReal)
-                            AND p.fecha_propuesta_pago >= CAST(GETDATE() AS DATE)
-                            GROUP BY p.cod_cliente, p.fecha_propuesta_pago
-                            ORDER BY p.fecha_propuesta_pago ASC";
-            } else {
-                $sql_items = "SELECT 
-                                p.cod_cliente as COD_CLI,
-                                p.fecha_propuesta_pago as Cobro,
-                                i.t_comp_factura as T_COMP,
-                                i.n_comp_factura as N_COMP,
-                                i.porcentaje_descuento as [Desc],
-                                i.importe_bruto,
-                                i.importe_neto
-                            FROM FP_propuestas_pago p
-                            INNER JOIN FP_propuestas_pago_items i ON p.id = i.id_propuesta
-                            WHERE p.estado IN ($estadosReal)
-                            AND p.fecha_propuesta_pago >= CAST(GETDATE() AS DATE)
-                            ORDER BY p.fecha_propuesta_pago ASC";
-            }
+            // La misma consulta para los dos modos: una fila por comprobante,
+            // con su fecha de cobro. El resumen ya no agrupa aca -lo hace
+            // EjeVista::armarAgrupado()-, porque un GROUP BY por cliente +
+            // fecha obliga a que un cliente con cobros en tres fechas ocupe
+            // tres filas del resumen.
+            $sql_items = "SELECT
+                            p.cod_cliente as COD_CLI,
+                            p.fecha_propuesta_pago as Cobro,
+                            i.t_comp_factura as T_COMP,
+                            i.n_comp_factura as N_COMP,
+                            i.porcentaje_descuento as [Desc],
+                            i.importe_bruto,
+                            i.importe_neto
+                        FROM FP_propuestas_pago p
+                        INNER JOIN FP_propuestas_pago_items i ON p.id = i.id_propuesta
+                        WHERE p.estado IN ($estadosReal)
+                        AND p.fecha_propuesta_pago >= CAST(GETDATE() AS DATE)
+                        ORDER BY p.fecha_propuesta_pago ASC";
 
             $stmt = sqlsrv_query($cid_apps, $sql_items);
             if ($stmt === false) {
@@ -848,15 +810,28 @@ class Ingresos {
                 }
 
                 $cod_cli = strtoupper(trim($item['COD_CLI']));
+                $item['COD_CLI'] = $cod_cli;
                 $item['RAZON_SOC'] = $razonesSociales[$cod_cli] ?? 'Cliente no encontrado';
                 $item['TIPO_REGISTRO'] = 'REAL';
 
-                if (!$summary) {
+                // Las notas de credito restan, en los dos modos. Antes el signo
+                // se aplicaba en el deep dive y en el resumen lo resolvia el
+                // CASE del GROUP BY; sin ese GROUP BY tiene que aplicarse acá
+                // siempre, o el resumen sumaria las NC en vez de restarlas.
+                $multiplicador = (strpos(trim($item['T_COMP']), 'NC') !== false) ? -1 : 1;
+
+                $item['importe_bruto'] = (float) $item['importe_bruto'] * $multiplicador;
+                $item['importe_neto'] = (float) $item['importe_neto'] * $multiplicador;
+                $item['Desc'] = (float) $item['Desc'] . '%';
+
+                if ($summary) {
+                    // El resumen no muestra ni la emision ni los dias, y traer
+                    // la emision cuesta una consulta a GVA12 POR FILA.
+                    $item['FECHA'] = 'N/A';
+                    $item['Dias'] = 0;
+                } else {
                     $sql_f = "SELECT TOP 1 FECHA_EMIS FROM GVA12 WHERE T_COMP = ? AND N_COMP = ?";
                     $stmt_f = sqlsrv_query($cid_central, $sql_f, [trim($item['T_COMP']), trim($item['N_COMP'])]);
-                    
-                    $isNC = (strpos(trim($item['T_COMP']), 'NC') !== false);
-                    $multiplicador = $isNC ? -1 : 1;
 
                     if ($stmt_f && $row_f = sqlsrv_fetch_array($stmt_f, SQLSRV_FETCH_ASSOC)) {
                         $f_emis = $row_f['FECHA_EMIS'];
@@ -874,13 +849,6 @@ class Ingresos {
                         $item['FECHA'] = 'N/A';
                         $item['Dias'] = 0;
                     }
-                    
-                    $item['importe_bruto'] = (float)$item['importe_bruto'] * $multiplicador;
-                    $item['importe_neto'] = (float)$item['importe_neto'] * $multiplicador;
-                    $item['Desc'] = (float)$item['Desc'] . '%';
-                } else {
-                    $item['importe_bruto'] = (float)$item['importe_bruto'];
-                    $item['importe_neto'] = (float)$item['importe_neto'];
                 }
 
                 $data[] = $item;
@@ -890,7 +858,7 @@ class Ingresos {
 
         // 2. Cargar pendientes proyectados si corresponde
         if ($origen === 'todos' || $origen === 'proyectado') {
-            $proyectados = $this->getCobranzasFRPendientesProyectadas($summary);
+            $proyectados = $this->getCobranzasFRPendientesProyectadas();
             $data = array_merge($data, $proyectados);
         }
 
@@ -938,7 +906,7 @@ class Ingresos {
 
         // 2. Cobranza Proyectada (Facturas PEN con PPP)
         if ($origen === 'todos' || $origen === 'proyectado') {
-            $proy = $this->getCobranzasFRPendientesProyectadas(true);
+            $proy = $this->getCobranzasFRPendientesProyectadas();
             foreach ($proy as $p) {
                 $f = $p['Cobro'];
                 $totalesPorFecha[$f] = ($totalesPorFecha[$f] ?? 0.0) + floatval($p['importe_neto']);
@@ -978,12 +946,17 @@ class Ingresos {
     }
 
     /**
-     * Obtiene las facturas pendientes de Mayoristas (Camino 1) proyectadas a fecha de emisión + días de plazo.
-     * 
-     * @param bool $summary Si es true agrupa por cliente y fecha probable de cobro
+     * Las facturas pendientes de Mayoristas (Camino 1), proyectadas a fecha de
+     * emision + dias de plazo.
+     *
+     * Devuelve SIEMPRE una fila por comprobante, con su fecha de cobro. El
+     * resumen por cliente lo hace EjeVista::armarAgrupado() en el controller:
+     * asi cada importe conserva su fecha, que es lo que lo ubica en la grilla,
+     * y un cliente con cobros en tres fechas sigue siendo UNA fila.
+     *
      * @return array Listado de comprobantes proyectados
      */
-    public function getCobranzasMay($summary = false) {
+    public function getCobranzasMay() {
         $cid_central = $this->conn->conectar('central');
         if (!$cid_central) {
             throw new Exception('No se pudo conectar a la base de datos central');
@@ -1014,7 +987,6 @@ class Ingresos {
         }
 
         $items = [];
-        $resumenMap = [];
         $hoyStr = (new DateTime())->format('Y-m-d');
 
         while ($row = sqlsrv_fetch_array($stmt_fac, SQLSRV_FETCH_ASSOC)) {
@@ -1041,52 +1013,22 @@ class Ingresos {
                 continue;
             }
 
-            if ($summary) {
-                $key = $codCli . '|' . $fProbCobroStr;
-                if (!isset($resumenMap[$key])) {
-                    $resumenMap[$key] = [
-                        'COD_CLI' => $codCli,
-                        'RAZON_SOC' => $razonSoci,
-                        'FECHA' => 'N/A',
-                        'T_COMP' => 'VARIOS',
-                        'N_COMP' => 'COMPROBANTES',
-                        'Desc' => '0%',
-                        'Dias' => $diasPlazo,
-                        'importe_bruto' => 0.0,
-                        'importe_neto' => 0.0,
-                        'Cobro' => $fProbCobroStr,
-                        'TIPO_REGISTRO' => 'PROYECCION',
-                        'PLAZO' => $diasPlazo
-                    ];
-                }
-                $resumenMap[$key]['importe_bruto'] += $importeReal;
-                $resumenMap[$key]['importe_neto'] += $importeReal;
-            } else {
-                $items[] = [
-                    'COD_CLI' => $codCli,
-                    'RAZON_SOC' => $razonSoci,
-                    'FECHA' => $fEmisStr,
-                    'T_COMP' => $tComp,
-                    'N_COMP' => $nComp,
-                    'Desc' => '0%',
-                    'Dias' => $diasPlazo,
-                    'importe_bruto' => round($importeReal, 2),
-                    'importe_neto' => round($importeReal, 2),
-                    'Cobro' => $fProbCobroStr,
-                    'TIPO_REGISTRO' => 'PROYECCION',
-                    'PLAZO' => $diasPlazo
-                ];
-            }
+            $items[] = [
+                'COD_CLI' => $codCli,
+                'RAZON_SOC' => $razonSoci,
+                'FECHA' => $fEmisStr,
+                'T_COMP' => $tComp,
+                'N_COMP' => $nComp,
+                'Desc' => '0%',
+                'Dias' => $diasPlazo,
+                'importe_bruto' => round($importeReal, 2),
+                'importe_neto' => round($importeReal, 2),
+                'Cobro' => $fProbCobroStr,
+                'TIPO_REGISTRO' => 'PROYECCION',
+                'PLAZO' => $diasPlazo
+            ];
         }
         sqlsrv_free_stmt($stmt_fac);
-
-        if ($summary) {
-            foreach ($resumenMap as &$r) {
-                $r['importe_bruto'] = round($r['importe_bruto'], 2);
-                $r['importe_neto'] = round($r['importe_neto'], 2);
-                $items[] = $r;
-            }
-        }
 
         return $items;
     }
@@ -1097,7 +1039,7 @@ class Ingresos {
      * @return array Filas ['FECHA' => 'Y-m-d', 'IMPORTE' => float]
      */
     public function getCobranzasMayTotales() {
-        $items = $this->getCobranzasMay(true);
+        $items = $this->getCobranzasMay();
         $totalesPorFecha = [];
 
         foreach ($items as $item) {

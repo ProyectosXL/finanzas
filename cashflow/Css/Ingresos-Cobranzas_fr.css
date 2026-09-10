@@ -167,7 +167,14 @@
 .modo-resumen tfoot td:nth-child(5),
 .modo-resumen tfoot td:nth-child(6),
 .modo-resumen tfoot td:nth-child(7),
-.modo-resumen tfoot td:nth-child(8) {
+.modo-resumen tfoot td:nth-child(8),
+/* Y la columna Cobro (la 11). En el Resumen la fila es un CLIENTE y sus
+   facturas se cobran en fechas distintas, así que una sola fecha ahí sería la
+   de una factura cualquiera. Dónde cae cada importe lo dice la grilla del eje,
+   que es para lo que está. */
+.modo-resumen thead tr:first-child th:nth-child(11),
+.modo-resumen tbody td:nth-child(11),
+.modo-resumen tfoot td:nth-child(11) {
     display: none !important;
 }
 

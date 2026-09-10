@@ -201,11 +201,29 @@ Los endpoints son `IngresosController?action=saveFechaCobroManual` y `deleteFech
 
 Dentro de cada solapa, la barra de herramientas superior proporciona:
 - **Buscador rápido:** Filtrado en tiempo real por código de cliente, razón social o número de comprobante.
-- **Modo Resumen vs Deep Dive:**
-  - *Resumen:* Vista consolidada por cliente con 5 columnas base (`COD_CLI`, `RAZON_SOC`, `Importe Bruto`, `Importe Neto`, `Cobro`) más el eje temporal.
-  - *Deep Dive:* Vista aperturada comprobante por comprobante mostrando fecha de emisión, tipo, número, descuento y días.
+- **Modo Resumen vs Deep Dive:** ver más abajo.
 - **Selector de Eje Temporal:** Alterna entre *Días* (tramo diario), *Meses* (tramo mensual) y *Período Completo* mediante el componente común `Js/eje-vistas.js`.
 - **Botones de Acción:** *Actualizar* datos y *Exportar* matriz a Excel.
+
+---
+
+## Resumen: una fila por cliente
+
+Antes el Resumen agrupaba por **cliente + fecha de cobro**, así que un cliente con cobros en tres fechas ocupaba tres filas. Eso no es un resumen: es el deep dive con menos columnas.
+
+Ahora es **una fila por cliente**, con sus importes repartidos en las columnas de la grilla según la fecha de cada comprobante. Una misma fila puede tener plata en el 6/9, en el 8/9 y en la columna de octubre.
+
+| | Resumen | Deep Dive |
+| --- | --- | --- |
+| La fila es | un cliente | un comprobante |
+| Columnas | `Tipo`, `COD_CLI`, `RAZON_SOC`, `Importe Bruto`, `Importe Neto` + la grilla | todas, incluidas `FECHA`, `T_COMP`, `N_COMP`, `Desc`, `Días` y `Cobro` |
+| Lo arma | `EjeVista::armarAgrupado()` | `EjeVista::armar()` |
+
+**El agrupado lo hace `EjeVista`, no la consulta.** Es la parte que importa: agrupar por cliente en SQL obligaría a elegir entre repetir la fila por cada fecha o quedarse con una sola fecha y tirar la ubicación temporal del resto de la plata. `armarAgrupado()` suma las **series** de todos los comprobantes del cliente, así que cada importe conserva su columna y la fila es una sola. Está documentado en el encabezado de `Class/EjeVista.php` y probado en `tests/test_ejevista.php`, incluido el invariante de que las dos formas dan el mismo total.
+
+En Resumen se van `FECHA`, `T_COMP`, `N_COMP`, `Desc`, `Días` y `Cobro`: son distintos en cada comprobante del cliente. `armarAgrupado()` **descarta** los campos que difieren dentro del grupo en vez de mostrar el del primer comprobante — una fila que dijera "FAC 0001-123" cuando en realidad son doce facturas es peor que una celda vacía, porque nadie tendría por qué sospecharlo.
+
+El pie de totales pasó a tener **una celda por columna descriptiva** en lugar de un `colspan` escrito en duro, que había que actualizar a mano cada vez que cambiaba la cantidad de columnas.
 
 ---
 

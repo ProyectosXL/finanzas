@@ -59,6 +59,26 @@ require_once __DIR__ . '/Horizonte.php';
  *
  * y en el front, Js/eje-vistas.js dibuja los botones, los encabezados y los
  * totales a partir de ese payload. No hay que reimplementar nada.
+ *
+ * POR QUE HAY DOS FORMAS DE ARMAR EL PAYLOAD
+ * ------------------------------------------
+ * armar() resuelve UNA fecha por fila: cada item entra tal cual y su importe
+ * cae en la columna de su fecha. Es lo que necesita un deep dive, donde la
+ * fila es el comprobante.
+ *
+ * armarAgrupado() resuelve MUCHAS fechas por fila: agrupa los items por una
+ * clave -el cliente- y suma sus series, asi que una fila puede tener importe en
+ * varias columnas a la vez. Es lo que necesita un resumen, donde la fila es el
+ * cliente y sus facturas se cobran en fechas distintas.
+ *
+ * Sin la segunda, un resumen tiene dos salidas y las dos son malas: agrupar por
+ * cliente + fecha -y entonces un cliente con cobros en tres fechas ocupa tres
+ * filas, que no es un resumen-, o agrupar solo por cliente y quedarse con una
+ * sola fecha, que tira a la basura la ubicacion temporal del resto de la plata.
+ *
+ * Las dos devuelven el MISMO payload -eje, vistas, totales y descartes-, asi
+ * que el front no distingue una de la otra, y las dos usan Horizonte::agrupar()
+ * para respetar la regla dia-o-mes.
  */
 class EjeVista {
 
@@ -131,6 +151,115 @@ class EjeVista {
             }
 
             $filas[] = array_merge($item, self::conTotales($serie['dias'], $serie['meses']));
+        }
+
+        $payload['filas'] = $filas;
+        $payload['totales'] = self::conTotales($totales['dias'], $totales['meses']);
+        $payload['descartes'] = $descartes;
+        $payload['warnings'] = self::avisosDescartes($descartes);
+
+        return $payload;
+    }
+
+    /**
+     * Como armar(), pero con UNA FILA POR GRUPO en vez de una por item.
+     *
+     * Cada fila suma las series de todos los items de su grupo, asi que puede
+     * tener importe en varias columnas del eje a la vez. Ver la nota del
+     * encabezado sobre por que existen las dos formas.
+     *
+     * QUE PASA CON LOS CAMPOS DESCRIPTIVOS
+     * Se conservan los que valen lo MISMO en todos los items del grupo -el
+     * codigo de cliente, la razon social- y se descartan los que difieren -el
+     * numero de comprobante, la fecha de emision-. Quedarse con el valor del
+     * primer item seria peor que no mostrar nada: la fila diria "FAC 0001-123"
+     * cuando en realidad son doce comprobantes, y nadie tendria por que
+     * sospecharlo.
+     *
+     * LOS TOTALES DEL PIE SALEN DE LA SERIE PROPIA, igual que en armar(): se
+     * acumulan sobre un solo mapa mientras se recorre, y no sumando las filas
+     * despues. Es la misma cuenta con la mitad de recorridos y no se puede
+     * desincronizar de las filas, porque sale del mismo agrupador.
+     *
+     * @param Horizonte $h
+     * @param array $items Registros crudos
+     * @param string $campoClave Campo por el que se agrupa (por ejemplo 'COD_CLI')
+     * @param string $campoFecha Campo con la fecha
+     * @param string $campoImporte Campo con el importe que va al eje. Siempre se suma
+     * @param float $factor Multiplicador, por ejemplo un tipo de cambio
+     * @param array $camposSuma Otros campos numericos a sumar (por ejemplo el bruto)
+     * @return array
+     */
+    public static function armarAgrupado($h, $items, $campoClave, $campoFecha,
+                                         $campoImporte, $factor = 1, $camposSuma = []) {
+        $payload = self::eje($h);
+
+        $descartes = ['fuera_horizonte' => 0, 'sin_fecha' => 0];
+        $totales = $h->serieVacia();
+        $grupos = [];
+
+        $sumar = array_values(array_unique(array_merge([$campoImporte],
+            is_array($camposSuma) ? $camposSuma : [])));
+
+        foreach (is_array($items) ? $items : [] as $item) {
+            $clave = isset($item[$campoClave]) ? (string) $item[$campoClave] : '';
+            $serie = $h->agrupar([$item], $campoFecha, $campoImporte, $factor);
+
+            $descartes['fuera_horizonte'] += $serie['fuera_horizonte'];
+            $descartes['sin_fecha'] += $serie['sin_fecha'];
+
+            if (!isset($grupos[$clave])) {
+                $grupos[$clave] = [
+                    'serie' => $h->serieVacia(),
+                    'comunes' => $item,
+                    'sumas' => array_fill_keys($sumar, 0.0)
+                ];
+            }
+
+            foreach ($serie['dias'] as $k => $v) {
+                $totales['dias'][$k] += $v;
+                $grupos[$clave]['serie']['dias'][$k] += $v;
+            }
+
+            foreach ($serie['meses'] as $k => $v) {
+                $totales['meses'][$k] += $v;
+                $grupos[$clave]['serie']['meses'][$k] += $v;
+            }
+
+            // Interseccion: sobrevive solo lo que coincide en todo el grupo
+            foreach ($grupos[$clave]['comunes'] as $campo => $valor) {
+                if (!array_key_exists($campo, $item) || $item[$campo] !== $valor) {
+                    unset($grupos[$clave]['comunes'][$campo]);
+                }
+            }
+
+            foreach ($sumar as $campo) {
+                $grupos[$clave]['sumas'][$campo] +=
+                    isset($item[$campo]) ? floatval($item[$campo]) : 0;
+            }
+        }
+
+        $filas = [];
+
+        foreach ($grupos as $clave => $g) {
+            $sumas = [];
+
+            foreach ($g['sumas'] as $campo => $valor) {
+                $sumas[$campo] = round($valor, 2);
+            }
+
+            // La clave de agrupamiento se repone SIEMPRE, aunque la
+            // interseccion la hubiera descartado: sin ella la fila no dice de
+            // quien es. Solo puede pasar si algun item no traia el campo.
+            $sumas[$campoClave] = isset($g['comunes'][$campoClave])
+                ? $g['comunes'][$campoClave]
+                : $clave;
+
+            $filas[] = array_merge(
+                $g['comunes'],
+                $sumas,
+                self::conTotales($g['serie']['dias'], $g['serie']['meses'])
+            );
         }
 
         $payload['filas'] = $filas;
