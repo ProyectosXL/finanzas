@@ -337,6 +337,23 @@ Los mensajes enuncian la **consecuencia de negocio**, no la regla: *"su importe 
 
 ---
 
+## Dos clases de aviso, y no hay que mezclarlas
+
+| | Sobre qué | Dónde vive | Cuánto dura |
+| --- | --- | --- | --- |
+| **Aviso** | Los **datos**: *"$ 1.200 quedaron fuera del horizonte"* | Pintado en la pantalla, arriba de la tabla | Mientras el dato siga así |
+| **Notificación** | Una **acción del usuario**: se guardó, falló, falta un campo | Esquina inferior derecha, sobre todo lo demás | Se descarta |
+
+Lo primero lo genera el backend y es parte de lo que la pantalla informa; lo segundo es la respuesta a un click. Un aviso que desaparece solo sería un dato perdido, y una notificación permanente sería ruido.
+
+Las notificaciones las resuelve `Js/notificaciones.js` (`Notificacion.exito / error / advertencia / campoInvalido / confirmar`), cargado en `index.php` porque su contenedor cuelga de `<body>` y tiene que sobrevivir al reemplazo de `#tabContent`.
+
+**Un error no se cierra solo.** Trae el mensaje del servidor, que es lo único que explica por qué el dato no quedó guardado; que se borre a los cuatro segundos es perderlo. Los éxitos sí, y el temporizador se pausa con el mouse encima.
+
+**`Notificacion.confirmar()` devuelve una promesa**, así que reemplaza a `confirm()` pero no bloquea el hilo: lo que iba después del `if` va adentro del `then`. El foco arranca en *Cancelar* — son acciones que cuestan deshacer y un Enter reflejo tiene que no hacer nada.
+
+---
+
 ## Lo que el tablero avisa, y por qué
 
 Los avisos no son decoración: son lo que evita leer un cero como si fuera un dato.
@@ -390,6 +407,8 @@ sql/echeqs_prechequeado.sql                 Maestro de pre-chequeado + vista del
 cashflow/Class/Horizonte.php                Eje temporal, compartido con Ventas
 cashflow/Class/EjeVista.php                 Las tres vistas: columnas, totales y periodo
 cashflow/Js/eje-vistas.js                   Su contraparte en el front (cargado en index.php)
+cashflow/Js/notificaciones.js               Avisos de accion y confirmaciones (idem)
+cashflow/Css/notificaciones.css
 cashflow/Class/Menu.php                     Menu lateral y estado de cada pestana
 cashflow/Class/CashflowProvider.php         Contrato de proveedor
 cashflow/Class/CashflowRegistry.php         Registro de orígenes de datos
@@ -430,4 +449,5 @@ Eliminado: `Tabs/resumen.php`.
 - **`nacionalizacion_2` está en `$validTabs` de `TabController` pero no tiene archivo ni entrada de menú.** Es configuración muerta: nadie puede llegar ahí, y si llegara vería el placeholder.
 - **`VentasController?action=saveMixCobro` puede grabar un mix que Parámetros rechazaría**: no valida el 100%. Es anterior a este trabajo.
 - `pedir()` está duplicado en `Ingresos-Ventas.js` y `Parametros.js`. El código nuevo usa `pedirJson()` de `main.js`; sacar las dos copias viejas es un cambio aparte.
+- **Las pestañas de datos todavía usan `alert()`.** `Js/notificaciones.js` está enchufado en toda la pestaña Parámetros —sus cuatro sub-pestañas— y disponible para el resto, pero Ventas, Saldos, Echeqs, Cob. Electrónicos y las dos de Comex siguen con el diálogo del navegador. Es el mismo reemplazo, archivo por archivo.
 - Sin login: todo se graba con `USUARIO = NULL`. La costura ya está puesta.

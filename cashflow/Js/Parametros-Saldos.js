@@ -194,13 +194,19 @@
             var ent = parseInt(valor, 10);
 
             if (isNaN(ent) || ent < 0) {
-                avisar('El valor de ' + etiqueta(clave) + ' debe ser un entero no negativo');
+                // Se marca el campo además de avisar: el bloque tiene varios
+                // inputs iguales y el mensaje solo no dice cuál es.
+                Notificacion.campoInvalido(input,
+                    'El valor de ' + etiqueta(clave) + ' debe ser un entero no negativo.');
+
                 return;
             }
 
             valor = String(ent);
         } else if (String(valor).trim() === '') {
-            avisar('El valor de ' + etiqueta(clave) + ' no puede quedar vacío');
+            Notificacion.campoInvalido(input,
+                'El valor de ' + etiqueta(clave) + ' no puede quedar vacío.');
+
             return;
         }
 
@@ -209,7 +215,9 @@
                 destacar('sp-card-' + clave);
             })
             .catch(function(error) {
-                avisar('Error al guardar ' + etiqueta(clave) + ': ' + error.message);
+                Notificacion.error('No se pudo guardar ' + etiqueta(clave) + ': ' + error.message, {
+                    detalle: 'El campo vuelve al último valor guardado.'
+                });
                 cargar();
             });
     }
@@ -344,8 +352,10 @@
         var vacio = filas.filter(function(f) { return !f.nombre; });
 
         if (vacio.length) {
-            avisar('Hay ' + vacio.length + ' cuenta(s) sin nombre. El nombre es lo que identifica '
-                 + 'la cuenta en la pantalla de carga.');
+            Notificacion.advertencia('Hay ' + vacio.length + ' cuenta(s) sin nombre.', {
+                detalle: 'El nombre es lo que identifica la cuenta en la pantalla de carga.'
+            });
+
             return;
         }
 
@@ -360,7 +370,10 @@
         var tipo = (grupo === 'BANCO') ? 'BANCO' : valorDe('.sp-nuevo-tipo', grupo);
 
         if (!nombre) {
-            avisar('Ingresá el nombre de la cuenta');
+            Notificacion.campoInvalido(
+                document.querySelector('.sp-nuevo-nombre[data-tipo="' + grupo + '"]'),
+                'Ingresá el nombre de la cuenta.');
+
             return;
         }
 
@@ -380,7 +393,7 @@
             cargar();
         })
         .catch(function(error) {
-            avisar('Error al agregar la cuenta: ' + error.message);
+            Notificacion.error('No se pudo agregar la cuenta: ' + error.message);
         })
         .then(function() {
             btn.disabled = false;
@@ -456,14 +469,17 @@
         var filas = Object.keys(porNro).map(function(k) { return porNro[k]; });
 
         if (!filas.length) {
-            avisar('No hay locales para guardar.');
+            Notificacion.advertencia('No hay locales para guardar.');
             return;
         }
 
         var negativas = filas.filter(function(f) { return f.reserva < 0; });
 
         if (negativas.length) {
-            avisar('La reserva de caja no puede ser negativa.');
+            Notificacion.advertencia('La reserva de caja no puede ser negativa.', {
+                detalle: 'Hay ' + negativas.length + ' local(es) con un valor menor a cero.'
+            });
+
             return;
         }
 
@@ -481,13 +497,18 @@
 
         pedirJson(URL_PARAM + '?action=sincronizarSucursales')
             .then(function(r) {
-                alert('Locales sincronizados: ' + r.altas + ' nuevos, ' + r.reactivadas +
-                      ' reactivados, ' + r.bajas + ' inhabilitados.\n\n' +
-                      'La gestión y la reserva ya cargadas no se tocaron.');
+                // El resultado de la sincronización se informa siempre, también
+                // cuando no cambió nada: "no pasó nada" es exactamente lo que
+                // hay que poder distinguir de "no funcionó".
+                Notificacion.exito('Locales sincronizados: ' + r.altas + ' nuevos, '
+                    + r.reactivadas + ' reactivados, ' + r.bajas + ' inhabilitados.', {
+                    detalle: 'La gestión y la reserva ya cargadas no se tocaron.'
+                });
+
                 cargar();
             })
             .catch(function(error) {
-                avisar('No se pudieron sincronizar los locales: ' + error.message);
+                Notificacion.error('No se pudieron sincronizar los locales: ' + error.message);
             })
             .then(function() {
                 btn.disabled = false;
@@ -610,9 +631,9 @@
             .replace(/"/g, '&quot;');
     }
 
+    /** Un error: no se cierra solo, porque trae el motivo del servidor */
     function avisar(mensaje) {
-        console.error(mensaje);
-        alert(mensaje);
+        Notificacion.error(mensaje);
     }
 
 })(); // Fin del IIFE

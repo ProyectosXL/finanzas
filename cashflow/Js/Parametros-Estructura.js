@@ -576,7 +576,7 @@
         var nombre = valor('cfeNuevoNombre');
 
         if (!nombre.trim()) {
-            alert('Poné un nombre para la fila.');
+            Notificacion.campoInvalido('cfeNuevoNombre', 'Poné un nombre para la fila.');
             return;
         }
 
@@ -587,10 +587,18 @@
         }).then(function() {
             document.getElementById('cfeNuevoNombre').value = '';
             texto('cfeNuevoCodigo', '—');
+
+            // Las filas entran inhabilitadas: si no se dice, la fila "no
+            // aparece" en el tablero y parece que el alta falló.
+            Notificacion.exito('Fila agregada.', {
+                detalle: 'Entra inhabilitada: una fila nueva no puede invalidar la estructura. '
+                       + 'Habilitala y guardá cuando tenga origen de datos.'
+            });
+
             cargado = false;
             cargar();
         }).catch(function(e) {
-            alert(e.message);
+            Notificacion.error('No se pudo agregar la fila: ' + e.message);
         });
     }
 
@@ -598,7 +606,7 @@
         var nombre = valor('cfeNuevaSeccionNombre');
 
         if (!nombre.trim()) {
-            alert('Poné un nombre para la sección.');
+            Notificacion.campoInvalido('cfeNuevaSeccionNombre', 'Poné un nombre para la sección.');
             return;
         }
 
@@ -607,10 +615,15 @@
             rol: valor('cfeNuevaSeccionRol')
         }).then(function() {
             document.getElementById('cfeNuevaSeccionNombre').value = '';
+
+            Notificacion.exito('Sección agregada.', {
+                detalle: 'Entra inhabilitada, igual que las filas.'
+            });
+
             cargado = false;
             cargar();
         }).catch(function(e) {
-            alert(e.message);
+            Notificacion.error('No se pudo agregar la sección: ' + e.message);
         });
     }
 
@@ -761,11 +774,19 @@
             secciones: secciones,
             filas: filas
         }).then(function() {
+            Notificacion.exito('Estructura guardada. El tablero ya usa este cuadro.');
+
             cargado = false;
             cargar();
             restaurarBoton(btn);
         }).catch(function(e) {
-            alert(e.message);
+            // El servidor valida el estado resultante completo, así que su
+            // mensaje enuncia la consecuencia de negocio -"su importe
+            // desaparecería del tablero"- y hay que poder leerlo entero.
+            Notificacion.error('No se guardó la estructura: ' + e.message, {
+                titulo: 'El tablero quedó como estaba'
+            });
+
             restaurarBoton(btn);
             validar();
         });

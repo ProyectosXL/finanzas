@@ -220,7 +220,11 @@
             var num = parseFloat(valor);
 
             if (isNaN(num)) {
-                alert('El valor de ' + etiqueta(clave) + ' debe ser numérico');
+                // Se marca el campo y no sólo se avisa: el bloque de generales
+                // tiene cinco inputs iguales y el mensaje solo no dice cuál.
+                Notificacion.campoInvalido(input,
+                    'El valor de ' + etiqueta(clave) + ' debe ser numérico.');
+
                 return;
             }
 
@@ -229,7 +233,9 @@
             var ent = parseInt(valor, 10);
 
             if (isNaN(ent) || ent < 0) {
-                alert('El valor de ' + etiqueta(clave) + ' debe ser un entero no negativo');
+                Notificacion.campoInvalido(input,
+                    'El valor de ' + etiqueta(clave) + ' debe ser un entero no negativo.');
+
                 return;
             }
 
@@ -244,7 +250,11 @@
             destacar('card-' + clave);
         })
         .catch(function(error) {
-            alert('Error al guardar ' + etiqueta(clave) + ': ' + error.message);
+            // El campo se recarga con el valor que quedó guardado, así que hay
+            // que decir que lo tipeado NO es lo que está en la base.
+            Notificacion.error('No se pudo guardar ' + etiqueta(clave) + ': ' + error.message, {
+                detalle: 'El campo vuelve al último valor guardado.'
+            });
             cargar();
         });
     }
@@ -449,7 +459,7 @@
                 }, 900);
             })
             .catch(function(error) {
-                alert('Error al guardar el mix: ' + error.message);
+                Notificacion.error('No se pudo guardar el mix: ' + error.message);
                 btn.disabled = false;
                 btn.innerHTML = textoOriginal;
             });
@@ -500,13 +510,13 @@
         var dias = parseInt(document.getElementById('nuevoDias').value, 10);
 
         if (!medio) {
-            alert('Ingresá el nombre del medio de pago');
-            document.getElementById('nuevoMedio').focus();
+            Notificacion.campoInvalido('nuevoMedio', 'Ingresá el nombre del medio de pago.');
             return;
         }
 
         if (isNaN(dias) || dias < 0) {
-            alert('Los días de acreditación deben ser un entero no negativo');
+            Notificacion.campoInvalido('nuevoDias',
+                'Los días de acreditación deben ser un entero no negativo.');
             return;
         }
 
@@ -523,10 +533,18 @@
         })
         .then(function() {
             toggleFormNuevoMedio(false);
+
+            // Entra inhabilitado y en 0%: si no se dice, el medio "no aparece"
+            // en la proyección y parece que el alta no funcionó.
+            Notificacion.exito('Medio de pago agregado a ' + titulo(canal) + '.', {
+                detalle: 'Queda inhabilitado y en 0%. Activalo y repartí los porcentajes del '
+                       + 'canal para que vuelvan a sumar 100%.'
+            });
+
             cargar();
         })
         .catch(function(error) {
-            alert('Error al agregar el medio de pago: ' + error.message);
+            Notificacion.error('No se pudo agregar el medio de pago: ' + error.message);
         })
         .then(function() {
             btn.disabled = false;
@@ -628,7 +646,8 @@
                 }, 900);
             })
             .catch(function(error) {
-                alert('Error al guardar las participaciones de respaldo: ' + error.message);
+                Notificacion.error('No se pudieron guardar las participaciones de respaldo: '
+                    + error.message);
                 btn.disabled = false;
                 btn.innerHTML = textoOriginal;
             });
@@ -738,8 +757,7 @@
     }
 
     function mostrarError(mensaje) {
-        console.error(mensaje);
-        alert(mensaje);
+        Notificacion.error(mensaje);
     }
 
 })(); // Fin del IIFE

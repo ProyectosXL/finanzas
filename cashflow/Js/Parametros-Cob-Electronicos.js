@@ -262,15 +262,17 @@
         var filas = Object.keys(porId).map(function(k) { return porId[k]; });
 
         if (!filas.length) {
-            avisar('No hay procesadoras para guardar.');
+            Notificacion.advertencia('No hay procesadoras para guardar.');
             return;
         }
 
         var vacias = filas.filter(function(f) { return !f.razon_social; });
 
         if (vacias.length) {
-            avisar('Hay ' + vacias.length + ' procesadora(s) sin razón social. Es lo que las '
-                 + 'identifica en la pantalla de carga.');
+            Notificacion.advertencia('Hay ' + vacias.length + ' procesadora(s) sin razón social.', {
+                detalle: 'Es lo que las identifica en la pantalla de carga.'
+            });
+
             return;
         }
 
@@ -283,7 +285,8 @@
         var razon = valor('nuevaRazonSocial');
 
         if (!razon) {
-            avisar('Ingresá la razón social de la procesadora.');
+            Notificacion.campoInvalido('nuevaRazonSocial',
+                'Ingresá la razón social de la procesadora.');
             return;
         }
 
@@ -482,24 +485,30 @@
         var porc = parseFloat(valor('nuevaAliPorcentaje'));
         var vigencia = valor('nuevaAliVigencia');
 
+        // Cada validación marca SU campo: el formulario tiene cuatro y un
+        // mensaje suelto obliga a adivinar cuál es el que falta.
         if (!idProc) {
-            avisar('Elegí una procesadora.');
+            Notificacion.campoInvalido('nuevaAliProcesadora', 'Elegí una procesadora.');
             return;
         }
 
         if (!concepto) {
-            avisar('Ingresá el concepto de la retención (por ejemplo IIBB o SICREB).');
+            Notificacion.campoInvalido('nuevaAliConcepto',
+                'Ingresá el concepto de la retención (por ejemplo IIBB o SICREB).');
             return;
         }
 
         if (isNaN(porc) || porc < 0) {
-            avisar('La alícuota tiene que ser un número no negativo.');
+            Notificacion.campoInvalido('nuevaAliPorcentaje',
+                'La alícuota tiene que ser un número no negativo.');
             return;
         }
 
         if (!vigencia) {
-            avisar('Ingresá desde qué fecha rige esta alícuota: es lo que permite cambiarla sin ' +
-                   'reescribir el neto de lo ya informado.');
+            Notificacion.campoInvalido('nuevaAliVigencia',
+                'Ingresá desde qué fecha rige esta alícuota.', {
+                detalle: 'Es lo que permite cambiarla sin reescribir el neto de lo ya informado.'
+            });
             return;
         }
 
@@ -522,20 +531,30 @@
     }
 
     function bajaAlicuota(id, boton) {
-        if (!confirm('¿Dar de baja esta vigencia?\n\nNo se borra: deja de regir. Los movimientos ' +
-                     'ya acreditados conservan la tasa con la que se calcularon, y los pendientes ' +
-                     'se recalculan con lo que quede vigente.')) {
-            return;
-        }
+        // La confirmación es asíncrona: no bloquea el hilo como confirm(), así
+        // que lo que venía después se mueve adentro del then.
+        Notificacion.confirmar({
+            titulo: 'Dar de baja la vigencia',
+            mensaje: '¿Dar de baja esta alícuota?',
+            detalle: 'No se borra: deja de regir. Los movimientos ya acreditados conservan la '
+                   + 'tasa con la que se calcularon, y los pendientes se recalculan con lo que '
+                   + 'quede vigente.',
+            confirmar: 'Dar de baja',
+            peligro: true
+        }).then(function(confirmado) {
+            if (!confirmado) {
+                return;
+            }
 
-        conBotonEl(boton, function() {
-            return pedirJson(URL_PARAM + '?action=bajaAlicuotaCobel', { id: id })
-                .then(function(r) {
-                    mostrarResultado('Alícuota dada de baja: deja de regir, pero la fila queda '
-                        + 'en el histórico.', r);
-                    cargar();
-                });
-        }, 'No se pudo dar de baja la alícuota');
+            conBotonEl(boton, function() {
+                return pedirJson(URL_PARAM + '?action=bajaAlicuotaCobel', { id: id })
+                    .then(function(r) {
+                        mostrarResultado('Alícuota dada de baja: deja de regir, pero la fila queda '
+                            + 'en el histórico.', r);
+                        cargar();
+                    });
+            }, 'No se pudo dar de baja la alícuota');
+        });
     }
 
     /**
@@ -792,9 +811,9 @@
             .replace(/"/g, '&quot;');
     }
 
+    /** Un error: no se cierra solo, porque trae el motivo del servidor */
     function avisar(mensaje) {
-        console.error(mensaje);
-        alert(mensaje);
+        Notificacion.error(mensaje);
     }
 
 })(); // Fin del IIFE

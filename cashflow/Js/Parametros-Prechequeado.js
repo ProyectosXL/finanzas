@@ -211,7 +211,7 @@
         var codigo = valor('nuevoCodigoPpq');
 
         if (!codigo) {
-            avisar('Ingresá el código del cliente.');
+            Notificacion.campoInvalido('nuevoCodigoPpq', 'Ingresá el código del cliente.');
             return;
         }
 
@@ -223,8 +223,16 @@
                         encontrado = null;
                         setValor('razonSocialPpq', '');
                         habilitar('btnAgregarClientePpq', false);
-                        avisar('El código "' + codigo + '" no existe en el maestro de clientes de '
-                             + 'Tango. Ojo con las mayúsculas: la comparación las distingue.');
+
+                        // No es un error del sistema: es un código que no existe.
+                        // Va como advertencia sobre el campo, que es lo que hay
+                        // que corregir.
+                        Notificacion.campoInvalido('nuevoCodigoPpq',
+                            'El código "' + codigo + '" no existe en el maestro de clientes de '
+                            + 'Tango.', {
+                            detalle: 'Ojo con las mayúsculas: la comparación las distingue.'
+                        });
+
                         return;
                     }
 
@@ -242,7 +250,10 @@
         // validación que vale es la del servidor: vuelve a buscar el código
         // antes de guardarlo.
         if (!encontrado || encontrado.codigo !== codigo) {
-            avisar('Buscá el código primero: se guarda la razón social que devuelve Tango.');
+            Notificacion.advertencia('Buscá el código primero.', {
+                detalle: 'Se guarda la razón social que devuelve Tango, no la que se tipee.'
+            });
+
             return;
         }
 
@@ -253,15 +264,26 @@
                     olvidarBusqueda();
                     mostrar('formClientePpq', false);
 
-                    // Se dice cuántos cheques trajo: si es cero, el código
-                    // existe pero probablemente no es el que se quería.
-                    alert((data.reactivado ? 'Cliente reactivado: ' : 'Cliente agregado: ')
-                        + data.cliente + ' - ' + data.razon_social + '. '
-                        + (data.cheques_vivos > 0
-                            ? 'Trae ' + data.cheques_vivos + ' cheque(s) vivos, que ya aparecen '
-                              + 'tildados en Echeqs → Venta Cobrada Anticipada.'
-                            : 'Hoy no tiene ningún cheque vivo. Revisá que el código sea el que '
-                              + 'buscabas.'));
+                    // Cuántos cheques trajo es lo que hay que decir: en cero, el
+                    // código existe pero probablemente no es el que se quería, y
+                    // eso no se nota de ninguna otra forma. Por eso ese caso va
+                    // como advertencia y no como éxito.
+                    var titulo = data.reactivado ? 'Cliente reactivado' : 'Cliente agregado';
+                    var quien = data.cliente + ' — ' + data.razon_social;
+
+                    if (data.cheques_vivos > 0) {
+                        Notificacion.exito(quien, {
+                            titulo: titulo,
+                            detalle: 'Trae ' + data.cheques_vivos + ' cheque(s) vivos, que ya '
+                                   + 'aparecen tildados en Echeqs → Venta Cobrada Anticipada.'
+                        });
+                    } else {
+                        Notificacion.advertencia(quien, {
+                            titulo: titulo + ', pero sin cheques',
+                            detalle: 'Hoy no tiene ningún cheque vivo. Revisá que el código sea '
+                                   + 'el que buscabas.'
+                        });
+                    }
 
                     cargar();
                 });
@@ -269,28 +291,49 @@
     }
 
     function cambiarEstado(codigo, activo, checkbox) {
-        var accion = activo ? 'addClientePrecheq' : 'bajaClientePrecheq';
-
-        if (!activo && !confirm('¿Dar de baja a ' + codigo + '? Sus cheques dejan de aparecer y '
-                + 'dejan de netear la cobranza de Ventas. No se borra nada.')) {
-            checkbox.checked = true;
-            return;
-        }
-
-        checkbox.disabled = true;
-
-        pedirJson(URL_PARAM + '?action=' + accion, { codigo: codigo })
-            .then(function() {
-                cargar();
-            })
-            .catch(function(error) {
-                // Reversión: dejar el switch como quedó haría creer que se
-                // guardó un cambio que el tablero no va a ver.
-                checkbox.checked = !activo;
-                checkbox.disabled = false;
-                avisar('No se pudo cambiar el estado, así que se dejó como estaba: '
-                    + error.message);
+        // Reactivar no se pregunta: no rompe nada y se deshace con el mismo
+        // switch. Dar de baja sí, porque cambia números del tablero.
+        var pregunta = activo
+            ? Promise.resolve(true)
+            : Notificacion.confirmar({
+                titulo: 'Dar de baja el cliente',
+                mensaje: '¿Dar de baja a ' + codigo + '?',
+                detalle: 'Sus cheques dejan de aparecer en la pantalla y dejan de netear la '
+                       + 'cobranza proyectada de Ventas. No se borra nada: las marcas por cheque '
+                       + 'quedan por si el cliente vuelve.',
+                confirmar: 'Dar de baja',
+                peligro: true
             });
+
+        pregunta.then(function(confirmado) {
+            if (!confirmado) {
+                checkbox.checked = true;
+                return;
+            }
+
+            checkbox.disabled = true;
+
+            return pedirJson(URL_PARAM + '?action=' + (activo ? 'addClientePrecheq'
+                                                              : 'bajaClientePrecheq'),
+                             { codigo: codigo })
+                .then(function() {
+                    Notificacion.exito(activo
+                        ? codigo + ' vuelve a operar con venta cobrada anticipada.'
+                        : codigo + ' quedó dado de baja.');
+
+                    cargar();
+                })
+                .catch(function(error) {
+                    // Reversión: dejar el switch como quedó haría creer que se
+                    // guardó un cambio que el tablero no va a ver.
+                    checkbox.checked = !activo;
+                    checkbox.disabled = false;
+
+                    Notificacion.error('No se pudo cambiar el estado: ' + error.message, {
+                        detalle: 'El cliente quedó como estaba.'
+                    });
+                });
+        });
     }
 
     /* ================================================================
@@ -390,9 +433,9 @@
             .replace(/"/g, '&quot;');
     }
 
+    /** Un error: no se cierra solo, porque trae el motivo del servidor */
     function avisar(mensaje) {
-        console.error(mensaje);
-        alert(mensaje);
+        Notificacion.error(mensaje);
     }
 
 })(); // Fin del IIFE
