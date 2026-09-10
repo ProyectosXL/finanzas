@@ -159,15 +159,23 @@ GO
    TAMPOCO devuelve el canal. El canal se deriva del prefijo del codigo de
    cliente y esa regla vive en Echeqs::canalDeCliente(), en un solo lugar.
 
-   NO FILTRA ESTADO = 'C'. Los cheques pre-chequeados suelen estar en 'A', que en
-   dbo.SBA14 es "aplicado": ya salio de cartera, sea depositado en el banco
-   (T_COMP_SAL = 'BDE') o endosado a un proveedor en una orden de pago
-   (T_COMP_SAL = 'O/P'). Se excluyen solo 'X' (anulado) y 'R' (rechazado): un
-   cheque rechazado no netea nada, y deja de netear SOLO, sin tocar su marca.
+   NO FILTRA ESTADO = 'C', Y ES UNA DECISION DE NEGOCIO. Netea lo que este
+   TILDADO, sin mirar el estado: quien tilda es quien sabe si esa venta esta
+   prepagada, y para eso existe la sub-pestana.
 
-   ESTADO viaja en la vista a proposito: es lo que permite auditar cuanto del
-   neteo sale de cheques que ya no estan en cartera. Ver el aviso que deja
-   Ventas::getNeteoPrechequeado() y la nota de README-ventas.md.
+   Los pre-chequeados estan casi todos en 'A', que en dbo.SBA14 es "aplicado":
+   el cheque ya salio de cartera, sea depositado en el banco (T_COMP_SAL = 'BDE')
+   o endosado a un proveedor en una orden de pago (T_COMP_SAL = 'O/P'). Verificado
+   contra la base: 187 de 250 son endosos y 60 son depositos. Filtrar por 'C'
+   dejaria el circuito sin efecto.
+
+   Se excluyen solo 'X' (anulado) y 'R' (rechazado), que no son plata. Ese filtro
+   es lo que hace que un cheque rechazado deje de netear SOLO, sin que nadie
+   tenga que acordarse de destildarlo.
+
+   ESTADO viaja igual en la vista: es lo que permite auditar cuanto del neteo
+   sale de cheques que ya no estan en cartera. El pie de la sub-pestana lo
+   muestra abierto. Ver README-ventas.md.
 
    ESTA VISTA Y Echeqs::cruzarPrechequeado() SON LAS DOS CARAS DE LA MISMA REGLA.
    La de PHP es la que dibuja la pantalla; esta es la que alimenta el neteo y se

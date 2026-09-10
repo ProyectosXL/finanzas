@@ -220,9 +220,11 @@
                 </div>
             </div>
 
-            <!-- El corte por estado no es decoración: los cheques que ya salieron
-                 de cartera no los suma ninguna fila del tablero, así que su
-                 neteo sólo cierra si esa plata llegó por otro lado. -->
+            <!-- El neteo va por tilde y no por estado: lo decide quien tilda.
+                 Pero los dos casos no se comportan igual en el tablero, y estas
+                 dos tarjetas son las que dejan ver de cuánto se está hablando:
+                 un cheque en cartera cierra solo, uno ya aplicado resta sin que
+                 ninguna fila lo sume. -->
             <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">

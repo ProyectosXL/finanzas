@@ -313,21 +313,27 @@ chequear('pero se informa', 60.0, $n['sin_canal']);
 chequear('y el aviso lo dice', true,
     strpos(implode(' ', Ventas::avisosNeteo($n, 0)), 'no reconcilian') !== false);
 
-seccion('los cheques que ya salieron de cartera se informan aparte');
+seccion('netea lo tildado, sin mirar el estado del cheque');
 
-// Un cheque en 'C' cierra solo: suma en la fila de cartera y resta en Ventas.
-// Uno en 'A' no lo suma ninguna fila del tablero, asi que su neteo deja un
-// agujero. Ver el punto abierto en README-ventas.md.
+// Decision de negocio: quien tilda es quien sabe si esa venta esta prepagada.
+// Los pre-chequeados estan tipicamente en 'A' -ya aplicados-, justamente porque
+// el cheque se recibio y se uso antes de facturar. Filtrar por 'C' dejaria
+// afuera casi todo el neteo.
 $n = Ventas::repartirNeteo([
     marcado('2026-09-10', 100, 'FRCAST', 'C'),
     marcado('2026-09-11', 400, 'FRCAST', 'A')
 ], $ejeDias, $ejeMeses, 0);
 
-chequear('los dos netean', 500.0, $n['total']);
-chequear('pero lo que ya salio de cartera queda contado aparte',
-    400.0, $n['fuera_de_cartera']);
-chequear('y se avisa', true,
-    strpos(implode(' ', Ventas::avisosNeteo($n, 0)), 'ya no están en cartera') !== false);
+chequear('un cheque ya aplicado netea igual que uno en cartera', 500.0, $n['total']);
+
+// El dato sigue disponible para la pantalla, que muestra los marcados abiertos
+// por estado: es donde se decide que tildar.
+chequear('lo que ya salio de cartera queda contado aparte', 400.0, $n['fuera_de_cartera']);
+
+// Pero NO genera aviso: los avisos son para lo excepcional. Uno que aparece
+// siempre deja de leerse.
+chequear('y no genera ningun aviso, porque es el caso normal',
+    0, count(Ventas::avisosNeteo($n, 0)));
 
 seccion('el signo del neteo');
 

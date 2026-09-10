@@ -590,6 +590,13 @@ class Ventas {
      * puede netear en ninguna columna. Va a un aviso, igual que hace el resto del
      * modulo con 'fuera_horizonte'.
      *
+     * NETEA TODO LO TILDADO, SIN MIRAR EL ESTADO DEL CHEQUE. Es una decision de
+     * negocio: quien tilda es quien sabe si esa venta esta prepagada, y los
+     * cheques pre-chequeados estan tipicamente en 'A' -ya aplicados- justamente
+     * porque se recibieron y se usaron antes de facturar. Filtrar por ESTADO = 'C'
+     * dejaria afuera casi todo el neteo. Lo unico que se excluye son 'X' y 'R',
+     * anulado y rechazado, que no son plata: eso lo hace la vista origen.
+     *
      * NO LANZA SI EL ORIGEN NO ESTA. Este metodo lo llama proyectarCobranzas(),
      * que dibuja la pestana Ventas entera: una vista que todavia no se creo tiene
      * que dejar el neteo en cero y avisar, no tumbar la pantalla.
@@ -724,9 +731,19 @@ class Ventas {
     }
 
     /**
-     * Los tres avisos del neteo. Ninguno es opcional: los tres describen plata
-     * que el cuadro no cierra, y un cuadro que no cierra sin decirlo es peor que
-     * uno que falla.
+     * Los avisos del neteo. Describen plata por la que el cuadro no cierra, y un
+     * cuadro que no cierra sin decirlo es peor que uno que falla.
+     *
+     * NO SE AVISA POR EL ESTADO DEL CHEQUE, y es una decision de negocio tomada:
+     * netea lo que este TILDADO, sin importar si el cheque sigue en cartera o ya
+     * se aplico. Quien tilda es quien sabe si esa venta esta prepagada, y esa es
+     * exactamente la funcion de la sub-pestana. Un aviso por cada cheque
+     * aplicado seria ruido permanente sobre el caso normal -los pre-chequeados
+     * estan tipicamente en 'A'-, y un aviso que aparece siempre deja de leerse.
+     *
+     * El dato sigue estando: 'fuera_de_cartera' viaja en el neteo y el pie de la
+     * sub-pestana muestra los marcados abiertos por estado, que es donde se
+     * decide que tildar.
      *
      * @param array $neteo Resultado de repartirNeteo()
      * @param int $diasPrecheq
@@ -747,14 +764,6 @@ class Ventas {
                 . number_format($neteo['sin_canal'], 2, ',', '.') . ' no se pudieron imputar a '
                 . 'ningún canal y sólo se restan del total. La fila total de cobranza y su '
                 . 'apertura por canal no reconcilian por ese importe.';
-        }
-
-        if ($neteo['fuera_de_cartera'] > 0) {
-            $avisos[] = 'Neteo de cheques adelantados: $ '
-                . number_format($neteo['fuera_de_cartera'], 2, ',', '.') . ' salen de cheques que '
-                . 'ya no están en cartera. Ese importe se resta de la cobranza pero ninguna fila '
-                . 'del tablero lo suma: verificá que esa plata esté reflejada en Saldos antes de '
-                . 'leer el número como bueno.';
         }
 
         return $avisos;

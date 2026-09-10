@@ -309,26 +309,27 @@ El importe cae en el bucket diario de esa fecha, o en el mensual si quedó fuera
 
 `RO_T_CASHFLOW_VENTAS_PRECHEQ` **ya no es el origen** y no tiene lector. Queda creada porque puede tener filas en algún ambiente. Ver `sql/ventas_proyeccion.sql` §6.
 
-### Tres cosas que el neteo avisa en vez de callar
+### Dos cosas que el neteo avisa en vez de callar
 
-- **Lo que cae antes del inicio del eje.** Con `dias_prechequeado > 0` la fecha teórica puede quedar en el pasado, y ahí no hay columna donde restar. Va a un aviso con el monto.
+- **Lo que cae antes del inicio del eje.** Con `dias_prechequeado > 0` la fecha teórica puede quedar en el pasado, y ahí no hay columna donde restar. Va a un aviso con el monto. No alcanza con preguntarle a `Horizonte::ubicar()` si encontró columna: una fecha de los primeros días del mes **en curso** cae en la columna de ese mes, que existe pero no representa ningún día futuro y la pantalla ni siquiera la dibuja. Por eso el corte es contra el primer día del eje.
 - **Lo que no se pudo imputar a un canal.** El canal sale del prefijo del código de cliente (`Echeqs::canalDeCliente()`): `F` es Franquicias y `L` es Locales. Si algún importe no mapea, se resta sólo del total y el aviso dice por cuánta plata la fila total y su apertura por canal no reconcilian.
-- **Lo que sale de cheques que ya no están en cartera.** Ver abajo.
 
-### El punto abierto: los cheques con `ESTADO = 'A'`
+### Netea lo tildado, sin mirar el estado del cheque
 
-Los cheques en `'C'` cierran solos: entran por la fila *Echeqs en cartera* y salen por el neteo, neto cero. Los `'A'` **no**: la sub-pestaña de cartera no los muestra, así que ninguna fila del tablero los suma, y el neteo sí los resta.
+**Es una decisión de negocio, y es la respuesta al punto que quedaba abierto.** Quien tilda es quien sabe si esa venta está prepagada, y para eso está la sub-pestaña. El módulo no filtra por estado.
 
-Verificado contra la base: `'A'` en `dbo.SBA14` es **aplicado**, o sea que el cheque ya salió de cartera. Todos los `'A'` con fecha futura traen `FECHA_SAL` y `T_COMP_SAL` informados, y se reparten en dos casos:
+Importa porque el dato podía llevar a la conclusión contraria. Verificado contra la base, `'A'` en `dbo.SBA14` es **aplicado**: el cheque ya salió de cartera. Todos los `'A'` con fecha futura traen `FECHA_SAL` y `T_COMP_SAL` informados, y se reparten en dos casos:
 
-| `T_COMP_SAL` | Qué pasó | Dónde está esa plata |
+| `T_COMP_SAL` | Qué pasó | Cuántos |
 | --- | --- | --- |
-| `O/P` (187 de 250) | Endosado a un proveedor en una orden de pago | En ningún lado del tablero: nunca va a entrar al banco |
-| `BDE` (60 de 250) | Depositado en una boleta de depósito | Todavía en ningún lado: es un cheque diferido depositado, no acreditado |
+| `O/P` | Endosado a un proveedor en una orden de pago | 187 de 250 |
+| `BDE` | Depositado en una boleta de depósito | 60 de 250 |
 
-**En ninguno de los dos casos el importe está reflejado en Saldos**, así que hoy el tablero perdería esa plata: no la cuenta como ingreso y además la descuenta de la cobranza proyectada. `Ventas::getNeteoPrechequeado()` deja un aviso con el monto exacto y el pie de la sub-pestaña lo muestra abierto por estado.
+Ninguno de los dos está hoy reflejado en Saldos, y la sub-pestaña de cartera tampoco los muestra —sólo trae `'C'`—, así que **el tablero resta ese importe de la cobranza sin haberlo sumado en ninguna fila**. Es el precio de netear por tilde y no por estado, y es lo que se decidió: los cheques pre-chequeados están típicamente en `'A'` justamente porque se reciben y se usan antes de facturar, así que filtrar por `'C'` dejaría afuera casi todo el neteo.
 
-**Antes de encender el neteo en producción** —es decir, antes de cargar clientes en Parámetros → Pre-chequeado— hay que decidir qué hacer con esos cheques. La corrección probablemente sea una serie más del proveedor de Echeqs, pero no está escrita porque el criterio es de negocio.
+Lo único que se excluye es `'X'` y `'R'` —anulado y rechazado—, que no son plata. Eso lo hace la vista origen, así que un cheque que se rechaza deja de netear **solo**, sin que nadie tenga que destildarlo.
+
+El dato sigue a la vista para poder auditarlo: el pie de la sub-pestaña muestra los marcados **abiertos por estado** y hay dos tarjetas separando *marcados en cartera* de *marcados fuera de cartera*. No genera aviso en el tablero: es el caso normal, y un aviso que aparece siempre deja de leerse.
 
 ---
 

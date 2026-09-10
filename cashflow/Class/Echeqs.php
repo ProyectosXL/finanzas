@@ -214,10 +214,12 @@ class Echeqs {
      * Resumen del pie de la sub-pestana: cuanto hay marcado y como se reparte por
      * estado.
      *
-     * El corte por ESTADO no es decoracion. Los cheques en 'C' cierran solos -
-     * entran por cartera y salen por el neteo-, pero los que ya salieron de
-     * cartera solo netean bien si esa plata llego al tablero por otra fila. Este
-     * total es lo que hace verificable ese punto. Ver README-cashflow.md.
+     * El corte por ESTADO no es decoracion. El neteo va por TILDE y no por
+     * estado -es criterio del usuario, ver README-ventas.md-, pero los dos casos
+     * no se comportan igual en el tablero: un cheque en 'C' cierra solo, porque
+     * entra por la fila de cartera y sale por el neteo; uno ya aplicado resta sin
+     * que ninguna fila lo sume. Este corte es lo que permite ver de cuanto se
+     * esta hablando antes de tildar.
      *
      * @param array $filas Filas devueltas por cruzarPrechequeado()
      * @return array
