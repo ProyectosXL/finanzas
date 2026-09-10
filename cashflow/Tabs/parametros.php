@@ -196,6 +196,13 @@
             <?php include __DIR__ . '/parametros_cob_electronicos.php'; ?>
         </div>
 
+        <!-- Maestro de clientes que operan con venta cobrada anticipada. Acota
+             el listado de Echeqs → Venta Cobrada Anticipada, que es de donde
+             sale el neteo de cheques adelantados de Ventas. Mismo criterio que
+             Saldos y Cob. Electrónicos: archivo y JS propios, y clases con
+             prefijo ppq-. -->
+        <div class="tab-pane fade" id="paneParamPrechequeado" role="tabpanel">
+            <?php include __DIR__ . '/parametros_prechequeado.php'; ?>
         <!-- Parámetros del módulo Cobranzas: PPP calculado y editable, y escalas de descuento por cliente -->
         <div class="tab-pane fade" id="paneParamCobranzas" role="tabpanel">
             <?php include __DIR__ . '/parametros_cobranzas.php'; ?>
@@ -219,5 +226,6 @@
 <script src="Js/Parametros.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Saldos.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Cob-Electronicos.js?v=<?php echo time(); ?>"></script>
+<script src="Js/Parametros-Prechequeado.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Cobranzas.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Estructura.js?v=<?php echo time(); ?>"></script>

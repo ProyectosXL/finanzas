@@ -291,15 +291,45 @@ Mix de cobro inicial (cada canal suma 100%):
 
 ## Neteo de cheques adelantados
 
-El circuito está **cableado y apagado**: la vista origen todavía no existe.
+**El circuito está enchufado.** Hay clientes que entregan los echeqs *antes* de que se les facture: esa venta futura ya está cobrada y proyectarla de nuevo la contaría dos veces.
 
-- `RO_T_CASHFLOW_VENTAS_PRECHEQ` creada y vacía
-- parámetro `dias_prechequeado`
-- `Ventas::getNeteoPrechequeado()` devuelve cero
-- `case getNeteoPrechequeado` en el controller
-- fila en la tabla de cobranza mostrando `0`
+| Pieza | Qué hace |
+| --- | --- |
+| `Echeqs → Venta Cobrada Anticipada` | Dónde se tilda qué cheques netean |
+| `Parámetros → Pre-chequeado` | Qué clientes operan con la modalidad |
+| `RO_V_CASHFLOW_VENTAS_PRECHEQ` | La vista origen. La crea `sql/echeqs_prechequeado.sql` |
+| `dias_prechequeado` | Cuántos días antes del cheque se emite la factura |
+| `Ventas::getNeteoPrechequeado()` | Reparte el importe contra el eje y avisa lo que no entra |
 
-Cuando exista la vista, sólo hay que enchufar el origen de datos en `getNeteoPrechequeado()`. La lógica futura está documentada ahí y en el DDL: se toma la fecha del cheque, se le restan `dias_prechequeado` días para obtener la fecha teórica de la factura, y el importe se resta de la cobranza proyectada de esa fecha o de ese mes.
+```
+FECHA_TEORICA_FACTURA = FECHA_CHEQUE − dias_prechequeado
+```
+
+El importe cae en el bucket diario de esa fecha, o en el mensual si quedó fuera del tramo diario: es la misma regla de `Horizonte::ubicar()` que usa el resto del módulo, no una copia.
+
+`RO_T_CASHFLOW_VENTAS_PRECHEQ` **ya no es el origen** y no tiene lector. Queda creada porque puede tener filas en algún ambiente. Ver `sql/ventas_proyeccion.sql` §6.
+
+### Dos cosas que el neteo avisa en vez de callar
+
+- **Lo que cae antes del inicio del eje.** Con `dias_prechequeado > 0` la fecha teórica puede quedar en el pasado, y ahí no hay columna donde restar. Va a un aviso con el monto. No alcanza con preguntarle a `Horizonte::ubicar()` si encontró columna: una fecha de los primeros días del mes **en curso** cae en la columna de ese mes, que existe pero no representa ningún día futuro y la pantalla ni siquiera la dibuja. Por eso el corte es contra el primer día del eje.
+- **Lo que no se pudo imputar a un canal.** El canal sale del prefijo del código de cliente (`Echeqs::canalDeCliente()`): `F` es Franquicias y `L` es Locales. Si algún importe no mapea, se resta sólo del total y el aviso dice por cuánta plata la fila total y su apertura por canal no reconcilian.
+
+### Netea lo tildado, sin mirar el estado del cheque
+
+**Es una decisión de negocio, y es la respuesta al punto que quedaba abierto.** Quien tilda es quien sabe si esa venta está prepagada, y para eso está la sub-pestaña. El módulo no filtra por estado.
+
+Importa porque el dato podía llevar a la conclusión contraria. Verificado contra la base, `'A'` en `dbo.SBA14` es **aplicado**: el cheque ya salió de cartera. Todos los `'A'` con fecha futura traen `FECHA_SAL` y `T_COMP_SAL` informados, y se reparten en dos casos:
+
+| `T_COMP_SAL` | Qué pasó | Cuántos |
+| --- | --- | --- |
+| `O/P` | Endosado a un proveedor en una orden de pago | 187 de 250 |
+| `BDE` | Depositado en una boleta de depósito | 60 de 250 |
+
+Ninguno de los dos está hoy reflejado en Saldos, y la sub-pestaña de cartera tampoco los muestra —sólo trae `'C'`—, así que **el tablero resta ese importe de la cobranza sin haberlo sumado en ninguna fila**. Es el precio de netear por tilde y no por estado, y es lo que se decidió: los cheques pre-chequeados están típicamente en `'A'` justamente porque se reciben y se usan antes de facturar, así que filtrar por `'C'` dejaría afuera casi todo el neteo.
+
+Lo único que se excluye es `'X'` y `'R'` —anulado y rechazado—, que no son plata. Eso lo hace la vista origen, así que un cheque que se rechaza deja de netear **solo**, sin que nadie tenga que destildarlo.
+
+El dato sigue a la vista para poder auditarlo: el pie de la sub-pestaña muestra los marcados **abiertos por estado** y hay dos tarjetas separando *marcados en cartera* de *marcados fuera de cartera*. No genera aviso en el tablero: es el caso normal, y un aviso que aparece siempre deja de leerse.
 
 ---
 

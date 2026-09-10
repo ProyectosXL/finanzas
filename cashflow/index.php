@@ -24,6 +24,10 @@ session_start();
     <!-- Custom CSS -->
     <link href="Css/sidebar.css?v=<?php echo time(); ?>" rel="stylesheet">
     <link href="Css/main.css?v=<?php echo time(); ?>" rel="stylesheet">
+    <!-- Notificaciones de acción (Js/notificaciones.js). Va acá y no en una
+         pestaña porque su contenedor cuelga de <body> y tiene que sobrevivir al
+         reemplazo de #tabContent. -->
+    <link href="Css/notificaciones.css?v=<?php echo time(); ?>" rel="stylesheet">
 </head>
 <body>
   
@@ -58,6 +62,10 @@ session_start();
     <!-- Custom JS -->
     <script src="Js/sidebar.js"></script>
     <script src="Js/main.js"></script>
+    <!-- Notificaciones de una acción del usuario: reemplazan a alert() y
+         confirm(). Van acá por el mismo motivo que eje-vistas.js: las pestañas
+         se cargan por AJAX y esto tiene que existir antes que ellas. -->
+    <script src="Js/notificaciones.js?v=<?php echo time(); ?>"></script>
     <!-- Las tres vistas del eje temporal (Días / Meses / Período completo).
          Va acá y no en cada pestaña porque lo usan todas las que tienen eje, y
          las pestañas se cargan por AJAX. -->

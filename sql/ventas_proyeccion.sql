@@ -205,10 +205,14 @@ GO
    Neteo de cheques adelantados (echeqs ya recibidos por ventas anteriores),
    para no duplicar cobranza.
 
-   QUEDA CABLEADA Y VACIA A PROPOSITO: la vista origen todavia no existe.
-   getNeteoPrechequeado() devuelve 0 hasta que se enchufe el origen.
+   YA NO ES EL ORIGEN DE DATOS. El neteo sale hoy de la vista
+   dbo.RO_V_CASHFLOW_VENTAS_PRECHEQ, que crea sql/echeqs_prechequeado.sql y que
+   arma la sub-pestana Echeqs -> Venta Cobrada Anticipada. Esta tabla queda sin
+   uso y sin lector: no se borra porque puede tener filas cargadas en algun
+   ambiente, y borrarla se las llevaria puestas.
 
-   Logica futura, cuando exista la vista origen:
+   La regla de reparto es la misma que estaba documentada aca y sigue vigente,
+   solo que la aplica Ventas::getNeteoPrechequeado() sobre la vista:
      FECHA_TEORICA_FACTURA = FECHA_CHEQUE - parametro 'dias_prechequeado'
      El IMPORTE se resta de la cobranza proyectada de esa fecha (tramo diario)
      o de ese mes (tramo mensual).

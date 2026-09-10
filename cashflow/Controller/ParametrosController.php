@@ -513,6 +513,80 @@ try {
             break;
 
         /* ================================================================
+           MODULO ECHEQS - MAESTRO DE PRE-CHEQUEADO
+
+           El ABM vive en Class/Echeqs.php, que es la clase duena de esas
+           tablas. Mismo patron que Saldos y Cob. Electronicos: un alta que
+           chequea la clave natural antes de insertar y ninguna baja fisica.
+
+           La particularidad de este maestro es que el codigo se valida contra
+           dbo.GVA14 antes de guardarlo. Un codigo tipeado mal no da error: da un
+           listado vacio en la pestana Echeqs y nadie entiende por que.
+           ================================================================ */
+
+        case 'buscarClientePrecheq':
+            require_once __DIR__ . '/../Class/Echeqs.php';
+
+            $codigo = isset($_GET['codigo']) ? $_GET['codigo'] : '';
+            $cliente = (new Echeqs())->buscarCliente($codigo);
+
+            // No es un error que no exista: es el resultado de una busqueda, y
+            // la pantalla lo usa para decidir si habilita el boton de agregar.
+            echo json_encode([
+                'success' => true,
+                'data' => ($cliente === null)
+                    ? ['encontrado' => false]
+                    : [
+                        'encontrado' => true,
+                        'codigo' => $cliente['COD_CLIENT'],
+                        'razon_social' => $cliente['RAZON_SOCI']
+                    ]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'addClientePrecheq':
+            $data = bodyJson();
+
+            if (!isset($data['codigo'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/Echeqs.php';
+
+            // Sirve tambien para reactivar una baja: la clase resuelve cual de
+            // los dos casos es y lo dice en la respuesta.
+            $r = (new Echeqs())->guardarClientePrechequeado($data['codigo'], usuarioActual());
+
+            echo json_encode([
+                'success' => true,
+                'message' => ($r['reactivado'] ? 'Cliente reactivado: ' : 'Cliente agregado: ')
+                    . $r['cliente'] . ' - ' . $r['razon_social'] . '. '
+                    . ($r['cheques_vivos'] > 0
+                        ? 'Sus ' . $r['cheques_vivos'] . ' cheque(s) vivos ya aparecen tildados '
+                          . 'en Echeqs → Venta Cobrada Anticipada.'
+                        : 'Hoy no tiene ningún cheque vivo, así que la pantalla de Echeqs no va a '
+                          . 'mostrar nada suyo.'),
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'bajaClientePrecheq':
+            $data = bodyJson();
+
+            if (!isset($data['codigo'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/Echeqs.php';
+
+            // Baja LOGICA: la fila queda, sus cheques salen del listado y dejan
+            // de netear la cobranza de Ventas.
+            (new Echeqs())->bajaClientePrechequeado($data['codigo'], usuarioActual());
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Cliente dado de baja. No se borró: queda inhabilitado, sus cheques '
+                           . 'salen del listado y dejan de netear la cobranza proyectada.'
            MODULO COBRANZAS (PPP y Escalas de Descuento por Cliente)
            ================================================================ */
 

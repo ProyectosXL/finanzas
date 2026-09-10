@@ -4,6 +4,7 @@ require_once __DIR__ . '/Parametros.php';
 require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/EjeVista.php';
 require_once __DIR__ . '/Cotizacion.php';
+require_once __DIR__ . '/Echeqs.php';
 
 /**
  * Ventas
@@ -44,6 +45,12 @@ require_once __DIR__ . '/Cotizacion.php';
  * emitidas. Este modulo proyecta cobranza de ventas futuras y no se cruza con
  * ellas. En el cashflow consolidado:
  *   Cobranza total = cobranza real (facturas emitidas) + cobranza estimada.
+ *
+ * EL NETEO DE CHEQUES ADELANTADOS ES LA EXCEPCION a esa independencia, y va en
+ * el otro sentido: hay clientes que entregan los echeqs ANTES de que se les
+ * facture, asi que esa venta futura ya esta cobrada y no se puede proyectar de
+ * nuevo. getNeteoPrechequeado() devuelve cuanto restar, por columna del eje y
+ * por canal. Lo que hay que netear sale de Echeqs -> Venta Cobrada Anticipada.
  *
  * NINGUN VALOR DE NEGOCIO ESTA HARDCODEADO: alicuota, horizonte, feriados,
  * participaciones de respaldo, mix y plazos salen de las tablas de parametros.
@@ -557,43 +564,210 @@ class Ventas {
     /**
      * Neteo de cheques adelantados.
      *
-     * CABLEADO Y APAGADO A PROPOSITO: la vista origen todavia no existe, asi que
-     * RO_T_CASHFLOW_VENTAS_PRECHEQ esta vacia y esto devuelve siempre cero. El
-     * circuito completo (tabla, parametro, metodo, case del controller y fila
-     * del front) ya esta armado: cuando exista la vista solo se enchufa el
-     * origen de datos.
+     * QUE RESUELVE
+     * Hay clientes que entregan los cheques ANTES de que se les facture. Esa
+     * cobranza ya esta en la casa, asi que cuando este motor proyecta la cobranza
+     * de la venta futura de ese cliente la estaria contando de nuevo. Lo que
+     * devuelve este metodo es lo que hay que RESTAR para que no pase.
      *
-     * LOGICA FUTURA
-     * Se toma la fecha del cheque, se le restan 'dias_prechequeado' dias para
-     * obtener la fecha teorica de la factura, y el importe se resta de la
-     * cobranza proyectada de esa fecha (tramo diario) o de ese mes (tramo
-     * mensual). Es para no duplicar cobranza de echeqs ya recibidos por ventas
-     * anteriores.
+     * EL ORIGEN
+     * dbo.RO_V_CASHFLOW_VENTAS_PRECHEQ, que trae los cheques efectivamente
+     * marcados en Echeqs -> Venta Cobrada Anticipada. Se crea con
+     * sql/echeqs_prechequeado.sql. Reemplaza como origen a la tabla
+     * RO_T_CASHFLOW_VENTAS_PRECHEQ, que queda sin uso.
+     *
+     * LA REGLA
+     *     FECHA_TEORICA_FACTURA = FECHA_CHEQUE - dias_prechequeado
+     * y el importe cae en el bucket diario de esa fecha, o en el mensual si quedo
+     * fuera del tramo diario. El reparto lo decide Horizonte::ubicar(), que es la
+     * misma regla "dia O mes, nunca las dos" que usa todo el modulo.
+     *
+     * 'dias_prechequeado' se lee de los parametros y NO de la vista: es un valor
+     * editable, y un parametro leido desde dos lugares se va a desincronizar.
+     *
+     * LO QUE CAE ANTES DEL EJE NO SE DESCARTA CALLADO. Con dias_prechequeado > 0
+     * la fecha teorica puede quedar antes del inicio del eje, y ese importe no se
+     * puede netear en ninguna columna. Va a un aviso, igual que hace el resto del
+     * modulo con 'fuera_horizonte'.
+     *
+     * NETEA TODO LO TILDADO, SIN MIRAR EL ESTADO DEL CHEQUE. Es una decision de
+     * negocio: quien tilda es quien sabe si esa venta esta prepagada, y los
+     * cheques pre-chequeados estan tipicamente en 'A' -ya aplicados- justamente
+     * porque se recibieron y se usaron antes de facturar. Filtrar por ESTADO = 'C'
+     * dejaria afuera casi todo el neteo. Lo unico que se excluye son 'X' y 'R',
+     * anulado y rechazado, que no son plata: eso lo hace la vista origen.
+     *
+     * NO LANZA SI EL ORIGEN NO ESTA. Este metodo lo llama proyectarCobranzas(),
+     * que dibuja la pestana Ventas entera: una vista que todavia no se creo tiene
+     * que dejar el neteo en cero y avisar, no tumbar la pantalla.
+     *
+     * EL SIGNO: los importes se devuelven POSITIVOS. Quien consume es el que
+     * resta (VentasProvider::cobranzaNeta() y el pie de Js/Ingresos-Ventas.js).
      *
      * @param array $dias Lista de fechas 'Y-m-d' del tramo diario
      * @param array $meses Lista de claves 'Y-m' del tramo mensual
-     * @return array ['dias' => mapa, 'meses' => mapa, 'total' => float]
+     * @return array ['dias' => mapa, 'meses' => mapa, 'total' => float,
+     *                'canales' => mapa canal => ['dias','meses'],
+     *                'fuera_horizonte' => float, 'sin_canal' => float,
+     *                'fuera_de_cartera' => float]
      */
     public function getNeteoPrechequeado($dias = [], $meses = []) {
+        $diasPrecheq = 0;
+        $filas = [];
+
+        try {
+            $diasPrecheq = Parametros::ent(
+                $this->parametros->getParametrosMap(), 'dias_prechequeado');
+            $filas = (new Echeqs())->getPrechequeadoTotales();
+        } catch (Throwable $e) {
+            $this->warnings[] = 'No se pudo leer el neteo de cheques adelantados ('
+                . $e->getMessage() . '). La cobranza se muestra sin netear.';
+
+            return self::repartirNeteo([], $dias, $meses, 0);
+        }
+
+        $neteo = self::repartirNeteo($filas, $dias, $meses, $diasPrecheq);
+
+        foreach (self::avisosNeteo($neteo, $diasPrecheq) as $aviso) {
+            $this->warnings[] = $aviso;
+        }
+
+        return $neteo;
+    }
+
+    /**
+     * Reparte los cheques marcados contra las columnas del eje. Es la regla del
+     * neteo, sin base de datos.
+     *
+     * Va aparte y estatica porque lo unico delicado de este calculo es el
+     * reparto, y sobre todo QUE SE DESCARTA: probarlo obligaria a tener cheques
+     * cargados con fechas conocidas, que es justamente lo que no se puede pedir
+     * de una tabla de Tango.
+     *
+     * LO QUE CAE ANTES DEL INICIO DEL EJE NO SE NETEA. Y no alcanza con
+     * preguntarle a Horizonte::ubicar() si encontro columna: una fecha teorica de
+     * los primeros dias del mes EN CURSO cae en la columna de ese mes, que existe
+     * en la serie pero no representa ningun dia futuro -la pestana ni siquiera la
+     * dibuja-. Restar ahi seria hacer desaparecer el importe en una columna que
+     * nadie ve. Por eso el corte es contra el primer dia del eje.
+     *
+     * @param array $filas Filas de Echeqs::getPrechequeadoTotales()
+     * @param array $dias Lista de fechas 'Y-m-d' del tramo diario
+     * @param array $meses Lista de claves 'Y-m' del tramo mensual
+     * @param int $diasPrecheq Dias a restarle a la fecha del cheque
+     * @return array
+     */
+    public static function repartirNeteo($filas, $dias, $meses, $diasPrecheq) {
         $neteo = [
             'dias' => [],
             'meses' => [],
-            'total' => 0
+            'total' => 0,
+            'canales' => [],
+            'fuera_horizonte' => 0,
+            'fuera_de_cartera' => 0,
+            'sin_canal' => 0
         ];
 
-        foreach ($dias as $fecha) {
+        foreach (is_array($dias) ? $dias : [] as $fecha) {
             $neteo['dias'][$fecha] = 0;
         }
 
-        foreach ($meses as $clave) {
+        foreach (is_array($meses) ? $meses : [] as $clave) {
             $neteo['meses'][$clave] = 0;
         }
 
-        // Sin origen de datos todavia: la tabla esta vacia y el neteo es cero.
-        // Cuando exista la vista, aca se leera RO_T_CASHFLOW_VENTAS_PRECHEQ
-        // agrupando por FECHA_TEORICA_FACTURA y se restara de cada bucket.
+        // La apertura por canal arranca completa y en cero: una fila del tablero
+        // que apunte a un canal sin cheques tiene que ver ceros, no una clave
+        // ausente.
+        foreach (Parametros::CANALES as $canal) {
+            $neteo['canales'][$canal] = [
+                'dias' => $neteo['dias'],
+                'meses' => $neteo['meses']
+            ];
+        }
+
+        // El primer dia del eje. Sin tramo diario -el Analisis de Ventas arma un
+        // horizonte solo mensual- se cae a hoy, que es donde arranca el eje de
+        // todos modos.
+        $inicio = !empty($neteo['dias']) ? min(array_keys($neteo['dias'])) : date('Y-m-d');
+        $diasPrecheq = intval($diasPrecheq);
+
+        foreach (is_array($filas) ? $filas : [] as $fila) {
+            $importe = floatval($fila['IMPORTE']);
+
+            if ($importe == 0) {
+                continue;
+            }
+
+            $teorica = date('Y-m-d',
+                strtotime($fila['FECHA_CHEQUE'] . ' -' . $diasPrecheq . ' days'));
+
+            $destino = ($teorica < $inicio) ? null : Horizonte::ubicar($neteo, $teorica);
+
+            if ($destino === null) {
+                $neteo['fuera_horizonte'] += $importe;
+                continue;
+            }
+
+            $neteo[$destino[0]][$destino[1]] += $importe;
+            $neteo['total'] += $importe;
+
+            // El canal sale del prefijo del codigo de cliente. Sin esto el neteo
+            // solo se podria restar del total, y la fila total del tablero
+            // dejaria de reconciliar con su apertura por canal.
+            $canal = Echeqs::canalDeCliente($fila['COD_CLIENTE']);
+
+            if ($canal !== null && isset($neteo['canales'][$canal])) {
+                $neteo['canales'][$canal][$destino[0]][$destino[1]] += $importe;
+            } else {
+                $neteo['sin_canal'] += $importe;
+            }
+
+            if ($fila['ESTADO'] !== Echeqs::ESTADO_CARTERA) {
+                $neteo['fuera_de_cartera'] += $importe;
+            }
+        }
 
         return $neteo;
+    }
+
+    /**
+     * Los avisos del neteo. Describen plata por la que el cuadro no cierra, y un
+     * cuadro que no cierra sin decirlo es peor que uno que falla.
+     *
+     * NO SE AVISA POR EL ESTADO DEL CHEQUE, y es una decision de negocio tomada:
+     * netea lo que este TILDADO, sin importar si el cheque sigue en cartera o ya
+     * se aplico. Quien tilda es quien sabe si esa venta esta prepagada, y esa es
+     * exactamente la funcion de la sub-pestana. Un aviso por cada cheque
+     * aplicado seria ruido permanente sobre el caso normal -los pre-chequeados
+     * estan tipicamente en 'A'-, y un aviso que aparece siempre deja de leerse.
+     *
+     * El dato sigue estando: 'fuera_de_cartera' viaja en el neteo y el pie de la
+     * sub-pestana muestra los marcados abiertos por estado, que es donde se
+     * decide que tildar.
+     *
+     * @param array $neteo Resultado de repartirNeteo()
+     * @param int $diasPrecheq
+     * @return array
+     */
+    public static function avisosNeteo($neteo, $diasPrecheq) {
+        $avisos = [];
+
+        if ($neteo['fuera_horizonte'] > 0) {
+            $avisos[] = 'Neteo de cheques adelantados: $ '
+                . number_format($neteo['fuera_horizonte'], 2, ',', '.') . ' no se restaron de '
+                . 'ninguna columna porque su fecha teórica de factura (la del cheque menos '
+                . intval($diasPrecheq) . ' día(s)) cae antes del inicio del eje.';
+        }
+
+        if ($neteo['sin_canal'] > 0) {
+            $avisos[] = 'Neteo de cheques adelantados: $ '
+                . number_format($neteo['sin_canal'], 2, ',', '.') . ' no se pudieron imputar a '
+                . 'ningún canal y sólo se restan del total. La fila total de cobranza y su '
+                . 'apertura por canal no reconcilian por ese importe.';
+        }
+
+        return $avisos;
     }
 
     /* ====================================================================

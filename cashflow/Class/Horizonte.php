@@ -349,21 +349,44 @@ class Horizonte {
      * @return bool false si la fecha cae fuera del eje y el importe no se sumo
      */
     public function acumular(&$serie, $fecha, $importe) {
-        if (isset($serie['dias'][$fecha])) {
-            $serie['dias'][$fecha] += $importe;
+        $destino = self::ubicar($serie, $fecha);
 
-            return true;
+        if ($destino === null) {
+            return false;
         }
 
-        $mes = substr($fecha, 0, 7);
+        $serie[$destino[0]][$destino[1]] += $importe;
+
+        return true;
+    }
+
+    /**
+     * A que rama y clave de una serie le corresponde una fecha, o null si no cae
+     * en ninguna columna. ES LA REGLA "DIA O MES, NUNCA LAS DOS", escrita una
+     * sola vez.
+     *
+     * Va estatica y sobre la serie -y no sobre el eje del objeto- porque hay un
+     * consumidor que no tiene un Horizonte a mano: el neteo de cheques
+     * adelantados de Ventas arma sus buckets a partir de las listas de claves que
+     * recibe por parametro. Sin esto, ese metodo terminaria reimplementando la
+     * regla, que es exactamente lo que este modulo evita en todos lados.
+     *
+     * @param array $serie Serie con las claves del eje ya inicializadas
+     * @param string $fecha 'Y-m-d'
+     * @return array|null ['dias'|'meses', clave] o null
+     */
+    public static function ubicar($serie, $fecha) {
+        if (isset($serie['dias'][$fecha])) {
+            return ['dias', $fecha];
+        }
+
+        $mes = substr((string) $fecha, 0, 7);
 
         if (isset($serie['meses'][$mes])) {
-            $serie['meses'][$mes] += $importe;
-
-            return true;
+            return ['meses', $mes];
         }
 
-        return false;
+        return null;
     }
 
     /**

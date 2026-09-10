@@ -169,17 +169,23 @@ class CashflowRegistry {
             'series' => ['COBRANZA' => 'Cobranzas electronicas']
         ],
 
-        /* ---- Modulos que todavia no existen -------------------------------- */
-        /* Rinden cero y el tablero avisa. Ver la nota del encabezado. */
-
+        /* La serie sale UNICAMENTE de los cheques en cartera. La sub-pestana
+           Venta Cobrada Anticipada de esa misma pantalla no aporta ninguna
+           serie: su efecto es restar de la cobranza proyectada de Ventas. Ver
+           el encabezado de Providers/EcheqsProvider.php. */
         'ECHEQS' => [
             'nombre' => 'Echeqs',
             'descripcion' => 'Echeqs en cartera pendientes de acreditacion',
+            'archivo' => 'Providers/EcheqsProvider.php',
+            'clase' => 'EcheqsProvider',
             'moneda' => 'ARS',
-            'disponible' => false,
+            'disponible' => true,
             'tab' => 'echeqs',
             'series' => ['A_COBRAR' => 'Echeqs a cobrar']
         ],
+
+        /* ---- Modulos que todavia no existen -------------------------------- */
+        /* Rinden cero y el tablero avisa. Ver la nota del encabezado. */
 
         'COBRANZAS_MAY' => [
             'nombre' => 'Cobranzas Mayoristas',
