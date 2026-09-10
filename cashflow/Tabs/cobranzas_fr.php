@@ -3,14 +3,24 @@
 
 <div class="tab-cobranzas_fr">
 
-    <!-- Lo que quedó fuera del horizonte o sin fecha. Antes se descartaba en
-         silencio, así que la tabla podía informar de menos sin decirlo. -->
+    <!-- Avisos de importes fuera del horizonte o sin fecha -->
     <div id="avisosCob"></div>
 
-    <!-- KPI Cards Row.
-         Las tres tarjetas miden los tres períodos de las tres vistas, así que
-         cada una se corresponde con un botón. El rótulo lo escribe el JS con el
-         período real, que depende del horizonte configurado. -->
+    <!-- Solapas Principales: Real a Cobrar vs Pendientes Proyectados -->
+    <ul class="nav nav-tabs mb-3" id="cobranzasFrTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="tabRealCobBtn" type="button" role="tab" data-origen="real">
+                <i class="fas fa-check-circle text-success me-1"></i> Real a Cobrar
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tabProyCobBtn" type="button" role="tab" data-origen="proyectado">
+                <i class="fas fa-clock text-warning me-1"></i> Pendientes Proyectados
+            </button>
+        </li>
+    </ul>
+
+    <!-- KPI Cards Row -->
     <div class="row g-3 mb-4" id="summarySectionCob" style="display: none;">
         <div class="col-md-6 col-lg-4">
             <div class="kpi-card">
@@ -60,86 +70,86 @@
 
     <!-- Header Section con Botones -->
     <div class="card mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-3">
             <div class="d-flex align-items-center gap-3">
                 <div>
-                    <h5 class="mb-0">Cobranzas FR</h5>
-                    <small class="text-muted">Proyectadas por fecha de pago</small>
+                    <h5 class="mb-0" id="tituloMatrizCob">Cobranzas FR &mdash; Real a Cobrar</h5>
+                    <small class="text-muted" id="subtituloMatrizCob">Propuestas de pago confirmadas por fecha de cobro</small>
                 </div>
-                <div class="search-box-container ms-3">
+                <div class="search-box-container ms-2">
                     <div class="input-group input-group-sm">
                         <span class="input-group-text bg-light border-end-0">
                             <i class="fas fa-search text-muted"></i>
                         </span>
-                        <input type="text" id="busquedaCob" class="form-control border-start-0 ps-0" placeholder="Buscar cliente o código..." style="min-width: 250px;">
+                        <input type="text" id="busquedaCob" class="form-control border-start-0 ps-0" placeholder="Buscar cliente o comprobante..." style="min-width: 230px;">
                     </div>
                 </div>
             </div>
-            <div class="d-flex gap-2">
+
+            <div class="d-flex gap-2 flex-wrap align-items-center">
                 <div class="btn-group" role="group">
-                    <button id="btnVistaResumenCob" class="btn btn-sm btn-primary">
+                    <button id="btnVistaResumenCob" class="btn btn-sm btn-outline-primary active">
                         <i class="fas fa-list me-1"></i> Resumen
                     </button>
                     <button id="btnVistaDeepDiveCob" class="btn btn-sm btn-outline-secondary">
                         <i class="fas fa-search-plus me-1"></i> Deep Dive
                     </button>
                 </div>
-                <!-- Los tres botones los dibuja Js/eje-vistas.js. El grupo de
-                     Resumen / Deep Dive de al lado es otra dimensión: cambia el
-                     grano de las filas, no el período. -->
+
+                <!-- Los tres botones los dibuja Js/eje-vistas.js -->
                 <div id="vistasCob"></div>
-                <button id="btnRefreshCob" class="btn btn-sm btn-outline-primary">
+
+                <button id="btnRefreshCob" class="btn btn-sm btn-outline-primary" title="Actualizar datos">
                     <i class="fas fa-sync-alt me-1"></i> Actualizar
                 </button>
-                <button id="btnExportCob" class="btn btn-sm btn-success">
+                <button id="btnExportCob" class="btn btn-sm btn-success" title="Exportar a Excel">
                     <i class="fas fa-file-excel me-1"></i> Exportar
                 </button>
             </div>
         </div>
 
-        <!-- Qué período se está midiendo. La vista Meses no cubre el horizonte
-             completo, y sin esto su total se lee como el total de todo. -->
-        <div class="card-body py-2 border-bottom">
+        <!-- Período que se está midiendo -->
+        <div class="card-body py-2 border-bottom bg-light bg-opacity-50">
             <small class="text-muted" id="periodoCob"></small>
         </div>
 
         <div class="card-body p-0">
             <div class="loading-spinner" id="loadingSpinnerCob">
                 <div class="spinner"></div>
-                <p>Cargando datos...</p>
+                <p>Cargando matriz de cobranzas...</p>
             </div>
             
             <div class="table-wrapper table-responsive" id="tableWrapperCob" style="display: none;">
                 <table id="tablaCobranzasFR" class="table table-hover mb-0">
-                        <thead>
-                            <tr>
-                                <th rowspan="2">COD_CLI</th>
-                                <th rowspan="2">RAZON_SOC</th>
-                                <th rowspan="2">FECHA</th>
-                                <th rowspan="2">T_COMP</th>
-                                <th rowspan="2">N_COMP</th>
-                                <th rowspan="2">Desc</th>
-                                <th rowspan="2">Dias</th>
-                                <th rowspan="2">Importe Bruto</th>
-                                <th rowspan="2">Importe Neto</th>
-                                <th rowspan="2">Cobro</th>
-                                <!-- El rótulo y el colspan los pone el JS según
-                                     la vista activa. -->
-                                <th colspan="1" class="table-group-divider" id="mesActualHeaderCob">Días</th>
-                            </tr>
-                            <tr id="headerRowSubCob">
-                                <!-- Los días se generan dinámicamente -->
-                            </tr>
-                        </thead>
-                        <tbody id="tableBodyCob">
-                            <!-- Las filas se generan dinámicamente -->
-                        </tbody>
-                        <tfoot class="table-light">
-                            <tr id="totalsRowCob">
-                                <td colspan="10" class="fw-bold text-end">TOTALES</td>
-                                <!-- Los totales se generan dinámicamente -->
-                            </tr>
-                        </tfoot>
+                    <thead>
+                        <tr>
+                            <th rowspan="2">Tipo</th>
+                            <th rowspan="2">COD_CLI</th>
+                            <th rowspan="2">RAZON_SOC</th>
+                            <th rowspan="2">FECHA</th>
+                            <th rowspan="2">T_COMP</th>
+                            <th rowspan="2">N_COMP</th>
+                            <th rowspan="2">Desc</th>
+                            <th rowspan="2">Dias</th>
+                            <th rowspan="2">Importe Bruto</th>
+                            <th rowspan="2" id="thImporteNetoCob">Importe Neto</th>
+                            <th rowspan="2" id="thCobroCob">Cobro</th>
+                            <!-- El rótulo y el colspan los pone el JS según la vista activa -->
+                            <th colspan="1" class="table-group-divider" id="mesActualHeaderCob">Días</th>
+                        </tr>
+                        <tr id="headerRowSubCob">
+                            <!-- Los días se generan dinámicamente -->
+                        </tr>
+                    </thead>
+                    <tbody id="tableBodyCob">
+                        <!-- Las filas se generan dinámicamente -->
+                    </tbody>
+                    <tfoot class="table-light">
+                        <tr id="totalsRowCob">
+                            <td colspan="10" class="fw-bold text-end">TOTALES</td>
+                            <!-- Los totales se generan dinámicamente -->
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </div>

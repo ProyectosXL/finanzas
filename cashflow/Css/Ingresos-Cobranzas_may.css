@@ -1,10 +1,10 @@
-/* Ingresos - Cobranzas FR CSS */
+﻿/* Ingresos - Cobranzas Mayoristas CSS */
 
-.tab-cobranzas_fr {
+.tab-cobranzas_may {
 }
 
 /* Loading Spinner */
-.loading-spinner {
+.tab-cobranzas_may .loading-spinner {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -12,15 +12,15 @@
     padding: 60px 20px;
 }
 
-.table-wrapper {
+.tab-cobranzas_may .table-wrapper {
     max-height: calc(100vh - 420px);
     overflow-y: auto;
     overflow-x: auto;
 }
 
-.spinner {
+.tab-cobranzas_may .spinner {
     border: 3px solid var(--border-light, #eef0f5);
-    border-top: 3px solid #28a745; /* Green for income */
+    border-top: 3px solid #0d6efd;
     border-radius: 50%;
     width: 40px;
     height: 40px;
@@ -32,19 +32,19 @@
     100% { transform: rotate(360deg); }
 }
 
-.loading-spinner p {
+.tab-cobranzas_may .loading-spinner p {
     margin-top: 15px;
     color: var(--text-muted, #8c93a8);
     font-size: 13px;
 }
 
 /* Table Headers */
-#tablaCobranzasFR {
+#tablaCobranzasMay {
     border-collapse: separate;
     border-spacing: 0;
 }
 
-#tablaCobranzasFR thead th {
+#tablaCobranzasMay thead th {
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
@@ -58,13 +58,13 @@
 }
 
 /* Primera fila de encabezados (rowspan="2") */
-#tablaCobranzasFR thead tr:nth-child(1) th {
+#tablaCobranzasMay thead tr:nth-child(1) th {
     top: 0;
 }
 
 /* Segunda fila de encabezados (días/meses) */
-#tablaCobranzasFR thead tr:nth-child(2) th {
-    top: 38px; /* Ajustar según el alto de la primera fila */
+#tablaCobranzasMay thead tr:nth-child(2) th {
+    top: 38px;
 }
 
 .table-group-divider {
@@ -72,8 +72,8 @@
 }
 
 /* Column widths */
-#tablaCobranzasFR tbody td:nth-child(2),
-#tablaCobranzasFR thead th:nth-child(2) {
+#tablaCobranzasMay tbody td:nth-child(3),
+#tablaCobranzasMay thead th:nth-child(3) {
     min-width: 200px;
 }
 
@@ -92,7 +92,7 @@
 
 /* Cell styles */
 .cell-with-value {
-    background-color: #e8f5e9 !important; /* light green for income values */
+    background-color: #e8f5e9 !important;
     font-weight: 600;
     color: #2e7d32;
 }
@@ -104,42 +104,27 @@
 }
 
 /* Totals Row */
-#tablaCobranzasFR tfoot tr {
+#tablaCobranzasMay tfoot tr {
     background-color: #f8f9fa;
-    border-top: 2px solid #28a745;
+    border-top: 2px solid #0d6efd;
     font-weight: 700;
 }
 
-#tablaCobranzasFR tfoot td {
+#tablaCobranzasMay tfoot td {
     padding: 12px 8px;
     font-size: 13px;
 }
 
-#tablaCobranzasFR tfoot .total-label {
+#tablaCobranzasMay tfoot .total-label {
     text-align: right;
     color: var(--text-primary, #1a1d29);
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
 
-#tablaCobranzasFR tfoot .cell-with-value {
+#tablaCobranzasMay tfoot .cell-with-value {
     background-color: #c8e6c9 !important;
     color: #1b5e20;
-}
-
-/* Badge specific for cobranzas */
-.badge-cobro {
-    background-color: #e8f5e9;
-    color: #2e7d32;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 11px;
-    border: 1px solid #c8e6c9;
-}
-
-/* Forzar texto blanco en botones primarios para mejor legibilidad */
-.btn-primary, .btn-primary i {
-    color: #ffffff !important;
 }
 
 /* Modo Resumen: Ocultar columnas de detalle */
@@ -156,68 +141,42 @@
     display: none !important;
 }
 
-/* ============================================================================
-   LAS TRES VISTAS
-   Columna de total y marca de mes recortado. Ver Js/eje-vistas.js.
-   ============================================================================ */
-
-/* El total de la fila suma las columnas de la VISTA ACTIVA, no siempre el
-   horizonte completo. */
-.tab-cobranzas_fr .total-column {
+.tab-cobranzas_may .total-column {
     background: var(--bg-light, #f5f6fa);
     font-weight: 600;
     border-left: 2px solid var(--border-color, #e2e5ed);
     white-space: nowrap;
 }
 
-/* Un mes cuya columna cubre solo parte del mes: el resto de sus dias esta en el
-   tramo diario. Sin la marca, un importe mas chico se lee como una caida. */
-.tab-cobranzas_fr .col-parcial {
+.tab-cobranzas_may .col-parcial {
     font-style: italic;
 }
 
-.tab-cobranzas_fr .col-parcial::after {
+.tab-cobranzas_may .col-parcial::after {
     content: '*';
     opacity: 0.6;
 }
 
-/* ============================================================================
-   PROYECCIONES (Pendientes Proyectados con PPP)
-   ============================================================================ */
-.fila-proyeccion {
-    background-color: #fffdf2 !important;
+.fila-proyeccion-may {
+    background-color: #fcfdfe !important;
 }
 
-.fila-proyeccion:hover td {
-    background-color: #fff9db !important;
-}
-
-.badge-proyeccion {
-    background-color: #fff3cd;
-    color: #856404;
+.badge-may {
+    background-color: #e3f2fd;
+    color: #0d47a1;
     padding: 2px 6px;
     border-radius: 4px;
     font-size: 10px;
     font-weight: 700;
-    border: 1px solid #ffeeba;
+    border: 1px solid #bbdefb;
     display: inline-block;
-    letter-spacing: 0.3px;
 }
 
-.badge-real {
-    background-color: #e7f5ea;
-    color: #1e7e34;
+.badge-cobro-may {
+    background-color: #e8f5e9;
+    color: #2e7d32;
     padding: 2px 6px;
     border-radius: 4px;
-    font-size: 10px;
-    font-weight: 700;
-    border: 1px solid #c3e6cb;
-    display: inline-block;
+    font-size: 11px;
+    border: 1px solid #c8e6c9;
 }
-
-.cell-with-proy {
-    background-color: #fff9db !important;
-    font-weight: 600;
-    color: #856404 !important;
-}
-

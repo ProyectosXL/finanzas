@@ -587,6 +587,90 @@ try {
                 'success' => true,
                 'message' => 'Cliente dado de baja. No se borró: queda inhabilitado, sus cheques '
                            . 'salen del listado y dejan de netear la cobranza proyectada.'
+           MODULO COBRANZAS (PPP y Escalas de Descuento por Cliente)
+           ================================================================ */
+
+        case 'getCobranzasClientesConfig':
+            echo json_encode([
+                'success' => true,
+                'data' => $parametros->getCobranzasClientesConfig()
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'savePPPManual':
+            $data = bodyJson();
+
+            if (!isset($data['cod_cliente'])) {
+                throw new Exception('Falta el código de cliente');
+            }
+
+            $parametros->savePPPManual(
+                $data['cod_cliente'],
+                isset($data['ppp_manual']) ? $data['ppp_manual'] : null,
+                usuarioActual()
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Plazo Promedio de Pago actualizado correctamente'
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'saveMedioPagoCliente':
+            $data = bodyJson();
+
+            if (!isset($data['cod_cliente']) || !isset($data['medio_pago'])) {
+                throw new Exception('Faltan campos obligatorios para guardar el medio de pago');
+            }
+
+            $parametros->saveMedioPagoCliente(
+                $data['cod_cliente'],
+                $data['medio_pago'],
+                usuarioActual()
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Medio de pago actualizado correctamente'
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'saveEscalaDescuento':
+            $data = bodyJson();
+
+            if (!isset($data['cod_cliente']) || !isset($data['dias_desde']) || !isset($data['dias_hasta']) || !isset($data['porcentaje_desc'])) {
+                throw new Exception('Faltan campos obligatorios para la escala de descuento');
+            }
+
+            $id = $parametros->saveEscalaDescuento(
+                isset($data['id']) ? intval($data['id']) : 0,
+                $data['cod_cliente'],
+                isset($data['medio_pago']) ? $data['medio_pago'] : 'ECHEQ',
+                $data['dias_desde'],
+                $data['dias_hasta'],
+                $data['porcentaje_desc'],
+                usuarioActual()
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Escala de descuento guardada correctamente',
+                'data' => ['id' => $id]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'deleteEscalaDescuento':
+            $data = bodyJson();
+
+            if (!isset($data['id'])) {
+                throw new Exception('Falta el ID de la escala a eliminar');
+            }
+
+            $parametros->deleteEscalaDescuento(intval($data['id']));
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Escala de descuento eliminada correctamente'
             ], JSON_UNESCAPED_UNICODE);
             break;
 

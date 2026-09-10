@@ -203,6 +203,9 @@
              prefijo ppq-. -->
         <div class="tab-pane fade" id="paneParamPrechequeado" role="tabpanel">
             <?php include __DIR__ . '/parametros_prechequeado.php'; ?>
+        <!-- Parámetros del módulo Cobranzas: PPP calculado y editable, y escalas de descuento por cliente -->
+        <div class="tab-pane fade" id="paneParamCobranzas" role="tabpanel">
+            <?php include __DIR__ . '/parametros_cobranzas.php'; ?>
         </div>
 
         <!-- Estructura del tablero de Cashflow.
@@ -224,4 +227,5 @@
 <script src="Js/Parametros-Saldos.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Cob-Electronicos.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Prechequeado.js?v=<?php echo time(); ?>"></script>
+<script src="Js/Parametros-Cobranzas.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Estructura.js?v=<?php echo time(); ?>"></script>

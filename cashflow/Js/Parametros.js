@@ -70,11 +70,12 @@
     // Cómo se edita cada parámetro general. Los porcentajes se muestran en % y
     // se guardan en tasa; el resto va tal cual.
     var FORMATO = {
-        'alicuota_iva':      { tipo: 'porcentaje', sufijo: '%',     paso: '0.01' },
-        'dias_prechequeado': { tipo: 'entero',     sufijo: 'días',  paso: '1' },
-        'horizonte_dias':    { tipo: 'entero',     sufijo: 'días',  paso: '1' },
-        'horizonte_meses':   { tipo: 'entero',     sufijo: 'meses', paso: '1' },
-        'feriados_comercio': { tipo: 'texto',      sufijo: '',      paso: null }
+        'alicuota_iva':            { tipo: 'porcentaje', sufijo: '%',     paso: '0.01' },
+        'dias_prechequeado':       { tipo: 'entero',     sufijo: 'días',  paso: '1' },
+        'horizonte_dias':          { tipo: 'entero',     sufijo: 'días',  paso: '1' },
+        'horizonte_meses':         { tipo: 'entero',     sufijo: 'meses', paso: '1' },
+        'feriados_comercio':       { tipo: 'texto',      sufijo: '',      paso: null },
+        'cobranzas_may_dias_vto':  { tipo: 'entero',     sufijo: 'días',  paso: '1' }
     };
 
     function inicializar() {
@@ -721,7 +722,8 @@
             'dias_prechequeado': 'Días a restar a la fecha del cheque para obtener la fecha teórica de factura.',
             'horizonte_dias': 'Cantidad de columnas diarias de la proyección.',
             'horizonte_meses': 'Cantidad de columnas mensuales de la proyección.',
-            'feriados_comercio': 'Formato MM-DD separado por coma. Únicos días del año sin venta estimada.'
+            'feriados_comercio': 'Formato MM-DD separado por coma. Únicos días del año sin venta estimada.',
+            'cobranzas_may_dias_vto': 'Días de plazo a sumar a la fecha de emisión para proyectar la fecha probable de cobro mayorista.'
         };
 
         return hints[clave] || '';

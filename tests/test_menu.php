@@ -109,6 +109,7 @@ chequear('Cashflow tiene datos', Menu::DATOS, $porTab['cashflow']['estado']);
 chequear('Ventas tiene datos', Menu::DATOS, $porTab['ventas']['estado']);
 chequear('Saldos tiene datos', Menu::DATOS, $porTab['saldos']['estado']);
 chequear('Cobranzas FR tiene datos', Menu::DATOS, $porTab['cobranzas_fr']['estado']);
+chequear('Cobranzas May tiene datos', Menu::DATOS, $porTab['cobranzas_may']['estado']);
 chequear('Cob. Electronicos tiene datos',
     Menu::DATOS, $porTab['cob_electronicos']['estado']);
 
@@ -159,6 +160,7 @@ foreach ($menu['categorias'] as $cat) {
 }
 
 // Ventas, Saldos, Echeqs, Cobranzas FR y Cob. Electronicos.
+// Ventas, Saldos, Cobranzas FR, Cobranzas May y Cob. Electronicos.
 chequear('Ingresos tiene 5 de 6 con datos', 5, $porCategoria['Ingresos']['con_datos']);
 chequear('y son 6 en total', 6, $porCategoria['Ingresos']['total']);
 // Comercio Exterior queda completa: sus dos pestanas tienen datos. Despachante

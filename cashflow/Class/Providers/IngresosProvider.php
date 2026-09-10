@@ -27,10 +27,29 @@ class IngresosProvider extends CashflowProvider {
     protected function calcular($h) {
         $ingresos = new Ingresos();
 
-        $serie = $h->agrupar($ingresos->getCobranzasFRTotales(), 'FECHA', 'IMPORTE');
+        if ($this->codigo() === 'COBRANZAS_MAY') {
+            $cobranzaMay = $h->agrupar($ingresos->getCobranzasMayTotales(), 'FECHA', 'IMPORTE');
+            $cobranzaMay['moneda_origen'] = 'ARS';
 
-        $serie['moneda_origen'] = 'ARS';
+            return [
+                'COBRANZA' => $cobranzaMay
+            ];
+        }
 
-        return ['COBRANZA' => $serie];
+        $real = $h->agrupar($ingresos->getCobranzasFRTotales('real'), 'FECHA', 'IMPORTE');
+        $real['moneda_origen'] = 'ARS';
+
+        $proy = $h->agrupar($ingresos->getCobranzasFRTotales('proyectado'), 'FECHA', 'IMPORTE');
+        $proy['moneda_origen'] = 'ARS';
+
+        $total = $h->agrupar($ingresos->getCobranzasFRTotales('todos'), 'FECHA', 'IMPORTE');
+        $total['moneda_origen'] = 'ARS';
+
+        return [
+            'COBRANZA' => $total,
+            'COBRANZA_REAL' => $real,
+            'COBRANZA_PROYECTADA' => $proy,
+            'COBRANZA_TOTAL' => $total
+        ];
     }
 }
