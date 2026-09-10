@@ -38,6 +38,15 @@
             alCambiar: generarTabla
         });
 
+        // Mismo default que Cobranzas FR: Tipo, COD_CLI y RAZON_SOC, en
+        // Resumen y en Deep Dive. Ver Js/columnas-fijas.js.
+        crearColumnasFijas({
+            tabla: 'tablaCobranzasMay',
+            control: 'colFijasCobMay',
+            clave: 'cobranzas_may',
+            porDefecto: [0, 1, 2]
+        });
+
         if (btnRefresh) {
             btnRefresh.addEventListener('click', cargarDatos);
         }
@@ -257,11 +266,19 @@
      */
     function generarFilaTotales() {
         var totalsRow = document.getElementById('totalsRowCobMay');
-        var colspan = (modoVista === 'resumen') ? 6 : 11;
         var cols = vistas.columnas();
         var visibles = filasFiltradas();
 
-        var html = `<td colspan="${colspan}" class="total-label">TOTALES</td>`;
+        // Una celda por columna descriptiva en lugar de un colspan en duro.
+        // Ver la nota equivalente en Js/Ingresos-Cobranzas_fr.js.
+        var descriptivas = ColumnasFijas.descriptivas(
+            document.getElementById('tablaCobranzasMay'));
+
+        var html = '<td class="total-label">TOTALES</td>';
+
+        for (var i = 1; i < descriptivas.length; i++) {
+            html += '<td></td>';
+        }
 
         cols.forEach(function(col) {
             var total = 0;

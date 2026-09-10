@@ -78,6 +78,22 @@
             alCambiar: cambiarVista
         });
 
+        // Canal y Medio de Pago: es el par que identifica la fila, y es lo que
+        // ya estaba fijo cuando el mecanismo estaba cableado en el CSS. Ahora
+        // además se puede cambiar.
+        //
+        // Las otras tablas de la pestaña -tendencias, proyección por mes,
+        // control de facturación- no llevan selector: tienen cuatro o cinco
+        // columnas y no scrollean a lo ancho, así que elegir columnas fijas ahí
+        // no resuelve nada. Conservan igual su primera columna fija, que es el
+        // default automático de Js/columnas-fijas.js.
+        crearColumnasFijas({
+            tabla: 'tablaCobranza',
+            control: 'colFijasCobranza',
+            clave: 'ventas_cobranza',
+            porDefecto: [0, 1]
+        });
+
         // La proyección se calcula recién cuando se abre la sub-pestaña
         if (tabProyeccionBtn) {
             tabProyeccionBtn.addEventListener('shown.bs.tab', function() {

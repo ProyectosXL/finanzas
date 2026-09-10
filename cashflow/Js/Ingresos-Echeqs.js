@@ -37,6 +37,15 @@
             alCambiar: dibujarCartera
         });
 
+        // N° de cheque identifica la fila y Cliente es de quién es: son las dos
+        // que uno busca cuando ya scrolleó hasta la columna de la fecha.
+        crearColumnasFijas({
+            tabla: 'tablaEcheqs',
+            control: 'colFijasEcheqs',
+            clave: 'echeqs_cartera',
+            porDefecto: [1, 3]
+        });
+
         conectar('btnRefreshEch', cargarCartera);
         conectar('btnExportEch', exportarCartera);
         conectar('btnRefreshPre', cargarPrechequeado);

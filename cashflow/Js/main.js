@@ -48,9 +48,24 @@ function initStickyHeaders() {
 /**
  * Mide cada tabla temporal y publica:
  *   --thead-row1-height : alto real de la primera fila del thead
- *   --col-fija-1-width  : ancho de la primera columna descriptiva
+ *   --col-fija-N-left   : desplazamiento horizontal de cada columna fija
+ *
+ * El desplazamiento de una columna fija es la SUMA de los anchos de las fijas
+ * anteriores, y hay que medirlo: los anchos los reparte el navegador según el
+ * contenido, así que un valor escrito en el CSS se desalinea en cuanto una
+ * razón social es más larga de lo previsto. Se acumula sobre el ancho real
+ * medido y no sobre un `min-width`, por eso mismo.
+ *
+ * Quién lleva la clase .col-fija-N lo decide Js/columnas-fijas.js. Acá sólo se
+ * mide lo que ya está marcado.
  */
 function ajustarStickyHeaders() {
+    // Las marcas primero: si la tabla se acaba de redibujar, sus celdas nuevas
+    // todavía no tienen clase y no habría nada que medir.
+    if (window.ColumnasFijas) {
+        window.ColumnasFijas.reaplicar();
+    }
+
     var contenedores = document.querySelectorAll('.tabla-temporal');
 
     contenedores.forEach(function(cont) {
@@ -74,17 +89,43 @@ function ajustarStickyHeaders() {
             }
         }
 
-        // Ancho de la primera columna, para posicionar la segunda columna fija
-        var primera = filas[0] ? filas[0].cells[0] : null;
-
-        if (primera) {
-            var ancho = primera.getBoundingClientRect().width;
-
-            if (ancho > 0) {
-                cont.style.setProperty('--col-fija-1-width', Math.round(ancho) + 'px');
-            }
-        }
+        medirColumnasFijas(tabla);
     });
+}
+
+/**
+ * Publica --col-fija-1-left … --col-fija-N-left sobre la tabla.
+ *
+ * Van sobre la <table> y no sobre el contenedor porque una pestaña puede tener
+ * más de una tabla adentro del mismo wrapper, y cada una tiene sus propios
+ * anchos. Las custom properties se heredan, así que las celdas las ven igual.
+ *
+ * @param {HTMLTableElement} tabla
+ */
+function medirColumnasFijas(tabla) {
+    var cabecera = tabla.tHead.rows[0];
+
+    if (!cabecera) {
+        return;
+    }
+
+    var tope = window.ColumnasFijas ? window.ColumnasFijas.MAXIMO : 4;
+    var acumulado = 0;
+
+    for (var n = 1; n <= tope; n++) {
+        var celda = cabecera.querySelector('.col-fija-' + n);
+
+        if (!celda) {
+            // Una columna que no está fija no aporta desplazamiento, pero su
+            // variable se limpia igual: si quedara el valor de una selección
+            // anterior, al volver a fijarla arrancaría corrida.
+            tabla.style.removeProperty('--col-fija-' + n + '-left');
+            continue;
+        }
+
+        tabla.style.setProperty('--col-fija-' + n + '-left', Math.round(acumulado) + 'px');
+        acumulado += celda.getBoundingClientRect().width;
+    }
 }
 
 /**

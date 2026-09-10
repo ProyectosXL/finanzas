@@ -129,6 +129,53 @@ No hay que calcular fechas en el navegador ni decidir qué columnas van en cada 
 
 ---
 
+## Columnas fijas: qué se queda quieto al scrollear a lo ancho
+
+Con 28 columnas de días a la derecha, al scrollear se pierde de vista **de quién es** cada número. La solución existía, pero estaba cableada: la primera columna por `:first-child` y una segunda por la clase `.col-medio`, con una única variable `--col-fija-1-width`. Alcanzaba para la tabla de cobranza de Ventas y para nada más.
+
+Ahora hay tres piezas, una por capa:
+
+| Capa | Archivo | Qué resuelve |
+| --- | --- | --- |
+| Estilo | `Css/main.css`, `.col-fija-1` … `.col-fija-4` | El `sticky`, el fondo opaco y los tres `z-index` de las intersecciones |
+| Medición | `Js/main.js`, `medirColumnasFijas()` | Publica `--col-fija-N-left`, acumulando los anchos **reales** de las anteriores |
+| Decisión | `Js/columnas-fijas.js` | Quién lleva cada clase, y el desplegable para elegirlo |
+
+```js
+crearColumnasFijas({
+    tabla: 'tablaCobranzasFR',   // id de la <table>
+    control: 'colFijasCob',      // id del contenedor del desplegable
+    clave: 'cobranzas_fr',       // clave de localStorage
+    porDefecto: [0, 1, 2]
+});
+```
+
+Tres decisiones que importan:
+
+- **Las columnas elegibles se derivan del encabezado, no se declaran.** Son la corrida de celdas con `rowspan` y `colspan="1"` que está antes del grupo del eje temporal. Una lista declarada por pestaña se desactualiza en silencio cuando alguien agrega una columna, y el síntoma sería una columna fija corrida un lugar. El corte en la primera celda de grupo es lo que deja afuera la columna *Total*, que también tiene `rowspan` pero vive al final.
+- **El desplazamiento se mide, no se escribe.** El ancho lo reparte el navegador según el contenido: una razón social más larga de lo previsto desalinea cualquier valor puesto en el CSS.
+- **En el pie, una celda que se pasa del bloque fijo no se fija.** Donde el rótulo *TOTALES* es una sola celda con `colspan` sobre todas las descriptivas, anclarla a la izquierda estacionaría una banda de ese ancho encima de los importes. En Cobranzas FR y May el pie pasó a tener **una celda por columna** —el `colspan` estaba escrito en duro y se desactualizaba solo—, así que el rótulo va en la primera columna fija y queda a la vista.
+
+La elección se guarda en `localStorage` con una clave por pestaña. Es una preferencia de cómo mirar la tabla, no un filtro de datos: si se perdiera en cada recarga, no serviría para trabajar. Si el índice guardado ya no existe en la tabla, se descarta y vuelve el default, para no fijar una columna que el usuario no eligió.
+
+**Toda tabla `.tabla-temporal` sin control explícito conserva su primera columna fija.** Es el default automático, y existe para que el mecanismo nuevo no le saque el comportamiento a las tablas que nadie pidió cambiar.
+
+### Dónde está aplicado, y dónde no
+
+| Pestaña | Fijas por defecto |
+| --- | --- |
+| Cobranzas FR · Cobranzas May | `Tipo`, `COD_CLI`, `RAZON_SOC` — en Resumen y en Deep Dive |
+| Proveedores Exterior | `Proveedor`, `Contenedor` |
+| Crono Nacionalización | `Proveedor`, `Contenedor` — la primera columna es una fecha, que no identifica nada |
+| Echeqs (cartera) | `N° Cheque`, `Cliente` |
+| Ventas (Cobranza Proyectada) | `Canal`, `Medio de Pago` |
+| Cashflow (el tablero) | `Concepto` — **sin selector**: es la única columna descriptiva y un desplegable de una opción es ruido |
+| Saldos · Cob. Electrónicos | **No se aplicó.** No tienen eje temporal: son cinco a siete columnas que entran en pantalla y no scrollean a lo ancho. Fijar una columna ahí no resuelve nada |
+
+Cobranzas FR, Cobranzas May y Echeqs además **no tenían header fijo**: usaban `table-wrapper table-responsive` sin `.tabla-temporal`. Ahora la llevan.
+
+---
+
 ## Agregar un módulo al tablero
 
 Dos pasos de código y uno de pantalla:
@@ -410,6 +457,7 @@ sql/echeqs_prechequeado.sql                 Maestro de pre-chequeado + vista del
 cashflow/Class/Horizonte.php                Eje temporal, compartido con Ventas
 cashflow/Class/EjeVista.php                 Las tres vistas: columnas, totales y periodo
 cashflow/Js/eje-vistas.js                   Su contraparte en el front (cargado en index.php)
+cashflow/Js/columnas-fijas.js               Que columnas quedan fijas al scrollear (idem)
 cashflow/Js/notificaciones.js               Avisos de accion y confirmaciones (idem)
 cashflow/Css/notificaciones.css
 cashflow/Class/Menu.php                     Menu lateral y estado de cada pestana

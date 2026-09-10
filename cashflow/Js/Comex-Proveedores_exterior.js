@@ -44,6 +44,16 @@
             alCambiar: generarTabla
         });
 
+        // Proveedor y Contenedor: entre los dos identifican la fila, y son lo
+        // que uno necesita tener a la vista al scrollear hasta la columna del
+        // mes que le interesa.
+        crearColumnasFijas({
+            tabla: 'tablaProveedoresExterior',
+            control: 'colFijasProvExt',
+            clave: 'proveedores_exterior',
+            porDefecto: [0, 1]
+        });
+
         // Cargar datos automáticamente
         cargarDatos();
     }

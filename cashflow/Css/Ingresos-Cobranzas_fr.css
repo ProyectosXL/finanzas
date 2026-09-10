@@ -115,8 +115,12 @@
     font-size: 13px;
 }
 
+/* El rótulo va en la PRIMERA celda descriptiva -que es una de las fijas- y no
+   en una celda con colspan sobre todo el bloque, así que se alinea a la
+   izquierda: a la derecha quedaría pegado contra la columna de al lado. */
 #tablaCobranzasFR tfoot .total-label {
-    text-align: right;
+    text-align: left;
+    white-space: nowrap;
     color: var(--text-primary, #1a1d29);
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -152,7 +156,14 @@
 .modo-resumen tbody td:nth-child(5),
 .modo-resumen tbody td:nth-child(6),
 .modo-resumen tbody td:nth-child(7),
-.modo-resumen tbody td:nth-child(8) {
+.modo-resumen tbody td:nth-child(8),
+/* El pie también: desde que tiene una celda por columna en vez de un colspan,
+   si no se ocultan las mismas queda corrido cinco lugares. */
+.modo-resumen tfoot td:nth-child(4),
+.modo-resumen tfoot td:nth-child(5),
+.modo-resumen tfoot td:nth-child(6),
+.modo-resumen tfoot td:nth-child(7),
+.modo-resumen tfoot td:nth-child(8) {
     display: none !important;
 }
 

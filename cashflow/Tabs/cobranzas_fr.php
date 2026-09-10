@@ -99,6 +99,9 @@
                 <!-- Los tres botones los dibuja Js/eje-vistas.js -->
                 <div id="vistasCob"></div>
 
+                <!-- El selector de columnas fijas lo dibuja Js/columnas-fijas.js -->
+                <div id="colFijasCob"></div>
+
                 <button id="btnRefreshCob" class="btn btn-sm btn-outline-primary" title="Actualizar datos">
                     <i class="fas fa-sync-alt me-1"></i> Actualizar
                 </button>
@@ -119,7 +122,10 @@
                 <p>Cargando matriz de cobranzas...</p>
             </div>
             
-            <div class="table-wrapper table-responsive" id="tableWrapperCob" style="display: none;">
+            <!-- .tabla-temporal: header de dos filas fijo arriba, pie de
+                 totales fijo abajo y columnas descriptivas fijas a la
+                 izquierda. Ver Css/main.css. -->
+            <div class="table-wrapper table-responsive tabla-temporal" id="tableWrapperCob" style="display: none;">
                 <table id="tablaCobranzasFR" class="table table-hover mb-0">
                     <thead>
                         <tr>

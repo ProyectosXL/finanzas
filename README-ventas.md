@@ -378,13 +378,17 @@ cashflow/Tabs/proveedores_exterior.php  Modificado: clase .tabla-temporal
 
 ---
 
-## Header fijo
+## Header fijo y columnas fijas
 
-La clase `.tabla-temporal` (en `Css/main.css`, **no duplicada por pestaña**) acota la altura del contenedor para que `position: sticky` tenga contra qué pegarse, fija las dos filas del `thead`, la primera columna descriptiva en horizontal y el `tfoot` de totales abajo.
+La clase `.tabla-temporal` (en `Css/main.css`, **no duplicada por pestaña**) acota la altura del contenedor para que `position: sticky` tenga contra qué pegarse, fija las dos filas del `thead` y el `tfoot` de totales abajo.
 
 `ajustarStickyHeaders()` en `Js/main.js` mide el alto **real** de la primera fila del `thead` y lo publica como `--thead-row1-height`: las celdas con `rowspan="2"` abarcan las dos filas, así que un `offsetHeight` directo daría un valor falso. Un `MutationObserver` sobre `#tabContent` lo re-mide cuando las tablas se generan por AJAX, de modo que no hubo que tocar el JS de cada pestaña.
 
-Aplicado a Ventas, Crono Nacionalización, Proveedores Exterior y Cashflow.
+Las **columnas fijas en horizontal** ya no están cableadas: se eligen desde la pantalla y las resuelve `Js/columnas-fijas.js`. Ver `README-cashflow.md`.
+
+En esta pestaña el selector va sólo en la tabla **Cobranza Proyectada**, con `Canal` y `Medio de Pago` fijas por defecto — que es exactamente lo que hacía el CSS viejo con `:first-child` y `.col-medio`. Las otras tablas de Ventas (tendencias, proyección por mes, venta acumulada, balance, control de facturación) tienen cuatro o cinco columnas y **no scrollean a lo ancho**: un selector ahí sería un control que no resuelve nada. Conservan su primera columna fija, que es el default automático.
+
+Una diferencia visible: el pie de *Cobranza Proyectada* tiene sus rótulos en celdas con `colspan="4"` sobre todo el bloque descriptivo, y una celda así **no se fija**. Antes se fijaba —era `tfoot td:first-child`— y al scrollear estacionaba una banda de cuatro columnas de ancho encima de los importes. Ahora el rótulo se va con el scroll y sigue pegado abajo, que es lo que se quería ver.
 
 ---
 

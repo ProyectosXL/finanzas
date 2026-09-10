@@ -38,6 +38,16 @@
             alCambiar: generarTabla
         });
 
+        // Proveedor y Contenedor, igual que Proveedores Exterior: es la misma
+        // fila mirada desde el otro lado del circuito. La primera columna es
+        // una fecha, que no identifica nada por sí sola.
+        crearColumnasFijas({
+            tabla: 'tablaCronoNacionalizacion',
+            control: 'colFijasCronoNac',
+            clave: 'crono_nacionalizacion',
+            porDefecto: [1, 2]
+        });
+
         // Cargar datos automáticamente
         cargarDatos();
     }

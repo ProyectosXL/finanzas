@@ -58,6 +58,17 @@
             alCambiar: generarTabla
         });
 
+        // Tipo, COD_CLI y RAZON_SOC fijas por defecto, en Resumen y en Deep
+        // Dive: con veintiocho columnas de días a la derecha, sin ellas no se
+        // ve de quién es el número que uno está mirando. Es la misma tabla en
+        // los dos modos, así que un solo control las cubre.
+        crearColumnasFijas({
+            tabla: 'tablaCobranzasFR',
+            control: 'colFijasCob',
+            clave: 'cobranzas_fr',
+            porDefecto: [0, 1, 2]
+        });
+
         if (btnRefresh) {
             btnRefresh.addEventListener('click', cargarDatos);
         }
@@ -317,11 +328,24 @@
      */
     function generarFilaTotales() {
         var totalsRow = document.getElementById('totalsRowCob');
-        var colspan = (modoVista === 'resumen') ? 6 : 11;
         var cols = vistas.columnas();
         var visibles = filasFiltradas();
 
-        var html = `<td colspan="${colspan}" class="total-label">TOTALES</td>`;
+        // Una celda por columna descriptiva en lugar de un colspan escrito en
+        // duro. Dos motivos: el colspan se desactualiza cada vez que cambia la
+        // cantidad de columnas -y desalinea todo el pie sin que nadie lo note-,
+        // y una celda que abarca todo el bloque descriptivo no se puede fijar a
+        // la izquierda sin tapar los importes. El rótulo va en la PRIMERA, que
+        // es una de las fijas: así queda a la vista aunque se scrollee a lo
+        // ancho.
+        var descriptivas = ColumnasFijas.descriptivas(
+            document.getElementById('tablaCobranzasFR'));
+
+        var html = '<td class="total-label">TOTALES</td>';
+
+        for (var i = 1; i < descriptivas.length; i++) {
+            html += '<td></td>';
+        }
 
         cols.forEach(function(col) {
             var total = 0;

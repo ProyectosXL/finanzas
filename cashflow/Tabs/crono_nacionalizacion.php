@@ -73,6 +73,8 @@
                 <!-- Los tres botones los dibuja Js/eje-vistas.js a partir del
                      eje que resolvió el backend. -->
                 <div id="vistasCronoNac"></div>
+                <!-- El selector de columnas fijas lo dibuja Js/columnas-fijas.js -->
+                <div id="colFijasCronoNac"></div>
                 <button id="btnRefresh" class="btn btn-sm btn-outline-primary">
                     <i class="fas fa-sync-alt me-1"></i> Actualizar
                 </button>

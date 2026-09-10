@@ -118,6 +118,8 @@
                     <!-- No hay Resumen / Deep Dive: el grano natural de esta
                          pantalla es el cheque, y no hay nada que aperturar. -->
                     <div id="vistasEcheqs"></div>
+                    <!-- El selector de columnas fijas lo dibuja Js/columnas-fijas.js -->
+                    <div id="colFijasEcheqs"></div>
                     <button id="btnRefreshEch" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
@@ -139,7 +141,10 @@
                     <p>Cargando cheques en cartera...</p>
                 </div>
 
-                <div class="table-wrapper table-responsive" id="wrapperEch" style="display: none;">
+                <!-- .tabla-temporal: header de dos filas fijo arriba y
+                     columnas descriptivas fijas a la izquierda. Ver
+                     Css/main.css. -->
+                <div class="table-wrapper table-responsive tabla-temporal" id="wrapperEch" style="display: none;">
                     <table id="tablaEcheqs" class="table table-hover mb-0">
                         <thead>
                             <!--

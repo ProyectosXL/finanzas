@@ -70,6 +70,8 @@
                      eje que resolvió el backend: la pestaña no decide ni cuáles
                      son ni qué columnas tiene cada uno. -->
                 <div id="vistasProvExt"></div>
+                <!-- El selector de columnas fijas lo dibuja Js/columnas-fijas.js -->
+                <div id="colFijasProvExt"></div>
                 <button id="btnRefresh" class="btn btn-sm btn-outline-primary">
                     <i class="fas fa-sync-alt me-1"></i> Actualizar
                 </button>

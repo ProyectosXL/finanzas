@@ -342,40 +342,66 @@ body {
     top: var(--thead-row1-height, 38px);
 }
 
-/* Primera columna descriptiva fija en horizontal: con 28 columnas de días la
-   tabla scrollea mucho a lo ancho y se pierde de vista a qué fila corresponde
-   cada número. */
-.tabla-temporal .table tbody td:first-child,
-.tabla-temporal .table tfoot td:first-child {
+/* ----------------------------------------------------------------------------
+   COLUMNAS FIJAS EN HORIZONTAL
+   ----------------------------------------------------------------------------
+   Con 28 columnas de días la tabla scrollea mucho a lo ancho y se pierde de
+   vista a qué fila corresponde cada número.
+
+   Antes esto estaba CABLEADO: la primera columna por :first-child y una segunda
+   por la clase .col-medio, con un único --col-fija-1-width. Eso alcanzaba para
+   la tabla de cobranza de Ventas y para nada más: no se podían fijar tres
+   columnas y no se podía elegir cuáles.
+
+   Ahora la columna fija se marca con .col-fija-1 … .col-fija-4 y su posición
+   sale de --col-fija-N-left, que publica ajustarStickyHeaders() en main.js
+   midiendo el ancho REAL de las columnas anteriores. Quién lleva cada clase lo
+   decide Js/columnas-fijas.js, que además dibuja el selector de la pantalla.
+
+   Cuatro es el tope a propósito: más columnas fijas que eso dejan sin ancho
+   útil a las columnas de días, que son las que se van a mirar.
+   ---------------------------------------------------------------------------- */
+.tabla-temporal .table thead th.col-fija-1,
+.tabla-temporal .table thead th.col-fija-2,
+.tabla-temporal .table thead th.col-fija-3,
+.tabla-temporal .table thead th.col-fija-4,
+.tabla-temporal .table tbody td.col-fija-1,
+.tabla-temporal .table tbody td.col-fija-2,
+.tabla-temporal .table tbody td.col-fija-3,
+.tabla-temporal .table tbody td.col-fija-4,
+.tabla-temporal .table tfoot td.col-fija-1,
+.tabla-temporal .table tfoot td.col-fija-2,
+.tabla-temporal .table tfoot td.col-fija-3,
+.tabla-temporal .table tfoot td.col-fija-4 {
     position: sticky;
-    left: 0;
-    z-index: 2;
+    /* El fondo tiene que ser OPACO: si se transparenta, las celdas de la fila
+       pasan por debajo al scrollear y se lee un número encima de otro. */
     background-color: var(--bg-white);
 }
 
-.tabla-temporal .table tfoot td:first-child {
-    background-color: #f8f9fa;
-}
-
-/* Intersección de header y columna fija: tiene que quedar por encima de ambos */
-.tabla-temporal .table thead th:first-child {
-    left: 0;
-    z-index: 5;
-}
-
-/* Segunda columna fija (tabla de cobranza: Canal + Medio de Pago) */
-.tabla-temporal .table tbody td.col-medio,
-.tabla-temporal .table tfoot td.col-medio {
-    position: sticky;
-    left: var(--col-fija-1-width, 150px);
+.tabla-temporal .table tbody td.col-fija-1,
+.tabla-temporal .table tbody td.col-fija-2,
+.tabla-temporal .table tbody td.col-fija-3,
+.tabla-temporal .table tbody td.col-fija-4 {
     z-index: 2;
-    background-color: var(--bg-white);
 }
 
-.tabla-temporal .table thead th.col-medio {
-    left: var(--col-fija-1-width, 150px);
+/* Intersección de header y columna fija: por encima de los dos (thead es 3) */
+.tabla-temporal .table thead th.col-fija-1,
+.tabla-temporal .table thead th.col-fija-2,
+.tabla-temporal .table thead th.col-fija-3,
+.tabla-temporal .table thead th.col-fija-4 {
     z-index: 5;
 }
+
+/* El desplazamiento de cada columna es la suma de los anchos de las anteriores.
+   El valor de arranque es 0 y no una estimación: hasta que el JS mida, es
+   preferible que las columnas se pisen contra el borde izquierdo a que queden
+   separadas por un ancho inventado. */
+.tabla-temporal .table .col-fija-1 { left: var(--col-fija-1-left, 0px); }
+.tabla-temporal .table .col-fija-2 { left: var(--col-fija-2-left, 0px); }
+.tabla-temporal .table .col-fija-3 { left: var(--col-fija-3-left, 0px); }
+.tabla-temporal .table .col-fija-4 { left: var(--col-fija-4-left, 0px); }
 
 /* El tfoot de totales también queda fijo abajo mientras se scrollea */
 .tabla-temporal .table tfoot td {
@@ -385,9 +411,32 @@ body {
     background-color: #f8f9fa;
 }
 
-.tabla-temporal .table tfoot td:first-child,
-.tabla-temporal .table tfoot td.col-medio {
+/* Intersección tfoot × columna fija: por encima del tfoot (3) y del tbody */
+.tabla-temporal .table tfoot td.col-fija-1,
+.tabla-temporal .table tfoot td.col-fija-2,
+.tabla-temporal .table tfoot td.col-fija-3,
+.tabla-temporal .table tfoot td.col-fija-4 {
     z-index: 4;
+    background-color: #f8f9fa;
+}
+
+/* Desplegable del selector de columnas fijas (Js/columnas-fijas.js).
+   Los ítems son etiquetas con checkbox, así que no tienen que reaccionar al
+   hover como un menú de acciones ni cerrarse al clickear. */
+.cf-menu-columnas {
+    min-width: 220px;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.cf-menu-columnas .dropdown-item {
+    cursor: pointer;
+    white-space: normal;
+}
+
+.cf-menu-columnas .dropdown-item:active {
+    background-color: transparent;
+    color: inherit;
 }
 
 /* ========================================
