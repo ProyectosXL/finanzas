@@ -98,13 +98,41 @@ GO
 IF OBJECT_ID('dbo.RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE (
-        CLIENTE      VARCHAR(6) COLLATE Latin1_General_BIN NOT NULL,
-        RAZON_SOCIAL VARCHAR(60) NULL,
-        ACTIVO       BIT         NOT NULL CONSTRAINT DF_CF_ECHEQ_PRECLI_ACTIVO DEFAULT (1),
-        FECHA_UPDATE DATETIME    NOT NULL CONSTRAINT DF_CF_ECHEQ_PRECLI_FUPD   DEFAULT (GETDATE()),
-        USUARIO      VARCHAR(50) NULL,
+        CLIENTE           VARCHAR(6) COLLATE Latin1_General_BIN NOT NULL,
+        RAZON_SOCIAL      VARCHAR(60) NULL,
+        DIAS_PRECHEQUEADO INT         NOT NULL CONSTRAINT DF_CF_ECHEQ_PRECLI_DIAS   DEFAULT (0),
+        ACTIVO            BIT         NOT NULL CONSTRAINT DF_CF_ECHEQ_PRECLI_ACTIVO DEFAULT (1),
+        FECHA_UPDATE      DATETIME    NOT NULL CONSTRAINT DF_CF_ECHEQ_PRECLI_FUPD   DEFAULT (GETDATE()),
+        USUARIO           VARCHAR(50) NULL,
         CONSTRAINT PK_ECHEQ_PRECHEQ_CLIENTE PRIMARY KEY CLUSTERED (CLIENTE)
     );
+END
+GO
+
+/* ----------------------------------------------------------------------------
+   1.b DIAS_PRECHEQUEADO, para las instalaciones que ya tenian la tabla.
+
+   CUANTOS DIAS ANTES DEL CHEQUE SE EMITE LA FACTURA, POR CLIENTE.
+
+   Antes esto era UN parametro global, 'dias_prechequeado' en
+   RO_T_CASHFLOW_PARAMETROS. No alcanza: cada cliente negocia su propio
+   adelanto, y un unico numero obliga a elegir cual de todos los clientes queda
+   bien calculado.
+
+   NO HAY RESPALDO GLOBAL. Los dias salen UNICAMENTE de esta columna, y un
+   cliente en cero no desplaza nada: el cheque queda en su propia fecha. Un
+   respaldo global seria peor que el cero, porque un cliente sin configurar
+   heredaria un desplazamiento que nadie eligio para el y no habria forma de
+   distinguirlo de uno configurado.
+
+   El default 0 es el valor correcto para el alta: hasta que alguien cargue el
+   plazo del cliente, la estimacion mas honesta es no mover la fecha.
+   ---------------------------------------------------------------------------- */
+IF COL_LENGTH('dbo.RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE', 'DIAS_PRECHEQUEADO') IS NULL
+BEGIN
+    ALTER TABLE dbo.RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE
+        ADD DIAS_PRECHEQUEADO INT NOT NULL
+            CONSTRAINT DF_CF_ECHEQ_PRECLI_DIAS DEFAULT (0);
 END
 GO
 

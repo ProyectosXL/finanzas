@@ -554,8 +554,15 @@ try {
             require_once __DIR__ . '/../Class/Echeqs.php';
 
             // Sirve tambien para reactivar una baja: la clase resuelve cual de
-            // los dos casos es y lo dice en la respuesta.
-            $r = (new Echeqs())->guardarClientePrechequeado($data['codigo'], usuarioActual());
+            // los dos casos es y lo dice en la respuesta. Los dias son
+            // obligatorios en el alta y opcionales al reactivar -ahi se
+            // conserva el plazo que el cliente ya tenia-, y eso tambien lo
+            // resuelve la clase.
+            $r = (new Echeqs())->guardarClientePrechequeado(
+                $data['codigo'],
+                array_key_exists('dias', $data) ? $data['dias'] : null,
+                usuarioActual()
+            );
 
             echo json_encode([
                 'success' => true,
@@ -567,6 +574,28 @@ try {
                         : 'Hoy no tiene ningún cheque vivo, así que la pantalla de Echeqs no va a '
                           . 'mostrar nada suyo.'),
                 'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'saveDiasPrecheq':
+            $data = bodyJson();
+
+            if (!isset($data['codigo']) || !array_key_exists('dias', $data)) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/Echeqs.php';
+
+            $dias = (new Echeqs())->guardarDiasCliente(
+                $data['codigo'], $data['dias'], usuarioActual());
+
+            echo json_encode([
+                'success' => true,
+                'message' => $dias === 0
+                    ? 'El cliente queda sin desplazamiento: sus cheques se netean en su propia '
+                      . 'fecha.'
+                    : 'La venta se estima ' . $dias . ' día(s) antes de la fecha del cheque.',
+                'data' => ['dias' => $dias]
             ], JSON_UNESCAPED_UNICODE);
             break;
 

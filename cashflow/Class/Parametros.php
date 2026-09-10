@@ -18,6 +18,21 @@ class Parametros {
     const CANALES = ['LOCALES', 'FRANQUICIAS', 'MAYORISTAS', 'ECOMMERCE'];
 
     /**
+     * Parametros que ya nadie lee y que la pantalla no muestra.
+     *
+     * LA FILA NO SE BORRA de RO_T_CASHFLOW_PARAMETROS: queda el valor que
+     * alguien habia cargado, por si hace falta reconstruir con que numero se
+     * proyecto en su momento. Lo que se saca es el campo editable, porque un
+     * campo que se puede tocar y que no cambia nada es peor que no tenerlo.
+     *
+     *   'dias_prechequeado' -> los dias de pre-chequeado pasaron a ser POR
+     *   CLIENTE, en RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE.DIAS_PRECHEQUEADO. Un
+     *   unico numero global obligaba a elegir cual de todos los clientes
+     *   quedaba bien calculado. Ver README-ventas.md.
+     */
+    const RETIRADOS = ['dias_prechequeado'];
+
+    /**
      * Modulos que expone la pestana Parametros, en el orden de las sub-pestanas.
      *
      * Cada parametro declara a que MODULO pertenece, asi se ve de un vistazo que
@@ -372,6 +387,10 @@ class Parametros {
             if (!$tieneModulo) {
                 // Todos los parametros que existen hoy son del modulo de ventas
                 $row['MODULO'] = 'VENTAS';
+            }
+
+            if (in_array($row['CLAVE'], self::RETIRADOS, true)) {
+                continue;
             }
 
             $v[] = $row;

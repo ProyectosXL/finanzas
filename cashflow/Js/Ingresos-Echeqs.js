@@ -30,11 +30,24 @@
     /** Controlador de las tres vistas, compartido con el resto del módulo */
     var vistas = null;
 
+    /**
+     * El de la sub-pestaña 2. Va SEPARADO del de cartera y no compartido: son
+     * dos tablas con dos ejes distintos en pantalla al mismo tiempo, y un solo
+     * controlador haría que cambiar de vista en una moviera la otra.
+     */
+    var vistasPre = null;
+
     function inicializar() {
         vistas = crearEjeVistas({
             botones: 'vistasEcheqs',
             periodo: 'periodoEcheqs',
             alCambiar: dibujarCartera
+        });
+
+        vistasPre = crearEjeVistas({
+            botones: 'vistasPre',
+            periodo: 'periodoPre',
+            alCambiar: dibujarPrechequeado
         });
 
         // N° de cheque identifica la fila y Cliente es de quién es: son las dos
@@ -44,6 +57,15 @@
             control: 'colFijasEcheqs',
             clave: 'echeqs_cartera',
             porDefecto: [1, 3]
+        });
+
+        // En pre-chequeado la primera columna es el tilde, que es lo que hay
+        // que tener siempre a mano, y la cuarta es el cliente.
+        crearColumnasFijas({
+            tabla: 'tablaPrechequeado',
+            control: 'colFijasPre',
+            clave: 'echeqs_prechequeado',
+            porDefecto: [0, 6]
         });
 
         conectar('btnRefreshEch', cargarCartera);
@@ -296,7 +318,12 @@
             .then(function(data) {
                 datosPre = data;
 
+                // El controlador de vistas se entera del eje nuevo antes de que
+                // se dibuje la tabla.
+                vistasPre.usar(datosPre);
+
                 pintarAvisos();
+                pintarAvisosEjePre();
                 pintarFiltroClientes();
                 dibujarPrechequeado();
 
@@ -339,18 +366,78 @@
         }
 
         var filas = filasPreVisibles();
+        var cols = vistasPre.columnas();
 
-        pintarFilasPre(filas);
-        pintarPiePre(filas);
+        pintarEncabezadoEjePre(cols);
+        pintarFilasPre(filas, cols);
+        pintarPiePre(filas, cols);
         pintarKpiPre();
         sincronizarCabecera(filas);
     }
 
-    function pintarFilasPre(filas) {
+    /**
+     * Lo que quedó fuera del eje. Con días de pre-chequeado altos la fecha
+     * estimada de venta puede caer antes del inicio del eje, y ahí no hay
+     * columna donde ubicar el importe. Se avisa, no se esconde: es el mismo
+     * criterio de Ventas::repartirNeteo(), que además es la cuenta que de
+     * verdad netea.
+     */
+    function pintarAvisosEjePre() {
+        var cont = document.getElementById('avisosEjePre');
+
+        if (!cont) {
+            return;
+        }
+
+        var avisos = (datosPre && datosPre.warnings) || [];
+
+        cont.innerHTML = avisos.length
+            ? '<div class="alert alert-warning py-2 px-3 mb-0 rounded-0"><small>'
+                + '<i class="fas fa-triangle-exclamation me-1"></i>'
+                + avisos.map(escapar).join(' ') + '</small></div>'
+            : '';
+    }
+
+    function pintarEncabezadoEjePre(cols) {
+        var html = '';
+
+        cols.forEach(function(col) {
+            var esMes = vistasPre.esMes(col);
+            var meta = vistasPre.meta(col) || {};
+            var clases = [esMes ? 'month-column' : 'day-column'];
+            var titulo = '';
+
+            if (esMes && meta.parcial) {
+                clases.push('col-parcial');
+                titulo = 'Este mes está recortado: sus primeros días están en el tramo diario';
+            }
+
+            html += '<th class="' + clases.join(' ') + '"'
+                + (titulo ? ' title="' + escapar(titulo) + '"' : '') + '>'
+                + escapar(vistasPre.rotulo(col)) + '</th>';
+        });
+
+        html += '<th class="total-column">Total</th>';
+
+        var grupo = document.getElementById('grupoEjePre');
+
+        if (grupo && datosPre.vistas) {
+            grupo.textContent = datosPre.vistas[vistasPre.activa()].label;
+            grupo.setAttribute('colspan', String(cols.length + 1));
+        }
+
+        document.getElementById('headerEjePre').innerHTML = html;
+    }
+
+    /** Cuántas columnas descriptivas tiene la tabla de pre-chequeado */
+    var COLS_DESC_PRE = 10;
+
+    function pintarFilasPre(filas, cols) {
         var html = '';
 
         filas.forEach(function(f) {
             var heredada = (f.ORIGEN_MARCA === 'cliente');
+            var dias = Number(f.DIAS_PRECHEQUEADO) || 0;
 
             html += '<tr class="' + (f.MARCADO ? 'ech-marcado' : 'ech-sin-marcar') + '"'
                  + ' data-id="' + f.ID_SBA14 + '">';
@@ -358,6 +445,25 @@
             html += '<td class="text-center">'
                  + '<input type="checkbox" class="form-check-input ech-marca" '
                  + 'data-id="' + f.ID_SBA14 + '"' + (f.MARCADO ? ' checked' : '') + '>'
+                 + '</td>';
+
+            // La fecha estimada de venta es donde cae el importe en la grilla.
+            // Va primera y destacada; la del cheque queda al lado como
+            // referencia, que es el dato duro de Tango.
+            html += '<td class="center"><span class="ech-fecha-estimada" '
+                 + 'title="Fecha del cheque menos los días de pre-chequeado del cliente. '
+                 + 'Es donde este importe netea la cobranza proyectada de Ventas.">'
+                 + fecha(f.FECHA_VENTA_EST) + '</span></td>';
+
+            // Los días efectivos: sin esto, un cliente en cero se ve igual que
+            // uno configurado y no hay forma de saber por qué las dos fechas
+            // coinciden.
+            html += '<td class="text-center">'
+                 + (dias > 0
+                        ? '<span class="ech-dias-precheq">−' + dias + ' d</span>'
+                        : '<span class="ech-sin-dias" title="Este cliente no tiene días de '
+                          + 'pre-chequeado cargados, así que el cheque se netea en su propia '
+                          + 'fecha. Se configura en Parámetros → Pre-chequeado.">0</span>')
                  + '</td>';
 
             html += '<td class="center">' + fecha(f.FECHA_CHEQUE) + '</td>';
@@ -379,12 +485,26 @@
                           + (f.MARCADO ? 'tildado a mano' : 'destildado a mano') + '</span>')
                  + '</td>';
 
+            // Los importes por columna ya vienen resueltos del backend, sobre
+            // la fecha estimada de venta.
+            cols.forEach(function(col) {
+                var v = Number(vistasPre.valor(f, col)) || 0;
+
+                html += '<td class="currency ' + (v !== 0 ? 'cell-with-value' : '') + '">'
+                    + (v !== 0 ? pesos(v) : '') + '</td>';
+            });
+
+            var total = vistasPre.total(f);
+
+            html += '<td class="currency total-column">'
+                + (total !== 0 ? pesos(total) : '') + '</td>';
+
             html += '</tr>';
         });
 
         if (!filas.length) {
-            html = '<tr><td colspan="8" class="text-center text-muted py-4">' + mensajeVacio()
-                 + '</td></tr>';
+            html = '<tr><td colspan="' + (COLS_DESC_PRE + cols.length + 1) + '" '
+                 + 'class="text-center text-muted py-4">' + mensajeVacio() + '</td></tr>';
         }
 
         document.getElementById('bodyPre').innerHTML = html;
@@ -412,7 +532,7 @@
         return 'Ningún cheque coincide con el filtro.';
     }
 
-    function pintarPiePre(filas) {
+    function pintarPiePre(filas, cols) {
         var porEstado = {};
         var totalVisible = 0;
         var marcadoVisible = 0;
@@ -445,19 +565,55 @@
                 + '</span>';
         }).join(' ');
 
+        // La grilla del pie suma SOLO los cheques marcados: son los únicos que
+        // netean. Mostrar ahí el total del listado haría creer que se resta
+        // también lo destildado.
+        var porColumna = cols.map(function(col) {
+            var total = 0;
+
+            filas.forEach(function(f) {
+                if (f.MARCADO) {
+                    total += Number(vistasPre.valor(f, col)) || 0;
+                }
+            });
+
+            return total;
+        });
+
+        var granTotal = 0;
+
+        filas.forEach(function(f) {
+            if (f.MARCADO) {
+                granTotal += vistasPre.total(f);
+            }
+        });
+
+        var celdasEje = porColumna.map(function(t) {
+            return '<td class="currency ' + (t !== 0 ? 'cell-with-value' : '') + '">'
+                + (t !== 0 ? pesos(t) : '') + '</td>';
+        }).join('')
+            + '<td class="currency total-column">'
+            + (granTotal !== 0 ? pesos(granTotal) : '') + '</td>';
+
+        var vacias = cols.map(function() { return '<td></td>'; }).join('') + '<td></td>';
+        var anchoTotal = COLS_DESC_PRE + cols.length + 1;
+
         document.getElementById('footPre').innerHTML =
             '<tr class="ech-fila-total">' +
-                '<td colspan="6" class="fw-bold text-end">MARCADO (visible)</td>' +
+                '<td colspan="8" class="fw-bold text-end">MARCADO (visible)</td>' +
                 '<td class="currency fw-bold">' + pesos(marcadoVisible) + '</td>' +
                 '<td></td>' +
+                celdasEje +
             '</tr>' +
             '<tr>' +
-                '<td colspan="6" class="text-end text-muted">Total del listado visible</td>' +
+                '<td colspan="8" class="text-end text-muted">Total del listado visible</td>' +
                 '<td class="currency text-muted">' + pesos(totalVisible) + '</td>' +
                 '<td></td>' +
+                vacias +
             '</tr>' +
             (detalle
-                ? '<tr><td colspan="8" class="ech-detalle-estados">' + detalle + '</td></tr>'
+                ? '<tr><td colspan="' + anchoTotal + '" class="ech-detalle-estados">'
+                    + detalle + '</td></tr>'
                 : '');
     }
 

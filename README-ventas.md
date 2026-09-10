@@ -251,7 +251,7 @@ Las secciones disponibles son `generales` (clave/valor del grupo `GENERAL`), `re
 | Clave | Semilla | Qué controla |
 | --- | --- | --- |
 | `alicuota_iva` | `0.21` | IVA sobre la venta neta proyectada |
-| `dias_prechequeado` | `0` | Días a restar a la fecha del cheque para la fecha teórica de factura |
+| ~~`dias_prechequeado`~~ | `0` | **Sin uso.** Los días de pre-chequeado pasaron a ser por cliente. La fila queda en la tabla pero la pantalla no la muestra; ver más abajo |
 | `horizonte_dias` | `28` | Columnas diarias de la proyección |
 | `horizonte_meses` | `12` | Columnas mensuales de la proyección |
 | `feriados_comercio` | `12-25,01-01,09-26` | Días sin venta estimada, formato `MM-DD` |
@@ -295,23 +295,35 @@ Mix de cobro inicial (cada canal suma 100%):
 
 | Pieza | Qué hace |
 | --- | --- |
-| `Echeqs → Venta Cobrada Anticipada` | Dónde se tilda qué cheques netean |
-| `Parámetros → Pre-chequeado` | Qué clientes operan con la modalidad |
+| `Echeqs → Venta Cobrada Anticipada` | Dónde se tilda qué cheques netean, con su grilla temporal |
+| `Parámetros → Pre-chequeado` | Qué clientes operan con la modalidad **y cuántos días adelanta cada uno** |
 | `RO_V_CASHFLOW_VENTAS_PRECHEQ` | La vista origen. La crea `sql/echeqs_prechequeado.sql` |
-| `dias_prechequeado` | Cuántos días antes del cheque se emite la factura |
+| `RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE.DIAS_PRECHEQUEADO` | Los días, **por cliente** |
+| `Echeqs::diasDeCliente()` · `Echeqs::fechaVentaEstimada()` | Resuelven el plazo y la fecha. Las usan la pantalla **y** el neteo |
 | `Ventas::getNeteoPrechequeado()` | Reparte el importe contra el eje y avisa lo que no entra |
 
 ```
-FECHA_TEORICA_FACTURA = FECHA_CHEQUE − dias_prechequeado
+FECHA_VENTA_ESTIMADA = FECHA_CHEQUE − días del CLIENTE
 ```
 
 El importe cae en el bucket diario de esa fecha, o en el mensual si quedó fuera del tramo diario: es la misma regla de `Horizonte::ubicar()` que usa el resto del módulo, no una copia.
+
+### Los días son por cliente, y no hay valor global
+
+Antes eran **uno solo para todos**: el parámetro `dias_prechequeado`. Cada cliente negocia su propio adelanto, así que un único número obliga a elegir cuál de todos queda bien calculado.
+
+- **No hay respaldo global.** Un cliente en cero **no desplaza nada** y su cheque queda en su propia fecha. Un respaldo sería peor que el cero: un cliente sin configurar heredaría un desplazamiento que nadie eligió para él, y en pantalla sería indistinguible de uno configurado.
+- **Los días se piden en el alta.** Son parte de configurar al cliente, no un dato que se descubre después. Cero es una respuesta válida; que falte, no.
+- **La pantalla deja ver los que quedaron en cero**, con la marca *sin desplazar*: si alguien esperaba un corrimiento y en Echeqs ve el cheque en su propia fecha, el motivo es ése y tiene que poder encontrarlo.
+- **La pantalla y el neteo resuelven el plazo con la MISMA función.** Si aplicaran plazos distintos, el tablero dejaría de cerrar y no habría ninguna pantalla donde se notara. `tests/test_echeqs.php` cubre dos clientes con días distintos y uno en cero.
+
+> **`dias_prechequeado` quedó sin uso.** La fila **no se borró** de `RO_T_CASHFLOW_PARAMETROS` —queda el valor que alguien había cargado, por si hace falta reconstruir con qué número se proyectó en su momento—, pero `Parametros::RETIRADOS` la saca del listado, así que ya no aparece como campo editable en *Parámetros → Ventas*. Un campo que se puede tocar y que no cambia nada es peor que no tenerlo.
 
 `RO_T_CASHFLOW_VENTAS_PRECHEQ` **ya no es el origen** y no tiene lector. Queda creada porque puede tener filas en algún ambiente. Ver `sql/ventas_proyeccion.sql` §6.
 
 ### Dos cosas que el neteo avisa en vez de callar
 
-- **Lo que cae antes del inicio del eje.** Con `dias_prechequeado > 0` la fecha teórica puede quedar en el pasado, y ahí no hay columna donde restar. Va a un aviso con el monto. No alcanza con preguntarle a `Horizonte::ubicar()` si encontró columna: una fecha de los primeros días del mes **en curso** cae en la columna de ese mes, que existe pero no representa ningún día futuro y la pantalla ni siquiera la dibuja. Por eso el corte es contra el primer día del eje.
+- **Lo que cae antes del inicio del eje.** Con días de pre-chequeado la fecha estimada de venta puede quedar en el pasado, y ahí no hay columna donde restar. Va a un aviso con el monto. No alcanza con preguntarle a `Horizonte::ubicar()` si encontró columna: una fecha de los primeros días del mes **en curso** cae en la columna de ese mes, que existe pero no representa ningún día futuro y la pantalla ni siquiera la dibuja. Por eso el corte es contra el primer día del eje. El aviso ya no puede nombrar *un* plazo —cada cliente tiene el suyo—, así que manda al detalle en vez de inventar un número.
 - **Lo que no se pudo imputar a un canal.** El canal sale del prefijo del código de cliente (`Echeqs::canalDeCliente()`): `F` es Franquicias y `L` es Locales. Si algún importe no mapea, se resta sólo del total y el aviso dice por cuánta plata la fila total y su apertura por canal no reconcilian.
 
 ### Netea lo tildado, sin mirar el estado del cheque

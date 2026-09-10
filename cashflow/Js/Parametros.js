@@ -70,8 +70,10 @@
     // Cómo se edita cada parámetro general. Los porcentajes se muestran en % y
     // se guardan en tasa; el resto va tal cual.
     var FORMATO = {
+        // 'dias_prechequeado' ya no está: los días de pre-chequeado son POR
+        // CLIENTE y se editan en Parámetros → Pre-chequeado. La fila sigue en
+        // la tabla, pero Parametros::RETIRADOS la saca del listado.
         'alicuota_iva':            { tipo: 'porcentaje', sufijo: '%',     paso: '0.01' },
-        'dias_prechequeado':       { tipo: 'entero',     sufijo: 'días',  paso: '1' },
         'horizonte_dias':          { tipo: 'entero',     sufijo: 'días',  paso: '1' },
         'horizonte_meses':         { tipo: 'entero',     sufijo: 'meses', paso: '1' },
         'feriados_comercio':       { tipo: 'texto',      sufijo: '',      paso: null },
@@ -719,7 +721,6 @@
     function hint(clave) {
         var hints = {
             'alicuota_iva': 'Se aplica sobre la venta neta proyectada de los cuatro canales.',
-            'dias_prechequeado': 'Días a restar a la fecha del cheque para obtener la fecha teórica de factura.',
             'horizonte_dias': 'Cantidad de columnas diarias de la proyección.',
             'horizonte_meses': 'Cantidad de columnas mensuales de la proyección.',
             'feriados_comercio': 'Formato MM-DD separado por coma. Únicos días del año sin venta estimada.',

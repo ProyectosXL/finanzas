@@ -577,17 +577,23 @@ class Ventas {
      * RO_T_CASHFLOW_VENTAS_PRECHEQ, que queda sin uso.
      *
      * LA REGLA
-     *     FECHA_TEORICA_FACTURA = FECHA_CHEQUE - dias_prechequeado
+     *     FECHA_TEORICA_FACTURA = FECHA_CHEQUE - dias del CLIENTE
      * y el importe cae en el bucket diario de esa fecha, o en el mensual si quedo
      * fuera del tramo diario. El reparto lo decide Horizonte::ubicar(), que es la
      * misma regla "dia O mes, nunca las dos" que usa todo el modulo.
      *
-     * 'dias_prechequeado' se lee de los parametros y NO de la vista: es un valor
-     * editable, y un parametro leido desde dos lugares se va a desincronizar.
+     * LOS DIAS SON POR CLIENTE Y NO HAY VALOR GLOBAL. Antes salian del parametro
+     * 'dias_prechequeado', uno solo para todos: cada cliente negocia su propio
+     * adelanto, asi que un unico numero obliga a elegir cual de todos queda bien
+     * calculado. Ahora salen de RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE y los
+     * resuelve Echeqs::diasDeCliente(), LA MISMA funcion que usa la sub-pestana:
+     * si la pantalla y el neteo aplicaran plazos distintos, el tablero dejaria de
+     * cerrar y no habria ninguna pantalla donde se notara. Un cliente en cero no
+     * desplaza nada.
      *
-     * LO QUE CAE ANTES DEL EJE NO SE DESCARTA CALLADO. Con dias_prechequeado > 0
-     * la fecha teorica puede quedar antes del inicio del eje, y ese importe no se
-     * puede netear en ninguna columna. Va a un aviso, igual que hace el resto del
+     * LO QUE CAE ANTES DEL EJE NO SE DESCARTA CALLADO. Con dias > 0 la fecha
+     * teorica puede quedar antes del inicio del eje, y ese importe no se puede
+     * netear en ninguna columna. Va a un aviso, igual que hace el resto del
      * modulo con 'fuera_horizonte'.
      *
      * NETEA TODO LO TILDADO, SIN MIRAR EL ESTADO DEL CHEQUE. Es una decision de
@@ -612,23 +618,26 @@ class Ventas {
      *                'fuera_de_cartera' => float]
      */
     public function getNeteoPrechequeado($dias = [], $meses = []) {
-        $diasPrecheq = 0;
+        $diasPorCliente = [];
         $filas = [];
 
         try {
-            $diasPrecheq = Parametros::ent(
-                $this->parametros->getParametrosMap(), 'dias_prechequeado');
-            $filas = (new Echeqs())->getPrechequeadoTotales();
+            $echeqs = new Echeqs();
+
+            // Los dos salen del mismo maestro y en la misma pasada: el plazo
+            // que se aplica acá tiene que ser el que muestra la sub-pestaña.
+            $diasPorCliente = $echeqs->getDiasPrechequeadoPorCliente();
+            $filas = $echeqs->getPrechequeadoTotales();
         } catch (Throwable $e) {
             $this->warnings[] = 'No se pudo leer el neteo de cheques adelantados ('
                 . $e->getMessage() . '). La cobranza se muestra sin netear.';
 
-            return self::repartirNeteo([], $dias, $meses, 0);
+            return self::repartirNeteo([], $dias, $meses, []);
         }
 
-        $neteo = self::repartirNeteo($filas, $dias, $meses, $diasPrecheq);
+        $neteo = self::repartirNeteo($filas, $dias, $meses, $diasPorCliente);
 
-        foreach (self::avisosNeteo($neteo, $diasPrecheq) as $aviso) {
+        foreach (self::avisosNeteo($neteo) as $aviso) {
             $this->warnings[] = $aviso;
         }
 
@@ -651,13 +660,19 @@ class Ventas {
      * dibuja-. Restar ahi seria hacer desaparecer el importe en una columna que
      * nadie ve. Por eso el corte es contra el primer dia del eje.
      *
+     * LOS DIAS LLEGAN POR CLIENTE, en un mapa. Antes era un unico entero
+     * aplicado a todas las filas. El mapa se resuelve con
+     * Echeqs::diasDeCliente(), que es la misma funcion que usa la sub-pestana
+     * para mostrar la fecha estimada de venta: si los dos aplicaran plazos
+     * distintos, la pantalla mostraria una fecha y el tablero netearia en otra.
+     *
      * @param array $filas Filas de Echeqs::getPrechequeadoTotales()
      * @param array $dias Lista de fechas 'Y-m-d' del tramo diario
      * @param array $meses Lista de claves 'Y-m' del tramo mensual
-     * @param int $diasPrecheq Dias a restarle a la fecha del cheque
+     * @param array $diasPorCliente Mapa codigo de cliente => dias
      * @return array
      */
-    public static function repartirNeteo($filas, $dias, $meses, $diasPrecheq) {
+    public static function repartirNeteo($filas, $dias, $meses, $diasPorCliente = []) {
         $neteo = [
             'dias' => [],
             'meses' => [],
@@ -690,7 +705,6 @@ class Ventas {
         // horizonte solo mensual- se cae a hoy, que es donde arranca el eje de
         // todos modos.
         $inicio = !empty($neteo['dias']) ? min(array_keys($neteo['dias'])) : date('Y-m-d');
-        $diasPrecheq = intval($diasPrecheq);
 
         foreach (is_array($filas) ? $filas : [] as $fila) {
             $importe = floatval($fila['IMPORTE']);
@@ -699,10 +713,16 @@ class Ventas {
                 continue;
             }
 
-            $teorica = date('Y-m-d',
-                strtotime($fila['FECHA_CHEQUE'] . ' -' . $diasPrecheq . ' days'));
+            // La misma funcion que usa la sub-pestana para mostrar la fecha
+            // estimada de venta. No hay respaldo global: un cliente en cero
+            // deja el cheque en su propia fecha.
+            $teorica = Echeqs::fechaVentaEstimada(
+                $fila['FECHA_CHEQUE'],
+                Echeqs::diasDeCliente($diasPorCliente, $fila['COD_CLIENTE']));
 
-            $destino = ($teorica < $inicio) ? null : Horizonte::ubicar($neteo, $teorica);
+            $destino = ($teorica === null || $teorica < $inicio)
+                ? null
+                : Horizonte::ubicar($neteo, $teorica);
 
             if ($destino === null) {
                 $neteo['fuera_horizonte'] += $importe;
@@ -747,17 +767,19 @@ class Ventas {
      * decide que tildar.
      *
      * @param array $neteo Resultado de repartirNeteo()
-     * @param int $diasPrecheq
      * @return array
      */
-    public static function avisosNeteo($neteo, $diasPrecheq) {
+    public static function avisosNeteo($neteo) {
         $avisos = [];
 
         if ($neteo['fuera_horizonte'] > 0) {
+            // El aviso ya no puede nombrar UN plazo: cada cliente tiene el
+            // suyo. Dice dónde mirarlo en vez de mentir un número.
             $avisos[] = 'Neteo de cheques adelantados: $ '
                 . number_format($neteo['fuera_horizonte'], 2, ',', '.') . ' no se restaron de '
-                . 'ninguna columna porque su fecha teórica de factura (la del cheque menos '
-                . intval($diasPrecheq) . ' día(s)) cae antes del inicio del eje.';
+                . 'ninguna columna porque su fecha estimada de venta (la del cheque menos los '
+                . 'días de pre-chequeado del cliente) cae antes del inicio del eje. El detalle '
+                . 'está en Echeqs → Venta Cobrada Anticipada.';
         }
 
         if ($neteo['sin_canal'] > 0) {
