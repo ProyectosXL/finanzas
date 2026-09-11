@@ -1,12 +1,13 @@
 <?php
 /**
  * Sub-pestaña Parámetros -> Cobranzas
- * Gestión de Plazos Promedio de Pago (PPP) y Escalas de Descuento por Cliente
+ * Escala de descuento y PPP de Cobranzas Franquicias, y los plazos globales
+ * de Mayoristas y Exportaciones Tasky (que no llevan descuento).
  */
 ?>
 
 <div class="modulo-descripcion mb-3">
-    La <strong>escala de descuento</strong> es una sola y vale para todos los clientes. Lo que sí es por cliente es el <strong>Plazo Promedio de Pago (PPP)</strong>, que se calcula con los últimos 3 cobros y se puede pisar a mano. Acá también se editan el <strong>Plazo de Vencimiento Mayorista</strong> y el <strong>Plazo de Cobro de Exportaciones Tasky</strong>.
+    La <strong>escala de descuento</strong> es de <strong>Cobranzas Franquicias</strong>: es una sola y vale para todas las franquicias. Lo que sí es por franquicia es el <strong>Plazo Promedio de Pago (PPP)</strong>, que se calcula con los últimos 3 cobros y se puede pisar a mano. Mayoristas y Exportaciones Tasky no llevan descuento: acá se editan sólo sus plazos, el <strong>Plazo de Vencimiento Mayorista</strong> y el <strong>Plazo de Cobro de Exportaciones Tasky</strong>.
 </div>
 
 <div class="row g-3 mb-4">
@@ -67,9 +68,9 @@
         <div class="card h-100" id="cardEscalaCob">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div>
-                    <h5 class="mb-0">Escala de Descuento</h5>
+                    <h5 class="mb-0">Escala de Descuento &mdash; Cobranzas Franquicias</h5>
                     <small class="text-muted">
-                        Una sola escala para todos los clientes. <strong>No depende del medio de pago.</strong>
+                        Aplica sólo a las facturas de franquicias. Una sola escala para todas. <strong>No depende del medio de pago.</strong>
                         Los días son los que van de la emisión a la fecha de cobro.
                     </small>
                 </div>
