@@ -20,24 +20,33 @@
                 <small class="text-muted">Parámetros globales: días a sumar a la fecha de emisión</small>
             </div>
             <div class="card-body">
-                <div class="param-card" id="card-cobranzas_may_dias_vto">
-                    <div class="param-clave">Plazo de Proyección Mayoristas</div>
-                    <div class="param-descripcion">Días de plazo a sumar a la fecha de emisión de factura para calcular la fecha probable de cobro.</div>
-                    <div class="input-group input-group-sm">
-                        <input type="number" step="1" min="1" class="form-control param-input" data-clave="cobranzas_may_dias_vto" data-tipo="entero" value="60">
-                        <span class="input-group-text">días</span>
+                <!-- Cada tarjeta en su propia columna: .param-card lleva
+                     height: 100%, y dos apiladas sueltas en el mismo
+                     card-body se pisan. -->
+                <div class="row g-3">
+                    <div class="col-12">
+                        <div class="param-card" id="card-cobranzas_may_dias_vto">
+                            <div class="param-clave">Plazo de Proyección Mayoristas</div>
+                            <div class="param-descripcion">Días de plazo a sumar a la fecha de emisión de factura para calcular la fecha probable de cobro.</div>
+                            <div class="input-group input-group-sm">
+                                <input type="number" step="1" min="1" class="form-control param-input" data-clave="cobranzas_may_dias_vto" data-tipo="entero" value="60">
+                                <span class="input-group-text">días</span>
+                            </div>
+                            <div class="param-hint">Días a sumar a la F. Emisión (predeterminado: 60 días).</div>
+                        </div>
                     </div>
-                    <div class="param-hint">Días a sumar a la F. Emisión (predeterminado: 60 días).</div>
-                </div>
 
-                <div class="param-card mt-3" id="card-exportaciones_tasky_dias_cobro">
-                    <div class="param-clave">Plazo de Cobro Exportaciones Tasky</div>
-                    <div class="param-descripcion">Días a sumar a la fecha de emisión de las facturas en dólares a Tasky para estimar su fecha de cobro. Una factura cuya fecha estimada ya pasó se muestra como vencida, en el primer día del eje.</div>
-                    <div class="input-group input-group-sm">
-                        <input type="number" step="1" min="1" class="form-control param-input" data-clave="exportaciones_tasky_dias_cobro" data-tipo="entero" value="30">
-                        <span class="input-group-text">días</span>
+                    <div class="col-12">
+                        <div class="param-card" id="card-exportaciones_tasky_dias_cobro">
+                            <div class="param-clave">Plazo de Cobro Exportaciones Tasky</div>
+                            <div class="param-descripcion">Días a sumar a la fecha de emisión de las facturas en dólares a Tasky para estimar su fecha de cobro. Una factura cuya fecha estimada ya pasó se muestra como vencida, en el primer día del eje.</div>
+                            <div class="input-group input-group-sm">
+                                <input type="number" step="1" min="1" class="form-control param-input" data-clave="exportaciones_tasky_dias_cobro" data-tipo="entero" value="30">
+                                <span class="input-group-text">días</span>
+                            </div>
+                            <div class="param-hint">Predeterminado: 30 días. Si el parámetro no está sembrado, la pestaña usa ese valor.</div>
+                        </div>
                     </div>
-                    <div class="param-hint">Predeterminado: 30 días. Si el parámetro no está sembrado, la pestaña usa ese valor.</div>
                 </div>
             </div>
         </div>

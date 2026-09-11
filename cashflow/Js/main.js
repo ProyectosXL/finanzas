@@ -195,40 +195,23 @@ function loadTab(tabName) {
 }
 
 /**
- * Actualiza el header con el nombre del tab actual
- * @param {string} tabName - Nombre del tab
+ * Actualiza el header con el nombre del tab actual.
+ *
+ * El título sale del enlace del menú (data-encabezado, que pone
+ * Components/sidebar.php a partir de Class/Menu.php). Antes había acá una
+ * segunda lista de nombres escrita a mano, y se desactualizaba sola: cada
+ * pestaña nueva aparecía en el encabezado con su código y guión bajo.
+ *
+ * @param {string} tabName - Código del tab
  */
 function updateHeader(tabName) {
-    const titles = {
-        'cashflow': 'Cashflow',
-        'dashboard': 'Dashboard',
-        'parametros': 'Parámetros',
-        'ventas': 'Ventas',
-        'saldos': 'Saldos',
-        'echeqs': 'Echeqs',
-        'cobranzas_fr': 'Cobranzas FR',
-        'cobranzas_may': 'Cobranzas May',
-        'cob_electronicos': 'Cobranzas Electrónicos',
-        'proveedores_exterior': 'Proveedores Exterior',
-        'crono_nacionalizacion': 'Crono Nacionalización',
-        'nacionalizacion_2': 'Nacionalización (2)',
-        'proveedores_locales': 'Proveedores Locales',
-        'cronograma': 'Cronograma',
-        'logistica_local': 'Logística Local',
-        'haberes': 'Haberes',
-        'impuestos': 'Impuestos',
-        'alquileres': 'Alquileres',
-        'seguros': 'Seguros',
-        'llaves_renov': 'Llaves y Renov. Contratos',
-        'pagos_tarjetas': 'Pagos con Tarjetas y Otros',
-        'otros_socios': 'Otros Socios y No Prog.',
-        'bopreal': 'Bopreal',
-        'prestamos': 'Préstamos',
-        'pagos_div': 'Pagos Div. Marzo'
-    };
-    
-    const title = titles[tabName] || tabName;
-    
+    const link = $('.menu-link[data-tab="' + tabName + '"]').first();
+    const encabezado = link.length ? link.data('encabezado') : '';
+
+    // Sin enlace en el menú (una pestaña a la que se llega por código, como
+    // nacionalizacion_2) se humaniza el código, que es mejor que el crudo.
+    const title = encabezado || tabName.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
+
     $('#pageTitle').text(title);
     $('#breadcrumbCurrent').text(title);
 }

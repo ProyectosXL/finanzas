@@ -129,6 +129,22 @@ chequear('una pestana con datos no lleva marca', '', $porTab['ventas']['icono_es
 chequear('ni tooltip', '', $porTab['ventas']['titulo']);
 chequear('una pendiente si lleva marca', true, $porTab['haberes']['icono_estado'] !== '');
 
+seccion('el titulo de la pagina sale del menu');
+
+// El encabezado lo lee main.js del enlace del menu: no hay otra lista de
+// nombres. Por defecto es el nombre del menu; cuando ese va abreviado para
+// entrar en el sidebar, el encabezado va completo.
+foreach ($porTab as $tab => $item) {
+    if (empty($item['encabezado'])) {
+        chequear('toda pestana tiene encabezado: ' . $tab, true, false);
+    }
+}
+
+chequear('por defecto es el nombre del menu', 'Exportaciones Tasky', $porTab['exportaciones_tasky']['encabezado']);
+chequear('Cobranzas FR va completo', 'Cobranzas Franquicias', $porTab['cobranzas_fr']['encabezado']);
+chequear('Cobranzas May tambien', 'Cobranzas Mayoristas', $porTab['cobranzas_may']['encabezado']);
+chequear('y Cob. Electronicos', 'Cobranzas Electrónicas', $porTab['cob_electronicos']['encabezado']);
+
 seccion('el placeholder se detecta y baja el estado declarado');
 
 // Es la guarda que evita que el menu prometa datos que no existen. Va en una

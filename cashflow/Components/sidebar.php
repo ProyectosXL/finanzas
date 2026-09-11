@@ -25,8 +25,11 @@
     function menuLink($item, $activo = false) {
         $clases = 'menu-link menu-' . $item['estado'] . ($activo ? ' active' : '');
 
+        // data-encabezado es el título de la página: main.js lo lee de acá al
+        // cargar la pestaña, así el menú es la única lista de nombres.
         $html = '<a href="#" class="' . $clases . '" data-tab="'
             . htmlspecialchars($item['tab']) . '"'
+            . ' data-encabezado="' . htmlspecialchars($item['encabezado']) . '"'
             . ($item['titulo'] !== '' ? ' title="' . htmlspecialchars($item['titulo']) . '"' : '')
             . '>'
             . '<i class="fas ' . htmlspecialchars($item['icono']) . ' menu-icono"></i>'
