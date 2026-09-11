@@ -15,8 +15,9 @@
      2. RO_T_CASHFLOW_ECHEQ_PRECHEQ          excepciones por cheque
      3. RO_V_CASHFLOW_VENTAS_PRECHEQ         los cheques efectivamente marcados
 
-   No crea ningun parametro clave/valor: 'dias_prechequeado' ya existe y lo
-   siembra sql/ventas_proyeccion.sql.
+   No crea ningun parametro clave/valor. Los dias de pre-chequeado viven en la
+   tabla 1, por cliente: el parametro global 'dias_prechequeado' que sembraba
+   sql/ventas_proyeccion.sql quedo SIN USO -no se borra, pero ya nadie lo lee-.
 
    ----------------------------------------------------------------------------
    QUE ES ESTO
@@ -175,14 +176,19 @@ GO
    por inexistente. Reemplaza como origen de datos a la tabla
    RO_T_CASHFLOW_VENTAS_PRECHEQ de sql/ventas_proyeccion.sql, que queda sin uso.
 
-   'dias_prechequeado' NO ESTA ACA. La vista devuelve la fecha del cheque y el
-   PHP le resta los dias para obtener la fecha teorica de factura:
+   LOS DIAS NO ESTAN ACA. La vista devuelve la fecha del cheque y el PHP le
+   resta los dias del CLIENTE para obtener la fecha estimada de la venta:
 
-       FECHA_TEORICA_FACTURA = FECHA_CHEQUE - dias_prechequeado
+       FECHA_VENTA_ESTIMADA = FECHA_CHEQUE - DIAS_PRECHEQUEADO del cliente
 
-   Es un parametro editable, se lee con Parametros::num() como todos los demas, y
-   un parametro leido desde dos lugares es un parametro que se va a
-   desincronizar.
+   El plazo es editable y sale de la tabla 1 de este mismo script. Se resuelve
+   en PHP con Echeqs::diasDeCliente(), que es la MISMA funcion que usa la
+   pantalla: un plazo leido desde dos lugares es un plazo que se va a
+   desincronizar, y si la pantalla y el neteo aplicaran distinto, el tablero
+   dejaria de cerrar sin que se notara en ningun lado.
+
+   Meterlo en la vista obligaria ademas a un JOIN mas para algo que el PHP ya
+   tiene resuelto al armar la pantalla.
 
    TAMPOCO devuelve el canal. El canal se deriva del prefijo del codigo de
    cliente y esa regla vive en Echeqs::canalDeCliente(), en un solo lugar.

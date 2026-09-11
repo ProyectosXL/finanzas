@@ -1237,8 +1237,8 @@
                 '<i class="fas fa-circle-info ms-1" ' +
                 'title="Sale de Echeqs → Venta Cobrada Anticipada: los cheques tildados ahí ' +
                 'ya cobraron una venta futura, así que se restan de la cobranza proyectada de ' +
-                'la fecha teórica de esa factura (fecha del cheque menos el parámetro ' +
-                'dias_prechequeado)."></i>' +
+                'la fecha estimada de esa venta (fecha del cheque menos los días de ' +
+                'pre-chequeado del cliente, que se cargan en Parámetros → Pre-chequeado)."></i>' +
                 '</td>';
 
         cols.forEach(function(col) {

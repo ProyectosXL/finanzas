@@ -177,7 +177,13 @@ GO
 MERGE dbo.RO_T_CASHFLOW_PARAMETROS AS T
 USING (VALUES
     ('alicuota_iva',            '0.21',           'DECIMAL', 'Alicuota de IVA aplicada a la venta neta proyectada', 'VENTAS', 'GENERAL'),
-    ('dias_prechequeado',       '0',              'INT',     'Dias a restar a la fecha del cheque para obtener la fecha teorica de factura', 'VENTAS', 'GENERAL'),
+    /* SIN USO. Los dias de pre-chequeado pasaron a ser POR CLIENTE, en
+       RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE.DIAS_PRECHEQUEADO: un unico numero
+       obligaba a elegir cual de todos los clientes quedaba bien calculado.
+       La fila NO se borra -queda el valor que alguien haya cargado, por si
+       hace falta reconstruir con que numero se proyecto- pero la pantalla ya
+       no la muestra: la saca Parametros::RETIRADOS. Ver README-ventas.md. */
+    ('dias_prechequeado',       '0',              'INT',     'SIN USO: los dias de pre-chequeado son por cliente', 'VENTAS', 'GENERAL'),
     ('horizonte_dias',          '28',             'INT',     'Cantidad de dias del tramo diario de la proyeccion', 'VENTAS', 'GENERAL'),
     ('horizonte_meses',         '12',             'INT',     'Cantidad de meses del horizonte de proyeccion', 'VENTAS', 'GENERAL'),
     /* Feriados de comercio: unicos dias del anio sin venta estimada.
@@ -213,9 +219,12 @@ GO
 
    La regla de reparto es la misma que estaba documentada aca y sigue vigente,
    solo que la aplica Ventas::getNeteoPrechequeado() sobre la vista:
-     FECHA_TEORICA_FACTURA = FECHA_CHEQUE - parametro 'dias_prechequeado'
+     FECHA_VENTA_ESTIMADA = FECHA_CHEQUE - dias de pre-chequeado del CLIENTE
      El IMPORTE se resta de la cobranza proyectada de esa fecha (tramo diario)
      o de ese mes (tramo mensual).
+   Los dias son POR CLIENTE, en
+   RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE.DIAS_PRECHEQUEADO. El parametro global
+   'dias_prechequeado' que siembra este script quedo sin uso; ver mas abajo.
    ---------------------------------------------------------------------------- */
 IF OBJECT_ID('dbo.RO_T_CASHFLOW_VENTAS_PRECHEQ', 'U') IS NULL
 BEGIN
