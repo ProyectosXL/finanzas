@@ -58,6 +58,17 @@
             alCambiar: generarTabla
         });
 
+        // Tipo, COD_CLI y RAZON_SOC fijas por defecto, en Resumen y en Deep
+        // Dive: con veintiocho columnas de días a la derecha, sin ellas no se
+        // ve de quién es el número que uno está mirando. Es la misma tabla en
+        // los dos modos, así que un solo control las cubre.
+        crearColumnasFijas({
+            tabla: 'tablaCobranzasFR',
+            control: 'colFijasCob',
+            clave: 'cobranzas_fr',
+            porDefecto: [0, 1, 2]
+        });
+
         if (btnRefresh) {
             btnRefresh.addEventListener('click', cargarDatos);
         }
@@ -273,8 +284,15 @@
                 html += `<td class="center"><span class="badge-real" title="Propuesta"><i class="fas fa-check me-1"></i>REAL</span></td>`;
             }
 
-            html += `<td><strong>${item.COD_CLI || ''}</strong></td>`;
-            html += `<td>${item.RAZON_SOC || ''}</td>`;
+            html += `<td><strong>${item.COD_CLI || ''}</strong>${marcaManual(item)}</td>`;
+
+            // El nombre se recorta con puntos suspensivos (.col-texto) para que
+            // la fila sea una sola línea. El title lo devuelve completo: lo que
+            // se recorta se puede pedir, no se pierde.
+            var razon = item.RAZON_SOC || '';
+
+            html += '<td class="col-texto" title="' + escaparAttr(razon) + '">'
+                + escaparAttr(razon) + '</td>';
             
             // Columnas ocultables en resumen
             html += `<td class="center col-detail">${formatDate(item.FECHA)}</td>`;
@@ -287,9 +305,8 @@
             html += `<td class="currency">${formatCurrency(item.importe_bruto)}</td>`;
             html += `<td class="currency fw-bold">${formatCurrency(item.importe_neto)}</td>`;
             
-            var badgeCobroClase = esProy ? 'badge-proyeccion' : 'badge-cobro';
-            html += `<td class="center"><span class="${badgeCobroClase}">${formatDate(item.Cobro)}</span></td>`;
-            
+            html += celdaCobro(item, esProy);
+
             // Columnas del eje temporal
             cols.forEach(function(col) {
                 var valor = Number(vistas.valor(item, col)) || 0;
@@ -310,6 +327,154 @@
             html += '</tr>';
         });
         tableBody.innerHTML = html;
+
+        conectarEdicionFecha();
+    }
+
+    /* ================================================================
+       FECHA DE COBRO MANUAL
+
+       La fecha de cobro proyectada sale de FECHA_EMIS + PPP del cliente, que
+       es un promedio. Cuando alguien ya sabe la fecha de una factura puntual,
+       la carga acá y esa fecha manda.
+
+       Es editable SÓLO en el Deep Dive de Pendientes Proyectados, y no en
+       Resumen: en Resumen la fila es un cliente y no un comprobante, así que
+       no hay a qué comprobante atarle la fecha. En Resumen se muestra un
+       indicador de que alguna de sus facturas la tiene.
+       ================================================================ */
+
+    /** Si esta vista permite editar la fecha de cobro */
+    function editable() {
+        return modoOrigen === 'proyectado' && modoVista === 'deepdive';
+    }
+
+    /** El indicador del Resumen: este cliente tiene alguna fecha cargada a mano */
+    function marcaManual(item) {
+        if (editable() || !item.FECHA_MANUAL) {
+            return '';
+        }
+
+        return ' <i class="fas fa-hand-pointer text-primary cob-marca-manual" '
+            + 'title="Alguna factura de este cliente tiene la fecha de cobro cargada a mano, '
+            + 'así que no sale del PPP. El detalle está en Deep Dive."></i>';
+    }
+
+    function celdaCobro(item, esProy) {
+        if (!editable()) {
+            var badge = esProy ? 'badge-proyeccion' : 'badge-cobro';
+
+            return '<td class="center"><span class="' + badge + '">'
+                + formatDate(item.Cobro) + '</span></td>';
+        }
+
+        var manual = !!item.FECHA_MANUAL;
+        var titulo = manual
+            ? 'Fecha cargada a mano. Los días y el descuento se recalculan sobre ella.'
+            : 'Calculada como fecha de emisión + PPP del cliente. Se puede pisar.';
+
+        // El `min` en hoy es una comodidad del navegador, no una garantía: el
+        // endpoint valida la fecha de nuevo. Ver IngresosController.
+        return '<td class="center cob-celda-cobro' + (manual ? ' cob-fecha-manual' : '') + '">'
+            + '<div class="input-group input-group-sm flex-nowrap">'
+            +     '<input type="date" class="form-control form-control-sm cob-input-fecha" '
+            +         'value="' + (item.Cobro || '') + '" min="' + hoyISO() + '" '
+            +         'title="' + titulo + '" '
+            +         'data-tcomp="' + escaparAttr(item.T_COMP) + '" '
+            +         'data-ncomp="' + escaparAttr(item.N_COMP) + '" '
+            +         'data-cod="' + escaparAttr(item.COD_CLI) + '">'
+            +     (manual
+                    ? '<button class="btn btn-outline-secondary cob-btn-volver" type="button" '
+                        + 'title="Volver a la fecha calculada con el PPP">'
+                        + '<i class="fas fa-rotate-left"></i></button>'
+                    : '')
+            + '</div>'
+            + '</td>';
+    }
+
+    function conectarEdicionFecha() {
+        if (!editable()) {
+            return;
+        }
+
+        document.querySelectorAll('#tableBodyCob .cob-input-fecha').forEach(function(inp) {
+            inp.addEventListener('change', function() {
+                guardarFechaManual(inp);
+            });
+        });
+
+        document.querySelectorAll('#tableBodyCob .cob-btn-volver').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var inp = btn.closest('.input-group').querySelector('.cob-input-fecha');
+
+                borrarFechaManual(inp);
+            });
+        });
+    }
+
+    function guardarFechaManual(inp) {
+        if (!inp.value) {
+            return;
+        }
+
+        pedirFecha('saveFechaCobroManual', {
+            cod_cliente: inp.getAttribute('data-cod'),
+            t_comp: inp.getAttribute('data-tcomp'),
+            n_comp: inp.getAttribute('data-ncomp'),
+            fecha_cobro: inp.value
+        }, 'Fecha de cobro guardada.');
+    }
+
+    function borrarFechaManual(inp) {
+        pedirFecha('deleteFechaCobroManual', {
+            t_comp: inp.getAttribute('data-tcomp'),
+            n_comp: inp.getAttribute('data-ncomp')
+        }, 'La fecha vuelve a calcularse con el PPP del cliente.');
+    }
+
+    /**
+     * Guarda o borra y RECARGA todo.
+     *
+     * Se recarga la pestaña entera en vez de parchear la fila: la fecha cambia
+     * los días, el descuento, el importe neto, en qué columna del eje cae ese
+     * importe y los totales del pie. Reconstruir eso en el navegador sería
+     * reimplementar en JS la cuenta que ya hace el backend, con el riesgo
+     * habitual de que las dos den distinto.
+     */
+    function pedirFecha(accion, cuerpo, mensajeOk) {
+        fetch('Controller/IngresosController.php?action=' + accion, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(cuerpo)
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(result) {
+            if (result.success) {
+                Notificacion.exito(mensajeOk);
+                cargarDatos();
+            } else {
+                Notificacion.error(result.message);
+                cargarDatos();
+            }
+        })
+        .catch(function(err) {
+            Notificacion.error('Error de conexión: ' + err.message);
+        });
+    }
+
+    function hoyISO() {
+        var d = new Date();
+        var m = String(d.getMonth() + 1).padStart(2, '0');
+        var dia = String(d.getDate()).padStart(2, '0');
+
+        return d.getFullYear() + '-' + m + '-' + dia;
+    }
+
+    function escaparAttr(texto) {
+        return String(texto === null || texto === undefined ? '' : texto)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/"/g, '&quot;');
     }
 
     /**
@@ -317,11 +482,24 @@
      */
     function generarFilaTotales() {
         var totalsRow = document.getElementById('totalsRowCob');
-        var colspan = (modoVista === 'resumen') ? 6 : 11;
         var cols = vistas.columnas();
         var visibles = filasFiltradas();
 
-        var html = `<td colspan="${colspan}" class="total-label">TOTALES</td>`;
+        // Una celda por columna descriptiva en lugar de un colspan escrito en
+        // duro. Dos motivos: el colspan se desactualiza cada vez que cambia la
+        // cantidad de columnas -y desalinea todo el pie sin que nadie lo note-,
+        // y una celda que abarca todo el bloque descriptivo no se puede fijar a
+        // la izquierda sin tapar los importes. El rótulo va en la PRIMERA, que
+        // es una de las fijas: así queda a la vista aunque se scrollee a lo
+        // ancho.
+        var descriptivas = ColumnasFijas.descriptivas(
+            document.getElementById('tablaCobranzasFR'));
+
+        var html = '<td class="total-label">TOTALES</td>';
+
+        for (var i = 1; i < descriptivas.length; i++) {
+            html += '<td></td>';
+        }
 
         cols.forEach(function(col) {
             var total = 0;
@@ -395,7 +573,12 @@
     }
 
     function formatDate(dateString) {
-        if (!dateString || dateString === '-' || dateString === 'N/A') return dateString;
+        // Una fila agrupada del Resumen no trae fecha de emisión ni de cobro:
+        // son distintas en cada comprobante del cliente, así que
+        // EjeVista::armarAgrupado() las descarta en vez de mostrar la de una
+        // factura cualquiera. Ver la nota de esa función.
+        if (dateString === undefined || dateString === null || dateString === '') return '';
+        if (dateString === '-' || dateString === 'N/A') return dateString;
         var parts = dateString.split(' ')[0].split('-');
         if (parts.length !== 3) return dateString;
         return parts[2] + '/' + parts[1] + '/' + parts[0];
@@ -408,7 +591,7 @@
 
     function mostrarError(mensaje) {
         mostrarCargando(false);
-        alert(mensaje);
+        Notificacion.error(mensaje);
     }
 
     function exportarExcel() {

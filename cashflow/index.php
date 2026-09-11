@@ -70,5 +70,9 @@ session_start();
          Va acá y no en cada pestaña porque lo usan todas las que tienen eje, y
          las pestañas se cargan por AJAX. -->
     <script src="Js/eje-vistas.js?v=<?php echo time(); ?>"></script>
+    <!-- Qué columnas descriptivas quedan fijas al scrollear a lo ancho. Mismo
+         motivo que los dos de arriba: es compartido y las pestañas llegan por
+         AJAX. Va DESPUÉS de main.js, que lo consulta al medir. -->
+    <script src="Js/columnas-fijas.js?v=<?php echo time(); ?>"></script>
 </body>
 </html>

@@ -62,19 +62,26 @@
     top: 0;
 }
 
-/* Segunda fila de encabezados (días/meses) */
+/* Segunda fila de encabezados (días/meses).
+   El alto de la primera fila lo mide ajustarStickyHeaders() en main.js: las
+   celdas con rowspan="2" abarcan las dos filas, así que un valor escrito acá
+   se desalinea en cuanto un encabezado ocupa dos renglones. El 38px es sólo
+   el arranque, hasta que el JS mide. */
 #tablaCobranzasFR thead tr:nth-child(2) th {
-    top: 38px; /* Ajustar según el alto de la primera fila */
+    top: var(--thead-row1-height, 38px);
 }
 
 .table-group-divider {
     border-top: 2px solid var(--border-color, #e2e5ed);
 }
 
-/* Column widths */
-#tablaCobranzasFR tbody td:nth-child(2),
-#tablaCobranzasFR thead th:nth-child(2) {
-    min-width: 200px;
+/* El ancho de la razón social sale de .col-texto (Css/main.css) y no de un
+   nth-child: la regla que había acá apuntaba a la columna 2, que era
+   RAZON_SOC hasta que se agregó Tipo adelante. Desde entonces le daba el
+   ancho a COD_CLI y dejaba la razón social apretada en cuatro renglones. Un
+   índice de columna escrito en duro se desactualiza en silencio. */
+.tab-cobranzas_fr {
+    --col-texto-ancho: 250px;
 }
 
 /* Periodic columns */
@@ -115,8 +122,12 @@
     font-size: 13px;
 }
 
+/* El rótulo va en la PRIMERA celda descriptiva -que es una de las fijas- y no
+   en una celda con colspan sobre todo el bloque, así que se alinea a la
+   izquierda: a la derecha quedaría pegado contra la columna de al lado. */
 #tablaCobranzasFR tfoot .total-label {
-    text-align: right;
+    text-align: left;
+    white-space: nowrap;
     color: var(--text-primary, #1a1d29);
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -152,7 +163,21 @@
 .modo-resumen tbody td:nth-child(5),
 .modo-resumen tbody td:nth-child(6),
 .modo-resumen tbody td:nth-child(7),
-.modo-resumen tbody td:nth-child(8) {
+.modo-resumen tbody td:nth-child(8),
+/* El pie también: desde que tiene una celda por columna en vez de un colspan,
+   si no se ocultan las mismas queda corrido cinco lugares. */
+.modo-resumen tfoot td:nth-child(4),
+.modo-resumen tfoot td:nth-child(5),
+.modo-resumen tfoot td:nth-child(6),
+.modo-resumen tfoot td:nth-child(7),
+.modo-resumen tfoot td:nth-child(8),
+/* Y la columna Cobro (la 11). En el Resumen la fila es un CLIENTE y sus
+   facturas se cobran en fechas distintas, así que una sola fecha ahí sería la
+   de una factura cualquiera. Dónde cae cada importe lo dice la grilla del eje,
+   que es para lo que está. */
+.modo-resumen thead tr:first-child th:nth-child(11),
+.modo-resumen tbody td:nth-child(11),
+.modo-resumen tfoot td:nth-child(11) {
     display: none !important;
 }
 
@@ -221,3 +246,36 @@
     color: #856404 !important;
 }
 
+
+/* ============================================================================
+   FECHA DE COBRO MANUAL
+
+   La fecha proyectada sale de FECHA_EMIS + PPP, que es un promedio. Cuando
+   alguien la pisa a mano, la celda tiene que verse distinta: si no, dos filas
+   con la misma fecha en pantalla estarían diciendo cosas distintas -una
+   estimada y una pactada- y no habría forma de saber cuál es cuál.
+   ============================================================================ */
+
+#tablaCobranzasFR .cob-celda-cobro {
+    min-width: 175px;
+}
+
+#tablaCobranzasFR .cob-input-fecha {
+    font-size: 11px;
+    padding: 2px 6px;
+    min-width: 118px;
+}
+
+#tablaCobranzasFR .cob-fecha-manual .cob-input-fecha {
+    border-color: #0d6efd;
+    background-color: #e7f1ff;
+    font-weight: 600;
+    color: #084298;
+}
+
+/* En el Resumen no hay comprobante que editar, así que la marca va al lado del
+   código de cliente: dice que alguna de sus facturas no sale del PPP. */
+#tablaCobranzasFR .cob-marca-manual {
+    font-size: 10px;
+    vertical-align: super;
+}

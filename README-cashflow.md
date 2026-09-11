@@ -24,7 +24,42 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 
 ---
 
-## Ejecución de los scripts
+## Para pasar a producción: los scripts, en orden
+
+**Todos van contra `central`.** Todos son reejecutables y ninguno borra nada: lo que reemplazan queda inhabilitado. Si no se corren, la pantalla **no falla** — avisa.
+
+### Scripts nuevos
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 1 | `sql/cashflow_cobranzas_escala_general.sql` | Crea `RO_T_CASHFLOW_COBRANZAS_ESCALA_DESC` y siembra la escala de descuento general (8/6/4/0%) | Todas las facturas proyectan con **0% de descuento** |
+| 2 | `sql/cashflow_cobranzas_fecha_manual.sql` | Crea `RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL` | La fecha de cobro siempre sale del PPP y la celda editable no guarda |
+| 3 | `sql/cashflow_estructura_split_cobranzas_fr.sql` | Parte la fila `COBRANZAS_FR` en `COBRANZAS_FR_REAL` + `COBRANZAS_FR_PROY` | El tablero sigue mostrando real y proyectada en un solo número |
+| 4 | `sql/cashflow_dolares_comitente.sql` | Crea `RO_T_CASHFLOW_DOLARES_COMITENTE` y apunta su fila del tablero a la serie `INGRESO` | La pestaña avisa que falta la tabla y **la fila queda inválida**: apuntaría a una serie que el proveedor ya no ofrece |
+
+### Scripts modificados — hay que volver a correrlos
+
+| # | Script | Qué cambió | Si no se corre |
+| --- | --- | --- | --- |
+| 5 | `sql/echeqs_prechequeado.sql` | Agrega `DIAS_PRECHEQUEADO` a `RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE`, en un `ALTER` re-ejecutable | **La pestaña Echeqs falla**: el maestro se lee con esa columna |
+| 6 | `sql/cashflow_estructura.sql` | La semilla nace con la cobranza FR partida y con la fila de dólares | Sólo afecta a una **instalación nueva**; una base ya sembrada no lo necesita |
+| 7 | `sql/cashflow_estructura_disponibilidades.sql` | Mueve también las dos filas nuevas de FR, y `DOLARES_COMITENTE` pasa a `MERGE` | Ídem: sólo una instalación nueva. En una base que ya lo corrió, el script no hace nada |
+
+El único **obligatorio** para que nada se rompa es el **5**. Los otros dejan la pantalla funcionando con menos, y avisando.
+
+> **Orden dentro del grupo:** los cuatro nuevos son independientes entre sí. Los dos de estructura (6 y 7) sólo importan en una instalación desde cero, y ahí el orden es `cashflow_estructura.sql` → `cashflow_estructura_disponibilidades.sql` → `cashflow_estructura_split_cobranzas_fr.sql` → `cashflow_dolares_comitente.sql`.
+
+### Después de correrlos, verificar
+
+Que ninguna fila del tablero duplique importes:
+
+- `COBRANZAS_FR` **inactiva**, y `COBRANZAS_FR_REAL` + `COBRANZAS_FR_PROY` activas. El registro declara `COBRANZA = [COBRANZA_REAL, COBRANZA_PROYECTADA]`, así que si alguien reactiva la total el validador de *Parámetros → Cashflow* lo rechaza.
+- `DOLARES_COMITENTE` **una sola vez**, activa, con serie `INGRESO`.
+- Ningún par (proveedor, serie) repetido entre filas activas. Eso también lo verifica el validador, y *Parámetros → Cashflow* lo muestra arriba del editor.
+
+---
+
+## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
 
@@ -34,7 +69,13 @@ En este orden, contra `central`:
 -- 3. sql/cashflow_saldos.sql   (alimenta Saldo Inicial y Caja Locales)
 -- 4. sql/cashflow_cob_electronicos.sql  (alimenta Cobranzas Pagos Electrónicos)
 -- 5. sql/echeqs_prechequeado.sql        (venta cobrada anticipada y su neteo)
+-- 6. sql/cashflow_cobranzas_escala_general.sql     (escala de descuento de Cobranzas FR)
+-- 7. sql/cashflow_cobranzas_fecha_manual.sql       (fecha de cobro manual por factura)
+-- 8. sql/cashflow_estructura_split_cobranzas_fr.sql  (parte Cobranzas FR en Real + Proyectada)
+-- 9. sql/cashflow_dolares_comitente.sql  (Otros Ingresos: dolares cuenta comitente)
 ```
+
+Los que alimentan pestañas puntuales están documentados en su propio README: `sql/ventas_proyeccion.sql` y compañía en `README-ventas.md`, `sql/cashflow_cobranzas_parametros.sql` y `sql/cashflow_cobranzas_may.sql` en `README-cobranzas-fr.md` y `README-cobranzas-may.md`.
 
 El primero crea `RO_T_CASHFLOW_CONF_SECCION` y `RO_T_CASHFLOW_CONF_FILA`, siembra la estructura y agrega el parámetro `comex_tipo_cambio_usd`.
 
@@ -44,9 +85,15 @@ El tercero crea las tablas del módulo Saldos, que es el que llena las filas *Sa
 
 El cuarto crea las tablas del módulo Cob. Electrónicos, que llena la fila *Cobranzas Pagos Electrónicos*. Mismo criterio: sin él la fila va en cero y el tablero avisa. Los movimientos del Excel los carga aparte `sql/cashflow_cob_electronicos_migracion.sql`. Ver `README-cob-electronicos.md`.
 
-El quinto crea el maestro de clientes que operan con **venta cobrada anticipada** y la vista de la que sale el neteo de cheques adelantados de Ventas. **La fila *Echeqs en cartera* no lo necesita**: sale entera de Tango y funciona igual sin él. Lo que no funciona sin él es la segunda sub-pestaña de Echeqs, que avisa y no rompe.
+El quinto crea el maestro de clientes que operan con **venta cobrada anticipada** —con sus **días de pre-chequeado por cliente**, en un `ALTER` re-ejecutable para las bases que ya tenían la tabla— y la vista de la que sale el neteo de cheques adelantados de Ventas. **La fila *Echeqs en cartera* no lo necesita**: sale entera de Tango y funciona igual sin él. Lo que no funciona sin él es la segunda sub-pestaña de Echeqs, que avisa y no rompe.
 
-Los cinco son reejecutables y no pisan nada ya editado. Si no se corrieron, la pantalla **no falla**: muestra un aviso diciendo que hay que correrlos.
+El sexto y el séptimo crean la **escala de descuento general** y la tabla de **fechas de cobro manuales** de Cobranzas FR. Ver `README-cobranzas-fr.md`.
+
+El octavo da de baja lógica la fila `COBRANZAS_FR` —que traía real y proyectada sumadas en un solo número— y la reemplaza por dos filas, una por serie. No borra la fila vieja y toma la sección de la que reemplaza, para no depender de si se corrió o no el segundo script. Ver `README-cobranzas-fr.md`.
+
+El noveno crea la tabla de carga de los **dólares de la cuenta comitente** y deja su fila del tablero apuntada a la serie del proveedor nuevo. Ver `README-otros-ingresos.md`.
+
+Todos son reejecutables y no pisan nada ya editado. Si no se corrieron, la pantalla **no falla**: muestra un aviso diciendo que hay que correrlos.
 
 ---
 
@@ -63,9 +110,12 @@ Los cinco son reejecutables y no pisan nada ya editado. Si no se corrieron, la p
 | Capa | Archivo | Qué resuelve |
 | --- | --- | --- |
 | Cálculo | `Class/EjeVista.php` | Qué columnas tiene cada vista, qué total le corresponde y qué período mide |
+| Cálculo | `Class/EjeVista.php` — `armarAgrupado()` | Lo mismo, pero con una fila por **grupo** en vez de una por item |
 | Presentación | `Js/eje-vistas.js` | Dibuja los botones, mantiene la vista activa y entrega las columnas visibles |
 
-Las usan **Cashflow, Ventas, Proveedores Exterior, Crono Nacionalización y Cobranzas FR**.
+Las usan **Cashflow, Ventas, Proveedores Exterior, Crono Nacionalización, Cobranzas FR, Cobranzas May y las dos sub-pestañas de Echeqs**.
+
+> En *Echeqs → Venta Cobrada Anticipada* cada cheque se ubica en la **fecha estimada de venta** —la del cheque menos los días de pre-chequeado del cliente— y no en la del cheque: es la fecha en la que ese importe netea la cobranza proyectada de Ventas, así que es donde tiene que verse. La del cheque queda como columna de referencia y los días efectivos van al lado, para que se vea de dónde sale la estimación. Ver `README-ventas.md`.
 
 **Los indicadores miden exactamente las columnas que se están mirando**, y la columna Total también. Antes eran siempre del tramo diario, aunque la pantalla mostrara los meses: el número no describía nada de lo que había en pantalla.
 
@@ -122,7 +172,91 @@ vistas.total(fila)              // el total que corresponde a la vista activa
 
 No hay que calcular fechas en el navegador ni decidir qué columnas van en cada vista: eso ya está resuelto y probado.
 
+#### Cuando la fila no es un item, sino un grupo
+
+`armar()` resuelve **una** fecha por fila. Un resumen por cliente necesita otra cosa: una fila con importes en **varias** columnas a la vez, porque las facturas de ese cliente se cobran en fechas distintas. Para eso está `armarAgrupado()`:
+
+```php
+$payload = EjeVista::armarAgrupado(
+    $h, $items,
+    'COD_CLI',        // por qué campo se agrupa
+    'Cobro',          // la fecha de cada item
+    'importe_neto',   // el importe que va al eje; siempre se suma
+    1,                // factor
+    ['importe_bruto'] // otros campos numéricos a sumar
+);
+```
+
+Devuelve **el mismo payload** que `armar()` —eje, vistas, totales y descartes—, así que el front es idéntico. Sin esto, un resumen tiene dos salidas y las dos son malas: agrupar por cliente + fecha (y entonces un cliente con cobros en tres fechas ocupa tres filas), o agrupar sólo por cliente y quedarse con una sola fecha, tirando la ubicación temporal del resto de la plata.
+
+Los campos descriptivos que **difieren** dentro del grupo se descartan en vez de tomar el del primer item: una fila que dijera "FAC 0001-123" cuando en realidad son doce comprobantes es peor que una celda vacía. Lo usan los Resumen de **Cobranzas FR** y **Cobranzas May**.
+
 > **El tablero dibuja una columna más que las demás pantallas**, y es a propósito: las columnas que no representan ningún día futuro se muestran con un guión sobre fondo gris, porque sus filas de arrastre tienen que poder decir *"acá no hay posición que mostrar"*. Las pestañas de detalle no tienen filas de arrastre y no las necesitan. Del componente compartido toman igual el estado de la vista, el rótulo del período y el total.
+
+---
+
+## Columnas fijas: qué se queda quieto al scrollear a lo ancho
+
+Con 28 columnas de días a la derecha, al scrollear se pierde de vista **de quién es** cada número. La solución existía, pero estaba cableada: la primera columna por `:first-child` y una segunda por la clase `.col-medio`, con una única variable `--col-fija-1-width`. Alcanzaba para la tabla de cobranza de Ventas y para nada más.
+
+Ahora hay tres piezas, una por capa:
+
+| Capa | Archivo | Qué resuelve |
+| --- | --- | --- |
+| Estilo | `Css/main.css`, `.col-fija-1` … `.col-fija-4` | El `sticky`, el fondo opaco y los tres `z-index` de las intersecciones |
+| Medición | `Js/main.js`, `medirColumnasFijas()` | Publica `--col-fija-N-left`, acumulando los anchos **reales** de las anteriores |
+| Decisión | `Js/columnas-fijas.js` | Quién lleva cada clase, y el desplegable para elegirlo |
+
+```js
+crearColumnasFijas({
+    tabla: 'tablaCobranzasFR',   // id de la <table>
+    control: 'colFijasCob',      // id del contenedor del desplegable
+    clave: 'cobranzas_fr',       // clave de localStorage
+    porDefecto: [0, 1, 2]
+});
+```
+
+Tres decisiones que importan:
+
+- **Las columnas elegibles se derivan del encabezado, no se declaran.** Son la corrida de celdas con `rowspan` y `colspan="1"` que está antes del grupo del eje temporal. Una lista declarada por pestaña se desactualiza en silencio cuando alguien agrega una columna, y el síntoma sería una columna fija corrida un lugar. El corte en la primera celda de grupo es lo que deja afuera la columna *Total*, que también tiene `rowspan` pero vive al final.
+- **El desplazamiento se mide, no se escribe.** El ancho lo reparte el navegador según el contenido: una razón social más larga de lo previsto desalinea cualquier valor puesto en el CSS.
+- **En el pie, una celda que se pasa del bloque fijo no se fija.** Donde el rótulo *TOTALES* es una sola celda con `colspan` sobre todas las descriptivas, anclarla a la izquierda estacionaría una banda de ese ancho encima de los importes. En Cobranzas FR y May el pie pasó a tener **una celda por columna** —el `colspan` estaba escrito en duro y se desactualizaba solo—, así que el rótulo va en la primera columna fija y queda a la vista.
+
+La elección se guarda en `localStorage` con una clave por pestaña. Es una preferencia de cómo mirar la tabla, no un filtro de datos: si se perdiera en cada recarga, no serviría para trabajar. Si el índice guardado ya no existe en la tabla, se descarta y vuelve el default, para no fijar una columna que el usuario no eligió.
+
+**Toda tabla `.tabla-temporal` sin control explícito conserva su primera columna fija.** Es el default automático, y existe para que el mecanismo nuevo no le saque el comportamiento a las tablas que nadie pidió cambiar.
+
+### Una fila por fila
+
+Las celdas de `.tabla-temporal` **no envuelven**. Sin eso pasaban dos cosas, y las dos rompían la grilla como grilla:
+
+1. **`$ 4.186.288,48` se partía entre el signo y el número.** El espacio es un punto de corte válido para el navegador, y la columna de importes es angosta porque al lado hay veintiocho columnas de días.
+2. **Una razón social larga estiraba la fila a tres o cuatro renglones**, y las celdas del eje quedaban flotando en el medio de una fila altísima.
+
+El texto largo se recorta con **puntos suspensivos** (`.col-texto`) en lugar de envolver o de estirar la columna sin techo, y el valor completo va en el `title` de la celda: lo que se recorta se puede pedir con el mouse encima, no se pierde.
+
+Tres detalles que no son obvios:
+
+- **El ancho de `.col-texto` va fijo** —el mismo `min` que `max`— y no sólo como máximo. En una tabla con `table-layout: auto` un `max-width` suelto es una sugerencia que el navegador ignora en cuanto el contenido no entra, y entonces no hay contra qué recortar. Cada pestaña lo corre con `--col-texto-ancho` sobre su contenedor.
+- **Las celdas con `colspan` quedan afuera del `nowrap`.** En estas tablas una celda que abarca varias columnas es siempre un *texto* y no un dato —el mensaje del listado vacío, el corte por estado del pie de Echeqs, el rótulo del grupo del eje—. Forzarles una sola línea las haría desbordar justo cuando lo que tienen para decir es largo.
+- **Un subtítulo dentro de la celda sigue yendo abajo**: es un `<div>`, o sea un bloque, y `nowrap` no lo afecta. Eso es a propósito — es el código de cliente debajo del nombre en Echeqs, y el `th-sub` de las tablas de Ventas.
+
+> **El ancho de la razón social en Cobranzas FR estaba en la columna equivocada.** La regla era `#tablaCobranzasFR td:nth-child(2)`, que era `RAZON_SOC` hasta que alguien agregó `Tipo` adelante; desde entonces le daba los 200px a `COD_CLI` y dejaba la razón social apretada. Es el mismo defecto que el selector de columnas fijas evita derivando las columnas del encabezado: **un índice de columna escrito en duro se desactualiza en silencio.** Por eso ahora es una clase y no un índice.
+
+### Dónde está aplicado, y dónde no
+
+| Pestaña | Fijas por defecto |
+| --- | --- |
+| Cobranzas FR · Cobranzas May | `Tipo`, `COD_CLI`, `RAZON_SOC` — en Resumen y en Deep Dive |
+| Proveedores Exterior | `Proveedor`, `Contenedor` |
+| Crono Nacionalización | `Proveedor`, `Contenedor` — la primera columna es una fecha, que no identifica nada |
+| Echeqs (cartera) | `N° Cheque`, `Cliente` |
+| Echeqs (venta cobrada anticipada) | el tilde y `Cliente` — el tilde es lo que hay que tener a mano mientras se scrollea |
+| Ventas (Cobranza Proyectada) | `Canal`, `Medio de Pago` |
+| Cashflow (el tablero) | `Concepto` — **sin selector**: es la única columna descriptiva y un desplegable de una opción es ruido |
+| Saldos · Cob. Electrónicos | **No se aplicó.** No tienen eje temporal: son cinco a siete columnas que entran en pantalla y no scrollean a lo ancho. Fijar una columna ahí no resuelve nada |
+
+Cobranzas FR, Cobranzas May y Echeqs además **no tenían header fijo**: usaban `table-wrapper table-responsive` sin `.tabla-temporal`. Ahora la llevan.
 
 ---
 
@@ -174,7 +308,7 @@ Esa división es lo importante: hace cumplir por construcción la regla de que *
 
 Van igual en el registro, con `'disponible' => false` y sin clase. Una fila que los apunte se muestra **en cero** y el tablero avisa, en vez de desaparecer del cuadro: así la pantalla tiene desde el primer día la forma completa del Excel y se ve qué falta. Cuando el módulo exista, se escribe su proveedor y se da vuelta el flag; la fila ya está configurada y se llena sola.
 
-Hoy tienen datos reales ocho: **Ventas**, **Cobranzas FR**, **Proveedores Exterior**, **Nacionalizaciones**, **Saldos**, **Caja Locales**, **Cobranzas Electrónicas** y **Echeqs**. Los otros ocho están declarados y rinden cero.
+Hoy tienen datos reales diez: **Ventas**, **Cobranzas FR**, **Cobranzas Mayoristas**, **Proveedores Exterior**, **Nacionalizaciones**, **Saldos**, **Caja Locales**, **Cobranzas Electrónicas**, **Echeqs** y **Dólares Cuenta Comitente**. Los otros están declarados y rinden cero.
 
 ---
 
@@ -307,7 +441,9 @@ La guarda va en esa dirección a propósito: lo que hay que evitar es que el men
 
 ### El contador de cada categoría
 
-Cada categoría muestra `n/m`: cuántas de sus pestañas tienen datos del sistema. Sirve para ver el avance sin abrirla, y **cuenta sólo `datos`** —una maqueta no suma—, que es lo que hace que el número sea confiable. Hoy: Ingresos 3/6, Comercio Exterior 2/3, y el resto en cero.
+Cada categoría muestra `n/m`: cuántas de sus pestañas tienen datos del sistema. Sirve para ver el avance sin abrirla, y **cuenta sólo `datos`** —una maqueta no suma—, que es lo que hace que el número sea confiable. Hoy: Ingresos 6/7 (falta *Exportaciones Tasky*), Otros Ingresos 1/1, Comercio Exterior 2/2, y el resto en cero.
+
+**Otros Ingresos va después de Ingresos y aparte**: Ingresos agrupa lo que sale de un circuito del sistema y esa categoría agrupa lo que se tipea. La diferencia importa al leer un número — en una fila de Ingresos un cero es *"no hay movimientos"* y en una de esas es *"nadie cargó nada todavía"*. Ver `README-otros-ingresos.md`.
 
 ### Parámetros va al pie
 
@@ -407,6 +543,7 @@ sql/echeqs_prechequeado.sql                 Maestro de pre-chequeado + vista del
 cashflow/Class/Horizonte.php                Eje temporal, compartido con Ventas
 cashflow/Class/EjeVista.php                 Las tres vistas: columnas, totales y periodo
 cashflow/Js/eje-vistas.js                   Su contraparte en el front (cargado en index.php)
+cashflow/Js/columnas-fijas.js               Que columnas quedan fijas al scrollear (idem)
 cashflow/Js/notificaciones.js               Avisos de accion y confirmaciones (idem)
 cashflow/Css/notificaciones.css
 cashflow/Class/Menu.php                     Menu lateral y estado de cada pestana
@@ -430,6 +567,11 @@ cashflow/Tabs/parametros_estructura.php     El editor
 cashflow/Js/Cashflow.js
 cashflow/Js/Parametros-Estructura.js
 cashflow/Css/Cashflow.css
+cashflow/Class/OtrosIngresos.php            Otros Ingresos (README-otros-ingresos.md)
+cashflow/Class/Providers/OtrosIngresosProvider.php
+cashflow/Controller/OtrosIngresosController.php
+cashflow/Tabs/dolares_comitente.php
+cashflow/Tabs/exportaciones_tasky.php       Solo el placeholder
 tests/                                      Arnés de pruebas
 ```
 
@@ -442,12 +584,12 @@ Eliminado: `Tabs/resumen.php`.
 ## Pendientes conocidos
 
 - **El saldo de apertura ya no arranca en cero, pero depende de que alguien cargue.** El módulo Saldos existe (ver `README-saldos.md`) y alimenta *Saldo Inicial*. Mientras no haya ninguna carga, o mientras la última quede vieja, la fila va en cero o desactualizada y **el tablero lo avisa con la fecha del dato**: leer esos saldos como disponibilidad real sería un error caro.
-- **Dos filas del Excel no tienen de dónde salir.** *Dólares Cuenta Comitente* y *Exportaciones* las tipea una persona en el Excel (Tesorería, Silvina, Dan). Acá el origen de datos es únicamente por proveedor, así que hasta que exista el módulo que las alimente se muestran en cero y el tablero avisa. Quedan declaradas para que el cuadro tenga la forma completa. Si hicieran falta cargadas a mano, habría que sumar un tipo de origen manual, que hoy el módulo no tiene. *Caja Locales* ya salió de esta lista: la alimenta el módulo Saldos.
+- **Una fila del Excel todavía no tiene de dónde salir:** *Exportaciones Tasky*. Hasta que exista el módulo que la alimente se muestra en cero y el tablero avisa; queda declarada para que el cuadro tenga la forma completa. *Caja Locales* salió de esta lista cuando se construyó el módulo Saldos, y *Dólares Cuenta Comitente* con **Otros Ingresos** (ver `README-otros-ingresos.md`): esa se carga a mano, pero por una pantalla y no por el Excel, así que sigue entrando al tablero por un proveedor como cualquier otra.
 - **El neteo de cheques adelantados resta importes que ninguna fila del tablero suma.** Un cheque en cartera cierra solo: suma en *Echeqs en cartera* y resta de la cobranza de Ventas. Uno ya aplicado —depositado o endosado a un proveedor— no lo suma nadie, y se netea igual: **el neteo va por tilde y no por estado**, porque los cheques pre-chequeados están casi todos aplicados y filtrarlos dejaría el circuito sin efecto. Es una decisión tomada, no un pendiente; el pie de la sub-pestaña muestra el corte por estado para poder auditar el número. El detalle de lo verificado contra la base está en `README-ventas.md`.
-- **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** para traer la razón social. El tablero no lo sufre, porque usa `getCobranzasFRTotales()`, pero la pestaña Cobranzas FR sí.
+- **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** en Deep Dive, para traer la fecha de emisión de cada comprobante. El tablero no lo sufre —usa `getCobranzasFRTotales()`— y el Resumen tampoco, que desde que no muestra esa columna se la saltea; lo paga sólo el Deep Dive, que es donde se pidió el detalle.
 - **El Dashboard es una maqueta**: no tiene ninguna llamada al servidor, sus números están escritos a mano. El menú lo marca como tal. Cuando se construya de verdad, hay que pasarlo a `datos` en `Class/Menu.php`.
 - **`nacionalizacion_2` está en `$validTabs` de `TabController` pero no tiene archivo ni entrada de menú.** Es configuración muerta: nadie puede llegar ahí, y si llegara vería el placeholder.
 - **`VentasController?action=saveMixCobro` puede grabar un mix que Parámetros rechazaría**: no valida el 100%. Es anterior a este trabajo.
 - `pedir()` está duplicado en `Ingresos-Ventas.js` y `Parametros.js`. El código nuevo usa `pedirJson()` de `main.js`; sacar las dos copias viejas es un cambio aparte.
-- **Las pestañas de datos todavía usan `alert()`.** `Js/notificaciones.js` está enchufado en toda la pestaña Parámetros —sus cuatro sub-pestañas— y disponible para el resto, pero Ventas, Saldos, Echeqs, Cob. Electrónicos y las dos de Comex siguen con el diálogo del navegador. Es el mismo reemplazo, archivo por archivo.
+- **Algunas pestañas de datos todavía usan `alert()`.** `Js/notificaciones.js` está enchufado en toda la pestaña Parámetros, en Cobranzas FR y en Otros Ingresos, y disponible para el resto; Ventas, Saldos, Cob. Electrónicos, Cobranzas May y las dos de Comex siguen con el diálogo del navegador, y Echeqs con un `confirm()` en el tildado masivo. Es el mismo reemplazo, archivo por archivo.
 - Sin login: todo se graba con `USUARIO = NULL`. La costura ya está puesta.

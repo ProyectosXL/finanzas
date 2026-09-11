@@ -78,6 +78,22 @@
             alCambiar: cambiarVista
         });
 
+        // Canal y Medio de Pago: es el par que identifica la fila, y es lo que
+        // ya estaba fijo cuando el mecanismo estaba cableado en el CSS. Ahora
+        // además se puede cambiar.
+        //
+        // Las otras tablas de la pestaña -tendencias, proyección por mes,
+        // control de facturación- no llevan selector: tienen cuatro o cinco
+        // columnas y no scrollean a lo ancho, así que elegir columnas fijas ahí
+        // no resuelve nada. Conservan igual su primera columna fija, que es el
+        // default automático de Js/columnas-fijas.js.
+        crearColumnasFijas({
+            tabla: 'tablaCobranza',
+            control: 'colFijasCobranza',
+            clave: 'ventas_cobranza',
+            porDefecto: [0, 1]
+        });
+
         // La proyección se calcula recién cuando se abre la sub-pestaña
         if (tabProyeccionBtn) {
             tabProyeccionBtn.addEventListener('shown.bs.tab', function() {
@@ -1221,8 +1237,8 @@
                 '<i class="fas fa-circle-info ms-1" ' +
                 'title="Sale de Echeqs → Venta Cobrada Anticipada: los cheques tildados ahí ' +
                 'ya cobraron una venta futura, así que se restan de la cobranza proyectada de ' +
-                'la fecha teórica de esa factura (fecha del cheque menos el parámetro ' +
-                'dias_prechequeado)."></i>' +
+                'la fecha estimada de esa venta (fecha del cheque menos los días de ' +
+                'pre-chequeado del cliente, que se cargan en Parámetros → Pre-chequeado)."></i>' +
                 '</td>';
 
         cols.forEach(function(col) {

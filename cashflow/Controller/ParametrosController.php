@@ -554,8 +554,15 @@ try {
             require_once __DIR__ . '/../Class/Echeqs.php';
 
             // Sirve tambien para reactivar una baja: la clase resuelve cual de
-            // los dos casos es y lo dice en la respuesta.
-            $r = (new Echeqs())->guardarClientePrechequeado($data['codigo'], usuarioActual());
+            // los dos casos es y lo dice en la respuesta. Los dias son
+            // obligatorios en el alta y opcionales al reactivar -ahi se
+            // conserva el plazo que el cliente ya tenia-, y eso tambien lo
+            // resuelve la clase.
+            $r = (new Echeqs())->guardarClientePrechequeado(
+                $data['codigo'],
+                array_key_exists('dias', $data) ? $data['dias'] : null,
+                usuarioActual()
+            );
 
             echo json_encode([
                 'success' => true,
@@ -567,6 +574,28 @@ try {
                         : 'Hoy no tiene ningún cheque vivo, así que la pantalla de Echeqs no va a '
                           . 'mostrar nada suyo.'),
                 'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'saveDiasPrecheq':
+            $data = bodyJson();
+
+            if (!isset($data['codigo']) || !array_key_exists('dias', $data)) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/Echeqs.php';
+
+            $dias = (new Echeqs())->guardarDiasCliente(
+                $data['codigo'], $data['dias'], usuarioActual());
+
+            echo json_encode([
+                'success' => true,
+                'message' => $dias === 0
+                    ? 'El cliente queda sin desplazamiento: sus cheques se netean en su propia '
+                      . 'fecha.'
+                    : 'La venta se estima ' . $dias . ' día(s) antes de la fecha del cheque.',
+                'data' => ['dias' => $dias]
             ], JSON_UNESCAPED_UNICODE);
             break;
 
@@ -639,42 +668,29 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* La escala de descuento es UNA sola y general: no hay endpoint por
+           cliente ni por tramo. Se lee y se guarda entera, que es lo unico que
+           permite validar que no se solape ni deje huecos. */
+        case 'getEscalaDescuento':
+            echo json_encode([
+                'success' => true,
+                'data' => $parametros->getEscalaDescuentoGeneral()
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         case 'saveEscalaDescuento':
             $data = bodyJson();
 
-            if (!isset($data['cod_cliente']) || !isset($data['dias_desde']) || !isset($data['dias_hasta']) || !isset($data['porcentaje_desc'])) {
-                throw new Exception('Faltan campos obligatorios para la escala de descuento');
+            if (!isset($data['tramos']) || !is_array($data['tramos'])) {
+                throw new Exception('Faltan los tramos de la escala de descuento');
             }
 
-            $id = $parametros->saveEscalaDescuento(
-                isset($data['id']) ? intval($data['id']) : 0,
-                $data['cod_cliente'],
-                isset($data['medio_pago']) ? $data['medio_pago'] : 'ECHEQ',
-                $data['dias_desde'],
-                $data['dias_hasta'],
-                $data['porcentaje_desc'],
-                usuarioActual()
-            );
+            $escala = $parametros->saveEscalaDescuentoGeneral($data['tramos'], usuarioActual());
 
             echo json_encode([
                 'success' => true,
                 'message' => 'Escala de descuento guardada correctamente',
-                'data' => ['id' => $id]
-            ], JSON_UNESCAPED_UNICODE);
-            break;
-
-        case 'deleteEscalaDescuento':
-            $data = bodyJson();
-
-            if (!isset($data['id'])) {
-                throw new Exception('Falta el ID de la escala a eliminar');
-            }
-
-            $parametros->deleteEscalaDescuento(intval($data['id']));
-
-            echo json_encode([
-                'success' => true,
-                'message' => 'Escala de descuento eliminada correctamente'
+                'data' => $escala
             ], JSON_UNESCAPED_UNICODE);
             break;
 

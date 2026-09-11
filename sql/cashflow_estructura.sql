@@ -190,14 +190,30 @@ USING (VALUES
         'VENTAS', 'VENTA', 10),
     ('COBROS_VENTAS', 'Cobros s/ ventas estimadas', 'INGRESOS', 'INGRESO', 1,
         'VENTAS', 'COBRANZA', 20),
-    ('COBRANZAS_FR', 'Cobranzas Franquicias', 'INGRESOS', 'INGRESO', 1,
-        'COBRANZAS_FR', 'COBRANZA', 30),
+    /* La cobranza de franquicias va PARTIDA en dos filas y no en una sola con
+       la serie COBRANZA (que es real + proyectada sumadas): son dos cosas que
+       se miran distinto -lo comprometido en propuestas ACEPTADAS y lo estimado
+       por PPP- y en un solo numero no se distinguen. La fila total
+       COBRANZAS_FR queda declarada e INACTIVA: el registro la relaciona con
+       estas dos en su bloque 'componentes', asi que activarla junto a ellas
+       contaria dos veces el mismo importe y el validador lo rechaza.
+       Ver sql/cashflow_estructura_split_cobranzas_fr.sql. */
+    ('COBRANZAS_FR_REAL', 'Cobranzas Franquicias (Prop. aceptadas)', 'INGRESOS', 'INGRESO', 1,
+        'COBRANZAS_FR', 'COBRANZA_REAL', 30),
+    ('COBRANZAS_FR_PROY', 'Cobranzas Franquicias Proyectadas', 'INGRESOS', 'INGRESO', 1,
+        'COBRANZAS_FR', 'COBRANZA_PROYECTADA', 35),
     ('COBRANZAS_MAY', 'Cobranzas Mayoristas', 'INGRESOS', 'INGRESO', 1,
         'COBRANZAS_MAY', 'COBRANZA', 40),
     ('COB_ELECTRONICOS', 'Cobranzas Electronicas', 'INGRESOS', 'INGRESO', 1,
         'COB_ELECTRONICOS', 'COBRANZA', 50),
     ('ECHEQS', 'Echeqs a cobrar', 'INGRESOS', 'INGRESO', 1,
         'ECHEQS', 'A_COBRAR', 60),
+    /* Se carga a mano en Otros Ingresos -> Dolares Cuenta Comitente. Es un
+       INGRESO y no una disponibilidad: el importe entra al flujo en la fecha
+       que se le carga y no arrastra. La carga es en dolares y la conversion a
+       pesos la hace el proveedor. Ver sql/cashflow_dolares_comitente.sql. */
+    ('DOLARES_COMITENTE', 'Dolares Cuenta Comitente', 'INGRESOS', 'INGRESO', 1,
+        'DOLARES_COMITENTE', 'INGRESO', 65),
     ('SUB_INGRESOS', 'Total Ingresos', 'INGRESOS', 'SUBTOTAL', 0,
         NULL, NULL, 70),
 

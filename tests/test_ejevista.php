@@ -198,3 +198,113 @@ chequear('el eje se describe igual', 3, count($vacio['vistas']['dias']['columnas
 chequear('y no hay avisos que dar', 0, count($vacio['warnings']));
 chequear('items que no son lista tampoco rompen',
     0, count(EjeVista::armar($h, null, 'FECHA', 'IMPORTE')['filas']));
+
+/* ================================================================
+   armarAgrupado(): una fila por grupo, con varias fechas adentro
+
+   Es lo que necesita un resumen por cliente. Con armar() un cliente que
+   cobra en tres fechas ocupa tres filas, que no es un resumen; y agrupar
+   por cliente en la consulta perderia la fecha, que es lo que ubica el
+   importe en la grilla.
+   ================================================================ */
+seccion('armarAgrupado suma las series de cada grupo');
+
+$items = [
+    ['COD_CLI' => 'FR001', 'RAZON_SOC' => 'Franquicia Uno', 'TIPO_REGISTRO' => 'PROYECCION',
+     'N_COMP' => '0001-1', 'FECHA' => '2026-08-01',
+     'Cobro' => '2026-09-06', 'importe_neto' => 100.0, 'importe_bruto' => 110.0],
+    ['COD_CLI' => 'FR001', 'RAZON_SOC' => 'Franquicia Uno', 'TIPO_REGISTRO' => 'PROYECCION',
+     'N_COMP' => '0001-2', 'FECHA' => '2026-08-15',
+     'Cobro' => '2026-09-08', 'importe_neto' => 200.0, 'importe_bruto' => 220.0],
+    // Fuera del tramo diario: cae en la columna de su mes
+    ['COD_CLI' => 'FR001', 'RAZON_SOC' => 'Franquicia Uno', 'TIPO_REGISTRO' => 'PROYECCION',
+     'N_COMP' => '0001-3', 'FECHA' => '2026-08-20',
+     'Cobro' => '2026-10-15', 'importe_neto' => 300.0, 'importe_bruto' => 330.0],
+    ['COD_CLI' => 'FR002', 'RAZON_SOC' => 'Franquicia Dos', 'TIPO_REGISTRO' => 'PROYECCION',
+     'N_COMP' => '0002-1', 'FECHA' => '2026-08-02',
+     'Cobro' => '2026-09-07', 'importe_neto' => 50.0, 'importe_bruto' => 55.0]
+];
+
+$g = EjeVista::armarAgrupado($h, $items, 'COD_CLI', 'Cobro', 'importe_neto', 1,
+    ['importe_bruto']);
+
+chequear('cuatro comprobantes, dos clientes, DOS filas', 2, count($g['filas']));
+
+$fr1 = $g['filas'][0];
+
+chequear('la fila es del cliente', 'FR001', $fr1['COD_CLI']);
+chequear('con importe en la primera columna diaria',
+    100.0, EjeVista::valor($fr1, 'DIA|2026-09-06'));
+chequear('y en la tercera, la MISMA fila',
+    200.0, EjeVista::valor($fr1, 'DIA|2026-09-08'));
+chequear('y en la columna del mes de octubre',
+    300.0, EjeVista::valor($fr1, 'MES|2026-10'));
+chequear('el total del tramo suma solo las diarias', 300.0, $fr1['total_tramo']);
+chequear('el del horizonte, las dos ramas', 600.0, $fr1['total_horizonte']);
+
+seccion('los campos descriptivos comunes se conservan y los que difieren no');
+
+chequear('la razon social sobrevive', 'Franquicia Uno', $fr1['RAZON_SOC']);
+chequear('el tipo de registro tambien', 'PROYECCION', $fr1['TIPO_REGISTRO']);
+chequear('el numero de comprobante NO: son tres distintos',
+    false, array_key_exists('N_COMP', $fr1));
+chequear('la fecha de emision tampoco',
+    false, array_key_exists('FECHA', $fr1));
+chequear('ni la fecha de cobro, que es distinta en cada factura',
+    false, array_key_exists('Cobro', $fr1));
+
+seccion('los importes se suman');
+
+chequear('el neto del grupo', 600.0, $fr1['importe_neto']);
+chequear('el bruto tambien, porque se pidio en camposSuma', 660.0, $fr1['importe_bruto']);
+
+seccion('los totales del pie salen de la serie propia');
+
+chequear('el total del tramo es el de los cuatro comprobantes',
+    350.0, $g['totales']['total_tramo']);
+chequear('el del mes, el que quedo fuera del tramo',
+    300.0, $g['totales']['total_meses']);
+chequear('y el del horizonte, la suma de los dos',
+    650.0, $g['totales']['total_horizonte']);
+
+// El invariante del modulo: las dos formas de armar el payload tienen que dar
+// exactamente el mismo total. Si no, el resumen y el deep dive de la misma
+// pestana mostrarian dos numeros distintos para la misma plata.
+$sinAgrupar = EjeVista::armar($h, $items, 'Cobro', 'importe_neto');
+
+chequear('armar() y armarAgrupado() dan el mismo total del horizonte',
+    $sinAgrupar['totales']['total_horizonte'], $g['totales']['total_horizonte']);
+chequear('y el mismo total del tramo',
+    $sinAgrupar['totales']['total_tramo'], $g['totales']['total_tramo']);
+
+seccion('armarAgrupado avisa lo que cae afuera, igual que armar');
+
+$conDescartes = EjeVista::armarAgrupado($h, [
+    ['COD_CLI' => 'FR001', 'Cobro' => '2030-01-01', 'importe_neto' => 400.0],
+    ['COD_CLI' => 'FR001', 'Cobro' => null,         'importe_neto' => 700.0]
+], 'COD_CLI', 'Cobro', 'importe_neto');
+
+chequear('lo que cae fuera del horizonte se informa',
+    400.0, $conDescartes['descartes']['fuera_horizonte']);
+chequear('y lo que no tiene fecha tambien',
+    700.0, $conDescartes['descartes']['sin_fecha']);
+chequear('con sus dos avisos', 2, count($conDescartes['warnings']));
+
+seccion('armarAgrupado no rompe con listas raras');
+
+$vacioG = EjeVista::armarAgrupado($h, [], 'COD_CLI', 'Cobro', 'importe_neto');
+
+chequear('sin items no hay filas', 0, count($vacioG['filas']));
+chequear('los totales van en cero', 0.0, $vacioG['totales']['total_horizonte']);
+chequear('el eje se describe igual', 3, count($vacioG['vistas']['dias']['columnas']));
+chequear('items que no son lista tampoco rompen',
+    0, count(EjeVista::armarAgrupado($h, null, 'COD_CLI', 'Cobro', 'importe_neto')['filas']));
+
+// Un item sin la clave de agrupamiento cae en un grupo propio y la fila igual
+// sale con la clave repuesta: la alternativa seria perderlo en silencio.
+$sinClave = EjeVista::armarAgrupado($h, [
+    ['Cobro' => '2026-09-06', 'importe_neto' => 10.0]
+], 'COD_CLI', 'Cobro', 'importe_neto');
+
+chequear('un item sin la clave igual genera su fila', 1, count($sinClave['filas']));
+chequear('y su importe no se pierde', 10.0, $sinClave['totales']['total_horizonte']);

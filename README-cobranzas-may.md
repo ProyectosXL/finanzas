@@ -72,8 +72,10 @@ La pestaña **Cobranzas May** cuenta con todos los componentes estándar del sis
 2. **Barra de Herramientas:**
    - **Buscador rápido:** Filtrado en tiempo real por código de cliente, razón social o comprobante.
    - **Modo Resumen vs Deep Dive:**
-     - *Resumen:* Vista agrupada por cliente y fecha de cobro.
-     - *Deep Dive:* Apertura individual por comprobante con fecha de emisión, tipo, número e importe.
+     - *Resumen:* **una fila por cliente**, con los importes repartidos en las columnas de la grilla según la fecha de cobro de cada comprobante. Quedan `Tipo`, `COD_CLI`, `RAZON_SOC`, `Importe Bruto` e `Importe Neto`.
+     - *Deep Dive:* apertura individual por comprobante con fecha de emisión, tipo, número, importe y fecha de cobro.
+
+     Antes el Resumen agrupaba por cliente **y fecha**, así que un cliente con cobros en tres fechas ocupaba tres filas. El agrupado ahora lo hace `EjeVista::armarAgrupado()` sumando las series, no la consulta: así cada importe conserva la fecha que lo ubica en la grilla y la fila es una sola. `Ingresos::getCobranzasMay()` perdió su parámetro `$summary` — devuelve siempre una fila por comprobante. Ver `README-cobranzas-fr.md`.
    - **Selector de Eje Temporal:** Alterna entre vistas de *Días*, *Meses* y *Período Completo* (`Js/eje-vistas.js`).
    - **Acciones:** Botón de *Actualizar* y *Exportar a Excel*.
 
@@ -95,7 +97,7 @@ Suite de pruebas implementada en `tests/test_cobranzas_may.php`:
 - Registro y disponibilidad de `COBRANZAS_MAY` en `CashflowRegistry`.
 - Lectura y valor por defecto del parámetro `cobranzas_may_dias_vto`.
 - Cálculo de la fecha probable de cobro ($\text{Fecha Emisión} + 60\text{ días}$).
-- Estructura de salida de `getCobranzasMay(true)` (Resumen) y `getCobranzasMayTotales()`.
+- Estructura de salida de `getCobranzasMay()` y `getCobranzasMayTotales()`.
 - Generación de series diarias y mensuales en `IngresosProvider` alineadas con el `Horizonte`.
 
 Ejecución de la suite completa:

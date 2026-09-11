@@ -15,8 +15,9 @@
      2. RO_T_CASHFLOW_ECHEQ_PRECHEQ          excepciones por cheque
      3. RO_V_CASHFLOW_VENTAS_PRECHEQ         los cheques efectivamente marcados
 
-   No crea ningun parametro clave/valor: 'dias_prechequeado' ya existe y lo
-   siembra sql/ventas_proyeccion.sql.
+   No crea ningun parametro clave/valor. Los dias de pre-chequeado viven en la
+   tabla 1, por cliente: el parametro global 'dias_prechequeado' que sembraba
+   sql/ventas_proyeccion.sql quedo SIN USO -no se borra, pero ya nadie lo lee-.
 
    ----------------------------------------------------------------------------
    QUE ES ESTO
@@ -98,13 +99,41 @@ GO
 IF OBJECT_ID('dbo.RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE (
-        CLIENTE      VARCHAR(6) COLLATE Latin1_General_BIN NOT NULL,
-        RAZON_SOCIAL VARCHAR(60) NULL,
-        ACTIVO       BIT         NOT NULL CONSTRAINT DF_CF_ECHEQ_PRECLI_ACTIVO DEFAULT (1),
-        FECHA_UPDATE DATETIME    NOT NULL CONSTRAINT DF_CF_ECHEQ_PRECLI_FUPD   DEFAULT (GETDATE()),
-        USUARIO      VARCHAR(50) NULL,
+        CLIENTE           VARCHAR(6) COLLATE Latin1_General_BIN NOT NULL,
+        RAZON_SOCIAL      VARCHAR(60) NULL,
+        DIAS_PRECHEQUEADO INT         NOT NULL CONSTRAINT DF_CF_ECHEQ_PRECLI_DIAS   DEFAULT (0),
+        ACTIVO            BIT         NOT NULL CONSTRAINT DF_CF_ECHEQ_PRECLI_ACTIVO DEFAULT (1),
+        FECHA_UPDATE      DATETIME    NOT NULL CONSTRAINT DF_CF_ECHEQ_PRECLI_FUPD   DEFAULT (GETDATE()),
+        USUARIO           VARCHAR(50) NULL,
         CONSTRAINT PK_ECHEQ_PRECHEQ_CLIENTE PRIMARY KEY CLUSTERED (CLIENTE)
     );
+END
+GO
+
+/* ----------------------------------------------------------------------------
+   1.b DIAS_PRECHEQUEADO, para las instalaciones que ya tenian la tabla.
+
+   CUANTOS DIAS ANTES DEL CHEQUE SE EMITE LA FACTURA, POR CLIENTE.
+
+   Antes esto era UN parametro global, 'dias_prechequeado' en
+   RO_T_CASHFLOW_PARAMETROS. No alcanza: cada cliente negocia su propio
+   adelanto, y un unico numero obliga a elegir cual de todos los clientes queda
+   bien calculado.
+
+   NO HAY RESPALDO GLOBAL. Los dias salen UNICAMENTE de esta columna, y un
+   cliente en cero no desplaza nada: el cheque queda en su propia fecha. Un
+   respaldo global seria peor que el cero, porque un cliente sin configurar
+   heredaria un desplazamiento que nadie eligio para el y no habria forma de
+   distinguirlo de uno configurado.
+
+   El default 0 es el valor correcto para el alta: hasta que alguien cargue el
+   plazo del cliente, la estimacion mas honesta es no mover la fecha.
+   ---------------------------------------------------------------------------- */
+IF COL_LENGTH('dbo.RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE', 'DIAS_PRECHEQUEADO') IS NULL
+BEGIN
+    ALTER TABLE dbo.RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE
+        ADD DIAS_PRECHEQUEADO INT NOT NULL
+            CONSTRAINT DF_CF_ECHEQ_PRECLI_DIAS DEFAULT (0);
 END
 GO
 
@@ -147,14 +176,19 @@ GO
    por inexistente. Reemplaza como origen de datos a la tabla
    RO_T_CASHFLOW_VENTAS_PRECHEQ de sql/ventas_proyeccion.sql, que queda sin uso.
 
-   'dias_prechequeado' NO ESTA ACA. La vista devuelve la fecha del cheque y el
-   PHP le resta los dias para obtener la fecha teorica de factura:
+   LOS DIAS NO ESTAN ACA. La vista devuelve la fecha del cheque y el PHP le
+   resta los dias del CLIENTE para obtener la fecha estimada de la venta:
 
-       FECHA_TEORICA_FACTURA = FECHA_CHEQUE - dias_prechequeado
+       FECHA_VENTA_ESTIMADA = FECHA_CHEQUE - DIAS_PRECHEQUEADO del cliente
 
-   Es un parametro editable, se lee con Parametros::num() como todos los demas, y
-   un parametro leido desde dos lugares es un parametro que se va a
-   desincronizar.
+   El plazo es editable y sale de la tabla 1 de este mismo script. Se resuelve
+   en PHP con Echeqs::diasDeCliente(), que es la MISMA funcion que usa la
+   pantalla: un plazo leido desde dos lugares es un plazo que se va a
+   desincronizar, y si la pantalla y el neteo aplicaran distinto, el tablero
+   dejaria de cerrar sin que se notara en ningun lado.
+
+   Meterlo en la vista obligaria ademas a un JOIN mas para algo que el PHP ya
+   tiene resuelto al armar la pantalla.
 
    TAMPOCO devuelve el canal. El canal se deriva del prefijo del codigo de
    cliente y esa regla vive en Echeqs::canalDeCliente(), en un solo lugar.

@@ -118,6 +118,8 @@
                     <!-- No hay Resumen / Deep Dive: el grano natural de esta
                          pantalla es el cheque, y no hay nada que aperturar. -->
                     <div id="vistasEcheqs"></div>
+                    <!-- El selector de columnas fijas lo dibuja Js/columnas-fijas.js -->
+                    <div id="colFijasEcheqs"></div>
                     <button id="btnRefreshEch" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
@@ -139,7 +141,10 @@
                     <p>Cargando cheques en cartera...</p>
                 </div>
 
-                <div class="table-wrapper table-responsive" id="wrapperEch" style="display: none;">
+                <!-- .tabla-temporal: header de dos filas fijo arriba y
+                     columnas descriptivas fijas a la izquierda. Ver
+                     Css/main.css. -->
+                <div class="table-wrapper table-responsive tabla-temporal" id="wrapperEch" style="display: none;">
                     <table id="tablaEcheqs" class="table table-hover mb-0">
                         <thead>
                             <!--
@@ -156,7 +161,7 @@
                                 <th rowspan="2">Fecha de pago</th>
                                 <th rowspan="2">N° Cheque</th>
                                 <th rowspan="2">Banco</th>
-                                <th rowspan="2">Cliente</th>
+                                <th rowspan="2" class="col-texto">Cliente</th>
                                 <th rowspan="2" class="text-end">Importe</th>
                                 <th colspan="1" class="table-group-divider" id="ejeHeaderEch">Días</th>
                             </tr>
@@ -282,11 +287,27 @@
                 </div>
                 <div class="d-flex gap-2 align-items-center">
                     <span id="avisoGuardadoPre" class="ech-aviso-guardado" style="display: none;"></span>
+                    <!-- Los tres botones los dibuja Js/eje-vistas.js -->
+                    <div id="vistasPre"></div>
+                    <!-- El selector de columnas fijas lo dibuja Js/columnas-fijas.js -->
+                    <div id="colFijasPre"></div>
                     <button id="btnRefreshPre" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
                 </div>
             </div>
+
+            <!-- Qué período se está midiendo. La vista Meses no cubre el
+                 horizonte completo, y sin esto su total se lee como el de todo. -->
+            <div class="card-body py-2 border-bottom bg-light bg-opacity-50">
+                <small class="text-muted" id="periodoPre"></small>
+            </div>
+
+            <!-- Lo que no entra en el eje se avisa, no se esconde: con días de
+                 pre-chequeado altos la fecha estimada de venta puede caer antes
+                 del inicio del eje. Es el mismo criterio de
+                 Ventas::repartirNeteo(). -->
+            <div id="avisosEjePre"></div>
 
             <div class="card-body p-0">
                 <div class="loading-spinner" id="loadingPre">
@@ -294,25 +315,48 @@
                     <p>Cargando cheques pre-chequeados...</p>
                 </div>
 
-                <div class="table-responsive" id="wrapperPre" style="display: none;">
+                <div class="table-wrapper table-responsive tabla-temporal" id="wrapperPre"
+                     style="display: none;">
                     <table class="table table-hover mb-0" id="tablaPrechequeado">
                         <thead>
+                            <!--
+                                Nueve columnas descriptivas y después una por
+                                cada columna del eje, que dibuja el JS.
+
+                                FECHA VENTA ESTIMADA = fecha del cheque − días
+                                del cliente, y es DONDE SE UBICA el importe en
+                                la grilla: es la fecha en la que ese cheque
+                                netea la cobranza proyectada de Ventas.
+
+                                La fecha del cheque se conserva como referencia
+                                —es el dato duro de Tango— y los días efectivos
+                                van al lado para que se vea de dónde sale la
+                                estimación. Un cliente en 0 días muestra las dos
+                                fechas iguales, y eso es información: quiere
+                                decir que no está configurado.
+                            -->
                             <tr>
-                                <th class="text-center" style="width: 60px;">
+                                <th rowspan="2" class="text-center" style="width: 60px;">
                                     <!-- Marca o desmarca TODO LO VISIBLE según el
                                          filtro actual, y dice cuántas filas va a
                                          afectar antes de hacerlo. -->
                                     <input type="checkbox" class="form-check-input" id="marcarTodosPre"
                                            title="Marca o desmarca todo lo que se está viendo">
                                 </th>
-                                <th>Fecha de pago</th>
-                                <th>N° Cheque</th>
-                                <th>Banco</th>
-                                <th>Cliente</th>
-                                <th class="text-center" style="width: 90px;">Estado</th>
-                                <th class="text-end">Importe</th>
-                                <th class="text-center" style="width: 160px;">Marca</th>
+                                <th rowspan="2">Fecha venta estimada</th>
+                                <th rowspan="2" class="text-center" style="width: 80px;"
+                                    title="Días de pre-chequeado del cliente. En 0 el cheque no se desplaza.">Días</th>
+                                <th rowspan="2">Fecha de pago</th>
+                                <th rowspan="2">N° Cheque</th>
+                                <th rowspan="2">Banco</th>
+                                <th rowspan="2" class="col-texto">Cliente</th>
+                                <th rowspan="2" class="text-center" style="width: 90px;">Estado</th>
+                                <th rowspan="2" class="text-end">Importe</th>
+                                <th rowspan="2" class="text-center" style="width: 160px;">Marca</th>
+                                <!-- El rótulo y el colspan los pone el JS según la vista activa -->
+                                <th colspan="1" class="table-group-divider" id="grupoEjePre">Días</th>
                             </tr>
+                            <tr id="headerEjePre"></tr>
                         </thead>
                         <tbody id="bodyPre"></tbody>
                         <tfoot class="table-light" id="footPre"></tfoot>

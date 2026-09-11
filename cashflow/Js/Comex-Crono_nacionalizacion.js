@@ -38,6 +38,16 @@
             alCambiar: generarTabla
         });
 
+        // Proveedor y Contenedor, igual que Proveedores Exterior: es la misma
+        // fila mirada desde el otro lado del circuito. La primera columna es
+        // una fecha, que no identifica nada por sí sola.
+        crearColumnasFijas({
+            tabla: 'tablaCronoNacionalizacion',
+            control: 'colFijasCronoNac',
+            clave: 'crono_nacionalizacion',
+            porDefecto: [1, 2]
+        });
+
         // Cargar datos automáticamente
         cargarDatos();
     }
@@ -213,7 +223,9 @@
             
             // Columnas fijas
             html += `<td class="center">${formatDate(item.FECHA_EST_EMB)}</td>`;
-            html += `<td>${item.PROVEEDOR || ''}</td>`;
+            // Recortado con puntos suspensivos (.col-texto); el nombre
+            // completo va en el title. Ver Css/main.css.
+            html += `<td class="col-texto" title="${escaparAttrCrono(item.PROVEEDOR)}">${escaparAttrCrono(item.PROVEEDOR)}</td>`;
             html += `<td class="center">${item.CONTENEDOR || ''}</td>`;
             html += `<td class="center">${item.ORDEN_COMPRA || ''}</td>`;
             html += `<td>${item.DESPACHANTE || ''}</td>`;
@@ -430,6 +442,14 @@
             }
         });
     };
+
+    /** Escapa un texto para meterlo en un atributo o en el cuerpo de una celda */
+    function escaparAttrCrono(texto) {
+        return String(texto === null || texto === undefined ? '' : texto)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/"/g, '&quot;');
+    }
 
     /**
      * Formatea un valor como moneda ARS

@@ -73,16 +73,31 @@ try {
         case 'getEcheqsPrechequeado':
             $filas = $echeqs->getEcheqsPrechequeado();
 
+            // Cada cheque se ubica en la FECHA ESTIMADA DE VENTA -la del cheque
+            // menos los dias del cliente- y no en la del cheque: es la fecha en
+            // la que ese importe netea la cobranza proyectada de Ventas, asi que
+            // es donde tiene que verse en la grilla. La del cheque queda como
+            // columna de referencia.
+            //
+            // Los cheques cuya fecha estimada cae antes del inicio del eje se
+            // avisan en 'descartes', igual que hace Ventas::repartirNeteo(). No
+            // se esconden.
+            $payload = EjeVista::armar(
+                Horizonte::desdeParametros(new Parametros()),
+                $filas,
+                'FECHA_VENTA_EST',
+                'IMPORTE'
+            );
+
             // Los avisos van SIEMPRE, incluso -sobre todo- cuando el listado
             // esta vacio: es la diferencia entre "no hay clientes configurados"
             // y "esta pantalla no anda".
+            $payload['resumen'] = Echeqs::resumenPrechequeado($filas);
+            $payload['avisos'] = $echeqs->getAvisos();
+
             echo json_encode([
                 'success' => true,
-                'data' => [
-                    'filas' => $filas,
-                    'resumen' => Echeqs::resumenPrechequeado($filas),
-                    'avisos' => $echeqs->getAvisos()
-                ]
+                'data' => $payload
             ], JSON_UNESCAPED_UNICODE);
             break;
 

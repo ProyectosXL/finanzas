@@ -52,16 +52,22 @@ if (!Pruebas::hayBase()) {
     return;
 }
 
-$resumen = $ingresos->getCobranzasMay(true);
-chequear('getCobranzasMay(true) devuelve un array', true, is_array($resumen));
+// getCobranzasMay() ya no tiene modo resumen: devuelve una fila por
+// comprobante, con su fecha. El agrupado por cliente lo hace
+// EjeVista::armarAgrupado() en el controller, que es lo que evita perder la
+// fecha de cada factura. Ver README-cobranzas-may.md.
+$comprobantes = $ingresos->getCobranzasMay();
+chequear('getCobranzasMay() devuelve un array', true, is_array($comprobantes));
 
-if (count($resumen) > 0) {
-    $filaResumen = $resumen[0];
-    chequear('fila resumen tiene COD_CLI', true, isset($filaResumen['COD_CLI']));
-    chequear('fila resumen tiene RAZON_SOC', true, isset($filaResumen['RAZON_SOC']));
-    chequear('fila resumen tiene Cobro', true, isset($filaResumen['Cobro']));
-    chequear('fila resumen tiene importe_neto', true, isset($filaResumen['importe_neto']));
-    chequear('fila resumen tiene TIPO_REGISTRO PROYECCION', 'PROYECCION', $filaResumen['TIPO_REGISTRO']);
+if (count($comprobantes) > 0) {
+    $fila = $comprobantes[0];
+    chequear('la fila tiene COD_CLI', true, isset($fila['COD_CLI']));
+    chequear('la fila tiene RAZON_SOC', true, isset($fila['RAZON_SOC']));
+    chequear('la fila tiene Cobro', true, isset($fila['Cobro']));
+    chequear('la fila tiene importe_neto', true, isset($fila['importe_neto']));
+    chequear('la fila tiene TIPO_REGISTRO PROYECCION', 'PROYECCION', $fila['TIPO_REGISTRO']);
+    chequear('y trae el comprobante, no un rotulo de grupo', true,
+        isset($fila['N_COMP']) && $fila['N_COMP'] !== 'COMPROBANTES');
 }
 
 $totales = $ingresos->getCobranzasMayTotales();

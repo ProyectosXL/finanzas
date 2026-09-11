@@ -138,7 +138,7 @@
 
         document.getElementById('bodyClientesPpq').innerHTML = clientes.length
             ? clientes.map(filaCliente).join('')
-            : '<tr><td colspan="5" class="text-center text-muted py-4">' +
+            : '<tr><td colspan="6" class="text-center text-muted py-4">' +
               'Todavía no hay clientes cargados. Mientras tanto, la sub-pestaña Venta Cobrada ' +
               'Anticipada se muestra vacía y no se netea nada de Ventas.</td></tr>';
 
@@ -147,15 +147,96 @@
                 cambiarEstado(c.dataset.codigo, c.checked, c);
             });
         });
+
+        document.querySelectorAll('.ppq-dias').forEach(function(inp) {
+            inp.addEventListener('change', function() {
+                guardarDias(inp);
+            });
+
+            inp.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    guardarDias(inp);
+                }
+            });
+        });
+    }
+
+    /**
+     * Los días editables en la grilla.
+     *
+     * Un cliente en CERO se muestra igual que el resto, con la marca "sin
+     * desplazar": si alguien esperaba un corrimiento y en Echeqs ve el cheque
+     * en su propia fecha, el motivo es éste y tiene que poder encontrarlo. No
+     * hay valor global de respaldo que lo tape.
+     */
+    function celdaDias(codigo, dias) {
+        return '<div class="input-group input-group-sm mx-auto" style="max-width: 150px;">' +
+            '<input type="number" class="form-control form-control-sm text-center ppq-dias" ' +
+                'min="0" max="365" step="1" value="' + dias + '" ' +
+                'data-codigo="' + escapar(codigo) + '" data-previo="' + dias + '" ' +
+                'title="Días antes del cheque en que se emite la factura. ' +
+                    'En 0 el cheque no se desplaza.">' +
+            '<span class="input-group-text">' +
+                (dias === 0
+                    ? '<span class="ppq-sin-cheques" title="Este cliente no desplaza nada: ' +
+                      'su cheque se netea en su propia fecha.">sin desplazar</span>'
+                    : 'días') +
+            '</span>' +
+        '</div>';
+    }
+
+    function guardarDias(inp) {
+        var codigo = inp.getAttribute('data-codigo');
+        var previo = inp.getAttribute('data-previo');
+        var dias = parseInt(inp.value, 10);
+
+        if (isNaN(dias) || dias < 0 || dias > 365) {
+            inp.value = previo;
+
+            Notificacion.campoInvalido(inp, 'Los días tienen que ser un entero entre 0 y 365.', {
+                detalle: 'Poné 0 si el cliente no adelanta: el cheque queda en su propia fecha.'
+            });
+
+            return;
+        }
+
+        if (String(dias) === String(previo)) {
+            return;
+        }
+
+        inp.disabled = true;
+
+        pedirJson(URL_PARAM + '?action=saveDiasPrecheq', { codigo: codigo, dias: dias })
+            .then(function() {
+                Notificacion.exito(codigo + ': ' + dias + ' día(s) de pre-chequeado.', {
+                    detalle: 'La fecha estimada de venta y el neteo de Ventas se recalculan '
+                           + 'con este plazo.'
+                });
+
+                cargar();
+            })
+            .catch(function(error) {
+                // Reversión: dejar el número nuevo haría creer que se guardó un
+                // plazo que el tablero no va a aplicar.
+                inp.value = previo;
+                inp.disabled = false;
+
+                Notificacion.error('No se pudieron guardar los días: ' + error.message, {
+                    detalle: 'El cliente quedó con ' + previo + ' día(s).'
+                });
+            });
     }
 
     function filaCliente(c) {
         var activo = (parseInt(c.ACTIVO, 10) === 1);
         var vivos = parseInt(c.CHEQUES_VIVOS, 10) || 0;
+        var dias = parseInt(c.DIAS_PRECHEQUEADO, 10) || 0;
 
         return '<tr class="' + (activo ? '' : 'ppq-inactivo') + '">' +
             '<td class="fw-semibold">' + escapar(c.CLIENTE) + '</td>' +
             '<td>' + escapar(c.RAZON_SOCIAL || '—') + '</td>' +
+            '<td class="text-center">' + celdaDias(c.CLIENTE, dias) + '</td>' +
             '<td class="text-center">' + celdaCheques(vivos, activo) + '</td>' +
             '<td class="text-center ppq-fecha">' +
                 (c.FECHA_UPDATE ? fechaHora(c.FECHA_UPDATE) : '—') +
@@ -257,10 +338,26 @@
             return;
         }
 
+        // Los días son parte del alta y no un dato que se descubre después: un
+        // cliente cargado sin plazo queda en cero, y en la pantalla eso es
+        // indistinguible de un cliente que realmente opera con cero.
+        var dias = parseInt(valor('diasPpq'), 10);
+
+        if (isNaN(dias) || dias < 0 || dias > 365) {
+            Notificacion.campoInvalido('diasPpq',
+                'Los días de pre-chequeado tienen que ser un entero entre 0 y 365.', {
+                detalle: 'Poné 0 si el cliente no adelanta: el cheque queda en su propia fecha.'
+            });
+
+            return;
+        }
+
         conBotonEl(document.getElementById('btnAgregarClientePpq'), function() {
-            return pedirJson(URL_PARAM + '?action=addClientePrecheq', { codigo: codigo })
+            return pedirJson(URL_PARAM + '?action=addClientePrecheq',
+                    { codigo: codigo, dias: dias })
                 .then(function(data) {
                     setValor('nuevoCodigoPpq', '');
+                    setValor('diasPpq', '0');
                     olvidarBusqueda();
                     mostrar('formClientePpq', false);
 

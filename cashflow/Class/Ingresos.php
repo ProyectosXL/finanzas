@@ -1,12 +1,74 @@
 <?php
 
+// Horizonte::normalizarFecha() es la unica implementacion del modulo para
+// llevar a 'Y-m-d' lo que devuelve sqlsrv, que para una columna DATE entrega un
+// DateTime y no un string.
+require_once __DIR__ . '/Horizonte.php';
+
+/**
+ * Ingresos
+ * Cobranza de franquicias (real y proyectada) y de mayoristas.
+ *
+ * LA INVARIANTE ENTRE REAL Y PROYECTADO
+ * -------------------------------------
+ * Las dos pestanas de Cobranzas FR se reparten el mismo universo de facturas y
+ * la particion tiene que ser EXACTA: cada comprobante esta en una o en la otra,
+ * nunca en las dos y nunca en ninguna.
+ *
+ *   Real a Cobrar        -> comprobantes de propuestas en estado 'ACEPTADA'
+ *   Pendientes Proyectados -> todo lo demas, o sea las facturas PEN de Tango
+ *                             MENOS las que ya cuenta Real ('ACEPTADA') y
+ *                             menos las ya cobradas ('PAGADO')
+ *
+ * Los estados reales de FP_propuestas_pago son exactamente tres: 'ACEPTADA',
+ * 'PAGADO' y 'PENDIENTE_APROBACION_CLIENTE'. Una factura en una propuesta que
+ * todavia espera la aprobacion del cliente NO es cobranza comprometida, asi que
+ * no la cuenta Real; y por eso mismo TIENE que volver a la proyeccion. Si las
+ * dos consultas no son complementarias, esas facturas desaparecen de las dos
+ * pestanas y la plata se evapora en silencio.
+ *
+ * La invariante vive repartida entre getCobranzasFR() / getCobranzasFRTotales()
+ * (lo que cuenta Real) y getCobranzasFRPendientesProyectadas() (lo que excluye
+ * la proyeccion). Estan comentadas de los dos lados a proposito: son dos
+ * consultas separadas que se tienen que mover juntas.
+ *
+ * getPPPClientes() usa 'PAGADO' y no participa de esto: es el historico con el
+ * que se calcula el plazo promedio, no el universo a cobrar.
+ */
 class Ingresos {
+
+    /**
+     * Estados de propuesta que cuenta la cobranza REAL.
+     * El complemento de esta lista es lo que vuelve a la proyeccion; ver
+     * $estadosYaContados y el encabezado de la clase.
+     */
+    const ESTADOS_REAL = ['ACEPTADA'];
+
+    /**
+     * Estados de propuesta cuyos comprobantes NO tienen que volver a la
+     * proyeccion: 'ACEPTADA' porque ya la cuenta Real, 'PAGADO' porque ya se
+     * cobro. Es el complemento exacto de ESTADOS_REAL mas lo ya cobrado.
+     */
+    const ESTADOS_YA_CONTADOS = ['ACEPTADA', 'PAGADO'];
 
     private $conn;
 
     function __construct(){
         require_once __DIR__.'/../../class/conexion.php';
         $this->conn = new Conexion;
+    }
+
+    /**
+     * Lista de estados lista para intercalar en un IN (...) de SQL.
+     * Las dos constantes son literales del codigo, no entrada del usuario: no
+     * hay nada que parametrizar. Existe para que la lista este escrita una sola
+     * vez y las consultas de Real y de la proyeccion no se puedan desalinear.
+     *
+     * @param array $estados
+     * @return string
+     */
+    private static function inSql($estados) {
+        return "'" . implode("', '", $estados) . "'";
     }
 
     /**
@@ -100,8 +162,17 @@ class Ingresos {
     }
 
     /**
-     * Obtiene las escalas de descuento por cliente y medio desde RO_T_CASHFLOW_COBRANZAS_PARAM_DESC.
-     * @return array Mapa [COD_CLIENT][MEDIO_PAGO] => array de tramos
+     * La escala de descuento GENERAL, desde RO_T_CASHFLOW_COBRANZAS_ESCALA_DESC.
+     *
+     * Es UNA SOLA para todos los clientes y NO depende del medio de pago. Antes
+     * habia una escala por cliente y por medio en
+     * RO_T_CASHFLOW_COBRANZAS_PARAM_DESC; esa tabla sigue existiendo con sus
+     * datos, pero ya no se lee. Ver README-cobranzas-fr.md.
+     *
+     * Devuelve los tramos ordenados por DIAS_DESDE. Una lista vacia no es un
+     * error: significa que la escala todavia no se cargo, y el descuento da 0%.
+     *
+     * @return array Lista de tramos ['id', 'dias_desde', 'dias_hasta', 'porcentaje_desc']
      */
     public function getEscalasDescuento() {
         $cid = $this->conn->conectar('central');
@@ -109,28 +180,19 @@ class Ingresos {
             return [];
         }
 
-        $sql = "SELECT ID, COD_CLIENT, MEDIO_PAGO, DIAS_DESDE, DIAS_HASTA, PORCENTAJE_DESC, ACTIVO 
-                FROM RO_T_CASHFLOW_COBRANZAS_PARAM_DESC 
-                WHERE ACTIVO = 1 
-                ORDER BY COD_CLIENT, MEDIO_PAGO, DIAS_DESDE ASC";
+        $sql = "SELECT ID, DIAS_DESDE, DIAS_HASTA, PORCENTAJE_DESC
+                FROM RO_T_CASHFLOW_COBRANZAS_ESCALA_DESC
+                WHERE ACTIVO = 1
+                ORDER BY DIAS_DESDE ASC";
 
         $stmt = sqlsrv_query($cid, $sql);
         if ($stmt === false) {
             return [];
         }
 
-        $escalas = [];
+        $escala = [];
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            $cod = strtoupper(trim($row['COD_CLIENT']));
-            $medio = strtoupper(trim($row['MEDIO_PAGO']));
-            if (!isset($escalas[$cod])) {
-                $escalas[$cod] = [];
-            }
-            if (!isset($escalas[$cod][$medio])) {
-                $escalas[$cod][$medio] = [];
-            }
-
-            $escalas[$cod][$medio][] = [
+            $escala[] = [
                 'id' => intval($row['ID']),
                 'dias_desde' => intval($row['DIAS_DESDE']),
                 'dias_hasta' => intval($row['DIAS_HASTA']),
@@ -139,7 +201,7 @@ class Ingresos {
         }
         sqlsrv_free_stmt($stmt);
 
-        return $escalas;
+        return $escala;
     }
 
     /**
@@ -170,45 +232,45 @@ class Ingresos {
     }
 
     /**
-     * Calcula el porcentaje de descuento aplicable según el cliente, días y medio de pago.
-     * 
-     * @param string $codClient Código de cliente
-     * @param int $dias Días calculados (PPP o diferencia de fechas)
-     * @param string $medioPago Medio de pago ('ECHEQ', 'TRANSFERENCIA', etc.)
-     * @param array|null $escalas Mapa pre-cargado de escalas
-     * @param array|null $paramsClientes Mapa pre-cargado de parámetros
-     * @return float Porcentaje de descuento (ej: 8.0 para 8%)
+     * Porcentaje de descuento que corresponde a una cantidad de dias.
+     *
+     * Ya no recibe cliente ni medio de pago: la escala es una sola y general.
+     * La firma quedo con un solo dato de negocio porque eso es lo que hoy
+     * determina el descuento, y una firma que siga pidiendo el cliente
+     * sugeriria que todavia influye.
+     *
+     * @param int $dias Dias entre la emision y la fecha de cobro
+     * @param array|null $escala Escala pre-cargada; si es null la va a buscar
+     * @return float Porcentaje (ej: 8.0 para 8%)
      */
-    public function calcularDescuentoPorDias($codClient, $dias, $medioPago = 'ECHEQ', $escalas = null, $paramsClientes = null) {
-        $cod = strtoupper(trim($codClient));
-        $medio = strtoupper(trim($medioPago ?: 'ECHEQ'));
+    public function calcularDescuentoPorDias($dias, $escala = null) {
+        if ($escala === null) {
+            $escala = $this->getEscalasDescuento();
+        }
+
+        return self::descuentoDeEscala($escala, $dias);
+    }
+
+    /**
+     * El tramo que contiene una cantidad de dias, y su porcentaje.
+     *
+     * Va estatica y pura -sin base de datos- para poder probarla: es la regla
+     * que decide cuanta plata se descuenta de cada factura.
+     *
+     * Un dia que no cae en ningun tramo devuelve 0%. Es lo unico razonable, y
+     * por eso mismo la semilla de la escala llega hasta 9999: asi el cero
+     * siempre es un tramo cargado y no un hueco de configuracion.
+     *
+     * @param array $escala Lista de tramos con dias_desde, dias_hasta y porcentaje_desc
+     * @param int $dias
+     * @return float
+     */
+    public static function descuentoDeEscala($escala, $dias) {
         $dias = intval($dias);
 
-        if ($escalas === null) {
-            $escalas = $this->getEscalasDescuento();
-        }
-
-        // 1. Si el cliente tiene tramos configurados para ese medio (o para ECHEQ)
-        if (isset($escalas[$cod])) {
-            $tramos = $escalas[$cod][$medio] ?? ($escalas[$cod]['ECHEQ'] ?? null);
-            if (!empty($tramos)) {
-                foreach ($tramos as $tramo) {
-                    if ($dias >= $tramo['dias_desde'] && $dias <= $tramo['dias_hasta']) {
-                        return floatval($tramo['porcentaje_desc']);
-                    }
-                }
-            }
-        }
-
-        // 2. Fallback a RO_T_PARAMETROS_DESC_CLIENTES si no hay tramo específico
-        if ($paramsClientes === null) {
-            $paramsClientes = $this->getParametrosClientes();
-        }
-
-        if (isset($paramsClientes[$cod])) {
-            $param = $paramsClientes[$cod];
-            if ($param['dias_pp_max'] > 0 && $dias <= $param['dias_pp_max']) {
-                return round($param['desc_pp_max'] * 100, 2);
+        foreach (is_array($escala) ? $escala : [] as $tramo) {
+            if ($dias >= intval($tramo['dias_desde']) && $dias <= intval($tramo['dias_hasta'])) {
+                return floatval($tramo['porcentaje_desc']);
             }
         }
 
@@ -216,13 +278,335 @@ class Ingresos {
     }
 
     /**
-     * Obtiene los comprobantes pendientes proyectados (FAC en estado PEN fuera de propuestas activas).
-     * Calcula para cada uno la fecha probable de cobro = FECHA_EMIS + PPP, y el descuento según la escala de días.
-     * 
-     * @param bool $summary Si es true, agrupa por cliente y fecha probable de cobro
+     * Valida que una escala cubra los dias de punta a punta sin solaparse.
+     *
+     * Los dos defectos que busca se ven distinto y los dos son caros:
+     * un SOLAPAMIENTO hace que el descuento dependa del orden de los tramos, y
+     * un HUECO hace que un dia caiga en el 0% de "no hay tramo" en vez del que
+     * alguien penso. Ninguno se nota mirando la grilla: se nota en el importe.
+     *
+     * Es estatica y pura para que la valide el servidor y la pueda probar el
+     * arnes, sin depender de que el navegador la haya chequeado antes.
+     *
+     * @param array $tramos Lista con dias_desde, dias_hasta
+     * @return array Lista de mensajes de error; vacia si la escala es valida
+     */
+    public static function validarEscala($tramos) {
+        $errores = [];
+        $lista = [];
+
+        foreach (is_array($tramos) ? $tramos : [] as $t) {
+            $desde = intval($t['dias_desde']);
+            $hasta = intval($t['dias_hasta']);
+            $porc = isset($t['porcentaje_desc']) ? floatval($t['porcentaje_desc']) : 0;
+
+            if ($desde < 0) {
+                $errores[] = 'El tramo que arranca en ' . $desde . ' días tiene un desde negativo.';
+            }
+
+            if ($hasta < $desde) {
+                $errores[] = 'El tramo ' . $desde . '-' . $hasta . ' termina antes de empezar.';
+            }
+
+            if ($porc < 0 || $porc > 100) {
+                $errores[] = 'El descuento del tramo ' . $desde . '-' . $hasta
+                    . ' tiene que estar entre 0% y 100%.';
+            }
+
+            $lista[] = ['desde' => $desde, 'hasta' => $hasta];
+        }
+
+        if (empty($lista)) {
+            return $errores;
+        }
+
+        usort($lista, function ($a, $b) {
+            return $a['desde'] - $b['desde'];
+        });
+
+        if ($lista[0]['desde'] !== 0) {
+            $errores[] = 'La escala tiene que arrancar en 0 días: hoy arranca en '
+                . $lista[0]['desde'] . ' y las facturas más nuevas quedarían sin descuento.';
+        }
+
+        for ($i = 1; $i < count($lista); $i++) {
+            $anterior = $lista[$i - 1];
+            $actual = $lista[$i];
+
+            if ($actual['desde'] <= $anterior['hasta']) {
+                $errores[] = 'Los tramos ' . $anterior['desde'] . '-' . $anterior['hasta']
+                    . ' y ' . $actual['desde'] . '-' . $actual['hasta'] . ' se superponen: '
+                    . 'un mismo plazo tendría dos descuentos.';
+            } elseif ($actual['desde'] > $anterior['hasta'] + 1) {
+                $errores[] = 'Entre ' . $anterior['hasta'] . ' y ' . $actual['desde']
+                    . ' días no hay tramo: esas facturas irían con 0% sin que nadie lo haya decidido.';
+            }
+        }
+
+        return $errores;
+    }
+
+    /* ====================================================================
+       FECHA DE COBRO MANUAL POR COMPROBANTE
+       ==================================================================== */
+
+    /**
+     * Las fechas de cobro cargadas a mano, indexadas por comprobante.
+     *
+     * @return array Mapa 'T_COMP|N_COMP' => ['fecha' => 'Y-m-d', 'usuario' => ...]
+     */
+    public function getFechasManualesFR() {
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            return [];
+        }
+
+        $sql = "SELECT COD_CLIENTE, T_COMP, N_COMP, FECHA_COBRO, USUARIO
+                FROM RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL";
+
+        $stmt = sqlsrv_query($cid, $sql);
+
+        if ($stmt === false) {
+            // La tabla puede no existir todavia: sin fechas manuales la
+            // proyeccion funciona igual, con el PPP. No es motivo para tumbar
+            // la pestana.
+            return [];
+        }
+
+        $mapa = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $clave = strtoupper(trim($row['T_COMP'])) . '|' . strtoupper(trim($row['N_COMP']));
+
+            $mapa[$clave] = [
+                'fecha' => Horizonte::normalizarFecha($row['FECHA_COBRO']),
+                'cod_cliente' => strtoupper(trim($row['COD_CLIENTE'])),
+                'usuario' => $row['USUARIO']
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $mapa;
+    }
+
+    /**
+     * Guarda (o pisa) la fecha de cobro manual de un comprobante.
+     *
+     * VALIDA LA FECHA EN EL SERVIDOR. El input del navegador lleva `min` en el
+     * dia de hoy, pero lo que manda el navegador es un pedido, no una
+     * autorizacion: el endpoint es alcanzable sin pasar por la pantalla.
+     *
+     * @param string $codCliente
+     * @param string $tComp
+     * @param string $nComp
+     * @param string $fecha 'Y-m-d'
+     * @param string|null $usuario
+     * @return string La fecha guardada, normalizada
+     */
+    public function saveFechaManualFR($codCliente, $tComp, $nComp, $fecha, $usuario = null) {
+        $cod = strtoupper(trim($codCliente));
+        $t = strtoupper(trim($tComp));
+        $n = strtoupper(trim($nComp));
+        $f = self::validarFechaCobroManual($fecha);
+
+        if ($t === '' || $n === '') {
+            throw new Exception('Falta el comprobante al que corresponde la fecha de cobro.');
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos central');
+        }
+
+        // Un UPDATE que no toca ninguna fila y despues un INSERT: la unicidad
+        // esta en (T_COMP, N_COMP), asi que no puede quedar duplicado.
+        $sql = "UPDATE RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL
+                SET FECHA_COBRO = ?, COD_CLIENTE = ?, USUARIO = ?, FECHA_MOD = GETDATE()
+                WHERE T_COMP = ? AND N_COMP = ?";
+
+        $stmt = sqlsrv_query($cid, $sql, [$f, $cod, $usuario, $t, $n]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSqlIngresos('Error al guardar la fecha de cobro'));
+        }
+
+        $filas = sqlsrv_rows_affected($stmt);
+        sqlsrv_free_stmt($stmt);
+
+        if ($filas > 0) {
+            return $f;
+        }
+
+        $sql = "INSERT INTO RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL
+                    (COD_CLIENTE, T_COMP, N_COMP, FECHA_COBRO, USUARIO)
+                VALUES (?, ?, ?, ?, ?)";
+
+        $stmt = sqlsrv_query($cid, $sql, [$cod, $t, $n, $f, $usuario]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSqlIngresos('Error al guardar la fecha de cobro'));
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $f;
+    }
+
+    /**
+     * Borra la fecha manual de un comprobante: vuelve a valer FECHA_EMIS + PPP.
+     *
+     * Aca SI hay borrado fisico, a diferencia del resto del modulo, y es a
+     * proposito: la fila no es un dato de negocio historico sino un override
+     * puntual, y su baja logica seria indistinguible de no tenerla. Lo que el
+     * modulo no borra son los importes y la configuracion del tablero.
+     *
+     * @param string $tComp
+     * @param string $nComp
+     * @return bool
+     */
+    public function deleteFechaManualFR($tComp, $nComp) {
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos central');
+        }
+
+        $sql = "DELETE FROM RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL
+                WHERE T_COMP = ? AND N_COMP = ?";
+
+        $stmt = sqlsrv_query($cid, $sql, [strtoupper(trim($tComp)), strtoupper(trim($nComp))]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSqlIngresos('Error al borrar la fecha de cobro'));
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return true;
+    }
+
+    /**
+     * Normaliza y valida una fecha de cobro cargada a mano.
+     *
+     * NO SE ACEPTAN FECHAS PASADAS. La pestana solo muestra cobros de hoy en
+     * adelante, asi que una fecha de ayer haria desaparecer la factura de la
+     * grilla sin ningun aviso: el usuario veria que su edicion "borro" la fila.
+     *
+     * Estatica y pura, para poder probarla y para que la use el endpoint sin
+     * necesitar conexion.
+     *
+     * @param mixed $fecha
+     * @param string|null $hoy 'Y-m-d'; por defecto el dia de hoy
+     * @return string 'Y-m-d'
+     * @throws Exception si la fecha no es valida o es anterior a hoy
+     */
+    public static function validarFechaCobroManual($fecha, $hoy = null) {
+        $f = Horizonte::normalizarFecha($fecha);
+
+        if ($f === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $f)) {
+            throw new Exception('La fecha de cobro no es una fecha válida.');
+        }
+
+        list($a, $m, $d) = array_map('intval', explode('-', $f));
+
+        if (!checkdate($m, $d, $a)) {
+            throw new Exception('La fecha de cobro no existe en el calendario.');
+        }
+
+        $referencia = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+
+        if ($f < $referencia) {
+            throw new Exception('La fecha de cobro no puede ser anterior a hoy ('
+                . self::formatoCorto($referencia) . '). Una factura con fecha pasada '
+                . 'desaparecería del listado de pendientes.');
+        }
+
+        return $f;
+    }
+
+    /**
+     * Resuelve la fecha de cobro de un comprobante y los dias que le
+     * corresponden. ES LA JERARQUIA, escrita una sola vez:
+     *
+     *   1. la fecha manual, si hay una cargada para ese comprobante
+     *   2. si no, FECHA_EMIS + PPP del cliente
+     *
+     * Y los dias salen SIEMPRE de la fecha resuelta, no del PPP: con fecha
+     * manual el plazo real es otro, y con el plazo cambia el tramo de la escala
+     * y por lo tanto el importe neto. Devolver el PPP como "dias" cuando hay
+     * fecha manual dejaria el descuento calculado sobre un plazo que no existe.
+     *
+     * Estatica y pura: es la regla mas facil de romper de la pestana.
+     *
+     * @param string $fechaEmis 'Y-m-d'
+     * @param int $pppDias
+     * @param string|null $fechaManual 'Y-m-d' o null
+     * @return array ['fecha' => 'Y-m-d', 'dias' => int, 'manual' => bool]
+     */
+    public static function resolverFechaCobro($fechaEmis, $pppDias, $fechaManual = null) {
+        $emis = new DateTime($fechaEmis);
+        $emis->setTime(0, 0, 0);
+
+        if ($fechaManual !== null && $fechaManual !== '') {
+            $cobro = new DateTime(substr((string) $fechaManual, 0, 10));
+            $cobro->setTime(0, 0, 0);
+            $manual = true;
+        } else {
+            $cobro = clone $emis;
+            $cobro->modify('+' . intval($pppDias) . ' days');
+            $manual = false;
+        }
+
+        // Diferencia con signo: una fecha manual anterior a la emision da
+        // negativa, y eso tiene que llegar asi a la escala en vez de aparecer
+        // como un plazo positivo. DateTime::diff()->days es siempre positivo.
+        $dias = intval($emis->diff($cobro)->format('%r%a'));
+
+        return [
+            'fecha' => $cobro->format('Y-m-d'),
+            'dias' => $dias,
+            'manual' => $manual
+        ];
+    }
+
+    /** dd/mm/aaaa, para los mensajes de error */
+    private static function formatoCorto($fecha) {
+        $p = explode('-', substr((string) $fecha, 0, 10));
+
+        return (count($p) === 3) ? $p[2] . '/' . $p[1] . '/' . $p[0] : $fecha;
+    }
+
+    /** Mensaje de error de sqlsrv, con contexto */
+    private function errorSqlIngresos($contexto) {
+        $errores = sqlsrv_errors();
+        $msg = $contexto;
+
+        if ($errores) {
+            foreach ($errores as $e) {
+                $msg .= ': ' . $e['message'];
+            }
+        }
+
+        return $msg;
+    }
+
+    /**
+     * Los comprobantes pendientes proyectados: FAC en estado PEN que no cuenta
+     * la cobranza real ni estan ya cobrados.
+     *
+     * Devuelve SIEMPRE una fila por comprobante, con su fecha de cobro. El
+     * resumen por cliente lo hace EjeVista::armarAgrupado(), que suma las
+     * series contra el eje y por lo tanto NO pierde la fecha de cada factura:
+     * es lo que ubica cada importe en su columna de la grilla. Antes esta
+     * funcion tenia un modo resumen que agrupaba por cliente + fecha, y eso
+     * obligaba a que un cliente con cobros en tres fechas ocupara tres filas.
+     *
      * @return array Listado de comprobantes proyectados
      */
-    public function getCobranzasFRPendientesProyectadas($summary = false) {
+    public function getCobranzasFRPendientesProyectadas() {
         $cid_apps = $this->conn->conectar('apps');
         $cid_central = $this->conn->conectar('central');
 
@@ -230,11 +614,18 @@ class Ingresos {
             throw new Exception('No se pudo conectar a la base de datos');
         }
 
-        // 1. Obtener comprobantes ya en propuestas activas para excluirlos
-        $sql_prop = "SELECT items.t_comp_factura, items.n_comp_factura 
-                     FROM FP_propuestas_pago_items items 
-                     JOIN FP_propuestas_pago propuestas ON items.id_propuesta = propuestas.id 
-                     WHERE propuestas.estado NOT IN ('RECHAZADA', 'CANCELADA', 'PAGADO', 'VENCIDA')";
+        // 1. Comprobantes que NO tienen que volver a la proyeccion.
+        //    INVARIANTE: esta exclusion es el complemento exacto de lo que
+        //    cuenta la cobranza real. Real cuenta ESTADOS_REAL ('ACEPTADA'), y
+        //    aca se excluye eso mas 'PAGADO', que ya se cobro. Una factura en
+        //    una propuesta PENDIENTE_APROBACION_CLIENTE no la cuenta Real, asi
+        //    que TIENE que aparecer aca: si las dos consultas se desalinean,
+        //    esas facturas desaparecen de las dos pestanas y la plata se
+        //    evapora en silencio. Ver getCobranzasFR() y el encabezado.
+        $sql_prop = "SELECT items.t_comp_factura, items.n_comp_factura
+                     FROM FP_propuestas_pago_items items
+                     JOIN FP_propuestas_pago propuestas ON items.id_propuesta = propuestas.id
+                     WHERE propuestas.estado IN (" . self::inSql(self::ESTADOS_YA_CONTADOS) . ")";
         $stmt_prop = sqlsrv_query($cid_apps, $sql_prop);
         $en_propuestas = [];
         if ($stmt_prop !== false) {
@@ -245,10 +636,10 @@ class Ingresos {
             sqlsrv_free_stmt($stmt_prop);
         }
 
-        // 2. Cargar PPPs y escalas de descuento
+        // 2. PPP por cliente, escala general de descuento y fechas manuales
         $ppps = $this->getPPPClientes();
-        $escalas = $this->getEscalasDescuento();
-        $paramsClientes = $this->getParametrosClientes();
+        $escala = $this->getEscalasDescuento();
+        $fechasManuales = $this->getFechasManualesFR();
 
         // 3. Consultar facturas FAC pendientes en Central (Tango GVA12)
         $sql_fac = "
@@ -299,10 +690,13 @@ class Ingresos {
             $pppDias = $pppInfo ? intval($pppInfo['ppp_efectivo']) : 30;
             if ($pppDias <= 0) $pppDias = 30;
 
-            // Fecha probable de cobro = F. Emis + PPP
-            $fProbCobroObj = clone $fEmisObj;
-            $fProbCobroObj->modify("+{$pppDias} days");
-            $fProbCobroStr = $fProbCobroObj->format('Y-m-d');
+            // Fecha de cobro: manda la manual; si no hay, F. Emis + PPP. Y los
+            // dias salen de la fecha resuelta, no del PPP, porque son los que
+            // deciden el tramo de descuento. Ver resolverFechaCobro().
+            $manual = isset($fechasManuales[$key]) ? $fechasManuales[$key]['fecha'] : null;
+            $cobro = self::resolverFechaCobro($fEmisStr, $pppDias, $manual);
+
+            $fProbCobroStr = $cobro['fecha'];
 
             // No traer cobros pendientes cuya fecha probable sea anterior al día actual
             $hoyStr = $hoy->format('Y-m-d');
@@ -310,14 +704,11 @@ class Ingresos {
                 continue;
             }
 
-            // Días para cálculo de descuento (antigüedad / plazo)
-            $diasDesc = $pppDias;
+            $diasDesc = $cobro['dias'];
 
-            // Medio de pago configurado para el cliente
-            $medioCli = isset($paramsClientes[$codCli]) ? $paramsClientes[$codCli]['medio_pago'] : 'ECHEQ';
-
-            // Descuento según escala por cliente
-            $porcDesc = $this->calcularDescuentoPorDias($codCli, $diasDesc, $medioCli, $escalas, $paramsClientes);
+            // Descuento segun la escala GENERAL: no depende del cliente ni del
+            // medio de pago.
+            $porcDesc = self::descuentoDeEscala($escala, $diasDesc);
             $importeNeto = round($importeBruto * (1 - ($porcDesc / 100)), 2);
 
             $itemsProyectados[] = [
@@ -332,41 +723,13 @@ class Ingresos {
                 'importe_bruto' => $importeBruto,
                 'importe_neto' => $importeNeto,
                 'Cobro' => $fProbCobroStr,
+                'FECHA_MANUAL' => $cobro['manual'],
                 'TIPO_REGISTRO' => 'PROYECCION' // Distintivo para pintar en amarillo
             ];
         }
         sqlsrv_free_stmt($stmt_fac);
 
-        if (!$summary) {
-            return $itemsProyectados;
-        }
-
-        // Si es modo resumen, agrupar por cliente y fecha probable de cobro
-        $agrupados = [];
-        foreach ($itemsProyectados as $item) {
-            $grupoKey = $item['COD_CLI'] . '|' . $item['Cobro'];
-            if (!isset($agrupados[$grupoKey])) {
-                $agrupados[$grupoKey] = [
-                    'COD_CLI' => $item['COD_CLI'],
-                    'RAZON_SOC' => $item['RAZON_SOC'],
-                    'FECHA' => 'N/A',
-                    'T_COMP' => 'PROY',
-                    'N_COMP' => 'VARIOS',
-                    'Desc' => $item['Desc'],
-                    'Dias' => $item['Dias'],
-                    'PPP' => $item['PPP'],
-                    'importe_bruto' => 0.0,
-                    'importe_neto' => 0.0,
-                    'Cobro' => $item['Cobro'],
-                    'TIPO_REGISTRO' => 'PROYECCION'
-                ];
-            }
-
-            $agrupados[$grupoKey]['importe_bruto'] += $item['importe_bruto'];
-            $agrupados[$grupoKey]['importe_neto'] += $item['importe_neto'];
-        }
-
-        return array_values($agrupados);
+        return $itemsProyectados;
     }
 
     /**
@@ -376,7 +739,15 @@ class Ingresos {
      *   - 'real': Solo propuestas reales
      *   - 'proyectado': Solo facturas pendientes proyectadas con PPP
      * 
-     * @param bool $summary Si es true, agrupa por cliente y fecha
+     * Devuelve SIEMPRE una fila por comprobante, con su fecha de cobro. El
+     * resumen por cliente lo hace EjeVista::armarAgrupado() en el controller.
+     *
+     * $summary ya no agrupa: lo unico que decide es cuanto detalle se trae. En
+     * resumen no hace falta la fecha de emision de cada comprobante, y esa es
+     * la parte cara -una consulta a GVA12 por fila-, asi que se saltea. Ver el
+     * pendiente conocido en README-cashflow.md.
+     *
+     * @param bool $summary Si es true, se omite el detalle por comprobante
      * @param string $origen 'todos', 'real', o 'proyectado'
      * @return array Listado de filas para la grilla
      */
@@ -392,38 +763,30 @@ class Ingresos {
                 throw new Exception('No se pudo conectar a la base de datos');
             }
 
-            if ($summary) {
-                $sql_items = "SELECT 
-                                p.cod_cliente as COD_CLI,
-                                p.fecha_propuesta_pago as Cobro,
-                                SUM(CASE WHEN i.t_comp_factura LIKE '%NC%' THEN -i.importe_bruto ELSE i.importe_bruto END) as importe_bruto,
-                                SUM(CASE WHEN i.t_comp_factura LIKE '%NC%' THEN -i.importe_neto ELSE i.importe_neto END) as importe_neto,
-                                'RESUMEN' as T_COMP,
-                                'VARIOS' as N_COMP,
-                                'N/A' as FECHA,
-                                '0' as Dias,
-                                '0%' as [Desc]
-                            FROM FP_propuestas_pago p
-                            INNER JOIN FP_propuestas_pago_items i ON p.id = i.id_propuesta
-                            WHERE p.estado NOT IN ('RECHAZADA', 'CANCELADA', 'PAGADO', 'VENCIDA')
-                            AND p.fecha_propuesta_pago >= CAST(GETDATE() AS DATE)
-                            GROUP BY p.cod_cliente, p.fecha_propuesta_pago
-                            ORDER BY p.fecha_propuesta_pago ASC";
-            } else {
-                $sql_items = "SELECT 
-                                p.cod_cliente as COD_CLI,
-                                p.fecha_propuesta_pago as Cobro,
-                                i.t_comp_factura as T_COMP,
-                                i.n_comp_factura as N_COMP,
-                                i.porcentaje_descuento as [Desc],
-                                i.importe_bruto,
-                                i.importe_neto
-                            FROM FP_propuestas_pago p
-                            INNER JOIN FP_propuestas_pago_items i ON p.id = i.id_propuesta
-                            WHERE p.estado NOT IN ('RECHAZADA', 'CANCELADA', 'PAGADO', 'VENCIDA')
-                            AND p.fecha_propuesta_pago >= CAST(GETDATE() AS DATE)
-                            ORDER BY p.fecha_propuesta_pago ASC";
-            }
+            // INVARIANTE: Real cuenta UNICAMENTE las propuestas ACEPTADAS. El
+            // complemento -lo que espera aprobacion del cliente- vuelve a la
+            // proyeccion; la exclusion esta en
+            // getCobranzasFRPendientesProyectadas() y las dos se mueven juntas.
+            $estadosReal = self::inSql(self::ESTADOS_REAL);
+
+            // La misma consulta para los dos modos: una fila por comprobante,
+            // con su fecha de cobro. El resumen ya no agrupa aca -lo hace
+            // EjeVista::armarAgrupado()-, porque un GROUP BY por cliente +
+            // fecha obliga a que un cliente con cobros en tres fechas ocupe
+            // tres filas del resumen.
+            $sql_items = "SELECT
+                            p.cod_cliente as COD_CLI,
+                            p.fecha_propuesta_pago as Cobro,
+                            i.t_comp_factura as T_COMP,
+                            i.n_comp_factura as N_COMP,
+                            i.porcentaje_descuento as [Desc],
+                            i.importe_bruto,
+                            i.importe_neto
+                        FROM FP_propuestas_pago p
+                        INNER JOIN FP_propuestas_pago_items i ON p.id = i.id_propuesta
+                        WHERE p.estado IN ($estadosReal)
+                        AND p.fecha_propuesta_pago >= CAST(GETDATE() AS DATE)
+                        ORDER BY p.fecha_propuesta_pago ASC";
 
             $stmt = sqlsrv_query($cid_apps, $sql_items);
             if ($stmt === false) {
@@ -447,15 +810,28 @@ class Ingresos {
                 }
 
                 $cod_cli = strtoupper(trim($item['COD_CLI']));
+                $item['COD_CLI'] = $cod_cli;
                 $item['RAZON_SOC'] = $razonesSociales[$cod_cli] ?? 'Cliente no encontrado';
                 $item['TIPO_REGISTRO'] = 'REAL';
 
-                if (!$summary) {
+                // Las notas de credito restan, en los dos modos. Antes el signo
+                // se aplicaba en el deep dive y en el resumen lo resolvia el
+                // CASE del GROUP BY; sin ese GROUP BY tiene que aplicarse acá
+                // siempre, o el resumen sumaria las NC en vez de restarlas.
+                $multiplicador = (strpos(trim($item['T_COMP']), 'NC') !== false) ? -1 : 1;
+
+                $item['importe_bruto'] = (float) $item['importe_bruto'] * $multiplicador;
+                $item['importe_neto'] = (float) $item['importe_neto'] * $multiplicador;
+                $item['Desc'] = (float) $item['Desc'] . '%';
+
+                if ($summary) {
+                    // El resumen no muestra ni la emision ni los dias, y traer
+                    // la emision cuesta una consulta a GVA12 POR FILA.
+                    $item['FECHA'] = 'N/A';
+                    $item['Dias'] = 0;
+                } else {
                     $sql_f = "SELECT TOP 1 FECHA_EMIS FROM GVA12 WHERE T_COMP = ? AND N_COMP = ?";
                     $stmt_f = sqlsrv_query($cid_central, $sql_f, [trim($item['T_COMP']), trim($item['N_COMP'])]);
-                    
-                    $isNC = (strpos(trim($item['T_COMP']), 'NC') !== false);
-                    $multiplicador = $isNC ? -1 : 1;
 
                     if ($stmt_f && $row_f = sqlsrv_fetch_array($stmt_f, SQLSRV_FETCH_ASSOC)) {
                         $f_emis = $row_f['FECHA_EMIS'];
@@ -473,13 +849,6 @@ class Ingresos {
                         $item['FECHA'] = 'N/A';
                         $item['Dias'] = 0;
                     }
-                    
-                    $item['importe_bruto'] = (float)$item['importe_bruto'] * $multiplicador;
-                    $item['importe_neto'] = (float)$item['importe_neto'] * $multiplicador;
-                    $item['Desc'] = (float)$item['Desc'] . '%';
-                } else {
-                    $item['importe_bruto'] = (float)$item['importe_bruto'];
-                    $item['importe_neto'] = (float)$item['importe_neto'];
                 }
 
                 $data[] = $item;
@@ -489,7 +858,7 @@ class Ingresos {
 
         // 2. Cargar pendientes proyectados si corresponde
         if ($origen === 'todos' || $origen === 'proyectado') {
-            $proyectados = $this->getCobranzasFRPendientesProyectadas($summary);
+            $proyectados = $this->getCobranzasFRPendientesProyectadas();
             $data = array_merge($data, $proyectados);
         }
 
@@ -509,13 +878,17 @@ class Ingresos {
         if ($origen === 'todos' || $origen === 'real') {
             $cid = $this->conn->conectar('apps');
             if ($cid) {
+                // Mismo criterio que getCobranzasFR(): solo propuestas
+                // ACEPTADAS. Ver la invariante en el encabezado de la clase.
+                $estadosReal = self::inSql(self::ESTADOS_REAL);
+
                 $sql = "SELECT
                             p.fecha_propuesta_pago AS FECHA,
                             SUM(CASE WHEN i.t_comp_factura LIKE '%NC%'
                                      THEN -i.importe_neto ELSE i.importe_neto END) AS IMPORTE
                         FROM FP_propuestas_pago p
                         INNER JOIN FP_propuestas_pago_items i ON p.id = i.id_propuesta
-                        WHERE p.estado NOT IN ('RECHAZADA', 'CANCELADA', 'PAGADO', 'VENCIDA')
+                        WHERE p.estado IN ($estadosReal)
                         AND p.fecha_propuesta_pago >= CAST(GETDATE() AS DATE)
                         GROUP BY p.fecha_propuesta_pago
                         ORDER BY p.fecha_propuesta_pago ASC";
@@ -533,7 +906,7 @@ class Ingresos {
 
         // 2. Cobranza Proyectada (Facturas PEN con PPP)
         if ($origen === 'todos' || $origen === 'proyectado') {
-            $proy = $this->getCobranzasFRPendientesProyectadas(true);
+            $proy = $this->getCobranzasFRPendientesProyectadas();
             foreach ($proy as $p) {
                 $f = $p['Cobro'];
                 $totalesPorFecha[$f] = ($totalesPorFecha[$f] ?? 0.0) + floatval($p['importe_neto']);
@@ -573,12 +946,17 @@ class Ingresos {
     }
 
     /**
-     * Obtiene las facturas pendientes de Mayoristas (Camino 1) proyectadas a fecha de emisión + días de plazo.
-     * 
-     * @param bool $summary Si es true agrupa por cliente y fecha probable de cobro
+     * Las facturas pendientes de Mayoristas (Camino 1), proyectadas a fecha de
+     * emision + dias de plazo.
+     *
+     * Devuelve SIEMPRE una fila por comprobante, con su fecha de cobro. El
+     * resumen por cliente lo hace EjeVista::armarAgrupado() en el controller:
+     * asi cada importe conserva su fecha, que es lo que lo ubica en la grilla,
+     * y un cliente con cobros en tres fechas sigue siendo UNA fila.
+     *
      * @return array Listado de comprobantes proyectados
      */
-    public function getCobranzasMay($summary = false) {
+    public function getCobranzasMay() {
         $cid_central = $this->conn->conectar('central');
         if (!$cid_central) {
             throw new Exception('No se pudo conectar a la base de datos central');
@@ -609,7 +987,6 @@ class Ingresos {
         }
 
         $items = [];
-        $resumenMap = [];
         $hoyStr = (new DateTime())->format('Y-m-d');
 
         while ($row = sqlsrv_fetch_array($stmt_fac, SQLSRV_FETCH_ASSOC)) {
@@ -636,52 +1013,22 @@ class Ingresos {
                 continue;
             }
 
-            if ($summary) {
-                $key = $codCli . '|' . $fProbCobroStr;
-                if (!isset($resumenMap[$key])) {
-                    $resumenMap[$key] = [
-                        'COD_CLI' => $codCli,
-                        'RAZON_SOC' => $razonSoci,
-                        'FECHA' => 'N/A',
-                        'T_COMP' => 'VARIOS',
-                        'N_COMP' => 'COMPROBANTES',
-                        'Desc' => '0%',
-                        'Dias' => $diasPlazo,
-                        'importe_bruto' => 0.0,
-                        'importe_neto' => 0.0,
-                        'Cobro' => $fProbCobroStr,
-                        'TIPO_REGISTRO' => 'PROYECCION',
-                        'PLAZO' => $diasPlazo
-                    ];
-                }
-                $resumenMap[$key]['importe_bruto'] += $importeReal;
-                $resumenMap[$key]['importe_neto'] += $importeReal;
-            } else {
-                $items[] = [
-                    'COD_CLI' => $codCli,
-                    'RAZON_SOC' => $razonSoci,
-                    'FECHA' => $fEmisStr,
-                    'T_COMP' => $tComp,
-                    'N_COMP' => $nComp,
-                    'Desc' => '0%',
-                    'Dias' => $diasPlazo,
-                    'importe_bruto' => round($importeReal, 2),
-                    'importe_neto' => round($importeReal, 2),
-                    'Cobro' => $fProbCobroStr,
-                    'TIPO_REGISTRO' => 'PROYECCION',
-                    'PLAZO' => $diasPlazo
-                ];
-            }
+            $items[] = [
+                'COD_CLI' => $codCli,
+                'RAZON_SOC' => $razonSoci,
+                'FECHA' => $fEmisStr,
+                'T_COMP' => $tComp,
+                'N_COMP' => $nComp,
+                'Desc' => '0%',
+                'Dias' => $diasPlazo,
+                'importe_bruto' => round($importeReal, 2),
+                'importe_neto' => round($importeReal, 2),
+                'Cobro' => $fProbCobroStr,
+                'TIPO_REGISTRO' => 'PROYECCION',
+                'PLAZO' => $diasPlazo
+            ];
         }
         sqlsrv_free_stmt($stmt_fac);
-
-        if ($summary) {
-            foreach ($resumenMap as &$r) {
-                $r['importe_bruto'] = round($r['importe_bruto'], 2);
-                $r['importe_neto'] = round($r['importe_neto'], 2);
-                $items[] = $r;
-            }
-        }
 
         return $items;
     }
@@ -692,7 +1039,7 @@ class Ingresos {
      * @return array Filas ['FECHA' => 'Y-m-d', 'IMPORTE' => float]
      */
     public function getCobranzasMayTotales() {
-        $items = $this->getCobranzasMay(true);
+        $items = $this->getCobranzasMay();
         $totalesPorFecha = [];
 
         foreach ($items as $item) {

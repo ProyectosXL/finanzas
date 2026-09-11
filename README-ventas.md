@@ -251,7 +251,7 @@ Las secciones disponibles son `generales` (clave/valor del grupo `GENERAL`), `re
 | Clave | Semilla | Qué controla |
 | --- | --- | --- |
 | `alicuota_iva` | `0.21` | IVA sobre la venta neta proyectada |
-| `dias_prechequeado` | `0` | Días a restar a la fecha del cheque para la fecha teórica de factura |
+| ~~`dias_prechequeado`~~ | `0` | **Sin uso.** Los días de pre-chequeado pasaron a ser por cliente. La fila queda en la tabla pero la pantalla no la muestra; ver más abajo |
 | `horizonte_dias` | `28` | Columnas diarias de la proyección |
 | `horizonte_meses` | `12` | Columnas mensuales de la proyección |
 | `feriados_comercio` | `12-25,01-01,09-26` | Días sin venta estimada, formato `MM-DD` |
@@ -295,23 +295,35 @@ Mix de cobro inicial (cada canal suma 100%):
 
 | Pieza | Qué hace |
 | --- | --- |
-| `Echeqs → Venta Cobrada Anticipada` | Dónde se tilda qué cheques netean |
-| `Parámetros → Pre-chequeado` | Qué clientes operan con la modalidad |
+| `Echeqs → Venta Cobrada Anticipada` | Dónde se tilda qué cheques netean, con su grilla temporal |
+| `Parámetros → Pre-chequeado` | Qué clientes operan con la modalidad **y cuántos días adelanta cada uno** |
 | `RO_V_CASHFLOW_VENTAS_PRECHEQ` | La vista origen. La crea `sql/echeqs_prechequeado.sql` |
-| `dias_prechequeado` | Cuántos días antes del cheque se emite la factura |
+| `RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE.DIAS_PRECHEQUEADO` | Los días, **por cliente** |
+| `Echeqs::diasDeCliente()` · `Echeqs::fechaVentaEstimada()` | Resuelven el plazo y la fecha. Las usan la pantalla **y** el neteo |
 | `Ventas::getNeteoPrechequeado()` | Reparte el importe contra el eje y avisa lo que no entra |
 
 ```
-FECHA_TEORICA_FACTURA = FECHA_CHEQUE − dias_prechequeado
+FECHA_VENTA_ESTIMADA = FECHA_CHEQUE − días del CLIENTE
 ```
 
 El importe cae en el bucket diario de esa fecha, o en el mensual si quedó fuera del tramo diario: es la misma regla de `Horizonte::ubicar()` que usa el resto del módulo, no una copia.
+
+### Los días son por cliente, y no hay valor global
+
+Antes eran **uno solo para todos**: el parámetro `dias_prechequeado`. Cada cliente negocia su propio adelanto, así que un único número obliga a elegir cuál de todos queda bien calculado.
+
+- **No hay respaldo global.** Un cliente en cero **no desplaza nada** y su cheque queda en su propia fecha. Un respaldo sería peor que el cero: un cliente sin configurar heredaría un desplazamiento que nadie eligió para él, y en pantalla sería indistinguible de uno configurado.
+- **Los días se piden en el alta.** Son parte de configurar al cliente, no un dato que se descubre después. Cero es una respuesta válida; que falte, no.
+- **La pantalla deja ver los que quedaron en cero**, con la marca *sin desplazar*: si alguien esperaba un corrimiento y en Echeqs ve el cheque en su propia fecha, el motivo es ése y tiene que poder encontrarlo.
+- **La pantalla y el neteo resuelven el plazo con la MISMA función.** Si aplicaran plazos distintos, el tablero dejaría de cerrar y no habría ninguna pantalla donde se notara. `tests/test_echeqs.php` cubre dos clientes con días distintos y uno en cero.
+
+> **`dias_prechequeado` quedó sin uso.** La fila **no se borró** de `RO_T_CASHFLOW_PARAMETROS` —queda el valor que alguien había cargado, por si hace falta reconstruir con qué número se proyectó en su momento—, pero `Parametros::RETIRADOS` la saca del listado, así que ya no aparece como campo editable en *Parámetros → Ventas*. Un campo que se puede tocar y que no cambia nada es peor que no tenerlo.
 
 `RO_T_CASHFLOW_VENTAS_PRECHEQ` **ya no es el origen** y no tiene lector. Queda creada porque puede tener filas en algún ambiente. Ver `sql/ventas_proyeccion.sql` §6.
 
 ### Dos cosas que el neteo avisa en vez de callar
 
-- **Lo que cae antes del inicio del eje.** Con `dias_prechequeado > 0` la fecha teórica puede quedar en el pasado, y ahí no hay columna donde restar. Va a un aviso con el monto. No alcanza con preguntarle a `Horizonte::ubicar()` si encontró columna: una fecha de los primeros días del mes **en curso** cae en la columna de ese mes, que existe pero no representa ningún día futuro y la pantalla ni siquiera la dibuja. Por eso el corte es contra el primer día del eje.
+- **Lo que cae antes del inicio del eje.** Con días de pre-chequeado la fecha estimada de venta puede quedar en el pasado, y ahí no hay columna donde restar. Va a un aviso con el monto. No alcanza con preguntarle a `Horizonte::ubicar()` si encontró columna: una fecha de los primeros días del mes **en curso** cae en la columna de ese mes, que existe pero no representa ningún día futuro y la pantalla ni siquiera la dibuja. Por eso el corte es contra el primer día del eje. El aviso ya no puede nombrar *un* plazo —cada cliente tiene el suyo—, así que manda al detalle en vez de inventar un número.
 - **Lo que no se pudo imputar a un canal.** El canal sale del prefijo del código de cliente (`Echeqs::canalDeCliente()`): `F` es Franquicias y `L` es Locales. Si algún importe no mapea, se resta sólo del total y el aviso dice por cuánta plata la fila total y su apertura por canal no reconcilian.
 
 ### Netea lo tildado, sin mirar el estado del cheque
@@ -378,13 +390,17 @@ cashflow/Tabs/proveedores_exterior.php  Modificado: clase .tabla-temporal
 
 ---
 
-## Header fijo
+## Header fijo y columnas fijas
 
-La clase `.tabla-temporal` (en `Css/main.css`, **no duplicada por pestaña**) acota la altura del contenedor para que `position: sticky` tenga contra qué pegarse, fija las dos filas del `thead`, la primera columna descriptiva en horizontal y el `tfoot` de totales abajo.
+La clase `.tabla-temporal` (en `Css/main.css`, **no duplicada por pestaña**) acota la altura del contenedor para que `position: sticky` tenga contra qué pegarse, fija las dos filas del `thead` y el `tfoot` de totales abajo.
 
 `ajustarStickyHeaders()` en `Js/main.js` mide el alto **real** de la primera fila del `thead` y lo publica como `--thead-row1-height`: las celdas con `rowspan="2"` abarcan las dos filas, así que un `offsetHeight` directo daría un valor falso. Un `MutationObserver` sobre `#tabContent` lo re-mide cuando las tablas se generan por AJAX, de modo que no hubo que tocar el JS de cada pestaña.
 
-Aplicado a Ventas, Crono Nacionalización, Proveedores Exterior y Cashflow.
+Las **columnas fijas en horizontal** ya no están cableadas: se eligen desde la pantalla y las resuelve `Js/columnas-fijas.js`. Ver `README-cashflow.md`.
+
+En esta pestaña el selector va sólo en la tabla **Cobranza Proyectada**, con `Canal` y `Medio de Pago` fijas por defecto — que es exactamente lo que hacía el CSS viejo con `:first-child` y `.col-medio`. Las otras tablas de Ventas (tendencias, proyección por mes, venta acumulada, balance, control de facturación) tienen cuatro o cinco columnas y **no scrollean a lo ancho**: un selector ahí sería un control que no resuelve nada. Conservan su primera columna fija, que es el default automático.
+
+Una diferencia visible: el pie de *Cobranza Proyectada* tiene sus rótulos en celdas con `colspan="4"` sobre todo el bloque descriptivo, y una celda así **no se fija**. Antes se fijaba —era `tfoot td:first-child`— y al scrollear estacionaba una banda de cuatro columnas de ancho encima de los importes. Ahora el rótulo se va con el scroll y sigue pegado abajo, que es lo que se quería ver.
 
 ---
 

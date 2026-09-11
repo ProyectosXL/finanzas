@@ -24,6 +24,8 @@ $validTabs = [
     'cobranzas_fr',
     'cobranzas_may',
     'cob_electronicos',
+    'exportaciones_tasky',
+    'dolares_comitente',
     'proveedores_exterior',
     'crono_nacionalizacion',
     'nacionalizacion_2',

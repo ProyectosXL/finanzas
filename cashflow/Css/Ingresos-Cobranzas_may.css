@@ -64,17 +64,20 @@
 
 /* Segunda fila de encabezados (días/meses) */
 #tablaCobranzasMay thead tr:nth-child(2) th {
-    top: 38px;
+    /* Lo mide ajustarStickyHeaders() en main.js. Ver Ingresos-Cobranzas_fr.css */
+    top: var(--thead-row1-height, 38px);
 }
 
 .table-group-divider {
     border-top: 2px solid var(--border-color, #e2e5ed);
 }
 
-/* Column widths */
-#tablaCobranzasMay tbody td:nth-child(3),
-#tablaCobranzasMay thead th:nth-child(3) {
-    min-width: 200px;
+/* El ancho de la razón social lo pone .col-texto (Css/main.css), que además
+   la recorta con puntos suspensivos en vez de dejar que envuelva. Se deja de
+   direccionar la columna por nth-child: un índice escrito en duro se
+   desactualiza en silencio en cuanto alguien agrega una columna adelante. */
+.tab-cobranzas_may {
+    --col-texto-ancho: 250px;
 }
 
 /* Periodic columns */
@@ -115,8 +118,12 @@
     font-size: 13px;
 }
 
+/* El rótulo va en la PRIMERA celda descriptiva -que es una de las fijas- y no
+   en una celda con colspan sobre todo el bloque, así que se alinea a la
+   izquierda. Ver la nota equivalente en Ingresos-Cobranzas_fr.css. */
 #tablaCobranzasMay tfoot .total-label {
-    text-align: right;
+    text-align: left;
+    white-space: nowrap;
     color: var(--text-primary, #1a1d29);
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -137,7 +144,19 @@
 .modo-resumen tbody td:nth-child(5),
 .modo-resumen tbody td:nth-child(6),
 .modo-resumen tbody td:nth-child(7),
-.modo-resumen tbody td:nth-child(8) {
+.modo-resumen tbody td:nth-child(8),
+/* El pie también: desde que tiene una celda por columna en vez de un colspan,
+   si no se ocultan las mismas queda corrido cinco lugares. */
+.modo-resumen tfoot td:nth-child(4),
+.modo-resumen tfoot td:nth-child(5),
+.modo-resumen tfoot td:nth-child(6),
+.modo-resumen tfoot td:nth-child(7),
+.modo-resumen tfoot td:nth-child(8),
+/* Y la columna Cobro (la 11): ver la nota equivalente en
+   Ingresos-Cobranzas_fr.css. */
+.modo-resumen thead tr:first-child th:nth-child(11),
+.modo-resumen tbody td:nth-child(11),
+.modo-resumen tfoot td:nth-child(11) {
     display: none !important;
 }
 

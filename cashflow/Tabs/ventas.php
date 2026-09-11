@@ -413,13 +413,17 @@
 
             <!-- Bloque COBRANZA -->
             <div class="card mb-4" id="cardCobranza" style="display: none;">
-                <div class="card-header">
-                    <h5 class="mb-0">Cobranza Proyectada</h5>
-                    <small class="text-muted">
-                        Por canal y medio de pago, con la fecha real de acreditación
-                        <i class="fas fa-info-circle ms-1"
-                           title="Cada día de venta se acredita a los días del medio de pago y, si cae en día no laboral, se corre al próximo día hábil bancario. Que los lunes acumulen más es efecto del corrimiento del sábado y el domingo."></i>
-                    </small>
+                <div class="card-header d-flex justify-content-between align-items-start gap-3 flex-wrap">
+                    <div>
+                        <h5 class="mb-0">Cobranza Proyectada</h5>
+                        <small class="text-muted">
+                            Por canal y medio de pago, con la fecha real de acreditación
+                            <i class="fas fa-info-circle ms-1"
+                               title="Cada día de venta se acredita a los días del medio de pago y, si cae en día no laboral, se corre al próximo día hábil bancario. Que los lunes acumulen más es efecto del corrimiento del sábado y el domingo."></i>
+                        </small>
+                    </div>
+                    <!-- El selector de columnas fijas lo dibuja Js/columnas-fijas.js -->
+                    <div id="colFijasCobranza"></div>
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive tabla-temporal">

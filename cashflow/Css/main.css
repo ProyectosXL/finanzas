@@ -318,6 +318,57 @@ body {
     overflow: auto;
 }
 
+/* ----------------------------------------------------------------------------
+   UNA FILA POR FILA
+   ----------------------------------------------------------------------------
+   Las celdas NO envuelven. Sin esto pasan dos cosas, y las dos rompen la
+   grilla como grilla:
+
+     1. "$ 4.186.288,48" se parte entre el signo y el número. El espacio es un
+        punto de corte válido para el navegador, y la columna de importes es
+        angosta porque al lado hay veintiocho columnas de días.
+     2. Una razón social larga estira la fila a tres o cuatro renglones, y las
+        celdas del eje quedan flotando en el medio de una fila altísima.
+
+   Un subtítulo dentro de la celda sigue yendo abajo: es un <div>, o sea un
+   bloque, y nowrap no lo afecta. Eso es a propósito — es el código de cliente
+   debajo del nombre en Echeqs.
+
+   LAS CELDAS CON colspan QUEDAN AFUERA, y no es un detalle: en estas tablas
+   una celda que abarca varias columnas es siempre un texto y no un dato — el
+   "No hay cheques con fecha de hoy en adelante" del listado vacío, el corte
+   por estado del pie de Echeqs, el rótulo del grupo del eje—. Forzarles una
+   sola línea las haría desbordar a lo ancho justamente cuando lo que tienen
+   para decir es largo.
+   ---------------------------------------------------------------------------- */
+.tabla-temporal .table th:not([colspan]),
+.tabla-temporal .table td:not([colspan]) {
+    white-space: nowrap;
+}
+
+/* El texto largo se recorta con puntos suspensivos en vez de envolver o de
+   estirar la columna sin techo. El valor completo va en el `title` de la
+   celda, así que no se pierde: se pide con el mouse encima.
+
+   El ancho va FIJO -mismo min que max- y no sólo como máximo: en una tabla con
+   `table-layout: auto` un `max-width` suelto es una sugerencia que el
+   navegador ignora en cuanto el contenido no entra, y entonces no hay contra
+   qué recortar. Es el mismo truco que ya usaba `.cf-col-concepto` en el
+   tablero.
+
+   Cada pestaña puede correr el ancho con --col-texto-ancho sobre su
+   contenedor, sin tocar esta regla. */
+.tabla-temporal .table .col-texto {
+    min-width: var(--col-texto-ancho, 230px);
+    max-width: var(--col-texto-ancho, 230px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* Explícito y no heredado de la regla de arriba: text-overflow no hace
+       nada sin nowrap, y si alguien pone esta clase en una celda con colspan
+       el recorte tiene que seguir funcionando. */
+    white-space: nowrap;
+}
+
 /* El fondo tiene que ser OPACO o se transparenta el contenido al scrollear.
    Es el mismo --bg-light que ya usa .table thead th, pero explícito: un
    background heredado o transparente deja ver las filas pasar por debajo. */
@@ -342,40 +393,66 @@ body {
     top: var(--thead-row1-height, 38px);
 }
 
-/* Primera columna descriptiva fija en horizontal: con 28 columnas de días la
-   tabla scrollea mucho a lo ancho y se pierde de vista a qué fila corresponde
-   cada número. */
-.tabla-temporal .table tbody td:first-child,
-.tabla-temporal .table tfoot td:first-child {
+/* ----------------------------------------------------------------------------
+   COLUMNAS FIJAS EN HORIZONTAL
+   ----------------------------------------------------------------------------
+   Con 28 columnas de días la tabla scrollea mucho a lo ancho y se pierde de
+   vista a qué fila corresponde cada número.
+
+   Antes esto estaba CABLEADO: la primera columna por :first-child y una segunda
+   por la clase .col-medio, con un único --col-fija-1-width. Eso alcanzaba para
+   la tabla de cobranza de Ventas y para nada más: no se podían fijar tres
+   columnas y no se podía elegir cuáles.
+
+   Ahora la columna fija se marca con .col-fija-1 … .col-fija-4 y su posición
+   sale de --col-fija-N-left, que publica ajustarStickyHeaders() en main.js
+   midiendo el ancho REAL de las columnas anteriores. Quién lleva cada clase lo
+   decide Js/columnas-fijas.js, que además dibuja el selector de la pantalla.
+
+   Cuatro es el tope a propósito: más columnas fijas que eso dejan sin ancho
+   útil a las columnas de días, que son las que se van a mirar.
+   ---------------------------------------------------------------------------- */
+.tabla-temporal .table thead th.col-fija-1,
+.tabla-temporal .table thead th.col-fija-2,
+.tabla-temporal .table thead th.col-fija-3,
+.tabla-temporal .table thead th.col-fija-4,
+.tabla-temporal .table tbody td.col-fija-1,
+.tabla-temporal .table tbody td.col-fija-2,
+.tabla-temporal .table tbody td.col-fija-3,
+.tabla-temporal .table tbody td.col-fija-4,
+.tabla-temporal .table tfoot td.col-fija-1,
+.tabla-temporal .table tfoot td.col-fija-2,
+.tabla-temporal .table tfoot td.col-fija-3,
+.tabla-temporal .table tfoot td.col-fija-4 {
     position: sticky;
-    left: 0;
-    z-index: 2;
+    /* El fondo tiene que ser OPACO: si se transparenta, las celdas de la fila
+       pasan por debajo al scrollear y se lee un número encima de otro. */
     background-color: var(--bg-white);
 }
 
-.tabla-temporal .table tfoot td:first-child {
-    background-color: #f8f9fa;
-}
-
-/* Intersección de header y columna fija: tiene que quedar por encima de ambos */
-.tabla-temporal .table thead th:first-child {
-    left: 0;
-    z-index: 5;
-}
-
-/* Segunda columna fija (tabla de cobranza: Canal + Medio de Pago) */
-.tabla-temporal .table tbody td.col-medio,
-.tabla-temporal .table tfoot td.col-medio {
-    position: sticky;
-    left: var(--col-fija-1-width, 150px);
+.tabla-temporal .table tbody td.col-fija-1,
+.tabla-temporal .table tbody td.col-fija-2,
+.tabla-temporal .table tbody td.col-fija-3,
+.tabla-temporal .table tbody td.col-fija-4 {
     z-index: 2;
-    background-color: var(--bg-white);
 }
 
-.tabla-temporal .table thead th.col-medio {
-    left: var(--col-fija-1-width, 150px);
+/* Intersección de header y columna fija: por encima de los dos (thead es 3) */
+.tabla-temporal .table thead th.col-fija-1,
+.tabla-temporal .table thead th.col-fija-2,
+.tabla-temporal .table thead th.col-fija-3,
+.tabla-temporal .table thead th.col-fija-4 {
     z-index: 5;
 }
+
+/* El desplazamiento de cada columna es la suma de los anchos de las anteriores.
+   El valor de arranque es 0 y no una estimación: hasta que el JS mida, es
+   preferible que las columnas se pisen contra el borde izquierdo a que queden
+   separadas por un ancho inventado. */
+.tabla-temporal .table .col-fija-1 { left: var(--col-fija-1-left, 0px); }
+.tabla-temporal .table .col-fija-2 { left: var(--col-fija-2-left, 0px); }
+.tabla-temporal .table .col-fija-3 { left: var(--col-fija-3-left, 0px); }
+.tabla-temporal .table .col-fija-4 { left: var(--col-fija-4-left, 0px); }
 
 /* El tfoot de totales también queda fijo abajo mientras se scrollea */
 .tabla-temporal .table tfoot td {
@@ -385,9 +462,32 @@ body {
     background-color: #f8f9fa;
 }
 
-.tabla-temporal .table tfoot td:first-child,
-.tabla-temporal .table tfoot td.col-medio {
+/* Intersección tfoot × columna fija: por encima del tfoot (3) y del tbody */
+.tabla-temporal .table tfoot td.col-fija-1,
+.tabla-temporal .table tfoot td.col-fija-2,
+.tabla-temporal .table tfoot td.col-fija-3,
+.tabla-temporal .table tfoot td.col-fija-4 {
     z-index: 4;
+    background-color: #f8f9fa;
+}
+
+/* Desplegable del selector de columnas fijas (Js/columnas-fijas.js).
+   Los ítems son etiquetas con checkbox, así que no tienen que reaccionar al
+   hover como un menú de acciones ni cerrarse al clickear. */
+.cf-menu-columnas {
+    min-width: 220px;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.cf-menu-columnas .dropdown-item {
+    cursor: pointer;
+    white-space: normal;
+}
+
+.cf-menu-columnas .dropdown-item:active {
+    background-color: transparent;
+    color: inherit;
 }
 
 /* ========================================

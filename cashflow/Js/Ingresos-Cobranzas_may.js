@@ -38,6 +38,15 @@
             alCambiar: generarTabla
         });
 
+        // Mismo default que Cobranzas FR: Tipo, COD_CLI y RAZON_SOC, en
+        // Resumen y en Deep Dive. Ver Js/columnas-fijas.js.
+        crearColumnasFijas({
+            tabla: 'tablaCobranzasMay',
+            control: 'colFijasCobMay',
+            clave: 'cobranzas_may',
+            porDefecto: [0, 1, 2]
+        });
+
         if (btnRefresh) {
             btnRefresh.addEventListener('click', cargarDatos);
         }
@@ -215,7 +224,13 @@
             html += `<td class="center"><span class="badge-may" title="${plazoInfo}"><i class="fas fa-clock me-1"></i>PROY</span></td>`;
 
             html += `<td><strong>${item.COD_CLI || ''}</strong></td>`;
-            html += `<td>${item.RAZON_SOC || ''}</td>`;
+
+            // Recortado con puntos suspensivos (.col-texto) para que la fila
+            // sea una sola línea; el nombre completo va en el title.
+            var razon = item.RAZON_SOC || '';
+
+            html += '<td class="col-texto" title="' + escaparAttr(razon) + '">'
+                + escaparAttr(razon) + '</td>';
             
             // Columnas ocultables en resumen
             html += `<td class="center col-detail">${formatDate(item.FECHA)}</td>`;
@@ -257,11 +272,19 @@
      */
     function generarFilaTotales() {
         var totalsRow = document.getElementById('totalsRowCobMay');
-        var colspan = (modoVista === 'resumen') ? 6 : 11;
         var cols = vistas.columnas();
         var visibles = filasFiltradas();
 
-        var html = `<td colspan="${colspan}" class="total-label">TOTALES</td>`;
+        // Una celda por columna descriptiva en lugar de un colspan en duro.
+        // Ver la nota equivalente en Js/Ingresos-Cobranzas_fr.js.
+        var descriptivas = ColumnasFijas.descriptivas(
+            document.getElementById('tablaCobranzasMay'));
+
+        var html = '<td class="total-label">TOTALES</td>';
+
+        for (var i = 1; i < descriptivas.length; i++) {
+            html += '<td></td>';
+        }
 
         cols.forEach(function(col) {
             var total = 0;
@@ -333,8 +356,18 @@
         return '$ ' + formatted;
     }
 
+    function escaparAttr(texto) {
+        return String(texto === null || texto === undefined ? '' : texto)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/"/g, '&quot;');
+    }
+
     function formatDate(dateString) {
-        if (!dateString || dateString === '-' || dateString === 'N/A') return dateString;
+        // Una fila agrupada del Resumen no trae fecha: es distinta en cada
+        // comprobante del cliente. Ver EjeVista::armarAgrupado().
+        if (dateString === undefined || dateString === null || dateString === '') return '';
+        if (dateString === '-' || dateString === 'N/A') return dateString;
         var parts = dateString.split(' ')[0].split('-');
         if (parts.length !== 3) return dateString;
         return parts[2] + '/' + parts[1] + '/' + parts[0];

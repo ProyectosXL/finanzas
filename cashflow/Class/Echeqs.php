@@ -112,6 +112,73 @@ class Echeqs {
         return null;
     }
 
+    /* ====================================================================
+       DIAS DE PRE-CHEQUEADO
+
+       Cuantos dias antes de la fecha del cheque se emite la factura. De ahi
+       sale la FECHA ESTIMADA DE VENTA, que es donde se netea el importe:
+
+           FECHA_VENTA_ESTIMADA = FECHA_CHEQUE - dias del cliente
+
+       ES POR CLIENTE. Antes era un unico parametro global,
+       'dias_prechequeado'; con un solo numero hay que elegir cual de todos
+       los clientes queda bien calculado. Ver README-ventas.md.
+
+       LAS DOS FUNCIONES DE ABAJO SON EL UNICO LUGAR DONDE SE RESUELVE ESTO, y
+       las usan tanto la pantalla como el neteo. Si la sub-pestana y el neteo
+       aplicaran plazos distintos, el tablero dejaria de cerrar y no habria
+       ninguna pantalla donde se notara.
+       ==================================================================== */
+
+    /**
+     * Los dias que le corresponden a un cliente.
+     *
+     * NO HAY RESPALDO GLOBAL: un cliente que no esta en el mapa, o que esta en
+     * cero, no desplaza nada y su cheque queda en su propia fecha. Un respaldo
+     * heredaria a los clientes sin configurar un desplazamiento que nadie
+     * eligio para ellos, y en pantalla seria indistinguible de uno configurado.
+     *
+     * @param array $mapa Mapa codigo => dias
+     * @param string $codigo Codigo de cliente
+     * @return int
+     */
+    public static function diasDeCliente($mapa, $codigo) {
+        $cod = trim((string) $codigo);
+
+        if (!is_array($mapa) || !isset($mapa[$cod])) {
+            return 0;
+        }
+
+        $dias = intval($mapa[$cod]);
+
+        // Un valor negativo correria la venta HACIA ADELANTE del cheque, que es
+        // lo contrario de lo que significa pre-chequear. Se trata como cero.
+        return ($dias > 0) ? $dias : 0;
+    }
+
+    /**
+     * La fecha estimada de la venta: la del cheque menos los dias del cliente.
+     *
+     * @param string $fechaCheque 'Y-m-d'
+     * @param int $dias
+     * @return string 'Y-m-d'
+     */
+    public static function fechaVentaEstimada($fechaCheque, $dias) {
+        $f = Horizonte::normalizarFecha($fechaCheque);
+
+        if ($f === null) {
+            return null;
+        }
+
+        $dias = intval($dias);
+
+        if ($dias <= 0) {
+            return $f;
+        }
+
+        return date('Y-m-d', strtotime($f . ' -' . $dias . ' days'));
+    }
+
     /**
      * Cruza los cheques con el maestro de clientes pre-chequeados y con las
      * excepciones por cheque. ES LA REGLA COMPLETA DE LA SUB-PESTANA, escrita una
@@ -145,10 +212,14 @@ class Echeqs {
      */
     public static function cruzarPrechequeado($cheques, $clientes, $excepciones) {
         $activos = [];
+        $dias = [];
 
         foreach (is_array($clientes) ? $clientes : [] as $c) {
             if (intval(isset($c['ACTIVO']) ? $c['ACTIVO'] : 1) === 1) {
-                $activos[trim((string) $c['CLIENTE'])] = $c;
+                $cod = trim((string) $c['CLIENTE']);
+
+                $activos[$cod] = $c;
+                $dias[$cod] = isset($c['DIAS_PRECHEQUEADO']) ? $c['DIAS_PRECHEQUEADO'] : 0;
             }
         }
 
@@ -193,6 +264,15 @@ class Echeqs {
                 ? $excepcion['USUARIO'] : null;
 
             $cheque['CANAL'] = self::canalDeCliente($codigo);
+
+            // Los dias efectivos y la fecha estimada de venta viajan en la fila
+            // para que la pantalla no los recalcule. Los dias van a la vista
+            // porque son de donde sale la fecha: sin ellos, un cliente en cero
+            // se ve igual que uno configurado y nadie entiende por que su
+            // cheque no se desplazo.
+            $cheque['DIAS_PRECHEQUEADO'] = self::diasDeCliente($dias, $codigo);
+            $cheque['FECHA_VENTA_EST'] = self::fechaVentaEstimada(
+                $cheque['FECHA_CHEQUE'], $cheque['DIAS_PRECHEQUEADO']);
 
             $filas[] = $cheque;
         }
@@ -707,7 +787,8 @@ class Echeqs {
         /* El conteo va por subconsulta y no por LEFT JOIN + GROUP BY para que un
            cliente sin cheques siga apareciendo con cero, que es justamente el
            caso que hay que poder ver. */
-        $sql = "SELECT c.CLIENTE, c.RAZON_SOCIAL, c.ACTIVO, c.FECHA_UPDATE, c.USUARIO,
+        $sql = "SELECT c.CLIENTE, c.RAZON_SOCIAL, c.DIAS_PRECHEQUEADO,
+                       c.ACTIVO, c.FECHA_UPDATE, c.USUARIO,
                        (SELECT COUNT(*)
                           FROM dbo.SBA14 s
                          WHERE s.CLIENTE = c.CLIENTE
@@ -733,6 +814,7 @@ class Echeqs {
             $v[] = [
                 'CLIENTE' => trim((string) $row['CLIENTE']),
                 'RAZON_SOCIAL' => trim((string) $row['RAZON_SOCIAL']),
+                'DIAS_PRECHEQUEADO' => intval($row['DIAS_PRECHEQUEADO']),
                 'ACTIVO' => intval($row['ACTIVO']),
                 'FECHA_UPDATE' => $this->fechaHora($row['FECHA_UPDATE']),
                 'USUARIO' => $row['USUARIO'],
@@ -743,6 +825,100 @@ class Echeqs {
         sqlsrv_free_stmt($stmt);
 
         return $v;
+    }
+
+    /**
+     * Mapa codigo de cliente => dias de pre-chequeado, de los clientes ACTIVOS.
+     *
+     * Es lo que consume el neteo de Ventas. La sub-pestana lo resuelve por el
+     * mismo camino -cruzarPrechequeado() usa diasDeCliente() sobre el mismo
+     * maestro-, que es lo que garantiza que la pantalla y el neteo apliquen el
+     * mismo plazo.
+     *
+     * @return array Mapa 'FR001' => 15
+     */
+    public function getDiasPrechequeadoPorCliente() {
+        $mapa = [];
+
+        foreach ($this->getClientesPrechequeado(true) as $c) {
+            $mapa[$c['CLIENTE']] = intval($c['DIAS_PRECHEQUEADO']);
+        }
+
+        return $mapa;
+    }
+
+    /**
+     * Guarda los dias de pre-chequeado de un cliente que ya esta en el maestro.
+     *
+     * @param string $codigo
+     * @param int $dias
+     * @param string|null $usuario
+     * @return int Los dias guardados
+     */
+    public function guardarDiasCliente($codigo, $dias, $usuario = null) {
+        if (!$this->tablasCreadas()) {
+            throw new Exception('No existen las tablas de venta cobrada anticipada. '
+                . 'Corré sql/echeqs_prechequeado.sql.');
+        }
+
+        $codigo = self::normalizarCodigo($codigo);
+        $dias = self::validarDias($dias);
+
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid,
+            "UPDATE dbo.RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE
+             SET DIAS_PRECHEQUEADO = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+             WHERE CLIENTE = ?",
+            [$dias, $usuario, $codigo]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al guardar los días de pre-chequeado'));
+        }
+
+        $filas = sqlsrv_rows_affected($stmt);
+        sqlsrv_free_stmt($stmt);
+
+        if ($filas < 1) {
+            throw new Exception('El cliente "' . $codigo . '" no está en el maestro de '
+                . 'pre-chequeado.');
+        }
+
+        return $dias;
+    }
+
+    /**
+     * Valida los dias de pre-chequeado. Estatica y pura.
+     *
+     * Cero es un valor VALIDO y significa "no desplazar": es el default del
+     * alta y el estado en el que queda un cliente hasta que alguien averigua
+     * su plazo. Lo que se rechaza es un negativo -que correria la venta hacia
+     * adelante del cheque, o sea al reves de lo que significa pre-chequear- y
+     * un plazo absurdamente largo, que en la practica es un error de tipeo.
+     *
+     * @param mixed $dias
+     * @return int
+     * @throws Exception
+     */
+    public static function validarDias($dias) {
+        if ($dias === null || $dias === '' || !is_numeric($dias)) {
+            throw new Exception('Los días de pre-chequeado tienen que ser un número entero. '
+                . 'Poné 0 si todavía no se sabe: el cheque queda en su propia fecha.');
+        }
+
+        $n = intval($dias);
+
+        if ($n < 0) {
+            throw new Exception('Los días de pre-chequeado no pueden ser negativos: '
+                . 'correrían la venta hacia adelante del cheque, que es lo contrario de '
+                . 'pre-chequear.');
+        }
+
+        if ($n > 365) {
+            throw new Exception('Los días de pre-chequeado no pueden superar 365.');
+        }
+
+        return $n;
     }
 
     /**
@@ -792,11 +968,22 @@ class Echeqs {
      * que decir lo mismo que Tango, o dos pantallas van a mostrar dos nombres
      * distintos para el mismo codigo.
      *
+     * LOS DIAS SON OBLIGATORIOS EN EL ALTA. Son parte de configurar al cliente,
+     * no un dato que se descubre despues: un cliente cargado sin plazo queda en
+     * cero, y en la pantalla eso es indistinguible de uno que realmente opera
+     * con cero dias de adelanto. Cero es una respuesta valida; que falte, no.
+     *
+     * En una REACTIVACION pueden venir en null, y ahi se conserva el plazo que
+     * ya tenia: el switch de la grilla reactiva sin volver a preguntar nada, y
+     * pisarle el plazo a cero seria una perdida silenciosa.
+     *
      * @param string $codigo Codigo de cliente
+     * @param int|null $dias Dias de pre-chequeado. null solo vale reactivando
      * @param string|null $usuario
-     * @return array ['cliente', 'razon_social', 'reactivado', 'cheques_vivos']
+     * @return array ['cliente', 'razon_social', 'dias_prechequeado', 'reactivado',
+     *                'cheques_vivos']
      */
-    public function guardarClientePrechequeado($codigo, $usuario = null) {
+    public function guardarClientePrechequeado($codigo, $dias = null, $usuario = null) {
         if (!$this->tablasCreadas()) {
             throw new Exception('No existen las tablas de venta cobrada anticipada. '
                 . 'Corré sql/echeqs_prechequeado.sql.');
@@ -836,18 +1023,32 @@ class Echeqs {
                 . 'cargado y activo.');
         }
 
+        if ($dias === null || $dias === '') {
+            if ($existe === null) {
+                throw new Exception('Faltan los días de pre-chequeado. Es parte de configurar '
+                    . 'al cliente: poné 0 si todavía no se sabe, y el cheque queda en su '
+                    . 'propia fecha.');
+            }
+
+            // Reactivacion sin dias: conserva el plazo que ya tenia.
+            $dias = intval($existe['DIAS_PRECHEQUEADO']);
+        }
+
+        $dias = self::validarDias($dias);
+
         if ($existe !== null) {
             // Estaba de baja: se reactiva en vez de insertar de nuevo, asi la
             // fila conserva su historia.
             $sql = "UPDATE dbo.RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE
-                    SET ACTIVO = 1, RAZON_SOCIAL = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                    SET ACTIVO = 1, RAZON_SOCIAL = ?, DIAS_PRECHEQUEADO = ?,
+                        FECHA_UPDATE = GETDATE(), USUARIO = ?
                     WHERE CLIENTE = ?";
-            $params = [$cliente['RAZON_SOCI'], $usuario, $codigo];
+            $params = [$cliente['RAZON_SOCI'], $dias, $usuario, $codigo];
         } else {
             $sql = "INSERT INTO dbo.RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE
-                        (CLIENTE, RAZON_SOCIAL, ACTIVO, FECHA_UPDATE, USUARIO)
-                    VALUES (?, ?, 1, GETDATE(), ?)";
-            $params = [$codigo, $cliente['RAZON_SOCI'], $usuario];
+                        (CLIENTE, RAZON_SOCIAL, DIAS_PRECHEQUEADO, ACTIVO, FECHA_UPDATE, USUARIO)
+                    VALUES (?, ?, ?, 1, GETDATE(), ?)";
+            $params = [$codigo, $cliente['RAZON_SOCI'], $dias, $usuario];
         }
 
         $stmt = sqlsrv_query($cid, $sql, $params);
@@ -869,6 +1070,7 @@ class Echeqs {
         return [
             'cliente' => $codigo,
             'razon_social' => $cliente['RAZON_SOCI'],
+            'dias_prechequeado' => $dias,
             'reactivado' => ($existe !== null),
             'cheques_vivos' => $vivos
         ];

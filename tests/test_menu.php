@@ -38,8 +38,8 @@ foreach ($menu['categorias'] as $cat) {
     $todos = array_merge($todos, $cat['items']);
 }
 
-// 2 arriba + 21 en las cinco categorias + 1 al pie
-chequear('el menu tiene los 24 items', 24, count($todos));
+// 2 arriba + 23 en las seis categorias + 1 al pie
+chequear('el menu tiene los 26 items', 26, count($todos));
 
 $incompletos = [];
 
@@ -159,10 +159,27 @@ foreach ($menu['categorias'] as $cat) {
     $porCategoria[$cat['codigo']] = $cat;
 }
 
-// Ventas, Saldos, Echeqs, Cobranzas FR, Cobranzas May y Cob. Electronicos:
-// con Cobranzas May construida, la categoria quedo completa.
-chequear('Ingresos tiene sus 6 pestanas con datos', 6, $porCategoria['Ingresos']['con_datos']);
-chequear('y son 6 en total', 6, $porCategoria['Ingresos']['total']);
+// Ventas, Saldos, Echeqs, Cobranzas FR, Cobranzas May y Cob. Electronicos
+// tienen datos; Exportaciones Tasky todavia es un placeholder, asi que el
+// contador dice 6 de 7. El contador cuenta SOLO 'datos', que es lo que lo hace
+// confiable: una pestana en construccion no suma.
+chequear('Ingresos tiene 6 pestanas con datos', 6, $porCategoria['Ingresos']['con_datos']);
+chequear('y son 7 en total, con Exportaciones Tasky pendiente',
+    7, $porCategoria['Ingresos']['total']);
+
+// Otros Ingresos es la categoria de lo que se carga a mano: hoy tiene un solo
+// item y ya con datos.
+chequear('Otros Ingresos existe', true, isset($porCategoria['OtrosIngresos']));
+chequear('con su unica pestana', 1, $porCategoria['OtrosIngresos']['total']);
+chequear('y con datos', 1, $porCategoria['OtrosIngresos']['con_datos']);
+chequear('arranca cerrada', false, $porCategoria['OtrosIngresos']['abierta']);
+
+// Va DESPUES de Ingresos: la categoria agrupa lo que se tipea, y leerlo
+// pegado a lo que sale de un circuito es lo que hace que la diferencia se vea.
+$orden = array_column($menu['categorias'], 'codigo');
+
+chequear('Otros Ingresos va justo despues de Ingresos',
+    array_search('Ingresos', $orden) + 1, array_search('OtrosIngresos', $orden));
 // Comercio Exterior queda completa: sus dos pestanas tienen datos. Despachante
 // y Asesor se dio de baja del menu porque no se usa mas.
 chequear('Comex tiene sus 2 pestanas con datos', 2, $porCategoria['Comex']['con_datos']);

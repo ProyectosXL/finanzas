@@ -51,10 +51,10 @@
 }
 
 /* Anchos específicos de columnas */
-#tablaProveedoresExterior tbody td:nth-child(1),
-#tablaProveedoresExterior thead th:nth-child(1) {
-    min-width: 200px;
-    max-width: 300px;
+/* El ancho del proveedor lo pone .col-texto (Css/main.css), que además lo
+   recorta con puntos suspensivos en vez de dejar que envuelva. */
+.tab-proveedores_exterior {
+    --col-texto-ancho: 220px;
 }
 
 #tablaProveedoresExterior tbody td:nth-child(5),
