@@ -270,11 +270,11 @@ class CashflowRegistry {
             'series' => ['MOVIMIENTOS' => 'Otros movimientos']
         ],
 
-        /* ---- Filas del Excel que se cargan a mano --------------------------
+        /* ---- Filas del Excel que se cargaban a mano ------------------------
            En el Excel original estas filas las tipea una persona (Tesoreria,
-           Silvina, Dan, Alejandro). Dolares Cuenta Comitente ya tiene su
-           pantalla; Exportaciones todavia no, asi que se muestra en cero y el
-           tablero avisa. Queda declarada para que el cuadro este completo. */
+           Silvina, Dan, Alejandro). Dolares Cuenta Comitente tiene su pantalla
+           de carga, y Exportaciones sale directo de Tango: son las facturas
+           pendientes a Tasky en GVA12. */
 
         /* La carga es en DOLARES y la conversion a pesos la hace el proveedor
            con el oficial del BCRA, igual que ComexProvider: el motor nunca ve
@@ -291,14 +291,20 @@ class CashflowRegistry {
             'series' => ['INGRESO' => 'Dolares cuenta comitente']
         ],
 
+        /* Facturas pendientes EN DOLARES a Tasky (GVA12, cliente EXTASK). Se
+           valuan TODAS a dolar de hoy, a proposito: la deuda esta fija en
+           dolares y valuarla a hoy es no suponer devaluacion. Ver el encabezado
+           de Providers/ExportacionesProvider.php antes de cambiarlo. */
         'EXPORTACIONES' => [
             'nombre' => 'Exportaciones Tasky',
-            'descripcion' => 'Cobranza de exportaciones. Tasky es la razon social del grupo '
-                . 'en Uruguay',
+            'descripcion' => 'Cobranza de las facturas pendientes en dolares a Tasky, la razon '
+                . 'social del grupo en Uruguay. Sale de GVA12 y se valua a dolar de hoy',
+            'archivo' => 'Providers/ExportacionesProvider.php',
+            'clase' => 'ExportacionesProvider',
             'moneda' => 'USD',
-            'disponible' => false,
+            'disponible' => true,
             'tab' => 'exportaciones_tasky',
-            'series' => ['COBRANZA' => 'Cobranza de exportaciones']
+            'series' => ['COBRANZA' => 'Cobranza de exportaciones Tasky']
         ]
     ];
 

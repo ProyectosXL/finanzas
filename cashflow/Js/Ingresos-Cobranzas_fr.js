@@ -155,12 +155,12 @@
         if (tabProy) tabProy.classList.toggle('active', origen === 'proyectado');
 
         if (origen === 'proyectado') {
-            if (titulo) titulo.innerHTML = 'Cobranzas FR &mdash; <span class="text-warning-emphasis">Pendientes Proyectados</span>';
+            if (titulo) titulo.innerHTML = 'Cobranzas Franquicias &mdash; <span class="text-warning-emphasis">Pendientes Proyectados</span>';
             if (subtitulo) subtitulo.textContent = 'Facturas pendientes calculadas con Plazo Promedio de Pago (PPP)';
             if (thCobro) thCobro.textContent = 'F. Prob. Cobro';
             if (thImporteNeto) thImporteNeto.textContent = 'Importe Neto Proy.';
         } else {
-            if (titulo) titulo.innerHTML = 'Cobranzas FR &mdash; <span class="text-success">Real a Cobrar</span>';
+            if (titulo) titulo.innerHTML = 'Cobranzas Franquicias &mdash; <span class="text-success">Real a Cobrar</span>';
             if (subtitulo) subtitulo.textContent = 'Propuestas de pago confirmadas por fecha de cobro';
             if (thCobro) thCobro.textContent = 'Cobro';
             if (thImporteNeto) thImporteNeto.textContent = 'Importe Neto';

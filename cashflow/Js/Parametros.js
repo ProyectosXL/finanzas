@@ -77,7 +77,8 @@
         'horizonte_dias':          { tipo: 'entero',     sufijo: 'días',  paso: '1' },
         'horizonte_meses':         { tipo: 'entero',     sufijo: 'meses', paso: '1' },
         'feriados_comercio':       { tipo: 'texto',      sufijo: '',      paso: null },
-        'cobranzas_may_dias_vto':  { tipo: 'entero',     sufijo: 'días',  paso: '1' }
+        'cobranzas_may_dias_vto':  { tipo: 'entero',     sufijo: 'días',  paso: '1' },
+        'exportaciones_tasky_dias_cobro': { tipo: 'entero', sufijo: 'días', paso: '1' }
     };
 
     function inicializar() {
@@ -724,7 +725,8 @@
             'horizonte_dias': 'Cantidad de columnas diarias de la proyección.',
             'horizonte_meses': 'Cantidad de columnas mensuales de la proyección.',
             'feriados_comercio': 'Formato MM-DD separado por coma. Únicos días del año sin venta estimada.',
-            'cobranzas_may_dias_vto': 'Días de plazo a sumar a la fecha de emisión para proyectar la fecha probable de cobro mayorista.'
+            'cobranzas_may_dias_vto': 'Días de plazo a sumar a la fecha de emisión para proyectar la fecha probable de cobro mayorista.',
+            'exportaciones_tasky_dias_cobro': 'Días a sumar a la fecha de emisión de las facturas en dólares a Tasky para estimar su cobro.'
         };
 
         return hints[clave] || '';

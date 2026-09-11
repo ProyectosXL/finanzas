@@ -101,10 +101,12 @@ class Menu {
                 ['tab' => 'ventas',           'nombre' => 'Ventas',             'icono' => 'fa-cart-shopping',       'estado' => self::DATOS],
                 ['tab' => 'saldos',           'nombre' => 'Saldos',             'icono' => 'fa-wallet',              'estado' => self::DATOS],
                 ['tab' => 'echeqs',           'nombre' => 'Echeqs',             'icono' => 'fa-money-check-dollar',  'estado' => self::DATOS],
-                ['tab' => 'cobranzas_fr',     'nombre' => 'Cobranzas FR',       'icono' => 'fa-hand-holding-dollar', 'estado' => self::DATOS],
-                ['tab' => 'cobranzas_may',    'nombre' => 'Cobranzas May',      'icono' => 'fa-warehouse',           'estado' => self::DATOS],
-                ['tab' => 'cob_electronicos', 'nombre' => 'Cob. Electrónicos',  'icono' => 'fa-credit-card',         'estado' => self::DATOS],
-                ['tab' => 'exportaciones_tasky', 'nombre' => 'Exportaciones Tasky', 'icono' => 'fa-file-export',   'estado' => self::PENDIENTE]
+                /* 'encabezado' es el titulo de la pagina, cuando el nombre del
+                   menu va abreviado para que entre en el ancho del sidebar. */
+                ['tab' => 'cobranzas_fr',     'nombre' => 'Cobranzas FR',       'icono' => 'fa-hand-holding-dollar', 'estado' => self::DATOS, 'encabezado' => 'Cobranzas Franquicias'],
+                ['tab' => 'cobranzas_may',    'nombre' => 'Cobranzas May',      'icono' => 'fa-warehouse',           'estado' => self::DATOS, 'encabezado' => 'Cobranzas Mayoristas'],
+                ['tab' => 'cob_electronicos', 'nombre' => 'Cob. Electrónicos',  'icono' => 'fa-credit-card',         'estado' => self::DATOS, 'encabezado' => 'Cobranzas Electrónicas'],
+                ['tab' => 'exportaciones_tasky', 'nombre' => 'Exportaciones Tasky', 'icono' => 'fa-file-export',   'estado' => self::DATOS]
             ]
         ],
         /* Otros Ingresos va DESPUES de Ingresos y aparte: Ingresos agrupa lo
@@ -207,6 +209,13 @@ class Menu {
             $item['estado'] = $estado;
             $item['titulo'] = self::$titulos[$estado];
             $item['icono_estado'] = self::$iconos[$estado];
+
+            // El titulo de la pagina sale de aca y no de una lista aparte en
+            // el JS: esa lista se desactualizaba sola y el encabezado
+            // terminaba mostrando el codigo de la pestana con guion bajo.
+            if (empty($item['encabezado'])) {
+                $item['encabezado'] = $item['nombre'];
+            }
 
             return $item;
         }, $items);

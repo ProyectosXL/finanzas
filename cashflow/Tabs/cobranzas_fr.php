@@ -73,7 +73,7 @@
         <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-3">
             <div class="d-flex align-items-center gap-3">
                 <div>
-                    <h5 class="mb-0" id="tituloMatrizCob">Cobranzas FR &mdash; Real a Cobrar</h5>
+                    <h5 class="mb-0" id="tituloMatrizCob">Cobranzas Franquicias &mdash; Real a Cobrar</h5>
                     <small class="text-muted" id="subtituloMatrizCob">Propuestas de pago confirmadas por fecha de cobro</small>
                 </div>
                 <div class="search-box-container ms-2">

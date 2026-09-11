@@ -4,10 +4,22 @@
 // llevar a 'Y-m-d' lo que devuelve sqlsrv, que para una columna DATE entrega un
 // DateTime y no un string.
 require_once __DIR__ . '/Horizonte.php';
+require_once __DIR__ . '/Cotizacion.php';
 
 /**
  * Ingresos
- * Cobranza de franquicias (real y proyectada) y de mayoristas.
+ * Cobranza de franquicias (real y proyectada), de mayoristas y de las
+ * exportaciones a Tasky.
+ *
+ * EXPORTACIONES TASKY
+ * -------------------
+ * Tasky es la razon social del grupo en Uruguay: mismo grupo, otra empresa.
+ * Se le factura en DOLARES y sus facturas pendientes de GVA12 son cobranza a
+ * proyectar. El importe que vale es IMPORTE_EX (dolares); COTIZ e IMPORTE son
+ * la cotizacion y el importe en pesos AL MOMENTO DE FACTURAR, que se muestran
+ * como referencia historica y NO entran en ningun calculo. Todas las facturas
+ * se valuan a dolar de HOY: ver getExportacionesTasky() y el encabezado de
+ * Providers/ExportacionesProvider.php.
  *
  * LA INVARIANTE ENTRE REAL Y PROYECTADO
  * -------------------------------------
@@ -51,7 +63,26 @@ class Ingresos {
      */
     const ESTADOS_YA_CONTADOS = ['ACEPTADA', 'PAGADO'];
 
+    /**
+     * Codigos de cliente de GVA12 cuyas facturas son exportaciones. Hoy es
+     * uno solo, Tasky; si manana aparece otra exportadora, se agrega aca y no
+     * dentro del SQL.
+     */
+    const CLIENTES_EXPORTACION = ['EXTASK'];
+
+    /** Clave del plazo de cobro de exportaciones en RO_T_CASHFLOW_PARAMETROS */
+    const PARAM_EXPORTACIONES_DIAS = 'exportaciones_tasky_dias_cobro';
+
+    /** Plazo por defecto, el mismo que siembra sql/cashflow_exportaciones_tasky.sql */
+    const EXPORTACIONES_DIAS_DEFAULT = 30;
+
     private $conn;
+
+    /** @var float|null|false Cache de getCotizacionHoy(); false = todavia no se pidio */
+    private $cotizacionHoy = false;
+
+    /** @var int|null Cache de getDiasCobroExportaciones() */
+    private $diasCobroExportaciones = null;
 
     function __construct(){
         require_once __DIR__.'/../../class/conexion.php';
@@ -1088,5 +1119,351 @@ class Ingresos {
         }
 
         return $resultado;
+    }
+
+    /* ====================================================================
+       EXPORTACIONES TASKY
+       ==================================================================== */
+
+    /**
+     * Dias de plazo para estimar el cobro de las facturas a Tasky.
+     * Lee 'exportaciones_tasky_dias_cobro' (default 30), igual que
+     * getDiasPlazoMayoristas() con el plazo de mayoristas.
+     *
+     * @return int Dias de plazo
+     */
+    public function getDiasCobroExportaciones() {
+        if ($this->diasCobroExportaciones !== null) {
+            return $this->diasCobroExportaciones;
+        }
+
+        $this->diasCobroExportaciones = self::EXPORTACIONES_DIAS_DEFAULT;
+
+        $cid = $this->conn->conectar('central');
+        if (!$cid) return $this->diasCobroExportaciones;
+
+        $sql = "SELECT VALOR FROM RO_T_CASHFLOW_PARAMETROS WHERE CLAVE = ?";
+        $stmt = sqlsrv_query($cid, $sql, [self::PARAM_EXPORTACIONES_DIAS]);
+        if ($stmt && $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            sqlsrv_free_stmt($stmt);
+            $val = intval($row['VALOR']);
+            if ($val > 0) {
+                $this->diasCobroExportaciones = $val;
+            }
+        }
+
+        return $this->diasCobroExportaciones;
+    }
+
+    /**
+     * El dolar oficial BCRA de HOY: el cierre del mes en curso de
+     * RO_V_DOLAR_OFICIAL_BCRA, que para el mes en curso es la ultima
+     * cotizacion cargada.
+     *
+     * Devuelve null si no hay cotizacion o si la vista no esta disponible.
+     * NO lanza y NO asume un valor: quien la use tiene que avisar y dejar la
+     * columna en pesos vacia, que es distinto de mostrar cero.
+     *
+     * Se resuelve una sola vez por instancia: la pestana la necesita para las
+     * filas y para el encabezado, y el proveedor para la serie.
+     *
+     * @return float|null
+     */
+    public function getCotizacionHoy() {
+        if ($this->cotizacionHoy !== false) {
+            return $this->cotizacionHoy;
+        }
+
+        try {
+            $this->cotizacionHoy = (new Cotizacion())->delMes(intval(date('Y')), intval(date('n')));
+        } catch (Throwable $e) {
+            $this->cotizacionHoy = null;
+        }
+
+        return $this->cotizacionHoy;
+    }
+
+    /**
+     * Las facturas pendientes a Tasky, una fila por comprobante, con su fecha
+     * de cobro estimada y su valuacion a dolar de hoy.
+     *
+     * La consulta es la de GVA12 con el cliente de CLIENTES_EXPORTACION y estado
+     * PEN. Los importes van a FLOAT y las fechas a DATE en el SELECT, como el
+     * resto de las consultas sobre GVA12 del modulo.
+     *
+     * Lo que sale de la consulta lo transforma proyectarExportaciones(), que
+     * es estatica y pura: ahi vive la regla de la fecha estimada, la de las
+     * facturas vencidas y la de la conversion. Ver esa funcion.
+     *
+     * @return array Listado de comprobantes
+     */
+    public function getExportacionesTasky() {
+        $cid = $this->conn->conectar('central');
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos central');
+        }
+
+        $sql = "
+            SELECT
+                CAST(A.FECHA_EMIS AS DATE) AS FECHA_EMIS,
+                A.COD_CLIENT,
+                B.RAZON_SOCI,
+                A.T_COMP,
+                A.N_COMP,
+                CAST(A.IMPORTE_EX AS FLOAT) AS IMPORTE_EX,
+                CAST(A.COTIZ AS FLOAT) AS COTIZ,
+                CAST(A.IMPORTE AS FLOAT) AS IMPORTE
+            FROM GVA12 A
+            INNER JOIN GVA14 B ON A.COD_CLIENT = B.COD_CLIENT
+            WHERE A.T_COMP = 'FAC'
+              AND A.COD_CLIENT IN (" . self::inSql(self::CLIENTES_EXPORTACION) . ")
+              AND A.ESTADO = 'PEN'
+            ORDER BY A.FECHA_EMIS ASC, A.N_COMP ASC
+        ";
+
+        $stmt = sqlsrv_query($cid, $sql);
+        if ($stmt === false) {
+            throw new Exception("Error al consultar facturas pendientes de exportacion: " . print_r(sqlsrv_errors(), true));
+        }
+
+        $filas = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $filas[] = $row;
+        }
+        sqlsrv_free_stmt($stmt);
+
+        return self::proyectarExportaciones(
+            $filas,
+            $this->getDiasCobroExportaciones(),
+            $this->getCotizacionHoy()
+        );
+    }
+
+    /**
+     * Transforma las filas crudas de GVA12 en las filas de la pestana.
+     *
+     * ES LA REGLA DE LA PESTANA, escrita una sola vez y sin base de datos,
+     * para poder probarla:
+     *
+     *   Fecha de cobro estimada = FECHA_EMIS + dias
+     *
+     *   Una factura cuya fecha estimada YA PASO se ubica en HOY -el primer dia
+     *   del eje- y queda marcada como VENCIDA. Es una factura vencida sin
+     *   cobrar: informacion, no un error a esconder, y por eso no se descarta
+     *   como hace Mayoristas. Quien la muestre tiene que avisar.
+     *
+     *   Importe en pesos de hoy = IMPORTE_USD x cotizacion de hoy
+     *
+     *   TODAS las facturas se valuan a la MISMA cotizacion, la de hoy, y no a
+     *   la del mes en que se van a cobrar. La deuda esta fija en dolares y
+     *   valuarla a hoy es no suponer devaluacion: el criterio conservador que
+     *   se pidio. Sin cotizacion, el importe en pesos queda en null -no en
+     *   cero- y los dolares siguen estando.
+     *
+     * COTIZ e IMPORTE (la cotizacion y los pesos al facturar) se copian tal
+     * cual como referencia historica. No entran en ninguna cuenta.
+     *
+     * @param array $filas Filas crudas: FECHA_EMIS, COD_CLIENT, RAZON_SOCI,
+     *                     T_COMP, N_COMP, IMPORTE_EX, COTIZ, IMPORTE
+     * @param int $dias Plazo de cobro
+     * @param float|null $cotizHoy Dolar de hoy, o null si no hay
+     * @param string|null $hoy 'Y-m-d'; por defecto el dia de hoy
+     * @return array Filas de la pestana
+     */
+    public static function proyectarExportaciones($filas, $dias, $cotizHoy, $hoy = null) {
+        $hoyStr = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+        $dias = intval($dias);
+        $items = [];
+
+        foreach (is_array($filas) ? $filas : [] as $row) {
+            $fEmis = Horizonte::normalizarFecha(isset($row['FECHA_EMIS']) ? $row['FECHA_EMIS'] : null);
+            $usd = isset($row['IMPORTE_EX']) ? round(floatval($row['IMPORTE_EX']), 2) : 0.0;
+
+            $cobro = self::estimarCobroExportacion($fEmis, $dias, $hoyStr);
+
+            $items[] = [
+                'FECHA_EMIS' => $fEmis,
+                'COD_CLIENT' => strtoupper(trim(isset($row['COD_CLIENT']) ? $row['COD_CLIENT'] : '')),
+                'RAZON_SOCI' => trim(isset($row['RAZON_SOCI']) ? $row['RAZON_SOCI'] : ''),
+                'T_COMP' => strtoupper(trim(isset($row['T_COMP']) ? $row['T_COMP'] : 'FAC')),
+                'N_COMP' => strtoupper(trim(isset($row['N_COMP']) ? $row['N_COMP'] : '')),
+                'IMPORTE_USD' => $usd,
+                // Referencia historica: como se facturo. No se usa para nada mas.
+                'COTIZ_FACT' => isset($row['COTIZ']) ? floatval($row['COTIZ']) : null,
+                'IMPORTE_PESOS_FACT' => isset($row['IMPORTE']) ? round(floatval($row['IMPORTE']), 2) : null,
+                // Valuacion de hoy: es la que va a la grilla y al tablero.
+                'COTIZ_HOY' => $cotizHoy,
+                'IMPORTE_PESOS_HOY' => self::valuarHoy($usd, $cotizHoy),
+                'DIAS' => $dias,
+                'Cobro' => $cobro['fecha'],
+                'COBRO_ORIGINAL' => $cobro['original'],
+                'VENCIDA' => $cobro['vencida']
+            ];
+        }
+
+        return $items;
+    }
+
+    /**
+     * Fecha de cobro estimada de una factura de exportacion.
+     *
+     * Estatica y pura: es la regla de ubicacion en el eje. Una fecha que ya
+     * paso se lleva a HOY y se marca, no se descarta.
+     *
+     * @param string|null $fechaEmis 'Y-m-d'
+     * @param int $dias Plazo de cobro
+     * @param string $hoy 'Y-m-d'
+     * @return array ['fecha' => 'Y-m-d'|null, 'original' => 'Y-m-d'|null, 'vencida' => bool]
+     */
+    public static function estimarCobroExportacion($fechaEmis, $dias, $hoy) {
+        if ($fechaEmis === null || $fechaEmis === '') {
+            // Sin fecha de emision no hay de donde estimar: queda sin fecha y
+            // Horizonte::agrupar() la informa en 'sin_fecha'.
+            return ['fecha' => null, 'original' => null, 'vencida' => false];
+        }
+
+        $cobro = new DateTime(substr((string) $fechaEmis, 0, 10));
+        $cobro->setTime(0, 0, 0);
+        $cobro->modify('+' . intval($dias) . ' days');
+
+        $original = $cobro->format('Y-m-d');
+        $vencida = ($original < $hoy);
+
+        return [
+            'fecha' => $vencida ? $hoy : $original,
+            'original' => $original,
+            'vencida' => $vencida
+        ];
+    }
+
+    /**
+     * Dolares a pesos de hoy. Sin cotizacion devuelve null, no cero: un cero
+     * se leeria como "la factura vale cero pesos".
+     *
+     * @param float $usd
+     * @param float|null $cotizHoy
+     * @return float|null
+     */
+    public static function valuarHoy($usd, $cotizHoy) {
+        if ($cotizHoy === null || floatval($cotizHoy) <= 0) {
+            return null;
+        }
+
+        return round(floatval($usd) * floatval($cotizHoy), 2);
+    }
+
+    /**
+     * Los avisos de la pestana y del tablero sobre las exportaciones: lo que
+     * NO se ve en los numeros y hay que decir.
+     *
+     *   - Sin cotizacion de hoy: la columna en pesos queda vacia y la grilla
+     *     no muestra importes. Los dolares estan; lo que falta es a cuanto
+     *     valuarlos. No se asume ningun valor.
+     *   - Facturas vencidas: se ubicaron en el primer dia del eje. Son
+     *     facturas vencidas sin cobrar.
+     *
+     * Estatica y pura para que la pestana y el proveedor digan lo mismo.
+     *
+     * @param array $items Filas de proyectarExportaciones()
+     * @param float|null $cotizHoy
+     * @return array Lista de mensajes
+     */
+    public static function avisosExportaciones($items, $cotizHoy) {
+        $avisos = [];
+        $usdTotal = 0.0;
+        $usdVencidas = 0.0;
+        $vencidas = 0;
+
+        foreach (is_array($items) ? $items : [] as $it) {
+            $usdTotal += floatval($it['IMPORTE_USD']);
+
+            if (!empty($it['VENCIDA'])) {
+                $vencidas++;
+                $usdVencidas += floatval($it['IMPORTE_USD']);
+            }
+        }
+
+        if ($cotizHoy === null && count($items) > 0) {
+            $avisos[] = 'No hay cotización del dólar oficial BCRA para el mes en curso ('
+                . Cotizacion::VISTA . '): los ' . self::usd($usdTotal) . ' pendientes no se '
+                . 'pueden valuar, así que la columna en pesos queda vacía y no entran a la '
+                . 'grilla ni al tablero. No se asume ningún tipo de cambio.';
+        }
+
+        if ($vencidas > 0) {
+            $avisos[] = $vencidas . ' factura' . ($vencidas === 1 ? '' : 's') . ' por '
+                . self::usd($usdVencidas) . ' ' . ($vencidas === 1 ? 'tiene' : 'tienen')
+                . ' la fecha de cobro estimada ya vencida: se '
+                . ($vencidas === 1 ? 'ubica' : 'ubican') . ' en el primer día del eje. '
+                . ($vencidas === 1 ? 'Es una factura vencida' : 'Son facturas vencidas')
+                . ' sin cobrar.';
+        }
+
+        return $avisos;
+    }
+
+    /**
+     * Las exportaciones agregadas por fecha de cobro estimada, EN DOLARES,
+     * para el tablero de Cashflow. La conversion a pesos la hace el proveedor,
+     * como ComexProvider: aca se transportan dolares.
+     *
+     * Ademas del importe, devuelve que parte de el esta VENCIDA: son las
+     * facturas que se ubicaron en hoy por tener la fecha estimada en el
+     * pasado, y el tablero tiene que poder distinguirlas de una cobranza que
+     * de verdad se estima para hoy.
+     *
+     * @return array Filas ['FECHA', 'IMPORTE_USD', 'VENCIDAS_USD', 'COMP_VENCIDOS']
+     */
+    public function getExportacionesTaskyTotales() {
+        return self::agruparExportacionesPorFecha($this->getExportacionesTasky());
+    }
+
+    /**
+     * El agregado de getExportacionesTaskyTotales(), separado y estatico para
+     * poder probarlo sin base.
+     *
+     * @param array $items Filas de proyectarExportaciones()
+     * @return array
+     */
+    public static function agruparExportacionesPorFecha($items) {
+        $usdPorFecha = [];
+        $vencidasPorFecha = [];
+        $compPorFecha = [];
+
+        foreach (is_array($items) ? $items : [] as $it) {
+            $f = isset($it['Cobro']) ? $it['Cobro'] : null;
+
+            // Sin fecha se transporta igual, con clave vacia: el agrupador del
+            // horizonte la informa en 'sin_fecha' en vez de perderla.
+            $clave = ($f === null) ? '' : $f;
+            $usd = floatval($it['IMPORTE_USD']);
+
+            $usdPorFecha[$clave] = ($usdPorFecha[$clave] ?? 0.0) + $usd;
+
+            if (!empty($it['VENCIDA'])) {
+                $vencidasPorFecha[$clave] = ($vencidasPorFecha[$clave] ?? 0.0) + $usd;
+                $compPorFecha[$clave] = ($compPorFecha[$clave] ?? 0) + 1;
+            }
+        }
+
+        $resultado = [];
+        ksort($usdPorFecha);
+
+        foreach ($usdPorFecha as $f => $usd) {
+            $resultado[] = [
+                'FECHA' => ($f === '') ? null : $f,
+                'IMPORTE_USD' => round($usd, 2),
+                'VENCIDAS_USD' => round($vencidasPorFecha[$f] ?? 0.0, 2),
+                'COMP_VENCIDOS' => $compPorFecha[$f] ?? 0
+            ];
+        }
+
+        return $resultado;
+    }
+
+    /** USD 1.234,56, para los avisos */
+    private static function usd($n) {
+        return 'USD ' . number_format(floatval($n), 2, ',', '.');
     }
 }

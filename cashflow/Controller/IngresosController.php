@@ -92,6 +92,30 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* Exportaciones Tasky: una fila por factura, sin Resumen -es un solo
+           cliente-. A la grilla va el importe en PESOS DE HOY, que es el que
+           entra al tablero; los dolares y la referencia de facturacion son
+           columnas de la fila.
+
+           Sin cotizacion, IMPORTE_PESOS_HOY es null y el agrupador lo saltea
+           como cero: por eso los avisos de Ingresos::avisosExportaciones() van
+           ADELANTE de los del eje, si no la grilla vacia no diria por que. */
+        case 'getExportacionesTasky':
+            $items = $ingresos->getExportacionesTasky();
+            $cotiz = $ingresos->getCotizacionHoy();
+            $h = Horizonte::desdeParametros(new Parametros());
+
+            $payload = EjeVista::armar($h, $items, 'Cobro', 'IMPORTE_PESOS_HOY');
+            $payload['cotizacion_hoy'] = $cotiz;
+            $payload['dias_cobro'] = $ingresos->getDiasCobroExportaciones();
+            $payload['warnings'] = array_merge(
+                Ingresos::avisosExportaciones($items, $cotiz),
+                $payload['warnings']
+            );
+
+            echo json_encode(['success' => true, 'data' => $payload], JSON_UNESCAPED_UNICODE);
+            break;
+
         /* ================================================================
            FECHA DE COBRO MANUAL POR COMPROBANTE
 

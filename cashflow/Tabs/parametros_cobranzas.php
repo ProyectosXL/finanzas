@@ -1,32 +1,53 @@
 <?php
 /**
  * Sub-pestaña Parámetros -> Cobranzas
- * Gestión de Plazos Promedio de Pago (PPP) y Escalas de Descuento por Cliente
+ * Escala de descuento y PPP de Cobranzas Franquicias, y los plazos globales
+ * de Mayoristas y Exportaciones Tasky (que no llevan descuento).
  */
 ?>
 
 <div class="modulo-descripcion mb-3">
-    La <strong>escala de descuento</strong> es una sola y vale para todos los clientes. Lo que sí es por cliente es el <strong>Plazo Promedio de Pago (PPP)</strong>, que se calcula con los últimos 3 cobros y se puede pisar a mano. Acá también se edita el <strong>Plazo de Vencimiento Mayorista</strong>.
+    La <strong>escala de descuento</strong> es de <strong>Cobranzas Franquicias</strong>: es una sola y vale para todas las franquicias. Lo que sí es por franquicia es el <strong>Plazo Promedio de Pago (PPP)</strong>, que se calcula con los últimos 3 cobros y se puede pisar a mano. Mayoristas y Exportaciones Tasky no llevan descuento: acá se editan sólo sus plazos, el <strong>Plazo de Vencimiento Mayorista</strong> y el <strong>Plazo de Cobro de Exportaciones Tasky</strong>.
 </div>
 
 <div class="row g-3 mb-4">
 
-    <!-- Parámetros Mayoristas -->
+    <!-- Plazos globales: Mayoristas y Exportaciones Tasky. Los dos son el
+         mismo mecanismo -fecha de emisión + días- y por eso van juntos. -->
     <div class="col-lg-4">
         <div class="card h-100">
             <div class="card-header">
-                <h5 class="mb-0">Cobranzas Mayoristas</h5>
-                <small class="text-muted">Parámetro global de proyección para clientes mayoristas</small>
+                <h5 class="mb-0">Plazos de Cobro</h5>
+                <small class="text-muted">Parámetros globales: días a sumar a la fecha de emisión</small>
             </div>
             <div class="card-body">
-                <div class="param-card" id="card-cobranzas_may_dias_vto">
-                    <div class="param-clave">Plazo de Proyección Mayoristas</div>
-                    <div class="param-descripcion">Días de plazo a sumar a la fecha de emisión de factura para calcular la fecha probable de cobro.</div>
-                    <div class="input-group input-group-sm">
-                        <input type="number" step="1" min="1" class="form-control param-input" data-clave="cobranzas_may_dias_vto" data-tipo="entero" value="60">
-                        <span class="input-group-text">días</span>
+                <!-- Cada tarjeta en su propia columna: .param-card lleva
+                     height: 100%, y dos apiladas sueltas en el mismo
+                     card-body se pisan. -->
+                <div class="row g-3">
+                    <div class="col-12">
+                        <div class="param-card" id="card-cobranzas_may_dias_vto">
+                            <div class="param-clave">Plazo de Proyección Mayoristas</div>
+                            <div class="param-descripcion">Días de plazo a sumar a la fecha de emisión de factura para calcular la fecha probable de cobro.</div>
+                            <div class="input-group input-group-sm">
+                                <input type="number" step="1" min="1" class="form-control param-input" data-clave="cobranzas_may_dias_vto" data-tipo="entero" value="60">
+                                <span class="input-group-text">días</span>
+                            </div>
+                            <div class="param-hint">Días a sumar a la F. Emisión (predeterminado: 60 días).</div>
+                        </div>
                     </div>
-                    <div class="param-hint">Días a sumar a la F. Emisión (predeterminado: 60 días).</div>
+
+                    <div class="col-12">
+                        <div class="param-card" id="card-exportaciones_tasky_dias_cobro">
+                            <div class="param-clave">Plazo de Cobro Exportaciones Tasky</div>
+                            <div class="param-descripcion">Días a sumar a la fecha de emisión de las facturas en dólares a Tasky para estimar su fecha de cobro. Una factura cuya fecha estimada ya pasó se muestra como vencida, en el primer día del eje.</div>
+                            <div class="input-group input-group-sm">
+                                <input type="number" step="1" min="1" class="form-control param-input" data-clave="exportaciones_tasky_dias_cobro" data-tipo="entero" value="30">
+                                <span class="input-group-text">días</span>
+                            </div>
+                            <div class="param-hint">Predeterminado: 30 días. Si el parámetro no está sembrado, la pestaña usa ese valor.</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -47,9 +68,9 @@
         <div class="card h-100" id="cardEscalaCob">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div>
-                    <h5 class="mb-0">Escala de Descuento</h5>
+                    <h5 class="mb-0">Escala de Descuento &mdash; Cobranzas Franquicias</h5>
                     <small class="text-muted">
-                        Una sola escala para todos los clientes. <strong>No depende del medio de pago.</strong>
+                        Aplica sólo a las facturas de franquicias. Una sola escala para todas. <strong>No depende del medio de pago.</strong>
                         Los días son los que van de la emisión a la fecha de cobro.
                     </small>
                 </div>

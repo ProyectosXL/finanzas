@@ -59,7 +59,7 @@
         <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-3">
             <div class="d-flex align-items-center gap-3">
                 <div>
-                    <h5 class="mb-0" id="tituloMatrizCobMay">Cobranzas May &mdash; Pendientes Proyectados</h5>
+                    <h5 class="mb-0" id="tituloMatrizCobMay">Cobranzas Mayoristas &mdash; Pendientes Proyectados</h5>
                     <small class="text-muted" id="subtituloMatrizCobMay">Facturas pendientes proyectadas por fecha probable de cobro</small>
                 </div>
                 <div class="search-box-container ms-2">
