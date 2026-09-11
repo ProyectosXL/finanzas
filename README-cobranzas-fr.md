@@ -193,6 +193,22 @@ En **Resumen** la fila es un cliente y no un comprobante, así que no hay nada q
 
 Los endpoints son `IngresosController?action=saveFechaCobroManual` y `deleteFechaCobroManual`.
 
+### Y se ve en el tablero
+
+Una factura con fecha manual **no está en ninguna propuesta** —si lo estuviera sería cobranza real— pero su fecha **tampoco es una estimación**: Tesorería la habló con el cliente y la acordó por fuera de la app de cobranzas. Es una negociación, y quien mira el tablero para decidir necesita poder distinguirla de un promedio estadístico. En la grilla los dos números tienen exactamente la misma pinta.
+
+Por eso la fila **Cobranzas Franquicias Proyectadas** del tablero anota sus celdas:
+
+- La celda que tiene parte pactada lleva un **subrayado violeta**, y el tooltip dice cuánto y de cuántos comprobantes: *"$ 386.814,96 de esta celda (1 comprobante) tienen fecha de cobro PACTADA con el cliente… El resto de la celda sale del PPP, que es una estimación."*
+- El nombre de la fila lleva un **🤝** con el total pactado **de la vista activa**, para poder verlo sin recorrer veintiocho columnas con el mouse.
+- El detalle factura por factura sigue estando en *Pendientes Proyectados → Deep Dive*.
+
+**Nunca es el importe entero de la celda**, y por eso el tooltip dice cuánto: una celda del 14/9 puede tener $4.244.724 de los cuales $386.814 están pactados y el resto proyectado. Marcar sin decir cuánto haría leer los cuatro millones como acordados.
+
+Se implementa con el campo `detalle` del contrato de proveedor, que es metadato sobre el importe y **no un importe más**: no entra en ninguna suma. Ver `README-cashflow.md`.
+
+> **La cobranza real no se anota**, y no es un olvido: sale de una propuesta, así que su fecha siempre está acordada. Marcarla no distinguiría nada.
+
 > **Acá sí hay borrado físico**, a diferencia del resto del módulo, y es a propósito: la fila no es un dato de negocio histórico sino un override puntual, y su baja lógica sería indistinguible de no tenerla. Lo que el módulo no borra son los importes y la configuración del tablero.
 
 ---

@@ -406,14 +406,14 @@
         if (f.sin_datos) { clases.push('cf-sin-datos'); }
 
         var celdas = cols.map(function(c, i) {
-            return celdaHtml(f[c.rama][c.clave], c, i);
+            return celdaHtml(f[c.rama][c.clave], c, i, anotacion(f, c));
         }).join('');
 
         var total = totalDeVista(f);
 
         return '<tr class="' + clases.join(' ') + '">' +
             '<td class="cf-col-concepto" title="' + escapar(f.nombre) + '">' +
-                conceptoHtml(f) +
+                conceptoHtml(f, cols) +
             '</td>' +
             celdas +
             '<td class="text-end cf-col-total' + (Number(total) < 0 ? ' cf-negativo' : '') + '">' +
@@ -426,7 +426,7 @@
      * tiene. Es lo que hace navegable el tablero: desde el número consolidado se
      * llega al detalle que lo produce.
      */
-    function conceptoHtml(f) {
+    function conceptoHtml(f, cols) {
         var nombre = escapar(f.nombre);
         var marca = '';
 
@@ -445,6 +445,11 @@
                 + Number(f.tipo_cambio).toFixed(2) + '"></i>';
         }
 
+        // Se SUMA a la anterior en vez de competir con ella: las otras marcas
+        // dicen de dónde sale el número de la fila, y ésta dice algo sobre una
+        // parte de ese número. Las dos cosas pueden pasar a la vez.
+        marca += marcaPactado(f, cols);
+
         if (f.tab) {
             // data-sub-tab lo lee el JS de la pestaña destino para abrirse en la
             // vista correcta: hay módulos con más de una, y llegar a la primera
@@ -458,6 +463,49 @@
     }
 
     /**
+     * El indicador de la fila: cuánto de lo que se está viendo tiene fecha
+     * PACTADA con el cliente en lugar de estimada.
+     *
+     * Va en el nombre de la fila y no sólo en las celdas porque el caso de uso
+     * es mirar el tablero, no recorrerlo: si la única forma de enterarse fuera
+     * pasar el mouse por veintiocho columnas, nadie se enteraría nunca.
+     *
+     * Suma SÓLO las columnas de la vista activa, igual que la columna Total:
+     * un indicador que midiera todo el horizonte mientras la pantalla muestra
+     * el tramo diario no describiría lo que se está viendo.
+     */
+    function marcaPactado(f, cols) {
+        if (!f.detalle) {
+            return '';
+        }
+
+        var total = 0;
+        var celdas = 0;
+
+        cols.forEach(function(c) {
+            var nota = anotacion(f, c);
+
+            if (nota) {
+                total += Number(nota.importe) || 0;
+                celdas++;
+            }
+        });
+
+        if (!celdas) {
+            return '';
+        }
+
+        return ' <i class="fas fa-handshake cf-marca cf-marca-pactado" title="'
+            + escapar('De lo que se está viendo, $ ' + plataCorta(total) + ' tienen fecha de cobro '
+                + 'PACTADA con el cliente y no estimada: Tesorería la acordó por fuera de la app '
+                + 'de cobranzas, así que no figuran en ninguna propuesta. Están en '
+                + celdas + ' columna' + (celdas === 1 ? '' : 's') + ', marcadas en la fila. '
+                + 'El detalle factura por factura está en Cobranzas FR → Pendientes Proyectados '
+                + '→ Deep Dive.')
+            + '"></i>';
+    }
+
+    /**
      * Qué explicar en una fila de arrastre. Si además su módulo de origen no
      * existe, hay que decir las dos cosas: que el horizonte arranca en cero, y
      * que lo que se ve es la caja que se va acumulando.
@@ -468,7 +516,25 @@
             + 'no un dato cargado en esta fila.';
     }
 
-    function celdaHtml(valor, col, i) {
+    /**
+     * La anotación del proveedor para esta celda, si la hay.
+     *
+     * Dice que UNA PARTE del importe tiene algo que contar — hoy: cuánto de la
+     * cobranza proyectada tiene fecha pactada con el cliente en lugar de
+     * estimada con el PPP. No es un importe más y no entra en ninguna suma;
+     * ver el encabezado de Class/CashflowProvider.php.
+     */
+    function anotacion(f, col) {
+        if (!f.detalle) {
+            return null;
+        }
+
+        var id = (col.rama === 'meses' ? 'MES|' : 'DIA|') + col.clave;
+
+        return f.detalle[id] || null;
+    }
+
+    function celdaHtml(valor, col, i, nota) {
         var clases = clasesColumna(col, i).concat(['text-end']);
 
         // null no es cero: es una columna que no representa ningún día futuro.
@@ -483,6 +549,16 @@
             clases.push('cf-cero');
         } else if (n < 0) {
             clases.push('cf-negativo');
+        }
+
+        // La celda anotada se marca y explica QUÉ parte del importe está
+        // anotada. Marcarla sin decir cuánto haría creer que el número entero
+        // es lo pactado, que casi nunca es el caso.
+        if (nota) {
+            clases.push('cf-anotada');
+
+            return '<td class="' + clases.join(' ') + '" title="' + escapar(nota.nota) + '">'
+                + plataCorta(n) + '</td>';
         }
 
         return '<td class="' + clases.join(' ') + '">' + plataCorta(n) + '</td>';

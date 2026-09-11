@@ -40,6 +40,30 @@ require_once __DIR__ . '/Horizonte.php';
  *   'fuera_horizonte' float               importe que quedo fuera del eje
  *   'sin_fecha'       float               importe sin fecha utilizable
  *   'warnings'        string[]            avisos propios de la serie
+ *   'detalle'         array               anotaciones por columna (ver abajo)
+ *
+ * ANOTAR UNA CELDA: 'detalle'
+ * ---------------------------
+ * Mapa columna => ['importe' => float, 'nota' => string], con la columna en el
+ * formato de Horizonte::columna() ('DIA|Y-m-d' o 'MES|Y-m').
+ *
+ *   'detalle' => [
+ *       'DIA|2026-09-17' => ['importe' => 12345.67, 'nota' => 'De este importe...']
+ *   ]
+ *
+ * Sirve para decir que UNA PARTE del importe de esa celda tiene algo que
+ * contar. El caso que lo origino: en la cobranza proyectada de franquicias,
+ * distinguir lo que sale del PPP -una estimacion estadistica- de lo que
+ * Tesoreria pacto con el cliente por fuera de la app de cobranzas. Los dos
+ * numeros tienen la misma pinta en el tablero y no significan lo mismo.
+ *
+ * NO ES UNA SERIE APARTE, y esa es la decision. Una serie nueva seria una fila
+ * nueva del tablero, y esa fila sumaria un importe que la fila original ya
+ * suma: doble conteo. 'detalle' es metadato SOBRE el mismo importe, no un
+ * importe mas, asi que no entra en ninguna cuenta.
+ *
+ * Tampoco genera avisos: lo que cae fuera del eje ya lo informa la serie a la
+ * que anota, porque son las mismas filas de origen.
  *
  * IMPORTANTE: los importes SIEMPRE se devuelven en pesos. Si el modulo maneja
  * otra moneda, la conversion la hace el proveedor y no el motor: el tipo de
@@ -155,6 +179,25 @@ abstract class CashflowProvider {
     }
 
     /**
+     * 'DIA|2026-09-06' => ['dias', '2026-09-06']. Devuelve [null, null] si el
+     * id de columna no tiene la forma esperada.
+     *
+     * @param string $columna
+     * @return array [rama, clave]
+     */
+    private static function partirColumna($columna) {
+        if (strpos((string) $columna, 'DIA|') === 0) {
+            return ['dias', substr($columna, 4)];
+        }
+
+        if (strpos((string) $columna, 'MES|') === 0) {
+            return ['meses', substr($columna, 4)];
+        }
+
+        return [null, null];
+    }
+
+    /**
      * Completa una serie: todas las claves del eje, los escalares con su valor
      * por defecto, y los importes que vengan con una clave que no pertenece al
      * eje sumados a 'fuera_horizonte' en lugar de descartados.
@@ -173,7 +216,8 @@ abstract class CashflowProvider {
             'tipo_cambio' => null,
             'fuera_horizonte' => 0,
             'sin_fecha' => 0,
-            'warnings' => []
+            'warnings' => [],
+            'detalle' => []
         ];
 
         if (!is_array($serie)) {
@@ -210,6 +254,22 @@ abstract class CashflowProvider {
 
         if (isset($serie['warnings']) && is_array($serie['warnings'])) {
             $out['warnings'] = array_values($serie['warnings']);
+        }
+
+        // Solo sobreviven las anotaciones de columnas que EXISTEN en el eje.
+        // Una anotacion sobre una columna que no se dibuja no se puede ver, y
+        // dejarla pasar haria creer que el importe esta anotado en algun lado.
+        if (isset($serie['detalle']) && is_array($serie['detalle'])) {
+            foreach ($serie['detalle'] as $columna => $info) {
+                list($rama, $clave) = self::partirColumna($columna);
+
+                if ($rama !== null && array_key_exists($clave, $out[$rama])) {
+                    $out['detalle'][$columna] = [
+                        'importe' => isset($info['importe']) ? floatval($info['importe']) : 0,
+                        'nota' => isset($info['nota']) ? (string) $info['nota'] : ''
+                    ];
+                }
+            }
         }
 
         return $out;

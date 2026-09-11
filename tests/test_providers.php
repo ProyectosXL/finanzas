@@ -99,8 +99,52 @@ chequear('una clave fuera del eje no se descarta en silencio', 500.0, $s['fuera_
 chequear('moneda por defecto', 'ARS', $s['moneda_origen']);
 chequear('tipo de cambio por defecto', null, $s['tipo_cambio']);
 
+chequear('sin detalle, el mapa de anotaciones va vacio', [], $s['detalle']);
+
 $nada = new ProveedorQueDevuelveNada('NADA');
 chequear('devolver null no rompe', [], $nada->series($h));
+
+/* ================================================================
+   ANOTACIONES POR COLUMNA ('detalle')
+
+   Dicen que UNA PARTE del importe de una celda tiene algo que contar. No
+   son un importe mas: no entran en ninguna suma y no generan avisos. Ver
+   el encabezado de CashflowProvider.
+   ================================================================ */
+seccion('anotaciones por columna');
+
+class ProveedorQueAnota extends CashflowProvider {
+    protected function calcular($h) {
+        return ['X' => [
+            'dias' => ['2026-09-10' => 1000],
+            'detalle' => [
+                'DIA|2026-09-10' => ['importe' => 400, 'nota' => 'pactado a mano'],
+                'MES|2026-10'    => ['importe' => 250, 'nota' => 'otra cosa'],
+                // Columnas que NO existen en el eje: no se pueden ver, asi que
+                // no tienen que sobrevivir.
+                'DIA|2030-01-01' => ['importe' => 999, 'nota' => 'fuera del eje'],
+                'basura'         => ['importe' => 777, 'nota' => 'id invalido']
+            ]
+        ]];
+    }
+}
+
+$anota = new ProveedorQueAnota('ANOTA');
+$s = $anota->series($h)['X'];
+
+chequear('sobreviven solo las columnas que existen en el eje',
+    ['DIA|2026-09-10', 'MES|2026-10'], array_keys($s['detalle']));
+chequear('con su importe', 400.0, $s['detalle']['DIA|2026-09-10']['importe']);
+chequear('y su nota', 'pactado a mano', $s['detalle']['DIA|2026-09-10']['nota']);
+
+// LO IMPORTANTE: anotar no suma. Si el detalle entrara en la serie, el
+// tablero contaria dos veces la parte anotada.
+chequear('la anotacion NO se suma al importe de la celda',
+    1000.0, $s['dias']['2026-09-10']);
+chequear('ni al total de la serie',
+    1000.0, array_sum($s['dias']) + array_sum($s['meses']));
+chequear('ni se informa como importe fuera del horizonte', 0, $s['fuera_horizonte']);
+chequear('ni genera avisos', [], $s['warnings']);
 
 /* ================================================================
    Contra datos reales
