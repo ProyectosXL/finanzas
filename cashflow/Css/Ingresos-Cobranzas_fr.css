@@ -75,10 +75,13 @@
     border-top: 2px solid var(--border-color, #e2e5ed);
 }
 
-/* Column widths */
-#tablaCobranzasFR tbody td:nth-child(2),
-#tablaCobranzasFR thead th:nth-child(2) {
-    min-width: 200px;
+/* El ancho de la razón social sale de .col-texto (Css/main.css) y no de un
+   nth-child: la regla que había acá apuntaba a la columna 2, que era
+   RAZON_SOC hasta que se agregó Tipo adelante. Desde entonces le daba el
+   ancho a COD_CLI y dejaba la razón social apretada en cuatro renglones. Un
+   índice de columna escrito en duro se desactualiza en silencio. */
+.tab-cobranzas_fr {
+    --col-texto-ancho: 250px;
 }
 
 /* Periodic columns */

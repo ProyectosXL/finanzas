@@ -224,7 +224,13 @@
             html += `<td class="center"><span class="badge-may" title="${plazoInfo}"><i class="fas fa-clock me-1"></i>PROY</span></td>`;
 
             html += `<td><strong>${item.COD_CLI || ''}</strong></td>`;
-            html += `<td>${item.RAZON_SOC || ''}</td>`;
+
+            // Recortado con puntos suspensivos (.col-texto) para que la fila
+            // sea una sola línea; el nombre completo va en el title.
+            var razon = item.RAZON_SOC || '';
+
+            html += '<td class="col-texto" title="' + escaparAttr(razon) + '">'
+                + escaparAttr(razon) + '</td>';
             
             // Columnas ocultables en resumen
             html += `<td class="center col-detail">${formatDate(item.FECHA)}</td>`;
@@ -348,6 +354,13 @@
             return `<span class="text-danger">$ ${formatted}</span>`;
         }
         return '$ ' + formatted;
+    }
+
+    function escaparAttr(texto) {
+        return String(texto === null || texto === undefined ? '' : texto)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/"/g, '&quot;');
     }
 
     function formatDate(dateString) {

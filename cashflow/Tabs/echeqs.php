@@ -161,7 +161,7 @@
                                 <th rowspan="2">Fecha de pago</th>
                                 <th rowspan="2">N° Cheque</th>
                                 <th rowspan="2">Banco</th>
-                                <th rowspan="2">Cliente</th>
+                                <th rowspan="2" class="col-texto">Cliente</th>
                                 <th rowspan="2" class="text-end">Importe</th>
                                 <th colspan="1" class="table-group-divider" id="ejeHeaderEch">Días</th>
                             </tr>
@@ -349,7 +349,7 @@
                                 <th rowspan="2">Fecha de pago</th>
                                 <th rowspan="2">N° Cheque</th>
                                 <th rowspan="2">Banco</th>
-                                <th rowspan="2">Cliente</th>
+                                <th rowspan="2" class="col-texto">Cliente</th>
                                 <th rowspan="2" class="text-center" style="width: 90px;">Estado</th>
                                 <th rowspan="2" class="text-end">Importe</th>
                                 <th rowspan="2" class="text-center" style="width: 160px;">Marca</th>

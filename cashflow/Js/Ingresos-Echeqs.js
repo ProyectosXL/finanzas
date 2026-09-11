@@ -201,7 +201,8 @@
             html += '<td class="center"><span class="badge-cobro">' + fecha(f.FECHA_PAGO) + '</span></td>';
             html += '<td class="center">' + numeroCheque(f.N_CHEQUE) + '</td>';
             html += '<td>' + escapar(f.BANCO) + '</td>';
-            html += '<td>' + escapar(f.CLIENTE) + subtituloCodigo(f.COD_CLIENTE) + '</td>';
+            html += '<td class="col-texto" title="' + escapar(f.CLIENTE) + '">'
+                 + escapar(f.CLIENTE) + subtituloCodigo(f.COD_CLIENTE) + '</td>';
             html += '<td class="currency">' + pesos(f.IMPORTE) + '</td>';
 
             // Los importes por columna ya vienen resueltos: la regla de "día O
@@ -469,7 +470,8 @@
             html += '<td class="center">' + fecha(f.FECHA_CHEQUE) + '</td>';
             html += '<td class="center">' + numeroCheque(f.N_CHEQUE) + '</td>';
             html += '<td>' + escapar(f.BANCO) + '</td>';
-            html += '<td>' + escapar(f.CLIENTE) + subtituloCodigo(f.COD_CLIENTE) + '</td>';
+            html += '<td class="col-texto" title="' + escapar(f.CLIENTE) + '">'
+                 + escapar(f.CLIENTE) + subtituloCodigo(f.COD_CLIENTE) + '</td>';
             html += '<td class="text-center">' + badgeEstado(f.ESTADO) + '</td>';
             html += '<td class="currency">' + pesos(f.IMPORTE) + '</td>';
 

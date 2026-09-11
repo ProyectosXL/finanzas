@@ -233,7 +233,9 @@ function generarFilasDatos() {
         html += '<tr>';
         
         // Columnas fijas
-        html += `<td>${item.PROVEEDOR || ''}</td>`;
+        // Recortado con puntos suspensivos (.col-texto); el nombre completo va
+        // en el title. Ver Css/main.css.
+        html += `<td class="col-texto" title="${escaparAttrProv(item.PROVEEDOR)}">${escaparAttrProv(item.PROVEEDOR)}</td>`;
         html += `<td class="center">${item.CONTENEDOR || ''}</td>`;
         html += `<td class="center">${item.ORDEN_COMPRA || ''}</td>`;
         html += `<td>${item.DESPACHANTE || ''}</td>`;
@@ -452,6 +454,14 @@ window.editarFechaPago = function(cell) {
         }
     });
 };
+
+/** Escapa un texto para meterlo en un atributo o en el cuerpo de una celda */
+function escaparAttrProv(texto) {
+    return String(texto === null || texto === undefined ? '' : texto)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/"/g, '&quot;');
+}
 
 /**
  * Formatea un valor como moneda USD

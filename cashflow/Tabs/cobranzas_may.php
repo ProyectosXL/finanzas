@@ -117,7 +117,7 @@
                         <tr>
                             <th rowspan="2">Tipo</th>
                             <th rowspan="2">COD_CLI</th>
-                            <th rowspan="2">RAZON_SOC</th>
+                            <th rowspan="2" class="col-texto">RAZON_SOC</th>
                             <th rowspan="2">FECHA</th>
                             <th rowspan="2">T_COMP</th>
                             <th rowspan="2">N_COMP</th>

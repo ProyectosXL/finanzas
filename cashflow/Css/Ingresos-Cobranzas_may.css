@@ -72,10 +72,12 @@
     border-top: 2px solid var(--border-color, #e2e5ed);
 }
 
-/* Column widths */
-#tablaCobranzasMay tbody td:nth-child(3),
-#tablaCobranzasMay thead th:nth-child(3) {
-    min-width: 200px;
+/* El ancho de la razón social lo pone .col-texto (Css/main.css), que además
+   la recorta con puntos suspensivos en vez de dejar que envuelva. Se deja de
+   direccionar la columna por nth-child: un índice escrito en duro se
+   desactualiza en silencio en cuanto alguien agrega una columna adelante. */
+.tab-cobranzas_may {
+    --col-texto-ancho: 250px;
 }
 
 /* Periodic columns */

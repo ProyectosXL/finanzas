@@ -318,6 +318,57 @@ body {
     overflow: auto;
 }
 
+/* ----------------------------------------------------------------------------
+   UNA FILA POR FILA
+   ----------------------------------------------------------------------------
+   Las celdas NO envuelven. Sin esto pasan dos cosas, y las dos rompen la
+   grilla como grilla:
+
+     1. "$ 4.186.288,48" se parte entre el signo y el número. El espacio es un
+        punto de corte válido para el navegador, y la columna de importes es
+        angosta porque al lado hay veintiocho columnas de días.
+     2. Una razón social larga estira la fila a tres o cuatro renglones, y las
+        celdas del eje quedan flotando en el medio de una fila altísima.
+
+   Un subtítulo dentro de la celda sigue yendo abajo: es un <div>, o sea un
+   bloque, y nowrap no lo afecta. Eso es a propósito — es el código de cliente
+   debajo del nombre en Echeqs.
+
+   LAS CELDAS CON colspan QUEDAN AFUERA, y no es un detalle: en estas tablas
+   una celda que abarca varias columnas es siempre un texto y no un dato — el
+   "No hay cheques con fecha de hoy en adelante" del listado vacío, el corte
+   por estado del pie de Echeqs, el rótulo del grupo del eje—. Forzarles una
+   sola línea las haría desbordar a lo ancho justamente cuando lo que tienen
+   para decir es largo.
+   ---------------------------------------------------------------------------- */
+.tabla-temporal .table th:not([colspan]),
+.tabla-temporal .table td:not([colspan]) {
+    white-space: nowrap;
+}
+
+/* El texto largo se recorta con puntos suspensivos en vez de envolver o de
+   estirar la columna sin techo. El valor completo va en el `title` de la
+   celda, así que no se pierde: se pide con el mouse encima.
+
+   El ancho va FIJO -mismo min que max- y no sólo como máximo: en una tabla con
+   `table-layout: auto` un `max-width` suelto es una sugerencia que el
+   navegador ignora en cuanto el contenido no entra, y entonces no hay contra
+   qué recortar. Es el mismo truco que ya usaba `.cf-col-concepto` en el
+   tablero.
+
+   Cada pestaña puede correr el ancho con --col-texto-ancho sobre su
+   contenedor, sin tocar esta regla. */
+.tabla-temporal .table .col-texto {
+    min-width: var(--col-texto-ancho, 230px);
+    max-width: var(--col-texto-ancho, 230px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* Explícito y no heredado de la regla de arriba: text-overflow no hace
+       nada sin nowrap, y si alguien pone esta clase en una celda con colspan
+       el recorte tiene que seguir funcionando. */
+    white-space: nowrap;
+}
+
 /* El fondo tiene que ser OPACO o se transparenta el contenido al scrollear.
    Es el mismo --bg-light que ya usa .table thead th, pero explícito: un
    background heredado o transparente deja ver las filas pasar por debajo. */

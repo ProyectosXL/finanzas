@@ -99,7 +99,7 @@
                     <table id="tablaProveedoresExterior" class="table table-hover mb-0">
                         <thead>
                             <tr>
-                                <th rowspan="2">Proveedor</th>
+                                <th rowspan="2" class="col-texto">Proveedor</th>
                                 <th rowspan="2">Contenedor</th>
                                 <th rowspan="2">Orden Compra</th>
                                 <th rowspan="2">Despachante</th>

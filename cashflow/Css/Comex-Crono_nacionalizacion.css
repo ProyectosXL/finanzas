@@ -51,10 +51,11 @@
 }
 
 /* Anchos específicos de columnas */
-#tablaCronoNacionalizacion tbody td:nth-child(2),
-#tablaCronoNacionalizacion thead th:nth-child(2) {
-    min-width: 200px;
-    max-width: 300px;
+/* El ancho del proveedor lo pone .col-texto (Css/main.css), que además lo
+   recorta con puntos suspensivos en vez de dejar que envuelva. Acá sólo se
+   corre el ancho para esta pestaña. */
+.tab-crono_nacionalizacion {
+    --col-texto-ancho: 220px;
 }
 
 #tablaCronoNacionalizacion tbody td:nth-child(6),

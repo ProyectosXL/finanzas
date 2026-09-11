@@ -102,7 +102,7 @@
                         <thead>
                             <tr>
                                 <th rowspan="2">Fecha Est. EMB</th>
-                                <th rowspan="2">Proveedor</th>
+                                <th rowspan="2" class="col-texto">Proveedor</th>
                                 <th rowspan="2">Contenedor</th>
                                 <th rowspan="2">Orden Compra</th>
                                 <th rowspan="2">Despachante</th>

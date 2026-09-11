@@ -285,7 +285,14 @@
             }
 
             html += `<td><strong>${item.COD_CLI || ''}</strong>${marcaManual(item)}</td>`;
-            html += `<td>${item.RAZON_SOC || ''}</td>`;
+
+            // El nombre se recorta con puntos suspensivos (.col-texto) para que
+            // la fila sea una sola línea. El title lo devuelve completo: lo que
+            // se recorta se puede pedir, no se pierde.
+            var razon = item.RAZON_SOC || '';
+
+            html += '<td class="col-texto" title="' + escaparAttr(razon) + '">'
+                + escaparAttr(razon) + '</td>';
             
             // Columnas ocultables en resumen
             html += `<td class="center col-detail">${formatDate(item.FECHA)}</td>`;
