@@ -24,7 +24,42 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 
 ---
 
-## Ejecución de los scripts
+## Para pasar a producción: los scripts, en orden
+
+**Todos van contra `central`.** Todos son reejecutables y ninguno borra nada: lo que reemplazan queda inhabilitado. Si no se corren, la pantalla **no falla** — avisa.
+
+### Scripts nuevos
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 1 | `sql/cashflow_cobranzas_escala_general.sql` | Crea `RO_T_CASHFLOW_COBRANZAS_ESCALA_DESC` y siembra la escala de descuento general (8/6/4/0%) | Todas las facturas proyectan con **0% de descuento** |
+| 2 | `sql/cashflow_cobranzas_fecha_manual.sql` | Crea `RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL` | La fecha de cobro siempre sale del PPP y la celda editable no guarda |
+| 3 | `sql/cashflow_estructura_split_cobranzas_fr.sql` | Parte la fila `COBRANZAS_FR` en `COBRANZAS_FR_REAL` + `COBRANZAS_FR_PROY` | El tablero sigue mostrando real y proyectada en un solo número |
+| 4 | `sql/cashflow_dolares_comitente.sql` | Crea `RO_T_CASHFLOW_DOLARES_COMITENTE` y apunta su fila del tablero a la serie `INGRESO` | La pestaña avisa que falta la tabla y **la fila queda inválida**: apuntaría a una serie que el proveedor ya no ofrece |
+
+### Scripts modificados — hay que volver a correrlos
+
+| # | Script | Qué cambió | Si no se corre |
+| --- | --- | --- | --- |
+| 5 | `sql/echeqs_prechequeado.sql` | Agrega `DIAS_PRECHEQUEADO` a `RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE`, en un `ALTER` re-ejecutable | **La pestaña Echeqs falla**: el maestro se lee con esa columna |
+| 6 | `sql/cashflow_estructura.sql` | La semilla nace con la cobranza FR partida y con la fila de dólares | Sólo afecta a una **instalación nueva**; una base ya sembrada no lo necesita |
+| 7 | `sql/cashflow_estructura_disponibilidades.sql` | Mueve también las dos filas nuevas de FR, y `DOLARES_COMITENTE` pasa a `MERGE` | Ídem: sólo una instalación nueva. En una base que ya lo corrió, el script no hace nada |
+
+El único **obligatorio** para que nada se rompa es el **5**. Los otros dejan la pantalla funcionando con menos, y avisando.
+
+> **Orden dentro del grupo:** los cuatro nuevos son independientes entre sí. Los dos de estructura (6 y 7) sólo importan en una instalación desde cero, y ahí el orden es `cashflow_estructura.sql` → `cashflow_estructura_disponibilidades.sql` → `cashflow_estructura_split_cobranzas_fr.sql` → `cashflow_dolares_comitente.sql`.
+
+### Después de correrlos, verificar
+
+Que ninguna fila del tablero duplique importes:
+
+- `COBRANZAS_FR` **inactiva**, y `COBRANZAS_FR_REAL` + `COBRANZAS_FR_PROY` activas. El registro declara `COBRANZA = [COBRANZA_REAL, COBRANZA_PROYECTADA]`, así que si alguien reactiva la total el validador de *Parámetros → Cashflow* lo rechaza.
+- `DOLARES_COMITENTE` **una sola vez**, activa, con serie `INGRESO`.
+- Ningún par (proveedor, serie) repetido entre filas activas. Eso también lo verifica el validador, y *Parámetros → Cashflow* lo muestra arriba del editor.
+
+---
+
+## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
 
@@ -34,9 +69,13 @@ En este orden, contra `central`:
 -- 3. sql/cashflow_saldos.sql   (alimenta Saldo Inicial y Caja Locales)
 -- 4. sql/cashflow_cob_electronicos.sql  (alimenta Cobranzas Pagos Electrónicos)
 -- 5. sql/echeqs_prechequeado.sql        (venta cobrada anticipada y su neteo)
--- 6. sql/cashflow_estructura_split_cobranzas_fr.sql  (parte Cobranzas FR en Real + Proyectada)
--- 7. sql/cashflow_dolares_comitente.sql  (Otros Ingresos: dolares cuenta comitente)
+-- 6. sql/cashflow_cobranzas_escala_general.sql     (escala de descuento de Cobranzas FR)
+-- 7. sql/cashflow_cobranzas_fecha_manual.sql       (fecha de cobro manual por factura)
+-- 8. sql/cashflow_estructura_split_cobranzas_fr.sql  (parte Cobranzas FR en Real + Proyectada)
+-- 9. sql/cashflow_dolares_comitente.sql  (Otros Ingresos: dolares cuenta comitente)
 ```
+
+Los que alimentan pestañas puntuales están documentados en su propio README: `sql/ventas_proyeccion.sql` y compañía en `README-ventas.md`, `sql/cashflow_cobranzas_parametros.sql` y `sql/cashflow_cobranzas_may.sql` en `README-cobranzas-fr.md` y `README-cobranzas-may.md`.
 
 El primero crea `RO_T_CASHFLOW_CONF_SECCION` y `RO_T_CASHFLOW_CONF_FILA`, siembra la estructura y agrega el parámetro `comex_tipo_cambio_usd`.
 
@@ -48,9 +87,11 @@ El cuarto crea las tablas del módulo Cob. Electrónicos, que llena la fila *Cob
 
 El quinto crea el maestro de clientes que operan con **venta cobrada anticipada** —con sus **días de pre-chequeado por cliente**, en un `ALTER` re-ejecutable para las bases que ya tenían la tabla— y la vista de la que sale el neteo de cheques adelantados de Ventas. **La fila *Echeqs en cartera* no lo necesita**: sale entera de Tango y funciona igual sin él. Lo que no funciona sin él es la segunda sub-pestaña de Echeqs, que avisa y no rompe.
 
-El séptimo crea la tabla de carga de los **dólares de la cuenta comitente** y deja su fila del tablero apuntada a la serie del proveedor nuevo. Ver `README-otros-ingresos.md`.
+El sexto y el séptimo crean la **escala de descuento general** y la tabla de **fechas de cobro manuales** de Cobranzas FR. Ver `README-cobranzas-fr.md`.
 
-El sexto da de baja lógica la fila `COBRANZAS_FR` —que traía real y proyectada sumadas en un solo número— y la reemplaza por dos filas, una por serie. No borra la fila vieja y toma la sección de la que reemplaza, para no depender de si se corrió o no el segundo script. Ver `README-cobranzas-fr.md`.
+El octavo da de baja lógica la fila `COBRANZAS_FR` —que traía real y proyectada sumadas en un solo número— y la reemplaza por dos filas, una por serie. No borra la fila vieja y toma la sección de la que reemplaza, para no depender de si se corrió o no el segundo script. Ver `README-cobranzas-fr.md`.
+
+El noveno crea la tabla de carga de los **dólares de la cuenta comitente** y deja su fila del tablero apuntada a la serie del proveedor nuevo. Ver `README-otros-ingresos.md`.
 
 Todos son reejecutables y no pisan nada ya editado. Si no se corrieron, la pantalla **no falla**: muestra un aviso diciendo que hay que correrlos.
 
@@ -509,6 +550,11 @@ cashflow/Tabs/parametros_estructura.php     El editor
 cashflow/Js/Cashflow.js
 cashflow/Js/Parametros-Estructura.js
 cashflow/Css/Cashflow.css
+cashflow/Class/OtrosIngresos.php            Otros Ingresos (README-otros-ingresos.md)
+cashflow/Class/Providers/OtrosIngresosProvider.php
+cashflow/Controller/OtrosIngresosController.php
+cashflow/Tabs/dolares_comitente.php
+cashflow/Tabs/exportaciones_tasky.php       Solo el placeholder
 tests/                                      Arnés de pruebas
 ```
 
@@ -523,10 +569,10 @@ Eliminado: `Tabs/resumen.php`.
 - **El saldo de apertura ya no arranca en cero, pero depende de que alguien cargue.** El módulo Saldos existe (ver `README-saldos.md`) y alimenta *Saldo Inicial*. Mientras no haya ninguna carga, o mientras la última quede vieja, la fila va en cero o desactualizada y **el tablero lo avisa con la fecha del dato**: leer esos saldos como disponibilidad real sería un error caro.
 - **Una fila del Excel todavía no tiene de dónde salir:** *Exportaciones Tasky*. Hasta que exista el módulo que la alimente se muestra en cero y el tablero avisa; queda declarada para que el cuadro tenga la forma completa. *Caja Locales* salió de esta lista cuando se construyó el módulo Saldos, y *Dólares Cuenta Comitente* con **Otros Ingresos** (ver `README-otros-ingresos.md`): esa se carga a mano, pero por una pantalla y no por el Excel, así que sigue entrando al tablero por un proveedor como cualquier otra.
 - **El neteo de cheques adelantados resta importes que ninguna fila del tablero suma.** Un cheque en cartera cierra solo: suma en *Echeqs en cartera* y resta de la cobranza de Ventas. Uno ya aplicado —depositado o endosado a un proveedor— no lo suma nadie, y se netea igual: **el neteo va por tilde y no por estado**, porque los cheques pre-chequeados están casi todos aplicados y filtrarlos dejaría el circuito sin efecto. Es una decisión tomada, no un pendiente; el pie de la sub-pestaña muestra el corte por estado para poder auditar el número. El detalle de lo verificado contra la base está en `README-ventas.md`.
-- **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** para traer la razón social. El tablero no lo sufre, porque usa `getCobranzasFRTotales()`, pero la pestaña Cobranzas FR sí.
+- **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** en Deep Dive, para traer la fecha de emisión de cada comprobante. El tablero no lo sufre —usa `getCobranzasFRTotales()`— y el Resumen tampoco, que desde que no muestra esa columna se la saltea; lo paga sólo el Deep Dive, que es donde se pidió el detalle.
 - **El Dashboard es una maqueta**: no tiene ninguna llamada al servidor, sus números están escritos a mano. El menú lo marca como tal. Cuando se construya de verdad, hay que pasarlo a `datos` en `Class/Menu.php`.
 - **`nacionalizacion_2` está en `$validTabs` de `TabController` pero no tiene archivo ni entrada de menú.** Es configuración muerta: nadie puede llegar ahí, y si llegara vería el placeholder.
 - **`VentasController?action=saveMixCobro` puede grabar un mix que Parámetros rechazaría**: no valida el 100%. Es anterior a este trabajo.
 - `pedir()` está duplicado en `Ingresos-Ventas.js` y `Parametros.js`. El código nuevo usa `pedirJson()` de `main.js`; sacar las dos copias viejas es un cambio aparte.
-- **Las pestañas de datos todavía usan `alert()`.** `Js/notificaciones.js` está enchufado en toda la pestaña Parámetros —sus cuatro sub-pestañas— y disponible para el resto, pero Ventas, Saldos, Echeqs, Cob. Electrónicos y las dos de Comex siguen con el diálogo del navegador. Es el mismo reemplazo, archivo por archivo.
+- **Algunas pestañas de datos todavía usan `alert()`.** `Js/notificaciones.js` está enchufado en toda la pestaña Parámetros, en Cobranzas FR y en Otros Ingresos, y disponible para el resto; Ventas, Saldos, Cob. Electrónicos, Cobranzas May y las dos de Comex siguen con el diálogo del navegador, y Echeqs con un `confirm()` en el tildado masivo. Es el mismo reemplazo, archivo por archivo.
 - Sin login: todo se graba con `USUARIO = NULL`. La costura ya está puesta.
