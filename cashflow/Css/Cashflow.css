@@ -197,3 +197,31 @@
 .tab-cashflow .cf-marca-arrastre {
     color: #6b8fb5;
 }
+
+/* ============================================================================
+   CELDAS ANOTADAS — FECHA DE COBRO PACTADA
+
+   Parte del importe de la celda tiene fecha ACORDADA con el cliente y no
+   estimada con el PPP. Son dos cosas distintas con el mismo aspecto —un
+   promedio estadístico y un compromiso conversado— y quien mira el tablero
+   para decidir necesita poder distinguirlas.
+
+   La marca es un subrayado punteado y no un color de fondo: los fondos de las
+   celdas ya están tomados (cero, negativo, columna fuera de secuencia, primera
+   columna mensual) y agregar uno más volvería ilegible el resto del código de
+   color. El subrayado se superpone a cualquiera de ellos sin taparlo.
+
+   Sólo dice que HAY algo anotado: cuánto y por qué lo dice el title, porque
+   casi nunca es el importe entero de la celda.
+   ============================================================================ */
+
+.tab-cashflow .cf-anotada {
+    /* box-shadow y no border-bottom: un borde corre el contenido un píxel y
+       desalinea los números de la fila contra los de las filas vecinas. */
+    box-shadow: inset 0 -2px 0 -1px #7e57c2;
+    cursor: help;
+}
+
+.tab-cashflow .cf-marca-pactado {
+    color: #7e57c2;
+}

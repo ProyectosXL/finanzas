@@ -39,11 +39,17 @@ class IngresosProvider extends CashflowProvider {
         $real = $h->agrupar($ingresos->getCobranzasFRTotales('real'), 'FECHA', 'IMPORTE');
         $real['moneda_origen'] = 'ARS';
 
-        $proy = $h->agrupar($ingresos->getCobranzasFRTotales('proyectado'), 'FECHA', 'IMPORTE');
-        $proy['moneda_origen'] = 'ARS';
+        $filasProy = $ingresos->getCobranzasFRTotales('proyectado');
 
-        $total = $h->agrupar($ingresos->getCobranzasFRTotales('todos'), 'FECHA', 'IMPORTE');
+        $proy = $h->agrupar($filasProy, 'FECHA', 'IMPORTE');
+        $proy['moneda_origen'] = 'ARS';
+        $proy['detalle'] = $this->detallePactado($h, $filasProy);
+
+        $filasTotal = $ingresos->getCobranzasFRTotales('todos');
+
+        $total = $h->agrupar($filasTotal, 'FECHA', 'IMPORTE');
         $total['moneda_origen'] = 'ARS';
+        $total['detalle'] = $this->detallePactado($h, $filasTotal);
 
         return [
             'COBRANZA' => $total,
@@ -51,5 +57,61 @@ class IngresosProvider extends CashflowProvider {
             'COBRANZA_PROYECTADA' => $proy,
             'COBRANZA_TOTAL' => $total
         ];
+    }
+
+    /**
+     * Que parte del importe de cada columna tiene la fecha de cobro PACTADA A
+     * MANO, en lugar de estimada con el PPP del cliente.
+     *
+     * POR QUE EL TABLERO TIENE QUE MOSTRARLO
+     * Una factura con fecha manual no esta en ninguna propuesta de la app de
+     * cobranzas -si lo estuviera, seria cobranza real-, pero su fecha tampoco
+     * es una estimacion: Tesoreria la hablo con el cliente y la acordo por
+     * fuera. En el tablero los dos casos se ven igual, y no significan lo
+     * mismo: uno es un promedio estadistico y el otro es un compromiso
+     * conversado. Quien mira el numero para tomar una decision necesita poder
+     * distinguirlos.
+     *
+     * Se agrupa con el MISMO Horizonte::agrupar() que el importe, asi que la
+     * parte pactada cae siempre en la misma columna que el total al que anota:
+     * repartirla con otra regla la pondria en una celda donde no hay nada que
+     * anotar.
+     *
+     * @param Horizonte $h
+     * @param array $filas Filas de Ingresos::getCobranzasFRTotales()
+     * @return array Mapa columna => ['importe', 'nota']
+     */
+    private function detallePactado($h, $filas) {
+        $importes = $h->agrupar($filas, 'FECHA', 'IMPORTE_PACTADO');
+        $comprobantes = $h->agrupar($filas, 'FECHA', 'COMP_PACTADOS');
+
+        $detalle = [];
+
+        foreach (['dias' => 'DIA|', 'meses' => 'MES|'] as $rama => $prefijo) {
+            foreach ($importes[$rama] as $clave => $importe) {
+                if ($importe == 0) {
+                    continue;
+                }
+
+                $cant = intval($comprobantes[$rama][$clave]);
+
+                $detalle[$prefijo . $clave] = [
+                    'importe' => $importe,
+                    'nota' => self::plata($importe) . ' de esta celda ('
+                        . $cant . ' comprobante' . ($cant === 1 ? '' : 's')
+                        . ') tienen fecha de cobro PACTADA con el cliente, cargada a mano en '
+                        . 'Cobranzas FR. No estan en ninguna propuesta de la app: Tesoreria las '
+                        . 'acordo por fuera. El resto de la celda sale del PPP, que es una '
+                        . 'estimacion.'
+                ];
+            }
+        }
+
+        return $detalle;
+    }
+
+    /** Formato de importe para las notas */
+    private static function plata($n) {
+        return '$ ' . number_format(floatval($n), 2, ',', '.');
     }
 }

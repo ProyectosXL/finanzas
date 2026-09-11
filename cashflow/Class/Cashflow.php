@@ -278,6 +278,10 @@ class Cashflow {
                 'dias' => $vacia['dias'],
                 'meses' => $vacia['meses'],
                 'fuera_horizonte' => 0,
+                // Anotaciones por columna que deja el proveedor: que parte del
+                // importe de una celda tiene algo que contar. NO es un importe
+                // mas y no entra en ninguna suma; ver CashflowProvider.
+                'detalle' => [],
                 'sin_datos' => false
             ];
 
@@ -319,6 +323,12 @@ class Cashflow {
             $fila['moneda_origen'] = $s['moneda_origen'];
             $fila['tipo_cambio'] = $s['tipo_cambio'];
             $fila['fuera_horizonte'] = $s['fuera_horizonte'];
+
+            // Las anotaciones viajan tal cual. Las filas DERIVADAS -subtotales,
+            // flujo neto, saldo final- no las heredan y se quedan con el arreglo
+            // vacio: una anotacion dice algo sobre el origen de un importe, y el
+            // de un subtotal es la suma de varias filas, no ese origen.
+            $fila['detalle'] = $s['detalle'];
 
             foreach ($s['warnings'] as $w) {
                 $this->warnings[] = $w;

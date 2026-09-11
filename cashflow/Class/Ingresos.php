@@ -866,13 +866,30 @@ class Ingresos {
     }
 
     /**
-     * Cobranza de franquicias agregada por fecha de cobro, para el tablero de Cashflow.
-     * 
+     * Cobranza de franquicias agregada por fecha de cobro, para el tablero de
+     * Cashflow.
+     *
+     * ADEMAS DEL IMPORTE, DEVUELVE QUE PARTE DE EL ESTA PACTADA A MANO.
+     *
+     * Una factura con fecha de cobro manual es una que Tesoreria hablo con el
+     * cliente y acordo por fuera de la app de cobranzas: no esta en ninguna
+     * propuesta, pero la fecha no es una estimacion del PPP sino algo que
+     * alguien pacto. Para quien mira el tablero son dos cosas distintas con la
+     * misma pinta, y sin distinguirlas el numero de una columna no dice si es
+     * una proyeccion estadistica o un compromiso conversado.
+     *
+     * Va en la misma pasada y no en un metodo aparte a proposito:
+     * getCobranzasFRPendientesProyectadas() recorre todas las facturas PEN, y
+     * pedirle el detalle por separado seria correr esa consulta una vez mas
+     * por cada carga del tablero.
+     *
      * @param string $origen 'todos', 'real', o 'proyectado'
-     * @return array Filas ['FECHA' => 'Y-m-d', 'IMPORTE' => float]
+     * @return array Filas ['FECHA', 'IMPORTE', 'IMPORTE_PACTADO', 'COMP_PACTADOS']
      */
     public function getCobranzasFRTotales($origen = 'todos') {
         $totalesPorFecha = [];
+        $pactadoPorFecha = [];
+        $compPorFecha = [];
 
         // 1. Cobranza Real
         if ($origen === 'todos' || $origen === 'real') {
@@ -907,18 +924,32 @@ class Ingresos {
         // 2. Cobranza Proyectada (Facturas PEN con PPP)
         if ($origen === 'todos' || $origen === 'proyectado') {
             $proy = $this->getCobranzasFRPendientesProyectadas();
+
             foreach ($proy as $p) {
                 $f = $p['Cobro'];
-                $totalesPorFecha[$f] = ($totalesPorFecha[$f] ?? 0.0) + floatval($p['importe_neto']);
+                $importe = floatval($p['importe_neto']);
+
+                $totalesPorFecha[$f] = ($totalesPorFecha[$f] ?? 0.0) + $importe;
+
+                // Solo la proyeccion puede tener fecha pactada: la cobranza
+                // real ya sale de una propuesta, o sea que su fecha siempre
+                // esta acordada y marcarla no distinguiria nada.
+                if (!empty($p['FECHA_MANUAL'])) {
+                    $pactadoPorFecha[$f] = ($pactadoPorFecha[$f] ?? 0.0) + $importe;
+                    $compPorFecha[$f] = ($compPorFecha[$f] ?? 0) + 1;
+                }
             }
         }
 
         $resultado = [];
         ksort($totalesPorFecha);
+
         foreach ($totalesPorFecha as $f => $imp) {
             $resultado[] = [
                 'FECHA' => $f,
-                'IMPORTE' => round($imp, 2)
+                'IMPORTE' => round($imp, 2),
+                'IMPORTE_PACTADO' => round($pactadoPorFecha[$f] ?? 0.0, 2),
+                'COMP_PACTADOS' => $compPorFecha[$f] ?? 0
             ];
         }
 
