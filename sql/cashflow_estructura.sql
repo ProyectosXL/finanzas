@@ -214,8 +214,13 @@ USING (VALUES
        pesos la hace el proveedor. Ver sql/cashflow_dolares_comitente.sql. */
     ('DOLARES_COMITENTE', 'Dolares Cuenta Comitente', 'INGRESOS', 'INGRESO', 1,
         'DOLARES_COMITENTE', 'INGRESO', 65),
+    /* Facturas pendientes en dolares a Tasky, la razon social del grupo en
+       Uruguay. Salen de GVA12 y las valua a dolar de hoy el proveedor. Ver
+       sql/cashflow_exportaciones_tasky.sql. */
+    ('EXPORTACIONES', 'Exportaciones Tasky', 'INGRESOS', 'INGRESO', 1,
+        'EXPORTACIONES', 'COBRANZA', 70),
     ('SUB_INGRESOS', 'Total Ingresos', 'INGRESOS', 'SUBTOTAL', 0,
-        NULL, NULL, 70),
+        NULL, NULL, 80),
 
     /* -- Costo de Mercaderia ------------------------------------------------- */
     ('PROV_EXTERIOR', 'Proveedores Exterior', 'COSTO_MERCADERIA', 'EGRESO', 1,

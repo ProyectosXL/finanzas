@@ -160,24 +160,14 @@ $r = CashflowEstructura::validar(
 chequear('apuntada a la serie vieja, la fila es invalida', false, $r['valido']);
 
 /* ================================================================
-   Exportaciones Tasky: solo el item de menu
+   Exportaciones Tasky ya tiene modulo: el detalle esta en
+   test_exportaciones_tasky.php. Aca solo que dejo de ser placeholder.
    ================================================================ */
 seccion('Exportaciones Tasky');
 
-$exp = CashflowRegistry::meta('EXPORTACIONES');
-
-chequear('se llama Exportaciones Tasky', 'Exportaciones Tasky', $exp['nombre']);
-chequear('enlaza a su propia pestana', 'exportaciones_tasky', $exp['tab']);
-chequear('sigue sin modulo: rinde cero y el tablero avisa',
-    false, CashflowRegistry::disponible('EXPORTACIONES'));
-chequear('la descripcion aclara que Tasky es la razon social en Uruguay', true,
-    mb_stripos($exp['descripcion'], 'Uruguay') !== false);
-
-// El estado NO se declara: se detecta por el include del placeholder. Asi una
-// declaracion que quedo vieja se corrige sola.
-chequear('el menu la detecta como placeholder',
-    true, Menu::esPlaceholder('exportaciones_tasky'));
-chequear('y la pestana de dolares NO lo es',
+chequear('ya tiene modulo: no es placeholder',
+    false, Menu::esPlaceholder('exportaciones_tasky'));
+chequear('y la pestana de dolares tampoco',
     false, Menu::esPlaceholder('dolares_comitente'));
 
 /* ================================================================

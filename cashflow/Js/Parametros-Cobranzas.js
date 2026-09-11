@@ -33,15 +33,19 @@
             inputBusqueda.addEventListener('keyup', filtrarClientes);
         }
 
-        var inputMay = document.querySelector('input[data-clave="cobranzas_may_dias_vto"]');
+        // Los dos plazos globales -mayoristas y exportaciones Tasky- se
+        // guardan solos al cambiar, con el mismo endpoint.
+        PLAZOS_GLOBALES.forEach(function(clave) {
+            var input = document.querySelector('input[data-clave="' + clave + '"]');
 
-        if (inputMay) {
-            inputMay.addEventListener('change', function() {
-                guardarParametroGlobal(this);
-            });
-        }
+            if (input) {
+                input.addEventListener('change', function() {
+                    guardarParametroGlobal(this);
+                });
+            }
+        });
 
-        cargarParametroMayoristas();
+        cargarPlazosGlobales();
         cargarEscala();
         cargarClientes();
     }
@@ -270,29 +274,33 @@
     }
 
     /* ================================================================
-       PARÁMETRO GLOBAL DE MAYORISTAS
+       PLAZOS GLOBALES: MAYORISTAS Y EXPORTACIONES TASKY
        ================================================================ */
 
-    function cargarParametroMayoristas() {
-        var inputMay = document.querySelector('input[data-clave="cobranzas_may_dias_vto"]');
+    /** Los parámetros de plazo que se editan en esta pantalla */
+    var PLAZOS_GLOBALES = ['cobranzas_may_dias_vto', 'exportaciones_tasky_dias_cobro'];
 
-        if (!inputMay) {
-            return;
-        }
-
+    function cargarPlazosGlobales() {
         fetch('Controller/ParametrosController.php?action=getParametros')
             .then(res => res.json())
             .then(result => {
-                if (result.success && result.data) {
-                    var pMay = result.data.find(p => p.CLAVE === 'cobranzas_may_dias_vto');
-
-                    if (pMay && pMay.VALOR) {
-                        inputMay.value = pMay.VALOR;
-                    }
+                if (!result.success || !result.data) {
+                    return;
                 }
+
+                PLAZOS_GLOBALES.forEach(function(clave) {
+                    var input = document.querySelector('input[data-clave="' + clave + '"]');
+                    var p = result.data.find(function(x) { return x.CLAVE === clave; });
+
+                    // Si el parámetro no está sembrado queda el valor por
+                    // defecto del HTML, que es el mismo que usa el backend.
+                    if (input && p && p.VALOR) {
+                        input.value = p.VALOR;
+                    }
+                });
             })
             .catch(err => {
-                console.error('Error al cargar parámetro cobranzas_may_dias_vto:', err);
+                console.error('Error al cargar los plazos globales de cobranzas:', err);
             });
     }
 

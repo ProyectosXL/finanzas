@@ -44,7 +44,8 @@
    una persona. Este modulo resuelve el origen de datos unicamente por
    proveedor, asi que hasta que exista el modulo que las alimente se muestran en
    cero y el tablero avisa. Quedan declaradas para que el cuadro tenga la forma
-   completa.
+   completa. Hoy las tres ya tienen modulo: Saldos, Otros Ingresos y
+   Exportaciones Tasky (que lee las facturas a Tasky de GVA12).
 
    ES REEJECUTABLE: todo el cambio va dentro de un IF que pregunta si la seccion
    DISPONIBILIDADES ya existe, asi que una segunda corrida no hace nada y no
@@ -111,13 +112,14 @@ BEGIN
     WHERE CODIGO = 'COBRANZAS_MAY';
 
     /* ---- 3. Filas nuevas de Disponibilidades --------------------------- */
-    /* DOLARES_COMITENTE puede venir ya sembrado por cashflow_estructura.sql:
-       desde que tiene pantalla propia, la semilla lo crea en INGRESOS. Por eso
-       va con MERGE y no con INSERT -CODIGO es UNIQUE- y por eso su serie es
-       'INGRESO': un INSERT a secas reventaria en una instalacion nueva. */
+    /* DOLARES_COMITENTE y EXPORTACIONES pueden venir ya sembrados por
+       cashflow_estructura.sql: desde que tienen pantalla propia, la semilla
+       los crea en INGRESOS. Por eso van con MERGE y no con INSERT -CODIGO es
+       UNIQUE-: un INSERT a secas reventaria en una instalacion nueva. */
     MERGE dbo.RO_T_CASHFLOW_CONF_FILA AS T
     USING (VALUES
-        ('DOLARES_COMITENTE', 'Dolares Cuenta Comitente', 'DOLARES_COMITENTE', 'INGRESO', 60)
+        ('DOLARES_COMITENTE', 'Dolares Cuenta Comitente', 'DOLARES_COMITENTE', 'INGRESO', 60),
+        ('EXPORTACIONES', 'Exportaciones Tasky', 'EXPORTACIONES', 'COBRANZA', 70)
     ) AS S (CODIGO, NOMBRE, PROVIDER, SERIE, ORDEN)
         ON T.CODIGO = S.CODIGO
     WHEN MATCHED THEN
@@ -130,8 +132,6 @@ BEGIN
     INSERT INTO dbo.RO_T_CASHFLOW_CONF_FILA
         (CODIGO, NOMBRE, SECCION, TIPO, COMPUTA, ORIGEN_PROVIDER, ORIGEN_SERIE, ORDEN, ACTIVO)
     VALUES
-        ('EXPORTACIONES', 'Exportaciones Tasky', 'DISPONIBILIDADES', 'INGRESO', 1,
-            'EXPORTACIONES', 'COBRANZA', 70, 1),
         ('CAJA_LOCALES', 'Caja Locales', 'DISPONIBILIDADES', 'INGRESO', 1,
             'CAJA_LOCALES', 'DEPOSITOS', 80, 1),
         /* El subtotal del bloque. Incluye la fila de saldo: es el "Disponible"

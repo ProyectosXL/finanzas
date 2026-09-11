@@ -6,17 +6,18 @@
 ?>
 
 <div class="modulo-descripcion mb-3">
-    La <strong>escala de descuento</strong> es una sola y vale para todos los clientes. Lo que sí es por cliente es el <strong>Plazo Promedio de Pago (PPP)</strong>, que se calcula con los últimos 3 cobros y se puede pisar a mano. Acá también se edita el <strong>Plazo de Vencimiento Mayorista</strong>.
+    La <strong>escala de descuento</strong> es una sola y vale para todos los clientes. Lo que sí es por cliente es el <strong>Plazo Promedio de Pago (PPP)</strong>, que se calcula con los últimos 3 cobros y se puede pisar a mano. Acá también se editan el <strong>Plazo de Vencimiento Mayorista</strong> y el <strong>Plazo de Cobro de Exportaciones Tasky</strong>.
 </div>
 
 <div class="row g-3 mb-4">
 
-    <!-- Parámetros Mayoristas -->
+    <!-- Plazos globales: Mayoristas y Exportaciones Tasky. Los dos son el
+         mismo mecanismo -fecha de emisión + días- y por eso van juntos. -->
     <div class="col-lg-4">
         <div class="card h-100">
             <div class="card-header">
-                <h5 class="mb-0">Cobranzas Mayoristas</h5>
-                <small class="text-muted">Parámetro global de proyección para clientes mayoristas</small>
+                <h5 class="mb-0">Plazos de Cobro</h5>
+                <small class="text-muted">Parámetros globales: días a sumar a la fecha de emisión</small>
             </div>
             <div class="card-body">
                 <div class="param-card" id="card-cobranzas_may_dias_vto">
@@ -27,6 +28,16 @@
                         <span class="input-group-text">días</span>
                     </div>
                     <div class="param-hint">Días a sumar a la F. Emisión (predeterminado: 60 días).</div>
+                </div>
+
+                <div class="param-card mt-3" id="card-exportaciones_tasky_dias_cobro">
+                    <div class="param-clave">Plazo de Cobro Exportaciones Tasky</div>
+                    <div class="param-descripcion">Días a sumar a la fecha de emisión de las facturas en dólares a Tasky para estimar su fecha de cobro. Una factura cuya fecha estimada ya pasó se muestra como vencida, en el primer día del eje.</div>
+                    <div class="input-group input-group-sm">
+                        <input type="number" step="1" min="1" class="form-control param-input" data-clave="exportaciones_tasky_dias_cobro" data-tipo="entero" value="30">
+                        <span class="input-group-text">días</span>
+                    </div>
+                    <div class="param-hint">Predeterminado: 30 días. Si el parámetro no está sembrado, la pestaña usa ese valor.</div>
                 </div>
             </div>
         </div>

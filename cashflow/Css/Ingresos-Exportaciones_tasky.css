@@ -1,0 +1,193 @@
+/* Ingresos - Exportaciones Tasky CSS
+   Mismo molde que Ingresos-Cobranzas_may.css: tabla temporal con header de
+   dos filas fijo, columnas descriptivas fijas y pie de totales. */
+
+.tab-exportaciones_tasky {
+    /* El ancho de la razón social lo pone .col-texto (Css/main.css), que la
+       recorta con puntos suspensivos en vez de dejar que envuelva. */
+    --col-texto-ancho: 250px;
+}
+
+/* Loading Spinner */
+.tab-exportaciones_tasky .loading-spinner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+}
+
+.tab-exportaciones_tasky .table-wrapper {
+    max-height: calc(100vh - 420px);
+    overflow-y: auto;
+    overflow-x: auto;
+}
+
+.tab-exportaciones_tasky .spinner {
+    border: 3px solid var(--border-light, #eef0f5);
+    border-top: 3px solid #0d6efd;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.tab-exportaciones_tasky .loading-spinner p {
+    margin-top: 15px;
+    color: var(--text-muted, #8c93a8);
+    font-size: 13px;
+}
+
+/* Falta en main.css: la usan las tarjetas de dólares y cotización */
+.tab-exportaciones_tasky .kpi-card-icon.purple {
+    background: rgba(111, 66, 193, 0.1);
+    color: #6f42c1;
+}
+
+/* Table Headers */
+#tablaExportacionesTasky {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+#tablaExportacionesTasky thead th {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 10px 8px;
+    white-space: nowrap;
+    position: sticky;
+    background-color: white;
+    z-index: 10;
+    border-bottom: 2px solid var(--border-color, #e2e5ed);
+}
+
+/* Primera fila de encabezados (rowspan="2") */
+#tablaExportacionesTasky thead tr:nth-child(1) th {
+    top: 0;
+}
+
+/* Segunda fila de encabezados (días/meses) */
+#tablaExportacionesTasky thead tr:nth-child(2) th {
+    /* Lo mide ajustarStickyHeaders() en main.js. Ver Ingresos-Cobranzas_fr.css */
+    top: var(--thead-row1-height, 38px);
+}
+
+.tab-exportaciones_tasky .table-group-divider {
+    border-top: 2px solid var(--border-color, #e2e5ed);
+}
+
+/* Columnas de referencia histórica (cotización e importe de facturación):
+   atenuadas para que no se confundan con la valuación de hoy, que es la que
+   vale. */
+#tablaExportacionesTasky .col-referencia {
+    color: var(--text-muted, #8c93a8);
+    font-weight: 400;
+}
+
+/* Periodic columns */
+.tab-exportaciones_tasky .day-column,
+.tab-exportaciones_tasky .month-column {
+    min-width: 70px;
+    text-align: center;
+    font-size: 10px;
+}
+
+/* Cell styles */
+.tab-exportaciones_tasky .cell-with-value {
+    background-color: #e8f5e9 !important;
+    font-weight: 600;
+    color: #2e7d32;
+}
+
+.tab-exportaciones_tasky .currency {
+    font-variant-numeric: tabular-nums;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    text-align: right;
+}
+
+.tab-exportaciones_tasky .center {
+    text-align: center;
+}
+
+/* Totals Row */
+#tablaExportacionesTasky tfoot tr {
+    background-color: #f8f9fa;
+    border-top: 2px solid #0d6efd;
+    font-weight: 700;
+}
+
+#tablaExportacionesTasky tfoot td {
+    padding: 12px 8px;
+    font-size: 13px;
+}
+
+/* El rótulo va en la celda de N_COMP -la primera fija por defecto- y no en
+   una celda con colspan sobre todo el bloque. Ver la nota equivalente en
+   Ingresos-Cobranzas_fr.css. */
+#tablaExportacionesTasky tfoot .total-label {
+    text-align: left;
+    white-space: nowrap;
+    color: var(--text-primary, #1a1d29);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+#tablaExportacionesTasky tfoot .cell-with-value {
+    background-color: #c8e6c9 !important;
+    color: #1b5e20;
+}
+
+.tab-exportaciones_tasky .total-column {
+    background: var(--bg-light, #f5f6fa);
+    font-weight: 600;
+    border-left: 2px solid var(--border-color, #e2e5ed);
+    white-space: nowrap;
+}
+
+.tab-exportaciones_tasky .col-parcial {
+    font-style: italic;
+}
+
+.tab-exportaciones_tasky .col-parcial::after {
+    content: '*';
+    opacity: 0.6;
+}
+
+.fila-exportacion {
+    background-color: #fcfdfe !important;
+}
+
+/* Una factura vencida se distingue en toda la fila, no sólo en el badge:
+   está en la grilla en el primer día del eje, y quien lea ese número tiene
+   que ver que no es cobranza estimada para hoy. */
+.fila-vencida td {
+    background-color: #fff8e1 !important;
+}
+
+.badge-cobro-exp {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    border: 1px solid #c8e6c9;
+    white-space: nowrap;
+}
+
+.badge-vencida-exp {
+    background-color: #fff3cd;
+    color: #856404;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid #ffe69c;
+    white-space: nowrap;
+}

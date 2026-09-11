@@ -104,7 +104,7 @@ class Menu {
                 ['tab' => 'cobranzas_fr',     'nombre' => 'Cobranzas FR',       'icono' => 'fa-hand-holding-dollar', 'estado' => self::DATOS],
                 ['tab' => 'cobranzas_may',    'nombre' => 'Cobranzas May',      'icono' => 'fa-warehouse',           'estado' => self::DATOS],
                 ['tab' => 'cob_electronicos', 'nombre' => 'Cob. Electrónicos',  'icono' => 'fa-credit-card',         'estado' => self::DATOS],
-                ['tab' => 'exportaciones_tasky', 'nombre' => 'Exportaciones Tasky', 'icono' => 'fa-file-export',   'estado' => self::PENDIENTE]
+                ['tab' => 'exportaciones_tasky', 'nombre' => 'Exportaciones Tasky', 'icono' => 'fa-file-export',   'estado' => self::DATOS]
             ]
         ],
         /* Otros Ingresos va DESPUES de Ingresos y aparte: Ingresos agrupa lo
