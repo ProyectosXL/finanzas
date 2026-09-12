@@ -164,7 +164,12 @@
 
                             <div id="wrapperAcumulada" style="display: none;">
                                 <div class="table-responsive tabla-temporal">
-                                    <table id="tablaAcumulada" class="table table-hover mb-0">
+                                    <!-- data-orden="no": tiene una columna de
+                                         ACUMULADO, que sólo significa algo con
+                                         los meses en orden. Ordenada por otra
+                                         columna, esa columna se leería como una
+                                         serie que sube y baja sin sentido. -->
+                                    <table id="tablaAcumulada" class="table table-hover mb-0" data-orden="no">
                                         <thead>
                                             <tr id="acumuladaHeader"></tr>
                                         </thead>
@@ -186,7 +191,10 @@
 
                             <div id="wrapperBalance" style="display: none;">
                                 <div class="table-responsive tabla-temporal">
-                                    <table id="tablaBalance" class="table table-hover mb-0">
+                                    <!-- data-orden="no" por el mismo motivo que
+                                         tablaAcumulada: lleva el acumulado del
+                                         balance. -->
+                                    <table id="tablaBalance" class="table table-hover mb-0" data-orden="no">
                                         <thead>
                                             <tr id="balanceHeader"></tr>
                                         </thead>

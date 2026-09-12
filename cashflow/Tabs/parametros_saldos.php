@@ -63,6 +63,12 @@
                     </small>
                 </div>
                 <div class="d-flex gap-2">
+                    <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
+                    <button class="btn btn-sm btn-outline-success" data-exportar="tablaSpCuentas"
+                            data-exportar-nombre="Parametros_Saldos_Cuentas"
+                            title="Exportar a Excel lo que se está viendo">
+                        <i class="fas fa-file-excel me-1"></i> Exportar
+                    </button>
                     <button class="btn btn-sm btn-outline-primary sp-btn-nueva" data-tipo="BANCO">
                         <i class="fas fa-plus me-1"></i> Agregar banco
                     </button>
@@ -105,7 +111,7 @@
 
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover mb-0">
+                    <table class="table table-hover mb-0" id="tablaSpCuentas">
                         <thead>
                             <tr>
                                 <th>Nombre</th>
@@ -132,9 +138,17 @@
                         después. Cada uno con su moneda.
                     </small>
                 </div>
-                <button class="btn btn-sm btn-outline-primary sp-btn-nueva" data-tipo="OTRO">
-                    <i class="fas fa-plus me-1"></i> Agregar saldo
-                </button>
+                <div class="d-flex gap-2">
+                    <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
+                    <button class="btn btn-sm btn-outline-success" data-exportar="tablaSpOtros"
+                            data-exportar-nombre="Parametros_Saldos_Otros"
+                            title="Exportar a Excel lo que se está viendo">
+                        <i class="fas fa-file-excel me-1"></i> Exportar
+                    </button>
+                    <button class="btn btn-sm btn-outline-primary sp-btn-nueva" data-tipo="OTRO">
+                        <i class="fas fa-plus me-1"></i> Agregar saldo
+                    </button>
+                </div>
             </div>
 
             <div class="card-body border-bottom sp-form-nueva" data-tipo="OTRO" style="display: none;">
@@ -171,7 +185,7 @@
 
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover mb-0">
+                    <table class="table table-hover mb-0" id="tablaSpOtros">
                         <thead>
                             <tr>
                                 <th>Nombre</th>
@@ -201,6 +215,12 @@
                     </small>
                 </div>
                 <div class="d-flex gap-2">
+                    <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
+                    <button class="btn btn-sm btn-outline-success" data-exportar="tablaSpLocales"
+                            data-exportar-nombre="Parametros_Saldos_Locales"
+                            title="Exportar a Excel lo que se está viendo">
+                        <i class="fas fa-file-excel me-1"></i> Exportar
+                    </button>
                     <button id="btnSincronizarLocales" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-rotate me-1"></i> Sincronizar con locales
                     </button>
@@ -212,7 +232,7 @@
 
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover mb-0">
+                    <table class="table table-hover mb-0" id="tablaSpLocales">
                         <thead>
                             <tr>
                                 <th style="width: 90px;">Nro.</th>

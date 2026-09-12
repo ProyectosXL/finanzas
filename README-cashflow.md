@@ -265,6 +265,157 @@ Cobranzas FR, Cobranzas May y Echeqs además **no tenían header fijo**: usaban 
 
 ---
 
+## Ordenar por encabezado: un control, treinta y seis tablas
+
+Ninguna tabla del módulo se podía ordenar. Ahora se ordenan todas, con
+`Js/tabla-orden.js`, que es el tercer control compartido junto a `eje-vistas.js` y
+`columnas-fijas.js`.
+
+> **Por qué no DataTables**, que está cargado y lo haría solo: toma el control del
+> `<table>` entero —paginado, su propio buscador, su propio redibujo— y estas tablas ya
+> tienen resuelto todo eso de otra forma. El eje temporal, las columnas fijas, el header y
+> el pie fijos, el buscador propio y el filtro server-side pelearían con los cuatro.
+
+**Click en el `<th>`: asc → desc → sin orden.** El tercer click devuelve la tabla al orden
+que le dio el backend. El indicador es una **clase con un `::after`** y no un `<i>`
+agregado, y eso no es una preferencia de estilo: `main.js` observa `#tabContent` por
+`childList`, así que un hijo nuevo en el encabezado dispararía el observer y el par
+*observer → reaplicar → pintar* no pararía nunca. Por el mismo motivo `aplicar()` **no
+escribe en el DOM si las filas ya están en el orden pedido**: mover filas *sí* es un cambio
+de `childList`, y esa guarda es lo que corta la cadena en la segunda pasada.
+
+### Se ordena por el valor, no por el string
+
+`$ 1.000.000,00` es menor que `$ 9,00` como texto. El tipo se detecta por contenido:
+importes en formato es-AR (`$ 1.234,56`, `USD -1.000,00`, `8%`), fechas (`dd/mm/aaaa` y
+`aaaa-mm-dd`) y **rótulos de mes** (`Sep-26`, los de `Horizonte::labelMes()`). Sin ese
+último, las tablas mensuales de Ventas se ordenarían Abr, Ago, Dic, Ene.
+
+- **El tipo lo decide la mayoría de los valores, no la unanimidad.** Un `N/A` suelto en una
+  columna de fechas —que es lo que deja `getCobranzasFR()` cuando el comprobante no
+  aparece en `GVA12`— la convertiría en columna de texto, y entonces las fechas se
+  ordenarían por el día.
+- **Lo vacío va siempre al final, en las dos direcciones.** Un vacío es ausencia de dato, y
+  en la punta de la tabla ocuparía justo el lugar donde uno busca el máximo o el mínimo.
+- **`data-orden` en el `<td>` es el escape** para cuando el texto no sirve: un badge que
+  dice *"Vencida 03/09/2026"*, un ícono. Una celda con un `<input>` se resuelve sola, por
+  su `value`.
+
+### Qué se ordena y qué no
+
+| | |
+| --- | --- |
+| Columnas ordenables, `thead` de una fila | todas |
+| Columnas ordenables, `thead` de dos filas | las descriptivas (`rowspan="2"`) **más `Total`** |
+| Las 28 columnas de días | **no** — se aprieta una sin querer, y el rótulo es tan chico que no hay dónde poner el indicador |
+| El `tfoot` | **no se ordena nunca**: los totales van al pie |
+| Las filas escondidas por el buscador o por el filtro de fecha | **siguen escondidas**: el `display` viaja con la fila |
+
+Las columnas se **derivan del encabezado** y no se declaran por pestaña, por el mismo
+motivo que en `columnas-fijas.js`: una lista declarada se desactualiza en silencio.
+
+### Se descubren solas
+
+`reaplicar()` habilita el orden en **toda tabla con `<thead>` e `id`** dentro de
+`#tabContent`. Una lista de pestañas acá no cubriría la tabla que alguien agregue mañana, y
+son treinta y seis. Por eso **las tablas que no tenían `id` ahora lo tienen**: es la clave
+con la que se guarda la preferencia, y una clave por posición se mudaría de tabla en cuanto
+alguien agregue una arriba.
+
+La preferencia va en `localStorage` **por nombre de columna, no por índice**. Guardar el
+índice sería repetir el error que este módulo ya pagó dos veces: si alguien agrega o saca
+una columna, el índice apunta a otra cosa y la tabla abre ordenada por una columna que el
+usuario no eligió. Con el nombre, una columna que ya no existe hace que la preferencia se
+descarte.
+
+### Dos excepciones, y las dos declaradas
+
+**El tablero se ordena, pero sólo por dentro de cada sección.** Sus filas derivadas
+significan lo que significan **por dónde están**: un `SUBTOTAL` cierra su sección y un
+`FLUJO_NETO` suma las filas que están por encima. Si se movieran, el cuadro quedaría con la
+pinta de siempre y los subtotales dejarían de corresponder a las filas que tienen arriba —
+el peor error posible acá: uno que no se ve. Así que `Cashflow.js` declara sus **filas
+ancla**, que quedan clavadas y hacen de borde, y lo que se ordena son las filas de
+movimiento de cada bloque. Una fila con una sola celda con `colspan` queda anclada sola:
+no es un dato, es un texto (el rótulo de la sección, el *"No hay facturas"* del listado
+vacío).
+
+Y hay tablas donde **el orden de las filas ES el dato**, y ésas declaran `data-orden="no"`:
+
+| Tabla | Por qué |
+| --- | --- |
+| `cfeTabla`, `cfeTablaSecciones` | Se reordenan con los botones ↑ y ↓, y el servidor renumera al guardar |
+| `tablaAcumulada`, `tablaBalance` | Llevan una columna de **acumulado**, que sólo se lee en orden cronológico |
+| `tablaMix`, `tablaEscalaCob` | Son formularios que se guardan y validan enteros, no listados |
+
+---
+
+## Exportar a Excel: la misma función, una sola vez
+
+`exportarExcel()` estaba **copiada siete veces** —Cobranzas FR, Cobranzas May,
+Exportaciones Tasky, Crono Nacionalización, Proveedores Exterior, Echeqs, Ventas y el
+tablero—, con diferencias entre las copias:
+
+- una envolvía en `<html>` con `<meta charset>` y las otras no, y **sin eso Excel abre las
+  razones sociales con los acentos rotos**;
+- una clonaba la tabla y las demás exportaban el nodo vivo;
+- **ninguna sacaba los `<input>` ni los botones**, así que la columna de fecha de cobro
+  editable de Cobranzas FR llegaba a la planilla con un control de formulario en vez de una
+  fecha;
+- y la mitad de las pestañas con tabla no tenía botón.
+
+Ahora es `Js/tabla-export.js`, y las siete copias son una llamada:
+
+```js
+exportarTabla('tablaCobranzasFR', 'Cobranzas_FR');
+```
+
+**Exporta lo que se ve**, que es lo único defendible: quien aprieta *Exportar* después de
+buscar un cliente, filtrar por fecha de emisión y ordenar por importe espera bajar eso. Sale
+del DOM vivo, así que el orden y el filtro server-side vienen puestos; lo que hay que hacer
+a mano es **sacar del clon las filas y las columnas que el CSS está escondiendo** —el
+buscador esconde filas, el modo Resumen esconde columnas con una regla de `nth-child`—,
+porque Excel no interpreta ese CSS y en la planilla aparecería todo.
+
+> **La visibilidad se pregunta sobre la tabla viva y no sobre el clon.** Un clon suelto no
+> tiene estilo calculado, así que `getComputedStyle` sobre el clon diría que todo se ve. Se
+> recorren las dos en paralelo.
+
+El nombre del archivo es `<Pestaña>_<YYYY-MM-DD>.xls`, y si no se declara uno se usa el
+**título de la página**, que sale del menú: así una pestaña nueva no exporta un archivo
+llamado `undefined` ni hay que declarar el nombre en dos lugares.
+
+### Un botón nuevo es HTML y nada más
+
+```html
+<button class="btn btn-sm btn-success" data-exportar="tablaSaldos"
+        data-exportar-nombre="Saldos_Por_Cuenta">
+    <i class="fas fa-file-excel me-1"></i> Exportar
+</button>
+```
+
+`reaplicar()` engancha todos los botones con `data-exportar`, y la llama `main.js` con el
+mismo `MutationObserver`. Así se agregó el botón a las pestañas que no lo tenían —
+*Cob. Electrónicos* (sus cuatro tablas), *Dólares Cuenta Comitente* (vigentes e historial),
+*Saldos* (cuentas y locales) y las de *Parámetros*—, **un botón por tabla, en su propia
+`card-header`**: son cuadros distintos y bajar "la pestaña" no querría decir nada.
+
+Las dos tablas con `data-orden="no"` que **sí** se exportan son `tablaMix` y
+`tablaEscalaCob`: no se ordenan porque son formularios, pero bajar la configuración que
+explica cada importe proyectado es justamente lo que se pide de esas pantallas.
+
+> **`tests/test_tablas_controles.php` verifica el cableado, no la lógica.** No hay corredor
+> de JavaScript en el proyecto, pero lo que se rompe en silencio de estos dos controles no
+> es su lógica: es el cableado. Un `data-exportar` mal escrito deja un botón que **no hace
+> nada** —no tira error, no avisa—, y desde la pantalla es indistinguible de una tabla
+> vacía. La prueba chequea que cada `data-exportar` apunte a una tabla que existe en su
+> misma pestaña, que toda tabla tenga `id`, que los dos componentes estén cargados en
+> `index.php`, que `main.js` los reaplique en el orden correcto, y que **el tipo MIME de
+> Excel siga saliendo en un solo archivo** — si reaparece en otro, alguien volvió a copiar
+> la función y esa copia va a divergir como divergieron las siete anteriores.
+
+---
+
 ## Agregar un módulo al tablero
 
 Dos pasos de código y uno de pantalla:
@@ -579,6 +730,8 @@ cashflow/Class/Horizonte.php                Eje temporal, compartido con Ventas
 cashflow/Class/EjeVista.php                 Las tres vistas: columnas, totales y periodo
 cashflow/Js/eje-vistas.js                   Su contraparte en el front (cargado en index.php)
 cashflow/Js/columnas-fijas.js               Que columnas quedan fijas al scrollear (idem)
+cashflow/Js/tabla-orden.js                  Ordenar por encabezado, en las 36 tablas (idem)
+cashflow/Js/tabla-export.js                 Exportar a Excel lo que se ve (idem)
 cashflow/Js/notificaciones.js               Avisos de accion y confirmaciones (idem)
 cashflow/Css/notificaciones.css
 cashflow/Class/Menu.php                     Menu lateral y estado de cada pestana

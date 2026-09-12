@@ -1614,24 +1614,9 @@
         }
     }
 
+    /** Exporta lo que se ve. Ver Js/tabla-export.js. */
     function exportarExcel(idTabla, nombre) {
-        var tabla = document.getElementById(idTabla);
-
-        if (!tabla) {
-            return;
-        }
-
-        var html = tabla.outerHTML;
-        var blob = new Blob([html], { type: 'application/vnd.ms-excel' });
-        var url = URL.createObjectURL(blob);
-
-        var a = document.createElement('a');
-        a.href = url;
-        a.download = nombre + '_' + new Date().toISOString().split('T')[0] + '.xls';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        exportarTabla(idTabla, nombre);
     }
 
 })(); // Fin del IIFE

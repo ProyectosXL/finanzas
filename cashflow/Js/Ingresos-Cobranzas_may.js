@@ -350,7 +350,11 @@
             html += `<td class="currency">${formatCurrency(item.importe_bruto)}</td>`;
             html += `<td class="currency fw-bold">${formatCurrency(item.importe_neto)}</td>`;
             
-            html += '<td class="center">' + celdaCobro(item) + '</td>';
+            // data-orden con la fecha cruda: el texto del badge de una vencida
+            // es "Vencida 03/09/2026" y no se puede interpretar como fecha.
+            // Ver Js/tabla-orden.js.
+            html += '<td class="center" data-orden="' + escaparAttr(item.Cobro || '') + '">'
+                + celdaCobro(item) + '</td>';
             
             // Columnas del eje temporal
             cols.forEach(function(col) {
@@ -537,17 +541,8 @@
         alert(mensaje);
     }
 
+    /** Exporta lo que se ve. Ver Js/tabla-export.js. */
     function exportarExcel() {
-        var tabla = document.getElementById('tablaCobranzasMay').cloneNode(true);
-        var html = tabla.outerHTML;
-        var blob = new Blob([html], { type: 'application/vnd.ms-excel' });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-        a.href = url;
-        a.download = 'Cobranzas_May_' + new Date().toISOString().split('T')[0] + '.xls';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        exportarTabla('tablaCobranzasMay', 'Cobranzas_May');
     }
 })();

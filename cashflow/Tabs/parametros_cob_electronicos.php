@@ -52,6 +52,12 @@
                     </small>
                 </div>
                 <div class="d-flex gap-2">
+                    <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
+                    <button class="btn btn-sm btn-outline-success" data-exportar="tablaPceProcesadoras"
+                            data-exportar-nombre="Parametros_Procesadoras"
+                            title="Exportar a Excel lo que se está viendo">
+                        <i class="fas fa-file-excel me-1"></i> Exportar
+                    </button>
                     <button id="btnRefreshParamCobel" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
@@ -92,7 +98,7 @@
 
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover mb-0">
+                    <table class="table table-hover mb-0" id="tablaPceProcesadoras">
                         <thead>
                             <tr>
                                 <th>Razón social</th>
@@ -123,9 +129,17 @@
                         calcularon.
                     </small>
                 </div>
-                <button id="btnNuevaAlicuota" class="btn btn-sm btn-outline-primary">
-                    <i class="fas fa-plus me-1"></i> Cargar alícuota
-                </button>
+                <div class="d-flex gap-2">
+                    <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
+                    <button class="btn btn-sm btn-outline-success" data-exportar="tablaPceAlicuotas"
+                            data-exportar-nombre="Parametros_Alicuotas"
+                            title="Exportar a Excel lo que se está viendo">
+                        <i class="fas fa-file-excel me-1"></i> Exportar
+                    </button>
+                    <button id="btnNuevaAlicuota" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-plus me-1"></i> Cargar alícuota
+                    </button>
+                </div>
             </div>
 
             <div class="card-body border-bottom" id="formAlicuota" style="display: none;">
@@ -170,7 +184,7 @@
 
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover mb-0">
+                    <table class="table table-hover mb-0" id="tablaPceAlicuotas">
                         <thead>
                             <tr>
                                 <th>Procesadora</th>

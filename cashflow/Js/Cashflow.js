@@ -50,6 +50,25 @@
             alCambiar: cambiarVista
         });
 
+        /* EL TABLERO SE ORDENA, PERO SÓLO POR DENTRO DE CADA SECCIÓN.
+           Sus filas derivadas no significan lo que significan por su contenido
+           sino POR DÓNDE ESTÁN: un SUBTOTAL cierra su sección y un FLUJO_NETO
+           suma las filas que están por encima. Si se movieran, el cuadro
+           quedaría con la pinta de siempre y los subtotales dejarían de
+           corresponder a las filas que tienen arriba, que es el peor error
+           posible en este módulo: uno que no se ve.
+
+           Así que las filas de sección y las derivadas quedan clavadas y actúan
+           de borde, y lo que se ordena son las filas de movimiento de cada
+           bloque. El rótulo de sección ya queda anclado solo —es una celda con
+           colspan—, pero se declara igual para que la regla se lea completa. */
+        crearOrdenTabla({
+            tabla: 'cfTabla',
+            clave: 'cashflow',
+            anclas: '.cf-seccion, .cf-tipo-subtotal, .cf-tipo-flujo_neto,'
+                + ' .cf-tipo-saldo_inicial, .cf-tipo-saldo_final'
+        });
+
         if (btnRefresh) {
             btnRefresh.addEventListener('click', cargar);
         }
@@ -598,23 +617,15 @@
        EXPORTAR
        ================================================================ */
 
+    /**
+     * Exporta lo que se ve, con el orden aplicado. Ver Js/tabla-export.js.
+     *
+     * El `<meta charset>` que esta copia tenía y las otras cuatro no es lo que
+     * hace que Excel abra los acentos bien; ahora lo pone el componente para
+     * todas.
+     */
     function exportar() {
-        var tabla = document.getElementById('cfTabla');
-
-        if (!tabla) {
-            return;
-        }
-
-        var blob = new Blob(
-            ['<html><head><meta charset="utf-8"></head><body>' + tabla.outerHTML + '</body></html>'],
-            { type: 'application/vnd.ms-excel' }
-        );
-
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'Cashflow_' + datos.generado + '.xls';
-        a.click();
-        URL.revokeObjectURL(a.href);
+        exportarTabla('cfTabla', 'Cashflow');
     }
 
     /* ================================================================

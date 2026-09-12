@@ -52,6 +52,12 @@
                     </small>
                 </div>
                 <div class="d-flex gap-2">
+                    <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
+                    <button class="btn btn-sm btn-outline-success" data-exportar="tablaPpqClientes"
+                            data-exportar-nombre="Parametros_Prechequeado"
+                            title="Exportar a Excel lo que se está viendo">
+                        <i class="fas fa-file-excel me-1"></i> Exportar
+                    </button>
                     <button id="btnRefreshParamPpq" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
@@ -110,7 +116,7 @@
 
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover mb-0">
+                    <table class="table table-hover mb-0" id="tablaPpqClientes">
                         <thead>
                             <tr>
                                 <th style="width: 120px;">Código</th>

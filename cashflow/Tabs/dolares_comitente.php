@@ -88,12 +88,20 @@
     </div>
 
     <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0">Importes vigentes</h5>
-            <small class="text-muted">
-                Un importe por fecha. Las cargas pisadas no se borran: se ven desde
-                <em>Historial</em>.
-            </small>
+        <div class="card-header d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+                <h5 class="mb-0">Importes vigentes</h5>
+                <small class="text-muted">
+                    Un importe por fecha. Las cargas pisadas no se borran: se ven desde
+                    <em>Historial</em>.
+                </small>
+            </div>
+            <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
+            <button class="btn btn-sm btn-success" data-exportar="tablaDolares"
+                    data-exportar-nombre="Dolares_Comitente"
+                    title="Exportar a Excel lo que se está viendo">
+                <i class="fas fa-file-excel me-1"></i> Exportar
+            </button>
         </div>
         <div class="card-body p-0">
             <div class="loading-spinner" id="loadingDol">
@@ -144,6 +152,14 @@
                     </table>
                 </div>
                 <div class="modal-footer">
+                    <!-- El historial también se exporta: es lo que explica por
+                         qué el número de ayer era otro, y eso se comparte. -->
+                    <button type="button" class="btn btn-sm btn-success"
+                            data-exportar="tablaHistorialDol"
+                            data-exportar-nombre="Dolares_Comitente_Historial"
+                            title="Exportar a Excel el historial de esta fecha">
+                        <i class="fas fa-file-excel me-1"></i> Exportar
+                    </button>
                     <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">
                         Cerrar
                     </button>

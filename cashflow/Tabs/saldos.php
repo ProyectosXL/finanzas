@@ -112,6 +112,12 @@
                     </small>
                 </div>
                 <div class="d-flex gap-2">
+                    <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
+                    <button class="btn btn-sm btn-success" data-exportar="tablaSaldos"
+                            data-exportar-nombre="Saldos_Por_Cuenta"
+                            title="Exportar a Excel lo que se está viendo">
+                        <i class="fas fa-file-excel me-1"></i> Exportar
+                    </button>
                     <button id="btnRefreshSaldos" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
@@ -249,6 +255,14 @@
                 </div>
                 <div class="d-flex gap-2 align-items-center">
                     <span id="avisoGuardadoLocales" class="sal-aviso-guardado" style="display: none;"></span>
+                    <!-- Lo engancha Js/tabla-export.js. Los campos editables de
+                         Gestión y Reserva se exportan como su valor en texto, no
+                         como un <input>. -->
+                    <button class="btn btn-sm btn-outline-success" data-exportar="tablaLocales"
+                            data-exportar-nombre="Saldos_Caja_Locales"
+                            title="Exportar a Excel lo que se está viendo">
+                        <i class="fas fa-file-excel me-1"></i> Exportar
+                    </button>
                     <button id="btnRefreshLocales" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>

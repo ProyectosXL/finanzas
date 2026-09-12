@@ -491,6 +491,51 @@ body {
 }
 
 /* ========================================
+   ORDEN POR ENCABEZADO
+   ========================================
+   El indicador de Js/tabla-orden.js. Es una CLASE con un `::after` y no un
+   `<i>` agregado al `<th>`, y eso no es una preferencia de estilo: main.js
+   observa #tabContent por `childList`, así que un hijo nuevo en el encabezado
+   dispararía el observer y el par observer → reaplicar → pintar no pararía
+   nunca. Las mutaciones de atributos no se observan.
+
+   Las flechas son caracteres y no íconos de Font Awesome: un `::after` con
+   Font Awesome depende de que la familia esté cargada con el peso exacto, y
+   acá el indicador tiene que estar sí o sí — es lo único que dice por qué la
+   tabla está en ese orden.
+   ======================================== */
+
+.orden-col {
+    cursor: pointer;
+    user-select: none;
+}
+
+.orden-col::after {
+    content: '↕';
+    margin-left: 4px;
+    opacity: 0.25;
+    font-weight: 400;
+}
+
+.orden-col:hover::after {
+    opacity: 0.6;
+}
+
+.orden-col.orden-asc::after {
+    content: '▲';
+    opacity: 1;
+    color: var(--primary-color);
+    font-size: 0.8em;
+}
+
+.orden-col.orden-desc::after {
+    content: '▼';
+    opacity: 1;
+    color: var(--primary-color);
+    font-size: 0.8em;
+}
+
+/* ========================================
    SUB-SOLAPAS DE LAS PESTAÑAS DE COBRANZA
    ========================================
    Resumen / Detalle Facturas. Antes eran un `btn-group`, que es el control de

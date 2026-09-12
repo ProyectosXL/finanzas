@@ -440,17 +440,8 @@
         }
     }
 
+    /** Exporta lo que se ve. Ver Js/tabla-export.js. */
     function exportarExcel() {
-        var tabla = document.getElementById('tablaExportacionesTasky').cloneNode(true);
-        var html = tabla.outerHTML;
-        var blob = new Blob([html], { type: 'application/vnd.ms-excel' });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-        a.href = url;
-        a.download = 'Exportaciones_Tasky_' + new Date().toISOString().split('T')[0] + '.xls';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        exportarTabla('tablaExportacionesTasky', 'Exportaciones_Tasky');
     }
 })();

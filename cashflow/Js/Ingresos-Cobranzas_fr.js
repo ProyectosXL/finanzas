@@ -521,14 +521,19 @@
             // Tasky, que es de donde sale el criterio.
             var vencida = item.VENCIDA ? badgeVencida(item) : '';
 
+            // data-orden con la fecha cruda: el texto del badge de una vencida
+            // es "Vencida 03/09/2026" y no se puede interpretar como fecha, así
+            // que sin esto la columna se ordenaría como texto. Ver
+            // Js/tabla-orden.js.
             if (vencida) {
-                return '<td class="center">' + vencida + '</td>';
+                return '<td class="center" data-orden="' + escaparAttr(item.Cobro || '') + '">'
+                    + vencida + '</td>';
             }
 
             var badge = esProy ? 'badge-proyeccion' : 'badge-cobro';
 
-            return '<td class="center"><span class="' + badge + '">'
-                + formatDate(item.Cobro) + '</span></td>';
+            return '<td class="center" data-orden="' + escaparAttr(item.Cobro || '') + '">'
+                + '<span class="' + badge + '">' + formatDate(item.Cobro) + '</span></td>';
         }
 
         var manual = !!item.FECHA_MANUAL;
@@ -797,17 +802,13 @@
         Notificacion.error(mensaje);
     }
 
+    /**
+     * Exporta lo que se ve: el buscador, el filtro por fecha de emisión y el
+     * orden aplicado ya están en el DOM, y de las columnas del modo Resumen y
+     * los `<input>` de la fecha editable se encarga el componente compartido.
+     * Ver Js/tabla-export.js.
+     */
     function exportarExcel() {
-        var tabla = document.getElementById('tablaCobranzasFR').cloneNode(true);
-        var html = tabla.outerHTML;
-        var blob = new Blob([html], { type: 'application/vnd.ms-excel' });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-        a.href = url;
-        a.download = 'Cobranzas_FR_' + new Date().toISOString().split('T')[0] + '.xls';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        exportarTabla('tablaCobranzasFR', 'Cobranzas_FR');
     }
 })();

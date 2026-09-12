@@ -290,18 +290,13 @@
             || String(f.N_CHEQUE || '').indexOf(term) !== -1;
     }
 
+    /**
+     * Exporta lo que se ve: el buscador y el orden aplicado ya están en el DOM,
+     * y de los tildes de la grilla se encarga el componente compartido, que los
+     * exporta como Sí/No y no como un checkbox. Ver Js/tabla-export.js.
+     */
     function exportarCartera() {
-        var tabla = document.getElementById('tablaEcheqs').cloneNode(true);
-        var blob = new Blob([tabla.outerHTML], { type: 'application/vnd.ms-excel' });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-
-        a.href = url;
-        a.download = 'Echeqs_cartera_' + new Date().toISOString().slice(0, 10) + '.xls';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        exportarTabla('tablaEcheqs', 'Echeqs_cartera');
     }
 
     /* ================================================================

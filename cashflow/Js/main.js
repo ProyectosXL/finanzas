@@ -60,10 +60,28 @@ function initStickyHeaders() {
  * mide lo que ya está marcado.
  */
 function ajustarStickyHeaders() {
-    // Las marcas primero: si la tabla se acaba de redibujar, sus celdas nuevas
+    // El orden primero: si la tabla se acaba de redibujar hay que volver a
+    // aplicarle el orden elegido, y eso mueve filas. Medir antes sería medir
+    // una tabla que todavía va a cambiar.
+    //
+    // No entra en bucle con el observer aunque mover filas sea un cambio de
+    // childList: OrdenTabla.aplicar() no escribe en el DOM si las filas ya
+    // están en el orden pedido. Ver el encabezado de Js/tabla-orden.js.
+    if (window.OrdenTabla) {
+        window.OrdenTabla.reaplicar();
+    }
+
+    // Las marcas después: si la tabla se acaba de redibujar, sus celdas nuevas
     // todavía no tienen clase y no habría nada que medir.
     if (window.ColumnasFijas) {
         window.ColumnasFijas.reaplicar();
+    }
+
+    // Los botones de Exportar declarados en el HTML con data-exportar. No
+    // tienen nada que ver con las medidas, pero es el único lugar del módulo
+    // que se entera de que llegó una pestaña nueva.
+    if (window.TablaExport) {
+        window.TablaExport.reaplicar();
     }
 
     var contenedores = document.querySelectorAll('.tabla-temporal');
