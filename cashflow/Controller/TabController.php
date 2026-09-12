@@ -26,6 +26,7 @@ $validTabs = [
     'cob_electronicos',
     'exportaciones_tasky',
     'dolares_comitente',
+    'saldo_inversiones',
     'proveedores_exterior',
     'crono_nacionalizacion',
     'nacionalizacion_2',

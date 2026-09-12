@@ -116,6 +116,13 @@
                 </small>
             </div>
             <div class="d-flex gap-2">
+                <!-- Exportar lo que se ve. Lo engancha Js/tabla-export.js por el
+                     data-exportar: no hace falta JS en la pestaña. -->
+                <button class="btn btn-sm btn-success" data-exportar="tablaCobel"
+                        data-exportar-nombre="Cobranzas_Electronicas_Acreditaciones"
+                        title="Exportar a Excel lo que se está viendo">
+                    <i class="fas fa-file-excel me-1"></i> Exportar
+                </button>
                 <button id="btnRefreshCobel" class="btn btn-sm btn-outline-primary">
                     <i class="fas fa-sync-alt me-1"></i> Actualizar
                 </button>
@@ -315,16 +322,25 @@
          TOTALES POR PROCESADORA
          ============================================================ -->
     <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0">Totales por procesadora</h5>
-            <small class="text-muted">
-                En bruto y en neto. La diferencia son las retenciones que la procesadora descuenta
-                y que nunca llegan al banco.
-            </small>
+        <div class="card-header d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+                <h5 class="mb-0">Totales por procesadora</h5>
+                <small class="text-muted">
+                    En bruto y en neto. La diferencia son las retenciones que la procesadora descuenta
+                    y que nunca llegan al banco.
+                </small>
+            </div>
+            <!-- Un botón por tabla, en su propia card-header: son cuadros
+                 distintos y bajar "la pestaña" no querría decir nada. -->
+            <button class="btn btn-sm btn-success" data-exportar="tablaCobelProcesadoras"
+                    data-exportar-nombre="Cobranzas_Electronicas_Por_Procesadora"
+                    title="Exportar a Excel lo que se está viendo">
+                <i class="fas fa-file-excel me-1"></i> Exportar
+            </button>
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-hover mb-0">
+                <table class="table table-hover mb-0" id="tablaCobelProcesadoras">
                     <thead>
                         <tr>
                             <th>Procesadora</th>
@@ -356,9 +372,16 @@
         <div class="card-body">
             <div class="row g-4">
                 <div class="col-lg-6">
-                    <h6 class="cobel-subtitulo">Por día</h6>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h6 class="cobel-subtitulo">Por día</h6>
+                        <button class="btn btn-sm btn-success" data-exportar="tablaCobelPorDia"
+                                data-exportar-nombre="Cobranzas_Electronicas_Por_Dia"
+                                title="Exportar a Excel lo que se está viendo">
+                            <i class="fas fa-file-excel me-1"></i> Exportar
+                        </button>
+                    </div>
                     <div class="table-responsive cobel-cuadro">
-                        <table class="table table-sm table-hover mb-0">
+                        <table class="table table-sm table-hover mb-0" id="tablaCobelPorDia">
                             <thead>
                                 <tr>
                                     <th>Fecha</th>
@@ -372,9 +395,16 @@
                 </div>
 
                 <div class="col-lg-6">
-                    <h6 class="cobel-subtitulo">Por mes</h6>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h6 class="cobel-subtitulo">Por mes</h6>
+                        <button class="btn btn-sm btn-success" data-exportar="tablaCobelPorMes"
+                                data-exportar-nombre="Cobranzas_Electronicas_Por_Mes"
+                                title="Exportar a Excel lo que se está viendo">
+                            <i class="fas fa-file-excel me-1"></i> Exportar
+                        </button>
+                    </div>
                     <div class="table-responsive cobel-cuadro">
-                        <table class="table table-sm table-hover mb-0">
+                        <table class="table table-sm table-hover mb-0" id="tablaCobelPorMes">
                             <thead>
                                 <tr>
                                     <th>Mes</th>

@@ -1,7 +1,13 @@
 /**
  * Ingresos - Cobranzas FR JavaScript
- * Con soporte para Resumen (predeterminado) y Deep Dive (aperturado por comprobante)
- * y doble matriz: Real a Cobrar vs Pendientes Proyectados (con cálculo de PPP).
+ * Con soporte para Resumen (predeterminado) y Detalle Facturas (aperturado por
+ * comprobante) y doble matriz: Real a Cobrar vs Pendientes Proyectados (con
+ * cálculo de PPP).
+ *
+ * "Detalle Facturas" es el nombre de cara al usuario; el identificador interno
+ * sigue siendo `deepdive` y el controller sigue recibiendo `type=deepdive`.
+ * Renombrar el contrato no habría cambiado nada en pantalla y habría tocado el
+ * endpoint, el controller y las pruebas.
  *
  * LAS TRES VISTAS LAS MANEJA eje-vistas.js — ver la nota del encabezado de
  * Comex-Proveedores_exterior.js. Esta pestaña tenía el mismo criterio propio,
@@ -58,15 +64,21 @@
             alCambiar: generarTabla
         });
 
-        // Tipo, COD_CLI y RAZON_SOC fijas por defecto, en Resumen y en Deep
-        // Dive: con veintiocho columnas de días a la derecha, sin ellas no se
-        // ve de quién es el número que uno está mirando. Es la misma tabla en
-        // los dos modos, así que un solo control las cubre.
+        // COD_CLI y RAZON_SOC fijas por defecto, en Resumen y en Detalle
+        // Facturas: con veintiocho columnas de días a la derecha, sin ellas no
+        // se ve de quién es el número que uno está mirando. Es la misma tabla
+        // en los dos modos, así que un solo control las cubre.
+        // La clave de localStorage cambió con la columna Tipo. Los índices
+        // guardados se corrieron un lugar, y un `[0, 1, 2]` viejo dejaría
+        // fijada FECHA —que en Resumen ni se muestra—: la validación de
+        // columnas-fijas.js descarta los índices que ya no existen, pero el 2
+        // sigue existiendo y apunta a otra cosa. Cambiar la clave descarta la
+        // preferencia vieja, que es lo correcto: era sobre otra tabla.
         crearColumnasFijas({
             tabla: 'tablaCobranzasFR',
             control: 'colFijasCob',
-            clave: 'cobranzas_fr',
-            porDefecto: [0, 1, 2]
+            clave: 'cobranzas_fr.sin_tipo',
+            porDefecto: [0, 1]
         });
 
         if (btnRefresh) {
@@ -83,8 +95,97 @@
                 filtrarTabla();
             });
         }
-        
+
+        conectarFiltroEmision();
+
         cargarDatos();
+    }
+
+    /* ================================================================
+       FILTRO POR FECHA DE EMISIÓN
+
+       Es SERVER-SIDE: los dos extremos se mandan como parámetros y el
+       controller filtra los items antes de EjeVista. Si se filtrara acá
+       escondiendo filas, las columnas del eje, el pie de totales y las
+       tarjetas de indicadores seguirían mostrando el total sin filtrar.
+       ================================================================ */
+
+    function filtroEmision() {
+        var desde = document.getElementById('fechaDesdeCob');
+        var hasta = document.getElementById('fechaHastaCob');
+
+        return {
+            desde: desde && desde.value ? desde.value : '',
+            hasta: hasta && hasta.value ? hasta.value : ''
+        };
+    }
+
+    function conectarFiltroEmision() {
+        var desde = document.getElementById('fechaDesdeCob');
+        var hasta = document.getElementById('fechaHastaCob');
+        var limpiar = document.getElementById('btnLimpiarFechasCob');
+
+        [desde, hasta].forEach(function(inp) {
+            if (inp) {
+                inp.addEventListener('change', function() {
+                    acotarExtremos();
+                    cargarDatos();
+                });
+            }
+        });
+
+        if (limpiar) {
+            limpiar.addEventListener('click', function() {
+                if (desde) desde.value = '';
+                if (hasta) hasta.value = '';
+
+                acotarExtremos();
+                cargarDatos();
+            });
+        }
+    }
+
+    /**
+     * Cada extremo acota al otro, y el botón de limpiar sólo está activo si hay
+     * algo que limpiar.
+     *
+     * El `max` y el `min` son una comodidad del navegador, no una garantía: el
+     * rango se valida de nuevo en el servidor, que es el único que puede.
+     */
+    function acotarExtremos() {
+        var desde = document.getElementById('fechaDesdeCob');
+        var hasta = document.getElementById('fechaHastaCob');
+        var limpiar = document.getElementById('btnLimpiarFechasCob');
+        var f = filtroEmision();
+
+        if (desde) desde.max = f.hasta;
+        if (hasta) hasta.min = f.desde;
+        if (limpiar) limpiar.disabled = !f.desde && !f.hasta;
+    }
+
+    /** El filtro aplicado, al lado del rótulo del período */
+    function pintarFiltroPeriodo() {
+        var el = document.getElementById('filtroPeriodoCob');
+
+        if (!el) {
+            return;
+        }
+
+        var r = (datosCobranzas && datosCobranzas.filtro_emision) || {};
+
+        if (!r.desde && !r.hasta) {
+            el.innerHTML = '';
+            return;
+        }
+
+        var rango = r.desde && r.hasta
+            ? 'emitidas del ' + formatDate(r.desde) + ' al ' + formatDate(r.hasta)
+            : (r.desde
+                ? 'emitidas desde el ' + formatDate(r.desde)
+                : 'emitidas hasta el ' + formatDate(r.hasta));
+
+        el.innerHTML = ' <span class="badge bg-secondary-subtle text-secondary-emphasis">'
+            + '<i class="fas fa-filter me-1"></i>Filtro: ' + rango + '</span>';
     }
     
     function texto(id, valor) {
@@ -118,25 +219,24 @@
         inicializar();
     }
 
+    /**
+     * Resumen o Detalle Facturas.
+     *
+     * Son sub-solapas anidadas (`nav nav-tabs`) y no un `btn-group`, así que
+     * el estado activo es la clase `active` del `nav-link`. Lo que no cambió
+     * es el flujo: `modoVista` sigue siendo `'resumen'` / `'deepdive'` y el
+     * controller sigue recibiendo `type=deepdive`.
+     */
     function cambiarModo(modo) {
         if (modo === modoVista) return;
         modoVista = modo;
-        
+
         var btnResumen = document.getElementById('btnVistaResumenCob');
         var btnDeepDive = document.getElementById('btnVistaDeepDiveCob');
-        
-        if (modo === 'resumen') {
-            btnResumen.classList.add('btn-primary', 'active');
-            btnResumen.classList.remove('btn-outline-primary', 'btn-outline-secondary');
-            btnDeepDive.classList.remove('btn-primary', 'active');
-            btnDeepDive.classList.add('btn-outline-secondary');
-        } else {
-            btnDeepDive.classList.add('btn-primary', 'active');
-            btnDeepDive.classList.remove('btn-outline-secondary');
-            btnResumen.classList.remove('btn-primary', 'active');
-            btnResumen.classList.add('btn-outline-secondary');
-        }
-        
+
+        if (btnResumen) btnResumen.classList.toggle('active', modo === 'resumen');
+        if (btnDeepDive) btnDeepDive.classList.toggle('active', modo === 'deepdive');
+
         cargarDatos();
     }
 
@@ -171,7 +271,15 @@
 
     function cargarDatos() {
         mostrarCargando(true);
-        fetch(`Controller/IngresosController.php?action=getCobranzasFR&type=${modoVista}&origen=${modoOrigen}`)
+
+        var f = filtroEmision();
+        var url = 'Controller/IngresosController.php?action=getCobranzasFR'
+            + '&type=' + encodeURIComponent(modoVista)
+            + '&origen=' + encodeURIComponent(modoOrigen)
+            + '&desde=' + encodeURIComponent(f.desde)
+            + '&hasta=' + encodeURIComponent(f.hasta);
+
+        fetch(url)
             .then(response => {
                 if (!response.ok) throw new Error('Error HTTP: ' + response.status);
                 return response.json();
@@ -187,6 +295,8 @@
                     generarTabla();
                     calcularResumenes();
                     pintarAvisos();
+                    pintarFiltroPeriodo();
+                    acotarExtremos();
                     mostrarCargando(false);
                 } else {
                     mostrarError('Error al cargar datos: ' + result.message);
@@ -272,19 +382,28 @@
 
         datosCobranzas.filas.forEach(function(item) {
             var esProy = (item.TIPO_REGISTRO === 'PROYECCION');
-            var trClase = esProy ? 'fila-proyeccion' : '';
-            
-            html += `<tr class="${trClase}">`;
-            
-            // Columna Tipo
+            var clases = [];
+
             if (esProy) {
-                var pppInfo = item.PPP ? `PPP: ${item.PPP} días` : '';
-                html += `<td class="center"><span class="badge-proyeccion" title="${pppInfo}"><i class="fas fa-clock me-1"></i>PROYECCIÓN</span></td>`;
-            } else {
-                html += `<td class="center"><span class="badge-real" title="Propuesta"><i class="fas fa-check me-1"></i>REAL</span></td>`;
+                clases.push('fila-proyeccion');
             }
 
-            html += `<td><strong>${item.COD_CLI || ''}</strong>${marcaManual(item)}</td>`;
+            // Una factura vencida se distingue en toda la fila: su importe está
+            // en la columna de hoy por ser el primer día del eje, no porque se
+            // estime cobrarla hoy. Ver Ingresos::ubicarCobroVencido().
+            if (item.VENCIDA) {
+                clases.push('fila-vencida');
+            }
+
+            html += '<tr class="' + clases.join(' ') + '">';
+
+            // El badge REAL/PROYECCIÓN se fue con la columna Tipo: la solapa
+            // activa ya dice cuál es el origen. Lo que sí distinguía —el color
+            // de la fila y el PPP con el que se proyectó— sigue acá, sobre
+            // COD_CLI.
+            html += '<td title="' + escaparAttr(tituloOrigen(item, esProy)) + '">'
+                + '<strong>' + escaparAttr(item.COD_CLI || '') + '</strong>'
+                + marcaManual(item) + marcaVencida(item) + '</td>';
 
             // El nombre se recorta con puntos suspensivos (.col-texto) para que
             // la fila sea una sola línea. El title lo devuelve completo: lo que
@@ -331,6 +450,23 @@
         conectarEdicionFecha();
     }
 
+    /**
+     * De dónde sale la fila, en el `title` de COD_CLI.
+     *
+     * Es lo que quedó del badge de la columna Tipo. En una proyección lo que
+     * importa es el PPP con el que se calculó la fecha, que es un promedio y no
+     * un dato del comprobante: sin eso, la fecha de cobro no se puede auditar.
+     */
+    function tituloOrigen(item, esProy) {
+        if (!esProy) {
+            return 'Cobranza real: sale de una propuesta de pago aceptada.';
+        }
+
+        return item.PPP
+            ? 'Proyección con el PPP del cliente: ' + item.PPP + ' días.'
+            : 'Proyección.';
+    }
+
     /* ================================================================
        FECHA DE COBRO MANUAL
 
@@ -338,7 +474,7 @@
        es un promedio. Cuando alguien ya sabe la fecha de una factura puntual,
        la carga acá y esa fecha manda.
 
-       Es editable SÓLO en el Deep Dive de Pendientes Proyectados, y no en
+       Es editable SÓLO en Pendientes Proyectados → Detalle Facturas, y no en
        Resumen: en Resumen la fila es un cliente y no un comprobante, así que
        no hay a qué comprobante atarle la fecha. En Resumen se muestra un
        indicador de que alguna de sus facturas la tiene.
@@ -357,21 +493,63 @@
 
         return ' <i class="fas fa-hand-pointer text-primary cob-marca-manual" '
             + 'title="Alguna factura de este cliente tiene la fecha de cobro cargada a mano, '
-            + 'así que no sale del PPP. El detalle está en Deep Dive."></i>';
+            + 'así que no sale del PPP. El detalle está en Detalle Facturas."></i>';
+    }
+
+    /**
+     * El indicador del Resumen: este cliente tiene alguna factura vencida.
+     *
+     * Las dos marcas dicen "alguna", no "todas": la repone
+     * EjeVista::marcarAlguna() en el controller, porque el agrupado descarta
+     * los campos que difieren dentro del grupo.
+     */
+    function marcaVencida(item) {
+        if (modoVista !== 'resumen' || !item.VENCIDA) {
+            return '';
+        }
+
+        return ' <i class="fas fa-triangle-exclamation text-warning cob-marca-vencida" '
+            + 'title="Alguna factura de este cliente tiene la fecha probable de cobro ya '
+            + 'vencida: su importe se muestra en el primer día del eje. El detalle está '
+            + 'en Detalle Facturas."></i>';
     }
 
     function celdaCobro(item, esProy) {
         if (!editable()) {
+            // Una vencida dice cuál era su fecha original: está dibujada en hoy
+            // por ser el primer día del eje. Mismo badge que Exportaciones
+            // Tasky, que es de donde sale el criterio.
+            var vencida = item.VENCIDA ? badgeVencida(item) : '';
+
+            // data-orden con la fecha cruda: el texto del badge de una vencida
+            // es "Vencida 03/09/2026" y no se puede interpretar como fecha, así
+            // que sin esto la columna se ordenaría como texto. Ver
+            // Js/tabla-orden.js.
+            if (vencida) {
+                return '<td class="center" data-orden="' + escaparAttr(item.Cobro || '') + '">'
+                    + vencida + '</td>';
+            }
+
             var badge = esProy ? 'badge-proyeccion' : 'badge-cobro';
 
-            return '<td class="center"><span class="' + badge + '">'
-                + formatDate(item.Cobro) + '</span></td>';
+            return '<td class="center" data-orden="' + escaparAttr(item.Cobro || '') + '">'
+                + '<span class="' + badge + '">' + formatDate(item.Cobro) + '</span></td>';
         }
 
         var manual = !!item.FECHA_MANUAL;
         var titulo = manual
             ? 'Fecha cargada a mano. Los días y el descuento se recalculan sobre ella.'
             : 'Calculada como fecha de emisión + PPP del cliente. Se puede pisar.';
+
+        // Vencida: el input muestra dónde quedó ubicada, así que el title es el
+        // único lugar donde cabe decir cuál era la fecha que venció.
+        if (item.VENCIDA) {
+            titulo = 'Vencida: la fecha ' + (manual ? 'pactada' : 'probable') + ' era el '
+                + formatDate(item.COBRO_ORIGINAL) + ' y ya pasó. '
+                + (manual
+                    ? 'Se respeta tal cual porque la cargó una persona.'
+                    : 'El importe se muestra en el primer día del eje.');
+        }
 
         // El `min` en hoy es una comodidad del navegador, no una garantía: el
         // endpoint valida la fecha de nuevo. Ver IngresosController.
@@ -390,6 +568,31 @@
                     : '')
             + '</div>'
             + '</td>';
+    }
+
+    /**
+     * El badge de una factura vencida, con la fecha que venció en el title.
+     *
+     * Sin COBRO_ORIGINAL no se puede decir cuál era la fecha, y un badge que
+     * dijera "Vencida" sin fecha no agrega nada sobre el color de la fila. Es
+     * el caso del Resumen, donde la fila es un cliente: ahí la marca va al lado
+     * del código y el detalle queda para Detalle Facturas.
+     */
+    function badgeVencida(item) {
+        if (!item.COBRO_ORIGINAL) {
+            return '';
+        }
+
+        var pactada = !!item.FECHA_MANUAL;
+
+        return '<span class="badge-vencida-exp" title="Fecha de cobro '
+            + (pactada ? 'pactada' : 'probable') + ' original: '
+            + formatDate(item.COBRO_ORIGINAL) + '. Vencida sin cobrar: '
+            + (pactada
+                ? 'se respeta tal cual porque la cargó una persona'
+                : 'se ubica en el primer día del eje') + '">'
+            + '<i class="fas fa-triangle-exclamation me-1"></i>Vencida '
+            + formatDate(item.COBRO_ORIGINAL) + '</span>';
     }
 
     function conectarEdicionFecha() {
@@ -533,10 +736,15 @@
             return datosCobranzas.filas;
         }
 
+        /* TIPO_REGISTRO ya no entra en la búsqueda, y tiene que no entrar:
+           filtrarTabla() esconde filas mirando el textContent de la fila, y
+           desde que se fue la columna Tipo el texto "REAL" o "PROYECCIÓN" no
+           está en el DOM. Si siguiera acá, buscar "real" dejaría los totales
+           de esas filas y escondería las filas: el pie no cerraría con la
+           tabla. Las dos funciones tienen que mirar lo mismo. */
         return datosCobranzas.filas.filter(function(item) {
             return (item.COD_CLI || '').toLowerCase().includes(term)
                 || (item.RAZON_SOC || '').toLowerCase().includes(term)
-                || (item.TIPO_REGISTRO || '').toLowerCase().includes(term)
                 || (item.N_COMP || '').toLowerCase().includes(term);
         });
     }
@@ -594,17 +802,13 @@
         Notificacion.error(mensaje);
     }
 
+    /**
+     * Exporta lo que se ve: el buscador, el filtro por fecha de emisión y el
+     * orden aplicado ya están en el DOM, y de las columnas del modo Resumen y
+     * los `<input>` de la fecha editable se encarga el componente compartido.
+     * Ver Js/tabla-export.js.
+     */
     function exportarExcel() {
-        var tabla = document.getElementById('tablaCobranzasFR').cloneNode(true);
-        var html = tabla.outerHTML;
-        var blob = new Blob([html], { type: 'application/vnd.ms-excel' });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-        a.href = url;
-        a.download = 'Cobranzas_FR_' + new Date().toISOString().split('T')[0] + '.xls';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        exportarTabla('tablaCobranzasFR', 'Cobranzas_FR');
     }
 })();

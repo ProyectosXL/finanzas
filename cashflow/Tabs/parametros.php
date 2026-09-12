@@ -86,6 +86,14 @@
                     </small>
                 </div>
                 <div class="d-flex gap-2">
+                    <!-- Lo engancha Js/tabla-export.js por el data-exportar. El
+                         mix no se ordena (data-orden="no") pero sí se exporta:
+                         es la configuración que explica la proyección. -->
+                    <button class="btn btn-sm btn-outline-success" data-exportar="tablaMix"
+                            data-exportar-nombre="Parametros_Mix_De_Cobro"
+                            title="Exportar a Excel lo que se está viendo">
+                        <i class="fas fa-file-excel me-1"></i> Exportar
+                    </button>
                     <button id="btnNuevoMedio" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-plus me-1"></i> Agregar medio
                     </button>
@@ -131,7 +139,11 @@
 
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table id="tablaMix" class="table table-hover mb-0">
+                    <!-- data-orden="no": no es un listado, es un formulario. Los
+                         porcentajes tienen que sumar 100% POR CANAL, y las filas
+                         de un canal vienen juntas justamente para poder leer esa
+                         suma; ordenar por otra columna las desarma. -->
+                    <table id="tablaMix" class="table table-hover mb-0" data-orden="no">
                         <thead>
                             <tr>
                                 <th>Canal</th>

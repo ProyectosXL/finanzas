@@ -8,15 +8,25 @@ require_once __DIR__ . '/../Cotizacion.php';
  * OtrosIngresosProvider
  * Alimenta el tablero con los ingresos que se cargan a mano.
  *
- * Hoy sirve un solo codigo del registro:
+ * Sirve dos codigos del registro:
  *   DOLARES_COMITENTE -> serie INGRESO, los dolares de la cuenta comitente.
+ *   SALDO_INVERSIONES -> serie INGRESO, el saldo de inversiones, EN PESOS.
  *
  * ES UN INGRESO, NO UNA DISPONIBILIDAD. El importe entra al flujo en la fecha
  * que se le carga; no es un saldo de apertura y no arrastra. Por eso la fila
  * del tablero es de tipo INGRESO y no SALDO_INICIAL.
  *
- * LA CONVERSION VIVE ACA, NO EN EL MOTOR
- * --------------------------------------
+ * LOS DOS CONCEPTOS NO SE VALUAN IGUAL, Y ES CORRECTO
+ * ---------------------------------------------------
+ * Los dolares se guardan en dolares y se convierten en cada lectura. El saldo
+ * de inversiones se informa EN PESOS: no hay nada que valuar, asi que su serie
+ * sale tal cual. Convertirlo seria inventar una moneda de origen que el dato no
+ * tiene, y eso se notaria recien cuando el numero del tablero no coincidiera con
+ * el de la pantalla. La decision, y como darla vuelta si algun dia el saldo se
+ * informa en dolares, esta arriba de sql/cashflow_saldo_inversiones.sql.
+ *
+ * LA CONVERSION DE LOS DOLARES VIVE ACA, NO EN EL MOTOR
+ * -----------------------------------------------------
  * El motor nunca ve dolares: todos los proveedores le entregan pesos. Se
  * guardan los dolares y se convierten en cada lectura, igual que hace
  * ComexProvider con los pagos al exterior. Guardar pesos congelaria la
@@ -49,14 +59,52 @@ require_once __DIR__ . '/../Cotizacion.php';
 class OtrosIngresosProvider extends CashflowProvider {
 
     protected function calcular($h) {
-        if ($this->codigo() !== 'DOLARES_COMITENTE') {
-            $this->avisar('Otros Ingresos: el codigo de proveedor "' . $this->codigo()
-                . '" no tiene serie definida.');
-
-            return [];
+        if ($this->codigo() === 'DOLARES_COMITENTE') {
+            return ['INGRESO' => $this->dolaresComitente($h)];
         }
 
-        return ['INGRESO' => $this->dolaresComitente($h)];
+        if ($this->codigo() === 'SALDO_INVERSIONES') {
+            return ['INGRESO' => $this->saldoInversiones($h)];
+        }
+
+        $this->avisar('Otros Ingresos: el codigo de proveedor "' . $this->codigo()
+            . '" no tiene serie definida.');
+
+        return [];
+    }
+
+    /**
+     * El saldo de inversiones vigente por fecha, EN PESOS.
+     *
+     * Sin conversion y sin cotizacion: el dato ya esta en la moneda del motor.
+     * Por eso este metodo es mucho mas corto que dolaresComitente() -no hay
+     * mapa mensual, no hay meses sin cotizacion, no hay aviso de valuacion-, y
+     * la diferencia es del dato y no del circuito.
+     *
+     * @param Horizonte $h
+     * @return array Serie
+     */
+    private function saldoInversiones($h) {
+        $serie = $h->serieVacia();
+        $serie['moneda_origen'] = 'ARS';
+        $serie['tipo_cambio'] = null;
+        $serie['fuera_horizonte'] = 0;
+        $serie['sin_fecha'] = 0;
+
+        foreach ((new OtrosIngresos())->getSaldoInversiones() as $carga) {
+            $importe = floatval($carga['IMPORTE_ARS']);
+
+            if ($importe == 0) {
+                continue;
+            }
+
+            // Lo que cae fuera del eje se informa, no se descarta en silencio.
+            if (!$h->acumular($serie, $carga['FECHA'], $importe)) {
+                $serie['fuera_horizonte'] += $importe;
+            }
+        }
+
+        return $serie;
     }
 
     /**

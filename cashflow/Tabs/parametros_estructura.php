@@ -37,6 +37,15 @@
                     </small>
                 </div>
                 <div class="d-flex align-items-center gap-2">
+                    <!-- Lo engancha Js/tabla-export.js por el data-exportar.
+                         La tabla no se ordena (data-orden="no") pero sí se
+                         exporta: bajar la estructura configurada para revisarla
+                         es justamente lo que se pide de esta pantalla. -->
+                    <button class="btn btn-sm btn-outline-success" data-exportar="cfeTabla"
+                            data-exportar-nombre="Parametros_Estructura_Filas"
+                            title="Exportar a Excel lo que se está viendo">
+                        <i class="fas fa-file-excel me-1"></i> Exportar
+                    </button>
                     <div class="form-check form-switch mb-0 me-2">
                         <input class="form-check-input" type="checkbox" id="cfeVerInactivas">
                         <label class="form-check-label small text-muted" for="cfeVerInactivas">
@@ -54,7 +63,12 @@
 
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover mb-0" id="cfeTabla">
+                    <!-- data-orden="no": acá el ORDEN DE LAS FILAS ES EL DATO.
+                         Se edita con los botones ↑ y ↓, el servidor lo renumera
+                         al guardar, y un FLUJO_NETO suma las filas que están
+                         por encima. Ordenar por otra columna mostraría una
+                         estructura que no es la que se va a guardar. -->
+                    <table class="table table-hover mb-0" id="cfeTabla" data-orden="no">
                         <thead>
                             <tr>
                                 <th style="width: 70px;">Orden</th>
@@ -113,16 +127,25 @@
              SECCIONES
              ======================================================== -->
         <div class="card mb-4">
-            <div class="card-header">
-                <h6 class="mb-0">Secciones</h6>
-                <small class="text-muted">
-                    El rol define cómo participa la sección en el cálculo.
-                    Inhabilitar una sección saca del tablero todas sus filas.
-                </small>
+            <div class="card-header d-flex justify-content-between align-items-start flex-wrap gap-2">
+                <div>
+                    <h6 class="mb-0">Secciones</h6>
+                    <small class="text-muted">
+                        El rol define cómo participa la sección en el cálculo.
+                        Inhabilitar una sección saca del tablero todas sus filas.
+                    </small>
+                </div>
+                <button class="btn btn-sm btn-outline-success" data-exportar="cfeTablaSecciones"
+                        data-exportar-nombre="Parametros_Estructura_Secciones"
+                        title="Exportar a Excel lo que se está viendo">
+                    <i class="fas fa-file-excel me-1"></i> Exportar
+                </button>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover mb-0" id="cfeTablaSecciones">
+                    <!-- data-orden="no" por el mismo motivo que cfeTabla: el
+                         orden de las secciones es lo que se está editando. -->
+                    <table class="table table-hover mb-0" id="cfeTablaSecciones" data-orden="no">
                         <thead>
                             <tr>
                                 <th style="width: 70px;">Orden</th>
@@ -161,12 +184,19 @@
              ORÍGENES DE DATOS DISPONIBLES
              ======================================================== -->
         <div class="card mb-4">
-            <div class="card-header">
-                <h6 class="mb-0">Orígenes de datos</h6>
-                <small class="text-muted">
-                    Los módulos registrados. Los que todavía no están construidos
-                    rinden cero y el tablero lo avisa.
-                </small>
+            <div class="card-header d-flex justify-content-between align-items-start flex-wrap gap-2">
+                <div>
+                    <h6 class="mb-0">Orígenes de datos</h6>
+                    <small class="text-muted">
+                        Los módulos registrados. Los que todavía no están construidos
+                        rinden cero y el tablero lo avisa.
+                    </small>
+                </div>
+                <button class="btn btn-sm btn-outline-success" data-exportar="cfeTablaProviders"
+                        data-exportar-nombre="Parametros_Estructura_Origenes"
+                        title="Exportar a Excel lo que se está viendo">
+                    <i class="fas fa-file-excel me-1"></i> Exportar
+                </button>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">

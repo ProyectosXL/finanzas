@@ -115,7 +115,7 @@
                     </div>
                 </div>
                 <div class="d-flex gap-2">
-                    <!-- No hay Resumen / Deep Dive: el grano natural de esta
+                    <!-- No hay Resumen / Detalle Facturas: el grano natural de esta
                          pantalla es el cheque, y no hay nada que aperturar. -->
                     <div id="vistasEcheqs"></div>
                     <!-- El selector de columnas fijas lo dibuja Js/columnas-fijas.js -->

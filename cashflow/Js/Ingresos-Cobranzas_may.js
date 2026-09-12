@@ -1,7 +1,10 @@
 ﻿/**
  * Ingresos - Cobranzas Mayoristas JavaScript
- * Con soporte para Resumen (predeterminado) y Deep Dive (aperturado por comprobante)
- * y proyección a 60 días (o plazo configurado en parámetros).
+ * Con soporte para Resumen (predeterminado) y Detalle Facturas (aperturado por
+ * comprobante) y proyección a 60 días (o plazo configurado en parámetros).
+ *
+ * "Detalle Facturas" es el nombre de cara al usuario; el identificador interno
+ * sigue siendo `deepdive`, igual que en Cobranzas FR.
  */
 
 (function() {
@@ -38,13 +41,15 @@
             alCambiar: generarTabla
         });
 
-        // Mismo default que Cobranzas FR: Tipo, COD_CLI y RAZON_SOC, en
-        // Resumen y en Deep Dive. Ver Js/columnas-fijas.js.
+        // Mismo default que Cobranzas FR: COD_CLI y RAZON_SOC, en Resumen y en
+        // Detalle Facturas. Ver Js/columnas-fijas.js.
+        // La clave cambió con la columna Tipo, por el mismo motivo que en
+        // Cobranzas FR: los índices guardados se corrieron un lugar.
         crearColumnasFijas({
             tabla: 'tablaCobranzasMay',
             control: 'colFijasCobMay',
-            clave: 'cobranzas_may',
-            porDefecto: [0, 1, 2]
+            clave: 'cobranzas_may.sin_tipo',
+            porDefecto: [0, 1]
         });
 
         if (btnRefresh) {
@@ -61,8 +66,95 @@
                 filtrarTabla();
             });
         }
-        
+
+        conectarFiltroEmision();
+
         cargarDatos();
+    }
+
+    /* ================================================================
+       FILTRO POR FECHA DE EMISIÓN
+
+       Es SERVER-SIDE, igual que en Cobranzas FR: los dos extremos se mandan
+       como parámetros y el controller filtra los items antes de EjeVista.
+       Filtrar escondiendo filas dejaría las columnas del eje, el pie de
+       totales y las tarjetas describiendo el total sin filtrar.
+       ================================================================ */
+
+    function filtroEmision() {
+        var desde = document.getElementById('fechaDesdeCobMay');
+        var hasta = document.getElementById('fechaHastaCobMay');
+
+        return {
+            desde: desde && desde.value ? desde.value : '',
+            hasta: hasta && hasta.value ? hasta.value : ''
+        };
+    }
+
+    function conectarFiltroEmision() {
+        var desde = document.getElementById('fechaDesdeCobMay');
+        var hasta = document.getElementById('fechaHastaCobMay');
+        var limpiar = document.getElementById('btnLimpiarFechasCobMay');
+
+        [desde, hasta].forEach(function(inp) {
+            if (inp) {
+                inp.addEventListener('change', function() {
+                    acotarExtremos();
+                    cargarDatos();
+                });
+            }
+        });
+
+        if (limpiar) {
+            limpiar.addEventListener('click', function() {
+                if (desde) desde.value = '';
+                if (hasta) hasta.value = '';
+
+                acotarExtremos();
+                cargarDatos();
+            });
+        }
+    }
+
+    /**
+     * Cada extremo acota al otro, y el botón de limpiar sólo está activo si hay
+     * algo que limpiar. El `max` y el `min` son una comodidad: el rango lo
+     * valida de nuevo el servidor.
+     */
+    function acotarExtremos() {
+        var desde = document.getElementById('fechaDesdeCobMay');
+        var hasta = document.getElementById('fechaHastaCobMay');
+        var limpiar = document.getElementById('btnLimpiarFechasCobMay');
+        var f = filtroEmision();
+
+        if (desde) desde.max = f.hasta;
+        if (hasta) hasta.min = f.desde;
+        if (limpiar) limpiar.disabled = !f.desde && !f.hasta;
+    }
+
+    /** El filtro aplicado, al lado del rótulo del período */
+    function pintarFiltroPeriodo() {
+        var el = document.getElementById('filtroPeriodoCobMay');
+
+        if (!el) {
+            return;
+        }
+
+        var r = (datosCobranzas && datosCobranzas.filtro_emision) || {};
+
+        if (!r.desde && !r.hasta) {
+            el.innerHTML = '';
+            return;
+        }
+
+        var rango = r.desde && r.hasta
+            ? 'emitidas del ' + formatDate(r.desde) + ' al ' + formatDate(r.hasta)
+            : (r.desde
+                ? 'emitidas desde el ' + formatDate(r.desde)
+                : 'emitidas hasta el ' + formatDate(r.hasta));
+
+        el.innerHTML = ' <span class="badge bg-secondary-subtle text-secondary-emphasis">'
+            + '<i class="fas fa-filter me-1"></i>Filtro: ' + rango + '</span>';
     }
     
     function texto(id, valor) {
@@ -96,31 +188,36 @@
         inicializar();
     }
 
+    /**
+     * Resumen o Detalle Facturas.
+     *
+     * Son sub-solapas anidadas (`nav nav-tabs`) y no un `btn-group`, así que
+     * el estado activo es la clase `active` del `nav-link`. `modoVista` y el
+     * `type=deepdive` del controller siguen igual.
+     */
     function cambiarModo(modo) {
         if (modo === modoVista) return;
         modoVista = modo;
-        
+
         var btnResumen = document.getElementById('btnVistaResumenCobMay');
         var btnDeepDive = document.getElementById('btnVistaDeepDiveCobMay');
-        
-        if (modo === 'resumen') {
-            btnResumen.classList.add('btn-primary', 'active');
-            btnResumen.classList.remove('btn-outline-primary', 'btn-outline-secondary');
-            btnDeepDive.classList.remove('btn-primary', 'active');
-            btnDeepDive.classList.add('btn-outline-secondary');
-        } else {
-            btnDeepDive.classList.add('btn-primary', 'active');
-            btnDeepDive.classList.remove('btn-outline-secondary');
-            btnResumen.classList.remove('btn-primary', 'active');
-            btnResumen.classList.add('btn-outline-secondary');
-        }
-        
+
+        if (btnResumen) btnResumen.classList.toggle('active', modo === 'resumen');
+        if (btnDeepDive) btnDeepDive.classList.toggle('active', modo === 'deepdive');
+
         cargarDatos();
     }
 
     function cargarDatos() {
         mostrarCargando(true);
-        fetch(`Controller/IngresosController.php?action=getCobranzasMay&type=${modoVista}`)
+
+        var f = filtroEmision();
+        var url = 'Controller/IngresosController.php?action=getCobranzasMay'
+            + '&type=' + encodeURIComponent(modoVista)
+            + '&desde=' + encodeURIComponent(f.desde)
+            + '&hasta=' + encodeURIComponent(f.hasta);
+
+        fetch(url)
             .then(response => {
                 if (!response.ok) throw new Error('Error HTTP: ' + response.status);
                 return response.json();
@@ -134,6 +231,8 @@
                     generarTabla();
                     calcularResumenes();
                     pintarAvisos();
+                    pintarFiltroPeriodo();
+                    acotarExtremos();
                     mostrarCargando(false);
                 } else {
                     mostrarError('Error al cargar datos: ' + result.message);
@@ -218,12 +317,20 @@
         var html = '';
 
         datosCobranzas.filas.forEach(function(item) {
-            html += `<tr class="fila-proyeccion-may">`;
-            
-            var plazoInfo = item.Dias ? `Plazo: ${item.Dias} días` : '';
-            html += `<td class="center"><span class="badge-may" title="${plazoInfo}"><i class="fas fa-clock me-1"></i>PROY</span></td>`;
+            // Una factura vencida se distingue en toda la fila: su importe está
+            // en la columna de hoy por ser el primer día del eje, no porque se
+            // estime cobrarla hoy. Ver Ingresos::ubicarCobroVencido().
+            html += '<tr class="fila-proyeccion-may' + (item.VENCIDA ? ' fila-vencida' : '') + '">';
 
-            html += `<td><strong>${item.COD_CLI || ''}</strong></td>`;
+            // El badge PROY se fue con la columna Tipo: todas las filas de
+            // esta pestaña son proyección, así que decía lo mismo en todas. El
+            // plazo con el que se proyectó queda en el title de COD_CLI, que
+            // es lo único que permitía auditar la fecha de cobro.
+            html += '<td title="' + escaparAttr(item.Dias
+                    ? 'Proyección a ' + item.Dias + ' días de la emisión.'
+                    : 'Proyección.') + '">'
+                + '<strong>' + escaparAttr(item.COD_CLI || '') + '</strong>'
+                + marcaVencida(item) + '</td>';
 
             // Recortado con puntos suspensivos (.col-texto) para que la fila
             // sea una sola línea; el nombre completo va en el title.
@@ -243,7 +350,11 @@
             html += `<td class="currency">${formatCurrency(item.importe_bruto)}</td>`;
             html += `<td class="currency fw-bold">${formatCurrency(item.importe_neto)}</td>`;
             
-            html += `<td class="center"><span class="badge-cobro-may">${formatDate(item.Cobro)}</span></td>`;
+            // data-orden con la fecha cruda: el texto del badge de una vencida
+            // es "Vencida 03/09/2026" y no se puede interpretar como fecha.
+            // Ver Js/tabla-orden.js.
+            html += '<td class="center" data-orden="' + escaparAttr(item.Cobro || '') + '">'
+                + celdaCobro(item) + '</td>';
             
             // Columnas del eje temporal
             cols.forEach(function(col) {
@@ -265,6 +376,53 @@
             html += '</tr>';
         });
         tableBody.innerHTML = html;
+    }
+
+    /* ================================================================
+       FACTURAS VENCIDAS
+
+       Mismo criterio que Exportaciones Tasky y Cobranzas FR: una factura cuya
+       fecha probable de cobro ya pasó no se descarta, se ubica en el primer
+       día del eje y se marca con su fecha original a la vista. Ver
+       Ingresos::ubicarCobroVencido().
+       ================================================================ */
+
+    /**
+     * La celda de fecha de cobro. Una vencida dice cuál era su fecha, que es
+     * lo único que explica por qué su importe está en la columna de hoy.
+     *
+     * Sin COBRO_ORIGINAL —el Resumen, donde la fila es un cliente y las fechas
+     * difieren— el badge no tendría fecha que mostrar y no agregaría nada
+     * sobre el color de la fila, así que va el badge normal.
+     */
+    function celdaCobro(item) {
+        if (item.VENCIDA && item.COBRO_ORIGINAL) {
+            return '<span class="badge-vencida-exp" title="Fecha probable de cobro original: '
+                + formatDate(item.COBRO_ORIGINAL) + '. Vencida sin cobrar: se ubica en el '
+                + 'primer día del eje">'
+                + '<i class="fas fa-triangle-exclamation me-1"></i>Vencida '
+                + formatDate(item.COBRO_ORIGINAL) + '</span>';
+        }
+
+        return '<span class="badge-cobro-may">' + formatDate(item.Cobro) + '</span>';
+    }
+
+    /**
+     * El indicador del Resumen: este cliente tiene alguna factura vencida.
+     *
+     * Dice "alguna" y no "todas". La marca la repone EjeVista::marcarAlguna()
+     * en el controller, porque el agrupado descarta los campos que difieren
+     * dentro del grupo.
+     */
+    function marcaVencida(item) {
+        if (modoVista !== 'resumen' || !item.VENCIDA) {
+            return '';
+        }
+
+        return ' <i class="fas fa-triangle-exclamation text-warning cob-marca-vencida" '
+            + 'title="Alguna factura de este cliente tiene la fecha probable de cobro ya '
+            + 'vencida: su importe se muestra en el primer día del eje. El detalle está '
+            + 'en Detalle Facturas."></i>';
     }
 
     /**
@@ -383,17 +541,8 @@
         alert(mensaje);
     }
 
+    /** Exporta lo que se ve. Ver Js/tabla-export.js. */
     function exportarExcel() {
-        var tabla = document.getElementById('tablaCobranzasMay').cloneNode(true);
-        var html = tabla.outerHTML;
-        var blob = new Blob([html], { type: 'application/vnd.ms-excel' });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-        a.href = url;
-        a.download = 'Cobranzas_May_' + new Date().toISOString().split('T')[0] + '.xls';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        exportarTabla('tablaCobranzasMay', 'Cobranzas_May');
     }
 })();

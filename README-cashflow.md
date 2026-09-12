@@ -37,6 +37,7 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 | 3 | `sql/cashflow_estructura_split_cobranzas_fr.sql` | Parte la fila `COBRANZAS_FR` en `COBRANZAS_FR_REAL` + `COBRANZAS_FR_PROY` | El tablero sigue mostrando real y proyectada en un solo número |
 | 4 | `sql/cashflow_dolares_comitente.sql` | Crea `RO_T_CASHFLOW_DOLARES_COMITENTE` y apunta su fila del tablero a la serie `INGRESO` | La pestaña avisa que falta la tabla y **la fila queda inválida**: apuntaría a una serie que el proveedor ya no ofrece |
 | 4b | `sql/cashflow_exportaciones_tasky.sql` | Siembra `exportaciones_tasky_dias_cobro` (30) y, si no existe, la fila `EXPORTACIONES` | La pestaña proyecta con 30 días igual; la fila ya existe en una base que corrió el script 7 |
+| 4c | `sql/cashflow_saldo_inversiones.sql` | Crea `RO_T_CASHFLOW_SALDO_INVERSIONES` y **crea** la fila `SALDO_INVERSIONES`, tomando la sección de la fila de dólares | La pestaña avisa que falta la tabla y la fila **no existe**, así que ese saldo no entra al tablero |
 
 ### Scripts modificados — hay que volver a correrlos
 
@@ -75,6 +76,7 @@ En este orden, contra `central`:
 -- 8. sql/cashflow_estructura_split_cobranzas_fr.sql  (parte Cobranzas FR en Real + Proyectada)
 -- 9. sql/cashflow_dolares_comitente.sql  (Otros Ingresos: dolares cuenta comitente)
 -- 10. sql/cashflow_exportaciones_tasky.sql  (Ingresos: plazo de cobro y fila de Exportaciones Tasky)
+-- 11. sql/cashflow_saldo_inversiones.sql  (Otros Ingresos: saldo de inversiones, EN PESOS)
 ```
 
 Los que alimentan pestañas puntuales están documentados en su propio README: `sql/ventas_proyeccion.sql` y compañía en `README-ventas.md`, `sql/cashflow_cobranzas_parametros.sql` y `sql/cashflow_cobranzas_may.sql` en `README-cobranzas-fr.md` y `README-cobranzas-may.md`.
@@ -96,6 +98,8 @@ El octavo da de baja lógica la fila `COBRANZAS_FR` —que traía real y proyect
 El noveno crea la tabla de carga de los **dólares de la cuenta comitente** y deja su fila del tablero apuntada a la serie del proveedor nuevo. Ver `README-otros-ingresos.md`.
 
 El décimo siembra el plazo de cobro de **Exportaciones Tasky** y su fila del tablero si no existía. No crea ninguna tabla: las facturas salen de `GVA12`. **Se valúan todas al dólar de hoy, a propósito** —ver `README-exportaciones-tasky.md` antes de tocar eso—.
+
+El undécimo crea la tabla del **saldo de inversiones** y su fila del tablero, que no existía. Es el mismo circuito que los dólares de la cuenta comitente pero **se carga en pesos y no se convierte**: el criterio y cómo revertirlo están escritos arriba del script. Ver `README-otros-ingresos.md`.
 
 Todos son reejecutables y no pisan nada ya editado. Si no se corrieron, la pantalla **no falla**: muestra un aviso diciendo que hay que correrlos.
 
@@ -251,7 +255,7 @@ Tres detalles que no son obvios:
 
 | Pestaña | Fijas por defecto |
 | --- | --- |
-| Cobranzas FR · Cobranzas May | `Tipo`, `COD_CLI`, `RAZON_SOC` — en Resumen y en Deep Dive |
+| Cobranzas FR · Cobranzas May | `COD_CLI`, `RAZON_SOC` — en Resumen y en Detalle Facturas. Eran tres con `Tipo`, que se sacó: ver `README-cobranzas-fr.md` |
 | Exportaciones Tasky | `N_COMP`, `RAZON_SOCI` — el rótulo del pie va en `N_COMP`, la primera fija |
 | Proveedores Exterior | `Proveedor`, `Contenedor` |
 | Crono Nacionalización | `Proveedor`, `Contenedor` — la primera columna es una fecha, que no identifica nada |
@@ -262,6 +266,157 @@ Tres detalles que no son obvios:
 | Saldos · Cob. Electrónicos | **No se aplicó.** No tienen eje temporal: son cinco a siete columnas que entran en pantalla y no scrollean a lo ancho. Fijar una columna ahí no resuelve nada |
 
 Cobranzas FR, Cobranzas May y Echeqs además **no tenían header fijo**: usaban `table-wrapper table-responsive` sin `.tabla-temporal`. Ahora la llevan.
+
+---
+
+## Ordenar por encabezado: un control, treinta y seis tablas
+
+Ninguna tabla del módulo se podía ordenar. Ahora se ordenan todas, con
+`Js/tabla-orden.js`, que es el tercer control compartido junto a `eje-vistas.js` y
+`columnas-fijas.js`.
+
+> **Por qué no DataTables**, que está cargado y lo haría solo: toma el control del
+> `<table>` entero —paginado, su propio buscador, su propio redibujo— y estas tablas ya
+> tienen resuelto todo eso de otra forma. El eje temporal, las columnas fijas, el header y
+> el pie fijos, el buscador propio y el filtro server-side pelearían con los cuatro.
+
+**Click en el `<th>`: asc → desc → sin orden.** El tercer click devuelve la tabla al orden
+que le dio el backend. El indicador es una **clase con un `::after`** y no un `<i>`
+agregado, y eso no es una preferencia de estilo: `main.js` observa `#tabContent` por
+`childList`, así que un hijo nuevo en el encabezado dispararía el observer y el par
+*observer → reaplicar → pintar* no pararía nunca. Por el mismo motivo `aplicar()` **no
+escribe en el DOM si las filas ya están en el orden pedido**: mover filas *sí* es un cambio
+de `childList`, y esa guarda es lo que corta la cadena en la segunda pasada.
+
+### Se ordena por el valor, no por el string
+
+`$ 1.000.000,00` es menor que `$ 9,00` como texto. El tipo se detecta por contenido:
+importes en formato es-AR (`$ 1.234,56`, `USD -1.000,00`, `8%`), fechas (`dd/mm/aaaa` y
+`aaaa-mm-dd`) y **rótulos de mes** (`Sep-26`, los de `Horizonte::labelMes()`). Sin ese
+último, las tablas mensuales de Ventas se ordenarían Abr, Ago, Dic, Ene.
+
+- **El tipo lo decide la mayoría de los valores, no la unanimidad.** Un `N/A` suelto en una
+  columna de fechas —que es lo que deja `getCobranzasFR()` cuando el comprobante no
+  aparece en `GVA12`— la convertiría en columna de texto, y entonces las fechas se
+  ordenarían por el día.
+- **Lo vacío va siempre al final, en las dos direcciones.** Un vacío es ausencia de dato, y
+  en la punta de la tabla ocuparía justo el lugar donde uno busca el máximo o el mínimo.
+- **`data-orden` en el `<td>` es el escape** para cuando el texto no sirve: un badge que
+  dice *"Vencida 03/09/2026"*, un ícono. Una celda con un `<input>` se resuelve sola, por
+  su `value`.
+
+### Qué se ordena y qué no
+
+| | |
+| --- | --- |
+| Columnas ordenables, `thead` de una fila | todas |
+| Columnas ordenables, `thead` de dos filas | las descriptivas (`rowspan="2"`) **más `Total`** |
+| Las 28 columnas de días | **no** — se aprieta una sin querer, y el rótulo es tan chico que no hay dónde poner el indicador |
+| El `tfoot` | **no se ordena nunca**: los totales van al pie |
+| Las filas escondidas por el buscador o por el filtro de fecha | **siguen escondidas**: el `display` viaja con la fila |
+
+Las columnas se **derivan del encabezado** y no se declaran por pestaña, por el mismo
+motivo que en `columnas-fijas.js`: una lista declarada se desactualiza en silencio.
+
+### Se descubren solas
+
+`reaplicar()` habilita el orden en **toda tabla con `<thead>` e `id`** dentro de
+`#tabContent`. Una lista de pestañas acá no cubriría la tabla que alguien agregue mañana, y
+son treinta y seis. Por eso **las tablas que no tenían `id` ahora lo tienen**: es la clave
+con la que se guarda la preferencia, y una clave por posición se mudaría de tabla en cuanto
+alguien agregue una arriba.
+
+La preferencia va en `localStorage` **por nombre de columna, no por índice**. Guardar el
+índice sería repetir el error que este módulo ya pagó dos veces: si alguien agrega o saca
+una columna, el índice apunta a otra cosa y la tabla abre ordenada por una columna que el
+usuario no eligió. Con el nombre, una columna que ya no existe hace que la preferencia se
+descarte.
+
+### Dos excepciones, y las dos declaradas
+
+**El tablero se ordena, pero sólo por dentro de cada sección.** Sus filas derivadas
+significan lo que significan **por dónde están**: un `SUBTOTAL` cierra su sección y un
+`FLUJO_NETO` suma las filas que están por encima. Si se movieran, el cuadro quedaría con la
+pinta de siempre y los subtotales dejarían de corresponder a las filas que tienen arriba —
+el peor error posible acá: uno que no se ve. Así que `Cashflow.js` declara sus **filas
+ancla**, que quedan clavadas y hacen de borde, y lo que se ordena son las filas de
+movimiento de cada bloque. Una fila con una sola celda con `colspan` queda anclada sola:
+no es un dato, es un texto (el rótulo de la sección, el *"No hay facturas"* del listado
+vacío).
+
+Y hay tablas donde **el orden de las filas ES el dato**, y ésas declaran `data-orden="no"`:
+
+| Tabla | Por qué |
+| --- | --- |
+| `cfeTabla`, `cfeTablaSecciones` | Se reordenan con los botones ↑ y ↓, y el servidor renumera al guardar |
+| `tablaAcumulada`, `tablaBalance` | Llevan una columna de **acumulado**, que sólo se lee en orden cronológico |
+| `tablaMix`, `tablaEscalaCob` | Son formularios que se guardan y validan enteros, no listados |
+
+---
+
+## Exportar a Excel: la misma función, una sola vez
+
+`exportarExcel()` estaba **copiada siete veces** —Cobranzas FR, Cobranzas May,
+Exportaciones Tasky, Crono Nacionalización, Proveedores Exterior, Echeqs, Ventas y el
+tablero—, con diferencias entre las copias:
+
+- una envolvía en `<html>` con `<meta charset>` y las otras no, y **sin eso Excel abre las
+  razones sociales con los acentos rotos**;
+- una clonaba la tabla y las demás exportaban el nodo vivo;
+- **ninguna sacaba los `<input>` ni los botones**, así que la columna de fecha de cobro
+  editable de Cobranzas FR llegaba a la planilla con un control de formulario en vez de una
+  fecha;
+- y la mitad de las pestañas con tabla no tenía botón.
+
+Ahora es `Js/tabla-export.js`, y las siete copias son una llamada:
+
+```js
+exportarTabla('tablaCobranzasFR', 'Cobranzas_FR');
+```
+
+**Exporta lo que se ve**, que es lo único defendible: quien aprieta *Exportar* después de
+buscar un cliente, filtrar por fecha de emisión y ordenar por importe espera bajar eso. Sale
+del DOM vivo, así que el orden y el filtro server-side vienen puestos; lo que hay que hacer
+a mano es **sacar del clon las filas y las columnas que el CSS está escondiendo** —el
+buscador esconde filas, el modo Resumen esconde columnas con una regla de `nth-child`—,
+porque Excel no interpreta ese CSS y en la planilla aparecería todo.
+
+> **La visibilidad se pregunta sobre la tabla viva y no sobre el clon.** Un clon suelto no
+> tiene estilo calculado, así que `getComputedStyle` sobre el clon diría que todo se ve. Se
+> recorren las dos en paralelo.
+
+El nombre del archivo es `<Pestaña>_<YYYY-MM-DD>.xls`, y si no se declara uno se usa el
+**título de la página**, que sale del menú: así una pestaña nueva no exporta un archivo
+llamado `undefined` ni hay que declarar el nombre en dos lugares.
+
+### Un botón nuevo es HTML y nada más
+
+```html
+<button class="btn btn-sm btn-success" data-exportar="tablaSaldos"
+        data-exportar-nombre="Saldos_Por_Cuenta">
+    <i class="fas fa-file-excel me-1"></i> Exportar
+</button>
+```
+
+`reaplicar()` engancha todos los botones con `data-exportar`, y la llama `main.js` con el
+mismo `MutationObserver`. Así se agregó el botón a las pestañas que no lo tenían —
+*Cob. Electrónicos* (sus cuatro tablas), *Dólares Cuenta Comitente* (vigentes e historial),
+*Saldos* (cuentas y locales) y las de *Parámetros*—, **un botón por tabla, en su propia
+`card-header`**: son cuadros distintos y bajar "la pestaña" no querría decir nada.
+
+Las dos tablas con `data-orden="no"` que **sí** se exportan son `tablaMix` y
+`tablaEscalaCob`: no se ordenan porque son formularios, pero bajar la configuración que
+explica cada importe proyectado es justamente lo que se pide de esas pantallas.
+
+> **`tests/test_tablas_controles.php` verifica el cableado, no la lógica.** No hay corredor
+> de JavaScript en el proyecto, pero lo que se rompe en silencio de estos dos controles no
+> es su lógica: es el cableado. Un `data-exportar` mal escrito deja un botón que **no hace
+> nada** —no tira error, no avisa—, y desde la pantalla es indistinguible de una tabla
+> vacía. La prueba chequea que cada `data-exportar` apunte a una tabla que existe en su
+> misma pestaña, que toda tabla tenga `id`, que los dos componentes estén cargados en
+> `index.php`, que `main.js` los reaplique en el orden correcto, y que **el tipo MIME de
+> Excel siga saliendo en un solo archivo** — si reaparece en otro, alguien volvió a copiar
+> la función y esa copia va a divergir como divergieron las siete anteriores.
 
 ---
 
@@ -335,7 +490,7 @@ El ícono de la fila mide **sólo las columnas de la vista activa**, igual que l
 
 Van igual en el registro, con `'disponible' => false` y sin clase. Una fila que los apunte se muestra **en cero** y el tablero avisa, en vez de desaparecer del cuadro: así la pantalla tiene desde el primer día la forma completa del Excel y se ve qué falta. Cuando el módulo exista, se escribe su proveedor y se da vuelta el flag; la fila ya está configurada y se llena sola.
 
-Hoy tienen datos reales once: **Ventas**, **Cobranzas FR**, **Cobranzas Mayoristas**, **Proveedores Exterior**, **Nacionalizaciones**, **Saldos**, **Caja Locales**, **Cobranzas Electrónicas**, **Echeqs**, **Dólares Cuenta Comitente** y **Exportaciones Tasky**. Los otros están declarados y rinden cero.
+Hoy tienen datos reales doce: **Ventas**, **Cobranzas FR**, **Cobranzas Mayoristas**, **Proveedores Exterior**, **Nacionalizaciones**, **Saldos**, **Caja Locales**, **Cobranzas Electrónicas**, **Echeqs**, **Dólares Cuenta Comitente**, **Exportaciones Tasky** y **Saldo de Inversiones**. Los otros están declarados y rinden cero.
 
 > **Exportaciones Tasky valúa todas sus facturas al dólar de hoy**, y no cada una al tipo de cambio del mes en que se cobra. Se aparta a propósito de la doctrina de `Class/Cotizacion.php`, que es para series históricas: acá la deuda está fija en dólares y el cobro es futuro, y valuar a hoy es no suponer devaluación. Ver `README-exportaciones-tasky.md`.
 
@@ -474,7 +629,7 @@ La guarda va en esa dirección a propósito: lo que hay que evitar es que el men
 
 ### El contador de cada categoría
 
-Cada categoría muestra `n/m`: cuántas de sus pestañas tienen datos del sistema. Sirve para ver el avance sin abrirla, y **cuenta sólo `datos`** —una maqueta no suma—, que es lo que hace que el número sea confiable. Hoy: Ingresos 7/7, Otros Ingresos 1/1, Comercio Exterior 2/2, y el resto en cero.
+Cada categoría muestra `n/m`: cuántas de sus pestañas tienen datos del sistema. Sirve para ver el avance sin abrirla, y **cuenta sólo `datos`** —una maqueta no suma—, que es lo que hace que el número sea confiable. Hoy: Ingresos 7/7, Otros Ingresos 2/2, Comercio Exterior 2/2, y el resto en cero.
 
 **Otros Ingresos va después de Ingresos y aparte**: Ingresos agrupa lo que sale de un circuito del sistema y esa categoría agrupa lo que se tipea. La diferencia importa al leer un número — en una fila de Ingresos un cero es *"no hay movimientos"* y en una de esas es *"nadie cargó nada todavía"*. Ver `README-otros-ingresos.md`.
 
@@ -533,6 +688,7 @@ Los avisos no son decoración: son lo que evita leer un cero como si fuera un da
 - **Nacionalizaciones da cero** aunque haya contenedores: hoy ninguno tiene gastos estimados cargados. El aviso trae el conteo, para distinguir "no hay datos" de "los datos son cero". La pestaña Crono Nacionalización muestra el mismo cero.
 - Falta del tipo de cambio.
 - **Exportaciones Tasky ubica en hoy las facturas cuya fecha de cobro estimada ya venció**, con el conteo y los dólares. Son facturas vencidas sin cobrar, no cobranza estimada para hoy; la celda de hoy además queda anotada con `detalle`. Sin cotización de hoy, la fila va en cero y el aviso dice cuántos dólares quedan sin valuar.
+- **Cobranzas Franquicias y Mayoristas hacen lo mismo desde que la regla se unificó** (`Ingresos::ubicarCobroVencido()`, ver `README-cobranzas-fr.md`): las facturas proyectadas vencidas de hasta 180 días atrás entran en la columna de hoy, y el aviso trae el conteo y el importe. Acá va **como aviso y no como `detalle`**, a diferencia de las exportaciones: el contrato admite una anotación por celda y la celda de hoy de la cobranza proyectada ya puede tener la de la fecha pactada a mano. Dos notas por la misma celda dejarían ver una sola.
 
 ---
 
@@ -578,6 +734,8 @@ cashflow/Class/Horizonte.php                Eje temporal, compartido con Ventas
 cashflow/Class/EjeVista.php                 Las tres vistas: columnas, totales y periodo
 cashflow/Js/eje-vistas.js                   Su contraparte en el front (cargado en index.php)
 cashflow/Js/columnas-fijas.js               Que columnas quedan fijas al scrollear (idem)
+cashflow/Js/tabla-orden.js                  Ordenar por encabezado, en las 36 tablas (idem)
+cashflow/Js/tabla-export.js                 Exportar a Excel lo que se ve (idem)
 cashflow/Js/notificaciones.js               Avisos de accion y confirmaciones (idem)
 cashflow/Css/notificaciones.css
 cashflow/Class/Menu.php                     Menu lateral y estado de cada pestana
@@ -605,6 +763,8 @@ cashflow/Class/OtrosIngresos.php            Otros Ingresos (README-otros-ingreso
 cashflow/Class/Providers/OtrosIngresosProvider.php
 cashflow/Controller/OtrosIngresosController.php
 cashflow/Tabs/dolares_comitente.php
+cashflow/Tabs/saldo_inversiones.php         El segundo concepto: se carga EN PESOS
+sql/cashflow_saldo_inversiones.sql
 cashflow/Class/Providers/ExportacionesProvider.php   Exportaciones Tasky (README-exportaciones-tasky.md)
 cashflow/Tabs/exportaciones_tasky.php
 sql/cashflow_exportaciones_tasky.sql
@@ -620,9 +780,9 @@ Eliminado: `Tabs/resumen.php`.
 ## Pendientes conocidos
 
 - **El saldo de apertura ya no arranca en cero, pero depende de que alguien cargue.** El módulo Saldos existe (ver `README-saldos.md`) y alimenta *Saldo Inicial*. Mientras no haya ninguna carga, o mientras la última quede vieja, la fila va en cero o desactualizada y **el tablero lo avisa con la fecha del dato**: leer esos saldos como disponibilidad real sería un error caro.
-- **Todas las filas del Excel ya tienen de dónde salir.** *Exportaciones Tasky* fue la última: la alimenta `ExportacionesProvider` con las facturas pendientes en dólares de `GVA12` (ver `README-exportaciones-tasky.md`). *Caja Locales* salió de esta lista cuando se construyó el módulo Saldos, y *Dólares Cuenta Comitente* con **Otros Ingresos** (ver `README-otros-ingresos.md`): esa se carga a mano, pero por una pantalla y no por el Excel, así que sigue entrando al tablero por un proveedor como cualquier otra.
+- **Todas las filas del Excel ya tienen de dónde salir.** *Exportaciones Tasky* fue la última: la alimenta `ExportacionesProvider` con las facturas pendientes en dólares de `GVA12` (ver `README-exportaciones-tasky.md`). *Caja Locales* salió de esta lista cuando se construyó el módulo Saldos, y *Dólares Cuenta Comitente* y *Saldo de Inversiones* con **Otros Ingresos** (ver `README-otros-ingresos.md`): esas se cargan a mano, pero por una pantalla y no por el Excel, así que siguen entrando al tablero por un proveedor como cualquier otra.
 - **El neteo de cheques adelantados resta importes que ninguna fila del tablero suma.** Un cheque en cartera cierra solo: suma en *Echeqs en cartera* y resta de la cobranza de Ventas. Uno ya aplicado —depositado o endosado a un proveedor— no lo suma nadie, y se netea igual: **el neteo va por tilde y no por estado**, porque los cheques pre-chequeados están casi todos aplicados y filtrarlos dejaría el circuito sin efecto. Es una decisión tomada, no un pendiente; el pie de la sub-pestaña muestra el corte por estado para poder auditar el número. El detalle de lo verificado contra la base está en `README-ventas.md`.
-- **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** en Deep Dive, para traer la fecha de emisión de cada comprobante. El tablero no lo sufre —usa `getCobranzasFRTotales()`— y el Resumen tampoco, que desde que no muestra esa columna se la saltea; lo paga sólo el Deep Dive, que es donde se pidió el detalle.
+- **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** en *Detalle Facturas*, para traer la fecha de emisión de cada comprobante. El tablero no lo sufre —usa `getCobranzasFRTotales()`— y el Resumen tampoco, que desde que no muestra esa columna se la saltea; lo paga *Detalle Facturas*, que es donde se pidió el detalle, **y el Resumen cuando hay filtro por fecha de emisión**, porque ahí esa fecha es lo que decide si la fila entra.
 - **El Dashboard es una maqueta**: no tiene ninguna llamada al servidor, sus números están escritos a mano. El menú lo marca como tal. Cuando se construya de verdad, hay que pasarlo a `datos` en `Class/Menu.php`.
 - **`nacionalizacion_2` está en `$validTabs` de `TabController` pero no tiene archivo ni entrada de menú.** Es configuración muerta: nadie puede llegar ahí, y si llegara vería el placeholder.
 - **`VentasController?action=saveMixCobro` puede grabar un mix que Parámetros rechazaría**: no valida el 100%. Es anterior a este trabajo.

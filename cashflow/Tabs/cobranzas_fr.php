@@ -70,6 +70,31 @@
 
     <!-- Header Section con Botones -->
     <div class="card mb-4">
+
+        <!-- Sub-solapas: Resumen vs Detalle Facturas. Van DENTRO del panel y
+             debajo de las solapas principales, que es lo que las hace leer
+             como anidadas: no son otro origen de datos, son dos formas de
+             mirar la misma tabla. Se muestran en los dos orígenes; lo que
+             sigue habilitado sólo en Pendientes Proyectados → Detalle
+             Facturas es la edición de la fecha de cobro manual.
+
+             El estado sigue viviendo en `modoVista`: lo que cambió es el
+             control, no el flujo. -->
+        <div class="card-header cob-subtabs pt-2 pb-0 px-3">
+            <ul class="nav nav-tabs card-header-tabs mb-0" id="cobranzasFrSubTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="btnVistaResumenCob" type="button" role="tab">
+                        <i class="fas fa-list me-1"></i> Resumen
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="btnVistaDeepDiveCob" type="button" role="tab">
+                        <i class="fas fa-search-plus me-1"></i> Detalle Facturas
+                    </button>
+                </li>
+            </ul>
+        </div>
+
         <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-3">
             <div class="d-flex align-items-center gap-3">
                 <div>
@@ -84,18 +109,26 @@
                         <input type="text" id="busquedaCob" class="form-control border-start-0 ps-0" placeholder="Buscar cliente o comprobante..." style="min-width: 230px;">
                     </div>
                 </div>
+
+                <!-- Filtro por fecha de EMISIÓN. Es server-side: se manda como
+                     parámetro y los items se filtran antes de EjeVista, así que
+                     las columnas, el pie de totales y las tarjetas describen lo
+                     que se está viendo. Ver Ingresos::validarRangoFechaEmision(). -->
+                <div class="filtro-emision d-flex align-items-center gap-1">
+                    <span class="text-muted small text-nowrap">Emisión</span>
+                    <input type="date" id="fechaDesdeCob" class="form-control form-control-sm"
+                           title="Desde esta fecha de emisión, inclusive">
+                    <span class="text-muted small">a</span>
+                    <input type="date" id="fechaHastaCob" class="form-control form-control-sm"
+                           title="Hasta esta fecha de emisión, inclusive">
+                    <button id="btnLimpiarFechasCob" class="btn btn-sm btn-outline-secondary"
+                            title="Quitar el filtro por fecha de emisión" disabled>
+                        <i class="fas fa-eraser"></i>
+                    </button>
+                </div>
             </div>
 
             <div class="d-flex gap-2 flex-wrap align-items-center">
-                <div class="btn-group" role="group">
-                    <button id="btnVistaResumenCob" class="btn btn-sm btn-outline-primary active">
-                        <i class="fas fa-list me-1"></i> Resumen
-                    </button>
-                    <button id="btnVistaDeepDiveCob" class="btn btn-sm btn-outline-secondary">
-                        <i class="fas fa-search-plus me-1"></i> Deep Dive
-                    </button>
-                </div>
-
                 <!-- Los tres botones los dibuja Js/eje-vistas.js -->
                 <div id="vistasCob"></div>
 
@@ -111,9 +144,12 @@
             </div>
         </div>
 
-        <!-- Período que se está midiendo -->
+        <!-- Período que se está midiendo. El filtro aplicado va en un elemento
+             APARTE: eje-vistas.js reescribe #periodoCob cada vez que se cambia
+             de vista, así que lo que se agregara ahí se perdería. -->
         <div class="card-body py-2 border-bottom bg-light bg-opacity-50">
             <small class="text-muted" id="periodoCob"></small>
+            <small class="text-muted" id="filtroPeriodoCob"></small>
         </div>
 
         <div class="card-body p-0">
@@ -129,7 +165,12 @@
                 <table id="tablaCobranzasFR" class="table table-hover mb-0">
                     <thead>
                         <tr>
-                            <th rowspan="2">Tipo</th>
+                            <!-- No hay columna Tipo: la solapa activa ya dice si lo
+                                 que se está viendo es real o proyectado, así que el
+                                 badge REAL/PROYECCIÓN repetía el encabezado en cada
+                                 fila. Lo que distinguía dentro de la vista "todos"
+                                 sigue estando: el color de fila (.fila-proyeccion) y
+                                 el PPP en el title de COD_CLI. -->
                             <th rowspan="2">COD_CLI</th>
                             <th rowspan="2" class="col-texto">RAZON_SOC</th>
                             <th rowspan="2">FECHA</th>
@@ -152,7 +193,7 @@
                     </tbody>
                     <tfoot class="table-light">
                         <tr id="totalsRowCob">
-                            <td colspan="10" class="fw-bold text-end">TOTALES</td>
+                            <td colspan="9" class="fw-bold text-end">TOTALES</td>
                             <!-- Los totales se generan dinámicamente -->
                         </tr>
                     </tfoot>

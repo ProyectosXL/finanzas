@@ -74,5 +74,10 @@ session_start();
          motivo que los dos de arriba: es compartido y las pestañas llegan por
          AJAX. Va DESPUÉS de main.js, que lo consulta al medir. -->
     <script src="Js/columnas-fijas.js?v=<?php echo time(); ?>"></script>
+    <!-- Ordenar la tabla clickeando el encabezado, y exportarla a Excel. Mismo
+         motivo que los de arriba: los usan todas las pestañas con tabla, y las
+         pestañas llegan por AJAX, así que tienen que existir antes que ellas. -->
+    <script src="Js/tabla-orden.js?v=<?php echo time(); ?>"></script>
+    <script src="Js/tabla-export.js?v=<?php echo time(); ?>"></script>
 </body>
 </html>

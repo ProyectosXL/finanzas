@@ -62,7 +62,7 @@ La interfaz de `Cobranzas FR` cuenta con dos pestañas de navegación dedicadas 
 ### 1. Solapa "Real a Cobrar"
 - **Origen de datos:** Propuestas de pago de franquicias (`FP_propuestas_pago` en la base `apps`).
 - **Criterio:** Facturas comprometidas por fecha efectiva de cobro pactada (`fecha_propuesta_pago`), **únicamente de propuestas en estado `ACEPTADA`**.
-- **Estilo:** Visualización estándar en verde/azul (`.badge-real`, `.badge-cobro`).
+- **Estilo:** Visualización estándar en verde/azul (`.badge-cobro`).
 - **Serie del Tablero:** `COBRANZA_REAL`.
 
 ### 2. Solapa "Pendientes Proyectados"
@@ -167,7 +167,7 @@ La validación corre en el servidor (`Ingresos::validarEscala()`, pura y probada
 
 ## Fecha de cobro manual por factura
 
-El PPP es un promedio: sirve para el grueso de la cartera y no sirve cuando alguien ya habló con el franquiciado y sabe la fecha de esa factura. Esa fecha se carga en el **Deep Dive de Pendientes Proyectados**, celda por celda, y vive en `RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL`.
+El PPP es un promedio: sirve para el grueso de la cartera y no sirve cuando alguien ya habló con el franquiciado y sabe la fecha de esa factura. Esa fecha se carga en el **Detalle Facturas de Pendientes Proyectados**, celda por celda, y vive en `RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL`.
 
 ### La jerarquía
 
@@ -189,7 +189,7 @@ La diferencia se calcula **con signo**: una fecha manual anterior a la emisión 
 - **La celda editada distingue lo pactado de lo estimado.** Sin esa marca, dos filas con la misma fecha en pantalla estarían diciendo cosas distintas y no habría forma de saber cuál es cuál. El botón de volver borra el override y la fecha vuelve al PPP.
 - **Al guardar se recarga la pestaña entera**, no la fila. La fecha cambia los días, el descuento, el neto, en qué columna del eje cae ese importe y los totales del pie: parchearlo en el navegador sería reimplementar en JS la cuenta que ya hace el backend, con el riesgo habitual de que las dos den distinto.
 
-En **Resumen** la fila es un cliente y no un comprobante, así que no hay nada que editar: se muestra un indicador cuando alguna de sus facturas tiene fecha cargada a mano, y el detalle está en Deep Dive.
+En **Resumen** la fila es un cliente y no un comprobante, así que no hay nada que editar: se muestra un indicador cuando alguna de sus facturas tiene fecha cargada a mano, y el detalle está en Detalle Facturas.
 
 Los endpoints son `IngresosController?action=saveFechaCobroManual` y `deleteFechaCobroManual`.
 
@@ -201,7 +201,7 @@ Por eso la fila **Cobranzas Franquicias Proyectadas** del tablero anota sus celd
 
 - La celda que tiene parte pactada lleva un **subrayado violeta**, y el tooltip dice cuánto y de cuántos comprobantes: *"$ 386.814,96 de esta celda (1 comprobante) tienen fecha de cobro PACTADA con el cliente… El resto de la celda sale del PPP, que es una estimación."*
 - El nombre de la fila lleva un **🤝** con el total pactado **de la vista activa**, para poder verlo sin recorrer veintiocho columnas con el mouse.
-- El detalle factura por factura sigue estando en *Pendientes Proyectados → Deep Dive*.
+- El detalle factura por factura sigue estando en *Pendientes Proyectados → Detalle Facturas*.
 
 **Nunca es el importe entero de la celda**, y por eso el tooltip dice cuánto: una celda del 14/9 puede tener $4.244.724 de los cuales $386.814 están pactados y el resto proyectado. Marcar sin decir cuánto haría leer los cuatro millones como acordados.
 
@@ -213,29 +213,194 @@ Se implementa con el campo `detalle` del contrato de proveedor, que es metadato 
 
 ---
 
+## Las facturas vencidas entran, ubicadas en hoy
+
+Antes, la factura cuya **fecha probable de cobro ya había pasado** se descartaba con un
+`continue` en `Ingresos::getCobranzasFRPendientesProyectadas()`. Esa plata desaparecía de
+la pantalla y **nada lo decía**: la pestaña mostraba de menos en silencio, que es
+exactamente lo que el resto del módulo evita.
+
+Ahora vale el criterio de Exportaciones Tasky: **una factura con la fecha estimada en el
+pasado es una factura vencida sin cobrar**, o sea información y no un error a esconder.
+
+```
+Fecha probable de cobro ≥ hoy          → va en su fecha
+Fecha probable entre hoy − 180 y hoy   → va en el PRIMER DÍA DEL EJE, marcada VENCIDA
+Fecha probable anterior a hoy − 180    → queda afuera
+Fecha PACTADA A MANO, aunque venció    → va en su fecha, marcada VENCIDA, sin reubicar
+```
+
+La regla vive escrita **una sola vez** en `Ingresos::ubicarCobroVencido()`, que es estática
+y pura, y la usan Cobranzas FR, Cobranzas May y —a través de
+`estimarCobroExportacion()`— Exportaciones Tasky. Antes eran dos criterios opuestos en
+tres funciones.
+
+### Los 180 días son un techo, no una preferencia
+
+Es la constante `Ingresos::DIAS_COBRO_VENCIDO`. Sin techo, una cartera con años de
+facturas incobrables entraría **entera** en la columna de hoy, y el primer día del eje
+mostraría una cobranza que nadie espera cobrar. Exportaciones Tasky pasa `null` —sin
+techo— porque son pocas facturas de un solo cliente y todas se gestionan.
+
+### La fecha manual no se reubica, y tampoco se descarta
+
+Es una fecha que Tesorería pactó con el cliente. Moverla a hoy sería pisar una decisión
+tomada con una regla automática, y el usuario vería **su propia carga en otra columna**. Se
+marca vencida —eso es un hecho— pero se muestra donde está. Y no se descarta por antigua:
+si cayó fuera del horizonte, lo informa `EjeVista` como cualquier otro importe.
+
+### El descuento no cambia por reubicar el importe
+
+Los días de la escala salen del **plazo pactado** (`resolverFechaCobro()`) y no de la
+columna en la que se dibuja el importe. Si se recalcularan sobre hoy, el importe neto de
+una factura vencida cambiaría solo con el paso de los días, sin que nadie tocara nada.
+
+### Qué se ve en la pantalla
+
+- La fila entera en ámbar (`.fila-vencida`, en `Css/main.css` porque la comparten las tres
+  pestañas) y un badge `badge-vencida-exp` con la fecha que venció en el `title`.
+- En **Resumen** la fila es un cliente, así que no hay una fecha que marcar: va un
+  indicador al lado del código que dice que **alguna** de sus facturas está vencida, igual
+  que el de fecha pactada a mano.
+- Un aviso arriba de la tabla con la cantidad y el importe, generado por
+  `Ingresos::avisosCobranzasVencidas()`. Son **dos** avisos y no uno, porque son dos cosas
+  distintas: una reubicada está en la columna de hoy, y una pactada vencida está en la
+  columna de su fecha.
+
+> **La marca del Resumen dice "alguna", no "todas".** `EjeVista::armarAgrupado()` conserva
+> sólo los campos que valen lo mismo en todo el grupo, y para un dato descriptivo eso es
+> correcto. Pero una bandera no es un dato descriptivo: con la intersección, un cliente con
+> una factura vencida y otra al día perdía la marca y se veía igual que uno sin ninguna.
+> Lo repone `EjeVista::marcarAlguna()`, y **arregla también la marca de fecha pactada**,
+> que tenía el mismo defecto desde antes.
+
+### No se duplica contra Real a Cobrar
+
+La exclusión de la proyección es **por comprobante** —las facturas de propuestas `ACEPTADA`
+o `PAGADO`— y no por fecha, así que aceptar fechas pasadas no puede traer de vuelta nada
+que *Real* ya cuente. La invariante de las dos solapas no se movió.
+
+Lo que sí cambia es el tablero: `getCobranzasFRTotales()` ahora informa `IMPORTE_VENCIDO` y
+`COMP_VENCIDOS`, y `IngresosProvider` deja un aviso con el total. **Va como aviso y no como
+`detalle`**: el contrato admite una anotación por celda, y la celda de hoy de la cobranza
+proyectada ya puede tener la de la fecha pactada a mano. Dos notas compitiendo por la misma
+celda dejarían ver una sola, y cuál de las dos dependería del orden en que se escribieron.
+
+---
+
 ## Barra de Herramientas y Navegación
 
 Dentro de cada solapa, la barra de herramientas superior proporciona:
 - **Buscador rápido:** Filtrado en tiempo real por código de cliente, razón social o número de comprobante.
-- **Modo Resumen vs Deep Dive:** ver más abajo.
+- **Filtro por fecha de emisión (desde – hasta):** ver más abajo.
+- **Modo Resumen vs Detalle Facturas:** ver más abajo.
 - **Selector de Eje Temporal:** Alterna entre *Días* (tramo diario), *Meses* (tramo mensual) y *Período Completo* mediante el componente común `Js/eje-vistas.js`.
 - **Botones de Acción:** *Actualizar* datos y *Exportar* matriz a Excel.
 
 ---
 
+## El filtro por fecha de emisión es del servidor, no del navegador
+
+Dos `<input type="date">` al lado del buscador, más un botón de limpiar. Filtran por
+`FECHA`, que es la **fecha de emisión** del comprobante, no la de cobro.
+
+Los dos extremos se mandan como parámetros `desde` y `hasta` a
+`IngresosController`, y los items se filtran **antes** de `EjeVista::armar()` /
+`armarAgrupado()`.
+
+**Es lo único que puede funcionar.** El buscador esconde filas en el DOM, y eso alcanza
+para buscar un cliente: sigue siendo la misma tabla. Un filtro hecho igual dejaría las
+columnas del eje, el pie de totales y las tres tarjetas de indicadores describiendo el
+total **sin** filtrar, y se vería una tabla de tres filas con un total de doscientos
+millones sin nada que explicara la diferencia.
+
+- **Se valida en el servidor** (`Ingresos::validarRangoFechaEmision()`, pura y probada):
+  formato, calendario y `desde <= hasta`. El `max` y el `min` que se ponen en los inputs
+  son una comodidad del navegador, no una garantía — el endpoint es alcanzable sin pasar
+  por la pantalla. Mismo criterio que la fecha de cobro manual.
+- **Los dos extremos son opcionales e independientes.** Vacío es *sin filtro*, no un error.
+- **El filtro aplicado se ve en el rótulo del período**, en un elemento aparte del que
+  escribe `eje-vistas.js`: ese se reescribe en cada cambio de vista y se llevaría puesto
+  cualquier cosa agregada ahí.
+- **Un comprobante sin fecha de emisión utilizable queda afuera, pero contado y avisado.**
+  Es la cobranza real cuyo comprobante no aparece en `GVA12`, donde `getCobranzasFR()`
+  deja `'N/A'`: no se puede ubicar en el rango, y descartarlo en silencio sería perder
+  plata sin decirlo.
+
+> **Con filtro, el Resumen paga la consulta que se ahorraba.** El modo resumen de
+> `getCobranzasFR()` se saltea la fecha de emisión de la cobranza real justamente porque
+> cuesta **una consulta a `GVA12` por fila** y el Resumen no la muestra. Pero con filtro
+> esa fecha es lo que decide si la fila entra: sin ella, la cobranza real quedaría entera
+> afuera y el número sería falso. Así que el detalle se trae **sólo cuando hay filtro**.
+
+---
+
+## Resumen y Detalle Facturas son sub-solapas, no botones
+
+Antes eran un `btn-group` al lado de *Actualizar* y *Exportar*. Un `btn-group` es el
+control de una **acción**, y ahí había tres cosas con la misma pinta de las cuales sólo dos
+cambiaban lo que la tabla muestra.
+
+Ahora son un `<ul class="nav nav-tabs">` anidado, **dentro del panel y debajo de las
+solapas principales**, que es lo que las hace leer como dos formas de mirar la misma tabla
+y no como otro origen de datos. Se muestran en los dos orígenes —*Real a Cobrar* y
+*Pendientes Proyectados*—, porque es la misma tabla en los dos.
+
+- **Lo que sigue habilitado sólo en *Pendientes Proyectados → Detalle Facturas* es la
+  edición de la fecha de cobro manual.** `editable()` no cambió.
+- **El estado sigue viviendo en `modoVista`** (`'resumen'` / `'deepdive'`). Lo que cambió es
+  el control y su marcado; `cambiarModo()` hace lo mismo que antes con una clase distinta.
+- **En Cobranzas May van directamente arriba de la tabla**: esa pestaña no tiene solapas
+  principales, así que no hay nada debajo de lo que anidarlas.
+
+### "Deep Dive" pasó a llamarse "Detalle Facturas"
+
+Sólo el texto de cara al usuario: rótulos, títulos, tooltips y avisos. **Los
+identificadores internos quedaron como estaban** — `deepdive`, `btnVistaDeepDiveCob`, el
+parámetro `type=deepdive`—, porque renombrarlos no cambia nada en pantalla y sí toca el
+endpoint, el controller y las pruebas.
+
+---
+
 ## Resumen: una fila por cliente
 
-Antes el Resumen agrupaba por **cliente + fecha de cobro**, así que un cliente con cobros en tres fechas ocupaba tres filas. Eso no es un resumen: es el deep dive con menos columnas.
+Antes el Resumen agrupaba por **cliente + fecha de cobro**, así que un cliente con cobros en tres fechas ocupaba tres filas. Eso no es un resumen: es el detalle con menos columnas.
 
 Ahora es **una fila por cliente**, con sus importes repartidos en las columnas de la grilla según la fecha de cada comprobante. Una misma fila puede tener plata en el 6/9, en el 8/9 y en la columna de octubre.
 
-| | Resumen | Deep Dive |
+| | Resumen | Detalle Facturas |
 | --- | --- | --- |
 | La fila es | un cliente | un comprobante |
-| Columnas | `Tipo`, `COD_CLI`, `RAZON_SOC`, `Importe Bruto`, `Importe Neto` + la grilla | todas, incluidas `FECHA`, `T_COMP`, `N_COMP`, `Desc`, `Días` y `Cobro` |
+| Columnas | `COD_CLI`, `RAZON_SOC`, `Importe Bruto`, `Importe Neto` + la grilla | todas, incluidas `FECHA`, `T_COMP`, `N_COMP`, `Desc`, `Días` y `Cobro` |
 | Lo arma | `EjeVista::armarAgrupado()` | `EjeVista::armar()` |
 
 **El agrupado lo hace `EjeVista`, no la consulta.** Es la parte que importa: agrupar por cliente en SQL obligaría a elegir entre repetir la fila por cada fecha o quedarse con una sola fecha y tirar la ubicación temporal del resto de la plata. `armarAgrupado()` suma las **series** de todos los comprobantes del cliente, así que cada importe conserva su columna y la fila es una sola. Está documentado en el encabezado de `Class/EjeVista.php` y probado en `tests/test_ejevista.php`, incluido el invariante de que las dos formas dan el mismo total.
+
+### La columna TIPO se fue
+
+El badge REAL/PROYECCIÓN **repetía el encabezado en cada fila**: la solapa activa ya dice
+si lo que se está mirando es real o proyectado. Distinguía algo sólo dentro de la vista
+"todos", que no es la que se usa.
+
+Lo que sí distinguía sigue estando, porque no era el badge: **el color de la fila**
+(`.fila-proyeccion`) y **el PPP con el que se proyectó la fecha**, que pasó al `title` de
+`COD_CLI`. Sin ese dato la fecha de cobro no se puede auditar — es un promedio, no un
+dato del comprobante.
+
+Sacar una columna del medio mueve más cosas de las que parece, y todas son índices:
+
+| Qué | Antes | Ahora |
+| --- | --- | --- |
+| `porDefecto` de `crearColumnasFijas()` | `[0, 1, 2]` | `[0, 1]` |
+| `colspan` del rótulo TOTALES del `tfoot` | `10` (FR) / `11` (May) | `9` / `10` |
+| `.modo-resumen` — columnas de detalle | `nth-child(4..8)` | `nth-child(3..7)` |
+| `.modo-resumen` — columna `Cobro` | `nth-child(11)` | `nth-child(10)` |
+
+Y una que no es un índice: **`TIPO_REGISTRO` salió del buscador**. `filtrarTabla()` esconde
+filas mirando el `textContent` de la fila, y desde que no hay columna Tipo el texto "REAL"
+o "PROYECCIÓN" no está en el DOM. Si siguiera en `filasFiltradas()`, buscar *real* dejaría
+los totales de esas filas y escondería las filas: el pie no cerraría con la tabla. Las dos
+funciones tienen que mirar lo mismo.
 
 En Resumen se van `FECHA`, `T_COMP`, `N_COMP`, `Desc`, `Días` y `Cobro`: son distintos en cada comprobante del cliente. `armarAgrupado()` **descarta** los campos que difieren dentro del grupo en vez de mostrar el del primer comprobante — una fila que dijera "FAC 0001-123" cuando en realidad son doce facturas es peor que una celda vacía, porque nadie tendría por qué sospecharlo.
 
@@ -262,6 +427,11 @@ El proveedor `IngresosProvider` registra tres series en `CashflowRegistry`:
 - El validador de la escala: solapamientos, huecos, tramos al revés, porcentajes imposibles, y que el orden de carga no cambie el veredicto.
 - La jerarquía de fechas: fecha manual sobre PPP, los días recalculados sobre la fecha resuelta, y que eso cambie el tramo de descuento.
 - La validación de fecha pasada, con `hoy` inyectado para que la prueba no caduque sola.
+- La ubicación de las vencidas: los dos bordes del techo (180 entra y se ubica en hoy, 181 queda afuera), que hoy mismo no está vencido, que sin techo entra igual, que con techo cero se reproduce el comportamiento viejo, y que una fecha manual no se reubica ni se descarta ni siquiera más atrás del techo.
+- Que el descuento no cambie por reubicar el importe.
+- Los dos avisos de vencidas, y que sin vencidas no haya ninguno.
+- Que `EjeVista::marcarAlguna()` marque al cliente con **una** factura vencida entre dos.
+- El filtro por fecha de emisión: extremos vacíos, extremos sueltos, los bordes del rango inclusive, el rango al revés rechazado, el calendario imposible, y que el comprobante sin emisión quede afuera **contado** y avisado.
 
 `tests/test_cobranzas_fr_split.php`:
 - Que lo que cuenta *Real* y lo que la proyección excluye sean complementarios, estado por estado.
@@ -270,3 +440,4 @@ El proveedor `IngresosProvider` registra tres series en `CashflowRegistry`:
 ```bash
 php tests/run.php
 ```
+

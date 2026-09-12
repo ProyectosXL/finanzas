@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/lib.php';
 require_once __DIR__ . '/../cashflow/Class/Ingresos.php';
+require_once __DIR__ . '/../cashflow/Class/EjeVista.php';
 require_once __DIR__ . '/../cashflow/Class/Parametros.php';
 require_once __DIR__ . '/../cashflow/Class/CashflowRegistry.php';
 
@@ -175,6 +176,267 @@ chequearLanza('una fecha vacia se rechaza', function () {
 // Un DateTime tambien entra: es lo que devuelve sqlsrv para una columna DATE.
 chequear('acepta un DateTime, que es lo que devuelve sqlsrv', '2026-10-05',
     Ingresos::validarFechaCobroManual(new DateTime('2026-10-05'), '2026-09-10'));
+
+// ============================================================================
+// Las facturas vencidas entran, ubicadas en hoy
+//
+// Antes Cobranzas FR y Mayoristas descartaban con un `continue` todo cobro
+// cuya fecha probable fuera anterior a hoy, y esa plata desaparecia de la
+// pantalla sin que nada lo dijera. Ahora la regla es una sola para las tres
+// pestanas de cobranza proyectada: Ingresos::ubicarCobroVencido().
+// ============================================================================
+
+seccion('una factura vencida se ubica en hoy en vez de descartarse');
+
+$HOY = '2026-09-10';
+$DIAS = Ingresos::DIAS_COBRO_VENCIDO;
+
+chequear('el techo de dias es una constante documentada', 180, $DIAS);
+
+$alDia = Ingresos::ubicarCobroVencido('2026-09-20', $HOY, $DIAS);
+
+chequear('una fecha futura no se toca', '2026-09-20', $alDia['fecha']);
+chequear('y no esta vencida', false, $alDia['vencida']);
+chequear('y no se descarta', false, $alDia['descartar']);
+
+// El borde: hoy mismo NO esta vencido.
+$hoyMismo = Ingresos::ubicarCobroVencido($HOY, $HOY, $DIAS);
+
+chequear('hoy no esta vencido', false, $hoyMismo['vencida']);
+chequear('y se queda en hoy', $HOY, $hoyMismo['fecha']);
+
+$ayer = Ingresos::ubicarCobroVencido('2026-09-09', $HOY, $DIAS);
+
+chequear('la de ayer se ubica en hoy', $HOY, $ayer['fecha']);
+chequear('y conserva su fecha original', '2026-09-09', $ayer['original']);
+chequear('y queda marcada como vencida', true, $ayer['vencida']);
+chequear('y NO se descarta: antes se perdia en silencio', false, $ayer['descartar']);
+
+// Los dos bordes del techo. 180 dias para atras entra; 181 no.
+$borde180 = Ingresos::ubicarCobroVencido('2026-03-14', $HOY, $DIAS);  // hoy - 180
+$borde181 = Ingresos::ubicarCobroVencido('2026-03-13', $HOY, $DIAS);  // hoy - 181
+
+chequear('180 dias atras entra', false, $borde180['descartar']);
+chequear('y se ubica en hoy', $HOY, $borde180['fecha']);
+chequear('181 dias atras queda afuera', true, $borde181['descartar']);
+chequear('y sigue informando su fecha original', '2026-03-13', $borde181['original']);
+
+// Sin techo es lo que usa Exportaciones Tasky: son pocas facturas de un solo
+// cliente y todas se gestionan.
+$sinTecho = Ingresos::ubicarCobroVencido('2020-01-01', $HOY, null);
+
+chequear('sin techo, una vencida de hace anios entra igual', false, $sinTecho['descartar']);
+chequear('y se ubica en hoy', $HOY, $sinTecho['fecha']);
+
+// Con techo cero se reproduce el comportamiento viejo: todo lo anterior a hoy
+// afuera. Vale como prueba de que el techo es lo unico que cambio.
+chequear('con techo cero, lo de ayer se descarta', true,
+    Ingresos::ubicarCobroVencido('2026-09-09', $HOY, 0)['descartar']);
+
+// Sin fecha no hay nada que ubicar: se transporta asi y Horizonte::agrupar()
+// la informa en 'sin_fecha' en vez de perderla.
+$sinFecha = Ingresos::ubicarCobroVencido(null, $HOY, $DIAS);
+
+chequear('sin fecha no se descarta', false, $sinFecha['descartar']);
+chequear('y la fecha sigue siendo null, no hoy', null, $sinFecha['fecha']);
+
+seccion('la fecha manual manda: no se reubica ni se descarta');
+
+$manualVencida = Ingresos::ubicarCobroVencido('2026-09-01', $HOY, $DIAS, true);
+
+chequear('una fecha pactada vencida NO se mueve a hoy', '2026-09-01', $manualVencida['fecha']);
+chequear('pero se marca vencida, que es un hecho', true, $manualVencida['vencida']);
+chequear('y no se descarta', false, $manualVencida['descartar']);
+
+// Ni siquiera mas atras del techo: el techo es para la fecha automatica. Una
+// fecha que alguien cargo no se descarta por antigua; si cae fuera del eje, lo
+// informa EjeVista.
+$manualVieja = Ingresos::ubicarCobroVencido('2024-01-01', $HOY, $DIAS, true);
+
+chequear('una fecha pactada mas vieja que el techo tampoco se descarta',
+    false, $manualVieja['descartar']);
+chequear('y se respeta tal cual', '2024-01-01', $manualVieja['fecha']);
+
+// Y la fecha automatica del mismo dia si se descarta: es lo que distingue a las
+// dos.
+chequear('la misma fecha, pero automatica, si se descarta', true,
+    Ingresos::ubicarCobroVencido('2024-01-01', $HOY, $DIAS, false)['descartar']);
+
+seccion('el descuento no cambia por reubicar el importe');
+
+// La fecha manual decide el tramo por el plazo pactado, no por la columna en
+// la que se dibuja. Si el descuento se recalculara sobre hoy, una vencida
+// cambiaria de importe neto sola con el paso de los dias.
+$plazo = Ingresos::resolverFechaCobro('2026-08-01', 25);
+
+chequear('el plazo son 25 dias', 25, $plazo['dias']);
+chequear('la fecha probable ya venció', true,
+    Ingresos::ubicarCobroVencido($plazo['fecha'], $HOY, $DIAS)['vencida']);
+chequear('y el descuento sigue siendo el del tramo de 25 dias', 6.0,
+    Ingresos::descuentoDeEscala($ESCALA, $plazo['dias']));
+
+seccion('los avisos de facturas vencidas');
+
+$itemsAviso = [
+    ['VENCIDA' => true,  'FECHA_MANUAL' => false, 'importe_neto' => 1000.0],
+    ['VENCIDA' => true,  'FECHA_MANUAL' => false, 'importe_neto' => 500.0],
+    ['VENCIDA' => true,  'FECHA_MANUAL' => true,  'importe_neto' => 2000.0],
+    ['VENCIDA' => false, 'FECHA_MANUAL' => false, 'importe_neto' => 9999.0]
+];
+
+$avisos = Ingresos::avisosCobranzasVencidas($itemsAviso);
+
+chequear('hay dos avisos: las reubicadas y las pactadas', 2, count($avisos));
+chequear('el primero cuenta las reubicadas', true,
+    mb_stripos($avisos[0], '2 facturas por $ 1.500,00') !== false);
+chequear('y dice que no es cobranza estimada para hoy', true,
+    mb_stripos($avisos[0], 'no cobranza estimada para hoy') !== false);
+chequear('el segundo cuenta las pactadas', true,
+    mb_stripos($avisos[1], '1 factura por $ 2.000,00') !== false);
+chequear('y dice que no se reubican', true,
+    mb_stripos($avisos[1], 'sin reubicar') !== false);
+
+// Sin vencidas no hay aviso: un aviso permanente que dice "0 facturas" es
+// ruido y entrena a no leerlos.
+chequear('sin vencidas no hay aviso', [], Ingresos::avisosCobranzasVencidas([
+    ['VENCIDA' => false, 'importe_neto' => 100.0]
+]));
+
+chequear('una lista vacia tampoco avisa', [], Ingresos::avisosCobranzasVencidas([]));
+
+seccion('la marca del Resumen dice ALGUNA, no TODAS');
+
+// EjeVista::marcarAlguna() repone lo que la interseccion de armarAgrupado()
+// descarta. Sin esto, un cliente con una factura vencida y otra al dia perdia
+// la marca y se veia igual que uno sin ninguna.
+$payloadFalso = ['filas' => [
+    ['COD_CLI' => 'FR001'],
+    ['COD_CLI' => 'FR002'],
+    ['COD_CLI' => 'FR003']
+]];
+
+$itemsGrupo = [
+    ['COD_CLI' => 'FR001', 'VENCIDA' => true,  'FECHA_MANUAL' => false],
+    ['COD_CLI' => 'FR001', 'VENCIDA' => false, 'FECHA_MANUAL' => false],
+    ['COD_CLI' => 'FR002', 'VENCIDA' => false, 'FECHA_MANUAL' => true],
+    ['COD_CLI' => 'FR003', 'VENCIDA' => false, 'FECHA_MANUAL' => false]
+];
+
+$marcado = EjeVista::marcarAlguna($payloadFalso, $itemsGrupo, 'COD_CLI',
+    ['VENCIDA', 'FECHA_MANUAL']);
+
+chequear('un cliente con una vencida entre dos queda marcado',
+    true, $marcado['filas'][0]['VENCIDA']);
+chequear('y no queda marcado como pactado', false, $marcado['filas'][0]['FECHA_MANUAL']);
+chequear('el que tiene fecha pactada queda marcado',
+    true, $marcado['filas'][1]['FECHA_MANUAL']);
+chequear('y el que no tiene nada dice false explicito, no undefined',
+    false, $marcado['filas'][2]['VENCIDA']);
+
+// Un cliente que no aparece en los items tampoco puede quedar con la marca de
+// otro: la clave es la que manda.
+chequear('un cliente sin items queda sin marca', false,
+    EjeVista::marcarAlguna(['filas' => [['COD_CLI' => 'FR999']]], $itemsGrupo,
+        'COD_CLI', ['VENCIDA'])['filas'][0]['VENCIDA']);
+
+// ============================================================================
+// El filtro por fecha de emisión
+//
+// Es server-side a proposito: si se filtrara escondiendo filas en el DOM, las
+// columnas del eje, el pie de totales y las tarjetas de indicadores seguirian
+// describiendo el total sin filtrar.
+// ============================================================================
+
+seccion('el rango del filtro se valida en el servidor');
+
+chequear('los dos extremos vacios es "sin filtro", no un error',
+    ['desde' => null, 'hasta' => null],
+    Ingresos::validarRangoFechaEmision('', ''));
+
+chequear('null tambien', ['desde' => null, 'hasta' => null],
+    Ingresos::validarRangoFechaEmision(null, null));
+
+chequear('solo desde', ['desde' => '2026-01-01', 'hasta' => null],
+    Ingresos::validarRangoFechaEmision('2026-01-01', ''));
+
+chequear('solo hasta', ['desde' => null, 'hasta' => '2026-03-31'],
+    Ingresos::validarRangoFechaEmision('', '2026-03-31'));
+
+chequear('los dos extremos iguales es un dia', ['desde' => '2026-02-10', 'hasta' => '2026-02-10'],
+    Ingresos::validarRangoFechaEmision('2026-02-10', '2026-02-10'));
+
+chequearLanza('un rango al reves se rechaza', function () {
+    Ingresos::validarRangoFechaEmision('2026-05-01', '2026-04-01');
+});
+
+chequear('y el mensaje dice que no puede entrar ninguna factura', true, (function () {
+    try {
+        Ingresos::validarRangoFechaEmision('2026-05-01', '2026-04-01');
+    } catch (Throwable $e) {
+        return mb_stripos($e->getMessage(), 'pueda entrar') !== false;
+    }
+
+    return false;
+})());
+
+chequearLanza('un texto que no es fecha se rechaza', function () {
+    Ingresos::validarRangoFechaEmision('el mes pasado', '');
+});
+
+chequearLanza('una fecha que no existe en el calendario se rechaza', function () {
+    Ingresos::validarRangoFechaEmision('', '2026-02-30');
+});
+
+// Un DateTime entra igual: es lo que devuelve sqlsrv para una columna DATE.
+chequear('acepta un DateTime', '2026-07-04',
+    Ingresos::validarRangoFechaEmision(new DateTime('2026-07-04'), null)['desde']);
+
+seccion('el filtro deja pasar solo los emitidos en el rango');
+
+$ITEMS = [
+    ['N_COMP' => 'A', 'FECHA' => '2026-01-15', 'importe_neto' => 100.0],
+    ['N_COMP' => 'B', 'FECHA' => '2026-02-01', 'importe_neto' => 200.0],
+    ['N_COMP' => 'C', 'FECHA' => '2026-02-28', 'importe_neto' => 300.0],
+    ['N_COMP' => 'D', 'FECHA' => '2026-03-10', 'importe_neto' => 400.0],
+    // 'N/A' es lo que deja getCobranzasFR() cuando el comprobante no aparece
+    // en GVA12: no tiene emision con la que decidir si entra.
+    ['N_COMP' => 'E', 'FECHA' => 'N/A', 'importe_neto' => 500.0]
+];
+
+$sinFiltro = Ingresos::filtrarPorFechaEmision($ITEMS, ['desde' => null, 'hasta' => null]);
+
+chequear('sin filtro no se toca nada, ni el de fecha "N/A"', 5, count($sinFiltro['items']));
+chequear('y no hay nada que informar', 0, $sinFiltro['sin_fecha']);
+
+$febrero = Ingresos::filtrarPorFechaEmision($ITEMS,
+    ['desde' => '2026-02-01', 'hasta' => '2026-02-28']);
+
+chequear('febrero deja dos', 2, count($febrero['items']));
+chequear('el primero es el del 1/2', 'B', $febrero['items'][0]['N_COMP']);
+chequear('los bordes entran: el del 28/2 tambien', 'C', $febrero['items'][1]['N_COMP']);
+
+// El que no se puede ubicar en el rango queda afuera, pero CONTADO: descartarlo
+// en silencio seria perder plata sin decirlo.
+chequear('el de emision desconocida queda afuera', 1, $febrero['sin_fecha']);
+
+$avisos = Ingresos::avisosFiltroFechaEmision(['desde' => '2026-02-01', 'hasta' => '2026-02-28'], 1);
+
+chequear('y se avisa', 1, count($avisos));
+chequear('el aviso dice cuantos son', true,
+    mb_stripos($avisos[0], '1 comprobante sin fecha de emisión') !== false);
+chequear('y como verlos', true, mb_stripos($avisos[0], 'Quitá el filtro') !== false);
+chequear('sin ninguno, no hay aviso', [],
+    Ingresos::avisosFiltroFechaEmision(['desde' => '2026-02-01', 'hasta' => null], 0));
+
+// Un extremo suelto acota de un solo lado.
+chequear('solo desde: deja los tres posteriores', 3,
+    count(Ingresos::filtrarPorFechaEmision($ITEMS, ['desde' => '2026-02-01', 'hasta' => null])['items']));
+chequear('solo hasta: deja los dos anteriores', 2,
+    count(Ingresos::filtrarPorFechaEmision($ITEMS, ['desde' => null, 'hasta' => '2026-02-01'])['items']));
+
+// Un rango que no contiene nada devuelve una lista vacia, no todo.
+chequear('un rango vacio de facturas deja cero filas', 0,
+    count(Ingresos::filtrarPorFechaEmision($ITEMS, ['desde' => '2027-01-01', 'hasta' => '2027-12-31'])['items']));
 
 // ============================================================================
 // Parámetros y Registro de Cashflow

@@ -38,8 +38,8 @@ foreach ($menu['categorias'] as $cat) {
     $todos = array_merge($todos, $cat['items']);
 }
 
-// 2 arriba + 23 en las seis categorias + 1 al pie
-chequear('el menu tiene los 26 items', 26, count($todos));
+// 2 arriba + 24 en las seis categorias + 1 al pie
+chequear('el menu tiene los 27 items', 27, count($todos));
 
 $incompletos = [];
 
@@ -182,11 +182,13 @@ foreach ($menu['categorias'] as $cat) {
 chequear('Ingresos tiene sus 7 pestanas con datos', 7, $porCategoria['Ingresos']['con_datos']);
 chequear('y son 7 en total', 7, $porCategoria['Ingresos']['total']);
 
-// Otros Ingresos es la categoria de lo que se carga a mano: hoy tiene un solo
-// item y ya con datos.
+// Otros Ingresos es la categoria de lo que se carga a mano: hoy son dos
+// conceptos -dolares en cuenta comitente y saldo de inversiones-, los dos con
+// datos. La categoria quedo armada para que sumar uno fuera agregar una
+// pestana, y el segundo lo confirma.
 chequear('Otros Ingresos existe', true, isset($porCategoria['OtrosIngresos']));
-chequear('con su unica pestana', 1, $porCategoria['OtrosIngresos']['total']);
-chequear('y con datos', 1, $porCategoria['OtrosIngresos']['con_datos']);
+chequear('con sus dos pestanas', 2, $porCategoria['OtrosIngresos']['total']);
+chequear('las dos con datos', 2, $porCategoria['OtrosIngresos']['con_datos']);
 chequear('arranca cerrada', false, $porCategoria['OtrosIngresos']['abierta']);
 
 // Va DESPUES de Ingresos: la categoria agrupa lo que se tipea, y leerlo

@@ -134,29 +134,31 @@
     color: #1b5e20;
 }
 
-/* Modo Resumen: Ocultar columnas de detalle */
+/* Modo Resumen: ocultar columnas de detalle.
+   FECHA, T_COMP, N_COMP, Desc y Días son de la 3 a la 7 desde que se sacó la
+   columna Tipo de adelante. Ver la nota en Ingresos-Cobranzas_fr.css. */
+.modo-resumen thead tr:first-child th:nth-child(3),
 .modo-resumen thead tr:first-child th:nth-child(4),
 .modo-resumen thead tr:first-child th:nth-child(5),
 .modo-resumen thead tr:first-child th:nth-child(6),
 .modo-resumen thead tr:first-child th:nth-child(7),
-.modo-resumen thead tr:first-child th:nth-child(8),
+.modo-resumen tbody td:nth-child(3),
 .modo-resumen tbody td:nth-child(4),
 .modo-resumen tbody td:nth-child(5),
 .modo-resumen tbody td:nth-child(6),
 .modo-resumen tbody td:nth-child(7),
-.modo-resumen tbody td:nth-child(8),
 /* El pie también: desde que tiene una celda por columna en vez de un colspan,
    si no se ocultan las mismas queda corrido cinco lugares. */
+.modo-resumen tfoot td:nth-child(3),
 .modo-resumen tfoot td:nth-child(4),
 .modo-resumen tfoot td:nth-child(5),
 .modo-resumen tfoot td:nth-child(6),
 .modo-resumen tfoot td:nth-child(7),
-.modo-resumen tfoot td:nth-child(8),
-/* Y la columna Cobro (la 11): ver la nota equivalente en
+/* Y la columna Cobro (la 10): ver la nota equivalente en
    Ingresos-Cobranzas_fr.css. */
-.modo-resumen thead tr:first-child th:nth-child(11),
-.modo-resumen tbody td:nth-child(11),
-.modo-resumen tfoot td:nth-child(11) {
+.modo-resumen thead tr:first-child th:nth-child(10),
+.modo-resumen tbody td:nth-child(10),
+.modo-resumen tfoot td:nth-child(10) {
     display: none !important;
 }
 
@@ -180,16 +182,7 @@
     background-color: #fcfdfe !important;
 }
 
-.badge-may {
-    background-color: #e3f2fd;
-    color: #0d47a1;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 10px;
-    font-weight: 700;
-    border: 1px solid #bbdefb;
-    display: inline-block;
-}
+/* `.badge-may` -el badge PROY- se fue con la columna Tipo: era su único uso. */
 
 .badge-cobro-may {
     background-color: #e8f5e9;

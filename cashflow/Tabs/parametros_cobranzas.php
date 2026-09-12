@@ -75,6 +75,15 @@
                     </small>
                 </div>
                 <div class="d-flex gap-2">
+                    <!-- Lo engancha Js/tabla-export.js. La escala no se ordena
+                         pero sí se exporta: es el parámetro que explica cada
+                         importe neto proyectado. Los tramos salen como texto,
+                         no como los <input> con los que se editan. -->
+                    <button class="btn btn-sm btn-outline-success" data-exportar="tablaEscalaCob"
+                            data-exportar-nombre="Parametros_Escala_Descuento"
+                            title="Exportar a Excel la escala tal como está cargada">
+                        <i class="fas fa-file-excel me-1"></i> Exportar
+                    </button>
                     <button id="btnAgregarTramoEsc" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-plus me-1"></i> Agregar tramo
                     </button>
@@ -89,7 +98,11 @@
                 <div id="avisosEscalaCob"></div>
 
                 <div class="table-responsive">
-                    <table class="table table-sm align-middle mb-0" id="tablaEscalaCob">
+                    <!-- data-orden="no": la escala es un formulario que se
+                         guarda entero y se valida como un todo -sin huecos ni
+                         solapamientos-, y eso sólo se puede leer con los tramos
+                         en orden de días. -->
+                    <table class="table table-sm align-middle mb-0" id="tablaEscalaCob" data-orden="no">
                         <thead class="table-light">
                             <tr>
                                 <th style="width: 140px;">Días desde</th>
@@ -131,7 +144,13 @@
                 </div>
             </div>
         </div>
-        <div>
+        <div class="d-flex gap-2">
+            <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
+            <button class="btn btn-sm btn-outline-success" data-exportar="tablaParamCob"
+                    data-exportar-nombre="Parametros_Cobranzas_Clientes"
+                    title="Exportar a Excel lo que se está viendo">
+                <i class="fas fa-file-excel me-1"></i> Exportar
+            </button>
             <button id="btnRefreshParamCob" class="btn btn-sm btn-outline-primary">
                 <i class="fas fa-sync-alt me-1"></i> Actualizar
             </button>

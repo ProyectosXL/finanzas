@@ -491,6 +491,136 @@ body {
 }
 
 /* ========================================
+   ORDEN POR ENCABEZADO
+   ========================================
+   El indicador de Js/tabla-orden.js. Es una CLASE con un `::after` y no un
+   `<i>` agregado al `<th>`, y eso no es una preferencia de estilo: main.js
+   observa #tabContent por `childList`, así que un hijo nuevo en el encabezado
+   dispararía el observer y el par observer → reaplicar → pintar no pararía
+   nunca. Las mutaciones de atributos no se observan.
+
+   Las flechas son caracteres y no íconos de Font Awesome: un `::after` con
+   Font Awesome depende de que la familia esté cargada con el peso exacto, y
+   acá el indicador tiene que estar sí o sí — es lo único que dice por qué la
+   tabla está en ese orden.
+   ======================================== */
+
+.orden-col {
+    cursor: pointer;
+    user-select: none;
+}
+
+.orden-col::after {
+    content: '↕';
+    margin-left: 4px;
+    opacity: 0.25;
+    font-weight: 400;
+}
+
+.orden-col:hover::after {
+    opacity: 0.6;
+}
+
+.orden-col.orden-asc::after {
+    content: '▲';
+    opacity: 1;
+    color: var(--primary-color);
+    font-size: 0.8em;
+}
+
+.orden-col.orden-desc::after {
+    content: '▼';
+    opacity: 1;
+    color: var(--primary-color);
+    font-size: 0.8em;
+}
+
+/* ========================================
+   SUB-SOLAPAS DE LAS PESTAÑAS DE COBRANZA
+   ========================================
+   Resumen / Detalle Facturas. Antes eran un `btn-group`, que es el control de
+   una acción y no de una vista: dos botones al lado de *Actualizar* y
+   *Exportar* se leen como tres cosas del mismo tipo, y sólo dos de ellas
+   cambian lo que la tabla muestra.
+
+   Van en su propio `card-header` para que las lengüetas se apoyen sobre el
+   borde inferior del bloque, que es lo que las hace leer como solapas. El
+   `border-bottom` del `nav-tabs` se saca porque ese borde ya lo dibuja el
+   `card-header`, y con los dos queda una línea doble.
+   ======================================== */
+
+.cob-subtabs {
+    background: var(--bg-light);
+}
+
+.cob-subtabs .nav-tabs {
+    border-bottom: 0;
+}
+
+.cob-subtabs .nav-link {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.cob-subtabs .nav-link.active {
+    background: var(--bg-white);
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
+/* ========================================
+   FILTRO POR FECHA DE EMISIÓN
+   ========================================
+   Los dos extremos del filtro de las pestañas de cobranza. El ancho va
+   explícito porque un `input type="date"` sin ancho toma el de un campo de
+   texto común, y en Chrome eso deja el ícono del calendario montado sobre el
+   año.
+   ======================================== */
+
+.filtro-emision input[type="date"] {
+    width: 138px;
+}
+
+/* ========================================
+   FACTURAS VENCIDAS
+   ========================================
+   Una factura cuya fecha probable de cobro ya pasó entra a la grilla ubicada en
+   el primer día del eje (ver Ingresos::ubicarCobroVencido()). Quien lea ese
+   número tiene que ver que no es cobranza estimada para hoy, así que se
+   distingue la fila entera y no sólo el badge.
+
+   Están acá y no en la hoja de cada pestaña porque las usan las tres que
+   proyectan cobranza —Cobranzas FR, Cobranzas May y Exportaciones Tasky— y tres
+   copias del mismo ámbar se desincronizan a la primera vez que alguien retoca
+   una.
+   ======================================== */
+
+.fila-vencida td {
+    background-color: #fff8e1 !important;
+}
+
+.badge-vencida-exp {
+    background-color: #fff3cd;
+    color: #856404;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid #ffe69c;
+    white-space: nowrap;
+}
+
+/* En el Resumen la fila es un cliente y no un comprobante, así que no hay una
+   fecha que marcar: el indicador va al lado del código y dice que ALGUNA de
+   sus facturas está vencida. Mismo lugar y tamaño que la marca de fecha
+   pactada a mano. */
+.cob-marca-vencida {
+    font-size: 10px;
+    vertical-align: super;
+}
+
+/* ========================================
    UTILITIES
    ======================================== */
 

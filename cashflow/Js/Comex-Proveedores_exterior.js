@@ -510,22 +510,9 @@ function mostrarError(mensaje) {
 /**
  * Exporta la tabla a Excel
  */
+/** Exporta lo que se ve. Ver Js/tabla-export.js. */
 function exportarExcel() {
-    // Crear una tabla temporal con todos los datos
-    var tabla = document.getElementById('tablaProveedoresExterior').cloneNode(true);
-    
-    // Convertir a Excel usando una librería o método simple
-    var html = tabla.outerHTML;
-    var blob = new Blob([html], { type: 'application/vnd.ms-excel' });
-    var url = URL.createObjectURL(blob);
-    
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = 'Proveedores_Exterior_' + new Date().toISOString().split('T')[0] + '.xls';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    exportarTabla('tablaProveedoresExterior', 'Proveedores_Exterior');
 }
 
 })(); // Fin del IIFE

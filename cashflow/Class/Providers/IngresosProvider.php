@@ -21,6 +21,14 @@ require_once __DIR__ . '/../Ingresos.php';
  * consulta. La pestana Cobranzas FR sigue usando getCobranzasFR(), que trae
  * razon social y detalle de comprobante a costa de una consulta por fila: datos
  * que el tablero no muestra.
+ *
+ * LAS FACTURAS VENCIDAS ENTRAN, EN HOY, Y SE AVISAN
+ * -------------------------------------------------
+ * Una factura proyectada cuya fecha probable ya paso antes se descartaba, asi
+ * que el tablero nunca la vio. Ahora entra ubicada en el primer dia del eje
+ * (ver Ingresos::ubicarCobroVencido()), de modo que la columna de hoy puede
+ * traer plata que nadie espera cobrar hoy: avisarVencidas() lo dice con el
+ * conteo y el importe.
  */
 class IngresosProvider extends CashflowProvider {
 
@@ -28,8 +36,12 @@ class IngresosProvider extends CashflowProvider {
         $ingresos = new Ingresos();
 
         if ($this->codigo() === 'COBRANZAS_MAY') {
-            $cobranzaMay = $h->agrupar($ingresos->getCobranzasMayTotales(), 'FECHA', 'IMPORTE');
+            $filasMay = $ingresos->getCobranzasMayTotales();
+
+            $cobranzaMay = $h->agrupar($filasMay, 'FECHA', 'IMPORTE');
             $cobranzaMay['moneda_origen'] = 'ARS';
+
+            $this->avisarVencidas('Cobranzas Mayoristas', $filasMay);
 
             return [
                 'COBRANZA' => $cobranzaMay
@@ -51,12 +63,52 @@ class IngresosProvider extends CashflowProvider {
         $total['moneda_origen'] = 'ARS';
         $total['detalle'] = $this->detallePactado($h, $filasTotal);
 
+        $this->avisarVencidas('Cobranzas Franquicias', $filasProy);
+
         return [
             'COBRANZA' => $total,
             'COBRANZA_REAL' => $real,
             'COBRANZA_PROYECTADA' => $proy,
             'COBRANZA_TOTAL' => $total
         ];
+    }
+
+    /**
+     * Avisa cuanta plata de la serie son facturas VENCIDAS ubicadas en el
+     * primer dia del eje.
+     *
+     * Antes esas facturas se descartaban y el tablero no las veia; ahora entran,
+     * asi que la columna de hoy puede tener un importe que nadie espera cobrar
+     * hoy. Sin este aviso el cambio seria invisible justo donde importa.
+     *
+     * VA COMO AVISO Y NO COMO 'detalle', a diferencia de las exportaciones
+     * vencidas: el contrato admite UNA anotacion por celda y la celda de hoy de
+     * la cobranza proyectada ya puede tener la de la fecha pactada a mano. Dos
+     * notas compitiendo por la misma celda dejarian ver sola una, y cual de las
+     * dos dependeria del orden en que se escribieron.
+     *
+     * @param string $nombre Como se llama la serie en el aviso
+     * @param array $filas Filas con 'IMPORTE_VENCIDO' y 'COMP_VENCIDOS'
+     */
+    private function avisarVencidas($nombre, $filas) {
+        $importe = 0.0;
+        $comprobantes = 0;
+
+        foreach ($filas as $f) {
+            $importe += floatval(isset($f['IMPORTE_VENCIDO']) ? $f['IMPORTE_VENCIDO'] : 0);
+            $comprobantes += intval(isset($f['COMP_VENCIDOS']) ? $f['COMP_VENCIDOS'] : 0);
+        }
+
+        if ($comprobantes === 0) {
+            return;
+        }
+
+        $this->avisar($nombre . ': ' . $comprobantes . ' factura'
+            . ($comprobantes === 1 ? '' : 's') . ' por ' . self::plata($importe) . ' '
+            . ($comprobantes === 1 ? 'tiene' : 'tienen') . ' la fecha probable de cobro ya '
+            . 'vencida y se ' . ($comprobantes === 1 ? 'ubica' : 'ubican') . ' en el primer dia '
+            . 'del eje. ' . ($comprobantes === 1 ? 'Es una factura vencida' : 'Son facturas vencidas')
+            . ' sin cobrar, no cobranza estimada para hoy.');
     }
 
     /**

@@ -70,6 +70,17 @@ class Ingresos {
      */
     const CLIENTES_EXPORTACION = ['EXTASK'];
 
+    /**
+     * Hasta cuantos dias para atras entra una factura cuya fecha probable de
+     * cobro ya paso. Ver ubicarCobroVencido(), que es donde se aplica.
+     *
+     * El numero es un techo, no una preferencia: sin techo, una cartera con
+     * anios de facturas incobrables entraria entera en la columna de hoy y el
+     * primer dia del eje mostraria una cobranza que nadie espera cobrar. Seis
+     * meses es lo que Tesoreria todavia gestiona.
+     */
+    const DIAS_COBRO_VENCIDO = 180;
+
     /** Clave del plazo de cobro de exportaciones en RO_T_CASHFLOW_PARAMETROS */
     const PARAM_EXPORTACIONES_DIAS = 'exportaciones_tasky_dias_cobro';
 
@@ -603,6 +614,276 @@ class Ingresos {
         ];
     }
 
+    /**
+     * Donde se ubica en el eje una factura cuya fecha probable de cobro YA
+     * PASO, y si hay que dejarla afuera.
+     *
+     * ES LA REGLA UNICA DE LAS TRES PESTANAS DE COBRANZA PROYECTADA, y hasta
+     * ahora eran dos criterios opuestos:
+     *
+     *   Cobranzas FR y Mayoristas   -> la descartaban con un `continue`. Esa
+     *                                  plata desaparecia de la pantalla y nada
+     *                                  lo decia.
+     *   Exportaciones Tasky         -> la ubicaba en HOY y avisaba.
+     *
+     * Vale la de Exportaciones: una factura con la fecha estimada en el pasado
+     * es UNA FACTURA VENCIDA SIN COBRAR, que es informacion y no un error a
+     * esconder. Lo que se conserva del criterio viejo es el techo: mas atras de
+     * $diasAtras la factura queda afuera igual.
+     *
+     * LA FECHA MANUAL MANDA Y NO SE REUBICA. Es una fecha que Tesoreria pacto
+     * con el cliente; moverla a hoy seria pisar una decision tomada con una
+     * regla automatica, y el usuario veria su propia carga en otra columna. Se
+     * marca vencida -eso es un hecho- pero se muestra donde esta. Tampoco se
+     * descarta: si cayo fuera del eje, lo informa EjeVista.
+     *
+     * LOS DIAS DEL DESCUENTO NO SALEN DE ACA. Quien llama conserva los dias de
+     * resolverFechaCobro(), que son los del plazo pactado: el tramo de la
+     * escala lo decide ese plazo y no la columna en la que se dibuja el
+     * importe.
+     *
+     * Estatica y pura: es la pieza que reparte la plata entre "se ve" y "no se
+     * ve", asi que es la que mas conviene probar sin base.
+     *
+     * @param string|null $fechaProbable Fecha de cobro resuelta, 'Y-m-d'
+     * @param string $hoy Primer dia del eje, 'Y-m-d'
+     * @param int|null $diasAtras Dias hacia atras que se aceptan. null = sin
+     *                            techo, que es lo que usa Exportaciones Tasky
+     * @param bool $manual Si la fecha la cargo una persona
+     * @return array ['fecha', 'original', 'vencida', 'descartar']
+     */
+    public static function ubicarCobroVencido($fechaProbable, $hoy, $diasAtras, $manual = false) {
+        $f = Horizonte::normalizarFecha($fechaProbable);
+
+        if ($f === null) {
+            // Sin fecha no hay nada que ubicar: se transporta asi y
+            // Horizonte::agrupar() la informa en 'sin_fecha' en vez de
+            // perderla.
+            return ['fecha' => null, 'original' => null, 'vencida' => false, 'descartar' => false];
+        }
+
+        $hoyStr = substr((string) $hoy, 0, 10);
+
+        if ($f >= $hoyStr) {
+            return ['fecha' => $f, 'original' => $f, 'vencida' => false, 'descartar' => false];
+        }
+
+        if ($manual) {
+            return ['fecha' => $f, 'original' => $f, 'vencida' => true, 'descartar' => false];
+        }
+
+        if ($diasAtras !== null) {
+            $limite = new DateTime($hoyStr);
+            $limite->setTime(0, 0, 0);
+            $limite->modify('-' . intval($diasAtras) . ' days');
+
+            if ($f < $limite->format('Y-m-d')) {
+                return ['fecha' => $f, 'original' => $f, 'vencida' => true, 'descartar' => true];
+            }
+        }
+
+        return ['fecha' => $hoyStr, 'original' => $f, 'vencida' => true, 'descartar' => false];
+    }
+
+    /**
+     * Los avisos de una grilla de cobranza proyectada sobre sus facturas
+     * vencidas: lo que NO se ve en los numeros y hay que decir.
+     *
+     * Son dos avisos y no uno porque son dos cosas distintas: una factura
+     * reubicada esta en la columna de hoy sin que se estime cobrarla hoy, y una
+     * con fecha pactada vencida esta en la columna de su fecha, que ya paso. Un
+     * solo mensaje para las dos haria pensar que estan todas en el mismo lugar.
+     *
+     * Misma redaccion que avisosExportaciones(), que es de donde sale el
+     * criterio. Estatica y pura, para que las dos pestanas digan lo mismo.
+     *
+     * @param array $items Filas con 'VENCIDA', 'FECHA_MANUAL' e importe
+     * @param string $campoImporte Campo con el importe a informar
+     * @return array Lista de mensajes
+     */
+    public static function avisosCobranzasVencidas($items, $campoImporte = 'importe_neto') {
+        $reubicadas = 0;
+        $pactadas = 0;
+        $impReubicadas = 0.0;
+        $impPactadas = 0.0;
+
+        foreach (is_array($items) ? $items : [] as $it) {
+            if (empty($it['VENCIDA'])) {
+                continue;
+            }
+
+            $importe = isset($it[$campoImporte]) ? floatval($it[$campoImporte]) : 0.0;
+
+            if (!empty($it['FECHA_MANUAL'])) {
+                $pactadas++;
+                $impPactadas += $importe;
+            } else {
+                $reubicadas++;
+                $impReubicadas += $importe;
+            }
+        }
+
+        $avisos = [];
+
+        if ($reubicadas > 0) {
+            $avisos[] = $reubicadas . ' factura' . ($reubicadas === 1 ? '' : 's') . ' por '
+                . self::plata($impReubicadas) . ' ' . ($reubicadas === 1 ? 'tiene' : 'tienen')
+                . ' la fecha probable de cobro ya vencida: se '
+                . ($reubicadas === 1 ? 'ubica' : 'ubican') . ' en el primer día del eje. '
+                . ($reubicadas === 1 ? 'Es una factura vencida' : 'Son facturas vencidas')
+                . ' sin cobrar, no cobranza estimada para hoy.';
+        }
+
+        if ($pactadas > 0) {
+            $avisos[] = $pactadas . ' factura' . ($pactadas === 1 ? '' : 's') . ' por '
+                . self::plata($impPactadas) . ' ' . ($pactadas === 1 ? 'tiene' : 'tienen')
+                . ' la fecha de cobro pactada a mano y ya vencida: se '
+                . ($pactadas === 1 ? 'muestra' : 'muestran')
+                . ' en su fecha, sin reubicar, porque la cargó una persona.';
+        }
+
+        return $avisos;
+    }
+
+    /* ====================================================================
+       FILTRO POR FECHA DE EMISION
+       ==================================================================== */
+
+    /**
+     * Normaliza y valida el rango de fechas de emision del filtro.
+     *
+     * EL FILTRO ES DEL SERVIDOR Y NO DEL NAVEGADOR, y no es un detalle de
+     * implementacion: si se filtrara escondiendo filas en el DOM, las columnas
+     * del eje, el pie de totales y las tarjetas de indicadores seguirian
+     * describiendo el total SIN filtrar. Se veria una tabla de tres filas con
+     * un total de doscientos millones, y nada explicaria la diferencia. Por eso
+     * los items se filtran antes de EjeVista.
+     *
+     * Los dos extremos son opcionales e independientes -solo desde, solo hasta,
+     * o los dos-. Vacio significa "sin filtro" y no es un error.
+     *
+     * Estatica y pura: la validacion que vale es la del servidor, porque el
+     * endpoint es alcanzable sin pasar por la pantalla. Mismo criterio que
+     * validarFechaCobroManual().
+     *
+     * @param mixed $desde
+     * @param mixed $hasta
+     * @return array ['desde' => 'Y-m-d'|null, 'hasta' => 'Y-m-d'|null]
+     * @throws Exception si una fecha no es valida o el rango esta al reves
+     */
+    public static function validarRangoFechaEmision($desde, $hasta) {
+        $d = self::fechaDeFiltro($desde, 'desde');
+        $h = self::fechaDeFiltro($hasta, 'hasta');
+
+        if ($d !== null && $h !== null && $d > $h) {
+            throw new Exception('El filtro por fecha de emisión está al revés: desde ('
+                . self::formatoCorto($d) . ') es posterior a hasta ('
+                . self::formatoCorto($h) . '), así que no hay ninguna factura que '
+                . 'pueda entrar.');
+        }
+
+        return ['desde' => $d, 'hasta' => $h];
+    }
+
+    /**
+     * Deja de una lista de comprobantes los que emitieron dentro del rango.
+     *
+     * Los que no tienen una fecha de emision utilizable NO se descartan en
+     * silencio: se cuentan aparte para que la pantalla pueda decir cuantos
+     * quedaron afuera. Es el caso de la cobranza real cuando el comprobante no
+     * aparece en GVA12, donde getCobranzasFR() deja 'N/A'.
+     *
+     * @param array $items
+     * @param array $rango Lo que devuelve validarRangoFechaEmision()
+     * @param string $campo Campo con la fecha de emision
+     * @return array ['items' => array, 'sin_fecha' => int]
+     */
+    public static function filtrarPorFechaEmision($items, $rango, $campo = 'FECHA') {
+        $lista = is_array($items) ? $items : [];
+        $desde = isset($rango['desde']) ? $rango['desde'] : null;
+        $hasta = isset($rango['hasta']) ? $rango['hasta'] : null;
+
+        if ($desde === null && $hasta === null) {
+            return ['items' => $lista, 'sin_fecha' => 0];
+        }
+
+        $filtrados = [];
+        $sinFecha = 0;
+
+        foreach ($lista as $item) {
+            $f = Horizonte::normalizarFecha(isset($item[$campo]) ? $item[$campo] : null);
+
+            if ($f === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $f)) {
+                $sinFecha++;
+                continue;
+            }
+
+            if ($desde !== null && $f < $desde) {
+                continue;
+            }
+
+            if ($hasta !== null && $f > $hasta) {
+                continue;
+            }
+
+            $filtrados[] = $item;
+        }
+
+        return ['items' => $filtrados, 'sin_fecha' => $sinFecha];
+    }
+
+    /**
+     * Lo que el filtro por fecha de emision tiene que decir.
+     *
+     * Los comprobantes que quedaron afuera POR EL RANGO no se avisan: es
+     * exactamente lo que el usuario pidio. Los que quedaron afuera por no tener
+     * fecha de emision utilizable si, porque eso no lo pidio nadie.
+     *
+     * @param array $rango Lo que devuelve validarRangoFechaEmision()
+     * @param int $sinFecha Cuantos quedaron afuera sin fecha
+     * @return array Lista de mensajes
+     */
+    public static function avisosFiltroFechaEmision($rango, $sinFecha) {
+        $sinFecha = intval($sinFecha);
+
+        if ($sinFecha < 1) {
+            return [];
+        }
+
+        return [$sinFecha . ' comprobante' . ($sinFecha === 1 ? '' : 's')
+            . ' sin fecha de emisión ' . ($sinFecha === 1 ? 'queda' : 'quedan')
+            . ' fuera del filtro: no se ' . ($sinFecha === 1 ? 'puede' : 'pueden')
+            . ' ubicar en el rango. Quitá el filtro para ' . ($sinFecha === 1 ? 'verlo' : 'verlos')
+            . '.'];
+    }
+
+    /**
+     * Un extremo del filtro: fecha valida, o null si viene vacio.
+     *
+     * @param mixed $valor
+     * @param string $cual 'desde' o 'hasta', para el mensaje
+     * @return string|null 'Y-m-d'
+     */
+    private static function fechaDeFiltro($valor, $cual) {
+        if ($valor === null || $valor === '' || $valor === false) {
+            return null;
+        }
+
+        $f = Horizonte::normalizarFecha($valor);
+
+        if ($f === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $f)) {
+            throw new Exception('La fecha "' . $cual . '" del filtro no es una fecha válida.');
+        }
+
+        list($a, $m, $d) = array_map('intval', explode('-', $f));
+
+        if (!checkdate($m, $d, $a)) {
+            throw new Exception('La fecha "' . $cual . '" del filtro no existe en el calendario.');
+        }
+
+        return $f;
+    }
+
     /** dd/mm/aaaa, para los mensajes de error */
     private static function formatoCorto($fecha) {
         $p = explode('-', substr((string) $fecha, 0, 10));
@@ -634,6 +915,13 @@ class Ingresos {
      * es lo que ubica cada importe en su columna de la grilla. Antes esta
      * funcion tenia un modo resumen que agrupaba por cliente + fecha, y eso
      * obligaba a que un cliente con cobros en tres fechas ocupara tres filas.
+     *
+     * LAS VENCIDAS ENTRAN. Antes, la factura cuya fecha probable de cobro ya
+     * habia pasado se descartaba con un `continue` y su importe desaparecia de
+     * la pantalla sin que nada lo dijera. Ahora entra si la fecha cae dentro de
+     * los ultimos DIAS_COBRO_VENCIDO dias, se ubica en el primer dia del eje y
+     * viaja marcada con VENCIDA y COBRO_ORIGINAL para que la pantalla la
+     * distinga. La regla completa esta en ubicarCobroVencido().
      *
      * @return array Listado de comprobantes proyectados
      */
@@ -727,14 +1015,20 @@ class Ingresos {
             $manual = isset($fechasManuales[$key]) ? $fechasManuales[$key]['fecha'] : null;
             $cobro = self::resolverFechaCobro($fEmisStr, $pppDias, $manual);
 
-            $fProbCobroStr = $cobro['fecha'];
+            // Una factura cuya fecha probable ya pasó NO se descarta: se ubica
+            // en el primer día del eje y queda marcada como vencida, salvo que
+            // la fecha la haya cargado una persona. Sólo se deja afuera lo más
+            // viejo que DIAS_COBRO_VENCIDO. Ver ubicarCobroVencido().
+            $ubic = self::ubicarCobroVencido($cobro['fecha'], $hoy->format('Y-m-d'),
+                self::DIAS_COBRO_VENCIDO, $cobro['manual']);
 
-            // No traer cobros pendientes cuya fecha probable sea anterior al día actual
-            $hoyStr = $hoy->format('Y-m-d');
-            if ($fProbCobroStr < $hoyStr) {
+            if ($ubic['descartar']) {
                 continue;
             }
 
+            // Los días del descuento salen del plazo pactado y no de la columna
+            // en la que se dibuja el importe: reubicar una vencida en hoy no le
+            // cambia el tramo de la escala.
             $diasDesc = $cobro['dias'];
 
             // Descuento segun la escala GENERAL: no depende del cliente ni del
@@ -753,7 +1047,9 @@ class Ingresos {
                 'PPP' => $pppDias,
                 'importe_bruto' => $importeBruto,
                 'importe_neto' => $importeNeto,
-                'Cobro' => $fProbCobroStr,
+                'Cobro' => $ubic['fecha'],
+                'COBRO_ORIGINAL' => $ubic['original'],
+                'VENCIDA' => $ubic['vencida'],
                 'FECHA_MANUAL' => $cobro['manual'],
                 'TIPO_REGISTRO' => 'PROYECCION' // Distintivo para pintar en amarillo
             ];
@@ -914,13 +1210,21 @@ class Ingresos {
      * pedirle el detalle por separado seria correr esa consulta una vez mas
      * por cada carga del tablero.
      *
+     * Y TAMBIEN QUE PARTE ESTA VENCIDA: son las facturas que se ubicaron en hoy
+     * por tener la fecha probable en el pasado. El tablero tiene que poder
+     * distinguirlas de una cobranza que de verdad se estima para hoy, igual que
+     * ya hace con las exportaciones vencidas.
+     *
      * @param string $origen 'todos', 'real', o 'proyectado'
-     * @return array Filas ['FECHA', 'IMPORTE', 'IMPORTE_PACTADO', 'COMP_PACTADOS']
+     * @return array Filas ['FECHA', 'IMPORTE', 'IMPORTE_PACTADO', 'COMP_PACTADOS',
+     *                      'IMPORTE_VENCIDO', 'COMP_VENCIDOS']
      */
     public function getCobranzasFRTotales($origen = 'todos') {
         $totalesPorFecha = [];
         $pactadoPorFecha = [];
         $compPorFecha = [];
+        $vencidoPorFecha = [];
+        $compVencidosPorFecha = [];
 
         // 1. Cobranza Real
         if ($origen === 'todos' || $origen === 'real') {
@@ -969,6 +1273,11 @@ class Ingresos {
                     $pactadoPorFecha[$f] = ($pactadoPorFecha[$f] ?? 0.0) + $importe;
                     $compPorFecha[$f] = ($compPorFecha[$f] ?? 0) + 1;
                 }
+
+                if (!empty($p['VENCIDA'])) {
+                    $vencidoPorFecha[$f] = ($vencidoPorFecha[$f] ?? 0.0) + $importe;
+                    $compVencidosPorFecha[$f] = ($compVencidosPorFecha[$f] ?? 0) + 1;
+                }
             }
         }
 
@@ -980,7 +1289,9 @@ class Ingresos {
                 'FECHA' => $f,
                 'IMPORTE' => round($imp, 2),
                 'IMPORTE_PACTADO' => round($pactadoPorFecha[$f] ?? 0.0, 2),
-                'COMP_PACTADOS' => $compPorFecha[$f] ?? 0
+                'COMP_PACTADOS' => $compPorFecha[$f] ?? 0,
+                'IMPORTE_VENCIDO' => round($vencidoPorFecha[$f] ?? 0.0, 2),
+                'COMP_VENCIDOS' => $compVencidosPorFecha[$f] ?? 0
             ];
         }
 
@@ -1015,6 +1326,10 @@ class Ingresos {
      * resumen por cliente lo hace EjeVista::armarAgrupado() en el controller:
      * asi cada importe conserva su fecha, que es lo que lo ubica en la grilla,
      * y un cliente con cobros en tres fechas sigue siendo UNA fila.
+     *
+     * LAS VENCIDAS ENTRAN, igual que en Cobranzas FR y por el mismo motivo:
+     * antes se descartaban con un `continue` y la plata desaparecia de la
+     * pantalla. Ver ubicarCobroVencido().
      *
      * @return array Listado de comprobantes proyectados
      */
@@ -1070,8 +1385,14 @@ class Ingresos {
             $fProbCobroObj->modify("+{$diasPlazo} days");
             $fProbCobroStr = $fProbCobroObj->format('Y-m-d');
 
-            // No traer cobros pendientes cuya fecha probable de cobro sea anterior al día de corte / hoy
-            if ($fProbCobroStr < $hoyStr) {
+            // Las vencidas no se descartan: van al primer día del eje y se
+            // marcan, con el mismo techo de días que Cobranzas FR. Mayoristas
+            // no tiene fecha manual, así que nunca hay nada que respetar.
+            // Ver ubicarCobroVencido().
+            $ubic = self::ubicarCobroVencido($fProbCobroStr, $hoyStr,
+                self::DIAS_COBRO_VENCIDO);
+
+            if ($ubic['descartar']) {
                 continue;
             }
 
@@ -1085,7 +1406,9 @@ class Ingresos {
                 'Dias' => $diasPlazo,
                 'importe_bruto' => round($importeReal, 2),
                 'importe_neto' => round($importeReal, 2),
-                'Cobro' => $fProbCobroStr,
+                'Cobro' => $ubic['fecha'],
+                'COBRO_ORIGINAL' => $ubic['original'],
+                'VENCIDA' => $ubic['vencida'],
                 'TIPO_REGISTRO' => 'PROYECCION',
                 'PLAZO' => $diasPlazo
             ];
@@ -1097,16 +1420,29 @@ class Ingresos {
 
     /**
      * Cobranza mayorista agregada por fecha probable de cobro para el tablero de Cashflow.
-     * 
-     * @return array Filas ['FECHA' => 'Y-m-d', 'IMPORTE' => float]
+     *
+     * Informa aparte la parte VENCIDA, por el mismo motivo que
+     * getCobranzasFRTotales(): son facturas ubicadas en hoy por tener la fecha
+     * probable en el pasado, no cobranza estimada para hoy.
+     *
+     * @return array Filas ['FECHA', 'IMPORTE', 'IMPORTE_VENCIDO', 'COMP_VENCIDOS']
      */
     public function getCobranzasMayTotales() {
         $items = $this->getCobranzasMay();
         $totalesPorFecha = [];
+        $vencidoPorFecha = [];
+        $compVencidosPorFecha = [];
 
         foreach ($items as $item) {
             $f = $item['Cobro'];
-            $totalesPorFecha[$f] = ($totalesPorFecha[$f] ?? 0.0) + floatval($item['importe_neto']);
+            $importe = floatval($item['importe_neto']);
+
+            $totalesPorFecha[$f] = ($totalesPorFecha[$f] ?? 0.0) + $importe;
+
+            if (!empty($item['VENCIDA'])) {
+                $vencidoPorFecha[$f] = ($vencidoPorFecha[$f] ?? 0.0) + $importe;
+                $compVencidosPorFecha[$f] = ($compVencidosPorFecha[$f] ?? 0) + 1;
+            }
         }
 
         $resultado = [];
@@ -1114,7 +1450,9 @@ class Ingresos {
         foreach ($totalesPorFecha as $f => $imp) {
             $resultado[] = [
                 'FECHA' => $f,
-                'IMPORTE' => round($imp, 2)
+                'IMPORTE' => round($imp, 2),
+                'IMPORTE_VENCIDO' => round($vencidoPorFecha[$f] ?? 0.0, 2),
+                'COMP_VENCIDOS' => $compVencidosPorFecha[$f] ?? 0
             ];
         }
 
@@ -1308,8 +1646,11 @@ class Ingresos {
     /**
      * Fecha de cobro estimada de una factura de exportacion.
      *
-     * Estatica y pura: es la regla de ubicacion en el eje. Una fecha que ya
-     * paso se lleva a HOY y se marca, no se descarta.
+     * La ubicacion en el eje la resuelve ubicarCobroVencido(), que es la misma
+     * regla que usan Cobranzas FR y Mayoristas. Aca se pasa SIN TECHO de dias
+     * hacia atras, y esa es la unica diferencia con las otras dos: son pocas
+     * facturas de un solo cliente y todas se gestionan, asi que no hay nada que
+     * dejar afuera por antiguedad.
      *
      * @param string|null $fechaEmis 'Y-m-d'
      * @param int $dias Plazo de cobro
@@ -1327,13 +1668,12 @@ class Ingresos {
         $cobro->setTime(0, 0, 0);
         $cobro->modify('+' . intval($dias) . ' days');
 
-        $original = $cobro->format('Y-m-d');
-        $vencida = ($original < $hoy);
+        $ubic = self::ubicarCobroVencido($cobro->format('Y-m-d'), $hoy, null);
 
         return [
-            'fecha' => $vencida ? $hoy : $original,
-            'original' => $original,
-            'vencida' => $vencida
+            'fecha' => $ubic['fecha'],
+            'original' => $ubic['original'],
+            'vencida' => $ubic['vencida']
         ];
     }
 
@@ -1465,5 +1805,10 @@ class Ingresos {
     /** USD 1.234,56, para los avisos */
     private static function usd($n) {
         return 'USD ' . number_format(floatval($n), 2, ',', '.');
+    }
+
+    /** $ 1.234,56, para los avisos */
+    private static function plata($n) {
+        return '$ ' . number_format(floatval($n), 2, ',', '.');
     }
 }

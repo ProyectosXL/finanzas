@@ -56,6 +56,29 @@
 
     <!-- Header Section con Botones -->
     <div class="card mb-4">
+
+        <!-- Sub-solapas: Resumen vs Detalle Facturas. Acá van directamente
+             arriba de la tabla: esta pestaña no tiene solapas principales
+             -Mayoristas tiene un solo origen de datos-, así que no hay nada
+             debajo de lo que anidarlas.
+
+             El estado sigue viviendo en `modoVista`: lo que cambió es el
+             control, no el flujo. -->
+        <div class="card-header cob-subtabs pt-2 pb-0 px-3">
+            <ul class="nav nav-tabs card-header-tabs mb-0" id="cobranzasMaySubTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="btnVistaResumenCobMay" type="button" role="tab">
+                        <i class="fas fa-list me-1"></i> Resumen
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="btnVistaDeepDiveCobMay" type="button" role="tab">
+                        <i class="fas fa-search-plus me-1"></i> Detalle Facturas
+                    </button>
+                </li>
+            </ul>
+        </div>
+
         <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-3">
             <div class="d-flex align-items-center gap-3">
                 <div>
@@ -70,18 +93,24 @@
                         <input type="text" id="busquedaCobMay" class="form-control border-start-0 ps-0" placeholder="Buscar cliente o comprobante..." style="min-width: 230px;">
                     </div>
                 </div>
+
+                <!-- Filtro por fecha de EMISIÓN, server-side. Ver la nota
+                     equivalente en Tabs/cobranzas_fr.php. -->
+                <div class="filtro-emision d-flex align-items-center gap-1">
+                    <span class="text-muted small text-nowrap">Emisión</span>
+                    <input type="date" id="fechaDesdeCobMay" class="form-control form-control-sm"
+                           title="Desde esta fecha de emisión, inclusive">
+                    <span class="text-muted small">a</span>
+                    <input type="date" id="fechaHastaCobMay" class="form-control form-control-sm"
+                           title="Hasta esta fecha de emisión, inclusive">
+                    <button id="btnLimpiarFechasCobMay" class="btn btn-sm btn-outline-secondary"
+                            title="Quitar el filtro por fecha de emisión" disabled>
+                        <i class="fas fa-eraser"></i>
+                    </button>
+                </div>
             </div>
 
             <div class="d-flex gap-2 flex-wrap align-items-center">
-                <div class="btn-group" role="group">
-                    <button id="btnVistaResumenCobMay" class="btn btn-sm btn-outline-primary active">
-                        <i class="fas fa-list me-1"></i> Resumen
-                    </button>
-                    <button id="btnVistaDeepDiveCobMay" class="btn btn-sm btn-outline-secondary">
-                        <i class="fas fa-search-plus me-1"></i> Deep Dive
-                    </button>
-                </div>
-
                 <!-- Los tres botones los dibuja Js/eje-vistas.js -->
                 <div id="vistasCobMay"></div>
 
@@ -97,9 +126,11 @@
             </div>
         </div>
 
-        <!-- Período que se está midiendo -->
+        <!-- Período que se está midiendo. El filtro aplicado va aparte: el
+             componente de vistas reescribe #periodoCobMay al cambiar de vista. -->
         <div class="card-body py-2 border-bottom bg-light bg-opacity-50">
             <small class="text-muted" id="periodoCobMay"></small>
+            <small class="text-muted" id="filtroPeriodoCobMay"></small>
         </div>
 
         <div class="card-body p-0">
@@ -115,7 +146,10 @@
                 <table id="tablaCobranzasMay" class="table table-hover mb-0">
                     <thead>
                         <tr>
-                            <th rowspan="2">Tipo</th>
+                            <!-- No hay columna Tipo: todas las filas de esta
+                                 pestaña son proyección, así que el badge PROY decía
+                                 lo mismo en todas. El plazo aplicado queda en el
+                                 title de COD_CLI. -->
                             <th rowspan="2">COD_CLI</th>
                             <th rowspan="2" class="col-texto">RAZON_SOC</th>
                             <th rowspan="2">FECHA</th>
@@ -138,7 +172,7 @@
                     </tbody>
                     <tfoot class="table-light">
                         <tr id="totalsRowCobMay">
-                            <td colspan="11" class="fw-bold text-end">TOTALES</td>
+                            <td colspan="10" class="fw-bold text-end">TOTALES</td>
                             <!-- Los totales se generan dinámicamente -->
                         </tr>
                     </tfoot>

@@ -8,7 +8,7 @@
     TODAS se valúan a dólar de hoy, a propósito: la deuda está fija en dólares
     y valuarla a hoy es no suponer devaluación. Ver README-exportaciones-tasky.md.
 
-    No hay Resumen / Deep Dive como en Cobranzas May: es un solo cliente, así
+    No hay Resumen / Detalle Facturas como en Cobranzas May: es un solo cliente, así
     que una fila por factura ya es el resumen.
 -->
 <div class="tab-exportaciones_tasky">
