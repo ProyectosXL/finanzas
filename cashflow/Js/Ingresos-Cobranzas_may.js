@@ -41,13 +41,15 @@
             alCambiar: generarTabla
         });
 
-        // Mismo default que Cobranzas FR: Tipo, COD_CLI y RAZON_SOC, en
-        // Resumen y en Detalle Facturas. Ver Js/columnas-fijas.js.
+        // Mismo default que Cobranzas FR: COD_CLI y RAZON_SOC, en Resumen y en
+        // Detalle Facturas. Ver Js/columnas-fijas.js.
+        // La clave cambió con la columna Tipo, por el mismo motivo que en
+        // Cobranzas FR: los índices guardados se corrieron un lugar.
         crearColumnasFijas({
             tabla: 'tablaCobranzasMay',
             control: 'colFijasCobMay',
-            clave: 'cobranzas_may',
-            porDefecto: [0, 1, 2]
+            clave: 'cobranzas_may.sin_tipo',
+            porDefecto: [0, 1]
         });
 
         if (btnRefresh) {
@@ -320,10 +322,15 @@
             // estime cobrarla hoy. Ver Ingresos::ubicarCobroVencido().
             html += '<tr class="fila-proyeccion-may' + (item.VENCIDA ? ' fila-vencida' : '') + '">';
 
-            var plazoInfo = item.Dias ? `Plazo: ${item.Dias} días` : '';
-            html += `<td class="center"><span class="badge-may" title="${plazoInfo}"><i class="fas fa-clock me-1"></i>PROY</span></td>`;
-
-            html += `<td><strong>${item.COD_CLI || ''}</strong>${marcaVencida(item)}</td>`;
+            // El badge PROY se fue con la columna Tipo: todas las filas de
+            // esta pestaña son proyección, así que decía lo mismo en todas. El
+            // plazo con el que se proyectó queda en el title de COD_CLI, que
+            // es lo único que permitía auditar la fecha de cobro.
+            html += '<td title="' + escaparAttr(item.Dias
+                    ? 'Proyección a ' + item.Dias + ' días de la emisión.'
+                    : 'Proyección.') + '">'
+                + '<strong>' + escaparAttr(item.COD_CLI || '') + '</strong>'
+                + marcaVencida(item) + '</td>';
 
             // Recortado con puntos suspensivos (.col-texto) para que la fila
             // sea una sola línea; el nombre completo va en el title.

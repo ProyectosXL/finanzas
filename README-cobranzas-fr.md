@@ -62,7 +62,7 @@ La interfaz de `Cobranzas FR` cuenta con dos pestañas de navegación dedicadas 
 ### 1. Solapa "Real a Cobrar"
 - **Origen de datos:** Propuestas de pago de franquicias (`FP_propuestas_pago` en la base `apps`).
 - **Criterio:** Facturas comprometidas por fecha efectiva de cobro pactada (`fecha_propuesta_pago`), **únicamente de propuestas en estado `ACEPTADA`**.
-- **Estilo:** Visualización estándar en verde/azul (`.badge-real`, `.badge-cobro`).
+- **Estilo:** Visualización estándar en verde/azul (`.badge-cobro`).
 - **Serie del Tablero:** `COBRANZA_REAL`.
 
 ### 2. Solapa "Pendientes Proyectados"
@@ -371,10 +371,36 @@ Ahora es **una fila por cliente**, con sus importes repartidos en las columnas d
 | | Resumen | Detalle Facturas |
 | --- | --- | --- |
 | La fila es | un cliente | un comprobante |
-| Columnas | `Tipo`, `COD_CLI`, `RAZON_SOC`, `Importe Bruto`, `Importe Neto` + la grilla | todas, incluidas `FECHA`, `T_COMP`, `N_COMP`, `Desc`, `Días` y `Cobro` |
+| Columnas | `COD_CLI`, `RAZON_SOC`, `Importe Bruto`, `Importe Neto` + la grilla | todas, incluidas `FECHA`, `T_COMP`, `N_COMP`, `Desc`, `Días` y `Cobro` |
 | Lo arma | `EjeVista::armarAgrupado()` | `EjeVista::armar()` |
 
 **El agrupado lo hace `EjeVista`, no la consulta.** Es la parte que importa: agrupar por cliente en SQL obligaría a elegir entre repetir la fila por cada fecha o quedarse con una sola fecha y tirar la ubicación temporal del resto de la plata. `armarAgrupado()` suma las **series** de todos los comprobantes del cliente, así que cada importe conserva su columna y la fila es una sola. Está documentado en el encabezado de `Class/EjeVista.php` y probado en `tests/test_ejevista.php`, incluido el invariante de que las dos formas dan el mismo total.
+
+### La columna TIPO se fue
+
+El badge REAL/PROYECCIÓN **repetía el encabezado en cada fila**: la solapa activa ya dice
+si lo que se está mirando es real o proyectado. Distinguía algo sólo dentro de la vista
+"todos", que no es la que se usa.
+
+Lo que sí distinguía sigue estando, porque no era el badge: **el color de la fila**
+(`.fila-proyeccion`) y **el PPP con el que se proyectó la fecha**, que pasó al `title` de
+`COD_CLI`. Sin ese dato la fecha de cobro no se puede auditar — es un promedio, no un
+dato del comprobante.
+
+Sacar una columna del medio mueve más cosas de las que parece, y todas son índices:
+
+| Qué | Antes | Ahora |
+| --- | --- | --- |
+| `porDefecto` de `crearColumnasFijas()` | `[0, 1, 2]` | `[0, 1]` |
+| `colspan` del rótulo TOTALES del `tfoot` | `10` (FR) / `11` (May) | `9` / `10` |
+| `.modo-resumen` — columnas de detalle | `nth-child(4..8)` | `nth-child(3..7)` |
+| `.modo-resumen` — columna `Cobro` | `nth-child(11)` | `nth-child(10)` |
+
+Y una que no es un índice: **`TIPO_REGISTRO` salió del buscador**. `filtrarTabla()` esconde
+filas mirando el `textContent` de la fila, y desde que no hay columna Tipo el texto "REAL"
+o "PROYECCIÓN" no está en el DOM. Si siguiera en `filasFiltradas()`, buscar *real* dejaría
+los totales de esas filas y escondería las filas: el pie no cerraría con la tabla. Las dos
+funciones tienen que mirar lo mismo.
 
 En Resumen se van `FECHA`, `T_COMP`, `N_COMP`, `Desc`, `Días` y `Cobro`: son distintos en cada comprobante del cliente. `armarAgrupado()` **descarta** los campos que difieren dentro del grupo en vez de mostrar el del primer comprobante — una fila que dijera "FAC 0001-123" cuando en realidad son doce facturas es peor que una celda vacía, porque nadie tendría por qué sospecharlo.
 

@@ -165,7 +165,12 @@
                 <table id="tablaCobranzasFR" class="table table-hover mb-0">
                     <thead>
                         <tr>
-                            <th rowspan="2">Tipo</th>
+                            <!-- No hay columna Tipo: la solapa activa ya dice si lo
+                                 que se está viendo es real o proyectado, así que el
+                                 badge REAL/PROYECCIÓN repetía el encabezado en cada
+                                 fila. Lo que distinguía dentro de la vista "todos"
+                                 sigue estando: el color de fila (.fila-proyeccion) y
+                                 el PPP en el title de COD_CLI. -->
                             <th rowspan="2">COD_CLI</th>
                             <th rowspan="2" class="col-texto">RAZON_SOC</th>
                             <th rowspan="2">FECHA</th>
@@ -188,7 +193,7 @@
                     </tbody>
                     <tfoot class="table-light">
                         <tr id="totalsRowCob">
-                            <td colspan="10" class="fw-bold text-end">TOTALES</td>
+                            <td colspan="9" class="fw-bold text-end">TOTALES</td>
                             <!-- Los totales se generan dinámicamente -->
                         </tr>
                     </tfoot>

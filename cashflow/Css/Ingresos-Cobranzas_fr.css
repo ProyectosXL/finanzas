@@ -153,31 +153,35 @@
     color: #ffffff !important;
 }
 
-/* Modo Resumen: Ocultar columnas de detalle */
+/* Modo Resumen: ocultar columnas de detalle.
+   Los índices son FECHA, T_COMP, N_COMP, Desc y Días, o sea de la 3 a la 7
+   desde que se sacó la columna Tipo de adelante. Antes eran de la 4 a la 8:
+   un índice de columna escrito en duro se desactualiza en silencio, y el
+   síntoma es una tabla corrida un lugar. */
+.modo-resumen thead tr:first-child th:nth-child(3),
 .modo-resumen thead tr:first-child th:nth-child(4),
 .modo-resumen thead tr:first-child th:nth-child(5),
 .modo-resumen thead tr:first-child th:nth-child(6),
 .modo-resumen thead tr:first-child th:nth-child(7),
-.modo-resumen thead tr:first-child th:nth-child(8),
+.modo-resumen tbody td:nth-child(3),
 .modo-resumen tbody td:nth-child(4),
 .modo-resumen tbody td:nth-child(5),
 .modo-resumen tbody td:nth-child(6),
 .modo-resumen tbody td:nth-child(7),
-.modo-resumen tbody td:nth-child(8),
 /* El pie también: desde que tiene una celda por columna en vez de un colspan,
    si no se ocultan las mismas queda corrido cinco lugares. */
+.modo-resumen tfoot td:nth-child(3),
 .modo-resumen tfoot td:nth-child(4),
 .modo-resumen tfoot td:nth-child(5),
 .modo-resumen tfoot td:nth-child(6),
 .modo-resumen tfoot td:nth-child(7),
-.modo-resumen tfoot td:nth-child(8),
-/* Y la columna Cobro (la 11). En el Resumen la fila es un CLIENTE y sus
+/* Y la columna Cobro (la 10). En el Resumen la fila es un CLIENTE y sus
    facturas se cobran en fechas distintas, así que una sola fecha ahí sería la
    de una factura cualquiera. Dónde cae cada importe lo dice la grilla del eje,
    que es para lo que está. */
-.modo-resumen thead tr:first-child th:nth-child(11),
-.modo-resumen tbody td:nth-child(11),
-.modo-resumen tfoot td:nth-child(11) {
+.modo-resumen thead tr:first-child th:nth-child(10),
+.modo-resumen tbody td:nth-child(10),
+.modo-resumen tfoot td:nth-child(10) {
     display: none !important;
 }
 
@@ -217,6 +221,8 @@
     background-color: #fff9db !important;
 }
 
+/* La usa la celda de fecha de cobro de una fila proyectada. `.badge-real`, su
+   par, se fue con la columna Tipo: era el único lugar donde se usaba. */
 .badge-proyeccion {
     background-color: #fff3cd;
     color: #856404;
@@ -227,17 +233,6 @@
     border: 1px solid #ffeeba;
     display: inline-block;
     letter-spacing: 0.3px;
-}
-
-.badge-real {
-    background-color: #e7f5ea;
-    color: #1e7e34;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 10px;
-    font-weight: 700;
-    border: 1px solid #c3e6cb;
-    display: inline-block;
 }
 
 .cell-with-proy {

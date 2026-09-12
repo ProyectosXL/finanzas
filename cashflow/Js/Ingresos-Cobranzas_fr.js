@@ -64,15 +64,21 @@
             alCambiar: generarTabla
         });
 
-        // Tipo, COD_CLI y RAZON_SOC fijas por defecto, en Resumen y en Deep
-        // Dive: con veintiocho columnas de días a la derecha, sin ellas no se
-        // ve de quién es el número que uno está mirando. Es la misma tabla en
-        // los dos modos, así que un solo control las cubre.
+        // COD_CLI y RAZON_SOC fijas por defecto, en Resumen y en Detalle
+        // Facturas: con veintiocho columnas de días a la derecha, sin ellas no
+        // se ve de quién es el número que uno está mirando. Es la misma tabla
+        // en los dos modos, así que un solo control las cubre.
+        // La clave de localStorage cambió con la columna Tipo. Los índices
+        // guardados se corrieron un lugar, y un `[0, 1, 2]` viejo dejaría
+        // fijada FECHA —que en Resumen ni se muestra—: la validación de
+        // columnas-fijas.js descarta los índices que ya no existen, pero el 2
+        // sigue existiendo y apunta a otra cosa. Cambiar la clave descarta la
+        // preferencia vieja, que es lo correcto: era sobre otra tabla.
         crearColumnasFijas({
             tabla: 'tablaCobranzasFR',
             control: 'colFijasCob',
-            clave: 'cobranzas_fr',
-            porDefecto: [0, 1, 2]
+            clave: 'cobranzas_fr.sin_tipo',
+            porDefecto: [0, 1]
         });
 
         if (btnRefresh) {
@@ -390,16 +396,14 @@
             }
 
             html += '<tr class="' + clases.join(' ') + '">';
-            
-            // Columna Tipo
-            if (esProy) {
-                var pppInfo = item.PPP ? `PPP: ${item.PPP} días` : '';
-                html += `<td class="center"><span class="badge-proyeccion" title="${pppInfo}"><i class="fas fa-clock me-1"></i>PROYECCIÓN</span></td>`;
-            } else {
-                html += `<td class="center"><span class="badge-real" title="Propuesta"><i class="fas fa-check me-1"></i>REAL</span></td>`;
-            }
 
-            html += `<td><strong>${item.COD_CLI || ''}</strong>${marcaManual(item)}${marcaVencida(item)}</td>`;
+            // El badge REAL/PROYECCIÓN se fue con la columna Tipo: la solapa
+            // activa ya dice cuál es el origen. Lo que sí distinguía —el color
+            // de la fila y el PPP con el que se proyectó— sigue acá, sobre
+            // COD_CLI.
+            html += '<td title="' + escaparAttr(tituloOrigen(item, esProy)) + '">'
+                + '<strong>' + escaparAttr(item.COD_CLI || '') + '</strong>'
+                + marcaManual(item) + marcaVencida(item) + '</td>';
 
             // El nombre se recorta con puntos suspensivos (.col-texto) para que
             // la fila sea una sola línea. El title lo devuelve completo: lo que
@@ -444,6 +448,23 @@
         tableBody.innerHTML = html;
 
         conectarEdicionFecha();
+    }
+
+    /**
+     * De dónde sale la fila, en el `title` de COD_CLI.
+     *
+     * Es lo que quedó del badge de la columna Tipo. En una proyección lo que
+     * importa es el PPP con el que se calculó la fecha, que es un promedio y no
+     * un dato del comprobante: sin eso, la fecha de cobro no se puede auditar.
+     */
+    function tituloOrigen(item, esProy) {
+        if (!esProy) {
+            return 'Cobranza real: sale de una propuesta de pago aceptada.';
+        }
+
+        return item.PPP
+            ? 'Proyección con el PPP del cliente: ' + item.PPP + ' días.'
+            : 'Proyección.';
     }
 
     /* ================================================================
@@ -710,10 +731,15 @@
             return datosCobranzas.filas;
         }
 
+        /* TIPO_REGISTRO ya no entra en la búsqueda, y tiene que no entrar:
+           filtrarTabla() esconde filas mirando el textContent de la fila, y
+           desde que se fue la columna Tipo el texto "REAL" o "PROYECCIÓN" no
+           está en el DOM. Si siguiera acá, buscar "real" dejaría los totales
+           de esas filas y escondería las filas: el pie no cerraría con la
+           tabla. Las dos funciones tienen que mirar lo mismo. */
         return datosCobranzas.filas.filter(function(item) {
             return (item.COD_CLI || '').toLowerCase().includes(term)
                 || (item.RAZON_SOC || '').toLowerCase().includes(term)
-                || (item.TIPO_REGISTRO || '').toLowerCase().includes(term)
                 || (item.N_COMP || '').toLowerCase().includes(term);
         });
     }

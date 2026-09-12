@@ -146,7 +146,10 @@
                 <table id="tablaCobranzasMay" class="table table-hover mb-0">
                     <thead>
                         <tr>
-                            <th rowspan="2">Tipo</th>
+                            <!-- No hay columna Tipo: todas las filas de esta
+                                 pestaña son proyección, así que el badge PROY decía
+                                 lo mismo en todas. El plazo aplicado queda en el
+                                 title de COD_CLI. -->
                             <th rowspan="2">COD_CLI</th>
                             <th rowspan="2" class="col-texto">RAZON_SOC</th>
                             <th rowspan="2">FECHA</th>
@@ -169,7 +172,7 @@
                     </tbody>
                     <tfoot class="table-light">
                         <tr id="totalsRowCobMay">
-                            <td colspan="11" class="fw-bold text-end">TOTALES</td>
+                            <td colspan="10" class="fw-bold text-end">TOTALES</td>
                             <!-- Los totales se generan dinámicamente -->
                         </tr>
                     </tfoot>
