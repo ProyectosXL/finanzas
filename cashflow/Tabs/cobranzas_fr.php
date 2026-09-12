@@ -70,6 +70,31 @@
 
     <!-- Header Section con Botones -->
     <div class="card mb-4">
+
+        <!-- Sub-solapas: Resumen vs Detalle Facturas. Van DENTRO del panel y
+             debajo de las solapas principales, que es lo que las hace leer
+             como anidadas: no son otro origen de datos, son dos formas de
+             mirar la misma tabla. Se muestran en los dos orígenes; lo que
+             sigue habilitado sólo en Pendientes Proyectados → Detalle
+             Facturas es la edición de la fecha de cobro manual.
+
+             El estado sigue viviendo en `modoVista`: lo que cambió es el
+             control, no el flujo. -->
+        <div class="card-header cob-subtabs pt-2 pb-0 px-3">
+            <ul class="nav nav-tabs card-header-tabs mb-0" id="cobranzasFrSubTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="btnVistaResumenCob" type="button" role="tab">
+                        <i class="fas fa-list me-1"></i> Resumen
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="btnVistaDeepDiveCob" type="button" role="tab">
+                        <i class="fas fa-search-plus me-1"></i> Detalle Facturas
+                    </button>
+                </li>
+            </ul>
+        </div>
+
         <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-3">
             <div class="d-flex align-items-center gap-3">
                 <div>
@@ -104,15 +129,6 @@
             </div>
 
             <div class="d-flex gap-2 flex-wrap align-items-center">
-                <div class="btn-group" role="group">
-                    <button id="btnVistaResumenCob" class="btn btn-sm btn-outline-primary active">
-                        <i class="fas fa-list me-1"></i> Resumen
-                    </button>
-                    <button id="btnVistaDeepDiveCob" class="btn btn-sm btn-outline-secondary">
-                        <i class="fas fa-search-plus me-1"></i> Deep Dive
-                    </button>
-                </div>
-
                 <!-- Los tres botones los dibuja Js/eje-vistas.js -->
                 <div id="vistasCob"></div>
 

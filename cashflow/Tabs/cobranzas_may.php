@@ -56,6 +56,29 @@
 
     <!-- Header Section con Botones -->
     <div class="card mb-4">
+
+        <!-- Sub-solapas: Resumen vs Detalle Facturas. Acá van directamente
+             arriba de la tabla: esta pestaña no tiene solapas principales
+             -Mayoristas tiene un solo origen de datos-, así que no hay nada
+             debajo de lo que anidarlas.
+
+             El estado sigue viviendo en `modoVista`: lo que cambió es el
+             control, no el flujo. -->
+        <div class="card-header cob-subtabs pt-2 pb-0 px-3">
+            <ul class="nav nav-tabs card-header-tabs mb-0" id="cobranzasMaySubTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="btnVistaResumenCobMay" type="button" role="tab">
+                        <i class="fas fa-list me-1"></i> Resumen
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="btnVistaDeepDiveCobMay" type="button" role="tab">
+                        <i class="fas fa-search-plus me-1"></i> Detalle Facturas
+                    </button>
+                </li>
+            </ul>
+        </div>
+
         <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-3">
             <div class="d-flex align-items-center gap-3">
                 <div>
@@ -88,15 +111,6 @@
             </div>
 
             <div class="d-flex gap-2 flex-wrap align-items-center">
-                <div class="btn-group" role="group">
-                    <button id="btnVistaResumenCobMay" class="btn btn-sm btn-outline-primary active">
-                        <i class="fas fa-list me-1"></i> Resumen
-                    </button>
-                    <button id="btnVistaDeepDiveCobMay" class="btn btn-sm btn-outline-secondary">
-                        <i class="fas fa-search-plus me-1"></i> Deep Dive
-                    </button>
-                </div>
-
                 <!-- Los tres botones los dibuja Js/eje-vistas.js -->
                 <div id="vistasCobMay"></div>
 

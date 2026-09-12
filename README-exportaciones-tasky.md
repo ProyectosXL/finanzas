@@ -106,7 +106,7 @@ En el tablero, el proveedor anota esa parte de la celda de hoy con el mecanismo 
 
 ## Pantalla
 
-Una fila por factura. No hay Resumen / Deep Dive como en Cobranzas May: es un solo cliente, así que una fila por factura ya es el resumen.
+Una fila por factura. No hay Resumen / Detalle Facturas como en Cobranzas May: es un solo cliente, así que una fila por factura ya es el resumen.
 
 Columnas: `FECHA_EMIS`, `N_COMP`, `COD_CLIENT`, `RAZON_SOCI`, `Importe USD`, `Cotiz. facturación`, `Importe pesos facturación`, `Cotiz. hoy`, `Importe pesos hoy`, `Fecha cobro estimada`, y la grilla temporal con las tres vistas de `Js/eje-vistas.js`. **El importe que va a la grilla es el de hoy.**
 

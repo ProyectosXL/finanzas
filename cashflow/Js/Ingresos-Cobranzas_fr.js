@@ -1,7 +1,13 @@
 /**
  * Ingresos - Cobranzas FR JavaScript
- * Con soporte para Resumen (predeterminado) y Deep Dive (aperturado por comprobante)
- * y doble matriz: Real a Cobrar vs Pendientes Proyectados (con cálculo de PPP).
+ * Con soporte para Resumen (predeterminado) y Detalle Facturas (aperturado por
+ * comprobante) y doble matriz: Real a Cobrar vs Pendientes Proyectados (con
+ * cálculo de PPP).
+ *
+ * "Detalle Facturas" es el nombre de cara al usuario; el identificador interno
+ * sigue siendo `deepdive` y el controller sigue recibiendo `type=deepdive`.
+ * Renombrar el contrato no habría cambiado nada en pantalla y habría tocado el
+ * endpoint, el controller y las pruebas.
  *
  * LAS TRES VISTAS LAS MANEJA eje-vistas.js — ver la nota del encabezado de
  * Comex-Proveedores_exterior.js. Esta pestaña tenía el mismo criterio propio,
@@ -207,25 +213,24 @@
         inicializar();
     }
 
+    /**
+     * Resumen o Detalle Facturas.
+     *
+     * Son sub-solapas anidadas (`nav nav-tabs`) y no un `btn-group`, así que
+     * el estado activo es la clase `active` del `nav-link`. Lo que no cambió
+     * es el flujo: `modoVista` sigue siendo `'resumen'` / `'deepdive'` y el
+     * controller sigue recibiendo `type=deepdive`.
+     */
     function cambiarModo(modo) {
         if (modo === modoVista) return;
         modoVista = modo;
-        
+
         var btnResumen = document.getElementById('btnVistaResumenCob');
         var btnDeepDive = document.getElementById('btnVistaDeepDiveCob');
-        
-        if (modo === 'resumen') {
-            btnResumen.classList.add('btn-primary', 'active');
-            btnResumen.classList.remove('btn-outline-primary', 'btn-outline-secondary');
-            btnDeepDive.classList.remove('btn-primary', 'active');
-            btnDeepDive.classList.add('btn-outline-secondary');
-        } else {
-            btnDeepDive.classList.add('btn-primary', 'active');
-            btnDeepDive.classList.remove('btn-outline-secondary');
-            btnResumen.classList.remove('btn-primary', 'active');
-            btnResumen.classList.add('btn-outline-secondary');
-        }
-        
+
+        if (btnResumen) btnResumen.classList.toggle('active', modo === 'resumen');
+        if (btnDeepDive) btnDeepDive.classList.toggle('active', modo === 'deepdive');
+
         cargarDatos();
     }
 
@@ -448,7 +453,7 @@
        es un promedio. Cuando alguien ya sabe la fecha de una factura puntual,
        la carga acá y esa fecha manda.
 
-       Es editable SÓLO en el Deep Dive de Pendientes Proyectados, y no en
+       Es editable SÓLO en Pendientes Proyectados → Detalle Facturas, y no en
        Resumen: en Resumen la fila es un cliente y no un comprobante, así que
        no hay a qué comprobante atarle la fecha. En Resumen se muestra un
        indicador de que alguna de sus facturas la tiene.

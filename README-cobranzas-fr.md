@@ -167,7 +167,7 @@ La validación corre en el servidor (`Ingresos::validarEscala()`, pura y probada
 
 ## Fecha de cobro manual por factura
 
-El PPP es un promedio: sirve para el grueso de la cartera y no sirve cuando alguien ya habló con el franquiciado y sabe la fecha de esa factura. Esa fecha se carga en el **Deep Dive de Pendientes Proyectados**, celda por celda, y vive en `RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL`.
+El PPP es un promedio: sirve para el grueso de la cartera y no sirve cuando alguien ya habló con el franquiciado y sabe la fecha de esa factura. Esa fecha se carga en el **Detalle Facturas de Pendientes Proyectados**, celda por celda, y vive en `RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL`.
 
 ### La jerarquía
 
@@ -189,7 +189,7 @@ La diferencia se calcula **con signo**: una fecha manual anterior a la emisión 
 - **La celda editada distingue lo pactado de lo estimado.** Sin esa marca, dos filas con la misma fecha en pantalla estarían diciendo cosas distintas y no habría forma de saber cuál es cuál. El botón de volver borra el override y la fecha vuelve al PPP.
 - **Al guardar se recarga la pestaña entera**, no la fila. La fecha cambia los días, el descuento, el neto, en qué columna del eje cae ese importe y los totales del pie: parchearlo en el navegador sería reimplementar en JS la cuenta que ya hace el backend, con el riesgo habitual de que las dos den distinto.
 
-En **Resumen** la fila es un cliente y no un comprobante, así que no hay nada que editar: se muestra un indicador cuando alguna de sus facturas tiene fecha cargada a mano, y el detalle está en Deep Dive.
+En **Resumen** la fila es un cliente y no un comprobante, así que no hay nada que editar: se muestra un indicador cuando alguna de sus facturas tiene fecha cargada a mano, y el detalle está en Detalle Facturas.
 
 Los endpoints son `IngresosController?action=saveFechaCobroManual` y `deleteFechaCobroManual`.
 
@@ -201,7 +201,7 @@ Por eso la fila **Cobranzas Franquicias Proyectadas** del tablero anota sus celd
 
 - La celda que tiene parte pactada lleva un **subrayado violeta**, y el tooltip dice cuánto y de cuántos comprobantes: *"$ 386.814,96 de esta celda (1 comprobante) tienen fecha de cobro PACTADA con el cliente… El resto de la celda sale del PPP, que es una estimación."*
 - El nombre de la fila lleva un **🤝** con el total pactado **de la vista activa**, para poder verlo sin recorrer veintiocho columnas con el mouse.
-- El detalle factura por factura sigue estando en *Pendientes Proyectados → Deep Dive*.
+- El detalle factura por factura sigue estando en *Pendientes Proyectados → Detalle Facturas*.
 
 **Nunca es el importe entero de la celda**, y por eso el tooltip dice cuánto: una celda del 14/9 puede tener $4.244.724 de los cuales $386.814 están pactados y el resto proyectado. Marcar sin decir cuánto haría leer los cuatro millones como acordados.
 
@@ -293,7 +293,7 @@ celda dejarían ver una sola, y cuál de las dos dependería del orden en que se
 Dentro de cada solapa, la barra de herramientas superior proporciona:
 - **Buscador rápido:** Filtrado en tiempo real por código de cliente, razón social o número de comprobante.
 - **Filtro por fecha de emisión (desde – hasta):** ver más abajo.
-- **Modo Resumen vs Deep Dive:** ver más abajo.
+- **Modo Resumen vs Detalle Facturas:** ver más abajo.
 - **Selector de Eje Temporal:** Alterna entre *Días* (tramo diario), *Meses* (tramo mensual) y *Período Completo* mediante el componente común `Js/eje-vistas.js`.
 - **Botones de Acción:** *Actualizar* datos y *Exportar* matriz a Excel.
 
@@ -335,13 +335,40 @@ millones sin nada que explicara la diferencia.
 
 ---
 
+## Resumen y Detalle Facturas son sub-solapas, no botones
+
+Antes eran un `btn-group` al lado de *Actualizar* y *Exportar*. Un `btn-group` es el
+control de una **acción**, y ahí había tres cosas con la misma pinta de las cuales sólo dos
+cambiaban lo que la tabla muestra.
+
+Ahora son un `<ul class="nav nav-tabs">` anidado, **dentro del panel y debajo de las
+solapas principales**, que es lo que las hace leer como dos formas de mirar la misma tabla
+y no como otro origen de datos. Se muestran en los dos orígenes —*Real a Cobrar* y
+*Pendientes Proyectados*—, porque es la misma tabla en los dos.
+
+- **Lo que sigue habilitado sólo en *Pendientes Proyectados → Detalle Facturas* es la
+  edición de la fecha de cobro manual.** `editable()` no cambió.
+- **El estado sigue viviendo en `modoVista`** (`'resumen'` / `'deepdive'`). Lo que cambió es
+  el control y su marcado; `cambiarModo()` hace lo mismo que antes con una clase distinta.
+- **En Cobranzas May van directamente arriba de la tabla**: esa pestaña no tiene solapas
+  principales, así que no hay nada debajo de lo que anidarlas.
+
+### "Deep Dive" pasó a llamarse "Detalle Facturas"
+
+Sólo el texto de cara al usuario: rótulos, títulos, tooltips y avisos. **Los
+identificadores internos quedaron como estaban** — `deepdive`, `btnVistaDeepDiveCob`, el
+parámetro `type=deepdive`—, porque renombrarlos no cambia nada en pantalla y sí toca el
+endpoint, el controller y las pruebas.
+
+---
+
 ## Resumen: una fila por cliente
 
-Antes el Resumen agrupaba por **cliente + fecha de cobro**, así que un cliente con cobros en tres fechas ocupaba tres filas. Eso no es un resumen: es el deep dive con menos columnas.
+Antes el Resumen agrupaba por **cliente + fecha de cobro**, así que un cliente con cobros en tres fechas ocupaba tres filas. Eso no es un resumen: es el detalle con menos columnas.
 
 Ahora es **una fila por cliente**, con sus importes repartidos en las columnas de la grilla según la fecha de cada comprobante. Una misma fila puede tener plata en el 6/9, en el 8/9 y en la columna de octubre.
 
-| | Resumen | Deep Dive |
+| | Resumen | Detalle Facturas |
 | --- | --- | --- |
 | La fila es | un cliente | un comprobante |
 | Columnas | `Tipo`, `COD_CLI`, `RAZON_SOC`, `Importe Bruto`, `Importe Neto` + la grilla | todas, incluidas `FECHA`, `T_COMP`, `N_COMP`, `Desc`, `Días` y `Cobro` |
@@ -387,3 +414,4 @@ El proveedor `IngresosProvider` registra tres series en `CashflowRegistry`:
 ```bash
 php tests/run.php
 ```
+

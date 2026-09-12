@@ -1,7 +1,10 @@
 ﻿/**
  * Ingresos - Cobranzas Mayoristas JavaScript
- * Con soporte para Resumen (predeterminado) y Deep Dive (aperturado por comprobante)
- * y proyección a 60 días (o plazo configurado en parámetros).
+ * Con soporte para Resumen (predeterminado) y Detalle Facturas (aperturado por
+ * comprobante) y proyección a 60 días (o plazo configurado en parámetros).
+ *
+ * "Detalle Facturas" es el nombre de cara al usuario; el identificador interno
+ * sigue siendo `deepdive`, igual que en Cobranzas FR.
  */
 
 (function() {
@@ -39,7 +42,7 @@
         });
 
         // Mismo default que Cobranzas FR: Tipo, COD_CLI y RAZON_SOC, en
-        // Resumen y en Deep Dive. Ver Js/columnas-fijas.js.
+        // Resumen y en Detalle Facturas. Ver Js/columnas-fijas.js.
         crearColumnasFijas({
             tabla: 'tablaCobranzasMay',
             control: 'colFijasCobMay',
@@ -183,25 +186,23 @@
         inicializar();
     }
 
+    /**
+     * Resumen o Detalle Facturas.
+     *
+     * Son sub-solapas anidadas (`nav nav-tabs`) y no un `btn-group`, así que
+     * el estado activo es la clase `active` del `nav-link`. `modoVista` y el
+     * `type=deepdive` del controller siguen igual.
+     */
     function cambiarModo(modo) {
         if (modo === modoVista) return;
         modoVista = modo;
-        
+
         var btnResumen = document.getElementById('btnVistaResumenCobMay');
         var btnDeepDive = document.getElementById('btnVistaDeepDiveCobMay');
-        
-        if (modo === 'resumen') {
-            btnResumen.classList.add('btn-primary', 'active');
-            btnResumen.classList.remove('btn-outline-primary', 'btn-outline-secondary');
-            btnDeepDive.classList.remove('btn-primary', 'active');
-            btnDeepDive.classList.add('btn-outline-secondary');
-        } else {
-            btnDeepDive.classList.add('btn-primary', 'active');
-            btnDeepDive.classList.remove('btn-outline-secondary');
-            btnResumen.classList.remove('btn-primary', 'active');
-            btnResumen.classList.add('btn-outline-secondary');
-        }
-        
+
+        if (btnResumen) btnResumen.classList.toggle('active', modo === 'resumen');
+        if (btnDeepDive) btnDeepDive.classList.toggle('active', modo === 'deepdive');
+
         cargarDatos();
     }
 

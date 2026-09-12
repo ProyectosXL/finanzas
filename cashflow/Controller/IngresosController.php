@@ -11,8 +11,11 @@ header('Content-Type: application/json');
 
 /**
  * El payload de una grilla de cobranzas: agrupado por cliente en Resumen, una
- * fila por comprobante en Deep Dive. Las dos formas devuelven exactamente el
- * mismo payload, asi que el front no las distingue.
+ * fila por comprobante en Detalle Facturas. Las dos formas devuelven
+ * exactamente el mismo payload, asi que el front no las distingue.
+ *
+ * En pantalla la sub-solapa se llama "Detalle Facturas"; el parametro sigue
+ * siendo type=deepdive, que es el contrato con el front y no se toca.
  *
  * 'importe_bruto' se suma ademas del neto: el neto es el que va al eje -es la
  * plata que entra- y el bruto es una columna mas de la fila.
@@ -93,13 +96,13 @@ try {
     };
 
     switch ($action) {
-        /* Resumen y Deep Dive se arman con la MISMA lista de comprobantes: lo
-           que cambia es quien la agrupa.
+        /* Resumen y Detalle Facturas se arman con la MISMA lista de
+           comprobantes: lo que cambia es quien la agrupa.
 
-             Deep Dive -> EjeVista::armar(), una fila por comprobante
-             Resumen   -> EjeVista::armarAgrupado() por COD_CLI, una fila por
-                          cliente con los importes repartidos en las columnas
-                          de la fecha de cada factura
+             Detalle Facturas -> EjeVista::armar(), una fila por comprobante
+             Resumen          -> EjeVista::armarAgrupado() por COD_CLI, una
+                          fila por cliente con los importes repartidos en las
+                          columnas de la fecha de cada factura
 
            El agrupado va en EjeVista y no en la consulta porque agrupar por
            cliente + fecha en SQL obliga a que un cliente con cobros en tres

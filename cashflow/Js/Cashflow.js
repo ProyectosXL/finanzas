@@ -501,7 +501,7 @@
                 + 'de cobranzas, así que no figuran en ninguna propuesta. Están en '
                 + celdas + ' columna' + (celdas === 1 ? '' : 's') + ', marcadas en la fila. '
                 + 'El detalle factura por factura está en Cobranzas FR → Pendientes Proyectados '
-                + '→ Deep Dive.')
+                + '→ Detalle Facturas.')
             + '"></i>';
     }
 

@@ -491,6 +491,40 @@ body {
 }
 
 /* ========================================
+   SUB-SOLAPAS DE LAS PESTAÑAS DE COBRANZA
+   ========================================
+   Resumen / Detalle Facturas. Antes eran un `btn-group`, que es el control de
+   una acción y no de una vista: dos botones al lado de *Actualizar* y
+   *Exportar* se leen como tres cosas del mismo tipo, y sólo dos de ellas
+   cambian lo que la tabla muestra.
+
+   Van en su propio `card-header` para que las lengüetas se apoyen sobre el
+   borde inferior del bloque, que es lo que las hace leer como solapas. El
+   `border-bottom` del `nav-tabs` se saca porque ese borde ya lo dibuja el
+   `card-header`, y con los dos queda una línea doble.
+   ======================================== */
+
+.cob-subtabs {
+    background: var(--bg-light);
+}
+
+.cob-subtabs .nav-tabs {
+    border-bottom: 0;
+}
+
+.cob-subtabs .nav-link {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.cob-subtabs .nav-link.active {
+    background: var(--bg-white);
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
+/* ========================================
    FILTRO POR FECHA DE EMISIÓN
    ========================================
    Los dos extremos del filtro de las pestañas de cobranza. El ancho va
