@@ -83,8 +83,97 @@
                 filtrarTabla();
             });
         }
-        
+
+        conectarFiltroEmision();
+
         cargarDatos();
+    }
+
+    /* ================================================================
+       FILTRO POR FECHA DE EMISIÓN
+
+       Es SERVER-SIDE: los dos extremos se mandan como parámetros y el
+       controller filtra los items antes de EjeVista. Si se filtrara acá
+       escondiendo filas, las columnas del eje, el pie de totales y las
+       tarjetas de indicadores seguirían mostrando el total sin filtrar.
+       ================================================================ */
+
+    function filtroEmision() {
+        var desde = document.getElementById('fechaDesdeCob');
+        var hasta = document.getElementById('fechaHastaCob');
+
+        return {
+            desde: desde && desde.value ? desde.value : '',
+            hasta: hasta && hasta.value ? hasta.value : ''
+        };
+    }
+
+    function conectarFiltroEmision() {
+        var desde = document.getElementById('fechaDesdeCob');
+        var hasta = document.getElementById('fechaHastaCob');
+        var limpiar = document.getElementById('btnLimpiarFechasCob');
+
+        [desde, hasta].forEach(function(inp) {
+            if (inp) {
+                inp.addEventListener('change', function() {
+                    acotarExtremos();
+                    cargarDatos();
+                });
+            }
+        });
+
+        if (limpiar) {
+            limpiar.addEventListener('click', function() {
+                if (desde) desde.value = '';
+                if (hasta) hasta.value = '';
+
+                acotarExtremos();
+                cargarDatos();
+            });
+        }
+    }
+
+    /**
+     * Cada extremo acota al otro, y el botón de limpiar sólo está activo si hay
+     * algo que limpiar.
+     *
+     * El `max` y el `min` son una comodidad del navegador, no una garantía: el
+     * rango se valida de nuevo en el servidor, que es el único que puede.
+     */
+    function acotarExtremos() {
+        var desde = document.getElementById('fechaDesdeCob');
+        var hasta = document.getElementById('fechaHastaCob');
+        var limpiar = document.getElementById('btnLimpiarFechasCob');
+        var f = filtroEmision();
+
+        if (desde) desde.max = f.hasta;
+        if (hasta) hasta.min = f.desde;
+        if (limpiar) limpiar.disabled = !f.desde && !f.hasta;
+    }
+
+    /** El filtro aplicado, al lado del rótulo del período */
+    function pintarFiltroPeriodo() {
+        var el = document.getElementById('filtroPeriodoCob');
+
+        if (!el) {
+            return;
+        }
+
+        var r = (datosCobranzas && datosCobranzas.filtro_emision) || {};
+
+        if (!r.desde && !r.hasta) {
+            el.innerHTML = '';
+            return;
+        }
+
+        var rango = r.desde && r.hasta
+            ? 'emitidas del ' + formatDate(r.desde) + ' al ' + formatDate(r.hasta)
+            : (r.desde
+                ? 'emitidas desde el ' + formatDate(r.desde)
+                : 'emitidas hasta el ' + formatDate(r.hasta));
+
+        el.innerHTML = ' <span class="badge bg-secondary-subtle text-secondary-emphasis">'
+            + '<i class="fas fa-filter me-1"></i>Filtro: ' + rango + '</span>';
     }
     
     function texto(id, valor) {
@@ -171,7 +260,15 @@
 
     function cargarDatos() {
         mostrarCargando(true);
-        fetch(`Controller/IngresosController.php?action=getCobranzasFR&type=${modoVista}&origen=${modoOrigen}`)
+
+        var f = filtroEmision();
+        var url = 'Controller/IngresosController.php?action=getCobranzasFR'
+            + '&type=' + encodeURIComponent(modoVista)
+            + '&origen=' + encodeURIComponent(modoOrigen)
+            + '&desde=' + encodeURIComponent(f.desde)
+            + '&hasta=' + encodeURIComponent(f.hasta);
+
+        fetch(url)
             .then(response => {
                 if (!response.ok) throw new Error('Error HTTP: ' + response.status);
                 return response.json();
@@ -187,6 +284,8 @@
                     generarTabla();
                     calcularResumenes();
                     pintarAvisos();
+                    pintarFiltroPeriodo();
+                    acotarExtremos();
                     mostrarCargando(false);
                 } else {
                     mostrarError('Error al cargar datos: ' + result.message);

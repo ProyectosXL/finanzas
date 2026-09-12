@@ -84,6 +84,23 @@
                         <input type="text" id="busquedaCob" class="form-control border-start-0 ps-0" placeholder="Buscar cliente o comprobante..." style="min-width: 230px;">
                     </div>
                 </div>
+
+                <!-- Filtro por fecha de EMISIÓN. Es server-side: se manda como
+                     parámetro y los items se filtran antes de EjeVista, así que
+                     las columnas, el pie de totales y las tarjetas describen lo
+                     que se está viendo. Ver Ingresos::validarRangoFechaEmision(). -->
+                <div class="filtro-emision d-flex align-items-center gap-1">
+                    <span class="text-muted small text-nowrap">Emisión</span>
+                    <input type="date" id="fechaDesdeCob" class="form-control form-control-sm"
+                           title="Desde esta fecha de emisión, inclusive">
+                    <span class="text-muted small">a</span>
+                    <input type="date" id="fechaHastaCob" class="form-control form-control-sm"
+                           title="Hasta esta fecha de emisión, inclusive">
+                    <button id="btnLimpiarFechasCob" class="btn btn-sm btn-outline-secondary"
+                            title="Quitar el filtro por fecha de emisión" disabled>
+                        <i class="fas fa-eraser"></i>
+                    </button>
+                </div>
             </div>
 
             <div class="d-flex gap-2 flex-wrap align-items-center">
@@ -111,9 +128,12 @@
             </div>
         </div>
 
-        <!-- Período que se está midiendo -->
+        <!-- Período que se está midiendo. El filtro aplicado va en un elemento
+             APARTE: eje-vistas.js reescribe #periodoCob cada vez que se cambia
+             de vista, así que lo que se agregara ahí se perdería. -->
         <div class="card-body py-2 border-bottom bg-light bg-opacity-50">
             <small class="text-muted" id="periodoCob"></small>
+            <small class="text-muted" id="filtroPeriodoCob"></small>
         </div>
 
         <div class="card-body p-0">

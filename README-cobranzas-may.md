@@ -71,6 +71,7 @@ La pestaña **Cobranzas May** cuenta con todos los componentes estándar del sis
    - Plazo Promedio Aplicado (días).
 2. **Barra de Herramientas:**
    - **Buscador rápido:** Filtrado en tiempo real por código de cliente, razón social o comprobante.
+   - **Filtro por fecha de emisión (desde – hasta):** dos `<input type="date">` y un botón de limpiar. Es **server-side**: los extremos se mandan como parámetros y los items se filtran antes de `EjeVista`, porque filtrar escondiendo filas dejaría las columnas del eje, el pie de totales y las tarjetas mostrando el total sin filtrar. La validación (formato, calendario y `desde <= hasta`) corre en el servidor. Está explicado en `README-cobranzas-fr.md`.
    - **Modo Resumen vs Deep Dive:**
      - *Resumen:* **una fila por cliente**, con los importes repartidos en las columnas de la grilla según la fecha de cobro de cada comprobante. Quedan `Tipo`, `COD_CLI`, `RAZON_SOC`, `Importe Bruto` e `Importe Neto`.
      - *Deep Dive:* apertura individual por comprobante con fecha de emisión, tipo, número, importe y fecha de cobro.

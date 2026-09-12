@@ -17,12 +17,21 @@ header('Content-Type: application/json');
  * 'importe_bruto' se suma ademas del neto: el neto es el que va al eje -es la
  * plata que entra- y el bruto es una columna mas de la fila.
  *
+ * EL FILTRO POR FECHA DE EMISION SE APLICA ACA, ANTES DE EjeVista. Si se
+ * filtrara en el navegador, las columnas del eje, el pie de totales y las
+ * tarjetas de indicadores seguirian mostrando el total sin filtrar. Ver
+ * Ingresos::validarRangoFechaEmision().
+ *
  * @param array $items
  * @param bool $summary
+ * @param array $rango ['desde', 'hasta'], lo que devuelve la validacion
  * @return array
  */
-function payloadCobranzas($items, $summary) {
+function payloadCobranzas($items, $summary, $rango = ['desde' => null, 'hasta' => null]) {
     $h = Horizonte::desdeParametros(new Parametros());
+
+    $filtrado = Ingresos::filtrarPorFechaEmision($items, $rango);
+    $items = $filtrado['items'];
 
     if (!$summary) {
         $payload = EjeVista::armar($h, $items, 'Cobro', 'importe_neto');
@@ -43,13 +52,23 @@ function payloadCobranzas($items, $summary) {
        sobre $items -una fila por comprobante- y no sobre las filas del payload,
        que en Resumen son clientes y perdieron la marca. */
     $payload['warnings'] = array_merge(
+        Ingresos::avisosFiltroFechaEmision($rango, $filtrado['sin_fecha']),
         Ingresos::avisosCobranzasVencidas($items),
         $payload['warnings']
     );
 
     $payload['dias_vencidas'] = Ingresos::DIAS_COBRO_VENCIDO;
+    $payload['filtro_emision'] = $rango;
 
     return $payload;
+}
+
+/** El rango del filtro por fecha de emision que llego en la query string */
+function rangoEmisionPedido() {
+    return Ingresos::validarRangoFechaEmision(
+        isset($_GET['desde']) ? $_GET['desde'] : null,
+        isset($_GET['hasta']) ? $_GET['hasta'] : null
+    );
 }
 
 try {
@@ -90,6 +109,16 @@ try {
         case 'getCobranzasFR':
             $summary = isset($_GET['type']) && $_GET['type'] === 'deepdive' ? false : true;
             $origen = isset($_GET['origen']) ? $_GET['origen'] : 'todos';
+            $rango = rangoEmisionPedido();
+
+            /* CON FILTRO POR FECHA DE EMISION HAY QUE TRAER LA EMISION.
+               El modo resumen de getCobranzasFR() se saltea la fecha de emision
+               de la cobranza real justamente porque cuesta una consulta a GVA12
+               POR FILA, y el Resumen no la muestra. Pero si hay filtro, esa
+               fecha es lo que decide si la fila entra: sin ella, la cobranza
+               real quedaria entera afuera del filtro y el numero seria falso.
+               Se paga la consulta solo cuando hay filtro. */
+            $conFiltro = ($rango['desde'] !== null || $rango['hasta'] !== null);
 
             // El eje sale de horizonte_dias y horizonte_meses, el mismo del
             // tablero: esta pestaña deja de tener su ventana propia -eran los
@@ -97,8 +126,9 @@ try {
             echo json_encode([
                 'success' => true,
                 'data' => payloadCobranzas(
-                    $ingresos->getCobranzasFR($summary, $origen),
-                    $summary
+                    $ingresos->getCobranzasFR($summary && !$conFiltro, $origen),
+                    $summary,
+                    $rango
                 )
             ], JSON_UNESCAPED_UNICODE);
             break;
@@ -108,7 +138,8 @@ try {
 
             echo json_encode([
                 'success' => true,
-                'data' => payloadCobranzas($ingresos->getCobranzasMay(), $summary)
+                'data' => payloadCobranzas($ingresos->getCobranzasMay(), $summary,
+                    rangoEmisionPedido())
             ], JSON_UNESCAPED_UNICODE);
             break;
 

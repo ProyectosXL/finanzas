@@ -491,6 +491,19 @@ body {
 }
 
 /* ========================================
+   FILTRO POR FECHA DE EMISIÓN
+   ========================================
+   Los dos extremos del filtro de las pestañas de cobranza. El ancho va
+   explícito porque un `input type="date"` sin ancho toma el de un campo de
+   texto común, y en Chrome eso deja el ícono del calendario montado sobre el
+   año.
+   ======================================== */
+
+.filtro-emision input[type="date"] {
+    width: 138px;
+}
+
+/* ========================================
    FACTURAS VENCIDAS
    ========================================
    Una factura cuya fecha probable de cobro ya pasó entra a la grilla ubicada en

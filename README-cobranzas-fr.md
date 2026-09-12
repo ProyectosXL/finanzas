@@ -292,9 +292,46 @@ celda dejarían ver una sola, y cuál de las dos dependería del orden en que se
 
 Dentro de cada solapa, la barra de herramientas superior proporciona:
 - **Buscador rápido:** Filtrado en tiempo real por código de cliente, razón social o número de comprobante.
+- **Filtro por fecha de emisión (desde – hasta):** ver más abajo.
 - **Modo Resumen vs Deep Dive:** ver más abajo.
 - **Selector de Eje Temporal:** Alterna entre *Días* (tramo diario), *Meses* (tramo mensual) y *Período Completo* mediante el componente común `Js/eje-vistas.js`.
 - **Botones de Acción:** *Actualizar* datos y *Exportar* matriz a Excel.
+
+---
+
+## El filtro por fecha de emisión es del servidor, no del navegador
+
+Dos `<input type="date">` al lado del buscador, más un botón de limpiar. Filtran por
+`FECHA`, que es la **fecha de emisión** del comprobante, no la de cobro.
+
+Los dos extremos se mandan como parámetros `desde` y `hasta` a
+`IngresosController`, y los items se filtran **antes** de `EjeVista::armar()` /
+`armarAgrupado()`.
+
+**Es lo único que puede funcionar.** El buscador esconde filas en el DOM, y eso alcanza
+para buscar un cliente: sigue siendo la misma tabla. Un filtro hecho igual dejaría las
+columnas del eje, el pie de totales y las tres tarjetas de indicadores describiendo el
+total **sin** filtrar, y se vería una tabla de tres filas con un total de doscientos
+millones sin nada que explicara la diferencia.
+
+- **Se valida en el servidor** (`Ingresos::validarRangoFechaEmision()`, pura y probada):
+  formato, calendario y `desde <= hasta`. El `max` y el `min` que se ponen en los inputs
+  son una comodidad del navegador, no una garantía — el endpoint es alcanzable sin pasar
+  por la pantalla. Mismo criterio que la fecha de cobro manual.
+- **Los dos extremos son opcionales e independientes.** Vacío es *sin filtro*, no un error.
+- **El filtro aplicado se ve en el rótulo del período**, en un elemento aparte del que
+  escribe `eje-vistas.js`: ese se reescribe en cada cambio de vista y se llevaría puesto
+  cualquier cosa agregada ahí.
+- **Un comprobante sin fecha de emisión utilizable queda afuera, pero contado y avisado.**
+  Es la cobranza real cuyo comprobante no aparece en `GVA12`, donde `getCobranzasFR()`
+  deja `'N/A'`: no se puede ubicar en el rango, y descartarlo en silencio sería perder
+  plata sin decirlo.
+
+> **Con filtro, el Resumen paga la consulta que se ahorraba.** El modo resumen de
+> `getCobranzasFR()` se saltea la fecha de emisión de la cobranza real justamente porque
+> cuesta **una consulta a `GVA12` por fila** y el Resumen no la muestra. Pero con filtro
+> esa fecha es lo que decide si la fila entra: sin ella, la cobranza real quedaría entera
+> afuera y el número sería falso. Así que el detalle se trae **sólo cuando hay filtro**.
 
 ---
 
@@ -341,6 +378,7 @@ El proveedor `IngresosProvider` registra tres series en `CashflowRegistry`:
 - Que el descuento no cambie por reubicar el importe.
 - Los dos avisos de vencidas, y que sin vencidas no haya ninguno.
 - Que `EjeVista::marcarAlguna()` marque al cliente con **una** factura vencida entre dos.
+- El filtro por fecha de emisión: extremos vacíos, extremos sueltos, los bordes del rango inclusive, el rango al revés rechazado, el calendario imposible, y que el comprobante sin emisión quede afuera **contado** y avisado.
 
 `tests/test_cobranzas_fr_split.php`:
 - Que lo que cuenta *Real* y lo que la proyección excluye sean complementarios, estado por estado.

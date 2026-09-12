@@ -745,6 +745,145 @@ class Ingresos {
         return $avisos;
     }
 
+    /* ====================================================================
+       FILTRO POR FECHA DE EMISION
+       ==================================================================== */
+
+    /**
+     * Normaliza y valida el rango de fechas de emision del filtro.
+     *
+     * EL FILTRO ES DEL SERVIDOR Y NO DEL NAVEGADOR, y no es un detalle de
+     * implementacion: si se filtrara escondiendo filas en el DOM, las columnas
+     * del eje, el pie de totales y las tarjetas de indicadores seguirian
+     * describiendo el total SIN filtrar. Se veria una tabla de tres filas con
+     * un total de doscientos millones, y nada explicaria la diferencia. Por eso
+     * los items se filtran antes de EjeVista.
+     *
+     * Los dos extremos son opcionales e independientes -solo desde, solo hasta,
+     * o los dos-. Vacio significa "sin filtro" y no es un error.
+     *
+     * Estatica y pura: la validacion que vale es la del servidor, porque el
+     * endpoint es alcanzable sin pasar por la pantalla. Mismo criterio que
+     * validarFechaCobroManual().
+     *
+     * @param mixed $desde
+     * @param mixed $hasta
+     * @return array ['desde' => 'Y-m-d'|null, 'hasta' => 'Y-m-d'|null]
+     * @throws Exception si una fecha no es valida o el rango esta al reves
+     */
+    public static function validarRangoFechaEmision($desde, $hasta) {
+        $d = self::fechaDeFiltro($desde, 'desde');
+        $h = self::fechaDeFiltro($hasta, 'hasta');
+
+        if ($d !== null && $h !== null && $d > $h) {
+            throw new Exception('El filtro por fecha de emisión está al revés: desde ('
+                . self::formatoCorto($d) . ') es posterior a hasta ('
+                . self::formatoCorto($h) . '), así que no hay ninguna factura que '
+                . 'pueda entrar.');
+        }
+
+        return ['desde' => $d, 'hasta' => $h];
+    }
+
+    /**
+     * Deja de una lista de comprobantes los que emitieron dentro del rango.
+     *
+     * Los que no tienen una fecha de emision utilizable NO se descartan en
+     * silencio: se cuentan aparte para que la pantalla pueda decir cuantos
+     * quedaron afuera. Es el caso de la cobranza real cuando el comprobante no
+     * aparece en GVA12, donde getCobranzasFR() deja 'N/A'.
+     *
+     * @param array $items
+     * @param array $rango Lo que devuelve validarRangoFechaEmision()
+     * @param string $campo Campo con la fecha de emision
+     * @return array ['items' => array, 'sin_fecha' => int]
+     */
+    public static function filtrarPorFechaEmision($items, $rango, $campo = 'FECHA') {
+        $lista = is_array($items) ? $items : [];
+        $desde = isset($rango['desde']) ? $rango['desde'] : null;
+        $hasta = isset($rango['hasta']) ? $rango['hasta'] : null;
+
+        if ($desde === null && $hasta === null) {
+            return ['items' => $lista, 'sin_fecha' => 0];
+        }
+
+        $filtrados = [];
+        $sinFecha = 0;
+
+        foreach ($lista as $item) {
+            $f = Horizonte::normalizarFecha(isset($item[$campo]) ? $item[$campo] : null);
+
+            if ($f === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $f)) {
+                $sinFecha++;
+                continue;
+            }
+
+            if ($desde !== null && $f < $desde) {
+                continue;
+            }
+
+            if ($hasta !== null && $f > $hasta) {
+                continue;
+            }
+
+            $filtrados[] = $item;
+        }
+
+        return ['items' => $filtrados, 'sin_fecha' => $sinFecha];
+    }
+
+    /**
+     * Lo que el filtro por fecha de emision tiene que decir.
+     *
+     * Los comprobantes que quedaron afuera POR EL RANGO no se avisan: es
+     * exactamente lo que el usuario pidio. Los que quedaron afuera por no tener
+     * fecha de emision utilizable si, porque eso no lo pidio nadie.
+     *
+     * @param array $rango Lo que devuelve validarRangoFechaEmision()
+     * @param int $sinFecha Cuantos quedaron afuera sin fecha
+     * @return array Lista de mensajes
+     */
+    public static function avisosFiltroFechaEmision($rango, $sinFecha) {
+        $sinFecha = intval($sinFecha);
+
+        if ($sinFecha < 1) {
+            return [];
+        }
+
+        return [$sinFecha . ' comprobante' . ($sinFecha === 1 ? '' : 's')
+            . ' sin fecha de emisión ' . ($sinFecha === 1 ? 'queda' : 'quedan')
+            . ' fuera del filtro: no se ' . ($sinFecha === 1 ? 'puede' : 'pueden')
+            . ' ubicar en el rango. Quitá el filtro para ' . ($sinFecha === 1 ? 'verlo' : 'verlos')
+            . '.'];
+    }
+
+    /**
+     * Un extremo del filtro: fecha valida, o null si viene vacio.
+     *
+     * @param mixed $valor
+     * @param string $cual 'desde' o 'hasta', para el mensaje
+     * @return string|null 'Y-m-d'
+     */
+    private static function fechaDeFiltro($valor, $cual) {
+        if ($valor === null || $valor === '' || $valor === false) {
+            return null;
+        }
+
+        $f = Horizonte::normalizarFecha($valor);
+
+        if ($f === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $f)) {
+            throw new Exception('La fecha "' . $cual . '" del filtro no es una fecha válida.');
+        }
+
+        list($a, $m, $d) = array_map('intval', explode('-', $f));
+
+        if (!checkdate($m, $d, $a)) {
+            throw new Exception('La fecha "' . $cual . '" del filtro no existe en el calendario.');
+        }
+
+        return $f;
+    }
+
     /** dd/mm/aaaa, para los mensajes de error */
     private static function formatoCorto($fecha) {
         $p = explode('-', substr((string) $fecha, 0, 10));

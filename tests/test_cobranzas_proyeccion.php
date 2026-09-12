@@ -340,6 +340,105 @@ chequear('un cliente sin items queda sin marca', false,
         'COD_CLI', ['VENCIDA'])['filas'][0]['VENCIDA']);
 
 // ============================================================================
+// El filtro por fecha de emisión
+//
+// Es server-side a proposito: si se filtrara escondiendo filas en el DOM, las
+// columnas del eje, el pie de totales y las tarjetas de indicadores seguirian
+// describiendo el total sin filtrar.
+// ============================================================================
+
+seccion('el rango del filtro se valida en el servidor');
+
+chequear('los dos extremos vacios es "sin filtro", no un error',
+    ['desde' => null, 'hasta' => null],
+    Ingresos::validarRangoFechaEmision('', ''));
+
+chequear('null tambien', ['desde' => null, 'hasta' => null],
+    Ingresos::validarRangoFechaEmision(null, null));
+
+chequear('solo desde', ['desde' => '2026-01-01', 'hasta' => null],
+    Ingresos::validarRangoFechaEmision('2026-01-01', ''));
+
+chequear('solo hasta', ['desde' => null, 'hasta' => '2026-03-31'],
+    Ingresos::validarRangoFechaEmision('', '2026-03-31'));
+
+chequear('los dos extremos iguales es un dia', ['desde' => '2026-02-10', 'hasta' => '2026-02-10'],
+    Ingresos::validarRangoFechaEmision('2026-02-10', '2026-02-10'));
+
+chequearLanza('un rango al reves se rechaza', function () {
+    Ingresos::validarRangoFechaEmision('2026-05-01', '2026-04-01');
+});
+
+chequear('y el mensaje dice que no puede entrar ninguna factura', true, (function () {
+    try {
+        Ingresos::validarRangoFechaEmision('2026-05-01', '2026-04-01');
+    } catch (Throwable $e) {
+        return mb_stripos($e->getMessage(), 'pueda entrar') !== false;
+    }
+
+    return false;
+})());
+
+chequearLanza('un texto que no es fecha se rechaza', function () {
+    Ingresos::validarRangoFechaEmision('el mes pasado', '');
+});
+
+chequearLanza('una fecha que no existe en el calendario se rechaza', function () {
+    Ingresos::validarRangoFechaEmision('', '2026-02-30');
+});
+
+// Un DateTime entra igual: es lo que devuelve sqlsrv para una columna DATE.
+chequear('acepta un DateTime', '2026-07-04',
+    Ingresos::validarRangoFechaEmision(new DateTime('2026-07-04'), null)['desde']);
+
+seccion('el filtro deja pasar solo los emitidos en el rango');
+
+$ITEMS = [
+    ['N_COMP' => 'A', 'FECHA' => '2026-01-15', 'importe_neto' => 100.0],
+    ['N_COMP' => 'B', 'FECHA' => '2026-02-01', 'importe_neto' => 200.0],
+    ['N_COMP' => 'C', 'FECHA' => '2026-02-28', 'importe_neto' => 300.0],
+    ['N_COMP' => 'D', 'FECHA' => '2026-03-10', 'importe_neto' => 400.0],
+    // 'N/A' es lo que deja getCobranzasFR() cuando el comprobante no aparece
+    // en GVA12: no tiene emision con la que decidir si entra.
+    ['N_COMP' => 'E', 'FECHA' => 'N/A', 'importe_neto' => 500.0]
+];
+
+$sinFiltro = Ingresos::filtrarPorFechaEmision($ITEMS, ['desde' => null, 'hasta' => null]);
+
+chequear('sin filtro no se toca nada, ni el de fecha "N/A"', 5, count($sinFiltro['items']));
+chequear('y no hay nada que informar', 0, $sinFiltro['sin_fecha']);
+
+$febrero = Ingresos::filtrarPorFechaEmision($ITEMS,
+    ['desde' => '2026-02-01', 'hasta' => '2026-02-28']);
+
+chequear('febrero deja dos', 2, count($febrero['items']));
+chequear('el primero es el del 1/2', 'B', $febrero['items'][0]['N_COMP']);
+chequear('los bordes entran: el del 28/2 tambien', 'C', $febrero['items'][1]['N_COMP']);
+
+// El que no se puede ubicar en el rango queda afuera, pero CONTADO: descartarlo
+// en silencio seria perder plata sin decirlo.
+chequear('el de emision desconocida queda afuera', 1, $febrero['sin_fecha']);
+
+$avisos = Ingresos::avisosFiltroFechaEmision(['desde' => '2026-02-01', 'hasta' => '2026-02-28'], 1);
+
+chequear('y se avisa', 1, count($avisos));
+chequear('el aviso dice cuantos son', true,
+    mb_stripos($avisos[0], '1 comprobante sin fecha de emisión') !== false);
+chequear('y como verlos', true, mb_stripos($avisos[0], 'Quitá el filtro') !== false);
+chequear('sin ninguno, no hay aviso', [],
+    Ingresos::avisosFiltroFechaEmision(['desde' => '2026-02-01', 'hasta' => null], 0));
+
+// Un extremo suelto acota de un solo lado.
+chequear('solo desde: deja los tres posteriores', 3,
+    count(Ingresos::filtrarPorFechaEmision($ITEMS, ['desde' => '2026-02-01', 'hasta' => null])['items']));
+chequear('solo hasta: deja los dos anteriores', 2,
+    count(Ingresos::filtrarPorFechaEmision($ITEMS, ['desde' => null, 'hasta' => '2026-02-01'])['items']));
+
+// Un rango que no contiene nada devuelve una lista vacia, no todo.
+chequear('un rango vacio de facturas deja cero filas', 0,
+    count(Ingresos::filtrarPorFechaEmision($ITEMS, ['desde' => '2027-01-01', 'hasta' => '2027-12-31'])['items']));
+
+// ============================================================================
 // Parámetros y Registro de Cashflow
 // ============================================================================
 

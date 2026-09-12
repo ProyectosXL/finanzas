@@ -70,6 +70,21 @@
                         <input type="text" id="busquedaCobMay" class="form-control border-start-0 ps-0" placeholder="Buscar cliente o comprobante..." style="min-width: 230px;">
                     </div>
                 </div>
+
+                <!-- Filtro por fecha de EMISIÓN, server-side. Ver la nota
+                     equivalente en Tabs/cobranzas_fr.php. -->
+                <div class="filtro-emision d-flex align-items-center gap-1">
+                    <span class="text-muted small text-nowrap">Emisión</span>
+                    <input type="date" id="fechaDesdeCobMay" class="form-control form-control-sm"
+                           title="Desde esta fecha de emisión, inclusive">
+                    <span class="text-muted small">a</span>
+                    <input type="date" id="fechaHastaCobMay" class="form-control form-control-sm"
+                           title="Hasta esta fecha de emisión, inclusive">
+                    <button id="btnLimpiarFechasCobMay" class="btn btn-sm btn-outline-secondary"
+                            title="Quitar el filtro por fecha de emisión" disabled>
+                        <i class="fas fa-eraser"></i>
+                    </button>
+                </div>
             </div>
 
             <div class="d-flex gap-2 flex-wrap align-items-center">
@@ -97,9 +112,11 @@
             </div>
         </div>
 
-        <!-- Período que se está midiendo -->
+        <!-- Período que se está midiendo. El filtro aplicado va aparte: el
+             componente de vistas reescribe #periodoCobMay al cambiar de vista. -->
         <div class="card-body py-2 border-bottom bg-light bg-opacity-50">
             <small class="text-muted" id="periodoCobMay"></small>
+            <small class="text-muted" id="filtroPeriodoCobMay"></small>
         </div>
 
         <div class="card-body p-0">
