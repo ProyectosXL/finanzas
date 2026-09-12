@@ -491,6 +491,44 @@ body {
 }
 
 /* ========================================
+   FACTURAS VENCIDAS
+   ========================================
+   Una factura cuya fecha probable de cobro ya pasó entra a la grilla ubicada en
+   el primer día del eje (ver Ingresos::ubicarCobroVencido()). Quien lea ese
+   número tiene que ver que no es cobranza estimada para hoy, así que se
+   distingue la fila entera y no sólo el badge.
+
+   Están acá y no en la hoja de cada pestaña porque las usan las tres que
+   proyectan cobranza —Cobranzas FR, Cobranzas May y Exportaciones Tasky— y tres
+   copias del mismo ámbar se desincronizan a la primera vez que alguien retoca
+   una.
+   ======================================== */
+
+.fila-vencida td {
+    background-color: #fff8e1 !important;
+}
+
+.badge-vencida-exp {
+    background-color: #fff3cd;
+    color: #856404;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid #ffe69c;
+    white-space: nowrap;
+}
+
+/* En el Resumen la fila es un cliente y no un comprobante, así que no hay una
+   fecha que marcar: el indicador va al lado del código y dice que ALGUNA de
+   sus facturas está vencida. Mismo lugar y tamaño que la marca de fecha
+   pactada a mano. */
+.cob-marca-vencida {
+    font-size: 10px;
+    vertical-align: super;
+}
+
+/* ========================================
    UTILITIES
    ======================================== */
 

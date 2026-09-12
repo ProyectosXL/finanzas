@@ -47,7 +47,7 @@ El módulo implementa el flujo de **Camino 1: Facturas Pendientes** del sistema 
 - **Tipos de comprobante incluidos:** `FAC`, `NDC`, `NDU` (suman al saldo) y `NC`, `NCC`, `NCU` (restan al saldo).
 - **Cálculo de Proyección:**
   $$\text{Fecha Probable de Cobro} = \text{Fecha Emisión} + \text{Días de Plazo}$$
-- **Filtro Temporal:** Se excluyen comprobantes cuya $\text{Fecha Probable de Cobro} < \text{Fecha Actual (Día de corte)}$, ya que los cobros proyectados pasados no deben formar parte del flujo futuro de fondos.
+- **Las vencidas entran, ubicadas en hoy.** Antes se excluían los comprobantes cuya fecha probable de cobro fuera anterior al día de corte, y esa plata desaparecía de la pantalla sin aviso. Ahora entran si la fecha cae dentro de los últimos `Ingresos::DIAS_COBRO_VENCIDO` (180) días, se ubican en el primer día del eje y se marcan. La regla es la misma para las tres pestañas de cobranza proyectada y vive en `Ingresos::ubicarCobroVencido()`; está explicada en `README-cobranzas-fr.md`. Mayoristas no tiene fecha manual, así que nunca hay una fecha pactada que respetar.
 - **Días de Plazo:** Se obtienen desde `RO_T_CASHFLOW_PARAMETROS` (`cobranzas_may_dias_vto`, por defecto 60 días).
 
 ---

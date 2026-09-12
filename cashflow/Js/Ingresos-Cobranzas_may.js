@@ -218,12 +218,15 @@
         var html = '';
 
         datosCobranzas.filas.forEach(function(item) {
-            html += `<tr class="fila-proyeccion-may">`;
-            
+            // Una factura vencida se distingue en toda la fila: su importe está
+            // en la columna de hoy por ser el primer día del eje, no porque se
+            // estime cobrarla hoy. Ver Ingresos::ubicarCobroVencido().
+            html += '<tr class="fila-proyeccion-may' + (item.VENCIDA ? ' fila-vencida' : '') + '">';
+
             var plazoInfo = item.Dias ? `Plazo: ${item.Dias} días` : '';
             html += `<td class="center"><span class="badge-may" title="${plazoInfo}"><i class="fas fa-clock me-1"></i>PROY</span></td>`;
 
-            html += `<td><strong>${item.COD_CLI || ''}</strong></td>`;
+            html += `<td><strong>${item.COD_CLI || ''}</strong>${marcaVencida(item)}</td>`;
 
             // Recortado con puntos suspensivos (.col-texto) para que la fila
             // sea una sola línea; el nombre completo va en el title.
@@ -243,7 +246,7 @@
             html += `<td class="currency">${formatCurrency(item.importe_bruto)}</td>`;
             html += `<td class="currency fw-bold">${formatCurrency(item.importe_neto)}</td>`;
             
-            html += `<td class="center"><span class="badge-cobro-may">${formatDate(item.Cobro)}</span></td>`;
+            html += '<td class="center">' + celdaCobro(item) + '</td>';
             
             // Columnas del eje temporal
             cols.forEach(function(col) {
@@ -265,6 +268,53 @@
             html += '</tr>';
         });
         tableBody.innerHTML = html;
+    }
+
+    /* ================================================================
+       FACTURAS VENCIDAS
+
+       Mismo criterio que Exportaciones Tasky y Cobranzas FR: una factura cuya
+       fecha probable de cobro ya pasó no se descarta, se ubica en el primer
+       día del eje y se marca con su fecha original a la vista. Ver
+       Ingresos::ubicarCobroVencido().
+       ================================================================ */
+
+    /**
+     * La celda de fecha de cobro. Una vencida dice cuál era su fecha, que es
+     * lo único que explica por qué su importe está en la columna de hoy.
+     *
+     * Sin COBRO_ORIGINAL —el Resumen, donde la fila es un cliente y las fechas
+     * difieren— el badge no tendría fecha que mostrar y no agregaría nada
+     * sobre el color de la fila, así que va el badge normal.
+     */
+    function celdaCobro(item) {
+        if (item.VENCIDA && item.COBRO_ORIGINAL) {
+            return '<span class="badge-vencida-exp" title="Fecha probable de cobro original: '
+                + formatDate(item.COBRO_ORIGINAL) + '. Vencida sin cobrar: se ubica en el '
+                + 'primer día del eje">'
+                + '<i class="fas fa-triangle-exclamation me-1"></i>Vencida '
+                + formatDate(item.COBRO_ORIGINAL) + '</span>';
+        }
+
+        return '<span class="badge-cobro-may">' + formatDate(item.Cobro) + '</span>';
+    }
+
+    /**
+     * El indicador del Resumen: este cliente tiene alguna factura vencida.
+     *
+     * Dice "alguna" y no "todas". La marca la repone EjeVista::marcarAlguna()
+     * en el controller, porque el agrupado descarta los campos que difieren
+     * dentro del grupo.
+     */
+    function marcaVencida(item) {
+        if (modoVista !== 'resumen' || !item.VENCIDA) {
+            return '';
+        }
+
+        return ' <i class="fas fa-triangle-exclamation text-warning cob-marca-vencida" '
+            + 'title="Alguna factura de este cliente tiene la fecha probable de cobro ya '
+            + 'vencida: su importe se muestra en el primer día del eje. El detalle está '
+            + 'en Detalle Facturas."></i>';
     }
 
     /**

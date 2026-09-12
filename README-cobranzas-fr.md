@@ -213,6 +213,81 @@ Se implementa con el campo `detalle` del contrato de proveedor, que es metadato 
 
 ---
 
+## Las facturas vencidas entran, ubicadas en hoy
+
+Antes, la factura cuya **fecha probable de cobro ya había pasado** se descartaba con un
+`continue` en `Ingresos::getCobranzasFRPendientesProyectadas()`. Esa plata desaparecía de
+la pantalla y **nada lo decía**: la pestaña mostraba de menos en silencio, que es
+exactamente lo que el resto del módulo evita.
+
+Ahora vale el criterio de Exportaciones Tasky: **una factura con la fecha estimada en el
+pasado es una factura vencida sin cobrar**, o sea información y no un error a esconder.
+
+```
+Fecha probable de cobro ≥ hoy          → va en su fecha
+Fecha probable entre hoy − 180 y hoy   → va en el PRIMER DÍA DEL EJE, marcada VENCIDA
+Fecha probable anterior a hoy − 180    → queda afuera
+Fecha PACTADA A MANO, aunque venció    → va en su fecha, marcada VENCIDA, sin reubicar
+```
+
+La regla vive escrita **una sola vez** en `Ingresos::ubicarCobroVencido()`, que es estática
+y pura, y la usan Cobranzas FR, Cobranzas May y —a través de
+`estimarCobroExportacion()`— Exportaciones Tasky. Antes eran dos criterios opuestos en
+tres funciones.
+
+### Los 180 días son un techo, no una preferencia
+
+Es la constante `Ingresos::DIAS_COBRO_VENCIDO`. Sin techo, una cartera con años de
+facturas incobrables entraría **entera** en la columna de hoy, y el primer día del eje
+mostraría una cobranza que nadie espera cobrar. Exportaciones Tasky pasa `null` —sin
+techo— porque son pocas facturas de un solo cliente y todas se gestionan.
+
+### La fecha manual no se reubica, y tampoco se descarta
+
+Es una fecha que Tesorería pactó con el cliente. Moverla a hoy sería pisar una decisión
+tomada con una regla automática, y el usuario vería **su propia carga en otra columna**. Se
+marca vencida —eso es un hecho— pero se muestra donde está. Y no se descarta por antigua:
+si cayó fuera del horizonte, lo informa `EjeVista` como cualquier otro importe.
+
+### El descuento no cambia por reubicar el importe
+
+Los días de la escala salen del **plazo pactado** (`resolverFechaCobro()`) y no de la
+columna en la que se dibuja el importe. Si se recalcularan sobre hoy, el importe neto de
+una factura vencida cambiaría solo con el paso de los días, sin que nadie tocara nada.
+
+### Qué se ve en la pantalla
+
+- La fila entera en ámbar (`.fila-vencida`, en `Css/main.css` porque la comparten las tres
+  pestañas) y un badge `badge-vencida-exp` con la fecha que venció en el `title`.
+- En **Resumen** la fila es un cliente, así que no hay una fecha que marcar: va un
+  indicador al lado del código que dice que **alguna** de sus facturas está vencida, igual
+  que el de fecha pactada a mano.
+- Un aviso arriba de la tabla con la cantidad y el importe, generado por
+  `Ingresos::avisosCobranzasVencidas()`. Son **dos** avisos y no uno, porque son dos cosas
+  distintas: una reubicada está en la columna de hoy, y una pactada vencida está en la
+  columna de su fecha.
+
+> **La marca del Resumen dice "alguna", no "todas".** `EjeVista::armarAgrupado()` conserva
+> sólo los campos que valen lo mismo en todo el grupo, y para un dato descriptivo eso es
+> correcto. Pero una bandera no es un dato descriptivo: con la intersección, un cliente con
+> una factura vencida y otra al día perdía la marca y se veía igual que uno sin ninguna.
+> Lo repone `EjeVista::marcarAlguna()`, y **arregla también la marca de fecha pactada**,
+> que tenía el mismo defecto desde antes.
+
+### No se duplica contra Real a Cobrar
+
+La exclusión de la proyección es **por comprobante** —las facturas de propuestas `ACEPTADA`
+o `PAGADO`— y no por fecha, así que aceptar fechas pasadas no puede traer de vuelta nada
+que *Real* ya cuente. La invariante de las dos solapas no se movió.
+
+Lo que sí cambia es el tablero: `getCobranzasFRTotales()` ahora informa `IMPORTE_VENCIDO` y
+`COMP_VENCIDOS`, y `IngresosProvider` deja un aviso con el total. **Va como aviso y no como
+`detalle`**: el contrato admite una anotación por celda, y la celda de hoy de la cobranza
+proyectada ya puede tener la de la fecha pactada a mano. Dos notas compitiendo por la misma
+celda dejarían ver una sola, y cuál de las dos dependería del orden en que se escribieron.
+
+---
+
 ## Barra de Herramientas y Navegación
 
 Dentro de cada solapa, la barra de herramientas superior proporciona:
@@ -262,6 +337,10 @@ El proveedor `IngresosProvider` registra tres series en `CashflowRegistry`:
 - El validador de la escala: solapamientos, huecos, tramos al revés, porcentajes imposibles, y que el orden de carga no cambie el veredicto.
 - La jerarquía de fechas: fecha manual sobre PPP, los días recalculados sobre la fecha resuelta, y que eso cambie el tramo de descuento.
 - La validación de fecha pasada, con `hoy` inyectado para que la prueba no caduque sola.
+- La ubicación de las vencidas: los dos bordes del techo (180 entra y se ubica en hoy, 181 queda afuera), que hoy mismo no está vencido, que sin techo entra igual, que con techo cero se reproduce el comportamiento viejo, y que una fecha manual no se reubica ni se descarta ni siquiera más atrás del techo.
+- Que el descuento no cambie por reubicar el importe.
+- Los dos avisos de vencidas, y que sin vencidas no haya ninguno.
+- Que `EjeVista::marcarAlguna()` marque al cliente con **una** factura vencida entre dos.
 
 `tests/test_cobranzas_fr_split.php`:
 - Que lo que cuenta *Real* y lo que la proyección excluye sean complementarios, estado por estado.

@@ -94,7 +94,11 @@ El parámetro vive en `RO_T_CASHFLOW_PARAMETROS` (`INT`, default `30`, `MODULO =
 
 ### Las vencidas no se descartan: van a hoy y se avisa
 
-Mayoristas **excluye** las facturas cuya fecha estimada ya pasó. Acá no: una factura de exportación con la fecha estimada en el pasado es **una factura vencida sin cobrar**, que es información, no un error a esconder. Se ubica en el **primer día del eje** —hoy—, la fila se marca en ámbar con la fecha original a la vista, y arriba de la tabla un aviso dice cuántas son y por cuántos dólares.
+Una factura de exportación con la fecha estimada en el pasado es **una factura vencida sin cobrar**, que es información, no un error a esconder. Se ubica en el **primer día del eje** —hoy—, la fila se marca en ámbar con la fecha original a la vista, y arriba de la tabla un aviso dice cuántas son y por cuántos dólares.
+
+**Este criterio dejó de ser propio de esta pestaña: ahora es el de las tres.** Cobranzas FR y Mayoristas descartaban lo vencido con un `continue`, y eso se unificó en `Ingresos::ubicarCobroVencido()`, que es la regla única. `estimarCobroExportacion()` la llama pasando `null` como techo de días hacia atrás, y **ése es el único apartamiento**: las otras dos dejan afuera lo anterior a `DIAS_COBRO_VENCIDO` (180 días), acá no hay nada que dejar afuera por antigüedad porque son pocas facturas de un solo cliente y todas se gestionan. Ver `README-cobranzas-fr.md`.
+
+Las clases `.fila-vencida` y `.badge-vencida-exp` se mudaron de `Css/Ingresos-Exportaciones_tasky.css` a `Css/main.css`, porque desde ahora las usan las tres pestañas y tres copias del mismo ámbar se desincronizan a la primera vez que alguien retoca una.
 
 En el tablero, el proveedor anota esa parte de la celda de hoy con el mecanismo `detalle` (el mismo que usa Cobranzas FR para la cobranza pactada a mano): el tooltip dice que ese importe está ahí por ser el primer día del eje y no porque se estime cobrarlo hoy. Es metadato sobre el mismo importe, no una serie aparte: no suma dos veces.
 

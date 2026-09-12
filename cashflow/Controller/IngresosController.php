@@ -25,11 +25,31 @@ function payloadCobranzas($items, $summary) {
     $h = Horizonte::desdeParametros(new Parametros());
 
     if (!$summary) {
-        return EjeVista::armar($h, $items, 'Cobro', 'importe_neto');
+        $payload = EjeVista::armar($h, $items, 'Cobro', 'importe_neto');
+    } else {
+        $payload = EjeVista::armarAgrupado($h, $items, 'COD_CLI', 'Cobro', 'importe_neto',
+            1, ['importe_bruto']);
+
+        // Las dos marcas del Resumen significan "alguna factura de este
+        // cliente", y la interseccion de armarAgrupado() contesta "todas".
+        // Ver EjeVista::marcarAlguna().
+        $payload = EjeVista::marcarAlguna($payload, $items, 'COD_CLI',
+            ['VENCIDA', 'FECHA_MANUAL']);
     }
 
-    return EjeVista::armarAgrupado($h, $items, 'COD_CLI', 'Cobro', 'importe_neto',
-        1, ['importe_bruto']);
+    /* Los avisos de facturas vencidas van ADELANTE de los del eje, por el mismo
+       motivo que en Exportaciones Tasky: explican por que hay importe en la
+       columna de hoy, y eso se lee antes que lo que quedo afuera. Se cuentan
+       sobre $items -una fila por comprobante- y no sobre las filas del payload,
+       que en Resumen son clientes y perdieron la marca. */
+    $payload['warnings'] = array_merge(
+        Ingresos::avisosCobranzasVencidas($items),
+        $payload['warnings']
+    );
+
+    $payload['dias_vencidas'] = Ingresos::DIAS_COBRO_VENCIDO;
+
+    return $payload;
 }
 
 try {

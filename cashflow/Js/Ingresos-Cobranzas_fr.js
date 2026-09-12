@@ -272,9 +272,20 @@
 
         datosCobranzas.filas.forEach(function(item) {
             var esProy = (item.TIPO_REGISTRO === 'PROYECCION');
-            var trClase = esProy ? 'fila-proyeccion' : '';
-            
-            html += `<tr class="${trClase}">`;
+            var clases = [];
+
+            if (esProy) {
+                clases.push('fila-proyeccion');
+            }
+
+            // Una factura vencida se distingue en toda la fila: su importe está
+            // en la columna de hoy por ser el primer día del eje, no porque se
+            // estime cobrarla hoy. Ver Ingresos::ubicarCobroVencido().
+            if (item.VENCIDA) {
+                clases.push('fila-vencida');
+            }
+
+            html += '<tr class="' + clases.join(' ') + '">';
             
             // Columna Tipo
             if (esProy) {
@@ -284,7 +295,7 @@
                 html += `<td class="center"><span class="badge-real" title="Propuesta"><i class="fas fa-check me-1"></i>REAL</span></td>`;
             }
 
-            html += `<td><strong>${item.COD_CLI || ''}</strong>${marcaManual(item)}</td>`;
+            html += `<td><strong>${item.COD_CLI || ''}</strong>${marcaManual(item)}${marcaVencida(item)}</td>`;
 
             // El nombre se recorta con puntos suspensivos (.col-texto) para que
             // la fila sea una sola línea. El title lo devuelve completo: lo que
@@ -357,11 +368,38 @@
 
         return ' <i class="fas fa-hand-pointer text-primary cob-marca-manual" '
             + 'title="Alguna factura de este cliente tiene la fecha de cobro cargada a mano, '
-            + 'así que no sale del PPP. El detalle está en Deep Dive."></i>';
+            + 'así que no sale del PPP. El detalle está en Detalle Facturas."></i>';
+    }
+
+    /**
+     * El indicador del Resumen: este cliente tiene alguna factura vencida.
+     *
+     * Las dos marcas dicen "alguna", no "todas": la repone
+     * EjeVista::marcarAlguna() en el controller, porque el agrupado descarta
+     * los campos que difieren dentro del grupo.
+     */
+    function marcaVencida(item) {
+        if (modoVista !== 'resumen' || !item.VENCIDA) {
+            return '';
+        }
+
+        return ' <i class="fas fa-triangle-exclamation text-warning cob-marca-vencida" '
+            + 'title="Alguna factura de este cliente tiene la fecha probable de cobro ya '
+            + 'vencida: su importe se muestra en el primer día del eje. El detalle está '
+            + 'en Detalle Facturas."></i>';
     }
 
     function celdaCobro(item, esProy) {
         if (!editable()) {
+            // Una vencida dice cuál era su fecha original: está dibujada en hoy
+            // por ser el primer día del eje. Mismo badge que Exportaciones
+            // Tasky, que es de donde sale el criterio.
+            var vencida = item.VENCIDA ? badgeVencida(item) : '';
+
+            if (vencida) {
+                return '<td class="center">' + vencida + '</td>';
+            }
+
             var badge = esProy ? 'badge-proyeccion' : 'badge-cobro';
 
             return '<td class="center"><span class="' + badge + '">'
@@ -372,6 +410,16 @@
         var titulo = manual
             ? 'Fecha cargada a mano. Los días y el descuento se recalculan sobre ella.'
             : 'Calculada como fecha de emisión + PPP del cliente. Se puede pisar.';
+
+        // Vencida: el input muestra dónde quedó ubicada, así que el title es el
+        // único lugar donde cabe decir cuál era la fecha que venció.
+        if (item.VENCIDA) {
+            titulo = 'Vencida: la fecha ' + (manual ? 'pactada' : 'probable') + ' era el '
+                + formatDate(item.COBRO_ORIGINAL) + ' y ya pasó. '
+                + (manual
+                    ? 'Se respeta tal cual porque la cargó una persona.'
+                    : 'El importe se muestra en el primer día del eje.');
+        }
 
         // El `min` en hoy es una comodidad del navegador, no una garantía: el
         // endpoint valida la fecha de nuevo. Ver IngresosController.
@@ -390,6 +438,31 @@
                     : '')
             + '</div>'
             + '</td>';
+    }
+
+    /**
+     * El badge de una factura vencida, con la fecha que venció en el title.
+     *
+     * Sin COBRO_ORIGINAL no se puede decir cuál era la fecha, y un badge que
+     * dijera "Vencida" sin fecha no agrega nada sobre el color de la fila. Es
+     * el caso del Resumen, donde la fila es un cliente: ahí la marca va al lado
+     * del código y el detalle queda para Detalle Facturas.
+     */
+    function badgeVencida(item) {
+        if (!item.COBRO_ORIGINAL) {
+            return '';
+        }
+
+        var pactada = !!item.FECHA_MANUAL;
+
+        return '<span class="badge-vencida-exp" title="Fecha de cobro '
+            + (pactada ? 'pactada' : 'probable') + ' original: '
+            + formatDate(item.COBRO_ORIGINAL) + '. Vencida sin cobrar: '
+            + (pactada
+                ? 'se respeta tal cual porque la cargó una persona'
+                : 'se ubica en el primer día del eje') + '">'
+            + '<i class="fas fa-triangle-exclamation me-1"></i>Vencida '
+            + formatDate(item.COBRO_ORIGINAL) + '</span>';
     }
 
     function conectarEdicionFecha() {

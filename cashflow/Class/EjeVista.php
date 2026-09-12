@@ -271,6 +271,60 @@ class EjeVista {
     }
 
     /**
+     * Repone en las filas de armarAgrupado() las marcas que significan
+     * "ALGUNA de las filas del grupo".
+     *
+     * La interseccion de armarAgrupado() es lo correcto para un dato
+     * DESCRIPTIVO: no se puede mostrar el N_COMP de doce comprobantes, asi que
+     * se descarta. Pero una BANDERA no es un dato descriptivo. Lo que la
+     * pantalla tiene que decir es "este cliente tiene alguna factura vencida",
+     * y la interseccion contesta otra pregunta -"todas sus facturas estan
+     * vencidas"- que nadie hizo. El sintoma es el peor de los dos posibles: un
+     * cliente con una factura vencida y otra al dia perdia la marca y se veia
+     * igual que uno que no tiene ninguna.
+     *
+     * Se aplica DESPUES de armarAgrupado() y sobre los items originales, que
+     * son los que todavia tienen una marca por comprobante.
+     *
+     * @param array $payload Payload de armarAgrupado(); se modifica
+     * @param array $items Los items originales, uno por comprobante
+     * @param string $campoClave El mismo campo con el que se agrupo
+     * @param array $campos Nombres de las marcas a reponer
+     * @return array El payload
+     */
+    public static function marcarAlguna($payload, $items, $campoClave, $campos) {
+        $alguna = [];
+
+        foreach (is_array($items) ? $items : [] as $item) {
+            $clave = isset($item[$campoClave]) ? (string) $item[$campoClave] : '';
+
+            foreach ($campos as $campo) {
+                if (!isset($alguna[$clave][$campo])) {
+                    $alguna[$clave][$campo] = false;
+                }
+
+                if (!empty($item[$campo])) {
+                    $alguna[$clave][$campo] = true;
+                }
+            }
+        }
+
+        foreach ($payload['filas'] as $i => $fila) {
+            $clave = isset($fila[$campoClave]) ? (string) $fila[$campoClave] : '';
+
+            foreach ($campos as $campo) {
+                // false y no unset: la fila tiene que decir explicitamente que
+                // no tiene ninguna, para que la pantalla no dependa de si el
+                // campo llego o no.
+                $payload['filas'][$i][$campo] =
+                    !empty($alguna[$clave][$campo]);
+            }
+        }
+
+        return $payload;
+    }
+
+    /**
      * Agrega a un par de mapas dias/meses los tres totales por vista.
      *
      * El total de la vista Meses NO es el del horizonte: las columnas mensuales
