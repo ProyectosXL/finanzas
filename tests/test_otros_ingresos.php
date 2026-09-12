@@ -1,10 +1,14 @@
 <?php
 /**
- * Otros Ingresos: Dolares Cuenta Comitente.
+ * Otros Ingresos: Dolares Cuenta Comitente y Saldo de Inversiones.
  *
  * Lo que se prueba sin base son las reglas de validacion -que cero sea valido
  * y un negativo no- y el cableado del registro y del menu. La carga en si
  * necesita la base y se saltea sola.
+ *
+ * Los dos conceptos comparten la validacion y la plomeria; lo que NO comparten
+ * es la moneda, y esa es la parte que las pruebas fijan: el saldo de
+ * inversiones se guarda en pesos y su serie no se convierte.
  */
 
 require_once __DIR__ . '/lib.php';
@@ -158,6 +162,166 @@ $r = CashflowEstructura::validar(
     $provs);
 
 chequear('apuntada a la serie vieja, la fila es invalida', false, $r['valido']);
+
+/* ================================================================
+   SALDO DE INVERSIONES
+
+   Mismo circuito que los dolares, otra moneda. Lo que se prueba es
+   justamente eso: que la moneda no se haya copiado junto con el resto.
+   ================================================================ */
+seccion('el saldo de inversiones se carga en pesos');
+
+// La validacion del importe es LA MISMA para los dos conceptos: cero valido,
+// negativo rechazado. Lo unico que cambia es como se nombra la moneda en el
+// mensaje, asi que un validador por moneda serian dos copias de la misma
+// cuenta.
+chequear('cero es valido', 0.0, OtrosIngresos::validarImporte(0, 'pesos'));
+chequear('un importe positivo tambien', 3500000.0,
+    OtrosIngresos::validarImporte(3500000, 'pesos'));
+chequear('se redondea a dos decimales', 10.13,
+    OtrosIngresos::validarImporte(10.1289, 'pesos'));
+
+chequearLanza('un negativo se rechaza', function () {
+    OtrosIngresos::validarImporte(-1, 'pesos');
+});
+
+chequear('y el mensaje habla de pesos, no de dolares', true, (function () {
+    try {
+        OtrosIngresos::validarImporte(-1, 'pesos');
+    } catch (Throwable $e) {
+        return mb_stripos($e->getMessage(), 'en pesos') !== false;
+    }
+
+    return false;
+})());
+
+// Y el default sigue siendo dolares, asi que las llamadas viejas no cambian.
+chequear('sin moneda, el mensaje sigue siendo el de dolares', true, (function () {
+    try {
+        OtrosIngresos::validarImporte(-1);
+    } catch (Throwable $e) {
+        return mb_stripos($e->getMessage(), 'en dólares') !== false;
+    }
+
+    return false;
+})());
+
+// La tabla y el campo del importe estan declarados una sola vez, y el campo es
+// el que fija la moneda del concepto: si alguien lo cambiara a IMPORTE_USD sin
+// tocar el resto, la pantalla seguiria diciendo pesos y el tablero convertiria.
+chequear('la tabla del concepto es la del script',
+    'RO_T_CASHFLOW_SALDO_INVERSIONES', OtrosIngresos::INVERSIONES['tabla']);
+chequear('y el campo del importe es en PESOS',
+    'IMPORTE_ARS', OtrosIngresos::INVERSIONES['campo']);
+chequear('la de dolares sigue en USD',
+    'IMPORTE_USD', OtrosIngresos::DOLARES['campo']);
+
+seccion('SALDO_INVERSIONES esta enchufado al tablero');
+
+$metaInv = CashflowRegistry::meta('SALDO_INVERSIONES');
+
+chequear('esta registrado', true, $metaInv !== null);
+chequear('y esta disponible', true, CashflowRegistry::disponible('SALDO_INVERSIONES'));
+chequear('la serie es INGRESO', true,
+    CashflowRegistry::serieExiste('SALDO_INVERSIONES', 'INGRESO'));
+chequear('enlaza a su propia pestana', 'saldo_inversiones', $metaInv['tab']);
+
+// La moneda del registro es ARS y no USD: es lo que dice que esta serie NO se
+// convierte. Es informativo para el tablero, pero si dijera USD, quien lea el
+// registro para entender la fila entendería otra cosa.
+chequear('la moneda de origen es ARS', 'ARS', $metaInv['moneda']);
+
+// Es el MISMO proveedor que los dolares: es un concepto mas de la categoria, no
+// otro modelo de datos.
+chequear('usa el mismo proveedor que los dolares',
+    $meta['clase'], $metaInv['clase']);
+
+$provInv = CashflowRegistry::instanciar('SALDO_INVERSIONES');
+
+chequear('el proveedor se instancia', true, $provInv instanceof CashflowProvider);
+chequear('y sabe con que codigo lo instanciaron', 'SALDO_INVERSIONES', $provInv->codigo());
+
+seccion('la fila de inversiones valida contra el registro real');
+
+$r = CashflowEstructura::validar(
+    [['CODIGO' => 'ING', 'NOMBRE' => 'Ingresos', 'ROL' => 'MOVIMIENTO',
+      'ID_PADRE' => null, 'ORDEN' => 10, 'ACTIVO' => 1]],
+    [['ID' => 1, 'CODIGO' => 'SALDO_INVERSIONES', 'NOMBRE' => 'Saldo de Inversiones',
+      'SECCION' => 'ING', 'TIPO' => 'INGRESO', 'COMPUTA' => 1,
+      'ORIGEN_PROVIDER' => 'SALDO_INVERSIONES', 'ORIGEN_SERIE' => 'INGRESO',
+      'ORDEN' => 66, 'ACTIVO' => 1]],
+    $provs);
+
+chequear('la fila es valida', true, $r['valido']);
+
+// Las dos filas juntas tambien: son series distintas de proveedores distintos,
+// asi que la regla de origen repetido no las toca.
+$r = CashflowEstructura::validar(
+    [['CODIGO' => 'ING', 'NOMBRE' => 'Ingresos', 'ROL' => 'MOVIMIENTO',
+      'ID_PADRE' => null, 'ORDEN' => 10, 'ACTIVO' => 1]],
+    [['ID' => 1, 'CODIGO' => 'DOLARES_COMITENTE', 'NOMBRE' => 'Dolares Cuenta Comitente',
+      'SECCION' => 'ING', 'TIPO' => 'INGRESO', 'COMPUTA' => 1,
+      'ORIGEN_PROVIDER' => 'DOLARES_COMITENTE', 'ORIGEN_SERIE' => 'INGRESO',
+      'ORDEN' => 65, 'ACTIVO' => 1],
+     ['ID' => 2, 'CODIGO' => 'SALDO_INVERSIONES', 'NOMBRE' => 'Saldo de Inversiones',
+      'SECCION' => 'ING', 'TIPO' => 'INGRESO', 'COMPUTA' => 1,
+      'ORIGEN_PROVIDER' => 'SALDO_INVERSIONES', 'ORIGEN_SERIE' => 'INGRESO',
+      'ORDEN' => 66, 'ACTIVO' => 1]],
+    $provs);
+
+chequear('las dos filas de Otros Ingresos conviven', true, $r['valido']);
+
+seccion('el proveedor de inversiones no puede tumbar el tablero');
+
+class InversionesProviderRoto extends OtrosIngresosProvider {
+    protected function calcular($h) {
+        throw new Exception('base caida');
+    }
+}
+
+$rotoInv = new InversionesProviderRoto('SALDO_INVERSIONES');
+
+chequear('con la base caida no lanza', [], $rotoInv->series($h));
+chequear('deja un aviso', 1, count($rotoInv->warnings()));
+chequear('que nombra al modulo', true,
+    strpos($rotoInv->warnings()[0], 'SALDO_INVERSIONES') === 0);
+
+seccion('la pestana de inversiones esta en el menu y en el controller');
+
+chequear('no es un placeholder', false, Menu::esPlaceholder('saldo_inversiones'));
+
+// El archivo de la pestana y su JS tienen que existir: si faltaran, el menu
+// prometeria una pantalla que no carga.
+chequear('existe el archivo de la pestana', true,
+    file_exists(__DIR__ . '/../cashflow/Tabs/saldo_inversiones.php'));
+chequear('existe su JS', true,
+    file_exists(__DIR__ . '/../cashflow/Js/OtrosIngresos-Saldo_inversiones.js'));
+chequear('existe su CSS', true,
+    file_exists(__DIR__ . '/../cashflow/Css/OtrosIngresos-Saldo_inversiones.css'));
+chequear('existe el script SQL', true,
+    file_exists(__DIR__ . '/../sql/cashflow_saldo_inversiones.sql'));
+
+// Sin la entrada en $validTabs, TabController devuelve 400 y la pestana no
+// abre, aunque el menu la muestre.
+chequear('esta en los tabs validos del controller', true,
+    strpos(file_get_contents(__DIR__ . '/../cashflow/Controller/TabController.php'),
+        "'saldo_inversiones'") !== false);
+
+// Y el item del menu de Otros Ingresos: la categoria ahora tiene dos, y el
+// contador n/m del sidebar cuenta las dos como pestanas con datos.
+$catOtros = null;
+
+foreach (Menu::estructura()['categorias'] as $c) {
+    if ($c['codigo'] === 'OtrosIngresos') {
+        $catOtros = $c;
+    }
+}
+
+chequear('la categoria Otros Ingresos existe', true, $catOtros !== null);
+chequear('y ahora tiene dos items', 2, $catOtros['total']);
+chequear('las dos cuentan como pestanas con datos', 2, $catOtros['con_datos']);
+chequear('el tab de la segunda es saldo_inversiones',
+    'saldo_inversiones', $catOtros['items'][1]['tab']);
 
 /* ================================================================
    Exportaciones Tasky ya tiene modulo: el detalle esta en

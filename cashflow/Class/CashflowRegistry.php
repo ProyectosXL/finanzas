@@ -291,6 +291,21 @@ class CashflowRegistry {
             'series' => ['INGRESO' => 'Dolares cuenta comitente']
         ],
 
+        /* El otro concepto de Otros Ingresos, mismo proveedor y mismo circuito.
+           La moneda es ARS y no USD, a proposito: ese saldo se informa en pesos,
+           asi que no hay nada que valuar. Ver el encabezado de
+           sql/cashflow_saldo_inversiones.sql antes de cambiarlo. */
+        'SALDO_INVERSIONES' => [
+            'nombre' => 'Saldo de Inversiones',
+            'descripcion' => 'Saldo de inversiones en pesos, cargado a mano',
+            'archivo' => 'Providers/OtrosIngresosProvider.php',
+            'clase' => 'OtrosIngresosProvider',
+            'moneda' => 'ARS',
+            'disponible' => true,
+            'tab' => 'saldo_inversiones',
+            'series' => ['INGRESO' => 'Saldo de inversiones']
+        ],
+
         /* Facturas pendientes EN DOLARES a Tasky (GVA12, cliente EXTASK). Se
            valuan TODAS a dolar de hoy, a proposito: la deuda esta fija en
            dolares y valuarla a hoy es no suponer devaluacion. Ver el encabezado

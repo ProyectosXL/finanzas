@@ -6,7 +6,8 @@ require_once __DIR__ . '/Cotizacion.php';
 /**
  * OtrosIngresos
  * Los ingresos que no vienen de ningun circuito del sistema y los carga una
- * persona. Hoy hay uno solo: los dolares de la cuenta comitente.
+ * persona. Hoy hay dos: los dolares de la cuenta comitente y el saldo de
+ * inversiones.
  *
  * POR QUE ES UNA CATEGORIA Y NO UNA PESTANA MAS DE INGRESOS
  * ---------------------------------------------------------
@@ -16,12 +17,22 @@ require_once __DIR__ . '/Cotizacion.php';
  * significa "nadie cargo nada todavia". La categoria queda armada para que
  * sumar un concepto nuevo sea agregar una pestana y no rediseniar nada.
  *
- * SE GUARDAN DOLARES, NO PESOS
- * ----------------------------
- * La conversion la hace el proveedor con el oficial del BCRA, igual que
- * ComexProvider. Guardar pesos congelaria la valuacion al momento de la carga:
- * el dia que cambie el tipo de cambio, el tablero seguiria mostrando la
- * conversion vieja y no habria forma de notarlo.
+ * CADA CONCEPTO SE GUARDA EN LA MONEDA EN LA QUE SE INFORMA
+ * ---------------------------------------------------------
+ * Dolares Cuenta Comitente guarda DOLARES y la conversion la hace el proveedor
+ * con el oficial del BCRA, igual que ComexProvider. Guardar pesos congelaria la
+ * valuacion al momento de la carga: el dia que cambie el tipo de cambio, el
+ * tablero seguiria mostrando la conversion vieja y no habria forma de notarlo.
+ *
+ * Saldo de Inversiones guarda PESOS, y no es una inconsistencia: ese saldo se
+ * informa en pesos, asi que no hay nada que valuar. Convertirlo seria inventar
+ * una moneda de origen que el dato no tiene. La decision, y como darla vuelta,
+ * estan documentadas arriba de sql/cashflow_saldo_inversiones.sql.
+ *
+ * Los dos circuitos son por lo demas IDENTICOS -formulario minimo, sin baja
+ * fisica, historial por fecha- y los metodos van en paralelo en esta misma
+ * clase en vez de en una clase nueva: es un concepto mas de la categoria, no
+ * otro modelo de datos.
  *
  * EL IMPORTE VIGENTE SE PISA, PERO EL HISTORIAL QUEDA
  * ---------------------------------------------------
@@ -41,11 +52,23 @@ require_once __DIR__ . '/Cotizacion.php';
  */
 class OtrosIngresos {
 
+    /**
+     * Los dos conceptos, con su tabla y el nombre de su columna de importe.
+     *
+     * El nombre de la tabla se intercala en el SQL, y puede: es una constante
+     * del codigo y no entrada del usuario. Esta declarada aca -y no repetida en
+     * cada consulta- para que la tabla y el campo esten escritos UNA vez, que es
+     * lo que permite que los dos circuitos compartan la plomeria en lugar de ser
+     * cinco metodos copiados con otro nombre de tabla.
+     */
+    const DOLARES = ['tabla' => 'RO_T_CASHFLOW_DOLARES_COMITENTE', 'campo' => 'IMPORTE_USD'];
+    const INVERSIONES = ['tabla' => 'RO_T_CASHFLOW_SALDO_INVERSIONES', 'campo' => 'IMPORTE_ARS'];
+
     /** @var Conexion */
     private $conn;
 
-    /** @var bool|null Cache de tablaCreada() */
-    private $tabla = null;
+    /** @var array Cache de existe(), una entrada por tabla */
+    private $tablas = [];
 
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
@@ -62,50 +85,62 @@ class OtrosIngresos {
      * @return bool
      */
     public function tablaCreada() {
-        if ($this->tabla !== null) {
-            return $this->tabla;
-        }
-
-        $cid = $this->conectar();
-
-        $stmt = sqlsrv_query($cid,
-            "SELECT OBJECT_ID('dbo.RO_T_CASHFLOW_DOLARES_COMITENTE', 'U') AS T");
-
-        if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al verificar la tabla de dólares'));
-        }
-
-        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
-        sqlsrv_free_stmt($stmt);
-
-        $this->tabla = ($row && $row['T'] !== null);
-
-        return $this->tabla;
+        return $this->existe(self::DOLARES);
     }
 
     /**
-     * Avisos de configuracion pendiente, para mostrar en la pestana.
+     * Si ya se corrio sql/cashflow_saldo_inversiones.sql.
+     *
+     * @return bool
+     */
+    public function tablaInversionesCreada() {
+        return $this->existe(self::INVERSIONES);
+    }
+
+    /**
+     * Avisos de configuracion pendiente de los dolares, para la pestana.
      *
      * @return array
      */
     public function getAvisos() {
-        $avisos = [];
-
         if (!$this->tablaCreada()) {
-            $avisos[] = 'Todavía no existe la tabla de dólares en cuenta comitente. '
+            return ['Todavía no existe la tabla de dólares en cuenta comitente. '
                 . 'Corré sql/cashflow_dolares_comitente.sql contra la base central. '
-                . 'Mientras tanto, la fila del tablero se muestra en cero.';
-
-            return $avisos;
+                . 'Mientras tanto, la fila del tablero se muestra en cero.'];
         }
 
         if (empty($this->getDolaresComitente())) {
-            $avisos[] = 'Todavía no hay ninguna carga. La fila del tablero muestra cero, '
+            return ['Todavía no hay ninguna carga. La fila del tablero muestra cero, '
                 . 'que es lo correcto: no es que falte el dato, es que no hay dólares '
-                . 'informados.';
+                . 'informados.'];
         }
 
-        return $avisos;
+        return [];
+    }
+
+    /**
+     * Avisos de configuracion pendiente del saldo de inversiones.
+     *
+     * Mismo criterio que getAvisos(): la pantalla tiene que distinguir "falta
+     * correr el script" de "todavia nadie cargo nada". Los dos dejan la grilla
+     * vacia y no significan lo mismo.
+     *
+     * @return array
+     */
+    public function getAvisosInversiones() {
+        if (!$this->tablaInversionesCreada()) {
+            return ['Todavía no existe la tabla del saldo de inversiones. '
+                . 'Corré sql/cashflow_saldo_inversiones.sql contra la base central. '
+                . 'Mientras tanto, la fila del tablero se muestra en cero.'];
+        }
+
+        if (empty($this->getSaldoInversiones())) {
+            return ['Todavía no hay ninguna carga. La fila del tablero muestra cero, '
+                . 'que es lo correcto: no es que falte el dato, es que no hay saldo '
+                . 'informado.'];
+        }
+
+        return [];
     }
 
     /* ====================================================================
@@ -121,45 +156,20 @@ class OtrosIngresos {
      * @return array Filas ['FECHA', 'IMPORTE_USD', 'USUARIO', 'FECHA_ALTA', 'VERSIONES']
      */
     public function getDolaresComitente() {
-        if (!$this->tablaCreada()) {
-            return [];
-        }
+        return $this->leerVigentes(self::DOLARES);
+    }
 
-        $cid = $this->conectar();
-
-        /* VERSIONES cuenta TODAS las cargas de esa fecha, vigentes y pisadas.
-           Es lo que le dice a la pantalla que hay historial para abrir: sin
-           ese numero, el enlace al historial estaria siempre y la mitad de las
-           veces no mostraria nada. */
-        $sql = "SELECT d.FECHA, d.IMPORTE_USD, d.USUARIO, d.FECHA_ALTA,
-                       (SELECT COUNT(*)
-                          FROM dbo.RO_T_CASHFLOW_DOLARES_COMITENTE h
-                         WHERE h.FECHA = d.FECHA) AS VERSIONES
-                FROM dbo.RO_T_CASHFLOW_DOLARES_COMITENTE d
-                WHERE d.VIGENTE = 1
-                ORDER BY d.FECHA DESC";
-
-        $stmt = sqlsrv_query($cid, $sql);
-
-        if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al leer los dólares en cuenta comitente'));
-        }
-
-        $v = [];
-
-        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            $v[] = [
-                'FECHA' => Horizonte::normalizarFecha($row['FECHA']),
-                'IMPORTE_USD' => floatval($row['IMPORTE_USD']),
-                'USUARIO' => $row['USUARIO'],
-                'FECHA_ALTA' => $this->fechaHora($row['FECHA_ALTA']),
-                'VERSIONES' => intval($row['VERSIONES'])
-            ];
-        }
-
-        sqlsrv_free_stmt($stmt);
-
-        return $v;
+    /**
+     * Los saldos de inversiones VIGENTES por fecha, EN PESOS.
+     *
+     * En pesos y sin conversion, a diferencia de los dolares: ese saldo se
+     * informa en pesos, asi que no hay nada que valuar. La decision y como
+     * darla vuelta estan arriba de sql/cashflow_saldo_inversiones.sql.
+     *
+     * @return array Filas ['FECHA', 'IMPORTE_ARS', 'USUARIO', 'FECHA_ALTA', 'VERSIONES']
+     */
+    public function getSaldoInversiones() {
+        return $this->leerVigentes(self::INVERSIONES);
     }
 
     /**
@@ -172,15 +182,167 @@ class OtrosIngresos {
      * @return array
      */
     public function getHistorialFecha($fecha) {
-        if (!$this->tablaCreada()) {
+        return $this->leerHistorial(self::DOLARES, $fecha);
+    }
+
+    /**
+     * El historial de una fecha del saldo de inversiones.
+     *
+     * @param string $fecha 'Y-m-d'
+     * @return array
+     */
+    public function getHistorialInversiones($fecha) {
+        return $this->leerHistorial(self::INVERSIONES, $fecha);
+    }
+
+    /* ====================================================================
+       CARGA
+       ==================================================================== */
+
+    /**
+     * Carga un importe en dolares para una fecha.
+     *
+     * @param string $fecha 'Y-m-d'
+     * @param float $importeUsd
+     * @param string|null $usuario
+     * @return array ['fecha', 'importe_usd', 'piso' => bool]
+     */
+    public function guardarDolaresComitente($fecha, $importeUsd, $usuario = null) {
+        $r = $this->guardarCarga(self::DOLARES, $fecha, $importeUsd, $usuario, 'dólares',
+            'No existe la tabla de dólares en cuenta comitente. '
+            . 'Corré sql/cashflow_dolares_comitente.sql.');
+
+        return ['fecha' => $r['fecha'], 'importe_usd' => $r['importe'], 'piso' => $r['piso']];
+    }
+
+    /**
+     * Carga un saldo de inversiones EN PESOS para una fecha.
+     *
+     * @param string $fecha 'Y-m-d'
+     * @param float $importeArs
+     * @param string|null $usuario
+     * @return array ['fecha', 'importe_ars', 'piso' => bool]
+     */
+    public function guardarSaldoInversiones($fecha, $importeArs, $usuario = null) {
+        $r = $this->guardarCarga(self::INVERSIONES, $fecha, $importeArs, $usuario, 'pesos',
+            'No existe la tabla del saldo de inversiones. '
+            . 'Corré sql/cashflow_saldo_inversiones.sql.');
+
+        return ['fecha' => $r['fecha'], 'importe_ars' => $r['importe'], 'piso' => $r['piso']];
+    }
+
+    /* ====================================================================
+       LA PLOMERIA, UNA SOLA VEZ
+
+       Los dos conceptos tienen el mismo modelo de datos y las mismas reglas
+       -un importe vigente por fecha, sin baja fisica, historial completo-, asi
+       que comparten las consultas. Lo unico que cambia es la tabla y el nombre
+       de la columna del importe, y las dos vienen del concepto.
+
+       Duplicar estos tres metodos para el concepto nuevo habria dejado dos
+       transacciones que se pueden desincronizar: la del alta es la parte
+       delicada y tiene que estar escrita una sola vez.
+       ==================================================================== */
+
+    /**
+     * Si la tabla del concepto existe. Se pregunta una vez por tabla: la
+     * pestana la consulta para los avisos y para la grilla.
+     *
+     * @param array $concepto DOLARES o INVERSIONES
+     * @return bool
+     */
+    private function existe($concepto) {
+        $tabla = $concepto['tabla'];
+
+        if (isset($this->tablas[$tabla])) {
+            return $this->tablas[$tabla];
+        }
+
+        $cid = $this->conectar();
+
+        $stmt = sqlsrv_query($cid, "SELECT OBJECT_ID('dbo." . $tabla . "', 'U') AS T");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar la tabla ' . $tabla));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->tablas[$tabla] = ($row && $row['T'] !== null);
+
+        return $this->tablas[$tabla];
+    }
+
+    /**
+     * Los importes vigentes por fecha de un concepto.
+     *
+     * @param array $concepto
+     * @return array
+     */
+    private function leerVigentes($concepto) {
+        if (!$this->existe($concepto)) {
             return [];
         }
 
+        $tabla = $concepto['tabla'];
+        $campo = $concepto['campo'];
+        $cid = $this->conectar();
+
+        /* VERSIONES cuenta TODAS las cargas de esa fecha, vigentes y pisadas.
+           Es lo que le dice a la pantalla que hay historial para abrir: sin
+           ese numero, el enlace al historial estaria siempre y la mitad de las
+           veces no mostraria nada. */
+        $sql = "SELECT d.FECHA, d." . $campo . ", d.USUARIO, d.FECHA_ALTA,
+                       (SELECT COUNT(*)
+                          FROM dbo." . $tabla . " h
+                         WHERE h.FECHA = d.FECHA) AS VERSIONES
+                FROM dbo." . $tabla . " d
+                WHERE d.VIGENTE = 1
+                ORDER BY d.FECHA DESC";
+
+        $stmt = sqlsrv_query($cid, $sql);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer ' . $tabla));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $v[] = [
+                'FECHA' => Horizonte::normalizarFecha($row['FECHA']),
+                $campo => floatval($row[$campo]),
+                'USUARIO' => $row['USUARIO'],
+                'FECHA_ALTA' => $this->fechaHora($row['FECHA_ALTA']),
+                'VERSIONES' => intval($row['VERSIONES'])
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $v;
+    }
+
+    /**
+     * Todas las cargas de una fecha de un concepto, de la mas nueva a la mas
+     * vieja.
+     *
+     * @param array $concepto
+     * @param string $fecha
+     * @return array
+     */
+    private function leerHistorial($concepto, $fecha) {
+        if (!$this->existe($concepto)) {
+            return [];
+        }
+
+        $campo = $concepto['campo'];
         $f = self::validarFecha($fecha);
         $cid = $this->conectar();
 
-        $sql = "SELECT ID, FECHA, IMPORTE_USD, VIGENTE, USUARIO, FECHA_ALTA
-                FROM dbo.RO_T_CASHFLOW_DOLARES_COMITENTE
+        $sql = "SELECT ID, FECHA, " . $campo . ", VIGENTE, USUARIO, FECHA_ALTA
+                FROM dbo." . $concepto['tabla'] . "
                 WHERE FECHA = ?
                 ORDER BY ID DESC";
 
@@ -196,7 +358,7 @@ class OtrosIngresos {
             $v[] = [
                 'ID' => intval($row['ID']),
                 'FECHA' => Horizonte::normalizarFecha($row['FECHA']),
-                'IMPORTE_USD' => floatval($row['IMPORTE_USD']),
+                $campo => floatval($row[$campo]),
                 'VIGENTE' => intval($row['VIGENTE']),
                 'USUARIO' => $row['USUARIO'],
                 'FECHA_ALTA' => $this->fechaHora($row['FECHA_ALTA'])
@@ -208,10 +370,6 @@ class OtrosIngresos {
         return $v;
     }
 
-    /* ====================================================================
-       CARGA
-       ==================================================================== */
-
     /**
      * Carga un importe para una fecha.
      *
@@ -220,19 +378,24 @@ class OtrosIngresos {
      * confirmara y el alta fallara, la fecha se quedaria sin importe vigente y
      * la fila del tablero perderia esa plata en silencio.
      *
+     * @param array $concepto
      * @param string $fecha 'Y-m-d'
-     * @param float $importeUsd
+     * @param mixed $importe
      * @param string|null $usuario
-     * @return array ['fecha', 'importe_usd', 'piso' => bool]
+     * @param string $moneda Como se nombra la moneda en los mensajes de error
+     * @param string $faltaTabla Mensaje si no se corrio el script
+     * @return array ['fecha', 'importe', 'piso' => bool]
      */
-    public function guardarDolaresComitente($fecha, $importeUsd, $usuario = null) {
-        if (!$this->tablaCreada()) {
-            throw new Exception('No existe la tabla de dólares en cuenta comitente. '
-                . 'Corré sql/cashflow_dolares_comitente.sql.');
+    private function guardarCarga($concepto, $fecha, $importe, $usuario, $moneda, $faltaTabla) {
+        if (!$this->existe($concepto)) {
+            throw new Exception($faltaTabla);
         }
 
+        $tabla = $concepto['tabla'];
+        $campo = $concepto['campo'];
+
         $f = self::validarFecha($fecha);
-        $importe = self::validarImporte($importeUsd);
+        $monto = self::validarImporte($importe, $moneda);
 
         $cid = $this->conectar();
 
@@ -242,7 +405,7 @@ class OtrosIngresos {
 
         try {
             $stmt = sqlsrv_query($cid,
-                "UPDATE dbo.RO_T_CASHFLOW_DOLARES_COMITENTE
+                "UPDATE dbo." . $tabla . "
                  SET VIGENTE = 0
                  WHERE FECHA = ? AND VIGENTE = 1",
                 [$f]);
@@ -255,10 +418,10 @@ class OtrosIngresos {
             sqlsrv_free_stmt($stmt);
 
             $stmt = sqlsrv_query($cid,
-                "INSERT INTO dbo.RO_T_CASHFLOW_DOLARES_COMITENTE
-                     (FECHA, IMPORTE_USD, VIGENTE, USUARIO)
+                "INSERT INTO dbo." . $tabla . "
+                     (FECHA, " . $campo . ", VIGENTE, USUARIO)
                  VALUES (?, ?, 1, ?)",
-                [$f, $importe, $usuario]);
+                [$f, $monto, $usuario]);
 
             if ($stmt === false) {
                 throw new Exception($this->errorSql('Error al guardar el importe'));
@@ -272,7 +435,7 @@ class OtrosIngresos {
             throw $e;
         }
 
-        return ['fecha' => $f, 'importe_usd' => $importe, 'piso' => $piso];
+        return ['fecha' => $f, 'importe' => $monto, 'piso' => $piso];
     }
 
     /* ====================================================================
@@ -307,25 +470,30 @@ class OtrosIngresos {
     }
 
     /**
-     * Valida el importe en dolares.
+     * Valida el importe de una carga.
      *
-     * CERO ES VALIDO: significa que ese dia no habia dolares en la cuenta, y es
-     * un dato distinto de no haber cargado nada. Un negativo no: la cuenta
-     * comitente no tiene saldo deudor en este circuito, y un signo invertido
+     * CERO ES VALIDO: significa que ese dia no habia nada en la cuenta, y es un
+     * dato distinto de no haber cargado nada. Un negativo no: ninguno de los dos
+     * conceptos tiene saldo deudor en este circuito, y un signo invertido
      * restaria del tablero sin que nadie lo pida.
      *
+     * La moneda entra solo en el MENSAJE. La regla es la misma para los dos
+     * conceptos, y un validador por moneda serian dos copias de la misma
+     * cuenta que se pueden desincronizar.
+     *
      * @param mixed $importe
+     * @param string $moneda Como nombrarla en el mensaje de error
      * @return float
      */
-    public static function validarImporte($importe) {
+    public static function validarImporte($importe, $moneda = 'dólares') {
         if ($importe === null || $importe === '' || !is_numeric($importe)) {
-            throw new Exception('El importe en dólares tiene que ser un número.');
+            throw new Exception('El importe en ' . $moneda . ' tiene que ser un número.');
         }
 
         $v = round(floatval($importe), 2);
 
         if ($v < 0) {
-            throw new Exception('El importe en dólares no puede ser negativo: '
+            throw new Exception('El importe en ' . $moneda . ' no puede ser negativo: '
                 . 'restaría del tablero en vez de sumar.');
         }
 

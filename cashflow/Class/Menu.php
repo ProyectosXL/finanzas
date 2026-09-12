@@ -115,15 +115,17 @@ class Menu {
            una fila de Ingresos un cero es "no hay movimientos", y en una de
            estas es "nadie cargo nada todavia".
 
-           Arranca cerrada porque hoy tiene un solo item; queda armada para que
-           sumar un concepto nuevo sea agregar una pestana. */
+           Queda armada para que sumar un concepto nuevo sea agregar una
+           pestana, y el segundo item -Saldo de Inversiones- es la prueba: un
+           archivo en Tabs/, su entrada aca y su case en el controller. */
         [
             'codigo' => 'OtrosIngresos',
             'nombre' => 'Otros Ingresos',
             'icono' => 'fa-coins',
             'abierta' => false,
             'items' => [
-                ['tab' => 'dolares_comitente', 'nombre' => 'Dólares Cuenta Comitente', 'icono' => 'fa-dollar-sign', 'estado' => self::DATOS]
+                ['tab' => 'dolares_comitente', 'nombre' => 'Dólares Cuenta Comitente', 'icono' => 'fa-dollar-sign', 'estado' => self::DATOS],
+                ['tab' => 'saldo_inversiones', 'nombre' => 'Saldo de Inversiones', 'icono' => 'fa-chart-line', 'estado' => self::DATOS]
             ]
         ],
         [
