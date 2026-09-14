@@ -337,14 +337,40 @@
    ============================================================================ */
 
 /* Una procesadora o una vigencia de alicuota inhabilitada NO se borra: se
-   sigue viendo, atenuada. */
-.pce-cobel .pce-inactiva {
+   sigue viendo, atenuada.
+
+   LA CELDA DEL SWITCH NO SE ATENUA. Antes la opacidad iba sobre toda la fila y
+   el fondo gris sobre todos los inputs, checkbox incluido: el shorthand
+   `background` borra el background-image con el que Bootstrap dibuja la perilla
+   del switch, asi que el switch de una procesadora inactiva se veia como un
+   cuadrado gris e "inhabilitado" aunque se pudiera tocar. Es lo que hacia que
+   una procesadora nueva con alicuotas cargadas pareciera imposible de activar.
+   Las filas de alicuotas no tienen celda de estado y se atenuan enteras. */
+.pce-cobel .pce-inactiva td:not(.pce-celda-estado) {
     opacity: 0.55;
 }
 
-.pce-cobel .pce-inactiva input,
+.pce-cobel .pce-inactiva input:not(.form-check-input),
 .pce-cobel .pce-inactiva select {
-    background: var(--bg-light, #f5f6fa);
+    background-color: var(--bg-light, #f5f6fa);
+}
+
+/* El estado de la procesadora, escrito al lado del switch: un switch apagado
+   no dice si esta "inactiva" o si "no se puede tocar". */
+.pce-cobel .pce-estado {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    vertical-align: middle;
+    margin-left: 6px;
+}
+
+.pce-cobel .pce-estado-activa {
+    color: #1e7e34;
+}
+
+.pce-cobel .pce-estado-inactiva {
+    color: var(--text-muted, #8c93a8);
 }
 
 .pce-cobel .pce-num {
@@ -504,4 +530,38 @@
     font-size: 9px;
     color: var(--text-muted, #8c93a8);
     margin: 0 2px;
+}
+
+/* ============================================================================
+   MODULO COBRANZAS - GESTION DE COBRANZA FRANQUICIAS
+   Prefijo pc- por el mismo motivo que sp- y pce-. La tabla tiene DOS niveles:
+   una fila por grupo empresario -donde vive el PPP- y debajo sus clientes,
+   que solo heredan. Sin la distincion visual, el input de PPP de la fila del
+   grupo se leeria como si fuera del primer cliente.
+   ============================================================================ */
+
+#tablaParamCob .pc-grupo td {
+    background: var(--bg-light, #f5f6fa);
+    border-top: 2px solid var(--border-color, #e2e5ed);
+}
+
+#tablaParamCob .pc-cliente td {
+    font-size: 12px;
+}
+
+#tablaParamCob .pc-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: #e9ecef;
+    font-size: 10px;
+    color: var(--text-muted, #8c93a8);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    vertical-align: middle;
+}
+
+#tablaParamCob .pc-badge-grupo {
+    background: rgba(51, 102, 255, 0.12);
+    color: var(--primary-color, #3366ff);
 }

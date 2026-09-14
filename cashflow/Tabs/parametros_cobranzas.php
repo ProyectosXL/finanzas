@@ -7,7 +7,7 @@
 ?>
 
 <div class="modulo-descripcion mb-3">
-    La <strong>escala de descuento</strong> es de <strong>Cobranzas Franquicias</strong>: es una sola y vale para todas las franquicias. Lo que sí es por franquicia es el <strong>Plazo Promedio de Pago (PPP)</strong>, que se calcula con los últimos 3 cobros y se puede pisar a mano. Mayoristas y Exportaciones Tasky no llevan descuento: acá se editan sólo sus plazos, el <strong>Plazo de Vencimiento Mayorista</strong> y el <strong>Plazo de Cobro de Exportaciones Tasky</strong>.
+    La <strong>escala de descuento</strong> es de <strong>Cobranzas Franquicias</strong>: es una sola y vale para todas las franquicias. El <strong>Plazo Promedio de Pago (PPP)</strong> es por <strong>grupo empresario</strong>: se calcula con los recibos de Tango de los últimos 100 días de todos los locales del grupo, y se puede pisar a mano para el grupo entero. Mayoristas y Exportaciones Tasky no llevan descuento: acá se editan sólo sus plazos, el <strong>Plazo de Vencimiento Mayorista</strong> y el <strong>Plazo de Cobro de Exportaciones Tasky</strong>.
 </div>
 
 <div class="row g-3 mb-4">
@@ -130,9 +130,15 @@
         <div class="d-flex align-items-center gap-3">
             <div>
                 <h5 class="mb-0">Gestión de Cobranza Franquicias</h5>
+                <!-- El PPP es del grupo: una fila por grupo empresario con
+                     sus locales debajo. Se listan solo las franquicias
+                     habilitadas en el direccionario de sucursales. -->
                 <small class="text-muted">
-                    Plazo Promedio de Pago por cliente. El descuento sale de la escala general de arriba,
-                    y el <em>Medio de Pago</em> quedó como dato informativo del cliente: ya no interviene en el cálculo.
+                    Plazo Promedio de Pago por <strong>grupo empresario</strong>, con los recibos de
+                    Tango de los últimos 100 días; un cliente sin grupo es su propio grupo. Se listan
+                    sólo las franquicias <strong>habilitadas</strong> en el directorio de sucursales.
+                    El descuento sale de la escala general de arriba, y el <em>Medio de Pago</em> es
+                    un dato informativo de cada cliente.
                 </small>
             </div>
             <div class="search-box-container ms-3">
@@ -140,7 +146,7 @@
                     <span class="input-group-text bg-light border-end-0">
                         <i class="fas fa-search text-muted"></i>
                     </span>
-                    <input type="text" id="busquedaParamCob" class="form-control border-start-0 ps-0" placeholder="Buscar cliente..." style="min-width: 250px;">
+                    <input type="text" id="busquedaParamCob" class="form-control border-start-0 ps-0" placeholder="Buscar grupo, cliente o sucursal..." style="min-width: 250px;">
                 </div>
             </div>
         </div>
@@ -158,27 +164,32 @@
     </div>
 
     <div class="card-body p-0">
+        <div id="avisosParamCob" class="px-3 pt-3"></div>
+
         <div class="loading-spinner" id="loadingParamCob" style="display: none;">
             <div class="spinner"></div>
-            <p>Cargando configuración de clientes...</p>
+            <p>Cargando grupos y franquicias...</p>
         </div>
 
         <div class="table-responsive" id="wrapperTablaParamCob">
             <table class="table table-hover align-middle mb-0" id="tablaParamCob">
                 <thead class="table-light">
                     <tr>
-                        <th style="width: 120px;">Cód. Cliente</th>
+                        <th style="width: 130px;">Grupo / Cliente</th>
                         <th>Razón Social</th>
-                        <th class="text-center" style="width: 130px;" title="Medio de pago por defecto del cliente">Medio de Pago</th>
-                        <th class="text-center" style="width: 140px;" title="Promedio de días de los últimos 3 cobros realizados">PPP Calculado</th>
-                        <th class="text-center" style="width: 180px;" title="Plazo manual que pisa el PPP calculado">PPP Manual (Pisar)</th>
-                        <th class="text-center" style="width: 130px;" title="Plazo que se utiliza efectivamente en la proyección">PPP Efectivo</th>
+                        <th style="width: 200px;" title="Sucursal habilitada en el directorio">Sucursal</th>
+                        <th class="text-center" style="width: 130px;" title="Medio de pago por defecto del cliente. Informativo.">Medio de Pago</th>
+                        <th class="text-center" style="width: 160px;" title="Promedio de los promedios por cliente del grupo, con los recibos de Tango de los últimos 100 días">PPP Calculado</th>
+                        <th class="text-center" style="width: 180px;" title="Plazo manual del grupo: pisa el calculado para todos sus clientes">PPP Manual (Pisar)</th>
+                        <th class="text-center" style="width: 130px;" title="Plazo con el que se proyecta cada cliente">PPP Efectivo</th>
                     </tr>
                 </thead>
                 <tbody id="tbodyParamCob">
-                    <!-- Filas dinámicas -->
+                    <!-- Filas dinámicas: una por grupo, y debajo sus clientes -->
                 </tbody>
             </table>
         </div>
+
+        <div id="pieParamCob" class="px-3 py-2 small text-muted"></div>
     </div>
 </div>

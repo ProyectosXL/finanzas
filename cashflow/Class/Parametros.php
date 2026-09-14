@@ -189,7 +189,12 @@ class Parametros {
                     }
                 } elseif ($seccion === 'cobranzas_clientes') {
                     try {
-                        $modulo['cobranzas_clientes'] = $this->getCobranzasClientesConfig();
+                        $config = $this->getCobranzasClientesConfig();
+                        $modulo['cobranzas_clientes'] = $config['grupos'];
+
+                        foreach ($config['avisos'] as $a) {
+                            $modulo['avisos'][] = $a;
+                        }
                     } catch (Throwable $e) {
                         $modulo['cobranzas_clientes'] = [];
                         $modulo['avisos'][] = 'No se pudieron leer los parámetros de Cobranzas: '
@@ -757,101 +762,321 @@ class Parametros {
         return $feriados;
     }
 
+    /* ====================================================================
+       GESTION DE COBRANZA FRANQUICIAS: HELPERS PUROS
+
+       La tarjeta de Parametros -> Cobranzas agrupa a los clientes por grupo
+       empresario y solo lista las franquicias habilitadas en el direccionario
+       de sucursales. Las dos decisiones estan aca, sin base, para poder
+       probarlas; las lecturas SQL solo juntan los datos.
+       ==================================================================== */
+
     /**
-     * Devuelve la lista completa de clientes franquicia con su PPP calculado,
-     * su PPP manual/editable, su PPP efectivo y sus escalas de descuento configuradas.
-     * 
-     * @return array Listado de configuración por cliente
+     * Lleva las filas del direccionario de sucursales a un mapa por cliente.
+     *
+     * Un cliente con mas de una sucursal habilitada queda en UNA entrada, con
+     * los numeros y las descripciones concatenados: la tarjeta es por cliente,
+     * no por local. Una fila sin COD_CLIENT no se puede cruzar y se ignora.
+     *
+     * @param array $filas Filas NRO_SUCURSAL, COD_CLIENT, DESC_SUCURSAL
+     * @return array Mapa COD_CLIENT => ['nro_sucursal', 'desc_sucursal', 'cant_sucursales']
+     */
+    public static function mapaSucursales($filas) {
+        $mapa = [];
+
+        foreach ((is_array($filas) ? $filas : []) as $f) {
+            $cod = strtoupper(trim((string) (isset($f['COD_CLIENT']) ? $f['COD_CLIENT'] : '')));
+
+            if ($cod === '') {
+                continue;
+            }
+
+            $nro = trim((string) (isset($f['NRO_SUCURSAL']) ? $f['NRO_SUCURSAL'] : ''));
+            $desc = trim((string) (isset($f['DESC_SUCURSAL']) ? $f['DESC_SUCURSAL'] : ''));
+
+            if (!isset($mapa[$cod])) {
+                $mapa[$cod] = ['nro_sucursal' => [], 'desc_sucursal' => [], 'cant_sucursales' => 0];
+            }
+
+            if ($nro !== '') {
+                $mapa[$cod]['nro_sucursal'][] = $nro;
+            }
+
+            if ($desc !== '') {
+                $mapa[$cod]['desc_sucursal'][] = $desc;
+            }
+
+            $mapa[$cod]['cant_sucursales']++;
+        }
+
+        foreach ($mapa as $cod => $m) {
+            $mapa[$cod]['nro_sucursal'] = implode(', ', $m['nro_sucursal']);
+            $mapa[$cod]['desc_sucursal'] = implode(' / ', $m['desc_sucursal']);
+        }
+
+        return $mapa;
+    }
+
+    /**
+     * Se queda con los clientes que tienen una sucursal habilitada en el
+     * direccionario, y les cuelga la sucursal.
+     *
+     * INFORMAR DE MAS ANTES QUE VACIO: si el direccionario no se pudo leer
+     * (null) o no devolvio ninguna franquicia (vacio, que es un problema de la
+     * consulta y no un hecho), se devuelven TODOS los clientes con un aviso.
+     * Una tarjeta en blanco sin explicacion dejaria sin editar el PPP de todo
+     * el mundo por una caida del servidor de locales.
+     *
+     * Los descartados se cuentan y no se avisan: son las franquicias dadas de
+     * baja, y decirlo en cada carga seria ruido sobre algo que es asi a
+     * proposito. La pantalla lo muestra como nota al pie.
+     *
+     * @param array $pppPorCliente Mapa COD_CLIENT => datos, de Ingresos::getPPPClientes()
+     * @param array|null $mapa Mapa de mapaSucursales(), o null si no se pudo leer
+     * @return array ['clientes' => mapa filtrado, 'avisos' => [...], 'descartados' => int]
+     */
+    public static function filtrarFranquiciasActivas($pppPorCliente, $mapa) {
+        $pppPorCliente = is_array($pppPorCliente) ? $pppPorCliente : [];
+        $avisos = [];
+
+        if ($mapa === null) {
+            $avisos[] = 'No se pudo leer el directorio de sucursales (servidor \'locales\'): se '
+                . 'muestran todas las franquicias de Tango, también las dadas de baja.';
+        } elseif (empty($mapa)) {
+            $avisos[] = 'El directorio de sucursales no devolvió ninguna franquicia habilitada: se '
+                . 'muestran todas las franquicias de Tango, también las dadas de baja.';
+        }
+
+        if (!empty($avisos)) {
+            foreach ($pppPorCliente as $cod => $c) {
+                $pppPorCliente[$cod]['nro_sucursal'] = '';
+                $pppPorCliente[$cod]['desc_sucursal'] = '';
+            }
+
+            return ['clientes' => $pppPorCliente, 'avisos' => $avisos, 'descartados' => 0];
+        }
+
+        $clientes = [];
+        $descartados = 0;
+
+        foreach ($pppPorCliente as $cod => $c) {
+            if (!isset($mapa[$cod])) {
+                $descartados++;
+                continue;
+            }
+
+            $c['nro_sucursal'] = $mapa[$cod]['nro_sucursal'];
+            $c['desc_sucursal'] = $mapa[$cod]['desc_sucursal'];
+            $clientes[$cod] = $c;
+        }
+
+        return ['clientes' => $clientes, 'avisos' => [], 'descartados' => $descartados];
+    }
+
+    /**
+     * Junta los clientes en UNA FILA POR AGRUPADOR (grupo empresario, o el
+     * cliente si no tiene grupo), que es como se edita el PPP.
+     *
+     * El PPP calculado y el manual son del grupo, asi que se muestran una vez.
+     * El efectivo del grupo se calcula sin DIAS_PP_MAX -ese respaldo es por
+     * cliente-; el de cada cliente va en su fila, y solo difiere del grupo
+     * cuando el grupo no tiene ni manual ni calculado.
+     *
+     * @param array $pppPorCliente Mapa COD_CLIENT => datos (con sucursal si se cruzo)
+     * @return array Lista de grupos ordenada por nombre, cada uno con 'clientes'
+     */
+    public static function agruparPorAgrupador($pppPorCliente) {
+        require_once __DIR__ . '/Ingresos.php';
+
+        $grupos = [];
+
+        foreach ((is_array($pppPorCliente) ? $pppPorCliente : []) as $c) {
+            $agrup = $c['cod_agrup'];
+
+            if (!isset($grupos[$agrup])) {
+                $grupos[$agrup] = [
+                    'cod_agrup' => $agrup,
+                    'nombre_agrup' => $c['nombre_agrup'],
+                    'es_grupo' => !empty($c['es_grupo']),
+                    'ppp_calculado' => intval($c['ppp_calculado']),
+                    'cant_recibos' => intval($c['cant_recibos']),
+                    'cant_clientes_ppp' => intval($c['cant_clientes_ppp']),
+                    'ppp_manual' => $c['ppp_manual'],
+                    'ppp_efectivo' => Ingresos::pppEfectivo($c['ppp_manual'], $c['ppp_calculado'], null),
+                    'clientes' => []
+                ];
+            }
+
+            $grupos[$agrup]['clientes'][] = [
+                'cod_cliente' => $c['cod_cliente'],
+                'razon_social' => $c['razon_social'],
+                'nro_sucursal' => isset($c['nro_sucursal']) ? $c['nro_sucursal'] : '',
+                'desc_sucursal' => isset($c['desc_sucursal']) ? $c['desc_sucursal'] : '',
+                'medio_pago_default' => isset($c['medio_pago_default']) ? $c['medio_pago_default'] : 'ECHEQ',
+                'dias_pp_max' => intval($c['dias_pp_max']),
+                'desc_pp_max' => isset($c['desc_pp_max']) ? floatval($c['desc_pp_max']) : 0,
+                'ppp_efectivo' => intval($c['ppp_efectivo'])
+            ];
+        }
+
+        foreach ($grupos as $agrup => $g) {
+            usort($grupos[$agrup]['clientes'], function ($a, $b) {
+                return strcmp($a['cod_cliente'], $b['cod_cliente']);
+            });
+        }
+
+        $lista = array_values($grupos);
+
+        usort($lista, function ($a, $b) {
+            $n = strcasecmp($a['nombre_agrup'], $b['nombre_agrup']);
+
+            return ($n !== 0) ? $n : strcmp($a['cod_agrup'], $b['cod_agrup']);
+        });
+
+        return $lista;
+    }
+
+    /**
+     * Las franquicias habilitadas del direccionario de sucursales, desde el
+     * servidor 'locales'.
+     *
+     * Es la unica lectura de Parametros fuera de 'central', y va con el prefijo
+     * de Conexion::prefijoLocales() por el mismo motivo que en Saldos: en DEV
+     * la tabla se alcanza por linked server. Cualquier falla devuelve null y
+     * la decide filtrarFranquiciasActivas(), que no deja la tarjeta vacia.
+     *
+     * @return array|null Mapa de mapaSucursales(), o null si no se pudo leer
+     */
+    private function getFranquiciasActivas() {
+        $cid = $this->conn->conectar('locales');
+
+        if (!$cid) {
+            error_log('Parametros: no se pudo conectar a locales para leer las franquicias');
+
+            return null;
+        }
+
+        $p = method_exists($this->conn, 'prefijoLocales') ? $this->conn->prefijoLocales() : '';
+
+        $sql = "SELECT NRO_SUCURSAL, COD_CLIENT, DESC_SUCURSAL
+                FROM {$p}SUCURSALES_LAKERS
+                WHERE CANAL = 'FRANQUICIAS' AND HABILITADO = 1 AND NRO_SUC_MADRE IS NULL
+                ORDER BY COD_CLIENT, NRO_SUCURSAL";
+
+        $stmt = sqlsrv_query($cid, $sql);
+
+        if ($stmt === false) {
+            error_log('Parametros: ' . $this->errorSql('Error al leer las franquicias del direccionario'));
+
+            return null;
+        }
+
+        $filas = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $filas[] = $row;
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return self::mapaSucursales($filas);
+    }
+
+    /**
+     * Todo lo que necesita la tarjeta "Gestion de Cobranza Franquicias":
+     * los grupos empresarios con su PPP y sus clientes habilitados.
+     *
+     * El PPP viene de Ingresos::getPPPClientes() -ya por grupo-; aca solo se
+     * cruza contra el direccionario y se agrupa. Los avisos dicen si falta
+     * correr el script del PPP o si el direccionario no se pudo leer.
+     *
+     * @return array ['grupos', 'avisos', 'total_clientes', 'total_grupos', 'descartados']
      */
     public function getCobranzasClientesConfig() {
         require_once __DIR__ . '/Ingresos.php';
         $ingresos = new Ingresos();
 
         $ppps = $ingresos->getPPPClientes();
-        $paramsClientes = $ingresos->getParametrosClientes();
+        $params = $ingresos->getParametrosClientes();
 
-        $cid = $this->conn->conectar('central');
-        if (!$cid) {
-            throw new Exception('No se pudo conectar a la base de datos central');
+        // El medio de pago es informativo (la escala de descuento es general)
+        // pero describe como opera el cliente, asi que se sigue mostrando.
+        foreach ($ppps as $cod => $c) {
+            $ppps[$cod]['medio_pago_default'] = isset($params[$cod]) ? $params[$cod]['medio_pago'] : 'ECHEQ';
+            $ppps[$cod]['desc_pp_max'] = isset($params[$cod]) ? $params[$cod]['desc_pp_max'] : 0;
         }
 
-        // Obtener todas las franquicias desde GVA14
-        $sql = "SELECT COD_CLIENT, RAZON_SOCI FROM GVA14 WHERE COD_CLIENT LIKE 'FR%' ORDER BY COD_CLIENT";
-        $stmt = sqlsrv_query($cid, $sql);
-        if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al leer clientes de GVA14'));
-        }
+        $filtrado = self::filtrarFranquiciasActivas($ppps, $this->getFranquiciasActivas());
+        $grupos = self::agruparPorAgrupador($filtrado['clientes']);
 
-        $clientes = [];
-        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            $cod = strtoupper(trim($row['COD_CLIENT']));
-            $razon = trim($row['RAZON_SOCI']);
-
-            $pppInfo = $ppps[$cod] ?? null;
-            $paramInfo = $paramsClientes[$cod] ?? null;
-
-            $pppCalc = $pppInfo ? intval($pppInfo['ppp_calculado']) : 0;
-            $pppMan = ($pppInfo && $pppInfo['ppp_manual'] !== null) ? intval($pppInfo['ppp_manual']) : ($paramInfo['ppp_manual'] ?? null);
-            $cantCobros = $pppInfo ? intval($pppInfo['cant_cobros']) : 0;
-            $pppEfectivo = ($pppMan !== null && $pppMan > 0) ? $pppMan : ($pppCalc > 0 ? $pppCalc : ($paramInfo['dias_pp_max'] ?? 30));
-
-            $clientes[] = [
-                'cod_cliente' => $cod,
-                'razon_social' => $razon,
-                'ppp_calculado' => $pppCalc,
-                'ppp_manual' => $pppMan,
-                'ppp_efectivo' => $pppEfectivo,
-                'cant_cobros' => $cantCobros,
-                // Informativo: desde que la escala de descuento es general, el
-                // medio de pago NO entra en el calculo del porcentaje. Se sigue
-                // mostrando y editando porque describe como opera el cliente.
-                'medio_pago_default' => $paramInfo['medio_pago'] ?? 'ECHEQ',
-                'dias_pp_max' => $paramInfo['dias_pp_max'] ?? 0,
-                'desc_pp_max' => $paramInfo['desc_pp_max'] ?? 0
-            ];
-        }
-        sqlsrv_free_stmt($stmt);
-
-        return $clientes;
+        return [
+            'grupos' => $grupos,
+            'avisos' => array_merge($ingresos->getAvisosPPP(), $filtrado['avisos']),
+            'total_clientes' => count($filtrado['clientes']),
+            'total_grupos' => count($grupos),
+            'descartados' => $filtrado['descartados']
+        ];
     }
 
     /**
-     * Guarda o actualiza el PPP manual de un cliente en RO_T_PARAMETROS_DESC_CLIENTES.
-     * 
-     * @param string $codCliente Código de cliente
-     * @param int|null $pppManual Valor del PPP manual (o null para volver al calculado)
-     * @param string|null $usuario Usuario que realiza la acción
-     * @return bool True si se guardó
+     * Guarda el PPP manual de un GRUPO EMPRESARIO en
+     * RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO.
+     *
+     * Es un UPSERT sobre COD_AGRUP. Un valor vacio o <= 0 se guarda como NULL
+     * -vuelve al calculado- y la fila queda, con quien y cuando lo dejo asi.
+     * Reemplaza al PPP manual por cliente de RO_T_PARAMETROS_DESC_CLIENTES,
+     * que ya no se lee.
+     *
+     * @param string $codAgrup Grupo empresario, o el cliente si no tiene grupo
+     * @param int|null $pppManual Valor, o null/vacio para volver al calculado
+     * @param string|null $usuario
+     * @return bool
      */
-    public function savePPPManual($codCliente, $pppManual, $usuario = null) {
+    public function savePPPManualGrupo($codAgrup, $pppManual, $usuario = null) {
         $cid = $this->conn->conectar('central');
         if (!$cid) {
             throw new Exception('No se pudo conectar a la base de datos central');
         }
 
-        $cod = strtoupper(trim($codCliente));
-        $val = ($pppManual !== null && $pppManual !== '' && intval($pppManual) > 0) ? intval($pppManual) : null;
+        $agrup = strtoupper(trim((string) $codAgrup));
 
-        // Verificar si existe en RO_T_PARAMETROS_DESC_CLIENTES
-        $sqlCheck = "SELECT ID FROM RO_T_PARAMETROS_DESC_CLIENTES WHERE COD_CLIENT = ?";
-        $stmtCheck = sqlsrv_query($cid, $sqlCheck, [$cod]);
+        if ($agrup === '') {
+            throw new Exception('Falta el grupo empresario al que aplicar el PPP');
+        }
+
+        $val = ($pppManual !== null && $pppManual !== '' && intval($pppManual) > 0)
+            ? intval($pppManual) : null;
+
+        $stmtCheck = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo.RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO', 'U') AS T");
+        $existeTabla = ($stmtCheck !== false)
+            && ($row = sqlsrv_fetch_array($stmtCheck, SQLSRV_FETCH_ASSOC)) && $row['T'] !== null;
+        if ($stmtCheck !== false) sqlsrv_free_stmt($stmtCheck);
+
+        if (!$existeTabla) {
+            throw new Exception('No existe la tabla RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO. Corré '
+                . 'sql/cashflow_cobranzas_ppp_grupo.sql contra la base central.');
+        }
+
+        $stmtCheck = sqlsrv_query($cid,
+            "SELECT COD_AGRUP FROM RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO WHERE COD_AGRUP = ?", [$agrup]);
         $exists = ($stmtCheck !== false) ? sqlsrv_fetch_array($stmtCheck, SQLSRV_FETCH_ASSOC) : false;
         if ($stmtCheck !== false) sqlsrv_free_stmt($stmtCheck);
 
         if ($exists) {
-            $sql = "UPDATE RO_T_PARAMETROS_DESC_CLIENTES 
-                    SET PPP_MANUAL = ?, FECHA_MOD = GETDATE() 
-                    WHERE COD_CLIENT = ?";
-            $params = [$val, $cod];
+            $sql = "UPDATE RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO
+                    SET PPP_MANUAL = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                    WHERE COD_AGRUP = ?";
+            $params = [$val, $usuario, $agrup];
         } else {
-            $sql = "INSERT INTO RO_T_PARAMETROS_DESC_CLIENTES (COD_CLIENT, PPP_MANUAL, DIAS_PP_MAX, DESC_PP_MAX, MEDIO_PAGO_DEFAULT, FECHA_MOD) 
-                    VALUES (?, ?, 30, 0.08, 'ECHEQ', GETDATE())";
-            $params = [$cod, $val];
+            $sql = "INSERT INTO RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO (COD_AGRUP, PPP_MANUAL, FECHA_UPDATE, USUARIO)
+                    VALUES (?, ?, GETDATE(), ?)";
+            $params = [$agrup, $val, $usuario];
         }
 
         $stmt = sqlsrv_query($cid, $sql, $params);
         if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al guardar el PPP manual'));
+            throw new Exception($this->errorSql('Error al guardar el PPP manual del grupo ' . $agrup));
         }
         sqlsrv_free_stmt($stmt);
 

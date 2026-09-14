@@ -620,32 +620,33 @@ try {
             break;
 
         /* ================================================================
-           MODULO COBRANZAS (PPP y Escalas de Descuento por Cliente)
+           MODULO COBRANZAS (PPP por grupo empresario y escala de descuento)
            ================================================================ */
 
         case 'getCobranzasClientesConfig':
+            // Grupos empresarios con su PPP y sus franquicias habilitadas.
             echo json_encode([
                 'success' => true,
                 'data' => $parametros->getCobranzasClientesConfig()
             ], JSON_UNESCAPED_UNICODE);
             break;
 
-        case 'savePPPManual':
+        case 'savePPPManualGrupo':
             $data = bodyJson();
 
-            if (!isset($data['cod_cliente'])) {
-                throw new Exception('Falta el código de cliente');
+            if (!isset($data['cod_agrup'])) {
+                throw new Exception('Falta el grupo empresario');
             }
 
-            $parametros->savePPPManual(
-                $data['cod_cliente'],
+            $parametros->savePPPManualGrupo(
+                $data['cod_agrup'],
                 isset($data['ppp_manual']) ? $data['ppp_manual'] : null,
                 usuarioActual()
             );
 
             echo json_encode([
                 'success' => true,
-                'message' => 'Plazo Promedio de Pago actualizado correctamente'
+                'message' => 'Plazo Promedio de Pago del grupo actualizado: aplica a todos sus clientes.'
             ], JSON_UNESCAPED_UNICODE);
             break;
 

@@ -44,10 +44,24 @@ require_once __DIR__ . '/Cotizacion.php';
  * la proyeccion). Estan comentadas de los dos lados a proposito: son dos
  * consultas separadas que se tienen que mover juntas.
  *
- * getPPPClientes() usa 'PAGADO' y no participa de esto: es el historico con el
- * que se calcula el plazo promedio, no el universo a cobrar.
+ * getPPPClientes() no participa de esto: el plazo promedio de pago sale de
+ * los recibos de Tango (RO_V_CASHFLOW_PPP_GRUPO), no de las propuestas.
+ *
+ * EL PPP ES POR GRUPO EMPRESARIO
+ * ------------------------------
+ * Los franquiciados con varios locales pagan como grupo, asi que el PPP se
+ * calcula por GVA14.GRUPO_EMPR -un cliente sin grupo es su propio grupo- y
+ * todos los clientes del grupo lo comparten; el PPP manual tambien es del
+ * grupo (RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO). La regla de cual manda vive UNA
+ * vez, en pppEfectivo(). Ver sql/cashflow_cobranzas_ppp_grupo.sql.
  */
 class Ingresos {
+
+    /**
+     * Plazo de respaldo cuando un cliente no tiene ni manual, ni calculado, ni
+     * DIAS_PP_MAX. Es el ultimo escalon de pppEfectivo().
+     */
+    const PPP_DEFECTO = 30;
 
     /**
      * Estados de propuesta que cuenta la cobranza REAL.
@@ -95,6 +109,9 @@ class Ingresos {
     /** @var int|null Cache de getDiasCobroExportaciones() */
     private $diasCobroExportaciones = null;
 
+    /** @var array Avisos que dejo la ultima lectura del PPP (vista o tabla faltantes) */
+    private $avisosPPP = [];
+
     function __construct(){
         require_once __DIR__.'/../../class/conexion.php';
         $this->conn = new Conexion;
@@ -113,94 +130,228 @@ class Ingresos {
         return "'" . implode("', '", $estados) . "'";
     }
 
+    /* ====================================================================
+       PPP POR GRUPO EMPRESARIO - HELPERS PUROS
+
+       La regla de que plazo manda y la de a que grupo pertenece un cliente se
+       prueban sin base. La lectura SQL solo junta los datos y llama a estos.
+       ==================================================================== */
+
     /**
-     * Obtiene el PPP (Plazo Promedio de Pago) para todos los clientes o uno específico.
-     * Calcula el promedio de días de plazo de los últimos 3 cobros (propuestas en estado PAGADO).
-     * Si el cliente tiene un PPP_MANUAL definido en RO_T_PARAMETROS_DESC_CLIENTES, se usa ese como efectivo.
-     * 
-     * @param string|null $codCliente Opcional, filtrar por cliente
-     * @return array Mapa de clientes con ppp_calculado, ppp_manual, ppp_efectivo y cant_cobros
+     * El plazo con el que se proyecta un cliente. ES LA UNICA IMPLEMENTACION
+     * DE ESTA REGLA: antes estaba escrita tres veces (aca, en Parametros y en
+     * el JS de la pantalla) y las tres podian desalinearse.
+     *
+     *     manual del grupo   > 0  ->  ese
+     *     calculado del grupo > 0 ->  ese
+     *     DIAS_PP_MAX del cliente > 0 -> ese
+     *     si no                   ->  PPP_DEFECTO
+     *
+     * Acepta null, '' y strings de la base: todo lo que no es un entero
+     * positivo cuenta como "no hay".
+     *
+     * @param mixed $manual PPP manual del grupo
+     * @param mixed $calculado PPP calculado del grupo
+     * @param mixed $diasPpMax DIAS_PP_MAX del cliente, el respaldo previo al 30
+     * @return int
      */
-    public function getPPPClientes($codCliente = null) {
-        $cid_apps = $this->conn->conectar('apps');
-        $cid_central = $this->conn->conectar('central');
+    public static function pppEfectivo($manual, $calculado, $diasPpMax) {
+        foreach ([$manual, $calculado, $diasPpMax] as $v) {
+            $n = ($v === null || $v === '') ? 0 : intval($v);
 
-        if (!$cid_apps || !$cid_central) {
-            throw new Exception('No se pudo conectar a la base de datos para calcular PPP');
+            if ($n > 0) {
+                return $n;
+            }
         }
 
-        // 1. Obtener PPP calculado de los últimos 3 cobros pagados en apps
-        $sql_calc = "
-            WITH UltimosCobros AS (
-                SELECT 
-                    cod_cliente,
-                    DATEDIFF(day, fecha_creacion, fecha_propuesta_pago) AS plazo,
-                    ROW_NUMBER() OVER (PARTITION BY cod_cliente ORDER BY id DESC) AS rn
-                FROM FP_propuestas_pago
-                WHERE estado = 'PAGADO'
-                " . ($codCliente ? " AND cod_cliente = ?" : "") . "
-            )
-            SELECT 
-                cod_cliente,
-                ROUND(AVG(CAST(plazo AS FLOAT)), 0) AS ppp_calculado,
-                COUNT(*) AS cant_cobros
-            FROM UltimosCobros
-            WHERE rn <= 3
-            GROUP BY cod_cliente
-        ";
+        return self::PPP_DEFECTO;
+    }
 
-        $params_calc = $codCliente ? [trim($codCliente)] : [];
-        $stmt_calc = sqlsrv_query($cid_apps, $sql_calc, $params_calc);
+    /**
+     * A que agrupador pertenece un cliente: su grupo empresario, o el mismo
+     * cliente si no tiene. Espeja el CASE de RO_V_CASHFLOW_PPP_GRUPO, para que
+     * la clave con la que el PHP busca sea la misma que la vista devuelve.
+     *
+     * @param string $codCliente
+     * @param string|null $grupoEmpr GVA14.GRUPO_EMPR, puede venir '' o null
+     * @return string En mayusculas y sin espacios
+     */
+    public static function codAgrupador($codCliente, $grupoEmpr) {
+        $grupo = strtoupper(trim((string) $grupoEmpr));
 
+        return ($grupo !== '') ? $grupo : strtoupper(trim((string) $codCliente));
+    }
+
+    /**
+     * Arma el PPP de cada cliente a partir del de su grupo.
+     *
+     * Devuelve un mapa POR CLIENTE aunque el dato sea del grupo, porque asi lo
+     * consume la proyeccion: cada factura busca a su cliente. Cada fila dice
+     * ademas de que grupo salio, cuantos recibos y clientes tiene ese grupo,
+     * para que en la pantalla se vea por que dos clientes distintos tienen el
+     * mismo plazo.
+     *
+     * Un grupo sin fila en la vista -sin recibos en la ventana- deja el
+     * calculado en 0 y el nombre del grupo sale de GVA62 (o de la razon social
+     * del cliente si no tiene grupo). El efectivo lo resuelve pppEfectivo().
+     *
+     * @param array $clientes Filas [cod_cliente, razon_social, grupo_empr, nombre_gru]
+     * @param array $pppGrupos Mapa COD_AGRUP => [ppp, cant_recibos, cant_clientes,
+     *        nombre_agrup, es_grupo], lo que devuelve la vista
+     * @param array $manuales Mapa COD_AGRUP => PPP manual (int o null)
+     * @param array $paramsClientes Mapa COD_CLIENT => fila de getParametrosClientes()
+     * @return array Mapa COD_CLIENT => datos del PPP
+     */
+    public static function armarPPPPorCliente($clientes, $pppGrupos, $manuales, $paramsClientes) {
+        $pppGrupos = is_array($pppGrupos) ? $pppGrupos : [];
+        $manuales = is_array($manuales) ? $manuales : [];
+        $paramsClientes = is_array($paramsClientes) ? $paramsClientes : [];
         $ppps = [];
-        if ($stmt_calc !== false) {
-            while ($row = sqlsrv_fetch_array($stmt_calc, SQLSRV_FETCH_ASSOC)) {
-                $cod = strtoupper(trim($row['cod_cliente']));
-                $ppps[$cod] = [
-                    'cod_cliente' => $cod,
-                    'ppp_calculado' => intval($row['ppp_calculado']),
-                    'cant_cobros' => intval($row['cant_cobros']),
-                    'ppp_manual' => null,
-                    'ppp_efectivo' => intval($row['ppp_calculado'])
-                ];
+
+        foreach ((is_array($clientes) ? $clientes : []) as $c) {
+            $cod = strtoupper(trim((string) (isset($c['cod_cliente']) ? $c['cod_cliente'] : '')));
+
+            if ($cod === '') {
+                continue;
             }
-            sqlsrv_free_stmt($stmt_calc);
-        }
 
-        // 2. Leer configuración y PPP_MANUAL de RO_T_PARAMETROS_DESC_CLIENTES en central
-        $sql_man = "SELECT COD_CLIENT, PPP_MANUAL, DIAS_PP_MAX, DESC_PP_MAX, MEDIO_PAGO_DEFAULT FROM RO_T_PARAMETROS_DESC_CLIENTES";
-        if ($codCliente) {
-            $sql_man .= " WHERE COD_CLIENT = ?";
-        }
-        $params_man = $codCliente ? [trim($codCliente)] : [];
-        $stmt_man = sqlsrv_query($cid_central, $sql_man, $params_man);
+            $grupoEmpr = isset($c['grupo_empr']) ? $c['grupo_empr'] : null;
+            $agrup = self::codAgrupador($cod, $grupoEmpr);
+            $esGrupo = ($agrup !== $cod);
 
-        if ($stmt_man !== false) {
-            while ($row = sqlsrv_fetch_array($stmt_man, SQLSRV_FETCH_ASSOC)) {
-                $cod = strtoupper(trim($row['COD_CLIENT']));
-                $pppMan = ($row['PPP_MANUAL'] !== null && $row['PPP_MANUAL'] !== '') ? intval($row['PPP_MANUAL']) : null;
+            $vista = isset($pppGrupos[$agrup]) ? $pppGrupos[$agrup] : null;
+            $manual = array_key_exists($agrup, $manuales) ? $manuales[$agrup] : null;
+            $manual = ($manual === null || $manual === '' || intval($manual) <= 0) ? null : intval($manual);
+            $param = isset($paramsClientes[$cod]) ? $paramsClientes[$cod] : null;
 
-                if (!isset($ppps[$cod])) {
-                    $ppps[$cod] = [
-                        'cod_cliente' => $cod,
-                        'ppp_calculado' => 0,
-                        'cant_cobros' => 0,
-                        'ppp_manual' => $pppMan,
-                        'ppp_efectivo' => ($pppMan !== null && $pppMan > 0) ? $pppMan : intval($row['DIAS_PP_MAX'] ?: 30)
-                    ];
-                } else {
-                    $ppps[$cod]['ppp_manual'] = $pppMan;
-                    if ($pppMan !== null && $pppMan > 0) {
-                        $ppps[$cod]['ppp_efectivo'] = $pppMan;
-                    } elseif ($ppps[$cod]['ppp_calculado'] <= 0) {
-                        $ppps[$cod]['ppp_efectivo'] = intval($row['DIAS_PP_MAX'] ?: 30);
-                    }
-                }
-            }
-            sqlsrv_free_stmt($stmt_man);
+            $calculado = $vista ? intval($vista['ppp']) : 0;
+            $diasPpMax = $param ? intval($param['dias_pp_max']) : 0;
+
+            $nombreAgrup = $vista && !empty($vista['nombre_agrup'])
+                ? $vista['nombre_agrup']
+                : ($esGrupo && !empty($c['nombre_gru'])
+                    ? $c['nombre_gru']
+                    : (isset($c['razon_social']) ? $c['razon_social'] : $agrup));
+
+            $ppps[$cod] = [
+                'cod_cliente' => $cod,
+                'razon_social' => trim((string) (isset($c['razon_social']) ? $c['razon_social'] : '')),
+                'cod_agrup' => $agrup,
+                'nombre_agrup' => trim((string) $nombreAgrup),
+                'es_grupo' => $esGrupo,
+                'ppp_calculado' => $calculado,
+                'cant_recibos' => $vista ? intval($vista['cant_recibos']) : 0,
+                'cant_clientes_ppp' => $vista ? intval($vista['cant_clientes']) : 0,
+                'ppp_manual' => $manual,
+                'dias_pp_max' => $diasPpMax,
+                'ppp_efectivo' => self::pppEfectivo($manual, $calculado, $diasPpMax)
+            ];
         }
 
         return $ppps;
+    }
+
+    /**
+     * El PPP (Plazo Promedio de Pago) de cada cliente franquiciado, que es el
+     * de su grupo empresario.
+     *
+     * TRES LECTURAS, TODAS EN CENTRAL, Y EL CRUCE EN PHP:
+     *   1. los clientes FR con su grupo (GVA14 + GVA62)
+     *   2. el PPP calculado por grupo (RO_V_CASHFLOW_PPP_GRUPO, Tango)
+     *   3. el PPP manual por grupo (RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO)
+     * mas DIAS_PP_MAX por cliente como respaldo. NO se hace un join SQL entre
+     * las tablas propias y las de Tango: pueden tener collation distinta.
+     *
+     * Si la vista o la tabla no existen -el script no se corrio- no se rompe:
+     * el calculado o el manual quedan vacios, el efectivo cae al respaldo y
+     * queda un aviso en getAvisosPPP() que dice que script correr.
+     *
+     * @param string|null $codCliente Opcional, un solo cliente
+     * @return array Mapa COD_CLIENT => ver armarPPPPorCliente()
+     */
+    public function getPPPClientes($codCliente = null) {
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos para calcular el PPP');
+        }
+
+        $this->avisosPPP = [];
+
+        // 1. Los clientes y su grupo
+        $sql = "SELECT C.COD_CLIENT, C.RAZON_SOCI, C.GRUPO_EMPR, G.NOMBRE_GRU
+                FROM GVA14 C
+                LEFT JOIN GVA62 G ON G.GRUPO_EMPR = C.GRUPO_EMPR
+                WHERE C.COD_CLIENT LIKE 'FR%'"
+            . ($codCliente ? " AND C.COD_CLIENT = ?" : "")
+            . " ORDER BY C.COD_CLIENT";
+
+        $stmt = sqlsrv_query($cid, $sql, $codCliente ? [trim($codCliente)] : []);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSqlIngresos('Error al leer los clientes y sus grupos (GVA14)'));
+        }
+
+        $clientes = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $clientes[] = [
+                'cod_cliente' => $row['COD_CLIENT'],
+                'razon_social' => trim((string) $row['RAZON_SOCI']),
+                'grupo_empr' => $row['GRUPO_EMPR'],
+                'nombre_gru' => trim((string) $row['NOMBRE_GRU'])
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        // 2. El calculado por grupo
+        $pppGrupos = [];
+        $stmt = sqlsrv_query($cid, "SELECT COD_AGRUP, NOMBRE_AGRUP, ES_GRUPO, CANT_CLIENTES,
+                                            CANT_RECIBOS, PPP
+                                     FROM RO_V_CASHFLOW_PPP_GRUPO");
+
+        if ($stmt === false) {
+            $this->avisosPPP[] = 'No existe la vista RO_V_CASHFLOW_PPP_GRUPO, así que el PPP '
+                . 'calculado queda vacío y se usa el manual o el respaldo. Corré '
+                . 'sql/cashflow_cobranzas_ppp_grupo.sql contra la base central.';
+        } else {
+            while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+                $pppGrupos[strtoupper(trim((string) $row['COD_AGRUP']))] = [
+                    'ppp' => intval($row['PPP']),
+                    'cant_recibos' => intval($row['CANT_RECIBOS']),
+                    'cant_clientes' => intval($row['CANT_CLIENTES']),
+                    'nombre_agrup' => trim((string) $row['NOMBRE_AGRUP']),
+                    'es_grupo' => intval($row['ES_GRUPO']) === 1
+                ];
+            }
+
+            sqlsrv_free_stmt($stmt);
+        }
+
+        // 3. El manual por grupo
+        $manuales = [];
+        $stmt = sqlsrv_query($cid, "SELECT COD_AGRUP, PPP_MANUAL FROM RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO");
+
+        if ($stmt === false) {
+            $this->avisosPPP[] = 'No existe la tabla RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO, así que no '
+                . 'hay PPP manual por grupo. Corré sql/cashflow_cobranzas_ppp_grupo.sql contra '
+                . 'la base central.';
+        } else {
+            while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+                $manuales[strtoupper(trim((string) $row['COD_AGRUP']))] = $row['PPP_MANUAL'];
+            }
+
+            sqlsrv_free_stmt($stmt);
+        }
+
+        return self::armarPPPPorCliente($clientes, $pppGrupos, $manuales,
+            $this->getParametrosClientes());
+    }
+
+    /** @return array Avisos que dejo la ultima llamada a getPPPClientes() */
+    public function getAvisosPPP() {
+        return $this->avisosPPP;
     }
 
     /**
@@ -248,13 +399,19 @@ class Ingresos {
 
     /**
      * Obtiene los parámetros generales de clientes desde RO_T_PARAMETROS_DESC_CLIENTES.
+     *
+     * PPP_MANUAL de esta tabla YA NO SE LEE: el manual es por grupo y vive en
+     * RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO. La columna queda con sus datos (la
+     * semilla del script los migro), pero exponerla aca dejaria un segundo
+     * lugar desde donde alguien podria volver a usarla.
+     *
      * @return array Mapa [COD_CLIENT] => datos
      */
     public function getParametrosClientes() {
         $cid = $this->conn->conectar('central');
         if (!$cid) return [];
 
-        $sql = "SELECT COD_CLIENT, MEDIO_PAGO_DEFAULT, DIAS_PP_MAX, DESC_PP_MAX, PPP_MANUAL FROM RO_T_PARAMETROS_DESC_CLIENTES";
+        $sql = "SELECT COD_CLIENT, MEDIO_PAGO_DEFAULT, DIAS_PP_MAX, DESC_PP_MAX FROM RO_T_PARAMETROS_DESC_CLIENTES";
         $stmt = sqlsrv_query($cid, $sql);
         if ($stmt === false) return [];
 
@@ -265,8 +422,7 @@ class Ingresos {
                 'cod_cliente' => $cod,
                 'medio_pago' => strtoupper(trim($row['MEDIO_PAGO_DEFAULT'] ?? 'ECHEQ')),
                 'dias_pp_max' => intval($row['DIAS_PP_MAX'] ?? 0),
-                'desc_pp_max' => floatval($row['DESC_PP_MAX'] ?? 0),
-                'ppp_manual' => ($row['PPP_MANUAL'] !== null && $row['PPP_MANUAL'] !== '') ? intval($row['PPP_MANUAL']) : null
+                'desc_pp_max' => floatval($row['DESC_PP_MAX'] ?? 0)
             ];
         }
         sqlsrv_free_stmt($stmt);

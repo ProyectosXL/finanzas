@@ -88,8 +88,8 @@ try {
         case 'guardarCargaLocales':
             $data = bodyJson();
 
-            // Los saldos y las fechas los relee la clase de la consulta; del
-            // cliente se aceptan solo gestion y reserva, que es lo editable.
+            // Los saldos de la consulta y las fechas los relee la clase; del
+            // cliente se aceptan gestion, reserva y el saldo tipeado a mano.
             $r = $saldos->guardarCargaLocales(
                 isset($data['filas']) ? $data['filas'] : [],
                 isset($data['observaciones']) ? $data['observaciones'] : null,
@@ -105,6 +105,11 @@ try {
                 ? ' y ' . $r['parametros'] . ' local(es) con la gestión o la reserva '
                     . 'actualizadas, que es lo que va a usar el tablero.'
                 : '. No cambió ninguna gestión ni reserva.';
+
+            if ($r['saldos_manuales'] > 0) {
+                $mensaje .= ' ' . $r['saldos_manuales'] . ' saldo(s) en caja cargados a mano: '
+                    . 'mandan sobre la consulta hasta que ésta traiga un cierre más nuevo.';
+            }
 
             echo json_encode([
                 'success' => true,

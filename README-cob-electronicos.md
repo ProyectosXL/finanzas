@@ -68,7 +68,7 @@ La tasa de un movimiento se resuelve **contra su fecha de acreditación**, no co
 
 ### El recálculo de los pendientes es automático
 
-Decisión del negocio, tomada explícitamente: al guardar (o dar de baja) una alícuota, el servidor recalcula el neto de los movimientos **pendientes** de esa procesadora —los que tienen fecha de acreditación de hoy en adelante— y el mensaje dice **cuántos cambiaron y por cuánta plata**, con el detalle de tasa vieja → tasa nueva y neto viejo → neto nuevo.
+Decisión del negocio, tomada explícitamente: al guardar (o dar de baja) una alícuota, el servidor recalcula el neto de los movimientos **pendientes** de esa procesadora —los que tienen fecha de acreditación **de mañana en adelante**, ver [el corte](#lo-de-hoy-no-es-pendiente-el-corte-es-mañana)— y el mensaje dice **cuántos cambiaron y por cuánta plata**, con el detalle de tasa vieja → tasa nueva y neto viejo → neto nuevo.
 
 > Lo propuesto era un botón explícito con vista previa, y la objeción sigue en pie: recalcular al editar un parámetro es la mitad del problema del Excel corriendo al revés —ahí un cambio de `D3` no llegaba a ningún movimiento, acá llega a todos los pendientes de una sola vez—. Se implementó automático porque así se pidió. Lo que compensa el riesgo es que **el recálculo nunca es silencioso**: el plan de cambios se calcula antes de escribir (`CobElectronicos::planRecalculo()`, que es un helper puro y devuelve un plan, no una escritura) y se informa completo en la respuesta. Si algún día se quiere volver al botón con vista previa, el plan ya está separado de la escritura y el cambio es sólo de dónde se lo llama.
 
@@ -108,6 +108,25 @@ Una fecha **posterior** al eje sí va a `fuera_horizonte` y sí deja aviso, con 
 Cuando la fila del tablero queda en **cero** teniendo movimientos cargados, el proveedor igual lo explica —*"los movimientos cargados ya se acreditaron, así que no hay acreditaciones pendientes"*—, porque un cero sin explicación es exactamente lo que este módulo evita. La diferencia es que explica el cero, no reclama por el pasado.
 
 > **El corte por fecha es explícito y no se delega a `Horizonte::acumular()`.** Una fecha del mes en curso anterior a hoy —un 1/9 con el eje arrancando el 6/9— caería en la columna del mes `2026-09`, que existe en el eje pero que el tablero **ni siquiera incluye en el arrastre** (`Horizonte::secuencia()` la deja afuera porque no representa ningún día futuro). El importe quedaría en una columna que nadie suma. Con el corte por fecha en `CobElectronicos::ubicacionEnEje()`, el criterio no depende de cómo quede armado el eje. Tiene prueba propia.
+
+---
+
+## Lo de hoy no es pendiente: el corte es mañana
+
+**Decisión del negocio.** Una acreditación cuenta como **pendiente** recién desde **mañana**: lo que se acredita **hoy** ya está —o va a estar al cierre— en el saldo bancario que informa la pestaña Saldos en la primera columna del tablero, así que sumarlo también como cobranza lo contaría dos veces. Es el mismo argumento de la sección anterior, extendido al día en curso.
+
+**Y es mañana a secas, no el próximo día hábil.** Se evaluó cortar en *"el siguiente día hábil"* y se descartó: puede haber acreditaciones cualquier día —una billetera acredita un sábado—, así que un sábado visto un viernes **es pendiente** y tiene que entrar al tablero. Es coherente con la regla de imputación de este módulo, que tampoco corre la fecha de acreditación a día hábil.
+
+**El corte es uno solo.** `CobElectronicos::cortePendientes()` —helper puro, probado sin base— y lo usan los cuatro caminos, para que la pantalla y el tablero cierren:
+
+| Camino | Qué hace con el corte |
+| --- | --- |
+| Pestaña (`getPestana()`) | Filtra por defecto desde el corte, marca cada fila y devuelve `pendientes_desde` para que la pantalla lo diga |
+| Tablero (`CobElectronicosProvider`) | Pide los movimientos desde el corte y arma la serie con él |
+| Recálculo (`recalcularPendientes()`) | Sólo recalcula lo que está en el corte o después |
+| Importador (`compararImportacion()`) | Lo anterior al corte es *"ya acreditada"*: no se importa, y tampoco se propone dar de baja |
+
+En la pantalla, el formulario de alta propone como fecha **mañana** y no hoy: un movimiento fechado hoy nacería *"ya acreditado"* y no entraría al tablero.
 
 ---
 
@@ -200,7 +219,7 @@ Con `ID_EXTERNO` **manda el número de liquidación por encima de la fecha**, y 
 | **nueva** | No estaba cargada → se inserta, con `ORIGEN_DATO = 'ARCHIVO'` y el nombre del archivo |
 | **cambia** | Cambió el importe bruto o la fecha → se actualiza y **se recalcula la tasa y el neto** |
 | **igual** | Ya estaba cargada idéntica → **no se toca**. Pisarle `FECHA_UPDATE` a todo lo que el archivo repite dejaría la columna diciendo que se editó todo en cada importación, igual que el diff de las sucursales de Saldos |
-| **ya acreditada** | Fecha anterior al inicio del eje → **no se importa** y no es un error. El archivo de la procesadora siempre trae el histórico, y cargarlo no aporta nada |
+| **ya acreditada** | Fecha anterior al corte de pendientes (hoy incluido) → **no se importa** y no es un error. El archivo de la procesadora siempre trae el histórico, y cargarlo no aporta nada |
 | **problema** | Procesadora inexistente o inhabilitada, importe no numérico o ≤ 0, fecha ilegible, sin alícuota vigente, clave repetida |
 | **ya no viene** | Está cargado y el archivo no lo trae → **candidato a baja** |
 
@@ -216,7 +235,7 @@ Todo lo que sí se importa va **en una transacción**, por lo mismo.
 
 Sin esto, una acreditación que la procesadora dio de baja se queda para siempre en el tablero, porque ninguna importación la menciona.
 
-El alcance está acotado a propósito, y es la parte delicada: sólo se consideran los movimientos **de las procesadoras que vienen en el archivo**, con fecha **dentro del período que el archivo cubre**, y **desde el inicio del eje** —lo ya acreditado no se toca nunca, ni declarando un período largo—. Un archivo parcial no puede proponer dar de baja lo que no estaba mirando.
+El alcance está acotado a propósito, y es la parte delicada: sólo se consideran los movimientos **de las procesadoras que vienen en el archivo**, con fecha **dentro del período que el archivo cubre**, y **desde el corte de pendientes** —lo ya acreditado, lo de hoy incluido, no se toca nunca, ni declarando un período largo—. Un archivo parcial no puede proponer dar de baja lo que no estaba mirando.
 
 Y la baja **nunca se aplica sola**: se lista, hay que marcar la casilla y además confirmar.
 
@@ -280,7 +299,7 @@ Una sola pestaña, sin sub-pestañas.
 
 La tasa y el neto se muestran en cursiva y atenuados, y en la fila en edición se reemplazan por la leyenda *"la tasa y el neto se recalculan al guardar"*. Convertirlos en inputs sería ofrecer editar un número que el servidor va a descartar.
 
-Las acreditaciones **ya ocurridas no se muestran**: el filtro arranca en el inicio del eje y hay un switch para traerlas. Es lo que hace que el total de la pantalla coincida con el del tablero sin tener que explicar una diferencia. Cuando se traen, van en gris y marcadas *"ya acreditada"* — la marca es neutra, no roja: no son un problema.
+Las acreditaciones **ya ocurridas no se muestran, las de hoy incluidas**: el filtro arranca mañana (`pendientes_desde` en el payload) y hay un switch para traerlas. Es lo que hace que el total de la pantalla coincida con el del tablero sin tener que explicar una diferencia. Cuando se traen, van en gris y marcadas *"ya acreditada"* — la marca es neutra, no roja: no son un problema.
 
 El formulario de alta dibuja una **vista previa del neto** mientras se tipea, y dice explícitamente que el definitivo lo calcula el servidor con la alícuota vigente a la fecha elegida. La previa usa la tasa vigente **a hoy**, que es la que trae el payload; si la fecha de acreditación cae en otra vigencia, el mensaje del guardado informa la que se usó de verdad.
 
@@ -345,7 +364,7 @@ Así que el resultado va a un panel arriba de las dos secciones, con esa tabla, 
 
 Lo ya acreditado **no genera aviso**. Ver la sección de arriba.
 
-Los movimientos se piden **desde el inicio del eje**, que es una optimización: la regla vive igual en `armarSerie()` y está probada, así que no depende de que el llamador se acuerde de filtrar.
+Los movimientos se piden **desde el corte de pendientes** (`CobElectronicos::cortePendientes()`, mañana), que es una optimización: la regla vive igual en `armarSerie()` y está probada, así que no depende de que el llamador se acuerde de filtrar.
 
 Un movimiento cuya procesadora perdió sus alícuotas **sigue aportando su neto persistido**, y eso está bien: es el neto que se informó. Lo que hace falta saber es que de ahí en adelante esa procesadora no puede calcular nada nuevo — si no, el error aparece recién cuando alguien intenta cargar un movimiento.
 
@@ -408,6 +427,11 @@ php tests/run.php
 | Y **no** suma a `fuera_horizonte` ni deja aviso; se devuelve aparte como dato | `armarSerie()` |
 | Con sólo movimientos ya acreditados, la serie va en cero y muda | `armarSerie()` |
 | Una fecha del mes en curso anterior a hoy también queda afuera | `ubicacionEnEje()` |
+| **Lo pendiente arranca mañana**: un viernes, el sábado (no se corre al lunes); cruza mes y año | `cortePendientes()` |
+| **Un movimiento con fecha de hoy está en el eje pero cuenta como ya acreditado** | `ubicacionEnEje()` |
+| Visto un viernes, el sábado es pendiente y el viernes mismo no | `ubicacionEnEje()` |
+| Un movimiento de hoy **no suma en la columna de hoy** ni en ninguna; el mismo fechado el primer día pendiente sí | `armarSerie()` |
+| Un movimiento de hoy **no se recalcula** al cambiar una alícuota | `planRecalculo()` |
 | Un movimiento posterior al eje sí queda `fuera_horizonte`, con su aviso y su importe | `armarSerie()` |
 | `fuera_eje` cuenta sólo lo posterior; lo ya acreditado se cuenta aparte | `armarMovimientos()` |
 | La suma diaria y la mensual coinciden entre sí y con la suma de netos | `agruparPorDia()` / `agruparPorMes()` |
@@ -417,6 +441,7 @@ php tests/run.php
 | Sin tablas creadas, el proveedor rinde cero **con un aviso que dice qué falta**, y no el genérico de la clase base | `CobElectronicosProvider` |
 | Sin procesadoras, sin movimientos, y con todo ya acreditado: cero con aviso propio en cada caso | `CobElectronicosProvider` |
 | Con todo ya acreditado, el aviso explica el cero y **no** menciona nada anterior | `CobElectronicosProvider` |
+| Con sólo un movimiento de hoy, la fila va en cero y la columna de hoy no lo suma | `CobElectronicosProvider` |
 | El eje más lo posterior son todos los netos pendientes | `CobElectronicosProvider` |
 
 Del importador:
@@ -486,7 +511,7 @@ Todavía no hay login. Las tres tablas tienen `USUARIO VARCHAR(50) NULL` y hoy s
 5. **Verlo llegar al tablero.** Pestaña Cashflow, sección Disponibilidades, fila *Cobranzas Pagos Electrónicos*: el mismo neto en la columna de esa fecha. Clickeando el importe se vuelve a esta pestaña.
 6. **Importar una planilla.** *Importar planilla* → *Descargar plantilla* → abrila en Excel, dejá las dos filas de ejemplo o pegá las acreditaciones reales, guardá como CSV y subila. *Ver diferencias* tiene que mostrar los chips del resumen y la tabla de lo que cambia **sin haber escrito nada**. Confirmá, y comprobá que la tabla de arriba y el cuadro diario se actualizan. Después **volvé a subir el mismo archivo**: tiene que decir que no cambia nada y dejar el botón deshabilitado — eso es lo que permite importar seguido sin miedo.
 7. **Probar las bajas del importador.** Sacá una fila del medio del archivo y volvé a subirlo: aparece en *"Cargados que el archivo no trae"* con su importe, y la baja **no** se aplica salvo que marques la casilla. Si la fila que sacás es la primera o la última del período, completá *el archivo cubre desde / hasta* para que la detecte; el panel dice qué ventana usó y si la declaraste vos.
-8. **Probar el caso del Excel.** Cargá un movimiento con fecha **anterior a hoy**: no aparece en la tabla —el filtro arranca en el inicio del eje— y **el tablero no avisa nada**. Prendé *"Ver también las ya acreditadas"* y ahí sí se ve, en gris y marcada. Y desde Parámetros, intentá activar una procesadora nueva sin alícuotas: el switch está deshabilitado y el tooltip dice por qué.
+8. **Probar el caso del Excel.** Cargá un movimiento con fecha **de hoy o anterior**: no aparece en la tabla —el filtro arranca mañana— y **el tablero no avisa nada**. Prendé *"Ver también las ya acreditadas"* y ahí sí se ve, en gris y marcada. Y desde Parámetros, intentá activar una procesadora nueva sin alícuotas: el switch está deshabilitado y el tooltip dice por qué.
 9. **La migración, al final.** `sql/cashflow_cob_electronicos_migracion.sql`, después de verificar con Tesorería los tres movimientos sin fórmula. Revisar los dos cuadros que imprime y correrlo una segunda vez: el segundo cuadro tiene que decir *"Ya estaba cargado"* en todas las filas.
 
 ---

@@ -15,8 +15,12 @@ require_once __DIR__ . '/../cashflow/Class/CobElectronicos.php';
 require_once __DIR__ . '/../cashflow/Class/CashflowRegistry.php';
 require_once __DIR__ . '/../cashflow/Class/Providers/CobElectronicosProvider.php';
 
-/** Eje de referencia de todas las pruebas: 28 dias desde el 6/9/2026 + 12 meses */
+/**
+ * Eje de referencia de todas las pruebas: 28 dias desde el 6/9/2026 + 12 meses.
+ * El corte de pendientes es MANANA, el 7/9. Ver cortePendientes().
+ */
 $h = new Horizonte(28, 12, [], new DateTime('2026-09-06'));
+$corte = '2026-09-07';
 
 /**
  * Alicuotas de una procesadora: IIBB 2,5% y SICREB 0,6% desde el 1/9, mas una
@@ -210,6 +214,35 @@ chequear('se recortan los espacios', 'Payway',
 chequear('y los espacios internos repetidos', 'Mercado Pago',
     CobElectronicos::normalizarRazonSocial('Mercado   Pago'));
 
+seccion('activar una procesadora exige alicuota vigente solo al pasar a activa');
+
+// El invariante: una procesadora sin alicuota vigente no puede ENTRAR al
+// estado activo, porque sus movimientos no podrian calcular neto.
+chequearLanza('inactiva -> activa sin alicuotas se rechaza', function () {
+    CobElectronicos::validarActivacion(0, true, 0, 'Fiserv');
+}, '"Fiserv" no se puede activar porque no tiene ninguna alícuota vigente: sus movimientos '
+    . 'no podrían calcular el importe neto. Cargale una alícuota primero, en la sección de abajo.');
+
+// Todo lo demas pasa. Sobre todo: una que YA esta activa y a la que solo se le
+// edita el nombre no vuelve a pasar por la verificacion, porque la pantalla
+// guarda en lote y una fila que no se toca no puede frenar a las demas.
+$noLanza = function ($actual, $nuevo, $conceptos) {
+    try {
+        CobElectronicos::validarActivacion($actual, $nuevo, $conceptos, 'X');
+
+        return true;
+    } catch (Throwable $e) {
+        return false;
+    }
+};
+
+chequear('inactiva -> activa con alicuotas pasa', true, $noLanza(0, true, 2));
+chequear('activa que sigue activa pasa aunque no tenga alicuotas', true, $noLanza(1, true, 0));
+chequear('activa -> inactiva pasa', true, $noLanza(1, false, 0));
+chequear('inactiva que sigue inactiva pasa', true, $noLanza(0, false, 0));
+chequear('acepta el ACTIVO como string de la base', true, $noLanza('1', true, 0));
+chequear('y como booleano', false, $noLanza(false, true, 0));
+
 /* ================================================================
    Editar un porcentaje no reescribe lo ya guardado
    ================================================================ */
@@ -228,7 +261,7 @@ $movimientos = [
      'tasa_aplicada' => 0.031, 'importe_neto' => 1938000.0, 'origen_dato' => 'MANUAL']
 ];
 
-$plan = CobElectronicos::planRecalculo($movimientos, [1 => $alicuotas], '2026-09-06');
+$plan = CobElectronicos::planRecalculo($movimientos, [1 => $alicuotas], $corte);
 
 chequear('solo se recalcula un movimiento', 1, count($plan['cambios']));
 chequear('y es el pendiente', 2, $plan['cambios'][0]['id']);
@@ -261,12 +294,26 @@ $yaRecalculados = [
 
 chequear('un movimiento que ya tiene la tasa vigente no se vuelve a escribir',
     0, count(CobElectronicos::planRecalculo($yaRecalculados, [1 => $alicuotas],
-        '2026-09-06')['cambios']));
+        $corte)['cambios']));
+
+// Un movimiento con fecha de HOY tampoco se recalcula: el corte es el primer
+// dia habil despues de hoy, y lo de hoy ya se acredito con la tasa que tenia.
+$deHoy = [
+    ['id' => 3, 'id_procesadora' => 1, 'procesadora' => 'Payway',
+     'importe_bruto' => 1000000.0, 'fecha_acreditacion' => '2026-09-06',
+     'tasa_aplicada' => 0.010, 'importe_neto' => 990000.0]
+];
+
+$planHoy = CobElectronicos::planRecalculo($deHoy, [1 => $alicuotas], $corte);
+
+chequear('un movimiento con fecha de hoy no se recalcula', 0, count($planHoy['cambios']));
+chequear('cuenta como ya acreditado', 1, $planHoy['acreditados']);
+chequear('y no como pendiente', 0, $planHoy['pendientes']);
 
 // Una procesadora que perdio sus alicuotas no puede recalcular: el movimiento
 // queda con su tasa vieja y se AVISA, en lugar de quedar en cero (informaria de
 // menos) o en el bruto (informaria de mas).
-$sinAlicuota = CobElectronicos::planRecalculo($movimientos, [], '2026-09-06');
+$sinAlicuota = CobElectronicos::planRecalculo($movimientos, [], $corte);
 
 chequear('sin alicuotas no se recalcula nada', 0, count($sinAlicuota['cambios']));
 chequear('y se avisa', 1, count($sinAlicuota['avisos']));
@@ -276,14 +323,41 @@ chequear('el aviso dice que conservan su tasa',
 /* ================================================================
    Donde cae un movimiento respecto del eje
    ================================================================ */
-seccion('un movimiento con fecha anterior al eje NO abre el horizonte');
+seccion('lo pendiente arranca manana');
+
+// HOY NO ES PENDIENTE: lo que se acredita hoy ya esta -o va a estar al cierre-
+// en el saldo bancario de la primera columna. Y el corte es MANANA A SECAS, sin
+// regla de dia habil: puede haber acreditaciones cualquier dia.
+chequear('un jueves, lo pendiente arranca el viernes',
+    '2026-09-11', CobElectronicos::cortePendientes('2026-09-10'));
+chequear('un viernes, arranca el SABADO: no se corre al lunes',
+    '2026-09-12', CobElectronicos::cortePendientes('2026-09-11'));
+chequear('un domingo, el lunes',
+    '2026-09-07', CobElectronicos::cortePendientes('2026-09-06'));
+chequear('cruza el mes', '2026-10-01', CobElectronicos::cortePendientes('2026-09-30'));
+chequear('y el anio', '2027-01-01', CobElectronicos::cortePendientes('2026-12-31'));
+chequear('y es el corte de referencia de estas pruebas',
+    $corte, CobElectronicos::cortePendientes($h->hoy()));
+
+seccion('un movimiento con fecha anterior al corte NO abre el horizonte');
 
 chequear('una fecha del eje esta dentro',
     'DENTRO', CobElectronicos::ubicacionEnEje('2026-09-10', $h));
-chequear('el primer dia del eje tambien',
-    'DENTRO', CobElectronicos::ubicacionEnEje('2026-09-06', $h));
+chequear('manana, el primer dia pendiente, tambien',
+    'DENTRO', CobElectronicos::ubicacionEnEje('2026-09-07', $h));
+chequear('el dia de hoy ya NO: esta en el eje pero cuenta como acreditado',
+    'ANTERIOR', CobElectronicos::ubicacionEnEje('2026-09-06', $h));
 chequear('una fecha anterior queda afuera',
     'ANTERIOR', CobElectronicos::ubicacionEnEje('2026-09-02', $h));
+
+// Un viernes, el sabado siguiente ES pendiente: una billetera acredita
+// cualquier dia, y correr el corte al lunes lo escondería.
+$viernes = new Horizonte(28, 12, [], new DateTime('2026-09-11'));
+
+chequear('visto un viernes, el sabado es pendiente',
+    'DENTRO', CobElectronicos::ubicacionEnEje('2026-09-12', $viernes));
+chequear('y el viernes mismo no',
+    'ANTERIOR', CobElectronicos::ubicacionEnEje('2026-09-11', $viernes));
 
 // El caso que Horizonte::acumular() resolveria mal para este modulo: el 1/9 cae
 // en la columna del mes 2026-09, que existe en el eje pero que el tablero ni
@@ -331,6 +405,33 @@ chequear('el que cae fuera del tramo diario va a la columna de su mes',
 // bancario, asi que reubicarla la contaria dos veces.
 chequear('un movimiento ya acreditado no se reubica en la primera columna',
     0.0, $serie['dias']['2026-09-06']);
+
+// Y UNO CON FECHA DE HOY TAMPOCO ENTRA: la primera columna del tablero ya lo
+// tiene por el saldo bancario. Se cuenta como ya acreditado, no como pendiente.
+$deHoyArmado = CobElectronicos::armarMovimientos([
+    ['id' => 9, 'id_procesadora' => 1, 'procesadora' => 'Payway',
+     'importe_bruto' => 100000.0, 'fecha_acreditacion' => '2026-09-06',
+     'tasa_aplicada' => 0.031, 'importe_neto' => 96900.0]
+], $h);
+$serieHoy = CobElectronicos::armarSerie($deHoyArmado['filas'], $h);
+
+chequear('un movimiento con fecha de hoy no suma en la columna de hoy',
+    0.0, $serieHoy['dias']['2026-09-06']);
+chequear('ni en ninguna otra', 0.0, array_sum($serieHoy['dias']) + array_sum($serieHoy['meses']));
+chequear('se cuenta como ya acreditado', 96900.0, $serieHoy['ya_acreditado']);
+chequear('sin aviso', 0, count($serieHoy['warnings']));
+chequear('y su fila queda marcada como acreditada',
+    'ANTERIOR', $deHoyArmado['filas'][0]['ubicacion_eje']);
+
+// El mismo movimiento, corrido al primer dia pendiente, si entra.
+$deMananaArmado = CobElectronicos::armarMovimientos([
+    ['id' => 9, 'id_procesadora' => 1, 'procesadora' => 'Payway',
+     'importe_bruto' => 100000.0, 'fecha_acreditacion' => '2026-09-07',
+     'tasa_aplicada' => 0.031, 'importe_neto' => 96900.0]
+], $h);
+
+chequear('el mismo movimiento fechado el primer dia pendiente si entra',
+    96900.0, CobElectronicos::armarSerie($deMananaArmado['filas'], $h)['dias']['2026-09-07']);
 
 // Y TAMPOCO SE AVISA NI SUMA A fuera_horizonte. No es plata que el tablero
 // informe de menos: es plata que el tablero informa por otra fila, la del saldo
@@ -592,6 +693,28 @@ chequear('el aviso explica el cero remitiendo al saldo bancario', true,
 chequear('y dice que no hay acreditaciones pendientes', true,
     strpos(implode(' ', $todoAcreditado->warnings()), 'pendientes') !== false);
 
+// 5b. Lo unico cargado tiene fecha de HOY: para el tablero es lo mismo que ya
+//     acreditado, porque la primera columna ya lo tiene por el saldo bancario.
+$soloHoy = proveedorConDoble(function ($f) {
+    $f->procesadoras = [['ID' => 1, 'RAZON_SOCIAL' => 'Payway', 'ACTIVO' => 1]];
+    $f->alicuotas = [1 => [
+        ['ID' => 1, 'CONCEPTO' => 'IIBB', 'ALICUOTA' => 0.031,
+         'VIGENCIA_DESDE' => '2026-01-01', 'ACTIVO' => 1]
+    ]];
+    $f->movimientos = [
+        ['id' => 1, 'id_procesadora' => 1, 'procesadora' => 'Payway',
+         'importe_bruto' => 1000.0, 'fecha_acreditacion' => '2026-09-06',
+         'tasa_aplicada' => 0.031, 'importe_neto' => 969.0]
+    ];
+});
+
+$s = $soloHoy->series($h)['COBRANZA'];
+
+chequear('con solo un movimiento de hoy la fila va en cero', 0.0, array_sum($s['dias']));
+chequear('la columna de hoy no lo suma', 0.0, $s['dias']['2026-09-06']);
+chequear('y el aviso explica el cero por el saldo bancario', true,
+    strpos(implode(' ', $soloHoy->warnings()), 'saldo bancario') !== false);
+
 // 6. El camino normal: la serie del proveedor es la suma de netos.
 $normal = proveedorConDoble(function ($f) use ($paraSerie, $alicuotas) {
     $f->procesadoras = [['ID' => 1, 'RAZON_SOCIAL' => 'Payway', 'ACTIVO' => 1],
@@ -763,7 +886,7 @@ $archivo = [
 ];
 
 $diff = CobElectronicos::compararImportacion($archivo, $cargados, $procesadorasImp,
-    $alicuotasImp, '2026-09-06');
+    $alicuotasImp, $corte);
 
 chequear('una fila identica no se toca', 1, $diff['resumen']['sin_cambios']);
 chequear('una fila con otro importe es un cambio', 1, $diff['resumen']['cambios']);
@@ -804,7 +927,7 @@ $conNeto = "PROCESADORA;IMPORTE_BRUTO;FECHA_ACREDITACION;IMPORTE_NETO\n"
 
 $diffNeto = CobElectronicos::compararImportacion(
     CobElectronicos::parsearPlanilla($conNeto)['filas'],
-    [], $procesadorasImp, $alicuotasImp, '2026-09-06');
+    [], $procesadorasImp, $alicuotasImp, $corte);
 
 chequear('el neto del archivo se ignora', 969000.0, $diffNeto['filas'][0]['importe_neto']);
 
@@ -820,7 +943,7 @@ $conErrores = [
 ];
 
 $diffErr = CobElectronicos::compararImportacion($conErrores, [], $procesadorasImp,
-    $alicuotasImp, '2026-09-06');
+    $alicuotasImp, $corte);
 
 chequear('las seis filas quedan como error', 6, $diffErr['resumen']['errores']);
 chequear('y con un solo error no se importa NADA', false, $diffErr['puede_importar']);
@@ -855,13 +978,13 @@ chequear('la fila conserva el valor crudo del archivo',
 chequear('y volver a pasarla por el diff la rechaza igual', 1,
     CobElectronicos::compararImportacion(
         [array_merge(['linea' => 5], $porLineaErr[5]['crudo'])],
-        [], $procesadorasImp, $alicuotasImp, '2026-09-06')['resumen']['errores']);
+        [], $procesadorasImp, $alicuotasImp, $corte)['resumen']['errores']);
 
 // Sin alicuota vigente a esa fecha no se puede calcular el neto: es la misma
 // regla que la carga manual, aplicada al archivo.
 $sinAli = CobElectronicos::compararImportacion(
     [filaArchivo(2, 'Payway', '1000', '10/09/2026')],
-    [], $procesadorasImp, [], '2026-09-06');
+    [], $procesadorasImp, [], $corte);
 
 chequear('sin alicuota vigente la fila del archivo se rechaza',
     1, $sinAli['resumen']['errores']);
@@ -878,7 +1001,7 @@ $repetidas = [
 ];
 
 $diffRep = CobElectronicos::compararImportacion($repetidas, [], $procesadorasImp,
-    $alicuotasImp, '2026-09-06');
+    $alicuotasImp, $corte);
 
 chequear('la segunda queda como error', 1, $diffRep['resumen']['errores']);
 chequear('y el mensaje pide llenar ID_EXTERNO',
@@ -893,7 +1016,7 @@ $conExterno = [
 ];
 
 $diffExt = CobElectronicos::compararImportacion($conExterno, [], $procesadorasImp,
-    $alicuotasImp, '2026-09-06');
+    $alicuotasImp, $corte);
 
 chequear('con numero de liquidacion las dos son altas', 2, $diffExt['resumen']['altas']);
 chequear('y ninguna es error', 0, $diffExt['resumen']['errores']);
@@ -909,7 +1032,7 @@ $cargadoConExterno = [
 
 $diffMovida = CobElectronicos::compararImportacion(
     [filaArchivo(2, 'Payway', '1000', '15/09/2026', 'LIQ-1')],
-    $cargadoConExterno, $procesadorasImp, $alicuotasImp, '2026-09-06');
+    $cargadoConExterno, $procesadorasImp, $alicuotasImp, $corte);
 
 chequear('una acreditacion reprogramada se reconoce por su numero de liquidacion',
     1, $diffMovida['resumen']['cambios']);
@@ -948,7 +1071,7 @@ $cargadosBaja = [
 $diffBajas = CobElectronicos::compararImportacion(
     [filaArchivo(2, 'Payway', '1000000', '10/09/2026'),
      filaArchivo(3, 'Payway', '1000000', '12/09/2026')],
-    $cargadosBaja, $procesadorasImp, $alicuotasImp, '2026-09-06');
+    $cargadosBaja, $procesadorasImp, $alicuotasImp, $corte);
 
 chequear('solo se propone dar de baja lo que el archivo cubria', 1,
     $diffBajas['resumen']['bajas']);
@@ -967,7 +1090,7 @@ chequear('el neto que se daria de baja se informa', 678300.0,
 // propone -y no se adivina-.
 $diffPrimeraCaida = CobElectronicos::compararImportacion(
     [filaArchivo(2, 'Payway', '1000000', '12/09/2026')],
-    $cargadosBaja, $procesadorasImp, $alicuotasImp, '2026-09-06');
+    $cargadosBaja, $procesadorasImp, $alicuotasImp, $corte);
 
 chequear('con el rango inferido, una baja anterior a la primera fila no se propone',
     0, $diffPrimeraCaida['resumen']['bajas']);
@@ -977,7 +1100,7 @@ chequear('y se informa que la ventana se infirio',
 // Declarando el periodo -que el usuario conoce, es el que exporto- si se ve.
 $diffPeriodo = CobElectronicos::compararImportacion(
     [filaArchivo(2, 'Payway', '1000000', '12/09/2026')],
-    $cargadosBaja, $procesadorasImp, $alicuotasImp, '2026-09-06',
+    $cargadosBaja, $procesadorasImp, $alicuotasImp, $corte,
     ['desde' => '2026-09-07', 'hasta' => '2026-09-20']);
 
 chequear('declarando el periodo, la baja aparece', 1, $diffPeriodo['resumen']['bajas']);
@@ -990,7 +1113,7 @@ chequear('con las fechas declaradas', '2026-09-07', $diffPeriodo['ventana']['des
 // el inicio del eje manda sobre el periodo.
 $diffPeriodoLargo = CobElectronicos::compararImportacion(
     [filaArchivo(2, 'Payway', '1000000', '12/09/2026')],
-    $cargadosBaja, $procesadorasImp, $alicuotasImp, '2026-09-06',
+    $cargadosBaja, $procesadorasImp, $alicuotasImp, $corte,
     ['desde' => '2026-01-01', 'hasta' => '2026-12-31']);
 
 $idsBaja = array_map(function ($b) { return $b['id']; }, $diffPeriodoLargo['bajas']);
@@ -1004,7 +1127,7 @@ chequear('y nunca las de otra procesadora', false, in_array(31, $idsBaja, true))
 // Un archivo que no cambia nada lo dice, en lugar de dejar el boton habilitado.
 $sinNada = CobElectronicos::compararImportacion(
     [filaArchivo(2, 'Payway', '1000000,00', '10/09/2026')],
-    [$cargados[0]], $procesadorasImp, $alicuotasImp, '2026-09-06');
+    [$cargados[0]], $procesadorasImp, $alicuotasImp, $corte);
 
 chequear('un archivo que no cambia nada no se puede importar',
     false, $sinNada['puede_importar']);

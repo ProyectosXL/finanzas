@@ -10,7 +10,10 @@
  *
  *   1. Una procesadora no se puede activar sin alícuota vigente. El switch se
  *      bloquea y dice por qué, en lugar de dejar mandar un guardado que el
- *      servidor va a rechazar.
+ *      servidor va a rechazar. Cuando SÍ se puede, el switch guarda al tocarlo
+ *      y el estado queda escrito al lado ("Activa" / "Inactiva"): un switch
+ *      apagado en una fila atenuada se leía como "no se puede tocar", y así fue
+ *      como una procesadora con alícuotas cargadas quedó sin activar.
  *   2. Editar un porcentaje INSERTA una vigencia nueva. Por eso no hay inputs
  *      editables sobre las filas de alícuotas: se carga una vigencia nueva y la
  *      anterior queda a la vista, que es lo que explica la tasa de un
@@ -30,6 +33,19 @@
     function inicializar() {
         conectar('btnRefreshParamCobel', cargar);
         conectar('btnGuardarProcesadoras', guardarProcesadoras);
+
+        // El switch de activación guarda al tocarlo. Se delega en el tbody y
+        // se ata UNA vez: las filas se redibujan en cada cargar(), y atar por
+        // fila duplicaría el handler.
+        var bodyProcs = document.getElementById('bodyProcesadoras');
+
+        if (bodyProcs) {
+            bodyProcs.addEventListener('change', function(e) {
+                if (e.target && e.target.classList.contains('pce-proc-activo')) {
+                    cambiarActivo(e.target);
+                }
+            });
+        }
 
         conectar('btnNuevaProcesadora', function() { alternar('formProcesadora'); });
         conectar('btnCancelarProcesadora', function() { mostrar('formProcesadora', false); });
@@ -150,6 +166,17 @@
         var activa = (parseInt(p.ACTIVO, 10) === 1);
         var tasa = tasaVigente(p.ID);
         var puedeActivar = (tasa.conceptos > 0);
+        var bloqueado = (!activa && !puedeActivar);
+
+        // Tres situaciones, tres textos: bloqueada dice por qué, activable
+        // dice qué pasa al tocarla, activa dice qué pasa al apagarla.
+        var titulo = bloqueado
+            ? 'No se puede activar sin al menos una alícuota vigente: sus movimientos no ' +
+              'podrían calcular el importe neto. Cargale una alícuota en la sección de abajo.'
+            : (activa
+                ? 'Inhabilitarla la saca del alta de movimientos, pero los ya cargados quedan ' +
+                  'enteros. Se guarda al tocar el switch.'
+                : 'Activarla la habilita en el alta de movimientos. Se guarda al tocar el switch.');
 
         return '<tr class="' + (activa ? '' : 'pce-inactiva') + '">' +
             '<td>' +
@@ -160,22 +187,93 @@
             '<td class="text-center pce-num">' + textoTasa(tasa) + '</td>' +
             '<td class="text-center pce-fecha">' +
                 (p.FECHA_UPDATE ? fechaHora(p.FECHA_UPDATE) : '—') + '</td>' +
-            '<td class="text-center">' +
+            // La celda del estado no se atenúa (ver Parametros.css): un switch
+            // apagado y gris se lee como "no se puede tocar".
+            '<td class="text-center pce-celda-estado">' +
                 '<div class="form-check form-switch d-inline-block">' +
                     '<input class="form-check-input pce-proc-activo" type="checkbox" role="switch" ' +
                         'data-id="' + p.ID + '"' +
                         (activa ? ' checked' : '') +
-                        ((!activa && !puedeActivar) ? ' disabled' : '') +
-                        ' title="' +
-                        ((!activa && !puedeActivar)
-                            ? 'No se puede activar sin al menos una alícuota vigente: sus ' +
-                              'movimientos no podrían calcular el importe neto'
-                            : 'Inhabilitarla la saca del alta de movimientos, pero los ya ' +
-                              'cargados quedan enteros') +
-                        '">' +
+                        (bloqueado ? ' disabled' : '') +
+                        ' title="' + titulo + '">' +
                 '</div>' +
+                '<span class="pce-estado ' + (activa ? 'pce-estado-activa' : 'pce-estado-inactiva') +
+                    '" title="' + titulo + '">' +
+                    (activa ? 'Activa' : (bloqueado ? 'Inactiva · sin alícuota' : 'Inactiva')) +
+                '</span>' +
             '</td>' +
         '</tr>';
+    }
+
+    /**
+     * Guarda el cambio de estado de UNA procesadora en el momento en que se
+     * toca el switch.
+     *
+     * Manda sólo esa fila: el endpoint acepta una lista, y mandar todas
+     * pisaría los nombres de las demás con lo que haya en pantalla. Si hay
+     * nombres editados sin guardar, el toggle se rechaza y se avisa: el
+     * guardado recarga la tabla y esos nombres se perderían en silencio.
+     */
+    function cambiarActivo(checkbox) {
+        var id = parseInt(checkbox.dataset.id, 10);
+        var nuevo = checkbox.checked;
+        var proc = (modulo.procesadoras || []).filter(function(p) {
+            return parseInt(p.ID, 10) === id;
+        })[0];
+
+        if (!proc) {
+            return;
+        }
+
+        if (hayNombresSinGuardar()) {
+            checkbox.checked = !nuevo;
+            Notificacion.advertencia('Guardá primero los nombres editados con "Guardar procesadoras".', {
+                detalle: 'Cambiar el estado recarga la tabla y se perderían.'
+            });
+
+            return;
+        }
+
+        var nombreInput = document.querySelector('.pce-proc-nombre[data-id="' + id + '"]');
+        var razon = (nombreInput ? nombreInput.value.trim() : '') || proc.RAZON_SOCIAL;
+
+        checkbox.disabled = true;
+
+        pedirJson(URL_PARAM + '?action=saveProcesadorasCobel', {
+            filas: [{ id: id, razon_social: razon, activo: nuevo }]
+        })
+            .then(function() {
+                Notificacion.exito(nuevo
+                    ? '"' + razon + '" activada: ya se puede elegir al cargar un movimiento.'
+                    : '"' + razon + '" inhabilitada: sale del alta de movimientos, los ya cargados quedan.');
+                cargar();
+            })
+            .catch(function(error) {
+                checkbox.checked = !nuevo;
+                checkbox.disabled = false;
+                Notificacion.error('No se pudo cambiar el estado de "' + razon + '": ' + error.message);
+            });
+    }
+
+    /** Si algún nombre de procesadora en pantalla difiere del guardado */
+    function hayNombresSinGuardar() {
+        var porId = {};
+
+        (modulo.procesadoras || []).forEach(function(p) {
+            porId[parseInt(p.ID, 10)] = String(p.RAZON_SOCIAL || '').trim();
+        });
+
+        var sucio = false;
+
+        document.querySelectorAll('.pce-proc-nombre').forEach(function(i) {
+            var id = parseInt(i.dataset.id, 10);
+
+            if (porId[id] !== undefined && i.value.trim() !== porId[id]) {
+                sucio = true;
+            }
+        });
+
+        return sucio;
     }
 
     /**

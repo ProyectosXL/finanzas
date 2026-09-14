@@ -439,6 +439,144 @@ chequear('un rango vacio de facturas deja cero filas', 0,
     count(Ingresos::filtrarPorFechaEmision($ITEMS, ['desde' => '2027-01-01', 'hasta' => '2027-12-31'])['items']));
 
 // ============================================================================
+// El PPP es por grupo empresario
+// ============================================================================
+
+seccion('el PPP efectivo: manual del grupo, calculado del grupo, DIAS_PP_MAX, 30');
+
+// La regla vive UNA vez (Ingresos::pppEfectivo). Antes estaba escrita tres
+// veces y podian desalinearse.
+chequear('el manual manda', 45, Ingresos::pppEfectivo(45, 20, 15));
+chequear('sin manual, el calculado', 20, Ingresos::pppEfectivo(null, 20, 15));
+chequear('un manual en cero es "sin manual"', 20, Ingresos::pppEfectivo(0, 20, 15));
+chequear('sin calculado, el DIAS_PP_MAX del cliente', 15, Ingresos::pppEfectivo(null, 0, 15));
+chequear('sin nada, 30', 30, Ingresos::pppEfectivo(null, 0, 0));
+chequear('los vacios de la base cuentan como nada', 30, Ingresos::pppEfectivo('', '', null));
+chequear('acepta strings de sqlsrv', 45, Ingresos::pppEfectivo('45', '20', '15'));
+chequear('un manual negativo no manda', 20, Ingresos::pppEfectivo(-5, 20, 15));
+chequear('el respaldo es la constante', 30, Ingresos::PPP_DEFECTO);
+
+seccion('el agrupador es el grupo empresario o el propio cliente');
+
+chequear('sin grupo, el cliente', 'FR001', Ingresos::codAgrupador('FR001', ''));
+chequear('con grupo null tambien', 'FR001', Ingresos::codAgrupador('FR001', null));
+chequear('con grupo, el grupo en mayusculas y sin espacios', 'GR1',
+    Ingresos::codAgrupador('fr001', ' gr1 '));
+chequear('un grupo de solo espacios es sin grupo', 'FR001', Ingresos::codAgrupador(' fr001 ', '   '));
+
+seccion('el PPP del grupo se reparte a todos sus clientes');
+
+// Cuatro clientes: dos del grupo GR1, uno sin grupo, uno del grupo GR2 que no
+// tiene recibos en la ventana.
+$clientesPPP = [
+    ['cod_cliente' => 'FR001', 'razon_social' => 'LOCAL UNO', 'grupo_empr' => 'GR1', 'nombre_gru' => 'GRUPO UNO'],
+    ['cod_cliente' => 'FR002', 'razon_social' => 'LOCAL DOS', 'grupo_empr' => 'GR1', 'nombre_gru' => 'GRUPO UNO'],
+    ['cod_cliente' => 'FR003', 'razon_social' => 'SOLITARIO SRL', 'grupo_empr' => '', 'nombre_gru' => ''],
+    ['cod_cliente' => 'FR004', 'razon_social' => 'LOCAL CUATRO', 'grupo_empr' => 'GR2', 'nombre_gru' => 'GRUPO DOS']
+];
+
+$vistaPPP = [
+    'GR1' => ['ppp' => 25, 'cant_recibos' => 3, 'cant_clientes' => 2, 'nombre_agrup' => 'GRUPO UNO (VISTA)', 'es_grupo' => true],
+    'FR003' => ['ppp' => 40, 'cant_recibos' => 5, 'cant_clientes' => 1, 'nombre_agrup' => 'SOLITARIO SRL', 'es_grupo' => false]
+];
+
+$manualesPPP = ['GR2' => 50];
+
+$paramsPPP = [
+    'FR004' => ['dias_pp_max' => 12, 'medio_pago' => 'ECHEQ', 'desc_pp_max' => 0],
+    'FR002' => ['dias_pp_max' => 99, 'medio_pago' => 'ECHEQ', 'desc_pp_max' => 0]
+];
+
+$ppps = Ingresos::armarPPPPorCliente($clientesPPP, $vistaPPP, $manualesPPP, $paramsPPP);
+
+chequear('hay una entrada por cliente', 4, count($ppps));
+chequear('los dos del grupo comparten el PPP del grupo', 25, $ppps['FR001']['ppp_efectivo']);
+chequear('aunque uno tenga DIAS_PP_MAX propio', 25, $ppps['FR002']['ppp_efectivo']);
+chequear('y saben de que grupo salio', 'GR1', $ppps['FR002']['cod_agrup']);
+chequear('con el nombre que trae la vista', 'GRUPO UNO (VISTA)', $ppps['FR001']['nombre_agrup']);
+chequear('y cuantos recibos lo respaldan', 3, $ppps['FR001']['cant_recibos']);
+
+chequear('el cliente sin grupo es su propio agrupador', 'FR003', $ppps['FR003']['cod_agrup']);
+chequear('no es grupo', false, $ppps['FR003']['es_grupo']);
+chequear('y usa su propio calculado', 40, $ppps['FR003']['ppp_efectivo']);
+
+chequear('un grupo sin recibos queda con calculado cero', 0, $ppps['FR004']['ppp_calculado']);
+chequear('pero manda su manual', 50, $ppps['FR004']['ppp_efectivo']);
+chequear('y el nombre sale de GVA62', 'GRUPO DOS', $ppps['FR004']['nombre_agrup']);
+
+// Sin manual, el grupo sin recibos cae al respaldo del cliente; sin params, a 30.
+$sinManual = Ingresos::armarPPPPorCliente($clientesPPP, $vistaPPP, [], $paramsPPP);
+chequear('sin manual ni calculado, el DIAS_PP_MAX del cliente', 12, $sinManual['FR004']['ppp_efectivo']);
+
+$sinNada = Ingresos::armarPPPPorCliente($clientesPPP, $vistaPPP, [], []);
+chequear('sin nada, 30', 30, $sinNada['FR004']['ppp_efectivo']);
+chequear('un manual en cero de la tabla es "sin manual"', 25,
+    Ingresos::armarPPPPorCliente($clientesPPP, $vistaPPP, ['GR1' => 0], [])['FR001']['ppp_efectivo']);
+
+seccion('la tarjeta lista solo franquicias con sucursal habilitada');
+
+// El direccionario: dos sucursales del mismo cliente, una fila sin cliente.
+$direccionario = [
+    ['NRO_SUCURSAL' => 804, 'COD_CLIENT' => 'FR001', 'DESC_SUCURSAL' => 'BAHIA BLANCA - CENTRO'],
+    ['NRO_SUCURSAL' => 805, 'COD_CLIENT' => 'FR001', 'DESC_SUCURSAL' => 'BAHIA BLANCA SHOPPING'],
+    ['NRO_SUCURSAL' => 810, 'COD_CLIENT' => 'fr003 ', 'DESC_SUCURSAL' => 'LINIERS'],
+    ['NRO_SUCURSAL' => 811, 'COD_CLIENT' => '', 'DESC_SUCURSAL' => 'SIN CLIENTE']
+];
+
+$mapa = Parametros::mapaSucursales($direccionario);
+
+chequear('un cliente por entrada, sin la fila sin cliente', 2, count($mapa));
+chequear('dos sucursales se concatenan', '804, 805', $mapa['FR001']['nro_sucursal']);
+chequear('con sus descripciones', 'BAHIA BLANCA - CENTRO / BAHIA BLANCA SHOPPING', $mapa['FR001']['desc_sucursal']);
+chequear('y se cuentan', 2, $mapa['FR001']['cant_sucursales']);
+chequear('el codigo se normaliza', 'LINIERS', $mapa['FR003']['desc_sucursal']);
+
+$filtrado = Parametros::filtrarFranquiciasActivas($ppps, $mapa);
+
+chequear('quedan solo los que estan en el direccionario', 2, count($filtrado['clientes']));
+chequear('con su sucursal colgada', '804, 805', $filtrado['clientes']['FR001']['nro_sucursal']);
+chequear('los demas se cuentan como descartados', 2, $filtrado['descartados']);
+chequear('sin aviso: las bajas son a proposito', 0, count($filtrado['avisos']));
+
+// Informar de mas antes que vacio: sin direccionario se muestran todos y se avisa.
+$sinDir = Parametros::filtrarFranquiciasActivas($ppps, null);
+chequear('sin direccionario se muestran todos', 4, count($sinDir['clientes']));
+chequear('con un aviso que nombra al servidor', true,
+    strpos($sinDir['avisos'][0], 'locales') !== false);
+chequear('y sin sucursal', '', $sinDir['clientes']['FR001']['nro_sucursal']);
+
+$dirVacio = Parametros::filtrarFranquiciasActivas($ppps, []);
+chequear('un direccionario vacio tambien muestra todos', 4, count($dirVacio['clientes']));
+chequear('y avisa', 1, count($dirVacio['avisos']));
+
+seccion('la tarjeta agrupa una fila por agrupador');
+
+foreach ($ppps as $cod => $c) {
+    $ppps[$cod]['medio_pago_default'] = ($cod === 'FR002') ? 'TRANSFERENCIA' : 'ECHEQ';
+    $ppps[$cod]['desc_pp_max'] = 0;
+}
+
+$grupos = Parametros::agruparPorAgrupador($ppps);
+
+chequear('tres agrupadores', 3, count($grupos));
+chequear('ordenados por nombre', ['GRUPO DOS', 'GRUPO UNO (VISTA)', 'SOLITARIO SRL'],
+    array_column($grupos, 'nombre_agrup'));
+chequear('el grupo uno tiene dos clientes', 2, count($grupos[1]['clientes']));
+chequear('ordenados por codigo', ['FR001', 'FR002'], array_column($grupos[1]['clientes'], 'cod_cliente'));
+chequear('el efectivo del grupo con manual es el manual', 50, $grupos[0]['ppp_efectivo']);
+chequear('el efectivo del grupo con calculado es el calculado', 25, $grupos[1]['ppp_efectivo']);
+chequear('cada cliente conserva su medio de pago', 'TRANSFERENCIA',
+    $grupos[1]['clientes'][1]['medio_pago_default']);
+chequear('y su efectivo', 25, $grupos[1]['clientes'][1]['ppp_efectivo']);
+
+// El efectivo del grupo no usa DIAS_PP_MAX (es por cliente): un grupo sin
+// manual ni calculado queda en 30 aunque su cliente tenga respaldo propio.
+$gruposSinManual = Parametros::agruparPorAgrupador($sinManual);
+$gr2 = array_values(array_filter($gruposSinManual, function ($g) { return $g['cod_agrup'] === 'GR2'; }))[0];
+chequear('el grupo sin PPP queda en 30', 30, $gr2['ppp_efectivo']);
+chequear('pero su cliente usa su DIAS_PP_MAX', 12, $gr2['clientes'][0]['ppp_efectivo']);
+
+// ============================================================================
 // Parámetros y Registro de Cashflow
 // ============================================================================
 

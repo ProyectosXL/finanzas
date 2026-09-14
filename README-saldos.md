@@ -85,16 +85,26 @@ Es la regla transversal del relevamiento y está en el modelo, no calculada a oj
 
 Una cuenta que **nunca se cargó** dice `sin cargar`, no `0`. No es lo mismo.
 
+### Filtro por tipo
+
+El selector de la cabecera filtra la tabla por tipo de cuenta (`Banco`, `Mercado Pago`, `Efectivo`, `Otro`) y **los KPI *Total en Pesos* y *Total en Dólares*, y el pie de la tabla, se recalculan sobre lo filtrado** —el pie de cada KPI dice qué tipo está aplicado—. Es un filtro de pantalla, resuelto en el navegador con las filas que ya trajo el payload: lo que se guarda y lo que consume el tablero es siempre el conjunto completo.
+
+Mientras dura una **carga**, el filtro se limpia y se bloquea: el guardado toma el input de cada fila, y una fila escondida por el filtro no tendría input, así que su saldo viajaría en cero.
+
 ---
 
 ## Pestaña 2 — Saldos Locales
 
-Alimenta la fila **Caja Locales** (`DEPOSITOS`). Sale de una consulta contra el servidor `locales` que devuelve el último saldo de caja por sucursal y cuenta de tesorería, filtrando `CANAL = 'PROPIOS'` y `HABILITADO = 1`.
+Alimenta la fila **Caja Locales** (`DEPOSITOS`). Sale de una consulta contra el servidor `locales` sobre **`RO_T_SALDOS_CIERRE_SBA29`** que devuelve **el último registro** de caja por sucursal y cuenta —la fecha más nueva y, a igual fecha, el `ID` más alto, porque hay días cargados dos veces—, filtrando por `SUCURSALES_LAKERS` con `CANAL = 'PROPIOS'` y `HABILITADO = 1`. Es lo que se muestra hoy.
+
+**El importe es `SALDO_CIER`, el saldo de cierre.** La tabla trae también `SALDO_APE` (apertura), que no se usa: lo que hay para depositar es lo que quedó al cerrar.
+
+> Antes el origen era `RO_T_SALDO_CAJA_SUCURSALES.SALDO_MONEDA`. Se cambió por pedido del negocio; la foto que se guarda en `RO_T_CASHFLOW_SALDOS_LOCAL` conserva sus columnas (`SALDO_MONEDA`, `COD_CTA_CUENTA_TESORERIA`), así que el histórico sigue leyéndose igual.
 
 | Columna | Qué es | Editable |
 | --- | --- | --- |
-| Local | `NRO_SUCURSAL` + `DESC_SUCURSAL` | no |
-| Saldo en caja | `SALDO_MONEDA` de la consulta | no |
+| Local | `NRO_SUCURS` + `DESC_SUCURSAL` de `SUCURSALES_LAKERS` | no |
+| Saldo en caja | `SALDO_CIER` de la consulta, o el saldo manual si es más nuevo | **sí**, para cuando la consulta no trajo el cierre |
 | Fecha del saldo | `FECHA` de la consulta | no |
 | Gestión | `Deposita` / `Envía` | **sí** |
 | Reserva de caja | Mínimo que la sucursal debe conservar | **sí** |
@@ -135,9 +145,24 @@ Descartarla mostraba la fila en cero justo cuando había millones para depositar
 
 Una fecha **posterior** al eje sí queda `fuera_horizonte` y se informa: ésa es una fecha que el horizonte no cubre, no un dato que ya es cierto.
 
+### El saldo en caja se puede tipear cuando la consulta no trajo el cierre
+
+La alimentación de `RO_T_SALDOS_CIERRE_SBA29` puede fallar —error de conexión, un cierre que no viajó— y entonces el último registro del local queda viejo. Por eso:
+
+- **Las filas cuyo saldo no es el cierre de ayer se resaltan** (fondo y borde rojos, y *"no es de ayer"* debajo de la fecha). La regla es `fecha_saldo < ayer`, con `ayer` calculado por el servidor y devuelto en el payload; una fecha de hoy o posterior no está desactualizada, y una fila sin fecha sí. El aviso lista los locales y sube también al tablero.
+- **La columna *Saldo en caja* es un input.** Un saldo distinto del que manda se guarda, con *Guardar*, en **`RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL`** como registro fechado **ayer** —el cierre que no llegó—, junto con lo que decía la consulta en ese momento (`SALDO_CONSULTA`, `FECHA_CONSULTA`) para poder explicarlo después.
+
+**La regla de precedencia es una sola**, `Saldos::aplicarSaldosManuales()`, y la usan la pestaña, el guardado y el tablero: para cada local **gana el más nuevo por fecha** entre la consulta y el manual, y **a igual fecha gana el manual** —si alguien lo tipeó es porque el de la consulta no servía—. Cuando la consulta vuelve a traer un cierre más nuevo, vuelve a mandar sola: un manual no es un override permanente sino un dato con fecha.
+
+Qué saldos son nuevos lo decide `saldosManualesNuevos()`, un helper puro con tolerancia de un centavo: la pantalla manda los 20 locales en cada guardado, y sin el diff cada guardado insertaría un manual por local y la consulta no volvería a mandar nunca. Un manual de un local que la consulta no devuelve no inventa la fila.
+
+La foto (`RO_T_CASHFLOW_SALDOS_LOCAL`) guarda **`ORIGEN_DATO`** (`CONSULTA` / `MANUAL`) y la cabecera de una carga con manuales va como `MIXTA`, así el histórico dice de dónde salió el saldo que entró al tablero ese día. En pantalla, la fila con un manual lleva la marca *manual* (con quién y cuándo lo cargó) y debajo *"consulta: $X del dd/mm"*.
+
+> La tabla y la columna las crea `sql/cashflow_saldos_local_manual.sql` (mismo bloque dentro de `cashflow_saldos.sql`). Sin correrlo, la pestaña funciona igual pero el saldo no se puede tipear y avisa qué script falta.
+
 ### Una fila por sucursal, no por cuenta
 
-La consulta devuelve una fila por `(sucursal, cuenta de tesorería)`. La reserva, en cambio, es un mínimo **de la sucursal**: con dos cuentas y una reserva, restarla a cada una la descontaría dos veces. Así que los saldos se suman por sucursal, la columna `CUENTAS` dice cuántas se sumaron y `COD_CTA_CUENTA_TESORERIA` guarda los códigos separados por coma, para que la suma sea auditable.
+La consulta devuelve una fila por `(sucursal, cuenta de tesorería)`. La reserva, en cambio, es un mínimo **de la sucursal**: con dos cuentas y una reserva, restarla a cada una la descontaría dos veces. Así que los saldos se suman por sucursal, la columna `CUENTAS` dice cuántas se sumaron y `COD_CTA_CUENTA_TESORERIA` guarda los códigos (`COD_CTA`) separados por coma, para que la suma sea auditable.
 
 ---
 
@@ -157,7 +182,8 @@ Cinco tablas, prefijo `RO_T_CASHFLOW_SALDOS_`. Cumplen tres propiedades:
 | `RO_T_CASHFLOW_SALDOS_CARGA` | Cabecera de cada carga: tipo, fecha y hora, usuario, origen, observaciones |
 | `RO_T_CASHFLOW_SALDOS_DETALLE` | Histórico de saldos por cuenta y fecha, con los cinco `balances` y el `message` |
 | `RO_T_CASHFLOW_SALDOS_SUCURSAL` | Gestión y reserva por local (parámetro) |
-| `RO_T_CASHFLOW_SALDOS_LOCAL` | Histórico de la caja de los locales, con la gestión y la reserva **efectivas** |
+| `RO_T_CASHFLOW_SALDOS_LOCAL` | Histórico de la caja de los locales, con la gestión y la reserva **efectivas** y `ORIGEN_DATO` del saldo |
+| `RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL` | Saldo de caja tipeado a mano cuando la consulta no trajo el cierre; insert-only, fechado ayer |
 
 ### Por qué hay una cabecera de carga
 
@@ -328,7 +354,7 @@ Sub-pestaña **Parámetros → Saldos**, con tres secciones.
 | Qué | Conexión |
 | --- | --- |
 | Tablas del módulo, parámetros, `SBA05` | `central` |
-| `RO_T_SALDO_CAJA_SUCURSALES`, `SUCURSALES_LAKERS` | `locales` |
+| `RO_T_SALDOS_CIERRE_SBA29`, `SUCURSALES_LAKERS` | `locales` |
 | Tipo de cambio (`RO_V_DOLAR_OFICIAL_BCRA`) | `central`, por linked server |
 
 En `ENV = DEV` las tablas de locales se alcanzan por linked server con el nombre de cuatro partes `[XL-LAKERBIS].locales_lakers.dbo.`. `Conexion` ya tenía ese valor como propiedad privada y ahora lo expone con `prefijoLocales()`, para no repetir la condición sobre `ENV` en cada consulta.
@@ -360,8 +386,15 @@ php tests/run.php saldos
 | Los dólares se valúan con la cotización de su mes; sin cotización no se valúan a cero | `armarSerieDisponible()` |
 | Los totales por moneda no se mezclan | `totalesPorMoneda()` |
 | Varias cuentas de tesorería de una sucursal se consolidan en una fila | `agruparPorSucursal()` |
+| El saldo tomado es el de cierre, no el de apertura | `agruparPorSucursal()` |
+| Un manual más nuevo que la consulta manda; a igual fecha también; uno más viejo no | `aplicarSaldosManuales()` |
+| Un manual de un local que la consulta no devuelve no inventa la fila | `aplicarSaldosManuales()` |
+| El neto, el aporte y los totales salen del saldo **efectivo** | `armarSaldosLocales()` |
+| Un saldo anterior a ayer queda desactualizado, con aviso; uno de ayer, de hoy o posterior no; uno sin fecha sí | `armarSaldosLocales()` |
+| Sólo un saldo distinto del efectivo (más de un centavo) es un manual nuevo; ausente o null no cuenta | `saldosManualesNuevos()` |
+| Un saldo negativo o no numérico se rechaza antes de abrir la transacción | `saldosManualesNuevos()` |
 
-Verificado además contra la base real: el script corrido dos veces sin duplicar, la consulta de `SBA05`, y un alta de cuenta + carga + lectura por el proveedor que dejó el importe en una sola columna del eje.
+Verificado además contra la base real: la pestaña marcó los 3 locales sin cierre del 13/09 y, tras cargarlos a mano desde la pantalla, la cabecera quedó `MIXTA`, la foto con 17 filas `CONSULTA` + 3 `MANUAL`, y la pestaña y el tablero dejaron de avisar. También: el script corrido dos veces sin duplicar, la consulta de `SBA05`, y un alta de cuenta + carga + lectura por el proveedor que dejó el importe en una sola columna del eje.
 
 ---
 

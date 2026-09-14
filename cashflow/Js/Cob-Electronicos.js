@@ -182,7 +182,17 @@
         texto('cobelEje', eje.desde
             ? ('Horizonte: ' + fecha(eje.desde) + ' a ' + fecha(eje.hasta))
             : '');
-        texto('cobelDesde', eje.desde ? fecha(eje.desde) : 'hoy');
+        texto('cobelDesde', pendientesDesde() ? fecha(pendientesDesde()) : 'mañana');
+    }
+
+    /**
+     * Desde qué fecha una acreditación cuenta como pendiente: mañana, resuelto
+     * por el servidor. NO es el inicio del eje (que es hoy): lo de hoy ya está
+     * —o va a estar al cierre— en el saldo bancario, así que acá cuenta como
+     * acreditado.
+     */
+    function pendientesDesde() {
+        return (datos && datos.pendientes_desde) ? datos.pendientes_desde : '';
     }
 
     /** La retención efectiva del conjunto, para el pie de la tarjeta del neto */
@@ -377,9 +387,10 @@
      */
     function marcaEje(f) {
         if (f.ubicacion_eje === 'ANTERIOR') {
-            return '<div class="cobel-marca-neutra" title="Ya se acreditó: esa plata está en la ' +
-                   'cuenta y la informa el saldo bancario de la pestaña Saldos. Sumarla acá la ' +
-                   'contaría dos veces.">ya acreditada</div>';
+            return '<div class="cobel-marca-neutra" title="Se acredita hoy o antes: esa ' +
+                   'plata está o va a estar hoy en la cuenta, y la informa el saldo bancario ' +
+                   'de la pestaña Saldos. Sumarla acá la contaría dos veces.">' +
+                   'ya acreditada</div>';
         }
 
         if (f.ubicacion_eje === 'POSTERIOR') {
@@ -433,8 +444,10 @@
         setValor('nuevoBruto', '');
         setValor('nuevoObservaciones', '');
 
+        // Se propone el primer día pendiente y no hoy: un movimiento con fecha
+        // de hoy nacería "ya acreditado" y no entraría al tablero.
         if (!valor('nuevoFecha')) {
-            setValor('nuevoFecha', (datos && datos.hoy) ? datos.hoy : '');
+            setValor('nuevoFecha', pendientesDesde() || ((datos && datos.hoy) ? datos.hoy : ''));
         }
 
         pintarPreview();
@@ -956,11 +969,13 @@
     function pintarCuadros() {
         var dias = datos.por_dia || [];
         var meses = datos.por_mes || [];
-        var eje = datos.eje || {};
+        var desde = pendientesDesde();
 
         document.getElementById('bodyPorDia').innerHTML = dias.length
             ? dias.map(function(d) {
-                  var anterior = (eje.desde && d.fecha < eje.desde);
+                  // Anterior al corte de pendientes, no al eje: el día de hoy
+                  // está en el eje pero ya cuenta como acreditado.
+                  var anterior = (desde && d.fecha < desde);
                   var fuera = !d.entra_al_tablero && !anterior;
 
                   return '<tr' + (fuera ? ' class="cobel-fuera-eje"'
@@ -987,7 +1002,7 @@
               }).join('')
             : '<tr><td colspan="3" class="text-center text-muted py-3">sin cargar</td></tr>';
 
-        texto('cobelDesde', eje.desde ? fecha(eje.desde) : 'hoy');
+        texto('cobelDesde', desde ? fecha(desde) : 'mañana');
     }
 
     /* ================================================================

@@ -63,11 +63,13 @@ chequear('el desempate tampoco depende del orden',
    ================================================================ */
 seccion('la consulta se consolida por sucursal');
 
+// Las filas crudas vienen de RO_T_SALDOS_CIERRE_SBA29: el importe es el saldo
+// de CIERRE (SALDO_CIER), no el de apertura.
 $consultaMulti = [
     ['NRO_SUCURSAL' => 40, 'DESC_SUCURSAL' => 'FLORES 1', 'FECHA' => '2026-09-06',
-     'COD_CTA_CUENTA_TESORERIA' => '4001', 'SALDO_MONEDA' => 100000],
+     'COD_CTA' => '4001', 'SALDO_CIER' => 100000],
     ['NRO_SUCURSAL' => 40, 'DESC_SUCURSAL' => 'FLORES 1', 'FECHA' => '2026-09-07',
-     'COD_CTA_CUENTA_TESORERIA' => '4002', 'SALDO_MONEDA' => 50000]
+     'COD_CTA' => '4002', 'SALDO_CIER' => 50000]
 ];
 
 $agrupado = Saldos::agruparPorSucursal($consultaMulti);
@@ -76,6 +78,16 @@ chequear('dos cuentas de la misma sucursal dan una sola fila', 1, count($agrupad
 chequear('los saldos se suman', 150000.0, floatval($agrupado[40]['saldo']));
 chequear('se informa cuantas cuentas se sumaron', 2, $agrupado[40]['cuentas']);
 chequear('queda la fecha mas reciente de las dos', '2026-09-07', $agrupado[40]['fecha_saldo']);
+
+// Si la fila trajera tambien la apertura, se ignora: lo que hay para depositar
+// es lo que quedo al cerrar.
+$conApertura = [
+    ['NRO_SUCURSAL' => 2, 'DESC_SUCURSAL' => 'UNICENTER', 'FECHA' => '2026-09-13',
+     'COD_CTA' => '100102', 'SALDO_APE' => 2361000, 'SALDO_CIER' => 3394600]
+];
+
+chequear('el saldo es el de cierre, no el de apertura',
+    3394600.0, floatval(Saldos::agruparPorSucursal($conApertura)[2]['saldo']));
 
 /* ================================================================
    La tabla de la pestana 2 y sus tres reglas
@@ -87,13 +99,13 @@ seccion('que aporta cada local al cashflow');
 // relevamiento), envia, y uno sin parametro configurado.
 $consulta = [
     ['NRO_SUCURSAL' => 10, 'DESC_SUCURSAL' => 'CABILDO', 'FECHA' => '2026-09-08',
-     'COD_CTA_CUENTA_TESORERIA' => '1001', 'SALDO_MONEDA' => 1000000],
+     'COD_CTA' => '1001', 'SALDO_CIER' => 1000000],
     ['NRO_SUCURSAL' => 40, 'DESC_SUCURSAL' => 'FLORES 1', 'FECHA' => '2026-09-08',
-     'COD_CTA_CUENTA_TESORERIA' => '4001', 'SALDO_MONEDA' => 80000],
+     'COD_CTA' => '4001', 'SALDO_CIER' => 80000],
     ['NRO_SUCURSAL' => 55, 'DESC_SUCURSAL' => 'SALTA', 'FECHA' => '2026-09-08',
-     'COD_CTA_CUENTA_TESORERIA' => '5501', 'SALDO_MONEDA' => 600000],
+     'COD_CTA' => '5501', 'SALDO_CIER' => 600000],
     ['NRO_SUCURSAL' => 90, 'DESC_SUCURSAL' => 'NUEVA', 'FECHA' => '2026-09-08',
-     'COD_CTA_CUENTA_TESORERIA' => '9001', 'SALDO_MONEDA' => 300000]
+     'COD_CTA' => '9001', 'SALDO_CIER' => 300000]
 ];
 
 $params = [
@@ -147,6 +159,150 @@ chequear('el total de saldo en caja incluye a todos', 1980000.0,
     floatval($armado['totales']['saldo']));
 chequear('se cuentan los que depositan', 3, $armado['totales']['depositan']);
 chequear('y los que envian', 1, $armado['totales']['envian']);
+
+/* ================================================================
+   El saldo tipeado a mano cuando la consulta no trajo el cierre
+   ================================================================ */
+seccion('un saldo manual manda si es igual o mas nuevo que el de la consulta');
+
+chequear('ayer es el dia anterior', '2026-09-13', Saldos::ayer('2026-09-14'));
+chequear('y cruza el mes', '2026-08-31', Saldos::ayer('2026-09-01'));
+
+// Cuatro locales el 14/9: la consulta trajo el cierre del 13/9 para 10 y 55,
+// pero 40 quedo en el 10/9 (no viajo) y 90 quedo en el 12/9.
+$consultaVieja = [
+    ['NRO_SUCURSAL' => 10, 'DESC_SUCURSAL' => 'CABILDO', 'FECHA' => '2026-09-13',
+     'COD_CTA' => '1001', 'SALDO_CIER' => 1000000],
+    ['NRO_SUCURSAL' => 40, 'DESC_SUCURSAL' => 'FLORES 1', 'FECHA' => '2026-09-10',
+     'COD_CTA' => '4001', 'SALDO_CIER' => 80000],
+    ['NRO_SUCURSAL' => 55, 'DESC_SUCURSAL' => 'SALTA', 'FECHA' => '2026-09-13',
+     'COD_CTA' => '5501', 'SALDO_CIER' => 600000],
+    ['NRO_SUCURSAL' => 90, 'DESC_SUCURSAL' => 'NUEVA', 'FECHA' => '2026-09-12',
+     'COD_CTA' => '9001', 'SALDO_CIER' => 300000]
+];
+
+$manuales = [
+    // Mas nuevo que la consulta: manda
+    40 => ['NRO_SUCURSAL' => 40, 'FECHA_SALDO' => '2026-09-13', 'SALDO_MONEDA' => 250000,
+           'FECHA_UPDATE' => '2026-09-14 09:00:00', 'USUARIO' => 'ana'],
+    // Misma fecha que la consulta: manda igual, porque alguien lo tipeo
+    55 => ['NRO_SUCURSAL' => 55, 'FECHA_SALDO' => '2026-09-13', 'SALDO_MONEDA' => 650000],
+    // Mas viejo que la consulta: la consulta ya lo supero
+    10 => ['NRO_SUCURSAL' => 10, 'FECHA_SALDO' => '2026-09-11', 'SALDO_MONEDA' => 1],
+    // De un local que la consulta no devuelve: no inventa la fila
+    77 => ['NRO_SUCURSAL' => 77, 'FECHA_SALDO' => '2026-09-13', 'SALDO_MONEDA' => 999]
+];
+
+$conManuales = Saldos::armarSaldosLocales($consultaVieja, $params, $manuales, '2026-09-13');
+$porNroM = [];
+
+foreach ($conManuales['filas'] as $f) {
+    $porNroM[$f['nro_sucursal']] = $f;
+}
+
+chequear('un manual mas nuevo que la consulta manda', 250000.0, floatval($porNroM[40]['saldo']));
+chequear('con su fecha', '2026-09-13', $porNroM[40]['fecha_saldo']);
+chequear('y queda marcado como manual', 'MANUAL', $porNroM[40]['origen_saldo']);
+chequear('conservando lo que decia la consulta', 80000.0, floatval($porNroM[40]['saldo_consulta']));
+chequear('y de cuando era', '2026-09-10', $porNroM[40]['fecha_consulta']);
+chequear('con quien lo cargo', 'ana', $porNroM[40]['manual']['usuario']);
+
+chequear('a igual fecha gana el manual', 650000.0, floatval($porNroM[55]['saldo']));
+chequear('y tambien queda marcado', 'MANUAL', $porNroM[55]['origen_saldo']);
+
+chequear('un manual mas viejo que la consulta no manda', 1000000.0, floatval($porNroM[10]['saldo']));
+chequear('y la fila queda como de la consulta', 'CONSULTA', $porNroM[10]['origen_saldo']);
+chequear('sin dato de manual', null, $porNroM[10]['manual']);
+
+chequear('un manual de un local que la consulta no devuelve no inventa la fila',
+    false, isset($porNroM[77]));
+
+// El neto y el aporte se calculan sobre el saldo EFECTIVO: es lo que el
+// tablero va a usar, y es el motivo de poder tipearlo.
+chequear('el neto sale del saldo efectivo', 100000.0, floatval($porNroM[40]['neto']));
+chequear('y el aporte tambien', 100000.0, floatval($porNroM[40]['aporta']));
+chequear('el total de caja usa los saldos efectivos', 2200000.0,
+    floatval($conManuales['totales']['saldo']));
+chequear('se cuentan los manuales', 2, $conManuales['totales']['manuales']);
+
+seccion('un local cuyo saldo no es el de ayer queda marcado');
+
+// Ayer es el 13/9: 10, 40 (por el manual) y 55 estan al dia; 90 quedo en el 12/9.
+chequear('un saldo de ayer no esta desactualizado', false, $porNroM[10]['desactualizado']);
+chequear('un manual de ayer tampoco', false, $porNroM[40]['desactualizado']);
+chequear('un saldo anterior a ayer si', true, $porNroM[90]['desactualizado']);
+chequear('se cuentan', 1, $conManuales['totales']['desactualizados']);
+chequear('y se avisa con el local y su fecha', true,
+    strpos(implode(' ', $conManuales['avisos']), '90 NUEVA (12/09/2026)') !== false);
+chequear('diciendo que se puede cargar a mano', true,
+    strpos(implode(' ', $conManuales['avisos']), 'a mano') !== false);
+
+// Sin la fecha de referencia no se marca nada: el tablero de un dia pasado no
+// tiene "ayer".
+$sinAyer = Saldos::armarSaldosLocales($consultaVieja, $params, $manuales);
+
+chequear('sin fecha de referencia nada queda desactualizado',
+    0, $sinAyer['totales']['desactualizados']);
+
+// Un saldo de HOY -la consulta corrio con el cierre de hoy- no esta
+// desactualizado: es mas nuevo que ayer.
+$deHoy = Saldos::armarSaldosLocales([
+    ['NRO_SUCURSAL' => 10, 'DESC_SUCURSAL' => 'CABILDO', 'FECHA' => '2026-09-14',
+     'COD_CTA' => '1001', 'SALDO_CIER' => 1]
+], [], [], '2026-09-13');
+
+chequear('un saldo mas nuevo que ayer no esta desactualizado',
+    false, $deHoy['filas'][0]['desactualizado']);
+
+// Sin fecha tampoco se sabe de cuando es: cuenta como desactualizado.
+$sinFecha = Saldos::armarSaldosLocales([
+    ['NRO_SUCURSAL' => 10, 'DESC_SUCURSAL' => 'CABILDO', 'FECHA' => null,
+     'COD_CTA' => '1001', 'SALDO_CIER' => 1]
+], [], [], '2026-09-13');
+
+chequear('un saldo sin fecha cuenta como desactualizado',
+    true, $sinFecha['filas'][0]['desactualizado']);
+
+seccion('solo se guarda como manual un saldo distinto del que manda');
+
+// La pantalla manda TODOS los locales con su saldo. Sin el diff, cada guardado
+// insertaria un manual por local y la consulta no volveria a mandar nunca.
+$tipeados = [
+    // Igual al efectivo (que es el manual del 13/9): no es nuevo
+    ['nro_sucursal' => 40, 'gestion' => 'DEPOSITA', 'reserva' => 150000, 'saldo' => 250000],
+    // Distinto del efectivo (la consulta): nuevo
+    ['nro_sucursal' => 90, 'gestion' => 'DEPOSITA', 'reserva' => 0, 'saldo' => 320000],
+    // Igual con diferencia de un centavo por el input: no es nuevo
+    ['nro_sucursal' => 10, 'gestion' => 'DEPOSITA', 'reserva' => 200000, 'saldo' => 1000000.004],
+    // Sin saldo (pantalla vieja): no es nuevo
+    ['nro_sucursal' => 55, 'gestion' => 'ENVIA', 'reserva' => 100000, 'saldo' => null],
+    // Un local que no esta en la tabla: se ignora
+    ['nro_sucursal' => 77, 'gestion' => 'DEPOSITA', 'reserva' => 0, 'saldo' => 5]
+];
+
+$nuevos = Saldos::saldosManualesNuevos($conManuales['filas'], $tipeados);
+
+chequear('solo el saldo distinto del efectivo es nuevo', 1, count($nuevos));
+chequear('y es el del local 90', 90, $nuevos[0]['nro_sucursal']);
+chequear('con el importe tipeado', 320000.0, $nuevos[0]['saldo']);
+chequear('y lo que decia la consulta, para poder explicarlo', 300000.0,
+    $nuevos[0]['saldo_consulta']);
+chequear('con su fecha', '2026-09-12', $nuevos[0]['fecha_consulta']);
+
+chequear('sin ningun saldo tipeado no hay manuales nuevos', 0,
+    count(Saldos::saldosManualesNuevos($conManuales['filas'], $sinTocarManual = [
+        ['nro_sucursal' => 40, 'gestion' => 'DEPOSITA', 'reserva' => 150000]
+    ])));
+
+chequearLanza('un saldo negativo se rechaza', function () use ($conManuales) {
+    Saldos::saldosManualesNuevos($conManuales['filas'],
+        [['nro_sucursal' => 10, 'saldo' => -5]]);
+}, 'El saldo en caja del local 10 no puede ser negativo');
+
+chequearLanza('un saldo que no es numero se rechaza', function () use ($conManuales) {
+    Saldos::saldosManualesNuevos($conManuales['filas'],
+        [['nro_sucursal' => 10, 'saldo' => 'mucho']]);
+}, 'El saldo en caja del local 10 no es un número');
 
 seccion('editar gestion y reserva en la pestana guarda el parametro');
 

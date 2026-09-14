@@ -122,6 +122,39 @@
     background: rgba(240, 173, 78, 0.06);
 }
 
+/* Un local cuyo saldo NO es el cierre de ayer: la consulta no lo trajo. Se
+   resalta la fila entera -no solo la fecha- porque es lo que hay que ir a
+   tipear, y el borde izquierdo lo hace visible aunque la fila este en Envia. */
+.tab-saldos .sal-desactualizado {
+    background: rgba(220, 53, 69, 0.06);
+    box-shadow: inset 3px 0 0 var(--danger-color, #dc3545);
+}
+
+.tab-saldos .sal-leyenda-desactualizado {
+    padding: 0 4px;
+    background: rgba(220, 53, 69, 0.1);
+    box-shadow: inset 3px 0 0 var(--danger-color, #dc3545);
+}
+
+/* El saldo que manda salio de una carga manual, no de la consulta */
+.tab-saldos .sal-badge-manual {
+    background: rgba(111, 66, 193, 0.1);
+    color: #6f42c1;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+/* Un saldo tipeado distinto del que vino, todavia sin guardar */
+.tab-saldos .sal-saldo-editado {
+    border-color: #6f42c1;
+    background: rgba(111, 66, 193, 0.06);
+}
+
+.tab-saldos .sal-saldo-local {
+    min-width: 130px;
+    font-variant-numeric: tabular-nums;
+}
+
 .tab-saldos .sal-negativo {
     color: var(--danger-color, #dc3545);
 }

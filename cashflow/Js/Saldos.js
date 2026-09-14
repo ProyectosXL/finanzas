@@ -26,11 +26,28 @@
     // Modo carga de la pestaña 1: los saldos manuales pasan a ser editables.
     var enCarga = false;
 
+    // Filtro por tipo de cuenta de la pestaña 1. '' es "todos". Es sólo de
+    // pantalla: filtra la tabla, el pie y los KPI, nunca lo que se guarda.
+    var filtroTipo = '';
+
     function inicializar() {
         conectar('btnRefreshSaldos', cargarSaldos);
         conectar('btnNuevaCarga', function() { modoCarga(true); });
         conectar('btnCancelarCarga', function() { modoCarga(false); });
         conectar('btnGuardarCarga', guardarCarga);
+
+        var selTipo = document.getElementById('filtroTipoSaldos');
+
+        if (selTipo) {
+            selTipo.addEventListener('change', function() {
+                filtroTipo = selTipo.value;
+
+                if (datosSaldos) {
+                    pintarKpiSaldos();
+                    pintarTablaSaldos();
+                }
+            });
+        }
 
         conectar('btnRefreshLocales', cargarLocales);
         conectar('btnGuardarLocales', guardarLocales);
@@ -98,6 +115,10 @@
                 datosSaldos = data;
                 enCarga = false;
 
+                // Una recarga termina cualquier carga en curso (por ejemplo la
+                // que se acaba de guardar): el filtro vuelve a estar disponible.
+                filtrarTipo(filtroTipo, false);
+
                 pintarAvisos();
                 pintarKpiSaldos();
                 pintarTablaSaldos();
@@ -112,15 +133,54 @@
             });
     }
 
+    /** Las filas que pasan el filtro por tipo. Sin filtro, todas. */
+    function filasVisibles() {
+        var filas = (datosSaldos && datosSaldos.filas) || [];
+
+        if (!filtroTipo) {
+            return filas;
+        }
+
+        return filas.filter(function(f) {
+            return f.tipo === filtroTipo;
+        });
+    }
+
+    /**
+     * Totales por moneda de lo que se está viendo.
+     *
+     * Espeja Saldos::totalesPorMoneda() del servidor sobre las filas filtradas:
+     * una cuenta sin cargar cuenta como cuenta y suma cero, igual que allá. Sin
+     * filtro da lo mismo que el payload; con filtro, los KPI describen la tabla
+     * que está abajo y no otra.
+     */
+    function totalesVisibles() {
+        var totales = { ARS: { total: 0, cuentas: 0 }, USD: { total: 0, cuentas: 0 } };
+
+        filasVisibles().forEach(function(f) {
+            var m = (f.moneda || 'ARS').toUpperCase();
+
+            if (!totales[m]) {
+                totales[m] = { total: 0, cuentas: 0 };
+            }
+
+            totales[m].total += f.cargada ? (parseFloat(f.saldo) || 0) : 0;
+            totales[m].cuentas++;
+        });
+
+        return totales;
+    }
+
     function pintarKpiSaldos() {
-        var t = datosSaldos.totales || {};
-        var ars = t.ARS || { total: 0, cuentas: 0 };
-        var usd = t.USD || { total: 0, cuentas: 0 };
+        var t = totalesVisibles();
+        var ars = t.ARS;
+        var usd = t.USD;
+        var sufijo = filtroTipo ? (' · ' + etiquetaTipo(filtroTipo)) : '';
 
         texto('totalArs', pesos(ars.total));
-        texto('cuentasArs', ars.cuentas + ' cuenta(s) en pesos');
+        texto('cuentasArs', ars.cuentas + ' cuenta(s) en pesos' + sufijo);
         texto('totalUsd', dolares(usd.total));
-        texto('cuentasUsd', usd.cuentas + ' cuenta(s) en dólares');
+        texto('cuentasUsd', usd.cuentas + ' cuenta(s) en dólares' + sufijo);
 
         var uc = datosSaldos.ultima_carga;
 
@@ -139,8 +199,9 @@
 
     function pintarTablaSaldos() {
         var html = '';
+        var filas = filasVisibles();
 
-        datosSaldos.filas.forEach(function(f) {
+        filas.forEach(function(f) {
             var consulta = (f.origen_cuenta === 'CONSULTA');
 
             html += '<tr data-cuenta="' + f.id_cuenta + '"' +
@@ -167,17 +228,18 @@
         if (!datosSaldos.filas.length) {
             html = '<tr><td colspan="7" class="text-center text-muted py-4">' +
                    'No hay cuentas configuradas. Cargalas en Parámetros → Saldos.</td></tr>';
+        } else if (!filas.length) {
+            html = '<tr><td colspan="7" class="text-center text-muted py-4">' +
+                   'No hay cuentas de tipo ' + escapar(etiquetaTipo(filtroTipo)) + '.</td></tr>';
         }
 
         document.getElementById('bodySaldos').innerHTML = html;
 
-        var t = datosSaldos.totales || {};
-        var ars = t.ARS || { total: 0 };
-        var usd = t.USD || { total: 0 };
+        var t = totalesVisibles();
 
         document.getElementById('footSaldos').innerHTML =
-            filaTotal('Total en pesos', pesos(ars.total)) +
-            filaTotal('Total en dólares', dolares(usd.total));
+            filaTotal('Total en pesos', pesos(t.ARS.total)) +
+            filaTotal('Total en dólares', dolares(t.USD.total));
 
         if (enCarga) {
             document.querySelectorAll('.sal-input-saldo').forEach(function(i) {
@@ -252,7 +314,26 @@
             document.getElementById('observacionesCarga').value = '';
         }
 
+        // La carga es SIEMPRE de todas las cuentas: guardarCarga() toma el
+        // input de cada fila, y una fila que el filtro escondió no tiene
+        // input, así que su saldo viajaría en cero. Se quita el filtro y se
+        // bloquea el selector mientras dure la carga.
+        filtrarTipo(activo ? '' : filtroTipo, activo);
+
+        pintarKpiSaldos();
         pintarTablaSaldos();
+    }
+
+    /** Fija el filtro por tipo y, si se pide, bloquea el selector */
+    function filtrarTipo(tipo, bloquear) {
+        filtroTipo = tipo;
+
+        var sel = document.getElementById('filtroTipoSaldos');
+
+        if (sel) {
+            sel.value = tipo;
+            sel.disabled = !!bloquear;
+        }
     }
 
     function botonesCarga(activo) {
@@ -350,12 +431,25 @@
 
     function pintarTablaLocales() {
         var html = '';
+        var editable = !!datosLocales.manuales_disponibles;
 
         datosLocales.filas.forEach(function(f) {
             var envia = (f.gestion === 'ENVIA');
+            var manual = (f.origen_saldo === 'MANUAL');
+            var clases = [];
+
+            if (envia) {
+                clases.push('sal-envia');
+            }
+
+            // Resaltada: el saldo que manda no es el cierre de ayer. Es la
+            // señal de que la consulta no lo trajo y hay que tipearlo.
+            if (f.desactualizado) {
+                clases.push('sal-desactualizado');
+            }
 
             html += '<tr data-suc="' + f.nro_sucursal + '"' +
-                    (envia ? ' class="sal-envia"' : '') + '>';
+                    (clases.length ? ' class="' + clases.join(' ') + '"' : '') + '>';
 
             html += '<td class="fw-semibold">' + escapar(f.local) +
                     (f.sin_parametro
@@ -368,8 +462,8 @@
                         : '') +
                     '</td>';
 
-            html += '<td class="text-end">' + pesos(f.saldo) + '</td>';
-            html += '<td class="text-center">' + (f.fecha_saldo ? fecha(f.fecha_saldo) : '—') + '</td>';
+            html += '<td class="text-end">' + celdaSaldoLocal(f, editable, manual) + '</td>';
+            html += '<td class="text-center">' + celdaFechaLocal(f) + '</td>';
 
             html += '<td class="text-center">' +
                         '<select class="form-select form-select-sm sal-gestion" ' +
@@ -399,10 +493,54 @@
 
         document.getElementById('bodyLocales').innerHTML = html;
 
-        document.querySelectorAll('.sal-gestion, .sal-reserva').forEach(function(el) {
+        document.querySelectorAll('.sal-gestion, .sal-reserva, .sal-saldo-local').forEach(function(el) {
             el.addEventListener('input', recalcularLocales);
             el.addEventListener('change', recalcularLocales);
         });
+    }
+
+    /**
+     * La celda del saldo en caja: un input cuando se puede tipear, texto si la
+     * tabla de manuales todavía no existe. Debajo dice de dónde salió: si
+     * manda un manual, qué decía la consulta y de cuándo, para que se vea que
+     * se está pisando y por qué.
+     */
+    function celdaSaldoLocal(f, editable, manual) {
+        var html = editable
+            ? '<input type="number" step="0.01" min="0" ' +
+                  'class="form-control form-control-sm text-end sal-saldo-local" ' +
+                  'data-suc="' + f.nro_sucursal + '" data-original="' + f.saldo + '" ' +
+                  'value="' + f.saldo + '" ' +
+                  'title="Editalo sólo si la consulta no trajo el cierre: al guardar queda como ' +
+                  'saldo manual de ayer y manda hasta que la consulta traiga uno más nuevo">'
+            : '<span class="sal-saldo">' + pesos(f.saldo) + '</span>';
+
+        if (manual) {
+            var m = f.manual || {};
+
+            html += '<div class="sal-subtitulo">' +
+                    '<span class="sal-badge sal-badge-manual" title="Cargado a mano' +
+                        (m.usuario ? ' por ' + escapar(m.usuario) : '') +
+                        (m.fecha_update ? ' el ' + fechaHora(m.fecha_update) : '') + '">manual</span> ' +
+                    'consulta: ' + pesos(f.saldo_consulta) +
+                    (f.fecha_consulta ? ' del ' + fecha(f.fecha_consulta) : ' sin fecha') +
+                    '</div>';
+        }
+
+        return html;
+    }
+
+    /** La fecha del saldo, y si no es la de ayer, dicho al lado */
+    function celdaFechaLocal(f) {
+        var html = f.fecha_saldo ? fecha(f.fecha_saldo) : '—';
+
+        if (f.desactualizado) {
+            html += '<div class="sal-subtitulo sal-error" title="La consulta no trajo el cierre ' +
+                    'de ayer' + (datosLocales.ayer ? ' (' + fecha(datosLocales.ayer) + ')' : '') +
+                    '. Si tenés el saldo real, cargalo en Saldo en caja.">no es de ayer</div>';
+        }
+
+        return html;
     }
 
     /**
@@ -414,17 +552,38 @@
      * (Saldos::armarSaldosLocales); esto es para que el número se mueva mientras
      * se edita.
      */
+    /** El saldo en caja de un local tal como está en pantalla: el input, o el del payload */
+    function saldoEnPantalla(f) {
+        var inp = document.querySelector('.sal-saldo-local[data-suc="' + f.nro_sucursal + '"]');
+
+        return inp ? (parseFloat(inp.value) || 0) : parseFloat(f.saldo);
+    }
+
     function recalcularLocales() {
-        var totales = { saldo: 0, reserva: 0, neto: 0, aporta: 0, envian: 0 };
+        var totales = { saldo: 0, reserva: 0, neto: 0, aporta: 0, envian: 0, editados: 0 };
 
         datosLocales.filas.forEach(function(f) {
             var sel = document.querySelector('.sal-gestion[data-suc="' + f.nro_sucursal + '"]');
             var inp = document.querySelector('.sal-reserva[data-suc="' + f.nro_sucursal + '"]');
+            var inpSaldo = document.querySelector('.sal-saldo-local[data-suc="' + f.nro_sucursal + '"]');
 
             var gestion = sel ? sel.value : f.gestion;
             var reserva = inp ? (parseFloat(inp.value) || 0) : f.reserva;
+            var saldo = saldoEnPantalla(f);
 
-            var neto = f.saldo - reserva;
+            // Un saldo distinto del que vino se marca: es lo que va a quedar
+            // como manual al guardar.
+            var editado = inpSaldo && Math.abs(saldo - parseFloat(inpSaldo.dataset.original)) > 0.005;
+
+            if (inpSaldo) {
+                inpSaldo.classList.toggle('sal-saldo-editado', !!editado);
+            }
+
+            if (editado) {
+                totales.editados++;
+            }
+
+            var neto = saldo - reserva;
             var deposita = (gestion === 'DEPOSITA');
             var aporta = (deposita && neto > 0) ? neto : 0;
 
@@ -452,7 +611,7 @@
                 fila.classList.toggle('sal-envia', !deposita);
             }
 
-            totales.saldo += f.saldo;
+            totales.saldo += saldo;
             totales.reserva += reserva;
             totales.neto += neto;
             totales.aporta += aporta;
@@ -462,11 +621,25 @@
             }
         });
 
+        var t = datosLocales.totales || {};
+        var detalle = datosLocales.filas.length + ' local(es) propios';
+
+        // Cuántos no tienen el cierre de ayer: es lo que hay que ir a tipear.
+        if (t.desactualizados > 0) {
+            detalle += ' · ' + t.desactualizados + ' sin saldo de ayer';
+        }
+
+        if (totales.editados > 0) {
+            detalle += ' · ' + totales.editados + ' editado(s) sin guardar';
+        } else if (t.manuales > 0) {
+            detalle += ' · ' + t.manuales + ' cargado(s) a mano';
+        }
+
         texto('totalCajaLocales', pesos(totales.saldo));
         texto('totalReserva', pesos(totales.reserva));
         texto('totalNeto', pesos(totales.neto));
         texto('totalAporta', pesos(totales.aporta));
-        texto('detalleLocales', datosLocales.filas.length + ' local(es) propios');
+        texto('detalleLocales', detalle);
         texto('detalleAporta', totales.envian > 0
             ? (totales.envian + ' en Envía quedan afuera')
             : 'Todos los locales depositan');
@@ -486,11 +659,16 @@
         var filas = datosLocales.filas.map(function(f) {
             var sel = document.querySelector('.sal-gestion[data-suc="' + f.nro_sucursal + '"]');
             var inp = document.querySelector('.sal-reserva[data-suc="' + f.nro_sucursal + '"]');
+            var inpSaldo = document.querySelector('.sal-saldo-local[data-suc="' + f.nro_sucursal + '"]');
 
             return {
                 nro_sucursal: f.nro_sucursal,
                 gestion: sel ? sel.value : f.gestion,
-                reserva: inp ? (parseFloat(inp.value) || 0) : f.reserva
+                reserva: inp ? (parseFloat(inp.value) || 0) : f.reserva,
+                // El saldo viaja tal como está; el servidor decide si es nuevo
+                // comparándolo con el que manda hoy. Sin input (tabla de
+                // manuales sin crear) no viaja, y el servidor relee la consulta.
+                saldo: inpSaldo ? (parseFloat(inpSaldo.value) || 0) : null
             };
         });
 
@@ -500,17 +678,26 @@
         }
 
         conBoton('btnGuardarLocales', function() {
-            // Los saldos y las fechas no viajan: el servidor los relee de la
-            // consulta. Sólo van la gestión y la reserva, que es lo editable.
             return pedirJson(URL_SALDOS + '?action=guardarCargaLocales', { filas: filas })
                 .then(function(data) {
-                    // Lo que importa avisar es cuántos parámetros cambiaron:
-                    // es lo que el tablero va a usar de ahora en más. La foto
-                    // del histórico se guarda siempre y no es noticia.
+                    // Lo que importa avisar es lo que el tablero va a usar de
+                    // ahora en más: los parámetros que cambiaron y los saldos
+                    // que se cargaron a mano. La foto del histórico se guarda
+                    // siempre y no es noticia.
+                    var partes = [];
+
                     if (data && data.parametros > 0) {
-                        texto('avisoGuardadoLocales',
-                            data.parametros + ' local(es) con la gestión o la reserva ' +
-                            'actualizadas. El tablero ya usa estos valores.');
+                        partes.push(data.parametros + ' local(es) con la gestión o la reserva ' +
+                            'actualizadas.');
+                    }
+
+                    if (data && data.saldos_manuales > 0) {
+                        partes.push(data.saldos_manuales + ' saldo(s) en caja cargados a mano: ' +
+                            'mandan hasta que la consulta traiga un cierre más nuevo.');
+                    }
+
+                    if (partes.length) {
+                        texto('avisoGuardadoLocales', partes.join(' ') + ' El tablero ya usa estos valores.');
                         mostrar('avisoGuardadoLocales', true, 'inline-block');
                     }
 

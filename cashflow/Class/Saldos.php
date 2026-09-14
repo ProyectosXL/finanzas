@@ -46,13 +46,33 @@ require_once __DIR__ . '/Parametros.php';
  * solo en el saldo bancario de la pestana 1. Calcularlo de nuevo seria estimar
  * un dato que el sistema ya trae medido, y ademas lo contaria dos veces.
  *
+ * EL SALDO DE CAJA DE UN LOCAL SE PUEDE TIPEAR CUANDO LA CONSULTA NO LO TRAJO
+ * ---------------------------------------------------------------------------
+ * La consulta de locales se alimenta todos los dias, pero puede fallar -un
+ * error de conexion, un cierre que no viajo- y entonces el ultimo registro del
+ * local queda viejo. Para eso el saldo se puede cargar a mano desde la pestana:
+ * queda en RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL como un registro fechado, y la
+ * regla de cual manda es UNA y esta en aplicarSaldosManuales(): gana el mas
+ * nuevo por fecha entre la consulta y el manual, y a igual fecha gana el
+ * manual. Cuando la consulta vuelve a traer un cierre mas nuevo, vuelve a
+ * mandar sola. La foto guarda de donde salio cada saldo (ORIGEN_DATO).
+ *
+ * La pantalla resalta los locales cuyo saldo NO es el de ayer, que es el
+ * cierre que tendria que haber llegado: es la senal de que hay que tipearlo.
+ *
  * SI LAS TABLAS NO EXISTEN
  * ------------------------
  * Las lecturas devuelven vacio y getAvisos() dice que hay que correr
  * sql/cashflow_saldos.sql, en vez de romper. Mismo criterio que
- * CashflowEstructura.
+ * CashflowEstructura. La tabla de saldos manuales tiene su propio chequeo: sin
+ * ella la pestana funciona igual, solo que no deja tipear el saldo y avisa que
+ * script correr.
  */
 class Saldos {
+
+    /** De donde salio el saldo de caja de un local */
+    const SALDO_CONSULTA = 'CONSULTA';
+    const SALDO_MANUAL = 'MANUAL';
 
     /** Tipos de carga. Separan las dos pestanas dentro de la misma cabecera. */
     const CARGA_SALDOS = 'SALDOS';
@@ -73,6 +93,9 @@ class Saldos {
 
     /** @var bool|null Cache del chequeo de existencia de las tablas */
     private $tablas = null;
+
+    /** @var bool|null Cache del chequeo de la tabla de saldos manuales */
+    private $manuales = null;
 
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
@@ -167,7 +190,7 @@ class Saldos {
      * la fecha en la que ese saldo consolidado es cierto.
      *
      * @param array $filas Filas de la consulta: NRO_SUCURSAL, DESC_SUCURSAL,
-     *        FECHA, COD_CTA_CUENTA_TESORERIA, SALDO_MONEDA
+     *        FECHA, COD_CTA, SALDO_CIER (ver getSaldosLocalesOrigen())
      * @return array Mapa NRO_SUCURSAL => fila consolidada
      */
     public static function agruparPorSucursal($filas) {
@@ -180,9 +203,9 @@ class Saldos {
         foreach ($filas as $f) {
             $nro = intval(isset($f['NRO_SUCURSAL']) ? $f['NRO_SUCURSAL'] : 0);
             $fecha = Horizonte::normalizarFecha(isset($f['FECHA']) ? $f['FECHA'] : null);
-            $cta = trim((string) (isset($f['COD_CTA_CUENTA_TESORERIA'])
-                ? $f['COD_CTA_CUENTA_TESORERIA'] : ''));
-            $saldo = floatval(isset($f['SALDO_MONEDA']) ? $f['SALDO_MONEDA'] : 0);
+            $cta = trim((string) (isset($f['COD_CTA']) ? $f['COD_CTA'] : ''));
+            // El saldo de CIERRE: es lo que quedo en la caja al terminar el dia.
+            $saldo = floatval(isset($f['SALDO_CIER']) ? $f['SALDO_CIER'] : 0);
 
             if (!isset($porSucursal[$nro])) {
                 $porSucursal[$nro] = [
@@ -214,6 +237,145 @@ class Saldos {
     }
 
     /**
+     * El dia anterior a una fecha. Es la fecha del cierre que la consulta
+     * tendria que haber traido hoy, y la que lleva un saldo manual.
+     *
+     * @param string $hoy 'Y-m-d'
+     * @return string 'Y-m-d'
+     */
+    public static function ayer($hoy) {
+        return date('Y-m-d', strtotime(substr((string) $hoy, 0, 10) . ' -1 day'));
+    }
+
+    /**
+     * Superpone los saldos tipeados a mano sobre lo que trajo la consulta.
+     *
+     * ES LA UNICA REGLA DE PRECEDENCIA, y es por fecha: para cada local gana el
+     * saldo MAS NUEVO entre el de la consulta y el manual, y a igual fecha gana
+     * el MANUAL. Si alguien tipeo un saldo es porque el de la consulta no
+     * servia -no vino, o vino mal-, y un dato tipeado hoy no puede quedar
+     * tapado por uno del sistema de la misma fecha. Cuando la consulta vuelve
+     * a traer un cierre mas nuevo, vuelve a mandar sola, sin que nadie tenga
+     * que borrar nada: por eso un manual no es un override permanente sino un
+     * registro fechado.
+     *
+     * Un manual de un local que la consulta no devuelve NO inventa la fila: la
+     * lista de locales la define la consulta (propios y habilitados). Se
+     * ignora en silencio; no es un caso de uso, es un local que dejo de existir.
+     *
+     * Cada fila queda con 'origen_saldo', y conserva 'saldo_consulta' y
+     * 'fecha_consulta' para que la pantalla pueda mostrar que decia la consulta
+     * cuando lo que manda es un manual.
+     *
+     * @param array $agrupadas Mapa NRO_SUCURSAL => fila de agruparPorSucursal()
+     * @param array $manuales Mapa NRO_SUCURSAL => ['FECHA_SALDO', 'SALDO_MONEDA', ...]
+     *        con el ULTIMO manual de cada local
+     * @return array Mapa NRO_SUCURSAL => fila, con el saldo efectivo
+     */
+    public static function aplicarSaldosManuales($agrupadas, $manuales) {
+        $manuales = is_array($manuales) ? $manuales : [];
+        $resultado = [];
+
+        foreach ((is_array($agrupadas) ? $agrupadas : []) as $nro => $s) {
+            $s['saldo_consulta'] = $s['saldo'];
+            $s['fecha_consulta'] = $s['fecha_saldo'];
+            $s['origen_saldo'] = self::SALDO_CONSULTA;
+            $s['manual'] = null;
+
+            $m = isset($manuales[$nro]) ? $manuales[$nro] : null;
+
+            if ($m !== null) {
+                $fechaManual = Horizonte::normalizarFecha(
+                    isset($m['FECHA_SALDO']) ? $m['FECHA_SALDO'] : null);
+
+                // A igual fecha gana el manual. Sin fecha en la consulta,
+                // tambien: un saldo tipeado es mejor que uno sin fecha.
+                if ($fechaManual !== null
+                    && ($s['fecha_saldo'] === null || $fechaManual >= $s['fecha_saldo'])) {
+                    $s['saldo'] = floatval(isset($m['SALDO_MONEDA']) ? $m['SALDO_MONEDA'] : 0);
+                    $s['fecha_saldo'] = $fechaManual;
+                    $s['origen_saldo'] = self::SALDO_MANUAL;
+                    $s['manual'] = [
+                        'fecha_saldo' => $fechaManual,
+                        'saldo' => $s['saldo'],
+                        'fecha_update' => isset($m['FECHA_UPDATE']) ? $m['FECHA_UPDATE'] : null,
+                        'usuario' => isset($m['USUARIO']) ? $m['USUARIO'] : null
+                    ];
+                }
+            }
+
+            $resultado[$nro] = $s;
+        }
+
+        return $resultado;
+    }
+
+    /**
+     * Que saldos tipeados en la pantalla son NUEVOS respecto de lo que ya
+     * manda, y por lo tanto hay que guardar como manual.
+     *
+     * Es un helper puro y devuelve una lista, no una escritura, por el mismo
+     * motivo que resolverOverrides(): la pantalla manda TODOS los locales en
+     * cada guardado, y sin el diff cada guardado insertaria veinte manuales
+     * -uno por local- aunque nadie hubiera tocado ningun saldo, y a partir de
+     * ahi la consulta no volveria a mandar nunca.
+     *
+     * Un saldo igual al efectivo -con tolerancia de un centavo, porque el valor
+     * da la vuelta por un input numerico- no es un cambio. Un saldo ausente o
+     * null tampoco: es una pantalla vieja que no manda el campo.
+     *
+     * @param array $filas Filas de armarSaldosLocales()['filas'], con el saldo
+     *        efectivo de hoy
+     * @param array $overrides [['nro_sucursal', 'saldo' => float|null, ...], ...]
+     * @return array Lista de ['nro_sucursal', 'saldo', 'saldo_consulta', 'fecha_consulta']
+     */
+    public static function saldosManualesNuevos($filas, $overrides) {
+        $porSucursal = [];
+
+        foreach ((is_array($filas) ? $filas : []) as $f) {
+            $porSucursal[intval($f['nro_sucursal'])] = $f;
+        }
+
+        $nuevos = [];
+
+        foreach ((is_array($overrides) ? $overrides : []) as $o) {
+            $nro = intval(isset($o['nro_sucursal']) ? $o['nro_sucursal'] : 0);
+
+            if ($nro === 0 || !isset($porSucursal[$nro])
+                || !array_key_exists('saldo', $o) || $o['saldo'] === null || $o['saldo'] === '') {
+                continue;
+            }
+
+            if (!is_numeric($o['saldo'])) {
+                throw new Exception('El saldo en caja del local ' . $nro . ' no es un número');
+            }
+
+            $saldo = floatval($o['saldo']);
+
+            if ($saldo < 0) {
+                throw new Exception('El saldo en caja del local ' . $nro . ' no puede ser negativo');
+            }
+
+            $actual = $porSucursal[$nro];
+
+            if (abs(floatval($actual['saldo']) - $saldo) <= 0.005) {
+                continue;
+            }
+
+            $nuevos[] = [
+                'nro_sucursal' => $nro,
+                'saldo' => $saldo,
+                'saldo_consulta' => isset($actual['saldo_consulta'])
+                    ? floatval($actual['saldo_consulta']) : null,
+                'fecha_consulta' => isset($actual['fecha_consulta'])
+                    ? $actual['fecha_consulta'] : null
+            ];
+        }
+
+        return $nuevos;
+    }
+
+    /**
      * Arma la tabla de la pestana 2 a partir de la consulta y de los parametros
      * por sucursal.
      *
@@ -238,17 +400,29 @@ class Saldos {
      * nueva a la que todavia no le configuraron la reserva, y esconderla del
      * cuadro seria informar de menos.
      *
+     * EL SALDO ES EL EFECTIVO: el de la consulta o el manual, segun
+     * aplicarSaldosManuales(). Y cada fila dice si esta DESACTUALIZADA: si su
+     * fecha es anterior a $ayer, que es el cierre que tendria que haber
+     * llegado hoy. Es la senal de que hay que tipear el saldo, y se decide aca
+     * -y no en el navegador- para que el tablero pueda avisarlo tambien.
+     *
      * @param array $filasConsulta Filas crudas de la consulta de locales
      * @param array $params Mapa NRO_SUCURSAL => ['GESTION' => ..., 'RESERVA' => ...]
+     * @param array $manuales Mapa NRO_SUCURSAL => ultimo saldo manual, o vacio
+     * @param string|null $ayer 'Y-m-d' del cierre esperado; null para no marcar
      * @return array ['filas' => [...], 'totales' => [...], 'avisos' => [...]]
      */
-    public static function armarSaldosLocales($filasConsulta, $params) {
-        $agrupadas = self::agruparPorSucursal($filasConsulta);
+    public static function armarSaldosLocales($filasConsulta, $params, $manuales = [],
+                                              $ayer = null) {
+        $agrupadas = self::aplicarSaldosManuales(
+            self::agruparPorSucursal($filasConsulta), $manuales);
         $params = is_array($params) ? $params : [];
+        $ayer = Horizonte::normalizarFecha($ayer);
 
         $filas = [];
         $avisos = [];
         $sinParametro = [];
+        $desactualizados = [];
 
         $totales = [
             'saldo' => 0,
@@ -257,7 +431,9 @@ class Saldos {
             'aporta' => 0,
             'sucursales' => 0,
             'depositan' => 0,
-            'envian' => 0
+            'envian' => 0,
+            'manuales' => 0,
+            'desactualizados' => 0
         ];
 
         foreach ($agrupadas as $nro => $s) {
@@ -287,6 +463,11 @@ class Saldos {
                     . 'pero tampoco resta.';
             }
 
+            // Desactualizado: el saldo que manda no es el cierre de ayer. Sin
+            // fecha tambien cuenta, porque no se sabe de cuando es.
+            $desactualizado = ($ayer !== null)
+                && ($s['fecha_saldo'] === null || $s['fecha_saldo'] < $ayer);
+
             $filas[] = [
                 'nro_sucursal' => $nro,
                 'desc_sucursal' => $s['desc_sucursal'],
@@ -295,6 +476,11 @@ class Saldos {
                 'cod_cta' => implode(', ', $s['cod_cta']),
                 'cuentas' => $s['cuentas'],
                 'saldo' => $s['saldo'],
+                'origen_saldo' => $s['origen_saldo'],
+                'saldo_consulta' => $s['saldo_consulta'],
+                'fecha_consulta' => $s['fecha_consulta'],
+                'manual' => $s['manual'],
+                'desactualizado' => $desactualizado,
                 'gestion' => $gestion,
                 'reserva' => $reserva,
                 'neto' => $neto,
@@ -316,6 +502,17 @@ class Saldos {
             } else {
                 $totales['envian']++;
             }
+
+            if ($s['origen_saldo'] === self::SALDO_MANUAL) {
+                $totales['manuales']++;
+            }
+
+            if ($desactualizado) {
+                $totales['desactualizados']++;
+                $desactualizados[] = $nro . ' ' . $s['desc_sucursal']
+                    . ' (' . ($s['fecha_saldo'] === null ? 'sin fecha'
+                        : self::fechaCorta($s['fecha_saldo'])) . ')';
+            }
         }
 
         // Orden estable por numero de sucursal, como la consulta de origen
@@ -334,6 +531,15 @@ class Saldos {
         if ($totales['envian'] > 0) {
             $avisos[] = $totales['envian'] . ' local(es) están en Envía: se muestran en la tabla '
                 . 'pero su efectivo no entra al cashflow, porque no llega al banco por esta vía.';
+        }
+
+        // Lo desactualizado se avisa con la lista: es lo que hay que ir a
+        // tipear, y el aviso sube tambien al tablero.
+        if (!empty($desactualizados)) {
+            $avisos[] = count($desactualizados) . ' local(es) no tienen el saldo de caja de ayer ('
+                . self::fechaCorta($ayer) . '): ' . implode(', ', $desactualizados) . '. Se '
+                . 'proyecta con el último saldo conocido; si la consulta no lo trajo, cargalo a '
+                . 'mano en Saldos → Saldos Locales.';
         }
 
         return ['filas' => $filas, 'totales' => $totales, 'avisos' => $avisos];
@@ -742,6 +948,102 @@ class Saldos {
     }
 
     /**
+     * Si existe la tabla de saldos manuales de locales y la columna ORIGEN_DATO
+     * de la foto: las dos las crea sql/cashflow_saldos_local_manual.sql.
+     *
+     * Va aparte de tablasCreadas() a proposito: sin esto la pestana funciona
+     * igual que antes -consulta, gestion y reserva-, solo que no deja tipear el
+     * saldo y dice que script correr. Meterlo en tablasCreadas() dejaria la
+     * pestana entera en blanco por una migracion pendiente.
+     *
+     * @return bool
+     */
+    public function manualesCreados() {
+        if ($this->manuales !== null) {
+            return $this->manuales;
+        }
+
+        if (!$this->tablasCreadas()) {
+            $this->manuales = false;
+
+            return false;
+        }
+
+        $cid = $this->conectar('central');
+
+        $sql = "SELECT OBJECT_ID('dbo.RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL', 'U') AS M,
+                       COL_LENGTH('dbo.RO_T_CASHFLOW_SALDOS_LOCAL', 'ORIGEN_DATO') AS O";
+
+        $stmt = sqlsrv_query($cid, $sql);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar la tabla de saldos manuales'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->manuales = ($row && $row['M'] !== null && $row['O'] !== null);
+
+        return $this->manuales;
+    }
+
+    /**
+     * El ultimo saldo manual ACTIVO de cada local.
+     *
+     * "El ultimo" es por FECHA_SALDO y, a igual fecha, por ID: una correccion
+     * del mismo dia es una fila nueva con ID mayor, igual que en ultimaCarga().
+     * Cual manda contra la consulta lo decide aplicarSaldosManuales().
+     *
+     * @return array Mapa NRO_SUCURSAL => fila (FECHA_SALDO 'Y-m-d', SALDO_MONEDA
+     *         float, FECHA_UPDATE, USUARIO). Vacio si la tabla no existe.
+     */
+    public function getSaldosLocalesManuales() {
+        if (!$this->manualesCreados()) {
+            return [];
+        }
+
+        $cid = $this->conectar('central');
+
+        $sql = "WITH Ultimo AS (
+                    SELECT ID, NRO_SUCURSAL, FECHA_SALDO, SALDO_MONEDA, FECHA_UPDATE, USUARIO,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY NRO_SUCURSAL
+                               ORDER BY FECHA_SALDO DESC, ID DESC
+                           ) AS RN
+                    FROM RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL
+                    WHERE ACTIVO = 1
+                )
+                SELECT ID, NRO_SUCURSAL, FECHA_SALDO, SALDO_MONEDA, FECHA_UPDATE, USUARIO
+                FROM Ultimo WHERE RN = 1";
+
+        $stmt = sqlsrv_query($cid, $sql);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer los saldos manuales de locales'));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $nro = intval($row['NRO_SUCURSAL']);
+
+            $v[$nro] = [
+                'ID' => intval($row['ID']),
+                'NRO_SUCURSAL' => $nro,
+                'FECHA_SALDO' => Horizonte::normalizarFecha($row['FECHA_SALDO']),
+                'SALDO_MONEDA' => floatval($row['SALDO_MONEDA']),
+                'FECHA_UPDATE' => $this->fechaHora($row['FECHA_UPDATE']),
+                'USUARIO' => $row['USUARIO']
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $v;
+    }
+
+    /**
      * Avisos de configuracion pendiente.
      *
      * @return array Lista de mensajes
@@ -963,28 +1265,44 @@ class Saldos {
     /**
      * Ultimo saldo de caja de cada local propio, desde el servidor 'locales'.
      *
-     * Devuelve una fila por (sucursal, cuenta de tesoreria) con el ultimo saldo
-     * de cada una. La consolidacion por sucursal la hace agruparPorSucursal().
+     * EL ORIGEN ES RO_T_SALDOS_CIERRE_SBA29 Y EL IMPORTE ES SALDO_CIER: el saldo
+     * de CIERRE del dia. La tabla trae tambien SALDO_APE -la apertura-, que no
+     * se usa: la plata que hay para depositar es la que quedo al cerrar. Antes
+     * se leia RO_T_SALDO_CAJA_SUCURSALES.SALDO_MONEDA; se cambio de origen por
+     * pedido del negocio.
      *
-     * @return array Filas crudas de la consulta
+     * SE TOMA EL ULTIMO REGISTRO de cada (sucursal, cuenta): la fecha mas nueva
+     * y, a igual fecha, el ID mas alto. El desempate no es opcional: la tabla
+     * tiene dias con la misma (sucursal, cuenta, fecha) cargada dos veces, y
+     * sin el ID saldrian las dos filas y el saldo se contaria doble. Es lo que
+     * se muestra hoy.
+     *
+     * La consolidacion por sucursal la hace agruparPorSucursal(). El nombre del
+     * local sale de SUCURSALES_LAKERS y no de la tabla de saldos, porque es el
+     * join el que decide que locales son PROPIOS y estan HABILITADOS.
+     *
+     * @return array Filas crudas: ID, FECHA, NRO_SUCURSAL, DESC_SUCURSAL,
+     *         COD_CTA, SALDO_CIER
      */
     public function getSaldosLocalesOrigen() {
         $cid = $this->conectar('locales');
         $p = $this->prefijoLocales();
 
+        // COD_CTA es FLOAT en la tabla: se lleva a texto en SQL para que un
+        // codigo no aparezca como 1.00102E+5 en la pantalla ni en la foto.
         $sql = "WITH SaldoLocales AS (
-                    SELECT A.ID, A.FECHA, A.NRO_SUCURSAL, B.DESC_SUCURSAL,
-                           A.COD_CTA_CUENTA_TESORERIA, A.SALDO_MONEDA,
+                    SELECT A.ID, A.FECHA, A.NRO_SUCURS AS NRO_SUCURSAL, B.DESC_SUCURSAL,
+                           CAST(CAST(A.COD_CTA AS BIGINT) AS VARCHAR(20)) AS COD_CTA,
+                           A.SALDO_CIER,
                            ROW_NUMBER() OVER (
-                               PARTITION BY A.NRO_SUCURSAL, A.COD_CTA_CUENTA_TESORERIA
+                               PARTITION BY A.NRO_SUCURS, A.COD_CTA
                                ORDER BY A.FECHA DESC, A.ID DESC
                            ) AS RN
-                    FROM {$p}RO_T_SALDO_CAJA_SUCURSALES A
-                    INNER JOIN {$p}SUCURSALES_LAKERS B ON A.NRO_SUCURSAL = B.NRO_SUCURSAL
+                    FROM {$p}RO_T_SALDOS_CIERRE_SBA29 A
+                    INNER JOIN {$p}SUCURSALES_LAKERS B ON A.NRO_SUCURS = B.NRO_SUCURSAL
                     WHERE B.CANAL = 'PROPIOS' AND B.HABILITADO = 1
                 )
-                SELECT ID, FECHA, NRO_SUCURSAL, DESC_SUCURSAL,
-                       COD_CTA_CUENTA_TESORERIA, SALDO_MONEDA
+                SELECT ID, FECHA, NRO_SUCURSAL, DESC_SUCURSAL, COD_CTA, SALDO_CIER
                 FROM SaldoLocales WHERE RN = 1 ORDER BY NRO_SUCURSAL";
 
         $stmt = sqlsrv_query($cid, $sql);
@@ -1448,12 +1766,38 @@ class Saldos {
                 . $e->getMessage() . '): se toma Deposita con reserva cero.';
         }
 
-        $armado = self::armarSaldosLocales($consulta, $params);
+        // Los saldos tipeados a mano. Sin la tabla, la pestana funciona igual
+        // pero no deja tipear, y dice que script correr.
+        $manuales = [];
+        $manualesDisponibles = false;
+
+        try {
+            $manualesDisponibles = $this->manualesCreados();
+            $manuales = $this->getSaldosLocalesManuales();
+        } catch (Throwable $e) {
+            $avisos[] = 'No se pudieron leer los saldos de caja cargados a mano ('
+                . $e->getMessage() . '): se muestra lo que trajo la consulta.';
+        }
+
+        if ($this->tablasCreadas() && !$manualesDisponibles) {
+            $avisos[] = 'Para poder cargar a mano el saldo de caja de un local cuando la consulta '
+                . 'no lo trajo, hay que correr sql/cashflow_saldos_local_manual.sql contra la '
+                . 'base central.';
+        }
+
+        $hoy = date('Y-m-d');
+        $ayer = self::ayer($hoy);
+        $armado = self::armarSaldosLocales($consulta, $params, $manuales, $ayer);
 
         $cargas = $this->getCargas(self::CARGA_LOCALES);
         $ultima = self::ultimaCarga($cargas);
 
         return [
+            'hoy' => $hoy,
+            // El cierre que la consulta tendria que haber traido hoy. Las filas
+            // con fecha anterior vienen marcadas con 'desactualizado'.
+            'ayer' => $ayer,
+            'manuales_disponibles' => $manualesDisponibles,
             'filas' => $armado['filas'],
             'totales' => $armado['totales'],
             'ultima_carga' => $ultima === null ? null : [
@@ -1594,9 +1938,10 @@ class Saldos {
     /**
      * Guarda una carga de saldos de locales (pestana 2).
      *
-     * Los saldos y las fechas NO vienen del cliente: se vuelven a leer de la
-     * consulta en el momento de guardar. Del cliente se aceptan unicamente la
-     * gestion y la reserva, que son los dos valores editables.
+     * Los saldos de la consulta y sus fechas NO vienen del cliente: se vuelven
+     * a leer de la consulta en el momento de guardar. Del cliente se aceptan la
+     * gestion, la reserva y -solo cuando difiere de lo que manda- el saldo en
+     * caja tipeado a mano, que queda como registro MANUAL fechado.
      *
      * GUARDA LAS DOS COSAS: el parametro y la foto.
      *
@@ -1625,10 +1970,19 @@ class Saldos {
      * y no llamando a saveSucursal(), que abre su propia conexion: mismo
      * criterio que CashflowEstructura::guardar().
      *
-     * @param array $overrides [['nro_sucursal' => int, 'gestion' => str, 'reserva' => float], ...]
+     * EL SALDO EN CAJA TAMBIEN SE PUEDE TIPEAR, para cuando la consulta no
+     * trajo el cierre. Es la tercera escritura de la misma transaccion: un
+     * saldo distinto del efectivo se guarda como MANUAL con fecha de AYER -el
+     * cierre que no llego-, y la foto se arma con ese saldo y ORIGEN_DATO =
+     * 'MANUAL'. Que saldos son nuevos lo decide saldosManualesNuevos(), que es
+     * un helper puro; sin diff, cada guardado insertaria un manual por local y
+     * la consulta no volveria a mandar nunca.
+     *
+     * @param array $overrides [['nro_sucursal' => int, 'gestion' => str, 'reserva' => float,
+     *        'saldo' => float|null], ...]
      * @param string|null $observaciones
      * @param string|null $usuario
-     * @return array ['id' => int, 'filas' => int, 'parametros' => int]
+     * @return array ['id' => int, 'filas' => int, 'parametros' => int, 'saldos_manuales' => int]
      */
     public function guardarCargaLocales($overrides, $observaciones, $usuario = null) {
         if (!$this->tablasCreadas()) {
@@ -1659,7 +2013,34 @@ class Saldos {
             $descripciones[$nro] = $s['desc_sucursal'];
         }
 
-        $armado = self::armarSaldosLocales($consulta, $params);
+        // Los saldos tipeados: primero se resuelve que manda HOY (consulta o
+        // manual anterior), y contra eso se ve que saldos de la pantalla son
+        // nuevos. Recien despues se arma la foto, con los manuales nuevos ya
+        // aplicados: la foto tiene que describir lo que el tablero va a usar.
+        $manualesDisponibles = $this->manualesCreados();
+        $manuales = $manualesDisponibles ? $this->getSaldosLocalesManuales() : [];
+        $ayer = self::ayer(date('Y-m-d'));
+
+        $actual = self::armarSaldosLocales($consulta, $params, $manuales, $ayer);
+        $nuevos = self::saldosManualesNuevos($actual['filas'], $overrides);
+
+        if (!empty($nuevos) && !$manualesDisponibles) {
+            throw new Exception('Para guardar un saldo de caja cargado a mano hay que correr '
+                . 'sql/cashflow_saldos_local_manual.sql contra la base central. La gestión y la '
+                . 'reserva no se guardaron: corregí el saldo o corré el script y volvé a guardar.');
+        }
+
+        foreach ($nuevos as $n) {
+            $manuales[$n['nro_sucursal']] = [
+                'NRO_SUCURSAL' => $n['nro_sucursal'],
+                'FECHA_SALDO' => $ayer,
+                'SALDO_MONEDA' => $n['saldo'],
+                'FECHA_UPDATE' => null,
+                'USUARIO' => $usuario
+            ];
+        }
+
+        $armado = self::armarSaldosLocales($consulta, $params, $manuales, $ayer);
 
         $cid = $this->conectar('central');
 
@@ -1680,14 +2061,39 @@ class Saldos {
                 );
             }
 
-            $idCarga = $this->insertarCabecera($cid, self::CARGA_LOCALES, 'CONSULTA',
-                $observaciones, $usuario);
+            $sqlManual = "INSERT INTO RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL
+                              (NRO_SUCURSAL, FECHA_SALDO, SALDO_MONEDA, SALDO_CONSULTA,
+                               FECHA_CONSULTA, OBSERVACIONES, ACTIVO, FECHA_UPDATE, USUARIO)
+                          VALUES (?, ?, ?, ?, ?, ?, 1, GETDATE(), ?)";
 
-            $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_LOCAL
-                        (ID_CARGA, NRO_SUCURSAL, DESC_SUCURSAL, FECHA_SALDO,
-                         COD_CTA_CUENTA_TESORERIA, CUENTAS, SALDO_MONEDA,
-                         GESTION, RESERVA, NETO_DEPOSITAR, FECHA_UPDATE, USUARIO)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), ?)";
+            foreach ($nuevos as $n) {
+                $ok = sqlsrv_query($cid, $sqlManual, [
+                    $n['nro_sucursal'], $ayer, $n['saldo'], $n['saldo_consulta'],
+                    $n['fecha_consulta'], $observaciones, $usuario
+                ]);
+
+                if ($ok === false) {
+                    throw new Exception($this->errorSql('Error al guardar el saldo manual del '
+                        . 'local ' . $n['nro_sucursal']));
+                }
+            }
+
+            $idCarga = $this->insertarCabecera($cid, self::CARGA_LOCALES,
+                empty($nuevos) ? 'CONSULTA' : 'MIXTA', $observaciones, $usuario);
+
+            // ORIGEN_DATO existe recien con la migracion de manuales. Sin ella
+            // la foto se guarda como siempre: todo lo que hay es de la consulta.
+            $sql = $manualesDisponibles
+                ? "INSERT INTO RO_T_CASHFLOW_SALDOS_LOCAL
+                       (ID_CARGA, NRO_SUCURSAL, DESC_SUCURSAL, FECHA_SALDO,
+                        COD_CTA_CUENTA_TESORERIA, CUENTAS, SALDO_MONEDA,
+                        GESTION, RESERVA, NETO_DEPOSITAR, FECHA_UPDATE, USUARIO, ORIGEN_DATO)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), ?, ?)"
+                : "INSERT INTO RO_T_CASHFLOW_SALDOS_LOCAL
+                       (ID_CARGA, NRO_SUCURSAL, DESC_SUCURSAL, FECHA_SALDO,
+                        COD_CTA_CUENTA_TESORERIA, CUENTAS, SALDO_MONEDA,
+                        GESTION, RESERVA, NETO_DEPOSITAR, FECHA_UPDATE, USUARIO)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), ?)";
 
             foreach ($armado['filas'] as $f) {
                 $valores = [
@@ -1707,6 +2113,10 @@ class Saldos {
                     $usuario
                 ];
 
+                if ($manualesDisponibles) {
+                    $valores[] = $f['origen_saldo'];
+                }
+
                 if (sqlsrv_query($cid, $sql, $valores) === false) {
                     throw new Exception($this->errorSql('Error al guardar el local '
                         . $f['nro_sucursal']));
@@ -1724,7 +2134,8 @@ class Saldos {
         return [
             'id' => $idCarga,
             'filas' => count($armado['filas']),
-            'parametros' => count($cambios)
+            'parametros' => count($cambios),
+            'saldos_manuales' => count($nuevos)
         ];
     }
 

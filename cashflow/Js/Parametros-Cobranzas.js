@@ -7,18 +7,41 @@
  *     edita entera y se guarda entera. Antes se cargaba por cliente y por medio
  *     de pago desde un modal por fila, lo que obligaba a repetir la misma
  *     escala en cada franquicia y dejaba a la mayoría sin ninguna.
- *   - El PPP es POR CLIENTE: se calcula con los últimos 3 cobros y se puede
- *     pisar a mano. Eso no cambió.
+ *   - El PPP es POR GRUPO EMPRESARIO: se calcula con los recibos de Tango de
+ *     los últimos 100 días de todos los locales del grupo, y se pisa a mano
+ *     para el grupo entero. Un cliente sin grupo es su propio grupo. La tabla
+ *     muestra una fila por grupo y debajo sus clientes, que son sólo las
+ *     franquicias habilitadas en el directorio de sucursales.
  *
- * El medio de pago sigue editable porque describe cómo opera el cliente, pero
+ * El medio de pago sigue editable por cliente porque describe cómo opera, pero
  * ya NO entra en el cálculo del porcentaje.
+ *
+ * La regla del PPP efectivo que vale es la del servidor (Ingresos::pppEfectivo);
+ * acá se espeja sólo para que el número se mueva al guardar sin recargar.
  */
 
 (function() {
     'use strict';
 
-    let clientesConfig = [];
+    let grupos = [];
+    let avisos = [];
+    let descartados = 0;
     let escala = [];
+
+    /** Espejo de Ingresos::pppEfectivo(): manual > calculado > DIAS_PP_MAX > 30 */
+    function pppEfectivo(manual, calculado, diasPpMax) {
+        var candidatos = [manual, calculado, diasPpMax];
+
+        for (var i = 0; i < candidatos.length; i++) {
+            var n = parseInt(candidatos[i], 10);
+
+            if (!isNaN(n) && n > 0) {
+                return n;
+            }
+        }
+
+        return 30;
+    }
 
     function inicializar() {
         console.log('Inicializando Parámetros - Cobranzas');
@@ -359,7 +382,13 @@
                 mostrarCargando(false);
 
                 if (result.success) {
-                    clientesConfig = result.data || [];
+                    var data = result.data || {};
+
+                    grupos = data.grupos || [];
+                    avisos = data.avisos || [];
+                    descartados = data.descartados || 0;
+
+                    pintarAvisos();
                     renderizarTabla();
                 } else {
                     Notificacion.error('No se pudo cargar la configuración de cobranzas: '
@@ -372,70 +401,96 @@
             });
     }
 
-    function filtrarClientes() {
-        var term = (document.getElementById('busquedaParamCob').value || '').toLowerCase().trim();
+    /**
+     * Los avisos de la tarjeta: el script del PPP sin correr, o el directorio
+     * de sucursales que no se pudo leer. No son decoración: explican por qué
+     * un PPP está vacío o por qué aparecen franquicias dadas de baja.
+     */
+    function pintarAvisos() {
+        var cont = document.getElementById('avisosParamCob');
 
-        document.querySelectorAll('#tbodyParamCob tr').forEach(function(row) {
-            row.style.display = row.textContent.toLowerCase().includes(term) ? '' : 'none';
-        });
+        if (!cont) {
+            return;
+        }
+
+        cont.innerHTML = avisos.length
+            ? avisos.map(function(a) {
+                  return '<div class="alert alert-warning py-2 px-3 mb-2">'
+                      + '<i class="fas fa-triangle-exclamation me-1"></i><small>'
+                      + escapar(a) + '</small></div>';
+              }).join('')
+            : '';
     }
 
-    function renderizarTabla() {
+    /**
+     * Filtro consciente de grupos: un grupo se muestra si él o alguno de sus
+     * clientes matchea. Si matchea el grupo, se ven todos sus clientes; si no,
+     * sólo los que matchean. Sin término, todo.
+     */
+    function filtrarClientes() {
+        var term = (document.getElementById('busquedaParamCob').value || '').toLowerCase().trim();
         var tbody = document.getElementById('tbodyParamCob');
 
         if (!tbody) {
             return;
         }
 
-        if (clientesConfig.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">'
-                + 'No se encontraron clientes</td></tr>';
+        tbody.querySelectorAll('tr.pc-grupo').forEach(function(filaGrupo) {
+            var agrup = filaGrupo.getAttribute('data-agrup');
+            var clientes = tbody.querySelectorAll('tr.pc-cliente[data-agrup="' + agrup + '"]');
+            var grupoMatchea = !term || filaGrupo.textContent.toLowerCase().includes(term);
+            var algunCliente = false;
+
+            clientes.forEach(function(fila) {
+                var matchea = grupoMatchea || fila.textContent.toLowerCase().includes(term);
+
+                fila.style.display = matchea ? '' : 'none';
+                algunCliente = algunCliente || matchea;
+            });
+
+            filaGrupo.style.display = (grupoMatchea || algunCliente) ? '' : 'none';
+        });
+    }
+
+    function renderizarTabla() {
+        var tbody = document.getElementById('tbodyParamCob');
+        var pie = document.getElementById('pieParamCob');
+
+        if (!tbody) {
+            return;
+        }
+
+        if (grupos.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">'
+                + 'No se encontraron franquicias</td></tr>';
+
+            if (pie) {
+                pie.textContent = '';
+            }
+
             return;
         }
 
         var html = '';
+        var totalClientes = 0;
 
-        clientesConfig.forEach(function(c) {
-            var cod = c.cod_cliente;
-            var medio = c.medio_pago_default || 'ECHEQ';
-            var pppCalc = c.ppp_calculado > 0
-                ? c.ppp_calculado + ' días <small class="text-muted">(' + c.cant_cobros + ' cobros)</small>'
-                : '<span class="text-muted">-</span>';
-            var pppManVal = (c.ppp_manual !== null && c.ppp_manual !== undefined) ? c.ppp_manual : '';
-            var pppEfectivo = c.ppp_efectivo > 0
-                ? '<strong>' + c.ppp_efectivo + ' días</strong>'
-                : '<span class="text-muted">30 días (defecto)</span>';
+        grupos.forEach(function(g) {
+            html += filaGrupo(g);
 
-            html += '<tr data-cod="' + cod + '">'
-                + '<td><code>' + cod + '</code></td>'
-                + '<td><strong>' + escapar(c.razon_social) + '</strong></td>'
-                + '<td class="text-center">'
-                +     '<select class="form-select form-select-sm select-medio-pago mx-auto" '
-                +         'style="max-width: 140px;" data-cod="' + cod + '" '
-                +         'title="Informativo: no interviene en el descuento">'
-                +         '<option value="ECHEQ"' + (medio === 'ECHEQ' ? ' selected' : '') + '>ECHEQ</option>'
-                +         '<option value="TRANSFERENCIA"' + (medio === 'TRANSFERENCIA' ? ' selected' : '') + '>TRANSFERENCIA</option>'
-                +     '</select>'
-                + '</td>'
-                + '<td class="text-center">' + pppCalc + '</td>'
-                + '<td class="text-center">'
-                +     '<div class="input-group input-group-sm justify-content-center" '
-                +         'style="max-width: 140px; margin: 0 auto;">'
-                +         '<input type="number" min="0" step="1" '
-                +             'class="form-control form-control-sm text-center input-ppp-manual" '
-                +             'value="' + pppManVal + '" '
-                +             'placeholder="' + (c.ppp_calculado > 0 ? c.ppp_calculado : 30) + '" '
-                +             'data-cod="' + cod + '">'
-                +         '<button class="btn btn-outline-primary btn-save-ppp" '
-                +             'title="Guardar PPP manual" data-cod="' + cod + '">'
-                +             '<i class="fas fa-check"></i></button>'
-                +     '</div>'
-                + '</td>'
-                + '<td class="text-center text-primary">' + pppEfectivo + '</td>'
-                + '</tr>';
+            (g.clientes || []).forEach(function(c) {
+                html += filaCliente(g, c);
+                totalClientes++;
+            });
         });
 
         tbody.innerHTML = html;
+
+        if (pie) {
+            pie.textContent = grupos.length + ' grupo(s) · ' + totalClientes + ' franquicia(s) habilitada(s)'
+                + (descartados > 0
+                    ? ' · ' + descartados + ' franquicia(s) de Tango sin sucursal habilitada no se listan'
+                    : '');
+        }
 
         tbody.querySelectorAll('.select-medio-pago').forEach(function(sel) {
             sel.addEventListener('change', function() {
@@ -445,20 +500,107 @@
 
         tbody.querySelectorAll('.btn-save-ppp').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                var cod = this.getAttribute('data-cod');
-                var input = tbody.querySelector('.input-ppp-manual[data-cod="' + cod + '"]');
+                var agrup = this.getAttribute('data-agrup');
+                var input = tbody.querySelector('.input-ppp-manual[data-agrup="' + agrup + '"]');
 
-                guardarPPP(cod, input ? input.value : null);
+                guardarPPP(agrup, input ? input.value : null);
             });
         });
 
         tbody.querySelectorAll('.input-ppp-manual').forEach(function(inp) {
             inp.addEventListener('keydown', function(e) {
                 if (e.key === 'Enter') {
-                    guardarPPP(this.getAttribute('data-cod'), this.value);
+                    guardarPPP(this.getAttribute('data-agrup'), this.value);
                 }
             });
         });
+
+        // Un filtro tipeado sobrevive a un re-render (por ejemplo tras guardar)
+        filtrarClientes();
+    }
+
+    /** La fila del grupo: es donde vive el PPP, calculado y manual */
+    function filaGrupo(g) {
+        var agrup = g.cod_agrup;
+        var cant = (g.clientes || []).length;
+        var pppCalc = g.ppp_calculado > 0
+            ? g.ppp_calculado + ' días <small class="text-muted">(' + g.cant_recibos + ' recibo(s), '
+                + g.cant_clientes_ppp + ' cliente(s))</small>'
+            : '<span class="text-muted" title="Sin recibos de Tango en los últimos 100 días: se '
+                + 'proyecta con el manual, o con el respaldo del cliente">-</span>';
+        var pppManVal = (g.ppp_manual !== null && g.ppp_manual !== undefined) ? g.ppp_manual : '';
+
+        return '<tr class="pc-grupo" data-agrup="' + escapar(agrup) + '">'
+            + '<td><code>' + escapar(agrup) + '</code> '
+            +     (g.es_grupo
+                    ? '<span class="pc-badge pc-badge-grupo" title="Grupo empresario de GVA62">grupo</span>'
+                    : '<span class="pc-badge" title="Cliente sin grupo empresario: es su propio grupo">sin grupo</span>')
+            + '</td>'
+            + '<td><strong>' + escapar(g.nombre_agrup) + '</strong> '
+            +     '<small class="text-muted">' + cant + ' cliente(s)</small></td>'
+            + '<td></td>'
+            + '<td></td>'
+            + '<td class="text-center">' + pppCalc + '</td>'
+            + '<td class="text-center">'
+            +     '<div class="input-group input-group-sm justify-content-center" '
+            +         'style="max-width: 140px; margin: 0 auto;">'
+            +         '<input type="number" min="0" step="1" '
+            +             'class="form-control form-control-sm text-center input-ppp-manual" '
+            +             'value="' + pppManVal + '" '
+            +             'placeholder="' + (g.ppp_calculado > 0 ? g.ppp_calculado : 30) + '" '
+            +             'title="Pisa el PPP calculado para todos los clientes del grupo. Vacío = volver al calculado" '
+            +             'data-agrup="' + escapar(agrup) + '">'
+            +         '<button class="btn btn-outline-primary btn-save-ppp" '
+            +             'title="Guardar PPP manual del grupo" data-agrup="' + escapar(agrup) + '">'
+            +             '<i class="fas fa-check"></i></button>'
+            +     '</div>'
+            + '</td>'
+            + '<td class="text-center text-primary"><strong>' + g.ppp_efectivo + ' días</strong></td>'
+            + '</tr>';
+    }
+
+    /** La fila de un cliente: hereda el PPP del grupo; lo suyo es el medio de pago */
+    function filaCliente(g, c) {
+        var cod = c.cod_cliente;
+        var medio = c.medio_pago_default || 'ECHEQ';
+        var sucursal = c.nro_sucursal
+            ? '<code>' + escapar(c.nro_sucursal) + '</code> ' + escapar(c.desc_sucursal)
+            : '<span class="text-muted">—</span>';
+
+        // El efectivo del cliente sólo difiere del grupo cuando el grupo no
+        // tiene ni manual ni calculado y entra el DIAS_PP_MAX del cliente.
+        var distinto = (c.ppp_efectivo !== g.ppp_efectivo);
+
+        return '<tr class="pc-cliente" data-agrup="' + escapar(g.cod_agrup) + '" data-cod="' + escapar(cod) + '">'
+            + '<td class="ps-4"><code>' + escapar(cod) + '</code></td>'
+            + '<td>' + escapar(c.razon_social) + '</td>'
+            + '<td>' + sucursal + '</td>'
+            + '<td class="text-center">'
+            +     '<select class="form-select form-select-sm select-medio-pago mx-auto" '
+            +         'style="max-width: 140px;" data-cod="' + escapar(cod) + '" '
+            +         'title="Informativo: no interviene en el descuento">'
+            +         '<option value="ECHEQ"' + (medio === 'ECHEQ' ? ' selected' : '') + '>ECHEQ</option>'
+            +         '<option value="TRANSFERENCIA"' + (medio === 'TRANSFERENCIA' ? ' selected' : '') + '>TRANSFERENCIA</option>'
+            +     '</select>'
+            + '</td>'
+            + '<td class="text-center text-muted"><small>hereda del grupo</small></td>'
+            + '<td class="text-center text-muted">—</td>'
+            + '<td class="text-center' + (distinto ? ' text-warning' : ' text-muted') + '"'
+            +     (distinto ? ' title="El grupo no tiene PPP: se usa el respaldo del cliente (DIAS_PP_MAX o 30)"' : '')
+            +     '>' + c.ppp_efectivo + ' días</td>'
+            + '</tr>';
+    }
+
+    function buscarCliente(codCliente) {
+        for (var i = 0; i < grupos.length; i++) {
+            var cli = (grupos[i].clientes || []).find(c => c.cod_cliente === codCliente);
+
+            if (cli) {
+                return cli;
+            }
+        }
+
+        return null;
     }
 
     function guardarMedioPago(codCliente, medioPago) {
@@ -470,7 +612,7 @@
         .then(res => res.json())
         .then(result => {
             if (result.success) {
-                var cli = clientesConfig.find(c => c.cod_cliente === codCliente);
+                var cli = buscarCliente(codCliente);
 
                 if (cli) {
                     cli.medio_pago_default = medioPago;
@@ -486,28 +628,39 @@
         });
     }
 
-    function guardarPPP(codCliente, valor) {
+    /**
+     * Guarda el PPP manual de UN GRUPO y recalcula en memoria el efectivo del
+     * grupo y de cada uno de sus clientes, con la misma regla del servidor.
+     */
+    function guardarPPP(codAgrup, valor) {
         var pppVal = (valor !== '' && valor !== null) ? parseInt(valor, 10) : null;
 
-        fetch('Controller/ParametrosController.php?action=savePPPManual', {
+        if (pppVal !== null && (isNaN(pppVal) || pppVal < 0)) {
+            Notificacion.advertencia('El PPP tiene que ser un número de días no negativo.');
+            return;
+        }
+
+        fetch('Controller/ParametrosController.php?action=savePPPManualGrupo', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cod_cliente: codCliente, ppp_manual: pppVal })
+            body: JSON.stringify({ cod_agrup: codAgrup, ppp_manual: pppVal })
         })
         .then(res => res.json())
         .then(result => {
             if (result.success) {
-                var cli = clientesConfig.find(c => c.cod_cliente === codCliente);
+                var g = grupos.find(x => x.cod_agrup === codAgrup);
 
-                if (cli) {
-                    cli.ppp_manual = pppVal;
-                    cli.ppp_efectivo = (pppVal !== null && pppVal > 0)
-                        ? pppVal
-                        : (cli.ppp_calculado > 0 ? cli.ppp_calculado : 30);
+                if (g) {
+                    g.ppp_manual = (pppVal !== null && pppVal > 0) ? pppVal : null;
+                    g.ppp_efectivo = pppEfectivo(g.ppp_manual, g.ppp_calculado, null);
+
+                    (g.clientes || []).forEach(function(c) {
+                        c.ppp_efectivo = pppEfectivo(g.ppp_manual, g.ppp_calculado, c.dias_pp_max);
+                    });
                 }
 
                 renderizarTabla();
-                Notificacion.exito('PPP actualizado.');
+                Notificacion.exito(result.message || 'PPP del grupo actualizado.');
             } else {
                 Notificacion.error('No se pudo guardar el PPP: ' + result.message);
             }

@@ -1,4 +1,13 @@
 <?php
+// Todas las clases del sistema pasan por aca, asi que es el lugar para fijar la
+// zona horaria. php.ini trae date.timezone=Europe/Berlin (5 horas adelante de
+// Argentina): desde las 19:00 hora local, date('Y-m-d') y new DateTime('today')
+// ya decian "manana", y con eso el tablero de Cashflow arrancaba un dia
+// despues, el corte de pendientes de Cob. Electronicos corria un dia y el
+// "ayer" de Saldos Locales era hoy. GETDATE() del SQL Server esta en hora
+// Argentina, y esto alinea PHP con la base.
+date_default_timezone_set('America/Argentina/Buenos_Aires');
+
 if (!class_exists('Conexion')) {
     class Conexion
     {

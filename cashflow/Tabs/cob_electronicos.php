@@ -277,16 +277,17 @@
                         <span class="cobel-eje" id="cobelEje"></span>
                     </div>
                     <!-- Las ya acreditadas no se muestran por defecto: ya
-                         pasaron y no hay nada que hacer con ellas. El switch
-                         existe para poder auditarlas, no para trabajar. -->
+                         pasaron -o pasan hoy- y no hay nada que hacer con
+                         ellas. El switch existe para poder auditarlas, no
+                         para trabajar. -->
                     <div class="col-12">
                         <div class="form-check form-switch">
                             <input class="form-check-input" type="checkbox" role="switch"
                                    id="verAcreditadas">
                             <label class="form-check-label cobel-eje" for="verAcreditadas">
-                                Ver también las ya acreditadas (fecha anterior al horizonte).
-                                No entran al tablero: esa plata ya está informada en el saldo
-                                bancario de la pestaña Saldos.
+                                Ver también las ya acreditadas (fecha de hoy o anterior).
+                                No entran al tablero: esa plata ya está —o va a estar hoy— en
+                                el saldo bancario de la pestaña Saldos.
                             </label>
                         </div>
                     </div>
@@ -421,11 +422,12 @@
             <div class="cobel-nota mt-3">
                 <i class="fas fa-circle-info me-1"></i>
                 Las dos agrupaciones son la misma suma de netos vista de dos formas, así que dan el
-                mismo total. El horizonte del tablero arranca el
-                <span id="cobelDesde" class="fw-semibold">hoy</span>: lo anterior ya se acreditó y
-                lo informa el saldo bancario de la pestaña Saldos, así que sumarlo acá lo contaría
-                dos veces. Una fila marcada es una acreditación con fecha
-                <strong>posterior</strong> al eje, que el tablero todavía no puede mostrar.
+                mismo total. Lo pendiente arranca <strong>mañana</strong>
+                (<span id="cobelDesde" class="fw-semibold">mañana</span>): lo de hoy y lo
+                anterior ya está —o va a estar hoy— en el saldo bancario de la pestaña Saldos,
+                así que sumarlo acá lo contaría dos veces. Una fila
+                marcada es una acreditación con fecha <strong>posterior</strong> al eje, que el
+                tablero todavía no puede mostrar.
             </div>
         </div>
     </div>

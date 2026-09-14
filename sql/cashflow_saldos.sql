@@ -16,6 +16,8 @@
      3. RO_T_CASHFLOW_SALDOS_DETALLE    saldos por cuenta y fecha (historico)
      4. RO_T_CASHFLOW_SALDOS_SUCURSAL   gestion y reserva por local (parametro)
      5. RO_T_CASHFLOW_SALDOS_LOCAL      saldos de caja de locales (historico)
+     5.b RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL  saldo de caja tipeado a mano cuando
+                                        la consulta no trajo el cierre
      6. Parametros del modulo en RO_T_CASHFLOW_PARAMETROS
 
    ----------------------------------------------------------------------------
@@ -368,6 +370,52 @@ BEGIN
     CREATE NONCLUSTERED INDEX IX_RO_T_CASHFLOW_SALDOS_LOCAL_CARGA
         ON dbo.RO_T_CASHFLOW_SALDOS_LOCAL (ID_CARGA)
         INCLUDE (NRO_SUCURSAL, FECHA_SALDO, SALDO_MONEDA, GESTION, RESERVA, NETO_DEPOSITAR);
+END
+GO
+
+/* ----------------------------------------------------------------------------
+   5.b RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL y ORIGEN_DATO en la foto
+   Saldo de caja de un local cargado A MANO, para cuando la alimentacion de
+   RO_T_SALDOS_CIERRE_SBA29 falla y el ultimo registro del local queda viejo.
+
+   La regla de precedencia vive en Class/Saldos.php: gana el mas nuevo por
+   FECHA_SALDO entre la consulta y el manual, y a igual fecha gana el manual.
+   FECHA_SALDO del manual es AYER respecto del dia en que se carga: es el
+   cierre que no llego. Insert-only, sin bajas fisicas.
+
+   Mismo bloque que sql/cashflow_saldos_local_manual.sql, que es la migracion
+   para las bases donde este script ya corrio. Alcanza con correr uno.
+   ---------------------------------------------------------------------------- */
+IF OBJECT_ID('dbo.RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL (
+        ID            INT IDENTITY(1,1) NOT NULL,
+        NRO_SUCURSAL  INT           NOT NULL,
+        FECHA_SALDO   DATE          NOT NULL,
+        SALDO_MONEDA  DECIMAL(19,4) NOT NULL,
+        SALDO_CONSULTA DECIMAL(19,4) NULL,
+        FECHA_CONSULTA DATE          NULL,
+        OBSERVACIONES VARCHAR(500)  NULL,
+        ACTIVO        BIT           NOT NULL CONSTRAINT DF_CF_SAL_LOCM_ACTIVO DEFAULT (1),
+        FECHA_UPDATE  DATETIME      NOT NULL CONSTRAINT DF_CF_SAL_LOCM_FUPD   DEFAULT (GETDATE()),
+        USUARIO       VARCHAR(50)   NULL,
+
+        CONSTRAINT PK_RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL PRIMARY KEY CLUSTERED (ID)
+    );
+
+    CREATE NONCLUSTERED INDEX IX_RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL_ULTIMO
+        ON dbo.RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL (NRO_SUCURSAL, ACTIVO, FECHA_SALDO DESC, ID DESC)
+        INCLUDE (SALDO_MONEDA, FECHA_UPDATE, USUARIO);
+END
+GO
+
+IF COL_LENGTH('dbo.RO_T_CASHFLOW_SALDOS_LOCAL', 'ORIGEN_DATO') IS NULL
+BEGIN
+    ALTER TABLE dbo.RO_T_CASHFLOW_SALDOS_LOCAL
+        ADD ORIGEN_DATO VARCHAR(10) NOT NULL
+            CONSTRAINT DF_CF_SAL_LOC_ORIGEN DEFAULT ('CONSULTA'),
+        CONSTRAINT CK_RO_T_CASHFLOW_SALDOS_LOCAL_ORIGEN
+            CHECK (ORIGEN_DATO IN ('CONSULTA', 'MANUAL'));
 END
 GO
 

@@ -198,7 +198,20 @@ class SaldosProvider extends CashflowProvider {
                 . $e->getMessage() . '), asi que se toma reserva cero y todas depositan.');
         }
 
-        $armado = Saldos::armarSaldosLocales($consulta, $params);
+        // Los saldos tipeados a mano cuando la consulta no trajo el cierre.
+        // Cual manda lo decide Saldos::aplicarSaldosManuales(); el tablero y
+        // la pestana tienen que resolverlo igual, o no cierran.
+        $manuales = [];
+
+        try {
+            $manuales = $saldos->getSaldosLocalesManuales();
+        } catch (Throwable $e) {
+            $this->avisar('Caja Locales: no se pudieron leer los saldos cargados a mano ('
+                . $e->getMessage() . '), asi que se usa lo que trajo la consulta.');
+        }
+
+        $armado = Saldos::armarSaldosLocales($consulta, $params, $manuales,
+            Saldos::ayer($h->hoy()));
 
         foreach ($armado['avisos'] as $a) {
             $this->avisar('Caja Locales: ' . $a);

@@ -111,7 +111,20 @@
                         que se cargó. Los datos no se pisan: cada carga es un registro nuevo.
                     </small>
                 </div>
-                <div class="d-flex gap-2">
+                <div class="d-flex gap-2 align-items-center">
+                    <!-- Filtro por tipo de cuenta. Es de pantalla: los KPI, la
+                         tabla y el pie muestran lo filtrado, pero lo que se
+                         guarda y lo que consume el tablero es siempre todo.
+                         Mientras se carga se deshabilita: una carga con filas
+                         escondidas las guardaria en cero. -->
+                    <select id="filtroTipoSaldos" class="form-select form-select-sm w-auto"
+                            title="Filtra la tabla y los totales por tipo de cuenta">
+                        <option value="">Todos los tipos</option>
+                        <option value="BANCO">Banco</option>
+                        <option value="MERCADO_PAGO">Mercado Pago</option>
+                        <option value="EFECTIVO_CENTRAL">Efectivo</option>
+                        <option value="OTRO">Otro</option>
+                    </select>
                     <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
                     <button class="btn btn-sm btn-success" data-exportar="tablaSaldos"
                             data-exportar-nombre="Saldos_Por_Cuenta"
@@ -239,13 +252,17 @@
                 <div>
                     <h5 class="mb-0">Caja de los locales propios</h5>
                     <!--
-                        Qué guarda el botón, dicho en la pantalla. El saldo NO se
-                        edita ni viaja: al guardar, el servidor lo vuelve a leer
-                        de la consulta. Lo único editable son los dos valores que
-                        no están en Tango.
+                        Qué guarda el botón, dicho en la pantalla. El saldo sale
+                        de la consulta y sólo se tipea cuando ésta no trajo el
+                        cierre: queda como manual fechado ayer y manda hasta que
+                        la consulta traiga uno más nuevo. Gestión y Reserva son
+                        los dos valores que no están en Tango.
                     -->
                     <small class="text-muted">
-                        El <strong>saldo</strong> sale sólo de la consulta y no se edita.
+                        El <strong>saldo</strong> sale de la consulta: las filas
+                        <span class="sal-leyenda-desactualizado">resaltadas</span> no tienen el
+                        cierre de ayer, y ahí se puede tipear el saldo real; al guardar queda como
+                        <em>manual</em> y manda hasta que la consulta traiga uno más nuevo.
                         <strong>Gestión</strong> y <strong>Reserva</strong> se editan acá:
                         <em>Guardar</em> las deja como valor por defecto del local —es el mismo
                         dato que Parámetros → Saldos— y guarda la foto del día en el histórico.
@@ -267,7 +284,7 @@
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
                     <button id="btnGuardarLocales" class="btn btn-sm btn-success"
-                            title="Guarda la gestión y la reserva del local, y la foto del día en el histórico">
+                            title="Guarda la gestión y la reserva del local, los saldos tipeados a mano, y la foto del día en el histórico">
                         <i class="fas fa-floppy-disk me-1"></i> Guardar
                     </button>
                 </div>

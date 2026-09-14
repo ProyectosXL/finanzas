@@ -39,6 +39,13 @@ require_once __DIR__ . '/../CobElectronicos.php';
  * todavia no entro a ninguna cuenta y ninguna otra fila la muestra. El criterio
  * esta en CobElectronicos::ubicacionEnEje().
  *
+ * LO DE HOY TAMPOCO ENTRA
+ * -----------------------
+ * Una acreditacion es pendiente recien desde MANANA: la de hoy ya esta -o va a
+ * estar al cierre- en el saldo bancario de la primera columna. El corte es
+ * CobElectronicos::cortePendientes(), el mismo que usa la pestana, para que la
+ * pantalla y el tablero cierren.
+ *
  * ESTA FILA NO SE CRUZA CON VENTAS
  * --------------------------------
  * Por decision del negocio no se solapa ni se ajusta contra "Cobros s/ ventas
@@ -103,12 +110,16 @@ class CobElectronicosProvider extends CashflowProvider {
             return $this->vacia();
         }
 
-        // Se piden solo los movimientos DESDE el inicio del eje: los anteriores
-        // ya se acreditaron y estan informados en el saldo bancario, asi que no
-        // entran al tablero ni se avisan. El filtro es una optimizacion; la
-        // regla vive igual en CobElectronicos::armarSerie() y esta probada, para
-        // que no dependa de que el llamador se acuerde de filtrar.
-        $movimientos = $modulo->getMovimientos(['desde' => $h->hoy()]);
+        // Desde cuando una acreditacion es pendiente: manana.
+        $corte = CobElectronicos::cortePendientes($h->hoy());
+
+        // Se piden solo los movimientos DESDE el corte: los anteriores -los de
+        // hoy incluidos- ya se acreditaron y estan informados en el saldo
+        // bancario, asi que no entran al tablero ni se avisan. El filtro es una
+        // optimizacion; la regla vive igual en CobElectronicos::armarSerie() y
+        // esta probada, para que no dependa de que el llamador se acuerde de
+        // filtrar.
+        $movimientos = $modulo->getMovimientos(['desde' => $corte]);
 
         // Un cero no dice si no hay movimientos, si los que hay ya se
         // acreditaron, o si los datos son cero. Se distingue, igual que hace
@@ -119,7 +130,7 @@ class CobElectronicosProvider extends CashflowProvider {
 
             $this->avisar($cargados > 0
                 ? ('Cobranzas Pagos Electronicos: los ' . $cargados . ' movimientos cargados '
-                    . 'tienen fecha de acreditacion anterior al horizonte, asi que ya estan '
+                    . 'tienen fecha de acreditacion de hoy o anterior, asi que ya estan '
                     . 'informados en el saldo bancario y la fila va en cero. No hay '
                     . 'acreditaciones pendientes cargadas.')
                 : ('Cobranzas Pagos Electronicos: hay ' . count($procesadoras)

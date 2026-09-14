@@ -8,14 +8,15 @@ Rama: `feature/cobranzas-fr-proyeccion`
 
 ## La idea en una línea
 
-**Las facturas pendientes se proyectan sumando a su fecha de emisión el Plazo Promedio de Pago (PPP) de cada cliente —salvo que alguien haya cargado la fecha de esa factura a mano, que entonces manda—, y el descuento sale de una escala general por tramo de días.**
+**Las facturas pendientes se proyectan sumando a su fecha de emisión el Plazo Promedio de Pago (PPP) del grupo empresario del cliente —salvo que alguien haya cargado la fecha de esa factura a mano, que entonces manda—, y el descuento sale de una escala general por tramo de días.**
 
 ```
 Facturas Pendientes (GVA12 FAC en estado PEN)
         │
         ├─ Excluye comprobantes ya contados por Real (ACEPTADA) o ya cobrados (PAGADO)
-        ├─ PPP del Cliente = Promedio de días de plazo de los últimos 3 cobros
-        ├─ Si existe PPP_MANUAL en Parámetros, pisa el PPP calculado
+        ├─ PPP del GRUPO EMPRESARIO = promedio de los PPP por cliente del grupo,
+        │      con los recibos de Tango de los últimos 100 días (RO_V_CASHFLOW_PPP_GRUPO)
+        ├─ Si el grupo tiene PPP manual en Parámetros, pisa el calculado
         ▼
 Fecha Probable de Cobro = Fecha Emisión + PPP
         │
@@ -43,15 +44,16 @@ Contra `central`:
 -- 2. sql/cashflow_estructura_split_cobranzas_fr.sql
 -- 3. sql/cashflow_cobranzas_escala_general.sql
 -- 4. sql/cashflow_cobranzas_fecha_manual.sql
+-- 5. sql/cashflow_cobranzas_ppp_grupo.sql
 ```
 
-1. Crea la tabla `RO_T_CASHFLOW_COBRANZAS_PARAM_DESC` para administrar las escalas de descuento por cliente, tramo de días (`DIAS_DESDE`, `DIAS_HASTA`) y medio de pago (`ECHEQ`).
-2. Agrega la columna `PPP_MANUAL INT NULL` a la tabla `RO_T_PARAMETROS_DESC_CLIENTES`.
-3. Es reejecutable y cuenta con índices por `COD_CLIENT`, `MEDIO_PAGO` y `ACTIVO`.
+El primero crea `RO_T_CASHFLOW_COBRANZAS_PARAM_DESC` (escalas por cliente, que ya no se leen desde el script 3) y `RO_T_CASHFLOW_COBRANZAS_CLIENTE_CONFIG` (que nunca se leyó). **No** agrega `PPP_MANUAL` a `RO_T_PARAMETROS_DESC_CLIENTES`: esa columna existe en la base pero ningún script de este repo la crea, y desde el script 5 tampoco se lee.
 
 El segundo parte la fila `COBRANZAS_FR` del tablero en sus dos componentes. Es reejecutable y no borra nada.
 
 El tercero crea `RO_T_CASHFLOW_COBRANZAS_ESCALA_DESC` y siembra la escala de descuento general. El cuarto crea `RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL`, donde viven las fechas de cobro cargadas a mano. Los dos son reejecutables. Sin el tercero, todas las facturas proyectan con **0% de descuento**; sin el cuarto, la fecha de cobro siempre sale del PPP y la celda editable no guarda nada — ninguno de los dos rompe la pantalla.
+
+El quinto crea la vista `RO_V_CASHFLOW_PPP_GRUPO` (sobre `dbo.GC_VIEW_PPP`, que tiene que existir) y la tabla `RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO` del PPP manual por grupo, y migra a ella los PPP manuales por cliente que había. Sin él, el PPP calculado queda vacío, la tarjeta de Parámetros avisa qué script falta y la proyección cae al respaldo (`DIAS_PP_MAX` del cliente, o 30).
 
 ---
 
@@ -112,17 +114,32 @@ El script es `sql/cashflow_estructura_split_cobranzas_fr.sql`, y **toma la secci
 
 ## Cálculo y Override del Plazo Promedio de Pago (PPP)
 
-El cálculo del PPP por cliente opera de la siguiente manera:
+**El PPP es por grupo empresario.** Los franquiciados con varios locales pagan como grupo, así que el plazo se calcula por `GVA14.GRUPO_EMPR` (nombre en `GVA62.NOMBRE_GRU`) y todos los clientes del grupo lo comparten. Un cliente sin grupo es su propio grupo: `COD_AGRUP = GRUPO_EMPR`, o `COD_CLIENT` si está vacío. La regla vive en `Ingresos::codAgrupador()` y espeja el `CASE` de la vista, para que el PHP busque con la misma clave que la vista devuelve.
 
-1. **PPP Calculado:**
-   - Se buscan los últimos 3 cobros con estado `PAGADO` en `FP_propuestas_pago` para el cliente (`COD_CLIENT`).
-   - Para cada cobro se obtiene el plazo real: `DATEDIFF(day, fecha_creacion, fecha_propuesta_pago)`.
-   - Se promedian los plazos resultantes: `ROUND(AVG(dias_plazo))`.
-   - Si el cliente no registra cobros históricos, se adopta el valor de respaldo por defecto (30 días).
+1. **PPP Calculado** — vista `RO_V_CASHFLOW_PPP_GRUPO` (script 5), sobre `dbo.GC_VIEW_PPP` de Tango:
+   - `GC_VIEW_PPP` tiene un PPP **por recibo**: los días ponderados por importe entre la emisión de las facturas imputadas y el cobro. Es factura → cobro, que es lo que la proyección suma a `FECHA_EMIS`.
+   - Ventana: recibos de los últimos **100 días**, clientes `FR%`.
+   - Se promedia por cliente y después por grupo (**promedio de promedios**): un cliente con muchos recibos no pesa más que uno con pocos.
+   - Un grupo sin recibos en la ventana no tiene fila: su calculado es 0 y entra el respaldo.
 
-2. **PPP Manual (Override en Parámetros):**
-   - En la pestaña **Parámetros → Cobranzas**, cada cliente muestra su PPP calculado y un campo editable directo (`PPP_MANUAL`).
-   - Al ingresar un valor manual, el sistema utiliza inmediatamente ese plazo para todas las proyecciones del cliente sin alterar el histórico calculado.
+   > Antes salía de `FP_propuestas_pago` (base `apps`): el promedio de `DATEDIFF(fecha_creacion, fecha_propuesta_pago)` de las últimas 3 propuestas pagadas. Eso mide cuánto tarda una *propuesta* en pagarse desde que se crea, no cuánto tarda el cliente en pagar la factura, y se sumaba igual a la fecha de emisión. Era el número equivocado aplicado a la fecha correcta. Por eso "el PPP no era correcto".
+
+2. **PPP Manual** — tabla `RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO`, una fila por `COD_AGRUP`:
+   - En **Parámetros → Cobranzas** cada grupo tiene un campo editable; el valor aplica a todos sus clientes. Vacío o 0 vuelve al calculado (la fila queda, con quién y cuándo lo dejó así).
+   - `RO_T_PARAMETROS_DESC_CLIENTES.PPP_MANUAL` (por cliente) **ya no se lee**. La semilla del script 5 migró los que había a su agrupador, con `MAX` cuando dos clientes del mismo grupo tenían valores distintos.
+
+3. **PPP Efectivo** — una sola regla, `Ingresos::pppEfectivo()` (antes estaba escrita tres veces: en Ingresos, en Parametros y en el JS):
+
+   ```
+   manual del grupo > 0        → ese
+   calculado del grupo > 0     → ese
+   DIAS_PP_MAX del cliente > 0 → ese
+   si no                       → 30
+   ```
+
+   Sólo en el último escalón dos clientes del mismo grupo pueden proyectar con plazos distintos; la tarjeta lo marca.
+
+`Ingresos::getPPPClientes()` sigue devolviendo un mapa **por cliente** con `ppp_efectivo`, así que la proyección no cambió: cada factura busca a su cliente y encuentra el plazo de su grupo (más `cod_agrup`, `nombre_agrup`, `cant_recibos` y `cant_clientes_ppp` para poder auditarlo). Las tres lecturas van a `central` y **el cruce se hace en PHP**, nunca con un join SQL entre tablas propias y de Tango: pueden tener collation distinta.
 
 ---
 
@@ -161,7 +178,17 @@ La escala se guarda **completa** y no tramo por tramo. Es lo único que permite 
 
 La validación corre en el servidor (`Ingresos::validarEscala()`, pura y probada) y el JS la espeja **sólo para bloquear el botón y explicar por qué**. Es el mismo criterio del editor de estructura del tablero. El guardado va en una transacción: da de baja lógica los tramos vigentes e inserta los nuevos, así que no existe el estado intermedio de una escala a medio escribir.
 
-**El PPP por cliente no cambió.** Sigue siendo el promedio de los últimos 3 cobros, sigue pisable con `PPP_MANUAL` desde la misma pantalla, y sigue siendo lo que define `Fecha probable de cobro = Fecha emisión + PPP`. Lo único que se generalizó es el descuento.
+**El PPP sigue definiendo `Fecha probable de cobro = Fecha emisión + PPP`**, pero ahora es el del grupo empresario (ver la sección anterior). Lo que se generalizó acá es sólo el descuento.
+
+---
+
+## Qué franquicias lista la tarjeta de Parámetros
+
+La tarjeta **Gestión de Cobranza Franquicias** muestra una fila por grupo empresario y, debajo, sus clientes. Los clientes son **sólo las franquicias habilitadas en el directorio de sucursales**: `SUCURSALES_LAKERS` (servidor `locales`, con el prefijo de `Conexion::prefijoLocales()` igual que en Saldos) con `CANAL = 'FRANQUICIAS' AND HABILITADO = 1 AND NRO_SUC_MADRE IS NULL` — hoy 84, contra 204 clientes `FR%` en `GVA14`. Cada cliente muestra su número y nombre de sucursal (un cliente con dos sucursales las ve concatenadas), y el pie de la tarjeta dice cuántas franquicias de Tango quedaron afuera.
+
+**Informar de más antes que vacío:** si el servidor de locales no responde, o el directorio no devuelve ninguna franquicia, la tarjeta muestra **todas** las de Tango con un aviso. Una tarjeta en blanco dejaría sin editar el PPP de todo el mundo por una caída ajena.
+
+**La proyección no se filtra.** Una franquicia dada de baja con una factura abierta sigue proyectando en Cobranzas FR: el filtro es de la tarjeta de Parámetros, no del universo a cobrar. El cruce (`Parametros::mapaSucursales()`, `filtrarFranquiciasActivas()`) y el agrupado (`agruparPorAgrupador()`) son helpers puros con prueba.
 
 ---
 
@@ -173,7 +200,7 @@ El PPP es un promedio: sirve para el grueso de la cartera y no sirve cuando algu
 
 ```
 Fecha de cobro = fecha manual  (si hay una cargada para ese comprobante)
-               = Fecha emisión + PPP del cliente  (si no)
+               = Fecha emisión + PPP del grupo del cliente  (si no)
 
 Días = DATEDIFF(day, Fecha emisión, Fecha de cobro)   ← SIEMPRE sobre la fecha resuelta
 ```
@@ -432,6 +459,8 @@ El proveedor `IngresosProvider` registra tres series en `CashflowRegistry`:
 - Los dos avisos de vencidas, y que sin vencidas no haya ninguno.
 - Que `EjeVista::marcarAlguna()` marque al cliente con **una** factura vencida entre dos.
 - El filtro por fecha de emisión: extremos vacíos, extremos sueltos, los bordes del rango inclusive, el rango al revés rechazado, el calendario imposible, y que el comprobante sin emisión quede afuera **contado** y avisado.
+- El PPP por grupo: la regla del efectivo (`pppEfectivo()`: manual → calculado → `DIAS_PP_MAX` → 30, con vacíos y strings de la base), el agrupador (`codAgrupador()`), que los clientes de un grupo compartan el PPP del grupo y que un grupo sin recibos caiga al manual, al respaldo del cliente o a 30 (`armarPPPPorCliente()`).
+- La tarjeta de Parámetros: el cruce con el directorio de sucursales (`mapaSucursales()` concatena varias sucursales del mismo cliente; `filtrarFranquiciasActivas()` descarta sin avisar, y sin directorio muestra todos **con** aviso) y el agrupado en una fila por agrupador con sus clientes ordenados (`agruparPorAgrupador()`).
 
 `tests/test_cobranzas_fr_split.php`:
 - Que lo que cuenta *Real* y lo que la proyección excluye sean complementarios, estado por estado.

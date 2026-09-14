@@ -40,6 +40,17 @@ require_once __DIR__ . '/Horizonte.php';
  * tocan nunca: su plata ya entro con la tasa que entro. Ver
  * README-cob-electronicos.md.
  *
+ * LO DE HOY NO ES PENDIENTE
+ * -------------------------
+ * Una acreditacion cuenta como PENDIENTE recien desde MANANA. Lo que se
+ * acredita hoy ya esta -o va a estar al cierre- en el saldo bancario que
+ * informa la pestana Saldos, asi que sumarlo tambien como cobranza lo contaria
+ * dos veces. Manana a secas, sin regla de dia habil: puede haber acreditaciones
+ * cualquier dia -una billetera acredita un sabado-, asi que un sabado visto un
+ * viernes es pendiente. El corte es UNO SOLO, cortePendientes(), y lo usan la
+ * pestana, el tablero, el recalculo y el importador; si cada uno tuviera el
+ * suyo, la pantalla y el tablero no cerrarian.
+ *
  * ESTA FILA NO SE CRUZA CON VENTAS
  * --------------------------------
  * Por decision del negocio, la fila "Cobranzas Pagos Electronicos" NO se solapa
@@ -334,9 +345,35 @@ class CobElectronicos {
     }
 
     /**
+     * Desde que fecha una acreditacion cuenta como PENDIENTE: MANANA.
+     *
+     * HOY NO ES PENDIENTE. Lo que se acredita hoy ya esta -o va a estar al
+     * cierre- en el saldo bancario que informa la pestana Saldos, asi que
+     * sumarlo tambien como cobranza lo contaria dos veces.
+     *
+     * Y ES MANANA A SECAS, NO EL PROXIMO DIA HABIL. Por decision del negocio:
+     * puede haber acreditaciones cualquier dia -una billetera acredita un
+     * sabado-, asi que un sabado visto un viernes ES pendiente y tiene que
+     * entrar al tablero. Es coherente con armarSerie(), que tampoco corre la
+     * fecha de acreditacion a dia habil.
+     *
+     * @param string $hoy 'Y-m-d' del dia de referencia, normalmente $h->hoy()
+     * @return string 'Y-m-d'
+     */
+    public static function cortePendientes($hoy) {
+        $hoy = Horizonte::normalizarFecha($hoy);
+
+        if ($hoy === null) {
+            $hoy = date('Y-m-d');
+        }
+
+        return date('Y-m-d', strtotime($hoy . ' +1 day'));
+    }
+
+    /**
      * Donde cae un movimiento respecto del eje del tablero.
      *
-     * UN MOVIMIENTO CON FECHA ANTERIOR AL EJE **NO** ABRE EL HORIZONTE. Es lo
+     * UN MOVIMIENTO CON FECHA ANTERIOR AL CORTE **NO** ABRE EL HORIZONTE. Es lo
      * inverso a lo que hace Saldos::destinoEnEje(), y es a proposito:
      *
      *   - Un SALDO describe plata que EXISTE AHORA, asi que una fecha pasada
@@ -345,6 +382,10 @@ class CobElectronicos {
      *     plata ya esta en la cuenta y ya la informa el saldo bancario de la
      *     pestana Saldos. Reubicarla en la apertura del horizonte la contaria
      *     DOS VECES.
+     *
+     * EL CORTE NO ES HOY SINO MANANA, ver cortePendientes(): la acreditacion
+     * de hoy tambien es "ya acreditada", porque el saldo bancario de hoy ya la
+     * tiene o la va a tener al cierre.
      *
      * Y NO SE AVISA NI SE CUENTA COMO IMPORTE FUERA DEL HORIZONTE. Una
      * acreditacion ya ocurrida no es plata que el tablero informe de menos: es
@@ -372,7 +413,7 @@ class CobElectronicos {
             return 'POSTERIOR';
         }
 
-        if ($fecha < $h->hoy()) {
+        if ($fecha < self::cortePendientes($h->hoy())) {
             return 'ANTERIOR';
         }
 
@@ -390,9 +431,9 @@ class CobElectronicos {
      *     AVISAN y NO se bloquean: puede haber dos liquidaciones el mismo dia, y
      *     el aviso alcanza para detectar el pegado doble
      *
-     * Los movimientos YA ACREDITADOS -fecha anterior al eje- se marcan en su
-     * fila pero NO generan aviso: ya pasaron, y su importe ya esta informado en
-     * el saldo bancario. Ver ubicacionEnEje().
+     * Los movimientos YA ACREDITADOS -fecha anterior al corte, hoy incluido- se
+     * marcan en su fila pero NO generan aviso: ya pasaron, y su importe ya esta
+     * informado en el saldo bancario. Ver ubicacionEnEje().
      *
      * @param array $movimientos Filas normalizadas por filaMovimiento()
      * @param Horizonte $h
@@ -606,13 +647,14 @@ class CobElectronicos {
      * todavia no entro a ninguna cuenta y ninguna otra fila del tablero la
      * muestra, asi que callarla seria informar de menos.
      *
-     * LO YA ACREDITADO -fecha anterior al eje- queda fuera del alcance, sin
-     * aviso y SIN sumar a 'fuera_horizonte'. No es plata que el tablero informe
-     * de menos: es plata que el tablero informa por otra fila, la del saldo
-     * bancario de la pestana Saldos. Contarla en 'fuera_horizonte' haria que el
-     * tablero avisara todos los dias por algo que ya paso y que no hay que
-     * hacer. Ver ubicacionEnEje() para por que, a diferencia de Saldos, una
-     * fecha pasada tampoco abre el horizonte.
+     * LO YA ACREDITADO -fecha anterior al corte, hoy incluido- queda fuera del
+     * alcance, sin aviso y SIN sumar a 'fuera_horizonte'. No es plata que el
+     * tablero informe de menos: es plata que el tablero informa por otra fila,
+     * la del saldo bancario de la pestana Saldos. Contarla en 'fuera_horizonte'
+     * haria que el tablero avisara todos los dias por algo que ya paso y que no
+     * hay que hacer. Ver ubicacionEnEje() para por que, a diferencia de Saldos,
+     * una fecha pasada tampoco abre el horizonte, y cortePendientes() para por
+     * que hoy cuenta como pasado.
      *
      * 'ya_acreditado' se devuelve igual, para que quien quiera mostrarlo pueda:
      * es un escalar informativo y el contrato lo ignora.
@@ -682,10 +724,10 @@ class CobElectronicos {
      * Que movimientos PENDIENTES cambian si se recalculan con las alicuotas de
      * ahora, y con que diferencia.
      *
-     * SOLO LOS PENDIENTES. Un movimiento con fecha de acreditacion anterior a
-     * hoy ya se acredito: su plata entro con la tasa que entro, y recalcularlo
-     * seria reescribir la historia. Es el mismo motivo por el que la tasa se
-     * persiste en la fila.
+     * SOLO LOS PENDIENTES. Un movimiento con fecha de acreditacion anterior al
+     * corte -hoy incluido, ver cortePendientes()- ya se acredito: su plata
+     * entro con la tasa que entro, y recalcularlo seria reescribir la historia.
+     * Es el mismo motivo por el que la tasa se persiste en la fila.
      *
      * Es un helper puro y devuelve un PLAN, no una escritura: asi el mismo
      * calculo sirve para aplicar el recalculo y para poder decir en la pantalla
@@ -693,16 +735,17 @@ class CobElectronicos {
      *
      * @param array $movimientos Filas normalizadas por filaMovimiento()
      * @param array $alicuotasPorProcesadora Mapa id_procesadora => filas de alicuotas
-     * @param string $hoy 'Y-m-d'
+     * @param string $corte 'Y-m-d' desde el que una acreditacion es pendiente
      * @return array ['cambios', 'diferencia', 'pendientes', 'acreditados', 'avisos']
      */
-    public static function planRecalculo($movimientos, $alicuotasPorProcesadora, $hoy) {
+    public static function planRecalculo($movimientos, $alicuotasPorProcesadora, $corte) {
         $cambios = [];
         $avisos = [];
         $diferencia = 0;
         $pendientes = 0;
         $acreditados = 0;
         $sinAlicuota = [];
+        $corte = substr((string) $corte, 0, 10);
 
         $alicuotasPorProcesadora = is_array($alicuotasPorProcesadora)
             ? $alicuotasPorProcesadora : [];
@@ -715,7 +758,7 @@ class CobElectronicos {
                 continue;
             }
 
-            if ($fecha < substr((string) $hoy, 0, 10)) {
+            if ($fecha < $corte) {
                 $acreditados++;
                 continue;
             }
@@ -1218,7 +1261,7 @@ class CobElectronicos {
      * forma de saber cual de las dos corresponde a cual de las cargadas: el
      * error pide llenar ID_EXTERNO, que es la solucion real.
      *
-     * LAS FILAS YA ACREDITADAS -fecha anterior al inicio del eje- NO SE
+     * LAS FILAS YA ACREDITADAS -fecha anterior al corte, hoy incluido- NO SE
      * IMPORTAN. El archivo de la procesadora siempre va a traer el historico, y
      * cargarlo no aporta nada: esa plata ya esta informada en el saldo bancario.
      * Se cuentan aparte para que el resumen no mienta sobre el tamano del
@@ -1236,12 +1279,13 @@ class CobElectronicos {
      * @param array $existentes Movimientos activos normalizados (filaMovimiento())
      * @param array $procesadoras Filas de getProcesadoras(false)
      * @param array $alicuotas Mapa id_procesadora => filas de alicuotas
-     * @param string $inicioEje 'Y-m-d' del primer dia del eje del tablero
+     * @param string $corte 'Y-m-d' desde el que una acreditacion es pendiente,
+     *        ver cortePendientes()
      * @param array $periodo ['desde' => 'Y-m-d', 'hasta' => 'Y-m-d'] declarado
      * @return array Diff completo
      */
     public static function compararImportacion($filasArchivo, $existentes, $procesadoras,
-                                               $alicuotas, $inicioEje, $periodo = []) {
+                                               $alicuotas, $corte, $periodo = []) {
         $porNombre = [];
 
         foreach (is_array($procesadoras) ? $procesadoras : [] as $p) {
@@ -1263,7 +1307,7 @@ class CobElectronicos {
         $filas = [];
         $vistas = [];
         $tocados = [];
-        $inicioEje = substr((string) $inicioEje, 0, 10);
+        $corte = substr((string) $corte, 0, 10);
 
         $resumen = [
             'altas' => 0, 'cambios' => 0, 'sin_cambios' => 0,
@@ -1275,7 +1319,7 @@ class CobElectronicos {
         $maxFecha = null;
 
         foreach (is_array($filasArchivo) ? $filasArchivo : [] as $cruda) {
-            $fila = self::filaImportacion($cruda, $porNombre, $alicuotas, $inicioEje);
+            $fila = self::filaImportacion($cruda, $porNombre, $alicuotas, $corte);
 
             if ($fila['estado'] !== 'ERROR' && $fila['estado'] !== 'YA_ACREDITADA') {
                 $clave = self::claveImportacion($fila);
@@ -1359,7 +1403,7 @@ class CobElectronicos {
         }
 
         $bajas = self::bajasCandidatas($existentes, $filas, $tocados, $ventanaDesde,
-            $ventanaHasta, $inicioEje);
+            $ventanaHasta, $corte);
 
         $resumen['bajas'] = count($bajas);
         $resumen['neto_bajas'] = 0;
@@ -1406,7 +1450,7 @@ class CobElectronicos {
      *
      * @return array Fila con 'estado' ERROR / YA_ACREDITADA, o lista para clasificar
      */
-    private static function filaImportacion($cruda, $porNombre, $alicuotas, $inicioEje) {
+    private static function filaImportacion($cruda, $porNombre, $alicuotas, $corte) {
         $fila = [
             'linea' => isset($cruda['linea']) ? intval($cruda['linea']) : 0,
             // Los valores TAL COMO VINIERON en el archivo. Se devuelven para que
@@ -1511,11 +1555,11 @@ class CobElectronicos {
 
         // Ya acreditada: no se importa y no es un error. Ver la nota de
         // compararImportacion().
-        if ($fecha < $inicioEje) {
+        if ($fecha < $corte) {
             $fila['estado'] = 'YA_ACREDITADA';
-            $fila['motivo'] = 'Se acreditó el ' . self::fechaCorta($fecha)
-                . ', antes del inicio del horizonte: ya está informada en el saldo bancario, '
-                . 'así que no se importa.';
+            $fila['motivo'] = 'Se acredita el ' . self::fechaCorta($fecha) . ', antes del '
+                . self::fechaCorta($corte) . ' (mañana): ya está informada en el saldo '
+                . 'bancario, así que no se importa.';
 
             return $fila;
         }
@@ -1654,17 +1698,18 @@ class CobElectronicos {
      * EL ALCANCE ES ACOTADO A PROPOSITO, y esto es lo delicado de la funcion:
      * solo se consideran los movimientos de las procesadoras que vienen en el
      * archivo, con fecha DENTRO de la ventana que el archivo cubre, y desde el
-     * inicio del eje. Un archivo parcial -una sola procesadora, una sola semana-
-     * no puede proponer dar de baja lo que no estaba mirando.
+     * corte de pendientes. Un archivo parcial -una sola procesadora, una sola
+     * semana- no puede proponer dar de baja lo que no estaba mirando.
      *
      * Y la baja NUNCA se aplica sola: se ofrece y hay que confirmarla.
      *
      * @param string|null $desde Inicio de la ventana que cubre el archivo
      * @param string|null $hasta Fin de la ventana
+     * @param string $corte 'Y-m-d' desde el que una acreditacion es pendiente
      * @return array Movimientos candidatos, con el motivo
      */
     private static function bajasCandidatas($existentes, $filas, $tocados, $desde, $hasta,
-                                            $inicioEje) {
+                                            $corte) {
         if ($desde === null || $hasta === null) {
             return [];
         }
@@ -1690,7 +1735,7 @@ class CobElectronicos {
 
             $fecha = $m['fecha_acreditacion'];
 
-            if ($fecha === null || $fecha < $inicioEje
+            if ($fecha === null || $fecha < $corte
                 || $fecha < $desde || $fecha > $hasta) {
                 continue;
             }
@@ -2050,11 +2095,13 @@ class CobElectronicos {
      * "no entra al tablero" de cada fila describa exactamente el eje que el
      * tablero esta usando y no otro.
      *
-     * POR DEFECTO NO SE MUESTRAN LAS ACREDITACIONES YA OCURRIDAS. Ya pasaron, ya
-     * entraron a la cuenta y estan informadas en el saldo bancario: no hay nada
-     * que hacer con ellas, y tenerlas en la tabla todos los dias solo hace que
-     * el total de la pantalla no coincida con el del tablero. Se ven con el
-     * filtro 'incluir_acreditadas', que la pantalla ofrece como un switch.
+     * POR DEFECTO NO SE MUESTRAN LAS ACREDITACIONES YA OCURRIDAS, LAS DE HOY
+     * INCLUIDAS. Ya pasaron -o pasan hoy-, ya entraron a la cuenta y estan
+     * informadas en el saldo bancario: no hay nada que hacer con ellas, y
+     * tenerlas en la tabla todos los dias solo hace que el total de la pantalla
+     * no coincida con el del tablero. Se ven con el filtro 'incluir_acreditadas',
+     * que la pantalla ofrece como un switch. El corte es cortePendientes(), el
+     * mismo que usa el tablero.
      *
      * @param array $filtros ['id_procesadora', 'desde', 'hasta', 'incluir_acreditadas']
      * @return array
@@ -2086,8 +2133,13 @@ class CobElectronicos {
             }
         }
 
-        // Sin filtro explicito, la tabla arranca en el inicio del eje: lo
-        // anterior ya se acredito y no hay nada que hacer con eso. El switch
+        // Desde cuando cuenta lo pendiente: manana. Es lo que se usa para
+        // filtrar y lo que se le dice a la pantalla; las filas se marcan con el
+        // mismo corte en armarMovimientos().
+        $corte = self::cortePendientes($h->hoy());
+
+        // Sin filtro explicito, la tabla arranca en el corte: lo anterior -hoy
+        // incluido- ya se acredito y no hay nada que hacer con eso. El switch
         // 'incluir_acreditadas' lo trae de vuelta cuando alguien quiere verlo.
         $incluirAcreditadas = !empty($filtros['incluir_acreditadas']);
 
@@ -2095,7 +2147,7 @@ class CobElectronicos {
         $hasta = isset($filtros['hasta']) ? Horizonte::normalizarFecha($filtros['hasta']) : null;
 
         if ($desde === null && !$incluirAcreditadas) {
-            $desde = $h->hoy();
+            $desde = $corte;
         }
 
         $consulta = [
@@ -2142,6 +2194,10 @@ class CobElectronicos {
 
         return [
             'hoy' => $hoy,
+            // Desde cuando una acreditacion cuenta como pendiente. NO es el
+            // inicio del eje: es manana. La pantalla lo usa para marcar lo ya
+            // acreditado y para proponer la fecha de un movimiento nuevo.
+            'pendientes_desde' => $corte,
             'eje' => [
                 'desde' => $h->hoy(),
                 'hasta' => $h->fin()
@@ -2161,7 +2217,7 @@ class CobElectronicos {
                 'desde' => $consulta['desde'],
                 'hasta' => $consulta['hasta'],
                 'incluir_acreditadas' => $incluirAcreditadas,
-                'desde_por_defecto' => ($desde === $h->hoy()
+                'desde_por_defecto' => ($desde === $corte
                     && !isset($filtros['desde']) && !$incluirAcreditadas)
             ],
             'avisos' => array_merge($avisos, $armado['avisos'])
@@ -2374,28 +2430,11 @@ class CobElectronicos {
             $this->getMovimientos(),
             $this->getProcesadoras(false),
             $this->getAlicuotasPorProcesadora(),
-            $this->inicioEje(),
+            // El corte de pendientes contra el dia de hoy real: el que usa el
+            // tablero (por el Horizonte, que tambien arranca hoy).
+            self::cortePendientes(date('Y-m-d')),
             $periodo
         );
-    }
-
-    /**
-     * Primer dia del eje del tablero: es el corte a partir del cual una
-     * acreditacion todavia no ocurrio.
-     *
-     * Si el horizonte no se puede leer se usa hoy, que es el mismo dia con el
-     * que arranca el eje en el caso normal: es preferible a no poder importar.
-     *
-     * @return string 'Y-m-d'
-     */
-    private function inicioEje() {
-        require_once __DIR__ . '/Parametros.php';
-
-        try {
-            return Horizonte::desdeParametros(new Parametros())->hoy();
-        } catch (Throwable $e) {
-            return date('Y-m-d');
-        }
     }
 
     /* ====================================================================
@@ -2715,12 +2754,42 @@ class CobElectronicos {
     }
 
     /**
-     * Edita una procesadora: razon social y habilitacion.
+     * Si un cambio de estado de una procesadora es valido. LANZA con el motivo.
      *
      * NO SE PUEDE ACTIVAR UNA PROCESADORA SIN ALICUOTAS VIGENTES. Es el mismo
      * invariante que el alta, verificado del otro lado: si se pudiera activar
      * vacia, el alta de movimientos quedaria habilitada para una procesadora que
      * no puede calcular neto.
+     *
+     * SE EXIGE SOLO EN LA TRANSICION INACTIVA -> ACTIVA. La pantalla guarda las
+     * procesadoras en lote, y una que YA esta activa -a la que se le edita el
+     * nombre- no tiene que volver a pasar por la verificacion: si perdio sus
+     * alicuotas, eso lo cuida bajaAlicuota(), que no deja dar de baja la ultima
+     * vigente de una activa. Sin esta distincion, un guardado de nombres podia
+     * fallar por una fila que no se estaba tocando.
+     *
+     * @param mixed $activoActual 1/0, true/false o '1'/'0': como esta guardada
+     * @param mixed $activoNuevo Como se quiere dejar
+     * @param int $conceptosVigentes Conceptos con alicuota vigente hoy
+     * @param string $razonSocial Para el mensaje
+     */
+    public static function validarActivacion($activoActual, $activoNuevo, $conceptosVigentes,
+                                             $razonSocial = '') {
+        $actual = (intval($activoActual) === 1 || $activoActual === true);
+        $nuevo = (intval($activoNuevo) === 1 || $activoNuevo === true);
+
+        if (!$actual && $nuevo && intval($conceptosVigentes) === 0) {
+            throw new Exception('"' . $razonSocial . '" no se puede activar porque no tiene '
+                . 'ninguna alícuota vigente: sus movimientos no podrían calcular el importe '
+                . 'neto. Cargale una alícuota primero, en la sección de abajo.');
+        }
+    }
+
+    /**
+     * Edita una procesadora: razon social y habilitacion.
+     *
+     * La regla de cuando se puede activar es validarActivacion(): solo al pasar
+     * de inactiva a activa se exige una alicuota vigente.
      *
      * @param int $id
      * @param string $razonSocial
@@ -2746,17 +2815,15 @@ class CobElectronicos {
             throw new Exception('La procesadora ' . $id . ' no existe');
         }
 
-        if ($activo) {
+        // Las alicuotas se leen solo si hace falta decidir: es la transicion a
+        // activa, y es una consulta mas por fila del lote.
+        if ($activo && intval($procesadora['ACTIVO']) !== 1) {
             $alicuotas = $this->getAlicuotasPorProcesadora();
 
             $r = self::tasaRetencion(
                 isset($alicuotas[$id]) ? $alicuotas[$id] : [], date('Y-m-d'));
 
-            if ($r['conceptos'] === 0) {
-                throw new Exception('"' . $razonSocial . '" no se puede activar porque no tiene '
-                    . 'ninguna alícuota vigente: sus movimientos no podrían calcular el importe '
-                    . 'neto. Cargale una alícuota primero, en la sección de abajo.');
-            }
+            self::validarActivacion($procesadora['ACTIVO'], $activo, $r['conceptos'], $razonSocial);
         }
 
         $cid = $this->conectar('central');
@@ -2933,8 +3000,9 @@ class CobElectronicos {
      * alicuotas vigentes de ahora.
      *
      * Es lo que corre solo al guardar o dar de baja una alicuota, por decision
-     * del negocio. Solo toca movimientos con FECHA_ACREDITACION >= hoy: los ya
-     * acreditados conservan su tasa, porque su plata ya entro con esa tasa.
+     * del negocio. Solo toca movimientos con FECHA_ACREDITACION >= el corte de
+     * pendientes -manana, ver cortePendientes()-: los ya acreditados, los de
+     * hoy incluidos, conservan su tasa, porque su plata ya entro con esa tasa.
      *
      * Que movimientos cambian lo decide planRecalculo(), que es un helper puro y
      * esta cubierto por las pruebas. Aca solo se escribe lo que ese plan dice, y
@@ -2948,12 +3016,13 @@ class CobElectronicos {
      */
     public function recalcularPendientes($idProcesadora, $usuario = null) {
         $idProcesadora = intval($idProcesadora);
-        $hoy = date('Y-m-d');
+        $corte = self::cortePendientes(date('Y-m-d'));
 
         $movimientos = $this->getMovimientos(['id_procesadora' => $idProcesadora]);
-        $plan = self::planRecalculo($movimientos, $this->getAlicuotasPorProcesadora(), $hoy);
+        $plan = self::planRecalculo($movimientos, $this->getAlicuotasPorProcesadora(), $corte);
 
         $plan['aplicados'] = 0;
+        $plan['pendientes_desde'] = $corte;
 
         if (empty($plan['cambios'])) {
             return $plan;
