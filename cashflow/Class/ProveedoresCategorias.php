@@ -78,6 +78,16 @@ class ProveedoresCategorias {
     const RUBRO_EXCLUIDOS = 'Excluidos';
 
     /**
+     * Largo maximo del codigo de proveedor, EN CARACTERES.
+     *
+     * CPA01.COD_PROVEE es VARCHAR(6) con collation Latin1_General_BIN, donde una
+     * eñe ocupa UN byte. En UTF-8 ocupa DOS, asi que el largo hay que contarlo
+     * en caracteres -Planilla::largo()- y no con strlen, que cuenta bytes y
+     * rechazaba codigos validos como OGNUÑE.
+     */
+    const LARGO_CODIGO = 6;
+
+    /**
      * Las formas de pago declaradas.
      *
      * La planilla trae 9 valores y viene sucia. Se normaliza contra esta lista
@@ -190,7 +200,7 @@ class ProveedoresCategorias {
         }
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            $cod = strtoupper(trim((string) $row['COD_PROVEE']));
+            $cod = Planilla::codigo($row['COD_PROVEE']);
 
             $this->mapa[$cod] = [
                 'COD_PROVEE' => $cod,
@@ -229,7 +239,7 @@ class ProveedoresCategorias {
      * @return array
      */
     public function categoria($codProvee) {
-        $cod = strtoupper(trim((string) $codProvee));
+        $cod = Planilla::codigo($codProvee);
         $mapa = $this->mapa();
 
         if (!isset($mapa[$cod])) {
@@ -394,7 +404,7 @@ class ProveedoresCategorias {
         $faltan = [];
 
         foreach ($pendientes as $p) {
-            $cod = strtoupper(trim((string) $p['COD_PROVEE']));
+            $cod = Planilla::codigo($p['COD_PROVEE']);
 
             if (isset($mapa[$cod])) {
                 continue;
@@ -451,7 +461,7 @@ class ProveedoresCategorias {
         $discrepan = [];
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            $cod = strtoupper(trim((string) $row['COD_PROVEE']));
+            $cod = Planilla::codigo($row['COD_PROVEE']);
             $enMaestro = isset($mapa[$cod]);
             $rubro = $enMaestro ? $mapa[$cod]['RUBRO_ECONOMICO'] : null;
 
@@ -823,7 +833,7 @@ class ProveedoresCategorias {
             'cambios' => []
         ];
 
-        $cod = strtoupper(trim(isset($cruda['cod_provee']) ? $cruda['cod_provee'] : ''));
+        $cod = Planilla::codigo(isset($cruda['cod_provee']) ? $cruda['cod_provee'] : '');
 
         if ($cod === '') {
             $fila['estado'] = 'ERROR';
@@ -832,14 +842,19 @@ class ProveedoresCategorias {
             return $fila;
         }
 
-        /* El codigo de Tango es VARCHAR(6). Uno mas largo no va a cruzar contra
-           ninguna cuenta a pagar, asi que cargarlo seria cargar basura. */
-        if (strlen($cod) > 6) {
+        /* El codigo de Tango es de 6 CARACTERES, y hay que contarlos con
+           mb_strlen y no con strlen.
+
+           strlen cuenta BYTES: 'OGNUÑE' da 7 porque la eñe ocupa dos en UTF-8, y
+           el codigo quedaba rechazado siendo valido -existe en CPA01 con LEN 6-.
+           En el maestro hay 27 proveedores con caracteres no ASCII en el codigo.
+           Ver Planilla::largo(). */
+        if (Planilla::largo($cod) > self::LARGO_CODIGO) {
             $fila['cod_provee'] = $cod;
             $fila['estado'] = 'ERROR';
-            $fila['motivo'] = 'El código "' . $cod . '" tiene ' . strlen($cod) . ' caracteres '
-                . 'y en Tango son 6 como máximo, así que no va a cruzar contra ninguna '
-                . 'cuenta a pagar.';
+            $fila['motivo'] = 'El código "' . $cod . '" tiene ' . Planilla::largo($cod)
+                . ' caracteres y en Tango son ' . self::LARGO_CODIGO . ' como máximo, así que '
+                . 'no va a cruzar contra ninguna cuenta a pagar.';
 
             return $fila;
         }
@@ -1138,7 +1153,7 @@ class ProveedoresCategorias {
                 WHERE COD_PROVEE = ?
                 ORDER BY ID DESC";
 
-        $stmt = sqlsrv_query($cid, $sql, [strtoupper(trim((string) $codProvee))]);
+        $stmt = sqlsrv_query($cid, $sql, [Planilla::codigo($codProvee)]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al leer el historial del proveedor'));

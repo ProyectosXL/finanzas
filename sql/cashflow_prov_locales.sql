@@ -83,7 +83,13 @@ IF OBJECT_ID('dbo.RO_T_CASHFLOW_PROV_LOCALES_CATEG', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.RO_T_CASHFLOW_PROV_LOCALES_CATEG (
         ID                INT IDENTITY(1,1) NOT NULL,
-        COD_PROVEE        VARCHAR(6)    NOT NULL,
+        /* COLLATE Latin1_General_BIN: la MISMA que CPA01.COD_PROVEE. Sin
+           declararla, la columna toma la de la base -Modern_Spanish_CI_AI-, que
+           es acento-insensible: 'OGNUNE' y 'OGNUÑE' serian el mismo valor acá y
+           dos proveedores distintos en Tango. Hay 27 codigos con caracteres no
+           ASCII, asi que no es hipotetico. Ver sql/cashflow_prov_locales_collation.sql,
+           que lo corrige en una base ya creada. */
+        COD_PROVEE        VARCHAR(6)    COLLATE Latin1_General_BIN NOT NULL,
         /* El nombre tal como lo trae la planilla. NO se usa para cruzar -para
            eso esta el codigo- pero es lo que permite ver en la previsualizacion
            que "MTDODI" es Donna Di Dio sin ir a buscarlo. */
@@ -183,9 +189,11 @@ IF OBJECT_ID('dbo.RO_T_CASHFLOW_PROV_LOCALES_PAGO', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.RO_T_CASHFLOW_PROV_LOCALES_PAGO (
         ID              INT IDENTITY(1,1) NOT NULL,
-        COD_PROVEE      VARCHAR(6)    NOT NULL,
-        T_COMP          VARCHAR(3)    NOT NULL,
-        N_COMP          VARCHAR(14)   NOT NULL,
+        /* Las tres con la collation de CPA04, por el mismo motivo que arriba:
+           son la clave con la que se cruza contra las cuentas a pagar. */
+        COD_PROVEE      VARCHAR(6)    COLLATE Latin1_General_BIN NOT NULL,
+        T_COMP          VARCHAR(3)    COLLATE Latin1_General_BIN NOT NULL,
+        N_COMP          VARCHAR(14)   COLLATE Latin1_General_BIN NOT NULL,
 
         FECHA_PAGO      DATE          NOT NULL,
         FORMA_PAGO      VARCHAR(30)   NULL,

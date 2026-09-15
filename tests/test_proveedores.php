@@ -257,6 +257,55 @@ chequear('queda en error', 'ERROR', $c['filas'][0]['estado']);
 chequear('y explica por que', true,
     strpos($c['filas'][0]['motivo'], 'no va a cruzar') !== false);
 
+seccion('un codigo con enie NO es un codigo largo');
+
+/* EL BUG QUE ESTO FIJA: strlen() cuenta BYTES, y en UTF-8 la eñe ocupa dos.
+   'OGNUÑE' daba 7 y quedaba rechazado siendo un proveedor real de Tango
+   -existe en CPA01 con LEN 6-. En el maestro hay 27 proveedores con caracteres
+   no ASCII en el codigo. */
+chequear('la enie cuenta como UN caracter', 6, Planilla::largo('OGNUÑE'));
+chequear('y strlen contaria siete', 7, strlen('OGNUÑE'));
+
+$c = ProveedoresCategorias::compararImportacion([
+    $fila(2, 'OGNUÑE'),
+    $fila(3, 'OGMAGÑ'),
+    $fila(4, 'OGÑAND'),
+    $fila(5, 'OGA&S')
+], []);
+
+chequear('los cuatro se cargan', 4, $c['resumen']['altas']);
+chequear('y ninguno queda en error', 0, $c['resumen']['errores']);
+
+// Siete caracteres DE VERDAD si se rechazan: el limite sigue existiendo.
+$c = ProveedoresCategorias::compararImportacion([$fila(2, 'OGNUÑEZ')], []);
+
+chequear('siete caracteres reales si se rechazan', 'ERROR', $c['filas'][0]['estado']);
+chequear('y el mensaje dice SIETE, que es lo que el usuario ve', true,
+    strpos($c['filas'][0]['motivo'], 'tiene 7 caracteres') !== false);
+
+seccion('un codigo en minuscula con enie sube entero');
+
+/* EL OTRO BUG, mas silencioso: strtoupper() trabaja byte a byte y deja la eñe
+   intacta -'ognuñe' -> 'OGNUñE'-. Ese codigo NO matchea contra el 'OGNUÑE' de
+   Tango, y la fila quedaria sin cruzar sin que nadie entienda por que. */
+chequear('mb_strtoupper sube la enie', 'OGNUÑE', Planilla::codigo('ognuñe'));
+chequear('y strtoupper la dejaria abajo', 'OGNUñE', strtoupper('ognuñe'));
+
+$c = ProveedoresCategorias::compararImportacion([$fila(2, 'ognuñe')], []);
+
+chequear('el codigo queda normalizado entero', 'OGNUÑE', $c['filas'][0]['cod_provee']);
+
+// Y la clave de un pago tambien: es la que cruza contra las cuentas a pagar.
+chequear('la clave de pago normaliza la enie',
+    Proveedores::clavePago('OGNUÑE', 'FAC', 'A0001'),
+    Proveedores::clavePago('ognuñe', 'fac', 'a0001'));
+
+// PERO LOS ACENTOS NO SE SACAN: un codigo es un identificador, y 'OGNUNE' y
+// 'OGNUÑE' pueden ser dos proveedores distintos. Eso lo distingue de
+// normalizarTitulo(), que si los saca porque compara titulos de columna.
+chequear('OGNUNE y OGNUÑE NO son el mismo codigo', true,
+    Planilla::codigo('OGNUNE') !== Planilla::codigo('OGNUÑE'));
+
 seccion('las filas en error no ensucian las estadisticas de calidad');
 
 // Una fila que fallo por el codigo ni siquiera llego a leer el rubro: contarla

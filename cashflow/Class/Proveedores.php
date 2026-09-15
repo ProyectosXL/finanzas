@@ -224,9 +224,9 @@ class Proveedores {
         $items = [];
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            $cod = strtoupper(trim((string) $row['COD_PROVEE']));
-            $tComp = strtoupper(trim((string) $row['T_COMP']));
-            $nComp = strtoupper(trim((string) $row['N_COMP']));
+            $cod = Planilla::codigo($row['COD_PROVEE']);
+            $tComp = Planilla::codigo($row['T_COMP']);
+            $nComp = Planilla::codigo($row['N_COMP']);
             $clave = self::clavePago($cod, $tComp, $nComp);
 
             $cat = $this->categorias->categoria($cod);
@@ -523,9 +523,9 @@ class Proveedores {
             $clave = self::clavePago($row['COD_PROVEE'], $row['T_COMP'], $row['N_COMP']);
 
             $mapa[$clave] = [
-                'COD_PROVEE' => strtoupper(trim((string) $row['COD_PROVEE'])),
-                'T_COMP' => strtoupper(trim((string) $row['T_COMP'])),
-                'N_COMP' => strtoupper(trim((string) $row['N_COMP'])),
+                'COD_PROVEE' => Planilla::codigo($row['COD_PROVEE']),
+                'T_COMP' => Planilla::codigo($row['T_COMP']),
+                'N_COMP' => Planilla::codigo($row['N_COMP']),
                 'FECHA_PAGO' => Horizonte::normalizarFecha($row['FECHA_PAGO']),
                 'FORMA_PAGO' => $row['FORMA_PAGO'],
                 'FORMA_PAGO_ORIG' => $row['FORMA_PAGO_ORIG'],
@@ -554,9 +554,9 @@ class Proveedores {
      * @return string
      */
     public static function clavePago($codProvee, $tComp, $nComp) {
-        return strtoupper(trim((string) $codProvee)) . '|'
-             . strtoupper(trim((string) $tComp)) . '|'
-             . strtoupper(trim((string) $nComp));
+        return Planilla::codigo($codProvee) . '|'
+             . Planilla::codigo($tComp) . '|'
+             . Planilla::codigo($nComp);
     }
 
     /* ====================================================================
@@ -687,9 +687,9 @@ class Proveedores {
         $porNumero = [];
 
         foreach (is_array($pendientes) ? $pendientes : [] as $p) {
-            $cod = strtoupper(trim((string) $p['COD_PROVEE']));
-            $tComp = strtoupper(trim((string) $p['T_COMP']));
-            $nComp = strtoupper(trim((string) $p['N_COMP']));
+            $cod = Planilla::codigo($p['COD_PROVEE']);
+            $tComp = Planilla::codigo($p['T_COMP']);
+            $nComp = Planilla::codigo($p['N_COMP']);
 
             $porClave[self::clavePago($cod, $tComp, $nComp)] = $p;
             $porNumero[$cod . '|' . $nComp][] = $p;
@@ -810,9 +810,9 @@ class Proveedores {
             'antes' => null
         ];
 
-        $cod = strtoupper(trim(isset($cruda['cod_provee']) ? $cruda['cod_provee'] : ''));
-        $nComp = strtoupper(trim(isset($cruda['n_comp']) ? $cruda['n_comp'] : ''));
-        $tComp = strtoupper(trim(isset($cruda['t_comp']) ? $cruda['t_comp'] : ''));
+        $cod = Planilla::codigo(isset($cruda['cod_provee']) ? $cruda['cod_provee'] : '');
+        $nComp = Planilla::codigo(isset($cruda['n_comp']) ? $cruda['n_comp'] : '');
+        $tComp = Planilla::codigo(isset($cruda['t_comp']) ? $cruda['t_comp'] : '');
 
         $fila['cod_provee'] = $cod;
         $fila['n_comp'] = $nComp;
@@ -866,7 +866,7 @@ class Proveedores {
             $tipos = [];
 
             foreach ($candidatos as $c) {
-                $tipos[strtoupper(trim((string) $c['T_COMP']))] = true;
+                $tipos[Planilla::codigo($c['T_COMP'])] = true;
             }
 
             if (count($tipos) === 0) {
@@ -900,7 +900,7 @@ class Proveedores {
         $candidatos = isset($porNumero[$cod . '|' . $nComp]) ? $porNumero[$cod . '|' . $nComp] : [$pendiente];
 
         foreach ($candidatos as $c) {
-            if (strtoupper(trim((string) $c['T_COMP'])) !== $fila['t_comp']) {
+            if (Planilla::codigo($c['T_COMP']) !== $fila['t_comp']) {
                 continue;
             }
 
@@ -1048,9 +1048,9 @@ class Proveedores {
                 . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
         }
 
-        $cod = strtoupper(trim((string) $codProvee));
-        $t = strtoupper(trim((string) $tComp));
-        $n = strtoupper(trim((string) $nComp));
+        $cod = Planilla::codigo($codProvee);
+        $t = Planilla::codigo($tComp);
+        $n = Planilla::codigo($nComp);
 
         if ($cod === '' || $t === '' || $n === '') {
             throw new Exception('Falta el proveedor o el comprobante al que corresponde la '
@@ -1091,9 +1091,9 @@ class Proveedores {
         $stmt = sqlsrv_query($this->conectar(),
             "DELETE FROM dbo." . self::TABLA_PAGO . "
              WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?",
-            [strtoupper(trim((string) $codProvee)),
-             strtoupper(trim((string) $tComp)),
-             strtoupper(trim((string) $nComp))]);
+            [Planilla::codigo($codProvee),
+             Planilla::codigo($tComp),
+             Planilla::codigo($nComp)]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al borrar la fecha de pago'));

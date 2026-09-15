@@ -243,6 +243,49 @@ class Planilla {
         return $mapa;
     }
 
+    /**
+     * Un CODIGO tipeado en una planilla, listo para comparar: sin espacios y en
+     * mayusculas de verdad.
+     *
+     * EXISTE PORQUE strtoupper() NO SIRVE PARA ESTO. strtoupper() trabaja byte a
+     * byte, asi que sobre UTF-8 deja intactos los caracteres multibyte:
+     *
+     *     strtoupper('ognuñe')     -> 'OGNUñE'    la eñe NO sube
+     *     mb_strtoupper('ognuñe')  -> 'OGNUÑE'
+     *
+     * Y eso no es cosmetico: el codigo es la UNICA clave con la que la planilla
+     * cruza contra las cuentas a pagar. Un 'OGNUñE' no matchea contra el
+     * 'OGNUÑE' de Tango, y la fila quedaria sin cruzar sin que nadie entienda
+     * por que. En el maestro hay 27 proveedores con caracteres no ASCII en el
+     * codigo -eñes, y tambien '&' y '+'-.
+     *
+     * NO se sacan los acentos, a diferencia de normalizarTitulo(): un titulo de
+     * columna se compara de forma laxa porque lo escribe quien arma el archivo,
+     * pero un codigo de proveedor es un identificador y 'OGNUNE' y 'OGNUÑE'
+     * pueden ser dos proveedores distintos.
+     *
+     * @param mixed $codigo
+     * @return string
+     */
+    public static function codigo($codigo) {
+        return mb_strtoupper(trim((string) $codigo), 'UTF-8');
+    }
+
+    /**
+     * Cuantos CARACTERES tiene un texto, no cuantos bytes.
+     *
+     * strlen() cuenta bytes: strlen('OGNUÑE') da 7 porque la eñe ocupa dos en
+     * UTF-8. Validar un largo con strlen contra un limite pensado en caracteres
+     * rechaza codigos perfectamente validos, y el mensaje de error dice una
+     * cantidad que el usuario no ve en su planilla.
+     *
+     * @param mixed $texto
+     * @return int
+     */
+    public static function largo($texto) {
+        return mb_strlen((string) $texto, 'UTF-8');
+    }
+
     /** Titulo de columna comparable: sin acentos, sin espacios, en mayusculas */
     public static function normalizarTitulo($titulo) {
         $t = mb_strtoupper(trim((string) $titulo), 'UTF-8');

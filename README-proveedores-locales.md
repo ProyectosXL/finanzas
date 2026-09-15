@@ -33,7 +33,8 @@ Class/Proveedores.php  ──────────────┐
 Contra `central`, en cualquier momento:
 
 ```sql
--- sql/cashflow_prov_locales.sql
+-- 1. sql/cashflow_prov_locales.sql
+-- 2. sql/cashflow_prov_locales_collation.sql   (antes de la primera importación)
 ```
 
 Crea `RO_T_CASHFLOW_PROV_LOCALES_CATEG` (el maestro) y `RO_T_CASHFLOW_PROV_LOCALES_PAGO` (las fechas de pago), y renombra la fila del tablero. Es reejecutable.
@@ -201,6 +202,7 @@ Si igual se sube un `.xlsx`, el parser lo **detecta por su firma** (`PK`) y dice
 | Lo que trae la planilla real | Qué hace el importador |
 | --- | --- |
 | **Un código repetido** (1.222 únicos en 1.223 filas) | Deja en error **las dos** filas, nombrando cada una a la otra. Quedarse con la última elegiría por el usuario |
+| **Códigos con `Ñ`, `&` o `+`** (27 proveedores) | Se cargan normal. Ver abajo: acá hubo un bug |
 | `echeq` en minúscula | Matchea contra `ECHEQ`, y guarda el original al lado |
 | `eqheck` (un typo real) | **No** matchea: se guarda tal como vino, con el normalizado en `null`, y se avisa |
 | `50% ECOMMERC / 50% VENTAS` (2 casos) | Se detecta **sin inventar una lista de criterios válidos** — ver abajo |
@@ -209,6 +211,29 @@ Si igual se sube un `.xlsx`, el parser lo **detecta por su firma** (`PK`) y dice
 **Cómo se detecta el typo del criterio sin una lista declarada:** los criterios son texto que escribe administración, y declarar los válidos sería decidir por ellos. Lo que sí se puede afirmar sin inventar nada es que **un valor que aparece 2 veces y se parece 85% a otro que aparece 200 es sospechoso**. Eso se marca y se muestra; no se corrige.
 
 Un criterio poco usado pero **distinto** de todos los demás no se marca: sin algo parecido y más frecuente no hay nada que afirmar, y avisar de todos los raros sería ruido.
+
+### El código se mide en caracteres, no en bytes
+
+Un bug que apareció en la primera importación real: `OGNUÑE` y `OGMAGÑ` se rechazaban como *"tiene 7 caracteres"* siendo proveedores válidos de Tango.
+
+`strlen()` cuenta **bytes**, y en UTF-8 la `Ñ` ocupa dos. En `CPA01.COD_PROVEE` —`VARCHAR(6)` con collation `Latin1_General_BIN`— ocupa uno, así que el código entra perfectamente.
+
+Son **27 proveedores** con caracteres no ASCII en el código: eñes, `&` y `+`.
+
+Hay un segundo bug de la misma familia, más silencioso, que se corrigió junto con el primero: **`strtoupper()` tampoco es multibyte-safe.**
+
+```
+strtoupper('ognuñe')     →  'OGNUñE'    la eñe NO sube
+mb_strtoupper('ognuñe')  →  'OGNUÑE'
+```
+
+Si la planilla trae el código en minúscula, `OGNUñE` **no matchea** contra el `OGNUÑE` de Tango y la fila queda sin cruzar sin que nadie entienda por qué. Toda normalización de código pasa ahora por `Planilla::codigo()`.
+
+**Los acentos no se sacan**, a diferencia de `Planilla::normalizarTitulo()`: un título de columna se compara de forma laxa porque lo escribe quien arma el archivo, pero un código de proveedor es un identificador y `OGNUNE` y `OGNUÑE` pueden ser dos proveedores distintos.
+
+Por el mismo motivo, las claves de cruce se declaran con la collation de Tango (`Latin1_General_BIN`) y no con la de la base (`Modern_Spanish_CI_AI`, que es **acento-insensible**): si no, para SQL Server `OGNUNE` y `OGNUÑE` serían el mismo valor en nuestras tablas y dos distintos en Tango. Hoy no hay ninguna colisión —se verificó—, pero el día que la haya, el UPDATE de baja del maestro daría de baja los dos y la fecha de pago de uno se le aplicaría al otro, sin error y en silencio.
+
+En una base ya creada eso lo corrige `sql/cashflow_prov_locales_collation.sql`. **Conviene correrlo antes de la primera importación del maestro**, que es cuando las tablas están vacías.
 
 ### Sólo el código es obligatorio
 
@@ -365,6 +390,7 @@ Con base, además: que **ningún pendiente sea negativo** —el error que tenía
 
 ```
 sql/cashflow_prov_locales.sql                  Las dos tablas + la fila del tablero
+sql/cashflow_prov_locales_collation.sql        Alinea la collation con la de Tango
 sql/_referencia_tango_pendientes.sql           La consulta de Tango, como referencia
 cashflow/Class/Planilla.php                    El mecanismo de importacion CSV, compartido
 cashflow/Class/Proveedores.php                 Cuentas a pagar, fechas de pago y conciliacion
