@@ -18,10 +18,21 @@ require_once __DIR__ . '/CashflowRegistry.php';
  * (SECCION.ORDEN, FILA.ORDEN).
  *
  *   SUBTOTAL    -> las filas de movimiento de su propia seccion y de las
- *                  secciones hijas (en cascada por ID_PADRE)
- *   FLUJO_NETO  -> todas las filas de movimiento de secciones ROL='MOVIMIENTO'
- *                  que esten POR ENCIMA de ella
- *   SALDO_FINAL -> lo mismo, mas las secciones ROL='SALDO'
+ *                  secciones hijas (en cascada por ID_PADRE), mas las filas de
+ *                  saldo que caigan en ese alcance
+ *   FLUJO_NETO  -> todas las filas de movimiento y de saldo que esten POR
+ *                  ENCIMA de ella, de cualquier seccion
+ *   SALDO_FINAL -> los movimientos que esten por encima, mas el arrastre del
+ *                  saldo acumulado columna a columna
+ *
+ * EL ROL DE LA SECCION NO PARTICIPA DE NINGUNA DE LAS TRES: quien decide como
+ * suma una fila es su TIPO. El ROL quedo para agrupar y para los avisos del
+ * validador. Ver Cashflow::sumarMovimientos().
+ *
+ * QUE UNA FILA SE PUEDA EXCLUIR DE UN CALCULO MOVIENDOLA ES LA IDEA, no un
+ * efecto colateral: la fila de uso de cobertura queda DEBAJO del Flujo Neto
+ * (sin cobertura) y ARRIBA del Flujo Neto (con cobertura), y con eso las dos
+ * filas dan lo que su nombre promete sin ninguna regla nueva en el motor.
  *
  * No se guarda ninguna referencia fila->fila ni una lista de secciones a sumar.
  * Por eso no puede haber referencias colgadas, ni ciclos entre filas, ni una
@@ -37,19 +48,47 @@ require_once __DIR__ . '/CashflowRegistry.php';
  */
 class CashflowEstructura {
 
-    /** Tipos de fila validos */
+    /**
+     * Tipos de fila validos.
+     *
+     * STOCK_COBERTURA y USO_COBERTURA son los dos de la seccion Cobertura y no
+     * significan lo mismo:
+     *
+     *   STOCK_COBERTURA -> cuanta plata hay disponible para cubrir un bache. NO
+     *                      va en ninguna columna de fecha: es un stock, no un
+     *                      flujo, y ponerlo en un dia diria que ese dia entra.
+     *   USO_COBERTURA   -> cuanto de ese stock se aplica en cada fecha. Es una
+     *                      fila de movimiento como cualquier otra, y puede ser
+     *                      negativa (devolver plata a la inversion).
+     *
+     * ESTA LISTA Y EL CHECK DEL DDL CAMBIAN JUNTOS. Ver la restriccion
+     * CK_RO_T_CASHFLOW_CONF_FILA_TIPO en sql/cashflow_estructura.sql y su
+     * ampliacion en sql/cashflow_cobertura.sql.
+     */
     const TIPOS = [
-        'SALDO_INICIAL', 'INGRESO', 'EGRESO', 'SUBTOTAL', 'FLUJO_NETO', 'SALDO_FINAL'
+        'SALDO_INICIAL', 'INGRESO', 'EGRESO', 'SUBTOTAL', 'FLUJO_NETO', 'SALDO_FINAL',
+        'STOCK_COBERTURA', 'USO_COBERTURA'
     ];
 
     /** Roles de seccion validos */
     const ROLES = ['SALDO', 'MOVIMIENTO', 'DERIVADO'];
 
-    /** Tipos que aportan flujo y por lo tanto llevan signo */
-    const TIPOS_MOVIMIENTO = ['INGRESO', 'EGRESO'];
+    /**
+     * Tipos que aportan flujo y por lo tanto llevan signo.
+     *
+     * USO_COBERTURA entra aca A PROPOSITO: la cobertura aplicada es plata que
+     * efectivamente se mueve, asi que tiene que entrar al arrastre del saldo
+     * como cualquier otro movimiento. Lo que la distingue de un INGRESO es que
+     * no es plata que el negocio genera -es pasarla de una inversion a la
+     * cuenta-, y por eso no suma en el indicador de Ingresos. Ver
+     * Cashflow::kpiDe().
+     */
+    const TIPOS_MOVIMIENTO = ['INGRESO', 'EGRESO', 'USO_COBERTURA'];
 
     /** Tipos que necesitan un origen de datos */
-    const TIPOS_CON_ORIGEN = ['SALDO_INICIAL', 'INGRESO', 'EGRESO'];
+    const TIPOS_CON_ORIGEN = [
+        'SALDO_INICIAL', 'INGRESO', 'EGRESO', 'STOCK_COBERTURA', 'USO_COBERTURA'
+    ];
 
     /** Tipos que calcula el motor y no traen datos de ningun modulo */
     const TIPOS_DERIVADOS = ['SUBTOTAL', 'FLUJO_NETO', 'SALDO_FINAL'];
@@ -75,11 +114,17 @@ class CashflowEstructura {
      * El signo lo determina el TIPO y no una columna aparte: una columna
      * permitiria configurar "un Ingreso que resta", que no significa nada.
      *
+     * USO_COBERTURA suma, igual que un INGRESO: aplicar cobertura es traer plata
+     * a la cuenta. Lo que la hace poder restar es el IMPORTE, que se carga
+     * negativo cuando se devuelve plata a la inversion; el signo del tipo no
+     * cambia. Es la misma regla que el resto: el signo lo pone el tipo, la
+     * direccion del movimiento la pone el dato.
+     *
      * @param string $tipo
      * @return int 1, -1 o 0
      */
     public static function signo($tipo) {
-        if ($tipo === 'INGRESO') {
+        if ($tipo === 'INGRESO' || $tipo === 'USO_COBERTURA') {
             return 1;
         }
 

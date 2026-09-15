@@ -107,6 +107,8 @@
             html += '<tr>'
                 + '<td class="fw-semibold">' + fechaCorta(f.FECHA) + '</td>'
                 + '<td class="currency fw-bold">' + dolares(f.IMPORTE_USD) + '</td>'
+                + celdaCotizacion(f)
+                + celdaPesos(f)
                 + '<td class="text-center dol-alta">' + escapar(f.FECHA_ALTA || '—')
                 +     subtituloUsuario(f.USUARIO) + '</td>'
                 + '<td class="text-center">' + celdaHistorial(f.FECHA, versiones) + '</td>'
@@ -115,7 +117,7 @@
         });
 
         if (!filas.length) {
-            html = '<tr><td colspan="5" class="text-center text-muted py-4">'
+            html = '<tr><td colspan="7" class="text-center text-muted py-4">'
                  + 'Todavía no hay importes cargados. La fila del tablero muestra cero.'
                  + '</td></tr>';
         }
@@ -129,6 +131,64 @@
         });
 
         pintarPie(filas);
+    }
+
+    /**
+     * La cotización con la que se valuó la fila, CON SU FECHA.
+     *
+     * La fecha es parte del dato, no un adorno. Es la última cotización oficial
+     * anterior o igual a la de la carga, así que casi nunca es del mismo día:
+     * un sábado se valúa con la del viernes, y hoy con la última que el BCRA
+     * haya publicado. Sin decir de qué día es, el importe en pesos no se puede
+     * explicar contra nada.
+     *
+     * Cuando la fecha de la cotización no coincide con la de la carga se marca,
+     * porque es justo el caso en el que alguien podría suponer que el tipo de
+     * cambio es el del día.
+     */
+    function celdaCotizacion(f) {
+        if (f.TC === null || f.TC === undefined) {
+            return '<td class="text-center text-muted" '
+                + 'title="No hay ninguna cotización oficial anterior a esta fecha. '
+                + 'No se asume ningún tipo de cambio, así que este importe tampoco '
+                + 'entra al tablero.">—</td>';
+        }
+
+        var mismaFecha = (f.TC_FECHA === f.FECHA);
+
+        return '<td class="text-center">'
+            + '<span class="dol-tc">$ ' + Number(f.TC).toLocaleString('es-AR', {
+                  minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>'
+            + '<div class="dol-tc-fecha' + (mismaFecha ? '' : ' dol-tc-anterior') + '" '
+            +     'title="' + escapar(mismaFecha
+                    ? 'Cotización oficial del BCRA de ese mismo día.'
+                    : 'Ese día no tiene cotización publicada (fin de semana, feriado o '
+                        + 'todavía sin cargar), así que se usa la última anterior. No se '
+                        + 'inventa ningún valor intermedio.') + '">'
+            +     'del ' + fechaCorta(f.TC_FECHA)
+            + '</div></td>';
+    }
+
+    /**
+     * El importe en pesos: USD x cotización. Es EXACTAMENTE el número que entra
+     * al tablero, y sale de la misma cuenta que hace el proveedor
+     * (OtrosIngresos::valuarDolares()), no de una multiplicación hecha acá.
+     */
+    function celdaPesos(f) {
+        if (f.IMPORTE_ARS === null || f.IMPORTE_ARS === undefined) {
+            return '<td class="currency text-muted" '
+                + 'title="Sin cotización no hay importe en pesos. Un cero se leería como '
+                + '&quot;estos dólares valen cero&quot;.">—</td>';
+        }
+
+        return '<td class="currency fw-bold" title="'
+            + escapar('US$ ' + Number(f.IMPORTE_USD).toLocaleString('es-AR', {
+                  minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                + '  x  $ ' + Number(f.TC).toLocaleString('es-AR', {
+                  minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                + ' (del ' + fechaCorta(f.TC_FECHA) + ')')
+            + '">$ ' + Number(f.IMPORTE_ARS).toLocaleString('es-AR', {
+                  minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</td>';
     }
 
     /**
@@ -149,16 +209,45 @@
             + '</button>';
     }
 
+    /**
+     * El pie lleva los DOS totales. El de pesos es el que tiene que coincidir
+     * con la fila "Dólares Cuenta Comitente" del tablero: ése es el punto de
+     * toda la grilla.
+     *
+     * Suma sólo las filas valuadas. Las que no tienen cotización tampoco entran
+     * al tablero, así que incluirlas como cero haría que los dos números
+     * siguieran coincidiendo por casualidad, pero el total en dólares y el total
+     * en pesos dejarían de corresponderse entre sí sin que nada lo diga. El
+     * aviso de arriba dice cuántos dólares quedaron afuera.
+     */
     function pintarPie(filas) {
-        var total = 0;
+        var totalUsd = 0;
+        var totalArs = 0;
+        var sinValuar = 0;
 
         filas.forEach(function(f) {
-            total += Number(f.IMPORTE_USD) || 0;
+            totalUsd += Number(f.IMPORTE_USD) || 0;
+
+            if (f.IMPORTE_ARS === null || f.IMPORTE_ARS === undefined) {
+                sinValuar++;
+            } else {
+                totalArs += Number(f.IMPORTE_ARS);
+            }
         });
+
+        var pesos = sinValuar
+            ? '<td class="currency fw-bold" title="' + escapar(sinValuar + ' fila(s) sin '
+                + 'cotización quedaron fuera de este total, igual que del tablero.')
+                + '">$ ' + totalArs.toLocaleString('es-AR', { minimumFractionDigits: 2,
+                    maximumFractionDigits: 2 }) + ' *</td>'
+            : '<td class="currency fw-bold">$ ' + totalArs.toLocaleString('es-AR', {
+                minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</td>';
 
         document.getElementById('footDol').innerHTML = filas.length
             ? '<tr><td class="fw-bold text-end">TOTAL</td>'
-                + '<td class="currency fw-bold">' + dolares(total) + '</td>'
+                + '<td class="currency fw-bold">' + dolares(totalUsd) + '</td>'
+                + '<td></td>'
+                + pesos
                 + '<td colspan="3"></td></tr>'
             : '';
     }
@@ -166,9 +255,17 @@
     function pintarKpi() {
         var filas = (datos && datos.filas) || [];
         var total = 0;
+        var totalArs = 0;
+        var sinValuar = 0;
 
         filas.forEach(function(f) {
             total += Number(f.IMPORTE_USD) || 0;
+
+            if (f.IMPORTE_ARS === null || f.IMPORTE_ARS === undefined) {
+                sinValuar++;
+            } else {
+                totalArs += Number(f.IMPORTE_ARS);
+            }
         });
 
         // Las filas vienen de la más nueva a la más vieja.
@@ -178,6 +275,15 @@
         texto('ultimaFechaDol', ultima ? ('Al ' + fechaCorta(ultima.FECHA)) : 'Sin cargas');
         texto('totalDol', dolaresPlano(total));
         texto('detalleTotalDol', filas.length + ' fecha(s) con importe vigente');
+
+        texto('totalArsDol', '$ ' + totalArs.toLocaleString('es-AR', {
+            minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+
+        // Que haya filas sin valuar hay que decirlo acá: es la diferencia entre
+        // "este es todo el dinero" y "esto es lo que se pudo valuar".
+        texto('detalleArsDol', sinValuar
+            ? sinValuar + ' carga(s) sin cotización quedan afuera, acá y en el tablero'
+            : 'Valuado al oficial del BCRA de cada fecha');
 
         mostrar('summaryDol', true, 'flex');
     }

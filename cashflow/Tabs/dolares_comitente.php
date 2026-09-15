@@ -11,6 +11,14 @@
     oficial del BCRA en cada lectura del tablero. Guardar pesos congelaría la
     valuación al momento de la carga.
 
+    LA CUENTA SE MUESTRA ABIERTA: USD × cotización (con su fecha) = pesos. El
+    total en pesos del pie es exactamente el que va a la fila del cashflow, así
+    que ese número se puede auditar fila por fila desde acá.
+
+    LA COTIZACIÓN ES LA ÚLTIMA CONOCIDA A LA FECHA DE LA CARGA, no el cierre del
+    mes. El mes en curso no tiene cierre todavía, y el de un mes viejo valuaría
+    con una cotización de semanas después. Ver Class/Cotizacion.php.
+
     EL IMPORTE VIGENTE SE PISA, PERO EL HISTORIAL QUEDA. Cargar una fecha que ya
     existe no hace UPDATE: da de baja la anterior e inserta una nueva. El
     historial es lo único que explica por qué el número de ayer era otro.
@@ -45,15 +53,33 @@
                 </div>
             </div>
         </div>
+
+        <!-- El número que efectivamente va al tablero. Está acá y no sólo en el
+             pie de la tabla porque es el que se compara contra el cashflow, y
+             bajar a buscarlo al final de la grilla es justo lo que hace que
+             nadie lo compare. -->
+        <div class="col-md-6 col-lg-4">
+            <div class="kpi-card">
+                <div class="kpi-card-header">
+                    <span class="kpi-card-title">En pesos, al tablero</span>
+                    <div class="kpi-card-icon orange"><i class="fas fa-scale-balanced"></i></div>
+                </div>
+                <div class="kpi-card-value" id="totalArsDol">$ 0,00</div>
+                <div class="kpi-card-footer">
+                    <span class="text-muted" id="detalleArsDol">Valuado al oficial del BCRA</span>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div class="card mb-4">
         <div class="card-header">
             <h5 class="mb-0">Cargar importe</h5>
             <small class="text-muted">
-                Fecha e importe en dólares. La conversión a pesos la hace el tablero con el
-                <strong>oficial del BCRA</strong> del mes de la carga: no se guarda ningún
-                importe en pesos.
+                Fecha e importe en dólares. La conversión a pesos la hace el tablero con la
+                <strong>última cotización oficial del BCRA anterior o igual a esa fecha</strong>:
+                no se guarda ningún importe en pesos. La grilla de abajo muestra con cuál se
+                valuó cada carga.
             </small>
         </div>
         <div class="card-body">
@@ -113,10 +139,22 @@
                 <table class="table table-hover mb-0" id="tablaDolares">
                     <thead>
                         <tr>
-                            <th style="width: 160px;">Fecha</th>
-                            <th class="text-end" style="width: 200px;">Importe (USD)</th>
-                            <th class="text-center" style="width: 200px;">Cargado el</th>
-                            <th class="text-center" style="width: 160px;">Historial</th>
+                            <!-- LA CUENTA VA ABIERTA: dólares, a cuánto, de qué
+                                 día, y cuánto da en pesos. El total en pesos que
+                                 va al tablero tiene que poder atarse fila por
+                                 fila a esta grilla; con una sola columna de
+                                 dólares, el número del cashflow no se puede
+                                 auditar contra nada. -->
+                            <th style="width: 130px;">Fecha</th>
+                            <th class="text-end" style="width: 150px;">Importe (USD)</th>
+                            <th class="text-center" style="width: 170px;">
+                                Cotización usada
+                                <i class="fas fa-circle-info text-muted ms-1"
+                                   title="La última cotización oficial del BCRA con fecha anterior o igual a la de la carga. No es el cierre del mes: el mes en curso todavía no tiene cierre."></i>
+                            </th>
+                            <th class="text-end" style="width: 170px;">Importe (ARS)</th>
+                            <th class="text-center" style="width: 170px;">Cargado el</th>
+                            <th class="text-center" style="width: 150px;">Historial</th>
                             <th></th>
                         </tr>
                     </thead>

@@ -326,11 +326,9 @@
             // esta pestaña son proyección, así que decía lo mismo en todas. El
             // plazo con el que se proyectó queda en el title de COD_CLI, que
             // es lo único que permitía auditar la fecha de cobro.
-            html += '<td title="' + escaparAttr(item.Dias
-                    ? 'Proyección a ' + item.Dias + ' días de la emisión.'
-                    : 'Proyección.') + '">'
+            html += '<td title="' + escaparAttr(tituloPlazo(item)) + '">'
                 + '<strong>' + escaparAttr(item.COD_CLI || '') + '</strong>'
-                + marcaVencida(item) + '</td>';
+                + marcaManual(item) + marcaVencida(item) + '</td>';
 
             // Recortado con puntos suspensivos (.col-texto) para que la fila
             // sea una sola línea; el nombre completo va en el title.
@@ -353,8 +351,7 @@
             // data-orden con la fecha cruda: el texto del badge de una vencida
             // es "Vencida 03/09/2026" y no se puede interpretar como fecha.
             // Ver Js/tabla-orden.js.
-            html += '<td class="center" data-orden="' + escaparAttr(item.Cobro || '') + '">'
-                + celdaCobro(item) + '</td>';
+            html += celdaCobro(item);
             
             // Columnas del eje temporal
             cols.forEach(function(col) {
@@ -376,6 +373,27 @@
             html += '</tr>';
         });
         tableBody.innerHTML = html;
+
+        conectarEdicionFecha();
+    }
+
+    /**
+     * De dónde sale la fecha de cobro, en el `title` de COD_CLI.
+     *
+     * Con fecha manual, el plazo del parámetro deja de describir la fila: lo
+     * que importa es que alguien la cargó. Sin ella, lo que hay que poder
+     * auditar es a cuántos días se proyectó.
+     */
+    function tituloPlazo(item) {
+        if (item.FECHA_MANUAL) {
+            return 'Fecha de cobro cargada a mano: no sale del plazo de '
+                + (item.PLAZO || 60) + ' días. Mayoristas no tiene escala de descuento, '
+                + 'así que el importe no cambia.';
+        }
+
+        return item.Dias
+            ? 'Proyección a ' + item.Dias + ' días de la emisión.'
+            : 'Proyección.';
     }
 
     /* ================================================================
@@ -387,24 +405,179 @@
        Ingresos::ubicarCobroVencido().
        ================================================================ */
 
-    /**
-     * La celda de fecha de cobro. Una vencida dice cuál era su fecha, que es
-     * lo único que explica por qué su importe está en la columna de hoy.
-     *
-     * Sin COBRO_ORIGINAL —el Resumen, donde la fila es un cliente y las fechas
-     * difieren— el badge no tendría fecha que mostrar y no agregaría nada
-     * sobre el color de la fila, así que va el badge normal.
-     */
-    function celdaCobro(item) {
-        if (item.VENCIDA && item.COBRO_ORIGINAL) {
-            return '<span class="badge-vencida-exp" title="Fecha probable de cobro original: '
-                + formatDate(item.COBRO_ORIGINAL) + '. Vencida sin cobrar: se ubica en el '
-                + 'primer día del eje">'
-                + '<i class="fas fa-triangle-exclamation me-1"></i>Vencida '
-                + formatDate(item.COBRO_ORIGINAL) + '</span>';
+    /* ================================================================
+       FECHA DE COBRO MANUAL
+
+       Mismo circuito que Cobranzas FR, MISMA TABLA y mismos endpoints: la
+       clave es el comprobante, y un comprobante es de franquicias o de
+       mayoristas, nunca de los dos. Ver el encabezado de
+       sql/cashflow_cobranzas_fecha_manual.sql.
+
+       LA DIFERENCIA CON FR ESTÁ EN EL IMPORTE, y conviene tenerla presente
+       antes de copiar cualquier otra cosa de aquella pestaña: allá la fecha
+       recalcula los días, y con los días cambia el tramo de la escala de
+       descuento y el importe neto. Acá NO hay escala de descuento —el neto es
+       el bruto— así que lo único que cambia es en qué columna del eje cae la
+       plata.
+
+       Es editable SÓLO en Detalle Facturas, y no en Resumen: en Resumen la
+       fila es un cliente y no un comprobante, así que no hay a qué comprobante
+       atarle la fecha. Ahí se muestra un indicador de que alguna de sus
+       facturas la tiene.
+       ================================================================ */
+
+    /** Si esta vista permite editar la fecha de cobro */
+    function editable() {
+        return modoVista === 'deepdive';
+    }
+
+    /** El indicador del Resumen: este cliente tiene alguna fecha cargada a mano */
+    function marcaManual(item) {
+        if (editable() || !item.FECHA_MANUAL) {
+            return '';
         }
 
-        return '<span class="badge-cobro-may">' + formatDate(item.Cobro) + '</span>';
+        return ' <i class="fas fa-hand-pointer text-primary cob-marca-manual" '
+            + 'title="Alguna factura de este cliente tiene la fecha de cobro cargada a mano, '
+            + 'así que no sale del plazo de vencimiento. El detalle está en Detalle '
+            + 'Facturas."></i>';
+    }
+
+    /**
+     * La celda de fecha de cobro: un input en Detalle Facturas, un badge en
+     * Resumen.
+     *
+     * Una vencida dice cuál era su fecha, que es lo único que explica por qué
+     * su importe está en la columna de hoy. Sin COBRO_ORIGINAL —el Resumen,
+     * donde la fila es un cliente y las fechas difieren— el badge no tendría
+     * fecha que mostrar y no agregaría nada sobre el color de la fila.
+     *
+     * data-orden lleva la fecha cruda: el texto de un badge de vencida es
+     * "Vencida 03/09/2026" y no se puede interpretar como fecha. Ver
+     * Js/tabla-orden.js.
+     */
+    function celdaCobro(item) {
+        var orden = ' data-orden="' + escaparAttr(item.Cobro || '') + '"';
+
+        if (!editable()) {
+            if (item.VENCIDA && item.COBRO_ORIGINAL) {
+                return '<td class="center"' + orden + '>'
+                    + '<span class="badge-vencida-exp" title="Fecha de cobro '
+                    + (item.FECHA_MANUAL ? 'pactada' : 'probable') + ' original: '
+                    + formatDate(item.COBRO_ORIGINAL) + '. Vencida sin cobrar: '
+                    + (item.FECHA_MANUAL
+                        ? 'se respeta tal cual porque la cargó una persona'
+                        : 'se ubica en el primer día del eje') + '">'
+                    + '<i class="fas fa-triangle-exclamation me-1"></i>Vencida '
+                    + formatDate(item.COBRO_ORIGINAL) + '</span></td>';
+            }
+
+            return '<td class="center"' + orden + '>'
+                + '<span class="badge-cobro-may">' + formatDate(item.Cobro) + '</span></td>';
+        }
+
+        var manual = !!item.FECHA_MANUAL;
+        var titulo = manual
+            ? 'Fecha cargada a mano. El importe no cambia: mayoristas no tiene escala de '
+                + 'descuento.'
+            : 'Calculada como fecha de emisión + ' + (item.PLAZO || 60) + ' días. Se puede pisar.';
+
+        if (item.VENCIDA) {
+            titulo = 'Vencida: la fecha ' + (manual ? 'pactada' : 'probable') + ' era el '
+                + formatDate(item.COBRO_ORIGINAL) + ' y ya pasó. '
+                + (manual
+                    ? 'Se respeta tal cual porque la cargó una persona.'
+                    : 'El importe se muestra en el primer día del eje.');
+        }
+
+        // El `min` en hoy es una comodidad del navegador, no una garantía: el
+        // endpoint valida la fecha de nuevo. Ver IngresosController.
+        return '<td class="center cob-celda-cobro' + (manual ? ' cob-fecha-manual' : '') + '"'
+            + orden + '>'
+            + '<div class="input-group input-group-sm flex-nowrap">'
+            +     '<input type="date" class="form-control form-control-sm cob-input-fecha" '
+            +         'value="' + (item.Cobro || '') + '" min="' + hoyISO() + '" '
+            +         'title="' + escaparAttr(titulo) + '" '
+            +         'data-tcomp="' + escaparAttr(item.T_COMP) + '" '
+            +         'data-ncomp="' + escaparAttr(item.N_COMP) + '" '
+            +         'data-cod="' + escaparAttr(item.COD_CLI) + '">'
+            +     (manual
+                    ? '<button class="btn btn-outline-secondary cob-btn-volver" type="button" '
+                        + 'title="Volver a la fecha calculada con el plazo de vencimiento">'
+                        + '<i class="fas fa-rotate-left"></i></button>'
+                    : '')
+            + '</div>'
+            + '</td>';
+    }
+
+    function conectarEdicionFecha() {
+        if (!editable()) {
+            return;
+        }
+
+        document.querySelectorAll('#tableBodyCobMay .cob-input-fecha').forEach(function(inp) {
+            inp.addEventListener('change', function() {
+                if (!inp.value) {
+                    return;
+                }
+
+                pedirFecha('saveFechaCobroManual', {
+                    cod_cliente: inp.getAttribute('data-cod'),
+                    t_comp: inp.getAttribute('data-tcomp'),
+                    n_comp: inp.getAttribute('data-ncomp'),
+                    fecha_cobro: inp.value
+                }, 'Fecha de cobro guardada.');
+            });
+        });
+
+        document.querySelectorAll('#tableBodyCobMay .cob-btn-volver').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var inp = btn.closest('.input-group').querySelector('.cob-input-fecha');
+
+                pedirFecha('deleteFechaCobroManual', {
+                    t_comp: inp.getAttribute('data-tcomp'),
+                    n_comp: inp.getAttribute('data-ncomp')
+                }, 'La fecha vuelve a calcularse con el plazo de vencimiento.');
+            });
+        });
+    }
+
+    /**
+     * Guarda o borra y RECARGA todo.
+     *
+     * Se recarga la pestaña entera en vez de parchear la fila: la fecha cambia
+     * en qué columna del eje cae el importe, los totales del pie y las
+     * tarjetas. Reconstruir eso en el navegador sería reimplementar en JS la
+     * cuenta que ya hace el backend, con el riesgo habitual de que las dos den
+     * distinto.
+     */
+    function pedirFecha(accion, cuerpo, mensajeOk) {
+        fetch('Controller/IngresosController.php?action=' + accion, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(cuerpo)
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(result) {
+            if (result.success) {
+                Notificacion.exito(mensajeOk);
+            } else {
+                Notificacion.error(result.message);
+            }
+
+            cargarDatos();
+        })
+        .catch(function(err) {
+            Notificacion.error('Error de conexión: ' + err.message);
+        });
+    }
+
+    function hoyISO() {
+        var d = new Date();
+        var m = String(d.getMonth() + 1).padStart(2, '0');
+        var dia = String(d.getDate()).padStart(2, '0');
+
+        return d.getFullYear() + '-' + m + '-' + dia;
     }
 
     /**

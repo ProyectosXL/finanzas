@@ -160,6 +160,79 @@ class OtrosIngresos {
     }
 
     /**
+     * Las cargas en dolares, con la cuenta de su valuacion a pesos ABIERTA:
+     * cuantos dolares, a que cotizacion, de que fecha, y cuanto da en pesos.
+     *
+     * VIVE ACA Y NO EN EL PROVEEDOR porque lo usan los dos: el tablero, para
+     * armar la serie, y la pestana, para mostrar la cuenta fila por fila. Si
+     * cada uno hiciera su propia multiplicacion, el total del tablero y el de la
+     * grilla podrian discrepar y no habria forma de saber cual de los dos esta
+     * mal. Con una sola cuenta, el total del tablero se ata fila por fila a lo
+     * que se ve en la pantalla.
+     *
+     * LA COTIZACION ES LA ULTIMA CONOCIDA A LA FECHA DE LA CARGA, no el cierre
+     * del mes. El motivo esta en el encabezado de
+     * Providers/OtrosIngresosProvider.php.
+     *
+     * SIN COTIZACION, TC Y IMPORTE_ARS QUEDAN EN null Y NO EN CERO. Un cero se
+     * leeria como "esos dolares valen cero pesos"; null es "no hay con que
+     * valuarlos", y el front dibuja un guion. Esos dolares se informan aparte en
+     * 'sin_cotizacion' para que nadie tenga que sumarlos a mano.
+     *
+     * SI NO SE PUEDE LEER EL TIPO DE CAMBIO no lanza: deja el motivo en 'error'
+     * y devuelve todas las filas sin valuar. Una pestana que ya funcionaba no se
+     * cae porque falte una vista; ese es el criterio del modulo.
+     *
+     * @param array|null $cargas Filas de getDolaresComitente(); null las lee
+     * @param Cotizacion|null $cotizacion Se puede inyectar para poder probar
+     * @return array ['filas', 'sin_cotizacion' => float, 'error' => string|null]
+     */
+    public function valuarDolares($cargas = null, $cotizacion = null) {
+        $cargas = ($cargas === null) ? $this->getDolaresComitente() : $cargas;
+
+        $salida = ['filas' => [], 'sin_cotizacion' => 0.0, 'error' => null];
+
+        if (empty($cargas)) {
+            return $salida;
+        }
+
+        $c = ($cotizacion === null) ? new Cotizacion() : $cotizacion;
+
+        foreach ($cargas as $carga) {
+            $usd = floatval($carga['IMPORTE_USD']);
+            $tc = null;
+            $tcFecha = null;
+
+            if ($salida['error'] === null) {
+                try {
+                    $ult = $c->ultimaHasta($carga['FECHA']);
+
+                    if ($ult !== null) {
+                        $tc = $ult['tcc'];
+                        $tcFecha = $ult['fecha'];
+                    }
+                } catch (Throwable $e) {
+                    // El origen no esta disponible. Se anota una vez y las
+                    // filas siguientes ya no lo vuelven a intentar.
+                    $salida['error'] = $e->getMessage();
+                }
+            }
+
+            if ($tc === null && $usd != 0) {
+                $salida['sin_cotizacion'] += $usd;
+            }
+
+            $salida['filas'][] = array_merge($carga, [
+                'TC' => $tc,
+                'TC_FECHA' => $tcFecha,
+                'IMPORTE_ARS' => ($tc === null) ? null : round($usd * $tc, 2)
+            ]);
+        }
+
+        return $salida;
+    }
+
+    /**
      * Los saldos de inversiones VIGENTES por fecha, EN PESOS.
      *
      * En pesos y sin conversion, a diferencia de los dolares: ese saldo se

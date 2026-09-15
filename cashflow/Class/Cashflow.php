@@ -483,6 +483,19 @@ class Cashflow {
         // al final del cuadro eso equivale al total, pero es lo que permite
         // poner un resultado intermedio (por ejemplo un "Resultado Operativo"
         // antes de los ajustes) desde la configuracion y que de bien.
+        //
+        // FLUJO_NETO SUMA TAMBIEN EL SALDO QUE SE MUESTRA MAS ARRIBA. La
+        // definicion es Ingresos - Egresos, y los Ingresos del Excel arrancan en
+        // el Disponible, que incluye el saldo en bancos: D38 = D13 + D37. Antes
+        // sumaba solo los movimientos, con lo que el Flujo Neto de un dia con
+        // saldo inicial daba la variacion de caja y no los ingresos menos los
+        // egresos, que es lo que el rotulo promete.
+        //
+        // ES EL SALDO MOSTRADO, NO EL ARRASTRE: 'apertura' no entra. Eso es
+        // exactamente lo que distingue FLUJO_NETO de SALDO_FINAL, que sigue
+        // siendo apertura + aporte + movimientos. Por eso tampoco se le suma a
+        // SALDO_FINAL: ahi el saldo ya entro como 'aporte' y contarlo de nuevo
+        // lo duplicaria.
         foreach ($resueltas as $i => $f) {
             if ($f['tipo'] !== 'FLUJO_NETO' && $f['tipo'] !== 'SALDO_FINAL') {
                 continue;
@@ -494,7 +507,7 @@ class Cashflow {
                 $hasta = $this->sumarMovimientos($resueltas, $col, null, $i);
 
                 $mapa[$col] = ($f['tipo'] === 'FLUJO_NETO')
-                    ? $hasta
+                    ? $hasta + $this->sumarSaldoMostrado($resueltas, $col, null, $i)
                     : $apertura[$col] + $aporte[$col] + $hasta;
             }
 
@@ -590,23 +603,46 @@ class Cashflow {
     }
 
     /**
-     * Suma lo que MUESTRAN las filas de saldo inicial de un alcance. Se usa para
-     * los subtotales, que en el Excel incluyen el saldo en bancos.
+     * Suma lo que MUESTRAN las filas de saldo inicial. Tiene dos usuarios y cada
+     * uno la acota de una forma distinta:
+     *
+     *   SUBTOTAL   -> por ALCANCE de seccion, sin limite posicional. Es lo que
+     *                 reproduce el "Disponible" del Excel, que es el saldo en
+     *                 bancos mas las cobranzas del dia, todo en una seccion.
+     *   FLUJO_NETO -> por POSICION, sin alcance. Flujo Neto es
+     *                 Ingresos - Egresos, y los Ingresos incluyen el saldo
+     *                 inicial: en el Excel D38 = D13 + D37, y D13 es el
+     *                 Disponible, que arranca en el saldo en bancos.
+     *
+     * Los dos filtros son independientes a proposito: un subtotal abarca toda su
+     * seccion este donde este puesto dentro de ella, y un flujo neto abarca todo
+     * lo que tiene por encima sin importar de que seccion sea.
+     *
+     * SALDO_FINAL NO LA USA, Y NO ES UN OLVIDO: ese ya suma el saldo por otro
+     * lado -entra al arrastre como 'aporte'-, asi que sumarlo aca lo contaria
+     * dos veces. Esa es justamente la diferencia entre las dos filas: FLUJO_NETO
+     * muestra el saldo que esta dibujado mas arriba, SALDO_FINAL lo arrastra.
      *
      * @param array $resueltas
      * @param string $col
-     * @param array $alcance
+     * @param array|null $alcance Codigos de seccion a considerar, o null para todas
+     * @param int|null $limite Indice tope: solo las filas ANTERIORES a esa
+     *        posicion. null para no limitar.
      * @return float
      */
-    private function sumarSaldoMostrado($resueltas, $col, $alcance) {
+    private function sumarSaldoMostrado($resueltas, $col, $alcance, $limite = null) {
         $total = 0;
 
-        foreach ($resueltas as $f) {
+        foreach ($resueltas as $pos => $f) {
+            if ($limite !== null && $pos >= $limite) {
+                break;
+            }
+
             if ($f['tipo'] !== 'SALDO_INICIAL') {
                 continue;
             }
 
-            if (!isset($alcance[$f['seccion']])) {
+            if ($alcance !== null && !isset($alcance[$f['seccion']])) {
                 continue;
             }
 
@@ -633,6 +669,37 @@ class Cashflow {
      * @param string|null $ultima Ultima columna de la secuencia
      */
     private function calcularTotales($h, &$f, $ultimaDia, $ultima) {
+        /* EL STOCK DE COBERTURA NO VA EN NINGUNA COLUMNA DE FECHA.
+
+           Es cuanta plata hay disponible para tapar un bache, no plata que entra
+           un dia: ponerla en una columna diria que ese dia ingresa, y ademas la
+           sumaria el Total de esa vista como si fuera flujo. Las columnas quedan
+           en null -el front las dibuja con un guion- y el importe se muestra
+           unicamente en la columna Total.
+
+           El total es el MISMO en las tres vistas, por el mismo motivo que el de
+           una fila de saldo: lo disponible no depende del tramo que se elija
+           mirar. Se lee de la serie antes de vaciarla, asi que no importa en que
+           columna lo haya dejado el proveedor. */
+        if ($f['tipo'] === 'STOCK_COBERTURA') {
+            $stock = array_sum(array_map('floatval', $f['dias']))
+                + array_sum(array_map('floatval', $f['meses']));
+
+            foreach ($f['dias'] as $k => $v) {
+                $f['dias'][$k] = null;
+            }
+
+            foreach ($f['meses'] as $k => $v) {
+                $f['meses'][$k] = null;
+            }
+
+            $f['total_tramo'] = $stock;
+            $f['total_meses'] = $stock;
+            $f['total_horizonte'] = $stock;
+
+            return;
+        }
+
         if ($f['es_saldo']) {
             if ($f['tipo'] === 'SALDO_INICIAL') {
                 // La apertura del horizonte: con que saldo se arranca. Es el
@@ -735,6 +802,9 @@ class Cashflow {
             'ingresos' => 0,
             'egresos' => 0,
             'flujo' => 0,
+            // Cuanta cobertura se aplico en el periodo. Va aparte de ingresos y
+            // egresos a proposito; ver la nota del bucle.
+            'cobertura' => 0,
             'saldo_cierre' => 0,
             'minimo' => null,
             'periodo' => $this->rotuloPeriodo($cols, $vista),
@@ -769,6 +839,24 @@ class Cashflow {
                 continue;
             }
 
+            /* EL SALDO MOSTRADO SUMA EN INGRESOS, por el mismo motivo por el que
+               entra en el Flujo Neto: los Ingresos del cuadro arrancan en el
+               Disponible, que incluye el saldo en bancos. Sin esto, la tarjeta
+               de Ingresos no da lo mismo que la fila "Total Ingresos" y la de
+               Flujo Neto no da lo mismo que la fila "Flujo Neto", que estan a
+               dos centimetros una de otra. Un indicador que no coincide con la
+               fila que tiene al lado no se puede usar para nada.
+
+               Es el saldo MOSTRADO, no el arrastre: el arrastre ya lo informa
+               saldo_cierre. Ver Cashflow::sumarSaldoMostrado(). */
+            if ($f['tipo'] === 'SALDO_INICIAL') {
+                foreach ($cols as $col) {
+                    $kpi['ingresos'] += $this->valor($f, $col);
+                }
+
+                continue;
+            }
+
             if (!$f['computa'] || !in_array($f['tipo'], CashflowEstructura::TIPOS_MOVIMIENTO, true)) {
                 continue;
             }
@@ -781,6 +869,24 @@ class Cashflow {
 
             // Se acumulan como MAGNITUDES positivas, que es como se leen en una
             // tarjeta ("Egresos: $ 289 M"). El signo lo pone el flujo.
+            //
+            // LA COBERTURA APLICADA VA APARTE Y NO SUMA NI EN INGRESOS NI EN
+            // EGRESOS. No es plata que el negocio genere ni gaste: es pasarla de
+            // una inversion a la cuenta para tapar un bache. Contarla como
+            // ingreso haria subir el indicador de Ingresos por haber movido
+            // plata de bolsillo, y el de Flujo Neto dejaria de coincidir con la
+            // fila "Flujo Neto (sin cobertura)" del cuadro, que es la que el
+            // usuario esta mirando.
+            //
+            // Donde SI aparece es en el Saldo Final y en el Saldo Minimo: esos
+            // salen del arrastre, que toma todos los movimientos. Y es lo que
+            // se quiere, porque tapar el peor saldo proyectado es exactamente
+            // para lo que existe la cobertura.
+            if ($f['tipo'] === 'USO_COBERTURA') {
+                $kpi['cobertura'] += $suma;
+                continue;
+            }
+
             if ($f['tipo'] === 'INGRESO') {
                 $kpi['ingresos'] += $suma;
             } else {

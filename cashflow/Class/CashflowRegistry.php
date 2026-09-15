@@ -294,16 +294,54 @@ class CashflowRegistry {
         /* El otro concepto de Otros Ingresos, mismo proveedor y mismo circuito.
            La moneda es ARS y no USD, a proposito: ese saldo se informa en pesos,
            asi que no hay nada que valuar. Ver el encabezado de
-           sql/cashflow_saldo_inversiones.sql antes de cambiarlo. */
+           sql/cashflow_saldo_inversiones.sql antes de cambiarlo.
+
+           YA NO ES UN INGRESO: ES STOCK DE COBERTURA. La serie que usa el
+           tablero es STOCK -cuanta plata hay invertida y disponible para tapar
+           un bache-, y no entra en ninguna suma: la plata recien se mueve
+           cuando alguien aplica cobertura en una fecha, y eso es el proveedor
+           COBERTURA.
+
+           INGRESO queda declarada para poder volver atras desde Parametros sin
+           tocar codigo, pero son EL MISMO dinero mirado de dos formas: activar
+           las dos filas mostraria el saldo dos veces. Por eso van relacionadas
+           en 'componentes' y el validador rechaza la combinacion. */
         'SALDO_INVERSIONES' => [
             'nombre' => 'Saldo de Inversiones',
-            'descripcion' => 'Saldo de inversiones en pesos, cargado a mano',
+            'descripcion' => 'Saldo de inversiones en pesos, cargado a mano. '
+                . 'Es el stock que respalda la cobertura del flujo',
             'archivo' => 'Providers/OtrosIngresosProvider.php',
             'clase' => 'OtrosIngresosProvider',
             'moneda' => 'ARS',
             'disponible' => true,
             'tab' => 'saldo_inversiones',
-            'series' => ['INGRESO' => 'Saldo de inversiones']
+            'series' => [
+                'STOCK' => 'Saldo invertido disponible para cobertura',
+                'INGRESO' => 'Saldo de inversiones como ingreso (criterio viejo, en desuso)'
+            ],
+            'componentes' => [
+                'STOCK' => ['INGRESO'],
+                'INGRESO' => ['STOCK']
+            ]
+        ],
+
+        /* LA APLICACION DE LA COBERTURA: cuanto del saldo invertido se usa en
+           cada fecha para tapar un bache del flujo.
+
+           NO DECLARA 'tab' A PROPOSITO. La fila se edita desde el tablero
+           mismo, que es donde se ven los saldos negativos; un enlace a otra
+           pantalla obligaria a ir y volver comparando columnas, que es
+           justamente el trabajo que esta fila existe para evitar. Ver el
+           encabezado de Providers/CoberturaProvider.php. */
+        'COBERTURA' => [
+            'nombre' => 'Cobertura',
+            'descripcion' => 'Aplicacion del saldo de inversiones para cubrir los dias con '
+                . 'saldo negativo. Se carga desde el propio tablero',
+            'archivo' => 'Providers/CoberturaProvider.php',
+            'clase' => 'CoberturaProvider',
+            'moneda' => 'ARS',
+            'disponible' => true,
+            'series' => ['APLICACION' => 'Cobertura aplicada']
         ],
 
         /* Facturas pendientes EN DOLARES a Tasky (GVA12, cliente EXTASK). Se

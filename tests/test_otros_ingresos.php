@@ -365,3 +365,119 @@ foreach ($filas as $f) {
 
 chequear('ninguna fecha tiene dos importes vigentes',
     [], array_keys(array_filter($porFecha, function ($n) { return $n > 1; })));
+
+/* ================================================================
+   LA VALUACION DE LOS DOLARES: LA CUENTA ABIERTA
+
+   El criterio cambio: antes se valuaba con el CIERRE DEL MES de cada carga y
+   ahora con la ULTIMA COTIZACION CONOCIDA A SU FECHA. El motivo es que el saldo
+   en pesos del tablero tiene que poder atarse a una cotizacion real y fechada;
+   el cierre del mes en curso no existe todavia, y el de un mes viejo valua con
+   una cotizacion de semanas despues.
+
+   valuarDolares() es la UNICA cuenta: la usan el proveedor -para el tablero- y
+   la pestana -para la grilla-. Si cada uno multiplicara por su cuenta, los dos
+   totales podrian discrepar y no habria forma de saber cual esta mal.
+   ================================================================ */
+seccion('valuacion de dolares: se inyecta la cotizacion, sin base');
+
+/** Cotizacion de mentira: una serie diaria con agujeros, como la real. */
+class CotizacionFalsa extends Cotizacion {
+    /** Fecha => TCC. Faltan dias a proposito: sabados, domingos y feriados. */
+    public $serie = [
+        '2026-09-01' => 1485.0,
+        '2026-09-03' => 1490.0,
+        '2026-09-06' => 1480.0
+    ];
+
+    public function __construct() { /* a proposito: no abre conexion */ }
+
+    public function ultimaHasta($fecha) {
+        $f = self::dia($fecha);
+        $mejor = null;
+
+        foreach ($this->serie as $dia => $tcc) {
+            if ($dia <= $f && ($mejor === null || $dia > $mejor)) {
+                $mejor = $dia;
+            }
+        }
+
+        return ($mejor === null) ? null : ['fecha' => $mejor, 'tcc' => $this->serie[$mejor]];
+    }
+}
+
+$oi = new OtrosIngresos();
+
+$cargas = [
+    ['FECHA' => '2026-09-04', 'IMPORTE_USD' => 1000.0],   // sabado: vale la del 03
+    ['FECHA' => '2026-09-08', 'IMPORTE_USD' => 2000.0],   // posterior a la ultima
+    ['FECHA' => '2020-01-01', 'IMPORTE_USD' => 500.0]     // anterior a toda la serie
+];
+
+$v = $oi->valuarDolares($cargas, new CotizacionFalsa());
+
+chequear('devuelve una fila por carga', 3, count($v['filas']));
+
+// Un sabado no inventa una cotizacion: usa la del viernes Y DICE que es del
+// viernes. Sin la fecha, el numero en pesos no se puede explicar.
+chequear('un dia sin cotizacion toma la anterior', 1490.0, $v['filas'][0]['TC']);
+chequear('y dice de que dia salio', '2026-09-03', $v['filas'][0]['TC_FECHA']);
+chequear('la cuenta es USD x cotizacion', 1490000.0, $v['filas'][0]['IMPORTE_ARS']);
+
+// Una carga posterior a la ultima cotizacion cargada usa esa ultima, que es
+// justamente lo que el criterio de cierre mensual no podia contestar.
+chequear('una carga futura usa la ultima conocida', 1480.0, $v['filas'][1]['TC']);
+chequear('con su fecha', '2026-09-06', $v['filas'][1]['TC_FECHA']);
+chequear('y su cuenta', 2960000.0, $v['filas'][1]['IMPORTE_ARS']);
+
+// Sin ninguna cotizacion anterior NO se asume nada: null, no cero. Un cero se
+// leeria como "esos dolares valen cero pesos".
+chequear('sin cotizacion anterior, el tipo de cambio es null', null, $v['filas'][2]['TC']);
+chequear('la fecha tambien', null, $v['filas'][2]['TC_FECHA']);
+chequear('y el importe en pesos, null y no cero', null, $v['filas'][2]['IMPORTE_ARS']);
+chequear('esos dolares se informan aparte', 500.0, $v['sin_cotizacion']);
+chequear('y no hubo error de origen', null, $v['error']);
+
+chequear('sin cargas no hay nada que valuar y no se toca la base',
+    ['filas' => [], 'sin_cotizacion' => 0.0, 'error' => null], $oi->valuarDolares([]));
+
+seccion('normalizacion de un dia en Cotizacion');
+
+chequear('acepta Y-m-d', '2026-09-15', Cotizacion::dia('2026-09-15'));
+chequear('y recorta la hora', '2026-09-15', Cotizacion::dia('2026-09-15 13:45:00'));
+chequear('y acepta un DateTime', '2026-09-15', Cotizacion::dia(new DateTime('2026-09-15')));
+chequearLanza('una fecha inexistente se rechaza', function () { Cotizacion::dia('2026-02-30'); });
+chequearLanza('un texto cualquiera se rechaza', function () { Cotizacion::dia('ayer'); });
+
+/* ================================================================
+   EL SALDO DE INVERSIONES YA NO ES UN INGRESO: ES STOCK DE COBERTURA
+   ================================================================ */
+seccion('el saldo de inversiones pasa a ser stock');
+
+$metaInvStock = CashflowRegistry::meta('SALDO_INVERSIONES');
+
+chequear('ofrece la serie STOCK',
+    true, CashflowRegistry::serieExiste('SALDO_INVERSIONES', 'STOCK'));
+
+// La serie vieja queda declarada para poder volver atras desde Parametros, pero
+// son el MISMO dinero: activar las dos filas lo mostraria dos veces, y por eso
+// van relacionadas en 'componentes'.
+chequear('la serie vieja sigue declarada',
+    true, CashflowRegistry::serieExiste('SALDO_INVERSIONES', 'INGRESO'));
+chequear('y las dos estan declaradas como incompatibles',
+    ['INGRESO'], $metaInvStock['componentes']['STOCK']);
+
+$reglas = CashflowEstructura::validar(
+    [['CODIGO' => 'COB', 'NOMBRE' => 'Cobertura', 'ROL' => 'DERIVADO',
+      'ID_PADRE' => null, 'ORDEN' => 10, 'ACTIVO' => 1]],
+    [['ID' => 1, 'CODIGO' => 'STOCK_INV', 'NOMBRE' => 'Inversiones disponibles',
+      'SECCION' => 'COB', 'TIPO' => 'STOCK_COBERTURA', 'COMPUTA' => 0,
+      'ORIGEN_PROVIDER' => 'SALDO_INVERSIONES', 'ORIGEN_SERIE' => 'STOCK',
+      'ORDEN' => 10, 'ACTIVO' => 1],
+     ['ID' => 2, 'CODIGO' => 'SALDO_INV', 'NOMBRE' => 'Saldo de Inversiones',
+      'SECCION' => 'COB', 'TIPO' => 'INGRESO', 'COMPUTA' => 1,
+      'ORIGEN_PROVIDER' => 'SALDO_INVERSIONES', 'ORIGEN_SERIE' => 'INGRESO',
+      'ORDEN' => 20, 'ACTIVO' => 1]]
+);
+
+chequear('tener las dos activas es un error de configuracion', false, $reglas['valido']);

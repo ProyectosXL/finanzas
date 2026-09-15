@@ -57,14 +57,36 @@ try {
 
     switch ($action) {
         case 'getDolaresComitente':
-            // Los avisos van SIEMPRE, incluso -sobre todo- cuando la grilla
-            // esta vacia: es la diferencia entre "falta correr el script" y
-            // "todavia nadie cargo nada".
+            /* Las filas van VALUADAS, con la cuenta abierta: cuantos dolares, a
+               que cotizacion, de que fecha, y cuanto da en pesos. Es la MISMA
+               cuenta que hace el proveedor para el tablero -
+               OtrosIngresos::valuarDolares()-, asi que el total de esta grilla
+               se ata fila por fila al de la fila del cashflow.
+
+               Los avisos van SIEMPRE, incluso -sobre todo- cuando la grilla
+               esta vacia: es la diferencia entre "falta correr el script" y
+               "todavia nadie cargo nada". */
+            $val = $otros->valuarDolares();
+            $avisos = $otros->getAvisos();
+
+            if ($val['error'] !== null) {
+                $avisos[] = 'No se pudo leer el tipo de cambio oficial, así que la columna en '
+                    . 'pesos va con un guión. Los dólares cargados están; lo que falta es a '
+                    . 'cuánto valuarlos. Corré sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql contra '
+                    . 'la base central.';
+            }
+
+            if ($val['sin_cotizacion'] > 0) {
+                $avisos[] = 'US$ ' . number_format($val['sin_cotizacion'], 2, ',', '.')
+                    . ' no se pueden valuar porque no hay ninguna cotización oficial anterior '
+                    . 'a su fecha. No se asume ningún tipo de cambio: tampoco entran al tablero.';
+            }
+
             echo json_encode([
                 'success' => true,
                 'data' => [
-                    'filas' => $otros->getDolaresComitente(),
-                    'avisos' => $otros->getAvisos()
+                    'filas' => $val['filas'],
+                    'avisos' => $avisos
                 ]
             ], JSON_UNESCAPED_UNICODE);
             break;

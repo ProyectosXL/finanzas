@@ -37,8 +37,8 @@ $disponibles = array_values(array_filter($todos, function ($p) { return $p['disp
 
 // Ventas, Cobranzas FR, Cobranzas May, Proveedores Exterior, Nacionalizaciones,
 // Saldos, Caja Locales, Cobranzas Electronicas, Echeqs, Dolares Cuenta
-// Comitente, Exportaciones Tasky y Saldo de Inversiones.
-chequear('hay 12 modulos con datos reales', 12, count($disponibles));
+// Comitente, Exportaciones Tasky, Saldo de Inversiones y Cobertura.
+chequear('hay 13 modulos con datos reales', 13, count($disponibles));
 chequear('un modulo sin construir no se instancia',
     null, CashflowRegistry::instanciar('HABERES'));
 chequear('un modulo inexistente tampoco', null, CashflowRegistry::instanciar('NO_EXISTE'));
