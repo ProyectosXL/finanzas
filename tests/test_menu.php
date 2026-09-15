@@ -201,7 +201,10 @@ chequear('Otros Ingresos va justo despues de Ingresos',
 // y Asesor se dio de baja del menu porque no se usa mas.
 chequear('Comex tiene sus 2 pestanas con datos', 2, $porCategoria['Comex']['con_datos']);
 chequear('y son 2 en total, ya sin Despachante', 2, $porCategoria['Comex']['total']);
-chequear('Proveedores todavia no tiene ninguna', 0, $porCategoria['Proveedores']['con_datos']);
+// Proveedores Locales ya tiene datos: sale de Tango (CPA04 + CPA54 + CPA01).
+// Cronograma y Logistica Local siguen siendo maquetas.
+chequear('Proveedores tiene 1 pestana con datos', 1, $porCategoria['Proveedores']['con_datos']);
+chequear('y 3 en total', 3, $porCategoria['Proveedores']['total']);
 
 // El contador cuenta SOLO las que tienen datos: una maqueta no cuenta, que es
 // lo que hace que el numero sea confiable.

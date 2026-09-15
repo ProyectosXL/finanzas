@@ -1,0 +1,152 @@
+/* ============================================================================
+   PROVEEDORES LOCALES — CUENTAS A PAGAR
+
+   La pantalla tiene una sola cosa editable —la fecha de pago— y un solo número
+   que dice cuánto trabajo queda: lo vencido sin fecha. Todo el código de color
+   está al servicio de esas dos cosas.
+   ============================================================================ */
+
+/* ----------------------------------------------------------------------------
+   EL INDICADOR QUE IMPORTA
+
+   Lo vencido sin fecha cargada es el importe que está apilado en el primer día
+   del eje. Mientras haya algo, la tarjeta tiene que verse; cuando llega a cero,
+   se apaga. Un indicador que se ve igual con 839 millones pendientes y con cero
+   no sirve para saber si hay trabajo por hacer.
+   ---------------------------------------------------------------------------- */
+
+.tab-proveedores_locales .prov-kpi-pendiente {
+    border-left: 3px solid #c0392b;
+}
+
+.tab-proveedores_locales .prov-kpi-pendiente .kpi-card-value {
+    color: #c0392b;
+}
+
+/* Nada pendiente de fechar: se apaga. */
+.tab-proveedores_locales .prov-kpi-pendiente.prov-kpi-ok {
+    border-left-color: #2e9e6b;
+}
+
+.tab-proveedores_locales .prov-kpi-pendiente.prov-kpi-ok .kpi-card-value {
+    color: #2e9e6b;
+}
+
+/* ----------------------------------------------------------------------------
+   LAS FILAS
+
+   Tres estados que significan cosas distintas y no pueden verse igual:
+   vencida sin fecha (hay que hacer algo), con fecha cargada (ya se decidió), y
+   excluida (se lista pero puede no entrar al tablero).
+   ---------------------------------------------------------------------------- */
+
+.tab-proveedores_locales .prov-vencida {
+    background-color: #fdf3f2;
+}
+
+.tab-proveedores_locales .prov-con-fecha {
+    background-color: #f2f9f5;
+}
+
+/* Excluido: se atenúa. Se sigue listando —es donde alguien puede notar que está
+   mal clasificado— pero no compite visualmente con la deuda que sí entra. */
+.tab-proveedores_locales .prov-excluido td {
+    color: #8a94a3;
+    font-style: italic;
+}
+
+.tab-proveedores_locales .prov-marca {
+    font-size: 0.7rem;
+    color: #b07d2b;
+    cursor: help;
+}
+
+/* ----------------------------------------------------------------------------
+   RUBRO
+   ---------------------------------------------------------------------------- */
+
+.tab-proveedores_locales .prov-rubro {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 0.72rem;
+    background-color: #eef2f7;
+    color: #43536b;
+}
+
+.tab-proveedores_locales .prov-rubro-excluido {
+    background-color: #f1eef7;
+    color: #6b5b8a;
+}
+
+/* Una forma de pago que no matcheó contra la lista. Se muestra tal como vino:
+   lo que hay que arreglar es la planilla, no el dato ya cargado. */
+.tab-proveedores_locales .prov-forma-rara {
+    color: #b07d2b;
+    font-size: 0.78rem;
+    border-bottom: 1px dotted #b07d2b;
+    cursor: help;
+}
+
+/* ----------------------------------------------------------------------------
+   LA CELDA EDITABLE
+
+   Misma pinta que la fecha manual de Cobranzas FR y a propósito: es el mismo
+   gesto —pisar a mano una fecha que el sistema calculó— y tiene que verse igual
+   en las dos pantallas.
+   ---------------------------------------------------------------------------- */
+
+.tab-proveedores_locales .prov-celda-fecha {
+    min-width: 175px;
+}
+
+.tab-proveedores_locales .prov-input-fecha {
+    font-size: 11px;
+    padding: 2px 6px;
+    min-width: 118px;
+}
+
+.tab-proveedores_locales .prov-fecha-cargada .prov-input-fecha {
+    border-color: #0d6efd;
+    background-color: #e7f1ff;
+    font-weight: 600;
+    color: #084298;
+}
+
+/* ----------------------------------------------------------------------------
+   LA PREVISUALIZACIÓN DE LA IMPORTACIÓN
+
+   Lo que no se puede cargar va primero y se ve distinto: es lo que hay que
+   mirar antes de confirmar. Lo que no cambia se atenúa, porque es ruido para
+   esa decisión.
+   ---------------------------------------------------------------------------- */
+
+.tab-proveedores_locales .prov-preview-tabla {
+    max-height: 420px;
+    overflow-y: auto;
+}
+
+.tab-proveedores_locales .prov-pre-error {
+    background-color: #fdf3f2;
+}
+
+.tab-proveedores_locales .prov-pre-cambio {
+    background-color: #fdf9ee;
+}
+
+.tab-proveedores_locales .prov-pre-sin_cambios {
+    color: #97a1ae;
+}
+
+.tab-proveedores_locales .prov-preview-tabla code {
+    font-size: 0.76rem;
+    color: #43536b;
+}
+
+/* ----------------------------------------------------------------------------
+   SUB-SOLAPAS
+   ---------------------------------------------------------------------------- */
+
+.tab-proveedores_locales .prov-subtabs .nav-link {
+    font-size: 0.86rem;
+}
