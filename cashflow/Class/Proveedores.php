@@ -1190,6 +1190,342 @@ class Proveedores {
     }
 
     /* ====================================================================
+       CONCILIACION CONTRA LAS CANCELADAS
+
+       TANGO ES LA VERDAD SOBRE EL PAGO. Lo que se carga en la pestana es una
+       PREVISION: cuando se piensa pagar. Cuando el comprobante aparece
+       cancelado en Tango, dejo de ser una prevision y paso a ser un hecho, y
+       deja de proyectarse -sale del listado de pendientes por si solo, porque
+       ESTADO ya no es 'PEN'-.
+
+       LA PREVISION NO SE BORRA AL CONCILIAR. Queda marcada como CONCILIADA con
+       la fecha REAL de cancelacion al lado, sin pisar la prevista. Es lo unico
+       que permite despues comparar lo que se planifico contra lo que paso: si
+       se borrara, la unica pregunta que esta tabla puede contestar bien -"le
+       acertamos a la fecha?"- quedaria sin respuesta para siempre.
+       ==================================================================== */
+
+    /**
+     * Compara las previsiones cargadas contra el estado real en Tango.
+     *
+     * CONSULTA SOLO LO QUE TIENE PREVISION, no las 96.403 canceladas: la
+     * pregunta es "de lo que yo tengo previsto, que ya se pago", y al reves
+     * seria traer toda la historia de compras para cruzar contra un puñado.
+     *
+     * DETECTA LOS DOS SENTIDOS:
+     *
+     *   CONCILIA      estaba PREVISTO y el comprobante ya no esta pendiente en
+     *                 Tango: se pago.
+     *   REABRE        estaba CONCILIADO y el comprobante volvio a estar
+     *                 pendiente. Pasa cuando se anula una orden de pago. Sin
+     *                 esto, esa deuda quedaria marcada como pagada para siempre
+     *                 aunque el tablero la vuelva a mostrar.
+     *
+     * NO ESCRIBE NADA SI $aplicar es false: primero se mira que cambiaria, igual
+     * que en las dos importaciones.
+     *
+     * @param bool $aplicar
+     * @param string|null $usuario
+     * @return array ['concilia', 'reabre', 'sin_cambios', 'resumen']
+     */
+    public function conciliar($aplicar = false, $usuario = null) {
+        if (!$this->tablaCreada()) {
+            throw new Exception('Todavía no existe la tabla de fechas de pago. '
+                . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
+        }
+
+        $pagos = $this->getPagos();
+
+        if (empty($pagos)) {
+            return [
+                'concilia' => [], 'reabre' => [], 'sin_cambios' => 0,
+                'resumen' => ['concilia' => 0, 'reabre' => 0, 'sin_cambios' => 0,
+                              'importe_conciliado' => 0.0],
+                'avisos' => ['No hay ninguna fecha de pago cargada, así que no hay nada que '
+                    . 'conciliar.']
+            ];
+        }
+
+        $estados = $this->estadoEnTango($pagos);
+
+        $concilia = [];
+        $reabre = [];
+        $sinCambios = 0;
+        $importeConciliado = 0.0;
+
+        foreach ($pagos as $clave => $pago) {
+            $enTango = isset($estados[$clave]) ? $estados[$clave] : null;
+
+            /* Un comprobante que NO aparece en Tango no se toca. Puede haber
+               sido anulado, depurado, o cargado con un codigo que despues
+               cambio. Marcarlo como pagado seria inventar un hecho. */
+            if ($enTango === null) {
+                $sinCambios++;
+                continue;
+            }
+
+            $pendiente = ($enTango['ESTADO'] === 'PEN');
+
+            if ($pago['ESTADO'] === 'PREVISTO' && !$pendiente) {
+                $concilia[] = [
+                    'cod_provee' => $pago['COD_PROVEE'],
+                    't_comp' => $pago['T_COMP'],
+                    'n_comp' => $pago['N_COMP'],
+                    'razon_social' => $enTango['NOM_PROVEE'],
+                    'fecha_prevista' => $pago['FECHA_PAGO'],
+                    'fecha_cancelado' => $enTango['FECHA_CANCELADO'],
+                    'estado_tango' => $enTango['ESTADO'],
+                    'importe' => $enTango['IMPORTE'],
+                    // Cuantos dias antes o despues de lo previsto se pago. Es
+                    // el dato por el que existe guardar las dos fechas.
+                    'desvio_dias' => self::desvioDias($pago['FECHA_PAGO'],
+                        $enTango['FECHA_CANCELADO'])
+                ];
+
+                $importeConciliado += floatval($enTango['IMPORTE']);
+                continue;
+            }
+
+            if ($pago['ESTADO'] === 'CONCILIADO' && $pendiente) {
+                $reabre[] = [
+                    'cod_provee' => $pago['COD_PROVEE'],
+                    't_comp' => $pago['T_COMP'],
+                    'n_comp' => $pago['N_COMP'],
+                    'razon_social' => $enTango['NOM_PROVEE'],
+                    'fecha_prevista' => $pago['FECHA_PAGO'],
+                    'fecha_cancelado' => $pago['FECHA_CANCELADO']
+                ];
+
+                continue;
+            }
+
+            $sinCambios++;
+        }
+
+        if ($aplicar) {
+            $this->aplicarConciliacion($concilia, $reabre, $usuario);
+        }
+
+        $resumen = [
+            'concilia' => count($concilia),
+            'reabre' => count($reabre),
+            'sin_cambios' => $sinCambios,
+            'importe_conciliado' => round($importeConciliado, 2)
+        ];
+
+        return [
+            'concilia' => $concilia,
+            'reabre' => $reabre,
+            'sin_cambios' => $sinCambios,
+            'resumen' => $resumen,
+            'avisos' => self::avisosConciliacion($resumen, $concilia)
+        ];
+    }
+
+    /**
+     * El estado real en Tango de los comprobantes que tienen prevision.
+     *
+     * Se filtra por los PROVEEDORES involucrados y se cruza en PHP por
+     * comprobante. Es mas simple y mas seguro que armar un IN con cientos de
+     * pares, y el filtro por proveedor ya acota muchisimo.
+     *
+     * La FECHA REAL de cancelacion sale del ultimo comprobante que la cancelo
+     * (MAX de CPA05.F_COMP_CAN). No de CPA04: ahi no hay fecha de pago, hay
+     * fecha de emision y de contabilizacion, que son otra cosa.
+     *
+     * @param array $pagos Mapa de getPagos()
+     * @return array Mapa clave => ['ESTADO', 'FECHA_CANCELADO', 'IMPORTE', 'NOM_PROVEE']
+     */
+    private function estadoEnTango($pagos) {
+        $proveedores = [];
+
+        foreach ($pagos as $p) {
+            $proveedores[$p['COD_PROVEE']] = true;
+        }
+
+        if (empty($proveedores)) {
+            return [];
+        }
+
+        $cid = $this->conectar();
+        $codigos = array_keys($proveedores);
+        $marcas = implode(',', array_fill(0, count($codigos), '?'));
+
+        $sql = "SELECT a.COD_PROVEE, a.T_COMP, a.N_COMP, a.ESTADO, p.NOM_PROVEE,
+                       CAST(a.IMPORTE_TO AS FLOAT) AS IMPORTE,
+                       (SELECT MAX(i.F_COMP_CAN) FROM CPA05 i
+                         WHERE i.ID_CPA04 = a.ID_CPA04) AS FECHA_CANCELADO
+                FROM CPA04 a
+                INNER JOIN CPA01 p ON p.COD_PROVEE = a.COD_PROVEE
+                WHERE a.COD_PROVEE IN (" . $marcas . ")";
+
+        $stmt = sqlsrv_query($cid, $sql, $codigos);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer el estado en Tango'));
+        }
+
+        $estados = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $clave = self::clavePago($row['COD_PROVEE'], $row['T_COMP'], $row['N_COMP']);
+
+            $estados[$clave] = [
+                'ESTADO' => strtoupper(trim((string) $row['ESTADO'])),
+                'FECHA_CANCELADO' => Horizonte::normalizarFecha($row['FECHA_CANCELADO']),
+                'IMPORTE' => round(floatval($row['IMPORTE']), 2),
+                'NOM_PROVEE' => trim((string) $row['NOM_PROVEE'])
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $estados;
+    }
+
+    /** Escribe el resultado de la conciliacion, todo en una transaccion */
+    private function aplicarConciliacion($concilia, $reabre, $usuario) {
+        if (empty($concilia) && empty($reabre)) {
+            return;
+        }
+
+        $cid = $this->conectar();
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción'));
+        }
+
+        try {
+            foreach ($concilia as $c) {
+                /* La fecha PREVISTA no se pisa: al lado se guarda la real. Es
+                   lo unico que permite comparar despues prevision contra
+                   realidad. */
+                $stmt = sqlsrv_query($cid,
+                    "UPDATE dbo." . self::TABLA_PAGO . "
+                     SET ESTADO = 'CONCILIADO', FECHA_CANCELADO = ?, FECHA_CONCILIA = GETDATE(),
+                         USUARIO = ?, FECHA_MOD = GETDATE()
+                     WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?",
+                    [$c['fecha_cancelado'], $usuario,
+                     $c['cod_provee'], $c['t_comp'], $c['n_comp']]);
+
+                if ($stmt === false) {
+                    throw new Exception($this->errorSql('Error al conciliar '
+                        . $c['t_comp'] . ' ' . $c['n_comp']));
+                }
+
+                sqlsrv_free_stmt($stmt);
+            }
+
+            foreach ($reabre as $r) {
+                $stmt = sqlsrv_query($cid,
+                    "UPDATE dbo." . self::TABLA_PAGO . "
+                     SET ESTADO = 'PREVISTO', FECHA_CANCELADO = NULL, FECHA_CONCILIA = NULL,
+                         USUARIO = ?, FECHA_MOD = GETDATE()
+                     WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?",
+                    [$usuario, $r['cod_provee'], $r['t_comp'], $r['n_comp']]);
+
+                if ($stmt === false) {
+                    throw new Exception($this->errorSql('Error al reabrir '
+                        . $r['t_comp'] . ' ' . $r['n_comp']));
+                }
+
+                sqlsrv_free_stmt($stmt);
+            }
+
+            sqlsrv_commit($cid);
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Cuantos dias antes (negativo) o despues (positivo) de lo previsto se pago.
+     *
+     * Es el dato por el que vale la pena guardar las dos fechas en lugar de
+     * pisar una con la otra: contesta si la prevision sirve o si siempre se paga
+     * mas tarde de lo que se dice.
+     *
+     * Estatica y pura.
+     *
+     * @param string|null $prevista
+     * @param string|null $real
+     * @return int|null null si falta alguna de las dos
+     */
+    public static function desvioDias($prevista, $real) {
+        $p = Horizonte::normalizarFecha($prevista);
+        $r = Horizonte::normalizarFecha($real);
+
+        if ($p === null || $r === null) {
+            return null;
+        }
+
+        $a = new DateTime($p);
+        $b = new DateTime($r);
+        $a->setTime(0, 0, 0);
+        $b->setTime(0, 0, 0);
+
+        return intval($a->diff($b)->format('%r%a'));
+    }
+
+    /**
+     * Los avisos de la conciliacion. Dicen QUE CAMBIO, que es lo que evita
+     * tener que comparar fila por fila.
+     *
+     * Estaticos y puros.
+     *
+     * @param array $resumen
+     * @param array $concilia
+     * @return array
+     */
+    private static function avisosConciliacion($resumen, $concilia) {
+        $avisos = [];
+
+        if ($resumen['concilia'] === 0 && $resumen['reabre'] === 0) {
+            $avisos[] = 'Nada cambió: las ' . $resumen['sin_cambios'] . ' previsiones cargadas '
+                . 'siguen como estaban.';
+
+            return $avisos;
+        }
+
+        if ($resumen['concilia'] > 0) {
+            $avisos[] = $resumen['concilia'] . ' comprobante(s) por '
+                . self::plata($resumen['importe_conciliado']) . ' ya figuran cancelados en '
+                . 'Tango. Su previsión queda marcada como conciliada, con la fecha real al '
+                . 'lado: no se borra, porque es lo que permite comparar después lo que se '
+                . 'planificó contra lo que pasó.';
+
+            /* El desvio promedio contesta si la prevision sirve. Con pocos casos
+               no significa nada, asi que se informa recien con cinco. */
+            $conDesvio = [];
+
+            foreach ($concilia as $c) {
+                if ($c['desvio_dias'] !== null) {
+                    $conDesvio[] = $c['desvio_dias'];
+                }
+            }
+
+            if (count($conDesvio) >= 5) {
+                $promedio = array_sum($conDesvio) / count($conDesvio);
+
+                $avisos[] = 'En promedio se pagó ' . abs(round($promedio, 1)) . ' día(s) '
+                    . ($promedio >= 0 ? 'DESPUÉS' : 'ANTES') . ' de lo previsto, sobre '
+                    . count($conDesvio) . ' comprobante(s). Es lo que dice si la previsión '
+                    . 'está sirviendo.';
+            }
+        }
+
+        if ($resumen['reabre'] > 0) {
+            $avisos[] = $resumen['reabre'] . ' comprobante(s) estaban conciliados y volvieron a '
+                . 'estar pendientes en Tango: lo más probable es que se haya anulado una orden '
+                . 'de pago. Vuelven a proyectarse con su fecha prevista.';
+        }
+
+        return $avisos;
+    }
+
+    /* ====================================================================
        INFRAESTRUCTURA
        ==================================================================== */
 
