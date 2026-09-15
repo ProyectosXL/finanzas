@@ -473,6 +473,693 @@ class ProveedoresCategorias {
     }
 
     /* ====================================================================
+       IMPORTACION DEL MAESTRO
+
+       La hoja "Maestro proveedores" del Excel Cronograma de Pagos, que
+       administracion mantiene a mano. Mismo circuito que Cob. Electronicos:
+       plantilla CSV, previsualizacion del diff, y NADA se escribe hasta que el
+       usuario confirma.
+
+       LA PLANILLA VIENE SUCIA Y ESO SE MUESTRA, NO SE ARREGLA. Tiene un codigo
+       repetido, un 'echeq' en minuscula y un 'ECOMMERC' por 'ECOMMERCE'. Un
+       importador que los corrige solo deja la planilla rota para siempre, porque
+       nadie se entera nunca de que lo esta. Lo que hay que arreglar es la
+       planilla.
+       ==================================================================== */
+
+    /**
+     * Las columnas de la planilla, con sus sinonimos.
+     *
+     * Es la UNICA definicion: de aca salen la plantilla que se descarga, el
+     * mapeo del encabezado al parsear y la ayuda de la pantalla.
+     *
+     * SOLO EL CODIGO ES OBLIGATORIO. El resto puede faltar y de hecho falta: en
+     * la planilla real hay 84 filas sin rubro economico, 98 sin centro de costos
+     * y 765 sin plazo de pago. Exigirlos haria que la importacion falle entera
+     * por datos que administracion todavia no cargo.
+     *
+     * @return array Mapa campo => ['titulo', 'obligatoria', 'ayuda', 'sinonimos']
+     */
+    public static function columnasImportacion() {
+        return [
+            'cod_provee' => [
+                'titulo' => 'CODIGO',
+                'obligatoria' => true,
+                'ayuda' => 'Código del proveedor en Tango, de 4 a 7 caracteres. Es lo único '
+                    . 'que permite cruzar la planilla contra las cuentas a pagar.',
+                'sinonimos' => ['CODIGO', 'COD_PROVEE', 'CODPROVEEDOR', 'COD_PROVEEDOR',
+                                'CODIGOPROVEEDOR', 'PROVEEDOR']
+            ],
+            'nombre' => [
+                'titulo' => 'NOMBRE',
+                'obligatoria' => false,
+                'ayuda' => 'Nombre del proveedor. No se usa para cruzar -para eso está el '
+                    . 'código- pero es lo que permite reconocerlo en la previsualización.',
+                'sinonimos' => ['NOMBRE', 'RAZON_SOCIAL', 'RAZONSOCIAL', 'NOM_PROVEE',
+                                'DESCRIPCION']
+            ],
+            'rubro_economico' => [
+                'titulo' => 'RUBRO ECONOMICO',
+                'obligatoria' => false,
+                'ayuda' => 'Es el que mapea a las filas del tablero. "'
+                    . self::RUBRO_EXCLUIDOS . '" saca al proveedor del cuadro.',
+                'sinonimos' => ['RUBROECONOMICO', 'RUBRO_ECONOMICO', 'RUBROECON', 'ECONOMICO']
+            ],
+            'rubro' => [
+                'titulo' => 'RUBRO',
+                'obligatoria' => false,
+                'ayuda' => 'Apertura más fina que el rubro económico. Hoy sólo se guarda.',
+                'sinonimos' => ['RUBRO']
+            ],
+            'centro_costos' => [
+                'titulo' => 'CENTRO COSTOS',
+                'obligatoria' => false,
+                'ayuda' => 'Centro de costos al que se imputa. Hoy sólo se guarda.',
+                'sinonimos' => ['CENTROCOSTOS', 'CENTRO_COSTOS', 'CENTRODECOSTOS', 'CCOSTOS',
+                                'CENTRO_DE_COSTOS']
+            ],
+            'forma_pago' => [
+                'titulo' => 'FORMA DE PAGO',
+                'obligatoria' => false,
+                'ayuda' => 'Cómo se le paga habitualmente. Se usa como valor por defecto al '
+                    . 'importar pagos. Válidos: ' . implode(', ', self::FORMAS_PAGO) . '.',
+                'sinonimos' => ['FORMADEPAGO', 'FORMA_PAGO', 'FORMAPAGO', 'MEDIODEPAGO']
+            ],
+            'plazo_pago' => [
+                'titulo' => 'PLAZO DE PAGO',
+                'obligatoria' => false,
+                'ayuda' => 'CONTADO, DEBITO o "N DIAS". Se usa para estimar la fecha sólo '
+                    . 'cuando el comprobante no trae vencimiento.',
+                'sinonimos' => ['PLAZODEPAGO', 'PLAZO_PAGO', 'PLAZOPAGO', 'PLAZO', 'CONDICION']
+            ],
+            'criterio_distrib' => [
+                'titulo' => 'CRITERIO DISTRIBUCION',
+                'obligatoria' => false,
+                'ayuda' => 'Cómo se reparte el gasto entre canales. Hoy sólo se guarda.',
+                'sinonimos' => ['CRITERIODISTRIBUCION', 'CRITERIO_DISTRIBUCION', 'CRITERIO',
+                                'DISTRIBUCION']
+            ]
+        ];
+    }
+
+    /**
+     * La plantilla que se descarga, con filas de ejemplo cargadas.
+     *
+     * @return string
+     */
+    public static function plantillaCsv() {
+        return Planilla::plantillaCsv(self::columnasImportacion(), [
+            ['MTDODI', 'DONNA DI DIO S.R.L.', 'Mercaderia', 'Talleres', 'Fabrica',
+             'TRANSFERENCIA', '30 DIAS', '100% VENTAS'],
+            ['SAPALA', 'IRSA INVERSIONES Y REPRESENTACIONES SA', 'Alquileres', 'Shoppings',
+             'Locales', 'TRANSFERENCIA', 'CONTADO', '100% LOCALES'],
+            ['MTTESO', 'TESORERIA', self::RUBRO_EXCLUIDOS, '', '', 'EFECTIVO', '', '']
+        ]);
+    }
+
+    /**
+     * Compara lo que trae el archivo contra el maestro cargado y dice QUE
+     * CAMBIARIA. No escribe nada.
+     *
+     * Es un helper PURO: recibe las filas ya parseadas y el maestro actual, y
+     * devuelve el diff. Se prueba entero sin base y sin archivos, que es lo que
+     * permite verificar los casos sucios -el codigo repetido, el 'echeq', el
+     * 'ECOMMERC'- sin tener que fabricar un CSV.
+     *
+     * ESTADOS DE UNA FILA
+     *   ALTA         el proveedor no estaba en el maestro
+     *   CAMBIO       estaba y algun campo cambia; 'cambios' dice cuales
+     *   SIN_CAMBIOS  estaba igual
+     *   ERROR        no se puede cargar; 'motivo' dice por que
+     *
+     * Y aparte, las BAJAS: proveedores que estan vigentes en el maestro y que el
+     * archivo NO trae. No se dan de baja en silencio -se listan y se confirman-
+     * porque una planilla recortada por error daria de baja medio maestro.
+     *
+     * @param array $filasArchivo Filas de Planilla::parsear()
+     * @param array $existentes Maestro vigente, indexado por COD_PROVEE
+     * @return array ['filas', 'bajas', 'resumen', 'avisos']
+     */
+    public static function compararImportacion($filasArchivo, $existentes) {
+        $existentes = is_array($existentes) ? $existentes : [];
+        $filas = [];
+        $vistos = [];
+        $tocados = [];
+
+        /* Cuantas veces aparece cada CRITERIO DISTRIBUCION. Ver
+           criteriosSospechosos(): es como se detecta un typo sin tener una lista
+           declarada de criterios validos. */
+        $criterios = [];
+
+        $resumen = [
+            'altas' => 0, 'cambios' => 0, 'sin_cambios' => 0,
+            'errores' => 0, 'bajas' => 0,
+            'sin_rubro' => 0, 'excluidos' => 0,
+            'forma_desconocida' => 0, 'plazo_no_usable' => 0
+        ];
+
+        foreach (is_array($filasArchivo) ? $filasArchivo : [] as $cruda) {
+            $fila = self::filaImportacion($cruda);
+
+            if ($fila['estado'] !== 'ERROR') {
+                $cod = $fila['cod_provee'];
+
+                /* EL CODIGO REPETIDO NO SE COLAPSA. La planilla real tiene uno
+                   (1.222 unicos en 1.223 filas). Quedarse con el ultimo elegiria
+                   por el usuario y nadie se enteraria de que hay un duplicado.
+                   Las DOS filas quedan en error, nombrando a la otra. */
+                if (isset($vistos[$cod])) {
+                    $fila['estado'] = 'ERROR';
+                    $fila['motivo'] = 'El código ' . $cod . ' ya aparece en la línea '
+                        . $vistos[$cod] . '. Está repetido en la planilla: dejá una sola fila '
+                        . 'por proveedor y volvé a importar.';
+
+                    // La primera tambien pasa a error: si no, se cargaria una de
+                    // las dos sin que nadie haya decidido cual.
+                    foreach ($filas as $i => $anterior) {
+                        if ($anterior['cod_provee'] === $cod && $anterior['estado'] !== 'ERROR') {
+                            $filas[$i]['estado'] = 'ERROR';
+                            $filas[$i]['motivo'] = 'El código ' . $cod . ' se repite en la '
+                                . 'línea ' . $fila['linea'] . '. Está repetido en la planilla: '
+                                . 'dejá una sola fila por proveedor y volvé a importar.';
+                            $resumen['errores']++;
+                            $resumen[strtolower($anterior['estado']) === 'alta'
+                                ? 'altas' : (strtolower($anterior['estado']) === 'cambio'
+                                    ? 'cambios' : 'sin_cambios')]--;
+                        }
+                    }
+                } else {
+                    $vistos[$cod] = $fila['linea'];
+
+                    if (!isset($existentes[$cod])) {
+                        $fila['estado'] = 'ALTA';
+                        $fila['motivo'] = 'No estaba en el maestro.';
+                    } else {
+                        $tocados[$cod] = true;
+                        $fila = self::compararContraExistente($fila, $existentes[$cod]);
+                    }
+                }
+            }
+
+            /* La calidad del dato se cuenta en toda fila que se vaya a cargar,
+               incluso en una que no cambia nada: un 'echeq' en minuscula que ya
+               estaba cargado sigue siendo un typo de la planilla y hay que
+               arreglarlo.
+
+               PERO NO EN LAS FILAS EN ERROR. Esas no se cargan, asi que no
+               tienen calidad que evaluar; peor todavia, una fila que fallo por
+               el codigo ni siquiera llego a leer el rubro y contaria como "sin
+               rubro" siendo que lo trae. */
+            if ($fila['estado'] !== 'ERROR') {
+                if ($fila['forma_desconocida']) { $resumen['forma_desconocida']++; }
+                if ($fila['plazo_no_usable']) { $resumen['plazo_no_usable']++; }
+                if ($fila['excluido']) { $resumen['excluidos']++; }
+                if ($fila['rubro_economico'] === null) { $resumen['sin_rubro']++; }
+
+                if ($fila['criterio_distrib'] !== null) {
+                    $clave = $fila['criterio_distrib'];
+                    $criterios[$clave] = isset($criterios[$clave]) ? $criterios[$clave] + 1 : 1;
+                }
+            }
+
+            switch ($fila['estado']) {
+                case 'ALTA': $resumen['altas']++; break;
+                case 'CAMBIO': $resumen['cambios']++; break;
+                case 'SIN_CAMBIOS': $resumen['sin_cambios']++; break;
+                case 'ERROR': $resumen['errores']++; break;
+            }
+
+            $filas[] = $fila;
+        }
+
+        /* Las bajas: lo que esta vigente y el archivo no trae. */
+        $bajas = [];
+
+        foreach ($existentes as $cod => $e) {
+            if (isset($tocados[$cod])) {
+                continue;
+            }
+
+            $bajas[] = [
+                'cod_provee' => $cod,
+                'nombre' => $e['NOMBRE'],
+                'rubro_economico' => $e['RUBRO_ECONOMICO']
+            ];
+        }
+
+        $resumen['bajas'] = count($bajas);
+
+        $sospechosos = self::criteriosSospechosos($criterios);
+
+        return [
+            'filas' => $filas,
+            'bajas' => $bajas,
+            'resumen' => $resumen,
+            'criterios' => $criterios,
+            'criterios_sospechosos' => $sospechosos,
+            'avisos' => self::avisosImportacion($resumen, count($existentes), $sospechosos)
+        ];
+    }
+
+    /**
+     * Los CRITERIO DISTRIBUCION que parecen un typo.
+     *
+     * NO HAY UNA LISTA DECLARADA DE CRITERIOS VALIDOS, y no se inventa una: son
+     * texto que escribe administracion y declararla seria decidir por ellos cual
+     * es el juego completo.
+     *
+     * Lo que si se puede afirmar sin inventar nada es que UN VALOR QUE APARECE
+     * DOS VECES CUANDO OTRO PARECIDO APARECE DOSCIENTAS es sospechoso. Es
+     * exactamente el caso de '50% ECOMMERC / 50% VENTAS' contra
+     * '50% ECOMMERCE / 50% VENTAS': dos filas contra el resto.
+     *
+     * Se marca y se muestra; no se corrige. Lo que hay que arreglar es la
+     * planilla, y si el importador lo arregla solo nadie se entera nunca.
+     *
+     * Estatica y pura.
+     *
+     * @param array $criterios Mapa criterio => cuantas veces aparece
+     * @param int $umbral Hasta cuantas apariciones se considera sospechoso
+     * @return array Filas ['criterio', 'veces', 'parecido_a']
+     */
+    public static function criteriosSospechosos($criterios, $umbral = 2) {
+        $sospechosos = [];
+
+        foreach ($criterios as $criterio => $veces) {
+            if ($veces > $umbral) {
+                continue;
+            }
+
+            /* Se busca un criterio MUCHO mas frecuente que se le parezca. Sin
+               ese parecido, un criterio raro puede ser simplemente uno que se
+               usa poco, y avisar de todos seria ruido. */
+            $parecido = null;
+            $mejor = 0;
+
+            foreach ($criterios as $otro => $vecesOtro) {
+                if ($otro === $criterio || $vecesOtro <= $veces) {
+                    continue;
+                }
+
+                similar_text(
+                    Planilla::normalizarTitulo($criterio),
+                    Planilla::normalizarTitulo($otro),
+                    $porcentaje
+                );
+
+                if ($porcentaje >= 85 && $vecesOtro > $mejor) {
+                    $parecido = $otro;
+                    $mejor = $vecesOtro;
+                }
+            }
+
+            if ($parecido === null) {
+                continue;
+            }
+
+            $sospechosos[] = [
+                'criterio' => $criterio,
+                'veces' => $veces,
+                'parecido_a' => $parecido,
+                'veces_parecido' => $mejor
+            ];
+        }
+
+        return $sospechosos;
+    }
+
+    /**
+     * Normaliza una fila cruda de la planilla y la valida.
+     *
+     * CADA VALOR NORMALIZADO VIAJA CON SU ORIGINAL. El normalizado es con el que
+     * se agrupa y se decide; el original es lo que hay que mostrar cuando no
+     * matchea, porque "no reconocí FORMA DE PAGO" sin decir que decía la celda
+     * obliga a abrir la planilla y buscar la fila.
+     *
+     * @param array $cruda
+     * @return array
+     */
+    private static function filaImportacion($cruda) {
+        $linea = isset($cruda['linea']) ? intval($cruda['linea']) : 0;
+
+        $fila = [
+            'linea' => $linea,
+            'cod_provee' => '',
+            'nombre' => '',
+            'rubro_economico' => null,
+            'rubro' => null,
+            'centro_costos' => null,
+            'forma_pago' => null,
+            'forma_pago_orig' => '',
+            'forma_desconocida' => false,
+            'plazo_pago' => null,
+            'plazo_dias' => null,
+            'plazo_no_usable' => false,
+            'criterio_distrib' => null,
+            'criterio_orig' => '',
+            'excluido' => false,
+            'estado' => 'ALTA',
+            'motivo' => '',
+            'cambios' => []
+        ];
+
+        $cod = strtoupper(trim(isset($cruda['cod_provee']) ? $cruda['cod_provee'] : ''));
+
+        if ($cod === '') {
+            $fila['estado'] = 'ERROR';
+            $fila['motivo'] = 'La fila no tiene código de proveedor.';
+
+            return $fila;
+        }
+
+        /* El codigo de Tango es VARCHAR(6). Uno mas largo no va a cruzar contra
+           ninguna cuenta a pagar, asi que cargarlo seria cargar basura. */
+        if (strlen($cod) > 6) {
+            $fila['cod_provee'] = $cod;
+            $fila['estado'] = 'ERROR';
+            $fila['motivo'] = 'El código "' . $cod . '" tiene ' . strlen($cod) . ' caracteres '
+                . 'y en Tango son 6 como máximo, así que no va a cruzar contra ninguna '
+                . 'cuenta a pagar.';
+
+            return $fila;
+        }
+
+        $fila['cod_provee'] = $cod;
+        $fila['nombre'] = trim(isset($cruda['nombre']) ? $cruda['nombre'] : '');
+
+        $fila['rubro_economico'] = self::textoONull($cruda, 'rubro_economico');
+        $fila['rubro'] = self::textoONull($cruda, 'rubro');
+        $fila['centro_costos'] = self::textoONull($cruda, 'centro_costos');
+        $fila['excluido'] = self::esExcluido($fila['rubro_economico']);
+
+        /* La forma de pago se normaliza contra la lista declarada SIN PERDER el
+           original: un 'echeq' en minuscula matchea contra ECHEQ; un valor que
+           no matchea se guarda igual y se muestra. */
+        $forma = Planilla::normalizarContra(
+            isset($cruda['forma_pago']) ? $cruda['forma_pago'] : '', self::FORMAS_PAGO);
+
+        $fila['forma_pago'] = $forma['normalizado'];
+        $fila['forma_pago_orig'] = $forma['original'];
+        $fila['forma_desconocida'] = ($forma['original'] !== '' && $forma['normalizado'] === null);
+
+        $fila['plazo_pago'] = self::textoONull($cruda, 'plazo_pago');
+        $fila['plazo_dias'] = self::plazoEnDias($fila['plazo_pago']);
+
+        /* Un plazo que no se puede llevar a dias NO es un error: DEBITO es un
+           plazo legitimo que simplemente no dice cuando. Se cuenta para el
+           resumen, porque es lo que explica que el tercer escalon de la
+           jerarquia de fecha aplique a pocos proveedores. */
+        $fila['plazo_no_usable'] = ($fila['plazo_pago'] !== null && $fila['plazo_dias'] === null);
+
+        $criterio = trim(isset($cruda['criterio_distrib']) ? $cruda['criterio_distrib'] : '');
+        $fila['criterio_orig'] = $criterio;
+        $fila['criterio_distrib'] = ($criterio === '') ? null : $criterio;
+
+        return $fila;
+    }
+
+    /** Un campo de texto de la planilla, o null si vino vacio */
+    private static function textoONull($cruda, $campo) {
+        $v = trim(isset($cruda[$campo]) ? (string) $cruda[$campo] : '');
+
+        return ($v === '') ? null : $v;
+    }
+
+    /**
+     * Compara una fila del archivo contra la que ya esta cargada.
+     *
+     * DICE QUE CAMBIA, CAMPO POR CAMPO. Un "cambió" sin decir qué obliga a
+     * abrir las dos versiones para entender si el cambio es el que se esperaba.
+     *
+     * @param array $fila
+     * @param array $existente
+     * @return array
+     */
+    private static function compararContraExistente($fila, $existente) {
+        $comparar = [
+            'nombre' => 'NOMBRE',
+            'rubro_economico' => 'RUBRO_ECONOMICO',
+            'rubro' => 'RUBRO',
+            'centro_costos' => 'CENTRO_COSTOS',
+            'forma_pago' => 'FORMA_PAGO',
+            'plazo_pago' => 'PLAZO_PAGO',
+            'criterio_distrib' => 'CRITERIO_DISTRIB'
+        ];
+
+        $cambios = [];
+
+        foreach ($comparar as $campo => $columna) {
+            $nuevo = $fila[$campo];
+            $viejo = isset($existente[$columna]) ? $existente[$columna] : null;
+
+            // Se comparan como texto: null y '' son lo mismo para el usuario.
+            if (trim((string) $nuevo) === trim((string) $viejo)) {
+                continue;
+            }
+
+            $cambios[] = [
+                'campo' => $columna,
+                'antes' => $viejo,
+                'ahora' => $nuevo
+            ];
+        }
+
+        if (empty($cambios)) {
+            $fila['estado'] = 'SIN_CAMBIOS';
+            $fila['motivo'] = 'Ya estaba cargado igual.';
+
+            return $fila;
+        }
+
+        $fila['estado'] = 'CAMBIO';
+        $fila['cambios'] = $cambios;
+        $fila['motivo'] = count($cambios) . ' campo(s) cambian.';
+
+        return $fila;
+    }
+
+    /**
+     * Los avisos del resumen de importacion.
+     *
+     * Son los que hacen que la previsualizacion sirva para decidir y no solo
+     * para mirar. Estaticos y puros.
+     *
+     * @param array $resumen
+     * @param int $cuantosHabia Proveedores vigentes antes de importar
+     * @return array
+     */
+    private static function avisosImportacion($resumen, $cuantosHabia, $sospechosos = []) {
+        $avisos = [];
+
+        foreach ($sospechosos as $s) {
+            $avisos[] = 'El criterio de distribución "' . $s['criterio'] . '" aparece '
+                . $s['veces'] . ' vez/veces, y se parece mucho a "' . $s['parecido_a']
+                . '", que aparece ' . $s['veces_parecido'] . '. Probablemente sea un error de '
+                . 'tipeo en la planilla. Se guarda tal como vino: corregilo allá.';
+        }
+
+        if ($resumen['errores'] > 0) {
+            $avisos[] = $resumen['errores'] . ' fila(s) no se pueden cargar y quedan afuera. '
+                . 'El resto se importa igual: mirá el motivo de cada una.';
+        }
+
+        /* UNA BAJA MASIVA CASI SIEMPRE ES UNA PLANILLA RECORTADA. Si el archivo
+           trae menos de la mitad de lo que hay cargado, lo mas probable es que
+           alguien exporto un filtro y no el maestro entero. */
+        if ($resumen['bajas'] > 0 && $cuantosHabia > 0
+            && $resumen['bajas'] > ($cuantosHabia / 2)) {
+            $avisos[] = 'ATENCIÓN: el archivo daría de baja ' . $resumen['bajas']
+                . ' de los ' . $cuantosHabia . ' proveedores cargados. ¿Estás importando el '
+                . 'maestro completo o una parte filtrada? Revisá la lista de bajas antes de '
+                . 'confirmar.';
+        } elseif ($resumen['bajas'] > 0) {
+            $avisos[] = $resumen['bajas'] . ' proveedor(es) están cargados y el archivo no los '
+                . 'trae. Se darían de baja (baja lógica: quedan en el historial).';
+        }
+
+        if ($resumen['forma_desconocida'] > 0) {
+            $avisos[] = $resumen['forma_desconocida'] . ' fila(s) tienen una FORMA DE PAGO que '
+                . 'no está en la lista de válidas. Se guardan tal como vinieron, pero no se '
+                . 'van a poder usar como valor por defecto al importar pagos. Corregilas en la '
+                . 'planilla: el importador no las arregla solo, a propósito.';
+        }
+
+        if ($resumen['sin_rubro'] > 0) {
+            $avisos[] = $resumen['sin_rubro'] . ' fila(s) no tienen RUBRO ECONÓMICO. Esos '
+                . 'proveedores se cargan igual, pero su deuda no se va a poder abrir por rubro '
+                . 'en el tablero.';
+        }
+
+        if ($resumen['plazo_no_usable'] > 0) {
+            $avisos[] = $resumen['plazo_no_usable'] . ' fila(s) tienen un PLAZO DE PAGO que no '
+                . 'se puede llevar a días (DEBITO, por ejemplo). No es un error: para esos '
+                . 'proveedores manda la fecha de vencimiento del comprobante.';
+        }
+
+        return $avisos;
+    }
+
+    /**
+     * Aplica una importacion ya confirmada.
+     *
+     * TODO EN UNA TRANSACCION. Si se diera de baja el maestro viejo y fallara el
+     * alta del nuevo, el tablero se quedaria sin ninguna clasificacion y nadie
+     * sabria por que.
+     *
+     * NO HAY BAJA FISICA: lo reemplazado queda con VIGENTE = 0 y su FECHA_BAJA.
+     * El historial es lo unico que explica por que un comprobante se clasificaba
+     * distinto la semana pasada.
+     *
+     * LAS FILAS EN ERROR NO SE TOCAN. Se importa lo que se pueda; parar todo por
+     * una fila mala obligaria a corregir la planilla entera antes de poder
+     * cargar las mil doscientas que estan bien.
+     *
+     * @param array $comparacion Lo que devolvio compararImportacion()
+     * @param bool $aplicarBajas Si se dan de baja los que el archivo no trae
+     * @param string|null $usuario
+     * @return array ['altas', 'cambios', 'bajas']
+     */
+    public function aplicarImportacion($comparacion, $aplicarBajas, $usuario = null) {
+        if (!$this->tablaCreada()) {
+            throw new Exception('Todavía no existe la tabla del maestro. '
+                . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
+        }
+
+        $cid = $this->conectar();
+        $aplicadas = ['altas' => 0, 'cambios' => 0, 'bajas' => 0];
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción'));
+        }
+
+        try {
+            foreach ($comparacion['filas'] as $fila) {
+                if ($fila['estado'] !== 'ALTA' && $fila['estado'] !== 'CAMBIO') {
+                    continue;
+                }
+
+                // Un CAMBIO es una baja mas un alta: asi queda el historial.
+                if ($fila['estado'] === 'CAMBIO') {
+                    $this->bajaVigente($cid, $fila['cod_provee']);
+                    $aplicadas['cambios']++;
+                } else {
+                    $aplicadas['altas']++;
+                }
+
+                $this->insertar($cid, $fila, $usuario);
+            }
+
+            if ($aplicarBajas) {
+                foreach ($comparacion['bajas'] as $baja) {
+                    $this->bajaVigente($cid, $baja['cod_provee']);
+                    $aplicadas['bajas']++;
+                }
+            }
+
+            sqlsrv_commit($cid);
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        // El mapa cacheado quedo viejo.
+        $this->mapa = null;
+
+        return $aplicadas;
+    }
+
+    /** Marca VIGENTE = 0 la fila vigente de un proveedor */
+    private function bajaVigente($cid, $codProvee) {
+        $stmt = sqlsrv_query($cid,
+            "UPDATE dbo." . self::TABLA . "
+             SET VIGENTE = 0, FECHA_BAJA = GETDATE()
+             WHERE COD_PROVEE = ? AND VIGENTE = 1",
+            [$codProvee]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al dar de baja el maestro anterior'));
+        }
+
+        sqlsrv_free_stmt($stmt);
+    }
+
+    /** Inserta una fila del maestro */
+    private function insertar($cid, $fila, $usuario) {
+        $stmt = sqlsrv_query($cid,
+            "INSERT INTO dbo." . self::TABLA . "
+                 (COD_PROVEE, NOMBRE, RUBRO_ECONOMICO, RUBRO, CENTRO_COSTOS,
+                  FORMA_PAGO, FORMA_PAGO_ORIG, PLAZO_PAGO, PLAZO_DIAS,
+                  CRITERIO_DISTRIB, CRITERIO_ORIG, VIGENTE, USUARIO)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+            [
+                $fila['cod_provee'],
+                ($fila['nombre'] === '') ? null : mb_substr($fila['nombre'], 0, 120),
+                $fila['rubro_economico'],
+                $fila['rubro'],
+                $fila['centro_costos'],
+                $fila['forma_pago'],
+                ($fila['forma_pago_orig'] === '') ? null : $fila['forma_pago_orig'],
+                $fila['plazo_pago'],
+                $fila['plazo_dias'],
+                $fila['criterio_distrib'],
+                ($fila['criterio_orig'] === '') ? null : $fila['criterio_orig'],
+                $usuario
+            ]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al cargar el proveedor '
+                . $fila['cod_provee']));
+        }
+
+        sqlsrv_free_stmt($stmt);
+    }
+
+    /**
+     * El historial de un proveedor: todas sus versiones, de la mas nueva a la
+     * mas vieja.
+     *
+     * Es lo que explica por que un comprobante se clasificaba distinto antes.
+     *
+     * @param string $codProvee
+     * @return array
+     */
+    public function getHistorial($codProvee) {
+        if (!$this->tablaCreada()) {
+            return [];
+        }
+
+        $cid = $this->conectar();
+
+        $sql = "SELECT ID, COD_PROVEE, NOMBRE, RUBRO_ECONOMICO, RUBRO, CENTRO_COSTOS,
+                       FORMA_PAGO, FORMA_PAGO_ORIG, PLAZO_PAGO, PLAZO_DIAS,
+                       CRITERIO_DISTRIB, VIGENTE, USUARIO, FECHA_IMPORTACION, FECHA_BAJA
+                FROM dbo." . self::TABLA . "
+                WHERE COD_PROVEE = ?
+                ORDER BY ID DESC";
+
+        $stmt = sqlsrv_query($cid, $sql, [strtoupper(trim((string) $codProvee))]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer el historial del proveedor'));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $row['VIGENTE'] = intval($row['VIGENTE']);
+            $row['PLAZO_DIAS'] = ($row['PLAZO_DIAS'] === null) ? null : intval($row['PLAZO_DIAS']);
+            $row['FECHA_IMPORTACION'] = $this->fechaHora($row['FECHA_IMPORTACION']);
+            $row['FECHA_BAJA'] = $this->fechaHora($row['FECHA_BAJA']);
+            $v[] = $row;
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $v;
+    }
+
+    /* ====================================================================
        INFRAESTRUCTURA
        ==================================================================== */
 

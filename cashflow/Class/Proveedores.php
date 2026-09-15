@@ -3,6 +3,7 @@
 require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/Ingresos.php';
 require_once __DIR__ . '/ProveedoresCategorias.php';
+require_once __DIR__ . '/Planilla.php';
 
 /**
  * Proveedores
@@ -556,6 +557,636 @@ class Proveedores {
         return strtoupper(trim((string) $codProvee)) . '|'
              . strtoupper(trim((string) $tComp)) . '|'
              . strtoupper(trim((string) $nComp));
+    }
+
+    /* ====================================================================
+       IMPORTACION DE LOS PAGOS
+
+       La planilla con la que se decide CUANDO se paga cada factura. Es lo que
+       disuelve los ochocientos millones apilados en el primer dia del eje: sin
+       ella, todo lo vencido se dibuja hoy porque no hay otro lugar donde
+       ponerlo.
+
+       Mismo circuito que el maestro y que Cob. Electronicos: plantilla CSV,
+       previsualizacion del diff, y nada se escribe hasta confirmar.
+       ==================================================================== */
+
+    /**
+     * Las columnas de la planilla de pagos, con sus sinonimos.
+     *
+     * EL TIPO DE COMPROBANTE NO ES OBLIGATORIO, y es a proposito: quien arma la
+     * planilla mira una factura y copia su numero, no su tipo. Cuando falta se
+     * deduce de los pendientes del proveedor. Si ese numero existe con dos tipos
+     * distintos -una FAC y una NDI con el mismo numero-, la fila queda en error
+     * pidiendo que se aclare, en lugar de elegir una.
+     *
+     * @return array
+     */
+    public static function columnasImportacion() {
+        return [
+            'cod_provee' => [
+                'titulo' => 'COD_PROVEEDOR',
+                'obligatoria' => true,
+                'ayuda' => 'Código del proveedor en Tango. Hace falta: el número de factura '
+                    . 'solo no identifica un comprobante, porque lo emite el proveedor y dos '
+                    . 'proveedores distintos repiten numeración.',
+                'sinonimos' => ['CODPROVEEDOR', 'COD_PROVEE', 'CODIGO', 'COD_PROVEEDOR',
+                                'PROVEEDOR', 'CODIGOPROVEEDOR']
+            ],
+            'n_comp' => [
+                'titulo' => 'NRO_FACTURA',
+                'obligatoria' => true,
+                'ayuda' => 'Número de comprobante tal como figura en Tango, por ejemplo '
+                    . 'A0000500001731.',
+                'sinonimos' => ['NROFACTURA', 'N_COMP', 'NCOMP', 'NUMERO', 'NROCOMPROBANTE',
+                                'FACTURA', 'COMPROBANTE']
+            ],
+            'fecha_pago' => [
+                'titulo' => 'FECHA_PAGO',
+                'obligatoria' => true,
+                'ayuda' => 'Cuándo se piensa pagar. dd/mm/aaaa o aaaa-mm-dd.',
+                'sinonimos' => ['FECHAPAGO', 'FECHA_PAGO', 'FECHA', 'PAGO', 'FECHADEPAGO']
+            ],
+            'forma_pago' => [
+                'titulo' => 'FORMA_PAGO',
+                'obligatoria' => false,
+                'ayuda' => 'Opcional. Si no viene, se usa la forma habitual del proveedor '
+                    . 'según el maestro. Válidos: '
+                    . implode(', ', ProveedoresCategorias::FORMAS_PAGO) . '.',
+                'sinonimos' => ['FORMAPAGO', 'FORMA_PAGO', 'FORMA', 'MEDIODEPAGO',
+                                'FORMADEPAGO']
+            ],
+            't_comp' => [
+                'titulo' => 'TIPO_COMP',
+                'obligatoria' => false,
+                'ayuda' => 'Opcional (FAC, NDI, NCP...). Si no viene se deduce de los '
+                    . 'pendientes del proveedor.',
+                'sinonimos' => ['TIPOCOMP', 'T_COMP', 'TCOMP', 'TIPO', 'TIPOCOMPROBANTE']
+            ],
+            'observacion' => [
+                'titulo' => 'OBSERVACION',
+                'obligatoria' => false,
+                'ayuda' => 'Opcional, hasta 200 caracteres.',
+                'sinonimos' => ['OBSERVACION', 'OBSERVACIONES', 'NOTAS', 'COMENTARIOS']
+            ]
+        ];
+    }
+
+    /**
+     * La plantilla que se descarga, con filas de ejemplo cargadas.
+     *
+     * Las fechas de ejemplo se calculan sobre hoy para que nunca se vean viejas.
+     *
+     * @param string|null $ejemploFecha 'Y-m-d'
+     * @return string
+     */
+    public static function plantillaCsv($ejemploFecha = null) {
+        $fecha = ($ejemploFecha === null) ? date('Y-m-d') : substr((string) $ejemploFecha, 0, 10);
+        $enUnaSemana = date('d/m/Y', strtotime($fecha . ' +7 day'));
+        $enDosSemanas = date('d/m/Y', strtotime($fecha . ' +14 day'));
+
+        return Planilla::plantillaCsv(self::columnasImportacion(), [
+            ['MTDODI', 'A0000500001731', $enUnaSemana, 'TRANSFERENCIA', '', 'Ejemplo: borrar'],
+            ['OGCOAN', 'A0000300001234', $enDosSemanas, 'ECHEQ', 'FAC',
+             'Ejemplo: con tipo de comprobante']
+        ]);
+    }
+
+    /**
+     * Compara lo que trae el archivo contra los pendientes y contra lo ya
+     * cargado, y dice QUE CAMBIARIA. No escribe nada.
+     *
+     * Helper PURO: recibe las filas parseadas, los pendientes y los pagos
+     * cargados. Se prueba entero sin base y sin archivos.
+     *
+     * ESTADOS
+     *   ALTA         el comprobante no tenia fecha cargada
+     *   CAMBIO       la tenia y es otra; 'antes' dice cual
+     *   SIN_CAMBIOS  ya estaba con esa fecha y esa forma
+     *   ERROR        no se puede cargar; 'motivo' dice por que
+     *
+     * LO QUE NO MATCHEA CONTRA NINGUN PENDIENTE ES UN ERROR VISIBLE, no una
+     * fila que se ignora. Un comprobante que no esta en el listado puede ser un
+     * numero mal tipeado, un proveedor equivocado, o una factura que ya se pago
+     * -y eso ultimo es informacion, no un descarte-. El motivo distingue los
+     * tres casos, porque se arreglan distinto.
+     *
+     * @param array $filasArchivo Filas de Planilla::parsear()
+     * @param array $pendientes Filas de getPendientes()
+     * @param array $pagos Mapa de getPagos()
+     * @param string|null $hoy 'Y-m-d' para validar que la fecha no sea absurda
+     * @return array ['filas', 'resumen', 'avisos']
+     */
+    public static function compararImportacion($filasArchivo, $pendientes, $pagos, $hoy = null) {
+        $hoyStr = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+
+        /* Los pendientes, indexados de dos formas: por clave completa -cuando la
+           planilla trae el tipo- y por (proveedor, numero) para poder deducirlo
+           cuando no viene. */
+        $porClave = [];
+        $porNumero = [];
+
+        foreach (is_array($pendientes) ? $pendientes : [] as $p) {
+            $cod = strtoupper(trim((string) $p['COD_PROVEE']));
+            $tComp = strtoupper(trim((string) $p['T_COMP']));
+            $nComp = strtoupper(trim((string) $p['N_COMP']));
+
+            $porClave[self::clavePago($cod, $tComp, $nComp)] = $p;
+            $porNumero[$cod . '|' . $nComp][] = $p;
+        }
+
+        $pagos = is_array($pagos) ? $pagos : [];
+        $filas = [];
+        $vistas = [];
+
+        $resumen = [
+            'altas' => 0, 'cambios' => 0, 'sin_cambios' => 0, 'errores' => 0,
+            'importe_con_fecha' => 0.0, 'vencidos_resueltos' => 0,
+            'forma_desconocida' => 0
+        ];
+
+        foreach (is_array($filasArchivo) ? $filasArchivo : [] as $cruda) {
+            $fila = self::filaPago($cruda, $porClave, $porNumero, $hoyStr);
+
+            if ($fila['estado'] !== 'ERROR') {
+                $clave = self::clavePago($fila['cod_provee'], $fila['t_comp'], $fila['n_comp']);
+
+                /* Dos filas para el mismo comprobante no se colapsan: cual vale
+                   lo decide quien armo la planilla, no el importador. */
+                if (isset($vistas[$clave])) {
+                    $fila['estado'] = 'ERROR';
+                    $fila['motivo'] = 'Este comprobante ya aparece en la línea '
+                        . $vistas[$clave] . ' con otra fecha. Dejá una sola fila por '
+                        . 'comprobante y volvé a importar.';
+                } else {
+                    $vistas[$clave] = $fila['linea'];
+                    $existente = isset($pagos[$clave]) ? $pagos[$clave] : null;
+
+                    if ($existente === null) {
+                        $fila['estado'] = 'ALTA';
+                        $fila['motivo'] = 'No tenía fecha de pago cargada.';
+                    } elseif ($existente['FECHA_PAGO'] === $fila['fecha_pago']
+                        && trim((string) $existente['FORMA_PAGO']) === trim((string) $fila['forma_pago'])) {
+                        $fila['estado'] = 'SIN_CAMBIOS';
+                        $fila['motivo'] = 'Ya estaba cargado igual.';
+                    } else {
+                        $fila['estado'] = 'CAMBIO';
+                        $fila['antes'] = [
+                            'fecha_pago' => $existente['FECHA_PAGO'],
+                            'forma_pago' => $existente['FORMA_PAGO']
+                        ];
+                        $fila['motivo'] = 'Cambia la fecha cargada'
+                            . ($existente['FECHA_PAGO'] !== null
+                                ? ' (estaba en ' . self::formatoCorto($existente['FECHA_PAGO']) . ')'
+                                : '') . '.';
+
+                        /* Pisar una conciliada es distinto: Tango ya dijo que
+                           ese comprobante se pago. Se permite -puede ser una
+                           correccion- pero se marca. */
+                        if ($existente['ESTADO'] === 'CONCILIADO') {
+                            $fila['motivo'] .= ' OJO: este comprobante ya figura CONCILIADO '
+                                . 'contra Tango, así que se pagó de verdad. Cambiarle la '
+                                . 'fecha prevista no cambia eso.';
+                        }
+                    }
+                }
+            }
+
+            if ($fila['estado'] !== 'ERROR') {
+                $resumen['importe_con_fecha'] += $fila['importe_pendiente'];
+
+                if ($fila['estaba_vencido']) {
+                    $resumen['vencidos_resueltos']++;
+                }
+
+                if ($fila['forma_desconocida']) {
+                    $resumen['forma_desconocida']++;
+                }
+            }
+
+            switch ($fila['estado']) {
+                case 'ALTA': $resumen['altas']++; break;
+                case 'CAMBIO': $resumen['cambios']++; break;
+                case 'SIN_CAMBIOS': $resumen['sin_cambios']++; break;
+                case 'ERROR': $resumen['errores']++; break;
+            }
+
+            $filas[] = $fila;
+        }
+
+        return [
+            'filas' => $filas,
+            'resumen' => $resumen,
+            'avisos' => self::avisosImportacionPagos($resumen)
+        ];
+    }
+
+    /**
+     * Normaliza y valida una fila de la planilla de pagos contra los pendientes.
+     *
+     * @param array $cruda
+     * @param array $porClave Pendientes por clave completa
+     * @param array $porNumero Pendientes por (proveedor, numero)
+     * @param string $hoy
+     * @return array
+     */
+    private static function filaPago($cruda, $porClave, $porNumero, $hoy) {
+        $fila = [
+            'linea' => isset($cruda['linea']) ? intval($cruda['linea']) : 0,
+            'cod_provee' => '',
+            't_comp' => '',
+            'n_comp' => '',
+            'fecha_pago' => null,
+            'forma_pago' => null,
+            'forma_pago_orig' => '',
+            'forma_desconocida' => false,
+            'observacion' => null,
+            'razon_social' => '',
+            'importe_pendiente' => 0.0,
+            'fecha_vto' => null,
+            'estaba_vencido' => false,
+            'estado' => 'ALTA',
+            'motivo' => '',
+            'antes' => null
+        ];
+
+        $cod = strtoupper(trim(isset($cruda['cod_provee']) ? $cruda['cod_provee'] : ''));
+        $nComp = strtoupper(trim(isset($cruda['n_comp']) ? $cruda['n_comp'] : ''));
+        $tComp = strtoupper(trim(isset($cruda['t_comp']) ? $cruda['t_comp'] : ''));
+
+        $fila['cod_provee'] = $cod;
+        $fila['n_comp'] = $nComp;
+        $fila['t_comp'] = $tComp;
+
+        if ($cod === '' || $nComp === '') {
+            $fila['estado'] = 'ERROR';
+            $fila['motivo'] = 'Falta el código de proveedor o el número de comprobante.';
+
+            return $fila;
+        }
+
+        /* La fecha va antes que el cruce: sin fecha no hay nada que cargar,
+           aunque el comprobante exista. */
+        $fecha = Planilla::fecha(isset($cruda['fecha_pago']) ? $cruda['fecha_pago'] : '');
+
+        if ($fecha === null) {
+            $fila['estado'] = 'ERROR';
+            $fila['motivo'] = 'La fecha de pago no se entiende: "'
+                . trim((string) (isset($cruda['fecha_pago']) ? $cruda['fecha_pago'] : ''))
+                . '". Usá dd/mm/aaaa o aaaa-mm-dd.';
+
+            return $fila;
+        }
+
+        $fila['fecha_pago'] = $fecha;
+
+        /* EL CRUCE CONTRA LOS PENDIENTES. Tres desenlaces, y cada uno se arregla
+           distinto, asi que el motivo los distingue. */
+        $pendiente = null;
+
+        if ($tComp !== '') {
+            $clave = self::clavePago($cod, $tComp, $nComp);
+            $pendiente = isset($porClave[$clave]) ? $porClave[$clave] : null;
+
+            if ($pendiente === null) {
+                $fila['estado'] = 'ERROR';
+                $fila['motivo'] = 'No hay ningún comprobante pendiente ' . $tComp . ' '
+                    . $nComp . ' del proveedor ' . $cod . '. Revisá el tipo, el número y el '
+                    . 'código; si ya se pagó, no hace falta cargarle fecha.';
+
+                return $fila;
+            }
+        } else {
+            $candidatos = isset($porNumero[$cod . '|' . $nComp]) ? $porNumero[$cod . '|' . $nComp] : [];
+
+            /* Un comprobante en cuotas tiene VARIOS vencimientos y aparece
+               varias veces en los pendientes, pero es UN comprobante: eso no es
+               ambiguedad. Lo que si lo es son dos TIPOS distintos con el mismo
+               numero. */
+            $tipos = [];
+
+            foreach ($candidatos as $c) {
+                $tipos[strtoupper(trim((string) $c['T_COMP']))] = true;
+            }
+
+            if (count($tipos) === 0) {
+                $fila['estado'] = 'ERROR';
+                $fila['motivo'] = 'El proveedor ' . $cod . ' no tiene ningún comprobante '
+                    . $nComp . ' pendiente. Puede ser un número mal tipeado, un proveedor '
+                    . 'equivocado, o una factura que ya se pagó.';
+
+                return $fila;
+            }
+
+            if (count($tipos) > 1) {
+                $fila['estado'] = 'ERROR';
+                $fila['motivo'] = 'El proveedor ' . $cod . ' tiene el comprobante ' . $nComp
+                    . ' con más de un tipo (' . implode(', ', array_keys($tipos)) . '). '
+                    . 'Agregá la columna TIPO_COMP para aclarar cuál es.';
+
+                return $fila;
+            }
+
+            $fila['t_comp'] = key($tipos);
+            $pendiente = $candidatos[0];
+        }
+
+        $fila['razon_social'] = isset($pendiente['RAZON_SOC']) ? $pendiente['RAZON_SOC'] : '';
+        $fila['fecha_vto'] = isset($pendiente['FECHA_VTO']) ? $pendiente['FECHA_VTO'] : null;
+
+        /* El importe del comprobante es la SUMA de sus vencimientos pendientes:
+           la fecha de pago se carga por comprobante, no por cuota, asi que lo
+           que se esta reubicando es todo lo que se le debe. */
+        $candidatos = isset($porNumero[$cod . '|' . $nComp]) ? $porNumero[$cod . '|' . $nComp] : [$pendiente];
+
+        foreach ($candidatos as $c) {
+            if (strtoupper(trim((string) $c['T_COMP'])) !== $fila['t_comp']) {
+                continue;
+            }
+
+            $fila['importe_pendiente'] += floatval($c['IMPORTE_PENDIENTE']);
+
+            if (!empty($c['SIN_FECHA_CARGADA'])) {
+                $fila['estaba_vencido'] = true;
+            }
+        }
+
+        /* La forma de pago: la de la planilla, y si no vino, la habitual del
+           proveedor segun el maestro. Ver la nota de columnasImportacion(). */
+        $forma = ProveedoresCategorias::normalizarFormaPago(
+            isset($cruda['forma_pago']) ? $cruda['forma_pago'] : '');
+
+        if ($forma['original'] === '') {
+            $fila['forma_pago'] = isset($pendiente['FORMA_PAGO']) ? $pendiente['FORMA_PAGO'] : null;
+        } else {
+            $fila['forma_pago'] = $forma['normalizado'];
+            $fila['forma_pago_orig'] = $forma['original'];
+            $fila['forma_desconocida'] = ($forma['normalizado'] === null);
+        }
+
+        $obs = trim(isset($cruda['observacion']) ? (string) $cruda['observacion'] : '');
+        $fila['observacion'] = ($obs === '') ? null : mb_substr($obs, 0, 200);
+
+        return $fila;
+    }
+
+    /**
+     * Los avisos del resumen de importacion de pagos.
+     *
+     * EL PRIMERO ES EL QUE IMPORTA: cuanto de lo vencido queda resuelto. Es la
+     * razon de ser de esta importacion, y verlo antes de confirmar es lo que
+     * permite saber si la planilla cubrio lo que tenia que cubrir.
+     *
+     * Estaticos y puros.
+     *
+     * @param array $resumen
+     * @return array
+     */
+    private static function avisosImportacionPagos($resumen) {
+        $avisos = [];
+
+        if ($resumen['vencidos_resueltos'] > 0) {
+            $avisos[] = $resumen['vencidos_resueltos'] . ' comprobante(s) que hoy están '
+                . 'apilados en el primer día del eje por estar vencidos sin fecha pasan a '
+                . 'tener una. Es lo que esta importación viene a resolver.';
+        }
+
+        if ($resumen['errores'] > 0) {
+            $avisos[] = $resumen['errores'] . ' fila(s) no se pueden cargar y quedan afuera. '
+                . 'El resto se importa igual: mirá el motivo de cada una, porque no todas '
+                . 'fallan por lo mismo.';
+        }
+
+        if ($resumen['forma_desconocida'] > 0) {
+            $avisos[] = $resumen['forma_desconocida'] . ' fila(s) traen una forma de pago que '
+                . 'no está en la lista de válidas. Se guarda tal como vino.';
+        }
+
+        if ($resumen['altas'] === 0 && $resumen['cambios'] === 0 && $resumen['errores'] === 0) {
+            $avisos[] = 'El archivo no cambia nada: todo lo que trae ya estaba cargado igual.';
+        }
+
+        return $avisos;
+    }
+
+    /**
+     * Aplica una importacion de pagos ya confirmada.
+     *
+     * TODO EN UNA TRANSACCION, y solo las filas ALTA y CAMBIO: las que estan en
+     * error no se tocan. Importar lo que se pueda es mejor que parar todo por
+     * una fila mala, que obligaria a corregir la planilla entera antes de poder
+     * cargar las buenas.
+     *
+     * @param array $comparacion Lo que devolvio compararImportacion()
+     * @param string|null $usuario
+     * @return array ['altas', 'cambios']
+     */
+    public function aplicarImportacion($comparacion, $usuario = null) {
+        if (!$this->tablaCreada()) {
+            throw new Exception('Todavía no existe la tabla de fechas de pago. '
+                . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
+        }
+
+        $cid = $this->conectar();
+        $aplicadas = ['altas' => 0, 'cambios' => 0];
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción'));
+        }
+
+        try {
+            foreach ($comparacion['filas'] as $fila) {
+                if ($fila['estado'] !== 'ALTA' && $fila['estado'] !== 'CAMBIO') {
+                    continue;
+                }
+
+                $this->guardarPago(
+                    $cid,
+                    $fila['cod_provee'],
+                    $fila['t_comp'],
+                    $fila['n_comp'],
+                    $fila['fecha_pago'],
+                    $fila['forma_pago'],
+                    $fila['forma_pago_orig'],
+                    $fila['observacion'],
+                    'ARCHIVO',
+                    $usuario
+                );
+
+                $aplicadas[$fila['estado'] === 'ALTA' ? 'altas' : 'cambios']++;
+            }
+
+            sqlsrv_commit($cid);
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return $aplicadas;
+    }
+
+    /**
+     * Guarda la fecha de pago de un comprobante, de a uno.
+     *
+     * Es lo que usa la edicion fila por fila de la grilla. La importacion masiva
+     * pasa por el mismo metodo privado, asi que las dos escriben igual.
+     *
+     * @param string $codProvee
+     * @param string $tComp
+     * @param string $nComp
+     * @param string $fecha 'Y-m-d'
+     * @param string|null $formaPago
+     * @param string|null $observacion
+     * @param string|null $usuario
+     * @return array ['fecha', 'forma']
+     */
+    public function savePago($codProvee, $tComp, $nComp, $fecha, $formaPago = null,
+                             $observacion = null, $usuario = null) {
+        if (!$this->tablaCreada()) {
+            throw new Exception('Todavía no existe la tabla de fechas de pago. '
+                . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
+        }
+
+        $cod = strtoupper(trim((string) $codProvee));
+        $t = strtoupper(trim((string) $tComp));
+        $n = strtoupper(trim((string) $nComp));
+
+        if ($cod === '' || $t === '' || $n === '') {
+            throw new Exception('Falta el proveedor o el comprobante al que corresponde la '
+                . 'fecha de pago.');
+        }
+
+        $f = self::validarFechaPago($fecha);
+        $forma = ProveedoresCategorias::normalizarFormaPago($formaPago);
+
+        $this->guardarPago($this->conectar(), $cod, $t, $n, $f,
+            $forma['normalizado'], $forma['original'],
+            ($observacion === null || trim((string) $observacion) === '')
+                ? null : mb_substr(trim((string) $observacion), 0, 200),
+            'MANUAL', $usuario);
+
+        return ['fecha' => $f, 'forma' => $forma['normalizado']];
+    }
+
+    /**
+     * Borra la fecha de pago de un comprobante: vuelve a valer el vencimiento.
+     *
+     * ACA SI HAY BORRADO FISICO, igual que en la fecha manual de Cobranzas FR y
+     * por el mismo motivo: la fila no es un importe ni un dato historico, es un
+     * override puntual de un calculo, y su baja logica seria indistinguible de
+     * no tenerla. Lo que este modulo no borra son las categorias del maestro,
+     * que si explican como se clasificaba antes.
+     *
+     * @param string $codProvee
+     * @param string $tComp
+     * @param string $nComp
+     * @return bool
+     */
+    public function deletePago($codProvee, $tComp, $nComp) {
+        if (!$this->tablaCreada()) {
+            throw new Exception('Todavía no existe la tabla de fechas de pago.');
+        }
+
+        $stmt = sqlsrv_query($this->conectar(),
+            "DELETE FROM dbo." . self::TABLA_PAGO . "
+             WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?",
+            [strtoupper(trim((string) $codProvee)),
+             strtoupper(trim((string) $tComp)),
+             strtoupper(trim((string) $nComp))]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al borrar la fecha de pago'));
+        }
+
+        $filas = sqlsrv_rows_affected($stmt);
+        sqlsrv_free_stmt($stmt);
+
+        return ($filas > 0);
+    }
+
+    /**
+     * Valida y normaliza una fecha de pago.
+     *
+     * A DIFERENCIA DE LA FECHA DE COBRO DE COBRANZAS FR, ACA SI SE ACEPTAN
+     * FECHAS PASADAS. Alla una fecha vieja hacia desaparecer la factura del
+     * listado sin aviso; aca el listado muestra todo lo pendiente sin techo de
+     * antiguedad, asi que una fecha de la semana pasada es una decision
+     * legitima -se penso pagar y no se pago- y la factura sigue a la vista,
+     * marcada como vencida.
+     *
+     * Estatica y pura.
+     *
+     * @param mixed $fecha
+     * @return string 'Y-m-d'
+     */
+    public static function validarFechaPago($fecha) {
+        $f = Horizonte::normalizarFecha($fecha);
+
+        if ($f === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $f)) {
+            throw new Exception('La fecha de pago no es una fecha válida.');
+        }
+
+        list($a, $m, $d) = array_map('intval', explode('-', $f));
+
+        if (!checkdate($m, $d, $a)) {
+            throw new Exception('La fecha de pago no existe en el calendario.');
+        }
+
+        return $f;
+    }
+
+    /**
+     * Escribe una fecha de pago. Un UPDATE que no toca nada y despues un INSERT:
+     * la unicidad es (COD_PROVEE, T_COMP, N_COMP), asi que no puede duplicar.
+     *
+     * NO PISA EL ESTADO NI LA FECHA REAL DE CANCELACION. Si el comprobante ya
+     * estaba conciliado, cambiarle la prevision no lo desconcilia: Tango es la
+     * verdad sobre el pago y esto es una prevision.
+     */
+    private function guardarPago($cid, $cod, $t, $n, $fecha, $forma, $formaOrig,
+                                 $observacion, $origen, $usuario) {
+        $sql = "UPDATE dbo." . self::TABLA_PAGO . "
+                SET FECHA_PAGO = ?, FORMA_PAGO = ?, FORMA_PAGO_ORIG = ?, OBSERVACION = ?,
+                    ORIGEN = ?, USUARIO = ?, FECHA_MOD = GETDATE()
+                WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?";
+
+        $stmt = sqlsrv_query($cid, $sql,
+            [$fecha, $forma, ($formaOrig === '') ? null : $formaOrig, $observacion,
+             $origen, $usuario, $cod, $t, $n]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al guardar la fecha de pago'));
+        }
+
+        $filas = sqlsrv_rows_affected($stmt);
+        sqlsrv_free_stmt($stmt);
+
+        if ($filas > 0) {
+            return;
+        }
+
+        $sql = "INSERT INTO dbo." . self::TABLA_PAGO . "
+                    (COD_PROVEE, T_COMP, N_COMP, FECHA_PAGO, FORMA_PAGO, FORMA_PAGO_ORIG,
+                     OBSERVACION, ESTADO, ORIGEN, USUARIO)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'PREVISTO', ?, ?)";
+
+        $stmt = sqlsrv_query($cid, $sql,
+            [$cod, $t, $n, $fecha, $forma, ($formaOrig === '') ? null : $formaOrig,
+             $observacion, $origen, $usuario]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al guardar la fecha de pago'));
+        }
+
+        sqlsrv_free_stmt($stmt);
+    }
+
+    /** dd/mm/aaaa, para los mensajes */
+    private static function formatoCorto($fecha) {
+        $f = Horizonte::normalizarFecha($fecha);
+
+        return ($f === null) ? '' : date('d/m/Y', strtotime($f));
     }
 
     /* ====================================================================
