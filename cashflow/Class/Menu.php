@@ -144,7 +144,7 @@ class Menu {
             'icono' => 'fa-truck',
             'abierta' => false,
             'items' => [
-                ['tab' => 'proveedores_locales', 'nombre' => 'Proveedores Locales', 'icono' => 'fa-store',         'estado' => self::PENDIENTE],
+                ['tab' => 'proveedores_locales', 'nombre' => 'Proveedores Locales', 'icono' => 'fa-store',         'estado' => self::DATOS, 'encabezado' => 'Cuentas a Pagar Locales'],
                 ['tab' => 'cronograma',          'nombre' => 'Cronograma',          'icono' => 'fa-calendar-days', 'estado' => self::PENDIENTE],
                 ['tab' => 'logistica_local',     'nombre' => 'Logística Local',     'icono' => 'fa-truck-fast',    'estado' => self::PENDIENTE]
             ]
