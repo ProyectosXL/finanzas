@@ -198,13 +198,42 @@ class CashflowRegistry {
             'series' => ['COBRANZA' => 'Cobranza proyectada de mayoristas']
         ],
 
+        /* Las cuentas a pagar locales, que salen de Tango (CPA04 + CPA54 + CPA01
+           con las imputaciones de CPA05). NO incluye a los proveedores del
+           exterior: esos entran por COMEX_PROV_EXT y contarlos aca los duplicaria.
+
+           LAS SERIES POR RUBRO SON DINAMICAS y por eso esta entrada declara
+           'series_extra'. Cuales existen depende de lo que administracion haya
+           cargado en el maestro de proveedores, que es un DATO: escribirlas en
+           esta lista obligaria a tocar codigo cada vez que aparece un rubro
+           nuevo, que es exactamente lo que este diseño evita en todo lo demas.
+
+           Con las cuatro series fijas ya se puede sacar a los "Excluidos" -los
+           socios- del tablero apuntando la fila a PAGOS_OPERATIVOS desde
+           Parametros. Las de rubro sirven para partir la fila en alquileres,
+           impuestos, logistica y mercaderia cuando el maestro este cargado. */
         'PROV_LOCALES' => [
             'nombre' => 'Proveedores Locales',
-            'descripcion' => 'Pagos a proveedores del mercado local',
+            'descripcion' => 'Cuentas a pagar a proveedores del mercado local, con su fecha '
+                . 'de pago prevista. Sale de Tango y excluye a los del exterior',
+            'archivo' => 'Providers/ProveedoresProvider.php',
+            'clase' => 'ProveedoresProvider',
             'moneda' => 'ARS',
-            'disponible' => false,
+            'disponible' => true,
             'tab' => 'proveedores_locales',
-            'series' => ['PAGOS' => 'Pagos a proveedores locales']
+            'series' => [
+                'PAGOS' => 'Cuentas a pagar locales, todas',
+                'PAGOS_OPERATIVOS' => 'Cuentas a pagar, sin los rubros excluidos',
+                'PAGOS_EXCLUIDOS' => 'Solo los rubros excluidos (socios y no comerciales)',
+                'PAGOS_SIN_RUBRO' => 'Solo los proveedores que no estan en el maestro'
+            ],
+            'series_extra' => ['ProveedoresProvider', 'seriesDeRubro'],
+            // El total y cualquiera de sus aperturas no pueden estar activos a
+            // la vez: seria contar dos veces el mismo importe. Las de rubro se
+            // agregan a esta lista en resolverExtra().
+            'componentes' => [
+                'PAGOS' => ['PAGOS_OPERATIVOS', 'PAGOS_EXCLUIDOS', 'PAGOS_SIN_RUBRO']
+            ]
         ],
 
         'LOGISTICA' => [
@@ -367,12 +396,103 @@ class CashflowRegistry {
      *
      * @return array Lista de entradas, cada una con 'codigo'
      */
+    /**
+     * @var array|null Cache de las series dinamicas ya resueltas, por codigo de
+     *      proveedor. Se resuelven una vez por pedido.
+     */
+    private static $extra = null;
+
+    /**
+     * SERIES QUE SON DATOS Y NO CODIGO.
+     *
+     * Casi todos los proveedores tienen una lista fija de series y va escrita
+     * arriba. Cuentas a Pagar Locales no: sus series por rubro salen del maestro
+     * de proveedores, que carga administracion desde una planilla. Escribirlas
+     * en la lista obligaria a tocar codigo cada vez que aparece un rubro nuevo,
+     * que es justo lo que este registro existe para evitar.
+     *
+     * Una entrada puede declarar 'series_extra' => [clase, metodo estatico], y
+     * ese metodo devuelve el mapa codigoSerie => descripcion que corresponda
+     * HOY.
+     *
+     * SE RESUELVE UNA SOLA VEZ POR PEDIDO. El editor de estructura y el
+     * validador piden los proveedores varias veces; sin el cache, cada una
+     * consultaria el maestro.
+     *
+     * NO PUEDE LANZAR. Si la tabla del maestro no existe todavia o la base no
+     * responde, el proveedor se queda con sus series fijas y el editor sigue
+     * abriendo. Un registro que revienta deja sin pantalla a doce modulos que no
+     * tienen nada que ver.
+     *
+     * @param string $codigo
+     * @param array $meta
+     * @return array El meta con sus series y componentes ya completos
+     */
+    private static function resolverExtra($codigo, $meta) {
+        if (empty($meta['series_extra'])) {
+            return $meta;
+        }
+
+        if (self::$extra === null) {
+            self::$extra = [];
+        }
+
+        if (!array_key_exists($codigo, self::$extra)) {
+            self::$extra[$codigo] = [];
+
+            try {
+                list($clase, $metodo) = $meta['series_extra'];
+
+                if (!empty($meta['archivo'])) {
+                    $ruta = __DIR__ . '/' . $meta['archivo'];
+
+                    if (file_exists($ruta)) {
+                        require_once $ruta;
+                    }
+                }
+
+                if (class_exists($clase) && method_exists($clase, $metodo)) {
+                    $series = call_user_func([$clase, $metodo]);
+
+                    if (is_array($series)) {
+                        self::$extra[$codigo] = $series;
+                    }
+                }
+            } catch (Throwable $e) {
+                // Se queda con las fijas. Ver la nota de arriba.
+                self::$extra[$codigo] = [];
+            }
+        }
+
+        $extra = self::$extra[$codigo];
+
+        if (empty($extra)) {
+            return $meta;
+        }
+
+        $meta['series'] = array_merge($meta['series'], $extra);
+
+        // Las aperturas nuevas tambien son partes del total: activarlas junto
+        // con el no puede pasar. Ver la regla de doble conteo del validador.
+        $total = array_key_first($meta['componentes']);
+
+        if ($total !== null) {
+            $meta['componentes'][$total] = array_values(array_unique(
+                array_merge($meta['componentes'][$total], array_keys($extra))
+            ));
+        }
+
+        return $meta;
+    }
+
     public static function todos() {
         $v = [];
 
         foreach (self::$providers as $codigo => $meta) {
+            $meta = self::resolverExtra($codigo, $meta);
             $meta['codigo'] = $codigo;
-            unset($meta['archivo'], $meta['clase']);   // detalle interno
+            // Detalle interno: como se instancia y de donde salen sus series.
+            unset($meta['archivo'], $meta['clase'], $meta['series_extra']);
             $v[] = $meta;
         }
 
@@ -396,7 +516,7 @@ class CashflowRegistry {
             return null;
         }
 
-        $meta = self::$providers[$codigo];
+        $meta = self::resolverExtra($codigo, self::$providers[$codigo]);
         $meta['codigo'] = $codigo;
 
         return $meta;
@@ -410,7 +530,16 @@ class CashflowRegistry {
      * @return bool
      */
     public static function serieExiste($codigo, $serie) {
-        return isset(self::$providers[$codigo]['series'][$serie]);
+        if (!isset(self::$providers[$codigo])) {
+            return false;
+        }
+
+        // Pasa por meta() y no por la lista cruda: las series por rubro son
+        // datos y no estan escritas arriba. Sin esto, el validador rechazaria
+        // una fila configurada contra un rubro del maestro.
+        $meta = self::meta($codigo);
+
+        return isset($meta['series'][$serie]);
     }
 
     /**
