@@ -90,17 +90,46 @@ class ProveedoresCategorias {
     /**
      * Las formas de pago declaradas.
      *
-     * La planilla trae 9 valores y viene sucia. Se normaliza contra esta lista
-     * SIN PERDER EL ORIGINAL: un 'echeq' en minuscula matchea contra 'ECHEQ'; un
-     * valor que no matchea se guarda igual, con el normalizado en null, y la
-     * previsualizacion lo muestra.
+     * SON LAS QUE TRAE LA PLANILLA, NO LAS QUE PARECEN RAZONABLES. La primera
+     * version de esta lista se escribio a ojo -CHEQUE, EFECTIVO, RETENCION,
+     * COMPENSACION, OTRO- y ninguno de esos cinco existe en el maestro real. Los
+     * que si existen y faltaban eran CAJA, TARJETA CORP y MERCADO PAGO, que
+     * juntos son 639 de los 1.173 proveedores: el 54% quedo con la forma sin
+     * normalizar por haber adivinado en lugar de mirar.
      *
-     * Agregar una forma es agregar una entrada aca.
+     * Estos seis salen de contar el maestro importado:
+     *
+     *     CAJA           390     TARJETA CORP   240
+     *     TRANSFERENCIA  259     DEBITO          32
+     *     ECHEQ          243     MERCADO PAGO     9
+     *
+     * La comparacion ignora mayusculas, acentos y espacios, asi que 'echeq',
+     * 'Tarjeta Corp' y 'MERCADOPAGO' matchean. Un valor que NO matchea se guarda
+     * igual, con el normalizado en null y su original a la vista: la
+     * previsualizacion lo muestra y quien decide si es un typo o una forma nueva
+     * es una persona.
+     *
+     * AGREGAR UNA FORMA ES AGREGAR UNA ENTRADA ACA, y despues reimportar el
+     * maestro: las filas ya cargadas no se renormalizan solas.
      */
     const FORMAS_PAGO = [
-        'TRANSFERENCIA', 'CHEQUE', 'ECHEQ', 'EFECTIVO', 'DEBITO',
-        'TARJETA', 'RETENCION', 'COMPENSACION', 'OTRO'
+        'TRANSFERENCIA', 'ECHEQ', 'CAJA', 'TARJETA CORP', 'DEBITO', 'MERCADO PAGO'
     ];
+
+    /**
+     * Las formas de pago que se gestionan desde el cronograma de pagos.
+     *
+     * Es lo que se paga decidiendo CUANDO: una transferencia o un echeq se
+     * emiten el dia que alguien elige. Las otras no se planifican de la misma
+     * manera -un debito automatico se debita solo, la caja se paga en el
+     * mostrador- asi que mezclarlas en la grilla de trabajo es ruido.
+     *
+     * NO ES UN FILTRO DE LA CONSULTA: los pendientes se traen TODOS y esta lista
+     * solo decide que se muestra por defecto en la pestaña. Lo que queda fuera
+     * del filtro sigue contandose, se informa cuanto es, y se puede ver con un
+     * clic. Ver el encabezado de Tabs/proveedores_locales.php.
+     */
+    const FORMAS_CRONOGRAMA = ['ECHEQ', 'TRANSFERENCIA'];
 
     /** @var Conexion */
     private $conn;
@@ -271,6 +300,36 @@ class ProveedoresCategorias {
 
     /** Codigo de serie de los comprobantes cuyo proveedor no esta en el maestro */
     const SERIE_SIN_RUBRO = 'SIN_RUBRO';
+
+    /**
+     * Si un comprobante se gestiona desde el cronograma de pagos.
+     *
+     * Entra lo que se paga DECIDIENDO CUANDO: una transferencia o un echeq se
+     * emiten el dia que alguien elige. Un debito automatico se debita solo y la
+     * caja se paga en el mostrador, asi que no se planifican de la misma manera.
+     *
+     * LO QUE NO SE SABE, ENTRA Y SE MARCA. Una forma de pago en null -porque el
+     * proveedor no esta en el maestro, o porque lo que trajo la planilla no se
+     * reconocio- no es lo mismo que una forma que quedo afuera del criterio: es
+     * un dato que falta. Esconder deuda por un dato que falta es la peor razon
+     * para esconderla, y ademas garantiza que nadie lo complete nunca, porque
+     * deja de verse.
+     *
+     * Quien entra sin forma conocida se dibuja con su marca en la grilla, asi
+     * que se distingue de un echeq de verdad.
+     *
+     * Estatica y pura.
+     *
+     * @param string|null $formaPago Forma YA normalizada
+     * @return bool
+     */
+    public static function esDelCronograma($formaPago) {
+        if ($formaPago === null || trim((string) $formaPago) === '') {
+            return true;
+        }
+
+        return in_array($formaPago, self::FORMAS_CRONOGRAMA, true);
+    }
 
     /**
      * Si un rubro economico saca al proveedor del tablero.

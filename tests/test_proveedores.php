@@ -191,6 +191,60 @@ $sosp = ProveedoresCategorias::criteriosSospechosos([
 
 chequear('un criterio raro pero distinto no se marca', 0, count($sosp));
 
+seccion('las formas de pago son las de la planilla, no las que parecen razonables');
+
+/* La primera version de esta lista se escribio a ojo y ninguno de los cinco
+   valores inventados existe en el maestro real; los que si existian faltaban.
+   Resultado: 639 de 1.173 proveedores -el 54%- quedaron sin normalizar. */
+chequear('son las seis de la planilla',
+    ['TRANSFERENCIA', 'ECHEQ', 'CAJA', 'TARJETA CORP', 'DEBITO', 'MERCADO PAGO'],
+    ProveedoresCategorias::FORMAS_PAGO);
+
+chequear('CAJA esta', 'CAJA', ProveedoresCategorias::normalizarFormaPago('CAJA')['normalizado']);
+chequear('TARJETA CORP tambien, con espacio', 'TARJETA CORP',
+    ProveedoresCategorias::normalizarFormaPago('tarjeta corp')['normalizado']);
+chequear('y sin el espacio', 'TARJETA CORP',
+    ProveedoresCategorias::normalizarFormaPago('TARJETACORP')['normalizado']);
+chequear('MERCADO PAGO tambien', 'MERCADO PAGO',
+    ProveedoresCategorias::normalizarFormaPago('Mercado Pago')['normalizado']);
+
+// Y los que se habian inventado ya no estan: no existen en la planilla.
+chequear('CHEQUE no es una forma declarada', null,
+    ProveedoresCategorias::normalizarFormaPago('CHEQUE')['normalizado']);
+chequear('EFECTIVO tampoco', null,
+    ProveedoresCategorias::normalizarFormaPago('EFECTIVO')['normalizado']);
+
+seccion('que se gestiona desde el cronograma de pagos');
+
+/* Entra lo que se paga DECIDIENDO CUANDO. Un debito automatico se debita solo y
+   la caja se paga en el mostrador: no se planifican de la misma manera. */
+chequear('un echeq entra', true, ProveedoresCategorias::esDelCronograma('ECHEQ'));
+chequear('una transferencia tambien', true,
+    ProveedoresCategorias::esDelCronograma('TRANSFERENCIA'));
+
+chequear('un debito automatico NO', false, ProveedoresCategorias::esDelCronograma('DEBITO'));
+chequear('la caja tampoco', false, ProveedoresCategorias::esDelCronograma('CAJA'));
+chequear('ni la tarjeta corporativa', false,
+    ProveedoresCategorias::esDelCronograma('TARJETA CORP'));
+chequear('ni mercado pago', false, ProveedoresCategorias::esDelCronograma('MERCADO PAGO'));
+
+/* LO QUE NO SE SABE, ENTRA. Una forma en null no es una forma que quedo afuera
+   del criterio: es un dato que falta. Esconder deuda por un dato que falta es
+   la peor razon para esconderla, y ademas garantiza que nadie lo complete
+   nunca, porque deja de verse. */
+chequear('sin forma conocida ENTRA, y se marca en la grilla',
+    true, ProveedoresCategorias::esDelCronograma(null));
+chequear('una forma vacia tambien', true, ProveedoresCategorias::esDelCronograma(''));
+
+// Una forma que la planilla trajo mal escrita llega como null a este metodo
+// -normalizarFormaPago no la reconocio- asi que entra por la misma razon.
+$forma = ProveedoresCategorias::normalizarFormaPago('eqheck');
+chequear('y una forma no reconocida tambien', true,
+    ProveedoresCategorias::esDelCronograma($forma['normalizado']));
+
+chequear('las dos formas del cronograma estan declaradas',
+    ['ECHEQ', 'TRANSFERENCIA'], ProveedoresCategorias::FORMAS_CRONOGRAMA);
+
 seccion('el rubro Excluidos');
 
 chequear('lo detecta', true, ProveedoresCategorias::esExcluido('Excluidos'));
@@ -613,8 +667,14 @@ require_once __DIR__ . '/../cashflow/Class/CashflowRegistry.php';
 
 chequear('esta registrado', true, CashflowRegistry::existe('PROV_LOCALES'));
 chequear('y ya esta construido', true, CashflowRegistry::disponible('PROV_LOCALES'));
-chequear('ofrece la serie total', true,
+// OJO: 'PAGOS' NO trae todo. Es la que usa la fila del tablero y trae solo lo
+// que se gestiona por cronograma. El universo completo es PAGOS_TODO.
+chequear('ofrece la serie del cronograma', true,
     CashflowRegistry::serieExiste('PROV_LOCALES', 'PAGOS'));
+chequear('y la del universo completo', true,
+    CashflowRegistry::serieExiste('PROV_LOCALES', 'PAGOS_TODO'));
+chequear('y la de lo que queda afuera', true,
+    CashflowRegistry::serieExiste('PROV_LOCALES', 'PAGOS_FUERA_CRONOGRAMA'));
 
 // Con estas tres, sacar a los socios del tablero es apuntar la fila a
 // PAGOS_OPERATIVOS desde Parametros: configuracion, no codigo.
@@ -627,9 +687,14 @@ chequear('y la de los que faltan en el maestro', true,
 
 $meta = CashflowRegistry::meta('PROV_LOCALES');
 
-// El total y cualquiera de sus aperturas no pueden estar activos a la vez.
-chequear('las aperturas estan declaradas como partes del total', true,
-    in_array('PAGOS_OPERATIVOS', $meta['componentes']['PAGOS'], true));
+/* EL TOTAL CONTRA EL QUE SE MIDE EL DOBLE CONTEO ES PAGOS_TODO, no PAGOS: la
+   fila del tablero usa PAGOS -solo el cronograma- pero el universo es
+   PAGOS_TODO, y activar el universo junto a cualquiera de sus partes contaria
+   dos veces lo mismo. */
+chequear('las aperturas son partes de PAGOS_TODO', true,
+    in_array('PAGOS_OPERATIVOS', $meta['componentes']['PAGOS_TODO'], true));
+chequear('y la del cronograma tambien', true,
+    in_array('PAGOS', $meta['componentes']['PAGOS_TODO'], true));
 
 // 'series_extra' es detalle interno: COMO el registro consigue las series por
 // rubro, no algo que el editor de estructura tenga que ver. todos() es lo que
@@ -659,13 +724,45 @@ $val = CashflowEstructura::validar(
       'ID_PADRE' => null, 'ORDEN' => 10, 'ACTIVO' => 1]],
     [['ID' => 1, 'CODIGO' => 'PL_TOTAL', 'NOMBRE' => 'Cuentas a Pagar', 'SECCION' => 'EGR',
       'TIPO' => 'EGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'PROV_LOCALES',
-      'ORIGEN_SERIE' => 'PAGOS', 'ORDEN' => 10, 'ACTIVO' => 1],
+      'ORIGEN_SERIE' => 'PAGOS_TODO', 'ORDEN' => 10, 'ACTIVO' => 1],
      ['ID' => 2, 'CODIGO' => 'PL_OPER', 'NOMBRE' => 'Sin excluidos', 'SECCION' => 'EGR',
       'TIPO' => 'EGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'PROV_LOCALES',
       'ORIGEN_SERIE' => 'PAGOS_OPERATIVOS', 'ORDEN' => 20, 'ACTIVO' => 1]]
 );
 
-chequear('activar el total y una apertura es un error', false, $val['valido']);
+chequear('activar el universo y una apertura es un error', false, $val['valido']);
+
+/* Y el universo junto al cronograma tambien: PAGOS es una PARTE de PAGOS_TODO,
+   no otra cosa. */
+$val = CashflowEstructura::validar(
+    [['CODIGO' => 'EGR', 'NOMBRE' => 'Egresos', 'ROL' => 'MOVIMIENTO',
+      'ID_PADRE' => null, 'ORDEN' => 10, 'ACTIVO' => 1]],
+    [['ID' => 1, 'CODIGO' => 'PL_TODO', 'NOMBRE' => 'Todas', 'SECCION' => 'EGR',
+      'TIPO' => 'EGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'PROV_LOCALES',
+      'ORIGEN_SERIE' => 'PAGOS_TODO', 'ORDEN' => 10, 'ACTIVO' => 1],
+     ['ID' => 2, 'CODIGO' => 'PL_CRON', 'NOMBRE' => 'Cronograma', 'SECCION' => 'EGR',
+      'TIPO' => 'EGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'PROV_LOCALES',
+      'ORIGEN_SERIE' => 'PAGOS', 'ORDEN' => 20, 'ACTIVO' => 1]]
+);
+
+chequear('y el universo junto al cronograma tambien', false, $val['valido']);
+
+/* PERO EL CRONOGRAMA Y LO QUE QUEDA AFUERA SI PUEDEN CONVIVIR: son las dos
+   mitades del universo, no un total con una de sus partes. Es justamente la
+   forma de meter al tablero los 141 millones que hoy quedan fuera de la fila,
+   sin tocar codigo: dos filas, una por mitad. */
+$val = CashflowEstructura::validar(
+    [['CODIGO' => 'EGR', 'NOMBRE' => 'Egresos', 'ROL' => 'MOVIMIENTO',
+      'ID_PADRE' => null, 'ORDEN' => 10, 'ACTIVO' => 1]],
+    [['ID' => 1, 'CODIGO' => 'PL_CRON', 'NOMBRE' => 'Cronograma', 'SECCION' => 'EGR',
+      'TIPO' => 'EGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'PROV_LOCALES',
+      'ORIGEN_SERIE' => 'PAGOS', 'ORDEN' => 10, 'ACTIVO' => 1],
+     ['ID' => 2, 'CODIGO' => 'PL_FUERA', 'NOMBRE' => 'Otras formas', 'SECCION' => 'EGR',
+      'TIPO' => 'EGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'PROV_LOCALES',
+      'ORIGEN_SERIE' => 'PAGOS_FUERA_CRONOGRAMA', 'ORDEN' => 20, 'ACTIVO' => 1]]
+);
+
+chequear('las dos mitades si pueden convivir', true, $val['valido']);
 
 /* ================================================================
    CONTRA LA BASE
@@ -745,26 +842,37 @@ chequear('se instancia', true, $provTablero instanceof CashflowProvider);
 
 $series = $provTablero->series($h);
 
-chequear('devuelve la serie total', true, isset($series['PAGOS']));
+chequear('devuelve la serie del cronograma', true, isset($series['PAGOS']));
+chequear('la del universo completo', true, isset($series['PAGOS_TODO']));
+chequear('la de lo que queda afuera', true, isset($series['PAGOS_FUERA_CRONOGRAMA']));
 chequear('y las tres aperturas fijas', true,
     isset($series['PAGOS_OPERATIVOS']) && isset($series['PAGOS_EXCLUIDOS'])
     && isset($series['PAGOS_SIN_RUBRO']));
 
-chequear('la serie total tiene los dias del horizonte',
+chequear('la serie del cronograma tiene los dias del horizonte',
     $h->cantidadDias(), count($series['PAGOS']['dias']));
 
-// El total tiene que ser la suma de las dos aperturas que parten el universo en
-// dos: con excluidos y sin excluidos.
-$total = array_sum($series['PAGOS']['dias']) + array_sum($series['PAGOS']['meses']);
-$oper = array_sum($series['PAGOS_OPERATIVOS']['dias'])
-    + array_sum($series['PAGOS_OPERATIVOS']['meses']);
-$excl = array_sum($series['PAGOS_EXCLUIDOS']['dias'])
-    + array_sum($series['PAGOS_EXCLUIDOS']['meses']);
+$suma = function ($s) {
+    return round(array_sum($s['dias']) + array_sum($s['meses']), 2);
+};
 
-chequear('el total es operativos + excluidos', round($total, 2), round($oper + $excl, 2));
+/* LAS DOS PARTICIONES DEL UNIVERSO TIENEN QUE DAR LO MISMO. Son dos formas de
+   cortar la misma deuda: por COMO se paga y por QUE rubro es. Si una de las dos
+   no cerrara, algun comprobante se estaria yendo a la serie equivocada. */
+chequear('cronograma + fuera = universo',
+    $suma($series['PAGOS_TODO']),
+    $suma($series['PAGOS']) + $suma($series['PAGOS_FUERA_CRONOGRAMA']));
+
+chequear('operativos + excluidos = universo',
+    $suma($series['PAGOS_TODO']),
+    $suma($series['PAGOS_OPERATIVOS']) + $suma($series['PAGOS_EXCLUIDOS']));
+
+// La fila del tablero trae MENOS que el universo: esa es la decision de negocio.
+chequear('el cronograma no puede ser mayor que el universo', true,
+    $suma($series['PAGOS']) <= $suma($series['PAGOS_TODO']));
 
 // El proveedor devuelve importes POSITIVOS: el signo lo pone el TIPO de la fila.
-chequear('los importes van en positivo', true, $total >= 0);
+chequear('los importes van en positivo', true, $suma($series['PAGOS_TODO']) >= 0);
 
 seccion('el registro declara exactamente las series que el proveedor devuelve');
 

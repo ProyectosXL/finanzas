@@ -277,7 +277,14 @@ class Proveedores {
                 'RUBRO' => $cat['rubro'],
                 'CENTRO_COSTOS' => $cat['centro_costos'],
                 'EXCLUIDO' => $cat['excluido'],
-                'SERIE' => $cat['serie']
+                'SERIE' => $cat['serie'],
+
+                /* Si se gestiona desde el cronograma de pagos -echeq,
+                   transferencia, o forma desconocida-. Es lo que decide si
+                   entra a la fila del tablero y lo que la pestaña filtra por
+                   defecto. Ver ProveedoresCategorias::esDelCronograma(). */
+                'CRONOGRAMA' => ProveedoresCategorias::esDelCronograma(
+                    ($pago === null) ? $cat['forma_pago'] : $pago['FORMA_PAGO'])
             ];
         }
 

@@ -54,8 +54,27 @@ require_once __DIR__ . '/../Proveedores.php';
  */
 class ProveedoresProvider extends CashflowProvider {
 
-    /** La serie con todo, sin abrir */
+    /**
+     * LA SERIE QUE USA LA FILA DEL TABLERO, y NO trae todo.
+     *
+     * Trae unicamente lo que se gestiona desde el cronograma de pagos: echeq,
+     * transferencia, y lo que no tiene forma conocida. Es una decision de
+     * negocio, no un detalle: hoy deja fuera del cashflow $141 millones -debitos
+     * automaticos, caja, tarjeta corporativa- que igual salen de la caja.
+     *
+     * POR ESO EL PROVEEDOR AVISA cuanto quedo afuera cada vez. Si esa plata
+     * tiene que entrar al tablero por otra fila, todavia no existe; mientras
+     * tanto, el aviso es lo unico que impide que desaparezca en silencio.
+     *
+     * Para ver el universo completo esta PAGOS_TODO.
+     */
     const SERIE_TOTAL = 'PAGOS';
+
+    /** Todas las formas de pago, sin el criterio del cronograma */
+    const SERIE_TODO = 'PAGOS_TODO';
+
+    /** Lo que el criterio del cronograma deja afuera */
+    const SERIE_FUERA = 'PAGOS_FUERA_CRONOGRAMA';
 
     /** Las aperturas fijas, que no dependen de que el maestro este cargado */
     const SERIE_OPERATIVOS = 'PAGOS_OPERATIVOS';
@@ -86,8 +105,60 @@ class ProveedoresProvider extends CashflowProvider {
         // eso hay que decirlo ACA y no solo en la pestana: quien mira el tablero
         // tiene que saber que parte del importe no esta pudiendo abrirse.
         $this->avisarFaltantes($prov, $items);
+        $this->avisarFueraDelCronograma($items);
 
         return $this->repartir($h, $items);
+    }
+
+    /**
+     * Avisa cuanta deuda queda FUERA de la fila del tablero.
+     *
+     * ES EL AVISO MAS IMPORTANTE DE ESTE PROVEEDOR. La fila trae solo lo que se
+     * gestiona por cronograma -echeq y transferencia-, asi que un debito
+     * automatico, una compra con tarjeta corporativa o un pago por caja NO se
+     * proyectan en el cashflow, aunque esa plata igual salga.
+     *
+     * Hoy son unos $141 millones. Si tienen que entrar por otra fila, esa fila
+     * todavia no existe; mientras tanto este aviso es lo unico que impide que
+     * la plata desaparezca del tablero sin que nadie lo note.
+     *
+     * Se desglosa por forma de pago porque cada una se resuelve distinto: un
+     * debito automatico podria entrar por Financiero, y una caja por Haberes o
+     * por Caja Locales.
+     *
+     * @param array $items
+     */
+    private function avisarFueraDelCronograma($items) {
+        $porForma = [];
+        $total = 0;
+
+        foreach ($items as $item) {
+            if (!empty($item['CRONOGRAMA'])) {
+                continue;
+            }
+
+            $forma = ($item['FORMA_PAGO'] === null) ? 'sin forma' : $item['FORMA_PAGO'];
+            $importe = floatval($item['IMPORTE_PENDIENTE']);
+
+            $porForma[$forma] = (isset($porForma[$forma]) ? $porForma[$forma] : 0) + $importe;
+            $total += $importe;
+        }
+
+        if ($total == 0) {
+            return;
+        }
+
+        arsort($porForma);
+        $detalle = [];
+
+        foreach ($porForma as $forma => $importe) {
+            $detalle[] = $forma . ' $ ' . number_format($importe, 2, ',', '.');
+        }
+
+        $this->avisar('Cuentas a Pagar Locales: la fila trae SÓLO lo que se paga por echeq o '
+            . 'transferencia. Quedan fuera del tablero $ ' . number_format($total, 2, ',', '.')
+            . ' (' . implode('; ', $detalle) . '), que igual van a salir de la caja. El detalle '
+            . 'está en la pestaña, quitando el filtro por forma de pago.');
     }
 
     /**
@@ -100,10 +171,27 @@ class ProveedoresProvider extends CashflowProvider {
     private function repartir($h, $items) {
         $series = [
             self::SERIE_TOTAL => $this->serieVacia($h),
+            self::SERIE_TODO => $this->serieVacia($h),
+            self::SERIE_FUERA => $this->serieVacia($h),
             self::SERIE_OPERATIVOS => $this->serieVacia($h),
             self::SERIE_EXCLUIDOS => $this->serieVacia($h),
             self::SERIE_SIN_RUBRO => $this->serieVacia($h)
         ];
+
+        /* SE CREA UNA SERIE POR CADA RUBRO DEL MAESTRO, aunque hoy no tenga
+           deuda. Si no, un rubro sin pendientes no tendria serie, y una fila del
+           tablero configurada contra el se dibujaria como "sin datos" -con el
+           icono de que su modulo no devolvio nada- en lugar de mostrar un cero
+           limpio, que es lo cierto: no hay deuda de ese rubro.
+
+           Ademas hace que el conjunto de series que el registro declara y el que
+           el proveedor devuelve sean exactamente el mismo, que es el invariante
+           que fija tests/test_proveedores.php. */
+        foreach (array_keys(self::seriesDeRubro()) as $rubro) {
+            if (!isset($series[$rubro])) {
+                $series[$rubro] = $this->serieVacia($h);
+            }
+        }
 
         foreach ($items as $item) {
             $importe = floatval($item['IMPORTE_PENDIENTE']);
@@ -112,13 +200,13 @@ class ProveedoresProvider extends CashflowProvider {
                 continue;
             }
 
-            $destinos = [self::SERIE_TOTAL];
+            // PAGOS_TODO es el universo; PAGOS trae solo el cronograma. Las
+            // aperturas por rubro y por excluidos parten PAGOS_TODO, no PAGOS:
+            // describen QUE es cada deuda, no como se paga.
+            $destinos = [self::SERIE_TODO];
 
-            if (!empty($item['EXCLUIDO'])) {
-                $destinos[] = self::SERIE_EXCLUIDOS;
-            } else {
-                $destinos[] = self::SERIE_OPERATIVOS;
-            }
+            $destinos[] = empty($item['CRONOGRAMA']) ? self::SERIE_FUERA : self::SERIE_TOTAL;
+            $destinos[] = empty($item['EXCLUIDO']) ? self::SERIE_OPERATIVOS : self::SERIE_EXCLUIDOS;
 
             if (empty($item['EN_MAESTRO'])) {
                 $destinos[] = self::SERIE_SIN_RUBRO;
@@ -138,10 +226,10 @@ class ProveedoresProvider extends CashflowProvider {
 
             foreach ($destinos as $destino) {
                 // Lo que cae fuera del eje se informa, no se descarta en
-                // silencio. Solo se cuenta una vez, en la serie total: las
-                // aperturas informan lo mismo y el aviso saldria repetido.
+                // silencio. Solo se cuenta una vez, en PAGOS_TODO: las demas
+                // informan lo mismo y el aviso saldria repetido.
                 if (!$h->acumular($series[$destino], $item['Pago'], $importe)) {
-                    if ($destino === self::SERIE_TOTAL) {
+                    if ($destino === self::SERIE_TODO) {
                         if ($item['Pago'] === null) {
                             $series[$destino]['sin_fecha'] += $importe;
                         } else {

@@ -133,6 +133,22 @@
                             Sólo vencidos sin fecha
                         </label>
                     </div>
+
+                    <!-- LA GRILLA ABRE FILTRADA en lo que se paga por echeq o
+                         transferencia, que es lo que se gestiona desde el
+                         cronograma de pagos.
+
+                         El interruptor está PRENDIDO por defecto y se puede
+                         apagar: lo que queda afuera —débitos automáticos, caja,
+                         tarjeta corporativa— es deuda real que igual sale, así
+                         que tiene que haber una pantalla donde mirarla. Cuánto
+                         es se dice al lado, siempre. -->
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="soloCronogramaProv" checked>
+                        <label class="form-check-label small text-muted" for="soloCronogramaProv">
+                            Sólo echeq y transferencia
+                        </label>
+                    </div>
                 </div>
 
                 <div class="d-flex gap-2 flex-wrap align-items-center">
@@ -153,6 +169,10 @@
 
             <div class="card-body py-2 border-bottom bg-light bg-opacity-50">
                 <small class="text-muted" id="periodoProv"></small>
+                <!-- Cuánto queda fuera del filtro, desglosado por forma de pago.
+                     Un filtro que esconde plata sin decir cuánta es un filtro
+                     que miente. -->
+                <small class="text-muted ms-2" id="fueraFiltroProv"></small>
             </div>
 
             <div class="card-body p-0">

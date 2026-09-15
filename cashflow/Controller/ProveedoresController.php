@@ -135,6 +135,11 @@ try {
             $payload['faltantes'] = $prov->categorias()->faltantesEnMaestro($items);
             $payload['formas_pago'] = ProveedoresCategorias::FORMAS_PAGO;
 
+            /* Las dos formas que la pestaña muestra por defecto. Van en el
+               payload y no escritas en el JS: si algun dia cambia el criterio,
+               cambia en un solo lugar. */
+            $payload['formas_cronograma'] = ProveedoresCategorias::FORMAS_CRONOGRAMA;
+
             echo json_encode(['success' => true, 'data' => $payload], JSON_UNESCAPED_UNICODE);
             break;
 
@@ -337,6 +342,14 @@ function indicadores($items) {
     $excluido = 0.0;
     $proveedores = [];
 
+    /* El desglose por forma de pago. La pestaña abre filtrada en lo que se
+       gestiona por cronograma -echeq y transferencia-, asi que hay que poder
+       decir en pantalla CUANTO queda afuera de ese filtro y en cuantas filas:
+       un filtro que esconde plata sin decir cuanta es un filtro que miente. */
+    $fuera = 0.0;
+    $nFuera = 0;
+    $porFormaFuera = [];
+
     foreach ($items as $i) {
         $importe = floatval($i['IMPORTE_PENDIENTE']);
         $total += $importe;
@@ -344,6 +357,15 @@ function indicadores($items) {
 
         if (!empty($i['EXCLUIDO'])) {
             $excluido += $importe;
+        }
+
+        if (empty($i['CRONOGRAMA'])) {
+            $fuera += $importe;
+            $nFuera++;
+
+            $forma = ($i['FORMA_PAGO'] === null) ? 'sin forma' : $i['FORMA_PAGO'];
+            $porFormaFuera[$forma] = (isset($porFormaFuera[$forma]) ? $porFormaFuera[$forma] : 0)
+                + $importe;
         }
 
         if ($i['ORIGEN_FECHA'] === 'CARGADA') {
@@ -355,6 +377,8 @@ function indicadores($items) {
         }
     }
 
+    arsort($porFormaFuera);
+
     return [
         'total' => round($total, 2),
         'vencimientos' => count($items),
@@ -363,6 +387,10 @@ function indicadores($items) {
         'n_vencido_sin_fecha' => $nVencidoSinFecha,
         'con_fecha' => round($conFecha, 2),
         'n_con_fecha' => $nConFecha,
-        'excluido' => round($excluido, 2)
+        'excluido' => round($excluido, 2),
+        'cronograma' => round($total - $fuera, 2),
+        'fuera_cronograma' => round($fuera, 2),
+        'n_fuera_cronograma' => $nFuera,
+        'fuera_por_forma' => array_map(function ($v) { return round($v, 2); }, $porFormaFuera)
     ];
 }

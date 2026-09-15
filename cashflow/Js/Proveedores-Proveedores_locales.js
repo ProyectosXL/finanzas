@@ -56,6 +56,9 @@
         var soloV = document.getElementById('soloVencidosProv');
         if (soloV) { soloV.addEventListener('change', pintarGrilla); }
 
+        var soloC = document.getElementById('soloCronogramaProv');
+        if (soloC) { soloC.addEventListener('change', pintarGrilla); }
+
         var busqM = document.getElementById('busquedaMaestroProv');
         if (busqM) { busqM.addEventListener('input', pintarMaestro); }
 
@@ -177,20 +180,64 @@
        LA GRILLA
        ================================================================ */
 
+    /**
+     * Las filas que se están viendo.
+     *
+     * EL FILTRO POR FORMA DE PAGO VIENE PRENDIDO. La grilla es la herramienta
+     * para cargar fechas, y lo que se carga es lo que se paga decidiendo cuándo:
+     * echeq y transferencia. Un débito automático se debita solo.
+     *
+     * Pero se puede apagar, y mientras está prendido se dice cuánto queda
+     * afuera. Ese importe es deuda real que igual sale de la caja; esconderlo
+     * sin decir cuánto es sería exactamente lo que este módulo evita con los
+     * vencidos sin fecha.
+     */
     function filasVisibles() {
         var filas = (datos && datos.filas) || [];
         var q = (document.getElementById('busquedaProv') || {}).value || '';
         var soloVencidos = (document.getElementById('soloVencidosProv') || {}).checked;
+        var soloCronograma = (document.getElementById('soloCronogramaProv') || {}).checked;
 
         q = q.trim().toLowerCase();
 
         return filas.filter(function(f) {
+            if (soloCronograma && !f.CRONOGRAMA) { return false; }
             if (soloVencidos && !f.SIN_FECHA_CARGADA) { return false; }
             if (q === '') { return true; }
 
-            return [f.COD_PROVEE, f.RAZON_SOC, f.N_COMP, f.RUBRO_ECONOMICO]
+            return [f.COD_PROVEE, f.RAZON_SOC, f.N_COMP, f.RUBRO_ECONOMICO, f.FORMA_PAGO]
                 .join(' ').toLowerCase().indexOf(q) !== -1;
         });
+    }
+
+    /**
+     * El cartel que dice cuánto queda fuera del filtro, desglosado por forma.
+     *
+     * Va al lado del período y no en un tooltip: es la contrapartida de haber
+     * escondido filas, y tiene que leerse sin buscarla.
+     */
+    function pintarFueraDelFiltro() {
+        var el = document.getElementById('fueraFiltroProv');
+
+        if (!el) { return; }
+
+        var soloCronograma = (document.getElementById('soloCronogramaProv') || {}).checked;
+        var k = datos.indicadores;
+
+        if (!soloCronograma || !k.n_fuera_cronograma) {
+            el.textContent = '';
+            return;
+        }
+
+        var detalle = Object.keys(k.fuera_por_forma || {}).map(function(forma) {
+            return forma + ' ' + plata(k.fuera_por_forma[forma]);
+        }).join(' · ');
+
+        el.innerHTML = '&nbsp;·&nbsp;<span class="prov-fuera-filtro">'
+            + 'Quedan afuera ' + escapar(plata(k.fuera_cronograma)) + ' en '
+            + k.n_fuera_cronograma + ' vencimiento(s)'
+            + (detalle ? ' (' + escapar(detalle) + ')' : '')
+            + ' — destildá el filtro para verlos.</span>';
     }
 
     function pintarGrilla() {
@@ -246,6 +293,7 @@
         document.getElementById('bodyProv').innerHTML = html;
 
         pintarTotales(filas, cols);
+        pintarFueraDelFiltro();
         conectarEdicion();
     }
 
@@ -356,8 +404,15 @@
     }
 
     function celdaForma(f) {
+        // Sin forma conocida. ENTRA AL FILTRO IGUAL —no se sabe cómo se paga, y
+        // esconder deuda por un dato que falta es la peor razón para
+        // esconderla— pero se marca, para que no se confunda con un echeq.
         if (!f.FORMA_PAGO && !f.FORMA_PAGO_ORIG) {
-            return '<span class="text-muted small">—</span>';
+            return '<span class="prov-sin-forma" title="'
+                + escapar('Sin forma de pago conocida' + (f.EN_MAESTRO
+                    ? '.' : ': el proveedor no está en el maestro.')
+                    + ' Se muestra igual, pero no se sabe si se paga por echeq o de otra '
+                    + 'manera.') + '">sin forma</span>';
         }
 
         // Una forma que no matcheó contra la lista se muestra tal como vino y se

@@ -208,10 +208,17 @@ class CashflowRegistry {
            esta lista obligaria a tocar codigo cada vez que aparece un rubro
            nuevo, que es exactamente lo que este diseño evita en todo lo demas.
 
-           Con las cuatro series fijas ya se puede sacar a los "Excluidos" -los
-           socios- del tablero apuntando la fila a PAGOS_OPERATIVOS desde
-           Parametros. Las de rubro sirven para partir la fila en alquileres,
-           impuestos, logistica y mercaderia cuando el maestro este cargado. */
+           Con las series fijas ya se puede sacar a los "Excluidos" -los socios-
+           del tablero apuntando la fila a PAGOS_OPERATIVOS desde Parametros. Las
+           de rubro sirven para partir la fila en alquileres, impuestos,
+           logistica y mercaderia cuando el maestro este cargado.
+
+           OJO CON 'PAGOS': NO TRAE TODO. Trae solo lo que se paga por echeq o
+           transferencia, que es lo que se gestiona desde el cronograma de pagos.
+           Es una decision de negocio y deja fuera del tablero unos 141 millones
+           -debitos automaticos, caja, tarjeta corporativa- que igual salen de la
+           caja. El proveedor avisa cuanto es cada vez. Para el universo completo
+           esta PAGOS_TODO. */
         'PROV_LOCALES' => [
             'nombre' => 'Proveedores Locales',
             'descripcion' => 'Cuentas a pagar a proveedores del mercado local, con su fecha '
@@ -222,17 +229,23 @@ class CashflowRegistry {
             'disponible' => true,
             'tab' => 'proveedores_locales',
             'series' => [
-                'PAGOS' => 'Cuentas a pagar locales, todas',
-                'PAGOS_OPERATIVOS' => 'Cuentas a pagar, sin los rubros excluidos',
+                'PAGOS' => 'Cuentas a pagar por echeq o transferencia (lo del cronograma)',
+                'PAGOS_TODO' => 'Cuentas a pagar locales, TODAS las formas de pago',
+                'PAGOS_FUERA_CRONOGRAMA' => 'Solo lo que NO se paga por echeq ni transferencia',
+                'PAGOS_OPERATIVOS' => 'Todas, sin los rubros excluidos',
                 'PAGOS_EXCLUIDOS' => 'Solo los rubros excluidos (socios y no comerciales)',
                 'PAGOS_SIN_RUBRO' => 'Solo los proveedores que no estan en el maestro'
             ],
             'series_extra' => ['ProveedoresProvider', 'seriesDeRubro'],
-            // El total y cualquiera de sus aperturas no pueden estar activos a
-            // la vez: seria contar dos veces el mismo importe. Las de rubro se
-            // agregan a esta lista en resolverExtra().
+            /* EL TOTAL ES 'PAGOS_TODO', NO 'PAGOS'. La fila del tablero usa
+               PAGOS -solo el cronograma- porque asi se decidio, pero el universo
+               completo es PAGOS_TODO y es contra ese que se mide el doble
+               conteo: PAGOS + PAGOS_FUERA_CRONOGRAMA es lo mismo que
+               PAGOS_OPERATIVOS + PAGOS_EXCLUIDOS, y las dos particiones suman
+               PAGOS_TODO. Las de rubro se agregan en resolverExtra(). */
             'componentes' => [
-                'PAGOS' => ['PAGOS_OPERATIVOS', 'PAGOS_EXCLUIDOS', 'PAGOS_SIN_RUBRO']
+                'PAGOS_TODO' => ['PAGOS', 'PAGOS_FUERA_CRONOGRAMA', 'PAGOS_OPERATIVOS',
+                                 'PAGOS_EXCLUIDOS', 'PAGOS_SIN_RUBRO']
             ]
         ],
 

@@ -235,6 +235,20 @@ Por el mismo motivo, las claves de cruce se declaran con la collation de Tango (
 
 En una base ya creada eso lo corrige `sql/cashflow_prov_locales_collation.sql`. **Conviene correrlo antes de la primera importación del maestro**, que es cuando las tablas están vacías.
 
+### Las formas de pago son las de la planilla, no las que parecen razonables
+
+La primera versión de `FORMAS_PAGO` se escribió a ojo: `CHEQUE`, `EFECTIVO`, `RETENCION`, `COMPENSACION`, `OTRO`. **Ninguno de esos cinco existe en el maestro real**, y los que sí existen faltaban. Resultado de la primera importación: **639 de 1.173 proveedores (54%) quedaron con la forma sin normalizar.**
+
+Las seis reales, contadas sobre el maestro importado:
+
+| | | | |
+| --- | ---: | --- | ---: |
+| CAJA | 390 | TARJETA CORP | 240 |
+| TRANSFERENCIA | 259 | DEBITO | 32 |
+| ECHEQ | 243 | MERCADO PAGO | 9 |
+
+Agregar una forma es agregar una entrada, **y después reimportar el maestro**: las filas ya cargadas no se renormalizan solas.
+
 ### Sólo el código es obligatorio
 
 En la planilla real faltan datos en cientos de filas. Exigirlos haría que la importación **falle entera** por datos que administración todavía no cargó.
@@ -303,13 +317,28 @@ Como las dos importaciones, **no escribe nada hasta confirmar**.
 
 | Serie | Qué trae |
 | --- | --- |
-| `PAGOS` | Todo |
+| `PAGOS` | **Sólo echeq y transferencia** — es la que usa la fila del tablero |
+| `PAGOS_TODO` | El universo completo, todas las formas de pago |
+| `PAGOS_FUERA_CRONOGRAMA` | Sólo lo que el criterio deja afuera |
 | `PAGOS_OPERATIVOS` | Todo menos los rubros `Excluidos` |
 | `PAGOS_EXCLUIDOS` | Sólo los excluidos |
 | `PAGOS_SIN_RUBRO` | Sólo los que no están en el maestro |
 | `RUBRO_*` | Una por cada rubro económico del maestro |
 
+**`PAGOS` no trae todo**, y el nombre engaña: trae el cronograma. Ver la sección anterior.
+
+Son **dos particiones del mismo universo**, y las dos tienen que cerrar contra `PAGOS_TODO`:
+
+```
+PAGOS + PAGOS_FUERA_CRONOGRAMA   = PAGOS_TODO   (por cómo se paga)
+PAGOS_OPERATIVOS + PAGOS_EXCLUIDOS = PAGOS_TODO (por qué rubro es)
+```
+
+Eso lo fija `tests/test_proveedores.php` contra los datos reales: si una de las dos no cerrara, algún comprobante se estaría yendo a la serie equivocada.
+
 Con las fijas, **sacar a los socios del tablero es apuntar la fila a `PAGOS_OPERATIVOS` desde Parámetros**: configuración, no código.
+
+**El proveedor crea una serie por cada rubro del maestro, aunque hoy no tenga deuda.** Si no, una fila configurada contra un rubro sin pendientes se dibujaría como *"sin datos"* —con el ícono de que su módulo no devolvió nada— en lugar de mostrar un cero limpio, que es lo cierto.
 
 ### Las series por rubro son datos, no código
 
@@ -330,6 +359,34 @@ El signo lo pone el `TIPO` de la fila, no el dato. Es la regla de todos los prov
 De *Proveedores Locales* a **Cuentas a Pagar Locales**. Está en la sección *Costo de Mercadería*, pero de los $1.361 M pendientes sólo unos 80 son mercadería: el resto es aduana (367 M en **dos códigos distintos**, `OGADUN` y `OGADUA`), seguros, logística, alquileres, servicios, tarjetas y bancos. Dejarla llamándose *Proveedores Locales* dentro de *Costo de Mercadería* haría que la fila diga una cosa y muestre otra.
 
 Es un cambio de dato: el nombre vive en `NOMBRE` y se edita desde Parámetros.
+
+---
+
+## El filtro por forma de pago
+
+**La pestaña abre mostrando sólo lo que se paga por echeq o transferencia**, y la fila del tablero trae lo mismo.
+
+El criterio: entra lo que se paga **decidiendo cuándo**. Una transferencia o un echeq se emiten el día que alguien elige; un débito automático se debita solo y la caja se paga en el mostrador, así que no se planifican de la misma manera.
+
+**Lo que no se sabe, entra y se marca.** Una forma de pago en `null` —porque el proveedor no está en el maestro, o porque lo que trajo la planilla no se reconoció— no es lo mismo que una forma que quedó afuera del criterio: es un dato que falta. Esconder deuda por un dato que falta es la peor razón para esconderla, y además garantiza que nadie lo complete nunca, porque deja de verse. Esas filas se dibujan con la marca *sin forma*, así que no se confunden con un echeq confirmado.
+
+### El filtro se puede apagar, y mientras está prendido dice cuánto esconde
+
+El interruptor *Sólo echeq y transferencia* viene tildado y se puede destildar. Al lado del período, siempre a la vista:
+
+> *Quedan afuera $48.638.823,29 en 256 vencimiento(s) (DEBITO $48.638.823,29) — destildá el filtro para verlos.*
+
+Un filtro que esconde plata sin decir cuánta es un filtro que miente.
+
+### El tablero también filtra, y eso deja plata afuera
+
+La fila *Cuentas a Pagar Locales* usa la serie `PAGOS`, que **no trae todo**: trae el cronograma. Es una decisión de negocio, y su consecuencia es que **los débitos automáticos, la caja y la tarjeta corporativa no se proyectan en el cashflow aunque esa plata igual salga**.
+
+Por eso el proveedor **avisa cuánto quedó afuera, desglosado por forma**, en cada carga del tablero. Si esa plata tiene que entrar por otra fila, esa fila todavía no existe; mientras tanto el aviso es lo único que impide que desaparezca en silencio.
+
+Meterla es configuración, no código: `PAGOS` y `PAGOS_FUERA_CRONOGRAMA` son las dos mitades del universo y **pueden convivir** en dos filas distintas —el validador lo permite justamente porque no se pisan—. Lo que no puede es `PAGOS_TODO` junto a cualquiera de sus partes.
+
+> **Ojo con un número que va a cambiar:** hoy la fila del tablero trae $1.312.829.430 y deja afuera sólo $48,6 M. Eso es porque los `CAJA`, `TARJETA CORP` y `MERCADO PAGO` todavía están en la base **sin normalizar** —se importaron con la lista vieja— y entran como "forma desconocida". **Al reimportar el maestro con la lista corregida pasarán a quedar afuera**, y la fila bajará a ~$1.225 M.
 
 ---
 
