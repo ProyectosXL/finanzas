@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/Horizonte.php';
+require_once __DIR__ . '/Planilla.php';
 
 /**
  * CobElectronicos
@@ -846,8 +847,27 @@ class CobElectronicos {
        diff contra lo cargado se prueban sin base ni archivos.
        ==================================================================== */
 
+    /* ====================================================================
+       EL MECANISMO DE LA PLANILLA VIVE EN Class/Planilla.php
+
+       Todo esto estaba escrito aca, que fue el primer modulo que importo una
+       planilla. Cuando aparecieron dos importaciones mas -el maestro de
+       proveedores y los pagos a proveedores locales- se extrajo a una clase
+       propia en lugar de copiarlo tres veces.
+
+       LOS METODOS PUBLICOS DE ESTA CLASE NO CAMBIARON: siguen existiendo con el
+       mismo nombre y el mismo contrato, y ahora delegan. Eso es a proposito:
+       quien los usa -incluidas las pruebas- no tiene por que enterarse de donde
+       vive la plomeria, y esas pruebas son justamente la red que hace seguro el
+       refactor.
+
+       Lo que SI es de este modulo y se queda aca es columnasImportacion(): que
+       columnas tiene la planilla de cobranzas electronicas y con que sinonimos,
+       que es conocimiento de este circuito y de ningun otro.
+       ==================================================================== */
+
     /** Separadores que puede traer un CSV exportado de Excel */
-    const SEPARADORES = [';', ',', "\t", '|'];
+    const SEPARADORES = Planilla::SEPARADORES;
 
     /**
      * Las columnas de la planilla, con sus sinonimos aceptados.
@@ -905,52 +925,28 @@ class CobElectronicos {
     /**
      * La plantilla que se descarga, con dos filas de ejemplo.
      *
-     * Va con BOM de UTF-8 y separador ';': es lo que Excel en espanol abre en
-     * columnas sin preguntar nada. Sin el BOM, Excel muestra los acentos rotos;
-     * con coma como separador, mete todo en una sola columna.
-     *
-     * Las dos filas de ejemplo se cargan: son datos validos con la forma
-     * esperada. Una plantilla con la fila de ejemplo comentada obliga a
-     * adivinar el formato del numero y de la fecha, que es justo donde falla una
-     * importacion.
+     * LAS FILAS DE EJEMPLO VAN CARGADAS y no comentadas: una plantilla vacia
+     * obliga a adivinar el formato del numero y de la fecha, que es justo donde
+     * falla una importacion. Las fechas de ejemplo se calculan sobre el dia de
+     * hoy para que nunca se vean viejas.
      *
      * @param string $ejemploFecha 'Y-m-d' de la primera fila de ejemplo
      * @return string Contenido del archivo
      */
     public static function plantillaCsv($ejemploFecha = null) {
-        $columnas = self::columnasImportacion();
-        $titulos = [];
-
-        foreach ($columnas as $c) {
-            $titulos[] = $c['titulo'];
-        }
-
         $fecha = ($ejemploFecha === null) ? date('Y-m-d') : substr((string) $ejemploFecha, 0, 10);
         $manana = date('d/m/Y', strtotime($fecha . ' +1 day'));
         $pasado = date('d/m/Y', strtotime($fecha . ' +2 day'));
 
-        $filas = [
-            $titulos,
+        return Planilla::plantillaCsv(self::columnasImportacion(), [
             ['Payway', '1069326,00', $manana, '', 'Ejemplo: borrar esta fila'],
             ['Mercado Pago', '35257406,00', $pasado, 'LIQ-00123',
              'Ejemplo: con numero de liquidacion']
-        ];
-
-        $csv = "\xEF\xBB\xBF";   // BOM, para que Excel respete los acentos
-
-        foreach ($filas as $fila) {
-            $csv .= implode(';', $fila) . "\r\n";
-        }
-
-        return $csv;
+        ]);
     }
 
     /**
      * Lee el contenido de una planilla CSV y devuelve las filas crudas.
-     *
-     * Detecta el separador y acepta los formatos de numero y de fecha que
-     * exporta Excel en cualquiera de los dos idiomas: el usuario no tiene que
-     * saber en que configuracion regional esta su Excel.
      *
      * NO valida contra la base: eso es compararImportacion(). Aca solo se
      * resuelve la forma del archivo.
@@ -959,283 +955,27 @@ class CobElectronicos {
      * @return array ['filas' => [...], 'errores' => [...], 'separador' => string]
      */
     public static function parsearPlanilla($contenido) {
-        $contenido = (string) $contenido;
-
-        // Un .xlsx es un ZIP: empieza con 'PK'. Se detecta para poder decir que
-        // hacer, en lugar de fallar con un archivo lleno de bytes binarios.
-        if (substr($contenido, 0, 2) === 'PK') {
-            throw new Exception('El archivo es un .xlsx y este servidor no puede leerlo. '
-                . 'Abrilo en Excel y guardalo como CSV (Archivo → Guardar como → '
-                . 'CSV UTF-8 delimitado por comas). El contenido es el mismo.');
-        }
-
-        if (substr($contenido, 0, 8) === "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1") {
-            throw new Exception('El archivo es un .xls antiguo y este servidor no puede leerlo. '
-                . 'Abrilo en Excel y guardalo como CSV UTF-8.');
-        }
-
-        // BOM de UTF-8: si queda, el primer titulo no matchea con nada.
-        if (substr($contenido, 0, 3) === "\xEF\xBB\xBF") {
-            $contenido = substr($contenido, 3);
-        }
-
-        // Excel en Windows guarda en la codificacion del sistema si no se elige
-        // CSV UTF-8. Se convierte para que una razon social con acento no quede
-        // como basura y no matchee con la procesadora.
-        if (!mb_check_encoding($contenido, 'UTF-8')) {
-            $contenido = mb_convert_encoding($contenido, 'UTF-8', 'Windows-1252');
-        }
-
-        $lineas = preg_split('/\r\n|\r|\n/', $contenido);
-        $lineas = array_values(array_filter($lineas, function ($l) {
-            return trim($l) !== '';
-        }));
-
-        if (empty($lineas)) {
-            throw new Exception('El archivo está vacío');
-        }
-
-        $separador = self::detectarSeparador($lineas[0]);
-        $mapa = self::mapearEncabezado(str_getcsv($lineas[0], $separador));
-
-        $filas = [];
-        $errores = [];
-
-        for ($i = 1; $i < count($lineas); $i++) {
-            $celdas = str_getcsv($lineas[$i], $separador);
-            $fila = ['linea' => $i + 1];
-            $vacia = true;
-
-            foreach ($mapa as $campo => $indice) {
-                $valor = isset($celdas[$indice]) ? trim((string) $celdas[$indice]) : '';
-                $fila[$campo] = $valor;
-
-                if ($valor !== '') {
-                    $vacia = false;
-                }
-            }
-
-            // Una fila con separadores y nada mas es lo que deja Excel debajo de
-            // los datos: se saltea en silencio, no es un error del usuario.
-            if ($vacia) {
-                continue;
-            }
-
-            $filas[] = $fila;
-        }
-
-        if (empty($filas)) {
-            throw new Exception('El archivo no tiene ninguna fila de datos. La primera fila es '
-                . 'el encabezado y abajo van los movimientos.');
-        }
-
-        return ['filas' => $filas, 'errores' => $errores, 'separador' => $separador];
-    }
-
-    /**
-     * Separador de un CSV: el que mas veces aparece en el encabezado.
-     *
-     * Excel en espanol exporta con ';' y en ingles con ','. Adivinarlo es mas
-     * barato que hacer que el usuario lo declare, y si se equivoca el
-     * encabezado no matchea y el error lo dice.
-     *
-     * @param string $encabezado
-     * @return string
-     */
-    private static function detectarSeparador($encabezado) {
-        $mejor = ';';
-        $max = -1;
-
-        foreach (self::SEPARADORES as $sep) {
-            $n = substr_count($encabezado, $sep);
-
-            if ($n > $max) {
-                $max = $n;
-                $mejor = $sep;
-            }
-        }
-
-        return $mejor;
-    }
-
-    /**
-     * Empareja los titulos del archivo con los campos del modulo.
-     *
-     * La comparacion es sin acentos, sin espacios y sin mayusculas, y acepta los
-     * sinonimos de columnasImportacion(): el usuario no tiene que escribir el
-     * titulo exacto, y una columna de mas no molesta.
-     *
-     * @param array $titulos Celdas de la primera fila
-     * @return array Mapa campo => indice de columna
-     */
-    private static function mapearEncabezado($titulos) {
-        $columnas = self::columnasImportacion();
-        $mapa = [];
-
-        foreach ($titulos as $i => $titulo) {
-            $normalizado = self::normalizarTitulo($titulo);
-
-            foreach ($columnas as $campo => $def) {
-                if (isset($mapa[$campo])) {
-                    continue;
-                }
-
-                foreach ($def['sinonimos'] as $sinonimo) {
-                    if ($normalizado === self::normalizarTitulo($sinonimo)) {
-                        $mapa[$campo] = $i;
-                        break 2;
-                    }
-                }
-            }
-        }
-
-        $faltan = [];
-
-        foreach ($columnas as $campo => $def) {
-            if ($def['obligatoria'] && !isset($mapa[$campo])) {
-                $faltan[] = $def['titulo'];
-            }
-        }
-
-        if (!empty($faltan)) {
-            throw new Exception('Al archivo le faltan columnas obligatorias: '
-                . implode(', ', $faltan) . '. Descargá la plantilla y usá sus encabezados. '
-                . 'Se encontraron: ' . implode(', ', array_map('strval', $titulos)) . '.');
-        }
-
-        return $mapa;
-    }
-
-    /** Titulo de columna comparable: sin acentos, sin espacios, en mayusculas */
-    private static function normalizarTitulo($titulo) {
-        $t = mb_strtoupper(trim((string) $titulo), 'UTF-8');
-
-        $t = str_replace(
-            ['Á', 'É', 'Í', 'Ó', 'Ú', 'Ü', 'Ñ'],
-            ['A', 'E', 'I', 'O', 'U', 'U', 'N'],
-            $t
-        );
-
-        return preg_replace('/[^A-Z0-9]/', '', $t);
+        return Planilla::parsear($contenido, self::columnasImportacion());
     }
 
     /**
      * Lleva a float un importe tipeado en una planilla.
      *
-     * Acepta lo que exporta Excel en las dos configuraciones regionales:
-     * '1069326,00' y '1069326.00'. Con los DOS separadores presentes, el que
-     * este mas a la derecha es el decimal y el otro es de miles ('3.757.900,50').
-     * Con UN solo separador se toma como decimal, salvo que aparezca mas de una
-     * vez, que solo puede ser separador de miles ('1.648.264').
-     *
-     * Un solo punto o coma con tres decimales -'1.648'- es genuinamente
-     * ambiguo, asi que la plantilla pide el importe SIN separador de miles.
-     *
      * @param string $valor
      * @return float|null null si no es un numero
      */
     public static function numeroDesdePlanilla($valor) {
-        $v = trim((string) $valor);
-
-        // Simbolos de moneda, espacios y espacios finos que pega Excel
-        $v = str_replace(['$', ' ', "\xc2\xa0", "\xe2\x80\xaf", 'ARS', 'AR$'], '', $v);
-
-        if ($v === '') {
-            return null;
-        }
-
-        $negativo = (strpos($v, '-') !== false) || (strpos($v, '(') !== false);
-        $v = preg_replace('/[^0-9.,]/', '', $v);
-
-        if ($v === '' || !preg_match('/[0-9]/', $v)) {
-            return null;
-        }
-
-        $puntos = substr_count($v, '.');
-        $comas = substr_count($v, ',');
-
-        if ($puntos > 0 && $comas > 0) {
-            $decimal = (strrpos($v, '.') > strrpos($v, ',')) ? '.' : ',';
-            $miles = ($decimal === '.') ? ',' : '.';
-            $v = str_replace($miles, '', $v);
-            $v = str_replace($decimal, '.', $v);
-        } elseif ($comas > 1) {
-            $v = str_replace(',', '', $v);
-        } elseif ($puntos > 1) {
-            $v = str_replace('.', '', $v);
-        } elseif ($comas === 1) {
-            $v = str_replace(',', '.', $v);
-        }
-
-        if (!is_numeric($v)) {
-            return null;
-        }
-
-        return $negativo ? -abs(floatval($v)) : floatval($v);
+        return Planilla::numero($valor);
     }
 
     /**
      * Lleva a 'Y-m-d' una fecha tipeada en una planilla.
      *
-     * Acepta 'dd/mm/aaaa', 'dd-mm-aaaa', 'aaaa-mm-dd', 'dd/mm/aa' y el SERIAL de
-     * Excel. El serial se acepta acotado -del 1954 al 2064- porque una columna
-     * que quedo con formato numero exporta '46265' en lugar de la fecha, y sin
-     * esto la importacion falla con un mensaje que no ayuda. La hoja original
-     * trae fechas reales, asi que este camino es una red y no la norma.
-     *
-     * Una fecha ambigua NO se adivina: 'dd/mm' sin anio devuelve null y la fila
-     * queda como error, con su numero de linea.
-     *
      * @param string $valor
      * @return string|null 'Y-m-d' o null
      */
     public static function fechaDesdePlanilla($valor) {
-        $v = trim((string) $valor);
-
-        if ($v === '') {
-            return null;
-        }
-
-        // aaaa-mm-dd o aaaa/mm/dd, con hora opcional
-        if (preg_match('/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/', $v, $m)) {
-            return self::armarFecha($m[1], $m[2], $m[3]);
-        }
-
-        // dd/mm/aaaa, dd-mm-aaaa, dd.mm.aaaa y su version de dos digitos
-        if (preg_match('/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})/', $v, $m)) {
-            $anio = intval($m[3]);
-
-            if ($anio < 100) {
-                $anio += ($anio < 70) ? 2000 : 1900;
-            }
-
-            return self::armarFecha($anio, $m[2], $m[1]);
-        }
-
-        // Serial de Excel. La base es 1899-12-30 por el bug del anio 1900 que
-        // Excel conserva a proposito.
-        if (preg_match('/^\d{5}$/', $v)) {
-            $serial = intval($v);
-
-            if ($serial >= 20000 && $serial <= 60000) {
-                return date('Y-m-d', strtotime('1899-12-30 +' . $serial . ' day'));
-            }
-        }
-
-        return null;
-    }
-
-    /** Valida y arma 'Y-m-d'. Devuelve null si la fecha no existe */
-    private static function armarFecha($anio, $mes, $dia) {
-        $anio = intval($anio);
-        $mes = intval($mes);
-        $dia = intval($dia);
-
-        if (!checkdate($mes, $dia, $anio)) {
-            return null;
-        }
-
-        return sprintf('%04d-%02d-%02d', $anio, $mes, $dia);
+        return Planilla::fecha($valor);
     }
 
     /**
@@ -1782,7 +1522,7 @@ class CobElectronicos {
 
     /** Razon social comparable: sin espacios repetidos, sin acentos y en mayusculas */
     private static function claveNombre($razonSocial) {
-        return self::normalizarTitulo(self::normalizarRazonSocial($razonSocial));
+        return Planilla::normalizarTitulo(self::normalizarRazonSocial($razonSocial));
     }
 
     /* ====================================================================
