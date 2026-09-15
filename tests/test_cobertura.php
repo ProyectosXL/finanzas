@@ -274,6 +274,129 @@ chequear('el saldo de cierre si la incluye', 800.0, $kdc['saldo_cierre']);
 chequear('el indicador de flujo coincide con la fila sin cobertura',
     $pc['FLUJO']['total_tramo'], $kdc['flujo']);
 
+seccion('cuanto queda de cobertura');
+
+// El dato lo resuelve el motor y lo llevan LAS DOS filas de la seccion, para
+// que cualquiera de las dos pueda explicarlo sin que el front tenga que cruzar
+// filas. Ver Cashflow::resolverCobertura().
+chequear('la fila de stock lleva el saldo', true, is_array($pc['STOCK']['cobertura']));
+chequear('y la de uso tambien', true, is_array($pc['USO']['cobertura']));
+chequear('las dos dicen lo mismo', $pc['STOCK']['cobertura'], $pc['USO']['cobertura']);
+
+chequear('cuanto hay invertido', 5000.0, $pc['STOCK']['cobertura']['stock']);
+chequear('cuanto se aplico', 400.0, $pc['STOCK']['cobertura']['aplicado']);
+chequear('cuanto queda', 4600.0, $pc['STOCK']['cobertura']['disponible']);
+chequear('y que hay una fila de stock de donde sacarlo',
+    true, $pc['STOCK']['cobertura']['hay_stock']);
+
+// El resto de las filas NO lo lleva: null es distinto de un bloque con ceros.
+chequear('una fila cualquiera no lo lleva', null, $pc['COBROS']['cobertura']);
+chequear('ni el flujo neto', null, $pc['FLUJO']['cobertura']);
+
+seccion('el saldo de cobertura se mide sobre TODO el horizonte, no sobre la vista');
+
+// El stock es un stock: no cambia porque uno mire el tramo diario en vez del
+// mensual. Si lo aplicado se midiera por vista, el disponible cambiaria al
+// tocar un boton -la misma plata, dos numeros distintos- y una aplicacion
+// cargada en un mes de mas adelante no se descontaria mientras se mira la
+// vista Dias, que es justo cuando se decide aplicar mas.
+$motorMes = new CashflowCobertura($ec, new ParametrosCobertura(), $hc);
+$motorMes->series = array_merge($motorC->series, [
+    // 400 en el tramo diario MAS 600 en una columna mensual.
+    'COBERTURA' => ['APLICACION' => $serie($hc, ['2026-09-07' => 400], ['2026-10' => 600])]
+]);
+
+$tMes = $motorMes->proyectar();
+$pMes = [];
+foreach ($tMes['filas'] as $f) { $pMes[$f['codigo']] = $f; }
+
+chequear('lo aplicado suma los dos tramos', 1000.0, $pMes['STOCK']['cobertura']['aplicado']);
+chequear('y el disponible los descuenta a los dos', 4000.0,
+    $pMes['STOCK']['cobertura']['disponible']);
+
+// El total del tramo diario de la fila de uso es SOLO 400: el saldo de
+// cobertura no puede salir de ahi, y esa es la diferencia que se esta fijando.
+chequear('aunque el total del tramo diario sea otro', 400.0, $pMes['USO']['total_tramo']);
+
+seccion('una devolucion a la inversion suma al disponible');
+
+// Un importe negativo es sacar plata de la cuenta y volver a invertirla. Sale
+// gratis: es la misma resta, con el signo del dato.
+$motorNeg = new CashflowCobertura($ec, new ParametrosCobertura(), $hc);
+$motorNeg->series = array_merge($motorC->series, [
+    'COBERTURA' => ['APLICACION' => $serie($hc, ['2026-09-07' => 400, '2026-09-08' => -100])]
+]);
+
+$tNeg = $motorNeg->proyectar();
+$pNeg = [];
+foreach ($tNeg['filas'] as $f) { $pNeg[$f['codigo']] = $f; }
+
+chequear('lo aplicado es el neto', 300.0, $pNeg['STOCK']['cobertura']['aplicado']);
+chequear('y quedan 4700', 4700.0, $pNeg['STOCK']['cobertura']['disponible']);
+
+seccion('aplicar mas de lo que hay avisa, pero no se bloquea');
+
+// Que alguien planifique cubrir con plata que todavia no esta puede ser
+// deliberado -un rescate en camino-, asi que la app no lo impide. Lo que no
+// puede pasar es que el tablero tape un saldo final con plata inexistente sin
+// decirlo.
+$motorEx = new CashflowCobertura($ec, new ParametrosCobertura(), $hc);
+$motorEx->series = array_merge($motorC->series, [
+    'COBERTURA' => ['APLICACION' => $serie($hc, ['2026-09-07' => 8000])]
+]);
+
+$tEx = $motorEx->proyectar();
+$pEx = [];
+foreach ($tEx['filas'] as $f) { $pEx[$f['codigo']] = $f; }
+
+chequear('el disponible queda negativo', -3000.0, $pEx['STOCK']['cobertura']['disponible']);
+chequear('la cobertura se aplica igual', 8000.0, $pEx['USO']['dias']['2026-09-07']);
+
+$avisoExceso = null;
+foreach ($tEx['warnings'] as $w) {
+    if (strpos($w, 'Cobertura:') === 0) { $avisoExceso = $w; }
+}
+
+chequear('hay un aviso', true, $avisoExceso !== null);
+chequear('que dice cuanto falta', true,
+    $avisoExceso !== null && strpos($avisoExceso, '3.000,00') !== false);
+
+// Sin exceso NO se avisa: un aviso que aparece siempre deja de leerse.
+$sinAviso = true;
+foreach ($tc['warnings'] as $w) {
+    if (strpos($w, 'Cobertura:') === 0) { $sinAviso = false; }
+}
+
+chequear('y no aparece cuando alcanza', true, $sinAviso);
+
+seccion('sin fila de stock no se inventa un disponible');
+
+// Puede estar inhabilitada, o su modulo puede no haber devuelto nada. Contestar
+// cero seria decir que no hay plata cuando lo que pasa es que no se sabe.
+$ecSinStock = new EstructuraCobertura();
+$ecSinStock->secciones = $ec->secciones;
+$ecSinStock->filas = array_values(array_filter($ec->filas, function ($f) {
+    return $f['CODIGO'] !== 'STOCK';
+}));
+
+$motorSinStock = new CashflowCobertura($ecSinStock, new ParametrosCobertura(), $hc);
+$motorSinStock->series = $motorC->series;
+
+$tSin = $motorSinStock->proyectar();
+$pSin = [];
+foreach ($tSin['filas'] as $f) { $pSin[$f['codigo']] = $f; }
+
+chequear('la fila de uso sigue llevando el bloque', true, is_array($pSin['USO']['cobertura']));
+chequear('pero avisa que no hay stock de donde sacarlo',
+    false, $pSin['USO']['cobertura']['hay_stock']);
+
+$avisoSinStock = false;
+foreach ($tSin['warnings'] as $w) {
+    if (strpos($w, 'Cobertura:') === 0) { $avisoSinStock = true; }
+}
+
+chequear('y no avisa de un exceso que no puede calcular', false, $avisoSinStock);
+
 /* ================================================================
    SUBTOTALES ANIDADOS: EL ALCANCE SE SOLAPA Y NO SE DUPLICA NADA
 

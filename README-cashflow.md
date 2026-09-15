@@ -623,7 +623,7 @@ Debajo del *Flujo Neto (sin cobertura)*:
 
 | Fila | Tipo | Qué es |
 | --- | --- | --- |
-| Inversiones disponibles | `STOCK_COBERTURA` | Cuánto hay. **No va en ninguna columna de fecha**: el importe se muestra sólo en la columna Total |
+| Inversiones disponibles | `STOCK_COBERTURA` | Cuánto hay. **No va en ninguna columna de fecha**: el importe va en la columna Total, y **cuánto queda** en la celda de Concepto, que es la que no se va al scrollear |
 | Uso de Inversiones | `USO_COBERTURA` | Cuánto se aplica en cada fecha. **Se edita en el propio tablero** y puede ser negativa |
 | Flujo Neto (con cobertura) | `FLUJO_NETO` | El de arriba más lo aplicado en esa columna |
 | Saldo Final | `SALDO_FINAL` | La posición proyectada, ya con la cobertura |
@@ -655,6 +655,31 @@ Donde **sí** aparece es en el *Saldo Final* y en el *Saldo Mínimo*, que salen 
 `STOCK_COBERTURA` no va en ninguna columna de fecha. Ponerlo en un día diría que ese día entra plata, y además lo sumaría el Total de esa vista como si fuera flujo. El motor le vacía las columnas —el front las dibuja con un guión y un `title` que explica por qué— y el importe queda **sólo en la columna Total**, igual en las tres vistas: lo disponible no depende del tramo que se elija mirar.
 
 Lo alimenta la serie `STOCK` de `SALDO_INVERSIONES`, que es **la última carga y no la suma de todas**: cada carga es una foto del saldo, no un depósito. Ver `README-otros-ingresos.md`.
+
+### Cuánto queda, sin ir hasta el final de la tabla
+
+El importe vive en la columna Total, que con veintiocho columnas queda a un scroll horizontal de distancia: ahí no lo mira nadie. Y la pregunta de quien está decidiendo dónde aplicar no es *cuánto hay* sino **cuánto queda**.
+
+Así que la fila de stock lleva una segunda línea en su celda de **Concepto** —la columna que queda fija al scrollear a lo ancho—:
+
+```
+Inversiones disponibles  🐷
+$ 2.529.962 de $ 3.529.962
+```
+
+Sin nada aplicado dice sólo `$ 3.529.962 disponibles`: *"queda X de X"* es ruido.
+
+Va en una segunda línea y no al lado del nombre porque **el nombre sale de la configuración y puede ser largo**, y la columna tiene ancho fijo con puntos suspensivos: en la misma línea, el importe sería lo primero que se recorta.
+
+**El motor lo calcula, el front lo dibuja.** `Cashflow::resolverCobertura()` cuelga `{stock, aplicado, disponible, hay_stock}` a las dos filas de la sección, después de los totales —el stock ya no está en ninguna columna a esa altura—. Es la regla del módulo: el front de este tablero no calcula nada.
+
+**Se mide sobre todo el horizonte, no sobre la vista activa.** El stock es un stock: no cambia porque uno mire el tramo diario en vez del mensual. Si lo aplicado se midiera por vista, el disponible cambiaría al tocar un botón —la misma plata, dos números distintos— y una aplicación cargada en un mes de más adelante no se descontaría justo mientras se mira la vista Días, que es cuando se decide aplicar más.
+
+**Un uso negativo suma al disponible**, porque devuelve plata a la inversión. Sale gratis: es la misma resta con el signo del dato.
+
+**Aplicar más de lo que hay avisa, pero no se bloquea.** Planificar con plata que todavía no está puede ser deliberado —un rescate que se va a hacer, una suscripción en camino—, así que la app no lo impide. Lo que no puede pasar es que el tablero tape un saldo final con plata inexistente sin decirlo: el número se pinta en rojo y el motor deja un aviso que dice cuánto falta.
+
+**Sin fila de stock no se inventa un disponible.** Puede estar inhabilitada, o su módulo puede no haber devuelto nada; `hay_stock` en `false` es lo que distingue "no se sabe" de "no hay plata". Contestar cero sería lo segundo cuando lo cierto es lo primero.
 
 ### Se edita desde el tablero, no desde otra pantalla
 
@@ -835,6 +860,8 @@ php tests/run.php horizonte    # filtra por nombre de archivo
 Cubren el eje temporal y su secuencia cronológica, las tres vistas y su criterio de columnas y totales, el validador de la estructura regla por regla, el arrastre del saldo con números conocidos, el módulo Saldos, y que un proveedor que lanza, que devuelve basura o que devuelve `null` no pueda tumbar el tablero. Las que necesitan SQL Server se saltean solas si no hay conexión.
 
 De la **sección Cobertura**, `tests/test_cobertura.php` fija lo que la hace funcionar sin reglas nuevas en el motor: que el stock no vaya en ninguna columna de fecha y su total sea el mismo en las tres vistas; que **la posición de la fila de uso sea lo único** que separa los dos flujos netos —si alguien la mueve, esas pruebas se caen, que es exactamente lo que tienen que hacer—; que el arrastre la recoja y **el invariante `cierre[n] == apertura[n+1]` siga cerrando**; que no infle los indicadores de Ingresos ni de Egresos; y que **los subtotales anidados no dupliquen importes**, sobre un escenario con dos niveles de anidación.
+
+Y del **saldo de cobertura**: que se mida sobre todo el horizonte y no sobre la vista —con un escenario que aplica en el tramo diario *y* en una columna mensual, donde el total del tramo diario es otro número—; que un uso negativo sume al disponible; que aplicar de más avise y no bloquee; y que sin fila de stock no se invente un disponible.
 
 De `FLUJO_NETO`, `tests/test_cashflow.php` fija que incluya el saldo **mostrado** arriba y que no lo arrastre, y que `SALDO_FINAL` no lo cuente dos veces.
 

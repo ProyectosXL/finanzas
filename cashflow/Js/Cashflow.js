@@ -533,13 +533,14 @@
             // descubre que se puede hacer clic en sus celdas.
             marca = ' <i class="fas fa-pen-to-square cf-marca cf-marca-editable" title="'
                 + escapar('Se carga acá: hacé clic en la celda del día en el que querés aplicar '
-                    + 'cobertura. Un importe negativo devuelve plata a la inversión.')
+                    + 'cobertura. Un importe negativo devuelve plata a la inversión.'
+                    + textoSaldoCobertura(f))
                 + '"></i>';
         } else if (f.tipo === 'STOCK_COBERTURA') {
             marca = ' <i class="fas fa-piggy-bank cf-marca cf-marca-stock" title="'
                 + escapar('Stock, no flujo: es cuánto hay invertido y disponible para cubrir. '
-                    + 'No entra en ninguna suma y no va en ninguna columna de fecha; el importe '
-                    + 'está en la columna Total.')
+                    + 'No entra en ninguna suma y no va en ninguna columna de fecha.'
+                    + textoSaldoCobertura(f))
                 + '"></i>';
         } else if (f.sin_datos) {
             marca = ' <i class="fas fa-circle-info cf-marca" title="Todavía no hay datos para esta fila"></i>';
@@ -555,16 +556,83 @@
         // parte de ese número. Las dos cosas pueden pasar a la vez.
         marca += marcaPactado(f, cols);
 
+        // El saldo de cobertura va en la celda de Concepto y no sólo en la
+        // columna Total, porque la de Concepto es la que queda FIJA al
+        // scrollear a lo ancho: con veintiocho columnas, un importe que sólo
+        // vive al final de la tabla no lo mira nadie. Y el número que importa
+        // para decidir no es cuánto hay, sino cuánto QUEDA.
+        var saldo = lineaSaldoCobertura(f);
+
         if (f.tab) {
             // data-sub-tab lo lee el JS de la pestaña destino para abrirse en la
             // vista correcta: hay módulos con más de una, y llegar a la primera
             // deja al usuario sin el detalle del número que clickeó.
             return '<a href="#" class="cf-link" data-ir-a="' + escapar(f.tab) + '"'
                 + (f.subtab ? ' data-sub-tab="' + escapar(f.subtab) + '"' : '') + '>'
-                + nombre + '</a>' + marca;
+                + nombre + '</a>' + marca + saldo;
         }
 
-        return nombre + marca;
+        return nombre + marca + saldo;
+    }
+
+    /* ================================================================
+       CUÁNTO QUEDA DE COBERTURA
+
+       El motor lo resuelve sobre TODO el horizonte y no sobre la vista activa:
+       el stock es un stock y no cambia porque uno mire el tramo diario en vez
+       del mensual. Acá sólo se dibuja. Ver Cashflow::resolverCobertura().
+       ================================================================ */
+
+    /**
+     * La segunda línea de la celda de Concepto en la fila de stock: cuánto
+     * queda disponible, y cuánto había si ya se aplicó algo.
+     *
+     * Sólo la lleva la fila de stock. En la de uso el número ya está en su
+     * propia columna Total, y repetirlo ahí haría parecer que son dos cosas
+     * distintas.
+     */
+    function lineaSaldoCobertura(f) {
+        if (f.tipo !== 'STOCK_COBERTURA' || !f.cobertura || !f.cobertura.hay_stock) {
+            return '';
+        }
+
+        var c = f.cobertura;
+        var aplicado = Number(c.aplicado) || 0;
+
+        // Sin nada aplicado, "queda X de X" es ruido: alcanza con el importe.
+        if (aplicado === 0) {
+            return '<div class="cf-stock-saldo" title="'
+                + escapar('Todavía no se aplicó nada: está todo disponible.') + '">'
+                + '$ ' + plataCorta(c.stock) + ' disponibles</div>';
+        }
+
+        // Aplicar más de lo que hay no se bloquea —puede ser deliberado— pero
+        // se marca: el Saldo Final estaría tapado con plata que todavía no
+        // figura como invertida. El motor además lo dice en los avisos.
+        var excedido = (Number(c.disponible) < 0);
+
+        return '<div class="cf-stock-saldo' + (excedido ? ' cf-negativo' : '') + '" title="'
+            + escapar('Hay $ ' + plataCorta(c.stock) + ' invertidos y se aplicaron $ '
+                + plataCorta(aplicado) + ' a lo largo de todo el horizonte'
+                + (excedido
+                    ? ': se está cubriendo con $ ' + plataCorta(-Number(c.disponible))
+                        + ' que todavía no figuran como invertidos.'
+                    : '.'))
+            + '">$ ' + plataCorta(c.disponible) + ' de $ ' + plataCorta(c.stock) + '</div>';
+    }
+
+    /** Lo mismo, en una frase, para agregar al final de un tooltip */
+    function textoSaldoCobertura(f) {
+        if (!f.cobertura || !f.cobertura.hay_stock) {
+            return '';
+        }
+
+        var c = f.cobertura;
+
+        return ' Hay $ ' + plataCorta(c.stock) + ' invertidos, se aplicaron $ '
+            + plataCorta(c.aplicado) + ' y quedan $ ' + plataCorta(c.disponible)
+            + ' disponibles. Se mide sobre todo el horizonte, no sobre la vista activa: '
+            + 'el stock no cambia según el tramo que se mire.';
     }
 
     /**

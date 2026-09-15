@@ -143,6 +143,11 @@ class Cashflow {
 
         unset($f);
 
+        /* ---- 6b. Cuanto queda de cobertura ------------------------------- */
+        // Va DESPUES de los totales porque necesita el total de las dos filas:
+        // el stock ya no esta en ninguna columna a esta altura.
+        $this->resolverCobertura($resueltas);
+
         /* ---- 7. Salida --------------------------------------------------- */
         // El eje y las tres vistas los describe EjeVista, que es el criterio
         // compartido con las pestanas de detalle: el tablero y la pestana que
@@ -282,6 +287,10 @@ class Cashflow {
                 // importe de una celda tiene algo que contar. NO es un importe
                 // mas y no entra en ninguna suma; ver CashflowProvider.
                 'detalle' => [],
+                // Cuanto hay invertido, cuanto se aplico y cuanto queda. Solo lo
+                // llevan las dos filas de Cobertura; en el resto queda en null,
+                // que es distinto de un bloque con ceros. Ver resolverCobertura().
+                'cobertura' => null,
                 'sin_datos' => false
             ];
 
@@ -650,6 +659,87 @@ class Cashflow {
         }
 
         return $total;
+    }
+
+    /* ====================================================================
+       COBERTURA: CUANTO HAY, CUANTO SE USO Y CUANTO QUEDA
+       ==================================================================== */
+
+    /**
+     * Resuelve el saldo de cobertura y se lo cuelga a las filas que lo
+     * explican.
+     *
+     * POR QUE LO CALCULA EL MOTOR Y NO EL FRONT. Es una resta entre dos filas
+     * del cuadro, y el front de este modulo no calcula nada: pinta lo que el
+     * motor ya resolvio. Ademas la cuenta tiene una sutileza que no conviene
+     * dejar suelta en el navegador -ver el parrafo del horizonte-.
+     *
+     * SE MIDE SOBRE TODO EL HORIZONTE, NO SOBRE LA VISTA ACTIVA. El stock es un
+     * stock: no cambia porque uno mire el tramo diario en vez del mensual. Si lo
+     * aplicado se midiera por vista, el disponible cambiaria al tocar un boton
+     * -la misma plata, dos numeros distintos- y ademas una aplicacion cargada en
+     * un mes de mas adelante no se descontaria mientras se mira la vista Dias,
+     * que es justo cuando se decide aplicar mas.
+     *
+     * UN USO NEGATIVO DEVUELVE PLATA A LA INVERSION, asi que SUMA al disponible.
+     * Sale gratis: es la misma resta, con el signo del dato.
+     *
+     * SI NO HAY FILA DE STOCK NO SE INVENTA NINGUNO. Puede estar inhabilitada, o
+     * su modulo puede no haber devuelto nada. Sin saber cuanto hay, "cuanto
+     * queda" no se puede contestar, y contestar cero seria decir que no hay
+     * plata cuando lo que pasa es que no se sabe.
+     *
+     * @param array $resueltas Por referencia
+     */
+    private function resolverCobertura(&$resueltas) {
+        $stock = 0;
+        $aplicado = 0;
+        $hayStock = false;
+        $hayUso = false;
+
+        foreach ($resueltas as $f) {
+            if ($f['tipo'] === 'STOCK_COBERTURA') {
+                $stock += $f['total_horizonte'];
+                $hayStock = true;
+            }
+
+            if ($f['tipo'] === 'USO_COBERTURA' && $f['computa']) {
+                $aplicado += $f['total_horizonte'];
+                $hayUso = true;
+            }
+        }
+
+        if (!$hayStock && !$hayUso) {
+            return;
+        }
+
+        $info = [
+            'stock' => $stock,
+            'aplicado' => $aplicado,
+            'disponible' => $stock - $aplicado,
+            // Sin fila de stock el disponible no significa nada, y el front
+            // tiene que poder distinguirlo de un disponible de cero.
+            'hay_stock' => $hayStock
+        ];
+
+        foreach ($resueltas as $i => $f) {
+            if ($f['tipo'] === 'STOCK_COBERTURA' || $f['tipo'] === 'USO_COBERTURA') {
+                $resueltas[$i]['cobertura'] = $info;
+            }
+        }
+
+        /* SE AVISA CUANDO SE APLICA MAS DE LO QUE HAY, y no se bloquea. Que
+           alguien planifique cubrir con plata que todavia no esta puede ser
+           deliberado -un rescate que se va a hacer, una suscripcion en camino-,
+           asi que la app no tiene por que impedirlo. Lo que no puede pasar es
+           que el tablero muestre un saldo final tapado con plata inexistente sin
+           decirlo. */
+        if ($hayStock && $aplicado > $stock + 0.01) {
+            $this->warnings[] = 'Cobertura: se aplican ' . $this->plata($aplicado)
+                . ' pero el saldo de inversiones disponible es ' . $this->plata($stock)
+                . '. Faltan ' . $this->plata($aplicado - $stock) . ', así que el Saldo Final '
+                . 'está cubierto con plata que todavía no figura como invertida.';
+        }
     }
 
     /* ====================================================================

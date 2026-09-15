@@ -244,6 +244,30 @@
     color: #2e9e6b;
 }
 
+/* CUÁNTO QUEDA, EN LA CELDA DE CONCEPTO
+
+   Va acá y no sólo en la columna Total porque Concepto es la columna que queda
+   FIJA al scrollear a lo ancho: con veintiocho columnas, un importe que sólo
+   vive al final de la tabla no lo mira nadie. Y la pregunta que se hace quien
+   está decidiendo dónde aplicar no es cuánto hay, sino cuánto queda.
+
+   Segunda línea y no al lado del nombre: el nombre sale de la configuración y
+   puede ser largo, y la columna tiene ancho fijo con puntos suspensivos. En la
+   misma línea, el importe sería lo primero que se recorta. */
+.tab-cashflow .cf-stock-saldo {
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.2;
+    color: #2e9e6b;
+    cursor: help;
+}
+
+/* Se aplicó más de lo que hay. No se bloquea —puede ser deliberado— pero el
+   número tiene que verse distinto, y el motor además lo dice en los avisos. */
+.tab-cashflow .cf-stock-saldo.cf-negativo {
+    color: #c0392b;
+}
+
 /* La fila editable. El borde superior la separa del stock: son dos cosas
    distintas -lo que hay y lo que se usa- y sin la línea se leen como un bloque
    de dos números del mismo tipo. */
