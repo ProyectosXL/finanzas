@@ -189,7 +189,7 @@ try {
                 }
             }
 
-            $fecha = $ingresos->saveFechaManualFR(
+            $fecha = $ingresos->saveFechaManual(
                 isset($data['cod_cliente']) ? $data['cod_cliente'] : '',
                 $data['t_comp'],
                 $data['n_comp'],
@@ -211,7 +211,7 @@ try {
                 throw new Exception('Falta el comprobante cuya fecha manual hay que borrar.');
             }
 
-            $ingresos->deleteFechaManualFR($data['t_comp'], $data['n_comp']);
+            $ingresos->deleteFechaManual($data['t_comp'], $data['n_comp']);
 
             echo json_encode([
                 'success' => true,

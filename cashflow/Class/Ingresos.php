@@ -551,9 +551,17 @@ class Ingresos {
     /**
      * Las fechas de cobro cargadas a mano, indexadas por comprobante.
      *
+     * SIRVE A LOS DOS CIRCUITOS, franquicias y mayoristas, desde la misma tabla
+     * y sin ninguna columna que los distinga: la clave es el comprobante, y un
+     * comprobante pertenece a uno solo de los dos. El razonamiento completo esta
+     * arriba de sql/cashflow_cobranzas_fecha_manual.sql.
+     *
+     * Por eso no hay filtro por cliente: quien llama ya trae su propia lista de
+     * comprobantes y busca en este mapa los que le tocan.
+     *
      * @return array Mapa 'T_COMP|N_COMP' => ['fecha' => 'Y-m-d', 'usuario' => ...]
      */
-    public function getFechasManualesFR() {
+    public function getFechasManuales() {
         $cid = $this->conn->conectar('central');
 
         if (!$cid) {
@@ -603,7 +611,7 @@ class Ingresos {
      * @param string|null $usuario
      * @return string La fecha guardada, normalizada
      */
-    public function saveFechaManualFR($codCliente, $tComp, $nComp, $fecha, $usuario = null) {
+    public function saveFechaManual($codCliente, $tComp, $nComp, $fecha, $usuario = null) {
         $cod = strtoupper(trim($codCliente));
         $t = strtoupper(trim($tComp));
         $n = strtoupper(trim($nComp));
@@ -665,7 +673,7 @@ class Ingresos {
      * @param string $nComp
      * @return bool
      */
-    public function deleteFechaManualFR($tComp, $nComp) {
+    public function deleteFechaManual($tComp, $nComp) {
         $cid = $this->conn->conectar('central');
 
         if (!$cid) {
@@ -1114,7 +1122,7 @@ class Ingresos {
         // 2. PPP por cliente, escala general de descuento y fechas manuales
         $ppps = $this->getPPPClientes();
         $escala = $this->getEscalasDescuento();
-        $fechasManuales = $this->getFechasManualesFR();
+        $fechasManuales = $this->getFechasManuales();
 
         // 3. Consultar facturas FAC pendientes en Central (Tango GVA12)
         $sql_fac = "
@@ -1487,6 +1495,19 @@ class Ingresos {
      * antes se descartaban con un `continue` y la plata desaparecia de la
      * pantalla. Ver ubicarCobroVencido().
      *
+     * LA FECHA MANUAL MANDA, igual que en Cobranzas FR y con la misma tabla.
+     * Un plazo fijo de 60 dias sirve para el grueso de la cartera y no sirve
+     * cuando alguien ya hablo la fecha de una factura puntual. La jerarquia esta
+     * escrita una sola vez en resolverFechaCobro(); aca no se reimplementa.
+     *
+     * PERO ACA LA FECHA MANUAL NO CAMBIA NINGUN IMPORTE, a diferencia de FR.
+     * En franquicias los dias resueltos deciden el tramo de la escala de
+     * descuento y por lo tanto el importe neto; mayoristas NO tiene escala de
+     * descuento -el neto es el bruto, el 'Desc' de la fila es '0%' fijo-, asi
+     * que lo unico que cambia es en que columna cae el importe. Los 'Dias' de la
+     * fila si pasan a ser los reales, porque es informacion y porque un 60 fijo
+     * al lado de una fecha cargada a mano se contradiria a si mismo.
+     *
      * @return array Listado de comprobantes proyectados
      */
     public function getCobranzasMay() {
@@ -1496,6 +1517,7 @@ class Ingresos {
         }
 
         $diasPlazo = $this->getDiasPlazoMayoristas();
+        $fechasManuales = $this->getFechasManuales();
 
         $sql_fac = "
             SELECT 
@@ -1525,6 +1547,7 @@ class Ingresos {
         while ($row = sqlsrv_fetch_array($stmt_fac, SQLSRV_FETCH_ASSOC)) {
             $tComp = strtoupper(trim($row['T_COMP']));
             $nComp = strtoupper(trim($row['N_COMP']));
+            $key = $tComp . '|' . $nComp;
             $codCli = strtoupper(trim($row['COD_CLIENT']));
             $razonSoci = trim($row['RAZON_SOCI']);
             $importe = floatval($row['IMPORTE']);
@@ -1536,17 +1559,19 @@ class Ingresos {
             $fEmisObj = $row['FECHA_EMIS'] instanceof DateTime ? $row['FECHA_EMIS'] : new DateTime($row['FECHA_EMIS']);
             $fEmisStr = $fEmisObj->format('Y-m-d');
 
-            // Fecha probable de cobro = Fecha emisión + días de plazo
-            $fProbCobroObj = clone $fEmisObj;
-            $fProbCobroObj->modify("+{$diasPlazo} days");
-            $fProbCobroStr = $fProbCobroObj->format('Y-m-d');
+            // Fecha de cobro: manda la manual; si no hay, F. Emis + días de
+            // plazo. Es la MISMA jerarquía que Cobranzas FR y sale del mismo
+            // método: ver resolverFechaCobro().
+            $manual = isset($fechasManuales[$key]) ? $fechasManuales[$key]['fecha'] : null;
+            $cobro = self::resolverFechaCobro($fEmisStr, $diasPlazo, $manual);
 
             // Las vencidas no se descartan: van al primer día del eje y se
-            // marcan, con el mismo techo de días que Cobranzas FR. Mayoristas
-            // no tiene fecha manual, así que nunca hay nada que respetar.
+            // marcan, con el mismo techo de días que Cobranzas FR. Una fecha
+            // cargada a mano NO se reubica: la pactó una persona y moverla sería
+            // pisar su decisión con una regla automática.
             // Ver ubicarCobroVencido().
-            $ubic = self::ubicarCobroVencido($fProbCobroStr, $hoyStr,
-                self::DIAS_COBRO_VENCIDO);
+            $ubic = self::ubicarCobroVencido($cobro['fecha'], $hoyStr,
+                self::DIAS_COBRO_VENCIDO, $cobro['manual']);
 
             if ($ubic['descartar']) {
                 continue;
@@ -1558,14 +1583,23 @@ class Ingresos {
                 'FECHA' => $fEmisStr,
                 'T_COMP' => $tComp,
                 'N_COMP' => $nComp,
+                // Mayoristas no tiene escala de descuento: el neto es el bruto
+                // siempre, con o sin fecha manual. Por eso 'Desc' es fijo y el
+                // importe no se recalcula, a diferencia de Cobranzas FR.
                 'Desc' => '0%',
-                'Dias' => $diasPlazo,
+                // Los días son los REALES, no el parámetro: con fecha manual el
+                // plazo es otro, y mostrar 60 al lado de una fecha cargada a
+                // mano se contradiría a sí mismo.
+                'Dias' => $cobro['dias'],
                 'importe_bruto' => round($importeReal, 2),
                 'importe_neto' => round($importeReal, 2),
                 'Cobro' => $ubic['fecha'],
                 'COBRO_ORIGINAL' => $ubic['original'],
                 'VENCIDA' => $ubic['vencida'],
+                'FECHA_MANUAL' => $cobro['manual'],
                 'TIPO_REGISTRO' => 'PROYECCION',
+                // El plazo del parámetro, para poder auditar la proyección
+                // automática aunque la fila tenga fecha manual.
                 'PLAZO' => $diasPlazo
             ];
         }

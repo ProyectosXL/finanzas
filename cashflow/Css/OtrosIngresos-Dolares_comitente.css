@@ -75,3 +75,29 @@
     font-weight: 400;
     text-decoration: line-through;
 }
+
+/* ============================================================================
+   LA COTIZACIÓN USADA, CON SU FECHA
+
+   El valor y el día van en dos líneas y no en una: el día casi nunca es el de
+   la carga —un sábado se valúa con el viernes, y hoy con la última que el BCRA
+   haya publicado— y en una sola línea el "del 06/09" se lee como parte del
+   número.
+   ============================================================================ */
+
+.tab-dolares_comitente .dol-tc {
+    font-weight: 600;
+}
+
+.tab-dolares_comitente .dol-tc-fecha {
+    font-size: 0.72rem;
+    color: #8a94a3;
+    line-height: 1.2;
+}
+
+/* La cotización NO es del mismo día que la carga. Se marca porque es justo el
+   caso en el que alguien supondría que el tipo de cambio es el del día. */
+.tab-dolares_comitente .dol-tc-anterior {
+    color: #b07d2b;
+    cursor: help;
+}

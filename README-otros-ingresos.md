@@ -26,7 +26,10 @@ Contra `central`:
 ```sql
 -- 1. sql/cashflow_dolares_comitente.sql
 -- 2. sql/cashflow_saldo_inversiones.sql
+-- 3. sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql   (la cotización diaria)
 ```
+
+El tercero crea la vista **diaria** del dólar oficial. Sin ella, `Cotizacion::ultimaHasta()` lanza, la pestaña avisa y la columna en pesos va con un guión: los dólares cargados están, lo que falta es a cuánto valuarlos. La fila del tablero se muestra en cero. No rompe.
 
 Crea `RO_T_CASHFLOW_DOLARES_COMITENTE` y deja la fila `DOLARES_COMITENTE` del tablero apuntada a la serie correcta. Es reejecutable.
 
@@ -44,15 +47,49 @@ El segundo crea `RO_T_CASHFLOW_SALDO_INVERSIONES` y **crea** la fila `SALDO_INVE
 
 El importe **entra al flujo en la fecha que se le carga**. No es un saldo de apertura y no arrastra. Por eso la fila del tablero es de tipo `INGRESO` y no `SALDO_INICIAL`, y por eso vive en la categoría de ingresos y no en la de saldos.
 
+Esto **sigue valiendo para los dólares**, a diferencia del Saldo de Inversiones, que dejó de ser un ingreso y pasó a ser stock de cobertura. En el Excel los dólares están en el bloque del Disponible y no en el de inversiones: es plata en una cuenta, no un fondo invertido.
+
 ### Se guardan dólares, no pesos
 
 La conversión la hace el proveedor con el **oficial del BCRA**, que ya está resuelto en `Class/Cotizacion.php` sobre `RO_V_DOLAR_OFICIAL_BCRA`. Es el mismo criterio que `ComexProvider` con los pagos al exterior: **el motor nunca ve dólares**.
 
 Guardar pesos congelaría la valuación al momento de la carga. El día que cambie el tipo de cambio, el tablero seguiría mostrando la conversión vieja y no habría forma de notarlo.
 
-- **Cada carga se valúa al T/C de cierre de su propio mes.** No hay un único tipo de cambio para toda la serie: multiplicar todo por un solo valor es otra cuenta —reexpresar la serie a moneda de hoy— y con inflación no se parece.
+- **Cada carga se valúa con la ÚLTIMA COTIZACIÓN CONOCIDA A SU FECHA.** Ver abajo: este criterio cambió.
 - **A diferencia de Comex, el T/C no es un parámetro editable.** Un parámetro tiene sentido para valuar un pago futuro, que es criterio comercial; para decir cuánto valen unos dólares que ya están en la cuenta, no.
-- **Si para una fecha no hay cotización, se avisa y no se asume un valor.** Ese importe queda fuera de la serie y el aviso dice cuántos dólares son. Inventar un tipo de cambio —el del mes anterior, el último conocido— pondría en el tablero un número que nadie eligió y que nadie podría auditar.
+- **Si para una fecha no hay cotización, se avisa y no se asume un valor.** Ese importe queda fuera de la serie y el aviso dice cuántos dólares son. Inventar un tipo de cambio pondría en el tablero un número que nadie eligió y que nadie podría auditar.
+
+### La cotización es la última conocida a la fecha, no el cierre del mes
+
+> Esto **cambió**. Antes cada carga se valuaba con el tipo de cambio de cierre de su propio mes.
+
+El criterio viejo tenía dos problemas que sólo se veían mirando el número de cerca:
+
+- **El mes en curso no tiene cierre todavía.** `RO_V_DOLAR_OFICIAL_BCRA` colapsa a una fila por año/mes quedándose con el último día cargado, así que para el mes en curso devolvía "la última que haya", o sea otra cosa que lo que su nombre decía.
+- **Para una carga de principios de mes se valuaba con una cotización de semanas después.** Nada lo decía.
+
+El criterio nuevo es **`Cotizacion::ultimaHasta($fecha)`**: la última cotización con fecha *anterior o igual* a la de la carga, **junto con el día del que salió**. La fecha es parte del dato: sin ella el importe en pesos no se puede explicar contra nada, y en este país la diferencia entre el dólar de hace tres semanas y el de hoy no es un detalle.
+
+Eso necesitó una vista nueva, porque la que había no servía para esta pregunta:
+
+| Vista | Qué devuelve | Quién la usa | Qué pregunta contesta |
+| --- | --- | --- | --- |
+| `RO_V_DOLAR_OFICIAL_BCRA` | una fila por año/mes: el cierre | Ventas, Saldos (`mapaMensual`, `delMes`) | *cuánto valió el dólar en ese mes* |
+| `RO_V_DOLAR_OFICIAL_BCRA_DIARIO` | la serie diaria completa, sin colapsar | Otros Ingresos (`ultimaHasta`) | *cuánto vale hoy lo que tengo* |
+
+**Las dos son correctas y ninguna reemplaza a la otra**, así que `mapaMensual()` no se borró: Ventas valúa mes a mes porque lo que describe es lo que se vendió en cada mes, y ése sigue siendo el criterio que corresponde ahí. Son dos preguntas distintas con dos respuestas distintas, las dos bien.
+
+**No se rellenan los días sin cotización.** Un sábado se valúa con la del viernes y se muestra *la fecha del viernes*; inventar una fila para el sábado escondería que el dato es de otro día.
+
+### La cuenta se muestra abierta
+
+La grilla de la pestaña tiene cuatro columnas donde antes tenía una: **USD × cotización (con su fecha) = importe en pesos**. El total en pesos del pie es exactamente el que va a la fila del tablero, así que ese número se puede auditar fila por fila desde la pantalla.
+
+La cuenta la hace **`OtrosIngresos::valuarDolares()`**, y la usan los dos: el proveedor para armar la serie y el controller para la grilla. Si cada uno multiplicara por su cuenta, los dos totales podrían discrepar y no habría forma de saber cuál está mal.
+
+Cuando la fecha de la cotización no coincide con la de la carga —que es casi siempre— se marca en ámbar: es justo el caso en el que alguien supondría que el tipo de cambio es el del día.
+
+Sin cotización, `TC` e `IMPORTE_ARS` van en **`null`, no en cero**, y la celda muestra un guión. Un cero se leería como "estos dólares valen cero pesos".
 
 ### El importe vigente se pisa, pero el historial queda
 
@@ -80,7 +117,44 @@ Fecha e importe en dólares. Nada más. Todo lo demás —la conversión, la vig
 **Es el mismo circuito que Dólares Cuenta Comitente, copiado a propósito.** Formulario
 mínimo (fecha + importe), un importe vigente por fecha, sin baja física, historial desde el
 mismo modal, cero válido y negativo rechazado. Todo lo que dice la sección de arriba vale
-acá, salvo una cosa.
+acá, salvo dos cosas: la moneda, y qué significa el número.
+
+### No es un ingreso: es el stock que respalda la cobertura
+
+> Esto **cambió** con `sql/cashflow_cobertura.sql`. Antes este saldo entraba al flujo como
+> un `INGRESO` en la fecha de su carga, y este README y el encabezado del script decían
+> justamente eso.
+
+Estaba mal: **que el saldo invertido se informe un día no significa que ese día entre
+plata**. La plata ya está, invertida. Lo que hay que decidir es *cuándo se la usa*, y esa
+decisión ahora se carga en la sección **Cobertura** del tablero, sobre las columnas que
+quedan en rojo. Ver `README-cashflow.md`.
+
+Concretamente:
+
+- La fila `SALDO_INVERSIONES` de Disponibilidades quedó **inhabilitada** (baja lógica; se
+  reactiva desde Parámetros, pero mostraría el mismo dinero dos veces y el validador lo
+  rechaza).
+- En su lugar, la fila `STOCK_INVERSIONES` de la sección Cobertura, de tipo
+  `STOCK_COBERTURA`: **no va en ninguna columna de fecha** —es un stock, no un flujo— y su
+  importe se muestra sólo en la columna Total.
+- El proveedor sirve ahora la serie `STOCK`. La vieja `INGRESO` queda declarada para poder
+  volver atrás sin tocar código, y las dos están relacionadas en `'componentes'` del
+  registro para que no puedan estar activas a la vez.
+
+**Dólares Cuenta Comitente no se toca:** sigue siendo un ingreso. En el Excel está en el
+bloque del Disponible y no en el de inversiones, y es plata en una cuenta, no un fondo
+invertido.
+
+### El stock es la ÚLTIMA carga, no la suma de todas
+
+Cada carga es una **foto** del saldo invertido a esa fecha, no un depósito. Dos cargas de
+3,5 y 3,6 millones son el mismo dinero informado dos veces, así que el stock es 3,6 y no
+7,1.
+
+La serie vieja las sumaba —era un ingreso por fecha— y con más de una carga habría mostrado
+plata que no existe. El síntoma no apareció antes sólo porque hasta ahora hay una sola
+carga.
 
 ### Se carga en PESOS, y es una decisión
 
@@ -88,7 +162,8 @@ El campo es `IMPORTE_ARS` y **no hay conversión**: lo que se carga es lo que en
 tablero.
 
 Los dólares de la cuenta comitente hacen lo contrario —se guardan en dólares y el proveedor
-los valúa con el oficial del BCRA de cada mes— y eso **no es una inconsistencia**: ahí el
+los valúa con la última cotización oficial conocida a su fecha— y eso **no es una
+inconsistencia**: ahí el
 dato *es* en dólares, y guardarlo en pesos congelaría la valuación. Acá el saldo se informa
 en pesos, así que no hay nada que valuar. Convertirlo sería inventarle una moneda de origen
 que el dato no tiene, y el síntoma aparecería recién cuando el número del tablero no
@@ -99,8 +174,8 @@ que se ve no es el que llega al tablero, y acá sí.
 
 **Para darlo vuelta**, si algún día el saldo se informa en dólares, son cuatro pasos en
 cuatro archivos, y están escritos arriba de `sql/cashflow_saldo_inversiones.sql`: renombrar
-la columna, hacer que `OtrosIngresosProvider::saldoInversiones()` convierta con el mapa
-mensual de `Cotizacion` —exactamente como `dolaresComitente()`—, poner `'moneda' => 'USD'`
+la columna, hacer que `OtrosIngresosProvider::stockInversiones()` convierta con
+`Cotizacion::ultimaHasta()` —exactamente como `dolaresComitente()`—, poner `'moneda' => 'USD'`
 en el registro y cambiar los rótulos. **Ninguno de los cuatro adivina la moneda del otro**,
 y eso es lo que hace que la decisión sea reversible en lugar de un supuesto desparramado.
 
@@ -160,6 +235,10 @@ completa de punta a punta — archivo, JS, CSS, script SQL, entrada en `$validTa
 del menú contando en el `n/m` de la categoría. Sin esa última, el menú prometería una
 pantalla que devuelve 400.
 
+Y de la **valuación**, inyectando una `Cotizacion` de mentira con agujeros en la serie —sábados, domingos, feriados— para no depender de la base: que un día sin cotización tome la anterior *y diga de qué día es*; que una carga posterior a la última cotización cargada use esa última, que es justo lo que el criterio de cierre mensual no podía contestar; y que sin ninguna cotización anterior el tipo de cambio y el importe en pesos queden en `null` y no en cero, con esos dólares informados aparte.
+
+Y del cambio de **ingreso a stock**: que el registro ofrezca la serie `STOCK`, que la vieja `INGRESO` siga declarada para poder volver atrás, y que tener las dos filas activas a la vez sea un error de configuración —es el mismo dinero mostrado dos veces—.
+
 Con base, además: que ninguna fecha tenga dos importes vigentes, que es lo que garantiza que la fila del tablero no cuente la misma plata dos veces.
 
 ```bash
@@ -173,6 +252,7 @@ php tests/run.php otros_ingresos
 ```
 sql/cashflow_dolares_comitente.sql               Tabla + fila del tablero
 sql/cashflow_saldo_inversiones.sql               Tabla + fila del tablero (y el criterio de la moneda)
+sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql           La cotización diaria, sin colapsar por mes
 cashflow/Class/OtrosIngresos.php                 Lectura, carga y validaciones de los dos conceptos
 cashflow/Class/Providers/OtrosIngresosProvider.php  Las dos series del tablero
 cashflow/Controller/OtrosIngresosController.php

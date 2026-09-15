@@ -152,17 +152,36 @@ seccion('una fila informativa se muestra pero no computa');
 chequear('la fila muestra su importe', 9999.0, $p['VENTA_INFO']['dias']['2026-09-06']);
 chequear('esta marcada como que no computa', false, $p['VENTA_INFO']['computa']);
 chequear('el subtotal de su seccion no la incluye', 100.0, $p['SUB_ING']['dias']['2026-09-06']);
-chequear('el flujo neto tampoco', 100.0, $p['FLUJO']['dias']['2026-09-06']);
+chequear('el flujo neto tampoco (1000 de saldo + 100, y no los 9999)',
+    1100.0, $p['FLUJO']['dias']['2026-09-06']);
 
-seccion('flujo neto');
+seccion('flujo neto: Ingresos - Egresos, CON el saldo que se muestra arriba');
 
-chequear('flujo del 06/09', 100.0, $p['FLUJO']['dias']['2026-09-06']);
-chequear('flujo del 07/09 = 200 - 50', 150.0, $p['FLUJO']['dias']['2026-09-07']);
+// La definicion es Ingresos - Egresos, y los Ingresos del cuadro arrancan en el
+// Disponible, que incluye el saldo en bancos: en el Excel D38 = D13 + D37.
+// Antes esta fila sumaba solo los movimientos, con lo que un dia con saldo
+// inicial mostraba la variacion de caja y no lo que el rotulo promete.
+chequear('flujo del 06/09 = 1000 de saldo + 100 de cobros',
+    1100.0, $p['FLUJO']['dias']['2026-09-06']);
+chequear('flujo del 07/09 = 200 - 50, sin saldo ese dia', 150.0, $p['FLUJO']['dias']['2026-09-07']);
 chequear('un dia sin movimiento', 0.0, $p['FLUJO']['dias']['2026-09-08']);
 chequear('flujo de octubre = 500 - 100', 400.0, $p['FLUJO']['meses']['2026-10']);
 chequear('el flujo neto es la suma de los subtotales',
     $p['SUB_ING']['dias']['2026-09-07'] + $p['SUB_EGR']['dias']['2026-09-07'],
     $p['FLUJO']['dias']['2026-09-07']);
+
+// ES EL SALDO MOSTRADO, NO EL ARRASTRE: el 07/09 el arrastre vale 1100 y el
+// flujo neto vale 150. Esa es exactamente la diferencia entre FLUJO_NETO y
+// SALDO_FINAL, y es lo que no puede confundirse.
+chequear('no arrastra: el 07/09 no repite el saldo del 06/09',
+    150.0, $p['FLUJO']['dias']['2026-09-07']);
+chequear('y el saldo final del mismo dia si lo arrastra',
+    1250.0, $p['SALDO_FIN']['dias']['2026-09-07']);
+
+// SALDO_FINAL no suma dos veces el saldo: entra al arrastre como aporte, no
+// como fila mostrada. Si sumara las dos cosas, el 06/09 daria 2100.
+chequear('el saldo final no cuenta el saldo dos veces',
+    1100.0, $p['SALDO_FIN']['dias']['2026-09-06']);
 
 seccion('arrastre del saldo');
 
@@ -201,9 +220,9 @@ chequear('se cumple cierre[n] == apertura[n+1]', false, $descuadre);
 
 seccion('totales');
 
-chequear('total del tramo del flujo = 100 + 150 + 0', 250.0, $p['FLUJO']['total_tramo']);
+chequear('total del tramo del flujo = 1100 + 150 + 0', 1250.0, $p['FLUJO']['total_tramo']);
 chequear('total mensual del flujo = 0 + 400 + 0', 400.0, $p['FLUJO']['total_meses']);
-chequear('total del horizonte del flujo = 250 + 400', 650.0, $p['FLUJO']['total_horizonte']);
+chequear('total del horizonte del flujo = 1250 + 400', 1650.0, $p['FLUJO']['total_horizonte']);
 chequear('el total de una fila de saldo NO es una suma: es el cierre del tramo',
     1250.0, $p['SALDO_FIN']['total_tramo']);
 chequear('y el del horizonte es el cierre final', 1650.0, $p['SALDO_FIN']['total_horizonte']);
@@ -218,9 +237,12 @@ $kd = $t['kpi']['dias'];
 $km = $t['kpi']['meses'];
 $kc = $t['kpi']['completo'];
 
-chequear('dias: ingresos', 300.0, $kd['ingresos']);
+// El saldo que se MUESTRA suma en Ingresos, igual que en la fila Total
+// Ingresos: si no, la tarjeta y la fila que tiene al lado dirian numeros
+// distintos y ninguna de las dos serviria.
+chequear('dias: ingresos = 1000 de saldo + 300 de cobros', 1300.0, $kd['ingresos']);
 chequear('dias: egresos en positivo', 50.0, $kd['egresos']);
-chequear('dias: flujo = 300 - 50', 250.0, $kd['flujo']);
+chequear('dias: flujo = 1300 - 50', 1250.0, $kd['flujo']);
 chequear('dias: el KPI coincide con el total de la fila del tablero',
     $p['FLUJO']['total_tramo'], $kd['flujo']);
 chequear('dias: saldo de cierre', 1250.0, $kd['saldo_cierre']);
@@ -236,7 +258,7 @@ chequear('meses: el KPI coincide con el total mensual de la fila',
 chequear('meses: saldo de cierre es el final del horizonte', 1650.0, $km['saldo_cierre']);
 chequear('meses: el minimo es el de su propio tramo', 1250.0, $km['minimo']['valor']);
 
-chequear('completo: ingresos son la suma de los dos', 800.0, $kc['ingresos']);
+chequear('completo: ingresos son la suma de los dos, con el saldo', 1800.0, $kc['ingresos']);
 chequear('completo: egresos', 150.0, $kc['egresos']);
 chequear('completo: flujo coincide con el total del horizonte',
     $p['FLUJO']['total_horizonte'], $kc['flujo']);

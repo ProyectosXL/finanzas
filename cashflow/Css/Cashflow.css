@@ -225,3 +225,104 @@
 .tab-cashflow .cf-marca-pactado {
     color: #7e57c2;
 }
+
+/* ============================================================================
+   SECCIÓN COBERTURA
+
+   Tres filas debajo del Flujo Neto: cuánto hay invertido, cuánto se aplica en
+   cada fecha, y el flujo neto ya con esa aplicación.
+   ============================================================================ */
+
+/* El stock. Se atenúa como una informativa —no entra en ninguna suma— pero sin
+   la itálica, porque el importe de su columna Total sí es un número que se lee
+   y compara contra los rojos de abajo. */
+.tab-cashflow .cf-tipo-stock_cobertura td {
+    color: #6b7c8f;
+}
+
+.tab-cashflow .cf-marca-stock {
+    color: #2e9e6b;
+}
+
+/* CUÁNTO QUEDA, EN LA CELDA DE CONCEPTO
+
+   Va acá y no sólo en la columna Total porque Concepto es la columna que queda
+   FIJA al scrollear a lo ancho: con veintiocho columnas, un importe que sólo
+   vive al final de la tabla no lo mira nadie. Y la pregunta que se hace quien
+   está decidiendo dónde aplicar no es cuánto hay, sino cuánto queda.
+
+   Segunda línea y no al lado del nombre: el nombre sale de la configuración y
+   puede ser largo, y la columna tiene ancho fijo con puntos suspensivos. En la
+   misma línea, el importe sería lo primero que se recorta. */
+.tab-cashflow .cf-stock-saldo {
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.2;
+    color: #2e9e6b;
+    cursor: help;
+}
+
+/* Se aplicó más de lo que hay. No se bloquea —puede ser deliberado— pero el
+   número tiene que verse distinto, y el motor además lo dice en los avisos. */
+.tab-cashflow .cf-stock-saldo.cf-negativo {
+    color: #c0392b;
+}
+
+/* La fila editable. El borde superior la separa del stock: son dos cosas
+   distintas -lo que hay y lo que se usa- y sin la línea se leen como un bloque
+   de dos números del mismo tipo. */
+.tab-cashflow .cf-tipo-uso_cobertura td {
+    border-top: 1px dashed #c8d4e0;
+}
+
+.tab-cashflow .cf-marca-editable {
+    color: #2e7cc4;
+}
+
+/* Las celdas que se pueden cargar. El fondo tenue es lo único que dice que
+   ahí se puede hacer clic: sin eso, la fila parece de sólo lectura como todas
+   las demás del tablero. */
+.tab-cashflow .cf-cobertura-editable {
+    cursor: pointer;
+    background-color: #f2f7fc;
+}
+
+.tab-cashflow .cf-cobertura-editable:hover {
+    background-color: #e3eef9;
+    box-shadow: inset 0 0 0 1px #9ec3e6;
+}
+
+.tab-cashflow .cf-input-cobertura {
+    min-width: 72px;
+    padding: 1px 4px;
+    font-size: 0.78rem;
+    text-align: right;
+}
+
+/* ============================================================================
+   COLUMNAS CON SALDO FINAL NEGATIVO
+
+   Es donde falta plata, o sea exactamente dónde hace falta cobertura. Se marca
+   la columna ENTERA -encabezado incluido- y no sólo la celda del Saldo Final:
+   con veintiocho columnas, encontrar el rojo de la última fila obliga a
+   recorrerla número por número, y la pregunta "¿qué día me quedo corto?" es la
+   que se hace cualquiera que abre este tablero.
+
+   Va con un borde lateral y un fondo muy tenue, no con color de texto: el color
+   de texto ya lo usan el importe negativo y el cero, y pisarlo haría que un
+   ingreso normal de una columna en rojo se leyera como negativo.
+   ============================================================================ */
+
+.tab-cashflow .cf-col-negativa {
+    background-color: #fdf3f2;
+}
+
+.tab-cashflow thead .cf-col-negativa {
+    box-shadow: inset 0 -3px 0 #e07a6f;
+}
+
+/* La columna fuera de secuencia gana: ahí no hay proyección que pueda estar en
+   rojo, así que su gris tiene que seguir mandando. */
+.tab-cashflow .cf-col-fuera.cf-col-negativa {
+    background-color: #f4f5f7 !important;
+}

@@ -16,8 +16,23 @@
    cashflow_dolares_comitente.sql y README-otros-ingresos.md. La unica
    diferencia esta abajo y es la moneda.
 
-   ES UN INGRESO, NO UNA DISPONIBILIDAD. El importe entra al flujo en la fecha
-   que se le carga; no es un saldo de apertura y no arrastra.
+   NO ES UN INGRESO: ES EL STOCK QUE RESPALDA LA COBERTURA.
+
+   Esto CAMBIO. Hasta sql/cashflow_cobertura.sql el importe entraba al flujo
+   como un INGRESO en la fecha de su carga, y aca decia justamente eso. Estaba
+   mal: que el saldo invertido se informe un dia no significa que ese dia entre
+   plata. La plata ya esta, invertida, y lo que hay que decidir es CUANDO se la
+   usa.
+
+   Hoy el saldo alimenta la fila "Inversiones disponibles" de la seccion
+   Cobertura -tipo STOCK_COBERTURA-, que no va en ninguna columna de fecha y no
+   entra en ninguna suma. Lo que mueve el saldo proyectado es la fila "Uso de
+   Inversiones", que se carga aparte. Ver sql/cashflow_cobertura.sql.
+
+   Y EL STOCK ES LA ULTIMA CARGA, NO LA SUMA DE TODAS. Cada carga es una foto
+   del saldo a esa fecha; sumarlas contaria el mismo dinero tantas veces como
+   veces se haya informado. La serie vieja las sumaba y el sintoma no aparecio
+   antes solo porque hasta ahora hay una sola carga.
 
    ----------------------------------------------------------------------------
    SE GUARDA EN PESOS. ES UNA DECISION, NO UN DESCUIDO.
@@ -35,8 +50,10 @@
    PARA DARLO VUELTA, SI ALGUN DIA EL SALDO SE INFORMA EN DOLARES:
 
      1. Renombrar la columna a IMPORTE_USD (o agregarla y migrar).
-     2. Hacer que OtrosIngresosProvider::saldoInversiones() convierta con el
-        mapa mensual de Cotizacion, exactamente como hace dolaresComitente().
+     2. Hacer que OtrosIngresosProvider::stockInversiones() convierta con
+        Cotizacion::ultimaHasta(), como hace dolaresComitente(). Es la ultima
+        cotizacion conocida a la fecha y no el cierre del mes: lo que se valua
+        es un saldo que esta hoy en una cuenta.
      3. Poner 'moneda' => 'USD' en la entrada SALDO_INVERSIONES de
         CashflowRegistry.
      4. Cambiar el rotulo de la pantalla y el del formulario.
@@ -102,7 +119,12 @@ GO
    escribir 'INGRESOS' en duro dejaria la fila colgando de una seccion
    inhabilitada en una base ya migrada, y la fila no se dibujaria.
 
-   Es un INGRESO: el importe entra al flujo en la fecha que se le carga.
+   OJO: ESTE BLOQUE ES HISTORICO. Crea la fila como INGRESO en la seccion de
+   disponibilidades, que es como nacio. sql/cashflow_cobertura.sql la
+   INHABILITA despues y crea en su lugar la fila de stock de la seccion
+   Cobertura. Se deja tal cual, y no se corrige, porque los dos scripts se
+   corren en orden y este tiene que seguir levantando una base desde cero: un
+   script de migracion describe el paso que dio, no el estado final.
 
    LA FILA ENTRA ACTIVA, igual que la de dolares. Una fila apuntada a un
    proveedor que existe y a una serie que ofrece no puede invalidar la

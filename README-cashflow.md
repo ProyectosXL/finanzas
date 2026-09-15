@@ -38,6 +38,9 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 | 4 | `sql/cashflow_dolares_comitente.sql` | Crea `RO_T_CASHFLOW_DOLARES_COMITENTE` y apunta su fila del tablero a la serie `INGRESO` | La pestaña avisa que falta la tabla y **la fila queda inválida**: apuntaría a una serie que el proveedor ya no ofrece |
 | 4b | `sql/cashflow_exportaciones_tasky.sql` | Siembra `exportaciones_tasky_dias_cobro` (30) y, si no existe, la fila `EXPORTACIONES` | La pestaña proyecta con 30 días igual; la fila ya existe en una base que corrió el script 7 |
 | 4c | `sql/cashflow_saldo_inversiones.sql` | Crea `RO_T_CASHFLOW_SALDO_INVERSIONES` y **crea** la fila `SALDO_INVERSIONES`, tomando la sección de la fila de dólares | La pestaña avisa que falta la tabla y la fila **no existe**, así que ese saldo no entra al tablero |
+| 4d | `sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql` | La cotización del dólar oficial **día por día**, sin colapsar por mes. La vista que ya existía se queda con el cierre mensual, que no sirve para valuar un saldo que está hoy en una cuenta | Dólares Cuenta Comitente avisa y **su fila va en cero**: los dólares cargados están, lo que falta es a cuánto valuarlos |
+| 8 | `sql/cashflow_estructura_ingresos_egresos.sql` | Cuelga Disponibilidades y Ventas de **Ingresos**, y los tres bloques de costos de **Egresos**; agrega *Total Ingresos* y *Total Egresos*; da de baja **Ajustes** entera | El cuadro sigue plano: cinco subtotales y ninguno contesta cuánto entra ni cuánto sale en total |
+| 9 | `sql/cashflow_cobertura.sql` | Amplía el `CHECK` de `TIPO` con `STOCK_COBERTURA` y `USO_COBERTURA`, crea `RO_T_CASHFLOW_COBERTURA_APLIC` y la sección **Cobertura**, y baja `SALDO_FINAL` a su final | No hay sección Cobertura: el saldo de inversiones sigue entrando al flujo como ingreso y **no se puede aplicar en ninguna fecha**. Si además se corre a medias, el editor de estructura deja elegir un tipo que la base rechaza |
 
 ### Scripts modificados — hay que volver a correrlos
 
@@ -77,7 +80,12 @@ En este orden, contra `central`:
 -- 9. sql/cashflow_dolares_comitente.sql  (Otros Ingresos: dolares cuenta comitente)
 -- 10. sql/cashflow_exportaciones_tasky.sql  (Ingresos: plazo de cobro y fila de Exportaciones Tasky)
 -- 11. sql/cashflow_saldo_inversiones.sql  (Otros Ingresos: saldo de inversiones, EN PESOS)
+-- 12. sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql  (cotizacion diaria, para valuar los dolares)
+-- 13. sql/cashflow_estructura_ingresos_egresos.sql  (Ingresos y Egresos como bloques; baja Ajustes)
+-- 14. sql/cashflow_cobertura.sql  (seccion Cobertura: stock de inversiones y su aplicacion)
 ```
+
+**El 13 y el 14 van en ese orden y al final**, porque el 14 mueve `SALDO_FINAL` al final de la sección que crea y da de baja la fila del saldo de inversiones que crearon los anteriores. Correr el 14 sin el 13 no rompe nada, pero deja el cuadro a medio reagrupar.
 
 Los que alimentan pestañas puntuales están documentados en su propio README: `sql/ventas_proyeccion.sql` y compañía en `README-ventas.md`, `sql/cashflow_cobranzas_parametros.sql` y `sql/cashflow_cobranzas_may.sql` en `README-cobranzas-fr.md` y `README-cobranzas-may.md`.
 
@@ -99,7 +107,13 @@ El noveno crea la tabla de carga de los **dólares de la cuenta comitente** y de
 
 El décimo siembra el plazo de cobro de **Exportaciones Tasky** y su fila del tablero si no existía. No crea ninguna tabla: las facturas salen de `GVA12`. **Se valúan todas al dólar de hoy, a propósito** —ver `README-exportaciones-tasky.md` antes de tocar eso—.
 
-El undécimo crea la tabla del **saldo de inversiones** y su fila del tablero, que no existía. Es el mismo circuito que los dólares de la cuenta comitente pero **se carga en pesos y no se convierte**: el criterio y cómo revertirlo están escritos arriba del script. Ver `README-otros-ingresos.md`.
+El undécimo crea la tabla del **saldo de inversiones** y su fila del tablero, que no existía. Es el mismo circuito que los dólares de la cuenta comitente pero **se carga en pesos y no se convierte**: el criterio y cómo revertirlo están escritos arriba del script. Ver `README-otros-ingresos.md`. Ojo: el script 14 después **inhabilita** esa fila y crea en su lugar la de stock de la sección Cobertura. Se deja tal cual porque un script de migración describe el paso que dio, no el estado final.
+
+El duodécimo crea la vista **diaria** del dólar oficial. La que ya existía colapsa a una fila por mes —el cierre—, que sirve para valuar lo que se vendió en cada mes pero no para decir cuánto valen hoy unos dólares que están en una cuenta. Las dos conviven y las dos son correctas. Ver `README-otros-ingresos.md`.
+
+El decimotercero reagrupa las secciones bajo **Ingresos** y **Egresos** y da de baja **Ajustes**. Es un cambio de datos, no de código: reparenta cinco secciones y agrega dos filas `SUBTOTAL`.
+
+El decimocuarto crea la sección **Cobertura** —el stock de inversiones y su aplicación por fecha— y baja `SALDO_FINAL` a su final. Es el único de los dos que trae código nuevo: una tabla, un proveedor, un controller, dos tipos de fila y el editor de la grilla.
 
 Todos son reejecutables y no pisan nada ya editado. Si no se corrieron, la pantalla **no falla**: muestra un aviso diciendo que hay que correrlos.
 
@@ -505,9 +519,15 @@ No hay ninguna referencia fila a fila guardada. El alcance es **posicional**, re
 | `SALDO_INICIAL` | Nada: es una fila de DATOS, muestra lo que devuelve su módulo de origen |
 | `INGRESO` | Suma (+1) |
 | `EGRESO` | Resta (−1) |
+| `STOCK_COBERTURA` | Nada, y además **no va en ninguna columna de fecha**: es un stock, no un flujo |
+| `USO_COBERTURA` | Suma (+1), como un ingreso, pero **no cuenta como ingreso en los indicadores** |
 | `SUBTOTAL` | Las filas de movimiento **y de saldo inicial** de su sección y de las secciones hijas |
-| `FLUJO_NETO` | Las filas de movimiento que estén **por encima** |
-| `SALDO_FINAL` | Lo mismo, más el arrastre del saldo |
+| `FLUJO_NETO` | Las filas de movimiento **y de saldo** que estén **por encima** |
+| `SALDO_FINAL` | Los movimientos que estén por encima, más el arrastre del saldo |
+
+**`FLUJO_NETO` incluye el saldo que se muestra más arriba**, y eso cambió. La definición es *Ingresos − Egresos*, y los Ingresos del cuadro arrancan en el Disponible, que incluye el saldo en bancos: en el Excel `D38 = D13 + D37`. Antes sumaba sólo los movimientos, con lo que un día con saldo inicial mostraba la variación de caja y no lo que el rótulo promete.
+
+Es el **saldo mostrado, no el arrastre**: la apertura acumulada no entra. Ésa es exactamente la diferencia entre `FLUJO_NETO` y `SALDO_FINAL`, que no se tocó. Y por eso `SALDO_FINAL` *no* suma el saldo mostrado: ahí ya entró al arrastre como aporte, y contarlo de nuevo lo duplicaría. `Cashflow::sumarSaldoMostrado()` acepta los dos filtros —por alcance de sección, para los subtotales; por posición, para el flujo neto— y cada llamador usa el suyo.
 
 **El `ROL` de la sección no participa del cálculo.** Quien decide cómo participa una fila es su `TIPO`; el `ROL` (`SALDO` / `MOVIMIENTO` / `DERIVADO`) quedó para agrupar y para los avisos del validador. Antes sí participaba, y eso hacía imposible una sección que contuviera a la vez el saldo en bancos y las cobranzas — que es exactamente lo que tiene el Excel.
 
@@ -528,7 +548,33 @@ Que `FLUJO_NETO` sume "lo que está por encima" es lo que permite configurar un 
 
 ## La estructura del Excel
 
-El cuadro original no tiene una sección "Ingresos". Tiene dos bloques:
+### Cómo queda armado el cuadro
+
+Las secciones **cuelgan unas de otras** por `ID_PADRE`, y un `SUBTOTAL` abarca su sección y todas sus hijas en cascada. Con eso el cuadro se lee como "esto entra / esto sale" sin ningún lenguaje de fórmulas:
+
+```
+ORDEN  SECCIÓN              ID_PADRE     qué contiene
+ 10    Disponibilidades     INGRESOS     saldo en bancos + todas las cobranzas del día
+ 30    Ventas               INGRESOS     cobranza sobre ventas estimadas, por canal
+ 35    Ingresos             —            Total Ingresos
+ 50    Costo de Mercadería  EGRESOS
+ 60    Costos Directos      EGRESOS
+ 70    Costos Indirectos    EGRESOS
+ 75    Egresos              —            Total Egresos
+ 90    Resultados           —            Flujo Neto (sin cobertura)
+ 95    Cobertura            —            Inversiones disponibles / Uso de Inversiones /
+                                         Flujo Neto (con cobertura) / Saldo Final
+```
+
+**La sección madre va con un `ORDEN` mayor que el de sus hijas, y es a propósito.** El árbol define el **alcance** del subtotal; el `ORDEN` define **dónde se dibuja**. Un *Total Ingresos* tiene que caer abajo del bloque que totaliza. Las dos cosas son independientes y tienen que serlo: si el orden mandara sobre el alcance, no se podría poner un total abajo de lo que suma.
+
+**No hay doble conteo con los subtotales anidados.** `SUB_DISPONIBLE` y `SUB_INGRESOS_VENTA` quedan dentro del alcance de `SUB_INGRESOS`, pero un `SUBTOTAL` suma filas de movimiento y de saldo, y un subtotal no es ninguna de las dos cosas. Lo fija `tests/test_cobertura.php`, sobre un escenario con dos niveles de anidación.
+
+**La sección Ajustes se dio de baja entera** (`ACTIVO = 0`, nunca `DELETE`), junto con sus filas `FINANCIERO`, `OTROS` y `SUB_AJUSTES`. Es una decisión provisoria —más adelante se evalúa—, y por eso importa que reactivarlas sea poner el bit en 1 desde Parámetros y no volver a cargar la configuración.
+
+Lo hace `sql/cashflow_estructura_ingresos_egresos.sql`, que **no toca el motor**: reparenta cinco secciones y agrega dos filas `SUBTOTAL`.
+
+### Los dos bloques del cuadro original
 
 **1. Disponibilidades** — el saldo en bancos **más** todo lo que entra por cobranzas (echeqs, cobranzas electrónicas, franquicias, mayoristas, dólares de la cuenta comitente, exportaciones, caja de locales). Su subtotal es la fila *Total Disponibilidades*:
 
@@ -566,6 +612,106 @@ El arrastre sigue existiendo, pero lo muestra **sólo `SALDO_FINAL`**, que es la
 `VentasProvider` expone diez series: cobranza y venta, totales y abiertas por los cuatro canales. Las cuatro por canal suman exactamente el total.
 
 Activar a la vez la serie total y sus componentes cuenta **dos veces** el mismo importe, y la regla de origen repetido no lo ve, porque son series distintas. El registro declara la relación en `componentes` y el validador la rechaza.
+
+---
+
+## La sección Cobertura
+
+El tablero proyecta el saldo día por día y en algunas columnas da negativo o queda muy justo. La plata para cubrir eso **existe** —está invertida—, pero el tablero no tenía dónde decir *cuándo* se la piensa usar, ni mostrar cuánta hay.
+
+Debajo del *Flujo Neto (sin cobertura)*:
+
+| Fila | Tipo | Qué es |
+| --- | --- | --- |
+| Inversiones disponibles | `STOCK_COBERTURA` | Cuánto hay. **No va en ninguna columna de fecha**: el importe va en la columna Total, y **cuánto queda** en la celda de Concepto, que es la que no se va al scrollear |
+| Uso de Inversiones | `USO_COBERTURA` | Cuánto se aplica en cada fecha. **Se edita en el propio tablero** y puede ser negativa |
+| Flujo Neto (con cobertura) | `FLUJO_NETO` | El de arriba más lo aplicado en esa columna |
+| Saldo Final | `SALDO_FINAL` | La posición proyectada, ya con la cobertura |
+
+### No hizo falta ninguna regla nueva en el motor
+
+El alcance de las filas calculadas es **posicional**. *Uso de Inversiones* queda **debajo** de *Flujo Neto (sin cobertura)* y **arriba** de *Flujo Neto (con cobertura)*, así que el primero la excluye y el segundo la incluye, sin que el motor tenga que saber que la cobertura existe. Es exactamente el caso de uso del resultado intermedio que el diseño ya preveía, y por eso el *Flujo Neto (con cobertura)* es un `FLUJO_NETO` común y no un tipo nuevo:
+
+```
+Flujo Neto (con cobertura) = Flujo Neto (sin cobertura) + uso de esa columna
+```
+
+Sin acumular nada en la fórmula. La cuenta del Excel, `D47 = D38 + uso`.
+
+**`SALDO_FINAL` se movió al final de esta sección**, por el mismo motivo: suma lo que tiene por encima, así que ahí recoge el uso. Si se hubiera quedado en Resultados mostraría la posición sin cubrir y contradiría a la fila que tiene justo arriba. Resultados queda con el Flujo Neto sin cobertura, que es lo que ese bloque contesta.
+
+El arrastre, en cambio, usa **todos** los movimientos sin límite posicional, así que el uso entra a la posición proyectada esté donde esté puesta la fila.
+
+### Por qué el uso es un movimiento pero no un ingreso
+
+`USO_COBERTURA` está en `TIPOS_MOVIMIENTO` con signo `+1`: la plata **se mueve de verdad** y tiene que entrar al arrastre del saldo.
+
+Pero **no suma en los indicadores de Ingresos ni de Egresos**. No es plata que el negocio genere ni gaste: es pasarla de una inversión a la cuenta. Contarla como ingreso haría subir el indicador por haber movido plata de bolsillo, y el de *Flujo Neto* dejaría de coincidir con la fila *Flujo Neto (sin cobertura)* del cuadro, que está a dos centímetros. El KPI la informa aparte, en `kpi.cobertura`, y el pie de la tarjeta de Flujo Neto lo dice cuando hay.
+
+Donde **sí** aparece es en el *Saldo Final* y en el *Saldo Mínimo*, que salen del arrastre. Y es lo que se quiere: tapar el peor saldo proyectado es exactamente para lo que existe.
+
+### El stock es un stock
+
+`STOCK_COBERTURA` no va en ninguna columna de fecha. Ponerlo en un día diría que ese día entra plata, y además lo sumaría el Total de esa vista como si fuera flujo. El motor le vacía las columnas —el front las dibuja con un guión y un `title` que explica por qué— y el importe queda **sólo en la columna Total**, igual en las tres vistas: lo disponible no depende del tramo que se elija mirar.
+
+Lo alimenta la serie `STOCK` de `SALDO_INVERSIONES`, que es **la última carga y no la suma de todas**: cada carga es una foto del saldo, no un depósito. Ver `README-otros-ingresos.md`.
+
+### Cuánto queda, sin ir hasta el final de la tabla
+
+El importe vive en la columna Total, que con veintiocho columnas queda a un scroll horizontal de distancia: ahí no lo mira nadie. Y la pregunta de quien está decidiendo dónde aplicar no es *cuánto hay* sino **cuánto queda**.
+
+Así que la fila de stock lleva una segunda línea en su celda de **Concepto** —la columna que queda fija al scrollear a lo ancho—:
+
+```
+Inversiones disponibles  🐷
+$ 2.529.962 de $ 3.529.962
+```
+
+Sin nada aplicado dice sólo `$ 3.529.962 disponibles`: *"queda X de X"* es ruido.
+
+Va en una segunda línea y no al lado del nombre porque **el nombre sale de la configuración y puede ser largo**, y la columna tiene ancho fijo con puntos suspensivos: en la misma línea, el importe sería lo primero que se recorta.
+
+**El motor lo calcula, el front lo dibuja.** `Cashflow::resolverCobertura()` cuelga `{stock, aplicado, disponible, hay_stock}` a las dos filas de la sección, después de los totales —el stock ya no está en ninguna columna a esa altura—. Es la regla del módulo: el front de este tablero no calcula nada.
+
+**Se mide sobre todo el horizonte, no sobre la vista activa.** El stock es un stock: no cambia porque uno mire el tramo diario en vez del mensual. Si lo aplicado se midiera por vista, el disponible cambiaría al tocar un botón —la misma plata, dos números distintos— y una aplicación cargada en un mes de más adelante no se descontaría justo mientras se mira la vista Días, que es cuando se decide aplicar más.
+
+**Un uso negativo suma al disponible**, porque devuelve plata a la inversión. Sale gratis: es la misma resta con el signo del dato.
+
+**Aplicar más de lo que hay avisa, pero no se bloquea.** Planificar con plata que todavía no está puede ser deliberado —un rescate que se va a hacer, una suscripción en camino—, así que la app no lo impide. Lo que no puede pasar es que el tablero tape un saldo final con plata inexistente sin decirlo: el número se pinta en rojo y el motor deja un aviso que dice cuánto falta.
+
+**Sin fila de stock no se inventa un disponible.** Puede estar inhabilitada, o su módulo puede no haber devuelto nada; `hay_stock` en `false` es lo que distingue "no se sabe" de "no hay plata". Contestar cero sería lo segundo cuando lo cierto es lo primero.
+
+### Se edita desde el tablero, no desde otra pantalla
+
+La decisión que expresa esta fila —cuánto aplicar y en qué día— se toma **mirando las columnas en rojo**. Un editor en otra pestaña obligaría a ir y volver comparando fechas, que es justamente el trabajo que la fila existe para evitar. Por eso el proveedor `COBERTURA` **no declara `tab`** y su fila no queda como enlace.
+
+- Clic en una celda de la fila → un input; Enter guarda, Escape cancela.
+- **Sólo las columnas diarias.** Una columna mensual acumula muchos días y la aplicación se guarda con una fecha: elegir una por el sistema —el día 1, por ejemplo— sería inventar un dato que nadie cargó. La celda mensual muestra el acumulado y lo dice en el `title`.
+- Vaciar la celda **da de baja** la aplicación de esa fecha; no guarda un cero. Un cero no es una aplicación de cero pesos: es no tener ninguna, y la baja además deja rastro en el historial.
+- Guardar **recarga el tablero entero**: la aplicación cambia el flujo de esa columna, el saldo final de todas las siguientes, el saldo mínimo, las columnas que quedan en rojo y los indicadores. Rehacer eso en el navegador sería reimplementar en JS el arrastre que ya hace el motor.
+
+### Las columnas con saldo negativo se marcan
+
+Se marca la **columna entera**, encabezado incluido, y no sólo la celda del *Saldo Final*: con veintiocho columnas, encontrar el rojo de la última fila obliga a recorrerla número por número, y *"¿qué día me quedo corto?"* es la pregunta que se hace cualquiera que abre este tablero.
+
+Se mira el **Saldo Final** y no el flujo de la columna: un día que gasta más de lo que entra no es un problema si se arranca con caja, y uno que no mueve nada sí lo es si viene arrastrando un rojo. Lo que hay que ver es la posición, no la variación. Y como el Saldo Final ya trae la cobertura aplicada, **al cargar una las columnas que se taparon dejan de marcarse solas**.
+
+### La tabla
+
+`RO_T_CASHFLOW_COBERTURA_APLIC`: fecha, importe, origen del fondo, observación, usuario e historial.
+
+- **Una aplicación vigente por fecha.** La fila del tablero es una sola, así que la pregunta que contesta la tabla es "cuánta cobertura se aplica el día X". `ORIGEN` dice de qué fondo sale y es un dato de la aplicación, no parte de su identidad.
+- **El importe puede ser negativo**, y no lleva `CHECK` que lo impida: un negativo es sacar plata de la cuenta y volver a invertirla, que en una columna con saldo de sobra es una decisión tan real como aplicar cobertura. Lo que sí se rechaza es el cero.
+- **No hay baja física.** Pisar una fecha marca `VIGENTE = 0` las anteriores e inserta una nueva, en una transacción; borrar marca `VIGENTE = 0` y no inserta nada. El historial es lo único que explica por qué el saldo proyectado de ayer era otro: con un `UPDATE`, corregir un dedazo y cambiar de plan son indistinguibles después del hecho. Mismo criterio que `RO_T_CASHFLOW_SALDO_INVERSIONES`.
+- Los orígenes (`INVERSIONES`, `SUSCRIPCION`, `DOLARES`) son una lista declarada en `Cobertura::ORIGENES` y no texto libre: un campo libre termina con *Alyc*, *ALYC* y *Fondo Alyc* conviviendo, y después no hay forma de sumar por origen.
+
+### El saldo de inversiones dejó de ser un ingreso
+
+Su fila en Disponibilidades quedó **inhabilitada**. Entrar al flujo como ingreso en la fecha de su carga decía que ese día ingresaba plata, y no es cierto: la plata ya está. La serie vieja `INGRESO` sigue declarada para poder volver atrás desde Parámetros, pero las dos son el mismo dinero y están relacionadas en `componentes`, así que el validador rechaza tenerlas activas a la vez.
+
+Esto **contradice** lo que decía el encabezado de `sql/cashflow_saldo_inversiones.sql` (*"ES UN INGRESO, NO UNA DISPONIBILIDAD"*); ese texto quedó reescrito junto con el cambio, porque una nota que dice lo contrario de lo que hace el código es peor que no tener nota.
+
+**Dólares Cuenta Comitente no se tocó:** sigue siendo un ingreso.
 
 ---
 
@@ -713,6 +859,12 @@ php tests/run.php horizonte    # filtra por nombre de archivo
 
 Cubren el eje temporal y su secuencia cronológica, las tres vistas y su criterio de columnas y totales, el validador de la estructura regla por regla, el arrastre del saldo con números conocidos, el módulo Saldos, y que un proveedor que lanza, que devuelve basura o que devuelve `null` no pueda tumbar el tablero. Las que necesitan SQL Server se saltean solas si no hay conexión.
 
+De la **sección Cobertura**, `tests/test_cobertura.php` fija lo que la hace funcionar sin reglas nuevas en el motor: que el stock no vaya en ninguna columna de fecha y su total sea el mismo en las tres vistas; que **la posición de la fila de uso sea lo único** que separa los dos flujos netos —si alguien la mueve, esas pruebas se caen, que es exactamente lo que tienen que hacer—; que el arrastre la recoja y **el invariante `cierre[n] == apertura[n+1]` siga cerrando**; que no infle los indicadores de Ingresos ni de Egresos; y que **los subtotales anidados no dupliquen importes**, sobre un escenario con dos niveles de anidación.
+
+Y del **saldo de cobertura**: que se mida sobre todo el horizonte y no sobre la vista —con un escenario que aplica en el tramo diario *y* en una columna mensual, donde el total del tramo diario es otro número—; que un uso negativo sume al disponible; que aplicar de más avise y no bloquee; y que sin fila de stock no se invente un disponible.
+
+De `FLUJO_NETO`, `tests/test_cashflow.php` fija que incluya el saldo **mostrado** arriba y que no lo arrastre, y que `SALDO_FINAL` no lo cuente dos veces.
+
 **El motor acepta un `Horizonte` inyectado, y hace falta para poder probarlo.** El arrastre del saldo depende de qué día es hoy, así que un escenario con importes en fechas fijas deja de tener sentido en cuanto pasa esa fecha. Sin esa costura las pruebas del motor caducaban solas —y caducaron: 48 casos empezaron a devolver `null` al pasar el 06/09/2026, y la parte más delicada del módulo se quedó sin red. Es la misma costura que ya tenían `Ventas::proyectarVentas()` y `proyectarCobranzas()`.
 
 ```php
@@ -728,6 +880,8 @@ new Cashflow($estructura, $parametros, $horizonte)   // el horizonte es opcional
 ```
 sql/cashflow_estructura.sql                 Las dos tablas de configuración + semilla
 sql/cashflow_estructura_disponibilidades.sql  Reorganiza en Disponibilidades + Ventas
+sql/cashflow_estructura_ingresos_egresos.sql  Los cuelga de Ingresos y Egresos; baja Ajustes
+sql/cashflow_cobertura.sql                  Sección Cobertura: tipos, tabla y filas
 sql/cashflow_saldos.sql                     Tablas del modulo Saldos (README-saldos.md)
 sql/echeqs_prechequeado.sql                 Maestro de pre-chequeado + vista del neteo
 cashflow/Class/Horizonte.php                Eje temporal, compartido con Ventas
@@ -765,13 +919,19 @@ cashflow/Controller/OtrosIngresosController.php
 cashflow/Tabs/dolares_comitente.php
 cashflow/Tabs/saldo_inversiones.php         El segundo concepto: se carga EN PESOS
 sql/cashflow_saldo_inversiones.sql
+sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql      Cotización diaria, para valuar los dólares
+cashflow/Class/Cobertura.php                Aplicación de inversiones para cubrir baches
+cashflow/Class/Providers/CoberturaProvider.php   Serie APLICACION; no declara pestaña
+cashflow/Controller/CoberturaController.php      Se llama desde el tablero, no desde una pestaña
 cashflow/Class/Providers/ExportacionesProvider.php   Exportaciones Tasky (README-exportaciones-tasky.md)
 cashflow/Tabs/exportaciones_tasky.php
 sql/cashflow_exportaciones_tasky.sql
 tests/                                      Arnés de pruebas
 ```
 
-Modificados: `Class/Ventas.php` (delega el eje y acepta uno inyectado) · `Class/Ingresos.php` (`getCobranzasFRTotales`) · `Class/Parametros.php` (registro del módulo) · `Tabs/parametros.php` (navegación generada) · `Js/Parametros.js` (guardas contra null) · `Js/main.js` (`pedirJson`) · `index.php`, `TabController.php`, `Components/sidebar.php`, `Components/header.php` (el reemplazo de Resumen).
+Modificados: `Class/Ventas.php` (delega el eje y acepta uno inyectado) · `Class/Ingresos.php` (`getCobranzasFRTotales`; fecha manual también en mayoristas, y los métodos pierden el sufijo `FR`) · `Class/Parametros.php` (registro del módulo) · `Tabs/parametros.php` (navegación generada) · `Js/Parametros.js` (guardas contra null) · `Js/main.js` (`pedirJson`) · `index.php`, `TabController.php`, `Components/sidebar.php`, `Components/header.php` (el reemplazo de Resumen).
+
+De la rama `feature/cashflow-estructura-inversiones`: `Class/Cashflow.php` (el saldo mostrado entra en `FLUJO_NETO` y en el indicador de Ingresos; el stock de cobertura sale de las columnas; la cobertura va aparte en el KPI) · `Class/CashflowEstructura.php` (los dos tipos nuevos) · `Class/CashflowRegistry.php` (`COBERTURA`; serie `STOCK` en `SALDO_INVERSIONES`) · `Class/Cotizacion.php` (`ultimaHasta()` y la vista diaria) · `Class/OtrosIngresos.php` (`valuarDolares()`, la cuenta única) · `Providers/OtrosIngresosProvider.php` · `Controller/OtrosIngresosController.php` · `Js/Cashflow.js` y `Css/Cashflow.css` (celda editable, stock en guiones, columnas negativas) · `Js/Parametros-Estructura.js` (rótulos de los tipos nuevos) · `Tabs/cashflow.php`, `Tabs/dolares_comitente.php`, `Tabs/saldo_inversiones.php` · `Js/Ingresos-Cobranzas_may.js` y su CSS (editor de fecha manual) · `sql/cashflow_saldo_inversiones.sql` y `sql/cashflow_cobranzas_fecha_manual.sql` (encabezados reescritos: decían lo contrario de lo que hace el código).
 
 Eliminado: `Tabs/resumen.php`.
 

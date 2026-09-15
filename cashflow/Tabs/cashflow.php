@@ -63,7 +63,13 @@
                     <div class="kpi-card-icon blue"><i class="fas fa-scale-balanced"></i></div>
                 </div>
                 <div class="kpi-card-value" id="cfKpiFlujo">$ 0,00</div>
-                <div class="kpi-card-footer"><span class="cf-kpi-periodo"></span></div>
+                <!-- El Flujo Neto mide lo que el negocio genera, así que NO
+                     incluye la cobertura aplicada; el Saldo Final sí. Cuando hay
+                     cobertura en el período, este pie lo dice: sin eso, las dos
+                     tarjetas parecen no cerrar entre sí. -->
+                <div class="kpi-card-footer">
+                    <span class="cf-kpi-periodo"></span><span id="cfKpiFlujoCobertura"></span>
+                </div>
             </div>
         </div>
 

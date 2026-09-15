@@ -41,6 +41,9 @@
      */
     var vistas = null;
 
+    /** Columnas con Saldo Final negativo, indexadas por 'rama|clave'. Ver calcularNegativas(). */
+    var negativas = {};
+
     function inicializar() {
         var btnRefresh = document.getElementById('cfBtnRefresh');
         var btnExport = document.getElementById('cfBtnExport');
@@ -66,7 +69,13 @@
             tabla: 'cfTabla',
             clave: 'cashflow',
             anclas: '.cf-seccion, .cf-tipo-subtotal, .cf-tipo-flujo_neto,'
-                + ' .cf-tipo-saldo_inicial, .cf-tipo-saldo_final'
+                + ' .cf-tipo-saldo_inicial, .cf-tipo-saldo_final,'
+                // Las dos de Cobertura también quedan clavadas. El stock no es
+                // una fila de movimiento que se pueda reordenar dentro de su
+                // bloque, y el uso tiene que quedar ENTRE los dos flujos netos:
+                // si se moviera, el de arriba empezaría a incluirlo y las dos
+                // filas dirían lo mismo.
+                + ' .cf-tipo-stock_cobertura, .cf-tipo-uso_cobertura'
         });
 
         if (btnRefresh) {
@@ -201,6 +210,21 @@
             el.textContent = k.columnas + unidad;
         });
 
+        /* La cobertura aplicada NO está en el indicador de Flujo Neto, que mide
+           lo que el negocio genera: mover plata de una inversión a la cuenta no
+           es un ingreso. Pero sí está en el Saldo Final y en el Saldo Mínimo, y
+           esa diferencia hay que decirla, o los números de las tarjetas parecen
+           no cerrar entre sí. */
+        var pieFlujo = document.getElementById('cfKpiFlujoCobertura');
+
+        if (pieFlujo) {
+            var cob = Number(k.cobertura) || 0;
+
+            pieFlujo.textContent = (cob === 0)
+                ? ''
+                : ' · más ' + plataCompacta(cob) + ' de cobertura, fuera de esta cuenta';
+        }
+
         var cols = columnas();
         texto('cfKpiCierreCuando', cols.length ? 'Al ' + cols[cols.length - 1].label : '');
 
@@ -328,6 +352,10 @@
     function pintarGrilla() {
         var cols = columnas();
 
+        // Va ANTES del encabezado: las columnas negativas se marcan también en
+        // el <th>, y para eso el mapa ya tiene que estar armado.
+        calcularNegativas(cols);
+
         pintarEncabezado(cols);
         pintarFilas(cols);
     }
@@ -376,18 +404,58 @@
     /**
      * Clases de una columna. En la vista completa se marca la primera columna
      * mensual, para que se vea donde termina el tramo diario.
+     *
+     * Y SE MARCA LA COLUMNA ENTERA CUANDO EL SALDO FINAL DA NEGATIVO. Ver
+     * columnasNegativas(): es lo que hace visible de un vistazo dónde falta
+     * plata, que es la pregunta por la que existe la sección Cobertura. Sin
+     * esto hay que recorrer la última fila número por número.
      */
     function clasesColumna(c, i) {
         var clases = [];
 
         if (!c.enSecuencia) { clases.push('cf-col-fuera'); }
         if (c.feriado) { clases.push('cf-col-feriado'); }
+        if (negativas[c.rama + '|' + c.clave]) { clases.push('cf-col-negativa'); }
 
         if (vistas.activa() === 'completo' && c.mensual && i === datos.dias.length) {
             clases.push('cf-inicio-meses');
         }
 
         return clases;
+    }
+
+    /**
+     * Las columnas cuyo Saldo Final da negativo, indexadas por rama|clave.
+     *
+     * Se mira el SALDO_FINAL y no el flujo de la columna: un día que gasta más
+     * de lo que entra no es un problema si se arranca con caja, y uno que no
+     * mueve nada sí lo es si viene de arrastrar un rojo. Lo que hay que ver es
+     * la posición, no la variación.
+     *
+     * Se recalcula en cada pintada porque el Saldo Final ya trae la cobertura
+     * aplicada: al cargar una, las columnas que se taparon dejan de marcarse
+     * solas.
+     */
+    function calcularNegativas(cols) {
+        negativas = {};
+
+        var saldo = null;
+
+        datos.filas.forEach(function(f) {
+            if (f.tipo === 'SALDO_FINAL') { saldo = f; }
+        });
+
+        if (!saldo) {
+            return;
+        }
+
+        cols.forEach(function(c) {
+            var v = saldo[c.rama][c.clave];
+
+            if (v !== null && v !== undefined && Number(v) < 0) {
+                negativas[c.rama + '|' + c.clave] = true;
+            }
+        });
     }
 
     function pintarFilas(cols) {
@@ -416,6 +484,7 @@
 
         document.getElementById('cfBody').innerHTML = html;
         conectarEnlaces();
+        conectarCobertura();
     }
 
     function filaHtml(f, cols) {
@@ -425,7 +494,11 @@
         if (f.sin_datos) { clases.push('cf-sin-datos'); }
 
         var celdas = cols.map(function(c, i) {
-            return celdaHtml(f[c.rama][c.clave], c, i, anotacion(f, c));
+            if (f.tipo === 'USO_COBERTURA') {
+                return celdaCobertura(f[c.rama][c.clave], c, i);
+            }
+
+            return celdaHtml(f[c.rama][c.clave], c, i, anotacion(f, c), f.tipo);
         }).join('');
 
         var total = totalDeVista(f);
@@ -455,6 +528,20 @@
         if (f.arrastre) {
             marca = ' <i class="fas fa-arrow-right-arrow-left cf-marca cf-marca-arrastre" title="'
                 + escapar(textoArrastre(f)) + '"></i>';
+        } else if (f.tipo === 'USO_COBERTURA') {
+            // Es la única fila del tablero que se edita acá. Sin decirlo, nadie
+            // descubre que se puede hacer clic en sus celdas.
+            marca = ' <i class="fas fa-pen-to-square cf-marca cf-marca-editable" title="'
+                + escapar('Se carga acá: hacé clic en la celda del día en el que querés aplicar '
+                    + 'cobertura. Un importe negativo devuelve plata a la inversión.'
+                    + textoSaldoCobertura(f))
+                + '"></i>';
+        } else if (f.tipo === 'STOCK_COBERTURA') {
+            marca = ' <i class="fas fa-piggy-bank cf-marca cf-marca-stock" title="'
+                + escapar('Stock, no flujo: es cuánto hay invertido y disponible para cubrir. '
+                    + 'No entra en ninguna suma y no va en ninguna columna de fecha.'
+                    + textoSaldoCobertura(f))
+                + '"></i>';
         } else if (f.sin_datos) {
             marca = ' <i class="fas fa-circle-info cf-marca" title="Todavía no hay datos para esta fila"></i>';
         } else if (!f.computa && !f.derivada) {
@@ -469,16 +556,83 @@
         // parte de ese número. Las dos cosas pueden pasar a la vez.
         marca += marcaPactado(f, cols);
 
+        // El saldo de cobertura va en la celda de Concepto y no sólo en la
+        // columna Total, porque la de Concepto es la que queda FIJA al
+        // scrollear a lo ancho: con veintiocho columnas, un importe que sólo
+        // vive al final de la tabla no lo mira nadie. Y el número que importa
+        // para decidir no es cuánto hay, sino cuánto QUEDA.
+        var saldo = lineaSaldoCobertura(f);
+
         if (f.tab) {
             // data-sub-tab lo lee el JS de la pestaña destino para abrirse en la
             // vista correcta: hay módulos con más de una, y llegar a la primera
             // deja al usuario sin el detalle del número que clickeó.
             return '<a href="#" class="cf-link" data-ir-a="' + escapar(f.tab) + '"'
                 + (f.subtab ? ' data-sub-tab="' + escapar(f.subtab) + '"' : '') + '>'
-                + nombre + '</a>' + marca;
+                + nombre + '</a>' + marca + saldo;
         }
 
-        return nombre + marca;
+        return nombre + marca + saldo;
+    }
+
+    /* ================================================================
+       CUÁNTO QUEDA DE COBERTURA
+
+       El motor lo resuelve sobre TODO el horizonte y no sobre la vista activa:
+       el stock es un stock y no cambia porque uno mire el tramo diario en vez
+       del mensual. Acá sólo se dibuja. Ver Cashflow::resolverCobertura().
+       ================================================================ */
+
+    /**
+     * La segunda línea de la celda de Concepto en la fila de stock: cuánto
+     * queda disponible, y cuánto había si ya se aplicó algo.
+     *
+     * Sólo la lleva la fila de stock. En la de uso el número ya está en su
+     * propia columna Total, y repetirlo ahí haría parecer que son dos cosas
+     * distintas.
+     */
+    function lineaSaldoCobertura(f) {
+        if (f.tipo !== 'STOCK_COBERTURA' || !f.cobertura || !f.cobertura.hay_stock) {
+            return '';
+        }
+
+        var c = f.cobertura;
+        var aplicado = Number(c.aplicado) || 0;
+
+        // Sin nada aplicado, "queda X de X" es ruido: alcanza con el importe.
+        if (aplicado === 0) {
+            return '<div class="cf-stock-saldo" title="'
+                + escapar('Todavía no se aplicó nada: está todo disponible.') + '">'
+                + '$ ' + plataCorta(c.stock) + ' disponibles</div>';
+        }
+
+        // Aplicar más de lo que hay no se bloquea —puede ser deliberado— pero
+        // se marca: el Saldo Final estaría tapado con plata que todavía no
+        // figura como invertida. El motor además lo dice en los avisos.
+        var excedido = (Number(c.disponible) < 0);
+
+        return '<div class="cf-stock-saldo' + (excedido ? ' cf-negativo' : '') + '" title="'
+            + escapar('Hay $ ' + plataCorta(c.stock) + ' invertidos y se aplicaron $ '
+                + plataCorta(aplicado) + ' a lo largo de todo el horizonte'
+                + (excedido
+                    ? ': se está cubriendo con $ ' + plataCorta(-Number(c.disponible))
+                        + ' que todavía no figuran como invertidos.'
+                    : '.'))
+            + '">$ ' + plataCorta(c.disponible) + ' de $ ' + plataCorta(c.stock) + '</div>';
+    }
+
+    /** Lo mismo, en una frase, para agregar al final de un tooltip */
+    function textoSaldoCobertura(f) {
+        if (!f.cobertura || !f.cobertura.hay_stock) {
+            return '';
+        }
+
+        var c = f.cobertura;
+
+        return ' Hay $ ' + plataCorta(c.stock) + ' invertidos, se aplicaron $ '
+            + plataCorta(c.aplicado) + ' y quedan $ ' + plataCorta(c.disponible)
+            + ' disponibles. Se mide sobre todo el horizonte, no sobre la vista activa: '
+            + 'el stock no cambia según el tramo que se mire.';
     }
 
     /**
@@ -553,13 +707,21 @@
         return f.detalle[id] || null;
     }
 
-    function celdaHtml(valor, col, i, nota) {
+    function celdaHtml(valor, col, i, nota, tipo) {
         var clases = clasesColumna(col, i).concat(['text-end']);
 
-        // null no es cero: es una columna que no representa ningún día futuro.
+        // null no es cero. Son dos motivos distintos y cada uno se explica con
+        // lo suyo: una columna que no cubre ningún día futuro, o una fila de
+        // stock, que no va en ninguna columna de fecha porque es plata que
+        // está, no plata que entra ese día.
         if (valor === null || valor === undefined) {
+            var porque = (tipo === 'STOCK_COBERTURA')
+                ? 'Es un stock, no un flujo: la plata ya está invertida y no entra '
+                    + 'ningún día en particular. El importe disponible está en la columna Total.'
+                : 'Esta columna no cubre ningún día futuro';
+
             return '<td class="' + clases.join(' ') + ' cf-nulo" '
-                + 'title="Esta columna no cubre ningún día futuro">—</td>';
+                + 'title="' + escapar(porque) + '">—</td>';
         }
 
         var n = Number(valor);
@@ -581,6 +743,138 @@
         }
 
         return '<td class="' + clases.join(' ') + '">' + plataCorta(n) + '</td>';
+    }
+
+    /* ================================================================
+       COBERTURA: LA ÚNICA FILA EDITABLE DEL TABLERO
+
+       Se edita acá y no en una pestaña aparte porque la decisión que expresa
+       -cuánto aplicar y en qué día- se toma MIRANDO las columnas en rojo. Un
+       editor en otra pantalla obligaría a ir y volver comparando fechas, que es
+       justamente el trabajo que esta fila existe para evitar.
+
+       SÓLO SE EDITAN LAS COLUMNAS DIARIAS. Una columna mensual acumula muchos
+       días y la aplicación se guarda con una fecha: elegir una por el sistema
+       -el día 1, por ejemplo- sería inventar un dato que nadie cargó. La celda
+       mensual muestra el acumulado y lo dice en el title.
+       ================================================================ */
+
+    /** La celda de la fila de uso de cobertura: editable si la columna es un día */
+    function celdaCobertura(valor, col, i) {
+        var clases = clasesColumna(col, i).concat(['text-end', 'cf-cobertura']);
+        var n = Number(valor) || 0;
+
+        if (n < 0) { clases.push('cf-negativo'); }
+        if (n === 0) { clases.push('cf-cero'); }
+
+        if (col.rama !== 'dias') {
+            return '<td class="' + clases.join(' ') + '" title="'
+                + escapar('La cobertura se aplica por día. Esta celda acumula los días de '
+                    + 'este mes; para cargarla, pasá a la vista Días.')
+                + '">' + plataCorta(n) + '</td>';
+        }
+
+        clases.push('cf-cobertura-editable');
+
+        return '<td class="' + clases.join(' ') + '" data-fecha="' + escapar(col.clave) + '" '
+            + 'title="' + escapar('Clic para aplicar cobertura el ' + col.label
+                + '. Un importe negativo devuelve plata a la inversión.') + '">'
+            + plataCorta(n) + '</td>';
+    }
+
+    /**
+     * Abre el editor de una celda de cobertura.
+     *
+     * Guardar RECARGA TODO el tablero, por el mismo motivo que la fecha manual
+     * de Cobranzas FR: la aplicación cambia el flujo de esa columna, el saldo
+     * final de todas las siguientes, el saldo mínimo, las columnas que quedan
+     * en rojo y los indicadores. Rehacer eso en el navegador sería reimplementar
+     * en JS el arrastre que ya hace el motor, con el riesgo habitual de que los
+     * dos den distinto.
+     */
+    function editarCobertura(td) {
+        if (td.querySelector('input')) {
+            return;
+        }
+
+        var fecha = td.getAttribute('data-fecha');
+        var previo = td.innerHTML;
+        var actual = Number(String(td.textContent).replace(/\./g, '').replace(',', '.')) || 0;
+
+        td.innerHTML = '<input type="number" step="0.01" class="form-control form-control-sm '
+            + 'cf-input-cobertura" value="' + (actual === 0 ? '' : actual) + '">';
+
+        var inp = td.querySelector('input');
+
+        inp.focus();
+        inp.select();
+
+        var cerrado = false;
+
+        // Escape restaura la celda sin tocar nada: una edición abierta por
+        // error no tiene por qué borrar lo que había.
+        var cancelar = function() {
+            if (cerrado) { return; }
+            cerrado = true;
+            td.innerHTML = previo;
+        };
+
+        var confirmar = function() {
+            if (cerrado) { return; }
+            cerrado = true;
+
+            var v = inp.value.trim();
+
+            // Vaciar la celda es dar de baja la aplicación de esa fecha, no
+            // guardar un cero: un cero no es una aplicación de cero pesos.
+            if (v === '' || Number(v) === 0) {
+                if (actual === 0) { td.innerHTML = previo; return; }
+
+                pedirCobertura('deleteAplicacion', { fecha: fecha });
+                return;
+            }
+
+            pedirCobertura('saveAplicacion', { fecha: fecha, importe: Number(v) });
+        };
+
+        inp.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); confirmar(); }
+            if (e.key === 'Escape') { e.preventDefault(); cancelar(); }
+        });
+
+        inp.addEventListener('blur', confirmar);
+    }
+
+    function pedirCobertura(accion, cuerpo) {
+        fetch('Controller/CoberturaController.php?action=' + accion, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(cuerpo)
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(result) {
+            if (result.success) {
+                Notificacion.exito(result.message);
+            } else {
+                Notificacion.error(result.message);
+            }
+
+            cargar();
+        })
+        .catch(function(err) {
+            Notificacion.error('Error de conexión: ' + err.message);
+            cargar();
+        });
+    }
+
+    function conectarCobertura() {
+        var celdas = document.querySelectorAll('#cfBody .cf-cobertura-editable');
+
+        Array.prototype.forEach.call(celdas, function(td) {
+            td.addEventListener('click', function() {
+                editarCobertura(td);
+            });
+        });
     }
 
     /**

@@ -87,3 +87,94 @@ $seriesMay = $provMay->series($h);
 chequear('proveedor COBRANZAS_MAY rinde serie COBRANZA', true, isset($seriesMay['COBRANZA']));
 chequear('serie COBRANZA tiene dias alineados al horizonte', $h->cantidadDias(), count($seriesMay['COBRANZA']['dias']));
 chequear('serie COBRANZA tiene meses alineados al horizonte', $h->cantidadMeses(), count($seriesMay['COBRANZA']['meses']));
+
+/* ================================================================
+   FECHA DE COBRO MANUAL
+
+   Mayoristas pasa a tener el mismo circuito que Cobranzas FR, con la MISMA
+   tabla. La jerarquia -la fecha manual manda- vive en resolverFechaCobro() y
+   no se reimplementa; lo que se prueba aca es la parte que SI es distinta:
+   en mayoristas la fecha manual NO cambia ningun importe, porque no hay
+   escala de descuento.
+   ================================================================ */
+seccion('fecha de cobro manual: la jerarquia es la misma que en FR');
+
+// Sin fecha manual: emision + plazo.
+$sinManual = Ingresos::resolverFechaCobro('2026-09-15', 60, null);
+
+chequear('sin fecha manual, cobra a los 60 dias', '2026-11-14', $sinManual['fecha']);
+chequear('y los dias son el plazo', 60, $sinManual['dias']);
+chequear('no esta marcada como manual', false, $sinManual['manual']);
+
+// Con fecha manual: manda la fecha, y los dias se recalculan sobre ella. En
+// mayoristas eso es informativo -no hay escala de descuento-, pero mostrar 60
+// al lado de una fecha cargada a mano se contradiria a si mismo.
+$conManual = Ingresos::resolverFechaCobro('2026-09-15', 60, '2026-10-02');
+
+chequear('la fecha manual manda sobre el plazo', '2026-10-02', $conManual['fecha']);
+chequear('y los dias salen de la fecha resuelta, no del plazo', 17, $conManual['dias']);
+chequear('queda marcada como manual', true, $conManual['manual']);
+
+seccion('una fecha manual vencida NO se reubica en hoy');
+
+// Es una fecha que pacto una persona. Moverla seria pisar su decision con una
+// regla automatica, y el usuario veria su propia carga en otra columna.
+$ubicManual = Ingresos::ubicarCobroVencido('2026-09-01', '2026-09-15',
+    Ingresos::DIAS_COBRO_VENCIDO, true);
+
+chequear('se muestra donde la pusieron', '2026-09-01', $ubicManual['fecha']);
+chequear('pero se marca vencida, que es un hecho', true, $ubicManual['vencida']);
+chequear('y no se descarta', false, $ubicManual['descartar']);
+
+// Sin fecha manual, la misma fecha vencida SI se corre al primer dia del eje.
+$ubicAuto = Ingresos::ubicarCobroVencido('2026-09-01', '2026-09-15',
+    Ingresos::DIAS_COBRO_VENCIDO, false);
+
+chequear('una proyectada vencida va al primer dia del eje', '2026-09-15', $ubicAuto['fecha']);
+chequear('conservando cual era su fecha', '2026-09-01', $ubicAuto['original']);
+
+seccion('la fecha manual no cambia ningun importe en mayoristas');
+
+// ESTA ES LA DIFERENCIA CON COBRANZAS FR y el motivo por el que conviene
+// probarla: alla los dias deciden el tramo de la escala de descuento y con eso
+// cambia el importe neto. Aca no hay escala, asi que el neto es el bruto
+// siempre. Se verifica sobre las filas reales.
+if (count($comprobantes) > 0) {
+    $netoEsBruto = true;
+    $descFijo = true;
+
+    foreach ($comprobantes as $c) {
+        if (abs($c['importe_neto'] - $c['importe_bruto']) > 0.001) { $netoEsBruto = false; }
+        if ($c['Desc'] !== '0%') { $descFijo = false; }
+    }
+
+    chequear('el neto es siempre el bruto', true, $netoEsBruto);
+    chequear('y el descuento es 0% en todas', true, $descFijo);
+
+    // La fila transporta la marca para que la grilla pueda dibujar el editor y
+    // el Resumen pueda mostrar el indicador.
+    chequear('la fila informa si la fecha la cargo una persona',
+        true, array_key_exists('FECHA_MANUAL', $comprobantes[0]));
+
+    // PLAZO sigue siendo el del parametro aunque haya fecha manual: es lo que
+    // permite auditar contra que se aparto la fecha cargada.
+    chequear('y conserva el plazo del parametro',
+        true, intval($comprobantes[0]['PLAZO']) > 0);
+}
+
+seccion('los dos circuitos comparten la tabla de fechas manuales');
+
+// La clave es el comprobante y un comprobante es de franquicias o de
+// mayoristas, nunca de los dos. Por eso no hay tabla paralela ni columna de
+// origen. Ver el encabezado de sql/cashflow_cobranzas_fecha_manual.sql.
+$mapaManual = $ingresos->getFechasManuales();
+
+chequear('getFechasManuales devuelve un mapa', true, is_array($mapaManual));
+
+$clavesOk = true;
+
+foreach ($mapaManual as $clave => $info) {
+    if (strpos($clave, '|') === false || !isset($info['fecha'])) { $clavesOk = false; }
+}
+
+chequear('indexado por T_COMP|N_COMP', true, $clavesOk);

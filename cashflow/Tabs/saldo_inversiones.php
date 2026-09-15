@@ -7,12 +7,24 @@
     Mismo circuito que Dólares Cuenta Comitente y a propósito: formulario
     mínimo, sin baja física e historial por fecha. Lo que cambia es la moneda.
 
-    SE CARGA EN PESOS. El campo es IMPORTE_ARS y no hay conversión: lo que se
-    carga es lo que entra al tablero. Los dólares de la cuenta comitente hacen
-    lo contrario —se guardan en dólares para no congelar la valuación— porque
-    ahí el dato ES en dólares. Acá el saldo se informa en pesos, así que no hay
-    nada que valuar. La decisión y cómo darla vuelta están arriba de
-    sql/cashflow_saldo_inversiones.sql.
+    ESTE SALDO NO ENTRA AL FLUJO. Es el STOCK que respalda la cobertura: dice
+    cuánta plata hay invertida y disponible para tapar un bache, no que ese día
+    ingrese. Lo que mueve el saldo proyectado es la fila "Uso de Inversiones"
+    del tablero, que se carga ahí mismo, sobre las columnas que quedan en rojo.
+
+    Hasta sql/cashflow_cobertura.sql esta carga entraba como un INGRESO en su
+    fecha, y estaba mal: que el saldo se informe un día no significa que ese día
+    entre plata.
+
+    LA QUE VALE ES LA ÚLTIMA CARGA, no la suma de todas. Cada carga es una foto
+    del saldo a esa fecha; sumarlas contaría el mismo dinero tantas veces como
+    veces se haya informado.
+
+    SE CARGA EN PESOS. El campo es IMPORTE_ARS y no hay conversión. Los dólares
+    de la cuenta comitente hacen lo contrario —se guardan en dólares para no
+    congelar la valuación— porque ahí el dato ES en dólares. Acá el saldo se
+    informa en pesos, así que no hay nada que valuar. La decisión y cómo darla
+    vuelta están arriba de sql/cashflow_saldo_inversiones.sql.
 
     EL IMPORTE VIGENTE SE PISA, PERO EL HISTORIAL QUEDA. Cargar una fecha que ya
     existe no hace UPDATE: da de baja la anterior e inserta una nueva. El
@@ -55,7 +67,9 @@
             <h5 class="mb-0">Cargar saldo</h5>
             <small class="text-muted">
                 Fecha e importe <strong>en pesos</strong>. No hay conversión: el saldo se
-                informa en pesos, así que entra al tablero tal como se carga.
+                informa en pesos. <strong>La última carga</strong> es la que el tablero
+                muestra como inversiones disponibles, en la sección
+                <em>Cobertura</em>; no entra al flujo hasta que se aplique en alguna fecha.
             </small>
         </div>
         <div class="card-body">

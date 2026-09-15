@@ -192,3 +192,40 @@
     font-size: 11px;
     border: 1px solid #c8e6c9;
 }
+
+/* ============================================================================
+   FECHA DE COBRO MANUAL
+
+   Misma pinta que en Cobranzas FR y a propósito: es el mismo circuito y la
+   misma tabla, así que una celda editada a mano tiene que verse igual en las
+   dos pestañas. Si no, dos filas con la misma fecha en pantalla estarían
+   diciendo cosas distintas —una estimada y una pactada— sin forma de saber
+   cuál es cuál.
+
+   Lo que NO es igual está en los números, no en el CSS: acá la fecha manual no
+   recalcula ningún importe, porque mayoristas no tiene escala de descuento.
+   ============================================================================ */
+
+#tablaCobranzasMay .cob-celda-cobro {
+    min-width: 175px;
+}
+
+#tablaCobranzasMay .cob-input-fecha {
+    font-size: 11px;
+    padding: 2px 6px;
+    min-width: 118px;
+}
+
+#tablaCobranzasMay .cob-fecha-manual .cob-input-fecha {
+    border-color: #0d6efd;
+    background-color: #e7f1ff;
+    font-weight: 600;
+    color: #084298;
+}
+
+/* En el Resumen no hay comprobante que editar, así que la marca va al lado del
+   código de cliente: dice que alguna de sus facturas no sale del plazo. */
+#tablaCobranzasMay .cob-marca-manual {
+    font-size: 10px;
+    vertical-align: super;
+}

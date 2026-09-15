@@ -803,6 +803,13 @@
        AYUDANTES
        ================================================================ */
 
+    /**
+     * El rótulo con el que se elige un tipo en el desplegable.
+     *
+     * La lista de tipos la manda el servidor (CashflowEstructura::TIPOS): acá
+     * sólo se les pone nombre. Un tipo nuevo que no esté en este mapa se dibuja
+     * con su código, así que aparece igual —feo, pero nunca ausente.
+     */
     function rotuloTipo(t) {
         var r = {
             'SALDO_INICIAL': 'Saldo inicial',
@@ -810,7 +817,9 @@
             'EGRESO': 'Egreso',
             'SUBTOTAL': 'Subtotal',
             'FLUJO_NETO': 'Flujo neto',
-            'SALDO_FINAL': 'Saldo final'
+            'SALDO_FINAL': 'Saldo final',
+            'STOCK_COBERTURA': 'Stock de cobertura (no va en ninguna fecha)',
+            'USO_COBERTURA': 'Uso de cobertura (se edita en el tablero)'
         };
 
         return r[t] || t;

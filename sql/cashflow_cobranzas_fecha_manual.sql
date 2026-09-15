@@ -31,6 +31,37 @@
    de la unicidad. Si estuviera en la clave, un mismo comprobante cargado con
    dos codigos de cliente distintos daria dos fechas y ninguna ganaria.
 
+   ----------------------------------------------------------------------------
+   ESTA MISMA TABLA SIRVE TAMBIEN A COBRANZAS MAYORISTAS
+
+   El nombre dice FR por donde nacio, no por a quien sirve. No se creo una tabla
+   paralela ni se le agrego una columna de origen, y las dos decisiones salen de
+   la unicidad de arriba:
+
+     - La clave YA ES el comprobante, y un comprobante pertenece a un solo
+       circuito: los de franquicias son COD_CLIENT LIKE 'FR%' y los de
+       mayoristas LIKE 'MA%'. No puede ser los dos.
+
+     - Una columna ORIGEN tendria que coincidir siempre con lo que dice el
+       codigo de cliente, o sea que seria un dato que se puede contradecir con
+       otro. Y si entrara en la unicidad, el mismo comprobante podria tener dos
+       fechas manuales distintas, que es exactamente lo que el parrafo de arriba
+       dice que no puede pasar.
+
+     - Una tabla paralela duplicaria el circuito entero -leer, guardar, borrar,
+       la jerarquia de resolverFechaCobro()- para guardar la misma fila con el
+       mismo significado.
+
+   Por eso los metodos de PHP se llaman getFechasManuales(), saveFechaManual() y
+   deleteFechaManual(), sin sufijo: el sufijo FR sobrevive solo en el nombre de
+   la tabla, donde renombrar cuesta mas de lo que aclara.
+
+   LA DIFERENCIA ENTRE LOS DOS CIRCUITOS NO ESTA ACA, ESTA EN EL IMPORTE. En
+   franquicias la fecha manual recalcula los dias, y con los dias cambia el
+   tramo de la escala de descuento y el importe neto. En mayoristas NO hay
+   escala: el neto es el bruto, asi que lo unico que cambia es en que columna
+   del eje cae la plata. Ver Ingresos::getCobranzasMay().
+
    ES REEJECUTABLE: la tabla se crea solo si no existe.
    ============================================================================ */
 
