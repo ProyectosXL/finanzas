@@ -53,6 +53,14 @@
    'O/P' no figura en CPA21 -es una orden de pago, no un comprobante de
    compras-, asi que cae en el ELSE y resta, que es lo correcto.
 
+   LA RAMA DE 'REC' ES CODIGO NO EJERCITADO. Se copio tal cual por fidelidad al
+   origen, pero NO SE PUDO VERIFICAR CON DATOS: en CPA05 hay 109.314
+   imputaciones y NINGUNA tiene T_COMP_CAN = 'REC' -son todas O/P, NC*, ND* o
+   AJU-. Si algun dia aparece una, sera la primera vez que esa rama corra. Se
+   deja porque Tango la declara explicitamente y sobreescribe el CRE_DEB de
+   CPA21 -que dice 'D' para REC-, lo cual solo tiene sentido si el caso existe
+   en alguna instalacion.
+
    Sin esa tabla de signos, una nota de debito imputada se resta como si fuera
    un pago y el pendiente da NEGATIVO. Pasa de verdad: ver el caso de
    DONNA DI DIO en README-proveedores-locales.md.

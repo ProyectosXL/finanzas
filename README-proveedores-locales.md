@@ -77,6 +77,8 @@ Esa verificación es lo único que permite afirmar que el número del tablero es
 
 `O/P` no figura en `CPA21` —es una orden de pago, no un comprobante de compras— así que cae en el `ELSE` y resta, que es lo correcto.
 
+> **La rama de `REC` es código no ejercitado.** Se copió tal cual de la consulta de Tango, por fidelidad al origen, pero **no se pudo verificar con datos**: en `CPA05` hay 109.314 imputaciones y **ninguna** tiene `T_COMP_CAN = 'REC'` (son todas `O/P`, `NC*`, `ND*` o `AJU`). O sea que esa rama nunca se ejecuta hoy, y si algún día aparece un `REC`, será la primera vez que corra. Se deja porque Tango la declara explícitamente y sobreescribe el `CRE_DEB` de `CPA21` —que dice `'D'` para `REC`—, lo cual sólo tiene sentido si el caso existe en alguna instalación.
+
 **Sin esa tabla de signos el pendiente da negativo.** Pasa de verdad:
 
 ```
