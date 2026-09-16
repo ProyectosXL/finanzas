@@ -47,7 +47,7 @@
         // LA CLAVE CAMBIA CADA VEZ QUE CAMBIAN LOS ÍNDICES. La selección se
         // guarda por número de columna, así que agregar una columna en el medio
         // -acá, Importe Factura- corre todo lo que viene después: quien tuviera
-        // fijada "Importe Neto" se encontraría con "Importe Bruto" fijada y sin
+        // fijada "Importe Neto" se encontraría con "SALDO PENDIENTE" fijada y sin
         // entender por qué. Cambiar la clave hace que esa selección vuelva al
         // default, que es lo correcto y lo que ya se hizo cuando se fue la
         // columna Tipo.

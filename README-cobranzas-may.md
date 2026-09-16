@@ -101,6 +101,8 @@ El `ISNULL` no es decoración: un vencimiento sin ninguna imputación devuelve `
 
 `importe_bruto` e `importe_neto` son el **mismo número** —el pendiente—. El par existe porque es el contrato que `payloadCobranzas()` comparte con Cobranzas FR, donde sí difieren por la escala de descuento. Mayoristas no tiene escala.
 
+En pantalla la columna de `importe_bruto` se llama **SALDO PENDIENTE**. Se llamaba *Importe Bruto* cuando el dato era `GVA12.IMPORTE`; desde que sale de cruzar `GVA46` con `GVA07` el rótulo viejo nombraba una cosa —el facturado— y mostraba otra. El nombre del campo en el payload no cambia: es el contrato compartido con FR.
+
 `tests/test_cobranzas_may.php` fija que ningún pendiente supere a su importe facturado: si lo hiciera, la tabla de signos de `IMPU` estaría al revés.
 
 ### El pendiente puede volver en cero o en negativo
@@ -196,7 +198,7 @@ La pestaña **Cobranzas May** cuenta con todos los componentes estándar del sis
    - **Buscador rápido:** Filtrado en tiempo real por código de cliente, razón social o comprobante.
    - **Filtro por fecha de emisión (desde – hasta):** dos `<input type="date">` y un botón de limpiar. Es **server-side**: los extremos se mandan como parámetros y los items se filtran antes de `EjeVista`, porque filtrar escondiendo filas dejaría las columnas del eje, el pie de totales y las tarjetas mostrando el total sin filtrar. La validación (formato, calendario y `desde <= hasta`) corre en el servidor. Está explicado en `README-cobranzas-fr.md`.
    - **Resumen vs Detalle Facturas**, en sub-solapas anidadas (`nav nav-tabs`) directamente arriba de la tabla. Antes eran un `btn-group`; el cambio está explicado en `README-cobranzas-fr.md`. El nombre viejo era *Deep Dive*: se renombró sólo de cara al usuario, y el identificador interno sigue siendo `deepdive`.
-     - *Resumen:* **una fila por cliente**, con los importes repartidos en las columnas de la grilla según la fecha de cobro de cada comprobante. Quedan `COD_CLI`, `RAZON_SOC`, `Importe Factura`, `Importe Bruto` e `Importe Neto`.
+     - *Resumen:* **una fila por cliente**, con los importes repartidos en las columnas de la grilla según la fecha de cobro de cada comprobante. Quedan `COD_CLI`, `RAZON_SOC`, `Importe Factura`, `SALDO PENDIENTE` e `Importe Neto`.
      - *Detalle Facturas:* apertura individual por comprobante con fecha de emisión, tipo, número, importe y fecha de cobro.
 
      Antes el Resumen agrupaba por cliente **y fecha**, así que un cliente con cobros en tres fechas ocupaba tres filas. El agrupado ahora lo hace `EjeVista::armarAgrupado()` sumando las series, no la consulta: así cada importe conserva la fecha que lo ubica en la grilla y la fila es una sola. `Ingresos::getCobranzasMay()` perdió su parámetro `$summary` — devuelve siempre una fila por comprobante. Ver `README-cobranzas-fr.md`.
@@ -204,7 +206,7 @@ La pestaña **Cobranzas May** cuenta con todos los componentes estándar del sis
    - **Acciones:** Botón de *Actualizar* y *Exportar a Excel*.
 3. **La columna *Importe Factura*** va antes de las dos del pendiente, **en gris y marcada como informativa** en su `title`. Está apagada a propósito: si se leyera como un importe más del cuadro, el lector sumaría tres columnas de plata que miden dos cosas distintas. En *Resumen* se suma por cliente, igual que las otras dos.
 
-> **La clave de columnas fijas cambió** a `cobranzas_may.con_importe_factura`. La selección se guarda por número de columna, así que agregar una columna en el medio corre todo lo que viene después: quien tuviera fijada *Importe Neto* se encontraría con *Importe Bruto* fijada y sin entender por qué. Cambiar la clave devuelve esa selección al default. Es lo mismo que se hizo cuando se fue la columna *Tipo*.
+> **La clave de columnas fijas cambió** a `cobranzas_may.con_importe_factura`. La selección se guarda por número de columna, así que agregar una columna en el medio corre todo lo que viene después: quien tuviera fijada *Importe Neto* se encontraría con *SALDO PENDIENTE* fijada y sin entender por qué. Cambiar la clave devuelve esa selección al default. Es lo mismo que se hizo cuando se fue la columna *Tipo*.
 
 ---
 
