@@ -950,6 +950,98 @@ $val = CashflowEstructura::validar(
 
 chequear('las dos mitades si pueden convivir', true, $val['valido']);
 
+seccion('el validador tambien ve los solapes entre cortes distintos');
+
+/* EL AGUJERO QUE ESTO TAPA: la regla anterior miraba el TOTAL contra una de sus
+   partes y nunca las partes ENTRE SI. PAGOS y PAGOS_OPERATIVOS son dos partes
+   de PAGOS_TODO, ninguna es el total, y se solapan en $1.297 millones: el 89%
+   del universo contado dos veces, sin un solo aviso. */
+$filaProv = function ($id, $cod, $serie) {
+    return ['ID' => $id, 'CODIGO' => $cod, 'NOMBRE' => $cod, 'SECCION' => 'EGR',
+            'TIPO' => 'EGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'PROV_LOCALES',
+            'ORIGEN_SERIE' => $serie, 'ORDEN' => $id * 10, 'ACTIVO' => 1];
+};
+
+$seccionEgr = [['CODIGO' => 'EGR', 'NOMBRE' => 'Egresos', 'ROL' => 'MOVIMIENTO',
+                'ID_PADRE' => null, 'ORDEN' => 10, 'ACTIVO' => 1]];
+
+$val = CashflowEstructura::validar($seccionEgr, [
+    $filaProv(1, 'PL_CRON', 'PAGOS'),
+    $filaProv(2, 'PL_OPER', 'PAGOS_OPERATIVOS')
+]);
+
+chequear('el cronograma junto a los operativos ya no pasa', false, $val['valido']);
+
+// Y el mensaje dice POR QUE, que es lo que permite arreglarlo: son dos cortes
+// distintos de la misma deuda, no un total con una parte.
+$texto = implode(' | ', $val['errores']);
+
+chequear('nombrando los dos cortes', true,
+    strpos($texto, 'por cómo se paga') !== false
+    && strpos($texto, 'por si está excluido') !== false);
+
+/* La serie de los dos criterios es la interseccion de una mitad de cada corte:
+   se solapa con las cuatro y no puede convivir con ninguna. */
+$val = CashflowEstructura::validar($seccionEgr, [
+    $filaProv(1, 'PL_CRON', 'PAGOS'),
+    $filaProv(2, 'PL_CO', 'PAGOS_CRONO_OPERATIVOS')
+]);
+
+chequear('ni los dos criterios junto al cronograma', false, $val['valido']);
+
+$val = CashflowEstructura::validar($seccionEgr, [
+    $filaProv(1, 'PL_EXCL', 'PAGOS_EXCLUIDOS'),
+    $filaProv(2, 'PL_CO', 'PAGOS_CRONO_OPERATIVOS')
+]);
+
+chequear('ni junto a los excluidos', false, $val['valido']);
+
+/* LO QUE SI TIENE QUE SEGUIR PASANDO. Las dos mitades de un MISMO corte son la
+   forma prevista de meter al tablero lo que hoy queda fuera de la fila. */
+$val = CashflowEstructura::validar($seccionEgr, [
+    $filaProv(1, 'PL_OPER', 'PAGOS_OPERATIVOS'),
+    $filaProv(2, 'PL_EXCL', 'PAGOS_EXCLUIDOS')
+]);
+
+chequear('las dos mitades del corte por rubro siguen conviviendo', true, $val['valido']);
+
+/* Y UNA SOLA FILA NUNCA ES UN SOLAPE, sea cual sea la serie. */
+$val = CashflowEstructura::validar($seccionEgr, [
+    $filaProv(1, 'PL_CO', 'PAGOS_CRONO_OPERATIVOS')
+]);
+
+chequear('una sola fila no se pisa con nada', true, $val['valido']);
+
+/* SIN CORTES DECLARADOS NO CAMBIA NADA. Los cuatro canales de Ventas son un
+   unico corte y los cuatro pueden estar activos: si esta regla los rechazara,
+   habria roto el tablero de todos los demas modulos. */
+$val = CashflowEstructura::validar(
+    [['CODIGO' => 'ING', 'NOMBRE' => 'Ingresos', 'ROL' => 'MOVIMIENTO',
+      'ID_PADRE' => null, 'ORDEN' => 10, 'ACTIVO' => 1]],
+    [['ID' => 1, 'CODIGO' => 'V_LOC', 'NOMBRE' => 'Locales', 'SECCION' => 'ING',
+      'TIPO' => 'INGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'VENTAS',
+      'ORIGEN_SERIE' => 'COBRANZA_LOCALES', 'ORDEN' => 10, 'ACTIVO' => 1],
+     ['ID' => 2, 'CODIGO' => 'V_FR', 'NOMBRE' => 'Franquicias', 'SECCION' => 'ING',
+      'TIPO' => 'INGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'VENTAS',
+      'ORIGEN_SERIE' => 'COBRANZA_FRANQUICIAS', 'ORDEN' => 20, 'ACTIVO' => 1],
+     ['ID' => 3, 'CODIGO' => 'V_MAY', 'NOMBRE' => 'Mayoristas', 'SECCION' => 'ING',
+      'TIPO' => 'INGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'VENTAS',
+      'ORIGEN_SERIE' => 'COBRANZA_MAYORISTAS', 'ORDEN' => 30, 'ACTIVO' => 1],
+     ['ID' => 4, 'CODIGO' => 'V_ECO', 'NOMBRE' => 'Ecommerce', 'SECCION' => 'ING',
+      'TIPO' => 'INGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'VENTAS',
+      'ORIGEN_SERIE' => 'COBRANZA_ECOMMERCE', 'ORDEN' => 40, 'ACTIVO' => 1]]
+);
+
+chequear('los cuatro canales de Ventas siguen pudiendo convivir', true, $val['valido']);
+
+/* UNA FILA INACTIVA NO PISA NADA: el corte se mira sobre lo que computa. */
+$inactiva = $filaProv(2, 'PL_OPER', 'PAGOS_OPERATIVOS');
+$inactiva['ACTIVO'] = 0;
+
+$val = CashflowEstructura::validar($seccionEgr, [$filaProv(1, 'PL_CRON', 'PAGOS'), $inactiva]);
+
+chequear('una fila inhabilitada no cuenta como solape', true, $val['valido']);
+
 /* ================================================================
    CONTRA LA BASE
    ================================================================ */

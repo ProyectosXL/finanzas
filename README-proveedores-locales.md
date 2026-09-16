@@ -359,6 +359,24 @@ Por eso el registro ganó `'series_extra' => [clase, método]`: un punto de exte
 
 **El total y cualquiera de sus aperturas no pueden estar activos a la vez** —sería contar dos veces lo mismo— y las de rubro se agregan solas a `componentes` para que el validador lo rechace.
 
+### El validador mira las partes entre sí, no sólo contra el total
+
+La regla original comparaba el **total** contra cada una de sus partes. Eso dejaba un agujero: `PAGOS` y `PAGOS_OPERATIVOS` son **dos partes**, ninguna es el total, y **se solapan en $1.297 M** —el 89% del universo contado dos veces, sin un solo aviso—.
+
+Por eso el registro declara `particiones`: un mapa `total → corte → series`.
+
+```
+por cómo se paga      PAGOS · PAGOS_FUERA_CRONOGRAMA
+por si está excluido  PAGOS_OPERATIVOS · PAGOS_EXCLUIDOS
+por rubro             PAGOS_SIN_RUBRO · RUBRO_*
+```
+
+Dos series del **mismo** corte pueden convivir —son dos mitades, y es justamente cómo se mete al tablero lo que hoy queda fuera de la fila—. Dos de cortes **distintos**, no. `PAGOS_CRONO_OPERATIVOS` no figura en ninguno a propósito: es la intersección de una mitad de cada corte, así que se solapa con las cuatro.
+
+El corte *por rubro* lo completa `resolverExtra()` con las series del maestro. Dos rubros distintos nunca comparten un comprobante —cada uno tiene uno solo—, así que todas juntas son un corte: **partir la fila en alquileres, impuestos y logística sigue siendo válido**, que es para lo que existen.
+
+> **Sin `particiones` declaradas no cambia nada.** Un proveedor que no las declara toma todas sus partes como un único corte, que es como se comportaba antes: los cuatro canales de Ventas siguen pudiendo estar los cuatro activos.
+
 ### Es un egreso, y devuelve importes positivos
 
 El signo lo pone el `TIPO` de la fila, no el dato. Es la regla de todos los proveedores de egresos; ver la nota de `sql/cashflow_estructura.sql`.

@@ -256,7 +256,36 @@ class CashflowRegistry {
                 'PAGOS_TODO' => ['PAGOS', 'PAGOS_FUERA_CRONOGRAMA', 'PAGOS_OPERATIVOS',
                                  'PAGOS_EXCLUIDOS', 'PAGOS_CRONO_OPERATIVOS',
                                  'PAGOS_SIN_RUBRO']
-            ]
+            ],
+
+            /* LOS CORTES DEL MISMO UNIVERSO. 'componentes' dice que estas seis
+               son partes de PAGOS_TODO; esto dice CUALES son partes de la misma
+               division.
+
+               Dos series del mismo corte pueden convivir -son dos mitades, y es
+               justamente como se mete al tablero lo que hoy queda fuera de la
+               fila-. Dos de cortes distintos NO: se solapan casi enteras.
+               Activar PAGOS junto a PAGOS_OPERATIVOS contaba dos veces $1.297
+               millones y el validador no lo veia, porque miraba el total contra
+               sus partes y nunca las partes entre si.
+
+               PAGOS_CRONO_OPERATIVOS no figura en ninguno a proposito: es la
+               interseccion de una mitad de cada corte, asi que se solapa con
+               las cuatro y no puede convivir con ninguna.
+
+               El corte por rubro lo completa resolverExtra() con las series del
+               maestro: son datos y cuales existen depende de la planilla. Dos
+               rubros distintos nunca comparten un comprobante -cada uno tiene
+               UN rubro- asi que todas juntas son un corte, y por eso partir la
+               fila en alquileres, impuestos y logistica sigue siendo valido. */
+            'particiones' => [
+                'PAGOS_TODO' => [
+                    'por cómo se paga' => ['PAGOS', 'PAGOS_FUERA_CRONOGRAMA'],
+                    'por si está excluido' => ['PAGOS_OPERATIVOS', 'PAGOS_EXCLUIDOS'],
+                    'por rubro' => ['PAGOS_SIN_RUBRO']
+                ]
+            ],
+            'particion_extra' => 'por rubro'
         ],
 
         'LOGISTICA' => [
@@ -503,6 +532,18 @@ class CashflowRegistry {
             $meta['componentes'][$total] = array_values(array_unique(
                 array_merge($meta['componentes'][$total], array_keys($extra))
             ));
+
+            /* Y van al CORTE que el proveedor declara para ellas. Sin esto, dos
+               rubros activos a la vez -que es exactamente para lo que existen-
+               serian dos series sin corte y el validador las rechazaria.
+               Aparecen recien aca porque cuales existen depende del maestro. */
+            $corte = isset($meta['particion_extra']) ? $meta['particion_extra'] : null;
+
+            if ($corte !== null && isset($meta['particiones'][$total][$corte])) {
+                $meta['particiones'][$total][$corte] = array_values(array_unique(
+                    array_merge($meta['particiones'][$total][$corte], array_keys($extra))
+                ));
+            }
         }
 
         return $meta;

@@ -604,6 +604,8 @@ class CashflowEstructura {
             }
         }
 
+        self::validarCortes($r, $providers, $origenesUsados);
+
         // Un SUBTOTAL que no suma nada muestra cero y se lee como un error del
         // sistema. Se mira la seccion y sus descendientes, porque el subtotal
         // abarca en cascada.
@@ -649,6 +651,112 @@ class CashflowEstructura {
         }
 
         return $r;
+    }
+
+    /**
+     * DOS PARTES DEL MISMO UNIVERSO QUE VIENEN DE CORTES DISTINTOS SE PISAN.
+     *
+     * La regla de arriba mira el TOTAL contra una de sus partes. Esta mira las
+     * partes ENTRE SI, que es el agujero que quedaba: un mismo universo se
+     * puede cortar de varias maneras, y dos cortes distintos no son dos mitades
+     * -se solapan casi enteros-.
+     *
+     * El caso real: Proveedores Locales parte sus pendientes por COMO SE PAGA
+     * -PAGOS + PAGOS_FUERA_CRONOGRAMA- y tambien por QUE RUBRO ES
+     * -PAGOS_OPERATIVOS + PAGOS_EXCLUIDOS-. Cada par cierra contra el universo,
+     * asi que activar los dos de UN par es correcto y esta previsto; pero
+     * activar PAGOS junto a PAGOS_OPERATIVOS contaba dos veces $1.297 millones
+     * sin que nada lo dijera.
+     *
+     * COMO SE DECLARA. El registro pone 'particiones' en la entrada del
+     * proveedor: un mapa total => corte => series. Dos series del MISMO corte
+     * pueden convivir; dos de cortes distintos, no. Una serie que no esta en
+     * ningun corte -la interseccion de dos cortes, como
+     * PAGOS_CRONO_OPERATIVOS- no puede convivir con ninguna otra parte: se
+     * solapa con todas.
+     *
+     * SIN 'particiones' DECLARADAS NO CAMBIA NADA. Si el proveedor no las
+     * declara, todas sus partes se toman como un unico corte, que es lo que ya
+     * pasaba: los cuatro canales de Ventas siguen pudiendo estar los cuatro
+     * activos.
+     *
+     * @param array $r Resultado de la validacion, se modifica
+     * @param array $providers El registro
+     * @param array $origenesUsados Mapa 'PROV|SERIE' => nombre de la fila activa
+     */
+    private static function validarCortes(&$r, $providers, $origenesUsados) {
+        foreach ($providers as $prov => $meta) {
+            if (empty($meta['componentes'])) {
+                continue;
+            }
+
+            foreach ($meta['componentes'] as $total => $partes) {
+                /* Las partes activas de este universo, con el corte al que
+                   pertenece cada una. */
+                $activas = [];
+
+                foreach ($partes as $parte) {
+                    if (isset($origenesUsados[$prov . '|' . $parte])) {
+                        $activas[$parte] = self::corteDe($meta, $total, $parte);
+                    }
+                }
+
+                if (count($activas) < 2) {
+                    continue;
+                }
+
+                $codigos = array_keys($activas);
+
+                for ($i = 0; $i < count($codigos); $i++) {
+                    for ($j = $i + 1; $j < count($codigos); $j++) {
+                        $a = $codigos[$i];
+                        $b = $codigos[$j];
+
+                        // Mismo corte: son dos partes de la misma division y no
+                        // se pisan. Es el caso previsto de PAGOS junto a
+                        // PAGOS_FUERA_CRONOGRAMA.
+                        if ($activas[$a] !== null && $activas[$a] === $activas[$b]) {
+                            continue;
+                        }
+
+                        self::error($r, 'Las filas "' . $origenesUsados[$prov . '|' . $a]
+                            . '" y "' . $origenesUsados[$prov . '|' . $b] . '" cortan la misma '
+                            . 'deuda de ' . $meta['nombre'] . ' de dos maneras distintas ('
+                            . self::nombreCorte($activas[$a], $a) . ' contra '
+                            . self::nombreCorte($activas[$b], $b) . '), así que se superponen y '
+                            . 'el importe se contaría dos veces. Elegí un solo corte.');
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * A que corte del universo pertenece una serie, o null si a ninguno.
+     *
+     * Null significa "se solapa con todo lo demas": es el caso de una serie que
+     * cruza dos cortes, como el cronograma sin excluidos.
+     */
+    private static function corteDe($meta, $total, $serie) {
+        if (empty($meta['particiones'][$total])) {
+            // Sin declaracion, todas las partes son el mismo corte. Es como se
+            // comportaba antes y es lo correcto para los cuatro canales de
+            // Ventas.
+            return '(único)';
+        }
+
+        foreach ($meta['particiones'][$total] as $nombre => $series) {
+            if (in_array($serie, $series, true)) {
+                return $nombre;
+            }
+        }
+
+        return null;
+    }
+
+    /** El corte, para el mensaje. Una serie sin corte se nombra por si misma. */
+    private static function nombreCorte($corte, $serie) {
+        return ($corte === null) ? $serie : $corte;
     }
 
     /**
