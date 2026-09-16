@@ -52,6 +52,12 @@ require_once __DIR__ . '/Echeqs.php';
  * nuevo. getNeteoPrechequeado() devuelve cuanto restar, por columna del eje y
  * por canal. Lo que hay que netear sale de Echeqs -> Venta Cobrada Anticipada.
  *
+ * QUIEN LO CONSUME ES EL TABLERO, NO ESTA PANTALLA. El neteo es una fila propia
+ * del cashflow -serie VENTAS.NETEO_PRECHEQUEADO, en negativo- y las series de
+ * cobranza de este modulo salen BRUTAS. La pestana Ventas tambien muestra
+ * cobranza bruta: si la restara en el pie, habria dos lugares que tienen que
+ * dar lo mismo y ninguna garantia de que lo hagan.
+ *
  * NINGUN VALOR DE NEGOCIO ESTA HARDCODEADO: alicuota, horizonte, feriados,
  * participaciones de respaldo, mix y plazos salen de las tablas de parametros.
  */

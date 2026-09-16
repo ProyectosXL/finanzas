@@ -185,14 +185,14 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
-        case 'getNeteoPrechequeado':
-            // Circuito cableado y apagado: devuelve cero hasta que exista la
-            // vista origen de los echeqs adelantados.
-            echo json_encode([
-                'success' => true,
-                'data' => $ventas->getNeteoPrechequeado()
-            ], JSON_UNESCAPED_UNICODE);
-            break;
+        /* NO HAY CASO 'getNeteoPrechequeado', y se saco a proposito. Existia
+           para que la pestana Ventas dibujara el neteo en su pie, y esa fila ya
+           no esta: el neteo pasó a ser una fila del TABLERO -serie
+           VENTAS.NETEO_PRECHEQUEADO- y la pestana muestra cobranza bruta.
+           El circuito de calculo sigue vivo en Ventas::getNeteoPrechequeado():
+           lo consume VentasProvider, no esta pantalla. Un endpoint sin
+           consumidor es una superficie que hay que mantener sin que nadie la
+           use. */
 
         default:
             echo json_encode([

@@ -419,14 +419,30 @@ Una diferencia visible: el pie de *Cobranza Proyectada* tiene sus rótulos en ce
 
 ## Relación con el módulo Cashflow
 
-Ventas es uno de los proveedores de datos del tablero de Cashflow. Expone dos series a través del contrato común:
+Ventas es uno de los proveedores de datos del tablero de Cashflow. Expone tres series a través del contrato común, más la apertura por canal de las dos primeras:
 
 | Serie | Qué es |
 | --- | --- |
-| `COBRANZA` | La caja: cobranza estimada sobre ventas futuras, ya neta del neteo de cheques adelantados |
+| `COBRANZA` | La caja: cobranza estimada sobre ventas futuras. **Bruta** |
+| `NETEO_PRECHEQUEADO` | El neteo de cheques adelantados, **en negativo**. Es una fila propia del tablero |
 | `VENTA` | La venta proyectada con IVA. **No es caja**: en el tablero es una fila informativa que no entra en ninguna suma |
 
-Las dos salen de una única llamada a `proyectarCobranzas()`, que resuelve venta y cobranza en la misma pasada.
+Las tres salen de una única llamada a `proyectarCobranzas()`, que resuelve venta, cobranza y neteo en la misma pasada.
+
+### El neteo es una fila, no un descuento dentro de la cobranza
+
+`COBRANZA` y las cuatro `COBRANZA_<CANAL>` salían **netas**: el neteo se restaba adentro de cada serie. Ahora salen **brutas** y el neteo tiene su propia fila.
+
+El motivo del cambio es que el neteo es información que el tablero tiene que mostrar, no una corrección que tenga que esconder. Restado adentro de la cobranza, la única forma de saber cuánto se había neteado era abrir otra pantalla; ahora el cuadro dice la cobranza proyectada, cuánto de eso ya estaba cobrado, y el neto.
+
+> **Las dos cosas a la vez restarían el neteo DOS VECES.** Si alguien vuelve a netear adentro de `COBRANZA` —o de las series por canal— con la fila `NETEO_PRECHEQUEADO` activa, el tablero muestra de menos exactamente el importe del neteo, **y no hay ninguna validación que lo detecte**: las dos series son legítimas por separado. La regla es una sola: el neteo se resta en un solo lugar, y ese lugar es la fila.
+
+- **El signo se invierte en un solo lugar**, `VentasProvider::enNegativo()`. La fila del tablero es de `TIPO = 'INGRESO'` y el motor suma los ingresos: un ingreso negativo resta. Ponerla como `EGRESO` le daría signo −1 a un importe que ya viene negativo y el neteo terminaría *sumando*. Invertir mal el signo es invisible —el cuadro sigue dando un número razonable—, y por eso la inversión es una función estática con pruebas propias.
+- **La serie lleva el total de TODOS los canales**, no sólo Franquicias. Hoy todo el neteo es de franquicias porque son las que operan con pre-chequeado, pero eso es un hecho del padrón de clientes y no una regla del módulo: en cuanto un mayorista entregue cheques por adelantado, su neteo entra en la misma fila **sin tocar código**.
+- **No es componente de `COBRANZA`.** El registro declara en `componentes` qué series son apertura de qué total, y el validador rechaza que convivan. `NETEO_PRECHEQUEADO` no está ahí a propósito: no es una apertura de la cobranza sino una fila que convive con ella, y declararla componente haría que el validador rechace la combinación normal del tablero.
+- **La pestaña Ventas también muestra cobranza bruta.** El pie tenía una fila de neteo y una de *cobranza neta*, y las dos se fueron: dos lugares que tienen que dar lo mismo, sin ninguna garantía de que lo hagan. `VentasController` ya no expone `getNeteoPrechequeado` —quedó sin consumidores—, pero el circuito de cálculo sigue vivo: ahora lo consume el proveedor del tablero.
+
+La fila la crea `sql/cashflow_estructura_neteo_prechequeado.sql`. **Si ese script no se corre, el tablero muestra la cobranza en bruto y no avisa**, porque cada serie por separado es correcta.
 
 `proyectarVentas()` y `proyectarCobranzas()` aceptan un `Horizonte` opcional. La pestaña Ventas no lo pasa y arma el suyo desde los parámetros; el Cashflow **sí** lo pasa, para que la serie caiga exactamente en las mismas columnas sobre las que consolida el resto del tablero.
 

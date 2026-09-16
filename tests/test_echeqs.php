@@ -434,6 +434,70 @@ chequear('y devuelve el eje completo igual',
     count($ejeDias), count(Ventas::repartirNeteo([], $ejeDias, $ejeMeses, [])['dias']));
 
 /* ================================================================
+   EL NETEO ES UNA FILA DEL TABLERO, NO UN DESCUENTO DENTRO DE LA COBRANZA
+
+   Antes VentasProvider devolvia COBRANZA y las cuatro COBRANZA_<CANAL> ya
+   netas. Ahora las series vuelven a bruto y el neteo sale por una serie
+   propia, NETEO_PRECHEQUEADO, en NEGATIVO: la fila del tablero es de tipo
+   INGRESO y el motor suma los ingresos, asi que un negativo resta.
+
+   Invertir mal el signo es el unico error que esta serie puede tener, y es
+   invisible: el tablero sumaria el neteo en vez de restarlo y el cuadro
+   seguiria dando un numero razonable. Por eso la inversion vive en una
+   funcion estatica y por eso estas pruebas existen.
+   ================================================================ */
+seccion('el signo de la fila del tablero');
+
+require_once __DIR__ . '/../cashflow/Class/Providers/VentasProvider.php';
+
+chequear('lo que Ventas da en positivo, la serie lo da en negativo',
+    ['2026-09-10' => -500.0], VentasProvider::enNegativo(['2026-09-10' => 500.0]));
+
+// Una columna sin neteo tiene que mostrarse vacia. -0 no rompe ninguna cuenta
+// pero viaja tal cual al JSON y se ve en pantalla.
+chequear('el cero queda en cero y no en -0',
+    ['2026-09-11' => 0], VentasProvider::enNegativo(['2026-09-11' => 0]));
+chequear('y no se cuela un cero negativo', false,
+    strpos(json_encode(VentasProvider::enNegativo(['a' => 0])), '-0') !== false);
+
+chequear('un mapa vacio devuelve un mapa vacio', [], VentasProvider::enNegativo([]));
+
+// La serie tiene que llevar el TOTAL, no la rama de un canal: hoy todo el
+// neteo es de franquicias, pero eso es un hecho del padron de clientes y no
+// una regla del modulo. Si maniana un mayorista entrega cheques adelantados,
+// su neteo tiene que entrar en la fila sin que nadie toque codigo.
+$n = Ventas::repartirNeteo([
+    marcado('2026-09-10', 100, 'FRCAST'),
+    marcado('2026-09-11', 250, 'LMDQ01')
+], $ejeDias, $ejeMeses, []);
+
+$fila = VentasProvider::enNegativo($n['dias']);
+
+chequear('la fila lleva los dos canales, no solo franquicias',
+    -350.0, array_sum($fila));
+chequear('y es exactamente el total del neteo, dado vuelta',
+    -$n['total'], array_sum($fila) + array_sum(VentasProvider::enNegativo($n['meses'])));
+
+// El registro tiene que declarar la serie, y NO como componente de COBRANZA:
+// no es una apertura de la cobranza sino una fila que convive con ella, y
+// declararla componente haria que el validador rechace el tablero normal.
+$metaVentas = CashflowRegistry::meta('VENTAS');
+
+chequear('el registro declara la serie del neteo', true,
+    isset($metaVentas['series']['NETEO_PRECHEQUEADO']));
+
+$componentesDeclarados = [];
+
+foreach ($metaVentas['componentes'] as $hijas) {
+    $componentesDeclarados = array_merge($componentesDeclarados, $hijas);
+}
+
+chequear('y NO la declara componente de ninguna serie total', false,
+    in_array('NETEO_PRECHEQUEADO', $componentesDeclarados, true));
+chequear('NETEO_PRECHEQUEADO tampoco tiene componentes propios', false,
+    isset($metaVentas['componentes']['NETEO_PRECHEQUEADO']));
+
+/* ================================================================
    El proveedor del tablero
    ================================================================ */
 seccion('el proveedor no puede tumbar el tablero');
