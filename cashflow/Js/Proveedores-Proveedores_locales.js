@@ -211,8 +211,8 @@
     }
 
     /** El sufijo que devuelve el universo cuando el filtro escondió algo */
-    function deTotal(difiere, texto) {
-        return difiere ? ' · ' + texto : '';
+    function deTotal(difiere, delUniverso) {
+        return difiere ? ' · ' + delUniverso : '';
     }
 
     /**
