@@ -241,6 +241,8 @@ class CashflowRegistry {
                 'PAGOS_FUERA_CRONOGRAMA' => 'Solo lo que NO se paga por echeq ni transferencia',
                 'PAGOS_OPERATIVOS' => 'Todas, sin los rubros excluidos',
                 'PAGOS_EXCLUIDOS' => 'Solo los rubros excluidos (socios y no comerciales)',
+                'PAGOS_CRONO_OPERATIVOS' => 'Del cronograma y sin los rubros excluidos '
+                    . '(los dos criterios a la vez)',
                 'PAGOS_SIN_RUBRO' => 'Solo los proveedores que no estan en el maestro'
             ],
             'series_extra' => ['ProveedoresProvider', 'seriesDeRubro'],
@@ -252,7 +254,8 @@ class CashflowRegistry {
                PAGOS_TODO. Las de rubro se agregan en resolverExtra(). */
             'componentes' => [
                 'PAGOS_TODO' => ['PAGOS', 'PAGOS_FUERA_CRONOGRAMA', 'PAGOS_OPERATIVOS',
-                                 'PAGOS_EXCLUIDOS', 'PAGOS_SIN_RUBRO']
+                                 'PAGOS_EXCLUIDOS', 'PAGOS_CRONO_OPERATIVOS',
+                                 'PAGOS_SIN_RUBRO']
             ]
         ],
 

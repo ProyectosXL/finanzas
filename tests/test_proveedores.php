@@ -805,6 +805,72 @@ chequear('y la de solo excluidos', true,
 chequear('y la de los que faltan en el maestro', true,
     CashflowRegistry::serieExiste('PROV_LOCALES', 'PAGOS_SIN_RUBRO'));
 
+/* LOS DOS CRITERIOS A LA VEZ. Sin esta serie no habia forma de sacar a los
+   socios del tablero sin perder el criterio del cronograma: apuntar la fila a
+   PAGOS_OPERATIVOS se lleva tambien los debitos automaticos. */
+chequear('y la de los dos criterios juntos', true,
+    CashflowRegistry::serieExiste('PROV_LOCALES', 'PAGOS_CRONO_OPERATIVOS'));
+
+seccion('a que series va cada vencimiento');
+
+require_once __DIR__ . '/../cashflow/Class/Providers/ProveedoresProvider.php';
+
+$item = function ($crono, $excluido, $enMaestro = true, $serie = 'RUBRO_MERCADERIA') {
+    return ['CRONOGRAMA' => $crono, 'EXCLUIDO' => $excluido,
+            'EN_MAESTRO' => $enMaestro, 'SERIE' => $serie];
+};
+
+/* Los cuatro cuadrantes. El que faltaba poder aislar es el primero: cronograma
+   Y operativo. */
+$d = ProveedoresProvider::seriesDeItem($item(true, false));
+
+chequear('cronograma y operativo: va al cronograma', true, in_array('PAGOS', $d, true));
+chequear('a los operativos', true, in_array('PAGOS_OPERATIVOS', $d, true));
+chequear('y a los dos juntos', true, in_array('PAGOS_CRONO_OPERATIVOS', $d, true));
+
+/* EL CASO QUE MOTIVA LA SERIE: un socio que cobra por transferencia. Entra al
+   cronograma -asi se le paga- pero no es deuda comercial. Hoy son $109,6
+   millones de un solo proveedor dentro de la fila del tablero. */
+$d = ProveedoresProvider::seriesDeItem($item(true, true));
+
+chequear('un excluido que cobra por transferencia entra al cronograma', true,
+    in_array('PAGOS', $d, true));
+chequear('y a los excluidos', true, in_array('PAGOS_EXCLUIDOS', $d, true));
+chequear('pero NO a la serie de los dos criterios', false,
+    in_array('PAGOS_CRONO_OPERATIVOS', $d, true));
+
+// Un debito automatico operativo: queda fuera del cronograma, asi que tampoco.
+$d = ProveedoresProvider::seriesDeItem($item(false, false));
+
+chequear('un debito operativo queda fuera del cronograma', true,
+    in_array('PAGOS_FUERA_CRONOGRAMA', $d, true));
+chequear('y tampoco va a la serie de los dos criterios', false,
+    in_array('PAGOS_CRONO_OPERATIVOS', $d, true));
+
+$d = ProveedoresProvider::seriesDeItem($item(false, true));
+
+chequear('un excluido fuera del cronograma tampoco', false,
+    in_array('PAGOS_CRONO_OPERATIVOS', $d, true));
+
+// El universo se lleva las cuatro, siempre.
+foreach ([[true, true], [true, false], [false, true], [false, false]] as $q) {
+    chequear('el universo se lleva el cuadrante ' . json_encode($q), true,
+        in_array('PAGOS_TODO', ProveedoresProvider::seriesDeItem($item($q[0], $q[1])), true));
+}
+
+// Y la serie del rubro no depende de ninguno de los dos criterios: describe QUE
+// es la deuda, no como se paga ni si esta excluida.
+$d = ProveedoresProvider::seriesDeItem($item(false, false, true, 'RUBRO_LOGISTICA'));
+
+chequear('la serie del rubro va igual', true, in_array('RUBRO_LOGISTICA', $d, true));
+
+$d = ProveedoresProvider::seriesDeItem($item(true, false, false,
+    ProveedoresCategorias::SERIE_SIN_RUBRO));
+
+chequear('sin maestro va a PAGOS_SIN_RUBRO', true, in_array('PAGOS_SIN_RUBRO', $d, true));
+chequear('y no inventa una serie de rubro', false,
+    in_array(ProveedoresCategorias::SERIE_SIN_RUBRO, $d, true));
+
 $meta = CashflowRegistry::meta('PROV_LOCALES');
 
 /* EL TOTAL CONTRA EL QUE SE MIDE EL DOBLE CONTEO ES PAGOS_TODO, no PAGOS: la
@@ -1006,6 +1072,29 @@ chequear('cronograma + fuera = universo',
 chequear('operativos + excluidos = universo',
     $suma($series['PAGOS_TODO']),
     $suma($series['PAGOS_OPERATIVOS']) + $suma($series['PAGOS_EXCLUIDOS']));
+
+/* LA TERCERA SERIE NO ES UNA PARTICION: es la interseccion de una mitad de cada
+   una, asi que no cierra contra nada. Lo que si tiene que valer siempre es que
+   no sea mayor que ninguna de las dos mitades que la contienen -si lo fuera,
+   estaria contando algo que no pertenece a ninguna de las dos-. */
+chequear('los dos criterios juntos no superan al cronograma', true,
+    $suma($series['PAGOS_CRONO_OPERATIVOS']) <= $suma($series['PAGOS']));
+chequear('ni a los operativos', true,
+    $suma($series['PAGOS_CRONO_OPERATIVOS']) <= $suma($series['PAGOS_OPERATIVOS']));
+
+/* Y lo que le saca al cronograma es exactamente lo excluido que se paga por
+   cronograma, que es el importe que hasta ahora no se podia sacar de la fila. */
+$excluidoDelCronograma = 0.0;
+
+foreach ($items as $i) {
+    if (!empty($i['CRONOGRAMA']) && !empty($i['EXCLUIDO'])
+        && in_array('PAGOS_CRONO_OPERATIVOS', ProveedoresProvider::seriesDeItem($i), true)) {
+        $excluidoDelCronograma++;   // no deberia entrar ninguno
+    }
+}
+
+chequear('ningun excluido se cuela en la serie de los dos criterios',
+    0.0, $excluidoDelCronograma);
 
 // La fila del tablero trae MENOS que el universo: esa es la decision de negocio.
 chequear('el cronograma no puede ser mayor que el universo', true,

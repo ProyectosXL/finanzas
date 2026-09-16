@@ -313,15 +313,16 @@ Como las dos importaciones, **no escribe nada hasta confirmar**.
 
 ## Integración con el tablero
 
-`ProveedoresProvider` sirve el código `PROV_LOCALES` con **cuatro series fijas** y **una por rubro**:
+`ProveedoresProvider` sirve el código `PROV_LOCALES` con **siete series fijas** y **una por rubro**:
 
 | Serie | Qué trae |
 | --- | --- |
-| `PAGOS` | **Sólo echeq y transferencia** — es la que usa la fila del tablero |
 | `PAGOS_TODO` | El universo completo, todas las formas de pago |
+| `PAGOS` | **Sólo echeq y transferencia** — es la que usa la fila del tablero |
 | `PAGOS_FUERA_CRONOGRAMA` | Sólo lo que el criterio deja afuera |
 | `PAGOS_OPERATIVOS` | Todo menos los rubros `Excluidos` |
 | `PAGOS_EXCLUIDOS` | Sólo los excluidos |
+| `PAGOS_CRONO_OPERATIVOS` | **Los dos criterios a la vez** |
 | `PAGOS_SIN_RUBRO` | Sólo los que no están en el maestro |
 | `RUBRO_*` | Una por cada rubro económico del maestro |
 
@@ -336,7 +337,15 @@ PAGOS_OPERATIVOS + PAGOS_EXCLUIDOS = PAGOS_TODO (por qué rubro es)
 
 Eso lo fija `tests/test_proveedores.php` contra los datos reales: si una de las dos no cerrara, algún comprobante se estaría yendo a la serie equivocada.
 
-Con las fijas, **sacar a los socios del tablero es apuntar la fila a `PAGOS_OPERATIVOS` desde Parámetros**: configuración, no código.
+### Las dos particiones son independientes, y por eso hace falta la séptima
+
+Los dos criterios no se implican: un socio con rubro `Excluidos` que cobra por **transferencia** entra a `PAGOS`. No es teórico —hoy es **$109,6 M de un solo proveedor** dentro de la fila del tablero—, y hasta que existió `PAGOS_CRONO_OPERATIVOS` no había forma de aplicar los dos criterios a la vez: apuntar la fila a `PAGOS_OPERATIVOS` saca a los socios pero mete de vuelta los débitos automáticos, que es lo contrario de lo que la fila quiere decir.
+
+**Sacar a los socios del tablero sin perder el criterio del cronograma es apuntar la fila a `PAGOS_CRONO_OPERATIVOS` desde Parámetros**: configuración, no código.
+
+`PAGOS_CRONO_OPERATIVOS` **no parte nada**: es la intersección de una mitad de cada partición, así que se solapa con las dos. `PAGOS_SIN_RUBRO` tampoco: cruza las cuatro. El validador lo sabe —ver abajo—.
+
+La regla de reparto vive en `ProveedoresProvider::seriesDeItem()`, estática y pura, y los cuatro cuadrantes se verifican sin base.
 
 **El proveedor crea una serie por cada rubro del maestro, aunque hoy no tenga deuda.** Si no, una fila configurada contra un rubro sin pendientes se dibujaría como *"sin datos"* —con el ícono de que su módulo no devolvió nada— en lugar de mostrar un cero limpio, que es lo cierto.
 
