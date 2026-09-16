@@ -372,11 +372,19 @@
     }
 
     /**
-     * Lo que quedó fuera del eje. Con días de pre-chequeado altos la fecha
-     * estimada de venta puede caer antes del inicio del eje, y ahí no hay
-     * columna donde ubicar el importe. Se avisa, no se esconde: es el mismo
-     * criterio de Ventas::repartirNeteo(), que además es la cuenta que de
-     * verdad netea.
+     * Lo que quedó fuera del eje, que a esta altura es sólo lo POSTERIOR al
+     * horizonte: son cheques que están en la tabla pero cuyo importe no tiene
+     * columna donde ubicarse, y eso se avisa.
+     *
+     * Lo anterior a hoy no llega hasta acá. El filtro lo aplica PHP
+     * —`Echeqs::ventaYaCobrada()`, en `cruzarPrechequeado()`— y esos cheques no
+     * bajan: su venta ya se facturó y ya se cobró, así que no es plata que falte
+     * mostrar. El corte va en PHP y no acá a propósito: los KPIs del encabezado
+     * salen de `resumenPrechequeado()` sobre las mismas filas, y filtrar en el
+     * navegador habría dejado la tabla corta y los totales largos.
+     *
+     * Es el mismo criterio de `Ventas::repartirNeteo()`, que además es la cuenta
+     * que de verdad netea, y es literalmente la misma función.
      */
     function pintarAvisosEjePre() {
         var cont = document.getElementById('avisosEjePre');

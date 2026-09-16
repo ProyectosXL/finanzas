@@ -79,9 +79,15 @@ try {
             // es donde tiene que verse en la grilla. La del cheque queda como
             // columna de referencia.
             //
-            // Los cheques cuya fecha estimada cae antes del inicio del eje se
-            // avisan en 'descartes', igual que hace Ventas::repartirNeteo(). No
-            // se esconden.
+            // Los cheques cuya fecha estimada cae ANTES DE HOY ya no llegan
+            // hasta aca: los descarta Echeqs::cruzarPrechequeado() con
+            // Echeqs::ventaYaCobrada(), la misma funcion que usa
+            // Ventas::repartirNeteo() para no netearlos. Esa venta ya se
+            // facturo y ya se cobro: esta fuera del cashflow, y la leyenda de
+            // la sub-pestana lo dice.
+            //
+            // Lo POSTERIOR al horizonte si llega y si se avisa en 'descartes':
+            // ese cheque esta en la tabla y su importe no tiene columna.
             $payload = EjeVista::armar(
                 Horizonte::desdeParametros(new Parametros()),
                 $filas,

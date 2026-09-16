@@ -180,6 +180,50 @@ class Echeqs {
     }
 
     /**
+     * Si la venta de un cheque adelantado YA OCURRIO: su fecha estimada de venta
+     * quedo antes del corte.
+     *
+     * ES LA REGLA DE VISIBILIDAD DE LA SUB-PESTANA Y LA REGLA DE DESCARTE DEL
+     * NETEO, Y ES UNA SOLA FUNCION A PROPOSITO. La usan
+     * cruzarPrechequeado() -para no mostrar esos cheques- y
+     * Ventas::repartirNeteo() -para no netearlos-. Si fueran dos
+     * implementaciones, la pantalla podria mostrar un cheque que el tablero no
+     * netea, o al reves, y no habria ninguna pantalla donde se notara: el
+     * usuario tildaria algo que no mueve nada.
+     *
+     * QUE SIGNIFICA: si la venta teorica quedo en el pasado, esa factura ya se
+     * emitio y ese cheque ya entro. No es una venta futura, asi que no esta en
+     * la cobranza proyectada y no hay nada que netear. Por eso el cheque sale
+     * del cashflow entero -de la grilla, de los KPIs y del neteo- y no porque
+     * "no se pueda ubicar".
+     *
+     * EL CORTE ES UN PARAMETRO Y NO 'hoy' ESCRITO ADENTRO. La sub-pestana no le
+     * pasa nada y corta contra hoy; el neteo le pasa el PRIMER DIA DEL EJE.
+     * En la practica son el mismo dia -Horizonte arma el tramo diario
+     * empezando en hoy, ver Horizonte::construirDias()- pero el neteo tiene que
+     * cortar contra el eje que efectivamente recibio, no contra el reloj: con
+     * un eje inyectado distinto -el Analisis de Ventas arma uno solo mensual-
+     * el reloj daria otra respuesta.
+     *
+     * SIN FECHA ESTIMADA TAMBIEN DA true. Un cheque sin fecha no se puede ubicar
+     * en ninguna columna ni de la grilla ni del eje del tablero; tratarlo como
+     * visible lo mostraria en una fila sin ninguna celda con importe.
+     *
+     * @param string|null $fechaVentaEst Fecha estimada de venta, 'Y-m-d'
+     * @param string|null $corte Fecha de corte 'Y-m-d'. Por defecto, hoy
+     * @return bool
+     */
+    public static function ventaYaCobrada($fechaVentaEst, $corte = null) {
+        if ($fechaVentaEst === null || $fechaVentaEst === '') {
+            return true;
+        }
+
+        $corte = ($corte === null || $corte === '') ? date('Y-m-d') : $corte;
+
+        return $fechaVentaEst < $corte;
+    }
+
+    /**
      * Cruza los cheques con el maestro de clientes pre-chequeados y con las
      * excepciones por cheque. ES LA REGLA COMPLETA DE LA SUB-PESTANA, escrita una
      * sola vez.
@@ -201,6 +245,20 @@ class Echeqs {
      * 3. LOS ESTADOS MUERTOS NO ENTRAN. Un cheque anulado o rechazado no netea
      *    nada, y deja de hacerlo sin que su marca se toque.
      *
+     * 4. LO ANTERIOR A HOY NO ENTRA. Si la fecha estimada de venta quedo en el
+     *    pasado, esa venta ya se facturo y ya se cobro: esta fuera del cashflow
+     *    y no hay nada que tildar. El corte lo decide ventaYaCobrada(), LA MISMA
+     *    funcion que usa Ventas::repartirNeteo() para no netearlos. Que sea una
+     *    sola funcion es el punto: si fueran dos, la pantalla podria mostrar un
+     *    cheque que el tablero no netea y el usuario tildaria algo que no mueve
+     *    nada.
+     *
+     *    VA ACA Y NO EN EL JS, y tampoco en la consulta. En el JS la tabla
+     *    quedaria filtrada pero los KPIs del encabezado -que salen de
+     *    resumenPrechequeado() sobre estas mismas filas- seguirian contando los
+     *    cheques escondidos, y la pantalla se contradeciria a si misma. En la
+     *    consulta quedaria lejos del resto de la regla y sin pruebas.
+     *
      * La consulta de la que salen los cheques ya aplica los mismos filtros: eso
      * es una OPTIMIZACION -no traer del motor lo que se va a descartar-, no una
      * segunda copia de la regla. La regla que decide es esta.
@@ -208,9 +266,12 @@ class Echeqs {
      * @param array $cheques Filas crudas de dbo.SBA14 ya normalizadas
      * @param array $clientes Filas del maestro, con CLIENTE y ACTIVO
      * @param array $excepciones Filas de excepciones, con ID_SBA14 y MARCADO
+     * @param string|null $hoy Corte 'Y-m-d' para la regla 4. Por defecto, hoy.
+     *                         Existe para poder probar la regla sin depender
+     *                         del dia en que corren las pruebas
      * @return array Filas listas para la pantalla
      */
-    public static function cruzarPrechequeado($cheques, $clientes, $excepciones) {
+    public static function cruzarPrechequeado($cheques, $clientes, $excepciones, $hoy = null) {
         $activos = [];
         $dias = [];
 
@@ -273,6 +334,13 @@ class Echeqs {
             $cheque['DIAS_PRECHEQUEADO'] = self::diasDeCliente($dias, $codigo);
             $cheque['FECHA_VENTA_EST'] = self::fechaVentaEstimada(
                 $cheque['FECHA_CHEQUE'], $cheque['DIAS_PRECHEQUEADO']);
+
+            // Regla 4: la venta ya ocurrio, el cheque esta fuera del cashflow.
+            // Se descarta despues de calcular la fecha estimada porque es esa
+            // fecha -y no la del cheque- la que decide.
+            if (self::ventaYaCobrada($cheque['FECHA_VENTA_EST'], $hoy)) {
+                continue;
+            }
 
             $filas[] = $cheque;
         }

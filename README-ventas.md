@@ -300,6 +300,7 @@ Mix de cobro inicial (cada canal suma 100%):
 | `RO_V_CASHFLOW_VENTAS_PRECHEQ` | La vista origen. La crea `sql/echeqs_prechequeado.sql` |
 | `RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE.DIAS_PRECHEQUEADO` | Los días, **por cliente** |
 | `Echeqs::diasDeCliente()` · `Echeqs::fechaVentaEstimada()` | Resuelven el plazo y la fecha. Las usan la pantalla **y** el neteo |
+| `Echeqs::ventaYaCobrada()` | Decide qué queda fuera del cashflow. La usan la pantalla **y** el neteo, y es una sola implementación a propósito |
 | `Ventas::getNeteoPrechequeado()` | Reparte el importe contra el eje y descarta lo que queda afuera |
 
 ```
@@ -332,6 +333,10 @@ Por eso **no va a `fuera_horizonte` ni deja aviso**. `fuera_horizonte` tiene un 
 > Esto es un cambio de criterio respecto de la versión anterior, que lo informaba como `fuera_horizonte` con aviso. La regla *"nunca se descarta en silencio"* sigue en pie para lo que el tablero deja de mostrar; lo que cambió es la lectura de este caso, que no es uno de esos. La sub-pestaña **Echeqs → Venta Cobrada Anticipada** aplica la misma regla y **tampoco muestra** esos cheques, así que pantalla y neteo no se pueden desalinear.
 
 **El corte es contra el primer día del eje**, no contra `hoy` escrito a mano. No alcanza con preguntarle a `Horizonte::ubicar()` si encontró columna: una fecha de los primeros días del mes **en curso** cae en la columna de ese mes, que existe pero no representa ningún día futuro y la pantalla ni siquiera la dibuja.
+
+**La regla vive en una sola función: `Echeqs::ventaYaCobrada()`.** La llaman los dos lados —`Ventas::repartirNeteo()` para decidir qué netea, y `Echeqs::cruzarPrechequeado()` para decidir qué muestra la sub-pestaña—. Si fueran dos implementaciones, la pantalla podría mostrar un cheque que el tablero no netea, y el usuario tildaría algo que no mueve nada **sin ninguna pantalla donde notarlo**.
+
+El corte es un parámetro, no `hoy` escrito adentro: la sub-pestaña no le pasa nada y corta contra hoy; el neteo le pasa el **primer día del eje**. En la práctica son el mismo día —`Horizonte` arma el tramo diario empezando en hoy—, pero el neteo tiene que cortar contra el eje que efectivamente recibió y no contra el reloj.
 
 **Lo posterior al horizonte se descarta igual y por lo mismo:** si la venta cae más allá del último mes del eje, su cobranza proyectada tampoco está en el cuadro.
 

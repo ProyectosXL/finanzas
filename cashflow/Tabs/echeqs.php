@@ -262,10 +262,20 @@
                 <div class="d-flex align-items-center gap-3 flex-wrap">
                     <div>
                         <h5 class="mb-0">Cheques de clientes pre-chequeados</h5>
-                        <small class="text-muted">
+                        <!-- LA SEGUNDA LÍNEA NO ES OPCIONAL. La tabla esconde
+                             los cheques cuya venta teórica ya pasó, y una tabla
+                             que esconde filas sin decirlo se lee como que esos
+                             cheques no existen. Quien busque uno que ayer estaba
+                             tiene que poder entender por qué no está. -->
+                        <small class="text-muted d-block">
                             Entran <strong>tildados</strong>: estar en el maestro es haber optado
                             por la modalidad. Lo que se hace acá es <em>destildar</em> las
                             excepciones.
+                        </small>
+                        <small class="text-muted d-block">
+                            Se ven sólo los de <strong>venta teórica desde hoy</strong>. Los
+                            anteriores corresponden a ventas ya facturadas y cobradas: están
+                            fuera del cashflow y no hay nada que netear.
                         </small>
                     </div>
                     <select id="filtroClientePre" class="form-select form-select-sm"
@@ -294,6 +304,15 @@
                     <button id="btnRefreshPre" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
+                    <!-- Lo engancha Js/tabla-export.js por el data-exportar: no
+                         hace falta una línea de JS en la pestaña. Exporta lo que
+                         se ve —el buscador, el filtro de cliente y la vista del
+                         eje ya vienen aplicados porque sale del DOM vivo— y los
+                         tildes bajan como Sí/No, no como checkbox. -->
+                    <button class="btn btn-sm btn-success" data-exportar="tablaPrechequeado"
+                            data-exportar-nombre="Venta_Cobrada_Anticipada">
+                        <i class="fas fa-file-excel me-1"></i> Exportar
+                    </button>
                 </div>
             </div>
 
@@ -303,9 +322,11 @@
                 <small class="text-muted" id="periodoPre"></small>
             </div>
 
-            <!-- Lo que no entra en el eje se avisa, no se esconde: con días de
-                 pre-chequeado altos la fecha estimada de venta puede caer antes
-                 del inicio del eje. Es el mismo criterio de
+            <!-- Lo que queda MÁS ALLÁ del horizonte se avisa: son cheques que
+                 están en la tabla pero cuyo importe no tiene columna donde
+                 ubicarse. Lo anterior a hoy ya no llega hasta acá —no se
+                 muestra, y lo dice la leyenda de arriba—: no es plata que falte
+                 mostrar, es venta ya cobrada. Es el mismo criterio de
                  Ventas::repartirNeteo(). -->
             <div id="avisosEjePre"></div>
 

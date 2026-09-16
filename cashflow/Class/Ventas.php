@@ -669,6 +669,11 @@ class Ventas {
      * proyeccion y no hay nada de donde restarla. Un neteo sin contrapartida no
      * es plata que al tablero le falte: es plata que al tablero no le toca.
      *
+     * El corte lo decide Echeqs::ventaYaCobrada(), que es LA MISMA funcion con
+     * la que la sub-pestana Echeqs -> Venta Cobrada Anticipada decide que
+     * cheques muestra. Una sola implementacion, dos llamadores: asi la pantalla
+     * y el neteo no se pueden desalinear.
+     *
      * Por eso NO va a 'fuera_horizonte' ni deja aviso. 'fuera_horizonte' tiene
      * un significado preciso en este modulo -cuanta plata el tablero DEBERIA
      * mostrar y no muestra, ver README-cashflow.md- y este importe no es eso.
@@ -748,7 +753,16 @@ class Ventas {
                 $fila['FECHA_CHEQUE'],
                 Echeqs::diasDeCliente($diasPorCliente, $fila['COD_CLIENTE']));
 
-            $destino = ($teorica === null || $teorica < $inicio)
+            // LA MISMA funcion que decide que cheques muestra la sub-pestana
+            // Echeqs -> Venta Cobrada Anticipada. Es una sola por diseno: si
+            // fueran dos implementaciones, la pantalla podria mostrar un cheque
+            // que el tablero no netea -o al reves- y el usuario tildaria algo
+            // que no mueve nada, sin ninguna pantalla donde notarlo.
+            //
+            // El corte que se le pasa es el PRIMER DIA DEL EJE y no 'hoy': en
+            // la practica son el mismo dia, pero el neteo tiene que cortar
+            // contra el eje que efectivamente recibio.
+            $destino = Echeqs::ventaYaCobrada($teorica, $inicio)
                 ? null
                 : Horizonte::ubicar($neteo, $teorica);
 

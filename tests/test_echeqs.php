@@ -16,8 +16,27 @@ require_once __DIR__ . '/../cashflow/Class/Echeqs.php';
 require_once __DIR__ . '/../cashflow/Class/CashflowRegistry.php';
 require_once __DIR__ . '/../cashflow/Class/Parametros.php';
 
+/* Ventas se carga aca arriba y no mas abajo, donde empieza su seccion, porque
+   la regla de visibilidad de la sub-pestana y la de descarte del neteo son la
+   MISMA funcion: la prueba que las ata necesita las dos clases juntas. */
+require_once __DIR__ . '/../cashflow/Class/Ventas.php';
+
 /** Eje de referencia: 28 dias desde el 6/9/2026 + 12 meses */
 $h = new Horizonte(28, 12, [], new DateTime('2026-09-06'));
+
+/**
+ * El dia contra el que corta la sub-pestana en estas pruebas.
+ *
+ * Es el MISMO dia que abre el eje $h, y no es casualidad: Horizonte arma el
+ * tramo diario empezando en hoy, asi que "antes del primer dia del eje" y
+ * "antes de hoy" son la misma fecha. La sub-pestana corta contra hoy y el
+ * neteo contra el inicio del eje; que coincidan es lo que hace que la pantalla
+ * muestre exactamente los cheques que el tablero netea.
+ *
+ * Va explicito para que las pruebas no dependan del dia en que corren: sin
+ * esto, cada cheque de prueba se volveria invisible al pasar su fecha.
+ */
+define('HOY', '2026-09-06');
 
 /**
  * Un cheque de prueba, con lo minimo que mira cruzarPrechequeado().
@@ -70,7 +89,7 @@ $cheques = [
     cheque(3, 'FROTRO')       // cliente que NO esta en el maestro
 ];
 
-$filas = Echeqs::cruzarPrechequeado($cheques, $maestro, []);
+$filas = Echeqs::cruzarPrechequeado($cheques, $maestro, [], HOY);
 
 chequear('solo aparecen los cheques de clientes del maestro', 2, count($filas));
 
@@ -84,9 +103,9 @@ chequear('y son los que corresponden', [1, 2], $ids);
 // cheques de todos los clientes, y esos tildes netearian ventas que nadie
 // prepago.
 chequear('con el maestro vacio no se muestra NADA',
-    [], Echeqs::cruzarPrechequeado($cheques, [], []));
+    [], Echeqs::cruzarPrechequeado($cheques, [], [], HOY));
 chequear('un maestro que no es una lista tampoco abre la puerta',
-    [], Echeqs::cruzarPrechequeado($cheques, null, []));
+    [], Echeqs::cruzarPrechequeado($cheques, null, [], HOY));
 
 // Un cliente dado de baja no aparece, AUNQUE tenga una excepcion cargada: la
 // excepcion queda en la tabla por si vuelve, pero no lo revive.
@@ -96,14 +115,14 @@ $conBaja = [
 ];
 
 $filas = Echeqs::cruzarPrechequeado($cheques, $conBaja,
-    [['ID_SBA14' => 2, 'MARCADO' => 1]]);
+    [['ID_SBA14' => 2, 'MARCADO' => 1]], HOY);
 
 chequear('un cliente inhabilitado desaparece del listado', 1, count($filas));
 chequear('y el que queda es el activo', 1, $filas[0]['ID_SBA14']);
 
 seccion('la marca por defecto y de donde viene');
 
-$filas = Echeqs::cruzarPrechequeado([cheque(1, 'FRCAST')], $maestro, []);
+$filas = Echeqs::cruzarPrechequeado([cheque(1, 'FRCAST')], $maestro, [], HOY);
 
 // Estar en el maestro es haber optado por la modalidad: el tilde viene puesto.
 chequear('sin excepcion, el cheque entra MARCADO', 1, $filas[0]['MARCADO']);
@@ -114,7 +133,7 @@ chequear('nadie la toco, asi que no hay usuario', null, $filas[0]['MARCA_USUARIO
 $filas = Echeqs::cruzarPrechequeado([cheque(1, 'FRCAST')], $maestro, [
     ['ID_SBA14' => 1, 'MARCADO' => 0, 'FECHA_UPDATE' => '2026-09-09 10:00:00',
      'USUARIO' => 'silvina']
-]);
+], HOY);
 
 chequear('con una excepcion en 0, el cheque NO queda marcado', 0, $filas[0]['MARCADO']);
 chequear('y la marca se declara puesta a mano',
@@ -128,11 +147,79 @@ chequear('y cuando', '2026-09-09 10:00:00', $filas[0]['MARCA_FECHA']);
 // Re-tildar a mano tambien deja rastro: la fila de excepcion no se borra.
 $filas = Echeqs::cruzarPrechequeado([cheque(1, 'FRCAST')], $maestro, [
     ['ID_SBA14' => 1, 'MARCADO' => 1, 'USUARIO' => 'dan']
-]);
+], HOY);
 
 chequear('un re-tilde a mano queda marcado', 1, $filas[0]['MARCADO']);
 chequear('pero sigue siendo una marca manual',
     Echeqs::ORIGEN_CHEQUE, $filas[0]['ORIGEN_MARCA']);
+
+seccion('lo que ya se cobro no se muestra');
+
+/* LA REGLA ES UNA SOLA FUNCION, Echeqs::ventaYaCobrada(), y la usan los dos
+   lados: cruzarPrechequeado() para decidir que cheques muestra la sub-pestana,
+   y Ventas::repartirNeteo() para decidir cuales netea. Si fueran dos
+   implementaciones, la pantalla podria mostrar un cheque que el tablero no
+   netea y el usuario tildaria algo que no mueve nada, sin ninguna pantalla
+   donde notarlo. */
+
+chequear('una venta teorica anterior al corte ya esta cobrada',
+    true, Echeqs::ventaYaCobrada('2026-09-05', HOY));
+chequear('la del dia del corte NO: el corte es el primer dia que cuenta',
+    false, Echeqs::ventaYaCobrada('2026-09-06', HOY));
+chequear('y una futura tampoco',
+    false, Echeqs::ventaYaCobrada('2026-09-20', HOY));
+
+// Un cheque sin fecha no se puede ubicar en ninguna columna, ni de la grilla ni
+// del eje del tablero: mostrarlo seria una fila sin una sola celda con importe.
+chequear('sin fecha estimada queda afuera', true, Echeqs::ventaYaCobrada(null, HOY));
+chequear('una fecha vacia tambien', true, Echeqs::ventaYaCobrada('', HOY));
+
+// El cheque cae el 10 pero el cliente adelanta 10 dias: la venta teorica es el
+// 31/8, anterior al corte. El cheque NO se muestra, y es el mismo importe que
+// repartirNeteo() descarta.
+$adelantados = [['CLIENTE' => 'FRCAST', 'ACTIVO' => 1, 'DIAS_PRECHEQUEADO' => 10]];
+
+$filas = Echeqs::cruzarPrechequeado([cheque(1, 'FRCAST')], $adelantados, [], HOY);
+
+chequear('el cheque cuya venta teorica quedo en el pasado no aparece', 0, count($filas));
+
+// Y no es la fecha del CHEQUE la que decide: el mismo cheque, con un cliente
+// que no adelanta nada, si se ve.
+$filas = Echeqs::cruzarPrechequeado([cheque(1, 'FRCAST')],
+    [['CLIENTE' => 'FRCAST', 'ACTIVO' => 1, 'DIAS_PRECHEQUEADO' => 0]], [], HOY);
+
+chequear('decide la fecha teorica de venta, no la del cheque', 1, count($filas));
+
+// SALE DE TODOS LADOS, no solo de la tabla: los KPIs del encabezado y el pie
+// salen de resumenPrechequeado() sobre estas mismas filas. Filtrar en el JS
+// habria dejado la tabla corta y los totales largos, y la pantalla se
+// contradeciria a si misma.
+$mezcla = [
+    cheque(1, 'FRCAST', 'C', 100, '2026-09-20'),   // venta teorica 10/9: entra
+    cheque(2, 'FRCAST', 'C', 700, '2026-09-12')    // venta teorica 2/9: no entra
+];
+
+$resumen = Echeqs::resumenPrechequeado(
+    Echeqs::cruzarPrechequeado($mezcla, $adelantados, [], HOY));
+
+chequear('el KPI de cheques no cuenta los escondidos', 1, $resumen['cheques']);
+chequear('ni el de marcados', 1, $resumen['marcados']);
+chequear('ni el importe a netear', 100.0, $resumen['importe_marcado']);
+chequear('ni el total del listado', 100.0, $resumen['importe_total']);
+
+// EL INVARIANTE QUE ATA LAS DOS PANTALLAS: lo que la sub-pestana muestra es
+// exactamente lo que el neteo reparte. Con los mismos cheques y el mismo corte,
+// los dos caminos tienen que dar el mismo importe.
+$n = Ventas::repartirNeteo([
+    ['FECHA_CHEQUE' => '2026-09-20', 'COD_CLIENTE' => 'FRCAST',
+     'ESTADO' => 'C', 'IMPORTE' => 100, 'CHEQUES' => 1],
+    ['FECHA_CHEQUE' => '2026-09-12', 'COD_CLIENTE' => 'FRCAST',
+     'ESTADO' => 'C', 'IMPORTE' => 700, 'CHEQUES' => 1]
+], array_column($h->dias(), 'fecha'), array_column($h->meses(), 'clave'),
+   ['FRCAST' => 10]);
+
+chequear('el neteo reparte exactamente lo que la pantalla muestra',
+    $resumen['importe_marcado'], $n['total']);
 
 seccion('un cheque que se muere deja de netear solo');
 
@@ -153,7 +240,7 @@ $marcados = [
     ['ID_SBA14' => 4, 'MARCADO' => 1]
 ];
 
-$filas = Echeqs::cruzarPrechequeado($muertos, $maestro, $marcados);
+$filas = Echeqs::cruzarPrechequeado($muertos, $maestro, $marcados, HOY);
 $vivos = array_column($filas, 'ESTADO');
 sort($vivos);
 
@@ -183,7 +270,7 @@ chequear('y es el que tiene cheques', 'FRCAST', $resumen['clientes'][0]['codigo'
 // pero no suma a lo que se netea.
 $resumen = Echeqs::resumenPrechequeado(
     Echeqs::cruzarPrechequeado([cheque(1, 'FRCAST'), cheque(2, 'FRCAST')], $maestro,
-        [['ID_SBA14' => 2, 'MARCADO' => 0]]));
+        [['ID_SBA14' => 2, 'MARCADO' => 0]], HOY));
 
 chequear('un destildado sigue en el listado', 2, $resumen['cheques']);
 chequear('pero no se netea', 1, $resumen['marcados']);
@@ -193,7 +280,6 @@ chequear('el total del listado si lo incluye', 200.0, $resumen['importe_total'])
 /* ================================================================
    El reparto del neteo contra el eje
    ================================================================ */
-require_once __DIR__ . '/../cashflow/Class/Ventas.php';
 
 seccion('la regla dia O mes, nunca las dos');
 
@@ -634,17 +720,47 @@ foreach ($pre as $f) {
 chequear('ningun cheque del listado es de un cliente fuera del maestro', 0, $fueraDelMaestro);
 chequear('ningun rechazado ni anulado llega a netear', 0, $muertos);
 
-// La vista SQL y el cruce de PHP son las dos caras de la misma regla, y esta es
-// la prueba que las ata: si una cambia y la otra no, el total deja de coincidir.
+// LA PANTALLA NO MUESTRA LO QUE YA SE COBRO. Si la fecha estimada de venta
+// quedo antes de hoy, esa venta ya se facturo y ya se cobro: el cheque no esta
+// en la grilla ni en los KPIs. La regla la aplica cruzarPrechequeado().
+$vencidos = 0;
+
+foreach ($pre as $f) {
+    if (Echeqs::ventaYaCobrada($f['FECHA_VENTA_EST'])) {
+        $vencidos++;
+    }
+}
+
+chequear('ningun cheque del listado tiene la venta teorica en el pasado', 0, $vencidos);
+
+// LA VISTA SQL Y EL CRUCE DE PHP SIGUEN SIENDO LAS DOS CARAS DE LA MISMA REGLA,
+// pero ya no da un igual a secas: la vista es el ORIGEN AUDITABLE y trae todo lo
+// tildado, incluido lo que quedo en el pasado; la pantalla aplica encima el
+// corte por fecha. Para atarlas hay que aplicarle a la vista el MISMO corte, con
+// la MISMA funcion. Si alguna de las dos reglas cambia sola, esto se rompe.
+$diasPorCliente = $echeqs->getDiasPrechequeadoPorCliente();
 $marcadoPhp = Echeqs::resumenPrechequeado($pre)['importe_marcado'];
 $marcadoVista = 0;
+$marcadoVistaVigente = 0;
 
 foreach ($echeqs->getPrechequeadoTotales() as $t) {
     $marcadoVista += $t['IMPORTE'];
+
+    $teorica = Echeqs::fechaVentaEstimada(
+        $t['FECHA_CHEQUE'], Echeqs::diasDeCliente($diasPorCliente, $t['COD_CLIENTE']));
+
+    if (!Echeqs::ventaYaCobrada($teorica)) {
+        $marcadoVistaVigente += $t['IMPORTE'];
+    }
 }
 
-chequear('la vista del neteo y el cruce de PHP dan el mismo total marcado',
-    round($marcadoPhp, 2), round($marcadoVista, 2));
+chequear('la vista y el cruce de PHP dan el mismo total marcado vigente',
+    round($marcadoPhp, 2), round($marcadoVistaVigente, 2));
+
+// Y el origen sigue trayendo TODO: la vista no filtra, filtra quien la lee. Es
+// lo que permite auditar desde SQL cuanto se tildo, incluido lo que ya se cobro.
+chequear('la vista trae al menos lo mismo que la pantalla, y puede traer mas',
+    true, round($marcadoVista, 2) >= round($marcadoPhp, 2));
 
 seccion('el neteo llega a Ventas con la fecha teorica correcta');
 

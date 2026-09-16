@@ -143,6 +143,8 @@ Todos son reejecutables y no pisan nada ya editado. Si no se corrieron, la panta
 Las usan **Cashflow, Ventas, Proveedores Exterior, Crono Nacionalización, Cobranzas FR, Cobranzas May, Exportaciones Tasky y las dos sub-pestañas de Echeqs**.
 
 > En *Echeqs → Venta Cobrada Anticipada* cada cheque se ubica en la **fecha estimada de venta** —la del cheque menos los días de pre-chequeado del cliente— y no en la del cheque: es la fecha en la que ese importe netea la cobranza proyectada de Ventas, así que es donde tiene que verse. La del cheque queda como columna de referencia y los días efectivos van al lado, para que se vea de dónde sale la estimación. Ver `README-ventas.md`.
+>
+> Esa sub-pestaña además **sólo muestra los de venta teórica desde hoy**: los anteriores corresponden a ventas ya facturadas y cobradas, están fuera del cashflow y no hay nada que tildar. Lo dice su leyenda —una tabla que esconde filas sin decirlo se lee como que esos cheques no existen— y lo aplica `Echeqs::ventaYaCobrada()`, la misma función con la que el neteo decide qué descarta.
 
 **Los indicadores miden exactamente las columnas que se están mirando**, y la columna Total también. Antes eran siempre del tramo diario, aunque la pantalla mostrara los meses: el número no describía nada de lo que había en pantalla.
 
@@ -420,8 +422,15 @@ llamado `undefined` ni hay que declarar el nombre en dos lugares.
 `reaplicar()` engancha todos los botones con `data-exportar`, y la llama `main.js` con el
 mismo `MutationObserver`. Así se agregó el botón a las pestañas que no lo tenían —
 *Cob. Electrónicos* (sus cuatro tablas), *Dólares Cuenta Comitente* (vigentes e historial),
-*Saldos* (cuentas y locales) y las de *Parámetros*—, **un botón por tabla, en su propia
-`card-header`**: son cuadros distintos y bajar "la pestaña" no querría decir nada.
+*Saldos* (cuentas y locales), *Echeqs → Venta Cobrada Anticipada* y las de *Parámetros*—,
+**un botón por tabla, en su propia `card-header`**: son cuadros distintos y bajar "la
+pestaña" no querría decir nada.
+
+> *Venta Cobrada Anticipada* es la primera tabla exportable con **tildes**. No hizo falta
+> nada nuevo: `aTexto()` reemplaza cada `<input type="checkbox">` por `Sí` o `No`, así que
+> la planilla dice qué cheques netean en vez de llevar controles de formulario. El único
+> resto visible es el encabezado de esa columna, que es un checkbox de *marcar todo* y por
+> eso baja como `Sí`/`No` en vez de como un rótulo.
 
 Las dos tablas con `data-orden="no"` que **sí** se exportan son `tablaMix` y
 `tablaEscalaCob`: no se ordenan porque son formularios, pero bajar la configuración que
