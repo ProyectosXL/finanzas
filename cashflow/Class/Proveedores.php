@@ -544,6 +544,14 @@ class Proveedores {
      * del eje porque no hay otro lugar donde ponerlo, y sin este aviso se leeria
      * como "hoy se pagan ochocientos millones".
      *
+     * CUENTAN TODO LO PENDIENTE, Y LO DICEN. Los usan los dos lados -la pestaña
+     * y el proveedor del tablero- y los dos muestran MENOS que eso: la pestaña
+     * abre filtrada por forma de pago y la fila del tablero usa PAGOS, que trae
+     * solo el cronograma. Que cuenten el universo esta bien -son la
+     * contrapartida de lo que no se ve- pero un numero que no coincide con el
+     * que esta en pantalla tiene que decir a que se refiere, o se lee como un
+     * error del sistema.
+     *
      * Estatica y pura.
      *
      * @param array $items Filas de getPendientes()
@@ -579,25 +587,32 @@ class Proveedores {
             }
         }
 
+        /* SOBRE TODO LO PENDIENTE. Se dice en cada uno y no una vez al final:
+           los avisos se leen sueltos -van en una lista- y el que se lea sin el
+           de al lado tiene que seguir diciendo a que se refiere. */
+        $alcance = ' Es sobre TODAS las cuentas a pagar, así que no coincide con lo que '
+            . 'muestra la pantalla si hay un filtro puesto.';
+
         if ($compVencidos > 0) {
             $avisos[] = $compVencidos . ' vencimiento(s) por ' . self::plata($vencidoSinFecha)
                 . ' ya vencieron y NO tienen fecha de pago cargada. Se muestran en el primer '
                 . 'día del eje porque no hay otro lugar donde ponerlos, pero eso no significa '
                 . 'que se paguen hoy: cargales la fecha, de a uno en la grilla o importando '
-                . 'la planilla de pagos.';
+                . 'la planilla de pagos.' . $alcance;
         }
 
         if ($compSinFecha > 0) {
             $avisos[] = $compSinFecha . ' vencimiento(s) por ' . self::plata($sinFecha)
                 . ' no tienen fecha de vencimiento en Tango ni plazo de pago en el maestro, '
-                . 'así que no se pueden ubicar en el eje.';
+                . 'así que no se pueden ubicar en el eje.' . $alcance;
         }
 
         if ($compExcluidos > 0) {
             $avisos[] = $compExcluidos . ' vencimiento(s) por ' . self::plata($excluido)
                 . ' son de proveedores con rubro "' . ProveedoresCategorias::RUBRO_EXCLUIDOS
                 . '" en el maestro. Se listan acá pero su fila del tablero se puede '
-                . 'inhabilitar desde Parámetros.';
+                . 'inhabilitar desde Parámetros, o apuntarla a la serie que ya los deja '
+                . 'afuera sin perder el criterio del cronograma.' . $alcance;
         }
 
         return $avisos;

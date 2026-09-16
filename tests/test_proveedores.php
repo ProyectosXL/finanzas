@@ -365,6 +365,39 @@ $f = Proveedores::formaQueSeMuestra(
 chequear('sin maestro y sin pago no hay nada que mostrar', null, $f['original']);
 chequear('y eso no es un maestro viejo', false, $f['desactualizada']);
 
+seccion('los indicadores miden lo que la grilla muestra');
+
+/* EL BUG QUE ESTO FIJA: indicadores() se calculaba sobre TODOS los items y la
+   grilla sobre las filas visibles. Con el filtro por forma de pago prendido -que
+   es el default- la tarjeta decia 549 vencimientos arriba de una tabla que
+   mostraba 294, y ni el buscador ni el interruptor de vencidos la movian.
+
+   Se verifica sobre el JS porque los tres filtros son del navegador: solo ahi se
+   sabe que filas se estan viendo. Es el mismo lugar donde ya se calculaba el pie
+   de TOTALES. */
+$js = file_get_contents(__DIR__ . '/../cashflow/Js/Proveedores-Proveedores_locales.js');
+
+chequear('los indicadores se pintan desde pintarGrilla, con las filas visibles', true,
+    strpos($js, 'pintarIndicadores(filas);') !== false);
+
+// Y NO desde cargar(): ahi solo se pintarian una vez y no se moverian con los
+// filtros, que es exactamente el bug.
+chequear('y no una sola vez al cargar', false, strpos($js, 'pintarIndicadores();') !== false);
+
+chequear('se suman sobre las filas que se le pasan', true,
+    strpos($js, 'function calcularIndicadores(filas)') !== false);
+
+/* LO QUE EL FILTRO ESCONDE NO SE PIERDE: cuando lo visible difiere del universo,
+   el pie de la tarjeta dice el total. Misma regla que el cartel del periodo. */
+chequear('y cuando difieren del universo se dice cuanto es el universo', true,
+    strpos($js, 'function deTotal(') !== false);
+
+/* La tarjeta roja se apaga en verde por el UNIVERSO y no por lo visible:
+   apagarla porque el filtro escondio lo que falta fechar diria que no hay
+   trabajo por hacer justo cuando lo hay. */
+chequear('la tarjeta de vencidos se apaga por el universo', true,
+    strpos($js, "toggle('prov-kpi-ok', !u.n_vencido_sin_fecha)") !== false);
+
 seccion('el rubro Excluidos');
 
 chequear('lo detecta', true, ProveedoresCategorias::esExcluido('Excluidos'));
@@ -770,6 +803,20 @@ chequear('y cuantos comprobantes son', true, strpos($texto, '2 vencimiento') !==
 chequear('lo que no se puede ubicar va aparte', true, strpos($texto, '70,00') !== false);
 
 chequear('y lo excluido tambien', true, strpos($texto, '30,00') !== false);
+
+/* LOS AVISOS CUENTAN EL UNIVERSO, Y TIENEN QUE DECIRLO. Los usan los dos lados
+   -la pestaña, que abre filtrada por forma de pago, y el proveedor del tablero,
+   cuya fila usa PAGOS- y los dos muestran MENOS que esto. Contar el universo
+   esta bien: son la contrapartida de lo que no se ve. Lo que no puede es no
+   decirlo, porque un numero que no coincide con el de la pantalla se lee como
+   un error del sistema.
+
+   Se dice en CADA aviso y no una vez al final: van en una lista y se leen
+   sueltos. */
+foreach ($avisos as $a) {
+    chequear('cada aviso dice sobre que se calcula', true,
+        strpos($a, 'TODAS las cuentas a pagar') !== false);
+}
 
 // Sin nada que decir, no se dice nada: un aviso que aparece siempre deja de
 // leerse.

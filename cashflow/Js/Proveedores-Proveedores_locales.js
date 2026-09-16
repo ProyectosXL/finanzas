@@ -1,8 +1,15 @@
 /**
  * Proveedores Locales — cuentas a pagar, importación y maestro.
  *
- * Acá NO se calcula nada: el backend devuelve las filas ya resueltas —con su
- * categoría, su fecha ubicada en el eje y sus indicadores— y esto las pinta.
+ * Acá NO se calcula ningún importe: el backend devuelve las filas ya resueltas
+ * —con su categoría, su fecha ubicada en el eje y su pendiente— y esto las
+ * pinta.
+ *
+ * LO QUE SÍ SE SUMA ACÁ es el pie de TOTALES y los cuatro indicadores, y por el
+ * mismo motivo: los tres filtros —el buscador y los dos interruptores— son del
+ * navegador, así que sólo acá se sabe qué filas se están viendo. Un número
+ * arriba de una tabla describe esa tabla. Cuando el filtro esconde algo, cada
+ * tarjeta dice además cuánto es el universo: ver pintarIndicadores().
  *
  * LA FECHA DE PAGO ES LO ÚNICO EDITABLE. Las cuentas a pagar salen de Tango y no
  * se tocan; lo que se carga es cuándo se piensa pagar cada comprobante. Es lo
@@ -115,7 +122,8 @@
                 vistas.usar(datos);
 
                 pintarAvisos(datos.warnings, 'avisosProv');
-                pintarIndicadores();
+                // Los indicadores los pinta pintarGrilla(): se miden sobre las
+                // filas visibles, así que cambian con cada filtro.
                 pintarGrilla();
 
                 mostrar('loadingProv', false);
@@ -149,31 +157,97 @@
        ================================================================ */
 
     /**
-     * El segundo indicador es el que importa: lo vencido sin fecha cargada.
+     * Los cuatro indicadores, MEDIDOS SOBRE LO QUE SE ESTÁ VIENDO.
      *
-     * Ese importe está dibujado en el primer día del eje porque no hay otro
-     * lugar donde ponerlo, y NO significa que se pague hoy. La tarjeta se apaga
+     * Antes salían del backend y se calculaban sobre TODOS los vencimientos,
+     * mientras la grilla y el pie de TOTALES se calculaban sobre las filas
+     * visibles. Con el filtro por forma de pago prendido —que es el default—
+     * la tarjeta decía 549 vencimientos arriba de una tabla que mostraba 294, y
+     * ni el buscador ni el interruptor de vencidos la movían.
+     *
+     * Un número arriba de una tabla describe esa tabla. Si describiera otra
+     * cosa habría que decir cuál, y entonces no es un indicador de la pantalla.
+     *
+     * LO QUE EL FILTRO ESCONDE NO SE PIERDE: cuando lo que se ve difiere del
+     * universo, el pie de cada tarjeta dice el total. Es la misma regla del
+     * cartel de al lado del período —un filtro que esconde plata sin decir
+     * cuánta es un filtro que miente—, aplicada a las tarjetas.
+     *
+     * El segundo indicador es el que importa: lo vencido sin fecha cargada. Ese
+     * importe está dibujado en el primer día del eje porque no hay otro lugar
+     * donde ponerlo, y NO significa que se pague hoy. La tarjeta se apaga
      * cuando llega a cero: mientras haya algo, tiene que verse.
      */
-    function pintarIndicadores() {
-        var k = datos.indicadores;
+    function pintarIndicadores(filas) {
+        var k = calcularIndicadores(filas);
+        var u = datos.indicadores;          // el universo, tal como lo cuenta el backend
 
         texto('totalProv', plata(k.total));
-        texto('detalleTotalProv', k.vencimientos + ' vencimiento(s)');
+        texto('detalleTotalProv', k.vencimientos + ' vencimiento(s)'
+            + deTotal(k.vencimientos !== u.vencimientos, 'de ' + plata(u.total)
+                + ' en ' + u.vencimientos));
 
         texto('vencidoProv', plata(k.vencido_sin_fecha));
-        texto('detalleVencidoProv', k.n_vencido_sin_fecha
+        texto('detalleVencidoProv', (k.n_vencido_sin_fecha
             ? k.n_vencido_sin_fecha + ' comprobantes — se dibujan hoy, no se pagan hoy'
-            : 'Nada pendiente de fechar');
+            : 'Nada pendiente de fechar')
+            + deTotal(k.n_vencido_sin_fecha !== u.n_vencido_sin_fecha,
+                'de ' + plata(u.vencido_sin_fecha) + ' en ' + u.n_vencido_sin_fecha));
 
+        /* La tarjeta se apaga en verde sólo cuando NO queda nada en TODO el
+           universo. Apagarla porque el filtro escondió lo que falta fechar
+           diría que no hay trabajo por hacer justo cuando lo hay. */
         var card = document.getElementById('cardVencidoProv');
-        if (card) { card.classList.toggle('prov-kpi-ok', !k.n_vencido_sin_fecha); }
+        if (card) { card.classList.toggle('prov-kpi-ok', !u.n_vencido_sin_fecha); }
 
         texto('conFechaProv', plata(k.con_fecha));
-        texto('detalleConFechaProv', k.n_con_fecha + ' comprobante(s) con fecha');
+        texto('detalleConFechaProv', k.n_con_fecha + ' comprobante(s) con fecha'
+            + deTotal(k.n_con_fecha !== u.n_con_fecha,
+                'de ' + plata(u.con_fecha) + ' en ' + u.n_con_fecha));
 
         texto('proveedoresProv', String(k.proveedores));
-        texto('detalleProveedoresProv', 'con deuda pendiente');
+        texto('detalleProveedoresProv', 'con deuda pendiente'
+            + deTotal(k.proveedores !== u.proveedores, 'de ' + u.proveedores));
+    }
+
+    /** El sufijo que devuelve el universo cuando el filtro escondió algo */
+    function deTotal(difiere, texto) {
+        return difiere ? ' · ' + texto : '';
+    }
+
+    /**
+     * Los mismos cuatro números, sobre las filas que se le pasen.
+     *
+     * Se suman acá y no en el backend porque el filtro es del navegador: es el
+     * mismo motivo por el que el pie de TOTALES ya se calculaba acá. Lo que NO
+     * se calcula acá es ningún importe —cada fila llega con el suyo resuelto—:
+     * esto sólo los suma.
+     */
+    function calcularIndicadores(filas) {
+        var k = { total: 0, vencimientos: filas.length, proveedores: 0,
+                  vencido_sin_fecha: 0, n_vencido_sin_fecha: 0,
+                  con_fecha: 0, n_con_fecha: 0 };
+
+        var provs = {};
+
+        filas.forEach(function(f) {
+            var importe = Number(f.IMPORTE_PENDIENTE) || 0;
+
+            k.total += importe;
+            provs[f.COD_PROVEE] = true;
+
+            if (f.ORIGEN_FECHA === 'CARGADA') {
+                k.con_fecha += importe;
+                k.n_con_fecha++;
+            } else if (f.SIN_FECHA_CARGADA) {
+                k.vencido_sin_fecha += importe;
+                k.n_vencido_sin_fecha++;
+            }
+        });
+
+        k.proveedores = Object.keys(provs).length;
+
+        return k;
     }
 
     /* ================================================================
@@ -292,6 +366,7 @@
 
         document.getElementById('bodyProv').innerHTML = html;
 
+        pintarIndicadores(filas);
         pintarTotales(filas, cols);
         pintarFueraDelFiltro();
         conectarEdicion();
