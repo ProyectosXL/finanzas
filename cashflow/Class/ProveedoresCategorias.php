@@ -109,8 +109,14 @@ class ProveedoresCategorias {
      * previsualizacion lo muestra y quien decide si es un typo o una forma nueva
      * es una persona.
      *
-     * AGREGAR UNA FORMA ES AGREGAR UNA ENTRADA ACA, y despues reimportar el
-     * maestro: las filas ya cargadas no se renormalizan solas.
+     * AGREGAR UNA FORMA ES AGREGAR UNA ENTRADA ACA, y nada mas: las filas ya
+     * cargadas se renormalizan solas en el proximo pedido, porque el valor
+     * normalizado se deriva al LEER y no se congela al importar. Ver mapa().
+     *
+     * Antes habia que reimportar el maestro entero, y esa es la razon por la
+     * que los CAJA, TARJETA CORP y MERCADO PAGO -las tres formas que faltaban
+     * en la primera version de esta lista- se quedaron 639 filas sin normalizar
+     * hasta que alguien lo noto.
      */
     const FORMAS_PAGO = [
         'TRANSFERENCIA', 'ECHEQ', 'CAJA', 'TARJETA CORP', 'DEBITO', 'MERCADO PAGO'
@@ -201,6 +207,29 @@ class ProveedoresCategorias {
      * Se cachea: el tablero resuelve la categoria de cada uno de los cientos de
      * vencimientos y no tiene sentido ir a la base por cada uno.
      *
+     * LA FORMA DE PAGO SE NORMALIZA ACA, AL LEER, Y NO AL IMPORTAR
+     * ------------------------------------------------------------
+     * FORMA_PAGO es un valor DERIVADO: sale de pasar FORMA_PAGO_ORIG -lo que
+     * decia la celda- por la lista FORMAS_PAGO, que vive en el codigo.
+     * Calcularlo al importar lo congelaba contra la lista de ese dia, asi que
+     * agregar una forma nueva no arreglaba ninguna de las filas ya cargadas:
+     * habia que reimportar el maestro entero.
+     *
+     * Y REIMPORTAR NO ES RECALCULAR. Hace el diff completo: necesita tener a
+     * mano el Excel vigente -si no es el mismo que se importo, aplica de paso
+     * cambios que nadie pidio-, propone bajas, y cada CAMBIO escribe una baja
+     * mas un alta en el historial. Obligaba a correr una operacion de DATOS,
+     * con efectos colaterales, para arreglar la consecuencia de un cambio de
+     * CODIGO. Eso es lo que estaba mal, no el trabajo de reimportar.
+     *
+     * Derivarlo al leer cuesta 7 ms por pedido sobre las 1.173 filas del
+     * maestro -y este mapa se cachea, asi que es una vez- y hace que agregar
+     * una forma a FORMAS_PAGO tenga efecto en el proximo pedido.
+     *
+     * LA COLUMNA SE SIGUE ESCRIBIENDO IGUAL, y no es redundancia: guarda QUE
+     * DECIDIO EL SISTEMA en esa importacion, que es lo que getHistorial()
+     * muestra. Lo que cambio es por donde se LEE.
+     *
      * @return array Mapa COD_PROVEE => fila del maestro
      */
     public function mapa() {
@@ -237,8 +266,15 @@ class ProveedoresCategorias {
                 'RUBRO_ECONOMICO' => $row['RUBRO_ECONOMICO'],
                 'RUBRO' => $row['RUBRO'],
                 'CENTRO_COSTOS' => $row['CENTRO_COSTOS'],
-                'FORMA_PAGO' => $row['FORMA_PAGO'],
+                'FORMA_PAGO' => self::formaVigente($row['FORMA_PAGO_ORIG'],
+                                                   $row['FORMA_PAGO']),
                 'FORMA_PAGO_ORIG' => $row['FORMA_PAGO_ORIG'],
+
+                /* Lo que el sistema decidio cuando se importo esta fila. No se
+                   usa para clasificar -para eso esta FORMA_PAGO, recalculada-
+                   pero es lo que explica por que el tablero decia otra cosa
+                   antes de agregar una forma a la lista. */
+                'FORMA_PAGO_IMPORTADA' => $row['FORMA_PAGO'],
                 'PLAZO_PAGO' => $row['PLAZO_PAGO'],
                 'PLAZO_DIAS' => ($row['PLAZO_DIAS'] === null) ? null : intval($row['PLAZO_DIAS']),
                 'CRITERIO_DISTRIB' => $row['CRITERIO_DISTRIB'],
@@ -278,6 +314,7 @@ class ProveedoresCategorias {
                 'rubro' => null,
                 'centro_costos' => null,
                 'forma_pago' => null,
+                'forma_pago_orig' => null,
                 'plazo_dias' => null,
                 'excluido' => false,
                 'serie' => self::SERIE_SIN_RUBRO
@@ -292,6 +329,14 @@ class ProveedoresCategorias {
             'rubro' => $m['RUBRO'],
             'centro_costos' => $m['CENTRO_COSTOS'],
             'forma_pago' => $m['FORMA_PAGO'],
+
+            /* EL ORIGINAL VIAJA CON EL NORMALIZADO, igual que en la
+               importacion y por el mismo motivo: cuando el normalizado es null,
+               el original es lo unico que se puede mostrar. Sin esto la grilla
+               dibuja "sin forma" para un proveedor cuyo maestro dice
+               TARJETA CORP, y la marca naranja -que existe para exactamente
+               este caso- no se ejecuta nunca. */
+            'forma_pago_orig' => $m['FORMA_PAGO_ORIG'],
             'plazo_dias' => $m['PLAZO_DIAS'],
             'excluido' => self::esExcluido($m['RUBRO_ECONOMICO']),
             'serie' => self::serieDeRubro($m['RUBRO_ECONOMICO'])
@@ -318,9 +363,14 @@ class ProveedoresCategorias {
      * Quien entra sin forma conocida se dibuja con su marca en la grilla, asi
      * que se distingue de un echeq de verdad.
      *
+     * LO QUE SE LE PASA ES LA FORMA DEL MAESTRO, no la del pago registrado: el
+     * criterio es una propiedad del proveedor -a este se le paga por
+     * transferencia- y no un dato de un comprobante suelto. Ver la seccion "DOS
+     * FORMAS DE PAGO QUE NO SON LA MISMA COSA" del encabezado de Proveedores.
+     *
      * Estatica y pura.
      *
-     * @param string|null $formaPago Forma YA normalizada
+     * @param string|null $formaPago Forma del maestro, YA normalizada
      * @return bool
      */
     public static function esDelCronograma($formaPago) {
@@ -437,6 +487,34 @@ class ProveedoresCategorias {
      */
     public static function normalizarFormaPago($forma) {
         return Planilla::normalizarContra($forma, self::FORMAS_PAGO);
+    }
+
+    /**
+     * La forma de pago de una fila ya guardada, contra la lista DE HOY.
+     *
+     * Es lo que hace que agregar una forma a FORMAS_PAGO tenga efecto sin
+     * reimportar nada: el original esta guardado en todas las filas -verificado:
+     * 0 de 1.173 en el maestro y 0 de 15 en pagos tienen la normalizada sin su
+     * original- y la normalizacion es una funcion pura de el.
+     *
+     * EL SEGUNDO PARAMETRO ES UNA RED, NO UN CAMINO NORMAL. Si alguna fila
+     * tuviera la normalizada sin su original -hoy no hay ninguna, pero una
+     * correccion a mano sobre la base podria dejarla asi- se respeta lo que
+     * este guardado en lugar de perderlo. Recalcular nunca puede BORRAR un
+     * dato: solo puede reconocer uno que antes no se reconocia.
+     *
+     * Estatica y pura.
+     *
+     * @param string|null $original Lo que decia la celda de la planilla
+     * @param string|null $guardada Lo que se decidio al importar
+     * @return string|null
+     */
+    public static function formaVigente($original, $guardada) {
+        if ($original === null || trim((string) $original) === '') {
+            return $guardada;
+        }
+
+        return self::normalizarFormaPago($original)['normalizado'];
     }
 
     /* ====================================================================

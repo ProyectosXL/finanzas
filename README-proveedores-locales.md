@@ -101,7 +101,9 @@ Tango une `CPA04 ⋈ CPA54` por `(COD_PROVEE, T_COMP, N_COMP)`. Esa terna **no e
 - **`COD_PROVEE LIKE 'Z%'`**: no son proveedores de sistema, son los del **exterior** (`ZE…`: China, Hong Kong, India, y `ZETASK`). Son 8.023 de los 9.344 millones pendientes totales, y **ya entran al tablero por `COMEX_PROV_EXT`**: sin el filtro se contarían dos veces.
 - **`CPA01.CLAUSULA = 1`**: proveedores con cláusula de moneda extranjera. Es el criterio del *Total Pendiente (CTE)* de Tango, que es el pendiente en pesos. Hoy deja afuera $20.938 de un transportista local de 2022 y 2023, que además tiene el importe en moneda extranjera en cero: casi seguro un error de maestro.
 
-**Total local: $1.361.468.254,02** en 522 vencimientos de 112 proveedores.
+**Total local: $1.415.279.515,19** en 544 vencimientos de 122 proveedores.
+
+> **Todas las cifras de este archivo son una foto del 16/09/2026.** Salen de una base viva: cambian entre una corrida y la siguiente, y de hecho cambiaron mientras se escribía esto. Están para dar orden de magnitud y para poder decir *"esto no es teórico"*, no para cuadrar contra la pantalla.
 
 ---
 
@@ -113,7 +115,7 @@ Cobranzas descarta lo vencido hace más de `Ingresos::DIAS_COBRO_VENCIDO` (180) 
 
 Con ese techo quedaban afuera **$346,8 millones — el 29%** del total, y no era basura administrativa: la mayor parte es un plan de cuotas vigente de un proveedor industrial.
 
-**Pero no se apila en silencio.** El indicador *Vencido sin fecha* dice cuánto hay vencido **sin que nadie haya decidido cuándo se paga**: hoy son **366 vencimientos por $839.609.418,34**.
+**Pero no se apila en silencio.** El indicador *Vencido sin fecha* dice cuánto hay vencido **sin que nadie haya decidido cuándo se paga**: son **378 vencimientos por $965.189.059,14**.
 
 Ese importe se dibuja en el primer día del eje porque no hay otro lugar donde ponerlo. **Eso no significa que se pague hoy**, y por eso el número está a la vista en rojo, con un filtro de un clic para aislarlo.
 
@@ -247,7 +249,26 @@ Las seis reales, contadas sobre el maestro importado:
 | TRANSFERENCIA | 259 | DEBITO | 32 |
 | ECHEQ | 243 | MERCADO PAGO | 9 |
 
-Agregar una forma es agregar una entrada, **y después reimportar el maestro**: las filas ya cargadas no se renormalizan solas.
+Agregar una forma es **agregar una entrada, y nada más**: las filas ya cargadas se renormalizan solas en el próximo pedido. Ver abajo.
+
+### La forma normalizada se deriva al leer, no se congela al importar
+
+`FORMA_PAGO` es un valor **derivado**: sale de pasar `FORMA_PAGO_ORIG` —lo que decía la celda— por `FORMAS_PAGO`, que vive en el código. Calcularlo al importar lo congelaba contra la lista de ese día, así que agregar una forma nueva no arreglaba ninguna de las filas ya cargadas.
+
+**Y reimportar no es recalcular.** Hace el diff completo: necesita tener a mano el Excel vigente —si no es el mismo que se importó, aplica de paso cambios que nadie pidió—, propone bajas, y cada `CAMBIO` escribe una baja más un alta en el historial.
+
+> Obligaba a correr una operación de **datos**, con efectos colaterales, para arreglar la consecuencia de un cambio de **código**. Eso es lo que estaba mal, no el trabajo de reimportar.
+
+Se puede derivar al leer porque **el original está guardado en todas las filas**. Verificado sobre la base: 0 de 1.173 en el maestro y 0 de 15 en pagos tienen la normalizada sin su original. Y la normalización es una función pura de él.
+
+Cuesta **7,23 ms por pedido** sobre las 1.173 filas del maestro, y el mapa se cachea, así que es una vez.
+
+**La columna se sigue escribiendo igual**, y no es redundancia: guarda *qué decidió el sistema en esa importación*, que es lo que muestra el historial del proveedor. Lo que cambió es por dónde se **lee**.
+
+Dos garantías, las dos con prueba:
+
+- **Recalcular nunca borra un dato.** Sólo puede reconocer uno que antes no se reconocía. Una fila con la normalizada pero sin original —hoy no hay ninguna, pero una corrección a mano sobre la base podría dejarla así— conserva lo que tenga guardado.
+- **El diff no se ensucia.** Compara contra `mapa()`, que es justamente lo que se renormaliza, así que reimportar la misma planilla sigue dando `SIN_CAMBIOS` y no 639 cambios falsos.
 
 ### Sólo el código es obligatorio
 
@@ -313,15 +334,16 @@ Como las dos importaciones, **no escribe nada hasta confirmar**.
 
 ## Integración con el tablero
 
-`ProveedoresProvider` sirve el código `PROV_LOCALES` con **cuatro series fijas** y **una por rubro**:
+`ProveedoresProvider` sirve el código `PROV_LOCALES` con **siete series fijas** y **una por rubro**:
 
 | Serie | Qué trae |
 | --- | --- |
-| `PAGOS` | **Sólo echeq y transferencia** — es la que usa la fila del tablero |
 | `PAGOS_TODO` | El universo completo, todas las formas de pago |
+| `PAGOS` | **Sólo echeq y transferencia** — es la que usa la fila del tablero |
 | `PAGOS_FUERA_CRONOGRAMA` | Sólo lo que el criterio deja afuera |
 | `PAGOS_OPERATIVOS` | Todo menos los rubros `Excluidos` |
 | `PAGOS_EXCLUIDOS` | Sólo los excluidos |
+| `PAGOS_CRONO_OPERATIVOS` | **Los dos criterios a la vez** |
 | `PAGOS_SIN_RUBRO` | Sólo los que no están en el maestro |
 | `RUBRO_*` | Una por cada rubro económico del maestro |
 
@@ -336,7 +358,15 @@ PAGOS_OPERATIVOS + PAGOS_EXCLUIDOS = PAGOS_TODO (por qué rubro es)
 
 Eso lo fija `tests/test_proveedores.php` contra los datos reales: si una de las dos no cerrara, algún comprobante se estaría yendo a la serie equivocada.
 
-Con las fijas, **sacar a los socios del tablero es apuntar la fila a `PAGOS_OPERATIVOS` desde Parámetros**: configuración, no código.
+### Las dos particiones son independientes, y por eso hace falta la séptima
+
+Los dos criterios no se implican: un socio con rubro `Excluidos` que cobra por **transferencia** entra a `PAGOS`. No es teórico —hoy es **$109,6 M de un solo proveedor** dentro de la fila del tablero—, y hasta que existió `PAGOS_CRONO_OPERATIVOS` no había forma de aplicar los dos criterios a la vez: apuntar la fila a `PAGOS_OPERATIVOS` saca a los socios pero mete de vuelta los débitos automáticos, que es lo contrario de lo que la fila quiere decir.
+
+**Sacar a los socios del tablero sin perder el criterio del cronograma es apuntar la fila a `PAGOS_CRONO_OPERATIVOS` desde Parámetros**: configuración, no código.
+
+`PAGOS_CRONO_OPERATIVOS` **no parte nada**: es la intersección de una mitad de cada partición, así que se solapa con las dos. `PAGOS_SIN_RUBRO` tampoco: cruza las cuatro. El validador lo sabe —ver abajo—.
+
+La regla de reparto vive en `ProveedoresProvider::seriesDeItem()`, estática y pura, y los cuatro cuadrantes se verifican sin base.
 
 **El proveedor crea una serie por cada rubro del maestro, aunque hoy no tenga deuda.** Si no, una fila configurada contra un rubro sin pendientes se dibujaría como *"sin datos"* —con el ícono de que su módulo no devolvió nada— en lugar de mostrar un cero limpio, que es lo cierto.
 
@@ -349,6 +379,24 @@ Por eso el registro ganó `'series_extra' => [clase, método]`: un punto de exte
 `serieExiste()` pasa ahora por `meta()` y no por la lista cruda: si no, el validador rechazaría una fila configurada contra un rubro del maestro.
 
 **El total y cualquiera de sus aperturas no pueden estar activos a la vez** —sería contar dos veces lo mismo— y las de rubro se agregan solas a `componentes` para que el validador lo rechace.
+
+### El validador mira las partes entre sí, no sólo contra el total
+
+La regla original comparaba el **total** contra cada una de sus partes. Eso dejaba un agujero: `PAGOS` y `PAGOS_OPERATIVOS` son **dos partes**, ninguna es el total, y **se solapan en $1.297 M** —el 89% del universo contado dos veces, sin un solo aviso—.
+
+Por eso el registro declara `particiones`: un mapa `total → corte → series`.
+
+```
+por cómo se paga      PAGOS · PAGOS_FUERA_CRONOGRAMA
+por si está excluido  PAGOS_OPERATIVOS · PAGOS_EXCLUIDOS
+por rubro             PAGOS_SIN_RUBRO · RUBRO_*
+```
+
+Dos series del **mismo** corte pueden convivir —son dos mitades, y es justamente cómo se mete al tablero lo que hoy queda fuera de la fila—. Dos de cortes **distintos**, no. `PAGOS_CRONO_OPERATIVOS` no figura en ninguno a propósito: es la intersección de una mitad de cada corte, así que se solapa con las cuatro.
+
+El corte *por rubro* lo completa `resolverExtra()` con las series del maestro. Dos rubros distintos nunca comparten un comprobante —cada uno tiene uno solo—, así que todas juntas son un corte: **partir la fila en alquileres, impuestos y logística sigue siendo válido**, que es para lo que existen.
+
+> **Sin `particiones` declaradas no cambia nada.** Un proveedor que no las declara toma todas sus partes como un único corte, que es como se comportaba antes: los cuatro canales de Ventas siguen pudiendo estar los cuatro activos.
 
 ### Es un egreso, y devuelve importes positivos
 
@@ -370,11 +418,36 @@ El criterio: entra lo que se paga **decidiendo cuándo**. Una transferencia o un
 
 **Lo que no se sabe, entra y se marca.** Una forma de pago en `null` —porque el proveedor no está en el maestro, o porque lo que trajo la planilla no se reconoció— no es lo mismo que una forma que quedó afuera del criterio: es un dato que falta. Esconder deuda por un dato que falta es la peor razón para esconderla, y además garantiza que nadie lo complete nunca, porque deja de verse. Esas filas se dibujan con la marca *sin forma*, así que no se confunden con un echeq confirmado.
 
+### Una forma en naranja es un typo, y no hay segundo caso
+
+Una forma que llega con el normalizado en `null` se dibuja en naranja con su original: es un typo de la planilla —`eqheck`— y se arregla allá.
+
+**Hubo un segundo caso y ya no existe:** una forma perfectamente válida que había quedado sin normalizar porque el maestro se importó antes de que estuviera declarada en `FORMAS_PAGO`. Eran 133 vencimientos por $88.970.448,93 —129 de `TARJETA CORP` y 4 de `CAJA`— que entraban al filtro como si no se supiera cómo se pagan, y había que distinguirlos con un mensaje aparte porque se arreglaban reimportando y no corrigiendo nada. Derivar la normalización al leer eliminó la categoría entera.
+
+> Esto estuvo invisible un tiempo por otro motivo: `categoria()` no devolvía el `FORMA_PAGO_ORIG` del maestro, así que esas 133 filas se dibujaban *"sin forma"* en gris y la marca naranja —que existe exactamente para este caso— no se ejecutaba nunca.
+
+### Hay dos formas de pago por fila, y sólo una decide
+
+Confundirlas fue un bug.
+
+| | |
+| --- | --- |
+| `FORMA_PAGO_MAESTRO` | Cómo se le paga a **ese proveedor**, según el maestro. Es una **regla**, y es lo único que decide si el comprobante entra al cronograma —al filtro de la pestaña y a la serie `PAGOS` del tablero— |
+| `FORMA_PAGO` | Por qué vía salió o va a salir **ese pago**, si hay uno registrado. Es un **hecho**, y sólo se muestra |
+
+> El filtro mira la regla, no el hecho.
+
+Si lo decidiera la fila de pago pasarían dos cosas, y las dos son peores. La grilla edita una sola celda —la fecha— y manda sólo esa, así que **cargar una fecha desde la grilla movería la deuda de serie**: un proveedor de CAJA o de DÉBITO pasaría a "sin forma", entraría al filtro y entraría al cashflow. Y a la inversa, un pago hecho por una vía distinta de la habitual sacaría al proveedor del cronograma sin que nadie lo haya decidido.
+
+**Que las dos difieran no es un error: es información.** Significa que a ese proveedor se le pagó por una vía distinta de la habitual, y lo que eventualmente hay que corregir es el maestro.
+
+Por lo mismo, `savePago()` **no pisa lo que no le mandaron**: si la forma o la observación no viajan en el request, no entran al `UPDATE`. Un endpoint que recibe un campo y escribe cuatro no está guardando una edición, está reemplazando la fila —y borraba la forma y la observación que había dejado la importación de la planilla—.
+
 ### El filtro se puede apagar, y mientras está prendido dice cuánto esconde
 
 El interruptor *Sólo echeq y transferencia* viene tildado y se puede destildar. Al lado del período, siempre a la vista:
 
-> *Quedan afuera $48.638.823,29 en 256 vencimiento(s) (DEBITO $48.638.823,29) — destildá el filtro para verlos.*
+> *Quedan afuera $51.804.546,29 en 257 vencimiento(s) (DEBITO $51.804.546,29) — destildá el filtro para verlos.*
 
 Un filtro que esconde plata sin decir cuánta es un filtro que miente.
 
@@ -386,7 +459,20 @@ Por eso el proveedor **avisa cuánto quedó afuera, desglosado por forma**, en c
 
 Meterla es configuración, no código: `PAGOS` y `PAGOS_FUERA_CRONOGRAMA` son las dos mitades del universo y **pueden convivir** en dos filas distintas —el validador lo permite justamente porque no se pisan—. Lo que no puede es `PAGOS_TODO` junto a cualquiera de sus partes.
 
-> **Ojo con un número que va a cambiar:** hoy la fila del tablero trae $1.312.829.430 y deja afuera sólo $48,6 M. Eso es porque los `CAJA`, `TARJETA CORP` y `MERCADO PAGO` todavía están en la base **sin normalizar** —se importaron con la lista vieja— y entran como "forma desconocida". **Al reimportar el maestro con la lista corregida pasarán a quedar afuera**, y la fila bajará a ~$1.225 M.
+Lo que entra al filtro, abierto por qué entra:
+
+| | Importe | Venc. |
+| --- | ---: | ---: |
+| `ECHEQ` | 176.159.353,50 | 95 |
+| `TRANSFERENCIA` | 1.092.047.604,71 | 38 |
+| sin forma — **el proveedor no está en el maestro** | 6.297.561,76 | 21 |
+| *(afuera)* `DEBITO` | *51.804.546,29* | *257* |
+| *(afuera)* `TARJETA CORP` | *88.250.698,73* | *129* |
+| *(afuera)* `CAJA` | *719.750,20* | *4* |
+
+> Los `TARJETA CORP` y `CAJA` entraban al filtro hasta que la normalización pasó a derivarse al leer: eran **$88.970.448,93 en 133 vencimientos** dentro de la fila del tablero, porque el maestro se había importado con la lista vieja de `FORMAS_PAGO`. Salieron solos, sin reimportar y sin tocar un dato.
+
+Lo único que sigue entrando por *"no se sabe cómo se paga"* son **$6.297.561,76 en 21 vencimientos** de proveedores que no están en el maestro — que es exactamente el caso para el que la regla existe.
 
 ---
 
@@ -403,6 +489,20 @@ Tres sub-solapas, que son tres momentos del mismo circuito:
 > **Se llama *Cuentas a Pagar* y no *Pagos Reales***, que era el nombre propuesto. Lo que se carga es una **previsión**; lo real lo dice Tango cuando el comprobante se cancela, y eso lo resuelve la conciliación. Un rótulo que dijera *"reales"* prometería un hecho donde hay un plan.
 
 **El indicador que importa es el segundo:** *Vencido sin fecha*. Va en rojo mientras haya algo y se apaga en verde al llegar a cero — una tarjeta que se ve igual con 839 millones pendientes y con cero no sirve para saber si hay trabajo por hacer. Hay un filtro de un clic para aislar exactamente esas filas.
+
+### Las tarjetas miden lo que la tabla muestra
+
+Los tres filtros —el buscador y los dos interruptores— son del navegador, así que los cuatro indicadores se suman ahí, en el mismo lugar donde ya se sumaba el pie de TOTALES.
+
+> Un número arriba de una tabla describe esa tabla.
+
+Antes salían del backend calculados sobre **todos** los vencimientos: con el filtro por forma de pago prendido —que es el default— la tarjeta decía *549 vencimientos* arriba de una tabla que mostraba **294**, y ni el buscador ni el interruptor de vencidos la movían.
+
+**Lo que el filtro esconde no se pierde:** cuando lo visible difiere del universo, el pie de cada tarjeta dice el total. Es la misma regla del cartel de al lado del período, aplicada a las tarjetas.
+
+Con una excepción deliberada: **la tarjeta roja se apaga en verde por el universo, no por lo visible.** Apagarla porque el filtro escondió lo que falta fechar diría que no hay trabajo por hacer justo cuando lo hay.
+
+Los **avisos** sí siguen contando el universo —son la contrapartida de lo que no se ve— y cada uno lo dice. Un número que no coincide con el de la pantalla y no explica a qué se refiere se lee como un error del sistema.
 
 **La fecha es lo único editable.** La celda tiene la misma pinta que la fecha manual de Cobranzas FR —es el mismo gesto— pero **sin `min` en hoy**: acá se aceptan fechas pasadas, porque el listado no tiene techo de antigüedad y *"se pensó pagar y no se pagó"* es una decisión legítima.
 
@@ -439,7 +539,7 @@ php tests/run.php proveedores
 
 Con base, además: que **ningún pendiente sea negativo** —el error que tenía la consulta antes de la tabla de signos—, que no entre ningún proveedor del exterior, que el total sea exactamente operativos + excluidos, y que **el registro declare exactamente las series que el proveedor devuelve**.
 
-*Suite completa: 1849 OK, 0 fallas (18 archivos).*
+*Suite completa: 2078 OK, 0 fallas (18 archivos).*
 
 ---
 
@@ -466,6 +566,6 @@ Modificados: `Class/CashflowRegistry.php` (`PROV_LOCALES` disponible + `series_e
 
 ## Pendientes conocidos
 
-- **El maestro todavía no está cargado.** Hasta que se importe, los 112 proveedores con deuda aparecen sin clasificar y los 8 de directores figuran como discrepancia. Es el comportamiento esperado.
+- **639 de los 1.173 proveedores del maestro tienen la forma de pago sin normalizar en la columna** —`CAJA`, `TARJETA CORP` y `MERCADO PAGO`, las tres que faltaban en la primera versión de `FORMAS_PAGO`—. **Ya no afecta a nada**: la normalización se deriva al leer, así que esas filas se clasifican bien igual. La columna se acomoda sola la próxima vez que se reimporte el maestro por cualquier otro motivo; no hace falta hacerlo por esto.
 - **ARCA/Aduana está cargada con dos códigos** (`OGADUN` $235,4 M y `OGADUA` $131,8 M, mismo nombre). No se unifican en el resolutor: la clave es el código de Tango y arreglar el maestro no le toca a este módulo. Si los dos llevan el mismo rubro, el tablero los junta solo. El control de faltantes los muestra por separado, que es lo que va a revelar si la planilla trae uno solo.
 - **Las series por rubro se resuelven contra el maestro en cada pedido.** Con 26 rubros y un cache por request alcanza; si algún día el maestro creciera mucho, el lugar para mirar es `CashflowRegistry::resolverExtra()`.

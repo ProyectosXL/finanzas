@@ -67,6 +67,27 @@ require_once __DIR__ . '/Planilla.php';
  * un filtro por antiguedad. Por eso getPendientes() informa aparte cuanto hay
  * VENCIDO SIN FECHA CARGADA: apilarlo en el primer dia del eje sin decirlo seria
  * mostrar que se paga todo hoy.
+ *
+ * DOS FORMAS DE PAGO QUE NO SON LA MISMA COSA
+ * -------------------------------------------
+ * Cada fila viaja con dos, y confundirlas fue un bug:
+ *
+ *   FORMA_PAGO_MAESTRO  como se le paga a ESE PROVEEDOR, segun el maestro. Es
+ *                       una regla, y es lo UNICO que decide si el comprobante
+ *                       entra al cronograma -al filtro de la pestaña y a la
+ *                       serie PAGOS del tablero-.
+ *   FORMA_PAGO          por que via salio o va a salir ESTE PAGO, si hay uno
+ *                       registrado. Es un hecho, y solo se muestra.
+ *
+ * EL FILTRO MIRA LA REGLA, NO EL HECHO. Si lo decidiera la fila de pago, cargar
+ * una fecha desde la grilla moveria la deuda de serie -la grilla manda la fecha
+ * y nada mas, asi que la forma llegaria vacia- y un pago hecho por una via
+ * distinta de la habitual sacaria al proveedor del cronograma sin que nadie lo
+ * haya decidido.
+ *
+ * Que las dos difieran no es un error: es informacion. Significa que a ese
+ * proveedor se le pago por una via distinta de la habitual, y lo que
+ * eventualmente hay que corregir es el maestro.
  */
 class Proveedores {
 
@@ -181,7 +202,6 @@ class Proveedores {
                 p.NOM_PROVEE,
                 a.T_COMP,
                 a.N_COMP,
-                t.CRE_DEB,
                 a.LEYENDA,
                 CAST(a.FECHA_EMIS AS DATE) AS FECHA_EMIS,
                 CAST(a.FECHA_CONT AS DATE) AS FECHA_CONT,
@@ -192,7 +212,6 @@ class Proveedores {
             FROM CPA04 a
             INNER JOIN CPA01 p ON p.COD_PROVEE = a.COD_PROVEE
             INNER JOIN CPA54 v ON v.ID_CPA04   = a.ID_CPA04
-            LEFT  JOIN CPA21 t ON t.T_COMP     = a.T_COMP
             LEFT  JOIN (
                     SELECT i.ID_CPA04, i.FECHA_VTO,
                            SUM(CASE i.T_COMP_CAN
@@ -243,12 +262,13 @@ class Proveedores {
                 $hoyStr
             );
 
+            $forma = self::formaQueSeMuestra($cat, $pago);
+
             $items[] = [
                 'COD_PROVEE' => $cod,
                 'RAZON_SOC' => trim((string) $row['NOM_PROVEE']),
                 'T_COMP' => $tComp,
                 'N_COMP' => $nComp,
-                'CRE_DEB' => trim((string) $row['CRE_DEB']),
                 'LEYENDA' => trim((string) $row['LEYENDA']),
                 'FECHA_EMIS' => $fechaEmis,
                 'FECHA_CONT' => Horizonte::normalizarFecha($row['FECHA_CONT']),
@@ -266,8 +286,24 @@ class Proveedores {
 
                 // Lo cargado a mano, si hay.
                 'FECHA_PAGO' => ($pago === null) ? null : $pago['FECHA_PAGO'],
-                'FORMA_PAGO' => ($pago === null) ? $cat['forma_pago'] : $pago['FORMA_PAGO'],
-                'FORMA_PAGO_ORIG' => ($pago === null) ? null : $pago['FORMA_PAGO_ORIG'],
+
+                /* COMO SE LE PAGA A ESTE PROVEEDOR, segun el maestro. Es lo
+                   UNICO que decide el filtro y la serie del tablero: ver
+                   CRONOGRAMA, mas abajo. */
+                'FORMA_PAGO_MAESTRO' => $cat['forma_pago'],
+
+                /* La forma del pago REGISTRADO, que es otra cosa: es un hecho
+                   sobre este comprobante, no una regla sobre el proveedor. Se
+                   muestra en la columna Forma; si difiere de la del maestro,
+                   eso es un dato para mirar -y capaz para corregir el maestro-,
+                   no un motivo para cambiar lo que se filtra.
+
+                   Sin pago registrado, o con uno que no dice la forma, se
+                   muestra la del maestro: es lo mas cierto que se sabe. El
+                   ORIGINAL sale de la MISMA fuente que el normalizado, porque
+                   es el original DE ESE valor y no de otro. */
+                'FORMA_PAGO' => $forma['normalizado'],
+                'FORMA_PAGO_ORIG' => $forma['original'],
                 'OBSERVACION' => ($pago === null) ? null : $pago['OBSERVACION'],
                 'ESTADO_PAGO' => ($pago === null) ? null : $pago['ESTADO'],
 
@@ -282,15 +318,72 @@ class Proveedores {
                 /* Si se gestiona desde el cronograma de pagos -echeq,
                    transferencia, o forma desconocida-. Es lo que decide si
                    entra a la fila del tablero y lo que la pestaña filtra por
-                   defecto. Ver ProveedoresCategorias::esDelCronograma(). */
-                'CRONOGRAMA' => ProveedoresCategorias::esDelCronograma(
-                    ($pago === null) ? $cat['forma_pago'] : $pago['FORMA_PAGO'])
+                   defecto. Ver ProveedoresCategorias::esDelCronograma().
+
+                   SALE DEL MAESTRO Y SOLO DEL MAESTRO, haya o no fecha de pago
+                   cargada. El criterio es una propiedad del PROVEEDOR -a este
+                   se le paga por transferencia, a aquel por caja-, no del
+                   comprobante: si lo decidiera la fila de pago, cargar una
+                   fecha en la grilla cambiaria de lugar la deuda, y un pago
+                   registrado por una via distinta a la habitual sacaria al
+                   proveedor del cronograma sin que nadie lo haya decidido. */
+                'CRONOGRAMA' => ProveedoresCategorias::esDelCronograma($cat['forma_pago'])
             ];
         }
 
         sqlsrv_free_stmt($stmt);
 
         return $items;
+    }
+
+    /**
+     * Que forma de pago se MUESTRA en la columna Forma, y con que original.
+     *
+     * OJO: esto NO decide nada. Lo que entra al cronograma lo decide la forma
+     * del maestro y solo esa -ver la seccion "DOS FORMAS DE PAGO QUE NO SON LA
+     * MISMA COSA" del encabezado-. Esto es la columna de la grilla.
+     *
+     * Manda el pago registrado si lo hay, porque es un hecho sobre ESTE
+     * comprobante; si no hay, o si el pago no dice la forma, se muestra la del
+     * maestro, que es lo mas cierto que se sabe.
+     *
+     * EL ORIGINAL SALE DE LA MISMA FUENTE QUE EL NORMALIZADO. Mezclarlos
+     * -normalizado del pago, original del maestro- mostraria el original de un
+     * valor que no es el que se esta mostrando.
+     *
+     * SI EL NORMALIZADO ES null, EL ORIGINAL ES UN TYPO Y NO OTRA COSA. Antes
+     * habia un segundo caso -una forma valida que habia quedado sin normalizar
+     * porque el maestro se importo antes de que estuviera declarada- y habia
+     * que distinguirlo, porque se arreglaba reimportando y no corrigiendo la
+     * planilla. Ese caso ya no existe: la normalizacion se calcula al leer
+     * contra la lista de hoy. Ver ProveedoresCategorias::mapa().
+     *
+     * Estatica y pura.
+     *
+     * @param array $cat Lo que devolvio ProveedoresCategorias::categoria()
+     * @param array|null $pago La fila de pago, si hay
+     * @return array ['normalizado', 'original']
+     */
+    public static function formaQueSeMuestra($cat, $pago) {
+        $delPago = ($pago !== null && $pago['FORMA_PAGO'] !== null);
+
+        $normalizado = $delPago ? $pago['FORMA_PAGO'] : $cat['forma_pago'];
+        $original = $delPago
+            ? $pago['FORMA_PAGO_ORIG']
+            : (isset($cat['forma_pago_orig']) ? $cat['forma_pago_orig'] : null);
+
+        /* Un pago que no dice la forma pero si trae su original -un valor que
+           no matcheo al importar la planilla de pagos- conserva ese original:
+           es lo que hay que mostrar para poder corregirlo. */
+        if (!$delPago && $pago !== null && $pago['FORMA_PAGO_ORIG'] !== null
+            && trim((string) $pago['FORMA_PAGO_ORIG']) !== '') {
+            $original = $pago['FORMA_PAGO_ORIG'];
+        }
+
+        return [
+            'normalizado' => $normalizado,
+            'original' => $original
+        ];
     }
 
     /* ====================================================================
@@ -434,6 +527,14 @@ class Proveedores {
      * del eje porque no hay otro lugar donde ponerlo, y sin este aviso se leeria
      * como "hoy se pagan ochocientos millones".
      *
+     * CUENTAN TODO LO PENDIENTE, Y LO DICEN. Los usan los dos lados -la pestaña
+     * y el proveedor del tablero- y los dos muestran MENOS que eso: la pestaña
+     * abre filtrada por forma de pago y la fila del tablero usa PAGOS, que trae
+     * solo el cronograma. Que cuenten el universo esta bien -son la
+     * contrapartida de lo que no se ve- pero un numero que no coincide con el
+     * que esta en pantalla tiene que decir a que se refiere, o se lee como un
+     * error del sistema.
+     *
      * Estatica y pura.
      *
      * @param array $items Filas de getPendientes()
@@ -469,25 +570,32 @@ class Proveedores {
             }
         }
 
+        /* SOBRE TODO LO PENDIENTE. Se dice en cada uno y no una vez al final:
+           los avisos se leen sueltos -van en una lista- y el que se lea sin el
+           de al lado tiene que seguir diciendo a que se refiere. */
+        $alcance = ' Es sobre TODAS las cuentas a pagar, así que no coincide con lo que '
+            . 'muestra la pantalla si hay un filtro puesto.';
+
         if ($compVencidos > 0) {
             $avisos[] = $compVencidos . ' vencimiento(s) por ' . self::plata($vencidoSinFecha)
                 . ' ya vencieron y NO tienen fecha de pago cargada. Se muestran en el primer '
                 . 'día del eje porque no hay otro lugar donde ponerlos, pero eso no significa '
                 . 'que se paguen hoy: cargales la fecha, de a uno en la grilla o importando '
-                . 'la planilla de pagos.';
+                . 'la planilla de pagos.' . $alcance;
         }
 
         if ($compSinFecha > 0) {
             $avisos[] = $compSinFecha . ' vencimiento(s) por ' . self::plata($sinFecha)
                 . ' no tienen fecha de vencimiento en Tango ni plazo de pago en el maestro, '
-                . 'así que no se pueden ubicar en el eje.';
+                . 'así que no se pueden ubicar en el eje.' . $alcance;
         }
 
         if ($compExcluidos > 0) {
             $avisos[] = $compExcluidos . ' vencimiento(s) por ' . self::plata($excluido)
                 . ' son de proveedores con rubro "' . ProveedoresCategorias::RUBRO_EXCLUIDOS
                 . '" en el maestro. Se listan acá pero su fila del tablero se puede '
-                . 'inhabilitar desde Parámetros.';
+                . 'inhabilitar desde Parámetros, o apuntarla a la serie que ya los deja '
+                . 'afuera sin perder el criterio del cronograma.' . $alcance;
         }
 
         return $avisos;
@@ -534,7 +642,13 @@ class Proveedores {
                 'T_COMP' => Planilla::codigo($row['T_COMP']),
                 'N_COMP' => Planilla::codigo($row['N_COMP']),
                 'FECHA_PAGO' => Horizonte::normalizarFecha($row['FECHA_PAGO']),
-                'FORMA_PAGO' => $row['FORMA_PAGO'],
+
+                /* Normalizada contra la lista DE HOY y no contra la del dia que
+                   se importo. Misma regla que el maestro y por el mismo motivo:
+                   es un valor derivado del original, que esta guardado al lado.
+                   Ver ProveedoresCategorias::mapa(). */
+                'FORMA_PAGO' => ProveedoresCategorias::formaVigente(
+                    $row['FORMA_PAGO_ORIG'], $row['FORMA_PAGO']),
                 'FORMA_PAGO_ORIG' => $row['FORMA_PAGO_ORIG'],
                 'OBSERVACION' => $row['OBSERVACION'],
                 'ESTADO' => $row['ESTADO'],
@@ -1039,12 +1153,18 @@ class Proveedores {
      * Es lo que usa la edicion fila por fila de la grilla. La importacion masiva
      * pasa por el mismo metodo privado, asi que las dos escriben igual.
      *
+     * LO QUE NO SE MANDA NO SE PISA. La grilla edita UNA celda -la fecha- y
+     * manda solo esa; si los campos que no viajaron se escribieran igual, cada
+     * carga de fecha borraria la forma de pago y la observacion que habia
+     * dejado la importacion de la planilla. Un endpoint que recibe un campo y
+     * escribe cuatro no esta guardando una edicion, esta reemplazando la fila.
+     *
      * @param string $codProvee
      * @param string $tComp
      * @param string $nComp
      * @param string $fecha 'Y-m-d'
-     * @param string|null $formaPago
-     * @param string|null $observacion
+     * @param string|null $formaPago Si no viene, la que haya queda como esta
+     * @param string|null $observacion Idem
      * @param string|null $usuario
      * @return array ['fecha', 'forma']
      */
@@ -1066,12 +1186,16 @@ class Proveedores {
 
         $f = self::validarFechaPago($fecha);
         $forma = ProveedoresCategorias::normalizarFormaPago($formaPago);
+        $obs = ($observacion === null) ? '' : trim((string) $observacion);
 
+        /* Ver la nota del docblock: si el campo no vino, no se toca. Vacio y
+           ausente son lo mismo acá porque la grilla no tiene con que mandar un
+           vacio a proposito: edita la fecha y nada mas. */
         $this->guardarPago($this->conectar(), $cod, $t, $n, $f,
             $forma['normalizado'], $forma['original'],
-            ($observacion === null || trim((string) $observacion) === '')
-                ? null : mb_substr(trim((string) $observacion), 0, 200),
-            'MANUAL', $usuario);
+            ($obs === '') ? null : mb_substr($obs, 0, 200),
+            'MANUAL', $usuario,
+            ($forma['original'] !== ''), ($obs !== ''));
 
         return ['fecha' => $f, 'forma' => $forma['normalizado']];
     }
@@ -1150,17 +1274,42 @@ class Proveedores {
      * NO PISA EL ESTADO NI LA FECHA REAL DE CANCELACION. Si el comprobante ya
      * estaba conciliado, cambiarle la prevision no lo desconcilia: Tango es la
      * verdad sobre el pago y esto es una prevision.
+     *
+     * TAMPOCO PISA LO QUE EL LLAMADOR NO TRAJO. $tocarForma y $tocarObs dicen
+     * si esos dos campos entran al UPDATE. La importacion los trae siempre y
+     * pasa los dos en true; la edicion de a una manda solo la fecha. En el
+     * INSERT no hay nada que conservar, asi que van como vengan.
      */
     private function guardarPago($cid, $cod, $t, $n, $fecha, $forma, $formaOrig,
-                                 $observacion, $origen, $usuario) {
+                                 $observacion, $origen, $usuario,
+                                 $tocarForma = true, $tocarObs = true) {
+        $sets = ['FECHA_PAGO = ?'];
+        $params = [$fecha];
+
+        if ($tocarForma) {
+            $sets[] = 'FORMA_PAGO = ?';
+            $sets[] = 'FORMA_PAGO_ORIG = ?';
+            $params[] = $forma;
+            $params[] = ($formaOrig === '') ? null : $formaOrig;
+        }
+
+        if ($tocarObs) {
+            $sets[] = 'OBSERVACION = ?';
+            $params[] = $observacion;
+        }
+
+        $sets[] = 'ORIGEN = ?';
+        $sets[] = 'USUARIO = ?';
+        $sets[] = 'FECHA_MOD = GETDATE()';
+        $params[] = $origen;
+        $params[] = $usuario;
+
         $sql = "UPDATE dbo." . self::TABLA_PAGO . "
-                SET FECHA_PAGO = ?, FORMA_PAGO = ?, FORMA_PAGO_ORIG = ?, OBSERVACION = ?,
-                    ORIGEN = ?, USUARIO = ?, FECHA_MOD = GETDATE()
+                SET " . implode(', ', $sets) . "
                 WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?";
 
         $stmt = sqlsrv_query($cid, $sql,
-            [$fecha, $forma, ($formaOrig === '') ? null : $formaOrig, $observacion,
-             $origen, $usuario, $cod, $t, $n]);
+            array_merge($params, [$cod, $t, $n]));
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al guardar la fecha de pago'));

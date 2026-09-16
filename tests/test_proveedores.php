@@ -245,6 +245,217 @@ chequear('y una forma no reconocida tambien', true,
 chequear('las dos formas del cronograma estan declaradas',
     ['ECHEQ', 'TRANSFERENCIA'], ProveedoresCategorias::FORMAS_CRONOGRAMA);
 
+seccion('lo que no se manda a savePago no se pisa');
+
+/* EL BUG QUE ESTO FIJA: la grilla edita UNA celda -la fecha- y manda solo esa.
+   guardarPago escribia igual FORMA_PAGO y OBSERVACION, asi que cargar una fecha
+   borraba la forma y la observacion que habia dejado la importacion de la
+   planilla. Un endpoint que recibe un campo y escribe cuatro no guarda una
+   edicion: reemplaza la fila.
+
+   No hace falta base para verificarlo: se mira que el UPDATE que arma no
+   nombre las columnas que el llamador no trajo. */
+$m = new ReflectionMethod('Proveedores', 'guardarPago');
+$params = [];
+
+foreach ($m->getParameters() as $p) { $params[] = $p->getName(); }
+
+chequear('guardarPago sabe que campos tocar', true,
+    in_array('tocarForma', $params, true) && in_array('tocarObs', $params, true));
+chequear('y por defecto los toca: la importacion los trae siempre', true,
+    $m->getParameters()[10]->getDefaultValue() === true
+    && $m->getParameters()[11]->getDefaultValue() === true);
+
+// savePago es quien decide: si el campo no vino, no entra al UPDATE.
+$rs = new ReflectionMethod('Proveedores', 'savePago');
+$cuerpo = implode('', array_slice(file(__DIR__ . '/../cashflow/Class/Proveedores.php'),
+    $rs->getStartLine() - 1, $rs->getEndLine() - $rs->getStartLine() + 1));
+
+chequear('savePago pasa false cuando no vino la forma', true,
+    strpos($cuerpo, "\$forma['original'] !== ''") !== false);
+chequear('y cuando no vino la observacion', true,
+    strpos($cuerpo, "\$obs !== ''") !== false);
+
+seccion('el filtro mira el maestro, no la fila de pago');
+
+/* LA REGLA: el criterio es una propiedad del PROVEEDOR -a este se le paga por
+   transferencia, a aquel por caja-, no de un comprobante suelto. Si lo
+   decidiera la fila de pago, cargar una fecha desde la grilla cambiaria de
+   serie la deuda, porque la grilla manda la fecha y nada mas. */
+$fuente = file_get_contents(__DIR__ . '/../cashflow/Class/Proveedores.php');
+
+chequear('CRONOGRAMA se calcula sobre la forma del maestro', true,
+    strpos($fuente, "'CRONOGRAMA' => ProveedoresCategorias::esDelCronograma(\$cat['forma_pago'])")
+    !== false);
+
+// Y las dos formas viajan por separado: una decide, la otra se muestra.
+chequear('la forma del maestro viaja aparte', true,
+    strpos($fuente, "'FORMA_PAGO_MAESTRO' => \$cat['forma_pago']") !== false);
+
+/* LA TABLA DE SIGNOS NO SE TOCA. Al sacar la columna CRE_DEB del SELECT quedo
+   un solo uso de CPA21 en la consulta, y es el que importa: sin el, una nota de
+   debito imputada se resta como si fuera un pago y el pendiente da NEGATIVO.
+   Esta escrito aca para que un "limpiemos los joins de CPA21" no se lo lleve. */
+chequear('la tabla de signos de las imputaciones sigue en su lugar', true,
+    strpos($fuente, "ELSE CASE tc.CRE_DEB") !== false
+    && strpos($fuente, "LEFT JOIN CPA21 tc ON tc.T_COMP = i.T_COMP_CAN") !== false);
+
+/* Un proveedor de CAJA al que le cargaron una fecha sigue estando FUERA del
+   cronograma: la fila de pago no cambia el criterio. */
+chequear('un proveedor de CAJA no entra aunque tenga pago cargado',
+    false, ProveedoresCategorias::esDelCronograma('CAJA'));
+
+/* Y uno de ECHEQ sigue adentro aunque el pago se haya registrado por otra via:
+   que las dos difieran es informacion, no un motivo para recategorizar. */
+chequear('y uno de ECHEQ sigue adentro',
+    true, ProveedoresCategorias::esDelCronograma('ECHEQ'));
+
+seccion('la forma que se muestra sale de la misma fuente que su original');
+
+/* EL BUG QUE ESTO FIJA: categoria() no devolvia el FORMA_PAGO_ORIG del maestro,
+   asi que un proveedor cuyo maestro dice TARJETA CORP se dibujaba "sin forma"
+   en gris. La rama naranja del JS -que existe para exactamente este caso- no se
+   ejecutaba nunca. */
+$f = Proveedores::formaQueSeMuestra(
+    ['forma_pago' => null, 'forma_pago_orig' => 'eqheck'], null);
+
+chequear('sin pago cargado se muestra lo que dice el maestro', 'eqheck', $f['original']);
+chequear('sin normalizar, porque no matchea contra nada', null, $f['normalizado']);
+
+// El pago registrado manda sobre el maestro EN LA COLUMNA -es un hecho sobre
+// este comprobante- pero no sobre el filtro, que ya se verifico arriba.
+$f = Proveedores::formaQueSeMuestra(
+    ['forma_pago' => 'ECHEQ', 'forma_pago_orig' => 'echeq'],
+    ['FORMA_PAGO' => 'TRANSFERENCIA', 'FORMA_PAGO_ORIG' => null]);
+
+chequear('con pago cargado manda el del pago', 'TRANSFERENCIA', $f['normalizado']);
+
+/* EL ORIGINAL SALE DE LA MISMA FUENTE QUE EL NORMALIZADO: si se mezclaran, esta
+   fila mostraria 'TRANSFERENCIA' con el original 'echeq' del maestro al lado. */
+chequear('y el original es el de ese mismo valor, no el del maestro',
+    null, $f['original']);
+
+// Un pago que no dice la forma no borra lo que el maestro si sabe.
+$f = Proveedores::formaQueSeMuestra(
+    ['forma_pago' => 'ECHEQ', 'forma_pago_orig' => 'echeq'],
+    ['FORMA_PAGO' => null, 'FORMA_PAGO_ORIG' => null]);
+
+chequear('un pago sin forma no tapa la del maestro', 'ECHEQ', $f['normalizado']);
+
+// Pero un pago que trajo un valor que no matcheo SI conserva su original: es lo
+// que hay que mostrar para poder corregirlo.
+$f = Proveedores::formaQueSeMuestra(
+    ['forma_pago' => null, 'forma_pago_orig' => null],
+    ['FORMA_PAGO' => null, 'FORMA_PAGO_ORIG' => 'transfer.']);
+
+chequear('y el valor raro de la planilla de pagos no se pierde',
+    'transfer.', $f['original']);
+
+// Un proveedor que no esta en el maestro no tiene ni una ni otra.
+$f = Proveedores::formaQueSeMuestra(
+    ['forma_pago' => null, 'forma_pago_orig' => null], null);
+
+chequear('sin maestro y sin pago no hay nada que mostrar', null, $f['original']);
+
+seccion('la forma de pago se normaliza al LEER, no al importar');
+
+/* EL PROBLEMA QUE ESTO RESUELVE: FORMA_PAGO es un valor DERIVADO -sale de pasar
+   el original por FORMAS_PAGO, que vive en el codigo-. Calcularlo al importar lo
+   congelaba contra la lista de ese dia: agregar una forma nueva no arreglaba
+   ninguna de las filas ya cargadas y obligaba a REIMPORTAR el maestro entero.
+
+   Y reimportar no es recalcular: hace el diff completo, necesita el Excel
+   vigente -si no es el mismo, aplica cambios que nadie pidio-, propone bajas y
+   escribe historial. Era correr una operacion de DATOS, con efectos
+   colaterales, para arreglar la consecuencia de un cambio de CODIGO. */
+chequear('una forma que hoy esta declarada se reconoce aunque se haya guardado en null',
+    'TARJETA CORP', ProveedoresCategorias::formaVigente('TARJETA CORP', null));
+chequear('y en minuscula tambien', 'CAJA', ProveedoresCategorias::formaVigente('caja', null));
+
+// Lo que sigue sin matchear, sigue sin matchear: recalcular no inventa nada.
+chequear('un typo sigue sin normalizar', null,
+    ProveedoresCategorias::formaVigente('eqheck', null));
+
+/* RECALCULAR NUNCA PUEDE BORRAR UN DATO. Si una fila tuviera la normalizada sin
+   su original -hoy no hay ninguna, pero una correccion a mano sobre la base
+   podria dejarla asi- se respeta lo que este guardado en lugar de perderlo. */
+chequear('sin original se respeta lo guardado', 'ECHEQ',
+    ProveedoresCategorias::formaVigente(null, 'ECHEQ'));
+chequear('y un original vacio es lo mismo que no tenerlo', 'ECHEQ',
+    ProveedoresCategorias::formaVigente('   ', 'ECHEQ'));
+chequear('sin ninguna de las dos, null', null,
+    ProveedoresCategorias::formaVigente(null, null));
+
+seccion('renormalizar al leer no ensucia el diff de la importacion');
+
+/* EL RIESGO DEL CAMBIO: si las lecturas renormalizan y el diff comparara contra
+   la columna cruda, el proximo preview mostraria como CAMBIO las 639 filas que
+   en realidad ya quedaron bien. No pasa porque el diff compara contra mapa(),
+   que es justamente lo que se renormaliza. */
+$existenteViejo = ['MTDODI' => [
+    'COD_PROVEE' => 'MTDODI', 'NOMBRE' => 'N MTDODI',
+    'RUBRO_ECONOMICO' => 'Mercaderia', 'RUBRO' => null, 'CENTRO_COSTOS' => null,
+    // Como lo devuelve mapa() para una fila importada con la lista vieja:
+    // guardada en null, pero reconocida al leer.
+    'FORMA_PAGO' => ProveedoresCategorias::formaVigente('TARJETA CORP', null),
+    'FORMA_PAGO_ORIG' => 'TARJETA CORP',
+    'PLAZO_PAGO' => '30 DIAS', 'CRITERIO_DISTRIB' => null
+]];
+
+$c = ProveedoresCategorias::compararImportacion([[
+    'linea' => 2, 'cod_provee' => 'MTDODI', 'nombre' => 'N MTDODI',
+    'rubro_economico' => 'Mercaderia', 'rubro' => '', 'centro_costos' => '',
+    'forma_pago' => 'TARJETA CORP', 'plazo_pago' => '30 DIAS', 'criterio_distrib' => ''
+]], $existenteViejo);
+
+chequear('la misma planilla no propone ningun cambio falso',
+    'SIN_CAMBIOS', $c['filas'][0]['estado']);
+chequear('ni cuenta la fila como forma desconocida', 0,
+    $c['resumen']['forma_desconocida']);
+
+seccion('los indicadores miden lo que la grilla muestra');
+
+/* EL BUG QUE ESTO FIJA: indicadores() se calculaba sobre TODOS los items y la
+   grilla sobre las filas visibles. Con el filtro por forma de pago prendido -que
+   es el default- la tarjeta decia 549 vencimientos arriba de una tabla que
+   mostraba 294, y ni el buscador ni el interruptor de vencidos la movian.
+
+   Se verifica sobre el JS porque los tres filtros son del navegador: solo ahi se
+   sabe que filas se estan viendo. Es el mismo lugar donde ya se calculaba el pie
+   de TOTALES. */
+$js = file_get_contents(__DIR__ . '/../cashflow/Js/Proveedores-Proveedores_locales.js');
+
+chequear('los indicadores se pintan desde pintarGrilla, con las filas visibles', true,
+    strpos($js, 'pintarIndicadores(filas);') !== false);
+
+// Y NO desde cargar(): ahi solo se pintarian una vez y no se moverian con los
+// filtros, que es exactamente el bug.
+chequear('y no una sola vez al cargar', false, strpos($js, 'pintarIndicadores();') !== false);
+
+chequear('se suman sobre las filas que se le pasan', true,
+    strpos($js, 'function calcularIndicadores(filas)') !== false);
+
+/* LO QUE EL FILTRO ESCONDE NO SE PIERDE: cuando lo visible difiere del universo,
+   el pie de la tarjeta dice el total. Misma regla que el cartel del periodo. */
+chequear('y cuando difieren del universo se dice cuanto es el universo', true,
+    strpos($js, 'function deTotal(') !== false);
+
+/* La tarjeta roja se apaga en verde por el UNIVERSO y no por lo visible:
+   apagarla porque el filtro escondio lo que falta fechar diria que no hay
+   trabajo por hacer justo cuando lo hay. */
+chequear('la tarjeta de vencidos se apaga por el universo', true,
+    strpos($js, "toggle('prov-kpi-ok', !u.n_vencido_sin_fecha)") !== false);
+
+seccion('el archivo exportado dice que filtro estaba puesto');
+
+/* Bajar lo que se ve esta bien -es la tabla que el usuario mira- pero sin rastro
+   del recorte, dentro de una semana nadie sabe si el archivo trae todo o una
+   parte. Y aca el caso NORMAL es el recortado: el filtro viene prendido. */
+chequear('el nombre se arma con los filtros', true,
+    strpos($js, 'function nombreExport()') !== false);
+chequear('y no es una constante', false,
+    strpos($js, "exportarTabla('tablaProveedores', 'Cuentas_a_Pagar')") !== false);
+
 seccion('el rubro Excluidos');
 
 chequear('lo detecta', true, ProveedoresCategorias::esExcluido('Excluidos'));
@@ -651,6 +862,20 @@ chequear('lo que no se puede ubicar va aparte', true, strpos($texto, '70,00') !=
 
 chequear('y lo excluido tambien', true, strpos($texto, '30,00') !== false);
 
+/* LOS AVISOS CUENTAN EL UNIVERSO, Y TIENEN QUE DECIRLO. Los usan los dos lados
+   -la pestaña, que abre filtrada por forma de pago, y el proveedor del tablero,
+   cuya fila usa PAGOS- y los dos muestran MENOS que esto. Contar el universo
+   esta bien: son la contrapartida de lo que no se ve. Lo que no puede es no
+   decirlo, porque un numero que no coincide con el de la pantalla se lee como
+   un error del sistema.
+
+   Se dice en CADA aviso y no una vez al final: van en una lista y se leen
+   sueltos. */
+foreach ($avisos as $a) {
+    chequear('cada aviso dice sobre que se calcula', true,
+        strpos($a, 'TODAS las cuentas a pagar') !== false);
+}
+
 // Sin nada que decir, no se dice nada: un aviso que aparece siempre deja de
 // leerse.
 chequear('sin nada pendiente no hay avisos', [], Proveedores::avisosPendientes([
@@ -684,6 +909,72 @@ chequear('y la de solo excluidos', true,
     CashflowRegistry::serieExiste('PROV_LOCALES', 'PAGOS_EXCLUIDOS'));
 chequear('y la de los que faltan en el maestro', true,
     CashflowRegistry::serieExiste('PROV_LOCALES', 'PAGOS_SIN_RUBRO'));
+
+/* LOS DOS CRITERIOS A LA VEZ. Sin esta serie no habia forma de sacar a los
+   socios del tablero sin perder el criterio del cronograma: apuntar la fila a
+   PAGOS_OPERATIVOS se lleva tambien los debitos automaticos. */
+chequear('y la de los dos criterios juntos', true,
+    CashflowRegistry::serieExiste('PROV_LOCALES', 'PAGOS_CRONO_OPERATIVOS'));
+
+seccion('a que series va cada vencimiento');
+
+require_once __DIR__ . '/../cashflow/Class/Providers/ProveedoresProvider.php';
+
+$item = function ($crono, $excluido, $enMaestro = true, $serie = 'RUBRO_MERCADERIA') {
+    return ['CRONOGRAMA' => $crono, 'EXCLUIDO' => $excluido,
+            'EN_MAESTRO' => $enMaestro, 'SERIE' => $serie];
+};
+
+/* Los cuatro cuadrantes. El que faltaba poder aislar es el primero: cronograma
+   Y operativo. */
+$d = ProveedoresProvider::seriesDeItem($item(true, false));
+
+chequear('cronograma y operativo: va al cronograma', true, in_array('PAGOS', $d, true));
+chequear('a los operativos', true, in_array('PAGOS_OPERATIVOS', $d, true));
+chequear('y a los dos juntos', true, in_array('PAGOS_CRONO_OPERATIVOS', $d, true));
+
+/* EL CASO QUE MOTIVA LA SERIE: un socio que cobra por transferencia. Entra al
+   cronograma -asi se le paga- pero no es deuda comercial. Hoy son $109,6
+   millones de un solo proveedor dentro de la fila del tablero. */
+$d = ProveedoresProvider::seriesDeItem($item(true, true));
+
+chequear('un excluido que cobra por transferencia entra al cronograma', true,
+    in_array('PAGOS', $d, true));
+chequear('y a los excluidos', true, in_array('PAGOS_EXCLUIDOS', $d, true));
+chequear('pero NO a la serie de los dos criterios', false,
+    in_array('PAGOS_CRONO_OPERATIVOS', $d, true));
+
+// Un debito automatico operativo: queda fuera del cronograma, asi que tampoco.
+$d = ProveedoresProvider::seriesDeItem($item(false, false));
+
+chequear('un debito operativo queda fuera del cronograma', true,
+    in_array('PAGOS_FUERA_CRONOGRAMA', $d, true));
+chequear('y tampoco va a la serie de los dos criterios', false,
+    in_array('PAGOS_CRONO_OPERATIVOS', $d, true));
+
+$d = ProveedoresProvider::seriesDeItem($item(false, true));
+
+chequear('un excluido fuera del cronograma tampoco', false,
+    in_array('PAGOS_CRONO_OPERATIVOS', $d, true));
+
+// El universo se lleva las cuatro, siempre.
+foreach ([[true, true], [true, false], [false, true], [false, false]] as $q) {
+    chequear('el universo se lleva el cuadrante ' . json_encode($q), true,
+        in_array('PAGOS_TODO', ProveedoresProvider::seriesDeItem($item($q[0], $q[1])), true));
+}
+
+// Y la serie del rubro no depende de ninguno de los dos criterios: describe QUE
+// es la deuda, no como se paga ni si esta excluida.
+$d = ProveedoresProvider::seriesDeItem($item(false, false, true, 'RUBRO_LOGISTICA'));
+
+chequear('la serie del rubro va igual', true, in_array('RUBRO_LOGISTICA', $d, true));
+
+$d = ProveedoresProvider::seriesDeItem($item(true, false, false,
+    ProveedoresCategorias::SERIE_SIN_RUBRO));
+
+chequear('sin maestro va a PAGOS_SIN_RUBRO', true, in_array('PAGOS_SIN_RUBRO', $d, true));
+chequear('y no inventa una serie de rubro', false,
+    in_array(ProveedoresCategorias::SERIE_SIN_RUBRO, $d, true));
 
 $meta = CashflowRegistry::meta('PROV_LOCALES');
 
@@ -764,6 +1055,98 @@ $val = CashflowEstructura::validar(
 
 chequear('las dos mitades si pueden convivir', true, $val['valido']);
 
+seccion('el validador tambien ve los solapes entre cortes distintos');
+
+/* EL AGUJERO QUE ESTO TAPA: la regla anterior miraba el TOTAL contra una de sus
+   partes y nunca las partes ENTRE SI. PAGOS y PAGOS_OPERATIVOS son dos partes
+   de PAGOS_TODO, ninguna es el total, y se solapan en $1.297 millones: el 89%
+   del universo contado dos veces, sin un solo aviso. */
+$filaProv = function ($id, $cod, $serie) {
+    return ['ID' => $id, 'CODIGO' => $cod, 'NOMBRE' => $cod, 'SECCION' => 'EGR',
+            'TIPO' => 'EGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'PROV_LOCALES',
+            'ORIGEN_SERIE' => $serie, 'ORDEN' => $id * 10, 'ACTIVO' => 1];
+};
+
+$seccionEgr = [['CODIGO' => 'EGR', 'NOMBRE' => 'Egresos', 'ROL' => 'MOVIMIENTO',
+                'ID_PADRE' => null, 'ORDEN' => 10, 'ACTIVO' => 1]];
+
+$val = CashflowEstructura::validar($seccionEgr, [
+    $filaProv(1, 'PL_CRON', 'PAGOS'),
+    $filaProv(2, 'PL_OPER', 'PAGOS_OPERATIVOS')
+]);
+
+chequear('el cronograma junto a los operativos ya no pasa', false, $val['valido']);
+
+// Y el mensaje dice POR QUE, que es lo que permite arreglarlo: son dos cortes
+// distintos de la misma deuda, no un total con una parte.
+$texto = implode(' | ', $val['errores']);
+
+chequear('nombrando los dos cortes', true,
+    strpos($texto, 'por cómo se paga') !== false
+    && strpos($texto, 'por si está excluido') !== false);
+
+/* La serie de los dos criterios es la interseccion de una mitad de cada corte:
+   se solapa con las cuatro y no puede convivir con ninguna. */
+$val = CashflowEstructura::validar($seccionEgr, [
+    $filaProv(1, 'PL_CRON', 'PAGOS'),
+    $filaProv(2, 'PL_CO', 'PAGOS_CRONO_OPERATIVOS')
+]);
+
+chequear('ni los dos criterios junto al cronograma', false, $val['valido']);
+
+$val = CashflowEstructura::validar($seccionEgr, [
+    $filaProv(1, 'PL_EXCL', 'PAGOS_EXCLUIDOS'),
+    $filaProv(2, 'PL_CO', 'PAGOS_CRONO_OPERATIVOS')
+]);
+
+chequear('ni junto a los excluidos', false, $val['valido']);
+
+/* LO QUE SI TIENE QUE SEGUIR PASANDO. Las dos mitades de un MISMO corte son la
+   forma prevista de meter al tablero lo que hoy queda fuera de la fila. */
+$val = CashflowEstructura::validar($seccionEgr, [
+    $filaProv(1, 'PL_OPER', 'PAGOS_OPERATIVOS'),
+    $filaProv(2, 'PL_EXCL', 'PAGOS_EXCLUIDOS')
+]);
+
+chequear('las dos mitades del corte por rubro siguen conviviendo', true, $val['valido']);
+
+/* Y UNA SOLA FILA NUNCA ES UN SOLAPE, sea cual sea la serie. */
+$val = CashflowEstructura::validar($seccionEgr, [
+    $filaProv(1, 'PL_CO', 'PAGOS_CRONO_OPERATIVOS')
+]);
+
+chequear('una sola fila no se pisa con nada', true, $val['valido']);
+
+/* SIN CORTES DECLARADOS NO CAMBIA NADA. Los cuatro canales de Ventas son un
+   unico corte y los cuatro pueden estar activos: si esta regla los rechazara,
+   habria roto el tablero de todos los demas modulos. */
+$val = CashflowEstructura::validar(
+    [['CODIGO' => 'ING', 'NOMBRE' => 'Ingresos', 'ROL' => 'MOVIMIENTO',
+      'ID_PADRE' => null, 'ORDEN' => 10, 'ACTIVO' => 1]],
+    [['ID' => 1, 'CODIGO' => 'V_LOC', 'NOMBRE' => 'Locales', 'SECCION' => 'ING',
+      'TIPO' => 'INGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'VENTAS',
+      'ORIGEN_SERIE' => 'COBRANZA_LOCALES', 'ORDEN' => 10, 'ACTIVO' => 1],
+     ['ID' => 2, 'CODIGO' => 'V_FR', 'NOMBRE' => 'Franquicias', 'SECCION' => 'ING',
+      'TIPO' => 'INGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'VENTAS',
+      'ORIGEN_SERIE' => 'COBRANZA_FRANQUICIAS', 'ORDEN' => 20, 'ACTIVO' => 1],
+     ['ID' => 3, 'CODIGO' => 'V_MAY', 'NOMBRE' => 'Mayoristas', 'SECCION' => 'ING',
+      'TIPO' => 'INGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'VENTAS',
+      'ORIGEN_SERIE' => 'COBRANZA_MAYORISTAS', 'ORDEN' => 30, 'ACTIVO' => 1],
+     ['ID' => 4, 'CODIGO' => 'V_ECO', 'NOMBRE' => 'Ecommerce', 'SECCION' => 'ING',
+      'TIPO' => 'INGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'VENTAS',
+      'ORIGEN_SERIE' => 'COBRANZA_ECOMMERCE', 'ORDEN' => 40, 'ACTIVO' => 1]]
+);
+
+chequear('los cuatro canales de Ventas siguen pudiendo convivir', true, $val['valido']);
+
+/* UNA FILA INACTIVA NO PISA NADA: el corte se mira sobre lo que computa. */
+$inactiva = $filaProv(2, 'PL_OPER', 'PAGOS_OPERATIVOS');
+$inactiva['ACTIVO'] = 0;
+
+$val = CashflowEstructura::validar($seccionEgr, [$filaProv(1, 'PL_CRON', 'PAGOS'), $inactiva]);
+
+chequear('una fila inhabilitada no cuenta como solape', true, $val['valido']);
+
 /* ================================================================
    CONTRA LA BASE
    ================================================================ */
@@ -810,6 +1193,37 @@ foreach ($items as $i) {
 
 chequear('ningun pendiente es negativo', 0, $negativos);
 chequear('toda forma de pago normalizada esta declarada', true, $formaOk);
+
+/* EL FILTRO SALE DEL MAESTRO Y SOLO DEL MAESTRO. Con datos reales: para toda
+   fila, CRONOGRAMA tiene que ser exactamente esDelCronograma() de la forma del
+   maestro, tenga o no fecha de pago cargada. Si alguna difiriera, seria una
+   fila que entro o salio del cashflow por como se registro un pago y no por
+   como se le paga al proveedor. */
+$discrepan = 0;
+$sinFormaMaestro = 0;
+
+foreach ($items as $i) {
+    if (!array_key_exists('FORMA_PAGO_MAESTRO', $i)) { $sinFormaMaestro++; continue; }
+
+    if ($i['CRONOGRAMA']
+        !== ProveedoresCategorias::esDelCronograma($i['FORMA_PAGO_MAESTRO'])) {
+        $discrepan++;
+    }
+}
+
+chequear('toda fila trae la forma del maestro aparte', 0, $sinFormaMaestro);
+chequear('y el filtro sale de esa y no de la del pago', 0, $discrepan);
+
+/* CRE_DEB viajaba en cada fila y no lo consumia nadie, ni el JS ni el provider.
+   Y ademas no distinguia nada: es una funcion de T_COMP via CPA21, y T_COMP ya
+   es una columna de la grilla. */
+$conCreDeb = 0;
+
+foreach ($items as $i) {
+    if (array_key_exists('CRE_DEB', $i)) { $conCreDeb++; }
+}
+
+chequear('CRE_DEB ya no viaja en el payload', 0, $conCreDeb);
 
 // Los del exterior entran al tablero por COMEX_PROV_EXT: incluirlos aca los
 // contaria dos veces.
@@ -866,6 +1280,29 @@ chequear('cronograma + fuera = universo',
 chequear('operativos + excluidos = universo',
     $suma($series['PAGOS_TODO']),
     $suma($series['PAGOS_OPERATIVOS']) + $suma($series['PAGOS_EXCLUIDOS']));
+
+/* LA TERCERA SERIE NO ES UNA PARTICION: es la interseccion de una mitad de cada
+   una, asi que no cierra contra nada. Lo que si tiene que valer siempre es que
+   no sea mayor que ninguna de las dos mitades que la contienen -si lo fuera,
+   estaria contando algo que no pertenece a ninguna de las dos-. */
+chequear('los dos criterios juntos no superan al cronograma', true,
+    $suma($series['PAGOS_CRONO_OPERATIVOS']) <= $suma($series['PAGOS']));
+chequear('ni a los operativos', true,
+    $suma($series['PAGOS_CRONO_OPERATIVOS']) <= $suma($series['PAGOS_OPERATIVOS']));
+
+/* Y lo que le saca al cronograma es exactamente lo excluido que se paga por
+   cronograma, que es el importe que hasta ahora no se podia sacar de la fila. */
+$excluidoDelCronograma = 0.0;
+
+foreach ($items as $i) {
+    if (!empty($i['CRONOGRAMA']) && !empty($i['EXCLUIDO'])
+        && in_array('PAGOS_CRONO_OPERATIVOS', ProveedoresProvider::seriesDeItem($i), true)) {
+        $excluidoDelCronograma++;   // no deberia entrar ninguno
+    }
+}
+
+chequear('ningun excluido se cuela en la serie de los dos criterios',
+    0.0, $excluidoDelCronograma);
 
 // La fila del tablero trae MENOS que el universo: esa es la decision de negocio.
 chequear('el cronograma no puede ser mayor que el universo', true,

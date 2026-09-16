@@ -20,17 +20,21 @@ require_once __DIR__ . '/../Proveedores.php';
  * cuesta diez consultas.
  *
  * LAS SERIES FIJAS son las que permiten armar el cuadro sin depender del
- * maestro:
+ * maestro. OJO CON LA PRIMERA: PAGOS *NO* TRAE TODO.
  *
- *   PAGOS              todo, sin distinguir
- *   PAGOS_OPERATIVOS   todo MENOS los proveedores marcados "Excluidos"
- *   PAGOS_EXCLUIDOS    solo los "Excluidos" (socios y movimientos que no son
- *                      deuda comercial)
- *   PAGOS_SIN_RUBRO    los que no estan en el maestro
+ *   PAGOS_TODO             el universo: todas las formas, todos los rubros
+ *   PAGOS                  solo el cronograma: echeq, transferencia, y lo que
+ *                          no tiene forma conocida. Es la que usa la fila
+ *   PAGOS_FUERA_CRONOGRAMA lo que el criterio del cronograma deja afuera
+ *   PAGOS_OPERATIVOS       todo MENOS los proveedores marcados "Excluidos"
+ *   PAGOS_EXCLUIDOS        solo los "Excluidos" (socios y movimientos que no
+ *                          son deuda comercial)
+ *   PAGOS_CRONO_OPERATIVOS los dos criterios a la vez
+ *   PAGOS_SIN_RUBRO        los que no estan en el maestro
  *
- * Con esas cuatro, sacar los Excluidos del tablero es apuntar la fila a
- * PAGOS_OPERATIVOS desde Parametros: configuracion, no codigo. Que es
- * exactamente lo que se pidio.
+ * Con ellas, sacar los Excluidos del tablero SIN perder el criterio del
+ * cronograma es apuntar la fila a PAGOS_CRONO_OPERATIVOS desde Parametros:
+ * configuracion, no codigo.
  *
  * LAS SERIES POR RUBRO son dinamicas: hay una por cada rubro economico que
  * exista en el maestro. No se pueden escribir en el registro porque son DATOS
@@ -47,9 +51,9 @@ require_once __DIR__ . '/../Proveedores.php';
  *
  * LO VENCIDO SIN FECHA CARGADA SE INFORMA, NO SE ESCONDE
  * ------------------------------------------------------
- * Hoy son 366 vencimientos por mas de 839 millones. Entran al eje en su primer
- * dia -no hay otro lugar donde ponerlos- y el aviso dice cuanto es, para que
- * nadie lea esa columna como "hoy se paga todo esto". Ver
+ * Al 16/09/2026 son 378 vencimientos por $965 millones. Entran al eje en su
+ * primer dia -no hay otro lugar donde ponerlos- y el aviso dice cuanto es, para
+ * que nadie lea esa columna como "hoy se paga todo esto". Ver
  * Proveedores::avisosPendientes().
  */
 class ProveedoresProvider extends CashflowProvider {
@@ -59,8 +63,9 @@ class ProveedoresProvider extends CashflowProvider {
      *
      * Trae unicamente lo que se gestiona desde el cronograma de pagos: echeq,
      * transferencia, y lo que no tiene forma conocida. Es una decision de
-     * negocio, no un detalle: hoy deja fuera del cashflow $141 millones -debitos
-     * automaticos, caja, tarjeta corporativa- que igual salen de la caja.
+     * negocio, no un detalle: deja fuera del cashflow los debitos automaticos,
+     * la caja y la tarjeta corporativa, que igual salen de la caja. Al
+     * 16/09/2026 son $51,8 millones en 257 vencimientos.
      *
      * POR ESO EL PROVEEDOR AVISA cuanto quedo afuera cada vez. Si esa plata
      * tiene que entrar al tablero por otra fila, todavia no existe; mientras
@@ -80,6 +85,21 @@ class ProveedoresProvider extends CashflowProvider {
     const SERIE_OPERATIVOS = 'PAGOS_OPERATIVOS';
     const SERIE_EXCLUIDOS = 'PAGOS_EXCLUIDOS';
     const SERIE_SIN_RUBRO = 'PAGOS_SIN_RUBRO';
+
+    /**
+     * LOS DOS CRITERIOS A LA VEZ: cronograma Y sin los rubros Excluidos.
+     *
+     * Existe porque las dos particiones son INDEPENDIENTES y hasta ahora no
+     * habia forma de aplicar las dos. La fila del tablero podia traer el
+     * cronograma -y entonces se llevaba tambien a los socios que cobran por
+     * transferencia- o podia traer los operativos -y entonces se llevaba
+     * tambien los debitos automaticos, que no se planifican-. Ninguna de las
+     * dos es lo que la fila quiere decir.
+     *
+     * No es teorico: hoy la serie PAGOS incluye $109,6 millones de un solo
+     * proveedor con rubro Excluidos que cobra por TRANSFERENCIA.
+     */
+    const SERIE_CRONO_OPERATIVOS = 'PAGOS_CRONO_OPERATIVOS';
 
     protected function calcular($h) {
         if ($this->codigo() !== 'PROV_LOCALES') {
@@ -118,9 +138,10 @@ class ProveedoresProvider extends CashflowProvider {
      * automatico, una compra con tarjeta corporativa o un pago por caja NO se
      * proyectan en el cashflow, aunque esa plata igual salga.
      *
-     * Hoy son unos $141 millones. Si tienen que entrar por otra fila, esa fila
-     * todavia no existe; mientras tanto este aviso es lo unico que impide que
-     * la plata desaparezca del tablero sin que nadie lo note.
+     * Al 16/09/2026 son $51,8 millones, todos DEBITO. Si tienen que entrar por
+     * otra fila, esa fila todavia no existe; mientras tanto este aviso es lo
+     * unico que impide que la plata desaparezca del tablero sin que nadie lo
+     * note.
      *
      * Se desglosa por forma de pago porque cada una se resuelve distinto: un
      * debito automatico podria entrar por Financiero, y una caja por Haberes o
@@ -137,7 +158,10 @@ class ProveedoresProvider extends CashflowProvider {
                 continue;
             }
 
-            $forma = ($item['FORMA_PAGO'] === null) ? 'sin forma' : $item['FORMA_PAGO'];
+            /* La forma DEL MAESTRO, que es la que decide. Ver el comentario de
+               CRONOGRAMA en Proveedores::getPendientes(). */
+            $forma = ($item['FORMA_PAGO_MAESTRO'] === null)
+                ? 'sin forma' : $item['FORMA_PAGO_MAESTRO'];
             $importe = floatval($item['IMPORTE_PENDIENTE']);
 
             $porForma[$forma] = (isset($porForma[$forma]) ? $porForma[$forma] : 0) + $importe;
@@ -175,6 +199,7 @@ class ProveedoresProvider extends CashflowProvider {
             self::SERIE_FUERA => $this->serieVacia($h),
             self::SERIE_OPERATIVOS => $this->serieVacia($h),
             self::SERIE_EXCLUIDOS => $this->serieVacia($h),
+            self::SERIE_CRONO_OPERATIVOS => $this->serieVacia($h),
             self::SERIE_SIN_RUBRO => $this->serieVacia($h)
         ];
 
@@ -200,28 +225,14 @@ class ProveedoresProvider extends CashflowProvider {
                 continue;
             }
 
-            // PAGOS_TODO es el universo; PAGOS trae solo el cronograma. Las
-            // aperturas por rubro y por excluidos parten PAGOS_TODO, no PAGOS:
-            // describen QUE es cada deuda, no como se paga.
-            $destinos = [self::SERIE_TODO];
+            $destinos = self::seriesDeItem($item);
 
-            $destinos[] = empty($item['CRONOGRAMA']) ? self::SERIE_FUERA : self::SERIE_TOTAL;
-            $destinos[] = empty($item['EXCLUIDO']) ? self::SERIE_OPERATIVOS : self::SERIE_EXCLUIDOS;
-
-            if (empty($item['EN_MAESTRO'])) {
-                $destinos[] = self::SERIE_SIN_RUBRO;
-            }
-
-            // La serie del rubro. Se crea al vuelo: cuales existen depende de lo
-            // que haya en el maestro, que es un dato.
-            $rubro = $item['SERIE'];
-
-            if ($rubro !== ProveedoresCategorias::SERIE_SIN_RUBRO) {
-                if (!isset($series[$rubro])) {
-                    $series[$rubro] = $this->serieVacia($h);
+            foreach ($destinos as $destino) {
+                // La serie del rubro se crea al vuelo: cuales existen depende
+                // de lo que haya en el maestro, que es un dato.
+                if (!isset($series[$destino])) {
+                    $series[$destino] = $this->serieVacia($h);
                 }
-
-                $destinos[] = $rubro;
             }
 
             foreach ($destinos as $destino) {
@@ -241,6 +252,58 @@ class ProveedoresProvider extends CashflowProvider {
         }
 
         return $series;
+    }
+
+    /**
+     * A que series va un vencimiento. ES LA REGLA DE REPARTO, escrita una sola
+     * vez y sin tocar la base, que es lo que permite verificar los cuatro
+     * cuadrantes sin datos reales.
+     *
+     * DOS PARTICIONES INDEPENDIENTES, y una tercera serie que las cruza:
+     *
+     *   por COMO se paga   PAGOS            + PAGOS_FUERA_CRONOGRAMA
+     *   por QUE rubro es   PAGOS_OPERATIVOS + PAGOS_EXCLUIDOS
+     *   las dos juntas     PAGOS_CRONO_OPERATIVOS
+     *
+     * Las dos particiones cierran cada una contra PAGOS_TODO. La tercera NO es
+     * una particion: es la interseccion de una mitad de cada una, asi que se
+     * solapa con las dos y el validador tiene que saberlo. Ver
+     * CashflowRegistry, 'componentes' y 'solapan'.
+     *
+     * PAGOS_SIN_RUBRO tampoco parte nada: cruza las cuatro.
+     *
+     * Estatica y pura.
+     *
+     * @param array $item Una fila de Proveedores::getPendientes()
+     * @return array Codigos de serie
+     */
+    public static function seriesDeItem($item) {
+        $cronograma = !empty($item['CRONOGRAMA']);
+        $excluido = !empty($item['EXCLUIDO']);
+
+        // PAGOS_TODO es el universo; PAGOS trae solo el cronograma. Las
+        // aperturas por rubro y por excluidos parten PAGOS_TODO, no PAGOS:
+        // describen QUE es cada deuda, no como se paga.
+        $destinos = [self::SERIE_TODO];
+
+        $destinos[] = $cronograma ? self::SERIE_TOTAL : self::SERIE_FUERA;
+        $destinos[] = $excluido ? self::SERIE_EXCLUIDOS : self::SERIE_OPERATIVOS;
+
+        if ($cronograma && !$excluido) {
+            $destinos[] = self::SERIE_CRONO_OPERATIVOS;
+        }
+
+        if (empty($item['EN_MAESTRO'])) {
+            $destinos[] = self::SERIE_SIN_RUBRO;
+        }
+
+        $rubro = isset($item['SERIE']) ? $item['SERIE'] : ProveedoresCategorias::SERIE_SIN_RUBRO;
+
+        if ($rubro !== ProveedoresCategorias::SERIE_SIN_RUBRO) {
+            $destinos[] = $rubro;
+        }
+
+        return $destinos;
     }
 
     /** Una serie vacia con los escalares en su valor por defecto */

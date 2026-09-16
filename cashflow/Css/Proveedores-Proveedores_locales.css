@@ -88,6 +88,13 @@
     cursor: help;
 }
 
+/* El pago se registró por una vía distinta de la habitual del proveedor. NO es
+   un error —el filtro mira la del maestro, no ésta— así que se marca discreto:
+   es un dato para notar, no algo que haya que arreglar ya. */
+.tab-proveedores_locales .prov-forma-distinta {
+    cursor: help;
+}
+
 /* ----------------------------------------------------------------------------
    LA CELDA EDITABLE
 
