@@ -304,13 +304,6 @@ class Proveedores {
                    es el original DE ESE valor y no de otro. */
                 'FORMA_PAGO' => $forma['normalizado'],
                 'FORMA_PAGO_ORIG' => $forma['original'],
-
-                /* El maestro trae la forma escrita pero sin normalizar: se
-                   importo antes de que esa forma estuviera declarada en
-                   FORMAS_PAGO. NO es un typo de la planilla -reimportar el
-                   maestro lo arregla solo- y decirle al usuario que "no esta en
-                   la lista de validas" seria mentirle, porque hoy si esta. */
-                'FORMA_DESACTUALIZADA' => $forma['desactualizada'],
                 'OBSERVACION' => ($pago === null) ? null : $pago['OBSERVACION'],
                 'ESTADO_PAGO' => ($pago === null) ? null : $pago['ESTADO'],
 
@@ -358,17 +351,18 @@ class Proveedores {
      * -normalizado del pago, original del maestro- mostraria el original de un
      * valor que no es el que se esta mostrando.
      *
-     * LA TERCERA COSA QUE DEVUELVE es si el original QUEDARIA normalizado con
-     * la lista de hoy. Cuando eso pasa, el valor no es un typo de la planilla:
-     * es un maestro importado antes de que esa forma estuviera declarada en
-     * FORMAS_PAGO, y lo arregla reimportarlo. Distinguirlo importa porque el
-     * mensaje es otro: "no esta en la lista de validas" seria falso.
+     * SI EL NORMALIZADO ES null, EL ORIGINAL ES UN TYPO Y NO OTRA COSA. Antes
+     * habia un segundo caso -una forma valida que habia quedado sin normalizar
+     * porque el maestro se importo antes de que estuviera declarada- y habia
+     * que distinguirlo, porque se arreglaba reimportando y no corrigiendo la
+     * planilla. Ese caso ya no existe: la normalizacion se calcula al leer
+     * contra la lista de hoy. Ver ProveedoresCategorias::mapa().
      *
      * Estatica y pura.
      *
      * @param array $cat Lo que devolvio ProveedoresCategorias::categoria()
      * @param array|null $pago La fila de pago, si hay
-     * @return array ['normalizado', 'original', 'desactualizada']
+     * @return array ['normalizado', 'original']
      */
     public static function formaQueSeMuestra($cat, $pago) {
         $delPago = ($pago !== null && $pago['FORMA_PAGO'] !== null);
@@ -386,17 +380,9 @@ class Proveedores {
             $original = $pago['FORMA_PAGO_ORIG'];
         }
 
-        $desactualizada = false;
-
-        if ($normalizado === null && $original !== null && trim((string) $original) !== '') {
-            $desactualizada = (ProveedoresCategorias::normalizarFormaPago($original)['normalizado']
-                !== null);
-        }
-
         return [
             'normalizado' => $normalizado,
-            'original' => $original,
-            'desactualizada' => $desactualizada
+            'original' => $original
         ];
     }
 
@@ -656,7 +642,13 @@ class Proveedores {
                 'T_COMP' => Planilla::codigo($row['T_COMP']),
                 'N_COMP' => Planilla::codigo($row['N_COMP']),
                 'FECHA_PAGO' => Horizonte::normalizarFecha($row['FECHA_PAGO']),
-                'FORMA_PAGO' => $row['FORMA_PAGO'],
+
+                /* Normalizada contra la lista DE HOY y no contra la del dia que
+                   se importo. Misma regla que el maestro y por el mismo motivo:
+                   es un valor derivado del original, que esta guardado al lado.
+                   Ver ProveedoresCategorias::mapa(). */
+                'FORMA_PAGO' => ProveedoresCategorias::formaVigente(
+                    $row['FORMA_PAGO_ORIG'], $row['FORMA_PAGO']),
                 'FORMA_PAGO_ORIG' => $row['FORMA_PAGO_ORIG'],
                 'OBSERVACION' => $row['OBSERVACION'],
                 'ESTADO' => $row['ESTADO'],

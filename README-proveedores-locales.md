@@ -249,7 +249,26 @@ Las seis reales, contadas sobre el maestro importado:
 | TRANSFERENCIA | 259 | DEBITO | 32 |
 | ECHEQ | 243 | MERCADO PAGO | 9 |
 
-Agregar una forma es agregar una entrada, **y después reimportar el maestro**: las filas ya cargadas no se renormalizan solas.
+Agregar una forma es **agregar una entrada, y nada más**: las filas ya cargadas se renormalizan solas en el próximo pedido. Ver abajo.
+
+### La forma normalizada se deriva al leer, no se congela al importar
+
+`FORMA_PAGO` es un valor **derivado**: sale de pasar `FORMA_PAGO_ORIG` —lo que decía la celda— por `FORMAS_PAGO`, que vive en el código. Calcularlo al importar lo congelaba contra la lista de ese día, así que agregar una forma nueva no arreglaba ninguna de las filas ya cargadas.
+
+**Y reimportar no es recalcular.** Hace el diff completo: necesita tener a mano el Excel vigente —si no es el mismo que se importó, aplica de paso cambios que nadie pidió—, propone bajas, y cada `CAMBIO` escribe una baja más un alta en el historial.
+
+> Obligaba a correr una operación de **datos**, con efectos colaterales, para arreglar la consecuencia de un cambio de **código**. Eso es lo que estaba mal, no el trabajo de reimportar.
+
+Se puede derivar al leer porque **el original está guardado en todas las filas**. Verificado sobre la base: 0 de 1.173 en el maestro y 0 de 15 en pagos tienen la normalizada sin su original. Y la normalización es una función pura de él.
+
+Cuesta **7,23 ms por pedido** sobre las 1.173 filas del maestro, y el mapa se cachea, así que es una vez.
+
+**La columna se sigue escribiendo igual**, y no es redundancia: guarda *qué decidió el sistema en esa importación*, que es lo que muestra el historial del proveedor. Lo que cambió es por dónde se **lee**.
+
+Dos garantías, las dos con prueba:
+
+- **Recalcular nunca borra un dato.** Sólo puede reconocer uno que antes no se reconocía. Una fila con la normalizada pero sin original —hoy no hay ninguna, pero una corrección a mano sobre la base podría dejarla así— conserva lo que tenga guardado.
+- **El diff no se ensucia.** Compara contra `mapa()`, que es justamente lo que se renormaliza, así que reimportar la misma planilla sigue dando `SIN_CAMBIOS` y no 639 cambios falsos.
 
 ### Sólo el código es obligatorio
 
@@ -399,20 +418,13 @@ El criterio: entra lo que se paga **decidiendo cuándo**. Una transferencia o un
 
 **Lo que no se sabe, entra y se marca.** Una forma de pago en `null` —porque el proveedor no está en el maestro, o porque lo que trajo la planilla no se reconoció— no es lo mismo que una forma que quedó afuera del criterio: es un dato que falta. Esconder deuda por un dato que falta es la peor razón para esconderla, y además garantiza que nadie lo complete nunca, porque deja de verse. Esas filas se dibujan con la marca *sin forma*, así que no se confunden con un echeq confirmado.
 
-### Una forma sin normalizar no es lo mismo que un typo
+### Una forma en naranja es un typo, y no hay segundo caso
 
-Las dos llegan con el normalizado en `null` y las dos se dibujan en naranja con su original, pero **se arreglan distinto**, así que el mensaje las distingue:
+Una forma que llega con el normalizado en `null` se dibuja en naranja con su original: es un typo de la planilla —`eqheck`— y se arregla allá.
 
-| Lo que pasó | Qué hacer |
-| --- | --- |
-| `eqheck` — no matchea contra ninguna forma declarada | Corregir **la planilla** |
-| `TARJETA CORP` — sí es válida hoy, pero el maestro se importó antes de que estuviera en `FORMAS_PAGO` | **Reimportar el maestro** |
+**Hubo un segundo caso y ya no existe:** una forma perfectamente válida que había quedado sin normalizar porque el maestro se importó antes de que estuviera declarada en `FORMAS_PAGO`. Eran 133 vencimientos por $88.970.448,93 —129 de `TARJETA CORP` y 4 de `CAJA`— que entraban al filtro como si no se supiera cómo se pagan, y había que distinguirlos con un mensaje aparte porque se arreglaban reimportando y no corrigiendo nada. Derivar la normalización al leer eliminó la categoría entera.
 
-Decirle *"no está en la lista de válidas"* al segundo caso sería falso, y además manda a corregir una planilla que está bien.
-
-Hoy el segundo caso son **129 vencimientos por $88.250.698,73** (`TARJETA CORP`) más 4 por $719.750,20 (`CAJA`), y entran al filtro por eso. Reimportar el maestro los saca solos, sin tocar código.
-
-> Esto estuvo invisible un tiempo: `categoria()` no devolvía el `FORMA_PAGO_ORIG` del maestro, así que esas 133 filas se dibujaban *"sin forma"* en gris y la marca naranja —que existe exactamente para este caso— no se ejecutaba nunca.
+> Esto estuvo invisible un tiempo por otro motivo: `categoria()` no devolvía el `FORMA_PAGO_ORIG` del maestro, así que esas 133 filas se dibujaban *"sin forma"* en gris y la marca naranja —que existe exactamente para este caso— no se ejecutaba nunca.
 
 ### Hay dos formas de pago por fila, y sólo una decide
 
@@ -447,11 +459,20 @@ Por eso el proveedor **avisa cuánto quedó afuera, desglosado por forma**, en c
 
 Meterla es configuración, no código: `PAGOS` y `PAGOS_FUERA_CRONOGRAMA` son las dos mitades del universo y **pueden convivir** en dos filas distintas —el validador lo permite justamente porque no se pisan—. Lo que no puede es `PAGOS_TODO` junto a cualquiera de sus partes.
 
-> **Ojo con un número que va a cambiar, y es el pendiente más importante del módulo:** la fila del tablero trae $1.363.474.968,90 y deja afuera sólo $51,8 M. Eso es porque los `CAJA`, `TARJETA CORP` y `MERCADO PAGO` todavía están en la base **sin normalizar** —se importaron con la lista vieja: 639 de los 1.173 proveedores del maestro, y no hay ni uno con otra causa—. Entran al filtro como forma desconocida.
->
-> **Al reimportar el maestro con la lista corregida pasan a quedar afuera $88.970.448,93 en 133 vencimientos** —129 de `TARJETA CORP` y 4 de `CAJA`— y la fila baja a ~$1.274 M. Es un cambio de datos, no de código: la lista ya está corregida en `FORMAS_PAGO`.
->
-> Después de eso, lo único que sigue entrando por *"no se sabe cómo se paga"* son **$6.297.561,76 en 21 vencimientos** de proveedores que no están en el maestro — que es exactamente el caso para el que la regla existe.
+Lo que entra al filtro, abierto por qué entra:
+
+| | Importe | Venc. |
+| --- | ---: | ---: |
+| `ECHEQ` | 176.159.353,50 | 95 |
+| `TRANSFERENCIA` | 1.092.047.604,71 | 38 |
+| sin forma — **el proveedor no está en el maestro** | 6.297.561,76 | 21 |
+| *(afuera)* `DEBITO` | *51.804.546,29* | *257* |
+| *(afuera)* `TARJETA CORP` | *88.250.698,73* | *129* |
+| *(afuera)* `CAJA` | *719.750,20* | *4* |
+
+> Los `TARJETA CORP` y `CAJA` entraban al filtro hasta que la normalización pasó a derivarse al leer: eran **$88.970.448,93 en 133 vencimientos** dentro de la fila del tablero, porque el maestro se había importado con la lista vieja de `FORMAS_PAGO`. Salieron solos, sin reimportar y sin tocar un dato.
+
+Lo único que sigue entrando por *"no se sabe cómo se paga"* son **$6.297.561,76 en 21 vencimientos** de proveedores que no están en el maestro — que es exactamente el caso para el que la regla existe.
 
 ---
 
@@ -518,7 +539,7 @@ php tests/run.php proveedores
 
 Con base, además: que **ningún pendiente sea negativo** —el error que tenía la consulta antes de la tabla de signos—, que no entre ningún proveedor del exterior, que el total sea exactamente operativos + excluidos, y que **el registro declare exactamente las series que el proveedor devuelve**.
 
-*Suite completa: 2074 OK, 0 fallas (18 archivos).*
+*Suite completa: 2078 OK, 0 fallas (18 archivos).*
 
 ---
 
@@ -545,6 +566,6 @@ Modificados: `Class/CashflowRegistry.php` (`PROV_LOCALES` disponible + `series_e
 
 ## Pendientes conocidos
 
-- **El maestro está cargado pero con la lista vieja de formas de pago.** 639 de sus 1.173 proveedores tienen la forma sin normalizar —`CAJA`, `TARJETA CORP` y `MERCADO PAGO`, las tres que faltaban—, y por eso $88.970.448,93 en 133 vencimientos entran al filtro y a la fila del tablero como si no se supiera cómo se pagan. **Reimportarlo es lo primero que hay que hacer**, y no necesita ningún cambio de código.
+- **639 de los 1.173 proveedores del maestro tienen la forma de pago sin normalizar en la columna** —`CAJA`, `TARJETA CORP` y `MERCADO PAGO`, las tres que faltaban en la primera versión de `FORMAS_PAGO`—. **Ya no afecta a nada**: la normalización se deriva al leer, así que esas filas se clasifican bien igual. La columna se acomoda sola la próxima vez que se reimporte el maestro por cualquier otro motivo; no hace falta hacerlo por esto.
 - **ARCA/Aduana está cargada con dos códigos** (`OGADUN` $235,4 M y `OGADUA` $131,8 M, mismo nombre). No se unifican en el resolutor: la clave es el código de Tango y arreglar el maestro no le toca a este módulo. Si los dos llevan el mismo rubro, el tablero los junta solo. El control de faltantes los muestra por separado, que es lo que va a revelar si la planilla trae uno solo.
 - **Las series por rubro se resuelven contra el maestro en cada pedido.** Con 26 rubros y un cache por request alcanza; si algún día el maestro creciera mucho, el lugar para mirar es `CashflowRegistry::resolverExtra()`.

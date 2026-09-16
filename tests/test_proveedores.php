@@ -314,28 +314,13 @@ seccion('la forma que se muestra sale de la misma fuente que su original');
 
 /* EL BUG QUE ESTO FIJA: categoria() no devolvia el FORMA_PAGO_ORIG del maestro,
    asi que un proveedor cuyo maestro dice TARJETA CORP se dibujaba "sin forma"
-   en gris. Hoy son 129 vencimientos por $88,25 M: el maestro se importo con la
-   lista vieja de FORMAS_PAGO y quedaron con el normalizado en null. La rama
-   naranja del JS -que existe para exactamente este caso- no se ejecutaba nunca. */
-$catCaja = ['forma_pago' => null, 'forma_pago_orig' => 'TARJETA CORP'];
-
-$f = Proveedores::formaQueSeMuestra($catCaja, null);
-
-chequear('sin pago cargado se muestra lo que dice el maestro',
-    'TARJETA CORP', $f['original']);
-chequear('sin normalizar, que es como esta guardado', null, $f['normalizado']);
-
-/* Y SE DISTINGUE DEL TYPO. 'TARJETA CORP' hoy SI esta en FORMAS_PAGO: lo que
-   pasa es que el maestro se importo antes de que estuviera declarada. Decirle
-   al usuario que no es una forma valida seria mentirle, y ademas mandarlo a
-   corregir la planilla cuando lo que hay que hacer es reimportar el maestro. */
-chequear('y se sabe que es un maestro viejo, no un typo', true, $f['desactualizada']);
-
+   en gris. La rama naranja del JS -que existe para exactamente este caso- no se
+   ejecutaba nunca. */
 $f = Proveedores::formaQueSeMuestra(
     ['forma_pago' => null, 'forma_pago_orig' => 'eqheck'], null);
 
-chequear('un typo de verdad no se confunde con eso', false, $f['desactualizada']);
-chequear('pero se muestra igual', 'eqheck', $f['original']);
+chequear('sin pago cargado se muestra lo que dice el maestro', 'eqheck', $f['original']);
+chequear('sin normalizar, porque no matchea contra nada', null, $f['normalizado']);
 
 // El pago registrado manda sobre el maestro EN LA COLUMNA -es un hecho sobre
 // este comprobante- pero no sobre el filtro, que ya se verifico arriba.
@@ -371,7 +356,62 @@ $f = Proveedores::formaQueSeMuestra(
     ['forma_pago' => null, 'forma_pago_orig' => null], null);
 
 chequear('sin maestro y sin pago no hay nada que mostrar', null, $f['original']);
-chequear('y eso no es un maestro viejo', false, $f['desactualizada']);
+
+seccion('la forma de pago se normaliza al LEER, no al importar');
+
+/* EL PROBLEMA QUE ESTO RESUELVE: FORMA_PAGO es un valor DERIVADO -sale de pasar
+   el original por FORMAS_PAGO, que vive en el codigo-. Calcularlo al importar lo
+   congelaba contra la lista de ese dia: agregar una forma nueva no arreglaba
+   ninguna de las filas ya cargadas y obligaba a REIMPORTAR el maestro entero.
+
+   Y reimportar no es recalcular: hace el diff completo, necesita el Excel
+   vigente -si no es el mismo, aplica cambios que nadie pidio-, propone bajas y
+   escribe historial. Era correr una operacion de DATOS, con efectos
+   colaterales, para arreglar la consecuencia de un cambio de CODIGO. */
+chequear('una forma que hoy esta declarada se reconoce aunque se haya guardado en null',
+    'TARJETA CORP', ProveedoresCategorias::formaVigente('TARJETA CORP', null));
+chequear('y en minuscula tambien', 'CAJA', ProveedoresCategorias::formaVigente('caja', null));
+
+// Lo que sigue sin matchear, sigue sin matchear: recalcular no inventa nada.
+chequear('un typo sigue sin normalizar', null,
+    ProveedoresCategorias::formaVigente('eqheck', null));
+
+/* RECALCULAR NUNCA PUEDE BORRAR UN DATO. Si una fila tuviera la normalizada sin
+   su original -hoy no hay ninguna, pero una correccion a mano sobre la base
+   podria dejarla asi- se respeta lo que este guardado en lugar de perderlo. */
+chequear('sin original se respeta lo guardado', 'ECHEQ',
+    ProveedoresCategorias::formaVigente(null, 'ECHEQ'));
+chequear('y un original vacio es lo mismo que no tenerlo', 'ECHEQ',
+    ProveedoresCategorias::formaVigente('   ', 'ECHEQ'));
+chequear('sin ninguna de las dos, null', null,
+    ProveedoresCategorias::formaVigente(null, null));
+
+seccion('renormalizar al leer no ensucia el diff de la importacion');
+
+/* EL RIESGO DEL CAMBIO: si las lecturas renormalizan y el diff comparara contra
+   la columna cruda, el proximo preview mostraria como CAMBIO las 639 filas que
+   en realidad ya quedaron bien. No pasa porque el diff compara contra mapa(),
+   que es justamente lo que se renormaliza. */
+$existenteViejo = ['MTDODI' => [
+    'COD_PROVEE' => 'MTDODI', 'NOMBRE' => 'N MTDODI',
+    'RUBRO_ECONOMICO' => 'Mercaderia', 'RUBRO' => null, 'CENTRO_COSTOS' => null,
+    // Como lo devuelve mapa() para una fila importada con la lista vieja:
+    // guardada en null, pero reconocida al leer.
+    'FORMA_PAGO' => ProveedoresCategorias::formaVigente('TARJETA CORP', null),
+    'FORMA_PAGO_ORIG' => 'TARJETA CORP',
+    'PLAZO_PAGO' => '30 DIAS', 'CRITERIO_DISTRIB' => null
+]];
+
+$c = ProveedoresCategorias::compararImportacion([[
+    'linea' => 2, 'cod_provee' => 'MTDODI', 'nombre' => 'N MTDODI',
+    'rubro_economico' => 'Mercaderia', 'rubro' => '', 'centro_costos' => '',
+    'forma_pago' => 'TARJETA CORP', 'plazo_pago' => '30 DIAS', 'criterio_distrib' => ''
+]], $existenteViejo);
+
+chequear('la misma planilla no propone ningun cambio falso',
+    'SIN_CAMBIOS', $c['filas'][0]['estado']);
+chequear('ni cuenta la fila como forma desconocida', 0,
+    $c['resumen']['forma_desconocida']);
 
 seccion('los indicadores miden lo que la grilla muestra');
 

@@ -529,20 +529,15 @@
         }
 
         // Una forma que no matcheó contra la lista se muestra tal como vino y se
-        // marca. Los dos motivos por los que puede no haber matcheado se
-        // arreglan distinto, así que el mensaje los distingue: un typo se
-        // corrige en la planilla, y un maestro viejo se reimporta.
+        // marca: es un typo de la planilla, y eso se arregla allá. Ya no hay un
+        // segundo caso —una forma válida que quedó sin normalizar porque el
+        // maestro es viejo—: la normalización se calcula al leer, contra la
+        // lista de hoy.
         if (!f.FORMA_PAGO && f.FORMA_PAGO_ORIG) {
-            var titulo = f.FORMA_DESACTUALIZADA
-                ? '"' + f.FORMA_PAGO_ORIG + '" SÍ es una forma válida, pero el maestro se '
-                  + 'importó antes de que estuviera declarada, así que quedó sin normalizar '
-                  + 'y este comprobante entra al filtro como si no se supiera cómo se paga. '
-                  + 'Reimportá el maestro y se acomoda solo.'
-                : '"' + f.FORMA_PAGO_ORIG + '" no está en la lista de formas válidas. '
-                  + 'Corregilo en la planilla.';
-
-            return '<span class="prov-forma-rara" title="' + escapar(titulo) + '">'
-                + escapar(f.FORMA_PAGO_ORIG) + '</span>';
+            return '<span class="prov-forma-rara" title="'
+                + escapar('"' + f.FORMA_PAGO_ORIG + '" no está en la lista de formas válidas. '
+                    + 'Corregilo en la planilla.')
+                + '">' + escapar(f.FORMA_PAGO_ORIG) + '</span>';
         }
 
         // La forma del pago registrado difiere de la habitual del proveedor. No
