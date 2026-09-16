@@ -39,8 +39,13 @@ function payloadCobranzas($items, $summary, $rango = ['desde' => null, 'hasta' =
     if (!$summary) {
         $payload = EjeVista::armar($h, $items, 'Cobro', 'importe_neto');
     } else {
+        /* IMPORTE_FACTURA se suma en el Resumen igual que importe_bruto, pero NO
+           es lo mismo: es una columna INFORMATIVA de Mayoristas -cuanto decia la
+           factura- y lo que se consolida contra el eje sigue siendo
+           'importe_neto', que es el PENDIENTE. Cobranzas FR no la trae y el
+           agrupador la ignora sola cuando no esta. */
         $payload = EjeVista::armarAgrupado($h, $items, 'COD_CLI', 'Cobro', 'importe_neto',
-            1, ['importe_bruto']);
+            1, ['importe_bruto', 'IMPORTE_FACTURA']);
 
         // Las dos marcas del Resumen significan "alguna factura de este
         // cliente", y la interseccion de armarAgrupado() contesta "todas".
@@ -139,10 +144,22 @@ try {
         case 'getCobranzasMay':
             $summary = isset($_GET['type']) && $_GET['type'] === 'deepdive' ? false : true;
 
+            $payloadMay = payloadCobranzas($ingresos->getCobranzasMay(), $summary,
+                rangoEmisionPedido());
+
+            /* Las facturas con pendiente NEGATIVO no estan en el listado -no son
+               plata a cobrar- pero el aviso si tiene que estar: se lee DESPUES
+               de getCobranzasMay(), que es quien lo llena. Va adelante de los
+               del eje por el mismo motivo que los de vencidas: explica algo del
+               dato, y eso se lee antes que lo que quedo fuera del horizonte. */
+            $payloadMay['warnings'] = array_merge(
+                $ingresos->avisosPendienteSinSaldo(),
+                $payloadMay['warnings']
+            );
+
             echo json_encode([
                 'success' => true,
-                'data' => payloadCobranzas($ingresos->getCobranzasMay(), $summary,
-                    rangoEmisionPedido())
+                'data' => $payloadMay
             ], JSON_UNESCAPED_UNICODE);
             break;
 
