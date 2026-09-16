@@ -43,12 +43,18 @@
 
         // Mismo default que Cobranzas FR: COD_CLI y RAZON_SOC, en Resumen y en
         // Detalle Facturas. Ver Js/columnas-fijas.js.
-        // La clave cambió con la columna Tipo, por el mismo motivo que en
-        // Cobranzas FR: los índices guardados se corrieron un lugar.
+        //
+        // LA CLAVE CAMBIA CADA VEZ QUE CAMBIAN LOS ÍNDICES. La selección se
+        // guarda por número de columna, así que agregar una columna en el medio
+        // -acá, Importe Factura- corre todo lo que viene después: quien tuviera
+        // fijada "Importe Neto" se encontraría con "Importe Bruto" fijada y sin
+        // entender por qué. Cambiar la clave hace que esa selección vuelva al
+        // default, que es lo correcto y lo que ya se hizo cuando se fue la
+        // columna Tipo.
         crearColumnasFijas({
             tabla: 'tablaCobranzasMay',
             control: 'colFijasCobMay',
-            clave: 'cobranzas_may.sin_tipo',
+            clave: 'cobranzas_may.con_importe_factura',
             porDefecto: [0, 1]
         });
 
@@ -344,7 +350,16 @@
             html += `<td class="center col-detail">${item.Desc || '0%'}</td>`;
             html += `<td class="center col-detail">${item.Dias || 60}</td>`;
             
-            // Columnas siempre visibles
+            // INFORMATIVA y en gris: es lo que decía la factura al emitirse, no
+            // lo que falta cobrar. Va apagada a propósito para que no se lea
+            // como un importe más del cuadro: los dos que siguen son el
+            // pendiente, y son los que entran al eje y al cashflow.
+            html += `<td class="currency text-muted">${formatCurrency(item.IMPORTE_FACTURA)}</td>`;
+
+            // Columnas siempre visibles. Las dos son el PENDIENTE: mayoristas no
+            // tiene escala de descuento, así que bruto y neto son el mismo
+            // número. El par existe porque es el contrato que comparte con
+            // Cobranzas FR, donde sí difieren.
             html += `<td class="currency">${formatCurrency(item.importe_bruto)}</td>`;
             html += `<td class="currency fw-bold">${formatCurrency(item.importe_neto)}</td>`;
             

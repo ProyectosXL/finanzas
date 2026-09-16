@@ -43,6 +43,14 @@ class IngresosProvider extends CashflowProvider {
 
             $this->avisarVencidas('Cobranzas Mayoristas', $filasMay);
 
+            // Lo mismo que muestra la pestaña: una factura sobre-imputada no
+            // entra al tablero, y no puede salir del cuadro sin que nadie lo
+            // diga. El aviso se lee DESPUES de la consulta, que es quien lo
+            // llena, y getCobranzasMayTotales() ya la corrio.
+            foreach ($ingresos->avisosPendienteSinSaldo() as $aviso) {
+                $this->avisar('Cobranzas Mayoristas: ' . $aviso);
+            }
+
             return [
                 'COBRANZA' => $cobranzaMay
             ];

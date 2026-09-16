@@ -58,6 +58,19 @@ require_once __DIR__ . '/Cotizacion.php';
 class Ingresos {
 
     /**
+     * Facturas de Mayoristas que volvieron con pendiente NEGATIVO en la ultima
+     * lectura de getCobranzasMay(), agregadas.
+     *
+     * Van aparte y no como filas del listado porque no son plata a cobrar -no
+     * se muestran ni entran al eje- pero tampoco se pueden descartar en
+     * silencio: un pendiente negativo significa que contra esa factura se
+     * imputo mas de lo que decia. El aviso lo arma avisosPendienteSinSaldo().
+     *
+     * @var array ['comprobantes' => int, 'importe' => float]
+     */
+    private $sinSaldoMay = ['comprobantes' => 0, 'importe' => 0.0];
+
+    /**
      * Plazo de respaldo cuando un cliente no tiene ni manual, ni calculado, ni
      * DIAS_PP_MAX. Es el ultimo escalon de pppEfectivo().
      */
@@ -1519,21 +1532,91 @@ class Ingresos {
         $diasPlazo = $this->getDiasPlazoMayoristas();
         $fechasManuales = $this->getFechasManuales();
 
+        // Se reinicia en cada llamada: el contador es de ESTA lectura, no
+        // acumulado de todas las que hizo el objeto.
+        $this->sinSaldoMay = ['comprobantes' => 0, 'importe' => 0.0];
+
+        /* EL PENDIENTE REAL, NO EL FACTURADO.
+           Antes esta consulta leia GVA12 a secas y usaba g.IMPORTE como importe
+           a cobrar. Eso es el importe FACTURADO: una factura cobrada a medias
+           entraba al cashflow por su importe completo. Ahora el pendiente sale
+           de cruzar los vencimientos (GVA46) con las imputaciones (GVA07).
+
+           La copia de referencia de esta consulta, con la tabla de signos de
+           IMPU explicada, esta en sql/_referencia_tango_pendientes_cobro.sql.
+
+           SOLO FACTURAS. 'FAC' es intencional y es lo que un lector futuro va a
+           querer preguntar: la consulta vieja traia tambien NDC/NDU/NC/NCC/NCU.
+           Las notas de credito y debito IMPUTADAS ya estan descontadas del
+           pendiente por la subconsulta IMPU, asi que traerlas ademas como filas
+           propias las contaria dos veces. Por eso tampoco quedo nada de la
+           maquinaria de $isNC / $multiplicador que habia aca: con un solo
+           T_COMP no hay signo que dar vuelta.
+
+           GVA14.CLAUSULA = 0 deja afuera a los clientes con clausula de moneda
+           extranjera (el mismo campo que CPA01.CLAUSULA del lado de compras,
+           ver sql/_referencia_tango_pendientes.sql). VERIFICADO CONTRA LA BASE:
+           de los 1.165 clientes 'M%' hay 2 con CLAUSULA = 1 -MAACCU y MAALLI- y
+           NINGUNO de los dos tiene comprobantes pendientes, de ningun tipo y de
+           ninguna fecha. El filtro hoy no deja afuera un solo peso de cartera.
+           Si alguno de esos dos empieza a operar, esta linea lo esconde: es el
+           lugar donde mirar.
+
+           LIKE 'M%' reemplaza a 'MA%'. Verificado: no hay ningun cliente 'M%'
+           que no sea 'MA%', asi que da el mismo conjunto y queda el filtro mas
+           simple.
+
+           EL TOPE DE 360 DIAS de antiguedad de emision es un corte DELIBERADO,
+           no una limitacion tecnica: una factura de hace mas de un anio sin
+           cobrar no es cobranza proyectable. Verificado: hoy deja afuera dos
+           facturas de 2017 por 44.652,05 en total. */
         $sql_fac = "
-            SELECT 
-                g.COD_CLIENT, 
-                c.RAZON_SOCI, 
-                g.T_COMP, 
-                g.N_COMP, 
-                CAST(g.FECHA_EMIS AS DATE) AS FECHA_EMIS, 
-                g.ESTADO, 
-                CAST(g.IMPORTE AS FLOAT) AS IMPORTE
-            FROM GVA12 g
-            INNER JOIN GVA14 c ON g.COD_CLIENT = c.COD_CLIENT
-            WHERE g.COD_CLIENT LIKE 'MA%'
-              AND g.T_COMP IN ('FAC', 'NDC', 'NDU', 'NC', 'NCC', 'NCU')
-              AND g.ESTADO = 'PEN'
-            ORDER BY g.FECHA_EMIS DESC
+            SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+            SET DATEFORMAT DMY
+            SET DATEFIRST 7
+            SET DEADLOCK_PRIORITY -8;
+
+            SELECT
+                GVA12.COD_CLIENT,
+                GVA14.RAZON_SOCI,
+                NULLIF(GVA12.FECHA_EMIS, '18000101') AS FECHA_EMIS,
+                GVA12.T_COMP,
+                GVA12.N_COMP,
+                CAST(GVA12.IMPORTE AS FLOAT)                                        AS IMPORTE_FACTURA,
+                CAST(SUM(GVA46.IMPORTE_VT + ISNULL(IMPU.IMPUTACIONES, 0)) AS FLOAT) AS IMPORTE_PENDIENTE
+            FROM GVA12
+            INNER JOIN GVA46
+                    ON GVA46.T_COMP = GVA12.T_COMP
+                   AND GVA46.N_COMP = GVA12.N_COMP
+            INNER JOIN GVA14
+                    ON GVA14.COD_CLIENT = GVA12.COD_CLIENT
+            OUTER APPLY (
+                SELECT SUM(CASE GVA07.T_COMP_CAN
+                             WHEN 'REC' THEN -GVA07.IMPORT_CAN
+                             ELSE CASE GVA15.TIPO_COMP
+                                    WHEN 'D' THEN  GVA07.IMPORT_CAN
+                                    ELSE          -GVA07.IMPORT_CAN
+                                  END
+                           END) AS IMPUTACIONES
+                FROM GVA07
+                LEFT JOIN GVA15 ON GVA15.IDENT_COMP = GVA07.T_COMP_CAN
+                WHERE GVA07.T_COMP    = GVA12.T_COMP
+                  AND GVA07.N_COMP    = GVA12.N_COMP
+                  AND GVA07.FECHA_VTO = GVA46.FECHA_VTO
+            ) AS IMPU
+            WHERE GVA12.T_COMP      = 'FAC'
+              AND GVA12.FECHA_EMIS >= DATEADD(dd, -360, CAST(GETDATE() AS date))
+              AND GVA12.COD_CLIENT LIKE 'M%'
+              AND GVA14.CLAUSULA    = 0
+              AND GVA12.ESTADO      = 'PEN'
+              AND GVA46.ESTADO_VTO <> 'PAG'
+            GROUP BY
+                GVA12.COD_CLIENT,
+                GVA14.RAZON_SOCI,
+                GVA12.FECHA_EMIS,
+                GVA12.T_COMP,
+                GVA12.N_COMP,
+                GVA12.IMPORTE
         ";
 
         $stmt_fac = sqlsrv_query($cid_central, $sql_fac);
@@ -1550,18 +1633,53 @@ class Ingresos {
             $key = $tComp . '|' . $nComp;
             $codCli = strtoupper(trim($row['COD_CLIENT']));
             $razonSoci = trim($row['RAZON_SOCI']);
-            $importe = floatval($row['IMPORTE']);
 
-            $isNC = (strpos($tComp, 'NC') !== false);
-            $multiplicador = $isNC ? -1 : 1;
-            $importeReal = $importe * $multiplicador;
+            // EL QUE VA AL EJE Y AL CASHFLOW ES EL PENDIENTE. El facturado
+            // viaja como columna informativa y no se suma a nada.
+            $pendiente = floatval($row['IMPORTE_PENDIENTE']);
+            $facturado = floatval($row['IMPORTE_FACTURA']);
+
+            /* SIN SALDO NO ES PLATA A COBRAR. IMPU resta del pendiente todo lo
+               imputado contra la factura -recibos, ordenes de pago, notas de
+               credito-, asi que una factura sobre-imputada vuelve en cero o en
+               negativo aunque siga en ESTADO = 'PEN'. No se muestra ni va al
+               eje: una factura sin saldo no es cobranza.
+
+               PERO NO SE DESCARTA EN SILENCIO cuando es NEGATIVA: eso significa
+               que contra esa factura se imputo MAS de lo que decia, y es un
+               dato que alguien tiene que mirar. Queda un solo aviso agregado
+               con el total, no uno por comprobante: un aviso por fila taparia
+               el resto de la barra. El cero no avisa nada, porque un cero no es
+               plata que falte: es una factura que ya se cobro entera y que
+               Tango todavia no cerro. */
+            if ($pendiente < 0) {
+                $this->sinSaldoMay['comprobantes']++;
+                $this->sinSaldoMay['importe'] += $pendiente;
+            }
+
+            if ($pendiente <= 0) {
+                continue;
+            }
+
+            /* NULLIF(FECHA_EMIS, '18000101') puede devolver NULL: '18000101' es
+               como Tango escribe "sin fecha". Antes esto era un
+               new DateTime($row['FECHA_EMIS']) a secas, que con null no lanza:
+               devuelve la fecha de HOY, y la factura se proyectaria a hoy + el
+               plazo como si se hubiera emitido recien. Sin fecha de emision no
+               hay nada de donde proyectar, asi que la fila se saltea. */
+            if ($row['FECHA_EMIS'] === null || $row['FECHA_EMIS'] === '') {
+                continue;
+            }
 
             $fEmisObj = $row['FECHA_EMIS'] instanceof DateTime ? $row['FECHA_EMIS'] : new DateTime($row['FECHA_EMIS']);
             $fEmisStr = $fEmisObj->format('Y-m-d');
 
-            // Fecha de cobro: manda la manual; si no hay, F. Emis + días de
-            // plazo. Es la MISMA jerarquía que Cobranzas FR y sale del mismo
-            // método: ver resolverFechaCobro().
+            /* LA FECHA DE COBRO NO CAMBIA DE REGLA: sigue siendo FECHA_EMIS +
+               los dias de 'cobranzas_may_dias_vto', con la manual mandando por
+               encima. NO se usa GVA46.FECHA_VTO aunque la consulta ahora la
+               toque: el GROUP BY junta los vencimientos y devuelve UNA fila por
+               comprobante, asi que no hay una sola fecha de vencimiento que
+               nombrar. Ver resolverFechaCobro(). */
             $manual = isset($fechasManuales[$key]) ? $fechasManuales[$key]['fecha'] : null;
             $cobro = self::resolverFechaCobro($fEmisStr, $diasPlazo, $manual);
 
@@ -1591,8 +1709,16 @@ class Ingresos {
                 // plazo es otro, y mostrar 60 al lado de una fecha cargada a
                 // mano se contradiría a sí mismo.
                 'Dias' => $cobro['dias'],
-                'importe_bruto' => round($importeReal, 2),
-                'importe_neto' => round($importeReal, 2),
+                // Los dos importes son el PENDIENTE. Mayoristas no tiene escala
+                // de descuento, asi que bruto y neto son el mismo numero; el
+                // par existe porque es el contrato que consume
+                // payloadCobranzas(), compartido con Cobranzas FR.
+                'importe_bruto' => round($pendiente, 2),
+                'importe_neto' => round($pendiente, 2),
+                // INFORMATIVO. Es el importe con el que se emitio la factura, y
+                // esta para poder leer cuanto se cobro ya. NO se suma a nada ni
+                // alimenta ninguna serie: lo que va al eje es el pendiente.
+                'IMPORTE_FACTURA' => round($facturado, 2),
                 'Cobro' => $ubic['fecha'],
                 'COBRO_ORIGINAL' => $ubic['original'],
                 'VENCIDA' => $ubic['vencida'],
@@ -1606,6 +1732,59 @@ class Ingresos {
         sqlsrv_free_stmt($stmt_fac);
 
         return $items;
+    }
+
+    /**
+     * El aviso de las facturas de Mayoristas con pendiente negativo.
+     *
+     * UN SOLO AVISO AGREGADO, con el conteo y el importe total. Uno por
+     * comprobante taparia el resto de la barra, y lo que hay que saber es que
+     * existen y por cuanto: el detalle esta en Tango, no en esta pantalla.
+     *
+     * Solo cuenta los NEGATIVOS. Un pendiente en cero tambien se saltea, pero no
+     * avisa: es una factura ya cobrada entera que Tango todavia no cerro, y no
+     * hay nada que hacer con eso. Un negativo si: contra esa factura se imputo
+     * mas de lo que decia.
+     *
+     * Se lee DESPUES de getCobranzasMay(), que es quien lo llena. El texto lo
+     * arma avisoSinSaldo(), que va estatica para poder probarse sin base.
+     *
+     * @return array Cero o un aviso
+     */
+    public function avisosPendienteSinSaldo() {
+        return self::avisoSinSaldo(
+            $this->sinSaldoMay['comprobantes'], $this->sinSaldoMay['importe']);
+    }
+
+    /**
+     * El texto del aviso de pendientes negativos. Sin base: es la unica parte
+     * de este circuito que se puede verificar sin facturas sobre-imputadas
+     * cargadas, que es justamente lo que no se puede pedir de una tabla de
+     * Tango.
+     *
+     * EL IMPORTE SE MUESTRA EN VALOR ABSOLUTO, aunque llegue negativo: la
+     * palabra "NEGATIVO" ya esta en la frase, y "$ -1.000,00 negativo" se lee
+     * dos veces al reves.
+     *
+     * @param int $comprobantes Cuantas facturas volvieron en negativo
+     * @param float $importe Suma de esos pendientes (negativa)
+     * @return array Cero o un aviso
+     */
+    public static function avisoSinSaldo($comprobantes, $importe) {
+        $n = intval($comprobantes);
+
+        if ($n < 1) {
+            return [];
+        }
+
+        return [$n . ' factura' . ($n === 1 ? '' : 's')
+            . ' de mayoristas ' . ($n === 1 ? 'vuelve' : 'vuelven')
+            . ' con saldo pendiente NEGATIVO por ' . self::plata(abs(floatval($importe)))
+            . ': contra ' . ($n === 1 ? 'esa factura' : 'esas facturas')
+            . ' se imputó más de lo que decía. No se '
+            . ($n === 1 ? 'muestra ni entra' : 'muestran ni entran')
+            . ' al cashflow —un saldo negativo no es plata a cobrar—, pero el dato está acá '
+            . 'porque el desvío hay que revisarlo en Tango.'];
     }
 
     /**

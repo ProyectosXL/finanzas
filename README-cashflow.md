@@ -41,6 +41,7 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 | 4d | `sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql` | La cotización del dólar oficial **día por día**, sin colapsar por mes. La vista que ya existía se queda con el cierre mensual, que no sirve para valuar un saldo que está hoy en una cuenta | Dólares Cuenta Comitente avisa y **su fila va en cero**: los dólares cargados están, lo que falta es a cuánto valuarlos |
 | 8 | `sql/cashflow_estructura_ingresos_egresos.sql` | Cuelga Disponibilidades y Ventas de **Ingresos**, y los tres bloques de costos de **Egresos**; agrega *Total Ingresos* y *Total Egresos*; da de baja **Ajustes** entera | El cuadro sigue plano: cinco subtotales y ninguno contesta cuánto entra ni cuánto sale en total |
 | 9 | `sql/cashflow_cobertura.sql` | Amplía el `CHECK` de `TIPO` con `STOCK_COBERTURA` y `USO_COBERTURA`, crea `RO_T_CASHFLOW_COBERTURA_APLIC` y la sección **Cobertura**, y baja `SALDO_FINAL` a su final | No hay sección Cobertura: el saldo de inversiones sigue entrando al flujo como ingreso y **no se puede aplicar en ninguna fecha**. Si además se corre a medias, el editor de estructura deja elegir un tipo que la base rechaza |
+| 15 | `sql/cashflow_estructura_neteo_prechequeado.sql` | Agrega la fila **Neteo cheques adelantados** a la sección Ventas, con `ORDEN = 25` (entre Franquicias y Mayoristas), apuntada a la serie `VENTAS → NETEO_PRECHEQUEADO` | **El tablero muestra la cobranza de Ventas en bruto**: las series volvieron a bruto y si la fila no existe, el neteo no se resta en ningún lado. El cuadro no falla ni avisa —cada serie es correcta por separado—, así que este es el único script del grupo cuya ausencia es *silenciosa* |
 
 ### Scripts modificados — hay que volver a correrlos
 
@@ -61,6 +62,7 @@ Que ninguna fila del tablero duplique importes:
 - `COBRANZAS_FR` **inactiva**, y `COBRANZAS_FR_REAL` + `COBRANZAS_FR_PROY` activas. El registro declara `COBRANZA = [COBRANZA_REAL, COBRANZA_PROYECTADA]`, así que si alguien reactiva la total el validador de *Parámetros → Cashflow* lo rechaza.
 - `DOLARES_COMITENTE` **una sola vez**, activa, con serie `INGRESO`.
 - Ningún par (proveedor, serie) repetido entre filas activas. Eso también lo verifica el validador, y *Parámetros → Cashflow* lo muestra arriba del editor.
+- `NETEO_PRECHEQUEADO` **una sola vez**, activa, con `TIPO = 'INGRESO'` y `COMPUTA = 1`. Y las filas de cobranza de Ventas —las cuatro por canal, o la total— **activas al lado de ella**: la fila del neteo corrige a esas filas, no las reemplaza.
 
 ---
 
@@ -83,6 +85,7 @@ En este orden, contra `central`:
 -- 12. sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql  (cotizacion diaria, para valuar los dolares)
 -- 13. sql/cashflow_estructura_ingresos_egresos.sql  (Ingresos y Egresos como bloques; baja Ajustes)
 -- 14. sql/cashflow_cobertura.sql  (seccion Cobertura: stock de inversiones y su aplicacion)
+-- 15. sql/cashflow_estructura_neteo_prechequeado.sql  (fila del neteo de cheques adelantados)
 ```
 
 **El 13 y el 14 van en ese orden y al final**, porque el 14 mueve `SALDO_FINAL` al final de la sección que crea y da de baja la fila del saldo de inversiones que crearon los anteriores. Correr el 14 sin el 13 no rompe nada, pero deja el cuadro a medio reagrupar.
@@ -115,6 +118,8 @@ El decimotercero reagrupa las secciones bajo **Ingresos** y **Egresos** y da de 
 
 El decimocuarto crea la sección **Cobertura** —el stock de inversiones y su aplicación por fecha— y baja `SALDO_FINAL` a su final. Es el único de los dos que trae código nuevo: una tabla, un proveedor, un controller, dos tipos de fila y el editor de la grilla.
 
+El decimoquinto agrega la fila del **neteo de cheques adelantados**. Va después del 2, que es el que crea la sección *Ventas*; si esa sección no existe el script avisa y no hace nada, para no dejar una fila huérfana. Es el único cuya ausencia **no avisa**: las series de cobranza de *Ventas* volvieron a ser brutas, así que sin la fila el tablero muestra cobranza que ya está cobrada, y cada serie por separado es correcta. Ver *El neteo de cheques adelantados es una fila, no un descuento* más abajo.
+
 Todos son reejecutables y no pisan nada ya editado. Si no se corrieron, la pantalla **no falla**: muestra un aviso diciendo que hay que correrlos.
 
 ---
@@ -138,6 +143,8 @@ Todos son reejecutables y no pisan nada ya editado. Si no se corrieron, la panta
 Las usan **Cashflow, Ventas, Proveedores Exterior, Crono Nacionalización, Cobranzas FR, Cobranzas May, Exportaciones Tasky y las dos sub-pestañas de Echeqs**.
 
 > En *Echeqs → Venta Cobrada Anticipada* cada cheque se ubica en la **fecha estimada de venta** —la del cheque menos los días de pre-chequeado del cliente— y no en la del cheque: es la fecha en la que ese importe netea la cobranza proyectada de Ventas, así que es donde tiene que verse. La del cheque queda como columna de referencia y los días efectivos van al lado, para que se vea de dónde sale la estimación. Ver `README-ventas.md`.
+>
+> Esa sub-pestaña además **sólo muestra los de venta teórica desde hoy**: los anteriores corresponden a ventas ya facturadas y cobradas, están fuera del cashflow y no hay nada que tildar. Lo dice su leyenda —una tabla que esconde filas sin decirlo se lee como que esos cheques no existen— y lo aplica `Echeqs::ventaYaCobrada()`, la misma función con la que el neteo decide qué descarta.
 
 **Los indicadores miden exactamente las columnas que se están mirando**, y la columna Total también. Antes eran siempre del tramo diario, aunque la pantalla mostrara los meses: el número no describía nada de lo que había en pantalla.
 
@@ -403,6 +410,26 @@ El nombre del archivo es `<Pestaña>_<YYYY-MM-DD>.xls`, y si no se declara uno s
 **título de la página**, que sale del menú: así una pestaña nueva no exporta un archivo
 llamado `undefined` ni hay que declarar el nombre en dos lugares.
 
+### Crono Nacionalización dejó de tener el suyo
+
+Era el último con `#btnExport` + listener + una función envoltorio de una línea que ya
+llamaba a `exportarTabla()`. Ahora declara `data-exportar` como el resto y el JS de la
+pestaña se quedó sin las tres piezas. No cambió lo que baja, salvo por lo que sí cambió: la
+pestaña tiene **buscador**, y `TablaExport` saca del clon las filas con `display: none`, así
+que *Exportar* baja lo que el buscador está dejando ver.
+
+> El buscador de *Crono Nacionalización* mira **sólo Proveedor, Contenedor y Orden de
+> Compra**, y no el `textContent` de la fila entera como el de Cobranzas May: la tabla tiene
+> una columna por día del eje, así que buscar sobre todo daría falsos positivos contra los
+> importes —tipear `2026` traería todo—. El texto buscable viaja en un `data-buscar` sobre
+> el `<tr>`, armado al dibujar la fila: así el filtro no depende del índice de ninguna
+> columna y queda escrito en un solo lugar cuáles son los tres campos.
+>
+> Y **la fila de TOTALES se rehace** con lo visible. Si no, el pie diría el total de todo
+> arriba de una tabla de tres filas y nada en la pantalla diría que esos dos números miden
+> cosas distintas. Las tarjetas de arriba **no** se tocan: miden el cronograma completo.
+> Es el mismo reparto que Cobranzas May.
+
 ### Un botón nuevo es HTML y nada más
 
 ```html
@@ -415,8 +442,15 @@ llamado `undefined` ni hay que declarar el nombre en dos lugares.
 `reaplicar()` engancha todos los botones con `data-exportar`, y la llama `main.js` con el
 mismo `MutationObserver`. Así se agregó el botón a las pestañas que no lo tenían —
 *Cob. Electrónicos* (sus cuatro tablas), *Dólares Cuenta Comitente* (vigentes e historial),
-*Saldos* (cuentas y locales) y las de *Parámetros*—, **un botón por tabla, en su propia
-`card-header`**: son cuadros distintos y bajar "la pestaña" no querría decir nada.
+*Saldos* (cuentas y locales), *Echeqs → Venta Cobrada Anticipada* y las de *Parámetros*—,
+**un botón por tabla, en su propia `card-header`**: son cuadros distintos y bajar "la
+pestaña" no querría decir nada.
+
+> *Venta Cobrada Anticipada* es la primera tabla exportable con **tildes**. No hizo falta
+> nada nuevo: `aTexto()` reemplaza cada `<input type="checkbox">` por `Sí` o `No`, así que
+> la planilla dice qué cheques netean en vez de llevar controles de formulario. El único
+> resto visible es el encabezado de esa columna, que es un checkbox de *marcar todo* y por
+> eso baja como `Sí`/`No` en vez de como un rótulo.
 
 Las dos tablas con `data-orden="no"` que **sí** se exportan son `tablaMix` y
 `tablaEscalaCob`: no se ordenan porque son formularios, pero bajar la configuración que
@@ -847,6 +881,25 @@ Cobranza total = cobranza real (facturas emitidas) + cobranza sobre ventas estim
 ```
 
 El invariante está enunciado en el encabezado de `Class/Ventas.php`.
+
+### El neteo de cheques adelantados es una fila, no un descuento
+
+Hay clientes que entregan los echeqs **antes** de que se les facture: esa venta futura ya está cobrada, así que proyectar su cobranza la contaría dos veces. Lo que hay que restar sale de *Echeqs → Venta Cobrada Anticipada*.
+
+Hasta ahora ese neteo se restaba **adentro** de las series de cobranza del proveedor `VENTAS`. Ahora esas series son **brutas** y el neteo entra al cuadro por la fila `NETEO_PRECHEQUEADO`, sección *Ventas*, `ORDEN = 25` —entre Franquicias y Mayoristas—, alimentada por la serie `VENTAS → NETEO_PRECHEQUEADO`.
+
+| | |
+| --- | --- |
+| `TIPO` | `INGRESO`, con **importe negativo**. No `EGRESO`: esto no es plata que sale, es cobranza que no va a entrar porque ya entró. Y `EGRESO` le daría signo −1 a un importe que ya viene negativo, con lo cual el neteo terminaría *sumando* |
+| `COMPUTA` | `1`. La fila entra en el subtotal *Total Ventas*, que es el punto: ese subtotal tiene que dar la cobranza neta |
+| El signo | Lo invierte `VentasProvider::enNegativo()`, en un solo lugar. `Ventas` devuelve el neteo en positivo —es *cuánto hay que restar*— y la serie lo devuelve en negativo |
+| El alcance | La serie lleva el total de **todos los canales**. Hoy todo el neteo es de franquicias, pero eso es un hecho del padrón de clientes, no una regla: un mayorista que entregue cheques adelantados entra en la misma fila sin tocar código |
+
+> **Es crítico que las series de cobranza sigan siendo brutas.** Netear adentro de `COBRANZA` —o de las series por canal— con esta fila activa restaría el neteo **dos veces**, y ninguna validación lo detecta: las dos series son legítimas por separado. Está escrito también en el encabezado de `Class/Providers/VentasProvider.php`.
+
+`NETEO_PRECHEQUEADO` **no** está declarada en `componentes`: no es una apertura de `COBRANZA` sino una fila que convive con ella, y declararla ahí haría que el validador rechace la combinación normal del tablero.
+
+La crea `sql/cashflow_estructura_neteo_prechequeado.sql`. Ver `README-ventas.md`.
 
 ---
 

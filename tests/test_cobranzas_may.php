@@ -42,6 +42,51 @@ $fechaEsperada->modify("+{$plazoTest} days");
 chequear('fecha de emision + 60 dias suma correctamente', '2026-03-16', $fechaEsperada->format('Y-m-d'));
 
 // ============================================================================
+// EL PENDIENTE PUEDE VOLVER NEGATIVO, Y ESO NO SE DESCARTA EN SILENCIO
+//
+// La consulta cruza los vencimientos (GVA46) con las imputaciones (GVA07):
+// una factura sobre-imputada -se le imputo mas de lo que decia- vuelve con
+// pendiente negativo aunque siga en ESTADO = 'PEN'. No se muestra ni entra
+// al eje -un saldo negativo no es plata a cobrar- pero deja UN aviso
+// agregado, porque el desvio hay que revisarlo.
+//
+// El texto va aparte y estatico justamente para poder probarlo: tener
+// facturas sobre-imputadas cargadas es lo que no se le puede pedir a una
+// tabla de Tango.
+// ============================================================================
+
+seccion('el aviso de pendientes negativos');
+
+chequear('sin facturas negativas no hay aviso', [], Ingresos::avisoSinSaldo(0, 0));
+chequear('un conteo negativo tampoco inventa uno', [], Ingresos::avisoSinSaldo(-1, -500));
+
+$unaSola = Ingresos::avisoSinSaldo(1, -1500.50);
+
+chequear('con una factura hay exactamente UN aviso', 1, count($unaSola));
+chequear('y esta en singular', true, strpos($unaSola[0], '1 factura de mayoristas vuelve') === 0);
+
+// El importe va en VALOR ABSOLUTO aunque llegue negativo: la palabra
+// "NEGATIVO" ya esta en la frase, y "$ -1.500,50 negativo" se lee dos veces
+// al reves.
+chequear('el importe se muestra en positivo', true,
+    strpos($unaSola[0], '1.500,50') !== false);
+chequear('sin el signo menos delante', false,
+    strpos($unaSola[0], '-1.500,50') !== false);
+
+// UN SOLO AVISO AGREGADO, no uno por comprobante: uno por fila taparia el
+// resto de la barra de avisos.
+$varias = Ingresos::avisoSinSaldo(7, -90000);
+
+chequear('con siete facturas sigue habiendo UN solo aviso', 1, count($varias));
+chequear('y esta en plural', true, strpos($varias[0], '7 facturas de mayoristas vuelven') === 0);
+chequear('con el importe total', true, strpos($varias[0], '90.000,00') !== false);
+
+// Lo que el aviso tiene que dejar claro es que esa plata NO esta en el
+// cuadro: si no, se lee como un dato de color.
+chequear('dice que no entran al cashflow', true,
+    strpos($varias[0], 'No se muestran ni entran al cashflow') !== false);
+
+// ============================================================================
 // Consultas y estructura de datos contra la base (si hay conexión)
 // ============================================================================
 
@@ -150,6 +195,61 @@ if (count($comprobantes) > 0) {
 
     chequear('el neto es siempre el bruto', true, $netoEsBruto);
     chequear('y el descuento es 0% en todas', true, $descFijo);
+
+    /* EL IMPORTE QUE VA AL EJE ES EL PENDIENTE, NO EL FACTURADO. Es el cambio
+       que trajo la consulta nueva: antes se usaba GVA12.IMPORTE, que es lo que
+       decia la factura al emitirse, asi que una factura cobrada a medias
+       entraba al cashflow por su importe completo. */
+    $soloFac = true;
+    $conFactura = true;
+    $pendientePositivo = true;
+    $pendienteExcede = 0;
+
+    foreach ($comprobantes as $c) {
+        if ($c['T_COMP'] !== 'FAC') { $soloFac = false; }
+        if (!array_key_exists('IMPORTE_FACTURA', $c)) { $conFactura = false; continue; }
+        if ($c['importe_neto'] <= 0) { $pendientePositivo = false; }
+
+        // El pendiente no puede ser mayor que lo facturado: si lo fuera,
+        // la tabla de signos de IMPU estaria al reves.
+        if ($c['importe_neto'] > $c['IMPORTE_FACTURA'] + 0.001) { $pendienteExcede++; }
+    }
+
+    // SOLO FACTURAS, a proposito: las notas de credito y debito imputadas ya
+    // estan descontadas del pendiente, asi que traerlas como filas propias las
+    // contaria dos veces. Ver README-cobranzas-may.md.
+    chequear('todos los comprobantes son FAC', true, $soloFac);
+
+    chequear('cada fila trae el importe facturado como dato informativo',
+        true, $conFactura);
+    chequear('ninguna fila entra con pendiente cero o negativo',
+        true, $pendientePositivo);
+    chequear('y ningun pendiente supera al importe facturado', 0, $pendienteExcede);
+
+    // El total del listado tiene que ser el pendiente y no el facturado. Con
+    // cartera real los dos numeros difieren; si fueran iguales, o no hay nada
+    // cobrado a cuenta, o alguien volvio a usar GVA12.IMPORTE.
+    $sumaPend = 0;
+    $sumaFact = 0;
+
+    foreach ($comprobantes as $c) {
+        $sumaPend += $c['importe_neto'];
+        $sumaFact += $c['IMPORTE_FACTURA'];
+    }
+
+    chequear('el total pendiente nunca supera al total facturado',
+        true, round($sumaPend, 2) <= round($sumaFact, 2));
+
+    // Y lo que consolida el tablero sale del PENDIENTE: si la serie diera el
+    // facturado, el cuadro mostraria cobranza que ya se cobro.
+    $sumaSerie = 0;
+
+    foreach ($ingresos->getCobranzasMayTotales() as $t) {
+        $sumaSerie += $t['IMPORTE'];
+    }
+
+    chequear('la serie del tablero es exactamente el pendiente del listado',
+        round($sumaPend, 2), round($sumaSerie, 2));
 
     // La fila transporta la marca para que la grilla pueda dibujar el editor y
     // el Resumen pueda mostrar el indicador.

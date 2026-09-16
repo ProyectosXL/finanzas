@@ -157,6 +157,16 @@
                             <th rowspan="2">N_COMP</th>
                             <th rowspan="2">Desc</th>
                             <th rowspan="2">Dias</th>
+                            <!-- INFORMATIVA: lo que decía la factura cuando se
+                                 emitió. No se suma a nada ni alimenta ninguna
+                                 serie del tablero; lo que va al eje y al
+                                 cashflow es el pendiente de las dos columnas
+                                 siguientes. Está para poder leer cuánto de esa
+                                 factura ya se cobró. -->
+                            <th rowspan="2" class="text-muted"
+                                title="Importe con el que se emitió la factura. Informativo: lo que se cobra es el pendiente.">
+                                Importe Factura
+                            </th>
                             <th rowspan="2">Importe Bruto</th>
                             <th rowspan="2" id="thImporteNetoCobMay">Importe Neto</th>
                             <th rowspan="2" id="thCobroCobMay">Cobro</th>
@@ -172,7 +182,7 @@
                     </tbody>
                     <tfoot class="table-light">
                         <tr id="totalsRowCobMay">
-                            <td colspan="10" class="fw-bold text-end">TOTALES</td>
+                            <td colspan="11" class="fw-bold text-end">TOTALES</td>
                             <!-- Los totales se generan dinámicamente -->
                         </tr>
                     </tfoot>

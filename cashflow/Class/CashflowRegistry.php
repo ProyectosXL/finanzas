@@ -59,6 +59,7 @@ class CashflowRegistry {
                 'COBRANZA_FRANQUICIAS' => 'Cobranza estimada - Franquicias',
                 'COBRANZA_MAYORISTAS' => 'Cobranza estimada - Mayoristas',
                 'COBRANZA_ECOMMERCE' => 'Cobranza estimada - Ecommerce',
+                'NETEO_PRECHEQUEADO' => 'Neteo cheques adelantados (negativo)',
                 'VENTA' => 'Venta proyectada, total (no es caja)',
                 'VENTA_LOCALES' => 'Venta proyectada - Locales (no es caja)',
                 'VENTA_FRANQUICIAS' => 'Venta proyectada - Franquicias (no es caja)',
@@ -68,6 +69,12 @@ class CashflowRegistry {
             // Una serie total y sus componentes NO pueden estar activas a la
             // vez: seria contar dos veces el mismo importe. El validador de la
             // estructura lo rechaza a partir de esto.
+            //
+            // NETEO_PRECHEQUEADO NO VA ACA, y no es un olvido: no es un
+            // componente de COBRANZA sino una fila independiente que convive
+            // con ella. Declararla como componente haria que el validador
+            // rechace la combinacion normal del tablero -las cuatro filas por
+            // canal mas la del neteo-, que es justamente la que hay que armar.
             'componentes' => [
                 'COBRANZA' => ['COBRANZA_LOCALES', 'COBRANZA_FRANQUICIAS',
                                'COBRANZA_MAYORISTAS', 'COBRANZA_ECOMMERCE'],

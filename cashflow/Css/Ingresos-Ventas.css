@@ -182,24 +182,10 @@
     color: #084298;
 }
 
-/* Fila de neteo de prechequeado: cableada en cero */
-.tab-ventas .fila-neteo td {
-    background-color: #fffaf0;
-    font-weight: 500;
-    font-style: italic;
-    color: var(--text-muted, #8c93a8);
-}
-
-/* Cobranza neta */
-.tab-ventas .fila-neta td {
-    background-color: #e8f5e9;
-    border-top: 2px solid var(--success-color, #28a745);
-}
-
-.tab-ventas .fila-neta .cell-with-value {
-    background-color: #d4edda;
-    color: #155724;
-}
+/* .fila-neteo y .fila-neta quedaron sin uso y se borraron: el pie de Cobranza
+   mostraba el neteo de cheques adelantados y la cobranza neta, y las dos filas
+   pasaron al tablero (serie VENTAS.NETEO_PRECHEQUEADO). El pie de esta pestaña
+   es una sola fila, COBRANZA PROYECTADA, que usa .fila-total. */
 
 /* ========================================
    BLOQUE DE CONTROL DE REMITOS

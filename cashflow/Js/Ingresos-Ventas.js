@@ -980,12 +980,12 @@
         return (s && s[canal] && s[canal][col.clave]) || 0;
     }
 
-    /** Neteo de cheques adelantados de una columna */
-    function neteoEn(grilla, col) {
-        var n = grilla.neteo_prechequeado && grilla.neteo_prechequeado[col.rama];
-
-        return (n && n[col.clave]) || 0;
-    }
+    /* NO HAY neteoEn(). El neteo de cheques adelantados se dibujaba acá, en el
+       pie, y pasó a ser una fila del TABLERO (serie VENTAS.NETEO_PRECHEQUEADO).
+       Esta pestaña muestra la cobranza proyectada BRUTA y nada más: el neteo
+       corrige el cuadro consolidado, que es donde se lee la caja, y mostrarlo
+       también acá obligaba a mantener dos lugares que tenían que dar lo mismo.
+       El dato sigue viajando en el payload, sin consumidor en esta pantalla. */
 
     /**
      * Encabezado de columnas, compartido por Venta y Cobranza.
@@ -1221,38 +1221,14 @@
 
         document.getElementById('cobBody').innerHTML = html;
 
-        // Pie: cobranza bruta, neteo de prechequeado y cobranza neta
+        // Pie: cobranza proyectada BRUTA, y nada más. El neteo de cheques
+        // adelantados tenía acá su propia fila y una fila de cobranza neta
+        // debajo; las dos se fueron al tablero, que es donde se lee la caja.
         var foot = '<tr class="fila-total">';
         foot += '<td class="col-canal total-label" colspan="4">COBRANZA PROYECTADA</td>';
 
         cols.forEach(function(col) {
             foot += celdaValor(totalEn(cob, col), false);
-        });
-
-        foot += '</tr>';
-
-        foot += '<tr class="fila-neteo">';
-        foot += '<td class="col-canal" colspan="4">' +
-                'Neteo cheques adelantados ' +
-                '<i class="fas fa-circle-info ms-1" ' +
-                'title="Sale de Echeqs → Venta Cobrada Anticipada: los cheques tildados ahí ' +
-                'ya cobraron una venta futura, así que se restan de la cobranza proyectada de ' +
-                'la fecha estimada de esa venta (fecha del cheque menos los días de ' +
-                'pre-chequeado del cliente, que se cargan en Parámetros → Pre-chequeado)."></i>' +
-                '</td>';
-
-        cols.forEach(function(col) {
-            foot += '<td class="currency text-muted">'
-                + formatCurrency(-neteoEn(cob, col)) + '</td>';
-        });
-
-        foot += '</tr>';
-
-        foot += '<tr class="fila-total fila-neta">';
-        foot += '<td class="col-canal total-label" colspan="4">COBRANZA NETA</td>';
-
-        cols.forEach(function(col) {
-            foot += celdaValor(totalEn(cob, col) - neteoEn(cob, col), false);
         });
 
         foot += '</tr>';
