@@ -243,50 +243,48 @@ $n = Ventas::repartirNeteo([marcado('2026-11-20', 300)], $ejeDias, $ejeMeses, []
 chequear('lo posterior al tramo diario va a la columna del mes',
     300.0, $n['meses']['2026-11']);
 
-seccion('lo que cae antes del eje se avisa, no se pierde');
+seccion('lo que cae antes del eje se descarta callado');
 
 // EL CASO QUE ESTE HELPER EXISTE PARA CUBRIR. Con muchos dias de
 // pre-chequeado, la fecha estimada cae en los primeros dias del mes EN CURSO:
 // Horizonte::ubicar() le encontraria la columna del mes, que existe en la serie
 // pero no representa ningun dia futuro y la pantalla ni la dibuja. Restar ahi
 // haria desaparecer el importe en una columna que nadie ve.
+//
+// Y ADEMAS SE DESCARTA EN SILENCIO, que es la excepcion deliberada a la regla
+// del modulo: esa venta ya se facturo y ya se cobro, asi que no esta en la
+// cobranza proyectada y no hay nada de donde restarla. No es plata que al
+// tablero le falte mostrar, es plata que al tablero no le toca.
 $n = Ventas::repartirNeteo([marcado('2026-09-08', 700)], $ejeDias, $ejeMeses,
     ['FRCAST' => 10]);
 
 chequear('una fecha estimada anterior al inicio del eje no se resta de ninguna columna',
     0.0, $n['total']);
-chequear('el importe no se descarta: queda informado', 700.0, $n['fuera_horizonte']);
 chequear('y la columna del mes en curso queda intacta', 0, $n['meses']['2026-09']);
+chequear('no queda ninguna clave fuera_horizonte: no es plata que falte mostrar',
+    false, array_key_exists('fuera_horizonte', $n));
+chequear('y no deja ningun aviso', 0, count(Ventas::avisosNeteo($n)));
 
-$avisos = Ventas::avisosNeteo($n);
-
-chequear('deja un aviso', 1, count($avisos));
-chequear('con el monto', true, strpos($avisos[0], '700,00') !== false);
-
-// El aviso ya no puede nombrar UN plazo -cada cliente tiene el suyo-, asi que
-// dice donde mirarlo en vez de inventar un numero.
-chequear('y manda al detalle en vez de nombrar un plazo unico', true,
-    strpos($avisos[0], 'Venta Cobrada Anticipada') !== false);
-
-// Lo mismo del otro lado del eje.
+// Lo mismo del otro lado del eje: si la venta cae mas alla del ultimo mes, su
+// cobranza proyectada tampoco esta en el cuadro, asi que no hay que netearla.
 $n = Ventas::repartirNeteo([marcado('2030-01-01', 900)], $ejeDias, $ejeMeses, []);
 
-chequear('lo posterior al horizonte tampoco se descarta callado',
-    900.0, $n['fuera_horizonte']);
+chequear('lo posterior al horizonte tambien se descarta callado', 0.0, $n['total']);
+chequear('sin aviso', 0, count(Ventas::avisosNeteo($n)));
 
-seccion('nada se pierde ni se cuenta dos veces');
+seccion('solo se netea lo que cae dentro del eje');
 
 $n = Ventas::repartirNeteo([
     marcado('2026-09-10', 100),      // tramo diario
     marcado('2026-11-20', 200),      // columna mensual
-    marcado('2026-09-01', 400)       // antes del eje
+    marcado('2026-09-01', 400)       // antes del eje: no entra
 ], $ejeDias, $ejeMeses, []);
 
 $repartido = array_sum($n['dias']) + array_sum($n['meses']);
 
 chequear('el total es exactamente lo repartido en columnas', $repartido, $n['total']);
-chequear('y lo repartido mas lo descartado es todo lo marcado',
-    700.0, $repartido + $n['fuera_horizonte']);
+chequear('y lo repartido es solo lo que cayo dentro del eje', 300.0, $repartido);
+chequear('los 400 de antes del eje no aparecen en ningun total', 300.0, $n['total']);
 
 seccion('el neteo se imputa al canal del cliente');
 
@@ -371,7 +369,6 @@ chequear('el que no tiene dias queda en la fecha del cheque', 300.0, $n['dias'][
 chequear('tres cheques del mismo dia caen en tres columnas distintas',
     600.0, $n['dias']['2026-09-10'] + $n['dias']['2026-09-17'] + $n['dias']['2026-09-20']);
 chequear('y nada se pierde en el camino', 600.0, $n['total']);
-chequear('ni queda nada fuera del horizonte', 0, $n['fuera_horizonte']);
 
 seccion('la resolucion de los dias es una sola funcion');
 
@@ -601,14 +598,15 @@ $negativos = array_filter($neteo['dias'], function ($v) { return $v < 0; });
 
 chequear('los importes vienen en positivo', 0, count($negativos));
 
-// Nada se pierde: lo que entra a las columnas mas lo que quedo fuera del eje
-// tiene que ser todo lo marcado.
+// El neteo no puede netear mas de lo marcado. No tiene por que netearlo TODO:
+// lo que cae fuera del eje se descarta a proposito -es venta ya cobrada- y por
+// eso la igualdad es un <=, no un igual.
 $repartido = array_sum($neteo['dias']) + array_sum($neteo['meses']);
 
 chequear('el total del neteo es lo repartido en columnas',
     round($repartido, 2), round($neteo['total'], 2));
-chequear('y lo marcado es lo repartido mas lo que cayo fuera del eje',
-    round($marcadoVista, 2), round($repartido + $neteo['fuera_horizonte'], 2));
+chequear('y nunca netea mas de lo que esta marcado', true,
+    round($repartido, 2) <= round($marcadoVista, 2));
 
 // La apertura por canal tiene que sumar el total, o el tablero no reconcilia
 // entre la fila total de cobranza y sus filas por canal.

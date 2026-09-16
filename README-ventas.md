@@ -300,7 +300,7 @@ Mix de cobro inicial (cada canal suma 100%):
 | `RO_V_CASHFLOW_VENTAS_PRECHEQ` | La vista origen. La crea `sql/echeqs_prechequeado.sql` |
 | `RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE.DIAS_PRECHEQUEADO` | Los días, **por cliente** |
 | `Echeqs::diasDeCliente()` · `Echeqs::fechaVentaEstimada()` | Resuelven el plazo y la fecha. Las usan la pantalla **y** el neteo |
-| `Ventas::getNeteoPrechequeado()` | Reparte el importe contra el eje y avisa lo que no entra |
+| `Ventas::getNeteoPrechequeado()` | Reparte el importe contra el eje y descarta lo que queda afuera |
 
 ```
 FECHA_VENTA_ESTIMADA = FECHA_CHEQUE − días del CLIENTE
@@ -321,9 +321,22 @@ Antes eran **uno solo para todos**: el parámetro `dias_prechequeado`. Cada clie
 
 `RO_T_CASHFLOW_VENTAS_PRECHEQ` **ya no es el origen** y no tiene lector. Queda creada porque puede tener filas en algún ambiente. Ver `sql/ventas_proyeccion.sql` §6.
 
-### Dos cosas que el neteo avisa en vez de callar
+### Lo que cae fuera del eje se descarta, y se descarta callado
 
-- **Lo que cae antes del inicio del eje.** Con días de pre-chequeado la fecha estimada de venta puede quedar en el pasado, y ahí no hay columna donde restar. Va a un aviso con el monto. No alcanza con preguntarle a `Horizonte::ubicar()` si encontró columna: una fecha de los primeros días del mes **en curso** cae en la columna de ese mes, que existe pero no representa ningún día futuro y la pantalla ni siquiera la dibuja. Por eso el corte es contra el primer día del eje. El aviso ya no puede nombrar *un* plazo —cada cliente tiene el suyo—, así que manda al detalle en vez de inventar un número.
+**Es la excepción deliberada a la regla del módulo**, y el motivo es que acá no se descarta plata: **esa venta ya está cobrada**.
+
+Con días de pre-chequeado la fecha estimada de venta puede quedar antes del inicio del eje. Si quedó ahí, la factura ya se emitió y el cheque ya entró; el motor de Ventas proyecta cobranza de ventas **futuras**, así que esa venta no está en ninguna columna de la proyección y **no hay nada de donde restarla**. Un neteo sin contrapartida no es plata que al tablero le falte: es plata que al tablero no le toca.
+
+Por eso **no va a `fuera_horizonte` ni deja aviso**. `fuera_horizonte` tiene un significado preciso en el módulo —cuánta plata el tablero *debería* mostrar y no muestra, ver `README-cashflow.md`— y este importe no es eso. Es el mismo criterio con el que `CobElectronicos` trata lo ya acreditado. Un aviso por esto aparecería todos los días, sobre algo que ya pasó y sobre lo que no hay ninguna acción posible, y un aviso permanente tapa a los que sí piden hacer algo.
+
+> Esto es un cambio de criterio respecto de la versión anterior, que lo informaba como `fuera_horizonte` con aviso. La regla *"nunca se descarta en silencio"* sigue en pie para lo que el tablero deja de mostrar; lo que cambió es la lectura de este caso, que no es uno de esos. La sub-pestaña **Echeqs → Venta Cobrada Anticipada** aplica la misma regla y **tampoco muestra** esos cheques, así que pantalla y neteo no se pueden desalinear.
+
+**El corte es contra el primer día del eje**, no contra `hoy` escrito a mano. No alcanza con preguntarle a `Horizonte::ubicar()` si encontró columna: una fecha de los primeros días del mes **en curso** cae en la columna de ese mes, que existe pero no representa ningún día futuro y la pantalla ni siquiera la dibuja.
+
+**Lo posterior al horizonte se descarta igual y por lo mismo:** si la venta cae más allá del último mes del eje, su cobranza proyectada tampoco está en el cuadro.
+
+### Lo único que el neteo sigue avisando
+
 - **Lo que no se pudo imputar a un canal.** El canal sale del prefijo del código de cliente (`Echeqs::canalDeCliente()`): `F` es Franquicias y `L` es Locales. Si algún importe no mapea, se resta sólo del total y el aviso dice por cuánta plata la fila total y su apertura por canal no reconcilian.
 
 ### Netea lo tildado, sin mirar el estado del cheque
