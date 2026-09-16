@@ -202,7 +202,6 @@ class Proveedores {
                 p.NOM_PROVEE,
                 a.T_COMP,
                 a.N_COMP,
-                t.CRE_DEB,
                 a.LEYENDA,
                 CAST(a.FECHA_EMIS AS DATE) AS FECHA_EMIS,
                 CAST(a.FECHA_CONT AS DATE) AS FECHA_CONT,
@@ -213,7 +212,6 @@ class Proveedores {
             FROM CPA04 a
             INNER JOIN CPA01 p ON p.COD_PROVEE = a.COD_PROVEE
             INNER JOIN CPA54 v ON v.ID_CPA04   = a.ID_CPA04
-            LEFT  JOIN CPA21 t ON t.T_COMP     = a.T_COMP
             LEFT  JOIN (
                     SELECT i.ID_CPA04, i.FECHA_VTO,
                            SUM(CASE i.T_COMP_CAN
@@ -271,7 +269,6 @@ class Proveedores {
                 'RAZON_SOC' => trim((string) $row['NOM_PROVEE']),
                 'T_COMP' => $tComp,
                 'N_COMP' => $nComp,
-                'CRE_DEB' => trim((string) $row['CRE_DEB']),
                 'LEYENDA' => trim((string) $row['LEYENDA']),
                 'FECHA_EMIS' => $fechaEmis,
                 'FECHA_CONT' => Horizonte::normalizarFecha($row['FECHA_CONT']),

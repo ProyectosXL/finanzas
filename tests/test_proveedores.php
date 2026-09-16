@@ -292,6 +292,14 @@ chequear('CRONOGRAMA se calcula sobre la forma del maestro', true,
 chequear('la forma del maestro viaja aparte', true,
     strpos($fuente, "'FORMA_PAGO_MAESTRO' => \$cat['forma_pago']") !== false);
 
+/* LA TABLA DE SIGNOS NO SE TOCA. Al sacar la columna CRE_DEB del SELECT quedo
+   un solo uso de CPA21 en la consulta, y es el que importa: sin el, una nota de
+   debito imputada se resta como si fuera un pago y el pendiente da NEGATIVO.
+   Esta escrito aca para que un "limpiemos los joins de CPA21" no se lo lleve. */
+chequear('la tabla de signos de las imputaciones sigue en su lugar', true,
+    strpos($fuente, "ELSE CASE tc.CRE_DEB") !== false
+    && strpos($fuente, "LEFT JOIN CPA21 tc ON tc.T_COMP = i.T_COMP_CAN") !== false);
+
 /* Un proveedor de CAJA al que le cargaron una fecha sigue estando FUERA del
    cronograma: la fila de pago no cambia el criterio. */
 chequear('un proveedor de CAJA no entra aunque tenga pago cargado',
@@ -1165,6 +1173,17 @@ foreach ($items as $i) {
 
 chequear('toda fila trae la forma del maestro aparte', 0, $sinFormaMaestro);
 chequear('y el filtro sale de esa y no de la del pago', 0, $discrepan);
+
+/* CRE_DEB viajaba en cada fila y no lo consumia nadie, ni el JS ni el provider.
+   Y ademas no distinguia nada: es una funcion de T_COMP via CPA21, y T_COMP ya
+   es una columna de la grilla. */
+$conCreDeb = 0;
+
+foreach ($items as $i) {
+    if (array_key_exists('CRE_DEB', $i)) { $conCreDeb++; }
+}
+
+chequear('CRE_DEB ya no viaja en el payload', 0, $conCreDeb);
 
 // Los del exterior entran al tablero por COMEX_PROV_EXT: incluirlos aca los
 // contaria dos veces.
