@@ -363,7 +363,10 @@ function indicadores($items) {
             $fuera += $importe;
             $nFuera++;
 
-            $forma = ($i['FORMA_PAGO'] === null) ? 'sin forma' : $i['FORMA_PAGO'];
+            /* Se desglosa por la forma DEL MAESTRO y no por la del pago
+               registrado: es la que decidio que esta fila quedara afuera, y un
+               desglose que nombre otra forma no explica nada. */
+            $forma = ($i['FORMA_PAGO_MAESTRO'] === null) ? 'sin forma' : $i['FORMA_PAGO_MAESTRO'];
             $porFormaFuera[$forma] = (isset($porFormaFuera[$forma]) ? $porFormaFuera[$forma] : 0)
                 + $importe;
         }

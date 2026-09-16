@@ -245,6 +245,63 @@ chequear('y una forma no reconocida tambien', true,
 chequear('las dos formas del cronograma estan declaradas',
     ['ECHEQ', 'TRANSFERENCIA'], ProveedoresCategorias::FORMAS_CRONOGRAMA);
 
+seccion('lo que no se manda a savePago no se pisa');
+
+/* EL BUG QUE ESTO FIJA: la grilla edita UNA celda -la fecha- y manda solo esa.
+   guardarPago escribia igual FORMA_PAGO y OBSERVACION, asi que cargar una fecha
+   borraba la forma y la observacion que habia dejado la importacion de la
+   planilla. Un endpoint que recibe un campo y escribe cuatro no guarda una
+   edicion: reemplaza la fila.
+
+   No hace falta base para verificarlo: se mira que el UPDATE que arma no
+   nombre las columnas que el llamador no trajo. */
+$m = new ReflectionMethod('Proveedores', 'guardarPago');
+$params = [];
+
+foreach ($m->getParameters() as $p) { $params[] = $p->getName(); }
+
+chequear('guardarPago sabe que campos tocar', true,
+    in_array('tocarForma', $params, true) && in_array('tocarObs', $params, true));
+chequear('y por defecto los toca: la importacion los trae siempre', true,
+    $m->getParameters()[10]->getDefaultValue() === true
+    && $m->getParameters()[11]->getDefaultValue() === true);
+
+// savePago es quien decide: si el campo no vino, no entra al UPDATE.
+$rs = new ReflectionMethod('Proveedores', 'savePago');
+$cuerpo = implode('', array_slice(file(__DIR__ . '/../cashflow/Class/Proveedores.php'),
+    $rs->getStartLine() - 1, $rs->getEndLine() - $rs->getStartLine() + 1));
+
+chequear('savePago pasa false cuando no vino la forma', true,
+    strpos($cuerpo, "\$forma['original'] !== ''") !== false);
+chequear('y cuando no vino la observacion', true,
+    strpos($cuerpo, "\$obs !== ''") !== false);
+
+seccion('el filtro mira el maestro, no la fila de pago');
+
+/* LA REGLA: el criterio es una propiedad del PROVEEDOR -a este se le paga por
+   transferencia, a aquel por caja-, no de un comprobante suelto. Si lo
+   decidiera la fila de pago, cargar una fecha desde la grilla cambiaria de
+   serie la deuda, porque la grilla manda la fecha y nada mas. */
+$fuente = file_get_contents(__DIR__ . '/../cashflow/Class/Proveedores.php');
+
+chequear('CRONOGRAMA se calcula sobre la forma del maestro', true,
+    strpos($fuente, "'CRONOGRAMA' => ProveedoresCategorias::esDelCronograma(\$cat['forma_pago'])")
+    !== false);
+
+// Y las dos formas viajan por separado: una decide, la otra se muestra.
+chequear('la forma del maestro viaja aparte', true,
+    strpos($fuente, "'FORMA_PAGO_MAESTRO' => \$cat['forma_pago']") !== false);
+
+/* Un proveedor de CAJA al que le cargaron una fecha sigue estando FUERA del
+   cronograma: la fila de pago no cambia el criterio. */
+chequear('un proveedor de CAJA no entra aunque tenga pago cargado',
+    false, ProveedoresCategorias::esDelCronograma('CAJA'));
+
+/* Y uno de ECHEQ sigue adentro aunque el pago se haya registrado por otra via:
+   que las dos difieran es informacion, no un motivo para recategorizar. */
+chequear('y uno de ECHEQ sigue adentro',
+    true, ProveedoresCategorias::esDelCronograma('ECHEQ'));
+
 seccion('el rubro Excluidos');
 
 chequear('lo detecta', true, ProveedoresCategorias::esExcluido('Excluidos'));
@@ -810,6 +867,26 @@ foreach ($items as $i) {
 
 chequear('ningun pendiente es negativo', 0, $negativos);
 chequear('toda forma de pago normalizada esta declarada', true, $formaOk);
+
+/* EL FILTRO SALE DEL MAESTRO Y SOLO DEL MAESTRO. Con datos reales: para toda
+   fila, CRONOGRAMA tiene que ser exactamente esDelCronograma() de la forma del
+   maestro, tenga o no fecha de pago cargada. Si alguna difiriera, seria una
+   fila que entro o salio del cashflow por como se registro un pago y no por
+   como se le paga al proveedor. */
+$discrepan = 0;
+$sinFormaMaestro = 0;
+
+foreach ($items as $i) {
+    if (!array_key_exists('FORMA_PAGO_MAESTRO', $i)) { $sinFormaMaestro++; continue; }
+
+    if ($i['CRONOGRAMA']
+        !== ProveedoresCategorias::esDelCronograma($i['FORMA_PAGO_MAESTRO'])) {
+        $discrepan++;
+    }
+}
+
+chequear('toda fila trae la forma del maestro aparte', 0, $sinFormaMaestro);
+chequear('y el filtro sale de esa y no de la del pago', 0, $discrepan);
 
 // Los del exterior entran al tablero por COMEX_PROV_EXT: incluirlos aca los
 // contaria dos veces.

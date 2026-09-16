@@ -67,6 +67,27 @@ require_once __DIR__ . '/Planilla.php';
  * un filtro por antiguedad. Por eso getPendientes() informa aparte cuanto hay
  * VENCIDO SIN FECHA CARGADA: apilarlo en el primer dia del eje sin decirlo seria
  * mostrar que se paga todo hoy.
+ *
+ * DOS FORMAS DE PAGO QUE NO SON LA MISMA COSA
+ * -------------------------------------------
+ * Cada fila viaja con dos, y confundirlas fue un bug:
+ *
+ *   FORMA_PAGO_MAESTRO  como se le paga a ESE PROVEEDOR, segun el maestro. Es
+ *                       una regla, y es lo UNICO que decide si el comprobante
+ *                       entra al cronograma -al filtro de la pestaña y a la
+ *                       serie PAGOS del tablero-.
+ *   FORMA_PAGO          por que via salio o va a salir ESTE PAGO, si hay uno
+ *                       registrado. Es un hecho, y solo se muestra.
+ *
+ * EL FILTRO MIRA LA REGLA, NO EL HECHO. Si lo decidiera la fila de pago, cargar
+ * una fecha desde la grilla moveria la deuda de serie -la grilla manda la fecha
+ * y nada mas, asi que la forma llegaria vacia- y un pago hecho por una via
+ * distinta de la habitual sacaria al proveedor del cronograma sin que nadie lo
+ * haya decidido.
+ *
+ * Que las dos difieran no es un error: es informacion. Significa que a ese
+ * proveedor se le pago por una via distinta de la habitual, y lo que
+ * eventualmente hay que corregir es el maestro.
  */
 class Proveedores {
 
@@ -266,7 +287,22 @@ class Proveedores {
 
                 // Lo cargado a mano, si hay.
                 'FECHA_PAGO' => ($pago === null) ? null : $pago['FECHA_PAGO'],
-                'FORMA_PAGO' => ($pago === null) ? $cat['forma_pago'] : $pago['FORMA_PAGO'],
+
+                /* COMO SE LE PAGA A ESTE PROVEEDOR, segun el maestro. Es lo
+                   UNICO que decide el filtro y la serie del tablero: ver
+                   CRONOGRAMA, mas abajo. */
+                'FORMA_PAGO_MAESTRO' => $cat['forma_pago'],
+
+                /* La forma del pago REGISTRADO, que es otra cosa: es un hecho
+                   sobre este comprobante, no una regla sobre el proveedor. Se
+                   muestra en la columna Forma; si difiere de la del maestro,
+                   eso es un dato para mirar -y capaz para corregir el maestro-,
+                   no un motivo para cambiar lo que se filtra.
+
+                   Sin pago registrado, o con uno que no dice la forma, se
+                   muestra la del maestro: es lo mas cierto que se sabe. */
+                'FORMA_PAGO' => ($pago === null || $pago['FORMA_PAGO'] === null)
+                    ? $cat['forma_pago'] : $pago['FORMA_PAGO'],
                 'FORMA_PAGO_ORIG' => ($pago === null) ? null : $pago['FORMA_PAGO_ORIG'],
                 'OBSERVACION' => ($pago === null) ? null : $pago['OBSERVACION'],
                 'ESTADO_PAGO' => ($pago === null) ? null : $pago['ESTADO'],
@@ -282,9 +318,16 @@ class Proveedores {
                 /* Si se gestiona desde el cronograma de pagos -echeq,
                    transferencia, o forma desconocida-. Es lo que decide si
                    entra a la fila del tablero y lo que la pestaña filtra por
-                   defecto. Ver ProveedoresCategorias::esDelCronograma(). */
-                'CRONOGRAMA' => ProveedoresCategorias::esDelCronograma(
-                    ($pago === null) ? $cat['forma_pago'] : $pago['FORMA_PAGO'])
+                   defecto. Ver ProveedoresCategorias::esDelCronograma().
+
+                   SALE DEL MAESTRO Y SOLO DEL MAESTRO, haya o no fecha de pago
+                   cargada. El criterio es una propiedad del PROVEEDOR -a este
+                   se le paga por transferencia, a aquel por caja-, no del
+                   comprobante: si lo decidiera la fila de pago, cargar una
+                   fecha en la grilla cambiaria de lugar la deuda, y un pago
+                   registrado por una via distinta a la habitual sacaria al
+                   proveedor del cronograma sin que nadie lo haya decidido. */
+                'CRONOGRAMA' => ProveedoresCategorias::esDelCronograma($cat['forma_pago'])
             ];
         }
 
@@ -1039,12 +1082,18 @@ class Proveedores {
      * Es lo que usa la edicion fila por fila de la grilla. La importacion masiva
      * pasa por el mismo metodo privado, asi que las dos escriben igual.
      *
+     * LO QUE NO SE MANDA NO SE PISA. La grilla edita UNA celda -la fecha- y
+     * manda solo esa; si los campos que no viajaron se escribieran igual, cada
+     * carga de fecha borraria la forma de pago y la observacion que habia
+     * dejado la importacion de la planilla. Un endpoint que recibe un campo y
+     * escribe cuatro no esta guardando una edicion, esta reemplazando la fila.
+     *
      * @param string $codProvee
      * @param string $tComp
      * @param string $nComp
      * @param string $fecha 'Y-m-d'
-     * @param string|null $formaPago
-     * @param string|null $observacion
+     * @param string|null $formaPago Si no viene, la que haya queda como esta
+     * @param string|null $observacion Idem
      * @param string|null $usuario
      * @return array ['fecha', 'forma']
      */
@@ -1066,12 +1115,16 @@ class Proveedores {
 
         $f = self::validarFechaPago($fecha);
         $forma = ProveedoresCategorias::normalizarFormaPago($formaPago);
+        $obs = ($observacion === null) ? '' : trim((string) $observacion);
 
+        /* Ver la nota del docblock: si el campo no vino, no se toca. Vacio y
+           ausente son lo mismo acá porque la grilla no tiene con que mandar un
+           vacio a proposito: edita la fecha y nada mas. */
         $this->guardarPago($this->conectar(), $cod, $t, $n, $f,
             $forma['normalizado'], $forma['original'],
-            ($observacion === null || trim((string) $observacion) === '')
-                ? null : mb_substr(trim((string) $observacion), 0, 200),
-            'MANUAL', $usuario);
+            ($obs === '') ? null : mb_substr($obs, 0, 200),
+            'MANUAL', $usuario,
+            ($forma['original'] !== ''), ($obs !== ''));
 
         return ['fecha' => $f, 'forma' => $forma['normalizado']];
     }
@@ -1150,17 +1203,42 @@ class Proveedores {
      * NO PISA EL ESTADO NI LA FECHA REAL DE CANCELACION. Si el comprobante ya
      * estaba conciliado, cambiarle la prevision no lo desconcilia: Tango es la
      * verdad sobre el pago y esto es una prevision.
+     *
+     * TAMPOCO PISA LO QUE EL LLAMADOR NO TRAJO. $tocarForma y $tocarObs dicen
+     * si esos dos campos entran al UPDATE. La importacion los trae siempre y
+     * pasa los dos en true; la edicion de a una manda solo la fecha. En el
+     * INSERT no hay nada que conservar, asi que van como vengan.
      */
     private function guardarPago($cid, $cod, $t, $n, $fecha, $forma, $formaOrig,
-                                 $observacion, $origen, $usuario) {
+                                 $observacion, $origen, $usuario,
+                                 $tocarForma = true, $tocarObs = true) {
+        $sets = ['FECHA_PAGO = ?'];
+        $params = [$fecha];
+
+        if ($tocarForma) {
+            $sets[] = 'FORMA_PAGO = ?';
+            $sets[] = 'FORMA_PAGO_ORIG = ?';
+            $params[] = $forma;
+            $params[] = ($formaOrig === '') ? null : $formaOrig;
+        }
+
+        if ($tocarObs) {
+            $sets[] = 'OBSERVACION = ?';
+            $params[] = $observacion;
+        }
+
+        $sets[] = 'ORIGEN = ?';
+        $sets[] = 'USUARIO = ?';
+        $sets[] = 'FECHA_MOD = GETDATE()';
+        $params[] = $origen;
+        $params[] = $usuario;
+
         $sql = "UPDATE dbo." . self::TABLA_PAGO . "
-                SET FECHA_PAGO = ?, FORMA_PAGO = ?, FORMA_PAGO_ORIG = ?, OBSERVACION = ?,
-                    ORIGEN = ?, USUARIO = ?, FECHA_MOD = GETDATE()
+                SET " . implode(', ', $sets) . "
                 WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?";
 
         $stmt = sqlsrv_query($cid, $sql,
-            [$fecha, $forma, ($formaOrig === '') ? null : $formaOrig, $observacion,
-             $origen, $usuario, $cod, $t, $n]);
+            array_merge($params, [$cod, $t, $n]));
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al guardar la fecha de pago'));

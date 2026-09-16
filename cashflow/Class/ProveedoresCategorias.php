@@ -318,9 +318,14 @@ class ProveedoresCategorias {
      * Quien entra sin forma conocida se dibuja con su marca en la grilla, asi
      * que se distingue de un echeq de verdad.
      *
+     * LO QUE SE LE PASA ES LA FORMA DEL MAESTRO, no la del pago registrado: el
+     * criterio es una propiedad del proveedor -a este se le paga por
+     * transferencia- y no un dato de un comprobante suelto. Ver la seccion "DOS
+     * FORMAS DE PAGO QUE NO SON LA MISMA COSA" del encabezado de Proveedores.
+     *
      * Estatica y pura.
      *
-     * @param string|null $formaPago Forma YA normalizada
+     * @param string|null $formaPago Forma del maestro, YA normalizada
      * @return bool
      */
     public static function esDelCronograma($formaPago) {

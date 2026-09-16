@@ -370,6 +370,23 @@ El criterio: entra lo que se paga **decidiendo cuándo**. Una transferencia o un
 
 **Lo que no se sabe, entra y se marca.** Una forma de pago en `null` —porque el proveedor no está en el maestro, o porque lo que trajo la planilla no se reconoció— no es lo mismo que una forma que quedó afuera del criterio: es un dato que falta. Esconder deuda por un dato que falta es la peor razón para esconderla, y además garantiza que nadie lo complete nunca, porque deja de verse. Esas filas se dibujan con la marca *sin forma*, así que no se confunden con un echeq confirmado.
 
+### Hay dos formas de pago por fila, y sólo una decide
+
+Confundirlas fue un bug.
+
+| | |
+| --- | --- |
+| `FORMA_PAGO_MAESTRO` | Cómo se le paga a **ese proveedor**, según el maestro. Es una **regla**, y es lo único que decide si el comprobante entra al cronograma —al filtro de la pestaña y a la serie `PAGOS` del tablero— |
+| `FORMA_PAGO` | Por qué vía salió o va a salir **ese pago**, si hay uno registrado. Es un **hecho**, y sólo se muestra |
+
+> El filtro mira la regla, no el hecho.
+
+Si lo decidiera la fila de pago pasarían dos cosas, y las dos son peores. La grilla edita una sola celda —la fecha— y manda sólo esa, así que **cargar una fecha desde la grilla movería la deuda de serie**: un proveedor de CAJA o de DÉBITO pasaría a "sin forma", entraría al filtro y entraría al cashflow. Y a la inversa, un pago hecho por una vía distinta de la habitual sacaría al proveedor del cronograma sin que nadie lo haya decidido.
+
+**Que las dos difieran no es un error: es información.** Significa que a ese proveedor se le pagó por una vía distinta de la habitual, y lo que eventualmente hay que corregir es el maestro.
+
+Por lo mismo, `savePago()` **no pisa lo que no le mandaron**: si la forma o la observación no viajan en el request, no entran al `UPDATE`. Un endpoint que recibe un campo y escribe cuatro no está guardando una edición, está reemplazando la fila —y borraba la forma y la observación que había dejado la importación de la planilla—.
+
 ### El filtro se puede apagar, y mientras está prendido dice cuánto esconde
 
 El interruptor *Sólo echeq y transferencia* viene tildado y se puede destildar. Al lado del período, siempre a la vista:

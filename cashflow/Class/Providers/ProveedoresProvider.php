@@ -137,7 +137,10 @@ class ProveedoresProvider extends CashflowProvider {
                 continue;
             }
 
-            $forma = ($item['FORMA_PAGO'] === null) ? 'sin forma' : $item['FORMA_PAGO'];
+            /* La forma DEL MAESTRO, que es la que decide. Ver el comentario de
+               CRONOGRAMA en Proveedores::getPendientes(). */
+            $forma = ($item['FORMA_PAGO_MAESTRO'] === null)
+                ? 'sin forma' : $item['FORMA_PAGO_MAESTRO'];
             $importe = floatval($item['IMPORTE_PENDIENTE']);
 
             $porForma[$forma] = (isset($porForma[$forma]) ? $porForma[$forma] : 0) + $importe;
