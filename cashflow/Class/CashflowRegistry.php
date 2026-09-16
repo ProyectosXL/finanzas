@@ -222,10 +222,10 @@ class CashflowRegistry {
 
            OJO CON 'PAGOS': NO TRAE TODO. Trae solo lo que se paga por echeq o
            transferencia, que es lo que se gestiona desde el cronograma de pagos.
-           Es una decision de negocio y deja fuera del tablero unos 141 millones
-           -debitos automaticos, caja, tarjeta corporativa- que igual salen de la
-           caja. El proveedor avisa cuanto es cada vez. Para el universo completo
-           esta PAGOS_TODO. */
+           Es una decision de negocio y deja fuera del tablero los debitos
+           automaticos, la caja y la tarjeta corporativa, que igual salen de la
+           caja: al 16/09/2026 son $51,8 millones. El proveedor avisa cuanto es
+           cada vez. Para el universo completo esta PAGOS_TODO. */
         'PROV_LOCALES' => [
             'nombre' => 'Proveedores Locales',
             'descripcion' => 'Cuentas a pagar a proveedores del mercado local, con su fecha '

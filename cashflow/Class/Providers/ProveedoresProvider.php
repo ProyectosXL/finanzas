@@ -51,9 +51,9 @@ require_once __DIR__ . '/../Proveedores.php';
  *
  * LO VENCIDO SIN FECHA CARGADA SE INFORMA, NO SE ESCONDE
  * ------------------------------------------------------
- * Hoy son 366 vencimientos por mas de 839 millones. Entran al eje en su primer
- * dia -no hay otro lugar donde ponerlos- y el aviso dice cuanto es, para que
- * nadie lea esa columna como "hoy se paga todo esto". Ver
+ * Al 16/09/2026 son 378 vencimientos por $965 millones. Entran al eje en su
+ * primer dia -no hay otro lugar donde ponerlos- y el aviso dice cuanto es, para
+ * que nadie lea esa columna como "hoy se paga todo esto". Ver
  * Proveedores::avisosPendientes().
  */
 class ProveedoresProvider extends CashflowProvider {
@@ -63,8 +63,9 @@ class ProveedoresProvider extends CashflowProvider {
      *
      * Trae unicamente lo que se gestiona desde el cronograma de pagos: echeq,
      * transferencia, y lo que no tiene forma conocida. Es una decision de
-     * negocio, no un detalle: hoy deja fuera del cashflow $141 millones -debitos
-     * automaticos, caja, tarjeta corporativa- que igual salen de la caja.
+     * negocio, no un detalle: deja fuera del cashflow los debitos automaticos,
+     * la caja y la tarjeta corporativa, que igual salen de la caja. Al
+     * 16/09/2026 son $51,8 millones en 257 vencimientos.
      *
      * POR ESO EL PROVEEDOR AVISA cuanto quedo afuera cada vez. Si esa plata
      * tiene que entrar al tablero por otra fila, todavia no existe; mientras
@@ -137,9 +138,10 @@ class ProveedoresProvider extends CashflowProvider {
      * automatico, una compra con tarjeta corporativa o un pago por caja NO se
      * proyectan en el cashflow, aunque esa plata igual salga.
      *
-     * Hoy son unos $141 millones. Si tienen que entrar por otra fila, esa fila
-     * todavia no existe; mientras tanto este aviso es lo unico que impide que
-     * la plata desaparezca del tablero sin que nadie lo note.
+     * Al 16/09/2026 son $51,8 millones, todos DEBITO. Si tienen que entrar por
+     * otra fila, esa fila todavia no existe; mientras tanto este aviso es lo
+     * unico que impide que la plata desaparezca del tablero sin que nadie lo
+     * note.
      *
      * Se desglosa por forma de pago porque cada una se resuelve distinto: un
      * debito automatico podria entrar por Financiero, y una caja por Haberes o

@@ -101,7 +101,9 @@ Tango une `CPA04 ⋈ CPA54` por `(COD_PROVEE, T_COMP, N_COMP)`. Esa terna **no e
 - **`COD_PROVEE LIKE 'Z%'`**: no son proveedores de sistema, son los del **exterior** (`ZE…`: China, Hong Kong, India, y `ZETASK`). Son 8.023 de los 9.344 millones pendientes totales, y **ya entran al tablero por `COMEX_PROV_EXT`**: sin el filtro se contarían dos veces.
 - **`CPA01.CLAUSULA = 1`**: proveedores con cláusula de moneda extranjera. Es el criterio del *Total Pendiente (CTE)* de Tango, que es el pendiente en pesos. Hoy deja afuera $20.938 de un transportista local de 2022 y 2023, que además tiene el importe en moneda extranjera en cero: casi seguro un error de maestro.
 
-**Total local: $1.361.468.254,02** en 522 vencimientos de 112 proveedores.
+**Total local: $1.415.279.515,19** en 544 vencimientos de 122 proveedores.
+
+> **Todas las cifras de este archivo son una foto del 16/09/2026.** Salen de una base viva: cambian entre una corrida y la siguiente, y de hecho cambiaron mientras se escribía esto. Están para dar orden de magnitud y para poder decir *"esto no es teórico"*, no para cuadrar contra la pantalla.
 
 ---
 
@@ -113,7 +115,7 @@ Cobranzas descarta lo vencido hace más de `Ingresos::DIAS_COBRO_VENCIDO` (180) 
 
 Con ese techo quedaban afuera **$346,8 millones — el 29%** del total, y no era basura administrativa: la mayor parte es un plan de cuotas vigente de un proveedor industrial.
 
-**Pero no se apila en silencio.** El indicador *Vencido sin fecha* dice cuánto hay vencido **sin que nadie haya decidido cuándo se paga**: hoy son **366 vencimientos por $839.609.418,34**.
+**Pero no se apila en silencio.** El indicador *Vencido sin fecha* dice cuánto hay vencido **sin que nadie haya decidido cuándo se paga**: son **378 vencimientos por $965.189.059,14**.
 
 Ese importe se dibuja en el primer día del eje porque no hay otro lugar donde ponerlo. **Eso no significa que se pague hoy**, y por eso el número está a la vista en rojo, con un filtro de un clic para aislarlo.
 
@@ -433,7 +435,7 @@ Por lo mismo, `savePago()` **no pisa lo que no le mandaron**: si la forma o la o
 
 El interruptor *Sólo echeq y transferencia* viene tildado y se puede destildar. Al lado del período, siempre a la vista:
 
-> *Quedan afuera $48.638.823,29 en 256 vencimiento(s) (DEBITO $48.638.823,29) — destildá el filtro para verlos.*
+> *Quedan afuera $51.804.546,29 en 257 vencimiento(s) (DEBITO $51.804.546,29) — destildá el filtro para verlos.*
 
 Un filtro que esconde plata sin decir cuánta es un filtro que miente.
 
@@ -445,7 +447,11 @@ Por eso el proveedor **avisa cuánto quedó afuera, desglosado por forma**, en c
 
 Meterla es configuración, no código: `PAGOS` y `PAGOS_FUERA_CRONOGRAMA` son las dos mitades del universo y **pueden convivir** en dos filas distintas —el validador lo permite justamente porque no se pisan—. Lo que no puede es `PAGOS_TODO` junto a cualquiera de sus partes.
 
-> **Ojo con un número que va a cambiar:** hoy la fila del tablero trae $1.312.829.430 y deja afuera sólo $48,6 M. Eso es porque los `CAJA`, `TARJETA CORP` y `MERCADO PAGO` todavía están en la base **sin normalizar** —se importaron con la lista vieja— y entran como "forma desconocida". **Al reimportar el maestro con la lista corregida pasarán a quedar afuera**, y la fila bajará a ~$1.225 M.
+> **Ojo con un número que va a cambiar, y es el pendiente más importante del módulo:** la fila del tablero trae $1.363.474.968,90 y deja afuera sólo $51,8 M. Eso es porque los `CAJA`, `TARJETA CORP` y `MERCADO PAGO` todavía están en la base **sin normalizar** —se importaron con la lista vieja: 639 de los 1.173 proveedores del maestro, y no hay ni uno con otra causa—. Entran al filtro como forma desconocida.
+>
+> **Al reimportar el maestro con la lista corregida pasan a quedar afuera $88.970.448,93 en 133 vencimientos** —129 de `TARJETA CORP` y 4 de `CAJA`— y la fila baja a ~$1.274 M. Es un cambio de datos, no de código: la lista ya está corregida en `FORMAS_PAGO`.
+>
+> Después de eso, lo único que sigue entrando por *"no se sabe cómo se paga"* son **$6.297.561,76 en 21 vencimientos** de proveedores que no están en el maestro — que es exactamente el caso para el que la regla existe.
 
 ---
 
@@ -512,7 +518,7 @@ php tests/run.php proveedores
 
 Con base, además: que **ningún pendiente sea negativo** —el error que tenía la consulta antes de la tabla de signos—, que no entre ningún proveedor del exterior, que el total sea exactamente operativos + excluidos, y que **el registro declare exactamente las series que el proveedor devuelve**.
 
-*Suite completa: 1849 OK, 0 fallas (18 archivos).*
+*Suite completa: 2074 OK, 0 fallas (18 archivos).*
 
 ---
 
@@ -539,6 +545,6 @@ Modificados: `Class/CashflowRegistry.php` (`PROV_LOCALES` disponible + `series_e
 
 ## Pendientes conocidos
 
-- **El maestro todavía no está cargado.** Hasta que se importe, los 112 proveedores con deuda aparecen sin clasificar y los 8 de directores figuran como discrepancia. Es el comportamiento esperado.
+- **El maestro está cargado pero con la lista vieja de formas de pago.** 639 de sus 1.173 proveedores tienen la forma sin normalizar —`CAJA`, `TARJETA CORP` y `MERCADO PAGO`, las tres que faltaban—, y por eso $88.970.448,93 en 133 vencimientos entran al filtro y a la fila del tablero como si no se supiera cómo se pagan. **Reimportarlo es lo primero que hay que hacer**, y no necesita ningún cambio de código.
 - **ARCA/Aduana está cargada con dos códigos** (`OGADUN` $235,4 M y `OGADUA` $131,8 M, mismo nombre). No se unifican en el resolutor: la clave es el código de Tango y arreglar el maestro no le toca a este módulo. Si los dos llevan el mismo rubro, el tablero los junta solo. El control de faltantes los muestra por separado, que es lo que va a revelar si la planilla trae uno solo.
 - **Las series por rubro se resuelven contra el maestro en cada pedido.** Con 26 rubros y un cache por request alcanza; si algún día el maestro creciera mucho, el lugar para mirar es `CashflowRegistry::resolverExtra()`.
