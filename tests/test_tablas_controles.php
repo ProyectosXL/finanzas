@@ -197,3 +197,67 @@ foreach (['cf-seccion', 'cf-tipo-subtotal', 'cf-tipo-flujo_neto',
     chequear('ancla ' . $ancla, true,
         strpos($cashflowJs, $ancla) !== false);
 }
+
+// ============================================================================
+// EL ORDEN CON EL QUE ABRE UNA TABLA
+//
+// Son tres piezas que sólo sirven juntas: la opcion en el control, el nombre
+// estable en el <th> y la declaracion en la pestana. Si alguna se cae, la tabla
+// abre sin orden y no avisa.
+// ============================================================================
+
+seccion('el orden por defecto de Cobranzas FR');
+
+$ordenJs = file_get_contents($JS . '/tabla-orden.js');
+$frJs = file_get_contents($JS . '/Ingresos-Cobranzas_fr.js');
+$frTab = contenidoTab($TABS . '/cobranzas_fr.php');
+
+chequear('tabla-orden.js acepta porDefecto', true,
+    strpos($ordenJs, 'defaultDeOpciones') !== false);
+
+// NO por api.usar(): ese metodo ESCRIBE en localStorage, asi que un default
+// aplicado por ahi seria indistinguible de una eleccion del usuario y le
+// pisaria el orden que eligio a mano.
+chequear('el default no se guarda en localStorage', false,
+    strpos($ordenJs, 'guardar(clave, defaultDeOpciones') !== false);
+
+chequear('Cobranzas FR declara el orden con el que abre', true,
+    strpos($frJs, 'porDefecto: { columna: \'cobro\', dir: \'asc\' }') !== false);
+
+// El <th> cambia de rotulo segun la solapa -"Cobro" / "F. Prob. Cobro"- y es la
+// misma columna. Sin el nombre estable, el default apuntaria a un rotulo y no
+// valdria en la otra solapa, y el orden elegido a mano se perderia al cambiar.
+chequear('tabla-orden.js lee data-orden-nombre del th', true,
+    strpos($ordenJs, "getAttribute('data-orden-nombre')") !== false);
+
+chequear('la columna de cobro de FR declara su nombre estable', true,
+    preg_match('/<th\b[^>]*id="thCobroCob"[^>]*data-orden-nombre="cobro"/', $frTab) === 1);
+
+// Los dos rotulos que el JS le pone a esa misma columna.
+foreach (["'F. Prob. Cobro'", "'Cobro'"] as $rotulo) {
+    chequear('el JS sigue rotulando la columna como ' . $rotulo, true,
+        strpos($frJs, 'thCobro.textContent = ' . $rotulo) !== false);
+}
+
+// El default no necesita saber que existe el Resumen: ahi la columna esta
+// oculta por CSS y columnaActiva() no ordena por una columna invisible. Si
+// alguien saca cualquiera de las dos mitades, el default empieza a aplicarse en
+// Resumen -donde la fila es un cliente- sin que nadie lo note.
+chequear('columnaActiva descarta las columnas ocultas', true,
+    strpos($ordenJs, 'visible(cols[i].th)') !== false);
+
+$frCss = file_get_contents(__DIR__ . '/../cashflow/Css/Ingresos-Cobranzas_fr.css');
+
+chequear('y en Resumen la columna de cobro esta oculta', true,
+    strpos($frCss, '.modo-resumen thead tr:first-child th:nth-child(10)') !== false);
+
+// Sin orden tambien es una eleccion: si el tercer click borrara la clave, seria
+// indistinguible de no haber elegido nunca y el default volveria en la recarga
+// siguiente, reponiendo un orden que el usuario acababa de sacar.
+seccion('sacar el orden a mano le gana al default');
+
+chequear('el "sin orden" se guarda en vez de borrarse', true,
+    strpos($ordenJs, '{ columna: null }') !== false);
+
+chequear('y ya no se borra la clave', false,
+    strpos($ordenJs, 'removeItem') !== false);
