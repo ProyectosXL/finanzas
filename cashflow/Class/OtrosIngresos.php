@@ -36,13 +36,28 @@ require_once __DIR__ . '/Cotizacion.php';
  *
  * EL IMPORTE VIGENTE SE PISA, PERO EL HISTORIAL QUEDA
  * ---------------------------------------------------
- * Cargar una fecha que ya existe NO hace UPDATE: marca VIGENTE = 0 las
- * anteriores de esa fecha e inserta una fila nueva, en UNA transaccion. Nunca
- * hay baja fisica, igual que en el resto del modulo.
+ * Cargar un dia que ya existe NO hace UPDATE: marca VIGENTE = 0 las anteriores
+ * de ese dia e inserta una fila nueva, en UNA transaccion. Nunca hay baja
+ * fisica, igual que en el resto del modulo.
  *
- * El historial no es decoracion: es lo unico que explica por que el numero de
- * ayer era otro. Con un UPDATE, corregir un dedazo y cargar un dato nuevo son
- * indistinguibles despues del hecho.
+ * EDITAR ES ESTO MISMO. No hay un camino aparte: editar un importe desde la
+ * grilla es cargar de nuevo ese dia, y la version anterior aparece en el
+ * historial como una mas. El historial no es decoracion: es lo unico que
+ * explica por que el numero de ayer era otro. Con un UPDATE, corregir un dedazo
+ * y cargar un dato nuevo son indistinguibles despues del hecho.
+ *
+ * QUE DIA SE PISA lo dice claveVigencia(): para Dolares Comitente es el del
+ * CRONOGRAMA, para Saldo de Inversiones es su FECHA.
+ *
+ * LOS DOLARES TIENEN DOS FECHAS, Y NO HACEN LO MISMO
+ * --------------------------------------------------
+ *   FECHA             la fecha del dato. VALUA: es la cotizacion que se usa.
+ *   FECHA_CRONOGRAMA  donde cae el importe en el eje del tablero.
+ *
+ * La de cronograma es una decision de PRESENTACION -en que dia quiero ver este
+ * importe-. Si valuara, mover una fila en la grilla cambiaria la plata, que es
+ * justo el acople que separarlas viene a romper. El razonamiento completo esta
+ * en sql/cashflow_dolares_comitente_cronograma.sql.
  *
  * SI LA TABLA NO ESTA, NO SE ROMPE
  * --------------------------------
@@ -61,8 +76,25 @@ class OtrosIngresos {
      * lo que permite que los dos circuitos compartan la plomeria en lugar de ser
      * cinco metodos copiados con otro nombre de tabla.
      */
-    const DOLARES = ['tabla' => 'RO_T_CASHFLOW_DOLARES_COMITENTE', 'campo' => 'IMPORTE_USD'];
-    const INVERSIONES = ['tabla' => 'RO_T_CASHFLOW_SALDO_INVERSIONES', 'campo' => 'IMPORTE_ARS'];
+    /**
+     * 'cronograma' es la tercera pieza y la unica que difiere entre los dos:
+     * el nombre de la columna que decide DONDE cae el importe en el eje, o null
+     * si el concepto no la tiene.
+     *
+     * Dolares Comitente la tiene porque son dos preguntas distintas: con que
+     * cotizacion se valua ese importe -FECHA- y en que dia del cronograma se
+     * muestra -FECHA_CRONOGRAMA-.
+     *
+     * Saldo de Inversiones la tiene en null, y no es un olvido: es un STOCK y
+     * su importe ya se ubica en el primer dia del eje y no en su fecha, en
+     * OtrosIngresosProvider::stockInversiones(). Una columna de cronograma ahi
+     * seria una columna que no hace nada y que alguien va a editar esperando
+     * que haga algo. Ver sql/cashflow_dolares_comitente_cronograma.sql.
+     */
+    const DOLARES = ['tabla' => 'RO_T_CASHFLOW_DOLARES_COMITENTE', 'campo' => 'IMPORTE_USD',
+                     'cronograma' => 'FECHA_CRONOGRAMA'];
+    const INVERSIONES = ['tabla' => 'RO_T_CASHFLOW_SALDO_INVERSIONES', 'campo' => 'IMPORTE_ARS',
+                         'cronograma' => null];
 
     /**
      * Con que punta se valuan los dolares de la cuenta comitente.
@@ -89,7 +121,12 @@ class OtrosIngresos {
        ==================================================================== */
 
     /**
-     * Si ya se corrio sql/cashflow_dolares_comitente.sql.
+     * Si el circuito de dolares esta instalado entero: la tabla de
+     * sql/cashflow_dolares_comitente.sql Y la fecha de cronograma de
+     * sql/cashflow_dolares_comitente_cronograma.sql.
+     *
+     * getAvisos() distingue cual de los dos falta; esto responde si se puede
+     * leer o no.
      *
      * @return bool
      */
@@ -112,10 +149,22 @@ class OtrosIngresos {
      * @return array
      */
     public function getAvisos() {
-        if (!$this->tablaCreada()) {
+        $estado = $this->estado(self::DOLARES);
+
+        if (!$estado['tabla']) {
             return ['Todavía no existe la tabla de dólares en cuenta comitente. '
                 . 'Corré sql/cashflow_dolares_comitente.sql contra la base central. '
                 . 'Mientras tanto, la fila del tablero se muestra en cero.'];
+        }
+
+        // La tabla está pero le falta la fecha de cronograma. Es un aviso
+        // aparte y no el de arriba: quien ya corrió el primer script leería que
+        // no existe una tabla que sí existe, y no encontraría qué hacer.
+        if (!$estado['cronograma']) {
+            return ['La tabla de dólares en cuenta comitente todavía no tiene la fecha de '
+                . 'cronograma. Corré sql/cashflow_dolares_comitente_cronograma.sql contra la '
+                . 'base central. Mientras tanto, la grilla va vacía y la fila del tablero se '
+                . 'muestra en cero: los importes cargados están, no se perdió ninguno.'];
         }
 
         if (empty($this->getDolaresComitente())) {
@@ -179,9 +228,10 @@ class OtrosIngresos {
      * mal. Con una sola cuenta, el total del tablero se ata fila por fila a lo
      * que se ve en la pantalla.
      *
-     * LA COTIZACION ES LA ULTIMA CONOCIDA A LA FECHA DE LA CARGA, no el cierre
-     * del mes. El motivo esta en el encabezado de
-     * Providers/OtrosIngresosProvider.php.
+     * LA COTIZACION ES LA ULTIMA CONOCIDA A LA FECHA DE LA CARGA -la del DATO,
+     * no la del cronograma-, y no el cierre del mes. El motivo del criterio
+     * esta en el encabezado de Providers/OtrosIngresosProvider.php; el de por
+     * que valua la de registro, en el encabezado de esta clase.
      *
      * Y ES LA PUNTA VENDEDORA. Es la unica pantalla del cashflow que no valua
      * con comprador: estos dolares estan en una cuenta y se miden contra lo que
@@ -269,12 +319,15 @@ class OtrosIngresos {
     }
 
     /**
-     * Todas las cargas de una fecha, la vigente y las pisadas, de la mas nueva
-     * a la mas vieja.
+     * Todas las cargas de un dia del CRONOGRAMA, la vigente y las pisadas, de
+     * la mas nueva a la mas vieja.
      *
-     * Es lo que explica por que el numero de ayer era otro.
+     * Es lo que explica por que el numero de ayer era otro, y por eso se pide
+     * por el dia del cronograma: es la columna del tablero cuyo numero cambio.
+     * Las versiones de esa columna pueden haberse registrado en dias distintos,
+     * y cada una trae su propia FECHA.
      *
-     * @param string $fecha 'Y-m-d'
+     * @param string $fecha 'Y-m-d' del cronograma
      * @return array
      */
     public function getHistorialFecha($fecha) {
@@ -296,19 +349,33 @@ class OtrosIngresos {
        ==================================================================== */
 
     /**
-     * Carga un importe en dolares para una fecha.
+     * Carga un importe en dolares para una fecha, o edita uno ya cargado.
      *
-     * @param string $fecha 'Y-m-d'
+     * LAS DOS COSAS SON LA MISMA LLAMADA. Editar no es un UPDATE: es cargar de
+     * nuevo ese dia de cronograma, y la version anterior queda en el historial.
+     * Ver guardarCarga().
+     *
+     * @param string $fecha 'Y-m-d'. La fecha del DATO: es la que valua. Al
+     *        editar, la pantalla manda la que la fila ya tenia
      * @param float $importeUsd
      * @param string|null $usuario
-     * @return array ['fecha', 'importe_usd', 'piso' => bool]
+     * @param string|null $fechaCronograma 'Y-m-d' donde se muestra el importe.
+     *        Null usa $fecha
+     * @param string|null $cronogramaAnterior 'Y-m-d' del dia del que sale,
+     *        cuando la edicion mueve el importe de un dia a otro
+     * @return array ['fecha', 'fecha_cronograma', 'importe_usd', 'piso' => bool,
+     *                'movio' => string|null]
      */
-    public function guardarDolaresComitente($fecha, $importeUsd, $usuario = null) {
+    public function guardarDolaresComitente($fecha, $importeUsd, $usuario = null,
+                                            $fechaCronograma = null,
+                                            $cronogramaAnterior = null) {
         $r = $this->guardarCarga(self::DOLARES, $fecha, $importeUsd, $usuario, 'dólares',
             'No existe la tabla de dólares en cuenta comitente. '
-            . 'Corré sql/cashflow_dolares_comitente.sql.');
+            . 'Corré sql/cashflow_dolares_comitente.sql.',
+            $fechaCronograma, $cronogramaAnterior);
 
-        return ['fecha' => $r['fecha'], 'importe_usd' => $r['importe'], 'piso' => $r['piso']];
+        return ['fecha' => $r['fecha'], 'fecha_cronograma' => $r['cronograma'],
+                'importe_usd' => $r['importe'], 'piso' => $r['piso'], 'movio' => $r['movio']];
     }
 
     /**
@@ -332,31 +399,68 @@ class OtrosIngresos {
 
        Los dos conceptos tienen el mismo modelo de datos y las mismas reglas
        -un importe vigente por fecha, sin baja fisica, historial completo-, asi
-       que comparten las consultas. Lo unico que cambia es la tabla y el nombre
-       de la columna del importe, y las dos vienen del concepto.
+       que comparten las consultas. Lo unico que cambia sale del concepto: la
+       tabla, el nombre de la columna del importe y si tiene o no fecha de
+       cronograma.
 
        Duplicar estos tres metodos para el concepto nuevo habria dejado dos
        transacciones que se pueden desincronizar: la del alta es la parte
-       delicada y tiene que estar escrita una sola vez.
+       delicada y tiene que estar escrita una sola vez. Por eso la fecha de
+       cronograma entro como una CLAVE MAS del concepto y no como un metodo
+       aparte para los dolares: la diferencia entre los dos circuitos queda
+       declarada en un lugar, que es para lo que la constante existe.
        ==================================================================== */
 
     /**
-     * Si la tabla del concepto existe. Se pregunta una vez por tabla: la
-     * pestana la consulta para los avisos y para la grilla.
+     * Con que columna se decide la vigencia de un concepto.
+     *
+     * La regla es "un importe vigente por dia", y el dia que cuenta es el del
+     * CRONOGRAMA cuando el concepto lo tiene: el significado de la regla es
+     * "una fila por columna del eje, nada se cuenta dos veces", y eso lo decide
+     * donde cae el importe y no cuando se cargo. Para el que no lo tiene, es su
+     * FECHA, que es lo mismo que era antes.
+     *
+     * ES PUBLICA Y ESTATICA para poder probarla sin SQL Server: es una decision
+     * de negocio -que dia se pisa- y no un detalle de la consulta. Mismo
+     * criterio que los helpers puros de Echeqs.
      *
      * @param array $concepto DOLARES o INVERSIONES
-     * @return bool
+     * @return string Nombre de la columna
      */
-    private function existe($concepto) {
+    public static function claveVigencia($concepto) {
+        return ($concepto['cronograma'] === null) ? 'FECHA' : $concepto['cronograma'];
+    }
+
+    /**
+     * Que hay instalado de un concepto: la tabla y, si la necesita, su columna
+     * de cronograma.
+     *
+     * LAS DOS COSAS SE PREGUNTAN JUNTAS porque las dos son "falta correr un
+     * script", y distinguirlas es lo que le permite al aviso decir CUAL. Sin la
+     * segunda, una instalacion con la tabla vieja no avisaba nada: la pantalla
+     * reventaba con un "Invalid column name" que no le dice nada a nadie.
+     *
+     * Se pregunta una vez por tabla: la pestana la consulta para los avisos y
+     * para la grilla.
+     *
+     * @param array $concepto DOLARES o INVERSIONES
+     * @return array ['tabla' => bool, 'cronograma' => bool]
+     */
+    private function estado($concepto) {
         $tabla = $concepto['tabla'];
 
         if (isset($this->tablas[$tabla])) {
             return $this->tablas[$tabla];
         }
 
+        $crono = $concepto['cronograma'];
         $cid = $this->conectar();
 
-        $stmt = sqlsrv_query($cid, "SELECT OBJECT_ID('dbo." . $tabla . "', 'U') AS T");
+        $stmt = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo." . $tabla . "', 'U') AS T"
+            . ($crono === null
+                ? ''
+                : ", COL_LENGTH('dbo." . $tabla . "', '" . $crono . "') AS C"));
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al verificar la tabla ' . $tabla));
@@ -365,9 +469,34 @@ class OtrosIngresos {
         $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
         sqlsrv_free_stmt($stmt);
 
-        $this->tablas[$tabla] = ($row && $row['T'] !== null);
+        $hayTabla = ($row && $row['T'] !== null);
+
+        $this->tablas[$tabla] = [
+            'tabla' => $hayTabla,
+            // Sin columna de cronograma, no hay nada que esperar: el concepto
+            // esta completo con su tabla.
+            'cronograma' => ($crono === null)
+                ? $hayTabla
+                : ($hayTabla && $row['C'] !== null)
+        ];
 
         return $this->tablas[$tabla];
+    }
+
+    /**
+     * Si el concepto esta completo: su tabla y su columna de cronograma.
+     *
+     * Con la columna a medias se devuelve false y no se consulta nada: leer
+     * igual dejaria la pantalla con un error de SQL en vez de un aviso que dice
+     * que script correr.
+     *
+     * @param array $concepto DOLARES o INVERSIONES
+     * @return bool
+     */
+    private function existe($concepto) {
+        $e = $this->estado($concepto);
+
+        return $e['tabla'] && $e['cronograma'];
     }
 
     /**
@@ -383,19 +512,25 @@ class OtrosIngresos {
 
         $tabla = $concepto['tabla'];
         $campo = $concepto['campo'];
+        $crono = $concepto['cronograma'];
+        $clave = self::claveVigencia($concepto);
         $cid = $this->conectar();
 
-        /* VERSIONES cuenta TODAS las cargas de esa fecha, vigentes y pisadas.
-           Es lo que le dice a la pantalla que hay historial para abrir: sin
-           ese numero, el enlace al historial estaria siempre y la mitad de las
-           veces no mostraria nada. */
-        $sql = "SELECT d.FECHA, d." . $campo . ", d.USUARIO, d.FECHA_ALTA,
+        /* VERSIONES cuenta TODAS las cargas de ese dia, vigentes y pisadas. Es
+           lo que le dice a la pantalla que hay historial para abrir: sin ese
+           numero, el enlace al historial estaria siempre y la mitad de las
+           veces no mostraria nada.
+
+           Cuenta por la CLAVE DE VIGENCIA y no por FECHA: son las versiones de
+           esa columna del cronograma, que es lo que el historial explica. */
+        $sql = "SELECT d.FECHA, d." . $campo . ", d.USUARIO, d.FECHA_ALTA"
+             . ($crono === null ? '' : ", d." . $crono) . ",
                        (SELECT COUNT(*)
                           FROM dbo." . $tabla . " h
-                         WHERE h.FECHA = d.FECHA) AS VERSIONES
+                         WHERE h." . $clave . " = d." . $clave . ") AS VERSIONES
                 FROM dbo." . $tabla . " d
                 WHERE d.VIGENTE = 1
-                ORDER BY d.FECHA DESC";
+                ORDER BY d." . $clave . " DESC";
 
         $stmt = sqlsrv_query($cid, $sql);
 
@@ -406,13 +541,19 @@ class OtrosIngresos {
         $v = [];
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            $v[] = [
+            $fila = [
                 'FECHA' => Horizonte::normalizarFecha($row['FECHA']),
                 $campo => floatval($row[$campo]),
                 'USUARIO' => $row['USUARIO'],
                 'FECHA_ALTA' => $this->fechaHora($row['FECHA_ALTA']),
                 'VERSIONES' => intval($row['VERSIONES'])
             ];
+
+            if ($crono !== null) {
+                $fila[$crono] = Horizonte::normalizarFecha($row[$crono]);
+            }
+
+            $v[] = $fila;
         }
 
         sqlsrv_free_stmt($stmt);
@@ -434,12 +575,18 @@ class OtrosIngresos {
         }
 
         $campo = $concepto['campo'];
+        $crono = $concepto['cronograma'];
+        $clave = self::claveVigencia($concepto);
         $f = self::validarFecha($fecha);
         $cid = $this->conectar();
 
-        $sql = "SELECT ID, FECHA, " . $campo . ", VIGENTE, USUARIO, FECHA_ALTA
+        // Se pide por la CLAVE DE VIGENCIA: lo que el historial explica es por
+        // que el numero de ESA COLUMNA DEL CRONOGRAMA era otro, y las versiones
+        // de esa columna pueden haberse registrado en dias distintos.
+        $sql = "SELECT ID, FECHA, " . $campo . ", VIGENTE, USUARIO, FECHA_ALTA"
+             . ($crono === null ? '' : ", " . $crono) . "
                 FROM dbo." . $concepto['tabla'] . "
-                WHERE FECHA = ?
+                WHERE " . $clave . " = ?
                 ORDER BY ID DESC";
 
         $stmt = sqlsrv_query($cid, $sql, [$f]);
@@ -451,7 +598,7 @@ class OtrosIngresos {
         $v = [];
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            $v[] = [
+            $fila = [
                 'ID' => intval($row['ID']),
                 'FECHA' => Horizonte::normalizarFecha($row['FECHA']),
                 $campo => floatval($row[$campo]),
@@ -459,6 +606,12 @@ class OtrosIngresos {
                 'USUARIO' => $row['USUARIO'],
                 'FECHA_ALTA' => $this->fechaHora($row['FECHA_ALTA'])
             ];
+
+            if ($crono !== null) {
+                $fila[$crono] = Horizonte::normalizarFecha($row[$crono]);
+            }
+
+            $v[] = $fila;
         }
 
         sqlsrv_free_stmt($stmt);
@@ -469,29 +622,82 @@ class OtrosIngresos {
     /**
      * Carga un importe para una fecha.
      *
-     * NO HACE UPDATE. Marca VIGENTE = 0 las cargas anteriores de esa fecha e
+     * NO HACE UPDATE. Marca VIGENTE = 0 las cargas anteriores de ese dia e
      * inserta una fila nueva, LAS DOS COSAS EN UNA TRANSACCION: si la baja
-     * confirmara y el alta fallara, la fecha se quedaria sin importe vigente y
+     * confirmara y el alta fallara, el dia se quedaria sin importe vigente y
      * la fila del tablero perderia esa plata en silencio.
      *
+     * EDITAR PASA POR ACA. No hay un camino aparte para editar un importe ya
+     * cargado: editar es cargar de nuevo ese dia de cronograma, y la version
+     * anterior queda en el historial. El historial es lo unico que explica por
+     * que el numero de ayer era otro; con un UPDATE, corregir un dedazo y
+     * cargar un dato nuevo son indistinguibles despues del hecho.
+     *
+     * QUE DIA SE PISA: el de la CLAVE DE VIGENCIA, que para los dolares es la
+     * fecha de CRONOGRAMA. Mover una fila a un dia que ya tiene importe lo pisa,
+     * y por eso 'piso' vuelve al llamador: es lo unico que le permite a la
+     * pantalla decir que ese otro importe cambio de estado.
+     *
+     * LA FECHA DE REGISTRO NO SE PIERDE al editar. La manda el llamador, y la
+     * pantalla manda la que la fila ya tenia: si se pusiera hoy, editar el
+     * importe le cambiaria tambien la cotizacion con la que se valua, y el
+     * numero se moveria por un motivo que nadie pidio.
+     *
      * @param array $concepto
-     * @param string $fecha 'Y-m-d'
+     * @param string $fecha 'Y-m-d'. La fecha del DATO: es la que valua
      * @param mixed $importe
      * @param string|null $usuario
      * @param string $moneda Como se nombra la moneda en los mensajes de error
      * @param string $faltaTabla Mensaje si no se corrio el script
-     * @return array ['fecha', 'importe', 'piso' => bool]
+     * MOVER UN IMPORTE DE DIA RETIRA EL DIA DE ORIGEN, en la misma transaccion.
+     * Sin eso, la fila vieja seguiria vigente en su dia y el importe se contaria
+     * DOS VECES: una en el dia viejo y otra en el nuevo. El dia de origen lo
+     * manda la pantalla en $cronogramaAnterior, porque es la unica que sabe de
+     * que fila salio la edicion.
+     *
+     * @param string|null $cronograma 'Y-m-d' donde cae el importe en el eje.
+     *        Null usa $fecha, que es lo correcto en un alta: quien carga sin
+     *        elegir cronograma quiere verlo el dia del dato. Se ignora si el
+     *        concepto no tiene columna de cronograma
+     * @param string|null $cronogramaAnterior 'Y-m-d' del que sale, cuando la
+     *        edicion MUEVE un importe de un dia a otro. Null en un alta
+     * @return array ['fecha', 'cronograma', 'importe', 'piso' => bool,
+     *                'movio' => string|null]
      */
-    private function guardarCarga($concepto, $fecha, $importe, $usuario, $moneda, $faltaTabla) {
+    private function guardarCarga($concepto, $fecha, $importe, $usuario, $moneda, $faltaTabla,
+                                  $cronograma = null, $cronogramaAnterior = null) {
         if (!$this->existe($concepto)) {
             throw new Exception($faltaTabla);
         }
 
         $tabla = $concepto['tabla'];
         $campo = $concepto['campo'];
+        $crono = $concepto['cronograma'];
+        $clave = self::claveVigencia($concepto);
 
         $f = self::validarFecha($fecha);
         $monto = self::validarImporte($importe, $moneda);
+
+        // Sin columna de cronograma el parametro no existe para este concepto:
+        // aceptarlo en silencio dejaria a alguien creyendo que hizo algo.
+        $fc = ($crono === null)
+            ? $f
+            : self::validarFecha(($cronograma === null || $cronograma === '') ? $fecha : $cronograma);
+
+        // El dia que se pisa. Con cronograma es el del cronograma; sin el, es el
+        // mismo $f de siempre.
+        $dia = ($crono === null) ? $f : $fc;
+
+        // De donde sale, si esta edicion MUEVE el importe. Null si no se mueve.
+        $desde = null;
+
+        if ($crono !== null && $cronogramaAnterior !== null && $cronogramaAnterior !== '') {
+            $anterior = self::validarFecha($cronogramaAnterior);
+
+            if ($anterior !== $dia) {
+                $desde = $anterior;
+            }
+        }
 
         $cid = $this->conectar();
 
@@ -500,11 +706,29 @@ class OtrosIngresos {
         }
 
         try {
+            // EL DIA DE ORIGEN SE RETIRA PRIMERO Y EN LA MISMA TRANSACCION. Si
+            // esto quedara afuera, la fila vieja seguiria vigente en su dia y el
+            // importe se contaria dos veces. No es baja fisica: queda como una
+            // version pisada mas, y el historial de ese dia la muestra.
+            if ($desde !== null) {
+                $stmt = sqlsrv_query($cid,
+                    "UPDATE dbo." . $tabla . "
+                     SET VIGENTE = 0
+                     WHERE " . $clave . " = ? AND VIGENTE = 1",
+                    [$desde]);
+
+                if ($stmt === false) {
+                    throw new Exception($this->errorSql('Error al retirar el día de origen'));
+                }
+
+                sqlsrv_free_stmt($stmt);
+            }
+
             $stmt = sqlsrv_query($cid,
                 "UPDATE dbo." . $tabla . "
                  SET VIGENTE = 0
-                 WHERE FECHA = ? AND VIGENTE = 1",
-                [$f]);
+                 WHERE " . $clave . " = ? AND VIGENTE = 1",
+                [$dia]);
 
             if ($stmt === false) {
                 throw new Exception($this->errorSql('Error al dar de baja la carga anterior'));
@@ -513,11 +737,18 @@ class OtrosIngresos {
             $piso = (sqlsrv_rows_affected($stmt) > 0);
             sqlsrv_free_stmt($stmt);
 
+            $cols = 'FECHA, ' . $campo . ', VIGENTE, USUARIO'
+                . ($crono === null ? '' : ', ' . $crono);
+            $vals = '?, ?, 1, ?' . ($crono === null ? '' : ', ?');
+            $args = [$f, $monto, $usuario];
+
+            if ($crono !== null) {
+                $args[] = $fc;
+            }
+
             $stmt = sqlsrv_query($cid,
-                "INSERT INTO dbo." . $tabla . "
-                     (FECHA, " . $campo . ", VIGENTE, USUARIO)
-                 VALUES (?, ?, 1, ?)",
-                [$f, $monto, $usuario]);
+                "INSERT INTO dbo." . $tabla . " (" . $cols . ") VALUES (" . $vals . ")",
+                $args);
 
             if ($stmt === false) {
                 throw new Exception($this->errorSql('Error al guardar el importe'));
@@ -531,7 +762,8 @@ class OtrosIngresos {
             throw $e;
         }
 
-        return ['fecha' => $f, 'importe' => $monto, 'piso' => $piso];
+        return ['fecha' => $f, 'cronograma' => $fc, 'importe' => $monto,
+                'piso' => $piso, 'movio' => $desde];
     }
 
     /* ====================================================================

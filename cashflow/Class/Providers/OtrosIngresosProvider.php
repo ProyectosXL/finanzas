@@ -201,7 +201,11 @@ class OtrosIngresosProvider extends CashflowProvider {
     }
 
     /**
-     * Los dolares vigentes por fecha, convertidos a pesos.
+     * Los dolares vigentes, convertidos a pesos y ubicados en el eje.
+     *
+     * DOS FECHAS, DOS FUNCIONES DISTINTAS: se valua por FECHA -la del dato- y
+     * se ubica por FECHA_CRONOGRAMA -donde se quiere ver el importe-. Ver el
+     * encabezado de OtrosIngresos.
      *
      * @param Horizonte $h
      * @return array Serie
@@ -238,7 +242,11 @@ class OtrosIngresosProvider extends CashflowProvider {
 
             $usados[$fila['TC_FECHA']] = $fila['TC'];
 
-            if (!$h->acumular($serie, $fila['FECHA'], $fila['IMPORTE_ARS'])) {
+            // SE UBICA POR FECHA_CRONOGRAMA Y SE VALUA POR FECHA. Son dos
+            // preguntas distintas: en que dia se muestra este importe, y con
+            // que cotizacion se convierte. La valuacion ya la hizo
+            // valuarDolares() sobre la fecha del dato.
+            if (!$h->acumular($serie, $fila['FECHA_CRONOGRAMA'], $fila['IMPORTE_ARS'])) {
                 $serie['fuera_horizonte'] += $fila['IMPORTE_ARS'];
             }
         }

@@ -337,6 +337,66 @@ chequear('y la pestana de dolares tampoco',
 /* ================================================================
    Contra la base
    ================================================================ */
+/* ================================================================
+   LAS DOS FECHAS DE LOS DOLARES
+
+   FECHA            la del dato. VALUA.
+   FECHA_CRONOGRAMA donde cae el importe en el eje. Editable.
+
+   La de cronograma es una decision de PRESENTACION: si valuara, mover una fila
+   en la grilla cambiaria la plata, que es el acople que separarlas viene a
+   romper. Estas pruebas van ANTES del corte por base: son decisiones puras y
+   tienen que correr aunque no haya SQL Server.
+   ================================================================ */
+seccion('los dolares tienen dos fechas y el saldo de inversiones una');
+
+chequear('los dolares declaran su columna de cronograma',
+    'FECHA_CRONOGRAMA', OtrosIngresos::DOLARES['cronograma']);
+
+// NO es un olvido: el saldo de inversiones es un STOCK y su importe ya se ubica
+// en el primer dia del eje y no en su fecha. Una columna de cronograma ahi
+// seria una columna que no hace nada y que alguien va a editar esperando que
+// haga algo.
+chequear('el saldo de inversiones no tiene ninguna', null,
+    OtrosIngresos::INVERSIONES['cronograma']);
+
+seccion('que dia se pisa al guardar');
+
+// La regla sigue siendo "un importe vigente por dia". Lo que cambia es CUAL
+// dia: el que decide en que columna del eje cae el importe.
+chequear('en los dolares manda el dia del cronograma',
+    'FECHA_CRONOGRAMA', OtrosIngresos::claveVigencia(OtrosIngresos::DOLARES));
+chequear('en el saldo de inversiones sigue siendo su FECHA',
+    'FECHA', OtrosIngresos::claveVigencia(OtrosIngresos::INVERSIONES));
+
+seccion('el script de la fecha de cronograma');
+
+$migracion = __DIR__ . '/../sql/cashflow_dolares_comitente_cronograma.sql';
+
+chequear('el script existe', true, file_exists($migracion));
+
+$sqlCrono = file_get_contents($migracion);
+
+// Las filas que ya estan quedan con la MISMA fecha en los dos campos, asi que
+// el dia que se corra el script el tablero no se mueve ni un peso.
+chequear('rellena las filas que ya estan con su propia fecha', true,
+    strpos($sqlCrono, 'SET FECHA_CRONOGRAMA = FECHA') !== false);
+
+// Reejecutable: correrlo dos veces no puede cambiar ningun dato.
+chequear('no agrega la columna si ya esta', true,
+    strpos($sqlCrono, "COL_LENGTH('dbo.RO_T_CASHFLOW_DOLARES_COMITENTE', 'FECHA_CRONOGRAMA') IS NULL")
+        !== false);
+chequear('y el relleno solo toca lo que esta en null', true,
+    strpos($sqlCrono, 'WHERE FECHA_CRONOGRAMA IS NULL') !== false);
+
+// NOT NULL recien despues de rellenar: una fila sin fecha de cronograma no
+// tendria columna donde mostrarse y desapareceria del tablero sin aviso.
+chequear('deja la columna NOT NULL', true,
+    strpos($sqlCrono, 'ALTER COLUMN FECHA_CRONOGRAMA DATE NOT NULL') !== false);
+chequear('y recien despues de rellenarla', true,
+    strpos($sqlCrono, 'SET FECHA_CRONOGRAMA = FECHA')
+        < strpos($sqlCrono, 'ALTER COLUMN FECHA_CRONOGRAMA DATE NOT NULL'));
+
 seccion('contra la base');
 
 if (!Pruebas::hayBase()) {
@@ -346,8 +406,13 @@ if (!Pruebas::hayBase()) {
 
 $otros = new OtrosIngresos();
 
+/* tablaCreada() pide el circuito ENTERO: la tabla y su fecha de cronograma. El
+   mensaje nombra los dos scripts porque los dos dejan la grilla vacía y no es
+   lo mismo: uno es una instalación nueva y el otro una que quedó a mitad. */
 if (!$otros->tablaCreada()) {
-    Pruebas::saltear('falta correr sql/cashflow_dolares_comitente.sql');
+    Pruebas::saltear('falta correr sql/cashflow_dolares_comitente.sql '
+        . 'o sql/cashflow_dolares_comitente_cronograma.sql');
+
     return;
 }
 
@@ -355,16 +420,28 @@ $filas = $otros->getDolaresComitente();
 
 chequear('getDolaresComitente devuelve un array', true, is_array($filas));
 
-// Una fecha no puede tener dos importes vigentes: es lo que garantiza que la
-// fila del tablero no cuente la misma plata dos veces.
-$porFecha = [];
-
-foreach ($filas as $f) {
-    $porFecha[$f['FECHA']] = isset($porFecha[$f['FECHA']]) ? $porFecha[$f['FECHA']] + 1 : 1;
+// Cada fila trae las DOS fechas: la del dato -que valua- y la del cronograma
+// -que ubica-. Sin la segunda, el proveedor ubicaria en null y el importe
+// desapareceria del tablero sin aviso.
+if (!empty($filas)) {
+    chequear('cada fila trae la fecha del dato', true, isset($filas[0]['FECHA']));
+    chequear('y la fecha de cronograma', true,
+        array_key_exists('FECHA_CRONOGRAMA', $filas[0]));
 }
 
-chequear('ninguna fecha tiene dos importes vigentes',
-    [], array_keys(array_filter($porFecha, function ($n) { return $n > 1; })));
+// Un DIA DEL CRONOGRAMA no puede tener dos importes vigentes: es lo que
+// garantiza que la fila del tablero no cuente la misma plata dos veces. La
+// clave es la de cronograma y no la del dato, porque es la que decide en que
+// columna cae el importe.
+$porDia = [];
+
+foreach ($filas as $f) {
+    $dia = $f['FECHA_CRONOGRAMA'];
+    $porDia[$dia] = isset($porDia[$dia]) ? $porDia[$dia] + 1 : 1;
+}
+
+chequear('ningun dia del cronograma tiene dos importes vigentes',
+    [], array_keys(array_filter($porDia, function ($n) { return $n > 1; })));
 
 /* ================================================================
    LA VALUACION DE LOS DOLARES: LA CUENTA ABIERTA

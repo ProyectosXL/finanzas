@@ -102,6 +102,33 @@
     cursor: help;
 }
 
+/* ============================================================================
+   LAS DOS FECHAS DE LA GRILLA
+
+   Cronograma es editable y manda: es donde se muestra el importe. La fecha del
+   dato va en gris y no se toca desde acá, porque es la que decide con qué
+   cotización se valúa. Que una sea un campo y la otra texto es la mitad de lo
+   que las distingue; el color es la otra mitad.
+   ============================================================================ */
+
+.tab-dolares_comitente .dol-fecha-dato {
+    font-size: 0.8rem;
+    color: var(--text-muted, #8c93a8);
+    cursor: help;
+}
+
+/* Una fila con cambios sin guardar. Sin esto, el botón que aparece al costado
+   es la única señal de que algo quedó a medio hacer, y en una grilla de varias
+   filas eso se pierde de vista. */
+.tab-dolares_comitente tr.dol-editada > td {
+    background-color: #fff8e1;
+}
+
+.tab-dolares_comitente .dol-crono,
+.tab-dolares_comitente .dol-usd {
+    min-width: 110px;
+}
+
 /* La PUNTA, al lado del valor. Ésta es la única pestaña del cashflow que valúa
    con el vendedor, así que su total no cierra contra el de las otras: la
    etiqueta es lo que hace que eso se lea como una decisión y no como un error.

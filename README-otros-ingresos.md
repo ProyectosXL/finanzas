@@ -25,9 +25,14 @@ Contra `central`:
 
 ```sql
 -- 1. sql/cashflow_dolares_comitente.sql
--- 2. sql/cashflow_saldo_inversiones.sql
--- 3. sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql   (la cotización diaria)
+-- 2. sql/cashflow_dolares_comitente_cronograma.sql   (la fecha de cronograma)
+-- 3. sql/cashflow_saldo_inversiones.sql
+-- 4. sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql          (la cotización diaria)
 ```
+
+El segundo agrega `FECHA_CRONOGRAMA` y deja las filas que ya están **con la misma fecha en los dos campos**, así que el día que se corre el tablero no se mueve ni un peso. Va después del primero y es reejecutable.
+
+**Sin él la pestaña avisa y va vacía, no rompe.** `OtrosIngresos::estado()` pregunta por la tabla *y* por la columna en la misma consulta, y el aviso distingue los dos casos: "no existe la tabla" y "la tabla no tiene todavía la fecha de cronograma" no se resuelven con el mismo script, y quien ya corrió el primero leería que no existe una tabla que sí existe.
 
 El tercero crea la vista **diaria** del dólar oficial. Sin ella, `Cotizacion::ultimaHasta()` lanza, la pestaña avisa y la columna en pesos va con un guión: los dólares cargados están, lo que falta es a cuánto valuarlos. La fila del tablero se muestra en cero. No rompe.
 
@@ -42,6 +47,52 @@ El segundo crea `RO_T_CASHFLOW_SALDO_INVERSIONES` y **crea** la fila `SALDO_INVE
 ---
 
 ## Dólares Cuenta Comitente
+
+### Dos fechas, dos funciones distintas
+
+> Esto **cambió**. La tabla tenía una sola `FECHA` haciendo las dos cosas a la vez.
+
+| Columna | Qué decide | Editable |
+| --- | --- | --- |
+| `FECHA` | la fecha del **dato**: con qué cotización se valúa ese importe | no, desde la grilla |
+| `FECHA_CRONOGRAMA` | **dónde** cae el importe en el eje del tablero y en la grilla | **sí** |
+
+Se puede saber hoy que va a haber dólares disponibles y querer verlos en el cronograma el día que se van a usar. Con una sola fecha, correr el importe en el cronograma le cambiaba la valuación, y valuarlo bien lo obligaba a mostrarse el día de la carga.
+
+**Valúa la de registro, y el motivo no es el que parece.** No es que valuar por la de cronograma devuelva `null` cuando esa fecha es futura: `ultimaHasta()` hace `WHERE Fecha <= ?`, así que para una fecha futura devuelve *la última disponible*, no nada. El motivo es otro: **la fecha de cronograma es una decisión de presentación** —en qué día quiero ver este importe— y si valuara, mover una fila en la grilla cambiaría la plata. Ése es exactamente el acople que separarlas viene a romper.
+
+En el alta las dos arrancan iguales: el formulario tiene un solo campo de fecha. El cronograma se ajusta después, en la grilla.
+
+### La vigencia es por día de CRONOGRAMA
+
+La regla era *"un importe vigente por `FECHA`"*. Con dos fechas hay que elegir, y manda la del cronograma: el **significado** de la regla es *"una fila por columna del eje, nada se cuenta dos veces"*, y eso ahora lo decide dónde cae el importe, no cuándo se cargó. La fecha de registro pasa a ser metadato, como `USUARIO` y `FECHA_ALTA`.
+
+Lo resuelve **`OtrosIngresos::claveVigencia()`**, pública y estática para poder probarla sin SQL Server: es una decisión de negocio —qué día se pisa— y no un detalle de la consulta. El historial se lee por la misma clave, porque lo que explica es *por qué el número de esa columna del tablero era otro*, y las versiones de una columna pueden haberse registrado en días distintos.
+
+### Editar no es un `UPDATE`, y mover tampoco
+
+El importe y el día de cronograma se editan **en la grilla**, y los dos pasan por `guardarCarga()`: se marca `VIGENTE = 0` la versión anterior y se inserta una nueva. No hay un endpoint de edición aparte a propósito — insinuaría que hay un camino que modifica en el lugar, y no lo hay. En el historial, una edición aparece como **una versión más**.
+
+> **Mover un importe de día retira el día de origen, en la misma transacción.** Es el caso que no es obvio: sin eso, la fila vieja seguiría vigente en su día y el importe se contaría **dos veces**, una en cada columna. El día de origen lo manda la pantalla en `cronograma_anterior`, porque es la única que sabe de qué fila salió la edición.
+
+Tres cosas que la pantalla cuida, y por qué:
+
+- **La fecha del dato se manda de vuelta tal cual vino.** Si al editar el importe se mandara hoy, cambiaría también la cotización con la que se valúa y el número se movería por algo que nadie pidió.
+- **El botón de guardar de cada fila aparece sólo cuando esa fila tiene algo cambiado.** Un botón siempre activo invita a apretarlo, y apretarlo sin cambios generaría una versión idéntica en el historial: ruido permanente sobre el registro que existe justamente para explicar los cambios. El importe se compara **como número**, así que `1000` y `1000.00` no cuentan como cambio.
+- **Mover una fila a un día que ya tiene importe lo pisa**, y el mensaje lo dice con las dos fechas. Es lo único que distingue esa pisada de las otras: el usuario no la pidió explícitamente.
+
+### La plomería es compartida, y la diferencia está declarada en un lugar
+
+`guardarCarga()`, `leerVigentes()` y `leerHistorial()` los usan los dos conceptos. La fecha de cronograma entró como **una clave más de la constante del concepto**, que es para lo que esa constante existe:
+
+```php
+const DOLARES     = ['tabla' => …, 'campo' => 'IMPORTE_USD', 'cronograma' => 'FECHA_CRONOGRAMA'];
+const INVERSIONES = ['tabla' => …, 'campo' => 'IMPORTE_ARS', 'cronograma' => null];
+```
+
+Los tres métodos preguntan por `null` en tres lugares y **no se duplica ninguno**. Duplicarlos habría dejado dos transacciones que se pueden desincronizar, y la del alta es la parte delicada.
+
+**Saldo de Inversiones no recibe la columna, y no es un olvido.** Ese saldo es un `STOCK`: su importe **ya** se ubica en el primer día del eje y no en su fecha (`OtrosIngresosProvider::stockInversiones()`). Sus dos fechas ya estaban desacopladas. Darle una columna de cronograma sería darle una columna que no hace nada y que alguien va a editar esperando que haga algo.
 
 ### Es un ingreso, no una disponibilidad
 
@@ -109,7 +160,7 @@ Las dos vistas exponen **las dos puntas** (`Comprador AS TCC`, `Vendedor AS TCV`
 
 ### La cuenta se muestra abierta
 
-La grilla de la pestaña tiene cuatro columnas donde antes tenía una: **USD × cotización (con su fecha y su punta) = importe en pesos**. El total en pesos del pie es exactamente el que va a la fila del tablero, así que ese número se puede auditar fila por fila desde la pantalla.
+La grilla de la pestaña tiene cuatro columnas donde antes tenía una: **USD × cotización (con su fecha y su punta) = importe en pesos**. Las dos primeras columnas son las dos fechas: *Cronograma*, editable, y *Fecha dato*, en gris. El total en pesos del pie es exactamente el que va a la fila del tablero, así que ese número se puede auditar fila por fila desde la pantalla.
 
 La cuenta la hace **`OtrosIngresos::valuarDolares()`**, y la usan los dos: el proveedor para armar la serie y el controller para la grilla. Si cada uno multiplicara por su cuenta, los dos totales podrían discrepar y no habría forma de saber cuál está mal.
 
@@ -119,7 +170,7 @@ Sin cotización, `TC` e `IMPORTE_ARS` van en **`null`, no en cero**, y la celda 
 
 ### El importe vigente se pisa, pero el historial queda
 
-Cargar una fecha que ya tiene importe **no hace `UPDATE`**: marca `VIGENTE = 0` las cargas anteriores de esa fecha e inserta una nueva, **todo en una transacción**. Nunca hay baja física, igual que en el resto del módulo. El proveedor y la grilla leen sólo `VIGENTE = 1`.
+Cargar un día que ya tiene importe **no hace `UPDATE`**: marca `VIGENTE = 0` las cargas anteriores de ese día e inserta una nueva, **todo en una transacción**. Nunca hay baja física, igual que en el resto del módulo. El proveedor y la grilla leen sólo `VIGENTE = 1`. Qué día se pisa lo dice `claveVigencia()` — ver arriba.
 
 **El historial no es una auditoría escondida: es lo único que explica por qué el número de ayer era otro.** Con un `UPDATE`, corregir un dedazo y cargar un dato nuevo son indistinguibles después del hecho.
 
@@ -130,6 +181,8 @@ En la grilla, el enlace al historial aparece **sólo cuando hay más de una carg
 ### El formulario es mínimo a propósito
 
 Fecha e importe en dólares. Nada más. Todo lo demás —la conversión, la vigencia, el historial— lo resuelve el backend.
+
+**El alta sigue teniendo una sola fecha**, y usa la misma para el dato y para el cronograma: quien carga sin elegir cronograma quiere ver el importe el día del dato. Un segundo campo en el formulario obligaría a decidir dos cosas en el caso normal, que es aquel en el que las dos son la misma. El cronograma se ajusta después, en la grilla, que es donde se ve contra qué se lo está moviendo.
 
 - **Cero es un importe válido**: significa que ese día no había dólares en la cuenta, y es un dato distinto de no haber cargado nada.
 - **Un negativo se rechaza**: restaría del tablero en vez de sumar.

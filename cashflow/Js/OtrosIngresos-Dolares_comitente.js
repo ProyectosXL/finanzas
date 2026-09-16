@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Otros Ingresos → Dólares Cuenta Comitente
  *
  * El formulario es mínimo a propósito: fecha e importe en dólares. Todo lo
@@ -97,27 +97,55 @@
             : '';
     }
 
+    /**
+     * La grilla, con el importe y el día de cronograma editables.
+     *
+     * EDITAR NO ES UN UPDATE, y la pantalla no tiene por qué saberlo: manda el
+     * mismo `saveDolaresComitente` que el alta, y el backend da de baja la
+     * versión anterior e inserta una nueva. Un endpoint de edición aparte
+     * insinuaría que hay un camino que modifica en el lugar, y no lo hay.
+     *
+     * LA FECHA DEL DATO NO ES EDITABLE desde acá y va en gris: es la que decide
+     * con qué cotización se valúa el importe. Editarla cambiaría el número en
+     * pesos, que es exactamente lo que separar las dos fechas viene a evitar.
+     * Por eso se manda de vuelta tal cual vino.
+     */
     function pintarFilas() {
         var filas = (datos && datos.filas) || [];
         var html = '';
 
-        filas.forEach(function(f) {
+        filas.forEach(function(f, i) {
             var versiones = Number(f.VERSIONES) || 1;
+            var crono = f.FECHA_CRONOGRAMA || f.FECHA;
 
-            html += '<tr>'
-                + '<td class="fw-semibold">' + fechaCorta(f.FECHA) + '</td>'
-                + '<td class="currency fw-bold">' + dolares(f.IMPORTE_USD) + '</td>'
+            html += '<tr data-fila="' + i + '" data-crono="' + escapar(crono) + '"'
+                +     ' data-fecha="' + escapar(f.FECHA) + '"'
+                +     ' data-usd="' + escapar(String(f.IMPORTE_USD)) + '">'
+                + '<td><input type="date" class="form-control form-control-sm dol-crono" '
+                +     'value="' + escapar(crono) + '" '
+                +     'title="El día en el que este importe se muestra en el cronograma. '
+                +     'Cambiarlo no le cambia la cotización."></td>'
+                + '<td class="dol-fecha-dato" title="La fecha del dato: es la que decide con '
+                +     'qué cotización se valúa. No se edita desde acá.">'
+                +     fechaCorta(f.FECHA) + '</td>'
+                + '<td><input type="number" step="0.01" min="0" '
+                +     'class="form-control form-control-sm text-end dol-usd" '
+                +     'value="' + escapar(String(f.IMPORTE_USD)) + '"></td>'
                 + celdaCotizacion(f)
                 + celdaPesos(f)
                 + '<td class="text-center dol-alta">' + escapar(f.FECHA_ALTA || '—')
                 +     subtituloUsuario(f.USUARIO) + '</td>'
-                + '<td class="text-center">' + celdaHistorial(f.FECHA, versiones) + '</td>'
-                + '<td></td>'
+                + '<td class="text-center">' + celdaHistorial(crono, versiones) + '</td>'
+                + '<td class="text-center">'
+                +     '<button class="btn btn-sm btn-primary dol-guardar" style="display:none;" '
+                +     'title="Guarda una versión nueva. La anterior queda en el historial.">'
+                +     '<i class="fas fa-save"></i></button>'
+                + '</td>'
                 + '</tr>';
         });
 
         if (!filas.length) {
-            html = '<tr><td colspan="7" class="text-center text-muted py-4">'
+            html = '<tr><td colspan="8" class="text-center text-muted py-4">'
                  + 'Todavía no hay importes cargados. La fila del tablero muestra cero.'
                  + '</td></tr>';
         }
@@ -130,7 +158,117 @@
             });
         });
 
+        conectarEdicion();
         pintarPie(filas);
+    }
+
+    /* ================================================================
+       EDICION EN LA GRILLA
+
+       El botón de guardar de cada fila aparece SÓLO cuando esa fila tiene
+       algo cambiado. Un botón siempre activo invita a apretarlo, y acá
+       apretarlo sin haber cambiado nada genera una versión idéntica a la
+       anterior en el historial: ruido permanente sobre el registro que
+       existe justamente para explicar los cambios.
+       ================================================================ */
+
+    function conectarEdicion() {
+        document.querySelectorAll('#bodyDol tr[data-fila]').forEach(function(tr) {
+            var btn = tr.querySelector('.dol-guardar');
+
+            if (!btn) {
+                return;
+            }
+
+            ['.dol-crono', '.dol-usd'].forEach(function(sel) {
+                var inp = tr.querySelector(sel);
+
+                if (inp) {
+                    inp.addEventListener('input', function() { revisarFila(tr); });
+                }
+            });
+
+            btn.addEventListener('click', function() { guardarFila(tr); });
+        });
+    }
+
+    /** Si la fila difiere de lo que vino del backend, se puede guardar */
+    function cambios(tr) {
+        var crono = tr.querySelector('.dol-crono');
+        var usd = tr.querySelector('.dol-usd');
+
+        return {
+            crono: crono ? String(crono.value) : '',
+            usd: usd ? String(usd.value).trim() : '',
+            cronoOriginal: tr.getAttribute('data-crono'),
+            usdOriginal: tr.getAttribute('data-usd'),
+            fecha: tr.getAttribute('data-fecha')
+        };
+    }
+
+    function revisarFila(tr) {
+        var c = cambios(tr);
+        var btn = tr.querySelector('.dol-guardar');
+        var movio = (c.crono !== c.cronoOriginal);
+
+        // Comparado como número: '1000' y '1000.00' son el mismo importe, y
+        // ofrecer guardar ahí sería ofrecer una versión que no cambia nada.
+        var cambioImporte = (c.usd !== '' && Number(c.usd) !== Number(c.usdOriginal));
+
+        tr.classList.toggle('dol-editada', movio || cambioImporte);
+        btn.style.display = (movio || cambioImporte) ? '' : 'none';
+    }
+
+    function guardarFila(tr) {
+        var c = cambios(tr);
+
+        if (!c.crono) {
+            Notificacion.error('Elegí el día del cronograma.');
+            return;
+        }
+
+        if (c.usd === '' || isNaN(Number(c.usd))) {
+            Notificacion.error('El importe en dólares no es un número.');
+            return;
+        }
+
+        if (Number(c.usd) < 0) {
+            Notificacion.error('El importe no puede ser negativo: restaría del tablero '
+                + 'en vez de sumar.');
+
+            return;
+        }
+
+        var btn = tr.querySelector('.dol-guardar');
+
+        btn.disabled = true;
+
+        // 'fecha' es la que la fila YA TENÍA: es la que valúa, y editar el
+        // importe no tiene por qué cambiarle la cotización.
+        // 'cronograma_anterior' es lo que le permite al backend retirar el día
+        // de origen en la misma transacción: sin eso, mover una fila dejaría el
+        // importe contado dos veces.
+        pedirJson(URL_OTROS + '?action=saveDolaresComitente', {
+                fecha: c.fecha,
+                importe_usd: Number(c.usd),
+                fecha_cronograma: c.crono,
+                cronograma_anterior: c.cronoOriginal
+            })
+            .then(function(data) {
+                Notificacion.exito(data && data.movio
+                    ? 'Importe movido al ' + fechaCorta(c.crono) + '.'
+                    : 'Importe actualizado.', {
+                    detalle: data && data.piso
+                        ? 'Ese día ya tenía un importe: queda en el historial.'
+                        : 'La versión anterior queda en el historial.'
+                });
+
+                cargar();
+            })
+            .catch(function(error) {
+                btn.disabled = false;
+                Notificacion.error('No se pudo guardar: ' + error.message);
+            });
     }
 
     /**
@@ -260,8 +398,12 @@
             : '<td class="currency fw-bold">$ ' + totalArs.toLocaleString('es-AR', {
                 minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</td>';
 
+        // Las celdas del pie van una por columna y en el mismo orden que el
+        // encabezado: Cronograma | Fecha dato | USD | Cotización | ARS | Cargado
+        // el | Historial | (acción). Un colspan mal contado corre los totales
+        // debajo de otra columna y el número queda diciendo otra cosa.
         document.getElementById('footDol').innerHTML = filas.length
-            ? '<tr><td class="fw-bold text-end">TOTAL</td>'
+            ? '<tr><td colspan="2" class="fw-bold text-end">TOTAL</td>'
                 + '<td class="currency fw-bold">' + dolares(totalUsd) + '</td>'
                 + '<td></td>'
                 + pesos
@@ -302,8 +444,18 @@
             }
         });
 
-        // Las filas vienen de la más nueva a la más vieja.
-        var ultima = filas.length ? filas[0] : null;
+        // Las filas vienen ordenadas por FECHA DE CRONOGRAMA descendente, no
+        // por fecha de dato: filas[0] es el día del cronograma más lejano, que
+        // no tiene por qué ser la última carga. Esta tarjeta dice "última
+        // carga", así que busca el máximo por FECHA -la del dato- y no confía
+        // en el orden de la grilla.
+        var ultima = null;
+
+        filas.forEach(function(f) {
+            if (ultima === null || f.FECHA > ultima.FECHA) {
+                ultima = f;
+            }
+        });
 
         texto('ultimoImporteDol', ultima ? dolaresPlano(ultima.IMPORTE_USD) : 'US$ 0,00');
         texto('ultimaFechaDol', ultima ? ('Al ' + fechaCorta(ultima.FECHA)) : 'Sin cargas');
@@ -386,6 +538,11 @@
        HISTORIAL
        ================================================================ */
 
+    /**
+     * El historial de un DÍA DEL CRONOGRAMA, que es la columna del tablero cuyo
+     * número cambió. Las versiones de esa columna pueden haberse registrado en
+     * días distintos, así que cada una trae su propia fecha de dato.
+     */
     function abrirHistorial(fecha) {
         pedirJson(URL_OTROS + '?action=getHistorialDolares&fecha=' + encodeURIComponent(fecha))
             .then(function(filas) {
@@ -395,6 +552,8 @@
                     (filas || []).map(function(f) {
                         return '<tr class="' + (f.VIGENTE ? '' : 'dol-pisada') + '">'
                             + '<td class="currency">' + dolares(f.IMPORTE_USD) + '</td>'
+                            + '<td class="text-center dol-fecha-dato">'
+                            +     fechaCorta(f.FECHA) + '</td>'
                             + '<td class="text-center">'
                             +     (f.VIGENTE
                                     ? '<span class="badge bg-success">vigente</span>'

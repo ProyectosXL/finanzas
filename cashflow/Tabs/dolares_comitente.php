@@ -116,9 +116,15 @@
                 </div>
             </div>
             <div class="param-hint mt-2">
-                Cargar una fecha que ya tiene importe <strong>no lo edita</strong>: la carga
+                Cargar un día que ya tiene importe <strong>no lo edita</strong>: la carga
                 anterior queda en el historial y la nueva pasa a ser la vigente. Es lo único que
-                después explica por qué el número de esa fecha cambió.
+                después explica por qué el número de ese día cambió. Editar desde la grilla
+                pasa por el mismo camino.
+            </div>
+            <div class="param-hint">
+                El alta usa <strong>la misma fecha para el dato y para el cronograma</strong>. Si
+                querés mostrar este importe otro día, cambiale el <em>Cronograma</em> en la grilla:
+                eso no le cambia la cotización con la que se valúa.
             </div>
         </div>
     </div>
@@ -154,9 +160,27 @@
                                  va al tablero tiene que poder atarse fila por
                                  fila a esta grilla; con una sola columna de
                                  dólares, el número del cashflow no se puede
-                                 auditar contra nada. -->
-                            <th style="width: 130px;">Fecha</th>
-                            <th class="text-end" style="width: 150px;">Importe (USD)</th>
+                                 auditar contra nada.
+
+                                 DOS FECHAS, DOS FUNCIONES DISTINTAS:
+                                   Cronograma  -> dónde se muestra el importe.
+                                                  EDITABLE.
+                                   Fecha dato  -> con qué cotización se valúa.
+                                                  No se toca desde acá: cambiarla
+                                                  cambiaría el importe en pesos.
+                                 Las dos arrancan iguales en un alta. -->
+                            <th style="width: 160px;"
+                                title="El día del cronograma en el que se muestra este importe, acá y en el tablero. Se puede cambiar: no valúa nada.">
+                                Cronograma
+                            </th>
+                            <th class="text-muted" style="width: 120px;"
+                                title="La fecha del dato: con qué cotización se valúa este importe. No se edita desde la grilla, porque cambiarla cambiaría el importe en pesos.">
+                                Fecha dato
+                            </th>
+                            <th class="text-end" style="width: 170px;"
+                                title="Editable. Guardar no modifica la carga anterior: la deja en el historial e inserta una versión nueva.">
+                                Importe (USD)
+                            </th>
                             <!-- La punta se muestra fila por fila, y sale del
                                  backend. Es la única pestaña del cashflow que
                                  valúa con el VENDEDOR, así que su total no
@@ -171,7 +195,11 @@
                             <th class="text-end" style="width: 170px;">Importe (ARS)</th>
                             <th class="text-center" style="width: 170px;">Cargado el</th>
                             <th class="text-center" style="width: 150px;">Historial</th>
-                            <th></th>
+                            <!-- El botón de guardar de cada fila. Aparece sólo
+                                 cuando esa fila tiene algo cambiado: un botón
+                                 siempre activo invita a apretarlo y a generar
+                                 una versión idéntica a la anterior. -->
+                            <th class="text-center" style="width: 110px;"></th>
                         </tr>
                     </thead>
                     <tbody id="bodyDol"></tbody>
@@ -198,6 +226,16 @@
                         <thead class="table-light">
                             <tr>
                                 <th class="text-end">Importe (USD)</th>
+                                <!-- Las versiones de un mismo día del cronograma
+                                     pueden haberse registrado en días distintos
+                                     —y entonces se valuaron con cotizaciones
+                                     distintas—. Sin esta columna, dos versiones
+                                     con el mismo USD y distinto ARS no se
+                                     podrían explicar. -->
+                                <th class="text-center text-muted" style="width: 110px;"
+                                    title="La fecha del dato de esa versión: con qué cotización se valuó.">
+                                    Fecha dato
+                                </th>
                                 <th class="text-center" style="width: 110px;">Estado</th>
                                 <th class="text-center" style="width: 180px;">Cargado el</th>
                             </tr>
