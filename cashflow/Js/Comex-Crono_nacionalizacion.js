@@ -23,13 +23,18 @@
 
         // Verificar que los elementos existen antes de agregar listeners
         var btnRefresh = document.getElementById('btnRefresh');
-        var btnExport = document.getElementById('btnExport');
+        var busqueda = document.getElementById('busquedaCronoNac');
 
         if (btnRefresh) {
             btnRefresh.addEventListener('click', cargarDatos);
         }
-        if (btnExport) {
-            btnExport.addEventListener('click', exportarExcel);
+
+        // El botón de Exportar ya no se engancha acá: lo toma
+        // Js/tabla-export.js por su data-exportar, que es como funciona el
+        // resto del módulo.
+
+        if (busqueda) {
+            busqueda.addEventListener('keyup', filtrarTabla);
         }
 
         vistas = crearEjeVistas({
@@ -135,7 +140,12 @@
 
         generarEncabezados();
         generarFilasDatos();
-        generarFilaTotales();
+
+        // El buscador se reaplica sobre las filas recién dibujadas: cambiar de
+        // vista o refrescar no puede hacer reaparecer lo que el usuario filtró,
+        // con el campo de búsqueda todavía escrito. filtrarTabla() ya rehace los
+        // totales, así que no hace falta llamarlos aparte.
+        filtrarTabla();
     }
 
     /**
@@ -219,8 +229,12 @@
         var html = '';
 
         datosCrono.filas.forEach(function(item, index) {
-            html += '<tr>';
-            
+            // El texto que mira el buscador viaja en la fila, ya armado. Así
+            // el filtro no depende del índice de ninguna columna —mover una
+            // columna no lo rompe— y queda escrito en un solo lugar CUÁLES son
+            // los tres campos por los que se busca.
+            html += '<tr data-buscar="' + escaparAttrCrono(textoBuscable(item)) + '">';
+
             // Columnas fijas
             html += `<td class="center">${formatDate(item.FECHA_EST_EMB)}</td>`;
             // Recortado con puntos suspensivos (.col-texto); el nombre
@@ -288,12 +302,119 @@
         tableBody.innerHTML = html;
     }
 
+    /* ================================================================
+       EL BUSCADOR
+
+       Client-side y sin ir al servidor, igual que el de Echeqs: esconde
+       filas con display:none. La tabla ya está entera en el navegador, así
+       que un round-trip por cada tecla sería trabajo puro.
+
+       BUSCA SÓLO PROVEEDOR, CONTENEDOR Y ORDEN DE COMPRA. Son los tres
+       campos por los que alguien busca un contenedor. Mirar el textContent
+       de la fila entera -que es lo que hace Cobranzas May- acá daría falsos
+       positivos contra los importes de las columnas del eje: tipear "2026"
+       traería todo, y tipear un número de tres cifras, cualquier fila que
+       tenga ese número adentro de un importe.
+
+       INSENSIBLE A MAYÚSCULAS, NO A ACENTOS. Es lo que hace Echeqs y todo el
+       resto del módulo; agregar el plegado de acentos acá solo haría que
+       este buscador se comporte distinto de los otros cinco.
+       ================================================================ */
+
+    /** Los tres campos por los que se busca, concatenados */
+    function textoBuscable(item) {
+        return [item.PROVEEDOR, item.CONTENEDOR, item.ORDEN_COMPRA]
+            .map(function(v) { return v === null || v === undefined ? '' : String(v); })
+            .join(' ');
+    }
+
+    /**
+     * Esconde las filas que no coinciden y rehace los totales.
+     *
+     * Los totales se rehacen porque si no, el pie diría el total de todo
+     * arriba de una tabla que muestra tres filas, y nada en la pantalla
+     * diría que esos dos números miden cosas distintas.
+     *
+     * Las tarjetas de arriba NO se tocan, y es deliberado: miden el
+     * cronograma completo, que es lo que se quiere saber aunque uno esté
+     * mirando un contenedor. Es el mismo reparto que Cobranzas May.
+     */
+    function filtrarTabla() {
+        var campo = document.getElementById('busquedaCronoNac');
+        var term = campo ? campo.value.toLowerCase() : '';
+        var filas = document.querySelectorAll('#tableBody tr');
+
+        for (var i = 0; i < filas.length; i++) {
+            var texto = (filas[i].getAttribute('data-buscar') || '').toLowerCase();
+
+            filas[i].style.display = (!term || texto.indexOf(term) !== -1) ? '' : 'none';
+        }
+
+        generarFilaTotales();
+    }
+
+    /**
+     * Suma una lista de items en la MISMA forma que trae `datosCrono.totales`,
+     * para que la fila de totales no tenga que saber de dónde salió el número.
+     *
+     * Suma clave por clave lo que el backend ya resolvió —las ramas `dias` y
+     * `meses` y los tres totales de las tres vistas—: no decide en qué columna
+     * cae nada, que es la parte que no se puede duplicar.
+     *
+     * @param {Array} items
+     * @returns {Object} Con la forma de `datosCrono.totales`
+     */
+    function sumarColumnas(items) {
+        var t = {
+            dias: {}, meses: {},
+            total_tramo: 0, total_meses: 0, total_horizonte: 0
+        };
+
+        items.forEach(function(item) {
+            ['dias', 'meses'].forEach(function(rama) {
+                var mapa = item[rama] || {};
+
+                Object.keys(mapa).forEach(function(clave) {
+                    t[rama][clave] = (t[rama][clave] || 0) + (Number(mapa[clave]) || 0);
+                });
+            });
+
+            t.total_tramo += Number(item.total_tramo) || 0;
+            t.total_meses += Number(item.total_meses) || 0;
+            t.total_horizonte += Number(item.total_horizonte) || 0;
+        });
+
+        return t;
+    }
+
+    /** Los items que el buscador está dejando ver */
+    function filasVisibles() {
+        var campo = document.getElementById('busquedaCronoNac');
+        var term = campo ? campo.value.toLowerCase() : '';
+        var filas = (datosCrono && datosCrono.filas) || [];
+
+        if (!term) {
+            return null;    // sin filtro: mandan los totales del payload
+        }
+
+        return filas.filter(function(item) {
+            return textoBuscable(item).toLowerCase().indexOf(term) !== -1;
+        });
+    }
+
     /**
      * Genera la fila de totales.
      *
-     * Los totales salen del payload y no se recalculan acá recorriendo los
-     * items: recalcularlos era una tercera copia de la regla de "día O mes",
-     * que además se podía desincronizar de las celdas que tiene arriba.
+     * SIN FILTRO los totales salen del payload y no se recalculan acá
+     * recorriendo los items: recalcularlos era una tercera copia de la regla de
+     * "día O mes", que además se podía desincronizar de las celdas que tiene
+     * arriba.
+     *
+     * CON EL BUSCADOR ACTIVO hay que sumar los items visibles, porque el total
+     * de todo arriba de una tabla filtrada es un número que no corresponde a
+     * nada de lo que se está viendo. Sumar los valores POR COLUMNA que el
+     * payload ya trae resueltos no es volver a implementar la regla de "día O
+     * mes": es sumar exactamente las celdas que están dibujadas.
      */
     function generarFilaTotales() {
         var totalsRow = document.getElementById('totalsRow');
@@ -302,7 +423,11 @@
             return;
         }
 
-        var totales = datosCrono.totales || {};
+        var visibles = filasVisibles();
+        var totales = (visibles === null)
+            ? (datosCrono.totales || {})
+            : sumarColumnas(visibles);
+
         var html = '<td colspan="9" class="total-label">TOTALES</td>';
 
         vistas.columnas().forEach(function(col) {
@@ -495,12 +620,11 @@
         alert(mensaje);
     }
 
-    /**
-     * Exporta la tabla a Excel
-     */
-    /** Exporta lo que se ve. Ver Js/tabla-export.js. */
-    function exportarExcel() {
-        exportarTabla('tablaCronoNacionalizacion', 'Crono_Nacionalizacion');
-    }
+    /* NO HAY exportarExcel(). Era una función de una línea que llamaba a
+       exportarTabla(), más su listener sobre #btnExport: el botón ahora declara
+       data-exportar en el HTML y lo engancha Js/tabla-export.js solo, que es
+       como funciona el resto del módulo. El export sigue bajando lo que se ve,
+       ahora también respetando el buscador: TablaExport saca del clon las filas
+       con display:none. */
 
 })(); // Fin del IIFE

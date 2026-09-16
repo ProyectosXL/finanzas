@@ -410,6 +410,26 @@ El nombre del archivo es `<Pestaña>_<YYYY-MM-DD>.xls`, y si no se declara uno s
 **título de la página**, que sale del menú: así una pestaña nueva no exporta un archivo
 llamado `undefined` ni hay que declarar el nombre en dos lugares.
 
+### Crono Nacionalización dejó de tener el suyo
+
+Era el último con `#btnExport` + listener + una función envoltorio de una línea que ya
+llamaba a `exportarTabla()`. Ahora declara `data-exportar` como el resto y el JS de la
+pestaña se quedó sin las tres piezas. No cambió lo que baja, salvo por lo que sí cambió: la
+pestaña tiene **buscador**, y `TablaExport` saca del clon las filas con `display: none`, así
+que *Exportar* baja lo que el buscador está dejando ver.
+
+> El buscador de *Crono Nacionalización* mira **sólo Proveedor, Contenedor y Orden de
+> Compra**, y no el `textContent` de la fila entera como el de Cobranzas May: la tabla tiene
+> una columna por día del eje, así que buscar sobre todo daría falsos positivos contra los
+> importes —tipear `2026` traería todo—. El texto buscable viaja en un `data-buscar` sobre
+> el `<tr>`, armado al dibujar la fila: así el filtro no depende del índice de ninguna
+> columna y queda escrito en un solo lugar cuáles son los tres campos.
+>
+> Y **la fila de TOTALES se rehace** con lo visible. Si no, el pie diría el total de todo
+> arriba de una tabla de tres filas y nada en la pantalla diría que esos dos números miden
+> cosas distintas. Las tarjetas de arriba **no** se tocan: miden el cronograma completo.
+> Es el mismo reparto que Cobranzas May.
+
 ### Un botón nuevo es HTML y nada más
 
 ```html
