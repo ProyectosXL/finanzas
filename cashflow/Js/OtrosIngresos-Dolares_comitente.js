@@ -134,7 +134,7 @@
     }
 
     /**
-     * La cotización con la que se valuó la fila, CON SU FECHA.
+     * La cotización con la que se valuó la fila, CON SU FECHA Y CON SU PUNTA.
      *
      * La fecha es parte del dato, no un adorno. Es la última cotización oficial
      * anterior o igual a la de la carga, así que casi nunca es del mismo día:
@@ -145,6 +145,13 @@
      * Cuando la fecha de la cotización no coincide con la de la carga se marca,
      * porque es justo el caso en el que alguien podría suponer que el tipo de
      * cambio es el del día.
+     *
+     * LA PUNTA TAMBIÉN SE DICE, y por el mismo motivo. Ésta es la única pantalla
+     * del cashflow que valúa con el VENDEDOR; el resto usa comprador. Un importe
+     * a vendedor que no diga que es a vendedor se compara contra el BCRA
+     * comprador y parece estar mal. Sale de la fila (TC_PUNTA) y no de una
+     * constante de acá: la punta la decide el backend, y dos listas se
+     * desincronizan.
      */
     function celdaCotizacion(f) {
         if (f.TC === null || f.TC === undefined) {
@@ -155,10 +162,19 @@
         }
 
         var mismaFecha = (f.TC_FECHA === f.FECHA);
+        var punta = f.TC_PUNTA || '';
 
         return '<td class="text-center">'
             + '<span class="dol-tc">$ ' + Number(f.TC).toLocaleString('es-AR', {
                   minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>'
+            + (punta
+                ? ' <span class="dol-tc-punta" title="' + escapar('Punta ' + punta
+                        + ' del dólar oficial del BCRA: lo que el banco cobra por un dólar. '
+                        + 'Es la única pestaña del cashflow que valúa con esta punta —el '
+                        + 'resto usa la compradora—, así que este importe no cierra contra '
+                        + 'las otras pantallas, y es a propósito.')
+                    + '">' + escapar(punta) + '</span>'
+                : '')
             + '<div class="dol-tc-fecha' + (mismaFecha ? '' : ' dol-tc-anterior') + '" '
             +     'title="' + escapar(mismaFecha
                     ? 'Cotización oficial del BCRA de ese mismo día.'
@@ -186,7 +202,8 @@
                   minimumFractionDigits: 2, maximumFractionDigits: 2 })
                 + '  x  $ ' + Number(f.TC).toLocaleString('es-AR', {
                   minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                + ' (del ' + fechaCorta(f.TC_FECHA) + ')')
+                + ' (' + (f.TC_PUNTA ? f.TC_PUNTA + ', ' : '')
+                + 'del ' + fechaCorta(f.TC_FECHA) + ')')
             + '">$ ' + Number(f.IMPORTE_ARS).toLocaleString('es-AR', {
                   minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</td>';
     }
@@ -252,6 +269,23 @@
             : '';
     }
 
+    /**
+     * ", punta vendedora" para el pie del KPI, sacado de las filas valuadas.
+     *
+     * Vuelve vacío si ninguna fila trae punta —no hay cargas, o no se pudo leer
+     * el tipo de cambio—: nombrar una punta que no se usó sería peor que no
+     * nombrar ninguna.
+     */
+    function sufijoPunta(filas) {
+        for (var i = 0; i < filas.length; i++) {
+            if (filas[i].TC_PUNTA) {
+                return ', punta ' + filas[i].TC_PUNTA;
+            }
+        }
+
+        return '';
+    }
+
     function pintarKpi() {
         var filas = (datos && datos.filas) || [];
         var total = 0;
@@ -281,9 +315,14 @@
 
         // Que haya filas sin valuar hay que decirlo acá: es la diferencia entre
         // "este es todo el dinero" y "esto es lo que se pudo valuar".
+        //
+        // Y con qué punta se valuó, por lo mismo que en cada fila: este total es
+        // el que se compara contra el tablero y contra el BCRA, y es el único
+        // del módulo que no sale de la punta compradora. La punta se toma de las
+        // filas, que es de donde la decidió el backend.
         texto('detalleArsDol', sinValuar
             ? sinValuar + ' carga(s) sin cotización quedan afuera, acá y en el tablero'
-            : 'Valuado al oficial del BCRA de cada fecha');
+            : 'Valuado al oficial del BCRA de cada fecha' + sufijoPunta(filas));
 
         mostrar('summaryDol', true, 'flex');
     }

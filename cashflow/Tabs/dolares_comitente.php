@@ -19,6 +19,14 @@
     mes. El mes en curso no tiene cierre todavía, y el de un mes viejo valuaría
     con una cotización de semanas después. Ver Class/Cotizacion.php.
 
+    Y ES LA PUNTA VENDEDORA. Es la única pestaña del cashflow que no valúa con la
+    compradora: estos dólares están en una cuenta y se miden contra lo que
+    costaría reponerlos. Ventas, Saldos, Exportaciones Tasky y Comex siguen con
+    comprador. La consecuencia —que este total NO cierre contra los de las otras
+    pantallas— es deliberada, y por eso la punta se dice fila por fila y en el
+    pie del KPI: si no, alguien compara contra el BCRA comprador y concluye que
+    está mal.
+
     EL IMPORTE VIGENTE SE PISA, PERO EL HISTORIAL QUEDA. Cargar una fecha que ya
     existe no hace UPDATE: da de baja la anterior e inserta una nueva. El
     historial es lo único que explica por qué el número de ayer era otro.
@@ -66,6 +74,8 @@
                 </div>
                 <div class="kpi-card-value" id="totalArsDol">$ 0,00</div>
                 <div class="kpi-card-footer">
+                    <!-- El texto lo escribe el JS: nombra la punta con la que
+                         valuó el backend, no con una escrita acá. -->
                     <span class="text-muted" id="detalleArsDol">Valuado al oficial del BCRA</span>
                 </div>
             </div>
@@ -77,9 +87,9 @@
             <h5 class="mb-0">Cargar importe</h5>
             <small class="text-muted">
                 Fecha e importe en dólares. La conversión a pesos la hace el tablero con la
-                <strong>última cotización oficial del BCRA anterior o igual a esa fecha</strong>:
-                no se guarda ningún importe en pesos. La grilla de abajo muestra con cuál se
-                valuó cada carga.
+                <strong>última cotización oficial del BCRA anterior o igual a esa fecha, punta
+                vendedora</strong>: no se guarda ningún importe en pesos. La grilla de abajo
+                muestra con cuál se valuó cada carga.
             </small>
         </div>
         <div class="card-body">
@@ -147,10 +157,16 @@
                                  auditar contra nada. -->
                             <th style="width: 130px;">Fecha</th>
                             <th class="text-end" style="width: 150px;">Importe (USD)</th>
-                            <th class="text-center" style="width: 170px;">
+                            <!-- La punta se muestra fila por fila, y sale del
+                                 backend. Es la única pestaña del cashflow que
+                                 valúa con el VENDEDOR, así que su total no
+                                 cierra contra el de las otras: si no lo dijera,
+                                 alguien lo compara contra el BCRA comprador y
+                                 concluye que está mal. -->
+                            <th class="text-center" style="width: 190px;">
                                 Cotización usada
                                 <i class="fas fa-circle-info text-muted ms-1"
-                                   title="La última cotización oficial del BCRA con fecha anterior o igual a la de la carga. No es el cierre del mes: el mes en curso todavía no tiene cierre."></i>
+                                   title="La última cotización oficial del BCRA con fecha anterior o igual a la de la carga, punta VENDEDORA. No es el cierre del mes: el mes en curso todavía no tiene cierre. El resto del cashflow valúa con la punta compradora."></i>
                             </th>
                             <th class="text-end" style="width: 170px;">Importe (ARS)</th>
                             <th class="text-center" style="width: 170px;">Cargado el</th>

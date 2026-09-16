@@ -81,9 +81,35 @@ Eso necesitó una vista nueva, porque la que había no servía para esta pregunt
 
 **No se rellenan los días sin cotización.** Un sábado se valúa con la del viernes y se muestra *la fecha del viernes*; inventar una fila para el sábado escondería que el dato es de otro día.
 
+### Y es la punta VENDEDORA. Es la única pestaña del cashflow que no usa la compradora
+
+> Esto **cambió**. Antes esta pestaña valuaba con `Comprador`, igual que todas las demás.
+
+Estos dólares están en una cuenta y se miden contra **lo que costaría reponerlos**, que es lo que el banco *cobra* por un dólar. El resto del módulo —Ventas, Saldos, Exportaciones Tasky, Comex— sigue valuando con **comprador** y no se movió.
+
+| | Punta | Quién |
+| --- | --- | --- |
+| Dólares Cuenta Comitente | `TCV` — vendedor | sólo esta pestaña |
+| Ventas, Saldos, Exportaciones Tasky, Comex | `TCC` — comprador | todo lo demás |
+
+**La consecuencia hay que tenerla presente: este total NO cierra contra el de las otras pantallas, y es deliberado.** Con la cotización del 15/09/2026 —comprador 1.480, vendedor 1.530— los 137.000 USD cargados pasan de **202.760.000** a **209.610.000**: 6.850.000 de diferencia que no son un error de nadie.
+
+Por eso **la punta se dice en pantalla**, fila por fila al lado de la cotización y en el pie del KPI en pesos. Un importe valuado a vendedor que no diga que es a vendedor se compara contra el BCRA comprador y parece estar mal. El dato viaja en `TC_PUNTA` desde `valuarDolares()`: la pantalla no tiene una punta escrita, la muestra.
+
+**Cómo está implementado, y por qué así:**
+
+- `Cotizacion::ultimaHasta($fecha, $punta)` — la punta la elige el llamador, **con comprador por defecto**. Por eso agregar el parámetro no movió ni una pantalla.
+- `Cotizacion::COMPRADOR` / `Cotizacion::VENDEDOR` son los nombres de las columnas de las vistas: no hay un mapa que mantener, y lo que se intercala en el SQL sale de `Cotizacion::punta()`, que **lanza** ante una punta desconocida en vez de caer en el default. Caer en el default daría un importe apenas más chico sin nada que lo explique.
+- `OtrosIngresos::PUNTA` es el único lugar donde está escrito que esta pantalla usa vendedor.
+- **`mapaMensual()` y `delMes()` NO tienen el parámetro.** No es un olvido: hoy nadie les pide otra punta, y un método que acepta un argumento que nadie usa es el que un día alguien llama sin entender qué cambia. Agregarlo cuando haga falta es una línea.
+
+**`ultimaHasta()` ya no devuelve la clave `'tcc'`.** Con la punta elegible ese nombre decía *comprador* sobre un valor que puede ser del vendedor. Devuelve `['fecha', 'valor', 'punta']`.
+
+Las dos vistas exponen **las dos puntas** (`Comprador AS TCC`, `Vendedor AS TCV`). Sus encabezados decían que las dos tenían que exponer la misma punta "o los números de dos pantallas del mismo módulo no cerrarían entre sí": eso era cierto mientras todo valuaba con comprador, y quedó explicado en su lugar.
+
 ### La cuenta se muestra abierta
 
-La grilla de la pestaña tiene cuatro columnas donde antes tenía una: **USD × cotización (con su fecha) = importe en pesos**. El total en pesos del pie es exactamente el que va a la fila del tablero, así que ese número se puede auditar fila por fila desde la pantalla.
+La grilla de la pestaña tiene cuatro columnas donde antes tenía una: **USD × cotización (con su fecha y su punta) = importe en pesos**. El total en pesos del pie es exactamente el que va a la fila del tablero, así que ese número se puede auditar fila por fila desde la pantalla.
 
 La cuenta la hace **`OtrosIngresos::valuarDolares()`**, y la usan los dos: el proveedor para armar la serie y el controller para la grilla. Si cada uno multiplicara por su cuenta, los dos totales podrían discrepar y no habría forma de saber cuál está mal.
 

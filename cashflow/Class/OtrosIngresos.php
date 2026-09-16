@@ -64,6 +64,15 @@ class OtrosIngresos {
     const DOLARES = ['tabla' => 'RO_T_CASHFLOW_DOLARES_COMITENTE', 'campo' => 'IMPORTE_USD'];
     const INVERSIONES = ['tabla' => 'RO_T_CASHFLOW_SALDO_INVERSIONES', 'campo' => 'IMPORTE_ARS'];
 
+    /**
+     * Con que punta se valuan los dolares de la cuenta comitente.
+     *
+     * VENDEDOR, y es la unica pantalla del modulo que no usa comprador: estos
+     * dolares se miden contra lo que costaria reponerlos. Esta escrito una sola
+     * vez y aca, que es donde se hace la cuenta. Ver valuarDolares().
+     */
+    const PUNTA = Cotizacion::VENDEDOR;
+
     /** @var Conexion */
     private $conn;
 
@@ -174,6 +183,16 @@ class OtrosIngresos {
      * del mes. El motivo esta en el encabezado de
      * Providers/OtrosIngresosProvider.php.
      *
+     * Y ES LA PUNTA VENDEDORA. Es la unica pantalla del cashflow que no valua
+     * con comprador: estos dolares estan en una cuenta y se miden contra lo que
+     * costaria reponerlos, que es lo que el banco COBRA por un dolar. Ventas,
+     * Saldos, Exportaciones Tasky y Comex siguen con comprador y no se movieron.
+     *
+     * La consecuencia es que esta pantalla NO CIERRA contra las otras, y eso es
+     * deliberado. Por eso cada fila viaja con 'TC_PUNTA' y la grilla la muestra:
+     * un importe a vendedor que no diga que es a vendedor se compara contra el
+     * BCRA comprador y parece estar mal.
+     *
      * SIN COTIZACION, TC Y IMPORTE_ARS QUEDAN EN null Y NO EN CERO. Un cero se
      * leeria como "esos dolares valen cero pesos"; null es "no hay con que
      * valuarlos", y el front dibuja un guion. Esos dolares se informan aparte en
@@ -185,7 +204,8 @@ class OtrosIngresos {
      *
      * @param array|null $cargas Filas de getDolaresComitente(); null las lee
      * @param Cotizacion|null $cotizacion Se puede inyectar para poder probar
-     * @return array ['filas', 'sin_cotizacion' => float, 'error' => string|null]
+     * @return array ['filas', 'sin_cotizacion' => float, 'error' => string|null].
+     *               Cada fila suma 'TC', 'TC_FECHA', 'TC_PUNTA' e 'IMPORTE_ARS'
      */
     public function valuarDolares($cargas = null, $cotizacion = null) {
         $cargas = ($cargas === null) ? $this->getDolaresComitente() : $cargas;
@@ -202,14 +222,16 @@ class OtrosIngresos {
             $usd = floatval($carga['IMPORTE_USD']);
             $tc = null;
             $tcFecha = null;
+            $tcPunta = null;
 
             if ($salida['error'] === null) {
                 try {
-                    $ult = $c->ultimaHasta($carga['FECHA']);
+                    $ult = $c->ultimaHasta($carga['FECHA'], self::PUNTA);
 
                     if ($ult !== null) {
-                        $tc = $ult['tcc'];
+                        $tc = $ult['valor'];
                         $tcFecha = $ult['fecha'];
+                        $tcPunta = Cotizacion::nombrePunta($ult['punta']);
                     }
                 } catch (Throwable $e) {
                     // El origen no esta disponible. Se anota una vez y las
@@ -225,6 +247,7 @@ class OtrosIngresos {
             $salida['filas'][] = array_merge($carga, [
                 'TC' => $tc,
                 'TC_FECHA' => $tcFecha,
+                'TC_PUNTA' => $tcPunta,
                 'IMPORTE_ARS' => ($tc === null) ? null : round($usd * $tc, 2)
             ]);
         }

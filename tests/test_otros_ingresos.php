@@ -381,28 +381,45 @@ chequear('ninguna fecha tiene dos importes vigentes',
    ================================================================ */
 seccion('valuacion de dolares: se inyecta la cotizacion, sin base');
 
-/** Cotizacion de mentira: una serie diaria con agujeros, como la real. */
+/**
+ * Cotizacion de mentira: una serie diaria con agujeros, como la real, y con las
+ * DOS puntas. El vendedor va siempre mas arriba que el comprador, como en el
+ * origen: es lo que hace que una prueba pueda distinguir con cual se valuo.
+ */
 class CotizacionFalsa extends Cotizacion {
-    /** Fecha => TCC. Faltan dias a proposito: sabados, domingos y feriados. */
+    /** Fecha => [TCC, TCV]. Faltan dias a proposito: sabados y feriados. */
     public $serie = [
-        '2026-09-01' => 1485.0,
-        '2026-09-03' => 1490.0,
-        '2026-09-06' => 1480.0
+        '2026-09-01' => [1485.0, 1535.0],
+        '2026-09-03' => [1490.0, 1540.0],
+        '2026-09-06' => [1480.0, 1530.0]
     ];
+
+    /** La ultima punta que le pidieron, para poder chequearla */
+    public $ultimaPunta = null;
 
     public function __construct() { /* a proposito: no abre conexion */ }
 
-    public function ultimaHasta($fecha) {
+    public function ultimaHasta($fecha, $punta = Cotizacion::COMPRADOR) {
         $f = self::dia($fecha);
+        $col = self::punta($punta);
+        $this->ultimaPunta = $col;
         $mejor = null;
 
-        foreach ($this->serie as $dia => $tcc) {
+        foreach ($this->serie as $dia => $valores) {
             if ($dia <= $f && ($mejor === null || $dia > $mejor)) {
                 $mejor = $dia;
             }
         }
 
-        return ($mejor === null) ? null : ['fecha' => $mejor, 'tcc' => $this->serie[$mejor]];
+        if ($mejor === null) {
+            return null;
+        }
+
+        return [
+            'fecha' => $mejor,
+            'valor' => $this->serie[$mejor][$col === Cotizacion::VENDEDOR ? 1 : 0],
+            'punta' => $col
+        ];
     }
 }
 
@@ -414,21 +431,22 @@ $cargas = [
     ['FECHA' => '2020-01-01', 'IMPORTE_USD' => 500.0]     // anterior a toda la serie
 ];
 
-$v = $oi->valuarDolares($cargas, new CotizacionFalsa());
+$falsa = new CotizacionFalsa();
+$v = $oi->valuarDolares($cargas, $falsa);
 
 chequear('devuelve una fila por carga', 3, count($v['filas']));
 
 // Un sabado no inventa una cotizacion: usa la del viernes Y DICE que es del
 // viernes. Sin la fecha, el numero en pesos no se puede explicar.
-chequear('un dia sin cotizacion toma la anterior', 1490.0, $v['filas'][0]['TC']);
+chequear('un dia sin cotizacion toma la anterior', 1540.0, $v['filas'][0]['TC']);
 chequear('y dice de que dia salio', '2026-09-03', $v['filas'][0]['TC_FECHA']);
-chequear('la cuenta es USD x cotizacion', 1490000.0, $v['filas'][0]['IMPORTE_ARS']);
+chequear('la cuenta es USD x cotizacion', 1540000.0, $v['filas'][0]['IMPORTE_ARS']);
 
 // Una carga posterior a la ultima cotizacion cargada usa esa ultima, que es
 // justamente lo que el criterio de cierre mensual no podia contestar.
-chequear('una carga futura usa la ultima conocida', 1480.0, $v['filas'][1]['TC']);
+chequear('una carga futura usa la ultima conocida', 1530.0, $v['filas'][1]['TC']);
 chequear('con su fecha', '2026-09-06', $v['filas'][1]['TC_FECHA']);
-chequear('y su cuenta', 2960000.0, $v['filas'][1]['IMPORTE_ARS']);
+chequear('y su cuenta', 3060000.0, $v['filas'][1]['IMPORTE_ARS']);
 
 // Sin ninguna cotizacion anterior NO se asume nada: null, no cero. Un cero se
 // leeria como "esos dolares valen cero pesos".
@@ -437,6 +455,58 @@ chequear('la fecha tambien', null, $v['filas'][2]['TC_FECHA']);
 chequear('y el importe en pesos, null y no cero', null, $v['filas'][2]['IMPORTE_ARS']);
 chequear('esos dolares se informan aparte', 500.0, $v['sin_cotizacion']);
 chequear('y no hubo error de origen', null, $v['error']);
+
+/* ================================================================
+   LA PUNTA: ESTA PANTALLA VALUA CON EL VENDEDOR
+
+   Es la UNICA del cashflow que no usa comprador, asi que su total NO cierra
+   contra los de Ventas, Saldos, Exportaciones Tasky y Comex, y eso es
+   deliberado. Las pruebas de aca abajo son las que impiden que alguien
+   "arregle" la discrepancia devolviendo la pantalla a comprador sin darse
+   cuenta de que estaria cambiando la valuacion.
+   ================================================================ */
+seccion('los dolares de la cuenta comitente se valuan a la punta vendedora');
+
+chequear('valuarDolares le pide el vendedor a Cotizacion',
+    Cotizacion::VENDEDOR, $falsa->ultimaPunta);
+
+chequear('y la constante de la pantalla es esa', Cotizacion::VENDEDOR, OtrosIngresos::PUNTA);
+
+// Viaja con cada fila y con su nombre en castellano: la grilla lo muestra sin
+// tener que saber que TCV es el vendedor.
+chequear('cada fila valuada dice con que punta se valuo',
+    'vendedor', $v['filas'][0]['TC_PUNTA']);
+chequear('y una fila sin cotizacion no inventa ninguna',
+    null, $v['filas'][2]['TC_PUNTA']);
+
+// El comprador sigue siendo el default: es lo que hace que agregar el parametro
+// no haya movido a las otras cuatro pantallas.
+$compra = new CotizacionFalsa();
+$compra->ultimaHasta('2026-09-04');
+chequear('sin pedir punta, Cotizacion lee el comprador',
+    Cotizacion::COMPRADOR, $compra->ultimaPunta);
+chequear('y el comprador da un numero distinto del vendedor',
+    1490.0, $compra->ultimaHasta('2026-09-04')['valor']);
+
+// La clave dejo de llamarse 'tcc': con la punta elegible, ese nombre decia
+// "comprador" sobre un valor que puede ser del vendedor.
+$ult = $falsa->ultimaHasta('2026-09-04', Cotizacion::VENDEDOR);
+chequear('la cotizacion viaja en la clave "valor"', true, isset($ult['valor']));
+chequear('y ya no en "tcc"', false, isset($ult['tcc']));
+chequear('con su punta al lado', Cotizacion::VENDEDOR, $ult['punta']);
+
+// Una punta mal escrita LANZA en vez de caer en comprador: el sintoma de caer
+// en el default seria un importe en pesos apenas mas chico, sin nada que lo
+// explique.
+chequearLanza('una punta invalida se rechaza',
+    function () { Cotizacion::punta('TCX'); });
+chequearLanza('y una vacia tambien',
+    function () { Cotizacion::punta(''); });
+
+chequear('las puntas tienen nombre para la pantalla',
+    'comprador', Cotizacion::nombrePunta(Cotizacion::COMPRADOR));
+chequear('y el vendedor tambien',
+    'vendedor', Cotizacion::nombrePunta(Cotizacion::VENDEDOR));
 
 chequear('sin cargas no hay nada que valuar y no se toca la base',
     ['filas' => [], 'sin_cotizacion' => 0.0, 'error' => null], $oi->valuarDolares([]));

@@ -101,3 +101,19 @@
     color: #b07d2b;
     cursor: help;
 }
+
+/* La PUNTA, al lado del valor. Ésta es la única pestaña del cashflow que valúa
+   con el vendedor, así que su total no cierra contra el de las otras: la
+   etiqueta es lo que hace que eso se lea como una decisión y no como un error.
+   Va discreta —no es una alarma— pero presente en cada fila. */
+.tab-dolares_comitente .dol-tc-punta {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #5a6472;
+    background: #eef1f5;
+    border-radius: 3px;
+    padding: 1px 5px;
+    cursor: help;
+    vertical-align: middle;
+}
