@@ -451,12 +451,20 @@
                  + 'data-id="' + f.ID_SBA14 + '"' + (f.MARCADO ? ' checked' : '') + '>'
                  + '</td>';
 
-            // La fecha estimada de venta es donde cae el importe en la grilla.
-            // Va primera y destacada; la del cheque queda al lado como
-            // referencia, que es el dato duro de Tango.
+            // LA DEL CHEQUE ES LA QUE UBICA EL IMPORTE EN LA GRILLA, así que va
+            // primera y destacada. Es cuando entra la plata.
+            html += '<td class="center"><span class="ech-fecha-cheque" '
+                 + 'title="Fecha del cheque. Es la que ubica este importe en la grilla y en '
+                 + 'el tablero: es cuando entra la plata.">'
+                 + fecha(f.FECHA_CHEQUE) + '</span></td>';
+
+            // La estimada queda en gris, como informativa: explica POR QUÉ este
+            // cheque está en la lista -su venta todavía no ocurrió- y no dónde
+            // cae. Mismo idioma que "Importe Factura" en Cobranzas May.
             html += '<td class="center"><span class="ech-fecha-estimada" '
                  + 'title="Fecha del cheque menos los días de pre-chequeado del cliente. '
-                 + 'Es donde este importe netea la cobranza proyectada de Ventas.">'
+                 + 'Es la que decide si este cheque se muestra: si ya pasó, esa venta se '
+                 + 'facturó y se cobró. No es la que ubica el importe.">'
                  + fecha(f.FECHA_VENTA_EST) + '</span></td>';
 
             // Los días efectivos: sin esto, un cliente en cero se ve igual que
@@ -466,11 +474,10 @@
                  + (dias > 0
                         ? '<span class="ech-dias-precheq">−' + dias + ' d</span>'
                         : '<span class="ech-sin-dias" title="Este cliente no tiene días de '
-                          + 'pre-chequeado cargados, así que el cheque se netea en su propia '
-                          + 'fecha. Se configura en Parámetros → Pre-chequeado.">0</span>')
+                          + 'pre-chequeado cargados, así que su venta estimada es la propia '
+                          + 'fecha del cheque. Se configura en Parámetros → Pre-chequeado.">0</span>')
                  + '</td>';
 
-            html += '<td class="center">' + fecha(f.FECHA_CHEQUE) + '</td>';
             html += '<td class="center">' + numeroCheque(f.N_CHEQUE) + '</td>';
             html += '<td>' + escapar(f.BANCO) + '</td>';
             html += '<td class="col-texto" title="' + escapar(f.CLIENTE) + '">'
@@ -491,7 +498,7 @@
                  + '</td>';
 
             // Los importes por columna ya vienen resueltos del backend, sobre
-            // la fecha estimada de venta.
+            // la FECHA DEL CHEQUE.
             cols.forEach(function(col) {
                 var v = Number(vistasPre.valor(f, col)) || 0;
 

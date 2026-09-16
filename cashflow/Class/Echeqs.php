@@ -28,6 +28,37 @@ require_once __DIR__ . '/Parametros.php';
  *
  * Es lo primero que alguien va a querer "arreglar" al ver el cheque repetido.
  *
+ * DOS FECHAS, DOS FUNCIONES DISTINTAS
+ * -----------------------------------
+ * En Venta Cobrada Anticipada cada cheque tiene dos fechas, y NO hacen lo mismo:
+ *
+ *   FECHA_VENTA_EST   decide QUE se muestra y que netea.
+ *   (cheque - dias)   Si la venta teorica quedo antes de hoy, esa venta ya se
+ *                     facturo y ya se cobro: el cheque no esta en la lista y no
+ *                     netea nada. Lo resuelve ventaYaCobrada(), la unica
+ *                     funcion, usada por cruzarPrechequeado() y por
+ *                     Ventas::repartirNeteo().
+ *
+ *   FECHA_CHEQUE      decide DONDE cae el importe, en la grilla y en el
+ *                     tablero. Es cuando entra la plata.
+ *
+ * ANTES LAS DOS COSAS LAS HACIA LA FECHA TEORICA. El criterio era que el neteo
+ * cayera donde esta la cobranza proyectada de esa venta; se cambio porque lo que
+ * interesa es cuando entra la plata del cheque. FECHA_VENTA_EST sigue viajando
+ * en la fila y sigue siendo columna visible: es el dato que explica por que ese
+ * cheque esta en la lista.
+ *
+ * LA PANTALLA Y EL NETEO SE MUEVEN JUNTOS. EcheqsController arma el eje de la
+ * sub-pestana con 'FECHA_CHEQUE' y Ventas::repartirNeteo() ubica con
+ * $fila['FECHA_CHEQUE']. Si solo cambiara uno, el usuario tildaria un cheque en
+ * una columna y el tablero lo restaria en otra, sin ninguna pantalla donde
+ * notarlo. Es el mismo motivo por el que ventaYaCobrada() es una sola funcion.
+ *
+ * CONSECUENCIA: la fecha del cheque es siempre POSTERIOR O IGUAL a la teorica,
+ * asi que un cheque puede tener su venta adentro del eje y su fecha afuera. Ese
+ * importe ya no se descarta callado: va a 'fuera_horizonte' y deja aviso. Ver
+ * el encabezado de Ventas::repartirNeteo().
+ *
  * TRES TRAMPAS DEL ESQUEMA DE dbo.SBA14
  * -------------------------------------
  * 1. LA PK ES ID_SBA14. N_CHEQUE no identifica nada: se repite entre bancos y
@@ -116,7 +147,8 @@ class Echeqs {
        DIAS DE PRE-CHEQUEADO
 
        Cuantos dias antes de la fecha del cheque se emite la factura. De ahi
-       sale la FECHA ESTIMADA DE VENTA, que es donde se netea el importe:
+       sale la FECHA ESTIMADA DE VENTA, que es la que decide si el cheque se
+       muestra y netea -no donde cae, que lo decide la fecha del cheque-:
 
            FECHA_VENTA_ESTIMADA = FECHA_CHEQUE - dias del cliente
 
@@ -126,8 +158,8 @@ class Echeqs {
 
        LAS DOS FUNCIONES DE ABAJO SON EL UNICO LUGAR DONDE SE RESUELVE ESTO, y
        las usan tanto la pantalla como el neteo. Si la sub-pestana y el neteo
-       aplicaran plazos distintos, el tablero dejaria de cerrar y no habria
-       ninguna pantalla donde se notara.
+       aplicaran plazos distintos, uno filtraria cheques que el otro no y no
+       habria ninguna pantalla donde se notara.
        ==================================================================== */
 
     /**

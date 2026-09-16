@@ -272,10 +272,19 @@
                             por la modalidad. Lo que se hace acá es <em>destildar</em> las
                             excepciones.
                         </small>
+                        <!-- Las dos fechas hacen dos cosas distintas y la
+                             leyenda lo dice: la tabla tiene las dos columnas, y
+                             sin esto el lector supone que la que ubica es la
+                             misma que la que filtra. -->
                         <small class="text-muted d-block">
                             Se ven sólo los de <strong>venta teórica desde hoy</strong>. Los
                             anteriores corresponden a ventas ya facturadas y cobradas: están
                             fuera del cashflow y no hay nada que netear.
+                        </small>
+                        <small class="text-muted d-block">
+                            Cada importe se ubica en la grilla por la <strong>fecha del
+                            cheque</strong> —es cuando entra la plata—, no por la fecha
+                            estimada de venta, que es la que decide si el cheque aparece acá.
                         </small>
                     </div>
                     <select id="filtroClientePre" class="form-select form-select-sm"
@@ -323,11 +332,18 @@
             </div>
 
             <!-- Lo que queda MÁS ALLÁ del horizonte se avisa: son cheques que
-                 están en la tabla pero cuyo importe no tiene columna donde
-                 ubicarse. Lo anterior a hoy ya no llega hasta acá —no se
-                 muestra, y lo dice la leyenda de arriba—: no es plata que falte
-                 mostrar, es venta ya cobrada. Es el mismo criterio de
-                 Ventas::repartirNeteo(). -->
+                 están en la tabla pero cuya fecha no tiene columna donde
+                 ubicarse. Desde que el importe se ubica por la fecha del
+                 cheque, ese caso es plata que el tablero DEBERÍA restar y no
+                 resta: la venta que prepagaron sí puede estar proyectada
+                 adentro del cuadro. Ventas::repartirNeteo() informa el mismo
+                 importe en 'fuera_horizonte', así que las dos pantallas dicen
+                 lo mismo.
+
+                 Lo anterior a hoy ya no llega hasta acá —no se muestra, y lo
+                 dice la leyenda de arriba—: eso sí es venta ya cobrada, no
+                 plata que falte mostrar, y no avisa nada. Es el mismo criterio
+                 de Ventas::repartirNeteo(). -->
             <div id="avisosEjePre"></div>
 
             <div class="card-body p-0">
@@ -341,20 +357,32 @@
                     <table class="table table-hover mb-0" id="tablaPrechequeado">
                         <thead>
                             <!--
-                                Nueve columnas descriptivas y después una por
+                                Diez columnas descriptivas y después una por
                                 cada columna del eje, que dibuja el JS.
 
-                                FECHA VENTA ESTIMADA = fecha del cheque − días
-                                del cliente, y es DONDE SE UBICA el importe en
-                                la grilla: es la fecha en la que ese cheque
-                                netea la cobranza proyectada de Ventas.
+                                DOS FECHAS, DOS FUNCIONES DISTINTAS, y por eso
+                                el orden y el peso visual son los que son:
 
-                                La fecha del cheque se conserva como referencia
-                                —es el dato duro de Tango— y los días efectivos
-                                van al lado para que se vea de dónde sale la
-                                estimación. Un cliente en 0 días muestra las dos
-                                fechas iguales, y eso es información: quiere
-                                decir que no está configurado.
+                                  FECHA DEL CHEQUE     decide DÓNDE cae el
+                                                       importe en la grilla. Es
+                                                       cuando entra la plata.
+                                                       Va primera y destacada.
+
+                                  FECHA VENTA ESTIMADA decide QUÉ cheques se
+                                  (cheque − días)      muestran: si ya pasó, esa
+                                                       venta se facturó y se
+                                                       cobró, y el cheque no
+                                                       está en esta lista. Va
+                                                       en gris: explica por qué
+                                                       la fila está acá, no
+                                                       dónde cae.
+
+                                Antes el importe se ubicaba por la estimada y
+                                por eso iba primera. Los días efectivos van al
+                                lado de la estimada, que es de donde sale: un
+                                cliente en 0 días muestra las dos fechas
+                                iguales, y eso es información —quiere decir que
+                                no está configurado—.
                             -->
                             <tr>
                                 <th rowspan="2" class="text-center" style="width: 60px;">
@@ -364,10 +392,19 @@
                                     <input type="checkbox" class="form-check-input" id="marcarTodosPre"
                                            title="Marca o desmarca todo lo que se está viendo">
                                 </th>
-                                <th rowspan="2">Fecha venta estimada</th>
-                                <th rowspan="2" class="text-center" style="width: 80px;"
-                                    title="Días de pre-chequeado del cliente. En 0 el cheque no se desplaza.">Días</th>
-                                <th rowspan="2">Fecha de pago</th>
+                                <!-- Se llamaba "Fecha de pago". Con dos columnas
+                                     de fecha al lado, el nombre del dato es lo
+                                     único que las distingue de un vistazo. -->
+                                <th rowspan="2"
+                                    title="Fecha del cheque. Es la que ubica el importe en la grilla: es cuando entra la plata.">
+                                    Fecha del cheque
+                                </th>
+                                <th rowspan="2" class="text-muted"
+                                    title="Fecha del cheque menos los días de pre-chequeado del cliente. Informativa: es lo que explica por qué este cheque está en la lista —su venta todavía no ocurrió—, no dónde cae el importe.">
+                                    Fecha venta estimada
+                                </th>
+                                <th rowspan="2" class="text-center text-muted" style="width: 80px;"
+                                    title="Días de pre-chequeado del cliente. En 0 el cheque no se desplaza y las dos fechas coinciden.">Días</th>
                                 <th rowspan="2">N° Cheque</th>
                                 <th rowspan="2">Banco</th>
                                 <th rowspan="2" class="col-texto">Cliente</th>
