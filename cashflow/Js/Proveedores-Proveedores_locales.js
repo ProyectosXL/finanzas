@@ -51,7 +51,7 @@
         conectar('btnVistaMaestroProv', function() { cambiarVista('maestro'); });
 
         conectar('btnRefreshProv', cargar);
-        conectar('btnExportProv', function() { exportarTabla('tablaProveedores', 'Cuentas_a_Pagar'); });
+        conectar('btnExportProv', function() { exportarTabla('tablaProveedores', nombreExport()); });
         conectar('btnConciliarProv', previewConciliacion);
 
         conectar('btnPreviewPagosProv', function() { previewImportacion('Pagos'); });
@@ -282,6 +282,36 @@
             return [f.COD_PROVEE, f.RAZON_SOC, f.N_COMP, f.RUBRO_ECONOMICO, f.FORMA_PAGO]
                 .join(' ').toLowerCase().indexOf(q) !== -1;
         });
+    }
+
+    /**
+     * El nombre del archivo que se exporta dice QUÉ FILTRO estaba puesto.
+     *
+     * Bajar lo que se ve es lo correcto —es la tabla que el usuario está
+     * mirando—, pero un archivo que no deja rastro del recorte es un archivo
+     * que dentro de una semana nadie sabe si trae todo o una parte. Y acá el
+     * caso normal ES el recortado: el filtro por forma de pago viene prendido.
+     *
+     * Va en el nombre y no en una fila adentro de la tabla porque la tabla es
+     * el dato: agregarle una fila de encabezado la rompe para quien la abra con
+     * un dinamizador.
+     */
+    function nombreExport() {
+        var partes = ['Cuentas a Pagar'];
+        var q = ((document.getElementById('busquedaProv') || {}).value || '').trim();
+
+        if ((document.getElementById('soloCronogramaProv') || {}).checked) {
+            partes.push('solo echeq y transferencia');
+        }
+
+        if ((document.getElementById('soloVencidosProv') || {}).checked) {
+            partes.push('solo vencidos sin fecha');
+        }
+
+        if (q !== '') { partes.push('buscando ' + q); }
+
+        // Sin ningún filtro no hace falta aclarar nada: son todas.
+        return partes.join(' - ');
     }
 
     /**

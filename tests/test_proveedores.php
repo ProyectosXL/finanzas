@@ -398,6 +398,16 @@ chequear('y cuando difieren del universo se dice cuanto es el universo', true,
 chequear('la tarjeta de vencidos se apaga por el universo', true,
     strpos($js, "toggle('prov-kpi-ok', !u.n_vencido_sin_fecha)") !== false);
 
+seccion('el archivo exportado dice que filtro estaba puesto');
+
+/* Bajar lo que se ve esta bien -es la tabla que el usuario mira- pero sin rastro
+   del recorte, dentro de una semana nadie sabe si el archivo trae todo o una
+   parte. Y aca el caso NORMAL es el recortado: el filtro viene prendido. */
+chequear('el nombre se arma con los filtros', true,
+    strpos($js, 'function nombreExport()') !== false);
+chequear('y no es una constante', false,
+    strpos($js, "exportarTabla('tablaProveedores', 'Cuentas_a_Pagar')") !== false);
+
 seccion('el rubro Excluidos');
 
 chequear('lo detecta', true, ProveedoresCategorias::esExcluido('Excluidos'));
