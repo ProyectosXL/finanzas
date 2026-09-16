@@ -370,6 +370,21 @@ El criterio: entra lo que se paga **decidiendo cuándo**. Una transferencia o un
 
 **Lo que no se sabe, entra y se marca.** Una forma de pago en `null` —porque el proveedor no está en el maestro, o porque lo que trajo la planilla no se reconoció— no es lo mismo que una forma que quedó afuera del criterio: es un dato que falta. Esconder deuda por un dato que falta es la peor razón para esconderla, y además garantiza que nadie lo complete nunca, porque deja de verse. Esas filas se dibujan con la marca *sin forma*, así que no se confunden con un echeq confirmado.
 
+### Una forma sin normalizar no es lo mismo que un typo
+
+Las dos llegan con el normalizado en `null` y las dos se dibujan en naranja con su original, pero **se arreglan distinto**, así que el mensaje las distingue:
+
+| Lo que pasó | Qué hacer |
+| --- | --- |
+| `eqheck` — no matchea contra ninguna forma declarada | Corregir **la planilla** |
+| `TARJETA CORP` — sí es válida hoy, pero el maestro se importó antes de que estuviera en `FORMAS_PAGO` | **Reimportar el maestro** |
+
+Decirle *"no está en la lista de válidas"* al segundo caso sería falso, y además manda a corregir una planilla que está bien.
+
+Hoy el segundo caso son **129 vencimientos por $88.250.698,73** (`TARJETA CORP`) más 4 por $719.750,20 (`CAJA`), y entran al filtro por eso. Reimportar el maestro los saca solos, sin tocar código.
+
+> Esto estuvo invisible un tiempo: `categoria()` no devolvía el `FORMA_PAGO_ORIG` del maestro, así que esas 133 filas se dibujaban *"sin forma"* en gris y la marca naranja —que existe exactamente para este caso— no se ejecutaba nunca.
+
 ### Hay dos formas de pago por fila, y sólo una decide
 
 Confundirlas fue un bug.

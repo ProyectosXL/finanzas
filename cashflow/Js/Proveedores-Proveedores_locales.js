@@ -403,6 +403,14 @@
             + '</div></td>';
     }
 
+    /**
+     * La columna Forma.
+     *
+     * OJO: esta columna NO explica el filtro. Lo que entra al cronograma lo
+     * decide la forma del MAESTRO —`FORMA_PAGO_MAESTRO`— y acá se muestra la
+     * del pago registrado cuando hay uno. Que difieran es información: se le
+     * pagó por una vía distinta de la habitual.
+     */
     function celdaForma(f) {
         // Sin forma conocida. ENTRA AL FILTRO IGUAL —no se sabe cómo se paga, y
         // esconder deuda por un dato que falta es la peor razón para
@@ -416,11 +424,32 @@
         }
 
         // Una forma que no matcheó contra la lista se muestra tal como vino y se
-        // marca: lo que hay que arreglar es la planilla.
+        // marca. Los dos motivos por los que puede no haber matcheado se
+        // arreglan distinto, así que el mensaje los distingue: un typo se
+        // corrige en la planilla, y un maestro viejo se reimporta.
         if (!f.FORMA_PAGO && f.FORMA_PAGO_ORIG) {
-            return '<span class="prov-forma-rara" title="'
-                + escapar('"' + f.FORMA_PAGO_ORIG + '" no está en la lista de formas válidas.')
-                + '">' + escapar(f.FORMA_PAGO_ORIG) + '</span>';
+            var titulo = f.FORMA_DESACTUALIZADA
+                ? '"' + f.FORMA_PAGO_ORIG + '" SÍ es una forma válida, pero el maestro se '
+                  + 'importó antes de que estuviera declarada, así que quedó sin normalizar '
+                  + 'y este comprobante entra al filtro como si no se supiera cómo se paga. '
+                  + 'Reimportá el maestro y se acomoda solo.'
+                : '"' + f.FORMA_PAGO_ORIG + '" no está en la lista de formas válidas. '
+                  + 'Corregilo en la planilla.';
+
+            return '<span class="prov-forma-rara" title="' + escapar(titulo) + '">'
+                + escapar(f.FORMA_PAGO_ORIG) + '</span>';
+        }
+
+        // La forma del pago registrado difiere de la habitual del proveedor. No
+        // es un error —el filtro sigue mirando la del maestro— pero es un dato:
+        // o fue una excepción, o el maestro quedó viejo.
+        if (f.FORMA_PAGO_MAESTRO && f.FORMA_PAGO !== f.FORMA_PAGO_MAESTRO) {
+            return '<span class="small prov-forma-distinta" title="'
+                + escapar('El pago se registró por ' + f.FORMA_PAGO + ', pero en el maestro '
+                    + 'este proveedor es ' + f.FORMA_PAGO_MAESTRO + ', que es lo que decide '
+                    + 'si entra al cronograma. Si la vía cambió de verdad, actualizá el '
+                    + 'maestro.') + '">' + escapar(f.FORMA_PAGO)
+                + ' <i class="fas fa-arrows-left-right prov-marca"></i></span>';
         }
 
         return '<span class="small">' + escapar(f.FORMA_PAGO) + '</span>';

@@ -278,6 +278,7 @@ class ProveedoresCategorias {
                 'rubro' => null,
                 'centro_costos' => null,
                 'forma_pago' => null,
+                'forma_pago_orig' => null,
                 'plazo_dias' => null,
                 'excluido' => false,
                 'serie' => self::SERIE_SIN_RUBRO
@@ -292,6 +293,14 @@ class ProveedoresCategorias {
             'rubro' => $m['RUBRO'],
             'centro_costos' => $m['CENTRO_COSTOS'],
             'forma_pago' => $m['FORMA_PAGO'],
+
+            /* EL ORIGINAL VIAJA CON EL NORMALIZADO, igual que en la
+               importacion y por el mismo motivo: cuando el normalizado es null,
+               el original es lo unico que se puede mostrar. Sin esto la grilla
+               dibuja "sin forma" para un proveedor cuyo maestro dice
+               TARJETA CORP, y la marca naranja -que existe para exactamente
+               este caso- no se ejecuta nunca. */
+            'forma_pago_orig' => $m['FORMA_PAGO_ORIG'],
             'plazo_dias' => $m['PLAZO_DIAS'],
             'excluido' => self::esExcluido($m['RUBRO_ECONOMICO']),
             'serie' => self::serieDeRubro($m['RUBRO_ECONOMICO'])

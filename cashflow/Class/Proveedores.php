@@ -264,6 +264,8 @@ class Proveedores {
                 $hoyStr
             );
 
+            $forma = self::formaQueSeMuestra($cat, $pago);
+
             $items[] = [
                 'COD_PROVEE' => $cod,
                 'RAZON_SOC' => trim((string) $row['NOM_PROVEE']),
@@ -300,10 +302,18 @@ class Proveedores {
                    no un motivo para cambiar lo que se filtra.
 
                    Sin pago registrado, o con uno que no dice la forma, se
-                   muestra la del maestro: es lo mas cierto que se sabe. */
-                'FORMA_PAGO' => ($pago === null || $pago['FORMA_PAGO'] === null)
-                    ? $cat['forma_pago'] : $pago['FORMA_PAGO'],
-                'FORMA_PAGO_ORIG' => ($pago === null) ? null : $pago['FORMA_PAGO_ORIG'],
+                   muestra la del maestro: es lo mas cierto que se sabe. El
+                   ORIGINAL sale de la MISMA fuente que el normalizado, porque
+                   es el original DE ESE valor y no de otro. */
+                'FORMA_PAGO' => $forma['normalizado'],
+                'FORMA_PAGO_ORIG' => $forma['original'],
+
+                /* El maestro trae la forma escrita pero sin normalizar: se
+                   importo antes de que esa forma estuviera declarada en
+                   FORMAS_PAGO. NO es un typo de la planilla -reimportar el
+                   maestro lo arregla solo- y decirle al usuario que "no esta en
+                   la lista de validas" seria mentirle, porque hoy si esta. */
+                'FORMA_DESACTUALIZADA' => $forma['desactualizada'],
                 'OBSERVACION' => ($pago === null) ? null : $pago['OBSERVACION'],
                 'ESTADO_PAGO' => ($pago === null) ? null : $pago['ESTADO'],
 
@@ -334,6 +344,63 @@ class Proveedores {
         sqlsrv_free_stmt($stmt);
 
         return $items;
+    }
+
+    /**
+     * Que forma de pago se MUESTRA en la columna Forma, y con que original.
+     *
+     * OJO: esto NO decide nada. Lo que entra al cronograma lo decide la forma
+     * del maestro y solo esa -ver la seccion "DOS FORMAS DE PAGO QUE NO SON LA
+     * MISMA COSA" del encabezado-. Esto es la columna de la grilla.
+     *
+     * Manda el pago registrado si lo hay, porque es un hecho sobre ESTE
+     * comprobante; si no hay, o si el pago no dice la forma, se muestra la del
+     * maestro, que es lo mas cierto que se sabe.
+     *
+     * EL ORIGINAL SALE DE LA MISMA FUENTE QUE EL NORMALIZADO. Mezclarlos
+     * -normalizado del pago, original del maestro- mostraria el original de un
+     * valor que no es el que se esta mostrando.
+     *
+     * LA TERCERA COSA QUE DEVUELVE es si el original QUEDARIA normalizado con
+     * la lista de hoy. Cuando eso pasa, el valor no es un typo de la planilla:
+     * es un maestro importado antes de que esa forma estuviera declarada en
+     * FORMAS_PAGO, y lo arregla reimportarlo. Distinguirlo importa porque el
+     * mensaje es otro: "no esta en la lista de validas" seria falso.
+     *
+     * Estatica y pura.
+     *
+     * @param array $cat Lo que devolvio ProveedoresCategorias::categoria()
+     * @param array|null $pago La fila de pago, si hay
+     * @return array ['normalizado', 'original', 'desactualizada']
+     */
+    public static function formaQueSeMuestra($cat, $pago) {
+        $delPago = ($pago !== null && $pago['FORMA_PAGO'] !== null);
+
+        $normalizado = $delPago ? $pago['FORMA_PAGO'] : $cat['forma_pago'];
+        $original = $delPago
+            ? $pago['FORMA_PAGO_ORIG']
+            : (isset($cat['forma_pago_orig']) ? $cat['forma_pago_orig'] : null);
+
+        /* Un pago que no dice la forma pero si trae su original -un valor que
+           no matcheo al importar la planilla de pagos- conserva ese original:
+           es lo que hay que mostrar para poder corregirlo. */
+        if (!$delPago && $pago !== null && $pago['FORMA_PAGO_ORIG'] !== null
+            && trim((string) $pago['FORMA_PAGO_ORIG']) !== '') {
+            $original = $pago['FORMA_PAGO_ORIG'];
+        }
+
+        $desactualizada = false;
+
+        if ($normalizado === null && $original !== null && trim((string) $original) !== '') {
+            $desactualizada = (ProveedoresCategorias::normalizarFormaPago($original)['normalizado']
+                !== null);
+        }
+
+        return [
+            'normalizado' => $normalizado,
+            'original' => $original,
+            'desactualizada' => $desactualizada
+        ];
     }
 
     /* ====================================================================

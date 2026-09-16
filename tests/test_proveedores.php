@@ -302,6 +302,69 @@ chequear('un proveedor de CAJA no entra aunque tenga pago cargado',
 chequear('y uno de ECHEQ sigue adentro',
     true, ProveedoresCategorias::esDelCronograma('ECHEQ'));
 
+seccion('la forma que se muestra sale de la misma fuente que su original');
+
+/* EL BUG QUE ESTO FIJA: categoria() no devolvia el FORMA_PAGO_ORIG del maestro,
+   asi que un proveedor cuyo maestro dice TARJETA CORP se dibujaba "sin forma"
+   en gris. Hoy son 129 vencimientos por $88,25 M: el maestro se importo con la
+   lista vieja de FORMAS_PAGO y quedaron con el normalizado en null. La rama
+   naranja del JS -que existe para exactamente este caso- no se ejecutaba nunca. */
+$catCaja = ['forma_pago' => null, 'forma_pago_orig' => 'TARJETA CORP'];
+
+$f = Proveedores::formaQueSeMuestra($catCaja, null);
+
+chequear('sin pago cargado se muestra lo que dice el maestro',
+    'TARJETA CORP', $f['original']);
+chequear('sin normalizar, que es como esta guardado', null, $f['normalizado']);
+
+/* Y SE DISTINGUE DEL TYPO. 'TARJETA CORP' hoy SI esta en FORMAS_PAGO: lo que
+   pasa es que el maestro se importo antes de que estuviera declarada. Decirle
+   al usuario que no es una forma valida seria mentirle, y ademas mandarlo a
+   corregir la planilla cuando lo que hay que hacer es reimportar el maestro. */
+chequear('y se sabe que es un maestro viejo, no un typo', true, $f['desactualizada']);
+
+$f = Proveedores::formaQueSeMuestra(
+    ['forma_pago' => null, 'forma_pago_orig' => 'eqheck'], null);
+
+chequear('un typo de verdad no se confunde con eso', false, $f['desactualizada']);
+chequear('pero se muestra igual', 'eqheck', $f['original']);
+
+// El pago registrado manda sobre el maestro EN LA COLUMNA -es un hecho sobre
+// este comprobante- pero no sobre el filtro, que ya se verifico arriba.
+$f = Proveedores::formaQueSeMuestra(
+    ['forma_pago' => 'ECHEQ', 'forma_pago_orig' => 'echeq'],
+    ['FORMA_PAGO' => 'TRANSFERENCIA', 'FORMA_PAGO_ORIG' => null]);
+
+chequear('con pago cargado manda el del pago', 'TRANSFERENCIA', $f['normalizado']);
+
+/* EL ORIGINAL SALE DE LA MISMA FUENTE QUE EL NORMALIZADO: si se mezclaran, esta
+   fila mostraria 'TRANSFERENCIA' con el original 'echeq' del maestro al lado. */
+chequear('y el original es el de ese mismo valor, no el del maestro',
+    null, $f['original']);
+
+// Un pago que no dice la forma no borra lo que el maestro si sabe.
+$f = Proveedores::formaQueSeMuestra(
+    ['forma_pago' => 'ECHEQ', 'forma_pago_orig' => 'echeq'],
+    ['FORMA_PAGO' => null, 'FORMA_PAGO_ORIG' => null]);
+
+chequear('un pago sin forma no tapa la del maestro', 'ECHEQ', $f['normalizado']);
+
+// Pero un pago que trajo un valor que no matcheo SI conserva su original: es lo
+// que hay que mostrar para poder corregirlo.
+$f = Proveedores::formaQueSeMuestra(
+    ['forma_pago' => null, 'forma_pago_orig' => null],
+    ['FORMA_PAGO' => null, 'FORMA_PAGO_ORIG' => 'transfer.']);
+
+chequear('y el valor raro de la planilla de pagos no se pierde',
+    'transfer.', $f['original']);
+
+// Un proveedor que no esta en el maestro no tiene ni una ni otra.
+$f = Proveedores::formaQueSeMuestra(
+    ['forma_pago' => null, 'forma_pago_orig' => null], null);
+
+chequear('sin maestro y sin pago no hay nada que mostrar', null, $f['original']);
+chequear('y eso no es un maestro viejo', false, $f['desactualizada']);
+
 seccion('el rubro Excluidos');
 
 chequear('lo detecta', true, ProveedoresCategorias::esExcluido('Excluidos'));
