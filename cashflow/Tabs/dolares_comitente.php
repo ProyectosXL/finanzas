@@ -100,6 +100,25 @@
                 </div>
             </div>
         </div>
+
+        <!-- CUÁNTO QUEDA. Es la única tarjeta que contesta la pregunta con la
+             que alguien abre esta pantalla cuando ya viene usando el fondo:
+             informado − aplicado. Sin ella, el saldo de arriba es el de antes de
+             haberlo usado. Aparece sólo cuando hay algo aplicado: una tarjeta
+             que repite el saldo de al lado no agrega nada. -->
+        <div class="col-md-6 col-lg-4" id="cardDisponibleDol" style="display: none;">
+            <div class="kpi-card kpi-card-destacada">
+                <div class="kpi-card-header">
+                    <span class="kpi-card-title"
+                          title="El saldo informado menos lo que ya se aplicó como cobertura desde este fondo. Lo aplicado se carga en la sección Cobertura del tablero, sobre la fila «Uso de Inversiones».">Disponible sin usar</span>
+                    <div class="kpi-card-icon green"><i class="fas fa-wallet"></i></div>
+                </div>
+                <div class="kpi-card-value" id="disponibleDol">US$ 0,00</div>
+                <div class="kpi-card-footer">
+                    <span class="text-muted" id="detalleDisponibleDol"></span>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div class="card mb-4">

@@ -391,6 +391,16 @@ class CashflowRegistry {
             'moneda' => 'USD',
             'disponible' => true,
             'tab' => 'dolares_comitente',
+
+            /* DE QUE FONDO DE COBERTURA es este stock. Lo declara el modulo que
+               informa el saldo y no la fila del tablero: es una propiedad de
+               QUE es este dinero, no de como se lo configuro en el cuadro. En
+               CONF_FILA seria un dato que se puede contradecir con el proveedor
+               que la fila ya declara.
+
+               Con esto una aplicacion con origen DOLARES descuenta de ACA y no
+               del pozo comun. Ver Cashflow::resolverCobertura(). */
+            'origen_cobertura' => 'DOLARES',
             'series' => [
                 'STOCK' => 'Dolares en la cuenta, disponibles para cobertura',
                 'INGRESO' => 'Dolares cuenta comitente como ingreso (criterio viejo, en desuso)'
@@ -425,6 +435,10 @@ class CashflowRegistry {
             'moneda' => 'ARS',
             'disponible' => true,
             'tab' => 'saldo_inversiones',
+
+            /* El fondo del que descuentan las aplicaciones con origen
+               INVERSIONES. Ver la nota equivalente en DOLARES_COMITENTE. */
+            'origen_cobertura' => 'INVERSIONES',
             'series' => [
                 'STOCK' => 'Saldo invertido disponible para cobertura',
                 'INGRESO' => 'Saldo de inversiones como ingreso (criterio viejo, en desuso)'

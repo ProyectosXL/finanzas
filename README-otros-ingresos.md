@@ -27,8 +27,9 @@ Contra `central`:
 -- 1. sql/cashflow_dolares_comitente.sql
 -- 2. sql/cashflow_dolares_comitente_cronograma.sql   (la fecha de cronograma)
 -- 3. sql/cashflow_dolares_comitente_cobertura.sql    (pasa a stock de cobertura)
--- 4. sql/cashflow_saldo_inversiones.sql
--- 5. sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql          (la cotización diaria)
+-- 4. sql/cashflow_cobertura_por_fondo.sql            (consumo por fondo y en dólares)
+-- 5. sql/cashflow_saldo_inversiones.sql
+-- 6. sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql          (la cotización diaria)
 ```
 
 El tercero apaga la fila de Disponibilidades y crea la de **Cobertura**. Va después de `sql/cashflow_cobertura.sql`, que es el que crea esa sección, y aborta diciéndolo si falta. **No migra ningún dato**: las cargas quedan como están y cambia quién las lee.
@@ -106,6 +107,34 @@ Decir que ese día *ingresa* plata no es cierto: **los dólares ya están en la 
 **Funciona sin tocar el motor.** `Cashflow::calcularTotales()` **suma todas** las filas de tipo `STOCK_COBERTURA` para saber con cuánto se puede cubrir; no conoce ninguna por su código. Así que los dólares se suman a las inversiones y el aviso de *"se aplica más cobertura de la que hay"* los cuenta solo.
 
 La fila lleva `COMPUTA = 0` y el motor le vacía las columnas de fecha: un stock no ocurre un día, **está**. El importe se muestra sólo en la columna *Total*.
+
+### Se consumen por fecha, y el saldo se descuenta
+
+> Esto es **nuevo**. El origen de una aplicación de cobertura era una etiqueta.
+
+Colocar importes en fechas ya se podía —es la fila **Uso de Inversiones**, que se carga haciendo clic en la celda del día— y `Cobertura::ORIGENES` ya declaraba `DOLARES`. Lo que faltaba lo decía el propio código:
+
+> **OJO: el origen es DESCRIPTIVO.** Hoy el único stock que el tablero conoce es el saldo de inversiones en pesos, así que **el origen no limita cuánto se puede aplicar**; dice de dónde se piensa sacar.
+
+Había **un pozo**: el tablero sumaba todos los stocks, sumaba todos los usos y avisaba si se había aplicado de más. Se podían aplicar trescientos millones *"de dólares"* mientras el total alcanzara.
+
+**Ahora cada fondo lleva su cuenta.** Una aplicación con origen `DOLARES` descuenta de los dólares; una con origen `INVERSIONES`, de las inversiones. El aviso pasa a ser **por fondo** además de por el total — un fondo puede estar sobregirado mientras el total cierra, y ése es justamente el caso que el pozo único no podía ver.
+
+**Qué fondo es cada stock lo declara el módulo**, en `origen_cobertura` del registro. Es una propiedad de *qué es ese dinero*, no de cómo se configuró la fila; en `CONF_FILA` sería un dato que se puede contradecir con el proveedor que la fila ya declara.
+
+#### Los dólares se consumen en dólares
+
+La moneda **sale del origen**, no viaja como parámetro: aplicar del fondo de dólares *es* aplicar dólares. Recibirla suelta permitiría guardar un importe en dólares diciendo que sale de inversiones, y ese importe se valuaría dos veces o ninguna.
+
+Se carga *"vendo 20.000 USD el 3/10"* y se convierte con la cotización **del día en que se aplica**, punta vendedora — la misma con la que se valúa el saldo. Si usaran puntas distintas, consumir todo el saldo no lo dejaría en cero.
+
+**Por qué la fecha de la aplicación y no la del saldo:** vender 20.000 dólares el 3 de octubre entrega los pesos *de ese día*. La cotización con la que se informó el saldo describe otra cosa —cuánto valía lo que había— y usarla para una venta posterior pondría en el cuadro pesos que nadie va a recibir.
+
+Guardar los pesos en vez de los dólares tendría el problema inverso: el remanente **en dólares** se movería solo con el tipo de cambio — hoy quedan 46.000 y mañana 44.800 sin que nadie toque nada.
+
+**Sin el script, aplicar desde dólares se rechaza** con el nombre del script en el mensaje. Guardar un importe en dólares en una tabla que no sabe la moneda lo dejaría leyéndose como pesos, que es un error de dos órdenes de magnitud.
+
+La pestaña muestra **Disponible sin usar** —informado − aplicado, en dólares y en pesos— y la tarjeta sólo aparece cuando hay algo aplicado. Sale de la **misma cuenta** que alimenta el tablero, así que las dos pantallas no pueden discrepar.
 
 ### El saldo es la última carga, no la suma
 

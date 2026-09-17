@@ -479,3 +479,100 @@ $provCob = CashflowRegistry::instanciar('COBERTURA');
 chequear('se instancia', true, $provCob instanceof CashflowProvider);
 chequear('y devuelve la serie que declara',
     ['APLICACION'], array_keys($provCob->series(Horizonte::desdeParametros(new Parametros()))));
+
+/* ================================================================
+   LA COBERTURA SE CONSUME POR FONDO
+
+   El origen era DESCRIPTIVO: habia UN pozo, el tablero sumaba todos los stocks
+   y todos los usos, y se podian aplicar trescientos millones "de dolares"
+   mientras el total alcanzara. Desde que hay DOS fondos, el origen decide de
+   cual se descuenta.
+   ================================================================ */
+seccion('cada fondo tiene su moneda, y la decide el fondo');
+
+/* LA MONEDA NO ES UN PARAMETRO SUELTO. Recibirla aparte permitiria guardar un
+   importe en dolares diciendo que sale de inversiones, y ese importe se valuaria
+   dos veces o ninguna sin que nada lo dijera. */
+chequear('del fondo de dolares se aplican DOLARES',
+    'USD', Cobertura::monedaDeOrigen('DOLARES'));
+chequear('de inversiones, pesos', 'ARS', Cobertura::monedaDeOrigen('INVERSIONES'));
+chequear('de una suscripcion, pesos', 'ARS', Cobertura::monedaDeOrigen('SUSCRIPCION'));
+
+// Un origen desconocido es pesos: es lo que era todo antes de que hubiera un
+// stock en otra moneda, y valuar de mas es peor que no valuar.
+chequear('un origen que no existe cae en pesos', 'ARS', Cobertura::monedaDeOrigen('LO QUE SEA'));
+chequear('y null tambien', 'ARS', Cobertura::monedaDeOrigen(null));
+
+/* TODO ORIGEN TIENE MONEDA DECLARADA. Si alguien agrega uno a ORIGENES y se
+   olvida de MONEDA_POR_FONDO, sus aplicaciones se guardarian como pesos sin que
+   nadie lo note. */
+$sinMoneda = [];
+
+foreach (array_keys(Cobertura::ORIGENES) as $o) {
+    if (!isset(Cobertura::MONEDA_POR_FONDO[$o])) { $sinMoneda[] = $o; }
+}
+
+chequear('todos los origenes declaran su moneda', [], $sinMoneda);
+
+// Y al reves: una moneda declarada para un fondo que no existe no la usa nadie.
+$sinOrigen = [];
+
+foreach (array_keys(Cobertura::MONEDA_POR_FONDO) as $o) {
+    if (!isset(Cobertura::ORIGENES[$o])) { $sinOrigen[] = $o; }
+}
+
+chequear('y no sobra ninguna', [], $sinOrigen);
+
+seccion('cada stock declara de que fondo es');
+
+/* QUE FONDO ES CADA STOCK lo declara el MODULO que informa ese saldo, no la fila
+   del tablero: es una propiedad de que ES ese dinero. En CONF_FILA seria un dato
+   que se puede contradecir con el proveedor que la fila ya declara. */
+foreach (['DOLARES_COMITENTE' => 'DOLARES',
+          'SALDO_INVERSIONES' => 'INVERSIONES'] as $prov => $fondo) {
+    $m = CashflowRegistry::meta($prov);
+
+    chequear($prov . ' declara su fondo de cobertura', $fondo,
+        isset($m['origen_cobertura']) ? $m['origen_cobertura'] : null);
+
+    /* Y ese fondo tiene que EXISTIR como origen, o el aviso nombraria un fondo
+       del que nadie puede aplicar. */
+    chequear('y ese fondo existe como origen', true,
+        isset(Cobertura::ORIGENES[$fondo]));
+}
+
+seccion('el script que habilita el consumo por fondo');
+
+$sqlFondo = __DIR__ . '/../sql/cashflow_cobertura_por_fondo.sql';
+
+chequear('el script existe', true, file_exists($sqlFondo));
+
+$txtFondo = file_get_contents($sqlFondo);
+
+chequear('agrega la moneda solo si no esta', true,
+    strpos($txtFondo, "COL_LENGTH('dbo.RO_T_CASHFLOW_COBERTURA_APLIC', 'MONEDA') IS NULL")
+        !== false);
+
+// Lo que ya estaba es en pesos: es el dato cierto, no un relleno.
+chequear('lo que ya estaba queda en pesos', true,
+    strpos($txtFondo, "SET MONEDA = 'ARS'") !== false);
+chequear('y el default tambien', true, strpos($txtFondo, "DEFAULT ('ARS')") !== false);
+
+/* SIN EL SCRIPT NO SE PUEDE APLICAR EN DOLARES, y se dice por que: guardar un
+   importe en dolares en una tabla que no sabe la moneda lo dejaria leyendose
+   como pesos, que es un error de dos ordenes de magnitud. */
+$cuerpoGuardar = (function () {
+    $r = new ReflectionMethod('Cobertura', 'guardar');
+
+    return implode('', array_slice(file(__DIR__ . '/../cashflow/Class/Cobertura.php'),
+        $r->getStartLine() - 1, $r->getEndLine() - $r->getStartLine() + 1));
+})();
+
+chequear('la moneda sale del origen y no de un parametro', true,
+    strpos($cuerpoGuardar, '$mon = self::monedaDeOrigen($org);') !== false);
+chequear('sin la columna, aplicar en dolares se rechaza', true,
+    strpos($cuerpoGuardar, "if (\$mon === 'USD' && !\$this->tieneMoneda())") !== false);
+chequear('y el mensaje dice que se leeria como pesos', true,
+    strpos($cuerpoGuardar, 'leería como pesos') !== false);
+chequear('nombrando el script que falta', true,
+    strpos($cuerpoGuardar, 'sql/cashflow_cobertura_por_fondo.sql') !== false);

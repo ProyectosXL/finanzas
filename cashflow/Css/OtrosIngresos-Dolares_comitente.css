@@ -102,6 +102,13 @@
     cursor: help;
 }
 
+/* Se aplicó más cobertura de la que hay en este fondo. No se bloquea —puede ser
+   deliberado— pero un disponible negativo tiene que leerse como un problema y no
+   como un número más. */
+.tab-dolares_comitente .kpi-card.dol-sobregirado .kpi-card-value {
+    color: #b3261e;
+}
+
 /* ============================================================================
    LA CARGA QUE VALE
 

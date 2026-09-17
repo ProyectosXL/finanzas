@@ -82,10 +82,42 @@ try {
                     . 'a su fecha. No se asume ningún tipo de cambio: tampoco entran al tablero.';
             }
 
+            /* CUANTO SE CONSUMIO DE ESTE FONDO. La pantalla informa el saldo y
+               tiene que poder decir cuánto queda, o el número que muestra sería
+               el de antes de usarlo. Sale de la MISMA cuenta que alimenta el
+               tablero -Cobertura::valuarAplicaciones()-, así que las dos
+               pantallas no pueden discrepar.
+
+               Se lee en dólares y en pesos: el saldo se informa en dólares y la
+               fila del cuadro está en pesos, y las dos preguntas son legítimas. */
+            require_once __DIR__ . '/../Class/Cobertura.php';
+
+            $aplicado = ['usd' => 0.0, 'ars' => 0.0, 'n' => 0];
+
+            try {
+                foreach ((new Cobertura())->valuarAplicaciones()['filas'] as $a) {
+                    if ($a['ORIGEN'] !== 'DOLARES') {
+                        continue;
+                    }
+
+                    $aplicado['n']++;
+                    $aplicado['usd'] += ($a['MONEDA'] === 'USD') ? floatval($a['IMPORTE']) : 0;
+                    $aplicado['ars'] += ($a['IMPORTE_ARS'] === null) ? 0 : $a['IMPORTE_ARS'];
+                }
+            } catch (Throwable $e) {
+                /* Una pantalla que ya funcionaba no se cae porque la cobertura
+                   no esté instalada: el saldo informado se muestra igual y lo
+                   consumido queda en cero. */
+                $avisos[] = 'No se pudo leer cuánto se aplicó de estos dólares ('
+                    . $e->getMessage() . '). El saldo informado de abajo es correcto; '
+                    . 'lo que no se está descontando es lo ya usado.';
+            }
+
             echo json_encode([
                 'success' => true,
                 'data' => [
                     'filas' => $val['filas'],
+                    'aplicado' => $aplicado,
                     'avisos' => $avisos
                 ]
             ], JSON_UNESCAPED_UNICODE);

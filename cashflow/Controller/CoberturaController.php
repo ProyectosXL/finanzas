@@ -65,8 +65,14 @@ try {
             echo json_encode([
                 'success' => true,
                 'data' => [
-                    'filas' => $cobertura->getAplicaciones(),
+                    /* Las filas van VALUADAS: una aplicación en dólares trae
+                       además con qué cotización y de qué día se convirtió. Es la
+                       MISMA cuenta que hace el proveedor del tablero, así que la
+                       pantalla y el cuadro no pueden discrepar. */
+                    'filas' => $cobertura->valuarAplicaciones()['filas'],
                     'origenes' => Cobertura::ORIGENES,
+                    'moneda_por_fondo' => Cobertura::MONEDA_POR_FONDO,
+                    'en_dolares' => $cobertura->tieneMoneda(),
                     'avisos' => $cobertura->getAvisos()
                 ]
             ], JSON_UNESCAPED_UNICODE);
@@ -90,6 +96,9 @@ try {
                 throw new Exception('Faltan la fecha o el importe de la cobertura');
             }
 
+            /* LA MONEDA NO VIAJA: la decide el ORIGEN. Aplicar del fondo de
+               dolares es aplicar dolares, y recibirla suelta permitiria guardar
+               un importe en dolares diciendo que sale de inversiones. */
             $r = $cobertura->guardar(
                 $data['fecha'],
                 $data['importe'],
@@ -98,11 +107,18 @@ try {
                 usuarioActual()
             );
 
+            $cuanto = ($r['moneda'] === 'USD')
+                ? 'US$ ' . number_format($r['importe'], 2, ',', '.')
+                : '$ ' . number_format($r['importe'], 2, ',', '.');
+
             echo json_encode([
                 'success' => true,
-                'message' => $r['piso']
-                    ? 'Cobertura actualizada. La carga anterior de esa fecha queda en el historial.'
-                    : 'Cobertura aplicada.',
+                'message' => ($r['piso']
+                    ? 'Cobertura actualizada a ' . $cuanto . '. La carga anterior de esa fecha '
+                        . 'queda en el historial.'
+                    : 'Cobertura aplicada por ' . $cuanto . '.')
+                    . ($r['moneda'] === 'USD'
+                        ? ' Se valúa con la cotización del día en que se aplica.' : ''),
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
