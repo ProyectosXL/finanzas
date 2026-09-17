@@ -1167,7 +1167,7 @@ seccion('excluir una factura pide el motivo, y lo valida el back');
    la grilla, y una factura sacada del cashflow sin motivo no la explica nadie
    tres meses despues. Se mira el cuerpo del metodo porque tildar de verdad
    necesita base. */
-$cuerpoExcl = $cuerpoDe('saveExclusion');
+$cuerpoExcl = $cuerpoDe('saveExclusionMasiva');
 
 chequear('rechaza excluir sin motivo', true,
     strpos($cuerpoExcl, "if (\$excluir && \$texto === '')") !== false);
@@ -1185,6 +1185,65 @@ chequear('destildar borra el motivo', true,
 // ya tuviera no son asunto de este gesto.
 chequear('no toca la fecha de pago', false, strpos($cuerpoExcl, "'FECHA_PAGO'") !== false);
 chequear('ni la forma', false, strpos($cuerpoExcl, "'FORMA_PAGO") !== false);
+
+seccion('excluir varias facturas es UNA operacion, con UN motivo');
+
+/* UNA SOLA TRANSACCION, igual que el tildado masivo de Echeqs: sacar del
+   cashflow las ocho facturas de un proveedor con ocho llamadas deja la puerta
+   abierta a que la quinta falle y el tablero quede a mitad de camino. */
+chequear('abre una transaccion', true,
+    strpos($cuerpoExcl, 'sqlsrv_begin_transaction($cid)') !== false);
+chequear('y si algo falla no queda nada escrito', true,
+    strpos($cuerpoExcl, 'sqlsrv_rollback($cid)') !== false);
+
+/* LAS CLAVES SE NORMALIZAN ANTES DE ABRIR LA TRANSACCION: un comprobante mal
+   identificado en la fila once no puede descubrirse con diez ya escritas. */
+chequear('valida los comprobantes antes de empezar a escribir', true,
+    strpos($cuerpoExcl, 'foreach (is_array($comprobantes)')
+        < strpos($cuerpoExcl, 'sqlsrv_begin_transaction'));
+
+// La misma factura mandada dos veces es una: se indexa por su clave.
+chequear('la misma factura repetida no se escribe dos veces', true,
+    strpos($cuerpoExcl, '$claves[self::clavePago($cod, $t, $n)]') !== false);
+
+chequearLanza('sin comprobantes no hace nada y lo dice', function () {
+    (new Proveedores())->saveExclusionMasiva([], true, 'x');
+});
+
+// saveExclusion() de a una NO duplica la logica: delega en la masiva con una
+// lista de uno. Dos caminos que tienen que hacer lo mismo divergen.
+chequear('excluir de a una pasa por el mismo camino', true,
+    strpos($cuerpoDe('saveExclusion'), '$this->saveExclusionMasiva(') !== false);
+
+seccion('el motivo se pide en un dialogo del modulo, no con el prompt del navegador');
+
+/* window.prompt no se puede formatear, no entra un detalle largo, no valida
+   nada y se ve como un error del navegador en vez de como una decision del
+   sistema. Acá ademas hay que leer CUANTAS facturas y por CUANTA plata antes de
+   escribir el motivo, y eso en un prompt no entra. */
+$notiJs = file_get_contents(__DIR__ . '/../cashflow/Js/notificaciones.js');
+
+chequear('el control compartido sabe pedir un texto', true,
+    strpos($notiJs, 'pedirTexto: pedirTexto') !== false);
+
+/* DEVUELVE null AL CANCELAR Y EL TEXTO AL CONFIRMAR. confirmar() sigue
+   devolviendo un booleano: su respuesta es si o no, y la de esta es el texto.
+   Un false que a veces es '' obligaria a distinguir dos ausencias distintas. */
+chequear('y devuelve null si se cancela', true,
+    strpos($notiJs, 'Promise.resolve(null)') !== false);
+
+// El armazon del modal esta escrito UNA vez: lo delicado no es el HTML, es que
+// cerrar con la cruz, con Escape o clickeando afuera sea tambien una respuesta.
+chequear('los dos dialogos comparten el armazon', true,
+    strpos($notiJs, 'function abrirDialogo(opciones, pieza)') !== false);
+// El cuerpo vacio es la firma de confirmar(): pedirTexto() le pasa el campo.
+chequear('y confirmar() lo usa', true,
+    preg_match("/return abrirDialogo\(opciones, \{\s*cuerpo: '',/", $notiJs) === 1);
+
+chequear('la pestana ya no usa el prompt del navegador', false,
+    strpos($jsCodigo, 'window.prompt') !== false);
+chequear('sino el dialogo del modulo', true,
+    strpos($jsCodigo, 'Notificacion.pedirTexto({') !== false);
 
 seccion('el script que habilita excluir facturas');
 

@@ -216,9 +216,32 @@ Se aplican igual al confirmar: el que decide es quien importa, viéndolo.
 
 > Esto es **nuevo**. Antes sólo se podía excluir a un proveedor entero.
 
-Una factura duplicada, una en disputa o una que se pagó por fuera de Tango no son un problema del proveedor: son un problema de **esa factura**. El tilde de la columna *Excl.* la saca del cashflow.
+Una factura duplicada, una en disputa o una que se pagó por fuera de Tango no son un problema del proveedor: son un problema de **esa factura**.
 
-**El motivo es obligatorio**, y lo valida `Proveedores::saveExclusion()` y no la pantalla —el endpoint es alcanzable sin pasar por la grilla—. Una factura sacada del cashflow sin motivo no la explica nadie tres meses después. Destildar borra el motivo: dejarlo haría que una factura incluida arrastre el texto de cuando estuvo afuera.
+**El motivo es obligatorio**, y lo valida `Proveedores::saveExclusionMasiva()` y no la pantalla —el endpoint es alcanzable sin pasar por la grilla—. Una factura sacada del cashflow sin motivo no la explica nadie tres meses después. Volver a incluirla borra el motivo: dejarlo haría que una factura incluida arrastre el texto de cuando estuvo afuera.
+
+#### Se eligen varias y se confirman juntas, con UN motivo
+
+> Esto **cambió**. Era un tilde por fila que actuaba solo y pedía el motivo con el `prompt` del navegador.
+
+La columna es de **selección**, no de estado. Sacar plata del tablero no puede dispararse con un clic suelto, y el caso real no es una factura: son **las ocho de un proveedor**. Se resuelve con lo que la pantalla ya tenía — buscar el proveedor, *seleccionar todas las que se ven*, un motivo.
+
+**Un motivo para todas, y no es una simplificación de la pantalla:** excluir las ocho facturas de un proveedor es **una** decisión, y ocho motivos distintos para una decisión son ocho oportunidades de que digan cosas distintas.
+
+**Es una sola transacción**, igual que el tildado masivo de Echeqs y por el mismo motivo: ocho llamadas dejan la puerta abierta a que la quinta falle y el tablero quede a mitad de camino sin que nadie se entere. Las claves se normalizan **antes** de abrirla: un comprobante mal identificado en la fila once no puede descubrirse con diez ya escritas.
+
+`saveExclusion()` de a una **no duplica nada**: delega en la masiva con una lista de uno. Dos caminos que tienen que hacer lo mismo divergen, y lo que no puede estar escrito dos veces es la transacción.
+
+En la barra de selección, antes de apretar nada: **cuántas facturas y por cuánta plata**. El importe es el dato que hace que alguien note que seleccionó de más.
+
+#### El motivo se pide en un diálogo del módulo
+
+`Notificacion.pedirTexto()` — el mismo control que ya hacía `confirmar()`, con un campo adentro. `window.prompt` no se puede formatear, no entra un detalle largo, no valida nada y se ve como un error del navegador en vez de como una decisión del sistema. Y acá hay que **leer cuántas facturas y por cuánto antes de escribir el motivo**, que en un prompt no entra.
+
+- **Devuelve `null` al cancelar y el texto al confirmar.** `confirmar()` sigue devolviendo un booleano: su respuesta es sí o no, y la de ésta es el texto. Un `false` que a veces es `''` obligaría a cada llamador a distinguir dos ausencias distintas.
+- **Un campo obligatorio vacío no cierra el diálogo**: dice por qué en el mismo lugar donde se escribe, en vez de cerrar y fallar después contra el servidor.
+- El armazón está escrito **una vez** (`abrirDialogo()`): lo delicado no es el HTML, es que cerrar con la cruz, con Escape o clickeando afuera **también sea una respuesta, y sea la negativa**. Dos copias de eso se desincronizan en la primera corrección.
+- Sin Bootstrap se cae al `prompt` del navegador, igual que `confirmar()` se cae al `confirm`: es feo, pero preguntar es lo que no puede faltar.
 
 #### Por qué no alcanzaba con mandarla a `PAGOS_EXCLUIDOS`
 

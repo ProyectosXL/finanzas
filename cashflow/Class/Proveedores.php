@@ -1483,6 +1483,40 @@ class Proveedores {
      */
     public function saveExclusion($codProvee, $tComp, $nComp, $excluida, $motivo = null,
                                   $usuario = null) {
+        $r = $this->saveExclusionMasiva(
+            [['cod_provee' => $codProvee, 't_comp' => $tComp, 'n_comp' => $nComp]],
+            $excluida, $motivo, $usuario);
+
+        return ['excluida' => $r['excluida'], 'motivo' => $r['motivo']];
+    }
+
+    /**
+     * Excluye -o vuelve a incluir- VARIAS facturas de una, con UN SOLO MOTIVO.
+     *
+     * ES UNA SOLA TRANSACCION, igual que el tildado masivo de Echeqs y por el
+     * mismo motivo: sacar del cashflow las ocho facturas de un proveedor con
+     * ocho llamadas deja la puerta abierta a que la quinta falle y el tablero
+     * quede a mitad de camino sin que nadie se entere. O entran todas o ninguna.
+     *
+     * EL MOTIVO ES UNO PARA TODAS, y eso no es una simplificacion de la
+     * pantalla: excluir ocho facturas del mismo proveedor es UNA decision, y
+     * ocho motivos distintos para una decision son ocho oportunidades de que
+     * digan cosas distintas.
+     *
+     * NO SE VALIDA CONTRA LOS PENDIENTES DE HOY, a diferencia de
+     * Echeqs::marcarCheques(). Aca la fila de override vive por comprobante y
+     * puede existir para uno que hoy no esta pendiente -se pago, o se anulo-:
+     * borrarla o rechazarla perderia la decision el dia que el comprobante
+     * vuelva. Lo que si se valida es que el comprobante este identificado.
+     *
+     * @param array $comprobantes Filas con 'cod_provee', 't_comp', 'n_comp'
+     * @param bool $excluida
+     * @param string|null $motivo Obligatorio si $excluida es true
+     * @param string|null $usuario
+     * @return array ['excluida', 'motivo', 'tocados' => int]
+     */
+    public function saveExclusionMasiva($comprobantes, $excluida, $motivo = null,
+                                        $usuario = null) {
         if (!$this->tablaCreada()) {
             throw new Exception('Todavía no existe la tabla de overrides por comprobante. '
                 . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
@@ -1493,31 +1527,68 @@ class Proveedores {
                 . 'Corré sql/cashflow_prov_locales_excluir_factura.sql contra la base central.');
         }
 
-        $cod = Planilla::codigo($codProvee);
-        $t = Planilla::codigo($tComp);
-        $n = Planilla::codigo($nComp);
+        /* Se normalizan TODOS antes de abrir la transacción: un comprobante mal
+           identificado en la fila once no puede descubrirse con diez ya
+           escritas. */
+        $claves = [];
 
-        if ($cod === '' || $t === '' || $n === '') {
-            throw new Exception('Falta el proveedor o el comprobante.');
+        foreach (is_array($comprobantes) ? $comprobantes : [] as $c) {
+            $cod = Planilla::codigo(isset($c['cod_provee']) ? $c['cod_provee'] : '');
+            $t = Planilla::codigo(isset($c['t_comp']) ? $c['t_comp'] : '');
+            $n = Planilla::codigo(isset($c['n_comp']) ? $c['n_comp'] : '');
+
+            if ($cod === '' || $t === '' || $n === '') {
+                throw new Exception('Falta el proveedor o el comprobante en uno de los '
+                    . 'renglones.');
+            }
+
+            // Indexado por la clave: la misma factura mandada dos veces es una.
+            $claves[self::clavePago($cod, $t, $n)] = [$cod, $t, $n];
+        }
+
+        if (empty($claves)) {
+            throw new Exception('No llegó ninguna factura para excluir.');
         }
 
         $excluir = !empty($excluida);
         $texto = ($motivo === null) ? '' : trim((string) $motivo);
 
         if ($excluir && $texto === '') {
-            throw new Exception('Poné el motivo por el que esta factura no entra al cashflow. '
-                . 'Sin motivo, dentro de tres meses nadie va a poder explicar por qué falta '
-                . 'ese importe.');
+            throw new Exception('Poné el motivo por el que ' . (count($claves) === 1
+                    ? 'esta factura no entra' : 'estas facturas no entran')
+                . ' al cashflow. Sin motivo, dentro de tres meses nadie va a poder explicar '
+                . 'por qué falta ese importe.');
         }
 
-        $this->guardarPago($this->conectar(), $cod, $t, $n, [
+        $campos = [
             'EXCLUIDA' => $excluir ? 1 : 0,
             'MOTIVO_EXCLUSION' => $excluir ? mb_substr($texto, 0, 200) : null
-        ], 'MANUAL', $usuario);
+        ];
+
+        $cid = $this->conectar();
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción'));
+        }
+
+        try {
+            foreach ($claves as $c) {
+                $this->guardarPago($cid, $c[0], $c[1], $c[2], $campos, 'MANUAL', $usuario);
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar la exclusión'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
 
         return [
             'excluida' => $excluir,
-            'motivo' => $excluir ? mb_substr($texto, 0, 200) : null
+            'motivo' => $campos['MOTIVO_EXCLUSION'],
+            'tocados' => count($claves)
         ];
     }
 

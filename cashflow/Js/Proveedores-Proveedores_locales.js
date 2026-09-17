@@ -76,6 +76,32 @@
         conectar('btnGuardarProv', guardarProveedor);
         conectar('btnCancelarProv', cerrarForm);
 
+        /* "Seleccionar todas las que se ven" es lo que hace que el caso normal
+           —las ocho facturas de un proveedor— sea buscar el proveedor y tildar
+           una vez. Es el mismo gesto que el marcado masivo de Echeqs. */
+        var selTodas = document.getElementById('selTodasProv');
+
+        if (selTodas) {
+            selTodas.addEventListener('change', function() {
+                filasVisibles().forEach(function(f) {
+                    if (selTodas.checked) {
+                        seleccion[claveFila(f)] = true;
+                    } else {
+                        delete seleccion[claveFila(f)];
+                    }
+                });
+
+                pintarGrilla();
+            });
+        }
+
+        conectar('btnExcluirSelProv', function() { accionSeleccion(true); });
+        conectar('btnIncluirSelProv', function() { accionSeleccion(false); });
+        conectar('btnLimpiarSelProv', function() {
+            seleccion = {};
+            pintarGrilla();
+        });
+
         cargar();
     }
 
@@ -127,6 +153,12 @@
             .then(function(data) {
                 datos = data;
                 vistas.usar(datos);
+
+                /* La selección se poda contra lo que vino: un comprobante que se
+                   canceló en Tango ya no está en la lista, y dejarlo
+                   seleccionado haría que la próxima acción masiva lo mande al
+                   servidor sin que nadie lo vea en pantalla. */
+                podarSeleccion();
 
                 pintarAvisos(datos.warnings, 'avisosProv');
                 // Los indicadores los pinta pintarGrilla(): se miden sobre las
@@ -453,6 +485,7 @@
         pintarTotales(filas, cols);
         pintarFueraDelFiltro();
         conectarEdicion();
+        pintarSeleccion();
     }
 
     /**
@@ -688,16 +721,31 @@
                 + 'forma de esta factura.') + '"></i>';
     }
 
-    /**
-     * El tilde que saca esta factura del cashflow.
-     *
-     * NO ES LO MISMO que el rubro "Excluidos" del maestro, que es por proveedor.
-     * Éste es por comprobante: una factura duplicada, una en disputa o una que
-     * se pagó por fuera de Tango no son un problema del proveedor.
-     *
-     * El importe sale de la fila del tablero pero NO desaparece: va a su propia
-     * serie y el proveedor avisa cuánto es y con qué motivos.
-     */
+    /* ================================================================
+       EXCLUIR FACTURAS DEL CASHFLOW
+
+       NO ES LO MISMO que el rubro "Excluidos" del maestro, que es por
+       proveedor. Esto es por comprobante: una factura duplicada, una en
+       disputa o una que se pagó por fuera de Tango no son un problema del
+       proveedor.
+
+       SE ELIGEN Y SE CONFIRMAN JUNTAS, con UN motivo para todas. Excluir ocho
+       facturas del mismo proveedor es UNA decisión, y ocho motivos distintos
+       para una decisión son ocho oportunidades de que digan cosas distintas.
+       El caso se resuelve con el buscador: filtrar el proveedor, "seleccionar
+       todas las que se ven", y un motivo.
+
+       Por eso la columna es de SELECCIÓN y no un tilde que actúa solo: sacar
+       plata del tablero no puede dispararse con un clic suelto.
+       ================================================================ */
+
+    /** Claves de las facturas seleccionadas. Sobrevive a los redibujos. */
+    var seleccion = {};
+
+    function claveFila(f) {
+        return f.COD_PROVEE + '|' + f.T_COMP + '|' + f.N_COMP;
+    }
+
     function celdaExcluir(f) {
         if (!datos || !datos.excluir_factura) {
             return '<span class="text-muted small" title="'
@@ -705,19 +753,199 @@
                     + 'sql/cashflow_prov_locales_excluir_factura.sql.') + '">—</span>';
         }
 
-        var excl = !!f.EXCLUIDA_MANUAL;
-        var titulo = excl
-            ? 'Excluida del cashflow: ' + (f.MOTIVO_EXCLUSION || 'sin motivo registrado')
-                + '. Destildá para volver a incluirla.'
-            : 'Excluir esta factura del cashflow. Va a pedir un motivo.';
+        var clave = claveFila(f);
+        var marca = f.EXCLUIDA_MANUAL
+            ? '<div><span class="prov-badge-excluida" title="'
+              + escapar('Excluida del cashflow: '
+                  + (f.MOTIVO_EXCLUSION || 'sin motivo registrado'))
+              + '">excluida</span></div>'
+            : '';
 
-        return '<input type="checkbox" class="form-check-input prov-excluir"'
-            + (excl ? ' checked' : '')
-            + ' data-cod="' + escapar(f.COD_PROVEE) + '"'
-            + ' data-t="' + escapar(f.T_COMP) + '"'
-            + ' data-n="' + escapar(f.N_COMP) + '"'
-            + ' data-motivo="' + escapar(f.MOTIVO_EXCLUSION || '') + '"'
-            + ' title="' + escapar(titulo) + '">';
+        return '<input type="checkbox" class="form-check-input prov-sel"'
+            + (seleccion[clave] ? ' checked' : '')
+            + ' data-clave="' + escapar(clave) + '"'
+            + ' title="' + escapar('Seleccionar esta factura para excluirla o volver a '
+                + 'incluirla.') + '">' + marca;
+    }
+
+    /** Saca de la selección lo que ya no está en el listado */
+    function podarSeleccion() {
+        var vivas = {};
+
+        ((datos && datos.filas) || []).forEach(function(f) { vivas[claveFila(f)] = true; });
+
+        Object.keys(seleccion).forEach(function(k) {
+            if (!vivas[k]) { delete seleccion[k]; }
+        });
+    }
+
+    /** Las filas seleccionadas que hoy están a la vista */
+    function filasSeleccionadas() {
+        return filasVisibles().filter(function(f) { return !!seleccion[claveFila(f)]; });
+    }
+
+    /**
+     * La barra de acciones. Dice CUÁNTAS y CUÁNTO antes de que se apriete nada:
+     * excluir es sacar plata del tablero, y el importe es el dato que hace que
+     * alguien note que seleccionó de más.
+     */
+    function pintarSeleccion() {
+        var sel = filasSeleccionadas();
+        var total = 0;
+        var yaExcluidas = 0;
+
+        sel.forEach(function(f) {
+            total += Number(f.IMPORTE_PENDIENTE) || 0;
+            if (f.EXCLUIDA_MANUAL) { yaExcluidas++; }
+        });
+
+        mostrar('barraSelProv', sel.length > 0);
+
+        if (!sel.length) {
+            sincronizarSelTodas();
+            return;
+        }
+
+        texto('selResumenProv', sel.length + ' factura(s) seleccionada(s) · ' + plata(total)
+            + (yaExcluidas ? ' · ' + yaExcluidas + ' ya excluida(s)' : ''));
+
+        /* Cada botón se apaga cuando no tiene nada que hacer: "Excluir" con
+           todo ya excluido, o "Volver a incluir" sin ninguna excluida. Un botón
+           que se puede apretar y no cambia nada es peor que uno apagado. */
+        var btnEx = document.getElementById('btnExcluirSelProv');
+        var btnIn = document.getElementById('btnIncluirSelProv');
+
+        if (btnEx) { btnEx.disabled = (yaExcluidas === sel.length); }
+        if (btnIn) { btnIn.disabled = (yaExcluidas === 0); }
+
+        sincronizarSelTodas();
+    }
+
+    /** El checkbox del encabezado refleja si TODO lo visible está seleccionado */
+    function sincronizarSelTodas() {
+        var chk = document.getElementById('selTodasProv');
+
+        if (!chk) { return; }
+
+        var visibles = filasVisibles();
+        var elegidas = visibles.filter(function(f) { return !!seleccion[claveFila(f)]; }).length;
+
+        chk.checked = (visibles.length > 0 && elegidas === visibles.length);
+        chk.indeterminate = (elegidas > 0 && elegidas < visibles.length);
+    }
+
+    function conectarSeleccion() {
+        document.querySelectorAll('#bodyProv .prov-sel').forEach(function(chk) {
+            chk.addEventListener('change', function() {
+                var k = chk.getAttribute('data-clave');
+
+                if (chk.checked) {
+                    seleccion[k] = true;
+                } else {
+                    delete seleccion[k];
+                }
+
+                pintarSeleccion();
+            });
+        });
+    }
+
+    /**
+     * Excluye o incluye lo seleccionado, con UN motivo para todas.
+     *
+     * El motivo se pide en un diálogo del módulo y no con el prompt del
+     * navegador: acá hay que leer cuántas facturas y por cuánta plata antes de
+     * escribir nada, y eso en un prompt no entra.
+     */
+    function accionSeleccion(excluir) {
+        var sel = filasSeleccionadas();
+
+        if (!sel.length) { return; }
+
+        // Lo que ya está como se lo quiere dejar no se vuelve a escribir: sería
+        // una versión idéntica en la tabla y un número inflado en el mensaje.
+        var aplicar = sel.filter(function(f) { return !!f.EXCLUIDA_MANUAL !== excluir; });
+
+        if (!aplicar.length) { return; }
+
+        var total = 0;
+        var provs = {};
+
+        aplicar.forEach(function(f) {
+            total += Number(f.IMPORTE_PENDIENTE) || 0;
+            provs[f.COD_PROVEE] = true;
+        });
+
+        var cuantosProv = Object.keys(provs).length;
+        var detalle = aplicar.length + ' factura(s) por ' + plata(total)
+            + (cuantosProv === 1
+                ? ', todas de ' + aplicar[0].COD_PROVEE + ' — ' + aplicar[0].RAZON_SOC
+                : ', de ' + cuantosProv + ' proveedores') + '.';
+
+        if (!excluir) {
+            Notificacion.confirmar({
+                titulo: 'Volver a incluir en el cashflow',
+                mensaje: '¿Devolver estas facturas al cashflow?',
+                detalle: detalle + ' Sus importes vuelven a la fila del tablero y el motivo '
+                    + 'de exclusión se borra.',
+                confirmar: 'Volver a incluir'
+            }).then(function(ok) {
+                if (ok) { guardarExclusion(aplicar, false, null); }
+            });
+
+            return;
+        }
+
+        Notificacion.pedirTexto({
+            titulo: 'Excluir del cashflow',
+            peligro: true,
+            mensaje: detalle,
+            detalle: 'Sus importes salen de la fila del tablero y quedan informados aparte, '
+                + 'con este motivo.',
+            etiqueta: 'Motivo (el mismo para todas)',
+            placeholder: 'Ej.: duplicada en Tango, en disputa, se pagó por fuera…',
+            maxlargo: 200,
+            valor: motivoComun(aplicar),
+            invalido: 'Escribí el motivo: es lo único que después explica por qué falta ese '
+                + 'importe en el tablero.',
+            confirmar: 'Excluir ' + aplicar.length + ' factura(s)'
+        }).then(function(motivo) {
+            if (motivo !== null) { guardarExclusion(aplicar, true, motivo); }
+        });
+    }
+
+    /** Si las seleccionadas ya compartían un motivo, se ofrece de arranque */
+    function motivoComun(filas) {
+        var unico = null;
+
+        for (var i = 0; i < filas.length; i++) {
+            var m = filas[i].MOTIVO_EXCLUSION || '';
+
+            if (m === '') { continue; }
+            if (unico !== null && unico !== m) { return ''; }
+
+            unico = m;
+        }
+
+        return unico || '';
+    }
+
+    function guardarExclusion(filas, excluir, motivo) {
+        var cuerpo = {
+            excluida: excluir,
+            comprobantes: filas.map(function(f) {
+                return { cod_provee: f.COD_PROVEE, t_comp: f.T_COMP, n_comp: f.N_COMP };
+            })
+        };
+
+        if (motivo !== null) { cuerpo.motivo = motivo; }
+
+        // La selección se limpia al guardar: las filas excluidas se esconden por
+        // defecto, así que dejarlas seleccionadas mantendría una barra hablando
+        // de facturas que ya no están a la vista.
+        seleccion = {};
+
+        pedirPago('saveExclusion', cuerpo);
     }
 
     /* ================================================================
@@ -770,36 +998,7 @@
             });
         });
 
-        /* EL MOTIVO SE PIDE ANTES DE GUARDAR, y si se cancela el tilde vuelve
-           atrás: dejarlo tildado con la exclusión sin guardar mostraría una
-           factura como excluida cuando el tablero la sigue contando. La
-           validación que vale es la del backend. */
-        document.querySelectorAll('#bodyProv .prov-excluir').forEach(function(chk) {
-            chk.addEventListener('change', function() {
-                var cuerpo = {
-                    cod_provee: chk.getAttribute('data-cod'),
-                    t_comp: chk.getAttribute('data-t'),
-                    n_comp: chk.getAttribute('data-n'),
-                    excluida: chk.checked
-                };
-
-                if (chk.checked) {
-                    var motivo = window.prompt('¿Por qué esta factura no entra al cashflow?\n\n'
-                        + 'Su importe sale de la fila del tablero y queda informado aparte. '
-                        + 'El motivo es lo único que después lo explica.',
-                        chk.getAttribute('data-motivo') || '');
-
-                    if (motivo === null || motivo.trim() === '') {
-                        chk.checked = false;
-                        return;
-                    }
-
-                    cuerpo.motivo = motivo.trim();
-                }
-
-                pedirPago('saveExclusion', cuerpo);
-            });
-        });
+        conectarSeleccion();
     }
 
     /**

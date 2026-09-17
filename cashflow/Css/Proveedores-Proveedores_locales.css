@@ -88,6 +88,30 @@
     cursor: help;
 }
 
+/* LA BARRA DE SELECCIÓN. Aparece sólo cuando hay algo elegido y por eso puede
+   pintarse: una barra permanente teñida sería ruido de fondo. */
+.tab-proveedores_locales .prov-barra-sel {
+    background-color: #eef4ff;
+    border-bottom: 1px solid #c8d8f5;
+}
+
+/* La marca de que esa factura YA está excluida. Va en la misma celda que el
+   checkbox de selección porque son dos cosas distintas sobre la misma fila —una
+   es "la elegí" y la otra "está afuera"— y separarlas en dos columnas obligaría
+   a leer dos celdas para saber en qué estado está. */
+.tab-proveedores_locales .prov-badge-excluida {
+    display: inline-block;
+    margin-top: 2px;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #8a3d3d;
+    background: #f7e4e4;
+    border-radius: 3px;
+    padding: 0 4px;
+    cursor: help;
+}
+
 /* Una factura excluida a mano: su importe NO está en el cashflow. Se atenúa y se
    tacha el pendiente, que es la columna cuyo número dejó de contar. Tiene que
    verse sin leer la columna del tilde, porque es la fila la que cambió de

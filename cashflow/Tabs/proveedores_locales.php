@@ -190,6 +190,31 @@
                 <small class="text-muted ms-2" id="fueraFiltroProv"></small>
             </div>
 
+            <!-- LA BARRA DE SELECCIÓN. Aparece sólo cuando hay algo elegido: una
+                 barra siempre visible con los botones apagados ocupa lugar para
+                 decir que no se puede hacer nada.
+
+                 Dice CUÁNTAS y CUÁNTO antes de que se apriete nada: excluir es
+                 sacar plata del tablero, y el importe es el dato que hace que
+                 alguien note que seleccionó de más. -->
+            <div id="barraSelProv" class="card-body py-2 border-bottom prov-barra-sel"
+                 style="display: none;">
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                    <span class="fw-semibold" id="selResumenProv"></span>
+                    <div class="d-flex gap-2 ms-auto">
+                        <button class="btn btn-sm btn-outline-danger" id="btnExcluirSelProv">
+                            <i class="fas fa-ban me-1"></i> Excluir del cashflow
+                        </button>
+                        <button class="btn btn-sm btn-outline-success" id="btnIncluirSelProv">
+                            <i class="fas fa-rotate-left me-1"></i> Volver a incluir
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" id="btnLimpiarSelProv">
+                            Limpiar selección
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <div class="card-body p-0">
                 <div class="loading-spinner" id="loadingProv">
                     <div class="spinner"></div>
@@ -222,13 +247,19 @@
                                     title="Con qué forma se trata esta factura. Viene del maestro y se puede cambiar: el cambio vale sólo para esta factura y decide si su importe entra al cashflow. El maestro no se toca.">
                                     Forma de pago
                                 </th>
-                                <!-- El tilde saca el importe de la fila del
-                                     tablero. No lo hace desaparecer: va a su
-                                     propia serie y el proveedor avisa cuánto es
-                                     y por qué. El motivo es obligatorio. -->
-                                <th rowspan="2" class="text-center" style="width: 70px;"
-                                    title="Excluir esta factura del cashflow. Pide un motivo: sin él, dentro de tres meses nadie puede explicar por qué falta ese importe.">
-                                    Excl.
+                                <!-- LA COLUMNA ES DE SELECCIÓN, no de estado.
+                                     Excluir es una decisión que pide un motivo,
+                                     así que no puede dispararse con un clic
+                                     suelto: se eligen las facturas y se
+                                     confirman juntas, con un motivo para todas.
+
+                                     Que una factura ESTÉ excluida se ve en la
+                                     fila —atenuada y con el pendiente tachado— y
+                                     en la marca de esta misma celda. -->
+                                <th rowspan="2" class="text-center" style="width: 46px;">
+                                    <input type="checkbox" class="form-check-input"
+                                           id="selTodasProv"
+                                           title="Seleccionar todas las facturas que se están viendo. Con el buscador puesto, son las de ese proveedor.">
                                 </th>
                                 <th colspan="1" class="table-group-divider" id="headerEjeProv">Días</th>
                             </tr>

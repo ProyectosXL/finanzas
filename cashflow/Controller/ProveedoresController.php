@@ -224,28 +224,40 @@ try {
         case 'saveExclusion':
             $data = bodyJson();
 
-            foreach (['cod_provee', 't_comp', 'n_comp'] as $campo) {
-                if (empty($data[$campo])) {
-                    throw new Exception('Falta el comprobante que hay que excluir.');
-                }
-            }
-
             if (!array_key_exists('excluida', $data)) {
-                throw new Exception('Falta decir si la factura se excluye o se incluye.');
+                throw new Exception('Falta decir si las facturas se excluyen o se incluyen.');
             }
 
-            $r = $prov->saveExclusion(
-                $data['cod_provee'], $data['t_comp'], $data['n_comp'],
+            /* UNA SOLA ACCION PARA UNA Y PARA VARIAS. La pantalla manda siempre
+               una lista; 'comprobantes' con un solo elemento es el caso de una.
+               Un endpoint aparte para el masivo serian dos caminos que tienen
+               que hacer exactamente lo mismo, y la transaccion es justo lo que
+               no puede estar escrito dos veces. */
+            $comprobantes = isset($data['comprobantes']) ? $data['comprobantes'] : null;
+
+            if (!is_array($comprobantes) || empty($comprobantes)) {
+                throw new Exception('No llegó ninguna factura para excluir.');
+            }
+
+            $r = $prov->saveExclusionMasiva(
+                $comprobantes,
                 !empty($data['excluida']),
                 isset($data['motivo']) ? $data['motivo'] : null,
                 usuarioActual()
             );
 
+            $cuantas = $r['tocados'];
+
             echo json_encode([
                 'success' => true,
                 'message' => $r['excluida']
-                    ? 'Factura excluida: su importe sale del cashflow y queda informado aparte.'
-                    : 'Factura incluida de nuevo en el cashflow.',
+                    ? ($cuantas === 1
+                        ? 'Factura excluida: su importe sale del cashflow y queda informado aparte.'
+                        : $cuantas . ' facturas excluidas: sus importes salen del cashflow y '
+                            . 'quedan informados aparte.')
+                    : ($cuantas === 1
+                        ? 'Factura incluida de nuevo en el cashflow.'
+                        : $cuantas . ' facturas incluidas de nuevo en el cashflow.'),
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

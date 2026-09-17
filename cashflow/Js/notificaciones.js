@@ -182,6 +182,31 @@ var Notificacion = (function() {
          */
         confirmar: confirmar,
 
+        /**
+         * Pide un TEXTO antes de una acción que lo necesita para poder
+         * explicarse después. Es `confirmar()` con un campo adentro.
+         *
+         * EXISTE PORQUE window.prompt NO ALCANZA: no se puede dar formato, no
+         * entra un detalle largo, no valida nada y se ve como un error del
+         * navegador en vez de como una decisión del sistema.
+         *
+         * DEVUELVE null AL CANCELAR Y EL TEXTO AL CONFIRMAR, y nunca las dos
+         * cosas mezcladas: `confirmar()` devuelve un booleano porque su
+         * respuesta es sí o no, y ésta devuelve el texto porque su respuesta es
+         * el texto. Un `false` que a veces es `''` obligaría a cada llamador a
+         * distinguir dos ausencias distintas.
+         *
+         * @param {Object} opciones Las de confirmar(), más:
+         * @param {string} [opciones.etiqueta] Rótulo del campo
+         * @param {string} [opciones.placeholder]
+         * @param {string} [opciones.valor] Con qué arranca
+         * @param {number} [opciones.maxlargo] Tope de caracteres
+         * @param {boolean} [opciones.opcional] Si se permite dejarlo vacío
+         * @param {string} [opciones.invalido] Qué decir si está vacío y no debía
+         * @returns {Promise<string|null>} El texto, o null si canceló
+         */
+        pedirTexto: pedirTexto,
+
         /** Cierra todo lo que haya en pantalla */
         limpiar: function() {
             if (contenedor) {
@@ -331,9 +356,6 @@ var Notificacion = (function() {
     function confirmar(opciones) {
         opciones = opciones || {};
 
-        var textoCancelar = opciones.cancelar || 'Cancelar';
-        var textoConfirmar = opciones.confirmar || 'Confirmar';
-
         // Sin Bootstrap no hay modal, y una baja no puede quedar sin preguntar:
         // se cae al confirm del navegador, que es feo pero pregunta.
         if (!window.bootstrap || !bootstrap.Modal) {
@@ -341,6 +363,111 @@ var Notificacion = (function() {
 
             return Promise.resolve(window.confirm(texto));
         }
+
+        return abrirDialogo(opciones, {
+            cuerpo: '',
+            alConfirmar: function() { return true; },
+            alCancelar: false
+        });
+    }
+
+    function pedirTexto(opciones) {
+        opciones = opciones || {};
+
+        /* Sin Bootstrap se cae al prompt del navegador. Es feo -por eso este
+           diálogo existe- pero preguntar es lo que no puede faltar: el texto es
+           obligatorio justamente porque después nadie puede explicar la acción
+           sin él. */
+        if (!window.bootstrap || !bootstrap.Modal) {
+            var previo = window.prompt(
+                opciones.mensaje + (opciones.detalle ? '\n\n' + opciones.detalle : ''),
+                opciones.valor || '');
+
+            if (previo === null) {
+                return Promise.resolve(null);
+            }
+
+            previo = String(previo).trim();
+
+            return Promise.resolve((previo === '' && !opciones.opcional) ? null : previo);
+        }
+
+        var id = 'cf-dlg-campo-' + Math.random().toString(36).slice(2);
+        var max = opciones.maxlargo || 200;
+
+        var cuerpo =
+            '<div class="mt-3">' +
+                '<label class="form-label form-label-sm" for="' + id + '">' +
+                    escapar(opciones.etiqueta || 'Motivo') +
+                    (opciones.opcional ? ' <span class="text-muted">(opcional)</span>' : '') +
+                '</label>' +
+                '<textarea id="' + id + '" class="form-control form-control-sm cf-dlg-campo" ' +
+                    'rows="2" maxlength="' + max + '" ' +
+                    'placeholder="' + escapar(opciones.placeholder || '') + '">' +
+                    escapar(opciones.valor || '') +
+                '</textarea>' +
+                '<div class="d-flex justify-content-between align-items-center mt-1">' +
+                    '<small class="invalid-feedback d-block cf-dlg-error"></small>' +
+                    '<small class="text-muted cf-dlg-contador"></small>' +
+                '</div>' +
+            '</div>';
+
+        return abrirDialogo(opciones, {
+            cuerpo: cuerpo,
+            foco: '.cf-dlg-campo',
+
+            /* Devuelve el texto, o undefined para NO cerrar: un campo
+               obligatorio vacío tiene que decir por qué en el mismo lugar donde
+               se escribe, no cerrar y fallar después contra el servidor. */
+            alConfirmar: function(modal) {
+                var campo = modal.querySelector('.cf-dlg-campo');
+                var v = String(campo.value || '').trim();
+
+                if (v === '' && !opciones.opcional) {
+                    campo.classList.add('is-invalid');
+                    modal.querySelector('.cf-dlg-error').textContent =
+                        opciones.invalido || 'Escribí el motivo: es lo único que después '
+                            + 'explica esta decisión.';
+                    campo.focus();
+
+                    return undefined;
+                }
+
+                return v;
+            },
+
+            alCancelar: null,
+
+            alAbrir: function(modal) {
+                var campo = modal.querySelector('.cf-dlg-campo');
+                var contador = modal.querySelector('.cf-dlg-contador');
+
+                var pintar = function() {
+                    contador.textContent = campo.value.length + '/' + max;
+                    campo.classList.remove('is-invalid');
+                };
+
+                campo.addEventListener('input', pintar);
+                pintar();
+            }
+        });
+    }
+
+    /**
+     * El armazón que comparten los dos.
+     *
+     * Está escrito una vez porque lo delicado no es el HTML: es que cerrar con
+     * la cruz, con Escape o clickeando afuera TAMBIÉN sea una respuesta, y que
+     * sea la negativa. Dos copias de eso se desincronizan en la primera
+     * corrección.
+     *
+     * @param {Object} opciones Las del llamador
+     * @param {Object} pieza {cuerpo, alConfirmar, alCancelar, foco, alAbrir}
+     * @returns {Promise}
+     */
+    function abrirDialogo(opciones, pieza) {
+        var textoCancelar = opciones.cancelar || 'Cancelar';
+        var textoConfirmar = opciones.confirmar || 'Confirmar';
 
         return new Promise(function(resolver) {
             var modal = document.createElement('div');
@@ -367,6 +494,8 @@ var Notificacion = (function() {
                                 ? '<p class="cf-confirmar-detalle mt-2 mb-0">' +
                                   escapar(opciones.detalle) + '</p>'
                                 : '') +
+                            (opciones.html || '') +
+                            pieza.cuerpo +
                         '</div>' +
                         '<div class="modal-footer">' +
                             '<button type="button" class="btn btn-sm btn-outline-secondary" ' +
@@ -381,20 +510,32 @@ var Notificacion = (function() {
             document.body.appendChild(modal);
 
             var instancia = new bootstrap.Modal(modal);
-            var respuesta = false;
+            var respuesta = pieza.alCancelar;
 
             modal.querySelector('.cf-confirmar-si').addEventListener('click', function() {
-                respuesta = true;
+                var r = pieza.alConfirmar(modal);
+
+                // undefined = la validación dijo que no, y el diálogo se queda
+                // abierto con el error a la vista.
+                if (r === undefined) {
+                    return;
+                }
+
+                respuesta = r;
                 instancia.hide();
             });
 
-            // El foco arranca en Cancelar. Es una acción que cuesta deshacer:
-            // un Enter reflejo tiene que no hacer nada.
             modal.addEventListener('shown.bs.modal', function() {
-                var cancelar = modal.querySelector('[data-bs-dismiss="modal"].btn');
+                /* El foco arranca en Cancelar cuando la respuesta es sí o no: es
+                   una acción que cuesta deshacer y un Enter reflejo tiene que no
+                   hacer nada. Cuando hay algo que escribir, arranca en el campo:
+                   ahí el Enter no confirma, escribe. */
+                var destino = pieza.foco
+                    ? modal.querySelector(pieza.foco)
+                    : modal.querySelector('[data-bs-dismiss="modal"].btn');
 
-                if (cancelar) {
-                    cancelar.focus();
+                if (destino) {
+                    destino.focus();
                 }
             });
 
@@ -409,6 +550,10 @@ var Notificacion = (function() {
 
                 resolver(respuesta);
             });
+
+            if (pieza.alAbrir) {
+                pieza.alAbrir(modal);
+            }
 
             instancia.show();
         });
