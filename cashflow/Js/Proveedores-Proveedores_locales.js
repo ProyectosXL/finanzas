@@ -380,7 +380,8 @@
                 + '<td class="center">' + celdaVto(f) + '</td>'
                 + '<td class="currency fw-bold">' + plata(f.IMPORTE_PENDIENTE) + '</td>'
                 + celdaFechaPago(f)
-                + '<td class="center">' + celdaForma(f) + '</td>';
+                + '<td class="center">' + celdaForma(f) + '</td>'
+                + '<td class="center">' + celdaCronograma(f) + '</td>';
 
             cols.forEach(function(c) {
                 var v = Number(vistas.valor(f, c)) || 0;
@@ -393,7 +394,7 @@
         });
 
         if (!filas.length) {
-            html = '<tr><td colspan="' + (10 + cols.length) + '" '
+            html = '<tr><td colspan="' + (COLS_DESC + cols.length) + '" '
                  + 'class="text-center text-muted py-4">No hay cuentas a pagar que coincidan '
                  + 'con el filtro.</td></tr>';
         }
@@ -405,6 +406,16 @@
         pintarFueraDelFiltro();
         conectarEdicion();
     }
+
+    /**
+     * Cuántas columnas descriptivas tiene la grilla, antes de las del eje.
+     *
+     * Está declarada una vez porque la usan el pie de totales y la fila de
+     * "no hay resultados", y las dos se corren en silencio cuando se agrega una
+     * columna: el síntoma es una tabla desalineada que nadie relaciona con el
+     * cambio que la causó.
+     */
+    var COLS_DESC = 11;
 
     function pintarTotales(filas, cols) {
         var total = 0;
@@ -419,9 +430,13 @@
             });
         });
 
+        /* Las celdas del pie van en el mismo orden que el encabezado y suman
+           COLS_DESC: un colspan mal contado corre el total debajo de otra
+           columna y el número queda diciendo otra cosa. Siete descriptivas, el
+           total, y las tres editables al final. */
         var html = '<td colspan="7" class="fw-bold text-end">TOTALES</td>'
             + '<td class="currency fw-bold">' + plata(total) + '</td>'
-            + '<td colspan="2"></td>';
+            + '<td colspan="' + (COLS_DESC - 8) + '"></td>';
 
         cols.forEach(function(c) {
             var v = porCol[c.rama + '|' + c.clave] || 0;
@@ -560,6 +575,61 @@
     }
 
     /* ================================================================
+       LA FORMA CON LA QUE SE TRATA ESTA FACTURA
+
+       DOS COLUMNAS QUE NO SON LO MISMO, y ahora se ven las dos:
+
+         Forma      UN HECHO: por qué vía salió o va a salir el pago. Lo trae
+                    la importación de la planilla. Sólo se muestra.
+         Cronograma UNA REGLA: con qué forma hay que tratar a ESTA factura para
+                    decidir si entra al cashflow. Se elige acá, factura por
+                    factura, y pisa a la del maestro sólo para ella.
+
+       Vacío = "la del maestro", que es el caso normal y el que está en todas
+       las filas hasta que alguien decida otra cosa.
+       ================================================================ */
+
+    function celdaCronograma(f) {
+        if (!datos || !datos.forma_por_factura) {
+            // Sin el script no se puede escribir el override. Se muestra lo que
+            // decide -la del maestro- en vez de un desplegable que falla.
+            return '<span class="small text-muted" title="'
+                + escapar('Para fijar la forma por factura hace falta correr '
+                    + 'sql/cashflow_prov_locales_forma_por_factura.sql.') + '">'
+                + escapar(f.FORMA_PAGO_MAESTRO || '—') + '</span>';
+        }
+
+        var formas = Object.keys((datos && datos.formas_pago) || {});
+        var actual = f.FORMA_PAGO_CRONOGRAMA || '';
+
+        var opciones = '<option value=""'
+            + (actual === '' ? ' selected' : '') + '>'
+            + escapar(f.FORMA_PAGO_MAESTRO
+                ? 'maestro: ' + f.FORMA_PAGO_MAESTRO
+                : 'maestro: sin forma')
+            + '</option>';
+
+        formas.forEach(function(x) {
+            opciones += '<option value="' + escapar(x) + '"'
+                + (actual === x ? ' selected' : '') + '>' + escapar(x) + '</option>';
+        });
+
+        var titulo = actual === ''
+            ? 'Decide la forma del maestro. Elegí otra para tratar SÓLO esta factura de otra '
+                + 'manera: el maestro y las demás facturas de este proveedor no cambian.'
+            : 'Esta factura se trata como ' + actual + ', pisando la del maestro'
+                + (f.FORMA_PAGO_MAESTRO ? ' (' + f.FORMA_PAGO_MAESTRO + ')' : '')
+                + '. El maestro no cambió. Volvé a "maestro:" para sacarlo.';
+
+        return '<select class="form-select form-select-sm prov-select-crono'
+            + (actual !== '' ? ' prov-crono-pisado' : '') + '"'
+            + ' data-cod="' + escapar(f.COD_PROVEE) + '"'
+            + ' data-t="' + escapar(f.T_COMP) + '"'
+            + ' data-n="' + escapar(f.N_COMP) + '"'
+            + ' title="' + escapar(titulo) + '">' + opciones + '</select>';
+    }
+
+    /* ================================================================
        EDICIÓN DE LA FECHA, DE A UNA
        ================================================================ */
 
@@ -585,6 +655,21 @@
                     cod_provee: inp.getAttribute('data-cod'),
                     t_comp: inp.getAttribute('data-tcomp'),
                     n_comp: inp.getAttribute('data-ncomp')
+                });
+            });
+        });
+
+        /* La forma del cronograma cambia en qué serie cae el importe: recargar
+           entero es lo mismo que hace la fecha, y por lo mismo. El importe puede
+           entrar o salir del filtro y desaparecer de la vista, y eso el mensaje
+           lo dice. */
+        document.querySelectorAll('#bodyProv .prov-select-crono').forEach(function(sel) {
+            sel.addEventListener('change', function() {
+                pedirPago('saveFormaCronograma', {
+                    cod_provee: sel.getAttribute('data-cod'),
+                    t_comp: sel.getAttribute('data-t'),
+                    n_comp: sel.getAttribute('data-n'),
+                    forma: sel.value
                 });
             });
         });

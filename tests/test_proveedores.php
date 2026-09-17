@@ -253,44 +253,121 @@ seccion('lo que no se manda a savePago no se pisa');
    planilla. Un endpoint que recibe un campo y escribe cuatro no guarda una
    edicion: reemplaza la fila.
 
-   No hace falta base para verificarlo: se mira que el UPDATE que arma no
-   nombre las columnas que el llamador no trajo. */
+   AHORA ES ESTRUCTURAL Y NO UN FLAG POR CAMPO: guardarPago recibe un mapa
+   columna => valor con exactamente lo que hay que escribir, y lo que no esta en
+   el mapa no entra ni al UPDATE ni al INSERT. Con un flag por campo, cada
+   override nuevo obligaba a agregar un flag mas y a que todos los llamadores lo
+   pasaran bien. */
 $m = new ReflectionMethod('Proveedores', 'guardarPago');
 $params = [];
 
 foreach ($m->getParameters() as $p) { $params[] = $p->getName(); }
 
-chequear('guardarPago sabe que campos tocar', true,
-    in_array('tocarForma', $params, true) && in_array('tocarObs', $params, true));
-chequear('y por defecto los toca: la importacion los trae siempre', true,
-    $m->getParameters()[10]->getDefaultValue() === true
-    && $m->getParameters()[11]->getDefaultValue() === true);
+chequear('guardarPago recibe el mapa de lo que hay que escribir', true,
+    in_array('campos', $params, true));
+chequear('y ya no un booleano por campo', false,
+    in_array('tocarForma', $params, true) || in_array('tocarObs', $params, true));
 
-// savePago es quien decide: si el campo no vino, no entra al UPDATE.
-$rs = new ReflectionMethod('Proveedores', 'savePago');
-$cuerpo = implode('', array_slice(file(__DIR__ . '/../cashflow/Class/Proveedores.php'),
-    $rs->getStartLine() - 1, $rs->getEndLine() - $rs->getStartLine() + 1));
-
-chequear('savePago pasa false cuando no vino la forma', true,
-    strpos($cuerpo, "\$forma['original'] !== ''") !== false);
-chequear('y cuando no vino la observacion', true,
-    strpos($cuerpo, "\$obs !== ''") !== false);
-
-seccion('el filtro mira el maestro, no la fila de pago');
-
-/* LA REGLA: el criterio es una propiedad del PROVEEDOR -a este se le paga por
-   transferencia, a aquel por caja-, no de un comprobante suelto. Si lo
-   decidiera la fila de pago, cargar una fecha desde la grilla cambiaria de
-   serie la deuda, porque la grilla manda la fecha y nada mas. */
 $fuente = file_get_contents(__DIR__ . '/../cashflow/Class/Proveedores.php');
+$cuerpoDe = function ($metodo) use ($fuente) {
+    $r = new ReflectionMethod('Proveedores', $metodo);
 
-chequear('CRONOGRAMA se calcula sobre la forma del maestro', true,
-    strpos($fuente, "'CRONOGRAMA' => ProveedoresCategorias::esDelCronograma(\$cat['forma_pago'])")
-    !== false);
+    return implode('', array_slice(file(__DIR__ . '/../cashflow/Class/Proveedores.php'),
+        $r->getStartLine() - 1, $r->getEndLine() - $r->getStartLine() + 1));
+};
 
-// Y las dos formas viajan por separado: una decide, la otra se muestra.
+// El SET sale de las claves del mapa, no de una lista escrita.
+chequear('el UPDATE se arma con las claves del mapa', true,
+    strpos($cuerpoDe('guardarPago'), 'foreach ($campos as $col => $valor)') !== false);
+
+// savePago es quien decide: si el campo no vino, no entra al mapa.
+$cuerpo = $cuerpoDe('savePago');
+
+chequear('savePago no mete la forma si no vino', true,
+    strpos($cuerpo, "if (\$forma['original'] !== '')") !== false);
+chequear('ni la observacion', true, strpos($cuerpo, "if (\$obs !== '')") !== false);
+
+seccion('el filtro mira una REGLA, no un HECHO');
+
+/* LA REGLA NO CAMBIO, GANO UN ESCALON. Lo que decide si un comprobante entra al
+   cronograma es una regla, y ahora la regla tiene dos escalones:
+
+     1. el OVERRIDE de esa factura, si alguien lo puso a mano
+     2. si no, la forma del MAESTRO
+
+   Lo que NO decide -y esto es lo que hay que defender- es FORMA_PAGO, que es un
+   HECHO: por que via salio ese pago. La escribe la importacion de la planilla en
+   TODAS sus filas, asi que si decidiera, subir la planilla reclasificaria
+   comprobantes dentro y fuera del cashflow sin que nadie lo pida. */
+$cat = function ($forma) {
+    return ['forma_pago' => $forma, 'forma_pago_orig' => $forma];
+};
+
+chequear('sin override decide el maestro',
+    'CAJA', Proveedores::formaDelCronograma($cat('CAJA'), null));
+
+chequear('sin fila de pago tampoco cambia nada',
+    'ECHEQ', Proveedores::formaDelCronograma($cat('ECHEQ'), null));
+
+// El override pisa al maestro SOLO para esta factura.
+chequear('con override decide el override',
+    'TRANSFERENCIA', Proveedores::formaDelCronograma($cat('CAJA'),
+        ['FORMA_PAGO' => 'ECHEQ', 'FORMA_PAGO_CRONOGRAMA' => 'TRANSFERENCIA']));
+
+/* EL HECHO NO DECIDE. Una fila de pago registrada por ECHEQ sobre un proveedor
+   de CAJA sigue fuera del cronograma: lo que la importacion trae no reclasifica
+   nada. Es la prueba que impide que alguien "simplifique" leyendo FORMA_PAGO. */
+chequear('la forma del pago registrado NO decide',
+    'CAJA', Proveedores::formaDelCronograma($cat('CAJA'),
+        ['FORMA_PAGO' => 'ECHEQ', 'FORMA_PAGO_CRONOGRAMA' => null]));
+
+chequear('y tampoco al reves',
+    'ECHEQ', Proveedores::formaDelCronograma($cat('ECHEQ'),
+        ['FORMA_PAGO' => 'CAJA', 'FORMA_PAGO_CRONOGRAMA' => null]));
+
+// Un override vacio es no tener override: vuelve a decidir el maestro.
+chequear('un override vacio devuelve la del maestro',
+    'DEBITO', Proveedores::formaDelCronograma($cat('DEBITO'),
+        ['FORMA_PAGO' => null, 'FORMA_PAGO_CRONOGRAMA' => '']));
+
+// Y el efecto sobre lo que importa: entrar o no al cashflow.
+chequear('un proveedor de CAJA con override de ECHEQ entra al cronograma',
+    true, ProveedoresCategorias::esDelCronograma(
+        Proveedores::formaDelCronograma($cat('CAJA'),
+            ['FORMA_PAGO_CRONOGRAMA' => 'ECHEQ'])));
+
+chequear('y uno de ECHEQ con override de CAJA sale',
+    false, ProveedoresCategorias::esDelCronograma(
+        Proveedores::formaDelCronograma($cat('ECHEQ'),
+            ['FORMA_PAGO_CRONOGRAMA' => 'CAJA'])));
+
+/* Se mira el cuerpo de getPendientes y no el archivo entero: lo que hay que
+   fijar es que la fila arme CRONOGRAMA con formaDelCronograma() y no leyendo
+   una forma por su cuenta. */
+$cuerpoPend = $cuerpoDe('getPendientes');
+
+chequear('CRONOGRAMA sale de formaDelCronograma()', true,
+    preg_match('/\'CRONOGRAMA\'\s*=>\s*ProveedoresCategorias::esDelCronograma\(\s*'
+        . 'self::formaDelCronograma\(/', $cuerpoPend) === 1);
+
+// Y las tres formas viajan por separado: una decide, las otras dos se muestran.
 chequear('la forma del maestro viaja aparte', true,
     strpos($fuente, "'FORMA_PAGO_MAESTRO' => \$cat['forma_pago']") !== false);
+
+/* LA IMPORTACION NO ESCRIBE EL OVERRIDE. Es el invariante que sostiene todo lo
+   de arriba: si aplicarImportacion lo tocara, la planilla volveria a decidir.
+
+   Se busca la CLAVE del mapa que se le pasa a guardarPago, no el nombre suelto:
+   el nombre aparece en el comentario que explica por que NO se escribe, y ese
+   comentario tiene que poder existir. */
+chequear('la importacion de pagos no escribe el override', false,
+    strpos($cuerpoDe('aplicarImportacion'), "'FORMA_PAGO_CRONOGRAMA' =>") !== false);
+
+// Pero sí escribe las otras tres: es lo que la planilla trae.
+foreach (["'FECHA_PAGO' =>", "'FORMA_PAGO' =>", "'OBSERVACION' =>"] as $col) {
+    chequear('y sigue escribiendo ' . $col, true,
+        strpos($cuerpoDe('aplicarImportacion'), $col) !== false);
+}
 
 /* LA TABLA DE SIGNOS NO SE TOCA. Al sacar la columna CRE_DEB del SELECT quedo
    un solo uso de CPA21 en la consulta, y es el que importa: sin el, una nota de
@@ -735,6 +812,33 @@ seccion('el script que habilita la carga manual');
 $sqlManual = __DIR__ . '/../sql/cashflow_prov_locales_maestro_manual.sql';
 
 chequear('el script existe', true, file_exists($sqlManual));
+
+seccion('el script de la forma por factura');
+
+$sqlForma = __DIR__ . '/../sql/cashflow_prov_locales_forma_por_factura.sql';
+
+chequear('el script existe', true, file_exists($sqlForma));
+
+$txtForma = file_get_contents($sqlForma);
+
+chequear('agrega la columna solo si no esta', true,
+    strpos($txtForma, "COL_LENGTH('dbo.RO_T_CASHFLOW_PROV_LOCALES_PAGO', 'FORMA_PAGO_CRONOGRAMA') IS NULL")
+        !== false);
+
+/* LA FECHA DE PAGO DEJA DE SER OBLIGATORIA, y es parte del mismo cambio: sin
+   eso no habia forma de guardar un override sin inventarle ademas una fecha al
+   comprobante, y una fecha inventada no es un dato que falte, es un dato falso
+   que despues alguien lee como una decision. */
+chequear('la fecha de pago pasa a ser nullable', true,
+    strpos($txtForma, 'ALTER COLUMN FECHA_PAGO DATE NULL') !== false);
+
+// Sin fecha cargada, la jerarquia cae sola al vencimiento: es lo mismo que
+// pasaba cuando no habia fila.
+$sinFecha = Proveedores::resolverFechaPago(null, '2026-10-20', '2026-09-01', 30, '2026-09-17');
+
+chequear('una fila de override sin fecha cae al vencimiento',
+    '2026-10-20', $sinFecha['fecha']);
+chequear('y el origen lo dice', 'VENCIMIENTO', $sinFecha['origen']);
 
 $txtManual = file_get_contents($sqlManual);
 

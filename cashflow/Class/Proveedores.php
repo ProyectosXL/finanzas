@@ -112,6 +112,9 @@ class Proveedores {
     /** @var bool|null Cache del chequeo de existencia de la tabla de pagos */
     private $tabla = null;
 
+    /** @var array Cache de que columnas de override tiene la tabla de pagos */
+    private $columnasPago = [];
+
     /**
      * @param ProveedoresCategorias|null $categorias Se puede inyectar para poder
      *        probar la clasificacion sin base.
@@ -315,25 +318,69 @@ class Proveedores {
                 'EXCLUIDO' => $cat['excluido'],
                 'SERIE' => $cat['serie'],
 
+                /* EL OVERRIDE DE ESTA FACTURA, si alguien lo puso. Es una REGLA
+                   -con que forma hay que tratar a este comprobante- puesta a
+                   mano, y no toca el maestro: las otras facturas del mismo
+                   proveedor siguen como estaban. */
+                'FORMA_PAGO_CRONOGRAMA' => ($pago === null)
+                    ? null : $pago['FORMA_PAGO_CRONOGRAMA'],
+
                 /* Si se gestiona desde el cronograma de pagos -echeq,
                    transferencia, o forma desconocida-. Es lo que decide si
                    entra a la fila del tablero y lo que la pestaña filtra por
                    defecto. Ver ProveedoresCategorias::esDelCronograma().
 
-                   SALE DEL MAESTRO Y SOLO DEL MAESTRO, haya o no fecha de pago
-                   cargada. El criterio es una propiedad del PROVEEDOR -a este
-                   se le paga por transferencia, a aquel por caja-, no del
-                   comprobante: si lo decidiera la fila de pago, cargar una
-                   fecha en la grilla cambiaria de lugar la deuda, y un pago
-                   registrado por una via distinta a la habitual sacaria al
-                   proveedor del cronograma sin que nadie lo haya decidido. */
-                'CRONOGRAMA' => ProveedoresCategorias::esDelCronograma($cat['forma_pago'])
+                   SALE DE UNA REGLA, NO DE UN HECHO, y eso no cambio. Lo que
+                   cambio es que la regla tiene dos escalones: el override de
+                   ESTA factura si lo hay, y si no la forma del maestro, que es
+                   una propiedad del PROVEEDOR.
+
+                   NO SALE de FORMA_PAGO. Esa es el HECHO -por que via salio ese
+                   pago- y la escribe la importacion de la planilla de pagos en
+                   todas sus filas: si decidiera, importar reclasificaria
+                   comprobantes dentro y fuera del cashflow sin que nadie lo
+                   pida. Ver Proveedores::formaDelCronograma(). */
+                'CRONOGRAMA' => ProveedoresCategorias::esDelCronograma(
+                    self::formaDelCronograma($cat, $pago))
             ];
         }
 
         sqlsrv_free_stmt($stmt);
 
         return $items;
+    }
+
+    /**
+     * Con que forma de pago se decide si este comprobante entra al cronograma.
+     *
+     * SON DOS ESCALONES DE LA MISMA REGLA, y el orden importa:
+     *
+     *   1. el OVERRIDE de esta factura, si alguien lo puso a mano
+     *   2. si no, la forma del MAESTRO, que es como se le paga a ese proveedor
+     *
+     * NO ENTRA FORMA_PAGO. Esa es un HECHO -por que via salio o va a salir ese
+     * pago- y la escribe la importacion de la planilla en todas sus filas. Si
+     * decidiera, importar la planilla de pagos pasaria a mover comprobantes
+     * dentro y fuera del cashflow sin que nadie lo haya pedido. El filtro mira
+     * una regla, no un hecho; lo que se agrego es un escalon mas fino de la
+     * regla, no un cambio de criterio.
+     *
+     * EL OVERRIDE NO TOCA EL MAESTRO: las otras facturas del mismo proveedor
+     * siguen clasificandose por la forma del maestro.
+     *
+     * Estatica y pura.
+     *
+     * @param array $cat Lo que devolvio ProveedoresCategorias::categoria()
+     * @param array|null $pago La fila de override, si hay
+     * @return string|null La forma con la que hay que decidir, o null si no se
+     *         sabe -y entonces el comprobante entra igual y se marca-
+     */
+    public static function formaDelCronograma($cat, $pago) {
+        if ($pago !== null && !empty($pago['FORMA_PAGO_CRONOGRAMA'])) {
+            return $pago['FORMA_PAGO_CRONOGRAMA'];
+        }
+
+        return $cat['forma_pago'];
     }
 
     /**
@@ -623,7 +670,8 @@ class Proveedores {
         $cid = $this->conectar();
 
         $sql = "SELECT COD_PROVEE, T_COMP, N_COMP, FECHA_PAGO, FORMA_PAGO, FORMA_PAGO_ORIG,
-                       OBSERVACION, ESTADO, FECHA_CANCELADO, ORIGEN, USUARIO
+                       OBSERVACION, ESTADO, FECHA_CANCELADO, ORIGEN, USUARIO, "
+                       . $this->overrideSql('FORMA_PAGO_CRONOGRAMA') . " AS FORMA_PAGO_CRONOGRAMA
                 FROM dbo." . self::TABLA_PAGO;
 
         $stmt = sqlsrv_query($cid, $sql);
@@ -650,6 +698,13 @@ class Proveedores {
                 'FORMA_PAGO' => ProveedoresCategorias::formaVigente(
                     $row['FORMA_PAGO_ORIG'], $row['FORMA_PAGO']),
                 'FORMA_PAGO_ORIG' => $row['FORMA_PAGO_ORIG'],
+
+                /* EL OVERRIDE DE ESTA FACTURA, que es otra cosa que FORMA_PAGO:
+                   es una REGLA -con que forma hay que tratar a este
+                   comprobante- y no un hecho. Es lo unico de esta tabla que
+                   decide si el importe entra al cashflow. Ver la nota de
+                   CRONOGRAMA en getPendientes(). */
+                'FORMA_PAGO_CRONOGRAMA' => $row['FORMA_PAGO_CRONOGRAMA'],
                 'OBSERVACION' => $row['OBSERVACION'],
                 'ESTADO' => $row['ESTADO'],
                 'FECHA_CANCELADO' => Horizonte::normalizarFecha($row['FECHA_CANCELADO']),
@@ -661,6 +716,54 @@ class Proveedores {
         sqlsrv_free_stmt($stmt);
 
         return $mapa;
+    }
+
+    /**
+     * Como se pide una columna de override en un SELECT: la columna si ya
+     * existe, y NULL si el script que la agrega todavia no se corrio.
+     *
+     * SE PREGUNTA en vez de darla por hecha porque las cuentas a pagar se
+     * siguen pudiendo LEER sin ella: el listado sale de Tango y una instalacion
+     * que no corrio el script tiene que ver su pestana, no un error de SQL. NULL
+     * es ademas el valor correcto: sin la columna no hay ningun override, que es
+     * exactamente lo que NULL significa.
+     *
+     * @param string $columna
+     * @return string
+     */
+    private function overrideSql($columna) {
+        return $this->tieneColumnaPago($columna) ? $columna : 'NULL';
+    }
+
+    /**
+     * Si la tabla de overrides ya tiene una columna. Se pregunta una vez por
+     * columna y por pedido.
+     *
+     * @param string $columna
+     * @return bool
+     */
+    public function tieneColumnaPago($columna) {
+        if (isset($this->columnasPago[$columna])) {
+            return $this->columnasPago[$columna];
+        }
+
+        if (!$this->tablaCreada()) {
+            return false;
+        }
+
+        $stmt = sqlsrv_query($this->conectar(),
+            "SELECT COL_LENGTH('dbo." . self::TABLA_PAGO . "', ?) AS C", [$columna]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar la columna ' . $columna));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->columnasPago[$columna] = ($row && $row['C'] !== null);
+
+        return $this->columnasPago[$columna];
     }
 
     /**
@@ -1121,18 +1224,23 @@ class Proveedores {
                     continue;
                 }
 
-                $this->guardarPago(
-                    $cid,
-                    $fila['cod_provee'],
-                    $fila['t_comp'],
-                    $fila['n_comp'],
-                    $fila['fecha_pago'],
-                    $fila['forma_pago'],
-                    $fila['forma_pago_orig'],
-                    $fila['observacion'],
-                    'ARCHIVO',
-                    $usuario
-                );
+                /* LA IMPORTACION NO TOCA FORMA_PAGO_CRONOGRAMA, y es
+                   deliberado: esa columna es una REGLA que alguien puso a mano
+                   para una factura, y la planilla trae HECHOS -por que via
+                   salio cada pago-. Si la importacion la escribiera, subir la
+                   planilla reclasificaria comprobantes dentro y fuera del
+                   cashflow sin que nadie lo haya pedido. Ver
+                   formaDelCronograma(). */
+                $this->guardarPago($cid,
+                    $fila['cod_provee'], $fila['t_comp'], $fila['n_comp'],
+                    [
+                        'FECHA_PAGO' => $fila['fecha_pago'],
+                        'FORMA_PAGO' => $fila['forma_pago'],
+                        'FORMA_PAGO_ORIG' => ($fila['forma_pago_orig'] === '')
+                            ? null : $fila['forma_pago_orig'],
+                        'OBSERVACION' => $fila['observacion']
+                    ],
+                    'ARCHIVO', $usuario);
 
                 $aplicadas[$fila['estado'] === 'ALTA' ? 'altas' : 'cambios']++;
             }
@@ -1188,16 +1296,85 @@ class Proveedores {
         $forma = ProveedoresCategorias::normalizarFormaPago($formaPago);
         $obs = ($observacion === null) ? '' : trim((string) $observacion);
 
-        /* Ver la nota del docblock: si el campo no vino, no se toca. Vacio y
-           ausente son lo mismo acá porque la grilla no tiene con que mandar un
-           vacio a proposito: edita la fecha y nada mas. */
-        $this->guardarPago($this->conectar(), $cod, $t, $n, $f,
-            $forma['normalizado'], $forma['original'],
-            ($obs === '') ? null : mb_substr($obs, 0, 200),
-            'MANUAL', $usuario,
-            ($forma['original'] !== ''), ($obs !== ''));
+        /* Ver la nota del docblock de guardarPago(): lo que no entra al mapa no
+           se escribe. Vacio y ausente son lo mismo acá porque la grilla no tiene
+           con que mandar un vacio a proposito: edita la fecha y nada mas. */
+        $campos = ['FECHA_PAGO' => $f];
+
+        if ($forma['original'] !== '') {
+            $campos['FORMA_PAGO'] = $forma['normalizado'];
+            $campos['FORMA_PAGO_ORIG'] = $forma['original'];
+        }
+
+        if ($obs !== '') {
+            $campos['OBSERVACION'] = mb_substr($obs, 0, 200);
+        }
+
+        $this->guardarPago($this->conectar(), $cod, $t, $n, $campos, 'MANUAL', $usuario);
 
         return ['fecha' => $f, 'forma' => $forma['normalizado']];
+    }
+
+    /**
+     * Pone o saca el OVERRIDE DE FORMA DE PAGO de un comprobante.
+     *
+     * ES UNA REGLA POR FACTURA, no un hecho: dice con que forma hay que tratar a
+     * ESTE comprobante para decidir si entra al cronograma del cashflow. Pisa a
+     * la del maestro solo para el, y NO TOCA EL MAESTRO: las otras facturas del
+     * mismo proveedor siguen como estaban.
+     *
+     * VA EN SU PROPIA COLUMNA y no en FORMA_PAGO, que es el hecho que escribe la
+     * importacion de la planilla en todas sus filas. Ver formaDelCronograma().
+     *
+     * SACARLO ES MANDAR VACIO, y entonces vuelve a decidir el maestro. No borra
+     * la fila: la fecha de pago y la observacion que esa fila tenga siguen
+     * estando, porque son otra cosa.
+     *
+     * @param string $codProvee
+     * @param string $tComp
+     * @param string $nComp
+     * @param string|null $forma Una de FORMAS_PAGO, o vacio para sacar el override
+     * @param string|null $usuario
+     * @return array ['forma' => string|null]
+     */
+    public function saveFormaCronograma($codProvee, $tComp, $nComp, $forma, $usuario = null) {
+        if (!$this->tablaCreada()) {
+            throw new Exception('Todavía no existe la tabla de overrides por comprobante. '
+                . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
+        }
+
+        if (!$this->tieneColumnaPago('FORMA_PAGO_CRONOGRAMA')) {
+            throw new Exception('Todavía no se puede fijar la forma de pago por factura. '
+                . 'Corré sql/cashflow_prov_locales_forma_por_factura.sql contra la base '
+                . 'central.');
+        }
+
+        $cod = Planilla::codigo($codProvee);
+        $t = Planilla::codigo($tComp);
+        $n = Planilla::codigo($nComp);
+
+        if ($cod === '' || $t === '' || $n === '') {
+            throw new Exception('Falta el proveedor o el comprobante.');
+        }
+
+        $v = trim((string) $forma);
+
+        /* SE VALIDA CONTRA LA LISTA y no se acepta cualquier texto: esta forma
+           DECIDE si el importe entra al cashflow, asi que una que no este en
+           FORMAS_PAGO no decidiria nada y quedaria como un override que parece
+           puesto y no hace nada. Es lo contrario de FORMA_PAGO, que guarda lo
+           que diga la planilla porque describe un hecho. */
+        if ($v !== '' && !isset(ProveedoresCategorias::FORMAS_PAGO[mb_strtoupper($v)])) {
+            throw new Exception('"' . $v . '" no es una forma de pago conocida. Las válidas '
+                . 'son: ' . implode(', ', array_keys(ProveedoresCategorias::FORMAS_PAGO)) . '.');
+        }
+
+        $normalizada = ($v === '') ? null : mb_strtoupper($v);
+
+        $this->guardarPago($this->conectar(), $cod, $t, $n,
+            ['FORMA_PAGO_CRONOGRAMA' => $normalizada], 'MANUAL', $usuario);
+
+        return ['forma' => $normalizada];
     }
 
     /**
@@ -1275,27 +1452,28 @@ class Proveedores {
      * estaba conciliado, cambiarle la prevision no lo desconcilia: Tango es la
      * verdad sobre el pago y esto es una prevision.
      *
-     * TAMPOCO PISA LO QUE EL LLAMADOR NO TRAJO. $tocarForma y $tocarObs dicen
-     * si esos dos campos entran al UPDATE. La importacion los trae siempre y
-     * pasa los dos en true; la edicion de a una manda solo la fecha. En el
-     * INSERT no hay nada que conservar, asi que van como vengan.
+     * TAMPOCO PISA LO QUE EL LLAMADOR NO TRAJO, y ahora eso es estructural en
+     * vez de un booleano por campo: $campos es un mapa columna => valor con
+     * EXACTAMENTE lo que hay que escribir, y lo que no esta en el mapa no entra
+     * ni al UPDATE ni al INSERT.
+     *
+     * Con un flag por campo, agregar un override cuarto obligaba a agregar un
+     * cuarto flag y a que todos los llamadores lo pasaran bien. Un endpoint que
+     * recibe un campo y escribe cuatro no esta guardando una edicion: esta
+     * reemplazando la fila, y asi se borraban la forma y la observacion que
+     * habia dejado la importacion de la planilla.
      */
-    private function guardarPago($cid, $cod, $t, $n, $fecha, $forma, $formaOrig,
-                                 $observacion, $origen, $usuario,
-                                 $tocarForma = true, $tocarObs = true) {
-        $sets = ['FECHA_PAGO = ?'];
-        $params = [$fecha];
-
-        if ($tocarForma) {
-            $sets[] = 'FORMA_PAGO = ?';
-            $sets[] = 'FORMA_PAGO_ORIG = ?';
-            $params[] = $forma;
-            $params[] = ($formaOrig === '') ? null : $formaOrig;
+    private function guardarPago($cid, $cod, $t, $n, $campos, $origen, $usuario) {
+        if (empty($campos)) {
+            throw new Exception('No hay nada que guardar para ese comprobante.');
         }
 
-        if ($tocarObs) {
-            $sets[] = 'OBSERVACION = ?';
-            $params[] = $observacion;
+        $sets = [];
+        $params = [];
+
+        foreach ($campos as $col => $valor) {
+            $sets[] = $col . ' = ?';
+            $params[] = $valor;
         }
 
         $sets[] = 'ORIGEN = ?';
@@ -1312,7 +1490,7 @@ class Proveedores {
             array_merge($params, [$cod, $t, $n]));
 
         if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al guardar la fecha de pago'));
+            throw new Exception($this->errorSql('Error al guardar el comprobante'));
         }
 
         $filas = sqlsrv_rows_affected($stmt);
@@ -1322,17 +1500,26 @@ class Proveedores {
             return;
         }
 
-        $sql = "INSERT INTO dbo." . self::TABLA_PAGO . "
-                    (COD_PROVEE, T_COMP, N_COMP, FECHA_PAGO, FORMA_PAGO, FORMA_PAGO_ORIG,
-                     OBSERVACION, ESTADO, ORIGEN, USUARIO)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'PREVISTO', ?, ?)";
+        /* No habia fila. Lo que el llamador no trajo queda en su default, que es
+           NULL para los tres overrides: "no hay decision tomada sobre esto". */
+        $cols = array_merge(['COD_PROVEE', 'T_COMP', 'N_COMP'], array_keys($campos));
+        $vals = array_merge([$cod, $t, $n], array_values($campos));
 
-        $stmt = sqlsrv_query($cid, $sql,
-            [$cod, $t, $n, $fecha, $forma, ($formaOrig === '') ? null : $formaOrig,
-             $observacion, $origen, $usuario]);
+        $cols[] = 'ESTADO';
+        $cols[] = 'ORIGEN';
+        $cols[] = 'USUARIO';
+        $vals[] = 'PREVISTO';
+        $vals[] = $origen;
+        $vals[] = $usuario;
+
+        $sql = "INSERT INTO dbo." . self::TABLA_PAGO . "
+                    (" . implode(', ', $cols) . ")
+                VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")";
+
+        $stmt = sqlsrv_query($cid, $sql, $vals);
 
         if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al guardar la fecha de pago'));
+            throw new Exception($this->errorSql('Error al guardar el comprobante'));
         }
 
         sqlsrv_free_stmt($stmt);

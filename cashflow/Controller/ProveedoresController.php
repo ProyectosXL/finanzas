@@ -140,6 +140,12 @@ try {
                cambia en un solo lugar. */
             $payload['formas_cronograma'] = ProveedoresCategorias::FORMAS_CRONOGRAMA;
 
+            /* Si se puede fijar la forma por factura. La pantalla lo pregunta
+               en vez de suponerlo: sin el script, el listado se lee igual y lo
+               que no se puede es escribir el override. Un desplegable que se
+               dibuja y despues falla al guardar es peor que uno que no esta. */
+            $payload['forma_por_factura'] = $prov->tieneColumnaPago('FORMA_PAGO_CRONOGRAMA');
+
             echo json_encode(['success' => true, 'data' => $payload], JSON_UNESCAPED_UNICODE);
             break;
 
@@ -165,6 +171,40 @@ try {
             echo json_encode([
                 'success' => true,
                 'message' => 'Fecha de pago guardada.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           LA FORMA DE PAGO DE UNA FACTURA
+
+           ES UNA REGLA POR FACTURA, no el registro de por donde salio el pago
+           -eso es 'forma_pago' y lo escribe la importacion-. Pisa a la del
+           maestro SOLO para ese comprobante y decide si su importe entra al
+           cashflow. NO TOCA EL MAESTRO.
+
+           Mandar vacio saca el override y vuelve a decidir el maestro.
+           ================================================================ */
+        case 'saveFormaCronograma':
+            $data = bodyJson();
+
+            foreach (['cod_provee', 't_comp', 'n_comp'] as $campo) {
+                if (empty($data[$campo])) {
+                    throw new Exception('Falta el comprobante al que corresponde la forma.');
+                }
+            }
+
+            $r = $prov->saveFormaCronograma(
+                $data['cod_provee'], $data['t_comp'], $data['n_comp'],
+                isset($data['forma']) ? $data['forma'] : '',
+                usuarioActual()
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => ($r['forma'] === null)
+                    ? 'La forma vuelve a ser la del maestro.'
+                    : 'Esta factura se trata como ' . $r['forma'] . '. El maestro no cambia.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

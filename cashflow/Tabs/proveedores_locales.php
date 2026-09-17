@@ -195,7 +195,20 @@
                                 <th rowspan="2">VTO</th>
                                 <th rowspan="2">Pendiente</th>
                                 <th rowspan="2">Fecha de pago</th>
-                                <th rowspan="2">Forma</th>
+                                <!-- DOS COLUMNAS DE FORMA QUE NO SON LO MISMO:
+                                     Forma es un HECHO -por qué vía salió el
+                                     pago, lo trae la importación- y sólo se
+                                     muestra. Cronograma es una REGLA -con qué
+                                     forma se trata esta factura- y es lo que
+                                     decide si el importe entra al cashflow. -->
+                                <th rowspan="2"
+                                    title="Por qué vía salió o va a salir este pago. Es informativa: no decide si el importe entra al cashflow.">
+                                    Forma
+                                </th>
+                                <th rowspan="2" style="min-width: 150px;"
+                                    title="Con qué forma se trata ESTA factura para decidir si entra al cashflow. Vacío usa la del maestro. Cambiarla acá no toca el maestro ni las otras facturas del proveedor.">
+                                    Cronograma
+                                </th>
                                 <th colspan="1" class="table-group-divider" id="headerEjeProv">Días</th>
                             </tr>
                             <tr id="headerSubProv"></tr>

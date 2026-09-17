@@ -36,7 +36,10 @@ Contra `central`, en cualquier momento:
 -- 1. sql/cashflow_prov_locales.sql
 -- 2. sql/cashflow_prov_locales_collation.sql      (antes de la primera importación)
 -- 3. sql/cashflow_prov_locales_maestro_manual.sql (para cargar el maestro a mano)
+-- 4. sql/cashflow_prov_locales_forma_por_factura.sql (forma de pago por factura)
 ```
+
+El cuarto agrega `FORMA_PAGO_CRONOGRAMA` y hace `FECHA_PAGO` nullable. Las filas que ya están quedan con el override en `NULL` —*"usa la forma del maestro"*—, así que el tablero no se mueve. **Sin él el listado se lee igual** y la columna *Cronograma* muestra la del maestro en vez de un desplegable que fallaría al guardar.
 
 El tercero agrega `ORIGEN` al maestro y marca como `IMPORT` lo que ya está, que es lo que es. **Sin él el maestro se lee igual**: lo que no se puede es cargarlo a mano, y la pestaña lo dice con el script al lado en vez de dibujar un formulario que después falla.
 
@@ -459,22 +462,49 @@ Una forma que llega con el normalizado en `null` se dibuja en naranja con su ori
 
 > Esto estuvo invisible un tiempo por otro motivo: `categoria()` no devolvía el `FORMA_PAGO_ORIG` del maestro, así que esas 133 filas se dibujaban *"sin forma"* en gris y la marca naranja —que existe exactamente para este caso— no se ejecutaba nunca.
 
-### Hay dos formas de pago por fila, y sólo una decide
+### Hay tres formas de pago por fila, y sólo una decide
 
 Confundirlas fue un bug.
 
-| | |
-| --- | --- |
-| `FORMA_PAGO_MAESTRO` | Cómo se le paga a **ese proveedor**, según el maestro. Es una **regla**, y es lo único que decide si el comprobante entra al cronograma —al filtro de la pestaña y a la serie `PAGOS` del tablero— |
-| `FORMA_PAGO` | Por qué vía salió o va a salir **ese pago**, si hay uno registrado. Es un **hecho**, y sólo se muestra |
+| | Qué es | ¿Decide? |
+| --- | --- | --- |
+| `FORMA_PAGO_CRONOGRAMA` | Con qué forma hay que tratar a **esta factura**. La pone una persona en la grilla | **Sí**, y le gana al maestro |
+| `FORMA_PAGO_MAESTRO` | Cómo se le paga a **ese proveedor**, según el maestro | **Sí**, cuando no hay override |
+| `FORMA_PAGO` | Por qué vía salió o va a salir **ese pago**. La trae la importación de la planilla | **No.** Sólo se muestra |
 
-> El filtro mira la regla, no el hecho.
+> El filtro mira una **regla**, no un **hecho**. Lo resuelve `Proveedores::formaDelCronograma()`, estática y pura.
 
-Si lo decidiera la fila de pago pasarían dos cosas, y las dos son peores. La grilla edita una sola celda —la fecha— y manda sólo esa, así que **cargar una fecha desde la grilla movería la deuda de serie**: un proveedor de CAJA o de DÉBITO pasaría a "sin forma", entraría al filtro y entraría al cashflow. Y a la inversa, un pago hecho por una vía distinta de la habitual sacaría al proveedor del cronograma sin que nadie lo haya decidido.
+```
+CRONOGRAMA = esDelCronograma( override de la factura ?? forma del maestro )
+```
 
-**Que las dos difieran no es un error: es información.** Significa que a ese proveedor se le pagó por una vía distinta de la habitual, y lo que eventualmente hay que corregir es el maestro.
+#### Por qué el override va en su propia columna
 
-Por lo mismo, `savePago()` **no pisa lo que no le mandaron**: si la forma o la observación no viajan en el request, no entran al `UPDATE`. Un endpoint que recibe un campo y escribe cuatro no está guardando una edición, está reemplazando la fila —y borraba la forma y la observación que había dejado la importación de la planilla—.
+> Esto es **nuevo**. Antes la única regla era la del maestro, y cambiarla movía toda la deuda de ese proveedor.
+
+Una factura puntual puede pagarse distinto sin que eso cambie cómo se le paga al proveedor en general. Hasta ahora no había dónde decirlo: o se cambiaba el maestro —y se movía todo— o no se decía.
+
+**Lo que no se podía hacer es que decidiera `FORMA_PAGO`**, que era la columna que ya estaba. Esa es un *hecho*, y **la escribe la importación de la planilla de pagos en todas sus filas**: si decidiera, subir la planilla pasaría a mover comprobantes dentro y fuera del cashflow sin que nadie lo haya pedido. Hoy no hay **ni un comprobante donde las dos difieran**, así que el daño no se vería hasta la primera planilla que traiga una vía distinta de la habitual.
+
+Por eso `aplicarImportacion()` **no toca `FORMA_PAGO_CRONOGRAMA`**, y hay una prueba que lo fija.
+
+- **No toca el maestro.** Las otras facturas del mismo proveedor siguen clasificándose igual.
+- **Se valida contra `FORMAS_PAGO`**, al revés que `FORMA_PAGO`, que guarda lo que diga la planilla. Ésta *decide*: una forma que no está en la lista no decidiría nada y quedaría como un override que parece puesto y no hace nada.
+- **Sacarlo es elegir "maestro:" en el desplegable.** No borra la fila: la fecha de pago y la observación siguen estando, porque son otra cosa.
+
+**Que el hecho difiera de la regla no es un error: es información.** Significa que a ese proveedor se le pagó por una vía distinta de la habitual, y lo que eventualmente hay que corregir es el maestro.
+
+#### `savePago()` no pisa lo que no le mandaron, y ahora es estructural
+
+`guardarPago()` recibe **un mapa columna → valor con exactamente lo que hay que escribir**, y lo que no está en el mapa no entra ni al `UPDATE` ni al `INSERT`.
+
+Antes eran dos booleanos —`$tocarForma`, `$tocarObs`—, y cada override nuevo obligaba a agregar un flag más y a que todos los llamadores lo pasaran bien. El bug original: un endpoint que recibe un campo y escribe cuatro no está guardando una edición, está reemplazando la fila —y borraba la forma y la observación que había dejado la importación—.
+
+#### La tabla de pagos pasó a ser la tabla de overrides
+
+`RO_T_CASHFLOW_PROV_LOCALES_PAGO` nació como *"las fechas de pago"* y hoy guarda tres decisiones sobre un comprobante: **la fecha, la forma con la que se lo trata y si se lo excluye**. Por eso `FECHA_PAGO` es **nullable**: con `NOT NULL` no había forma de guardar un override sin inventarle además una fecha, y una fecha inventada no es un dato que falte —es un dato falso que después alguien lee como una decisión—.
+
+Una fila sin fecha cae sola al escalón siguiente de la jerarquía, el vencimiento de Tango, que es exactamente lo que pasaba cuando no había fila.
 
 ### El filtro se puede apagar, y mientras está prendido dice cuánto esconde
 
@@ -582,6 +612,7 @@ Con base, además: que **ningún pendiente sea negativo** —el error que tenía
 sql/cashflow_prov_locales.sql                  Las dos tablas + la fila del tablero
 sql/cashflow_prov_locales_collation.sql        Alinea la collation con la de Tango
 sql/cashflow_prov_locales_maestro_manual.sql   ORIGEN: habilita la carga a mano
+sql/cashflow_prov_locales_forma_por_factura.sql  El override de forma por factura
 sql/_referencia_tango_pendientes.sql           La consulta de Tango, como referencia
 cashflow/Class/Planilla.php                    El mecanismo de importacion CSV, compartido
 cashflow/Class/Proveedores.php                 Cuentas a pagar, fechas de pago y conciliacion
