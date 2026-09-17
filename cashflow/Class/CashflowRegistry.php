@@ -243,7 +243,8 @@ class CashflowRegistry {
                 'PAGOS_EXCLUIDOS' => 'Solo los rubros excluidos (socios y no comerciales)',
                 'PAGOS_CRONO_OPERATIVOS' => 'Del cronograma y sin los rubros excluidos '
                     . '(los dos criterios a la vez)',
-                'PAGOS_SIN_RUBRO' => 'Solo los proveedores que no estan en el maestro'
+                'PAGOS_SIN_RUBRO' => 'Solo los proveedores que no estan en el maestro',
+                'PAGOS_EXCLUIDOS_FACTURA' => 'Solo las facturas excluidas a mano, una por una'
             ],
             'series_extra' => ['ProveedoresProvider', 'seriesDeRubro'],
             /* EL TOTAL ES 'PAGOS_TODO', NO 'PAGOS'. La fila del tablero usa
@@ -255,7 +256,7 @@ class CashflowRegistry {
             'componentes' => [
                 'PAGOS_TODO' => ['PAGOS', 'PAGOS_FUERA_CRONOGRAMA', 'PAGOS_OPERATIVOS',
                                  'PAGOS_EXCLUIDOS', 'PAGOS_CRONO_OPERATIVOS',
-                                 'PAGOS_SIN_RUBRO']
+                                 'PAGOS_SIN_RUBRO', 'PAGOS_EXCLUIDOS_FACTURA']
             ],
 
             /* LOS CORTES DEL MISMO UNIVERSO. 'componentes' dice que estas seis
@@ -280,7 +281,12 @@ class CashflowRegistry {
                fila en alquileres, impuestos y logistica sigue siendo valido. */
             'particiones' => [
                 'PAGOS_TODO' => [
-                    'por cómo se paga' => ['PAGOS', 'PAGOS_FUERA_CRONOGRAMA'],
+                    /* TRES PARTES, no dos: una factura excluida a mano no va ni
+                       a PAGOS ni a PAGOS_FUERA_CRONOGRAMA. Es lo que hace que el
+                       tilde saque el importe de la fila del tablero, que usa
+                       PAGOS. Ver ProveedoresProvider::SERIE_EXCLUIDOS_FACTURA. */
+                    'por cómo se paga' => ['PAGOS', 'PAGOS_FUERA_CRONOGRAMA',
+                                           'PAGOS_EXCLUIDOS_FACTURA'],
                     'por si está excluido' => ['PAGOS_OPERATIVOS', 'PAGOS_EXCLUIDOS'],
                     'por rubro' => ['PAGOS_SIN_RUBRO']
                 ]

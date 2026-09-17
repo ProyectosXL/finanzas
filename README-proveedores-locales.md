@@ -37,7 +37,10 @@ Contra `central`, en cualquier momento:
 -- 2. sql/cashflow_prov_locales_collation.sql      (antes de la primera importación)
 -- 3. sql/cashflow_prov_locales_maestro_manual.sql (para cargar el maestro a mano)
 -- 4. sql/cashflow_prov_locales_forma_por_factura.sql (forma de pago por factura)
+-- 5. sql/cashflow_prov_locales_excluir_factura.sql   (excluir facturas sueltas)
 ```
+
+El quinto va **después** del cuarto: necesita que `FECHA_PAGO` ya sea nullable, y si no lo es aborta diciéndolo. Las filas quedan con `EXCLUIDA = 0`, así que el tablero no se mueve.
 
 El cuarto agrega `FORMA_PAGO_CRONOGRAMA` y hace `FECHA_PAGO` nullable. Las filas que ya están quedan con el override en `NULL` —*"usa la forma del maestro"*—, así que el tablero no se mueve. **Sin él el listado se lee igual** y la columna *Cronograma* muestra la del maestro en vez de un desplegable que fallaría al guardar.
 
@@ -208,6 +211,32 @@ Lo que se agrega es que **no la pise en silencio**. La columna `ORIGEN` (`IMPORT
 > Entre trescientos cambios, los que borran lo que alguien cargó a mano son los únicos que esa persona querría revisar. El aviso dice cuántos son; la marca dice cuáles.
 
 Se aplican igual al confirmar: el que decide es quien importa, viéndolo.
+
+### Excluir una factura suelta
+
+> Esto es **nuevo**. Antes sólo se podía excluir a un proveedor entero.
+
+Una factura duplicada, una en disputa o una que se pagó por fuera de Tango no son un problema del proveedor: son un problema de **esa factura**. El tilde de la columna *Excl.* la saca del cashflow.
+
+**El motivo es obligatorio**, y lo valida `Proveedores::saveExclusion()` y no la pantalla —el endpoint es alcanzable sin pasar por la grilla—. Una factura sacada del cashflow sin motivo no la explica nadie tres meses después. Destildar borra el motivo: dejarlo haría que una factura incluida arrastre el texto de cuando estuvo afuera.
+
+#### Por qué no alcanzaba con mandarla a `PAGOS_EXCLUIDOS`
+
+Ésta es la parte que no es obvia. **La fila del tablero usa `PAGOS`, y `PAGOS` pertenece al corte del cronograma, que no excluye nada.** Mandar la factura tildada al corte de excluidos la habría sacado de `PAGOS_CRONO_OPERATIVOS`, que hoy **no usa ninguna fila**: el tilde no habría movido un peso.
+
+Verificado contra la base: la fila está configurada con `ORIGEN_SERIE = 'PAGOS'`, y ahí adentro hay **$72.500.993,87 en 8 vencimientos de `OGRAZ`** —rubro *Excluidos*— que entran igual porque cobra por echeq.
+
+Por eso la exclusión manual sale también del primer corte, con serie propia, y ese corte pasa a tener **tres partes**:
+
+```
+PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA = PAGOS_TODO
+```
+
+- **No cae en `PAGOS_FUERA_CRONOGRAMA`.** Ahí el aviso desglosa por forma de pago —*"esto no se planifica porque es un débito automático"*— y una factura excluida a mano lo ensuciaría.
+- **Sigue en `PAGOS_TODO` y en `PAGOS_EXCLUIDOS`.** El importe no desaparece: queda auditable, y el proveedor **avisa cuánto es y con qué motivos** en cada carga del tablero.
+- **Un proveedor excluido por rubro no se mueve.** Sacarlo de `PAGOS` sigue siendo apuntar la fila a `PAGOS_CRONO_OPERATIVOS` desde Parámetros; este cambio no toma esa decisión por nadie.
+
+En la grilla, la fila excluida se atenúa y el pendiente va tachado: es la fila la que cambió de significado, no una celda.
 
 ### El rubro "Excluidos"
 
@@ -381,6 +410,7 @@ Como las dos importaciones, **no escribe nada hasta confirmar**.
 | `PAGOS_EXCLUIDOS` | Sólo los excluidos |
 | `PAGOS_CRONO_OPERATIVOS` | **Los dos criterios a la vez** |
 | `PAGOS_SIN_RUBRO` | Sólo los que no están en el maestro |
+| `PAGOS_EXCLUIDOS_FACTURA` | Sólo las facturas excluidas a mano, una por una |
 | `RUBRO_*` | Una por cada rubro económico del maestro |
 
 **`PAGOS` no trae todo**, y el nombre engaña: trae el cronograma. Ver la sección anterior.
@@ -388,8 +418,8 @@ Como las dos importaciones, **no escribe nada hasta confirmar**.
 Son **dos particiones del mismo universo**, y las dos tienen que cerrar contra `PAGOS_TODO`:
 
 ```
-PAGOS + PAGOS_FUERA_CRONOGRAMA   = PAGOS_TODO   (por cómo se paga)
-PAGOS_OPERATIVOS + PAGOS_EXCLUIDOS = PAGOS_TODO (por qué rubro es)
+PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA = PAGOS_TODO  (por cómo se paga)
+PAGOS_OPERATIVOS + PAGOS_EXCLUIDOS                       = PAGOS_TODO  (por qué rubro es)
 ```
 
 Eso lo fija `tests/test_proveedores.php` contra los datos reales: si una de las dos no cerrara, algún comprobante se estaría yendo a la serie equivocada.
@@ -423,7 +453,7 @@ La regla original comparaba el **total** contra cada una de sus partes. Eso deja
 Por eso el registro declara `particiones`: un mapa `total → corte → series`.
 
 ```
-por cómo se paga      PAGOS · PAGOS_FUERA_CRONOGRAMA
+por cómo se paga      PAGOS · PAGOS_FUERA_CRONOGRAMA · PAGOS_EXCLUIDOS_FACTURA
 por si está excluido  PAGOS_OPERATIVOS · PAGOS_EXCLUIDOS
 por rubro             PAGOS_SIN_RUBRO · RUBRO_*
 ```
@@ -613,6 +643,7 @@ sql/cashflow_prov_locales.sql                  Las dos tablas + la fila del tabl
 sql/cashflow_prov_locales_collation.sql        Alinea la collation con la de Tango
 sql/cashflow_prov_locales_maestro_manual.sql   ORIGEN: habilita la carga a mano
 sql/cashflow_prov_locales_forma_por_factura.sql  El override de forma por factura
+sql/cashflow_prov_locales_excluir_factura.sql    El tilde de exclusion por factura
 sql/_referencia_tango_pendientes.sql           La consulta de Tango, como referencia
 cashflow/Class/Planilla.php                    El mecanismo de importacion CSV, compartido
 cashflow/Class/Proveedores.php                 Cuentas a pagar, fechas de pago y conciliacion

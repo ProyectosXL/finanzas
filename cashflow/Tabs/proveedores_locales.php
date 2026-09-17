@@ -209,6 +209,14 @@
                                     title="Con qué forma se trata ESTA factura para decidir si entra al cashflow. Vacío usa la del maestro. Cambiarla acá no toca el maestro ni las otras facturas del proveedor.">
                                     Cronograma
                                 </th>
+                                <!-- El tilde saca el importe de la fila del
+                                     tablero. No lo hace desaparecer: va a su
+                                     propia serie y el proveedor avisa cuánto es
+                                     y por qué. El motivo es obligatorio. -->
+                                <th rowspan="2" class="text-center" style="width: 70px;"
+                                    title="Excluir esta factura del cashflow. Pide un motivo: sin él, dentro de tres meses nadie puede explicar por qué falta ese importe.">
+                                    Excl.
+                                </th>
                                 <th colspan="1" class="table-group-divider" id="headerEjeProv">Días</th>
                             </tr>
                             <tr id="headerSubProv"></tr>

@@ -1041,6 +1041,50 @@ chequearLanza('una fecha inventada se rechaza',
 chequearLanza('un texto cualquiera se rechaza',
     function () { Proveedores::validarFechaPago('el jueves'); });
 
+seccion('excluir una factura pide el motivo, y lo valida el back');
+
+/* NO ES UNA VALIDACION DE LA PANTALLA. El endpoint es alcanzable sin pasar por
+   la grilla, y una factura sacada del cashflow sin motivo no la explica nadie
+   tres meses despues. Se mira el cuerpo del metodo porque tildar de verdad
+   necesita base. */
+$cuerpoExcl = $cuerpoDe('saveExclusion');
+
+chequear('rechaza excluir sin motivo', true,
+    strpos($cuerpoExcl, "if (\$excluir && \$texto === '')") !== false);
+chequear('y el mensaje dice por que importa', true,
+    strpos($cuerpoExcl, 'nadie va a poder explicar') !== false);
+
+/* DESTILDAR BORRA EL MOTIVO: dejarlo haria que una factura incluida arrastre el
+   texto de cuando estuvo afuera, y el proximo que lo lea va a creer que sigue
+   excluida. */
+chequear('destildar borra el motivo', true,
+    strpos($cuerpoExcl, "'MOTIVO_EXCLUSION' => \$excluir ? mb_substr(\$texto, 0, 200) : null")
+        !== false);
+
+// Y escribe SOLO esas dos columnas: la fecha de pago y la forma que la factura
+// ya tuviera no son asunto de este gesto.
+chequear('no toca la fecha de pago', false, strpos($cuerpoExcl, "'FECHA_PAGO'") !== false);
+chequear('ni la forma', false, strpos($cuerpoExcl, "'FORMA_PAGO") !== false);
+
+seccion('el script que habilita excluir facturas');
+
+$sqlExcl = __DIR__ . '/../sql/cashflow_prov_locales_excluir_factura.sql';
+
+chequear('el script existe', true, file_exists($sqlExcl));
+
+$txtExcl = file_get_contents($sqlExcl);
+
+chequear('agrega el tilde solo si no esta', true,
+    strpos($txtExcl, "COL_LENGTH('dbo.RO_T_CASHFLOW_PROV_LOCALES_PAGO', 'EXCLUIDA') IS NULL")
+        !== false);
+chequear('y arranca en 0: el tablero no se mueve', true,
+    strpos($txtExcl, 'DEFAULT (0)') !== false);
+
+// Depende del anterior: sin FECHA_PAGO nullable no se puede guardar una
+// exclusion sin inventarle una fecha de pago a la factura.
+chequear('exige que FECHA_PAGO ya sea nullable', true,
+    strpos($txtExcl, 'Corre primero sql/cashflow_prov_locales_forma_por_factura.sql') !== false);
+
 /* ================================================================
    LOS AVISOS DEL LISTADO
    ================================================================ */
@@ -1185,6 +1229,90 @@ $d = ProveedoresProvider::seriesDeItem($item(true, false, false,
 chequear('sin maestro va a PAGOS_SIN_RUBRO', true, in_array('PAGOS_SIN_RUBRO', $d, true));
 chequear('y no inventa una serie de rubro', false,
     in_array(ProveedoresCategorias::SERIE_SIN_RUBRO, $d, true));
+
+/* ================================================================
+   UNA FACTURA EXCLUIDA A MANO SALE DE LA FILA DEL TABLERO
+
+   EL PUNTO ES QUE SALGA DE **PAGOS**, no de PAGOS_CRONO_OPERATIVOS. La fila del
+   tablero usa PAGOS, que pertenece al corte del cronograma y NO excluye nada:
+   mandar la factura tildada solo al corte de excluidos la habria sacado de una
+   serie que hoy no usa ninguna fila, y el tilde no habria movido un peso.
+
+   Verificado contra la base al escribir esto: la fila esta configurada con
+   ORIGEN_SERIE = 'PAGOS', y ahi adentro hay $72.500.993,87 en 8 vencimientos de
+   un proveedor con rubro Excluidos que entran igual porque cobra por echeq.
+   ================================================================ */
+seccion('una factura excluida a mano sale de la serie que usa el tablero');
+
+$excl = function ($crono, $excluidoRubro = false) {
+    return ['CRONOGRAMA' => $crono, 'EXCLUIDO' => true, 'EXCLUIDA_MANUAL' => true,
+            'EN_MAESTRO' => true, 'SERIE' => 'RUBRO_MERCADERIA'];
+};
+
+$d = ProveedoresProvider::seriesDeItem($excl(true));
+
+chequear('NO va a PAGOS, que es la serie de la fila del tablero', false,
+    in_array('PAGOS', $d, true));
+chequear('va a la suya', true, in_array('PAGOS_EXCLUIDOS_FACTURA', $d, true));
+chequear('y tampoco a la de los dos criterios', false,
+    in_array('PAGOS_CRONO_OPERATIVOS', $d, true));
+
+// Tampoco a PAGOS_FUERA_CRONOGRAMA: ese corte tiene tres partes y esta es la
+// tercera. Si cayera ahi, el aviso de "esto no se planifica" la contaria como si
+// fuera un debito automatico.
+chequear('ni a la de lo que queda fuera del cronograma', false,
+    in_array('PAGOS_FUERA_CRONOGRAMA', $d, true));
+
+// Pero SIGUE en el universo: el importe no desaparece, se puede auditar.
+chequear('sigue en el universo', true, in_array('PAGOS_TODO', $d, true));
+chequear('y en el corte de excluidos', true, in_array('PAGOS_EXCLUIDOS', $d, true));
+
+// Una excluida a mano que ademas queda fuera del cronograma tampoco se duplica.
+$d = ProveedoresProvider::seriesDeItem($excl(false));
+
+chequear('una excluida fuera del cronograma va a la suya igual', true,
+    in_array('PAGOS_EXCLUIDOS_FACTURA', $d, true));
+chequear('y a ninguna de las otras dos del corte', false,
+    in_array('PAGOS', $d, true) || in_array('PAGOS_FUERA_CRONOGRAMA', $d, true));
+
+/* UN PROVEEDOR EXCLUIDO POR RUBRO NO SE MUEVE. Sacarlo de PAGOS es otra
+   decision -se toma desde Parametros apuntando la fila a
+   PAGOS_CRONO_OPERATIVOS- y este cambio no la toma por nadie. */
+$d = ProveedoresProvider::seriesDeItem($item(true, true));
+
+chequear('un excluido por RUBRO sigue entrando a PAGOS', true, in_array('PAGOS', $d, true));
+chequear('y no va a la serie de las excluidas a mano', false,
+    in_array('PAGOS_EXCLUIDOS_FACTURA', $d, true));
+
+seccion('el corte por como se paga sigue cerrando, con tres partes');
+
+/* CADA VENCIMIENTO CAE EN EXACTAMENTE UNA de las tres. Si cayera en dos, la
+   particion contaria de mas y el validador dejaria pasar dos filas solapadas;
+   si no cayera en ninguna, el importe desapareceria de PAGOS_TODO sin aviso. */
+$corte = ['PAGOS', 'PAGOS_FUERA_CRONOGRAMA', 'PAGOS_EXCLUIDOS_FACTURA'];
+$casos = [
+    'cronograma'            => ['CRONOGRAMA' => true,  'EXCLUIDA_MANUAL' => false],
+    'fuera del cronograma'  => ['CRONOGRAMA' => false, 'EXCLUIDA_MANUAL' => false],
+    'excluida a mano'       => ['CRONOGRAMA' => true,  'EXCLUIDA_MANUAL' => true],
+    'excluida y fuera'      => ['CRONOGRAMA' => false, 'EXCLUIDA_MANUAL' => true]
+];
+
+foreach ($casos as $nombre => $caso) {
+    $d = ProveedoresProvider::seriesDeItem(array_merge(
+        ['EXCLUIDO' => false, 'EN_MAESTRO' => true,
+         'SERIE' => ProveedoresCategorias::SERIE_SIN_RUBRO], $caso));
+
+    chequear($nombre . ': cae en exactamente una parte del corte',
+        1, count(array_intersect($corte, $d)));
+}
+
+// Y el registro lo declara igual, o el validador mediria contra otro corte.
+$meta = CashflowRegistry::meta('PROV_LOCALES');
+
+chequear('el registro declara las tres partes del corte',
+    $corte, $meta['particiones']['PAGOS_TODO']['por cómo se paga']);
+chequear('y la serie nueva es parte de PAGOS_TODO', true,
+    in_array('PAGOS_EXCLUIDOS_FACTURA', $meta['componentes']['PAGOS_TODO'], true));
 
 $meta = CashflowRegistry::meta('PROV_LOCALES');
 

@@ -145,6 +145,7 @@ try {
                que no se puede es escribir el override. Un desplegable que se
                dibuja y despues falla al guardar es peor que uno que no esta. */
             $payload['forma_por_factura'] = $prov->tieneColumnaPago('FORMA_PAGO_CRONOGRAMA');
+            $payload['excluir_factura'] = $prov->tieneColumnaPago('EXCLUIDA');
 
             echo json_encode(['success' => true, 'data' => $payload], JSON_UNESCAPED_UNICODE);
             break;
@@ -205,6 +206,46 @@ try {
                 'message' => ($r['forma'] === null)
                     ? 'La forma vuelve a ser la del maestro.'
                     : 'Esta factura se trata como ' . $r['forma'] . '. El maestro no cambia.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           EXCLUIR UNA FACTURA DEL CASHFLOW
+
+           Por COMPROBANTE, a diferencia del rubro "Excluidos" del maestro, que
+           es por proveedor. El importe sale de la fila del tablero pero no
+           desaparece: va a PAGOS_EXCLUIDOS_FACTURA y el proveedor avisa cuanto
+           es y con que motivos.
+
+           EL MOTIVO ES OBLIGATORIO y lo valida Proveedores::saveExclusion(),
+           no la pantalla: este endpoint es alcanzable sin pasar por la grilla.
+           ================================================================ */
+        case 'saveExclusion':
+            $data = bodyJson();
+
+            foreach (['cod_provee', 't_comp', 'n_comp'] as $campo) {
+                if (empty($data[$campo])) {
+                    throw new Exception('Falta el comprobante que hay que excluir.');
+                }
+            }
+
+            if (!array_key_exists('excluida', $data)) {
+                throw new Exception('Falta decir si la factura se excluye o se incluye.');
+            }
+
+            $r = $prov->saveExclusion(
+                $data['cod_provee'], $data['t_comp'], $data['n_comp'],
+                !empty($data['excluida']),
+                isset($data['motivo']) ? $data['motivo'] : null,
+                usuarioActual()
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['excluida']
+                    ? 'Factura excluida: su importe sale del cashflow y queda informado aparte.'
+                    : 'Factura incluida de nuevo en el cashflow.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
@@ -446,6 +487,13 @@ function indicadores($items) {
     $nFuera = 0;
     $porFormaFuera = [];
 
+    /* Lo excluido a mano se cuenta aparte de lo excluido por rubro: son dos
+       decisiones distintas -una es "este proveedor no es deuda comercial" y la
+       otra "esta factura puntual no va"- y sólo la segunda saca el importe de la
+       serie que usa la fila del tablero. */
+    $excluidoManual = 0.0;
+    $nExcluidoManual = 0;
+
     foreach ($items as $i) {
         $importe = floatval($i['IMPORTE_PENDIENTE']);
         $total += $importe;
@@ -453,6 +501,11 @@ function indicadores($items) {
 
         if (!empty($i['EXCLUIDO'])) {
             $excluido += $importe;
+        }
+
+        if (!empty($i['EXCLUIDA_MANUAL'])) {
+            $excluidoManual += $importe;
+            $nExcluidoManual++;
         }
 
         if (empty($i['CRONOGRAMA'])) {
@@ -487,6 +540,8 @@ function indicadores($items) {
         'con_fecha' => round($conFecha, 2),
         'n_con_fecha' => $nConFecha,
         'excluido' => round($excluido, 2),
+        'excluido_manual' => round($excluidoManual, 2),
+        'n_excluido_manual' => $nExcluidoManual,
         'cronograma' => round($total - $fuera, 2),
         'fuera_cronograma' => round($fuera, 2),
         'n_fuera_cronograma' => $nFuera,

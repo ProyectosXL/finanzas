@@ -368,6 +368,10 @@
             if (f.ORIGEN_FECHA === 'CARGADA') { clases.push('prov-con-fecha'); }
             if (f.EXCLUIDO) { clases.push('prov-excluido'); }
 
+            // La excluida a mano se atenúa más: no está en el cashflow, y eso
+            // tiene que verse sin leer la columna del tilde.
+            if (f.EXCLUIDA_MANUAL) { clases.push('prov-excluida-mano'); }
+
             html += '<tr class="' + clases.join(' ') + '">'
                 + '<td title="' + escapar(tituloProveedor(f)) + '"><strong>'
                 +     escapar(f.COD_PROVEE) + '</strong>' + marcaMaestro(f) + '</td>'
@@ -381,7 +385,8 @@
                 + '<td class="currency fw-bold">' + plata(f.IMPORTE_PENDIENTE) + '</td>'
                 + celdaFechaPago(f)
                 + '<td class="center">' + celdaForma(f) + '</td>'
-                + '<td class="center">' + celdaCronograma(f) + '</td>';
+                + '<td class="center">' + celdaCronograma(f) + '</td>'
+                + '<td class="center">' + celdaExcluir(f) + '</td>';
 
             cols.forEach(function(c) {
                 var v = Number(vistas.valor(f, c)) || 0;
@@ -415,7 +420,7 @@
      * columna: el síntoma es una tabla desalineada que nadie relaciona con el
      * cambio que la causó.
      */
-    var COLS_DESC = 11;
+    var COLS_DESC = 12;
 
     function pintarTotales(filas, cols) {
         var total = 0;
@@ -629,6 +634,38 @@
             + ' title="' + escapar(titulo) + '">' + opciones + '</select>';
     }
 
+    /**
+     * El tilde que saca esta factura del cashflow.
+     *
+     * NO ES LO MISMO que el rubro "Excluidos" del maestro, que es por proveedor.
+     * Éste es por comprobante: una factura duplicada, una en disputa o una que
+     * se pagó por fuera de Tango no son un problema del proveedor.
+     *
+     * El importe sale de la fila del tablero pero NO desaparece: va a su propia
+     * serie y el proveedor avisa cuánto es y con qué motivos.
+     */
+    function celdaExcluir(f) {
+        if (!datos || !datos.excluir_factura) {
+            return '<span class="text-muted small" title="'
+                + escapar('Para excluir facturas hace falta correr '
+                    + 'sql/cashflow_prov_locales_excluir_factura.sql.') + '">—</span>';
+        }
+
+        var excl = !!f.EXCLUIDA_MANUAL;
+        var titulo = excl
+            ? 'Excluida del cashflow: ' + (f.MOTIVO_EXCLUSION || 'sin motivo registrado')
+                + '. Destildá para volver a incluirla.'
+            : 'Excluir esta factura del cashflow. Va a pedir un motivo.';
+
+        return '<input type="checkbox" class="form-check-input prov-excluir"'
+            + (excl ? ' checked' : '')
+            + ' data-cod="' + escapar(f.COD_PROVEE) + '"'
+            + ' data-t="' + escapar(f.T_COMP) + '"'
+            + ' data-n="' + escapar(f.N_COMP) + '"'
+            + ' data-motivo="' + escapar(f.MOTIVO_EXCLUSION || '') + '"'
+            + ' title="' + escapar(titulo) + '">';
+    }
+
     /* ================================================================
        EDICIÓN DE LA FECHA, DE A UNA
        ================================================================ */
@@ -671,6 +708,37 @@
                     n_comp: sel.getAttribute('data-n'),
                     forma: sel.value
                 });
+            });
+        });
+
+        /* EL MOTIVO SE PIDE ANTES DE GUARDAR, y si se cancela el tilde vuelve
+           atrás: dejarlo tildado con la exclusión sin guardar mostraría una
+           factura como excluida cuando el tablero la sigue contando. La
+           validación que vale es la del backend. */
+        document.querySelectorAll('#bodyProv .prov-excluir').forEach(function(chk) {
+            chk.addEventListener('change', function() {
+                var cuerpo = {
+                    cod_provee: chk.getAttribute('data-cod'),
+                    t_comp: chk.getAttribute('data-t'),
+                    n_comp: chk.getAttribute('data-n'),
+                    excluida: chk.checked
+                };
+
+                if (chk.checked) {
+                    var motivo = window.prompt('¿Por qué esta factura no entra al cashflow?\n\n'
+                        + 'Su importe sale de la fila del tablero y queda informado aparte. '
+                        + 'El motivo es lo único que después lo explica.',
+                        chk.getAttribute('data-motivo') || '');
+
+                    if (motivo === null || motivo.trim() === '') {
+                        chk.checked = false;
+                        return;
+                    }
+
+                    cuerpo.motivo = motivo.trim();
+                }
+
+                pedirPago('saveExclusion', cuerpo);
             });
         });
     }

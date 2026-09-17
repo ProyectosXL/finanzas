@@ -266,6 +266,7 @@ class Proveedores {
             );
 
             $forma = self::formaQueSeMuestra($cat, $pago);
+            $excluidaManual = ($pago !== null && !empty($pago['EXCLUIDA']));
 
             $items[] = [
                 'COD_PROVEE' => $cod,
@@ -315,7 +316,17 @@ class Proveedores {
                 'RUBRO_ECONOMICO' => $cat['rubro_economico'],
                 'RUBRO' => $cat['rubro'],
                 'CENTRO_COSTOS' => $cat['centro_costos'],
-                'EXCLUIDO' => $cat['excluido'],
+                /* EXCLUIDO junta los dos motivos: el rubro del maestro -por
+                   proveedor- y el tilde de esta factura. Los dos sacan el
+                   importe de PAGOS_CRONO_OPERATIVOS, asi que quien pregunta
+                   "esto va al cuadro operativo" tiene una sola respuesta.
+
+                   EXCLUIDA_MANUAL viaja aparte porque NO hacen lo mismo en el
+                   otro corte -sólo el tilde sale de PAGOS- y porque la pantalla
+                   y los avisos tienen que poder decir cuanto es de cada uno. */
+                'EXCLUIDO' => ($cat['excluido'] || $excluidaManual),
+                'EXCLUIDA_MANUAL' => $excluidaManual,
+                'MOTIVO_EXCLUSION' => ($pago === null) ? null : $pago['MOTIVO_EXCLUSION'],
                 'SERIE' => $cat['serie'],
 
                 /* EL OVERRIDE DE ESTA FACTURA, si alguien lo puso. Es una REGLA
@@ -671,7 +682,9 @@ class Proveedores {
 
         $sql = "SELECT COD_PROVEE, T_COMP, N_COMP, FECHA_PAGO, FORMA_PAGO, FORMA_PAGO_ORIG,
                        OBSERVACION, ESTADO, FECHA_CANCELADO, ORIGEN, USUARIO, "
-                       . $this->overrideSql('FORMA_PAGO_CRONOGRAMA') . " AS FORMA_PAGO_CRONOGRAMA
+                       . $this->overrideSql('FORMA_PAGO_CRONOGRAMA') . " AS FORMA_PAGO_CRONOGRAMA, "
+                       . ($this->tieneColumnaPago('EXCLUIDA') ? 'EXCLUIDA' : '0') . " AS EXCLUIDA, "
+                       . $this->overrideSql('MOTIVO_EXCLUSION') . " AS MOTIVO_EXCLUSION
                 FROM dbo." . self::TABLA_PAGO;
 
         $stmt = sqlsrv_query($cid, $sql);
@@ -705,6 +718,12 @@ class Proveedores {
                    decide si el importe entra al cashflow. Ver la nota de
                    CRONOGRAMA en getPendientes(). */
                 'FORMA_PAGO_CRONOGRAMA' => $row['FORMA_PAGO_CRONOGRAMA'],
+
+                /* El tercer override: esta factura NO va al cashflow. Es por
+                   COMPROBANTE, a diferencia del rubro "Excluidos" del maestro,
+                   que es por proveedor. Ver seriesDeItem(). */
+                'EXCLUIDA' => (intval($row['EXCLUIDA']) === 1),
+                'MOTIVO_EXCLUSION' => $row['MOTIVO_EXCLUSION'],
                 'OBSERVACION' => $row['OBSERVACION'],
                 'ESTADO' => $row['ESTADO'],
                 'FECHA_CANCELADO' => Horizonte::normalizarFecha($row['FECHA_CANCELADO']),
@@ -1411,6 +1430,75 @@ class Proveedores {
         sqlsrv_free_stmt($stmt);
 
         return ($filas > 0);
+    }
+
+    /**
+     * Excluye una factura del cashflow, o la vuelve a incluir.
+     *
+     * ES POR COMPROBANTE, a diferencia del rubro "Excluidos" del maestro, que es
+     * por proveedor. Una factura duplicada, una en disputa o una que se pago por
+     * fuera de Tango no son un problema del proveedor: son un problema de esa
+     * factura.
+     *
+     * EL IMPORTE SALE DE LA FILA DEL TABLERO pero NO desaparece: va a la serie
+     * PAGOS_EXCLUIDOS_FACTURA, que es la tercera parte del corte "por como se
+     * paga". El proveedor avisa cuanto es y con que motivos. Ver
+     * ProveedoresProvider::SERIE_EXCLUIDOS_FACTURA.
+     *
+     * EL MOTIVO ES OBLIGATORIO, y se valida aca y no en la pantalla: una factura
+     * sacada del cashflow sin motivo no la explica nadie tres meses despues, y
+     * el endpoint es alcanzable sin pasar por la grilla.
+     *
+     * DESTILDAR BORRA EL MOTIVO, porque ya no describe nada: dejarlo haria que
+     * una factura incluida arrastre el texto de cuando estuvo afuera, y el
+     * proximo que lo lea va a creer que sigue excluida.
+     *
+     * @param string $codProvee
+     * @param string $tComp
+     * @param string $nComp
+     * @param bool $excluida
+     * @param string|null $motivo Obligatorio si $excluida es true
+     * @param string|null $usuario
+     * @return array ['excluida' => bool, 'motivo' => string|null]
+     */
+    public function saveExclusion($codProvee, $tComp, $nComp, $excluida, $motivo = null,
+                                  $usuario = null) {
+        if (!$this->tablaCreada()) {
+            throw new Exception('Todavía no existe la tabla de overrides por comprobante. '
+                . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
+        }
+
+        if (!$this->tieneColumnaPago('EXCLUIDA')) {
+            throw new Exception('Todavía no se pueden excluir facturas. '
+                . 'Corré sql/cashflow_prov_locales_excluir_factura.sql contra la base central.');
+        }
+
+        $cod = Planilla::codigo($codProvee);
+        $t = Planilla::codigo($tComp);
+        $n = Planilla::codigo($nComp);
+
+        if ($cod === '' || $t === '' || $n === '') {
+            throw new Exception('Falta el proveedor o el comprobante.');
+        }
+
+        $excluir = !empty($excluida);
+        $texto = ($motivo === null) ? '' : trim((string) $motivo);
+
+        if ($excluir && $texto === '') {
+            throw new Exception('Poné el motivo por el que esta factura no entra al cashflow. '
+                . 'Sin motivo, dentro de tres meses nadie va a poder explicar por qué falta '
+                . 'ese importe.');
+        }
+
+        $this->guardarPago($this->conectar(), $cod, $t, $n, [
+            'EXCLUIDA' => $excluir ? 1 : 0,
+            'MOTIVO_EXCLUSION' => $excluir ? mb_substr($texto, 0, 200) : null
+        ], 'MANUAL', $usuario);
+
+        return [
+            'excluida' => $excluir,
+            'motivo' => $excluir ? mb_substr($texto, 0, 200) : null
+        ];
     }
 
     /**

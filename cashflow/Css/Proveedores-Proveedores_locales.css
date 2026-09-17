@@ -88,6 +88,18 @@
     cursor: help;
 }
 
+/* Una factura excluida a mano: su importe NO está en el cashflow. Se atenúa y se
+   tacha el pendiente, que es la columna cuyo número dejó de contar. Tiene que
+   verse sin leer la columna del tilde, porque es la fila la que cambió de
+   significado y no una celda. */
+.tab-proveedores_locales tr.prov-excluida-mano {
+    opacity: 0.62;
+}
+
+.tab-proveedores_locales tr.prov-excluida-mano .currency.fw-bold {
+    text-decoration: line-through;
+}
+
 /* La forma con la que se trata ESTA factura, cuando alguien la fijó a mano. Se
    marca porque pisa a la del maestro: una celda que decide distinto del resto de
    las facturas del mismo proveedor tiene que poder verse sin abrir el tooltip. */
