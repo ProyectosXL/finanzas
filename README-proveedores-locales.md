@@ -34,8 +34,11 @@ Contra `central`, en cualquier momento:
 
 ```sql
 -- 1. sql/cashflow_prov_locales.sql
--- 2. sql/cashflow_prov_locales_collation.sql   (antes de la primera importación)
+-- 2. sql/cashflow_prov_locales_collation.sql      (antes de la primera importación)
+-- 3. sql/cashflow_prov_locales_maestro_manual.sql (para cargar el maestro a mano)
 ```
+
+El tercero agrega `ORIGEN` al maestro y marca como `IMPORT` lo que ya está, que es lo que es. **Sin él el maestro se lee igual**: lo que no se puede es cargarlo a mano, y la pestaña lo dice con el script al lado en vez de dibujar un formulario que después falla.
 
 Crea `RO_T_CASHFLOW_PROV_LOCALES_CATEG` (el maestro) y `RO_T_CASHFLOW_PROV_LOCALES_PAGO` (las fechas de pago), y renombra la fila del tablero. Es reejecutable.
 
@@ -172,6 +175,36 @@ Se evaluó empezar a cargarla desde Tango y se descartó: **obligaría a adminis
 1. **Para que el tablero pueda abrir la deuda por rubro.** Hoy la fila es una sola; cuando el maestro esté cargado, partirla en alquileres, impuestos, logística y mercadería es **configuración desde Parámetros**, no un refactor: el proveedor ya entrega cada comprobante con su rubro resuelto y expone una serie por rubro además del total.
 2. **Para la forma de pago habitual**, que sirve de valor por defecto al importar pagos.
 3. **Para el plazo**, que es el último escalón de la jerarquía de fecha.
+
+### Se puede cargar y editar a mano, y la planilla sigue mandando
+
+> Esto es **nuevo**. Antes el maestro sólo se podía escribir importando el Excel.
+
+El caso que lo pide es concreto y se ve en la propia pantalla: hay **20 proveedores con deuda por $17.011.478,01 que no están en el maestro**. Aparecen en Tango, nadie los agrega a la planilla, y su deuda queda sin clasificar. El control de faltantes ya los listaba; lo que no había era forma de resolverlos sin volver al Excel.
+
+**Alta y edición son la misma operación, y no es un `UPDATE`.** `guardarManual()` da de baja la versión vigente e inserta una nueva, en una transacción — exactamente lo que hace un `CAMBIO` de la importación. Por eso hay **un solo formulario** y un solo endpoint: dos insinuarían que existe un camino que modifica en el lugar, y en este módulo no lo hay.
+
+**Se normaliza con la misma función que la importación.** `normalizarFila()` era privada y ahora es pública: aplica el largo del código en caracteres, la normalización de la forma de pago contra `FORMAS_PAGO` y el plazo en días. Si la pantalla normalizara por su cuenta, el mismo proveedor quedaría clasificado distinto según por dónde entró, y no habría ninguna pantalla donde notarlo.
+
+**El código no se puede cambiar al editar.** Es la clave con la que la fila cruza contra Tango y contra las fechas de pago ya cargadas; cambiarlo sería dar de baja un proveedor y dar de alta otro, y eso son dos gestos.
+
+**Una baja no borra**: marca `VIGENTE = 0` igual que una baja de la importación. La deuda de ese proveedor pasa a contarse como *sin rubro* y el historial sigue explicando cómo se clasificaba antes.
+
+#### La planilla manda, pero pisar trabajo manual se avisa
+
+Hay dos fuentes escribiendo la misma tabla, y este README ya había descartado eso una vez: *"dos maestros en paralelo terminan discrepando"*. La decisión es la misma de entonces — **la planilla es la fuente** — así que una edición manual es una versión más y la próxima importación la pisa.
+
+Lo que se agrega es que **no la pise en silencio**. La columna `ORIGEN` (`IMPORT` / `MANUAL`) hace posibles tres cosas:
+
+| | |
+| --- | --- |
+| En la grilla del maestro | una columna que dice si esa versión salió de la planilla o de la pantalla |
+| En el historial del proveedor | lo mismo, versión por versión |
+| **En la previsualización del diff** | un aviso — *"N de los cambios pisan proveedores editados a mano"* — y la marca en cada fila |
+
+> Entre trescientos cambios, los que borran lo que alguien cargó a mano son los únicos que esa persona querría revisar. El aviso dice cuántos son; la marca dice cuáles.
+
+Se aplican igual al confirmar: el que decide es quien importa, viéndolo.
 
 ### El rubro "Excluidos"
 
@@ -484,7 +517,7 @@ Tres sub-solapas, que son tres momentos del mismo circuito:
 | --- | --- |
 | **Cuentas a Pagar** | El listado, con la fecha editable celda por celda |
 | **Importar** | Las dos planillas, con previsualización del diff |
-| **Maestro** | Qué es cada proveedor, y qué proveedores faltan |
+| **Maestro** | Qué es cada proveedor, qué proveedores faltan, y el alta/edición de a uno |
 
 > **Se llama *Cuentas a Pagar* y no *Pagos Reales***, que era el nombre propuesto. Lo que se carga es una **previsión**; lo real lo dice Tango cuando el comprobante se cancela, y eso lo resuelve la conciliación. Un rótulo que dijera *"reales"* prometería un hecho donde hay un plan.
 
@@ -548,6 +581,7 @@ Con base, además: que **ningún pendiente sea negativo** —el error que tenía
 ```
 sql/cashflow_prov_locales.sql                  Las dos tablas + la fila del tablero
 sql/cashflow_prov_locales_collation.sql        Alinea la collation con la de Tango
+sql/cashflow_prov_locales_maestro_manual.sql   ORIGEN: habilita la carga a mano
 sql/_referencia_tango_pendientes.sql           La consulta de Tango, como referencia
 cashflow/Class/Planilla.php                    El mecanismo de importacion CSV, compartido
 cashflow/Class/Proveedores.php                 Cuentas a pagar, fechas de pago y conciliacion

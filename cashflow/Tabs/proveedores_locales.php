@@ -299,20 +299,110 @@
                 <div>
                     <h5 class="mb-0">Maestro de proveedores</h5>
                     <small class="text-muted">
-                        Copia de la planilla que mantiene administración. La fuente sigue
-                        siendo el Excel: esto es una copia reimportable.
+                        Copia de la planilla que mantiene administración. <strong>La fuente
+                        sigue siendo el Excel</strong>: lo que se cargue acá a mano se pisa la
+                        próxima vez que se importe, y el diff lo avisa antes.
                     </small>
                 </div>
-                <div class="search-box-container">
-                    <div class="input-group input-group-sm">
-                        <span class="input-group-text bg-light border-end-0">
-                            <i class="fas fa-search text-muted"></i>
-                        </span>
-                        <input type="text" id="busquedaMaestroProv"
-                               class="form-control border-start-0 ps-0"
-                               placeholder="Buscar código, nombre o rubro..." style="min-width: 240px;">
+                <div class="d-flex align-items-center gap-2">
+                    <div class="search-box-container">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text bg-light border-end-0">
+                                <i class="fas fa-search text-muted"></i>
+                            </span>
+                            <input type="text" id="busquedaMaestroProv"
+                                   class="form-control border-start-0 ps-0"
+                                   placeholder="Buscar código, nombre o rubro..." style="min-width: 240px;">
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-primary" id="btnNuevoProv">
+                        <i class="fas fa-plus me-1"></i> Agregar
+                    </button>
+                </div>
+            </div>
+
+            <!-- ========================================================
+                 EL FORMULARIO DE CARGA MANUAL
+
+                 Arranca oculto y lo abre "Agregar" o el lápiz de una fila. Es
+                 el MISMO formulario para las dos cosas: alta y edición son la
+                 misma operación —una baja más un alta— y dos formularios
+                 distintos insinuarían que la edición modifica en el lugar.
+
+                 El código no se puede cambiar al editar: es la clave con la
+                 que cruza contra Tango. Cambiarlo sería dar de baja un
+                 proveedor y dar de alta otro, y eso son dos gestos.
+                 ======================================================== -->
+            <div id="formProvWrap" class="card-body border-bottom bg-light bg-opacity-50"
+                 style="display: none;">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm" for="fpCodProv">Código</label>
+                        <input type="text" id="fpCodProv" class="form-control form-control-sm"
+                               maxlength="6" placeholder="OGADUN">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label form-label-sm" for="fpNombreProv">Nombre</label>
+                        <input type="text" id="fpNombreProv" class="form-control form-control-sm"
+                               maxlength="120">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label form-label-sm" for="fpRubroEcoProv">
+                            Rubro económico
+                            <i class="fas fa-circle-info text-muted"
+                               title="Cada rubro distinto crea una serie propia en el tablero. Elegí uno de la lista antes de escribir uno nuevo."></i>
+                        </label>
+                        <input type="text" id="fpRubroEcoProv" class="form-control form-control-sm"
+                               list="listaRubroEcoProv" autocomplete="off">
+                        <datalist id="listaRubroEcoProv"></datalist>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm" for="fpRubroProv">Rubro</label>
+                        <input type="text" id="fpRubroProv" class="form-control form-control-sm"
+                               list="listaRubroProv" autocomplete="off">
+                        <datalist id="listaRubroProv"></datalist>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm" for="fpCentroProv">Centro de costos</label>
+                        <input type="text" id="fpCentroProv" class="form-control form-control-sm"
+                               list="listaCentroProv" autocomplete="off">
+                        <datalist id="listaCentroProv"></datalist>
+                    </div>
+
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm" for="fpFormaProv">
+                            Forma de pago
+                            <i class="fas fa-circle-info text-muted"
+                               title="Decide si la deuda de este proveedor entra al cronograma del cashflow: hoy entran ECHEQ y TRANSFERENCIA."></i>
+                        </label>
+                        <select id="fpFormaProv" class="form-select form-select-sm"></select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm" for="fpPlazoProv">
+                            Plazo
+                            <i class="fas fa-circle-info text-muted"
+                               title="CONTADO, '30 DIAS', DEBITO… Es el último escalón de la fecha de pago: sólo se usa cuando la factura no tiene vencimiento."></i>
+                        </label>
+                        <input type="text" id="fpPlazoProv" class="form-control form-control-sm"
+                               placeholder="30 DIAS" maxlength="30">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label form-label-sm" for="fpCriterioProv">
+                            Criterio de distribución
+                        </label>
+                        <input type="text" id="fpCriterioProv" class="form-control form-control-sm"
+                               maxlength="60">
+                    </div>
+                    <div class="col-md-5 text-end">
+                        <button class="btn btn-sm btn-primary" id="btnGuardarProv">
+                            <i class="fas fa-save me-1"></i> Guardar
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" id="btnCancelarProv">
+                            Cancelar
+                        </button>
                     </div>
                 </div>
+                <div class="param-hint mt-2" id="hintProv"></div>
             </div>
 
             <div class="card-body p-0">
@@ -332,7 +422,13 @@
                                 <th>CENTRO COSTOS</th>
                                 <th>FORMA DE PAGO</th>
                                 <th>PLAZO</th>
+                                <!-- De dónde salió la versión vigente. Importa
+                                     porque la planilla pisa lo manual, así que
+                                     una fila MANUAL es una que se va a perder
+                                     en la próxima importación. -->
+                                <th class="text-center">ORIGEN</th>
                                 <th class="text-center">Historial</th>
+                                <th class="text-center" style="width: 90px;"></th>
                             </tr>
                         </thead>
                         <tbody id="bodyMaestroProv"></tbody>

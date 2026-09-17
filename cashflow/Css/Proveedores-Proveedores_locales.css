@@ -88,6 +88,21 @@
     cursor: help;
 }
 
+/* Una fila del maestro que se cargó o se editó desde la pantalla. No es un
+   problema —es una forma legítima de mantener el maestro— pero sí es lo que la
+   próxima importación va a pisar, así que tiene que poder verse de un vistazo
+   sin gritar. */
+.tab-proveedores_locales .prov-origen-manual {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #5a6472;
+    background: #eef1f5;
+    border-radius: 3px;
+    padding: 1px 5px;
+    cursor: help;
+}
+
 /* El pago se registró por una vía distinta de la habitual del proveedor. NO es
    un error —el filtro mira la del maestro, no ésta— así que se marca discreto:
    es un dato para notar, no algo que haya que arreglar ya. */

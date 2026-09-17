@@ -69,6 +69,10 @@
         var busqM = document.getElementById('busquedaMaestroProv');
         if (busqM) { busqM.addEventListener('input', pintarMaestro); }
 
+        conectar('btnNuevoProv', function() { abrirForm(null); });
+        conectar('btnGuardarProv', guardarProveedor);
+        conectar('btnCancelarProv', cerrarForm);
+
         cargar();
     }
 
@@ -730,11 +734,22 @@
                 }).join('') + '</ul>';
             }
 
+            /* El que pisa una versión cargada a mano se marca en la fila, no
+               sólo en el aviso de arriba: entre trescientos cambios, el aviso
+               dice cuántos son y esto dice cuáles. */
+            var pisa = f.pisa_manual
+                ? ' <span class="badge bg-warning text-dark" title="'
+                  + escapar('Este proveedor se había editado a mano desde la pantalla. La '
+                      + 'planilla manda, así que esta importación lo sobrescribe. La versión '
+                      + 'manual queda en el historial.')
+                  + '">pisa carga manual</span>'
+                : '';
+
             html += '<tr class="prov-pre-' + f.estado.toLowerCase() + '">'
                 + '<td>' + f.linea + '</td>'
                 + '<td><code>' + escapar(clave) + '</code></td>'
                 + '<td><span class="badge bg-' + colorEstado(f.estado) + '">'
-                +   escapar(f.estado) + '</span></td>'
+                +   escapar(f.estado) + '</span>' + pisa + '</td>'
                 + '<td class="small">' + detalle + '</td></tr>';
         });
 
@@ -921,6 +936,8 @@
                 .join(' ').toLowerCase().indexOf(q) !== -1;
         });
 
+        var editable = !!maestro.edicion_manual;
+
         var html = filas.map(function(f) {
             return '<tr>'
                 + '<td><strong>' + escapar(f.COD_PROVEE) + '</strong></td>'
@@ -933,20 +950,229 @@
                 + '<td>' + escapar(f.PLAZO_PAGO || '—')
                 +   (f.PLAZO_DIAS !== null ? ' <span class="text-muted small">('
                       + f.PLAZO_DIAS + ' d)</span>' : '') + '</td>'
+                + '<td class="text-center">' + celdaOrigen(f) + '</td>'
                 + '<td class="text-center"><span class="text-muted small">'
                 +   escapar((f.FECHA_IMPORTACION || '').substring(0, 10)) + '</span></td>'
+                + '<td class="text-center">'
+                +   (editable
+                        ? '<button class="btn btn-sm btn-outline-secondary py-0 px-2 prov-editar" '
+                          + 'data-cod="' + escapar(f.COD_PROVEE) + '" title="Editar. No modifica '
+                          + 'la fila: da de baja la vigente y carga una nueva, y la anterior '
+                          + 'queda en el historial.">'
+                          + '<i class="fas fa-pen"></i></button> '
+                          + '<button class="btn btn-sm btn-outline-danger py-0 px-2 prov-baja" '
+                          + 'data-cod="' + escapar(f.COD_PROVEE) + '" title="Dar de baja. Su '
+                          + 'deuda queda sin clasificar; la versión sigue en el historial.">'
+                          + '<i class="fas fa-xmark"></i></button>'
+                        : '')
+                + '</td>'
                 + '</tr>';
         }).join('');
 
         if (!filas.length) {
-            html = '<tr><td colspan="8" class="text-center text-muted py-4">'
+            html = '<tr><td colspan="10" class="text-center text-muted py-4">'
                  + (maestro.filas.length
                     ? 'Ningún proveedor coincide con el filtro.'
-                    : 'El maestro está vacío: importá la hoja "Maestro proveedores".')
+                    : 'El maestro está vacío: importá la hoja "Maestro proveedores" o agregá '
+                      + 'los proveedores de a uno.')
                  + '</td></tr>';
         }
 
         document.getElementById('bodyMaestroProv').innerHTML = html;
+
+        document.querySelectorAll('.prov-editar').forEach(function(b) {
+            b.addEventListener('click', function() { abrirForm(b.getAttribute('data-cod')); });
+        });
+
+        document.querySelectorAll('.prov-baja').forEach(function(b) {
+            b.addEventListener('click', function() { darDeBaja(b.getAttribute('data-cod')); });
+        });
+
+        mostrar('btnNuevoProv', editable);
+        pintarSugerencias();
+    }
+
+    /**
+     * De dónde salió la versión vigente.
+     *
+     * Una fila MANUAL no es un problema, pero sí es información: la planilla
+     * manda, así que ésa es una de las que la próxima importación va a pisar.
+     * Verlo acá es lo que permite decidir si conviene cargarla también en el
+     * Excel.
+     */
+    function celdaOrigen(f) {
+        if (f.ORIGEN !== 'MANUAL') {
+            return '<span class="text-muted small" title="Vino de la planilla.">planilla</span>';
+        }
+
+        return '<span class="prov-origen-manual" title="'
+            + escapar('Se cargó o se editó desde esta pantalla. La planilla sigue siendo la '
+                + 'fuente: la próxima importación lo va a pisar, y el diff lo avisa antes.')
+            + '">a mano</span>';
+    }
+
+    /* ================================================================
+       CARGA Y EDICION MANUAL DEL MAESTRO
+
+       UN SOLO FORMULARIO para el alta y para la edición, porque son la misma
+       operación: el backend da de baja la versión vigente e inserta una
+       nueva. Dos formularios distintos insinuarían que editar modifica en el
+       lugar, y en este módulo nada lo hace.
+
+       El CÓDIGO no se puede cambiar al editar: es la clave con la que la fila
+       cruza contra Tango y contra las fechas de pago ya cargadas. Cambiarlo
+       sería dar de baja un proveedor y dar de alta otro, y eso son dos gestos
+       distintos que tienen que verse como tales.
+       ================================================================ */
+
+    /** Los valores que ya existen en el maestro, para los datalist del form */
+    function pintarSugerencias() {
+        var r = (maestro && maestro.rubros) || {};
+        var mapa = {
+            listaRubroEcoProv: r.rubro_economico,
+            listaRubroProv: r.rubro,
+            listaCentroProv: r.centro_costos
+        };
+
+        Object.keys(mapa).forEach(function(id) {
+            var el = document.getElementById(id);
+
+            if (!el) { return; }
+
+            el.innerHTML = Object.keys(mapa[id] || {}).map(function(v) {
+                return '<option value="' + escapar(v) + '">';
+            }).join('');
+        });
+
+        var sel = document.getElementById('fpFormaProv');
+
+        if (sel && !sel.options.length) {
+            sel.innerHTML = '<option value="">(sin forma)</option>'
+                + ((maestro && maestro.formas_pago ? Object.keys(maestro.formas_pago) : [])
+                    .map(function(f) {
+                        return '<option value="' + escapar(f) + '">' + escapar(f) + '</option>';
+                    }).join(''));
+        }
+    }
+
+    /**
+     * Abre el formulario. Con código, en modo edición y con los valores
+     * cargados; sin código, vacío para un alta.
+     */
+    function abrirForm(cod) {
+        var f = null;
+
+        if (cod) {
+            (maestro.filas || []).forEach(function(x) {
+                if (x.COD_PROVEE === cod) { f = x; }
+            });
+        }
+
+        setValor('fpCodProv', f ? f.COD_PROVEE : '');
+        setValor('fpNombreProv', f ? (f.NOMBRE || '') : '');
+        setValor('fpRubroEcoProv', f ? (f.RUBRO_ECONOMICO || '') : '');
+        setValor('fpRubroProv', f ? (f.RUBRO || '') : '');
+        setValor('fpCentroProv', f ? (f.CENTRO_COSTOS || '') : '');
+        setValor('fpFormaProv', f ? (f.FORMA_PAGO || '') : '');
+        setValor('fpPlazoProv', f ? (f.PLAZO_PAGO || '') : '');
+        setValor('fpCriterioProv', f ? (f.CRITERIO_DISTRIB || '') : '');
+
+        // El código es la clave: se puede tipear en un alta y no en una edición.
+        var inpCod = document.getElementById('fpCodProv');
+
+        if (inpCod) { inpCod.readOnly = !!f; }
+
+        texto('hintProv', f
+            ? 'Editando ' + f.COD_PROVEE + '. Guardar no modifica la fila: da de baja la '
+                + 'versión vigente y carga una nueva, y la anterior queda en el historial.'
+            : 'El código es el de Tango (hasta 6 caracteres) y es lo que hace que la deuda de '
+                + 'este proveedor se pueda clasificar. La forma de pago decide si entra al '
+                + 'cronograma del cashflow.');
+
+        mostrar('formProvWrap', true);
+
+        if (inpCod && !f) { inpCod.focus(); }
+    }
+
+    function cerrarForm() {
+        mostrar('formProvWrap', false);
+    }
+
+    function guardarProveedor() {
+        var cod = (valor('fpCodProv') || '').trim();
+
+        if (cod === '') {
+            Notificacion.campoInvalido('fpCodProv', 'Poné el código del proveedor.');
+            return;
+        }
+
+        var btn = document.getElementById('btnGuardarProv');
+
+        btn.disabled = true;
+
+        /* Se mandan las MISMAS claves que las columnas de importación: el
+           backend normaliza con la misma función, así que un proveedor cargado
+           a mano queda idéntico a uno traído por la planilla. */
+        pedirJson('Controller/ProveedoresController.php?action=saveProveedor', {
+                cod_provee: cod,
+                nombre: valor('fpNombreProv'),
+                rubro_economico: valor('fpRubroEcoProv'),
+                rubro: valor('fpRubroProv'),
+                centro_costos: valor('fpCentroProv'),
+                forma_pago: valor('fpFormaProv'),
+                plazo_pago: valor('fpPlazoProv'),
+                criterio_distrib: valor('fpCriterioProv')
+            })
+            .then(function(data) {
+                btn.disabled = false;
+                cerrarForm();
+
+                Notificacion.exito(data && data.estado === 'ALTA'
+                    ? 'Proveedor ' + data.cod_provee + ' agregado.'
+                    : 'Proveedor ' + data.cod_provee + ' actualizado.', {
+                    detalle: 'La versión anterior queda en el historial. La planilla sigue '
+                           + 'siendo la fuente: la próxima importación puede pisarlo.'
+                });
+
+                recargarMaestroYListado();
+            })
+            .catch(function(error) {
+                btn.disabled = false;
+                Notificacion.error('No se pudo guardar: ' + error.message);
+            });
+    }
+
+    function darDeBaja(cod) {
+        if (!window.confirm('¿Dar de baja a ' + cod + ' del maestro?\n\n'
+                + 'Su deuda queda sin clasificar hasta que se lo vuelva a cargar. '
+                + 'La versión actual sigue en el historial: no se borra nada.')) {
+            return;
+        }
+
+        pedirJson('Controller/ProveedoresController.php?action=deleteProveedor',
+                { cod_provee: cod })
+            .then(function() {
+                Notificacion.exito('Proveedor dado de baja.', {
+                    detalle: 'Su deuda pasa a contarse como "sin rubro" en el tablero.'
+                });
+
+                recargarMaestroYListado();
+            })
+            .catch(function(error) {
+                Notificacion.error('No se pudo dar de baja: ' + error.message);
+            });
+    }
+
+    /**
+     * Tocar el maestro cambia el listado de cuentas a pagar: el rubro, la forma
+     * de pago —y con ella si la deuda entra al cronograma— y el plazo salen de
+     * ahí. Dejar el listado viejo en pantalla mostraría la clasificación
+     * anterior sin decir que quedó vieja.
+     */
+    function recargarMaestroYListado() {
+        maestro = null;
+        cargarMaestro();
+        cargar();
     }
 
     function celdaFormaMaestro(f) {
@@ -998,6 +1224,19 @@
         var el = document.getElementById(id);
 
         if (el) { el.textContent = v; }
+    }
+
+    /** El valor de un campo del formulario, ya recortado */
+    function valor(id) {
+        var el = document.getElementById(id);
+
+        return el ? String(el.value).trim() : '';
+    }
+
+    function setValor(id, v) {
+        var el = document.getElementById(id);
+
+        if (el) { el.value = (v === null || v === undefined) ? '' : v; }
     }
 
     function mostrarError(mensaje) {

@@ -641,6 +641,112 @@ foreach ($c['avisos'] as $a) {
 chequear('una baja masiva avisa distinto', true, $avisoMasivo);
 
 /* ================================================================
+   EL MAESTRO SE PUEDE CARGAR A MANO
+
+   La planilla SIGUE MANDANDO: una edicion manual es una version mas y la
+   proxima importacion la pisa. Eso es lo que evita tener dos maestros en
+   paralelo, que es la decision que este modulo ya tomo cuando descarto
+   CPA01.COD_RUBRO.
+
+   Lo que estas pruebas fijan es lo otro: que pisar trabajo manual NO sea
+   invisible, y que una carga a mano se normalice igual que una importada.
+   ================================================================ */
+seccion('una carga manual se normaliza igual que una importada');
+
+/* ES LA MISMA FUNCION, y por eso se puede afirmar. Si la pantalla normalizara
+   por su cuenta, el mismo proveedor quedaria clasificado distinto segun por
+   donde entro, y no habria ninguna pantalla donde notarlo. */
+$aMano = ProveedoresCategorias::normalizarFila([
+    'linea' => 0,
+    'cod_provee' => 'ognuñe',          // minuscula y con enie
+    'nombre' => '  Proveedor Nuevo  ',
+    'rubro_economico' => 'Logistica',
+    'forma_pago' => 'echeq',           // minuscula
+    'plazo_pago' => '30 DIAS'
+]);
+
+chequear('el codigo sube entero, con la enie', 'OGNUÑE', $aMano['cod_provee']);
+chequear('la forma de pago se normaliza', 'ECHEQ', $aMano['forma_pago']);
+chequear('y conserva lo que se tipeo', 'echeq', $aMano['forma_pago_orig']);
+chequear('el plazo se lleva a dias', 30, $aMano['plazo_dias']);
+chequear('y la fila queda lista para cargar', 'ALTA', $aMano['estado']);
+
+// Las mismas validaciones: un codigo que no cruza contra Tango no se carga ni
+// a mano ni por planilla.
+$largo = ProveedoresCategorias::normalizarFila(['linea' => 0, 'cod_provee' => 'DEMASIADO']);
+
+chequear('un codigo mas largo que el de Tango tampoco entra a mano',
+    'ERROR', $largo['estado']);
+chequear('y el motivo lo explica', true,
+    strpos($largo['motivo'], 'no va a cruzar') !== false);
+
+seccion('reimportar avisa antes de pisar una carga manual');
+
+/* La planilla manda, asi que el CAMBIO se aplica igual. Lo que se agrega es
+   poder VERLO: entre trescientos cambios, los que borran trabajo manual son los
+   unicos que alguien querria revisar. */
+$manual = ['MTDODI' => [
+    'COD_PROVEE' => 'MTDODI', 'NOMBRE' => 'DONNA DI DIO',
+    'RUBRO_ECONOMICO' => 'Mercaderia', 'RUBRO' => '', 'CENTRO_COSTOS' => '',
+    'FORMA_PAGO' => 'CHEQUE', 'PLAZO_PAGO' => '30 DIAS', 'CRITERIO_DISTRIB' => '',
+    'ORIGEN' => 'MANUAL'
+]];
+
+$c = ProveedoresCategorias::compararImportacion([$fila(2, 'MTDODI')], $manual);
+
+chequear('el cambio se aplica igual: la planilla manda', 'CAMBIO', $c['filas'][0]['estado']);
+chequear('pero la fila queda marcada', true, $c['filas'][0]['pisa_manual']);
+chequear('y el resumen lo cuenta', 1, $c['resumen']['pisa_manuales']);
+
+$avisoManual = false;
+
+foreach ($c['avisos'] as $a) {
+    if (strpos($a, 'editado a mano') !== false) { $avisoManual = true; }
+}
+
+chequear('el aviso lo dice antes de confirmar', true, $avisoManual);
+
+// Una fila que viene de la planilla no se marca: marcar todo seria no marcar
+// nada.
+$importada = $manual;
+$importada['MTDODI']['ORIGEN'] = 'IMPORT';
+
+$c = ProveedoresCategorias::compararImportacion([$fila(2, 'MTDODI')], $importada);
+
+chequear('pisar una fila importada no se marca', false, $c['filas'][0]['pisa_manual']);
+chequear('ni se cuenta', 0, $c['resumen']['pisa_manuales']);
+
+// Y una fila que no cambia tampoco: no hay nada que pisar. El maestro tiene
+// exactamente lo que el archivo trae, y ademas esta marcado como MANUAL.
+$igual = ['MTDODI' => [
+    'COD_PROVEE' => 'MTDODI', 'NOMBRE' => 'N MTDODI',
+    'RUBRO_ECONOMICO' => 'Mercaderia', 'RUBRO' => '', 'CENTRO_COSTOS' => '',
+    'FORMA_PAGO' => 'TRANSFERENCIA', 'PLAZO_PAGO' => '30 DIAS', 'CRITERIO_DISTRIB' => '',
+    'ORIGEN' => 'MANUAL'
+]];
+
+$c = ProveedoresCategorias::compararImportacion([$fila(2, 'MTDODI')], $igual);
+
+chequear('sin cambios no hay nada que pisar', 'SIN_CAMBIOS', $c['filas'][0]['estado']);
+chequear('asi que no se marca', 0, $c['resumen']['pisa_manuales']);
+
+seccion('el script que habilita la carga manual');
+
+$sqlManual = __DIR__ . '/../sql/cashflow_prov_locales_maestro_manual.sql';
+
+chequear('el script existe', true, file_exists($sqlManual));
+
+$txtManual = file_get_contents($sqlManual);
+
+chequear('agrega ORIGEN solo si no esta', true,
+    strpos($txtManual, "COL_LENGTH('dbo.RO_T_CASHFLOW_PROV_LOCALES_CATEG', 'ORIGEN') IS NULL")
+        !== false);
+
+// Lo que ya hay entro por la planilla: es el dato cierto, no un relleno.
+chequear('lo que ya estaba queda como IMPORT', true,
+    strpos($txtManual, "SET ORIGEN = 'IMPORT'") !== false);
+
+/* ================================================================
    EL DIFF DE LOS PAGOS
    ================================================================ */
 seccion('el tipo de comprobante se deduce cuando no viene');

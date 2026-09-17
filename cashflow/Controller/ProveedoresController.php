@@ -272,8 +272,64 @@ try {
                     'filas' => array_values($mapa),
                     'avisos' => $prov->categorias()->getAvisos(),
                     'directores_no_excluidos' => $prov->categorias()->directoresNoExcluidos(),
-                    'formas_pago' => ProveedoresCategorias::FORMAS_PAGO
+                    'formas_pago' => ProveedoresCategorias::FORMAS_PAGO,
+
+                    /* Si se puede cargar a mano. La pantalla lo pregunta en vez
+                       de suponerlo: sin el script del origen el maestro se lee
+                       igual, y lo que no se puede es escribirlo. Un formulario
+                       que se dibuja y despues falla al guardar es peor que uno
+                       que no aparece con el motivo al lado. */
+                    'edicion_manual' => $prov->categorias()->tieneOrigen(),
+                    'rubros' => $prov->categorias()->rubrosCargados()
                 ]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           CARGA Y EDICION MANUAL DEL MAESTRO
+
+           Una sola accion para el alta y para la edicion, igual que en Dolares
+           Comitente y por el mismo motivo: EDITAR NO ES UN UPDATE. Da de baja
+           la version vigente e inserta una nueva, en una transaccion, que es
+           exactamente lo que hace un CAMBIO de la importacion. Un endpoint
+           'editProveedor' aparte insinuaria que hay un camino que modifica en
+           el lugar, y no lo hay.
+           ================================================================ */
+        case 'saveProveedor':
+            $data = bodyJson();
+
+            if (empty($data['cod_provee'])) {
+                throw new Exception('Falta el código del proveedor.');
+            }
+
+            $r = $prov->categorias()->guardarManual($data, usuarioActual());
+
+            echo json_encode([
+                'success' => true,
+                'message' => ($r['estado'] === 'ALTA')
+                    ? 'Proveedor ' . $r['cod_provee'] . ' agregado al maestro.'
+                    : 'Proveedor ' . $r['cod_provee'] . ' actualizado. La versión anterior '
+                        . 'queda en el historial.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'deleteProveedor':
+            $data = bodyJson();
+
+            if (empty($data['cod_provee'])) {
+                throw new Exception('Falta el código del proveedor que hay que dar de baja.');
+            }
+
+            $habia = $prov->categorias()->bajaManual($data['cod_provee']);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $habia
+                    ? 'Proveedor dado de baja. Su deuda queda sin clasificar y la versión '
+                        . 'anterior sigue en el historial.'
+                    : 'Ese proveedor no estaba en el maestro.',
+                'data' => ['habia' => $habia]
             ], JSON_UNESCAPED_UNICODE);
             break;
 
