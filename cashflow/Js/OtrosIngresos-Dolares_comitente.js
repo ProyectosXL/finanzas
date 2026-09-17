@@ -98,36 +98,44 @@
     }
 
     /**
-     * La grilla, con el importe y el día de cronograma editables.
+     * La grilla, con el importe editable.
      *
      * EDITAR NO ES UN UPDATE, y la pantalla no tiene por qué saberlo: manda el
      * mismo `saveDolaresComitente` que el alta, y el backend da de baja la
      * versión anterior e inserta una nueva. Un endpoint de edición aparte
      * insinuaría que hay un camino que modifica en el lugar, y no lo hay.
      *
-     * LA FECHA DEL DATO NO ES EDITABLE desde acá y va en gris: es la que decide
-     * con qué cotización se valúa el importe. Editarla cambiaría el número en
-     * pesos, que es exactamente lo que separar las dos fechas viene a evitar.
-     * Por eso se manda de vuelta tal cual vino.
+     * LA FECHA NO ES EDITABLE desde la grilla, y decide dos cosas: con qué
+     * cotización se valúa esta carga, y cuál es la última —que es la que va al
+     * tablero—. Editarla desde acá cambiaría el importe en pesos y podría mover
+     * cuál es el saldo vigente, dos efectos que nadie pidió al corregir un
+     * número. Para una fecha distinta se carga desde el formulario de arriba.
+     *
+     * LA ÚLTIMA SE MARCA. Es la única cuyo importe llega al tablero; sin la
+     * marca, tres filas con tres importes se leen como tres cosas que suman.
      */
     function pintarFilas() {
         var filas = (datos && datos.filas) || [];
+        var ultima = laVigente(filas);
         var html = '';
 
         filas.forEach(function(f, i) {
             var versiones = Number(f.VERSIONES) || 1;
             var crono = f.FECHA_CRONOGRAMA || f.FECHA;
+            var esLaQueVale = (ultima !== null && f.FECHA === ultima.FECHA);
 
             html += '<tr data-fila="' + i + '" data-crono="' + escapar(crono) + '"'
                 +     ' data-fecha="' + escapar(f.FECHA) + '"'
-                +     ' data-usd="' + escapar(String(f.IMPORTE_USD)) + '">'
-                + '<td><input type="date" class="form-control form-control-sm dol-crono" '
-                +     'value="' + escapar(crono) + '" '
-                +     'title="El día en el que este importe se muestra en el cronograma. '
-                +     'Cambiarlo no le cambia la cotización."></td>'
-                + '<td class="dol-fecha-dato" title="La fecha del dato: es la que decide con '
-                +     'qué cotización se valúa. No se edita desde acá.">'
-                +     fechaCorta(f.FECHA) + '</td>'
+                +     ' data-usd="' + escapar(String(f.IMPORTE_USD)) + '"'
+                +     (esLaQueVale ? ' class="dol-vigente"' : '') + '>'
+                + '<td>' + fechaCorta(f.FECHA)
+                +     (esLaQueVale
+                          ? ' <span class="dol-badge-vigente" title="'
+                            + escapar('Es la carga más reciente, así que es el saldo que el '
+                                + 'tablero usa. Las anteriores son fotos de cómo venía.')
+                            + '">al tablero</span>'
+                          : '')
+                + '</td>'
                 + '<td><input type="number" step="0.01" min="0" '
                 +     'class="form-control form-control-sm text-end dol-usd" '
                 +     'value="' + escapar(String(f.IMPORTE_USD)) + '"></td>'
@@ -145,8 +153,8 @@
         });
 
         if (!filas.length) {
-            html = '<tr><td colspan="8" class="text-center text-muted py-4">'
-                 + 'Todavía no hay importes cargados. La fila del tablero muestra cero.'
+            html = '<tr><td colspan="7" class="text-center text-muted py-4">'
+                 + 'Todavía no hay saldo cargado. La fila del tablero muestra cero.'
                  + '</td></tr>';
         }
 
@@ -172,60 +180,65 @@
        existe justamente para explicar los cambios.
        ================================================================ */
 
+    /** La carga más reciente: el saldo que el tablero usa */
+    function laVigente(filas) {
+        var ultima = null;
+
+        (filas || []).forEach(function(f) {
+            if (ultima === null || f.FECHA > ultima.FECHA) {
+                ultima = f;
+            }
+        });
+
+        return ultima;
+    }
+
     function conectarEdicion() {
         document.querySelectorAll('#bodyDol tr[data-fila]').forEach(function(tr) {
             var btn = tr.querySelector('.dol-guardar');
+            var inp = tr.querySelector('.dol-usd');
 
-            if (!btn) {
+            if (!btn || !inp) {
                 return;
             }
 
-            ['.dol-crono', '.dol-usd'].forEach(function(sel) {
-                var inp = tr.querySelector(sel);
-
-                if (inp) {
-                    inp.addEventListener('input', function() { revisarFila(tr); });
-                }
-            });
-
+            inp.addEventListener('input', function() { revisarFila(tr); });
             btn.addEventListener('click', function() { guardarFila(tr); });
         });
     }
 
     /** Si la fila difiere de lo que vino del backend, se puede guardar */
     function cambios(tr) {
-        var crono = tr.querySelector('.dol-crono');
         var usd = tr.querySelector('.dol-usd');
 
         return {
-            crono: crono ? String(crono.value) : '',
             usd: usd ? String(usd.value).trim() : '',
-            cronoOriginal: tr.getAttribute('data-crono'),
             usdOriginal: tr.getAttribute('data-usd'),
-            fecha: tr.getAttribute('data-fecha')
+            fecha: tr.getAttribute('data-fecha'),
+
+            /* La fecha de cronograma no se muestra ni se edita, pero SIGUE
+               SIENDO la clave con la que el backend pisa la carga anterior. Se
+               manda tal cual vino: sin esto, una fila que tuviera una distinta
+               de su fecha se guardaría como una carga nueva en vez de pisar la
+               suya. */
+            crono: tr.getAttribute('data-crono')
         };
     }
 
     function revisarFila(tr) {
         var c = cambios(tr);
         var btn = tr.querySelector('.dol-guardar');
-        var movio = (c.crono !== c.cronoOriginal);
 
         // Comparado como número: '1000' y '1000.00' son el mismo importe, y
         // ofrecer guardar ahí sería ofrecer una versión que no cambia nada.
-        var cambioImporte = (c.usd !== '' && Number(c.usd) !== Number(c.usdOriginal));
+        var cambio = (c.usd !== '' && Number(c.usd) !== Number(c.usdOriginal));
 
-        tr.classList.toggle('dol-editada', movio || cambioImporte);
-        btn.style.display = (movio || cambioImporte) ? '' : 'none';
+        tr.classList.toggle('dol-editada', cambio);
+        btn.style.display = cambio ? '' : 'none';
     }
 
     function guardarFila(tr) {
         var c = cambios(tr);
-
-        if (!c.crono) {
-            Notificacion.error('Elegí el día del cronograma.');
-            return;
-        }
 
         if (c.usd === '' || isNaN(Number(c.usd))) {
             Notificacion.error('El importe en dólares no es un número.');
@@ -251,16 +264,11 @@
         pedirJson(URL_OTROS + '?action=saveDolaresComitente', {
                 fecha: c.fecha,
                 importe_usd: Number(c.usd),
-                fecha_cronograma: c.crono,
-                cronograma_anterior: c.cronoOriginal
+                fecha_cronograma: c.crono
             })
-            .then(function(data) {
-                Notificacion.exito(data && data.movio
-                    ? 'Importe movido al ' + fechaCorta(c.crono) + '.'
-                    : 'Importe actualizado.', {
-                    detalle: data && data.piso
-                        ? 'Ese día ya tenía un importe: queda en el historial.'
-                        : 'La versión anterior queda en el historial.'
+            .then(function() {
+                Notificacion.exito('Saldo actualizado.', {
+                    detalle: 'La versión anterior queda en el historial.'
                 });
 
                 cargar();
@@ -365,50 +373,43 @@
     }
 
     /**
-     * El pie lleva los DOS totales. El de pesos es el que tiene que coincidir
-     * con la fila "Dólares Cuenta Comitente" del tablero: ése es el punto de
-     * toda la grilla.
+     * El pie NO SUMA: muestra el saldo vigente, que es la carga más reciente.
      *
-     * Suma sólo las filas valuadas. Las que no tienen cotización tampoco entran
-     * al tablero, así que incluirlas como cero haría que los dos números
-     * siguieran coincidiendo por casualidad, pero el total en dólares y el total
-     * en pesos dejarían de corresponderse entre sí sin que nada lo diga. El
-     * aviso de arriba dice cuántos dólares quedaron afuera.
+     * Sumar las cargas daría dólares que nunca estuvieron juntos en la cuenta.
+     * Cada carga es una FOTO del saldo a esa fecha, y lo que va al tablero es la
+     * última. Un pie que dijera TOTAL sobre una columna de fotos sería el error
+     * más fácil de cometer leyendo esta pantalla, así que dice SALDO y nombra la
+     * fecha de la que sale.
      */
     function pintarPie(filas) {
-        var totalUsd = 0;
-        var totalArs = 0;
-        var sinValuar = 0;
+        var u = laVigente(filas);
 
-        filas.forEach(function(f) {
-            totalUsd += Number(f.IMPORTE_USD) || 0;
+        if (!filas.length || u === null) {
+            document.getElementById('footDol').innerHTML = '';
+            return;
+        }
 
-            if (f.IMPORTE_ARS === null || f.IMPORTE_ARS === undefined) {
-                sinValuar++;
-            } else {
-                totalArs += Number(f.IMPORTE_ARS);
-            }
-        });
+        var sinValuar = (u.IMPORTE_ARS === null || u.IMPORTE_ARS === undefined);
 
         var pesos = sinValuar
-            ? '<td class="currency fw-bold" title="' + escapar(sinValuar + ' fila(s) sin '
-                + 'cotización quedaron fuera de este total, igual que del tablero.')
-                + '">$ ' + totalArs.toLocaleString('es-AR', { minimumFractionDigits: 2,
-                    maximumFractionDigits: 2 }) + ' *</td>'
-            : '<td class="currency fw-bold">$ ' + totalArs.toLocaleString('es-AR', {
+            ? '<td class="currency fw-bold text-muted" title="' + escapar('Esta carga no se '
+                + 'pudo valuar: no hay cotización oficial anterior a su fecha. La fila del '
+                + 'tablero se muestra en cero.') + '">—</td>'
+            : '<td class="currency fw-bold">$ ' + Number(u.IMPORTE_ARS).toLocaleString('es-AR', {
                 minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</td>';
 
-        // Las celdas del pie van una por columna y en el mismo orden que el
-        // encabezado: Cronograma | Fecha dato | USD | Cotización | ARS | Cargado
-        // el | Historial | (acción). Un colspan mal contado corre los totales
-        // debajo de otra columna y el número queda diciendo otra cosa.
-        document.getElementById('footDol').innerHTML = filas.length
-            ? '<tr><td colspan="2" class="fw-bold text-end">TOTAL</td>'
-                + '<td class="currency fw-bold">' + dolares(totalUsd) + '</td>'
-                + '<td></td>'
-                + pesos
-                + '<td colspan="3"></td></tr>'
-            : '';
+        /* Las celdas del pie van una por columna y en el mismo orden que el
+           encabezado: Fecha | USD | Cotización | ARS | Cargado el | Historial |
+           (acción). Un colspan mal contado corre el número debajo de otra
+           columna y queda diciendo otra cosa. */
+        document.getElementById('footDol').innerHTML =
+            '<tr><td class="fw-bold text-end" title="' + escapar('Es la carga del '
+                + fechaCorta(u.FECHA) + ', la más reciente. No es una suma: las anteriores '
+                + 'son fotos de cómo venía el saldo.') + '">SALDO</td>'
+            + '<td class="currency fw-bold">' + dolares(u.IMPORTE_USD) + '</td>'
+            + '<td></td>'
+            + pesos
+            + '<td colspan="3"></td></tr>';
     }
 
     /**
@@ -428,53 +429,39 @@
         return '';
     }
 
+    /**
+     * Las tarjetas describen EL SALDO, no la suma de las cargas.
+     *
+     * Antes la del medio decía "Total cargado" y sumaba todas. Con una sola
+     * carga no se notaba; con dos decía US$ 137.000 arriba de una cuenta que
+     * tiene 71.000, porque las cargas son fotos del mismo saldo y no depósitos.
+     * Un número arriba de una tabla describe esa tabla.
+     */
     function pintarKpi() {
         var filas = (datos && datos.filas) || [];
-        var total = 0;
-        var totalArs = 0;
-        var sinValuar = 0;
+        var u = laVigente(filas);
+        var sinValuar = (u !== null
+            && (u.IMPORTE_ARS === null || u.IMPORTE_ARS === undefined));
 
-        filas.forEach(function(f) {
-            total += Number(f.IMPORTE_USD) || 0;
+        texto('ultimoImporteDol', u ? dolaresPlano(u.IMPORTE_USD) : 'US$ 0,00');
+        texto('ultimaFechaDol', u ? ('Al ' + fechaCorta(u.FECHA)) : 'Sin cargas');
 
-            if (f.IMPORTE_ARS === null || f.IMPORTE_ARS === undefined) {
-                sinValuar++;
-            } else {
-                totalArs += Number(f.IMPORTE_ARS);
-            }
-        });
+        texto('totalDol', String(filas.length));
+        texto('detalleTotalDol', filas.length === 1
+            ? 'una sola foto del saldo'
+            : 'fotos del saldo · vale la más reciente');
 
-        // Las filas vienen ordenadas por FECHA DE CRONOGRAMA descendente, no
-        // por fecha de dato: filas[0] es el día del cronograma más lejano, que
-        // no tiene por qué ser la última carga. Esta tarjeta dice "última
-        // carga", así que busca el máximo por FECHA -la del dato- y no confía
-        // en el orden de la grilla.
-        var ultima = null;
+        texto('totalArsDol', (u && !sinValuar)
+            ? '$ ' + Number(u.IMPORTE_ARS).toLocaleString('es-AR', {
+                minimumFractionDigits: 2, maximumFractionDigits: 2 })
+            : '$ 0,00');
 
-        filas.forEach(function(f) {
-            if (ultima === null || f.FECHA > ultima.FECHA) {
-                ultima = f;
-            }
-        });
-
-        texto('ultimoImporteDol', ultima ? dolaresPlano(ultima.IMPORTE_USD) : 'US$ 0,00');
-        texto('ultimaFechaDol', ultima ? ('Al ' + fechaCorta(ultima.FECHA)) : 'Sin cargas');
-        texto('totalDol', dolaresPlano(total));
-        texto('detalleTotalDol', filas.length + ' fecha(s) con importe vigente');
-
-        texto('totalArsDol', '$ ' + totalArs.toLocaleString('es-AR', {
-            minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-
-        // Que haya filas sin valuar hay que decirlo acá: es la diferencia entre
-        // "este es todo el dinero" y "esto es lo que se pudo valuar".
-        //
-        // Y con qué punta se valuó, por lo mismo que en cada fila: este total es
-        // el que se compara contra el tablero y contra el BCRA, y es el único
-        // del módulo que no sale de la punta compradora. La punta se toma de las
-        // filas, que es de donde la decidió el backend.
+        /* Con qué punta se valuó, por lo mismo que en cada fila: este número es
+           el que se compara contra el tablero y contra el BCRA, y es el único
+           del módulo que no sale de la punta compradora. */
         texto('detalleArsDol', sinValuar
-            ? sinValuar + ' carga(s) sin cotización quedan afuera, acá y en el tablero'
-            : 'Valuado al oficial del BCRA de cada fecha' + sufijoPunta(filas));
+            ? 'Sin cotización para esa fecha: el tablero muestra cero'
+            : 'Valuado al oficial del BCRA' + sufijoPunta(filas));
 
         mostrar('summaryDol', true, 'flex');
     }

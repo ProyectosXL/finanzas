@@ -26,9 +26,14 @@ Contra `central`:
 ```sql
 -- 1. sql/cashflow_dolares_comitente.sql
 -- 2. sql/cashflow_dolares_comitente_cronograma.sql   (la fecha de cronograma)
--- 3. sql/cashflow_saldo_inversiones.sql
--- 4. sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql          (la cotización diaria)
+-- 3. sql/cashflow_dolares_comitente_cobertura.sql    (pasa a stock de cobertura)
+-- 4. sql/cashflow_saldo_inversiones.sql
+-- 5. sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql          (la cotización diaria)
 ```
+
+El tercero apaga la fila de Disponibilidades y crea la de **Cobertura**. Va después de `sql/cashflow_cobertura.sql`, que es el que crea esa sección, y aborta diciéndolo si falta. **No migra ningún dato**: las cargas quedan como están y cambia quién las lee.
+
+> El segundo quedó **superado por el tercero**: agrega una columna que, con los dólares como stock, ya no tiene efecto. Se sigue corriendo igual — es lo que deja la tabla como el código la espera — pero la pantalla ya no ofrece esa fecha.
 
 El segundo agrega `FECHA_CRONOGRAMA` y deja las filas que ya están **con la misma fecha en los dos campos**, así que el día que se corre el tablero no se mueve ni un peso. Va después del primero y es reejecutable.
 
@@ -48,20 +53,13 @@ El segundo crea `RO_T_CASHFLOW_SALDO_INVERSIONES` y **crea** la fila `SALDO_INVE
 
 ## Dólares Cuenta Comitente
 
-### Dos fechas, dos funciones distintas
+### La fecha, y la de cronograma que quedó inerte
 
-> Esto **cambió**. La tabla tenía una sola `FECHA` haciendo las dos cosas a la vez.
+`FECHA` es **cuándo se tomó la foto del saldo**, y decide dos cosas: con qué cotización se valúa esa carga, y cuál es la última — que es la que va al tablero. **No se edita desde la grilla**: cambiarla movería el importe en pesos y podría cambiar cuál es el saldo vigente, dos efectos que nadie pide al corregir un número.
 
-| Columna | Qué decide | Editable |
-| --- | --- | --- |
-| `FECHA` | la fecha del **dato**: con qué cotización se valúa ese importe | no, desde la grilla |
-| `FECHA_CRONOGRAMA` | **dónde** cae el importe en el eje del tablero y en la grilla | **sí** |
+> **`FECHA_CRONOGRAMA` ya no hace nada, y es consecuencia de haber pasado a stock.** Existió mientras cada carga era un ingreso que se dibujaba en un día del eje. Un stock no se dibuja en ninguna columna, así que esa fecha dejó de tener efecto y **la pantalla dejó de ofrecerla**. Es el mismo argumento que ya estaba escrito para no dársela al Saldo de Inversiones: *una columna que se puede editar y no cambia nada es peor que no tenerla*.
 
-Se puede saber hoy que va a haber dólares disponibles y querer verlos en el cronograma el día que se van a usar. Con una sola fecha, correr el importe en el cronograma le cambiaba la valuación, y valuarlo bien lo obligaba a mostrarse el día de la carga.
-
-**Valúa la de registro, y el motivo no es el que parece.** No es que valuar por la de cronograma devuelva `null` cuando esa fecha es futura: `ultimaHasta()` hace `WHERE Fecha <= ?`, así que para una fecha futura devuelve *la última disponible*, no nada. El motivo es otro: **la fecha de cronograma es una decisión de presentación** —en qué día quiero ver este importe— y si valuara, mover una fila en la grilla cambiaría la plata. Ése es exactamente el acople que separarlas viene a romper.
-
-En el alta las dos arrancan iguales: el formulario tiene un solo campo de fecha. El cronograma se ajusta después, en la grilla.
+**La columna no se borra.** Queda en la base, inerte, por el mismo motivo que la serie `INGRESO` queda declarada: para poder volver atrás sin migrar datos. La grilla la sigue mandando tal cual vino al guardar, porque es la clave con la que el backend pisa la carga anterior.
 
 ### La vigencia es por día de CRONOGRAMA
 
@@ -94,11 +92,35 @@ Los tres métodos preguntan por `null` en tres lugares y **no se duplica ninguno
 
 **Saldo de Inversiones no recibe la columna, y no es un olvido.** Ese saldo es un `STOCK`: su importe **ya** se ubica en el primer día del eje y no en su fecha (`OtrosIngresosProvider::stockInversiones()`). Sus dos fechas ya estaban desacopladas. Darle una columna de cronograma sería darle una columna que no hace nada y que alguien va a editar esperando que haga algo.
 
-### Es un ingreso, no una disponibilidad
+### No es un ingreso: es stock de cobertura
 
-El importe **entra al flujo en la fecha que se le carga**. No es un saldo de apertura y no arrastra. Por eso la fila del tablero es de tipo `INGRESO` y no `SALDO_INICIAL`, y por eso vive en la categoría de ingresos y no en la de saldos.
+> Esto **cambió**. Entraban al flujo como `INGRESO` en la fecha de su carga.
 
-Esto **sigue valiendo para los dólares**, a diferencia del Saldo de Inversiones, que dejó de ser un ingreso y pasó a ser stock de cobertura. En el Excel los dólares están en el bloque del Disponible y no en el de inversiones: es plata en una cuenta, no un fondo invertido.
+Decir que ese día *ingresa* plata no es cierto: **los dólares ya están en la cuenta**. Lo que hay que decidir es *cuándo se los usa*, y esa decisión se carga en la sección **Cobertura** del tablero. Es exactamente el mismo movimiento que ya había hecho el Saldo de Inversiones, y el script lo copia paso por paso:
+
+| | Fila vieja | Fila nueva |
+|---|---|---|
+| Inversiones | `SALDO_INVERSIONES` · Disponibilidades · apagada | `STOCK_INVERSIONES` · Cobertura |
+| Dólares | `DOLARES_COMITENTE` · Disponibilidades · **apagada** | **`STOCK_DOLARES_COMITENTE`** · Cobertura |
+
+**Funciona sin tocar el motor.** `Cashflow::calcularTotales()` **suma todas** las filas de tipo `STOCK_COBERTURA` para saber con cuánto se puede cubrir; no conoce ninguna por su código. Así que los dólares se suman a las inversiones y el aviso de *"se aplica más cobertura de la que hay"* los cuenta solo.
+
+La fila lleva `COMPUTA = 0` y el motor le vacía las columnas de fecha: un stock no ocurre un día, **está**. El importe se muestra sólo en la columna *Total*.
+
+### El saldo es la última carga, no la suma
+
+Cada carga es una **foto del saldo** a esa fecha, no un depósito. Sumarlas cuenta dólares que nunca estuvieron juntos en la cuenta.
+
+No es teórico — medido sobre las dos cargas que hay hoy:
+
+| | |
+| --- | --- |
+| Suma de las dos cargas *(lo que hacía la serie vieja)* | **209.940.000** |
+| Saldo: la carga más reciente, del 18/09 | **101.310.000** |
+
+La serie `INGRESO` queda declarada para poder volver atrás desde Parámetros sin tocar código, pero las dos son **el mismo dinero mirado de dos formas**: activar las dos filas mostraría el saldo dos veces. Van relacionadas en `componentes` y el validador rechaza la combinación.
+
+En la pantalla, la carga vigente va marcada *al tablero* y el pie dice **SALDO**, no *TOTAL*: un pie que sumara una columna de fotos sería el error más fácil de cometer leyendo esta grilla.
 
 ### Se guardan dólares, no pesos
 
@@ -160,7 +182,7 @@ Las dos vistas exponen **las dos puntas** (`Comprador AS TCC`, `Vendedor AS TCV`
 
 ### La cuenta se muestra abierta
 
-La grilla de la pestaña tiene cuatro columnas donde antes tenía una: **USD × cotización (con su fecha y su punta) = importe en pesos**. Las dos primeras columnas son las dos fechas: *Cronograma*, editable, y *Fecha dato*, en gris. El total en pesos del pie es exactamente el que va a la fila del tablero, así que ese número se puede auditar fila por fila desde la pantalla.
+La grilla de la pestaña tiene cuatro columnas donde antes tenía una: **USD × cotización (con su fecha y su punta) = importe en pesos**. El pie no suma: muestra el **saldo** —la carga marcada *al tablero*— y es exactamente el importe de la fila del cashflow, así que ese número se puede auditar contra su cotización desde la pantalla.
 
 La cuenta la hace **`OtrosIngresos::valuarDolares()`**, y la usan los dos: el proveedor para armar la serie y el controller para la grilla. Si cada uno multiplicara por su cuenta, los dos totales podrían discrepar y no habría forma de saber cuál está mal.
 

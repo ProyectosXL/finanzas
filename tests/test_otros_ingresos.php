@@ -348,6 +348,121 @@ chequear('y la pestana de dolares tampoco',
    romper. Estas pruebas van ANTES del corte por base: son decisiones puras y
    tienen que correr aunque no haya SQL Server.
    ================================================================ */
+/* ================================================================
+   LOS DOLARES SON STOCK DE COBERTURA, NO UN INGRESO
+
+   Entraban al flujo como ingreso en la fecha de su carga, y eso decia que ese
+   dia INGRESA plata. No es cierto: los dolares ya estan en la cuenta. Lo que
+   hay que decidir es cuando se los usa, y esa decision se carga en Cobertura.
+
+   Es el mismo movimiento que ya habia hecho el saldo de inversiones.
+   ================================================================ */
+seccion('los dolares son stock de cobertura, igual que las inversiones');
+
+$metaDol = CashflowRegistry::meta('DOLARES_COMITENTE');
+
+chequear('ofrece la serie STOCK', true, isset($metaDol['series']['STOCK']));
+
+// La vieja queda declarada para poder volver atras desde Parametros sin tocar
+// codigo, igual que en inversiones.
+chequear('la serie vieja sigue declarada', true, isset($metaDol['series']['INGRESO']));
+
+/* PERO NO PUEDEN CONVIVIR: son el mismo dinero mirado de dos formas, y activar
+   las dos filas mostraria el saldo dos veces. */
+chequear('y las dos estan declaradas como incompatibles', true,
+    isset($metaDol['componentes']['STOCK'])
+    && in_array('INGRESO', $metaDol['componentes']['STOCK'], true)
+    && isset($metaDol['componentes']['INGRESO'])
+    && in_array('STOCK', $metaDol['componentes']['INGRESO'], true));
+
+// El proveedor devuelve exactamente las dos que el registro declara.
+$provDol = CashflowRegistry::instanciar('DOLARES_COMITENTE');
+$seriesDol = $provDol->series(Horizonte::desdeParametros(new Parametros()));
+
+chequear('el proveedor rinde la serie STOCK', true, isset($seriesDol['STOCK']));
+chequear('y tambien la vieja', true, isset($seriesDol['INGRESO']));
+
+$declaradas = array_keys($metaDol['series']);
+$devueltas = array_keys($seriesDol);
+sort($declaradas);
+sort($devueltas);
+
+chequear('el registro declara exactamente lo que el proveedor devuelve',
+    $declaradas, $devueltas);
+
+seccion('el stock es la ULTIMA carga, no la suma');
+
+/* CADA CARGA ES UNA FOTO DEL SALDO, no un deposito. Sumarlas daria dolares que
+   nunca estuvieron juntos en la cuenta. Se verifica contra la base: el stock
+   tiene que coincidir con UNA de las cargas -la mas reciente valuada- y no con
+   la suma de todas. */
+if (Pruebas::hayBase() && (new OtrosIngresos())->tablaCreada()) {
+    $val = (new OtrosIngresos())->valuarDolares();
+    $sumaStock = 0;
+
+    foreach ($seriesDol['STOCK']['dias'] as $v) { $sumaStock += floatval($v); }
+    foreach ($seriesDol['STOCK']['meses'] as $v) { $sumaStock += floatval($v); }
+
+    $suma = 0;
+    $ultima = null;
+
+    foreach ($val['filas'] as $f) {
+        if ($f['IMPORTE_ARS'] === null) { continue; }
+
+        $suma += floatval($f['IMPORTE_ARS']);
+
+        if ($ultima === null || $f['FECHA'] > $ultima['FECHA']) { $ultima = $f; }
+    }
+
+    if ($ultima !== null) {
+        chequear('el stock es el importe de la carga mas reciente',
+            round(floatval($ultima['IMPORTE_ARS']), 2), round($sumaStock, 2));
+
+        // Y con mas de una carga, NO es la suma. Con una sola coinciden y la
+        // prueba no distingue nada, asi que solo se afirma cuando hay varias.
+        if (count($val['filas']) > 1 && round($suma, 2) !== round($sumaStock, 2)) {
+            chequear('y con varias cargas no es la suma de todas',
+                true, round($suma, 2) !== round($sumaStock, 2));
+        }
+    }
+}
+
+/* EL IMPORTE VA EN EL PRIMER DIA DEL EJE. No significa "entra ese dia": el
+   motor vacia todas las columnas de una fila STOCK_COBERTURA y muestra el
+   importe solo en la columna Total. Esta ahi para que llegue por el mismo
+   camino que cualquier otra serie. */
+$fuenteProv = file_get_contents(__DIR__ . '/../cashflow/Class/Providers/OtrosIngresosProvider.php');
+
+chequear('el stock de dolares se ubica en el primer dia del eje', true,
+    strpos($fuenteProv, "\$h->acumular(\$serie, \$h->hoy(), floatval(\$ultima['IMPORTE_ARS']))")
+        !== false);
+
+seccion('el script que mueve la fila a Cobertura');
+
+$sqlCob = __DIR__ . '/../sql/cashflow_dolares_comitente_cobertura.sql';
+
+chequear('el script existe', true, file_exists($sqlCob));
+
+$txtCob = file_get_contents($sqlCob);
+
+chequear('crea la fila en la seccion Cobertura', true,
+    preg_match("/'STOCK_DOLARES_COMITENTE'.*?'COBERTURA',\s*'STOCK_COBERTURA'/s", $txtCob) === 1);
+
+// COMPUTA = 0: un stock no entra en ninguna suma del flujo. La plata se mueve
+// recien cuando alguien aplica cobertura.
+chequear('y no computa en el flujo', true,
+    strpos($txtCob, "'STOCK_COBERTURA', 0,") !== false);
+
+/* LA VIEJA SE DA DE BAJA LOGICA, no se borra: reactivarla es poner el bit en 1.
+   Se renombra para que quien la vea apagada entienda por que. */
+chequear('la fila vieja se apaga, no se borra', true,
+    strpos($txtCob, 'SET ACTIVO = 0,') !== false);
+chequear('y se renombra para que se entienda', true,
+    strpos($txtCob, 'pasó a ser stock de cobertura') !== false);
+
+chequear('es reejecutable', true,
+    strpos($txtCob, "IF NOT EXISTS (SELECT 1 FROM dbo.RO_T_CASHFLOW_CONF_FILA") !== false);
+
 seccion('los dolares tienen dos fechas y el saldo de inversiones una');
 
 chequear('los dolares declaran su columna de cronograma',

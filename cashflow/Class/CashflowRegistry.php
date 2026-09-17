@@ -364,18 +364,41 @@ class CashflowRegistry {
            pendientes a Tasky en GVA12. */
 
         /* La carga es en DOLARES y la conversion a pesos la hace el proveedor
-           con el oficial del BCRA, igual que ComexProvider: el motor nunca ve
-           dolares. Es un INGRESO y no una disponibilidad: entra al flujo en la
-           fecha que se le carga y no arrastra. */
+           con el oficial del BCRA -punta VENDEDORA, es la unica pantalla que no
+           usa la compradora-, igual que ComexProvider: el motor nunca ve
+           dolares.
+
+           YA NO ES UN INGRESO: ES STOCK DE COBERTURA, igual que el saldo de
+           inversiones y por el mismo motivo. Entrar al flujo como ingreso en la
+           fecha de la carga decia que ese dia ingresaba plata, y no es cierto:
+           los dolares YA ESTAN en la cuenta, y lo que hay que decidir es CUANDO
+           se los usa. Esa decision se carga en la seccion Cobertura.
+
+           EL STOCK ES LA ULTIMA CARGA, NO LA SUMA. Cada carga es una foto del
+           saldo a esa fecha: 66.000 y 71.000 cargados en dos dias son un saldo
+           que cambio, no 137.000 dolares juntos en la cuenta.
+
+           INGRESO queda declarada para poder volver atras desde Parametros sin
+           tocar codigo, pero son EL MISMO dinero mirado de dos formas: activar
+           las dos filas mostraria el saldo dos veces. Por eso van relacionadas
+           en 'componentes' y el validador rechaza la combinacion. */
         'DOLARES_COMITENTE' => [
             'nombre' => 'Dolares Cuenta Comitente',
-            'descripcion' => 'Dolares disponibles en la cuenta comitente, cargados a mano',
+            'descripcion' => 'Dolares en la cuenta comitente, cargados a mano. '
+                . 'Es stock que respalda la cobertura del flujo',
             'archivo' => 'Providers/OtrosIngresosProvider.php',
             'clase' => 'OtrosIngresosProvider',
             'moneda' => 'USD',
             'disponible' => true,
             'tab' => 'dolares_comitente',
-            'series' => ['INGRESO' => 'Dolares cuenta comitente']
+            'series' => [
+                'STOCK' => 'Dolares en la cuenta, disponibles para cobertura',
+                'INGRESO' => 'Dolares cuenta comitente como ingreso (criterio viejo, en desuso)'
+            ],
+            'componentes' => [
+                'STOCK' => ['INGRESO'],
+                'INGRESO' => ['STOCK']
+            ]
         ],
 
         /* El otro concepto de Otros Ingresos, mismo proveedor y mismo circuito.

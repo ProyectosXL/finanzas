@@ -103,13 +103,34 @@
 }
 
 /* ============================================================================
-   LAS DOS FECHAS DE LA GRILLA
+   LA CARGA QUE VALE
 
-   Cronograma es editable y manda: es donde se muestra el importe. La fecha del
-   dato va en gris y no se toca desde acá, porque es la que decide con qué
-   cotización se valúa. Que una sea un campo y la otra texto es la mitad de lo
-   que las distingue; el color es la otra mitad.
+   Cada fila es una foto del saldo a su fecha, y SÓLO LA MÁS RECIENTE va al
+   tablero. Sin marcarla, tres filas con tres importes se leen como tres cosas
+   que suman, que es justo el error que este concepto invita a cometer.
    ============================================================================ */
+
+.tab-dolares_comitente tr.dol-vigente > td {
+    background-color: #f2f8f6;
+}
+
+.tab-dolares_comitente .dol-badge-vigente {
+    display: inline-block;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #1b5e4f;
+    background: #d9ece6;
+    border-radius: 3px;
+    padding: 0 5px;
+    vertical-align: middle;
+    cursor: help;
+}
+
+/* Las filas que no son la vigente son historia: se leen, no se comparan. */
+.tab-dolares_comitente tbody tr:not(.dol-vigente) .currency {
+    color: var(--text-muted, #8c93a8);
+}
 
 .tab-dolares_comitente .dol-fecha-dato {
     font-size: 0.8rem;

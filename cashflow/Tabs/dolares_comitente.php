@@ -7,6 +7,19 @@
     En el Excel original esta fila la tipeaba una persona. Acá se carga, y el
     formulario es deliberadamente mínimo: fecha e importe en dólares. Nada más.
 
+    ESTOS DÓLARES NO ENTRAN AL FLUJO. Son el STOCK que respalda la cobertura,
+    igual que el saldo de inversiones: dicen cuántos dólares hay disponibles
+    para tapar un bache, no que ese día ingrese plata. Lo que mueve el saldo
+    proyectado es la fila "Uso de Inversiones" del tablero.
+
+    Hasta sql/cashflow_dolares_comitente_cobertura.sql esta carga entraba como un
+    INGRESO en su fecha, y estaba mal: que el saldo se informe un día no
+    significa que ese día entre plata. Los dólares ya están en la cuenta.
+
+    LA QUE VALE ES LA ÚLTIMA CARGA, no la suma de todas. Cada carga es una foto
+    del saldo a esa fecha; sumarlas contaría dólares que nunca estuvieron juntos
+    en la cuenta.
+
     SE CARGAN DÓLARES, NO PESOS. La conversión la hace el proveedor con el
     oficial del BCRA en cada lectura del tablero. Guardar pesos congelaría la
     valuación al momento de la carga.
@@ -39,7 +52,8 @@
         <div class="col-md-6 col-lg-4">
             <div class="kpi-card kpi-card-destacada">
                 <div class="kpi-card-header">
-                    <span class="kpi-card-title">Última carga</span>
+                    <span class="kpi-card-title"
+                          title="El saldo de la carga más reciente. Es el que va al tablero: las cargas anteriores son fotos de cómo venía.">Saldo en dólares</span>
                     <div class="kpi-card-icon green"><i class="fas fa-dollar-sign"></i></div>
                 </div>
                 <div class="kpi-card-value" id="ultimoImporteDol">US$ 0,00</div>
@@ -52,12 +66,17 @@
         <div class="col-md-6 col-lg-4">
             <div class="kpi-card">
                 <div class="kpi-card-header">
-                    <span class="kpi-card-title">Total cargado</span>
-                    <div class="kpi-card-icon blue"><i class="fas fa-coins"></i></div>
+                    <!-- NO ES UNA SUMA. Decía "Total cargado" y sumaba todas las
+                         cargas; con dos decía US$ 137.000 arriba de una cuenta
+                         que tiene 71.000. Son fotos del mismo saldo, no
+                         depósitos. -->
+                    <span class="kpi-card-title"
+                          title="Cuántas veces se informó el saldo. No se suman: cada una es una foto de cómo estaba la cuenta ese día.">Cargas registradas</span>
+                    <div class="kpi-card-icon blue"><i class="fas fa-camera"></i></div>
                 </div>
-                <div class="kpi-card-value" id="totalDol">US$ 0,00</div>
+                <div class="kpi-card-value" id="totalDol">0</div>
                 <div class="kpi-card-footer">
-                    <span class="text-muted" id="detalleTotalDol">0 fecha(s) con importe vigente</span>
+                    <span class="text-muted" id="detalleTotalDol">sin cargas</span>
                 </div>
             </div>
         </div>
@@ -69,7 +88,8 @@
         <div class="col-md-6 col-lg-4">
             <div class="kpi-card">
                 <div class="kpi-card-header">
-                    <span class="kpi-card-title">En pesos, al tablero</span>
+                    <span class="kpi-card-title"
+                          title="Ese mismo saldo valuado a pesos. Es el importe de la fila «Dólares en cuenta comitente» de la sección Cobertura del tablero.">En pesos, al tablero</span>
                     <div class="kpi-card-icon orange"><i class="fas fa-scale-balanced"></i></div>
                 </div>
                 <div class="kpi-card-value" id="totalArsDol">$ 0,00</div>
@@ -84,12 +104,13 @@
 
     <div class="card mb-4">
         <div class="card-header">
-            <h5 class="mb-0">Cargar importe</h5>
+            <h5 class="mb-0">Informar el saldo</h5>
             <small class="text-muted">
-                Fecha e importe en dólares. La conversión a pesos la hace el tablero con la
+                Cuántos dólares hay en la cuenta a esa fecha. <strong>Cargar reemplaza el saldo
+                anterior</strong>: el tablero usa siempre la carga más reciente, y las anteriores
+                quedan como fotos de cómo venía. La conversión a pesos la hace el tablero con la
                 <strong>última cotización oficial del BCRA anterior o igual a esa fecha, punta
-                vendedora</strong>: no se guarda ningún importe en pesos. La grilla de abajo
-                muestra con cuál se valuó cada carga.
+                vendedora</strong>: no se guarda ningún importe en pesos.
             </small>
         </div>
         <div class="card-body">
@@ -122,9 +143,10 @@
                 pasa por el mismo camino.
             </div>
             <div class="param-hint">
-                El alta usa <strong>la misma fecha para el dato y para el cronograma</strong>. Si
-                querés mostrar este importe otro día, cambiale el <em>Cronograma</em> en la grilla:
-                eso no le cambia la cotización con la que se valúa.
+                Estos dólares <strong>no entran al flujo como un ingreso</strong>: son el stock
+                que respalda la cobertura, igual que el saldo de inversiones. Se ven en la
+                sección <em>Cobertura</em> del tablero, y la plata recién se mueve cuando alguien
+                carga un <em>Uso de Inversiones</em>.
             </div>
         </div>
     </div>
@@ -132,10 +154,11 @@
     <div class="card mb-4">
         <div class="card-header d-flex justify-content-between align-items-start flex-wrap gap-2">
             <div>
-                <h5 class="mb-0">Importes vigentes</h5>
+                <h5 class="mb-0">Saldo informado</h5>
                 <small class="text-muted">
-                    Un importe por fecha. Las cargas pisadas no se borran: se ven desde
-                    <em>Historial</em>.
+                    Una foto por fecha. <strong>Vale la más reciente</strong>, marcada
+                    <em>al tablero</em>; las otras muestran cómo venía. Las versiones pisadas de
+                    una misma fecha no se borran: se ven desde <em>Historial</em>.
                 </small>
             </div>
             <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
@@ -162,20 +185,20 @@
                                  dólares, el número del cashflow no se puede
                                  auditar contra nada.
 
-                                 DOS FECHAS, DOS FUNCIONES DISTINTAS:
-                                   Cronograma  -> dónde se muestra el importe.
-                                                  EDITABLE.
-                                   Fecha dato  -> con qué cotización se valúa.
-                                                  No se toca desde acá: cambiarla
-                                                  cambiaría el importe en pesos.
-                                 Las dos arrancan iguales en un alta. -->
-                            <th style="width: 160px;"
-                                title="El día del cronograma en el que se muestra este importe, acá y en el tablero. Se puede cambiar: no valúa nada.">
-                                Cronograma
-                            </th>
-                            <th class="text-muted" style="width: 120px;"
-                                title="La fecha del dato: con qué cotización se valúa este importe. No se edita desde la grilla, porque cambiarla cambiaría el importe en pesos.">
-                                Fecha dato
+                                LA FECHA ES LA DEL DATO: cuándo se tomó esta foto
+                                del saldo. Decide dos cosas: con qué cotización
+                                se valúa, y cuál es la última —que es la que el
+                                tablero usa—.
+
+                                No hay columna de cronograma. La hubo mientras
+                                cada carga era un ingreso que se dibujaba en un
+                                día del eje; un stock no se dibuja en ninguna
+                                columna, así que esa fecha dejó de tener efecto.
+                                Una columna que se puede editar y no cambia nada
+                                es peor que no tenerla. -->
+                            <th style="width: 140px;"
+                                title="Cuándo se tomó esta foto del saldo. Decide con qué cotización se valúa, y cuál es la última: ésa es la que va al tablero.">
+                                Fecha
                             </th>
                             <th class="text-end" style="width: 170px;"
                                 title="Editable. Guardar no modifica la carga anterior: la deja en el historial e inserta una versión nueva.">
