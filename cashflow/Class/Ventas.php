@@ -660,6 +660,17 @@ class Ventas {
      * cargados con fechas conocidas, que es justamente lo que no se puede pedir
      * de una tabla de Tango.
      *
+     * DOS FECHAS, DOS FUNCIONES DISTINTAS. Es la regla entera de este metodo:
+     *
+     *     FECHA_VENTA_EST  decide QUE se muestra y que netea  -> ventaYaCobrada()
+     *     FECHA_CHEQUE     decide DONDE cae                   -> Horizonte::ubicar()
+     *
+     * Antes las dos las hacia la fecha teorica de venta, y el argumento escrito
+     * aca era que el neteo tenia que caer donde esta la cobranza proyectada de
+     * esa venta. ESE RAZONAMIENTO QUEDO SUPERADO: lo que interesa es cuando
+     * entra la plata del cheque, y eso lo dice la fecha del cheque. La fecha
+     * teorica sigue existiendo, pero solo como argumento del filtro.
+     *
      * LO QUE CAE ANTES DEL INICIO DEL EJE NO SE NETEA, Y SE DESCARTA CALLADO.
      * Es la excepcion deliberada a la regla "nunca se descarta en silencio" del
      * modulo, y el motivo es que aca no se descarta plata: ESA VENTA YA ESTA
@@ -690,15 +701,29 @@ class Ventas {
      * -la pestana ni siquiera la dibuja-. Restar ahi seria hacer desaparecer el
      * importe en una columna que nadie ve.
      *
-     * LO POSTERIOR AL HORIZONTE se descarta por el mismo motivo y de la misma
-     * forma: si la venta cae mas alla del ultimo mes del eje, su cobranza
-     * proyectada tampoco esta en el cuadro, asi que no hay columna que netear.
+     * LO POSTERIOR AL HORIZONTE SI CUENTA COMO 'fuera_horizonte', Y ESO CAMBIO.
+     * Antes tampoco contaba, con este argumento: si la venta caia mas alla del
+     * ultimo mes del eje, su cobranza proyectada tampoco estaba en el cuadro,
+     * asi que no habia columna que netear. Ubicando por la fecha del cheque eso
+     * ya no se sostiene: LA VENTA PUEDE ESTAR ADENTRO DEL EJE -con su cobranza
+     * proyectada dibujada- Y EL CHEQUE CAER AFUERA, porque la fecha del cheque
+     * es siempre posterior o igual a la teorica. Ahi el cuadro muestra una
+     * cobranza que no se va a cobrar y la resta desaparece: eso si es plata que
+     * el tablero deberia mostrar y no muestra, que es exactamente lo que
+     * 'fuera_horizonte' significa.
+     *
+     * Medido sobre la cartera real al hacer el cambio: 0,00. El cheque mas
+     * lejano vence 166 dias antes del borde del eje y el corrimiento maximo
+     * entre las dos fechas es de 60 dias -el DIAS_PRECHEQUEADO mas grande del
+     * maestro-. El aviso solo aparece cuando el importe es mayor que cero, asi
+     * que hoy no se ve; esta para el dia que un cheque lejano o un horizonte
+     * mas corto lo despierten.
      *
      * LOS DIAS LLEGAN POR CLIENTE, en un mapa. Antes era un unico entero
      * aplicado a todas las filas. El mapa se resuelve con
      * Echeqs::diasDeCliente(), que es la misma funcion que usa la sub-pestana
      * para mostrar la fecha estimada de venta: si los dos aplicaran plazos
-     * distintos, la pantalla mostraria una fecha y el tablero netearia en otra.
+     * distintos, la pantalla mostraria una fecha y el tablero filtraria con otra.
      *
      * @param array $filas Filas de Echeqs::getPrechequeadoTotales()
      * @param array $dias Lista de fechas 'Y-m-d' del tramo diario
@@ -713,7 +738,11 @@ class Ventas {
             'total' => 0,
             'canales' => [],
             'fuera_de_cartera' => 0,
-            'sin_canal' => 0
+            'sin_canal' => 0,
+            // Cheques que sobreviven al filtro -su venta todavia no ocurrio- y
+            // cuya fecha cae mas alla del ultimo mes del eje. Es plata que el
+            // tablero deberia restar y no resta. Ver el encabezado.
+            'fuera_horizonte' => 0
         ];
 
         foreach (is_array($dias) ? $dias : [] as $fecha) {
@@ -753,23 +782,35 @@ class Ventas {
                 $fila['FECHA_CHEQUE'],
                 Echeqs::diasDeCliente($diasPorCliente, $fila['COD_CLIENTE']));
 
-            // LA MISMA funcion que decide que cheques muestra la sub-pestana
-            // Echeqs -> Venta Cobrada Anticipada. Es una sola por diseno: si
-            // fueran dos implementaciones, la pantalla podria mostrar un cheque
-            // que el tablero no netea -o al reves- y el usuario tildaria algo
-            // que no mueve nada, sin ninguna pantalla donde notarlo.
+            // FILTRO: la fecha TEORICA decide si este cheque tiene algo que
+            // netear. LA MISMA funcion que decide que cheques muestra la
+            // sub-pestana Echeqs -> Venta Cobrada Anticipada. Es una sola por
+            // diseno: si fueran dos implementaciones, la pantalla podria
+            // mostrar un cheque que el tablero no netea -o al reves- y el
+            // usuario tildaria algo que no mueve nada, sin ninguna pantalla
+            // donde notarlo.
             //
             // El corte que se le pasa es el PRIMER DIA DEL EJE y no 'hoy': en
             // la practica son el mismo dia, pero el neteo tiene que cortar
             // contra el eje que efectivamente recibio.
-            $destino = Echeqs::ventaYaCobrada($teorica, $inicio)
-                ? null
-                : Horizonte::ubicar($neteo, $teorica);
+            //
+            // Se descarta CALLADO y sin contar en 'fuera_horizonte': esa venta
+            // ya se facturo y ya se cobro, no es plata que al tablero le falte.
+            if (Echeqs::ventaYaCobrada($teorica, $inicio)) {
+                continue;
+            }
 
-            // Fuera del eje no hay nada que netear: esa venta ya se cobro (si
-            // quedo atras) o su cobranza proyectada tampoco esta en el cuadro
-            // (si quedo adelante). Se descarta sin avisar, a proposito.
+            // UBICACION: la fecha del CHEQUE decide en que columna cae. Es
+            // cuando entra la plata, que es lo que el cuadro describe.
+            $destino = Horizonte::ubicar($neteo, $fila['FECHA_CHEQUE']);
+
+            // Sin columna, el cheque vence mas alla del ultimo mes del eje. Su
+            // venta SI puede estar adentro -la fecha del cheque es posterior o
+            // igual a la teorica-, asi que el cuadro queda mostrando una
+            // cobranza que este importe deberia restar. Eso se informa.
             if ($destino === null) {
+                $neteo['fuera_horizonte'] += $importe;
+
                 continue;
             }
 
@@ -810,17 +851,33 @@ class Ventas {
      * sub-pestana muestra los marcados abiertos por estado, que es donde se
      * decide que tildar.
      *
-     * TAMPOCO SE AVISA POR LO QUE CAE FUERA DEL EJE. Habia un aviso por eso y se
+     * TAMPOCO SE AVISA POR LO QUE CAE ANTES DEL EJE. Habia un aviso por eso y se
      * saco: ese importe es venta YA COBRADA, no plata que al tablero le falte
      * mostrar, asi que no hay ninguna accion detras del aviso. El razonamiento
-     * completo esta en repartirNeteo(). El de 'sin_canal' se queda porque ahi el
-     * cuadro efectivamente no cierra.
+     * completo esta en repartirNeteo().
+     *
+     * LO QUE CAE DESPUES DEL EJE SI SE AVISA, y es lo contrario del caso de
+     * arriba: ahi la venta puede estar adentro del cuadro y el cheque afuera, o
+     * sea que el cuadro muestra una cobranza que este importe deberia restar.
+     * El de 'sin_canal' se queda por lo mismo: el cuadro no cierra.
+     *
+     * Los dos avisos aparecen SOLO si su importe es mayor que cero. Medido al
+     * hacer el cambio, 'fuera_horizonte' da 0,00 y no se ve ninguno; un aviso
+     * que aparece siempre tapa a los que piden hacer algo.
      *
      * @param array $neteo Resultado de repartirNeteo()
      * @return array
      */
     public static function avisosNeteo($neteo) {
         $avisos = [];
+
+        if (!empty($neteo['fuera_horizonte'])) {
+            $avisos[] = 'Neteo de cheques adelantados: $ '
+                . number_format($neteo['fuera_horizonte'], 2, ',', '.') . ' corresponden a '
+                . 'cheques que vencen después del último mes del cuadro, así que no se '
+                . 'restaron de ninguna columna. La venta que prepagaron sí puede estar '
+                . 'proyectada acá adentro: por ese importe, la cobranza del cuadro está de más.';
+        }
 
         if ($neteo['sin_canal'] > 0) {
             $avisos[] = 'Neteo de cheques adelantados: $ '

@@ -73,25 +73,37 @@ try {
         case 'getEcheqsPrechequeado':
             $filas = $echeqs->getEcheqsPrechequeado();
 
-            // Cada cheque se ubica en la FECHA ESTIMADA DE VENTA -la del cheque
-            // menos los dias del cliente- y no en la del cheque: es la fecha en
-            // la que ese importe netea la cobranza proyectada de Ventas, asi que
-            // es donde tiene que verse en la grilla. La del cheque queda como
-            // columna de referencia.
+            // DOS FECHAS, DOS FUNCIONES DISTINTAS:
             //
-            // Los cheques cuya fecha estimada cae ANTES DE HOY ya no llegan
-            // hasta aca: los descarta Echeqs::cruzarPrechequeado() con
-            // Echeqs::ventaYaCobrada(), la misma funcion que usa
-            // Ventas::repartirNeteo() para no netearlos. Esa venta ya se
-            // facturo y ya se cobro: esta fuera del cashflow, y la leyenda de
-            // la sub-pestana lo dice.
+            //   FECHA_VENTA_EST  decide QUE cheques se muestran
+            //   FECHA_CHEQUE     decide DONDE cae cada importe en el eje
+            //
+            // Cada cheque se ubica en la fecha del CHEQUE, que es cuando entra
+            // la plata. Antes se ubicaba en la fecha estimada de venta, porque
+            // el criterio era caer donde esta la cobranza proyectada de esa
+            // venta; ese razonamiento quedo superado. La fecha estimada sigue
+            // siendo columna visible: es lo que explica por que ese cheque esta
+            // en la lista.
+            //
+            // ESTA LINEA Y Ventas::repartirNeteo() SE MUEVEN JUNTAS. El modulo
+            // esta construido para que la pantalla y el neteo no se puedan
+            // desalinear: si solo cambiara una, el usuario tildaria un cheque
+            // en una columna y el tablero lo restaria en otra.
+            //
+            // Los cheques cuya fecha ESTIMADA cae antes de hoy no llegan hasta
+            // aca: los descarta Echeqs::cruzarPrechequeado() con
+            // Echeqs::ventaYaCobrada(), la misma funcion que usa el neteo. Esa
+            // venta ya se facturo y ya se cobro: esta fuera del cashflow, y la
+            // leyenda de la sub-pestana lo dice.
             //
             // Lo POSTERIOR al horizonte si llega y si se avisa en 'descartes':
-            // ese cheque esta en la tabla y su importe no tiene columna.
+            // ese cheque esta en la tabla y su importe no tiene columna. El
+            // neteo informa el mismo importe en 'fuera_horizonte', asi que las
+            // dos pantallas dicen lo mismo.
             $payload = EjeVista::armar(
                 Horizonte::desdeParametros(new Parametros()),
                 $filas,
-                'FECHA_VENTA_EST',
+                'FECHA_CHEQUE',
                 'IMPORTE'
             );
 

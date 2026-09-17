@@ -79,12 +79,109 @@
     color: #6b5b8a;
 }
 
+/* El rubro, que va al lado del económico. Se ve más liviano a propósito: el de
+   al lado abre las series del tablero y éste no, así que no pueden pesar igual
+   ni leerse como dos etiquetas del mismo rango. */
+.tab-proveedores_locales .prov-rubro-detalle {
+    font-size: 0.74rem;
+    color: #6b7684;
+}
+
 /* Una forma de pago que no matcheó contra la lista. Se muestra tal como vino:
    lo que hay que arreglar es la planilla, no el dato ya cargado. */
 .tab-proveedores_locales .prov-forma-rara {
     color: #b07d2b;
     font-size: 0.78rem;
     border-bottom: 1px dotted #b07d2b;
+    cursor: help;
+}
+
+/* LA BARRA DE SELECCIÓN. Aparece sólo cuando hay algo elegido y por eso puede
+   pintarse: una barra permanente teñida sería ruido de fondo. */
+.tab-proveedores_locales .prov-barra-sel {
+    background-color: #eef4ff;
+    border-bottom: 1px solid #c8d8f5;
+}
+
+/* La marca de que esa factura YA está excluida. Va en la misma celda que el
+   checkbox de selección porque son dos cosas distintas sobre la misma fila —una
+   es "la elegí" y la otra "está afuera"— y separarlas en dos columnas obligaría
+   a leer dos celdas para saber en qué estado está. */
+.tab-proveedores_locales .prov-badge-excluida {
+    display: inline-block;
+    margin-top: 2px;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #8a3d3d;
+    background: #f7e4e4;
+    border-radius: 3px;
+    padding: 0 4px;
+    cursor: help;
+}
+
+/* Una factura excluida a mano: su importe NO está en el cashflow. Se atenúa y se
+   tacha el pendiente, que es la columna cuyo número dejó de contar. Tiene que
+   verse sin leer la columna del tilde, porque es la fila la que cambió de
+   significado y no una celda. */
+.tab-proveedores_locales tr.prov-excluida-mano {
+    opacity: 0.62;
+}
+
+.tab-proveedores_locales tr.prov-excluida-mano .currency.fw-bold {
+    text-decoration: line-through;
+}
+
+/* LA COLUMNA FORMA DE PAGO es una sola y es editable: muestra la que decide
+   —la del maestro, o el override de esta factura— y cambiarla guarda el
+   override. */
+.tab-proveedores_locales .prov-forma-celda {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    justify-content: center;
+}
+
+/* EL ANCHO VA ACOTADO. La opción que está seleccionada en el caso normal es la
+   más larga —'TRANSFERENCIA · del maestro'— y sin techo estira la columna, que
+   en una tabla con columnas fijas a la izquierda empuja el eje fuera de la
+   vista. El texto completo se lee al desplegar y está en el title. */
+.tab-proveedores_locales .prov-select-forma {
+    font-size: 0.78rem;
+    padding: 1px 4px;
+    max-width: 150px;
+}
+
+/* Fijada a mano para esta factura. Se marca porque decide distinto del resto de
+   las facturas del mismo proveedor, y eso tiene que verse sin abrir el
+   tooltip. */
+.tab-proveedores_locales .prov-forma-pisada {
+    border-color: #6f42c1;
+    background-color: #f3effa;
+    font-weight: 600;
+}
+
+/* No se sabe cómo se paga. Entra al cronograma igual —esconder deuda por un dato
+   que falta es la peor razón para esconderla— pero no se confunde con un echeq
+   confirmado. */
+.tab-proveedores_locales .prov-forma-incierta {
+    border-color: #c9ced6;
+    color: var(--text-muted, #8c93a8);
+    font-style: italic;
+}
+
+/* Una fila del maestro que se cargó o se editó desde la pantalla. No es un
+   problema —es una forma legítima de mantener el maestro— pero sí es lo que la
+   próxima importación va a pisar, así que tiene que poder verse de un vistazo
+   sin gritar. */
+.tab-proveedores_locales .prov-origen-manual {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #5a6472;
+    background: #eef1f5;
+    border-radius: 3px;
+    padding: 1px 5px;
     cursor: help;
 }
 

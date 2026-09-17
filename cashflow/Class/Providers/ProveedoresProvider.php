@@ -101,6 +101,30 @@ class ProveedoresProvider extends CashflowProvider {
      */
     const SERIE_CRONO_OPERATIVOS = 'PAGOS_CRONO_OPERATIVOS';
 
+    /**
+     * LAS FACTURAS EXCLUIDAS A MANO, una por una.
+     *
+     * Es el tercer miembro del corte "por como se paga", y por eso existe como
+     * serie propia en vez de reusar SERIE_EXCLUIDOS.
+     *
+     * EL MOTIVO ES CONCRETO: la fila del tablero usa PAGOS, y PAGOS pertenece al
+     * corte del cronograma, que NO excluye nada. Mandar la factura tildada solo
+     * a PAGOS_EXCLUIDOS la habria sacado de PAGOS_CRONO_OPERATIVOS, que hoy no
+     * usa ninguna fila: el tilde no habria movido un peso del cashflow.
+     *
+     * Verificado al escribirlo: la fila esta configurada con ORIGEN_SERIE =
+     * 'PAGOS' y ahi adentro hay $72.500.993,87 en 8 vencimientos de un proveedor
+     * con rubro Excluidos que entran igual porque cobra por echeq.
+     *
+     * Asi el corte sigue cerrando con tres partes en vez de dos:
+     *
+     *     PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA = PAGOS_TODO
+     *
+     * El importe no desaparece: queda en su propia serie, visible y auditable, y
+     * el proveedor avisa cuanto es y por que.
+     */
+    const SERIE_EXCLUIDOS_FACTURA = 'PAGOS_EXCLUIDOS_FACTURA';
+
     protected function calcular($h) {
         if ($this->codigo() !== 'PROV_LOCALES') {
             $this->avisar('Proveedores Locales: el codigo de proveedor "' . $this->codigo()
@@ -126,6 +150,7 @@ class ProveedoresProvider extends CashflowProvider {
         // tiene que saber que parte del importe no esta pudiendo abrirse.
         $this->avisarFaltantes($prov, $items);
         $this->avisarFueraDelCronograma($items);
+        $this->avisarExcluidasAMano($items);
 
         return $this->repartir($h, $items);
     }
@@ -186,6 +211,57 @@ class ProveedoresProvider extends CashflowProvider {
     }
 
     /**
+     * Avisa cuanta deuda se saco del cashflow tildandola factura por factura.
+     *
+     * ES PLATA QUE EL TABLERO DEJA DE MOSTRAR POR UNA DECISION, y por eso se
+     * avisa: el modulo entero esta construido sobre que nada desaparezca sin
+     * decir por que. Un tilde puesto en marzo que nadie recuerda es exactamente
+     * lo que este aviso evita.
+     *
+     * SE NOMBRAN LOS MOTIVOS, hasta tres. El motivo es obligatorio al tildar, y
+     * sin traerlo hasta aca el aviso diria cuanta plata falta pero no por que,
+     * que obliga a abrir la pestana igual.
+     *
+     * @param array $items
+     */
+    private function avisarExcluidasAMano($items) {
+        $total = 0;
+        $cuantas = 0;
+        $motivos = [];
+
+        foreach ($items as $item) {
+            if (empty($item['EXCLUIDA_MANUAL'])) {
+                continue;
+            }
+
+            $total += floatval($item['IMPORTE_PENDIENTE']);
+            $cuantas++;
+
+            $m = trim((string) $item['MOTIVO_EXCLUSION']);
+
+            if ($m !== '' && !in_array($m, $motivos, true)) {
+                $motivos[] = $m;
+            }
+        }
+
+        if ($cuantas === 0) {
+            return;
+        }
+
+        $detalle = '';
+
+        if (!empty($motivos)) {
+            $primeros = array_slice($motivos, 0, 3);
+            $detalle = ' Motivos: ' . implode('; ', $primeros)
+                . (count($motivos) > 3 ? '; y ' . (count($motivos) - 3) . ' más.' : '.');
+        }
+
+        $this->avisar('Cuentas a Pagar Locales: ' . $cuantas . ' factura(s) por $ '
+            . number_format($total, 2, ',', '.') . ' están excluidas a mano y no entran al '
+            . 'cashflow.' . $detalle . ' Se ven en la pestaña, con el motivo al lado.');
+    }
+
+    /**
      * Reparte los vencimientos en las series.
      *
      * @param Horizonte $h
@@ -200,7 +276,8 @@ class ProveedoresProvider extends CashflowProvider {
             self::SERIE_OPERATIVOS => $this->serieVacia($h),
             self::SERIE_EXCLUIDOS => $this->serieVacia($h),
             self::SERIE_CRONO_OPERATIVOS => $this->serieVacia($h),
-            self::SERIE_SIN_RUBRO => $this->serieVacia($h)
+            self::SERIE_SIN_RUBRO => $this->serieVacia($h),
+            self::SERIE_EXCLUIDOS_FACTURA => $this->serieVacia($h)
         ];
 
         /* SE CREA UNA SERIE POR CADA RUBRO DEL MAESTRO, aunque hoy no tenga
@@ -261,7 +338,7 @@ class ProveedoresProvider extends CashflowProvider {
      *
      * DOS PARTICIONES INDEPENDIENTES, y una tercera serie que las cruza:
      *
-     *   por COMO se paga   PAGOS            + PAGOS_FUERA_CRONOGRAMA
+     *   por COMO se paga   PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA
      *   por QUE rubro es   PAGOS_OPERATIVOS + PAGOS_EXCLUIDOS
      *   las dos juntas     PAGOS_CRONO_OPERATIVOS
      *
@@ -280,13 +357,27 @@ class ProveedoresProvider extends CashflowProvider {
     public static function seriesDeItem($item) {
         $cronograma = !empty($item['CRONOGRAMA']);
         $excluido = !empty($item['EXCLUIDO']);
+        $excluidaManual = !empty($item['EXCLUIDA_MANUAL']);
 
         // PAGOS_TODO es el universo; PAGOS trae solo el cronograma. Las
         // aperturas por rubro y por excluidos parten PAGOS_TODO, no PAGOS:
         // describen QUE es cada deuda, no como se paga.
         $destinos = [self::SERIE_TODO];
 
-        $destinos[] = $cronograma ? self::SERIE_TOTAL : self::SERIE_FUERA;
+        /* EL PRIMER CORTE TIENE TRES PARTES. Una factura excluida a mano no va
+           ni a PAGOS ni a PAGOS_FUERA_CRONOGRAMA: va a la suya. Es lo que hace
+           que el tilde saque el importe de la fila del tablero, que usa PAGOS.
+
+           No se pregunta por $excluido sino por $excluidaManual: un proveedor
+           con rubro "Excluidos" sigue repartiendose por como se le paga, como
+           siempre. Sacarlo de PAGOS es otra decision y se toma desde Parametros
+           apuntando la fila a PAGOS_CRONO_OPERATIVOS. */
+        if ($excluidaManual) {
+            $destinos[] = self::SERIE_EXCLUIDOS_FACTURA;
+        } else {
+            $destinos[] = $cronograma ? self::SERIE_TOTAL : self::SERIE_FUERA;
+        }
+
         $destinos[] = $excluido ? self::SERIE_EXCLUIDOS : self::SERIE_OPERATIVOS;
 
         if ($cronograma && !$excluido) {

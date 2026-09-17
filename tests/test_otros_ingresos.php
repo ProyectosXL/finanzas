@@ -337,6 +337,181 @@ chequear('y la pestana de dolares tampoco',
 /* ================================================================
    Contra la base
    ================================================================ */
+/* ================================================================
+   LAS DOS FECHAS DE LOS DOLARES
+
+   FECHA            la del dato. VALUA.
+   FECHA_CRONOGRAMA donde cae el importe en el eje. Editable.
+
+   La de cronograma es una decision de PRESENTACION: si valuara, mover una fila
+   en la grilla cambiaria la plata, que es el acople que separarlas viene a
+   romper. Estas pruebas van ANTES del corte por base: son decisiones puras y
+   tienen que correr aunque no haya SQL Server.
+   ================================================================ */
+/* ================================================================
+   LOS DOLARES SON STOCK DE COBERTURA, NO UN INGRESO
+
+   Entraban al flujo como ingreso en la fecha de su carga, y eso decia que ese
+   dia INGRESA plata. No es cierto: los dolares ya estan en la cuenta. Lo que
+   hay que decidir es cuando se los usa, y esa decision se carga en Cobertura.
+
+   Es el mismo movimiento que ya habia hecho el saldo de inversiones.
+   ================================================================ */
+seccion('los dolares son stock de cobertura, igual que las inversiones');
+
+$metaDol = CashflowRegistry::meta('DOLARES_COMITENTE');
+
+chequear('ofrece la serie STOCK', true, isset($metaDol['series']['STOCK']));
+
+// La vieja queda declarada para poder volver atras desde Parametros sin tocar
+// codigo, igual que en inversiones.
+chequear('la serie vieja sigue declarada', true, isset($metaDol['series']['INGRESO']));
+
+/* PERO NO PUEDEN CONVIVIR: son el mismo dinero mirado de dos formas, y activar
+   las dos filas mostraria el saldo dos veces. */
+chequear('y las dos estan declaradas como incompatibles', true,
+    isset($metaDol['componentes']['STOCK'])
+    && in_array('INGRESO', $metaDol['componentes']['STOCK'], true)
+    && isset($metaDol['componentes']['INGRESO'])
+    && in_array('STOCK', $metaDol['componentes']['INGRESO'], true));
+
+// El proveedor devuelve exactamente las dos que el registro declara.
+$provDol = CashflowRegistry::instanciar('DOLARES_COMITENTE');
+$seriesDol = $provDol->series(Horizonte::desdeParametros(new Parametros()));
+
+chequear('el proveedor rinde la serie STOCK', true, isset($seriesDol['STOCK']));
+chequear('y tambien la vieja', true, isset($seriesDol['INGRESO']));
+
+$declaradas = array_keys($metaDol['series']);
+$devueltas = array_keys($seriesDol);
+sort($declaradas);
+sort($devueltas);
+
+chequear('el registro declara exactamente lo que el proveedor devuelve',
+    $declaradas, $devueltas);
+
+seccion('el stock es la ULTIMA carga, no la suma');
+
+/* CADA CARGA ES UNA FOTO DEL SALDO, no un deposito. Sumarlas daria dolares que
+   nunca estuvieron juntos en la cuenta. Se verifica contra la base: el stock
+   tiene que coincidir con UNA de las cargas -la mas reciente valuada- y no con
+   la suma de todas. */
+if (Pruebas::hayBase() && (new OtrosIngresos())->tablaCreada()) {
+    $val = (new OtrosIngresos())->valuarDolares();
+    $sumaStock = 0;
+
+    foreach ($seriesDol['STOCK']['dias'] as $v) { $sumaStock += floatval($v); }
+    foreach ($seriesDol['STOCK']['meses'] as $v) { $sumaStock += floatval($v); }
+
+    $suma = 0;
+    $ultima = null;
+
+    foreach ($val['filas'] as $f) {
+        if ($f['IMPORTE_ARS'] === null) { continue; }
+
+        $suma += floatval($f['IMPORTE_ARS']);
+
+        if ($ultima === null || $f['FECHA'] > $ultima['FECHA']) { $ultima = $f; }
+    }
+
+    if ($ultima !== null) {
+        chequear('el stock es el importe de la carga mas reciente',
+            round(floatval($ultima['IMPORTE_ARS']), 2), round($sumaStock, 2));
+
+        // Y con mas de una carga, NO es la suma. Con una sola coinciden y la
+        // prueba no distingue nada, asi que solo se afirma cuando hay varias.
+        if (count($val['filas']) > 1 && round($suma, 2) !== round($sumaStock, 2)) {
+            chequear('y con varias cargas no es la suma de todas',
+                true, round($suma, 2) !== round($sumaStock, 2));
+        }
+    }
+}
+
+/* EL IMPORTE VA EN EL PRIMER DIA DEL EJE. No significa "entra ese dia": el
+   motor vacia todas las columnas de una fila STOCK_COBERTURA y muestra el
+   importe solo en la columna Total. Esta ahi para que llegue por el mismo
+   camino que cualquier otra serie. */
+$fuenteProv = file_get_contents(__DIR__ . '/../cashflow/Class/Providers/OtrosIngresosProvider.php');
+
+chequear('el stock de dolares se ubica en el primer dia del eje', true,
+    strpos($fuenteProv, "\$h->acumular(\$serie, \$h->hoy(), floatval(\$ultima['IMPORTE_ARS']))")
+        !== false);
+
+seccion('el script que mueve la fila a Cobertura');
+
+$sqlCob = __DIR__ . '/../sql/cashflow_dolares_comitente_cobertura.sql';
+
+chequear('el script existe', true, file_exists($sqlCob));
+
+$txtCob = file_get_contents($sqlCob);
+
+chequear('crea la fila en la seccion Cobertura', true,
+    preg_match("/'STOCK_DOLARES_COMITENTE'.*?'COBERTURA',\s*'STOCK_COBERTURA'/s", $txtCob) === 1);
+
+// COMPUTA = 0: un stock no entra en ninguna suma del flujo. La plata se mueve
+// recien cuando alguien aplica cobertura.
+chequear('y no computa en el flujo', true,
+    strpos($txtCob, "'STOCK_COBERTURA', 0,") !== false);
+
+/* LA VIEJA SE DA DE BAJA LOGICA, no se borra: reactivarla es poner el bit en 1.
+   Se renombra para que quien la vea apagada entienda por que. */
+chequear('la fila vieja se apaga, no se borra', true,
+    strpos($txtCob, 'SET ACTIVO = 0,') !== false);
+chequear('y se renombra para que se entienda', true,
+    strpos($txtCob, 'pasó a ser stock de cobertura') !== false);
+
+chequear('es reejecutable', true,
+    strpos($txtCob, "IF NOT EXISTS (SELECT 1 FROM dbo.RO_T_CASHFLOW_CONF_FILA") !== false);
+
+seccion('los dolares tienen dos fechas y el saldo de inversiones una');
+
+chequear('los dolares declaran su columna de cronograma',
+    'FECHA_CRONOGRAMA', OtrosIngresos::DOLARES['cronograma']);
+
+// NO es un olvido: el saldo de inversiones es un STOCK y su importe ya se ubica
+// en el primer dia del eje y no en su fecha. Una columna de cronograma ahi
+// seria una columna que no hace nada y que alguien va a editar esperando que
+// haga algo.
+chequear('el saldo de inversiones no tiene ninguna', null,
+    OtrosIngresos::INVERSIONES['cronograma']);
+
+seccion('que dia se pisa al guardar');
+
+// La regla sigue siendo "un importe vigente por dia". Lo que cambia es CUAL
+// dia: el que decide en que columna del eje cae el importe.
+chequear('en los dolares manda el dia del cronograma',
+    'FECHA_CRONOGRAMA', OtrosIngresos::claveVigencia(OtrosIngresos::DOLARES));
+chequear('en el saldo de inversiones sigue siendo su FECHA',
+    'FECHA', OtrosIngresos::claveVigencia(OtrosIngresos::INVERSIONES));
+
+seccion('el script de la fecha de cronograma');
+
+$migracion = __DIR__ . '/../sql/cashflow_dolares_comitente_cronograma.sql';
+
+chequear('el script existe', true, file_exists($migracion));
+
+$sqlCrono = file_get_contents($migracion);
+
+// Las filas que ya estan quedan con la MISMA fecha en los dos campos, asi que
+// el dia que se corra el script el tablero no se mueve ni un peso.
+chequear('rellena las filas que ya estan con su propia fecha', true,
+    strpos($sqlCrono, 'SET FECHA_CRONOGRAMA = FECHA') !== false);
+
+// Reejecutable: correrlo dos veces no puede cambiar ningun dato.
+chequear('no agrega la columna si ya esta', true,
+    strpos($sqlCrono, "COL_LENGTH('dbo.RO_T_CASHFLOW_DOLARES_COMITENTE', 'FECHA_CRONOGRAMA') IS NULL")
+        !== false);
+chequear('y el relleno solo toca lo que esta en null', true,
+    strpos($sqlCrono, 'WHERE FECHA_CRONOGRAMA IS NULL') !== false);
+
+// NOT NULL recien despues de rellenar: una fila sin fecha de cronograma no
+// tendria columna donde mostrarse y desapareceria del tablero sin aviso.
+chequear('deja la columna NOT NULL', true,
+    strpos($sqlCrono, 'ALTER COLUMN FECHA_CRONOGRAMA DATE NOT NULL') !== false);
+chequear('y recien despues de rellenarla', true,
+    strpos($sqlCrono, 'SET FECHA_CRONOGRAMA = FECHA')
+        < strpos($sqlCrono, 'ALTER COLUMN FECHA_CRONOGRAMA DATE NOT NULL'));
+
 seccion('contra la base');
 
 if (!Pruebas::hayBase()) {
@@ -346,8 +521,13 @@ if (!Pruebas::hayBase()) {
 
 $otros = new OtrosIngresos();
 
+/* tablaCreada() pide el circuito ENTERO: la tabla y su fecha de cronograma. El
+   mensaje nombra los dos scripts porque los dos dejan la grilla vacía y no es
+   lo mismo: uno es una instalación nueva y el otro una que quedó a mitad. */
 if (!$otros->tablaCreada()) {
-    Pruebas::saltear('falta correr sql/cashflow_dolares_comitente.sql');
+    Pruebas::saltear('falta correr sql/cashflow_dolares_comitente.sql '
+        . 'o sql/cashflow_dolares_comitente_cronograma.sql');
+
     return;
 }
 
@@ -355,16 +535,28 @@ $filas = $otros->getDolaresComitente();
 
 chequear('getDolaresComitente devuelve un array', true, is_array($filas));
 
-// Una fecha no puede tener dos importes vigentes: es lo que garantiza que la
-// fila del tablero no cuente la misma plata dos veces.
-$porFecha = [];
-
-foreach ($filas as $f) {
-    $porFecha[$f['FECHA']] = isset($porFecha[$f['FECHA']]) ? $porFecha[$f['FECHA']] + 1 : 1;
+// Cada fila trae las DOS fechas: la del dato -que valua- y la del cronograma
+// -que ubica-. Sin la segunda, el proveedor ubicaria en null y el importe
+// desapareceria del tablero sin aviso.
+if (!empty($filas)) {
+    chequear('cada fila trae la fecha del dato', true, isset($filas[0]['FECHA']));
+    chequear('y la fecha de cronograma', true,
+        array_key_exists('FECHA_CRONOGRAMA', $filas[0]));
 }
 
-chequear('ninguna fecha tiene dos importes vigentes',
-    [], array_keys(array_filter($porFecha, function ($n) { return $n > 1; })));
+// Un DIA DEL CRONOGRAMA no puede tener dos importes vigentes: es lo que
+// garantiza que la fila del tablero no cuente la misma plata dos veces. La
+// clave es la de cronograma y no la del dato, porque es la que decide en que
+// columna cae el importe.
+$porDia = [];
+
+foreach ($filas as $f) {
+    $dia = $f['FECHA_CRONOGRAMA'];
+    $porDia[$dia] = isset($porDia[$dia]) ? $porDia[$dia] + 1 : 1;
+}
+
+chequear('ningun dia del cronograma tiene dos importes vigentes',
+    [], array_keys(array_filter($porDia, function ($n) { return $n > 1; })));
 
 /* ================================================================
    LA VALUACION DE LOS DOLARES: LA CUENTA ABIERTA
@@ -381,28 +573,45 @@ chequear('ninguna fecha tiene dos importes vigentes',
    ================================================================ */
 seccion('valuacion de dolares: se inyecta la cotizacion, sin base');
 
-/** Cotizacion de mentira: una serie diaria con agujeros, como la real. */
+/**
+ * Cotizacion de mentira: una serie diaria con agujeros, como la real, y con las
+ * DOS puntas. El vendedor va siempre mas arriba que el comprador, como en el
+ * origen: es lo que hace que una prueba pueda distinguir con cual se valuo.
+ */
 class CotizacionFalsa extends Cotizacion {
-    /** Fecha => TCC. Faltan dias a proposito: sabados, domingos y feriados. */
+    /** Fecha => [TCC, TCV]. Faltan dias a proposito: sabados y feriados. */
     public $serie = [
-        '2026-09-01' => 1485.0,
-        '2026-09-03' => 1490.0,
-        '2026-09-06' => 1480.0
+        '2026-09-01' => [1485.0, 1535.0],
+        '2026-09-03' => [1490.0, 1540.0],
+        '2026-09-06' => [1480.0, 1530.0]
     ];
+
+    /** La ultima punta que le pidieron, para poder chequearla */
+    public $ultimaPunta = null;
 
     public function __construct() { /* a proposito: no abre conexion */ }
 
-    public function ultimaHasta($fecha) {
+    public function ultimaHasta($fecha, $punta = Cotizacion::COMPRADOR) {
         $f = self::dia($fecha);
+        $col = self::punta($punta);
+        $this->ultimaPunta = $col;
         $mejor = null;
 
-        foreach ($this->serie as $dia => $tcc) {
+        foreach ($this->serie as $dia => $valores) {
             if ($dia <= $f && ($mejor === null || $dia > $mejor)) {
                 $mejor = $dia;
             }
         }
 
-        return ($mejor === null) ? null : ['fecha' => $mejor, 'tcc' => $this->serie[$mejor]];
+        if ($mejor === null) {
+            return null;
+        }
+
+        return [
+            'fecha' => $mejor,
+            'valor' => $this->serie[$mejor][$col === Cotizacion::VENDEDOR ? 1 : 0],
+            'punta' => $col
+        ];
     }
 }
 
@@ -414,21 +623,22 @@ $cargas = [
     ['FECHA' => '2020-01-01', 'IMPORTE_USD' => 500.0]     // anterior a toda la serie
 ];
 
-$v = $oi->valuarDolares($cargas, new CotizacionFalsa());
+$falsa = new CotizacionFalsa();
+$v = $oi->valuarDolares($cargas, $falsa);
 
 chequear('devuelve una fila por carga', 3, count($v['filas']));
 
 // Un sabado no inventa una cotizacion: usa la del viernes Y DICE que es del
 // viernes. Sin la fecha, el numero en pesos no se puede explicar.
-chequear('un dia sin cotizacion toma la anterior', 1490.0, $v['filas'][0]['TC']);
+chequear('un dia sin cotizacion toma la anterior', 1540.0, $v['filas'][0]['TC']);
 chequear('y dice de que dia salio', '2026-09-03', $v['filas'][0]['TC_FECHA']);
-chequear('la cuenta es USD x cotizacion', 1490000.0, $v['filas'][0]['IMPORTE_ARS']);
+chequear('la cuenta es USD x cotizacion', 1540000.0, $v['filas'][0]['IMPORTE_ARS']);
 
 // Una carga posterior a la ultima cotizacion cargada usa esa ultima, que es
 // justamente lo que el criterio de cierre mensual no podia contestar.
-chequear('una carga futura usa la ultima conocida', 1480.0, $v['filas'][1]['TC']);
+chequear('una carga futura usa la ultima conocida', 1530.0, $v['filas'][1]['TC']);
 chequear('con su fecha', '2026-09-06', $v['filas'][1]['TC_FECHA']);
-chequear('y su cuenta', 2960000.0, $v['filas'][1]['IMPORTE_ARS']);
+chequear('y su cuenta', 3060000.0, $v['filas'][1]['IMPORTE_ARS']);
 
 // Sin ninguna cotizacion anterior NO se asume nada: null, no cero. Un cero se
 // leeria como "esos dolares valen cero pesos".
@@ -437,6 +647,58 @@ chequear('la fecha tambien', null, $v['filas'][2]['TC_FECHA']);
 chequear('y el importe en pesos, null y no cero', null, $v['filas'][2]['IMPORTE_ARS']);
 chequear('esos dolares se informan aparte', 500.0, $v['sin_cotizacion']);
 chequear('y no hubo error de origen', null, $v['error']);
+
+/* ================================================================
+   LA PUNTA: ESTA PANTALLA VALUA CON EL VENDEDOR
+
+   Es la UNICA del cashflow que no usa comprador, asi que su total NO cierra
+   contra los de Ventas, Saldos, Exportaciones Tasky y Comex, y eso es
+   deliberado. Las pruebas de aca abajo son las que impiden que alguien
+   "arregle" la discrepancia devolviendo la pantalla a comprador sin darse
+   cuenta de que estaria cambiando la valuacion.
+   ================================================================ */
+seccion('los dolares de la cuenta comitente se valuan a la punta vendedora');
+
+chequear('valuarDolares le pide el vendedor a Cotizacion',
+    Cotizacion::VENDEDOR, $falsa->ultimaPunta);
+
+chequear('y la constante de la pantalla es esa', Cotizacion::VENDEDOR, OtrosIngresos::PUNTA);
+
+// Viaja con cada fila y con su nombre en castellano: la grilla lo muestra sin
+// tener que saber que TCV es el vendedor.
+chequear('cada fila valuada dice con que punta se valuo',
+    'vendedor', $v['filas'][0]['TC_PUNTA']);
+chequear('y una fila sin cotizacion no inventa ninguna',
+    null, $v['filas'][2]['TC_PUNTA']);
+
+// El comprador sigue siendo el default: es lo que hace que agregar el parametro
+// no haya movido a las otras cuatro pantallas.
+$compra = new CotizacionFalsa();
+$compra->ultimaHasta('2026-09-04');
+chequear('sin pedir punta, Cotizacion lee el comprador',
+    Cotizacion::COMPRADOR, $compra->ultimaPunta);
+chequear('y el comprador da un numero distinto del vendedor',
+    1490.0, $compra->ultimaHasta('2026-09-04')['valor']);
+
+// La clave dejo de llamarse 'tcc': con la punta elegible, ese nombre decia
+// "comprador" sobre un valor que puede ser del vendedor.
+$ult = $falsa->ultimaHasta('2026-09-04', Cotizacion::VENDEDOR);
+chequear('la cotizacion viaja en la clave "valor"', true, isset($ult['valor']));
+chequear('y ya no en "tcc"', false, isset($ult['tcc']));
+chequear('con su punta al lado', Cotizacion::VENDEDOR, $ult['punta']);
+
+// Una punta mal escrita LANZA en vez de caer en comprador: el sintoma de caer
+// en el default seria un importe en pesos apenas mas chico, sin nada que lo
+// explique.
+chequearLanza('una punta invalida se rechaza',
+    function () { Cotizacion::punta('TCX'); });
+chequearLanza('y una vacia tambien',
+    function () { Cotizacion::punta(''); });
+
+chequear('las puntas tienen nombre para la pantalla',
+    'comprador', Cotizacion::nombrePunta(Cotizacion::COMPRADOR));
+chequear('y el vendedor tambien',
+    'vendedor', Cotizacion::nombrePunta(Cotizacion::VENDEDOR));
 
 chequear('sin cargas no hay nada que valuar y no se toca la base',
     ['filas' => [], 'sin_cotizacion' => 0.0, 'error' => null], $oi->valuarDolares([]));

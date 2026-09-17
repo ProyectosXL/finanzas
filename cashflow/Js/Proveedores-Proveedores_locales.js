@@ -66,8 +66,41 @@
         var soloC = document.getElementById('soloCronogramaProv');
         if (soloC) { soloC.addEventListener('change', pintarGrilla); }
 
+        var verEx = document.getElementById('verExcluidasProv');
+        if (verEx) { verEx.addEventListener('change', pintarGrilla); }
+
         var busqM = document.getElementById('busquedaMaestroProv');
         if (busqM) { busqM.addEventListener('input', pintarMaestro); }
+
+        conectar('btnNuevoProv', function() { abrirForm(null); });
+        conectar('btnGuardarProv', guardarProveedor);
+        conectar('btnCancelarProv', cerrarForm);
+
+        /* "Seleccionar todas las que se ven" es lo que hace que el caso normal
+           —las ocho facturas de un proveedor— sea buscar el proveedor y tildar
+           una vez. Es el mismo gesto que el marcado masivo de Echeqs. */
+        var selTodas = document.getElementById('selTodasProv');
+
+        if (selTodas) {
+            selTodas.addEventListener('change', function() {
+                filasVisibles().forEach(function(f) {
+                    if (selTodas.checked) {
+                        seleccion[claveFila(f)] = true;
+                    } else {
+                        delete seleccion[claveFila(f)];
+                    }
+                });
+
+                pintarGrilla();
+            });
+        }
+
+        conectar('btnExcluirSelProv', function() { accionSeleccion(true); });
+        conectar('btnIncluirSelProv', function() { accionSeleccion(false); });
+        conectar('btnLimpiarSelProv', function() {
+            seleccion = {};
+            pintarGrilla();
+        });
 
         cargar();
     }
@@ -121,6 +154,12 @@
                 datos = data;
                 vistas.usar(datos);
 
+                /* La selección se poda contra lo que vino: un comprobante que se
+                   canceló en Tango ya no está en la lista, y dejarlo
+                   seleccionado haría que la próxima acción masiva lo mande al
+                   servidor sin que nadie lo vea en pantalla. */
+                podarSeleccion();
+
                 pintarAvisos(datos.warnings, 'avisosProv');
                 // Los indicadores los pinta pintarGrilla(): se miden sobre las
                 // filas visibles, así que cambian con cada filtro.
@@ -144,6 +183,14 @@
         pedirJson('Controller/ProveedoresController.php?action=getMaestro')
             .then(function(data) {
                 maestro = data;
+
+                /* LOS AVISOS DEL MAESTRO SE PINTAN, y antes no: el backend los
+                   venía produciendo —"el maestro está vacío", "falta el script
+                   de la carga manual"— y esta pantalla no los leía nunca. El
+                   síntoma es una función que no aparece sin que nada diga por
+                   qué, que es indistinguible de una que no se construyó. */
+                pintarAvisos(maestro.avisos, 'avisosMaestroProv');
+
                 pintarMaestro();
                 pintarFaltantes();
             })
@@ -271,15 +318,25 @@
         var q = (document.getElementById('busquedaProv') || {}).value || '';
         var soloVencidos = (document.getElementById('soloVencidosProv') || {}).checked;
         var soloCronograma = (document.getElementById('soloCronogramaProv') || {}).checked;
+        var verExcluidas = (document.getElementById('verExcluidasProv') || {}).checked;
 
         q = q.trim().toLowerCase();
 
         return filas.filter(function(f) {
+            /* LAS EXCLUIDAS NO SE VEN POR DEFECTO: ya se decidió que no van al
+               cashflow, así que en el trabajo normal son ruido. Cuánto esconde
+               este filtro se dice al lado del período. */
+            if (!verExcluidas && f.EXCLUIDA_MANUAL) { return false; }
+
             if (soloCronograma && !f.CRONOGRAMA) { return false; }
             if (soloVencidos && !f.SIN_FECHA_CARGADA) { return false; }
             if (q === '') { return true; }
 
-            return [f.COD_PROVEE, f.RAZON_SOC, f.N_COMP, f.RUBRO_ECONOMICO, f.FORMA_PAGO]
+            /* Se busca por la forma QUE DECIDE y no por la del pago registrado:
+               es la que se ve en la columna, y buscar "CAJA" tiene que traer lo
+               que la grilla muestra como CAJA. */
+            return [f.COD_PROVEE, f.RAZON_SOC, f.N_COMP, f.RUBRO_ECONOMICO, f.RUBRO,
+                    f.FORMA_PAGO_VIGENTE, f.MOTIVO_EXCLUSION]
                 .join(' ').toLowerCase().indexOf(q) !== -1;
         });
     }
@@ -308,6 +365,12 @@
             partes.push('solo vencidos sin fecha');
         }
 
+        // Se nombra cuando SE VEN, no cuando se esconden: esconderlas es el
+        // caso normal y aclararlo siempre haria que el nombre no distinga nada.
+        if ((document.getElementById('verExcluidasProv') || {}).checked) {
+            partes.push('con las excluidas');
+        }
+
         if (q !== '') { partes.push('buscando ' + q); }
 
         // Sin ningún filtro no hace falta aclarar nada: son todas.
@@ -326,22 +389,35 @@
         if (!el) { return; }
 
         var soloCronograma = (document.getElementById('soloCronogramaProv') || {}).checked;
+        var verExcluidas = (document.getElementById('verExcluidasProv') || {}).checked;
         var k = datos.indicadores;
+        var partes = [];
 
-        if (!soloCronograma || !k.n_fuera_cronograma) {
-            el.textContent = '';
-            return;
+        if (soloCronograma && k.n_fuera_cronograma) {
+            var detalle = Object.keys(k.fuera_por_forma || {}).map(function(forma) {
+                return forma + ' ' + plata(k.fuera_por_forma[forma]);
+            }).join(' · ');
+
+            partes.push('Quedan afuera ' + escapar(plata(k.fuera_cronograma)) + ' en '
+                + k.n_fuera_cronograma + ' vencimiento(s)'
+                + (detalle ? ' (' + escapar(detalle) + ')' : '')
+                + ' — destildá <em>Sólo echeq y transferencia</em> para verlos.');
         }
 
-        var detalle = Object.keys(k.fuera_por_forma || {}).map(function(forma) {
-            return forma + ' ' + plata(k.fuera_por_forma[forma]);
-        }).join(' · ');
+        /* LO EXCLUIDO SE DICE AUNQUE NO SE VEA, y sobre todo por eso: esas
+           facturas están escondidas por defecto, así que sin este cartel no hay
+           ninguna pantalla donde alguien note que existen. Es la misma regla que
+           el filtro de al lado: un filtro que esconde plata sin decir cuánta es
+           un filtro que miente. */
+        if (!verExcluidas && k.n_excluido_manual) {
+            partes.push('Hay ' + k.n_excluido_manual + ' factura(s) excluida(s) a mano por '
+                + escapar(plata(k.excluido_manual)) + ', escondidas y fuera del cashflow '
+                + '— tildá <em>Ver excluidas</em> para revisarlas.');
+        }
 
-        el.innerHTML = '&nbsp;·&nbsp;<span class="prov-fuera-filtro">'
-            + 'Quedan afuera ' + escapar(plata(k.fuera_cronograma)) + ' en '
-            + k.n_fuera_cronograma + ' vencimiento(s)'
-            + (detalle ? ' (' + escapar(detalle) + ')' : '')
-            + ' — destildá el filtro para verlos.</span>';
+        el.innerHTML = partes.length
+            ? '&nbsp;·&nbsp;<span class="prov-fuera-filtro">' + partes.join(' · ') + '</span>'
+            : '';
     }
 
     function pintarGrilla() {
@@ -349,9 +425,21 @@
 
         var cols = vistas.columnas();
 
+        /* EL RÓTULO SALE DE vistas.rotulo(), NO DE c.label. `columnas()` devuelve
+           STRINGS —'DIA|2026-09-17', 'MES|2026-10'—, no objetos: `c.label` daba
+           undefined y la fila de días y meses del encabezado salía toda vacía.
+           Es la misma API que usan Cobranzas FR y Echeqs. */
         document.getElementById('headerEjeProv').setAttribute('colspan', cols.length || 1);
         document.getElementById('headerSubProv').innerHTML = cols.map(function(c) {
-            return '<th class="text-end">' + escapar(c.label) + '</th>';
+            var meta = vistas.meta(c) || {};
+            var parcial = vistas.esMes(c) && meta.parcial;
+
+            return '<th class="text-end"'
+                + (parcial
+                    ? ' title="' + escapar('Este mes está recortado: sus primeros días '
+                        + 'están en el tramo diario') + '"'
+                    : '')
+                + '>' + escapar(vistas.rotulo(c)) + '</th>';
         }).join('');
 
         var filas = filasVisibles();
@@ -364,19 +452,25 @@
             if (f.ORIGEN_FECHA === 'CARGADA') { clases.push('prov-con-fecha'); }
             if (f.EXCLUIDO) { clases.push('prov-excluido'); }
 
+            // La excluida a mano se atenúa más: no está en el cashflow, y eso
+            // tiene que verse sin leer la columna del tilde.
+            if (f.EXCLUIDA_MANUAL) { clases.push('prov-excluida-mano'); }
+
             html += '<tr class="' + clases.join(' ') + '">'
                 + '<td title="' + escapar(tituloProveedor(f)) + '"><strong>'
                 +     escapar(f.COD_PROVEE) + '</strong>' + marcaMaestro(f) + '</td>'
                 + '<td class="col-texto" title="' + escapar(f.RAZON_SOC) + '">'
                 +     escapar(f.RAZON_SOC) + '</td>'
                 + '<td>' + celdaRubro(f) + '</td>'
+                + '<td>' + celdaRubroDetalle(f) + '</td>'
                 + '<td class="center">' + escapar(f.T_COMP) + '</td>'
                 + '<td class="center">' + escapar(f.N_COMP) + '</td>'
                 + '<td class="center">' + fechaCorta(f.FECHA_EMIS) + '</td>'
                 + '<td class="center">' + celdaVto(f) + '</td>'
                 + '<td class="currency fw-bold">' + plata(f.IMPORTE_PENDIENTE) + '</td>'
                 + celdaFechaPago(f)
-                + '<td class="center">' + celdaForma(f) + '</td>';
+                + '<td class="center">' + celdaForma(f) + '</td>'
+                + '<td class="center">' + celdaExcluir(f) + '</td>';
 
             cols.forEach(function(c) {
                 var v = Number(vistas.valor(f, c)) || 0;
@@ -389,7 +483,7 @@
         });
 
         if (!filas.length) {
-            html = '<tr><td colspan="' + (10 + cols.length) + '" '
+            html = '<tr><td colspan="' + (COLS_DESC + cols.length) + '" '
                  + 'class="text-center text-muted py-4">No hay cuentas a pagar que coincidan '
                  + 'con el filtro.</td></tr>';
         }
@@ -400,27 +494,46 @@
         pintarTotales(filas, cols);
         pintarFueraDelFiltro();
         conectarEdicion();
+        pintarSeleccion();
     }
+
+    /**
+     * Cuántas columnas descriptivas tiene la grilla, antes de las del eje.
+     *
+     * Está declarada una vez porque la usan el pie de totales y la fila de
+     * "no hay resultados", y las dos se corren en silencio cuando se agrega una
+     * columna: el síntoma es una tabla desalineada que nadie relaciona con el
+     * cambio que la causó.
+     */
+    var COLS_DESC = 12;
 
     function pintarTotales(filas, cols) {
         var total = 0;
         var porCol = {};
 
+        /* LA CLAVE ES LA COLUMNA, que ya ES el string 'DIA|2026-09-17'. Antes se
+           armaba con `c.rama + '|' + c.clave`, dos campos que no existen: TODAS
+           las columnas caían en la clave 'undefined|undefined' y el pie mostraba
+           el total del período repetido en cada una de las 28 columnas. Una fila
+           de totales que miente es peor que una que falta. */
         filas.forEach(function(f) {
             total += Number(f.IMPORTE_PENDIENTE) || 0;
 
             cols.forEach(function(c) {
-                var k = c.rama + '|' + c.clave;
-                porCol[k] = (porCol[k] || 0) + (Number(vistas.valor(f, c)) || 0);
+                porCol[c] = (porCol[c] || 0) + (Number(vistas.valor(f, c)) || 0);
             });
         });
 
-        var html = '<td colspan="7" class="fw-bold text-end">TOTALES</td>'
+        /* Las celdas del pie van en el mismo orden que el encabezado y suman
+           COLS_DESC: un colspan mal contado corre el total debajo de otra
+           columna y el número queda diciendo otra cosa. Ocho descriptivas, el
+           total, y las tres editables al final. */
+        var html = '<td colspan="8" class="fw-bold text-end">TOTALES</td>'
             + '<td class="currency fw-bold">' + plata(total) + '</td>'
-            + '<td colspan="2"></td>';
+            + '<td colspan="' + (COLS_DESC - 9) + '"></td>';
 
         cols.forEach(function(c) {
-            var v = porCol[c.rama + '|' + c.clave] || 0;
+            var v = porCol[c] || 0;
 
             html += '<td class="currency fw-bold">' + (v !== 0 ? plataCorta(v) : '') + '</td>';
         });
@@ -451,6 +564,10 @@
                 + 'por rubro. Importá la hoja "Maestro proveedores" actualizada.') + '"></i>';
     }
 
+    /**
+     * El RUBRO ECONÓMICO del maestro. Es el que abre la deuda por serie en el
+     * tablero, así que es el que se marca cuando el proveedor está excluido.
+     */
     function celdaRubro(f) {
         if (!f.RUBRO_ECONOMICO) {
             return '<span class="text-muted small">sin clasificar</span>';
@@ -458,6 +575,26 @@
 
         return '<span class="prov-rubro' + (f.EXCLUIDO ? ' prov-rubro-excluido' : '') + '">'
             + escapar(f.RUBRO_ECONOMICO) + '</span>';
+    }
+
+    /**
+     * El RUBRO del maestro, que es OTRA columna: un segundo nivel de
+     * clasificación dentro del económico.
+     *
+     * Va aparte y no concatenado al de al lado porque no hacen lo mismo: el
+     * económico abre las series del tablero y éste es informativo. Juntarlos en
+     * una celda haría que el que decide no se pueda leer solo.
+     *
+     * Se distingue del "sin clasificar" del económico: ahí el proveedor no está
+     * en el maestro; acá está pero esa columna vino vacía, que es de lo más
+     * común en la planilla.
+     */
+    function celdaRubroDetalle(f) {
+        if (!f.RUBRO) {
+            return '<span class="text-muted small">—</span>';
+        }
+
+        return '<span class="prov-rubro-detalle">' + escapar(f.RUBRO) + '</span>';
     }
 
     /**
@@ -508,51 +645,340 @@
             + '</div></td>';
     }
 
-    /**
-     * La columna Forma.
-     *
-     * OJO: esta columna NO explica el filtro. Lo que entra al cronograma lo
-     * decide la forma del MAESTRO —`FORMA_PAGO_MAESTRO`— y acá se muestra la
-     * del pago registrado cuando hay uno. Que difieran es información: se le
-     * pagó por una vía distinta de la habitual.
-     */
+    /* ================================================================
+       LA COLUMNA FORMA DE PAGO
+
+       UNA SOLA COLUMNA, Y MUESTRA LA QUE DECIDE. Trae la del maestro —o la
+       que quedó de la importación del maestro— y se puede editar; editarla
+       guarda un override para ESA factura y no toca el maestro.
+
+       Lo que se ve es lo que decide. Es la propiedad que importa en una
+       columna que está al lado de los importes del cashflow: si mostrara una
+       cosa y el tablero usara otra, no habría dónde notarlo.
+
+       La forma con la que se REGISTRÓ el pago —el hecho que trae la planilla
+       de pagos— sigue existiendo y no decide. Cuando difiere de la que decide
+       se marca al lado con un ícono, en vez de ocupar una columna propia: es
+       un caso raro —hoy, cero comprobantes— y una columna entera para eso
+       obliga a leer dos celdas para contestar una sola pregunta.
+       ================================================================ */
+
+    /** Cómo se nombra la forma que trae el maestro, con sus casos raros */
+    function formaDelMaestro(f) {
+        if (f.FORMA_PAGO_MAESTRO) {
+            return f.FORMA_PAGO_MAESTRO;
+        }
+
+        // Un valor que no matcheó contra la lista: es un typo de la planilla y
+        // se muestra tal como vino, porque lo que hay que arreglar es allá.
+        if (f.FORMA_PAGO_ORIG) {
+            return f.FORMA_PAGO_ORIG + ' (?)';
+        }
+
+        return 'sin forma';
+    }
+
     function celdaForma(f) {
-        // Sin forma conocida. ENTRA AL FILTRO IGUAL —no se sabe cómo se paga, y
-        // esconder deuda por un dato que falta es la peor razón para
-        // esconderla— pero se marca, para que no se confunda con un echeq.
-        if (!f.FORMA_PAGO && !f.FORMA_PAGO_ORIG) {
-            return '<span class="prov-sin-forma" title="'
-                + escapar('Sin forma de pago conocida' + (f.EN_MAESTRO
-                    ? '.' : ': el proveedor no está en el maestro.')
-                    + ' Se muestra igual, pero no se sabe si se paga por echeq o de otra '
-                    + 'manera.') + '">sin forma</span>';
+        var delMaestro = formaDelMaestro(f);
+
+        /* Sin el script del override no se puede escribir, así que se muestra
+           lo que decide en texto en vez de un desplegable que falla al
+           guardar. */
+        if (!datos || !datos.forma_por_factura) {
+            return textoForma(f, delMaestro);
         }
 
-        // Una forma que no matcheó contra la lista se muestra tal como vino y se
-        // marca: es un typo de la planilla, y eso se arregla allá. Ya no hay un
-        // segundo caso —una forma válida que quedó sin normalizar porque el
-        // maestro es viejo—: la normalización se calcula al leer, contra la
-        // lista de hoy.
-        if (!f.FORMA_PAGO && f.FORMA_PAGO_ORIG) {
-            return '<span class="prov-forma-rara" title="'
-                + escapar('"' + f.FORMA_PAGO_ORIG + '" no está en la lista de formas válidas. '
-                    + 'Corregilo en la planilla.')
-                + '">' + escapar(f.FORMA_PAGO_ORIG) + '</span>';
+        /* FORMAS_PAGO es una LISTA de nombres, no un mapa: los nombres son los
+           VALORES. Leerla con Object.keys devolvía 0..5 y el desplegable
+           mostraba números. */
+        var formas = (datos && datos.formas_pago) || [];
+        var actual = f.FORMA_PAGO_CRONOGRAMA || '';
+
+        /* La opción vacía NO es "vacío": es "la que trae el maestro", y se
+           nombra. Así el caso normal —que es éste— muestra la forma real y de
+           dónde sale, y volver a ella es lo que saca el override. */
+        var opciones = '<option value=""' + (actual === '' ? ' selected' : '') + '>'
+            + escapar(delMaestro + ' · maestro') + '</option>';
+
+        formas.forEach(function(x) {
+            opciones += '<option value="' + escapar(x) + '"'
+                + (actual === x ? ' selected' : '') + '>' + escapar(x) + '</option>';
+        });
+
+        var titulo = actual === ''
+            ? 'Viene del maestro (' + delMaestro + '). Elegí otra para tratar SÓLO esta '
+                + 'factura de otra manera: el maestro y las demás facturas de este proveedor '
+                + 'no cambian.'
+            : 'Esta factura se trata como ' + actual + ', en lugar de la del maestro ('
+                + delMaestro + '). El maestro no cambió. Volvé a "del maestro" para sacarlo.';
+
+        return '<div class="prov-forma-celda">'
+            + '<select class="form-select form-select-sm prov-select-forma'
+            +   (actual !== '' ? ' prov-forma-pisada' : '')
+            +   (!f.FORMA_PAGO_VIGENTE ? ' prov-forma-incierta' : '') + '"'
+            +   ' data-cod="' + escapar(f.COD_PROVEE) + '"'
+            +   ' data-t="' + escapar(f.T_COMP) + '"'
+            +   ' data-n="' + escapar(f.N_COMP) + '"'
+            +   ' title="' + escapar(titulo) + '">' + opciones + '</select>'
+            + marcaPagoDistinto(f)
+            + '</div>';
+    }
+
+    /** La misma columna cuando todavía no se puede editar */
+    function textoForma(f, delMaestro) {
+        var vigente = f.FORMA_PAGO_VIGENTE || delMaestro;
+
+        return '<span class="small' + (!f.FORMA_PAGO_VIGENTE ? ' prov-sin-forma' : '') + '" '
+            + 'title="' + escapar('Viene del maestro. Para poder cambiarla por factura hace '
+                + 'falta correr sql/cashflow_prov_locales_forma_por_factura.sql.') + '">'
+            + escapar(vigente) + '</span>' + marcaPagoDistinto(f);
+    }
+
+    /**
+     * El pago se registró por una vía distinta de la que decide.
+     *
+     * No es un error y no cambia nada: es un dato. O fue una excepción, o el
+     * maestro quedó viejo. Va como ícono al lado y no como columna: hoy no hay
+     * ni un comprobante en este caso.
+     */
+    function marcaPagoDistinto(f) {
+        if (!f.FORMA_PAGO || !f.FORMA_PAGO_VIGENTE
+            || f.FORMA_PAGO === f.FORMA_PAGO_VIGENTE) {
+            return '';
         }
 
-        // La forma del pago registrado difiere de la habitual del proveedor. No
-        // es un error —el filtro sigue mirando la del maestro— pero es un dato:
-        // o fue una excepción, o el maestro quedó viejo.
-        if (f.FORMA_PAGO_MAESTRO && f.FORMA_PAGO !== f.FORMA_PAGO_MAESTRO) {
-            return '<span class="small prov-forma-distinta" title="'
-                + escapar('El pago se registró por ' + f.FORMA_PAGO + ', pero en el maestro '
-                    + 'este proveedor es ' + f.FORMA_PAGO_MAESTRO + ', que es lo que decide '
-                    + 'si entra al cronograma. Si la vía cambió de verdad, actualizá el '
-                    + 'maestro.') + '">' + escapar(f.FORMA_PAGO)
-                + ' <i class="fas fa-arrows-left-right prov-marca"></i></span>';
+        return ' <i class="fas fa-arrows-left-right prov-marca prov-forma-distinta" title="'
+            + escapar('El pago se registró por ' + f.FORMA_PAGO + ', pero esta factura se '
+                + 'trata como ' + f.FORMA_PAGO_VIGENTE + ', que es lo que decide si entra al '
+                + 'cashflow. Si la vía cambió de verdad, actualizá el maestro o cambiá la '
+                + 'forma de esta factura.') + '"></i>';
+    }
+
+    /* ================================================================
+       EXCLUIR FACTURAS DEL CASHFLOW
+
+       NO ES LO MISMO que el rubro "Excluidos" del maestro, que es por
+       proveedor. Esto es por comprobante: una factura duplicada, una en
+       disputa o una que se pagó por fuera de Tango no son un problema del
+       proveedor.
+
+       SE ELIGEN Y SE CONFIRMAN JUNTAS, con UN motivo para todas. Excluir ocho
+       facturas del mismo proveedor es UNA decisión, y ocho motivos distintos
+       para una decisión son ocho oportunidades de que digan cosas distintas.
+       El caso se resuelve con el buscador: filtrar el proveedor, "seleccionar
+       todas las que se ven", y un motivo.
+
+       Por eso la columna es de SELECCIÓN y no un tilde que actúa solo: sacar
+       plata del tablero no puede dispararse con un clic suelto.
+       ================================================================ */
+
+    /** Claves de las facturas seleccionadas. Sobrevive a los redibujos. */
+    var seleccion = {};
+
+    function claveFila(f) {
+        return f.COD_PROVEE + '|' + f.T_COMP + '|' + f.N_COMP;
+    }
+
+    function celdaExcluir(f) {
+        if (!datos || !datos.excluir_factura) {
+            return '<span class="text-muted small" title="'
+                + escapar('Para excluir facturas hace falta correr '
+                    + 'sql/cashflow_prov_locales_excluir_factura.sql.') + '">—</span>';
         }
 
-        return '<span class="small">' + escapar(f.FORMA_PAGO) + '</span>';
+        var clave = claveFila(f);
+        var marca = f.EXCLUIDA_MANUAL
+            ? '<div><span class="prov-badge-excluida" title="'
+              + escapar('Excluida del cashflow: '
+                  + (f.MOTIVO_EXCLUSION || 'sin motivo registrado'))
+              + '">excluida</span></div>'
+            : '';
+
+        return '<input type="checkbox" class="form-check-input prov-sel"'
+            + (seleccion[clave] ? ' checked' : '')
+            + ' data-clave="' + escapar(clave) + '"'
+            + ' title="' + escapar('Seleccionar esta factura para excluirla o volver a '
+                + 'incluirla.') + '">' + marca;
+    }
+
+    /** Saca de la selección lo que ya no está en el listado */
+    function podarSeleccion() {
+        var vivas = {};
+
+        ((datos && datos.filas) || []).forEach(function(f) { vivas[claveFila(f)] = true; });
+
+        Object.keys(seleccion).forEach(function(k) {
+            if (!vivas[k]) { delete seleccion[k]; }
+        });
+    }
+
+    /** Las filas seleccionadas que hoy están a la vista */
+    function filasSeleccionadas() {
+        return filasVisibles().filter(function(f) { return !!seleccion[claveFila(f)]; });
+    }
+
+    /**
+     * La barra de acciones. Dice CUÁNTAS y CUÁNTO antes de que se apriete nada:
+     * excluir es sacar plata del tablero, y el importe es el dato que hace que
+     * alguien note que seleccionó de más.
+     */
+    function pintarSeleccion() {
+        var sel = filasSeleccionadas();
+        var total = 0;
+        var yaExcluidas = 0;
+
+        sel.forEach(function(f) {
+            total += Number(f.IMPORTE_PENDIENTE) || 0;
+            if (f.EXCLUIDA_MANUAL) { yaExcluidas++; }
+        });
+
+        mostrar('barraSelProv', sel.length > 0);
+
+        if (!sel.length) {
+            sincronizarSelTodas();
+            return;
+        }
+
+        texto('selResumenProv', sel.length + ' factura(s) seleccionada(s) · ' + plata(total)
+            + (yaExcluidas ? ' · ' + yaExcluidas + ' ya excluida(s)' : ''));
+
+        /* Cada botón se apaga cuando no tiene nada que hacer: "Excluir" con
+           todo ya excluido, o "Volver a incluir" sin ninguna excluida. Un botón
+           que se puede apretar y no cambia nada es peor que uno apagado. */
+        var btnEx = document.getElementById('btnExcluirSelProv');
+        var btnIn = document.getElementById('btnIncluirSelProv');
+
+        if (btnEx) { btnEx.disabled = (yaExcluidas === sel.length); }
+        if (btnIn) { btnIn.disabled = (yaExcluidas === 0); }
+
+        sincronizarSelTodas();
+    }
+
+    /** El checkbox del encabezado refleja si TODO lo visible está seleccionado */
+    function sincronizarSelTodas() {
+        var chk = document.getElementById('selTodasProv');
+
+        if (!chk) { return; }
+
+        var visibles = filasVisibles();
+        var elegidas = visibles.filter(function(f) { return !!seleccion[claveFila(f)]; }).length;
+
+        chk.checked = (visibles.length > 0 && elegidas === visibles.length);
+        chk.indeterminate = (elegidas > 0 && elegidas < visibles.length);
+    }
+
+    function conectarSeleccion() {
+        document.querySelectorAll('#bodyProv .prov-sel').forEach(function(chk) {
+            chk.addEventListener('change', function() {
+                var k = chk.getAttribute('data-clave');
+
+                if (chk.checked) {
+                    seleccion[k] = true;
+                } else {
+                    delete seleccion[k];
+                }
+
+                pintarSeleccion();
+            });
+        });
+    }
+
+    /**
+     * Excluye o incluye lo seleccionado, con UN motivo para todas.
+     *
+     * El motivo se pide en un diálogo del módulo y no con el prompt del
+     * navegador: acá hay que leer cuántas facturas y por cuánta plata antes de
+     * escribir nada, y eso en un prompt no entra.
+     */
+    function accionSeleccion(excluir) {
+        var sel = filasSeleccionadas();
+
+        if (!sel.length) { return; }
+
+        // Lo que ya está como se lo quiere dejar no se vuelve a escribir: sería
+        // una versión idéntica en la tabla y un número inflado en el mensaje.
+        var aplicar = sel.filter(function(f) { return !!f.EXCLUIDA_MANUAL !== excluir; });
+
+        if (!aplicar.length) { return; }
+
+        var total = 0;
+        var provs = {};
+
+        aplicar.forEach(function(f) {
+            total += Number(f.IMPORTE_PENDIENTE) || 0;
+            provs[f.COD_PROVEE] = true;
+        });
+
+        var cuantosProv = Object.keys(provs).length;
+        var detalle = aplicar.length + ' factura(s) por ' + plata(total)
+            + (cuantosProv === 1
+                ? ', todas de ' + aplicar[0].COD_PROVEE + ' — ' + aplicar[0].RAZON_SOC
+                : ', de ' + cuantosProv + ' proveedores') + '.';
+
+        if (!excluir) {
+            Notificacion.confirmar({
+                titulo: 'Volver a incluir en el cashflow',
+                mensaje: '¿Devolver estas facturas al cashflow?',
+                detalle: detalle + ' Sus importes vuelven a la fila del tablero y el motivo '
+                    + 'de exclusión se borra.',
+                confirmar: 'Volver a incluir'
+            }).then(function(ok) {
+                if (ok) { guardarExclusion(aplicar, false, null); }
+            });
+
+            return;
+        }
+
+        Notificacion.pedirTexto({
+            titulo: 'Excluir del cashflow',
+            peligro: true,
+            mensaje: detalle,
+            detalle: 'Sus importes salen de la fila del tablero y quedan informados aparte, '
+                + 'con este motivo.',
+            etiqueta: 'Motivo (el mismo para todas)',
+            placeholder: 'Ej.: duplicada en Tango, en disputa, se pagó por fuera…',
+            maxlargo: 200,
+            valor: motivoComun(aplicar),
+            invalido: 'Escribí el motivo: es lo único que después explica por qué falta ese '
+                + 'importe en el tablero.',
+            confirmar: 'Excluir ' + aplicar.length + ' factura(s)'
+        }).then(function(motivo) {
+            if (motivo !== null) { guardarExclusion(aplicar, true, motivo); }
+        });
+    }
+
+    /** Si las seleccionadas ya compartían un motivo, se ofrece de arranque */
+    function motivoComun(filas) {
+        var unico = null;
+
+        for (var i = 0; i < filas.length; i++) {
+            var m = filas[i].MOTIVO_EXCLUSION || '';
+
+            if (m === '') { continue; }
+            if (unico !== null && unico !== m) { return ''; }
+
+            unico = m;
+        }
+
+        return unico || '';
+    }
+
+    function guardarExclusion(filas, excluir, motivo) {
+        var cuerpo = {
+            excluida: excluir,
+            comprobantes: filas.map(function(f) {
+                return { cod_provee: f.COD_PROVEE, t_comp: f.T_COMP, n_comp: f.N_COMP };
+            })
+        };
+
+        if (motivo !== null) { cuerpo.motivo = motivo; }
+
+        // La selección se limpia al guardar: las filas excluidas se esconden por
+        // defecto, así que dejarlas seleccionadas mantendría una barra hablando
+        // de facturas que ya no están a la vista.
+        seleccion = {};
+
+        pedirPago('saveExclusion', cuerpo);
     }
 
     /* ================================================================
@@ -584,6 +1010,28 @@
                 });
             });
         });
+
+        /* La forma del cronograma cambia en qué serie cae el importe: recargar
+           entero es lo mismo que hace la fecha, y por lo mismo. El importe puede
+           entrar o salir del filtro y desaparecer de la vista, y eso el mensaje
+           lo dice. */
+        /* Cambiar la forma cambia en qué serie cae el importe: recargar entero
+           es lo mismo que hace la fecha, y por lo mismo. El importe puede entrar
+           o salir del filtro y desaparecer de la vista, y eso el mensaje lo
+           dice. Elegir "del maestro" manda vacío, que es lo que saca el
+           override. */
+        document.querySelectorAll('#bodyProv .prov-select-forma').forEach(function(sel) {
+            sel.addEventListener('change', function() {
+                pedirPago('saveFormaCronograma', {
+                    cod_provee: sel.getAttribute('data-cod'),
+                    t_comp: sel.getAttribute('data-t'),
+                    n_comp: sel.getAttribute('data-n'),
+                    forma: sel.value
+                });
+            });
+        });
+
+        conectarSeleccion();
     }
 
     /**
@@ -730,11 +1178,22 @@
                 }).join('') + '</ul>';
             }
 
+            /* El que pisa una versión cargada a mano se marca en la fila, no
+               sólo en el aviso de arriba: entre trescientos cambios, el aviso
+               dice cuántos son y esto dice cuáles. */
+            var pisa = f.pisa_manual
+                ? ' <span class="badge bg-warning text-dark" title="'
+                  + escapar('Este proveedor se había editado a mano desde la pantalla. La '
+                      + 'planilla manda, así que esta importación lo sobrescribe. La versión '
+                      + 'manual queda en el historial.')
+                  + '">pisa carga manual</span>'
+                : '';
+
             html += '<tr class="prov-pre-' + f.estado.toLowerCase() + '">'
                 + '<td>' + f.linea + '</td>'
                 + '<td><code>' + escapar(clave) + '</code></td>'
                 + '<td><span class="badge bg-' + colorEstado(f.estado) + '">'
-                +   escapar(f.estado) + '</span></td>'
+                +   escapar(f.estado) + '</span>' + pisa + '</td>'
                 + '<td class="small">' + detalle + '</td></tr>';
         });
 
@@ -921,6 +1380,8 @@
                 .join(' ').toLowerCase().indexOf(q) !== -1;
         });
 
+        var editable = !!maestro.edicion_manual;
+
         var html = filas.map(function(f) {
             return '<tr>'
                 + '<td><strong>' + escapar(f.COD_PROVEE) + '</strong></td>'
@@ -933,20 +1394,229 @@
                 + '<td>' + escapar(f.PLAZO_PAGO || '—')
                 +   (f.PLAZO_DIAS !== null ? ' <span class="text-muted small">('
                       + f.PLAZO_DIAS + ' d)</span>' : '') + '</td>'
+                + '<td class="text-center">' + celdaOrigen(f) + '</td>'
                 + '<td class="text-center"><span class="text-muted small">'
                 +   escapar((f.FECHA_IMPORTACION || '').substring(0, 10)) + '</span></td>'
+                + '<td class="text-center">'
+                +   (editable
+                        ? '<button class="btn btn-sm btn-outline-secondary py-0 px-2 prov-editar" '
+                          + 'data-cod="' + escapar(f.COD_PROVEE) + '" title="Editar. No modifica '
+                          + 'la fila: da de baja la vigente y carga una nueva, y la anterior '
+                          + 'queda en el historial.">'
+                          + '<i class="fas fa-pen"></i></button> '
+                          + '<button class="btn btn-sm btn-outline-danger py-0 px-2 prov-baja" '
+                          + 'data-cod="' + escapar(f.COD_PROVEE) + '" title="Dar de baja. Su '
+                          + 'deuda queda sin clasificar; la versión sigue en el historial.">'
+                          + '<i class="fas fa-xmark"></i></button>'
+                        : '')
+                + '</td>'
                 + '</tr>';
         }).join('');
 
         if (!filas.length) {
-            html = '<tr><td colspan="8" class="text-center text-muted py-4">'
+            html = '<tr><td colspan="10" class="text-center text-muted py-4">'
                  + (maestro.filas.length
                     ? 'Ningún proveedor coincide con el filtro.'
-                    : 'El maestro está vacío: importá la hoja "Maestro proveedores".')
+                    : 'El maestro está vacío: importá la hoja "Maestro proveedores" o agregá '
+                      + 'los proveedores de a uno.')
                  + '</td></tr>';
         }
 
         document.getElementById('bodyMaestroProv').innerHTML = html;
+
+        document.querySelectorAll('.prov-editar').forEach(function(b) {
+            b.addEventListener('click', function() { abrirForm(b.getAttribute('data-cod')); });
+        });
+
+        document.querySelectorAll('.prov-baja').forEach(function(b) {
+            b.addEventListener('click', function() { darDeBaja(b.getAttribute('data-cod')); });
+        });
+
+        mostrar('btnNuevoProv', editable);
+        pintarSugerencias();
+    }
+
+    /**
+     * De dónde salió la versión vigente.
+     *
+     * Una fila MANUAL no es un problema, pero sí es información: la planilla
+     * manda, así que ésa es una de las que la próxima importación va a pisar.
+     * Verlo acá es lo que permite decidir si conviene cargarla también en el
+     * Excel.
+     */
+    function celdaOrigen(f) {
+        if (f.ORIGEN !== 'MANUAL') {
+            return '<span class="text-muted small" title="Vino de la planilla.">planilla</span>';
+        }
+
+        return '<span class="prov-origen-manual" title="'
+            + escapar('Se cargó o se editó desde esta pantalla. La planilla sigue siendo la '
+                + 'fuente: la próxima importación lo va a pisar, y el diff lo avisa antes.')
+            + '">a mano</span>';
+    }
+
+    /* ================================================================
+       CARGA Y EDICION MANUAL DEL MAESTRO
+
+       UN SOLO FORMULARIO para el alta y para la edición, porque son la misma
+       operación: el backend da de baja la versión vigente e inserta una
+       nueva. Dos formularios distintos insinuarían que editar modifica en el
+       lugar, y en este módulo nada lo hace.
+
+       El CÓDIGO no se puede cambiar al editar: es la clave con la que la fila
+       cruza contra Tango y contra las fechas de pago ya cargadas. Cambiarlo
+       sería dar de baja un proveedor y dar de alta otro, y eso son dos gestos
+       distintos que tienen que verse como tales.
+       ================================================================ */
+
+    /** Los valores que ya existen en el maestro, para los datalist del form */
+    function pintarSugerencias() {
+        var r = (maestro && maestro.rubros) || {};
+        var mapa = {
+            listaRubroEcoProv: r.rubro_economico,
+            listaRubroProv: r.rubro,
+            listaCentroProv: r.centro_costos
+        };
+
+        Object.keys(mapa).forEach(function(id) {
+            var el = document.getElementById(id);
+
+            if (!el) { return; }
+
+            el.innerHTML = Object.keys(mapa[id] || {}).map(function(v) {
+                return '<option value="' + escapar(v) + '">';
+            }).join('');
+        });
+
+        var sel = document.getElementById('fpFormaProv');
+
+        // Los nombres son los VALORES de la lista, no sus claves.
+        if (sel && !sel.options.length) {
+            sel.innerHTML = '<option value="">(sin forma)</option>'
+                + ((maestro && maestro.formas_pago) || []).map(function(f) {
+                    return '<option value="' + escapar(f) + '">' + escapar(f) + '</option>';
+                }).join('');
+        }
+    }
+
+    /**
+     * Abre el formulario. Con código, en modo edición y con los valores
+     * cargados; sin código, vacío para un alta.
+     */
+    function abrirForm(cod) {
+        var f = null;
+
+        if (cod) {
+            (maestro.filas || []).forEach(function(x) {
+                if (x.COD_PROVEE === cod) { f = x; }
+            });
+        }
+
+        setValor('fpCodProv', f ? f.COD_PROVEE : '');
+        setValor('fpNombreProv', f ? (f.NOMBRE || '') : '');
+        setValor('fpRubroEcoProv', f ? (f.RUBRO_ECONOMICO || '') : '');
+        setValor('fpRubroProv', f ? (f.RUBRO || '') : '');
+        setValor('fpCentroProv', f ? (f.CENTRO_COSTOS || '') : '');
+        setValor('fpFormaProv', f ? (f.FORMA_PAGO || '') : '');
+        setValor('fpPlazoProv', f ? (f.PLAZO_PAGO || '') : '');
+        setValor('fpCriterioProv', f ? (f.CRITERIO_DISTRIB || '') : '');
+
+        // El código es la clave: se puede tipear en un alta y no en una edición.
+        var inpCod = document.getElementById('fpCodProv');
+
+        if (inpCod) { inpCod.readOnly = !!f; }
+
+        texto('hintProv', f
+            ? 'Editando ' + f.COD_PROVEE + '. Guardar no modifica la fila: da de baja la '
+                + 'versión vigente y carga una nueva, y la anterior queda en el historial.'
+            : 'El código es el de Tango (hasta 6 caracteres) y es lo que hace que la deuda de '
+                + 'este proveedor se pueda clasificar. La forma de pago decide si entra al '
+                + 'cronograma del cashflow.');
+
+        mostrar('formProvWrap', true);
+
+        if (inpCod && !f) { inpCod.focus(); }
+    }
+
+    function cerrarForm() {
+        mostrar('formProvWrap', false);
+    }
+
+    function guardarProveedor() {
+        var cod = (valor('fpCodProv') || '').trim();
+
+        if (cod === '') {
+            Notificacion.campoInvalido('fpCodProv', 'Poné el código del proveedor.');
+            return;
+        }
+
+        var btn = document.getElementById('btnGuardarProv');
+
+        btn.disabled = true;
+
+        /* Se mandan las MISMAS claves que las columnas de importación: el
+           backend normaliza con la misma función, así que un proveedor cargado
+           a mano queda idéntico a uno traído por la planilla. */
+        pedirJson('Controller/ProveedoresController.php?action=saveProveedor', {
+                cod_provee: cod,
+                nombre: valor('fpNombreProv'),
+                rubro_economico: valor('fpRubroEcoProv'),
+                rubro: valor('fpRubroProv'),
+                centro_costos: valor('fpCentroProv'),
+                forma_pago: valor('fpFormaProv'),
+                plazo_pago: valor('fpPlazoProv'),
+                criterio_distrib: valor('fpCriterioProv')
+            })
+            .then(function(data) {
+                btn.disabled = false;
+                cerrarForm();
+
+                Notificacion.exito(data && data.estado === 'ALTA'
+                    ? 'Proveedor ' + data.cod_provee + ' agregado.'
+                    : 'Proveedor ' + data.cod_provee + ' actualizado.', {
+                    detalle: 'La versión anterior queda en el historial. La planilla sigue '
+                           + 'siendo la fuente: la próxima importación puede pisarlo.'
+                });
+
+                recargarMaestroYListado();
+            })
+            .catch(function(error) {
+                btn.disabled = false;
+                Notificacion.error('No se pudo guardar: ' + error.message);
+            });
+    }
+
+    function darDeBaja(cod) {
+        if (!window.confirm('¿Dar de baja a ' + cod + ' del maestro?\n\n'
+                + 'Su deuda queda sin clasificar hasta que se lo vuelva a cargar. '
+                + 'La versión actual sigue en el historial: no se borra nada.')) {
+            return;
+        }
+
+        pedirJson('Controller/ProveedoresController.php?action=deleteProveedor',
+                { cod_provee: cod })
+            .then(function() {
+                Notificacion.exito('Proveedor dado de baja.', {
+                    detalle: 'Su deuda pasa a contarse como "sin rubro" en el tablero.'
+                });
+
+                recargarMaestroYListado();
+            })
+            .catch(function(error) {
+                Notificacion.error('No se pudo dar de baja: ' + error.message);
+            });
+    }
+
+    /**
+     * Tocar el maestro cambia el listado de cuentas a pagar: el rubro, la forma
+     * de pago —y con ella si la deuda entra al cronograma— y el plazo salen de
+     * ahí. Dejar el listado viejo en pantalla mostraría la clasificación
+     * anterior sin decir que quedó vieja.
+     */
+    function recargarMaestroYListado() {
+        maestro = null;
+        cargarMaestro();
+        cargar();
     }
 
     function celdaFormaMaestro(f) {
@@ -998,6 +1668,19 @@
         var el = document.getElementById(id);
 
         if (el) { el.textContent = v; }
+    }
+
+    /** El valor de un campo del formulario, ya recortado */
+    function valor(id) {
+        var el = document.getElementById(id);
+
+        return el ? String(el.value).trim() : '';
+    }
+
+    function setValor(id, v) {
+        var el = document.getElementById(id);
+
+        if (el) { el.value = (v === null || v === undefined) ? '' : v; }
     }
 
     function mostrarError(mensaje) {

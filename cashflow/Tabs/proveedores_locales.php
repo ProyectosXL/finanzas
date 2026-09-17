@@ -149,6 +149,21 @@
                             Sólo echeq y transferencia
                         </label>
                     </div>
+
+                    <!-- LAS EXCLUIDAS NO SE VEN POR DEFECTO. Ya se decidió que
+                         no van al cashflow, así que en el trabajo normal
+                         —revisar qué hay que pagar— son ruido.
+
+                         Pero tienen que poder mirarse: una exclusión puesta en
+                         marzo que nadie recuerda es justamente lo que este
+                         interruptor evita. Cuánto esconde se dice al lado del
+                         período, siempre, igual que el filtro de al lado. -->
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="verExcluidasProv">
+                        <label class="form-check-label small text-muted" for="verExcluidasProv">
+                            Ver excluidas
+                        </label>
+                    </div>
                 </div>
 
                 <div class="d-flex gap-2 flex-wrap align-items-center">
@@ -175,6 +190,31 @@
                 <small class="text-muted ms-2" id="fueraFiltroProv"></small>
             </div>
 
+            <!-- LA BARRA DE SELECCIÓN. Aparece sólo cuando hay algo elegido: una
+                 barra siempre visible con los botones apagados ocupa lugar para
+                 decir que no se puede hacer nada.
+
+                 Dice CUÁNTAS y CUÁNTO antes de que se apriete nada: excluir es
+                 sacar plata del tablero, y el importe es el dato que hace que
+                 alguien note que seleccionó de más. -->
+            <div id="barraSelProv" class="card-body py-2 border-bottom prov-barra-sel"
+                 style="display: none;">
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                    <span class="fw-semibold" id="selResumenProv"></span>
+                    <div class="d-flex gap-2 ms-auto">
+                        <button class="btn btn-sm btn-outline-danger" id="btnExcluirSelProv">
+                            <i class="fas fa-ban me-1"></i> Excluir del cashflow
+                        </button>
+                        <button class="btn btn-sm btn-outline-success" id="btnIncluirSelProv">
+                            <i class="fas fa-rotate-left me-1"></i> Volver a incluir
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" id="btnLimpiarSelProv">
+                            Limpiar selección
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <div class="card-body p-0">
                 <div class="loading-spinner" id="loadingProv">
                     <div class="spinner"></div>
@@ -188,22 +228,65 @@
                             <tr>
                                 <th rowspan="2">PROVEEDOR</th>
                                 <th rowspan="2" class="col-texto">RAZON SOCIAL</th>
-                                <th rowspan="2">RUBRO</th>
+                                <!-- DOS COLUMNAS DEL MAESTRO, no una con dos
+                                     nombres. El rubro económico es el que abre
+                                     la deuda por serie en el tablero; el rubro
+                                     clasifica adentro de ése y no arma ninguna
+                                     serie. La grilla del maestro ya las muestra
+                                     separadas y acá se leen igual, en el mismo
+                                     orden, para que sean el mismo dato de los
+                                     dos lados. -->
+                                <th rowspan="2"
+                                    title="El rubro económico del maestro. Es el que abre la deuda por serie en el tablero.">
+                                    RUBRO ECONOMICO
+                                </th>
+                                <th rowspan="2"
+                                    title="El rubro del maestro, dentro del rubro económico. Es informativo: no abre ninguna serie del tablero.">
+                                    RUBRO
+                                </th>
                                 <th rowspan="2">T_COMP</th>
                                 <th rowspan="2">N_COMP</th>
                                 <th rowspan="2">EMISION</th>
                                 <th rowspan="2">VTO</th>
                                 <th rowspan="2">Pendiente</th>
                                 <th rowspan="2">Fecha de pago</th>
-                                <th rowspan="2">Forma</th>
+                                <!-- UNA SOLA COLUMNA, Y MUESTRA LA QUE DECIDE.
+                                     Trae la del maestro —o la que dejó la
+                                     importación— y se puede editar: editarla
+                                     guarda un override para ESA factura y no
+                                     toca el maestro. Si la forma con la que se
+                                     registró el pago difiere de la que decide,
+                                     se marca al lado en vez de ocupar otra
+                                     columna. -->
+                                <th rowspan="2"
+                                    title="Con qué forma se trata esta factura. Viene del maestro y se puede cambiar: el cambio vale sólo para esta factura y decide si su importe entra al cashflow. El maestro no se toca.">
+                                    Forma de pago
+                                </th>
+                                <!-- LA COLUMNA ES DE SELECCIÓN, no de estado.
+                                     Excluir es una decisión que pide un motivo,
+                                     así que no puede dispararse con un clic
+                                     suelto: se eligen las facturas y se
+                                     confirman juntas, con un motivo para todas.
+
+                                     Que una factura ESTÉ excluida se ve en la
+                                     fila —atenuada y con el pendiente tachado— y
+                                     en la marca de esta misma celda. -->
+                                <th rowspan="2" class="text-center" style="width: 46px;">
+                                    <input type="checkbox" class="form-check-input"
+                                           id="selTodasProv"
+                                           title="Seleccionar todas las facturas que se están viendo. Con el buscador puesto, son las de ese proveedor.">
+                                </th>
                                 <th colspan="1" class="table-group-divider" id="headerEjeProv">Días</th>
                             </tr>
                             <tr id="headerSubProv"></tr>
                         </thead>
                         <tbody id="bodyProv"></tbody>
                         <tfoot class="table-light">
+                            <!-- El pie lo reescribe pintarTotales() con una celda
+                                 por columna. Este colspan es sólo el estado
+                                 inicial, y son las 12 descriptivas. -->
                             <tr id="totalesProv">
-                                <td colspan="10" class="fw-bold text-end">TOTALES</td>
+                                <td colspan="12" class="fw-bold text-end">TOTALES</td>
                             </tr>
                         </tfoot>
                     </table>
@@ -299,26 +382,123 @@
                 <div>
                     <h5 class="mb-0">Maestro de proveedores</h5>
                     <small class="text-muted">
-                        Copia de la planilla que mantiene administración. La fuente sigue
-                        siendo el Excel: esto es una copia reimportable.
+                        Copia de la planilla que mantiene administración. <strong>La fuente
+                        sigue siendo el Excel</strong>: lo que se cargue acá a mano se pisa la
+                        próxima vez que se importe, y el diff lo avisa antes.
                     </small>
                 </div>
-                <div class="search-box-container">
-                    <div class="input-group input-group-sm">
-                        <span class="input-group-text bg-light border-end-0">
-                            <i class="fas fa-search text-muted"></i>
-                        </span>
-                        <input type="text" id="busquedaMaestroProv"
-                               class="form-control border-start-0 ps-0"
-                               placeholder="Buscar código, nombre o rubro..." style="min-width: 240px;">
+                <div class="d-flex align-items-center gap-2">
+                    <div class="search-box-container">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text bg-light border-end-0">
+                                <i class="fas fa-search text-muted"></i>
+                            </span>
+                            <input type="text" id="busquedaMaestroProv"
+                                   class="form-control border-start-0 ps-0"
+                                   placeholder="Buscar código, nombre o rubro..." style="min-width: 240px;">
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-primary" id="btnNuevoProv">
+                        <i class="fas fa-plus me-1"></i> Agregar
+                    </button>
+                </div>
+            </div>
+
+            <!-- ========================================================
+                 EL FORMULARIO DE CARGA MANUAL
+
+                 Arranca oculto y lo abre "Agregar" o el lápiz de una fila. Es
+                 el MISMO formulario para las dos cosas: alta y edición son la
+                 misma operación —una baja más un alta— y dos formularios
+                 distintos insinuarían que la edición modifica en el lugar.
+
+                 El código no se puede cambiar al editar: es la clave con la
+                 que cruza contra Tango. Cambiarlo sería dar de baja un
+                 proveedor y dar de alta otro, y eso son dos gestos.
+                 ======================================================== -->
+            <div id="formProvWrap" class="card-body border-bottom bg-light bg-opacity-50"
+                 style="display: none;">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm" for="fpCodProv">Código</label>
+                        <input type="text" id="fpCodProv" class="form-control form-control-sm"
+                               maxlength="6" placeholder="OGADUN">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label form-label-sm" for="fpNombreProv">Nombre</label>
+                        <input type="text" id="fpNombreProv" class="form-control form-control-sm"
+                               maxlength="120">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label form-label-sm" for="fpRubroEcoProv">
+                            Rubro económico
+                            <i class="fas fa-circle-info text-muted"
+                               title="Cada rubro distinto crea una serie propia en el tablero. Elegí uno de la lista antes de escribir uno nuevo."></i>
+                        </label>
+                        <input type="text" id="fpRubroEcoProv" class="form-control form-control-sm"
+                               list="listaRubroEcoProv" autocomplete="off">
+                        <datalist id="listaRubroEcoProv"></datalist>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm" for="fpRubroProv">Rubro</label>
+                        <input type="text" id="fpRubroProv" class="form-control form-control-sm"
+                               list="listaRubroProv" autocomplete="off">
+                        <datalist id="listaRubroProv"></datalist>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm" for="fpCentroProv">Centro de costos</label>
+                        <input type="text" id="fpCentroProv" class="form-control form-control-sm"
+                               list="listaCentroProv" autocomplete="off">
+                        <datalist id="listaCentroProv"></datalist>
+                    </div>
+
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm" for="fpFormaProv">
+                            Forma de pago
+                            <i class="fas fa-circle-info text-muted"
+                               title="Decide si la deuda de este proveedor entra al cronograma del cashflow: hoy entran ECHEQ y TRANSFERENCIA."></i>
+                        </label>
+                        <select id="fpFormaProv" class="form-select form-select-sm"></select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm" for="fpPlazoProv">
+                            Plazo
+                            <i class="fas fa-circle-info text-muted"
+                               title="CONTADO, '30 DIAS', DEBITO… Es el último escalón de la fecha de pago: sólo se usa cuando la factura no tiene vencimiento."></i>
+                        </label>
+                        <input type="text" id="fpPlazoProv" class="form-control form-control-sm"
+                               placeholder="30 DIAS" maxlength="30">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label form-label-sm" for="fpCriterioProv">
+                            Criterio de distribución
+                        </label>
+                        <input type="text" id="fpCriterioProv" class="form-control form-control-sm"
+                               maxlength="60">
+                    </div>
+                    <div class="col-md-5 text-end">
+                        <button class="btn btn-sm btn-primary" id="btnGuardarProv">
+                            <i class="fas fa-save me-1"></i> Guardar
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" id="btnCancelarProv">
+                            Cancelar
+                        </button>
                     </div>
                 </div>
+                <div class="param-hint mt-2" id="hintProv"></div>
             </div>
 
             <div class="card-body p-0">
                 <!-- EL CONTROL QUE EVITA QUE EL MAESTRO SE DESACTUALICE SIN QUE
                      NADIE SE ENTERE: proveedores con deuda que no están en la
                      planilla. -->
+                <!-- Los avisos del maestro: que está vacío, o que falta el
+                     script que habilita la carga manual. Van ACÁ y no sólo en
+                     la solapa de cuentas a pagar: son sobre esta pantalla, y
+                     una función que no aparece sin decir por qué es
+                     indistinguible de una que no se construyó. -->
+                <div id="avisosMaestroProv" class="px-3 pt-3"></div>
+
                 <div id="faltantesProv" class="px-3 pt-3"></div>
 
                 <div class="table-responsive" id="wrapperMaestroProv">
@@ -332,7 +512,13 @@
                                 <th>CENTRO COSTOS</th>
                                 <th>FORMA DE PAGO</th>
                                 <th>PLAZO</th>
+                                <!-- De dónde salió la versión vigente. Importa
+                                     porque la planilla pisa lo manual, así que
+                                     una fila MANUAL es una que se va a perder
+                                     en la próxima importación. -->
+                                <th class="text-center">ORIGEN</th>
                                 <th class="text-center">Historial</th>
+                                <th class="text-center" style="width: 90px;"></th>
                             </tr>
                         </thead>
                         <tbody id="bodyMaestroProv"></tbody>

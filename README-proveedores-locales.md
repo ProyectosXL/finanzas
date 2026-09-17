@@ -34,8 +34,17 @@ Contra `central`, en cualquier momento:
 
 ```sql
 -- 1. sql/cashflow_prov_locales.sql
--- 2. sql/cashflow_prov_locales_collation.sql   (antes de la primera importación)
+-- 2. sql/cashflow_prov_locales_collation.sql      (antes de la primera importación)
+-- 3. sql/cashflow_prov_locales_maestro_manual.sql (para cargar el maestro a mano)
+-- 4. sql/cashflow_prov_locales_forma_por_factura.sql (forma de pago por factura)
+-- 5. sql/cashflow_prov_locales_excluir_factura.sql   (excluir facturas sueltas)
 ```
+
+El quinto va **después** del cuarto: necesita que `FECHA_PAGO` ya sea nullable, y si no lo es aborta diciéndolo. Las filas quedan con `EXCLUIDA = 0`, así que el tablero no se mueve.
+
+El cuarto agrega `FORMA_PAGO_CRONOGRAMA` y hace `FECHA_PAGO` nullable. Las filas que ya están quedan con el override en `NULL` —*"usa la forma del maestro"*—, así que el tablero no se mueve. **Sin él el listado se lee igual** y la columna *Cronograma* muestra la del maestro en vez de un desplegable que fallaría al guardar.
+
+El tercero agrega `ORIGEN` al maestro y marca como `IMPORT` lo que ya está, que es lo que es. **Sin él el maestro se lee igual**: lo que no se puede es cargarlo a mano, y la pestaña lo dice con el script al lado en vez de dibujar un formulario que después falla.
 
 Crea `RO_T_CASHFLOW_PROV_LOCALES_CATEG` (el maestro) y `RO_T_CASHFLOW_PROV_LOCALES_PAGO` (las fechas de pago), y renombra la fila del tablero. Es reejecutable.
 
@@ -172,6 +181,108 @@ Se evaluó empezar a cargarla desde Tango y se descartó: **obligaría a adminis
 1. **Para que el tablero pueda abrir la deuda por rubro.** Hoy la fila es una sola; cuando el maestro esté cargado, partirla en alquileres, impuestos, logística y mercadería es **configuración desde Parámetros**, no un refactor: el proveedor ya entrega cada comprobante con su rubro resuelto y expone una serie por rubro además del total.
 2. **Para la forma de pago habitual**, que sirve de valor por defecto al importar pagos.
 3. **Para el plazo**, que es el último escalón de la jerarquía de fecha.
+
+### Rubro económico y rubro son dos columnas, no dos nombres de una
+
+La planilla trae los dos, y clasifican en dos niveles distintos:
+
+| | |
+| --- | --- |
+| **Rubro económico** | Es el que **abre la deuda por serie** en el tablero: `RUBRO_ALQUILERES`, `RUBRO_LOGISTICA`, `RUBRO_MERCADERIA`… Un proveedor sin este dato cae en `PAGOS_SIN_RUBRO` |
+| **Rubro** | Clasifica **adentro** del económico. Es informativo: no arma ninguna serie, y viene vacío en buena parte de la planilla |
+
+Las dos se ven en las dos solapas —*Maestro* y *Cuentas a Pagar*—, en el mismo orden. Antes *Cuentas a Pagar* mostraba una sola, así que el mismo proveedor se leía distinto según por dónde se lo mirara.
+
+> Están en columnas separadas y no concatenadas en una celda a propósito: **el que decide tiene que poder leerse solo.** Juntarlos obligaría a saber cuál de los dos abre las series para interpretar la celda.
+
+Cuando el económico falta se dice *sin clasificar* —el proveedor no está en el maestro, y eso es trabajo pendiente—; cuando falta el otro va un guion, porque está clasificado y esa columna simplemente vino vacía. Un mismo cartel para los dos casos mandaría a clasificar proveedores que ya lo están.
+
+### Se puede cargar y editar a mano, y la planilla sigue mandando
+
+> Esto es **nuevo**. Antes el maestro sólo se podía escribir importando el Excel.
+
+El caso que lo pide es concreto y se ve en la propia pantalla: hay **20 proveedores con deuda por $17.011.478,01 que no están en el maestro**. Aparecen en Tango, nadie los agrega a la planilla, y su deuda queda sin clasificar. El control de faltantes ya los listaba; lo que no había era forma de resolverlos sin volver al Excel.
+
+**Alta y edición son la misma operación, y no es un `UPDATE`.** `guardarManual()` da de baja la versión vigente e inserta una nueva, en una transacción — exactamente lo que hace un `CAMBIO` de la importación. Por eso hay **un solo formulario** y un solo endpoint: dos insinuarían que existe un camino que modifica en el lugar, y en este módulo no lo hay.
+
+**Se normaliza con la misma función que la importación.** `normalizarFila()` era privada y ahora es pública: aplica el largo del código en caracteres, la normalización de la forma de pago contra `FORMAS_PAGO` y el plazo en días. Si la pantalla normalizara por su cuenta, el mismo proveedor quedaría clasificado distinto según por dónde entró, y no habría ninguna pantalla donde notarlo.
+
+**El código no se puede cambiar al editar.** Es la clave con la que la fila cruza contra Tango y contra las fechas de pago ya cargadas; cambiarlo sería dar de baja un proveedor y dar de alta otro, y eso son dos gestos.
+
+**Una baja no borra**: marca `VIGENTE = 0` igual que una baja de la importación. La deuda de ese proveedor pasa a contarse como *sin rubro* y el historial sigue explicando cómo se clasificaba antes.
+
+#### La planilla manda, pero pisar trabajo manual se avisa
+
+Hay dos fuentes escribiendo la misma tabla, y este README ya había descartado eso una vez: *"dos maestros en paralelo terminan discrepando"*. La decisión es la misma de entonces — **la planilla es la fuente** — así que una edición manual es una versión más y la próxima importación la pisa.
+
+Lo que se agrega es que **no la pise en silencio**. La columna `ORIGEN` (`IMPORT` / `MANUAL`) hace posibles tres cosas:
+
+| | |
+| --- | --- |
+| En la grilla del maestro | una columna que dice si esa versión salió de la planilla o de la pantalla |
+| En el historial del proveedor | lo mismo, versión por versión |
+| **En la previsualización del diff** | un aviso — *"N de los cambios pisan proveedores editados a mano"* — y la marca en cada fila |
+
+> Entre trescientos cambios, los que borran lo que alguien cargó a mano son los únicos que esa persona querría revisar. El aviso dice cuántos son; la marca dice cuáles.
+
+Se aplican igual al confirmar: el que decide es quien importa, viéndolo.
+
+### Excluir una factura suelta
+
+> Esto es **nuevo**. Antes sólo se podía excluir a un proveedor entero.
+
+Una factura duplicada, una en disputa o una que se pagó por fuera de Tango no son un problema del proveedor: son un problema de **esa factura**.
+
+**El motivo es obligatorio**, y lo valida `Proveedores::saveExclusionMasiva()` y no la pantalla —el endpoint es alcanzable sin pasar por la grilla—. Una factura sacada del cashflow sin motivo no la explica nadie tres meses después. Volver a incluirla borra el motivo: dejarlo haría que una factura incluida arrastre el texto de cuando estuvo afuera.
+
+#### Se eligen varias y se confirman juntas, con UN motivo
+
+> Esto **cambió**. Era un tilde por fila que actuaba solo y pedía el motivo con el `prompt` del navegador.
+
+La columna es de **selección**, no de estado. Sacar plata del tablero no puede dispararse con un clic suelto, y el caso real no es una factura: son **las ocho de un proveedor**. Se resuelve con lo que la pantalla ya tenía — buscar el proveedor, *seleccionar todas las que se ven*, un motivo.
+
+**Un motivo para todas, y no es una simplificación de la pantalla:** excluir las ocho facturas de un proveedor es **una** decisión, y ocho motivos distintos para una decisión son ocho oportunidades de que digan cosas distintas.
+
+**Es una sola transacción**, igual que el tildado masivo de Echeqs y por el mismo motivo: ocho llamadas dejan la puerta abierta a que la quinta falle y el tablero quede a mitad de camino sin que nadie se entere. Las claves se normalizan **antes** de abrirla: un comprobante mal identificado en la fila once no puede descubrirse con diez ya escritas.
+
+`saveExclusion()` de a una **no duplica nada**: delega en la masiva con una lista de uno. Dos caminos que tienen que hacer lo mismo divergen, y lo que no puede estar escrito dos veces es la transacción.
+
+En la barra de selección, antes de apretar nada: **cuántas facturas y por cuánta plata**. El importe es el dato que hace que alguien note que seleccionó de más.
+
+#### El motivo se pide en un diálogo del módulo
+
+`Notificacion.pedirTexto()` — el mismo control que ya hacía `confirmar()`, con un campo adentro. `window.prompt` no se puede formatear, no entra un detalle largo, no valida nada y se ve como un error del navegador en vez de como una decisión del sistema. Y acá hay que **leer cuántas facturas y por cuánto antes de escribir el motivo**, que en un prompt no entra.
+
+- **Devuelve `null` al cancelar y el texto al confirmar.** `confirmar()` sigue devolviendo un booleano: su respuesta es sí o no, y la de ésta es el texto. Un `false` que a veces es `''` obligaría a cada llamador a distinguir dos ausencias distintas.
+- **Un campo obligatorio vacío no cierra el diálogo**: dice por qué en el mismo lugar donde se escribe, en vez de cerrar y fallar después contra el servidor.
+- El armazón está escrito **una vez** (`abrirDialogo()`): lo delicado no es el HTML, es que cerrar con la cruz, con Escape o clickeando afuera **también sea una respuesta, y sea la negativa**. Dos copias de eso se desincronizan en la primera corrección.
+- Sin Bootstrap se cae al `prompt` del navegador, igual que `confirmar()` se cae al `confirm`: es feo, pero preguntar es lo que no puede faltar.
+
+#### Por qué no alcanzaba con mandarla a `PAGOS_EXCLUIDOS`
+
+Ésta es la parte que no es obvia. **La fila del tablero usa `PAGOS`, y `PAGOS` pertenece al corte del cronograma, que no excluye nada.** Mandar la factura tildada al corte de excluidos la habría sacado de `PAGOS_CRONO_OPERATIVOS`, que hoy **no usa ninguna fila**: el tilde no habría movido un peso.
+
+Verificado contra la base: la fila está configurada con `ORIGEN_SERIE = 'PAGOS'`, y ahí adentro hay **$72.500.993,87 en 8 vencimientos de `OGRAZ`** —rubro *Excluidos*— que entran igual porque cobra por echeq.
+
+Por eso la exclusión manual sale también del primer corte, con serie propia, y ese corte pasa a tener **tres partes**:
+
+```
+PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA = PAGOS_TODO
+```
+
+- **No cae en `PAGOS_FUERA_CRONOGRAMA`.** Ahí el aviso desglosa por forma de pago —*"esto no se planifica porque es un débito automático"*— y una factura excluida a mano lo ensuciaría.
+- **Sigue en `PAGOS_TODO` y en `PAGOS_EXCLUIDOS`.** El importe no desaparece: queda auditable, y el proveedor **avisa cuánto es y con qué motivos** en cada carga del tablero.
+- **Un proveedor excluido por rubro no se mueve.** Sacarlo de `PAGOS` sigue siendo apuntar la fila a `PAGOS_CRONO_OPERATIVOS` desde Parámetros; este cambio no toma esa decisión por nadie.
+
+#### No se ven por defecto, y el cartel dice cuántas son
+
+Ya se decidió que no van al cashflow, así que en el trabajo normal —revisar qué hay que pagar— son ruido. El interruptor **Ver excluidas** viene **apagado**, al revés que el de al lado.
+
+Pero esconder plata sin decir cuánta es exactamente lo que este módulo no hace, y acá pesa más que en el otro filtro: **esas filas están escondidas por defecto**, así que sin el cartel del período no hay ninguna pantalla donde alguien note que existen. Una exclusión puesta en marzo que nadie recuerda es justo lo que el cartel evita.
+
+> *Hay 1 factura(s) excluida(s) a mano por $ 7.110.342,48, escondidas y fuera del cashflow — tildá Ver excluidas para revisarlas.*
+
+Los indicadores siguen midiendo lo visible y diciendo el universo al lado, como con los otros dos filtros. Cuando se muestran, la fila se atenúa y el pendiente va tachado: es la fila la que cambió de significado, no una celda.
 
 ### El rubro "Excluidos"
 
@@ -345,6 +456,7 @@ Como las dos importaciones, **no escribe nada hasta confirmar**.
 | `PAGOS_EXCLUIDOS` | Sólo los excluidos |
 | `PAGOS_CRONO_OPERATIVOS` | **Los dos criterios a la vez** |
 | `PAGOS_SIN_RUBRO` | Sólo los que no están en el maestro |
+| `PAGOS_EXCLUIDOS_FACTURA` | Sólo las facturas excluidas a mano, una por una |
 | `RUBRO_*` | Una por cada rubro económico del maestro |
 
 **`PAGOS` no trae todo**, y el nombre engaña: trae el cronograma. Ver la sección anterior.
@@ -352,8 +464,8 @@ Como las dos importaciones, **no escribe nada hasta confirmar**.
 Son **dos particiones del mismo universo**, y las dos tienen que cerrar contra `PAGOS_TODO`:
 
 ```
-PAGOS + PAGOS_FUERA_CRONOGRAMA   = PAGOS_TODO   (por cómo se paga)
-PAGOS_OPERATIVOS + PAGOS_EXCLUIDOS = PAGOS_TODO (por qué rubro es)
+PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA = PAGOS_TODO  (por cómo se paga)
+PAGOS_OPERATIVOS + PAGOS_EXCLUIDOS                       = PAGOS_TODO  (por qué rubro es)
 ```
 
 Eso lo fija `tests/test_proveedores.php` contra los datos reales: si una de las dos no cerrara, algún comprobante se estaría yendo a la serie equivocada.
@@ -387,7 +499,7 @@ La regla original comparaba el **total** contra cada una de sus partes. Eso deja
 Por eso el registro declara `particiones`: un mapa `total → corte → series`.
 
 ```
-por cómo se paga      PAGOS · PAGOS_FUERA_CRONOGRAMA
+por cómo se paga      PAGOS · PAGOS_FUERA_CRONOGRAMA · PAGOS_EXCLUIDOS_FACTURA
 por si está excluido  PAGOS_OPERATIVOS · PAGOS_EXCLUIDOS
 por rubro             PAGOS_SIN_RUBRO · RUBRO_*
 ```
@@ -426,28 +538,71 @@ Una forma que llega con el normalizado en `null` se dibuja en naranja con su ori
 
 > Esto estuvo invisible un tiempo por otro motivo: `categoria()` no devolvía el `FORMA_PAGO_ORIG` del maestro, así que esas 133 filas se dibujaban *"sin forma"* en gris y la marca naranja —que existe exactamente para este caso— no se ejecutaba nunca.
 
-### Hay dos formas de pago por fila, y sólo una decide
+### Hay tres formas de pago por fila, sólo una decide, y en la grilla se ve una sola columna
 
 Confundirlas fue un bug.
 
-| | |
-| --- | --- |
-| `FORMA_PAGO_MAESTRO` | Cómo se le paga a **ese proveedor**, según el maestro. Es una **regla**, y es lo único que decide si el comprobante entra al cronograma —al filtro de la pestaña y a la serie `PAGOS` del tablero— |
-| `FORMA_PAGO` | Por qué vía salió o va a salir **ese pago**, si hay uno registrado. Es un **hecho**, y sólo se muestra |
+| | Qué es | ¿Decide? |
+| --- | --- | --- |
+| `FORMA_PAGO_CRONOGRAMA` | Con qué forma hay que tratar a **esta factura**. La pone una persona en la grilla | **Sí**, y le gana al maestro |
+| `FORMA_PAGO_MAESTRO` | Cómo se le paga a **ese proveedor**, según el maestro | **Sí**, cuando no hay override |
+| `FORMA_PAGO` | Por qué vía salió o va a salir **ese pago**. La trae la importación de la planilla | **No.** Sólo se muestra |
 
-> El filtro mira la regla, no el hecho.
+> El filtro mira una **regla**, no un **hecho**. Lo resuelve `Proveedores::formaDelCronograma()`, estática y pura.
 
-Si lo decidiera la fila de pago pasarían dos cosas, y las dos son peores. La grilla edita una sola celda —la fecha— y manda sólo esa, así que **cargar una fecha desde la grilla movería la deuda de serie**: un proveedor de CAJA o de DÉBITO pasaría a "sin forma", entraría al filtro y entraría al cashflow. Y a la inversa, un pago hecho por una vía distinta de la habitual sacaría al proveedor del cronograma sin que nadie lo haya decidido.
+```
+CRONOGRAMA = esDelCronograma( override de la factura ?? forma del maestro )
+```
 
-**Que las dos difieran no es un error: es información.** Significa que a ese proveedor se le pagó por una vía distinta de la habitual, y lo que eventualmente hay que corregir es el maestro.
+**En pantalla es UNA sola columna, editable, y muestra la que decide.** `FORMA_PAGO_VIGENTE` viaja ya resuelta en cada fila —la regla se escribe una vez, en el backend, y la grilla muestra lo que decide en vez de una aproximación suya—.
 
-Por lo mismo, `savePago()` **no pisa lo que no le mandaron**: si la forma o la observación no viajan en el request, no entran al `UPDATE`. Un endpoint que recibe un campo y escribe cuatro no está guardando una edición, está reemplazando la fila —y borraba la forma y la observación que había dejado la importación de la planilla—.
+- La opción vacía del desplegable **se nombra**: `CAJA · del maestro`. Así el caso normal muestra la forma real *y de dónde sale*, y volver a ella es lo que saca el override.
+- Elegir cualquier otra guarda el override y la celda se marca en violeta.
+- **Cuando el hecho difiere de lo que decide**, va un ícono al lado con el detalle, no una columna propia. Hubo dos columnas y se unificaron: obligaban a leer dos celdas para contestar una sola pregunta, y hoy **no hay ni un comprobante donde difieran**.
 
-### El filtro se puede apagar, y mientras está prendido dice cuánto esconde
+> Lo que se ve es lo que decide. Es la propiedad que importa en una columna que está al lado de los importes del cashflow: si mostrara una cosa y el tablero usara otra, no habría dónde notarlo.
 
-El interruptor *Sólo echeq y transferencia* viene tildado y se puede destildar. Al lado del período, siempre a la vista:
+#### Por qué el override va en su propia columna
 
-> *Quedan afuera $51.804.546,29 en 257 vencimiento(s) (DEBITO $51.804.546,29) — destildá el filtro para verlos.*
+> Esto es **nuevo**. Antes la única regla era la del maestro, y cambiarla movía toda la deuda de ese proveedor.
+
+Una factura puntual puede pagarse distinto sin que eso cambie cómo se le paga al proveedor en general. Hasta ahora no había dónde decirlo: o se cambiaba el maestro —y se movía todo— o no se decía.
+
+**Lo que no se podía hacer es que decidiera `FORMA_PAGO`**, que era la columna que ya estaba. Esa es un *hecho*, y **la escribe la importación de la planilla de pagos en todas sus filas**: si decidiera, subir la planilla pasaría a mover comprobantes dentro y fuera del cashflow sin que nadie lo haya pedido. Hoy no hay **ni un comprobante donde las dos difieran**, así que el daño no se vería hasta la primera planilla que traiga una vía distinta de la habitual.
+
+Por eso `aplicarImportacion()` **no toca `FORMA_PAGO_CRONOGRAMA`**, y hay una prueba que lo fija.
+
+- **No toca el maestro.** Las otras facturas del mismo proveedor siguen clasificándose igual.
+- **Se valida contra `FORMAS_PAGO`**, al revés que `FORMA_PAGO`, que guarda lo que diga la planilla. Ésta *decide*: una forma que no está en la lista no decidiría nada y quedaría como un override que parece puesto y no hace nada.
+- **Sacarlo es elegir "maestro:" en el desplegable.** No borra la fila: la fecha de pago y la observación siguen estando, porque son otra cosa.
+
+**Que el hecho difiera de la regla no es un error: es información.** Significa que a ese proveedor se le pagó por una vía distinta de la habitual, y lo que eventualmente hay que corregir es el maestro.
+
+#### `savePago()` no pisa lo que no le mandaron, y ahora es estructural
+
+`guardarPago()` recibe **un mapa columna → valor con exactamente lo que hay que escribir**, y lo que no está en el mapa no entra ni al `UPDATE` ni al `INSERT`.
+
+Antes eran dos booleanos —`$tocarForma`, `$tocarObs`—, y cada override nuevo obligaba a agregar un flag más y a que todos los llamadores lo pasaran bien. El bug original: un endpoint que recibe un campo y escribe cuatro no está guardando una edición, está reemplazando la fila —y borraba la forma y la observación que había dejado la importación—.
+
+#### La tabla de pagos pasó a ser la tabla de overrides
+
+`RO_T_CASHFLOW_PROV_LOCALES_PAGO` nació como *"las fechas de pago"* y hoy guarda tres decisiones sobre un comprobante: **la fecha, la forma con la que se lo trata y si se lo excluye**. Por eso `FECHA_PAGO` es **nullable**: con `NOT NULL` no había forma de guardar un override sin inventarle además una fecha, y una fecha inventada no es un dato que falte —es un dato falso que después alguien lee como una decisión—.
+
+Una fila sin fecha cae sola al escalón siguiente de la jerarquía, el vencimiento de Tango, que es exactamente lo que pasaba cuando no había fila.
+
+### Los filtros se pueden apagar, y dicen cuánto esconden
+
+Son tres interruptores, y **sus defaults no son todos iguales porque no significan lo mismo**:
+
+| Interruptor | Arranca | Por qué |
+| --- | --- | --- |
+| *Sólo echeq y transferencia* | **prendido** | Es el cronograma, que es el trabajo normal |
+| *Sólo vencidos sin fecha* | apagado | Es un filtro de un clic para aislar lo que falta fechar |
+| *Ver excluidas* | **apagado** | Ya se decidió que no van: mostrarlas en el trabajo normal es ruido |
+
+Al lado del período, siempre a la vista:
+
+> *Quedan afuera $141.423.489,13 en 392 vencimiento(s) (TARJETA CORP $88.129.222,37 · DEBITO $52.128.205,29 · CAJA $1.166.061,47) — destildá Sólo echeq y transferencia para verlos. · Hay 1 factura(s) excluida(s) a mano por $7.110.342,48, escondidas y fuera del cashflow — tildá Ver excluidas para revisarlas.*
 
 Un filtro que esconde plata sin decir cuánta es un filtro que miente.
 
@@ -484,7 +639,7 @@ Tres sub-solapas, que son tres momentos del mismo circuito:
 | --- | --- |
 | **Cuentas a Pagar** | El listado, con la fecha editable celda por celda |
 | **Importar** | Las dos planillas, con previsualización del diff |
-| **Maestro** | Qué es cada proveedor, y qué proveedores faltan |
+| **Maestro** | Qué es cada proveedor, qué proveedores faltan, y el alta/edición de a uno |
 
 > **Se llama *Cuentas a Pagar* y no *Pagos Reales***, que era el nombre propuesto. Lo que se carga es una **previsión**; lo real lo dice Tango cuando el comprobante se cancela, y eso lo resuelve la conciliación. Un rótulo que dijera *"reales"* prometería un hecho donde hay un plan.
 
@@ -548,6 +703,9 @@ Con base, además: que **ningún pendiente sea negativo** —el error que tenía
 ```
 sql/cashflow_prov_locales.sql                  Las dos tablas + la fila del tablero
 sql/cashflow_prov_locales_collation.sql        Alinea la collation con la de Tango
+sql/cashflow_prov_locales_maestro_manual.sql   ORIGEN: habilita la carga a mano
+sql/cashflow_prov_locales_forma_por_factura.sql  El override de forma por factura
+sql/cashflow_prov_locales_excluir_factura.sql    El tilde de exclusion por factura
 sql/_referencia_tango_pendientes.sql           La consulta de Tango, como referencia
 cashflow/Class/Planilla.php                    El mecanismo de importacion CSV, compartido
 cashflow/Class/Proveedores.php                 Cuentas a pagar, fechas de pago y conciliacion

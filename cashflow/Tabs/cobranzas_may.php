@@ -167,7 +167,15 @@
                                 title="Importe con el que se emitió la factura. Informativo: lo que se cobra es el pendiente.">
                                 Importe Factura
                             </th>
-                            <th rowspan="2">Importe Bruto</th>
+                            <!-- Se llamaba "Importe Bruto" cuando el dato era
+                                 GVA12.IMPORTE. Desde que el importe sale de
+                                 cruzar vencimientos con imputaciones, lo que
+                                 hay acá es el saldo pendiente, y el rótulo lo
+                                 dice. -->
+                            <th rowspan="2"
+                                title="Lo que falta cobrar de la factura: el importe emitido menos lo ya imputado. Es lo que va al cashflow.">
+                                SALDO PENDIENTE
+                            </th>
                             <th rowspan="2" id="thImporteNetoCobMay">Importe Neto</th>
                             <th rowspan="2" id="thCobroCobMay">Cobro</th>
                             <!-- El rótulo y el colspan los pone el JS según la vista activa -->

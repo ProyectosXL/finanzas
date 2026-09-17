@@ -253,44 +253,128 @@ seccion('lo que no se manda a savePago no se pisa');
    planilla. Un endpoint que recibe un campo y escribe cuatro no guarda una
    edicion: reemplaza la fila.
 
-   No hace falta base para verificarlo: se mira que el UPDATE que arma no
-   nombre las columnas que el llamador no trajo. */
+   AHORA ES ESTRUCTURAL Y NO UN FLAG POR CAMPO: guardarPago recibe un mapa
+   columna => valor con exactamente lo que hay que escribir, y lo que no esta en
+   el mapa no entra ni al UPDATE ni al INSERT. Con un flag por campo, cada
+   override nuevo obligaba a agregar un flag mas y a que todos los llamadores lo
+   pasaran bien. */
 $m = new ReflectionMethod('Proveedores', 'guardarPago');
 $params = [];
 
 foreach ($m->getParameters() as $p) { $params[] = $p->getName(); }
 
-chequear('guardarPago sabe que campos tocar', true,
-    in_array('tocarForma', $params, true) && in_array('tocarObs', $params, true));
-chequear('y por defecto los toca: la importacion los trae siempre', true,
-    $m->getParameters()[10]->getDefaultValue() === true
-    && $m->getParameters()[11]->getDefaultValue() === true);
+chequear('guardarPago recibe el mapa de lo que hay que escribir', true,
+    in_array('campos', $params, true));
+chequear('y ya no un booleano por campo', false,
+    in_array('tocarForma', $params, true) || in_array('tocarObs', $params, true));
 
-// savePago es quien decide: si el campo no vino, no entra al UPDATE.
-$rs = new ReflectionMethod('Proveedores', 'savePago');
-$cuerpo = implode('', array_slice(file(__DIR__ . '/../cashflow/Class/Proveedores.php'),
-    $rs->getStartLine() - 1, $rs->getEndLine() - $rs->getStartLine() + 1));
-
-chequear('savePago pasa false cuando no vino la forma', true,
-    strpos($cuerpo, "\$forma['original'] !== ''") !== false);
-chequear('y cuando no vino la observacion', true,
-    strpos($cuerpo, "\$obs !== ''") !== false);
-
-seccion('el filtro mira el maestro, no la fila de pago');
-
-/* LA REGLA: el criterio es una propiedad del PROVEEDOR -a este se le paga por
-   transferencia, a aquel por caja-, no de un comprobante suelto. Si lo
-   decidiera la fila de pago, cargar una fecha desde la grilla cambiaria de
-   serie la deuda, porque la grilla manda la fecha y nada mas. */
 $fuente = file_get_contents(__DIR__ . '/../cashflow/Class/Proveedores.php');
+$cuerpoDe = function ($metodo) use ($fuente) {
+    $r = new ReflectionMethod('Proveedores', $metodo);
 
-chequear('CRONOGRAMA se calcula sobre la forma del maestro', true,
-    strpos($fuente, "'CRONOGRAMA' => ProveedoresCategorias::esDelCronograma(\$cat['forma_pago'])")
-    !== false);
+    return implode('', array_slice(file(__DIR__ . '/../cashflow/Class/Proveedores.php'),
+        $r->getStartLine() - 1, $r->getEndLine() - $r->getStartLine() + 1));
+};
 
-// Y las dos formas viajan por separado: una decide, la otra se muestra.
+// El SET sale de las claves del mapa, no de una lista escrita.
+chequear('el UPDATE se arma con las claves del mapa', true,
+    strpos($cuerpoDe('guardarPago'), 'foreach ($campos as $col => $valor)') !== false);
+
+// savePago es quien decide: si el campo no vino, no entra al mapa.
+$cuerpo = $cuerpoDe('savePago');
+
+chequear('savePago no mete la forma si no vino', true,
+    strpos($cuerpo, "if (\$forma['original'] !== '')") !== false);
+chequear('ni la observacion', true, strpos($cuerpo, "if (\$obs !== '')") !== false);
+
+seccion('el filtro mira una REGLA, no un HECHO');
+
+/* LA REGLA NO CAMBIO, GANO UN ESCALON. Lo que decide si un comprobante entra al
+   cronograma es una regla, y ahora la regla tiene dos escalones:
+
+     1. el OVERRIDE de esa factura, si alguien lo puso a mano
+     2. si no, la forma del MAESTRO
+
+   Lo que NO decide -y esto es lo que hay que defender- es FORMA_PAGO, que es un
+   HECHO: por que via salio ese pago. La escribe la importacion de la planilla en
+   TODAS sus filas, asi que si decidiera, subir la planilla reclasificaria
+   comprobantes dentro y fuera del cashflow sin que nadie lo pida. */
+$cat = function ($forma) {
+    return ['forma_pago' => $forma, 'forma_pago_orig' => $forma];
+};
+
+chequear('sin override decide el maestro',
+    'CAJA', Proveedores::formaDelCronograma($cat('CAJA'), null));
+
+chequear('sin fila de pago tampoco cambia nada',
+    'ECHEQ', Proveedores::formaDelCronograma($cat('ECHEQ'), null));
+
+// El override pisa al maestro SOLO para esta factura.
+chequear('con override decide el override',
+    'TRANSFERENCIA', Proveedores::formaDelCronograma($cat('CAJA'),
+        ['FORMA_PAGO' => 'ECHEQ', 'FORMA_PAGO_CRONOGRAMA' => 'TRANSFERENCIA']));
+
+/* EL HECHO NO DECIDE. Una fila de pago registrada por ECHEQ sobre un proveedor
+   de CAJA sigue fuera del cronograma: lo que la importacion trae no reclasifica
+   nada. Es la prueba que impide que alguien "simplifique" leyendo FORMA_PAGO. */
+chequear('la forma del pago registrado NO decide',
+    'CAJA', Proveedores::formaDelCronograma($cat('CAJA'),
+        ['FORMA_PAGO' => 'ECHEQ', 'FORMA_PAGO_CRONOGRAMA' => null]));
+
+chequear('y tampoco al reves',
+    'ECHEQ', Proveedores::formaDelCronograma($cat('ECHEQ'),
+        ['FORMA_PAGO' => 'CAJA', 'FORMA_PAGO_CRONOGRAMA' => null]));
+
+// Un override vacio es no tener override: vuelve a decidir el maestro.
+chequear('un override vacio devuelve la del maestro',
+    'DEBITO', Proveedores::formaDelCronograma($cat('DEBITO'),
+        ['FORMA_PAGO' => null, 'FORMA_PAGO_CRONOGRAMA' => '']));
+
+// Y el efecto sobre lo que importa: entrar o no al cashflow.
+chequear('un proveedor de CAJA con override de ECHEQ entra al cronograma',
+    true, ProveedoresCategorias::esDelCronograma(
+        Proveedores::formaDelCronograma($cat('CAJA'),
+            ['FORMA_PAGO_CRONOGRAMA' => 'ECHEQ'])));
+
+chequear('y uno de ECHEQ con override de CAJA sale',
+    false, ProveedoresCategorias::esDelCronograma(
+        Proveedores::formaDelCronograma($cat('ECHEQ'),
+            ['FORMA_PAGO_CRONOGRAMA' => 'CAJA'])));
+
+/* Se mira el cuerpo de getPendientes y no el archivo entero: lo que hay que
+   fijar es que la fila arme CRONOGRAMA con formaDelCronograma() y no leyendo
+   una forma por su cuenta. */
+$cuerpoPend = $cuerpoDe('getPendientes');
+
+chequear('CRONOGRAMA sale de formaDelCronograma()', true,
+    preg_match('/\'CRONOGRAMA\'\s*=>\s*ProveedoresCategorias::esDelCronograma\(\s*'
+        . 'self::formaDelCronograma\(/', $cuerpoPend) === 1);
+
+/* LA GRILLA TIENE UNA SOLA COLUMNA DE FORMA, Y MUESTRA LA QUE DECIDE. Por eso
+   la fila trae el valor ya resuelto: si el navegador lo recalculara, la columna
+   podria mostrar una cosa y el tablero usar otra, y no habria donde notarlo. */
+chequear('la fila trae la forma que decide, ya resuelta', true,
+    strpos($cuerpoPend, "'FORMA_PAGO_VIGENTE' => self::formaDelCronograma(\$cat, \$pago)")
+        !== false);
+
+// Y las tres formas viajan por separado: una decide, las otras dos se muestran.
 chequear('la forma del maestro viaja aparte', true,
     strpos($fuente, "'FORMA_PAGO_MAESTRO' => \$cat['forma_pago']") !== false);
+
+/* LA IMPORTACION NO ESCRIBE EL OVERRIDE. Es el invariante que sostiene todo lo
+   de arriba: si aplicarImportacion lo tocara, la planilla volveria a decidir.
+
+   Se busca la CLAVE del mapa que se le pasa a guardarPago, no el nombre suelto:
+   el nombre aparece en el comentario que explica por que NO se escribe, y ese
+   comentario tiene que poder existir. */
+chequear('la importacion de pagos no escribe el override', false,
+    strpos($cuerpoDe('aplicarImportacion'), "'FORMA_PAGO_CRONOGRAMA' =>") !== false);
+
+// Pero sí escribe las otras tres: es lo que la planilla trae.
+foreach (["'FECHA_PAGO' =>", "'FORMA_PAGO' =>", "'OBSERVACION' =>"] as $col) {
+    chequear('y sigue escribiendo ' . $col, true,
+        strpos($cuerpoDe('aplicarImportacion'), $col) !== false);
+}
 
 /* LA TABLA DE SIGNOS NO SE TOCA. Al sacar la columna CRE_DEB del SELECT quedo
    un solo uso de CPA21 en la consulta, y es el que importa: sin el, una nota de
@@ -445,6 +529,182 @@ chequear('y cuando difieren del universo se dice cuanto es el universo', true,
    trabajo por hacer justo cuando lo hay. */
 chequear('la tarjeta de vencidos se apaga por el universo', true,
     strpos($js, "toggle('prov-kpi-ok', !u.n_vencido_sin_fecha)") !== false);
+
+seccion('el eje se lee con la API de eje-vistas, no inventando campos');
+
+/* DOS BUGS DE LA MISMA FAMILIA, los dos de esta pestaña y los dos invisibles
+   hasta que alguien mira la tabla de cerca.
+
+   `vistas.columnas()` devuelve STRINGS -'DIA|2026-09-17', 'MES|2026-10'-, no
+   objetos. Esta pestaña los trataba como objetos:
+
+     c.label            -> undefined: la fila de dias y meses salia TODA VACIA
+     c.rama + c.clave   -> 'undefined|undefined': las 28 columnas del pie caian
+                           en la MISMA clave, asi que la fila de TOTALES mostraba
+                           el total del periodo repetido en cada columna
+
+   El segundo es el peor: una fila de totales que miente es peor que una que
+   falta. Ninguna otra pestaña del modulo lo tiene; todas usan rotulo() y valor(),
+   que es la API. */
+/* Se mira el JS SIN COMENTARIOS: los dos nombres viejos aparecen en el
+   comentario que explica por que estaban mal, y ese comentario tiene que poder
+   existir. Lo que no puede volver es el codigo. */
+$jsCodigo = preg_replace(['/\/\*.*?\*\//s', '/\/\/[^\n]*/'], '', $js);
+
+chequear('el rotulo del eje sale de vistas.rotulo()', true,
+    strpos($jsCodigo, 'escapar(vistas.rotulo(c))') !== false);
+chequear('y ya no de un campo que no existe', false, strpos($jsCodigo, 'c.label') !== false);
+
+chequear('el pie agrupa por la columna, que ya es la clave', true,
+    strpos($jsCodigo, 'porCol[c] = (porCol[c] || 0)') !== false);
+chequear('y ya no por dos campos inexistentes', false,
+    strpos($jsCodigo, "c.rama + '|' + c.clave") !== false);
+
+/* La API que SI existe, para que se note si alguien la cambia. */
+$ejeJs = file_get_contents(__DIR__ . '/../cashflow/Js/eje-vistas.js');
+
+foreach (['rotulo: function(col)', 'valor: function(fila, col)',
+          'esMes: function(col)', 'meta: function(col)'] as $m) {
+    chequear('eje-vistas sigue ofreciendo ' . $m, true, strpos($ejeJs, $m) !== false);
+}
+
+seccion('rubro economico y rubro son dos columnas, y la grilla no se desalinea');
+
+/* SON DOS COLUMNAS DISTINTAS DEL MAESTRO. El economico abre la deuda por serie
+   en el tablero; el rubro clasifica adentro de ese y no arma ninguna serie. La
+   solapa del maestro ya las mostraba separadas y Cuentas a Pagar mostraba una
+   sola: el mismo proveedor se leia distinto segun la solapa. */
+$htmlProv = file_get_contents(__DIR__ . '/../cashflow/Tabs/proveedores_locales.php');
+
+/* Se mira el HTML SIN COMENTARIOS, por la misma razon que el JS de arriba: el
+   comentario que explica la diferencia nombra las dos columnas. */
+$htmlCodigo = preg_replace('/<!--.*?-->/s', '', $htmlProv);
+
+chequear('el encabezado nombra las dos, y en ese orden', 1,
+    preg_match('/RUBRO ECONOMICO\s*<\/th>.*?>\s*RUBRO\s*<\/th>/s', $htmlCodigo));
+
+chequear('y el cuerpo pinta una celda para cada una', true,
+    strpos($jsCodigo, "'<td>' + celdaRubro(f) + '</td>'") !== false
+    && strpos($jsCodigo, "'<td>' + celdaRubroDetalle(f) + '</td>'") !== false);
+
+// El economico distingue "no esta en el maestro"; el otro, "esta pero vino
+// vacio", que es lo comun. Un mismo cartel para los dos casos haria pensar que
+// falta clasificar a un proveedor que ya esta clasificado.
+chequear('el economico avisa cuando el proveedor no esta en el maestro', true,
+    strpos($jsCodigo, 'sin clasificar') !== false);
+
+/* EL SINTOMA QUE ESTO EVITA: agregar una columna al encabezado y no al cuerpo
+   -o al reves- corre la tabla entera una celda, y el numero que uno lee bajo
+   "Pendiente" es el de la columna de al lado. No rompe nada: solo miente.
+
+   Por eso el conteo se verifica contra el HTML y no se confia en COLS_DESC, que
+   es justamente el numero que se olvida de actualizar. */
+$encabezado = substr($htmlCodigo, strpos($htmlCodigo, '<table id="tablaProveedores"'));
+$encabezado = substr($encabezado, 0, strpos($encabezado, 'id="headerEjeProv"'));
+
+preg_match('/var COLS_DESC = (\d+);/', $jsCodigo, $mCols);
+
+/* Se cuentan las de rowspan="2" y no todos los <th>: la ultima del encabezado es
+   la del eje, que es una sola celda con colspan y no es descriptiva. */
+chequear('el encabezado tiene tantas descriptivas como declara COLS_DESC',
+    substr_count($encabezado, '<th rowspan="2"'), intval($mCols[1]));
+
+/* El pie las reparte en tres tramos -las que llevan el rotulo, la del total, y
+   las editables- y los tres tienen que sumar lo mismo. Un colspan mal contado
+   deja el total debajo de otra columna. */
+preg_match('/<td colspan="(\d+)" class="fw-bold text-end">TOTALES<\/td>/', $jsCodigo, $mPie);
+preg_match('/COLS_DESC - (\d+)/', $jsCodigo, $mResto);
+
+chequear('y el pie reparte esas mismas columnas', intval($mCols[1]),
+    intval($mPie[1]) + 1 + (intval($mCols[1]) - intval($mResto[1])));
+
+// El colspan del HTML es solo el estado inicial -pintarTotales lo reescribe-,
+// pero si arranca mal la tabla parpadea desalineada en cada carga.
+preg_match('/id="totalesProv">\s*<td colspan="(\d+)"/', $htmlCodigo, $mPieHtml);
+
+chequear('el pie del HTML arranca con el mismo ancho', intval($mCols[1]),
+    intval($mPieHtml[1]));
+
+// Buscar "CAJA" trae lo que la grilla muestra como CAJA: si una columna se ve y
+// no se busca, el buscador contesta que no hay nada sobre algo que esta a la
+// vista.
+chequear('el buscador mira las dos columnas', true,
+    strpos($jsCodigo, 'f.RUBRO_ECONOMICO, f.RUBRO,') !== false);
+
+seccion('las excluidas no se ven por defecto, y se dice cuantas son');
+
+/* YA SE DECIDIO que no van al cashflow, asi que en el trabajo normal -revisar
+   que hay que pagar- son ruido. Pero esconder plata sin decir cuanta es
+   exactamente lo que este modulo no hace: el cartel del periodo lo dice aunque
+   -y sobre todo porque- las filas no se ven. */
+chequear('el filtro las esconde salvo que se pidan', true,
+    strpos($js, 'if (!verExcluidas && f.EXCLUIDA_MANUAL) { return false; }') !== false);
+
+chequear('el interruptor arranca APAGADO', true,
+    preg_match('/id="verExcluidasProv"(?![^>]*\bchecked\b)/',
+        file_get_contents(__DIR__ . '/../cashflow/Tabs/proveedores_locales.php')) === 1);
+
+// El de al lado arranca prendido, y son dos defaults distintos a proposito.
+chequear('y el de echeq y transferencia sigue arrancando PRENDIDO', true,
+    preg_match('/id="soloCronogramaProv"[^>]*\bchecked\b/',
+        file_get_contents(__DIR__ . '/../cashflow/Tabs/proveedores_locales.php')) === 1);
+
+chequear('el cartel dice cuantas quedaron escondidas', true,
+    strpos($js, 'factura(s) excluida(s) a mano por') !== false);
+chequear('y el backend le da el numero', true,
+    strpos(file_get_contents(__DIR__ . '/../cashflow/Controller/ProveedoresController.php'),
+        "'n_excluido_manual' => \$nExcluidoManual") !== false);
+
+seccion('la forma de pago es UNA sola columna, y es la que decide');
+
+/* UNA COLUMNA, EDITABLE, Y MUESTRA LO QUE DECIDE. Eran dos -el hecho y la
+   regla- y leer dos celdas para contestar una sola pregunta no ayudaba a nadie:
+   hoy no hay ni un comprobante donde difieran. El hecho no se pierde: cuando
+   difiere se marca al lado con un icono. */
+chequear('hay un solo desplegable de forma por fila', true,
+    strpos($js, 'prov-select-forma') !== false);
+chequear('y ya no una segunda columna', false,
+    strpos($js, 'prov-select-crono') !== false || strpos($js, 'celdaCronograma') !== false);
+
+// La opcion vacia se NOMBRA con la del maestro: asi el caso normal muestra la
+// forma real y de donde sale, y volver a ella es lo que saca el override.
+chequear('la opcion vacia dice que viene del maestro', true,
+    strpos($js, "escapar(delMaestro + ' · maestro')") !== false);
+
+/* FORMAS_PAGO ES UNA LISTA, NO UN MAPA: los nombres son los VALORES. Leerla con
+   Object.keys devolvia 0..5 y el desplegable mostraba numeros en vez de las
+   formas. */
+chequear('el desplegable lee los valores de la lista, no sus claves', false,
+    strpos($js, 'Object.keys((datos && datos.formas_pago)') !== false
+    || strpos($js, 'Object.keys(maestro.formas_pago)') !== false);
+
+chequear('y FORMAS_PAGO efectivamente es una lista', true,
+    array_keys(ProveedoresCategorias::FORMAS_PAGO) === range(0,
+        count(ProveedoresCategorias::FORMAS_PAGO) - 1));
+
+seccion('la forma del override se valida contra la lista, no por indice');
+
+/* EL BUG QUE ESTO FIJA: la validacion hacia isset(FORMAS_PAGO[mb_strtoupper(x)])
+   sobre una LISTA, asi que daba false siempre y RECHAZABA TODOS los overrides.
+   Nadie podia fijar la forma de una factura. */
+$cuerpoForma = $cuerpoDe('saveFormaCronograma');
+
+chequear('usa la normalizacion del modulo', true,
+    strpos($cuerpoForma, 'ProveedoresCategorias::normalizarFormaPago($v)') !== false);
+chequear('y ya no indexa la lista por nombre', false,
+    strpos($cuerpoForma, 'isset(ProveedoresCategorias::FORMAS_PAGO[') !== false);
+
+// Esa normalizacion es la del modulo: ignora mayusculas, acentos y espacios,
+// igual que en la importacion.
+chequear('una forma valida en minuscula matchea',
+    'ECHEQ', ProveedoresCategorias::normalizarFormaPago('echeq')['normalizado']);
+chequear('y una con espacios de mas tambien',
+    'MERCADO PAGO', ProveedoresCategorias::normalizarFormaPago('  Mercado Pago ')['normalizado']);
+chequear('una que no esta en la lista no matchea',
+    null, ProveedoresCategorias::normalizarFormaPago('eqheck')['normalizado']);
+
+chequear('el hecho distinto se marca al lado, no en otra columna', true,
+    strpos($js, 'function marcaPagoDistinto(f)') !== false);
 
 seccion('el archivo exportado dice que filtro estaba puesto');
 
@@ -641,6 +901,165 @@ foreach ($c['avisos'] as $a) {
 chequear('una baja masiva avisa distinto', true, $avisoMasivo);
 
 /* ================================================================
+   EL MAESTRO SE PUEDE CARGAR A MANO
+
+   La planilla SIGUE MANDANDO: una edicion manual es una version mas y la
+   proxima importacion la pisa. Eso es lo que evita tener dos maestros en
+   paralelo, que es la decision que este modulo ya tomo cuando descarto
+   CPA01.COD_RUBRO.
+
+   Lo que estas pruebas fijan es lo otro: que pisar trabajo manual NO sea
+   invisible, y que una carga a mano se normalice igual que una importada.
+   ================================================================ */
+seccion('una carga manual se normaliza igual que una importada');
+
+/* ES LA MISMA FUNCION, y por eso se puede afirmar. Si la pantalla normalizara
+   por su cuenta, el mismo proveedor quedaria clasificado distinto segun por
+   donde entro, y no habria ninguna pantalla donde notarlo. */
+$aMano = ProveedoresCategorias::normalizarFila([
+    'linea' => 0,
+    'cod_provee' => 'ognuñe',          // minuscula y con enie
+    'nombre' => '  Proveedor Nuevo  ',
+    'rubro_economico' => 'Logistica',
+    'forma_pago' => 'echeq',           // minuscula
+    'plazo_pago' => '30 DIAS'
+]);
+
+chequear('el codigo sube entero, con la enie', 'OGNUÑE', $aMano['cod_provee']);
+chequear('la forma de pago se normaliza', 'ECHEQ', $aMano['forma_pago']);
+chequear('y conserva lo que se tipeo', 'echeq', $aMano['forma_pago_orig']);
+chequear('el plazo se lleva a dias', 30, $aMano['plazo_dias']);
+chequear('y la fila queda lista para cargar', 'ALTA', $aMano['estado']);
+
+// Las mismas validaciones: un codigo que no cruza contra Tango no se carga ni
+// a mano ni por planilla.
+$largo = ProveedoresCategorias::normalizarFila(['linea' => 0, 'cod_provee' => 'DEMASIADO']);
+
+chequear('un codigo mas largo que el de Tango tampoco entra a mano',
+    'ERROR', $largo['estado']);
+chequear('y el motivo lo explica', true,
+    strpos($largo['motivo'], 'no va a cruzar') !== false);
+
+seccion('reimportar avisa antes de pisar una carga manual');
+
+/* La planilla manda, asi que el CAMBIO se aplica igual. Lo que se agrega es
+   poder VERLO: entre trescientos cambios, los que borran trabajo manual son los
+   unicos que alguien querria revisar. */
+$manual = ['MTDODI' => [
+    'COD_PROVEE' => 'MTDODI', 'NOMBRE' => 'DONNA DI DIO',
+    'RUBRO_ECONOMICO' => 'Mercaderia', 'RUBRO' => '', 'CENTRO_COSTOS' => '',
+    'FORMA_PAGO' => 'CHEQUE', 'PLAZO_PAGO' => '30 DIAS', 'CRITERIO_DISTRIB' => '',
+    'ORIGEN' => 'MANUAL'
+]];
+
+$c = ProveedoresCategorias::compararImportacion([$fila(2, 'MTDODI')], $manual);
+
+chequear('el cambio se aplica igual: la planilla manda', 'CAMBIO', $c['filas'][0]['estado']);
+chequear('pero la fila queda marcada', true, $c['filas'][0]['pisa_manual']);
+chequear('y el resumen lo cuenta', 1, $c['resumen']['pisa_manuales']);
+
+$avisoManual = false;
+
+foreach ($c['avisos'] as $a) {
+    if (strpos($a, 'editado a mano') !== false) { $avisoManual = true; }
+}
+
+chequear('el aviso lo dice antes de confirmar', true, $avisoManual);
+
+// Una fila que viene de la planilla no se marca: marcar todo seria no marcar
+// nada.
+$importada = $manual;
+$importada['MTDODI']['ORIGEN'] = 'IMPORT';
+
+$c = ProveedoresCategorias::compararImportacion([$fila(2, 'MTDODI')], $importada);
+
+chequear('pisar una fila importada no se marca', false, $c['filas'][0]['pisa_manual']);
+chequear('ni se cuenta', 0, $c['resumen']['pisa_manuales']);
+
+// Y una fila que no cambia tampoco: no hay nada que pisar. El maestro tiene
+// exactamente lo que el archivo trae, y ademas esta marcado como MANUAL.
+$igual = ['MTDODI' => [
+    'COD_PROVEE' => 'MTDODI', 'NOMBRE' => 'N MTDODI',
+    'RUBRO_ECONOMICO' => 'Mercaderia', 'RUBRO' => '', 'CENTRO_COSTOS' => '',
+    'FORMA_PAGO' => 'TRANSFERENCIA', 'PLAZO_PAGO' => '30 DIAS', 'CRITERIO_DISTRIB' => '',
+    'ORIGEN' => 'MANUAL'
+]];
+
+$c = ProveedoresCategorias::compararImportacion([$fila(2, 'MTDODI')], $igual);
+
+chequear('sin cambios no hay nada que pisar', 'SIN_CAMBIOS', $c['filas'][0]['estado']);
+chequear('asi que no se marca', 0, $c['resumen']['pisa_manuales']);
+
+seccion('lo que falta se dice, aunque no rompa nada');
+
+/* EL SINTOMA QUE ESTO EVITA: sin la columna ORIGEN la pantalla esconde el boton
+   de agregar -no puede escribir- y no decia por que. Una funcion que desaparece
+   sin explicarse es indistinguible de una que no se construyo: quien la fue a
+   buscar no tiene donde enterarse de que existe y de que falta un script. */
+$tabProv = file_get_contents(__DIR__ . '/../cashflow/Tabs/proveedores_locales.php');
+
+chequear('la solapa del maestro tiene donde poner sus avisos', true,
+    strpos($tabProv, 'id="avisosMaestroProv"') !== false);
+
+// Y el JS los pinta: el backend los venia produciendo y nadie los leia.
+chequear('y el JS los pinta al cargar el maestro', true,
+    strpos($jsCodigo, "pintarAvisos(maestro.avisos, 'avisosMaestroProv')") !== false);
+
+$catJs = file_get_contents(__DIR__ . '/../cashflow/Class/ProveedoresCategorias.php');
+
+chequear('el aviso nombra el script que falta', true,
+    strpos($catJs, 'La carga manual de proveedores está apagada') !== false
+    && strpos($catJs, 'sql/cashflow_prov_locales_maestro_manual.sql') !== false);
+
+// Y dice que lo demás sigue andando: un aviso que suena a "esta pantalla está
+// rota" manda a alguien a buscar un problema que no existe.
+chequear('y aclara que el resto funciona igual', true,
+    strpos($catJs, 'Todo lo demás de esta') !== false);
+
+seccion('el script que habilita la carga manual');
+
+$sqlManual = __DIR__ . '/../sql/cashflow_prov_locales_maestro_manual.sql';
+
+chequear('el script existe', true, file_exists($sqlManual));
+
+seccion('el script de la forma por factura');
+
+$sqlForma = __DIR__ . '/../sql/cashflow_prov_locales_forma_por_factura.sql';
+
+chequear('el script existe', true, file_exists($sqlForma));
+
+$txtForma = file_get_contents($sqlForma);
+
+chequear('agrega la columna solo si no esta', true,
+    strpos($txtForma, "COL_LENGTH('dbo.RO_T_CASHFLOW_PROV_LOCALES_PAGO', 'FORMA_PAGO_CRONOGRAMA') IS NULL")
+        !== false);
+
+/* LA FECHA DE PAGO DEJA DE SER OBLIGATORIA, y es parte del mismo cambio: sin
+   eso no habia forma de guardar un override sin inventarle ademas una fecha al
+   comprobante, y una fecha inventada no es un dato que falte, es un dato falso
+   que despues alguien lee como una decision. */
+chequear('la fecha de pago pasa a ser nullable', true,
+    strpos($txtForma, 'ALTER COLUMN FECHA_PAGO DATE NULL') !== false);
+
+// Sin fecha cargada, la jerarquia cae sola al vencimiento: es lo mismo que
+// pasaba cuando no habia fila.
+$sinFecha = Proveedores::resolverFechaPago(null, '2026-10-20', '2026-09-01', 30, '2026-09-17');
+
+chequear('una fila de override sin fecha cae al vencimiento',
+    '2026-10-20', $sinFecha['fecha']);
+chequear('y el origen lo dice', 'VENCIMIENTO', $sinFecha['origen']);
+
+$txtManual = file_get_contents($sqlManual);
+
+chequear('agrega ORIGEN solo si no esta', true,
+    strpos($txtManual, "COL_LENGTH('dbo.RO_T_CASHFLOW_PROV_LOCALES_CATEG', 'ORIGEN') IS NULL")
+        !== false);
+
+// Lo que ya hay entro por la planilla: es el dato cierto, no un relleno.
+chequear('lo que ya estaba queda como IMPORT', true,
+    strpos($txtManual, "SET ORIGEN = 'IMPORT'") !== false);
+
+/* ================================================================
    EL DIFF DE LOS PAGOS
    ================================================================ */
 seccion('el tipo de comprobante se deduce cuando no viene');
@@ -831,6 +1250,109 @@ chequearLanza('una fecha inventada se rechaza',
 chequearLanza('un texto cualquiera se rechaza',
     function () { Proveedores::validarFechaPago('el jueves'); });
 
+seccion('excluir una factura pide el motivo, y lo valida el back');
+
+/* NO ES UNA VALIDACION DE LA PANTALLA. El endpoint es alcanzable sin pasar por
+   la grilla, y una factura sacada del cashflow sin motivo no la explica nadie
+   tres meses despues. Se mira el cuerpo del metodo porque tildar de verdad
+   necesita base. */
+$cuerpoExcl = $cuerpoDe('saveExclusionMasiva');
+
+chequear('rechaza excluir sin motivo', true,
+    strpos($cuerpoExcl, "if (\$excluir && \$texto === '')") !== false);
+chequear('y el mensaje dice por que importa', true,
+    strpos($cuerpoExcl, 'nadie va a poder explicar') !== false);
+
+/* DESTILDAR BORRA EL MOTIVO: dejarlo haria que una factura incluida arrastre el
+   texto de cuando estuvo afuera, y el proximo que lo lea va a creer que sigue
+   excluida. */
+chequear('destildar borra el motivo', true,
+    strpos($cuerpoExcl, "'MOTIVO_EXCLUSION' => \$excluir ? mb_substr(\$texto, 0, 200) : null")
+        !== false);
+
+// Y escribe SOLO esas dos columnas: la fecha de pago y la forma que la factura
+// ya tuviera no son asunto de este gesto.
+chequear('no toca la fecha de pago', false, strpos($cuerpoExcl, "'FECHA_PAGO'") !== false);
+chequear('ni la forma', false, strpos($cuerpoExcl, "'FORMA_PAGO") !== false);
+
+seccion('excluir varias facturas es UNA operacion, con UN motivo');
+
+/* UNA SOLA TRANSACCION, igual que el tildado masivo de Echeqs: sacar del
+   cashflow las ocho facturas de un proveedor con ocho llamadas deja la puerta
+   abierta a que la quinta falle y el tablero quede a mitad de camino. */
+chequear('abre una transaccion', true,
+    strpos($cuerpoExcl, 'sqlsrv_begin_transaction($cid)') !== false);
+chequear('y si algo falla no queda nada escrito', true,
+    strpos($cuerpoExcl, 'sqlsrv_rollback($cid)') !== false);
+
+/* LAS CLAVES SE NORMALIZAN ANTES DE ABRIR LA TRANSACCION: un comprobante mal
+   identificado en la fila once no puede descubrirse con diez ya escritas. */
+chequear('valida los comprobantes antes de empezar a escribir', true,
+    strpos($cuerpoExcl, 'foreach (is_array($comprobantes)')
+        < strpos($cuerpoExcl, 'sqlsrv_begin_transaction'));
+
+// La misma factura mandada dos veces es una: se indexa por su clave.
+chequear('la misma factura repetida no se escribe dos veces', true,
+    strpos($cuerpoExcl, '$claves[self::clavePago($cod, $t, $n)]') !== false);
+
+chequearLanza('sin comprobantes no hace nada y lo dice', function () {
+    (new Proveedores())->saveExclusionMasiva([], true, 'x');
+});
+
+// saveExclusion() de a una NO duplica la logica: delega en la masiva con una
+// lista de uno. Dos caminos que tienen que hacer lo mismo divergen.
+chequear('excluir de a una pasa por el mismo camino', true,
+    strpos($cuerpoDe('saveExclusion'), '$this->saveExclusionMasiva(') !== false);
+
+seccion('el motivo se pide en un dialogo del modulo, no con el prompt del navegador');
+
+/* window.prompt no se puede formatear, no entra un detalle largo, no valida
+   nada y se ve como un error del navegador en vez de como una decision del
+   sistema. Acá ademas hay que leer CUANTAS facturas y por CUANTA plata antes de
+   escribir el motivo, y eso en un prompt no entra. */
+$notiJs = file_get_contents(__DIR__ . '/../cashflow/Js/notificaciones.js');
+
+chequear('el control compartido sabe pedir un texto', true,
+    strpos($notiJs, 'pedirTexto: pedirTexto') !== false);
+
+/* DEVUELVE null AL CANCELAR Y EL TEXTO AL CONFIRMAR. confirmar() sigue
+   devolviendo un booleano: su respuesta es si o no, y la de esta es el texto.
+   Un false que a veces es '' obligaria a distinguir dos ausencias distintas. */
+chequear('y devuelve null si se cancela', true,
+    strpos($notiJs, 'Promise.resolve(null)') !== false);
+
+// El armazon del modal esta escrito UNA vez: lo delicado no es el HTML, es que
+// cerrar con la cruz, con Escape o clickeando afuera sea tambien una respuesta.
+chequear('los dos dialogos comparten el armazon', true,
+    strpos($notiJs, 'function abrirDialogo(opciones, pieza)') !== false);
+// El cuerpo vacio es la firma de confirmar(): pedirTexto() le pasa el campo.
+chequear('y confirmar() lo usa', true,
+    preg_match("/return abrirDialogo\(opciones, \{\s*cuerpo: '',/", $notiJs) === 1);
+
+chequear('la pestana ya no usa el prompt del navegador', false,
+    strpos($jsCodigo, 'window.prompt') !== false);
+chequear('sino el dialogo del modulo', true,
+    strpos($jsCodigo, 'Notificacion.pedirTexto({') !== false);
+
+seccion('el script que habilita excluir facturas');
+
+$sqlExcl = __DIR__ . '/../sql/cashflow_prov_locales_excluir_factura.sql';
+
+chequear('el script existe', true, file_exists($sqlExcl));
+
+$txtExcl = file_get_contents($sqlExcl);
+
+chequear('agrega el tilde solo si no esta', true,
+    strpos($txtExcl, "COL_LENGTH('dbo.RO_T_CASHFLOW_PROV_LOCALES_PAGO', 'EXCLUIDA') IS NULL")
+        !== false);
+chequear('y arranca en 0: el tablero no se mueve', true,
+    strpos($txtExcl, 'DEFAULT (0)') !== false);
+
+// Depende del anterior: sin FECHA_PAGO nullable no se puede guardar una
+// exclusion sin inventarle una fecha de pago a la factura.
+chequear('exige que FECHA_PAGO ya sea nullable', true,
+    strpos($txtExcl, 'Corre primero sql/cashflow_prov_locales_forma_por_factura.sql') !== false);
+
 /* ================================================================
    LOS AVISOS DEL LISTADO
    ================================================================ */
@@ -975,6 +1497,90 @@ $d = ProveedoresProvider::seriesDeItem($item(true, false, false,
 chequear('sin maestro va a PAGOS_SIN_RUBRO', true, in_array('PAGOS_SIN_RUBRO', $d, true));
 chequear('y no inventa una serie de rubro', false,
     in_array(ProveedoresCategorias::SERIE_SIN_RUBRO, $d, true));
+
+/* ================================================================
+   UNA FACTURA EXCLUIDA A MANO SALE DE LA FILA DEL TABLERO
+
+   EL PUNTO ES QUE SALGA DE **PAGOS**, no de PAGOS_CRONO_OPERATIVOS. La fila del
+   tablero usa PAGOS, que pertenece al corte del cronograma y NO excluye nada:
+   mandar la factura tildada solo al corte de excluidos la habria sacado de una
+   serie que hoy no usa ninguna fila, y el tilde no habria movido un peso.
+
+   Verificado contra la base al escribir esto: la fila esta configurada con
+   ORIGEN_SERIE = 'PAGOS', y ahi adentro hay $72.500.993,87 en 8 vencimientos de
+   un proveedor con rubro Excluidos que entran igual porque cobra por echeq.
+   ================================================================ */
+seccion('una factura excluida a mano sale de la serie que usa el tablero');
+
+$excl = function ($crono, $excluidoRubro = false) {
+    return ['CRONOGRAMA' => $crono, 'EXCLUIDO' => true, 'EXCLUIDA_MANUAL' => true,
+            'EN_MAESTRO' => true, 'SERIE' => 'RUBRO_MERCADERIA'];
+};
+
+$d = ProveedoresProvider::seriesDeItem($excl(true));
+
+chequear('NO va a PAGOS, que es la serie de la fila del tablero', false,
+    in_array('PAGOS', $d, true));
+chequear('va a la suya', true, in_array('PAGOS_EXCLUIDOS_FACTURA', $d, true));
+chequear('y tampoco a la de los dos criterios', false,
+    in_array('PAGOS_CRONO_OPERATIVOS', $d, true));
+
+// Tampoco a PAGOS_FUERA_CRONOGRAMA: ese corte tiene tres partes y esta es la
+// tercera. Si cayera ahi, el aviso de "esto no se planifica" la contaria como si
+// fuera un debito automatico.
+chequear('ni a la de lo que queda fuera del cronograma', false,
+    in_array('PAGOS_FUERA_CRONOGRAMA', $d, true));
+
+// Pero SIGUE en el universo: el importe no desaparece, se puede auditar.
+chequear('sigue en el universo', true, in_array('PAGOS_TODO', $d, true));
+chequear('y en el corte de excluidos', true, in_array('PAGOS_EXCLUIDOS', $d, true));
+
+// Una excluida a mano que ademas queda fuera del cronograma tampoco se duplica.
+$d = ProveedoresProvider::seriesDeItem($excl(false));
+
+chequear('una excluida fuera del cronograma va a la suya igual', true,
+    in_array('PAGOS_EXCLUIDOS_FACTURA', $d, true));
+chequear('y a ninguna de las otras dos del corte', false,
+    in_array('PAGOS', $d, true) || in_array('PAGOS_FUERA_CRONOGRAMA', $d, true));
+
+/* UN PROVEEDOR EXCLUIDO POR RUBRO NO SE MUEVE. Sacarlo de PAGOS es otra
+   decision -se toma desde Parametros apuntando la fila a
+   PAGOS_CRONO_OPERATIVOS- y este cambio no la toma por nadie. */
+$d = ProveedoresProvider::seriesDeItem($item(true, true));
+
+chequear('un excluido por RUBRO sigue entrando a PAGOS', true, in_array('PAGOS', $d, true));
+chequear('y no va a la serie de las excluidas a mano', false,
+    in_array('PAGOS_EXCLUIDOS_FACTURA', $d, true));
+
+seccion('el corte por como se paga sigue cerrando, con tres partes');
+
+/* CADA VENCIMIENTO CAE EN EXACTAMENTE UNA de las tres. Si cayera en dos, la
+   particion contaria de mas y el validador dejaria pasar dos filas solapadas;
+   si no cayera en ninguna, el importe desapareceria de PAGOS_TODO sin aviso. */
+$corte = ['PAGOS', 'PAGOS_FUERA_CRONOGRAMA', 'PAGOS_EXCLUIDOS_FACTURA'];
+$casos = [
+    'cronograma'            => ['CRONOGRAMA' => true,  'EXCLUIDA_MANUAL' => false],
+    'fuera del cronograma'  => ['CRONOGRAMA' => false, 'EXCLUIDA_MANUAL' => false],
+    'excluida a mano'       => ['CRONOGRAMA' => true,  'EXCLUIDA_MANUAL' => true],
+    'excluida y fuera'      => ['CRONOGRAMA' => false, 'EXCLUIDA_MANUAL' => true]
+];
+
+foreach ($casos as $nombre => $caso) {
+    $d = ProveedoresProvider::seriesDeItem(array_merge(
+        ['EXCLUIDO' => false, 'EN_MAESTRO' => true,
+         'SERIE' => ProveedoresCategorias::SERIE_SIN_RUBRO], $caso));
+
+    chequear($nombre . ': cae en exactamente una parte del corte',
+        1, count(array_intersect($corte, $d)));
+}
+
+// Y el registro lo declara igual, o el validador mediria contra otro corte.
+$meta = CashflowRegistry::meta('PROV_LOCALES');
+
+chequear('el registro declara las tres partes del corte',
+    $corte, $meta['particiones']['PAGOS_TODO']['por cómo se paga']);
+chequear('y la serie nueva es parte de PAGOS_TODO', true,
+    in_array('PAGOS_EXCLUIDOS_FACTURA', $meta['componentes']['PAGOS_TODO'], true));
 
 $meta = CashflowRegistry::meta('PROV_LOCALES');
 
@@ -1262,6 +1868,8 @@ chequear('la de lo que queda afuera', true, isset($series['PAGOS_FUERA_CRONOGRAM
 chequear('y las tres aperturas fijas', true,
     isset($series['PAGOS_OPERATIVOS']) && isset($series['PAGOS_EXCLUIDOS'])
     && isset($series['PAGOS_SIN_RUBRO']));
+chequear('y la de las facturas excluidas a mano', true,
+    isset($series['PAGOS_EXCLUIDOS_FACTURA']));
 
 chequear('la serie del cronograma tiene los dias del horizonte',
     $h->cantidadDias(), count($series['PAGOS']['dias']));
@@ -1272,10 +1880,16 @@ $suma = function ($s) {
 
 /* LAS DOS PARTICIONES DEL UNIVERSO TIENEN QUE DAR LO MISMO. Son dos formas de
    cortar la misma deuda: por COMO se paga y por QUE rubro es. Si una de las dos
-   no cerrara, algun comprobante se estaria yendo a la serie equivocada. */
-chequear('cronograma + fuera = universo',
+   no cerrara, algun comprobante se estaria yendo a la serie equivocada.
+
+   EL PRIMER CORTE TIENE TRES PARTES desde que se pueden excluir facturas
+   sueltas: la excluida no va ni a PAGOS ni a PAGOS_FUERA_CRONOGRAMA, va a la
+   suya. Es lo que hace que el tilde saque el importe de la fila del tablero,
+   que usa PAGOS. */
+chequear('cronograma + fuera + excluidas a mano = universo',
     $suma($series['PAGOS_TODO']),
-    $suma($series['PAGOS']) + $suma($series['PAGOS_FUERA_CRONOGRAMA']));
+    $suma($series['PAGOS']) + $suma($series['PAGOS_FUERA_CRONOGRAMA'])
+        + $suma($series['PAGOS_EXCLUIDOS_FACTURA']));
 
 chequear('operativos + excluidos = universo',
     $suma($series['PAGOS_TODO']),

@@ -32,12 +32,31 @@
    NO HAY RELLENO DE DIAS SIN COTIZACION. Los fines de semana y feriados no
    tienen fila, y esta vista tampoco los inventa: la ultima cotizacion conocida
    de un sabado es la del viernes, y eso lo resuelve quien consulta, diciendo de
-   que fecha es. Rellenar aca escondería que el dato es del viernes.
+   que fecha es. Rellenar aca esconderia que el dato es del viernes.
+   ----------------------------------------------------------------------------
+   EXPONE LAS DOS PUNTAS, Y EL LLAMADOR ELIGE
 
-   SE EXPONE 'Comprador' COMO TCC, igual que RO_V_DOLAR_OFICIAL_BCRA: los dos
-   criterios tienen que valuar con la misma punta o los numeros de dos pantallas
-   del mismo modulo no cerrarian entre si.
+       Comprador AS TCC   lo que el banco paga por un dolar
+       Vendedor  AS TCV   lo que el banco cobra por un dolar
 
+   Esta vista exponia SOLO 'Comprador AS TCC', y el motivo escrito era que las
+   dos vistas tenian que valuar con la misma punta "o los numeros de dos
+   pantallas del mismo modulo no cerrarian entre si". Eso era cierto mientras
+   todo el cashflow valuaba con comprador, y dejo de serlo.
+
+   Dolares Cuenta Comitente valua con VENDEDOR: es la punta a la que se compra
+   un dolar, y esa cuenta comitente se mide contra lo que costaria reponerla.
+   El resto del modulo -Ventas, Saldos, Exportaciones Tasky, Comex- sigue con
+   COMPRADOR y no se movio.
+
+   Las dos pantallas NO cierran entre si, y es deliberado. Por eso la grilla de
+   Dolares Comitente dice en pantalla con que punta se valuo cada fila: un
+   numero a vendedor que no diga que es a vendedor se compara contra el BCRA
+   comprador y parece un error.
+
+   La punta la elige el llamador -Cotizacion::ultimaHasta($fecha, $punta)-, con
+   comprador por defecto, asi que agregar la columna no movio a nadie.
+   ----------------------------------------------------------------------------
    ES REEJECUTABLE: se borra y se vuelve a crear.
    ============================================================================ */
 
@@ -46,6 +65,10 @@ IF OBJECT_ID('RO_V_DOLAR_OFICIAL_BCRA_DIARIO', 'V') IS NOT NULL
 GO
 
 CREATE VIEW RO_V_DOLAR_OFICIAL_BCRA_DIARIO AS
-SELECT d.Fecha, d.Mes, d.Año, d.Comprador AS TCC
+SELECT d.Fecha,
+       d.Mes,
+       d.Año,
+       d.Comprador AS TCC,
+       d.Vendedor  AS TCV
 FROM [XL-APPS].sistemas.DBO.dolar_oficial_bcra d;
 GO

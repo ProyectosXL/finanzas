@@ -326,6 +326,45 @@ Dentro de cada solapa, la barra de herramientas superior proporciona:
 
 ---
 
+## Detalle Facturas abre ordenado por fecha de cobro
+
+Lo más antiguo arriba, que es lo primero que hay que mirar de una cartera
+pendiente. Antes abría en el orden en que la consulta devolvía las filas.
+
+Son tres piezas y ninguna sirve sola:
+
+| Pieza | Dónde | Qué aporta |
+| --- | --- | --- |
+| `porDefecto: { columna: 'cobro', dir: 'asc' }` | `Js/Ingresos-Cobranzas_fr.js` | el orden con el que abre |
+| `data-orden-nombre="cobro"` | el `<th id="thCobroCob">` de la pestaña | un nombre estable para una columna que cambia de rótulo |
+| `display: none` en `.modo-resumen` | `Css/Ingresos-Cobranzas_fr.css` | que el default **no** se aplique en *Resumen* |
+
+**No se guarda en `localStorage`.** Un default escrito ahí sería
+indistinguible de una elección del usuario, y le pisaría el orden que eligió a
+mano. Lo aplica `crear()` sólo cuando no hay nada guardado, y cualquier click
+en un encabezado lo reemplaza para siempre.
+
+**Vale en las dos solapas.** Es la misma columna física: dice *F. Prob. Cobro*
+en Pendientes Proyectados y *Cobro* en Real a Cobrar, y en las dos es la fecha
+en que entra la plata. El `data-orden-nombre` es lo que hace que sean una sola
+columna a los efectos del orden — y de paso arregla que **el orden elegido a
+mano se perdía al cambiar de solapa**, porque la preferencia guardada nombraba
+un rótulo que dejaba de existir.
+
+**No vale en *Resumen*, y no porque nadie lo diga.** Ahí la fila es un cliente
+con facturas que se cobran en fechas distintas, así que la columna de cobro
+está oculta por CSS — y `tabla-orden.js` no ordena por una columna que no se
+ve, la misma guarda que ya protegía a las preferencias guardadas. Por eso hay
+**una sola clave de preferencia** para los dos modos y el control no necesita
+saber qué es un modo.
+
+> Quien ya tuviera ordenada esta tabla por *Cobro* o por *F. Prob. Cobro*
+> pierde esa preferencia una vez: la columna pasó a llamarse `cobro` y el
+> nombre viejo se descarta. La tabla abre con el default y la primera elección
+> nueva se guarda. Es lo mismo que pasa cuando una columna se va.
+
+---
+
 ## El filtro por fecha de emisión es del servidor, no del navegador
 
 Dos `<input type="date">` al lado del buscador, más un botón de limpiar. Filtran por

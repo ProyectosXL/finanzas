@@ -38,12 +38,31 @@
  * hoy. Con inflacion, las dos cuentas no se parecen, y la primera es la que
  * describe lo que efectivamente se vendio en cada mes.
  *
- * LA COTIZACION VIAJA CON SU FECHA
- * --------------------------------
- * ultimaHasta() devuelve el valor Y el dia del que salio. La fecha es parte del
- * dato: un importe en pesos que no se puede atar a una cotizacion fechada no se
- * puede auditar contra nada, y en este pais la diferencia entre el dolar de
- * hace tres semanas y el de hoy no es un detalle.
+ * LA COTIZACION VIAJA CON SU FECHA Y CON SU PUNTA
+ * -----------------------------------------------
+ * ultimaHasta() devuelve el valor, el dia del que salio Y con que punta se
+ * leyo. Las dos cosas son parte del dato: un importe en pesos que no se puede
+ * atar a una cotizacion fechada no se puede auditar contra nada, y en este pais
+ * la diferencia entre el dolar de hace tres semanas y el de hoy no es un
+ * detalle.
+ *
+ * LA PUNTA LA ELIGE EL LLAMADOR, Y EL DEFAULT ES COMPRADOR
+ * --------------------------------------------------------
+ * El origen publica las dos: COMPRADOR (lo que el banco paga por un dolar) y
+ * VENDEDOR (lo que cobra). Casi todo el cashflow -Ventas, Saldos,
+ * Exportaciones Tasky, Comex- valua con comprador, y por eso ese es el default:
+ * agregar el parametro no movio ni una pantalla.
+ *
+ * Dolares Cuenta Comitente es la unica que pide VENDEDOR, y es deliberado. La
+ * consecuencia hay que tenerla presente: ESA PANTALLA NO CIERRA CONTRA LAS
+ * OTRAS, a proposito. Por eso el valor viaja con su punta y la grilla la
+ * muestra: un importe valuado a vendedor que no diga que es a vendedor se
+ * compara contra el BCRA comprador y parece estar mal.
+ *
+ * mapaMensual() y delMes() NO tienen el parametro. No es un olvido: hoy nadie
+ * les pide otra punta, y el metodo que se puede llamar con un argumento que
+ * nadie usa es el que un dia alguien llama sin entender que cambia. Agregarlo
+ * cuando haga falta es esta misma linea.
  *
  * UN MES SIN COTIZACION DEVUELVE null, NO CERO
  * --------------------------------------------
@@ -66,6 +85,19 @@ class Cotizacion {
     /** Vista DIARIA del mismo origen, sin colapsar por mes */
     const VISTA_DIARIA = 'RO_V_DOLAR_OFICIAL_BCRA_DIARIO';
 
+    /**
+     * Las dos puntas, con el nombre de su columna en las vistas.
+     *
+     * Son el nombre de la columna y no un codigo aparte: asi no hay un mapa que
+     * mantener y lo que se intercala en el SQL sale de esta lista y de ningun
+     * otro lado. Ver punta().
+     */
+    const COMPRADOR = 'TCC';
+    const VENDEDOR = 'TCV';
+
+    /** Como se nombra cada punta de cara al usuario */
+    const NOMBRES = [self::COMPRADOR => 'comprador', self::VENDEDOR => 'vendedor'];
+
     /** @var Conexion */
     private $conn;
 
@@ -78,10 +110,13 @@ class Cotizacion {
     }
 
     /**
-     * Tipo de cambio de cierre de cada mes de un rango.
+     * Tipo de cambio de cierre de cada mes de un rango, punta COMPRADORA.
      *
      * Los meses sin cotizacion NO estan en el mapa: la clave ausente es lo que
      * distingue "no hay dato" de "el dato es cero".
+     *
+     * La punta no es elegible acá: ninguno de sus llamadores -Ventas,
+     * SaldosProvider- valua con otra. Ver el encabezado de la clase.
      *
      * @param string $desde Mes inicial 'YYYY-MM' (tambien acepta 'YYYY-MM-DD')
      * @param string $hasta Mes final 'YYYY-MM' (tambien acepta 'YYYY-MM-DD')
@@ -124,7 +159,10 @@ class Cotizacion {
     }
 
     /**
-     * Tipo de cambio de cierre de un mes puntual.
+     * Tipo de cambio de cierre de un mes puntual, punta COMPRADORA.
+     *
+     * Misma nota que mapaMensual(): sus llamadores -Exportaciones Tasky,
+     * Ingresos- valuan con comprador y la punta no es elegible acá.
      *
      * @param int $anio Anio de cuatro digitos
      * @param int $mes Mes 1..12
@@ -158,7 +196,8 @@ class Cotizacion {
 
     /**
      * La ultima cotizacion conocida a una fecha: la mas reciente cuyo dia sea
-     * ANTERIOR O IGUAL al pedido, junto con el dia del que salio.
+     * ANTERIOR O IGUAL al pedido, junto con el dia del que salio y la punta con
+     * la que se leyo.
      *
      * ES EL CRITERIO PARA VALUAR ALGO QUE ESTA EN UNA CUENTA. El cierre del mes
      * no sirve para eso: el mes en curso no lo tiene todavia, y el de un mes
@@ -177,20 +216,33 @@ class Cotizacion {
      * son pocas -son las cargas de una pantalla de carga manual- y cada una
      * necesita su propia busqueda hacia atras. Traerse las 5.800 filas de la
      * serie diaria para resolverlo en PHP seria mas lento y mucho mas fragil.
+     * El cache se indexa por PUNTA Y FECHA: la misma fecha leida con las dos
+     * puntas son dos cotizaciones distintas.
+     *
+     * LA CLAVE DEL VALOR SE LLAMA 'valor' Y NO 'tcc'. Con la punta elegible,
+     * 'tcc' nombraria al comprador en un array que puede traer al vendedor: el
+     * llamador leeria una clave que dice una cosa y contiene otra. El nombre de
+     * la punta va en 'punta', aparte, para que el importe se pueda explicar.
      *
      * @param string $fecha 'Y-m-d' (tambien acepta un DateTime o 'Y-m-d H:i:s')
-     * @return array|null ['fecha' => 'Y-m-d', 'tcc' => float], o null si no hay
+     * @param string $punta self::COMPRADOR (default) o self::VENDEDOR
+     * @return array|null ['fecha' => 'Y-m-d', 'valor' => float, 'punta' => 'TCC'|'TCV'],
+     *                    o null si no hay ninguna cotizacion anterior
      */
-    public function ultimaHasta($fecha) {
+    public function ultimaHasta($fecha, $punta = self::COMPRADOR) {
         $f = self::dia($fecha);
+        $col = self::punta($punta);
+        $cache = $col . '|' . $f;
 
-        if (array_key_exists($f, $this->ultimas)) {
-            return $this->ultimas[$f];
+        if (array_key_exists($cache, $this->ultimas)) {
+            return $this->ultimas[$cache];
         }
 
         $cid = $this->conectar();
 
-        $sql = "SELECT TOP 1 Fecha, TCC
+        // $col sale de punta(), que sólo devuelve una de las dos constantes: no
+        // es entrada del usuario y no hay nada que parametrizar.
+        $sql = "SELECT TOP 1 Fecha, " . $col . " AS COTIZACION
                 FROM " . self::VISTA_DIARIA . "
                 WHERE Fecha <= ?
                 ORDER BY Fecha DESC";
@@ -205,16 +257,17 @@ class Cotizacion {
         $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
         sqlsrv_free_stmt($stmt);
 
-        $tcc = $row ? self::valor($row['TCC']) : null;
+        $cot = $row ? self::valor($row['COTIZACION']) : null;
 
-        $this->ultimas[$f] = ($tcc === null) ? null : [
+        $this->ultimas[$cache] = ($cot === null) ? null : [
             'fecha' => ($row['Fecha'] instanceof DateTime)
                 ? $row['Fecha']->format('Y-m-d')
                 : substr((string) $row['Fecha'], 0, 10),
-            'tcc' => $tcc
+            'valor' => $cot,
+            'punta' => $col
         ];
 
-        return $this->ultimas[$f];
+        return $this->ultimas[$cache];
     }
 
     /* ====================================================================
@@ -245,6 +298,38 @@ class Cotizacion {
         }
 
         return $d;
+    }
+
+    /**
+     * Valida una punta y devuelve el nombre de su columna.
+     *
+     * Lanza en vez de caer en el default: una punta mal escrita valuaria con
+     * comprador en silencio, y el sintoma seria un importe en pesos apenas mas
+     * chico que nadie va a poder explicar.
+     *
+     * @param string $punta self::COMPRADOR o self::VENDEDOR
+     * @return string Nombre de la columna en las vistas
+     */
+    public static function punta($punta) {
+        if (!isset(self::NOMBRES[$punta])) {
+            throw new Exception("Punta de cotizacion invalida: '$punta'. Se espera "
+                . self::COMPRADOR . ' o ' . self::VENDEDOR);
+        }
+
+        return $punta;
+    }
+
+    /**
+     * Como se nombra una punta de cara al usuario: 'comprador' o 'vendedor'.
+     *
+     * Vive aca y no en la pantalla porque lo usan el back -para los avisos- y
+     * el front -para la grilla-, y dos listas se desincronizan.
+     *
+     * @param string $punta
+     * @return string
+     */
+    public static function nombrePunta($punta) {
+        return self::NOMBRES[self::punta($punta)];
     }
 
     /**

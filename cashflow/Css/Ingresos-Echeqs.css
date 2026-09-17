@@ -168,10 +168,16 @@
 /* El alto de la primera fila lo mide ajustarStickyHeaders() en main.js */
 #tablaPrechequeado thead tr:nth-child(2) th { top: var(--thead-row1-height, 38px); }
 
-/* La FECHA ESTIMADA DE VENTA es donde cae el importe en la grilla, así que se
-   distingue de la del cheque, que es sólo la referencia de Tango. Dos fechas
-   con el mismo formato al lado se leerían como la misma clase de dato. */
-.ech-fecha-estimada {
+/* DOS FECHAS AL LADO, Y NO SIGNIFICAN LO MISMO. Con el mismo formato se leerían
+   como la misma clase de dato, y son dos cosas distintas:
+
+     .ech-fecha-cheque     ubica el importe en la grilla -es cuando entra la
+                           plata-, así que es la que manda visualmente.
+     .ech-fecha-estimada   explica por qué la fila está en la lista. Informativa,
+                           en gris, igual que "Importe Factura" en Cobranzas May.
+
+   El destacado estaba en la estimada, cuando era ella la que ubicaba. */
+.ech-fecha-cheque {
     display: inline-block;
     padding: 2px 6px;
     border-radius: 4px;
@@ -182,10 +188,15 @@
     border: 1px solid #d1c4e9;
 }
 
+.ech-fecha-estimada {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+    cursor: help;
+}
+
 .ech-dias-precheq {
     font-size: 11px;
-    font-weight: 600;
-    color: #4527a0;
+    color: var(--text-muted, #8c93a8);
 }
 
 /* Un cliente en cero no desplaza nada, y eso hay que poder verlo: si no, las

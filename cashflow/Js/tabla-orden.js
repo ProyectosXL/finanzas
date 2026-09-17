@@ -53,13 +53,18 @@
  * `<thead>` e `id` que esté dentro de `#tabContent`, y usa el id como clave de
  * la preferencia. Las pestañas sólo intervienen en dos casos:
  *
- *   - Para declarar opciones (filas ancla, columnas excluidas):
+ *   - Para declarar opciones (filas ancla, orden con el que abre):
  *
  *       crearOrdenTabla({
  *           tabla: 'cfTabla',
  *           clave: 'cashflow',
- *           anclas: '.cf-seccion, .cf-tipo-subtotal'
+ *           anclas: '.cf-seccion, .cf-tipo-subtotal',
+ *           porDefecto: { columna: 'cobro', dir: 'asc' }
  *       });
+ *
+ *     Si se omite `clave`, es el id de la tabla: el mismo que usa el
+ *     descubrimiento automático, así que declarar opciones sobre una tabla que
+ *     ya se ordenaba sola NO le cambia la clave ni le pierde la preferencia.
  *
  *   - Para NO ordenarse, con `data-orden="no"` en la `<table>`. Es para las
  *     tablas donde el orden de las filas ES el dato: el editor de la estructura
@@ -73,6 +78,39 @@
  * el índice guardado apunta a otra cosa y la tabla abre ordenada por una columna
  * que el usuario no eligió. Con el nombre, una columna que ya no existe hace que
  * la preferencia se descarte, que es lo correcto.
+ *
+ * Con una excepción: una columna que CAMBIA DE RÓTULO sin dejar de ser la misma
+ * columna. El `<th id="thCobroCob">` de Cobranzas FR dice "F. Prob. Cobro" en
+ * Pendientes Proyectados y "Cobro" en Real a Cobrar, y es la misma fecha en las
+ * dos. Ordenar por ella en una solapa y perder el orden al pasar a la otra no es
+ * "la columna ya no existe": es la misma columna con otro nombre. Para eso el
+ * `<th>` puede declarar `data-orden-nombre` con un nombre estable, y el control
+ * lo usa en lugar del texto. Es el mismo idioma de escape que `data-orden` en el
+ * `<td>` y `data-orden="no"` en la `<table>`: opcional, y lo que no lo declara
+ * se sigue nombrando por su texto.
+ *
+ * ABRIR CON UN ORDEN, SIN PISARLE LA ELECCIÓN AL USUARIO
+ * ------------------------------------------------------
+ * `porDefecto: { columna: 'cobro', dir: 'asc' }` es con qué abre la tabla
+ * CUANDO EL USUARIO NO ELIGIÓ NADA. No se guarda en `localStorage` —guardarlo
+ * sería indistinguible de una elección a mano— y lo pisa cualquier click en un
+ * encabezado. El nombre es el mismo que usa la preferencia: el
+ * `data-orden-nombre` si la columna lo declara, y si no su texto.
+ *
+ * Pasa por el mismo `columnaActiva()` que la preferencia guardada, así que
+ * hereda su guarda: SI LA COLUMNA NO ESTÁ VISIBLE, NO SE APLICA. Eso es lo que
+ * hace que el default de Cobranzas FR valga en *Detalle Facturas* y no en
+ * *Resumen*, donde la columna de cobro está oculta por CSS, sin que haga falta
+ * una clave de preferencia por modo ni que el control sepa qué es un modo.
+ *
+ * SIN ORDEN TAMBIÉN ES UNA ELECCIÓN
+ * ----------------------------------
+ * El tercer click deja la tabla sin ordenar, y eso se guarda —como
+ * `{"columna": null}`— en vez de borrar la clave. Borrarla haría que "saqué el
+ * orden a mano" y "nunca elegí nada" quedaran iguales, y en una tabla con
+ * `porDefecto` el orden que el usuario acaba de sacar reaparecería en la
+ * recarga siguiente. En una tabla sin `porDefecto` las dos cosas dan el mismo
+ * resultado, que es el de siempre.
  *
  * NO PUEDE ENTRAR EN BUCLE CON EL MutationObserver
  * ------------------------------------------------
@@ -356,10 +394,14 @@ var OrdenTabla = (function() {
             return c.th.classList.contains('total-column')
                 || c.th.classList.contains('cf-col-total');
         }).map(function(c) {
+            // `data-orden-nombre` manda sobre el texto: es para las columnas que
+            // cambian de rótulo sin dejar de ser la misma columna. Ver el
+            // encabezado del archivo.
             return {
                 th: c.th,
                 indice: c.indice,
-                nombre: (c.th.textContent || '').replace(/\s+/g, ' ').trim()
+                nombre: (c.th.getAttribute('data-orden-nombre') || '').trim()
+                    || (c.th.textContent || '').replace(/\s+/g, ' ').trim()
                     || ('Columna ' + (c.indice + 1))
             };
         });
@@ -434,6 +476,16 @@ var OrdenTabla = (function() {
        PERSISTENCIA
        ================================================================ */
 
+    /**
+     * Lo que el usuario eligió para esta tabla. Distingue tres cosas, y las tres
+     * importan cuando hay un `porDefecto`:
+     *
+     *   {columna:'Cobro', dir:'asc'} -> eligió ordenar por esa columna
+     *   {columna: null}              -> eligió NO ordenar (el tercer click)
+     *   null                         -> no eligió nada, o lo guardado ya no sirve
+     *
+     * @returns {Object|null}
+     */
     function leerGuardado(clave) {
         try {
             var crudo = window.localStorage.getItem(PREFIJO_STORAGE + clave);
@@ -444,7 +496,15 @@ var OrdenTabla = (function() {
 
             var v = JSON.parse(crudo);
 
-            return (v && v.columna && (v.dir === 'asc' || v.dir === 'desc')) ? v : null;
+            if (!v || typeof v !== 'object') {
+                return null;
+            }
+
+            if (v.columna === null) {
+                return { columna: null, dir: 'asc' };
+            }
+
+            return (v.columna && (v.dir === 'asc' || v.dir === 'desc')) ? v : null;
         } catch (e) {
             // localStorage puede estar bloqueado (modo privado, política del
             // navegador). La tabla tiene que abrir sin orden, no romperse por
@@ -453,16 +513,34 @@ var OrdenTabla = (function() {
         }
     }
 
+    /**
+     * El "sin orden" se escribe, no se borra: es una elección y tiene que poder
+     * distinguirse de no haber elegido nunca. Ver el encabezado del archivo.
+     */
     function guardar(clave, estado) {
         try {
-            if (estado === null) {
-                window.localStorage.removeItem(PREFIJO_STORAGE + clave);
-            } else {
-                window.localStorage.setItem(PREFIJO_STORAGE + clave, JSON.stringify(estado));
-            }
+            window.localStorage.setItem(PREFIJO_STORAGE + clave,
+                JSON.stringify(estado === null ? { columna: null } : estado));
         } catch (e) {
             /* sin persistencia, pero el orden igual se aplica */
         }
+    }
+
+    /**
+     * El `porDefecto` de las opciones, validado. Devuelve null si no hay o si
+     * está mal escrito: una opción con una falta de tipeo tiene que dejar la
+     * tabla como estaba, no ordenarla por una columna inexistente.
+     *
+     * @returns {Object|null}
+     */
+    function defaultDeOpciones(opciones) {
+        var d = opciones.porDefecto;
+
+        if (!d || !d.columna) {
+            return null;
+        }
+
+        return { columna: d.columna, dir: (d.dir === 'desc') ? 'desc' : 'asc' };
     }
 
     /* ================================================================
@@ -471,7 +549,15 @@ var OrdenTabla = (function() {
 
     function crear(opciones) {
         var clave = opciones.clave || opciones.tabla;
-        var estado = leerGuardado(clave);
+        var guardado = leerGuardado(clave);
+
+        // El default sólo entra si el usuario no eligió nada. Un {columna:null}
+        // guardado ES una elección -sacar el orden- y gana igual que ganaría una
+        // columna elegida. Y no se guarda: mientras siga siendo el default, la
+        // tabla no tiene preferencia escrita.
+        var estado = guardado
+            ? (guardado.columna ? guardado : null)
+            : defaultDeOpciones(opciones);
 
         function tabla() {
             return document.getElementById(opciones.tabla);

@@ -278,3 +278,32 @@ foreach ($mapaManual as $clave => $info) {
 }
 
 chequear('indexado por T_COMP|N_COMP', true, $clavesOk);
+
+// ============================================================================
+// LA COLUMNA DEL PENDIENTE SE LLAMA POR LO QUE ES
+// ============================================================================
+
+seccion('el rotulo de la columna del pendiente');
+
+// El dato dejo de ser GVA12.IMPORTE en ad2d04d: lo que hay ahi es el saldo
+// pendiente. "Importe Bruto" nombraba el facturado y mostraba el pendiente, y
+// al lado quedo una columna que SI es el facturado. Los dos rotulos tienen que
+// poder leerse juntos sin confundirse.
+$tabMay = file_get_contents(__DIR__ . '/../cashflow/Tabs/cobranzas_may.php');
+
+// Sin los comentarios: ahi el nombre viejo SI puede aparecer, y aparece, porque
+// es lo que explica por que el rotulo cambio.
+$visibleMay = preg_replace('/<!--.*?-->/s', '', $tabMay);
+
+chequear('la columna del pendiente se llama SALDO PENDIENTE',
+    true, strpos($visibleMay, 'SALDO PENDIENTE') !== false);
+
+chequear('y el rotulo viejo no se muestra en ninguna columna',
+    false, strpos($visibleMay, 'Importe Bruto') !== false);
+
+// Igual que "Importe Factura", que explica en su title que es informativa.
+chequear('tiene un title que explica que es lo que falta cobrar',
+    true, strpos($visibleMay, 'title="Lo que falta cobrar') !== false);
+
+chequear('la columna informativa del facturado sigue estando',
+    true, strpos($visibleMay, 'Importe Factura') !== false);

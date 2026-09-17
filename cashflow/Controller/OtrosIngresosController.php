@@ -82,10 +82,42 @@ try {
                     . 'a su fecha. No se asume ningún tipo de cambio: tampoco entran al tablero.';
             }
 
+            /* CUANTO SE CONSUMIO DE ESTE FONDO. La pantalla informa el saldo y
+               tiene que poder decir cuánto queda, o el número que muestra sería
+               el de antes de usarlo. Sale de la MISMA cuenta que alimenta el
+               tablero -Cobertura::valuarAplicaciones()-, así que las dos
+               pantallas no pueden discrepar.
+
+               Se lee en dólares y en pesos: el saldo se informa en dólares y la
+               fila del cuadro está en pesos, y las dos preguntas son legítimas. */
+            require_once __DIR__ . '/../Class/Cobertura.php';
+
+            $aplicado = ['usd' => 0.0, 'ars' => 0.0, 'n' => 0];
+
+            try {
+                foreach ((new Cobertura())->valuarAplicaciones()['filas'] as $a) {
+                    if ($a['ORIGEN'] !== 'DOLARES') {
+                        continue;
+                    }
+
+                    $aplicado['n']++;
+                    $aplicado['usd'] += ($a['MONEDA'] === 'USD') ? floatval($a['IMPORTE']) : 0;
+                    $aplicado['ars'] += ($a['IMPORTE_ARS'] === null) ? 0 : $a['IMPORTE_ARS'];
+                }
+            } catch (Throwable $e) {
+                /* Una pantalla que ya funcionaba no se cae porque la cobertura
+                   no esté instalada: el saldo informado se muestra igual y lo
+                   consumido queda en cero. */
+                $avisos[] = 'No se pudo leer cuánto se aplicó de estos dólares ('
+                    . $e->getMessage() . '). El saldo informado de abajo es correcto; '
+                    . 'lo que no se está descontando es lo ya usado.';
+            }
+
             echo json_encode([
                 'success' => true,
                 'data' => [
                     'filas' => $val['filas'],
+                    'aplicado' => $aplicado,
                     'avisos' => $avisos
                 ]
             ], JSON_UNESCAPED_UNICODE);
@@ -102,6 +134,19 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* ALTA Y EDICION SON LA MISMA ACCION, y no por ahorrar un endpoint:
+           editar NO es un UPDATE. Editar un importe -o moverlo a otro día del
+           cronograma- es cargar de nuevo ese día, y la versión anterior queda
+           en el historial. Un endpoint 'editDolares' aparte insinuaría que hay
+           un camino que modifica en el lugar, y no lo hay.
+
+           'fecha' es la del DATO y es la que valúa. La grilla manda la que la
+           fila ya tenía: si mandara hoy, editar el importe le cambiaría también
+           la cotización y el número se movería por algo que nadie pidió.
+
+           'fecha_cronograma' es opcional. Sin ella se usa 'fecha', que es lo
+           correcto en un alta desde el formulario: quien carga sin elegir
+           cronograma quiere ver el importe el día del dato. */
         case 'saveDolaresComitente':
             $data = bodyJson();
 
@@ -110,16 +155,30 @@ try {
             }
 
             $r = $otros->guardarDolaresComitente(
-                $data['fecha'], $data['importe_usd'], usuarioActual());
+                $data['fecha'], $data['importe_usd'], usuarioActual(),
+                isset($data['fecha_cronograma']) ? $data['fecha_cronograma'] : null,
+                isset($data['cronograma_anterior']) ? $data['cronograma_anterior'] : null);
+
+            /* Los tres mensajes dicen tres cosas distintas, y las tres importan:
+               una corrección que se ve igual que un alta deja a nadie sabiendo
+               que el número de ese día cambió. El que más pesa es el del medio:
+               mover una fila a un día que ya tenía importe PISA el que estaba, y
+               eso el usuario no lo pidió explícitamente. */
+            if ($r['movio'] !== null) {
+                $mensaje = 'Importe movido del ' . $r['movio'] . ' al ' . $r['fecha_cronograma'] . '.'
+                    . ($r['piso']
+                        ? ' Ese día ya tenía un importe: queda en el historial.'
+                        : '');
+            } elseif ($r['piso']) {
+                $mensaje = 'Importe actualizado. La carga anterior del ' . $r['fecha_cronograma']
+                    . ' queda en el historial.';
+            } else {
+                $mensaje = 'Importe cargado.';
+            }
 
             echo json_encode([
                 'success' => true,
-                // Que la carga PISO una anterior es lo que hay que decir: si
-                // no, una corrección se ve igual que un alta y nadie sabe que
-                // el número de esa fecha cambió.
-                'message' => $r['piso']
-                    ? 'Importe actualizado. La carga anterior de esa fecha queda en el historial.'
-                    : 'Importe cargado.',
+                'message' => $mensaje,
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

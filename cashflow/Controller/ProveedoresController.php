@@ -140,6 +140,13 @@ try {
                cambia en un solo lugar. */
             $payload['formas_cronograma'] = ProveedoresCategorias::FORMAS_CRONOGRAMA;
 
+            /* Si se puede fijar la forma por factura. La pantalla lo pregunta
+               en vez de suponerlo: sin el script, el listado se lee igual y lo
+               que no se puede es escribir el override. Un desplegable que se
+               dibuja y despues falla al guardar es peor que uno que no esta. */
+            $payload['forma_por_factura'] = $prov->tieneColumnaPago('FORMA_PAGO_CRONOGRAMA');
+            $payload['excluir_factura'] = $prov->tieneColumnaPago('EXCLUIDA');
+
             echo json_encode(['success' => true, 'data' => $payload], JSON_UNESCAPED_UNICODE);
             break;
 
@@ -165,6 +172,92 @@ try {
             echo json_encode([
                 'success' => true,
                 'message' => 'Fecha de pago guardada.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           LA FORMA DE PAGO DE UNA FACTURA
+
+           ES UNA REGLA POR FACTURA, no el registro de por donde salio el pago
+           -eso es 'forma_pago' y lo escribe la importacion-. Pisa a la del
+           maestro SOLO para ese comprobante y decide si su importe entra al
+           cashflow. NO TOCA EL MAESTRO.
+
+           Mandar vacio saca el override y vuelve a decidir el maestro.
+           ================================================================ */
+        case 'saveFormaCronograma':
+            $data = bodyJson();
+
+            foreach (['cod_provee', 't_comp', 'n_comp'] as $campo) {
+                if (empty($data[$campo])) {
+                    throw new Exception('Falta el comprobante al que corresponde la forma.');
+                }
+            }
+
+            $r = $prov->saveFormaCronograma(
+                $data['cod_provee'], $data['t_comp'], $data['n_comp'],
+                isset($data['forma']) ? $data['forma'] : '',
+                usuarioActual()
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => ($r['forma'] === null)
+                    ? 'La forma vuelve a ser la del maestro.'
+                    : 'Esta factura se trata como ' . $r['forma'] . '. El maestro no cambia.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           EXCLUIR UNA FACTURA DEL CASHFLOW
+
+           Por COMPROBANTE, a diferencia del rubro "Excluidos" del maestro, que
+           es por proveedor. El importe sale de la fila del tablero pero no
+           desaparece: va a PAGOS_EXCLUIDOS_FACTURA y el proveedor avisa cuanto
+           es y con que motivos.
+
+           EL MOTIVO ES OBLIGATORIO y lo valida Proveedores::saveExclusion(),
+           no la pantalla: este endpoint es alcanzable sin pasar por la grilla.
+           ================================================================ */
+        case 'saveExclusion':
+            $data = bodyJson();
+
+            if (!array_key_exists('excluida', $data)) {
+                throw new Exception('Falta decir si las facturas se excluyen o se incluyen.');
+            }
+
+            /* UNA SOLA ACCION PARA UNA Y PARA VARIAS. La pantalla manda siempre
+               una lista; 'comprobantes' con un solo elemento es el caso de una.
+               Un endpoint aparte para el masivo serian dos caminos que tienen
+               que hacer exactamente lo mismo, y la transaccion es justo lo que
+               no puede estar escrito dos veces. */
+            $comprobantes = isset($data['comprobantes']) ? $data['comprobantes'] : null;
+
+            if (!is_array($comprobantes) || empty($comprobantes)) {
+                throw new Exception('No llegó ninguna factura para excluir.');
+            }
+
+            $r = $prov->saveExclusionMasiva(
+                $comprobantes,
+                !empty($data['excluida']),
+                isset($data['motivo']) ? $data['motivo'] : null,
+                usuarioActual()
+            );
+
+            $cuantas = $r['tocados'];
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['excluida']
+                    ? ($cuantas === 1
+                        ? 'Factura excluida: su importe sale del cashflow y queda informado aparte.'
+                        : $cuantas . ' facturas excluidas: sus importes salen del cashflow y '
+                            . 'quedan informados aparte.')
+                    : ($cuantas === 1
+                        ? 'Factura incluida de nuevo en el cashflow.'
+                        : $cuantas . ' facturas incluidas de nuevo en el cashflow.'),
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
@@ -272,8 +365,64 @@ try {
                     'filas' => array_values($mapa),
                     'avisos' => $prov->categorias()->getAvisos(),
                     'directores_no_excluidos' => $prov->categorias()->directoresNoExcluidos(),
-                    'formas_pago' => ProveedoresCategorias::FORMAS_PAGO
+                    'formas_pago' => ProveedoresCategorias::FORMAS_PAGO,
+
+                    /* Si se puede cargar a mano. La pantalla lo pregunta en vez
+                       de suponerlo: sin el script del origen el maestro se lee
+                       igual, y lo que no se puede es escribirlo. Un formulario
+                       que se dibuja y despues falla al guardar es peor que uno
+                       que no aparece con el motivo al lado. */
+                    'edicion_manual' => $prov->categorias()->tieneOrigen(),
+                    'rubros' => $prov->categorias()->rubrosCargados()
                 ]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           CARGA Y EDICION MANUAL DEL MAESTRO
+
+           Una sola accion para el alta y para la edicion, igual que en Dolares
+           Comitente y por el mismo motivo: EDITAR NO ES UN UPDATE. Da de baja
+           la version vigente e inserta una nueva, en una transaccion, que es
+           exactamente lo que hace un CAMBIO de la importacion. Un endpoint
+           'editProveedor' aparte insinuaria que hay un camino que modifica en
+           el lugar, y no lo hay.
+           ================================================================ */
+        case 'saveProveedor':
+            $data = bodyJson();
+
+            if (empty($data['cod_provee'])) {
+                throw new Exception('Falta el código del proveedor.');
+            }
+
+            $r = $prov->categorias()->guardarManual($data, usuarioActual());
+
+            echo json_encode([
+                'success' => true,
+                'message' => ($r['estado'] === 'ALTA')
+                    ? 'Proveedor ' . $r['cod_provee'] . ' agregado al maestro.'
+                    : 'Proveedor ' . $r['cod_provee'] . ' actualizado. La versión anterior '
+                        . 'queda en el historial.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'deleteProveedor':
+            $data = bodyJson();
+
+            if (empty($data['cod_provee'])) {
+                throw new Exception('Falta el código del proveedor que hay que dar de baja.');
+            }
+
+            $habia = $prov->categorias()->bajaManual($data['cod_provee']);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $habia
+                    ? 'Proveedor dado de baja. Su deuda queda sin clasificar y la versión '
+                        . 'anterior sigue en el historial.'
+                    : 'Ese proveedor no estaba en el maestro.',
+                'data' => ['habia' => $habia]
             ], JSON_UNESCAPED_UNICODE);
             break;
 
@@ -350,6 +499,13 @@ function indicadores($items) {
     $nFuera = 0;
     $porFormaFuera = [];
 
+    /* Lo excluido a mano se cuenta aparte de lo excluido por rubro: son dos
+       decisiones distintas -una es "este proveedor no es deuda comercial" y la
+       otra "esta factura puntual no va"- y sólo la segunda saca el importe de la
+       serie que usa la fila del tablero. */
+    $excluidoManual = 0.0;
+    $nExcluidoManual = 0;
+
     foreach ($items as $i) {
         $importe = floatval($i['IMPORTE_PENDIENTE']);
         $total += $importe;
@@ -357,6 +513,11 @@ function indicadores($items) {
 
         if (!empty($i['EXCLUIDO'])) {
             $excluido += $importe;
+        }
+
+        if (!empty($i['EXCLUIDA_MANUAL'])) {
+            $excluidoManual += $importe;
+            $nExcluidoManual++;
         }
 
         if (empty($i['CRONOGRAMA'])) {
@@ -391,6 +552,8 @@ function indicadores($items) {
         'con_fecha' => round($conFecha, 2),
         'n_con_fecha' => $nConFecha,
         'excluido' => round($excluido, 2),
+        'excluido_manual' => round($excluidoManual, 2),
+        'n_excluido_manual' => $nExcluidoManual,
         'cronograma' => round($total - $fuera, 2),
         'fuera_cronograma' => round($fuera, 2),
         'n_fuera_cronograma' => $nFuera,

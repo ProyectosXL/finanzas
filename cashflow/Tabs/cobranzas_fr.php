@@ -180,7 +180,13 @@
                             <th rowspan="2">Dias</th>
                             <th rowspan="2">Importe Bruto</th>
                             <th rowspan="2" id="thImporteNetoCob">Importe Neto</th>
-                            <th rowspan="2" id="thCobroCob">Cobro</th>
+                            <!-- data-orden-nombre: el JS le cambia el rótulo
+                                 según la solapa -"Cobro" en Real a Cobrar,
+                                 "F. Prob. Cobro" en Pendientes Proyectados- y
+                                 es la misma fecha en las dos. Sin un nombre
+                                 estable, el orden guardado se perdería al
+                                 cambiar de solapa. Ver Js/tabla-orden.js. -->
+                            <th rowspan="2" id="thCobroCob" data-orden-nombre="cobro">Cobro</th>
                             <!-- El rótulo y el colspan los pone el JS según la vista activa -->
                             <th colspan="1" class="table-group-divider" id="mesActualHeaderCob">Días</th>
                         </tr>

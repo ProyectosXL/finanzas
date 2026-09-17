@@ -146,6 +146,9 @@ class ProveedoresCategorias {
     /** @var array|null Cache del maestro vigente, indexado por COD_PROVEE */
     private $mapa = null;
 
+    /** @var bool|null Cache de si la tabla ya tiene la columna ORIGEN */
+    private $origen = null;
+
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
         $this->conn = new Conexion;
@@ -177,6 +180,55 @@ class ProveedoresCategorias {
     }
 
     /**
+     * Si la tabla ya tiene la columna ORIGEN de
+     * sql/cashflow_prov_locales_maestro_manual.sql.
+     *
+     * SE PREGUNTA en vez de darla por hecha porque el maestro se sigue pudiendo
+     * LEER sin ella: una instalacion que todavia no corrio ese script tiene que
+     * ver su pestana, no un error de SQL. Lo que no puede es cargar a mano, y
+     * eso lo dice guardarManual() con su propio mensaje.
+     *
+     * @return bool
+     */
+    public function tieneOrigen() {
+        if ($this->origen !== null) {
+            return $this->origen;
+        }
+
+        if (!$this->tablaCreada()) {
+            return false;
+        }
+
+        $stmt = sqlsrv_query($this->conectar(),
+            "SELECT COL_LENGTH('dbo." . self::TABLA . "', 'ORIGEN') AS C");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar el origen del maestro'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->origen = ($row && $row['C'] !== null);
+
+        return $this->origen;
+    }
+
+    /**
+     * Como se pide el origen en un SELECT: la columna si esta, y el literal
+     * 'IMPORT' si todavia no.
+     *
+     * Devolver el literal y no null es lo que hace que quien consume no tenga
+     * que preguntar: sin la columna, todo lo que hay entro por la planilla, asi
+     * que 'IMPORT' no es un relleno, es el dato cierto.
+     *
+     * @return string
+     */
+    private function origenSql() {
+        return $this->tieneOrigen() ? 'ORIGEN' : "'IMPORT'";
+    }
+
+    /**
      * Avisos de configuracion pendiente, para mostrar en pantalla.
      *
      * @return array
@@ -188,13 +240,29 @@ class ProveedoresCategorias {
                 . 'Mientras tanto, los comprobantes se muestran sin clasificar.'];
         }
 
+        $avisos = [];
+
         if (empty($this->mapa())) {
-            return ['El maestro de proveedores está vacío: importá la hoja '
+            $avisos[] = 'El maestro de proveedores está vacío: importá la hoja '
                 . '"Maestro proveedores" del Excel Cronograma de Pagos. Mientras tanto, '
-                . 'todos los comprobantes se muestran sin clasificar y ninguno queda excluido.'];
+                . 'todos los comprobantes se muestran sin clasificar y ninguno queda excluido.';
         }
 
-        return [];
+        /* LO QUE FALTA SE DICE, AUNQUE NO ROMPA NADA. Sin la columna ORIGEN el
+           maestro se lee igual y lo único que no se puede es cargarlo a mano,
+           así que la pantalla esconde el botón de agregar. Una función que
+           desaparece sin decir por qué es indistinguible de una que no se
+           construyó: quien la fue a buscar no tiene dónde enterarse de que
+           existe y de que falta un script. */
+        if (!$this->tieneOrigen()) {
+            $avisos[] = 'La carga manual de proveedores está apagada: falta la columna ORIGEN '
+                . 'en el maestro. Corré sql/cashflow_prov_locales_maestro_manual.sql contra la '
+                . 'base central y el botón de agregar aparece solo. Todo lo demás de esta '
+                . 'pantalla funciona igual; lo único que no se puede es cargar o editar un '
+                . 'proveedor de a uno.';
+        }
+
+        return $avisos;
     }
 
     /* ====================================================================
@@ -247,7 +315,8 @@ class ProveedoresCategorias {
 
         $sql = "SELECT COD_PROVEE, NOMBRE, RUBRO_ECONOMICO, RUBRO, CENTRO_COSTOS,
                        FORMA_PAGO, FORMA_PAGO_ORIG, PLAZO_PAGO, PLAZO_DIAS,
-                       CRITERIO_DISTRIB, FECHA_IMPORTACION
+                       CRITERIO_DISTRIB, FECHA_IMPORTACION, "
+                       . self::origenSql() . " AS ORIGEN
                 FROM dbo." . self::TABLA . "
                 WHERE VIGENTE = 1";
 
@@ -278,7 +347,11 @@ class ProveedoresCategorias {
                 'PLAZO_PAGO' => $row['PLAZO_PAGO'],
                 'PLAZO_DIAS' => ($row['PLAZO_DIAS'] === null) ? null : intval($row['PLAZO_DIAS']),
                 'CRITERIO_DISTRIB' => $row['CRITERIO_DISTRIB'],
-                'FECHA_IMPORTACION' => $this->fechaHora($row['FECHA_IMPORTACION'])
+                'FECHA_IMPORTACION' => $this->fechaHora($row['FECHA_IMPORTACION']),
+
+                /* De donde salio esta version. Lo usa el diff para avisar antes
+                   de pisar trabajo manual, y la grilla para marcarlo. */
+                'ORIGEN' => $row['ORIGEN']
             ];
         }
 
@@ -762,11 +835,15 @@ class ProveedoresCategorias {
             'altas' => 0, 'cambios' => 0, 'sin_cambios' => 0,
             'errores' => 0, 'bajas' => 0,
             'sin_rubro' => 0, 'excluidos' => 0,
-            'forma_desconocida' => 0, 'plazo_no_usable' => 0
+            'forma_desconocida' => 0, 'plazo_no_usable' => 0,
+
+            /* Cuantos de los cambios pisan una version cargada a mano. Ver la
+               nota en el bucle. */
+            'pisa_manuales' => 0
         ];
 
         foreach (is_array($filasArchivo) ? $filasArchivo : [] as $cruda) {
-            $fila = self::filaImportacion($cruda);
+            $fila = self::normalizarFila($cruda);
 
             if ($fila['estado'] !== 'ERROR') {
                 $cod = $fila['cod_provee'];
@@ -804,6 +881,16 @@ class ProveedoresCategorias {
                     } else {
                         $tocados[$cod] = true;
                         $fila = self::compararContraExistente($fila, $existentes[$cod]);
+
+                        /* PISAR TRABAJO MANUAL SE AVISA ANTES DE CONFIRMAR. La
+                           planilla manda -esa decision no cambia- pero quien
+                           importa tiene que poder ver que entre los 300 cambios
+                           hay tres que borran lo que alguien cargó a mano. Sin
+                           esto, la edición manual y la importación se pisan en
+                           silencio, que es el riesgo de tener dos fuentes. */
+                        $fila['pisa_manual'] = ($fila['estado'] === 'CAMBIO'
+                            && isset($existentes[$cod]['ORIGEN'])
+                            && $existentes[$cod]['ORIGEN'] === 'MANUAL');
                     }
                 }
             }
@@ -834,6 +921,10 @@ class ProveedoresCategorias {
                 case 'CAMBIO': $resumen['cambios']++; break;
                 case 'SIN_CAMBIOS': $resumen['sin_cambios']++; break;
                 case 'ERROR': $resumen['errores']++; break;
+            }
+
+            if (!empty($fila['pisa_manual'])) {
+                $resumen['pisa_manuales']++;
             }
 
             $filas[] = $fila;
@@ -943,10 +1034,17 @@ class ProveedoresCategorias {
      * matchea, porque "no reconocí FORMA DE PAGO" sin decir que decía la celda
      * obliga a abrir la planilla y buscar la fila.
      *
-     * @param array $cruda
+     * ES PUBLICA PORQUE LA CARGA MANUAL PASA POR ACA. Un proveedor cargado
+     * desde la pantalla se normaliza con la MISMA funcion que uno importado:
+     * el mismo largo de codigo, la misma normalizacion de forma de pago, el
+     * mismo plazo en dias. Si la pantalla normalizara por su cuenta, un
+     * proveedor cargado a mano se clasificaria distinto que el mismo proveedor
+     * traido por la planilla, y nadie tendria donde notarlo.
+     *
+     * @param array $cruda Las mismas claves que las columnas de importacion
      * @return array
      */
-    private static function filaImportacion($cruda) {
+    public static function normalizarFila($cruda) {
         $linea = isset($cruda['linea']) ? intval($cruda['linea']) : 0;
 
         $fila = [
@@ -1115,6 +1213,18 @@ class ProveedoresCategorias {
                 . 'El resto se importa igual: mirá el motivo de cada una.';
         }
 
+        /* PISAR TRABAJO MANUAL NO ES UN ERROR, ES UN DATO. La planilla manda:
+           es la fuente del maestro y esa decisión no cambia. Pero entre 300
+           cambios, los que borran lo que alguien cargó a mano son los únicos
+           que esa persona querría revisar, y sin decirlo no hay forma de que
+           los encuentre. */
+        if (!empty($resumen['pisa_manuales'])) {
+            $avisos[] = 'ATENCIÓN: ' . $resumen['pisa_manuales'] . ' de los cambios pisan '
+                . 'proveedores que se habían editado a mano desde la pantalla. La planilla '
+                . 'manda, así que se van a sobrescribir; quedan en el historial de cada '
+                . 'proveedor. Están marcados en la lista de abajo.';
+        }
+
         /* UNA BAJA MASIVA CASI SIEMPRE ES UNA PLANILLA RECORTADA. Si el archivo
            trae menos de la mitad de lo que hay cargado, lo mas probable es que
            alguien exporto un filtro y no el maestro entero. */
@@ -1221,6 +1331,161 @@ class ProveedoresCategorias {
         return $aplicadas;
     }
 
+    /* ====================================================================
+       CARGA Y EDICION MANUAL
+
+       El maestro sale de la planilla, y eso no cambia: LA PLANILLA SIGUE
+       MANDANDO. Una edicion manual es una version mas, y la proxima
+       importacion la pisa como pisa cualquier otra. Es lo que evita tener
+       dos maestros en paralelo, que es la decision que este modulo ya tomo
+       cuando descarto CPA01.COD_RUBRO.
+
+       Lo que si se agrega es que pisar trabajo manual no sea invisible: la
+       columna ORIGEN permite que el diff avise ANTES de confirmar. Ver
+       compararImportacion() y sql/cashflow_prov_locales_maestro_manual.sql.
+
+       PASA POR EL MISMO CAMINO QUE LA IMPORTACION, y no es por ahorrar
+       codigo: normalizarFila() aplica el largo del codigo, la normalizacion
+       de la forma de pago y el plazo en dias. Con una normalizacion propia,
+       el mismo proveedor quedaria clasificado distinto segun por donde entro.
+       ==================================================================== */
+
+    /**
+     * Los valores que ya existen en el maestro para los tres campos de
+     * clasificacion, ordenados por uso.
+     *
+     * Es lo que el formulario de carga manual ofrece como sugerencia. NO es una
+     * lista cerrada -se puede escribir uno nuevo- pero tiene que estar: cada
+     * RUBRO_ECONOMICO distinto crea una serie propia en el tablero, asi que
+     * tipear "Alquileres " con un espacio al final no es un detalle cosmetico,
+     * es una fila nueva del cuadro que nadie pidio. Mostrando lo que ya hay, el
+     * caso normal es elegir.
+     *
+     * @return array ['rubro_economico' => [valor => veces], 'rubro' => …, …]
+     */
+    public function rubrosCargados() {
+        $campos = ['rubro_economico' => 'RUBRO_ECONOMICO',
+                   'rubro' => 'RUBRO',
+                   'centro_costos' => 'CENTRO_COSTOS'];
+        $salida = [];
+
+        foreach ($campos as $clave => $col) {
+            $salida[$clave] = [];
+        }
+
+        foreach ($this->mapa() as $m) {
+            foreach ($campos as $clave => $col) {
+                $v = ($m[$col] === null) ? '' : trim((string) $m[$col]);
+
+                if ($v === '') {
+                    continue;
+                }
+
+                $salida[$clave][$v] = isset($salida[$clave][$v]) ? $salida[$clave][$v] + 1 : 1;
+            }
+        }
+
+        foreach ($salida as $clave => $vs) {
+            arsort($salida[$clave]);
+        }
+
+        return $salida;
+    }
+
+    /**
+     * Carga o edita un proveedor del maestro, de a uno.
+     *
+     * NO HACE UPDATE: da de baja la version vigente e inserta una nueva, las
+     * dos cosas en UNA transaccion. Es exactamente lo que hace un CAMBIO de la
+     * importacion, y por el mismo motivo: el historial es lo unico que despues
+     * explica por que un comprobante se clasificaba distinto.
+     *
+     * @param array $datos Las mismas claves que las columnas de importacion
+     * @param string|null $usuario
+     * @return array ['cod_provee', 'estado' => 'ALTA'|'CAMBIO', 'fila']
+     */
+    public function guardarManual($datos, $usuario = null) {
+        if (!$this->tablaCreada()) {
+            throw new Exception('Todavía no existe la tabla del maestro. '
+                . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
+        }
+
+        if (!$this->tieneOrigen()) {
+            throw new Exception('El maestro todavía no distingue las cargas manuales de las '
+                . 'importadas. Corré sql/cashflow_prov_locales_maestro_manual.sql contra la '
+                . 'base central. Sin eso, una edición a mano quedaría indistinguible de la '
+                . 'planilla y la próxima importación la pisaría sin avisar.');
+        }
+
+        $fila = self::normalizarFila($datos);
+
+        if ($fila['estado'] === 'ERROR') {
+            throw new Exception($fila['motivo']);
+        }
+
+        $mapa = $this->mapa();
+        $existia = isset($mapa[$fila['cod_provee']]);
+        $cid = $this->conectar();
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción'));
+        }
+
+        try {
+            if ($existia) {
+                $this->bajaVigente($cid, $fila['cod_provee']);
+            }
+
+            $this->insertar($cid, $fila, $usuario, 'MANUAL');
+            sqlsrv_commit($cid);
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        $this->mapa = null;
+
+        return [
+            'cod_provee' => $fila['cod_provee'],
+            'estado' => $existia ? 'CAMBIO' : 'ALTA',
+            'fila' => $fila
+        ];
+    }
+
+    /**
+     * Da de baja un proveedor del maestro.
+     *
+     * NO BORRA LA FILA, marca VIGENTE = 0 igual que una baja de la importacion:
+     * la deuda de ese proveedor pasa a estar sin clasificar y el historial sigue
+     * explicando como se clasificaba antes.
+     *
+     * @param string $codProvee
+     * @return bool Si habia algo vigente para dar de baja
+     */
+    public function bajaManual($codProvee) {
+        if (!$this->tablaCreada()) {
+            throw new Exception('Todavía no existe la tabla del maestro.');
+        }
+
+        $cod = Planilla::codigo($codProvee);
+
+        if ($cod === '') {
+            throw new Exception('Falta el código del proveedor que hay que dar de baja.');
+        }
+
+        $mapa = $this->mapa();
+
+        if (!isset($mapa[$cod])) {
+            return false;
+        }
+
+        $this->bajaVigente($this->conectar(), $cod);
+        $this->mapa = null;
+
+        return true;
+    }
+
     /** Marca VIGENTE = 0 la fila vigente de un proveedor */
     private function bajaVigente($cid, $codProvee) {
         $stmt = sqlsrv_query($cid,
@@ -1236,28 +1501,46 @@ class ProveedoresCategorias {
         sqlsrv_free_stmt($stmt);
     }
 
-    /** Inserta una fila del maestro */
-    private function insertar($cid, $fila, $usuario) {
+    /**
+     * Inserta una fila del maestro.
+     *
+     * $origen dice de donde salio esta version. La columna puede no existir
+     * todavia -es de un script posterior-, y entonces no entra al INSERT: su
+     * default la pone en 'IMPORT', que es lo cierto en una instalacion que
+     * todavia no puede cargar a mano.
+     */
+    private function insertar($cid, $fila, $usuario, $origen = 'IMPORT') {
+        $cols = ['COD_PROVEE', 'NOMBRE', 'RUBRO_ECONOMICO', 'RUBRO', 'CENTRO_COSTOS',
+                 'FORMA_PAGO', 'FORMA_PAGO_ORIG', 'PLAZO_PAGO', 'PLAZO_DIAS',
+                 'CRITERIO_DISTRIB', 'CRITERIO_ORIG', 'VIGENTE', 'USUARIO'];
+        $vals = ['?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '1', '?'];
+
+        $params = [
+            $fila['cod_provee'],
+            ($fila['nombre'] === '') ? null : mb_substr($fila['nombre'], 0, 120),
+            $fila['rubro_economico'],
+            $fila['rubro'],
+            $fila['centro_costos'],
+            $fila['forma_pago'],
+            ($fila['forma_pago_orig'] === '') ? null : $fila['forma_pago_orig'],
+            $fila['plazo_pago'],
+            $fila['plazo_dias'],
+            $fila['criterio_distrib'],
+            ($fila['criterio_orig'] === '') ? null : $fila['criterio_orig'],
+            $usuario
+        ];
+
+        if ($this->tieneOrigen()) {
+            $cols[] = 'ORIGEN';
+            $vals[] = '?';
+            $params[] = $origen;
+        }
+
         $stmt = sqlsrv_query($cid,
             "INSERT INTO dbo." . self::TABLA . "
-                 (COD_PROVEE, NOMBRE, RUBRO_ECONOMICO, RUBRO, CENTRO_COSTOS,
-                  FORMA_PAGO, FORMA_PAGO_ORIG, PLAZO_PAGO, PLAZO_DIAS,
-                  CRITERIO_DISTRIB, CRITERIO_ORIG, VIGENTE, USUARIO)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
-            [
-                $fila['cod_provee'],
-                ($fila['nombre'] === '') ? null : mb_substr($fila['nombre'], 0, 120),
-                $fila['rubro_economico'],
-                $fila['rubro'],
-                $fila['centro_costos'],
-                $fila['forma_pago'],
-                ($fila['forma_pago_orig'] === '') ? null : $fila['forma_pago_orig'],
-                $fila['plazo_pago'],
-                $fila['plazo_dias'],
-                $fila['criterio_distrib'],
-                ($fila['criterio_orig'] === '') ? null : $fila['criterio_orig'],
-                $usuario
-            ]);
+                 (" . implode(', ', $cols) . ")
+             VALUES (" . implode(', ', $vals) . ")",
+            $params);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al cargar el proveedor '
@@ -1283,9 +1566,15 @@ class ProveedoresCategorias {
 
         $cid = $this->conectar();
 
+        /* EL ORIGEN VA EN EL HISTORIAL, y es la mitad de para qué sirve desde
+           que el maestro se puede editar a mano: "esta versión la escribió una
+           persona el martes" y "esta la trajo la planilla" explican cosas
+           distintas cuando alguien pregunta por qué un comprobante cambió de
+           rubro. */
         $sql = "SELECT ID, COD_PROVEE, NOMBRE, RUBRO_ECONOMICO, RUBRO, CENTRO_COSTOS,
                        FORMA_PAGO, FORMA_PAGO_ORIG, PLAZO_PAGO, PLAZO_DIAS,
-                       CRITERIO_DISTRIB, VIGENTE, USUARIO, FECHA_IMPORTACION, FECHA_BAJA
+                       CRITERIO_DISTRIB, VIGENTE, USUARIO, FECHA_IMPORTACION, FECHA_BAJA, "
+                       . $this->origenSql() . " AS ORIGEN
                 FROM dbo." . self::TABLA . "
                 WHERE COD_PROVEE = ?
                 ORDER BY ID DESC";

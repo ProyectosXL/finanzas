@@ -333,6 +333,14 @@ class Cashflow {
             $fila['tipo_cambio'] = $s['tipo_cambio'];
             $fila['fuera_horizonte'] = $s['fuera_horizonte'];
 
+            /* De que fondo de cobertura es este stock, y cuanto se aplico de
+               cada uno. Los dos viajan para que resolverCobertura() pueda
+               calcular el disponible POR FONDO sin consultar la base: el motor
+               arma el cuadro con lo que los proveedores le dieron. */
+            $fila['origen_cobertura'] = isset($meta['origen_cobertura'])
+                ? $meta['origen_cobertura'] : null;
+            $fila['por_origen'] = isset($s['por_origen']) ? $s['por_origen'] : null;
+
             // Las anotaciones viajan tal cual. Las filas DERIVADAS -subtotales,
             // flujo neto, saldo final- no las heredan y se quedan con el arreglo
             // vacio: una anotacion dice algo sobre el origen de un importe, y el
@@ -697,20 +705,50 @@ class Cashflow {
         $hayStock = false;
         $hayUso = false;
 
+        /* EL DETALLE POR FONDO. Cada fila de stock dice de que fondo es -lo
+           declara su modulo en el registro- y la de uso trae cuanto se aplico de
+           cada uno. Con dos fondos, el total dejo de alcanzar: se pueden aplicar
+           trescientos millones "de dolares" y que el total cierre porque las
+           inversiones lo tapan. */
+        $fondos = [];
+
         foreach ($resueltas as $f) {
             if ($f['tipo'] === 'STOCK_COBERTURA') {
                 $stock += $f['total_horizonte'];
                 $hayStock = true;
+
+                $o = isset($f['origen_cobertura']) ? $f['origen_cobertura'] : null;
+
+                if ($o !== null) {
+                    if (!isset($fondos[$o])) {
+                        $fondos[$o] = ['stock' => 0, 'aplicado' => 0, 'nombre' => $o];
+                    }
+
+                    $fondos[$o]['stock'] += $f['total_horizonte'];
+                    $fondos[$o]['nombre'] = $f['nombre'];
+                }
             }
 
             if ($f['tipo'] === 'USO_COBERTURA' && $f['computa']) {
                 $aplicado += $f['total_horizonte'];
                 $hayUso = true;
+
+                foreach ((isset($f['por_origen']) ? $f['por_origen'] : []) as $o => $v) {
+                    if (!isset($fondos[$o])) {
+                        $fondos[$o] = ['stock' => 0, 'aplicado' => 0, 'nombre' => $o];
+                    }
+
+                    $fondos[$o]['aplicado'] += floatval($v);
+                }
             }
         }
 
         if (!$hayStock && !$hayUso) {
             return;
+        }
+
+        foreach ($fondos as $o => $d) {
+            $fondos[$o]['disponible'] = $d['stock'] - $d['aplicado'];
         }
 
         $info = [
@@ -719,7 +757,8 @@ class Cashflow {
             'disponible' => $stock - $aplicado,
             // Sin fila de stock el disponible no significa nada, y el front
             // tiene que poder distinguirlo de un disponible de cero.
-            'hay_stock' => $hayStock
+            'hay_stock' => $hayStock,
+            'fondos' => $fondos
         ];
 
         foreach ($resueltas as $i => $f) {
@@ -733,12 +772,30 @@ class Cashflow {
            deliberado -un rescate que se va a hacer, una suscripcion en camino-,
            asi que la app no tiene por que impedirlo. Lo que no puede pasar es
            que el tablero muestre un saldo final tapado con plata inexistente sin
-           decirlo. */
+           decirlo.
+
+           EL AVISO ES POR FONDO, y ademas por el total. Son dos cosas distintas:
+           un fondo puede estar sobregirado mientras el total cierra, y ese caso
+           -aplicar de un fondo plata que esta en el otro- es el que el pozo
+           unico no podia ver. */
+        foreach ($fondos as $d) {
+            if ($d['stock'] <= 0 && $d['aplicado'] <= 0) {
+                continue;
+            }
+
+            if ($d['aplicado'] > $d['stock'] + 0.01) {
+                $this->warnings[] = 'Cobertura: se aplican ' . $this->plata($d['aplicado'])
+                    . ' de "' . $d['nombre'] . '" pero ahí hay ' . $this->plata($d['stock'])
+                    . '. Faltan ' . $this->plata($d['aplicado'] - $d['stock'])
+                    . ' de ese fondo.';
+            }
+        }
+
         if ($hayStock && $aplicado > $stock + 0.01) {
             $this->warnings[] = 'Cobertura: se aplican ' . $this->plata($aplicado)
-                . ' pero el saldo de inversiones disponible es ' . $this->plata($stock)
+                . ' pero el total disponible para cubrir es ' . $this->plata($stock)
                 . '. Faltan ' . $this->plata($aplicado - $stock) . ', así que el Saldo Final '
-                . 'está cubierto con plata que todavía no figura como invertida.';
+                . 'está cubierto con plata que todavía no figura como disponible.';
         }
     }
 

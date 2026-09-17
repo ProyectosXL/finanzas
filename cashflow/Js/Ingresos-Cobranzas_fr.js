@@ -81,6 +81,26 @@
             porDefecto: [0, 1]
         });
 
+        // La tabla abre por fecha de cobro ascendente: lo más antiguo arriba,
+        // que es lo primero que hay que mirar de una cartera pendiente. Sin
+        // esto abría en el orden en que vino del backend.
+        //
+        // 'cobro' es el data-orden-nombre del <th>, no su rótulo: el rótulo
+        // cambia con la solapa y el default tiene que valer en las dos.
+        //
+        // Sólo aplica en Detalle Facturas, y no porque acá se diga: en Resumen
+        // esa columna está oculta por CSS -la fila es un cliente con facturas
+        // que se cobran en fechas distintas- y tabla-orden.js no ordena por una
+        // columna que no se ve.
+        //
+        // La clave de la preferencia sigue siendo el id de la tabla, así que
+        // quien ya tenga un orden elegido a mano lo conserva y este default no
+        // se le aplica.
+        crearOrdenTabla({
+            tabla: 'tablaCobranzasFR',
+            porDefecto: { columna: 'cobro', dir: 'asc' }
+        });
+
         if (btnRefresh) {
             btnRefresh.addEventListener('click', cargarDatos);
         }

@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/Horizonte.php';
+require_once __DIR__ . '/Cotizacion.php';
 
 /**
  * Cobertura
@@ -82,11 +83,43 @@ class Cobertura {
     /** Origen que se asume si no mandan ninguno */
     const ORIGEN_DEFECTO = 'INVERSIONES';
 
+    /**
+     * En que moneda se mide lo que sale de cada fondo.
+     *
+     * NO ES UNA PREFERENCIA DE LA PANTALLA: es la moneda en la que ese fondo
+     * existe. El saldo de inversiones se informa en pesos, asi que aplicar de
+     * ahi es aplicar pesos; la cuenta comitente tiene DOLARES, y vender 20.000
+     * dolares un dia entrega los pesos de ESE dia.
+     *
+     * Esta aca y no en el navegador porque decide como se guarda el dato: con la
+     * moneda equivocada el importe se valua dos veces o ninguna.
+     */
+    const MONEDA_POR_FONDO = [
+        'INVERSIONES' => 'ARS',
+        'SUSCRIPCION' => 'ARS',
+        'DOLARES' => 'USD'
+    ];
+
+    /**
+     * La moneda que le corresponde a un origen.
+     *
+     * @param string|null $origen
+     * @return string 'ARS' | 'USD'
+     */
+    public static function monedaDeOrigen($origen) {
+        $o = strtoupper(trim((string) $origen));
+
+        return isset(self::MONEDA_POR_FONDO[$o]) ? self::MONEDA_POR_FONDO[$o] : 'ARS';
+    }
+
     /** @var Conexion */
     private $conn;
 
     /** @var bool|null Cache del chequeo de existencia de la tabla */
     private $tabla = null;
+
+    /** @var bool|null Cache de si la tabla ya tiene la columna MONEDA */
+    private $moneda = null;
 
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
@@ -159,7 +192,8 @@ class Cobertura {
 
         $cid = $this->conectar();
 
-        $sql = "SELECT a.FECHA, a.IMPORTE, a.ORIGEN, a.OBSERVACION, a.USUARIO, a.FECHA_ALTA,
+        $sql = "SELECT a.FECHA, a.IMPORTE, a.ORIGEN, a.OBSERVACION, a.USUARIO, a.FECHA_ALTA, "
+                     . $this->monedaSql() . " AS MONEDA,
                        (SELECT COUNT(*)
                           FROM dbo." . self::TABLA . " h
                          WHERE h.FECHA = a.FECHA) AS VERSIONES
@@ -179,6 +213,7 @@ class Cobertura {
             $v[] = [
                 'FECHA' => Horizonte::normalizarFecha($row['FECHA']),
                 'IMPORTE' => floatval($row['IMPORTE']),
+                'MONEDA' => self::monedaValida($row['MONEDA']),
                 'ORIGEN' => (string) $row['ORIGEN'],
                 'OBSERVACION' => (string) $row['OBSERVACION'],
                 'USUARIO' => $row['USUARIO'],
@@ -190,6 +225,126 @@ class Cobertura {
         sqlsrv_free_stmt($stmt);
 
         return $v;
+    }
+
+    /**
+     * Las aplicaciones YA VALUADAS A PESOS, y cuanto se aplico de cada fondo.
+     *
+     * ES DONDE SE CONVIERTE, Y EN UN SOLO LUGAR. Una aplicacion en dolares se
+     * valua con la cotizacion del DIA EN QUE SE APLICA -no con la del saldo- y a
+     * la punta VENDEDORA, que es la misma con la que se valua el stock: si las
+     * dos usaran puntas distintas, consumir todo el saldo no lo dejaria en cero.
+     *
+     * POR QUE LA FECHA DE LA APLICACION Y NO LA DEL SALDO: vender 20.000 dolares
+     * el 3 de octubre entrega los pesos de ese dia. La cotizacion con la que se
+     * informo el saldo describe otra cosa -cuanto valia lo que habia- y usarla
+     * para una venta posterior pondria en el cuadro pesos que nadie va a recibir.
+     *
+     * SIN COTIZACION NO SE INVENTA NADA: esa aplicacion queda con IMPORTE_ARS en
+     * null, se informa en 'sin_cotizacion' y no entra al cuadro. Un cero se
+     * leeria como "ese dia no se aplico nada".
+     *
+     * @param Cotizacion|null $cotizacion Se puede inyectar para poder probar
+     * @return array ['filas', 'por_origen' => [origen => pesos], 'sin_cotizacion',
+     *                'error' => string|null]
+     */
+    public function valuarAplicaciones($cotizacion = null) {
+        $salida = ['filas' => [], 'por_origen' => [], 'sin_cotizacion' => 0.0, 'error' => null];
+        $aplic = $this->getAplicaciones();
+
+        if (empty($aplic)) {
+            return $salida;
+        }
+
+        $c = ($cotizacion === null) ? new Cotizacion() : $cotizacion;
+
+        foreach ($aplic as $a) {
+            $ars = floatval($a['IMPORTE']);
+            $tc = null;
+            $tcFecha = null;
+
+            if ($a['MONEDA'] === 'USD') {
+                $ars = null;
+
+                if ($salida['error'] === null) {
+                    try {
+                        $ult = $c->ultimaHasta($a['FECHA'], Cotizacion::VENDEDOR);
+
+                        if ($ult !== null) {
+                            $tc = $ult['valor'];
+                            $tcFecha = $ult['fecha'];
+                            $ars = round(floatval($a['IMPORTE']) * $tc, 2);
+                        }
+                    } catch (Throwable $e) {
+                        $salida['error'] = $e->getMessage();
+                    }
+                }
+
+                if ($ars === null) {
+                    $salida['sin_cotizacion'] += floatval($a['IMPORTE']);
+                }
+            }
+
+            if ($ars !== null) {
+                $o = ($a['ORIGEN'] === '') ? self::ORIGEN_DEFECTO : $a['ORIGEN'];
+
+                $salida['por_origen'][$o] = (isset($salida['por_origen'][$o])
+                    ? $salida['por_origen'][$o] : 0) + $ars;
+            }
+
+            $salida['filas'][] = array_merge($a, [
+                'IMPORTE_ARS' => $ars,
+                'TC' => $tc,
+                'TC_FECHA' => $tcFecha
+            ]);
+        }
+
+        return $salida;
+    }
+
+    /**
+     * Como se pide la moneda en un SELECT: la columna si esta, y el literal
+     * 'ARS' si el script que la agrega todavia no se corrio.
+     *
+     * Devolver el literal y no null es lo correcto: sin la columna, todo lo que
+     * hay se cargo en pesos, asi que 'ARS' no es un relleno, es el dato cierto.
+     *
+     * @return string
+     */
+    private function monedaSql() {
+        if ($this->moneda === null) {
+            $stmt = sqlsrv_query($this->conectar(),
+                "SELECT COL_LENGTH('dbo." . self::TABLA . "', 'MONEDA') AS C");
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al verificar la moneda'));
+            }
+
+            $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+            sqlsrv_free_stmt($stmt);
+
+            $this->moneda = ($row && $row['C'] !== null);
+        }
+
+        return $this->moneda ? 'a.MONEDA' : "'ARS'";
+    }
+
+    /** Si la tabla ya tiene la columna MONEDA */
+    public function tieneMoneda() {
+        $this->monedaSql();
+
+        return $this->moneda;
+    }
+
+    /**
+     * Normaliza una moneda leida del origen. Lo que no se sabe valuar es pesos,
+     * que es lo que era todo antes de que la columna existiera.
+     *
+     * @param mixed $v
+     * @return string 'ARS' | 'USD'
+     */
+    public static function monedaValida($v) {
+        return (strtoupper(trim((string) $v)) === 'USD') ? 'USD' : 'ARS';
     }
 
     /**
@@ -249,12 +404,24 @@ class Cobertura {
      * confirmara y el alta fallara, la fecha se quedaria sin importe vigente y
      * el saldo proyectado cambiaria sin que nadie lo hubiera pedido.
      *
+     * EL IMPORTE VA EN LA MONEDA DEL FONDO, Y LA MONEDA SALE DEL ORIGEN. No es
+     * un parametro aparte a proposito: la moneda no es una eleccion, es una
+     * propiedad del fondo del que se saca la plata. Recibirla suelta permitiria
+     * guardar dolares con origen INVERSIONES, y ese importe se valuaria dos
+     * veces o ninguna sin que nada lo dijera.
+     *
+     * Con 'USD' el importe se guarda EN DOLARES y se convierte al leer, con la
+     * cotizacion del dia de la aplicacion: guardar los pesos congelaria la
+     * conversion, y el remanente en dolares se moveria solo con el tipo de
+     * cambio.
+     *
      * @param string $fecha 'Y-m-d'
-     * @param mixed $importe Puede ser negativo; no puede ser cero
+     * @param mixed $importe Puede ser negativo; no puede ser cero. En la moneda
+     *        del fondo que dice $origen
      * @param string|null $origen Clave de self::ORIGENES
      * @param string|null $observacion
      * @param string|null $usuario
-     * @return array ['fecha', 'importe', 'origen', 'piso' => bool]
+     * @return array ['fecha', 'importe', 'moneda', 'origen', 'piso' => bool]
      */
     public function guardar($fecha, $importe, $origen = null, $observacion = null,
                            $usuario = null) {
@@ -267,6 +434,24 @@ class Cobertura {
         $monto = self::validarImporte($importe);
         $org = self::validarOrigen($origen);
         $obs = self::normalizarObservacion($observacion);
+        $mon = self::monedaDeOrigen($org);
+
+        if ($mon === 'USD' && !$this->tieneMoneda()) {
+            throw new Exception('Todavía no se puede aplicar cobertura desde el fondo de '
+                . 'dólares: la tabla no sabe guardar la moneda, así que ese importe se '
+                . 'leería como pesos. Corré sql/cashflow_cobertura_por_fondo.sql contra la '
+                . 'base central.');
+        }
+
+        $cols = 'FECHA, IMPORTE, ORIGEN, OBSERVACION, VIGENTE, USUARIO';
+        $vals = '?, ?, ?, ?, 1, ?';
+        $args = [$f, $monto, $org, $obs, $usuario];
+
+        if ($this->tieneMoneda()) {
+            $cols .= ', MONEDA';
+            $vals .= ', ?';
+            $args[] = $mon;
+        }
 
         $cid = $this->conectar();
 
@@ -278,10 +463,8 @@ class Cobertura {
             $piso = $this->bajaVigentes($cid, $f);
 
             $stmt = sqlsrv_query($cid,
-                "INSERT INTO dbo." . self::TABLA . "
-                     (FECHA, IMPORTE, ORIGEN, OBSERVACION, VIGENTE, USUARIO)
-                 VALUES (?, ?, ?, ?, 1, ?)",
-                [$f, $monto, $org, $obs, $usuario]);
+                "INSERT INTO dbo." . self::TABLA . " (" . $cols . ") VALUES (" . $vals . ")",
+                $args);
 
             if ($stmt === false) {
                 throw new Exception($this->errorSql('Error al guardar la cobertura'));
@@ -295,7 +478,8 @@ class Cobertura {
             throw $e;
         }
 
-        return ['fecha' => $f, 'importe' => $monto, 'origen' => $org, 'piso' => $piso];
+        return ['fecha' => $f, 'importe' => $monto, 'moneda' => $mon,
+                'origen' => $org, 'piso' => $piso];
     }
 
     /**

@@ -53,16 +53,46 @@ class CoberturaProvider extends CashflowProvider {
         $serie['fuera_horizonte'] = 0;
         $serie['sin_fecha'] = 0;
 
+        /* CUANTO SE APLICO DE CADA FONDO. Viaja con la serie -como ya viajan
+           moneda_origen y fuera_horizonte- porque el motor lo necesita para
+           calcular el disponible POR FONDO y no puede ir a buscarlo a la base:
+           el motor no consulta, arma el cuadro con lo que los proveedores le
+           dan. Ver Cashflow::resolverCobertura(). */
+        $serie['por_origen'] = [];
+
         $cobertura = new Cobertura();
 
         foreach ($cobertura->getAvisos() as $aviso) {
             $this->avisar($aviso);
         }
 
-        foreach ($cobertura->getAplicaciones() as $a) {
-            $importe = floatval($a['IMPORTE']);
+        /* LOS IMPORTES VIENEN YA VALUADOS. Una aplicacion en dolares se guarda en
+           dolares y se convierte con la cotizacion del dia en que se aplica; la
+           conversion vive en Cobertura::valuarAplicaciones(), que es tambien la
+           que usa la pantalla. Si cada uno multiplicara por su cuenta, el cuadro
+           y la pestaña podrian discrepar y no habria forma de saber cual esta
+           mal. */
+        $val = $cobertura->valuarAplicaciones();
 
-            if ($importe == 0) {
+        if ($val['error'] !== null) {
+            $this->avisar('Cobertura: no se pudo leer el tipo de cambio oficial, así que las '
+                . 'aplicaciones cargadas en dólares no se están mostrando. Las de pesos no '
+                . 'cambian.');
+        }
+
+        if ($val['sin_cotizacion'] > 0) {
+            $this->avisar('Cobertura: USD '
+                . number_format($val['sin_cotizacion'], 2, ',', '.') . ' aplicados no se pueden '
+                . 'valuar porque no hay cotización oficial anterior a su fecha, así que no '
+                . 'entran al cuadro.');
+        }
+
+        $serie['por_origen'] = $val['por_origen'];
+
+        foreach ($val['filas'] as $a) {
+            $importe = $a['IMPORTE_ARS'];
+
+            if ($importe === null || $importe == 0) {
                 continue;
             }
 
