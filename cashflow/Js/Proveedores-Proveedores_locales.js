@@ -183,6 +183,14 @@
         pedirJson('Controller/ProveedoresController.php?action=getMaestro')
             .then(function(data) {
                 maestro = data;
+
+                /* LOS AVISOS DEL MAESTRO SE PINTAN, y antes no: el backend los
+                   venía produciendo —"el maestro está vacío", "falta el script
+                   de la carga manual"— y esta pantalla no los leía nunca. El
+                   síntoma es una función que no aparece sin que nada diga por
+                   qué, que es indistinguible de una que no se construyó. */
+                pintarAvisos(maestro.avisos, 'avisosMaestroProv');
+
                 pintarMaestro();
                 pintarFaltantes();
             })

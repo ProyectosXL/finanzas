@@ -240,13 +240,29 @@ class ProveedoresCategorias {
                 . 'Mientras tanto, los comprobantes se muestran sin clasificar.'];
         }
 
+        $avisos = [];
+
         if (empty($this->mapa())) {
-            return ['El maestro de proveedores está vacío: importá la hoja '
+            $avisos[] = 'El maestro de proveedores está vacío: importá la hoja '
                 . '"Maestro proveedores" del Excel Cronograma de Pagos. Mientras tanto, '
-                . 'todos los comprobantes se muestran sin clasificar y ninguno queda excluido.'];
+                . 'todos los comprobantes se muestran sin clasificar y ninguno queda excluido.';
         }
 
-        return [];
+        /* LO QUE FALTA SE DICE, AUNQUE NO ROMPA NADA. Sin la columna ORIGEN el
+           maestro se lee igual y lo único que no se puede es cargarlo a mano,
+           así que la pantalla esconde el botón de agregar. Una función que
+           desaparece sin decir por qué es indistinguible de una que no se
+           construyó: quien la fue a buscar no tiene dónde enterarse de que
+           existe y de que falta un script. */
+        if (!$this->tieneOrigen()) {
+            $avisos[] = 'La carga manual de proveedores está apagada: falta la columna ORIGEN '
+                . 'en el maestro. Corré sql/cashflow_prov_locales_maestro_manual.sql contra la '
+                . 'base central y el botón de agregar aparece solo. Todo lo demás de esta '
+                . 'pantalla funciona igual; lo único que no se puede es cargar o editar un '
+                . 'proveedor de a uno.';
+        }
+
+        return $avisos;
     }
 
     /* ====================================================================

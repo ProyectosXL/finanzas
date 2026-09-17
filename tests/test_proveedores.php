@@ -927,6 +927,32 @@ $c = ProveedoresCategorias::compararImportacion([$fila(2, 'MTDODI')], $igual);
 chequear('sin cambios no hay nada que pisar', 'SIN_CAMBIOS', $c['filas'][0]['estado']);
 chequear('asi que no se marca', 0, $c['resumen']['pisa_manuales']);
 
+seccion('lo que falta se dice, aunque no rompa nada');
+
+/* EL SINTOMA QUE ESTO EVITA: sin la columna ORIGEN la pantalla esconde el boton
+   de agregar -no puede escribir- y no decia por que. Una funcion que desaparece
+   sin explicarse es indistinguible de una que no se construyo: quien la fue a
+   buscar no tiene donde enterarse de que existe y de que falta un script. */
+$tabProv = file_get_contents(__DIR__ . '/../cashflow/Tabs/proveedores_locales.php');
+
+chequear('la solapa del maestro tiene donde poner sus avisos', true,
+    strpos($tabProv, 'id="avisosMaestroProv"') !== false);
+
+// Y el JS los pinta: el backend los venia produciendo y nadie los leia.
+chequear('y el JS los pinta al cargar el maestro', true,
+    strpos($jsCodigo, "pintarAvisos(maestro.avisos, 'avisosMaestroProv')") !== false);
+
+$catJs = file_get_contents(__DIR__ . '/../cashflow/Class/ProveedoresCategorias.php');
+
+chequear('el aviso nombra el script que falta', true,
+    strpos($catJs, 'La carga manual de proveedores está apagada') !== false
+    && strpos($catJs, 'sql/cashflow_prov_locales_maestro_manual.sql') !== false);
+
+// Y dice que lo demás sigue andando: un aviso que suena a "esta pantalla está
+// rota" manda a alguien a buscar un problema que no existe.
+chequear('y aclara que el resto funciona igual', true,
+    strpos($catJs, 'Todo lo demás de esta') !== false);
+
 seccion('el script que habilita la carga manual');
 
 $sqlManual = __DIR__ . '/../sql/cashflow_prov_locales_maestro_manual.sql';

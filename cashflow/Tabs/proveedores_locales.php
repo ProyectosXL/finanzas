@@ -477,6 +477,13 @@
                 <!-- EL CONTROL QUE EVITA QUE EL MAESTRO SE DESACTUALICE SIN QUE
                      NADIE SE ENTERE: proveedores con deuda que no están en la
                      planilla. -->
+                <!-- Los avisos del maestro: que está vacío, o que falta el
+                     script que habilita la carga manual. Van ACÁ y no sólo en
+                     la solapa de cuentas a pagar: son sobre esta pantalla, y
+                     una función que no aparece sin decir por qué es
+                     indistinguible de una que no se construyó. -->
+                <div id="avisosMaestroProv" class="px-3 pt-3"></div>
+
                 <div id="faltantesProv" class="px-3 pt-3"></div>
 
                 <div class="table-responsive" id="wrapperMaestroProv">
