@@ -568,6 +568,69 @@ foreach (['rotulo: function(col)', 'valor: function(fila, col)',
     chequear('eje-vistas sigue ofreciendo ' . $m, true, strpos($ejeJs, $m) !== false);
 }
 
+seccion('rubro economico y rubro son dos columnas, y la grilla no se desalinea');
+
+/* SON DOS COLUMNAS DISTINTAS DEL MAESTRO. El economico abre la deuda por serie
+   en el tablero; el rubro clasifica adentro de ese y no arma ninguna serie. La
+   solapa del maestro ya las mostraba separadas y Cuentas a Pagar mostraba una
+   sola: el mismo proveedor se leia distinto segun la solapa. */
+$htmlProv = file_get_contents(__DIR__ . '/../cashflow/Tabs/proveedores_locales.php');
+
+/* Se mira el HTML SIN COMENTARIOS, por la misma razon que el JS de arriba: el
+   comentario que explica la diferencia nombra las dos columnas. */
+$htmlCodigo = preg_replace('/<!--.*?-->/s', '', $htmlProv);
+
+chequear('el encabezado nombra las dos, y en ese orden', 1,
+    preg_match('/RUBRO ECONOMICO\s*<\/th>.*?>\s*RUBRO\s*<\/th>/s', $htmlCodigo));
+
+chequear('y el cuerpo pinta una celda para cada una', true,
+    strpos($jsCodigo, "'<td>' + celdaRubro(f) + '</td>'") !== false
+    && strpos($jsCodigo, "'<td>' + celdaRubroDetalle(f) + '</td>'") !== false);
+
+// El economico distingue "no esta en el maestro"; el otro, "esta pero vino
+// vacio", que es lo comun. Un mismo cartel para los dos casos haria pensar que
+// falta clasificar a un proveedor que ya esta clasificado.
+chequear('el economico avisa cuando el proveedor no esta en el maestro', true,
+    strpos($jsCodigo, 'sin clasificar') !== false);
+
+/* EL SINTOMA QUE ESTO EVITA: agregar una columna al encabezado y no al cuerpo
+   -o al reves- corre la tabla entera una celda, y el numero que uno lee bajo
+   "Pendiente" es el de la columna de al lado. No rompe nada: solo miente.
+
+   Por eso el conteo se verifica contra el HTML y no se confia en COLS_DESC, que
+   es justamente el numero que se olvida de actualizar. */
+$encabezado = substr($htmlCodigo, strpos($htmlCodigo, '<table id="tablaProveedores"'));
+$encabezado = substr($encabezado, 0, strpos($encabezado, 'id="headerEjeProv"'));
+
+preg_match('/var COLS_DESC = (\d+);/', $jsCodigo, $mCols);
+
+/* Se cuentan las de rowspan="2" y no todos los <th>: la ultima del encabezado es
+   la del eje, que es una sola celda con colspan y no es descriptiva. */
+chequear('el encabezado tiene tantas descriptivas como declara COLS_DESC',
+    substr_count($encabezado, '<th rowspan="2"'), intval($mCols[1]));
+
+/* El pie las reparte en tres tramos -las que llevan el rotulo, la del total, y
+   las editables- y los tres tienen que sumar lo mismo. Un colspan mal contado
+   deja el total debajo de otra columna. */
+preg_match('/<td colspan="(\d+)" class="fw-bold text-end">TOTALES<\/td>/', $jsCodigo, $mPie);
+preg_match('/COLS_DESC - (\d+)/', $jsCodigo, $mResto);
+
+chequear('y el pie reparte esas mismas columnas', intval($mCols[1]),
+    intval($mPie[1]) + 1 + (intval($mCols[1]) - intval($mResto[1])));
+
+// El colspan del HTML es solo el estado inicial -pintarTotales lo reescribe-,
+// pero si arranca mal la tabla parpadea desalineada en cada carga.
+preg_match('/id="totalesProv">\s*<td colspan="(\d+)"/', $htmlCodigo, $mPieHtml);
+
+chequear('el pie del HTML arranca con el mismo ancho', intval($mCols[1]),
+    intval($mPieHtml[1]));
+
+// Buscar "CAJA" trae lo que la grilla muestra como CAJA: si una columna se ve y
+// no se busca, el buscador contesta que no hay nada sobre algo que esta a la
+// vista.
+chequear('el buscador mira las dos columnas', true,
+    strpos($jsCodigo, 'f.RUBRO_ECONOMICO, f.RUBRO,') !== false);
+
 seccion('las excluidas no se ven por defecto, y se dice cuantas son');
 
 /* YA SE DECIDIO que no van al cashflow, asi que en el trabajo normal -revisar

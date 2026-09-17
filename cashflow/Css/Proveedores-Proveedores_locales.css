@@ -79,6 +79,14 @@
     color: #6b5b8a;
 }
 
+/* El rubro, que va al lado del económico. Se ve más liviano a propósito: el de
+   al lado abre las series del tablero y éste no, así que no pueden pesar igual
+   ni leerse como dos etiquetas del mismo rango. */
+.tab-proveedores_locales .prov-rubro-detalle {
+    font-size: 0.74rem;
+    color: #6b7684;
+}
+
 /* Una forma de pago que no matcheó contra la lista. Se muestra tal como vino:
    lo que hay que arreglar es la planilla, no el dato ya cargado. */
 .tab-proveedores_locales .prov-forma-rara {

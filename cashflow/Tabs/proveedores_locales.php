@@ -228,7 +228,22 @@
                             <tr>
                                 <th rowspan="2">PROVEEDOR</th>
                                 <th rowspan="2" class="col-texto">RAZON SOCIAL</th>
-                                <th rowspan="2">RUBRO</th>
+                                <!-- DOS COLUMNAS DEL MAESTRO, no una con dos
+                                     nombres. El rubro económico es el que abre
+                                     la deuda por serie en el tablero; el rubro
+                                     clasifica adentro de ése y no arma ninguna
+                                     serie. La grilla del maestro ya las muestra
+                                     separadas y acá se leen igual, en el mismo
+                                     orden, para que sean el mismo dato de los
+                                     dos lados. -->
+                                <th rowspan="2"
+                                    title="El rubro económico del maestro. Es el que abre la deuda por serie en el tablero.">
+                                    RUBRO ECONOMICO
+                                </th>
+                                <th rowspan="2"
+                                    title="El rubro del maestro, dentro del rubro económico. Es informativo: no abre ninguna serie del tablero.">
+                                    RUBRO
+                                </th>
                                 <th rowspan="2">T_COMP</th>
                                 <th rowspan="2">N_COMP</th>
                                 <th rowspan="2">EMISION</th>
@@ -269,9 +284,9 @@
                         <tfoot class="table-light">
                             <!-- El pie lo reescribe pintarTotales() con una celda
                                  por columna. Este colspan es sólo el estado
-                                 inicial, y son las 11 descriptivas. -->
+                                 inicial, y son las 12 descriptivas. -->
                             <tr id="totalesProv">
-                                <td colspan="11" class="fw-bold text-end">TOTALES</td>
+                                <td colspan="12" class="fw-bold text-end">TOTALES</td>
                             </tr>
                         </tfoot>
                     </table>

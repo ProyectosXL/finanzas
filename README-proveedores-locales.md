@@ -182,6 +182,21 @@ Se evaluó empezar a cargarla desde Tango y se descartó: **obligaría a adminis
 2. **Para la forma de pago habitual**, que sirve de valor por defecto al importar pagos.
 3. **Para el plazo**, que es el último escalón de la jerarquía de fecha.
 
+### Rubro económico y rubro son dos columnas, no dos nombres de una
+
+La planilla trae los dos, y clasifican en dos niveles distintos:
+
+| | |
+| --- | --- |
+| **Rubro económico** | Es el que **abre la deuda por serie** en el tablero: `RUBRO_ALQUILERES`, `RUBRO_LOGISTICA`, `RUBRO_MERCADERIA`… Un proveedor sin este dato cae en `PAGOS_SIN_RUBRO` |
+| **Rubro** | Clasifica **adentro** del económico. Es informativo: no arma ninguna serie, y viene vacío en buena parte de la planilla |
+
+Las dos se ven en las dos solapas —*Maestro* y *Cuentas a Pagar*—, en el mismo orden. Antes *Cuentas a Pagar* mostraba una sola, así que el mismo proveedor se leía distinto según por dónde se lo mirara.
+
+> Están en columnas separadas y no concatenadas en una celda a propósito: **el que decide tiene que poder leerse solo.** Juntarlos obligaría a saber cuál de los dos abre las series para interpretar la celda.
+
+Cuando el económico falta se dice *sin clasificar* —el proveedor no está en el maestro, y eso es trabajo pendiente—; cuando falta el otro va un guion, porque está clasificado y esa columna simplemente vino vacía. Un mismo cartel para los dos casos mandaría a clasificar proveedores que ya lo están.
+
 ### Se puede cargar y editar a mano, y la planilla sigue mandando
 
 > Esto es **nuevo**. Antes el maestro sólo se podía escribir importando el Excel.

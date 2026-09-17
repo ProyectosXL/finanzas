@@ -335,7 +335,7 @@
             /* Se busca por la forma QUE DECIDE y no por la del pago registrado:
                es la que se ve en la columna, y buscar "CAJA" tiene que traer lo
                que la grilla muestra como CAJA. */
-            return [f.COD_PROVEE, f.RAZON_SOC, f.N_COMP, f.RUBRO_ECONOMICO,
+            return [f.COD_PROVEE, f.RAZON_SOC, f.N_COMP, f.RUBRO_ECONOMICO, f.RUBRO,
                     f.FORMA_PAGO_VIGENTE, f.MOTIVO_EXCLUSION]
                 .join(' ').toLowerCase().indexOf(q) !== -1;
         });
@@ -462,6 +462,7 @@
                 + '<td class="col-texto" title="' + escapar(f.RAZON_SOC) + '">'
                 +     escapar(f.RAZON_SOC) + '</td>'
                 + '<td>' + celdaRubro(f) + '</td>'
+                + '<td>' + celdaRubroDetalle(f) + '</td>'
                 + '<td class="center">' + escapar(f.T_COMP) + '</td>'
                 + '<td class="center">' + escapar(f.N_COMP) + '</td>'
                 + '<td class="center">' + fechaCorta(f.FECHA_EMIS) + '</td>'
@@ -504,7 +505,7 @@
      * columna: el síntoma es una tabla desalineada que nadie relaciona con el
      * cambio que la causó.
      */
-    var COLS_DESC = 11;
+    var COLS_DESC = 12;
 
     function pintarTotales(filas, cols) {
         var total = 0;
@@ -525,11 +526,11 @@
 
         /* Las celdas del pie van en el mismo orden que el encabezado y suman
            COLS_DESC: un colspan mal contado corre el total debajo de otra
-           columna y el número queda diciendo otra cosa. Siete descriptivas, el
+           columna y el número queda diciendo otra cosa. Ocho descriptivas, el
            total, y las tres editables al final. */
-        var html = '<td colspan="7" class="fw-bold text-end">TOTALES</td>'
+        var html = '<td colspan="8" class="fw-bold text-end">TOTALES</td>'
             + '<td class="currency fw-bold">' + plata(total) + '</td>'
-            + '<td colspan="' + (COLS_DESC - 8) + '"></td>';
+            + '<td colspan="' + (COLS_DESC - 9) + '"></td>';
 
         cols.forEach(function(c) {
             var v = porCol[c] || 0;
@@ -563,6 +564,10 @@
                 + 'por rubro. Importá la hoja "Maestro proveedores" actualizada.') + '"></i>';
     }
 
+    /**
+     * El RUBRO ECONÓMICO del maestro. Es el que abre la deuda por serie en el
+     * tablero, así que es el que se marca cuando el proveedor está excluido.
+     */
     function celdaRubro(f) {
         if (!f.RUBRO_ECONOMICO) {
             return '<span class="text-muted small">sin clasificar</span>';
@@ -570,6 +575,26 @@
 
         return '<span class="prov-rubro' + (f.EXCLUIDO ? ' prov-rubro-excluido' : '') + '">'
             + escapar(f.RUBRO_ECONOMICO) + '</span>';
+    }
+
+    /**
+     * El RUBRO del maestro, que es OTRA columna: un segundo nivel de
+     * clasificación dentro del económico.
+     *
+     * Va aparte y no concatenado al de al lado porque no hacen lo mismo: el
+     * económico abre las series del tablero y éste es informativo. Juntarlos en
+     * una celda haría que el que decide no se pueda leer solo.
+     *
+     * Se distingue del "sin clasificar" del económico: ahí el proveedor no está
+     * en el maestro; acá está pero esa columna vino vacía, que es de lo más
+     * común en la planilla.
+     */
+    function celdaRubroDetalle(f) {
+        if (!f.RUBRO) {
+            return '<span class="text-muted small">—</span>';
+        }
+
+        return '<span class="prov-rubro-detalle">' + escapar(f.RUBRO) + '</span>';
     }
 
     /**
