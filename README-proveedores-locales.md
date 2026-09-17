@@ -236,7 +236,15 @@ PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA = PAGOS_TODO
 - **Sigue en `PAGOS_TODO` y en `PAGOS_EXCLUIDOS`.** El importe no desaparece: queda auditable, y el proveedor **avisa cuánto es y con qué motivos** en cada carga del tablero.
 - **Un proveedor excluido por rubro no se mueve.** Sacarlo de `PAGOS` sigue siendo apuntar la fila a `PAGOS_CRONO_OPERATIVOS` desde Parámetros; este cambio no toma esa decisión por nadie.
 
-En la grilla, la fila excluida se atenúa y el pendiente va tachado: es la fila la que cambió de significado, no una celda.
+#### No se ven por defecto, y el cartel dice cuántas son
+
+Ya se decidió que no van al cashflow, así que en el trabajo normal —revisar qué hay que pagar— son ruido. El interruptor **Ver excluidas** viene **apagado**, al revés que el de al lado.
+
+Pero esconder plata sin decir cuánta es exactamente lo que este módulo no hace, y acá pesa más que en el otro filtro: **esas filas están escondidas por defecto**, así que sin el cartel del período no hay ninguna pantalla donde alguien note que existen. Una exclusión puesta en marzo que nadie recuerda es justo lo que el cartel evita.
+
+> *Hay 1 factura(s) excluida(s) a mano por $ 7.110.342,48, escondidas y fuera del cashflow — tildá Ver excluidas para revisarlas.*
+
+Los indicadores siguen midiendo lo visible y diciendo el universo al lado, como con los otros dos filtros. Cuando se muestran, la fila se atenúa y el pendiente va tachado: es la fila la que cambió de significado, no una celda.
 
 ### El rubro "Excluidos"
 
@@ -492,7 +500,7 @@ Una forma que llega con el normalizado en `null` se dibuja en naranja con su ori
 
 > Esto estuvo invisible un tiempo por otro motivo: `categoria()` no devolvía el `FORMA_PAGO_ORIG` del maestro, así que esas 133 filas se dibujaban *"sin forma"* en gris y la marca naranja —que existe exactamente para este caso— no se ejecutaba nunca.
 
-### Hay tres formas de pago por fila, y sólo una decide
+### Hay tres formas de pago por fila, sólo una decide, y en la grilla se ve una sola columna
 
 Confundirlas fue un bug.
 
@@ -507,6 +515,14 @@ Confundirlas fue un bug.
 ```
 CRONOGRAMA = esDelCronograma( override de la factura ?? forma del maestro )
 ```
+
+**En pantalla es UNA sola columna, editable, y muestra la que decide.** `FORMA_PAGO_VIGENTE` viaja ya resuelta en cada fila —la regla se escribe una vez, en el backend, y la grilla muestra lo que decide en vez de una aproximación suya—.
+
+- La opción vacía del desplegable **se nombra**: `CAJA · del maestro`. Así el caso normal muestra la forma real *y de dónde sale*, y volver a ella es lo que saca el override.
+- Elegir cualquier otra guarda el override y la celda se marca en violeta.
+- **Cuando el hecho difiere de lo que decide**, va un ícono al lado con el detalle, no una columna propia. Hubo dos columnas y se unificaron: obligaban a leer dos celdas para contestar una sola pregunta, y hoy **no hay ni un comprobante donde difieran**.
+
+> Lo que se ve es lo que decide. Es la propiedad que importa en una columna que está al lado de los importes del cashflow: si mostrara una cosa y el tablero usara otra, no habría dónde notarlo.
 
 #### Por qué el override va en su propia columna
 
@@ -536,11 +552,19 @@ Antes eran dos booleanos —`$tocarForma`, `$tocarObs`—, y cada override nuevo
 
 Una fila sin fecha cae sola al escalón siguiente de la jerarquía, el vencimiento de Tango, que es exactamente lo que pasaba cuando no había fila.
 
-### El filtro se puede apagar, y mientras está prendido dice cuánto esconde
+### Los filtros se pueden apagar, y dicen cuánto esconden
 
-El interruptor *Sólo echeq y transferencia* viene tildado y se puede destildar. Al lado del período, siempre a la vista:
+Son tres interruptores, y **sus defaults no son todos iguales porque no significan lo mismo**:
 
-> *Quedan afuera $51.804.546,29 en 257 vencimiento(s) (DEBITO $51.804.546,29) — destildá el filtro para verlos.*
+| Interruptor | Arranca | Por qué |
+| --- | --- | --- |
+| *Sólo echeq y transferencia* | **prendido** | Es el cronograma, que es el trabajo normal |
+| *Sólo vencidos sin fecha* | apagado | Es un filtro de un clic para aislar lo que falta fechar |
+| *Ver excluidas* | **apagado** | Ya se decidió que no van: mostrarlas en el trabajo normal es ruido |
+
+Al lado del período, siempre a la vista:
+
+> *Quedan afuera $141.423.489,13 en 392 vencimiento(s) (TARJETA CORP $88.129.222,37 · DEBITO $52.128.205,29 · CAJA $1.166.061,47) — destildá Sólo echeq y transferencia para verlos. · Hay 1 factura(s) excluida(s) a mano por $7.110.342,48, escondidas y fuera del cashflow — tildá Ver excluidas para revisarlas.*
 
 Un filtro que esconde plata sin decir cuánta es un filtro que miente.
 

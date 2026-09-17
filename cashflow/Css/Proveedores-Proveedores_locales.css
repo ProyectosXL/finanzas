@@ -100,18 +100,37 @@
     text-decoration: line-through;
 }
 
-/* La forma con la que se trata ESTA factura, cuando alguien la fijó a mano. Se
-   marca porque pisa a la del maestro: una celda que decide distinto del resto de
-   las facturas del mismo proveedor tiene que poder verse sin abrir el tooltip. */
-.tab-proveedores_locales .prov-select-crono {
+/* LA COLUMNA FORMA DE PAGO es una sola y es editable: muestra la que decide
+   —la del maestro, o el override de esta factura— y cambiarla guarda el
+   override. */
+.tab-proveedores_locales .prov-forma-celda {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    justify-content: center;
+}
+
+.tab-proveedores_locales .prov-select-forma {
     font-size: 0.78rem;
     padding: 1px 4px;
 }
 
-.tab-proveedores_locales .prov-crono-pisado {
+/* Fijada a mano para esta factura. Se marca porque decide distinto del resto de
+   las facturas del mismo proveedor, y eso tiene que verse sin abrir el
+   tooltip. */
+.tab-proveedores_locales .prov-forma-pisada {
     border-color: #6f42c1;
     background-color: #f3effa;
     font-weight: 600;
+}
+
+/* No se sabe cómo se paga. Entra al cronograma igual —esconder deuda por un dato
+   que falta es la peor razón para esconderla— pero no se confunde con un echeq
+   confirmado. */
+.tab-proveedores_locales .prov-forma-incierta {
+    border-color: #c9ced6;
+    color: var(--text-muted, #8c93a8);
+    font-style: italic;
 }
 
 /* Una fila del maestro que se cargó o se editó desde la pantalla. No es un

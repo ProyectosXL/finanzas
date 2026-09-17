@@ -350,6 +350,13 @@ chequear('CRONOGRAMA sale de formaDelCronograma()', true,
     preg_match('/\'CRONOGRAMA\'\s*=>\s*ProveedoresCategorias::esDelCronograma\(\s*'
         . 'self::formaDelCronograma\(/', $cuerpoPend) === 1);
 
+/* LA GRILLA TIENE UNA SOLA COLUMNA DE FORMA, Y MUESTRA LA QUE DECIDE. Por eso
+   la fila trae el valor ya resuelto: si el navegador lo recalculara, la columna
+   podria mostrar una cosa y el tablero usar otra, y no habria donde notarlo. */
+chequear('la fila trae la forma que decide, ya resuelta', true,
+    strpos($cuerpoPend, "'FORMA_PAGO_VIGENTE' => self::formaDelCronograma(\$cat, \$pago)")
+        !== false);
+
 // Y las tres formas viajan por separado: una decide, las otras dos se muestran.
 chequear('la forma del maestro viaja aparte', true,
     strpos($fuente, "'FORMA_PAGO_MAESTRO' => \$cat['forma_pago']") !== false);
@@ -522,6 +529,49 @@ chequear('y cuando difieren del universo se dice cuanto es el universo', true,
    trabajo por hacer justo cuando lo hay. */
 chequear('la tarjeta de vencidos se apaga por el universo', true,
     strpos($js, "toggle('prov-kpi-ok', !u.n_vencido_sin_fecha)") !== false);
+
+seccion('las excluidas no se ven por defecto, y se dice cuantas son');
+
+/* YA SE DECIDIO que no van al cashflow, asi que en el trabajo normal -revisar
+   que hay que pagar- son ruido. Pero esconder plata sin decir cuanta es
+   exactamente lo que este modulo no hace: el cartel del periodo lo dice aunque
+   -y sobre todo porque- las filas no se ven. */
+chequear('el filtro las esconde salvo que se pidan', true,
+    strpos($js, 'if (!verExcluidas && f.EXCLUIDA_MANUAL) { return false; }') !== false);
+
+chequear('el interruptor arranca APAGADO', true,
+    preg_match('/id="verExcluidasProv"(?![^>]*\bchecked\b)/',
+        file_get_contents(__DIR__ . '/../cashflow/Tabs/proveedores_locales.php')) === 1);
+
+// El de al lado arranca prendido, y son dos defaults distintos a proposito.
+chequear('y el de echeq y transferencia sigue arrancando PRENDIDO', true,
+    preg_match('/id="soloCronogramaProv"[^>]*\bchecked\b/',
+        file_get_contents(__DIR__ . '/../cashflow/Tabs/proveedores_locales.php')) === 1);
+
+chequear('el cartel dice cuantas quedaron escondidas', true,
+    strpos($js, 'factura(s) excluida(s) a mano por') !== false);
+chequear('y el backend le da el numero', true,
+    strpos(file_get_contents(__DIR__ . '/../cashflow/Controller/ProveedoresController.php'),
+        "'n_excluido_manual' => \$nExcluidoManual") !== false);
+
+seccion('la forma de pago es UNA sola columna, y es la que decide');
+
+/* UNA COLUMNA, EDITABLE, Y MUESTRA LO QUE DECIDE. Eran dos -el hecho y la
+   regla- y leer dos celdas para contestar una sola pregunta no ayudaba a nadie:
+   hoy no hay ni un comprobante donde difieran. El hecho no se pierde: cuando
+   difiere se marca al lado con un icono. */
+chequear('hay un solo desplegable de forma por fila', true,
+    strpos($js, 'prov-select-forma') !== false);
+chequear('y ya no una segunda columna', false,
+    strpos($js, 'prov-select-crono') !== false || strpos($js, 'celdaCronograma') !== false);
+
+// La opcion vacia se NOMBRA con la del maestro: asi el caso normal muestra la
+// forma real y de donde sale, y volver a ella es lo que saca el override.
+chequear('la opcion vacia dice que viene del maestro', true,
+    strpos($js, "escapar(delMaestro + ' · del maestro')") !== false);
+
+chequear('el hecho distinto se marca al lado, no en otra columna', true,
+    strpos($js, 'function marcaPagoDistinto(f)') !== false);
 
 seccion('el archivo exportado dice que filtro estaba puesto');
 
@@ -1600,6 +1650,8 @@ chequear('la de lo que queda afuera', true, isset($series['PAGOS_FUERA_CRONOGRAM
 chequear('y las tres aperturas fijas', true,
     isset($series['PAGOS_OPERATIVOS']) && isset($series['PAGOS_EXCLUIDOS'])
     && isset($series['PAGOS_SIN_RUBRO']));
+chequear('y la de las facturas excluidas a mano', true,
+    isset($series['PAGOS_EXCLUIDOS_FACTURA']));
 
 chequear('la serie del cronograma tiene los dias del horizonte',
     $h->cantidadDias(), count($series['PAGOS']['dias']));
@@ -1610,10 +1662,16 @@ $suma = function ($s) {
 
 /* LAS DOS PARTICIONES DEL UNIVERSO TIENEN QUE DAR LO MISMO. Son dos formas de
    cortar la misma deuda: por COMO se paga y por QUE rubro es. Si una de las dos
-   no cerrara, algun comprobante se estaria yendo a la serie equivocada. */
-chequear('cronograma + fuera = universo',
+   no cerrara, algun comprobante se estaria yendo a la serie equivocada.
+
+   EL PRIMER CORTE TIENE TRES PARTES desde que se pueden excluir facturas
+   sueltas: la excluida no va ni a PAGOS ni a PAGOS_FUERA_CRONOGRAMA, va a la
+   suya. Es lo que hace que el tilde saque el importe de la fila del tablero,
+   que usa PAGOS. */
+chequear('cronograma + fuera + excluidas a mano = universo',
     $suma($series['PAGOS_TODO']),
-    $suma($series['PAGOS']) + $suma($series['PAGOS_FUERA_CRONOGRAMA']));
+    $suma($series['PAGOS']) + $suma($series['PAGOS_FUERA_CRONOGRAMA'])
+        + $suma($series['PAGOS_EXCLUIDOS_FACTURA']));
 
 chequear('operativos + excluidos = universo',
     $suma($series['PAGOS_TODO']),

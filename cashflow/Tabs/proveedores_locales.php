@@ -149,6 +149,21 @@
                             Sólo echeq y transferencia
                         </label>
                     </div>
+
+                    <!-- LAS EXCLUIDAS NO SE VEN POR DEFECTO. Ya se decidió que
+                         no van al cashflow, así que en el trabajo normal
+                         —revisar qué hay que pagar— son ruido.
+
+                         Pero tienen que poder mirarse: una exclusión puesta en
+                         marzo que nadie recuerda es justamente lo que este
+                         interruptor evita. Cuánto esconde se dice al lado del
+                         período, siempre, igual que el filtro de al lado. -->
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="verExcluidasProv">
+                        <label class="form-check-label small text-muted" for="verExcluidasProv">
+                            Ver excluidas
+                        </label>
+                    </div>
                 </div>
 
                 <div class="d-flex gap-2 flex-wrap align-items-center">
@@ -195,19 +210,17 @@
                                 <th rowspan="2">VTO</th>
                                 <th rowspan="2">Pendiente</th>
                                 <th rowspan="2">Fecha de pago</th>
-                                <!-- DOS COLUMNAS DE FORMA QUE NO SON LO MISMO:
-                                     Forma es un HECHO -por qué vía salió el
-                                     pago, lo trae la importación- y sólo se
-                                     muestra. Cronograma es una REGLA -con qué
-                                     forma se trata esta factura- y es lo que
-                                     decide si el importe entra al cashflow. -->
-                                <th rowspan="2"
-                                    title="Por qué vía salió o va a salir este pago. Es informativa: no decide si el importe entra al cashflow.">
-                                    Forma
-                                </th>
-                                <th rowspan="2" style="min-width: 150px;"
-                                    title="Con qué forma se trata ESTA factura para decidir si entra al cashflow. Vacío usa la del maestro. Cambiarla acá no toca el maestro ni las otras facturas del proveedor.">
-                                    Cronograma
+                                <!-- UNA SOLA COLUMNA, Y MUESTRA LA QUE DECIDE.
+                                     Trae la del maestro —o la que dejó la
+                                     importación— y se puede editar: editarla
+                                     guarda un override para ESA factura y no
+                                     toca el maestro. Si la forma con la que se
+                                     registró el pago difiere de la que decide,
+                                     se marca al lado en vez de ocupar otra
+                                     columna. -->
+                                <th rowspan="2" style="min-width: 160px;"
+                                    title="Con qué forma se trata esta factura. Viene del maestro y se puede cambiar: el cambio vale sólo para esta factura y decide si su importe entra al cashflow. El maestro no se toca.">
+                                    Forma de pago
                                 </th>
                                 <!-- El tilde saca el importe de la fila del
                                      tablero. No lo hace desaparecer: va a su

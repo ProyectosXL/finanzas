@@ -66,6 +66,9 @@
         var soloC = document.getElementById('soloCronogramaProv');
         if (soloC) { soloC.addEventListener('change', pintarGrilla); }
 
+        var verEx = document.getElementById('verExcluidasProv');
+        if (verEx) { verEx.addEventListener('change', pintarGrilla); }
+
         var busqM = document.getElementById('busquedaMaestroProv');
         if (busqM) { busqM.addEventListener('input', pintarMaestro); }
 
@@ -275,15 +278,25 @@
         var q = (document.getElementById('busquedaProv') || {}).value || '';
         var soloVencidos = (document.getElementById('soloVencidosProv') || {}).checked;
         var soloCronograma = (document.getElementById('soloCronogramaProv') || {}).checked;
+        var verExcluidas = (document.getElementById('verExcluidasProv') || {}).checked;
 
         q = q.trim().toLowerCase();
 
         return filas.filter(function(f) {
+            /* LAS EXCLUIDAS NO SE VEN POR DEFECTO: ya se decidió que no van al
+               cashflow, así que en el trabajo normal son ruido. Cuánto esconde
+               este filtro se dice al lado del período. */
+            if (!verExcluidas && f.EXCLUIDA_MANUAL) { return false; }
+
             if (soloCronograma && !f.CRONOGRAMA) { return false; }
             if (soloVencidos && !f.SIN_FECHA_CARGADA) { return false; }
             if (q === '') { return true; }
 
-            return [f.COD_PROVEE, f.RAZON_SOC, f.N_COMP, f.RUBRO_ECONOMICO, f.FORMA_PAGO]
+            /* Se busca por la forma QUE DECIDE y no por la del pago registrado:
+               es la que se ve en la columna, y buscar "CAJA" tiene que traer lo
+               que la grilla muestra como CAJA. */
+            return [f.COD_PROVEE, f.RAZON_SOC, f.N_COMP, f.RUBRO_ECONOMICO,
+                    f.FORMA_PAGO_VIGENTE, f.MOTIVO_EXCLUSION]
                 .join(' ').toLowerCase().indexOf(q) !== -1;
         });
     }
@@ -312,6 +325,12 @@
             partes.push('solo vencidos sin fecha');
         }
 
+        // Se nombra cuando SE VEN, no cuando se esconden: esconderlas es el
+        // caso normal y aclararlo siempre haria que el nombre no distinga nada.
+        if ((document.getElementById('verExcluidasProv') || {}).checked) {
+            partes.push('con las excluidas');
+        }
+
         if (q !== '') { partes.push('buscando ' + q); }
 
         // Sin ningún filtro no hace falta aclarar nada: son todas.
@@ -330,22 +349,35 @@
         if (!el) { return; }
 
         var soloCronograma = (document.getElementById('soloCronogramaProv') || {}).checked;
+        var verExcluidas = (document.getElementById('verExcluidasProv') || {}).checked;
         var k = datos.indicadores;
+        var partes = [];
 
-        if (!soloCronograma || !k.n_fuera_cronograma) {
-            el.textContent = '';
-            return;
+        if (soloCronograma && k.n_fuera_cronograma) {
+            var detalle = Object.keys(k.fuera_por_forma || {}).map(function(forma) {
+                return forma + ' ' + plata(k.fuera_por_forma[forma]);
+            }).join(' · ');
+
+            partes.push('Quedan afuera ' + escapar(plata(k.fuera_cronograma)) + ' en '
+                + k.n_fuera_cronograma + ' vencimiento(s)'
+                + (detalle ? ' (' + escapar(detalle) + ')' : '')
+                + ' — destildá <em>Sólo echeq y transferencia</em> para verlos.');
         }
 
-        var detalle = Object.keys(k.fuera_por_forma || {}).map(function(forma) {
-            return forma + ' ' + plata(k.fuera_por_forma[forma]);
-        }).join(' · ');
+        /* LO EXCLUIDO SE DICE AUNQUE NO SE VEA, y sobre todo por eso: esas
+           facturas están escondidas por defecto, así que sin este cartel no hay
+           ninguna pantalla donde alguien note que existen. Es la misma regla que
+           el filtro de al lado: un filtro que esconde plata sin decir cuánta es
+           un filtro que miente. */
+        if (!verExcluidas && k.n_excluido_manual) {
+            partes.push('Hay ' + k.n_excluido_manual + ' factura(s) excluida(s) a mano por '
+                + escapar(plata(k.excluido_manual)) + ', escondidas y fuera del cashflow '
+                + '— tildá <em>Ver excluidas</em> para revisarlas.');
+        }
 
-        el.innerHTML = '&nbsp;·&nbsp;<span class="prov-fuera-filtro">'
-            + 'Quedan afuera ' + escapar(plata(k.fuera_cronograma)) + ' en '
-            + k.n_fuera_cronograma + ' vencimiento(s)'
-            + (detalle ? ' (' + escapar(detalle) + ')' : '')
-            + ' — destildá el filtro para verlos.</span>';
+        el.innerHTML = partes.length
+            ? '&nbsp;·&nbsp;<span class="prov-fuera-filtro">' + partes.join(' · ') + '</span>'
+            : '';
     }
 
     function pintarGrilla() {
@@ -385,7 +417,6 @@
                 + '<td class="currency fw-bold">' + plata(f.IMPORTE_PENDIENTE) + '</td>'
                 + celdaFechaPago(f)
                 + '<td class="center">' + celdaForma(f) + '</td>'
-                + '<td class="center">' + celdaCronograma(f) + '</td>'
                 + '<td class="center">' + celdaExcluir(f) + '</td>';
 
             cols.forEach(function(c) {
@@ -420,7 +451,7 @@
      * columna: el síntoma es una tabla desalineada que nadie relaciona con el
      * cambio que la causó.
      */
-    var COLS_DESC = 12;
+    var COLS_DESC = 11;
 
     function pintarTotales(filas, cols) {
         var total = 0;
@@ -532,87 +563,57 @@
             + '</div></td>';
     }
 
-    /**
-     * La columna Forma.
-     *
-     * OJO: esta columna NO explica el filtro. Lo que entra al cronograma lo
-     * decide la forma del MAESTRO —`FORMA_PAGO_MAESTRO`— y acá se muestra la
-     * del pago registrado cuando hay uno. Que difieran es información: se le
-     * pagó por una vía distinta de la habitual.
-     */
-    function celdaForma(f) {
-        // Sin forma conocida. ENTRA AL FILTRO IGUAL —no se sabe cómo se paga, y
-        // esconder deuda por un dato que falta es la peor razón para
-        // esconderla— pero se marca, para que no se confunda con un echeq.
-        if (!f.FORMA_PAGO && !f.FORMA_PAGO_ORIG) {
-            return '<span class="prov-sin-forma" title="'
-                + escapar('Sin forma de pago conocida' + (f.EN_MAESTRO
-                    ? '.' : ': el proveedor no está en el maestro.')
-                    + ' Se muestra igual, pero no se sabe si se paga por echeq o de otra '
-                    + 'manera.') + '">sin forma</span>';
-        }
-
-        // Una forma que no matcheó contra la lista se muestra tal como vino y se
-        // marca: es un typo de la planilla, y eso se arregla allá. Ya no hay un
-        // segundo caso —una forma válida que quedó sin normalizar porque el
-        // maestro es viejo—: la normalización se calcula al leer, contra la
-        // lista de hoy.
-        if (!f.FORMA_PAGO && f.FORMA_PAGO_ORIG) {
-            return '<span class="prov-forma-rara" title="'
-                + escapar('"' + f.FORMA_PAGO_ORIG + '" no está en la lista de formas válidas. '
-                    + 'Corregilo en la planilla.')
-                + '">' + escapar(f.FORMA_PAGO_ORIG) + '</span>';
-        }
-
-        // La forma del pago registrado difiere de la habitual del proveedor. No
-        // es un error —el filtro sigue mirando la del maestro— pero es un dato:
-        // o fue una excepción, o el maestro quedó viejo.
-        if (f.FORMA_PAGO_MAESTRO && f.FORMA_PAGO !== f.FORMA_PAGO_MAESTRO) {
-            return '<span class="small prov-forma-distinta" title="'
-                + escapar('El pago se registró por ' + f.FORMA_PAGO + ', pero en el maestro '
-                    + 'este proveedor es ' + f.FORMA_PAGO_MAESTRO + ', que es lo que decide '
-                    + 'si entra al cronograma. Si la vía cambió de verdad, actualizá el '
-                    + 'maestro.') + '">' + escapar(f.FORMA_PAGO)
-                + ' <i class="fas fa-arrows-left-right prov-marca"></i></span>';
-        }
-
-        return '<span class="small">' + escapar(f.FORMA_PAGO) + '</span>';
-    }
-
     /* ================================================================
-       LA FORMA CON LA QUE SE TRATA ESTA FACTURA
+       LA COLUMNA FORMA DE PAGO
 
-       DOS COLUMNAS QUE NO SON LO MISMO, y ahora se ven las dos:
+       UNA SOLA COLUMNA, Y MUESTRA LA QUE DECIDE. Trae la del maestro —o la
+       que quedó de la importación del maestro— y se puede editar; editarla
+       guarda un override para ESA factura y no toca el maestro.
 
-         Forma      UN HECHO: por qué vía salió o va a salir el pago. Lo trae
-                    la importación de la planilla. Sólo se muestra.
-         Cronograma UNA REGLA: con qué forma hay que tratar a ESTA factura para
-                    decidir si entra al cashflow. Se elige acá, factura por
-                    factura, y pisa a la del maestro sólo para ella.
+       Lo que se ve es lo que decide. Es la propiedad que importa en una
+       columna que está al lado de los importes del cashflow: si mostrara una
+       cosa y el tablero usara otra, no habría dónde notarlo.
 
-       Vacío = "la del maestro", que es el caso normal y el que está en todas
-       las filas hasta que alguien decida otra cosa.
+       La forma con la que se REGISTRÓ el pago —el hecho que trae la planilla
+       de pagos— sigue existiendo y no decide. Cuando difiere de la que decide
+       se marca al lado con un ícono, en vez de ocupar una columna propia: es
+       un caso raro —hoy, cero comprobantes— y una columna entera para eso
+       obliga a leer dos celdas para contestar una sola pregunta.
        ================================================================ */
 
-    function celdaCronograma(f) {
+    /** Cómo se nombra la forma que trae el maestro, con sus casos raros */
+    function formaDelMaestro(f) {
+        if (f.FORMA_PAGO_MAESTRO) {
+            return f.FORMA_PAGO_MAESTRO;
+        }
+
+        // Un valor que no matcheó contra la lista: es un typo de la planilla y
+        // se muestra tal como vino, porque lo que hay que arreglar es allá.
+        if (f.FORMA_PAGO_ORIG) {
+            return f.FORMA_PAGO_ORIG + ' (?)';
+        }
+
+        return 'sin forma';
+    }
+
+    function celdaForma(f) {
+        var delMaestro = formaDelMaestro(f);
+
+        /* Sin el script del override no se puede escribir, así que se muestra
+           lo que decide en texto en vez de un desplegable que falla al
+           guardar. */
         if (!datos || !datos.forma_por_factura) {
-            // Sin el script no se puede escribir el override. Se muestra lo que
-            // decide -la del maestro- en vez de un desplegable que falla.
-            return '<span class="small text-muted" title="'
-                + escapar('Para fijar la forma por factura hace falta correr '
-                    + 'sql/cashflow_prov_locales_forma_por_factura.sql.') + '">'
-                + escapar(f.FORMA_PAGO_MAESTRO || '—') + '</span>';
+            return textoForma(f, delMaestro);
         }
 
         var formas = Object.keys((datos && datos.formas_pago) || {});
         var actual = f.FORMA_PAGO_CRONOGRAMA || '';
 
-        var opciones = '<option value=""'
-            + (actual === '' ? ' selected' : '') + '>'
-            + escapar(f.FORMA_PAGO_MAESTRO
-                ? 'maestro: ' + f.FORMA_PAGO_MAESTRO
-                : 'maestro: sin forma')
-            + '</option>';
+        /* La opción vacía NO es "vacío": es "la que trae el maestro", y se
+           nombra. Así el caso normal —que es éste— muestra la forma real y de
+           dónde sale, y volver a ella es lo que saca el override. */
+        var opciones = '<option value=""' + (actual === '' ? ' selected' : '') + '>'
+            + escapar(delMaestro + ' · del maestro') + '</option>';
 
         formas.forEach(function(x) {
             opciones += '<option value="' + escapar(x) + '"'
@@ -620,18 +621,52 @@
         });
 
         var titulo = actual === ''
-            ? 'Decide la forma del maestro. Elegí otra para tratar SÓLO esta factura de otra '
-                + 'manera: el maestro y las demás facturas de este proveedor no cambian.'
-            : 'Esta factura se trata como ' + actual + ', pisando la del maestro'
-                + (f.FORMA_PAGO_MAESTRO ? ' (' + f.FORMA_PAGO_MAESTRO + ')' : '')
-                + '. El maestro no cambió. Volvé a "maestro:" para sacarlo.';
+            ? 'Viene del maestro (' + delMaestro + '). Elegí otra para tratar SÓLO esta '
+                + 'factura de otra manera: el maestro y las demás facturas de este proveedor '
+                + 'no cambian.'
+            : 'Esta factura se trata como ' + actual + ', en lugar de la del maestro ('
+                + delMaestro + '). El maestro no cambió. Volvé a "del maestro" para sacarlo.';
 
-        return '<select class="form-select form-select-sm prov-select-crono'
-            + (actual !== '' ? ' prov-crono-pisado' : '') + '"'
-            + ' data-cod="' + escapar(f.COD_PROVEE) + '"'
-            + ' data-t="' + escapar(f.T_COMP) + '"'
-            + ' data-n="' + escapar(f.N_COMP) + '"'
-            + ' title="' + escapar(titulo) + '">' + opciones + '</select>';
+        return '<div class="prov-forma-celda">'
+            + '<select class="form-select form-select-sm prov-select-forma'
+            +   (actual !== '' ? ' prov-forma-pisada' : '')
+            +   (!f.FORMA_PAGO_VIGENTE ? ' prov-forma-incierta' : '') + '"'
+            +   ' data-cod="' + escapar(f.COD_PROVEE) + '"'
+            +   ' data-t="' + escapar(f.T_COMP) + '"'
+            +   ' data-n="' + escapar(f.N_COMP) + '"'
+            +   ' title="' + escapar(titulo) + '">' + opciones + '</select>'
+            + marcaPagoDistinto(f)
+            + '</div>';
+    }
+
+    /** La misma columna cuando todavía no se puede editar */
+    function textoForma(f, delMaestro) {
+        var vigente = f.FORMA_PAGO_VIGENTE || delMaestro;
+
+        return '<span class="small' + (!f.FORMA_PAGO_VIGENTE ? ' prov-sin-forma' : '') + '" '
+            + 'title="' + escapar('Viene del maestro. Para poder cambiarla por factura hace '
+                + 'falta correr sql/cashflow_prov_locales_forma_por_factura.sql.') + '">'
+            + escapar(vigente) + '</span>' + marcaPagoDistinto(f);
+    }
+
+    /**
+     * El pago se registró por una vía distinta de la que decide.
+     *
+     * No es un error y no cambia nada: es un dato. O fue una excepción, o el
+     * maestro quedó viejo. Va como ícono al lado y no como columna: hoy no hay
+     * ni un comprobante en este caso.
+     */
+    function marcaPagoDistinto(f) {
+        if (!f.FORMA_PAGO || !f.FORMA_PAGO_VIGENTE
+            || f.FORMA_PAGO === f.FORMA_PAGO_VIGENTE) {
+            return '';
+        }
+
+        return ' <i class="fas fa-arrows-left-right prov-marca prov-forma-distinta" title="'
+            + escapar('El pago se registró por ' + f.FORMA_PAGO + ', pero esta factura se '
+                + 'trata como ' + f.FORMA_PAGO_VIGENTE + ', que es lo que decide si entra al '
+                + 'cashflow. Si la vía cambió de verdad, actualizá el maestro o cambiá la '
+                + 'forma de esta factura.') + '"></i>';
     }
 
     /**
@@ -700,7 +735,12 @@
            entero es lo mismo que hace la fecha, y por lo mismo. El importe puede
            entrar o salir del filtro y desaparecer de la vista, y eso el mensaje
            lo dice. */
-        document.querySelectorAll('#bodyProv .prov-select-crono').forEach(function(sel) {
+        /* Cambiar la forma cambia en qué serie cae el importe: recargar entero
+           es lo mismo que hace la fecha, y por lo mismo. El importe puede entrar
+           o salir del filtro y desaparecer de la vista, y eso el mensaje lo
+           dice. Elegir "del maestro" manda vacío, que es lo que saca el
+           override. */
+        document.querySelectorAll('#bodyProv .prov-select-forma').forEach(function(sel) {
             sel.addEventListener('change', function() {
                 pedirPago('saveFormaCronograma', {
                     cod_provee: sel.getAttribute('data-cod'),

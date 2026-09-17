@@ -336,6 +336,13 @@ class Proveedores {
                 'FORMA_PAGO_CRONOGRAMA' => ($pago === null)
                     ? null : $pago['FORMA_PAGO_CRONOGRAMA'],
 
+                /* LA QUE DECIDE, ya resuelta: el override si lo hay, y si no la
+                   del maestro. Viaja calculada y no se rehace en el navegador
+                   por el mismo motivo que todo lo demas de esta fila: la regla
+                   se escribe una vez, en formaDelCronograma(), y la grilla
+                   muestra lo que decide en vez de una aproximacion suya. */
+                'FORMA_PAGO_VIGENTE' => self::formaDelCronograma($cat, $pago),
+
                 /* Si se gestiona desde el cronograma de pagos -echeq,
                    transferencia, o forma desconocida-. Es lo que decide si
                    entra a la fila del tablero y lo que la pestaña filtra por
