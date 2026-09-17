@@ -1384,18 +1384,31 @@ class Proveedores {
         }
 
         $v = trim((string) $forma);
+        $normalizada = null;
 
         /* SE VALIDA CONTRA LA LISTA y no se acepta cualquier texto: esta forma
            DECIDE si el importe entra al cashflow, asi que una que no este en
            FORMAS_PAGO no decidiria nada y quedaria como un override que parece
            puesto y no hace nada. Es lo contrario de FORMA_PAGO, que guarda lo
-           que diga la planilla porque describe un hecho. */
-        if ($v !== '' && !isset(ProveedoresCategorias::FORMAS_PAGO[mb_strtoupper($v)])) {
-            throw new Exception('"' . $v . '" no es una forma de pago conocida. Las válidas '
-                . 'son: ' . implode(', ', array_keys(ProveedoresCategorias::FORMAS_PAGO)) . '.');
-        }
+           que diga la planilla porque describe un hecho.
 
-        $normalizada = ($v === '') ? null : mb_strtoupper($v);
+           SE NORMALIZA CON normalizarFormaPago() y no con un mb_strtoupper y un
+           isset: FORMAS_PAGO es una LISTA -no un mapa- asi que indexarla por
+           nombre da siempre false y rechazaba todos los overrides. Y ademas esa
+           es la unica normalizacion del modulo: la que ignora mayusculas,
+           acentos y espacios, para que 'echeq' y 'Mercado Pago' matcheen igual
+           que en la importacion. */
+        if ($v !== '') {
+            $norm = ProveedoresCategorias::normalizarFormaPago($v);
+
+            if ($norm['normalizado'] === null) {
+                throw new Exception('"' . $v . '" no es una forma de pago conocida. Las '
+                    . 'válidas son: '
+                    . implode(', ', ProveedoresCategorias::FORMAS_PAGO) . '.');
+            }
+
+            $normalizada = $norm['normalizado'];
+        }
 
         $this->guardarPago($this->conectar(), $cod, $t, $n,
             ['FORMA_PAGO_CRONOGRAMA' => $normalizada], 'MANUAL', $usuario);

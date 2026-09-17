@@ -218,7 +218,7 @@
                                      registró el pago difiere de la que decide,
                                      se marca al lado en vez de ocupar otra
                                      columna. -->
-                                <th rowspan="2" style="min-width: 160px;"
+                                <th rowspan="2"
                                     title="Con qué forma se trata esta factura. Viene del maestro y se puede cambiar: el cambio vale sólo para esta factura y decide si su importe entra al cashflow. El maestro no se toca.">
                                     Forma de pago
                                 </th>
@@ -236,8 +236,11 @@
                         </thead>
                         <tbody id="bodyProv"></tbody>
                         <tfoot class="table-light">
+                            <!-- El pie lo reescribe pintarTotales() con una celda
+                                 por columna. Este colspan es sólo el estado
+                                 inicial, y son las 11 descriptivas. -->
                             <tr id="totalesProv">
-                                <td colspan="10" class="fw-bold text-end">TOTALES</td>
+                                <td colspan="11" class="fw-bold text-end">TOTALES</td>
                             </tr>
                         </tfoot>
                     </table>

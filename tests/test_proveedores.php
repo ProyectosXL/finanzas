@@ -530,6 +530,44 @@ chequear('y cuando difieren del universo se dice cuanto es el universo', true,
 chequear('la tarjeta de vencidos se apaga por el universo', true,
     strpos($js, "toggle('prov-kpi-ok', !u.n_vencido_sin_fecha)") !== false);
 
+seccion('el eje se lee con la API de eje-vistas, no inventando campos');
+
+/* DOS BUGS DE LA MISMA FAMILIA, los dos de esta pestaña y los dos invisibles
+   hasta que alguien mira la tabla de cerca.
+
+   `vistas.columnas()` devuelve STRINGS -'DIA|2026-09-17', 'MES|2026-10'-, no
+   objetos. Esta pestaña los trataba como objetos:
+
+     c.label            -> undefined: la fila de dias y meses salia TODA VACIA
+     c.rama + c.clave   -> 'undefined|undefined': las 28 columnas del pie caian
+                           en la MISMA clave, asi que la fila de TOTALES mostraba
+                           el total del periodo repetido en cada columna
+
+   El segundo es el peor: una fila de totales que miente es peor que una que
+   falta. Ninguna otra pestaña del modulo lo tiene; todas usan rotulo() y valor(),
+   que es la API. */
+/* Se mira el JS SIN COMENTARIOS: los dos nombres viejos aparecen en el
+   comentario que explica por que estaban mal, y ese comentario tiene que poder
+   existir. Lo que no puede volver es el codigo. */
+$jsCodigo = preg_replace(['/\/\*.*?\*\//s', '/\/\/[^\n]*/'], '', $js);
+
+chequear('el rotulo del eje sale de vistas.rotulo()', true,
+    strpos($jsCodigo, 'escapar(vistas.rotulo(c))') !== false);
+chequear('y ya no de un campo que no existe', false, strpos($jsCodigo, 'c.label') !== false);
+
+chequear('el pie agrupa por la columna, que ya es la clave', true,
+    strpos($jsCodigo, 'porCol[c] = (porCol[c] || 0)') !== false);
+chequear('y ya no por dos campos inexistentes', false,
+    strpos($jsCodigo, "c.rama + '|' + c.clave") !== false);
+
+/* La API que SI existe, para que se note si alguien la cambia. */
+$ejeJs = file_get_contents(__DIR__ . '/../cashflow/Js/eje-vistas.js');
+
+foreach (['rotulo: function(col)', 'valor: function(fila, col)',
+          'esMes: function(col)', 'meta: function(col)'] as $m) {
+    chequear('eje-vistas sigue ofreciendo ' . $m, true, strpos($ejeJs, $m) !== false);
+}
+
 seccion('las excluidas no se ven por defecto, y se dice cuantas son');
 
 /* YA SE DECIDIO que no van al cashflow, asi que en el trabajo normal -revisar
@@ -568,7 +606,39 @@ chequear('y ya no una segunda columna', false,
 // La opcion vacia se NOMBRA con la del maestro: asi el caso normal muestra la
 // forma real y de donde sale, y volver a ella es lo que saca el override.
 chequear('la opcion vacia dice que viene del maestro', true,
-    strpos($js, "escapar(delMaestro + ' · del maestro')") !== false);
+    strpos($js, "escapar(delMaestro + ' · maestro')") !== false);
+
+/* FORMAS_PAGO ES UNA LISTA, NO UN MAPA: los nombres son los VALORES. Leerla con
+   Object.keys devolvia 0..5 y el desplegable mostraba numeros en vez de las
+   formas. */
+chequear('el desplegable lee los valores de la lista, no sus claves', false,
+    strpos($js, 'Object.keys((datos && datos.formas_pago)') !== false
+    || strpos($js, 'Object.keys(maestro.formas_pago)') !== false);
+
+chequear('y FORMAS_PAGO efectivamente es una lista', true,
+    array_keys(ProveedoresCategorias::FORMAS_PAGO) === range(0,
+        count(ProveedoresCategorias::FORMAS_PAGO) - 1));
+
+seccion('la forma del override se valida contra la lista, no por indice');
+
+/* EL BUG QUE ESTO FIJA: la validacion hacia isset(FORMAS_PAGO[mb_strtoupper(x)])
+   sobre una LISTA, asi que daba false siempre y RECHAZABA TODOS los overrides.
+   Nadie podia fijar la forma de una factura. */
+$cuerpoForma = $cuerpoDe('saveFormaCronograma');
+
+chequear('usa la normalizacion del modulo', true,
+    strpos($cuerpoForma, 'ProveedoresCategorias::normalizarFormaPago($v)') !== false);
+chequear('y ya no indexa la lista por nombre', false,
+    strpos($cuerpoForma, 'isset(ProveedoresCategorias::FORMAS_PAGO[') !== false);
+
+// Esa normalizacion es la del modulo: ignora mayusculas, acentos y espacios,
+// igual que en la importacion.
+chequear('una forma valida en minuscula matchea',
+    'ECHEQ', ProveedoresCategorias::normalizarFormaPago('echeq')['normalizado']);
+chequear('y una con espacios de mas tambien',
+    'MERCADO PAGO', ProveedoresCategorias::normalizarFormaPago('  Mercado Pago ')['normalizado']);
+chequear('una que no esta en la lista no matchea',
+    null, ProveedoresCategorias::normalizarFormaPago('eqheck')['normalizado']);
 
 chequear('el hecho distinto se marca al lado, no en otra columna', true,
     strpos($js, 'function marcaPagoDistinto(f)') !== false);

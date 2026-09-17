@@ -385,9 +385,21 @@
 
         var cols = vistas.columnas();
 
+        /* EL RÓTULO SALE DE vistas.rotulo(), NO DE c.label. `columnas()` devuelve
+           STRINGS —'DIA|2026-09-17', 'MES|2026-10'—, no objetos: `c.label` daba
+           undefined y la fila de días y meses del encabezado salía toda vacía.
+           Es la misma API que usan Cobranzas FR y Echeqs. */
         document.getElementById('headerEjeProv').setAttribute('colspan', cols.length || 1);
         document.getElementById('headerSubProv').innerHTML = cols.map(function(c) {
-            return '<th class="text-end">' + escapar(c.label) + '</th>';
+            var meta = vistas.meta(c) || {};
+            var parcial = vistas.esMes(c) && meta.parcial;
+
+            return '<th class="text-end"'
+                + (parcial
+                    ? ' title="' + escapar('Este mes está recortado: sus primeros días '
+                        + 'están en el tramo diario') + '"'
+                    : '')
+                + '>' + escapar(vistas.rotulo(c)) + '</th>';
         }).join('');
 
         var filas = filasVisibles();
@@ -457,12 +469,16 @@
         var total = 0;
         var porCol = {};
 
+        /* LA CLAVE ES LA COLUMNA, que ya ES el string 'DIA|2026-09-17'. Antes se
+           armaba con `c.rama + '|' + c.clave`, dos campos que no existen: TODAS
+           las columnas caían en la clave 'undefined|undefined' y el pie mostraba
+           el total del período repetido en cada una de las 28 columnas. Una fila
+           de totales que miente es peor que una que falta. */
         filas.forEach(function(f) {
             total += Number(f.IMPORTE_PENDIENTE) || 0;
 
             cols.forEach(function(c) {
-                var k = c.rama + '|' + c.clave;
-                porCol[k] = (porCol[k] || 0) + (Number(vistas.valor(f, c)) || 0);
+                porCol[c] = (porCol[c] || 0) + (Number(vistas.valor(f, c)) || 0);
             });
         });
 
@@ -475,7 +491,7 @@
             + '<td colspan="' + (COLS_DESC - 8) + '"></td>';
 
         cols.forEach(function(c) {
-            var v = porCol[c.rama + '|' + c.clave] || 0;
+            var v = porCol[c] || 0;
 
             html += '<td class="currency fw-bold">' + (v !== 0 ? plataCorta(v) : '') + '</td>';
         });
@@ -606,14 +622,17 @@
             return textoForma(f, delMaestro);
         }
 
-        var formas = Object.keys((datos && datos.formas_pago) || {});
+        /* FORMAS_PAGO es una LISTA de nombres, no un mapa: los nombres son los
+           VALORES. Leerla con Object.keys devolvía 0..5 y el desplegable
+           mostraba números. */
+        var formas = (datos && datos.formas_pago) || [];
         var actual = f.FORMA_PAGO_CRONOGRAMA || '';
 
         /* La opción vacía NO es "vacío": es "la que trae el maestro", y se
            nombra. Así el caso normal —que es éste— muestra la forma real y de
            dónde sale, y volver a ella es lo que saca el override. */
         var opciones = '<option value=""' + (actual === '' ? ' selected' : '') + '>'
-            + escapar(delMaestro + ' · del maestro') + '</option>';
+            + escapar(delMaestro + ' · maestro') + '</option>';
 
         formas.forEach(function(x) {
             opciones += '<option value="' + escapar(x) + '"'
@@ -1239,12 +1258,12 @@
 
         var sel = document.getElementById('fpFormaProv');
 
+        // Los nombres son los VALORES de la lista, no sus claves.
         if (sel && !sel.options.length) {
             sel.innerHTML = '<option value="">(sin forma)</option>'
-                + ((maestro && maestro.formas_pago ? Object.keys(maestro.formas_pago) : [])
-                    .map(function(f) {
-                        return '<option value="' + escapar(f) + '">' + escapar(f) + '</option>';
-                    }).join(''));
+                + ((maestro && maestro.formas_pago) || []).map(function(f) {
+                    return '<option value="' + escapar(f) + '">' + escapar(f) + '</option>';
+                }).join('');
         }
     }
 

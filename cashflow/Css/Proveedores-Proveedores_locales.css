@@ -110,9 +110,14 @@
     justify-content: center;
 }
 
+/* EL ANCHO VA ACOTADO. La opción que está seleccionada en el caso normal es la
+   más larga —'TRANSFERENCIA · del maestro'— y sin techo estira la columna, que
+   en una tabla con columnas fijas a la izquierda empuja el eje fuera de la
+   vista. El texto completo se lee al desplegar y está en el title. */
 .tab-proveedores_locales .prov-select-forma {
     font-size: 0.78rem;
     padding: 1px 4px;
+    max-width: 150px;
 }
 
 /* Fijada a mano para esta factura. Se marca porque decide distinto del resto de
