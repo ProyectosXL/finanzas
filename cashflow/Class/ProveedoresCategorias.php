@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/Planilla.php';
 require_once __DIR__ . '/ProveedoresTango.php';
+require_once __DIR__ . '/ProveedoresOpciones.php';
 
 /**
  * ProveedoresCategorias
@@ -183,6 +184,9 @@ class ProveedoresCategorias {
     /** @var ProveedoresTango|null El maestro de Tango, para validar los codigos */
     private $tango = null;
 
+    /** @var ProveedoresOpciones|null Las listas de valores validos del maestro */
+    private $opciones = null;
+
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
         $this->conn = new Conexion;
@@ -202,6 +206,41 @@ class ProveedoresCategorias {
         }
 
         return $this->tango;
+    }
+
+    /**
+     * Las cinco listas de valores validos del maestro, con su cache.
+     *
+     * Igual que tango(): se expone para que el controlador pueda pedir las
+     * listas UNA vez y pasarlas al diff, que es estatico y no toca la base.
+     *
+     * @return ProveedoresOpciones
+     */
+    public function opciones() {
+        if ($this->opciones === null) {
+            $this->opciones = new ProveedoresOpciones();
+        }
+
+        return $this->opciones;
+    }
+
+    /**
+     * Las listas vigentes, o null si todavia no existe la tabla.
+     *
+     * DEVUELVE null Y NO UN MAPA VACIO cuando el script no se corrio, y la
+     * diferencia es la misma que con CPA01: null es "no hay listas contra las
+     * cuales validar" -y entonces no se marca nada, que es el comportamiento de
+     * antes- mientras que un mapa vacio significaria "ninguna lista tiene
+     * valores" y marcaria el maestro entero como fuera de lista.
+     *
+     * @return array|null
+     */
+    public function listasVigentes() {
+        try {
+            return $this->opciones()->tablaCreada() ? $this->opciones()->vigentes() : null;
+        } catch (Throwable $e) {
+            return null;
+        }
     }
 
     /* ====================================================================
@@ -937,13 +976,26 @@ class ProveedoresCategorias {
      * malas un monton de filas que probablemente esten bien, y bloquear una
      * importacion legitima por un origen caido.
      *
+     * LAS LISTAS DE OPCIONES SON ADVERTENCIA, NO ERROR
+     * ------------------------------------------------
+     * $opciones son las cinco listas vigentes. Un valor que no esta en la suya
+     * NO frena la fila: se importa igual, se guarda con lo que vino y queda
+     * marcado en la previsualizacion. Es lo contrario de CPA01, y la diferencia
+     * es qué significa cada cosa: un codigo que no existe hace que el proveedor
+     * no clasifique NADA, mientras que un rubro fuera de lista clasifica -crea
+     * su propia serie- y lo que hay que decidir es si esa serie tenia que
+     * existir. Lo primero es un dato roto; lo segundo, un dato que alguien
+     * tiene que mirar.
+     *
      * @param array $filasArchivo Filas de Planilla::parsear()
      * @param array $existentes Maestro vigente, indexado por COD_PROVEE
      * @param array|null $validos Mapa COD_PROVEE => NOM_PROVEE de CPA01, o null
      *                            si la validacion no se pudo correr
+     * @param array|null $opciones Listas vigentes de ProveedoresOpciones, o null
      * @return array ['filas', 'bajas', 'resumen', 'avisos']
      */
-    public static function compararImportacion($filasArchivo, $existentes, $validos = null) {
+    public static function compararImportacion($filasArchivo, $existentes, $validos = null,
+                                               $opciones = null) {
         $existentes = is_array($existentes) ? $existentes : [];
         $validando = is_array($validos);
         $filas = [];
@@ -970,13 +1022,19 @@ class ProveedoresCategorias {
                chequear", y son dos cosas muy distintas. */
             'valido_contra_tango' => $validando,
 
+            /* Cuantas filas traen ALGUN valor que no esta en su lista. Se
+               importan igual: es advertencia. El desglose por lista es lo que
+               dice cual de las cinco hay que mirar. */
+            'fuera_de_lista' => 0,
+            'fuera_de_lista_por_tipo' => [],
+
             /* Cuantos de los cambios pisan una version cargada a mano. Ver la
                nota en el bucle. */
             'pisa_manuales' => 0
         ];
 
         foreach (is_array($filasArchivo) ? $filasArchivo : [] as $cruda) {
-            $fila = self::normalizarFila($cruda);
+            $fila = self::normalizarFila($cruda, $opciones);
 
             /* EL CODIGO TIENE QUE EXISTIR EN CPA01, y se chequea ANTES que el
                duplicado: un codigo que no existe no se puede cargar ni una vez,
@@ -1062,6 +1120,21 @@ class ProveedoresCategorias {
                 if ($fila['criterio_distrib'] !== null) {
                     $clave = $fila['criterio_distrib'];
                     $criterios[$clave] = isset($criterios[$clave]) ? $criterios[$clave] + 1 : 1;
+                }
+
+                /* UNA FILA CUENTA UNA VEZ, aunque tenga tres campos fuera de
+                   lista: el numero que se informa arriba es "cuantas filas hay
+                   que mirar". El desglose por lista, en cambio, cuenta cada
+                   campo, porque dice CUAL de las cinco listas esta incompleta. */
+                if (!empty($fila['fuera_lista'])) {
+                    $resumen['fuera_de_lista']++;
+
+                    foreach ($fila['fuera_lista'] as $tipo => $valor) {
+                        $resumen['fuera_de_lista_por_tipo'][$tipo] =
+                            isset($resumen['fuera_de_lista_por_tipo'][$tipo])
+                                ? $resumen['fuera_de_lista_por_tipo'][$tipo] + 1
+                                : 1;
+                    }
                 }
             }
 
@@ -1190,10 +1263,40 @@ class ProveedoresCategorias {
      * proveedor cargado a mano se clasificaria distinto que el mismo proveedor
      * traido por la planilla, y nadie tendria donde notarlo.
      *
+     * LAS LISTAS DE OPCIONES LLEGAN POR PARAMETRO, Y SON UNA ADVERTENCIA
+     * ------------------------------------------------------------------
+     * $opciones es lo que devuelve ProveedoresOpciones::vigentes(): las cinco
+     * listas de valores validos. Llega por parametro para que esta funcion siga
+     * siendo pura y se pueda probar sin base.
+     *
+     * UN VALOR QUE NO ESTA EN SU LISTA NO ES UN ERROR: la fila se importa igual
+     * y se guarda con lo que vino, marcada. Es el mismo criterio que este modulo
+     * ya aplica a las formas de pago y a los criterios de distribucion, y el
+     * motivo esta escrito en el encabezado de la clase: la planilla viene sucia
+     * y eso se MUESTRA, no se arregla. Un importador que descarta lo que no
+     * reconoce deja la planilla rota para siempre, porque nadie se entera nunca.
+     *
+     * Y NUNCA SE AGREGA SOLO A LA LISTA. Las listas las administra una persona
+     * desde Parametros: si la importacion las ampliara, la lista se llenaria de
+     * los typos de la planilla y dejaria de servir para validar nada.
+     *
+     * NO SE CORRIGE EL VALOR AL CANONICO. buscarEnLista() matchea ignorando
+     * mayusculas y acentos -asi que 'alquileres' reconoce a 'Alquileres'- pero
+     * lo que se guarda sigue siendo lo que vino. Pisarlo cambiaria en silencio
+     * la serie del tablero de ese proveedor, y el original es la evidencia de
+     * que la planilla tiene algo que corregir.
+     *
+     * EL PLAZO ES LA EXCEPCION, Y SOLO EN UNA COSA: si el valor esta en la
+     * lista, los DIAS salen de la lista en lugar de derivarse del texto con
+     * plazoEnDias(). Eso es lo que permite declarar un plazo que plazoEnDias()
+     * no sabria interpretar, como 'FIN DE MES' -> 30. El texto guardado no
+     * cambia; lo que cambia es de donde sale el numero.
+     *
      * @param array $cruda Las mismas claves que las columnas de importacion
+     * @param array|null $opciones Listas vigentes, o null para no validar
      * @return array
      */
-    public static function normalizarFila($cruda) {
+    public static function normalizarFila($cruda, $opciones = null) {
         $linea = isset($cruda['linea']) ? intval($cruda['linea']) : 0;
 
         $fila = [
@@ -1217,6 +1320,12 @@ class ProveedoresCategorias {
                es pura y no toca la base- pero la clave viaja siempre, en false,
                para que la pantalla no tenga que preguntar si llego. */
             'no_en_tango' => false,
+
+            /* Que campos traen un valor que no esta en su lista de opciones.
+               Mapa TIPO => valor, para que la previsualizacion pueda decir cual
+               es el valor raro y no solo que hay uno. Vacio si no se valido o
+               si esta todo bien. */
+            'fuera_lista' => [],
             'estado' => 'ALTA',
             'motivo' => '',
             'cambios' => []
@@ -1278,6 +1387,63 @@ class ProveedoresCategorias {
         $criterio = trim(isset($cruda['criterio_distrib']) ? $cruda['criterio_distrib'] : '');
         $fila['criterio_orig'] = $criterio;
         $fila['criterio_distrib'] = ($criterio === '') ? null : $criterio;
+
+        return self::validarContraListas($fila, $opciones);
+    }
+
+    /**
+     * Marca los campos cuyo valor no esta en su lista de opciones, y toma de la
+     * lista los dias del plazo cuando si esta.
+     *
+     * Va aparte de normalizarFila() para que se lea de un saque QUE HACE Y QUE
+     * NO HACE: marca y resuelve los dias. No corrige, no descarta y no agrega
+     * nada a ninguna lista. Ver la nota de normalizarFila().
+     *
+     * SIN LISTAS NO VALIDA Y NO MARCA NADA. $opciones en null es "no hay listas
+     * cargadas" -el script no se corrio- y ahi el comportamiento es el de
+     * antes: texto libre. Marcar todo como fuera de lista cuando no hay ninguna
+     * lista seria informar como sospechoso el maestro entero.
+     *
+     * Estatica y pura.
+     *
+     * @param array $fila Fila ya normalizada
+     * @param array|null $opciones Listas vigentes, o null
+     * @return array La fila, con 'fuera_lista' resuelto
+     */
+    private static function validarContraListas($fila, $opciones) {
+        if (!is_array($opciones)) {
+            return $fila;
+        }
+
+        foreach (ProveedoresOpciones::TIPOS as $tipo => $def) {
+            $campo = $def['campo'];
+            $valor = isset($fila[$campo]) ? $fila[$campo] : null;
+
+            /* Un campo VACIO no esta fuera de lista: esta vacio, que es otra
+               cosa y ya se cuenta aparte. En la planilla real hay 84 filas sin
+               rubro economico y 765 sin plazo; marcarlas como valor invalido
+               ahogaria el aviso de las que si tienen un typo. */
+            if ($valor === null || trim((string) $valor) === '') {
+                continue;
+            }
+
+            $enLista = ProveedoresOpciones::buscarEnLista(
+                $valor, isset($opciones[$tipo]) ? $opciones[$tipo] : []);
+
+            if ($enLista === null) {
+                $fila['fuera_lista'][$tipo] = $valor;
+                continue;
+            }
+
+            /* LOS DIAS SALEN DE LA LISTA cuando el plazo esta en ella. Es lo
+               unico que la lista decide, y es lo que permite declarar
+               'FIN DE MES' -> 30, que plazoEnDias() no sabria interpretar. El
+               texto guardado no cambia. */
+            if ($tipo === ProveedoresOpciones::TIPO_PLAZO) {
+                $fila['plazo_dias'] = $enLista['plazo_dias'];
+                $fila['plazo_no_usable'] = ($enLista['plazo_dias'] === null);
+            }
+        }
 
         return $fila;
     }
@@ -1433,6 +1599,27 @@ class ProveedoresCategorias {
             $avisos[] = $resumen['plazo_no_usable'] . ' fila(s) tienen un PLAZO DE PAGO que no '
                 . 'se puede llevar a días (DEBITO, por ejemplo). No es un error: para esos '
                 . 'proveedores manda la fecha de vencimiento del comprobante.';
+        }
+
+        /* LOS VALORES FUERA DE LISTA SON ADVERTENCIA Y SE IMPORTAN. El aviso
+           nombra CUÁLES listas, porque con cinco decir sólo "hay valores fuera
+           de lista" obliga a recorrer la previsualización entera para saber
+           dónde mirar. Y dice explícitamente que no se agregan solas: alguien
+           va a esperar que sí. */
+        if (!empty($resumen['fuera_de_lista'])) {
+            $porTipo = [];
+
+            foreach ($resumen['fuera_de_lista_por_tipo'] as $tipo => $n) {
+                $porTipo[] = (isset(ProveedoresOpciones::TIPOS[$tipo])
+                    ? ProveedoresOpciones::TIPOS[$tipo]['nombre'] : $tipo) . ' (' . $n . ')';
+            }
+
+            $avisos[] = $resumen['fuera_de_lista'] . ' fila(s) traen algún valor que NO está en '
+                . 'las listas de opciones: ' . implode(', ', $porTipo) . '. Se importan igual y '
+                . 'se guardan tal como vinieron, marcadas. Los valores NO se agregan solos a las '
+                . 'listas: si alguno es correcto, cargalo en Parámetros → Prov. Locales; si es '
+                . 'un typo, corregilo en la planilla. Ojo con el RUBRO ECONÓMICO: cada valor '
+                . 'distinto crea una fila propia en el tablero.';
         }
 
         return $avisos;
@@ -1612,7 +1799,11 @@ class ProveedoresCategorias {
                 . 'planilla y la próxima importación la pisaría sin avisar.');
         }
 
-        $fila = self::normalizarFila($datos);
+        /* Con las listas cargadas, el PLAZO en dias sale de la lista y no de
+           derivar el texto. Un valor fuera de lista NO frena el guardado -es
+           advertencia, igual que en la importacion- pero viaja en la respuesta
+           para que la pantalla lo pueda decir. */
+        $fila = self::normalizarFila($datos, $this->listasVigentes());
 
         if ($fila['estado'] === 'ERROR') {
             throw new Exception($fila['motivo']);

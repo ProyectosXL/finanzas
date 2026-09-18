@@ -1200,6 +1200,26 @@
                     + '">no está en Tango</span>';
             }
 
+            /* UN VALOR FUERA DE LISTA ES ADVERTENCIA, NO ERROR: la fila se
+               importa igual y se guarda tal como vino. La marca dice CUÁLES
+               campos y con QUÉ valor, porque "hay algo fuera de lista" sin
+               decir qué obliga a abrir la planilla y buscarlo. */
+            var fuera = f.fuera_lista && Object.keys(f.fuera_lista);
+
+            if (fuera && fuera.length) {
+                var tipos = (d.opciones_tipos) || {};
+
+                pisa += ' <span class="badge bg-warning text-dark" title="'
+                    + escapar('Se importa igual y se guarda tal como vino. El valor NO se '
+                        + 'agrega solo a la lista: si es correcto, cargalo en Parámetros → '
+                        + 'Prov. Locales; si es un typo, corregilo en la planilla. '
+                        + fuera.map(function(t) {
+                            return (tipos[t] ? tipos[t].nombre : t) + ': "'
+                                + f.fuera_lista[t] + '"';
+                          }).join(' · '))
+                    + '">fuera de lista (' + fuera.length + ')</span>';
+            }
+
             html += '<tr class="prov-pre-' + f.estado.toLowerCase() + '">'
                 + '<td>' + f.linea + '</td>'
                 + '<td><code>' + escapar(clave) + '</code></td>'
@@ -1533,6 +1553,149 @@
                     return '<option value="' + escapar(f) + '">' + escapar(f) + '</option>';
                 }).join('');
         }
+
+        aplicarListas();
+    }
+
+    /* ================================================================
+       LAS CINCO LISTAS DE OPCIONES
+
+       Rubro económico, rubro, centro de costos, plazo y criterio pasan de ser
+       texto libre a ser desplegables poblados desde Parámetros → Prov.
+       Locales. El motivo está en el encabezado de Class/ProveedoresOpciones.php,
+       y el que importa es éste: CADA RUBRO ECONÓMICO DISTINTO CREA UNA FILA
+       PROPIA EN EL TABLERO. Tipear "Alquileres " con un espacio al final no es
+       un typo cosmético, es una fila del cuadro que nadie pidió.
+
+       SIN LISTAS CARGADAS NO SE CAMBIA NADA. Si el script no se corrió, el
+       backend manda 'opciones' en null y los campos siguen siendo texto libre
+       con sugerencias, que es como funcionaban antes. Dibujar desplegables
+       vacíos dejaría una pantalla donde no se puede cargar nada, y el aviso del
+       maestro ya dice qué script falta.
+       ================================================================ */
+
+    /** Qué campo del formulario corresponde a cada lista */
+    var CAMPOS_LISTA = {
+        RUBRO_ECONOMICO: 'fpRubroEcoProv',
+        RUBRO: 'fpRubroProv',
+        CENTRO_COSTOS: 'fpCentroProv',
+        PLAZO: 'fpPlazoProv',
+        CRITERIO_DISTRIB: 'fpCriterioProv'
+    };
+
+    /**
+     * Reemplaza los cinco campos de texto por desplegables.
+     *
+     * SE REEMPLAZA EL ELEMENTO, conservando el id: el resto del archivo lee y
+     * escribe por id con valor()/setValor(), y un <select> responde a .value
+     * igual que un <input>. Así el cambio no toca ni abrirForm() ni
+     * guardarProveedor().
+     */
+    function aplicarListas() {
+        var listas = maestro && maestro.opciones;
+
+        // null = no hay listas cargadas. Ver la nota de arriba.
+        if (!listas) { return; }
+
+        Object.keys(CAMPOS_LISTA).forEach(function(tipo) {
+            var id = CAMPOS_LISTA[tipo];
+            var el = document.getElementById(id);
+
+            if (!el) { return; }
+
+            var valores = Object.keys(listas[tipo] || {});
+
+            /* UNA LISTA VACÍA NO REEMPLAZA NADA. Un desplegable con una sola
+               opción vacía no deja cargar ese campo, y sería peor que el texto
+               libre que había antes. Parámetros ya avisa que la lista está
+               vacía. */
+            if (!valores.length) { return; }
+
+            /* YA ESTÁ CONVERTIDO. Sólo se repuebla si el formulario está
+               CERRADO, y no es un detalle: pintarMaestro() —que llama acá—
+               corre en cada tecla del buscador del maestro, y repoblar un
+               select le borra el valor elegido. Con el formulario abierto, eso
+               sería vaciarle los campos a alguien mientras los está cargando, y
+               en silencio. Las listas sólo cambian desde otra pestaña, así que
+               esperar a que el formulario se cierre no atrasa nada. */
+            if (el.tagName === 'SELECT') {
+                if (!visible('formProvWrap')) {
+                    repoblarSelect(el, valores);
+                }
+
+                return;
+            }
+
+            var sel = document.createElement('select');
+
+            sel.id = id;
+            sel.className = 'form-select form-select-sm';
+            sel.title = el.title || '';
+
+            el.parentNode.replaceChild(sel, el);
+            repoblarSelect(sel, valores);
+        });
+    }
+
+    function repoblarSelect(sel, valores) {
+        sel.innerHTML = '<option value="">(sin definir)</option>'
+            + valores.map(function(v) {
+                return '<option value="' + escapar(v) + '">' + escapar(v) + '</option>';
+            }).join('');
+    }
+
+    /**
+     * Deja seleccionado un valor que puede NO estar en la lista.
+     *
+     * ES LA PARTE QUE NO SE PUEDE OMITIR. Un proveedor cargado antes de que
+     * existieran las listas —o traído por una importación, donde un valor fuera
+     * de lista es advertencia y se guarda igual— tiene valores que el
+     * desplegable no ofrece. Si se le pide a un <select> un valor que no tiene,
+     * queda vacío EN SILENCIO, y guardar el formulario le borraría el rubro al
+     * proveedor sin que nadie lo haya pedido.
+     *
+     * Así que el valor se agrega como opción, marcada, y el campo se pinta en
+     * naranja: el dato no se pierde, se ve que está fuera de lista, y quien
+     * edita decide si lo deja o elige uno de la lista.
+     */
+    function elegirValor(id, valor) {
+        var el = document.getElementById(id);
+
+        if (!el) { return; }
+
+        var v = valor || '';
+
+        el.classList.remove('prov-fuera-lista');
+
+        if (el.tagName !== 'SELECT') {
+            el.value = v;
+            return;
+        }
+
+        // Se saca la opción temporal de la edición anterior.
+        var previa = el.querySelector('option[data-fuera-lista]');
+
+        if (previa) { previa.remove(); }
+
+        el.value = v;
+
+        // Se le pidió un valor y el select quedó vacío: no está en la lista.
+        if (v !== '' && el.value !== v) {
+            var opt = document.createElement('option');
+
+            opt.value = v;
+            opt.textContent = v + '  (fuera de lista)';
+            opt.dataset.fueraLista = '1';
+            el.appendChild(opt);
+            el.value = v;
+        }
+
+        if (v !== '' && el.querySelector('option[data-fuera-lista]')) {
+            el.classList.add('prov-fuera-lista');
+            el.title = 'Este valor no está en la lista de opciones. Se conserva tal como está '
+                + 'guardado: elegí uno de la lista si corresponde, o agregalo en '
+                + 'Parámetros → Prov. Locales.';
+        }
     }
 
     /**
@@ -1550,12 +1713,17 @@
 
         setValor('fpCodProv', f ? f.COD_PROVEE : '');
         setValor('fpNombreProv', f ? (f.NOMBRE || '') : '');
-        setValor('fpRubroEcoProv', f ? (f.RUBRO_ECONOMICO || '') : '');
-        setValor('fpRubroProv', f ? (f.RUBRO || '') : '');
-        setValor('fpCentroProv', f ? (f.CENTRO_COSTOS || '') : '');
         setValor('fpFormaProv', f ? (f.FORMA_PAGO || '') : '');
-        setValor('fpPlazoProv', f ? (f.PLAZO_PAGO || '') : '');
-        setValor('fpCriterioProv', f ? (f.CRITERIO_DISTRIB || '') : '');
+
+        /* Los cinco que salen de una lista pasan por elegirValor(), que conserva
+           el valor guardado aunque la lista no lo tenga. Con setValor() a secas,
+           un rubro fuera de lista dejaría el desplegable vacío en silencio y
+           guardar le borraría el rubro al proveedor. */
+        elegirValor('fpRubroEcoProv', f ? f.RUBRO_ECONOMICO : '');
+        elegirValor('fpRubroProv', f ? f.RUBRO : '');
+        elegirValor('fpCentroProv', f ? f.CENTRO_COSTOS : '');
+        elegirValor('fpPlazoProv', f ? f.PLAZO_PAGO : '');
+        elegirValor('fpCriterioProv', f ? f.CRITERIO_DISTRIB : '');
 
         // El código es la clave: se puede tipear en un alta y no en una edición.
         var inpCod = document.getElementById('fpCodProv');
@@ -1835,6 +2003,14 @@
         var el = document.getElementById(id);
 
         if (el) { el.style.display = visible ? '' : 'none'; }
+    }
+
+    /** Si un bloque está a la vista. Lo usa aplicarListas() para no pisar un
+        formulario que alguien está cargando. */
+    function visible(id) {
+        var el = document.getElementById(id);
+
+        return !!el && el.style.display !== 'none';
     }
 
     function texto(id, v) {

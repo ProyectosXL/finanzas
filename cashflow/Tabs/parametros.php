@@ -224,6 +224,16 @@
             <?php include __DIR__ . '/parametros_cobranzas.php'; ?>
         </div>
 
+        <!-- Listas de opciones del maestro de Proveedores Locales: rubro
+             económico, rubro, centro de costos, plazo y criterio de
+             distribución. Antes eran texto libre, y el rubro económico no es
+             cosmético: cada valor distinto crea una fila propia en el tablero.
+             Mismo criterio que los anteriores: archivo y JS propios, y clases
+             con prefijo pplo-. -->
+        <div class="tab-pane fade" id="paneParamProv_locales" role="tabpanel">
+            <?php include __DIR__ . '/parametros_prov_locales.php'; ?>
+        </div>
+
         <!-- Estructura del tablero de Cashflow.
              Va en su propio archivo y con su propio JS: no comparte nada con
              los bloques de Ventas, y así un problema acá no puede llevarse
@@ -244,4 +254,5 @@
 <script src="Js/Parametros-Cob-Electronicos.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Prechequeado.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Cobranzas.js?v=<?php echo time(); ?>"></script>
+<script src="Js/Parametros-Prov_locales.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Estructura.js?v=<?php echo time(); ?>"></script>

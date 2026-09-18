@@ -342,10 +342,19 @@ try {
                 $validos = null;
             }
 
+            /* Las listas de opciones son ADVERTENCIA y no error: un valor que
+               no está en su lista se importa igual y se guarda tal como vino,
+               marcado. La diferencia con CPA01 es qué significa cada cosa: un
+               código que no existe hace que el proveedor no clasifique NADA,
+               mientras que un rubro fuera de lista sí clasifica —crea su propia
+               serie— y lo que hay que decidir es si esa serie tenía que
+               existir. */
             $comp = ProveedoresCategorias::compararImportacion(
-                $parse['filas'], $prov->categorias()->mapa(), $validos);
+                $parse['filas'], $prov->categorias()->mapa(), $validos,
+                $prov->categorias()->listasVigentes());
 
             $comp['separador'] = $parse['separador'];
+            $comp['opciones_tipos'] = ProveedoresOpciones::TIPOS;
 
             echo json_encode(['success' => true, 'data' => $comp], JSON_UNESCAPED_UNICODE);
             break;
@@ -422,6 +431,17 @@ try {
                        que se dibuja y despues falla al guardar es peor que uno
                        que no aparece con el motivo al lado. */
                     'edicion_manual' => $prov->categorias()->tieneOrigen(),
+
+                    /* Las cinco listas de valores válidos. En null si todavía
+                       no se corrió su script: la pantalla vuelve a los campos
+                       de texto con sugerencias —que es como funcionaban antes—
+                       en lugar de dibujar desplegables vacíos que no dejan
+                       cargar nada. Ver ProveedoresOpciones. */
+                    'opciones' => $prov->categorias()->listasVigentes(),
+                    'opciones_tipos' => ProveedoresOpciones::TIPOS,
+
+                    /* Las sugerencias del datalist quedan para ese caso. No se
+                       sacan: son el respaldo de cuando no hay listas. */
                     'rubros' => $prov->categorias()->rubrosCargados()
                 ]
             ], JSON_UNESCAPED_UNICODE);
