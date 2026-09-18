@@ -324,12 +324,54 @@ try {
             $parse = Planilla::parsear(contenidoSubido(),
                 ProveedoresCategorias::columnasImportacion());
 
+            /* LOS CÓDIGOS SE VALIDAN CONTRA CPA01 EN UNA SOLA CONSULTA, no una
+               por fila: la planilla real tiene 1.223 filas y una consulta por
+               cada una serían 1.223 viajes a la base para una pantalla que
+               tiene que responder mientras alguien espera.
+
+               Si CPA01 no responde se pasa null, que NO es lo mismo que un mapa
+               vacío: null significa "no se pudo validar" y el diff no marca
+               nada en error, sólo avisa. Con un mapa vacío marcaría en error la
+               planilla entera por un origen caído. */
+            $validos = null;
+
+            try {
+                $validos = $prov->categorias()->tango()->existentes(
+                    array_column($parse['filas'], 'cod_provee'));
+            } catch (Throwable $e) {
+                $validos = null;
+            }
+
             $comp = ProveedoresCategorias::compararImportacion(
-                $parse['filas'], $prov->categorias()->mapa());
+                $parse['filas'], $prov->categorias()->mapa(), $validos);
 
             $comp['separador'] = $parse['separador'];
 
             echo json_encode(['success' => true, 'data' => $comp], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           BUSCADOR DE PROVEEDORES DE TANGO
+
+           Alimenta el autocomplete del alta manual. Busca por código Y por
+           nombre porque quien carga un proveedor casi nunca se acuerda del
+           código: se acuerda del nombre.
+
+           NO ES LA VALIDACIÓN. Que acá aparezca un proveedor no autoriza nada:
+           guardarManual() vuelve a chequear contra CPA01, porque lo que manda
+           el navegador es un pedido y no una autorización.
+           ================================================================ */
+        case 'buscarProveedorTango':
+            $q = isset($_GET['q']) ? $_GET['q'] : '';
+
+            echo json_encode([
+                'success' => true,
+                'data' => [
+                    'filas' => $prov->categorias()->tango()->buscar($q),
+                    'min' => ProveedoresTango::MIN_BUSQUEDA,
+                    'max' => ProveedoresTango::MAX_RESULTADOS
+                ]
+            ], JSON_UNESCAPED_UNICODE);
             break;
 
         case 'aplicarMaestro':
@@ -365,6 +407,13 @@ try {
                     'filas' => array_values($mapa),
                     'avisos' => $prov->categorias()->getAvisos(),
                     'directores_no_excluidos' => $prov->categorias()->directoresNoExcluidos(),
+
+                    /* El segundo control del maestro: quién está cargado y
+                       vigente con un código que Tango no tiene. Sólo avisa; no
+                       se da de baja nada automáticamente. Ver
+                       ProveedoresCategorias::noEnTango(). */
+                    'no_en_tango' => $prov->categorias()->noEnTango(),
+                    'tango_disponible' => $prov->categorias()->tango()->disponible(),
                     'formas_pago' => ProveedoresCategorias::FORMAS_PAGO,
 
                     /* Si se puede cargar a mano. La pantalla lo pregunta en vez

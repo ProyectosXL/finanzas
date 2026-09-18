@@ -176,6 +176,57 @@ La columna existe y está **vacía en los 4.893 proveedores**; `CAMPOS_ADICIONAL
 
 Se evaluó empezar a cargarla desde Tango y se descartó: **obligaría a administración a mantener dos maestros en paralelo**, y dos maestros en paralelo terminan discrepando. La planilla sigue siendo la fuente.
 
+### Pero el código sí se valida contra `CPA01`
+
+> Esto es **nuevo**.
+
+Que el **contenido** salga de la planilla no significa que el **código** pueda ser cualquiera. `CPA01` es el universo de proveedores que existen, y un código que no está ahí no va a cruzar contra ninguna cuenta a pagar: el proveedor se carga, **no clasifica nada**, y el síntoma aparece semanas después en otra pantalla, como una deuda sin rubro que nadie sabe por qué no clasifica.
+
+Antes el código se validaba **sólo por largo**, así que `MTDOD` entraba igual que `MTDODI`.
+
+| Dónde | Qué pasa si el código no existe |
+| --- | --- |
+| **Alta manual** | Se **rechaza**. Es la tabla maestra de proveedores: no hay alta con advertencia |
+| **Importación** | La fila queda en `ERROR` y **el resto de la planilla se importa igual**. Parar todo por dos códigos malos obligaría a corregir la planilla entera antes de poder cargar las mil doscientas que están bien — el mismo criterio que ya regía para el código repetido |
+| **Lo ya cargado** | Se **audita y se avisa**. No se da de baja nada automáticamente |
+
+**No se filtra por empresa ni por estado de baja.** `COD_PROVEE` es único en `CPA01`: si existe, vale. Un proveedor dado de baja en Tango puede seguir teniendo deuda pendiente, y excluirlo haría imposible clasificar esa deuda.
+
+**El chequeo de la importación es UNA consulta para todos los códigos del archivo**, no una por fila: la planilla real tiene 1.223 filas y una consulta por cada una serían 1.223 viajes a la base para una pantalla que responde mientras alguien espera. El diff sigue siendo **puro** —recibe el mapa de códigos válidos por parámetro— y por eso se prueba entero sin base.
+
+**Si `CPA01` no responde, la validación no corre y se dice.** Se pasa `null`, que **no es lo mismo que un mapa vacío**: con un mapa vacío se marcaría en error la planilla entera por un origen caído. Un aviso propio avisa que los códigos no se chequearon, porque sin él una previsualización limpia se lee como *"todos los códigos existen"* cuando en realidad es *"no se chequeó ninguno"*.
+
+> El alta manual es la excepción: ahí, si `CPA01` no responde, **se frena**. La diferencia es el volumen. Frenar un alta de a uno cuesta que la persona vuelva en un rato; frenar una planilla de mil doscientas filas bloquea un trabajo entero. Con una sola fila en juego, conviene no adivinar.
+
+#### El nombre sale de `CPA01` y no se edita
+
+En el alta manual, `NOM_PROVEE` se trae de Tango y el campo es de **sólo lectura**. El backend lo vuelve a traer al guardar e **ignora lo que mande el navegador**: el endpoint es alcanzable sin pasar por la pantalla. Si el nombre se pudiera tipear, dos pantallas mostrarían dos nombres para el mismo código y ninguna de las dos sería *el* nombre del proveedor. Es el mismo criterio que usa el pre-chequeado con la razón social de `GVA14`.
+
+**En la importación el nombre lo sigue trayendo la planilla**, y es deliberado: la planilla es la fuente del maestro y el nombre que administración escribió es parte de lo que se está importando. Lo que la importación sí hace es validar que el código exista.
+
+#### El buscador acepta el nombre, no sólo el código
+
+Quien carga un proveedor casi nunca se acuerda del código: se acuerda del nombre. El campo de código del alta es un autocomplete contra `CPA01` que busca **por código y por nombre**, desde 2 caracteres y con un tope de 20 resultados, poniendo primero los que *empiezan* con lo tipeado. Un campo que sólo aceptara el código obliga a ir a Tango a buscarlo, que es justo el paso que esto viene a sacar.
+
+Elegir de la lista es una comodidad, **no la validación**: `guardarManual()` vuelve a chequear contra `CPA01`.
+
+#### La collation no es un detalle
+
+`CPA01.COD_PROVEE` es `VARCHAR(6) COLLATE Latin1_General_BIN`, y hay **27 códigos con caracteres no ASCII**. La comparación es **binaria**: `OGNUNE` y `OGNUÑE` son dos proveedores distintos. Por eso los códigos viajan **siempre como parámetro** y nunca interpolados, y por eso `RO_T_CASHFLOW_PROV_LOCALES_CATEG.COD_PROVEE` declara la misma collation (ver `sql/cashflow_prov_locales_collation.sql`).
+
+El buscador es la excepción y lleva `COLLATE` explícito: un `LIKE` contra una columna binaria **no encontraría `mtdodi` en minúscula**, que es como se tipea.
+
+#### Vive en su propia clase, y eso es la decisión
+
+`Class/ProveedoresTango.php`. Son **dos maestros distintos** y hay que poder distinguirlos:
+
+| | |
+| --- | --- |
+| `CPA01` | Quién **existe** como proveedor. Lo mantiene Tango |
+| `RO_T_CASHFLOW_PROV_LOCALES_CATEG` | Qué **es** cada proveedor para nosotros. Lo mantiene administración |
+
+Meter la lectura de `CPA01` adentro de `ProveedoresCategorias` haría parecer que son el mismo maestro, que es exactamente la confusión que esta sección viene evitando.
+
 ### Para qué sirve
 
 1. **Para que el tablero pueda abrir la deuda por rubro.** Hoy la fila es una sola; cuando el maestro esté cargado, partirla en alquileres, impuestos, logística y mercadería es **configuración desde Parámetros**, no un refactor: el proveedor ya entrega cada comprobante con su rubro resuelto y expone una serie por rubro además del total.
@@ -667,12 +718,15 @@ Componentes estándar: tarjetas KPI, buscador, selector de eje temporal (`Js/eje
 
 ---
 
-## Los dos controles
+## Los tres controles
 
 Sin ellos el maestro se desactualiza y nadie se entera.
 
 1. **Proveedores con deuda que no están en el maestro.** Aparecen proveedores nuevos en Tango, nadie los agrega a la planilla, y su deuda queda sin clasificar —o peor, se la lee como si estuviera clasificada—. Se muestran ordenados **por importe**: si la lista es larga, lo que importa es por cuál empezar.
 2. **Egresos de directores que el maestro no marca como `Excluidos`.** Ver arriba: manda el maestro, esto audita.
+3. **Proveedores vigentes del maestro que no existen en `CPA01`.** Es el control **al revés** del primero: aquél busca deuda sin clasificación, éste busca clasificación sin proveedor. Un código que Tango no tiene no va a cruzar contra ninguna cuenta a pagar nunca; casi siempre es un código tipeado mal de antes de que hubiera validación, pero también puede ser un proveedor que Tango depuró. La lista dice si la versión vigente entró por **carga manual** o por la planilla, porque se corrigen en lugares distintos: una a mano, la otra en el Excel o vuelve en la próxima importación.
+
+> **Sólo avisa: no da de baja nada.** Una baja automática borraría la clasificación de una deuda que puede seguir existiendo, y lo haría sin que nadie lo decida. Es el mismo criterio del control de directores.
 
 ---
 
@@ -688,6 +742,7 @@ php tests/run.php proveedores
 - **Que el plazo no es un número**: `DEBITO` devuelve `null` y no `0`.
 - **La suciedad de la planilla**: que el código repetido deje en error **las dos** filas, que `echeq` matchee y `eqheck` no, y que el typo del criterio se detecte sin lista declarada —y que un criterio raro pero distinto **no** se marque—.
 - **Que las filas en error no ensucien las estadísticas de calidad**: una que falló por el código ni siquiera llegó a leer el rubro.
+- **La validación contra `CPA01`**: que un código inexistente quede en error y el resto de la planilla se importe igual, que el chequeo de existencia vaya **antes** que el de duplicado —un código que no existe no se puede cargar ni una vez—, y que `null` (no se pudo leer `CPA01`) no marque nada pero **avise**, mientras que un mapa vacío sí marca, porque son dos cosas distintas.
 - **El diff de pagos**: que el tipo se deduzca, que un comprobante en cuotas no sea ambiguo, que dos tipos con el mismo número sí lo sean, y que lo que no cruza dé un error con motivo.
 - **Que la clave incluya al proveedor**: dos proveedores con el mismo comprobante dan claves distintas.
 - **El desvío** de la conciliación en los dos sentidos.
@@ -710,6 +765,7 @@ sql/_referencia_tango_pendientes.sql           La consulta de Tango, como refere
 cashflow/Class/Planilla.php                    El mecanismo de importacion CSV, compartido
 cashflow/Class/Proveedores.php                 Cuentas a pagar, fechas de pago y conciliacion
 cashflow/Class/ProveedoresCategorias.php       El maestro y el resolutor de categoria
+cashflow/Class/ProveedoresTango.php            CPA01: quien existe como proveedor. Solo lectura
 cashflow/Class/Providers/ProveedoresProvider.php
 cashflow/Controller/ProveedoresController.php
 cashflow/Tabs/proveedores_locales.php

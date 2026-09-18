@@ -419,15 +419,38 @@
             <div id="formProvWrap" class="card-body border-bottom bg-light bg-opacity-50"
                  style="display: none;">
                 <div class="row g-2 align-items-end">
-                    <div class="col-md-2">
-                        <label class="form-label form-label-sm" for="fpCodProv">Código</label>
+                    <!-- EL CÓDIGO SE BUSCA, NO SE TIPEA A CIEGAS.
+                         Se valida contra CPA01, el maestro de proveedores de
+                         Tango: un código que no está ahí no cruza contra
+                         ninguna cuenta a pagar, así que el proveedor quedaría
+                         cargado sin clasificar nada. El buscador acepta el
+                         nombre además del código porque quien carga casi nunca
+                         se acuerda del código. -->
+                    <div class="col-md-3 position-relative">
+                        <label class="form-label form-label-sm" for="fpCodProv">
+                            Código
+                            <i class="fas fa-circle-info text-muted"
+                               title="Escribí el código o el nombre y elegí de la lista. Se valida contra CPA01, el maestro de proveedores de Tango."></i>
+                        </label>
                         <input type="text" id="fpCodProv" class="form-control form-control-sm"
-                               maxlength="6" placeholder="OGADUN">
+                               placeholder="Código o nombre…" autocomplete="off">
+                        <!-- Los resultados de la búsqueda contra Tango -->
+                        <div id="sugeProvTango" class="prov-tango-suge" style="display: none;"></div>
                     </div>
+                    <!-- EL NOMBRE ES EL DE TANGO Y NO SE EDITA. Si se pudiera
+                         tipear, dos pantallas mostrarían dos nombres para el
+                         mismo código y ninguna sería "el nombre del proveedor".
+                         El backend lo vuelve a traer de CPA01 al guardar, así
+                         que lo que mande el navegador no decide. -->
                     <div class="col-md-3">
-                        <label class="form-label form-label-sm" for="fpNombreProv">Nombre</label>
+                        <label class="form-label form-label-sm" for="fpNombreProv">
+                            Nombre
+                            <i class="fas fa-circle-info text-muted"
+                               title="Sale de CPA01 y no se edita: es el nombre que tiene el proveedor en Tango."></i>
+                        </label>
                         <input type="text" id="fpNombreProv" class="form-control form-control-sm"
-                               maxlength="120">
+                               maxlength="120" readonly
+                               placeholder="(lo trae Tango)">
                     </div>
                     <div class="col-md-3">
                         <label class="form-label form-label-sm" for="fpRubroEcoProv">

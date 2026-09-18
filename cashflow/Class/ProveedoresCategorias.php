@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/Planilla.php';
+require_once __DIR__ . '/ProveedoresTango.php';
 
 /**
  * ProveedoresCategorias
@@ -20,6 +21,36 @@ require_once __DIR__ . '/Planilla.php';
  * DOS maestros en paralelo, y dos maestros en paralelo terminan discrepando. La
  * planilla sigue siendo la fuente; esto es una copia con su fecha de importacion
  * a la vista, para que se sepa cuan vieja es.
+ *
+ * PERO EL CODIGO SI SE VALIDA CONTRA CPA01
+ * ----------------------------------------
+ * Que el CONTENIDO salga de la planilla no significa que el CODIGO pueda ser
+ * cualquiera. CPA01 es el universo de proveedores que existen, y un codigo que
+ * no esta ahi no va a cruzar contra ninguna cuenta a pagar: el proveedor se
+ * carga, clasifica nada, y el sintoma aparece semanas despues como una deuda
+ * sin rubro que nadie sabe por que no clasifica.
+ *
+ * Antes el codigo se validaba solo por LARGO, asi que 'MTDOD' entraba igual que
+ * 'MTDODI'. Ahora:
+ *
+ *   - El ALTA MANUAL se RECHAZA si el codigo no existe. Es la tabla maestra de
+ *     proveedores: no hay alta con advertencia. Y el NOMBRE se trae de CPA01 y
+ *     no se puede editar, por el mismo motivo por el que la razon social del
+ *     pre-chequeado sale de GVA14: dos pantallas mostrando dos nombres para el
+ *     mismo codigo no tienen forma de decir cual es el nombre del proveedor.
+ *   - La IMPORTACION marca en ERROR la fila y sigue: las filas validas se
+ *     importan igual. Parar la planilla entera por dos codigos malos obligaria
+ *     a corregir todo antes de poder cargar las mil doscientas que estan bien,
+ *     que es el mismo criterio que ya rige para el codigo repetido. Ahi el
+ *     nombre lo sigue trayendo la planilla: es la fuente del maestro y el
+ *     nombre que administracion escribio es parte de lo que se esta importando.
+ *   - Lo YA CARGADO se audita: getAvisos() lista los vigentes cuyo codigo no
+ *     existe en CPA01. SOLO AVISA. Dar de baja automaticamente borraria la
+ *     clasificacion de una deuda que puede seguir existiendo.
+ *
+ * La lectura de CPA01 vive en ProveedoresTango, que es una clase aparte porque
+ * son DOS maestros distintos y confundirlos es exactamente lo que este
+ * encabezado viene evitando. Ver su docblock.
  *
  * PARA QUE SIRVE, CONCRETAMENTE
  * -----------------------------
@@ -149,9 +180,28 @@ class ProveedoresCategorias {
     /** @var bool|null Cache de si la tabla ya tiene la columna ORIGEN */
     private $origen = null;
 
+    /** @var ProveedoresTango|null El maestro de Tango, para validar los codigos */
+    private $tango = null;
+
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
         $this->conn = new Conexion;
+    }
+
+    /**
+     * El maestro de proveedores de Tango, con su cache.
+     *
+     * Se expone para que el controlador pueda pedirle la validacion de una
+     * planilla entera en UNA consulta, igual que expone mapa() para el diff.
+     *
+     * @return ProveedoresTango
+     */
+    public function tango() {
+        if ($this->tango === null) {
+            $this->tango = new ProveedoresTango();
+        }
+
+        return $this->tango;
     }
 
     /* ====================================================================
@@ -262,7 +312,65 @@ class ProveedoresCategorias {
                 . 'proveedor de a uno.';
         }
 
+        if (!$this->tango()->disponible()) {
+            $avisos[] = 'No se pudo leer CPA01, el maestro de proveedores de Tango, así que los '
+                . 'códigos no se están validando: un código mal tipeado se puede cargar y '
+                . 'después no va a clasificar ninguna deuda. Todo lo demás funciona igual.';
+        }
+
         return $avisos;
+    }
+
+    /**
+     * Los proveedores VIGENTES del maestro cuyo codigo no existe en CPA01.
+     *
+     * ES EL SEGUNDO CONTROL DEL MODULO, y mira al reves que faltantesEnMaestro():
+     * aquel busca deuda sin clasificar, este busca clasificacion sin proveedor.
+     *
+     * Un codigo que no esta en Tango no va a cruzar contra ninguna cuenta a
+     * pagar NUNCA. Puede ser un codigo tipeado mal antes de que hubiera
+     * validacion, o un proveedor que Tango depuro. Los dos casos se ven igual
+     * desde acá y los dos hay que mirarlos.
+     *
+     * SOLO AVISA: NO DA DE BAJA NADA. Es el mismo criterio que
+     * directoresNoExcluidos(). Una baja automatica borraria la clasificacion de
+     * una deuda que puede seguir existiendo, y lo haria sin que nadie lo
+     * decida.
+     *
+     * SI CPA01 NO SE PUEDE LEER devuelve vacio y no rompe: es un control, no un
+     * requisito, y la pantalla ya avisa aparte que la validacion no corrio.
+     *
+     * @return array Filas ['COD_PROVEE', 'NOMBRE', 'RUBRO_ECONOMICO', 'ORIGEN']
+     */
+    public function noEnTango() {
+        $mapa = $this->mapa();
+
+        if (empty($mapa) || !$this->tango()->disponible()) {
+            return [];
+        }
+
+        try {
+            $faltan = $this->tango()->faltantes(array_keys($mapa));
+        } catch (Throwable $e) {
+            return [];
+        }
+
+        $v = [];
+
+        foreach ($faltan as $cod) {
+            $v[] = [
+                'COD_PROVEE' => $cod,
+                'NOMBRE' => $mapa[$cod]['NOMBRE'],
+                'RUBRO_ECONOMICO' => $mapa[$cod]['RUBRO_ECONOMICO'],
+
+                /* De donde salio la version vigente. Un codigo inexistente
+                   cargado A MANO es un typo de alguien; uno que trajo la
+                   planilla hay que corregirlo en la planilla, o no vuelve. */
+                'ORIGEN' => $mapa[$cod]['ORIGEN']
+            ];
+        }
+
+        return $v;
     }
 
     /* ====================================================================
@@ -816,12 +924,28 @@ class ProveedoresCategorias {
      * archivo NO trae. No se dan de baja en silencio -se listan y se confirman-
      * porque una planilla recortada por error daria de baja medio maestro.
      *
+     * LA VALIDACION CONTRA CPA01 LLEGA POR PARAMETRO, YA RESUELTA
+     * -----------------------------------------------------------
+     * $validos es el mapa CODIGO => NOMBRE de los que existen en Tango, y lo
+     * arma el llamador con UNA sola consulta para todos los codigos del archivo
+     * -ProveedoresTango::existentes()-. Este metodo no toca la base, y esa es
+     * la razon por la que el diff entero se puede probar sin base ni archivos.
+     *
+     * $validos EN null SIGNIFICA "NO SE PUDO VALIDAR", que no es lo mismo que
+     * "ninguno existe". Ahi no se marca nada en error y se avisa: si CPA01 no
+     * responde, marcar en error las mil doscientas filas seria informar como
+     * malas un monton de filas que probablemente esten bien, y bloquear una
+     * importacion legitima por un origen caido.
+     *
      * @param array $filasArchivo Filas de Planilla::parsear()
      * @param array $existentes Maestro vigente, indexado por COD_PROVEE
+     * @param array|null $validos Mapa COD_PROVEE => NOM_PROVEE de CPA01, o null
+     *                            si la validacion no se pudo correr
      * @return array ['filas', 'bajas', 'resumen', 'avisos']
      */
-    public static function compararImportacion($filasArchivo, $existentes) {
+    public static function compararImportacion($filasArchivo, $existentes, $validos = null) {
         $existentes = is_array($existentes) ? $existentes : [];
+        $validando = is_array($validos);
         $filas = [];
         $vistos = [];
         $tocados = [];
@@ -837,6 +961,15 @@ class ProveedoresCategorias {
             'sin_rubro' => 0, 'excluidos' => 0,
             'forma_desconocida' => 0, 'plazo_no_usable' => 0,
 
+            /* Cuantas filas traen un codigo que no existe en CPA01. Quedan en
+               ERROR y no se importan; el resto si. Ver la nota del encabezado. */
+            'no_en_tango' => 0,
+
+            /* Si la validacion contra CPA01 llego a correr. Un cero en
+               'no_en_tango' significa "ninguna fila esta mal" o "no se pudo
+               chequear", y son dos cosas muy distintas. */
+            'valido_contra_tango' => $validando,
+
             /* Cuantos de los cambios pisan una version cargada a mano. Ver la
                nota en el bucle. */
             'pisa_manuales' => 0
@@ -844,6 +977,22 @@ class ProveedoresCategorias {
 
         foreach (is_array($filasArchivo) ? $filasArchivo : [] as $cruda) {
             $fila = self::normalizarFila($cruda);
+
+            /* EL CODIGO TIENE QUE EXISTIR EN CPA01, y se chequea ANTES que el
+               duplicado: un codigo que no existe no se puede cargar ni una vez,
+               asi que decir "esta repetido" seria contestar una pregunta que ya
+               no importa. La fila queda en ERROR y el resto de la planilla se
+               importa igual. */
+            if ($fila['estado'] !== 'ERROR' && $validando
+                && !isset($validos[$fila['cod_provee']])) {
+                $fila['estado'] = 'ERROR';
+                $fila['no_en_tango'] = true;
+                $fila['motivo'] = 'El código "' . $fila['cod_provee'] . '" no existe en CPA01, '
+                    . 'el maestro de proveedores de Tango. Un proveedor que no está en Tango no '
+                    . 'va a cruzar contra ninguna cuenta a pagar, así que cargarlo no '
+                    . 'clasificaría nada. Revisá el código en la planilla.';
+                $resumen['no_en_tango']++;
+            }
 
             if ($fila['estado'] !== 'ERROR') {
                 $cod = $fila['cod_provee'];
@@ -1063,6 +1212,11 @@ class ProveedoresCategorias {
             'criterio_distrib' => null,
             'criterio_orig' => '',
             'excluido' => false,
+
+            /* Si el codigo no existe en CPA01. Se resuelve afuera -esta funcion
+               es pura y no toca la base- pero la clave viaja siempre, en false,
+               para que la pantalla no tenga que preguntar si llego. */
+            'no_en_tango' => false,
             'estado' => 'ALTA',
             'motivo' => '',
             'cambios' => []
@@ -1211,6 +1365,29 @@ class ProveedoresCategorias {
         if ($resumen['errores'] > 0) {
             $avisos[] = $resumen['errores'] . ' fila(s) no se pueden cargar y quedan afuera. '
                 . 'El resto se importa igual: mirá el motivo de cada una.';
+        }
+
+        /* EL CODIGO INEXISTENTE SE NOMBRA APARTE del conteo general de errores.
+           Es el unico de los motivos que se arregla mirando OTRO sistema -hay
+           que ir a Tango a ver cuál es el código de verdad- y no releyendo la
+           planilla, así que decir sólo "N filas en error" manda a buscar el
+           problema al lugar equivocado. */
+        if (!empty($resumen['no_en_tango'])) {
+            $avisos[] = $resumen['no_en_tango'] . ' fila(s) traen un código que NO existe en '
+                . 'CPA01, el maestro de proveedores de Tango. No se cargan: un proveedor que no '
+                . 'está en Tango no cruza contra ninguna cuenta a pagar, así que no clasificaría '
+                . 'nada. Buscá el código correcto en Tango y corregí la planilla.';
+        }
+
+        /* QUE LA VALIDACION NO HAYA CORRIDO NO PUEDE PASAR DESAPERCIBIDO. Sin
+           este aviso, una previsualización sin errores de código se lee como
+           "todos los códigos existen", cuando en realidad es "no se chequeó
+           ninguno". */
+        if (array_key_exists('valido_contra_tango', $resumen)
+            && !$resumen['valido_contra_tango']) {
+            $avisos[] = 'ATENCIÓN: no se pudo leer CPA01, así que los códigos de proveedor NO se '
+                . 'validaron contra Tango. Si alguno está mal tipeado, se va a cargar igual y '
+                . 'después no va a clasificar ninguna deuda.';
         }
 
         /* PISAR TRABAJO MANUAL NO ES UN ERROR, ES UN DATO. La planilla manda:
@@ -1400,6 +1577,24 @@ class ProveedoresCategorias {
      * importacion, y por el mismo motivo: el historial es lo unico que despues
      * explica por que un comprobante se clasificaba distinto.
      *
+     * EL CODIGO SE VALIDA CONTRA CPA01 Y SE RECHAZA SI NO EXISTE
+     * ----------------------------------------------------------
+     * No hay alta con advertencia: CPA01 es la tabla maestra de proveedores, y
+     * un codigo que no esta ahi no va a cruzar contra ninguna cuenta a pagar
+     * nunca. Cargarlo igual crearia una fila que no clasifica nada y cuyo
+     * sintoma -una deuda sin rubro- aparece semanas despues y en otra pantalla.
+     *
+     * EL NOMBRE SE TRAE DE CPA01 Y SE IGNORA EL QUE MANDE EL NAVEGADOR. Es
+     * informativo y tiene que decir lo mismo que Tango, o dos pantallas van a
+     * mostrar dos nombres para el mismo codigo. Mismo criterio que
+     * Echeqs::guardarClientePrechequeado() con la razon social de GVA14.
+     *
+     * SI CPA01 NO SE PUEDE LEER, EL ALTA SE BLOQUEA. Es lo contrario de lo que
+     * hace la importacion -que sigue y avisa- y la diferencia es el volumen:
+     * frenar un alta de a uno cuesta que la persona vuelva en un rato; frenar
+     * una planilla de mil doscientas filas por un origen caido bloquea un
+     * trabajo entero. Con una sola fila en juego, conviene no adivinar.
+     *
      * @param array $datos Las mismas claves que las columnas de importacion
      * @param string|null $usuario
      * @return array ['cod_provee', 'estado' => 'ALTA'|'CAMBIO', 'fila']
@@ -1422,6 +1617,26 @@ class ProveedoresCategorias {
         if ($fila['estado'] === 'ERROR') {
             throw new Exception($fila['motivo']);
         }
+
+        if (!$this->tango()->disponible()) {
+            throw new Exception('No se pudo leer CPA01, el maestro de proveedores de Tango, así '
+                . 'que no se puede verificar que el código exista. El alta se frena a propósito: '
+                . 'un código que no está en Tango no cruza contra ninguna cuenta a pagar y el '
+                . 'proveedor quedaría cargado sin clasificar nada. Probá de nuevo en un rato.');
+        }
+
+        $nombreTango = $this->tango()->existe($fila['cod_provee']);
+
+        if ($nombreTango === null) {
+            throw new Exception('El código "' . $fila['cod_provee'] . '" no existe en CPA01, el '
+                . 'maestro de proveedores de Tango. Buscá el proveedor por nombre en el campo de '
+                . 'código: el buscador trae el código correcto.');
+        }
+
+        /* EL NOMBRE ES EL DE TANGO, siempre. Lo que haya mandado el navegador
+           se descarta: el campo es de sólo lectura en la pantalla, pero este
+           método es alcanzable sin pasar por ella. */
+        $fila['nombre'] = $nombreTango;
 
         $mapa = $this->mapa();
         $existia = isset($mapa[$fila['cod_provee']]);
