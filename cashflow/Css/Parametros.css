@@ -565,3 +565,65 @@
     background: rgba(51, 102, 255, 0.12);
     color: var(--primary-color, #3366ff);
 }
+
+/* ============================================================================
+   PARAMETROS -> PROV. LOCALES
+   Las cinco listas de opciones del maestro de proveedores. Prefijo pplo-
+   porque Parametros.js busca .param-input, .mix-* y .respaldo-* en TODO el
+   documento. Ver Js/Parametros-Prov_locales.js.
+   ============================================================================ */
+
+/* Una opcion dada de baja sigue en la tabla: no se borra nunca, porque los
+   proveedores que la tienen la conservan. Se ve apagada para que no se confunda
+   con las que si se ofrecen, pero se ve: es la unica forma de reactivarla. */
+.pplo-opciones .pplo-baja {
+    opacity: 0.55;
+}
+
+.pplo-opciones .pplo-baja .pplo-valor,
+.pplo-opciones .pplo-baja .pplo-orden {
+    text-decoration: line-through;
+}
+
+.pplo-opciones .pplo-valor,
+.pplo-opciones .pplo-orden,
+.pplo-opciones .pplo-dias {
+    border-color: transparent;
+    background: transparent;
+}
+
+/* El campo editable se revela al pasar por encima: la tabla se lee como una
+   lista y se edita como un formulario, sin dibujar veinte recuadros. */
+.pplo-opciones .pplo-valor:hover,
+.pplo-opciones .pplo-orden:hover,
+.pplo-opciones .pplo-dias:hover,
+.pplo-opciones .pplo-valor:focus,
+.pplo-opciones .pplo-orden:focus,
+.pplo-opciones .pplo-dias:focus {
+    border-color: var(--border-color, #e2e5ed);
+    background: #fff;
+}
+
+/* VACIO NO ES CERO, y la celda tiene que decirlo: vacio es "este plazo no dice
+   cuando se paga" -DEBITO- y cero es "se paga el dia de la factura" -CONTADO-.
+   Sin la etiqueta, las dos celdas se ven igual de vacias. */
+.pplo-opciones .pplo-sin-dias {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: var(--text-muted, #7a8194);
+}
+
+.pplo-opciones .pplo-dias-etiqueta {
+    font-size: 11px;
+}
+
+/* ============================================================================
+   UN VALOR FUERA DE LISTA EN EL MAESTRO
+   Lo usa tambien el formulario de Proveedores Locales, que agrega la opcion al
+   select para no perder el valor guardado. Ver Proveedores-Proveedores_locales.js.
+   ============================================================================ */
+.prov-fuera-lista {
+    border-color: #ff9800 !important;
+    background-color: #fff8e1;
+}

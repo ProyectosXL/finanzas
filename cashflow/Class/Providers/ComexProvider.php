@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../CashflowProvider.php';
 require_once __DIR__ . '/../Parametros.php';
 require_once __DIR__ . '/../Comex.php';
+require_once __DIR__ . '/../DolarFuturo.php';
 
 /**
  * ComexProvider
@@ -13,27 +14,44 @@ require_once __DIR__ . '/../Comex.php';
  *   COMEX_PROV_EXT -> serie PAGOS, pagos a proveedores del exterior. En DOLARES.
  *   COMEX_NAC      -> serie NACIONALIZACION, gastos de nacionalizacion. En pesos.
  *
- * LA CONVERSION DE MONEDA VIVE ACA, NO EN EL MOTOR
- * El motor nunca ve dolares: todos los proveedores le entregan pesos. El tipo
- * de cambio con el que se valua un pago futuro es criterio de negocio de
- * Comercio Exterior, no del tablero, y el dia que haya que usar una curva por
- * mes en lugar de un valor unico el cambio es solo aca.
+ * LA CONVERSION DE MONEDA YA NO VIVE ACA: VIVE EN Comex
+ * -----------------------------------------------------
+ * El motor sigue sin ver dolares -todos los proveedores le entregan pesos- pero
+ * la multiplicacion se movio a Comex::valuar(), y no es un detalle de
+ * organizacion.
  *
- * Si falta el parametro del tipo de cambio, la fila va en CERO con un aviso que
- * nombra el parametro. No se lee con Parametros::num() justamente por eso:
- * num() lanza si la clave no esta, y un proveedor no puede tumbar el tablero.
+ * Antes se valuaba con UN parametro global, 'comex_tipo_cambio_usd', aplicado a
+ * la serie entera de una: un multiplicador unico en la llamada a agrupar().
+ * Mientras el criterio era un numero, daba lo mismo donde estuviera escrito.
+ *
+ * Ahora cada fila se valua con la CURVA DE DOLAR FUTURO ROFEX segun el mes de
+ * SU fecha de pago, asi que ya no hay un multiplicador: hay una cotizacion por
+ * fila. Y esa misma cotizacion es la que la pestana Proveedores Exterior
+ * necesita mostrar. Con la cuenta en los dos lados, el tablero y la pestana
+ * podrian valuar distinto el mismo contenedor; con la cuenta en el getter,
+ * los dos leen el mismo IMPORTE_ARS. Ver el encabezado de Comex y el de
+ * DolarFuturo.
+ *
+ * EL PARAMETRO GLOBAL SE RETIRO, Y NO CONVIVE
+ * -------------------------------------------
+ * 'comex_tipo_cambio_usd' esta en Parametros::RETIRADOS: la fila sigue en la
+ * base -este modulo no borra parametros historicos- y el formulario ya no la
+ * muestra. Dos criterios de valuacion conviviendo es la peor opcion posible,
+ * porque el tablero y la pestana muestran dos numeros para el mismo contenedor
+ * y nadie puede decir cual es cual.
+ *
+ * Si la curva no se puede leer, la fila va en CERO con un aviso que nombra la
+ * tabla, igual que antes hacia con el parametro faltante: un proveedor no puede
+ * tumbar el tablero.
  *
  * NO SE REUSAN procesarDatosPorPeriodo() NI procesarCronoNacPorPeriodo()
  * Esos dos metodos agrupan por dia del mes (1..31) con una ventana fija del mes
  * actual mas once, y descartan en silencio todo lo que cae afuera. El tablero
  * necesita claves 'Y-m-d' sobre el eje configurable y necesita SABER lo que
  * quedo afuera. Se agrupa desde los getters crudos con Horizonte::agrupar() y
- * no se toca Comex.php, del que dependen dos pestanas que funcionan.
+ * no se toca el resto de Comex.php, del que dependen dos pestanas que funcionan.
  */
 class ComexProvider extends CashflowProvider {
-
-    /** Clave del tipo de cambio en RO_T_CASHFLOW_PARAMETROS (MODULO='COMEX') */
-    const PARAM_TIPO_CAMBIO = 'comex_tipo_cambio_usd';
 
     /**
      * Aviso comun a las dos series: la consulta de origen solo trae
@@ -60,23 +78,40 @@ class ComexProvider extends CashflowProvider {
     }
 
     /**
-     * Pagos a proveedores del exterior, convertidos de dolares a pesos.
+     * Pagos a proveedores del exterior, ya convertidos a pesos fila por fila.
+     *
+     * SE AGRUPA POR IMPORTE_ARS Y SIN MULTIPLICADOR. Cada fila llega con su
+     * propia valuacion resuelta -la cotizacion del mes de su fecha de pago, o
+     * el override que alguien le cargo- y lo unico que queda por hacer es
+     * ubicarla en el eje. El multiplicador unico de agrupar() ya no sirve para
+     * esto: no hay UN tipo de cambio.
      *
      * La fecha que manda es FECHA_PAGO_EFECTIVA, que Comex resuelve como
      * FECHA_PAGO_EDIT si el usuario la corrigio y FECHA_EST_PAGO si no. Puede
-     * venir nula: en ese caso el importe no se puede ubicar en el tiempo y
-     * Horizonte::agrupar() lo acumula en 'sin_fecha' para que se informe.
+     * venir nula, y ahi hay algo importante: esas filas NO se pueden convertir
+     * -sin mes no hay cotizacion- asi que su IMPORTE_ARS es null y no entran a
+     * 'sin_fecha', que es un acumulador EN PESOS. Se cuentan aparte y se
+     * informan en dolares. Mezclar las dos monedas en el mismo campo daria un
+     * numero que no significa nada.
      *
      * @param Horizonte $h
      * @param Comex $comex
      * @return array Serie
      */
     private function pagosExterior($h, $comex) {
-        $tipoCambio = $this->tipoCambio();
-
         $this->avisar('Proveedores Exterior: ' . self::AVISO_FILTRO_EMBARQUE);
 
-        if ($tipoCambio === null) {
+        $dolar = $comex->dolarFuturo();
+
+        /* La curva es el criterio de valuacion entero: sin ella no hay ningun
+           pago que se pueda expresar en pesos. La fila va en cero con el aviso
+           que nombra la tabla, igual que antes con el parametro faltante. */
+        if (!$dolar->disponible()) {
+            $this->avisar('Proveedores Exterior: no se pudo leer la curva de dólar futuro ROFEX ('
+                . DolarFuturo::ORIGEN . '), así que los pagos al exterior van en cero. '
+                . 'Los importes en dólares están: lo que falta es a cuánto convertirlos. '
+                . ($dolar->error() === null ? '' : $dolar->error()));
+
             return [
                 'dias' => [],
                 'meses' => [],
@@ -85,15 +120,35 @@ class ComexProvider extends CashflowProvider {
             ];
         }
 
-        $serie = $h->agrupar(
-            $comex->getProveedoresExterior(),
-            'FECHA_PAGO_EFECTIVA',
-            'VALOR_FOB_DOLAR',
-            $tipoCambio
-        );
+        $filas = $comex->getProveedoresExterior();
+
+        $serie = $h->agrupar($filas, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_ARS');
 
         $serie['moneda_origen'] = 'USD';
-        $serie['tipo_cambio'] = $tipoCambio;
+
+        /* CON QUE COTIZACION SE CONVIRTIO. El contrato de la serie tiene UN
+           escalar, y la valuacion ahora es por fila: solo se informa cuando
+           todas las filas se valuaron con el mismo numero, que es el mismo
+           criterio que OtrosIngresosProvider usa para los dolares comitente.
+           Con varias, el detalle por fila lo tiene la pestana, y el tablero
+           dibuja la marca de "valuado con la curva". */
+        $usadas = [];
+
+        foreach ($filas as $f) {
+            if ($f['COTIZ_USD'] !== null) {
+                $usadas[(string) $f['COTIZ_USD']] = floatval($f['COTIZ_USD']);
+            }
+        }
+
+        $serie['tipo_cambio'] = (count($usadas) === 1) ? reset($usadas) : null;
+
+        /* Los mismos avisos que muestra la pestana, escritos una sola vez en
+           Comex::avisosValuacion(). Se les antepone el nombre de la fila
+           porque en el tablero conviven los avisos de todos los modulos y un
+           mensaje suelto no dice de cual es. */
+        foreach (Comex::avisosValuacion($filas, $dolar->ultimoMes()) as $aviso) {
+            $this->avisar('Proveedores Exterior: ' . $aviso);
+        }
 
         return $serie;
     }
@@ -148,28 +203,4 @@ class ComexProvider extends CashflowProvider {
             + $serie['sin_fecha'];
     }
 
-    /**
-     * Tipo de cambio para valuar los pagos en dolares.
-     *
-     * @return float|null null si el parametro falta o no es positivo
-     */
-    private function tipoCambio() {
-        $map = (new Parametros())->getParametrosMap();
-
-        $valor = isset($map[self::PARAM_TIPO_CAMBIO])
-            ? floatval($map[self::PARAM_TIPO_CAMBIO])
-            : 0;
-
-        if ($valor <= 0) {
-            $this->avisar(
-                'Proveedores Exterior: falta el parametro "' . self::PARAM_TIPO_CAMBIO
-                . '" o esta en cero, asi que los pagos en dolares se muestran en cero. '
-                . 'Cargalo en Parametros.'
-            );
-
-            return null;
-        }
-
-        return $valor;
-    }
 }

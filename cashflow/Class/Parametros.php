@@ -29,8 +29,20 @@ class Parametros {
      *   CLIENTE, en RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE.DIAS_PRECHEQUEADO. Un
      *   unico numero global obligaba a elegir cual de todos los clientes
      *   quedaba bien calculado. Ver README-ventas.md.
+     *
+     *   'comex_tipo_cambio_usd' -> los pagos a proveedores del exterior pasaron
+     *   a valuarse con la CURVA DE DOLAR FUTURO ROFEX, segun el mes de la fecha
+     *   estimada de pago de cada contenedor. Un unico tipo de cambio global
+     *   convertia por igual el pago del mes que viene y el de dentro de once
+     *   meses, que es la cuenta que el encabezado de Cotizacion describe como
+     *   incorrecta: no proyecta, reexpresa toda la serie a moneda de hoy.
+     *
+     *   EL DOLAR FUTURO ES EL UNICO CRITERIO Y POR ESO ESTE PARAMETRO SE
+     *   RETIRA. Dejarlo editable con la curva ya funcionando seria peor que
+     *   borrarlo: un campo que se puede tocar, que parece decidir la valuacion
+     *   de Comex y que no cambia nada. Ver Class/DolarFuturo.php.
      */
-    const RETIRADOS = ['dias_prechequeado'];
+    const RETIRADOS = ['dias_prechequeado', 'comex_tipo_cambio_usd'];
 
     /**
      * Modulos que expone la pestana Parametros, en el orden de las sub-pestanas.
@@ -84,6 +96,15 @@ class Parametros {
             'icono' => 'fa-hand-holding-dollar',
             'descripcion' => 'Plazos promedio de pago (PPP) calculados y editables, y escalas de descuento por cliente',
             'secciones' => ['cobranzas_clientes']
+        ],
+        'PROV_LOCALES' => [
+            'nombre' => 'Prov. Locales',
+            'icono' => 'fa-file-invoice-dollar',
+            'descripcion' => 'Las listas de valores con las que se clasifica a cada proveedor: '
+                . 'rubro económico, rubro, centro de costos, plazo de pago y criterio de '
+                . 'distribución. Alimentan el alta manual del maestro de Proveedores Locales '
+                . 'y la validación de su importación',
+            'secciones' => ['prov_locales_opciones']
         ],
         'CASHFLOW' => [
             'nombre' => 'Cashflow',
@@ -200,6 +221,29 @@ class Parametros {
                         $modulo['avisos'][] = 'No se pudieron leer los parámetros de Cobranzas: '
                             . $e->getMessage();
                     }
+                } elseif ($seccion === 'prov_locales_opciones') {
+                    /* Mismo criterio que Saldos, Cob. Electrónicos y
+                       Pre-chequeado: la tabla es del módulo Proveedores Locales
+                       y la lee su propia clase. Va dentro de un try porque su
+                       script puede no haberse corrido todavía, y eso no puede
+                       tumbar la pestaña entera de Parámetros.
+
+                       LOS USOS VIAJAN CON LAS LISTAS. Sin ellos, dar de baja un
+                       valor es a ciegas: no hay forma de saber si saca una
+                       opción que no usa nadie o una que tienen doscientos
+                       proveedores, que van a quedar todos fuera de lista. */
+                    try {
+                        $modulo[$seccion] = $this->provLocalesOpciones();
+
+                        foreach ($modulo[$seccion]['avisos'] as $a) {
+                            $modulo['avisos'][] = $a;
+                        }
+                    } catch (Throwable $e) {
+                        $modulo[$seccion] = ['tipos' => [], 'listas' => [], 'usos' => [],
+                                             'avisos' => [], 'tabla_creada' => false];
+                        $modulo['avisos'][] = 'No se pudieron leer las listas de opciones de '
+                            . 'Proveedores Locales: ' . $e->getMessage();
+                    }
                 }
             }
 
@@ -261,6 +305,44 @@ class Parametros {
         }
 
         return $this->echeqs;
+    }
+
+    /**
+     * Las cinco listas de opciones del maestro de Proveedores Locales, con sus
+     * avisos y con CUANTOS proveedores usan cada valor.
+     *
+     * LOS USOS SALEN DEL MAESTRO y por eso esta pantalla lo lee: sin ese
+     * numero, dar de baja un valor es a ciegas. No hay forma de saber si se
+     * saca una opcion que no usa nadie o una que tienen doscientos proveedores,
+     * que van a quedar todos marcados como fuera de lista.
+     *
+     * Si el maestro no se puede leer, las listas se muestran igual y los usos
+     * van vacios: un control que falla no puede llevarse puesta la pantalla que
+     * administra las listas.
+     *
+     * @return array ['tipos', 'listas', 'usos', 'avisos', 'tabla_creada']
+     */
+    private function provLocalesOpciones() {
+        require_once __DIR__ . '/ProveedoresOpciones.php';
+        require_once __DIR__ . '/ProveedoresCategorias.php';
+
+        $opciones = new ProveedoresOpciones();
+        $usos = [];
+
+        try {
+            $usos = ProveedoresOpciones::usos((new ProveedoresCategorias())->mapa());
+        } catch (Throwable $e) {
+            $usos = [];
+        }
+
+        return [
+            'tipos' => ProveedoresOpciones::TIPOS,
+            'tipo_plazo' => ProveedoresOpciones::TIPO_PLAZO,
+            'listas' => $opciones->listas(),
+            'usos' => $usos,
+            'avisos' => $opciones->getAvisos(),
+            'tabla_creada' => $opciones->tablaCreada()
+        ];
     }
 
     /**

@@ -1,6 +1,31 @@
 /**
  * Comex - Proveedores Exterior JavaScript
- * Incluye funcionalidad de edición de Fecha Est. Pago
+ * Incluye funcionalidad de edición de Fecha Est. Pago y de la cotización
+ *
+ * LA GRILLA ESTÁ EN PESOS, Y EL DÓLAR ESTÁ A LA VISTA
+ * ---------------------------------------------------
+ * Antes esta pestaña mostraba dólares y el tablero mostraba pesos, convertidos
+ * con un parámetro global. Eran dos pantallas del mismo módulo midiendo cosas
+ * distintas: los totales de acá no se podían comparar contra la fila del
+ * tablero que esta pestaña explica.
+ *
+ * Ahora las columnas del eje, los totales y las tarjetas están en PESOS, y cada
+ * fila dice con QUÉ DÓLAR se valuó: el símbolo de la curva de futuros ROFEX
+ * (DLR/NOV26) y su valor. El FOB en dólares queda como referencia, que es el
+ * dato con el que se chequea contra la factura del proveedor.
+ *
+ * La cuenta no se hace acá: viene resuelta del backend -Class/Comex.php y
+ * Class/DolarFuturo.php- fila por fila, y es la MISMA que consume el tablero.
+ * En el navegador no queda ninguna multiplicación, por el mismo motivo por el
+ * que no quedó ninguna aritmética de fechas.
+ *
+ * DOS MARCAS, DOS COSAS DISTINTAS
+ * -------------------------------
+ *   naranja  la cotización la corrigió una persona para este contenedor
+ *   punteado el mes de pago no está en la curva y se usó el más cercano
+ *
+ * Las dos se explican en el tooltip. Un importe distinto del que esperaba el
+ * usuario, sin nada que diga por qué, es indistinguible de un error.
  *
  * LAS TRES VISTAS LAS MANEJA eje-vistas.js
  * ----------------------------------------
@@ -96,6 +121,7 @@
                         generarTabla();
                         calcularResumenes();
                         pintarAvisos();
+                        pintarOrigenCotizacion();
                         mostrarCargando(false);
                     } else {
                         console.error('Error al cargar datos:', result);
@@ -165,6 +191,41 @@
                 + '<i class="fas fa-triangle-exclamation me-1"></i>'
                 + avisos.join(' ') + '</small></div>'
             : '';
+    }
+
+    /**
+     * De dónde sale el dólar con el que está valuada la tabla.
+     *
+     * Va en el pie junto al período, y no es decoración: un importe en pesos
+     * que no se puede atar a una cotización identificada y fechada no se puede
+     * auditar contra nada. Es el mismo criterio con el que Dólares Cuenta
+     * Comitente muestra la fecha y la punta de su cotización.
+     */
+    function pintarOrigenCotizacion() {
+        var el = document.getElementById('cotizProvExt');
+
+        if (!el) {
+            return;
+        }
+
+        var c = (datosProveedores && datosProveedores.cotizacion) || {};
+
+        if (!c.disponible) {
+            el.innerHTML = '<span class="text-danger">'
+                + '<i class="fas fa-triangle-exclamation me-1"></i>'
+                + 'Sin curva de dólar futuro: los importes no se pueden expresar en pesos.'
+                + '</span>';
+            return;
+        }
+
+        el.textContent = 'Valuado con dólar futuro ROFEX'
+            + (c.ultimo_mes ? ', curva hasta ' + c.ultimo_mes : '')
+            // Sólo el día: 'actualizada' viene como 'Y-m-d H:i:s' y formatDate
+            // espera una fecha pelada.
+            + (c.actualizada
+                ? ' (actualizada el ' + formatDate(String(c.actualizada).substring(0, 10)) + ')'
+                : '')
+            + (c.editable ? '.' : '. La corrección manual está apagada: falta el script.');
     }
 
 /**
@@ -239,7 +300,7 @@ function generarFilasDatos() {
         html += `<td class="center">${item.CONTENEDOR || ''}</td>`;
         html += `<td class="center">${item.ORDEN_COMPRA || ''}</td>`;
         html += `<td>${item.DESPACHANTE || ''}</td>`;
-        html += `<td class="currency">${formatCurrency(item.VALOR_FOB_DOLAR)}</td>`;
+        html += `<td class="currency">${formatUSD(item.VALOR_FOB_DOLAR)}</td>`;
         
         // ETD con indicador de confirmación
         var etdConfirm = item.ETD_CONFIRM == 1;
@@ -277,7 +338,11 @@ function generarFilasDatos() {
                         </div>
                     ` : ''}
                  </td>`;
-        
+
+        // Con qué dólar se valuó la fila, y el importe que sale de eso.
+        html += celdaCotizacion(item);
+        html += celdaImporteArs(item);
+
         // Los importes por columna ya vienen resueltos: la regla de "día O mes,
         // nunca las dos" la aplicó Horizonte::agrupar() en el backend, una sola
         // vez y para todas las pestañas.
@@ -300,6 +365,82 @@ function generarFilasDatos() {
 }
 
 /**
+ * La celda del dólar aplicado: qué cotización se usó, de qué mes, y por qué.
+ *
+ * SE MARCAN LOS DOS CASOS ESPECIALES y se explican en el tooltip. El texto lo
+ * escribe el backend -DolarFuturo::explicar()- y no este archivo: lo usan el
+ * tablero y la pestaña, y dos textos parecidos se desincronizan.
+ *
+ * SIN COTIZACIÓN SE DIBUJA UN GUIÓN, no un cero. Es la diferencia entre "no hay
+ * dato" y "el dato es cero", y es el criterio de todo el módulo.
+ *
+ * @param {Object} item Fila del payload
+ * @returns {string} HTML de la celda
+ */
+function celdaCotizacion(item) {
+    var editable = !!(datosProveedores.cotizacion && datosProveedores.cotizacion.editable);
+    var detalle = item.COTIZ_DETALLE || '';
+    var clases = ['center', 'cotiz-cell'];
+
+    if (item.COTIZ_ORIGEN === 'OVERRIDE') {
+        clases.push('cotiz-override');
+    } else if (item.COTIZ_ORIGEN === 'APROXIMADA') {
+        clases.push('cotiz-aproximada');
+    }
+
+    if (editable) {
+        clases.push('cotiz-editable');
+    }
+
+    var cuerpo;
+
+    if (item.COTIZ_USD === null || item.COTIZ_USD === undefined) {
+        cuerpo = '<span class="cotiz-sin">—</span>';
+    } else {
+        cuerpo = '<span class="cotiz-valor">' + formatCotiz(item.COTIZ_USD) + '</span>'
+            + '<span class="cotiz-simbolo">'
+            + escaparAttrProv(item.COTIZ_ORIGEN === 'OVERRIDE'
+                ? 'a mano'
+                : (item.COTIZ_SIMBOLO || item.COTIZ_MES || ''))
+            + '</span>';
+
+        if (item.COTIZ_ORIGEN === 'APROXIMADA') {
+            cuerpo += '<i class="fas fa-code-branch cotiz-marca" aria-hidden="true"></i>';
+        } else if (item.COTIZ_ORIGEN === 'OVERRIDE') {
+            cuerpo += '<i class="fas fa-pen cotiz-marca" aria-hidden="true"></i>';
+        }
+    }
+
+    return '<td class="' + clases.join(' ') + '"'
+        + ' data-id="' + item.ID + '"'
+        + ' data-cotiz="' + (item.COTIZ_USD_EDIT === null || item.COTIZ_USD_EDIT === undefined
+            ? '' : item.COTIZ_USD_EDIT) + '"'
+        + ' title="' + escaparAttrProv(detalle
+            + (editable ? ' Hacé clic para corregirla sólo para este contenedor; '
+                + 'dejala vacía para volver a la curva.' : ''))
+        + '"' + (editable ? ' onclick="editarCotizacion(this)"' : '') + '>'
+        + cuerpo + '</td>';
+}
+
+/**
+ * El importe en pesos de la fila: el FOB por la cotización que le tocó.
+ *
+ * EN BLANCO CUANDO NO SE PUDO VALUAR, con el motivo en el tooltip. Un cero diría
+ * que este contenedor no se paga, que es una afirmación que nadie hizo.
+ *
+ * @param {Object} item Fila del payload
+ * @returns {string} HTML de la celda
+ */
+function celdaImporteArs(item) {
+    if (item.IMPORTE_ARS === null || item.IMPORTE_ARS === undefined) {
+        return '<td class="currency cotiz-sin" title="'
+            + escaparAttrProv(item.COTIZ_DETALLE || '') + '">—</td>';
+    }
+
+    return '<td class="currency importe-ars">' + formatCurrency(item.IMPORTE_ARS) + '</td>';
+}
+
+/**
  * Genera la fila de totales
  */
 function generarFilaTotales() {
@@ -313,7 +454,16 @@ function generarFilaTotales() {
     // items: recalcularlos era una tercera copia de la regla de "día O mes", y
     // una copia que se puede desincronizar de las celdas que tiene arriba.
     var totales = datosProveedores.totales || {};
-    var html = '<td colspan="8" class="total-label">TOTALES</td>';
+
+    /* Ocho columnas fijas más las dos de la valuación. El pie NO totaliza la
+       cotización: promediar cotizaciones de meses distintos daría un número que
+       no es el tipo de cambio de nada. Lo que sí suma es la columna en pesos. */
+    var html = '<td colspan="9" class="total-label">TOTALES</td>'
+        + '<td class="currency" title="' + escaparAttrProv('Suma el importe de TODAS las filas '
+            + 'de la tabla, incluidas las que caen fuera del horizonte. Por eso puede no '
+            + 'coincidir con el total de las columnas, que sólo cubre el período. La '
+            + 'diferencia está en los avisos de arriba.') + '">'
+        + formatCurrency(sumaImporteArs()) + '</td>';
 
     vistas.columnas().forEach(function(col) {
         var valor = Number(vistas.valor(totales, col)) || 0;
@@ -430,6 +580,15 @@ window.editarFechaPago = function(cell) {
         .then(response => response.json())
         .then(result => {
             if (result.success) {
+                /* SI EL CAMBIO DE MES DESCARTÓ LA COTIZACIÓN CARGADA A MANO,
+                   hay que decirlo: el usuario movió una fecha y va a ver
+                   cambiar un importe por una segunda razón que no pidió. El
+                   backend lo resuelve en la misma transacción y lo informa
+                   acá. Ver Comex::updateFechaPago(). */
+                if (result.data && result.data.cotizacion_descartada) {
+                    alert(result.message);
+                }
+
                 // Recargar datos para reflejar el cambio
                 cargarDatos();
             } else {
@@ -455,6 +614,98 @@ window.editarFechaPago = function(cell) {
     });
 };
 
+/**
+ * Permite corregir la cotización de UN contenedor.
+ *
+ * MISMA MECÁNICA QUE LA FECHA -clic, input, Enter o blur para guardar, Esc para
+ * cancelar- a propósito: es la segunda cosa editable de esta grilla y aprender
+ * dos gestos distintos para lo mismo no tiene ninguna ventaja.
+ *
+ * VACÍO BORRA EL OVERRIDE y la fila vuelve a la curva. Es la única forma de
+ * deshacer una corrección, así que tiene que ser la misma acción y no un botón
+ * aparte.
+ *
+ * NO TOCA LA TABLA MAESTRA DEL ROFEX: el override vive en la tabla del cashflow
+ * y afecta a este contenedor, no a todos los del mes.
+ *
+ * @param {HTMLElement} cell Celda donde se hizo click
+ */
+window.editarCotizacion = function(cell) {
+    if (cell.querySelector('input')) {
+        return;
+    }
+
+    var idMg = cell.dataset.id;
+    var originalContent = cell.innerHTML;
+
+    var input = document.createElement('input');
+
+    input.type = 'text';
+    input.className = 'cotiz-input';
+    input.value = cell.dataset.cotiz || '';
+    input.placeholder = 'vacío = curva';
+
+    cell.innerHTML = '';
+    cell.appendChild(input);
+    input.focus();
+    input.select();
+
+    var guardando = false;
+
+    var guardar = function() {
+        if (guardando) {
+            return;
+        }
+
+        guardando = true;
+
+        var nueva = input.value.trim();
+
+        // Nada que hacer: ni se cargó ni se borró nada.
+        if (nueva === (cell.dataset.cotiz || '')) {
+            cell.innerHTML = originalContent;
+            return;
+        }
+
+        cell.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+        fetch('Controller/ComexController.php?action=updateCotizacion', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id_mg: idMg, cotizacion: nueva })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(result) {
+            if (result.success) {
+                // Se recarga todo: cambia el importe de la fila, su columna del
+                // eje, el total y los avisos. Repintar sólo la celda dejaría
+                // las otras cuatro cosas diciendo lo anterior.
+                cargarDatos();
+            } else {
+                alert('No se pudo guardar la cotización: ' + result.message);
+                cell.innerHTML = originalContent;
+                guardando = false;
+            }
+        })
+        .catch(function(error) {
+            console.error('Error:', error);
+            alert('Error de conexión al guardar la cotización');
+            cell.innerHTML = originalContent;
+            guardando = false;
+        });
+    };
+
+    input.addEventListener('blur', guardar);
+    input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            guardar();
+        } else if (e.key === 'Escape') {
+            guardando = true;   // que el blur que viene no dispare el guardado
+            cell.innerHTML = originalContent;
+        }
+    });
+};
+
 /** Escapa un texto para meterlo en un atributo o en el cuerpo de una celda */
 function escaparAttrProv(texto) {
     return String(texto === null || texto === undefined ? '' : texto)
@@ -464,11 +715,54 @@ function escaparAttrProv(texto) {
 }
 
 /**
- * Formatea un valor como moneda USD
+ * Suma el importe en pesos de todas las filas de la tabla.
+ *
+ * Las que no se pudieron valuar suman cero acá y se informan aparte, en dólares:
+ * es la única moneda en la que existen, y meterlas en este total las haría
+ * desaparecer. Ver Comex::avisosValuacion().
+ *
+ * @returns {number}
+ */
+function sumaImporteArs() {
+    return ((datosProveedores && datosProveedores.filas) || []).reduce(function(a, f) {
+        return a + (Number(f.IMPORTE_ARS) || 0);
+    }, 0);
+}
+
+/**
+ * Formatea un valor en PESOS, que es la moneda del eje y de los totales.
+ *
+ * Se llama formatCurrency porque es la moneda de la tabla: las columnas del
+ * eje, el pie y las tarjetas están en pesos. Los dólares son la referencia y
+ * tienen su propia función, que lo dice en el nombre.
  */
 function formatCurrency(value) {
     var num = parseFloat(value) || 0;
+    return '$ ' + num.toLocaleString('es-AR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+}
+
+/** Formatea un valor en dólares: el FOB, que queda como referencia */
+function formatUSD(value) {
+    var num = parseFloat(value) || 0;
     return 'U$S ' + num.toLocaleString('es-AR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+}
+
+/**
+ * Formatea una cotización.
+ *
+ * Con DOS decimales y no con los cuatro que guarda la base: son los que se leen,
+ * y el valor exacto ya está en el tooltip y en el campo de edición. Cuatro
+ * decimales en una columna angosta no se leen y no deciden nada.
+ */
+function formatCotiz(value) {
+    var num = parseFloat(value) || 0;
+    return '$ ' + num.toLocaleString('es-AR', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
     });

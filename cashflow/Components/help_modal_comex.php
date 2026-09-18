@@ -27,6 +27,14 @@
                             <i class="fas fa-tag me-1"></i> Indicadores
                         </button>
                     </li>
+                    <!-- De dónde sale el dólar con el que se valúa Proveedores
+                         Exterior. Es la pregunta que más se hace sobre esa
+                         pantalla desde que los importes están en pesos. -->
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="tab-dolar" data-bs-toggle="tab" data-bs-target="#content-dolar" type="button">
+                            <i class="fas fa-dollar-sign me-1"></i> El dólar
+                        </button>
+                    </li>
                 </ul>
 
                 <div class="tab-content" id="ayudaTabContent">
@@ -211,6 +219,124 @@
                                     </div>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab: El dólar -->
+                    <div class="tab-pane fade" id="content-dolar" role="tabpanel">
+                        <h6 class="mb-3">
+                            <i class="fas fa-dollar-sign text-primary me-2"></i>
+                            Con qué dólar se valúa cada contenedor
+                        </h6>
+
+                        <div class="alert alert-info mb-3">
+                            <i class="fas fa-lightbulb me-2"></i>
+                            <strong>La tabla está en pesos.</strong> El cashflow es en pesos, y
+                            esta pestaña es el detalle de una fila del tablero: si mostrara
+                            dólares, sus totales no se podrían comparar contra la fila que
+                            explica. El <strong>Valor FOB (USD)</strong> queda como referencia,
+                            que es el dato con el que se chequea contra la factura del proveedor.
+                        </div>
+
+                        <div class="help-section mb-4">
+                            <h6 class="fw-bold mb-2">De dónde sale</h6>
+                            <p class="mb-2">
+                                De la <strong>curva de dólar futuro ROFEX</strong>: el mercado
+                                publica a cuánto se puede comprar hoy un dólar de cada mes
+                                futuro, y ese es el precio con el que se valúa cada contenedor
+                                <strong>según el mes de su fecha estimada de pago</strong>.
+                            </p>
+                            <p class="mb-2">
+                                Eso significa que <strong>dos contenedores que se pagan en meses
+                                distintos se valúan a dos dólares distintos</strong>. La columna
+                                <strong>Dólar aplicado</strong> dice cuál le tocó a cada uno, con
+                                el símbolo del contrato (<code>DLR/NOV26</code>) y su valor.
+                            </p>
+                            <div class="alert alert-secondary mb-0 py-2">
+                                <small>
+                                    <strong>Es el único criterio.</strong> Antes se usaba un
+                                    parámetro global, <code>comex_tipo_cambio_usd</code>: un solo
+                                    número con el que se convertían por igual el pago del mes que
+                                    viene y el de dentro de once meses. Ese parámetro se retiró de
+                                    Parámetros a propósito —dos criterios de valuación conviviendo
+                                    significan dos números distintos para el mismo contenedor, sin
+                                    que nadie pueda decir cuál es cuál—. Su fila sigue en la base
+                                    por si hay que reconstruir con qué número se proyectó antes.
+                                </small>
+                            </div>
+                        </div>
+
+                        <div class="help-section mb-4">
+                            <h6 class="fw-bold mb-2">Las marcas de la columna</h6>
+                            <div class="row g-2">
+                                <div class="col-md-6">
+                                    <div class="p-2 border rounded" style="background-color: #fff8e1; border-left: 3px solid #ff9800 !important;">
+                                        <strong><i class="fas fa-pen me-1"></i> Corregida a mano</strong>
+                                        <br><small class="text-muted">
+                                            Alguien le puso una cotización a <em>este</em>
+                                            contenedor y esa manda sobre la curva. Se usa cuando la
+                                            operación ya está cerrada a un tipo de cambio que el
+                                            mercado no refleja.
+                                        </small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="p-2 border rounded" style="border-left: 3px dashed #7e57c2 !important;">
+                                        <strong><i class="fas fa-code-branch me-1"></i> Mes fuera de la curva</strong>
+                                        <br><small class="text-muted">
+                                            El pago cae después del último mes que publica el
+                                            ROFEX, así que se usó la cotización del mes más cercano
+                                            que hay. El importe es una aproximación y por eso se
+                                            marca.
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="help-section mb-4">
+                            <h6 class="fw-bold mb-2">Cómo corregir la cotización de un contenedor</h6>
+                            <ol class="mb-2">
+                                <li class="mb-2">
+                                    <strong>Click en la celda</strong> de la columna "Dólar
+                                    aplicado".
+                                </li>
+                                <li class="mb-2">
+                                    <strong>Escribí el valor</strong> (acepta coma decimal:
+                                    <code>1.450,75</code>) y <kbd>Enter</kbd>.
+                                </li>
+                                <li class="mb-2">
+                                    <strong>Para volver a la curva</strong>, dejá el campo
+                                    <strong>vacío</strong> y guardá. Es la única forma de deshacer
+                                    una corrección.
+                                </li>
+                            </ol>
+                            <div class="alert alert-warning mb-0 py-2">
+                                <small>
+                                    <i class="fas fa-triangle-exclamation me-1"></i>
+                                    <strong>Si movés la fecha de pago a otro mes, la corrección se
+                                    descarta</strong> y el contenedor vuelve a valuarse con la
+                                    curva del mes nuevo. Una cotización cargada a mano es una
+                                    afirmación sobre <em>un mes</em>: si el pago se corre a otro,
+                                    conservarla valuaría el mes nuevo con un número pensado para el
+                                    viejo. La pantalla lo avisa cuando pasa.
+                                </small>
+                            </div>
+                        </div>
+
+                        <div class="help-section">
+                            <h6 class="fw-bold mb-2">Cuando un contenedor aparece sin importe</h6>
+                            <p class="mb-0">
+                                Un guión en la columna de pesos significa que
+                                <strong>no se pudo valuar</strong>, y el motivo está en el tooltip
+                                de la celda. Casi siempre es que <strong>el contenedor no tiene
+                                fecha estimada de pago</strong>: sin fecha no hay mes, y sin mes no
+                                hay cotización que pedirle a la curva. No se le aplica ningún tipo
+                                de cambio inventado —un cero se leería como "este contenedor no se
+                                paga"—, y el aviso de arriba de la tabla dice cuántos son y cuánto
+                                suman <strong>en dólares</strong>. Cargales la fecha y el importe
+                                aparece solo.
+                            </p>
                         </div>
                     </div>
                 </div>

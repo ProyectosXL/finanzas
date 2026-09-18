@@ -38,7 +38,14 @@ Contra `central`, en cualquier momento:
 -- 3. sql/cashflow_prov_locales_maestro_manual.sql (para cargar el maestro a mano)
 -- 4. sql/cashflow_prov_locales_forma_por_factura.sql (forma de pago por factura)
 -- 5. sql/cashflow_prov_locales_excluir_factura.sql   (excluir facturas sueltas)
+-- 6. sql/cashflow_prov_locales_opciones.sql          (las cinco listas de opciones)
 ```
+
+El sexto crea `RO_T_CASHFLOW_PROV_LOCALES_OPCIONES` y **siembra las cinco listas con los valores que ya están cargados en el maestro vigente**, ordenados por frecuencia de uso: lo que se usa doscientas veces arriba, lo que se usó una vez al final, que es donde se nota que probablemente sea un typo. Los valores se siembran **tal como están guardados**, sin corregir mayúsculas ni espacios: corregirlos ahí cambiaría en silencio la serie del tablero de los proveedores que los tienen.
+
+> Es la misma lección que este módulo ya aprendió con `FORMAS_PAGO`: la primera versión de esa lista se escribió a ojo y **ninguno** de esos cinco valores existía en el maestro real, mientras que los que sí existían y faltaban eran el 54% de los proveedores.
+
+Es **reejecutable y no revierte decisiones**: los valores que ya están no se vuelven a insertar, los que alguien dio de baja **no se reactivan**, y los días de plazo ajustados a mano no se pisan. **Sin él los campos siguen siendo texto libre** con sugerencias —como funcionaban antes— y la importación no valida contra ninguna lista; la pantalla lo dice con el script al lado.
 
 El quinto va **después** del cuarto: necesita que `FECHA_PAGO` ya sea nullable, y si no lo es aborta diciéndolo. Las filas quedan con `EXCLUIDA = 0`, así que el tablero no se mueve.
 
@@ -176,11 +183,132 @@ La columna existe y está **vacía en los 4.893 proveedores**; `CAMPOS_ADICIONAL
 
 Se evaluó empezar a cargarla desde Tango y se descartó: **obligaría a administración a mantener dos maestros en paralelo**, y dos maestros en paralelo terminan discrepando. La planilla sigue siendo la fuente.
 
+### Pero el código sí se valida contra `CPA01`
+
+> Esto es **nuevo**.
+
+Que el **contenido** salga de la planilla no significa que el **código** pueda ser cualquiera. `CPA01` es el universo de proveedores que existen, y un código que no está ahí no va a cruzar contra ninguna cuenta a pagar: el proveedor se carga, **no clasifica nada**, y el síntoma aparece semanas después en otra pantalla, como una deuda sin rubro que nadie sabe por qué no clasifica.
+
+Antes el código se validaba **sólo por largo**, así que `MTDOD` entraba igual que `MTDODI`.
+
+| Dónde | Qué pasa si el código no existe |
+| --- | --- |
+| **Alta manual** | Se **rechaza**. Es la tabla maestra de proveedores: no hay alta con advertencia |
+| **Importación** | La fila queda en `ERROR` y **el resto de la planilla se importa igual**. Parar todo por dos códigos malos obligaría a corregir la planilla entera antes de poder cargar las mil doscientas que están bien — el mismo criterio que ya regía para el código repetido |
+| **Lo ya cargado** | Se **audita y se avisa**. No se da de baja nada automáticamente |
+
+**No se filtra por empresa ni por estado de baja.** `COD_PROVEE` es único en `CPA01`: si existe, vale. Un proveedor dado de baja en Tango puede seguir teniendo deuda pendiente, y excluirlo haría imposible clasificar esa deuda.
+
+**El chequeo de la importación es UNA consulta para todos los códigos del archivo**, no una por fila: la planilla real tiene 1.223 filas y una consulta por cada una serían 1.223 viajes a la base para una pantalla que responde mientras alguien espera. El diff sigue siendo **puro** —recibe el mapa de códigos válidos por parámetro— y por eso se prueba entero sin base.
+
+**Si `CPA01` no responde, la validación no corre y se dice.** Se pasa `null`, que **no es lo mismo que un mapa vacío**: con un mapa vacío se marcaría en error la planilla entera por un origen caído. Un aviso propio avisa que los códigos no se chequearon, porque sin él una previsualización limpia se lee como *"todos los códigos existen"* cuando en realidad es *"no se chequeó ninguno"*.
+
+> El alta manual es la excepción: ahí, si `CPA01` no responde, **se frena**. La diferencia es el volumen. Frenar un alta de a uno cuesta que la persona vuelva en un rato; frenar una planilla de mil doscientas filas bloquea un trabajo entero. Con una sola fila en juego, conviene no adivinar.
+
+#### El nombre sale de `CPA01` y no se edita
+
+En el alta manual, `NOM_PROVEE` se trae de Tango y el campo es de **sólo lectura**. El backend lo vuelve a traer al guardar e **ignora lo que mande el navegador**: el endpoint es alcanzable sin pasar por la pantalla. Si el nombre se pudiera tipear, dos pantallas mostrarían dos nombres para el mismo código y ninguna de las dos sería *el* nombre del proveedor. Es el mismo criterio que usa el pre-chequeado con la razón social de `GVA14`.
+
+**En la importación el nombre lo sigue trayendo la planilla**, y es deliberado: la planilla es la fuente del maestro y el nombre que administración escribió es parte de lo que se está importando. Lo que la importación sí hace es validar que el código exista.
+
+#### El buscador acepta el nombre, no sólo el código
+
+Quien carga un proveedor casi nunca se acuerda del código: se acuerda del nombre. El campo de código del alta es un autocomplete contra `CPA01` que busca **por código y por nombre**, desde 2 caracteres y con un tope de 20 resultados, poniendo primero los que *empiezan* con lo tipeado. Un campo que sólo aceptara el código obliga a ir a Tango a buscarlo, que es justo el paso que esto viene a sacar.
+
+Elegir de la lista es una comodidad, **no la validación**: `guardarManual()` vuelve a chequear contra `CPA01`.
+
+#### La collation no es un detalle
+
+`CPA01.COD_PROVEE` es `VARCHAR(6) COLLATE Latin1_General_BIN`, y hay **27 códigos con caracteres no ASCII**. La comparación es **binaria**: `OGNUNE` y `OGNUÑE` son dos proveedores distintos. Por eso los códigos viajan **siempre como parámetro** y nunca interpolados, y por eso `RO_T_CASHFLOW_PROV_LOCALES_CATEG.COD_PROVEE` declara la misma collation (ver `sql/cashflow_prov_locales_collation.sql`).
+
+El buscador es la excepción y lleva `COLLATE` explícito: un `LIKE` contra una columna binaria **no encontraría `mtdodi` en minúscula**, que es como se tipea.
+
+#### Vive en su propia clase, y eso es la decisión
+
+`Class/ProveedoresTango.php`. Son **dos maestros distintos** y hay que poder distinguirlos:
+
+| | |
+| --- | --- |
+| `CPA01` | Quién **existe** como proveedor. Lo mantiene Tango |
+| `RO_T_CASHFLOW_PROV_LOCALES_CATEG` | Qué **es** cada proveedor para nosotros. Lo mantiene administración |
+
+Meter la lectura de `CPA01` adentro de `ProveedoresCategorias` haría parecer que son el mismo maestro, que es exactamente la confusión que esta sección viene evitando.
+
 ### Para qué sirve
 
 1. **Para que el tablero pueda abrir la deuda por rubro.** Hoy la fila es una sola; cuando el maestro esté cargado, partirla en alquileres, impuestos, logística y mercadería es **configuración desde Parámetros**, no un refactor: el proveedor ya entrega cada comprobante con su rubro resuelto y expone una serie por rubro además del total.
 2. **Para la forma de pago habitual**, que sirve de valor por defecto al importar pagos.
 3. **Para el plazo**, que es el último escalón de la jerarquía de fecha.
+
+### Las cinco clasificaciones salen de listas, no de texto libre
+
+> Esto es **nuevo**. Antes eran texto libre con un `datalist` de sugerencias armado con los valores ya cargados.
+
+`RUBRO_ECONOMICO`, `RUBRO`, `CENTRO_COSTOS`, `PLAZO_PAGO` y `CRITERIO_DISTRIB` se eligen de **cinco listas administrables** desde *Parámetros → Prov. Locales*.
+
+El motivo no es cosmético, y está en una de las cinco: **cada `RUBRO_ECONOMICO` distinto crea una serie propia en el tablero** (`serieDeRubro()`). Tipear `Alquileres ` con un espacio al final no es un typo: es una **fila nueva del cuadro** que nadie pidió, y que además hay que ir a configurar a *Parámetros → Cashflow* para que se vea.
+
+El caso ya estaba documentado en este mismo README: la planilla trae `50% ECOMMERC` contra `50% ECOMMERCE`, dos filas contra doscientas. Hasta ahora eso se detectaba **a posteriori**, comparando parecidos, porque no había ninguna lista declarada contra la cual validar.
+
+#### Una sola tabla con una columna `TIPO`, y no cinco tablas
+
+`RO_T_CASHFLOW_PROV_LOCALES_OPCIONES`. Las cinco listas tienen la misma forma —un valor, un orden, una vigencia— y el mismo ABM. Cinco tablas serían cinco `CREATE`, cinco consultas y cinco pantallas idénticas que hay que mantener sincronizadas, y la primera que se olvide de un cambio queda distinta sin que nadie lo note. El `CHECK` sobre `TIPO` es lo que impide que un typo cree una sexta lista invisible.
+
+**Las cinco son independientes entre sí.** `RUBRO` no depende de `RUBRO_ECONOMICO`: no hay jerarquía y elegir un rubro económico no acota los rubros disponibles.
+
+#### No son como `FORMAS_PAGO`, y la diferencia es quién las decide
+
+| | |
+| --- | --- |
+| `FORMAS_PAGO` | Constante del **código**. Con ellas se **decide**: `esDelCronograma()` define si un comprobante entra al cashflow. Agregar una es un cambio de código, con su docblock |
+| Estas cinco | **Datos**. Administración agrega un centro de costos el día que abre un depósito, y no puede depender de que alguien toque código |
+
+#### `PLAZO` es la única que el sistema usa para calcular
+
+Las otras cuatro se guardan y se muestran. `PLAZO` se traduce a **días**, y esos días son el último escalón de la jerarquía de fecha de pago. Por eso la lista guarda **el texto y su interpretación**:
+
+```
+CONTADO    -> 0       se paga el día de la factura
+'30 DIAS'  -> 30
+DEBITO     -> null    se debita solo; la fecha no la decide un plazo
+```
+
+**`null` no es `0`.** Cero calcula una fecha; `null` hace caer la jerarquía al escalón siguiente. Perder esa distinción cambiaría la fecha de pago de todos los proveedores con `DEBITO`.
+
+Guardar los días **en la lista** —en vez de derivarlos siempre del texto— es lo que permite declarar un plazo que `plazoEnDias()` no sabría interpretar, como `FIN DE MES → 30`. Cuando el valor **no** está en la lista, `plazoEnDias()` sigue siendo el fallback y nada cambia.
+
+#### `CRITERIO_DISTRIB` es, por ahora, sólo un nombre
+
+Se verificó antes de escribir esto: en todo el módulo se guarda, se muestra en la grilla, se compara en el diff y se audita por typos. **Ningún cálculo depende de él**: no define porcentajes por canal ni afecta a ninguna serie. La lista lo normaliza y nada más. El día que tenga que repartir un gasto entre canales, los porcentajes son columnas nuevas de esta misma tabla.
+
+#### En la importación es advertencia, y nunca se agrega solo
+
+| | |
+| --- | --- |
+| Código fuera de `CPA01` | **Error**. El proveedor no clasificaría *nada* |
+| Valor fuera de lista | **Advertencia**. Se importa igual y se guarda tal como vino, marcado |
+
+La diferencia es qué significa cada cosa: un código que no existe deja al proveedor sin poder clasificar nada, mientras que un rubro fuera de lista **sí** clasifica —crea su propia serie— y lo que hay que decidir es si esa serie tenía que existir. Lo primero es un dato roto; lo segundo, un dato que alguien tiene que mirar.
+
+**El valor no se corrige al canónico.** La comparación es tolerante —`alquileres` reconoce a `Alquileres`— pero lo que se guarda sigue siendo lo que vino. Pisarlo cambiaría en silencio la serie del tablero de ese proveedor, y el original es la evidencia de que la planilla tiene algo que arreglar. Es el mismo criterio que rige para las formas de pago desde el principio.
+
+**Y nunca se agrega solo a la lista.** Si la importación las ampliara, las listas se llenarían con los typos de la planilla y dejarían de servir para validar nada.
+
+#### La pantalla de administración muestra cuántos proveedores usan cada valor
+
+Sin ese número, dar de baja es a ciegas: no hay forma de saber si se saca una opción que no usa nadie o una que tienen doscientos proveedores, que van a quedar todos marcados como fuera de lista. Es la misma razón por la que *Pre-chequeado* muestra los cheques vivos de cada cliente.
+
+**Renombrar no propaga al maestro**, y la pantalla lo dice. El maestro guarda el **texto**, no un id: los proveedores cargados conservan el valor viejo y quedan marcados como fuera de lista hasta que alguien los edite. Propagar sería un `UPDATE` masivo que cambia de fila del tablero a cientos de proveedores desde una pantalla de configuración, sin previsualización y sin historial. En este módulo, un cambio masivo sobre el maestro es una **importación**, y las importaciones muestran el diff antes de confirmar.
+
+**La baja es lógica.** Un valor dado de baja deja de ofrecerse pero no desaparece de los proveedores que ya lo tienen. Borrar la fila dejaría proveedores apuntando a un valor que ya no se puede explicar.
+
+#### Un valor fuera de lista no se pierde al editar
+
+Si a un `<select>` se le pide un valor que no tiene, queda vacío **en silencio**, y guardar el formulario le borraría el rubro al proveedor sin que nadie lo haya pedido. Por eso el formulario **agrega el valor guardado como opción**, marcada *(fuera de lista)* y con el campo en naranja: el dato no se pierde, se ve que está fuera de lista, y quien edita decide.
+
+**Sin el script corrido, nada de esto cambia:** el backend manda las listas en `null` y los campos siguen siendo texto libre con sugerencias, que es como funcionaban antes. Dibujar desplegables vacíos dejaría una pantalla donde no se puede cargar nada.
+
+> Estas listas aplican **sólo a Proveedores Locales**, no a Proveedores Exterior.
 
 ### Rubro económico y rubro son dos columnas, no dos nombres de una
 
@@ -667,12 +795,15 @@ Componentes estándar: tarjetas KPI, buscador, selector de eje temporal (`Js/eje
 
 ---
 
-## Los dos controles
+## Los tres controles
 
 Sin ellos el maestro se desactualiza y nadie se entera.
 
 1. **Proveedores con deuda que no están en el maestro.** Aparecen proveedores nuevos en Tango, nadie los agrega a la planilla, y su deuda queda sin clasificar —o peor, se la lee como si estuviera clasificada—. Se muestran ordenados **por importe**: si la lista es larga, lo que importa es por cuál empezar.
 2. **Egresos de directores que el maestro no marca como `Excluidos`.** Ver arriba: manda el maestro, esto audita.
+3. **Proveedores vigentes del maestro que no existen en `CPA01`.** Es el control **al revés** del primero: aquél busca deuda sin clasificación, éste busca clasificación sin proveedor. Un código que Tango no tiene no va a cruzar contra ninguna cuenta a pagar nunca; casi siempre es un código tipeado mal de antes de que hubiera validación, pero también puede ser un proveedor que Tango depuró. La lista dice si la versión vigente entró por **carga manual** o por la planilla, porque se corrigen en lugares distintos: una a mano, la otra en el Excel o vuelve en la próxima importación.
+
+> **Sólo avisa: no da de baja nada.** Una baja automática borraría la clasificación de una deuda que puede seguir existiendo, y lo haría sin que nadie lo decida. Es el mismo criterio del control de directores.
 
 ---
 
@@ -688,13 +819,22 @@ php tests/run.php proveedores
 - **Que el plazo no es un número**: `DEBITO` devuelve `null` y no `0`.
 - **La suciedad de la planilla**: que el código repetido deje en error **las dos** filas, que `echeq` matchee y `eqheck` no, y que el typo del criterio se detecte sin lista declarada —y que un criterio raro pero distinto **no** se marque—.
 - **Que las filas en error no ensucien las estadísticas de calidad**: una que falló por el código ni siquiera llegó a leer el rubro.
+- **La validación contra `CPA01`**: que un código inexistente quede en error y el resto de la planilla se importe igual, que el chequeo de existencia vaya **antes** que el de duplicado —un código que no existe no se puede cargar ni una vez—, y que `null` (no se pudo leer `CPA01`) no marque nada pero **avise**, mientras que un mapa vacío sí marca, porque son dos cosas distintas.
 - **El diff de pagos**: que el tipo se deduzca, que un comprobante en cuotas no sea ambiguo, que dos tipos con el mismo número sí lo sean, y que lo que no cruza dé un error con motivo.
 - **Que la clave incluya al proveedor**: dos proveedores con el mismo comprobante dan claves distintas.
 - **El desvío** de la conciliación en los dos sentidos.
 
 Con base, además: que **ningún pendiente sea negativo** —el error que tenía la consulta antes de la tabla de signos—, que no entre ningún proveedor del exterior, que el total sea exactamente operativos + excluidos, y que **el registro declare exactamente las series que el proveedor devuelve**.
 
-*Suite completa: 2078 OK, 0 fallas (18 archivos).*
+`tests/test_prov_locales_opciones.php` fija las cinco listas, también sin base —llegan por parámetro, ya resueltas—:
+
+- **Qué es pertenecer a una lista**: que la comparación ignore mayúsculas, acentos y espacios, que `50% ECOMMERC` **no** matchee con `50% ECOMMERCE`, y que un campo vacío **no** cuente como fuera de lista (son dos cosas distintas y se cuentan aparte).
+- **Que fuera de lista es advertencia y no error**, y que el valor se guarde **tal como vino** aun cuando matchea: corregirlo al canónico cambiaría en silencio la serie del tablero.
+- **Que sin listas cargadas no se marca nada**: el comportamiento vuelve a ser el de antes.
+- **La semántica del plazo entera**: que los días salgan de la lista, que eso permita declarar `FIN DE MES` —que `plazoEnDias()` sola devuelve `null`—, que `CONTADO` sea `0` y `DEBITO` siga siendo `null`, y que un plazo fuera de lista caiga al fallback de siempre.
+- **Que el formulario no pierda un valor fuera de lista** al editar un proveedor.
+
+*Suite completa: 2478 OK, 0 fallas (20 archivos).*
 
 ---
 
@@ -706,10 +846,15 @@ sql/cashflow_prov_locales_collation.sql        Alinea la collation con la de Tan
 sql/cashflow_prov_locales_maestro_manual.sql   ORIGEN: habilita la carga a mano
 sql/cashflow_prov_locales_forma_por_factura.sql  El override de forma por factura
 sql/cashflow_prov_locales_excluir_factura.sql    El tilde de exclusion por factura
+sql/cashflow_prov_locales_opciones.sql         Las cinco listas de opciones + semilla
 sql/_referencia_tango_pendientes.sql           La consulta de Tango, como referencia
 cashflow/Class/Planilla.php                    El mecanismo de importacion CSV, compartido
 cashflow/Class/Proveedores.php                 Cuentas a pagar, fechas de pago y conciliacion
 cashflow/Class/ProveedoresCategorias.php       El maestro y el resolutor de categoria
+cashflow/Class/ProveedoresTango.php            CPA01: quien existe como proveedor. Solo lectura
+cashflow/Class/ProveedoresOpciones.php         Las cinco listas de valores validos
+cashflow/Tabs/parametros_prov_locales.php      Su ABM, en Parametros
+cashflow/Js/Parametros-Prov_locales.js
 cashflow/Class/Providers/ProveedoresProvider.php
 cashflow/Controller/ProveedoresController.php
 cashflow/Tabs/proveedores_locales.php
@@ -718,7 +863,9 @@ cashflow/Css/Proveedores-Proveedores_locales.css
 tests/test_proveedores.php
 ```
 
-Modificados: `Class/CashflowRegistry.php` (`PROV_LOCALES` disponible + `series_extra`) · `Class/CobElectronicos.php` (delega en `Planilla`, sin cambiar su contrato) · `Class/Menu.php` (la pestaña pasa a `DATOS`) · `tests/test_providers.php` y `tests/test_menu.php` (los conteos).
+Modificados: `Class/CashflowRegistry.php` (`PROV_LOCALES` disponible + `series_extra`) · `Class/CobElectronicos.php` (delega en `Planilla`, sin cambiar su contrato) · `Class/Menu.php` (la pestaña pasa a `DATOS`) · `Class/Parametros.php` (el módulo `PROV_LOCALES` y su sección) · `Tabs/parametros.php` (la sub-pestaña) · `tests/test_providers.php` y `tests/test_menu.php` (los conteos).
+
+Pruebas propias de las listas: `tests/test_prov_locales_opciones.php`.
 
 ---
 

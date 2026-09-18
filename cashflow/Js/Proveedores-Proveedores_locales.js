@@ -75,6 +75,7 @@
         conectar('btnNuevoProv', function() { abrirForm(null); });
         conectar('btnGuardarProv', guardarProveedor);
         conectar('btnCancelarProv', cerrarForm);
+        conectarBuscadorTango();
 
         /* "Seleccionar todas las que se ven" es lo que hace que el caso normal
            —las ocho facturas de un proveedor— sea buscar el proveedor y tildar
@@ -1189,6 +1190,36 @@
                   + '">pisa carga manual</span>'
                 : '';
 
+            /* EL CÓDIGO INEXISTENTE SE MARCA APARTE del resto de los errores.
+               Es el único que se arregla mirando OTRO sistema —hay que ir a
+               Tango a buscar el código de verdad— y no releyendo la planilla. */
+            if (f.no_en_tango) {
+                pisa += ' <span class="badge bg-danger" title="'
+                    + escapar('El código no existe en CPA01, el maestro de proveedores de '
+                        + 'Tango. Buscalo en Tango y corregí la planilla.')
+                    + '">no está en Tango</span>';
+            }
+
+            /* UN VALOR FUERA DE LISTA ES ADVERTENCIA, NO ERROR: la fila se
+               importa igual y se guarda tal como vino. La marca dice CUÁLES
+               campos y con QUÉ valor, porque "hay algo fuera de lista" sin
+               decir qué obliga a abrir la planilla y buscarlo. */
+            var fuera = f.fuera_lista && Object.keys(f.fuera_lista);
+
+            if (fuera && fuera.length) {
+                var tipos = (d.opciones_tipos) || {};
+
+                pisa += ' <span class="badge bg-warning text-dark" title="'
+                    + escapar('Se importa igual y se guarda tal como vino. El valor NO se '
+                        + 'agrega solo a la lista: si es correcto, cargalo en Parámetros → '
+                        + 'Prov. Locales; si es un typo, corregilo en la planilla. '
+                        + fuera.map(function(t) {
+                            return (tipos[t] ? tipos[t].nombre : t) + ': "'
+                                + f.fuera_lista[t] + '"';
+                          }).join(' · '))
+                    + '">fuera de lista (' + fuera.length + ')</span>';
+            }
+
             html += '<tr class="prov-pre-' + f.estado.toLowerCase() + '">'
                 + '<td>' + f.linea + '</td>'
                 + '<td><code>' + escapar(clave) + '</code></td>'
@@ -1364,6 +1395,31 @@
                 + '</div>';
         }
 
+        /* EL CONTROL AL REVÉS: clasificación sin proveedor.
+           El de arriba busca deuda que no se puede clasificar; éste busca
+           proveedores cargados cuyo código Tango no tiene, que no van a cruzar
+           contra ninguna cuenta a pagar nunca. Casi siempre son códigos
+           tipeados mal antes de que hubiera validación.
+           SÓLO AVISA: no se da de baja nada. Una baja automática borraría la
+           clasificación de una deuda que puede seguir existiendo. */
+        var noTango = (maestro && maestro.no_en_tango) || [];
+
+        if (noTango.length) {
+            html += '<div class="alert alert-danger small">'
+                + '<strong>' + noTango.length + ' proveedor(es) vigentes del maestro no existen '
+                + 'en CPA01</strong>, el maestro de proveedores de Tango. No van a clasificar '
+                + 'ninguna deuda: su código no cruza contra nada. Revisalos y corregí el código '
+                + '(o dalos de baja, si ya no van). No se da de baja nada automáticamente.'
+                + '<div class="mt-2">'
+                + noTango.slice(0, 12).map(function(f) {
+                    return '<code>' + escapar(f.COD_PROVEE) + '</code>'
+                        + (f.NOMBRE ? ' ' + escapar(f.NOMBRE) : '')
+                        + (f.ORIGEN === 'MANUAL' ? ' <em>(carga manual)</em>' : '');
+                  }).join(' · ')
+                + (noTango.length > 12 ? ' y ' + (noTango.length - 12) + ' más' : '')
+                + '</div></div>';
+        }
+
         cont.innerHTML = html;
     }
 
@@ -1497,6 +1553,149 @@
                     return '<option value="' + escapar(f) + '">' + escapar(f) + '</option>';
                 }).join('');
         }
+
+        aplicarListas();
+    }
+
+    /* ================================================================
+       LAS CINCO LISTAS DE OPCIONES
+
+       Rubro económico, rubro, centro de costos, plazo y criterio pasan de ser
+       texto libre a ser desplegables poblados desde Parámetros → Prov.
+       Locales. El motivo está en el encabezado de Class/ProveedoresOpciones.php,
+       y el que importa es éste: CADA RUBRO ECONÓMICO DISTINTO CREA UNA FILA
+       PROPIA EN EL TABLERO. Tipear "Alquileres " con un espacio al final no es
+       un typo cosmético, es una fila del cuadro que nadie pidió.
+
+       SIN LISTAS CARGADAS NO SE CAMBIA NADA. Si el script no se corrió, el
+       backend manda 'opciones' en null y los campos siguen siendo texto libre
+       con sugerencias, que es como funcionaban antes. Dibujar desplegables
+       vacíos dejaría una pantalla donde no se puede cargar nada, y el aviso del
+       maestro ya dice qué script falta.
+       ================================================================ */
+
+    /** Qué campo del formulario corresponde a cada lista */
+    var CAMPOS_LISTA = {
+        RUBRO_ECONOMICO: 'fpRubroEcoProv',
+        RUBRO: 'fpRubroProv',
+        CENTRO_COSTOS: 'fpCentroProv',
+        PLAZO: 'fpPlazoProv',
+        CRITERIO_DISTRIB: 'fpCriterioProv'
+    };
+
+    /**
+     * Reemplaza los cinco campos de texto por desplegables.
+     *
+     * SE REEMPLAZA EL ELEMENTO, conservando el id: el resto del archivo lee y
+     * escribe por id con valor()/setValor(), y un <select> responde a .value
+     * igual que un <input>. Así el cambio no toca ni abrirForm() ni
+     * guardarProveedor().
+     */
+    function aplicarListas() {
+        var listas = maestro && maestro.opciones;
+
+        // null = no hay listas cargadas. Ver la nota de arriba.
+        if (!listas) { return; }
+
+        Object.keys(CAMPOS_LISTA).forEach(function(tipo) {
+            var id = CAMPOS_LISTA[tipo];
+            var el = document.getElementById(id);
+
+            if (!el) { return; }
+
+            var valores = Object.keys(listas[tipo] || {});
+
+            /* UNA LISTA VACÍA NO REEMPLAZA NADA. Un desplegable con una sola
+               opción vacía no deja cargar ese campo, y sería peor que el texto
+               libre que había antes. Parámetros ya avisa que la lista está
+               vacía. */
+            if (!valores.length) { return; }
+
+            /* YA ESTÁ CONVERTIDO. Sólo se repuebla si el formulario está
+               CERRADO, y no es un detalle: pintarMaestro() —que llama acá—
+               corre en cada tecla del buscador del maestro, y repoblar un
+               select le borra el valor elegido. Con el formulario abierto, eso
+               sería vaciarle los campos a alguien mientras los está cargando, y
+               en silencio. Las listas sólo cambian desde otra pestaña, así que
+               esperar a que el formulario se cierre no atrasa nada. */
+            if (el.tagName === 'SELECT') {
+                if (!visible('formProvWrap')) {
+                    repoblarSelect(el, valores);
+                }
+
+                return;
+            }
+
+            var sel = document.createElement('select');
+
+            sel.id = id;
+            sel.className = 'form-select form-select-sm';
+            sel.title = el.title || '';
+
+            el.parentNode.replaceChild(sel, el);
+            repoblarSelect(sel, valores);
+        });
+    }
+
+    function repoblarSelect(sel, valores) {
+        sel.innerHTML = '<option value="">(sin definir)</option>'
+            + valores.map(function(v) {
+                return '<option value="' + escapar(v) + '">' + escapar(v) + '</option>';
+            }).join('');
+    }
+
+    /**
+     * Deja seleccionado un valor que puede NO estar en la lista.
+     *
+     * ES LA PARTE QUE NO SE PUEDE OMITIR. Un proveedor cargado antes de que
+     * existieran las listas —o traído por una importación, donde un valor fuera
+     * de lista es advertencia y se guarda igual— tiene valores que el
+     * desplegable no ofrece. Si se le pide a un <select> un valor que no tiene,
+     * queda vacío EN SILENCIO, y guardar el formulario le borraría el rubro al
+     * proveedor sin que nadie lo haya pedido.
+     *
+     * Así que el valor se agrega como opción, marcada, y el campo se pinta en
+     * naranja: el dato no se pierde, se ve que está fuera de lista, y quien
+     * edita decide si lo deja o elige uno de la lista.
+     */
+    function elegirValor(id, valor) {
+        var el = document.getElementById(id);
+
+        if (!el) { return; }
+
+        var v = valor || '';
+
+        el.classList.remove('prov-fuera-lista');
+
+        if (el.tagName !== 'SELECT') {
+            el.value = v;
+            return;
+        }
+
+        // Se saca la opción temporal de la edición anterior.
+        var previa = el.querySelector('option[data-fuera-lista]');
+
+        if (previa) { previa.remove(); }
+
+        el.value = v;
+
+        // Se le pidió un valor y el select quedó vacío: no está en la lista.
+        if (v !== '' && el.value !== v) {
+            var opt = document.createElement('option');
+
+            opt.value = v;
+            opt.textContent = v + '  (fuera de lista)';
+            opt.dataset.fueraLista = '1';
+            el.appendChild(opt);
+            el.value = v;
+        }
+
+        if (v !== '' && el.querySelector('option[data-fuera-lista]')) {
+            el.classList.add('prov-fuera-lista');
+            el.title = 'Este valor no está en la lista de opciones. Se conserva tal como está '
+                + 'guardado: elegí uno de la lista si corresponde, o agregalo en '
+                + 'Parámetros → Prov. Locales.';
+        }
     }
 
     /**
@@ -1514,23 +1713,32 @@
 
         setValor('fpCodProv', f ? f.COD_PROVEE : '');
         setValor('fpNombreProv', f ? (f.NOMBRE || '') : '');
-        setValor('fpRubroEcoProv', f ? (f.RUBRO_ECONOMICO || '') : '');
-        setValor('fpRubroProv', f ? (f.RUBRO || '') : '');
-        setValor('fpCentroProv', f ? (f.CENTRO_COSTOS || '') : '');
         setValor('fpFormaProv', f ? (f.FORMA_PAGO || '') : '');
-        setValor('fpPlazoProv', f ? (f.PLAZO_PAGO || '') : '');
-        setValor('fpCriterioProv', f ? (f.CRITERIO_DISTRIB || '') : '');
+
+        /* Los cinco que salen de una lista pasan por elegirValor(), que conserva
+           el valor guardado aunque la lista no lo tenga. Con setValor() a secas,
+           un rubro fuera de lista dejaría el desplegable vacío en silencio y
+           guardar le borraría el rubro al proveedor. */
+        elegirValor('fpRubroEcoProv', f ? f.RUBRO_ECONOMICO : '');
+        elegirValor('fpRubroProv', f ? f.RUBRO : '');
+        elegirValor('fpCentroProv', f ? f.CENTRO_COSTOS : '');
+        elegirValor('fpPlazoProv', f ? f.PLAZO_PAGO : '');
+        elegirValor('fpCriterioProv', f ? f.CRITERIO_DISTRIB : '');
 
         // El código es la clave: se puede tipear en un alta y no en una edición.
         var inpCod = document.getElementById('fpCodProv');
 
         if (inpCod) { inpCod.readOnly = !!f; }
 
+        cerrarSugerenciasTango();
+
         texto('hintProv', f
             ? 'Editando ' + f.COD_PROVEE + '. Guardar no modifica la fila: da de baja la '
                 + 'versión vigente y carga una nueva, y la anterior queda en el historial.'
-            : 'El código es el de Tango (hasta 6 caracteres) y es lo que hace que la deuda de '
-                + 'este proveedor se pueda clasificar. La forma de pago decide si entra al '
+            : 'Buscá el proveedor por código o por nombre y elegilo de la lista: el código se '
+                + 'valida contra CPA01, el maestro de Tango, y el nombre lo trae de ahí. Un '
+                + 'código que no existe en Tango no cruza contra ninguna cuenta a pagar, así '
+                + 'que no se puede cargar. La forma de pago decide si la deuda entra al '
                 + 'cronograma del cashflow.');
 
         mostrar('formProvWrap', true);
@@ -1540,6 +1748,139 @@
 
     function cerrarForm() {
         mostrar('formProvWrap', false);
+        cerrarSugerenciasTango();
+    }
+
+    /* ================================================================
+       EL BUSCADOR CONTRA CPA01
+
+       Quien carga un proveedor casi nunca se acuerda del código: se acuerda
+       del nombre. Un campo que sólo acepte el código obliga a ir a Tango a
+       buscarlo, que es justo el paso que esto viene a sacar.
+
+       NO ES LA VALIDACIÓN. Elegir de la lista es una comodidad; lo que decide
+       es el backend, que vuelve a chequear contra CPA01 al guardar. Este
+       endpoint es alcanzable sin pasar por la pantalla.
+       ================================================================ */
+
+    /** Handle del debounce, para no consultar en cada tecla */
+    var buscarTangoTimer = null;
+
+    /** Lo último que se buscó, para no repetir la misma consulta */
+    var ultimaBusquedaTango = '';
+
+    function conectarBuscadorTango() {
+        var inp = document.getElementById('fpCodProv');
+
+        if (!inp) { return; }
+
+        inp.addEventListener('input', function() {
+            // Al tipear, el nombre que hubiera quedado de una elección anterior
+            // deja de corresponder: se limpia en vez de mostrar el de otro.
+            setValor('fpNombreProv', '');
+
+            var q = inp.value.trim();
+
+            if (buscarTangoTimer) { clearTimeout(buscarTangoTimer); }
+
+            if (q.length < 2) {
+                cerrarSugerenciasTango();
+                return;
+            }
+
+            // 250 ms: alcanza para que una ráfaga de tecleo sea una consulta y
+            // no se nota como espera.
+            buscarTangoTimer = setTimeout(function() { buscarEnTango(q); }, 250);
+        });
+
+        // Esc cierra la lista sin cerrar el formulario entero.
+        inp.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') { cerrarSugerenciasTango(); }
+        });
+
+        // Un clic afuera la cierra. Sin esto queda flotando sobre la grilla.
+        document.addEventListener('click', function(e) {
+            var cont = document.getElementById('sugeProvTango');
+
+            if (cont && !cont.contains(e.target) && e.target !== inp) {
+                cerrarSugerenciasTango();
+            }
+        });
+    }
+
+    function buscarEnTango(q) {
+        if (q === ultimaBusquedaTango) { return; }
+
+        ultimaBusquedaTango = q;
+
+        fetch('Controller/ProveedoresController.php?action=buscarProveedorTango&q='
+                + encodeURIComponent(q))
+            .then(function(r) { return r.json(); })
+            .then(function(res) {
+                // Llegó tarde: el usuario ya está buscando otra cosa.
+                if (q !== ultimaBusquedaTango) { return; }
+
+                pintarSugerenciasTango(res.success ? (res.data.filas || []) : [], res.message);
+            })
+            .catch(function() {
+                pintarSugerenciasTango([], 'No se pudo consultar Tango.');
+            });
+    }
+
+    function pintarSugerenciasTango(filas, error) {
+        var cont = document.getElementById('sugeProvTango');
+
+        if (!cont) { return; }
+
+        if (error) {
+            cont.innerHTML = '<div class="prov-tango-vacio text-danger">' + escapar(error)
+                + '</div>';
+            cont.style.display = 'block';
+            return;
+        }
+
+        if (!filas.length) {
+            /* UN RESULTADO VACÍO SE DICE. Sin esto, un código que no existe se
+               ve igual que uno que todavía no se terminó de tipear, y el
+               usuario se entera recién al guardar. */
+            cont.innerHTML = '<div class="prov-tango-vacio">Ningún proveedor de Tango coincide. '
+                + 'Si el proveedor es nuevo, hay que darlo de alta en Tango primero.</div>';
+            cont.style.display = 'block';
+            return;
+        }
+
+        cont.innerHTML = filas.map(function(f) {
+            return '<button type="button" class="prov-tango-item"'
+                + ' data-cod="' + escapar(f.COD_PROVEE) + '"'
+                + ' data-nombre="' + escapar(f.NOM_PROVEE) + '">'
+                + '<code>' + escapar(f.COD_PROVEE) + '</code> '
+                + escapar(f.NOM_PROVEE) + '</button>';
+        }).join('');
+
+        cont.style.display = 'block';
+
+        Array.prototype.forEach.call(cont.querySelectorAll('.prov-tango-item'), function(b) {
+            b.addEventListener('click', function() {
+                setValor('fpCodProv', b.dataset.cod);
+                setValor('fpNombreProv', b.dataset.nombre);
+                cerrarSugerenciasTango();
+
+                var eco = document.getElementById('fpRubroEcoProv');
+
+                if (eco) { eco.focus(); }
+            });
+        });
+    }
+
+    function cerrarSugerenciasTango() {
+        var cont = document.getElementById('sugeProvTango');
+
+        if (cont) {
+            cont.style.display = 'none';
+            cont.innerHTML = '';
+        }
+
+        ultimaBusquedaTango = '';
     }
 
     function guardarProveedor() {
@@ -1662,6 +2003,14 @@
         var el = document.getElementById(id);
 
         if (el) { el.style.display = visible ? '' : 'none'; }
+    }
+
+    /** Si un bloque está a la vista. Lo usa aplicarListas() para no pisar un
+        formulario que alguien está cargando. */
+    function visible(id) {
+        var el = document.getElementById(id);
+
+        return !!el && el.style.display !== 'none';
     }
 
     function texto(id, v) {

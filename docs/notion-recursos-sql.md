@@ -166,7 +166,19 @@ Todos los objetos se crean con `sql/ventas_proyeccion.sql`, `sql/SJ_CASHFLOW_VEN
 
 **Base**: LAKER_SA
 
-**Descripción**: Tipo de cambio con el que se valúan en pesos los pagos a proveedores del exterior. Vive bajo MODULO=COMEX y no bajo el del tablero porque la conversión la hace el proveedor de datos de Comercio Exterior y no el motor de consolidación: el motor nunca ve dólares, todos los proveedores le entregan pesos. Si el parámetro falta o está en cero, la fila se muestra en cero y el tablero deja un aviso que lo nombra, en lugar de fallar. El valor sembrado es de referencia y hay que actualizarlo; la pantalla muestra en el detalle de cada fila con qué tipo de cambio se valuó.
+**Descripción**: **RETIRADO.** Era el tipo de cambio único con el que se valuaban en pesos los pagos a proveedores del exterior. Se reemplazó por la curva de dólar futuro ROFEX ([XL-APPS].sistemas.dbo.FP_DOLAR_FUTURO_ROFEX): cada contenedor se valúa con la cotización del mes de su fecha estimada de pago, y el que se paga dentro de once meses ya no se convierte al mismo tipo de cambio que el del mes que viene. Un solo número para toda la serie no proyecta: reexpresa la serie entera a moneda de hoy, que es la cuenta que el encabezado de cashflow/Class/Cotizacion.php describe como incorrecta. El dólar futuro es el único criterio y por eso este parámetro no convive con él: está en Parametros::RETIRADOS, el formulario ya no lo muestra y la fila NO se borra de RO_T_CASHFLOW_PARAMETROS, para poder reconstruir con qué número se proyectó en su momento. Ver cashflow/Class/DolarFuturo.php.
+
+---
+
+- **Módulo**: Comercio Exterior
+
+        **Tabla: FP_DOLAR_FUTURO_ROFEX** *(lectura, externa)*
+
+**Servidor**: XL-APPS
+
+**Base**: sistemas
+
+**Descripción**: La curva de futuros de dólar de ROFEX, una fila por mes (hoy doce): símbolo del contrato ('DLR/AGO26'), mes, año, cotización y fecha de actualización. Es con lo que se valúan en pesos los pagos a proveedores del exterior, según el mes de la fecha estimada de pago de cada contenedor. Se lee con el nombre de cuatro partes desde 'central', que es la misma ruta que ya usa RO_V_DOLAR_OFICIAL_BCRA contra este mismo servidor: el linked server existe y está probado. Para el módulo de cashflow es de SOLO LECTURA —la mantiene el proceso que baja la curva del mercado—; el único ajuste que puede hacer un usuario es el override por contenedor, que vive en RO_T_CASHFLOW_COMEX_CRONO_NAC.COTIZ_USD_EDIT. Si un pago cae en un mes que la curva no cubre se usa el mes más cercano y la fila queda marcada; si no se puede leer, la fila del tablero va en cero con un aviso que nombra la tabla, en lugar de fallar.
 
 ## Resumen
 
@@ -184,3 +196,4 @@ Todos los objetos se crean con `sql/ventas_proyeccion.sql`, `sql/SJ_CASHFLOW_VEN
 | SJ_CASHFLOW_VENTAS_HIST | Stored Procedure | XL-TANGO | LAKER_SA |
 | RO_SP_CASHFLOW_VENTAS_HIST_DIA | Stored Procedure | XL-TANGO | LAKER_SA |
 | RO_T_CALENDARIO | Tabla (lectura, externa) | XL-APPS | POWER_BI_CONTROL |
+| FP_DOLAR_FUTURO_ROFEX | Tabla (lectura, externa) | XL-APPS | sistemas |

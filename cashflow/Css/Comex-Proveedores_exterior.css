@@ -308,3 +308,87 @@
     content: '*';
     opacity: 0.6;
 }
+
+/* ============================================================================
+   EL DOLAR APLICADO A CADA FILA
+   Con que cotizacion se valuo el contenedor, de donde salio y por que.
+   Ver Js/Comex-Proveedores_exterior.js y Class/DolarFuturo.php.
+   ============================================================================ */
+
+/* La celda trae dos datos apilados: el valor y de que mes de la curva salio.
+   El simbolo va chico y gris porque es la referencia -DLR/NOV26- y el numero
+   es lo que se lee. */
+.tab-proveedores_exterior .cotiz-cell {
+    white-space: nowrap;
+    line-height: 1.2;
+}
+
+.tab-proveedores_exterior .cotiz-valor {
+    display: block;
+    font-weight: 600;
+}
+
+.tab-proveedores_exterior .cotiz-simbolo {
+    display: block;
+    font-size: 10px;
+    color: var(--text-muted, #7a8194);
+    text-transform: uppercase;
+}
+
+/* Un guion, no un cero: no se pudo valuar. La diferencia entre "no hay dato" y
+   "el dato es cero" es la misma de todo el modulo. */
+.tab-proveedores_exterior .cotiz-sin {
+    color: var(--text-muted, #7a8194);
+}
+
+/* Se puede corregir a mano. Sin el script del override la celda no lleva esta
+   clase y no responde al clic: una celda que invita a editar y despues falla al
+   guardar es peor que una que no invita. */
+.tab-proveedores_exterior .cotiz-editable {
+    cursor: pointer;
+}
+
+.tab-proveedores_exterior .cotiz-editable:hover {
+    background: var(--bg-light, #f5f6fa);
+}
+
+/* CASO 1: la cotizacion la corrigio una persona para este contenedor. Manda
+   sobre la curva, asi que el importe de esta fila no se puede reconstruir
+   mirando el ROFEX: hay que ver el override. Mismo naranja que la fecha
+   editada, que es la otra correccion manual de esta grilla. */
+.tab-proveedores_exterior .cotiz-override {
+    background-color: #fff8e1;
+    border-left: 3px solid #ff9800;
+}
+
+/* CASO 2: el mes de pago no esta en la curva y se uso el mes mas cercano. El
+   importe es una aproximacion y tiene que verse como tal, pero NO es una
+   correccion de nadie: por eso el borde punteado y no el naranja. */
+.tab-proveedores_exterior .cotiz-aproximada {
+    border-left: 3px dashed #7e57c2;
+}
+
+.tab-proveedores_exterior .cotiz-marca {
+    font-size: 9px;
+    opacity: 0.7;
+    margin-left: 2px;
+}
+
+/* El input de la correccion. Acepta coma decimal: el backend lo normaliza con
+   Planilla::numero(), que es lo mismo que usan las importaciones del modulo. */
+.tab-proveedores_exterior .cotiz-input {
+    width: 100%;
+    min-width: 80px;
+    font-size: 12px;
+    padding: 2px 4px;
+    border: 1px solid var(--border-color, #e2e5ed);
+    border-radius: 3px;
+    text-align: right;
+}
+
+/* El importe que efectivamente entra al cashflow. Va destacado porque es el
+   numero que esta pestana explica: el resto de las columnas dicen de donde
+   sale. */
+.tab-proveedores_exterior .importe-ars {
+    font-weight: 600;
+}

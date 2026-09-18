@@ -990,6 +990,150 @@ $c = ProveedoresCategorias::compararImportacion([$fila(2, 'MTDODI')], $igual);
 chequear('sin cambios no hay nada que pisar', 'SIN_CAMBIOS', $c['filas'][0]['estado']);
 chequear('asi que no se marca', 0, $c['resumen']['pisa_manuales']);
 
+/* ================================================================
+   LA VALIDACION CONTRA CPA01
+
+   CPA01 es el maestro de proveedores de Tango y es el universo: un codigo que
+   no esta ahi no va a cruzar contra ninguna cuenta a pagar NUNCA, asi que
+   cargarlo crea una fila que no clasifica nada.
+
+   El mapa de codigos validos llega por parametro, ya resuelto con UNA consulta:
+   por eso todo esto se prueba sin base.
+   ================================================================ */
+seccion('un codigo que no existe en CPA01 no se importa');
+
+// El maestro de Tango de esta prueba: dos proveedores y nada mas.
+$enTango = ['MTDODI' => 'DONNA DI DIO S.R.L.', 'SAPALA' => 'IRSA INVERSIONES SA'];
+
+$c = ProveedoresCategorias::compararImportacion([
+    $fila(2, 'MTDODI'),
+    $fila(3, 'NOEXIS'),
+    $fila(4, 'SAPALA')
+], [], $enTango);
+
+$porLinea = [];
+foreach ($c['filas'] as $f) { $porLinea[$f['linea']] = $f; }
+
+chequear('la fila con codigo inexistente queda en error', 'ERROR', $porLinea[3]['estado']);
+chequear('y se marca aparte del resto de los errores', true, $porLinea[3]['no_en_tango']);
+chequear('el motivo nombra CPA01', true,
+    strpos($porLinea[3]['motivo'], 'CPA01') !== false);
+
+// NO SE RECHAZA LA PLANILLA ENTERA. Parar todo por un codigo malo obligaria a
+// corregir la planilla antes de poder cargar las que estan bien, que es el
+// mismo criterio que ya rige para el codigo repetido.
+chequear('las validas se importan igual', 'ALTA', $porLinea[2]['estado']);
+chequear('las dos', 'ALTA', $porLinea[4]['estado']);
+chequear('dos altas', 2, $c['resumen']['altas']);
+chequear('y un error', 1, $c['resumen']['errores']);
+chequear('contado aparte', 1, $c['resumen']['no_en_tango']);
+
+seccion('y el aviso manda a buscar el codigo a Tango, no a la planilla');
+
+// Es el unico motivo de error que se arregla mirando OTRO sistema. Decir solo
+// "N filas en error" manda a buscar el problema al lugar equivocado.
+$avisoTango = '';
+
+foreach ($c['avisos'] as $a) {
+    if (strpos($a, 'CPA01') !== false) { $avisoTango = $a; }
+}
+
+chequear('hay un aviso propio', true, $avisoTango !== '');
+chequear('dice cuantas son', true, strpos($avisoTango, '1 fila(s)') !== false);
+
+seccion('el codigo se valida ANTES que el duplicado');
+
+/* Un codigo que no existe no se puede cargar ni una vez, asi que decir "esta
+   repetido" seria contestar una pregunta que ya no importa. */
+$c = ProveedoresCategorias::compararImportacion([
+    $fila(2, 'NOEXIS'),
+    $fila(3, 'NOEXIS')
+], [], $enTango);
+
+chequear('las dos quedan en error', 2, $c['resumen']['errores']);
+chequear('por no estar en Tango', 2, $c['resumen']['no_en_tango']);
+chequear('y no por estar repetidas', true,
+    strpos($c['filas'][0]['motivo'], 'repetido') === false);
+
+seccion('sin poder leer CPA01 no se marca nada, pero se avisa');
+
+/* null NO ES LO MISMO QUE UN MAPA VACIO. null significa "no se pudo validar":
+   con un mapa vacio se marcaria en error la planilla entera por un origen
+   caido, que es peor que no validar. */
+$c = ProveedoresCategorias::compararImportacion([
+    $fila(2, 'MTDODI'),
+    $fila(3, 'NOEXIS')
+], [], null);
+
+chequear('ninguna fila se marca', 0, $c['resumen']['no_en_tango']);
+chequear('las dos se importan', 2, $c['resumen']['altas']);
+chequear('y el resumen dice que no se valido', false, $c['resumen']['valido_contra_tango']);
+
+// QUE LA VALIDACION NO HAYA CORRIDO NO PUEDE PASAR DESAPERCIBIDO: sin el
+// aviso, una previsualizacion limpia se lee como "todos los codigos existen".
+$avisoSinValidar = '';
+
+foreach ($c['avisos'] as $a) {
+    if (strpos($a, 'NO se validaron') !== false) { $avisoSinValidar = $a; }
+}
+
+chequear('y lo avisa', true, $avisoSinValidar !== '');
+
+seccion('con CPA01 leido, el resumen lo dice');
+
+$c = ProveedoresCategorias::compararImportacion([$fila(2, 'MTDODI')], [], $enTango);
+
+chequear('se valido', true, $c['resumen']['valido_contra_tango']);
+chequear('y no hay aviso de validacion faltante', 0, count(array_filter($c['avisos'],
+    function ($a) { return strpos($a, 'NO se validaron') !== false; })));
+
+seccion('un mapa vacio SI marca todo: es "ninguno existe", no "no se pudo"');
+
+// Es el caso legitimo de una planilla cuyos codigos no existen ninguno. Se
+// distingue de null justamente por eso.
+$c = ProveedoresCategorias::compararImportacion([$fila(2, 'MTDODI')], [], []);
+
+chequear('la fila queda en error', 'ERROR', $c['filas'][0]['estado']);
+chequear('pero la validacion SI corrio', true, $c['resumen']['valido_contra_tango']);
+
+seccion('el codigo se compara normalizado, igual que en todo el modulo');
+
+// Planilla::codigo() pasa a mayusculas y recorta: la planilla la escriben a
+// mano y 'mtdodi ' es el mismo proveedor.
+$c = ProveedoresCategorias::compararImportacion([$fila(2, ' mtdodi ')], [], $enTango);
+
+chequear('minusculas y espacios no lo vuelven inexistente', 'ALTA', $c['filas'][0]['estado']);
+
+seccion('la clase de Tango es OTRA clase, y eso es la decision');
+
+/* Son dos maestros distintos: CPA01 dice quien EXISTE y el maestro propio dice
+   que ES cada uno. Meter la lectura de CPA01 adentro de ProveedoresCategorias
+   haria parecer que son el mismo. */
+chequear('ProveedoresTango existe', true, class_exists('ProveedoresTango'));
+chequear('y lee CPA01', 'CPA01', ProveedoresTango::TABLA);
+chequear('el autocomplete arranca en 2 caracteres', 2, ProveedoresTango::MIN_BUSQUEDA);
+chequear('y devuelve hasta 20', 20, ProveedoresTango::MAX_RESULTADOS);
+
+seccion('el alta manual rechaza lo que no esta en Tango');
+
+$catFuente = file_get_contents(__DIR__ . '/../cashflow/Class/ProveedoresCategorias.php');
+
+// ES LA TABLA MAESTRA: no hay alta con advertencia.
+chequear('guardarManual consulta CPA01', true,
+    strpos($catFuente, '$nombreTango = $this->tango()->existe(') !== false);
+
+// EL NOMBRE SALE DE TANGO Y SE PISA lo que mande el navegador: el campo es de
+// solo lectura en la pantalla, pero el endpoint es alcanzable sin pasar por ella.
+chequear('y el nombre lo pisa con el de Tango', true,
+    strpos($catFuente, "\$fila['nombre'] = \$nombreTango;") !== false);
+
+$tabFuente = file_get_contents(__DIR__ . '/../cashflow/Tabs/proveedores_locales.php');
+
+chequear('el campo del nombre es de solo lectura', true,
+    strpos($tabFuente, 'id="fpNombreProv"') !== false
+    && strpos(substr($tabFuente, strpos($tabFuente, 'id="fpNombreProv"'), 200), 'readonly')
+       !== false);
+
 seccion('lo que falta se dice, aunque no rompa nada');
 
 /* EL SINTOMA QUE ESTO EVITA: sin la columna ORIGEN la pantalla esconde el boton

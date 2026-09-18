@@ -40,20 +40,87 @@ try {
 
     switch ($action) {
         case 'getProveedoresExterior':
-            // Los importes de esta pestaña están en DÓLARES y así se muestran:
-            // no hay conversión acá. La conversión a pesos la hace
-            // ComexProvider, que es quien alimenta el tablero.
+            /* EL EJE SE ARMA SOBRE IMPORTE_ARS, no sobre VALOR_FOB_DOLAR. El
+               cashflow es en pesos y esta pestaña es el detalle de una fila del
+               tablero: si mostrara dólares, sus totales no se podrían comparar
+               contra la fila que explica. La columna en dólares sigue en la
+               grilla como referencia.
+
+               La valuación fila por fila -con la curva de dólar futuro ROFEX,
+               o con el override que alguien cargó- ya viene resuelta del
+               getter, así que acá no hay ninguna multiplicación. Ver
+               Class/Comex.php y Class/DolarFuturo.php. */
+            $filasExt = $comex->getProveedoresExterior();
+
+            $payload = EjeVista::armar(
+                ejeDelModulo(),
+                $filasExt,
+                'FECHA_PAGO_EFECTIVA',
+                'IMPORTE_ARS'
+            );
+
+            /* Los avisos propios van ADELANTE de los del eje: explican por qué
+               hay contenedores que no aparecen con importe, y eso se lee antes
+               que lo que quedó fuera del horizonte. */
+            $payload['warnings'] = array_merge(
+                $comex->getAvisosExterior(),
+                Comex::avisosValuacion($filasExt, $comex->dolarFuturo()->ultimoMes()),
+                $payload['warnings']
+            );
+
+            /* De dónde sale el dólar y hasta cuándo llega la curva. La pantalla
+               lo muestra en el pie: un importe en pesos que no se puede atar a
+               una cotización identificada y fechada no se puede auditar contra
+               nada. */
+            $payload['cotizacion'] = [
+                'origen' => DolarFuturo::ORIGEN,
+                'disponible' => $comex->dolarFuturo()->disponible(),
+                'ultimo_mes' => $comex->dolarFuturo()->ultimoMes(),
+                'actualizada' => $comex->dolarFuturo()->actualizada(),
+                'curva' => array_values($comex->dolarFuturo()->curva()),
+
+                /* Si se puede corregir a mano. La pantalla lo pregunta en vez de
+                   suponerlo: sin el script la grilla se lee igual y lo que no se
+                   puede es escribir el override. Una celda que se dibuja
+                   editable y después falla al guardar es peor que una que no lo
+                   es, con el motivo al lado. */
+                'editable' => $comex->tieneCotizEdit()
+            ];
+
+            echo json_encode(['success' => true, 'data' => $payload], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           LA COTIZACIÓN DE UN CONTENEDOR
+
+           Pisa a la curva SOLO para ese contenedor y NO toca la tabla maestra
+           del ROFEX, que para este módulo es de sólo lectura.
+
+           Mandar vacío saca el override y la fila vuelve a la curva.
+           ================================================================ */
+        case 'updateCotizacion':
+            $data = json_decode(file_get_contents('php://input'), true);
+
+            if (!is_array($data) || !isset($data['id_mg'])) {
+                throw new Exception('Falta el contenedor al que corresponde la cotización.');
+            }
+
+            $r = $comex->updateCotizacion(
+                $data['id_mg'],
+                array_key_exists('cotizacion', $data) ? $data['cotizacion'] : null
+            );
+
             echo json_encode([
                 'success' => true,
-                'data' => EjeVista::armar(
-                    ejeDelModulo(),
-                    $comex->getProveedoresExterior(),
-                    'FECHA_PAGO_EFECTIVA',
-                    'VALOR_FOB_DOLAR'
-                )
+                'message' => ($r['cotizacion'] === null)
+                    ? 'La cotización vuelve a salir de la curva de dólar futuro.'
+                    : 'Este contenedor se valúa a $ '
+                        . number_format($r['cotizacion'], 4, ',', '.')
+                        . ' por dólar. La curva no cambia: es sólo para esta fila.',
+                'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
-            
+
         case 'getProveedoresExteriorRaw':
             // Solo los datos crudos sin procesamiento
             $datos = $comex->getProveedoresExterior();
@@ -77,10 +144,21 @@ try {
                 $data['fecha_pago_orig'],
                 $data['fecha_pago_edit']
             );
-            
+
+            /* EL DESCARTE DE LA COTIZACIÓN SE AVISA. Si el pago se corrió a
+               otro mes, el override que alguien había cargado dejó de aplicar y
+               la fila volvió a la curva. Sin decirlo, el usuario ve cambiar un
+               importe que no tocó. Ver Comex::updateFechaPago(). */
             echo json_encode([
                 'success' => true,
-                'message' => 'Fecha actualizada correctamente'
+                'message' => $result['cotizacion_descartada']
+                    ? 'Fecha actualizada. El pago pasó de ' . $result['mes_anterior'] . ' a '
+                        . $result['mes_nuevo'] . ', así que la cotización que tenía cargada a '
+                        . 'mano ($ ' . number_format($result['cotizacion_anterior'], 4, ',', '.')
+                        . ') se descartó: este contenedor vuelve a valuarse con la curva de '
+                        . 'dólar futuro del mes nuevo.'
+                    : 'Fecha actualizada correctamente',
+                'data' => $result
             ], JSON_UNESCAPED_UNICODE);
             break;
             

@@ -549,6 +549,19 @@
         } else if (f.moneda_origen === 'USD' && f.tipo_cambio) {
             marca = ' <i class="fas fa-dollar-sign cf-marca" title="Convertido de dólares a $ '
                 + Number(f.tipo_cambio).toFixed(2) + '"></i>';
+        } else if (f.moneda_origen === 'USD') {
+            /* EN DÓLARES, PERO SIN UN ÚNICO TIPO DE CAMBIO. Pasa cuando la fila
+               se valúa FILA POR FILA: Proveedores Exterior convierte cada
+               contenedor con el dólar futuro del mes en que se paga, así que no
+               hay un número que poner acá. Sin esta rama la marca desaparecía y
+               la fila se veía igual que una en pesos, que es lo contrario de lo
+               que hay que comunicar: el origen del importe sigue siendo dólares
+               y eso cambia cómo se lee. El detalle por fila está en la pestaña. */
+            marca = ' <i class="fas fa-dollar-sign cf-marca" title="'
+                + escapar('Está en dólares y cada importe se convirtió con SU propio tipo de '
+                    + 'cambio, según el mes en que se paga. No hay una cotización única que '
+                    + 'mostrar acá: el dólar aplicado a cada fila está en la pestaña.')
+                + '"></i>';
         }
 
         // Se SUMA a la anterior en vez de competir con ella: las otras marcas

@@ -620,6 +620,101 @@ try {
             break;
 
         /* ================================================================
+           MODULO PROVEEDORES LOCALES
+           Las cinco listas con las que se clasifica a cada proveedor.
+
+           ES UN ABM DE DATOS, no de configuracion del sistema: administracion
+           agrega un centro de costos el dia que abre un deposito, y no puede
+           depender de que alguien toque codigo. Por eso viven en una tabla y no
+           en una constante, a diferencia de FORMAS_PAGO, con la que SI se
+           deciden cosas -esDelCronograma()- y por eso es codigo.
+
+           NUNCA HAY BAJA FISICA: un valor dado de baja deja de ofrecerse pero
+           no desaparece de los proveedores que ya lo tienen.
+           ================================================================ */
+        case 'addOpcionProvLocal':
+            $data = bodyJson();
+
+            foreach (['tipo', 'valor'] as $campo) {
+                if (!isset($data[$campo]) || trim((string) $data[$campo]) === '') {
+                    throw new Exception('Falta el ' . $campo . ' de la opción.');
+                }
+            }
+
+            require_once __DIR__ . '/../Class/ProveedoresOpciones.php';
+
+            /* Sirve tambien para reactivar una baja: la clase resuelve cual de
+               los dos casos es y lo dice en la respuesta. Un endpoint aparte
+               insertaria un duplicado que la pantalla no puede distinguir. */
+            $r = (new ProveedoresOpciones())->agregar(
+                $data['tipo'],
+                $data['valor'],
+                array_key_exists('plazo_dias', $data) ? $data['plazo_dias'] : null
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['reactivado']
+                    ? '"' . $r['valor'] . '" se reactivó: vuelve a estar disponible. Los '
+                        . 'proveedores que ya lo tenían nunca lo perdieron.'
+                    : '"' . $r['valor'] . '" agregado al final de la lista.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'saveOpcionProvLocal':
+            $data = bodyJson();
+
+            if (!isset($data['id'])) {
+                throw new Exception('Falta la opción que hay que guardar.');
+            }
+
+            require_once __DIR__ . '/../Class/ProveedoresOpciones.php';
+
+            $r = (new ProveedoresOpciones())->guardar($data['id'], $data);
+
+            /* RENOMBRAR NO PROPAGA AL MAESTRO, y hay que decirlo: el maestro
+               guarda el TEXTO, no un id, así que los proveedores cargados
+               conservan el valor viejo y quedan marcados como fuera de lista.
+               Propagar sería un UPDATE masivo que cambia de fila del tablero a
+               cientos de proveedores desde una pantalla de configuración, sin
+               previsualización y sin historial. En este módulo, un cambio
+               masivo sobre el maestro es una importación, y las importaciones
+               muestran el diff antes de confirmar. */
+            echo json_encode([
+                'success' => true,
+                'message' => array_key_exists('valor', $data)
+                    ? 'Opción renombrada. Los proveedores que ya tenían el valor anterior lo '
+                        . 'conservan y quedan marcados como fuera de lista: cambiarlos es una '
+                        . 'edición del maestro, no de esta pantalla.'
+                    : 'Opción guardada.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'bajaOpcionProvLocal':
+            $data = bodyJson();
+
+            if (!isset($data['id'])) {
+                throw new Exception('Falta la opción que hay que dar de baja.');
+            }
+
+            require_once __DIR__ . '/../Class/ProveedoresOpciones.php';
+
+            $vigente = !empty($data['vigente']);
+            $r = (new ProveedoresOpciones())->baja($data['id'], $vigente);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $vigente
+                    ? '"' . $r['valor'] . '" vuelve a estar disponible.'
+                    : '"' . $r['valor'] . '" ya no se ofrece. No se borró: los proveedores que '
+                        . 'lo tienen lo conservan, y quedan marcados como fuera de lista.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
            MODULO COBRANZAS (PPP por grupo empresario y escala de descuento)
            ================================================================ */
 

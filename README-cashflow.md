@@ -86,13 +86,14 @@ En este orden, contra `central`:
 -- 13. sql/cashflow_estructura_ingresos_egresos.sql  (Ingresos y Egresos como bloques; baja Ajustes)
 -- 14. sql/cashflow_cobertura.sql  (seccion Cobertura: stock de inversiones y su aplicacion)
 -- 15. sql/cashflow_estructura_neteo_prechequeado.sql  (fila del neteo de cheques adelantados)
+-- 16. sql/cashflow_comex_cotiz_edit.sql  (Comex: override de cotizacion por contenedor)
 ```
 
 **El 13 y el 14 van en ese orden y al final**, porque el 14 mueve `SALDO_FINAL` al final de la sección que crea y da de baja la fila del saldo de inversiones que crearon los anteriores. Correr el 14 sin el 13 no rompe nada, pero deja el cuadro a medio reagrupar.
 
 Los que alimentan pestañas puntuales están documentados en su propio README: `sql/ventas_proyeccion.sql` y compañía en `README-ventas.md`, `sql/cashflow_cobranzas_parametros.sql` y `sql/cashflow_cobranzas_may.sql` en `README-cobranzas-fr.md` y `README-cobranzas-may.md`.
 
-El primero crea `RO_T_CASHFLOW_CONF_SECCION` y `RO_T_CASHFLOW_CONF_FILA`, siembra la estructura y agrega el parámetro `comex_tipo_cambio_usd`.
+El primero crea `RO_T_CASHFLOW_CONF_SECCION` y `RO_T_CASHFLOW_CONF_FILA`, siembra la estructura y agrega el parámetro `comex_tipo_cambio_usd`, **que hoy está retirado**: los pagos a proveedores del exterior se valúan con la curva de dólar futuro ROFEX, mes a mes (ver más abajo). La fila del parámetro queda en la base —este módulo no borra parámetros históricos— pero el formulario de Parámetros ya no la muestra.
 
 El segundo la reorganiza en **Disponibilidades + Ventas por canal**, que es la forma del Excel original (ver más abajo). No borra nada: las filas que reemplaza quedan inhabilitadas y visibles en el editor.
 
@@ -503,12 +504,16 @@ Esa división es lo importante: hace cumplir por construcción la regla de que *
 | `dias` | `['Y-m-d' => float]`, todas las claves del eje |
 | `meses` | `['Y-m' => float]`, todas las claves del eje |
 | `moneda_origen` | `'ARS'` o `'USD'`, informativo |
-| `tipo_cambio` | Con cuál se convirtió, si se convirtió |
+| `tipo_cambio` | Con cuál se convirtió, si se convirtió. **Es un escalar**: cuando la serie se valúa fila por fila —con una cotización distinta por mes— sólo se informa si todas las filas usaron la misma, y si no queda en `null` |
 | `fuera_horizonte` | Importe que cayó fuera del eje |
 | `sin_fecha` | Importe sin fecha utilizable |
 | `warnings` | Avisos propios de la serie |
 
-**Los importes siempre se devuelven en pesos.** La conversión la hace el proveedor y no el motor: el tipo de cambio de un pago futuro es criterio de negocio del módulo que paga, y el día que haga falta una curva por mes en lugar de un valor único, el cambio es sólo ahí.
+**Los importes siempre se devuelven en pesos.** La conversión la hace el proveedor y no el motor: el tipo de cambio de un pago futuro es criterio de negocio del módulo que paga.
+
+Ese día llegó para Comercio Exterior, y confirmó el diseño: **Proveedores Exterior pasó de un tipo de cambio único a la curva de dólar futuro ROFEX**, con una cotización por mes, y el motor no se enteró. Lo que sí cambió de lugar es la multiplicación: ahora vive en `Class/Comex.php`, en el mismo getter que alimenta la pestaña, porque la cotización de cada contenedor es un dato que la pantalla tiene que **mostrar** y no sólo aplicar. Con la cuenta en los dos lados, el tablero y la pestaña podrían valuar distinto el mismo contenedor. El proveedor agrupa sobre el campo ya convertido, sin multiplicador. Ver `Class/DolarFuturo.php`.
+
+Una consecuencia del contrato: con la valuación por fila ya no hay un `tipo_cambio` único que informar, así que la marca del tablero para una fila en dólares sin cotización única dice que cada importe se convirtió con el suyo y manda el detalle a la pestaña.
 
 `fuera_horizonte` no es opcional. Un tablero de consolidación que informa de menos en silencio es peor que uno que falla.
 
@@ -866,7 +871,10 @@ Los avisos no son decoración: son lo que evita leer un cero como si fuera un da
 - Importes que cayeron **fuera del horizonte** o **sin fecha**, con el monto.
 - **Comercio Exterior filtra por fecha de embarque desde hoy**, así que un pago pendiente de un contenedor *ya embarcado* no aparece en el tablero. Sin ese aviso, los egresos de Comex quedarían informados de menos en silencio.
 - **Nacionalizaciones da cero** aunque haya contenedores: hoy ninguno tiene gastos estimados cargados. El aviso trae el conteo, para distinguir "no hay datos" de "los datos son cero". La pestaña Crono Nacionalización muestra el mismo cero.
-- Falta del tipo de cambio.
+- **Contenedores del exterior que no se pudieron valuar**, con el conteo y **cuánto suman en dólares**. Pasa cuando no tienen fecha estimada de pago: sin fecha no hay mes, y sin mes no hay cotización que pedirle a la curva de dólar futuro. No se los convierte con ningún tipo de cambio inventado. El monto va **en dólares y no en pesos** a propósito: decirlo en pesos exigiría valuarlo, que es justamente lo que no se pudo hacer.
+- **Contenedores valuados con un mes que la curva no cubre**, con el conteo y hasta dónde llega la curva. Se usa la cotización del mes más cercano y la fila queda marcada en la pestaña; aproximar en silencio sería mostrar un número que nadie puede explicar.
+- **Contenedores con la cotización corregida a mano**, que manda sobre la curva.
+- Falta de la curva de dólar futuro. Si no se puede leer, la fila de Proveedores Exterior va en cero con un aviso que nombra la tabla, en lugar de tumbar el tablero.
 - **Exportaciones Tasky ubica en hoy las facturas cuya fecha de cobro estimada ya venció**, con el conteo y los dólares. Son facturas vencidas sin cobrar, no cobranza estimada para hoy; la celda de hoy además queda anotada con `detalle`. Sin cotización de hoy, la fila va en cero y el aviso dice cuántos dólares quedan sin valuar.
 - **Cobranzas Franquicias y Mayoristas hacen lo mismo desde que la regla se unificó** (`Ingresos::ubicarCobroVencido()`, ver `README-cobranzas-fr.md`): las facturas proyectadas vencidas de hasta 180 días atrás entran en la columna de hoy, y el aviso trae el conteo y el importe. Acá va **como aviso y no como `detalle`**, a diferencia de las exportaciones: el contrato admite una anotación por celda y la celda de hoy de la cobranza proyectada ya puede tener la de la fecha pactada a mano. Dos notas por la misma celda dejarían ver una sola.
 
