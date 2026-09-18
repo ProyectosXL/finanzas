@@ -29,8 +29,20 @@ class Parametros {
      *   CLIENTE, en RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE.DIAS_PRECHEQUEADO. Un
      *   unico numero global obligaba a elegir cual de todos los clientes
      *   quedaba bien calculado. Ver README-ventas.md.
+     *
+     *   'comex_tipo_cambio_usd' -> los pagos a proveedores del exterior pasaron
+     *   a valuarse con la CURVA DE DOLAR FUTURO ROFEX, segun el mes de la fecha
+     *   estimada de pago de cada contenedor. Un unico tipo de cambio global
+     *   convertia por igual el pago del mes que viene y el de dentro de once
+     *   meses, que es la cuenta que el encabezado de Cotizacion describe como
+     *   incorrecta: no proyecta, reexpresa toda la serie a moneda de hoy.
+     *
+     *   EL DOLAR FUTURO ES EL UNICO CRITERIO Y POR ESO ESTE PARAMETRO SE
+     *   RETIRA. Dejarlo editable con la curva ya funcionando seria peor que
+     *   borrarlo: un campo que se puede tocar, que parece decidir la valuacion
+     *   de Comex y que no cambia nada. Ver Class/DolarFuturo.php.
      */
-    const RETIRADOS = ['dias_prechequeado'];
+    const RETIRADOS = ['dias_prechequeado', 'comex_tipo_cambio_usd'];
 
     /**
      * Modulos que expone la pestana Parametros, en el orden de las sub-pestanas.

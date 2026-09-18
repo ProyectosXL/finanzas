@@ -3,8 +3,9 @@
 
 <div class="tab-proveedores_exterior">
 
-    <!-- Lo que quedó fuera del horizonte o sin fecha. Antes se descartaba en
-         silencio, así que la tabla podía informar de menos sin decirlo. -->
+    <!-- Lo que quedó fuera del horizonte o sin fecha, y lo que no se pudo
+         valuar. Antes se descartaba en silencio, así que la tabla podía
+         informar de menos sin decirlo. -->
     <div id="avisosProvExt"></div>
 
     <!-- KPI Cards Row.
@@ -20,7 +21,7 @@
                         <i class="fas fa-calendar-day"></i>
                     </div>
                 </div>
-                <div class="kpi-card-value" id="total4semanas">U$S 0.00</div>
+                <div class="kpi-card-value" id="total4semanas">$ 0,00</div>
                 <div class="kpi-card-footer">
                     <span class="text-muted" id="rotulo4semanas">Tramo diario</span>
                 </div>
@@ -35,7 +36,7 @@
                         <i class="fas fa-calendar-alt"></i>
                     </div>
                 </div>
-                <div class="kpi-card-value" id="total11meses">U$S 0.00</div>
+                <div class="kpi-card-value" id="total11meses">$ 0,00</div>
                 <div class="kpi-card-footer">
                     <span class="text-muted" id="rotulo11meses">Después del tramo diario</span>
                 </div>
@@ -50,7 +51,7 @@
                         <i class="fas fa-ship"></i>
                     </div>
                 </div>
-                <div class="kpi-card-value" id="totalGeneral">U$S 0.00</div>
+                <div class="kpi-card-value" id="totalGeneral">$ 0,00</div>
                 <div class="kpi-card-footer">
                     <span class="text-muted" id="rotuloGeneral">Todo el horizonte</span>
                 </div>
@@ -86,6 +87,10 @@
              total de todo. -->
         <div class="card-body py-2 border-bottom">
             <small class="text-muted" id="periodoProvExt"></small>
+            <!-- De dónde sale el dólar con el que se valúa la tabla y hasta
+                 qué mes llega la curva. No es decoración: es lo que permite
+                 auditar los importes en pesos contra el mercado. -->
+            <small class="text-muted ms-2" id="cotizProvExt"></small>
         </div>
 
         <div class="card-body p-0">
@@ -103,14 +108,31 @@
                                 <th rowspan="2">Contenedor</th>
                                 <th rowspan="2">Orden Compra</th>
                                 <th rowspan="2">Despachante</th>
+                                <!-- El FOB en dólares queda como REFERENCIA. Es
+                                     el dato del contenedor y es con lo que se
+                                     chequea contra la factura del proveedor; lo
+                                     que entra al cashflow es la columna en
+                                     pesos. -->
                                 <th rowspan="2">Valor FOB (USD)</th>
                                 <th rowspan="2">ETD</th>
                                 <th rowspan="2">ETA</th>
                                 <th rowspan="2">
                                     Fecha Est. Pago
-                                    <i class="fas fa-pen-to-square ms-1" style="font-size: 10px;" 
+                                    <i class="fas fa-pen-to-square ms-1" style="font-size: 10px;"
                                        title="Click para editar"></i>
                                 </th>
+                                <!-- CON QUÉ DÓLAR SE VALUÓ ESTA FILA. Sale de
+                                     la curva de dólar futuro ROFEX según el mes
+                                     de la fecha de pago, y se puede corregir a
+                                     mano para un contenedor puntual. Un importe
+                                     en pesos que no diga con qué cotización
+                                     salió no se puede auditar contra nada. -->
+                                <th rowspan="2">
+                                    Dólar aplicado
+                                    <i class="fas fa-pen-to-square ms-1" style="font-size: 10px;"
+                                       title="Click para corregir la cotización de este contenedor"></i>
+                                </th>
+                                <th rowspan="2">Importe ($)</th>
                                 <!-- El rótulo y el colspan los pone el JS según
                                      la vista activa, y las columnas salen del
                                      eje del backend. -->
@@ -125,7 +147,7 @@
                         </tbody>
                         <tfoot class="table-light">
                             <tr id="totalsRow">
-                                <td colspan="8" class="fw-bold text-end">TOTALES</td>
+                                <td colspan="10" class="fw-bold text-end">TOTALES</td>
                                 <!-- Los totales se generan dinámicamente -->
                             </tr>
                         </tfoot>
