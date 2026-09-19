@@ -549,6 +549,14 @@ class CashflowEstructura {
                         self::advertenciaFila($r, $id, 'La fila "' . $f['NOMBRE'] . '" se muestra '
                             . 'en cero: el módulo ' . $providers[$prov]['nombre'] . ' todavía no '
                             . 'está construido.');
+                    } elseif (!empty($providers[$prov]['retirado'])) {
+                        // Advertencia y no error: la fila sigue funcionando con
+                        // lo ultimo que se cargo ahi, y bloquear el guardado
+                        // impediria justamente corregirla. Ver CashflowRegistry.
+                        self::advertenciaFila($r, $id, 'La fila "' . $f['NOMBRE'] . '" lee del '
+                            . 'módulo ' . $providers[$prov]['nombre'] . ', que está retirado: '
+                            . $providers[$prov]['retirado'] . ' Apuntala al módulo que lo '
+                            . 'reemplaza.');
                     }
                 }
             } elseif (!empty($f['ORIGEN_PROVIDER'])) {

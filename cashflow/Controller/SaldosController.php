@@ -1,11 +1,18 @@
 <?php
 /**
  * SaldosController.php
- * Controlador de la pestana Saldos: disponible inicial y caja de locales.
+ * Controlador de la pestana Saldos: disponible inicial, caja de locales y las
+ * cuentas de fondo (inversion y comitente) con su cuenta corriente.
  *
- * Las dos sub-pestanas se piden por separado. No es solo prolijidad: la
+ * Las tres sub-pestanas se piden por separado. No es solo prolijidad: la
  * pestana 2 consulta el servidor de locales, que puede estar caido, y en ese
- * caso la pestana 1 tiene que seguir dibujandose igual.
+ * caso la pestana 1 tiene que seguir dibujandose igual. La 3 depende de un
+ * script que puede no haberse corrido, y entonces avisa sin tumbar a las otras.
+ *
+ * LOS MOVIMIENTOS DE UN FONDO SE VALIDAN EN Class/Fondos.php, no aca ni en el
+ * navegador: el endpoint es alcanzable sin pasar por la pantalla. La moneda no
+ * viaja -sale de la cuenta- y un movimiento que corrige a otro lo dice con
+ * 'id_reemplaza', para que el anterior quede en el historial y no se pise.
  */
 
 error_reporting(E_ALL);
@@ -115,6 +122,90 @@ try {
                 'success' => true,
                 'message' => $mensaje,
                 'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ============================================================
+           PESTANA 3: FONDOS
+           ============================================================ */
+
+        case 'getFondos':
+            echo json_encode([
+                'success' => true,
+                'data' => $saldos->getPestanaFondos()
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* El historial completo de una cuenta: vigentes, pisados y dados de
+           baja. Es lo que explica por que el saldo de ayer era otro. */
+        case 'getMovimientosFondo':
+            if (!isset($_GET['id_cuenta'])) {
+                throw new Exception('Falta la cuenta');
+            }
+
+            require_once __DIR__ . '/../Class/Fondos.php';
+
+            echo json_encode([
+                'success' => true,
+                'data' => (new Fondos())->getMovimientos(intval($_GET['id_cuenta']))
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'guardarMovimientoFondo':
+            $data = bodyJson();
+
+            foreach (['id_cuenta', 'fecha', 'tipo', 'importe'] as $campo) {
+                if (!isset($data[$campo]) || $data[$campo] === '') {
+                    throw new Exception('Falta el campo "' . $campo . '" del movimiento');
+                }
+            }
+
+            require_once __DIR__ . '/../Class/Fondos.php';
+
+            $r = (new Fondos())->guardarMovimiento(
+                $data['id_cuenta'],
+                $data['fecha'],
+                $data['tipo'],
+                $data['importe'],
+                isset($data['observacion']) ? $data['observacion'] : null,
+                usuarioActual(),
+                (isset($data['id_reemplaza']) && $data['id_reemplaza'] !== '')
+                    ? intval($data['id_reemplaza']) : null
+            );
+
+            $cuanto = ($r['moneda'] === 'USD' ? 'US$ ' : '$ ')
+                . number_format($r['importe'], 2, ',', '.');
+            $que = ($r['tipo'] === 'SUSCRIPCION') ? 'Suscripción' : 'Rescate';
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['reemplazo']
+                    ? $que . ' corregido a ' . $cuanto . '. La versión anterior queda en el '
+                        . 'historial de la cuenta.'
+                    : $que . ' de ' . $cuanto . ' cargado. El saldo del fondo y el stock del '
+                        . 'tablero ya lo reflejan.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* No borra la fila: la da de baja. Ver Fondos::bajaMovimiento(). */
+        case 'bajaMovimientoFondo':
+            $data = bodyJson();
+
+            if (!isset($data['id_cuenta']) || !isset($data['id'])) {
+                throw new Exception('Faltan la cuenta o el movimiento a dar de baja');
+            }
+
+            require_once __DIR__ . '/../Class/Fondos.php';
+
+            $habia = (new Fondos())->bajaMovimiento(intval($data['id_cuenta']), intval($data['id']));
+
+            echo json_encode([
+                'success' => true,
+                'message' => $habia
+                    ? 'Movimiento dado de baja. Queda en el historial de la cuenta, tachado.'
+                    : 'Ese movimiento ya no estaba vigente.',
+                'data' => ['habia' => $habia]
             ], JSON_UNESCAPED_UNICODE);
             break;
 

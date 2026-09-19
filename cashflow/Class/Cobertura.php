@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/Cotizacion.php';
+require_once __DIR__ . '/Fondos.php';
 
 /**
  * Cobertura
@@ -39,6 +40,27 @@ require_once __DIR__ . '/Cotizacion.php';
  * dia desde dos fondos distintos son una sola decision de tesoreria y se cargan
  * como un solo importe con el origen que corresponda.
  *
+ * LOS FONDOS SON LAS CUENTAS DE FONDO DE SALDOS, NO UNA LISTA DEL CODIGO
+ * ----------------------------------------------------------------------
+ * Esto CAMBIO. ORIGENES era una constante con tres claves (INVERSIONES,
+ * SUSCRIPCION, DOLARES) y cada stock del tablero declaraba en el registro a
+ * cual pertenecia. Con cuentas de inversion y comitente que da de alta el
+ * usuario, eso ya no puede ser una lista fija: CADA CUENTA DE FONDO ES UN
+ * FONDO, su clave es Fondos::claveFondo() ('CTA_' + ID) y su moneda es la de
+ * la cuenta. origenes() las lee del catalogo; los helpers puros reciben la
+ * lista para poder probarse sin base.
+ *
+ * Las aplicaciones que ya estaban las reescribio la migracion a la clave de la
+ * cuenta equivalente (ver sql/cashflow_saldos_cuentas_fondo.sql). Una
+ * aplicacion cuyo origen no sea una cuenta -una clave vieja que no se pudo
+ * mover- se muestra y suma al total, pero no descuenta de ningun fondo.
+ *
+ * EL ORIGEN POR DEFECTO ES LA PRIMERA CUENTA DE FONDO EN PESOS del catalogo,
+ * por orden. No es una cuenta escrita en el codigo, es una regla; y existe
+ * porque el editor del tablero todavia no pregunta de que fondo se aplica
+ * -eso es la etapa siguiente-. Sin ninguna cuenta en pesos, guardar sin
+ * origen se rechaza diciendolo.
+ *
  * EL IMPORTE VIGENTE SE PISA, PERO EL HISTORIAL QUEDA
  * ---------------------------------------------------
  * Mismo circuito que Dolares Cuenta Comitente y Saldo de Inversiones, y a
@@ -61,57 +83,6 @@ class Cobertura {
     /** Tabla de aplicaciones, en la base central */
     const TABLA = 'RO_T_CASHFLOW_COBERTURA_APLIC';
 
-    /**
-     * De donde puede salir la plata.
-     *
-     * Son los tres bloques de stock del Excel. La lista esta aca -y no como
-     * texto libre- por el mismo motivo que las series de CashflowRegistry: un
-     * campo libre termina con 'Alyc', 'ALYC' y 'Fondo Alyc' conviviendo, y
-     * despues no hay forma de sumar por origen. Agregar uno es agregar una
-     * entrada aca.
-     *
-     * OJO: el origen es DESCRIPTIVO. Hoy el unico stock que el tablero conoce
-     * es el saldo de inversiones en pesos, asi que el origen no limita cuanto
-     * se puede aplicar; dice de donde se piensa sacar.
-     */
-    const ORIGENES = [
-        'INVERSIONES' => 'Inversiones (Fondo Alyc)',
-        'SUSCRIPCION' => 'Suscripción',
-        'DOLARES' => 'Dólares'
-    ];
-
-    /** Origen que se asume si no mandan ninguno */
-    const ORIGEN_DEFECTO = 'INVERSIONES';
-
-    /**
-     * En que moneda se mide lo que sale de cada fondo.
-     *
-     * NO ES UNA PREFERENCIA DE LA PANTALLA: es la moneda en la que ese fondo
-     * existe. El saldo de inversiones se informa en pesos, asi que aplicar de
-     * ahi es aplicar pesos; la cuenta comitente tiene DOLARES, y vender 20.000
-     * dolares un dia entrega los pesos de ESE dia.
-     *
-     * Esta aca y no en el navegador porque decide como se guarda el dato: con la
-     * moneda equivocada el importe se valua dos veces o ninguna.
-     */
-    const MONEDA_POR_FONDO = [
-        'INVERSIONES' => 'ARS',
-        'SUSCRIPCION' => 'ARS',
-        'DOLARES' => 'USD'
-    ];
-
-    /**
-     * La moneda que le corresponde a un origen.
-     *
-     * @param string|null $origen
-     * @return string 'ARS' | 'USD'
-     */
-    public static function monedaDeOrigen($origen) {
-        $o = strtoupper(trim((string) $origen));
-
-        return isset(self::MONEDA_POR_FONDO[$o]) ? self::MONEDA_POR_FONDO[$o] : 'ARS';
-    }
-
     /** @var Conexion */
     private $conn;
 
@@ -121,9 +92,92 @@ class Cobertura {
     /** @var bool|null Cache de si la tabla ya tiene la columna MONEDA */
     private $moneda = null;
 
+    /** @var array|null Cache de los fondos: las cuentas de fondo del catalogo */
+    private $origenes = null;
+
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
         $this->conn = new Conexion;
+    }
+
+    /* ====================================================================
+       LOS FONDOS
+       ==================================================================== */
+
+    /**
+     * De donde puede salir la plata: las cuentas de fondo del catalogo de
+     * Saldos, por su clave, incluidas las inhabilitadas (una aplicacion vieja
+     * tiene que poder nombrar su fondo). Ver Fondos::origenesCobertura().
+     *
+     * NO LANZA si el script de los fondos no se corrio: devuelve vacio, y
+     * entonces no hay de donde aplicar, que es lo cierto.
+     *
+     * @return array Mapa clave => ['id', 'nombre', 'moneda', 'clase', 'activo']
+     */
+    public function origenes() {
+        if ($this->origenes === null) {
+            try {
+                $this->origenes = (new Fondos())->origenesCobertura();
+            } catch (Throwable $e) {
+                $this->origenes = [];
+            }
+        }
+
+        return $this->origenes;
+    }
+
+    /**
+     * La moneda del fondo del que sale una aplicacion.
+     *
+     * NO ES UNA PREFERENCIA DE LA PANTALLA: es la moneda en la que esa cuenta
+     * existe. Aplicar desde una cuenta en dolares es vender dolares, y vender
+     * 20.000 dolares un dia entrega los pesos de ESE dia. Esta aca y no en el
+     * navegador porque decide como se guarda el dato: con la moneda equivocada
+     * el importe se valua dos veces o ninguna.
+     *
+     * @param string|null $origen
+     * @return string 'ARS' | 'USD'
+     */
+    public function monedaDeOrigen($origen) {
+        return self::monedaDeOrigenEn($origen, $this->origenes());
+    }
+
+    /**
+     * La misma pregunta, sobre una lista dada. Es la version pura.
+     *
+     * Un origen que no esta en la lista es pesos: es lo que era todo antes de
+     * que existieran los fondos en dolares, y lo que no se sabe valuar de otra
+     * forma.
+     *
+     * @param string|null $origen
+     * @param array $origenes Como devuelve origenes()
+     * @return string 'ARS' | 'USD'
+     */
+    public static function monedaDeOrigenEn($origen, $origenes) {
+        $o = strtoupper(trim((string) $origen));
+
+        if (isset($origenes[$o]['moneda'])) {
+            return self::monedaValida($origenes[$o]['moneda']);
+        }
+
+        return 'ARS';
+    }
+
+    /**
+     * El origen que se asume cuando no mandan ninguno: la primera cuenta de
+     * fondo ACTIVA en PESOS, por orden del catalogo. Ver el encabezado.
+     *
+     * @param array $origenes Como devuelve origenes(), que ya viene ordenado
+     * @return string|null null si no hay ninguna
+     */
+    public static function origenDefectoDe($origenes) {
+        foreach ($origenes as $clave => $f) {
+            if (!empty($f['activo']) && self::monedaValida($f['moneda']) === 'ARS') {
+                return $clave;
+            }
+        }
+
+        return null;
     }
 
     /* ====================================================================
@@ -285,8 +339,11 @@ class Cobertura {
                 }
             }
 
-            if ($ars !== null) {
-                $o = ($a['ORIGEN'] === '') ? self::ORIGEN_DEFECTO : $a['ORIGEN'];
+            // Una aplicacion sin origen -no deberia haber, guardar() siempre lo
+            // manda- suma al total y a ningun fondo. Lo mismo una con una clave
+            // que no es de una cuenta: el motor la ve en 'por_origen' y avisa.
+            if ($ars !== null && $a['ORIGEN'] !== '') {
+                $o = $a['ORIGEN'];
 
                 $salida['por_origen'][$o] = (isset($salida['por_origen'][$o])
                     ? $salida['por_origen'][$o] : 0) + $ars;
@@ -418,7 +475,8 @@ class Cobertura {
      * @param string $fecha 'Y-m-d'
      * @param mixed $importe Puede ser negativo; no puede ser cero. En la moneda
      *        del fondo que dice $origen
-     * @param string|null $origen Clave de self::ORIGENES
+     * @param string|null $origen Clave de una cuenta de fondo (Fondos::claveFondo());
+     *        null toma la primera cuenta en pesos del catalogo
      * @param string|null $observacion
      * @param string|null $usuario
      * @return array ['fecha', 'importe', 'moneda', 'origen', 'piso' => bool]
@@ -432,9 +490,9 @@ class Cobertura {
 
         $f = self::validarFecha($fecha);
         $monto = self::validarImporte($importe);
-        $org = self::validarOrigen($origen);
+        $org = $this->validarOrigen($origen);
         $obs = self::normalizarObservacion($observacion);
-        $mon = self::monedaDeOrigen($org);
+        $mon = $this->monedaDeOrigen($org);
 
         if ($mon === 'USD' && !$this->tieneMoneda()) {
             throw new Exception('Todavía no se puede aplicar cobertura desde el fondo de '
@@ -584,25 +642,59 @@ class Cobertura {
     }
 
     /**
-     * Normaliza el origen del fondo contra self::ORIGENES.
+     * Normaliza el origen del fondo contra las cuentas de fondo del catalogo.
      *
-     * Un origen desconocido NO se guarda como vino ni se descarta en silencio:
-     * se rechaza. Es una clave, y una clave que nadie declaro no se puede
-     * agrupar ni mostrar con su nombre.
-     *
-     * @param mixed $origen null usa ORIGEN_DEFECTO
+     * @param mixed $origen null toma el de defecto
      * @return string
      */
-    public static function validarOrigen($origen) {
-        if ($origen === null || $origen === '') {
-            return self::ORIGEN_DEFECTO;
+    public function validarOrigen($origen) {
+        return self::validarOrigenEn($origen, $this->origenes());
+    }
+
+    /**
+     * La misma validacion, sobre una lista dada. Es la version pura.
+     *
+     * Un origen desconocido NO se guarda como vino ni se descarta en silencio:
+     * se rechaza. Es una clave, y una clave que no es de ninguna cuenta no se
+     * puede descontar de ningun fondo ni mostrar con su nombre. Una cuenta
+     * INHABILITADA tampoco sirve para aplicar: esta en la lista para poder
+     * leer el historial, no para cargar cosas nuevas.
+     *
+     * @param mixed $origen
+     * @param array $origenes Como devuelve origenes()
+     * @return string
+     */
+    public static function validarOrigenEn($origen, $origenes) {
+        if ($origen === null || trim((string) $origen) === '') {
+            $defecto = self::origenDefectoDe($origenes);
+
+            if ($defecto === null) {
+                throw new Exception('No hay ninguna cuenta de inversión en pesos dada de alta de '
+                    . 'la que aplicar cobertura. Cargá una desde Parámetros → Saldos.');
+            }
+
+            return $defecto;
         }
 
         $o = strtoupper(trim((string) $origen));
 
-        if (!isset(self::ORIGENES[$o])) {
-            throw new Exception('El origen "' . $origen . '" no está declarado. '
-                . 'Los válidos son: ' . implode(', ', array_keys(self::ORIGENES)) . '.');
+        if (!isset($origenes[$o])) {
+            $validos = [];
+
+            foreach ($origenes as $clave => $f) {
+                if (!empty($f['activo'])) {
+                    $validos[] = $clave . ' (' . $f['nombre'] . ')';
+                }
+            }
+
+            throw new Exception('El origen "' . $origen . '" no es ninguna cuenta de fondo. '
+                . (empty($validos) ? 'No hay ninguna dada de alta.'
+                    : 'Las válidas son: ' . implode(', ', $validos) . '.'));
+        }
+
+        if (empty($origenes[$o]['activo'])) {
+            throw new Exception('La cuenta "' . $origenes[$o]['nombre'] . '" está inhabilitada: '
+                . 'no se puede aplicar cobertura desde ahí.');
         }
 
         return $o;

@@ -246,7 +246,9 @@
             datos.providers.map(function(p) {
                 return '<option value="' + escapar(p.codigo) + '"'
                     + (p.codigo === f.origen_provider ? ' selected' : '') + '>'
-                    + escapar(p.nombre) + (p.disponible ? '' : ' (sin construir)') + '</option>';
+                    + escapar(p.nombre)
+                    + (p.disponible ? (p.retirado ? ' (retirado)' : '') : ' (sin construir)')
+                    + '</option>';
             })
         ).join('');
 
@@ -496,14 +498,20 @@
                 return escapar(p.series[c]);
             }).join('<br>');
 
-            return '<tr class="' + (p.disponible ? '' : 'cfe-inactiva') + '">'
+            // Retirado no es "sin construir": el módulo existe y sirve lo que
+            // tiene cargado, pero ese dato ya no se mantiene. Se dice por qué.
+            var estado = !p.disponible
+                ? '<span class="badge bg-secondary-subtle text-secondary">Sin construir</span>'
+                : (p.retirado
+                    ? '<span class="badge bg-warning-subtle text-warning-emphasis" title="'
+                        + escapar(p.retirado) + '">Retirado</span>'
+                    : '<span class="badge bg-success-subtle text-success">Con datos</span>');
+
+            return '<tr class="' + (p.disponible && !p.retirado ? '' : 'cfe-inactiva') + '">'
                 + '<td>' + escapar(p.nombre) + '</td>'
                 + '<td class="small">' + series + '</td>'
                 + '<td>' + escapar(p.moneda) + '</td>'
-                + '<td>' + (p.disponible
-                    ? '<span class="badge bg-success-subtle text-success">Con datos</span>'
-                    : '<span class="badge bg-secondary-subtle text-secondary">Sin construir</span>')
-                + '</td></tr>';
+                + '<td>' + estado + '</td></tr>';
         }).join('');
     }
 

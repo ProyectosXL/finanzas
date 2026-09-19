@@ -1,45 +1,52 @@
-# Módulo Saldos — disponible inicial y caja de locales
+# Módulo Saldos — disponible inicial, caja de locales y fondos
 
-Reemplaza el placeholder de la pestaña **Saldos** y alimenta las dos filas del tablero que hasta ahora rendían cero: *Saldo Inicial* y *Caja Locales*.
+Reemplaza el placeholder de la pestaña **Saldos** y alimenta las dos filas del tablero que hasta ahora rendían cero: *Saldo Inicial* y *Caja Locales*. Desde `feature/cuentas-inversion` también lleva las **cuentas de inversión y comitente**, que son el stock de la sección Cobertura.
 
-Rama: `feature/saldos`
+Ramas: `feature/saldos`, `feature/cuentas-inversion`
 
 ---
 
 ## La idea en una línea
 
-**Una carga es un evento fechado, no un `UPDATE`.** Los saldos no se pisan: cada carga inserta un juego nuevo de filas y la pantalla muestra, para cada dato, su último valor conocido **con la fecha en que se cargó**.
+**Una carga es un evento fechado, no un `UPDATE`.** Los saldos no se pisan: cada carga inserta un juego nuevo de filas y la pantalla muestra, para cada dato, su último valor conocido **con la fecha en que se cargó**. Los fondos siguen la misma idea con otra forma: no se cargan fotos, se cargan **movimientos**, y el saldo se calcula.
 
 ```
-Pestaña 1 "Saldos"          Pestaña 2 "Saldos Locales"
-efectivo central (SBA05)    caja de locales propios (Tango)
-+ bancos (manual → API)     − reserva de caja
-+ Mercado Pago (manual)     = neto a depositar
-        │                            │
-        ▼                            ▼
-  serie DISPONIBLE            serie DEPOSITOS
-        │                            │
-        └──── SaldosProvider ────────┘
-                     │
-              Cashflow (motor)
-        Saldo Inicial      Caja Locales
+Pestaña 1 "Saldos"          Pestaña 2 "Saldos Locales"      Pestaña 3 "Fondos"
+efectivo central (SBA05)    caja de locales propios (Tango)  cuentas INVERSION / COMITENTE
++ bancos (manual → API)     − reserva de caja                saldo inicial
++ Mercado Pago (manual)     = neto a depositar               + suscripciones − rescates
+        │                            │                                │
+        ▼                            ▼                                ▼
+  serie DISPONIBLE            serie DEPOSITOS                   series STOCK
+        │                            │                                │
+        └──── SaldosProvider ────────┘                         FondosProvider
+                     │                                                │
+              Cashflow (motor)                                 Cashflow (motor)
+        Saldo Inicial      Caja Locales                   Cobertura: stock por fondo
 ```
+
+**Los fondos no entran en Disponibilidades.** Su único rol en el tablero es ser stock de la sección Cobertura; si entraran a los dos lados, la misma plata se contaría dos veces.
 
 ---
 
 ## Ejecución de los scripts
 
-Contra `central`:
+Contra `central`, en este orden:
 
 ```sql
--- sql/cashflow_saldos.sql
+-- 1. sql/cashflow_saldos.sql
+-- 2. sql/cashflow_saldos_cuentas_fondo.sql   (después de cashflow_cobertura.sql,
+--                                             cashflow_cobertura_por_fondo.sql y
+--                                             cashflow_dolares_comitente_cobertura.sql)
 ```
 
-Crea las cinco tablas, siembra la cuenta de efectivo de tesorería y carga los dos parámetros del módulo. **Es reejecutable**: las tablas se crean sólo si no existen y las semillas entran por `MERGE WHEN NOT MATCHED`, así que una segunda corrida no duplica nada ni pisa un valor ya editado. Verificado corriéndolo dos veces.
+El primero crea las cinco tablas, siembra la cuenta de efectivo de tesorería y carga los dos parámetros del módulo. **Es reejecutable**: las tablas se crean sólo si no existen y las semillas entran por `MERGE WHEN NOT MATCHED`, así que una segunda corrida no duplica nada ni pisa un valor ya editado. Verificado corriéndolo dos veces.
 
 No depende de los otros scripts, pero las filas del tablero que alimenta las creó `sql/cashflow_estructura_disponibilidades.sql`.
 
-Si el script **no se corrió**, la pantalla no falla: muestra un aviso y el tablero deja las dos filas en cero, igual que hace hoy con la estructura.
+El segundo agrega `CLASE` y el saldo inicial al catálogo de cuentas, crea la tabla de movimientos de los fondos, **migra** la última carga vigente de Otros Ingresos como saldo inicial de dos cuentas nuevas, reescribe el origen de las aplicaciones de cobertura a la clave de esas cuentas y reapunta las dos filas de stock del tablero. Ver *Pestaña 3 — Fondos*. También reejecutable: cada bloque pregunta antes de escribir, y las migraciones se guardan por clase de cuenta (si ya hay una cuenta `INVERSION`, no migra el saldo de inversiones). Verificado corriéndolo dos veces contra la base: 13 cuentas antes y después.
+
+Si un script **no se corrió**, la pantalla no falla: muestra un aviso y el tablero deja las filas correspondientes en cero, igual que hace hoy con la estructura. Sin el segundo, las dos sub-pestañas de siempre funcionan igual, todas las cuentas son cuentas a la vista, y Fondos avisa qué script falta.
 
 ---
 
@@ -166,9 +173,72 @@ La consulta devuelve una fila por `(sucursal, cuenta de tesorería)`. La reserva
 
 ---
 
+## Pestaña 3 — Fondos
+
+Las cuentas de **inversión** y **comitente** del catálogo, con su cuenta corriente. Alimentan las dos filas de stock de la sección **Cobertura** del tablero (`STOCK_INVERSIONES` y `STOCK_DOLARES_COMITENTE`), a través de `FondosProvider`.
+
+> Hasta acá ese stock salía de dos **fotos** cargadas en *Otros Ingresos*: una del saldo invertido en pesos y otra de los dólares de la cuenta comitente. Una foto dice cuánto había el día que alguien la tomó y nada más: no explica de dónde salió el número ni permite asentar un rescate. Ahora cada fondo es una cuenta y su saldo **se calcula**. Las pestañas de Otros Ingresos quedaron retiradas: ver `README-otros-ingresos.md`.
+
+### Una cuenta tiene TIPO y CLASE, y son dos preguntas
+
+`TIPO` ya existía y dice **de dónde sale** el saldo (`BANCO`, `MERCADO_PAGO`, `EFECTIVO_CENTRAL`, `OTRO`): decide el origen del dato, lo que la API va a sincronizar, el filtro de la pestaña 1, y es inmutable. `CLASE` es nueva y dice **qué es** la cuenta:
+
+| `CLASE` | Qué es | Cómo se carga | Dónde entra al tablero |
+| --- | --- | --- | --- |
+| `CTA_CORRIENTE`, `CAJA_AHORRO` | Plata a la vista | Foto del saldo (pestaña 1) | *Saldo Inicial* (Disponibilidades) |
+| `INVERSION`, `COMITENTE` | Un fondo | Cuenta corriente (pestaña 3) | *Inversiones disponibles* / *Dólares en cuenta comitente* (Cobertura) |
+
+Se descartó reorganizar `TIPO` porque son dos ejes independientes —un banco tiene cuentas corrientes *y* cajas de ahorro, un comitente puede estar en pesos o en dólares—, porque `TIPO` ya está escrito en el histórico, y porque `ACCOUNT_TYPE` de Interbanking (`CC`/`CA`) es la visión del proveedor del mismo dato, sólo para cuentas bancarias; `CLASE` es la del negocio y vale para todas. El argumento completo está arriba de `sql/cashflow_saldos_cuentas_fondo.sql`.
+
+Las cuentas que ya estaban quedaron como `CTA_CORRIENTE`, que es lo que son todas hoy; si alguna es una caja de ahorro se corrige desde Parámetros. **La clase se cambia sólo dentro del mismo grupo**: entre las dos a la vista o entre los dos fondos. Cruzar de grupo dejaría el histórico de la cuenta —fotos en un caso, movimientos en el otro— leído como lo que no es. Si quedó mal, se inhabilita y se crea otra, igual que con el `TIPO`. La regla es `Fondos::cambioDeClasePermitido()`, y `Fondos::esFondo()` es **la única** que decide de qué lado del tablero va una cuenta: `Saldos::getSaldosActuales()` la usa para dejar los fondos fuera del disponible.
+
+Los fondos migrados llevan `TIPO = 'OTRO'`: un fondo no es un banco ni una billetera, y su saldo no sale de ninguna consulta ni API sino de su cuenta corriente.
+
+### El saldo es saldo inicial + suscripciones − rescates
+
+```
+saldo a una fecha = SALDO_INICIAL
+                  + suscripciones − rescates
+                    (movimientos vigentes con FECHA_SALDO_INICIAL < FECHA <= esa fecha)
+```
+
+La cuenta la hace `Fondos::saldoA()`, un helper puro, y la usan la pestaña y el proveedor: el tablero y la pantalla no pueden discrepar. Tres reglas que no son obvias:
+
+- **El saldo inicial es al cierre de su fecha.** Un movimiento de esa fecha o anterior ya está incluido en él y no se vuelve a sumar (la pestaña lo marca *En saldo inicial*). Sin esa regla, fijar un saldo inicial nuevo después de haber cargado movimientos los contaría dos veces. Por lo mismo, `guardarMovimiento()` **rechaza** un movimiento anterior o igual a esa fecha: cargarlo no cambiaría el saldo y nada lo diría. Si el saldo inicial está mal, se corrige el saldo inicial.
+- **El stock del tablero es el saldo a hoy.** Un rescate previsto para la semana que viene es un dato real —se acepta y se lista, marcado *Futuro*— pero no entra al saldo de hoy ni al stock: hoy la plata todavía está en el fondo. El proveedor avisa cuántos hay. Cómo se usa ese stock para cubrir el flujo es asunto de la sección Cobertura y no cambió en esta etapa.
+- **Sin saldo inicial se arranca de cero**, y la pantalla dice *sin saldo inicial* en vez de mostrar un cero: no es lo mismo. El tablero también lo avisa.
+
+El importe de un movimiento es **siempre positivo** y el signo lo pone el tipo (`SUSCRIPCION` suma, `RESCATE` resta), por el mismo motivo que el tablero no tiene columna de signo: "un rescate negativo" no significa nada. La moneda **no viaja**: se copia de la cuenta al guardar, como hace el detalle de saldos, así que corregir la moneda de una cuenta no reescribe lo que significan sus movimientos viejos. Por eso la moneda de un fondo **con movimientos no se deja cambiar**.
+
+**No se registra contrapartida bancaria.** Un rescate saca plata del fondo y nada más: lo que entra al banco se va a ver en el saldo bancario, que en breve lo trae la API. Registrarla acá sería adelantar un dato que otro circuito ya va a medir, y las dos cifras podrían discrepar.
+
+### El saldo inicial va en la cuenta
+
+`SALDO_INICIAL` y `FECHA_SALDO_INICIAL` son dos columnas del catálogo, no un movimiento: es un parámetro de la cuenta, como el nombre, que se fija al darla de alta (o en la migración) y del que arranca la cuenta corriente. Los eventos son los movimientos; el saldo inicial es el punto de partida. Corregirlo es un `UPDATE` auditado (`FECHA_UPDATE`, `USUARIO`) desde Parámetros → Saldos, y van los dos o ninguno (`CHECK`).
+
+### Editar un movimiento no es un UPDATE
+
+Mismo circuito que `RO_T_CASHFLOW_COBERTURA_APLIC`: corregir marca `VIGENTE = 0` el anterior e inserta uno nuevo que apunta al que reemplaza (`ID_REEMPLAZA`), en una transacción; dar de baja marca `VIGENTE = 0` y no inserta nada. A diferencia de las aplicaciones, **la identidad no es la fecha**: dos suscripciones el mismo día a la misma cuenta son dos hechos distintos, y por eso la cadena de versiones va por `ID_REEMPLAZA`. El modal de la pestaña muestra **todo**: vigentes, corregidos (tachados, con cuál los reemplazó) y dados de baja. Es lo único que explica por qué el saldo del fondo de la semana pasada era otro.
+
+### Los dólares se valúan como siempre
+
+Una cuenta en `USD` se convierte con la **última cotización oficial conocida a hoy, punta vendedora** (`Cotizacion::ultimaHasta()`), que es el mismo criterio con el que se valuaba la foto de la cuenta comitente y la misma punta con la que se valúan las aplicaciones en dólares: consumir todo el saldo lo deja en cero. Sin cotización, esa cuenta **no entra** y se avisa el importe en dólares. La moneda la dice la **cuenta**, no la clase: una cuenta de inversión en dólares se valúa igual que una comitente. La pestaña, como la 1, **no convierte**: un KPI por clase y moneda.
+
+### Cada cuenta de fondo es un fondo de cobertura
+
+Antes el fondo del que descontaba cada aplicación era una constante del código (`Cobertura::ORIGENES`: `INVERSIONES`, `SUSCRIPCION`, `DOLARES`) y el registro declaraba a qué fondo pertenecía cada stock (`origen_cobertura`). Con cuentas que da de alta el usuario eso ya no puede ser una lista fija: **cada cuenta de fondo es un fondo**, su clave es `Fondos::claveFondo()` (`CTA_` + ID) y su moneda es la de la cuenta. Es la clave que guarda `RO_T_CASHFLOW_COBERTURA_APLIC.ORIGEN`, la que `Cobertura::origenes()` lista, y la que el motor cruza. El reparto por cuenta **viaja con la serie** (`por_fondo` y `fondos`, ver `CashflowProvider`) y `Cashflow::resolverCobertura()` descuenta de cada cuenta lo aplicado desde ella. El detalle de qué cambió en Cobertura está en `README-cashflow.md`.
+
+### La pantalla
+
+Un KPI por clase y moneda, la tabla de cuentas con saldo inicial (y su fecha), suscripciones, rescates, saldo a hoy y último movimiento, y por cuenta el botón de movimientos que abre el historial completo. *Nuevo movimiento* pide cuenta, fecha, tipo, importe y observación; la moneda se muestra al lado del importe y es la de la cuenta. Desde el historial se corrige (abre el mismo formulario con el movimiento cargado y viaja `id_reemplaza`) o se da de baja, con confirmación. La sub-pestaña es lazy como la de locales, y el enlace de las filas de stock del tablero abre directamente en ella (`'subtab' => 'fondos'`).
+
+Las cuentas se dan de alta en **Parámetros → Saldos**, sección *Fondos de inversión y cuentas comitente*, con su saldo inicial y fecha. Ver *Parámetros*.
+
+---
+
 ## Modelo de datos
 
-Cinco tablas, prefijo `RO_T_CASHFLOW_SALDOS_`. Cumplen tres propiedades:
+Seis tablas, prefijo `RO_T_CASHFLOW_SALDOS_`. Cumplen tres propiedades:
 
 | Propiedad | Cómo |
 | --- | --- |
@@ -178,12 +248,13 @@ Cinco tablas, prefijo `RO_T_CASHFLOW_SALDOS_`. Cumplen tres propiedades:
 
 | Tabla | Qué guarda |
 | --- | --- |
-| `RO_T_CASHFLOW_SALDOS_CUENTA` | Catálogo de cuentas (parámetro): tipo, moneda, origen y los siete campos de `/accounts` |
+| `RO_T_CASHFLOW_SALDOS_CUENTA` | Catálogo de cuentas (parámetro): tipo, **clase**, moneda, origen, **saldo inicial con su fecha** (sólo fondos) y los siete campos de `/accounts` |
 | `RO_T_CASHFLOW_SALDOS_CARGA` | Cabecera de cada carga: tipo, fecha y hora, usuario, origen, observaciones |
 | `RO_T_CASHFLOW_SALDOS_DETALLE` | Histórico de saldos por cuenta y fecha, con los cinco `balances` y el `message` |
 | `RO_T_CASHFLOW_SALDOS_SUCURSAL` | Gestión y reserva por local (parámetro) |
 | `RO_T_CASHFLOW_SALDOS_LOCAL` | Histórico de la caja de los locales, con la gestión y la reserva **efectivas** y `ORIGEN_DATO` del saldo |
 | `RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL` | Saldo de caja tipeado a mano cuando la consulta no trajo el cierre; insert-only, fechado ayer |
+| `RO_T_CASHFLOW_SALDOS_FONDO_MOV` | La cuenta corriente de cada fondo: suscripciones y rescates, con moneda copiada de la cuenta, `VIGENTE`, `ID_REEMPLAZA` y `FECHA_BAJA`. Nunca se borra ni se actualiza un importe |
 
 ### Por qué hay una cabecera de carga
 
@@ -306,6 +377,15 @@ Fuera del alcance de este cambio; el modelo y la pantalla ya están listos para 
 
 Van separados porque **leen dos servidores distintos**: así una caída del servidor de locales no se lleva puesto el disponible bancario.
 
+Y `Class/Providers/FondosProvider.php`, también bajo dos códigos, uno por clase de fondo, porque son dos filas del tablero y cada una tiene que poder mostrar su moneda y su cotización:
+
+| Código | Serie | Qué devuelve |
+| --- | --- | --- |
+| `FONDO_INVERSION` | `STOCK` | Suma del saldo a hoy de las cuentas `INVERSION`, en pesos, repartida por cuenta en `por_fondo` |
+| `FONDO_COMITENTE` | `STOCK` | Ídem para las cuentas `COMITENTE`, con las de dólares valuadas a la última cotización a hoy, punta vendedora |
+
+El importe va en el primer día del eje sólo para llegar al motor por el mismo camino que cualquier serie: el motor le vacía las columnas a una fila `STOCK_COBERTURA` y muestra el total. Ambas series llevan `por_fondo` (clave de cuenta → pesos) y `fondos` (clave → nombre), que es lo que `Cashflow::resolverCobertura()` cruza con lo aplicado. Las dos dependencias con base (`Fondos` y `Cotizacion`) van por fábrica, así que `tests/test_fondos.php` lo prueba con cuentas de mentira.
+
 ### El saldo va en la columna de su fecha y en cero en el resto
 
 Es lo más fácil de romper en silencio. La fila `DISPONIBLE` es de tipo `SALDO_INICIAL`, y el motor toma lo que el módulo pone en **cada columna** como aporte de esa columna al arrastre (`Cashflow::sumarAporteSaldo()`). Repetir el saldo en las 28 columnas diarias sumaría la misma plata veintiocho veces: con 157 millones, el tablero cerraría con cuatro mil millones de caja inventada.
@@ -332,14 +412,16 @@ El tablero **no** activa la sub-pestaña por su cuenta: `loadTab()` carga por AJ
 
 ## Parámetros
 
-Sub-pestaña **Parámetros → Saldos**, con tres secciones.
+Sub-pestaña **Parámetros → Saldos**, con cinco secciones.
 
 | Clave | Semilla | Qué controla |
 | --- | --- | --- |
 | `saldos_cta_tesoreria` | `100101` | Cuenta contable de `SBA05` con el efectivo de tesorería |
 | `saldos_dias_alerta_carga` | `7` | Días desde la última carga a partir de los cuales se avisa que el disponible no es el de hoy |
 
-**Bancos y cuentas** y **Otros saldos** son el mismo ABM sobre `RO_T_CASHFLOW_SALDOS_CUENTA`, separados por `TIPO`. Nombre y moneda son editables; el **tipo no**, porque es lo que decide de dónde sale el saldo y cambiarlo dejaría el histórico atribuido a un origen que nunca lo produjo. Si quedó mal, se inhabilita y se crea otra.
+**Bancos y cuentas**, **Otros saldos** y **Fondos de inversión y cuentas comitente** son el mismo ABM sobre `RO_T_CASHFLOW_SALDOS_CUENTA`: los fondos se separan por `CLASE` y el resto por `TIPO`. Nombre, moneda y clase (dentro del grupo) son editables; el **tipo no**, porque es lo que decide de dónde sale el saldo y cambiarlo dejaría el histórico atribuido a un origen que nunca lo produjo. Si quedó mal, se inhabilita y se crea otra. Los fondos llevan además el **saldo inicial con su fecha**, que se fija en el alta y se corrige ahí mismo; van los dos o ninguno, y la moneda de un fondo con movimientos no se cambia. Cada botón *Guardar* manda **su** grilla: apretar *Guardar fondos* no manda los bancos que uno estaba editando a medias.
+
+Sin `sql/cashflow_saldos_cuentas_fondo.sql`, los selectores de clase y el alta de fondos quedan apagados diciendo qué script falta, y el resto del ABM funciona como antes.
 
 > Una cuenta nueva **entra activa**, a diferencia de un medio de pago del mix. No es una inconsistencia: un medio de pago nuevo rompe el 100 % de su canal, así que tiene que entrar apagado. Una cuenta no rompe ningún invariante y nace **sin saldo cargado**, que la pantalla muestra como `sin cargar` y no como cero, así que no puede informar de menos en silencio.
 
@@ -396,6 +478,16 @@ php tests/run.php saldos
 
 Verificado además contra la base real: la pestaña marcó los 3 locales sin cierre del 13/09 y, tras cargarlos a mano desde la pantalla, la cabecera quedó `MIXTA`, la foto con 17 filas `CONSULTA` + 3 `MANUAL`, y la pestaña y el tablero dejaron de avisar. También: el script corrido dos veces sin duplicar, la consulta de `SBA05`, y un alta de cuenta + carga + lectura por el proveedor que dejó el importe en una sola columna del eje.
 
+### Los fondos
+
+```bash
+php tests/run.php fondos
+```
+
+133 casos, sin base salvo la última sección. Fija las reglas de `Fondos` (qué clase es un fondo y cuál es **la única** regla que lo decide; el cambio de clase sólo dentro del grupo; el importe positivo con el signo en el tipo; el saldo inicial con su fecha, los dos o ninguno; la clave de fondo y su lectura), `saldoA()` con un escenario que tiene un movimiento anterior al saldo inicial, uno del mismo día, uno dado de baja y uno futuro —cada uno tiene que quedar donde corresponde—, los helpers de `Cobertura` sobre una lista de cuentas de mentira (el origen por defecto saltea inhabilitadas y dólares), y el **proveedor con cuentas inyectadas**: que sume sólo su clase, que reparta por cuenta con nombre, que valúe los dólares a hoy y a la punta vendedora, que sin cotización no invente y avise en dólares, y qué avisa (sin saldo inicial, movimientos futuros, sin cuentas, sin script). Y lo que puede haberse cableado mal: que las filas de stock validen contra el registro real y una sobre el proveedor retirado valide con advertencia; que el script agregue `CLASE` con su `CHECK`, migre **la última carga vigente** con desempate por ID, reescriba **todas** las aplicaciones (no sólo las vigentes), reapunte las filas en vez de crearlas y no borre nada; y que la pestaña, los parámetros y el controller tengan sus piezas.
+
+Contra la base: que ninguna cuenta de fondo entre al disponible, que el saldo listado coincida con `saldoA()` sobre el historial, y que ninguna aplicación de cobertura vigente haya quedado sin cuenta. El circuito completo —alta de movimiento, corrección con `id_reemplaza`, rescate futuro que no entra, baja, y el stock del tablero en cada paso— se corrió a mano contra la base de desarrollo; los tres movimientos de prueba quedaron en `RO_T_CASHFLOW_SALDOS_FONDO_MOV` dados de baja, como historial.
+
 ---
 
 ## Usuario
@@ -408,17 +500,23 @@ Todavía no hay login. Todas las tablas tienen `USUARIO VARCHAR(50) NULL` y hoy 
 
 ```
 sql/cashflow_saldos.sql                        Las 5 tablas + semillas + parámetros
+sql/cashflow_saldos_cuentas_fondo.sql          CLASE, saldo inicial, movimientos de fondos y la migración
 cashflow/Class/Saldos.php                      Motor del módulo y helpers puros
+cashflow/Class/Fondos.php                      Las cuentas de fondo: clases, cuenta corriente, claves de cobertura
 cashflow/Class/Providers/SaldosProvider.php    DISPONIBLE y DEPOSITOS
-cashflow/Controller/SaldosController.php       Las dos pestañas y las dos cargas
+cashflow/Class/Providers/FondosProvider.php    STOCK de FONDO_INVERSION y FONDO_COMITENTE
+cashflow/Controller/SaldosController.php       Las tres pestañas, las dos cargas y los movimientos
 cashflow/Tabs/saldos.php                       Reemplaza el placeholder
 cashflow/Tabs/parametros_saldos.php            Sub-pestaña de Parámetros
 cashflow/Js/Saldos.js
 cashflow/Js/Parametros-Saldos.js
 cashflow/Css/Saldos.css
 tests/test_saldos.php
+tests/test_fondos.php
 ```
 
 Modificados: `Class/CashflowRegistry.php` (los dos códigos a `disponible => true`) · `Class/Parametros.php` (módulo `SALDOS` y sus secciones) · `Controller/ParametrosController.php` (ABM de cuentas y locales) · `Tabs/parametros.php` (el `tab-pane`) · `Css/Parametros.css` · `class/conexion.php` (`prefijoLocales()`) · `tests/test_providers.php` (ahora hay 6 módulos con datos reales).
+
+De la rama `feature/cuentas-inversion`: `Class/Saldos.php` (`fondosCreados()`, los fondos fuera de `getSaldosActuales()`, `CLASE` y saldo inicial en `getCuentas()`, `addCuenta()` y `saveCuenta()`, `getPestanaFondos()`) · `Class/Parametros.php` (clases y `fondos_creados` en el payload) · `Controller/ParametrosController.php` (clase y saldo inicial en el alta y el guardado) · `Class/CashflowRegistry.php` (`FONDO_INVERSION`, `FONDO_COMITENTE`; Otros Ingresos retirados) · `Class/Cobertura.php`, `Class/Cashflow.php`, `Class/CashflowProvider.php` y `Providers/CoberturaProvider.php` (los fondos son las cuentas: ver `README-cashflow.md`).
 
 Ver `README-cashflow.md`.

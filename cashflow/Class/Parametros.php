@@ -71,8 +71,9 @@ class Parametros {
         'SALDOS' => [
             'nombre' => 'Saldos',
             'icono' => 'fa-wallet',
-            'descripcion' => 'Bancos y cuentas, otros saldos y la gestión de caja de cada local. '
-                . 'Alimentan la pestaña Saldos y las filas Saldo Inicial y Caja Locales del tablero',
+            'descripcion' => 'Bancos y cuentas, otros saldos, los fondos de inversión y comitente, '
+                . 'y la gestión de caja de cada local. Alimentan la pestaña Saldos, las filas '
+                . 'Saldo Inicial y Caja Locales del tablero, y el stock de la sección Cobertura',
             'secciones' => ['generales', 'cuentas', 'sucursales']
         ],
         'COB_ELECTRONICOS' => [
@@ -164,6 +165,24 @@ class Parametros {
                         $modulo[$seccion] = ($seccion === 'cuentas')
                             ? $this->saldos()->getCuentas(false)
                             : array_values($this->saldos()->getParametrosSucursales(false));
+
+                        if ($seccion === 'cuentas') {
+                            // Que clases existen y si el script que las crea ya
+                            // se corrio: sin el, el editor no ofrece fondos y
+                            // dice que script falta, en vez de fallar al guardar.
+                            require_once __DIR__ . '/Fondos.php';
+                            $modulo['clases'] = Fondos::CLASES;
+                            $modulo['clases_fondo'] = Fondos::CLASES_FONDO;
+                            $modulo['fondos_creados'] = $this->saldos()->fondosCreados();
+
+                            if (!$modulo['fondos_creados'] && $this->saldos()->tablasCreadas()) {
+                                $modulo['avisos'][] = 'Todavía no existen las clases de cuenta ni '
+                                    . 'los fondos de inversión: corré '
+                                    . 'sql/cashflow_saldos_cuentas_fondo.sql contra la base '
+                                    . 'central. Mientras tanto todas las cuentas son cuentas a la '
+                                    . 'vista y no se pueden dar de alta fondos.';
+                            }
+                        }
                     } catch (Throwable $e) {
                         $modulo[$seccion] = [];
                         $modulo['avisos'][] = 'No se pudieron leer los parámetros de Saldos: '

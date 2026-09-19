@@ -72,6 +72,11 @@ class SaldosProvider extends CashflowProvider {
      * ultima carga, o que quedo sin completar, tiene que aportar su ultimo dato
      * conocido y no un cero.
      *
+     * SOLO LAS CUENTAS A LA VISTA. Las de clase INVERSION y COMITENTE son
+     * stock de cobertura y entran al tablero por FondosProvider; si ademas
+     * sumaran aca, la misma plata estaria disponible y de cobertura a la vez.
+     * El corte lo hace Saldos::getSaldosActuales() con Fondos::esFondo().
+     *
      * @param Horizonte $h
      * @param Saldos $saldos
      * @return array Serie

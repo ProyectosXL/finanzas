@@ -299,18 +299,34 @@ try {
             }
 
             require_once __DIR__ . '/../Class/Saldos.php';
+            require_once __DIR__ . '/../Class/Fondos.php';
+
+            /* La clase dice que es la cuenta (a la vista o fondo). El saldo
+               inicial viaja solo con un fondo y siempre con su fecha; los dos
+               los valida Fondos, no el navegador. */
+            $clase = isset($data['clase']) ? $data['clase'] : null;
+            $inicial = (array_key_exists('saldo_inicial', $data)
+                        || array_key_exists('fecha_saldo_inicial', $data))
+                ? ['saldo' => isset($data['saldo_inicial']) ? $data['saldo_inicial'] : null,
+                   'fecha' => isset($data['fecha_saldo_inicial']) ? $data['fecha_saldo_inicial'] : null]
+                : null;
 
             $id = (new Saldos())->addCuenta(
                 $data['tipo'],
                 $data['nombre'],
                 $data['moneda'],
-                usuarioActual()
+                usuarioActual(),
+                $clase,
+                $inicial
             );
 
             echo json_encode([
                 'success' => true,
-                'message' => 'Cuenta agregada. Queda activa y sin saldo cargado: '
-                           . 'se muestra como "sin cargar" hasta la próxima carga.',
+                'message' => Fondos::esFondo($clase)
+                    ? 'Fondo agregado. Queda activo y ya es stock de cobertura del tablero: '
+                        . 'los movimientos se cargan desde Saldos → Fondos.'
+                    : 'Cuenta agregada. Queda activa y sin saldo cargado: '
+                        . 'se muestra como "sin cargar" hasta la próxima carga.',
                 'data' => ['id' => $id]
             ], JSON_UNESCAPED_UNICODE);
             break;
@@ -331,12 +347,23 @@ try {
                     throw new Exception('Falta el ID de una cuenta');
                 }
 
+                /* La clase y el saldo inicial son opcionales por fila: la
+                   grilla de bancos manda la clase, la de fondos manda los
+                   dos, y lo que no viene no se toca. */
+                $inicial = (array_key_exists('saldo_inicial', $fila)
+                            || array_key_exists('fecha_saldo_inicial', $fila))
+                    ? ['saldo' => isset($fila['saldo_inicial']) ? $fila['saldo_inicial'] : null,
+                       'fecha' => isset($fila['fecha_saldo_inicial']) ? $fila['fecha_saldo_inicial'] : null]
+                    : null;
+
                 $saldos->saveCuenta(
                     $fila['id'],
                     isset($fila['nombre']) ? $fila['nombre'] : '',
                     isset($fila['moneda']) ? $fila['moneda'] : 'ARS',
                     !empty($fila['activo']),
-                    usuarioActual()
+                    usuarioActual(),
+                    isset($fila['clase']) ? $fila['clase'] : null,
+                    $inicial
                 );
             }
 

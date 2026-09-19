@@ -70,8 +70,11 @@ try {
                        MISMA cuenta que hace el proveedor del tablero, así que la
                        pantalla y el cuadro no pueden discrepar. */
                     'filas' => $cobertura->valuarAplicaciones()['filas'],
-                    'origenes' => Cobertura::ORIGENES,
-                    'moneda_por_fondo' => Cobertura::MONEDA_POR_FONDO,
+                    /* Los origenes son las cuentas de fondo del catalogo, con
+                       su moneda y si estan activas: ya no hay una lista fija
+                       en el codigo. Ver Cobertura::origenes(). */
+                    'origenes' => $cobertura->origenes(),
+                    'origen_defecto' => Cobertura::origenDefectoDe($cobertura->origenes()),
                     'en_dolares' => $cobertura->tieneMoneda(),
                     'avisos' => $cobertura->getAvisos()
                 ]

@@ -22,10 +22,10 @@ require_once __DIR__ . '/../Cobertura.php';
  * CashflowEstructura::signo().
  *
  * EL STOCK NO SALE DE ACA. Cuanta plata hay disponible para cubrir lo informa
- * OtrosIngresosProvider con su serie STOCK, porque el dato es el saldo de
- * inversiones y se carga en Otros Ingresos -> Saldo de Inversiones. Asi la fila
- * de stock del tablero enlaza a la pantalla donde ese numero se puede auditar,
- * en vez de a una pantalla que lo repetiria.
+ * FondosProvider con su serie STOCK, porque el dato es el saldo de las cuentas
+ * de inversion y comitente y se lleva en Saldos -> Fondos. Asi la fila de stock
+ * del tablero enlaza a la pantalla donde ese numero se puede auditar, en vez de
+ * a una pantalla que lo repetiria.
  */
 class CoberturaProvider extends CashflowProvider {
 
@@ -57,8 +57,15 @@ class CoberturaProvider extends CashflowProvider {
            moneda_origen y fuera_horizonte- porque el motor lo necesita para
            calcular el disponible POR FONDO y no puede ir a buscarlo a la base:
            el motor no consulta, arma el cuadro con lo que los proveedores le
-           dan. Ver Cashflow::resolverCobertura(). */
-        $serie['por_origen'] = [];
+           dan. La clave es la de la cuenta de fondo, la misma que usa la serie
+           de stock de FondosProvider; 'fondos' lleva el nombre de cada una
+           para que el aviso pueda nombrarla. Ver Cashflow::resolverCobertura().
+
+           OJO: la clave del contrato es 'por_fondo'. Antes era 'por_origen', y
+           CashflowProvider::normalizar() la descartaba en silencio, asi que
+           los avisos por fondo nunca llegaron al tablero real. */
+        $serie['por_fondo'] = [];
+        $serie['fondos'] = [];
 
         $cobertura = new Cobertura();
 
@@ -87,7 +94,33 @@ class CoberturaProvider extends CashflowProvider {
                 . 'entran al cuadro.');
         }
 
-        $serie['por_origen'] = $val['por_origen'];
+        $serie['por_fondo'] = $val['por_origen'];
+
+        $origenes = $cobertura->origenes();
+
+        foreach (array_keys($val['por_origen']) as $clave) {
+            if (isset($origenes[$clave])) {
+                $serie['fondos'][$clave] = $origenes[$clave]['nombre'];
+            }
+        }
+
+        /* Una aplicacion desde un fondo que no es ninguna cuenta -una clave
+           vieja que la migracion no pudo mover- suma al cuadro pero no
+           descuenta de nadie. Se dice, porque el disponible por fondo queda
+           informado de mas. */
+        $huerfanas = 0;
+
+        foreach ($val['por_origen'] as $clave => $ars) {
+            if (!isset($origenes[$clave])) {
+                $huerfanas += floatval($ars);
+            }
+        }
+
+        if ($huerfanas != 0) {
+            $this->avisar('Cobertura: $ ' . number_format($huerfanas, 2, ',', '.') . ' aplicados '
+                . 'salen de un origen que no es ninguna cuenta de fondo, así que no descuentan '
+                . 'del saldo de ninguna. Reasignalos desde el tablero.');
+        }
 
         foreach ($val['filas'] as $a) {
             $importe = $a['IMPORTE_ARS'];

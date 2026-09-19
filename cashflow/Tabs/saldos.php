@@ -2,16 +2,22 @@
 <link rel="stylesheet" href="Css/Saldos.css?v=<?php echo time(); ?>">
 
 <!--
-    Pestaña Saldos. Dos sub-pestañas que son dos cosas distintas:
+    Pestaña Saldos. Tres sub-pestañas que son tres cosas distintas:
 
       Saldos         -> alimenta la fila "Saldo Inicial" del tablero. Carga
                         periódica (los lunes) y en parte manual.
       Saldos Locales -> alimenta la fila "Caja Locales". Sale de una consulta
                         contra Tango que se actualiza sola todos los días.
+      Fondos         -> las cuentas de inversión y comitente, con su cuenta
+                        corriente (saldo inicial + suscripciones − rescates).
+                        Alimentan el STOCK de la sección Cobertura del tablero,
+                        y NO el Saldo Inicial: la misma plata no puede estar
+                        disponible y de cobertura a la vez.
 
     Se piden por separado a propósito: la segunda consulta el servidor de
     locales, que puede estar caído, y en ese caso la primera tiene que seguir
-    dibujándose igual.
+    dibujándose igual. La tercera depende de un script que puede no haberse
+    corrido, y entonces avisa sin tumbar a las otras.
 
     REGLA TRANSVERSAL DEL RELEVAMIENTO: se muestra la fecha de carga de cada
     dato, para ver cuál es la última actualización. Por eso cada fila tiene su
@@ -32,6 +38,12 @@
             <button class="nav-link" id="tabLocalesBtn" data-bs-toggle="tab"
                     data-bs-target="#paneLocales" type="button" role="tab">
                 <i class="fas fa-store me-1"></i> Saldos Locales
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tabFondosBtn" data-bs-toggle="tab"
+                    data-bs-target="#paneFondos" type="button" role="tab">
+                <i class="fas fa-chart-line me-1"></i> Fondos
             </button>
         </li>
     </ul>
@@ -312,6 +324,169 @@
                         <tbody id="bodyLocales"></tbody>
                         <tfoot class="table-light" id="footLocales"></tfoot>
                     </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         PESTAÑA 3 — FONDOS (inversión y cuenta comitente)
+         ============================================================ -->
+    <div class="tab-pane fade" id="paneFondos" role="tabpanel">
+
+        <!-- Un KPI por clase y moneda. Los importes NO se convierten: un fondo
+             en pesos y otro en dólares se muestran cada uno en la suya, igual
+             que en la pestaña 1. La valuación a pesos existe sólo para el
+             tablero. Las tarjetas las dibuja el JS con lo que haya. -->
+        <div class="row g-3 mb-4" id="kpiFondos"></div>
+
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <div>
+                    <h5 class="mb-0">Cuentas de inversión y comitente</h5>
+                    <small class="text-muted">
+                        El saldo de cada fondo es <strong>saldo inicial + suscripciones −
+                        rescates</strong> a hoy. No entra al Saldo Inicial del tablero: es el
+                        <strong>stock de la sección Cobertura</strong>. Las cuentas se dan de alta
+                        en Parámetros → Saldos; acá se cargan los movimientos.
+                    </small>
+                </div>
+                <div class="d-flex gap-2 align-items-center">
+                    <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
+                    <button class="btn btn-sm btn-success" data-exportar="tablaFondos"
+                            data-exportar-nombre="Saldos_Fondos"
+                            title="Exportar a Excel lo que se está viendo">
+                        <i class="fas fa-file-excel me-1"></i> Exportar
+                    </button>
+                    <button id="btnRefreshFondos" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-sync-alt me-1"></i> Actualizar
+                    </button>
+                    <button id="btnNuevoMovimiento" class="btn btn-sm btn-primary">
+                        <i class="fas fa-plus me-1"></i> Nuevo movimiento
+                    </button>
+                </div>
+            </div>
+
+            <!-- El formulario es mínimo a propósito: cuenta, fecha, tipo,
+                 importe y una observación. La moneda no se elige: es la de la
+                 cuenta, y se muestra al lado del importe para que se sepa en
+                 qué se está cargando. -->
+            <div class="card-body border-bottom" id="formMovimiento" style="display: none;">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label form-label-sm">Cuenta</label>
+                        <select id="movCuenta" class="form-select form-select-sm"></select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm">Fecha</label>
+                        <input type="date" id="movFecha" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm">Tipo</label>
+                        <select id="movTipo" class="form-select form-select-sm">
+                            <option value="SUSCRIPCION">Suscripción (+)</option>
+                            <option value="RESCATE">Rescate (−)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label form-label-sm">Importe</label>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text" id="movMoneda">$</span>
+                            <input type="number" step="0.01" min="0.01" id="movImporte"
+                                   class="form-control text-end">
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label form-label-sm">Observación</label>
+                        <input type="text" id="movObservacion" class="form-control form-control-sm"
+                               maxlength="200" placeholder="Opcional">
+                    </div>
+                </div>
+                <div class="d-flex gap-2 align-items-center mt-2">
+                    <button id="btnGuardarMovimiento" class="btn btn-sm btn-success">
+                        <i class="fas fa-floppy-disk me-1"></i> Guardar movimiento
+                    </button>
+                    <button id="btnCancelarMovimiento" class="btn btn-sm btn-outline-secondary">
+                        <i class="fas fa-xmark"></i>
+                    </button>
+                    <small class="text-muted" id="movAyuda">
+                        El importe va siempre en positivo: el signo lo pone el tipo. Un movimiento
+                        con fecha futura se lista pero no entra al saldo de hoy.
+                    </small>
+                </div>
+            </div>
+
+            <div class="card-body p-0">
+                <div class="loading-spinner" id="loadingFondos">
+                    <div class="spinner"></div>
+                    <p>Cargando fondos...</p>
+                </div>
+
+                <div class="table-responsive" id="wrapperFondos" style="display: none;">
+                    <table class="table table-hover mb-0" id="tablaFondos">
+                        <thead>
+                            <tr>
+                                <th>Cuenta</th>
+                                <th>Clase</th>
+                                <th class="text-center">Moneda</th>
+                                <th class="text-end">Saldo inicial</th>
+                                <th class="text-end">Suscripciones</th>
+                                <th class="text-end">Rescates</th>
+                                <th class="text-end">Saldo a hoy</th>
+                                <th class="text-center">Último movimiento</th>
+                                <th class="text-center" style="width: 130px;">Movimientos</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bodyFondos"></tbody>
+                        <tfoot class="table-light" id="footFondos"></tfoot>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- El historial de una cuenta: TODOS sus movimientos, vigentes,
+             pisados y dados de baja. Un movimiento corregido se ve tachado y
+             al lado la versión que lo reemplazó: es lo que explica por qué el
+             saldo de la semana pasada era otro. -->
+        <div class="modal fade" id="modalMovimientos" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h6 class="modal-title">
+                            <i class="fas fa-clock-rotate-left me-1"></i>
+                            Movimientos de <span id="movimientosCuenta"></span>
+                        </h6>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                aria-label="Cerrar"></button>
+                    </div>
+                    <div class="modal-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-sm mb-0" id="tablaMovimientos">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th class="text-center" style="width: 100px;">Fecha</th>
+                                        <th style="width: 110px;">Tipo</th>
+                                        <th class="text-end">Importe</th>
+                                        <th>Observación</th>
+                                        <th class="text-center" style="width: 100px;">Estado</th>
+                                        <th class="text-center" style="width: 150px;">Cargado el</th>
+                                        <th class="text-center" style="width: 90px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="bodyMovimientos"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="modal-footer justify-content-between">
+                        <small class="text-muted">
+                            Corregir un movimiento no lo pisa: lo da de baja e inserta uno nuevo.
+                            Dar de baja tampoco borra. Los que están incluidos en el saldo inicial
+                            o son posteriores a hoy no suman al saldo de hoy.
+                        </small>
+                        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">
+                            Cerrar
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
