@@ -182,14 +182,30 @@ foreach ($menu['categorias'] as $cat) {
 chequear('Ingresos tiene sus 7 pestanas con datos', 7, $porCategoria['Ingresos']['con_datos']);
 chequear('y son 7 en total', 7, $porCategoria['Ingresos']['total']);
 
-// Otros Ingresos es la categoria de lo que se carga a mano: hoy son dos
-// conceptos -dolares en cuenta comitente y saldo de inversiones-, los dos con
-// datos. La categoria quedo armada para que sumar uno fuera agregar una
-// pestana, y el segundo lo confirma.
+// Otros Ingresos es la categoria de lo que se carga a mano: dos conceptos
+// -dolares en cuenta comitente y saldo de inversiones- que estan RETIRADOS
+// desde que son cuentas de fondo de Saldos. Las pestanas siguen -conservan el
+// historico- pero no cuentan como pestanas con datos: lo que se carga ahi ya
+// no llega al tablero, y el contador n/m tiene que decirlo.
 chequear('Otros Ingresos existe', true, isset($porCategoria['OtrosIngresos']));
 chequear('con sus dos pestanas', 2, $porCategoria['OtrosIngresos']['total']);
-chequear('las dos con datos', 2, $porCategoria['OtrosIngresos']['con_datos']);
+chequear('ninguna cuenta como pestana con datos', 0, $porCategoria['OtrosIngresos']['con_datos']);
 chequear('arranca cerrada', false, $porCategoria['OtrosIngresos']['abierta']);
+
+seccion('el cuarto estado: retirada');
+
+// Retirada no es pendiente: la pantalla abre y funciona. Y no es datos: su
+// numero no va a ningun lado. Se marca, como la maqueta, y no suma.
+chequear('Saldo de Inversiones esta retirada', Menu::RETIRADA, $porTab['saldo_inversiones']['estado']);
+chequear('Dolares Cuenta Comitente tambien', Menu::RETIRADA, $porTab['dolares_comitente']['estado']);
+chequear('una retirada lleva marca', true, $porTab['saldo_inversiones']['icono_estado'] !== '');
+chequear('y un tooltip que dice que la reemplaza', true,
+    strpos($porTab['saldo_inversiones']['titulo'], 'Saldos') !== false);
+chequear('sigue sin ser un placeholder', false, Menu::esPlaceholder('saldo_inversiones'));
+chequear('el estado declarado se respeta', Menu::RETIRADA,
+    Menu::estado('saldo_inversiones', Menu::RETIRADA));
+chequear('y no cuenta como con datos', 0,
+    Menu::contarConDatos([['estado' => Menu::RETIRADA]]));
 
 // Va DESPUES de Ingresos: la categoria agrupa lo que se tipea, y leerlo
 // pegado a lo que sale de un circuito es lo que hace que la diferencia se vea.

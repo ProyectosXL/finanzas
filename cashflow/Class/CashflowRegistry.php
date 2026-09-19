@@ -38,6 +38,17 @@ require_once __DIR__ . '/CashflowProvider.php';
  * 'moneda' es la moneda en la que el modulo maneja sus importes. El proveedor
  * los convierte a pesos antes de devolverlos; el dato queda para poder mostrar
  * y auditar la conversion.
+ *
+ * MODULOS RETIRADOS
+ * -----------------
+ * Un modulo puede dejar de ser la fuente de un dato porque otro circuito lo
+ * reemplazo. No se borra del registro -las filas que lo apunten se volverian
+ * invalidas y el validador las rechazaria- ni se marca 'disponible' => false,
+ * que diria "todavia no construido" sobre algo que existe y funciona. Lleva
+ * 'retirado' => 'por que, y que lo reemplaza'. El proveedor sigue sirviendo
+ * lo que tenga cargado, el motor avisa que ese dato ya no se mantiene, y el
+ * editor de estructura lo muestra marcado. Es el caso de Otros Ingresos desde
+ * que el stock de cobertura sale de las cuentas de fondo de Saldos.
  */
 class CashflowRegistry {
 
@@ -158,6 +169,51 @@ class CashflowRegistry {
             // acababa de clickear.
             'subtab' => 'locales',
             'series' => ['DEPOSITOS' => 'Depositos de caja de locales']
+        ],
+
+        /* EL STOCK DE COBERTURA SALE DE LAS CUENTAS DE FONDO DEL CATALOGO DE
+           SALDOS: las de clase INVERSION y las de clase COMITENTE, cada una con
+           su cuenta corriente (saldo inicial + suscripciones - rescates).
+           FondosProvider sirve los dos codigos, uno por clase, igual que
+           SaldosProvider sirve SALDOS y CAJA_LOCALES.
+
+           NO ENTRAN EN DISPONIBILIDADES. Su unico rol en el tablero es ser
+           stock de la seccion Cobertura; si entraran a los dos lados la misma
+           plata se contaria dos veces. SaldosProvider las deja afuera.
+
+           CADA CUENTA ES UN FONDO. La serie trae 'por_fondo' con el stock de
+           cada cuenta, por su clave, y es con eso que el motor descuenta lo
+           aplicado desde cada una. No hay ninguna cuenta escrita en el codigo:
+           se dan de alta desde Parametros -> Saldos.
+
+           'moneda' es informativa: la moneda la dice cada cuenta y el
+           proveedor valua las que estan en dolares con la ultima cotizacion
+           oficial a hoy, punta vendedora, como se valuaba la foto de la cuenta
+           comitente. */
+        'FONDO_INVERSION' => [
+            'nombre' => 'Cuentas de inversión',
+            'descripcion' => 'Saldo de las cuentas de inversión del catálogo de Saldos: saldo '
+                . 'inicial más suscripciones menos rescates. Es stock de cobertura',
+            'archivo' => 'Providers/FondosProvider.php',
+            'clase' => 'FondosProvider',
+            'moneda' => 'ARS',
+            'disponible' => true,
+            'tab' => 'saldos',
+            'subtab' => 'fondos',
+            'series' => ['STOCK' => 'Saldo a hoy de las cuentas de inversión']
+        ],
+
+        'FONDO_COMITENTE' => [
+            'nombre' => 'Cuentas comitente',
+            'descripcion' => 'Saldo de las cuentas comitente del catálogo de Saldos, en dólares '
+                . 'valuados a hoy. Es stock de cobertura',
+            'archivo' => 'Providers/FondosProvider.php',
+            'clase' => 'FondosProvider',
+            'moneda' => 'USD',
+            'disponible' => true,
+            'tab' => 'saldos',
+            'subtab' => 'fondos',
+            'series' => ['STOCK' => 'Saldo a hoy de las cuentas comitente']
         ],
 
         /* Suma NETOS, nunca brutos: la diferencia son las retenciones de la
@@ -382,52 +438,45 @@ class CashflowRegistry {
             'series' => ['MOVIMIENTOS' => 'Otros movimientos']
         ],
 
-        /* ---- Filas del Excel que se cargaban a mano ------------------------
-           En el Excel original estas filas las tipea una persona (Tesoreria,
-           Silvina, Dan, Alejandro). Dolares Cuenta Comitente tiene su pantalla
-           de carga, y Exportaciones sale directo de Tango: son las facturas
-           pendientes a Tasky en GVA12. */
+        /* ---- Otros Ingresos: RETIRADOS ---------------------------------------
+           En el Excel original estas filas las tipeaba una persona: una foto
+           del saldo de inversiones (en pesos) y otra de los dolares de la
+           cuenta comitente. Primero fueron INGRESOS, despues STOCK DE
+           COBERTURA, y desde sql/cashflow_saldos_cuentas_fondo.sql el stock
+           sale de las CUENTAS DE FONDO del catalogo de Saldos (FONDO_INVERSION
+           y FONDO_COMITENTE, mas arriba), que llevan cuenta corriente en vez
+           de foto.
 
-        /* La carga es en DOLARES y la conversion a pesos la hace el proveedor
-           con el oficial del BCRA -punta VENDEDORA, es la unica pantalla que no
-           usa la compradora-, igual que ComexProvider: el motor nunca ve
-           dolares.
+           QUEDAN DECLARADOS, CON LA MARCA DE RETIRADOS. Borrarlos dejaria
+           invalida cualquier fila que todavia los apunte, y ponerlos en
+           'disponible' => false diria "sin construir" sobre algo que existe:
+           el proveedor sigue leyendo sus tablas -que no se borran, por el
+           historico- y las pestanas siguen abriendo, marcadas como retiradas
+           en el menu. Lo que cambia es que el dato ya no se mantiene, y el
+           motor lo avisa en cada fila que siga leyendo de aca.
 
-           YA NO ES UN INGRESO: ES STOCK DE COBERTURA, igual que el saldo de
-           inversiones y por el mismo motivo. Entrar al flujo como ingreso en la
-           fecha de la carga decia que ese dia ingresaba plata, y no es cierto:
-           los dolares YA ESTAN en la cuenta, y lo que hay que decidir es CUANDO
-           se los usa. Esa decision se carga en la seccion Cobertura.
+           YA NO DECLARAN 'origen_cobertura': el fondo dejo de ser una constante
+           del registro. Cada cuenta de fondo es un fondo, y el reparto viaja
+           con la serie ('por_fondo'). Un stock de estos, si alguien vuelve a
+           apuntarle una fila, suma al total de cobertura y a ningun fondo.
 
-           EL STOCK ES LA ULTIMA CARGA, NO LA SUMA. Cada carga es una foto del
-           saldo a esa fecha: 66.000 y 71.000 cargados en dos dias son un saldo
-           que cambio, no 137.000 dolares juntos en la cuenta.
-
-           INGRESO queda declarada para poder volver atras desde Parametros sin
-           tocar codigo, pero son EL MISMO dinero mirado de dos formas: activar
-           las dos filas mostraria el saldo dos veces. Por eso van relacionadas
-           en 'componentes' y el validador rechaza la combinacion. */
+           Para volver atras desde Parametros -> Cashflow: apuntar las filas de
+           stock de nuevo a estos codigos, serie STOCK. Las series INGRESO
+           siguen declaradas por el mismo motivo de siempre. */
         'DOLARES_COMITENTE' => [
             'nombre' => 'Dolares Cuenta Comitente',
-            'descripcion' => 'Dolares en la cuenta comitente, cargados a mano. '
-                . 'Es stock que respalda la cobertura del flujo',
+            'descripcion' => 'Foto de los dolares de la cuenta comitente, cargada a mano. '
+                . 'RETIRADO: lo reemplazan las cuentas comitente de Saldos',
             'archivo' => 'Providers/OtrosIngresosProvider.php',
             'clase' => 'OtrosIngresosProvider',
             'moneda' => 'USD',
             'disponible' => true,
+            'retirado' => 'los dólares de la cuenta comitente ahora son una cuenta de Saldos '
+                . '(clase Cuenta comitente) con cuenta corriente propia, y el stock de '
+                . 'cobertura sale de ahí.',
             'tab' => 'dolares_comitente',
-
-            /* DE QUE FONDO DE COBERTURA es este stock. Lo declara el modulo que
-               informa el saldo y no la fila del tablero: es una propiedad de
-               QUE es este dinero, no de como se lo configuro en el cuadro. En
-               CONF_FILA seria un dato que se puede contradecir con el proveedor
-               que la fila ya declara.
-
-               Con esto una aplicacion con origen DOLARES descuenta de ACA y no
-               del pozo comun. Ver Cashflow::resolverCobertura(). */
-            'origen_cobertura' => 'DOLARES',
             'series' => [
-                'STOCK' => 'Dolares en la cuenta, disponibles para cobertura',
+                'STOCK' => 'Ultima foto de los dolares (retirado)',
                 'INGRESO' => 'Dolares cuenta comitente como ingreso (criterio viejo, en desuso)'
             ],
             'componentes' => [
@@ -436,36 +485,19 @@ class CashflowRegistry {
             ]
         ],
 
-        /* El otro concepto de Otros Ingresos, mismo proveedor y mismo circuito.
-           La moneda es ARS y no USD, a proposito: ese saldo se informa en pesos,
-           asi que no hay nada que valuar. Ver el encabezado de
-           sql/cashflow_saldo_inversiones.sql antes de cambiarlo.
-
-           YA NO ES UN INGRESO: ES STOCK DE COBERTURA. La serie que usa el
-           tablero es STOCK -cuanta plata hay invertida y disponible para tapar
-           un bache-, y no entra en ninguna suma: la plata recien se mueve
-           cuando alguien aplica cobertura en una fecha, y eso es el proveedor
-           COBERTURA.
-
-           INGRESO queda declarada para poder volver atras desde Parametros sin
-           tocar codigo, pero son EL MISMO dinero mirado de dos formas: activar
-           las dos filas mostraria el saldo dos veces. Por eso van relacionadas
-           en 'componentes' y el validador rechaza la combinacion. */
         'SALDO_INVERSIONES' => [
             'nombre' => 'Saldo de Inversiones',
-            'descripcion' => 'Saldo de inversiones en pesos, cargado a mano. '
-                . 'Es el stock que respalda la cobertura del flujo',
+            'descripcion' => 'Foto del saldo de inversiones en pesos, cargada a mano. '
+                . 'RETIRADO: lo reemplazan las cuentas de inversión de Saldos',
             'archivo' => 'Providers/OtrosIngresosProvider.php',
             'clase' => 'OtrosIngresosProvider',
             'moneda' => 'ARS',
             'disponible' => true,
+            'retirado' => 'el saldo de inversiones ahora son cuentas de Saldos (clase '
+                . 'Inversión) con cuenta corriente propia, y el stock de cobertura sale de ahí.',
             'tab' => 'saldo_inversiones',
-
-            /* El fondo del que descuentan las aplicaciones con origen
-               INVERSIONES. Ver la nota equivalente en DOLARES_COMITENTE. */
-            'origen_cobertura' => 'INVERSIONES',
             'series' => [
-                'STOCK' => 'Saldo invertido disponible para cobertura',
+                'STOCK' => 'Ultima foto del saldo invertido (retirado)',
                 'INGRESO' => 'Saldo de inversiones como ingreso (criterio viejo, en desuso)'
             ],
             'componentes' => [
@@ -682,6 +714,17 @@ class CashflowRegistry {
      */
     public static function disponible($codigo) {
         return !empty(self::$providers[$codigo]['disponible']);
+    }
+
+    /**
+     * Si el modulo fue retirado: sigue sirviendo, pero su dato ya no se
+     * mantiene porque lo reemplazo otro circuito. Ver el encabezado.
+     *
+     * @param string $codigo
+     * @return bool
+     */
+    public static function retirado($codigo) {
+        return !empty(self::$providers[$codigo]['retirado']);
     }
 
     /**

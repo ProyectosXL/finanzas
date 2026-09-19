@@ -4,6 +4,10 @@
 <!--
     Otros Ingresos → Dólares Cuenta Comitente.
 
+    RETIRADA: desde sql/cashflow_saldos_cuentas_fondo.sql lo que se carga acá
+    ya no alimenta el tablero. La reemplaza Saldos → Fondos. Se conserva por
+    el histórico y el cartel de arriba lo dice.
+
     En el Excel original esta fila la tipeaba una persona. Acá se carga, y el
     formulario es deliberadamente mínimo: fecha e importe en dólares. Nada más.
 
@@ -46,7 +50,20 @@
 -->
 <div class="tab-dolares_comitente">
 
-    <div id="avisosDol"></div>
+        <!-- PESTAÑA RETIRADA. Sigue leyendo y guardando en su tabla, que queda
+         por el histórico, pero lo que se cargue acá ya no llega al tablero:
+         el stock de cobertura sale de las cuentas de fondo de Saldos. El
+         cartel va fijo y arriba de todo, porque una pantalla que abre y
+         guarda sin decir que su número no va a ningún lado es el mismo
+         peligro que una maqueta. Ver sql/cashflow_saldos_cuentas_fondo.sql. -->
+    <div class="alert alert-warning py-2 px-3 mb-3">
+        <i class="fas fa-box-archive me-1"></i>
+        <strong>Pestaña retirada.</strong> Desde que los dólares de la cuenta comitente son una cuenta de <strong>Saldos → Fondos</strong> (clase Cuenta comitente), con cuenta corriente propia, lo que se carga acá
+        <strong>ya no llega al tablero</strong>. La última carga vigente pasó a ser el saldo
+        inicial de esa cuenta; esta pantalla queda para consultar el histórico.
+    </div>
+
+<div id="avisosDol"></div>
 
     <div class="row g-3 mb-4" id="summaryDol" style="display: none;">
         <div class="col-md-6 col-lg-4">
@@ -101,24 +118,6 @@
             </div>
         </div>
 
-        <!-- CUÁNTO QUEDA. Es la única tarjeta que contesta la pregunta con la
-             que alguien abre esta pantalla cuando ya viene usando el fondo:
-             informado − aplicado. Sin ella, el saldo de arriba es el de antes de
-             haberlo usado. Aparece sólo cuando hay algo aplicado: una tarjeta
-             que repite el saldo de al lado no agrega nada. -->
-        <div class="col-md-6 col-lg-4" id="cardDisponibleDol" style="display: none;">
-            <div class="kpi-card kpi-card-destacada">
-                <div class="kpi-card-header">
-                    <span class="kpi-card-title"
-                          title="El saldo informado menos lo que ya se aplicó como cobertura desde este fondo. Lo aplicado se carga en la sección Cobertura del tablero, sobre la fila «Uso de Inversiones».">Disponible sin usar</span>
-                    <div class="kpi-card-icon green"><i class="fas fa-wallet"></i></div>
-                </div>
-                <div class="kpi-card-value" id="disponibleDol">US$ 0,00</div>
-                <div class="kpi-card-footer">
-                    <span class="text-muted" id="detalleDisponibleDol"></span>
-                </div>
-            </div>
-        </div>
     </div>
 
     <div class="card mb-4">

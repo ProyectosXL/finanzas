@@ -41,6 +41,29 @@ require_once __DIR__ . '/Horizonte.php';
  *   'sin_fecha'       float               importe sin fecha utilizable
  *   'warnings'        string[]            avisos propios de la serie
  *   'detalle'         array               anotaciones por columna (ver abajo)
+ *   'por_fondo'       [clave => float]    cuanto de la serie corresponde a cada
+ *                                         fondo de cobertura (ver abajo)
+ *   'fondos'          [clave => string]   el nombre de cada fondo, si se sabe
+ *
+ * EL DETALLE POR FONDO: 'por_fondo' y 'fondos'
+ * --------------------------------------------
+ * Solo lo usan las series de la seccion Cobertura. Una serie de STOCK dice
+ * cuanto stock aporta cada cuenta de fondo; la serie de USO dice cuanto se
+ * aplico desde cada una. Las dos usan la misma clave (Fondos::claveFondo()),
+ * y con eso el motor descuenta de cada fondo lo suyo y avisa por fondo cuando
+ * se aplica de mas. Ver Cashflow::resolverCobertura().
+ *
+ * NO ES UN IMPORTE MAS: es como se reparte el total de la serie, y no entra en
+ * ninguna suma. Es metadato, como 'detalle'.
+ *
+ * ESTAS DOS CLAVES SOBREVIVEN A normalizar() A PROPOSITO, y hay que tenerlo
+ * presente al agregar otra: normalizar() arma la serie de salida con una lista
+ * cerrada de claves, asi que cualquier cosa que un proveedor cuelgue de la
+ * serie y no este en esa lista SE PIERDE EN SILENCIO. Asi paso con el reparto
+ * por fondo de la cobertura: el proveedor lo colgaba, el motor lo esperaba, y
+ * en el medio se descartaba; los avisos por fondo nunca llegaron a dispararse
+ * contra la base real. Solo la prueba unitaria, que reemplaza pedirSeries()
+ * y se saltea este paso, los veia funcionar.
  *
  * ANOTAR UNA CELDA: 'detalle'
  * ---------------------------
@@ -217,11 +240,28 @@ abstract class CashflowProvider {
             'fuera_horizonte' => 0,
             'sin_fecha' => 0,
             'warnings' => [],
-            'detalle' => []
+            'detalle' => [],
+            'por_fondo' => [],
+            'fondos' => []
         ];
 
         if (!is_array($serie)) {
             return $out;
+        }
+
+        // El reparto por fondo viaja tal cual, con los importes como numeros y
+        // los nombres como texto. Ver la nota del encabezado: lo que no esta en
+        // esta lista se pierde, y esto ya se perdio una vez.
+        if (isset($serie['por_fondo']) && is_array($serie['por_fondo'])) {
+            foreach ($serie['por_fondo'] as $clave => $valor) {
+                $out['por_fondo'][(string) $clave] = floatval($valor);
+            }
+        }
+
+        if (isset($serie['fondos']) && is_array($serie['fondos'])) {
+            foreach ($serie['fondos'] as $clave => $nombre) {
+                $out['fondos'][(string) $clave] = (string) $nombre;
+            }
         }
 
         foreach (['dias', 'meses'] as $rama) {

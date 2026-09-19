@@ -43,6 +43,7 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 | 9 | `sql/cashflow_cobertura.sql` | Amplía el `CHECK` de `TIPO` con `STOCK_COBERTURA` y `USO_COBERTURA`, crea `RO_T_CASHFLOW_COBERTURA_APLIC` y la sección **Cobertura**, y baja `SALDO_FINAL` a su final | No hay sección Cobertura: el saldo de inversiones sigue entrando al flujo como ingreso y **no se puede aplicar en ninguna fecha**. Si además se corre a medias, el editor de estructura deja elegir un tipo que la base rechaza |
 | 15 | `sql/cashflow_estructura_neteo_prechequeado.sql` | Agrega la fila **Neteo cheques adelantados** a la sección Ventas, con `ORDEN = 25` (entre Franquicias y Mayoristas), apuntada a la serie `VENTAS → NETEO_PRECHEQUEADO` | **El tablero muestra la cobranza de Ventas en bruto**: las series volvieron a bruto y si la fila no existe, el neteo no se resta en ningún lado. El cuadro no falla ni avisa —cada serie es correcta por separado—, así que este es el único script del grupo cuya ausencia es *silenciosa* |
 | 17 | `sql/cashflow_echeqs_excluir.sql` | Crea `RO_T_CASHFLOW_ECHEQ_EXCLUIDO`: qué cheques de **cartera** no se van a poder cobrar, con su motivo, quién, cuándo y el historial completo | **No se puede excluir ningún cheque**. La pestaña se lee igual —el listado no depende de la tabla—, los dos botones de la barra quedan apagados diciendo qué script falta, y la fila del tablero sigue trayendo toda la cartera, que es lo que traía antes |
+| 18 | `sql/cashflow_saldos_cuentas_fondo.sql` | Agrega `CLASE` y el saldo inicial al catálogo de cuentas de Saldos, crea `RO_T_CASHFLOW_SALDOS_FONDO_MOV` (la cuenta corriente de cada fondo), **migra** la última foto de Otros Ingresos como saldo inicial de dos cuentas nuevas, reescribe el `ORIGEN` de las aplicaciones de cobertura a la clave de esas cuentas, y reapunta las dos filas de stock a `FONDO_INVERSION` / `FONDO_COMITENTE` | **Las filas de stock siguen leyendo de Otros Ingresos**, que está retirado: muestran la última foto cargada y el tablero avisa que ese dato ya no se mantiene. Saldos → Fondos y el ABM de fondos de Parámetros avisan qué script falta. Si además el código nuevo corre contra una base sin el script, `Cobertura::origenes()` devuelve vacío y **no se puede aplicar cobertura nueva** hasta correrlo: no hay ninguna cuenta de la que aplicar |
 
 ### Scripts modificados — hay que volver a correrlos
 
@@ -65,6 +66,7 @@ Que ninguna fila del tablero duplique importes:
 - Ningún par (proveedor, serie) repetido entre filas activas. Eso también lo verifica el validador, y *Parámetros → Cashflow* lo muestra arriba del editor.
 - `NETEO_PRECHEQUEADO` **una sola vez**, activa, con `TIPO = 'INGRESO'` y `COMPUTA = 1`. Y las filas de cobranza de Ventas —las cuatro por canal, o la total— **activas al lado de ella**: la fila del neteo corrige a esas filas, no las reemplaza.
 - `ECHEQS → A_COBRAR` **activa y sola**. `A_COBRAR` ya no trae toda la cartera: trae la cobrable, sin lo excluido a mano. El universo es `A_COBRAR_TODO` y las dos mitades son `A_COBRAR` + `A_COBRAR_EXCLUIDOS`; activar el total al lado de cualquiera de las dos cuenta dos veces el mismo cheque, y eso lo rechaza el validador. **No hay que repuntar nada**: la fila ya está configurada contra `A_COBRAR`, y mientras no haya ningún cheque excluido ese código vale lo mismo que antes.
+- `STOCK_INVERSIONES → FONDO_INVERSION/STOCK` y `STOCK_DOLARES_COMITENTE → FONDO_COMITENTE/STOCK`, activas. Si alguna sigue apuntando a `SALDO_INVERSIONES` o `DOLARES_COMITENTE`, el editor la marca con la advertencia de módulo retirado y el tablero avisa. El día que se corre el script 18 **el tablero no se mueve un peso**: verificado contra la base, las dos filas dan `3.529.962,37` y `1.535,00` antes y después, porque el saldo inicial migrado es exactamente la última foto que el proveedor viejo tomaba como stock. Lo que sí aparece es el aviso por fondo de la cobertura, que antes no llegaba (ver *Los fondos son las cuentas*).
 
 ---
 
@@ -90,9 +92,12 @@ En este orden, contra `central`:
 -- 15. sql/cashflow_estructura_neteo_prechequeado.sql  (fila del neteo de cheques adelantados)
 -- 16. sql/cashflow_comex_cotiz_edit.sql  (Comex: override de cotizacion por contenedor)
 -- 17. sql/cashflow_echeqs_excluir.sql  (Echeqs: excluir de cartera lo que no se va a cobrar)
+-- 18. sql/cashflow_saldos_cuentas_fondo.sql  (Saldos: cuentas de inversion y comitente; retira Otros Ingresos)
 ```
 
 **El 13 y el 14 van en ese orden y al final**, porque el 14 mueve `SALDO_FINAL` al final de la sección que crea y da de baja la fila del saldo de inversiones que crearon los anteriores. Correr el 14 sin el 13 no rompe nada, pero deja el cuadro a medio reagrupar.
+
+**El 18 va después del 3, del 14, de `sql/cashflow_cobertura_por_fondo.sql` y de `sql/cashflow_dolares_comitente_cobertura.sql`** (los dos de `README-otros-ingresos.md`): necesita el catálogo de cuentas, la tabla de aplicaciones con su columna `MONEDA`, y las dos filas de stock que reapunta. Si las tablas de Otros Ingresos no están, no crea las cuentas y lo dice: no hay nada que migrar, y los fondos se dan de alta desde Parámetros. Ver `README-saldos.md`.
 
 Los que alimentan pestañas puntuales están documentados en su propio README: `sql/ventas_proyeccion.sql` y compañía en `README-ventas.md`, `sql/cashflow_cobranzas_parametros.sql` y `sql/cashflow_cobranzas_may.sql` en `README-cobranzas-fr.md` y `README-cobranzas-may.md`.
 
@@ -546,7 +551,11 @@ El ícono de la fila mide **sólo las columnas de la vista activa**, igual que l
 
 Van igual en el registro, con `'disponible' => false` y sin clase. Una fila que los apunte se muestra **en cero** y el tablero avisa, en vez de desaparecer del cuadro: así la pantalla tiene desde el primer día la forma completa del Excel y se ve qué falta. Cuando el módulo exista, se escribe su proveedor y se da vuelta el flag; la fila ya está configurada y se llena sola.
 
-Hoy tienen datos reales doce: **Ventas**, **Cobranzas FR**, **Cobranzas Mayoristas**, **Proveedores Exterior**, **Nacionalizaciones**, **Saldos**, **Caja Locales**, **Cobranzas Electrónicas**, **Echeqs**, **Dólares Cuenta Comitente**, **Exportaciones Tasky** y **Saldo de Inversiones**. Los otros están declarados y rinden cero.
+Hoy tienen datos reales dieciséis: **Ventas**, **Cobranzas FR**, **Cobranzas Mayoristas**, **Proveedores Exterior**, **Nacionalizaciones**, **Saldos**, **Caja Locales**, **Cuentas de inversión**, **Cuentas comitente**, **Cobranzas Electrónicas**, **Echeqs**, **Exportaciones Tasky**, **Proveedores Locales**, **Cobertura**, y los dos de Otros Ingresos —**Dólares Cuenta Comitente** y **Saldo de Inversiones**— que están **retirados**: siguen sirviendo lo que tienen cargado, pero ya no alimentan ninguna fila. Los otros están declarados y rinden cero.
+
+### Módulos retirados
+
+Un módulo puede dejar de ser la fuente de un dato porque otro circuito lo reemplazó. No se borra del registro —las filas que lo apunten se volverían inválidas— ni se marca `'disponible' => false`, que diría *"todavía no construido"* sobre algo que existe y funciona. Lleva `'retirado' => 'por qué, y qué lo reemplaza'`: el proveedor sigue sirviendo, el motor avisa en cada fila que todavía lo lea que ese dato ya no se mantiene, el validador de estructura lo marca como advertencia (no como error: bloquear el guardado impediría justamente corregirla), y el editor lo muestra como *Retirado* en el desplegable y en la lista de módulos. Es lo que pasó con Otros Ingresos cuando el stock de cobertura pasó a salir de las cuentas de fondo.
 
 > **Exportaciones Tasky valúa todas sus facturas al dólar de hoy**, y no cada una al tipo de cambio del mes en que se cobra. Se aparta a propósito de la doctrina de `Class/Cotizacion.php`, que es para series históricas: acá la deuda está fija en dólares y el cobro es futuro, y valuar a hoy es no suponer devaluación. Ver `README-exportaciones-tasky.md`.
 
@@ -696,7 +705,7 @@ Donde **sí** aparece es en el *Saldo Final* y en el *Saldo Mínimo*, que salen 
 
 `STOCK_COBERTURA` no va en ninguna columna de fecha. Ponerlo en un día diría que ese día entra plata, y además lo sumaría el Total de esa vista como si fuera flujo. El motor le vacía las columnas —el front las dibuja con un guión y un `title` que explica por qué— y el importe queda **sólo en la columna Total**, igual en las tres vistas: lo disponible no depende del tramo que se elija mirar.
 
-Lo alimenta la serie `STOCK` de `SALDO_INVERSIONES`, que es **la última carga y no la suma de todas**: cada carga es una foto del saldo, no un depósito. Ver `README-otros-ingresos.md`.
+Lo alimentan las series `STOCK` de `FONDO_INVERSION` y `FONDO_COMITENTE`: el **saldo a hoy** de las cuentas de inversión y comitente del catálogo de Saldos —saldo inicial + suscripciones − rescates—, calculado por `Fondos::saldoA()`. Ver `README-saldos.md`, *Pestaña 3 — Fondos*. Antes eran dos fotos cargadas en Otros Ingresos, y de cada tabla se tomaba la última: ver `README-otros-ingresos.md`, que quedó retirado.
 
 ### Cuánto queda, sin ir hasta el final de la tabla
 
@@ -745,7 +754,27 @@ Se mira el **Saldo Final** y no el flujo de la columna: un día que gasta más d
 - **Una aplicación vigente por fecha.** La fila del tablero es una sola, así que la pregunta que contesta la tabla es "cuánta cobertura se aplica el día X". `ORIGEN` dice de qué fondo sale y es un dato de la aplicación, no parte de su identidad.
 - **El importe puede ser negativo**, y no lleva `CHECK` que lo impida: un negativo es sacar plata de la cuenta y volver a invertirla, que en una columna con saldo de sobra es una decisión tan real como aplicar cobertura. Lo que sí se rechaza es el cero.
 - **No hay baja física.** Pisar una fecha marca `VIGENTE = 0` las anteriores e inserta una nueva, en una transacción; borrar marca `VIGENTE = 0` y no inserta nada. El historial es lo único que explica por qué el saldo proyectado de ayer era otro: con un `UPDATE`, corregir un dedazo y cambiar de plan son indistinguibles después del hecho. Mismo criterio que `RO_T_CASHFLOW_SALDO_INVERSIONES`.
-- Los orígenes (`INVERSIONES`, `SUSCRIPCION`, `DOLARES`) son una lista declarada en `Cobertura::ORIGENES` y no texto libre: un campo libre termina con *Alyc*, *ALYC* y *Fondo Alyc* conviviendo, y después no hay forma de sumar por origen.
+- El origen no es texto libre —un campo libre termina con *Alyc*, *ALYC* y *Fondo Alyc* conviviendo, y después no hay forma de sumar por origen— pero **tampoco es una lista del código**: es la clave de una cuenta de fondo del catálogo de Saldos. Ver la sección siguiente.
+
+### Los fondos son las cuentas
+
+> Esto **cambió** con `feature/cuentas-inversion`. Los orígenes eran una constante (`Cobertura::ORIGENES`: `INVERSIONES`, `SUSCRIPCION`, `DOLARES`), y cada fila de stock declaraba en el registro a qué fondo pertenecía (`'origen_cobertura'`).
+
+Con cuentas de inversión y comitente que da de alta el usuario, el fondo ya no puede ser una constante del registro ni una lista fija: **cada cuenta de fondo es un fondo**. Su clave es `Fondos::claveFondo()` (`CTA_` + ID de la cuenta), es lo que guarda `RO_T_CASHFLOW_COBERTURA_APLIC.ORIGEN`, y su moneda es la de la cuenta. La migración reescribió las aplicaciones que ya estaban (`INVERSIONES` → la cuenta de inversión migrada, `DOLARES` → la comitente), todas, para que el historial siga nombrando un fondo que existe.
+
+Cómo llega eso al motor sin que el motor conozca ninguna cuenta:
+
+| Quién | Qué pone en la serie |
+| --- | --- |
+| `FondosProvider` (stock) | `por_fondo`: cuánto stock aporta cada cuenta, por clave, ya en pesos. `fondos`: el nombre de cada una |
+| `CoberturaProvider` (uso) | `por_fondo`: cuánto se aplicó desde cada cuenta, misma clave |
+| `Cashflow::resolverCobertura()` | Cruza por clave, calcula el disponible por fondo y avisa **por fondo** cuando se aplica de más, nombrando la cuenta |
+
+Un stock que no reparte —una fila que siga leyendo del proveedor retirado— suma al total y a ningún fondo. Una aplicación cuyo origen no es ninguna cuenta —una clave vieja que la migración no pudo mover, por ejemplo `SUSCRIPCION`— suma al total, abre un fondo sin stock para que se vea, y `CoberturaProvider` avisa cuánto es. Está fijado en `tests/test_cobertura.php`.
+
+`Cobertura::origenes()` lista las cuentas de fondo —incluidas las inhabilitadas, porque una aplicación vieja tiene que poder nombrar la suya— y los helpers puros (`validarOrigenEn()`, `monedaDeOrigenEn()`, `origenDefectoDe()`) reciben esa lista. **El origen por defecto es la primera cuenta de fondo activa en pesos**, por orden del catálogo: no es una cuenta escrita en el código, es una regla, y existe porque el editor del tablero todavía no pregunta de qué fondo se aplica. Eso es la etapa siguiente; ver *Pendientes conocidos*.
+
+> **Un bug de `develop` que salió con esto.** `CashflowProvider::normalizar()` arma la serie con una lista cerrada de claves, y el reparto por fondo del uso —entonces `por_origen`— no estaba en ella: `CoberturaProvider` lo colgaba, el motor lo esperaba, y en el medio se descartaba en silencio. Contra la base real `aplicado` por fondo era siempre cero y **el aviso por fondo nunca se disparó**; sólo `tests/test_cobertura.php`, que reemplaza `pedirSeries()` y se saltea `normalizar()`, lo veía funcionar. Ahora `por_fondo` y `fondos` están en el contrato, `normalizar()` las deja pasar, y hay una prueba que pasa por `series()` —el camino real— para que no vuelva a perderse. Consecuencia visible: el tablero ahora avisa *"se aplican $ 4.000.000 de «Inversiones» pero ahí hay $ 3.529.962,37"*, que era cierto desde antes.
 
 ### El saldo de inversiones dejó de ser un ingreso
 
@@ -793,13 +822,16 @@ El motor verifica que `cierre[n] == apertura[n+1]`; si no da, deja un aviso y no
 
 La lista de pestañas y el estado de cada una salen de `Class/Menu.php`; `Components/sidebar.php` sólo dibuja. Antes eran veintiséis enlaces escritos a mano e iguales entre sí, y por eso no se podía ver de un vistazo qué está hecho.
 
-**Tres estados, no dos:**
+**Cuatro estados, no dos:**
 
 | Estado | Qué significa | Cómo se ve |
 | --- | --- | --- |
 | `datos` | La pestaña lee del sistema. Se puede confiar en lo que muestra | Normal, sin marca |
 | `maqueta` | **Dibuja pero los números son de ejemplo** | Ícono ámbar 📐 |
 | `pendiente` | Todavía no se desarrolló; muestra el aviso de *en construcción* | Atenuada, ícono 🪖 |
+| `retirada` | **Lee del sistema, pero su dato ya no alimenta el tablero**: otro circuito lo reemplazó. Se conserva por el histórico | Atenuada, ícono ámbar 🗃️ |
+
+`retirada` llegó con las cuentas de fondo de Saldos, que reemplazaron a las dos pestañas de Otros Ingresos. Una pantalla que abre, funciona y guarda, y cuyo número no va a ningún lado, es el mismo peligro que una maqueta, y por eso se marca igual y no cuenta en el `n/m`. Las dos pestañas además lo dicen arriba de todo.
 
 **El estado del medio es el que importa, y es el que faltaba.** Hoy lo tiene el **Dashboard**: no tiene una sola llamada al servidor, así que sus números están escritos a mano. Un placeholder es honesto —dice que no está hecho—; una maqueta es peor, porque tiene la forma de una pantalla terminada y números que parecen reales. Meterla en la misma bolsa que las pestañas con datos sería el error caro que este módulo evita en todos lados.
 
@@ -817,7 +849,7 @@ La guarda va en esa dirección a propósito: lo que hay que evitar es que el men
 
 ### El contador de cada categoría
 
-Cada categoría muestra `n/m`: cuántas de sus pestañas tienen datos del sistema. Sirve para ver el avance sin abrirla, y **cuenta sólo `datos`** —una maqueta no suma—, que es lo que hace que el número sea confiable. Hoy: Ingresos 7/7, Otros Ingresos 2/2, Comercio Exterior 2/2, y el resto en cero.
+Cada categoría muestra `n/m`: cuántas de sus pestañas tienen datos del sistema. Sirve para ver el avance sin abrirla, y **cuenta sólo `datos`** —una maqueta no suma—, que es lo que hace que el número sea confiable. Hoy: Ingresos 7/7, Otros Ingresos 0/2 (retiradas), Comercio Exterior 2/2, y el resto en cero.
 
 **Otros Ingresos va después de Ingresos y aparte**: Ingresos agrupa lo que sale de un circuito del sistema y esa categoría agrupa lo que se tipea. La diferencia importa al leer un número — en una fila de Ingresos un cero es *"no hay movimientos"* y en una de esas es *"nadie cargó nada todavía"*. Ver `README-otros-ingresos.md`.
 
@@ -972,6 +1004,8 @@ Y del **saldo de cobertura**: que se mida sobre todo el horizonte y no sobre la 
 
 De `FLUJO_NETO`, `tests/test_cashflow.php` fija que incluya el saldo **mostrado** arriba y que no lo arrastre, y que `SALDO_FINAL` no lo cuente dos veces.
 
+De los **fondos como cuentas**, `tests/test_cobertura.php` fija que el disponible se lleve por clave de cuenta —con un fondo sobregirado mientras el total cierra, que es el aviso que el pozo único no daba—, que un stock sin reparto y una aplicación con una clave que no es de ninguna cuenta se traten como corresponde, y que `por_fondo` **sobreviva a `series()`**, que es donde se perdió una vez. `tests/test_fondos.php` cubre el resto: ver `README-saldos.md`.
+
 **El motor acepta un `Horizonte` inyectado, y hace falta para poder probarlo.** El arrastre del saldo depende de qué día es hoy, así que un escenario con importes en fechas fijas deja de tener sentido en cuanto pasa esa fecha. Sin esa costura las pruebas del motor caducaban solas —y caducaron: 48 casos empezaron a devolver `null` al pasar el 06/09/2026, y la parte más delicada del módulo se quedó sin red. Es la misma costura que ya tenían `Ventas::proyectarVentas()` y `proyectarCobranzas()`.
 
 ```php
@@ -1028,7 +1062,10 @@ cashflow/Tabs/dolares_comitente.php
 cashflow/Tabs/saldo_inversiones.php         El segundo concepto: se carga EN PESOS
 sql/cashflow_saldo_inversiones.sql
 sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql      Cotización diaria, para valuar los dólares
-cashflow/Class/Cobertura.php                Aplicación de inversiones para cubrir baches
+cashflow/Class/Cobertura.php                Aplicación de inversiones para cubrir baches; los fondos son las cuentas
+cashflow/Class/Fondos.php                   Cuentas de inversión y comitente (README-saldos.md)
+cashflow/Class/Providers/FondosProvider.php Stock de cobertura por cuenta de fondo
+sql/cashflow_saldos_cuentas_fondo.sql       CLASE, saldo inicial, movimientos y la migración desde Otros Ingresos
 cashflow/Class/Providers/CoberturaProvider.php   Serie APLICACION; no declara pestaña
 cashflow/Controller/CoberturaController.php      Se llama desde el tablero, no desde una pestaña
 cashflow/Class/Providers/ExportacionesProvider.php   Exportaciones Tasky (README-exportaciones-tasky.md)
@@ -1041,6 +1078,8 @@ Modificados: `Class/Ventas.php` (delega el eje y acepta uno inyectado) · `Class
 
 De la rama `feature/cashflow-estructura-inversiones`: `Class/Cashflow.php` (el saldo mostrado entra en `FLUJO_NETO` y en el indicador de Ingresos; el stock de cobertura sale de las columnas; la cobertura va aparte en el KPI) · `Class/CashflowEstructura.php` (los dos tipos nuevos) · `Class/CashflowRegistry.php` (`COBERTURA`; serie `STOCK` en `SALDO_INVERSIONES`) · `Class/Cotizacion.php` (`ultimaHasta()` y la vista diaria) · `Class/OtrosIngresos.php` (`valuarDolares()`, la cuenta única) · `Providers/OtrosIngresosProvider.php` · `Controller/OtrosIngresosController.php` · `Js/Cashflow.js` y `Css/Cashflow.css` (celda editable, stock en guiones, columnas negativas) · `Js/Parametros-Estructura.js` (rótulos de los tipos nuevos) · `Tabs/cashflow.php`, `Tabs/dolares_comitente.php`, `Tabs/saldo_inversiones.php` · `Js/Ingresos-Cobranzas_may.js` y su CSS (editor de fecha manual) · `sql/cashflow_saldo_inversiones.sql` y `sql/cashflow_cobranzas_fecha_manual.sql` (encabezados reescritos: decían lo contrario de lo que hace el código).
 
+De la rama `feature/cuentas-inversion`: `sql/cashflow_saldos_cuentas_fondo.sql`, `Class/Fondos.php`, `Providers/FondosProvider.php` y `tests/test_fondos.php` (nuevos) · `Class/CashflowProvider.php` (`por_fondo` y `fondos` en el contrato, y `normalizar()` las deja pasar) · `Class/Cashflow.php` (`resolverCobertura()` cruza por clave de cuenta; aviso por módulo retirado) · `Class/CashflowRegistry.php` (`FONDO_INVERSION`, `FONDO_COMITENTE`; `'retirado'` y `retirado()`; Otros Ingresos sin `origen_cobertura`) · `Class/CashflowEstructura.php` (advertencia por módulo retirado) · `Class/Cobertura.php` (`origenes()` y los helpers puros sobre la lista; se fueron `ORIGENES`, `MONEDA_POR_FONDO` y `ORIGEN_DEFECTO`) · `Providers/CoberturaProvider.php` (`por_fondo` y los nombres; aviso por aplicaciones sin cuenta) · `Controller/CoberturaController.php` (los orígenes salen de las cuentas) · `Class/Saldos.php`, `Controller/SaldosController.php`, `Tabs/saldos.php`, `Js/Saldos.js`, `Css/Saldos.css`, `Tabs/parametros_saldos.php`, `Js/Parametros-Saldos.js`, `Class/Parametros.php`, `Controller/ParametrosController.php` (ver `README-saldos.md`) · `Class/Menu.php`, `Css/sidebar.css` (el estado `retirada`) · `Js/Parametros-Estructura.js` (los módulos retirados, marcados) · `Tabs/dolares_comitente.php`, `Tabs/saldo_inversiones.php` (el cartel de retiro), `Controller/OtrosIngresosController.php`, `Js/OtrosIngresos-Dolares_comitente.js` (se sacó la tarjeta *Disponible sin usar*, que filtraba por una clave que ya no existe) · `tests/test_cobertura.php`, `tests/test_otros_ingresos.php`, `tests/test_menu.php`, `tests/test_providers.php`.
+
 De la rama `feature/echeqs-excluir`: `sql/cashflow_echeqs_excluir.sql` (nuevo) · `Class/Echeqs.php` (la exclusión entera, y el corte por excluido en las dos consultas de cartera) · `Providers/EcheqsProvider.php` (tres series en vez de una; `seriesDeItem()` y `repartir()` estáticas y puras, para poder verificar el corte sin depender de que haya algo excluido) · `Class/CashflowRegistry.php` (las tres series y su `componentes`) · `Controller/EcheqsController.php` (`excluirCheques`, `getHistorialExclusion`, y los totales netos en el payload) · `Tabs/echeqs.php`, `Js/Ingresos-Echeqs.js`, `Css/Ingresos-Echeqs.css` (el interruptor, la barra de selección y el diálogo del motivo) · `tests/test_echeqs.php`.
 
 > En esa rama salió además un **bug que ya estaba en `develop`**: `Echeqs::marcarCheques()` armaba la lista de ids con `array_values()` sobre un mapa **indexado por id**, así que lo que viajaba a la consulta era una lista de `true` —que SQL Server convierte a `1`— y las veinte marcas terminaban todas sobre el cheque `1`. Nunca se ejecutó: `RO_T_CASHFLOW_ECHEQ_PRECHEQ` está vacía, así que no hay ningún dato que reparar. Se corrigió junto con la exclusión porque es la misma función que ésta reusa, y se dejó la nota en las dos.
@@ -1051,8 +1090,10 @@ Eliminado: `Tabs/resumen.php`.
 
 ## Pendientes conocidos
 
+- **El editor de cobertura del tablero todavía no pregunta de qué fondo se aplica.** Cada cuenta de fondo es un fondo y las aplicaciones ya guardan la clave de la cuenta, pero la celda editable de *Uso de Inversiones* manda sólo fecha e importe, así que todo va al origen por defecto: la primera cuenta de fondo activa en pesos. Con una sola cuenta de inversión es lo correcto; con varias, o para vender dólares de la comitente, hay que poder elegir. Es **la etapa siguiente**, junto con lo que haga el cálculo de la cobertura con los movimientos futuros de los fondos (un rescate previsto hoy no entra al stock, que es el saldo a hoy). `CoberturaController::getAplicaciones` ya devuelve los orígenes con su moneda y el defecto.
+- **La cuenta comitente migró con `USD 1,00` como saldo inicial**, porque ésa era la última foto vigente (18/09/2026) y el tablero ya mostraba ese número. Si fue una carga de prueba, se corrige el saldo inicial desde Parámetros → Saldos; la foto de 71.000 del 16/09 sigue en `RO_T_CASHFLOW_DOLARES_COMITENTE`.
 - **El saldo de apertura ya no arranca en cero, pero depende de que alguien cargue.** El módulo Saldos existe (ver `README-saldos.md`) y alimenta *Saldo Inicial*. Mientras no haya ninguna carga, o mientras la última quede vieja, la fila va en cero o desactualizada y **el tablero lo avisa con la fecha del dato**: leer esos saldos como disponibilidad real sería un error caro.
-- **Todas las filas del Excel ya tienen de dónde salir.** *Exportaciones Tasky* fue la última: la alimenta `ExportacionesProvider` con las facturas pendientes en dólares de `GVA12` (ver `README-exportaciones-tasky.md`). *Caja Locales* salió de esta lista cuando se construyó el módulo Saldos, y *Dólares Cuenta Comitente* y *Saldo de Inversiones* con **Otros Ingresos** (ver `README-otros-ingresos.md`): esas se cargan a mano, pero por una pantalla y no por el Excel, así que siguen entrando al tablero por un proveedor como cualquier otra.
+- **Todas las filas del Excel ya tienen de dónde salir.** *Exportaciones Tasky* fue la última: la alimenta `ExportacionesProvider` con las facturas pendientes en dólares de `GVA12` (ver `README-exportaciones-tasky.md`). *Caja Locales* salió de esta lista cuando se construyó el módulo Saldos, y *Dólares Cuenta Comitente* y *Saldo de Inversiones* primero con **Otros Ingresos** y después como **cuentas de fondo de Saldos** (ver `README-saldos.md`): se cargan a mano —un saldo inicial y los movimientos—, pero por una pantalla y no por el Excel, así que siguen entrando al tablero por un proveedor como cualquier otra.
 - **El neteo de cheques adelantados resta importes que ninguna fila del tablero suma.** Un cheque en cartera cierra solo: suma en *Echeqs en cartera* y resta de la cobranza de Ventas. Uno ya aplicado —depositado o endosado a un proveedor— no lo suma nadie, y se netea igual: **el neteo va por tilde y no por estado**, porque los cheques pre-chequeados están casi todos aplicados y filtrarlos dejaría el circuito sin efecto. Es una decisión tomada, no un pendiente; el pie de la sub-pestaña muestra el corte por estado para poder auditar el número. El detalle de lo verificado contra la base está en `README-ventas.md`.
 - **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** en *Detalle Facturas*, para traer la fecha de emisión de cada comprobante. El tablero no lo sufre —usa `getCobranzasFRTotales()`— y el Resumen tampoco, que desde que no muestra esa columna se la saltea; lo paga *Detalle Facturas*, que es donde se pidió el detalle, **y el Resumen cuando hay filtro por fecha de emisión**, porque ahí esa fecha es lo que decide si la fila entra.
 - **El Dashboard es una maqueta**: no tiene ninguna llamada al servidor, sus números están escritos a mano. El menú lo marca como tal. Cuando se construya de verdad, hay que pasarlo a `datos` en `Class/Menu.php`.

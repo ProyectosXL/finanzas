@@ -203,6 +203,19 @@ class Cashflow {
                 continue;
             }
 
+            /* UN MODULO RETIRADO SIGUE SIRVIENDO, PERO SE AVISA. Retirado no es
+               "sin construir": el proveedor existe y lee su tabla, solo que ese
+               dato ya no se mantiene porque lo reemplazo otro circuito. Una
+               fila que siga apuntando ahi muestra el ultimo numero que se
+               cargo, que puede ser viejo, y sin el aviso se leeria como de
+               hoy. Es lo que pasa con Otros Ingresos desde que el stock sale
+               de las cuentas de fondo. */
+            if (!empty($meta['retirado'])) {
+                $this->warnings[] = 'El módulo ' . $meta['nombre'] . ' está retirado: '
+                    . $meta['retirado'] . ' Las filas que todavía lo usan muestran lo último '
+                    . 'que se cargó ahí, que ya no se mantiene.';
+            }
+
             $prov = CashflowRegistry::instanciar($codigo);
 
             if ($prov === null) {
@@ -333,13 +346,16 @@ class Cashflow {
             $fila['tipo_cambio'] = $s['tipo_cambio'];
             $fila['fuera_horizonte'] = $s['fuera_horizonte'];
 
-            /* De que fondo de cobertura es este stock, y cuanto se aplico de
-               cada uno. Los dos viajan para que resolverCobertura() pueda
-               calcular el disponible POR FONDO sin consultar la base: el motor
-               arma el cuadro con lo que los proveedores le dieron. */
-            $fila['origen_cobertura'] = isset($meta['origen_cobertura'])
-                ? $meta['origen_cobertura'] : null;
-            $fila['por_origen'] = isset($s['por_origen']) ? $s['por_origen'] : null;
+            /* COMO SE REPARTE ESTA SERIE ENTRE LOS FONDOS DE COBERTURA. En una
+               fila de stock es cuanto aporta cada cuenta de fondo; en la de
+               uso, cuanto se aplico desde cada una. Viaja con la serie y no
+               sale del registro: los fondos son cuentas que da de alta el
+               usuario, asi que ninguna constante del codigo puede decir cual
+               es cual. resolverCobertura() lo cruza por la clave sin consultar
+               la base: el motor arma el cuadro con lo que los proveedores le
+               dieron. */
+            $fila['por_fondo'] = isset($s['por_fondo']) ? $s['por_fondo'] : [];
+            $fila['fondos'] = isset($s['fondos']) ? $s['fondos'] : [];
 
             // Las anotaciones viajan tal cual. Las filas DERIVADAS -subtotales,
             // flujo neto, saldo final- no las heredan y se quedan con el arreglo
@@ -705,27 +721,40 @@ class Cashflow {
         $hayStock = false;
         $hayUso = false;
 
-        /* EL DETALLE POR FONDO. Cada fila de stock dice de que fondo es -lo
-           declara su modulo en el registro- y la de uso trae cuanto se aplico de
-           cada uno. Con dos fondos, el total dejo de alcanzar: se pueden aplicar
-           trescientos millones "de dolares" y que el total cierre porque las
-           inversiones lo tapan. */
+        /* EL DETALLE POR FONDO. Cada serie de stock trae cuanto aporta cada
+           cuenta de fondo ('por_fondo') y la de uso cuanto se aplico desde
+           cada una, con la misma clave. Con mas de un fondo el total dejo de
+           alcanzar: se pueden aplicar trescientos millones "de dolares" y que
+           el total cierre porque las inversiones lo tapan.
+
+           LOS FONDOS SON CUENTAS, NO UNA LISTA DEL CODIGO. Antes cada fila de
+           stock declaraba su fondo en el registro ('origen_cobertura'); ahora
+           las cuentas las da de alta el usuario, asi que el reparto viaja con
+           la serie y el motor no conoce ninguna. Un stock que no reparte -por
+           ejemplo una fila que siga leyendo de Otros Ingresos- suma al total y
+           a ningun fondo. Ver Providers/FondosProvider.php. */
         $fondos = [];
 
+        $abrir = function ($clave, $nombre = null) use (&$fondos) {
+            if (!isset($fondos[$clave])) {
+                $fondos[$clave] = ['stock' => 0, 'aplicado' => 0, 'nombre' => $clave];
+            }
+
+            if ($nombre !== null && $nombre !== '') {
+                $fondos[$clave]['nombre'] = $nombre;
+            }
+        };
+
         foreach ($resueltas as $f) {
+            $nombres = isset($f['fondos']) ? $f['fondos'] : [];
+
             if ($f['tipo'] === 'STOCK_COBERTURA') {
                 $stock += $f['total_horizonte'];
                 $hayStock = true;
 
-                $o = isset($f['origen_cobertura']) ? $f['origen_cobertura'] : null;
-
-                if ($o !== null) {
-                    if (!isset($fondos[$o])) {
-                        $fondos[$o] = ['stock' => 0, 'aplicado' => 0, 'nombre' => $o];
-                    }
-
-                    $fondos[$o]['stock'] += $f['total_horizonte'];
-                    $fondos[$o]['nombre'] = $f['nombre'];
+                foreach ((isset($f['por_fondo']) ? $f['por_fondo'] : []) as $o => $v) {
+                    $abrir($o, isset($nombres[$o]) ? $nombres[$o] : null);
+                    $fondos[$o]['stock'] += floatval($v);
                 }
             }
 
@@ -733,11 +762,8 @@ class Cashflow {
                 $aplicado += $f['total_horizonte'];
                 $hayUso = true;
 
-                foreach ((isset($f['por_origen']) ? $f['por_origen'] : []) as $o => $v) {
-                    if (!isset($fondos[$o])) {
-                        $fondos[$o] = ['stock' => 0, 'aplicado' => 0, 'nombre' => $o];
-                    }
-
+                foreach ((isset($f['por_fondo']) ? $f['por_fondo'] : []) as $o => $v) {
+                    $abrir($o, isset($nombres[$o]) ? $nombres[$o] : null);
                     $fondos[$o]['aplicado'] += floatval($v);
                 }
             }

@@ -82,18 +82,46 @@ chequearLanza('un texto cualquiera se rechaza',
 
 seccion('validacion del origen del fondo');
 
-chequear('sin origen se asume el de defecto',
-    'INVERSIONES', Cobertura::validarOrigen(null));
-chequear('vacio tambien', 'INVERSIONES', Cobertura::validarOrigen(''));
-chequear('se normaliza a mayusculas', 'DOLARES', Cobertura::validarOrigen(' dolares '));
+/* LOS FONDOS SON LAS CUENTAS DE FONDO DE SALDOS, no una lista del codigo. Los
+   helpers reciben la lista -como la devuelve Cobertura::origenes()- para poder
+   probarse sin base. Esta lista imita dos cuentas activas, una en pesos y una en
+   dolares, y una inhabilitada que va PRIMERA para verificar que no la elige el
+   defecto. El detalle de las reglas esta en tests/test_fondos.php. */
+$origenesPrueba = [
+    'CTA_9' => ['id' => 9, 'nombre' => 'Fondo viejo', 'moneda' => 'ARS', 'clase' => 'INVERSION',
+                'activo' => false],
+    'CTA_13' => ['id' => 13, 'nombre' => 'Inversiones', 'moneda' => 'ARS', 'clase' => 'INVERSION',
+                 'activo' => true],
+    'CTA_14' => ['id' => 14, 'nombre' => 'Cuenta comitente', 'moneda' => 'USD',
+                 'clase' => 'COMITENTE', 'activo' => true]
+];
 
-// Un origen que nadie declaro no se guarda como vino ni se descarta en
-// silencio: es una clave, y una clave desconocida no se puede agrupar.
-chequearLanza('un origen no declarado se rechaza',
-    function () { Cobertura::validarOrigen('CRIPTO'); });
+chequear('sin origen se asume la primera cuenta activa en pesos',
+    'CTA_13', Cobertura::validarOrigenEn(null, $origenesPrueba));
+chequear('vacio tambien', 'CTA_13', Cobertura::validarOrigenEn('', $origenesPrueba));
+chequear('se normaliza a mayusculas', 'CTA_14', Cobertura::validarOrigenEn(' cta_14 ', $origenesPrueba));
 
-chequear('los tres origenes del Excel estan declarados',
-    ['INVERSIONES', 'SUSCRIPCION', 'DOLARES'], array_keys(Cobertura::ORIGENES));
+// Un origen que no es ninguna cuenta no se guarda como vino ni se descarta en
+// silencio: es una clave, y una clave desconocida no descuenta de nadie.
+chequearLanza('un origen que no es una cuenta se rechaza',
+    function () use ($origenesPrueba) { Cobertura::validarOrigenEn('CRIPTO', $origenesPrueba); });
+
+// Las claves viejas tampoco: la migracion las reescribio, y aceptarlas volveria
+// a crear aplicaciones sin fondo.
+chequearLanza('la clave vieja INVERSIONES ya no vale',
+    function () use ($origenesPrueba) { Cobertura::validarOrigenEn('INVERSIONES', $origenesPrueba); });
+
+// Una cuenta inhabilitada esta en la lista para leer el historial, no para
+// cargar cosas nuevas.
+chequearLanza('una cuenta inhabilitada no sirve para aplicar',
+    function () use ($origenesPrueba) { Cobertura::validarOrigenEn('CTA_9', $origenesPrueba); });
+
+chequearLanza('sin ninguna cuenta en pesos, sin origen se rechaza diciendolo',
+    function () use ($origenesPrueba) {
+        Cobertura::validarOrigenEn(null, ['CTA_14' => $origenesPrueba['CTA_14']]);
+    });
+chequear('y con la lista vacia el defecto es null',
+    null, Cobertura::origenDefectoDe([]));
 
 seccion('observacion');
 
@@ -398,6 +426,146 @@ foreach ($tSin['warnings'] as $w) {
 chequear('y no avisa de un exceso que no puede calcular', false, $avisoSinStock);
 
 /* ================================================================
+   EL DISPONIBLE SE LLEVA POR FONDO, Y LOS FONDOS SON CUENTAS
+
+   Cada serie de stock trae 'por_fondo' -cuanto aporta cada cuenta- y la de
+   uso cuanto se aplico desde cada una, con la misma clave. El motor cruza por
+   clave y avisa por fondo: un fondo puede estar sobregirado mientras el total
+   cierra, y ese es el caso que el pozo unico no veia. Ninguna clave esta
+   escrita en el motor.
+   ================================================================ */
+seccion('el disponible se lleva por fondo');
+
+$ecFondos = new EstructuraCobertura();
+$ecFondos->secciones = $ec->secciones;
+$ecFondos->filas = array_map(function ($f) {
+    if ($f['CODIGO'] === 'STOCK') {
+        $f['ORIGEN_PROVIDER'] = 'FONDO_INVERSION';
+    }
+
+    return $f;
+}, $ec->filas);
+
+// Dos cuentas de inversion: 3000 y 2000. Se aplican 2500 de la primera y 100
+// de la segunda: el total (2600 de 5000) cierra, pero la primera NO.
+$stockFondos = $serie($hc, ['2026-09-06' => 5000]);
+$stockFondos['por_fondo'] = ['CTA_1' => 3000, 'CTA_2' => 2000];
+$stockFondos['fondos'] = ['CTA_1' => 'Fondo Alyc', 'CTA_2' => 'Fondo Banco'];
+
+$usoFondos = $serie($hc, ['2026-09-07' => 2600]);
+$usoFondos['por_fondo'] = ['CTA_1' => 2500, 'CTA_2' => 100];
+
+$motorF = new CashflowCobertura($ecFondos, new ParametrosCobertura(), $hc);
+$motorF->series = array_merge($motorC->series, [
+    'FONDO_INVERSION' => ['STOCK' => $stockFondos],
+    'COBERTURA' => ['APLICACION' => $usoFondos]
+]);
+
+$tF = $motorF->proyectar();
+$pF = [];
+foreach ($tF['filas'] as $f) { $pF[$f['codigo']] = $f; }
+
+$fondosF = $pF['STOCK']['cobertura']['fondos'];
+
+chequear('el total sigue siendo el de siempre', 5000.0, $pF['STOCK']['cobertura']['stock']);
+chequear('y el disponible total tambien', 2400.0, $pF['STOCK']['cobertura']['disponible']);
+chequear('hay un fondo por cuenta', ['CTA_1', 'CTA_2'], array_keys($fondosF));
+chequear('cada uno con su stock', 3000.0, $fondosF['CTA_1']['stock']);
+chequear('y con lo que se aplico desde el', 2500.0, $fondosF['CTA_1']['aplicado']);
+chequear('el disponible por fondo es la resta', 500.0, $fondosF['CTA_1']['disponible']);
+chequear('y el nombre es el de la cuenta, no la clave', 'Fondo Alyc', $fondosF['CTA_1']['nombre']);
+
+// Sin exceso en ningun fondo ni en el total: ningun aviso de cobertura.
+$avisosF = array_values(array_filter($tF['warnings'], function ($w) {
+    return strpos($w, 'Cobertura:') === 0;
+}));
+
+chequear('con todos los fondos alcanzando, no hay aviso', [], $avisosF);
+
+// Ahora 3500 de la primera: el total (3600 de 5000) SIGUE cerrando, pero la
+// primera queda sobregirada en 500. Es el aviso que el pozo unico no daba.
+$usoExceso = $serie($hc, ['2026-09-07' => 3600]);
+$usoExceso['por_fondo'] = ['CTA_1' => 3500, 'CTA_2' => 100];
+
+$motorFE = new CashflowCobertura($ecFondos, new ParametrosCobertura(), $hc);
+$motorFE->series = array_merge($motorF->series, ['COBERTURA' => ['APLICACION' => $usoExceso]]);
+
+$tFE = $motorFE->proyectar();
+$avisosFE = array_values(array_filter($tFE['warnings'], function ($w) {
+    return strpos($w, 'Cobertura:') === 0;
+}));
+
+chequear('un fondo sobregirado avisa aunque el total cierre', 1, count($avisosFE));
+chequear('y el aviso nombra la cuenta', true,
+    count($avisosFE) === 1 && strpos($avisosFE[0], '"Fondo Alyc"') !== false);
+chequear('con cuanto falta de ese fondo', true,
+    count($avisosFE) === 1 && strpos($avisosFE[0], '500,00') !== false);
+
+/* UNA APLICACION CON UNA CLAVE QUE NO ES DE NINGUNA CUENTA -una vieja que la
+   migracion no pudo mover- suma al total y a un fondo sin stock, para que se
+   vea. Y un stock que NO reparte -una fila que siga leyendo de Otros Ingresos-
+   suma al total y a ningun fondo. */
+$usoHuerfano = $serie($hc, ['2026-09-07' => 400]);
+$usoHuerfano['por_fondo'] = ['SUSCRIPCION' => 400];
+
+$stockSinReparto = $serie($hc, ['2026-09-06' => 5000]);
+
+$motorH = new CashflowCobertura($ecFondos, new ParametrosCobertura(), $hc);
+$motorH->series = array_merge($motorC->series, [
+    'FONDO_INVERSION' => ['STOCK' => $stockSinReparto],
+    'COBERTURA' => ['APLICACION' => $usoHuerfano]
+]);
+
+$tH = $motorH->proyectar();
+$pH = [];
+foreach ($tH['filas'] as $f) { $pH[$f['codigo']] = $f; }
+
+chequear('el total no depende del reparto', 4600.0, $pH['STOCK']['cobertura']['disponible']);
+chequear('un stock sin reparto no abre ningun fondo', ['SUSCRIPCION'],
+    array_keys($pH['STOCK']['cobertura']['fondos']));
+chequear('y la clave huerfana queda con stock cero y su aplicado', [0, 400.0],
+    [$pH['STOCK']['cobertura']['fondos']['SUSCRIPCION']['stock'],
+     $pH['STOCK']['cobertura']['fondos']['SUSCRIPCION']['aplicado']]);
+
+seccion('el reparto por fondo sobrevive al contrato del proveedor');
+
+/* ESTO YA SE ROMPIO UNA VEZ. CashflowProvider::normalizar() arma la serie con
+   una lista cerrada de claves, y el reparto -entonces 'por_origen'- no estaba:
+   el proveedor lo colgaba, el motor lo esperaba, y en el medio se perdia. Los
+   avisos por fondo nunca llegaron al tablero real; solo esta prueba, que
+   reemplaza pedirSeries() y se saltea normalizar(), los veia andar. Por eso
+   esta prueba pasa por series(), que es el camino real. */
+class ProveedorConReparto extends CashflowProvider {
+    protected function calcular($h) {
+        $s = $h->serieVacia();
+        $s['dias'][$h->hoy()] = 5000;
+        $s['por_fondo'] = ['CTA_1' => '3000', 'CTA_2' => 2000];
+        $s['fondos'] = ['CTA_1' => 'Fondo Alyc'];
+
+        return ['STOCK' => $s];
+    }
+}
+
+$conReparto = (new ProveedorConReparto('X'))->series($hc);
+
+chequear('por_fondo llega al motor', ['CTA_1' => 3000.0, 'CTA_2' => 2000.0],
+    $conReparto['STOCK']['por_fondo']);
+chequear('como numeros', true, is_float($conReparto['STOCK']['por_fondo']['CTA_1']));
+chequear('y los nombres tambien', ['CTA_1' => 'Fondo Alyc'], $conReparto['STOCK']['fondos']);
+
+class ProveedorSinReparto extends CashflowProvider {
+    protected function calcular($h) {
+        return ['STOCK' => $h->serieVacia()];
+    }
+}
+
+$sinReparto = (new ProveedorSinReparto('X'))->series($hc);
+
+// Vacio y no ausente: el motor lee la clave sin preguntar si existe.
+chequear('una serie que no reparte llega con el reparto vacio', [], $sinReparto['STOCK']['por_fondo']);
+chequear('y sin nombres', [], $sinReparto['STOCK']['fondos']);
+
+/* ================================================================
    SUBTOTALES ANIDADOS: EL ALCANCE SE SOLAPA Y NO SE DUPLICA NADA
 
    SUB_ING abarca ING_TOT + DISP + VTA, o sea que su alcance contiene a
@@ -453,14 +621,20 @@ chequear('getAplicaciones devuelve una lista', true, is_array($cob->getAplicacio
 // que el proveedor asume al armar la serie.
 $formaOk = true;
 
+$origenesBase = $cob->origenes();
+
 foreach ($cob->getAplicaciones() as $a) {
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $a['FECHA'])
-        || !isset(Cobertura::ORIGENES[$a['ORIGEN']])) {
+        || !isset($origenesBase[$a['ORIGEN']])) {
         $formaOk = false;
     }
 }
 
-chequear('las aplicaciones vigentes tienen fecha y origen validos', true, $formaOk);
+// El origen tiene que ser una cuenta de fondo: la migracion reescribio las
+// claves viejas, y una aplicacion con una clave que no es de ninguna cuenta no
+// descuenta de nadie. Si esto falla, hay aplicaciones huerfanas que reasignar.
+chequear('las aplicaciones vigentes tienen fecha valida y salen de una cuenta de fondo',
+    true, $formaOk);
 
 seccion('el proveedor de cobertura esta enchufado al tablero');
 
@@ -490,56 +664,65 @@ chequear('y devuelve la serie que declara',
    ================================================================ */
 seccion('cada fondo tiene su moneda, y la decide el fondo');
 
-/* LA MONEDA NO ES UN PARAMETRO SUELTO. Recibirla aparte permitiria guardar un
-   importe en dolares diciendo que sale de inversiones, y ese importe se valuaria
-   dos veces o ninguna sin que nada lo dijera. */
-chequear('del fondo de dolares se aplican DOLARES',
-    'USD', Cobertura::monedaDeOrigen('DOLARES'));
-chequear('de inversiones, pesos', 'ARS', Cobertura::monedaDeOrigen('INVERSIONES'));
-chequear('de una suscripcion, pesos', 'ARS', Cobertura::monedaDeOrigen('SUSCRIPCION'));
+/* LA MONEDA NO ES UN PARAMETRO SUELTO: es la de la CUENTA de la que se aplica.
+   Recibirla aparte permitiria guardar un importe en dolares diciendo que sale
+   de inversiones, y ese importe se valuaria dos veces o ninguna sin que nada lo
+   dijera. La lista es la misma de mas arriba: dos cuentas activas, una en cada
+   moneda. */
+chequear('de la cuenta comitente se aplican DOLARES',
+    'USD', Cobertura::monedaDeOrigenEn('CTA_14', $origenesPrueba));
+chequear('de la cuenta de inversion, pesos',
+    'ARS', Cobertura::monedaDeOrigenEn('CTA_13', $origenesPrueba));
+chequear('se normaliza', 'USD', Cobertura::monedaDeOrigenEn(' cta_14 ', $origenesPrueba));
 
 // Un origen desconocido es pesos: es lo que era todo antes de que hubiera un
 // stock en otra moneda, y valuar de mas es peor que no valuar.
-chequear('un origen que no existe cae en pesos', 'ARS', Cobertura::monedaDeOrigen('LO QUE SEA'));
-chequear('y null tambien', 'ARS', Cobertura::monedaDeOrigen(null));
+chequear('un origen que no existe cae en pesos',
+    'ARS', Cobertura::monedaDeOrigenEn('LO QUE SEA', $origenesPrueba));
+chequear('y null tambien', 'ARS', Cobertura::monedaDeOrigenEn(null, $origenesPrueba));
 
-/* TODO ORIGEN TIENE MONEDA DECLARADA. Si alguien agrega uno a ORIGENES y se
-   olvida de MONEDA_POR_FONDO, sus aplicaciones se guardarian como pesos sin que
-   nadie lo note. */
-$sinMoneda = [];
+seccion('los fondos son las cuentas, y el stock viaja repartido por cuenta');
 
-foreach (array_keys(Cobertura::ORIGENES) as $o) {
-    if (!isset(Cobertura::MONEDA_POR_FONDO[$o])) { $sinMoneda[] = $o; }
+/* YA NO HAY LISTA FIJA. Cobertura::ORIGENES y MONEDA_POR_FONDO desaparecieron: si
+   alguien las vuelve a escribir, volvio a haber una cuenta escrita en el codigo.
+   Lo mismo con 'origen_cobertura' en el registro. */
+chequear('Cobertura no tiene una lista fija de origenes',
+    false, defined('Cobertura::ORIGENES'));
+chequear('ni una tabla fija de monedas por fondo',
+    false, defined('Cobertura::MONEDA_POR_FONDO'));
+chequear('ni un origen por defecto escrito',
+    false, defined('Cobertura::ORIGEN_DEFECTO'));
+
+$conOrigenFijo = [];
+
+foreach (CashflowRegistry::todos() as $p) {
+    if (isset($p['origen_cobertura'])) { $conOrigenFijo[] = $p['codigo']; }
 }
 
-chequear('todos los origenes declaran su moneda', [], $sinMoneda);
+chequear('ningun proveedor declara un fondo fijo en el registro', [], $conOrigenFijo);
 
-// Y al reves: una moneda declarada para un fondo que no existe no la usa nadie.
-$sinOrigen = [];
+/* EL STOCK LO SIRVEN LAS CUENTAS DE FONDO, un codigo por clase. Ver
+   tests/test_fondos.php para el proveedor en detalle. */
+foreach (['FONDO_INVERSION', 'FONDO_COMITENTE'] as $codigo) {
+    $mf = CashflowRegistry::meta($codigo);
 
-foreach (array_keys(Cobertura::MONEDA_POR_FONDO) as $o) {
-    if (!isset(Cobertura::ORIGENES[$o])) { $sinOrigen[] = $o; }
+    chequear($codigo . ' esta registrado y disponible',
+        true, CashflowRegistry::disponible($codigo));
+    chequear($codigo . ' ofrece la serie STOCK',
+        true, CashflowRegistry::serieExiste($codigo, 'STOCK'));
+    chequear($codigo . ' enlaza a Saldos -> Fondos',
+        'saldos/fondos', $mf['tab'] . '/' . $mf['subtab']);
 }
 
-chequear('y no sobra ninguna', [], $sinOrigen);
-
-seccion('cada stock declara de que fondo es');
-
-/* QUE FONDO ES CADA STOCK lo declara el MODULO que informa ese saldo, no la fila
-   del tablero: es una propiedad de que ES ese dinero. En CONF_FILA seria un dato
-   que se puede contradecir con el proveedor que la fila ya declara. */
-foreach (['DOLARES_COMITENTE' => 'DOLARES',
-          'SALDO_INVERSIONES' => 'INVERSIONES'] as $prov => $fondo) {
-    $m = CashflowRegistry::meta($prov);
-
-    chequear($prov . ' declara su fondo de cobertura', $fondo,
-        isset($m['origen_cobertura']) ? $m['origen_cobertura'] : null);
-
-    /* Y ese fondo tiene que EXISTIR como origen, o el aviso nombraria un fondo
-       del que nadie puede aplicar. */
-    chequear('y ese fondo existe como origen', true,
-        isset(Cobertura::ORIGENES[$fondo]));
+/* Y LOS DE OTROS INGRESOS ESTAN RETIRADOS: siguen declarados y disponibles
+   -una fila que los apunte no queda invalida- pero marcados. */
+foreach (['SALDO_INVERSIONES', 'DOLARES_COMITENTE'] as $codigo) {
+    chequear($codigo . ' sigue disponible', true, CashflowRegistry::disponible($codigo));
+    chequear($codigo . ' esta retirado', true, CashflowRegistry::retirado($codigo));
 }
+
+chequear('los proveedores vivos no estan retirados', false,
+    CashflowRegistry::retirado('FONDO_INVERSION') || CashflowRegistry::retirado('COBERTURA'));
 
 seccion('el script que habilita el consumo por fondo');
 
@@ -569,7 +752,7 @@ $cuerpoGuardar = (function () {
 })();
 
 chequear('la moneda sale del origen y no de un parametro', true,
-    strpos($cuerpoGuardar, '$mon = self::monedaDeOrigen($org);') !== false);
+    strpos($cuerpoGuardar, '$mon = $this->monedaDeOrigen($org);') !== false);
 chequear('sin la columna, aplicar en dolares se rechaza', true,
     strpos($cuerpoGuardar, "if (\$mon === 'USD' && !\$this->tieneMoneda())") !== false);
 chequear('y el mensaje dice que se leeria como pesos', true,

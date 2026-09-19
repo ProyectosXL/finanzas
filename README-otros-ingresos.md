@@ -4,6 +4,30 @@ Los ingresos que **no salen de ningún circuito del sistema** y los carga una pe
 
 ---
 
+## RETIRADO: los dos conceptos son ahora cuentas de Saldos
+
+> Esto **cambió** con `sql/cashflow_saldos_cuentas_fondo.sql` (rama `feature/cuentas-inversion`). Todo lo que sigue en este README describe cómo funcionaba y sigue siendo cierto para lo que tienen cargado las tablas, pero **lo que se cargue acá ya no llega al tablero**.
+
+Las dos pestañas eran **fotos** del saldo: cuánto había invertido, cuántos dólares había en la cuenta comitente, el día que alguien lo tipeó. Una foto no explica de dónde salió el número ni permite asentar un rescate. Ahora los dos son **cuentas del catálogo de Saldos** —clase `INVERSION` y clase `COMITENTE`— con cuenta corriente propia:
+
+```
+saldo a una fecha = saldo inicial + suscripciones − rescates
+```
+
+y el stock de la sección Cobertura lo lee `FondosProvider` de esas cuentas. Ver `README-saldos.md`, *Pestaña 3 — Fondos*.
+
+**Qué pasó con lo cargado.** La última carga vigente de cada tabla pasó a ser el **saldo inicial** de la cuenta equivalente, con su fecha: inversiones `3.529.962,37` al 14/09/2026, y en dólares la vigente más nueva, `USD 1,00` al 18/09/2026 —la de 71.000 del 16/09 sigue vigente pero es anterior, y el stock siempre fue la de mayor fecha, así que es exactamente lo que el tablero ya mostraba; si es una carga de prueba, se corrige el saldo inicial desde Parámetros → Saldos—. Las aplicaciones de cobertura que decían `ORIGEN = 'INVERSIONES'` o `'DOLARES'` pasaron a la clave de la cuenta (`CTA_<id>`), todas, vigentes y pisadas, para que el historial siga nombrando un fondo que existe.
+
+**Qué NO se borró**, igual que cuando el saldo de inversiones dejó de ser un ingreso:
+
+- `RO_T_CASHFLOW_SALDO_INVERSIONES` y `RO_T_CASHFLOW_DOLARES_COMITENTE` quedan con su histórico.
+- Las dos pestañas siguen abriendo y guardando en sus tablas, con un cartel arriba que dice que están retiradas. El menú las marca con el cuarto estado, `retirada` (ver `Class/Menu.php`), y no las cuenta en el `n/m` de la categoría: una pantalla que abre, funciona y guarda, y cuyo número no va a ningún lado, es el mismo peligro que una maqueta.
+- `OtrosIngresosProvider` sigue declarado y disponible bajo los mismos códigos, con la marca `'retirado'` en el registro. Una fila que todavía lo apunte no queda inválida: muestra lo último que se cargó ahí y el motor avisa que ese dato ya no se mantiene. Para volver atrás se reapuntan las filas de stock desde Parámetros → Cashflow.
+
+Lo que sí se sacó de la pestaña de dólares es la tarjeta *Disponible sin usar*: se calculaba filtrando las aplicaciones por `ORIGEN = 'DOLARES'`, que ya no existe, y el disponible por fondo se ve ahora en el tablero, en la fila de stock. Ya no declaran `origen_cobertura`: los fondos son cuentas y el reparto viaja con la serie.
+
+---
+
 ## Por qué es una categoría aparte y no una pestaña más de Ingresos
 
 *Ingresos* agrupa lo que sale de un circuito —ventas, cobranzas, echeqs, cobranzas electrónicas—. Lo de acá se tipea, y la diferencia importa a la hora de leer un número:
@@ -30,7 +54,11 @@ Contra `central`:
 -- 4. sql/cashflow_cobertura_por_fondo.sql            (consumo por fondo y en dólares)
 -- 5. sql/cashflow_saldo_inversiones.sql
 -- 6. sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql          (la cotización diaria)
+-- 7. sql/cashflow_saldos_cuentas_fondo.sql           (RETIRA los dos conceptos: los migra a
+--                                                     cuentas de Saldos; ver README-saldos.md)
 ```
+
+El séptimo va **después de todos los anteriores y de `sql/cashflow_saldos.sql`**: migra la última carga vigente de cada tabla a una cuenta de fondo y reapunta las filas de stock. Si las tablas de Otros Ingresos no existen en la base, lo dice y no crea las cuentas: no hay nada que migrar.
 
 El tercero apaga la fila de Disponibilidades y crea la de **Cobertura**. Va después de `sql/cashflow_cobertura.sql`, que es el que crea esa sección, y aborta diciéndolo si falta. **No migra ningún dato**: las cargas quedan como están y cambia quién las lee.
 
@@ -120,7 +148,7 @@ Había **un pozo**: el tablero sumaba todos los stocks, sumaba todos los usos y 
 
 **Ahora cada fondo lleva su cuenta.** Una aplicación con origen `DOLARES` descuenta de los dólares; una con origen `INVERSIONES`, de las inversiones. El aviso pasa a ser **por fondo** además de por el total — un fondo puede estar sobregirado mientras el total cierra, y ése es justamente el caso que el pozo único no podía ver.
 
-**Qué fondo es cada stock lo declara el módulo**, en `origen_cobertura` del registro. Es una propiedad de *qué es ese dinero*, no de cómo se configuró la fila; en `CONF_FILA` sería un dato que se puede contradecir con el proveedor que la fila ya declara.
+**Qué fondo es cada stock lo declaraba el módulo**, en `origen_cobertura` del registro. **Esto cambió** con las cuentas de fondo: ya no hay una lista de fondos en el código ni en el registro. Cada cuenta de fondo es un fondo (`CTA_<id>`), el reparto viaja con la serie (`por_fondo`) y las aplicaciones apuntan a la cuenta. Ver `README-saldos.md` y `README-cashflow.md`.
 
 #### Los dólares se consumen en dólares
 
@@ -134,7 +162,7 @@ Guardar los pesos en vez de los dólares tendría el problema inverso: el remane
 
 **Sin el script, aplicar desde dólares se rechaza** con el nombre del script en el mensaje. Guardar un importe en dólares en una tabla que no sabe la moneda lo dejaría leyéndose como pesos, que es un error de dos órdenes de magnitud.
 
-La pestaña muestra **Disponible sin usar** —informado − aplicado, en dólares y en pesos— y la tarjeta sólo aparece cuando hay algo aplicado. Sale de la **misma cuenta** que alimenta el tablero, así que las dos pantallas no pueden discrepar.
+La pestaña mostraba **Disponible sin usar** —informado − aplicado, en dólares y en pesos—. **Esa tarjeta se sacó** al retirar la pestaña: filtraba por `ORIGEN = 'DOLARES'`, que ya no existe. El disponible por fondo se ve en la fila de stock del tablero.
 
 ### El saldo es la última carga, no la suma
 

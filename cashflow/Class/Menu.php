@@ -12,20 +12,29 @@
  * que todavia no se desarrollaron. Con la lista como dato, el estado se resuelve
  * una vez y la vista solo dibuja.
  *
- * LOS TRES ESTADOS, Y POR QUE SON TRES
- * ------------------------------------
+ * LOS CUATRO ESTADOS, Y POR QUE SON CUATRO
+ * ----------------------------------------
  *   'datos'     -> la pestana lee del sistema. Se puede confiar en lo que muestra.
  *   'maqueta'   -> DIBUJA PERO LOS NUMEROS SON DE EJEMPLO. Es el caso del
  *                  Dashboard: no tiene una sola llamada al servidor.
  *   'pendiente' -> todavia no se desarrollo; la pestana muestra el aviso de
  *                  "en construccion".
+ *   'retirada'  -> LEE DEL SISTEMA, PERO SU DATO YA NO ALIMENTA EL TABLERO:
+ *                  otro circuito lo reemplazo. Se conserva por el historico.
  *
- * El estado del medio es el importante y es el que faltaba. Un placeholder es
+ * El estado 'maqueta' es el importante y es el que faltaba. Un placeholder es
  * HONESTO: dice que no esta hecho. Una maqueta es peor, porque tiene la forma de
  * una pantalla terminada y numeros que parecen reales, asi que sin marcarla se
  * lee como un dato del negocio. Meterla en la misma bolsa que las pestanas con
  * datos seria justamente el error caro que este modulo trata de evitar en todos
  * lados.
+ *
+ * 'retirada' llego con las cuentas de fondo de Saldos, que reemplazaron a las
+ * dos pestanas de Otros Ingresos. Esas pestanas no se borran -sus tablas
+ * guardan el historico de lo que se cargo- pero lo que se cargue ahi ya no
+ * llega al tablero, y eso es exactamente lo que el menu tiene que decir: una
+ * pantalla que abre, funciona y guarda, y cuyo numero no va a ningun lado, es
+ * el mismo peligro que una maqueta. No cuenta en el n/m de la categoria.
  *
  * EL PLACEHOLDER SE DETECTA, NO SE DECLARA
  * ----------------------------------------
@@ -50,6 +59,9 @@ class Menu {
     /** Todavia no se desarrollo */
     const PENDIENTE = 'pendiente';
 
+    /** Funciona, pero su dato ya no alimenta el tablero: la reemplazo otra */
+    const RETIRADA = 'retirada';
+
     /**
      * Que dice el tooltip de cada estado.
      * 'datos' no lleva nada: es el caso normal y un cartel en cada item seria
@@ -60,14 +72,17 @@ class Menu {
         self::MAQUETA => 'Maqueta: la pantalla está dibujada pero los números son '
             . 'de ejemplo, todavía no salen del sistema',
         self::PENDIENTE => 'Todavía no desarrollada: la pestaña muestra un aviso de '
-            . 'sección en construcción'
+            . 'sección en construcción',
+        self::RETIRADA => 'Retirada: la pantalla funciona y conserva su histórico, pero lo '
+            . 'que se carga acá ya no llega al tablero. La reemplaza Saldos → Fondos'
     ];
 
     /** Icono con el que se marca cada estado. 'datos' no se marca. */
     private static $iconos = [
         self::DATOS => '',
         self::MAQUETA => 'fa-pen-ruler',
-        self::PENDIENTE => 'fa-hard-hat'
+        self::PENDIENTE => 'fa-hard-hat',
+        self::RETIRADA => 'fa-box-archive'
     ];
 
     /**
@@ -115,17 +130,20 @@ class Menu {
            una fila de Ingresos un cero es "no hay movimientos", y en una de
            estas es "nadie cargo nada todavia".
 
-           Queda armada para que sumar un concepto nuevo sea agregar una
-           pestana, y el segundo item -Saldo de Inversiones- es la prueba: un
-           archivo en Tabs/, su entrada aca y su case en el controller. */
+           LAS DOS ESTAN RETIRADAS. Eran fotos del saldo invertido y de los
+           dolares de la cuenta comitente; desde que esos son cuentas del
+           catalogo de Saldos con cuenta corriente (Saldos -> Fondos), lo que se
+           cargue aca ya no llega al tablero. No se borran: sus tablas guardan
+           el historico y las pantallas siguen abriendo, con el cartel arriba.
+           Ver sql/cashflow_saldos_cuentas_fondo.sql. */
         [
             'codigo' => 'OtrosIngresos',
             'nombre' => 'Otros Ingresos',
             'icono' => 'fa-coins',
             'abierta' => false,
             'items' => [
-                ['tab' => 'dolares_comitente', 'nombre' => 'Dólares Cuenta Comitente', 'icono' => 'fa-dollar-sign', 'estado' => self::DATOS],
-                ['tab' => 'saldo_inversiones', 'nombre' => 'Saldo de Inversiones', 'icono' => 'fa-chart-line', 'estado' => self::DATOS]
+                ['tab' => 'dolares_comitente', 'nombre' => 'Dólares Cuenta Comitente', 'icono' => 'fa-dollar-sign', 'estado' => self::RETIRADA],
+                ['tab' => 'saldo_inversiones', 'nombre' => 'Saldo de Inversiones', 'icono' => 'fa-chart-line', 'estado' => self::RETIRADA]
             ]
         ],
         [

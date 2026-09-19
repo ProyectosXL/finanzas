@@ -10,6 +10,13 @@
  * generica con un campo 'importe' haria que el endpoint acepte un numero sin
  * moneda, y la que decide cual es quedaria escrita en el navegador.
  *
+ * LAS DOS PESTANAS ESTAN RETIRADAS desde que el stock de cobertura sale de las
+ * cuentas de fondo de Saldos (sql/cashflow_saldos_cuentas_fondo.sql). Siguen
+ * leyendo y guardando en sus tablas -que quedan por el historico- pero lo que
+ * se cargue aca ya no llega al tablero, y la pantalla lo dice arriba. Se saco
+ * la tarjeta "Disponible sin usar" de los dolares: lo aplicado se descuenta de
+ * la cuenta de fondo, y se ve en Saldos -> Fondos.
+ *
  * LA VALIDACION QUE VALE ES LA DE ACA. El formulario del navegador acota lo que
  * se puede tipear, pero lo que manda es un pedido y no una autorizacion: el
  * endpoint es alcanzable sin pasar por la pantalla. La fecha y el importe se
@@ -82,42 +89,10 @@ try {
                     . 'a su fecha. No se asume ningún tipo de cambio: tampoco entran al tablero.';
             }
 
-            /* CUANTO SE CONSUMIO DE ESTE FONDO. La pantalla informa el saldo y
-               tiene que poder decir cuánto queda, o el número que muestra sería
-               el de antes de usarlo. Sale de la MISMA cuenta que alimenta el
-               tablero -Cobertura::valuarAplicaciones()-, así que las dos
-               pantallas no pueden discrepar.
-
-               Se lee en dólares y en pesos: el saldo se informa en dólares y la
-               fila del cuadro está en pesos, y las dos preguntas son legítimas. */
-            require_once __DIR__ . '/../Class/Cobertura.php';
-
-            $aplicado = ['usd' => 0.0, 'ars' => 0.0, 'n' => 0];
-
-            try {
-                foreach ((new Cobertura())->valuarAplicaciones()['filas'] as $a) {
-                    if ($a['ORIGEN'] !== 'DOLARES') {
-                        continue;
-                    }
-
-                    $aplicado['n']++;
-                    $aplicado['usd'] += ($a['MONEDA'] === 'USD') ? floatval($a['IMPORTE']) : 0;
-                    $aplicado['ars'] += ($a['IMPORTE_ARS'] === null) ? 0 : $a['IMPORTE_ARS'];
-                }
-            } catch (Throwable $e) {
-                /* Una pantalla que ya funcionaba no se cae porque la cobertura
-                   no esté instalada: el saldo informado se muestra igual y lo
-                   consumido queda en cero. */
-                $avisos[] = 'No se pudo leer cuánto se aplicó de estos dólares ('
-                    . $e->getMessage() . '). El saldo informado de abajo es correcto; '
-                    . 'lo que no se está descontando es lo ya usado.';
-            }
-
             echo json_encode([
                 'success' => true,
                 'data' => [
                     'filas' => $val['filas'],
-                    'aplicado' => $aplicado,
                     'avisos' => $avisos
                 ]
             ], JSON_UNESCAPED_UNICODE);

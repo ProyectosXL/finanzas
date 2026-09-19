@@ -8,6 +8,17 @@ require_once __DIR__ . '/../Cotizacion.php';
  * OtrosIngresosProvider
  * Alimenta el tablero con los ingresos que se cargan a mano.
  *
+ * RETIRADO. Desde sql/cashflow_saldos_cuentas_fondo.sql el stock de cobertura
+ * sale de las cuentas de fondo del catalogo de Saldos (FondosProvider), y las
+ * dos filas de stock del tablero apuntan ahi. Este proveedor sigue declarado y
+ * sigue leyendo sus tablas -que no se borran, por el historico- para que una
+ * fila que todavia lo apunte no quede invalida y para poder volver atras desde
+ * Parametros; el motor avisa que ese dato ya no se mantiene. Ya no declara a
+ * que fondo pertenece cada stock: los fondos son cuentas y el reparto viaja
+ * con la serie ('por_fondo'), cosa que estas series no hacen. Todo lo que
+ * sigue describe como funcionaba, y sigue siendo cierto para lo que tiene
+ * cargado.
+ *
  * Sirve dos codigos del registro, y los DOS son stock de cobertura:
  *   DOLARES_COMITENTE -> serie STOCK, cuantos dolares hay en la cuenta. En USD,
  *                        convertidos a pesos en cada lectura.

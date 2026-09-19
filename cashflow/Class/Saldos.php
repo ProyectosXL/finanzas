@@ -2,23 +2,41 @@
 
 require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/Parametros.php';
+require_once __DIR__ . '/Fondos.php';
 
 /**
  * Saldos
  * Disponible inicial de la empresa: efectivo de tesoreria de casa central,
  * saldos bancarios, Mercado Pago y la caja de los locales propios.
  *
- * LAS DOS PESTANAS SON DOS COSAS DISTINTAS
- * ----------------------------------------
+ * LAS TRES PESTANAS SON TRES COSAS DISTINTAS
+ * ------------------------------------------
  *   Pestana 1 "Saldos"        -> alimenta la fila DISPONIBLE (Saldo Inicial).
  *                                Carga PERIODICA (hoy, los lunes) y en parte
  *                                manual. El historico lo construye este modulo.
  *   Pestana 2 "Saldos Locales" -> alimenta la fila CAJA_LOCALES. Sale de una
  *                                consulta contra el servidor 'locales' que corre
  *                                todos los dias.
+ *   Pestana 3 "Fondos"        -> las cuentas de inversion y comitente, con su
+ *                                cuenta corriente. Alimentan el STOCK DE
+ *                                COBERTURA del tablero y NO el Saldo Inicial.
+ *                                Viven en Class/Fondos.php.
  *
  * Por eso las cargas llevan TIPO: son dos procesos con dos cadencias, y "la
- * ultima carga" tiene que poder responderse por separado para cada uno.
+ * ultima carga" tiene que poder responderse por separado para cada uno. Los
+ * fondos no tienen cargas: tienen movimientos.
+ *
+ * UNA CUENTA TIENE TIPO Y CLASE, Y SON DOS PREGUNTAS
+ * --------------------------------------------------
+ * TIPO dice de donde sale el saldo (BANCO, MERCADO_PAGO, EFECTIVO_CENTRAL,
+ * OTRO). CLASE dice que es la cuenta: CTA_CORRIENTE y CAJA_AHORRO son plata a
+ * la vista y entran al disponible como foto; INVERSION y COMITENTE son fondos,
+ * llevan cuenta corriente y son stock de cobertura. LOS FONDOS NO ENTRAN EN
+ * DISPONIBILIDADES: si entraran a los dos lados, la misma plata se contaria
+ * dos veces. getSaldosActuales() los deja afuera con Fondos::esFondo(), que es
+ * la unica regla que decide de que lado va cada cuenta. El argumento de por
+ * que CLASE es una columna y no un valor mas de TIPO esta en el encabezado de
+ * sql/cashflow_saldos_cuentas_fondo.sql.
  *
  * UNA CARGA ES UN EVENTO FECHADO, NO UN UPDATE
  * --------------------------------------------
@@ -97,9 +115,42 @@ class Saldos {
     /** @var bool|null Cache del chequeo de la tabla de saldos manuales */
     private $manuales = null;
 
+    /** @var Fondos|null Puerta al modulo de fondos; la resuelve fondos() */
+    private $fondos = null;
+
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
         $this->conn = new Conexion;
+    }
+
+    /**
+     * El modulo de fondos, para lo que este necesita de el: si su script se
+     * corrio -que decide si CLASE y el saldo inicial existen como columnas- y
+     * las reglas de clase. Una sola instancia, para que el chequeo del DDL se
+     * haga una vez por pedido.
+     *
+     * @return Fondos
+     */
+    private function fondos() {
+        if ($this->fondos === null) {
+            $this->fondos = new Fondos();
+        }
+
+        return $this->fondos;
+    }
+
+    /**
+     * Si ya se corrio sql/cashflow_saldos_cuentas_fondo.sql.
+     *
+     * Va aparte de tablasCreadas() por el mismo motivo que manualesCreados():
+     * sin ese script las dos pestanas de siempre funcionan igual, solo que no
+     * hay fondos y las cuentas no tienen clase. Meterlo en tablasCreadas()
+     * dejaria la pestana entera en blanco por una migracion pendiente.
+     *
+     * @return bool
+     */
+    public function fondosCreados() {
+        return $this->tablasCreadas() && $this->fondos()->creado();
     }
 
     /* ====================================================================
@@ -1124,6 +1175,13 @@ class Saldos {
      *
      * Una cuenta que nunca se cargo viene con los importes en NULL.
      *
+     * SOLO LAS CUENTAS A LA VISTA. Los fondos -clase INVERSION o COMITENTE- no
+     * son disponibilidad: son stock de cobertura, y entran al tablero por
+     * FondosProvider. Si ademas se listaran aca, sumarian al Saldo Inicial la
+     * misma plata que la seccion Cobertura ofrece para tapar baches. El corte
+     * lo hace la clase con Fondos::CLASES_FONDO; sin la columna (script sin
+     * correr) no hay fondos y no hay nada que cortar.
+     *
      * @return array Filas listas para la pantalla
      */
     public function getSaldosActuales() {
@@ -1132,6 +1190,12 @@ class Saldos {
         }
 
         $cid = $this->conectar('central');
+
+        $conClase = $this->fondosCreados();
+        $colClase = $conClase ? "CU.CLASE" : "'" . Fondos::CLASE_DEFECTO . "'";
+        $sinFondos = $conClase
+            ? " AND CU.CLASE NOT IN ('" . implode("','", Fondos::CLASES_FONDO) . "')"
+            : "";
 
         $sql = "WITH Ultimo AS (
                     SELECT D.ID_CUENTA, D.FECHA_SALDO, D.MONEDA, D.COUNTABLE_BALANCE,
@@ -1148,7 +1212,8 @@ class Saldos {
                     INNER JOIN RO_T_CASHFLOW_SALDOS_CARGA C
                         ON C.ID = D.ID_CARGA AND C.ACTIVO = 1 AND C.TIPO = ?
                 )
-                SELECT CU.ID, CU.TIPO, CU.NOMBRE, CU.MONEDA, CU.ORIGEN_DATO AS ORIGEN_CUENTA,
+                SELECT CU.ID, CU.TIPO, " . $colClase . " AS CLASE, CU.NOMBRE, CU.MONEDA,
+                       CU.ORIGEN_DATO AS ORIGEN_CUENTA,
                        CU.BANK_ID, CU.BANK_NAME, CU.ACCOUNT_NUMBER, CU.ACCOUNT_TYPE,
                        CU.CBU, CU.ACCOUNT_LABEL, CU.ORDEN,
                        U.FECHA_SALDO, U.COUNTABLE_BALANCE, U.INITIAL_OPERATING_BALANCE,
@@ -1158,7 +1223,7 @@ class Saldos {
                        U.ID_CARGA, U.FECHA_CARGA, U.USUARIO_CARGA
                 FROM RO_T_CASHFLOW_SALDOS_CUENTA CU
                 LEFT JOIN Ultimo U ON U.ID_CUENTA = CU.ID AND U.RN = 1
-                WHERE CU.ACTIVO = 1
+                WHERE CU.ACTIVO = 1" . $sinFondos . "
                 ORDER BY CU.ORDEN, CU.NOMBRE";
 
         $stmt = sqlsrv_query($cid, $sql, [self::CARGA_SALDOS]);
@@ -1194,6 +1259,7 @@ class Saldos {
         return [
             'id_cuenta' => intval($row['ID']),
             'tipo' => $row['TIPO'],
+            'clase' => $row['CLASE'],
             'nombre' => $row['NOMBRE'],
             'moneda' => $row['MONEDA'],
             'origen_cuenta' => $row['ORIGEN_CUENTA'],
@@ -1430,7 +1496,14 @@ class Saldos {
 
         $cid = $this->conectar('central');
 
-        $sql = "SELECT ID, TIPO, NOMBRE, MONEDA, ORIGEN_DATO,
+        // CLASE y el saldo inicial existen desde sql/cashflow_saldos_cuentas_fondo.sql.
+        // Sin el script todas son cuentas a la vista, que es lo que eran.
+        $colsFondo = $this->fondosCreados()
+            ? "CLASE, SALDO_INICIAL, FECHA_SALDO_INICIAL"
+            : "'" . Fondos::CLASE_DEFECTO . "' AS CLASE, NULL AS SALDO_INICIAL, "
+                . "NULL AS FECHA_SALDO_INICIAL";
+
+        $sql = "SELECT ID, TIPO, " . $colsFondo . ", NOMBRE, MONEDA, ORIGEN_DATO,
                        BANK_ID, BANK_NAME, ACCOUNT_NUMBER, ACCOUNT_TYPE, CBU, ACCOUNT_LABEL,
                        ORDEN, ACTIVO, FECHA_UPDATE, USUARIO
                 FROM RO_T_CASHFLOW_SALDOS_CUENTA";
@@ -1454,6 +1527,9 @@ class Saldos {
             $row['ORDEN'] = intval($row['ORDEN']);
             $row['ACTIVO'] = intval($row['ACTIVO']);
             $row['FECHA_UPDATE'] = $this->fechaHora($row['FECHA_UPDATE']);
+            $row['SALDO_INICIAL'] = $this->numeroONull($row['SALDO_INICIAL']);
+            $row['FECHA_SALDO_INICIAL'] = Horizonte::normalizarFecha($row['FECHA_SALDO_INICIAL']);
+            $row['ES_FONDO'] = Fondos::esFondo($row['CLASE']);
             $v[] = $row;
         }
 
@@ -1473,14 +1549,31 @@ class Saldos {
      * Inhabilitar NO borra: la cuenta desaparece de la pantalla de carga y deja
      * de sumar al disponible, pero su historico queda entero.
      *
+     * LA CLASE SE PUEDE CAMBIAR SOLO DENTRO DEL MISMO GRUPO (a la vista <->
+     * a la vista, fondo <-> fondo). Cruzar de grupo dejaria el historico de la
+     * cuenta -fotos en un caso, movimientos en el otro- leido como lo que no
+     * es. La regla es Fondos::cambioDeClasePermitido().
+     *
+     * LA MONEDA DE UN FONDO CON MOVIMIENTOS NO SE CAMBIA. El saldo es una suma
+     * y una suma en dos monedas no es nada. En una cuenta a la vista si se
+     * puede, como siempre: el detalle copia la moneda en cada carga.
+     *
+     * EL SALDO INICIAL solo tiene sentido en un fondo. Se pasa null para no
+     * tocarlo; con ['saldo', 'fecha'] se reemplaza, y es un UPDATE auditado y
+     * no una fila nueva: es el punto desde el que se cuenta, no un hecho. Ver
+     * el encabezado de sql/cashflow_saldos_cuentas_fondo.sql.
+     *
      * @param int $id
      * @param string $nombre
      * @param string $moneda ARS o USD
      * @param bool $activo
      * @param string|null $usuario
+     * @param string|null $clase null deja la que tiene
+     * @param array|null $inicial ['saldo' => mixed, 'fecha' => mixed], o null para no tocar
      * @return bool
      */
-    public function saveCuenta($id, $nombre, $moneda, $activo = true, $usuario = null) {
+    public function saveCuenta($id, $nombre, $moneda, $activo = true, $usuario = null,
+                               $clase = null, $inicial = null) {
         $nombre = trim((string) $nombre);
         $moneda = strtoupper(trim((string) $moneda));
 
@@ -1498,12 +1591,60 @@ class Saldos {
 
         $cid = $this->conectar('central');
 
-        $sql = "UPDATE RO_T_CASHFLOW_SALDOS_CUENTA
-                SET NOMBRE = ?, MONEDA = ?, ACTIVO = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
-                WHERE ID = ?";
+        $sets = "NOMBRE = ?, MONEDA = ?, ACTIVO = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?";
+        $args = [$nombre, $moneda, ($activo ? 1 : 0), $usuario];
 
-        $stmt = sqlsrv_query($cid, $sql,
-            [$nombre, $moneda, ($activo ? 1 : 0), $usuario, intval($id)]);
+        $tocaFondo = ($clase !== null && trim((string) $clase) !== '') || $inicial !== null;
+
+        if ($tocaFondo) {
+            if (!$this->fondosCreados()) {
+                throw new Exception('Todavía no existen las clases de cuenta ni el saldo inicial: '
+                    . 'corré sql/cashflow_saldos_cuentas_fondo.sql contra la base central.');
+            }
+
+            $actual = $this->cuentaPorId($id);
+
+            $claseNueva = ($clase === null || trim((string) $clase) === '')
+                ? $actual['CLASE'] : Fondos::validarClase($clase);
+
+            if (!Fondos::cambioDeClasePermitido($actual['CLASE'], $claseNueva)) {
+                throw new Exception('La cuenta "' . $actual['NOMBRE'] . '" es '
+                    . Fondos::CLASES[$actual['CLASE']] . ' y no puede pasar a '
+                    . Fondos::CLASES[$claseNueva] . ': su histórico no significa lo mismo. '
+                    . 'Inhabilitala y creá otra.');
+            }
+
+            $sets .= ", CLASE = ?";
+            $args[] = $claseNueva;
+
+            if (Fondos::esFondo($claseNueva) && $moneda !== $actual['MONEDA']
+                && $this->fondoTieneMovimientos($id)) {
+                throw new Exception('La cuenta "' . $actual['NOMBRE'] . '" ya tiene movimientos '
+                    . 'en ' . $actual['MONEDA'] . ': no se le puede cambiar la moneda. '
+                    . 'Inhabilitala y creá otra.');
+            }
+
+            if ($inicial !== null) {
+                if (!Fondos::esFondo($claseNueva)) {
+                    throw new Exception('El saldo inicial es de los fondos: una cuenta '
+                        . Fondos::CLASES[$claseNueva] . ' se carga como foto del saldo.');
+                }
+
+                $ini = Fondos::validarSaldoInicial(
+                    isset($inicial['saldo']) ? $inicial['saldo'] : null,
+                    isset($inicial['fecha']) ? $inicial['fecha'] : null
+                );
+
+                $sets .= ", SALDO_INICIAL = ?, FECHA_SALDO_INICIAL = ?";
+                $args[] = ($ini === null) ? null : $ini['saldo'];
+                $args[] = ($ini === null) ? null : $ini['fecha'];
+            }
+        }
+
+        $args[] = intval($id);
+
+        $stmt = sqlsrv_query($cid,
+            "UPDATE RO_T_CASHFLOW_SALDOS_CUENTA SET " . $sets . " WHERE ID = ?", $args);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al guardar la cuenta'));
@@ -1512,6 +1653,41 @@ class Saldos {
         sqlsrv_free_stmt($stmt);
 
         return true;
+    }
+
+    /** Una cuenta por ID, con su clase, o excepcion */
+    private function cuentaPorId($id) {
+        $stmt = sqlsrv_query($this->conectar('central'),
+            "SELECT ID, NOMBRE, MONEDA, TIPO, CLASE FROM RO_T_CASHFLOW_SALDOS_CUENTA WHERE ID = ?",
+            [intval($id)]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer la cuenta'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        if (!$row) {
+            throw new Exception('La cuenta ' . intval($id) . ' no existe');
+        }
+
+        return $row;
+    }
+
+    /** Si un fondo tiene algun movimiento, vigente o no: su moneda ya esta escrita */
+    private function fondoTieneMovimientos($id) {
+        $stmt = sqlsrv_query($this->conectar('central'),
+            "SELECT TOP 1 ID FROM " . Fondos::TABLA_MOV . " WHERE ID_CUENTA = ?", [intval($id)]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer los movimientos de la cuenta'));
+        }
+
+        $hay = is_array(sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC));
+        sqlsrv_free_stmt($stmt);
+
+        return $hay;
     }
 
     /**
@@ -1523,13 +1699,22 @@ class Saldos {
      * ademas nace SIN SALDO CARGADO, que la pantalla muestra como "sin cargar" y
      * no como cero. O sea que no puede informar de menos en silencio.
      *
+     * UN FONDO NACE CON SU SALDO INICIAL, O SIN EL. Con saldo inicial y fecha,
+     * la cuenta corriente arranca de ahi; sin ellos arranca de cero y la
+     * pantalla lo dice ("sin saldo inicial"), que no es lo mismo que un cero
+     * informado. Una cuenta a la vista no lleva saldo inicial: se carga como
+     * foto, y mandarselo se rechaza para que nadie crea que lo cargo.
+     *
      * @param string $tipo BANCO, MERCADO_PAGO, EFECTIVO_CENTRAL u OTRO
      * @param string $nombre Nombre del banco o de la billetera
      * @param string $moneda ARS o USD
      * @param string|null $usuario
+     * @param string|null $clase Una de Fondos::CLASES; null es cuenta corriente
+     * @param array|null $inicial ['saldo' => mixed, 'fecha' => mixed], solo para un fondo
      * @return int ID de la cuenta creada
      */
-    public function addCuenta($tipo, $nombre, $moneda, $usuario = null) {
+    public function addCuenta($tipo, $nombre, $moneda, $usuario = null, $clase = null,
+                              $inicial = null) {
         if (!$this->tablasCreadas()) {
             throw new Exception('No existen las tablas del módulo Saldos. '
                 . 'Corré sql/cashflow_saldos.sql.');
@@ -1555,6 +1740,28 @@ class Saldos {
 
         if ($moneda !== 'ARS' && $moneda !== 'USD') {
             throw new Exception('Moneda inválida: ' . $moneda);
+        }
+
+        $clase = Fondos::validarClase($clase);
+        $ini = null;
+
+        if ($clase !== Fondos::CLASE_DEFECTO || $inicial !== null) {
+            if (!$this->fondosCreados()) {
+                throw new Exception('Todavía no existen las clases de cuenta ni el saldo inicial: '
+                    . 'corré sql/cashflow_saldos_cuentas_fondo.sql contra la base central.');
+            }
+        }
+
+        if ($inicial !== null) {
+            if (!Fondos::esFondo($clase)) {
+                throw new Exception('El saldo inicial es de los fondos: una cuenta '
+                    . Fondos::CLASES[$clase] . ' se carga como foto del saldo.');
+            }
+
+            $ini = Fondos::validarSaldoInicial(
+                isset($inicial['saldo']) ? $inicial['saldo'] : null,
+                isset($inicial['fecha']) ? $inicial['fecha'] : null
+            );
         }
 
         $cid = $this->conectar('central');
@@ -1585,14 +1792,30 @@ class Saldos {
         // exista la integracion con Interbanking.
         $origen = ($tipo === 'EFECTIVO_CENTRAL') ? 'CONSULTA' : 'MANUAL';
 
-        $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_CUENTA
-                    (TIPO, NOMBRE, MONEDA, ORIGEN_DATO, ORDEN, ACTIVO, FECHA_UPDATE, USUARIO)
-                OUTPUT INSERTED.ID
-                VALUES (?, ?, ?, ?,
-                    (SELECT ISNULL(MAX(ORDEN), 0) + 10 FROM RO_T_CASHFLOW_SALDOS_CUENTA),
-                    1, GETDATE(), ?)";
+        // Sin el script de fondos la tabla no tiene CLASE: se inserta como
+        // antes, y la cuenta es una cuenta a la vista porque no hay otra cosa.
+        if ($this->fondosCreados()) {
+            $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_CUENTA
+                        (TIPO, CLASE, NOMBRE, MONEDA, ORIGEN_DATO, SALDO_INICIAL,
+                         FECHA_SALDO_INICIAL, ORDEN, ACTIVO, FECHA_UPDATE, USUARIO)
+                    OUTPUT INSERTED.ID
+                    VALUES (?, ?, ?, ?, ?, ?, ?,
+                        (SELECT ISNULL(MAX(ORDEN), 0) + 10 FROM RO_T_CASHFLOW_SALDOS_CUENTA),
+                        1, GETDATE(), ?)";
+            $args = [$tipo, $clase, $nombre, $moneda, $origen,
+                     ($ini === null) ? null : $ini['saldo'],
+                     ($ini === null) ? null : $ini['fecha'], $usuario];
+        } else {
+            $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_CUENTA
+                        (TIPO, NOMBRE, MONEDA, ORIGEN_DATO, ORDEN, ACTIVO, FECHA_UPDATE, USUARIO)
+                    OUTPUT INSERTED.ID
+                    VALUES (?, ?, ?, ?,
+                        (SELECT ISNULL(MAX(ORDEN), 0) + 10 FROM RO_T_CASHFLOW_SALDOS_CUENTA),
+                        1, GETDATE(), ?)";
+            $args = [$tipo, $nombre, $moneda, $origen, $usuario];
+        }
 
-        $stmt = sqlsrv_query($cid, $sql, [$tipo, $nombre, $moneda, $origen, $usuario]);
+        $stmt = sqlsrv_query($cid, $sql, $args);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al crear la cuenta'));
@@ -1731,6 +1954,70 @@ class Saldos {
                 ];
             }, $cargas),
             'efectivo_central' => $efectivo,
+            'avisos' => $avisos
+        ];
+    }
+
+    /**
+     * Todo lo que necesita la pestana 3 -Fondos- para dibujarse: cada cuenta
+     * de inversion y comitente con su saldo A HOY y el resumen de su cuenta
+     * corriente, mas los totales por clase y moneda.
+     *
+     * LOS TOTALES NO MEZCLAN MONEDAS, igual que en la pestana 1: un fondo en
+     * pesos y otro en dolares se muestran cada uno en la suya. La valuacion a
+     * pesos existe solo para el tablero y la hace FondosProvider. El saldo lo
+     * calcula Fondos::saldoA(), que es la misma cuenta que usa el proveedor.
+     *
+     * @return array
+     */
+    public function getPestanaFondos() {
+        $avisos = $this->getAvisos();
+
+        foreach ($this->fondos()->getAvisos() as $a) {
+            $avisos[] = $a;
+        }
+
+        $cuentas = $this->fondosCreados() ? $this->fondos()->getCuentasFondo(true) : [];
+
+        $totales = [];
+
+        foreach ($cuentas as $c) {
+            $k = $c['CLASE'] . '|' . $c['MONEDA'];
+
+            if (!isset($totales[$k])) {
+                $totales[$k] = ['clase' => $c['CLASE'], 'moneda' => $c['MONEDA'],
+                                'saldo' => 0.0, 'cuentas' => 0];
+            }
+
+            $totales[$k]['saldo'] += floatval($c['saldo']);
+            $totales[$k]['cuentas']++;
+
+            if ($c['SALDO_INICIAL'] === null) {
+                $avisos[] = 'La cuenta "' . $c['NOMBRE'] . '" no tiene saldo inicial: su saldo '
+                    . 'arranca de cero y sólo cuenta los movimientos. Cargalo desde '
+                    . 'Parámetros → Saldos.';
+            }
+
+            if (intval($c['posteriores']) > 0) {
+                $avisos[] = 'La cuenta "' . $c['NOMBRE'] . '" tiene ' . $c['posteriores']
+                    . ' movimiento(s) con fecha posterior a hoy: se listan pero no entran al '
+                    . 'saldo de hoy ni al stock del tablero.';
+            }
+        }
+
+        if ($this->fondosCreados() && empty($cuentas)) {
+            $avisos[] = 'Todavía no hay ninguna cuenta de inversión ni comitente dada de alta. '
+                . 'Se cargan desde Parámetros → Saldos, y el stock de cobertura del tablero va '
+                . 'en cero hasta entonces.';
+        }
+
+        return [
+            'cuentas' => $cuentas,
+            'totales' => array_values($totales),
+            'clases' => Fondos::CLASES,
+            'tipos_movimiento' => array_keys(Fondos::TIPOS_MOV),
+            'hoy' => date('Y-m-d'),
+            'creado' => $this->fondosCreados(),
             'avisos' => $avisos
         ];
     }

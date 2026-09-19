@@ -7,6 +7,12 @@
  * se queda con el módulo SALDOS.
  *
  * Nunca hay baja: se inhabilita con el switch de la columna Activo.
+ *
+ * Bancos, otros saldos y fondos son el MISMO catálogo de cuentas. Los fondos
+ * (clase Inversión o Cuenta comitente) se separan por CLASE y llevan además el
+ * saldo inicial con su fecha; el resto por TIPO. La clase se elige sólo dentro
+ * del grupo, y sin el script que la crea (sql/cashflow_saldos_cuentas_fondo.sql)
+ * los selectores y el alta de fondos quedan apagados diciendo qué falta.
  */
 
 (function() {
@@ -34,7 +40,17 @@
 
     function inicializar() {
         conectar('btnRefreshParamSaldos', cargar);
-        conectar('btnGuardarCuentas', guardarCuentas);
+        // Las cuentas a la vista y los fondos son el mismo ABM, pero cada botón
+        // guarda SU grilla: apretar "Guardar fondos" no tiene que mandar
+        // también los bancos que uno estaba editando a medias.
+        conectar('btnGuardarCuentas', function() {
+            guardarCuentas(['bodyBancos', 'bodyOtros'], 'btnGuardarCuentas',
+                'No se pudieron guardar las cuentas');
+        });
+        conectar('btnGuardarFondos', function() {
+            guardarCuentas(['bodySpFondos'], 'btnGuardarFondos',
+                'No se pudieron guardar los fondos');
+        });
         conectar('btnGuardarSucursales', guardarSucursales);
         conectar('btnSincronizarLocales', sincronizarLocales);
 
@@ -226,13 +242,21 @@
        CUENTAS
        ================================================================ */
 
+    /**
+     * Tres grillas sobre el mismo catálogo: los fondos por su CLASE, y el resto
+     * por TIPO (banco / otro). Un fondo con TIPO = BANCO sería una cuenta
+     * comitente de un banco, y va igual con los fondos: la clase manda.
+     */
     function pintarCuentas() {
         var cuentas = modulo.cuentas || [];
         var bancos = '';
         var otros = '';
+        var fondos = '';
 
         cuentas.forEach(function(c) {
-            if (c.TIPO === 'BANCO') {
+            if (c.ES_FONDO) {
+                fondos += filaFondo(c);
+            } else if (c.TIPO === 'BANCO') {
                 bancos += filaBanco(c);
             } else {
                 otros += filaOtro(c);
@@ -240,12 +264,34 @@
         });
 
         document.getElementById('bodyBancos').innerHTML = bancos ||
-            '<tr><td colspan="4" class="text-center text-muted py-4">' +
+            '<tr><td colspan="5" class="text-center text-muted py-4">' +
             'Todavía no hay bancos cargados.</td></tr>';
 
         document.getElementById('bodyOtros').innerHTML = otros ||
-            '<tr><td colspan="5" class="text-center text-muted py-4">' +
+            '<tr><td colspan="6" class="text-center text-muted py-4">' +
             'Todavía no hay otros saldos cargados.</td></tr>';
+
+        document.getElementById('bodySpFondos').innerHTML = fondos ||
+            '<tr><td colspan="6" class="text-center text-muted py-4">' +
+            (modulo.fondos_creados
+                ? 'Todavía no hay fondos cargados. Agregá uno: desde ese momento es stock de ' +
+                  'cobertura del tablero.'
+                : 'Falta correr sql/cashflow_saldos_cuentas_fondo.sql.') + '</td></tr>';
+
+        // Sin el script no hay columna CLASE ni fondos: los selectores de
+        // clase se deshabilitan y el alta de fondos también, con el motivo.
+        var sinFondos = !modulo.fondos_creados;
+
+        document.querySelectorAll('.sp-cuenta-clase, .sp-nueva-clase').forEach(function(s) {
+            s.disabled = sinFondos;
+            s.title = sinFondos ? 'Falta correr sql/cashflow_saldos_cuentas_fondo.sql' : '';
+        });
+
+        document.querySelectorAll('.sp-btn-nueva[data-tipo="FONDO"], #btnGuardarFondos')
+            .forEach(function(b) {
+                b.disabled = sinFondos;
+                b.title = sinFondos ? 'Falta correr sql/cashflow_saldos_cuentas_fondo.sql' : '';
+            });
     }
 
     function filaBanco(c) {
@@ -253,6 +299,7 @@
 
         return '<tr class="' + (activo ? '' : 'sp-inactiva') + '">' +
             '<td>' + inputNombre(c) + '</td>' +
+            '<td class="text-center">' + selectClase(c, false) + '</td>' +
             '<td class="text-center">' + selectMoneda(c) + '</td>' +
             '<td class="sp-api">' + datosApi(c) + '</td>' +
             '<td class="text-center">' + switchActivo(c) + '</td>' +
@@ -266,12 +313,46 @@
         return '<tr class="' + (activo ? '' : 'sp-inactiva') + '">' +
             '<td>' + inputNombre(c) + '</td>' +
             '<td class="text-center">' + etiquetaTipo(c.TIPO) + '</td>' +
+            '<td class="text-center">' + selectClase(c, false) + '</td>' +
             '<td class="text-center">' + selectMoneda(c) + '</td>' +
             '<td class="text-center"><span class="sp-origen" title="' +
                 (consulta
                     ? 'El saldo lo resuelve una consulta del sistema, no se tipea'
                     : 'El saldo se carga a mano desde la pestaña Saldos') +
                 '">' + etiquetaOrigen(c.ORIGEN_DATO) + '</span></td>' +
+            '<td class="text-center">' + switchActivo(c) + '</td>' +
+        '</tr>';
+    }
+
+    /**
+     * Un fondo: además del nombre, la clase y la moneda, lleva el saldo inicial
+     * con su fecha. Los dos inputs van SIEMPRE, también vacíos: al guardar
+     * viajan juntos y el servidor exige los dos o ninguno.
+     */
+    function filaFondo(c) {
+        var activo = (parseInt(c.ACTIVO, 10) === 1);
+        var saldo = (c.SALDO_INICIAL === null || c.SALDO_INICIAL === undefined)
+            ? '' : c.SALDO_INICIAL;
+
+        return '<tr class="' + (activo ? '' : 'sp-inactiva') + '">' +
+            '<td>' + inputNombre(c) + '</td>' +
+            '<td class="text-center">' + selectClase(c, true) + '</td>' +
+            '<td class="text-center">' + selectMoneda(c) + '</td>' +
+            '<td>' +
+                '<div class="input-group input-group-sm">' +
+                    '<span class="input-group-text">' + (c.MONEDA === 'USD' ? 'US$' : '$') + '</span>' +
+                    '<input type="number" step="0.01" min="0" ' +
+                        'class="form-control text-end sp-cuenta-saldo-inicial" ' +
+                        'data-id="' + c.ID + '" value="' + escapar(saldo) + '" ' +
+                        'placeholder="sin saldo inicial" ' +
+                        'title="Saldo al cierre de la fecha de al lado. Los movimientos de esa ' +
+                        'fecha o anteriores ya están incluidos.">' +
+                '</div>' +
+            '</td>' +
+            '<td>' +
+                '<input type="date" class="form-control form-control-sm sp-cuenta-fecha-inicial" ' +
+                    'data-id="' + c.ID + '" value="' + escapar(c.FECHA_SALDO_INICIAL || '') + '">' +
+            '</td>' +
             '<td class="text-center">' + switchActivo(c) + '</td>' +
         '</tr>';
     }
@@ -285,6 +366,25 @@
         return '<select class="form-select form-select-sm sp-cuenta-moneda" data-id="' + c.ID + '">' +
             '<option value="ARS"' + (c.MONEDA === 'ARS' ? ' selected' : '') + '>ARS</option>' +
             '<option value="USD"' + (c.MONEDA === 'USD' ? ' selected' : '') + '>USD</option>' +
+        '</select>';
+    }
+
+    /**
+     * Las clases entre las que se puede mover una cuenta: sólo las de su
+     * grupo. Cruzar de cuenta a la vista a fondo, o al revés, lo rechaza el
+     * servidor; acá directamente no se ofrece.
+     */
+    function selectClase(c, fondo) {
+        var clases = modulo.clases || {};
+        var deFondo = modulo.clases_fondo || [];
+
+        return '<select class="form-select form-select-sm sp-cuenta-clase" data-id="' + c.ID + '">' +
+            Object.keys(clases).filter(function(k) {
+                return (deFondo.indexOf(k) !== -1) === fondo;
+            }).map(function(k) {
+                return '<option value="' + k + '"' + (c.CLASE === k ? ' selected' : '') + '>' +
+                    escapar(clases[k]) + '</option>';
+            }).join('') +
         '</select>';
     }
 
@@ -327,25 +427,45 @@
             : '<span class="text-muted">pendiente de la integración con Interbanking</span>';
     }
 
-    function guardarCuentas() {
+    /**
+     * Guarda las cuentas de una o más grillas.
+     *
+     * Se junta por ID lo que hay en cada fila: nombre, moneda, activo, y -si
+     * la grilla los tiene- la clase y el saldo inicial con su fecha. Lo que la
+     * grilla no muestra no viaja, y el servidor no lo toca.
+     *
+     * @param {string[]} cuerpos Ids de los <tbody> a leer
+     * @param {string} idBoton El botón que se apretó
+     * @param {string} mensajeError
+     */
+    function guardarCuentas(cuerpos, idBoton, mensajeError) {
         var porId = {};
 
-        document.querySelectorAll('.sp-cuenta-nombre').forEach(function(i) {
-            var id = parseInt(i.dataset.id, 10);
-            porId[id] = porId[id] || { id: id };
-            porId[id].nombre = i.value.trim();
-        });
+        var leer = function(selector, fn) {
+            cuerpos.forEach(function(idCuerpo) {
+                var cuerpo = document.getElementById(idCuerpo);
 
-        document.querySelectorAll('.sp-cuenta-moneda').forEach(function(s) {
-            var id = parseInt(s.dataset.id, 10);
-            porId[id] = porId[id] || { id: id };
-            porId[id].moneda = s.value;
-        });
+                if (!cuerpo) {
+                    return;
+                }
 
-        document.querySelectorAll('.sp-cuenta-activo').forEach(function(c) {
-            var id = parseInt(c.dataset.id, 10);
-            porId[id] = porId[id] || { id: id };
-            porId[id].activo = c.checked;
+                cuerpo.querySelectorAll(selector).forEach(function(el) {
+                    var id = parseInt(el.dataset.id, 10);
+                    porId[id] = porId[id] || { id: id };
+                    fn(porId[id], el);
+                });
+            });
+        };
+
+        leer('.sp-cuenta-nombre', function(f, i) { f.nombre = i.value.trim(); });
+        leer('.sp-cuenta-moneda', function(f, s) { f.moneda = s.value; });
+        leer('.sp-cuenta-activo', function(f, c) { f.activo = c.checked; });
+        leer('.sp-cuenta-clase', function(f, s) { if (!s.disabled) { f.clase = s.value; } });
+        leer('.sp-cuenta-saldo-inicial', function(f, i) {
+            f.saldo_inicial = (i.value.trim() === '') ? null : i.value.trim();
+        });
+        leer('.sp-cuenta-fecha-inicial', function(f, i) {
+            f.fecha_saldo_inicial = (i.value === '') ? null : i.value;
         });
 
         var filas = Object.keys(porId).map(function(k) { return porId[k]; });
@@ -359,15 +479,36 @@
             return;
         }
 
-        conBoton('btnGuardarCuentas',
+        // El saldo inicial va con su fecha: los dos o ninguno. Se avisa acá para
+        // marcar la fila; el servidor lo vuelve a rechazar igual.
+        var aMedias = filas.filter(function(f) {
+            return ('saldo_inicial' in f)
+                && ((f.saldo_inicial === null) !== (f.fecha_saldo_inicial === null));
+        });
+
+        if (aMedias.length) {
+            Notificacion.advertencia('El saldo inicial va con su fecha: los dos o ninguno.', {
+                detalle: 'Hay ' + aMedias.length + ' fondo(s) con uno solo de los dos.'
+            });
+
+            return;
+        }
+
+        if (!filas.length) {
+            Notificacion.advertencia('No hay cuentas para guardar.');
+            return;
+        }
+
+        conBoton(idBoton,
             pedirJson(URL_PARAM + '?action=saveCuentasSaldo', { filas: filas }),
-            'No se pudieron guardar las cuentas');
+            mensajeError);
     }
 
     function agregarCuenta(grupo) {
         var nombre = valorDe('.sp-nuevo-nombre', grupo);
         var moneda = valorDe('.sp-nueva-moneda', grupo);
-        var tipo = (grupo === 'BANCO') ? 'BANCO' : valorDe('.sp-nuevo-tipo', grupo);
+        var tipo = (grupo === 'BANCO') ? 'BANCO'
+            : (grupo === 'FONDO' ? 'OTRO' : valorDe('.sp-nuevo-tipo', grupo));
 
         if (!nombre) {
             Notificacion.campoInvalido(
@@ -377,17 +518,42 @@
             return;
         }
 
+        var cuerpo = { tipo: tipo, nombre: nombre, moneda: moneda };
+
+        // La clase viaja cuando la grilla la ofrece. Un fondo lleva además el
+        // saldo inicial con su fecha, o ninguno de los dos.
+        var selClase = document.querySelector('.sp-nueva-clase[data-tipo="' + grupo + '"]');
+
+        if (selClase && !selClase.disabled) {
+            cuerpo.clase = selClase.value;
+        }
+
+        if (grupo === 'FONDO') {
+            var saldo = valorDe('.sp-nuevo-saldo', grupo);
+            var fechaIni = valorDe('.sp-nueva-fecha', grupo);
+
+            if ((saldo === '') !== (fechaIni === '')) {
+                Notificacion.campoInvalido(
+                    document.querySelector((saldo === '' ? '.sp-nuevo-saldo' : '.sp-nueva-fecha') +
+                        '[data-tipo="FONDO"]'),
+                    'El saldo inicial va con su fecha: los dos o ninguno.');
+
+                return;
+            }
+
+            if (saldo !== '') {
+                cuerpo.saldo_inicial = saldo;
+                cuerpo.fecha_saldo_inicial = fechaIni;
+            }
+        }
+
         var btn = document.querySelector('.sp-btn-agregar[data-tipo="' + grupo + '"]');
         var original = btn.innerHTML;
 
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
-        pedirJson(URL_PARAM + '?action=addCuentaSaldo', {
-            tipo: tipo,
-            nombre: nombre,
-            moneda: moneda
-        })
+        pedirJson(URL_PARAM + '?action=addCuentaSaldo', cuerpo)
         .then(function() {
             mostrarEl(formDe(grupo), false);
             cargar();

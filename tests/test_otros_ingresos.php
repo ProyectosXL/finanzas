@@ -77,10 +77,19 @@ chequearLanza('un texto que no es fecha se rechaza', function () {
    ================================================================ */
 seccion('DOLARES_COMITENTE esta enchufado al tablero');
 
+/* RETIRADO, PERO ENCHUFADO. Desde las cuentas de fondo de Saldos este proveedor
+   no alimenta ninguna fila -las de stock apuntan a FONDO_INVERSION y
+   FONDO_COMITENTE-, pero sigue declarado, disponible e instanciable: una fila
+   que todavia lo apunte no puede quedar invalida, y hay que poder volver
+   atras desde Parametros. Lo que cambia es la marca, y el motor avisa. Todo lo
+   que sigue en este archivo verifica que lo retirado siga funcionando como
+   funcionaba, que es lo que "retirado" promete. */
 $meta = CashflowRegistry::meta('DOLARES_COMITENTE');
 
 chequear('esta registrado', true, $meta !== null);
 chequear('y ya esta disponible', true, CashflowRegistry::disponible('DOLARES_COMITENTE'));
+chequear('pero retirado', true, CashflowRegistry::retirado('DOLARES_COMITENTE'));
+chequear('y dice que lo reemplaza', true, strpos($meta['retirado'], 'Saldos') !== false);
 chequear('la serie es INGRESO, no DISPONIBLE', true,
     CashflowRegistry::serieExiste('DOLARES_COMITENTE', 'INGRESO'));
 chequear('la serie vieja ya no existe', false,
@@ -307,8 +316,10 @@ chequear('esta en los tabs validos del controller', true,
     strpos(file_get_contents(__DIR__ . '/../cashflow/Controller/TabController.php'),
         "'saldo_inversiones'") !== false);
 
-// Y el item del menu de Otros Ingresos: la categoria ahora tiene dos, y el
-// contador n/m del sidebar cuenta las dos como pestanas con datos.
+// Y el item del menu de Otros Ingresos: la categoria tiene dos, y desde que los
+// dos conceptos son cuentas de fondo de Saldos estan RETIRADOS. Siguen en el
+// menu -conservan el historico- pero el contador n/m no los cuenta: lo que se
+// carga ahi ya no llega al tablero. Ver test_menu.php y test_fondos.php.
 $catOtros = null;
 
 foreach (Menu::estructura()['categorias'] as $c) {
@@ -318,10 +329,11 @@ foreach (Menu::estructura()['categorias'] as $c) {
 }
 
 chequear('la categoria Otros Ingresos existe', true, $catOtros !== null);
-chequear('y ahora tiene dos items', 2, $catOtros['total']);
-chequear('las dos cuentan como pestanas con datos', 2, $catOtros['con_datos']);
+chequear('y tiene dos items', 2, $catOtros['total']);
+chequear('ninguna cuenta como pestana con datos: estan retiradas', 0, $catOtros['con_datos']);
 chequear('el tab de la segunda es saldo_inversiones',
     'saldo_inversiones', $catOtros['items'][1]['tab']);
+chequear('y su estado es retirada', Menu::RETIRADA, $catOtros['items'][1]['estado']);
 
 /* ================================================================
    Exportaciones Tasky ya tiene modulo: el detalle esta en

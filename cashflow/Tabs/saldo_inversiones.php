@@ -4,6 +4,10 @@
 <!--
     Otros Ingresos → Saldo de Inversiones.
 
+    RETIRADA: desde sql/cashflow_saldos_cuentas_fondo.sql lo que se carga acá
+    ya no alimenta el tablero. La reemplaza Saldos → Fondos. Se conserva por
+    el histórico y el cartel de arriba lo dice.
+
     Mismo circuito que Dólares Cuenta Comitente y a propósito: formulario
     mínimo, sin baja física e historial por fecha. Lo que cambia es la moneda.
 
@@ -32,7 +36,20 @@
 -->
 <div class="tab-saldo_inversiones">
 
-    <div id="avisosInv"></div>
+        <!-- PESTAÑA RETIRADA. Sigue leyendo y guardando en su tabla, que queda
+         por el histórico, pero lo que se cargue acá ya no llega al tablero:
+         el stock de cobertura sale de las cuentas de fondo de Saldos. El
+         cartel va fijo y arriba de todo, porque una pantalla que abre y
+         guarda sin decir que su número no va a ningún lado es el mismo
+         peligro que una maqueta. Ver sql/cashflow_saldos_cuentas_fondo.sql. -->
+    <div class="alert alert-warning py-2 px-3 mb-3">
+        <i class="fas fa-box-archive me-1"></i>
+        <strong>Pestaña retirada.</strong> Desde que el saldo de inversiones es una cuenta de <strong>Saldos → Fondos</strong> (clase Inversión), con cuenta corriente propia, lo que se carga acá
+        <strong>ya no llega al tablero</strong>. La última carga vigente pasó a ser el saldo
+        inicial de esa cuenta; esta pantalla queda para consultar el histórico.
+    </div>
+
+<div id="avisosInv"></div>
 
     <div class="row g-3 mb-4" id="summaryInv" style="display: none;">
         <div class="col-md-6 col-lg-4">

@@ -463,55 +463,7 @@
             ? 'Sin cotización para esa fecha: el tablero muestra cero'
             : 'Valuado al oficial del BCRA' + sufijoPunta(filas));
 
-        pintarDisponible(u, sinValuar);
-
         mostrar('summaryDol', true, 'flex');
-    }
-
-    /**
-     * Cuánto de este fondo queda sin usar: informado − aplicado.
-     *
-     * LO APLICADO SE CARGA EN OTRA PANTALLA —la sección Cobertura del tablero—
-     * pero el saldo que queda es una pregunta de ÉSTA: quien informa el saldo es
-     * quien necesita saber cuánto de eso ya se comprometió. Sin esto, el número
-     * de arriba es el de antes de haberlo usado.
-     *
-     * La tarjeta sólo aparece cuando hay algo aplicado. Con cero, repetiría el
-     * saldo de al lado y una tarjeta que no agrega nada es ruido.
-     */
-    function pintarDisponible(u, sinValuar) {
-        var ap = (datos && datos.aplicado) || { usd: 0, ars: 0, n: 0 };
-
-        if (!u || !ap.n) {
-            mostrar('cardDisponibleDol', false);
-            return;
-        }
-
-        var usd = (Number(u.IMPORTE_USD) || 0) - (Number(ap.usd) || 0);
-
-        texto('disponibleDol', dolaresPlano(usd));
-
-        /* En pesos también, porque es el número que se compara contra el
-           tablero. Si el saldo no se pudo valuar no se inventa un equivalente:
-           un cero ahí se leería como "no queda plata". */
-        var enPesos = (!sinValuar && u.IMPORTE_ARS !== null)
-            ? ' · quedan $ ' + (Number(u.IMPORTE_ARS) - (Number(ap.ars) || 0))
-                .toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-            : '';
-
-        texto('detalleDisponibleDol', 'Ya se aplicaron ' + dolaresPlano(ap.usd)
-            + ' en ' + ap.n + ' fecha(s)' + enPesos);
-
-        mostrar('cardDisponibleDol', true);
-
-        /* SOBREGIRADO: se aplicó más de lo que hay. No se bloquea —puede ser
-           deliberado, un rescate en camino— pero el número tiene que verse como
-           lo que es. El tablero avisa lo mismo por su lado. */
-        var card = document.getElementById('cardDisponibleDol');
-
-        if (card) {
-            card.querySelector('.kpi-card').classList.toggle('dol-sobregirado', usd < -0.005);
-        }
     }
 
     /* ================================================================
