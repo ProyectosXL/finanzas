@@ -177,6 +177,49 @@ try {
             break;
 
         /* ================================================================
+           LA MISMA FECHA DE PAGO PARA VARIAS FACTURAS
+
+           EL MISMO GESTO QUE LA EXCLUSION MASIVA: se eligen con los checks, se
+           confirma viendo cuantas son y por cuanta plata, y recien ahi se
+           escribe. El caso real no es una factura: son las ocho de un proveedor
+           al que se le decide una fecha de una vez.
+
+           UNA SOLA TRANSACCION PARA TODO EL LOTE, y solo se escribe la fecha:
+           la forma del cronograma, la exclusion y la observacion de cada
+           factura son otras decisiones y no se tocan. Lo hace
+           Proveedores::saveFechaMasiva().
+           ================================================================ */
+        case 'saveFechaMasiva':
+            $data = bodyJson();
+
+            $comprobantes = isset($data['comprobantes']) ? $data['comprobantes'] : null;
+
+            if (!is_array($comprobantes) || empty($comprobantes)) {
+                throw new Exception('No llegó ninguna factura para fechar.');
+            }
+
+            if (!isset($data['fecha_pago']) || $data['fecha_pago'] === '') {
+                throw new Exception('Falta la fecha de pago que hay que ponerles.');
+            }
+
+            $r = $prov->saveFechaMasiva($comprobantes, $data['fecha_pago'], usuarioActual());
+
+            $cuantas = $r['tocados'];
+
+            /* El mensaje dice QUE FECHA quedo, y no solo que se guardo: es un
+               gesto que toca muchas filas de una, y lo unico que permite notar
+               un dedazo en el año es leer la fecha que quedo escrita. */
+            echo json_encode([
+                'success' => true,
+                'message' => ($cuantas === 1
+                        ? 'La factura queda prevista para '
+                        : $cuantas . ' facturas quedan previstas para ')
+                    . date('d/m/Y', strtotime($r['fecha'])) . '.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
            LA FORMA DE PAGO DE UNA FACTURA
 
            ES UNA REGLA POR FACTURA, no el registro de por donde salio el pago

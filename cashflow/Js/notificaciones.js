@@ -207,6 +207,30 @@ var Notificacion = (function() {
          */
         pedirTexto: pedirTexto,
 
+        /**
+         * Pide una FECHA antes de una acción que la necesita. Es `confirmar()`
+         * con un calendario adentro.
+         *
+         * MISMO CONTRATO QUE pedirTexto(): devuelve null al cancelar y la fecha
+         * —'aaaa-mm-dd', que es como la manda y la espera el backend— al
+         * confirmar. Nunca un Date: el módulo entero mueve fechas como string
+         * para no pasar por `new Date(string)`, que es de donde salen los
+         * corrimientos de un día.
+         *
+         * NO ES UN CAMPO MÁS EN LA BARRA DE ACCIONES. La fecha se elige adentro
+         * del diálogo que dice cuántas filas y por cuánta plata se van a tocar,
+         * porque ese número es lo que hace notar que se seleccionó de más, y
+         * hay que leerlo ANTES de elegir la fecha, no después.
+         *
+         * @param {Object} opciones Las de confirmar(), más:
+         * @param {string} [opciones.etiqueta] Rótulo del campo
+         * @param {string} [opciones.valor] Con qué arranca, 'aaaa-mm-dd'
+         * @param {string} [opciones.min] Fecha mínima aceptada
+         * @param {string} [opciones.invalido] Qué decir si quedó vacía
+         * @returns {Promise<string|null>} 'aaaa-mm-dd', o null si canceló
+         */
+        pedirFecha: pedirFecha,
+
         /** Cierra todo lo que haya en pantalla */
         limpiar: function() {
             if (contenedor) {
@@ -453,8 +477,100 @@ var Notificacion = (function() {
         });
     }
 
+    function pedirFecha(opciones) {
+        opciones = opciones || {};
+
+        /* Sin Bootstrap se cae al prompt del navegador, igual que los otros dos:
+           es feo —por eso este diálogo existe— pero preguntar es lo que no puede
+           faltar. Se pide en el mismo formato que viaja al backend en vez de en
+           dd/mm/aaaa: convertir dos formatos a mano en el camino de respaldo es
+           donde aparece el corrimiento de un día. */
+        if (!window.bootstrap || !bootstrap.Modal) {
+            var previo = window.prompt(
+                opciones.mensaje + (opciones.detalle ? '\n\n' + opciones.detalle : '')
+                    + '\n\nFecha (aaaa-mm-dd):',
+                opciones.valor || '');
+
+            if (previo === null) {
+                return Promise.resolve(null);
+            }
+
+            previo = String(previo).trim();
+
+            return Promise.resolve(esFecha(previo) ? previo : null);
+        }
+
+        var id = 'cf-dlg-fecha-' + Math.random().toString(36).slice(2);
+
+        var cuerpo =
+            '<div class="mt-3">' +
+                '<label class="form-label form-label-sm" for="' + id + '">' +
+                    escapar(opciones.etiqueta || 'Fecha') +
+                '</label>' +
+                '<input type="date" id="' + id + '" ' +
+                    'class="form-control form-control-sm cf-dlg-fecha" ' +
+                    (opciones.min ? 'min="' + escapar(opciones.min) + '" ' : '') +
+                    'value="' + escapar(opciones.valor || '') + '">' +
+                '<small class="invalid-feedback d-block cf-dlg-error"></small>' +
+            '</div>';
+
+        return abrirDialogo(opciones, {
+            cuerpo: cuerpo,
+            foco: '.cf-dlg-fecha',
+
+            /* Igual que en pedirTexto(): undefined NO cierra. Un campo vacío
+               tiene que decir por qué en el mismo lugar donde se completa, en
+               vez de cerrar y fallar después contra el servidor.
+
+               El formato se chequea aunque el input sea type="date": un
+               navegador sin soporte lo degrada a texto, y ahí entra cualquier
+               cosa. La validación que vale igual es la del backend. */
+            alConfirmar: function(modal) {
+                var campo = modal.querySelector('.cf-dlg-fecha');
+                var v = String(campo.value || '').trim();
+
+                if (!esFecha(v)) {
+                    campo.classList.add('is-invalid');
+                    modal.querySelector('.cf-dlg-error').textContent =
+                        opciones.invalido || 'Elegí una fecha.';
+                    campo.focus();
+
+                    return undefined;
+                }
+
+                return v;
+            },
+
+            alCancelar: null,
+
+            alAbrir: function(modal) {
+                var campo = modal.querySelector('.cf-dlg-fecha');
+
+                campo.addEventListener('input', function() {
+                    campo.classList.remove('is-invalid');
+                });
+            }
+        });
+    }
+
+    /** 'aaaa-mm-dd' y que exista en el calendario */
+    function esFecha(v) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+            return false;
+        }
+
+        // Se compara contra lo que devuelve Date: así el 31 de febrero, que
+        // JavaScript corre solo al 3 de marzo, no pasa como válido.
+        var p = v.split('-');
+        var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+
+        return d.getFullYear() === Number(p[0])
+            && d.getMonth() === Number(p[1]) - 1
+            && d.getDate() === Number(p[2]);
+    }
+
     /**
-     * El armazón que comparten los dos.
+     * El armazón que comparten los tres.
      *
      * Está escrito una vez porque lo delicado no es el HTML: es que cerrar con
      * la cruz, con Escape o clickeando afuera TAMBIÉN sea una respuesta, y que
@@ -528,8 +644,8 @@ var Notificacion = (function() {
             modal.addEventListener('shown.bs.modal', function() {
                 /* El foco arranca en Cancelar cuando la respuesta es sí o no: es
                    una acción que cuesta deshacer y un Enter reflejo tiene que no
-                   hacer nada. Cuando hay algo que escribir, arranca en el campo:
-                   ahí el Enter no confirma, escribe. */
+                   hacer nada. Cuando hay un campo que completar, arranca en el
+                   campo: ahí el Enter no llega al botón de confirmar. */
                 var destino = pieza.foco
                     ? modal.querySelector(pieza.foco)
                     : modal.querySelector('[data-bs-dismiss="modal"].btn');

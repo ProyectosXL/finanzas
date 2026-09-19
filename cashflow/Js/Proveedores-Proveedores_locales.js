@@ -15,6 +15,11 @@
  * se tocan; lo que se carga es cuándo se piensa pagar cada comprobante. Es lo
  * que disuelve los importes vencidos apilados en el primer día del eje.
  *
+ * Se carga de dos formas y las dos escriben lo mismo: celda por celda, y para
+ * VARIAS DE UNA desde la barra de selección. La segunda existe porque lo
+ * vencido sin fecha son cientos de vencimientos y el caso real no es una
+ * factura, son las ocho de un proveedor: ver fecharSeleccion().
+ *
  * NADA SE IMPORTA SIN VER EL DIFF ANTES. Las tres operaciones masivas —maestro,
  * pagos y conciliación— tienen dos pasos: primero se pide qué cambiaría y
  * después, con otra llamada, se aplica.
@@ -79,7 +84,8 @@
 
         /* "Seleccionar todas las que se ven" es lo que hace que el caso normal
            —las ocho facturas de un proveedor— sea buscar el proveedor y tildar
-           una vez. Es el mismo gesto que el marcado masivo de Echeqs. */
+           una vez. Es el mismo gesto que el marcado masivo de Echeqs, y sirve
+           para las dos acciones de la barra: fecharlas y excluirlas. */
         var selTodas = document.getElementById('selTodasProv');
 
         if (selTodas) {
@@ -96,6 +102,7 @@
             });
         }
 
+        conectar('btnFecharSelProv', fecharSeleccion);
         conectar('btnExcluirSelProv', function() { accionSeleccion(true); });
         conectar('btnIncluirSelProv', function() { accionSeleccion(false); });
         conectar('btnLimpiarSelProv', function() {
@@ -771,22 +778,35 @@
 
        Por eso la columna es de SELECCIÓN y no un tilde que actúa solo: sacar
        plata del tablero no puede dispararse con un clic suelto.
+
+       ESA COLUMNA HOY ALIMENTA DOS ACCIONES. La otra —poner la misma fecha de
+       pago a todas— está más abajo y es la que se usa todos los días; ésta es
+       la excepción. Las dos comparten la selección, el podado contra lo que
+       vino del servidor y la barra que dice cuántas y por cuánto.
        ================================================================ */
 
     /** Claves de las facturas seleccionadas. Sobrevive a los redibujos. */
     var seleccion = {};
 
+    /** Por qué los dos botones de excluir pueden estar apagados */
+    var FALTA_EXCLUIR = 'Para excluir facturas hace falta correr '
+        + 'sql/cashflow_prov_locales_excluir_factura.sql contra la base central.';
+
     function claveFila(f) {
         return f.COD_PROVEE + '|' + f.T_COMP + '|' + f.N_COMP;
     }
 
+    /**
+     * La celda de selección.
+     *
+     * EL CHECK SE DIBUJA AUNQUE FALTE EL SCRIPT DE LA EXCLUSIÓN. La selección
+     * alimenta las dos acciones masivas y sólo una de las dos necesita ese
+     * script: sin él se puede fechar igual, y lo que se apaga son los dos
+     * botones de excluir —eso lo hace pintarSeleccion()—. Esconder el check
+     * dejaría sin la acción de todos los días a quien no corrió un script que
+     * no tiene nada que ver con ella.
+     */
     function celdaExcluir(f) {
-        if (!datos || !datos.excluir_factura) {
-            return '<span class="text-muted small" title="'
-                + escapar('Para excluir facturas hace falta correr '
-                    + 'sql/cashflow_prov_locales_excluir_factura.sql.') + '">—</span>';
-        }
-
         var clave = claveFila(f);
         var marca = f.EXCLUIDA_MANUAL
             ? '<div><span class="prov-badge-excluida" title="'
@@ -798,8 +818,8 @@
         return '<input type="checkbox" class="form-check-input prov-sel"'
             + (seleccion[clave] ? ' checked' : '')
             + ' data-clave="' + escapar(clave) + '"'
-            + ' title="' + escapar('Seleccionar esta factura para excluirla o volver a '
-                + 'incluirla.') + '">' + marca;
+            + ' title="' + escapar('Seleccionar esta factura para ponerle fecha de pago, '
+                + 'excluirla o volver a incluirla.') + '">' + marca;
     }
 
     /** Saca de la selección lo que ya no está en el listado */
@@ -820,8 +840,8 @@
 
     /**
      * La barra de acciones. Dice CUÁNTAS y CUÁNTO antes de que se apriete nada:
-     * excluir es sacar plata del tablero, y el importe es el dato que hace que
-     * alguien note que seleccionó de más.
+     * fechar mueve esa plata de columna y excluir la saca del tablero, y el
+     * importe es el dato que hace que alguien note que seleccionó de más.
      */
     function pintarSeleccion() {
         var sel = filasSeleccionadas();
@@ -845,12 +865,24 @@
 
         /* Cada botón se apaga cuando no tiene nada que hacer: "Excluir" con
            todo ya excluido, o "Volver a incluir" sin ninguna excluida. Un botón
-           que se puede apretar y no cambia nada es peor que uno apagado. */
+           que se puede apretar y no cambia nada es peor que uno apagado.
+
+           SIN EL SCRIPT DE LA EXCLUSIÓN los dos quedan apagados y lo dicen en
+           el título: la pantalla sigue andando para fechar, que es lo que no
+           depende de ese script. */
+        var puedeExcluir = !!(datos && datos.excluir_factura);
         var btnEx = document.getElementById('btnExcluirSelProv');
         var btnIn = document.getElementById('btnIncluirSelProv');
 
-        if (btnEx) { btnEx.disabled = (yaExcluidas === sel.length); }
-        if (btnIn) { btnIn.disabled = (yaExcluidas === 0); }
+        if (btnEx) {
+            btnEx.disabled = !puedeExcluir || (yaExcluidas === sel.length);
+            btnEx.title = puedeExcluir ? '' : FALTA_EXCLUIR;
+        }
+
+        if (btnIn) {
+            btnIn.disabled = !puedeExcluir || (yaExcluidas === 0);
+            btnIn.title = puedeExcluir ? '' : FALTA_EXCLUIR;
+        }
 
         sincronizarSelTodas();
     }
@@ -939,7 +971,7 @@
             etiqueta: 'Motivo (el mismo para todas)',
             placeholder: 'Ej.: duplicada en Tango, en disputa, se pagó por fuera…',
             maxlargo: 200,
-            valor: motivoComun(aplicar),
+            valor: valorComun(aplicar, 'MOTIVO_EXCLUSION'),
             invalido: 'Escribí el motivo: es lo único que después explica por qué falta ese '
                 + 'importe en el tablero.',
             confirmar: 'Excluir ' + aplicar.length + ' factura(s)'
@@ -948,12 +980,19 @@
         });
     }
 
-    /** Si las seleccionadas ya compartían un motivo, se ofrece de arranque */
-    function motivoComun(filas) {
+    /**
+     * Si las seleccionadas ya compartían un valor en ese campo, se ofrece de
+     * arranque. Si hay dos distintos no se elige uno: el diálogo abre vacío,
+     * porque proponer el de la primera fila sería decidir por el usuario.
+     *
+     * Lo usan el motivo de la exclusión y la fecha del fechado masivo: es la
+     * misma pregunta —"¿ya venían todas iguales?"— sobre dos columnas.
+     */
+    function valorComun(filas, campo) {
         var unico = null;
 
         for (var i = 0; i < filas.length; i++) {
-            var m = filas[i].MOTIVO_EXCLUSION || '';
+            var m = filas[i][campo] || '';
 
             if (m === '') { continue; }
             if (unico !== null && unico !== m) { return ''; }
@@ -980,6 +1019,110 @@
         seleccion = {};
 
         pedirPago('saveExclusion', cuerpo);
+    }
+
+    /* ================================================================
+       LA MISMA FECHA DE PAGO PARA VARIAS FACTURAS
+
+       ES EL MISMO GESTO QUE LA EXCLUSIÓN MASIVA: se seleccionan con los
+       checks, se ve cuántas son y por cuánta plata, se elige la fecha y
+       recién ahí se guarda. Y es la acción que se usa todos los días: lo
+       que disuelve los vencimientos apilados en el primer día del eje es
+       cargar fechas, y el caso real no es una factura sino las ocho de un
+       proveedor al que se le decide una fecha de una vez.
+
+       SÓLO LA FECHA. La forma del cronograma y la exclusión de cada factura
+       son otras decisiones y este gesto no las toca — ni acá ni en el
+       backend, que escribe una sola columna.
+       ================================================================ */
+
+    /**
+     * Pone la misma fecha a todas las seleccionadas.
+     *
+     * NO SE FILTRA LO QUE "YA ESTÁ ASÍ", al revés que al excluir, y la
+     * diferencia es cuándo se sabe el estado final: excluir tiene dos estados y
+     * se conocen antes de preguntar nada, así que lo que ya está excluido se
+     * saca del lote. Acá el estado final es la fecha, y no existe hasta que se
+     * elige. Volver a escribir la misma fecha no es un error: es alguien
+     * ratificando la decisión, y queda con su fecha de modificación.
+     *
+     * LO QUE SÍ SE DICE ANTES es cuántas de las elegidas ya tenían una fecha
+     * cargada, porque esas son decisiones de alguien que este gesto pisa.
+     */
+    function fecharSeleccion() {
+        var sel = filasSeleccionadas();
+
+        if (!sel.length) { return; }
+
+        var total = 0;
+        var provs = {};
+        var yaTenian = 0;
+        var conciliadas = 0;
+
+        sel.forEach(function(f) {
+            total += Number(f.IMPORTE_PENDIENTE) || 0;
+            provs[f.COD_PROVEE] = true;
+
+            if (f.ORIGEN_FECHA === 'CARGADA') { yaTenian++; }
+            if (f.ESTADO_PAGO === 'CONCILIADO') { conciliadas++; }
+        });
+
+        var cuantosProv = Object.keys(provs).length;
+
+        var mensaje = sel.length + ' factura(s) por ' + plata(total)
+            + (cuantosProv === 1
+                ? ', todas de ' + sel[0].COD_PROVEE + ' — ' + sel[0].RAZON_SOC
+                : ', de ' + cuantosProv + ' proveedores') + '.';
+
+        var detalle = 'Sus importes pasan a la columna de esa fecha en el tablero. '
+            + 'No se toca ni la forma de pago ni la exclusión de ninguna.';
+
+        // Pisar la fecha que puso otro es legítimo, pero no puede ser una
+        // sorpresa: el número va antes de elegir, no después de guardar.
+        if (yaTenian) {
+            detalle += ' ' + yaTenian + ' ya ten' + (yaTenian === 1 ? 'ía' : 'ían')
+                + ' una fecha cargada y se pisa' + (yaTenian === 1 ? '' : 'n') + '.';
+        }
+
+        /* Una conciliada ya se pagó y Tango tiene la fecha real: cambiarle la
+           previsión no la desconcilia ni toca ese dato, pero sí cambia el
+           desvío que después dice si le acertamos a la fecha. */
+        if (conciliadas) {
+            detalle += ' ' + conciliadas + ' está(n) conciliada(s): se les cambia la '
+                + 'previsión, no la fecha real en la que se pagaron.';
+        }
+
+        Notificacion.pedirFecha({
+            titulo: 'Fecha de pago para varias facturas',
+            mensaje: mensaje,
+            detalle: detalle,
+            etiqueta: 'Fecha de pago (la misma para todas)',
+            /* Sin `min`, igual que la celda de la grilla: acá se aceptan fechas
+               pasadas porque el listado no tiene techo de antigüedad y "se
+               pensó pagar y no se pagó" es una decisión legítima. */
+            valor: valorComun(sel, 'FECHA_PAGO'),
+            invalido: 'Elegí la fecha en la que se piensan pagar: es lo único que saca '
+                + 'estos importes del primer día del eje.',
+            confirmar: 'Fechar ' + sel.length + ' factura(s)'
+        }).then(function(fecha) {
+            if (fecha !== null) { guardarFechaMasiva(sel, fecha); }
+        });
+    }
+
+    function guardarFechaMasiva(filas, fecha) {
+        /* LA SELECCIÓN NO SE LIMPIA, al revés que al excluir, y la diferencia
+           es si las filas siguen a la vista: una excluida se esconde por
+           defecto, así que la barra quedaría hablando de facturas que ya no
+           están en la tabla. Una fechada sigue estando —se movió de columna—,
+           y dejarla seleccionada es lo que permite corregir la fecha ahí mismo
+           si el importe cayó donde no iba. Lo que ya no esté lo saca
+           podarSeleccion() con lo que vuelva del servidor. */
+        pedirPago('saveFechaMasiva', {
+            fecha_pago: fecha,
+            comprobantes: filas.map(function(f) {
+                return { cod_provee: f.COD_PROVEE, t_comp: f.T_COMP, n_comp: f.N_COMP };
+            })
+        });
     }
 
     /* ================================================================
