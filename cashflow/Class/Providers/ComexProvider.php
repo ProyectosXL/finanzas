@@ -44,6 +44,25 @@ require_once __DIR__ . '/../DolarFuturo.php';
  * tabla, igual que antes hacia con el parametro faltante: un proveedor no puede
  * tumbar el tablero.
  *
+ * YA NO SE FILTRA POR FECHA DE EMBARQUE, Y EL TABLERO SE MUEVE
+ * ------------------------------------------------------------
+ * Las dos consultas de origen cortaban con FECHA_EMB >= hoy, y este proveedor
+ * avisaba en cada carga que por eso un pago pendiente de un contenedor ya
+ * embarcado no aparecia. El aviso era correcto y no alcanzaba: lo que el filtro
+ * escondia -al 19/09/2026- eran 42 de 76 contenedores, entre ellos 10 con la
+ * fecha de pago todavia por delante y 18 con la nacionalizacion por delante.
+ * Eran egresos reales que el tablero informaba de menos.
+ *
+ * El filtro se fue y el aviso con el. Lo que decide es la FECHA EFECTIVA de
+ * cada fila, que es la que ubica el importe en el eje.
+ *
+ * LO VENCIDO SE AVISA APARTE, y no se reubica en la columna de hoy. El porque
+ * -y por que esto se aparta de Ingresos::ubicarCobroVencido()- esta en el
+ * encabezado de Comex. Lo que importa aca es que el motor ya informa lo que
+ * cayo 'fuera del horizonte' pero no distingue si cayo antes o despues del eje,
+ * y esas dos cosas se arreglan distinto: una cargando una fecha nueva, la otra
+ * alargando el horizonte.
+ *
  * NO SE REUSAN procesarDatosPorPeriodo() NI procesarCronoNacPorPeriodo()
  * Esos dos metodos agrupan por dia del mes (1..31) con una ventana fija del mes
  * actual mas once, y descartan en silencio todo lo que cae afuera. El tablero
@@ -52,14 +71,6 @@ require_once __DIR__ . '/../DolarFuturo.php';
  * no se toca el resto de Comex.php, del que dependen dos pestanas que funcionan.
  */
 class ComexProvider extends CashflowProvider {
-
-    /**
-     * Aviso comun a las dos series: la consulta de origen solo trae
-     * contenedores cuyo embarque es de hoy en adelante.
-     */
-    const AVISO_FILTRO_EMBARQUE =
-        'solo se incluyen contenedores con fecha de embarque desde hoy, '
-        . 'asi que un pago pendiente de un contenedor ya embarcado no aparece en el tablero.';
 
     protected function calcular($h) {
         $comex = new Comex();
@@ -86,9 +97,10 @@ class ComexProvider extends CashflowProvider {
      * ubicarla en el eje. El multiplicador unico de agrupar() ya no sirve para
      * esto: no hay UN tipo de cambio.
      *
-     * La fecha que manda es FECHA_PAGO_EFECTIVA, que Comex resuelve como
-     * FECHA_PAGO_EDIT si el usuario la corrigio y FECHA_EST_PAGO si no. Puede
-     * venir nula, y ahi hay algo importante: esas filas NO se pueden convertir
+     * La fecha que manda es FECHA_PAGO_EFECTIVA, que desde
+     * feature/comex-fecha-maestra es FECHA_EST_PAGO del maestro y nada mas: lo
+     * que se edita desde el cashflow se escribe ahi. Puede venir nula, y ahi
+     * hay algo importante: esas filas NO se pueden convertir
      * -sin mes no hay cotizacion- asi que su IMPORTE_ARS es null y no entran a
      * 'sin_fecha', que es un acumulador EN PESOS. Se cuentan aparte y se
      * informan en dolares. Mezclar las dos monedas en el mismo campo daria un
@@ -99,8 +111,6 @@ class ComexProvider extends CashflowProvider {
      * @return array Serie
      */
     private function pagosExterior($h, $comex) {
-        $this->avisar('Proveedores Exterior: ' . self::AVISO_FILTRO_EMBARQUE);
-
         $dolar = $comex->dolarFuturo();
 
         /* La curva es el criterio de valuacion entero: sin ella no hay ningun
@@ -150,6 +160,14 @@ class ComexProvider extends CashflowProvider {
             $this->avisar('Proveedores Exterior: ' . $aviso);
         }
 
+        /* Lo vencido no entra en ninguna columna y se informa por separado del
+           'fuera del horizonte' del motor, que no distingue si el importe cayo
+           antes o despues del eje. Ver Comex::avisosVencidos(). */
+        foreach (Comex::avisosVencidos($filas, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_ARS',
+                 'fecha estimada de pago', $h) as $aviso) {
+            $this->avisar('Proveedores Exterior: ' . $aviso);
+        }
+
         return $serie;
     }
 
@@ -165,13 +183,16 @@ class ComexProvider extends CashflowProvider {
      * @return array Serie
      */
     private function nacionalizaciones($h, $comex) {
-        $this->avisar('Nacionalizaciones: ' . self::AVISO_FILTRO_EMBARQUE);
-
         $filas = $comex->getCronoNacionalizacion();
 
         $serie = $h->agrupar($filas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_EST');
 
         $serie['moneda_origen'] = 'ARS';
+
+        foreach (Comex::avisosVencidos($filas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_EST',
+                 'fecha de nacionalización', $h) as $aviso) {
+            $this->avisar('Nacionalizaciones: ' . $aviso);
+        }
 
         // Un cero no dice si no hay contenedores o si los hay sin importe
         // cargado. Hoy pasa lo segundo: la estimacion sale de un LEFT JOIN

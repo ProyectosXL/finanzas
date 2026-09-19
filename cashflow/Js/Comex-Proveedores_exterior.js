@@ -27,6 +27,33 @@
  * Las dos se explican en el tooltip. Un importe distinto del que esperaba el
  * usuario, sin nada que diga por qué, es indistinguible de un error.
  *
+ * LA FECHA DE PAGO SE EDITA SOBRE EL MAESTRO DE COMERCIO EXTERIOR
+ * ---------------------------------------------------------------
+ * Antes se guardaba en una tabla del cashflow y la app de Comex no se enteraba.
+ * Ahora el guardado escribe RO_T_IMPORTACIONES_ENCABEZADO.FECHA_EST_PAGO, así
+ * que la fecha es una sola para las dos aplicaciones, y el mensaje de la
+ * notificación lo dice: quien la mueve desde acá tiene que saber que la está
+ * moviendo también allá.
+ *
+ * El badge de "Editada" cambió de significado con eso. Ya no dice "hay un valor
+ * propio del cashflow que pisa al maestro" —eso dejó de existir— sino "esta
+ * fecha del maestro la puso alguien desde acá", con quién y cuándo en el
+ * tooltip. Lo calcula el backend comparando el rastro contra el maestro: si la
+ * app de Comex movió la fecha después, el badge no aparece, porque el valor que
+ * se ve ya no lo puso este módulo.
+ *
+ * SE VEN LOS VENCIDOS, Y SE MARCAN
+ * --------------------------------
+ * La consulta ya no corta por fecha de embarque, así que la grilla trae también
+ * los contenedores ya embarcados: al 19/09/2026 eran 42 de 76, con más de mil
+ * millones de pesos de pagos que el tablero no estaba contando.
+ *
+ * Un pago con la fecha vencida NO ENTRA EN NINGUNA COLUMNA del eje —no se lo
+ * reubica en hoy; ver el encabezado de Class/Comex.php— así que su fila tiene
+ * todas las celdas del eje vacías. Sin la marca, eso se lee como un contenedor
+ * sin importe. Con la marca se lee como lo que es: una fecha para corregir, y
+ * la celda de al lado es donde se corrige.
+ *
  * LAS TRES VISTAS LAS MANEJA eje-vistas.js
  * ----------------------------------------
  * Antes esta pestaña armaba las columnas acá, con aritmética de fechas en el
@@ -54,13 +81,19 @@
 
         // Verificar que los elementos existen antes de agregar listeners
         var btnRefresh = document.getElementById('btnRefresh');
-        var btnExport = document.getElementById('btnExport');
+        var busqueda = document.getElementById('busquedaProvExt');
 
         if (btnRefresh) {
             btnRefresh.addEventListener('click', cargarDatos);
         }
-        if (btnExport) {
-            btnExport.addEventListener('click', exportarExcel);
+
+        // El botón de Exportar ya no se engancha acá: lo toma
+        // Js/tabla-export.js por su data-exportar, que es como funciona el
+        // resto del módulo. Y así el export respeta el buscador, porque
+        // TablaExport saca del clon las filas con display:none.
+
+        if (busqueda) {
+            busqueda.addEventListener('keyup', filtrarTabla);
         }
 
         vistas = crearEjeVistas({
@@ -168,7 +201,12 @@
 
         generarEncabezados();
         generarFilasDatos();
-        generarFilaTotales();
+
+        // El buscador se reaplica sobre las filas recién dibujadas: cambiar de
+        // vista o refrescar no puede hacer reaparecer lo que el usuario filtró,
+        // con el campo de búsqueda todavía escrito. filtrarTabla() ya rehace
+        // los totales, así que no hace falta llamarlos aparte.
+        filtrarTabla();
     }
 
     /**
@@ -291,8 +329,13 @@ function generarFilasDatos() {
     var html = '';
 
     datosProveedores.filas.forEach(function(item, index) {
-        html += '<tr>';
-        
+        // El texto que mira el buscador viaja en la fila, ya armado. Así el
+        // filtro no depende del índice de ninguna columna —mover una columna no
+        // lo rompe— y queda escrito en un solo lugar CUÁLES son los tres campos
+        // por los que se busca. Mismo mecanismo que Crono Nacionalización.
+        html += '<tr data-buscar="' + escaparAttrProv(textoBuscable(item)) + '"'
+            + (item.VENCIDA ? ' class="fila-vencida"' : '') + '>';
+
         // Columnas fijas
         // Recortado con puntos suspensivos (.col-texto); el nombre completo va
         // en el title. Ver Css/main.css.
@@ -316,28 +359,13 @@ function generarFilasDatos() {
                     <span class="confirm-indicator ${etaConfirm ? 'confirmed' : 'estimated'}">${etaConfirm ? 'Conf' : 'Est'}</span>
                  </td>`;
         
-        // FECHA_EST_PAGO - Editable
-        var fechaPagoEfectiva = item.FECHA_PAGO_EFECTIVA || item.FECHA_EST_PAGO || '-';
-        var esEditada = item.FECHA_PAGO_EDIT != null;
-        var fechaOriginal = item.FECHA_EST_PAGO || '-';
-        
-        html += `<td class="center fecha-pago-cell ${esEditada ? 'fecha-editada' : ''}" 
-                     data-id="${item.ID}" 
-                     data-fecha-orig="${item.FECHA_EST_PAGO || ''}" 
-                     data-fecha-edit="${item.FECHA_PAGO_EDIT || ''}"
-                     onclick="editarFechaPago(this)">
-                    <div class="fecha-pago-display">
-                        <span class="fecha-value">${formatDate(fechaPagoEfectiva)}</span>
-                        ${esEditada ? '<span class="badge-fecha-editada">Editada</span>' : ''}
-                        <i class="fas fa-pen fecha-pago-icon"></i>
-                    </div>
-                    ${esEditada ? `
-                        <div class="fecha-tooltip">
-                            <span class="fecha-tooltip-label">Fecha Original</span>
-                            <span class="fecha-tooltip-value">${formatDate(fechaOriginal)}</span>
-                        </div>
-                    ` : ''}
-                 </td>`;
+        // FECHA_EST_PAGO — editable, y ahora sobre el maestro de Comex.
+        // La celda la arma Js/Comex-fechas.js, compartida con la otra pestaña.
+        html += ComexFechas.celda(item, 'PAGO', {
+            clase: 'fecha-pago',
+            editable: !!datosProveedores.fechas_editables,
+            alEditar: 'editarFechaPago'
+        });
 
         // Con qué dólar se valuó la fila, y el importe que sale de eso.
         html += celdaCotizacion(item);
@@ -441,7 +469,45 @@ function celdaImporteArs(item) {
 }
 
 /**
- * Genera la fila de totales
+ * Esconde las filas que no coinciden y rehace los totales.
+ *
+ * Los totales se rehacen porque si no, el pie diría el total de todo arriba de
+ * una tabla que muestra tres filas, y nada en la pantalla diría que esos dos
+ * números miden cosas distintas.
+ *
+ * Las tarjetas de arriba NO se tocan, y es deliberado: miden el cronograma
+ * completo, que es lo que se quiere saber aunque uno esté mirando un
+ * contenedor. Es el mismo reparto que Crono Nacionalización y Cobranzas May.
+ */
+function filtrarTabla() {
+    ComexFechas.filtrar('busquedaProvExt', 'tableBody');
+
+    generarFilaTotales();
+}
+
+/** Los items que el buscador está dejando ver, o null si no hay filtro */
+function filasVisibles() {
+    return ComexFechas.visibles('busquedaProvExt',
+        (datosProveedores && datosProveedores.filas) || []);
+}
+
+/** Los tres campos por los que busca el buscador, concatenados */
+function textoBuscable(item) {
+    return ComexFechas.textoBuscable(item);
+}
+
+/**
+ * Genera la fila de totales.
+ *
+ * SIN FILTRO los totales salen del payload y no se recalculan acá recorriendo
+ * los items: recalcularlos era una tercera copia de la regla de "día O mes", y
+ * una copia que se puede desincronizar de las celdas que tiene arriba.
+ *
+ * CON EL BUSCADOR ACTIVO hay que sumar los items visibles, porque el total de
+ * todo arriba de una tabla filtrada es un número que no corresponde a nada de
+ * lo que se está viendo. Sumar los valores POR COLUMNA que el payload ya trae
+ * resueltos no es volver a implementar la regla de "día O mes": es sumar
+ * exactamente las celdas que están dibujadas.
  */
 function generarFilaTotales() {
     var totalsRow = document.getElementById('totalsRow');
@@ -450,20 +516,21 @@ function generarFilaTotales() {
         return;
     }
 
-    // Los totales salen del payload y no se recalculan acá recorriendo los
-    // items: recalcularlos era una tercera copia de la regla de "día O mes", y
-    // una copia que se puede desincronizar de las celdas que tiene arriba.
-    var totales = datosProveedores.totales || {};
+    var visibles = filasVisibles();
+    var totales = (visibles === null)
+        ? (datosProveedores.totales || {})
+        : ComexFechas.sumarColumnas(visibles);
 
     /* Ocho columnas fijas más las dos de la valuación. El pie NO totaliza la
        cotización: promediar cotizaciones de meses distintos daría un número que
        no es el tipo de cambio de nada. Lo que sí suma es la columna en pesos. */
     var html = '<td colspan="9" class="total-label">TOTALES</td>'
-        + '<td class="currency" title="' + escaparAttrProv('Suma el importe de TODAS las filas '
-            + 'de la tabla, incluidas las que caen fuera del horizonte. Por eso puede no '
-            + 'coincidir con el total de las columnas, que sólo cubre el período. La '
-            + 'diferencia está en los avisos de arriba.') + '">'
-        + formatCurrency(sumaImporteArs()) + '</td>';
+        + '<td class="currency" title="' + escaparAttrProv('Suma el importe de las filas que se '
+            + 'están viendo, incluidas las que caen fuera del horizonte —las vencidas y las '
+            + 'posteriores al último mes—. Por eso puede no coincidir con el total de las '
+            + 'columnas, que sólo cubre el período. La diferencia está en los avisos de arriba.')
+        + '">'
+        + formatCurrency(sumaImporteArs(visibles)) + '</td>';
 
     vistas.columnas().forEach(function(col) {
         var valor = Number(vistas.valor(totales, col)) || 0;
@@ -518,100 +585,21 @@ function texto(id, valor) {
 }
 
 /**
- * Permite editar la fecha de pago
+ * Permite editar la fecha de pago.
+ *
+ * El editor entero vive en Js/Comex-fechas.js, compartido con Crono
+ * Nacionalización: es el mismo gesto sobre el mismo maestro. Acá queda lo único
+ * propio, que es qué hacer después de guardar.
+ *
+ * SE RECARGA TODO. La fecha nueva cambia la columna del eje en la que cae el
+ * importe, el total, los avisos de vencidos y —si el pago cambió de mes— la
+ * cotización con la que se valúa la fila y su importe en pesos. Repintar sólo
+ * la celda dejaría las otras cinco cosas diciendo lo anterior.
+ *
  * @param {HTMLElement} cell Celda donde se hizo click
  */
 window.editarFechaPago = function(cell) {
-    // Evitar edición múltiple
-    if (cell.querySelector('input')) {
-        return;
-    }
-    
-    var idMg = cell.dataset.id;
-    var fechaOrig = cell.dataset.fechaOrig;
-    var fechaEdit = cell.dataset.fechaEdit || fechaOrig;
-    
-    // Guardar contenido original
-    var originalContent = cell.innerHTML;
-    
-    // Crear input date
-    var input = document.createElement('input');
-    input.type = 'date';
-    input.className = 'fecha-pago-input';
-    
-    // Normalizar la fecha para evitar problemas de zona horaria
-    if (fechaEdit || fechaOrig) {
-        var fechaParaInput = fechaEdit || fechaOrig;
-        // Asegurar formato YYYY-MM-DD sin conversión de timezone
-        if (fechaParaInput && fechaParaInput !== '-') {
-            input.value = fechaParaInput.split('T')[0]; // Tomar solo la parte de fecha
-        }
-    }
-    
-    // Reemplazar contenido con input
-    cell.innerHTML = '';
-    cell.appendChild(input);
-    input.focus();
-    
-    // Handler para guardar
-    var guardarFecha = function() {
-        var nuevaFecha = input.value;
-        
-        if (!nuevaFecha) {
-            cell.innerHTML = originalContent;
-            return;
-        }
-        
-        // Mostrar loading
-        cell.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-        
-        // Enviar al servidor
-        fetch('Controller/ComexController.php?action=updateFechaPago', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                id_mg: idMg,
-                fecha_pago_orig: fechaOrig,
-                fecha_pago_edit: nuevaFecha
-            })
-        })
-        .then(response => response.json())
-        .then(result => {
-            if (result.success) {
-                /* SI EL CAMBIO DE MES DESCARTÓ LA COTIZACIÓN CARGADA A MANO,
-                   hay que decirlo: el usuario movió una fecha y va a ver
-                   cambiar un importe por una segunda razón que no pidió. El
-                   backend lo resuelve en la misma transacción y lo informa
-                   acá. Ver Comex::updateFechaPago(). */
-                if (result.data && result.data.cotizacion_descartada) {
-                    alert(result.message);
-                }
-
-                // Recargar datos para reflejar el cambio
-                cargarDatos();
-            } else {
-                alert('Error al guardar: ' + result.message);
-                cell.innerHTML = originalContent;
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('Error de conexión al guardar la fecha');
-            cell.innerHTML = originalContent;
-        });
-    };
-    
-    // Events
-    input.addEventListener('blur', guardarFecha);
-    input.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') {
-            guardarFecha();
-        } else if (e.key === 'Escape') {
-            cell.innerHTML = originalContent;
-        }
-    });
+    ComexFechas.editar(cell, cargarDatos);
 };
 
 /**
@@ -715,16 +703,25 @@ function escaparAttrProv(texto) {
 }
 
 /**
- * Suma el importe en pesos de todas las filas de la tabla.
+ * Suma el importe en pesos de las filas que se están viendo.
+ *
+ * RESPETA EL BUSCADOR, igual que las columnas del eje: si el pie sumara todo
+ * mientras la tabla muestra tres filas, esta celda y la de al lado dirían
+ * números de dos universos distintos sin que nada lo indique.
  *
  * Las que no se pudieron valuar suman cero acá y se informan aparte, en dólares:
  * es la única moneda en la que existen, y meterlas en este total las haría
  * desaparecer. Ver Comex::avisosValuacion().
  *
+ * @param {Array|null} visibles Las filas filtradas, o null si no hay filtro
  * @returns {number}
  */
-function sumaImporteArs() {
-    return ((datosProveedores && datosProveedores.filas) || []).reduce(function(a, f) {
+function sumaImporteArs(visibles) {
+    var filas = (visibles === null || visibles === undefined)
+        ? ((datosProveedores && datosProveedores.filas) || [])
+        : visibles;
+
+    return filas.reduce(function(a, f) {
         return a + (Number(f.IMPORTE_ARS) || 0);
     }, 0);
 }
@@ -801,12 +798,12 @@ function mostrarError(mensaje) {
     alert(mensaje);
 }
 
-/**
- * Exporta la tabla a Excel
- */
-/** Exporta lo que se ve. Ver Js/tabla-export.js. */
-function exportarExcel() {
-    exportarTabla('tablaProveedoresExterior', 'Proveedores_Exterior');
-}
+/* NO HAY exportarExcel(). Era una función de una línea que llamaba a
+   exportarTabla(), más su listener sobre #btnExport: el botón ahora declara
+   data-exportar en el HTML y lo engancha Js/tabla-export.js solo, que es como
+   funciona el resto del módulo. Es el mismo cambio que ya había hecho Crono
+   Nacionalización, y acá se vuelve necesario: la pestaña tiene buscador, y
+   TablaExport saca del clon las filas con display:none, así que Exportar baja
+   lo que el buscador está dejando ver. */
 
 })(); // Fin del IIFE

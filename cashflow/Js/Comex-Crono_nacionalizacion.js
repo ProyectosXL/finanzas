@@ -7,6 +7,23 @@
  * con las columnas calculadas en el navegador y un backend que agrupaba por día
  * del mes en curso. Ahora el eje y los importes por columna vienen resueltos de
  * Class/EjeVista.php, sobre horizonte_dias y horizonte_meses.
+ *
+ * EL LISTADO VA POR FECHA DE NACIONALIZACIÓN
+ * ------------------------------------------
+ * Que es la que decide cuándo impacta el gasto. Antes el orden salía de un
+ * COALESCE de cinco fechas y el corte era por fecha de embarque: la tabla se
+ * leía por una fecha y se ordenaba por otra. Ahora las dos cosas son
+ * FECHA_DESP_ADU, que viene del maestro de Comercio Exterior.
+ *
+ * SE VEN LOS VENCIDOS, Y EL CAMBIO ES GRANDE ACÁ. El filtro por embarque
+ * escondía justamente los contenedores que tienen los gastos estimados
+ * cargados —se cargan cuando el contenedor ya embarcó—, así que la fila del
+ * tablero daba CERO y avisaba que ninguno tenía gastos. Verificado contra la
+ * base el 19/09/2026: sin el filtro pasa a $ 561.423,77 dentro del horizonte.
+ *
+ * LA EDICIÓN ESCRIBE SOBRE EL MAESTRO. La celda y el editor viven en
+ * Js/Comex-fechas.js, compartidos con Proveedores Exterior: es el mismo gesto
+ * sobre la misma tabla, y las dos copias que había ya habían divergido.
  */
 
 (function() {
@@ -233,7 +250,8 @@
             // el filtro no depende del índice de ninguna columna —mover una
             // columna no lo rompe— y queda escrito en un solo lugar CUÁLES son
             // los tres campos por los que se busca.
-            html += '<tr data-buscar="' + escaparAttrCrono(textoBuscable(item)) + '">';
+            html += '<tr data-buscar="' + escaparAttrCrono(textoBuscable(item)) + '"'
+                + (item.VENCIDA ? ' class="fila-vencida"' : '') + '>';
 
             // Columnas fijas
             html += `<td class="center">${formatDate(item.FECHA_EST_EMB)}</td>`;
@@ -259,29 +277,16 @@
                         <span class="confirm-indicator ${etaConfirm ? 'confirmed' : 'estimated'}">${etaConfirm ? 'Conf' : 'Est'}</span>
                      </td>`;
             
-            // FECHA_NAC - Editable
-            var fechaNacEfectiva = item.FECHA_NAC_EFECTIVA || item.FECHA_NAC || '-';
-            var esEditada = item.FECHA_NAC_EDIT != null;
-            var fechaOriginal = item.FECHA_NAC || '-';
-            
-            html += `<td class="center fecha-nac-cell ${esEditada ? 'fecha-editada' : ''}" 
-                         data-id="${item.ID}" 
-                         data-fecha-orig="${item.FECHA_NAC || ''}" 
-                         data-fecha-edit="${item.FECHA_NAC_EDIT || ''}"
-                         onclick="editarFechaNac(this)">
-                        <div class="fecha-nac-display">
-                            <span class="fecha-value">${formatDate(fechaNacEfectiva)}</span>
-                            ${esEditada ? '<span class="badge-fecha-editada">Editada</span>' : ''}
-                            <i class="fas fa-pen fecha-nac-icon"></i>
-                        </div>
-                        ${esEditada ? `
-                            <div class="fecha-tooltip">
-                                <span class="fecha-tooltip-label">Fecha Original</span>
-                                <span class="fecha-tooltip-value">${formatDate(fechaOriginal)}</span>
-                            </div>
-                        ` : ''}
-                     </td>`;
-            
+            // FECHA_NAC — editable, y ahora sobre el maestro de Comex.
+            // La celda la arma Js/Comex-fechas.js, compartida con la otra
+            // pestaña.
+            html += ComexFechas.celda(item, 'NAC', {
+                clase: 'fecha-nac',
+                editable: !!datosCrono.fechas_editables,
+                alEditar: 'editarFechaNac'
+            });
+
+
             // Los importes por columna ya vienen resueltos: la regla de "día O
             // mes, nunca las dos" la aplicó el backend, una sola vez.
             cols.forEach(function(col) {
@@ -302,30 +307,14 @@
         tableBody.innerHTML = html;
     }
 
-    /* ================================================================
-       EL BUSCADOR
-
-       Client-side y sin ir al servidor, igual que el de Echeqs: esconde
-       filas con display:none. La tabla ya está entera en el navegador, así
-       que un round-trip por cada tecla sería trabajo puro.
-
-       BUSCA SÓLO PROVEEDOR, CONTENEDOR Y ORDEN DE COMPRA. Son los tres
-       campos por los que alguien busca un contenedor. Mirar el textContent
-       de la fila entera -que es lo que hace Cobranzas May- acá daría falsos
-       positivos contra los importes de las columnas del eje: tipear "2026"
-       traería todo, y tipear un número de tres cifras, cualquier fila que
-       tenga ese número adentro de un importe.
-
-       INSENSIBLE A MAYÚSCULAS, NO A ACENTOS. Es lo que hace Echeqs y todo el
-       resto del módulo; agregar el plegado de acentos acá solo haría que
-       este buscador se comporte distinto de los otros cinco.
-       ================================================================ */
+    /* EL BUSCADOR vive en Js/Comex-fechas.js desde que Proveedores Exterior
+       también lo tiene: es el mismo control sobre la misma grilla, y dos copias
+       se desincronizan en la primera corrección. Lo que buscan, y por qué son
+       esos tres campos y no el textContent de la fila, está escrito allá. */
 
     /** Los tres campos por los que se busca, concatenados */
     function textoBuscable(item) {
-        return [item.PROVEEDOR, item.CONTENEDOR, item.ORDEN_COMPRA]
-            .map(function(v) { return v === null || v === undefined ? '' : String(v); })
-            .join(' ');
+        return ComexFechas.textoBuscable(item);
     }
 
     /**
@@ -340,66 +329,15 @@
      * mirando un contenedor. Es el mismo reparto que Cobranzas May.
      */
     function filtrarTabla() {
-        var campo = document.getElementById('busquedaCronoNac');
-        var term = campo ? campo.value.toLowerCase() : '';
-        var filas = document.querySelectorAll('#tableBody tr');
-
-        for (var i = 0; i < filas.length; i++) {
-            var texto = (filas[i].getAttribute('data-buscar') || '').toLowerCase();
-
-            filas[i].style.display = (!term || texto.indexOf(term) !== -1) ? '' : 'none';
-        }
+        ComexFechas.filtrar('busquedaCronoNac', 'tableBody');
 
         generarFilaTotales();
     }
 
-    /**
-     * Suma una lista de items en la MISMA forma que trae `datosCrono.totales`,
-     * para que la fila de totales no tenga que saber de dónde salió el número.
-     *
-     * Suma clave por clave lo que el backend ya resolvió —las ramas `dias` y
-     * `meses` y los tres totales de las tres vistas—: no decide en qué columna
-     * cae nada, que es la parte que no se puede duplicar.
-     *
-     * @param {Array} items
-     * @returns {Object} Con la forma de `datosCrono.totales`
-     */
-    function sumarColumnas(items) {
-        var t = {
-            dias: {}, meses: {},
-            total_tramo: 0, total_meses: 0, total_horizonte: 0
-        };
-
-        items.forEach(function(item) {
-            ['dias', 'meses'].forEach(function(rama) {
-                var mapa = item[rama] || {};
-
-                Object.keys(mapa).forEach(function(clave) {
-                    t[rama][clave] = (t[rama][clave] || 0) + (Number(mapa[clave]) || 0);
-                });
-            });
-
-            t.total_tramo += Number(item.total_tramo) || 0;
-            t.total_meses += Number(item.total_meses) || 0;
-            t.total_horizonte += Number(item.total_horizonte) || 0;
-        });
-
-        return t;
-    }
-
-    /** Los items que el buscador está dejando ver */
+    /** Los items que el buscador está dejando ver, o null si no hay filtro */
     function filasVisibles() {
-        var campo = document.getElementById('busquedaCronoNac');
-        var term = campo ? campo.value.toLowerCase() : '';
-        var filas = (datosCrono && datosCrono.filas) || [];
-
-        if (!term) {
-            return null;    // sin filtro: mandan los totales del payload
-        }
-
-        return filas.filter(function(item) {
-            return textoBuscable(item).toLowerCase().indexOf(term) !== -1;
-        });
+        return ComexFechas.visibles('busquedaCronoNac',
+            (datosCrono && datosCrono.filas) || []);
     }
 
     /**
@@ -426,7 +364,7 @@
         var visibles = filasVisibles();
         var totales = (visibles === null)
             ? (datosCrono.totales || {})
-            : sumarColumnas(visibles);
+            : ComexFechas.sumarColumnas(visibles);
 
         var html = '<td colspan="9" class="total-label">TOTALES</td>';
 
@@ -481,91 +419,20 @@
     }
 
     /**
-     * Permite editar la fecha de nacionalización
+     * Permite editar la fecha de nacionalización.
+     *
+     * El editor entero vive en Js/Comex-fechas.js, compartido con Proveedores
+     * Exterior: es el mismo gesto sobre el mismo maestro. Acá queda lo único
+     * propio, que es qué hacer después de guardar.
+     *
+     * SE RECARGA TODO: la fecha nueva cambia la columna del eje en la que cae
+     * el importe, el total, el orden del listado —que ahora es por esta misma
+     * fecha— y los avisos de vencidos.
+     *
      * @param {HTMLElement} cell Celda donde se hizo click
      */
     window.editarFechaNac = function(cell) {
-        // Evitar edición múltiple
-        if (cell.querySelector('input')) {
-            return;
-        }
-        
-        var idMg = cell.dataset.id;
-        var fechaOrig = cell.dataset.fechaOrig;
-        var fechaEdit = cell.dataset.fechaEdit || fechaOrig;
-        
-        // Guardar contenido original
-        var originalContent = cell.innerHTML;
-        
-        // Crear input date
-        var input = document.createElement('input');
-        input.type = 'date';
-        input.className = 'fecha-nac-input';
-        
-        // Normalizar la fecha para evitar problemas de zona horaria
-        if (fechaEdit || fechaOrig) {
-            var fechaParaInput = fechaEdit || fechaOrig;
-            // Asegurar formato YYYY-MM-DD sin conversión de timezone
-            if (fechaParaInput && fechaParaInput !== '-') {
-                input.value = fechaParaInput.split('T')[0]; // Tomar solo la parte de fecha
-            }
-        }
-        
-        // Reemplazar contenido con input
-        cell.innerHTML = '';
-        cell.appendChild(input);
-        input.focus();
-        
-        // Handler para guardar
-        var guardarFecha = function() {
-            var nuevaFecha = input.value;
-            
-            if (!nuevaFecha) {
-                cell.innerHTML = originalContent;
-                return;
-            }
-            
-            // Mostrar loading
-            cell.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-            
-            // Enviar al servidor
-            fetch('Controller/ComexController.php?action=updateFechaNacPago', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    id_mg: idMg,
-                    fecha_nac_orig: fechaOrig,
-                    fecha_nac_edit: nuevaFecha
-                })
-            })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
-                    // Recargar datos para reflejar el cambio
-                    cargarDatos();
-                } else {
-                    alert('Error al guardar: ' + result.message);
-                    cell.innerHTML = originalContent;
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error de conexión al guardar la fecha');
-                cell.innerHTML = originalContent;
-            });
-        };
-        
-        // Events
-        input.addEventListener('blur', guardarFecha);
-        input.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') {
-                guardarFecha();
-            } else if (e.key === 'Escape') {
-                cell.innerHTML = originalContent;
-            }
-        });
+        ComexFechas.editar(cell, cargarDatos);
     };
 
     /** Escapa un texto para meterlo en un atributo o en el cuerpo de una celda */

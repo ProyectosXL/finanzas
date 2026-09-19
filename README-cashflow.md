@@ -45,6 +45,7 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 | 17 | `sql/cashflow_echeqs_excluir.sql` | Crea `RO_T_CASHFLOW_ECHEQ_EXCLUIDO`: qué cheques de **cartera** no se van a poder cobrar, con su motivo, quién, cuándo y el historial completo | **No se puede excluir ningún cheque**. La pestaña se lee igual —el listado no depende de la tabla—, los dos botones de la barra quedan apagados diciendo qué script falta, y la fila del tablero sigue trayendo toda la cartera, que es lo que traía antes |
 | 18 | `sql/cashflow_saldos_cuentas_fondo.sql` | Agrega `CLASE` y el saldo inicial al catálogo de cuentas de Saldos, crea `RO_T_CASHFLOW_SALDOS_FONDO_MOV` (la cuenta corriente de cada fondo), **migra** la última foto de Otros Ingresos como saldo inicial de dos cuentas nuevas, reescribe el `ORIGEN` de las aplicaciones de cobertura a la clave de esas cuentas, y reapunta las dos filas de stock a `FONDO_INVERSION` / `FONDO_COMITENTE` | **Las filas de stock siguen leyendo de Otros Ingresos**, que está retirado: muestran la última foto cargada y el tablero avisa que ese dato ya no se mantiene. Saldos → Fondos y el ABM de fondos de Parámetros avisan qué script falta. Si además el código nuevo corre contra una base sin el script, `Cobertura::origenes()` devuelve vacío y **no se puede aplicar cobertura nueva** hasta correrlo: no hay ninguna cuenta de la que aplicar |
 | 19 | `sql/cashflow_cobertura_automatica.sql` | Reapunta la fila *Uso de Inversiones* a la serie `COBERTURA → USO_INVERSION`, crea *Uso de Dólares comitente* (`USO_COMITENTE`, `ORDEN = 25`), crea *Flujo Neto Acumulado (sin cobertura)* (`SALDO_FINAL`, en Resultados debajo del flujo neto) y fija la clave **fecha + fondo** de las aplicaciones manuales con un índice único filtrado por `VIGENTE = 1` | **El motor rescata igual de las inversiones** —la fila existente sigue leyendo `APLICACION`, que nombra los fondos de lo que tenga cargado— pero **no de la comitente**: no hay fila donde mostrarlo, y el tablero avisa nombrando el script. La clave por fondo la aplica el PHP de todos modos; sin el índice, sólo el código la garantiza |
+| 20 | `sql/cashflow_comex_fecha_maestra.sql` | Crea `RO_T_CASHFLOW_COMEX_FECHA_EDIT` —quién movió cada fecha de Comercio Exterior desde el cashflow— y **migra al maestro** las fechas que vivían en las columnas `EDIT` de `RO_T_CASHFLOW_COMEX_CRONO_NAC` | **Las dos pestañas de Comex se leen igual** —las fechas salen del maestro, que siempre está, y los vencidos se ven igual— pero **no se pueden editar**, y las dos avisan qué script falta. El tablero no cambia: lo que mueve sus números es el filtro de embarque que se sacó del código, no este script. En la base real la migración **no escribe ni una fecha**: las seis ediciones vigentes ya coinciden con el maestro. Ver `README-comex.md` |
 
 ### Scripts modificados — hay que volver a correrlos
 
@@ -97,6 +98,7 @@ En este orden, contra `central`:
 -- 17. sql/cashflow_echeqs_excluir.sql  (Echeqs: excluir de cartera lo que no se va a cobrar)
 -- 18. sql/cashflow_saldos_cuentas_fondo.sql  (Saldos: cuentas de inversion y comitente; retira Otros Ingresos)
 -- 19. sql/cashflow_cobertura_automatica.sql  (Cobertura: una fila de uso por fondo; clave fecha + fondo)
+-- 20. sql/cashflow_comex_fecha_maestra.sql  (Comex: la fecha vive en el maestro, con rastro de quien edito)
 ```
 
 **El 13 y el 14 van en ese orden y al final**, porque el 14 mueve `SALDO_FINAL` al final de la sección que crea y da de baja la fila del saldo de inversiones que crearon los anteriores. Correr el 14 sin el 13 no rompe nada, pero deja el cuadro a medio reagrupar.
@@ -104,6 +106,8 @@ En este orden, contra `central`:
 **El 18 va después del 3, del 14, de `sql/cashflow_cobertura_por_fondo.sql` y de `sql/cashflow_dolares_comitente_cobertura.sql`** (los dos de `README-otros-ingresos.md`): necesita el catálogo de cuentas, la tabla de aplicaciones con su columna `MONEDA`, y las dos filas de stock que reapunta. Si las tablas de Otros Ingresos no están, no crea las cuentas y lo dice: no hay nada que migrar, y los fondos se dan de alta desde Parámetros. Ver `README-saldos.md`.
 
 **El 19 va después del 18**: reapunta la fila de uso que creó el 14 y necesita que exista la fila de stock de la comitente para que la fila de uso nueva tenga de dónde rescatar; si no está, avisa. Es el único cuya ausencia **puede cambiar un número**: sin él el motor cubre sólo con las inversiones, y una columna que la comitente habría tapado queda en rojo, con aviso.
+
+**El 20 va después de `sql/cashflow_comex_cotiz_edit.sql`** y de ningún otro. Es el único script del módulo que **escribe sobre una tabla que no es del cashflow** —el maestro de la plataforma Comex—, así que su encabezado documenta el criterio de conflicto y el script lista al final lo que decidió no migrar en vez de resolverlo solo. Ver `README-comex.md`.
 
 Los que alimentan pestañas puntuales están documentados en su propio README: `sql/ventas_proyeccion.sql` y compañía en `README-ventas.md`, `sql/cashflow_cobranzas_parametros.sql` y `sql/cashflow_cobranzas_may.sql` en `README-cobranzas-fr.md` y `README-cobranzas-may.md`.
 
@@ -425,7 +429,7 @@ El nombre del archivo es `<Pestaña>_<YYYY-MM-DD>.xls`, y si no se declara uno s
 **título de la página**, que sale del menú: así una pestaña nueva no exporta un archivo
 llamado `undefined` ni hay que declarar el nombre en dos lugares.
 
-### Crono Nacionalización dejó de tener el suyo
+### Crono Nacionalización dejó de tener el suyo, y Proveedores Exterior después
 
 Era el último con `#btnExport` + listener + una función envoltorio de una línea que ya
 llamaba a `exportarTabla()`. Ahora declara `data-exportar` como el resto y el JS de la
@@ -433,12 +437,31 @@ pestaña se quedó sin las tres piezas. No cambió lo que baja, salvo por lo que
 pestaña tiene **buscador**, y `TablaExport` saca del clon las filas con `display: none`, así
 que *Exportar* baja lo que el buscador está dejando ver.
 
-> El buscador de *Crono Nacionalización* mira **sólo Proveedor, Contenedor y Orden de
-> Compra**, y no el `textContent` de la fila entera como el de Cobranzas May: la tabla tiene
-> una columna por día del eje, así que buscar sobre todo daría falsos positivos contra los
-> importes —tipear `2026` traería todo—. El texto buscable viaja en un `data-buscar` sobre
-> el `<tr>`, armado al dibujar la fila: así el filtro no depende del índice de ninguna
-> columna y queda escrito en un solo lugar cuáles son los tres campos.
+*Proveedores Exterior* tenía las mismas tres piezas y las perdió en
+`feature/comex-fecha-maestra`, cuando ganó su buscador. Ahí el cambio dejó de ser cosmético
+por el mismo motivo: sin el atributo, *Exportar* habría bajado las 76 filas mientras la
+pantalla mostraba tres.
+
+> **Quedan pestañas con el botón enganchado a mano** —Cobranzas FR, Cobranzas May, Echeqs,
+> Ventas, Exportaciones Tasky y Proveedores Locales—, cada una con su `#btnExport*` y su
+> listener. Ya no son copias de la función: todas terminan llamando a `exportarTabla()`. Lo
+> que les queda es el cableado a mano, que es trabajo de más y una pieza más que se puede
+> romper en silencio. Pasarlas a `data-exportar` es un cambio aparte.
+
+> El buscador de las **dos pestañas de Comercio Exterior** mira **sólo Proveedor, Contenedor
+> y Orden de Compra**, y no el `textContent` de la fila entera como el de Cobranzas May: la
+> tabla tiene una columna por día del eje, así que buscar sobre todo daría falsos positivos
+> contra los importes —tipear `2026` traería todo—. El texto buscable viaja en un
+> `data-buscar` sobre el `<tr>`, armado al dibujar la fila: así el filtro no depende del
+> índice de ninguna columna y queda escrito en un solo lugar cuáles son los tres campos.
+>
+> **Es el mismo código, no uno parecido.** *Proveedores Exterior* no tenía buscador y lo ganó
+> en `feature/comex-fecha-maestra`; en vez de copiarlo, el buscador y la celda de fecha
+> editable se mudaron a `Js/Comex-fechas.js`, que cargan las dos pestañas. Las dos copias de
+> la celda que había **ya habían divergido** —una avisaba cuando el cambio de mes descartaba
+> la cotización y la otra no tenía ni eso ni la guarda que evita el doble guardado del
+> `blur`—, que es exactamente cómo nacieron las siete copias de `exportarExcel()`. Ver
+> `README-comex.md`.
 >
 > Y **la fila de TOTALES se rehace** con lo visible. Si no, el pie diría el total de todo
 > arriba de una tabla de tres filas y nada en la pantalla diría que esos dos números miden
@@ -950,8 +973,9 @@ Los avisos no son decoración: son lo que evita leer un cero como si fuera un da
 
 - Módulos todavía no construidos cuyas filas rinden cero (agrupados en un solo aviso).
 - Importes que cayeron **fuera del horizonte** o **sin fecha**, con el monto.
-- **Comercio Exterior filtra por fecha de embarque desde hoy**, así que un pago pendiente de un contenedor *ya embarcado* no aparece en el tablero. Sin ese aviso, los egresos de Comex quedarían informados de menos en silencio.
-- **Nacionalizaciones da cero** aunque haya contenedores: hoy ninguno tiene gastos estimados cargados. El aviso trae el conteo, para distinguir "no hay datos" de "los datos son cero". La pestaña Crono Nacionalización muestra el mismo cero.
+- **Comercio Exterior ya no filtra por fecha de embarque**, y con eso se fueron los dos avisos que ese filtro necesitaba. El corte escondía **42 de 76 contenedores** —verificado el 19/09/2026—, entre ellos 10 con la fecha de pago todavía por delante: eran egresos reales informados de menos, y el aviso lo decía sin poder arreglarlo, porque la fila tampoco se veía en la pestaña. Ahora lo que decide es la fecha efectiva de cada contenedor. Ver `README-comex.md`.
+  - **Comex informa lo vencido en dos avisos**, y son dos porque la columna del **mes en curso** cubre los días previos al tramo diario: un pago vencido de este mismo mes **sí** entra al cuadro, y uno del mes pasado no. Un solo mensaje diciendo "no entran en ninguna columna" sería falso para los primeros. Lo vencido **no se reubica en hoy** —a diferencia de las tres pestañas de cobranza proyectada—, y el porqué está en `README-comex.md`.
+  - **Nacionalizaciones dejó de dar cero.** El aviso decía que ningún contenedor tenía gastos estimados cargados, y eso era cierto **de los 34 que el filtro dejaba pasar**: los gastos se cargan cuando el contenedor ya embarcó, así que el filtro escondía exactamente los que tenían el dato. La fila pasó de `$ 0` a `$ 561.423,77` dentro del horizonte. La guarda que avisa sigue en `ComexProvider`, por si algún día vuelve a pasar de verdad.
 - **Contenedores del exterior que no se pudieron valuar**, con el conteo y **cuánto suman en dólares**. Pasa cuando no tienen fecha estimada de pago: sin fecha no hay mes, y sin mes no hay cotización que pedirle a la curva de dólar futuro. No se los convierte con ningún tipo de cambio inventado. El monto va **en dólares y no en pesos** a propósito: decirlo en pesos exigiría valuarlo, que es justamente lo que no se pudo hacer.
 - **Contenedores valuados con un mes que la curva no cubre**, con el conteo y hasta dónde llega la curva. Se usa la cotización del mes más cercano y la fila queda marcada en la pestaña; aproximar en silencio sería mostrar un número que nadie puede explicar.
 - **Contenedores con la cotización corregida a mano**, que manda sobre la curva.
@@ -1052,6 +1076,10 @@ De los **fondos como cuentas**, `tests/test_cobertura.php` fija que el disponibl
 
 De la **cobertura automática**, `tests/test_cobertura_automatica.php` prueba primero `CoberturaAutomatica::calcular()` sola, con números, porque ahí viven todas las reglas: un día con flujo negativo pero caja de sobra **no rescata**; el rescate parcial saca exactamente lo que falta; las inversiones se agotan y recién ahí entra la comitente; los dólares se venden enteros hacia arriba (y un cociente exacto no sube uno por punto flotante; de USD 3,50 se venden 3); sin cotización no se vende; con los dos fondos agotados queda el faltante y ningún fondo va a negativo; la devolución es LIFO, acotada al sobrante del día y a lo rescatado, con una pila de varios rescates que se deshace en orden inverso; lo manual va primero, descuenta del tope, no se devuelve solo, y una devolución manual que deja rojo se cubre; el tope cambia con los movimientos previstos y un rescate previsto que se come lo usado deja el fondo sobregirado e informado; y el orden de consumo. Después lo enchufa al motor con dos filas de stock y dos de uso: que las celdas muestren manual más calculado, que el flujo con cobertura y el arrastre lo recojan sin aviso de descuadre, que el KPI y el saldo mínimo lo vean, que el desglose por columna y los totales separen los dos, que si no alcanza quede el faltante con su aviso, que un fondo sin fila de uso no se toque y se avise nombrando el script, que una fila informativa no calcule y que un stock sin tope no sea automatizable. Y lo de alrededor: `validarDisponible()` con la aplicación de la misma fecha que se pisa, la posterior que no cuenta y el negativo que pasa siempre; `Fondos::saldoProyectado()` y el tope por columna con un rescate previsto; `Cotizacion::ultimasHasta()` en dos consultas; `CoberturaProvider` con una `Cobertura` de mentira, repartiendo por clase y por columna; y el script y el registro.
 
+De **Comercio Exterior**, `tests/test_comex_fecha_maestra.php` fija las reglas puras de esta etapa —cuándo una fecha está vencida (con hoy inyectado, para que la prueba no caduque sola), cuándo la marca de *editada* describe el valor que se ve, y el reparto de lo vencido entre lo que entra en la columna del mes en curso y lo que queda fuera del eje— y, **leyendo archivos**, el cableado que se rompe en silencio: que el filtro por fecha de embarque no vuelva, que las columnas `EDIT` no vuelvan a leerse, que el endpoint de fechas siga siendo uno solo, que el cliente no vuelva a mandar la fecha anterior, y que el buscador y la celda de fecha no se copien en las dos pestañas. Es el mismo criterio de `test_tablas_controles.php`. Ver `README-comex.md`.
+
+> Esas pruebas leen el código **sin sus comentarios**, y eso no es un detalle: estos archivos explican en prosa lo que dejaron de hacer —*"antes era `COALESCE(FECHA_PAGO_EDIT, ...)`"*—, que es justamente lo que este módulo pide que se escriba. Buscando el patrón sobre el archivo entero, la única forma de pasar la prueba sería borrar la explicación.
+
 **El motor acepta un `Horizonte` inyectado, y hace falta para poder probarlo.** El arrastre del saldo depende de qué día es hoy, así que un escenario con importes en fechas fijas deja de tener sentido en cuanto pasa esa fecha. Sin esa costura las pruebas del motor caducaban solas —y caducaron: 48 casos empezaron a devolver `null` al pasar el 06/09/2026, y la parte más delicada del módulo se quedó sin red. Es la misma costura que ya tenían `Ventas::proyectarVentas()` y `proyectarCobranzas()`.
 
 ```php
@@ -1116,6 +1144,9 @@ cashflow/Controller/CoberturaController.php      Se llama desde el tablero, no d
 cashflow/Class/Providers/ExportacionesProvider.php   Exportaciones Tasky (README-exportaciones-tasky.md)
 cashflow/Tabs/exportaciones_tasky.php
 sql/cashflow_exportaciones_tasky.sql
+cashflow/Class/Comex.php                    Comercio Exterior (README-comex.md)
+cashflow/Js/Comex-fechas.js                 La celda de fecha editable y el buscador, de las dos pestanas
+sql/cashflow_comex_fecha_maestra.sql        La fecha vive en el maestro, con rastro de quien edito
 tests/                                      Arnés de pruebas
 ```
 
@@ -1131,6 +1162,8 @@ De la rama `feature/echeqs-excluir`: `sql/cashflow_echeqs_excluir.sql` (nuevo) �
 
 De la rama `feature/cobertura-automatica`: `Class/CoberturaAutomatica.php`, `sql/cashflow_cobertura_automatica.sql` y `tests/test_cobertura_automatica.php` (nuevos) · `Class/Cashflow.php` (`resolverUsoCobertura()` antes del arrastre; `sumarMovimientos()` con exclusión de tipo; `resolverCobertura()` separa manual de calculado y los avisos pasan a `avisarCobertura()`; el segundo invariante; `fondos_tope` y `fondos_manual` no salen en el JSON) · `Class/CashflowProvider.php` (`fondos_tope` y `fondos_manual` en el contrato) · `Providers/FondosProvider.php` (`fondos_tope`; `fechasPorColumna()` y `tope()` estáticos) · `Providers/CoberturaProvider.php` (una serie por clase; `fondos_manual`; `cobertura()` por fábrica) · `Class/CashflowRegistry.php` (las tres series de `COBERTURA` y su `componentes`) · `Class/Cobertura.php` (clave fecha + fondo; `validarDisponible()` y `disponibleParaAplicar()`; `saldoFondoA()`; historial por fondo) · `Class/Fondos.php` (`saldoProyectado()`; `getCuentasFondo()` con movimientos a pedido) · `Class/Cotizacion.php` (`ultimasHasta()` y `entreFechas()`) · `Controller/CoberturaController.php` (origen en baja e historial) · `Js/Cashflow.js` y `Css/Cashflow.css` (dos filas de uso, manual vs. calculado, editor por fondo y en su moneda) · `tests/test_cobertura.php` y `tests/test_fondos.php` (las series nuevas y los dobles).
 
+De la rama `feature/comex-fecha-maestra`: `sql/cashflow_comex_fecha_maestra.sql`, `Js/Comex-fechas.js`, `tests/test_comex_fecha_maestra.php` y `README-comex.md` (nuevos) · `Class/Comex.php` (las dos fechas se escriben sobre `RO_T_IMPORTACIONES_ENCABEZADO`; `guardarFecha()` reemplaza a `updateFechaPago()` y `updateFechaNacPago()`; se fue el filtro por fecha de embarque; `estaVencida()`, `marcaVigente()` y `avisosVencidos()` puras; el orden por fecha efectiva con los nulos al final) · `Providers/ComexProvider.php` (se fue `AVISO_FILTRO_EMBARQUE`; los avisos de vencidos) · `Controller/ComexController.php` (un solo `updateFecha`, más `getHistorialFecha`) · `Js/Comex-Proveedores_exterior.js` y `Js/Comex-Crono_nacionalizacion.js` (delegan la celda, el editor y el buscador en el archivo compartido) · `Tabs/proveedores_exterior.php` (buscador y `data-exportar`), `Tabs/crono_nacionalizacion.php` · sus dos CSS (las marcas de vencida y sin fecha).
+
 Eliminado: `Tabs/resumen.php`.
 
 ---
@@ -1145,6 +1178,7 @@ Eliminado: `Tabs/resumen.php`.
 - **El neteo de cheques adelantados resta importes que ninguna fila del tablero suma.** Un cheque en cartera cierra solo: suma en *Echeqs en cartera* y resta de la cobranza de Ventas. Uno ya aplicado —depositado o endosado a un proveedor— no lo suma nadie, y se netea igual: **el neteo va por tilde y no por estado**, porque los cheques pre-chequeados están casi todos aplicados y filtrarlos dejaría el circuito sin efecto. Es una decisión tomada, no un pendiente; el pie de la sub-pestaña muestra el corte por estado para poder auditar el número. El detalle de lo verificado contra la base está en `README-ventas.md`.
 - **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** en *Detalle Facturas*, para traer la fecha de emisión de cada comprobante. El tablero no lo sufre —usa `getCobranzasFRTotales()`— y el Resumen tampoco, que desde que no muestra esa columna se la saltea; lo paga *Detalle Facturas*, que es donde se pidió el detalle, **y el Resumen cuando hay filtro por fecha de emisión**, porque ahí esa fecha es lo que decide si la fila entra.
 - **El Dashboard es una maqueta**: no tiene ninguna llamada al servidor, sus números están escritos a mano. El menú lo marca como tal. Cuando se construya de verdad, hay que pasarlo a `datos` en `Class/Menu.php`.
+- **Las fechas de Comercio Exterior se graban con `USUARIO = NULL`**, como todo lo demás, y el rastro de quién editó existe pero **todavía no tiene pantalla que muestre el historial completo**: la celda muestra sólo la edición vigente en su tooltip. `getHistorialFecha` ya lo devuelve entero. Ver `README-comex.md`.
 - **`nacionalizacion_2` está en `$validTabs` de `TabController` pero no tiene archivo ni entrada de menú.** Es configuración muerta: nadie puede llegar ahí, y si llegara vería el placeholder.
 - **`VentasController?action=saveMixCobro` puede grabar un mix que Parámetros rechazaría**: no valida el 100%. Es anterior a este trabajo.
 - `pedir()` está duplicado en `Ingresos-Ventas.js` y `Parametros.js`. El código nuevo usa `pedirJson()` de `main.js`; sacar las dos copias viejas es un cambio aparte.

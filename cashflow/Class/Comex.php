@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/DolarFuturo.php';
+require_once __DIR__ . '/Horizonte.php';
 
 /**
  * Comex
@@ -38,20 +39,96 @@ require_once __DIR__ . '/DolarFuturo.php';
  * Ver el encabezado de Cotizacion, que documenta el criterio para todo el
  * modulo.
  *
+ * LAS FECHAS EDITABLES VIVEN EN EL MAESTRO, NO ACA
+ * ------------------------------------------------
+ * Esto CAMBIO con feature/comex-fecha-maestra. Las dos fechas que se editan
+ * desde el cashflow -la estimada de pago y la de nacionalizacion- se guardaban
+ * en RO_T_CASHFLOW_COMEX_CRONO_NAC (FECHA_PAGO_EDIT, FECHA_NAC_EDIT) y el
+ * maestro de la plataforma Comex no se enteraba: la app de Comercio Exterior
+ * mostraba una fecha y el cashflow otra, las dos vigentes, y ninguna pantalla
+ * decia que existia la otra.
+ *
+ * Ahora hay UN solo lugar por fecha, y es el maestro:
+ *
+ *     fecha estimada de pago            -> RO_T_IMPORTACIONES_ENCABEZADO.FECHA_EST_PAGO
+ *     fecha estimada de nacionalizacion -> RO_T_IMPORTACIONES_ENCABEZADO.FECHA_DESP_ADU
+ *
+ * Las columnas EDIT quedan en la base -este modulo no borra nada- pero NADIE
+ * LAS LEE. RO_T_CASHFLOW_COMEX_CRONO_NAC sigue viva por COTIZ_USD_EDIT, que es
+ * otro circuito y no se toca. Ver sql/cashflow_comex_fecha_maestra.sql.
+ *
+ * COMO SE ESCRIBE SOBRE UNA TABLA AJENA
+ * -------------------------------------
+ * El maestro es de la plataforma Comex y no tiene columnas de auditoria, asi
+ * que el rastro de quien edito y que decia antes va del lado del cashflow, en
+ * RO_T_CASHFLOW_COMEX_FECHA_EDIT. No es una segunda fuente de verdad: la fecha
+ * vigente es siempre la del maestro, y ese rastro solo contesta QUIEN la puso.
+ * Si la app de Comex la mueve despues, el rastro deja de describir lo que se ve
+ * y marcaVigente() lo detecta comparando contra el maestro.
+ *
+ * SE VEN LOS VENCIDOS
+ * -------------------
+ * Las dos consultas filtraban con ISNULL(FECHA_EMB, FECHA_EST_EMB) >= GETDATE()
+ * y ese filtro escondia mas de la mitad del padron -42 de 76 contenedores al
+ * 19/09/2026-, incluidos 10 con fecha de pago FUTURA y 18 con nacionalizacion
+ * futura, que son pagos y gastos que el tablero tenia que estar contando. El
+ * filtro se fue. Lo que decide donde impacta un contenedor es SU FECHA
+ * EFECTIVA, no cuando embarco.
+ *
+ * UN IMPORTE CON FECHA EFECTIVA VENCIDA NO SE REUBICA EN HOY, y es una decision
+ * tomada: queda en su fecha, cae fuera del eje y el tablero informa cuantos son
+ * y cuanto suman. Se aparta de Ingresos::ubicarCobroVencido() -que si ubica en
+ * el primer dia del eje las cobranzas vencidas- por dos razones que no valen
+ * alla:
+ *
+ *   1. Aca la fecha SE EDITA desde la pestana. Una fecha de pago vencida es un
+ *      dato a corregir, no un hecho consumado: el circuito correcto es que
+ *      Comercio Exterior le cargue la fecha nueva, y para eso la fila ahora se
+ *      ve. Reubicar en hoy pondria en la columna de hoy un egreso que nadie
+ *      afirmo que sale hoy, y encima competiria con la correccion.
+ *   2. Alla Tango dice si la factura sigue impaga, asi que reubicar es correcto:
+ *      esa plata esta pendiente con seguridad. Aca no hay ninguna senal de que
+ *      el pago no se haya hecho -el unico corte es que el contenedor todavia no
+ *      tenga detalle cargado-, y al 19/09/2026 hay pagos vencidos de hasta 331
+ *      dias. Amontonarlos en la columna de hoy pondria en el peor dia del
+ *      tablero una montania de plata que probablemente ya salio.
+ *
  * EL CODIGO NO ASUME QUE EL DDL SE CORRIO
  * ---------------------------------------
- * COTIZ_USD_EDIT -el override por contenedor- es de un script posterior, asi
- * que su existencia se pregunta con COL_LENGTH y la pantalla sigue funcionando
- * sin el: se valua con la curva y lo unico que no se puede es corregir una fila
- * a mano. Mismo patron que ProveedoresCategorias::tieneOrigen().
+ * COTIZ_USD_EDIT -el override por contenedor- y la tabla del rastro son de
+ * scripts posteriores, asi que su existencia se pregunta y la pantalla sigue
+ * funcionando sin ellos: las fechas se leen del maestro igual, los vencidos se
+ * ven igual, y lo unico que no se puede es editar. Mismo patron que
+ * ProveedoresCategorias::tieneOrigen().
  */
 class Comex {
 
-    /** Tabla propia del modulo: guarda las fechas editadas y el override de cotizacion */
+    /** Tabla propia del modulo: hoy solo se lee por el override de cotizacion */
     const TABLA_EDIT = 'RO_T_CASHFLOW_COMEX_CRONO_NAC';
+
+    /** El rastro de que fechas del maestro las movio alguien desde el cashflow */
+    const TABLA_HISTORIAL = 'RO_T_CASHFLOW_COMEX_FECHA_EDIT';
+
+    /** El maestro de la plataforma Comex, donde viven las dos fechas */
+    const TABLA_MAESTRO = 'RO_T_IMPORTACIONES_ENCABEZADO';
+
+    /**
+     * Los dos campos editables, y en que columna del maestro vive cada uno.
+     *
+     * LA LISTA ES CERRADA Y VIVE ACA. El nombre de la columna nunca sale de lo
+     * que manda el cliente: se busca en este mapa, asi que no hay forma de que
+     * un pedido armado a mano escriba sobre otra columna del maestro.
+     */
+    const CAMPOS = [
+        'PAGO' => 'FECHA_EST_PAGO',
+        'NAC'  => 'FECHA_DESP_ADU'
+    ];
 
     /** @var bool|null Cache de si la tabla ya tiene la columna COTIZ_USD_EDIT */
     private $cotizEdit = null;
+
+    /** @var bool|null Cache de si existe la tabla del rastro */
+    private $historial = null;
 
     /** @var DolarFuturo|null Se construye una vez: la curva se lee y se cachea adentro */
     private $dolar = null;
@@ -103,6 +180,66 @@ class Comex {
     }
 
     /**
+     * Si ya existe la tabla del rastro, de
+     * sql/cashflow_comex_fecha_maestra.sql.
+     *
+     * SE PREGUNTA en vez de darla por hecha porque las dos pestanas se LEEN sin
+     * ella: las fechas salen del maestro, que siempre esta, y los vencidos se
+     * ven igual. Lo que no se puede sin la tabla es EDITAR, y eso es a
+     * proposito: escribir sobre el maestro de otra plataforma sin dejar rastro
+     * de quien lo hizo es exactamente lo que esta tabla existe para evitar.
+     * guardarFecha() lo dice con su propio mensaje.
+     *
+     * @return bool
+     */
+    public function tieneHistorial() {
+        if ($this->historial !== null) {
+            return $this->historial;
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo." . self::TABLA_HISTORIAL . "', 'U') AS T");
+
+        if ($stmt === false) {
+            throw new Exception('Error al verificar la tabla del historial de fechas');
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->historial = ($row && $row['T'] !== null);
+
+        return $this->historial;
+    }
+
+    /**
+     * El aviso de que la edicion de fechas esta apagada, o cadena vacia.
+     *
+     * Uno solo para las dos pestanas: las dos escriben sobre el mismo maestro y
+     * les falta la misma tabla, asi que dos textos parecidos se
+     * desincronizarian en la primera correccion.
+     *
+     * @return string
+     */
+    public function avisoSinHistorial() {
+        if ($this->tieneHistorial()) {
+            return '';
+        }
+
+        return 'La edición de fechas está apagada: falta la tabla '
+            . self::TABLA_HISTORIAL . '. Corré sql/cashflow_comex_fecha_maestra.sql contra la '
+            . 'base central y las fechas se vuelven editables solas. Todo lo demás de esta '
+            . 'pantalla funciona igual: las fechas salen del maestro de Comercio Exterior, que '
+            . 'es de donde salen ahora para las dos aplicaciones.';
+    }
+
+    /**
      * La curva de dolar futuro, con su cache.
      *
      * @return DolarFuturo
@@ -128,6 +265,12 @@ class Comex {
         $avisos = [];
         $dolar = $this->dolarFuturo();
 
+        $sinHistorial = $this->avisoSinHistorial();
+
+        if ($sinHistorial !== '') {
+            $avisos[] = $sinHistorial;
+        }
+
         if (!$dolar->disponible()) {
             $avisos[] = 'No se pudo leer la curva de dólar futuro ROFEX ('
                 . DolarFuturo::ORIGEN . '), así que los pagos al exterior se muestran sin '
@@ -148,9 +291,94 @@ class Comex {
         return $avisos;
     }
 
+    /* ====================================================================
+       EL RASTRO DE LA EDICION, EN LAS DOS CONSULTAS
+
+       Las dos pestanas necesitan exactamente lo mismo -quien movio esta fecha,
+       cuando, y que decia antes- sobre campos distintos del mismo maestro, asi
+       que el pedazo de consulta se arma una sola vez.
+       ==================================================================== */
+
     /**
-     * Obtiene los datos de proveedores del exterior
-     * Incluye lógica de FECHA_PAGO_EDIT vs FECHA_PAGO_ORIG
+     * Las columnas del rastro vigente de un campo, listas para el SELECT.
+     *
+     * SIN LA TABLA SE PIDEN LITERALES NULL con el mismo nombre, para que el
+     * resto del metodo no tenga que preguntar si el script corrio. Es el mismo
+     * truco que usa el override de cotizacion, y significa lo correcto: sin la
+     * tabla no hay ningun rastro, y NULL es eso.
+     *
+     * @param string $campo 'PAGO' o 'NAC'
+     * @return string
+     */
+    private function rastroSelect($campo) {
+        if (!$this->tieneHistorial()) {
+            return "CAST(NULL AS VARCHAR(50)) EDIT_USUARIO,
+                    CAST(NULL AS DATETIME)    EDIT_FECHA,
+                    CAST(NULL AS DATE)        EDIT_ANTERIOR,
+                    CAST(NULL AS DATE)        EDIT_VALOR";
+        }
+
+        return "E.USUARIO        EDIT_USUARIO,
+                E.FECHA_ALTA     EDIT_FECHA,
+                E.FECHA_ANTERIOR EDIT_ANTERIOR,
+                E.FECHA_NUEVA    EDIT_VALOR";
+    }
+
+    /**
+     * El JOIN del rastro vigente de un campo, o cadena vacia si no hay tabla.
+     *
+     * El campo se toma de self::CAMPOS y no del argumento crudo: es una lista
+     * cerrada del codigo, no entrada del usuario, y asi no hay literal que
+     * pueda venir de afuera.
+     *
+     * @param string $campo 'PAGO' o 'NAC'
+     * @return string
+     */
+    private function rastroJoin($campo) {
+        if (!$this->tieneHistorial() || !isset(self::CAMPOS[$campo])) {
+            return '';
+        }
+
+        return "LEFT JOIN " . self::TABLA_HISTORIAL . " E
+                       ON E.ID_MG = A.ID AND E.VIGENTE = 1 AND E.CAMPO = '" . $campo . "'";
+    }
+
+    /**
+     * Le pone a una fila leida su fecha efectiva, si esta vencida y si la marca
+     * de editada corresponde al valor que se ve.
+     *
+     * @param array $row Fila cruda, con las fechas ya pasadas a string
+     * @param string $campoFecha Columna del maestro que manda ('FECHA_EST_PAGO'…)
+     * @param string $destino Nombre del campo de fecha efectiva de la pestana
+     * @param string $hoy
+     * @return array
+     */
+    private static function conFechaEfectiva($row, $campoFecha, $destino, $hoy) {
+        $fecha = isset($row[$campoFecha]) ? $row[$campoFecha] : null;
+
+        $row[$destino] = $fecha;
+        $row['VENCIDA'] = self::estaVencida($fecha, $hoy);
+
+        /* La marca de "editada desde el cashflow" describe el valor que se ve,
+           no el historial: si la app de Comex movio la fecha despues, el rastro
+           sigue siendo cierto pero ya no explica lo que hay en la celda. */
+        $row['EDITADA'] = self::marcaVigente(
+            isset($row['EDIT_VALOR']) ? $row['EDIT_VALOR'] : null, $fecha);
+
+        return $row;
+    }
+
+    /**
+     * Obtiene los datos de proveedores del exterior.
+     *
+     * LA FECHA DE PAGO SALE DEL MAESTRO -FECHA_EST_PAGO- y nada mas. Antes era
+     * COALESCE(FECHA_PAGO_EDIT, FECHA_EST_PAGO), con la editada viviendo solo
+     * del lado del cashflow; ver el encabezado de la clase.
+     *
+     * NO SE FILTRA POR FECHA DE EMBARQUE. Ese filtro escondia mas de la mitad
+     * del padron, incluidos contenedores con el pago todavia por delante. Lo
+     * que decide es la fecha de pago, y los vencidos se muestran marcados para
+     * poder corregirles la fecha, que es lo unico que los devuelve al eje.
      *
      * Cada fila vuelve con su valuacion en pesos resuelta -IMPORTE_ARS- y con
      * QUE DOLAR se le aplico: el simbolo de la curva, el mes, la cotizacion y
@@ -159,14 +387,18 @@ class Comex {
      * puede auditar contra nada, que es el mismo criterio de
      * Cotizacion::ultimaHasta().
      *
+     * @param string|null $hoy Para poder probar el corte de vencidos sin
+     *                         depender de que dia es. Por defecto, hoy.
      * @return array Listado de importaciones pendientes
      */
-    public function getProveedoresExterior(){
+    public function getProveedoresExterior($hoy = null){
         $cid = $this->conn->conectar('central');
 
         if (!$cid) {
             throw new Exception('No se pudo conectar a la base de datos');
         }
+
+        $hoy = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
 
         /* La columna del override es de un script posterior: si no esta, se
            pide NULL con su nombre para que el resto del metodo no tenga que
@@ -187,17 +419,20 @@ class Comex {
                     A.FECHA_ARR ETA,
                     CASE WHEN A.ETA_CONFIRMADA = 1 THEN 1 ELSE 0 END ETA_CONFIRM,
                     A.FECHA_EST_PAGO,
-                    D.FECHA_PAGO_EDIT,
+                    " . $this->rastroSelect('PAGO') . ",
                     " . $cotizSql . " AS COTIZ_USD_EDIT
-                FROM RO_T_IMPORTACIONES_ENCABEZADO A
+                FROM " . self::TABLA_MAESTRO . " A
                 LEFT JOIN RO_T_IMPORTACIONES_DETALLE B ON A.ID = B.ID_MG
-                LEFT JOIN RO_T_CASHFLOW_COMEX_CRONO_NAC D ON A.ID = D.ID_MG
+                LEFT JOIN " . self::TABLA_EDIT . " D ON A.ID = D.ID_MG
+                " . $this->rastroJoin('PAGO') . "
                 WHERE B.ID_MG IS NULL
-                AND ISNULL(A.FECHA_EMB, A.FECHA_EST_EMB) >= CAST(GETDATE() AS DATE)
-                ORDER BY COALESCE(D.FECHA_PAGO_EDIT, A.FECHA_EST_PAGO, A.FECHA_ARR, ISNULL(A.FECHA_EMB, A.FECHA_EST_EMB))";
+                ORDER BY CASE WHEN A.FECHA_EST_PAGO IS NULL THEN 1 ELSE 0 END,
+                         A.FECHA_EST_PAGO,
+                         A.FECHA_ARR,
+                         ISNULL(A.FECHA_EMB, A.FECHA_EST_EMB)";
 
         $stmt = sqlsrv_query($cid, $sql);
-        
+
         if ($stmt === false) {
             $errors = sqlsrv_errors();
             $errorMsg = 'Error en la consulta SQL: ';
@@ -208,29 +443,17 @@ class Comex {
             }
             throw new Exception($errorMsg);
         }
-        
+
         $v = [];
 
         // La curva se lee UNA vez para todo el listado, no una por fila.
         $curva = $this->dolarFuturo()->curva();
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            // Convertir objetos DateTime a strings
-            if (isset($row['ETD']) && $row['ETD'] instanceof DateTime) {
-                $row['ETD'] = $row['ETD']->format('Y-m-d');
-            }
-            if (isset($row['ETA']) && $row['ETA'] instanceof DateTime) {
-                $row['ETA'] = $row['ETA']->format('Y-m-d');
-            }
-            if (isset($row['FECHA_EST_PAGO']) && $row['FECHA_EST_PAGO'] instanceof DateTime) {
-                $row['FECHA_EST_PAGO'] = $row['FECHA_EST_PAGO']->format('Y-m-d');
-            }
-            if (isset($row['FECHA_PAGO_EDIT']) && $row['FECHA_PAGO_EDIT'] instanceof DateTime) {
-                $row['FECHA_PAGO_EDIT'] = $row['FECHA_PAGO_EDIT']->format('Y-m-d');
-            }
+            $row = self::aTexto($row,
+                ['ETD', 'ETA', 'FECHA_EST_PAGO', 'EDIT_ANTERIOR', 'EDIT_VALOR', 'EDIT_FECHA']);
 
-            // Determinar la fecha efectiva a utilizar para el cronograma
-            $row['FECHA_PAGO_EFECTIVA'] = $row['FECHA_PAGO_EDIT'] ?? $row['FECHA_EST_PAGO'];
+            $row = self::conFechaEfectiva($row, 'FECHA_EST_PAGO', 'FECHA_PAGO_EFECTIVA', $hoy);
 
             $v[] = self::valuar($row, $curva);
         }
@@ -238,6 +461,196 @@ class Comex {
         sqlsrv_free_stmt($stmt);
 
         return $v;
+    }
+
+    /**
+     * Pasa a string las columnas de fecha que devuelve sqlsrv como DateTime.
+     *
+     * Existe porque los dos getters convertian la misma media docena de campos
+     * con un if por campo, y cada campo nuevo era una linea mas que alguien se
+     * podia olvidar. El modulo mueve fechas como string de punta a punta -ver
+     * la nota de Js/notificaciones.js sobre no pasar por new Date(string)-.
+     *
+     * LA HORA SE CONSERVA en FECHA_ALTA y se corta en las fechas puras: una
+     * datetime recortada a diez caracteres perderia a que hora se edito, que es
+     * la mitad del rastro.
+     *
+     * @param array $row
+     * @param array $campos
+     * @return array
+     */
+    private static function aTexto($row, $campos) {
+        foreach ($campos as $c) {
+            if (isset($row[$c]) && $row[$c] instanceof DateTime) {
+                $row[$c] = $row[$c]->format(
+                    ($c === 'EDIT_FECHA') ? 'Y-m-d H:i:s' : 'Y-m-d');
+            }
+        }
+
+        return $row;
+    }
+
+    /* ====================================================================
+       LAS REGLAS, PURAS
+
+       Las tres deciden que ve el usuario y ninguna necesita la base, asi que se
+       prueban sin ella. Es el mismo criterio con el que ya viven afuera de la
+       consulta descartaCotizacion() y DolarFuturo::resolver().
+       ==================================================================== */
+
+    /**
+     * Si una fecha efectiva ya paso.
+     *
+     * SIN FECHA NO ES VENCIDA. Son dos problemas distintos: una fecha vencida
+     * hay que corregirla, una que falta hay que cargarla, y el aviso es otro.
+     * Devolver true para las dos las juntaria en un solo numero que no sirve
+     * para nada.
+     *
+     * @param mixed $fecha
+     * @param string $hoy 'Y-m-d'
+     * @return bool
+     */
+    public static function estaVencida($fecha, $hoy) {
+        $f = Horizonte::normalizarFecha($fecha);
+
+        if ($f === null) {
+            return false;
+        }
+
+        return ($f < substr((string) $hoy, 0, 10));
+    }
+
+    /**
+     * Si el rastro de edicion describe la fecha que se esta viendo.
+     *
+     * El rastro dice "el cashflow puso esta fecha". Si despues la app de
+     * Comercio Exterior movio la misma columna, el rastro sigue siendo cierto
+     * -alguien edito desde aca- pero ya NO explica lo que hay en la celda, y
+     * marcarla como editada desde el cashflow seria atribuirle a este modulo un
+     * valor que puso otro.
+     *
+     * Por eso la marca se calcula comparando, y no se guarda: un bit
+     * persistido quedaria mintiendo desde el primer cambio hecho del otro lado,
+     * que es un cambio que este modulo no ve pasar.
+     *
+     * @param mixed $valorEditado Lo que el cashflow escribio (FECHA_NUEVA)
+     * @param mixed $valorActual Lo que dice hoy el maestro
+     * @return bool
+     */
+    public static function marcaVigente($valorEditado, $valorActual) {
+        $e = Horizonte::normalizarFecha($valorEditado);
+        $a = Horizonte::normalizarFecha($valorActual);
+
+        return ($e !== null && $e === $a);
+    }
+
+    /**
+     * Los avisos por los importes cuya fecha efectiva ya venció.
+     *
+     * LO VENCIDO NO SE REUBICA EN HOY. Ver el encabezado de la clase: es la
+     * decision que separa a estas dos pestanas de las tres de cobranza
+     * proyectada, y este aviso es lo que la hace visible. Sin el, esos importes
+     * caen en el 'fuera del horizonte' generico de EjeVista, donde se
+     * confundirian con los que caen DESPUES del ultimo mes -que son otra cosa y
+     * no se arreglan editando nada-.
+     *
+     * SON DOS AVISOS, PORQUE NO TODO LO VENCIDO QUEDA AFUERA DEL CUADRO
+     * ----------------------------------------------------------------
+     * Esto no es obvio y costo descubrirlo: la columna del MES EN CURSO cubre
+     * los dias de ese mes que quedaron fuera del tramo diario, o sea DIAS QUE YA
+     * PASARON. Un pago vencido de este mismo mes cae ahi, como cualquier otro
+     * importe, y entra al tablero. Uno de agosto no: queda fuera del eje.
+     *
+     * Verificado contra la base el 19/09/2026: de 27 pagos vencidos, 4 por
+     * $ 256.768.590 caian en la columna de septiembre y 23 por $ 2.260.986.624
+     * quedaban afuera. Un solo aviso diciendo "no entran en ninguna columna"
+     * habria sido falso para los cuatro primeros, que es justo el error que este
+     * modulo no se permite: una nota que dice lo contrario de lo que hace el
+     * codigo.
+     *
+     * Ese reparto lo decide Horizonte::agrupar() y NO se toca: es la regla de
+     * "un importe va a un dia O a un mes" que hace sumables a las tres vistas.
+     * Lo unico que cambia es que ahora se dice cual es cual.
+     *
+     * SIN HORIZONTE se informa un aviso solo, sin afirmar donde cayo cada uno.
+     * Es lo que corresponde cuando no hay con que decidirlo: el eje es lo unico
+     * que sabe que columnas existen.
+     *
+     * SOLO INFORMA LO VENCIDO, y no lo que no tiene fecha, aunque las dos cosas
+     * queden fuera del eje. Lo segundo ya lo dicen dos avisos que existen y lo
+     * dicen mejor: en Proveedores Exterior, avisosValuacion() lo informa EN
+     * DOLARES -es la unica moneda en la que existe un importe que no se pudo
+     * valuar-, y en Crono Nacionalizacion lo informa EjeVista con el importe en
+     * pesos, que ahi si existe. Repetirlo aca daria "$ 0,00 sin fecha" al lado
+     * de "U$S 164.526,47 sin fecha", que es el mismo hecho contado dos veces y
+     * una de las dos mal.
+     *
+     * LA USAN LA PESTANA Y EL TABLERO: un solo texto, igual que
+     * avisosValuacion().
+     *
+     * @param array $filas Filas con 'VENCIDA' resuelta
+     * @param string $campoFecha Campo con la fecha efectiva
+     * @param string $campoImporte Campo con el importe a informar
+     * @param string $queEs Como se nombra la fecha en el mensaje
+     * @param Horizonte|null $h El eje, para saber que columnas existen
+     * @return array Lista de mensajes
+     */
+    public static function avisosVencidos($filas, $campoFecha, $campoImporte, $queEs, $h = null) {
+        $afuera = 0;
+        $adentro = 0;
+        $impAfuera = 0.0;
+        $impAdentro = 0.0;
+
+        foreach (is_array($filas) ? $filas : [] as $f) {
+            if (empty($f['VENCIDA'])) {
+                continue;
+            }
+
+            $importe = isset($f[$campoImporte]) ? floatval($f[$campoImporte]) : 0.0;
+
+            /* Si entro en alguna columna lo contesta el eje, fila por fila. No
+               se deduce comparando la fecha contra el primer dia del tramo:
+               cual mes del pasado tiene columna y cual no depende de
+               horizonte_dias, que es un parametro editable. */
+            if ($h !== null) {
+                $serie = $h->agrupar([$f], $campoFecha, $campoImporte);
+
+                if (array_sum($serie['dias']) + array_sum($serie['meses']) != 0) {
+                    $adentro++;
+                    $impAdentro += $importe;
+
+                    continue;
+                }
+            }
+
+            $afuera++;
+            $impAfuera += $importe;
+        }
+
+        $avisos = [];
+
+        if ($afuera > 0) {
+            $avisos[] = $afuera . ' contenedor(es) por ' . self::plata($impAfuera)
+                . ' tienen la ' . $queEs . ' ya vencida y su fecha quedó fuera del eje, así que '
+                . 'NO entran en ninguna columna. No se los reubica en hoy, porque nadie afirmó '
+                . 'que ese importe se mueve hoy. Están marcados en la grilla; cargales la fecha '
+                . 'nueva y entran solos.';
+        }
+
+        if ($adentro > 0) {
+            $avisos[] = $adentro . ' contenedor(es) por ' . self::plata($impAdentro)
+                . ' tienen la ' . $queEs . ' vencida pero dentro del mes en curso, así que SÍ '
+                . 'entran, en la columna de ese mes —que cubre los días previos al tramo '
+                . 'diario—. Están en el cuadro, en días que ya pasaron: es plata que todavía no '
+                . 'se movió, no proyección.';
+        }
+
+        return $avisos;
+    }
+
+    /** Un importe en pesos, con el formato del modulo */
+    private static function plata($n) {
+        return '$ ' . number_format(floatval($n), 2, ',', '.');
     }
 
     /**
@@ -355,7 +768,28 @@ class Comex {
     }
 
     /**
-     * Actualiza la fecha de pago estimada editada (Proveedores Exterior)
+     * Guarda una de las dos fechas editables ESCRIBIENDO SOBRE EL MAESTRO, y
+     * deja el rastro de quien lo hizo del lado del cashflow.
+     *
+     * UNA SOLA FUNCION PARA LOS DOS CAMPOS. Eran dos -updateFechaPago() y
+     * updateFechaNacPago()- que hacian lo mismo contra columnas distintas, y la
+     * segunda se habia quedado sin la transaccion y sin los mensajes de error
+     * que la primera fue ganando. Con el maestro de por medio esa divergencia
+     * deja de ser cosmetica: son escrituras sobre una tabla ajena.
+     *
+     * TODO EN UNA TRANSACCION: el UPDATE del maestro, la baja del rastro
+     * anterior, el rastro nuevo y -si corresponde- el descarte del override de
+     * cotizacion. Si fueran escrituras sueltas y fallara una, el maestro
+     * quedaria con una fecha que nadie puede atribuir a nadie, que es
+     * exactamente el estado que esta entrega viene a terminar.
+     *
+     * SI NO CAMBIA NADA, NO SE ESCRIBE. Tipear la misma fecha que ya estaba no
+     * es una edicion: un rastro por eso seria ruido en el historial, que es el
+     * lugar donde despues hay que poder leer que paso.
+     *
+     * NO HAY BAJAS FISICAS. Volver a editar la misma fecha marca VIGENTE = 0 la
+     * anterior e inserta una nueva. Mismo criterio que
+     * RO_T_CASHFLOW_ECHEQ_EXCLUIDO.
      *
      * SI CAMBIA EL MES DE PAGO, EL OVERRIDE DE COTIZACION SE DESCARTA
      * ---------------------------------------------------------------
@@ -365,21 +799,53 @@ class Comex {
      * alguien penso para noviembre sin que la pantalla lo indique. La curva del
      * mes nuevo es el dato que si corresponde.
      *
-     * VA EN LA MISMA TRANSACCION QUE EL UPDATE DE LA FECHA. Si fueran dos
-     * escrituras sueltas y fallara la segunda, la fila quedaria con la fecha
-     * nueva y la cotizacion vieja, que es exactamente el estado que esta regla
-     * existe para evitar.
-     *
      * Y SE DEVUELVE, para que el front lo avise. Un descarte silencioso hace
      * que el usuario vea cambiar un importe que el no toco y no tenga donde
-     * enterarse de por que.
+     * enterarse de por que. Solo aplica a 'PAGO': la nacionalizacion no se
+     * valua en dolares.
      *
-     * @param int $idMg ID del maestro de importación
-     * @param string $fechaPagoOrig Fecha original de pago
-     * @param string $fechaPagoEdit Fecha editada de pago
-     * @return array ['cotizacion_descartada', 'cotizacion_anterior', 'mes_anterior', 'mes_nuevo']
+     * @param string $campo 'PAGO' o 'NAC'
+     * @param int $idMg ID del contenedor en el maestro
+     * @param mixed $fechaNueva Fecha nueva, 'Y-m-d'
+     * @param string|null $usuario Quien edita. Todavia no hay login: llega null
+     * @return array ['campo', 'id_mg', 'fecha_anterior', 'fecha_nueva',
+     *                'sin_cambios', 'cotizacion_descartada', …]
      */
-    public function updateFechaPago($idMg, $fechaPagoOrig, $fechaPagoEdit) {
+    public function guardarFecha($campo, $idMg, $fechaNueva, $usuario = null) {
+        if (!$this->tieneHistorial()) {
+            throw new Exception($this->avisoSinHistorial());
+        }
+
+        $campo = strtoupper(trim((string) $campo));
+
+        /* LA VALIDACION QUE VALE ES LA DE ACA: el endpoint es alcanzable sin
+           pasar por la grilla. La columna sale de la lista cerrada y nunca de
+           lo que llego en el pedido. */
+        if (!isset(self::CAMPOS[$campo])) {
+            throw new Exception('No se sabe qué fecha hay que guardar. '
+                . 'Las editables son la estimada de pago y la de nacionalización.');
+        }
+
+        $columna = self::CAMPOS[$campo];
+        $idMg = intval($idMg);
+
+        if ($idMg <= 0) {
+            throw new Exception('Falta el contenedor al que corresponde la fecha.');
+        }
+
+        $nueva = Horizonte::normalizarFecha($fechaNueva);
+
+        /* VACIO NO BORRA. A diferencia del override de cotizacion -donde vaciar
+           es la unica forma de volver a la curva-, estas dos fechas son del
+           maestro y las usa la otra aplicacion: dejarlas en NULL desde aca seria
+           sacarle un dato a una pantalla que no es esta. Si hay que vaciarlas,
+           se hace desde Comercio Exterior. */
+        if ($nueva === null) {
+            throw new Exception('La fecha tiene que ser una fecha válida. '
+                . 'Desde el cashflow no se puede vaciar una fecha del maestro de Comercio '
+                . 'Exterior: esa pantalla la usa también la otra aplicación.');
+        }
+
         $cid = $this->conn->conectar('central');
 
         if (!$cid) {
@@ -388,62 +854,91 @@ class Comex {
 
         $tieneCotiz = $this->tieneCotizEdit();
 
-        // Verificar si ya existe un registro. Se traen tambien la fecha y la
-        // cotizacion vigentes: son las que deciden si el override sobrevive.
-        $sqlCheck = "SELECT ID, FECHA_PAGO_EDIT, "
-                  . ($tieneCotiz ? 'COTIZ_USD_EDIT' : 'CAST(NULL AS DECIMAL(12,4))')
-                  . " AS COTIZ_USD_EDIT
-                    FROM " . self::TABLA_EDIT . " WHERE ID_MG = ?";
-        $stmtCheck = sqlsrv_query($cid, $sqlCheck, [$idMg]);
+        /* Lo que dice hoy el maestro y que override tiene cargado la fila. Los
+           dos deciden el resto: el primero es el valor anterior del rastro, el
+           segundo si la cotizacion sobrevive al cambio de mes. */
+        $stmt = sqlsrv_query($cid,
+            "SELECT A." . $columna . " AS ACTUAL, "
+            . ($tieneCotiz ? 'D.COTIZ_USD_EDIT' : 'CAST(NULL AS DECIMAL(12,4))') . " AS COTIZ
+             FROM " . self::TABLA_MAESTRO . " A
+             LEFT JOIN " . self::TABLA_EDIT . " D ON D.ID_MG = A.ID
+             WHERE A.ID = ?", [$idMg]);
 
-        if ($stmtCheck === false) {
-            throw new Exception('Error al verificar registro existente');
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer la fecha actual del contenedor'));
         }
 
-        $exists = sqlsrv_fetch_array($stmtCheck, SQLSRV_FETCH_ASSOC);
-        sqlsrv_free_stmt($stmtCheck);
+        $fila = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
 
-        $r = self::descartaCotizacion(
-            $exists ? ($exists['FECHA_PAGO_EDIT'] ?? $fechaPagoOrig) : $fechaPagoOrig,
-            $fechaPagoEdit,
-            $exists ? $exists['COTIZ_USD_EDIT'] : null
-        );
+        /* UN CONTENEDOR QUE NO ESTA NO SE DA DE ALTA. Esta pestana edita el
+           padron de Comercio Exterior, no lo crea: un INSERT aca inventaria una
+           importacion en el maestro de la otra aplicacion. */
+        if (!$fila) {
+            throw new Exception('El contenedor ' . $idMg . ' no está en '
+                . self::TABLA_MAESTRO . '. Puede que lo hayan dado de baja desde Comercio '
+                . 'Exterior mientras esta pantalla estaba abierta: actualizá y volvé a '
+                . 'intentar.');
+        }
+
+        $anterior = Horizonte::normalizarFecha($fila['ACTUAL']);
+
+        $r = [
+            'campo' => $campo,
+            'id_mg' => $idMg,
+            'fecha_anterior' => $anterior,
+            'fecha_nueva' => $nueva,
+            'sin_cambios' => ($anterior === $nueva),
+            'cotizacion_descartada' => false,
+            'cotizacion_anterior' => null,
+            'mes_anterior' => null,
+            'mes_nuevo' => null
+        ];
+
+        if ($r['sin_cambios']) {
+            return $r;
+        }
+
+        if ($campo === 'PAGO') {
+            $r = array_merge($r,
+                self::descartaCotizacion($anterior, $nueva, $fila['COTIZ']));
+        }
 
         if (sqlsrv_begin_transaction($cid) === false) {
             throw new Exception('No se pudo abrir la transacción para guardar la fecha');
         }
 
         try {
-            if ($exists) {
-                /* El SET del override solo se arma si la columna existe: sin el
-                   script corrido, la instalacion guarda la fecha igual. */
-                $setCotiz = ($tieneCotiz && $r['cotizacion_descartada'])
-                    ? ', COTIZ_USD_EDIT = NULL'
-                    : '';
+            $this->ejecutar($cid,
+                "UPDATE " . self::TABLA_MAESTRO . " SET " . $columna . " = ? WHERE ID = ?",
+                [$nueva, $idMg],
+                'Error al guardar la fecha en ' . self::TABLA_MAESTRO);
 
-                $sqlUpdate = "UPDATE " . self::TABLA_EDIT . "
-                             SET FECHA_PAGO_ORIG = ?,
-                                 FECHA_PAGO_EDIT = ?,
-                                 FECHA_UPDATE = GETDATE()" . $setCotiz . "
-                             WHERE ID_MG = ?";
-                $params = [$fechaPagoOrig, $fechaPagoEdit, $idMg];
-                $stmt = sqlsrv_query($cid, $sqlUpdate, $params);
-            } else {
-                /* Insertar nuevo registro (con valores por defecto para NAC).
-                   COTIZ_USD_EDIT no entra en la lista de columnas: una fila
-                   nueva no tiene override, y NULL es justamente eso. */
-                $sqlInsert = "INSERT INTO " . self::TABLA_EDIT . "
-                             (ID_MG, FECHA_NAC_ORIG, FECHA_NAC_EDIT, FECHA_PAGO_ORIG, FECHA_PAGO_EDIT, FECHA_UPDATE)
-                             VALUES (?, '1900-01-01', '1900-01-01', ?, ?, GETDATE())";
-                $params = [$idMg, $fechaPagoOrig, $fechaPagoEdit];
-                $stmt = sqlsrv_query($cid, $sqlInsert, $params);
+            $this->ejecutar($cid,
+                "UPDATE " . self::TABLA_HISTORIAL . "
+                 SET VIGENTE = 0, FECHA_BAJA = GETDATE()
+                 WHERE ID_MG = ? AND CAMPO = ? AND VIGENTE = 1",
+                [$idMg, $campo],
+                'Error al dar de baja el rastro anterior');
+
+            $this->ejecutar($cid,
+                "INSERT INTO " . self::TABLA_HISTORIAL . "
+                     (ID_MG, CAMPO, FECHA_ANTERIOR, FECHA_NUEVA, VIGENTE, USUARIO, FECHA_ALTA)
+                 VALUES (?, ?, ?, ?, 1, ?, GETDATE())",
+                [$idMg, $campo, $anterior, $nueva, $usuario],
+                'Error al guardar el rastro de la edición');
+
+            /* El override solo se limpia si la columna existe: sin el script de
+               cotizacion corrido, la instalacion guarda la fecha igual. */
+            if ($tieneCotiz && $r['cotizacion_descartada']) {
+                $this->ejecutar($cid,
+                    "UPDATE " . self::TABLA_EDIT . "
+                     SET COTIZ_USD_EDIT = NULL, FECHA_UPDATE = GETDATE()
+                     WHERE ID_MG = ?",
+                    [$idMg],
+                    'Error al descartar la cotización cargada a mano');
             }
 
-            if ($stmt === false) {
-                throw new Exception($this->errorSql('Error al guardar la fecha'));
-            }
-
-            sqlsrv_free_stmt($stmt);
             sqlsrv_commit($cid);
         } catch (Throwable $e) {
             sqlsrv_rollback($cid);
@@ -455,11 +950,96 @@ class Comex {
     }
 
     /**
+     * Corre una escritura y lanza con el error de SQL Server si falla.
+     *
+     * Existe para que las cuatro escrituras de la transaccion de guardarFecha()
+     * no sean cuatro bloques identicos de if/throw: la que se olvide el
+     * chequeo dejaria la transaccion confirmando a medias sin que nadie se
+     * entere.
+     *
+     * @param resource $cid
+     * @param string $sql
+     * @param array $params
+     * @param string $contexto
+     * @return void
+     */
+    private function ejecutar($cid, $sql, $params, $contexto) {
+        $stmt = sqlsrv_query($cid, $sql, $params);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql($contexto));
+        }
+
+        sqlsrv_free_stmt($stmt);
+    }
+
+    /**
+     * El historial completo de ediciones de un contenedor, el vigente primero.
+     *
+     * LAS NO VIGENTES SON EL PUNTO: con un UPDATE, un dedazo corregido a los
+     * cinco minutos y una decision que estuvo vigente tres semanas son
+     * indistinguibles despues del hecho, y la segunda es la que explica por que
+     * el egreso proyectado de la semana pasada caia en otra columna.
+     *
+     * @param int $idMg
+     * @param string|null $campo 'PAGO', 'NAC' o null para los dos
+     * @return array
+     */
+    public function getHistorialFechas($idMg, $campo = null) {
+        if (!$this->tieneHistorial()) {
+            return [];
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $campo = ($campo === null) ? null : strtoupper(trim((string) $campo));
+        $params = [intval($idMg)];
+        $filtro = '';
+
+        if ($campo !== null && isset(self::CAMPOS[$campo])) {
+            $filtro = ' AND CAMPO = ?';
+            $params[] = $campo;
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT ID, ID_MG, CAMPO, FECHA_ANTERIOR, FECHA_NUEVA, VIGENTE,
+                    USUARIO, FECHA_ALTA, FECHA_BAJA
+             FROM " . self::TABLA_HISTORIAL . "
+             WHERE ID_MG = ?" . $filtro . "
+             ORDER BY VIGENTE DESC, FECHA_ALTA DESC, ID DESC", $params);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer el historial de fechas'));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $row = self::aTexto($row, ['FECHA_ANTERIOR', 'FECHA_NUEVA']);
+
+            foreach (['FECHA_ALTA', 'FECHA_BAJA'] as $c) {
+                if (isset($row[$c]) && $row[$c] instanceof DateTime) {
+                    $row[$c] = $row[$c]->format('Y-m-d H:i:s');
+                }
+            }
+
+            $v[] = $row;
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $v;
+    }
+
+    /**
      * Si al mover la fecha de pago hay que descartar el override de cotizacion.
      *
      * Estatica y pura: es la regla, y se prueba sin base. Ver la nota de
-     * updateFechaPago() sobre por que un override no sobrevive a un cambio de
-     * mes.
+     * guardarFecha() sobre por que un override no sobrevive a un cambio de mes.
      *
      * SIN OVERRIDE NO HAY NADA QUE DESCARTAR, aunque cambie el mes. Y si la
      * fecha nueva no tiene mes utilizable, tampoco se descarta: no se pudo
@@ -551,9 +1131,11 @@ class Comex {
                  WHERE ID_MG = ?",
                 [$valor, $idMg]);
         } else {
-            /* Mismos centinelas que usa updateFechaPago() al insertar: esta
-               tabla sirve a las dos pestanas y una fila nueva no puede dejar
-               las fechas de la otra en NULL. */
+            /* LOS CENTINELAS SIGUEN HACIENDO FALTA aunque nadie lea ya esas
+               columnas: FECHA_NAC_ORIG y FECHA_NAC_EDIT nacieron NOT NULL, y
+               esta fila se inserta solo para guardar el override. Vaciarlas
+               seria un ALTER sobre una tabla que este modulo no necesita
+               cambiar, y ponerles una fecha real inventaria una edicion. */
             $stmt = sqlsrv_query($cid,
                 "INSERT INTO " . self::TABLA_EDIT . "
                      (ID_MG, FECHA_NAC_ORIG, FECHA_NAC_EDIT, COTIZ_USD_EDIT, FECHA_UPDATE)
@@ -572,48 +1154,68 @@ class Comex {
 
 
     /**
-     * Obtiene los datos del cronograma de nacionalización
-     * Aplica lógica de FECHA_NAC_EDIT vs FECHA_NAC_ORIG
+     * Obtiene los datos del cronograma de nacionalización.
+     *
+     * SE LISTA POR FECHA DE NACIONALIZACION, que es la que decide cuándo
+     * impacta el gasto. Antes el orden era COALESCE(FECHA_NAC_EDIT,
+     * FECHA_DESP_ADU, FECHA_ARR, FECHA_EMB, FECHA_EST_EMB) y el corte era por
+     * fecha de embarque: la tabla se leia por una fecha y se ordenaba por
+     * cualquiera de cinco, asi que dos contenedores con la misma
+     * nacionalizacion podian quedar en cualquier orden entre si.
+     *
+     * Ahora manda FECHA_DESP_ADU -del maestro- y nada mas. La de embarque queda
+     * como la ultima desempatadora: es informacion de la fila, no el criterio.
+     *
+     * SIN FECHA DE NACIONALIZACION LA FILA NO SE PIERDE: va al final del
+     * listado y su importe se informa aparte. Hoy todos los contenedores la
+     * tienen -la calcula la app de Comercio Exterior- pero una fila que
+     * desaparece porque le falta un dato es justamente lo que este modulo evita
+     * en todos lados.
+     *
+     * @param string|null $hoy Para poder probar el corte de vencidos sin
+     *                         depender de que dia es. Por defecto, hoy.
      * @return array Listado de importaciones con fechas de nacionalización
      */
-    public function getCronoNacionalizacion() {
+    public function getCronoNacionalizacion($hoy = null) {
         $cid = $this->conn->conectar('central');
-        
+
         if (!$cid) {
             throw new Exception('No se pudo conectar a la base de datos');
         }
 
-        // Query base
+        $hoy = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+
         $sql = "SELECT
                     A.ID,
                     A.FECHA_EST_EMB,
-                    A.PROVEEDOR, 
-                    A.CONTENEDOR, 
-                    A.ORDEN_COMPRA, 
-                    UPPER(A.DESPACHANTE) DESPACHANTE, 
-                    C.IMPORTE_EST,  
-                    A.FECHA_EMB ETD, 
-                    CASE WHEN A.FECHA_EMB IS NULL THEN 0 ELSE 1 END ETD_CONFIRM, 
-                    A.FECHA_ARR ETA, 
-                    CASE WHEN A.ETA_CONFIRMADA = 1 THEN 1 ELSE 0 END ETA_CONFIRM, 
+                    A.PROVEEDOR,
+                    A.CONTENEDOR,
+                    A.ORDEN_COMPRA,
+                    UPPER(A.DESPACHANTE) DESPACHANTE,
+                    C.IMPORTE_EST,
+                    A.FECHA_EMB ETD,
+                    CASE WHEN A.FECHA_EMB IS NULL THEN 0 ELSE 1 END ETD_CONFIRM,
+                    A.FECHA_ARR ETA,
+                    CASE WHEN A.ETA_CONFIRMADA = 1 THEN 1 ELSE 0 END ETA_CONFIRM,
                     A.FECHA_DESP_ADU FECHA_NAC,
-                    D.FECHA_NAC_EDIT
-                FROM RO_T_IMPORTACIONES_ENCABEZADO A 
-                LEFT JOIN RO_T_IMPORTACIONES_DETALLE B ON A.ID = B.ID_MG 
+                    " . $this->rastroSelect('NAC') . "
+                FROM " . self::TABLA_MAESTRO . " A
+                LEFT JOIN RO_T_IMPORTACIONES_DETALLE B ON A.ID = B.ID_MG
                 LEFT JOIN
                 (
-                    SELECT ID_MG, SUM(IMPORTE) IMPORTE_EST 
-                    FROM RO_T_IMPORTACIONES_ESTIMACION_DETALLE 
+                    SELECT ID_MG, SUM(IMPORTE) IMPORTE_EST
+                    FROM RO_T_IMPORTACIONES_ESTIMACION_DETALLE
                     WHERE ID_CE BETWEEN 3 AND 10
-                    GROUP BY ID_MG  
+                    GROUP BY ID_MG
                 ) C ON A.ID = C.ID_MG
-                LEFT JOIN RO_T_CASHFLOW_COMEX_CRONO_NAC D ON A.ID = D.ID_MG
-                WHERE B.ID_MG IS NULL 
-                AND ISNULL(A.FECHA_EMB, A.FECHA_EST_EMB) >= CAST(GETDATE() AS DATE)
-                ORDER BY COALESCE(D.FECHA_NAC_EDIT, A.FECHA_DESP_ADU, A.FECHA_ARR, A.FECHA_EMB, A.FECHA_EST_EMB)";
+                " . $this->rastroJoin('NAC') . "
+                WHERE B.ID_MG IS NULL
+                ORDER BY CASE WHEN A.FECHA_DESP_ADU IS NULL THEN 1 ELSE 0 END,
+                         A.FECHA_DESP_ADU,
+                         ISNULL(A.FECHA_EMB, A.FECHA_EST_EMB)";
 
         $stmt = sqlsrv_query($cid, $sql);
-        
+
         if ($stmt === false) {
             $errors = sqlsrv_errors();
             $errorMsg = 'Error en la consulta SQL: ';
@@ -624,94 +1226,19 @@ class Comex {
             }
             throw new Exception($errorMsg);
         }
-        
+
         $v = [];
-        
+
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            // Convertir objetos DateTime a strings
-            if (isset($row['FECHA_EST_EMB']) && $row['FECHA_EST_EMB'] instanceof DateTime) {
-                $row['FECHA_EST_EMB'] = $row['FECHA_EST_EMB']->format('Y-m-d');
-            }
-            if (isset($row['ETD']) && $row['ETD'] instanceof DateTime) {
-                $row['ETD'] = $row['ETD']->format('Y-m-d');
-            }
-            if (isset($row['ETA']) && $row['ETA'] instanceof DateTime) {
-                $row['ETA'] = $row['ETA']->format('Y-m-d');
-            }
-            if (isset($row['FECHA_NAC']) && $row['FECHA_NAC'] instanceof DateTime) {
-                $row['FECHA_NAC'] = $row['FECHA_NAC']->format('Y-m-d');
-            }
-            if (isset($row['FECHA_NAC_EDIT']) && $row['FECHA_NAC_EDIT'] instanceof DateTime) {
-                $row['FECHA_NAC_EDIT'] = $row['FECHA_NAC_EDIT']->format('Y-m-d');
-            }
-            
-            // Determinar la fecha efectiva a utilizar para el cronograma
-            $row['FECHA_NAC_EFECTIVA'] = $row['FECHA_NAC_EDIT'] ?? $row['FECHA_NAC'];
-            
-            $v[] = $row;
+            $row = self::aTexto($row, ['FECHA_EST_EMB', 'ETD', 'ETA', 'FECHA_NAC',
+                'EDIT_ANTERIOR', 'EDIT_VALOR', 'EDIT_FECHA']);
+
+            $v[] = self::conFechaEfectiva($row, 'FECHA_NAC', 'FECHA_NAC_EFECTIVA', $hoy);
         }
-        
+
         sqlsrv_free_stmt($stmt);
-        
+
         return $v;
-    }
-
-    /**
-     * Actualiza la fecha de nacionalización editada
-     * @param int $idMg ID del maestro de importación
-     * @param string $fechaNacOrig Fecha original de nacionalización
-     * @param string $fechaNacEdit Fecha editada de nacionalización
-     * @return bool True si se actualizó correctamente
-     */
-    public function updateFechaNacPago($idMg, $fechaNacOrig, $fechaNacEdit) {
-        $cid = $this->conn->conectar('central');
-        
-        if (!$cid) {
-            throw new Exception('No se pudo conectar a la base de datos');
-        }
-
-        // Verificar si ya existe un registro
-        $sqlCheck = "SELECT ID FROM RO_T_CASHFLOW_COMEX_CRONO_NAC WHERE ID_MG = ?";
-        $stmtCheck = sqlsrv_query($cid, $sqlCheck, [$idMg]);
-        
-        if ($stmtCheck === false) {
-            throw new Exception('Error al verificar registro existente');
-        }
-        
-        $exists = sqlsrv_fetch_array($stmtCheck, SQLSRV_FETCH_ASSOC);
-        sqlsrv_free_stmt($stmtCheck);
-        
-        if ($exists) {
-            // Actualizar registro existente
-            $sqlUpdate = "UPDATE RO_T_CASHFLOW_COMEX_CRONO_NAC 
-                         SET FECHA_NAC_ORIG = ?, 
-                             FECHA_NAC_EDIT = ?, 
-                             FECHA_UPDATE = GETDATE()
-                         WHERE ID_MG = ?";
-            $params = [$fechaNacOrig, $fechaNacEdit, $idMg];
-            $stmt = sqlsrv_query($cid, $sqlUpdate, $params);
-        } else {
-            // Insertar nuevo registro
-            $sqlInsert = "INSERT INTO RO_T_CASHFLOW_COMEX_CRONO_NAC 
-                         (ID_MG, FECHA_NAC_ORIG, FECHA_NAC_EDIT, FECHA_UPDATE)
-                         VALUES (?, ?, ?, GETDATE())";
-            $params = [$idMg, $fechaNacOrig, $fechaNacEdit];
-            $stmt = sqlsrv_query($cid, $sqlInsert, $params);
-        }
-        
-        if ($stmt === false) {
-            $errors = sqlsrv_errors();
-            $errorMsg = 'Error al guardar la fecha: ';
-            if ($errors) {
-                foreach ($errors as $error) {
-                    $errorMsg .= $error['message'] . ' ';
-                }
-            }
-            throw new Exception($errorMsg);
-        }
-        
-        sqlsrv_free_stmt($stmt);
-        return true;
     }
 
     /**

@@ -65,18 +65,19 @@
                 <div>
                     <h5 class="mb-0">Cronograma de Nacionalización</h5>
                     <small class="text-muted">
-                        Gestión de fechas de pago de nacionalización
+                        Contenedores ordenados por fecha de nacionalización
                         <i class="fas fa-info-circle ms-1"
-                           title="Click en la fecha de nacionalización para editarla. Las fechas editadas se muestran con fondo amarillo."></i>
+                           title="Click en la fecha de nacionalización para editarla. Se guarda en el maestro de Comercio Exterior, así que la ve también esa aplicación. Las vencidas están marcadas: su importe no entra en ninguna columna hasta que se les cargue una fecha nueva."></i>
                     </small>
                 </div>
-                <!-- Mismo marcado que el buscador de Echeqs: las dos pestañas
-                     tienen la misma tabla ancha con el mismo problema, y un
-                     control que se ve distinto en cada pantalla se lee como
-                     otro control. Busca SÓLO Proveedor, Contenedor y Orden de
-                     Compra: son los tres campos por los que se busca un
-                     contenedor, y mirar toda la fila haría que un importe o
-                     una fecha den falsos positivos. -->
+                <!-- Mismo marcado y mismo comportamiento que el buscador de
+                     Echeqs y el de Proveedores Exterior: la misma tabla ancha
+                     con el mismo problema, y un control que se ve distinto en
+                     cada pantalla se lee como otro control. Busca SÓLO
+                     Proveedor, Contenedor y Orden de Compra: son los tres
+                     campos por los que se busca un contenedor, y mirar toda la
+                     fila haría que un importe o una fecha den falsos positivos.
+                     Ver Js/Comex-fechas.js. -->
                 <div class="search-box-container">
                     <div class="input-group input-group-sm">
                         <span class="input-group-text bg-light border-end-0">
@@ -167,4 +168,7 @@
 
 <?php include __DIR__ . '/../Components/help_modal_comex.php'; ?>
 
+<!-- La celda de fecha editable y el buscador, compartidos por las dos
+     pestanas de Comercio Exterior. Ver su encabezado. -->
+<script src="Js/Comex-fechas.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Comex-Crono_nacionalizacion.js?v=<?php echo time(); ?>"></script>
