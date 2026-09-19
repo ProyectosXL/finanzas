@@ -555,7 +555,7 @@ Hoy tienen datos reales dieciséis: **Ventas**, **Cobranzas FR**, **Cobranzas Ma
 
 ### Módulos retirados
 
-Un módulo puede dejar de ser la fuente de un dato porque otro circuito lo reemplazó. No se borra del registro —las filas que lo apunten se volverían inválidas— ni se marca `'disponible' => false`, que diría *"todavía no construido"* sobre algo que existe y funciona. Lleva `'retirado' => 'por qué, y qué lo reemplaza'`: el proveedor sigue sirviendo, el motor avisa en cada fila que todavía lo lea que ese dato ya no se mantiene, el validador de estructura lo marca como advertencia (no como error: bloquear el guardado impediría justamente corregirla), y el editor lo muestra como *Retirado* en el desplegable y en la lista de módulos. Es lo que pasó con Otros Ingresos cuando el stock de cobertura pasó a salir de las cuentas de fondo.
+Un módulo puede dejar de ser la fuente de un dato porque otro circuito lo reemplazó. No se borra del registro —las filas que lo apunten se volverían inválidas— ni se marca `'disponible' => false`, que diría *"todavía no construido"* sobre algo que existe y funciona. Lleva `'retirado' => 'por qué, y qué lo reemplaza'` y **no declara `tab`**: el proveedor sigue sirviendo, el motor avisa en cada fila que todavía lo lea que ese dato ya no se mantiene, el validador de estructura lo marca como advertencia (no como error: bloquear el guardado impediría justamente corregirla), el editor lo muestra como *Retirado* en el desplegable y en la lista de módulos, y su fila no queda como enlace, porque la pantalla de carga se eliminó. Es lo que pasó con Otros Ingresos cuando el stock de cobertura pasó a salir de las cuentas de fondo.
 
 > **Exportaciones Tasky valúa todas sus facturas al dólar de hoy**, y no cada una al tipo de cambio del mes en que se cobra. Se aparta a propósito de la doctrina de `Class/Cotizacion.php`, que es para series históricas: acá la deuda está fija en dólares y el cobro es futuro, y valuar a hoy es no suponer devaluación. Ver `README-exportaciones-tasky.md`.
 
@@ -822,16 +822,15 @@ El motor verifica que `cierre[n] == apertura[n+1]`; si no da, deja un aviso y no
 
 La lista de pestañas y el estado de cada una salen de `Class/Menu.php`; `Components/sidebar.php` sólo dibuja. Antes eran veintiséis enlaces escritos a mano e iguales entre sí, y por eso no se podía ver de un vistazo qué está hecho.
 
-**Cuatro estados, no dos:**
+**Tres estados, no dos:**
 
 | Estado | Qué significa | Cómo se ve |
 | --- | --- | --- |
 | `datos` | La pestaña lee del sistema. Se puede confiar en lo que muestra | Normal, sin marca |
 | `maqueta` | **Dibuja pero los números son de ejemplo** | Ícono ámbar 📐 |
 | `pendiente` | Todavía no se desarrolló; muestra el aviso de *en construcción* | Atenuada, ícono 🪖 |
-| `retirada` | **Lee del sistema, pero su dato ya no alimenta el tablero**: otro circuito lo reemplazó. Se conserva por el histórico | Atenuada, ícono ámbar 🗃️ |
 
-`retirada` llegó con las cuentas de fondo de Saldos, que reemplazaron a las dos pestañas de Otros Ingresos. Una pantalla que abre, funciona y guarda, y cuyo número no va a ningún lado, es el mismo peligro que una maqueta, y por eso se marca igual y no cuenta en el `n/m`. Las dos pestañas además lo dicen arriba de todo.
+> **No hay un cuarto estado para una pestaña que dejó de alimentar el tablero.** Las dos de Otros Ingresos quedaron en esa situación cuando el stock de cobertura pasó a salir de las cuentas de fondo de Saldos, y **se eliminaron** junto con su categoría: una pantalla que abre, funciona y guarda, y cuyo número no va a ningún lado, confunde aunque lleve un cartel. Sus tablas quedan, por el histórico. Ver `README-otros-ingresos.md`.
 
 **El estado del medio es el que importa, y es el que faltaba.** Hoy lo tiene el **Dashboard**: no tiene una sola llamada al servidor, así que sus números están escritos a mano. Un placeholder es honesto —dice que no está hecho—; una maqueta es peor, porque tiene la forma de una pantalla terminada y números que parecen reales. Meterla en la misma bolsa que las pestañas con datos sería el error caro que este módulo evita en todos lados.
 
@@ -849,7 +848,7 @@ La guarda va en esa dirección a propósito: lo que hay que evitar es que el men
 
 ### El contador de cada categoría
 
-Cada categoría muestra `n/m`: cuántas de sus pestañas tienen datos del sistema. Sirve para ver el avance sin abrirla, y **cuenta sólo `datos`** —una maqueta no suma—, que es lo que hace que el número sea confiable. Hoy: Ingresos 7/7, Otros Ingresos 0/2 (retiradas), Comercio Exterior 2/2, y el resto en cero.
+Cada categoría muestra `n/m`: cuántas de sus pestañas tienen datos del sistema. Sirve para ver el avance sin abrirla, y **cuenta sólo `datos`** —una maqueta no suma—, que es lo que hace que el número sea confiable. Hoy: Ingresos 7/7, Comercio Exterior 2/2, Proveedores 1/3, y el resto en cero.
 
 **Otros Ingresos va después de Ingresos y aparte**: Ingresos agrupa lo que sale de un circuito del sistema y esa categoría agrupa lo que se tipea. La diferencia importa al leer un número — en una fila de Ingresos un cero es *"no hay movimientos"* y en una de esas es *"nadie cargó nada todavía"*. Ver `README-otros-ingresos.md`.
 
@@ -1055,11 +1054,8 @@ cashflow/Tabs/parametros_estructura.php     El editor
 cashflow/Js/Cashflow.js
 cashflow/Js/Parametros-Estructura.js
 cashflow/Css/Cashflow.css
-cashflow/Class/OtrosIngresos.php            Otros Ingresos (README-otros-ingresos.md)
+cashflow/Class/OtrosIngresos.php            Otros Ingresos, retirado (README-otros-ingresos.md)
 cashflow/Class/Providers/OtrosIngresosProvider.php
-cashflow/Controller/OtrosIngresosController.php
-cashflow/Tabs/dolares_comitente.php
-cashflow/Tabs/saldo_inversiones.php         El segundo concepto: se carga EN PESOS
 sql/cashflow_saldo_inversiones.sql
 sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql      Cotización diaria, para valuar los dólares
 cashflow/Class/Cobertura.php                Aplicación de inversiones para cubrir baches; los fondos son las cuentas
@@ -1078,7 +1074,7 @@ Modificados: `Class/Ventas.php` (delega el eje y acepta uno inyectado) · `Class
 
 De la rama `feature/cashflow-estructura-inversiones`: `Class/Cashflow.php` (el saldo mostrado entra en `FLUJO_NETO` y en el indicador de Ingresos; el stock de cobertura sale de las columnas; la cobertura va aparte en el KPI) · `Class/CashflowEstructura.php` (los dos tipos nuevos) · `Class/CashflowRegistry.php` (`COBERTURA`; serie `STOCK` en `SALDO_INVERSIONES`) · `Class/Cotizacion.php` (`ultimaHasta()` y la vista diaria) · `Class/OtrosIngresos.php` (`valuarDolares()`, la cuenta única) · `Providers/OtrosIngresosProvider.php` · `Controller/OtrosIngresosController.php` · `Js/Cashflow.js` y `Css/Cashflow.css` (celda editable, stock en guiones, columnas negativas) · `Js/Parametros-Estructura.js` (rótulos de los tipos nuevos) · `Tabs/cashflow.php`, `Tabs/dolares_comitente.php`, `Tabs/saldo_inversiones.php` · `Js/Ingresos-Cobranzas_may.js` y su CSS (editor de fecha manual) · `sql/cashflow_saldo_inversiones.sql` y `sql/cashflow_cobranzas_fecha_manual.sql` (encabezados reescritos: decían lo contrario de lo que hace el código).
 
-De la rama `feature/cuentas-inversion`: `sql/cashflow_saldos_cuentas_fondo.sql`, `Class/Fondos.php`, `Providers/FondosProvider.php` y `tests/test_fondos.php` (nuevos) · `Class/CashflowProvider.php` (`por_fondo` y `fondos` en el contrato, y `normalizar()` las deja pasar) · `Class/Cashflow.php` (`resolverCobertura()` cruza por clave de cuenta; aviso por módulo retirado) · `Class/CashflowRegistry.php` (`FONDO_INVERSION`, `FONDO_COMITENTE`; `'retirado'` y `retirado()`; Otros Ingresos sin `origen_cobertura`) · `Class/CashflowEstructura.php` (advertencia por módulo retirado) · `Class/Cobertura.php` (`origenes()` y los helpers puros sobre la lista; se fueron `ORIGENES`, `MONEDA_POR_FONDO` y `ORIGEN_DEFECTO`) · `Providers/CoberturaProvider.php` (`por_fondo` y los nombres; aviso por aplicaciones sin cuenta) · `Controller/CoberturaController.php` (los orígenes salen de las cuentas) · `Class/Saldos.php`, `Controller/SaldosController.php`, `Tabs/saldos.php`, `Js/Saldos.js`, `Css/Saldos.css`, `Tabs/parametros_saldos.php`, `Js/Parametros-Saldos.js`, `Class/Parametros.php`, `Controller/ParametrosController.php` (ver `README-saldos.md`) · `Class/Menu.php`, `Css/sidebar.css` (el estado `retirada`) · `Js/Parametros-Estructura.js` (los módulos retirados, marcados) · `Tabs/dolares_comitente.php`, `Tabs/saldo_inversiones.php` (el cartel de retiro), `Controller/OtrosIngresosController.php`, `Js/OtrosIngresos-Dolares_comitente.js` (se sacó la tarjeta *Disponible sin usar*, que filtraba por una clave que ya no existe) · `tests/test_cobertura.php`, `tests/test_otros_ingresos.php`, `tests/test_menu.php`, `tests/test_providers.php`.
+De la rama `feature/cuentas-inversion`: `sql/cashflow_saldos_cuentas_fondo.sql`, `Class/Fondos.php`, `Providers/FondosProvider.php` y `tests/test_fondos.php` (nuevos) · `Class/CashflowProvider.php` (`por_fondo` y `fondos` en el contrato, y `normalizar()` las deja pasar) · `Class/Cashflow.php` (`resolverCobertura()` cruza por clave de cuenta; aviso por módulo retirado) · `Class/CashflowRegistry.php` (`FONDO_INVERSION`, `FONDO_COMITENTE`; `'retirado'` y `retirado()`; Otros Ingresos sin `origen_cobertura`) · `Class/CashflowEstructura.php` (advertencia por módulo retirado) · `Class/Cobertura.php` (`origenes()` y los helpers puros sobre la lista; se fueron `ORIGENES`, `MONEDA_POR_FONDO` y `ORIGEN_DEFECTO`) · `Providers/CoberturaProvider.php` (`por_fondo` y los nombres; aviso por aplicaciones sin cuenta) · `Controller/CoberturaController.php` (los orígenes salen de las cuentas) · `Class/Saldos.php`, `Controller/SaldosController.php`, `Tabs/saldos.php`, `Js/Saldos.js`, `Css/Saldos.css`, `Tabs/parametros_saldos.php`, `Js/Parametros-Saldos.js`, `Class/Parametros.php`, `Controller/ParametrosController.php` (ver `README-saldos.md`) · `Class/Menu.php` (se va la categoría Otros Ingresos) · `Js/Parametros-Estructura.js` (los módulos retirados, marcados) · `Controller/TabController.php` (sin las dos pestañas) · **eliminados** `Tabs/dolares_comitente.php`, `Tabs/saldo_inversiones.php`, sus JS y CSS y `Controller/OtrosIngresosController.php` · `tests/test_cobertura.php`, `tests/test_otros_ingresos.php`, `tests/test_menu.php`, `tests/test_providers.php`.
 
 De la rama `feature/echeqs-excluir`: `sql/cashflow_echeqs_excluir.sql` (nuevo) · `Class/Echeqs.php` (la exclusión entera, y el corte por excluido en las dos consultas de cartera) · `Providers/EcheqsProvider.php` (tres series en vez de una; `seriesDeItem()` y `repartir()` estáticas y puras, para poder verificar el corte sin depender de que haya algo excluido) · `Class/CashflowRegistry.php` (las tres series y su `componentes`) · `Controller/EcheqsController.php` (`excluirCheques`, `getHistorialExclusion`, y los totales netos en el payload) · `Tabs/echeqs.php`, `Js/Ingresos-Echeqs.js`, `Css/Ingresos-Echeqs.css` (el interruptor, la barra de selección y el diálogo del motivo) · `tests/test_echeqs.php`.
 

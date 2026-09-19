@@ -13,7 +13,9 @@ require_once __DIR__ . '/../Cotizacion.php';
  * dos filas de stock del tablero apuntan ahi. Este proveedor sigue declarado y
  * sigue leyendo sus tablas -que no se borran, por el historico- para que una
  * fila que todavia lo apunte no quede invalida y para poder volver atras desde
- * Parametros; el motor avisa que ese dato ya no se mantiene. Ya no declara a
+ * Parametros; el motor avisa que ese dato ya no se mantiene. Las PESTANAS de
+ * carga y su controller se eliminaron: ya no hay forma de cargar una foto
+ * nueva, solo de leer las que quedaron. Ya no declara a
  * que fondo pertenece cada stock: los fondos son cuentas y el reparto viaja
  * con la serie ('por_fondo'), cosa que estas series no hacen. Todo lo que
  * sigue describe como funcionaba, y sigue siendo cierto para lo que tiene

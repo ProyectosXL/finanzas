@@ -39,7 +39,7 @@ foreach ($menu['categorias'] as $cat) {
 }
 
 // 2 arriba + 24 en las seis categorias + 1 al pie
-chequear('el menu tiene los 27 items', 27, count($todos));
+chequear('el menu tiene los 25 items', 25, count($todos));
 
 $incompletos = [];
 
@@ -182,37 +182,25 @@ foreach ($menu['categorias'] as $cat) {
 chequear('Ingresos tiene sus 7 pestanas con datos', 7, $porCategoria['Ingresos']['con_datos']);
 chequear('y son 7 en total', 7, $porCategoria['Ingresos']['total']);
 
-// Otros Ingresos es la categoria de lo que se carga a mano: dos conceptos
-// -dolares en cuenta comitente y saldo de inversiones- que estan RETIRADOS
-// desde que son cuentas de fondo de Saldos. Las pestanas siguen -conservan el
-// historico- pero no cuentan como pestanas con datos: lo que se carga ahi ya
-// no llega al tablero, y el contador n/m tiene que decirlo.
-chequear('Otros Ingresos existe', true, isset($porCategoria['OtrosIngresos']));
-chequear('con sus dos pestanas', 2, $porCategoria['OtrosIngresos']['total']);
-chequear('ninguna cuenta como pestana con datos', 0, $porCategoria['OtrosIngresos']['con_datos']);
-chequear('arranca cerrada', false, $porCategoria['OtrosIngresos']['abierta']);
+// Otros Ingresos era la categoria de lo que se carga a mano: las fotos del
+// saldo invertido y de los dolares de la cuenta comitente. Desde que esos son
+// cuentas de fondo de Saldos (Saldos -> Fondos), las dos pestanas se
+// ELIMINARON: una pantalla que abre y guarda, y cuyo numero no va a ningun
+// lado, confunde aunque lleve un cartel. Ni la categoria ni los archivos
+// existen; las tablas si, por el historico.
+chequear('Otros Ingresos ya no esta en el menu', false, isset($porCategoria['OtrosIngresos']));
+chequear('ni sus pestanas', false,
+    isset($porTab['saldo_inversiones']) || isset($porTab['dolares_comitente']));
+chequear('y sus archivos no existen', false,
+    file_exists(__DIR__ . '/../cashflow/Tabs/saldo_inversiones.php')
+    || file_exists(__DIR__ . '/../cashflow/Tabs/dolares_comitente.php'));
 
-seccion('el cuarto estado: retirada');
+// Sin archivo, TabController cae al placeholder: el menu tampoco puede
+// ofrecerlas, o prometeria una pantalla que muestra "en construccion".
+chequear('para el menu son pendientes, por si alguien las vuelve a listar',
+    Menu::PENDIENTE, Menu::estado('saldo_inversiones', Menu::DATOS));
 
-// Retirada no es pendiente: la pantalla abre y funciona. Y no es datos: su
-// numero no va a ningun lado. Se marca, como la maqueta, y no suma.
-chequear('Saldo de Inversiones esta retirada', Menu::RETIRADA, $porTab['saldo_inversiones']['estado']);
-chequear('Dolares Cuenta Comitente tambien', Menu::RETIRADA, $porTab['dolares_comitente']['estado']);
-chequear('una retirada lleva marca', true, $porTab['saldo_inversiones']['icono_estado'] !== '');
-chequear('y un tooltip que dice que la reemplaza', true,
-    strpos($porTab['saldo_inversiones']['titulo'], 'Saldos') !== false);
-chequear('sigue sin ser un placeholder', false, Menu::esPlaceholder('saldo_inversiones'));
-chequear('el estado declarado se respeta', Menu::RETIRADA,
-    Menu::estado('saldo_inversiones', Menu::RETIRADA));
-chequear('y no cuenta como con datos', 0,
-    Menu::contarConDatos([['estado' => Menu::RETIRADA]]));
-
-// Va DESPUES de Ingresos: la categoria agrupa lo que se tipea, y leerlo
-// pegado a lo que sale de un circuito es lo que hace que la diferencia se vea.
 $orden = array_column($menu['categorias'], 'codigo');
-
-chequear('Otros Ingresos va justo despues de Ingresos',
-    array_search('Ingresos', $orden) + 1, array_search('OtrosIngresos', $orden));
 // Comercio Exterior queda completa: sus dos pestanas tienen datos. Despachante
 // y Asesor se dio de baja del menu porque no se usa mas.
 chequear('Comex tiene sus 2 pestanas con datos', 2, $porCategoria['Comex']['con_datos']);
