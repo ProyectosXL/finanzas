@@ -202,6 +202,16 @@
                 <div class="d-flex align-items-center gap-3 flex-wrap">
                     <span class="fw-semibold" id="selResumenProv"></span>
                     <div class="d-flex gap-2 ms-auto">
+                        <!-- La fecha va PRIMERA: es la acción que se usa todos
+                             los días -lo que disuelve los vencimientos
+                             apilados en el día uno- y excluir es la excepción.
+                             La fecha se elige adentro del diálogo, junto al
+                             importe que se va a mover, y no acá: ese número es
+                             lo que hace notar que se seleccionó de más, y hay
+                             que leerlo antes de elegir la fecha. -->
+                        <button class="btn btn-sm btn-outline-primary" id="btnFecharSelProv">
+                            <i class="fas fa-calendar-day me-1"></i> Poner fecha de pago
+                        </button>
                         <button class="btn btn-sm btn-outline-danger" id="btnExcluirSelProv">
                             <i class="fas fa-ban me-1"></i> Excluir del cashflow
                         </button>
@@ -262,11 +272,14 @@
                                     title="Con qué forma se trata esta factura. Viene del maestro y se puede cambiar: el cambio vale sólo para esta factura y decide si su importe entra al cashflow. El maestro no se toca.">
                                     Forma de pago
                                 </th>
-                                <!-- LA COLUMNA ES DE SELECCIÓN, no de estado.
-                                     Excluir es una decisión que pide un motivo,
-                                     así que no puede dispararse con un clic
-                                     suelto: se eligen las facturas y se
-                                     confirman juntas, con un motivo para todas.
+                                <!-- LA COLUMNA ES DE SELECCIÓN, no de estado, y
+                                     alimenta las dos acciones masivas de la
+                                     barra: poner la fecha de pago y excluir.
+                                     Ninguna de las dos puede dispararse con un
+                                     clic suelto —una mueve plata de columna y la
+                                     otra la saca del tablero—: se eligen las
+                                     facturas y se confirman juntas, viendo
+                                     cuántas son y por cuánto.
 
                                      Que una factura ESTÉ excluida se ve en la
                                      fila —atenuada y con el pendiente tachado— y

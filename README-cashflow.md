@@ -855,11 +855,13 @@ Los mensajes enuncian la **consecuencia de negocio**, no la regla: *"su importe 
 
 Lo primero lo genera el backend y es parte de lo que la pantalla informa; lo segundo es la respuesta a un click. Un aviso que desaparece solo sería un dato perdido, y una notificación permanente sería ruido.
 
-Las notificaciones las resuelve `Js/notificaciones.js` (`Notificacion.exito / error / advertencia / campoInvalido / confirmar`), cargado en `index.php` porque su contenedor cuelga de `<body>` y tiene que sobrevivir al reemplazo de `#tabContent`.
+Las notificaciones las resuelve `Js/notificaciones.js` (`Notificacion.exito / error / advertencia / campoInvalido / confirmar / pedirTexto / pedirFecha`), cargado en `index.php` porque su contenedor cuelga de `<body>` y tiene que sobrevivir al reemplazo de `#tabContent`.
 
 **Un error no se cierra solo.** Trae el mensaje del servidor, que es lo único que explica por qué el dato no quedó guardado; que se borre a los cuatro segundos es perderlo. Los éxitos sí, y el temporizador se pausa con el mouse encima.
 
 **`Notificacion.confirmar()` devuelve una promesa**, así que reemplaza a `confirm()` pero no bloquea el hilo: lo que iba después del `if` va adentro del `then`. El foco arranca en *Cancelar* — son acciones que cuestan deshacer y un Enter reflejo tiene que no hacer nada.
+
+**Los tres diálogos comparten un solo armazón** (`abrirDialogo()`): `confirmar()` contesta sí o no, `pedirTexto()` devuelve el texto o `null`, y `pedirFecha()` devuelve `'aaaa-mm-dd'` o `null` —nunca un `Date`: el módulo mueve fechas como string para no pasar por `new Date(string)`—. Lo delicado no es el HTML: es que cerrar con la cruz, con Escape o clickeando afuera **también sea una respuesta, y sea la negativa**. Tres copias de eso se desincronizan en la primera corrección. Cuando el diálogo tiene un campo, el foco arranca ahí y un campo obligatorio vacío **no cierra**: dice por qué en el mismo lugar donde se completa, en vez de fallar después contra el servidor.
 
 ---
 

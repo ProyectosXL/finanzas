@@ -41,6 +41,8 @@ Contra `central`, en cualquier momento:
 -- 6. sql/cashflow_prov_locales_opciones.sql          (las cinco listas de opciones)
 ```
 
+**El gesto de fechar en masa no agrega ningún script**, y eso es parte de su diseño: escribe `FECHA_PAGO` en la tabla que ya existe desde el primero, con el mismo camino de escritura que la celda de la grilla. En una base que corrió el primer script, funciona sin tocar nada.
+
 El sexto crea `RO_T_CASHFLOW_PROV_LOCALES_OPCIONES` y **siembra las cinco listas con los valores que ya están cargados en el maestro vigente**, ordenados por frecuencia de uso: lo que se usa doscientas veces arriba, lo que se usó una vez al final, que es donde se nota que probablemente sea un typo. Los valores se siembran **tal como están guardados**, sin corregir mayúsculas ni espacios: corregirlos ahí cambiaría en silencio la serie del tablero de los proveedores que los tienen.
 
 > Es la misma lección que este módulo ya aprendió con `FORMAS_PAGO`: la primera versión de esa lista se escribió a ojo y **ninguno** de esos cinco valores existía en el maestro real, mientras que los que sí existían y faltaban eran el 54% de los proveedores.
@@ -170,6 +172,68 @@ vacío     → null
 ```
 
 **`null` no es lo mismo que `0`.** Cero es *"se paga hoy"* y se usa para calcular; `null` es *"este plazo no dice cuándo"* y hace caer al escalón siguiente.
+
+---
+
+## La fecha se carga de a una, o de a muchas
+
+> El gesto masivo es **nuevo**. La celda editable de la grilla no cambió.
+
+Cargar la fecha es lo único que saca a la deuda vencida del primer día del eje, y **lo que hay para fechar son 378 vencimientos**. De a uno, eso son 378 gestos.
+
+Y el caso real casi nunca es una factura: es *"a este proveedor le pagamos el 30"*, que son las ocho facturas que tiene abiertas. La pantalla ya sabía resolverlo —buscar el proveedor, *seleccionar todas las que se ven*— porque es exactamente lo mismo que hace la exclusión masiva.
+
+**Es el mismo gesto, con el mismo orden:** se seleccionan, se lee cuántas son y por cuánta plata, se elige la fecha, y recién ahí se guarda.
+
+### Una fecha para todas, y eso es lo que se está diciendo
+
+No es una simplificación de la pantalla. *"A este proveedor le pagamos el 30"* es **una** decisión sobre ocho facturas. Cuando las fechas son distintas son decisiones distintas, y ésas se cargan celda por celda — que es lo que la grilla ya hacía y se sigue pudiendo hacer, sin `min` y aceptando fechas pasadas.
+
+### Sólo la fecha
+
+`saveFechaMasiva()` escribe **una columna**. La forma del cronograma, la exclusión y la observación de cada factura son otras decisiones, y un gesto que recibe una fecha y escribe cuatro columnas no está guardando una edición: está reemplazando la fila. Es la misma regla que ya defendía `guardarPago()`, y acá pesa más porque son muchas filas de una.
+
+Verificado contra la base: una factura con `EXCLUIDA = 1`, su motivo y un `FORMA_PAGO_CRONOGRAMA` puesto a mano conserva las tres después de fecharla en masa.
+
+**Tampoco desconcilia nada.** Si alguna de las elegidas ya se pagó, Tango tiene la fecha real y eso no se toca: lo que cambia es la previsión, y con ella el desvío que después contesta *"¿le acertamos a la fecha?"*. El diálogo lo dice cuando hay alguna.
+
+### No se filtra lo que "ya está así", al revés que al excluir
+
+Excluir tiene dos estados y se conocen **antes** de preguntar nada, así que lo que ya está excluido se saca del lote: volver a escribirlo sería una versión idéntica en la tabla y un número inflado en el mensaje.
+
+Acá el estado final **es la fecha, y no existe hasta que se elige**. Volver a escribir la misma fecha no es un error: es alguien ratificando la decisión, y queda con su fecha de modificación. Lo que sí se dice antes de confirmar es **cuántas de las elegidas ya tenían una fecha cargada**, porque ésas son decisiones de otro que este gesto pisa.
+
+### Una sola transacción, y escrita una sola vez
+
+O se fechan todas o ninguna, por lo mismo que la exclusión masiva: ocho llamadas dejan la puerta abierta a que la quinta falle y el tablero quede a mitad de camino.
+
+Lo que cambió es **dónde vive esa mecánica**. Los dos gestos masivos tienen igual el normalizado de las claves y la transacción, y lo único distinto entre ellos es qué columnas se escriben. Así que eso se separó en dos piezas —`normalizarClaves()` y `guardarLote()`— y los dos pasan por ahí:
+
+```
+saveExclusionMasiva ─┐                                      ┌─ EXCLUIDA + MOTIVO
+                     ├─ normalizarClaves ─ guardarLote ─ guardarPago
+saveFechaMasiva     ─┘                                      └─ FECHA_PAGO
+```
+
+Una segunda copia de una transacción no se ve hasta el día que algo falla en el medio, y para entonces ya escribió a medias. **La fecha se valida una vez y antes de abrir nada**, igual que las claves: es la misma para todas, así que una fecha inválida no puede descubrirse con diez facturas ya escritas.
+
+`guardarPago()` sigue siendo el único lugar del módulo que toca la tabla de overrides.
+
+### La fecha se elige en el diálogo, no en la barra
+
+`Notificacion.pedirFecha()` — el tercero que usa el mismo armazón, junto a `confirmar()` y `pedirTexto()`. Mismo contrato que el segundo: **`null` al cancelar y la fecha al confirmar**, como string `aaaa-mm-dd` y nunca un `Date`, porque el módulo entero mueve fechas como texto para no pasar por `new Date(string)`.
+
+Un campo de fecha suelto en la barra de acciones habría sido más corto de escribir y peor de usar: **el número que hace notar que se seleccionó de más hay que leerlo antes de elegir la fecha**, no después de guardar. Por eso van en la misma ventana.
+
+El formato se valida aunque el campo sea `type="date"` —un navegador sin soporte lo degrada a texto— y el 31 de febrero se rechaza comparando contra lo que devuelve `Date`, que en JavaScript lo corre solo al 3 de marzo. La validación que vale igual es la del backend: `validarFechaPago()` hace lo mismo con `checkdate()`.
+
+### El check se dibuja aunque falte el script de la exclusión
+
+La columna de selección alimenta las dos acciones y **sólo una de las dos necesita `sql/cashflow_prov_locales_excluir_factura.sql`**. Sin ese script se puede fechar igual, y lo que se apaga —diciendo por qué— son los dos botones de excluir. Esconder el check dejaría sin la acción de todos los días a quien no corrió un script que no tiene nada que ver con ella.
+
+**La selección se poda contra lo que vino del servidor**, como ya hacía el módulo: las dos acciones mandan lo que la pantalla está mostrando, y un comprobante que se canceló en Tango ya no está en la lista.
+
+> **Una diferencia con la exclusión:** al fechar, la selección **no se limpia**. Es la misma pregunta de siempre —¿las filas siguen a la vista?—: una excluida se esconde por defecto, así que la barra quedaría hablando de facturas que ya no están; una fechada sigue en la tabla, movida de columna, y dejarla seleccionada es lo que permite corregir la fecha ahí mismo si el importe cayó donde no iba.
 
 ---
 
@@ -370,6 +434,8 @@ Una factura duplicada, una en disputa o una que se pagó por fuera de Tango no s
 La columna es de **selección**, no de estado. Sacar plata del tablero no puede dispararse con un clic suelto, y el caso real no es una factura: son **las ocho de un proveedor**. Se resuelve con lo que la pantalla ya tenía — buscar el proveedor, *seleccionar todas las que se ven*, un motivo.
 
 **Un motivo para todas, y no es una simplificación de la pantalla:** excluir las ocho facturas de un proveedor es **una** decisión, y ocho motivos distintos para una decisión son ocho oportunidades de que digan cosas distintas.
+
+> **Esa columna hoy alimenta dos acciones.** La otra es poner la misma fecha de pago a todas, que es la que se usa todos los días; ésta es la excepción. Comparten la selección, el podado contra lo que vino del servidor y la barra que dice cuántas y por cuánto. Ver *La fecha se carga de a una, o de a muchas*.
 
 **Es una sola transacción**, igual que el tildado masivo de Echeqs y por el mismo motivo: ocho llamadas dejan la puerta abierta a que la quinta falle y el tablero quede a mitad de camino sin que nadie se entere. Las claves se normalizan **antes** de abrirla: un comprobante mal identificado en la fila once no puede descubrirse con diez ya escritas.
 
@@ -789,6 +855,8 @@ Los **avisos** sí siguen contando el universo —son la contrapartida de lo que
 
 **La fecha es lo único editable.** La celda tiene la misma pinta que la fecha manual de Cobranzas FR —es el mismo gesto— pero **sin `min` en hoy**: acá se aceptan fechas pasadas, porque el listado no tiene techo de antigüedad y *"se pensó pagar y no se pagó"* es una decisión legítima.
 
+Y se carga de dos formas, que escriben lo mismo: **celda por celda, o para varias de una** desde la barra de selección. Ver *La fecha se carga de a una, o de a muchas*.
+
 Guardar recarga la pestaña entera: la fecha cambia en qué columna del eje cae el importe, los totales del pie y los cuatro indicadores.
 
 Componentes estándar: tarjetas KPI, buscador, selector de eje temporal (`Js/eje-vistas.js`), columnas fijas, Actualizar, Exportar a Excel y avisos por `Js/notificaciones.js`.
@@ -823,6 +891,10 @@ php tests/run.php proveedores
 - **El diff de pagos**: que el tipo se deduzca, que un comprobante en cuotas no sea ambiguo, que dos tipos con el mismo número sí lo sean, y que lo que no cruza dé un error con motivo.
 - **Que la clave incluya al proveedor**: dos proveedores con el mismo comprobante dan claves distintas.
 - **El desvío** de la conciliación en los dos sentidos.
+- **Que fechar en masa escriba una sola columna**: la prueba falla si aparece `EXCLUIDA`, `MOTIVO_EXCLUSION`, `FORMA_PAGO`, `OBSERVACION` o `ESTADO` en el cuerpo del método. Es la garantía de que el gesto no reemplaza la fila.
+- **Que la transacción esté escrita una sola vez**: que `guardarLote()` la abra y tenga su rollback, que escriba por `guardarPago()`, y que **ninguna de las dos masivas tenga una propia**. Una segunda copia sin rollback no se ve hasta el día que algo falla en el medio.
+- **Que la fecha y las claves se validen antes de abrir nada**, que la lista vacía se rechace, y que el 31 de febrero no pase ni por el campo del diálogo ni por el backend.
+- **El cableado del gesto de punta a punta**: el botón en la barra, el `conectar()` que lo engancha, el endpoint, y que el check de selección **ya no dependa** del script de la exclusión.
 
 Con base, además: que **ningún pendiente sea negativo** —el error que tenía la consulta antes de la tabla de signos—, que no entre ningún proveedor del exterior, que el total sea exactamente operativos + excluidos, y que **el registro declare exactamente las series que el proveedor devuelve**.
 
@@ -834,7 +906,7 @@ Con base, además: que **ningún pendiente sea negativo** —el error que tenía
 - **La semántica del plazo entera**: que los días salgan de la lista, que eso permita declarar `FIN DE MES` —que `plazoEnDias()` sola devuelve `null`—, que `CONTADO` sea `0` y `DEBITO` siga siendo `null`, y que un plazo fuera de lista caiga al fallback de siempre.
 - **Que el formulario no pierda un valor fuera de lista** al editar un proveedor.
 
-*Suite completa: 2478 OK, 0 fallas (20 archivos).*
+*Suite completa: 2515 OK, 0 fallas (20 archivos).*
 
 ---
 
@@ -863,7 +935,7 @@ cashflow/Css/Proveedores-Proveedores_locales.css
 tests/test_proveedores.php
 ```
 
-Modificados: `Class/CashflowRegistry.php` (`PROV_LOCALES` disponible + `series_extra`) · `Class/CobElectronicos.php` (delega en `Planilla`, sin cambiar su contrato) · `Class/Menu.php` (la pestaña pasa a `DATOS`) · `Class/Parametros.php` (el módulo `PROV_LOCALES` y su sección) · `Tabs/parametros.php` (la sub-pestaña) · `tests/test_providers.php` y `tests/test_menu.php` (los conteos).
+Modificados: `Class/CashflowRegistry.php` (`PROV_LOCALES` disponible + `series_extra`) · `Class/CobElectronicos.php` (delega en `Planilla`, sin cambiar su contrato) · `Class/Menu.php` (la pestaña pasa a `DATOS`) · `Class/Parametros.php` (el módulo `PROV_LOCALES` y su sección) · `Tabs/parametros.php` (la sub-pestaña) · `Js/notificaciones.js` (`pedirFecha()`, el tercer diálogo sobre el mismo armazón) · `tests/test_providers.php` y `tests/test_menu.php` (los conteos).
 
 Pruebas propias de las listas: `tests/test_prov_locales_opciones.php`.
 

@@ -1423,25 +1423,148 @@ seccion('excluir varias facturas es UNA operacion, con UN motivo');
 
 /* UNA SOLA TRANSACCION, igual que el tildado masivo de Echeqs: sacar del
    cashflow las ocho facturas de un proveedor con ocho llamadas deja la puerta
-   abierta a que la quinta falle y el tablero quede a mitad de camino. */
+   abierta a que la quinta falle y el tablero quede a mitad de camino.
+
+   LA TRANSACCION YA NO VIVE ACA: la abre guardarLote(), que es lo que los dos
+   gestos masivos de la grilla -excluir y fechar- tienen igual. Lo que cambia
+   entre ellos es QUE columnas se escriben, y eso viaja en $campos. Que este
+   escrita una sola vez es justamente lo que estas pruebas cuidan: una segunda
+   copia sin rollback no se ve hasta el dia que algo falla en el medio. */
+$cuerpoLote = $cuerpoDe('guardarLote');
+
 chequear('abre una transaccion', true,
-    strpos($cuerpoExcl, 'sqlsrv_begin_transaction($cid)') !== false);
+    strpos($cuerpoLote, 'sqlsrv_begin_transaction($cid)') !== false);
 chequear('y si algo falla no queda nada escrito', true,
-    strpos($cuerpoExcl, 'sqlsrv_rollback($cid)') !== false);
+    strpos($cuerpoLote, 'sqlsrv_rollback($cid)') !== false);
+chequear('escribe por el unico escritor del modulo', true,
+    strpos($cuerpoLote, '$this->guardarPago($cid,') !== false);
+
+chequear('la exclusion masiva pasa por ahi', true,
+    strpos($cuerpoExcl, '$this->guardarLote($claves,') !== false);
+chequear('y no tiene una transaccion propia', false,
+    strpos($cuerpoExcl, 'sqlsrv_begin_transaction') !== false);
 
 /* LAS CLAVES SE NORMALIZAN ANTES DE ABRIR LA TRANSACCION: un comprobante mal
    identificado en la fila once no puede descubrirse con diez ya escritas. */
+$cuerpoClaves = $cuerpoDe('normalizarClaves');
+
 chequear('valida los comprobantes antes de empezar a escribir', true,
-    strpos($cuerpoExcl, 'foreach (is_array($comprobantes)')
-        < strpos($cuerpoExcl, 'sqlsrv_begin_transaction'));
+    strpos($cuerpoExcl, 'self::normalizarClaves(')
+        < strpos($cuerpoExcl, '$this->guardarLote('));
+chequear('y esa validacion es la misma para los dos gestos', true,
+    strpos($cuerpoClaves, 'foreach (is_array($comprobantes)') !== false);
 
 // La misma factura mandada dos veces es una: se indexa por su clave.
 chequear('la misma factura repetida no se escribe dos veces', true,
-    strpos($cuerpoExcl, '$claves[self::clavePago($cod, $t, $n)]') !== false);
+    strpos($cuerpoClaves, '$claves[self::clavePago($cod, $t, $n)]') !== false);
 
 chequearLanza('sin comprobantes no hace nada y lo dice', function () {
     (new Proveedores())->saveExclusionMasiva([], true, 'x');
 });
+
+/* ================================================================
+   LA MISMA FECHA DE PAGO PARA VARIAS FACTURAS
+
+   Es el gesto que se usa todos los dias: lo que disuelve los vencimientos
+   apilados en el dia uno es cargar fechas, y el caso real no es una factura
+   sino las ocho de un proveedor.
+   ================================================================ */
+seccion('fechar varias facturas es UNA operacion, con UNA fecha');
+
+$cuerpoFecha = $cuerpoDe('saveFechaMasiva');
+
+// MISMO CAMINO DE ESCRITURA QUE LA EXCLUSION. Si se hubiera escrito su propia
+// transaccion, la segunda copia es la que se olvida el rollback.
+chequear('pasa por el mismo lote transaccional', true,
+    strpos($cuerpoFecha, '$this->guardarLote($claves,') !== false);
+chequear('y no abre una transaccion propia', false,
+    strpos($cuerpoFecha, 'sqlsrv_begin_transaction') !== false);
+chequear('ni escribe contra la tabla por su cuenta', false,
+    strpos($cuerpoFecha, 'sqlsrv_query') !== false);
+
+/* SOLO ESCRIBE LA FECHA. La forma del cronograma, la exclusion y la observacion
+   de cada factura son otras decisiones; un gesto que recibe una fecha y escribe
+   cuatro columnas no guarda una edicion, reemplaza la fila. Aca pesa mas que en
+   savePago() porque son muchas filas de una. */
+chequear('escribe la fecha', true,
+    strpos($cuerpoFecha, "['FECHA_PAGO' => \$f]") !== false);
+chequear('y nada mas: no toca la exclusion', false,
+    strpos($cuerpoFecha, 'EXCLUIDA') !== false);
+chequear('ni el motivo', false, strpos($cuerpoFecha, 'MOTIVO_EXCLUSION') !== false);
+chequear('ni la forma de pago', false, strpos($cuerpoFecha, 'FORMA_PAGO') !== false);
+chequear('ni la observacion', false, strpos($cuerpoFecha, 'OBSERVACION') !== false);
+
+/* LA FECHA SE VALIDA UNA VEZ Y ANTES DE ABRIR NADA, igual que las claves: es la
+   misma para todas, asi que una fecha invalida no puede descubrirse con diez
+   facturas ya escritas. */
+chequear('la fecha se valida antes de escribir', true,
+    strpos($cuerpoFecha, 'self::validarFechaPago($fecha)')
+        < strpos($cuerpoFecha, '$this->guardarLote('));
+chequear('y con el validador de siempre, que acepta fechas pasadas', true,
+    strpos($cuerpoFecha, 'self::validarFechaPago(') !== false);
+
+chequearLanza('sin comprobantes no escribe nada y lo dice', function () {
+    (new Proveedores())->saveFechaMasiva([], '2026-10-30');
+});
+
+// El mensaje nombra el gesto: "para fechar", no "para excluir". Es el mismo
+// metodo el que lo arma, y por eso recibe el gesto por parametro.
+chequear('el mensaje de la lista vacia sale del gesto', true,
+    strpos($cuerpoClaves, "'No llegó ninguna factura para ' . \$gesto") !== false);
+
+/* NO DESCONCILIA NADA: si la factura ya se pago, Tango tiene la fecha real y
+   esto es una prevision. guardarPago() no toca ESTADO ni FECHA_CANCELADO, y por
+   eso alcanza con no mandarlos. */
+chequear('no toca el estado de conciliacion', false,
+    strpos($cuerpoFecha, 'ESTADO') !== false);
+
+seccion('el gesto de fechar en masa esta enchufado de punta a punta');
+
+$ctrlProv = file_get_contents(__DIR__ . '/../cashflow/Controller/ProveedoresController.php');
+
+chequear('el endpoint existe', true, strpos($ctrlProv, "case 'saveFechaMasiva':") !== false);
+chequear('y exige la fecha, que la pantalla no puede garantizar', true,
+    strpos($ctrlProv, "Falta la fecha de pago que hay que ponerles.") !== false);
+chequear('el mensaje dice QUE fecha quedo, no solo que se guardo', true,
+    strpos($ctrlProv, "date('d/m/Y', strtotime(\$r['fecha']))") !== false);
+
+chequear('la barra tiene el boton', true,
+    strpos($htmlProv, 'id="btnFecharSelProv"') !== false);
+chequear('y el JS lo engancha', true,
+    strpos($jsCodigo, "conectar('btnFecharSelProv', fecharSeleccion)") !== false);
+chequear('que llama al endpoint masivo', true,
+    strpos($jsCodigo, "pedirPago('saveFechaMasiva'") !== false);
+
+/* LA SELECCION SE PODA CONTRA LO QUE VINO DEL SERVIDOR, como ya hacia el
+   modulo: las dos acciones masivas mandan lo que la pantalla muestra, y un
+   comprobante que se cancelo en Tango ya no esta en la lista. */
+chequear('lo que se manda sale de las filas visibles', true,
+    strpos($jsCodigo, 'function filasSeleccionadas()') !== false);
+chequear('y la seleccion se poda en cada carga', true,
+    strpos($jsCodigo, 'podarSeleccion();') !== false);
+
+/* EL CHECK SE DIBUJA AUNQUE FALTE EL SCRIPT DE LA EXCLUSION: fechar no depende
+   de el, y esconder la columna dejaria sin la accion de todos los dias a quien
+   no corrio un script que no tiene nada que ver. Lo que se apaga son los dos
+   botones de excluir. */
+chequear('la celda de seleccion ya no depende del script de exclusion', false,
+    preg_match('/function celdaExcluir\(f\) \{\s*if \(!datos \|\| !datos\.excluir_factura\)/',
+        $jsCodigo) === 1);
+chequear('y los botones de excluir se apagan sin ese script', true,
+    strpos($jsCodigo, 'var puedeExcluir = !!(datos && datos.excluir_factura);') !== false);
+
+// El diálogo dice cuantas facturas y por cuanta plata, y cuantas ya tenian
+// fecha: pisar la decision de otro es legitimo, pero no puede ser una sorpresa.
+chequear('el dialogo dice cuantas y por cuanto', true,
+    strpos($jsCodigo, "sel.length + ' factura(s) por ' + plata(total)") !== false);
+chequear('y cuantas ya tenian fecha cargada', true,
+    strpos($jsCodigo, "if (f.ORIGEN_FECHA === 'CARGADA') { yaTenian++; }") !== false);
+
+/* SIN `min`, igual que la celda de la grilla: aca se aceptan fechas pasadas
+   porque el listado no tiene techo de antiguedad y "se penso pagar y no se
+   pago" es una decision legitima. */
+chequear('no se le pone piso a la fecha', false,
+    preg_match('/Notificacion\.pedirFecha\(\{[^}]*\bmin:/s', $jsCodigo) === 1);
 
 // saveExclusion() de a una NO duplica la logica: delega en la masiva con una
 // lista de uno. Dos caminos que tienen que hacer lo mismo divergen.
@@ -1477,6 +1600,38 @@ chequear('la pestana ya no usa el prompt del navegador', false,
     strpos($jsCodigo, 'window.prompt') !== false);
 chequear('sino el dialogo del modulo', true,
     strpos($jsCodigo, 'Notificacion.pedirTexto({') !== false);
+
+seccion('la fecha del gesto masivo se elige en el mismo dialogo');
+
+/* MISMO ARMAZON QUE EL MOTIVO DE LA EXCLUSION, y por el mismo motivo de fondo:
+   no es un campo suelto en la barra de acciones. El numero que hace notar que
+   se selecciono de mas hay que leerlo ANTES de elegir la fecha, no despues de
+   guardar. */
+chequear('el control compartido sabe pedir una fecha', true,
+    strpos($notiJs, 'pedirFecha: pedirFecha') !== false);
+chequear('y usa el mismo armazon que los otros dos', true,
+    preg_match('/function pedirFecha\(opciones\) \{.*?return abrirDialogo\(opciones, \{/s',
+        $notiJs) === 1);
+chequear('la pestana lo usa', true,
+    strpos($jsCodigo, 'Notificacion.pedirFecha({') !== false);
+
+/* MISMO CONTRATO QUE pedirTexto(): null al cancelar y el valor al confirmar,
+   como string 'aaaa-mm-dd' y nunca un Date. El modulo entero mueve fechas como
+   string para no pasar por new Date(string), que es de donde salen los
+   corrimientos de un dia. */
+chequear('el camino sin Bootstrap devuelve la fecha o null, nunca un Date', true,
+    strpos($notiJs, 'Promise.resolve(esFecha(previo) ? previo : null)') !== false);
+chequear('y el formato es el que viaja al backend', true,
+    strpos($notiJs, '/^\d{4}-\d{2}-\d{2}$/.test(v)') !== false);
+
+/* Una fecha que no existe en el calendario no pasa. JavaScript corre solo el 31
+   de febrero al 3 de marzo, asi que compararla contra lo que devuelve Date es
+   lo unico que lo detecta. La validacion que vale igual es la del backend:
+   validarFechaPago() hace exactamente lo mismo con checkdate(). */
+chequear('el 31 de febrero no pasa por el campo', true,
+    strpos($notiJs, 'd.getDate() === Number(p[2])') !== false);
+chequearLanza('ni por el backend',
+    function () { Proveedores::validarFechaPago('2026-02-31'); });
 
 seccion('el script que habilita excluir facturas');
 

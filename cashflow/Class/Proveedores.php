@@ -1342,6 +1342,58 @@ class Proveedores {
     }
 
     /**
+     * Pone LA MISMA FECHA DE PAGO a varias facturas, en UNA transaccion.
+     *
+     * ES EL MISMO GESTO QUE LA EXCLUSION MASIVA y existe por el mismo motivo: el
+     * caso real no es una factura, son las ocho de un proveedor a las que se les
+     * decide una fecha de una vez. Cargarlas de a una es justo el trabajo que la
+     * barra de seleccion viene a sacar, y es ademas lo que hay que hacer
+     * cientos de veces para vaciar el indicador de vencido sin fecha.
+     *
+     * UNA SOLA FECHA PARA TODAS, y no es una simplificacion de la pantalla:
+     * "a este proveedor le pagamos el 30" es UNA decision. Cuando las fechas son
+     * distintas son decisiones distintas, y esas se cargan celda por celda, que
+     * es lo que la grilla ya hacia y se sigue pudiendo hacer.
+     *
+     * SOLO ESCRIBE LA FECHA. La forma del cronograma, la exclusion y la
+     * observacion de cada factura son otras decisiones: un gesto que recibe una
+     * fecha y escribe cuatro columnas no esta guardando una edicion, esta
+     * reemplazando la fila. Es la misma regla que ya defiende guardarPago(), y
+     * aca pesa mas porque son muchas filas de una.
+     *
+     * NO DESCONCILIA NADA. Si alguna de las elegidas ya estaba conciliada contra
+     * Tango sigue estandolo, con su fecha real intacta: Tango es la verdad sobre
+     * el pago y esto es una prevision. La pantalla dice cuantas de las
+     * seleccionadas ya tenian fecha antes de que se confirme.
+     *
+     * LA FECHA SE VALIDA UNA VEZ Y ANTES DE ABRIR LA TRANSACCION, igual que las
+     * claves: es la misma para todas, asi que una fecha invalida no puede
+     * descubrirse con diez facturas ya escritas.
+     *
+     * NO SE VALIDA CONTRA LOS PENDIENTES DE HOY, por lo mismo que la exclusion
+     * masiva: la fila de override vive por comprobante y puede existir para uno
+     * que hoy no esta pendiente.
+     *
+     * @param array $comprobantes Filas con 'cod_provee', 't_comp', 'n_comp'
+     * @param mixed $fecha 'Y-m-d'
+     * @param string|null $usuario
+     * @return array ['fecha' => string, 'tocados' => int]
+     */
+    public function saveFechaMasiva($comprobantes, $fecha, $usuario = null) {
+        if (!$this->tablaCreada()) {
+            throw new Exception('Todavía no existe la tabla de fechas de pago. '
+                . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
+        }
+
+        $claves = self::normalizarClaves($comprobantes, 'fechar');
+        $f = self::validarFechaPago($fecha);
+
+        $this->guardarLote($claves, ['FECHA_PAGO' => $f], 'MANUAL', $usuario);
+
+        return ['fecha' => $f, 'tocados' => count($claves)];
+    }
+
+    /**
      * Pone o saca el OVERRIDE DE FORMA DE PAGO de un comprobante.
      *
      * ES UNA REGLA POR FACTURA, no un hecho: dice con que forma hay que tratar a
@@ -1493,10 +1545,12 @@ class Proveedores {
     /**
      * Excluye -o vuelve a incluir- VARIAS facturas de una, con UN SOLO MOTIVO.
      *
-     * ES UNA SOLA TRANSACCION, igual que el tildado masivo de Echeqs y por el
-     * mismo motivo: sacar del cashflow las ocho facturas de un proveedor con
-     * ocho llamadas deja la puerta abierta a que la quinta falle y el tablero
-     * quede a mitad de camino sin que nadie se entere. O entran todas o ninguna.
+     * ES UNA SOLA TRANSACCION -la abre guardarLote(), que es donde vive esa
+     * mecanica desde que el gesto de fechar en masa la necesita igual-, por el
+     * mismo motivo que el tildado masivo de Echeqs: sacar del cashflow las ocho
+     * facturas de un proveedor con ocho llamadas deja la puerta abierta a que la
+     * quinta falle y el tablero quede a mitad de camino sin que nadie se entere.
+     * O entran todas o ninguna.
      *
      * EL MOTIVO ES UNO PARA TODAS, y eso no es una simplificacion de la
      * pantalla: excluir ocho facturas del mismo proveedor es UNA decision, y
@@ -1527,28 +1581,8 @@ class Proveedores {
                 . 'Corré sql/cashflow_prov_locales_excluir_factura.sql contra la base central.');
         }
 
-        /* Se normalizan TODOS antes de abrir la transacción: un comprobante mal
-           identificado en la fila once no puede descubrirse con diez ya
-           escritas. */
-        $claves = [];
-
-        foreach (is_array($comprobantes) ? $comprobantes : [] as $c) {
-            $cod = Planilla::codigo(isset($c['cod_provee']) ? $c['cod_provee'] : '');
-            $t = Planilla::codigo(isset($c['t_comp']) ? $c['t_comp'] : '');
-            $n = Planilla::codigo(isset($c['n_comp']) ? $c['n_comp'] : '');
-
-            if ($cod === '' || $t === '' || $n === '') {
-                throw new Exception('Falta el proveedor o el comprobante en uno de los '
-                    . 'renglones.');
-            }
-
-            // Indexado por la clave: la misma factura mandada dos veces es una.
-            $claves[self::clavePago($cod, $t, $n)] = [$cod, $t, $n];
-        }
-
-        if (empty($claves)) {
-            throw new Exception('No llegó ninguna factura para excluir.');
-        }
+        // Se resuelven TODAS antes de abrir la transacción: ver normalizarClaves().
+        $claves = self::normalizarClaves($comprobantes, 'excluir');
 
         $excluir = !empty($excluida);
         $texto = ($motivo === null) ? '' : trim((string) $motivo);
@@ -1565,25 +1599,7 @@ class Proveedores {
             'MOTIVO_EXCLUSION' => $excluir ? mb_substr($texto, 0, 200) : null
         ];
 
-        $cid = $this->conectar();
-
-        if (sqlsrv_begin_transaction($cid) === false) {
-            throw new Exception($this->errorSql('No se pudo abrir la transacción'));
-        }
-
-        try {
-            foreach ($claves as $c) {
-                $this->guardarPago($cid, $c[0], $c[1], $c[2], $campos, 'MANUAL', $usuario);
-            }
-
-            if (sqlsrv_commit($cid) === false) {
-                throw new Exception($this->errorSql('No se pudo confirmar la exclusión'));
-            }
-        } catch (Throwable $e) {
-            sqlsrv_rollback($cid);
-
-            throw $e;
-        }
+        $this->guardarLote($claves, $campos, 'MANUAL', $usuario);
 
         return [
             'excluida' => $excluir,
@@ -1621,6 +1637,89 @@ class Proveedores {
         }
 
         return $f;
+    }
+
+    /**
+     * Las claves de un lote de comprobantes, normalizadas y sin repetidos.
+     *
+     * SE RESUELVE ENTERO ANTES DE ABRIR NINGUNA TRANSACCION: un comprobante mal
+     * identificado en la fila once no puede descubrirse con diez ya escritas.
+     *
+     * Esta escrito una vez porque lo comparten los dos gestos masivos de la
+     * grilla -excluir y fechar-, y los dos tienen que rechazar exactamente lo
+     * mismo. Dos copias de esto divergen en la primera correccion, y lo que
+     * quedaria distinto es QUE se considera una factura identificada.
+     *
+     * @param array $comprobantes Filas con 'cod_provee', 't_comp', 'n_comp'
+     * @param string $gesto Que se iba a hacer con ellas, para el mensaje
+     * @return array clave => [cod, t, n]
+     */
+    private static function normalizarClaves($comprobantes, $gesto) {
+        $claves = [];
+
+        foreach (is_array($comprobantes) ? $comprobantes : [] as $c) {
+            $cod = Planilla::codigo(isset($c['cod_provee']) ? $c['cod_provee'] : '');
+            $t = Planilla::codigo(isset($c['t_comp']) ? $c['t_comp'] : '');
+            $n = Planilla::codigo(isset($c['n_comp']) ? $c['n_comp'] : '');
+
+            if ($cod === '' || $t === '' || $n === '') {
+                throw new Exception('Falta el proveedor o el comprobante en uno de los '
+                    . 'renglones.');
+            }
+
+            // Indexado por la clave: la misma factura mandada dos veces es una.
+            $claves[self::clavePago($cod, $t, $n)] = [$cod, $t, $n];
+        }
+
+        if (empty($claves)) {
+            throw new Exception('No llegó ninguna factura para ' . $gesto . '.');
+        }
+
+        return $claves;
+    }
+
+    /**
+     * Escribe el MISMO mapa de campos en varios comprobantes, en UNA transaccion.
+     *
+     * O ENTRAN TODOS O NINGUNO, igual que el tildado masivo de Echeqs y por el
+     * mismo motivo: tocar ocho facturas con ocho llamadas deja la puerta abierta
+     * a que la quinta falle y el tablero quede a mitad de camino sin que nadie
+     * se entere.
+     *
+     * LA TRANSACCION ESTA ESCRITA UNA SOLA VEZ. Es lo que los dos gestos
+     * masivos tienen igual -lo que cambia entre ellos es QUE columnas se
+     * escriben, y eso viaja en $campos-, y es ademas lo que no puede quedar
+     * escrito dos veces: una copia sin rollback no se ve hasta el dia que algo
+     * falla en el medio.
+     *
+     * Escribe por guardarPago(), que sigue siendo el unico lugar del modulo que
+     * toca la tabla de overrides.
+     *
+     * @param array $claves Las de normalizarClaves()
+     * @param array $campos Mapa columna => valor, el mismo para todas
+     * @param string $origen 'MANUAL' o 'ARCHIVO'
+     * @param string|null $usuario
+     */
+    private function guardarLote($claves, $campos, $origen, $usuario) {
+        $cid = $this->conectar();
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción'));
+        }
+
+        try {
+            foreach ($claves as $c) {
+                $this->guardarPago($cid, $c[0], $c[1], $c[2], $campos, $origen, $usuario);
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar el guardado'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
     }
 
     /**
