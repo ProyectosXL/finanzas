@@ -25,14 +25,19 @@
    dolares cuando las inversiones no alcanzan, hace falta ver cada cosa en su
    fila: cuanto sale de las inversiones y cuanto de la comitente. Por eso el
    proveedor COBERTURA abre la serie en dos, USO_INVERSION y USO_COMITENTE, y
-   el cuadro lleva una fila por cada una, en el orden en que se consumen:
+   el cuadro lleva una fila por cada una, en el orden en que se consumen. Y en
+   Resultados aparece el acumulado SIN cobertura (ver el bloque 2b):
 
+     Resultados
+       10  Flujo Neto (sin cobertura)
+       15  Flujo Neto Acumulado (sin cobertura)   SALDO_FINAL   <- nueva
+     Cobertura
        10  Inversiones disponibles      STOCK    FONDO_INVERSION / STOCK
        15  Dolares en cuenta comitente  STOCK    FONDO_COMITENTE / STOCK
        20  Uso de Inversiones           USO      COBERTURA / USO_INVERSION
        25  Uso de Dolares comitente     USO      COBERTURA / USO_COMITENTE
        30  Flujo Neto (con cobertura)
-       40  Saldo Final
+       40  Flujo Neto Acumulado (con cobertura)   SALDO_FINAL
 
    La fila que ya existe SE REAPUNTA, no se da de baja y se crea otra: es la
    misma fila -"cuanto se usa de las inversiones" no cambio de significado,
@@ -154,6 +159,66 @@ ELSE
 BEGIN
     PRINT 'La fila de uso de la comitente ya existe: no se hizo nada.';
 END
+GO
+
+/* ----------------------------------------------------------------------------
+   2b. El acumulado SIN cobertura, debajo del Flujo Neto (sin cobertura).
+
+   Leyendo de arriba hacia abajo, el cuadro decia "flujo del dia" y recien
+   despues de la seccion Cobertura "posicion acumulada". Con el motor
+   rescatando solo, el numero que explica POR QUE rescato -el acumulado en
+   rojo antes de cubrir- no estaba en ninguna fila. Ahora hay dos filas de
+   saldo: esta, en Resultados, es la posicion sin cobertura; la del final es
+   la posicion ya cubierta.
+
+   Es un SALDO_FINAL comun. Desde esta etapa SALDO_FINAL arrastra SOLO lo que
+   tiene por encima (Cashflow::resolverDerivadas()), asi que puesta arriba de
+   las filas de uso no las ve. La del final no cambia: arrastra todo.
+
+   Se cuelga de la fila 'Flujo Neto (sin cobertura)' -misma seccion, orden
+   siguiente- para que quede pegada a ella este donde este. Si esa fila no
+   existe con su codigo de siempre, se avisa y no se crea nada: una fila de
+   saldo suelta en cualquier seccion diria un numero que nadie pidio.
+
+   Y la fila de saldo que ya existe, si todavia se llama exactamente
+   'Flujo Neto Acumulado', pasa a decir '(con cobertura)': con dos filas del
+   mismo nombre no se sabria cual es cual. Si alguien ya la renombro, se
+   respeta.
+   ---------------------------------------------------------------------------- */
+IF NOT EXISTS (SELECT 1 FROM dbo.RO_T_CASHFLOW_CONF_FILA WHERE CODIGO = 'SALDO_ACUM_SIN_COB')
+BEGIN
+    DECLARE @secFlujo VARCHAR(50), @ordFlujo INT;
+
+    SELECT @secFlujo = SECCION, @ordFlujo = ORDEN
+    FROM dbo.RO_T_CASHFLOW_CONF_FILA
+    WHERE CODIGO = 'FLUJO_NETO' AND TIPO = 'FLUJO_NETO';
+
+    IF @secFlujo IS NULL
+    BEGIN
+        PRINT 'AVISO: no existe la fila FLUJO_NETO (Flujo Neto sin cobertura), asi que no se creo el acumulado sin cobertura. Crealo desde Parametros -> Cashflow: tipo SALDO_FINAL, en la seccion del Flujo Neto sin cobertura, debajo de el.';
+    END
+    ELSE
+    BEGIN
+        INSERT INTO dbo.RO_T_CASHFLOW_CONF_FILA
+            (CODIGO, NOMBRE, SECCION, TIPO, COMPUTA, ORIGEN_PROVIDER, ORIGEN_SERIE, ORDEN, ACTIVO)
+        VALUES
+            ('SALDO_ACUM_SIN_COB', 'Flujo Neto Acumulado (sin cobertura)', @secFlujo, 'SALDO_FINAL', 0,
+             NULL, NULL, @ordFlujo + 5, 1);
+
+        PRINT 'Fila "Flujo Neto Acumulado (sin cobertura)" creada en la seccion ' + @secFlujo + '.';
+    END
+END
+ELSE
+BEGIN
+    PRINT 'El acumulado sin cobertura ya existe: no se hizo nada.';
+END
+GO
+
+UPDATE dbo.RO_T_CASHFLOW_CONF_FILA
+SET NOMBRE = 'Flujo Neto Acumulado (con cobertura)', FECHA_UPDATE = GETDATE()
+WHERE CODIGO = 'SALDO_FINAL' AND NOMBRE = 'Flujo Neto Acumulado';
+
+IF @@ROWCOUNT > 0 PRINT 'La fila de saldo del final ahora se llama "Flujo Neto Acumulado (con cobertura)".';
 GO
 
 /* ----------------------------------------------------------------------------

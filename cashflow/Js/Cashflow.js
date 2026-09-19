@@ -441,6 +441,9 @@
 
         var saldo = null;
 
+        // La ÚLTIMA fila de saldo: es la que arrastra todo, o sea la posición.
+        // La que va antes de la cobertura muestra el rojo que el motor ya
+        // tapó, y marcar la columna por ella diría que falta plata donde no.
         datos.filas.forEach(function(f) {
             if (f.tipo === 'SALDO_FINAL') { saldo = f; }
         });
@@ -747,8 +750,9 @@
      */
     function textoArrastre(f) {
         return 'Arrastre: la posición proyectada al cierre de cada columna. '
-            + 'Es el saldo de apertura más todo lo que se movió hasta acá, '
-            + 'no un dato cargado en esta fila.';
+            + 'Es el saldo de apertura más todo lo que se movió en las filas de arriba de '
+            + 'ésta, columna a columna; no un dato cargado en esta fila. Una fila de '
+            + 'arrastre puesta antes de la cobertura es la posición SIN cubrir.';
     }
 
     /**

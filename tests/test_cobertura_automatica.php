@@ -936,3 +936,70 @@ $vDoble = CashflowEstructura::validar($secDoble, $filasDoble);
 
 chequear('el total y una parte activas a la vez es un error de estructura', true,
     count(array_filter($vDoble['errores'], function ($e) { return strpos($e, 'dos veces') !== false; })) > 0);
+
+/* ================================================================
+   DOS FILAS DE SALDO: EL ACUMULADO SIN COBERTURA Y EL CUBIERTO
+   SALDO_FINAL arrastra SOLO lo que tiene por encima. Una puesta arriba
+   de las filas de uso es la posicion sin cobertura -el rojo que dispara
+   el rescate-; la del final, la posicion cubierta.
+   ================================================================ */
+seccion('un saldo acumulado arriba de la cobertura es la posicion SIN cobertura');
+
+$eaDos = new EstructuraCobAuto();
+$eaDos->secciones = $ea->secciones;
+$eaDos->filas = [];
+
+foreach ($ea->filas as $f) {
+    $eaDos->filas[] = $f;
+
+    if ($f['CODIGO'] === 'FLUJO') {
+        $eaDos->filas[] = $filA(99, 'SALDO_SIN_COB', 'RES', 'SALDO_FINAL', 15);
+    }
+}
+
+$mDos = new CashflowCobAuto($eaDos, new ParametrosCobAuto(), $ha);
+$mDos->series = $seriesBase;
+$tDos = $mDos->proyectar();
+$pDos = [];
+foreach ($tDos['filas'] as $f) { $pDos[$f['codigo']] = $f; }
+
+// Los dias sin cobertura dan lo mismo en las dos filas.
+chequear('06/09: las dos filas arrancan del saldo inicial', [1100.0, 1100.0],
+    [$pDos['SALDO_SIN_COB']['dias']['2026-09-06'], $pDos['SALDO_FIN']['dias']['2026-09-06']]);
+chequear('07/09: iguales, no hubo rescate', [400.0, 400.0],
+    [$pDos['SALDO_SIN_COB']['dias']['2026-09-07'], $pDos['SALDO_FIN']['dias']['2026-09-07']]);
+
+// El 08/09 la de arriba muestra el rojo que dispara el rescate; la de abajo,
+// la posicion ya cubierta.
+chequear('08/09: la de arriba queda en -2200, el rojo que el motor tapa', -2200.0,
+    $pDos['SALDO_SIN_COB']['dias']['2026-09-08']);
+chequear('08/09: la del final sigue cubierta', 300.0, $pDos['SALDO_FIN']['dias']['2026-09-08']);
+
+// Y NO es un hibrido: en octubre, la de arriba sigue sin ver los 2500
+// rescatados en septiembre (-2200 + 300 = -1900), aunque ya sean de "ayer".
+chequear('Oct: la de arriba arrastra sin ninguna cobertura, ni la de dias anteriores', -1900.0,
+    $pDos['SALDO_SIN_COB']['meses']['2026-10']);
+chequear('Oct: la del final, con todo', 600.0, $pDos['SALDO_FIN']['meses']['2026-10']);
+
+// El indicador de saldo minimo sale de la ULTIMA fila de saldo: la posicion.
+chequear('el saldo minimo del KPI es el de la fila del final, no el rojo tapado', 300.0,
+    $tDos['kpi']['dias']['minimo']['valor']);
+chequear('y el saldo de cierre tambien', 300.0, $tDos['kpi']['dias']['saldo_cierre']);
+
+// Las dos llevan la marca de arrastre y el mismo total que su ultima columna.
+chequear('las dos son filas de arrastre', [true, true],
+    [$pDos['SALDO_SIN_COB']['arrastre'], $pDos['SALDO_FIN']['arrastre']]);
+chequear('el total del tramo de la de arriba es su ultimo dia', -2200.0, $pDos['SALDO_SIN_COB']['total_tramo']);
+
+$descuadreDos = array_values(array_filter($tDos['warnings'], function ($w) {
+    return strpos($w, 'no cierra') !== false;
+}));
+chequear('los invariantes siguen cerrando con dos filas de saldo', [], $descuadreDos);
+
+// El script la crea, colgada del Flujo Neto sin cobertura.
+chequear('el script crea SALDO_ACUM_SIN_COB debajo de FLUJO_NETO', true,
+    strpos($txtAuto, "'SALDO_ACUM_SIN_COB'") !== false
+    && strpos($txtAuto, "WHERE CODIGO = 'FLUJO_NETO' AND TIPO = 'FLUJO_NETO'") !== false
+    && strpos($txtAuto, '@ordFlujo + 5') !== false);
+chequear('y renombra la del final solo si conserva el nombre de siempre', true,
+    strpos($txtAuto, "WHERE CODIGO = 'SALDO_FINAL' AND NOMBRE = 'Flujo Neto Acumulado'") !== false);

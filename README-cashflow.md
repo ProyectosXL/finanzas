@@ -44,7 +44,7 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 | 15 | `sql/cashflow_estructura_neteo_prechequeado.sql` | Agrega la fila **Neteo cheques adelantados** a la sección Ventas, con `ORDEN = 25` (entre Franquicias y Mayoristas), apuntada a la serie `VENTAS → NETEO_PRECHEQUEADO` | **El tablero muestra la cobranza de Ventas en bruto**: las series volvieron a bruto y si la fila no existe, el neteo no se resta en ningún lado. El cuadro no falla ni avisa —cada serie es correcta por separado—, así que este es el único script del grupo cuya ausencia es *silenciosa* |
 | 17 | `sql/cashflow_echeqs_excluir.sql` | Crea `RO_T_CASHFLOW_ECHEQ_EXCLUIDO`: qué cheques de **cartera** no se van a poder cobrar, con su motivo, quién, cuándo y el historial completo | **No se puede excluir ningún cheque**. La pestaña se lee igual —el listado no depende de la tabla—, los dos botones de la barra quedan apagados diciendo qué script falta, y la fila del tablero sigue trayendo toda la cartera, que es lo que traía antes |
 | 18 | `sql/cashflow_saldos_cuentas_fondo.sql` | Agrega `CLASE` y el saldo inicial al catálogo de cuentas de Saldos, crea `RO_T_CASHFLOW_SALDOS_FONDO_MOV` (la cuenta corriente de cada fondo), **migra** la última foto de Otros Ingresos como saldo inicial de dos cuentas nuevas, reescribe el `ORIGEN` de las aplicaciones de cobertura a la clave de esas cuentas, y reapunta las dos filas de stock a `FONDO_INVERSION` / `FONDO_COMITENTE` | **Las filas de stock siguen leyendo de Otros Ingresos**, que está retirado: muestran la última foto cargada y el tablero avisa que ese dato ya no se mantiene. Saldos → Fondos y el ABM de fondos de Parámetros avisan qué script falta. Si además el código nuevo corre contra una base sin el script, `Cobertura::origenes()` devuelve vacío y **no se puede aplicar cobertura nueva** hasta correrlo: no hay ninguna cuenta de la que aplicar |
-| 19 | `sql/cashflow_cobertura_automatica.sql` | Reapunta la fila *Uso de Inversiones* a la serie `COBERTURA → USO_INVERSION`, crea *Uso de Dólares comitente* (`USO_COMITENTE`, `ORDEN = 25`) y fija la clave **fecha + fondo** de las aplicaciones manuales con un índice único filtrado por `VIGENTE = 1` | **El motor rescata igual de las inversiones** —la fila existente sigue leyendo `APLICACION`, que nombra los fondos de lo que tenga cargado— pero **no de la comitente**: no hay fila donde mostrarlo, y el tablero avisa nombrando el script. La clave por fondo la aplica el PHP de todos modos; sin el índice, sólo el código la garantiza |
+| 19 | `sql/cashflow_cobertura_automatica.sql` | Reapunta la fila *Uso de Inversiones* a la serie `COBERTURA → USO_INVERSION`, crea *Uso de Dólares comitente* (`USO_COMITENTE`, `ORDEN = 25`), crea *Flujo Neto Acumulado (sin cobertura)* (`SALDO_FINAL`, en Resultados debajo del flujo neto) y fija la clave **fecha + fondo** de las aplicaciones manuales con un índice único filtrado por `VIGENTE = 1` | **El motor rescata igual de las inversiones** —la fila existente sigue leyendo `APLICACION`, que nombra los fondos de lo que tenga cargado— pero **no de la comitente**: no hay fila donde mostrarlo, y el tablero avisa nombrando el script. La clave por fondo la aplica el PHP de todos modos; sin el índice, sólo el código la garantiza |
 
 ### Scripts modificados — hay que volver a correrlos
 
@@ -69,6 +69,7 @@ Que ninguna fila del tablero duplique importes:
 - `ECHEQS → A_COBRAR` **activa y sola**. `A_COBRAR` ya no trae toda la cartera: trae la cobrable, sin lo excluido a mano. El universo es `A_COBRAR_TODO` y las dos mitades son `A_COBRAR` + `A_COBRAR_EXCLUIDOS`; activar el total al lado de cualquiera de las dos cuenta dos veces el mismo cheque, y eso lo rechaza el validador. **No hay que repuntar nada**: la fila ya está configurada contra `A_COBRAR`, y mientras no haya ningún cheque excluido ese código vale lo mismo que antes.
 - `STOCK_INVERSIONES → FONDO_INVERSION/STOCK` y `STOCK_DOLARES_COMITENTE → FONDO_COMITENTE/STOCK`, activas. Si alguna sigue apuntando a `SALDO_INVERSIONES` o `DOLARES_COMITENTE`, el editor la marca con la advertencia de módulo retirado y el tablero avisa. El día que se corre el script 18 **el tablero no se mueve un peso**: verificado contra la base, las dos filas dan `3.529.962,37` y `1.535,00` antes y después, porque el saldo inicial migrado es exactamente la última foto que el proveedor viejo tomaba como stock. Lo que sí aparece es el aviso por fondo de la cobertura, que antes no llegaba (ver *Los fondos son las cuentas*).
 - **Dos filas de uso, una por clase de fondo**: `USO_COBERTURA → COBERTURA/USO_INVERSION` y `USO_DOLARES_COMITENTE → COBERTURA/USO_COMITENTE`, activas, `COMPUTA = 1`, y **las dos entre** *Flujo Neto (sin cobertura)* y *Flujo Neto (con cobertura)*: el alcance de un flujo neto es posicional, así que una fila de uso puesta abajo del segundo no entraría en él. Ninguna fila activa con la serie `APLICACION` al lado de esas dos: es el total y el validador lo rechaza. El día que se corre el script 19 el tablero **no cambia ningún número salvo que ya hubiera columnas en rojo**: verificado contra la base el 19/09/2026, no había ninguna, así que el motor no rescató nada y la única aplicación manual vigente siguió en su columna.
+- **Dos filas de saldo**: `SALDO_ACUM_SIN_COB` en *Resultados* justo debajo de *Flujo Neto (sin cobertura)*, y `SALDO_FINAL` al final de *Cobertura*. Si la de arriba quedara **debajo** de las filas de uso las incluiría y diría lo mismo que la del final.
 
 ---
 
@@ -579,7 +580,7 @@ No hay ninguna referencia fila a fila guardada. El alcance es **posicional**, re
 | `USO_COBERTURA` | Suma (+1), como un ingreso, pero **no cuenta como ingreso en los indicadores** |
 | `SUBTOTAL` | Las filas de movimiento **y de saldo inicial** de su sección y de las secciones hijas |
 | `FLUJO_NETO` | Las filas de movimiento **y de saldo** que estén **por encima** |
-| `SALDO_FINAL` | Los movimientos que estén por encima, más el arrastre del saldo |
+| `SALDO_FINAL` | El **arrastre**, columna a columna, del saldo y de los movimientos que estén **por encima**: la posición hasta ahí. Puede haber más de una: una arriba de la cobertura es la posición sin cubrir |
 
 **`FLUJO_NETO` incluye el saldo que se muestra más arriba**, y eso cambió. La definición es *Ingresos − Egresos*, y los Ingresos del cuadro arrancan en el Disponible, que incluye el saldo en bancos: en el Excel `D38 = D13 + D37`. Antes sumaba sólo los movimientos, con lo que un día con saldo inicial mostraba la variación de caja y no lo que el rótulo promete.
 
@@ -679,12 +680,15 @@ Debajo del *Flujo Neto (sin cobertura)*:
 
 | Fila | Tipo | Qué es |
 | --- | --- | --- |
+| Flujo Neto Acumulado (sin cobertura) | `SALDO_FINAL` | En *Resultados*, pegada al flujo neto: la posición acumulada **sin cubrir**, el rojo que dispara el rescate. Leyendo de arriba hacia abajo, es la que contesta "¿cuánto me falta?" antes de ver de dónde sale |
 | Inversiones disponibles | `STOCK_COBERTURA` | Cuánto hay en las cuentas de inversión. **No va en ninguna columna de fecha**: el importe va en la columna Total, y **cuánto queda** en la celda de Concepto, que es la que no se va al scrollear |
 | Dólares en cuenta comitente | `STOCK_COBERTURA` | Lo mismo, para las cuentas comitente, valuado a hoy |
 | Uso de Inversiones | `USO_COBERTURA` | Cuánto se rescata de las cuentas de inversión en cada fecha. **Lo calcula el motor** y se puede pisar a mano desde el tablero |
 | Uso de Dólares comitente | `USO_COBERTURA` | Lo mismo, para las comitente, en dólares enteros vendidos a la cotización del día |
 | Flujo Neto (con cobertura) | `FLUJO_NETO` | El de arriba más lo aplicado en esa columna |
-| Saldo Final | `SALDO_FINAL` | La posición proyectada, ya con la cobertura |
+| Flujo Neto Acumulado (con cobertura) | `SALDO_FINAL` | La posición proyectada, ya con la cobertura. Es la que miran los indicadores y la que pinta las columnas en rojo |
+
+**Dos filas de saldo, y `SALDO_FINAL` arrastra sólo lo que tiene por encima.** Esto **cambió**: era *apertura de la columna (con todo) + movimientos por encima*, y con una sola fila al final da lo mismo. Con una fila de saldo arriba de la cobertura, la apertura global la volvía un híbrido —los rescates de ayer sí, el de hoy no—; ahora es la misma regla posicional de `FLUJO_NETO` aplicada al arrastre, y la fila del final sigue dando exactamente el cierre global, que el invariante verifica. Los indicadores (*Saldo Final*, *Saldo Mínimo*) y las columnas en rojo usan **la última** fila de saldo: la de arriba muestra un rojo que la cobertura ya tapó.
 
 **Una fila de uso por clase de fondo, no una sola con un origen.** Con el motor vendiendo dólares cuando las inversiones no alcanzan, hay que ver cada cosa en su fila. El proveedor `COBERTURA` sirve `USO_INVERSION` y `USO_COMITENTE`; `APLICACION` —el total de antes— queda declarada para volver atrás y relacionada en `componentes`, así que el validador no deja activar el total y una parte a la vez. Lo crea `sql/cashflow_cobertura_automatica.sql`.
 
@@ -850,7 +854,7 @@ para cada columna de la secuencia:
     cierre   = saldo                          <- lo que muestra SALDO_FINAL
 ```
 
-El motor verifica que `cierre[n] == apertura[n+1]`; si no da, deja un aviso y no una excepción.
+El motor verifica que `cierre[n] == apertura[n+1]`; si no da, deja un aviso y no una excepción. Ese es el arrastre **global**, con todos los movimientos; lo que muestra cada fila `SALDO_FINAL` es el mismo arrastre pero sólo con las filas que tiene **por encima**, así que la del final coincide con el cierre global y una puesta antes de la cobertura es la posición sin cubrir.
 
 ### Dos consecuencias que se ven en pantalla
 

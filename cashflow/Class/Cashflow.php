@@ -559,23 +559,38 @@ class Cashflow {
         // egresos, que es lo que el rotulo promete.
         //
         // ES EL SALDO MOSTRADO, NO EL ARRASTRE: 'apertura' no entra. Eso es
-        // exactamente lo que distingue FLUJO_NETO de SALDO_FINAL, que sigue
-        // siendo apertura + aporte + movimientos. Por eso tampoco se le suma a
+        // exactamente lo que distingue FLUJO_NETO de SALDO_FINAL, que es el
+        // ARRASTRE de lo que tiene por encima. Por eso tampoco se le suma a
         // SALDO_FINAL: ahi el saldo ya entro como 'aporte' y contarlo de nuevo
         // lo duplicaria.
+        //
+        // SALDO_FINAL ARRASTRA SOLO LO QUE TIENE POR ENCIMA, columna a columna
+        // desde el principio del horizonte. Antes era "apertura de la columna
+        // (con TODO) + movimientos por encima", y con una sola fila al final
+        // del cuadro es lo mismo. La diferencia aparece con dos: una fila de
+        // saldo puesta ARRIBA de la cobertura tiene que ser la posicion SIN
+        // cobertura -el rojo que dispara el rescate-, y con la apertura global
+        // mostraria un hibrido: los rescates de ayer si, el de hoy no. Es la
+        // misma regla posicional de FLUJO_NETO, aplicada al arrastre. La fila
+        // del final sigue dando exactamente el cierre global, y el invariante
+        // de abajo lo verifica.
         foreach ($resueltas as $i => $f) {
             if ($f['tipo'] !== 'FLUJO_NETO' && $f['tipo'] !== 'SALDO_FINAL') {
                 continue;
             }
 
             $mapa = [];
+            $acumulado = 0;
 
             foreach ($columnas as $col) {
                 $hasta = $this->sumarMovimientos($resueltas, $col, null, $i);
 
-                $mapa[$col] = ($f['tipo'] === 'FLUJO_NETO')
-                    ? $hasta + $this->sumarSaldoMostrado($resueltas, $col, null, $i)
-                    : $apertura[$col] + $aporte[$col] + $hasta;
+                if ($f['tipo'] === 'FLUJO_NETO') {
+                    $mapa[$col] = $hasta + $this->sumarSaldoMostrado($resueltas, $col, null, $i);
+                } else {
+                    $acumulado += $this->sumarAporteSaldo($resueltas, $col, $i) + $hasta;
+                    $mapa[$col] = $acumulado;
+                }
             }
 
             $resueltas[$i] = $this->volcar($resueltas[$i], $todas, $mapa, $enSecuencia);
@@ -904,12 +919,19 @@ class Cashflow {
      *
      * @param array $resueltas
      * @param string $col
+     * @param int|null $limite Indice tope: solo las filas ANTERIORES a esa
+     *        posicion, para el arrastre posicional de SALDO_FINAL. null para
+     *        el arrastre global.
      * @return float
      */
-    private function sumarAporteSaldo($resueltas, $col) {
+    private function sumarAporteSaldo($resueltas, $col, $limite = null) {
         $total = 0;
 
-        foreach ($resueltas as $f) {
+        foreach ($resueltas as $pos => $f) {
+            if ($limite !== null && $pos >= $limite) {
+                break;
+            }
+
             if ($f['tipo'] === 'SALDO_INICIAL') {
                 $total += $this->valor($f, $col);
             }
@@ -1409,8 +1431,24 @@ class Cashflow {
 
         $ultima = $cols[count($cols) - 1];
 
-        foreach ($resueltas as $f) {
+        // Con mas de una fila de saldo -una antes de la cobertura y otra al
+        // final- el indicador es LA ULTIMA: es la que arrastra todo lo que hay,
+        // o sea la posicion. Si se tomara el minimo entre las dos, el Saldo
+        // Minimo mostraria el rojo que la cobertura ya tapo.
+        $posSaldo = null;
+
+        foreach ($resueltas as $pos => $f) {
             if ($f['tipo'] === 'SALDO_FINAL') {
+                $posSaldo = $pos;
+            }
+        }
+
+        foreach ($resueltas as $pos => $f) {
+            if ($f['tipo'] === 'SALDO_FINAL') {
+                if ($pos !== $posSaldo) {
+                    continue;
+                }
+
                 $kpi['saldo_cierre'] = $this->valor($f, $ultima);
 
                 // El peor saldo proyectado del periodo y cuando ocurre. Es el
