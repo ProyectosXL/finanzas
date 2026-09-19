@@ -450,10 +450,14 @@ class CashflowRegistry {
            QUEDAN DECLARADOS, CON LA MARCA DE RETIRADOS. Borrarlos dejaria
            invalida cualquier fila que todavia los apunte, y ponerlos en
            'disponible' => false diria "sin construir" sobre algo que existe:
-           el proveedor sigue leyendo sus tablas -que no se borran, por el
-           historico- y las pestanas siguen abriendo, marcadas como retiradas
-           en el menu. Lo que cambia es que el dato ya no se mantiene, y el
+           el proveedor sigue leyendo sus tablas, que no se borran por el
+           historico. Lo que cambia es que el dato ya no se mantiene, y el
            motor lo avisa en cada fila que siga leyendo de aca.
+
+           NO DECLARAN 'tab': las dos pestanas de Otros Ingresos se eliminaron
+           para que no confundan -una pantalla que abre y guarda, y cuyo
+           numero no va a ningun lado-. Una fila que los apunte no queda como
+           enlace, igual que la de Cobertura.
 
            YA NO DECLARAN 'origen_cobertura': el fondo dejo de ser una constante
            del registro. Cada cuenta de fondo es un fondo, y el reparto viaja
@@ -474,7 +478,6 @@ class CashflowRegistry {
             'retirado' => 'los dólares de la cuenta comitente ahora son una cuenta de Saldos '
                 . '(clase Cuenta comitente) con cuenta corriente propia, y el stock de '
                 . 'cobertura sale de ahí.',
-            'tab' => 'dolares_comitente',
             'series' => [
                 'STOCK' => 'Ultima foto de los dolares (retirado)',
                 'INGRESO' => 'Dolares cuenta comitente como ingreso (criterio viejo, en desuso)'
@@ -495,7 +498,6 @@ class CashflowRegistry {
             'disponible' => true,
             'retirado' => 'el saldo de inversiones ahora son cuentas de Saldos (clase '
                 . 'Inversión) con cuenta corriente propia, y el stock de cobertura sale de ahí.',
-            'tab' => 'saldo_inversiones',
             'series' => [
                 'STOCK' => 'Ultima foto del saldo invertido (retirado)',
                 'INGRESO' => 'Saldo de inversiones como ingreso (criterio viejo, en desuso)'

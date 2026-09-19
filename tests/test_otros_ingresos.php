@@ -94,7 +94,7 @@ chequear('la serie es INGRESO, no DISPONIBLE', true,
     CashflowRegistry::serieExiste('DOLARES_COMITENTE', 'INGRESO'));
 chequear('la serie vieja ya no existe', false,
     CashflowRegistry::serieExiste('DOLARES_COMITENTE', 'DISPONIBLE'));
-chequear('enlaza a su propia pestana', 'dolares_comitente', $meta['tab']);
+chequear('ya no enlaza a ninguna pestana: la suya se elimino', false, isset($meta['tab']));
 chequear('la moneda de origen es USD', 'USD', $meta['moneda']);
 
 // El proveedor tiene que poder instanciarse: si el archivo o la clase no
@@ -233,7 +233,7 @@ chequear('esta registrado', true, $metaInv !== null);
 chequear('y esta disponible', true, CashflowRegistry::disponible('SALDO_INVERSIONES'));
 chequear('la serie es INGRESO', true,
     CashflowRegistry::serieExiste('SALDO_INVERSIONES', 'INGRESO'));
-chequear('enlaza a su propia pestana', 'saldo_inversiones', $metaInv['tab']);
+chequear('ya no enlaza a ninguna pestana: la suya se elimino', false, isset($metaInv['tab']));
 
 // La moneda del registro es ARS y no USD: es lo que dice que esta serie NO se
 // convierte. Es informativo para el tablero, pero si dijera USD, quien lea el
@@ -295,31 +295,26 @@ chequear('deja un aviso', 1, count($rotoInv->warnings()));
 chequear('que nombra al modulo', true,
     strpos($rotoInv->warnings()[0], 'SALDO_INVERSIONES') === 0);
 
-seccion('la pestana de inversiones esta en el menu y en el controller');
+seccion('las pestanas de Otros Ingresos se eliminaron; las tablas quedan');
 
-chequear('no es un placeholder', false, Menu::esPlaceholder('saldo_inversiones'));
+/* Desde que el saldo invertido y los dolares de la cuenta comitente son
+   cuentas de fondo de Saldos, una pantalla que abre y guarda, y cuyo numero no
+   va a ningun lado, confunde aunque lleve un cartel. Se eliminaron las
+   pestanas, sus JS y CSS, su controller y la categoria del menu. Lo que queda
+   es lo que guarda el historico: las tablas, sus scripts, la clase
+   OtrosIngresos y el proveedor retirado. Ver test_menu.php y test_fondos.php. */
+foreach (['Tabs/saldo_inversiones.php', 'Tabs/dolares_comitente.php',
+          'Js/OtrosIngresos-Saldo_inversiones.js', 'Js/OtrosIngresos-Dolares_comitente.js',
+          'Css/OtrosIngresos-Saldo_inversiones.css', 'Css/OtrosIngresos-Dolares_comitente.css',
+          'Controller/OtrosIngresosController.php'] as $archivo) {
+    chequear($archivo . ' ya no existe', false, file_exists(__DIR__ . '/../cashflow/' . $archivo));
+}
 
-// El archivo de la pestana y su JS tienen que existir: si faltaran, el menu
-// prometeria una pantalla que no carga.
-chequear('existe el archivo de la pestana', true,
-    file_exists(__DIR__ . '/../cashflow/Tabs/saldo_inversiones.php'));
-chequear('existe su JS', true,
-    file_exists(__DIR__ . '/../cashflow/Js/OtrosIngresos-Saldo_inversiones.js'));
-chequear('existe su CSS', true,
-    file_exists(__DIR__ . '/../cashflow/Css/OtrosIngresos-Saldo_inversiones.css'));
-chequear('existe el script SQL', true,
+chequear('el script SQL de la tabla sigue existiendo', true,
     file_exists(__DIR__ . '/../sql/cashflow_saldo_inversiones.sql'));
+chequear('y la clase que lee las tablas tambien', true,
+    file_exists(__DIR__ . '/../cashflow/Class/OtrosIngresos.php'));
 
-// Sin la entrada en $validTabs, TabController devuelve 400 y la pestana no
-// abre, aunque el menu la muestre.
-chequear('esta en los tabs validos del controller', true,
-    strpos(file_get_contents(__DIR__ . '/../cashflow/Controller/TabController.php'),
-        "'saldo_inversiones'") !== false);
-
-// Y el item del menu de Otros Ingresos: la categoria tiene dos, y desde que los
-// dos conceptos son cuentas de fondo de Saldos estan RETIRADOS. Siguen en el
-// menu -conservan el historico- pero el contador n/m no los cuenta: lo que se
-// carga ahi ya no llega al tablero. Ver test_menu.php y test_fondos.php.
 $catOtros = null;
 
 foreach (Menu::estructura()['categorias'] as $c) {
@@ -328,12 +323,7 @@ foreach (Menu::estructura()['categorias'] as $c) {
     }
 }
 
-chequear('la categoria Otros Ingresos existe', true, $catOtros !== null);
-chequear('y tiene dos items', 2, $catOtros['total']);
-chequear('ninguna cuenta como pestana con datos: estan retiradas', 0, $catOtros['con_datos']);
-chequear('el tab de la segunda es saldo_inversiones',
-    'saldo_inversiones', $catOtros['items'][1]['tab']);
-chequear('y su estado es retirada', Menu::RETIRADA, $catOtros['items'][1]['estado']);
+chequear('la categoria Otros Ingresos ya no esta en el menu', null, $catOtros);
 
 /* ================================================================
    Exportaciones Tasky ya tiene modulo: el detalle esta en
@@ -343,8 +333,6 @@ seccion('Exportaciones Tasky');
 
 chequear('ya tiene modulo: no es placeholder',
     false, Menu::esPlaceholder('exportaciones_tasky'));
-chequear('y la pestana de dolares tampoco',
-    false, Menu::esPlaceholder('dolares_comitente'));
 
 /* ================================================================
    Contra la base

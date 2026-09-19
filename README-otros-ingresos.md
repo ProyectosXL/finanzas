@@ -20,11 +20,10 @@ y el stock de la sección Cobertura lo lee `FondosProvider` de esas cuentas. Ver
 
 **Qué NO se borró**, igual que cuando el saldo de inversiones dejó de ser un ingreso:
 
-- `RO_T_CASHFLOW_SALDO_INVERSIONES` y `RO_T_CASHFLOW_DOLARES_COMITENTE` quedan con su histórico.
-- Las dos pestañas siguen abriendo y guardando en sus tablas, con un cartel arriba que dice que están retiradas. El menú las marca con el cuarto estado, `retirada` (ver `Class/Menu.php`), y no las cuenta en el `n/m` de la categoría: una pantalla que abre, funciona y guarda, y cuyo número no va a ningún lado, es el mismo peligro que una maqueta.
-- `OtrosIngresosProvider` sigue declarado y disponible bajo los mismos códigos, con la marca `'retirado'` en el registro. Una fila que todavía lo apunte no queda inválida: muestra lo último que se cargó ahí y el motor avisa que ese dato ya no se mantiene. Para volver atrás se reapuntan las filas de stock desde Parámetros → Cashflow.
+- `RO_T_CASHFLOW_SALDO_INVERSIONES` y `RO_T_CASHFLOW_DOLARES_COMITENTE` quedan con su histórico, con sus scripts y con `Class/OtrosIngresos.php`, que las lee.
+- `OtrosIngresosProvider` sigue declarado y disponible bajo los mismos códigos, con la marca `'retirado'` en el registro y **sin `tab`**. Una fila que todavía lo apunte no queda inválida: muestra lo último que se cargó ahí y el motor avisa que ese dato ya no se mantiene. Para volver atrás se reapuntan las filas de stock desde Parámetros → Cashflow.
 
-Lo que sí se sacó de la pestaña de dólares es la tarjeta *Disponible sin usar*: se calculaba filtrando las aplicaciones por `ORIGEN = 'DOLARES'`, que ya no existe, y el disponible por fondo se ve ahora en el tablero, en la fila de stock. Ya no declaran `origen_cobertura`: los fondos son cuentas y el reparto viaja con la serie.
+**Qué SÍ se eliminó: las dos pestañas**, con su JS, su CSS, su controller (`OtrosIngresosController.php`), su entrada en `TabController` y la categoría *Otros Ingresos* del menú. Primero habían quedado con un cartel de *retirada* y un cuarto estado del menú; se sacaron porque una pantalla que abre, funciona y guarda, y cuyo número no va a ningún lado, confunde aunque lleve cartel. Son código, no datos: lo que había que conservar es el histórico, y eso está en las tablas. Ya no hay forma de cargar una foto nueva, sólo de leer las que quedaron (por el proveedor retirado, si alguien reapunta una fila). Tampoco declaran `origen_cobertura`: los fondos son cuentas y el reparto viaja con la serie.
 
 ---
 
@@ -382,7 +381,7 @@ En el tablero, la fila `EXPORTACIONES` sigue apuntando a un proveedor con `'disp
 - Que el registro exponga la serie `INGRESO` y **ya no** `DISPONIBLE`, y que el proveedor se instancie.
 - Que un proveedor que lanza rinda cero y avise, en vez de tumbar el tablero.
 - Que la fila apuntada a `INGRESO` valide y la apuntada a la serie vieja no — que es exactamente lo que arregla el `UPDATE` del script.
-- Que el menú detecte `exportaciones_tasky` como placeholder y `dolares_comitente` como pestaña de datos.
+- Que el menú no ofrezca más las dos pestañas, que sus archivos no existan y que el proveedor retirado no declare `tab`.
 
 Y del Saldo de Inversiones, **lo que puede haberse copiado mal**: que su campo sea
 `IMPORTE_ARS` y el de dólares siga siendo `IMPORTE_USD`; que la moneda del registro sea
@@ -412,16 +411,10 @@ sql/cashflow_dolares_comitente.sql               Tabla + fila del tablero
 sql/cashflow_saldo_inversiones.sql               Tabla + fila del tablero (y el criterio de la moneda)
 sql/RO_V_DOLAR_OFICIAL_BCRA_DIARIO.sql           La cotización diaria, sin colapsar por mes
 cashflow/Class/OtrosIngresos.php                 Lectura, carga y validaciones de los dos conceptos
-cashflow/Class/Providers/OtrosIngresosProvider.php  Las dos series del tablero
-cashflow/Controller/OtrosIngresosController.php
-cashflow/Tabs/dolares_comitente.php
-cashflow/Tabs/saldo_inversiones.php
-cashflow/Tabs/exportaciones_tasky.php            Sólo el placeholder
-cashflow/Js/OtrosIngresos-Dolares_comitente.js
-cashflow/Js/OtrosIngresos-Saldo_inversiones.js
-cashflow/Css/OtrosIngresos-Dolares_comitente.css
-cashflow/Css/OtrosIngresos-Saldo_inversiones.css
+cashflow/Class/Providers/OtrosIngresosProvider.php  Las dos series del tablero (retirado)
 tests/test_otros_ingresos.php
 ```
+
+Eliminados con `feature/cuentas-inversion`: `Controller/OtrosIngresosController.php`, `Tabs/dolares_comitente.php`, `Tabs/saldo_inversiones.php`, `Js/OtrosIngresos-Dolares_comitente.js`, `Js/OtrosIngresos-Saldo_inversiones.js`, `Css/OtrosIngresos-Dolares_comitente.css`, `Css/OtrosIngresos-Saldo_inversiones.css`, y la categoría *Otros Ingresos* de `Class/Menu.php`. `Tabs/exportaciones_tasky.php` ya no es un placeholder: ver `README-exportaciones-tasky.md`.
 
 Modificados: `Class/Menu.php` (categoría nueva + ítem de Exportaciones + ítem de Saldo de Inversiones) · `Class/CashflowRegistry.php` (`DOLARES_COMITENTE` disponible, `EXPORTACIONES` renombrada, `SALDO_INVERSIONES` nuevo) · `Controller/TabController.php` (tres pestañas en `$validTabs`) · `sql/cashflow_estructura.sql` y `sql/cashflow_estructura_disponibilidades.sql` (la fila en la semilla).

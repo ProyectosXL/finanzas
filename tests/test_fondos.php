@@ -446,10 +446,19 @@ chequear('con clase en el alta de bancos', true,
 chequear('y el JS manda saldo inicial y fecha juntos', true,
     strpos($jsParam, 'saldo_inicial') !== false && strpos($jsParam, 'fecha_saldo_inicial') !== false);
 
-// Las dos pestanas retiradas lo dicen arriba de todo.
+// Las dos pestanas de Otros Ingresos se eliminaron: ni archivo, ni menu, ni
+// TabController, ni enlace desde el tablero. Sus tablas quedan.
+$tabCtrl = file_get_contents(__DIR__ . '/../cashflow/Controller/TabController.php');
+
 foreach (['dolares_comitente', 'saldo_inversiones'] as $tab) {
-    chequear($tab . ' muestra el cartel de retirada', true,
-        strpos(file_get_contents(__DIR__ . '/../cashflow/Tabs/' . $tab . '.php'), 'Pestaña retirada') !== false);
+    chequear($tab . ' ya no tiene archivo de pestana', false,
+        file_exists(__DIR__ . '/../cashflow/Tabs/' . $tab . '.php'));
+    chequear($tab . ' ya no esta en TabController', false, strpos($tabCtrl, "'" . $tab . "'") !== false);
+}
+
+foreach (['SALDO_INVERSIONES', 'DOLARES_COMITENTE'] as $codigo) {
+    chequear($codigo . ' ya no declara pestana: su fila no queda como enlace roto',
+        false, isset(CashflowRegistry::meta($codigo)['tab']));
 }
 
 /* ================================================================

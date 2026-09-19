@@ -357,15 +357,13 @@
 /* ============================================================================
    ICONOS Y ESTADO DE CADA PESTANA
 
-   Los cuatro estados salen de Class/Menu.php:
+   Los tres estados salen de Class/Menu.php:
      datos     -> la pestana lee del sistema. Es el caso normal y NO se marca:
                   marcar lo normal es ruido.
      maqueta   -> dibuja pero los numeros son de ejemplo. Se marca en ambar,
                   porque es el caso peligroso: tiene la forma de una pantalla
                   terminada.
      pendiente -> todavia no se desarrollo. Se atenua.
-     retirada  -> lee del sistema pero su dato ya no alimenta el tablero. Se
-                  atenua y se marca en ambar.
    ============================================================================ */
 
 /* Los items de categoria ahora tienen icono propio. El sangrado de 44px existia
@@ -464,21 +462,4 @@
 .sidebar.collapsed .category-avance,
 .sidebar.collapsed .sidebar-leyenda {
     display: none;
-}
-
-/* Retirada: funciona y conserva su historico, pero lo que se carga ahi ya no
-   llega al tablero. Se atenua como una pendiente -no es una pantalla a la que
-   ir a trabajar- y la marca va en ambar como la maqueta, porque el peligro es
-   el mismo: una pantalla que abre y guarda, y cuyo numero no va a ningun lado. */
-.sidebar .menu-retirada {
-    opacity: 0.6;
-}
-
-.sidebar .menu-retirada:hover {
-    opacity: 0.9;
-}
-
-.sidebar .menu-retirada .menu-marca {
-    color: var(--warning-color, #f0ad4e);
-    opacity: 1;
 }

@@ -22,9 +22,10 @@
        saldo a una fecha = saldo inicial + suscripciones - rescates
                            (movimientos vigentes con FECHA <= esa fecha)
 
-   Las tablas y las pestanas de Otros Ingresos NO se borran: quedan por el
-   historico y el menu las marca como retiradas, igual que se hizo cuando el
-   saldo de inversiones dejo de ser un ingreso.
+   Las tablas de Otros Ingresos NO se borran: quedan por el historico, igual
+   que cuando el saldo de inversiones dejo de ser un ingreso. Las PESTANAS si
+   se eliminaron -son codigo, no datos-: una pantalla que abre y guarda, y cuyo
+   numero ya no va a ningun lado, confunde aunque lleve un cartel.
 
    ----------------------------------------------------------------------------
    1. CLASE ES UNA COLUMNA NUEVA, Y NO UN VALOR MAS DE TIPO

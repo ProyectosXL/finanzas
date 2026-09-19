@@ -177,7 +177,7 @@ La consulta devuelve una fila por `(sucursal, cuenta de tesorería)`. La reserva
 
 Las cuentas de **inversión** y **comitente** del catálogo, con su cuenta corriente. Alimentan las dos filas de stock de la sección **Cobertura** del tablero (`STOCK_INVERSIONES` y `STOCK_DOLARES_COMITENTE`), a través de `FondosProvider`.
 
-> Hasta acá ese stock salía de dos **fotos** cargadas en *Otros Ingresos*: una del saldo invertido en pesos y otra de los dólares de la cuenta comitente. Una foto dice cuánto había el día que alguien la tomó y nada más: no explica de dónde salió el número ni permite asentar un rescate. Ahora cada fondo es una cuenta y su saldo **se calcula**. Las pestañas de Otros Ingresos quedaron retiradas: ver `README-otros-ingresos.md`.
+> Hasta acá ese stock salía de dos **fotos** cargadas en *Otros Ingresos*: una del saldo invertido en pesos y otra de los dólares de la cuenta comitente. Una foto dice cuánto había el día que alguien la tomó y nada más: no explica de dónde salió el número ni permite asentar un rescate. Ahora cada fondo es una cuenta y su saldo **se calcula**. Las pestañas de Otros Ingresos se eliminaron; sus tablas quedan por el histórico: ver `README-otros-ingresos.md`.
 
 ### Una cuenta tiene TIPO y CLASE, y son dos preguntas
 
