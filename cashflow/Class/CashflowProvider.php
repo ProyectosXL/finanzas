@@ -44,6 +44,11 @@ require_once __DIR__ . '/Horizonte.php';
  *   'por_fondo'       [clave => float]    cuanto de la serie corresponde a cada
  *                                         fondo de cobertura (ver abajo)
  *   'fondos'          [clave => string]   el nombre de cada fondo, si se sabe
+ *   'fondos_tope'     [clave => detalle]  el saldo de cada fondo, columna por
+ *                                         columna: el tope de la cobertura
+ *                                         automatica (ver abajo)
+ *   'fondos_manual'   [clave => [col => ..]] lo cargado a mano desde cada
+ *                                         fondo, por columna (ver abajo)
  *
  * EL DETALLE POR FONDO: 'por_fondo' y 'fondos'
  * --------------------------------------------
@@ -56,7 +61,33 @@ require_once __DIR__ . '/Horizonte.php';
  * NO ES UN IMPORTE MAS: es como se reparte el total de la serie, y no entra en
  * ninguna suma. Es metadato, como 'detalle'.
  *
- * ESTAS DOS CLAVES SOBREVIVEN A normalizar() A PROPOSITO, y hay que tenerlo
+ * LO QUE NECESITA LA COBERTURA AUTOMATICA: 'fondos_tope' y 'fondos_manual'
+ * ------------------------------------------------------------------------
+ * Desde que el uso de cobertura lo calcula el motor (CoberturaAutomatica), la
+ * serie de STOCK tiene que decir ademas CUANTO HAY EN CADA FONDO EN CADA
+ * COLUMNA -el tope del que se puede rescatar ese dia, rescates previstos
+ * incluidos- y la de USO tiene que decir que se cargo A MANO desde cada fondo
+ * en cada columna, para que lo manual tenga precedencia y descuente del tope.
+ * Las dos van por columna ('DIA|Y-m-d' o 'MES|Y-m', como 'detalle'):
+ *
+ *   'fondos_tope' => [
+ *       'CTA_13' => ['moneda' => 'ARS', 'clase' => 'INVERSION', 'orden' => 0,
+ *                    'tope' => ['DIA|2026-09-19' => 3529962.37, ...],  en su moneda
+ *                    'tc'   => ['DIA|2026-09-19' => 1535.0, ...]]      solo en USD
+ *   ]
+ *   'fondos_manual' => [
+ *       'CTA_13' => ['DIA|2026-09-22' => ['importe' => 400000, 'ars' => 400000]]
+ *   ]
+ *
+ * 'importe' va en la moneda del fondo y 'ars' ya valuado: el motor suma pesos
+ * al saldo y descuenta moneda del tope, y sin las dos cifras tendria que
+ * volver a valuar, que es justamente lo que no hace. Los fondos que la serie
+ * de USO nombra en 'fondos' son los que esa fila del tablero APLICA: si un
+ * fondo tiene tope pero ninguna fila de uso lo nombra, el motor no rescata
+ * de ahi, porque no tendria donde mostrarlo. Ver el encabezado de
+ * Class/CoberturaAutomatica.php y Cashflow::resolverUsoCobertura().
+ *
+ * ESTAS CLAVES SOBREVIVEN A normalizar() A PROPOSITO, y hay que tenerlo
  * presente al agregar otra: normalizar() arma la serie de salida con una lista
  * cerrada de claves, asi que cualquier cosa que un proveedor cuelgue de la
  * serie y no este en esa lista SE PIERDE EN SILENCIO. Asi paso con el reparto
@@ -242,11 +273,70 @@ abstract class CashflowProvider {
             'warnings' => [],
             'detalle' => [],
             'por_fondo' => [],
-            'fondos' => []
+            'fondos' => [],
+            'fondos_tope' => [],
+            'fondos_manual' => []
         ];
 
         if (!is_array($serie)) {
             return $out;
+        }
+
+        // El tope y lo manual por columna: solo las columnas que EXISTEN en el
+        // eje, como 'detalle'. Una columna que no se dibuja no se puede cubrir
+        // ni mostrar, y dejarla pasar haria que el motor arrastre un tope que
+        // no corresponde a ninguna fecha del cuadro.
+        if (isset($serie['fondos_tope']) && is_array($serie['fondos_tope'])) {
+            foreach ($serie['fondos_tope'] as $clave => $d) {
+                if (!is_array($d)) {
+                    continue;
+                }
+
+                $f = [
+                    'moneda' => (isset($d['moneda']) && strtoupper($d['moneda']) === 'USD') ? 'USD' : 'ARS',
+                    'clase' => isset($d['clase']) ? strtoupper((string) $d['clase']) : '',
+                    'orden' => isset($d['orden']) ? intval($d['orden']) : 0,
+                    'tope' => [],
+                    'tc' => []
+                ];
+
+                foreach (['tope', 'tc'] as $k) {
+                    if (!isset($d[$k]) || !is_array($d[$k])) {
+                        continue;
+                    }
+
+                    foreach ($d[$k] as $columna => $v) {
+                        list($rama, $cl) = self::partirColumna($columna);
+
+                        if ($rama !== null && array_key_exists($cl, $out[$rama])) {
+                            $f[$k][$columna] = ($v === null) ? null : floatval($v);
+                        }
+                    }
+                }
+
+                $out['fondos_tope'][(string) $clave] = $f;
+            }
+        }
+
+        if (isset($serie['fondos_manual']) && is_array($serie['fondos_manual'])) {
+            foreach ($serie['fondos_manual'] as $clave => $cols) {
+                if (!is_array($cols)) {
+                    continue;
+                }
+
+                foreach ($cols as $columna => $v) {
+                    list($rama, $cl) = self::partirColumna($columna);
+
+                    if ($rama === null || !array_key_exists($cl, $out[$rama])) {
+                        continue;
+                    }
+
+                    $out['fondos_manual'][(string) $clave][$columna] = [
+                        'importe' => isset($v['importe']) ? floatval($v['importe']) : 0.0,
+                        'ars' => isset($v['ars']) ? floatval($v['ars']) : 0.0
+                    ];
+                }
+            }
         }
 
         // El reparto por fondo viaja tal cual, con los importes como numeros y

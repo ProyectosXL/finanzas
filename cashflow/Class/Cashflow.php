@@ -5,6 +5,7 @@ require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/EjeVista.php';
 require_once __DIR__ . '/CashflowRegistry.php';
 require_once __DIR__ . '/CashflowEstructura.php';
+require_once __DIR__ . '/CoberturaAutomatica.php';
 
 /**
  * Cashflow
@@ -54,6 +55,13 @@ class Cashflow {
     private $apertura = [];
     private $aporte = [];
     private $cierre = [];
+
+    /**
+     * Lo que calculo CoberturaAutomatica en este pedido, o null si no habia
+     * ningun fondo del que rescatar. Lo llena resolverUsoCobertura() y lo lee
+     * resolverCobertura() para armar el resumen por fondo y los avisos.
+     */
+    private $automatico = null;
 
     /**
      * Las dependencias se pueden inyectar para poder probar el arrastre del
@@ -301,9 +309,19 @@ class Cashflow {
                 // mas y no entra en ninguna suma; ver CashflowProvider.
                 'detalle' => [],
                 // Cuanto hay invertido, cuanto se aplico y cuanto queda. Solo lo
-                // llevan las dos filas de Cobertura; en el resto queda en null,
+                // llevan las filas de Cobertura; en el resto queda en null,
                 // que es distinto de un bloque con ceros. Ver resolverCobertura().
                 'cobertura' => null,
+                // Solo en las filas de USO: que fondos aplica esta fila, y en
+                // cada columna cuanto es cargado a mano y cuanto calculado por
+                // el motor. Es lo que le permite al front distinguir los dos
+                // sin volver a calcular nada. Ver resolverUsoCobertura().
+                'fondos_fila' => [],
+                'cobertura_columnas' => [],
+                // Y el total de la fila sobre el horizonte, partido en los
+                // dos: es lo que la celda de Concepto muestra al lado del
+                // nombre. Lo suma el motor, no el front.
+                'cobertura_totales' => null,
                 'sin_datos' => false
             ];
 
@@ -356,6 +374,14 @@ class Cashflow {
                dieron. */
             $fila['por_fondo'] = isset($s['por_fondo']) ? $s['por_fondo'] : [];
             $fila['fondos'] = isset($s['fondos']) ? $s['fondos'] : [];
+
+            /* Y LO QUE NECESITA LA COBERTURA AUTOMATICA: el saldo de cada fondo
+               columna por columna (en la serie de stock) y lo cargado a mano
+               desde cada uno (en la de uso). Mismo criterio: viajan con la
+               serie, el motor no consulta. No salen en el JSON del tablero -son
+               entradas del calculo, no resultado-; ver salidaFilas(). */
+            $fila['fondos_tope'] = isset($s['fondos_tope']) ? $s['fondos_tope'] : [];
+            $fila['fondos_manual'] = isset($s['fondos_manual']) ? $s['fondos_manual'] : [];
 
             // Las anotaciones viajan tal cual. Las filas DERIVADAS -subtotales,
             // flujo neto, saldo final- no las heredan y se quedan con el arreglo
@@ -448,6 +474,14 @@ class Cashflow {
         $columnas = $h->secuencia();
         $enSecuencia = array_fill_keys($columnas, true);
         $todas = $this->todasLasColumnas($h);
+
+        /* ---- 0. Uso de cobertura ----------------------------------------- */
+        // Va ANTES del arrastre porque lo modifica: el motor calcula cuanto
+        // rescatar de cada fondo para que el saldo acumulado no quede abajo
+        // de cero, y eso se escribe en las filas de uso, que son filas de
+        // movimiento. Recien con eso puesto el arrastre de abajo es la
+        // posicion proyectada de verdad.
+        $this->resolverUsoCobertura($h, $columnas, $resueltas);
 
         /* ---- 1. Arrastre del saldo --------------------------------------- */
         // Va PRIMERO porque los subtotales pueden abarcar la fila de saldo
@@ -569,6 +603,248 @@ class Cashflow {
                 break;
             }
         }
+
+        // Y el segundo invariante: la cobertura automatica arrastro el saldo
+        // por su cuenta, con el mismo flujo, y tiene que haber llegado al mismo
+        // cierre. Si no, o el flujo que se le dio no era el completo, o lo que
+        // se escribio en las filas de uso no es lo que calculo. Las dos cosas
+        // dejarian un saldo final tapado con plata que no se ve en ninguna
+        // fila, que es exactamente lo que este cuadro no puede hacer.
+        if ($this->automatico !== null) {
+            foreach ($columnas as $col) {
+                if (abs($cierre[$col] - $this->automatico['saldo'][$col]) > 0.01) {
+                    $this->warnings[] = 'La cobertura automática no cierra con el arrastre en '
+                        . $this->rotulo($col) . ': el saldo final puede no reflejar lo que se '
+                        . 'rescató. Avisá a Sistemas.';
+                    break;
+                }
+            }
+        }
+    }
+
+    /* ====================================================================
+       COBERTURA AUTOMATICA: CUANTO SE RESCATA DE CADA FONDO Y CUANDO
+       ==================================================================== */
+
+    /**
+     * Calcula el uso de cobertura y lo escribe en las filas de uso.
+     *
+     * Antes el uso se cargaba a mano, celda por celda, y habia que rehacerlo
+     * cada vez que se movia un vencimiento. Ahora lo calcula el motor en cada
+     * pedido, sin persistir nada: el algoritmo esta en CoberturaAutomatica,
+     * que es una funcion pura; aca solo se arman sus entradas con lo que los
+     * proveedores dieron y se reparte su resultado en las filas.
+     *
+     * QUE FILAS PARTICIPAN. Las de tipo USO_COBERTURA con COMPUTA = 1: son
+     * las que entran al arrastre, y un rescate que no entrara al saldo no
+     * cubriria nada. Una fila de uso informativa se queda con lo cargado a
+     * mano, sin calculo.
+     *
+     * QUE FONDOS. Los que tienen tope -lo dice la serie de stock, en
+     * 'fondos_tope'- Y ademas alguna fila de uso los nombra, en 'fondos'.
+     * Hay UNA FILA POR CLASE DE FONDO ("Uso de Inversiones", "Uso de Dolares
+     * comitente") y cada una aplica las cuentas de su clase; el motor no sabe
+     * cual es cual, lo lee de la serie. Un fondo con stock que ninguna fila
+     * aplica no se toca -no habria donde mostrar el rescate- y se avisa: es lo
+     * que pasa mientras no se corra sql/cashflow_cobertura_automatica.sql.
+     *
+     * EL FLUJO QUE RECIBE EL ALGORITMO ES EL DE ANTES DE TODA COBERTURA: el
+     * aporte de saldo mas los movimientos que computan, sin las filas de uso.
+     * Lo cargado a mano en esas filas viaja aparte, en pesos por columna, para
+     * que tenga precedencia y el motor cubra solo lo que siga faltando.
+     *
+     * LO QUE QUEDA EN CADA FILA. El valor de cada columna pasa a ser lo manual
+     * mas lo automatico de sus fondos, en pesos, y 'cobertura_columnas' guarda
+     * el desglose -manual y calculado, por fondo y en su moneda- para que el
+     * front pueda distinguirlos y editar lo manual sin recalcular nada.
+     *
+     * @param Horizonte $h
+     * @param array $columnas Secuencia cronologica
+     * @param array $resueltas Por referencia
+     */
+    private function resolverUsoCobertura($h, $columnas, &$resueltas) {
+        $this->automatico = null;
+
+        /* ---- 1. Las filas de uso y los fondos que cada una aplica --------- */
+        $filasUso = [];
+
+        foreach ($resueltas as $i => $f) {
+            if ($f['tipo'] !== 'USO_COBERTURA') {
+                continue;
+            }
+
+            $claves = array_values(array_unique(array_merge(
+                array_keys($f['fondos']),
+                array_keys($f['por_fondo']),
+                array_keys($f['fondos_manual'])
+            )));
+
+            $resueltas[$i]['fondos_fila'] = $claves;
+
+            if ($f['computa']) {
+                $filasUso[$i] = $claves;
+            }
+        }
+
+        if (empty($filasUso)) {
+            return;
+        }
+
+        // Un fondo nombrado por dos filas se aplica en la primera. No deberia
+        // pasar -cada fila trae una clase- pero si pasa, contar el rescate en
+        // las dos lo sumaria dos veces al saldo.
+        $filaDeFondo = [];
+
+        foreach ($filasUso as $i => $claves) {
+            foreach ($claves as $clave) {
+                if (!isset($filaDeFondo[$clave])) {
+                    $filaDeFondo[$clave] = $i;
+                }
+            }
+        }
+
+        /* ---- 2. Los topes, de las filas de stock ------------------------- */
+        $topes = [];
+        $nombres = [];
+
+        foreach ($resueltas as $f) {
+            if ($f['tipo'] !== 'STOCK_COBERTURA') {
+                continue;
+            }
+
+            foreach ($f['fondos_tope'] as $clave => $d) {
+                if (!isset($topes[$clave])) {
+                    $topes[$clave] = $d;
+                }
+            }
+
+            foreach ($f['fondos'] as $clave => $nombre) {
+                $nombres[$clave] = $nombre;
+            }
+        }
+
+        $fondos = [];
+        $sinFila = [];
+
+        foreach ($topes as $clave => $d) {
+            if (!isset($filaDeFondo[$clave])) {
+                $sinFila[] = isset($nombres[$clave]) ? $nombres[$clave] : $clave;
+                continue;
+            }
+
+            $manual = [];
+            $fm = $resueltas[$filaDeFondo[$clave]]['fondos_manual'];
+
+            if (isset($fm[$clave])) {
+                foreach ($fm[$clave] as $col => $v) {
+                    $manual[$col] = $v['importe'];
+                }
+            }
+
+            $fondos[] = [
+                'clave' => $clave,
+                'moneda' => $d['moneda'],
+                'clase' => $d['clase'],
+                'orden' => $d['orden'],
+                'tope' => $d['tope'],
+                'tc' => $d['tc'],
+                'manual' => $manual
+            ];
+        }
+
+        // Sin ningun fondo del que rescatar no hay calculo, y la seccion se
+        // resuelve como antes: lo manual contra el stock a hoy. Lo unico que
+        // queda por decir es si habia stock que ninguna fila aplica.
+        if (empty($fondos)) {
+            $this->avisarSinFila($sinFila);
+
+            return;
+        }
+
+        $fondos = CoberturaAutomatica::ordenDeConsumo($fondos);
+
+        /* ---- 3. El flujo sin cobertura y lo manual, por columna ---------- */
+        $flujo = [];
+        $manual = [];
+
+        foreach ($columnas as $col) {
+            $flujo[$col] = $this->sumarAporteSaldo($resueltas, $col)
+                + $this->sumarMovimientos($resueltas, $col, null, null, 'USO_COBERTURA');
+
+            $m = 0;
+
+            foreach ($filasUso as $i => $claves) {
+                $m += $this->valor($resueltas[$i], $col);
+            }
+
+            $manual[$col] = $m;
+        }
+
+        $r = CoberturaAutomatica::calcular($columnas, $flujo, $fondos, $manual);
+
+        $r['fondos'] = [];
+
+        foreach ($fondos as $f) {
+            $r['fondos'][$f['clave']] = $f;
+        }
+
+        $r['sin_fila'] = $sinFila;
+        $this->automatico = $r;
+
+        /* ---- 4. Se vuelca en las filas ----------------------------------- */
+        foreach ($filasUso as $i => $claves) {
+            $desglose = [];
+            $totales = ['manual' => 0.0, 'automatico' => 0.0];
+
+            foreach ($columnas as $col) {
+                $info = [
+                    'manual' => $this->valor($resueltas[$i], $col),
+                    'automatico' => 0.0,
+                    'fondos' => []
+                ];
+
+                foreach ($claves as $clave) {
+                    $mi = isset($resueltas[$i]['fondos_manual'][$clave][$col])
+                        ? $resueltas[$i]['fondos_manual'][$clave][$col] : null;
+                    $ai = isset($r['automatico'][$col][$clave]) ? $r['automatico'][$col][$clave] : null;
+
+                    if ($mi === null && $ai === null) {
+                        continue;
+                    }
+
+                    $info['fondos'][$clave] = [
+                        'manual' => ($mi === null) ? 0.0 : $mi['importe'],
+                        'manual_ars' => ($mi === null) ? 0.0 : $mi['ars'],
+                        'automatico' => ($ai === null) ? 0.0 : $ai['importe'],
+                        'automatico_ars' => ($ai === null) ? 0.0 : $ai['ars']
+                    ];
+
+                    if ($ai !== null) {
+                        $info['automatico'] += $ai['ars'];
+                    }
+                }
+
+                if ($info['manual'] == 0 && $info['automatico'] == 0) {
+                    continue;
+                }
+
+                $info['automatico'] = round($info['automatico'], 2);
+                $desglose[$col] = $info;
+                $totales['manual'] += $info['manual'];
+                $totales['automatico'] += $info['automatico'];
+
+                if ($info['automatico'] != 0) {
+                    $resueltas[$i] = $this->ponerValor($resueltas[$i], $col,
+                        round($info['manual'] + $info['automatico'], 2));
+                }
+            }
+
+            $resueltas[$i]['cobertura_columnas'] = $desglose;
+            $resueltas[$i]['cobertura_totales'] = [
+                'manual' => round($totales['manual'], 2),
+                'automatico' => round($totales['automatico'], 2)
+            ];
+        }
     }
 
     /**
@@ -587,9 +863,12 @@ class Cashflow {
      * @param int|null $limite Indice tope: solo las filas ANTERIORES a esa
      *        posicion. null para no limitar. Es lo que hace posicional el
      *        alcance de FLUJO_NETO y SALDO_FINAL.
+     * @param string|null $salvoTipo Un tipo de movimiento que se deja afuera.
+     *        Lo usa la cobertura automatica para medir el flujo SIN las filas
+     *        de uso, que son justamente lo que va a calcular.
      * @return float
      */
-    private function sumarMovimientos($resueltas, $col, $alcance, $limite = null) {
+    private function sumarMovimientos($resueltas, $col, $alcance, $limite = null, $salvoTipo = null) {
         $total = 0;
 
         foreach ($resueltas as $pos => $f) {
@@ -598,6 +877,10 @@ class Cashflow {
             }
 
             if (!in_array($f['tipo'], CashflowEstructura::TIPOS_MOVIMIENTO, true)) {
+                continue;
+            }
+
+            if ($salvoTipo !== null && $f['tipo'] === $salvoTipo) {
                 continue;
             }
 
@@ -713,6 +996,12 @@ class Cashflow {
      * queda" no se puede contestar, y contestar cero seria decir que no hay
      * plata cuando lo que pasa es que no se sabe.
      *
+     * LO APLICADO ES MANUAL MAS AUTOMATICO, y se informan por separado. Lo
+     * manual por fondo lo trae la serie de uso ('por_fondo'); lo automatico
+     * sale de lo que calculo resolverUsoCobertura(). El front muestra los dos
+     * porque no significan lo mismo: uno es una decision cargada, el otro lo
+     * que el motor rescato para que el saldo no quede en rojo.
+     *
      * @param array $resueltas Por referencia
      */
     private function resolverCobertura(&$resueltas) {
@@ -720,6 +1009,7 @@ class Cashflow {
         $aplicado = 0;
         $hayStock = false;
         $hayUso = false;
+        $auto = $this->automatico;
 
         /* EL DETALLE POR FONDO. Cada serie de stock trae cuanto aporta cada
            cuenta de fondo ('por_fondo') y la de uso cuanto se aplico desde
@@ -737,7 +1027,11 @@ class Cashflow {
 
         $abrir = function ($clave, $nombre = null) use (&$fondos) {
             if (!isset($fondos[$clave])) {
-                $fondos[$clave] = ['stock' => 0, 'aplicado' => 0, 'nombre' => $clave];
+                $fondos[$clave] = ['stock' => 0, 'aplicado' => 0, 'manual' => 0, 'automatico' => 0,
+                                   'nombre' => $clave, 'moneda' => 'ARS', 'clase' => null,
+                                   // Si el motor puede rescatar de aca: tiene tope
+                                   // y una fila de uso que lo aplique.
+                                   'automatizable' => false];
             }
 
             if ($nombre !== null && $nombre !== '') {
@@ -756,6 +1050,12 @@ class Cashflow {
                     $abrir($o, isset($nombres[$o]) ? $nombres[$o] : null);
                     $fondos[$o]['stock'] += floatval($v);
                 }
+
+                foreach ((isset($f['fondos_tope']) ? $f['fondos_tope'] : []) as $o => $d) {
+                    $abrir($o, isset($nombres[$o]) ? $nombres[$o] : null);
+                    $fondos[$o]['moneda'] = $d['moneda'];
+                    $fondos[$o]['clase'] = $d['clase'];
+                }
             }
 
             if ($f['tipo'] === 'USO_COBERTURA' && $f['computa']) {
@@ -764,7 +1064,13 @@ class Cashflow {
 
                 foreach ((isset($f['por_fondo']) ? $f['por_fondo'] : []) as $o => $v) {
                     $abrir($o, isset($nombres[$o]) ? $nombres[$o] : null);
-                    $fondos[$o]['aplicado'] += floatval($v);
+                    $fondos[$o]['manual'] += floatval($v);
+                }
+
+                // Los fondos que la fila nombra sin haber aplicado nada
+                // tambien se abren: el front los ofrece para cargar a mano.
+                foreach ($nombres as $o => $n) {
+                    $abrir($o, $n);
                 }
             }
         }
@@ -773,17 +1079,46 @@ class Cashflow {
             return;
         }
 
+        /* LO AUTOMATICO, POR FONDO: lo que el motor rescato menos lo que
+           devolvio, en pesos, sobre todo el horizonte. */
+        $automatico = 0;
+        $faltante = [];
+
+        if ($auto !== null) {
+            foreach ($auto['fondos'] as $clave => $d) {
+                $abrir($clave);
+                $fondos[$clave]['automatizable'] = true;
+            }
+
+            foreach ($auto['automatico'] as $col => $porFondo) {
+                foreach ($porFondo as $clave => $v) {
+                    $abrir($clave);
+                    $fondos[$clave]['automatico'] += $v['ars'];
+                    $automatico += $v['ars'];
+                }
+            }
+
+            $faltante = $auto['faltante'];
+        }
+
         foreach ($fondos as $o => $d) {
-            $fondos[$o]['disponible'] = $d['stock'] - $d['aplicado'];
+            $fondos[$o]['automatico'] = round($d['automatico'], 2);
+            $fondos[$o]['aplicado'] = round($d['manual'] + $d['automatico'], 2);
+            $fondos[$o]['disponible'] = round($d['stock'] - $fondos[$o]['aplicado'], 2);
         }
 
         $info = [
             'stock' => $stock,
             'aplicado' => $aplicado,
+            'manual' => round($aplicado - $automatico, 2),
+            'automatico' => round($automatico, 2),
             'disponible' => $stock - $aplicado,
             // Sin fila de stock el disponible no significa nada, y el front
             // tiene que poder distinguirlo de un disponible de cero.
             'hay_stock' => $hayStock,
+            // Las columnas que quedan en rojo aunque se aplique todo lo que
+            // hay, con cuanto falta en cada una. Vacio = alcanzo.
+            'faltante' => $faltante,
             'fondos' => $fondos
         ];
 
@@ -793,18 +1128,54 @@ class Cashflow {
             }
         }
 
-        /* SE AVISA CUANDO SE APLICA MAS DE LO QUE HAY, y no se bloquea. Que
-           alguien planifique cubrir con plata que todavia no esta puede ser
-           deliberado -un rescate que se va a hacer, una suscripcion en camino-,
-           asi que la app no tiene por que impedirlo. Lo que no puede pasar es
-           que el tablero muestre un saldo final tapado con plata inexistente sin
-           decirlo.
+        $this->avisarCobertura($fondos, $stock, $aplicado, $hayStock);
+    }
 
-           EL AVISO ES POR FONDO, y ademas por el total. Son dos cosas distintas:
-           un fondo puede estar sobregirado mientras el total cierra, y ese caso
-           -aplicar de un fondo plata que esta en el otro- es el que el pozo
-           unico no podia ver. */
-        foreach ($fondos as $d) {
+    /**
+     * Los avisos de la seccion Cobertura.
+     *
+     * SE AVISA CUANDO SE APLICA MAS DE LO QUE HAY, y no se bloquea. Que
+     * alguien planifique cubrir con plata que todavia no esta puede ser
+     * deliberado -un rescate que se va a hacer, una suscripcion en camino-,
+     * asi que la app no tiene por que impedirlo. Lo que no puede pasar es
+     * que el tablero muestre un saldo final tapado con plata inexistente sin
+     * decirlo.
+     *
+     * EL AVISO ES POR FONDO. Un fondo puede estar sobregirado mientras el
+     * total cierra, y ese caso -aplicar de un fondo plata que esta en el
+     * otro- es el que el pozo unico no podia ver.
+     *
+     * PARA UN FONDO QUE EL MOTOR MANEJA, LA MEDIDA ES OTRA. Compararlo contra
+     * el stock A HOY daria falsas alarmas: una suscripcion prevista sube el
+     * tope de las columnas siguientes y el motor puede usarla con razon. Lo
+     * que vale ahi es lo que CoberturaAutomatica informo en 'sobregirado':
+     * la primera columna en la que lo aplicado -a mano o previsto en Saldos-
+     * supera el saldo del fondo A ESA FECHA. Por lo mismo, cuando el motor
+     * corrio no se avisa por el total: el total a hoy no es el tope de nada.
+     *
+     * Y SI NO ALCANZA, SE DICE CUANTO FALTA Y DONDE. Con los dos fondos
+     * agotados la columna queda en rojo -eso ya lo marca el front- pero el
+     * numero que le falta solo lo sabe el motor.
+     */
+    private function avisarCobertura($fondos, $stock, $aplicado, $hayStock) {
+        $auto = $this->automatico;
+
+        foreach ($fondos as $clave => $d) {
+            if ($d['automatizable']) {
+                if (!empty($auto['sobregirado'][$clave])) {
+                    $col = array_key_first($auto['sobregirado'][$clave]);
+                    $exceso = $auto['sobregirado'][$clave][$col];
+
+                    $this->warnings[] = 'Cobertura: el ' . $this->rotulo($col) . ' lo aplicado de "'
+                        . $d['nombre'] . '" supera en ' . $this->moneda($exceso, $d['moneda'])
+                        . ' lo que hay en ese fondo a esa fecha (rescates previstos en Saldos → '
+                        . 'Fondos incluidos). El motor no rescata de ahí hasta que vuelva a '
+                        . 'haber saldo.';
+                }
+
+                continue;
+            }
+
             if ($d['stock'] <= 0 && $d['aplicado'] <= 0) {
                 continue;
             }
@@ -817,12 +1188,60 @@ class Cashflow {
             }
         }
 
-        if ($hayStock && $aplicado > $stock + 0.01) {
+        if ($auto === null && $hayStock && $aplicado > $stock + 0.01) {
             $this->warnings[] = 'Cobertura: se aplican ' . $this->plata($aplicado)
                 . ' pero el total disponible para cubrir es ' . $this->plata($stock)
                 . '. Faltan ' . $this->plata($aplicado - $stock) . ', así que el Saldo Final '
                 . 'está cubierto con plata que todavía no figura como disponible.';
         }
+
+        if ($auto === null) {
+            return;
+        }
+
+        if (!empty($auto['faltante'])) {
+            $partes = [];
+
+            foreach ($auto['faltante'] as $col => $v) {
+                if (count($partes) === 3) {
+                    $partes[] = (count($auto['faltante']) - 3) . ' más';
+                    break;
+                }
+
+                $partes[] = $this->rotulo($col) . ' ' . $this->plata($v);
+            }
+
+            $this->warnings[] = 'Cobertura: aun aplicando todo lo invertido, el Saldo Final queda '
+                . 'en rojo en ' . count($auto['faltante']) . ' columna(s). Falta: '
+                . implode(', ', $partes) . '. No se inventa plata: esas columnas quedan marcadas.';
+        }
+
+        $this->avisarSinFila($auto['sin_fila']);
+    }
+
+    /**
+     * Un fondo con stock que ninguna fila de uso aplica no se toca: el motor
+     * no rescata de donde no puede mostrarlo. Es lo que pasa con la cuenta
+     * comitente mientras no exista su fila de uso.
+     *
+     * @param array $nombres Los fondos en esa situacion
+     */
+    private function avisarSinFila($nombres) {
+        if (empty($nombres)) {
+            return;
+        }
+
+        $this->warnings[] = 'Cobertura: ' . implode(', ', array_map(function ($n) {
+                return '"' . $n . '"';
+            }, $nombres)) . ' tiene(n) stock pero ninguna fila de uso los aplica, así que el '
+            . 'motor no rescata de ahí. Corré sql/cashflow_cobertura_automatica.sql, o apuntá una '
+            . 'fila de tipo USO_COBERTURA a la serie de esa clase de fondo desde Parámetros → '
+            . 'Cashflow.';
+    }
+
+    /** Un importe en la moneda del fondo, para los avisos */
+    private function moneda($n, $moneda) {
+        return ($moneda === 'USD' ? 'US$ ' : '$ ') . number_format(floatval($n), 2, ',', '.');
     }
 
     /* ====================================================================
@@ -1190,8 +1609,22 @@ class Cashflow {
         return $v;
     }
 
-    /** Filas en el formato del JSON, ya ordenadas por seccion y orden */
+    /**
+     * Filas en el formato del JSON, ya ordenadas por seccion y orden.
+     *
+     * El tope por columna de cada fondo y lo manual por fondo no viajan: son
+     * ENTRADAS de la cobertura automatica, no resultado, y el desglose que el
+     * front necesita ya esta en 'cobertura_columnas'. Con 40 columnas por
+     * fondo serian el bloque mas grande del JSON y nadie lo leeria.
+     */
     private function salidaFilas($resueltas) {
-        return array_values($resueltas);
+        $v = [];
+
+        foreach ($resueltas as $f) {
+            unset($f['fondos_tope'], $f['fondos_manual']);
+            $v[] = $f;
+        }
+
+        return $v;
     }
 }

@@ -511,6 +511,14 @@ class CashflowRegistry {
         /* LA APLICACION DE LA COBERTURA: cuanto del saldo invertido se usa en
            cada fecha para tapar un bache del flujo.
 
+           UNA SERIE POR CLASE DE FONDO, porque hay una fila del tablero por
+           clase: "Uso de Inversiones" y "Uso de Dolares comitente". Lo que
+           sale del proveedor es SOLO lo cargado a mano; lo demas lo calcula
+           el motor en cada carga y lo suma a esas mismas filas. APLICACION es
+           el total de antes de la apertura: queda para poder volver atras, y
+           'componentes' impide tenerla activa junto con una de las partes,
+           que contaria dos veces lo manual.
+
            NO DECLARA 'tab' A PROPOSITO. La fila se edita desde el tablero
            mismo, que es donde se ven los saldos negativos; un enlace a otra
            pantalla obligaria a ir y volver comparando columnas, que es
@@ -518,13 +526,21 @@ class CashflowRegistry {
            encabezado de Providers/CoberturaProvider.php. */
         'COBERTURA' => [
             'nombre' => 'Cobertura',
-            'descripcion' => 'Aplicacion del saldo de inversiones para cubrir los dias con '
-                . 'saldo negativo. Se carga desde el propio tablero',
+            'descripcion' => 'Uso de las cuentas de inversión y comitente para cubrir los días '
+                . 'con saldo negativo. Lo calcula el motor; lo cargado a mano desde el '
+                . 'tablero lo pisa',
             'archivo' => 'Providers/CoberturaProvider.php',
             'clase' => 'CoberturaProvider',
             'moneda' => 'ARS',
             'disponible' => true,
-            'series' => ['APLICACION' => 'Cobertura aplicada']
+            'series' => [
+                'USO_INVERSION' => 'Uso de las cuentas de inversión (manual + calculado)',
+                'USO_COMITENTE' => 'Uso de las cuentas comitente (manual + calculado)',
+                'APLICACION' => 'Uso de todos los fondos juntos (una sola fila)'
+            ],
+            'componentes' => [
+                'APLICACION' => ['USO_INVERSION', 'USO_COMITENTE']
+            ]
         ],
 
         /* Facturas pendientes EN DOLARES a Tasky (GVA12, cliente EXTASK). Se

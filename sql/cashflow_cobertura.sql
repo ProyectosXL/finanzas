@@ -99,6 +99,12 @@ GO
    identidad: dos aplicaciones del mismo dia desde dos fondos distintos son una
    sola decision de tesoreria.
 
+   >> ESTO CAMBIO despues, con sql/cashflow_cobertura_automatica.sql: hay una
+   >> fila de uso por fondo, la clave paso a ser FECHA + ORIGEN (indice unico
+   >> filtrado por VIGENTE = 1), y el uso lo calcula el motor; esta tabla guarda
+   >> solo lo que se pisa a mano. El parrafo de arriba describe el paso que dio
+   >> este script, no el estado actual.
+
    EL IMPORTE PUEDE SER NEGATIVO, y no lleva CHECK que lo impida: un negativo es
    sacar plata de la cuenta y volver a invertirla, que en una columna con saldo
    de sobra es una decision tan real como aplicar cobertura. Lo que si se

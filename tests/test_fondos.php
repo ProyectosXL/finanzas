@@ -193,7 +193,7 @@ class FondosDePrueba extends Fondos {
     public $cuentas = [];
     public function __construct() { /* a proposito: no abre conexion */ }
     public function creado() { return $this->creado; }
-    public function getCuentasFondo($soloActivas = true, $hoy = null) { return $this->cuentas; }
+    public function getCuentasFondo($soloActivas = true, $hoy = null, $conMovimientos = false) { return $this->cuentas; }
 }
 
 class CotizacionDePrueba extends Cotizacion {
@@ -205,6 +205,9 @@ class CotizacionDePrueba extends Cotizacion {
         if ($this->valor === null) { return null; }
         return ['fecha' => '2026-09-05', 'valor' => $this->valor, 'punta' => $punta];
     }
+    // La segunda consulta de ultimasHasta(): sin base no hay filas entre las
+    // fechas, que es ademas el caso real para columnas futuras.
+    protected function entreFechas($desde, $hasta, $punta) { return []; }
 }
 
 class FondosProviderDePrueba extends FondosProvider {

@@ -11,10 +11,23 @@ require_once __DIR__ . '/Fondos.php';
  * QUE RESUELVE
  * ------------
  * El tablero proyecta el saldo dia por dia y en algunas columnas da negativo o
- * queda muy justo. La plata para cubrir eso existe -esta invertida-, pero hasta
- * ahora el tablero no tenia donde decir CUANDO se la piensa usar.
+ * queda muy justo. La plata para cubrir eso existe -esta invertida-, y el
+ * tablero muestra cuando se la usa.
  *
- * Esta tabla guarda esa decision: cuanto se aplica y en que fecha.
+ * LO CALCULA EL MOTOR; ESTA TABLA GUARDA LO QUE SE PISA A MANO
+ * ------------------------------------------------------------
+ * Esto CAMBIO con feature/cobertura-automatica. Antes cada aplicacion se
+ * cargaba a mano y esta tabla era la unica fuente del uso de cobertura. Ahora
+ * el uso lo calcula CoberturaAutomatica en cada carga del tablero -rescata lo
+ * justo para que el saldo acumulado no quede abajo de cero, primero de las
+ * inversiones y despues de la comitente- y no persiste nada: cambia un
+ * vencimiento y la cobertura se recalcula sola.
+ *
+ * Esta tabla queda para PISAR una fecha puntual. Lo manual tiene precedencia:
+ * primero se aplica lo cargado aca, y el motor cubre solo lo que siga
+ * faltando. Por eso la pantalla distingue lo calculado de lo cargado, y por
+ * eso una carga manual tiene una validacion que el motor no necesita: ver
+ * "NO SE PUEDE APLICAR MAS DE LO QUE HAY EN EL FONDO A ESA FECHA".
  *
  * NO ES UN INGRESO Y NO SE MODELA COMO TAL
  * ----------------------------------------
@@ -32,13 +45,34 @@ require_once __DIR__ . '/Fondos.php';
  * eso validarImporte() rechaza el cero y no los negativos: cero no es una
  * aplicacion, es no tener ninguna, y para eso esta borrar().
  *
- * UNA APLICACION VIGENTE POR FECHA
- * --------------------------------
- * La fila del tablero es una sola, asi que la pregunta que contesta esta tabla
- * es "cuanta cobertura se aplica el dia X". ORIGEN dice de que fondo sale, y es
- * un dato de la aplicacion, no parte de su identidad: dos aplicaciones el mismo
- * dia desde dos fondos distintos son una sola decision de tesoreria y se cargan
- * como un solo importe con el origen que corresponda.
+ * UNA APLICACION VIGENTE POR FECHA Y FONDO
+ * ----------------------------------------
+ * Esto CAMBIO. La clave era la fecha sola: la fila del tablero era una, y dos
+ * aplicaciones el mismo dia desde dos fondos se cargaban como un solo importe.
+ * Con una fila de uso POR FONDO en el cuadro ("Uso de Inversiones", "Uso de
+ * Dolares comitente") el mismo dia puede llevar una carga desde cada uno, y
+ * cada una se pisa y se borra por separado: la identidad es (FECHA, ORIGEN).
+ * sql/cashflow_cobertura_automatica.sql lo fija en la base con un indice
+ * unico filtrado por VIGENTE = 1, asi que la regla no depende solo de este
+ * codigo.
+ *
+ * NO SE PUEDE APLICAR MAS DE LO QUE HAY EN EL FONDO A ESA FECHA
+ * -------------------------------------------------------------
+ * Una carga manual que supere el saldo disponible del fondo a esa fecha SE
+ * RECHAZA, y el mensaje dice cuanto hay. Disponible es el saldo de la cuenta
+ * a esa fecha -saldo inicial + suscripciones - rescates, previstos incluidos-
+ * menos lo ya aplicado a mano desde ese fondo hasta esa fecha. NO SE RECORTA
+ * EN SILENCIO: recortar dejaria guardado un numero que nadie tipeo, y despues
+ * nadie sabria explicar por que el tablero muestra otra cosa que la que se
+ * cargo. Antes se avisaba y se dejaba pasar; con el motor rescatando solo, una
+ * carga que supera el fondo ya no puede ser "un rescate que se va a hacer":
+ * un rescate previsto se carga en Saldos -> Fondos y el motor lo ve.
+ *
+ * Los negativos siguen permitidos sin tope: devolver plata al fondo es una
+ * decision real, y no hay un maximo que tenga sentido validar.
+ *
+ * Lo automatico no pasa por aca: CoberturaAutomatica nunca saca de un fondo
+ * mas de lo que tiene, por construccion.
  *
  * LOS FONDOS SON LAS CUENTAS DE FONDO DE SALDOS, NO UNA LISTA DEL CODIGO
  * ----------------------------------------------------------------------
@@ -56,10 +90,10 @@ require_once __DIR__ . '/Fondos.php';
  * mover- se muestra y suma al total, pero no descuenta de ningun fondo.
  *
  * EL ORIGEN POR DEFECTO ES LA PRIMERA CUENTA DE FONDO EN PESOS del catalogo,
- * por orden. No es una cuenta escrita en el codigo, es una regla; y existe
- * porque el editor del tablero todavia no pregunta de que fondo se aplica
- * -eso es la etapa siguiente-. Sin ninguna cuenta en pesos, guardar sin
- * origen se rechaza diciendolo.
+ * por orden. No es una cuenta escrita en el codigo, es una regla. El editor
+ * del tablero ya manda el origen -cada fila de uso sabe que fondos aplica-,
+ * asi que el defecto queda para un pedido que llegue sin el: sin ninguna
+ * cuenta en pesos, guardar sin origen se rechaza diciendolo.
  *
  * EL IMPORTE VIGENTE SE PISA, PERO EL HISTORIAL QUEDA
  * ---------------------------------------------------
@@ -231,11 +265,12 @@ class Cobertura {
        ==================================================================== */
 
     /**
-     * Las aplicaciones vigentes, por fecha.
+     * Las aplicaciones vigentes, por fecha y fondo.
      *
-     * VERSIONES cuenta TODAS las cargas de esa fecha, vigentes y pisadas: es lo
-     * que le dice a la pantalla que hay historial para abrir. Mismo criterio que
-     * OtrosIngresos::leerVigentes().
+     * VERSIONES cuenta TODAS las cargas de esa fecha Y ese fondo, vigentes y
+     * pisadas: es lo que le dice a la pantalla que hay historial para abrir.
+     * Por fondo y no por fecha sola porque la identidad es (FECHA, ORIGEN):
+     * las versiones de la comitente no son versiones de la de inversiones.
      *
      * @return array Filas ['FECHA', 'IMPORTE', 'ORIGEN', 'OBSERVACION', ...]
      */
@@ -250,10 +285,10 @@ class Cobertura {
                      . $this->monedaSql() . " AS MONEDA,
                        (SELECT COUNT(*)
                           FROM dbo." . self::TABLA . " h
-                         WHERE h.FECHA = a.FECHA) AS VERSIONES
+                         WHERE h.FECHA = a.FECHA AND h.ORIGEN = a.ORIGEN) AS VERSIONES
                 FROM dbo." . self::TABLA . " a
                 WHERE a.VIGENTE = 1
-                ORDER BY a.FECHA";
+                ORDER BY a.FECHA, a.ORIGEN";
 
         $stmt = sqlsrv_query($cid, $sql);
 
@@ -405,12 +440,15 @@ class Cobertura {
     }
 
     /**
-     * Todas las cargas de una fecha, de la mas nueva a la mas vieja.
+     * Todas las cargas de una fecha, de la mas nueva a la mas vieja. Con un
+     * origen, solo las de ese fondo: es el historial de UNA celda del tablero.
+     * Sin origen, todas las de la fecha, que es lo que se leia hasta ahora.
      *
      * @param string $fecha 'Y-m-d'
+     * @param string|null $origen Clave de fondo, o null para todos
      * @return array
      */
-    public function getHistorial($fecha) {
+    public function getHistorial($fecha, $origen = null) {
         if (!$this->tablaCreada()) {
             return [];
         }
@@ -418,12 +456,20 @@ class Cobertura {
         $f = self::validarFecha($fecha);
         $cid = $this->conectar();
 
+        $args = [$f];
+        $filtro = '';
+
+        if ($origen !== null && trim((string) $origen) !== '') {
+            $filtro = ' AND ORIGEN = ?';
+            $args[] = strtoupper(trim((string) $origen));
+        }
+
         $sql = "SELECT ID, FECHA, IMPORTE, ORIGEN, OBSERVACION, VIGENTE, USUARIO, FECHA_ALTA
                 FROM dbo." . self::TABLA . "
-                WHERE FECHA = ?
+                WHERE FECHA = ?" . $filtro . "
                 ORDER BY ID DESC";
 
-        $stmt = sqlsrv_query($cid, $sql, [$f]);
+        $stmt = sqlsrv_query($cid, $sql, $args);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al leer el historial de cobertura'));
@@ -456,10 +502,16 @@ class Cobertura {
     /**
      * Carga la cobertura que se aplica en una fecha.
      *
-     * NO HACE UPDATE. Marca VIGENTE = 0 las cargas anteriores de esa fecha e
-     * inserta una fila nueva, LAS DOS COSAS EN UNA TRANSACCION: si la baja
-     * confirmara y el alta fallara, la fecha se quedaria sin importe vigente y
-     * el saldo proyectado cambiaria sin que nadie lo hubiera pedido.
+     * NO HACE UPDATE. Marca VIGENTE = 0 las cargas anteriores de esa fecha Y
+     * ese fondo e inserta una fila nueva, LAS DOS COSAS EN UNA TRANSACCION: si
+     * la baja confirmara y el alta fallara, la fecha se quedaria sin importe
+     * vigente y el saldo proyectado cambiaria sin que nadie lo hubiera pedido.
+     * Una carga desde el otro fondo el mismo dia no se toca: es otra celda.
+     *
+     * SE RECHAZA SI SUPERA LO DISPONIBLE EN EL FONDO A ESA FECHA, con un
+     * mensaje que dice cuanto hay. Ver el encabezado. La cuenta la hace
+     * validarDisponible(), que es pura; aca solo se le traen el saldo del
+     * fondo a la fecha y las aplicaciones vigentes.
      *
      * EL IMPORTE VA EN LA MONEDA DEL FONDO, Y LA MONEDA SALE DEL ORIGEN. No es
      * un parametro aparte a proposito: la moneda no es una eleccion, es una
@@ -501,6 +553,12 @@ class Cobertura {
                 . 'base central.');
         }
 
+        $origenes = $this->origenes();
+        $saldo = $this->saldoFondoA($org, $f);
+
+        self::validarDisponible($monto, $saldo, $this->getAplicaciones(), $f, $org,
+            $origenes[$org]['nombre'], $mon);
+
         $cols = 'FECHA, IMPORTE, ORIGEN, OBSERVACION, VIGENTE, USUARIO';
         $vals = '?, ?, ?, ?, 1, ?';
         $args = [$f, $monto, $org, $obs, $usuario];
@@ -518,7 +576,7 @@ class Cobertura {
         }
 
         try {
-            $piso = $this->bajaVigentes($cid, $f);
+            $piso = $this->bajaVigentes($cid, $f, $org);
 
             $stmt = sqlsrv_query($cid,
                 "INSERT INTO dbo." . self::TABLA . " (" . $cols . ") VALUES (" . $vals . ")",
@@ -541,10 +599,10 @@ class Cobertura {
     }
 
     /**
-     * Saca la cobertura de una fecha.
+     * Saca la cobertura manual de una fecha y un fondo.
      *
      * NO BORRA LA FILA: marca VIGENTE = 0 y no inserta ninguna nueva, con lo que
-     * esa fecha queda sin aplicacion vigente. Es la baja logica del resto del
+     * esa celda queda sin aplicacion vigente. Es la baja logica del resto del
      * modulo, y aca importa especialmente: una aplicacion es una decision de
      * tesoreria, y por que se dio de baja se explica solo con el historial.
      *
@@ -552,26 +610,30 @@ class Cobertura {
      * esto no es un override puntual de un calculo sino un importe. Los
      * importes de este modulo no se borran.
      *
+     * Lo que queda en esa celda despues de la baja es lo que calcule el motor.
+     *
      * @param string $fecha 'Y-m-d'
+     * @param string|null $origen Clave de fondo; null toma el defecto, como guardar()
      * @return bool Si habia algo que dar de baja
      */
-    public function borrar($fecha) {
+    public function borrar($fecha, $origen = null) {
         if (!$this->tablaCreada()) {
             throw new Exception('Todavía no existe la tabla de aplicación de cobertura.');
         }
 
         $f = self::validarFecha($fecha);
+        $org = $this->validarOrigen($origen);
 
-        return $this->bajaVigentes($this->conectar(), $f);
+        return $this->bajaVigentes($this->conectar(), $f, $org);
     }
 
-    /** Marca VIGENTE = 0 las cargas vigentes de una fecha. @return bool si habia alguna */
-    private function bajaVigentes($cid, $fecha) {
+    /** Marca VIGENTE = 0 las cargas vigentes de una fecha y un fondo. @return bool si habia alguna */
+    private function bajaVigentes($cid, $fecha, $origen) {
         $stmt = sqlsrv_query($cid,
             "UPDATE dbo." . self::TABLA . "
              SET VIGENTE = 0, FECHA_BAJA = GETDATE()
-             WHERE FECHA = ? AND VIGENTE = 1",
-            [$fecha]);
+             WHERE FECHA = ? AND ORIGEN = ? AND VIGENTE = 1",
+            [$fecha, $origen]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al dar de baja la cobertura anterior'));
@@ -707,9 +769,103 @@ class Cobertura {
         return ($o === '') ? null : mb_substr($o, 0, 200);
     }
 
+    /**
+     * Cuanto se puede aplicar a mano desde un fondo en una fecha: el saldo del
+     * fondo a esa fecha menos lo ya aplicado a mano desde el hasta esa fecha.
+     *
+     * Se descuentan las aplicaciones VIGENTES del mismo origen con FECHA
+     * anterior; la de la MISMA fecha no, porque guardar la nueva la pisa. Las
+     * posteriores tampoco: la pregunta es cuanto hay ese dia, y lo que se
+     * aplique despues es problema de ese dia. Lo automatico no se descuenta,
+     * a proposito: lo manual tiene precedencia y el motor se recalcula sobre
+     * lo que quede.
+     *
+     * @param float $saldoFondo Saldo del fondo a $fecha, en su moneda
+     * @param array $aplicaciones Como devuelve getAplicaciones()
+     * @param string $fecha 'Y-m-d'
+     * @param string $origen Clave de fondo
+     * @return float En la moneda del fondo
+     */
+    public static function disponibleParaAplicar($saldoFondo, $aplicaciones, $fecha, $origen) {
+        $aplicado = 0.0;
+
+        foreach ($aplicaciones as $a) {
+            if ($a['ORIGEN'] !== $origen || $a['FECHA'] >= $fecha) {
+                continue;
+            }
+
+            $aplicado += floatval($a['IMPORTE']);
+        }
+
+        return round(floatval($saldoFondo) - $aplicado, 2);
+    }
+
+    /**
+     * Rechaza una carga manual que supere lo disponible en el fondo a esa
+     * fecha. Ver el encabezado: no se recorta en silencio, se dice cuanto hay.
+     *
+     * Un importe negativo pasa siempre: devolver plata al fondo no tiene tope
+     * que valga la pena validar.
+     *
+     * @param float $importe En la moneda del fondo
+     * @param float $saldoFondo Saldo del fondo a $fecha
+     * @param array $aplicaciones Como devuelve getAplicaciones()
+     * @param string $fecha 'Y-m-d'
+     * @param string $origen Clave de fondo
+     * @param string $nombre Para el mensaje
+     * @param string $moneda 'ARS' | 'USD', para el mensaje
+     * @return float Lo disponible, para quien quiera informarlo
+     */
+    public static function validarDisponible($importe, $saldoFondo, $aplicaciones, $fecha,
+                                             $origen, $nombre, $moneda) {
+        $disponible = self::disponibleParaAplicar($saldoFondo, $aplicaciones, $fecha, $origen);
+
+        // El negativo se compara contra nada: con el fondo sobregirado el
+        // disponible es negativo, y una devolucion es justo lo que lo arregla.
+        if ($importe > 0 && $importe > $disponible + 0.005) {
+            $simbolo = ($moneda === 'USD') ? 'US$ ' : '$ ';
+            $fmt = function ($n) use ($simbolo) {
+                return $simbolo . number_format($n, 2, ',', '.');
+            };
+
+            throw new Exception('No se puede aplicar ' . $fmt($importe) . ' de "' . $nombre
+                . '" el ' . date('d/m/Y', strtotime($fecha)) . ': a esa fecha hay '
+                . $fmt(max(0, $disponible)) . ' disponibles (saldo del fondo '
+                . $fmt($saldoFondo) . ', menos lo ya aplicado a mano hasta ese día). '
+                . 'Si va a haber más plata, cargá la suscripción en Saldos → Fondos: el '
+                . 'motor la va a ver.');
+        }
+
+        return $disponible;
+    }
+
     /* ====================================================================
        INFRAESTRUCTURA
        ==================================================================== */
+
+    /**
+     * El saldo de una cuenta de fondo a una fecha, en su moneda, con los
+     * movimientos previstos hasta ahi. Es la misma cuenta que hace la pestana
+     * Saldos -> Fondos (Fondos::saldoA()), pedida a esa fecha en vez de a hoy.
+     *
+     * Es protected para que una prueba pueda contestarlo sin base.
+     *
+     * @param string $origen Clave de fondo, ya validada contra origenes()
+     * @param string $fecha 'Y-m-d'
+     * @return float
+     */
+    protected function saldoFondoA($origen, $fecha) {
+        $id = Fondos::idDeClave($origen);
+
+        foreach ((new Fondos())->getCuentasFondo(false, $fecha) as $c) {
+            if (intval($c['ID']) === $id) {
+                return floatval($c['saldo']);
+            }
+        }
+
+        throw new Exception('No se encontró la cuenta de fondo "' . $origen . '" para calcular '
+            . 'cuánto hay disponible a esa fecha.');
+    }
 
     /** @return resource Conexion a 'central' */
     private function conectar() {
