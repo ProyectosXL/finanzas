@@ -141,6 +141,64 @@ chequear('y con hora de un lado', true,
     Comex::marcaVigente('2026-10-15 00:00:00', '2026-10-15'));
 
 /* ================================================================
+   AL CASHFLOW ENTRA LO QUE SE PAGA DE HOY EN ADELANTE
+
+   Un pago con la fecha vencida NO SUMA. Es una regla de negocio y no una
+   consecuencia del eje: o el pago ya salio -y entonces no es proyeccion- o no
+   salio y hay que corregirle la fecha, y las dos cosas son gestion de Comercio
+   Exterior sobre el dato.
+
+   Aplica a PROVEEDORES EXTERIOR. En Crono Nacionalizacion no se pidio.
+   ================================================================ */
+seccion('un pago vencido aporta cero al eje');
+
+chequear('vencido no suma', 0.0,
+    Comex::aporteAlEje(['VENCIDA' => true, 'IMPORTE_ARS' => 85719920.0]));
+
+// CERO Y NO null: null es "no se pudo valuar" y tiene su propio aviso, en
+// dolares. Cero es "vale, pero no entra". Son dos motivos distintos por los que
+// una celda queda vacia, y la pantalla los informa por separado.
+chequear('y es cero, no null', true,
+    Comex::aporteAlEje(['VENCIDA' => true, 'IMPORTE_ARS' => 100]) === 0.0);
+
+seccion('un pago futuro aporta lo que vale');
+
+chequear('no vencido suma su importe', 85719920.0,
+    Comex::aporteAlEje(['VENCIDA' => false, 'IMPORTE_ARS' => 85719920.0]));
+chequear('sin el flag tambien', 1000.0, Comex::aporteAlEje(['IMPORTE_ARS' => 1000]));
+
+seccion('lo que no se pudo valuar sigue sin valuarse');
+
+/* null se conserva: sin fecha no hay mes, sin mes no hay cotizacion, y eso ya
+   se informa aparte EN DOLARES. Convertirlo en cero aca lo haria indistinguible
+   de un vencido. */
+chequear('null sigue siendo null', null,
+    Comex::aporteAlEje(['VENCIDA' => false, 'IMPORTE_ARS' => null]));
+chequear('y sin el campo tampoco se inventa', null, Comex::aporteAlEje([]));
+
+// Un vencido SIN valuar tambien da cero: ya no entra por vencido, y el motivo
+// que manda es ese.
+chequear('un vencido sin valuar da cero igual', 0.0,
+    Comex::aporteAlEje(['VENCIDA' => true, 'IMPORTE_ARS' => null]));
+
+seccion('IMPORTE_ARS no se toca: es lo que vale el contenedor');
+
+/* La grilla lo sigue mostrando en su columna. Lo que cambia es cuanto de eso
+   entra al periodo, que es otra pregunta. */
+chequear('el eje se arma sobre IMPORTE_EJE', true,
+    strpos(codigoSinComentarios(__DIR__ . '/../cashflow/Controller/ComexController.php'),
+        "'IMPORTE_EJE'") !== false);
+chequear('y el proveedor del tablero agrupa por lo mismo', true,
+    strpos(codigoSinComentarios(__DIR__ . '/../cashflow/Class/Providers/ComexProvider.php'),
+        "'FECHA_PAGO_EFECTIVA', 'IMPORTE_EJE'") !== false);
+
+// NACIONALIZACIONES NO: la regla no se pidio ahi, y si alguien la aplicara de
+// pasada, la fila del tablero cambiaria de numero sin que nadie lo decidiera.
+chequear('nacionalizaciones sigue agrupando por su importe', true,
+    strpos(codigoSinComentarios(__DIR__ . '/../cashflow/Class/Providers/ComexProvider.php'),
+        "'FECHA_NAC_EFECTIVA', 'IMPORTE_EST'") !== false);
+
+/* ================================================================
    EL AVISO DE LOS VENCIDOS
 
    Es lo que hace visible la decision de NO reubicar en hoy. Sin el, esos
@@ -168,8 +226,8 @@ chequear('nombrando que fecha es', true,
 // EL TEXTO DICE LA CONSECUENCIA Y LA ACCION. Un aviso que dijera solo "hay 2
 // vencidos" no explica por que el importe no esta en ninguna columna ni que
 // hacer para que entre.
-chequear('dice que no entran en ninguna columna', true,
-    strpos($avisos[0], 'NO entran en ninguna columna') !== false);
+chequear('dice que no suman en ninguna columna', true,
+    strpos($avisos[0], 'NO suman en ninguna columna') !== false);
 chequear('que no se reubican en hoy', true,
     strpos($avisos[0], 'No se los reubica en hoy') !== false);
 chequear('y que se arregla cargando la fecha', true,
@@ -207,7 +265,7 @@ chequear('son dos avisos distintos', 2, count($dos));
 
 // El de afuera va primero: es el que tiene una accion pendiente.
 chequear('el primero es el que quedo afuera', true,
-    strpos($dos[0], 'NO entran en ninguna columna') !== false);
+    strpos($dos[0], 'NO suman en ninguna columna') !== false);
 chequear('con su importe', true, strpos($dos[0], '$ 7.000.000,00') !== false);
 chequear('y es uno solo', true, strpos($dos[0], '1 contenedor(es)') !== false);
 

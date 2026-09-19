@@ -538,18 +538,20 @@ function pintarEstadoVencidas() {
         ? ('se ven las ' + n + ' vencidas')
         : (n + ' vencida' + (n === 1 ? '' : 's') + ' escondida' + (n === 1 ? '' : 's'));
 
-    /* EL PIE Y LAS TARJETAS PUEDEN NO COINCIDIR MIENTRAS ESTO ESCONDE FILAS, y
-       hay que decirlo: casi todas las vencidas no entran en ninguna columna
-       —así que esconderlas no cambia ningún total— pero las del mes en curso
-       sí entran, en la columna de ese mes. El pie mide lo que se ve y las
-       tarjetas miden el cronograma completo, igual que con el buscador; la
-       diferencia es que acá pasa sin que el usuario haya tipeado nada. */
+    /* ESCONDERLAS NO CAMBIA NINGÚN NÚMERO, y eso es lo que hay que poder
+       decir: un pago vencido no suma en ninguna columna —al cashflow entra lo
+       que se paga de hoy en adelante, ver Comex::aporteAlEje()—, así que el
+       interruptor saca de la vista filas que ya valían cero en el período. Las
+       tarjetas y el pie dicen lo mismo con el interruptor prendido o apagado.
+
+       Es la diferencia con el buscador, que sí puede dejar el pie midiendo
+       algo distinto de las tarjetas. */
     el.title = viendo
-        ? 'Están marcadas en rojo. Apagá el interruptor para sacarlas de la tabla.'
-        : 'Son contenedores con la fecha estimada de pago ya vencida. Prendé el '
-            + 'interruptor para verlos y cargarles una fecha nueva. Las tarjetas de arriba '
-            + 'los siguen contando: miden el cronograma completo, así que pueden no coincidir '
-            + 'con el pie de la tabla.';
+        ? 'Están marcadas en rojo. No suman en ninguna columna del período: apagá el '
+            + 'interruptor para sacarlas de la tabla.'
+        : 'Son contenedores con la fecha estimada de pago ya vencida, que no suman en '
+            + 'ninguna columna del período. Esconderlos no cambia ningún total. Prendé el '
+            + 'interruptor para verlos y cargarles una fecha nueva.';
 }
 
 /** Los tres campos por los que busca el buscador, concatenados */

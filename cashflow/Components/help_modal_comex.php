@@ -118,12 +118,13 @@
                                             <strong>Ver vencidas</strong>
                                             <br><small class="text-muted">
                                                 En <em>Proveedores Exterior</em> las vencidas
-                                                <strong>no se ven al abrir</strong>: son muchas y
-                                                no participan del período que se está mirando.
-                                                El interruptor las trae de vuelta, y al lado dice
-                                                siempre cuántas esconde. Las tarjetas de arriba
-                                                las siguen contando, así que pueden no coincidir
-                                                con el pie de la tabla.
+                                                <strong>no se ven al abrir</strong>: al cashflow
+                                                entra lo que se paga de hoy en adelante, así que
+                                                un pago vencido <strong>no suma en ninguna
+                                                columna</strong>. El interruptor las trae de
+                                                vuelta para poder corregirles la fecha, y al lado
+                                                dice siempre cuántas esconde. Esconderlas no
+                                                cambia ningún total.
                                             </small>
                                         </div>
                                     </div>

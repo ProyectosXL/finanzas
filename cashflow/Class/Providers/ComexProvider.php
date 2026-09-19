@@ -132,7 +132,12 @@ class ComexProvider extends CashflowProvider {
 
         $filas = $comex->getProveedoresExterior();
 
-        $serie = $h->agrupar($filas, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_ARS');
+        /* SE AGRUPA SOBRE IMPORTE_EJE. Es la misma valuacion que IMPORTE_ARS
+           salvo que vale cero cuando el pago ya vencio: al cashflow entra lo
+           que se paga de HOY EN ADELANTE, y un pago con la fecha pasada o ya
+           salio -y no es proyeccion- o hay que corregirle la fecha. Ver
+           Comex::aporteAlEje(). */
+        $serie = $h->agrupar($filas, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_EJE');
 
         $serie['moneda_origen'] = 'USD';
 
@@ -160,11 +165,16 @@ class ComexProvider extends CashflowProvider {
             $this->avisar('Proveedores Exterior: ' . $aviso);
         }
 
-        /* Lo vencido no entra en ninguna columna y se informa por separado del
-           'fuera del horizonte' del motor, que no distingue si el importe cayo
-           antes o despues del eje. Ver Comex::avisosVencidos(). */
+        /* Lo vencido no suma, y eso hay que decirlo con su importe: sin el
+           aviso, esa plata desaparece del tablero sin que nada lo explique.
+           Se informa IMPORTE_ARS -lo que valen- y no IMPORTE_EJE, que para
+           estas filas es cero por definicion.
+
+           SIN PASARLE EL EJE: aca no hay nada que repartir, porque ninguna
+           vencida entra en ninguna columna. Nacionalizaciones si se lo pasa,
+           porque alla la regla no aplica y las del mes en curso entran. */
         foreach (Comex::avisosVencidos($filas, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_ARS',
-                 'fecha estimada de pago', $h) as $aviso) {
+                 'fecha estimada de pago') as $aviso) {
             $this->avisar('Proveedores Exterior: ' . $aviso);
         }
 

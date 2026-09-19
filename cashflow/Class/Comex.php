@@ -66,8 +66,8 @@ require_once __DIR__ . '/Horizonte.php';
  * Si la app de Comex la mueve despues, el rastro deja de describir lo que se ve
  * y marcaVigente() lo detecta comparando contra el maestro.
  *
- * SE VEN LOS VENCIDOS
- * -------------------
+ * SE VEN LOS VENCIDOS, PERO NO SUMAN
+ * ----------------------------------
  * Las dos consultas filtraban con ISNULL(FECHA_EMB, FECHA_EST_EMB) >= GETDATE()
  * y ese filtro escondia mas de la mitad del padron -42 de 76 contenedores al
  * 19/09/2026-, incluidos 10 con fecha de pago FUTURA y 18 con nacionalizacion
@@ -75,11 +75,17 @@ require_once __DIR__ . '/Horizonte.php';
  * filtro se fue. Lo que decide donde impacta un contenedor es SU FECHA
  * EFECTIVA, no cuando embarco.
  *
- * UN IMPORTE CON FECHA EFECTIVA VENCIDA NO SE REUBICA EN HOY, y es una decision
- * tomada: queda en su fecha, cae fuera del eje y el tablero informa cuantos son
- * y cuanto suman. Se aparta de Ingresos::ubicarCobroVencido() -que si ubica en
- * el primer dia del eje las cobranzas vencidas- por dos razones que no valen
- * alla:
+ * AL CASHFLOW ENTRA LO QUE SE PAGA DE HOY EN ADELANTE. Un pago con la fecha ya
+ * vencida NO SUMA: o ya salio -y entonces no es proyeccion- o no salio y hay
+ * que corregirle la fecha. Las dos cosas son gestion de Comercio Exterior sobre
+ * el dato. Lo implementa aporteAlEje() y aplica a PROVEEDORES EXTERIOR; en
+ * Crono Nacionalizacion la regla no se pidio y las fechas vencidas se agrupan
+ * como cualquier otra.
+ *
+ * Y NO SE REUBICA EN HOY, que es la otra mitad de la decision: la fila queda en
+ * su fecha en vez de amontonarse en la primera columna. Se aparta de
+ * Ingresos::ubicarCobroVencido() -que si ubica en el primer dia del eje las
+ * cobranzas vencidas- por dos razones que no valen alla:
  *
  *   1. Aca la fecha SE EDITA desde la pestana. Una fecha de pago vencida es un
  *      dato a corregir, no un hecho consumado: el circuito correcto es que
@@ -92,6 +98,11 @@ require_once __DIR__ . '/Horizonte.php';
  *      tenga detalle cargado-, y al 19/09/2026 hay pagos vencidos de hasta 331
  *      dias. Amontonarlos en la columna de hoy pondria en el peor dia del
  *      tablero una montania de plata que probablemente ya salio.
+ *
+ * EN LA PESTANA ADEMAS ESTAN ESCONDIDAS por defecto, detras del interruptor
+ * "Ver vencidas", con el conteo al lado. Esconder filas que valen cero en el
+ * periodo no cambia ningun total: el interruptor es para poder ir a
+ * corregirlas.
  *
  * EL CODIGO NO ASUME QUE EL DDL SE CORRIO
  * ---------------------------------------
@@ -454,8 +465,15 @@ class Comex {
                 ['ETD', 'ETA', 'FECHA_EST_PAGO', 'EDIT_ANTERIOR', 'EDIT_VALOR', 'EDIT_FECHA']);
 
             $row = self::conFechaEfectiva($row, 'FECHA_EST_PAGO', 'FECHA_PAGO_EFECTIVA', $hoy);
+            $row = self::valuar($row, $curva);
 
-            $v[] = self::valuar($row, $curva);
+            /* Lo que de verdad entra al cashflow. Va DESPUES de valuar porque
+               sale de IMPORTE_ARS, y aparte de el porque no son lo mismo: uno
+               es cuanto vale el contenedor y el otro cuanto de eso cae en el
+               periodo que se esta proyectando. */
+            $row['IMPORTE_EJE'] = self::aporteAlEje($row);
+
+            $v[] = $row;
         }
 
         sqlsrv_free_stmt($stmt);
@@ -521,6 +539,43 @@ class Comex {
     }
 
     /**
+     * Cuanto aporta una fila de Proveedores Exterior al eje del cashflow.
+     *
+     * UN PAGO CON LA FECHA VENCIDA NO SUMA. Es una regla de negocio, no una
+     * consecuencia del eje: al cashflow entra lo que se paga de HOY EN
+     * ADELANTE. Si la fecha ya paso, o el pago se hizo -y entonces no es
+     * proyeccion- o no se hizo y hay que corregir la fecha. Las dos cosas son
+     * gestion de Comercio Exterior sobre el dato, y hasta que alguien la haga,
+     * ese importe no describe ningun movimiento futuro.
+     *
+     * POR QUE UN CAMPO APARTE Y NO FILTRAR LAS FILAS. Porque la fila tiene que
+     * seguir viajando: la pestana la muestra -escondida detras del interruptor,
+     * pero ahi- y es la unica forma de corregirle la fecha. Con un importe en
+     * cero, Horizonte::agrupar() la saltea entera: no entra en ninguna columna,
+     * y tampoco cae en 'fuera_horizonte', que es otra cosa -lo que quedo
+     * despues del ultimo mes- y se arregla de otra manera.
+     *
+     * CERO Y NO null: null es "no se pudo valuar" y tiene su propio aviso, en
+     * dolares. Cero es "vale, pero no entra". Son dos motivos distintos por los
+     * que una celda queda vacia y la pantalla los informa por separado.
+     *
+     * IMPORTE_ARS NO SE TOCA: es la valuacion de la fila y se sigue mostrando
+     * en su columna. Lo que cambia es cuanto de eso entra al periodo.
+     *
+     * @param array $fila Fila ya valuada, con VENCIDA resuelta
+     * @return float|null
+     */
+    public static function aporteAlEje($fila) {
+        if (!empty($fila['VENCIDA'])) {
+            return 0.0;
+        }
+
+        return (isset($fila['IMPORTE_ARS']) && $fila['IMPORTE_ARS'] !== null)
+            ? floatval($fila['IMPORTE_ARS'])
+            : null;
+    }
+
+    /**
      * Si el rastro de edicion describe la fecha que se esta viendo.
      *
      * El rastro dice "el cashflow puso esta fecha". Si despues la app de
@@ -554,27 +609,29 @@ class Comex {
      * confundirian con los que caen DESPUES del ultimo mes -que son otra cosa y
      * no se arreglan editando nada-.
      *
-     * SON DOS AVISOS, PORQUE NO TODO LO VENCIDO QUEDA AFUERA DEL CUADRO
-     * ----------------------------------------------------------------
-     * Esto no es obvio y costo descubrirlo: la columna del MES EN CURSO cubre
-     * los dias de ese mes que quedaron fuera del tramo diario, o sea DIAS QUE YA
-     * PASARON. Un pago vencido de este mismo mes cae ahi, como cualquier otro
-     * importe, y entra al tablero. Uno de agosto no: queda fuera del eje.
+     * PUEDEN SER DOS AVISOS, PORQUE NO EN TODAS LAS PESTANAS LO VENCIDO QUEDA
+     * AFUERA DEL CUADRO
+     * ----------------------------------------------------------------------
+     * En PROVEEDORES EXTERIOR es siempre uno: lo vencido no suma por regla -ver
+     * aporteAlEje()- asi que ninguna fila entra en ninguna columna. El llamador
+     * no pasa el eje y todas caen en la misma bolsa.
      *
-     * Verificado contra la base el 19/09/2026: de 27 pagos vencidos, 4 por
-     * $ 256.768.590 caian en la columna de septiembre y 23 por $ 2.260.986.624
-     * quedaban afuera. Un solo aviso diciendo "no entran en ninguna columna"
-     * habria sido falso para los cuatro primeros, que es justo el error que este
-     * modulo no se permite: una nota que dice lo contrario de lo que hace el
-     * codigo.
+     * En CRONO NACIONALIZACION esa regla no se pidio, y ahi aparece algo que no
+     * es obvio: la columna del MES EN CURSO cubre los dias de ese mes que
+     * quedaron fuera del tramo diario, o sea DIAS QUE YA PASARON. Una
+     * nacionalizacion vencida de este mismo mes cae ahi, como cualquier otro
+     * importe, y entra al tablero. Una de agosto no: queda fuera del eje.
+     * Verificado contra la base el 19/09/2026: de 24 vencidas, 1 por
+     * $ 55.238,12 caia en la columna de septiembre y 23 por $ 67.204,06
+     * quedaban afuera.
+     *
+     * Un solo aviso diciendo "no suman en ninguna columna" seria falso para esa
+     * primera, que es justo el error que este modulo no se permite: una nota que
+     * dice lo contrario de lo que hace el codigo. Por eso el llamador que
+     * necesita el reparto pasa el Horizonte, y el que no, no.
      *
      * Ese reparto lo decide Horizonte::agrupar() y NO se toca: es la regla de
      * "un importe va a un dia O a un mes" que hace sumables a las tres vistas.
-     * Lo unico que cambia es que ahora se dice cual es cual.
-     *
-     * SIN HORIZONTE se informa un aviso solo, sin afirmar donde cayo cada uno.
-     * Es lo que corresponde cuando no hay con que decidirlo: el eje es lo unico
-     * que sabe que columnas existen.
      *
      * SOLO INFORMA LO VENCIDO, y no lo que no tiene fecha, aunque las dos cosas
      * queden fuera del eje. Lo segundo ya lo dicen dos avisos que existen y lo
@@ -635,11 +692,16 @@ class Comex {
            un interruptor. Afirmar "están marcadas en la grilla" sería falso en
            dos de los tres casos. Qué se ve y qué no lo dice el contador que
            está al lado del interruptor; esto dice qué pasó y qué hacer. */
+        /* EL TEXTO NO AFIRMA EL MOTIVO, y es a propósito: hay dos y dependen de
+           la pestaña. En Proveedores Exterior lo vencido no suma POR REGLA —al
+           cashflow entra lo que se paga de hoy en adelante, ver aporteAlEje()—;
+           en Crono Nacionalización no suma cuando su fecha cayó fuera del eje.
+           El hecho es el mismo y la acción también, así que el mensaje es uno. */
         if ($afuera > 0) {
             $avisos[] = $afuera . ' contenedor(es) por ' . self::plata($impAfuera)
-                . ' tienen la ' . $queEs . ' ya vencida y su fecha quedó fuera del eje, así que '
-                . 'NO entran en ninguna columna. No se los reubica en hoy, porque nadie afirmó '
-                . 'que ese importe se mueve hoy: cargales la fecha nueva y entran solos.';
+                . ' tienen la ' . $queEs . ' ya vencida, así que NO suman en ninguna columna '
+                . 'del período. No se los reubica en hoy, porque nadie afirmó que ese importe '
+                . 'se mueve hoy: cargales la fecha nueva y entran solos.';
         }
 
         if ($adentro > 0) {

@@ -52,11 +52,17 @@ try {
                Class/Comex.php y Class/DolarFuturo.php. */
             $filasExt = $comex->getProveedoresExterior();
 
+            /* EL EJE SE ARMA SOBRE IMPORTE_EJE Y NO SOBRE IMPORTE_ARS. Los dos
+               son la misma valuación; lo que cambia es que el primero vale cero
+               cuando el pago ya venció, porque al cashflow entra lo que se paga
+               de hoy en adelante. Ver Comex::aporteAlEje(). La columna de la
+               grilla sigue mostrando IMPORTE_ARS: el contenedor vale eso
+               aunque no entre en el período. */
             $payload = EjeVista::armar(
                 ejeDelModulo(),
                 $filasExt,
                 'FECHA_PAGO_EFECTIVA',
-                'IMPORTE_ARS'
+                'IMPORTE_EJE'
             );
 
             /* Los avisos propios van ADELANTE de los del eje: explican por qué
@@ -71,8 +77,13 @@ try {
             $payload['warnings'] = array_merge(
                 $comex->getAvisosExterior(),
                 Comex::avisosValuacion($filasExt, $comex->dolarFuturo()->ultimoMes()),
+                /* SIN EL EJE: acá no hay nada que repartir, porque ninguna
+                   vencida entra en ninguna columna —no es que su fecha caiga
+                   afuera, es que no suman por regla—. El importe que se informa
+                   es IMPORTE_ARS, que es lo que valen; informar IMPORTE_EJE
+                   daría "$ 0,00 vencidos", que no le dice nada a nadie. */
                 Comex::avisosVencidos($filasExt, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_ARS',
-                    'fecha estimada de pago', ejeDelModulo()),
+                    'fecha estimada de pago'),
                 $payload['warnings']
             );
 

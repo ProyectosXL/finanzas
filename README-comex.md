@@ -148,34 +148,42 @@ Y de los escondidos, **10 tenían la fecha de pago todavía por delante** y **18
 
 | Fila | Antes | Ahora |
 | --- | --- | --- |
-| *Proveedores del Exterior* (dentro del horizonte) | $ 3.499.977.348 | **$ 4.888.951.400** |
+| *Proveedores del Exterior* (dentro del horizonte) | $ 3.499.977.348 | **$ 4.632.182.810** |
 | *Nacionalizaciones* (dentro del horizonte) | **$ 0** | **$ 561.423,77** |
 
 La segunda es la que más dice. La fila de nacionalizaciones **daba cero** y el proveedor avisaba que *"ninguno tiene gastos de nacionalización estimados cargados"*. No era cierto en general: era cierto **de los 34 que el filtro dejaba pasar**. Los gastos estimados se cargan cuando el contenedor ya embarcó, así que el filtro escondía exactamente los contenedores que tienen el dato. El aviso describía el efecto del filtro y lo atribuía a la carga.
 
 ### Qué hace el tablero con un importe cuya fecha efectiva ya venció
 
-Ésta es **la decisión de esta etapa**, y tiene dos partes.
+**Al cashflow entra lo que se paga de hoy en adelante. Un pago con la fecha ya vencida no suma.**
 
-**Primero: no se reubica en hoy.** El importe queda en su fecha.
+O el pago ya salió —y entonces no es proyección— o no salió y hay que corregirle la fecha. Las dos cosas son **gestión de Comercio Exterior sobre el dato**, y hasta que alguien la haga, ese importe no describe ningún movimiento futuro. Lo implementa `Comex::aporteAlEje()`.
 
-Eso se aparta de `Ingresos::ubicarCobroVencido()`, que es la regla única de las tres pestañas de cobranza proyectada y **sí** ubica lo vencido en el primer día del eje. Se aparta por dos razones que no valen allá:
+**Por qué un campo aparte y no filtrar las filas.** La fila tiene que seguir viajando: la pestaña la muestra —escondida detrás del interruptor, pero ahí— y es la única forma de corregirle la fecha. El eje se arma sobre `IMPORTE_EJE`, que es `IMPORTE_ARS` salvo que vale **cero** cuando el pago venció; con importe cero, `Horizonte::agrupar()` saltea la fila entera. Así no entra en ninguna columna y tampoco cae en `fuera_horizonte`, que es otra cosa —lo que quedó después del último mes— y se arregla de otra manera.
 
-1. **Acá la fecha se edita desde la pestaña.** Una fecha de pago vencida es un dato a corregir, no un hecho consumado: el circuito correcto es que Comercio Exterior le cargue la fecha nueva, y para eso la fila ahora se ve. Reubicar en hoy pondría en la columna de hoy un egreso que nadie afirmó que sale hoy, y encima competiría con la corrección.
+`IMPORTE_ARS` **no se toca**: es lo que vale el contenedor y la grilla lo sigue mostrando en su columna. Lo que cambia es cuánto de eso entra al período.
+
+> **Cero y no `null`.** `null` es *"no se pudo valuar"* y tiene su propio aviso, en dólares. Cero es *"vale, pero no entra"*. Son dos motivos distintos por los que una celda queda vacía, y la pantalla los informa por separado.
+
+**Y no se reubica en hoy.** El importe queda en su fecha en vez de amontonarse en la primera columna. Eso se aparta de `Ingresos::ubicarCobroVencido()`, que es la regla única de las tres pestañas de cobranza proyectada y **sí** ubica lo vencido en el primer día del eje. Se aparta por dos razones que no valen allá:
+
+1. **Acá la fecha se edita desde la pestaña.** El circuito correcto es que Comercio Exterior le cargue la fecha nueva, y para eso la fila ahora se ve. Reubicar en hoy pondría en la columna de hoy un egreso que nadie afirmó que sale hoy, y encima competiría con la corrección.
 2. **Allá Tango dice si la factura sigue impaga**, así que reubicar es correcto: esa plata está pendiente con seguridad. Acá **no hay ninguna señal** de que el pago no se haya hecho — el único corte es que el contenedor todavía no tenga detalle cargado — y hay pagos vencidos de hasta **331 días**. Amontonar los 27 en la columna de hoy pondría en el peor día del tablero **$ 2.517 millones** que probablemente ya salieron.
 
-**Segundo: no todo lo vencido queda afuera del cuadro.** Esto no es obvio y costó descubrirlo.
+### La regla es de Proveedores Exterior, y Crono Nacionalización muestra por qué importa
 
-La columna del **mes en curso** cubre los días de ese mes que quedaron fuera del tramo diario — o sea, **días que ya pasaron**. Un pago vencido de este mismo mes cae ahí, como cualquier otro importe, y **entra al tablero**. Uno del mes pasado no. Ese reparto lo decide `Horizonte::agrupar()`, es la regla de *"un importe va a un día O a un mes"* que hace sumables a las tres vistas, y **no se tocó**.
+En **Crono Nacionalización la regla no se aplicó** —no se pidió—, y ahí queda a la vista algo que no es obvio: la columna del **mes en curso** cubre los días de ese mes que quedaron fuera del tramo diario, o sea **días que ya pasaron**. Una nacionalización vencida de este mismo mes cae ahí, como cualquier otro importe, y **entra al tablero**. Una de agosto no. Ese reparto lo decide `Horizonte::agrupar()`, es la regla de *"un importe va a un día O a un mes"* que hace sumables a las tres vistas, y **no se tocó**.
 
-Al 19/09/2026, de los 27 pagos vencidos:
+Al 19/09/2026, de las 24 nacionalizaciones vencidas:
 
 | | Contenedores | Importe |
 | --- | --- | --- |
-| Caen en la columna de septiembre: **entran** | 4 | $ 256.768.590 |
-| Quedan fuera del eje: **no entran** | 23 | $ 2.260.986.624 |
+| Caen en la columna de septiembre: **entran** | 1 | $ 55.238,12 |
+| Quedan fuera del eje: **no entran** | 23 | $ 67.204,06 |
 
-Por eso **son dos avisos y no uno**. Un solo mensaje diciendo *"no entran en ninguna columna"* habría sido falso para los cuatro primeros, y una nota que dice lo contrario de lo que hace el código es peor que no tenerla. Lo escribe `Comex::avisosVencidos()`, que recibe el `Horizonte` para poder repartirlos: **qué columnas existen lo sabe el eje y nadie más**, y cuál mes del pasado tiene columna depende de `horizonte_dias`, que es un parámetro editable.
+Por eso `Comex::avisosVencidos()` puede dar **dos avisos**: recibe el `Horizonte` y reparte. Un solo mensaje diciendo *"no suman en ninguna columna"* sería falso para la primera, y una nota que dice lo contrario de lo que hace el código es peor que no tenerla. **Qué columnas existen lo sabe el eje y nadie más**, y cuál mes del pasado tiene columna depende de `horizonte_dias`, que es un parámetro editable.
+
+En Proveedores Exterior el llamador **no le pasa el eje**, y es correcto: ahí no hay nada que repartir, porque ninguna vencida entra en ninguna columna.
 
 ### Las vencidas no se ven por defecto
 
@@ -194,7 +202,7 @@ Una fecha de pago vencida es un dato a corregir, y hasta que alguien la corrija 
 | **El export** | Baja lo que se ve, sin nada extra: `TablaExport` saca del clon las filas con `display: none` |
 | **Qué mira** | El `data-vencida` del `<tr>`, no la clase CSS: la clase es presentación y podría cambiar sin que nadie piense en el filtro |
 
-> **Hay una diferencia que conviene tener presente, y la pantalla la explica.** Casi todas las vencidas no entran en ninguna columna, así que esconderlas no cambia ningún total. Pero las **4 del mes en curso sí entran**, en la columna de ese mes: con el interruptor apagado, el pie de la vista Meses baja $ 256.768.590 respecto de la tarjeta. Es el mismo reparto de siempre —el pie mide lo que se ve, las tarjetas el cronograma completo— con la particularidad de que acá ocurre **sin que el usuario haya tipeado nada**. Por eso el `title` del contador lo dice.
+> **Esconderlas no cambia ningún número**, y eso es lo que hace al interruptor seguro: un pago vencido ya valía cero en el período, así que el pie y las tarjetas dicen lo mismo prendido o apagado. Verificado en las dos vistas. Es la diferencia con el buscador, que sí puede dejar el pie midiendo algo distinto de las tarjetas.
 
 **Crono Nacionalización no tiene el interruptor**: el pedido era sobre la fecha estimada de pago. `ComexFechas.verVencidas()` devuelve `true` cuando la pantalla no declara el control, justamente para que una pestaña sin interruptor no pueda quedar escondiendo filas sin nada que las traiga de vuelta. Agregárselo, si algún día se quiere, es declarar el `<div class="form-switch">` y pasar su id en las dos llamadas.
 
@@ -205,7 +213,7 @@ Tres marcas, tres cosas distintas, y las tres las decide el backend:
 | Marca | Qué dice |
 | --- | --- |
 | **Editada** (naranja) | Esta fecha del maestro la puso alguien desde el cashflow. El tooltip dice quién, cuándo y qué decía antes |
-| **Vencida** (rojo) | La fecha ya pasó. El `title` explica la consecuencia: *"este importe no entra en ninguna columna del eje"* |
+| **Vencida** (rojo) | La fecha ya pasó. El `title` explica la consecuencia: *"este importe no entra en ninguna columna del eje"*. En Proveedores Exterior además está escondida por defecto |
 | **Sin fecha** (gris) | No hay dónde ubicar el importe en el tiempo. Es **otro problema** que vencida — uno se corrige, el otro se carga — y por eso es otra marca |
 
 **Se marca la fila entera y no sólo la celda.** Con veintiocho columnas de días, el ojo está en la punta derecha de la tabla y la celda de la fecha quedó a un scroll de distancia. Es el mismo criterio con el que el tablero marca la columna entera y no sólo el *Saldo Final*.
