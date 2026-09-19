@@ -40,10 +40,10 @@ try {
 
     switch ($action) {
         case 'getProveedoresExterior':
-            /* EL EJE SE ARMA SOBRE IMPORTE_ARS, no sobre VALOR_FOB_DOLAR. El
-               cashflow es en pesos y esta pestaña es el detalle de una fila del
-               tablero: si mostrara dólares, sus totales no se podrían comparar
-               contra la fila que explica. La columna en dólares sigue en la
+            /* EL EJE ESTÁ EN PESOS y no en dólares. El cashflow es en pesos y
+               esta pestaña es el detalle de una fila del tablero: si mostrara
+               dólares, sus totales no se podrían comparar contra la fila que
+               explica. La columna en dólares (VALOR_FOB_DOLAR) sigue en la
                grilla como referencia.
 
                La valuación fila por fila -con la curva de dólar futuro ROFEX,
@@ -52,12 +52,13 @@ try {
                Class/Comex.php y Class/DolarFuturo.php. */
             $filasExt = $comex->getProveedoresExterior();
 
-            /* EL EJE SE ARMA SOBRE IMPORTE_EJE Y NO SOBRE IMPORTE_ARS. Los dos
-               son la misma valuación; lo que cambia es que el primero vale cero
-               cuando el pago ya venció, porque al cashflow entra lo que se paga
-               de hoy en adelante. Ver Comex::aporteAlEje(). La columna de la
-               grilla sigue mostrando IMPORTE_ARS: el contenedor vale eso
-               aunque no entre en el período. */
+            /* Y SE ARMA SOBRE IMPORTE_EJE, NO SOBRE IMPORTE_ARS. Los dos son la
+               misma valuación en pesos; lo que cambia es que el primero vale
+               CERO cuando el pago ya venció o ya se marcó como hecho, porque el
+               cashflow proyecta lo que falta pagar de hoy en adelante. Ver
+               Comex::aporteAlEje(). La columna de la grilla sigue mostrando
+               IMPORTE_ARS: el contenedor vale eso aunque no entre en el
+               período. */
             $payload = EjeVista::armar(
                 ejeDelModulo(),
                 $filasExt,
@@ -112,6 +113,11 @@ try {
                entrega vino a terminar. La celda deja de invitar al clic y el
                aviso de arriba dice qué script falta. */
             $payload['fechas_editables'] = $comex->tieneHistorial();
+
+            /* Y lo mismo para el tilde de pagado, que tiene su propia tabla:
+               sin ella la casilla se dibuja deshabilitada y el aviso de arriba
+               dice qué script falta. */
+            $payload['pagado_editable'] = $comex->tienePagado();
 
             echo json_encode(['success' => true, 'data' => $payload], JSON_UNESCAPED_UNICODE);
             break;
@@ -214,6 +220,63 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* ================================================================
+           MARCAR UN PAGO COMO YA HECHO
+
+           NO toca el maestro de Comercio Exterior: es una afirmación del
+           cashflow sobre su propia proyección. Ver Comex::marcarPagado().
+
+           UN SOLO ENDPOINT PARA MARCAR Y DESMARCAR, por el mismo motivo por el
+           que vaciar la cotización es el mismo endpoint que cargarla: deshacer
+           tiene que ser el mismo gesto, no un segundo camino que hace lo
+           contrario del primero.
+           ================================================================ */
+        case 'marcarPagado':
+            $data = json_decode(file_get_contents('php://input'), true);
+
+            if (!is_array($data) || !isset($data['id_mg']) || !isset($data['concepto'])
+                || !array_key_exists('pagado', $data)) {
+                throw new Exception('Faltan parámetros obligatorios: el contenedor, '
+                    . 'qué pago es y si queda marcado.');
+            }
+
+            $r = $comex->marcarPagado(
+                $data['concepto'],
+                $data['id_mg'],
+                !empty($data['pagado']),
+                isset($data['observacion']) ? $data['observacion'] : null,
+                isset($data['usuario']) ? $data['usuario'] : null
+            );
+
+            if ($r['sin_cambios']) {
+                $mensaje = 'Ya estaba así: no se cambió nada.';
+            } elseif ($r['pagado']) {
+                /* SE DICE QUE SALE DEL TABLERO. Es la consecuencia que importa
+                   y no se deduce de tildar una casilla. */
+                $mensaje = 'Marcado como pagado: sale de la proyección y la fila del tablero '
+                    . 'deja de contarlo. El importe no se pierde, y se destilda desde acá.';
+            } else {
+                $mensaje = 'Vuelve a la proyección: la fila del tablero lo cuenta otra vez.';
+            }
+
+            echo json_encode([
+                'success' => true,
+                'message' => $mensaje,
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* Quién marcó este pago, cuándo, y si alguien lo destildó después. */
+        case 'getHistorialPagado':
+            echo json_encode([
+                'success' => true,
+                'data' => $comex->getHistorialPagado(
+                    isset($_GET['id_mg']) ? $_GET['id_mg'] : 0,
+                    isset($_GET['concepto']) ? $_GET['concepto'] : null
+                )
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         /* Quién movió esta fecha, cuándo, y qué decía antes. Las no vigentes
            son el punto: son lo único que explica por qué el egreso proyectado
            de la semana pasada caía en otra columna. */
@@ -232,26 +295,38 @@ try {
             // puede ser nulo: esos casos suman cero y no distorsionan.
             $filasNac = $comex->getCronoNacionalizacion();
 
+            /* Sobre IMPORTE_EJE, igual que Proveedores Exterior: una
+               nacionalización con la fecha vencida no suma. La columna
+               "Importe Est." de la grilla sigue mostrando IMPORTE_EST. */
             $payload = EjeVista::armar(
                 ejeDelModulo(),
                 $filasNac,
                 'FECHA_NAC_EFECTIVA',
-                'IMPORTE_EST'
+                'IMPORTE_EJE'
             );
 
             /* Mismo reparto que en Proveedores Exterior: primero lo que falta
                para poder editar, después lo que no entra en ninguna columna, y
                al final lo que el eje descartó. */
-            $avisoDDL = $comex->avisoSinHistorial();
+            $faltantes = array_values(array_filter(
+                [$comex->avisoSinHistorial(), $comex->avisoSinPagado()]));
 
             $payload['warnings'] = array_merge(
-                ($avisoDDL === '' ? [] : [$avisoDDL]),
+                $faltantes,
+                /* Sin el eje: ninguna vencida entra en ninguna columna, así que
+                   no hay nada que repartir. El importe que se informa es
+                   IMPORTE_EST, que es lo que valen. */
                 Comex::avisosVencidos($filasNac, 'FECHA_NAC_EFECTIVA', 'IMPORTE_EST',
-                    'fecha de nacionalización', ejeDelModulo()),
+                    'fecha de nacionalización'),
                 $payload['warnings']
             );
 
             $payload['fechas_editables'] = $comex->tieneHistorial();
+
+            /* Y lo mismo para el tilde de pagado, que tiene su propia tabla:
+               sin ella la casilla se dibuja deshabilitada y el aviso de arriba
+               dice qué script falta. */
+            $payload['pagado_editable'] = $comex->tienePagado();
 
             echo json_encode([
                 'success' => true,

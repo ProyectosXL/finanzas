@@ -163,6 +163,115 @@
             + '>' + cuerpo + '</td>';
     }
 
+    /* ================================================================
+       EL TILDE DE PAGADO
+
+       Dice que ese egreso YA SE HIZO, así que sale de la proyección: la fila
+       del tablero deja de contarlo. El importe no se pierde —sale por su
+       propia serie— y se destilda desde acá si se marcó por error.
+
+       ES UN TILDE QUE ACTÚA, no que selecciona. A diferencia del de Echeqs
+       —donde el check elige filas y un botón confirma el lote con su motivo—
+       acá cada clic guarda. La diferencia está en qué se está afirmando: allá
+       es una decisión discutible que saca plata del disponible y necesita un
+       motivo por escrito; acá es un hecho, "este pago se hizo", y pedir un
+       paso de confirmación por cada contenedor convertiría en un trámite lo
+       que es tildar una lista.
+
+       Y se deshace con el mismo clic, que es lo que lo hace seguro.
+       ================================================================ */
+
+    /**
+     * El HTML de la celda del tilde de pagado.
+     *
+     * @param {Object} item Fila del payload
+     * @param {string} concepto 'PAGO' o 'NAC'
+     * @param {Object} opts { editable, alMarcar }
+     * @returns {string}
+     */
+    function celdaPagado(item, concepto, opts) {
+        opts = opts || {};
+
+        var pagado = !!item.PAGADO;
+
+        /* Quién lo marcó y cuándo, en el title. Sin eso, una marca puesta en
+           marzo que nadie recuerda es indistinguible de un dato del sistema. */
+        var quien = item.PAGADO_USUARIO ? escapar(item.PAGADO_USUARIO) : 'desde el cashflow';
+        var titulo = pagado
+            ? ('Marcado como pagado ' + quien
+                + (item.PAGADO_FECHA ? (' el ' + fecha(item.PAGADO_FECHA)) : '')
+                + (item.PAGADO_OBS ? ('. ' + escapar(item.PAGADO_OBS)) : '')
+                + '. No entra en la proyección; destildalo para que vuelva.')
+            : (opts.editable
+                ? 'Tildá si este pago ya se hizo: sale de la proyección y el tablero deja de '
+                    + 'contarlo.'
+                : '');
+
+        /* data-orden porque la celda es un control y no un texto: sin esto,
+           Js/tabla-orden.js ordenaría esta columna por nada. Ver
+           README-cashflow.md. */
+        return '<td class="center pagado-cell' + (pagado ? ' pagado-si' : '') + '"'
+            + ' data-orden="' + (pagado ? '1' : '0') + '"'
+            + (titulo ? (' title="' + escapar(titulo) + '"') : '') + '>'
+            + '<input type="checkbox" class="form-check-input pagado-chk"'
+            + ' data-id="' + item.ID + '"'
+            + ' data-concepto="' + concepto + '"'
+            + (pagado ? ' checked' : '')
+            + (opts.editable ? '' : ' disabled')
+            + (opts.editable && opts.alMarcar
+                ? (' onchange="' + opts.alMarcar + '(this)"') : '')
+            + '></td>';
+    }
+
+    /**
+     * Guarda el tilde de pagado de una fila.
+     *
+     * EL CHECKBOX SE DESHABILITA MIENTRAS GUARDA. Sin eso, dos clics rápidos
+     * mandan dos pedidos y el segundo puede llegar antes que el primero, con
+     * lo que la fila queda en el estado contrario al que muestra la pantalla.
+     *
+     * SI FALLA, EL TILDE VUELVE SOLO a donde estaba: dejarlo tildado con el
+     * guardado fallido diría que el importe salió del tablero cuando no salió.
+     *
+     * @param {HTMLElement} chk El checkbox
+     * @param {Function} alGuardar Qué hacer después de guardar bien
+     */
+    function marcarPagado(chk, alGuardar) {
+        var queda = chk.checked;
+
+        chk.disabled = true;
+
+        fetch('Controller/ComexController.php?action=marcarPagado', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id_mg: chk.dataset.id,
+                concepto: chk.dataset.concepto,
+                pagado: queda
+            })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(result) {
+            if (!result.success) {
+                alert('No se pudo guardar: ' + result.message);
+                chk.checked = !queda;
+                chk.disabled = false;
+
+                return;
+            }
+
+            if (typeof alGuardar === 'function') {
+                alGuardar(result);
+            }
+        })
+        .catch(function(error) {
+            console.error('Error:', error);
+            alert('Error de conexión al guardar el tilde de pagado');
+            chk.checked = !queda;
+            chk.disabled = false;
+        });
+    }
+
     /**
      * Abre el editor de una celda de fecha y la guarda contra el maestro.
      *
@@ -357,32 +466,80 @@
      * @returns {boolean}
      */
     function verVencidas(idSwitch) {
+        return prendido(idSwitch);
+    }
+
+    /**
+     * Si un interruptor de la pantalla está prendido.
+     *
+     * SIN INTERRUPTOR SE VE TODO. Una pestaña que no declara el control no
+     * puede quedar escondiendo filas sin que nada lo diga.
+     *
+     * @param {string} idSwitch
+     * @returns {boolean}
+     */
+    function prendido(idSwitch) {
         var chk = idSwitch ? document.getElementById(idSwitch) : null;
 
         return chk ? !!chk.checked : true;
     }
 
     /**
-     * Esconde las filas de una tabla que el buscador o el interruptor dejan
+     * Si una fila pasa los tres filtros de la pantalla.
+     *
+     * LOS TRES SE EVALÚAN EN UN SOLO LUGAR, sobre la fila y sobre el item, y
+     * por eso `filtrar()` y `visibles()` no pueden quedar diciendo cosas
+     * distintas: esconder una fila que el pie sigue sumando es el defecto que
+     * esta función existe para hacer imposible.
+     *
+     * @param {Object} estado { term, conVencidas, conPagados }
+     * @param {Object} f { texto, vencida, pagado }
+     * @returns {boolean}
+     */
+    function pasaFiltros(estado, f) {
+        if (!estado.conVencidas && f.vencida) {
+            return false;
+        }
+
+        if (!estado.conPagados && f.pagado) {
+            return false;
+        }
+
+        return !estado.term || f.texto.indexOf(estado.term) !== -1;
+    }
+
+    /** El estado de los tres controles, leído de la pantalla */
+    function estadoFiltros(idCampo, idSwitch, idSwitchPagados) {
+        var campo = document.getElementById(idCampo);
+
+        return {
+            term: campo ? campo.value.toLowerCase() : '',
+            conVencidas: prendido(idSwitch),
+            conPagados: prendido(idSwitchPagados)
+        };
+    }
+
+    /**
+     * Esconde las filas de una tabla que el buscador o los interruptores dejan
      * afuera.
      *
      * @param {string} idCampo Id del input de búsqueda
      * @param {string} idCuerpo Id del tbody
      * @param {string} [idSwitch] Id del interruptor de ver vencidas
+     * @param {string} [idSwitchPagados] Id del interruptor de ver pagados
      * @returns {number} Cuántas filas quedaron visibles
      */
-    function filtrar(idCampo, idCuerpo, idSwitch) {
-        var campo = document.getElementById(idCampo);
-        var term = campo ? campo.value.toLowerCase() : '';
-        var conVencidas = verVencidas(idSwitch);
+    function filtrar(idCampo, idCuerpo, idSwitch, idSwitchPagados) {
+        var estado = estadoFiltros(idCampo, idSwitch, idSwitchPagados);
         var filas = document.querySelectorAll('#' + idCuerpo + ' tr');
         var n = 0;
 
         for (var i = 0; i < filas.length; i++) {
-            var texto = (filas[i].getAttribute('data-buscar') || '').toLowerCase();
-            var vencida = filas[i].getAttribute('data-vencida') === '1';
-            var pasa = (conVencidas || !vencida)
-                && (!term || texto.indexOf(term) !== -1);
+            var pasa = pasaFiltros(estado, {
+                texto: (filas[i].getAttribute('data-buscar') || '').toLowerCase(),
+                vencida: filas[i].getAttribute('data-vencida') === '1',
+                pagado: filas[i].getAttribute('data-pagado') === '1'
+            });
 
             filas[i].style.display = pasa ? '' : 'none';
 
@@ -395,8 +552,8 @@
     }
 
     /**
-     * Los items que el buscador y el interruptor están dejando ver, o null si
-     * no hay ningún filtro puesto.
+     * Los items que el buscador y los interruptores están dejando ver, o null
+     * si no hay ningún filtro puesto.
      *
      * NULL Y NO LA LISTA ENTERA: sin filtro mandan los totales del payload, que
      * no se recalculan acá. Recalcularlos sería una tercera copia de la regla
@@ -406,23 +563,22 @@
      * @param {string} idCampo
      * @param {Array} filas
      * @param {string} [idSwitch]
+     * @param {string} [idSwitchPagados]
      * @returns {Array|null}
      */
-    function visibles(idCampo, filas, idSwitch) {
-        var campo = document.getElementById(idCampo);
-        var term = campo ? campo.value.toLowerCase() : '';
-        var conVencidas = verVencidas(idSwitch);
+    function visibles(idCampo, filas, idSwitch, idSwitchPagados) {
+        var estado = estadoFiltros(idCampo, idSwitch, idSwitchPagados);
 
-        if (!term && conVencidas) {
+        if (!estado.term && estado.conVencidas && estado.conPagados) {
             return null;
         }
 
         return (filas || []).filter(function(item) {
-            if (!conVencidas && item.VENCIDA) {
-                return false;
-            }
-
-            return !term || textoBuscable(item).toLowerCase().indexOf(term) !== -1;
+            return pasaFiltros(estado, {
+                texto: textoBuscable(item).toLowerCase(),
+                vencida: !!item.VENCIDA,
+                pagado: !!item.PAGADO
+            });
         });
     }
 
@@ -437,15 +593,34 @@
         return (filas || []).filter(function(item) { return !!item.VENCIDA; }).length;
     }
 
+    /**
+     * Cuántas filas marcadas como pagadas hay.
+     *
+     * NO SE CUENTAN LAS QUE ADEMÁS ESTÁN VENCIDAS por separado: una fila puede
+     * estar en los dos grupos, y sumar los dos contadores daría más filas de
+     * las que hay. Cada contador dice cuántas tiene SU condición, que es lo que
+     * su interruptor esconde.
+     *
+     * @param {Array} filas
+     * @returns {number}
+     */
+    function contarPagadas(filas) {
+        return (filas || []).filter(function(item) { return !!item.PAGADO; }).length;
+    }
+
     window.ComexFechas = {
         celda: celda,
         editar: editar,
+        celdaPagado: celdaPagado,
+        marcarPagado: marcarPagado,
         textoBuscable: textoBuscable,
         sumarColumnas: sumarColumnas,
         filtrar: filtrar,
         visibles: visibles,
         verVencidas: verVencidas,
+        prendido: prendido,
         contarVencidas: contarVencidas,
+        contarPagadas: contarPagadas,
         formatDate: fecha,
         escapar: escapar
     };

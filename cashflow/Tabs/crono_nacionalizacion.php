@@ -89,6 +89,36 @@
                                style="min-width: 260px;">
                     </div>
                 </div>
+
+                <!-- LAS VENCIDAS NO SE VEN POR DEFECTO, igual que en
+                     Proveedores Exterior: una nacionalización con la fecha
+                     vencida no suma en ninguna columna del período, así que en
+                     el trabajo normal son ruido. Al 19/09/2026 son 24 de 76.
+
+                     Esconder filas que ya valían cero no cambia ningún total;
+                     el interruptor existe para poder ir a corregirles la fecha,
+                     y CUÁNTO ESCONDE SE DICE AL LADO, siempre. -->
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="verVencidasCronoNac">
+                    <label class="form-check-label small text-muted" for="verVencidasCronoNac">
+                        Ver vencidas
+                        <span class="text-muted fst-italic ms-1"
+                              id="estadoVencidasCronoNac"></span>
+                    </label>
+                </div>
+
+                <!-- LAS PAGADAS TAMPOCO SE VEN POR DEFECTO. Ya se decidió que
+                     ese gasto no se espera más, así que en el trabajo normal
+                     son ruido. El interruptor es desde donde se destilda lo que
+                     se marcó por error, y CUÁNTO ESCONDE SE DICE AL LADO. -->
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="verPagadosCronoNac">
+                    <label class="form-check-label small text-muted" for="verPagadosCronoNac">
+                        Ver pagadas
+                        <span class="text-muted fst-italic ms-1"
+                              id="estadoPagadosCronoNac"></span>
+                    </label>
+                </div>
             </div>
             <div class="d-flex gap-2">
                 <!-- Los tres botones los dibuja Js/eje-vistas.js a partir del
@@ -138,9 +168,18 @@
                                 <th rowspan="2">ETD</th>
                                 <th rowspan="2">ETA</th>
                                 <th rowspan="2">
-                                    Fecha Nac. 
-                                    <i class="fas fa-pen-to-square ms-1" style="font-size: 10px;" 
+                                    Fecha Nac.
+                                    <i class="fas fa-pen-to-square ms-1" style="font-size: 10px;"
                                        title="Click para editar"></i>
+                                </th>
+                                <!-- EL TILDE DE "YA SE PAGÓ", sobre el gasto de
+                                     nacionalización. Es el OTRO pago del mismo
+                                     contenedor: marcar el del proveedor del
+                                     exterior no dice nada de éste. -->
+                                <th rowspan="2">
+                                    Pagada
+                                    <i class="fas fa-check-square ms-1" style="font-size: 10px;"
+                                       title="Tildá si la nacionalización ya se pagó: sale de la proyección"></i>
                                 </th>
                                 <!-- El rótulo y el colspan los pone el JS según
                                      la vista activa. -->

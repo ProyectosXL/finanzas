@@ -1,8 +1,9 @@
 <?php
 /**
- * Comercio Exterior: la fecha vive en el maestro, y los vencidos se ven.
+ * Comercio Exterior: la fecha vive en el maestro, los vencidos se ven, y lo
+ * pagado sale del flujo.
  *
- * Tres cosas cambiaron en esta rama y las tres se rompen en silencio:
+ * Cuatro cosas cambiaron en estas ramas y las cuatro se rompen en silencio:
  *
  *   1. Las dos fechas editables se escriben sobre
  *      RO_T_IMPORTACIONES_ENCABEZADO y no sobre la tabla del cashflow. Si
@@ -10,10 +11,14 @@
  *      una fecha vieja que la otra aplicacion ya no tiene.
  *   2. El filtro por fecha de embarque se fue. Si vuelve, desaparecen 42 de 76
  *      contenedores y el tablero informa de menos sin que nada se caiga.
- *   3. Un importe con fecha vencida NO se reubica en hoy. Si alguien lo
- *      "arregla" reusando Ingresos::ubicarCobroVencido(), la columna de hoy se
- *      llena con dos mil millones de pesos de pagos que probablemente ya
+ *   3. Un importe con fecha vencida no suma, y NO se reubica en hoy. Si alguien
+ *      lo "arregla" reusando Ingresos::ubicarCobroVencido(), la columna de hoy
+ *      se llena con dos mil millones de pesos de pagos que probablemente ya
  *      salieron, y el tablero sigue dando un numero.
+ *   4. Un pago marcado como hecho sale del flujo por una serie propia. Si el
+ *      invariante PAGOS + PAGOS_PAGADOS = PAGOS_TODO se rompe, el importe
+ *      marcado se evapora o se cuenta dos veces, y las dos cosas dan un tablero
+ *      que no cierra sin que nada falle.
  *
  * LAS REGLAS SE PRUEBAN SIN BASE, que es por lo que viven afuera de las
  * consultas. Lo que necesita SQL Server se saltea solo.
@@ -143,12 +148,12 @@ chequear('y con hora de un lado', true,
 /* ================================================================
    AL CASHFLOW ENTRA LO QUE SE PAGA DE HOY EN ADELANTE
 
-   Un pago con la fecha vencida NO SUMA. Es una regla de negocio y no una
-   consecuencia del eje: o el pago ya salio -y entonces no es proyeccion- o no
-   salio y hay que corregirle la fecha, y las dos cosas son gestion de Comercio
+   Un importe con la fecha vencida NO SUMA. Es una regla de negocio y no una
+   consecuencia del eje: o ya se movio -y entonces no es proyeccion- o no se
+   movio y hay que corregirle la fecha, y las dos cosas son gestion de Comercio
    Exterior sobre el dato.
 
-   Aplica a PROVEEDORES EXTERIOR. En Crono Nacionalizacion no se pidio.
+   Vale en las DOS pestanas.
    ================================================================ */
 seccion('un pago vencido aporta cero al eje');
 
@@ -192,11 +197,169 @@ chequear('y el proveedor del tablero agrupa por lo mismo', true,
     strpos(codigoSinComentarios(__DIR__ . '/../cashflow/Class/Providers/ComexProvider.php'),
         "'FECHA_PAGO_EFECTIVA', 'IMPORTE_EJE'") !== false);
 
-// NACIONALIZACIONES NO: la regla no se pidio ahi, y si alguien la aplicara de
-// pasada, la fila del tablero cambiaria de numero sin que nadie lo decidiera.
-chequear('nacionalizaciones sigue agrupando por su importe', true,
-    strpos(codigoSinComentarios(__DIR__ . '/../cashflow/Class/Providers/ComexProvider.php'),
-        "'FECHA_NAC_EFECTIVA', 'IMPORTE_EST'") !== false);
+/* LA REGLA VALE EN LAS DOS PESTANAS. Nacionalizaciones se sumo despues, y la
+   funcion es la MISMA: aporteAlEje() recibe el campo de importe de cada una
+   -IMPORTE_ARS aca, IMPORTE_EST alla- en vez de tener el nombre escrito
+   adentro, que habria obligado a copiarla. */
+seccion('la misma regla, con el campo de cada pestana');
+
+chequear('una nacionalizacion vencida tampoco suma', 0.0,
+    Comex::aporteAlEje(['VENCIDA' => true, 'IMPORTE_EST' => 55238.12], 'IMPORTE_EST'));
+chequear('y una futura suma lo suyo', 55238.12,
+    Comex::aporteAlEje(['VENCIDA' => false, 'IMPORTE_EST' => 55238.12], 'IMPORTE_EST'));
+
+// El campo por defecto es el de Proveedores Exterior, que fue la primera.
+chequear('el campo por defecto es IMPORTE_ARS', 1000.0,
+    Comex::aporteAlEje(['IMPORTE_ARS' => 1000, 'IMPORTE_EST' => 7]));
+
+chequear('las dos series del tablero agrupan por IMPORTE_EJE', 2,
+    substr_count(codigoSinComentarios(__DIR__ . '/../cashflow/Class/Providers/ComexProvider.php'),
+        "'IMPORTE_EJE'"));
+
+seccion('el aviso de "sin gastos cargados" no se confunde con los vencidos');
+
+/* Un cero de la serie ya no significa "nadie cargo gastos": puede significar
+   que TODOS los contenedores estan vencidos, que es otra cosa y tiene su
+   propio aviso. Por eso esa guarda pasa a medirse sobre el importe crudo. */
+$provSrc = codigoSinComentarios(__DIR__ . '/../cashflow/Class/Providers/ComexProvider.php');
+
+chequear('se mide sobre el importe crudo', true,
+    strpos($provSrc, "self::totalImporte(\$filas, 'IMPORTE_EST')") !== false);
+chequear('y ya no sobre la serie', false, strpos($provSrc, 'totalSerie') !== false);
+
+/* ================================================================
+   UN PAGO MARCADO COMO HECHO SALE DEL FLUJO
+
+   Son dos reglas y estan separadas a proposito, porque el reparto en series
+   necesita las dos por separado:
+
+     importeProyectable()  0 si la FECHA ya paso
+     aporteAlEje()         eso, y ademas 0 si YA SE PAGO
+   ================================================================ */
+seccion('lo marcado como pagado no aporta al eje');
+
+chequear('un pago marcado no suma', 0.0,
+    Comex::aporteAlEje(['PAGADO' => true, 'IMPORTE_ARS' => 85719920.0]));
+chequear('uno sin marcar si', 85719920.0,
+    Comex::aporteAlEje(['PAGADO' => false, 'IMPORTE_ARS' => 85719920.0]));
+
+// PERO SIGUE SIENDO PROYECTABLE: ese campo mira solo la fecha, y es el que
+// alimenta las series PAGADOS y TODO. Si mirara tambien el tilde, las dos
+// darian cero y el invariante se romperia.
+chequear('pero sigue siendo proyectable', 85719920.0,
+    Comex::importeProyectable(['PAGADO' => true, 'IMPORTE_ARS' => 85719920.0]));
+
+seccion('vencido Y pagado da cero por las dos');
+
+chequear('el eje', 0.0,
+    Comex::aporteAlEje(['PAGADO' => true, 'VENCIDA' => true, 'IMPORTE_ARS' => 100]));
+
+/* Y el proyectable tambien, por la fecha: marcar un vencido NO mueve ningun
+   numero del tablero, porque ya valia cero. Lo que cambia es que la fila sale
+   de la pantalla, que es para lo que se marca. */
+chequear('y el proyectable', 0.0,
+    Comex::importeProyectable(['PAGADO' => true, 'VENCIDA' => true, 'IMPORTE_ARS' => 100]));
+
+seccion('el invariante del corte, fila por fila');
+
+/* PAGOS + PAGOS_PAGADOS = PAGOS_TODO. Lo que lo hace cerrar es que para una
+   fila NO marcada los dos campos valgan lo mismo, y para una marcada el del
+   eje valga cero. Se verifica sobre los cuatro casos posibles. */
+$casos = [
+    ['nada'            => ['IMPORTE_ARS' => 1000]],
+    ['pagada'          => ['IMPORTE_ARS' => 1000, 'PAGADO' => true]],
+    ['vencida'         => ['IMPORTE_ARS' => 1000, 'VENCIDA' => true]],
+    ['vencida y pagada' => ['IMPORTE_ARS' => 1000, 'VENCIDA' => true, 'PAGADO' => true]]
+];
+
+foreach ($casos as $caso) {
+    foreach ($caso as $nombre => $fila) {
+        $eje = floatval(Comex::aporteAlEje($fila));
+        $proy = floatval(Comex::importeProyectable($fila));
+        $pagados = empty($fila['PAGADO']) ? 0.0 : $proy;
+
+        chequear('cierra con ' . $nombre, $proy, $eje + $pagados);
+    }
+}
+
+seccion('el reparto de filas marcadas es puro');
+
+require_once __DIR__ . '/../cashflow/Class/Providers/ComexProvider.php';
+
+$mezcla = [
+    ['ID' => 1, 'PAGADO' => true],
+    ['ID' => 2],
+    ['ID' => 3, 'PAGADO' => false],
+    ['ID' => 4, 'PAGADO' => true]
+];
+
+$soloPagadas = ComexProvider::soloPagadas($mezcla);
+
+chequear('son dos', 2, count($soloPagadas));
+chequear('las marcadas', 1, $soloPagadas[0]['ID']);
+chequear('y la otra', 4, $soloPagadas[1]['ID']);
+
+// Se prueba SIN BASE, que es el punto: el corte se puede verificar aunque no
+// haya nada marcado en la base. Mismo criterio que EcheqsProvider::repartir().
+chequear('con la lista vacia no falla', 0, count(ComexProvider::soloPagadas([])));
+chequear('ni con basura', 0, count(ComexProvider::soloPagadas(null)));
+
+seccion('el aviso de lo marcado');
+
+$avisos = Comex::avisosPagados([
+    ['PAGADO' => true, 'IMPORTE_PROYECTABLE' => 1000000],
+    ['PAGADO' => true, 'IMPORTE_PROYECTABLE' => 500000],
+    ['PAGADO' => false, 'IMPORTE_PROYECTABLE' => 9999999]
+], 'IMPORTE_PROYECTABLE', 'pago');
+
+chequear('es uno', 1, count($avisos));
+chequear('dice cuantos son', true, strpos($avisos[0], '2 contenedor(es)') !== false);
+chequear('y cuanto salio de la proyeccion', true,
+    strpos($avisos[0], '$ 1.500.000,00') !== false);
+
+// EL AVISO EXISTE PORQUE EL IMPORTE YA NO ESTA EN LA FILA. Sin el, un egreso
+// que el tablero deberia proyectar desaparece y nada en pantalla lo explica.
+chequear('dice que salieron de la proyeccion', true,
+    strpos($avisos[0], 'salieron de la proyección') !== false);
+chequear('y que el importe no se perdio', true,
+    strpos($avisos[0], 'no se perdió') !== false);
+
+chequear('sin marcados no hay aviso', 0,
+    count(Comex::avisosPagados([['PAGADO' => false, 'IMPORTE_PROYECTABLE' => 1]],
+        'IMPORTE_PROYECTABLE', 'pago')));
+chequear('ni con basura', 0, count(Comex::avisosPagados(null, 'X', 'pago')));
+
+seccion('el corte esta declarado en el registro');
+
+require_once __DIR__ . '/../cashflow/Class/CashflowRegistry.php';
+
+foreach ([
+    'COMEX_PROV_EXT' => ['PAGOS', 'PAGOS_PAGADOS', 'PAGOS_TODO'],
+    'COMEX_NAC' => ['NACIONALIZACION', 'NACIONALIZACION_PAGADAS', 'NACIONALIZACION_TODO']
+] as $cod => $series) {
+    $reg = CashflowRegistry::meta($cod);
+
+    foreach ($series as $s) {
+        chequear($cod . ' sirve ' . $s, true, isset($reg['series'][$s]));
+    }
+
+    /* EL TOTAL DECLARADO COMO COMPUESTO es lo que impide que alguien active en
+       el tablero el universo Y una de sus partes: serian dos filas contando el
+       mismo importe, y la regla de origen repetido no lo ve porque son series
+       distintas. */
+    chequear($cod . ' declara el total como compuesto', [$series[0], $series[1]],
+        $reg['componentes'][$series[2]]);
+}
+
+seccion('la fila del tablero no hay que repuntarla');
+
+/* PAGOS y NACIONALIZACION cambian de SIGNIFICADO y no de codigo, igual que
+   A_COBRAR con la exclusion de cheques: son los que las filas del tablero ya
+   tienen configurados, asi que el circuito entra sin tocar Parametros. */
+chequear('PAGOS sigue existiendo', true,
+    isset(CashflowRegistry::meta('COMEX_PROV_EXT')['series']['PAGOS']));
+chequear('y NACIONALIZACION tambien', true,
+    isset(CashflowRegistry::meta('COMEX_NAC')['series']['NACIONALIZACION']));
 
 /* ================================================================
    EL AVISO DE LOS VENCIDOS
@@ -578,10 +741,12 @@ chequear('dispara el mismo filtrado que el buscador', true,
 
 // Las dos consultas al helper compartido le pasan el interruptor: si una se lo
 // olvidara, el pie sumaría filas que la tabla no muestra.
-chequear('el filtrado conoce el interruptor', true,
-    strpos($jsExt, "ComexFechas.filtrar('busquedaProvExt', 'tableBody', 'verVencidasProvExt')") !== false);
+chequear('el filtrado conoce los dos interruptores', true,
+    (bool) preg_match('/ComexFechas\.filtrar\(\s*\x27busquedaProvExt\x27,\s*\x27tableBody\x27,'
+        . '\s*\x27verVencidasProvExt\x27,\s*\x27verPagadosProvExt\x27\s*\)/s', $jsExt));
 chequear('y los totales también', true,
-    strpos($jsExt, "'verVencidasProvExt'") !== false);
+    (bool) preg_match('/ComexFechas\.visibles\([^;]*\x27verVencidasProvExt\x27,'
+        . '\s*\x27verPagadosProvExt\x27\s*\)/s', $jsExt));
 
 seccion('la fila lleva el dato, no sólo la clase');
 
@@ -592,17 +757,25 @@ chequear('data-vencida viaja en el <tr>', true,
 chequear('y el filtro compartido lo mira', true,
     strpos($compartido, "getAttribute('data-vencida')") !== false);
 
+seccion('las dos pestanas tienen el interruptor, y se comportan igual');
+
+chequear('Crono Nacionalizacion tambien lo declara', true,
+    strpos($htmlNac, 'id="verVencidasCronoNac"') !== false);
+chequear('y arranca apagado', false,
+    (bool) preg_match('/id="verVencidasCronoNac"[^>]*\schecked/', $htmlNac));
+chequear('con su contador al lado', true,
+    strpos($htmlNac, 'id="estadoVencidasCronoNac"') !== false);
+chequear('su filtrado lo pasa', true,
+    strpos($jsNac, "'verVencidasCronoNac'") !== false);
+chequear('y tambien marca la fila', true,
+    strpos($jsNac, 'data-vencida="1"') !== false);
+
 seccion('sin interruptor en la pantalla se ven todas');
 
-/* Es el caso de Crono Nacionalizacion, y la guarda importa: si verVencidas()
-   devolviera false por defecto, esa pestaña abriría escondiendo 24 filas sin
-   ningún control que las traiga de vuelta. */
-chequear('Crono Nacionalizacion no declara el interruptor', false,
-    strpos($htmlNac, 'form-switch') !== false);
-chequear('y su filtrado no lo pasa', false,
-    strpos($jsNac, 'verVencidas') !== false);
-
-// La guarda, leída del código compartido: sin id, devuelve true.
+/* La guarda importa aunque hoy las dos pestañas declaren el interruptor: si
+   verVencidas() devolviera false por defecto, una pestaña nueva que dibujara
+   filas con data-vencida abriría escondiéndolas sin ningún control que las
+   traiga de vuelta, y nada lo diría. */
 chequear('verVencidas() sin interruptor devuelve true', true,
     (bool) preg_match('/return chk \? !!chk\.checked : true;/', $compartido));
 

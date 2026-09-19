@@ -96,6 +96,12 @@
             verVencidas.addEventListener('change', filtrarTabla);
         }
 
+        var verPagados = document.getElementById('verPagadosProvExt');
+
+        if (verPagados) {
+            verPagados.addEventListener('change', filtrarTabla);
+        }
+
         // El botón de Exportar ya no se engancha acá: lo toma
         // Js/tabla-export.js por su data-exportar, que es como funciona el
         // resto del módulo. Y así el export respeta el buscador, porque
@@ -345,8 +351,15 @@ function generarFilasDatos() {
         // data-vencida es lo que mira el interruptor "Ver vencidas". Va en la
         // fila y no se deduce de la clase: la clase es presentación y podría
         // cambiar; el atributo es el dato.
+        var clases = [];
+
+        if (item.VENCIDA) { clases.push('fila-vencida'); }
+        if (item.PAGADO) { clases.push('fila-pagada'); }
+
         html += '<tr data-buscar="' + escaparAttrProv(textoBuscable(item)) + '"'
-            + (item.VENCIDA ? ' data-vencida="1" class="fila-vencida"' : '') + '>';
+            + (item.VENCIDA ? ' data-vencida="1"' : '')
+            + (item.PAGADO ? ' data-pagado="1"' : '')
+            + (clases.length ? (' class="' + clases.join(' ') + '"') : '') + '>';
 
         // Columnas fijas
         // Recortado con puntos suspensivos (.col-texto); el nombre completo va
@@ -382,6 +395,14 @@ function generarFilasDatos() {
         // Con qué dólar se valuó la fila, y el importe que sale de eso.
         html += celdaCotizacion(item);
         html += celdaImporteArs(item);
+
+        // El tilde de "ya se pagó". Lo dibuja Js/Comex-fechas.js, compartido
+        // con la otra pestaña: es el mismo gesto sobre el otro pago del mismo
+        // contenedor.
+        html += ComexFechas.celdaPagado(item, 'PAGO', {
+            editable: !!datosProveedores.pagado_editable,
+            alMarcar: 'marcarPagadoProvExt'
+        });
 
         // Los importes por columna ya vienen resueltos: la regla de "día O mes,
         // nunca las dos" la aplicó Horizonte::agrupar() en el backend, una sola
@@ -493,16 +514,54 @@ function celdaImporteArs(item) {
  * contenedor. Es el mismo reparto que Crono Nacionalización y Cobranzas May.
  */
 function filtrarTabla() {
-    ComexFechas.filtrar('busquedaProvExt', 'tableBody', 'verVencidasProvExt');
+    ComexFechas.filtrar('busquedaProvExt', 'tableBody',
+        'verVencidasProvExt', 'verPagadosProvExt');
 
     generarFilaTotales();
     pintarEstadoVencidas();
+    pintarEstadoPagados();
 }
 
-/** Los items que el buscador y el interruptor dejan ver, o null si no hay filtro */
+/** Los items que el buscador y los interruptores dejan ver, o null si no hay filtro */
 function filasVisibles() {
     return ComexFechas.visibles('busquedaProvExt',
-        (datosProveedores && datosProveedores.filas) || [], 'verVencidasProvExt');
+        (datosProveedores && datosProveedores.filas) || [],
+        'verVencidasProvExt', 'verPagadosProvExt');
+}
+
+/**
+ * Cuántas filas esconde el interruptor de pagados, al lado del interruptor.
+ *
+ * SE DICE SIEMPRE, igual que el de vencidas. Acá importa todavía más: un pago
+ * marcado SALIÓ DE LA PROYECCIÓN, así que si además desapareciera de la
+ * pantalla sin decirlo, nada explicaría por qué el tablero cuenta menos.
+ */
+function pintarEstadoPagados() {
+    var el = document.getElementById('estadoPagadosProvExt');
+
+    if (!el) {
+        return;
+    }
+
+    var n = ComexFechas.contarPagadas((datosProveedores && datosProveedores.filas) || []);
+
+    if (n === 0) {
+        el.textContent = 'ninguno marcado';
+        el.title = 'Ningún pago está marcado como hecho: el tablero los proyecta a todos.';
+
+        return;
+    }
+
+    var viendo = ComexFechas.prendido('verPagadosProvExt');
+
+    el.textContent = viendo
+        ? (n === 1 ? 'se ve 1 pagado' : ('se ven los ' + n + ' pagados'))
+        : (n + ' pagado' + (n === 1 ? '' : 's') + ' escondido' + (n === 1 ? '' : 's'));
+
+    el.title = 'Son pagos marcados como ya hechos: salieron de la proyección y la fila del '
+        + 'tablero no los cuenta. ' + (viendo
+            ? 'Destildá el que se haya marcado por error.'
+            : 'Prendé el interruptor para verlos y poder destildarlos.');
 }
 
 /**
@@ -535,7 +594,7 @@ function pintarEstadoVencidas() {
     var viendo = ComexFechas.verVencidas('verVencidasProvExt');
 
     el.textContent = viendo
-        ? ('se ven las ' + n + ' vencidas')
+        ? (n === 1 ? 'se ve 1 vencida' : ('se ven las ' + n + ' vencidas'))
         : (n + ' vencida' + (n === 1 ? '' : 's') + ' escondida' + (n === 1 ? '' : 's'));
 
     /* ESCONDERLAS NO CAMBIA NINGÚN NÚMERO, y eso es lo que hay que poder
@@ -593,7 +652,11 @@ function generarFilaTotales() {
             + 'posteriores al último mes—. Por eso puede no coincidir con el total de las '
             + 'columnas, que sólo cubre el período. La diferencia está en los avisos de arriba.')
         + '">'
-        + formatCurrency(sumaImporteArs(visibles)) + '</td>';
+        + formatCurrency(sumaImporteArs(visibles)) + '</td>'
+        /* La columna del tilde no totaliza nada: contar cuántos están tildados
+           en el pie de una tabla de importes no significaría nada, y el
+           conteo ya está al lado del interruptor. */
+        + '<td></td>';
 
     vistas.columnas().forEach(function(col) {
         var valor = Number(vistas.valor(totales, col)) || 0;
@@ -663,6 +726,19 @@ function texto(id, valor) {
  */
 window.editarFechaPago = function(cell) {
     ComexFechas.editar(cell, cargarDatos);
+};
+
+/**
+ * Marca o desmarca el pago de un contenedor.
+ *
+ * SE RECARGA TODO. El tilde saca la fila de la proyección: cambian su columna
+ * del eje, el total, el contador del interruptor y los avisos. Repintar sólo la
+ * celda dejaría las otras cuatro cosas diciendo lo anterior.
+ *
+ * @param {HTMLElement} chk
+ */
+window.marcarPagadoProvExt = function(chk) {
+    ComexFechas.marcarPagado(chk, cargarDatos);
 };
 
 /**

@@ -105,26 +105,50 @@
                                         </div>
                                     </div>
                                 </div>
-                                <!-- EL INTERRUPTOR, explicado donde se explican
-                                     las marcas: quien abre la ayuda por las
-                                     filas rojas es el mismo que se pregunta por
-                                     qué no las ve. -->
+                                <!-- EL TILDE DE PAGADO. Va acá, entre las
+                                     marcas, porque es lo que resuelve las filas
+                                     vencidas: se marcan y dejan de pedir
+                                     atención. -->
+                                <div class="col-12">
+                                    <div class="d-flex align-items-center gap-2 p-2 border rounded">
+                                        <input type="checkbox" class="form-check-input" checked disabled>
+                                        <div>
+                                            <strong>Pagado</strong>
+                                            <br><small class="text-muted">
+                                                Tildá cuando el pago <strong>ya se hizo</strong>:
+                                                sale de la proyección y la fila del tablero deja
+                                                de contarlo. El importe no se pierde y se
+                                                destilda con el mismo clic si fue un error. Queda
+                                                registrado quién lo marcó y cuándo.
+                                                <strong>Son dos tildes por contenedor</strong> —el
+                                                pago al proveedor del exterior y el de
+                                                nacionalización— y marcar uno no dice nada del
+                                                otro.
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- LOS INTERRUPTORES, explicados donde se
+                                     explican las marcas: quien abre la ayuda por
+                                     las filas rojas es el mismo que se pregunta
+                                     por qué no las ve. -->
                                 <div class="col-12">
                                     <div class="d-flex align-items-center gap-2 p-2 border rounded">
                                         <div class="form-check form-switch m-0">
                                             <input class="form-check-input" type="checkbox" disabled>
                                         </div>
                                         <div>
-                                            <strong>Ver vencidas</strong>
+                                            <strong>Ver vencidas · Ver pagados</strong>
                                             <br><small class="text-muted">
-                                                En <em>Proveedores Exterior</em> las vencidas
+                                                Las vencidas y las pagadas
                                                 <strong>no se ven al abrir</strong>: al cashflow
-                                                entra lo que se paga de hoy en adelante, así que
-                                                un pago vencido <strong>no suma en ninguna
-                                                columna</strong>. El interruptor las trae de
-                                                vuelta para poder corregirles la fecha, y al lado
-                                                dice siempre cuántas esconde. Esconderlas no
-                                                cambia ningún total.
+                                                entra lo que falta mover de hoy en adelante, así
+                                                que ninguna de las dos <strong>suma en ninguna
+                                                columna</strong>. Los interruptores las traen de
+                                                vuelta —para corregir una fecha o destildar lo
+                                                que se marcó por error— y al lado de cada uno
+                                                dice siempre cuántas filas esconde. Esconderlas
+                                                no cambia ningún total.
                                             </small>
                                         </div>
                                     </div>
