@@ -42,9 +42,21 @@
                     <div class="tab-pane fade show active" id="content-edicion" role="tabpanel">
                         <h6 class="mb-3"><i class="fas fa-pen text-primary me-2"></i>Cómo Editar Fechas</h6>
                         
-                        <div class="alert alert-info mb-3">
-                            <i class="fas fa-lightbulb me-2"></i>
-                            <strong>Importante:</strong> Las fechas editadas se guardan separadamente y no modifican los datos originales del sistema.
+                        <!-- ESTE AVISO DECÍA LO CONTRARIO. Hasta
+                             feature/comex-fecha-maestra las fechas editadas
+                             vivían sólo en una tabla del cashflow y el texto
+                             prometía que "no modifican los datos originales del
+                             sistema". Ahora se escriben sobre el maestro de
+                             Comercio Exterior, y quien edita tiene que saberlo
+                             ANTES de editar: una ayuda que promete que no pasa
+                             nada es peor que no tener ayuda. Ver
+                             README-comex.md. -->
+                        <div class="alert alert-warning mb-3">
+                            <i class="fas fa-triangle-exclamation me-2"></i>
+                            <strong>La fecha que edite acá es la del sistema de Comercio Exterior.</strong>
+                            Se guarda en el maestro de importaciones, así que el cambio lo ve
+                            también esa aplicación. No es una copia del cashflow: hay una sola
+                            fecha. Queda registrado quién la cambió, cuándo y qué decía antes.
                         </div>
 
                         <div class="help-section mb-4">
@@ -65,24 +77,73 @@
                             </ol>
                         </div>
 
+                        <!-- TRES MARCAS, TRES COSAS DISTINTAS. Las dos últimas
+                             son de feature/comex-fecha-maestra: desde que el
+                             listado ya no corta por fecha de embarque, la grilla
+                             trae también los contenedores vencidos y los que no
+                             tienen fecha, y sin marca una fila con las celdas
+                             del período vacías se lee como un contenedor sin
+                             importe. -->
                         <div class="help-section mb-4">
                             <h6 class="fw-bold mb-2">Identificación visual:</h6>
                             <div class="row g-2">
                                 <div class="col-md-6">
                                     <div class="d-flex align-items-center gap-2 p-2 border rounded">
-                                        <div style="background-color: #fff8e1; width: 30px; height: 30px; border-radius: 4px; border-left: 3px solid #ff9800;"></div>
+                                        <span class="badge-fecha-editada">Editada</span>
                                         <div>
-                                            <strong>Fondo Amarillo</strong>
-                                            <br><small class="text-muted">Indica fecha editada</small>
+                                            <strong>La movió alguien desde acá</strong>
+                                            <br><small class="text-muted">Pasá el mouse por encima: dice quién, cuándo y qué decía antes</small>
                                         </div>
                                     </div>
                                 </div>
                                 <div class="col-md-6">
                                     <div class="d-flex align-items-center gap-2 p-2 border rounded">
-                                        <span class="badge-fecha-editada">Editada</span>
+                                        <span class="badge-fecha-vencida">Vencida</span>
                                         <div>
-                                            <strong>Badge Naranja</strong>
-                                            <br><small class="text-muted">Marcador adicional</small>
+                                            <strong>La fecha ya pasó</strong>
+                                            <br><small class="text-muted">Ese importe no entra en ninguna columna del período. Cargale la fecha nueva y entra solo</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- EL INTERRUPTOR, explicado donde se explican
+                                     las marcas: quien abre la ayuda por las
+                                     filas rojas es el mismo que se pregunta por
+                                     qué no las ve. -->
+                                <div class="col-12">
+                                    <div class="d-flex align-items-center gap-2 p-2 border rounded">
+                                        <div class="form-check form-switch m-0">
+                                            <input class="form-check-input" type="checkbox" disabled>
+                                        </div>
+                                        <div>
+                                            <strong>Ver vencidas</strong>
+                                            <br><small class="text-muted">
+                                                En <em>Proveedores Exterior</em> las vencidas
+                                                <strong>no se ven al abrir</strong>: al cashflow
+                                                entra lo que se paga de hoy en adelante, así que
+                                                un pago vencido <strong>no suma en ninguna
+                                                columna</strong>. El interruptor las trae de
+                                                vuelta para poder corregirles la fecha, y al lado
+                                                dice siempre cuántas esconde. Esconderlas no
+                                                cambia ningún total.
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="d-flex align-items-center gap-2 p-2 border rounded">
+                                        <span class="badge-fecha-sin">Sin fecha</span>
+                                        <div>
+                                            <strong>No hay fecha cargada</strong>
+                                            <br><small class="text-muted">Sin fecha no hay dónde ubicar el importe en el tiempo</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="d-flex align-items-center gap-2 p-2 border rounded">
+                                        <div style="background-color: #fff5f5; width: 30px; height: 30px; border-radius: 4px; border-left: 3px solid #d64545;"></div>
+                                        <div>
+                                            <strong>Fila rosada</strong>
+                                            <br><small class="text-muted">Toda la fila, para encontrarla sin volver hasta la columna de la fecha</small>
                                         </div>
                                     </div>
                                 </div>
@@ -92,10 +153,12 @@
                         <div class="help-section">
                             <h6 class="fw-bold mb-2">Notas importantes:</h6>
                             <ul class="mb-0">
-                                <li>Las fechas que usted edite se guardan automáticamente</li>
-                                <li>Los datos originales del sistema no se modifican</li>
+                                <li><strong>La fecha se guarda en el maestro de Comercio Exterior</strong>, así que el cambio lo ve también esa aplicación</li>
+                                <li>Queda registrado quién la cambió, cuándo y qué decía antes</li>
+                                <li>Desde acá <strong>no se puede vaciar</strong> una fecha: si hay que borrarla, se hace desde Comercio Exterior</li>
                                 <li>El cronograma se actualiza automáticamente al guardar</li>
-                                <li>Puede cambiar una fecha cuantas veces necesite</li>
+                                <li>Puede cambiar una fecha cuantas veces necesite: cada cambio queda en el historial</li>
+                                <li>En Proveedores Exterior, si el pago pasa a <strong>otro mes</strong> y tenía una cotización cargada a mano, esa cotización se descarta y la fila vuelve a la curva de dólar futuro. La pantalla lo avisa</li>
                             </ul>
                         </div>
                     </div>

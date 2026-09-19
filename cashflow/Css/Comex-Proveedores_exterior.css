@@ -392,3 +392,95 @@
 .tab-proveedores_exterior .importe-ars {
     font-weight: 600;
 }
+
+/* ============================================================================
+   LOS VENCIDOS SE VEN
+   Desde feature/comex-fecha-maestra la consulta ya no corta por fecha de
+   embarque, asi que la grilla trae tambien los contenedores ya embarcados.
+   Ver Js/Comex-fechas.js y el encabezado de Class/Comex.php.
+   ============================================================================ */
+
+/* Un pago con la fecha vencida NO ENTRA en ninguna columna del eje, asi que su
+   fila tiene todas las celdas del periodo vacias. Sin la marca eso se lee como
+   un contenedor sin importe; con la marca se lee como lo que es, una fecha para
+   corregir.
+
+   LA FILA ENTERA Y NO SOLO LA CELDA: con veintiocho columnas de dias, el ojo
+   esta en la punta derecha de la tabla y la celda de la fecha quedo a un scroll
+   de distancia. Es el mismo criterio con el que el tablero marca la columna
+   entera y no solo el Saldo Final. */
+.tab-proveedores_exterior .fila-vencida > td {
+    background-color: #fff5f5;
+}
+
+/* UNA FILA PUEDE ESTAR VENCIDA Y EDITADA A LA VEZ, y en la celda de la fecha
+   gana vencida. La marca de editada dice de donde salio el valor; la de vencida
+   dice que ese valor deja el importe afuera del eje, que es lo que hay que
+   hacer algo al respecto. El badge naranja sigue ahi, al lado del rojo, asi que
+   no se pierde ninguna de las dos cosas.
+
+   Va con !important porque .fecha-editada lo lleva desde antes de esta rama y
+   si no, el amarillo le gana por orden de aparicion. */
+.tab-proveedores_exterior .comex-fecha-cell.fecha-vencida {
+    background-color: #ffe9e9 !important;
+    border-left: 3px solid #d64545 !important;
+}
+
+/* El rojo va SUAVE y el badge lleva el peso: una fila roja fuerte se lee como
+   un error del sistema, y esto es un dato que esta esperando una correccion.
+
+   LOS DOS BADGES VAN SIN EL PREFIJO DE LA PESTANA, igual que
+   .badge-fecha-editada desde antes de esta rama: el modal de ayuda los muestra
+   en su leyenda y vive FUERA del div .tab-proveedores_exterior. Con el prefijo,
+   la leyenda mostraria tres rectangulos sin estilo explicando marcas de
+   colores. */
+.badge-fecha-vencida {
+    display: inline-block;
+    padding: 3px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    background-color: #d64545;
+    color: #fff;
+    border-radius: 4px;
+    margin-left: 8px;
+}
+
+/* Sin fecha es OTRO problema que vencida -uno se carga, el otro se corrige- y
+   por eso es otra marca y no la misma en gris. Gris y no rojo porque no hay
+   nada que este mal: hay algo que falta. */
+.badge-fecha-sin {
+    display: inline-block;
+    padding: 3px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    background-color: var(--text-muted, #8c93a8);
+    color: #fff;
+    border-radius: 4px;
+    margin-left: 8px;
+}
+
+/* La celda solo invita al clic si de verdad se puede editar: sin la tabla del
+   rastro, guardar falla y el aviso de arriba dice que script falta. Una celda
+   que invita y despues falla es peor que una que no invita. */
+.tab-proveedores_exterior .comex-fecha-cell {
+    cursor: default;
+}
+
+.tab-proveedores_exterior .comex-fecha-cell.fecha-editable {
+    cursor: pointer;
+}
+
+.tab-proveedores_exterior .comex-fecha-input {
+    width: 100%;
+    padding: 4px 8px;
+    border: 1px solid var(--primary-color);
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: var(--font-family);
+}
+
+.tab-proveedores_exterior .comex-fecha-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1);
+}

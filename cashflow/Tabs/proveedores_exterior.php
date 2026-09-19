@@ -61,10 +61,61 @@
 
     <!-- Header Section con Botones -->
     <div class="card mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <div>
-                <h5 class="mb-0">Proveedores Exterior</h5>
-                <small class="text-muted">Importaciones pendientes ordenadas por fecha de pago</small>
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-3 flex-wrap">
+                <div>
+                    <h5 class="mb-0">Proveedores Exterior</h5>
+                    <small class="text-muted">
+                        Importaciones pendientes ordenadas por fecha de pago
+                        <i class="fas fa-info-circle ms-1"
+                           title="Click en la fecha estimada de pago para editarla. Se guarda en el maestro de Comercio Exterior, así que la ve también esa aplicación. Las vencidas están marcadas: su importe no entra en ninguna columna hasta que se les cargue una fecha nueva."></i>
+                    </small>
+                </div>
+                <!-- Mismo marcado que el buscador de Crono Nacionalización, y
+                     el mismo comportamiento: las dos pestañas son la misma fila
+                     mirada desde los dos lados del circuito, y un control que se
+                     ve distinto en cada pantalla se lee como otro control. Busca
+                     SÓLO Proveedor, Contenedor y Orden de Compra: son los tres
+                     campos por los que se busca un contenedor, y mirar toda la
+                     fila haría que un importe o una fecha den falsos positivos.
+                     Ver Js/Comex-fechas.js. -->
+                <div class="search-box-container">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-light border-end-0">
+                            <i class="fas fa-search text-muted"></i>
+                        </span>
+                        <input type="text" id="busquedaProvExt"
+                               class="form-control border-start-0 ps-0"
+                               placeholder="Buscar proveedor, contenedor u orden de compra…"
+                               style="min-width: 260px;">
+                    </div>
+                </div>
+
+                <!-- LAS VENCIDAS NO SE VEN POR DEFECTO. Una fecha de pago
+                     vencida es un dato a corregir, y hasta que alguien la
+                     corrija ese contenedor no participa del período que esta
+                     pantalla proyecta: sus celdas del eje están vacías. En el
+                     trabajo normal —mirar qué se paga de acá en adelante— son
+                     ruido, y acá son muchas: al 19/09/2026, 27 de 76 filas.
+
+                     Pero tienen que poder mirarse, porque son justamente las
+                     que hay que arreglar. Por eso es un interruptor y no un
+                     filtro fijo, y por eso CUÁNTO ESCONDE SE DICE AL LADO,
+                     siempre: una tabla que esconde filas sin decirlo se lee
+                     como que esos contenedores no existen. Mismo criterio que
+                     "Ver excluidos" de Echeqs.
+
+                     Sin `checked`: apagado es el estado por defecto, y que el
+                     HTML lo diga por omisión evita que alguien lo cambie sin
+                     querer moviendo el atributo. -->
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="verVencidasProvExt">
+                    <label class="form-check-label small text-muted" for="verVencidasProvExt">
+                        Ver vencidas
+                        <span class="text-muted fst-italic ms-1"
+                              id="estadoVencidasProvExt"></span>
+                    </label>
+                </div>
             </div>
             <div class="d-flex gap-2">
                 <!-- Los tres botones los dibuja Js/eje-vistas.js a partir del
@@ -76,7 +127,14 @@
                 <button id="btnRefresh" class="btn btn-sm btn-outline-primary">
                     <i class="fas fa-sync-alt me-1"></i> Actualizar
                 </button>
-                <button id="btnExport" class="btn btn-sm btn-success">
+                <!-- Lo engancha Js/tabla-export.js por el data-exportar, igual
+                     que el resto del módulo: antes era un #btnExport con su
+                     listener y una función envoltorio en el JS de la pestaña,
+                     que no hacían nada que el atributo no haga. Y saca del clon
+                     las filas que el buscador escondió, así que Exportar baja
+                     exactamente lo que se está viendo. -->
+                <button class="btn btn-sm btn-success" data-exportar="tablaProveedoresExterior"
+                        data-exportar-nombre="Proveedores_Exterior">
                     <i class="fas fa-file-excel me-1"></i> Exportar
                 </button>
             </div>
@@ -160,4 +218,7 @@
 
 <?php include __DIR__ . '/../Components/help_modal_comex.php'; ?>
 
+<!-- La celda de fecha editable y el buscador, compartidos por las dos
+     pestanas de Comercio Exterior. Ver su encabezado. -->
+<script src="Js/Comex-fechas.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Comex-Proveedores_exterior.js?v=<?php echo time(); ?>"></script>
