@@ -468,6 +468,8 @@ PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA = PAGOS_TODO
 - **Sigue en `PAGOS_TODO` y en `PAGOS_EXCLUIDOS`.** El importe no desaparece: queda auditable, y el proveedor **avisa cuánto es y con qué motivos** en cada carga del tablero.
 - **Un proveedor excluido por rubro no se mueve.** Sacarlo de `PAGOS` sigue siendo apuntar la fila a `PAGOS_CRONO_OPERATIVOS` desde Parámetros; este cambio no toma esa decisión por nadie.
 
+> **El criterio se reusó en Echeqs.** *Cheques en Cartera* excluye con el mismo patrón —serie propia, motivo obligatorio, acción masiva, sin bajas físicas— y ahí el corte `A_COBRAR + A_COBRAR_EXCLUIDOS = A_COBRAR_TODO` nace con esa etapa, porque `ECHEQS` tenía una sola serie y era el universo entero. Ver *Excluir un cheque que no se va a poder cobrar* en `README-cashflow.md`. Lo que cambia allá es que la exclusión guarda **historial**: el cheque puede entrar y salir varias veces, y cada decisión queda con su motivo, su autor y sus fechas de alta y de baja.
+
 #### No se ven por defecto, y el cartel dice cuántas son
 
 Ya se decidió que no van al cashflow, así que en el trabajo normal —revisar qué hay que pagar— son ruido. El interruptor **Ver excluidas** viene **apagado**, al revés que el de al lado.

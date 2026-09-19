@@ -42,6 +42,7 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 | 8 | `sql/cashflow_estructura_ingresos_egresos.sql` | Cuelga Disponibilidades y Ventas de **Ingresos**, y los tres bloques de costos de **Egresos**; agrega *Total Ingresos* y *Total Egresos*; da de baja **Ajustes** entera | El cuadro sigue plano: cinco subtotales y ninguno contesta cuánto entra ni cuánto sale en total |
 | 9 | `sql/cashflow_cobertura.sql` | Amplía el `CHECK` de `TIPO` con `STOCK_COBERTURA` y `USO_COBERTURA`, crea `RO_T_CASHFLOW_COBERTURA_APLIC` y la sección **Cobertura**, y baja `SALDO_FINAL` a su final | No hay sección Cobertura: el saldo de inversiones sigue entrando al flujo como ingreso y **no se puede aplicar en ninguna fecha**. Si además se corre a medias, el editor de estructura deja elegir un tipo que la base rechaza |
 | 15 | `sql/cashflow_estructura_neteo_prechequeado.sql` | Agrega la fila **Neteo cheques adelantados** a la sección Ventas, con `ORDEN = 25` (entre Franquicias y Mayoristas), apuntada a la serie `VENTAS → NETEO_PRECHEQUEADO` | **El tablero muestra la cobranza de Ventas en bruto**: las series volvieron a bruto y si la fila no existe, el neteo no se resta en ningún lado. El cuadro no falla ni avisa —cada serie es correcta por separado—, así que este es el único script del grupo cuya ausencia es *silenciosa* |
+| 17 | `sql/cashflow_echeqs_excluir.sql` | Crea `RO_T_CASHFLOW_ECHEQ_EXCLUIDO`: qué cheques de **cartera** no se van a poder cobrar, con su motivo, quién, cuándo y el historial completo | **No se puede excluir ningún cheque**. La pestaña se lee igual —el listado no depende de la tabla—, los dos botones de la barra quedan apagados diciendo qué script falta, y la fila del tablero sigue trayendo toda la cartera, que es lo que traía antes |
 
 ### Scripts modificados — hay que volver a correrlos
 
@@ -63,6 +64,7 @@ Que ninguna fila del tablero duplique importes:
 - `DOLARES_COMITENTE` **una sola vez**, activa, con serie `INGRESO`.
 - Ningún par (proveedor, serie) repetido entre filas activas. Eso también lo verifica el validador, y *Parámetros → Cashflow* lo muestra arriba del editor.
 - `NETEO_PRECHEQUEADO` **una sola vez**, activa, con `TIPO = 'INGRESO'` y `COMPUTA = 1`. Y las filas de cobranza de Ventas —las cuatro por canal, o la total— **activas al lado de ella**: la fila del neteo corrige a esas filas, no las reemplaza.
+- `ECHEQS → A_COBRAR` **activa y sola**. `A_COBRAR` ya no trae toda la cartera: trae la cobrable, sin lo excluido a mano. El universo es `A_COBRAR_TODO` y las dos mitades son `A_COBRAR` + `A_COBRAR_EXCLUIDOS`; activar el total al lado de cualquiera de las dos cuenta dos veces el mismo cheque, y eso lo rechaza el validador. **No hay que repuntar nada**: la fila ya está configurada contra `A_COBRAR`, y mientras no haya ningún cheque excluido ese código vale lo mismo que antes.
 
 ---
 
@@ -87,6 +89,7 @@ En este orden, contra `central`:
 -- 14. sql/cashflow_cobertura.sql  (seccion Cobertura: stock de inversiones y su aplicacion)
 -- 15. sql/cashflow_estructura_neteo_prechequeado.sql  (fila del neteo de cheques adelantados)
 -- 16. sql/cashflow_comex_cotiz_edit.sql  (Comex: override de cotizacion por contenedor)
+-- 17. sql/cashflow_echeqs_excluir.sql  (Echeqs: excluir de cartera lo que no se va a cobrar)
 ```
 
 **El 13 y el 14 van en ese orden y al final**, porque el 14 mueve `SALDO_FINAL` al final de la sección que crea y da de baja la fila del saldo de inversiones que crearon los anteriores. Correr el 14 sin el 13 no rompe nada, pero deja el cuadro a medio reagrupar.
@@ -911,6 +914,47 @@ Hasta ahora ese neteo se restaba **adentro** de las series de cobranza del prove
 
 La crea `sql/cashflow_estructura_neteo_prechequeado.sql`. Ver `README-ventas.md`.
 
+### Excluir un cheque que no se va a poder cobrar
+
+La fila *Echeqs en cartera* trae todo lo que en Tango está en estado `C` con fecha de hoy en adelante. Un cheque que ya se sabe que no entra —el cliente avisó que no lo cubre, quedó judicializado, está en gestión de cambio— sumaba igual al disponible y no había dónde decir que no.
+
+Ahora se lo tilda en *Echeqs → Cheques en Cartera*, con un motivo. **Aplica sólo a cartera: el pre-chequeado no se toca.**
+
+**El importe no desaparece: cambia de serie.** Es el mismo criterio que la exclusión de facturas de Proveedores Locales —ver el encabezado de `sql/cashflow_prov_locales_excluir_factura.sql`—, y acá el corte nace con esta etapa, porque `ECHEQS` tenía una sola serie y era el universo entero:
+
+```
+A_COBRAR + A_COBRAR_EXCLUIDOS = A_COBRAR_TODO
+```
+
+| Serie | Qué trae |
+| --- | --- |
+| `A_COBRAR` | La cartera **cobrable**. Es la que usa la fila del tablero |
+| `A_COBRAR_EXCLUIDOS` | Sólo lo excluido a mano, uno por uno |
+| `A_COBRAR_TODO` | El universo. Es lo que `A_COBRAR` significaba hasta ahora |
+
+> **`A_COBRAR` cambió de significado y no de código, a propósito.** Es el que la fila del tablero ya tenía configurado, así que el circuito entró sin repuntar ninguna fila ni tocar *Parámetros*. El día que se corre el script no hay nada excluido, con lo cual **el tablero no se mueve ni un peso**: verificado contra la base, son 390 cheques por $2.056.009.561,46 y las tres series dan ese número. Lo que el tilde cambia es de qué serie sale cada importe, nunca cuánta plata hay.
+
+**Los dos tildes de la pestaña Echeqs no son el mismo**, y no se cruzan:
+
+| Sub-pestaña | Tilde | Qué pregunta | Dónde vive |
+| --- | --- | --- | --- |
+| Cheques en Cartera | **Excluir** | *esta plata, ¿va a entrar?* | `RO_T_CASHFLOW_ECHEQ_EXCLUIDO` |
+| Venta Cobrada Anticipada | **Marcar** | *esta venta, ¿ya se cobró?* | `RO_T_CASHFLOW_ECHEQ_PRECHEQ` |
+
+Un mismo cheque puede tener los dos y ninguno implica al otro: que no vaya a entrar no dice nada sobre si la venta que prepagó hay que netearla. Por eso no hay ningún join entre las dos tablas y son dos endpoints distintos.
+
+Lo demás sigue el patrón de Proveedores Locales, por los mismos motivos:
+
+- **El motivo es obligatorio**, y lo valida el back (`Echeqs::validarMotivoExclusion()`), no la pantalla: el endpoint es alcanzable sin pasar por la grilla.
+- **Uno solo para todo el lote.** Excluir los doce cheques de un cliente que entró en concurso es *una* decisión, y doce motivos distintos son doce oportunidades de que digan cosas distintas.
+- **Se eligen con checks y se confirman juntos**, en una transacción. Es el gesto del tildado masivo de la otra sub-pestaña, con una diferencia: acá el check de la fila **selecciona** y no actúa. Sacar plata del disponible no puede dispararse con un clic suelto.
+- **Los excluidos se esconden por defecto**, con un interruptor *Ver excluidos* que se puede prender. Cuánto esconde se dice arriba de la tabla **siempre**, y `EcheqsProvider` deja el mismo aviso en el tablero, con los motivos: una exclusión puesta en marzo que nadie recuerda es justamente lo que eso evita.
+- **Las tres tarjetas muestran el neto** —sin lo excluido—, que es lo mismo que suma la fila del tablero. Los dos totales los calcula PHP (`Echeqs::totalesNetos()`): el front no resta nada.
+
+**No hay bajas físicas, y el historial es el punto.** Volver a incluir un cheque marca `VIGENTE = 0` y sella `FECHA_BAJA`; excluirlo de nuevo inserta una fila nueva. Con un `UPDATE`, un dedazo corregido a los cinco minutos y una decisión que estuvo vigente tres semanas son indistinguibles después del hecho, y la segunda es la que explica por qué el disponible proyectado de la semana pasada era otro. Volver a excluir algo ya excluido **no es un error**: es cómo se corrige un motivo mal escrito, y quedan los dos.
+
+La crea `sql/cashflow_echeqs_excluir.sql`.
+
 ---
 
 ## Pruebas
@@ -947,6 +991,7 @@ sql/cashflow_estructura_ingresos_egresos.sql  Los cuelga de Ingresos y Egresos; 
 sql/cashflow_cobertura.sql                  Sección Cobertura: tipos, tabla y filas
 sql/cashflow_saldos.sql                     Tablas del modulo Saldos (README-saldos.md)
 sql/echeqs_prechequeado.sql                 Maestro de pre-chequeado + vista del neteo
+sql/cashflow_echeqs_excluir.sql             Exclusion de cheques de cartera, con historial
 cashflow/Class/Horizonte.php                Eje temporal, compartido con Ventas
 cashflow/Class/EjeVista.php                 Las tres vistas: columnas, totales y periodo
 cashflow/Js/eje-vistas.js                   Su contraparte en el front (cargado en index.php)
@@ -965,8 +1010,8 @@ cashflow/Class/Providers/ComexProvider.php
 cashflow/Class/Providers/IngresosProvider.php
 cashflow/Class/Providers/SaldosProvider.php   Disponible inicial y caja de locales
 cashflow/Class/Echeqs.php                   Cheques en cartera y venta cobrada anticipada
-cashflow/Class/Providers/EcheqsProvider.php   Solo la serie de cartera: ver su encabezado
-cashflow/Controller/EcheqsController.php    Listados y marcado de cheques
+cashflow/Class/Providers/EcheqsProvider.php   Las tres series de cartera: ver su encabezado
+cashflow/Controller/EcheqsController.php    Listados, marcado y exclusion de cheques
 cashflow/Tabs/echeqs.php                    Las dos sub-pestanas
 cashflow/Tabs/parametros_prechequeado.php   Maestro de clientes pre-chequeados
 cashflow/Controller/CashflowController.php            getTablero
@@ -996,6 +1041,10 @@ Modificados: `Class/Ventas.php` (delega el eje y acepta uno inyectado) · `Class
 
 De la rama `feature/cashflow-estructura-inversiones`: `Class/Cashflow.php` (el saldo mostrado entra en `FLUJO_NETO` y en el indicador de Ingresos; el stock de cobertura sale de las columnas; la cobertura va aparte en el KPI) · `Class/CashflowEstructura.php` (los dos tipos nuevos) · `Class/CashflowRegistry.php` (`COBERTURA`; serie `STOCK` en `SALDO_INVERSIONES`) · `Class/Cotizacion.php` (`ultimaHasta()` y la vista diaria) · `Class/OtrosIngresos.php` (`valuarDolares()`, la cuenta única) · `Providers/OtrosIngresosProvider.php` · `Controller/OtrosIngresosController.php` · `Js/Cashflow.js` y `Css/Cashflow.css` (celda editable, stock en guiones, columnas negativas) · `Js/Parametros-Estructura.js` (rótulos de los tipos nuevos) · `Tabs/cashflow.php`, `Tabs/dolares_comitente.php`, `Tabs/saldo_inversiones.php` · `Js/Ingresos-Cobranzas_may.js` y su CSS (editor de fecha manual) · `sql/cashflow_saldo_inversiones.sql` y `sql/cashflow_cobranzas_fecha_manual.sql` (encabezados reescritos: decían lo contrario de lo que hace el código).
 
+De la rama `feature/echeqs-excluir`: `sql/cashflow_echeqs_excluir.sql` (nuevo) · `Class/Echeqs.php` (la exclusión entera, y el corte por excluido en las dos consultas de cartera) · `Providers/EcheqsProvider.php` (tres series en vez de una; `seriesDeItem()` y `repartir()` estáticas y puras, para poder verificar el corte sin depender de que haya algo excluido) · `Class/CashflowRegistry.php` (las tres series y su `componentes`) · `Controller/EcheqsController.php` (`excluirCheques`, `getHistorialExclusion`, y los totales netos en el payload) · `Tabs/echeqs.php`, `Js/Ingresos-Echeqs.js`, `Css/Ingresos-Echeqs.css` (el interruptor, la barra de selección y el diálogo del motivo) · `tests/test_echeqs.php`.
+
+> En esa rama salió además un **bug que ya estaba en `develop`**: `Echeqs::marcarCheques()` armaba la lista de ids con `array_values()` sobre un mapa **indexado por id**, así que lo que viajaba a la consulta era una lista de `true` —que SQL Server convierte a `1`— y las veinte marcas terminaban todas sobre el cheque `1`. Nunca se ejecutó: `RO_T_CASHFLOW_ECHEQ_PRECHEQ` está vacía, así que no hay ningún dato que reparar. Se corrigió junto con la exclusión porque es la misma función que ésta reusa, y se dejó la nota en las dos.
+
 Eliminado: `Tabs/resumen.php`.
 
 ---
@@ -1010,5 +1059,5 @@ Eliminado: `Tabs/resumen.php`.
 - **`nacionalizacion_2` está en `$validTabs` de `TabController` pero no tiene archivo ni entrada de menú.** Es configuración muerta: nadie puede llegar ahí, y si llegara vería el placeholder.
 - **`VentasController?action=saveMixCobro` puede grabar un mix que Parámetros rechazaría**: no valida el 100%. Es anterior a este trabajo.
 - `pedir()` está duplicado en `Ingresos-Ventas.js` y `Parametros.js`. El código nuevo usa `pedirJson()` de `main.js`; sacar las dos copias viejas es un cambio aparte.
-- **Algunas pestañas de datos todavía usan `alert()`.** `Js/notificaciones.js` está enchufado en toda la pestaña Parámetros, en Cobranzas FR y en Otros Ingresos, y disponible para el resto; Ventas, Saldos, Cob. Electrónicos, Cobranzas May y las dos de Comex siguen con el diálogo del navegador, y Echeqs con un `confirm()` en el tildado masivo. Es el mismo reemplazo, archivo por archivo.
+- **Algunas pestañas de datos todavía usan `alert()`.** `Js/notificaciones.js` está enchufado en toda la pestaña Parámetros, en Cobranzas FR, en Otros Ingresos y —desde la exclusión de cartera— en la sub-pestaña *Cheques en Cartera* de Echeqs; está disponible para el resto. Ventas, Saldos, Cob. Electrónicos, Cobranzas May y las dos de Comex siguen con el diálogo del navegador, y **la otra sub-pestaña de Echeqs sigue con un `confirm()` en el tildado masivo**: quedó así a propósito, porque cambiarla no es parte de la exclusión y mezclarla habría metido en esa etapa un archivo que no tiene nada que ver con ella. Es el mismo reemplazo, archivo por archivo.
 - Sin login: todo se graba con `USUARIO = NULL`. La costura ya está puesta.

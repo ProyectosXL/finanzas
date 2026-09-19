@@ -14,6 +14,16 @@
     está dicho también en la leyenda de la segunda sub-pestaña porque es lo
     primero que alguien va a querer "arreglar".
 
+    CADA UNA TIENE SU TILDE, Y NO SON EL MISMO:
+
+      Cartera       EXCLUIR  "esta plata, ¿va a entrar?"  -> saca el importe de
+                             la fila del tablero y lo manda a su propia serie
+      Prechequeado  MARCAR   "esta venta, ¿ya se cobró?"  -> decide qué se resta
+                             de la cobranza proyectada de Ventas
+
+    Son dos decisiones independientes sobre el mismo cheque y ninguna implica la
+    otra. Ver el encabezado de Class/Echeqs.php.
+
     La segunda se pide recién cuando se abre: depende de un maestro que puede no
     estar cargado, y no tiene por qué demorar la que se abre primero.
 -->
@@ -45,7 +55,13 @@
 
         <!-- Las tres tarjetas miden los tres períodos de las tres vistas, así
              que cada una se corresponde con un botón. El rótulo lo escribe el JS
-             con el período real, que depende del horizonte configurado. -->
+             con el período real, que depende del horizonte configurado.
+
+             MIDEN LO QUE ENTRA AL CASHFLOW, o sea SIN los cheques excluidos:
+             son los mismos números que la fila del tablero. El total con los
+             excluidos adentro diría que esa plata entra, que es justamente lo
+             que el tilde niega. Cuánto se excluyó se dice abajo de cada
+             tarjeta, y lo resta PHP: acá no se calcula nada. -->
         <div class="row g-3 mb-4" id="summarySectionEch" style="display: none;">
             <div class="col-md-6 col-lg-4">
                 <div class="kpi-card">
@@ -93,6 +109,14 @@
             </div>
         </div>
 
+        <!-- LO EXCLUIDO SE DICE AUNQUE NO SE VEA, y sobre todo por eso: los
+             excluidos están escondidos por defecto, así que sin este cartel la
+             única forma de notar que hay plata afuera sería acordarse de
+             prender el interruptor. Mismo criterio que el aviso que deja
+             EcheqsProvider en el tablero. -->
+        <div id="excluidosEch" class="alert alert-secondary py-2 px-3 mb-4"
+             style="display: none;"></div>
+
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div class="d-flex align-items-center gap-3">
@@ -112,6 +136,22 @@
                                    placeholder="Buscar cliente, banco o N° de cheque…"
                                    style="min-width: 260px;">
                         </div>
+                    </div>
+
+                    <!-- LOS EXCLUIDOS NO SE VEN POR DEFECTO. Ya se decidió que
+                         esa plata no va a entrar, así que en el trabajo normal
+                         —mirar qué se va a cobrar— son ruido.
+
+                         Pero tienen que poder mirarse: una exclusión puesta en
+                         marzo que nadie recuerda es justamente lo que este
+                         interruptor evita. Cuánto esconde se dice arriba,
+                         siempre. Mismo criterio que "Ver excluidas" de
+                         Proveedores Locales. -->
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="verExcluidosEch">
+                        <label class="form-check-label small text-muted" for="verExcluidosEch">
+                            Ver excluidos
+                        </label>
                     </div>
                 </div>
                 <div class="d-flex gap-2">
@@ -135,6 +175,32 @@
                 <small class="text-muted" id="periodoEcheqs"></small>
             </div>
 
+            <!-- LA BARRA DE SELECCIÓN. Aparece sólo cuando hay algo elegido:
+                 una barra siempre visible con los botones apagados ocupa lugar
+                 para decir que no se puede hacer nada.
+
+                 Dice CUÁNTOS y CUÁNTO antes de que se apriete nada: excluir es
+                 sacar plata del disponible, y el importe es el dato que hace
+                 que alguien note que seleccionó de más. Es la misma barra de
+                 Proveedores Locales y por el mismo motivo. -->
+            <div id="barraSelEch" class="card-body py-2 border-bottom ech-barra-sel"
+                 style="display: none;">
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                    <span class="fw-semibold" id="selResumenEch"></span>
+                    <div class="d-flex gap-2 ms-auto">
+                        <button class="btn btn-sm btn-outline-danger" id="btnExcluirSelEch">
+                            <i class="fas fa-ban me-1"></i> Excluir del cashflow
+                        </button>
+                        <button class="btn btn-sm btn-outline-success" id="btnIncluirSelEch">
+                            <i class="fas fa-rotate-left me-1"></i> Volver a incluir
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" id="btnLimpiarSelEch">
+                            Limpiar selección
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <div class="card-body p-0">
                 <div class="loading-spinner" id="loadingEch">
                     <div class="spinner"></div>
@@ -148,7 +214,7 @@
                     <table id="tablaEcheqs" class="table table-hover mb-0">
                         <thead>
                             <!--
-                                Cinco columnas fijas y después una por cada
+                                Seis columnas fijas y después una por cada
                                 columna del eje, que dibuja el JS.
 
                                 FECHA DE PAGO = FECHA DEL CHEQUE mientras no
@@ -163,6 +229,25 @@
                                 <th rowspan="2">Banco</th>
                                 <th rowspan="2" class="col-texto">Cliente</th>
                                 <th rowspan="2" class="text-end">Importe</th>
+                                <!-- LA COLUMNA ES DE SELECCIÓN, no de estado, y
+                                     alimenta las dos acciones de la barra.
+                                     Ninguna puede dispararse con un clic suelto
+                                     —sacan plata del disponible—: se eligen los
+                                     cheques y se confirman juntos, viendo
+                                     cuántos son y por cuánto.
+
+                                     Es el gesto del tildado masivo de la otra
+                                     sub-pestaña: el check del encabezado toma
+                                     todo lo visible según el buscador.
+
+                                     Que un cheque ESTÉ excluido se ve en la
+                                     fila —atenuada y con el importe tachado— y
+                                     en la marca de esta misma celda. -->
+                                <th rowspan="2" class="text-center" style="width: 46px;">
+                                    <input type="checkbox" class="form-check-input"
+                                           id="selTodosEch"
+                                           title="Seleccionar todos los cheques que se están viendo. Con el buscador puesto, son los de ese cliente.">
+                                </th>
                                 <th colspan="1" class="table-group-divider" id="ejeHeaderEch">Días</th>
                             </tr>
                             <tr id="ejeSubHeaderEch"></tr>
