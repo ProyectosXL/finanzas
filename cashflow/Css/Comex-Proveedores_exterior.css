@@ -484,3 +484,50 @@
     border-color: var(--primary-color);
     box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1);
 }
+
+/* ============================================================================
+   LO QUE YA SE PAGO
+   Un pago marcado como hecho sale de la proyeccion: la fila del tablero deja de
+   contarlo. Ver sql/cashflow_comex_pagado.sql y Js/Comex-fechas.js.
+   ============================================================================ */
+
+/* ATENUADA Y NO TACHADA. La fila sigue siendo un dato correcto -el contenedor
+   existe y ese importe se pago-, y el tachado se lee como "esto esta mal" o
+   "esto se dio de baja". Lo que hay que comunicar es "esto ya no se espera",
+   que es un segundo plano, no un error.
+
+   Solo se ven con el interruptor prendido: por defecto estan escondidas. */
+.tab-proveedores_exterior .fila-pagada > td {
+    opacity: 0.55;
+}
+
+/* La celda del tilde no se atenua: es el control con el que se destilda, y
+   atenuarlo lo haria parecer deshabilitado justo en la fila donde hay que
+   poder tocarlo. */
+.tab-proveedores_exterior .fila-pagada > td.pagado-cell {
+    opacity: 1;
+}
+
+.tab-proveedores_exterior .pagado-cell {
+    text-align: center;
+}
+
+/* El tilde en verde cuando esta marcado: es el unico color de la fila, que por
+   lo demas esta atenuada, asi que se encuentra de un vistazo. */
+.tab-proveedores_exterior .pagado-si .pagado-chk:checked {
+    background-color: #198754;
+    border-color: #198754;
+}
+
+/* Sin el script corrido la casilla se dibuja deshabilitada, y el aviso de
+   arriba dice que script falta. Una casilla que invita al clic y despues falla
+   al guardar es peor que una que no invita. */
+.tab-proveedores_exterior .pagado-chk:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+}
+
+.tab-proveedores_exterior .pagado-chk {
+    cursor: pointer;
+    margin: 0;
+}

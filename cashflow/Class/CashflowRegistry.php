@@ -122,8 +122,23 @@ class CashflowRegistry {
             'moneda' => 'USD',
             'disponible' => true,
             'tab' => 'proveedores_exterior',
+            /* EL CORTE ES POR "YA SE PAGO", y nace con el tilde de la pestana.
+               Mismo criterio que la exclusion de cheques de cartera: el importe
+               marcado NO DESAPARECE, cambia de serie.
+
+                   PAGOS + PAGOS_PAGADOS = PAGOS_TODO
+
+               PAGOS cambia de significado y NO de codigo, a proposito: es el
+               que la fila del tablero ya tiene configurado, asi que el circuito
+               entra sin repuntar ninguna fila ni tocar Parametros. Mientras no
+               haya nada marcado vale exactamente lo mismo que antes. */
             'series' => [
-                'PAGOS' => 'Pagos a proveedores del exterior'
+                'PAGOS' => 'Pagos pendientes a proveedores del exterior',
+                'PAGOS_PAGADOS' => 'Solo los pagos marcados como ya hechos',
+                'PAGOS_TODO' => 'Pagos al exterior, TODOS: pendientes y ya hechos'
+            ],
+            'componentes' => [
+                'PAGOS_TODO' => ['PAGOS', 'PAGOS_PAGADOS']
             ]
         ],
 
@@ -135,8 +150,15 @@ class CashflowRegistry {
             'moneda' => 'ARS',
             'disponible' => true,
             'tab' => 'crono_nacionalizacion',
+            /* Mismo corte que COMEX_PROV_EXT, sobre el otro pago del mismo
+               contenedor: son plata distinta y se marcan por separado. */
             'series' => [
-                'NACIONALIZACION' => 'Gastos de nacionalizacion'
+                'NACIONALIZACION' => 'Gastos de nacionalizacion pendientes',
+                'NACIONALIZACION_PAGADAS' => 'Solo las nacionalizaciones marcadas como pagadas',
+                'NACIONALIZACION_TODO' => 'Nacionalizaciones, TODAS: pendientes y ya pagadas'
+            ],
+            'componentes' => [
+                'NACIONALIZACION_TODO' => ['NACIONALIZACION', 'NACIONALIZACION_PAGADAS']
             ]
         ],
 

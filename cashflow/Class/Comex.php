@@ -120,6 +120,9 @@ class Comex {
     /** El rastro de que fechas del maestro las movio alguien desde el cashflow */
     const TABLA_HISTORIAL = 'RO_T_CASHFLOW_COMEX_FECHA_EDIT';
 
+    /** Que pagos ya se hicieron, con su historial. Es un dato del cashflow */
+    const TABLA_PAGADO = 'RO_T_CASHFLOW_COMEX_PAGADO';
+
     /** El maestro de la plataforma Comex, donde viven las dos fechas */
     const TABLA_MAESTRO = 'RO_T_IMPORTACIONES_ENCABEZADO';
 
@@ -140,6 +143,9 @@ class Comex {
 
     /** @var bool|null Cache de si existe la tabla del rastro */
     private $historial = null;
+
+    /** @var bool|null Cache de si existe la tabla de pagados */
+    private $pagado = null;
 
     /** @var DolarFuturo|null Se construye una vez: la curva se lee y se cachea adentro */
     private $dolar = null;
@@ -230,6 +236,58 @@ class Comex {
     }
 
     /**
+     * Si ya existe la tabla de pagados, de sql/cashflow_comex_pagado.sql.
+     *
+     * SE PREGUNTA en vez de darla por hecha: sin ella las dos pestanas se leen
+     * exactamente como antes -nadie marco nada, asi que no hay nada que
+     * descontar- y lo unico que no se puede es marcar. Mismo patron que
+     * tieneHistorial() y que tieneCotizEdit().
+     *
+     * @return bool
+     */
+    public function tienePagado() {
+        if ($this->pagado !== null) {
+            return $this->pagado;
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo." . self::TABLA_PAGADO . "', 'U') AS T");
+
+        if ($stmt === false) {
+            throw new Exception('Error al verificar la tabla de pagos marcados');
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->pagado = ($row && $row['T'] !== null);
+
+        return $this->pagado;
+    }
+
+    /**
+     * El aviso de que el tilde de pagado esta apagado, o cadena vacia.
+     *
+     * @return string
+     */
+    public function avisoSinPagado() {
+        if ($this->tienePagado()) {
+            return '';
+        }
+
+        return 'El tilde de «pagado» está apagado: falta la tabla ' . self::TABLA_PAGADO
+            . '. Corré sql/cashflow_comex_pagado.sql contra la base central y la columna se '
+            . 'vuelve marcable sola. Todo lo demás de esta pantalla funciona igual: mientras '
+            . 'tanto no hay ningún pago marcado, así que el tablero proyecta todo lo pendiente.';
+    }
+
+    /**
      * El aviso de que la edicion de fechas esta apagada, o cadena vacia.
      *
      * Uno solo para las dos pestanas: las dos escriben sobre el mismo maestro y
@@ -276,10 +334,13 @@ class Comex {
         $avisos = [];
         $dolar = $this->dolarFuturo();
 
-        $sinHistorial = $this->avisoSinHistorial();
-
-        if ($sinHistorial !== '') {
-            $avisos[] = $sinHistorial;
+        /* Los dos scripts que esta pantalla puede no tener corridos. Se avisan
+           los dos: cada uno apaga una cosa distinta -editar fechas y marcar
+           pagos- y un solo mensaje generico no diria cual falta. */
+        foreach ([$this->avisoSinHistorial(), $this->avisoSinPagado()] as $falta) {
+            if ($falta !== '') {
+                $avisos[] = $falta;
+            }
         }
 
         if (!$dolar->disponible()) {
@@ -354,6 +415,57 @@ class Comex {
                        ON E.ID_MG = A.ID AND E.VIGENTE = 1 AND E.CAMPO = '" . $campo . "'";
     }
 
+    /* ====================================================================
+       LO QUE YA SE PAGO
+
+       Es una afirmacion DEL CASHFLOW sobre su propia proyeccion -"este egreso
+       ya no lo esperamos"- y por eso vive del lado del cashflow y no en el
+       maestro de Comercio Exterior. Ver sql/cashflow_comex_pagado.sql.
+       ==================================================================== */
+
+    /**
+     * Las columnas de la marca de pagado, listas para el SELECT.
+     *
+     * SIN LA TABLA se piden literales con el mismo nombre y PAGADO en cero, que
+     * es exactamente lo que significa: sin el script no hay nada marcado. Asi
+     * el resto del metodo no tiene que preguntar si el DDL corrio. Mismo truco
+     * que rastroSelect().
+     *
+     * @return string
+     */
+    private function pagadoSelect() {
+        if (!$this->tienePagado()) {
+            return "CAST(0 AS BIT)         PAGADO,
+                    CAST(NULL AS DATETIME) PAGADO_FECHA,
+                    CAST(NULL AS VARCHAR(50))  PAGADO_USUARIO,
+                    CAST(NULL AS VARCHAR(200)) PAGADO_OBS";
+        }
+
+        return "CASE WHEN P.ID IS NULL THEN 0 ELSE 1 END PAGADO,
+                P.FECHA_ALTA  PAGADO_FECHA,
+                P.USUARIO     PAGADO_USUARIO,
+                P.OBSERVACION PAGADO_OBS";
+    }
+
+    /**
+     * El JOIN de la marca vigente de un concepto, o cadena vacia si no hay
+     * tabla.
+     *
+     * El concepto sale de self::CAMPOS y no del argumento crudo: es una lista
+     * cerrada del codigo, no entrada del usuario.
+     *
+     * @param string $concepto 'PAGO' o 'NAC'
+     * @return string
+     */
+    private function pagadoJoin($concepto) {
+        if (!$this->tienePagado() || !isset(self::CAMPOS[$concepto])) {
+            return '';
+        }
+
+        return "LEFT JOIN " . self::TABLA_PAGADO . " P
+                       ON P.ID_MG = A.ID AND P.VIGENTE = 1 AND P.CONCEPTO = '" . $concepto . "'";
+    }
+
     /**
      * Le pone a una fila leida su fecha efectiva, si esta vencida y si la marca
      * de editada corresponde al valor que se ve.
@@ -369,6 +481,13 @@ class Comex {
 
         $row[$destino] = $fecha;
         $row['VENCIDA'] = self::estaVencida($fecha, $hoy);
+
+        /* Un BIT de SQL Server llega como '1'/'0' y un literal CAST(0 AS BIT)
+           tambien: se normaliza a booleano acá, una sola vez, porque de este
+           flag dependen el reparto en series, el filtro de la grilla y lo que
+           aporta la fila al eje. Un '0' que sea verdadero en PHP sacaría del
+           tablero todo lo que no está pagado. */
+        $row['PAGADO'] = !empty($row['PAGADO']) && $row['PAGADO'] != '0';
 
         /* La marca de "editada desde el cashflow" describe el valor que se ve,
            no el historial: si la app de Comex movio la fecha despues, el rastro
@@ -431,11 +550,13 @@ class Comex {
                     CASE WHEN A.ETA_CONFIRMADA = 1 THEN 1 ELSE 0 END ETA_CONFIRM,
                     A.FECHA_EST_PAGO,
                     " . $this->rastroSelect('PAGO') . ",
+                    " . $this->pagadoSelect() . ",
                     " . $cotizSql . " AS COTIZ_USD_EDIT
                 FROM " . self::TABLA_MAESTRO . " A
                 LEFT JOIN RO_T_IMPORTACIONES_DETALLE B ON A.ID = B.ID_MG
                 LEFT JOIN " . self::TABLA_EDIT . " D ON A.ID = D.ID_MG
                 " . $this->rastroJoin('PAGO') . "
+                " . $this->pagadoJoin('PAGO') . "
                 WHERE B.ID_MG IS NULL
                 ORDER BY CASE WHEN A.FECHA_EST_PAGO IS NULL THEN 1 ELSE 0 END,
                          A.FECHA_EST_PAGO,
@@ -462,15 +583,16 @@ class Comex {
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $row = self::aTexto($row,
-                ['ETD', 'ETA', 'FECHA_EST_PAGO', 'EDIT_ANTERIOR', 'EDIT_VALOR', 'EDIT_FECHA']);
+                ['ETD', 'ETA', 'FECHA_EST_PAGO', 'EDIT_ANTERIOR', 'EDIT_VALOR', 'EDIT_FECHA',
+                 'PAGADO_FECHA']);
 
             $row = self::conFechaEfectiva($row, 'FECHA_EST_PAGO', 'FECHA_PAGO_EFECTIVA', $hoy);
             $row = self::valuar($row, $curva);
 
-            /* Lo que de verdad entra al cashflow. Va DESPUES de valuar porque
-               sale de IMPORTE_ARS, y aparte de el porque no son lo mismo: uno
-               es cuanto vale el contenedor y el otro cuanto de eso cae en el
-               periodo que se esta proyectando. */
+            /* Los dos importes derivados. Van DESPUES de valuar porque salen de
+               IMPORTE_ARS, y son dos porque el reparto en series necesita las
+               dos reglas por separado: ver aporteAlEje(). */
+            $row['IMPORTE_PROYECTABLE'] = self::importeProyectable($row);
             $row['IMPORTE_EJE'] = self::aporteAlEje($row);
 
             $v[] = $row;
@@ -501,7 +623,7 @@ class Comex {
         foreach ($campos as $c) {
             if (isset($row[$c]) && $row[$c] instanceof DateTime) {
                 $row[$c] = $row[$c]->format(
-                    ($c === 'EDIT_FECHA') ? 'Y-m-d H:i:s' : 'Y-m-d');
+                    in_array($c, ['EDIT_FECHA', 'PAGADO_FECHA'], true) ? 'Y-m-d H:i:s' : 'Y-m-d');
             }
         }
 
@@ -539,7 +661,7 @@ class Comex {
     }
 
     /**
-     * Cuanto aporta una fila de Proveedores Exterior al eje del cashflow.
+     * Cuanto vale una fila PARA PROYECTAR, mirando solo su fecha.
      *
      * UN PAGO CON LA FECHA VENCIDA NO SUMA. Es una regla de negocio, no una
      * consecuencia del eje: al cashflow entra lo que se paga de HOY EN
@@ -572,7 +694,7 @@ class Comex {
      * @param string $campoImporte De donde sale el importe de esa pestana
      * @return float|null
      */
-    public static function aporteAlEje($fila, $campoImporte = 'IMPORTE_ARS') {
+    public static function importeProyectable($fila, $campoImporte = 'IMPORTE_ARS') {
         if (!empty($fila['VENCIDA'])) {
             return 0.0;
         }
@@ -580,6 +702,38 @@ class Comex {
         return (isset($fila[$campoImporte]) && $fila[$campoImporte] !== null)
             ? floatval($fila[$campoImporte])
             : null;
+    }
+
+    /**
+     * Cuanto aporta una fila a LA FILA DEL TABLERO, que proyecta lo que falta
+     * mover.
+     *
+     * Son dos reglas, y estan separadas a proposito porque el reparto en series
+     * necesita las dos por separado:
+     *
+     *   importeProyectable()  0 si la FECHA ya paso
+     *   aporteAlEje()         eso, y ademas 0 si YA SE PAGO
+     *
+     * UN PAGO MARCADO COMO HECHO SALE DEL FLUJO. Es lo que el tilde significa:
+     * ese egreso ya no se espera. Pero el importe NO DESAPARECE DEL MODELO: el
+     * proveedor lo sirve por una serie propia -PAGOS_PAGADOS- y el invariante
+     * PAGOS + PAGOS_PAGADOS = PAGOS_TODO se cumple columna por columna. Es el
+     * mismo criterio de la exclusion de cheques de cartera.
+     *
+     * SI YA ESTABA VENCIDO, marcarlo no mueve ningun numero del tablero: ya
+     * valia cero. Lo que cambia es que la fila sale de la pantalla y deja de
+     * pedir atencion, que es justamente para lo que se marca.
+     *
+     * @param array $fila Fila ya valuada, con VENCIDA y PAGADO resueltos
+     * @param string $campoImporte De donde sale el importe de esa pestana
+     * @return float|null
+     */
+    public static function aporteAlEje($fila, $campoImporte = 'IMPORTE_ARS') {
+        if (!empty($fila['PAGADO'])) {
+            return 0.0;
+        }
+
+        return self::importeProyectable($fila, $campoImporte);
     }
 
     /**
@@ -720,6 +874,51 @@ class Comex {
         }
 
         return $avisos;
+    }
+
+    /**
+     * El aviso por lo que alguien marco como ya pagado.
+     *
+     * SE INFORMA SIEMPRE, aunque el importe ya no este en la fila del tablero
+     * -precisamente por eso-. Una marca puesta en marzo que nadie recuerda es
+     * exactamente lo que este aviso evita, igual que el de cheques excluidos:
+     * sin el, un egreso que el tablero deberia estar proyectando desaparece y
+     * no queda nada en pantalla que lo explique.
+     *
+     * SE MIDE SOBRE EL IMPORTE PROYECTABLE, no sobre lo que vale la fila: lo
+     * que hay que informar es cuanto salio DE LA PROYECCION. Un pago marcado
+     * que ademas estaba vencido ya no sumaba, asi que sacarlo no cambio ningun
+     * numero y contarlo aca infliaria el aviso.
+     *
+     * ESTATICA Y PURA, y la usa el tablero. La pestana no la necesita: ahi el
+     * conteo va al lado del interruptor, con el detalle de lo que esconde.
+     *
+     * @param array $filas Filas con 'PAGADO' resuelto
+     * @param string $campoImporte Campo con el importe a informar
+     * @param string $queEs Como se nombra el pago en el mensaje
+     * @return array Lista de mensajes
+     */
+    public static function avisosPagados($filas, $campoImporte, $queEs) {
+        $marcados = 0;
+        $importe = 0.0;
+
+        foreach (is_array($filas) ? $filas : [] as $f) {
+            if (empty($f['PAGADO'])) {
+                continue;
+            }
+
+            $marcados++;
+            $importe += isset($f[$campoImporte]) ? floatval($f[$campoImporte]) : 0.0;
+        }
+
+        if ($marcados === 0) {
+            return [];
+        }
+
+        return [$marcados . ' contenedor(es) tienen el ' . $queEs . ' marcado como YA HECHO, '
+            . 'así que salieron de la proyección: ' . self::plata($importe) . ' que la fila '
+            . 'del tablero ya no cuenta. El importe no se perdió —sale por su propia serie— y '
+            . 'se destilda desde la pestaña si se marcó por error.'];
     }
 
     /** Un importe en pesos, con el formato del modulo */
@@ -1048,6 +1247,182 @@ class Comex {
     }
 
     /**
+     * Marca -o desmarca- un pago como ya hecho.
+     *
+     * NO ESCRIBE EN EL MAESTRO DE COMERCIO EXTERIOR, y es la diferencia de
+     * fondo con guardarFecha(). Una fecha es el mismo dato para las dos
+     * aplicaciones; esto es una afirmacion DEL CASHFLOW sobre su propia
+     * proyeccion -"este egreso ya no lo esperamos"- y Comex no tiene hoy ese
+     * concepto. Ver sql/cashflow_comex_pagado.sql.
+     *
+     * NO HAY BAJAS FISICAS. Desmarcar marca VIGENTE = 0 y sella FECHA_BAJA;
+     * volver a marcar inserta una fila nueva. Con un UPDATE, un tilde puesto
+     * por error y corregido a los cinco minutos y una decision que estuvo
+     * vigente tres semanas son indistinguibles despues del hecho, y la segunda
+     * es la que explica por que el egreso proyectado del mes pasado era otro.
+     *
+     * LAS DOS ESCRITURAS VAN EN UNA TRANSACCION. Si la baja de la marca
+     * anterior confirmara y el alta fallara, el contenedor quedaria sin marca
+     * vigente y su importe volveria al tablero sin que nadie lo pidiera.
+     *
+     * MARCAR LO YA MARCADO NO HACE NADA, y desmarcar lo no marcado tampoco: son
+     * el mismo gesto repetido, no una correccion, y una fila de historial por
+     * cada clic en el mismo estado convierte el historial en ruido.
+     *
+     * @param string $concepto 'PAGO' o 'NAC'
+     * @param int $idMg ID del contenedor en el maestro
+     * @param bool $pagado Si queda marcado o no
+     * @param mixed $obs Observacion opcional
+     * @param string|null $usuario Quien marca. Todavia no hay login: llega null
+     * @return array ['concepto', 'id_mg', 'pagado', 'sin_cambios']
+     */
+    public function marcarPagado($concepto, $idMg, $pagado, $obs = null, $usuario = null) {
+        if (!$this->tienePagado()) {
+            throw new Exception($this->avisoSinPagado());
+        }
+
+        $concepto = strtoupper(trim((string) $concepto));
+
+        /* LA VALIDACION QUE VALE ES LA DE ACA: el endpoint es alcanzable sin
+           pasar por la grilla, y un concepto que no existe dejaria una marca
+           que ninguna serie descuenta. */
+        if (!isset(self::CAMPOS[$concepto])) {
+            throw new Exception('No se sabe qué pago hay que marcar. Los dos son el del '
+                . 'proveedor del exterior y el de nacionalización.');
+        }
+
+        $idMg = intval($idMg);
+
+        if ($idMg <= 0) {
+            throw new Exception('Falta el contenedor que se quiere marcar.');
+        }
+
+        $pagado = (bool) $pagado;
+
+        $obs = ($obs === null) ? null : trim((string) $obs);
+        $obs = ($obs === '') ? null : mb_substr($obs, 0, 200);
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT ID FROM " . self::TABLA_PAGADO . "
+             WHERE ID_MG = ? AND CONCEPTO = ? AND VIGENTE = 1",
+            [$idMg, $concepto]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSqlEn(self::TABLA_PAGADO,
+                'Error al verificar si el pago ya estaba marcado'));
+        }
+
+        $marcado = (bool) sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $r = [
+            'concepto' => $concepto,
+            'id_mg' => $idMg,
+            'pagado' => $pagado,
+            'sin_cambios' => ($marcado === $pagado)
+        ];
+
+        if ($r['sin_cambios']) {
+            return $r;
+        }
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception('No se pudo abrir la transacción para marcar el pago');
+        }
+
+        try {
+            $this->ejecutar($cid,
+                "UPDATE " . self::TABLA_PAGADO . "
+                 SET VIGENTE = 0, FECHA_BAJA = GETDATE()
+                 WHERE ID_MG = ? AND CONCEPTO = ? AND VIGENTE = 1",
+                [$idMg, $concepto],
+                'Error al dar de baja la marca anterior');
+
+            if ($pagado) {
+                $this->ejecutar($cid,
+                    "INSERT INTO " . self::TABLA_PAGADO . "
+                         (ID_MG, CONCEPTO, OBSERVACION, VIGENTE, USUARIO, FECHA_ALTA)
+                     VALUES (?, ?, ?, 1, ?, GETDATE())",
+                    [$idMg, $concepto, $obs, $usuario],
+                    'Error al marcar el pago');
+            }
+
+            sqlsrv_commit($cid);
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return $r;
+    }
+
+    /**
+     * El historial de marcas de un contenedor, la vigente primero.
+     *
+     * LAS NO VIGENTES SON EL PUNTO, igual que en getHistorialFechas(): son lo
+     * unico que explica por que el egreso proyectado de la semana pasada era
+     * otro.
+     *
+     * @param int $idMg
+     * @param string|null $concepto 'PAGO', 'NAC' o null para los dos
+     * @return array
+     */
+    public function getHistorialPagado($idMg, $concepto = null) {
+        if (!$this->tienePagado()) {
+            return [];
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $concepto = ($concepto === null) ? null : strtoupper(trim((string) $concepto));
+        $params = [intval($idMg)];
+        $filtro = '';
+
+        if ($concepto !== null && isset(self::CAMPOS[$concepto])) {
+            $filtro = ' AND CONCEPTO = ?';
+            $params[] = $concepto;
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT ID, ID_MG, CONCEPTO, OBSERVACION, VIGENTE, USUARIO, FECHA_ALTA, FECHA_BAJA
+             FROM " . self::TABLA_PAGADO . "
+             WHERE ID_MG = ?" . $filtro . "
+             ORDER BY VIGENTE DESC, FECHA_ALTA DESC, ID DESC", $params);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSqlEn(self::TABLA_PAGADO,
+                'Error al leer el historial de pagos marcados'));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            foreach (['FECHA_ALTA', 'FECHA_BAJA'] as $c) {
+                if (isset($row[$c]) && $row[$c] instanceof DateTime) {
+                    $row[$c] = $row[$c]->format('Y-m-d H:i:s');
+                }
+            }
+
+            $v[] = $row;
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $v;
+    }
+
+    /**
      * El historial completo de ediciones de un contenedor, el vigente primero.
      *
      * LAS NO VIGENTES SON EL PUNTO: con un UPDATE, un dedazo corregido a los
@@ -1272,7 +1647,8 @@ class Comex {
                     A.FECHA_ARR ETA,
                     CASE WHEN A.ETA_CONFIRMADA = 1 THEN 1 ELSE 0 END ETA_CONFIRM,
                     A.FECHA_DESP_ADU FECHA_NAC,
-                    " . $this->rastroSelect('NAC') . "
+                    " . $this->rastroSelect('NAC') . ",
+                    " . $this->pagadoSelect() . "
                 FROM " . self::TABLA_MAESTRO . " A
                 LEFT JOIN RO_T_IMPORTACIONES_DETALLE B ON A.ID = B.ID_MG
                 LEFT JOIN
@@ -1283,6 +1659,7 @@ class Comex {
                     GROUP BY ID_MG
                 ) C ON A.ID = C.ID_MG
                 " . $this->rastroJoin('NAC') . "
+                " . $this->pagadoJoin('NAC') . "
                 WHERE B.ID_MG IS NULL
                 ORDER BY CASE WHEN A.FECHA_DESP_ADU IS NULL THEN 1 ELSE 0 END,
                          A.FECHA_DESP_ADU,
@@ -1305,14 +1682,14 @@ class Comex {
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $row = self::aTexto($row, ['FECHA_EST_EMB', 'ETD', 'ETA', 'FECHA_NAC',
-                'EDIT_ANTERIOR', 'EDIT_VALOR', 'EDIT_FECHA']);
+                'EDIT_ANTERIOR', 'EDIT_VALOR', 'EDIT_FECHA', 'PAGADO_FECHA']);
 
             $row = self::conFechaEfectiva($row, 'FECHA_NAC', 'FECHA_NAC_EFECTIVA', $hoy);
 
-            /* Misma regla que en Proveedores Exterior: al cashflow entra lo que
-               se mueve de hoy en adelante. Una nacionalizacion con la fecha ya
-               pasada o se pago -y no es proyeccion- o hay que corregirle la
-               fecha. Ver aporteAlEje(). */
+            /* Mismas dos reglas que en Proveedores Exterior: al cashflow entra
+               lo que se mueve de hoy en adelante y lo que todavia no se pago.
+               Ver aporteAlEje(). */
+            $row['IMPORTE_PROYECTABLE'] = self::importeProyectable($row, 'IMPORTE_EST');
             $row['IMPORTE_EJE'] = self::aporteAlEje($row, 'IMPORTE_EST');
 
             $v[] = $row;
@@ -1327,14 +1704,18 @@ class Comex {
      * Arma el mensaje de error a partir de sqlsrv_errors().
      *
      * Nombra la tabla, igual que el resto del modulo: el aviso es lo unico que
-     * le dice a alguien contra que objeto fallo la escritura.
+     * le dice a alguien contra que objeto fallo la escritura. Esta clase
+     * escribe sobre CUATRO tablas -el maestro de Comex, el rastro de fechas, el
+     * de pagados y la de la cotizacion-, asi que un mensaje que nombrara
+     * siempre la misma mandaria a mirar el objeto equivocado.
      *
+     * @param string $tabla
      * @param string $contexto
      * @return string
      */
-    private function errorSql($contexto) {
+    private function errorSqlEn($tabla, $contexto) {
         $errores = sqlsrv_errors();
-        $msg = $contexto . ' (' . self::TABLA_EDIT . '): ';
+        $msg = $contexto . ' (' . $tabla . '): ';
 
         if ($errores) {
             foreach ($errores as $e) {
@@ -1343,6 +1724,16 @@ class Comex {
         }
 
         return $msg;
+    }
+
+    /**
+     * Como errorSqlEn(), para la tabla propia del modulo.
+     *
+     * @param string $contexto
+     * @return string
+     */
+    private function errorSql($contexto) {
+        return $this->errorSqlEn(self::TABLA_EDIT, $contexto);
     }
 
 }

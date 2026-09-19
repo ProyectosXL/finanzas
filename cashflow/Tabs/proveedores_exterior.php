@@ -116,6 +116,24 @@
                               id="estadoVencidasProvExt"></span>
                     </label>
                 </div>
+
+                <!-- LOS PAGADOS TAMPOCO SE VEN POR DEFECTO. Ya se decidió que
+                     ese egreso no se espera más, así que en el trabajo normal
+                     —mirar qué falta pagar— son ruido, igual que los excluidos
+                     de Echeqs.
+
+                     Pero tienen que poder mirarse: una marca puesta en marzo
+                     que nadie recuerda es justamente lo que este interruptor
+                     evita, y es desde donde se destilda lo que se marcó por
+                     error. CUÁNTO ESCONDE SE DICE AL LADO, siempre. -->
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="verPagadosProvExt">
+                    <label class="form-check-label small text-muted" for="verPagadosProvExt">
+                        Ver pagados
+                        <span class="text-muted fst-italic ms-1"
+                              id="estadoPagadosProvExt"></span>
+                    </label>
+                </div>
             </div>
             <div class="d-flex gap-2">
                 <!-- Los tres botones los dibuja Js/eje-vistas.js a partir del
@@ -191,6 +209,16 @@
                                        title="Click para corregir la cotización de este contenedor"></i>
                                 </th>
                                 <th rowspan="2">Importe ($)</th>
+                                <!-- EL TILDE DE "YA SE PAGÓ". Saca la fila de
+                                     la proyección: el tablero deja de contar
+                                     ese importe, que sale por su propia serie.
+                                     Es un dato del cashflow y NO se escribe en
+                                     el maestro de Comercio Exterior. -->
+                                <th rowspan="2">
+                                    Pagado
+                                    <i class="fas fa-check-square ms-1" style="font-size: 10px;"
+                                       title="Tildá si el pago ya se hizo: sale de la proyección"></i>
+                                </th>
                                 <!-- El rótulo y el colspan los pone el JS según
                                      la vista activa, y las columnas salen del
                                      eje del backend. -->

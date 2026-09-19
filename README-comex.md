@@ -2,13 +2,13 @@
 
 Pestañas **Comercio Exterior → Proveedores Exterior** y **Crono Nacionalización**, y las filas *Proveedores del Exterior* y *Nacionalizaciones* del tablero de Cashflow.
 
-Rama: `feature/comex-fecha-maestra`
+Ramas: `feature/comex-fecha-maestra` · `feature/comex-pagado`
 
 ---
 
 ## La idea en una línea
 
-**Las dos pestañas son el mismo contenedor mirado desde los dos lados del circuito**, y desde esta rama las dos escriben sobre el mismo lugar: el maestro de la plataforma Comex. El cashflow dejó de tener fechas propias.
+**Las dos pestañas son el mismo contenedor mirado desde los dos lados del circuito**, y las dos escriben sobre el mismo lugar. Qué se escribe dónde es la decisión de fondo de todo esto: **la fecha va al maestro de Comex porque es el mismo dato para las dos aplicaciones; el "ya se pagó" queda del lado del cashflow porque es una afirmación sobre su propia proyección.**
 
 ```
 RO_T_IMPORTACIONES_ENCABEZADO  (maestro de Comercio Exterior)
@@ -17,18 +17,20 @@ RO_T_IMPORTACIONES_ENCABEZADO  (maestro de Comercio Exterior)
         ├─ FECHA_EST_PAGO ──── cuándo se le paga al proveedor del exterior
         │       │  × curva de dólar futuro ROFEX del mes de esa fecha
         │       ▼
-        │   Proveedores Exterior  →  ComexProvider (serie PAGOS)
+        │   Proveedores Exterior  →  ComexProvider (PAGOS / PAGOS_PAGADOS / PAGOS_TODO)
         │
         └─ FECHA_DESP_ADU ──── cuándo se nacionaliza
                 │  + RO_T_IMPORTACIONES_ESTIMACION_DETALLE (conceptos 3 a 10)
                 ▼
-            Crono Nacionalización  →  ComexProvider (serie NACIONALIZACION)
+            Crono Nacionalización  →  ComexProvider (NACIONALIZACION / _PAGADAS / _TODO)
 
-RO_T_CASHFLOW_COMEX_FECHA_EDIT   quién movió cada fecha desde el cashflow
-RO_T_CASHFLOW_COMEX_CRONO_NAC    el override de cotización por contenedor
+Del lado del cashflow:
+  RO_T_CASHFLOW_COMEX_FECHA_EDIT   quién movió cada fecha del maestro desde acá
+  RO_T_CASHFLOW_COMEX_PAGADO       qué pagos ya se hicieron, con su historial
+  RO_T_CASHFLOW_COMEX_CRONO_NAC    el override de cotización por contenedor
 ```
 
-Las dos fechas **se editan desde el cashflow**, y eso ahora cambia el dato para las dos aplicaciones.
+Al cuadro entra **lo que falta mover, de hoy en adelante**: lo vencido y lo ya pagado quedan afuera, y las dos cosas se ven en la pestaña detrás de su interruptor.
 
 ---
 
@@ -40,8 +42,9 @@ Contra `central`, en este orden:
 | --- | --- | --- | --- |
 | 1 | `sql/cashflow_comex_cotiz_edit.sql` | Agrega `COTIZ_USD_EDIT` a `RO_T_CASHFLOW_COMEX_CRONO_NAC`: el override de cotización por contenedor | Los pagos se valúan con la curva igual; lo único que no se puede es corregir una fila a mano, y la pantalla lo dice |
 | 2 | `sql/cashflow_comex_fecha_maestra.sql` | Crea `RO_T_CASHFLOW_COMEX_FECHA_EDIT` y **migra al maestro** las fechas que vivían en las columnas `EDIT` | **Las dos pestañas se leen igual** —las fechas salen del maestro, que siempre está— pero **no se pueden editar**, y las dos avisan qué script falta |
+| 3 | `sql/cashflow_comex_pagado.sql` | Crea `RO_T_CASHFLOW_COMEX_PAGADO`: qué pagos ya se hicieron, con su historial | Las dos pestañas se leen igual y **el tablero no cambia** —sin la tabla no hay nada marcado, así que proyecta todo lo pendiente—. La casilla se dibuja deshabilitada y las dos avisan qué script falta |
 
-Los dos son reejecutables y ninguno borra nada.
+Los tres son reejecutables y ninguno borra nada. El 3 no depende de los otros dos.
 
 > **El 2 es el único del módulo que escribe sobre una tabla que no es del cashflow.** Por eso su encabezado documenta el criterio de conflicto y el script lista al final lo que decidió no migrar.
 
@@ -248,7 +251,60 @@ Lo mismo se aplicó a Proveedores Exterior con `FECHA_EST_PAGO`, donde el caso *
 
 ---
 
-## 4. El buscador
+## 4. El tilde de pagado
+
+El cashflow proyecta **lo que falta pagar**. Un contenedor cuyo pago ya se hizo seguía apareciendo —el maestro de Comercio Exterior no dice si se pagó— y su importe seguía sumando como un egreso por venir. Ahora se tilda, y sale.
+
+Y es lo que **resuelve los vencidos**: un pago con la fecha pasada ya no suma, pero seguía en la grilla esperando que alguien hiciera algo con él. Este tilde es ese algo, sin inventar una fecha que nadie conoce.
+
+### El dato es del cashflow
+
+A diferencia de las fechas —que se escriben sobre el maestro porque son el mismo dato para las dos aplicaciones— esto es una **afirmación del cashflow sobre su propia proyección**: *"este egreso ya no lo esperamos"*. Comercio Exterior no tiene hoy ese concepto, y no se le agrega una columna a su maestro para un circuito que es nuestro. Si más adelante lo quiere ver, lo resuelve con una consulta: `ID_MG` es la clave del contenedor en su maestro.
+
+> **Por qué una tabla propia y no columnas en `RO_T_CASHFLOW_COMEX_CRONO_NAC`**, que es donde el pedido la ubicaba. Esa tabla tiene **una fila por contenedor** y no puede llevar historial: pisar la marca con un `UPDATE` haría indistinguibles un tilde puesto por error y corregido a los cinco minutos de una decisión que estuvo vigente tres semanas. Y no alcanzaría con un flag: **hay dos pagos por contenedor** y son plata distinta, así que la clave es `(ID_MG, CONCEPTO)`. Es el mismo criterio de `RO_T_CASHFLOW_ECHEQ_EXCLUIDO`.
+
+### El importe no desaparece: cambia de serie
+
+```
+PAGOS + PAGOS_PAGADOS = PAGOS_TODO
+NACIONALIZACION + NACIONALIZACION_PAGADAS = NACIONALIZACION_TODO
+```
+
+Mismo criterio que la exclusión de cheques de cartera: un importe que sale del tablero sin dejar rastro es un agujero que nadie puede auditar. `PAGOS` y `NACIONALIZACION` **cambian de significado y no de código** —pasan a ser *"lo que falta pagar"*—, así que **no hay que repuntar ninguna fila** ni tocar Parámetros. El día que se corre el script la tabla nace vacía y el tablero no se mueve un peso.
+
+El proveedor informa en cada carga cuánto se marcó, con el conteo. Sin ese aviso, un egreso que el tablero debería estar proyectando desaparece y nada en pantalla lo explica.
+
+**Cómo cierra el invariante**, que es la parte delicada:
+
+| Serie | Campo | Sobre |
+| --- | --- | --- |
+| `PAGOS` | `IMPORTE_EJE` — vale cero si está pagado **o** vencido | todas las filas |
+| `PAGOS_PAGADOS` | `IMPORTE_PROYECTABLE` — vale cero sólo si está vencido | las marcadas |
+| `PAGOS_TODO` | `IMPORTE_PROYECTABLE` | todas |
+
+Para una fila no marcada los dos campos valen lo mismo y aporta a `PAGOS`; para una marcada, `IMPORTE_EJE` es cero y aporta a `PAGOS_PAGADOS`. Por eso las dos reglas viven en funciones separadas (`importeProyectable()` y `aporteAlEje()`) en vez de en una sola.
+
+**Verificado contra la base**, marcando una fila real en cada pestaña y deshaciéndolo:
+
+| | Antes | Después | Diferencia | Importe de la fila |
+| --- | --- | --- | --- | --- |
+| `PAGOS` (contenedor 690) | $ 4.632.182.810 | $ 4.546.462.890 | **$ 85.719.920** | **$ 85.719.920** |
+| `NACIONALIZACION` (contenedor 635) | $ 506.185,65 | $ 448.091,37 | **$ 58.094,28** | **$ 58.094,28** |
+
+En los dos casos el universo (`..._TODO`) **no se movió**, el invariante cerró antes y después, y destildar devolvió el total al original.
+
+> **Marcar algo que ya estaba vencido no mueve ningún número**: ya valía cero. Lo que cambia es que la fila sale de la pantalla y deja de pedir atención, que es justamente para lo que se marca.
+
+### Cómo se usa
+
+- **El tilde actúa, no selecciona.** A diferencia del de Echeqs —donde el check elige filas y un botón confirma el lote con su motivo— acá cada clic guarda. La diferencia está en qué se afirma: allá es una decisión discutible que saca plata del disponible y necesita un motivo por escrito; acá es un hecho, *"este pago se hizo"*. Y se deshace con el mismo clic, que es lo que lo hace seguro.
+- **La observación es opcional**, por lo mismo. Obligar a escribir algo terminaría en doscientas filas que dicen "pagado".
+- **Interruptor *Ver pagados*, apagado por defecto**, con el conteo al lado. Igual que el de vencidas y que el *Ver excluidos* de Echeqs.
+- **No hay bajas físicas.** Destildar marca `VIGENTE = 0` y sella `FECHA_BAJA`; volver a marcar inserta una fila nueva. Quién marcó y cuándo va en el `title` de la casilla.
+- **Son dos tildes por contenedor y no se cruzan**: marcar el pago al proveedor del exterior no dice nada del gasto de nacionalización. Por eso la clave lleva `CONCEPTO`.
+- **La fila pagada se atenúa, no se tacha.** Sigue siendo un dato correcto —el contenedor existe y ese importe se pagó—; el tachado se lee como *"esto está mal"*. La celda del tilde **no** se atenúa: es el control con el que se destilda.
+
+## 5. El buscador
 
 Proveedores Exterior no tenía. Ahora tiene **el mismo** que Crono Nacionalización — no uno parecido: **el mismo código**.
 
@@ -301,6 +357,7 @@ De lo nuevo, lo que se fija:
 - **Las reglas puras**: `estaVencida()` (con hoy inyectado, para que la prueba no caduque sola), `marcaVigente()` y los dos avisos de `avisosVencidos()`, incluido el reparto entre lo que entra en la columna del mes en curso y lo que no.
 - **El cableado**, leyendo archivos, con el mismo criterio de `test_tablas_controles.php`: que el filtro de embarque no vuelva, que las columnas `EDIT` no vuelvan a leerse, que el orden sea por la fecha efectiva con los nulos al final, que el endpoint de fechas sea uno solo y que el cliente no vuelva a mandar la fecha anterior.
 - **Que el buscador y la celda no se copien**: que las dos pestañas deleguen en `Comex-fechas.js`, que ninguna reimplemente `sumarColumnas()` ni arme su propio `fetch`, y que las dos carguen el archivo compartido **antes** que el suyo.
+- **El tilde de pagado**: que lo marcado no aporte al eje pero **siga siendo proyectable** —que es lo que hace cerrar el invariante—, y que `PAGOS + PAGOS_PAGADOS = PAGOS_TODO` se cumpla en los **cuatro casos posibles** (nada / pagada / vencida / vencida y pagada). El corte de filas marcadas se prueba **sin base**, con una lista armada a mano, que es el punto: se puede verificar aunque no haya nada marcado en la base. Y que el registro declare las tres series con su `componentes`, que es lo que impide activar el universo y una parte a la vez.
 - **El script**: que cree la tabla con las columnas que el código espera, que el índice único esté filtrado por `VIGENTE`, que no pise el maestro en conflicto y que sea reejecutable.
 - **Contra la base**, sólo lectura: que las dos consultas traigan el mismo padrón, que haya contenedores ya embarcados en la grilla, que el flag `VENCIDA` coincida con la regla pura fila por fila, que la fecha efectiva **sea** la del maestro y que el listado salga ordenado con los nulos al final.
 
@@ -313,6 +370,7 @@ De lo nuevo, lo que se fija:
 ```
 sql/cashflow_comex_fecha_maestra.sql   La tabla del rastro y la migracion al maestro
 sql/cashflow_comex_cotiz_edit.sql      El override de cotizacion por contenedor
+sql/cashflow_comex_pagado.sql          Que pagos ya se hicieron, con su historial
 cashflow/Class/Comex.php               Las dos consultas, el guardado y las reglas puras
 cashflow/Class/DolarFuturo.php         La curva ROFEX y que cotizacion le toca a cada fila
 cashflow/Class/Providers/ComexProvider.php   Las dos series del tablero
@@ -332,6 +390,8 @@ tests/test_comex_dolar_futuro.php
 
 ## Pendientes conocidos
 
+- **El tilde de pagado no guarda CUÁNDO se pagó**, sólo cuándo se marcó. Nadie lo pidió y inventar una fecha de pago real que después nadie mantenga sería peor que no tenerla; si hace falta, es una columna más en `RO_T_CASHFLOW_COMEX_PAGADO`.
+- **El historial de marcas se guarda pero no tiene pantalla**: la casilla muestra en su `title` quién marcó y cuándo, y `getHistorialPagado` devuelve la lista completa con las no vigentes. Mismo estado que el historial de fechas.
 - **Sin login: el rastro se graba con `USUARIO = NULL`**, y la pestaña dice *"la movió desde el cashflow"* sin nombre. La costura ya está puesta: `guardarFecha()` recibe `$usuario` y el controller lo pasa. Es el mismo pendiente que el resto del módulo.
 - **El historial se guarda pero todavía no se muestra entero.** La celda muestra el rastro **vigente** en su tooltip; `getHistorialFecha` devuelve la lista completa con las no vigentes y no hay pantalla que la pida. Es el mismo lugar en el que estuvo la exclusión de echeqs antes de su diálogo.
 - **Dos ediciones huérfanas** en `RO_T_CASHFLOW_COMEX_CRONO_NAC` (`ID_MG` 558 y 560): apuntan a contenedores que ya no están en el maestro. No se migraron y el script las lista. No molestan a nadie —no aparecen en ningún join— pero alguien de Comercio Exterior tendría que decir si esos contenedores se dieron de baja a propósito.
