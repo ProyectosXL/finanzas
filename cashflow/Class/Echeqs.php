@@ -28,6 +28,24 @@ require_once __DIR__ . '/Parametros.php';
  *
  * Es lo primero que alguien va a querer "arreglar" al ver el cheque repetido.
  *
+ * LOS DOS TILDES DE ESTE MODULO NO SON EL MISMO, Y NO SE CRUZAN
+ * -------------------------------------------------------------
+ * Cada sub-pestana tiene un tilde y contestan preguntas distintas:
+ *
+ *   Cartera        EXCLUIR   "esta plata, ¿va a entrar?"
+ *                            Un cheque que no se va a poder cobrar sale de la
+ *                            serie del tablero. Vive en
+ *                            RO_T_CASHFLOW_ECHEQ_EXCLUIDO.
+ *
+ *   Prechequeado   MARCAR    "esta venta, ¿ya se cobro?"
+ *                            Decide que se resta de la cobranza proyectada de
+ *                            Ventas. Vive en RO_T_CASHFLOW_ECHEQ_PRECHEQ.
+ *
+ * UN MISMO CHEQUE PUEDE TENER LOS DOS Y NO SE PISAN: que no vaya a entrar no
+ * dice nada sobre si la venta que prepago hay que netearla. Por eso no hay
+ * ningun join entre las dos tablas y por eso la exclusion NO toca el
+ * pre-chequeado. Ver el encabezado de sql/cashflow_echeqs_excluir.sql.
+ *
  * DOS FECHAS, DOS FUNCIONES DISTINTAS
  * -----------------------------------
  * En Venta Cobrada Anticipada cada cheque tiene dos fechas, y NO hacen lo mismo:
@@ -96,8 +114,25 @@ class Echeqs {
     /** El tilde -o el destilde- lo puso una persona sobre ese cheque */
     const ORIGEN_CHEQUE = 'cheque';
 
+    /**
+     * Exclusiones de cartera. Una fila por decision, con historial: volver a
+     * incluir marca VIGENTE = 0 y no borra nada.
+     */
+    const TABLA_EXCLUIDO = 'RO_T_CASHFLOW_ECHEQ_EXCLUIDO';
+
+    /** Largo util del motivo, el mismo de la columna */
+    const MOTIVO_MAX = 200;
+
     /** @var bool|null Cache del chequeo de tablas creadas */
     private $tablas = null;
+
+    /**
+     * @var bool|null Cache del chequeo de la tabla de exclusiones.
+     * VA APARTE de $tablas y no junto con las otras dos: la exclusion de cartera
+     * y el maestro de pre-chequeado son dos scripts independientes, y quien
+     * corrio uno solo tiene que perder unicamente esa funcion.
+     */
+    private $tablaExcluido = null;
 
     /** @var Conexion */
     private $conn;
@@ -141,6 +176,109 @@ class Echeqs {
         }
 
         return null;
+    }
+
+    /**
+     * Valida y normaliza el motivo de una exclusion.
+     *
+     * ES OBLIGATORIO, Y SE VALIDA EN EL BACK. El endpoint es alcanzable sin
+     * pasar por la grilla, y un cheque sacado del cashflow sin motivo no lo
+     * explica nadie tres meses despues. Es la misma regla que
+     * Proveedores::saveExclusionMasiva() y por el mismo motivo.
+     *
+     * Estatica y pura.
+     *
+     * @param mixed $motivo
+     * @param int $cuantos Cuantos cheques, para que el mensaje sea el del gesto
+     * @return string
+     */
+    public static function validarMotivoExclusion($motivo, $cuantos = 1) {
+        $texto = ($motivo === null) ? '' : trim((string) $motivo);
+
+        if ($texto === '') {
+            throw new Exception('Poné el motivo por el que ' . ($cuantos === 1
+                    ? 'este cheque no se va a poder cobrar'
+                    : 'estos cheques no se van a poder cobrar')
+                . '. Sin motivo, dentro de tres meses nadie va a poder explicar por qué '
+                . 'falta ese importe en el disponible.');
+        }
+
+        return mb_substr($texto, 0, self::MOTIVO_MAX);
+    }
+
+    /**
+     * Cuanto de lo que se muestra esta excluido, y con que motivos.
+     *
+     * LO QUE SE EXCLUYE NO DESAPARECE, SE INFORMA. Los excluidos se esconden por
+     * defecto en la pantalla, asi que sin este resumen la unica forma de notar
+     * que hay plata afuera seria acordarse de prender el interruptor. Es el
+     * mismo criterio de ProveedoresProvider::avisarExcluidasAMano().
+     *
+     * LOS TOTALES POR VISTA SALEN DE ACA Y NO DEL NAVEGADOR. Las filas ya traen
+     * sus importes por columna resueltos por EjeVista, asi que las tres
+     * tarjetas de la pestana pueden mostrar el neto -lo que de verdad entra al
+     * cashflow- sin que el front reste nada. El front no calcula.
+     *
+     * Estatica y pura: recibe las filas ya armadas.
+     *
+     * @param array $filas Filas del payload de EjeVista, con 'EXCLUIDO'
+     * @return array
+     */
+    public static function resumenExcluidos($filas) {
+        $r = [
+            'cheques' => 0,
+            'importe' => 0,
+            'total_tramo' => 0,
+            'total_meses' => 0,
+            'total_horizonte' => 0,
+            'motivos' => []
+        ];
+
+        foreach (is_array($filas) ? $filas : [] as $f) {
+            if (empty($f['EXCLUIDO'])) {
+                continue;
+            }
+
+            $r['cheques']++;
+            $r['importe'] += floatval($f['IMPORTE']);
+
+            foreach (['total_tramo', 'total_meses', 'total_horizonte'] as $t) {
+                $r[$t] += isset($f[$t]) ? floatval($f[$t]) : 0;
+            }
+
+            $m = trim((string) (isset($f['MOTIVO_EXCLUSION']) ? $f['MOTIVO_EXCLUSION'] : ''));
+
+            if ($m !== '' && !in_array($m, $r['motivos'], true)) {
+                $r['motivos'][] = $m;
+            }
+        }
+
+        return $r;
+    }
+
+    /**
+     * Los tres totales de la pestana SIN lo excluido.
+     *
+     * Es lo que las tarjetas tienen que mostrar: el total con los excluidos
+     * adentro diria que esa plata entra, que es justamente lo que el tilde
+     * niega. La resta se hace aca y no en el JS porque en este modulo el front
+     * no calcula: los numeros salen del motor.
+     *
+     * Estatica y pura.
+     *
+     * @param array $totales Los de EjeVista::armar()
+     * @param array $excluidos Los de resumenExcluidos()
+     * @return array Con las mismas claves que $totales
+     */
+    public static function totalesNetos($totales, $excluidos) {
+        $netos = is_array($totales) ? $totales : [];
+
+        foreach (['total_tramo', 'total_meses', 'total_horizonte'] as $t) {
+            $netos[$t] = (isset($totales[$t]) ? floatval($totales[$t]) : 0)
+                - (isset($excluidos[$t]) ? floatval($excluidos[$t]) : 0);
+        }
+
+        return $netos;
     }
 
     /* ====================================================================
@@ -492,6 +630,39 @@ class Echeqs {
     }
 
     /**
+     * Si ya se corrio sql/cashflow_echeqs_excluir.sql.
+     *
+     * SIN ELLA LA PESTANA NO SE ROMPE: el listado de cartera se lee igual,
+     * ningun cheque queda excluido y lo que la pantalla apaga son los botones
+     * de excluir, diciendo por que. Es la misma regla que
+     * Proveedores::tieneColumnaPago() y el mismo criterio de todo el modulo: si
+     * el DDL no se corrio, la pantalla avisa y sigue andando.
+     *
+     * @return bool
+     */
+    public function excluirCreada() {
+        if ($this->tablaExcluido !== null) {
+            return $this->tablaExcluido;
+        }
+
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo." . self::TABLA_EXCLUIDO . "', 'U') AS T");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar la tabla de exclusiones'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->tablaExcluido = ($row && $row['T'] !== null);
+
+        return $this->tablaExcluido;
+    }
+
+    /**
      * Avisos de configuracion pendiente, para mostrar en la pestana.
      *
      * @return array Lista de mensajes
@@ -560,6 +731,11 @@ class Echeqs {
      * la fecha del cheque-, el cambio es solo aca y no en la pantalla ni en el
      * proveedor.
      *
+     * LOS EXCLUIDOS VIENEN EN LA LISTA, MARCADOS. No se filtran aca: quien los
+     * esconde es la pantalla, y con un interruptor que se puede apagar. Una
+     * consulta que los sacara dejaria la exclusion sin ninguna pantalla donde
+     * revisarla, que es exactamente lo contrario de lo que este circuito busca.
+     *
      * @return array Filas normalizadas
      */
     public function getEcheqsCartera() {
@@ -573,6 +749,12 @@ class Echeqs {
 
            Se seleccionan solo las columnas que la pantalla muestra. Un s.* infla
            la respuesta y expone sesenta columnas de Tango que nadie usa. */
+        /* El JOIN de la exclusion se arma solo si la tabla existe: sin el script
+           corrido, la consulta es exactamente la de antes. Las columnas viajan
+           igual -en cero y en null- para que la pantalla y el proveedor no
+           tengan que preguntar si el script se corrio antes de leer una fila. */
+        $excl = $this->excluirCreada();
+
         $sql = "SELECT s.ID_SBA14,
                        CAST(s.N_CHEQUE AS BIGINT)  AS N_CHEQUE,
                        CAST(s.FECHA_CHEQ AS DATE)  AS FECHA_CHEQUE,
@@ -580,9 +762,19 @@ class Echeqs {
                        CAST(s.IMPORTE_CH AS FLOAT) AS IMPORTE,
                        s.RAZON_EMIS                AS CLIENTE,
                        s.CLIENTE                   AS COD_CLIENTE,
-                       CAST(s.FECHA_CHEQ AS DATE)  AS FECHA_PAGO
+                       CAST(s.FECHA_CHEQ AS DATE)  AS FECHA_PAGO,
+                       " . ($excl ? 'x.MOTIVO'     : 'CAST(NULL AS VARCHAR(200))')
+                       . " AS MOTIVO_EXCLUSION,
+                       " . ($excl ? 'x.USUARIO'    : 'CAST(NULL AS VARCHAR(50))')
+                       . " AS EXCLUSION_USUARIO,
+                       " . ($excl ? 'x.FECHA_ALTA' : 'CAST(NULL AS DATETIME)')
+                       . " AS EXCLUSION_FECHA
                 FROM dbo.SBA14 AS s
                 LEFT JOIN dbo.BANCO AS b ON s.ID_BANCO = b.ID_BANCO
+                " . ($excl
+                    ? 'LEFT JOIN dbo.' . self::TABLA_EXCLUIDO . ' AS x
+                              ON x.ID_SBA14 = s.ID_SBA14 AND x.VIGENTE = 1'
+                    : '') . "
                 WHERE s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)
                   AND s.ESTADO = ?
                   AND s.CLIENTE LIKE '[FL]%'
@@ -616,18 +808,44 @@ class Echeqs {
      * dos metodos dan el mismo total para que no se puedan desincronizar en
      * silencio.
      *
-     * @return array Filas ['FECHA_PAGO' => 'Y-m-d', 'IMPORTE' => float]
+     * ABRE POR EXCLUIDO, y por eso la clave de agrupacion son DOS campos y no
+     * uno. El proveedor necesita repartir el mismo universo en tres series
+     * -cobrable, excluido y todo-, y resolver eso con dos consultas distintas
+     * seria dos WHERE que tienen que decir lo mismo para siempre. Con el corte
+     * adentro del GROUP BY, el universo se lee UNA vez y las tres series salen
+     * de la misma lectura, que es lo que hace que cierren por construccion.
+     *
+     * @return array Filas ['FECHA_PAGO' => 'Y-m-d', 'EXCLUIDO' => bool,
+     *         'IMPORTE' => float]
      */
     public function getEcheqsCarteraTotales() {
         $cid = $this->conectar('central');
 
+        /* Sin el script de la exclusion, EXCLUIDO sale siempre en 0 y el
+           agrupado queda como el de antes: una fila por fecha.
+
+           EL CERO VA EN EL SELECT PERO NO EN EL GROUP BY. SQL Server rechaza
+           agrupar por una constante -"Each GROUP BY expression must contain at
+           least one column that is not an outer reference"-, asi que meter el
+           flag en los dos lados sin preguntar hacia fallar la pestana entera
+           justo en la instalacion que todavia no corrio el script, que es el
+           caso que este modulo se compromete a no romper. */
+        $excl = $this->excluirCreada();
+        $flag = $excl ? 'CASE WHEN x.ID IS NULL THEN 0 ELSE 1 END' : '0';
+
         $sql = "SELECT CAST(s.FECHA_CHEQ AS DATE)       AS FECHA_PAGO,
+                       " . $flag . "                    AS EXCLUIDO,
                        SUM(CAST(s.IMPORTE_CH AS FLOAT)) AS IMPORTE
                 FROM dbo.SBA14 AS s
+                " . ($excl
+                    ? 'LEFT JOIN dbo.' . self::TABLA_EXCLUIDO . ' AS x
+                              ON x.ID_SBA14 = s.ID_SBA14 AND x.VIGENTE = 1'
+                    : '') . "
                 WHERE s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)
                   AND s.ESTADO = ?
                   AND s.CLIENTE LIKE '[FL]%'
-                GROUP BY CAST(s.FECHA_CHEQ AS DATE)
+                GROUP BY CAST(s.FECHA_CHEQ AS DATE)"
+                    . ($excl ? ', ' . $flag : '') . "
                 ORDER BY CAST(s.FECHA_CHEQ AS DATE)";
 
         $stmt = sqlsrv_query($cid, $sql, [self::ESTADO_CARTERA]);
@@ -641,7 +859,362 @@ class Echeqs {
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $v[] = [
                 'FECHA_PAGO' => Horizonte::normalizarFecha($row['FECHA_PAGO']),
+                'EXCLUIDO' => (intval($row['EXCLUIDO']) === 1),
                 'IMPORTE' => floatval($row['IMPORTE'])
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $v;
+    }
+
+    /**
+     * Excluye cheques de cartera del cashflow, o los vuelve a incluir.
+     *
+     * QUE SIGNIFICA. Que ese importe NO se va a poder cobrar: el cliente avisó
+     * que no lo cubre, el cheque quedó judicializado, está en gestión de
+     * cambio. El cheque sigue en cartera en Tango -no somos nosotros los que lo
+     * damos de baja- y lo que cambia es de qué serie del tablero sale.
+     *
+     * EL IMPORTE NO DESAPARECE: sale de A_COBRAR y va a A_COBRAR_EXCLUIDOS, que
+     * es la otra mitad del mismo corte. Las dos cierran contra A_COBRAR_TODO y
+     * el proveedor avisa cuánto es y con qué motivos. Ver
+     * EcheqsProvider::SERIE_EXCLUIDOS y el encabezado de
+     * sql/cashflow_echeqs_excluir.sql.
+     *
+     * NO TOCA EL PRE-CHEQUEADO. Son dos preguntas distintas y tienen dos tablas
+     * distintas: ver la nota del encabezado de esta clase.
+     *
+     * ES UNA SOLA TRANSACCION, por el mismo motivo que marcarCheques(): excluir
+     * los doce cheques de un cliente con doce llamadas deja la puerta abierta a
+     * que la quinta falle y el disponible quede a mitad de camino sin que nadie
+     * se entere. O entran todos o no entra ninguno.
+     *
+     * EL MOTIVO ES UNO PARA TODOS, y eso no es una simplificación de la
+     * pantalla: excluir los doce cheques de un cliente que entró en concurso es
+     * UNA decisión, y doce motivos distintos para una decisión son doce
+     * oportunidades de que digan cosas distintas. Es el criterio de
+     * Proveedores::saveExclusionMasiva().
+     *
+     * SE VALIDA CONTRA LA CARTERA DE HOY, a diferencia de la exclusión de
+     * facturas de Proveedores Locales, que a propósito no lo hace. Allá la fila
+     * de override vive por comprobante y puede existir para uno que hoy no está
+     * pendiente, así que rechazarla perdería la decisión el día que el
+     * comprobante vuelva. Acá la exclusión sólo significa algo mientras el
+     * cheque esté en cartera: uno depositado o rechazado ya salió de la serie
+     * por su estado, y guardar una exclusión para él sería una decisión que no
+     * se ve en ninguna pantalla. Es la misma razón por la que marcarCheques()
+     * resuelve su universo en el servidor.
+     *
+     * VOLVER A EXCLUIR ALGO YA EXCLUIDO NO ES UN ERROR: da de baja la exclusión
+     * anterior e inserta una nueva. Es como se corrige un motivo mal escrito, y
+     * el historial guarda los dos.
+     *
+     * @param array $ids Ids de dbo.SBA14
+     * @param bool $excluir true saca del cashflow, false devuelve
+     * @param string|null $motivo Obligatorio si $excluir es true
+     * @param string|null $usuario
+     * @return array ['excluidos' => bool, 'motivo', 'tocados' => int,
+     *         'rechazados' => [...], 'filas' => [...]]
+     */
+    public function excluirCheques($ids, $excluir, $motivo = null, $usuario = null) {
+        if (!$this->excluirCreada()) {
+            throw new Exception('Todavía no se pueden excluir cheques. '
+                . 'Corré sql/cashflow_echeqs_excluir.sql contra la base central.');
+        }
+
+        $pedidos = [];
+
+        foreach (is_array($ids) ? $ids : [] as $id) {
+            $id = intval($id);
+
+            if ($id > 0) {
+                $pedidos[$id] = true;
+            }
+        }
+
+        if (empty($pedidos)) {
+            throw new Exception('No llegó ningún cheque para excluir.');
+        }
+
+        // El universo permitido se vuelve a resolver en el servidor: lo que
+        // manda el navegador es una lista de ids, no una autorizacion.
+        $permitidos = [];
+
+        foreach ($this->getEcheqsCartera() as $fila) {
+            $permitidos[intval($fila['ID_SBA14'])] = true;
+        }
+
+        /* array_keys() y NO array_values(): $pedidos esta indexado por id -es
+           lo que deduplica la lista que llega- y sus valores son todos true.
+           Ver la misma nota en marcarCheques(). */
+        $validos = array_keys(array_intersect_key($pedidos, $permitidos));
+        $rechazados = array_keys(array_diff_key($pedidos, $permitidos));
+
+        if (empty($validos)) {
+            throw new Exception('Ninguno de los ' . count($pedidos) . ' cheque(s) recibidos '
+                . 'está hoy en cartera. Puede que la pantalla haya quedado vieja: '
+                . 'actualizala y volvé a intentar.');
+        }
+
+        $sacar = !empty($excluir);
+
+        // El motivo se valida ANTES de abrir la transaccion: un lote rechazado
+        // no puede descubrirse con la mitad de las bajas ya escritas.
+        $texto = $sacar ? self::validarMotivoExclusion($motivo, count($validos)) : null;
+
+        $cid = $this->conectar('central');
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción de exclusión'));
+        }
+
+        try {
+            /* El constructor de tabla de un IN y el de un INSERT admiten hasta
+               1000 filas, asi que un lote grande se parte en tandas. Van todas
+               dentro de la MISMA transaccion: la garantia es de la operacion
+               completa. Mismo criterio que mergeMarcas(). */
+            foreach (array_chunk($validos, 500) as $tanda) {
+                /* SIEMPRE SE DA DE BAJA PRIMERO, se este excluyendo o
+                   incluyendo. Es lo que hace que volver a excluir algo ya
+                   excluido corrija el motivo en vez de chocar contra el indice
+                   unico de exclusiones vigentes, y lo que deja el historial
+                   completo en los dos casos. */
+                $this->bajaExclusiones($cid, $tanda);
+
+                if ($sacar) {
+                    $this->insertarExclusiones($cid, $tanda, $texto, $usuario);
+                }
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar la exclusión'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return [
+            'excluidos' => $sacar,
+            'motivo' => $texto,
+            'tocados' => count($validos),
+            'rechazados' => $rechazados,
+            // El estado efectivo de lo que quedo guardado, releido de la base:
+            // asi el front no tiene que adivinar como quedaron las filas.
+            'filas' => $this->getExclusiones($validos)
+        ];
+    }
+
+    /**
+     * Da de baja las exclusiones vigentes de una tanda de cheques.
+     *
+     * NO BORRA: marca VIGENTE = 0 y sella FECHA_BAJA. Con FECHA_ALTA sola no se
+     * puede distinguir una exclusión que se deshizo a los cinco minutos de una
+     * que estuvo vigente tres semanas, y la segunda es la que explica por qué el
+     * disponible proyectado de la semana pasada era otro.
+     *
+     * @param resource $cid Conexion con la transaccion ya abierta
+     * @param array $ids
+     */
+    private function bajaExclusiones($cid, $ids) {
+        $marcas = implode(', ', array_fill(0, count($ids), '?'));
+
+        $stmt = sqlsrv_query($cid,
+            "UPDATE dbo." . self::TABLA_EXCLUIDO . "
+             SET VIGENTE = 0, FECHA_BAJA = GETDATE()
+             WHERE VIGENTE = 1 AND ID_SBA14 IN (" . $marcas . ")",
+            array_map('intval', $ids));
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al dar de baja la exclusión anterior'));
+        }
+
+        sqlsrv_free_stmt($stmt);
+    }
+
+    /**
+     * Inserta una exclusion vigente por cheque, todas con el mismo motivo.
+     *
+     * @param resource $cid Conexion con la transaccion ya abierta
+     * @param array $ids
+     * @param string $motivo Ya validado
+     * @param string|null $usuario
+     */
+    private function insertarExclusiones($cid, $ids, $motivo, $usuario) {
+        $filas = implode(', ', array_fill(0, count($ids), '(?, ?, 1, ?)'));
+        $params = [];
+
+        foreach ($ids as $id) {
+            $params[] = intval($id);
+            $params[] = $motivo;
+            $params[] = $usuario;
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "INSERT INTO dbo." . self::TABLA_EXCLUIDO . " (ID_SBA14, MOTIVO, VIGENTE, USUARIO)
+             VALUES " . $filas,
+            $params);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al guardar la exclusión'));
+        }
+
+        sqlsrv_free_stmt($stmt);
+    }
+
+    /**
+     * Las exclusiones VIGENTES, para releer el estado efectivo.
+     *
+     * Sin el script corrido devuelve vacio y no lanza: quien lo llama esta
+     * preguntando que hay excluido, y la respuesta honesta en ese caso es
+     * "nada".
+     *
+     * @param array|null $ids Para releer solo un subconjunto, o null para todas
+     * @return array Filas ['ID_SBA14', 'MOTIVO', 'USUARIO', 'FECHA_ALTA']
+     */
+    public function getExclusiones($ids = null) {
+        if (!$this->excluirCreada()) {
+            return [];
+        }
+
+        $cid = $this->conectar('central');
+
+        $sql = "SELECT ID_SBA14, MOTIVO, USUARIO, FECHA_ALTA
+                FROM dbo." . self::TABLA_EXCLUIDO . "
+                WHERE VIGENTE = 1";
+        $params = [];
+
+        if (is_array($ids) && !empty($ids)) {
+            $sql .= " AND ID_SBA14 IN (" . implode(', ', array_fill(0, count($ids), '?')) . ")";
+            $params = array_map('intval', $ids);
+        }
+
+        $stmt = sqlsrv_query($cid, $sql, $params);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer las exclusiones'));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $v[] = [
+                'ID_SBA14' => intval($row['ID_SBA14']),
+                'MOTIVO' => trim((string) $row['MOTIVO']),
+                'USUARIO' => $row['USUARIO'],
+                'FECHA_ALTA' => $this->fechaHora($row['FECHA_ALTA'])
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $v;
+    }
+
+    /**
+     * Las exclusiones vigentes QUE HOY ESTAN EN CARTERA, resumidas.
+     *
+     * POR QUE NO ALCANZA CON getExclusiones(). Una exclusion no se limpia
+     * cuando el cheque sale de cartera -no hay bajas fisicas, y el estado lo
+     * maneja Tango, no nosotros-, asi que esa fila queda vigente pero deja de
+     * significar algo: el cheque ya no esta en ninguna serie. Contarla en el
+     * aviso del tablero diria "8 cheques excluidos" donde el importe que falta
+     * es el de 5.
+     *
+     * Va en una consulta y no cruzando en PHP porque el universo de cartera son
+     * cientos de filas y las exclusiones son un punado: traer las primeras para
+     * filtrar las segundas es al reves.
+     *
+     * @return array ['cheques' => int, 'importe' => float, 'motivos' => [...]]
+     */
+    public function getExclusionesEnCartera() {
+        $vacio = ['cheques' => 0, 'importe' => 0.0, 'motivos' => []];
+
+        if (!$this->excluirCreada()) {
+            return $vacio;
+        }
+
+        $cid = $this->conectar('central');
+
+        $sql = "SELECT x.MOTIVO,
+                       COUNT(*)                         AS CHEQUES,
+                       SUM(CAST(s.IMPORTE_CH AS FLOAT)) AS IMPORTE
+                FROM dbo." . self::TABLA_EXCLUIDO . " AS x
+                INNER JOIN dbo.SBA14 AS s ON s.ID_SBA14 = x.ID_SBA14
+                WHERE x.VIGENTE = 1
+                  AND s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)
+                  AND s.ESTADO = ?
+                  AND s.CLIENTE LIKE '[FL]%'
+                GROUP BY x.MOTIVO
+                ORDER BY SUM(CAST(s.IMPORTE_CH AS FLOAT)) DESC";
+
+        $stmt = sqlsrv_query($cid, $sql, [self::ESTADO_CARTERA]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al resumir las exclusiones'));
+        }
+
+        $r = $vacio;
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $r['cheques'] += intval($row['CHEQUES']);
+            $r['importe'] += floatval($row['IMPORTE']);
+
+            $m = trim((string) $row['MOTIVO']);
+
+            // Ordenados por importe, que es como el aviso tiene que nombrarlos:
+            // los tres primeros son los tres que mas plata explican.
+            if ($m !== '') {
+                $r['motivos'][] = $m;
+            }
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $r;
+    }
+
+    /**
+     * El historial completo de un cheque: las exclusiones vigentes y las dadas
+     * de baja, de la mas nueva a la mas vieja.
+     *
+     * ES LO QUE JUSTIFICA QUE NO HAYA BAJAS FISICAS. Sin esto, la tabla guarda
+     * filas que nadie puede mirar y el historial es un costo sin beneficio.
+     *
+     * @param int $idSba14
+     * @return array
+     */
+    public function getHistorialExclusion($idSba14) {
+        if (!$this->excluirCreada()) {
+            return [];
+        }
+
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT ID, MOTIVO, VIGENTE, USUARIO, FECHA_ALTA, FECHA_BAJA
+             FROM dbo." . self::TABLA_EXCLUIDO . "
+             WHERE ID_SBA14 = ?
+             ORDER BY ID DESC",
+            [intval($idSba14)]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer el historial de exclusiones'));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $v[] = [
+                'ID' => intval($row['ID']),
+                'MOTIVO' => trim((string) $row['MOTIVO']),
+                'VIGENTE' => intval($row['VIGENTE']),
+                'USUARIO' => $row['USUARIO'],
+                'FECHA_ALTA' => $this->fechaHora($row['FECHA_ALTA']),
+                'FECHA_BAJA' => $this->fechaHora($row['FECHA_BAJA'])
             ];
         }
 
@@ -780,8 +1353,14 @@ class Echeqs {
             $permitidos[intval($fila['ID_SBA14'])] = true;
         }
 
-        $validos = array_values(array_intersect_key($pedidos, $permitidos));
-        $rechazados = array_values(array_diff_key($pedidos, $permitidos));
+        /* array_keys() Y NO array_values(): $pedidos esta INDEXADO por id -es
+           lo que deduplica la lista que llega- y sus valores son todos true.
+           Con array_values() lo que viajaba a la consulta era una lista de
+           true, que SQL Server convierte a 1, y las veinte marcas terminaban
+           todas sobre el cheque 1. Es el mismo indexado y el mismo cuidado en
+           excluirCheques(). */
+        $validos = array_keys(array_intersect_key($pedidos, $permitidos));
+        $rechazados = array_keys(array_diff_key($pedidos, $permitidos));
 
         if (empty($validos)) {
             throw new Exception('Ninguno de los ' . count($pedidos) . ' cheque(s) recibidos está '
@@ -1353,6 +1932,26 @@ class Echeqs {
 
         if (array_key_exists('FECHA_PAGO', $row)) {
             $fila['FECHA_PAGO'] = Horizonte::normalizarFecha($row['FECHA_PAGO']);
+        }
+
+        /* EXCLUIDO SALE DE QUE HAYA MOTIVO, y no de una columna aparte: la fila
+           de exclusion vigente es la que trae el motivo, y el motivo es NOT
+           NULL. Un booleano propio seria un segundo dato que puede contradecir
+           al primero.
+
+           Las tres columnas van SIEMPRE, aunque el script no se haya corrido:
+           asi ni la pantalla ni el proveedor tienen que preguntar si existen
+           antes de leer una fila. */
+        if (array_key_exists('MOTIVO_EXCLUSION', $row)) {
+            $motivo = ($row['MOTIVO_EXCLUSION'] === null)
+                ? null : trim((string) $row['MOTIVO_EXCLUSION']);
+
+            $fila['EXCLUIDO'] = ($motivo !== null && $motivo !== '');
+            $fila['MOTIVO_EXCLUSION'] = $motivo;
+            $fila['EXCLUSION_USUARIO'] = isset($row['EXCLUSION_USUARIO'])
+                ? $row['EXCLUSION_USUARIO'] : null;
+            $fila['EXCLUSION_FECHA'] = isset($row['EXCLUSION_FECHA'])
+                ? $this->fechaHora($row['EXCLUSION_FECHA']) : null;
         }
 
         return $fila;

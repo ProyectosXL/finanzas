@@ -176,10 +176,20 @@ class CashflowRegistry {
             'series' => ['COBRANZA' => 'Cobranzas electronicas']
         ],
 
-        /* La serie sale UNICAMENTE de los cheques en cartera. La sub-pestana
+        /* Las series salen UNICAMENTE de los cheques en cartera. La sub-pestana
            Venta Cobrada Anticipada de esa misma pantalla no aporta ninguna
            serie: su efecto es restar de la cobranza proyectada de Ventas. Ver
-           el encabezado de Providers/EcheqsProvider.php. */
+           el encabezado de Providers/EcheqsProvider.php.
+
+           UN SOLO CORTE: A_COBRAR + A_COBRAR_EXCLUIDOS = A_COBRAR_TODO.
+
+           OJO CON 'A_COBRAR': YA NO TRAE TODO. Trae la cartera que se va a
+           poder cobrar, o sea sin los cheques excluidos a mano. Es el codigo
+           que la fila del tablero ya tenia configurado y por eso no cambio
+           -asi el circuito de exclusion entro sin repuntar ninguna fila-, pero
+           su significado si: lo que A_COBRAR era hasta entonces es hoy
+           A_COBRAR_TODO. Mientras no haya ningun cheque excluido los dos valen
+           lo mismo. */
         'ECHEQS' => [
             'nombre' => 'Echeqs',
             'descripcion' => 'Echeqs en cartera pendientes de acreditacion',
@@ -188,7 +198,22 @@ class CashflowRegistry {
             'moneda' => 'ARS',
             'disponible' => true,
             'tab' => 'echeqs',
-            'series' => ['A_COBRAR' => 'Echeqs a cobrar']
+            'series' => [
+                'A_COBRAR' => 'Echeqs a cobrar (sin los excluidos a mano)',
+                'A_COBRAR_EXCLUIDOS' => 'Solo los echeqs excluidos a mano, uno por uno',
+                'A_COBRAR_TODO' => 'Echeqs en cartera, TODOS: cobrables y excluidos'
+            ],
+            /* El total es A_COBRAR_TODO, igual que en Proveedores Locales: la
+               fila del tablero usa A_COBRAR porque asi se decidio, pero el
+               universo contra el que se mide el doble conteo es el otro.
+
+               NO HACE FALTA declarar 'particiones': hay un solo corte, y sin
+               declaracion el validador toma todas las partes como el mismo
+               corte, que es exactamente lo que son. Las dos pueden convivir
+               -son las dos mitades- y cualquiera de ellas junto al total, no. */
+            'componentes' => [
+                'A_COBRAR_TODO' => ['A_COBRAR', 'A_COBRAR_EXCLUIDOS']
+            ]
         ],
 
         /* ---- Modulos que todavia no existen -------------------------------- */

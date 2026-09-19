@@ -684,10 +684,272 @@ chequear('y explica la consecuencia', true, strpos($roto->warnings()[0], 'en cer
 // chequeo es el que lo va a frenar: ver el encabezado de EcheqsProvider.
 $meta = CashflowRegistry::meta('ECHEQS');
 
-chequear('el registro declara una sola serie', 1, count($meta['series']));
-chequear('y es la de cartera', true, isset($meta['series']['A_COBRAR']));
+/* TRES SERIES, Y LAS TRES SALEN DE CARTERA. La sub-pestana de venta cobrada
+   anticipada sigue sin aportar ninguna: si algun dia aparece una cuarta serie
+   alimentada por el pre-chequeado, este chequeo es el que lo va a frenar. Ver
+   el encabezado de EcheqsProvider. */
+chequear('el registro declara las tres series de cartera', 3, count($meta['series']));
+chequear('la que usa la fila del tablero', true, isset($meta['series']['A_COBRAR']));
+chequear('la de los excluidos a mano', true, isset($meta['series']['A_COBRAR_EXCLUIDOS']));
+chequear('y el universo', true, isset($meta['series']['A_COBRAR_TODO']));
 chequear('la pestana a la que enlaza el tablero', 'echeqs', $meta['tab']);
 chequear('y la moneda', 'ARS', $meta['moneda']);
+
+/* EL TOTAL ES A_COBRAR_TODO, NO A_COBRAR, y el registro tiene que decirlo: es
+   contra el universo que se mide el doble conteo. Si alguien declarara
+   A_COBRAR como total -que es lo que era antes de la exclusion-, el validador
+   dejaria activar la fila de excluidos al lado de la de cobrables creyendo que
+   son total y parte. */
+chequear('el total declarado es el universo', ['A_COBRAR', 'A_COBRAR_EXCLUIDOS'],
+    $meta['componentes']['A_COBRAR_TODO']);
+chequear('y A_COBRAR no se declara total de nada', false,
+    isset($meta['componentes']['A_COBRAR']));
+
+/* UN SOLO CORTE, asi que NO se declaran 'particiones'. Sin declararlas el
+   validador toma todas las partes como el mismo corte, que es exactamente lo
+   que son: las dos mitades pueden convivir en el tablero. Declarar un corte
+   aca seria copiar el caso de Proveedores Locales, que tiene tres. */
+chequear('no declara particiones: hay un solo corte', false, isset($meta['particiones']));
+
+/* ================================================================
+   EXCLUIR CHEQUES DE CARTERA DEL CASHFLOW
+
+   El tilde saca el importe de la fila del tablero. Lo que no puede pasar nunca
+   es que ese importe DESAPAREZCA: tiene que quedar en su propia serie, y las
+   dos partes tienen que seguir cerrando contra el universo.
+
+   Las reglas van primero sin base, sobre el reparto del proveedor, que es
+   estatico y puro por este motivo. Despues se verifican contra los datos
+   reales, en la seccion de la base.
+   ================================================================ */
+seccion('el motivo de la exclusion es obligatorio');
+
+/* SE VALIDA EN EL BACK y no en la pantalla: el endpoint es alcanzable sin
+   pasar por la grilla. Un cheque sacado del cashflow sin motivo no lo explica
+   nadie tres meses despues. */
+chequearLanza('un motivo vacio se rechaza',
+    function() { Echeqs::validarMotivoExclusion(''); });
+chequearLanza('y uno de solo espacios tambien -un motivo en blanco no es un motivo-',
+    function() { Echeqs::validarMotivoExclusion('    '); });
+chequearLanza('null tampoco alcanza',
+    function() { Echeqs::validarMotivoExclusion(null); });
+
+chequear('un motivo real se acepta y se limpia',
+    'El cliente avisó que no lo cubre',
+    Echeqs::validarMotivoExclusion('  El cliente avisó que no lo cubre  '));
+
+// Se recorta al largo de la columna, que es 200. Un motivo mas largo entraria
+// truncado por la base y nadie sabria donde se corto.
+chequear('se recorta al largo de la columna', 200,
+    mb_strlen(Echeqs::validarMotivoExclusion(str_repeat('á', 300))));
+
+// El mensaje tiene que hablar del gesto que se estaba haciendo: "este cheque"
+// cuando es uno y "estos cheques" cuando son varios.
+chequearLanza('el mensaje de uno habla de un cheque',
+    function() { Echeqs::validarMotivoExclusion('', 1); },
+    'Poné el motivo por el que este cheque no se va a poder cobrar. Sin motivo, '
+    . 'dentro de tres meses nadie va a poder explicar por qué falta ese importe en el '
+    . 'disponible.');
+
+seccion('el corte del proveedor: la plata no desaparece');
+
+require_once __DIR__ . '/../cashflow/Class/Providers/EcheqsProvider.php';
+
+/** Una fila agregada de las que devuelve Echeqs::getEcheqsCarteraTotales() */
+function carteraTotal($fecha, $importe, $excluido = false) {
+    return ['FECHA_PAGO' => $fecha, 'EXCLUIDO' => $excluido, 'IMPORTE' => $importe];
+}
+
+/** El total de una serie, incluyendo lo que quedo fuera del eje */
+function totalSerie($s) {
+    return array_sum($s['dias']) + array_sum($s['meses'])
+        + $s['fuera_horizonte'] + $s['sin_fecha'];
+}
+
+/* EL REPARTO SE CORRE SOBRE FILAS ARMADAS A MANO. Es estatico y puro para
+   esto: los casos que importan -toda la cartera excluida, un excluido con fecha
+   fuera del horizonte- hoy no existen en la base y van a existir en cuanto
+   alguien tilde. Es el criterio de ProveedoresProvider::seriesDeItem(). */
+
+chequear('un cheque normal va al universo y a la fila del tablero',
+    ['A_COBRAR_TODO', 'A_COBRAR'],
+    EcheqsProvider::seriesDeItem(carteraTotal('2026-09-10', 100.0)));
+chequear('uno excluido va al universo y a la de excluidos',
+    ['A_COBRAR_TODO', 'A_COBRAR_EXCLUIDOS'],
+    EcheqsProvider::seriesDeItem(carteraTotal('2026-09-10', 100.0, true)));
+
+// SIEMPRE DOS DESTINOS: el universo y UNA de las dos mitades. Nunca las dos
+// mitades, que seria contar el importe dos veces adentro del mismo corte.
+chequear('siempre va a exactamente dos series', 2,
+    count(EcheqsProvider::seriesDeItem(carteraTotal('2026-09-10', 100.0, true))));
+
+$s = EcheqsProvider::repartir($h, [
+    carteraTotal('2026-09-10', 1000.0),
+    carteraTotal('2026-09-10', 400.0, true),
+    carteraTotal('2026-11-15', 2000.0),
+    carteraTotal('2026-11-15', 600.0, true)
+]);
+
+chequear('la fila del tablero trae solo lo cobrable',
+    3000.0, totalSerie($s[EcheqsProvider::SERIE_COBRABLE]));
+chequear('lo excluido queda en su propia serie',
+    1000.0, totalSerie($s[EcheqsProvider::SERIE_EXCLUIDOS]));
+chequear('y el universo es el de siempre',
+    4000.0, totalSerie($s[EcheqsProvider::SERIE_TODO]));
+
+/* EL INVARIANTE QUE IMPORTA, y el unico que no puede romperse nunca: el importe
+   excluido no desaparece, cambia de serie. Si esto falla, alguien hizo que la
+   exclusion RESTE en vez de MOVER, y el cuadro deja de cerrar contra si mismo
+   sin que ninguna pantalla lo note. */
+chequear('las dos partes cierran contra el universo',
+    totalSerie($s[EcheqsProvider::SERIE_TODO]),
+    totalSerie($s[EcheqsProvider::SERIE_COBRABLE])
+        + totalSerie($s[EcheqsProvider::SERIE_EXCLUIDOS]));
+
+// Y cierra COLUMNA POR COLUMNA, no solo en el total: una exclusion que moviera
+// el importe de fecha daria el mismo total y un cuadro distinto.
+$porColumna = true;
+
+foreach (['dias', 'meses'] as $rama) {
+    foreach ($s[EcheqsProvider::SERIE_TODO][$rama] as $k => $v) {
+        if (abs($v - ($s[EcheqsProvider::SERIE_COBRABLE][$rama][$k]
+                + $s[EcheqsProvider::SERIE_EXCLUIDOS][$rama][$k])) > 0.001) {
+            $porColumna = false;
+        }
+    }
+}
+
+chequear('y cierran columna por columna, no solo en el total', true, $porColumna);
+
+seccion('los casos de borde del reparto');
+
+// SIN NADA EXCLUIDO, la fila del tablero vale lo mismo que el universo. Es el
+// estado del dia que se corre el script: el tablero no se mueve ni un peso.
+$s = EcheqsProvider::repartir($h, [carteraTotal('2026-09-10', 1000.0)]);
+
+chequear('sin exclusiones, la fila es el universo entero',
+    totalSerie($s[EcheqsProvider::SERIE_TODO]),
+    totalSerie($s[EcheqsProvider::SERIE_COBRABLE]));
+chequear('y la serie de excluidos existe igual, en cero',
+    0.0, totalSerie($s[EcheqsProvider::SERIE_EXCLUIDOS]));
+
+/* LA SERIE VACIA TIENE QUE EXISTIR AUNQUE NO HAYA NADA EXCLUIDO. Si no, una
+   fila del tablero configurada contra ella se dibujaria como "sin datos" -con
+   el icono de que su modulo no devolvio nada- en vez de mostrar un cero limpio,
+   que es lo cierto: no hay nada excluido. Es el criterio de
+   ProveedoresProvider::repartir(). */
+chequear('las tres series existen siempre', 3, count($s));
+
+// TODO EXCLUIDO: la fila del tablero va en cero y el universo no se mueve.
+$s = EcheqsProvider::repartir($h, [carteraTotal('2026-09-10', 1000.0, true)]);
+
+chequear('con todo excluido, la fila del tablero va en cero',
+    0.0, totalSerie($s[EcheqsProvider::SERIE_COBRABLE]));
+chequear('y el universo sigue siendo el mismo',
+    1000.0, totalSerie($s[EcheqsProvider::SERIE_TODO]));
+
+/* LO QUE CAE FUERA DEL EJE SE INFORMA UNA SOLA VEZ, en el universo. Contarlo
+   tambien en la parte haria que el aviso del tablero saliera repetido diciendo
+   dos veces el mismo importe. */
+$s = EcheqsProvider::repartir($h, [carteraTotal('2040-01-01', 500.0, true)]);
+
+chequear('lo de fuera del horizonte se informa en el universo',
+    500.0, $s[EcheqsProvider::SERIE_TODO]['fuera_horizonte']);
+chequear('y NO se repite en la parte',
+    0, $s[EcheqsProvider::SERIE_EXCLUIDOS]['fuera_horizonte']);
+
+seccion('lo excluido se informa, aunque no se vea');
+
+/* LOS EXCLUIDOS SE ESCONDEN POR DEFECTO EN LA PANTALLA, asi que el resumen es
+   lo unico que hace notar que falta un importe. Y los totales de las tarjetas
+   salen del backend: el front no resta nada. */
+
+/** Una fila del payload, ya con sus totales por vista resueltos */
+function filaCartera($id, $importe, $excluido = false, $motivo = null) {
+    return [
+        'ID_SBA14' => $id,
+        'IMPORTE' => $importe,
+        'EXCLUIDO' => $excluido,
+        'MOTIVO_EXCLUSION' => $motivo,
+        'total_tramo' => $importe,
+        'total_meses' => 0,
+        'total_horizonte' => $importe
+    ];
+}
+
+$r = Echeqs::resumenExcluidos([
+    filaCartera(1, 1000.0),
+    filaCartera(2, 400.0, true, 'Cliente en concurso'),
+    filaCartera(3, 600.0, true, 'Cliente en concurso'),
+    filaCartera(4, 250.0, true, 'Judicializado')
+]);
+
+chequear('cuenta los cheques excluidos', 3, $r['cheques']);
+chequear('y suma su importe', 1250.0, $r['importe']);
+chequear('los totales por vista salen de las filas, no del navegador',
+    1250.0, $r['total_horizonte']);
+
+// Los motivos se nombran en el aviso, y repetirlos no dice nada nuevo: dos
+// cheques con el mismo motivo son un motivo.
+chequear('los motivos no se repiten', ['Cliente en concurso', 'Judicializado'],
+    $r['motivos']);
+
+chequear('sin nada excluido el resumen es cero', 0,
+    Echeqs::resumenExcluidos([filaCartera(1, 1000.0)])['cheques']);
+chequear('y una lista vacia tampoco rompe', 0, Echeqs::resumenExcluidos([])['cheques']);
+
+/* LAS TARJETAS MUESTRAN EL NETO. El total con los excluidos adentro diria que
+   esa plata entra, que es justamente lo que el tilde niega. */
+$netos = Echeqs::totalesNetos(
+    ['total_tramo' => 2250.0, 'total_meses' => 0.0, 'total_horizonte' => 2250.0], $r);
+
+chequear('el neto del tramo descuenta lo excluido', 1000.0, $netos['total_tramo']);
+chequear('y el del horizonte tambien', 1000.0, $netos['total_horizonte']);
+
+// Sin exclusiones, el neto es el bruto: el dia que se corre el script la
+// pantalla muestra exactamente lo que mostraba antes.
+$sinNada = Echeqs::totalesNetos(
+    ['total_tramo' => 2250.0, 'total_meses' => 0.0, 'total_horizonte' => 2250.0],
+    Echeqs::resumenExcluidos([]));
+
+chequear('sin exclusiones el neto es el bruto', 2250.0, $sinNada['total_horizonte']);
+
+seccion('el cableado de la pantalla de exclusion');
+
+/* SE VERIFICA LEYENDO LOS ARCHIVOS, igual que test_tablas_controles.php y por
+   el mismo motivo: lo que se rompe en silencio de esta pantalla no es su
+   logica sino el CABLEADO. Un id que no coincide entre la pestana y el JS no
+   tira error, no avisa: el interruptor se tilda y no pasa nada, y desde la
+   pantalla es indistinguible de que no haya nada excluido. */
+
+$tabEcheqs = file_get_contents(__DIR__ . '/../cashflow/Tabs/echeqs.php');
+$jsEcheqs = file_get_contents(__DIR__ . '/../cashflow/Js/Ingresos-Echeqs.js');
+$ctrlEcheqs = file_get_contents(__DIR__ . '/../cashflow/Controller/EcheqsController.php');
+
+foreach (['verExcluidosEch', 'selTodosEch', 'barraSelEch', 'selResumenEch',
+          'btnExcluirSelEch', 'btnIncluirSelEch', 'btnLimpiarSelEch',
+          'excluidosEch'] as $id) {
+    chequear('la pestana tiene #' . $id, true, strpos($tabEcheqs, 'id="' . $id . '"') !== false);
+    chequear('y el JS lo usa', true, strpos($jsEcheqs, "'" . $id . "'") !== false);
+}
+
+// La accion del controller y la que pide el JS tienen que ser la misma cadena.
+chequear('el JS pide la accion de excluir', true,
+    strpos($jsEcheqs, "action=excluirCheques") !== false);
+chequear('y el controller la atiende', true,
+    strpos($ctrlEcheqs, "case 'excluirCheques':") !== false);
+
+/* LOS EXCLUIDOS ARRANCAN ESCONDIDOS. Si el interruptor naciera tildado, la
+   pantalla mostraria por defecto plata que ya se decidio que no entra, y el
+   total del pie no coincidiria con la fila del tablero. */
+chequear('el interruptor de ver excluidos NO nace tildado', false,
+    (bool) preg_match('/id="verExcluidosEch"[^>]*checked/', $tabEcheqs));
+
+/* EL TILDE DE CARTERA NO ES EL DE PRE-CHEQUEADO. Son dos decisiones distintas
+   sobre el mismo cheque y cada una tiene su accion: si alguien las uniera, el
+   endpoint de una empezaria a mover la tabla de la otra. */
+chequear('el controller sigue teniendo la accion de marcar, aparte', true,
+    strpos($ctrlEcheqs, "case 'marcarCheques':") !== false);
 
 /* ================================================================
    Contra datos reales
@@ -720,39 +982,104 @@ foreach ($cartera as $c) {
 chequear('ningun cheque en cartera tiene fecha anterior a hoy', 0, $pasadas);
 chequear('ni fecha nula: la centinela de 1800 la filtra el WHERE', 0, $sinFecha);
 
-// Las dos consultas de cartera no se pueden desincronizar en silencio: la del
-// detalle y la agregada tienen que dar el mismo total.
+/* Las dos consultas de cartera no se pueden desincronizar en silencio: la del
+   detalle y la agregada tienen que dar el mismo total, y tienen que decir lo
+   mismo sobre QUE esta excluido. Desde que la agregada abre por EXCLUIDO, las
+   dos aplican ese corte y un WHERE distinto en cualquiera de las dos dejaria la
+   pantalla mostrando una cosa y el tablero otra. */
 $sumaDetalle = 0;
+$sumaDetalleExcluida = 0;
 
 foreach ($cartera as $c) {
     $sumaDetalle += $c['IMPORTE'];
+
+    if (!empty($c['EXCLUIDO'])) {
+        $sumaDetalleExcluida += $c['IMPORTE'];
+    }
 }
 
 $sumaAgregado = 0;
+$sumaAgregadoExcluida = 0;
 
 foreach ($echeqs->getEcheqsCarteraTotales() as $t) {
     $sumaAgregado += $t['IMPORTE'];
+
+    if (!empty($t['EXCLUIDO'])) {
+        $sumaAgregadoExcluida += $t['IMPORTE'];
+    }
 }
 
 chequear('getEcheqsCarteraTotales da el mismo total que getEcheqsCartera',
     round($sumaDetalle, 2), round($sumaAgregado, 2));
+chequear('y las dos coinciden en cuanto esta excluido',
+    round($sumaDetalleExcluida, 2), round($sumaAgregadoExcluida, 2));
 
 seccion('la serie del tablero sale SOLO de cartera');
 
 $hReal = Horizonte::desdeParametros(new Parametros());
 $serieReal = CashflowRegistry::instanciar('ECHEQS')->series($hReal);
-$totalSerie = array_sum($serieReal['A_COBRAR']['dias'])
-    + array_sum($serieReal['A_COBRAR']['meses'])
-    + $serieReal['A_COBRAR']['fuera_horizonte']
-    + $serieReal['A_COBRAR']['sin_fecha'];
+
+/** El total de una serie real, con lo que quedo fuera del eje incluido */
+function totalReal($s) {
+    return array_sum($s['dias']) + array_sum($s['meses'])
+        + $s['fuera_horizonte'] + $s['sin_fecha'];
+}
 
 // EL INVARIANTE QUE IMPORTA: tildar cheques en la sub-pestana de venta cobrada
-// anticipada no puede mover este numero. Se verifica por construccion -la serie
-// tiene que ser exactamente el total de cartera- porque las marcas viven en una
-// tabla que esta consulta no toca. Si algun dia esto falla, o la serie dejo de
-// salir de cartera o alguien la conecto al maestro.
-chequear('la serie A_COBRAR es exactamente el total de cheques en cartera',
-    round($sumaDetalle, 2), round($totalSerie, 2));
+// anticipada no puede mover estos numeros. Se verifica por construccion -el
+// universo tiene que ser exactamente el total de cartera- porque las marcas
+// viven en una tabla que esta consulta no toca. Si algun dia esto falla, o la
+// serie dejo de salir de cartera o alguien la conecto al maestro.
+chequear('A_COBRAR_TODO es exactamente el total de cheques en cartera',
+    round($sumaDetalle, 2), round(totalReal($serieReal['A_COBRAR_TODO']), 2));
+
+/* Y ES EL MISMO NUMERO QUE DABA A_COBRAR ANTES DE QUE EXISTIERA LA EXCLUSION.
+   El dia que se corre el script no hay nada excluido, asi que el tablero no se
+   mueve ni un peso; el dia que alguien tilde, lo que cambia es de que serie
+   sale, no cuanta plata hay. Esta prueba es la que fija esa promesa contra los
+   datos reales. */
+chequear('la fila del tablero es la cartera MENOS lo excluido',
+    round($sumaDetalle - $sumaDetalleExcluida, 2),
+    round(totalReal($serieReal['A_COBRAR']), 2));
+chequear('y lo excluido esta entero en su propia serie',
+    round($sumaDetalleExcluida, 2),
+    round(totalReal($serieReal['A_COBRAR_EXCLUIDOS']), 2));
+
+/* LA PARTICION CIERRA CONTRA LOS DATOS REALES, que es lo que este circuito no
+   puede romper nunca: el importe excluido no desaparece del cuadro, cambia de
+   serie. */
+chequear('las dos partes suman el universo, con los datos de hoy',
+    round(totalReal($serieReal['A_COBRAR_TODO']), 2),
+    round(totalReal($serieReal['A_COBRAR'])
+        + totalReal($serieReal['A_COBRAR_EXCLUIDOS']), 2));
+
+// Y columna por columna: una exclusion que moviera el importe de fecha daria el
+// mismo total y un cuadro distinto.
+$cierraPorColumna = true;
+
+foreach (['dias', 'meses'] as $rama) {
+    foreach ($serieReal['A_COBRAR_TODO'][$rama] as $k => $v) {
+        if (abs($v - ($serieReal['A_COBRAR'][$rama][$k]
+                + $serieReal['A_COBRAR_EXCLUIDOS'][$rama][$k])) > 0.001) {
+            $cierraPorColumna = false;
+        }
+    }
+}
+
+chequear('y cierran columna por columna', true, $cierraPorColumna);
+
+/* El resumen que alimenta el aviso del tablero tiene que decir lo mismo que la
+   serie. Son dos consultas distintas -una agrupa por fecha, la otra por
+   motivo- y si dejaran de coincidir, el aviso diria un importe y el cuadro
+   mostraria otro. */
+chequear('el resumen de exclusiones coincide con la serie',
+    round($sumaDetalleExcluida, 2),
+    round($echeqs->getExclusionesEnCartera()['importe'], 2));
+
+if ($sumaDetalleExcluida == 0) {
+    Pruebas::saltear('hoy no hay ningun cheque excluido: el corte se verifica en cero, '
+        . 'que es el estado del dia que se corre el script');
+}
 
 seccion('venta cobrada anticipada');
 

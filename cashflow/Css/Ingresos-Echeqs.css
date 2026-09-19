@@ -289,3 +289,42 @@
 .tab-echeqs .btn-primary i {
     color: #ffffff !important;
 }
+
+/* ============================================================
+   EXCLUIR CHEQUES DE CARTERA DEL CASHFLOW
+
+   Mismo lenguaje visual que la exclusión de facturas de Proveedores Locales:
+   son el mismo gesto sobre dos pantallas y tienen que leerse igual.
+   ============================================================ */
+
+.tab-echeqs .ech-barra-sel {
+    background-color: #eef4ff;
+    border-bottom: 1px solid #c8d8f5;
+}
+
+/* La marca de que ese cheque YA está excluido. Va en la misma celda que el
+   checkbox de selección porque son dos cosas distintas sobre la misma fila —una
+   es "lo elegí" y la otra "está afuera"— y separarlas en dos columnas obligaría
+   a leer dos celdas para saber en qué estado está. */
+.tab-echeqs .ech-badge-excluido {
+    display: inline-block;
+    margin-top: 2px;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #8a3d3d;
+    background: #f7e4e4;
+    border-radius: 3px;
+    padding: 0 4px;
+    cursor: help;
+}
+
+/* La fila excluida se atenúa y su importe va tachado: no entra al cashflow, y
+   eso tiene que verse sin leer la celda de la marca. */
+.tab-echeqs tr.ech-excluido {
+    opacity: 0.62;
+}
+
+.tab-echeqs tr.ech-excluido .currency {
+    text-decoration: line-through;
+}

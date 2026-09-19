@@ -12,6 +12,18 @@
  * se decide qué columnas van en cada vista: eso lo resuelve Class/EjeVista.php y
  * viene en el payload.
  *
+ * CADA SUB-PESTAÑA TIENE SU TILDE Y NO SON EL MISMO:
+ *
+ *   Cartera       EXCLUIR  se eligen con checks y se confirman juntos, con UN
+ *                          motivo, desde la barra de selección. Saca el importe
+ *                          de la fila del tablero.
+ *   Prechequeado  MARCAR   el check actúa solo, porque tildar y destildar son
+ *                          el trabajo de todos los días en esa pantalla.
+ *
+ * LA DIFERENCIA DE GESTO ES A PROPÓSITO: destildar un cheque pre-chequeado se
+ * deshace destildándolo de nuevo, y sacar plata del disponible no puede
+ * dispararse con un clic suelto ni quedar sin motivo.
+ *
  * EL GUARDADO DE LAS MARCAS NO ES OPTIMISTA EN SILENCIO. El tilde se pinta
  * enseguida para que la pantalla responda, pero si el POST falla se revierte y
  * se muestra el error: una marca que se ve pero no se guardó desajusta la
@@ -72,6 +84,15 @@
         conectar('btnExportEch', exportarCartera);
         conectar('btnRefreshPre', cargarPrechequeado);
 
+        conectar('selTodosEch', seleccionarVisibles);
+        conectar('btnExcluirSelEch', function() { accionSeleccion(true); });
+        conectar('btnIncluirSelEch', function() { accionSeleccion(false); });
+        conectar('btnLimpiarSelEch', function() {
+            seleccion = {};
+            dibujarCartera();
+        });
+
+        escuchar('verExcluidosEch', 'change', dibujarCartera);
         escuchar('busquedaEch', 'keyup', dibujarCartera);
         escuchar('busquedaPre', 'keyup', dibujarPrechequeado);
         escuchar('filtroClientePre', 'change', dibujarPrechequeado);
@@ -130,9 +151,13 @@
     /**
      * Los tres indicadores miden los tres períodos de las tres vistas, así que
      * cada tarjeta se corresponde con un botón.
+     *
+     * MUESTRAN EL NETO —sin los excluidos—, que es lo que de verdad entra al
+     * cashflow y lo mismo que suma la fila del tablero. Los dos totales vienen
+     * del backend: acá no se resta nada.
      */
     function pintarKpiCartera() {
-        var totales = datosCartera.totales || {};
+        var totales = datosCartera.totales_netos || datosCartera.totales || {};
         var vs = datosCartera.vistas || {};
 
         texto('totalDiasEch', pesos(totales.total_tramo));
@@ -143,10 +168,59 @@
         texto('rotuloMesesEch', vs.meses ? vs.meses.periodo : '');
         texto('rotuloGeneralEch', vs.completo ? vs.completo.periodo : '');
 
-        texto('detalleCarteraEch', (datosCartera.filas || []).length
-            + ' cheque(s) de terceros, por fecha de pago');
+        /* CUENTA LOS QUE ENTRAN AL CASHFLOW, no los que hay. Con los excluidos
+           escondidos, decir "390 cheque(s)" arriba de una tabla con 387 filas
+           manda a buscar tres que no están, y el número tampoco describiría el
+           importe de al lado, que ya viene neto. */
+        var e = datosCartera.excluidos || {};
+        var cobrables = (datosCartera.filas || []).length - (e.cheques || 0);
+
+        texto('detalleCarteraEch', cobrables + ' cheque(s) de terceros, por fecha de pago'
+            + (e.cheques ? ' · ' + e.cheques + ' excluido(s) aparte' : ''));
 
         mostrar('summarySectionEch', true, 'flex');
+    }
+
+    /**
+     * Cuánta plata está excluida, y con qué motivos.
+     *
+     * SE DICE AUNQUE NO SE VEA, y sobre todo por eso: los excluidos están
+     * escondidos por defecto, así que sin este cartel la única forma de notar
+     * que falta un importe sería acordarse de prender el interruptor. Es el
+     * mismo aviso que EcheqsProvider deja en el tablero.
+     */
+    function pintarExcluidos() {
+        var cont = document.getElementById('excluidosEch');
+
+        if (!cont) {
+            return;
+        }
+
+        var e = (datosCartera && datosCartera.excluidos) || {};
+
+        if (!e.cheques) {
+            mostrar('excluidosEch', false);
+            return;
+        }
+
+        var motivos = (e.motivos || []).slice(0, 3);
+        var mas = (e.motivos || []).length - motivos.length;
+        var viendo = verExcluidos();
+
+        cont.innerHTML = '<small><i class="fas fa-ban me-1"></i>'
+            + '<strong>' + e.cheques + ' cheque(s) por ' + escapar(pesosPlano(e.importe))
+            + '</strong> están excluidos: esa plata no entra al cashflow y ya está '
+            + 'descontada de las tarjetas de arriba.'
+            + (motivos.length
+                ? ' Motivos: ' + motivos.map(escapar).join('; ')
+                  + (mas > 0 ? '; y ' + mas + ' más.' : '.')
+                : '')
+            + (viendo
+                ? ' Se ven en la tabla, atenuados.'
+                : ' Tildá <em>Ver excluidos</em> para revisarlos.')
+            + '</small>';
+
+        mostrar('excluidosEch', true);
     }
 
     function dibujarCartera() {
@@ -160,6 +234,8 @@
         pintarEncabezadoEje(cols);
         pintarFilasCartera(filas, cols);
         pintarTotalesCartera(filas, cols);
+        pintarExcluidos();
+        pintarSeleccion();
     }
 
     function pintarEncabezadoEje(cols) {
@@ -193,17 +269,24 @@
         document.getElementById('ejeSubHeaderEch').innerHTML = html;
     }
 
+    /** Cuántas columnas descriptivas tiene la tabla de cartera */
+    var COLS_DESC_ECH = 6;
+
     function pintarFilasCartera(filas, cols) {
         var html = '';
 
         filas.forEach(function(f) {
-            html += '<tr>';
+            // El excluido se atenúa y lleva el importe tachado: no entra al
+            // cashflow, y eso tiene que verse sin leer la celda de la marca.
+            html += '<tr' + (f.EXCLUIDO ? ' class="ech-excluido"' : '')
+                 + ' data-id="' + f.ID_SBA14 + '">';
             html += '<td class="center"><span class="badge-cobro">' + fecha(f.FECHA_PAGO) + '</span></td>';
             html += '<td class="center">' + numeroCheque(f.N_CHEQUE) + '</td>';
             html += '<td>' + escapar(f.BANCO) + '</td>';
             html += '<td class="col-texto" title="' + escapar(f.CLIENTE) + '">'
                  + escapar(f.CLIENTE) + subtituloCodigo(f.COD_CLIENTE) + '</td>';
             html += '<td class="currency">' + pesos(f.IMPORTE) + '</td>';
+            html += '<td class="text-center">' + celdaExcluir(f) + '</td>';
 
             // Los importes por columna ya vienen resueltos: la regla de "día O
             // mes, nunca las dos" la aplicó el backend, una sola vez.
@@ -221,14 +304,33 @@
         });
 
         if (!filas.length) {
-            html = '<tr><td colspan="' + (6 + cols.length) + '" class="text-center text-muted py-4">'
-                 + (datosCartera.filas.length
-                        ? 'Ningún cheque coincide con la búsqueda.'
-                        : 'No hay cheques de terceros en cartera con fecha de hoy en adelante.')
-                 + '</td></tr>';
+            html = '<tr><td colspan="' + (COLS_DESC_ECH + cols.length + 1) + '" '
+                 + 'class="text-center text-muted py-4">' + mensajeVacioCartera() + '</td></tr>';
         }
 
         document.getElementById('bodyEch').innerHTML = html;
+
+        conectarSeleccion();
+    }
+
+    /**
+     * El mensaje del listado vacío distingue los motivos. "No hay cheques" no es
+     * lo mismo que "el filtro no encontró nada", y ninguno de los dos es "están
+     * todos escondidos porque están excluidos".
+     */
+    function mensajeVacioCartera() {
+        if (!datosCartera.filas.length) {
+            return 'No hay cheques de terceros en cartera con fecha de hoy en adelante.';
+        }
+
+        var e = datosCartera.excluidos || {};
+
+        if (!verExcluidos() && e.cheques && e.cheques === datosCartera.filas.length) {
+            return 'Todos los cheques en cartera están excluidos. Tildá "Ver excluidos" '
+                 + 'para revisarlos.';
+        }
+
+        return 'Ningún cheque coincide con la búsqueda.';
     }
 
     /**
@@ -247,6 +349,7 @@
         });
 
         html += '<td class="currency fw-bold">' + pesos(bruto) + '</td>';
+        html += '<td></td>';
 
         cols.forEach(function(col) {
             var total = 0;
@@ -270,16 +373,31 @@
         document.getElementById('totalesEch').innerHTML = html;
     }
 
-    /** El buscador mira cliente, banco y número de cheque */
+    /** Si el interruptor de ver excluidos está prendido */
+    function verExcluidos() {
+        var chk = document.getElementById('verExcluidosEch');
+
+        return !!(chk && chk.checked);
+    }
+
+    /**
+     * El buscador mira cliente, banco y número de cheque, y el interruptor
+     * decide si los excluidos entran.
+     *
+     * LOS EXCLUIDOS NO SE VEN POR DEFECTO: ya se decidió que esa plata no va a
+     * entrar, así que en el trabajo normal son ruido. Lo que esconden se dice
+     * arriba, siempre, y por eso esconderlos no es esconder nada.
+     */
     function filasCarteraVisibles() {
         var term = valor('busquedaEch').toLowerCase();
-
-        if (!term) {
-            return datosCartera.filas;
-        }
+        var verEx = verExcluidos();
 
         return datosCartera.filas.filter(function(f) {
-            return coincide(f, term);
+            if (!verEx && f.EXCLUIDO) {
+                return false;
+            }
+
+            return !term || coincide(f, term);
         });
     }
 
@@ -297,6 +415,289 @@
      */
     function exportarCartera() {
         exportarTabla('tablaEcheqs', 'Echeqs_cartera');
+    }
+
+    /* ================================================================
+       EXCLUIR CHEQUES DEL CASHFLOW
+
+       Es plata que NO se va a poder cobrar: el cliente avisó que no lo cubre,
+       el cheque quedó judicializado, está en gestión de cambio. El importe
+       sale de la fila del tablero y queda informado aparte, con su motivo.
+
+       APLICA SÓLO A CARTERA. El tilde de la otra sub-pestaña contesta otra
+       pregunta —si esa venta ya se cobró— y ninguna decisión implica la otra.
+
+       SE ELIGEN Y SE CONFIRMAN JUNTOS, con UN motivo para todos. Excluir los
+       doce cheques de un cliente que entró en concurso es UNA decisión, y doce
+       motivos distintos para una decisión son doce oportunidades de que digan
+       cosas distintas. El caso se resuelve con el buscador: filtrar el
+       cliente, "seleccionar todos los que se ven", y un motivo.
+
+       ES EL GESTO DEL TILDADO MASIVO DE LA OTRA SUB-PESTAÑA —el check del
+       encabezado toma todo lo visible— con una diferencia: acá el check de la
+       fila SELECCIONA y no actúa. Sacar plata del disponible no puede
+       dispararse con un clic suelto ni quedar sin motivo.
+       ================================================================ */
+
+    /** Ids de los cheques seleccionados. Sobrevive a los redibujos. */
+    var seleccion = {};
+
+    /** Por qué los dos botones de excluir pueden estar apagados */
+    var FALTA_EXCLUIR = 'Para excluir cheques hace falta correr '
+        + 'sql/cashflow_echeqs_excluir.sql contra la base central.';
+
+    /**
+     * La celda de selección.
+     *
+     * EL CHECK SE DIBUJA AUNQUE FALTE EL SCRIPT DE LA EXCLUSIÓN, y lo que se
+     * apaga son los dos botones de la barra —eso lo hace pintarSeleccion()—.
+     * Un check que no está no explica por qué no está; uno que está y una barra
+     * que dice qué falta, sí.
+     */
+    function celdaExcluir(f) {
+        var marca = f.EXCLUIDO
+            ? '<div><span class="ech-badge-excluido" title="'
+              + escapar('Excluido del cashflow: ' + (f.MOTIVO_EXCLUSION || 'sin motivo registrado')
+                  + '\n' + detalleExclusion(f))
+              + '">excluido</span></div>'
+            : '';
+
+        return '<input type="checkbox" class="form-check-input ech-sel"'
+            + (seleccion[f.ID_SBA14] ? ' checked' : '')
+            + ' data-id="' + f.ID_SBA14 + '"'
+            + ' title="' + escapar('Seleccionar este cheque para excluirlo del cashflow o '
+                + 'volver a incluirlo.') + '">' + marca;
+    }
+
+    /** Quién excluyó ese cheque y cuándo. Un tilde sin autor no lo explica nadie */
+    function detalleExclusion(f) {
+        return 'Excluido por ' + (f.EXCLUSION_USUARIO || 'sin usuario (todavía no hay login)')
+            + (f.EXCLUSION_FECHA ? ' el ' + fechaHora(f.EXCLUSION_FECHA) : '');
+    }
+
+    /** Los cheques seleccionados que hoy están a la vista */
+    function filasSeleccionadas() {
+        return filasCarteraVisibles().filter(function(f) { return !!seleccion[f.ID_SBA14]; });
+    }
+
+    /**
+     * La barra de acciones. Dice CUÁNTOS y CUÁNTO antes de que se apriete nada:
+     * excluir saca plata del disponible, y el importe es el dato que hace que
+     * alguien note que seleccionó de más.
+     */
+    function pintarSeleccion() {
+        var sel = filasSeleccionadas();
+        var total = 0;
+        var yaExcluidos = 0;
+
+        sel.forEach(function(f) {
+            total += Number(f.IMPORTE) || 0;
+            if (f.EXCLUIDO) { yaExcluidos++; }
+        });
+
+        mostrar('barraSelEch', sel.length > 0);
+        sincronizarSelTodos();
+
+        if (!sel.length) {
+            return;
+        }
+
+        texto('selResumenEch', sel.length + ' cheque(s) seleccionado(s) · ' + pesosPlano(total)
+            + (yaExcluidos ? ' · ' + yaExcluidos + ' ya excluido(s)' : ''));
+
+        /* Cada botón se apaga cuando no tiene nada que hacer: "Excluir" con
+           todo ya excluido, o "Volver a incluir" sin ninguno excluido. Un botón
+           que se puede apretar y no cambia nada es peor que uno apagado.
+
+           SIN EL SCRIPT los dos quedan apagados y lo dicen en el título: la
+           pantalla sigue andando para todo lo demás, que no depende de él. */
+        var puede = !!(datosCartera && datosCartera.excluir_cheque);
+        var btnEx = document.getElementById('btnExcluirSelEch');
+        var btnIn = document.getElementById('btnIncluirSelEch');
+
+        if (btnEx) {
+            btnEx.disabled = !puede || (yaExcluidos === sel.length);
+            btnEx.title = puede ? '' : FALTA_EXCLUIR;
+        }
+
+        if (btnIn) {
+            btnIn.disabled = !puede || (yaExcluidos === 0);
+            btnIn.title = puede ? '' : FALTA_EXCLUIR;
+        }
+    }
+
+    /**
+     * El check del encabezado toma o suelta TODO LO VISIBLE según el buscador y
+     * el interruptor de excluidos. Es el mismo gesto que el tildado masivo de la
+     * otra sub-pestaña.
+     *
+     * ACÁ NO PREGUNTA NADA, a diferencia de allá: seleccionar no escribe, y la
+     * pregunta viene después, en el diálogo del motivo, que además dice cuántos
+     * y por cuánto.
+     */
+    function seleccionarVisibles() {
+        var chk = document.getElementById('selTodosEch');
+        var visibles = filasCarteraVisibles();
+
+        if (chk && chk.checked) {
+            visibles.forEach(function(f) { seleccion[f.ID_SBA14] = true; });
+        } else {
+            visibles.forEach(function(f) { delete seleccion[f.ID_SBA14]; });
+        }
+
+        dibujarCartera();
+    }
+
+    /** El check del encabezado refleja si TODO lo visible está seleccionado */
+    function sincronizarSelTodos() {
+        var chk = document.getElementById('selTodosEch');
+
+        if (!chk) { return; }
+
+        var visibles = filasCarteraVisibles();
+        var elegidos = visibles.filter(function(f) { return !!seleccion[f.ID_SBA14]; }).length;
+
+        chk.checked = (visibles.length > 0 && elegidos === visibles.length);
+        chk.indeterminate = (elegidos > 0 && elegidos < visibles.length);
+    }
+
+    function conectarSeleccion() {
+        document.querySelectorAll('#bodyEch .ech-sel').forEach(function(chk) {
+            chk.addEventListener('change', function() {
+                // parseInt y no el atributo crudo: las claves de un objeto son
+                // strings igual, pero el resto del archivo indexa con
+                // f.ID_SBA14, que es un número. Dos formas de escribir la misma
+                // clave invitan a compararlas algún día con ===.
+                var id = parseInt(chk.dataset.id, 10);
+
+                if (chk.checked) {
+                    seleccion[id] = true;
+                } else {
+                    delete seleccion[id];
+                }
+
+                pintarSeleccion();
+            });
+        });
+    }
+
+    /**
+     * Excluye o vuelve a incluir lo seleccionado, con UN motivo para todos.
+     *
+     * El motivo se pide en un diálogo del módulo y no con el prompt del
+     * navegador: acá hay que leer cuántos cheques y por cuánta plata antes de
+     * escribir nada, y eso en un prompt no entra.
+     */
+    function accionSeleccion(excluir) {
+        var sel = filasSeleccionadas();
+
+        if (!sel.length) { return; }
+
+        // Lo que ya está como se lo quiere dejar no se vuelve a escribir: sería
+        // una versión idéntica en el historial y un número inflado en el
+        // mensaje.
+        var aplicar = sel.filter(function(f) { return !!f.EXCLUIDO !== excluir; });
+
+        if (!aplicar.length) { return; }
+
+        var total = 0;
+        var clientes = {};
+
+        aplicar.forEach(function(f) {
+            total += Number(f.IMPORTE) || 0;
+            clientes[f.COD_CLIENTE] = f.CLIENTE;
+        });
+
+        var codigos = Object.keys(clientes);
+        var detalle = aplicar.length + ' cheque(s) por ' + pesosPlano(total)
+            + (codigos.length === 1
+                ? ', todos de ' + codigos[0] + ' — ' + clientes[codigos[0]]
+                : ', de ' + codigos.length + ' clientes') + '.';
+
+        if (!excluir) {
+            Notificacion.confirmar({
+                titulo: 'Volver a incluir en el cashflow',
+                mensaje: '¿Devolver estos cheques al cashflow?',
+                detalle: detalle + ' Sus importes vuelven a la fila del tablero. La exclusión '
+                    + 'no se borra: queda en el historial, dada de baja.',
+                confirmar: 'Volver a incluir'
+            }).then(function(ok) {
+                if (ok) { guardarExclusion(aplicar, false, null); }
+            });
+
+            return;
+        }
+
+        Notificacion.pedirTexto({
+            titulo: 'Excluir del cashflow',
+            peligro: true,
+            mensaje: detalle,
+            detalle: 'Sus importes salen de la fila del tablero y quedan informados aparte, '
+                + 'con este motivo. El cheque sigue en cartera en Tango: lo que cambia es que '
+                + 'el cashflow deja de contar esa plata.',
+            etiqueta: 'Motivo (el mismo para todos)',
+            placeholder: 'Ej.: el cliente avisó que no lo cubre, judicializado, en gestión de cambio…',
+            maxlargo: 200,
+            valor: valorComun(aplicar, 'MOTIVO_EXCLUSION'),
+            invalido: 'Escribí el motivo: es lo único que después explica por qué falta ese '
+                + 'importe en el disponible.',
+            confirmar: 'Excluir ' + aplicar.length + ' cheque(s)'
+        }).then(function(motivo) {
+            if (motivo !== null) { guardarExclusion(aplicar, true, motivo); }
+        });
+    }
+
+    /**
+     * Si los seleccionados ya compartían un valor en ese campo, se ofrece de
+     * arranque. Si hay dos distintos no se elige uno: el diálogo abre vacío,
+     * porque proponer el del primero sería decidir por el usuario.
+     */
+    function valorComun(filas, campo) {
+        var unico = null;
+
+        for (var i = 0; i < filas.length; i++) {
+            var m = filas[i][campo] || '';
+
+            if (m === '') { continue; }
+            if (unico !== null && unico !== m) { return ''; }
+
+            unico = m;
+        }
+
+        return unico || '';
+    }
+
+    function guardarExclusion(filas, excluir, motivo) {
+        var cuerpo = {
+            excluir: excluir,
+            ids: filas.map(function(f) { return f.ID_SBA14; })
+        };
+
+        if (motivo !== null) { cuerpo.motivo = motivo; }
+
+        // La selección se limpia al guardar: los excluidos se esconden por
+        // defecto, así que dejarlos seleccionados mantendría una barra hablando
+        // de cheques que ya no están a la vista.
+        seleccion = {};
+
+        pedirJson(URL_ECHEQS + '?action=excluirCheques', cuerpo)
+            .then(function(data) {
+                // Se recarga en vez de parchear en memoria: el servidor devuelve
+                // el estado efectivo y puede haber rechazado alguno de los ids
+                // por haber salido de cartera.
+                Notificacion.exito(excluir
+                    ? data.tocados + ' cheque(s) excluidos. El tablero ya no cuenta esa plata.'
+                    : data.tocados + ' cheque(s) incluidos de nuevo en el cashflow.');
+
+                cargarCartera();
+            })
+            .catch(function(error) {
+                // No hay nada que revertir en pantalla: el check sólo
+                // selecciona, y la fila se repinta recién cuando el servidor
+                // confirma. Lo que sí hay que hacer es decir que no se guardó.
+                Notificacion.error('No se pudo guardar: ' + error.message);
+                dibujarCartera();
+            });
     }
 
     /* ================================================================
