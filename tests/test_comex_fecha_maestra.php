@@ -481,6 +481,73 @@ chequear('ni su funcion envoltorio', false,
 chequear('Crono Nacionalizacion sigue igual', true,
     strpos($htmlNac, 'data-exportar="tablaCronoNacionalizacion"') !== false);
 
+/* ================================================================
+   EL INTERRUPTOR DE VENCIDAS
+
+   Va SOLO en Proveedores Exterior, que es donde se pidió: la fecha estimada de
+   pago. Crono Nacionalizacion no lo tiene y por eso ve todas sus filas —
+   verVencidas() devuelve true cuando no hay interruptor en la pantalla, para
+   que una pestaña que no declara el control no pueda quedar escondiendo filas
+   sin que nada lo diga.
+   ================================================================ */
+seccion('las vencidas no se ven por defecto en Proveedores Exterior');
+
+chequear('el interruptor existe', true,
+    strpos($htmlExt, 'id="verVencidasProvExt"') !== false);
+
+/* SIN `checked`: apagado es el estado por defecto. Si alguien agrega el
+   atributo, la pestaña abre mostrando 27 filas de contenedores vencidos y el
+   pedido se deshace sin que nada falle. */
+chequear('y arranca apagado', false,
+    (bool) preg_match('/id="verVencidasProvExt"[^>]*\schecked/', $htmlExt));
+
+// Cuánto esconde se dice AL LADO, siempre: una tabla que esconde filas sin
+// decirlo se lee como que esos contenedores no existen.
+chequear('dice cuántas esconde', true,
+    strpos($htmlExt, 'id="estadoVencidasProvExt"') !== false);
+chequear('y el JS lo escribe', true,
+    strpos($jsExt, 'function pintarEstadoVencidas') !== false);
+
+seccion('el interruptor y el buscador son el mismo camino');
+
+/* Los dos terminan en filtrarTabla(), así que no pueden quedar diciendo cosas
+   distintas: prender el interruptor con el buscador escrito tiene que dejar
+   ver la intersección, no una de las dos cosas. */
+chequear('el interruptor no recarga del servidor', false,
+    (bool) preg_match('/verVencidasProvExt[^\n]*addEventListener[^\n]*cargarDatos/', $jsExt));
+chequear('dispara el mismo filtrado que el buscador', true,
+    (bool) preg_match('/verVencidas\.addEventListener\(\x27change\x27,\s*filtrarTabla\)/', $jsExt));
+
+// Las dos consultas al helper compartido le pasan el interruptor: si una se lo
+// olvidara, el pie sumaría filas que la tabla no muestra.
+chequear('el filtrado conoce el interruptor', true,
+    strpos($jsExt, "ComexFechas.filtrar('busquedaProvExt', 'tableBody', 'verVencidasProvExt')") !== false);
+chequear('y los totales también', true,
+    strpos($jsExt, "'verVencidasProvExt'") !== false);
+
+seccion('la fila lleva el dato, no sólo la clase');
+
+/* El interruptor filtra por data-vencida y no por la clase: la clase es
+   presentación y podría cambiar sin que nadie piense en el filtro. */
+chequear('data-vencida viaja en el <tr>', true,
+    strpos($jsExt, 'data-vencida="1"') !== false);
+chequear('y el filtro compartido lo mira', true,
+    strpos($compartido, "getAttribute('data-vencida')") !== false);
+
+seccion('sin interruptor en la pantalla se ven todas');
+
+/* Es el caso de Crono Nacionalizacion, y la guarda importa: si verVencidas()
+   devolviera false por defecto, esa pestaña abriría escondiendo 24 filas sin
+   ningún control que las traiga de vuelta. */
+chequear('Crono Nacionalizacion no declara el interruptor', false,
+    strpos($htmlNac, 'form-switch') !== false);
+chequear('y su filtrado no lo pasa', false,
+    strpos($jsNac, 'verVencidas') !== false);
+
+// La guarda, leída del código compartido: sin id, devuelve true.
+chequear('verVencidas() sin interruptor devuelve true', true,
+    (bool) preg_match('/return chk \? !!chk\.checked : true;/', $compartido));
+
 seccion('los totales del pie respetan el filtro en las dos');
 
 foreach (['Proveedores Exterior' => $jsExt, 'Crono Nacionalizacion' => $jsNac] as $n => $js) {

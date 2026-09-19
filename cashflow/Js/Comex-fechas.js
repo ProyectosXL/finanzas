@@ -324,29 +324,79 @@
         return t;
     }
 
+    /* ================================================================
+       LAS VENCIDAS NO SE VEN POR DEFECTO
+
+       Una fecha vencida es un dato a corregir, y hasta que alguien la corrija
+       ese contenedor no participa del período que la pantalla proyecta: sus
+       celdas del eje están vacías. En el trabajo normal —mirar qué se paga de
+       acá en adelante— son ruido, y en esta grilla son MUCHAS: al 19/09/2026,
+       27 de 76 filas en Proveedores Exterior.
+
+       Pero tienen que poder mirarse, porque son justamente las que hay que
+       arreglar. Por eso hay un interruptor y no un filtro fijo, y por eso
+       CUÁNTO ESCONDE SE DICE SIEMPRE, prendido o apagado: una tabla que
+       esconde filas sin decirlo se lee como que esos contenedores no existen.
+
+       Es el mismo criterio de "Ver excluidos" de Echeqs y de "Ver excluidas"
+       de Proveedores Locales, con una diferencia que importa: allá lo
+       escondido es plata que ya se decidió que NO entra, así que las tarjetas
+       la descuentan. Acá es una preferencia de cómo mirar la tabla, no un
+       filtro de datos: las tarjetas siguen midiendo el cronograma completo,
+       igual que con el buscador.
+       ================================================================ */
+
     /**
-     * Esconde las filas de una tabla que no coinciden con lo tipeado.
+     * Si el interruptor de ver vencidas está prendido.
      *
-     * @param {string} idCampo Id del input de búsqueda
-     * @param {string} idCuerpo Id del tbody
-     * @returns {string} El término aplicado, en minúsculas
+     * SIN INTERRUPTOR EN LA PANTALLA, SE VEN TODAS. Una pestaña que no declara
+     * el control no puede quedar escondiendo filas sin que nada lo diga: es la
+     * situación de Crono Nacionalización, que no lo tiene.
+     *
+     * @param {string} idSwitch
+     * @returns {boolean}
      */
-    function filtrar(idCampo, idCuerpo) {
-        var campo = document.getElementById(idCampo);
-        var term = campo ? campo.value.toLowerCase() : '';
-        var filas = document.querySelectorAll('#' + idCuerpo + ' tr');
+    function verVencidas(idSwitch) {
+        var chk = idSwitch ? document.getElementById(idSwitch) : null;
 
-        for (var i = 0; i < filas.length; i++) {
-            var texto = (filas[i].getAttribute('data-buscar') || '').toLowerCase();
-
-            filas[i].style.display = (!term || texto.indexOf(term) !== -1) ? '' : 'none';
-        }
-
-        return term;
+        return chk ? !!chk.checked : true;
     }
 
     /**
-     * Los items que el buscador está dejando ver, o null si no hay filtro.
+     * Esconde las filas de una tabla que el buscador o el interruptor dejan
+     * afuera.
+     *
+     * @param {string} idCampo Id del input de búsqueda
+     * @param {string} idCuerpo Id del tbody
+     * @param {string} [idSwitch] Id del interruptor de ver vencidas
+     * @returns {number} Cuántas filas quedaron visibles
+     */
+    function filtrar(idCampo, idCuerpo, idSwitch) {
+        var campo = document.getElementById(idCampo);
+        var term = campo ? campo.value.toLowerCase() : '';
+        var conVencidas = verVencidas(idSwitch);
+        var filas = document.querySelectorAll('#' + idCuerpo + ' tr');
+        var n = 0;
+
+        for (var i = 0; i < filas.length; i++) {
+            var texto = (filas[i].getAttribute('data-buscar') || '').toLowerCase();
+            var vencida = filas[i].getAttribute('data-vencida') === '1';
+            var pasa = (conVencidas || !vencida)
+                && (!term || texto.indexOf(term) !== -1);
+
+            filas[i].style.display = pasa ? '' : 'none';
+
+            if (pasa) {
+                n++;
+            }
+        }
+
+        return n;
+    }
+
+    /**
+     * Los items que el buscador y el interruptor están dejando ver, o null si
+     * no hay ningún filtro puesto.
      *
      * NULL Y NO LA LISTA ENTERA: sin filtro mandan los totales del payload, que
      * no se recalculan acá. Recalcularlos sería una tercera copia de la regla
@@ -355,19 +405,36 @@
      *
      * @param {string} idCampo
      * @param {Array} filas
+     * @param {string} [idSwitch]
      * @returns {Array|null}
      */
-    function visibles(idCampo, filas) {
+    function visibles(idCampo, filas, idSwitch) {
         var campo = document.getElementById(idCampo);
         var term = campo ? campo.value.toLowerCase() : '';
+        var conVencidas = verVencidas(idSwitch);
 
-        if (!term) {
+        if (!term && conVencidas) {
             return null;
         }
 
         return (filas || []).filter(function(item) {
-            return textoBuscable(item).toLowerCase().indexOf(term) !== -1;
+            if (!conVencidas && item.VENCIDA) {
+                return false;
+            }
+
+            return !term || textoBuscable(item).toLowerCase().indexOf(term) !== -1;
         });
+    }
+
+    /**
+     * Cuántas filas vencidas hay, para poder decir cuánto esconde el
+     * interruptor.
+     *
+     * @param {Array} filas
+     * @returns {number}
+     */
+    function contarVencidas(filas) {
+        return (filas || []).filter(function(item) { return !!item.VENCIDA; }).length;
     }
 
     window.ComexFechas = {
@@ -377,6 +444,8 @@
         sumarColumnas: sumarColumnas,
         filtrar: filtrar,
         visibles: visibles,
+        verVencidas: verVencidas,
+        contarVencidas: contarVencidas,
         formatDate: fecha,
         escapar: escapar
     };

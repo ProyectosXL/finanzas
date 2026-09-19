@@ -105,6 +105,29 @@
                                         </div>
                                     </div>
                                 </div>
+                                <!-- EL INTERRUPTOR, explicado donde se explican
+                                     las marcas: quien abre la ayuda por las
+                                     filas rojas es el mismo que se pregunta por
+                                     qué no las ve. -->
+                                <div class="col-12">
+                                    <div class="d-flex align-items-center gap-2 p-2 border rounded">
+                                        <div class="form-check form-switch m-0">
+                                            <input class="form-check-input" type="checkbox" disabled>
+                                        </div>
+                                        <div>
+                                            <strong>Ver vencidas</strong>
+                                            <br><small class="text-muted">
+                                                En <em>Proveedores Exterior</em> las vencidas
+                                                <strong>no se ven al abrir</strong>: son muchas y
+                                                no participan del período que se está mirando.
+                                                El interruptor las trae de vuelta, y al lado dice
+                                                siempre cuántas esconde. Las tarjetas de arriba
+                                                las siguen contando, así que pueden no coincidir
+                                                con el pie de la tabla.
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
                                 <div class="col-md-6">
                                     <div class="d-flex align-items-center gap-2 p-2 border rounded">
                                         <span class="badge-fecha-sin">Sin fecha</span>

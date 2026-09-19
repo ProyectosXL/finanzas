@@ -82,9 +82,18 @@
         // Verificar que los elementos existen antes de agregar listeners
         var btnRefresh = document.getElementById('btnRefresh');
         var busqueda = document.getElementById('busquedaProvExt');
+        var verVencidas = document.getElementById('verVencidasProvExt');
 
         if (btnRefresh) {
             btnRefresh.addEventListener('click', cargarDatos);
+        }
+
+        /* El interruptor no recarga del servidor: las filas ya están todas en
+           el navegador y esconderlas es una decisión de cómo mirar la tabla.
+           Es el mismo camino que el buscador, así que los dos terminan en
+           filtrarTabla() y no pueden quedar diciendo cosas distintas. */
+        if (verVencidas) {
+            verVencidas.addEventListener('change', filtrarTabla);
         }
 
         // El botón de Exportar ya no se engancha acá: lo toma
@@ -333,8 +342,11 @@ function generarFilasDatos() {
         // filtro no depende del índice de ninguna columna —mover una columna no
         // lo rompe— y queda escrito en un solo lugar CUÁLES son los tres campos
         // por los que se busca. Mismo mecanismo que Crono Nacionalización.
+        // data-vencida es lo que mira el interruptor "Ver vencidas". Va en la
+        // fila y no se deduce de la clase: la clase es presentación y podría
+        // cambiar; el atributo es el dato.
         html += '<tr data-buscar="' + escaparAttrProv(textoBuscable(item)) + '"'
-            + (item.VENCIDA ? ' class="fila-vencida"' : '') + '>';
+            + (item.VENCIDA ? ' data-vencida="1" class="fila-vencida"' : '') + '>';
 
         // Columnas fijas
         // Recortado con puntos suspensivos (.col-texto); el nombre completo va
@@ -469,7 +481,8 @@ function celdaImporteArs(item) {
 }
 
 /**
- * Esconde las filas que no coinciden y rehace los totales.
+ * Esconde las filas que el buscador o el interruptor dejan afuera, y rehace los
+ * totales.
  *
  * Los totales se rehacen porque si no, el pie diría el total de todo arriba de
  * una tabla que muestra tres filas, y nada en la pantalla diría que esos dos
@@ -480,15 +493,63 @@ function celdaImporteArs(item) {
  * contenedor. Es el mismo reparto que Crono Nacionalización y Cobranzas May.
  */
 function filtrarTabla() {
-    ComexFechas.filtrar('busquedaProvExt', 'tableBody');
+    ComexFechas.filtrar('busquedaProvExt', 'tableBody', 'verVencidasProvExt');
 
     generarFilaTotales();
+    pintarEstadoVencidas();
 }
 
-/** Los items que el buscador está dejando ver, o null si no hay filtro */
+/** Los items que el buscador y el interruptor dejan ver, o null si no hay filtro */
 function filasVisibles() {
     return ComexFechas.visibles('busquedaProvExt',
-        (datosProveedores && datosProveedores.filas) || []);
+        (datosProveedores && datosProveedores.filas) || [], 'verVencidasProvExt');
+}
+
+/**
+ * Cuántas filas esconde el interruptor, al lado del interruptor.
+ *
+ * SE DICE SIEMPRE, prendido o apagado. Una tabla que esconde filas sin decirlo
+ * se lee como que esos contenedores no existen, y acá son muchos: al
+ * 19/09/2026, 27 de 76. Es el mismo criterio que el "Ver excluidos" de Echeqs.
+ *
+ * El importe no se repite acá: ya lo dicen los dos avisos de arriba, con el
+ * detalle de cuánto entra igual en la columna del mes en curso y cuánto no
+ * entra en ninguna.
+ */
+function pintarEstadoVencidas() {
+    var el = document.getElementById('estadoVencidasProvExt');
+
+    if (!el) {
+        return;
+    }
+
+    var n = ComexFechas.contarVencidas((datosProveedores && datosProveedores.filas) || []);
+
+    if (n === 0) {
+        el.textContent = 'no hay vencidas';
+        el.title = 'Ningún contenedor tiene la fecha estimada de pago vencida.';
+
+        return;
+    }
+
+    var viendo = ComexFechas.verVencidas('verVencidasProvExt');
+
+    el.textContent = viendo
+        ? ('se ven las ' + n + ' vencidas')
+        : (n + ' vencida' + (n === 1 ? '' : 's') + ' escondida' + (n === 1 ? '' : 's'));
+
+    /* EL PIE Y LAS TARJETAS PUEDEN NO COINCIDIR MIENTRAS ESTO ESCONDE FILAS, y
+       hay que decirlo: casi todas las vencidas no entran en ninguna columna
+       —así que esconderlas no cambia ningún total— pero las del mes en curso
+       sí entran, en la columna de ese mes. El pie mide lo que se ve y las
+       tarjetas miden el cronograma completo, igual que con el buscador; la
+       diferencia es que acá pasa sin que el usuario haya tipeado nada. */
+    el.title = viendo
+        ? 'Están marcadas en rojo. Apagá el interruptor para sacarlas de la tabla.'
+        : 'Son contenedores con la fecha estimada de pago ya vencida. Prendé el '
+            + 'interruptor para verlos y cargarles una fecha nueva. Las tarjetas de arriba '
+            + 'los siguen contando: miden el cronograma completo, así que pueden no coincidir '
+            + 'con el pie de la tabla.';
 }
 
 /** Los tres campos por los que busca el buscador, concatenados */

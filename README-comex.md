@@ -177,6 +177,27 @@ Al 19/09/2026, de los 27 pagos vencidos:
 
 Por eso **son dos avisos y no uno**. Un solo mensaje diciendo *"no entran en ninguna columna"* habría sido falso para los cuatro primeros, y una nota que dice lo contrario de lo que hace el código es peor que no tenerla. Lo escribe `Comex::avisosVencidos()`, que recibe el `Horizonte` para poder repartirlos: **qué columnas existen lo sabe el eje y nadie más**, y cuál mes del pasado tiene columna depende de `horizonte_dias`, que es un parámetro editable.
 
+### Las vencidas no se ven por defecto
+
+En **Proveedores Exterior** hay un interruptor **Ver vencidas**, apagado al abrir.
+
+Una fecha de pago vencida es un dato a corregir, y hasta que alguien la corrija ese contenedor no participa del período que la pantalla proyecta: sus celdas del eje están vacías. En el trabajo normal —mirar qué se paga de acá en adelante— son ruido, y acá son muchas: **27 de 76 filas**. Pero tienen que poder mirarse, porque son justamente las que hay que arreglar; por eso es un interruptor y no un filtro fijo.
+
+**Cuánto esconde se dice al lado del interruptor, siempre** — *"27 vencidas escondidas"* o *"se ven las 27 vencidas"*. Una tabla que esconde filas sin decirlo se lee como que esos contenedores no existen. Es el mismo criterio que *Ver excluidos* de Echeqs y *Ver excluidas* de Proveedores Locales.
+
+| | |
+| --- | --- |
+| **Dónde filtra** | En el navegador, escondiendo filas. Las 76 ya están cargadas: un round-trip por prender un interruptor sería trabajo puro |
+| **Con el buscador** | Se combinan: los dos terminan en `filtrarTabla()`, así que no pueden quedar diciendo cosas distintas |
+| **El pie** | Se rehace con lo visible, igual que con el buscador |
+| **Las tarjetas** | **No** se tocan: miden el cronograma completo |
+| **El export** | Baja lo que se ve, sin nada extra: `TablaExport` saca del clon las filas con `display: none` |
+| **Qué mira** | El `data-vencida` del `<tr>`, no la clase CSS: la clase es presentación y podría cambiar sin que nadie piense en el filtro |
+
+> **Hay una diferencia que conviene tener presente, y la pantalla la explica.** Casi todas las vencidas no entran en ninguna columna, así que esconderlas no cambia ningún total. Pero las **4 del mes en curso sí entran**, en la columna de ese mes: con el interruptor apagado, el pie de la vista Meses baja $ 256.768.590 respecto de la tarjeta. Es el mismo reparto de siempre —el pie mide lo que se ve, las tarjetas el cronograma completo— con la particularidad de que acá ocurre **sin que el usuario haya tipeado nada**. Por eso el `title` del contador lo dice.
+
+**Crono Nacionalización no tiene el interruptor**: el pedido era sobre la fecha estimada de pago. `ComexFechas.verVencidas()` devuelve `true` cuando la pantalla no declara el control, justamente para que una pestaña sin interruptor no pueda quedar escondiendo filas sin nada que las traiga de vuelta. Agregárselo, si algún día se quiere, es declarar el `<div class="form-switch">` y pasar su id en las dos llamadas.
+
 ### Cómo se ven en la grilla
 
 Tres marcas, tres cosas distintas, y las tres las decide el backend:

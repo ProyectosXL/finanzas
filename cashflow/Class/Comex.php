@@ -629,12 +629,17 @@ class Comex {
 
         $avisos = [];
 
+        /* EL TEXTO NO DICE DÓNDE ESTÁN EN LA PANTALLA, y es a propósito: este
+           mismo mensaje lo muestran la pestaña y el tablero, y en Proveedores
+           Exterior las vencidas además están escondidas por defecto detrás de
+           un interruptor. Afirmar "están marcadas en la grilla" sería falso en
+           dos de los tres casos. Qué se ve y qué no lo dice el contador que
+           está al lado del interruptor; esto dice qué pasó y qué hacer. */
         if ($afuera > 0) {
             $avisos[] = $afuera . ' contenedor(es) por ' . self::plata($impAfuera)
                 . ' tienen la ' . $queEs . ' ya vencida y su fecha quedó fuera del eje, así que '
                 . 'NO entran en ninguna columna. No se los reubica en hoy, porque nadie afirmó '
-                . 'que ese importe se mueve hoy. Están marcados en la grilla; cargales la fecha '
-                . 'nueva y entran solos.';
+                . 'que ese importe se mueve hoy: cargales la fecha nueva y entran solos.';
         }
 
         if ($adentro > 0) {

@@ -90,6 +90,32 @@
                                style="min-width: 260px;">
                     </div>
                 </div>
+
+                <!-- LAS VENCIDAS NO SE VEN POR DEFECTO. Una fecha de pago
+                     vencida es un dato a corregir, y hasta que alguien la
+                     corrija ese contenedor no participa del período que esta
+                     pantalla proyecta: sus celdas del eje están vacías. En el
+                     trabajo normal —mirar qué se paga de acá en adelante— son
+                     ruido, y acá son muchas: al 19/09/2026, 27 de 76 filas.
+
+                     Pero tienen que poder mirarse, porque son justamente las
+                     que hay que arreglar. Por eso es un interruptor y no un
+                     filtro fijo, y por eso CUÁNTO ESCONDE SE DICE AL LADO,
+                     siempre: una tabla que esconde filas sin decirlo se lee
+                     como que esos contenedores no existen. Mismo criterio que
+                     "Ver excluidos" de Echeqs.
+
+                     Sin `checked`: apagado es el estado por defecto, y que el
+                     HTML lo diga por omisión evita que alguien lo cambie sin
+                     querer moviendo el atributo. -->
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="verVencidasProvExt">
+                    <label class="form-check-label small text-muted" for="verVencidasProvExt">
+                        Ver vencidas
+                        <span class="text-muted fst-italic ms-1"
+                              id="estadoVencidasProvExt"></span>
+                    </label>
+                </div>
             </div>
             <div class="d-flex gap-2">
                 <!-- Los tres botones los dibuja Js/eje-vistas.js a partir del
