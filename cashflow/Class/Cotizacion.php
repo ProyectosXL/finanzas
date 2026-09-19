@@ -270,6 +270,114 @@ class Cotizacion {
         return $this->ultimas[$cache];
     }
 
+    /**
+     * ultimaHasta() para MUCHAS fechas de una vez: el tablero necesita la
+     * cotizacion de cada columna del eje -cuarenta fechas- para saber a cuanto
+     * vende los dolares de la cobertura automatica en cada una, y cuarenta
+     * consultas por carga es demasiado.
+     *
+     * COMO LO RESUELVE EN DOS CONSULTAS. La "ultima hasta" de la fecha mas
+     * chica sale de ultimaHasta(), una busqueda hacia atras. De ahi en adelante
+     * alcanza con las filas que hay ENTRE la fecha mas chica y la mas grande
+     * (entreFechas()), que en el caso normal -columnas futuras- son cero: nadie
+     * carga el dolar de la semana que viene. Se avanza sobre las fechas en
+     * orden llevando la ultima fila vista. Cada resultado queda en el mismo
+     * cache que ultimaHasta(), asi que preguntar despues por una de esas fechas
+     * no vuelve a consultar.
+     *
+     * Lo que devuelve para cada fecha es EXACTAMENTE lo que devolveria
+     * ultimaHasta() para esa fecha: valor, fecha de la que salio y punta, o
+     * null si no hay nada anterior. No hay dos criterios.
+     *
+     * @param array $fechas 'Y-m-d', en cualquier orden y con repetidas
+     * @param string $punta self::COMPRADOR (default) o self::VENDEDOR
+     * @return array Mapa fecha => (lo mismo que ultimaHasta())
+     */
+    public function ultimasHasta($fechas, $punta = self::COMPRADOR) {
+        $col = self::punta($punta);
+        $lista = [];
+
+        foreach ($fechas as $f) {
+            $lista[self::dia($f)] = true;
+        }
+
+        if (empty($lista)) {
+            return [];
+        }
+
+        $lista = array_keys($lista);
+        sort($lista);
+
+        $min = $lista[0];
+        $max = $lista[count($lista) - 1];
+
+        $actual = $this->ultimaHasta($min, $punta);
+        $entre = ($max > $min) ? $this->entreFechas($min, $max, $punta) : [];
+        $p = 0;
+        $out = [];
+
+        foreach ($lista as $f) {
+            while ($p < count($entre) && $entre[$p]['fecha'] <= $f) {
+                $actual = $entre[$p];
+                $p++;
+            }
+
+            $out[$f] = $actual;
+            $this->ultimas[$col . '|' . $f] = $actual;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Las cotizaciones diarias con fecha en (desde, hasta], ascendentes, en la
+     * forma de ultimaHasta(). Es la segunda consulta de ultimasHasta(); va
+     * separada para que una prueba pueda reemplazarla sin base.
+     *
+     * @param string $desde 'Y-m-d', exclusivo
+     * @param string $hasta 'Y-m-d', inclusivo
+     * @param string $punta
+     * @return array Lista de ['fecha', 'valor', 'punta']
+     */
+    protected function entreFechas($desde, $hasta, $punta) {
+        $col = self::punta($punta);
+        $cid = $this->conectar();
+
+        $sql = "SELECT Fecha, " . $col . " AS COTIZACION
+                FROM " . self::VISTA_DIARIA . "
+                WHERE Fecha > ? AND Fecha <= ?
+                ORDER BY Fecha";
+
+        $stmt = sqlsrv_query($cid, $sql, [self::dia($desde), self::dia($hasta)]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer el tipo de cambio diario',
+                self::VISTA_DIARIA));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $cot = self::valor($row['COTIZACION']);
+
+            if ($cot === null) {
+                continue;
+            }
+
+            $v[] = [
+                'fecha' => ($row['Fecha'] instanceof DateTime)
+                    ? $row['Fecha']->format('Y-m-d')
+                    : substr((string) $row['Fecha'], 0, 10),
+                'valor' => $cot,
+                'punta' => $col
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $v;
+    }
+
     /* ====================================================================
        HELPERS PUROS
        ==================================================================== */

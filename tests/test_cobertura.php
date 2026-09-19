@@ -642,8 +642,13 @@ $metaCob = CashflowRegistry::meta('COBERTURA');
 
 chequear('esta registrado', true, $metaCob !== null);
 chequear('y disponible', true, CashflowRegistry::disponible('COBERTURA'));
-chequear('ofrece la serie APLICACION',
-    true, CashflowRegistry::serieExiste('COBERTURA', 'APLICACION'));
+
+/* UNA SERIE POR CLASE DE FONDO, mas el total de antes. Ver
+   tests/test_cobertura_automatica.php para lo que trae cada una. */
+foreach (['USO_INVERSION', 'USO_COMITENTE', 'APLICACION'] as $serieCob) {
+    chequear('ofrece la serie ' . $serieCob,
+        true, CashflowRegistry::serieExiste('COBERTURA', $serieCob));
+}
 
 // NO declara 'tab' a proposito: la fila se edita desde el propio tablero.
 chequear('no declara pestana propia', false, isset($metaCob['tab']));
@@ -651,8 +656,9 @@ chequear('no declara pestana propia', false, isset($metaCob['tab']));
 $provCob = CashflowRegistry::instanciar('COBERTURA');
 
 chequear('se instancia', true, $provCob instanceof CashflowProvider);
-chequear('y devuelve la serie que declara',
-    ['APLICACION'], array_keys($provCob->series(Horizonte::desdeParametros(new Parametros()))));
+chequear('y devuelve las series que declara',
+    ['USO_INVERSION', 'USO_COMITENTE', 'APLICACION'],
+    array_keys($provCob->series(Horizonte::desdeParametros(new Parametros()))));
 
 /* ================================================================
    LA COBERTURA SE CONSUME POR FONDO

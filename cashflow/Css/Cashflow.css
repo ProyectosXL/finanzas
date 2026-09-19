@@ -229,8 +229,9 @@
 /* ============================================================================
    SECCIÓN COBERTURA
 
-   Tres filas debajo del Flujo Neto: cuánto hay invertido, cuánto se aplica en
-   cada fecha, y el flujo neto ya con esa aplicación.
+   Debajo del Flujo Neto: cuánto hay en cada fondo (stock), cuánto se usa de
+   cada uno en cada fecha -lo calcula el motor, se puede pisar a mano-, y el
+   flujo neto ya con esa aplicación.
    ============================================================================ */
 
 /* El stock. Se atenúa como una informativa —no entra en ninguna suma— pero sin
@@ -268,20 +269,21 @@
     color: #c0392b;
 }
 
-/* La fila editable. El borde superior la separa del stock: son dos cosas
-   distintas -lo que hay y lo que se usa- y sin la línea se leen como un bloque
-   de dos números del mismo tipo. */
-.tab-cashflow .cf-tipo-uso_cobertura td {
+/* Las filas de uso. El borde superior de la primera las separa del stock:
+   son dos cosas distintas -lo que hay y lo que se usa- y sin la línea se leen
+   como un bloque de números del mismo tipo. Las de uso entre sí no llevan
+   línea: son el mismo tipo de dato, uno por fondo. */
+.tab-cashflow .cf-tipo-stock_cobertura + .cf-tipo-uso_cobertura td {
     border-top: 1px dashed #c8d4e0;
 }
 
-.tab-cashflow .cf-marca-editable {
+.tab-cashflow .cf-marca-auto {
     color: #2e7cc4;
 }
 
-/* Las celdas que se pueden cargar. El fondo tenue es lo único que dice que
-   ahí se puede hacer clic: sin eso, la fila parece de sólo lectura como todas
-   las demás del tablero. */
+/* Las celdas que se pueden pisar a mano. El fondo tenue es lo único que dice
+   que ahí se puede hacer clic: sin eso, la fila parece de sólo lectura como
+   todas las demás del tablero. */
 .tab-cashflow .cf-cobertura-editable {
     cursor: pointer;
     background-color: #f2f7fc;
@@ -292,11 +294,83 @@
     box-shadow: inset 0 0 0 1px #9ec3e6;
 }
 
+/* CALCULADO vs. CARGADO A MANO
+
+   Los dos números salen de la misma fila y significan cosas distintas: lo
+   calculado es una consecuencia del flujo -cambia solo cuando cambia un
+   vencimiento- y lo manual es una decisión de alguien. Si se vieran igual,
+   nadie sabría qué celdas hay que revisar cuando el tablero se mueve.
+
+   Lo calculado va en itálica y azul, que es el color de la marca de la fila;
+   lo manual en negrita con un punto a la izquierda, que es lo que queda a la
+   vista aunque la celda tenga las dos cosas. No se usa el fondo: los fondos
+   ya están tomados (editable, columna en rojo, columna fuera de secuencia). */
+.tab-cashflow .cf-cob-auto {
+    font-style: italic;
+    color: #2e7cc4;
+}
+
+.tab-cashflow .cf-cob-manual {
+    font-weight: 700;
+    position: relative;
+}
+
+.tab-cashflow .cf-cob-manual::before {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 50%;
+    width: 5px;
+    height: 5px;
+    margin-top: -2px;
+    border-radius: 50%;
+    background-color: #2e7cc4;
+}
+
+/* Ni con todo lo que hay alcanza: el motor aplicó los dos fondos enteros y la
+   columna sigue en rojo. La celda lo dice con el subrayado; cuánto falta, el
+   title. */
+.tab-cashflow .cf-cob-falta {
+    box-shadow: inset 0 -2px 0 -1px #c0392b;
+    cursor: help;
+}
+
+.tab-cashflow .cf-cob-falta.cf-cobertura-editable {
+    cursor: pointer;
+}
+
+/* El editor: desplegable de fondo (sólo con más de uno), moneda e importe */
+.tab-cashflow .cf-editor-cobertura {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.tab-cashflow .cf-editor-cobertura .cf-moneda {
+    font-size: 0.72rem;
+    color: #6b7c8f;
+    white-space: nowrap;
+}
+
+.tab-cashflow .cf-select-fondo {
+    min-width: 110px;
+    padding: 1px 4px;
+    font-size: 0.72rem;
+}
+
 .tab-cashflow .cf-input-cobertura {
     min-width: 72px;
     padding: 1px 4px;
     font-size: 0.78rem;
     text-align: right;
+}
+
+/* La segunda línea de una fila de uso: cuánto calculó el motor y cuánto se
+   cargó. Es el mismo estilo que el "queda X de Y" del stock, en el color de
+   la marca de la fila. */
+.tab-cashflow .cf-uso-linea {
+    color: #2e7cc4;
+    font-weight: 500;
 }
 
 /* ============================================================================

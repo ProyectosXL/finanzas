@@ -25,8 +25,9 @@ require_once __DIR__ . '/../Cotizacion.php';
  *
  * La cuenta la hace Fondos::saldoA(), que es la misma que usa la pestana
  * Saldos -> Fondos, asi que el tablero y la pantalla no pueden discrepar. Un
- * movimiento con fecha futura no entra y se avisa: hoy la plata todavia esta
- * en el fondo.
+ * movimiento con fecha futura no entra al stock y se avisa: hoy la plata
+ * todavia esta en el fondo. Donde SI entra es en el tope de la cobertura
+ * automatica, en su fecha (ver abajo).
  *
  * EL IMPORTE VA EN EL PRIMER DIA DEL EJE y no significa "entra ese dia": el
  * motor vacia todas las columnas de una fila STOCK_COBERTURA y muestra el
@@ -42,15 +43,35 @@ require_once __DIR__ . '/../Cotizacion.php';
  * registro ('origen_cobertura'); con cuentas que da de alta el usuario, tiene
  * que viajar con los datos. Ver Cashflow::resolverCobertura().
  *
+ * Y EL TOPE COLUMNA POR COLUMNA, PARA LA COBERTURA AUTOMATICA
+ * -----------------------------------------------------------
+ * Desde que el uso de cobertura lo calcula el motor, cada cuenta viaja ademas
+ * en 'fondos_tope' con su saldo EN CADA COLUMNA DEL EJE -en su moneda- y, si
+ * es en dolares, la cotizacion vendedora de cada columna. El saldo de una
+ * columna es el saldo a hoy mas los movimientos previstos hasta la fecha de
+ * esa columna (Fondos::saldoProyectado()): un rescate cargado para la semana
+ * que viene deja de estar disponible desde ese dia, y una suscripcion prevista
+ * entra desde el suyo. La fecha de una columna mensual es el ULTIMO dia del
+ * mes: la columna acumula el mes entero y es la fecha mas cercana a cuando
+ * se aplicaria.
+ *
+ * La cotizacion de cada columna es la ultima conocida hasta esa fecha, punta
+ * vendedora, en UNA lectura para todo el eje (Cotizacion::ultimasHasta()). En
+ * la practica todas las columnas futuras valen la cotizacion de hoy -nadie
+ * carga el dolar de manana-, pero el criterio es el mismo que usa
+ * Cobertura::valuarAplicaciones() para una aplicacion manual con esa fecha, y
+ * asi lo automatico y lo manual del mismo dia valuan igual.
+ *
  * LOS DOLARES SE VALUAN COMO SIEMPRE
  * ----------------------------------
- * El motor nunca ve dolares. Una cuenta en USD se convierte con la ULTIMA
- * COTIZACION OFICIAL CONOCIDA A HOY, punta VENDEDORA: es el mismo criterio con
- * el que se valuaba la foto de la cuenta comitente (ver Class/Cotizacion.php y
- * README-otros-ingresos.md), y es la misma punta con la que se valuan las
- * aplicaciones en dolares, asi que consumir todo el saldo lo deja en cero.
- * Sin cotizacion, esa cuenta NO entra y se avisa el importe en dolares: un
- * cero se leeria como "no hay dolares".
+ * El motor nunca ve dolares en el stock. Una cuenta en USD se convierte con la
+ * ULTIMA COTIZACION OFICIAL CONOCIDA A HOY, punta VENDEDORA: es el mismo
+ * criterio con el que se valuaba la foto de la cuenta comitente (ver
+ * Class/Cotizacion.php y README-otros-ingresos.md), y es la misma punta con
+ * la que se valuan las aplicaciones en dolares, asi que consumir todo el saldo
+ * lo deja en cero. Sin cotizacion, esa cuenta NO entra y se avisa el importe
+ * en dolares: un cero se leeria como "no hay dolares". Tampoco lleva tope, y
+ * entonces el motor no vende de ahi: no hay con que valuar la venta.
  *
  * La moneda la dice la CUENTA, no la clase: una cuenta de inversion en dolares
  * se valua igual que una comitente. 'moneda' en el registro es informativa.
@@ -110,6 +131,7 @@ class FondosProvider extends CashflowProvider {
         $serie['sin_fecha'] = 0;
         $serie['por_fondo'] = [];
         $serie['fondos'] = [];
+        $serie['fondos_tope'] = [];
 
         $rotulo = Fondos::CLASES[$clase];
         $fondos = $this->fondos();
@@ -121,7 +143,7 @@ class FondosProvider extends CashflowProvider {
             return $serie;
         }
 
-        $cuentas = array_values(array_filter($fondos->getCuentasFondo(true, $h->hoy()),
+        $cuentas = array_values(array_filter($fondos->getCuentasFondo(true, $h->hoy(), true),
             function ($c) use ($clase) {
                 return $c['CLASE'] === $clase;
             }));
@@ -142,7 +164,13 @@ class FondosProvider extends CashflowProvider {
         $todasUsd = true;
         $total = 0;
 
-        foreach ($cuentas as $c) {
+        // La fecha de cada columna del eje, para proyectar el tope; y la
+        // cotizacion de cada una, en una sola lectura, para las cuentas en
+        // dolares. Se leen recien cuando aparece la primera cuenta en USD.
+        $fechasCol = self::fechasPorColumna($h);
+        $tcCol = null;
+
+        foreach ($cuentas as $i => $c) {
             if ($c['SALDO_INICIAL'] === null) {
                 $sinInicial[] = $c['NOMBRE'];
             }
@@ -150,8 +178,9 @@ class FondosProvider extends CashflowProvider {
             $posteriores += intval($c['posteriores']);
 
             $ars = floatval($c['saldo']);
+            $esUsd = (strtoupper((string) $c['MONEDA']) === 'USD');
 
-            if (strtoupper((string) $c['MONEDA']) === 'USD') {
+            if ($esUsd) {
                 $ars = null;
 
                 if ($errorCotizacion === null) {
@@ -165,6 +194,11 @@ class FondosProvider extends CashflowProvider {
                         if ($ult !== null) {
                             $ars = round(floatval($c['saldo']) * $ult['valor'], 2);
                             $tiposUsados[$ult['fecha']] = $ult['valor'];
+                        }
+
+                        if ($tcCol === null) {
+                            $tcCol = $cotizacion->ultimasHasta(array_values($fechasCol),
+                                Cotizacion::VENDEDOR);
                         }
                     } catch (Throwable $e) {
                         $errorCotizacion = $e->getMessage();
@@ -181,6 +215,8 @@ class FondosProvider extends CashflowProvider {
 
             $serie['por_fondo'][$c['clave_fondo']] = $ars;
             $serie['fondos'][$c['clave_fondo']] = $c['NOMBRE'];
+            $serie['fondos_tope'][$c['clave_fondo']] = self::tope($c, $i, $h->hoy(), $fechasCol,
+                $esUsd ? $tcCol : null);
             $total += $ars;
         }
 
@@ -221,5 +257,75 @@ class FondosProvider extends CashflowProvider {
         }
 
         return $serie;
+    }
+
+    /* ====================================================================
+       HELPERS PUROS
+       Estaticos y sin base: el tope por columna se prueba con cuentas de
+       mentira, y la regla de que fecha tiene cada columna vive en un lugar.
+       ==================================================================== */
+
+    /**
+     * La fecha a la que se mide cada columna del eje: la del dia en una
+     * columna diaria, y el ULTIMO dia del mes en una mensual, porque esa
+     * columna acumula el mes entero y es lo mas cerca de cuando se aplicaria.
+     *
+     * @param Horizonte $h
+     * @return array Mapa id de columna ('DIA|..' / 'MES|..') => 'Y-m-d'
+     */
+    public static function fechasPorColumna($h) {
+        $fechas = [];
+
+        foreach ($h->dias() as $d) {
+            $fechas['DIA|' . $d['fecha']] = $d['fecha'];
+        }
+
+        foreach ($h->meses() as $m) {
+            $fechas['MES|' . $m['clave']] = (new DateTime($m['clave'] . '-01'))
+                ->modify('last day of this month')->format('Y-m-d');
+        }
+
+        return $fechas;
+    }
+
+    /**
+     * El bloque 'fondos_tope' de una cuenta: su saldo en cada columna, en su
+     * moneda, y la cotizacion de cada columna si es en dolares.
+     *
+     * El saldo de cada columna es el de hoy mas lo previsto hasta la fecha de
+     * la columna (Fondos::saldoProyectado()). Una cuenta de prueba sin
+     * 'movimientos_vigentes' tiene el mismo saldo en todas.
+     *
+     * @param array $cuenta Fila de getCuentasFondo(), con 'saldo' a hoy
+     * @param int $orden Posicion en el catalogo, para el orden de consumo
+     * @param string $hoy 'Y-m-d'
+     * @param array $fechasCol De fechasPorColumna()
+     * @param array|null $tcCol Mapa fecha => (lo de ultimaHasta()) para una
+     *        cuenta en dolares; null en pesos
+     * @return array ['moneda', 'clase', 'orden', 'tope' => [col => float], 'tc' => [col => float|null]]
+     */
+    public static function tope($cuenta, $orden, $hoy, $fechasCol, $tcCol = null) {
+        $movs = isset($cuenta['movimientos_vigentes']) && is_array($cuenta['movimientos_vigentes'])
+            ? $cuenta['movimientos_vigentes'] : [];
+        $esUsd = (strtoupper((string) $cuenta['MONEDA']) === 'USD');
+
+        $t = [
+            'moneda' => $esUsd ? 'USD' : 'ARS',
+            'clase' => (string) $cuenta['CLASE'],
+            'orden' => intval($orden),
+            'tope' => [],
+            'tc' => []
+        ];
+
+        foreach ($fechasCol as $col => $fecha) {
+            $t['tope'][$col] = Fondos::saldoProyectado($cuenta['saldo'], $cuenta, $movs, $hoy, $fecha);
+
+            if ($esUsd) {
+                $t['tc'][$col] = (isset($tcCol[$fecha]) && $tcCol[$fecha] !== null)
+                    ? floatval($tcCol[$fecha]['valor']) : null;
+            }
+        }
+
+        return $t;
     }
 }

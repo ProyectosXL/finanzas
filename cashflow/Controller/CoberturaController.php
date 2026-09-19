@@ -9,11 +9,20 @@
  * negativos; un editor en otra pantalla obligaria a ir y volver comparando
  * columnas. Ver Js/Cashflow.js.
  *
+ * LO QUE SE GUARDA ES LO MANUAL. El uso de cobertura lo calcula el motor en
+ * cada carga del tablero (ver Class/CoberturaAutomatica.php); lo que entra por
+ * aca es lo que alguien decide pisar en una fecha y un fondo, y tiene
+ * precedencia. Por eso guardar y borrar van por FECHA + ORIGEN: cada fila de
+ * uso del cuadro aplica un fondo distinto, y el mismo dia puede llevar una
+ * carga desde cada uno.
+ *
  * LA VALIDACION QUE VALE ES LA DE ACA. El input del navegador acota lo que se
  * puede tipear, pero lo que manda es un pedido y no una autorizacion: el
  * endpoint es alcanzable sin pasar por la pantalla. La fecha, el importe y el
  * origen se validan de nuevo en Cobertura::validarFecha(), validarImporte() y
- * validarOrigen().
+ * validarOrigen(), y el importe contra lo disponible en el fondo a esa fecha
+ * en Cobertura::validarDisponible(): una carga que lo supere se rechaza con el
+ * numero, no se recorta.
  *
  * MISMO CONTRATO QUE LOS OTROS CONTROLLERS DEL MODULO: siempre JSON, nunca una
  * excepcion suelta, y el mensaje distingue si la carga PISO una anterior. Sin
@@ -81,6 +90,9 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* El historial de una celda: fecha Y fondo. Sin 'origen' trae toda
+           la fecha, que es lo que traia antes de que hubiera una fila por
+           fondo. */
         case 'getHistorialCobertura':
             if (!isset($_GET['fecha'])) {
                 throw new Exception('Falta la fecha del historial');
@@ -88,7 +100,8 @@ try {
 
             echo json_encode([
                 'success' => true,
-                'data' => $cobertura->getHistorial($_GET['fecha'])
+                'data' => $cobertura->getHistorial($_GET['fecha'],
+                    isset($_GET['origen']) ? $_GET['origen'] : null)
             ], JSON_UNESCAPED_UNICODE);
             break;
 
@@ -117,16 +130,18 @@ try {
             echo json_encode([
                 'success' => true,
                 'message' => ($r['piso']
-                    ? 'Cobertura actualizada a ' . $cuanto . '. La carga anterior de esa fecha '
-                        . 'queda en el historial.'
-                    : 'Cobertura aplicada por ' . $cuanto . '.')
+                    ? 'Cobertura manual actualizada a ' . $cuanto . '. La carga anterior de esa '
+                        . 'fecha y ese fondo queda en el historial.'
+                    : 'Cobertura manual de ' . $cuanto . ' cargada.')
                     . ($r['moneda'] === 'USD'
-                        ? ' Se valúa con la cotización del día en que se aplica.' : ''),
+                        ? ' Se valúa con la cotización del día en que se aplica.' : '')
+                    . ' El motor recalcula lo automático sobre lo que quede.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
 
-        /* No borra la fila: la da de baja. Ver Cobertura::borrar(). */
+        /* No borra la fila: la da de baja. Ver Cobertura::borrar(). Lo que
+           queda en la celda es lo que calcule el motor. */
         case 'deleteAplicacion':
             $data = bodyJson();
 
@@ -134,13 +149,15 @@ try {
                 throw new Exception('Falta la fecha de la cobertura a dar de baja');
             }
 
-            $habia = $cobertura->borrar($data['fecha']);
+            $habia = $cobertura->borrar($data['fecha'],
+                isset($data['origen']) ? $data['origen'] : null);
 
             echo json_encode([
                 'success' => true,
                 'message' => $habia
-                    ? 'Cobertura dada de baja. Queda en el historial de esa fecha.'
-                    : 'Esa fecha no tenía ninguna cobertura aplicada.',
+                    ? 'Cobertura manual dada de baja. Queda en el historial; la celda vuelve a '
+                        . 'lo que calcule el motor.'
+                    : 'Esa fecha no tenía ninguna cobertura manual de ese fondo.',
                 'data' => ['habia' => $habia]
             ], JSON_UNESCAPED_UNICODE);
             break;

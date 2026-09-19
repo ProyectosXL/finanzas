@@ -51,12 +51,14 @@ require_once __DIR__ . '/Horizonte.php';
  * mismo, guardarMovimiento() rechaza un movimiento anterior o igual a esa
  * fecha: cargarlo no cambiaria el saldo y nada lo diria.
  *
- * EL STOCK DEL TABLERO ES EL SALDO A HOY
- * --------------------------------------
+ * EL STOCK DEL TABLERO ES EL SALDO A HOY; EL TOPE DE LA COBERTURA, EL DE CADA DIA
+ * --------------------------------------------------------------------------------
  * Un movimiento con fecha futura -un rescate que se va a hacer la semana que
  * viene- se muestra en la pestana pero no entra al stock: hoy la plata todavia
- * esta en el fondo. El proveedor lo avisa. Como se usa ese stock para cubrir
- * el flujo es asunto de la seccion Cobertura y no cambio en esta etapa.
+ * esta en el fondo. El proveedor lo avisa. Donde SI entra es en la cobertura
+ * automatica, en su fecha: el motor rescata de cada fondo hasta su saldo a la
+ * fecha de cada columna, que es lo de hoy mas lo previsto hasta ahi
+ * (saldoProyectado()). Ver Class/CoberturaAutomatica.php.
  *
  * NO SE REGISTRA CONTRAPARTIDA BANCARIA
  * -------------------------------------
@@ -413,6 +415,37 @@ class Fondos {
         return $r;
     }
 
+    /**
+     * El saldo de un fondo a OTRA fecha, a partir de su saldo a hoy: lo de
+     * hoy mas los movimientos vigentes previstos entre hoy y esa fecha.
+     *
+     * ES EL TOPE DE LA COBERTURA AUTOMATICA en cada columna del tablero: un
+     * rescate previsto para la semana que viene baja lo que el motor puede
+     * usar a partir de ese dia, y una suscripcion prevista lo sube. Hasta
+     * esta etapa esos movimientos solo se avisaban; ahora cuentan, cada uno
+     * en su fecha.
+     *
+     * Se calcula como DIFERENCIA sobre saldoA() y no desde el saldo inicial,
+     * a proposito: asi la regla de que movimientos entran (vigentes, y
+     * posteriores al saldo inicial) esta escrita una sola vez, y el llamador
+     * puede pasar un saldo a hoy que ya tiene resuelto por otro camino.
+     * Con una fecha anterior a hoy devuelve el saldo que habia ese dia, por la
+     * misma cuenta al reves.
+     *
+     * @param float $saldoHoy El saldo a $hoy, en la moneda del fondo
+     * @param array $cuenta Con 'FECHA_SALDO_INICIAL' (puede ser null)
+     * @param array $movimientos Vigentes, como en saldoA()
+     * @param string $hoy 'Y-m-d'
+     * @param string $fecha 'Y-m-d'
+     * @return float
+     */
+    public static function saldoProyectado($saldoHoy, $cuenta, $movimientos, $hoy, $fecha) {
+        $aHoy = self::saldoA($cuenta, $movimientos, $hoy);
+        $aFecha = self::saldoA($cuenta, $movimientos, $fecha);
+
+        return round(floatval($saldoHoy) + ($aFecha['saldo'] - $aHoy['saldo']), 2);
+    }
+
     /* ====================================================================
        ESTADO DEL MODULO
        ==================================================================== */
@@ -473,11 +506,16 @@ class Fondos {
      *
      * @param bool $soloActivas
      * @param string|null $hoy 'Y-m-d' a la que se calcula el saldo; null = hoy
+     * @param bool $conMovimientos Si ademas se devuelve la lista de movimientos
+     *        vigentes de cada cuenta, en 'movimientos_vigentes'. Lo pide el
+     *        proveedor del tablero para proyectar el saldo columna por columna
+     *        (ver saldoProyectado()); la pestana no lo necesita y no lo carga
+     *        en su JSON.
      * @return array Filas con los campos de la cuenta mas 'saldo', 'suscripciones',
      *         'rescates', 'movimientos', 'posteriores', 'incluidos', 'clave_fondo',
      *         'ultimo_movimiento'
      */
-    public function getCuentasFondo($soloActivas = true, $hoy = null) {
+    public function getCuentasFondo($soloActivas = true, $hoy = null, $conMovimientos = false) {
         if (!$this->creado()) {
             return [];
         }
@@ -532,11 +570,17 @@ class Fondos {
                 }
             }
 
-            $v[] = array_merge($c, $calc, [
+            $fila = array_merge($c, $calc, [
                 'clave_fondo' => self::claveFondo($id),
                 'fecha_saldo' => $hoy,
                 'ultimo_movimiento' => $ultimo
             ]);
+
+            if ($conMovimientos) {
+                $fila['movimientos_vigentes'] = $movs;
+            }
+
+            $v[] = $fila;
         }
 
         return $v;

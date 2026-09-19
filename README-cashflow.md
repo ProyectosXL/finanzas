@@ -44,6 +44,7 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 | 15 | `sql/cashflow_estructura_neteo_prechequeado.sql` | Agrega la fila **Neteo cheques adelantados** a la sección Ventas, con `ORDEN = 25` (entre Franquicias y Mayoristas), apuntada a la serie `VENTAS → NETEO_PRECHEQUEADO` | **El tablero muestra la cobranza de Ventas en bruto**: las series volvieron a bruto y si la fila no existe, el neteo no se resta en ningún lado. El cuadro no falla ni avisa —cada serie es correcta por separado—, así que este es el único script del grupo cuya ausencia es *silenciosa* |
 | 17 | `sql/cashflow_echeqs_excluir.sql` | Crea `RO_T_CASHFLOW_ECHEQ_EXCLUIDO`: qué cheques de **cartera** no se van a poder cobrar, con su motivo, quién, cuándo y el historial completo | **No se puede excluir ningún cheque**. La pestaña se lee igual —el listado no depende de la tabla—, los dos botones de la barra quedan apagados diciendo qué script falta, y la fila del tablero sigue trayendo toda la cartera, que es lo que traía antes |
 | 18 | `sql/cashflow_saldos_cuentas_fondo.sql` | Agrega `CLASE` y el saldo inicial al catálogo de cuentas de Saldos, crea `RO_T_CASHFLOW_SALDOS_FONDO_MOV` (la cuenta corriente de cada fondo), **migra** la última foto de Otros Ingresos como saldo inicial de dos cuentas nuevas, reescribe el `ORIGEN` de las aplicaciones de cobertura a la clave de esas cuentas, y reapunta las dos filas de stock a `FONDO_INVERSION` / `FONDO_COMITENTE` | **Las filas de stock siguen leyendo de Otros Ingresos**, que está retirado: muestran la última foto cargada y el tablero avisa que ese dato ya no se mantiene. Saldos → Fondos y el ABM de fondos de Parámetros avisan qué script falta. Si además el código nuevo corre contra una base sin el script, `Cobertura::origenes()` devuelve vacío y **no se puede aplicar cobertura nueva** hasta correrlo: no hay ninguna cuenta de la que aplicar |
+| 19 | `sql/cashflow_cobertura_automatica.sql` | Reapunta la fila *Uso de Inversiones* a la serie `COBERTURA → USO_INVERSION`, crea *Uso de Dólares comitente* (`USO_COMITENTE`, `ORDEN = 25`), crea *Flujo Neto Acumulado (sin cobertura)* (`SALDO_FINAL`, en Resultados debajo del flujo neto) y fija la clave **fecha + fondo** de las aplicaciones manuales con un índice único filtrado por `VIGENTE = 1` | **El motor rescata igual de las inversiones** —la fila existente sigue leyendo `APLICACION`, que nombra los fondos de lo que tenga cargado— pero **no de la comitente**: no hay fila donde mostrarlo, y el tablero avisa nombrando el script. La clave por fondo la aplica el PHP de todos modos; sin el índice, sólo el código la garantiza |
 
 ### Scripts modificados — hay que volver a correrlos
 
@@ -67,6 +68,8 @@ Que ninguna fila del tablero duplique importes:
 - `NETEO_PRECHEQUEADO` **una sola vez**, activa, con `TIPO = 'INGRESO'` y `COMPUTA = 1`. Y las filas de cobranza de Ventas —las cuatro por canal, o la total— **activas al lado de ella**: la fila del neteo corrige a esas filas, no las reemplaza.
 - `ECHEQS → A_COBRAR` **activa y sola**. `A_COBRAR` ya no trae toda la cartera: trae la cobrable, sin lo excluido a mano. El universo es `A_COBRAR_TODO` y las dos mitades son `A_COBRAR` + `A_COBRAR_EXCLUIDOS`; activar el total al lado de cualquiera de las dos cuenta dos veces el mismo cheque, y eso lo rechaza el validador. **No hay que repuntar nada**: la fila ya está configurada contra `A_COBRAR`, y mientras no haya ningún cheque excluido ese código vale lo mismo que antes.
 - `STOCK_INVERSIONES → FONDO_INVERSION/STOCK` y `STOCK_DOLARES_COMITENTE → FONDO_COMITENTE/STOCK`, activas. Si alguna sigue apuntando a `SALDO_INVERSIONES` o `DOLARES_COMITENTE`, el editor la marca con la advertencia de módulo retirado y el tablero avisa. El día que se corre el script 18 **el tablero no se mueve un peso**: verificado contra la base, las dos filas dan `3.529.962,37` y `1.535,00` antes y después, porque el saldo inicial migrado es exactamente la última foto que el proveedor viejo tomaba como stock. Lo que sí aparece es el aviso por fondo de la cobertura, que antes no llegaba (ver *Los fondos son las cuentas*).
+- **Dos filas de uso, una por clase de fondo**: `USO_COBERTURA → COBERTURA/USO_INVERSION` y `USO_DOLARES_COMITENTE → COBERTURA/USO_COMITENTE`, activas, `COMPUTA = 1`, y **las dos entre** *Flujo Neto (sin cobertura)* y *Flujo Neto (con cobertura)*: el alcance de un flujo neto es posicional, así que una fila de uso puesta abajo del segundo no entraría en él. Ninguna fila activa con la serie `APLICACION` al lado de esas dos: es el total y el validador lo rechaza. El día que se corre el script 19 el tablero **no cambia ningún número salvo que ya hubiera columnas en rojo**: verificado contra la base el 19/09/2026, no había ninguna, así que el motor no rescató nada y la única aplicación manual vigente siguió en su columna.
+- **Dos filas de saldo**: `SALDO_ACUM_SIN_COB` en *Resultados* justo debajo de *Flujo Neto (sin cobertura)*, y `SALDO_FINAL` al final de *Cobertura*. Si la de arriba quedara **debajo** de las filas de uso las incluiría y diría lo mismo que la del final.
 
 ---
 
@@ -93,11 +96,14 @@ En este orden, contra `central`:
 -- 16. sql/cashflow_comex_cotiz_edit.sql  (Comex: override de cotizacion por contenedor)
 -- 17. sql/cashflow_echeqs_excluir.sql  (Echeqs: excluir de cartera lo que no se va a cobrar)
 -- 18. sql/cashflow_saldos_cuentas_fondo.sql  (Saldos: cuentas de inversion y comitente; retira Otros Ingresos)
+-- 19. sql/cashflow_cobertura_automatica.sql  (Cobertura: una fila de uso por fondo; clave fecha + fondo)
 ```
 
 **El 13 y el 14 van en ese orden y al final**, porque el 14 mueve `SALDO_FINAL` al final de la sección que crea y da de baja la fila del saldo de inversiones que crearon los anteriores. Correr el 14 sin el 13 no rompe nada, pero deja el cuadro a medio reagrupar.
 
 **El 18 va después del 3, del 14, de `sql/cashflow_cobertura_por_fondo.sql` y de `sql/cashflow_dolares_comitente_cobertura.sql`** (los dos de `README-otros-ingresos.md`): necesita el catálogo de cuentas, la tabla de aplicaciones con su columna `MONEDA`, y las dos filas de stock que reapunta. Si las tablas de Otros Ingresos no están, no crea las cuentas y lo dice: no hay nada que migrar, y los fondos se dan de alta desde Parámetros. Ver `README-saldos.md`.
+
+**El 19 va después del 18**: reapunta la fila de uso que creó el 14 y necesita que exista la fila de stock de la comitente para que la fila de uso nueva tenga de dónde rescatar; si no está, avisa. Es el único cuya ausencia **puede cambiar un número**: sin él el motor cubre sólo con las inversiones, y una columna que la comitente habría tapado queda en rojo, con aviso.
 
 Los que alimentan pestañas puntuales están documentados en su propio README: `sql/ventas_proyeccion.sql` y compañía en `README-ventas.md`, `sql/cashflow_cobranzas_parametros.sql` y `sql/cashflow_cobranzas_may.sql` en `README-cobranzas-fr.md` y `README-cobranzas-may.md`.
 
@@ -574,7 +580,7 @@ No hay ninguna referencia fila a fila guardada. El alcance es **posicional**, re
 | `USO_COBERTURA` | Suma (+1), como un ingreso, pero **no cuenta como ingreso en los indicadores** |
 | `SUBTOTAL` | Las filas de movimiento **y de saldo inicial** de su sección y de las secciones hijas |
 | `FLUJO_NETO` | Las filas de movimiento **y de saldo** que estén **por encima** |
-| `SALDO_FINAL` | Los movimientos que estén por encima, más el arrastre del saldo |
+| `SALDO_FINAL` | El **arrastre**, columna a columna, del saldo y de los movimientos que estén **por encima**: la posición hasta ahí. Puede haber más de una: una arriba de la cobertura es la posición sin cubrir |
 
 **`FLUJO_NETO` incluye el saldo que se muestra más arriba**, y eso cambió. La definición es *Ingresos − Egresos*, y los Ingresos del cuadro arrancan en el Disponible, que incluye el saldo en bancos: en el Excel `D38 = D13 + D37`. Antes sumaba sólo los movimientos, con lo que un día con saldo inicial mostraba la variación de caja y no lo que el rótulo promete.
 
@@ -613,7 +619,7 @@ ORDEN  SECCIÓN              ID_PADRE     qué contiene
  70    Costos Indirectos    EGRESOS
  75    Egresos              —            Total Egresos
  90    Resultados           —            Flujo Neto (sin cobertura)
- 95    Cobertura            —            Inversiones disponibles / Uso de Inversiones /
+ 95    Cobertura            —            Stock y uso de cada fondo (inversiones, comitente) /
                                          Flujo Neto (con cobertura) / Saldo Final
 ```
 
@@ -668,16 +674,50 @@ Activar a la vez la serie total y sus componentes cuenta **dos veces** el mismo 
 
 ## La sección Cobertura
 
-El tablero proyecta el saldo día por día y en algunas columnas da negativo o queda muy justo. La plata para cubrir eso **existe** —está invertida—, pero el tablero no tenía dónde decir *cuándo* se la piensa usar, ni mostrar cuánta hay.
+El tablero proyecta el saldo día por día y en algunas columnas da negativo o queda muy justo. La plata para cubrir eso **existe** —está invertida—, y el tablero muestra cuánta hay y cuándo se usa.
 
 Debajo del *Flujo Neto (sin cobertura)*:
 
 | Fila | Tipo | Qué es |
 | --- | --- | --- |
-| Inversiones disponibles | `STOCK_COBERTURA` | Cuánto hay. **No va en ninguna columna de fecha**: el importe va en la columna Total, y **cuánto queda** en la celda de Concepto, que es la que no se va al scrollear |
-| Uso de Inversiones | `USO_COBERTURA` | Cuánto se aplica en cada fecha. **Se edita en el propio tablero** y puede ser negativa |
+| Flujo Neto Acumulado (sin cobertura) | `SALDO_FINAL` | En *Resultados*, pegada al flujo neto: la posición acumulada **sin cubrir**, el rojo que dispara el rescate. Leyendo de arriba hacia abajo, es la que contesta "¿cuánto me falta?" antes de ver de dónde sale |
+| Inversiones disponibles | `STOCK_COBERTURA` | Cuánto hay en las cuentas de inversión. **No va en ninguna columna de fecha**: el importe va en la columna Total, y **cuánto queda** en la celda de Concepto, que es la que no se va al scrollear |
+| Dólares en cuenta comitente | `STOCK_COBERTURA` | Lo mismo, para las cuentas comitente, valuado a hoy |
+| Uso de Inversiones | `USO_COBERTURA` | Cuánto se rescata de las cuentas de inversión en cada fecha. **Lo calcula el motor** y se puede pisar a mano desde el tablero |
+| Uso de Dólares comitente | `USO_COBERTURA` | Lo mismo, para las comitente, en dólares enteros vendidos a la cotización del día |
 | Flujo Neto (con cobertura) | `FLUJO_NETO` | El de arriba más lo aplicado en esa columna |
-| Saldo Final | `SALDO_FINAL` | La posición proyectada, ya con la cobertura |
+| Flujo Neto Acumulado (con cobertura) | `SALDO_FINAL` | La posición proyectada, ya con la cobertura. Es la que miran los indicadores y la que pinta las columnas en rojo |
+
+**Dos filas de saldo, y `SALDO_FINAL` arrastra sólo lo que tiene por encima.** Esto **cambió**: era *apertura de la columna (con todo) + movimientos por encima*, y con una sola fila al final da lo mismo. Con una fila de saldo arriba de la cobertura, la apertura global la volvía un híbrido —los rescates de ayer sí, el de hoy no—; ahora es la misma regla posicional de `FLUJO_NETO` aplicada al arrastre, y la fila del final sigue dando exactamente el cierre global, que el invariante verifica. Los indicadores (*Saldo Final*, *Saldo Mínimo*) y las columnas en rojo usan **la última** fila de saldo: la de arriba muestra un rojo que la cobertura ya tapó.
+
+**Una fila de uso por clase de fondo, no una sola con un origen.** Con el motor vendiendo dólares cuando las inversiones no alcanzan, hay que ver cada cosa en su fila. El proveedor `COBERTURA` sirve `USO_INVERSION` y `USO_COMITENTE`; `APLICACION` —el total de antes— queda declarada para volver atrás y relacionada en `componentes`, así que el validador no deja activar el total y una parte a la vez. Lo crea `sql/cashflow_cobertura_automatica.sql`.
+
+### La cobertura la calcula el motor
+
+> Esto **cambió** con `feature/cobertura-automatica`. El uso se cargaba a mano, celda por celda, y había que rehacerlo cada vez que se movía un vencimiento.
+
+En cada carga del tablero, **al vuelo y sin persistir nada**, `CoberturaAutomatica::calcular()` recorre las columnas en orden cronológico arrastrando el saldo y, en cada una:
+
+1. Entra el flujo de la columna sin cobertura, y **lo cargado a mano** en esa columna, entero: lo manual va primero.
+2. Si el **saldo acumulado** queda abajo de cero, rescata **exactamente lo que falta** para llevarlo a cero. Lo que dispara el rescate es el acumulado, **no el flujo del día**: un día que gasta más de lo que entra pero viene con caja de sobra no necesita cobertura, y rescatar contra el flujo sacaría plata de una inversión que rinde sin necesitarla.
+3. Si el saldo acumulado tiene **sobrante** y antes el motor rescató, **devuelve** al fondo (uso negativo) hasta recuperar lo rescatado, sin pasarse.
+
+Las reglas que no son obvias:
+
+- **Orden de consumo: primero las cuentas de `INVERSION`, después las `COMITENTE`.** Vender dólares es la última opción. Dentro de cada clase, el orden del catálogo de Saldos (`ORDEN`, `NOMBRE`), el mismo de la pestaña y los desplegables; a igual orden, la clave. Lo fija `CoberturaAutomatica::ordenDeConsumo()` y **no depende de cómo estén ordenadas las filas del cuadro**: reordenarlas desde Parámetros cambiaría en silencio qué fondo se vende primero, y eso es una decisión de negocio.
+- **El tope de cada fondo es su saldo a la fecha de la columna** —saldo inicial + suscripciones − rescates hasta ahí, **previstos incluidos**— menos lo ya consumido en las columnas anteriores, a mano o por el motor. Un rescate cargado en Saldos → Fondos para la semana que viene deja de estar disponible desde ese día. **Un fondo nunca queda en negativo por el motor**: agotado, se pasa al siguiente. Lo único que puede dejarlo abajo de cero es una carga manual vieja o un rescate previsto que se coma lo ya usado; el motor lo clava en cero, no rescata de ahí, y avisa con la primera fecha en la que pasa.
+- **Del comitente se venden dólares enteros, redondeando hacia arriba**, valuados a la cotización del día de la columna, punta vendedora (`Cotizacion::ultimaHasta`, la misma con la que se valúa el stock). Hacia arriba porque el objetivo es llegar a cero: con un dólar de menos la columna sigue en rojo. La devolución redondea **hacia abajo** por lo mismo: recomprar uno de más dejaría el saldo abajo de cero. El vuelto del redondeo queda en caja. Sin cotización para ese día no se vende ni se recompra: no hay con qué valuar.
+- **Si con los dos fondos no alcanza, se aplica todo lo que hay** y la columna queda en rojo. No se inventa plata: el motor avisa cuánto falta y en qué columnas, la celda de uso lo dice en el `title`, y `cobertura.faltante` lo lleva por columna.
+- **La devolución es LIFO**: se le devuelve primero al fondo del que se sacó último, así que se recompran los dólares antes de volver a suscribir a la inversión. Se lleva una pila de rescates **automáticos**: lo cargado a mano no se devuelve solo —es una decisión de alguien y deshacerla en silencio sería peor que dejarla—; para eso está el importe manual negativo. **Nunca se devuelve más de lo que se sacó**, que sería inventar una suscripción, y tampoco se le devuelve a un fondo que una carga manual negativa ya dejó entero.
+- **Las columnas mensuales son un solo paso.** El eje no tiene resolución diaria fuera del tramo: una columna mensual acumula los días de ese mes que quedan fuera, y para el motor es una columna, medida al último día del mes. Un bache que ocurra a mitad de mes y se tape solo antes de fin de mes no se ve, porque el eje no lo ve.
+
+`calcular()` es **una función pura**: recibe columnas, flujo, fondos con su tope y cotización por columna, y lo manual; devuelve el uso por columna y fondo, el saldo, el faltante y los sobregiros. No conoce el `Horizonte` ni la estructura. `Cashflow::resolverUsoCobertura()` arma sus entradas con lo que los proveedores dieron —`FondosProvider` manda el tope por columna en `fondos_tope`, `CoberturaProvider` lo manual por columna en `fondos_manual`, ver `CashflowProvider`— y escribe el resultado en las filas de uso **antes del arrastre**, que después lo recoge como a cualquier movimiento. Los dos arrastres —el del motor y el de la función— tienen que llegar al mismo cierre, y si no lo hacen queda un aviso: es el segundo invariante, al lado de `cierre[n] == apertura[n+1]`.
+
+**Qué fondos participan:** los que tienen tope y **alguna fila de uso los nombra** (la serie de uso de cada clase lista en `fondos` todas sus cuentas activas). Un fondo con stock que ninguna fila aplica no se toca —no habría dónde mostrar el rescate— y el tablero avisa nombrando el script: es lo que pasa con la comitente hasta correr el 19. Una fila de uso con `COMPUTA = 0` no participa: un rescate que no entrara al saldo no cubriría nada.
+
+**Lo manual tiene precedencia y el motor se calcula sobre el remanente.** Primero se aplican las cargas manuales de la fecha, y recién después el motor cubre lo que siga faltando. Una carga manual descuenta del tope de su fondo como cualquier rescate; una negativa lo repone. Si una devolución manual deja la columna en rojo, el motor la cubre: lo manual manda, el motor tapa.
+
+**Se distingue lo calculado de lo cargado.** Cada celda de uso lleva su desglose en `cobertura_columnas` —manual y calculado, por fondo, en pesos y en la moneda del fondo— y el front lo pinta distinto: lo calculado en itálica azul, lo manual en negrita con un punto, el `title` con el detalle (*"El motor rescata US$ 1.658 de «Cuenta comitente» ($ 2.545.030)"*), y la celda de Concepto con los totales de la fila (*calculado $ X · a mano $ Y*), que suma el motor en `cobertura_totales`. **El front no calcula ninguno.**
 
 ### No hizo falta ninguna regla nueva en el motor
 
@@ -728,18 +768,21 @@ Va en una segunda línea y no al lado del nombre porque **el nombre sale de la c
 
 **Un uso negativo suma al disponible**, porque devuelve plata a la inversión. Sale gratis: es la misma resta con el signo del dato.
 
-**Aplicar más de lo que hay avisa, pero no se bloquea.** Planificar con plata que todavía no está puede ser deliberado —un rescate que se va a hacer, una suscripción en camino—, así que la app no lo impide. Lo que no puede pasar es que el tablero tape un saldo final con plata inexistente sin decirlo: el número se pinta en rojo y el motor deja un aviso que dice cuánto falta.
+**Lo aplicado es manual más calculado, y el resumen los separa** (`cobertura.manual`, `cobertura.automatico`, y lo mismo por fondo, con `automatizable` diciendo si el motor puede rescatar de ahí). Lo calculado es el neto de lo rescatado menos lo devuelto.
+
+**Una carga manual que supere lo disponible en el fondo a esa fecha se rechaza**, con un mensaje que dice cuánto hay: *"a esa fecha hay US$ 65.900,00 disponibles (saldo del fondo US$ 66.000,00, menos lo ya aplicado a mano hasta ese día)"*. Disponible es el saldo de la cuenta a esa fecha —previstos incluidos— menos lo aplicado a mano desde ese fondo **antes** de esa fecha (la de la misma fecha se pisa, y las posteriores son problema de su día). **No se recorta en silencio**: recortar dejaría guardado un número que nadie tipeó. Antes se avisaba y se dejaba pasar; con el motor rescatando solo, una carga que supera el fondo ya no puede ser "un rescate que se va a hacer": un rescate previsto se carga en Saldos → Fondos y el motor lo ve. Los negativos pasan siempre. Lo hace `Cobertura::validarDisponible()`, pura, desde `guardar()`. Para un fondo que el motor **no** maneja —sin tope, por ejemplo una fila que siga leyendo del proveedor retirado— queda el aviso de antes: se aplica más de lo que hay, no se bloquea.
 
 **Sin fila de stock no se inventa un disponible.** Puede estar inhabilitada, o su módulo puede no haber devuelto nada; `hay_stock` en `false` es lo que distingue "no se sabe" de "no hay plata". Contestar cero sería lo segundo cuando lo cierto es lo primero.
 
-### Se edita desde el tablero, no desde otra pantalla
+### Se pisa desde el tablero, no desde otra pantalla
 
-La decisión que expresa esta fila —cuánto aplicar y en qué día— se toma **mirando las columnas en rojo**. Un editor en otra pestaña obligaría a ir y volver comparando fechas, que es justamente el trabajo que la fila existe para evitar. Por eso el proveedor `COBERTURA` **no declara `tab`** y su fila no queda como enlace.
+La decisión que expresa una carga manual —cuánto aplicar y en qué día— se toma **mirando las columnas en rojo**. Un editor en otra pestaña obligaría a ir y volver comparando fechas, que es justamente el trabajo que la fila existe para evitar. Por eso el proveedor `COBERTURA` **no declara `tab`** y sus filas no quedan como enlace.
 
-- Clic en una celda de la fila → un input; Enter guarda, Escape cancela.
+- Clic en una celda de una fila de uso → un input; Enter guarda, Escape cancela. **El importe se tipea en la moneda del fondo** —dólares en la comitente— que es como se guarda y como uno lo decide; la celda muestra los pesos. Lo que se propone es **lo manual que ya tiene esa celda para ese fondo**, no el total que se ve: el total incluye lo que calculó el motor, y eso no se edita, se recalcula.
+- **Con más de una cuenta en la fila, el editor pregunta de cuál** con un desplegable; con una sola no molesta. Cada fila de uso sabe qué fondos aplica (`fondos_fila`).
 - **Sólo las columnas diarias.** Una columna mensual acumula muchos días y la aplicación se guarda con una fecha: elegir una por el sistema —el día 1, por ejemplo— sería inventar un dato que nadie cargó. La celda mensual muestra el acumulado y lo dice en el `title`.
-- Vaciar la celda **da de baja** la aplicación de esa fecha; no guarda un cero. Un cero no es una aplicación de cero pesos: es no tener ninguna, y la baja además deja rastro en el historial.
-- Guardar **recarga el tablero entero**: la aplicación cambia el flujo de esa columna, el saldo final de todas las siguientes, el saldo mínimo, las columnas que quedan en rojo y los indicadores. Rehacer eso en el navegador sería reimplementar en JS el arrastre que ya hace el motor.
+- Vaciar la celda **da de baja** la carga manual de esa fecha **y ese fondo**; no guarda un cero. Un cero no es una aplicación de cero pesos: es no tener ninguna, y la baja además deja rastro en el historial. Lo que queda en la celda es lo que calcule el motor.
+- Guardar **recarga el tablero entero**: la carga cambia el flujo de esa columna, el saldo final de todas las siguientes, el saldo mínimo, las columnas que quedan en rojo, los indicadores y todo lo que el motor rescata de ahí en adelante. Rehacer eso en el navegador sería reimplementar en JS el arrastre y la cobertura automática.
 
 ### Las columnas con saldo negativo se marcan
 
@@ -749,11 +792,11 @@ Se mira el **Saldo Final** y no el flujo de la columna: un día que gasta más d
 
 ### La tabla
 
-`RO_T_CASHFLOW_COBERTURA_APLIC`: fecha, importe, origen del fondo, observación, usuario e historial.
+`RO_T_CASHFLOW_COBERTURA_APLIC`: fecha, importe, origen del fondo, observación, usuario e historial. **Guarda sólo lo manual**: lo que calcula el motor no se persiste.
 
-- **Una aplicación vigente por fecha.** La fila del tablero es una sola, así que la pregunta que contesta la tabla es "cuánta cobertura se aplica el día X". `ORIGEN` dice de qué fondo sale y es un dato de la aplicación, no parte de su identidad.
-- **El importe puede ser negativo**, y no lleva `CHECK` que lo impida: un negativo es sacar plata de la cuenta y volver a invertirla, que en una columna con saldo de sobra es una decisión tan real como aplicar cobertura. Lo que sí se rechaza es el cero.
-- **No hay baja física.** Pisar una fecha marca `VIGENTE = 0` las anteriores e inserta una nueva, en una transacción; borrar marca `VIGENTE = 0` y no inserta nada. El historial es lo único que explica por qué el saldo proyectado de ayer era otro: con un `UPDATE`, corregir un dedazo y cambiar de plan son indistinguibles después del hecho. Mismo criterio que `RO_T_CASHFLOW_SALDO_INVERSIONES`.
+- **Una aplicación vigente por fecha y fondo.** Esto **cambió**: la clave era la fecha sola, porque la fila del tablero era una. Con una fila de uso por fondo, el mismo día puede llevar una carga desde cada uno, y cada una se pisa y se borra por separado. `sql/cashflow_cobertura_automatica.sql` lo fija con un índice único **filtrado por `VIGENTE = 1`** —las pisadas y las dadas de baja tienen que poder repetir la clave: son el historial— y antes controla que no haya duplicados; si los hay avisa y no lo crea. `VERSIONES` en `getAplicaciones()` cuenta por fecha y fondo, y el historial de una celda se pide con `fecha` y `origen`.
+- **El importe puede ser negativo**, y no lleva `CHECK` que lo impida: un negativo es sacar plata de la cuenta y volver a invertirla, que en una columna con saldo de sobra es una decisión tan real como aplicar cobertura. Lo que sí se rechaza es el cero, y un positivo mayor a lo disponible en el fondo a esa fecha (ver arriba).
+- **No hay baja física.** Pisar una celda marca `VIGENTE = 0` las anteriores de esa fecha y ese fondo e inserta una nueva, en una transacción; borrar marca `VIGENTE = 0` y no inserta nada. El historial es lo único que explica por qué el saldo proyectado de ayer era otro: con un `UPDATE`, corregir un dedazo y cambiar de plan son indistinguibles después del hecho. Mismo criterio que `RO_T_CASHFLOW_SALDO_INVERSIONES`.
 - El origen no es texto libre —un campo libre termina con *Alyc*, *ALYC* y *Fondo Alyc* conviviendo, y después no hay forma de sumar por origen— pero **tampoco es una lista del código**: es la clave de una cuenta de fondo del catálogo de Saldos. Ver la sección siguiente.
 
 ### Los fondos son las cuentas
@@ -772,7 +815,9 @@ Cómo llega eso al motor sin que el motor conozca ninguna cuenta:
 
 Un stock que no reparte —una fila que siga leyendo del proveedor retirado— suma al total y a ningún fondo. Una aplicación cuyo origen no es ninguna cuenta —una clave vieja que la migración no pudo mover, por ejemplo `SUSCRIPCION`— suma al total, abre un fondo sin stock para que se vea, y `CoberturaProvider` avisa cuánto es. Está fijado en `tests/test_cobertura.php`.
 
-`Cobertura::origenes()` lista las cuentas de fondo —incluidas las inhabilitadas, porque una aplicación vieja tiene que poder nombrar la suya— y los helpers puros (`validarOrigenEn()`, `monedaDeOrigenEn()`, `origenDefectoDe()`) reciben esa lista. **El origen por defecto es la primera cuenta de fondo activa en pesos**, por orden del catálogo: no es una cuenta escrita en el código, es una regla, y existe porque el editor del tablero todavía no pregunta de qué fondo se aplica. Eso es la etapa siguiente; ver *Pendientes conocidos*.
+`Cobertura::origenes()` lista las cuentas de fondo —incluidas las inhabilitadas, porque una aplicación vieja tiene que poder nombrar la suya— y los helpers puros (`validarOrigenEn()`, `monedaDeOrigenEn()`, `origenDefectoDe()`) reciben esa lista. **El origen por defecto es la primera cuenta de fondo activa en pesos**, por orden del catálogo: no es una cuenta escrita en el código, es una regla. El editor del tablero ya manda el origen —cada fila de uso sabe qué fondos aplica—, así que el defecto queda para un pedido que llegue sin él.
+
+Con la cobertura automática las series de la sección llevan dos cosas más, por el mismo camino: `fondos_tope` en el stock (el saldo de cada cuenta **en cada columna**, en su moneda, con la cotización de cada columna si es en dólares) y `fondos_manual` en el uso (lo cargado a mano desde cada cuenta, por columna, en las dos monedas). Son las entradas de `CoberturaAutomatica`, no salen en el JSON del tablero, y `normalizar()` las deja pasar como a `por_fondo`.
 
 > **Un bug de `develop` que salió con esto.** `CashflowProvider::normalizar()` arma la serie con una lista cerrada de claves, y el reparto por fondo del uso —entonces `por_origen`— no estaba en ella: `CoberturaProvider` lo colgaba, el motor lo esperaba, y en el medio se descartaba en silencio. Contra la base real `aplicado` por fondo era siempre cero y **el aviso por fondo nunca se disparó**; sólo `tests/test_cobertura.php`, que reemplaza `pedirSeries()` y se saltea `normalizar()`, lo veía funcionar. Ahora `por_fondo` y `fondos` están en el contrato, `normalizar()` las deja pasar, y hay una prueba que pasa por `series()` —el camino real— para que no vuelva a perderse. Consecuencia visible: el tablero ahora avisa *"se aplican $ 4.000.000 de «Inversiones» pero ahí hay $ 3.529.962,37"*, que era cierto desde antes.
 
@@ -809,7 +854,7 @@ para cada columna de la secuencia:
     cierre   = saldo                          <- lo que muestra SALDO_FINAL
 ```
 
-El motor verifica que `cierre[n] == apertura[n+1]`; si no da, deja un aviso y no una excepción.
+El motor verifica que `cierre[n] == apertura[n+1]`; si no da, deja un aviso y no una excepción. Ese es el arrastre **global**, con todos los movimientos; lo que muestra cada fila `SALDO_FINAL` es el mismo arrastre pero sólo con las filas que tiene **por encima**, así que la del final coincide con el cierre global y una puesta antes de la cobertura es la posición sin cubrir.
 
 ### Dos consecuencias que se ven en pantalla
 
@@ -1005,6 +1050,8 @@ De `FLUJO_NETO`, `tests/test_cashflow.php` fija que incluya el saldo **mostrado*
 
 De los **fondos como cuentas**, `tests/test_cobertura.php` fija que el disponible se lleve por clave de cuenta —con un fondo sobregirado mientras el total cierra, que es el aviso que el pozo único no daba—, que un stock sin reparto y una aplicación con una clave que no es de ninguna cuenta se traten como corresponde, y que `por_fondo` **sobreviva a `series()`**, que es donde se perdió una vez. `tests/test_fondos.php` cubre el resto: ver `README-saldos.md`.
 
+De la **cobertura automática**, `tests/test_cobertura_automatica.php` prueba primero `CoberturaAutomatica::calcular()` sola, con números, porque ahí viven todas las reglas: un día con flujo negativo pero caja de sobra **no rescata**; el rescate parcial saca exactamente lo que falta; las inversiones se agotan y recién ahí entra la comitente; los dólares se venden enteros hacia arriba (y un cociente exacto no sube uno por punto flotante; de USD 3,50 se venden 3); sin cotización no se vende; con los dos fondos agotados queda el faltante y ningún fondo va a negativo; la devolución es LIFO, acotada al sobrante del día y a lo rescatado, con una pila de varios rescates que se deshace en orden inverso; lo manual va primero, descuenta del tope, no se devuelve solo, y una devolución manual que deja rojo se cubre; el tope cambia con los movimientos previstos y un rescate previsto que se come lo usado deja el fondo sobregirado e informado; y el orden de consumo. Después lo enchufa al motor con dos filas de stock y dos de uso: que las celdas muestren manual más calculado, que el flujo con cobertura y el arrastre lo recojan sin aviso de descuadre, que el KPI y el saldo mínimo lo vean, que el desglose por columna y los totales separen los dos, que si no alcanza quede el faltante con su aviso, que un fondo sin fila de uso no se toque y se avise nombrando el script, que una fila informativa no calcule y que un stock sin tope no sea automatizable. Y lo de alrededor: `validarDisponible()` con la aplicación de la misma fecha que se pisa, la posterior que no cuenta y el negativo que pasa siempre; `Fondos::saldoProyectado()` y el tope por columna con un rescate previsto; `Cotizacion::ultimasHasta()` en dos consultas; `CoberturaProvider` con una `Cobertura` de mentira, repartiendo por clase y por columna; y el script y el registro.
+
 **El motor acepta un `Horizonte` inyectado, y hace falta para poder probarlo.** El arrastre del saldo depende de qué día es hoy, así que un escenario con importes en fechas fijas deja de tener sentido en cuanto pasa esa fecha. Sin esa costura las pruebas del motor caducaban solas —y caducaron: 48 casos empezaron a devolver `null` al pasar el 06/09/2026, y la parte más delicada del módulo se quedó sin red. Es la misma costura que ya tenían `Ventas::proyectarVentas()` y `proyectarCobranzas()`.
 
 ```php
@@ -1062,7 +1109,9 @@ cashflow/Class/Cobertura.php                Aplicación de inversiones para cubr
 cashflow/Class/Fondos.php                   Cuentas de inversión y comitente (README-saldos.md)
 cashflow/Class/Providers/FondosProvider.php Stock de cobertura por cuenta de fondo
 sql/cashflow_saldos_cuentas_fondo.sql       CLASE, saldo inicial, movimientos y la migración desde Otros Ingresos
-cashflow/Class/Providers/CoberturaProvider.php   Serie APLICACION; no declara pestaña
+cashflow/Class/Providers/CoberturaProvider.php   Lo cargado a mano, una serie por clase de fondo; no declara pestaña
+cashflow/Class/CoberturaAutomatica.php           El algoritmo del uso de cobertura, puro
+sql/cashflow_cobertura_automatica.sql            Una fila de uso por fondo; clave fecha + fondo
 cashflow/Controller/CoberturaController.php      Se llama desde el tablero, no desde una pestaña
 cashflow/Class/Providers/ExportacionesProvider.php   Exportaciones Tasky (README-exportaciones-tasky.md)
 cashflow/Tabs/exportaciones_tasky.php
@@ -1080,14 +1129,17 @@ De la rama `feature/echeqs-excluir`: `sql/cashflow_echeqs_excluir.sql` (nuevo) �
 
 > En esa rama salió además un **bug que ya estaba en `develop`**: `Echeqs::marcarCheques()` armaba la lista de ids con `array_values()` sobre un mapa **indexado por id**, así que lo que viajaba a la consulta era una lista de `true` —que SQL Server convierte a `1`— y las veinte marcas terminaban todas sobre el cheque `1`. Nunca se ejecutó: `RO_T_CASHFLOW_ECHEQ_PRECHEQ` está vacía, así que no hay ningún dato que reparar. Se corrigió junto con la exclusión porque es la misma función que ésta reusa, y se dejó la nota en las dos.
 
+De la rama `feature/cobertura-automatica`: `Class/CoberturaAutomatica.php`, `sql/cashflow_cobertura_automatica.sql` y `tests/test_cobertura_automatica.php` (nuevos) · `Class/Cashflow.php` (`resolverUsoCobertura()` antes del arrastre; `sumarMovimientos()` con exclusión de tipo; `resolverCobertura()` separa manual de calculado y los avisos pasan a `avisarCobertura()`; el segundo invariante; `fondos_tope` y `fondos_manual` no salen en el JSON) · `Class/CashflowProvider.php` (`fondos_tope` y `fondos_manual` en el contrato) · `Providers/FondosProvider.php` (`fondos_tope`; `fechasPorColumna()` y `tope()` estáticos) · `Providers/CoberturaProvider.php` (una serie por clase; `fondos_manual`; `cobertura()` por fábrica) · `Class/CashflowRegistry.php` (las tres series de `COBERTURA` y su `componentes`) · `Class/Cobertura.php` (clave fecha + fondo; `validarDisponible()` y `disponibleParaAplicar()`; `saldoFondoA()`; historial por fondo) · `Class/Fondos.php` (`saldoProyectado()`; `getCuentasFondo()` con movimientos a pedido) · `Class/Cotizacion.php` (`ultimasHasta()` y `entreFechas()`) · `Controller/CoberturaController.php` (origen en baja e historial) · `Js/Cashflow.js` y `Css/Cashflow.css` (dos filas de uso, manual vs. calculado, editor por fondo y en su moneda) · `tests/test_cobertura.php` y `tests/test_fondos.php` (las series nuevas y los dobles).
+
 Eliminado: `Tabs/resumen.php`.
 
 ---
 
 ## Pendientes conocidos
 
-- **El editor de cobertura del tablero todavía no pregunta de qué fondo se aplica.** Cada cuenta de fondo es un fondo y las aplicaciones ya guardan la clave de la cuenta, pero la celda editable de *Uso de Inversiones* manda sólo fecha e importe, así que todo va al origen por defecto: la primera cuenta de fondo activa en pesos. Con una sola cuenta de inversión es lo correcto; con varias, o para vender dólares de la comitente, hay que poder elegir. Es **la etapa siguiente**, junto con lo que haga el cálculo de la cobertura con los movimientos futuros de los fondos (un rescate previsto hoy no entra al stock, que es el saldo a hoy). `CoberturaController::getAplicaciones` ya devuelve los orígenes con su moneda y el defecto.
-- **La cuenta comitente migró con `USD 1,00` como saldo inicial**, porque ésa era la última foto vigente (18/09/2026) y el tablero ya mostraba ese número. Si fue una carga de prueba, se corrige el saldo inicial desde Parámetros → Saldos; la foto de 71.000 del 16/09 sigue en `RO_T_CASHFLOW_DOLARES_COMITENTE`.
+- **Una aplicación manual no es un movimiento del fondo.** El motor y las cargas manuales son *proyección*: cuando el rescate se hace de verdad, la plata sale del fondo y entra al banco, y eso lo tienen que reflejar un `RESCATE` en Saldos → Fondos y el saldo bancario del día siguiente. Una carga manual con fecha pasada no descuenta del stock a hoy (`Fondos::saldoA()` no la conoce) ni entra al saldo proyectado (su columna ya no está en la secuencia): queda en su celda y en el "queda X de Y", nada más. Hoy hay una así en la base —`$ 4.000.000` de *Inversiones* el 18/09, más que el fondo—, y **bloquea cualquier carga manual nueva desde ese fondo** porque `validarDisponible()` la descuenta: hay que darla de baja desde el tablero (o registrar el rescate real). Qué hacer con una aplicación cuando su fecha pasa —convertirla en movimiento, darla de baja sola, dejarla— es una decisión pendiente.
+- **Las columnas mensuales son un solo paso para el motor.** Un bache a mitad de un mes fuera del tramo diario que se tape solo antes de fin de mes no se ve, y uno que no se tape se rescata "en el mes", sin día. Es la resolución del eje, no del algoritmo; si hace falta más, se alarga `horizonte_dias`.
+- **La cuenta comitente migró con `USD 1,00` como saldo inicial** y después se corrigió a `USD 66.000,00` desde Parámetros → Saldos (verificado el 19/09/2026); la foto de 71.000 del 16/09 sigue en `RO_T_CASHFLOW_DOLARES_COMITENTE`. Con la cobertura automática ese saldo importa: es lo que el motor vende cuando las inversiones no alcanzan.
 - **El saldo de apertura ya no arranca en cero, pero depende de que alguien cargue.** El módulo Saldos existe (ver `README-saldos.md`) y alimenta *Saldo Inicial*. Mientras no haya ninguna carga, o mientras la última quede vieja, la fila va en cero o desactualizada y **el tablero lo avisa con la fecha del dato**: leer esos saldos como disponibilidad real sería un error caro.
 - **Todas las filas del Excel ya tienen de dónde salir.** *Exportaciones Tasky* fue la última: la alimenta `ExportacionesProvider` con las facturas pendientes en dólares de `GVA12` (ver `README-exportaciones-tasky.md`). *Caja Locales* salió de esta lista cuando se construyó el módulo Saldos, y *Dólares Cuenta Comitente* y *Saldo de Inversiones* primero con **Otros Ingresos** y después como **cuentas de fondo de Saldos** (ver `README-saldos.md`): se cargan a mano —un saldo inicial y los movimientos—, pero por una pantalla y no por el Excel, así que siguen entrando al tablero por un proveedor como cualquier otra.
 - **El neteo de cheques adelantados resta importes que ninguna fila del tablero suma.** Un cheque en cartera cierra solo: suma en *Echeqs en cartera* y resta de la cobranza de Ventas. Uno ya aplicado —depositado o endosado a un proveedor— no lo suma nadie, y se netea igual: **el neteo va por tilde y no por estado**, porque los cheques pre-chequeados están casi todos aplicados y filtrarlos dejaría el circuito sin efecto. Es una decisión tomada, no un pendiente; el pie de la sub-pestaña muestra el corte por estado para poder auditar el número. El detalle de lo verificado contra la base está en `README-ventas.md`.

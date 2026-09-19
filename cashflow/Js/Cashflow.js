@@ -70,10 +70,10 @@
             clave: 'cashflow',
             anclas: '.cf-seccion, .cf-tipo-subtotal, .cf-tipo-flujo_neto,'
                 + ' .cf-tipo-saldo_inicial, .cf-tipo-saldo_final,'
-                // Las dos de Cobertura también quedan clavadas. El stock no es
+                // Las de Cobertura también quedan clavadas. El stock no es
                 // una fila de movimiento que se pueda reordenar dentro de su
-                // bloque, y el uso tiene que quedar ENTRE los dos flujos netos:
-                // si se moviera, el de arriba empezaría a incluirlo y las dos
+                // bloque, y las de uso tienen que quedar ENTRE los dos flujos netos:
+                // si se movieran, el de arriba empezaría a incluirlas y las dos
                 // filas dirían lo mismo.
                 + ' .cf-tipo-stock_cobertura, .cf-tipo-uso_cobertura'
         });
@@ -441,6 +441,9 @@
 
         var saldo = null;
 
+        // La ÚLTIMA fila de saldo: es la que arrastra todo, o sea la posición.
+        // La que va antes de la cobertura muestra el rojo que el motor ya
+        // tapó, y marcar la columna por ella diría que falta plata donde no.
         datos.filas.forEach(function(f) {
             if (f.tipo === 'SALDO_FINAL') { saldo = f; }
         });
@@ -495,7 +498,7 @@
 
         var celdas = cols.map(function(c, i) {
             if (f.tipo === 'USO_COBERTURA') {
-                return celdaCobertura(f[c.rama][c.clave], c, i);
+                return celdaCobertura(f, f[c.rama][c.clave], c, i);
             }
 
             return celdaHtml(f[c.rama][c.clave], c, i, anotacion(f, c), f.tipo);
@@ -529,11 +532,14 @@
             marca = ' <i class="fas fa-arrow-right-arrow-left cf-marca cf-marca-arrastre" title="'
                 + escapar(textoArrastre(f)) + '"></i>';
         } else if (f.tipo === 'USO_COBERTURA') {
-            // Es la única fila del tablero que se edita acá. Sin decirlo, nadie
-            // descubre que se puede hacer clic en sus celdas.
-            marca = ' <i class="fas fa-pen-to-square cf-marca cf-marca-editable" title="'
-                + escapar('Se carga acá: hacé clic en la celda del día en el que querés aplicar '
-                    + 'cobertura. Un importe negativo devuelve plata a la inversión.'
+            // La calcula el motor, y es la única fila del tablero que se puede
+            // pisar acá. Sin decirlo, nadie descubre ni una cosa ni la otra.
+            marca = ' <i class="fas fa-wand-magic-sparkles cf-marca cf-marca-auto" title="'
+                + escapar('La calcula el motor en cada carga: rescata de ' + nombresFondos(f)
+                    + ' exactamente lo que falta para que el Saldo Final no quede abajo de '
+                    + 'cero, y devuelve cuando sobra. Para pisar un día, hacé clic en su celda '
+                    + 'y cargá el importe a mano: lo manual va primero y el motor cubre el '
+                    + 'resto. Un importe negativo devuelve plata al fondo.'
                     + textoSaldoCobertura(f))
                 + '"></i>';
         } else if (f.tipo === 'STOCK_COBERTURA') {
@@ -573,8 +579,9 @@
         // columna Total, porque la de Concepto es la que queda FIJA al
         // scrollear a lo ancho: con veintiocho columnas, un importe que sólo
         // vive al final de la tabla no lo mira nadie. Y el número que importa
-        // para decidir no es cuánto hay, sino cuánto QUEDA.
-        var saldo = lineaSaldoCobertura(f);
+        // para decidir no es cuánto hay, sino cuánto QUEDA. En las filas de
+        // uso, la misma línea dice cuánto calculó el motor y cuánto se cargó.
+        var saldo = lineaSaldoCobertura(f) + lineaUsoCobertura(f);
 
         if (f.tab) {
             // data-sub-tab lo lee el JS de la pestaña destino para abrirse en la
@@ -642,10 +649,55 @@
 
         var c = f.cobertura;
 
-        return ' Hay $ ' + plataCorta(c.stock) + ' invertidos, se aplicaron $ '
-            + plataCorta(c.aplicado) + ' y quedan $ ' + plataCorta(c.disponible)
+        return ' Hay $ ' + plataCorta(c.stock) + ' invertidos, se aplican $ '
+            + plataCorta(c.aplicado) + ' ($ ' + plataCorta(c.automatico) + ' calculados por el '
+            + 'motor y $ ' + plataCorta(c.manual) + ' cargados a mano) y quedan $ '
+            + plataCorta(c.disponible)
             + ' disponibles. Se mide sobre todo el horizonte, no sobre la vista activa: '
             + 'el stock no cambia según el tramo que se mire.';
+    }
+
+    /**
+     * La segunda línea de la celda de Concepto en una fila de uso: cuánto
+     * calculó el motor y cuánto se cargó a mano, sobre todo el horizonte. Los
+     * dos números los suma el motor (cobertura_totales); acá sólo se dibujan.
+     *
+     * Sin nada de nada no se escribe: "calculado $ 0 · a mano $ 0" es ruido.
+     */
+    function lineaUsoCobertura(f) {
+        if (f.tipo !== 'USO_COBERTURA' || !f.cobertura_totales) {
+            return '';
+        }
+
+        var t = f.cobertura_totales;
+        var manual = Number(t.manual) || 0;
+        var auto = Number(t.automatico) || 0;
+
+        if (manual === 0 && auto === 0) {
+            return '';
+        }
+
+        var partes = [];
+
+        if (auto !== 0) { partes.push('calculado $ ' + plataCorta(auto)); }
+        if (manual !== 0) { partes.push('a mano $ ' + plataCorta(manual)); }
+
+        return '<div class="cf-stock-saldo cf-uso-linea" title="'
+            + escapar('Sobre todo el horizonte. Lo calculado es el neto de lo que el motor '
+                + 'rescató menos lo que devolvió; lo manual es lo cargado en las celdas.')
+            + '">' + escapar(partes.join(' · ')) + '</div>';
+    }
+
+    /** Los nombres de los fondos que aplica una fila de uso, para los textos */
+    function nombresFondos(f) {
+        var nombres = [];
+
+        (f.fondos_fila || []).forEach(function(clave) {
+            var d = f.cobertura && f.cobertura.fondos ? f.cobertura.fondos[clave] : null;
+            nombres.push('«' + (d ? d.nombre : clave) + '»');
+        });
+
+        return nombres.length ? nombres.join(', ') : 'sus fondos';
     }
 
     /**
@@ -698,8 +750,9 @@
      */
     function textoArrastre(f) {
         return 'Arrastre: la posición proyectada al cierre de cada columna. '
-            + 'Es el saldo de apertura más todo lo que se movió hasta acá, '
-            + 'no un dato cargado en esta fila.';
+            + 'Es el saldo de apertura más todo lo que se movió en las filas de arriba de '
+            + 'ésta, columna a columna; no un dato cargado en esta fila. Una fila de '
+            + 'arrastre puesta antes de la cobertura es la posición SIN cubrir.';
     }
 
     /**
@@ -759,9 +812,17 @@
     }
 
     /* ================================================================
-       COBERTURA: LA ÚNICA FILA EDITABLE DEL TABLERO
+       COBERTURA: LA CALCULA EL MOTOR, Y ES LA ÚNICA FILA QUE SE PISA ACÁ
 
-       Se edita acá y no en una pestaña aparte porque la decisión que expresa
+       Cada celda de una fila de uso es lo que el motor rescató de los fondos
+       de esa fila para que el Saldo Final no quede abajo de cero, más lo que
+       alguien cargó a mano ese día. Los dos se ven distinto: lo calculado va
+       en itálica azul y lo manual en negrita con una marca, porque no
+       significan lo mismo -uno es una consecuencia del flujo, el otro una
+       decisión- y el tooltip desglosa los dos por fondo. El front no calcula
+       ninguno: vienen en cobertura_columnas, resueltos por el motor.
+
+       Se pisa acá y no en una pestaña aparte porque la decisión que expresa
        -cuánto aplicar y en qué día- se toma MIRANDO las columnas en rojo. Un
        editor en otra pantalla obligaría a ir y volver comparando fechas, que es
        justamente el trabajo que esta fila existe para evitar.
@@ -770,57 +831,228 @@
        días y la aplicación se guarda con una fecha: elegir una por el sistema
        -el día 1, por ejemplo- sería inventar un dato que nadie cargó. La celda
        mensual muestra el acumulado y lo dice en el title.
+
+       LO MANUAL SE CARGA EN LA MONEDA DEL FONDO: dólares en la comitente,
+       pesos en las inversiones. Es como se guarda (ver Cobertura::guardar())
+       y es lo que uno decide -"vendo 2.000 dólares"-; la celda muestra los
+       pesos. Con más de un fondo en la fila, el editor pregunta de cuál.
        ================================================================ */
 
+    /** El id de columna con el que el motor indexa el desglose */
+    function idColumna(col) {
+        return (col.rama === 'meses' ? 'MES|' : 'DIA|') + col.clave;
+    }
+
+    /** El desglose manual / calculado de una celda de uso, o null si no hay nada */
+    function desgloseCobertura(f, col) {
+        var id = idColumna(col);
+
+        return (f.cobertura_columnas && f.cobertura_columnas[id]) ? f.cobertura_columnas[id] : null;
+    }
+
+    /** Cuánto falta en esa columna aunque se aplique todo, o 0 */
+    function faltanteCobertura(f, col) {
+        var id = idColumna(col);
+
+        return (f.cobertura && f.cobertura.faltante && f.cobertura.faltante[id])
+            ? Number(f.cobertura.faltante[id]) : 0;
+    }
+
+    /** Los fondos que aplica una fila de uso: [{clave, nombre, moneda}] */
+    function fondosDeFila(f) {
+        return (f.fondos_fila || []).map(function(clave) {
+            var d = (f.cobertura && f.cobertura.fondos) ? f.cobertura.fondos[clave] : null;
+
+            return {
+                clave: clave,
+                nombre: d ? d.nombre : clave,
+                moneda: d ? d.moneda : 'ARS'
+            };
+        });
+    }
+
+    /** 'US$ 1.658' o '$ 2.545.030', según la moneda */
+    function enMoneda(v, moneda) {
+        return (moneda === 'USD' ? 'US$ ' : '$ ') + plataCorta(v);
+    }
+
+    /**
+     * Qué hay en una celda de uso, para el tooltip: lo calculado y lo manual,
+     * fondo por fondo y en la moneda del fondo. Es lo que hace que una celda
+     * de la comitente diga "1.658 dólares" y no sólo unos pesos.
+     */
+    function textoCeldaCobertura(f, info, col) {
+        if (!info) {
+            return '';
+        }
+
+        var fondos = {};
+
+        fondosDeFila(f).forEach(function(d) { fondos[d.clave] = d; });
+
+        var partes = [];
+
+        Object.keys(info.fondos || {}).forEach(function(clave) {
+            var x = info.fondos[clave];
+            var d = fondos[clave] || { nombre: clave, moneda: 'ARS' };
+            var auto = Number(x.automatico) || 0;
+            var manual = Number(x.manual) || 0;
+
+            if (auto !== 0) {
+                partes.push((auto > 0 ? 'El motor rescata ' : 'El motor devuelve ')
+                    + enMoneda(Math.abs(auto), d.moneda) + ' de «' + d.nombre + '»'
+                    + (d.moneda === 'USD' ? ' ($ ' + plataCorta(Math.abs(x.automatico_ars)) + ')' : '')
+                    + '.');
+            }
+
+            if (manual !== 0) {
+                partes.push((manual > 0 ? 'Cargado a mano: ' : 'Devolución cargada a mano: ')
+                    + enMoneda(Math.abs(manual), d.moneda) + ' de «' + d.nombre + '»'
+                    + (d.moneda === 'USD' ? ' ($ ' + plataCorta(Math.abs(x.manual_ars)) + ')' : '')
+                    + '.');
+            }
+        });
+
+        // Manual sin desglose por fondo: una aplicación con una clave que no
+        // es de ninguna cuenta. Se ve igual, pero no descuenta de nadie.
+        if (!partes.length && Number(info.manual)) {
+            partes.push('Cargado a mano: $ ' + plataCorta(info.manual) + '.');
+        }
+
+        return partes.join(' ');
+    }
+
     /** La celda de la fila de uso de cobertura: editable si la columna es un día */
-    function celdaCobertura(valor, col, i) {
+    function celdaCobertura(f, valor, col, i) {
         var clases = clasesColumna(col, i).concat(['text-end', 'cf-cobertura']);
         var n = Number(valor) || 0;
+        var info = desgloseCobertura(f, col);
+
+        // Sin desglose, todo lo que haya en la celda es manual: el motor sólo
+        // calcula sobre las columnas que representan días futuros, y deja el
+        // desglose de cada una en la que tocó.
+        var manual = info ? (Number(info.manual) || 0) : n;
+        var auto = info ? (Number(info.automatico) || 0) : 0;
+        var falta = faltanteCobertura(f, col);
 
         if (n < 0) { clases.push('cf-negativo'); }
         if (n === 0) { clases.push('cf-cero'); }
+        if (manual !== 0) { clases.push('cf-cob-manual'); }
+        if (auto !== 0) { clases.push('cf-cob-auto'); }
+        if (falta > 0) { clases.push('cf-cob-falta'); }
+
+        var detalle = textoCeldaCobertura(f, info, col);
+
+        if (falta > 0) {
+            detalle += (detalle ? ' ' : '') + 'AUN ASÍ FALTAN $ ' + plataCorta(falta)
+                + ': los fondos no alcanzan y la columna queda en rojo.';
+        }
 
         if (col.rama !== 'dias') {
             return '<td class="' + clases.join(' ') + '" title="'
-                + escapar('La cobertura se aplica por día. Esta celda acumula los días de '
-                    + 'este mes; para cargarla, pasá a la vista Días.')
+                + escapar((detalle ? detalle + ' ' : '')
+                    + 'Esta celda acumula el mes; la cobertura manual se carga por día, en '
+                    + 'la vista Días.')
                 + '">' + plataCorta(n) + '</td>';
         }
 
         clases.push('cf-cobertura-editable');
 
         return '<td class="' + clases.join(' ') + '" data-fecha="' + escapar(col.clave) + '" '
-            + 'title="' + escapar('Clic para aplicar cobertura el ' + col.label
-                + '. Un importe negativo devuelve plata a la inversión.') + '">'
+            + 'data-fila="' + escapar(f.codigo) + '" '
+            + 'title="' + escapar((detalle ? detalle + ' ' : '')
+                + 'Clic para cargar a mano la cobertura del ' + col.label
+                + ' desde ' + nombresFondos(f) + ': lo manual va primero y el motor cubre el '
+                + 'resto. Un importe negativo devuelve plata al fondo.') + '">'
             + plataCorta(n) + '</td>';
     }
 
     /**
      * Abre el editor de una celda de cobertura.
      *
+     * El importe se tipea EN LA MONEDA DEL FONDO y lo que se propone es lo
+     * manual que ya tiene esa celda para ese fondo, no el total que se ve: el
+     * total incluye lo que calculó el motor, y eso no se edita, se recalcula.
+     *
      * Guardar RECARGA TODO el tablero, por el mismo motivo que la fecha manual
      * de Cobranzas FR: la aplicación cambia el flujo de esa columna, el saldo
      * final de todas las siguientes, el saldo mínimo, las columnas que quedan
-     * en rojo y los indicadores. Rehacer eso en el navegador sería reimplementar
-     * en JS el arrastre que ya hace el motor, con el riesgo habitual de que los
+     * en rojo, los indicadores y -ahora- todo lo que el motor rescata de ahí
+     * en adelante. Rehacer eso en el navegador sería reimplementar en JS el
+     * arrastre y la cobertura automática, con el riesgo habitual de que los
      * dos den distinto.
      */
-    function editarCobertura(td) {
+    function editarCobertura(td, f) {
         if (td.querySelector('input')) {
+            return;
+        }
+
+        var fondos = fondosDeFila(f);
+
+        if (!fondos.length) {
+            Notificacion.advertencia('Esta fila no tiene ninguna cuenta de fondo de la que '
+                + 'aplicar. Se dan de alta en Parámetros → Saldos.');
             return;
         }
 
         var fecha = td.getAttribute('data-fecha');
         var previo = td.innerHTML;
-        var actual = Number(String(td.textContent).replace(/\./g, '').replace(',', '.')) || 0;
+        var info = desgloseCobertura(f, { rama: 'dias', clave: fecha });
 
-        td.innerHTML = '<input type="number" step="0.01" class="form-control form-control-sm '
-            + 'cf-input-cobertura" value="' + (actual === 0 ? '' : actual) + '">';
+        // Lo manual que ya hay, por fondo y en su moneda
+        var manualDe = function(clave) {
+            var x = (info && info.fondos) ? info.fondos[clave] : null;
+
+            return x ? (Number(x.manual) || 0) : 0;
+        };
+
+        var selector = '';
+
+        if (fondos.length > 1) {
+            selector = '<select class="form-select form-select-sm cf-select-fondo" title="'
+                + escapar('De qué fondo se aplica') + '">'
+                + fondos.map(function(d) {
+                    return '<option value="' + escapar(d.clave) + '">' + escapar(d.nombre) + '</option>';
+                }).join('')
+                + '</select>';
+        }
+
+        td.innerHTML = '<div class="cf-editor-cobertura">' + selector
+            + '<span class="cf-moneda"></span>'
+            + '<input type="number" step="0.01" class="form-control form-control-sm cf-input-cobertura">'
+            + '</div>';
 
         var inp = td.querySelector('input');
+        var sel = td.querySelector('select');
+        var mon = td.querySelector('.cf-moneda');
 
+        var elegido = function() {
+            var clave = sel ? sel.value : fondos[0].clave;
+
+            for (var k = 0; k < fondos.length; k++) {
+                if (fondos[k].clave === clave) { return fondos[k]; }
+            }
+
+            return fondos[0];
+        };
+
+        var proponer = function() {
+            var d = elegido();
+            var actual = manualDe(d.clave);
+
+            mon.textContent = (d.moneda === 'USD') ? 'US$' : '$';
+            inp.value = (actual === 0) ? '' : actual;
+            inp.setAttribute('title', 'Importe en ' + (d.moneda === 'USD' ? 'dólares' : 'pesos')
+                + ' de «' + d.nombre + '»');
+        };
+
+        proponer();
         inp.focus();
         inp.select();
+
+        if (sel) {
+            sel.addEventListener('change', function() { proponer(); inp.focus(); });
+        }
 
         var cerrado = false;
 
@@ -836,18 +1068,20 @@
             if (cerrado) { return; }
             cerrado = true;
 
+            var d = elegido();
             var v = inp.value.trim();
 
-            // Vaciar la celda es dar de baja la aplicación de esa fecha, no
-            // guardar un cero: un cero no es una aplicación de cero pesos.
+            // Vaciar la celda es dar de baja la carga manual de esa fecha y
+            // ese fondo, no guardar un cero: un cero no es una aplicación de
+            // cero pesos. Lo que queda es lo que calcule el motor.
             if (v === '' || Number(v) === 0) {
-                if (actual === 0) { td.innerHTML = previo; return; }
+                if (manualDe(d.clave) === 0) { td.innerHTML = previo; return; }
 
-                pedirCobertura('deleteAplicacion', { fecha: fecha });
+                pedirCobertura('deleteAplicacion', { fecha: fecha, origen: d.clave });
                 return;
             }
 
-            pedirCobertura('saveAplicacion', { fecha: fecha, importe: Number(v) });
+            pedirCobertura('saveAplicacion', { fecha: fecha, importe: Number(v), origen: d.clave });
         };
 
         inp.addEventListener('keydown', function(e) {
@@ -855,7 +1089,12 @@
             if (e.key === 'Escape') { e.preventDefault(); cancelar(); }
         });
 
-        inp.addEventListener('blur', confirmar);
+        // Salir del editor confirma, pero pasar del input al desplegable de
+        // fondo no es salir: el foco sigue adentro de la celda.
+        td.addEventListener('focusout', function(e) {
+            if (e.relatedTarget && td.contains(e.relatedTarget)) { return; }
+            confirmar();
+        });
     }
 
     function pedirCobertura(accion, cuerpo) {
@@ -882,10 +1121,17 @@
 
     function conectarCobertura() {
         var celdas = document.querySelectorAll('#cfBody .cf-cobertura-editable');
+        var porCodigo = {};
+
+        datos.filas.forEach(function(f) { porCodigo[f.codigo] = f; });
 
         Array.prototype.forEach.call(celdas, function(td) {
             td.addEventListener('click', function() {
-                editarCobertura(td);
+                var f = porCodigo[td.getAttribute('data-fila')];
+
+                if (f) {
+                    editarCobertura(td, f);
+                }
             });
         });
     }

@@ -22,8 +22,8 @@ require_once __DIR__ . '/CashflowRegistry.php';
  *                  saldo que caigan en ese alcance
  *   FLUJO_NETO  -> todas las filas de movimiento y de saldo que esten POR
  *                  ENCIMA de ella, de cualquier seccion
- *   SALDO_FINAL -> los movimientos que esten por encima, mas el arrastre del
- *                  saldo acumulado columna a columna
+ *   SALDO_FINAL -> el ARRASTRE, columna a columna, del saldo y de los movimientos
+ *                  que esten POR ENCIMA de ella: es la posicion hasta ahi
  *
  * EL ROL DE LA SECCION NO PARTICIPA DE NINGUNA DE LAS TRES: quien decide como
  * suma una fila es su TIPO. El ROL quedo para agrupar y para los avisos del
