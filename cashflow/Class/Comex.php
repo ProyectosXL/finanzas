@@ -559,19 +559,26 @@ class Comex {
      * dolares. Cero es "vale, pero no entra". Son dos motivos distintos por los
      * que una celda queda vacia y la pantalla los informa por separado.
      *
-     * IMPORTE_ARS NO SE TOCA: es la valuacion de la fila y se sigue mostrando
-     * en su columna. Lo que cambia es cuanto de eso entra al periodo.
+     * EL IMPORTE DE ORIGEN NO SE TOCA: es la valuacion de la fila y se sigue
+     * mostrando en su columna. Lo que cambia es cuanto de eso entra al periodo.
+     *
+     * EL CAMPO ES UN ARGUMENTO porque las dos pestanas tienen el suyo
+     * -IMPORTE_ARS en Proveedores Exterior, IMPORTE_EST en Crono
+     * Nacionalizacion- y la regla es la misma. Con el nombre escrito adentro,
+     * la segunda pestana habria necesitado una copia de esta funcion, que es
+     * como se desincronizan las reglas.
      *
      * @param array $fila Fila ya valuada, con VENCIDA resuelta
+     * @param string $campoImporte De donde sale el importe de esa pestana
      * @return float|null
      */
-    public static function aporteAlEje($fila) {
+    public static function aporteAlEje($fila, $campoImporte = 'IMPORTE_ARS') {
         if (!empty($fila['VENCIDA'])) {
             return 0.0;
         }
 
-        return (isset($fila['IMPORTE_ARS']) && $fila['IMPORTE_ARS'] !== null)
-            ? floatval($fila['IMPORTE_ARS'])
+        return (isset($fila[$campoImporte]) && $fila[$campoImporte] !== null)
+            ? floatval($fila[$campoImporte])
             : null;
     }
 
@@ -1300,7 +1307,15 @@ class Comex {
             $row = self::aTexto($row, ['FECHA_EST_EMB', 'ETD', 'ETA', 'FECHA_NAC',
                 'EDIT_ANTERIOR', 'EDIT_VALOR', 'EDIT_FECHA']);
 
-            $v[] = self::conFechaEfectiva($row, 'FECHA_NAC', 'FECHA_NAC_EFECTIVA', $hoy);
+            $row = self::conFechaEfectiva($row, 'FECHA_NAC', 'FECHA_NAC_EFECTIVA', $hoy);
+
+            /* Misma regla que en Proveedores Exterior: al cashflow entra lo que
+               se mueve de hoy en adelante. Una nacionalizacion con la fecha ya
+               pasada o se pago -y no es proyeccion- o hay que corregirle la
+               fecha. Ver aporteAlEje(). */
+            $row['IMPORTE_EJE'] = self::aporteAlEje($row, 'IMPORTE_EST');
+
+            $v[] = $row;
         }
 
         sqlsrv_free_stmt($stmt);

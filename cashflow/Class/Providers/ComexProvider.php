@@ -195,21 +195,32 @@ class ComexProvider extends CashflowProvider {
     private function nacionalizaciones($h, $comex) {
         $filas = $comex->getCronoNacionalizacion();
 
-        $serie = $h->agrupar($filas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_EST');
+        /* Sobre IMPORTE_EJE, igual que los pagos al exterior: una
+           nacionalizacion con la fecha ya vencida no suma. Ver
+           Comex::aporteAlEje(). */
+        $serie = $h->agrupar($filas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_EJE');
 
         $serie['moneda_origen'] = 'ARS';
 
+        /* Sin pasarle el eje: ninguna vencida entra en ninguna columna, asi que
+           no hay nada que repartir. Se informa IMPORTE_EST -lo que valen- y no
+           IMPORTE_EJE, que para estas filas es cero por definicion. */
         foreach (Comex::avisosVencidos($filas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_EST',
-                 'fecha de nacionalización', $h) as $aviso) {
+                 'fecha de nacionalización') as $aviso) {
             $this->avisar('Nacionalizaciones: ' . $aviso);
         }
 
-        // Un cero no dice si no hay contenedores o si los hay sin importe
-        // cargado. Hoy pasa lo segundo: la estimacion sale de un LEFT JOIN
-        // sobre RO_T_IMPORTACIONES_ESTIMACION_DETALLE (conceptos 3 a 10) y
-        // viene nula para todos. La pestana Crono Nacionalizacion muestra el
-        // mismo cero. Se avisa para que el cero se pueda interpretar.
-        if (count($filas) > 0 && $this->totalSerie($serie) == 0) {
+        /* Un cero no dice si no hay contenedores o si los hay sin importe
+           cargado. La estimacion sale de un LEFT JOIN sobre
+           RO_T_IMPORTACIONES_ESTIMACION_DETALLE (conceptos 3 a 10) y puede
+           venir nula. Se avisa para que el cero se pueda interpretar.
+
+           SE MIDE SOBRE EL IMPORTE DE ORIGEN Y NO SOBRE LA SERIE, y eso cambio
+           con la regla de los vencidos: ahora la serie puede dar cero porque
+           TODOS los contenedores estan vencidos, que es otra cosa
+           completamente. Midiendo la serie, ese caso diria "ninguno tiene
+           gastos cargados" sobre contenedores que si los tienen. */
+        if (count($filas) > 0 && self::totalImporte($filas, 'IMPORTE_EST') == 0) {
             $this->avisar(
                 'Nacionalizaciones: hay ' . count($filas) . ' contenedores en el cronograma pero '
                 . 'ninguno tiene gastos de nacionalizacion estimados cargados, asi que la fila va '
@@ -221,17 +232,26 @@ class ComexProvider extends CashflowProvider {
     }
 
     /**
-     * Todo lo que trajo la serie, este dentro o fuera del eje. Sirve para
-     * distinguir "no hay datos" de "los datos son cero".
+     * Cuanto suman las filas crudas en un campo, sin pasar por el eje.
      *
-     * @param array $serie
+     * REEMPLAZA A totalSerie(), que sumaba las cuatro bolsas de la serie. Desde
+     * que una fila vencida aporta CERO al eje, la serie ya no sirve para
+     * contestar "¿hay datos cargados?": puede dar cero porque no hay gastos
+     * estimados o porque todos los contenedores estan vencidos, y son dos cosas
+     * distintas que necesitan dos avisos distintos.
+     *
+     * @param array $filas
+     * @param string $campo
      * @return float
      */
-    private function totalSerie($serie) {
-        return array_sum($serie['dias'])
-            + array_sum($serie['meses'])
-            + $serie['fuera_horizonte']
-            + $serie['sin_fecha'];
+    private static function totalImporte($filas, $campo) {
+        $total = 0.0;
+
+        foreach (is_array($filas) ? $filas : [] as $f) {
+            $total += isset($f[$campo]) ? floatval($f[$campo]) : 0.0;
+        }
+
+        return $total;
     }
 
 }

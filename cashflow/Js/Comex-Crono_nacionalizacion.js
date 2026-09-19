@@ -54,6 +54,16 @@
             busqueda.addEventListener('keyup', filtrarTabla);
         }
 
+        /* El interruptor no recarga del servidor: las filas ya están todas en
+           el navegador y esconderlas es una decisión de cómo mirar la tabla.
+           Es el mismo camino que el buscador, así que los dos terminan en
+           filtrarTabla() y no pueden quedar diciendo cosas distintas. */
+        var verVencidas = document.getElementById('verVencidasCronoNac');
+
+        if (verVencidas) {
+            verVencidas.addEventListener('change', filtrarTabla);
+        }
+
         vistas = crearEjeVistas({
             botones: 'vistasCronoNac',
             periodo: 'periodoCronoNac',
@@ -250,8 +260,11 @@
             // el filtro no depende del índice de ninguna columna —mover una
             // columna no lo rompe— y queda escrito en un solo lugar CUÁLES son
             // los tres campos por los que se busca.
+            // data-vencida es lo que mira el interruptor "Ver vencidas". Va en
+            // la fila y no se deduce de la clase: la clase es presentación y
+            // podría cambiar; el atributo es el dato.
             html += '<tr data-buscar="' + escaparAttrCrono(textoBuscable(item)) + '"'
-                + (item.VENCIDA ? ' class="fila-vencida"' : '') + '>';
+                + (item.VENCIDA ? ' data-vencida="1" class="fila-vencida"' : '') + '>';
 
             // Columnas fijas
             html += `<td class="center">${formatDate(item.FECHA_EST_EMB)}</td>`;
@@ -329,15 +342,57 @@
      * mirando un contenedor. Es el mismo reparto que Cobranzas May.
      */
     function filtrarTabla() {
-        ComexFechas.filtrar('busquedaCronoNac', 'tableBody');
+        ComexFechas.filtrar('busquedaCronoNac', 'tableBody', 'verVencidasCronoNac');
 
         generarFilaTotales();
+        pintarEstadoVencidas();
     }
 
-    /** Los items que el buscador está dejando ver, o null si no hay filtro */
+    /** Los items que el buscador y el interruptor dejan ver, o null si no hay filtro */
     function filasVisibles() {
         return ComexFechas.visibles('busquedaCronoNac',
-            (datosCrono && datosCrono.filas) || []);
+            (datosCrono && datosCrono.filas) || [], 'verVencidasCronoNac');
+    }
+
+    /**
+     * Cuántas filas esconde el interruptor, al lado del interruptor.
+     *
+     * SE DICE SIEMPRE, prendido o apagado. Una tabla que esconde filas sin
+     * decirlo se lee como que esos contenedores no existen, y acá son muchos:
+     * al 19/09/2026, 24 de 76. Mismo criterio que Proveedores Exterior.
+     *
+     * ESCONDERLAS NO CAMBIA NINGÚN NÚMERO: una nacionalización vencida no suma
+     * en ninguna columna del período, así que el interruptor saca de la vista
+     * filas que ya valían cero.
+     */
+    function pintarEstadoVencidas() {
+        var el = document.getElementById('estadoVencidasCronoNac');
+
+        if (!el) {
+            return;
+        }
+
+        var n = ComexFechas.contarVencidas((datosCrono && datosCrono.filas) || []);
+
+        if (n === 0) {
+            el.textContent = 'no hay vencidas';
+            el.title = 'Ningún contenedor tiene la fecha de nacionalización vencida.';
+
+            return;
+        }
+
+        var viendo = ComexFechas.verVencidas('verVencidasCronoNac');
+
+        el.textContent = viendo
+            ? ('se ven las ' + n + ' vencidas')
+            : (n + ' vencida' + (n === 1 ? '' : 's') + ' escondida' + (n === 1 ? '' : 's'));
+
+        el.title = viendo
+            ? 'Están marcadas en rojo. No suman en ninguna columna del período: apagá el '
+                + 'interruptor para sacarlas de la tabla.'
+            : 'Son contenedores con la fecha de nacionalización ya vencida, que no suman en '
+                + 'ninguna columna del período. Esconderlos no cambia ningún total. Prendé el '
+                + 'interruptor para verlos y cargarles una fecha nueva.';
     }
 
     /**

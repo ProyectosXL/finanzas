@@ -192,11 +192,35 @@ chequear('y el proveedor del tablero agrupa por lo mismo', true,
     strpos(codigoSinComentarios(__DIR__ . '/../cashflow/Class/Providers/ComexProvider.php'),
         "'FECHA_PAGO_EFECTIVA', 'IMPORTE_EJE'") !== false);
 
-// NACIONALIZACIONES NO: la regla no se pidio ahi, y si alguien la aplicara de
-// pasada, la fila del tablero cambiaria de numero sin que nadie lo decidiera.
-chequear('nacionalizaciones sigue agrupando por su importe', true,
-    strpos(codigoSinComentarios(__DIR__ . '/../cashflow/Class/Providers/ComexProvider.php'),
-        "'FECHA_NAC_EFECTIVA', 'IMPORTE_EST'") !== false);
+/* LA REGLA VALE EN LAS DOS PESTANAS. Nacionalizaciones se sumo despues, y la
+   funcion es la MISMA: aporteAlEje() recibe el campo de importe de cada una
+   -IMPORTE_ARS aca, IMPORTE_EST alla- en vez de tener el nombre escrito
+   adentro, que habria obligado a copiarla. */
+seccion('la misma regla, con el campo de cada pestana');
+
+chequear('una nacionalizacion vencida tampoco suma', 0.0,
+    Comex::aporteAlEje(['VENCIDA' => true, 'IMPORTE_EST' => 55238.12], 'IMPORTE_EST'));
+chequear('y una futura suma lo suyo', 55238.12,
+    Comex::aporteAlEje(['VENCIDA' => false, 'IMPORTE_EST' => 55238.12], 'IMPORTE_EST'));
+
+// El campo por defecto es el de Proveedores Exterior, que fue la primera.
+chequear('el campo por defecto es IMPORTE_ARS', 1000.0,
+    Comex::aporteAlEje(['IMPORTE_ARS' => 1000, 'IMPORTE_EST' => 7]));
+
+chequear('las dos series del tablero agrupan por IMPORTE_EJE', 2,
+    substr_count(codigoSinComentarios(__DIR__ . '/../cashflow/Class/Providers/ComexProvider.php'),
+        "'IMPORTE_EJE'"));
+
+seccion('el aviso de "sin gastos cargados" no se confunde con los vencidos');
+
+/* Un cero de la serie ya no significa "nadie cargo gastos": puede significar
+   que TODOS los contenedores estan vencidos, que es otra cosa y tiene su
+   propio aviso. Por eso esa guarda pasa a medirse sobre el importe crudo. */
+$provSrc = codigoSinComentarios(__DIR__ . '/../cashflow/Class/Providers/ComexProvider.php');
+
+chequear('se mide sobre el importe crudo', true,
+    strpos($provSrc, "self::totalImporte(\$filas, 'IMPORTE_EST')") !== false);
+chequear('y ya no sobre la serie', false, strpos($provSrc, 'totalSerie') !== false);
 
 /* ================================================================
    EL AVISO DE LOS VENCIDOS
@@ -592,17 +616,25 @@ chequear('data-vencida viaja en el <tr>', true,
 chequear('y el filtro compartido lo mira', true,
     strpos($compartido, "getAttribute('data-vencida')") !== false);
 
+seccion('las dos pestanas tienen el interruptor, y se comportan igual');
+
+chequear('Crono Nacionalizacion tambien lo declara', true,
+    strpos($htmlNac, 'id="verVencidasCronoNac"') !== false);
+chequear('y arranca apagado', false,
+    (bool) preg_match('/id="verVencidasCronoNac"[^>]*\schecked/', $htmlNac));
+chequear('con su contador al lado', true,
+    strpos($htmlNac, 'id="estadoVencidasCronoNac"') !== false);
+chequear('su filtrado lo pasa', true,
+    strpos($jsNac, "'verVencidasCronoNac'") !== false);
+chequear('y tambien marca la fila', true,
+    strpos($jsNac, 'data-vencida="1"') !== false);
+
 seccion('sin interruptor en la pantalla se ven todas');
 
-/* Es el caso de Crono Nacionalizacion, y la guarda importa: si verVencidas()
-   devolviera false por defecto, esa pestaña abriría escondiendo 24 filas sin
-   ningún control que las traiga de vuelta. */
-chequear('Crono Nacionalizacion no declara el interruptor', false,
-    strpos($htmlNac, 'form-switch') !== false);
-chequear('y su filtrado no lo pasa', false,
-    strpos($jsNac, 'verVencidas') !== false);
-
-// La guarda, leída del código compartido: sin id, devuelve true.
+/* La guarda importa aunque hoy las dos pestañas declaren el interruptor: si
+   verVencidas() devolviera false por defecto, una pestaña nueva que dibujara
+   filas con data-vencida abriría escondiéndolas sin ningún control que las
+   traiga de vuelta, y nada lo diría. */
 chequear('verVencidas() sin interruptor devuelve true', true,
     (bool) preg_match('/return chk \? !!chk\.checked : true;/', $compartido));
 

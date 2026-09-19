@@ -232,11 +232,14 @@ try {
             // puede ser nulo: esos casos suman cero y no distorsionan.
             $filasNac = $comex->getCronoNacionalizacion();
 
+            /* Sobre IMPORTE_EJE, igual que Proveedores Exterior: una
+               nacionalización con la fecha vencida no suma. La columna
+               "Importe Est." de la grilla sigue mostrando IMPORTE_EST. */
             $payload = EjeVista::armar(
                 ejeDelModulo(),
                 $filasNac,
                 'FECHA_NAC_EFECTIVA',
-                'IMPORTE_EST'
+                'IMPORTE_EJE'
             );
 
             /* Mismo reparto que en Proveedores Exterior: primero lo que falta
@@ -246,8 +249,11 @@ try {
 
             $payload['warnings'] = array_merge(
                 ($avisoDDL === '' ? [] : [$avisoDDL]),
+                /* Sin el eje: ninguna vencida entra en ninguna columna, así que
+                   no hay nada que repartir. El importe que se informa es
+                   IMPORTE_EST, que es lo que valen. */
                 Comex::avisosVencidos($filasNac, 'FECHA_NAC_EFECTIVA', 'IMPORTE_EST',
-                    'fecha de nacionalización', ejeDelModulo()),
+                    'fecha de nacionalización'),
                 $payload['warnings']
             );
 

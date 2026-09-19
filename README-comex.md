@@ -170,26 +170,26 @@ O el pago ya salió —y entonces no es proyección— o no salió y hay que cor
 1. **Acá la fecha se edita desde la pestaña.** El circuito correcto es que Comercio Exterior le cargue la fecha nueva, y para eso la fila ahora se ve. Reubicar en hoy pondría en la columna de hoy un egreso que nadie afirmó que sale hoy, y encima competiría con la corrección.
 2. **Allá Tango dice si la factura sigue impaga**, así que reubicar es correcto: esa plata está pendiente con seguridad. Acá **no hay ninguna señal** de que el pago no se haya hecho — el único corte es que el contenedor todavía no tenga detalle cargado — y hay pagos vencidos de hasta **331 días**. Amontonar los 27 en la columna de hoy pondría en el peor día del tablero **$ 2.517 millones** que probablemente ya salieron.
 
-### La regla es de Proveedores Exterior, y Crono Nacionalización muestra por qué importa
+### La misma regla en las dos pestañas
 
-En **Crono Nacionalización la regla no se aplicó** —no se pidió—, y ahí queda a la vista algo que no es obvio: la columna del **mes en curso** cubre los días de ese mes que quedaron fuera del tramo diario, o sea **días que ya pasaron**. Una nacionalización vencida de este mismo mes cae ahí, como cualquier otro importe, y **entra al tablero**. Una de agosto no. Ese reparto lo decide `Horizonte::agrupar()`, es la regla de *"un importe va a un día O a un mes"* que hace sumables a las tres vistas, y **no se tocó**.
+**Crono Nacionalización la aplica igual**: una nacionalización con la fecha vencida tampoco suma. Es la misma función — `aporteAlEje()` recibe el campo de importe de cada pestaña (`IMPORTE_ARS` en una, `IMPORTE_EST` en la otra) en vez de tenerlo escrito adentro, que habría obligado a copiarla.
 
-Al 19/09/2026, de las 24 nacionalizaciones vencidas:
-
-| | Contenedores | Importe |
+| Fila del tablero | Sin la regla | Con la regla |
 | --- | --- | --- |
-| Caen en la columna de septiembre: **entran** | 1 | $ 55.238,12 |
-| Quedan fuera del eje: **no entran** | 23 | $ 67.204,06 |
+| *Proveedores del Exterior* | $ 4.888.951.400 | **$ 4.632.182.810** |
+| *Nacionalizaciones* | $ 561.423,77 | **$ 506.185,65** |
 
-Por eso `Comex::avisosVencidos()` puede dar **dos avisos**: recibe el `Horizonte` y reparte. Un solo mensaje diciendo *"no suman en ninguna columna"* sería falso para la primera, y una nota que dice lo contrario de lo que hace el código es peor que no tenerla. **Qué columnas existen lo sabe el eje y nadie más**, y cuál mes del pasado tiene columna depende de `horizonte_dias`, que es un parámetro editable.
+La diferencia en cada una son los importes vencidos **del mes en curso**, que hasta entonces entraban igual: $ 256.768.590 en pagos (4 contenedores) y $ 55.238,12 en nacionalizaciones (1). Que entraran no era un error del eje, sino algo que no es obvio: la columna del mes en curso cubre los días de ese mes que quedaron fuera del tramo diario, **o sea días que ya pasaron**. Ese reparto lo decide `Horizonte::agrupar()`, es la regla de *"un importe va a un día O a un mes"* que hace sumables a las tres vistas, y **no se tocó**: lo que cambió es cuánto aporta una fila vencida, que ahora es cero.
 
-En Proveedores Exterior el llamador **no le pasa el eje**, y es correcto: ahí no hay nada que repartir, porque ninguna vencida entra en ninguna columna.
+> **`Comex::avisosVencidos()` conserva la capacidad de dar dos avisos** —los que entran en la columna del mes en curso y los que no—, pero desde que la regla vale en las dos pestañas ninguna se la pide: las dos llaman **sin pasarle el `Horizonte`**, porque no hay nada que repartir. La capacidad queda porque es lo que hace que el aviso no pueda mentir si alguien vuelve a dejar entrar lo vencido en algún lado.
+
+> **Un aviso que hubo que corregir con esto.** `ComexProvider` avisaba *"hay N contenedores pero ninguno tiene gastos de nacionalización estimados cargados"* cuando la serie daba cero. Desde que una fila vencida aporta cero, la serie también puede dar cero **porque están todos vencidos**, que es otra cosa y tiene su propio aviso. Esa guarda pasó a medirse sobre el importe crudo (`totalImporte()`), no sobre la serie.
 
 ### Las vencidas no se ven por defecto
 
-En **Proveedores Exterior** hay un interruptor **Ver vencidas**, apagado al abrir.
+Las dos pestañas tienen un interruptor **Ver vencidas**, apagado al abrir.
 
-Una fecha de pago vencida es un dato a corregir, y hasta que alguien la corrija ese contenedor no participa del período que la pantalla proyecta: sus celdas del eje están vacías. En el trabajo normal —mirar qué se paga de acá en adelante— son ruido, y acá son muchas: **27 de 76 filas**. Pero tienen que poder mirarse, porque son justamente las que hay que arreglar; por eso es un interruptor y no un filtro fijo.
+Una fecha vencida es un dato a corregir, y hasta que alguien la corrija ese contenedor no participa del período que la pantalla proyecta: sus celdas del eje están vacías. En el trabajo normal —mirar qué se mueve de acá en adelante— son ruido, y son muchas: **27 de 76 filas** en Proveedores Exterior y **24 de 76** en Crono Nacionalización. Pero tienen que poder mirarse, porque son justamente las que hay que arreglar; por eso es un interruptor y no un filtro fijo.
 
 **Cuánto esconde se dice al lado del interruptor, siempre** — *"27 vencidas escondidas"* o *"se ven las 27 vencidas"*. Una tabla que esconde filas sin decirlo se lee como que esos contenedores no existen. Es el mismo criterio que *Ver excluidos* de Echeqs y *Ver excluidas* de Proveedores Locales.
 
@@ -204,7 +204,9 @@ Una fecha de pago vencida es un dato a corregir, y hasta que alguien la corrija 
 
 > **Esconderlas no cambia ningún número**, y eso es lo que hace al interruptor seguro: un pago vencido ya valía cero en el período, así que el pie y las tarjetas dicen lo mismo prendido o apagado. Verificado en las dos vistas. Es la diferencia con el buscador, que sí puede dejar el pie midiendo algo distinto de las tarjetas.
 
-**Crono Nacionalización no tiene el interruptor**: el pedido era sobre la fecha estimada de pago. `ComexFechas.verVencidas()` devuelve `true` cuando la pantalla no declara el control, justamente para que una pestaña sin interruptor no pueda quedar escondiendo filas sin nada que las traiga de vuelta. Agregárselo, si algún día se quiere, es declarar el `<div class="form-switch">` y pasar su id en las dos llamadas.
+**Crono Nacionalización tiene el suyo**, idéntico: `verVencidasCronoNac`, apagado, con su contador. Son 24 de 76 filas.
+
+> `ComexFechas.verVencidas()` devuelve `true` cuando la pantalla **no** declara el control. La guarda sigue importando aunque hoy las dos lo tengan: sin ella, una pestaña nueva que dibujara filas con `data-vencida` abriría escondiéndolas sin ningún control que las traiga de vuelta, y nada lo diría.
 
 ### Cómo se ven en la grilla
 

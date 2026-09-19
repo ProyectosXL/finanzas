@@ -89,6 +89,23 @@
                                style="min-width: 260px;">
                     </div>
                 </div>
+
+                <!-- LAS VENCIDAS NO SE VEN POR DEFECTO, igual que en
+                     Proveedores Exterior: una nacionalización con la fecha
+                     vencida no suma en ninguna columna del período, así que en
+                     el trabajo normal son ruido. Al 19/09/2026 son 24 de 76.
+
+                     Esconder filas que ya valían cero no cambia ningún total;
+                     el interruptor existe para poder ir a corregirles la fecha,
+                     y CUÁNTO ESCONDE SE DICE AL LADO, siempre. -->
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="verVencidasCronoNac">
+                    <label class="form-check-label small text-muted" for="verVencidasCronoNac">
+                        Ver vencidas
+                        <span class="text-muted fst-italic ms-1"
+                              id="estadoVencidasCronoNac"></span>
+                    </label>
+                </div>
             </div>
             <div class="d-flex gap-2">
                 <!-- Los tres botones los dibuja Js/eje-vistas.js a partir del
