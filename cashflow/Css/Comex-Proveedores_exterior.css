@@ -111,6 +111,16 @@
     border-left: 3px solid #ff9800 !important;
 }
 
+/* Fecha de pago FIJADA A MANO. Mismo amarillo que .fecha-editada —no es otra
+   familia de marca, es la misma idea con otro nombre: "esto no lo calculó el
+   sistema"— y es una clase aparte porque lo que afirma cambió. .fecha-editada
+   dice quién tocó la fecha; .fecha-manual dice que está fijada, la haya fijado
+   esta pantalla o la de Comercio Exterior. Ver Js/Comex-fechas.js. */
+.fecha-manual {
+    background-color: #fff8e1 !important;
+    border-left: 3px solid #ff9800 !important;
+}
+
 .fecha-pago-input {
     width: 100%;
     padding: 4px 8px;
@@ -128,6 +138,20 @@
 
 /* Badge de fecha editada */
 .badge-fecha-editada {
+    display: inline-block;
+    padding: 3px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    background-color: #ff9800;
+    color: white;
+    border-radius: 4px;
+    margin-left: 8px;
+}
+
+/* Badge de fecha de pago fijada a mano. Mismo amarillo que el de editada y, por
+   el mismo motivo que aquel, SIN EL PREFIJO DE LA PESTAÑA: el modal de ayuda
+   muestra la leyenda de marcas y vive fuera del div .tab-proveedores_exterior. */
+.badge-fecha-manual {
     display: inline-block;
     padding: 3px 8px;
     font-size: 10px;
@@ -419,8 +443,9 @@
    hacer algo al respecto. El badge naranja sigue ahi, al lado del rojo, asi que
    no se pierde ninguna de las dos cosas.
 
-   Va con !important porque .fecha-editada lo lleva desde antes de esta rama y
-   si no, el amarillo le gana por orden de aparicion. */
+   Va con !important porque .fecha-editada -y ahora tambien .fecha-manual, que
+   es el mismo amarillo- lo llevan, y si no el amarillo le gana por orden de
+   aparicion. */
 .tab-proveedores_exterior .comex-fecha-cell.fecha-vencida {
     background-color: #ffe9e9 !important;
     border-left: 3px solid #d64545 !important;

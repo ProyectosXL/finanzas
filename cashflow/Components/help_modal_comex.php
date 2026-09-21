@@ -87,11 +87,26 @@
                         <div class="help-section mb-4">
                             <h6 class="fw-bold mb-2">Identificación visual:</h6>
                             <div class="row g-2">
+                                <!-- La misma marca dice dos cosas distintas según
+                                     de qué fecha se trate, y por eso van las dos:
+                                     la de pago tiene un BIT en el maestro que
+                                     afirma que está fijada, la de nacionalización
+                                     no lo tiene y solo puede afirmar quién la
+                                     movió. Ver Js/Comex-fechas.js. -->
+                                <div class="col-md-6">
+                                    <div class="d-flex align-items-center gap-2 p-2 border rounded">
+                                        <span class="badge-fecha-manual">Manual</span>
+                                        <div>
+                                            <strong>Fecha de pago fijada a mano</strong>
+                                            <br><small class="text-muted">El cálculo automático de Comercio Exterior no la pisa. Pasá el mouse por encima: dice quién la fijó</small>
+                                        </div>
+                                    </div>
+                                </div>
                                 <div class="col-md-6">
                                     <div class="d-flex align-items-center gap-2 p-2 border rounded">
                                         <span class="badge-fecha-editada">Editada</span>
                                         <div>
-                                            <strong>La movió alguien desde acá</strong>
+                                            <strong>La nacionalización la movió alguien desde acá</strong>
                                             <br><small class="text-muted">Pasá el mouse por encima: dice quién, cuándo y qué decía antes</small>
                                         </div>
                                     </div>

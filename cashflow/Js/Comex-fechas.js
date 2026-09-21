@@ -21,8 +21,12 @@
  *
  * TRES MARCAS, TRES COSAS DISTINTAS
  * ---------------------------------
- *   Editada   esta fecha del maestro la puso alguien desde el cashflow. El
- *             tooltip dice quién, cuándo y qué decía antes
+ *   Manual /  esta fecha NO la calculó el sistema. En la FECHA DE PAGO dice
+ *   Editada   "Manual" y sale del BIT FECHA_PAGO_CONF del maestro, el mismo que
+ *             muestra la pantalla de Comercio Exterior: mientras esté en 1, el
+ *             recálculo de +5 días no la toca. En la fecha de NACIONALIZACIÓN
+ *             sigue diciendo "Editada" y sigue queriendo decir "esto lo movió el
+ *             cashflow", porque ahí no hay BIT y es lo único que se puede afirmar
  *   Vencida   la fecha ya pasó, así que el importe NO ENTRA en ninguna columna
  *             del eje. No se lo reubica en hoy: ver Class/Comex.php
  *   Sin fecha no hay dónde ubicar el importe. Es otro problema que el vencido
@@ -31,6 +35,23 @@
  * Las tres las decide el backend y viajan en la fila. El front no compara
  * ninguna fecha, por el mismo motivo por el que no le quedó ninguna aritmética
  * de fechas cuando el eje pasó a resolverse en PHP.
+ *
+ * POR QUÉ LA MARCA DE LA FECHA DE PAGO CAMBIÓ DE NOMBRE Y DE COLOR
+ * ---------------------------------------------------------------
+ * Porque cambió lo que afirma. "Editada" decía quién había tocado la fecha;
+ * "Manual" dice que está fijada, la haya fijado esta pantalla o la otra. Una
+ * fecha fijada desde Comercio Exterior no deja rastro de este lado y antes
+ * quedaba sin marcar, indistinguible de una que calculó el sistema.
+ *
+ * AMARILLO Y NO VERDE, alineado con el badge de la pantalla de Comercio
+ * Exterior, donde el par ya existía: verde lo que calcula el sistema, amarillo
+ * lo que puso una persona.
+ *
+ * EL TOOLTIP DEPENDE DE QUIÉN LA MOVIÓ. Si hay un rastro vigente del cashflow
+ * —RASTRO_VIGENTE— se muestra el de siempre, con qué decía antes y quién la
+ * movió: tooltipRastro() no cambió. Si no lo hay, la fijaron del otro lado y se
+ * dice eso, con lo que guardó el maestro. Atribuirle al cashflow una edición
+ * que el cashflow no hizo sería el error que este módulo no se permite.
  */
 
 (function() {
@@ -102,6 +123,33 @@
     }
 
     /**
+     * El tooltip de una fecha de pago que se fijó DESDE COMERCIO EXTERIOR.
+     *
+     * Existe porque tooltipRastro() dice "la movió el cashflow" y acá no fue el
+     * cashflow: no hay rastro de este lado, y el único dato es lo que el maestro
+     * guardó al fijarla. Decirlo con el texto del otro tooltip sería atribuirle
+     * a esta pantalla una edición que no hizo.
+     *
+     * NO DICE QUÉ DECÍA ANTES, porque el maestro no lo guarda: eso vive en
+     * RO_T_IMPORTACIONES_FECHAS_HIST, que es de la otra aplicación.
+     */
+    function tooltipFijadaEnComex(item) {
+        var quien = item.FECHA_PAGO_CONF_USUARIO
+            ? escapar(item.FECHA_PAGO_CONF_USUARIO)
+            : 'desde Comercio Exterior';
+
+        var cuando = item.FECHA_PAGO_CONF_FECHA ? fecha(item.FECHA_PAGO_CONF_FECHA) : '';
+
+        return '<div class="fecha-tooltip">'
+            + '<span class="fecha-tooltip-label">Fecha fijada a mano</span>'
+            + '<span class="fecha-tooltip-value">' + quien + '</span>'
+            + '<span class="fecha-tooltip-label">'
+            + 'El recálculo automático no la toca'
+            + (cuando ? (' · ' + cuando) : '') + '</span>'
+            + '</div>';
+    }
+
+    /**
      * El HTML de una celda de fecha editable.
      *
      * @param {Object} item Fila del payload
@@ -118,9 +166,14 @@
         var vencida = !!item.VENCIDA;
         var sinFecha = (valor === null || valor === '');
 
+        /* La de pago dice "Manual" porque afirma otra cosa: que está fijada, no
+           quién la tocó. La de nacionalización sigue diciendo "Editada". Ver el
+           encabezado del archivo. */
+        var esPago = (campo === 'PAGO');
+
         var clases = ['center', clase + '-cell', 'comex-fecha-cell'];
 
-        if (editada) { clases.push('fecha-editada'); }
+        if (editada) { clases.push(esPago ? 'fecha-manual' : 'fecha-editada'); }
         if (vencida) { clases.push('fecha-vencida'); }
         if (sinFecha) { clases.push('fecha-sin'); }
         if (opts.editable) { clases.push('fecha-editable'); }
@@ -145,10 +198,19 @@
             + '<span class="fecha-value">' + (sinFecha ? '—' : fecha(valor)) + '</span>'
             + (vencida ? '<span class="badge-fecha-vencida">Vencida</span>' : '')
             + (sinFecha ? '<span class="badge-fecha-sin">Sin fecha</span>' : '')
-            + (editada ? '<span class="badge-fecha-editada">Editada</span>' : '')
+            + (editada
+                ? (esPago
+                    ? '<span class="badge-fecha-manual">Manual</span>'
+                    : '<span class="badge-fecha-editada">Editada</span>')
+                : '')
             + (opts.editable ? '<i class="fas fa-pen ' + clase + '-icon"></i>' : '')
             + '</div>'
-            + (editada ? tooltipRastro(item) : '');
+            /* El rastro del cashflow solo se muestra si describe lo que se ve.
+               Una fecha marcada por el BIT que nadie movió desde acá lleva el
+               tooltip del maestro, que es de dónde salió el dato. */
+            + (editada
+                ? (item.RASTRO_VIGENTE ? tooltipRastro(item) : tooltipFijadaEnComex(item))
+                : '');
 
         return '<td class="' + clases.join(' ') + '"'
             + ' data-id="' + item.ID + '"'

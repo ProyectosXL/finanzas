@@ -210,6 +210,24 @@
     margin-left: 8px;
 }
 
+/* Badge de fecha de pago fijada a mano.
+   ESTA PESTAÑA NO LO DIBUJA EN NINGUNA CELDA —acá la fecha editable es la de
+   nacionalización, que no tiene BIT— pero Components/help_modal_comex.php es
+   el MISMO modal para las dos pestañas y su leyenda lo muestra. Sin esta regla,
+   el modal abierto desde acá mostraría un rectángulo sin estilo explicando una
+   marca de color. Es el mismo motivo por el que .badge-fecha-editada va sin el
+   prefijo de la pestaña. */
+.badge-fecha-manual {
+    display: inline-block;
+    padding: 3px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    background-color: #ff9800;
+    color: white;
+    border-radius: 4px;
+    margin-left: 8px;
+}
+
 /* Tooltip moderno para fechas editadas */
 .fecha-tooltip {
     position: absolute;

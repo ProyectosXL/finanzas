@@ -147,6 +147,9 @@ class Comex {
     /** @var bool|null Cache de si existe la tabla de pagados */
     private $pagado = null;
 
+    /** @var bool|null Cache de si el maestro ya tiene el BIT FECHA_PAGO_CONF */
+    private $fechaPagoConf = null;
+
     /** @var DolarFuturo|null Se construye una vez: la curva se lee y se cachea adentro */
     private $dolar = null;
 
@@ -233,6 +236,77 @@ class Comex {
         $this->historial = ($row && $row['T'] !== null);
 
         return $this->historial;
+    }
+
+    /**
+     * Si el maestro ya tiene el BIT FECHA_PAGO_CONF, de
+     * administracion/comercioExterior/sql/10_fecha_pago_manual.sql.
+     *
+     * ES UNA COLUMNA DE LA OTRA PLATAFORMA, y este modulo la lee y la escribe
+     * -guardarFecha() la prende cuando se mueve la fecha de pago desde aca-.
+     * Por eso se pregunta y no se asume: los dos repos se despliegan juntos,
+     * pero el DDL lo corre una persona y puede quedar atras. Sin la columna, la
+     * pestana se comporta exactamente como antes: la fecha se guarda igual, el
+     * rastro se guarda igual y la marca de editada la sigue decidiendo
+     * marcaVigente().
+     *
+     * QUE APORTA EL BIT QUE EL RASTRO NO PODIA. El rastro dice "el cashflow
+     * escribio esta fecha"; el BIT dice "esta fecha esta fijada a mano", sin
+     * importar desde que aplicacion. Una fecha que alguien fijo desde Comercio
+     * Exterior no deja rastro de este lado -es de otra plataforma- y aun asi
+     * tiene que verse como fijada, porque lo que la marca contesta es si el
+     * recalculo automatico de +5 dias la va a pisar.
+     *
+     * Mismo patron que tieneCotizEdit() y tieneHistorial().
+     *
+     * @return bool
+     */
+    public function tieneFechaPagoConf() {
+        if ($this->fechaPagoConf !== null) {
+            return $this->fechaPagoConf;
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT COL_LENGTH('dbo." . self::TABLA_MAESTRO . "', 'FECHA_PAGO_CONF') AS C");
+
+        if ($stmt === false) {
+            throw new Exception('Error al verificar la columna de fecha de pago fijada');
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->fechaPagoConf = ($row && $row['C'] !== null);
+
+        return $this->fechaPagoConf;
+    }
+
+    /**
+     * Las columnas del BIT de fecha de pago fijada, listas para el SELECT.
+     *
+     * SIN LA COLUMNA se piden literales con el mismo nombre y el BIT en cero,
+     * que es exactamente lo que significa: sin el script 10 nadie fijo nada. El
+     * resto del metodo no tiene que preguntar si el DDL corrio. Mismo truco que
+     * rastroSelect() y pagadoSelect().
+     *
+     * @return string
+     */
+    private function confPagoSelect() {
+        if (!$this->tieneFechaPagoConf()) {
+            return "CAST(0 AS BIT)             FECHA_PAGO_CONF,
+                    CAST(NULL AS VARCHAR(50))  FECHA_PAGO_CONF_USUARIO,
+                    CAST(NULL AS DATETIME)     FECHA_PAGO_CONF_FECHA";
+        }
+
+        return "A.FECHA_PAGO_CONF,
+                A.FECHA_PAGO_CONF_USUARIO,
+                A.FECHA_PAGO_CONF_FECHA";
     }
 
     /**
@@ -470,13 +544,37 @@ class Comex {
      * Le pone a una fila leida su fecha efectiva, si esta vencida y si la marca
      * de editada corresponde al valor que se ve.
      *
+     * DE DONDE SALE 'EDITADA', QUE NO ES LO MISMO PARA LAS DOS FECHAS
+     * ---------------------------------------------------------------
+     * Para la FECHA DE PAGO sale del BIT FECHA_PAGO_CONF del maestro, que es el
+     * dato de verdad sobre si esa fecha esta fijada a mano: lo prende tanto esta
+     * pestana -guardarFecha()- como la pantalla de Comercio Exterior, y mientras
+     * este en 1 el recalculo automatico de +5 dias no la toca. Comparar el
+     * rastro contra el maestro no alcanzaba: una fecha fijada desde Comercio
+     * Exterior no deja rastro de este lado y quedaba sin marcar.
+     *
+     * Para la FECHA DE NACIONALIZACION sigue saliendo de marcaVigente(), porque
+     * no hay BIT equivalente y agregarlo esta fuera de alcance: ahi la marca
+     * sigue queriendo decir "esto lo movio el cashflow", que es lo unico que se
+     * puede afirmar.
+     *
+     * SIN EL SCRIPT 10 la fecha de pago vuelve a marcaVigente(), o sea a
+     * comportarse exactamente como antes. La degradacion no cambia lo que la
+     * pestana muestra hoy: solo se pierde poder marcar lo que se fijo del otro
+     * lado, que es justo lo que la columna viene a agregar.
+     *
+     * El rastro viaja igual en RASTRO_VIGENTE, aparte de EDITADA: son dos cosas
+     * -si esta fijada, y si lo que se ve lo puso el cashflow- y el front las
+     * necesita separadas para elegir que tooltip mostrar.
+     *
      * @param array $row Fila cruda, con las fechas ya pasadas a string
      * @param string $campoFecha Columna del maestro que manda ('FECHA_EST_PAGO'…)
      * @param string $destino Nombre del campo de fecha efectiva de la pestana
      * @param string $hoy
+     * @param bool $conBitPago Si el BIT FECHA_PAGO_CONF esta disponible
      * @return array
      */
-    private static function conFechaEfectiva($row, $campoFecha, $destino, $hoy) {
+    private static function conFechaEfectiva($row, $campoFecha, $destino, $hoy, $conBitPago = false) {
         $fecha = isset($row[$campoFecha]) ? $row[$campoFecha] : null;
 
         $row[$destino] = $fecha;
@@ -489,11 +587,21 @@ class Comex {
            tablero todo lo que no está pagado. */
         $row['PAGADO'] = !empty($row['PAGADO']) && $row['PAGADO'] != '0';
 
-        /* La marca de "editada desde el cashflow" describe el valor que se ve,
-           no el historial: si la app de Comex movio la fecha despues, el rastro
-           sigue siendo cierto pero ya no explica lo que hay en la celda. */
-        $row['EDITADA'] = self::marcaVigente(
+        /* Si el rastro del cashflow describe el valor que se ve, o si quedo
+           siendo historia porque la app de Comex movio la fecha despues. Se
+           calcula siempre -las dos pestanas lo usan para el tooltip- y ademas
+           es lo que decide EDITADA cuando no hay BIT. */
+        $row['RASTRO_VIGENTE'] = self::marcaVigente(
             isset($row['EDIT_VALOR']) ? $row['EDIT_VALOR'] : null, $fecha);
+
+        /* Un BIT de SQL Server llega como '1'/'0', igual que PAGADO mas arriba:
+           se normaliza a booleano aca, una sola vez. */
+        $row['FECHA_PAGO_CONF'] =
+            !empty($row['FECHA_PAGO_CONF']) && $row['FECHA_PAGO_CONF'] != '0';
+
+        $row['EDITADA'] = ($conBitPago && $campoFecha === 'FECHA_EST_PAGO')
+            ? $row['FECHA_PAGO_CONF']
+            : $row['RASTRO_VIGENTE'];
 
         return $row;
     }
@@ -549,6 +657,7 @@ class Comex {
                     A.FECHA_ARR ETA,
                     CASE WHEN A.ETA_CONFIRMADA = 1 THEN 1 ELSE 0 END ETA_CONFIRM,
                     A.FECHA_EST_PAGO,
+                    " . $this->confPagoSelect() . ",
                     " . $this->rastroSelect('PAGO') . ",
                     " . $this->pagadoSelect() . ",
                     " . $cotizSql . " AS COTIZ_USD_EDIT
@@ -581,12 +690,18 @@ class Comex {
         // La curva se lee UNA vez para todo el listado, no una por fila.
         $curva = $this->dolarFuturo()->curva();
 
+        /* Se resuelve UNA vez y no por fila: la existencia de la columna no
+           cambia en medio de un listado, y tieneFechaPagoConf() haria una
+           consulta por contenedor. */
+        $conBitPago = $this->tieneFechaPagoConf();
+
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $row = self::aTexto($row,
                 ['ETD', 'ETA', 'FECHA_EST_PAGO', 'EDIT_ANTERIOR', 'EDIT_VALOR', 'EDIT_FECHA',
-                 'PAGADO_FECHA']);
+                 'PAGADO_FECHA', 'FECHA_PAGO_CONF_FECHA']);
 
-            $row = self::conFechaEfectiva($row, 'FECHA_EST_PAGO', 'FECHA_PAGO_EFECTIVA', $hoy);
+            $row = self::conFechaEfectiva($row, 'FECHA_EST_PAGO', 'FECHA_PAGO_EFECTIVA', $hoy,
+                                          $conBitPago);
             $row = self::valuar($row, $curva);
 
             /* Los dos importes derivados. Van DESPUES de valuar porque salen de
@@ -1060,6 +1175,22 @@ class Comex {
      * es una edicion: un rastro por eso seria ruido en el historial, que es el
      * lugar donde despues hay que poder leer que paso.
      *
+     * Y ESO INCLUYE AL BIT: reescribir la misma fecha NO la deja fijada. Es
+     * deliberado y es la misma regla, pero tiene un borde: si la fecha que el
+     * usuario quiere resulta ser la que el calculo automatico ya puso, confirmarla
+     * tipeandola igual no la protege. Para fijarla hay que moverla, o hacerlo
+     * desde la pantalla de Comercio Exterior. Cambiarlo significaria escribir
+     * sobre el maestro sin que nada haya cambiado, que es lo que esta funcion
+     * evita a proposito.
+     *
+     * MOVER LA FECHA DE PAGO DESDE ACA LA DEJA FIJADA. Se prende
+     * FECHA_PAGO_CONF en el maestro, en el mismo UPDATE, y el recalculo
+     * automatico de Comercio Exterior -embarque + 5 dias- deja de pisarla. El
+     * rastro de RO_T_CASHFLOW_COMEX_FECHA_EDIT se sigue guardando igual: esa
+     * tabla dice QUIEN la movio y DESDE DONDE, el BIT dice SI ESTA FIJADA, y no
+     * son lo mismo. Una fecha fijada desde Comercio Exterior no deja rastro de
+     * este lado y tiene que quedar protegida igual.
+     *
      * NO HAY BAJAS FISICAS. Volver a editar la misma fecha marca VIGENTE = 0 la
      * anterior e inserta una nueva. Mismo criterio que
      * RO_T_CASHFLOW_ECHEQ_EXCLUIDO.
@@ -1182,9 +1313,37 @@ class Comex {
         }
 
         try {
+            /* LA FECHA Y EL BIT, EN LA MISMA SENTENCIA.
+               Mover la fecha estimada de pago desde aca ES fijarla a mano: si
+               no quedara marcada, el recalculo automatico de Comercio Exterior
+               -fecha de embarque + 5 dias- la pisaria en el primer guardado de
+               esa pantalla, que es exactamente el problema que este BIT resuelve.
+
+               Y va DENTRO de la transaccion, junto con el rastro, por lo mismo
+               que el resto: si se escribiera aparte y fallara, el maestro
+               quedaria con una fecha nueva que nadie protege.
+
+               SOLO PARA 'PAGO'. La nacionalizacion no tiene BIT equivalente
+               -esta fuera de alcance- y su marca la sigue decidiendo
+               marcaVigente(). Ver conFechaEfectiva().
+
+               Y SOLO SI EL SCRIPT 10 CORRIO: sin la columna se guarda la fecha
+               igual, que es como funcionaba antes de esta entrega. */
+            $marcaConf = ($campo === 'PAGO' && $this->tieneFechaPagoConf())
+                ? ", FECHA_PAGO_CONF = 1,
+                     FECHA_PAGO_CONF_USUARIO = ?,
+                     FECHA_PAGO_CONF_FECHA = GETDATE()"
+                : '';
+
+            $params = ($marcaConf === '')
+                ? [$nueva, $idMg]
+                : [$nueva, $usuario, $idMg];
+
             $this->ejecutar($cid,
-                "UPDATE " . self::TABLA_MAESTRO . " SET " . $columna . " = ? WHERE ID = ?",
-                [$nueva, $idMg],
+                "UPDATE " . self::TABLA_MAESTRO . "
+                    SET " . $columna . " = ?" . $marcaConf . "
+                  WHERE ID = ?",
+                $params,
                 'Error al guardar la fecha en ' . self::TABLA_MAESTRO);
 
             $this->ejecutar($cid,
@@ -1647,6 +1806,11 @@ class Comex {
                     A.FECHA_ARR ETA,
                     CASE WHEN A.ETA_CONFIRMADA = 1 THEN 1 ELSE 0 END ETA_CONFIRM,
                     A.FECHA_DESP_ADU FECHA_NAC,
+                    /* El BIT viaja tambien en esta pestana aunque la marca de
+                       editada de la nacionalizacion no salga de el: la fila es
+                       el mismo contenedor y la columna de fecha de pago se
+                       muestra en las dos grillas. */
+                    " . $this->confPagoSelect() . ",
                     " . $this->rastroSelect('NAC') . ",
                     " . $this->pagadoSelect() . "
                 FROM " . self::TABLA_MAESTRO . " A
@@ -1682,7 +1846,8 @@ class Comex {
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $row = self::aTexto($row, ['FECHA_EST_EMB', 'ETD', 'ETA', 'FECHA_NAC',
-                'EDIT_ANTERIOR', 'EDIT_VALOR', 'EDIT_FECHA', 'PAGADO_FECHA']);
+                'EDIT_ANTERIOR', 'EDIT_VALOR', 'EDIT_FECHA', 'PAGADO_FECHA',
+                'FECHA_PAGO_CONF_FECHA']);
 
             $row = self::conFechaEfectiva($row, 'FECHA_NAC', 'FECHA_NAC_EFECTIVA', $hoy);
 

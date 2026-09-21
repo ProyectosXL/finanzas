@@ -217,9 +217,31 @@ Tres marcas, tres cosas distintas, y las tres las decide el backend:
 
 | Marca | Qué dice |
 | --- | --- |
-| **Editada** (naranja) | Esta fecha del maestro la puso alguien desde el cashflow. El tooltip dice quién, cuándo y qué decía antes |
+| **Manual** (amarillo, sólo fecha de pago) | Esta fecha está **fijada a mano** y el recálculo automático de Comercio Exterior no la pisa. Sale del BIT `FECHA_PAGO_CONF` del maestro |
+| **Editada** (naranja, sólo fecha de nacionalización) | Esta fecha del maestro la puso alguien desde el cashflow. El tooltip dice quién, cuándo y qué decía antes |
 | **Vencida** (rojo) | La fecha ya pasó. El `title` explica la consecuencia: *"este importe no entra en ninguna columna del eje"*. En Proveedores Exterior además está escondida por defecto |
 | **Sin fecha** (gris) | No hay dónde ubicar el importe en el tiempo. Es **otro problema** que vencida — uno se corrige, el otro se carga — y por eso es otra marca |
+
+#### Por qué la fecha de pago dejó de decir "Editada"
+
+Porque cambió lo que afirma. `FECHA_EST_PAGO` la **calcula** la pantalla de Comercio Exterior como *fecha de embarque + 5 días*, así que la pregunta útil sobre esa celda no es quién la tocó sino **si el recálculo se la va a llevar puesta**. Eso lo contesta `RO_T_IMPORTACIONES_ENCABEZADO.FECHA_PAGO_CONF`, un BIT del maestro que prenden las dos aplicaciones (script `comercioExterior/sql/10_fecha_pago_manual.sql`).
+
+Comparar el rastro contra el maestro no alcanzaba: **una fecha fijada desde Comercio Exterior no deja rastro de este lado** — es otra aplicación — y quedaba sin marcar, indistinguible de una calculada.
+
+El rastro **no se reemplaza, se suma**:
+
+| | Qué contesta |
+| --- | --- |
+| `RO_T_CASHFLOW_COMEX_FECHA_EDIT` | **quién** la movió y **desde dónde** |
+| `FECHA_PAGO_CONF` | **si está fijada** |
+
+Por eso `guardarFecha()` escribe las dos cosas en la misma transacción, y la fila viaja con `EDITADA` (del BIT) **y** `RASTRO_VIGENTE` (de `marcaVigente()`) por separado: el front usa el segundo para elegir el tooltip. Si hay rastro vigente muestra el de siempre; si no, dice que la fijaron desde Comercio Exterior, que es lo único cierto.
+
+**La de nacionalización no cambió.** No tiene BIT equivalente — está fuera de alcance — y su marca sigue queriendo decir *"esto lo movió el cashflow"*, que es lo único que se puede afirmar ahí.
+
+> **Sin el script 10 corrido, la fecha de pago vuelve a `marcaVigente()`**, o sea a comportarse exactamente como antes. `tieneFechaPagoConf()` lo pregunta con `COL_LENGTH`, mismo patrón que `tieneCotizEdit()` y `tieneHistorial()`. Lo único que se pierde es poder marcar lo que se fijó del otro lado.
+>
+> **Reescribir la misma fecha no la deja fijada.** Es la misma regla de siempre — *si no cambia nada, no se escribe* — y tiene un borde: si la fecha que el usuario quiere resulta ser la que el cálculo automático ya puso, confirmarla tipeándola igual no la protege. Para fijarla hay que moverla, o hacerlo desde Comercio Exterior.
 
 **Se marca la fila entera y no sólo la celda.** Con veintiocho columnas de días, el ojo está en la punta derecha de la tabla y la celda de la fecha quedó a un scroll de distancia. Es el mismo criterio con el que el tablero marca la columna entera y no sólo el *Saldo Final*.
 
@@ -383,8 +405,21 @@ cashflow/Css/Comex-Crono_nacionalizacion.css
 cashflow/Tabs/proveedores_exterior.php
 cashflow/Tabs/crono_nacionalizacion.php
 tests/test_comex_fecha_maestra.php
+tests/test_comex_fecha_pago_manual.php  El BIT de fecha de pago fijada, y su degradacion
 tests/test_comex_dolar_futuro.php
 ```
+
+El BIT lo crea un script del **otro** repo, porque la columna es del maestro de
+Comercio Exterior:
+
+```
+administracion/comercioExterior/sql/10_fecha_pago_manual.sql
+```
+
+Se corre **después** de `sql/cashflow_comex_fecha_maestra.sql`: su backfill lee
+`RO_T_CASHFLOW_COMEX_FECHA_EDIT` para marcar como fijadas las fechas que ya se
+habían movido desde acá. Si esa tabla no existe, saltea el backfill con un
+`PRINT` y no falla.
 
 ---
 
@@ -396,4 +431,12 @@ tests/test_comex_dolar_futuro.php
 - **El historial se guarda pero todavía no se muestra entero.** La celda muestra el rastro **vigente** en su tooltip; `getHistorialFecha` devuelve la lista completa con las no vigentes y no hay pantalla que la pida. Es el mismo lugar en el que estuvo la exclusión de echeqs antes de su diálogo.
 - **Dos ediciones huérfanas** en `RO_T_CASHFLOW_COMEX_CRONO_NAC` (`ID_MG` 558 y 560): apuntan a contenedores que ya no están en el maestro. No se migraron y el script las lista. No molestan a nadie —no aparecen en ningún join— pero alguien de Comercio Exterior tendría que decir si esos contenedores se dieron de baja a propósito.
 - **Los gastos de nacionalización siguen saliendo de `RO_T_IMPORTACIONES_ESTIMACION_DETALLE` con los conceptos 3 a 10 escritos en duro** en la consulta. Es anterior a este trabajo y nadie documentó de dónde sale ese rango.
+
+  **El rango sí coincide con el de la pantalla de Comercio Exterior**, y desde `feature/fecha-pago-manual`. Hasta esa rama no: su *Total nacionalización* sumaba los conceptos **2 a 10** —`calcularTodosLosConceptos()` arrancaba por `seguro`— así que los dos sistemas informaban números distintos para el mismo contenedor, con el **Seguro** (`ID_CE = 2`) como única diferencia. En la OC `0000100015881`: 71.241,96 en la pantalla contra 71.200,76 acá, con el seguro en 41,20.
+
+  Se corrigió del lado de la pantalla, no de acá, porque **el seguro se paga antes de nacionalizar** —junto con el flete, para poner la mercadería en el puerto de destino— y ya está contado dentro del CIF, que es la base sobre la que se calculan los impuestos que sí son de nacionalización. Sumarlo contaba dos veces el mismo concepto en dos roles distintos. La rama de Uruguay de esa misma función ya lo excluía, así que esta consulta era uno de los dos lugares que ya tenían razón.
+
+- **Flete y Seguro no los proyecta ninguna pestaña.** Proveedores Exterior cubre el pago al proveedor por `VALOR_FOB_DOLAR` y Crono Nacionalización los conceptos 3 a 10; el flete (`ID_CE = 1`) y el seguro (`ID_CE = 2`) no entran en ninguna de las dos. Al 21/09/2026 son **208.560,00 y 5.353,05** sobre 60 contenedores. El seguro es despreciable, el flete no. Es anterior a este trabajo y nadie lo documentó; hace falta que alguien de Comercio Exterior diga si esos pagos salen por otro circuito antes de sumarlos al tablero.
+- **No hay BIT equivalente para la fecha de nacionalización.** Quedó fuera de alcance a propósito: el problema que el BIT resuelve es específico de `FECHA_EST_PAGO`, que es la única fecha que el JS de Comercio Exterior vuelve a calcular sobre datos ya guardados. La de nacionalización ya queda protegida ahí por su propio flag al cargar.
+- **El cálculo de +5 días sigue viviendo en el JS de Comercio Exterior**, duplicado en `Encabezado::DIAS_EMB_EST_PAGO` para que el endpoint de *volver a auto* pueda devolver la fecha resuelta. Moverlo al backend es lo que cerraría la duplicación y, de paso, haría deducible el BIT desde `RO_T_IMPORTACIONES_FECHAS_HIST` — hoy no lo es, porque el recálculo y la edición manual llegan por el mismo POST y dejan un rastro idéntico.
 - **Las dos pestañas siguen usando `alert()`** en vez de `Js/notificaciones.js`. Está en la lista de `README-cashflow.md`; cambiarlo no es parte de esta etapa y mezclarlo habría metido acá un archivo que no tiene nada que ver.
