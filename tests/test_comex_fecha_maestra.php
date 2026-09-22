@@ -840,6 +840,84 @@ chequear('la clave de columnas fijas cambio con el layout', true,
     strpos($jsNac, "clave: 'crono_nacionalizacion_v2'") !== false);
 
 /* ================================================================
+   LOS AVISOS DE UNA ACCION NO VUELVEN A SER alert()
+
+   alert() bloquea el hilo, no tiene formato y -lo que importa aca- hace que un
+   "se guardo" y un "no se pudo guardar" salgan exactamente iguales, asi que el
+   segundo se cierra con el mismo reflejo que el primero. Es el problema 3 del
+   encabezado de Js/notificaciones.js.
+
+   SE LEE EL CODIGO SIN COMENTARIOS, como el resto de las pruebas de cableado:
+   estos archivos explican en prosa que dejaron de usar alert(), y buscar la
+   palabra sobre el archivo entero daria positivo en la nota que dice que ya no
+   esta.
+   ================================================================ */
+seccion('las tres pantallas de Comex avisan con Notificacion');
+
+/* $compartido se lee entero -otras pruebas miran su encabezado-, asi que para
+   esta hace falta la version sin comentarios. $jsExt y $jsNac ya vienen asi. */
+$jsComex = ['Comex-fechas' => codigoSinComentarios(__DIR__ . '/../cashflow/Js/Comex-fechas.js'),
+            'Proveedores Exterior' => $jsExt,
+            'Crono Nacionalizacion' => $jsNac];
+
+foreach ($jsComex as $n => $js) {
+    chequear($n . ' no usa alert()', false, (bool) preg_match('/\balert\s*\(/', $js));
+    chequear($n . ' ni confirm()', false, (bool) preg_match('/\bconfirm\s*\(/', $js));
+}
+
+/* LOS FALLOS VAN A error(), QUE NO SE AUTO-CIERRA: el mensaje del servidor es
+   lo unico que explica por que el dato no quedo guardado, y que se borre a los
+   cuatro segundos es perderlo. */
+chequear('el guardado del tilde avisa el fallo', true,
+    strpos($compartido, "Notificacion.error('No se pudo guardar el tilde de pagado: '") !== false);
+chequear('y el de la fecha tambien', true,
+    strpos($compartido, "Notificacion.error('No se pudo guardar la fecha: '") !== false);
+chequear('la cotizacion tambien', true,
+    strpos($jsExt, "Notificacion.error('No se pudo guardar la cotización: '") !== false);
+
+/* EL AVISO DE LA FECHA GUARDADA NO PUEDE SALIR IGUAL EN LOS DOS CASOS. Sale
+   siempre -mover esa fecha cambia un dato de otra aplicacion- pero si ademas se
+   descarto la cotizacion cargada a mano, cambio un importe que el usuario no
+   toco, y eso no es un "listo". */
+chequear('la fecha guardada avisa como exito', true,
+    strpos($compartido, 'Notificacion.exito(result.message)') !== false);
+chequear('y como advertencia si se descarto la cotizacion', true,
+    (bool) preg_match('/if \(result\.cotizacion_descartada\)\s*\{\s*'
+        . 'Notificacion\.advertencia\(result\.message/s', $compartido));
+
+seccion('la falla de carga se pinta donde esta el vacio');
+
+/* NO ES LO MISMO QUE UN GUARDADO FALLIDO: lo que queda en pantalla es una tabla
+   VACIA, y un mensaje efimero no la explica para el que llega treinta segundos
+   despues. Se pinta adentro de tableWrapper y se notifica ademas. */
+chequear('el compartido expone errorDeCarga', true,
+    strpos($compartido, 'errorDeCarga: errorDeCarga') !== false);
+chequear('y como sacarlo en la carga siguiente', true,
+    strpos($compartido, 'limpiarErrorDeCarga: limpiarErrorDeCarga') !== false);
+chequear('pinta adentro del contenedor de la tabla', true,
+    strpos($compartido, "getElementById(idWrapper || 'tableWrapper')") !== false);
+
+/* Y NO PISA LA TABLA: el panel se inserta como primer hijo. Con un innerHTML
+   sobre el wrapper, "Actualizar" no tendria donde dibujar cuando el servidor
+   vuelva. */
+chequear('inserta el panel, no reemplaza el contenedor', true,
+    strpos($compartido, 'cont.insertBefore(panel, cont.firstChild)') !== false);
+
+foreach (['Proveedores Exterior' => $jsExt, 'Crono Nacionalizacion' => $jsNac] as $n => $js) {
+    chequear($n . ' usa el panel compartido', true,
+        strpos($js, 'ComexFechas.errorDeCarga(mensaje)') !== false);
+    chequear($n . ' lo limpia al empezar una carga', true,
+        strpos($js, 'ComexFechas.limpiarErrorDeCarga()') !== false);
+}
+
+/* Notificacion se carga desde index.php y no desde la pestana: las pestanas se
+   reemplazan enteras por AJAX y el contenedor de los mensajes tiene que
+   sobrevivir a ese reemplazo. */
+chequear('notificaciones.js se carga desde index.php', true,
+    strpos(file_get_contents(__DIR__ . '/../cashflow/index.php'),
+        'Js/notificaciones.js') !== false);
+
+/* ================================================================
    EL INTERRUPTOR DE VENCIDAS
 
    Va SOLO en Proveedores Exterior, que es donde se pidió: la fecha estimada de

@@ -709,19 +709,38 @@
     }
 
     /**
-     * Muestra u oculta el spinner de carga
+     * Muestra u oculta el spinner de carga.
+     *
+     * Al EMPEZAR una carga se saca el panel de la falla anterior: desde ese
+     * momento describe algo que ya no se sabe si sigue pasando, y un cartel
+     * rojo arriba de una tabla que cargó bien es peor que no haberlo puesto.
      */
     function mostrarCargando(mostrar) {
         document.getElementById('loadingSpinner').style.display = mostrar ? 'flex' : 'none';
         document.getElementById('tableWrapper').style.display = mostrar ? 'none' : 'block';
+
+        if (mostrar) {
+            ComexFechas.limpiarErrorDeCarga();
+        }
     }
 
     /**
-     * Muestra un mensaje de error
+     * La pestaña no pudo cargar.
+     *
+     * NO ALCANZA CON NOTIFICAR. Lo que queda en pantalla es una tabla vacía, y
+     * un mensaje efímero no la explica para el que llega treinta segundos
+     * después. El panel se pinta adentro de la tabla y la notificación va
+     * igual, como complemento. Las dos cosas las hace Js/Comex-fechas.js,
+     * compartido con la otra pestaña: es la misma falla con la misma
+     * consecuencia.
+     *
+     * Acá además lo llaman los tres casos de "no hay nada para mostrar" de
+     * generarTabla(), que terminan igual: una tabla vacía que alguien tiene que
+     * poder interpretar.
      */
     function mostrarError(mensaje) {
         mostrarCargando(false);
-        alert(mensaje);
+        ComexFechas.errorDeCarga(mensaje);
     }
 
     /* NO HAY exportarExcel(). Era una función de una línea que llamaba a

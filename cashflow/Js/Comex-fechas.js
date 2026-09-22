@@ -325,7 +325,10 @@
         .then(function(r) { return r.json(); })
         .then(function(result) {
             if (!result.success) {
-                alert('No se pudo guardar: ' + result.message);
+                /* A Notificacion.error(), que NO se auto-cierra: el mensaje del
+                   servidor es lo único que explica por qué el tilde volvió a
+                   donde estaba. Ver el encabezado de Js/notificaciones.js. */
+                Notificacion.error('No se pudo guardar el tilde de pagado: ' + result.message);
                 chk.checked = !queda;
                 chk.disabled = false;
 
@@ -338,7 +341,8 @@
         })
         .catch(function(error) {
             console.error('Error:', error);
-            alert('Error de conexión al guardar el tilde de pagado');
+            Notificacion.error('Error de conexión al guardar el tilde de pagado: no se guardó '
+                + 'nada y la casilla vuelve a donde estaba. ' + error.message);
             chk.checked = !queda;
             chk.disabled = false;
         });
@@ -410,7 +414,10 @@
             .then(function(r) { return r.json(); })
             .then(function(result) {
                 if (!result.success) {
-                    alert('No se pudo guardar la fecha: ' + result.message);
+                    /* A Notificacion.error(), que NO se auto-cierra: el mensaje
+                       del servidor es lo único que explica por qué la fecha no
+                       quedó guardada, y la celda ya volvió a lo que decía. */
+                    Notificacion.error('No se pudo guardar la fecha: ' + result.message);
                     cell.innerHTML = original;
                     guardando = false;
 
@@ -419,8 +426,21 @@
 
                 /* SE AVISA SIEMPRE, y no sólo cuando se descartó la cotización.
                    Mover esta fecha cambia un dato de OTRA aplicación, y eso no
-                   se puede deducir mirando la grilla. */
-                alert(result.message);
+                   se puede deducir mirando la grilla.
+
+                   PERO NO SIEMPRE IGUAL, que era el problema de alert(): si el
+                   cambio de mes descartó la cotización cargada a mano, cambió
+                   ADEMÁS un importe que el usuario no tocó, y eso no es un
+                   "listo". Va a advertencia, que dura más y se ve distinto. Con
+                   los dos casos saliendo idénticos, el aviso que había que leer
+                   se cerraba con el mismo reflejo que el de todos los días —el
+                   problema 3 del encabezado de Js/notificaciones.js—. */
+                if (result.cotizacion_descartada) {
+                    Notificacion.advertencia(result.message,
+                        { titulo: 'Se descartó la cotización cargada a mano' });
+                } else {
+                    Notificacion.exito(result.message);
+                }
 
                 if (typeof alGuardar === 'function') {
                     alGuardar(result);
@@ -428,7 +448,9 @@
             })
             .catch(function(error) {
                 console.error('Error:', error);
-                alert('Error de conexión al guardar la fecha');
+                Notificacion.error('Error de conexión al guardar la fecha: no se escribió nada '
+                    + 'en el maestro de Comercio Exterior y la celda vuelve a lo que decía. '
+                    + error.message);
                 cell.innerHTML = original;
                 guardando = false;
             });
@@ -621,6 +643,101 @@
             + (c.editable === false
                 ? '. La corrección manual está apagada: falta el script.'
                 : '.');
+    }
+
+    /* ================================================================
+       CUANDO LA PESTAÑA NO PUDO CARGAR
+
+       NO ES LO MISMO QUE UN GUARDADO FALLIDO, y por eso no se resuelve igual.
+       Un guardado que falla es un aviso sobre UNA ACCIÓN: el usuario acaba de
+       hacer algo, está mirando, y una notificación efímera alcanza. Acá no
+       falló una acción: falló la carga entera, y lo que queda en pantalla es
+       una tabla VACÍA. Alguien que llega treinta segundos después —o que
+       vuelve de otra pestaña— ve un cronograma sin contenedores y no tiene
+       dónde enterarse de por qué.
+
+       Por eso el mensaje se pinta DENTRO de `tableWrapper`, que es donde está
+       el vacío que hay que explicar, y se queda ahí hasta la próxima carga.
+       La notificación se manda igual, como complemento, para que el que SÍ
+       estaba mirando se entere en el momento.
+
+       El README del módulo distingue "aviso sobre los datos" —que se pinta y
+       no se cierra— de "notificación sobre una acción" —que es efímera—. Esto
+       está en el medio y se resuelve con las dos cosas, no eligiendo la
+       etiqueta más cómoda.
+
+       NO SE PISA LA TABLA: el panel se inserta ANTES, como primer hijo del
+       contenedor. Reemplazar el innerHTML del wrapper se llevaría puesto el
+       <table>, y entonces "Actualizar" no tendría dónde dibujar cuando el
+       servidor vuelva.
+
+       LO USAN TAMBIÉN LOS CASOS DE "NO VINO NINGUNA FILA", que en estas dos
+       pestañas llegan por el mismo camino. Por eso el panel dice QUÉ pasa —la
+       tabla está vacía— y deja la causa en el mensaje del backend, en vez de
+       afirmar que falló la carga.
+       ================================================================ */
+
+    /** La clase del panel, que es también cómo se lo encuentra para sacarlo */
+    var CLASE_ERROR = 'comex-error-carga';
+
+    /**
+     * Pinta la falla de carga adentro de la tabla vacía, y además notifica.
+     *
+     * @param {string} mensaje Qué pasó
+     * @param {string} [idWrapper] Contenedor de la tabla ('tableWrapper')
+     */
+    function errorDeCarga(mensaje, idWrapper) {
+        var cont = document.getElementById(idWrapper || 'tableWrapper');
+
+        if (cont) {
+            var panel = cont.querySelector('.' + CLASE_ERROR);
+
+            if (!panel) {
+                panel = document.createElement('div');
+                panel.className = CLASE_ERROR + ' alert alert-danger m-3';
+                cont.insertBefore(panel, cont.firstChild);
+            }
+
+            /* EL ENCABEZADO NO AFIRMA LA CAUSA, sólo el hecho: a esta función
+               llegan tanto "se cayó la conexión" como "el servidor no devolvió
+               ninguna fila", y decir "no se pudieron cargar los datos" sobre lo
+               segundo sería contar otra cosa. La causa la trae el mensaje, que
+               es del backend.
+
+               El mensaje puede venir con el trace, con saltos de línea: se
+               escapa y se respetan los saltos, en vez de mandarlo como HTML. */
+            panel.innerHTML = '<i class="fas fa-circle-exclamation me-2"></i>'
+                + '<strong>La tabla quedó vacía.</strong> '
+                + '<span style="white-space: pre-wrap;">' + escapar(mensaje) + '</span>'
+                + '<div class="small mt-2 text-muted">Probá con Actualizar; si vuelve a pasar, '
+                + 'lo de arriba es lo que contestó el servidor.</div>';
+        }
+
+        /* Y la notificación, para el que está mirando en este momento. No se
+           auto-cierra: es un error. Ella misma lo manda a la consola. */
+        if (window.Notificacion) {
+            Notificacion.error(mensaje);
+        } else {
+            console.error(mensaje);
+        }
+    }
+
+    /**
+     * Saca el panel de la falla anterior.
+     *
+     * Se llama al EMPEZAR una carga: desde ese momento el panel describe algo
+     * que ya no se sabe si sigue pasando, y un cartel rojo arriba de una tabla
+     * que cargó bien es peor que no haberlo puesto.
+     *
+     * @param {string} [idWrapper]
+     */
+    function limpiarErrorDeCarga(idWrapper) {
+        var cont = document.getElementById(idWrapper || 'tableWrapper');
+        var panel = cont ? cont.querySelector('.' + CLASE_ERROR) : null;
+
+        if (panel) {
+            panel.parentNode.removeChild(panel);
+        }
     }
 
     /* ================================================================
@@ -866,6 +983,8 @@
         celdaCotizacion: celdaCotizacion,
         celdaImporteArs: celdaImporteArs,
         origenCotizacion: origenCotizacion,
+        errorDeCarga: errorDeCarga,
+        limpiarErrorDeCarga: limpiarErrorDeCarga,
         textoBuscable: textoBuscable,
         sumarColumnas: sumarColumnas,
         filtrar: filtrar,

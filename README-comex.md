@@ -468,6 +468,49 @@ Por eso la clave de esta pestaña pasa a ser `crono_nacionalizacion_v2`: la pref
 
 ---
 
+## 7. Los avisos de acción dejan de ser `alert()`
+
+Rama: `feature/comex-nac-usd`
+
+`Js/notificaciones.js` ya existe, está documentado y se carga desde `cashflow/index.php`, así que no hubo nada que enchufar: sólo reemplazar los nueve `alert()` que quedaban en las dos pestañas. No había ningún `confirm()`.
+
+| Qué es | Adónde va |
+| --- | --- |
+| Falló guardar el tilde de pagado, o la fecha, o la cotización | `Notificacion.error()` |
+| Error de conexión en cualquiera de los tres | `Notificacion.error()` |
+| **Se guardó la fecha** | `Notificacion.exito()`, o `Notificacion.advertencia()` si se descartó la cotización |
+| No se pudo cargar la pestaña | Panel adentro de la tabla **más** `Notificacion.error()` |
+
+**Los fallos van a `error()` porque no se auto-cierra.** El mensaje del servidor es lo único que explica por qué el dato no quedó guardado, y que se borre a los cuatro segundos es perderlo. Los tres traen además qué pasó con lo que se estaba editando: la celda volvió a lo que decía, el tilde volvió a donde estaba.
+
+### El aviso de la fecha es el que más cambió
+
+Sale **siempre**, aunque haya salido todo bien, porque mover esa fecha cambia un dato de otra aplicación y eso no se deduce mirando la grilla. Eso no cambió. Lo que cambió es que **los dos casos ya no salen idénticos**:
+
+- se guardó y no pasó nada más → **éxito**, que se cierra solo;
+- se guardó **y el cambio de mes descartó la cotización cargada a mano** → **advertencia**, con su propio título. Ahí cambió además un importe que el usuario no tocó.
+
+Con `alert()` los dos salían iguales, así que el que había que leer se cerraba con el mismo reflejo que el de todos los días. Es exactamente el problema 3 que `notificaciones.js` enumera en su encabezado.
+
+### La falla de carga no es una notificación
+
+Los dos `mostrarError()` no son como los otros siete. No falló una acción: falló **la carga entera**, y lo que queda en pantalla es una **tabla vacía**. Un mensaje efímero no sirve ahí: alguien que llega treinta segundos después, o que vuelve de otra pestaña, ve un cronograma sin contenedores y no tiene dónde enterarse de por qué.
+
+El README de este módulo distingue **aviso sobre los datos** —se pinta, queda a la vista, no se cierra— de **notificación sobre una acción** —efímera, se descarta—. Esto está en el medio, así que hace las dos cosas:
+
+| | |
+| --- | --- |
+| **Dónde se pinta** | Adentro de `tableWrapper`, que es donde está el vacío que hay que explicar, y con el consejo de probar *Actualizar* |
+| **Qué pasa con la tabla** | **No se pisa.** El panel se inserta como primer hijo del contenedor; con un `innerHTML` sobre el wrapper, *Actualizar* no tendría dónde dibujar cuando el servidor vuelva |
+| **Cuándo se va** | Al empezar la carga siguiente. Desde ese momento describe algo que ya no se sabe si sigue pasando |
+| **La notificación** | Se manda igual, como complemento, para el que estaba mirando en el momento |
+
+Las dos cosas viven en `Js/Comex-fechas.js` —`errorDeCarga()` y `limpiarErrorDeCarga()`— por la misma razón que el resto de lo compartido: es la misma falla con la misma consecuencia en las dos pestañas.
+
+> En Crono Nacionalización `mostrarError()` lo llaman además los tres casos de *"no hay nada para mostrar"* de `generarTabla()`, que terminan igual: una tabla vacía que alguien tiene que poder interpretar. **Por eso el panel dice qué pasa —*la tabla quedó vacía*— y deja la causa en el mensaje del backend**: afirmar "no se pudieron cargar los datos" sobre un servidor que contestó bien y no tenía filas sería contar otra cosa.
+
+---
+
 ## Lo que no cambió
 
 - **La valuación con dólar futuro ROFEX**, fila por fila, según el mes de la fecha efectiva. Vive en `Comex::valuar()` y `DolarFuturo::resolver()`, y la leen la pestaña y el tablero: un solo `IMPORTE_ARS`. Ver el encabezado de `Class/DolarFuturo.php`.
@@ -496,6 +539,7 @@ De lo nuevo, lo que se fija:
 - **Que el buscador y la celda no se copien**: que las dos pestañas deleguen en `Comex-fechas.js`, que ninguna reimplemente `sumarColumnas()` ni arme su propio `fetch`, y que las dos carguen el archivo compartido **antes** que el suyo.
 - **El tilde de pagado**: que lo marcado no aporte al eje pero **siga siendo proyectable** —que es lo que hace cerrar el invariante—, y que `PAGOS + PAGOS_PAGADOS = PAGOS_TODO` se cumpla en los **cuatro casos posibles** (nada / pagada / vencida / vencida y pagada). El corte de filas marcadas se prueba **sin base**, con una lista armada a mano, que es el punto: se puede verificar aunque no haya nada marcado en la base. Y que el registro declare las tres series con su `componentes`, que es lo que impide activar el universo y una parte a la vez.
 - **El script**: que cree la tabla con las columnas que el código espera, que el índice único esté filtrado por `VIGENTE`, que no pise el maestro en conflicto y que sea reejecutable.
+- **Que `alert()` no vuelva** a ninguno de los tres archivos, que los fallos vayan a `Notificacion.error()`, que la fecha guardada no avise igual cuando se descartó la cotización, y que la falla de carga se pinte adentro de `tableWrapper` **sin pisar la tabla** —si la pisara, *Actualizar* no tendría dónde dibujar—.
 - **La valuación de Crono Nacionalización**: qué cotización le toca según la **fecha de nacionalización**, que el mismo contenedor se valúe distinto en cada pestaña porque sus dos fechas caen en meses distintos, el mes fuera de curva hacia adelante y hacia atrás, y que sin fecha el importe quede en `null` y no en cero. Y que **`valuar()` con los parámetros por defecto siga dando exactamente lo de hoy** para Proveedores Exterior: es la prueba que evita la regresión silenciosa —con los defaults invertidos, esa pestaña valuaría por un campo que no tiene y todos sus importes irían a cero sin que nada falle—.
 - **Que la grilla no vuelva a ubicar `IMPORTE_EST` en el eje**, que la curva se lea una vez por listado y no una por fila, que ninguna serie de Comex declare pesos, que la celda de cotización no se reimplemente en ninguna de las dos pestañas y que la clave de columnas fijas haya cambiado con el layout.
 - **Contra la base**, sólo lectura: que las dos consultas traigan el mismo padrón, que haya contenedores ya embarcados en la grilla, que el flag `VENCIDA` coincida con la regla pura fila por fila, que la fecha efectiva **sea** la del maestro y que el listado salga ordenado con los nulos al final.
@@ -560,4 +604,3 @@ habían movido desde acá. Si esa tabla no existe, saltea el backfill con un
 - **Flete y Seguro no los proyecta ninguna pestaña.** Proveedores Exterior cubre el pago al proveedor por `VALOR_FOB_DOLAR` y Crono Nacionalización los conceptos 3 a 10; el flete (`ID_CE = 1`) y el seguro (`ID_CE = 2`) no entran en ninguna de las dos. Al 21/09/2026 son **U$S 208.560,00 y U$S 5.353,05** sobre 60 contenedores —en dólares, como todo lo que sale de esa estimación; ver la sección 6—. El seguro es despreciable, el flete no. Es anterior a este trabajo y nadie lo documentó; hace falta que alguien de Comercio Exterior diga si esos pagos salen por otro circuito antes de sumarlos al tablero.
 - **No hay BIT equivalente para la fecha de nacionalización.** Quedó fuera de alcance a propósito: el problema que el BIT resuelve es específico de `FECHA_EST_PAGO`, que es la única fecha que el JS de Comercio Exterior vuelve a calcular sobre datos ya guardados. La de nacionalización ya queda protegida ahí por su propio flag al cargar.
 - **El cálculo de +5 días sigue viviendo en el JS de Comercio Exterior**, duplicado en `Encabezado::DIAS_EMB_EST_PAGO` para que el endpoint de *volver a auto* pueda devolver la fecha resuelta. Moverlo al backend es lo que cerraría la duplicación y, de paso, haría deducible el BIT desde `RO_T_IMPORTACIONES_FECHAS_HIST` — hoy no lo es, porque el recálculo y la edición manual llegan por el mismo POST y dejan un rastro idéntico.
-- **Las dos pestañas siguen usando `alert()`** en vez de `Js/notificaciones.js`. Está en la lista de `README-cashflow.md`; cambiarlo no es parte de esta etapa y mezclarlo habría metido acá un archivo que no tiene nada que ver.
