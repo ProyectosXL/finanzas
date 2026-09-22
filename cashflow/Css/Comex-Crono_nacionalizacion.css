@@ -58,16 +58,84 @@
     --col-texto-ancho: 220px;
 }
 
+/* Las tres de la valuación: el gasto en dólares (6), el dólar aplicado (7) y el
+   importe en pesos (8). Los índices se corrieron dos lugares cuando la columna
+   única "Importe Est." pasó a ser tres —ver el encabezado de
+   Js/Comex-Crono_nacionalizacion.js—, así que ETD y ETA son ahora la 9 y la 10. */
 #tablaCronoNacionalizacion tbody td:nth-child(6),
-#tablaCronoNacionalizacion thead th:nth-child(6) {
+#tablaCronoNacionalizacion thead th:nth-child(6),
+#tablaCronoNacionalizacion tbody td:nth-child(8),
+#tablaCronoNacionalizacion thead th:nth-child(8) {
     min-width: 140px;
 }
 
 #tablaCronoNacionalizacion tbody td:nth-child(7),
-#tablaCronoNacionalizacion thead th:nth-child(7),
-#tablaCronoNacionalizacion tbody td:nth-child(8),
-#tablaCronoNacionalizacion thead th:nth-child(8) {
+#tablaCronoNacionalizacion thead th:nth-child(7) {
+    min-width: 105px;
+}
+
+#tablaCronoNacionalizacion tbody td:nth-child(9),
+#tablaCronoNacionalizacion thead th:nth-child(9),
+#tablaCronoNacionalizacion tbody td:nth-child(10),
+#tablaCronoNacionalizacion thead th:nth-child(10) {
     min-width: 110px;
+}
+
+/* ============================================================================
+   EL DOLAR APLICADO A CADA FILA
+   Con que cotizacion se valuo el gasto de nacionalizacion, de donde salio y por
+   que. La celda la dibuja Js/Comex-fechas.js, compartida con Proveedores
+   Exterior; estas reglas son las mismas de alla, scopeadas a esta pestana, que
+   es como el modulo ya trata a .comex-fecha-cell.
+
+   NO ESTAN LAS DEL OVERRIDE NI LA DEL INPUT: aca la cotizacion no se corrige a
+   mano. Ver Comex::valuar().
+   ============================================================================ */
+
+/* La celda trae dos datos apilados: el valor y de que mes de la curva salio. El
+   simbolo va chico y gris porque es la referencia -DLR/NOV26- y el numero es lo
+   que se lee. */
+.tab-crono_nacionalizacion .cotiz-cell {
+    white-space: nowrap;
+    line-height: 1.2;
+}
+
+.tab-crono_nacionalizacion .cotiz-valor {
+    display: block;
+    font-weight: 600;
+}
+
+.tab-crono_nacionalizacion .cotiz-simbolo {
+    display: block;
+    font-size: 10px;
+    color: var(--text-muted, #7a8194);
+    text-transform: uppercase;
+}
+
+/* Un guion, no un cero: no se pudo valuar. La diferencia entre "no hay dato" y
+   "el dato es cero" es la misma de todo el modulo. */
+.tab-crono_nacionalizacion .cotiz-sin {
+    color: var(--text-muted, #7a8194);
+}
+
+/* El mes de la nacionalizacion no esta en la curva y se uso el mas cercano: el
+   importe es una aproximacion y tiene que verse como tal, pero NO es una
+   correccion de nadie, por eso el borde punteado. */
+.tab-crono_nacionalizacion .cotiz-aproximada {
+    border-left: 3px dashed #7e57c2;
+}
+
+.tab-crono_nacionalizacion .cotiz-marca {
+    font-size: 9px;
+    opacity: 0.7;
+    margin-left: 2px;
+}
+
+/* El importe que efectivamente entra al cashflow. Va destacado porque es el
+   numero que esta pestana explica: el resto de las columnas dicen de donde
+   sale. */
+.tab-crono_nacionalizacion .importe-ars {
+    font-weight: 600;
 }
 
 /* Columna de fecha editable */

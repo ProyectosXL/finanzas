@@ -1,11 +1,19 @@
 <?php
 /**
- * Comex - Proveedores Exterior: la valuacion con dolar futuro ROFEX.
+ * Comex - la valuacion con dolar futuro ROFEX, en LAS DOS PESTANAS.
  *
  * Lo que se prueba es lo que decide QUE NUMERO sale: con que cotizacion se
- * valua cada contenedor, que pasa cuando el mes de pago no esta en la curva,
- * que manda cuando hay una correccion cargada a mano, y cuando esa correccion
- * se descarta.
+ * valua cada contenedor, que pasa cuando el mes no esta en la curva, que manda
+ * cuando hay una correccion cargada a mano, y cuando esa correccion se
+ * descarta.
+ *
+ * Y DESDE feature/comex-nac-usd, TAMBIEN CRONO NACIONALIZACION. Sus gastos
+ * estaban en dolares y el tablero los ubicaba en columnas de pesos; ahora se
+ * valuan con la misma funcion, por el mes de la fecha de NACIONALIZACION. Las
+ * pruebas de esa pestana estan abajo, junto con la que fija que los defaults
+ * de valuar() siguen siendo los de Proveedores Exterior: si alguien los
+ * invirtiera, esa pestana valuaria por un campo que no tiene y todos sus
+ * importes irian a cero sin que nada falle.
  *
  * TODO SIN BASE. La curva se pasa como argumento -es un mapa- y las reglas son
  * funciones puras, que es exactamente por que viven en DolarFuturo::resolver()
@@ -251,6 +259,163 @@ $fila = Comex::valuar([
 
 chequear('un cero de la base no es un override', null, $fila['COTIZ_USD_EDIT']);
 chequear('asi que manda la curva', 'CURVA', $fila['COTIZ_ORIGEN']);
+
+/* ================================================================
+   CRONO NACIONALIZACION SE VALUA IGUAL, CON OTRO CAMPO Y OTRA FECHA
+
+   Los gastos de nacionalizacion -los conceptos 3 a 10 de la estimacion- estan
+   EN DOLARES: se calculan como porcentajes del CIF y el CIF arranca en
+   VALOR_FOB_DOLAR. Hasta feature/comex-nac-usd el tablero los ubicaba en
+   columnas de pesos. El porque y la verificacion contra la base estan en el
+   encabezado de Class/Providers/ComexProvider.php.
+
+   Lo que se prueba aca es que la MISMA funcion los valua, con el campo y la
+   fecha de esa pestana.
+   ================================================================ */
+seccion('el gasto de nacionalizacion se valua por SU fecha');
+
+$fila = Comex::valuar([
+    'ID' => 10,
+    'IMPORTE_EST' => 1000,
+    'FECHA_NAC_EFECTIVA' => '2026-11-10'
+], $curva, 'IMPORTE_EST', 'FECHA_NAC_EFECTIVA');
+
+chequear('1.000 dolares de noviembre', 1725000.0, $fila['IMPORTE_ARS']);
+chequear('con la cotizacion a la vista', 1725.0, $fila['COTIZ_USD']);
+chequear('y el simbolo', 'DLR/NOV26', $fila['COTIZ_SIMBOLO']);
+chequear('el importe en dolares no se toca', 1000, $fila['IMPORTE_EST']);
+
+/* LOS NOMBRES DE SALIDA SON LOS MISMOS EN LAS DOS PESTANAS. No es cosmetico:
+   avisosValuacion() y la celda del front los leen por nombre, asi que si esta
+   pestana devolviera COTIZ_* con otro nombre los avisos irian vacios. */
+chequear('el detalle sale con el nombre de siempre', true,
+    isset($fila['COTIZ_DETALLE']) && $fila['COTIZ_DETALLE'] !== '');
+chequear('y el mes de la curva tambien', '2026-11', $fila['COTIZ_MES']);
+
+seccion('la fecha que manda es la de nacionalizacion, no la de pago');
+
+/* EL MISMO CONTENEDOR SE VALUA DISTINTO EN CADA PESTANA, y es todo el punto: el
+   pago al proveedor y la nacionalizacion caen en meses distintos, asi que les
+   toca un punto distinto de la curva. Si la nacionalizacion mirara la fecha de
+   pago, el gasto se valuaria con el dolar de un mes en el que no se mueve. */
+$contenedor = [
+    'ID' => 11,
+    'VALOR_FOB_DOLAR' => 100,
+    'IMPORTE_EST' => 100,
+    'FECHA_PAGO_EFECTIVA' => '2026-09-15',
+    'FECHA_NAC_EFECTIVA' => '2026-11-20'
+];
+
+$pago = Comex::valuar($contenedor, $curva);
+$nac = Comex::valuar($contenedor, $curva, 'IMPORTE_EST', 'FECHA_NAC_EFECTIVA');
+
+chequear('el pago usa septiembre', 1500.0, $pago['COTIZ_USD']);
+chequear('la nacionalizacion usa noviembre', 1725.0, $nac['COTIZ_USD']);
+chequear('y los dos importes no son el mismo', true,
+    $pago['IMPORTE_ARS'] !== $nac['IMPORTE_ARS']);
+
+seccion('una nacionalizacion fuera de curva se aproxima, y se dice');
+
+$fila = Comex::valuar([
+    'ID' => 12, 'IMPORTE_EST' => 100, 'FECHA_NAC_EFECTIVA' => '2027-06-10'
+], $curva, 'IMPORTE_EST', 'FECHA_NAC_EFECTIVA');
+
+chequear('se valua con el mes mas cercano', 1980.0, $fila['COTIZ_USD']);
+chequear('que es enero del 27', '2027-01', $fila['COTIZ_MES']);
+chequear('LA FILA QUEDA MARCADA', 'APROXIMADA', $fila['COTIZ_ORIGEN']);
+
+// Y hacia atras, que es el caso real: hay nacionalizaciones vencidas de meses
+// anteriores al inicio de la curva.
+$fila = Comex::valuar([
+    'ID' => 13, 'IMPORTE_EST' => 100, 'FECHA_NAC_EFECTIVA' => '2025-04-01'
+], $curva, 'IMPORTE_EST', 'FECHA_NAC_EFECTIVA');
+
+chequear('una vencida vieja usa el primer mes de la curva', 1500.0, $fila['COTIZ_USD']);
+chequear('tambien marcada', 'APROXIMADA', $fila['COTIZ_ORIGEN']);
+
+seccion('sin fecha de nacionalizacion no se valua, NO se pone cero');
+
+$fila = Comex::valuar([
+    'ID' => 14, 'IMPORTE_EST' => 5000, 'FECHA_NAC_EFECTIVA' => null
+], $curva, 'IMPORTE_EST', 'FECHA_NAC_EFECTIVA');
+
+chequear('no se valua', null, $fila['IMPORTE_ARS']);
+chequear('y dice por que', 'SIN_FECHA', $fila['COTIZ_MOTIVO']);
+chequear('pero los dolares siguen ahi', 5000, $fila['IMPORTE_EST']);
+
+seccion('esta pestana no tiene override: siempre manda la curva');
+
+/* La consulta de Crono Nacionalizacion NO trae COTIZ_USD_EDIT, asi que la
+   valuacion sale siempre de la curva. Es una decision y no un olvido: esa
+   columna tiene UNA fila por contenedor y las dos pestanas miran el mismo
+   contenedor en dos meses distintos. Ver Comex::valuar(). */
+$fila = Comex::valuar([
+    'ID' => 15, 'IMPORTE_EST' => 100, 'FECHA_NAC_EFECTIVA' => '2026-10-20'
+], $curva, 'IMPORTE_EST', 'FECHA_NAC_EFECTIVA');
+
+chequear('sale de la curva', 'CURVA', $fila['COTIZ_ORIGEN']);
+chequear('y el override viaja en null', null, $fila['COTIZ_USD_EDIT']);
+
+/* ================================================================
+   LOS DEFAULTS SIGUEN SIENDO LOS DE PROVEEDORES EXTERIOR
+
+   Es la prueba que evita la regresion silenciosa: valuar() se parametrizo para
+   que la segunda pestana no necesitara una copia, y la llamada de
+   getProveedoresExterior() no cambio. Si alguien invirtiera los defaults, esa
+   pestana empezaria a valuar por un campo que no tiene y todos sus importes
+   irian a cero sin que nada falle.
+   ================================================================ */
+seccion('con los defaults, Proveedores Exterior valua exactamente igual');
+
+$deProveedor = [
+    'ID' => 16,
+    'VALOR_FOB_DOLAR' => 10000,
+    'FECHA_PAGO_EFECTIVA' => '2026-11-10',
+    'COTIZ_USD_EDIT' => null
+];
+
+$conDefaults = Comex::valuar($deProveedor, $curva);
+$explicito = Comex::valuar($deProveedor, $curva, 'VALOR_FOB_DOLAR', 'FECHA_PAGO_EFECTIVA');
+
+chequear('el importe es el de siempre', 17250000.0, $conDefaults['IMPORTE_ARS']);
+chequear('y pasar los nombres a mano da lo mismo', $explicito, $conDefaults);
+
+// El override sigue mandando por el camino por defecto: es la unica pestana que
+// lo tiene y no se puede haber perdido en la parametrizacion.
+$conOverride = Comex::valuar([
+    'ID' => 17, 'VALOR_FOB_DOLAR' => 1000,
+    'FECHA_PAGO_EFECTIVA' => '2026-10-20', 'COTIZ_USD_EDIT' => 1450.75
+], $curva);
+
+chequear('el override manda igual que antes', 1450750.0, $conOverride['IMPORTE_ARS']);
+chequear('y se marca como tal', 'OVERRIDE', $conOverride['COTIZ_ORIGEN']);
+
+seccion('los avisos hablan de la pestana que los pide');
+
+/* Con los campos escritos adentro, el aviso de Crono Nacionalizacion habria
+   sumado VALOR_FOB_DOLAR -que esa pestana no trae- y habria dicho "U$S 0,00",
+   nombrando ademas la fecha de pago, que no es la que falta. */
+$sinFecha = [
+    Comex::valuar(['IMPORTE_EST' => 4000, 'FECHA_NAC_EFECTIVA' => null],
+        $curva, 'IMPORTE_EST', 'FECHA_NAC_EFECTIVA')
+];
+
+$avisos = Comex::avisosValuacion($sinFecha, '2027-01', 'IMPORTE_EST',
+    'fecha de nacionalización');
+
+chequear('hay un aviso', 1, count($avisos));
+chequear('suma el importe de ESTA pestana', true,
+    strpos($avisos[0], 'U$S 4.000,00') !== false);
+chequear('y nombra la fecha que falta', true,
+    strpos($avisos[0], 'fecha de nacionalización') !== false);
+
+// Y el default sigue siendo el de Proveedores Exterior.
+$avisosExt = Comex::avisosValuacion(
+    [Comex::valuar(['VALOR_FOB_DOLAR' => 4000, 'FECHA_PAGO_EFECTIVA' => null], $curva)],
+    '2027-01');
+
+chequear('el default nombra la fecha de pago', true,
+    strpos($avisosExt[0], 'fecha estimada de pago') !== false);
 
 /* ================================================================
    EL OVERRIDE SE DESCARTA SI CAMBIA EL MES DE PAGO

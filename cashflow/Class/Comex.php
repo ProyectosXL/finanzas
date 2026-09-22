@@ -12,8 +12,8 @@ require_once __DIR__ . '/Horizonte.php';
  * las filas crudas mas lo que se deriva de ellas: quien las muestra y quien las
  * agrupa tienen que estar mirando exactamente los mismos numeros.
  *
- * LOS PAGOS AL EXTERIOR SE VALUAN ACA, CON DOLAR FUTURO
- * -----------------------------------------------------
+ * LAS DOS PESTANAS ESTAN EN DOLARES, Y LAS DOS SE VALUAN ACA
+ * ----------------------------------------------------------
  * VALOR_FOB_DOLAR esta en dolares y el cashflow es en pesos, asi que alguien
  * tiene que convertir. Antes lo hacia ComexProvider con UN parametro global
  * -'comex_tipo_cambio_usd'- aplicado a todas las filas por igual, y la pestana
@@ -21,10 +21,21 @@ require_once __DIR__ . '/Horizonte.php';
  * midiendo cosas distintas.
  *
  * Ahora cada fila se valua con la CURVA DE DOLAR FUTURO ROFEX segun el mes de
- * su fecha efectiva de pago, y la conversion vive en getProveedoresExterior():
- * la pestana y el tablero leen el mismo IMPORTE_ARS, calculado una sola vez. La
- * regla de que cotizacion le toca a cada fila es pura y vive en DolarFuturo,
- * donde esta el por que completo.
+ * su fecha efectiva, y la conversion vive en los dos getters: la pestana y el
+ * tablero leen el mismo IMPORTE_ARS, calculado una sola vez. La regla de que
+ * cotizacion le toca a cada fila es pura y vive en DolarFuturo, donde esta el
+ * por que completo.
+ *
+ * Y EL GASTO DE NACIONALIZACION TAMBIEN ESTA EN DOLARES. Hasta
+ * feature/comex-nac-usd este archivo y ComexProvider afirmaban lo contrario
+ * -"ya estan en pesos, no hay conversion"- y era falso: IMPORTE_EST suma los
+ * conceptos 3 a 10 de RO_T_IMPORTACIONES_ESTIMACION_DETALLE, que la pantalla de
+ * Comercio Exterior calcula como porcentajes del CIF, y el CIF arranca en
+ * VALOR_FOB_DOLAR. Verificado contra la base el 21/09/2026: el cociente
+ * IMPORTE_EST / VALOR_FOB_DOLAR va de 0,71 a 1,04 en los 12 contenedores con
+ * estimacion cargada, o sea una fraccion del FOB en la MISMA moneda; si
+ * estuviera en pesos daria del orden de mil. El tablero venia ubicando dolares
+ * en columnas de pesos.
  *
  * EL DOLAR FUTURO ES EL UNICO CRITERIO. 'comex_tipo_cambio_usd' quedo en
  * Parametros::RETIRADOS: dos criterios de valuacion conviviendo significan dos
@@ -78,9 +89,9 @@ require_once __DIR__ . '/Horizonte.php';
  * AL CASHFLOW ENTRA LO QUE SE PAGA DE HOY EN ADELANTE. Un pago con la fecha ya
  * vencida NO SUMA: o ya salio -y entonces no es proyeccion- o no salio y hay
  * que corregirle la fecha. Las dos cosas son gestion de Comercio Exterior sobre
- * el dato. Lo implementa aporteAlEje() y aplica a PROVEEDORES EXTERIOR; en
- * Crono Nacionalizacion la regla no se pidio y las fechas vencidas se agrupan
- * como cualquier otra.
+ * el dato. Lo implementa aporteAlEje() y vale en LAS DOS PESTANAS: la regla se
+ * sumo a Crono Nacionalizacion en feature/comex-pagado, y esta nota decia hasta
+ * feature/comex-nac-usd que alla las vencidas se agrupaban como cualquier otra.
  *
  * Y NO SE REUBICA EN HOY, que es la otra mitad de la decision: la fila queda en
  * su fecha en vez de amontonarse en la primera columna. Se aparta de
@@ -799,11 +810,12 @@ class Comex {
      * EL IMPORTE DE ORIGEN NO SE TOCA: es la valuacion de la fila y se sigue
      * mostrando en su columna. Lo que cambia es cuanto de eso entra al periodo.
      *
-     * EL CAMPO ES UN ARGUMENTO porque las dos pestanas tienen el suyo
-     * -IMPORTE_ARS en Proveedores Exterior, IMPORTE_EST en Crono
-     * Nacionalizacion- y la regla es la misma. Con el nombre escrito adentro,
-     * la segunda pestana habria necesitado una copia de esta funcion, que es
-     * como se desincronizan las reglas.
+     * EL CAMPO ES UN ARGUMENTO, aunque desde feature/comex-nac-usd las dos
+     * pestanas pasen el mismo -IMPORTE_ARS-: hasta entonces Crono
+     * Nacionalizacion pasaba IMPORTE_EST, porque se creia que ese importe
+     * estaba en pesos. Queda como argumento por lo que hace posible: una
+     * tercera pestana con otro campo no necesita una copia de esta funcion, que
+     * es como se desincronizan las reglas. El default es el de las dos.
      *
      * @param array $fila Fila ya valuada, con VENCIDA resuelta
      * @param string $campoImporte De donde sale el importe de esa pestana
@@ -885,38 +897,31 @@ class Comex {
      * confundirian con los que caen DESPUES del ultimo mes -que son otra cosa y
      * no se arreglan editando nada-.
      *
-     * PUEDEN SER DOS AVISOS, PORQUE NO EN TODAS LAS PESTANAS LO VENCIDO QUEDA
-     * AFUERA DEL CUADRO
-     * ----------------------------------------------------------------------
-     * En PROVEEDORES EXTERIOR es siempre uno: lo vencido no suma por regla -ver
-     * aporteAlEje()- asi que ninguna fila entra en ninguna columna. El llamador
-     * no pasa el eje y todas caen en la misma bolsa.
+     * PUEDE DAR DOS AVISOS, AUNQUE HOY NINGUNA PESTANA LOS NECESITE
+     * -------------------------------------------------------------
+     * En las DOS pestanas lo vencido no suma por regla -ver aporteAlEje()- asi
+     * que ninguna fila entra en ninguna columna, los dos llamadores llaman SIN
+     * pasarle el Horizonte y todas caen en la misma bolsa.
      *
-     * En CRONO NACIONALIZACION esa regla no se pidio, y ahi aparece algo que no
-     * es obvio: la columna del MES EN CURSO cubre los dias de ese mes que
-     * quedaron fuera del tramo diario, o sea DIAS QUE YA PASARON. Una
-     * nacionalizacion vencida de este mismo mes cae ahi, como cualquier otro
-     * importe, y entra al tablero. Una de agosto no: queda fuera del eje.
-     * Verificado contra la base el 19/09/2026: de 24 vencidas, 1 por
-     * $ 55.238,12 caia en la columna de septiembre y 23 por $ 67.204,06
-     * quedaban afuera.
-     *
-     * Un solo aviso diciendo "no suman en ninguna columna" seria falso para esa
-     * primera, que es justo el error que este modulo no se permite: una nota que
-     * dice lo contrario de lo que hace el codigo. Por eso el llamador que
-     * necesita el reparto pasa el Horizonte, y el que no, no.
+     * La capacidad de dar dos queda porque hay un caso que no es obvio y que
+     * estuvo vivo: la columna del MES EN CURSO cubre los dias de ese mes que
+     * quedaron fuera del tramo diario, o sea DIAS QUE YA PASARON. Mientras
+     * Crono Nacionalizacion no tuvo la regla, una nacionalizacion vencida de
+     * este mismo mes caia ahi y entraba al tablero -al 19/09/2026, 1 de 24 por
+     * $ 55.238,12- y un solo aviso diciendo "no suman en ninguna columna"
+     * habria sido falso para esa. Si alguien vuelve a dejar entrar lo vencido
+     * en algun lado, el aviso no puede mentir: eso es lo que esta guardado aca.
      *
      * Ese reparto lo decide Horizonte::agrupar() y NO se toca: es la regla de
      * "un importe va a un dia O a un mes" que hace sumables a las tres vistas.
      *
      * SOLO INFORMA LO VENCIDO, y no lo que no tiene fecha, aunque las dos cosas
-     * queden fuera del eje. Lo segundo ya lo dicen dos avisos que existen y lo
-     * dicen mejor: en Proveedores Exterior, avisosValuacion() lo informa EN
-     * DOLARES -es la unica moneda en la que existe un importe que no se pudo
-     * valuar-, y en Crono Nacionalizacion lo informa EjeVista con el importe en
-     * pesos, que ahi si existe. Repetirlo aca daria "$ 0,00 sin fecha" al lado
-     * de "U$S 164.526,47 sin fecha", que es el mismo hecho contado dos veces y
-     * una de las dos mal.
+     * queden fuera del eje. Lo segundo ya lo dice mejor avisosValuacion(), que
+     * desde feature/comex-nac-usd corre en LAS DOS pestanas y lo informa EN
+     * DOLARES: sin fecha efectiva no hay mes, sin mes no hay cotizacion y el
+     * importe en pesos ni siquiera existe. Repetirlo aca daria "$ 0,00 sin
+     * fecha" al lado de "U$S 164.526,47 sin fecha", que es el mismo hecho
+     * contado dos veces y una de las dos mal.
      *
      * LA USAN LA PESTANA Y EL TABLERO: un solo texto, igual que
      * avisosValuacion().
@@ -1055,16 +1060,42 @@ class Comex {
      * informa cuantos son y cuanto suman EN DOLARES, que es la unica moneda en
      * la que esos importes se pueden expresar.
      *
-     * @param array $row Fila cruda, con FECHA_PAGO_EFECTIVA ya resuelta
+     * LAS DOS PESTANAS VALUAN, Y POR ESO LOS DOS CAMPOS SON ARGUMENTOS
+     * ----------------------------------------------------------------
+     * Proveedores Exterior valua VALOR_FOB_DOLAR por el mes de
+     * FECHA_PAGO_EFECTIVA; Crono Nacionalizacion valua IMPORTE_EST por el mes
+     * de FECHA_NAC_EFECTIVA. La regla es la misma -el importe en dolares por la
+     * cotizacion del mes en que se mueve- y el campo es lo unico distinto. Con
+     * los nombres escritos adentro, la segunda pestana habria necesitado una
+     * copia de esta funcion, que es como se desincronizan las reglas; es el
+     * mismo criterio de importeProyectable() y aporteAlEje().
+     *
+     * LOS NOMBRES DE SALIDA SON LOS MISMOS EN LAS DOS -IMPORTE_ARS, COTIZ_USD,
+     * COTIZ_MES, COTIZ_ORIGEN, COTIZ_MOTIVO, COTIZ_DETALLE- porque es el mismo
+     * concepto y avisosValuacion() los lee por nombre.
+     *
+     * EL OVERRIDE SOLO EXISTE EN PROVEEDORES EXTERIOR. La consulta de Crono
+     * Nacionalizacion no trae COTIZ_USD_EDIT, asi que esas filas se valuan
+     * SIEMPRE con la curva. No es un olvido: el override vive en una tabla con
+     * UNA fila por contenedor, y las dos pestanas valuan el mismo contenedor en
+     * dos fechas distintas -la de pago y la de nacionalizacion- que caen en
+     * meses distintos. Compartirlo aplicaria a la nacionalizacion una
+     * correccion que alguien cargo pensando en el pago, y descartaCotizacion()
+     * -atada al cambio de mes DEL PAGO- no sabe nada de la otra fecha.
+     *
+     * @param array $row Fila cruda, con su fecha efectiva ya resuelta
      * @param array $curva Lo que devolvio DolarFuturo::curva()
+     * @param string $campoImporte De donde sale el importe EN DOLARES
+     * @param string $campoFecha Que fecha decide el mes de la curva
      * @return array La misma fila con la valuacion agregada
      */
-    public static function valuar($row, $curva) {
-        $fob = isset($row['VALOR_FOB_DOLAR']) ? floatval($row['VALOR_FOB_DOLAR']) : 0;
+    public static function valuar($row, $curva, $campoImporte = 'VALOR_FOB_DOLAR',
+                                  $campoFecha = 'FECHA_PAGO_EFECTIVA') {
+        $usd = isset($row[$campoImporte]) ? floatval($row[$campoImporte]) : 0;
 
         $cot = DolarFuturo::resolver(
             $curva,
-            isset($row['FECHA_PAGO_EFECTIVA']) ? $row['FECHA_PAGO_EFECTIVA'] : null,
+            isset($row[$campoFecha]) ? $row[$campoFecha] : null,
             isset($row['COTIZ_USD_EDIT']) ? $row['COTIZ_USD_EDIT'] : null
         );
 
@@ -1083,7 +1114,7 @@ class Comex {
 
         $row['IMPORTE_ARS'] = ($cot['cotizacion'] === null)
             ? null
-            : round($fob * $cot['cotizacion'], 2);
+            : round($usd * $cot['cotizacion'], 2);
 
         return $row;
     }
@@ -1105,11 +1136,23 @@ class Comex {
      * la que existe. Decirlo en pesos exigiria valuarlo, que es justamente lo
      * que no se pudo hacer.
      *
-     * @param array $filas Las filas que devolvio getProveedoresExterior()
+     * EL CAMPO Y EL NOMBRE DE LA FECHA SON ARGUMENTOS desde que las dos
+     * pestanas valuan. El importe en dolares se llama VALOR_FOB_DOLAR en una e
+     * IMPORTE_EST en la otra, y la fecha que falta es la de pago o la de
+     * nacionalizacion. Con los dos escritos adentro, el aviso de Crono
+     * Nacionalizacion habria dicho "U$S 0,00" -sumando un campo que esa pestana
+     * no trae- y habria nombrado una fecha que no es la que falta: un aviso que
+     * dice algo distinto de lo que paso es peor que no tenerlo.
+     *
+     * @param array $filas Las filas ya valuadas de cualquiera de las dos
      * @param string|null $ultimoMesCurva Hasta donde llega la curva, para el aviso
+     * @param string $campoImporte De donde sale el importe EN DOLARES
+     * @param string $queEs Como se nombra en el mensaje la fecha que falta
      * @return array Lista de mensajes
      */
-    public static function avisosValuacion($filas, $ultimoMesCurva = null) {
+    public static function avisosValuacion($filas, $ultimoMesCurva = null,
+                                           $campoImporte = 'VALOR_FOB_DOLAR',
+                                           $queEs = 'fecha estimada de pago') {
         $sinValuar = 0;
         $usdSinValuar = 0.0;
         $aproximadas = 0;
@@ -1119,8 +1162,8 @@ class Comex {
         foreach (is_array($filas) ? $filas : [] as $f) {
             if (!isset($f['COTIZ_USD']) || $f['COTIZ_USD'] === null) {
                 $sinValuar++;
-                $usdSinValuar += isset($f['VALOR_FOB_DOLAR'])
-                    ? floatval($f['VALOR_FOB_DOLAR']) : 0;
+                $usdSinValuar += isset($f[$campoImporte])
+                    ? floatval($f[$campoImporte]) : 0;
                 continue;
             }
 
@@ -1133,14 +1176,17 @@ class Comex {
 
         if ($sinValuar > 0) {
             $avisos[] = $sinValuar . ' contenedor(es) por U$S '
-                . number_format($usdSinValuar, 2, ',', '.') . ' no tienen fecha estimada de '
-                . 'pago, así que no hay mes al que pedirle cotización y no se pueden valuar en '
+                . number_format($usdSinValuar, 2, ',', '.') . ' no tienen ' . $queEs
+                . ', así que no hay mes al que pedirle cotización y no se pueden valuar en '
                 . 'pesos. No se les aplica ningún tipo de cambio inventado: cargales la fecha '
                 . 'y el importe aparece.';
         }
 
+        /* "CAEN EN" y no "se pagan en": el mismo texto lo usa Crono
+           Nacionalización, donde lo que cae en ese mes es la nacionalización y
+           no un pago. */
         if ($aproximadas > 0) {
-            $avisos[] = $aproximadas . ' contenedor(es) se pagan en un mes que la curva de '
+            $avisos[] = $aproximadas . ' contenedor(es) caen en un mes que la curva de '
                 . 'dólar futuro no cubre'
                 . ($ultimoMesCurva === null ? '' : ' (llega hasta ' . $ultimoMesCurva . ')')
                 . ', así que se valuaron con la cotización del mes más cercano. Están marcados '
@@ -1205,8 +1251,15 @@ class Comex {
      *
      * Y SE DEVUELVE, para que el front lo avise. Un descarte silencioso hace
      * que el usuario vea cambiar un importe que el no toco y no tenga donde
-     * enterarse de por que. Solo aplica a 'PAGO': la nacionalizacion no se
-     * valua en dolares.
+     * enterarse de por que.
+     *
+     * SOLO APLICA A 'PAGO'. Este docblock decia hasta feature/comex-nac-usd que
+     * el motivo era que "la nacionalizacion no se valua en dolares", y eso ya no
+     * es cierto: se valua, con la curva del mes de su propia fecha. El motivo
+     * verdadero es otro y es el mismo por el que Crono Nacionalizacion no tiene
+     * override: COTIZ_USD_EDIT es UNA fila por contenedor y las dos pestanas lo
+     * miran en dos fechas distintas. Mover la fecha de nacionalizacion no puede
+     * descartar una correccion que se cargo para el mes del pago. Ver valuar().
      *
      * @param string $campo 'PAGO' o 'NAC'
      * @param int $idMg ID del contenedor en el maestro
@@ -1780,6 +1833,20 @@ class Comex {
      * desaparece porque le falta un dato es justamente lo que este modulo evita
      * en todos lados.
      *
+     * LOS GASTOS DE NACIONALIZACION ESTAN EN DOLARES Y SE VALUAN ACA
+     * -------------------------------------------------------------
+     * IMPORTE_EST -la suma de los conceptos 3 a 10- sale de una cadena que
+     * arranca en VALOR_FOB_DOLAR, asi que esta EN DOLARES, igual que el pago al
+     * proveedor. Hasta feature/comex-nac-usd esta pestana lo ubicaba en el eje
+     * como si fueran pesos; ver el encabezado de ComexProvider, que es donde
+     * estaba escrita la afirmacion equivocada.
+     *
+     * Entonces cada fila se valua igual que en Proveedores Exterior: con la
+     * cotizacion de la curva ROFEX del mes de SU fecha efectiva, que aca es la
+     * de nacionalizacion y no la de pago. El importe en dolares se sigue
+     * devolviendo en IMPORTE_EST -la grilla lo muestra- y lo que entra al eje
+     * es IMPORTE_ARS.
+     *
      * @param string|null $hoy Para poder probar el corte de vencidos sin
      *                         depender de que dia es. Por defecto, hoy.
      * @return array Listado de importaciones con fechas de nacionalización
@@ -1844,6 +1911,10 @@ class Comex {
 
         $v = [];
 
+        // La curva se lee UNA vez para todo el listado, no una por fila, igual
+        // que en getProveedoresExterior().
+        $curva = $this->dolarFuturo()->curva();
+
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $row = self::aTexto($row, ['FECHA_EST_EMB', 'ETD', 'ETA', 'FECHA_NAC',
                 'EDIT_ANTERIOR', 'EDIT_VALOR', 'EDIT_FECHA', 'PAGADO_FECHA',
@@ -1851,11 +1922,21 @@ class Comex {
 
             $row = self::conFechaEfectiva($row, 'FECHA_NAC', 'FECHA_NAC_EFECTIVA', $hoy);
 
+            /* EL GASTO ESTA EN DOLARES: se valua con la curva del mes de la
+               fecha de NACIONALIZACION, que es cuando se mueve. IMPORTE_EST
+               queda como esta -es el importe en dolares y la grilla lo
+               muestra-. */
+            $row = self::valuar($row, $curva, 'IMPORTE_EST', 'FECHA_NAC_EFECTIVA');
+
             /* Mismas dos reglas que en Proveedores Exterior: al cashflow entra
                lo que se mueve de hoy en adelante y lo que todavia no se pago.
-               Ver aporteAlEje(). */
-            $row['IMPORTE_PROYECTABLE'] = self::importeProyectable($row, 'IMPORTE_EST');
-            $row['IMPORTE_EJE'] = self::aporteAlEje($row, 'IMPORTE_EST');
+               Ver aporteAlEje().
+
+               SOBRE IMPORTE_ARS -el default- y ya no sobre IMPORTE_EST: lo que
+               se ubica en el eje es el importe en PESOS. Mientras se ubicaba el
+               de dolares, la fila del tablero sumaba dolares contra pesos. */
+            $row['IMPORTE_PROYECTABLE'] = self::importeProyectable($row);
+            $row['IMPORTE_EJE'] = self::aporteAlEje($row);
 
             $v[] = $row;
         }

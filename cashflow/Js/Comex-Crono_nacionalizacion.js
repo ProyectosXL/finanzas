@@ -24,6 +24,27 @@
  * LA EDICIÓN ESCRIBE SOBRE EL MAESTRO. La celda y el editor viven en
  * Js/Comex-fechas.js, compartidos con Proveedores Exterior: es el mismo gesto
  * sobre la misma tabla, y las dos copias que había ya habían divergido.
+ *
+ * LOS GASTOS DE NACIONALIZACIÓN ESTÁN EN DÓLARES, Y LA GRILLA ESTÁ EN PESOS
+ * -------------------------------------------------------------------------
+ * Esta pestaña mostraba IMPORTE_EST con el signo de pesos adelante y el tablero
+ * ubicaba ese número en columnas de pesos. Era un error de moneda: IMPORTE_EST
+ * suma los conceptos 3 a 10 de la estimación, que Comercio Exterior calcula
+ * como porcentajes del CIF, y el CIF arranca en VALOR_FOB_DOLAR. El porqué
+ * completo, y cómo se verificó contra la base, están en el encabezado de
+ * Class/Providers/ComexProvider.php.
+ *
+ * Ahora la fila trae tres columnas —el gasto en dólares, con qué dólar se valuó
+ * y el importe en pesos— y lo que se ubica en el eje es el importe en PESOS.
+ * La valuación no se hace acá: viene resuelta del backend, fila por fila, con
+ * la curva de dólar futuro ROFEX del mes de la fecha de NACIONALIZACIÓN. En el
+ * navegador no queda ninguna multiplicación, por el mismo motivo por el que no
+ * quedó ninguna aritmética de fechas.
+ *
+ * LA COTIZACIÓN ACÁ NO SE EDITA. En Proveedores Exterior se puede corregir por
+ * contenedor; acá no, y es una decisión: ese override vive en una tabla con UNA
+ * fila por contenedor, y las dos pestañas valúan el mismo contenedor en dos
+ * fechas que caen en meses distintos de la curva. Ver Comex::valuar().
  */
 
 (function() {
@@ -76,13 +97,21 @@
             alCambiar: generarTabla
         });
 
-        // Proveedor y Contenedor, igual que Proveedores Exterior: es la misma
-        // fila mirada desde el otro lado del circuito. La primera columna es
-        // una fecha, que no identifica nada por sí sola.
+        /* Proveedor y Contenedor, igual que Proveedores Exterior: es la misma
+           fila mirada desde el otro lado del circuito. La primera columna es
+           una fecha, que no identifica nada por sí sola.
+
+           LA CLAVE CAMBIÓ CON LAS DOS COLUMNAS NUEVAS. columnas-fijas.js guarda
+           la elección en localStorage COMO ÍNDICES, y sólo valida que el índice
+           siga existiendo: no tiene forma de saber que la columna 6 pasó de ser
+           ETD a ser el dólar aplicado. Quien tuviera fijada una columna a la
+           derecha del importe la habría visto correrse dos lugares, sin nada
+           que lo explicara. Con la clave nueva esa preferencia se descarta una
+           vez y se vuelve al default, que es lo único que no puede mentir. */
         crearColumnasFijas({
             tabla: 'tablaCronoNacionalizacion',
             control: 'colFijasCronoNac',
-            clave: 'crono_nacionalizacion',
+            clave: 'crono_nacionalizacion_v2',
             porDefecto: [1, 2]
         });
 
@@ -127,6 +156,7 @@
                         generarTabla();
                         calcularResumenes();
                         pintarAvisos();
+                        pintarOrigenCotizacion();
                         mostrarCargando(false);
                     } else {
                         console.error('Error al cargar datos:', result);
@@ -199,6 +229,18 @@
                 + '<i class="fas fa-triangle-exclamation me-1"></i>'
                 + avisos.join(' ') + '</small></div>'
             : '';
+    }
+
+    /**
+     * De dónde sale el dólar con el que está valuada la tabla.
+     *
+     * El texto lo escribe Js/Comex-fechas.js, igual que en Proveedores
+     * Exterior: es la misma frase sobre el mismo origen. Acá no dice nada de
+     * corregir la cotización a mano, porque en esta pestaña no se corrige.
+     */
+    function pintarOrigenCotizacion() {
+        ComexFechas.origenCotizacion('cotizCronoNac',
+            (datosCrono && datosCrono.cotizacion) || {});
     }
 
     /**
@@ -287,7 +329,19 @@
             html += `<td class="center">${item.CONTENEDOR || ''}</td>`;
             html += `<td class="center">${item.ORDEN_COMPRA || ''}</td>`;
             html += `<td>${item.DESPACHANTE || ''}</td>`;
-            html += `<td class="currency">${formatCurrency(item.IMPORTE_EST)}</td>`;
+
+            /* TRES COLUMNAS Y NO UNA, en el mismo orden que Proveedores
+               Exterior: el gasto en DÓLARES —que es como está cargado—, con qué
+               dólar se valuó, y el importe en pesos que sale de eso. Hasta
+               feature/comex-nac-usd era una sola celda que mostraba
+               IMPORTE_EST con el signo de pesos adelante.
+
+               Las dos últimas las arma Js/Comex-fechas.js. Acá la cotización es
+               de SÓLO LECTURA: no se pasa `editable`, porque el override por
+               contenedor es de la otra pestaña. Ver Comex::valuar(). */
+            html += `<td class="currency">${formatUSD(item.IMPORTE_EST)}</td>`;
+            html += ComexFechas.celdaCotizacion(item);
+            html += ComexFechas.celdaImporteArs(item);
             
             // ETD con indicador de confirmación
             var etdConfirm = item.ETD_CONFIRM == 1;
@@ -480,10 +534,26 @@
             ? (datosCrono.totales || {})
             : ComexFechas.sumarColumnas(visibles);
 
-        /* Nueve descriptivas más la del tilde, que no totaliza nada: contar
-           cuántas están tildadas en el pie de una tabla de importes no
-           significaría nada, y el conteo ya está al lado del interruptor. */
-        var html = '<td colspan="9" class="total-label">TOTALES</td><td></td>';
+        /* Siete descriptivas —hasta la cotización— y después la columna en
+           PESOS, que sí se suma. El pie NO totaliza la columna en dólares ni la
+           cotización: promediar cotizaciones de meses distintos no sería el
+           tipo de cambio de nada, y un total en dólares al lado de uno en pesos
+           invita a sumarlos. Lo que entra al cashflow es la columna en pesos.
+
+           La del tilde tampoco totaliza: contar cuántas están tildadas en el
+           pie de una tabla de importes no significaría nada, y el conteo ya
+           está al lado del interruptor. */
+        var html = '<td colspan="7" class="total-label">TOTALES</td>'
+            + '<td class="currency" title="' + escaparAttrCrono('Suma el importe en pesos de las '
+                + 'filas que se están viendo, incluidas las que caen fuera del horizonte —las '
+                + 'vencidas y las posteriores al último mes—. Por eso puede no coincidir con el '
+                + 'total de las columnas, que sólo cubre el período. La diferencia está en los '
+                + 'avisos de arriba.')
+            + '">'
+            + formatCurrency(sumaImporteArs(visibles)) + '</td>'
+            /* ETD, ETA y la fecha de nacionalización, que no suman nada. */
+            + '<td></td><td></td><td></td>'
+            + '<td></td>';
 
         vistas.columnas().forEach(function(col) {
             var valor = Number(vistas.valor(totales, col)) || 0;
@@ -564,6 +634,31 @@
         ComexFechas.marcarPagado(chk, cargarDatos);
     };
 
+    /**
+     * Suma el importe en pesos de las filas que se están viendo.
+     *
+     * RESPETA EL BUSCADOR Y LOS INTERRUPTORES, igual que las columnas del eje:
+     * si el pie sumara todo mientras la tabla muestra tres filas, esta celda y
+     * la del eje que tiene al lado dirían números de dos universos distintos sin
+     * que nada lo indique. Es la misma función que Proveedores Exterior.
+     *
+     * Las que no se pudieron valuar suman cero acá y se informan aparte, en
+     * dólares: es la única moneda en la que existen, y meterlas en este total
+     * las haría desaparecer. Ver Comex::avisosValuacion().
+     *
+     * @param {Array|null} visibles Las filas filtradas, o null si no hay filtro
+     * @returns {number}
+     */
+    function sumaImporteArs(visibles) {
+        var filas = (visibles === null || visibles === undefined)
+            ? ((datosCrono && datosCrono.filas) || [])
+            : visibles;
+
+        return filas.reduce(function(a, f) {
+            return a + (Number(f.IMPORTE_ARS) || 0);
+        }, 0);
+    }
+
     /** Escapa un texto para meterlo en un atributo o en el cuerpo de una celda */
     function escaparAttrCrono(texto) {
         return String(texto === null || texto === undefined ? '' : texto)
@@ -573,11 +668,24 @@
     }
 
     /**
-     * Formatea un valor como moneda ARS
+     * Formatea un valor como moneda ARS.
+     *
+     * Es la moneda del eje, del pie y de las tarjetas. Los gastos en dólares
+     * son el dato de origen y tienen su propia función, que lo dice en el
+     * nombre: mismo reparto que Proveedores Exterior.
      */
     function formatCurrency(value) {
         var num = parseFloat(value) || 0;
         return '$ ' + num.toLocaleString('es-AR', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+    }
+
+    /** Formatea un valor en dólares: el gasto estimado, como está cargado */
+    function formatUSD(value) {
+        var num = parseFloat(value) || 0;
+        return 'U$S ' + num.toLocaleString('es-AR', {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2
         });
@@ -601,19 +709,38 @@
     }
 
     /**
-     * Muestra u oculta el spinner de carga
+     * Muestra u oculta el spinner de carga.
+     *
+     * Al EMPEZAR una carga se saca el panel de la falla anterior: desde ese
+     * momento describe algo que ya no se sabe si sigue pasando, y un cartel
+     * rojo arriba de una tabla que cargó bien es peor que no haberlo puesto.
      */
     function mostrarCargando(mostrar) {
         document.getElementById('loadingSpinner').style.display = mostrar ? 'flex' : 'none';
         document.getElementById('tableWrapper').style.display = mostrar ? 'none' : 'block';
+
+        if (mostrar) {
+            ComexFechas.limpiarErrorDeCarga();
+        }
     }
 
     /**
-     * Muestra un mensaje de error
+     * La pestaña no pudo cargar.
+     *
+     * NO ALCANZA CON NOTIFICAR. Lo que queda en pantalla es una tabla vacía, y
+     * un mensaje efímero no la explica para el que llega treinta segundos
+     * después. El panel se pinta adentro de la tabla y la notificación va
+     * igual, como complemento. Las dos cosas las hace Js/Comex-fechas.js,
+     * compartido con la otra pestaña: es la misma falla con la misma
+     * consecuencia.
+     *
+     * Acá además lo llaman los tres casos de "no hay nada para mostrar" de
+     * generarTabla(), que terminan igual: una tabla vacía que alguien tiene que
+     * poder interpretar.
      */
     function mostrarError(mensaje) {
         mostrarCargando(false);
-        alert(mensaje);
+        ComexFechas.errorDeCarga(mensaje);
     }
 
     /* NO HAY exportarExcel(). Era una función de una línea que llamaba a

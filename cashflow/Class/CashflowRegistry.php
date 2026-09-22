@@ -147,7 +147,12 @@ class CashflowRegistry {
             'descripcion' => 'Cronograma de gastos de nacionalizacion',
             'archivo' => 'Providers/ComexProvider.php',
             'clase' => 'ComexProvider',
-            'moneda' => 'ARS',
+            /* EN DOLARES, igual que los pagos al exterior. Decia 'ARS' hasta
+               feature/comex-nac-usd, y era la misma afirmacion equivocada que
+               tenia el proveedor: los conceptos 3 a 10 de la estimacion se
+               calculan sobre el CIF, que arranca en el FOB en dolares. El
+               proveedor los convierte con la curva ROFEX antes de devolverlos. */
+            'moneda' => 'USD',
             'disponible' => true,
             'tab' => 'crono_nacionalizacion',
             /* Mismo corte que COMEX_PROV_EXT, sobre el otro pago del mismo

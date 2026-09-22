@@ -146,6 +146,11 @@
              completo, y sin esto su total se lee como el total de todo. -->
         <div class="card-body py-2 border-bottom">
             <small class="text-muted" id="periodoCronoNac"></small>
+            <!-- De dónde sale el dólar con el que se valúa la tabla y hasta qué
+                 mes llega la curva. No es decoración: es lo que permite auditar
+                 los importes en pesos contra el mercado. Igual que en
+                 Proveedores Exterior. -->
+            <small class="text-muted ms-2" id="cotizCronoNac"></small>
         </div>
 
         <div class="card-body p-0">
@@ -164,7 +169,25 @@
                                 <th rowspan="2">Contenedor</th>
                                 <th rowspan="2">Orden Compra</th>
                                 <th rowspan="2">Despachante</th>
-                                <th rowspan="2">Importe Est.</th>
+                                <!-- EL GASTO ESTIMADO ESTÁ EN DÓLARES. Es la
+                                     suma de los conceptos 3 a 10 de la
+                                     estimación, que Comercio Exterior calcula
+                                     como porcentajes del CIF, y el CIF arranca
+                                     en el FOB en dólares. Queda como
+                                     REFERENCIA —es el dato tal como se carga
+                                     del otro lado—; lo que entra al cashflow es
+                                     la columna en pesos. -->
+                                <th rowspan="2">Importe Est. (USD)</th>
+                                <!-- CON QUÉ DÓLAR SE VALUÓ ESTA FILA: la curva
+                                     de dólar futuro ROFEX del mes de la fecha
+                                     de NACIONALIZACIÓN, que no es la de pago.
+                                     Acá NO se corrige a mano, a diferencia de
+                                     Proveedores Exterior: el override es por
+                                     contenedor y las dos pestañas lo mirarían
+                                     en dos meses distintos. Ver
+                                     Comex::valuar(). -->
+                                <th rowspan="2">Dólar aplicado</th>
+                                <th rowspan="2">Importe ($)</th>
                                 <th rowspan="2">ETD</th>
                                 <th rowspan="2">ETA</th>
                                 <th rowspan="2">
@@ -194,7 +217,7 @@
                         </tbody>
                         <tfoot class="table-light">
                             <tr id="totalsRow">
-                                <td colspan="9" class="fw-bold text-end">TOTALES</td>
+                                <td colspan="12" class="fw-bold text-end">TOTALES</td>
                                 <!-- Los totales se generan dinámicamente -->
                             </tr>
                         </tfoot>

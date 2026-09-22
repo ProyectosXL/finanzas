@@ -1,5 +1,7 @@
 /**
- * Comex — la celda de fecha editable y el buscador, para las dos pestañas.
+ * Comex — lo que comparten las dos pestañas: la celda de fecha editable, el
+ * tilde de pagado, la celda del dólar aplicado, el importe en pesos y el
+ * buscador.
  *
  * POR QUÉ ESTO NO ESTÁ COPIADO EN LOS DOS ARCHIVOS
  * ------------------------------------------------
@@ -18,6 +20,14 @@
  * en vez de las siete copias que tenía. Lo que queda en cada pestaña es lo que
  * de verdad es distinto: qué campo edita, qué columnas dibuja y qué hace
  * después de guardar.
+ *
+ * LA CELDA DEL DÓLAR Y LA DEL IMPORTE EN PESOS TAMBIÉN VIVEN ACÁ, desde que
+ * Crono Nacionalización descubrió que sus gastos estaban en dólares y pasó a
+ * valuarse igual —feature/comex-nac-usd—. Vivían en Comex-Proveedores_exterior.js
+ * y eran la única pestaña que las tenía. Lo compartido es la parte de SÓLO
+ * LECTURA; Proveedores Exterior le agrega encima su edición del override, que
+ * es lo único que de verdad es suyo. Ver el bloque "CON QUÉ DÓLAR SE VALUÓ LA
+ * FILA" más abajo.
  *
  * TRES MARCAS, TRES COSAS DISTINTAS
  * ---------------------------------
@@ -315,7 +325,10 @@
         .then(function(r) { return r.json(); })
         .then(function(result) {
             if (!result.success) {
-                alert('No se pudo guardar: ' + result.message);
+                /* A Notificacion.error(), que NO se auto-cierra: el mensaje del
+                   servidor es lo único que explica por qué el tilde volvió a
+                   donde estaba. Ver el encabezado de Js/notificaciones.js. */
+                Notificacion.error('No se pudo guardar el tilde de pagado: ' + result.message);
                 chk.checked = !queda;
                 chk.disabled = false;
 
@@ -328,7 +341,8 @@
         })
         .catch(function(error) {
             console.error('Error:', error);
-            alert('Error de conexión al guardar el tilde de pagado');
+            Notificacion.error('Error de conexión al guardar el tilde de pagado: no se guardó '
+                + 'nada y la casilla vuelve a donde estaba. ' + error.message);
             chk.checked = !queda;
             chk.disabled = false;
         });
@@ -400,7 +414,10 @@
             .then(function(r) { return r.json(); })
             .then(function(result) {
                 if (!result.success) {
-                    alert('No se pudo guardar la fecha: ' + result.message);
+                    /* A Notificacion.error(), que NO se auto-cierra: el mensaje
+                       del servidor es lo único que explica por qué la fecha no
+                       quedó guardada, y la celda ya volvió a lo que decía. */
+                    Notificacion.error('No se pudo guardar la fecha: ' + result.message);
                     cell.innerHTML = original;
                     guardando = false;
 
@@ -409,8 +426,21 @@
 
                 /* SE AVISA SIEMPRE, y no sólo cuando se descartó la cotización.
                    Mover esta fecha cambia un dato de OTRA aplicación, y eso no
-                   se puede deducir mirando la grilla. */
-                alert(result.message);
+                   se puede deducir mirando la grilla.
+
+                   PERO NO SIEMPRE IGUAL, que era el problema de alert(): si el
+                   cambio de mes descartó la cotización cargada a mano, cambió
+                   ADEMÁS un importe que el usuario no tocó, y eso no es un
+                   "listo". Va a advertencia, que dura más y se ve distinto. Con
+                   los dos casos saliendo idénticos, el aviso que había que leer
+                   se cerraba con el mismo reflejo que el de todos los días —el
+                   problema 3 del encabezado de Js/notificaciones.js—. */
+                if (result.cotizacion_descartada) {
+                    Notificacion.advertencia(result.message,
+                        { titulo: 'Se descartó la cotización cargada a mano' });
+                } else {
+                    Notificacion.exito(result.message);
+                }
 
                 if (typeof alGuardar === 'function') {
                     alGuardar(result);
@@ -418,7 +448,9 @@
             })
             .catch(function(error) {
                 console.error('Error:', error);
-                alert('Error de conexión al guardar la fecha');
+                Notificacion.error('Error de conexión al guardar la fecha: no se escribió nada '
+                    + 'en el maestro de Comercio Exterior y la celda vuelve a lo que decía. '
+                    + error.message);
                 cell.innerHTML = original;
                 guardando = false;
             });
@@ -433,6 +465,279 @@
                 cell.innerHTML = original;
             }
         });
+    }
+
+    /* ================================================================
+       CON QUÉ DÓLAR SE VALUÓ LA FILA
+
+       LAS DOS PESTAÑAS ESTÁN EN DÓLARES, Y LAS DOS LO MUESTRAN IGUAL.
+       Proveedores Exterior valúa VALOR_FOB_DOLAR por el mes de la fecha de
+       pago; Crono Nacionalización valúa IMPORTE_EST —los gastos de
+       nacionalización, que también están en dólares— por el mes de la fecha de
+       nacionalización. Son dos columnas con el mismo significado, el mismo
+       tooltip y las mismas marcas, así que son el mismo código.
+
+       LA PARTE DE SÓLO LECTURA ES LA COMPARTIDA. Proveedores Exterior le suma
+       encima su comportamiento editable —el override por contenedor— pasando
+       "editable". Crono Nacionalización no lo pasa y su celda no responde al
+       clic: ahí la cotización SIEMPRE sale de la curva, y el porqué está en
+       Comex::valuar(). Resumido: el override vive en una tabla con UNA fila por
+       contenedor, y las dos pestañas miran ese mismo contenedor en dos fechas
+       que caen en meses distintos de la curva.
+
+       DOS MARCAS, DOS COSAS DISTINTAS
+         naranja   la cotización la corrigió una persona para este contenedor
+         punteado  el mes no está en la curva y se usó el más cercano
+
+       El texto del tooltip lo escribe el backend —DolarFuturo::explicar()— y no
+       este archivo: lo usan el tablero y las dos pestañas, y tres textos
+       parecidos se desincronizan en la primera corrección.
+       ================================================================ */
+
+    /**
+     * Una cotización, con DOS decimales y no con los cuatro que guarda la base.
+     *
+     * Son los que se leen; el valor exacto ya está en el tooltip y en el campo
+     * de edición. Cuatro decimales en una columna angosta no se leen y no
+     * deciden nada.
+     */
+    function cotiz(valor) {
+        var n = parseFloat(valor) || 0;
+
+        return '$ ' + n.toLocaleString('es-AR',
+            { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    /**
+     * Un importe en pesos.
+     *
+     * Vive acá porque estas dos celdas se dibujan acá. Cada pestaña conserva su
+     * formatCurrency() para las columnas del eje, que las dibuja ella.
+     */
+    function pesos(valor) {
+        var n = parseFloat(valor) || 0;
+
+        return '$ ' + n.toLocaleString('es-AR',
+            { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    /**
+     * La celda del dólar aplicado: qué cotización se usó, de qué mes y por qué.
+     *
+     * SIN COTIZACIÓN SE DIBUJA UN GUIÓN, no un cero. Es la diferencia entre "no
+     * hay dato" y "el dato es cero", y es el criterio de todo el módulo.
+     *
+     * @param {Object} item Fila del payload
+     * @param {Object} [opts] { editable, alEditar }
+     * @returns {string} HTML de la celda
+     */
+    function celdaCotizacion(item, opts) {
+        opts = opts || {};
+
+        var editable = !!opts.editable;
+        var detalle = item.COTIZ_DETALLE || '';
+        var clases = ['center', 'cotiz-cell'];
+
+        if (item.COTIZ_ORIGEN === 'OVERRIDE') {
+            clases.push('cotiz-override');
+        } else if (item.COTIZ_ORIGEN === 'APROXIMADA') {
+            clases.push('cotiz-aproximada');
+        }
+
+        if (editable) {
+            clases.push('cotiz-editable');
+        }
+
+        var cuerpo;
+
+        if (item.COTIZ_USD === null || item.COTIZ_USD === undefined) {
+            cuerpo = '<span class="cotiz-sin">—</span>';
+        } else {
+            cuerpo = '<span class="cotiz-valor">' + cotiz(item.COTIZ_USD) + '</span>'
+                + '<span class="cotiz-simbolo">'
+                + escapar(item.COTIZ_ORIGEN === 'OVERRIDE'
+                    ? 'a mano'
+                    : (item.COTIZ_SIMBOLO || item.COTIZ_MES || ''))
+                + '</span>';
+
+            if (item.COTIZ_ORIGEN === 'APROXIMADA') {
+                cuerpo += '<i class="fas fa-code-branch cotiz-marca" aria-hidden="true"></i>';
+            } else if (item.COTIZ_ORIGEN === 'OVERRIDE') {
+                cuerpo += '<i class="fas fa-pen cotiz-marca" aria-hidden="true"></i>';
+            }
+        }
+
+        return '<td class="' + clases.join(' ') + '"'
+            + ' data-id="' + item.ID + '"'
+            + ' data-cotiz="' + (item.COTIZ_USD_EDIT === null || item.COTIZ_USD_EDIT === undefined
+                ? '' : item.COTIZ_USD_EDIT) + '"'
+            + ' title="' + escapar(detalle
+                + (editable ? ' Hacé clic para corregirla sólo para este contenedor; '
+                    + 'dejala vacía para volver a la curva.' : ''))
+            + '"' + (editable && opts.alEditar
+                ? (' onclick="' + opts.alEditar + '(this)"') : '') + '>'
+            + cuerpo + '</td>';
+    }
+
+    /**
+     * El importe en pesos de la fila: sus dólares por la cotización que le tocó.
+     *
+     * EN BLANCO CUANDO NO SE PUDO VALUAR, con el motivo en el tooltip. Un cero
+     * diría que este contenedor no cuesta nada, que es una afirmación que nadie
+     * hizo.
+     *
+     * @param {Object} item Fila del payload
+     * @returns {string} HTML de la celda
+     */
+    function celdaImporteArs(item) {
+        if (item.IMPORTE_ARS === null || item.IMPORTE_ARS === undefined) {
+            return '<td class="currency cotiz-sin" title="'
+                + escapar(item.COTIZ_DETALLE || '') + '">—</td>';
+        }
+
+        return '<td class="currency importe-ars">' + pesos(item.IMPORTE_ARS) + '</td>';
+    }
+
+    /**
+     * De dónde sale el dólar con el que está valuada la tabla, para el pie.
+     *
+     * No es decoración: un importe en pesos que no se puede atar a una
+     * cotización identificada y fechada no se puede auditar contra nada. Es el
+     * mismo criterio con el que Dólares Cuenta Comitente muestra la fecha y la
+     * punta de su cotización.
+     *
+     * LA NOTA DE LA CORRECCIÓN MANUAL SÓLO SALE DONDE ESA CORRECCIÓN EXISTE:
+     * 'editable' viaja en el payload de Proveedores Exterior y no en el de
+     * Crono Nacionalización. Decir "la corrección manual está apagada: falta el
+     * script" en una pestaña donde no hay ninguna corrección que hacer mandaría
+     * a correr un script que allá no cambia nada.
+     *
+     * @param {string} idEl Id del elemento del pie
+     * @param {Object} c El bloque 'cotizacion' del payload
+     */
+    function origenCotizacion(idEl, c) {
+        var el = document.getElementById(idEl);
+
+        if (!el) {
+            return;
+        }
+
+        c = c || {};
+
+        if (!c.disponible) {
+            el.innerHTML = '<span class="text-danger">'
+                + '<i class="fas fa-triangle-exclamation me-1"></i>'
+                + 'Sin curva de dólar futuro: los importes no se pueden expresar en pesos.'
+                + '</span>';
+
+            return;
+        }
+
+        el.textContent = 'Valuado con dólar futuro ROFEX'
+            + (c.ultimo_mes ? ', curva hasta ' + c.ultimo_mes : '')
+            /* Sólo el día: 'actualizada' viene como 'Y-m-d H:i:s' y el
+               formateador de fechas espera una fecha pelada. */
+            + (c.actualizada
+                ? ' (actualizada el ' + fecha(String(c.actualizada).substring(0, 10)) + ')'
+                : '')
+            + (c.editable === false
+                ? '. La corrección manual está apagada: falta el script.'
+                : '.');
+    }
+
+    /* ================================================================
+       CUANDO LA PESTAÑA NO PUDO CARGAR
+
+       NO ES LO MISMO QUE UN GUARDADO FALLIDO, y por eso no se resuelve igual.
+       Un guardado que falla es un aviso sobre UNA ACCIÓN: el usuario acaba de
+       hacer algo, está mirando, y una notificación efímera alcanza. Acá no
+       falló una acción: falló la carga entera, y lo que queda en pantalla es
+       una tabla VACÍA. Alguien que llega treinta segundos después —o que
+       vuelve de otra pestaña— ve un cronograma sin contenedores y no tiene
+       dónde enterarse de por qué.
+
+       Por eso el mensaje se pinta DENTRO de `tableWrapper`, que es donde está
+       el vacío que hay que explicar, y se queda ahí hasta la próxima carga.
+       La notificación se manda igual, como complemento, para que el que SÍ
+       estaba mirando se entere en el momento.
+
+       El README del módulo distingue "aviso sobre los datos" —que se pinta y
+       no se cierra— de "notificación sobre una acción" —que es efímera—. Esto
+       está en el medio y se resuelve con las dos cosas, no eligiendo la
+       etiqueta más cómoda.
+
+       NO SE PISA LA TABLA: el panel se inserta ANTES, como primer hijo del
+       contenedor. Reemplazar el innerHTML del wrapper se llevaría puesto el
+       <table>, y entonces "Actualizar" no tendría dónde dibujar cuando el
+       servidor vuelva.
+
+       LO USAN TAMBIÉN LOS CASOS DE "NO VINO NINGUNA FILA", que en estas dos
+       pestañas llegan por el mismo camino. Por eso el panel dice QUÉ pasa —la
+       tabla está vacía— y deja la causa en el mensaje del backend, en vez de
+       afirmar que falló la carga.
+       ================================================================ */
+
+    /** La clase del panel, que es también cómo se lo encuentra para sacarlo */
+    var CLASE_ERROR = 'comex-error-carga';
+
+    /**
+     * Pinta la falla de carga adentro de la tabla vacía, y además notifica.
+     *
+     * @param {string} mensaje Qué pasó
+     * @param {string} [idWrapper] Contenedor de la tabla ('tableWrapper')
+     */
+    function errorDeCarga(mensaje, idWrapper) {
+        var cont = document.getElementById(idWrapper || 'tableWrapper');
+
+        if (cont) {
+            var panel = cont.querySelector('.' + CLASE_ERROR);
+
+            if (!panel) {
+                panel = document.createElement('div');
+                panel.className = CLASE_ERROR + ' alert alert-danger m-3';
+                cont.insertBefore(panel, cont.firstChild);
+            }
+
+            /* EL ENCABEZADO NO AFIRMA LA CAUSA, sólo el hecho: a esta función
+               llegan tanto "se cayó la conexión" como "el servidor no devolvió
+               ninguna fila", y decir "no se pudieron cargar los datos" sobre lo
+               segundo sería contar otra cosa. La causa la trae el mensaje, que
+               es del backend.
+
+               El mensaje puede venir con el trace, con saltos de línea: se
+               escapa y se respetan los saltos, en vez de mandarlo como HTML. */
+            panel.innerHTML = '<i class="fas fa-circle-exclamation me-2"></i>'
+                + '<strong>La tabla quedó vacía.</strong> '
+                + '<span style="white-space: pre-wrap;">' + escapar(mensaje) + '</span>'
+                + '<div class="small mt-2 text-muted">Probá con Actualizar; si vuelve a pasar, '
+                + 'lo de arriba es lo que contestó el servidor.</div>';
+        }
+
+        /* Y la notificación, para el que está mirando en este momento. No se
+           auto-cierra: es un error. Ella misma lo manda a la consola. */
+        if (window.Notificacion) {
+            Notificacion.error(mensaje);
+        } else {
+            console.error(mensaje);
+        }
+    }
+
+    /**
+     * Saca el panel de la falla anterior.
+     *
+     * Se llama al EMPEZAR una carga: desde ese momento el panel describe algo
+     * que ya no se sabe si sigue pasando, y un cartel rojo arriba de una tabla
+     * que cargó bien es peor que no haberlo puesto.
+     *
+     * @param {string} [idWrapper]
+     */
+    function limpiarErrorDeCarga(idWrapper) {
+        var cont = document.getElementById(idWrapper || 'tableWrapper');
+        var panel = cont ? cont.querySelector('.' + CLASE_ERROR) : null;
+
+        if (panel) {
+            panel.parentNode.removeChild(panel);
+        }
     }
 
     /* ================================================================
@@ -675,6 +980,11 @@
         editar: editar,
         celdaPagado: celdaPagado,
         marcarPagado: marcarPagado,
+        celdaCotizacion: celdaCotizacion,
+        celdaImporteArs: celdaImporteArs,
+        origenCotizacion: origenCotizacion,
+        errorDeCarga: errorDeCarga,
+        limpiarErrorDeCarga: limpiarErrorDeCarga,
         textoBuscable: textoBuscable,
         sumarColumnas: sumarColumnas,
         filtrar: filtrar,
