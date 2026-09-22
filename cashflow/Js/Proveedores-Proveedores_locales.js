@@ -161,6 +161,13 @@
         pedirJson('Controller/ProveedoresController.php?action=getPendientes')
             .then(function(data) {
                 datos = data;
+
+                /* El conteo de cuotas se deriva de `datos`, así que muere con
+                   la carga anterior. Si no se tira acá, una factura que en
+                   Tango pasó de dos vencimientos a uno seguiría mostrando
+                   "2 vtos." hasta que alguien recargue la página. */
+                cuotasPorComp = null;
+
                 vistas.usar(datos);
 
                 /* La selección se poda contra lo que vino: un comprobante que se
@@ -511,6 +518,7 @@
                 + '<td class="center">' + escapar(f.N_COMP) + '</td>'
                 + '<td class="center">' + fechaCorta(f.FECHA_EMIS) + '</td>'
                 + '<td class="center">' + celdaVto(f) + '</td>'
+                + celdaImporte(f)
                 + '<td class="currency fw-bold">' + plata(f.IMPORTE_PENDIENTE) + '</td>'
                 + celdaFechaPago(f)
                 + '<td class="center">' + celdaForma(f) + '</td>'
@@ -549,10 +557,11 @@
      * columna: el síntoma es una tabla desalineada que nadie relaciona con el
      * cambio que la causó.
      */
-    var COLS_DESC = 12;
+    var COLS_DESC = 13;
 
     function pintarTotales(filas, cols) {
         var total = 0;
+        var totalImporte = 0;
         var porCol = {};
 
         /* LA CLAVE ES LA COLUMNA, que ya ES el string 'DIA|2026-09-17'. Antes se
@@ -562,6 +571,7 @@
            de totales que miente es peor que una que falta. */
         filas.forEach(function(f) {
             total += Number(f.IMPORTE_PENDIENTE) || 0;
+            totalImporte += Number(f.IMPORTE_VTO) || 0;
 
             cols.forEach(function(c) {
                 porCol[c] = (porCol[c] || 0) + (Number(vistas.valor(f, c)) || 0);
@@ -571,10 +581,17 @@
         /* Las celdas del pie van en el mismo orden que el encabezado y suman
            COLS_DESC: un colspan mal contado corre el total debajo de otra
            columna y el número queda diciendo otra cosa. Ocho descriptivas, el
-           total, y las tres editables al final. */
+           importe, el pendiente, y las tres editables al final.
+
+           EL TOTAL DE IMPORTES NO VA EN NEGRITA, igual que su columna: es la
+           deuda ANTES de restarle lo imputado y no es un número del cashflow.
+           Que los dos difieran dice cuánto hay imputado sin cancelar en lo que
+           se está viendo, y con eso alcanza; ponerlo con el mismo peso que el
+           pendiente invitaría a usarlo como total, que es justo lo que no es. */
         var html = '<td colspan="8" class="fw-bold text-end">TOTALES</td>'
+            + '<td class="currency prov-importe">' + plata(totalImporte) + '</td>'
             + '<td class="currency fw-bold">' + plata(total) + '</td>'
-            + '<td colspan="' + (COLS_DESC - 9) + '"></td>';
+            + '<td colspan="' + (COLS_DESC - 10) + '"></td>';
 
         cols.forEach(function(c) {
             var v = porCol[c] || 0;
@@ -672,6 +689,95 @@
                 + 'se pague hoy: cargale la fecha.')
             + '"><i class="fas fa-triangle-exclamation me-1"></i>'
             + fechaCorta(f.FECHA_VTO) + '</span>';
+    }
+
+    /**
+     * EL IMPORTE DEL VENCIMIENTO, ANTES DE RESTARLE LO IMPUTADO.
+     *
+     * POR QUÉ EXISTE ESTA COLUMNA
+     * ---------------------------
+     * Porque "Pendiente" sola no distingue una factura que nadie pagó de una
+     * que se pagó y quedó corta, y esas dos cosas se resuelven distinto: la
+     * primera se paga, la segunda se va a buscar por qué faltó.
+     *
+     * El caso que lo motivó: SABAMA A0000300137161, de $431.393,34, tiene la
+     * O/P 0000100061675 imputada por $416.393,34 —la orden canceló siete
+     * facturas del proveedor y en la última se quedó sin plata—. La grilla
+     * mostraba "$15.000" y administración lo leyó como que el pago no estaba
+     * imputado. Estaba: lo que faltaba era ese pedazo.
+     *
+     * NO ES SIEMPRE EL TOTAL DE LA FACTURA, y por eso la columna se llama
+     * "Importe" y no "Total factura". Cada fila es un VENCIMIENTO, no un
+     * comprobante —ver el encabezado de Class/Proveedores.php—, así que en una
+     * factura en cuotas esto es el de ESTA cuota. Hoy son 6 comprobantes con
+     * más de un vencimiento pendiente, y se marcan: sin la marca, ver $7,8
+     * millones en una factura de $15,6 sería la misma sorpresa que esta columna
+     * viene a sacar.
+     *
+     * SE VE ATENUADA A PROPÓSITO. La que decide y la que suma sigue siendo
+     * "Pendiente"; ésta es el contexto para leerla. Si pesaran igual, dos
+     * columnas de plata pegadas se confundirían y la que entra al cashflow
+     * dejaría de leerse sola.
+     */
+    function celdaImporte(f) {
+        var imputado = Number(f.IMPUTACIONES) || 0;
+        var cuotas = cuotasDe(f);
+        var marcas = '';
+
+        /* IMPUTACIONES VIENE CON SIGNO Y SE SUMA AL IMPORTE: negativo lo baja
+           —un pago, una nota de crédito— y positivo lo sube —una nota de débito
+           es deuda NUEVA—. La tabla de signos está en Class/Proveedores.php y
+           acá sólo se lee: por eso el texto se decide por el signo y no se
+           asume que todo lo imputado sea un pago. */
+        if (imputado < 0) {
+            marcas += ' <i class="fas fa-circle-half-stroke prov-parcial" title="'
+                + escapar('Ya se le imputaron ' + plata(-imputado) + ' que no lo cancelaron '
+                    + 'entero: quedan ' + plata(f.IMPORTE_PENDIENTE) + ' sin pagar. El pago '
+                    + 'está hecho y quedó corto — revisá en Tango si falta imputarle una '
+                    + 'retención.') + '"></i>';
+        } else if (imputado > 0) {
+            marcas += ' <i class="fas fa-circle-plus prov-parcial" title="'
+                + escapar('Tiene ' + plata(imputado) + ' imputados que SUMAN deuda —una nota '
+                    + 'de débito—, así que se debe más que el importe original: '
+                    + plata(f.IMPORTE_PENDIENTE) + '.') + '"></i>';
+        }
+
+        if (cuotas > 1) {
+            marcas += ' <span class="prov-cuota" title="'
+                + escapar('Este comprobante tiene ' + cuotas + ' vencimientos pendientes, uno '
+                    + 'por fila. Éste es el importe de ESTE vencimiento, no el total de la '
+                    + 'factura.') + '">' + cuotas + ' vtos.</span>';
+        }
+
+        return '<td class="currency prov-importe">' + plata(f.IMPORTE_VTO) + marcas + '</td>';
+    }
+
+    /**
+     * Cuántos vencimientos pendientes tiene el comprobante de esta fila.
+     *
+     * SE CUENTA SOBRE TODO LO QUE VINO, no sobre lo que se está viendo. Con el
+     * buscador puesto en un rubro, o con "sólo vencidos" tildado, parte de las
+     * cuotas de una factura se esconde: contar las visibles diría "1 vto." de
+     * una factura en doce cuotas, que es justo lo contrario de lo que la marca
+     * tiene que avisar.
+     *
+     * El mapa se arma una vez por carga y no por fila: recorrerlo entero en
+     * cada celda serían 470 pasadas sobre 470 filas.
+     */
+    var cuotasPorComp = null;
+
+    function cuotasDe(f) {
+        if (cuotasPorComp === null) {
+            cuotasPorComp = {};
+
+            ((datos && datos.filas) || []).forEach(function(x) {
+                var k = x.COD_PROVEE + '|' + x.T_COMP + '|' + x.N_COMP;
+
+                cuotasPorComp[k] = (cuotasPorComp[k] || 0) + 1;
+            });
+        }
+
+        return cuotasPorComp[f.COD_PROVEE + '|' + f.T_COMP + '|' + f.N_COMP] || 1;
     }
 
     /**

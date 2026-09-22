@@ -258,7 +258,33 @@
                                 <th rowspan="2">N_COMP</th>
                                 <th rowspan="2">EMISION</th>
                                 <th rowspan="2">VTO</th>
-                                <th rowspan="2">Pendiente</th>
+                                <!-- EL IMPORTE VA ANTES QUE EL PENDIENTE, y son
+                                     dos columnas y no una porque cuando difieren
+                                     eso ES el dato: la factura tiene algo
+                                     imputado que no la canceló entera.
+
+                                     Sin esta columna, una factura de $431.393
+                                     con una O/P de $416.393 imputada se leía
+                                     como "una factura de $15.000 sin pagar", y
+                                     no había forma de notar desde la grilla que
+                                     el pago estaba hecho y había quedado corto.
+                                     Es el caso real de SABAMA A0000300137161,
+                                     que administración reportó como un error de
+                                     la pantalla. Hoy son 16 vencimientos así,
+                                     por $41,3 millones pendientes.
+
+                                     LA QUE SUMA SIGUE SIENDO "Pendiente". Ésta
+                                     es el contexto para leerla: va atenuada y no
+                                     entra a ningún total del tablero, y por eso
+                                     su total del pie tampoco va en negrita. -->
+                                <th rowspan="2"
+                                    title="Lo que se debía por este vencimiento antes de imputarle nada. Si difiere del pendiente es porque tiene pagos o notas imputados que no lo cancelaron entero.">
+                                    Importe
+                                </th>
+                                <th rowspan="2"
+                                    title="Lo que falta pagar: el importe menos lo que ya se le imputó. Es el número que va al cashflow.">
+                                    Pendiente
+                                </th>
                                 <th rowspan="2">Fecha de pago</th>
                                 <!-- UNA SOLA COLUMNA, Y MUESTRA LA QUE DECIDE.
                                      Trae la del maestro —o la que dejó la
@@ -297,9 +323,9 @@
                         <tfoot class="table-light">
                             <!-- El pie lo reescribe pintarTotales() con una celda
                                  por columna. Este colspan es sólo el estado
-                                 inicial, y son las 12 descriptivas. -->
+                                 inicial, y son las 13 descriptivas. -->
                             <tr id="totalesProv">
-                                <td colspan="12" class="fw-bold text-end">TOTALES</td>
+                                <td colspan="13" class="fw-bold text-end">TOTALES</td>
                             </tr>
                         </tfoot>
                     </table>

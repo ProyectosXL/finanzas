@@ -65,6 +65,46 @@
 }
 
 /* ----------------------------------------------------------------------------
+   IMPORTE
+   ---------------------------------------------------------------------------- */
+
+/* La columna Importe, y su total del pie. VA MÁS LIVIANA QUE LA DE AL LADO a
+   propósito: "Pendiente" es la que suma y la que entra al cashflow, y ésta es el
+   contexto para leerla. Dos columnas de plata con el mismo peso, pegadas, se
+   confunden, y la que hay que leer dejaría de leerse sola. */
+.tab-proveedores_locales .prov-importe {
+    color: #6b7684;
+    font-weight: 400;
+}
+
+/* La marca de que ese vencimiento tiene algo imputado que no lo canceló entero.
+   Es el aviso que faltaba: sin él, una factura pagada al 96% se leía igual que
+   una que nadie tocó. Usa el mismo ámbar que .prov-marca —las dos dicen "esta
+   fila necesita que alguien la mire", no "esta fila está mal"— y por eso no es
+   roja. */
+.tab-proveedores_locales .prov-parcial {
+    font-size: 0.72rem;
+    color: #b07d2b;
+    cursor: help;
+}
+
+/* "3 vtos.": el comprobante está en cuotas y ésta es una de ellas. Se ve como
+   una etiqueta y no como un ícono porque tiene que decir CUÁNTAS son —el número
+   es el dato— y va en gris, no en ámbar: estar en cuotas es normal, no algo
+   para revisar. */
+.tab-proveedores_locales .prov-cuota {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 0 5px;
+    border-radius: 8px;
+    background-color: #eef2f7;
+    color: #6b7684;
+    font-size: 0.68rem;
+    font-weight: 400;
+    cursor: help;
+}
+
+/* ----------------------------------------------------------------------------
    RUBRO
    ---------------------------------------------------------------------------- */
 
