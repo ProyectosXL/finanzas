@@ -411,6 +411,16 @@
                                    placeholder="Buscar código, nombre o rubro..." style="min-width: 240px;">
                         </div>
                     </div>
+                    <!-- El maestro se cargaba sólo al entrar a la solapa y
+                         después de guardar, así que una importación hecha
+                         desde otra pestaña no se veía sin recargar la página
+                         entera. Mismo botón, mismo ícono y mismo texto que el
+                         de cuentas a pagar: es el mismo gesto.
+                         NO pisa el formulario abierto ni el buscador. -->
+                    <button class="btn btn-sm btn-outline-primary" id="btnRefreshMaestroProv"
+                            title="Vuelve a traer el maestro. No cancela lo que estés cargando ni borra el filtro.">
+                        <i class="fas fa-sync-alt me-1"></i> Actualizar
+                    </button>
                     <button class="btn btn-sm btn-primary" id="btnNuevoProv">
                         <i class="fas fa-plus me-1"></i> Agregar
                     </button>

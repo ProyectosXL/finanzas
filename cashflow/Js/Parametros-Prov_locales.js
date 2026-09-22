@@ -200,9 +200,28 @@
             + '</div>'
 
             + '<div class="card-body p-0">'
+            /* LO QUE LA COLUMNA "ORDEN" HACE, Y LO QUE DEJÓ DE HACER.
+
+               Decidía el orden en el que se ofrecían los valores en el alta
+               manual del maestro, y ya no: los desplegables son alfabéticos
+               siempre, porque tienen buscador y en una lista larga el único
+               orden en el que se puede buscar con la vista es ése.
+
+               La columna no se sacó —la sigue usando el alta, que pone el valor
+               nuevo al final— pero un control que parece hacer algo que no hace
+               es peor que no tenerlo, así que dice lo que hace: ordena ESTA
+               tabla. */
+            +   '<div class="param-hint px-3 pt-2 pb-1">'
+            +     '<strong>Orden</strong>: acomoda esta tabla, y nada más. En el alta manual del '
+            +     'maestro los valores se ofrecen siempre en orden <strong>alfabético</strong>, '
+            +     'porque el desplegable tiene buscador y en una lista larga es el único orden '
+            +     'en el que se encuentra algo mirando. Poné arriba lo más usado si te sirve '
+            +     'para administrarlo acá.'
+            +   '</div>'
             +   '<div class="table-responsive">'
-            /* data-orden="no": no es un listado, es el orden en el que se
-               ofrecen las opciones. Ordenar por otra columna lo desarma. */
+            /* data-orden="no": no es un listado, es el orden con el que
+               administración acomoda esta tabla. Ordenar por otra columna lo
+               desarma. */
             +     '<table id="tablaPplo_' + escapar(tipo) + '" class="table table-hover mb-0" '
             +       'data-orden="no">'
             +       '<thead><tr>'
@@ -238,7 +257,8 @@
             return '<tr class="' + (o.VIGENTE ? '' : 'pplo-baja') + '" data-id="' + o.ID + '">'
                 + '<td><input type="number" class="form-control form-control-sm pplo-orden" '
                 +   'value="' + o.ORDEN + '" min="0" step="1" data-previo="' + o.ORDEN + '" '
-                +   'title="En qué posición se ofrece. Lo más usado arriba."></td>'
+                +   'title="En qué posición aparece en ESTA tabla. No cambia el orden de los '
+                +     'desplegables del alta manual, que son siempre alfabéticos."></td>'
                 + '<td><input type="text" class="form-control form-control-sm pplo-valor" '
                 +   'value="' + escapar(o.VALOR) + '" maxlength="60" '
                 +   'data-previo="' + escapar(o.VALOR) + '" '

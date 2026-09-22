@@ -53,6 +53,50 @@ require_once __DIR__ . '/ProveedoresOpciones.php';
  * son DOS maestros distintos y confundirlos es exactamente lo que este
  * encabezado viene evitando. Ver su docblock.
  *
+ * UNA FILA MALA ES ESA FILA; UN ORIGEN CAIDO ES TODO
+ * ---------------------------------------------------
+ * Parece una inconsistencia y no lo es, asi que queda escrito.
+ *
+ * Una fila con un codigo que no existe, o con un valor que no esta en su lista,
+ * queda en ERROR y NO SE CARGA; el resto de la planilla se importa igual. El
+ * alcance es POR FILA porque se sabe exactamente cual esta mal: hay 1.222 filas
+ * de las que no se sabe nada malo y no hay motivo para castigarlas.
+ *
+ * Que el ORIGEN de la validacion no se pueda leer -CPA01 caido, o la consulta
+ * de las listas fallando- es otra cosa. No es "ninguna fila esta mal": es que
+ * NO SE PUDO CHEQUEAR NINGUNA, asi que no existe el subconjunto de filas
+ * validas que dejar pasar. Ahi la importacion se PREVISUALIZA igual -se ve que
+ * cambiaria- pero NO SE PUEDE CONFIRMAR, y la pantalla dice por que. Es el
+ * mismo criterio que ya usaba el alta manual, donde CPA01 caido frena el alta.
+ *
+ * La excepcion de la excepcion: que las listas NO EXISTAN -porque no se corrio
+ * sql/cashflow_prov_locales_opciones.sql- no bloquea nada. Ahi no hay nada roto:
+ * el modulo funciona como funcionaba antes de que las listas existieran, con
+ * texto libre, y eso es una configuracion pendiente y no un origen caido. Ver
+ * listasVigentes() y OpcionesIlegibles.
+ *
+ * LOS VALORES DE LAS CINCO LISTAS SON REGLA, NO SUGERENCIA
+ * --------------------------------------------------------
+ * Esto CAMBIO. Un valor fuera de lista se importaba igual, marcado, y el
+ * argumento era que un rubro raro clasifica -crea su propia serie- mientras que
+ * un codigo inexistente no clasifica nada. Cierto, pero el resultado era que la
+ * serie del tablero se creaba igual: el aviso se leia despues de importar, y la
+ * fila nueva del cuadro ya estaba.
+ *
+ * Ahora la fila queda en ERROR y el motivo NOMBRA EL CAMPO Y EL VALOR, porque
+ * con cinco listas un "hay un valor invalido" no se puede accionar. Y la
+ * previsualizacion junta todos los valores rechazados, agrupados por lista y sin
+ * repetir, para que administracion los pueda dar de alta en Parametros de una
+ * sola pasada en vez de descubrirlos de a uno reimportando.
+ *
+ * OJO CON LA PRIMERA IMPORTACION DESPUES DE ESTE CAMBIO: si las cinco listas de
+ * Parametros no reflejan todos los valores en uso, la planilla tal como esta hoy
+ * puede quedar rechazada en masa. Para eso esta la lista agrupada.
+ *
+ * UN CAMPO VACIO NO ES UN VALOR FUERA DE LISTA. En la planilla real hay 84 filas
+ * sin rubro economico y 765 sin plazo: marcarlas en error haria que no se pueda
+ * importar nada. Vacio es vacio, y ya se cuenta aparte.
+ *
  * PARA QUE SIRVE, CONCRETAMENTE
  * -----------------------------
  * Para que el tablero pueda mostrar alquileres, impuestos y mercaderia en filas
@@ -118,6 +162,19 @@ class ProveedoresCategorias {
      * rechazaba codigos validos como OGNUÑE.
      */
     const LARGO_CODIGO = 6;
+
+    /**
+     * Lo que se le pasa al diff cuando las listas de opciones EXISTEN pero no se
+     * pudieron leer.
+     *
+     * Es un tercer estado, y hacen falta los tres: un array son las listas, null
+     * es "todavia no se corrio el script" -no se valida nada, como antes- y esto
+     * es "la consulta fallo". Los dos ultimos daban el mismo null hasta que los
+     * valores fuera de lista pasaron a ser un error; ahora deciden cosas
+     * opuestas, porque no poder chequear NINGUNA fila no es lo mismo que no
+     * tener contra que chequearlas. Ver el encabezado de la clase.
+     */
+    const LISTAS_ILEGIBLES = 'LISTAS_ILEGIBLES';
 
     /**
      * Las formas de pago declaradas.
@@ -231,15 +288,28 @@ class ProveedoresCategorias {
      * diferencia es la misma que con CPA01: null es "no hay listas contra las
      * cuales validar" -y entonces no se marca nada, que es el comportamiento de
      * antes- mientras que un mapa vacio significaria "ninguna lista tiene
-     * valores" y marcaria el maestro entero como fuera de lista.
+     * valores" y dejaria el maestro entero en error.
      *
-     * @return array|null
+     * Y SI LA CONSULTA FALLA, LANZA. Antes devolvia null tambien, porque un
+     * catch (Throwable) se comia la diferencia entre "no existe la tabla" y "no
+     * se pudo leer". Mientras un valor fuera de lista era advertencia daba
+     * igual: en los dos casos no se marcaba nada. Desde que es ERROR ya no,
+     * porque "no se pudo leer" significa que NINGUNA fila se chequeo y no hay
+     * un subconjunto de validas que dejar pasar. Ver OpcionesIlegibles.
+     *
+     * @return array|null Las listas, o null si todavia no existe la tabla
+     * @throws OpcionesIlegibles Si la tabla esta y la consulta falla
      */
     public function listasVigentes() {
         try {
             return $this->opciones()->tablaCreada() ? $this->opciones()->vigentes() : null;
+        } catch (OpcionesIlegibles $e) {
+            throw $e;
         } catch (Throwable $e) {
-            return null;
+            throw new OpcionesIlegibles('No se pudieron leer las listas de valores de '
+                . 'Parámetros → Prov. Locales, así que no hay contra qué validar el rubro, el '
+                . 'centro de costos ni el plazo. Probá de nuevo en un rato. (' . $e->getMessage()
+                . ')', 0, $e);
         }
     }
 
@@ -971,33 +1041,52 @@ class ProveedoresCategorias {
      * la razon por la que el diff entero se puede probar sin base ni archivos.
      *
      * $validos EN null SIGNIFICA "NO SE PUDO VALIDAR", que no es lo mismo que
-     * "ninguno existe". Ahi no se marca nada en error y se avisa: si CPA01 no
-     * responde, marcar en error las mil doscientas filas seria informar como
-     * malas un monton de filas que probablemente esten bien, y bloquear una
-     * importacion legitima por un origen caido.
+     * "ninguno existe". Ahi no se marca ninguna fila en error -seria informar
+     * como malas mil doscientas que probablemente esten bien- pero la
+     * importacion NO SE PUEDE CONFIRMAR: no es que ninguna este mal, es que no
+     * se chequeo ninguna, y entonces no hay un subconjunto de filas validas que
+     * dejar pasar. Se previsualiza igual, porque ver que cambiaria no hace
+     * daño; lo que se bloquea es aplicar.
      *
-     * LAS LISTAS DE OPCIONES SON ADVERTENCIA, NO ERROR
+     * LAS LISTAS DE OPCIONES SON REGLA, NO ADVERTENCIA
      * ------------------------------------------------
-     * $opciones son las cinco listas vigentes. Un valor que no esta en la suya
-     * NO frena la fila: se importa igual, se guarda con lo que vino y queda
-     * marcado en la previsualizacion. Es lo contrario de CPA01, y la diferencia
-     * es qué significa cada cosa: un codigo que no existe hace que el proveedor
-     * no clasifique NADA, mientras que un rubro fuera de lista clasifica -crea
-     * su propia serie- y lo que hay que decidir es si esa serie tenia que
-     * existir. Lo primero es un dato roto; lo segundo, un dato que alguien
-     * tiene que mirar.
+     * $opciones son las cinco listas vigentes, y tiene TRES estados:
+     *
+     *   array                 se valida. Un valor fuera de su lista deja la
+     *                         fila en ERROR, con el campo y el valor en el
+     *                         motivo, y el resto de la planilla se importa.
+     *   null                  todavia no existe la tabla de opciones. No se
+     *                         valida nada -texto libre, como antes- y no se
+     *                         bloquea: es configuracion pendiente, no un origen
+     *                         caido.
+     *   self::LISTAS_ILEGIBLES  la tabla esta y la consulta fallo. Mismo
+     *                         criterio que CPA01 en null: no se marca nada y no
+     *                         se puede confirmar.
+     *
+     * Que esto haya dejado de ser una advertencia esta explicado en el
+     * encabezado de la clase, igual que por que una fila mala es solo esa fila
+     * y un origen caido es todo.
      *
      * @param array $filasArchivo Filas de Planilla::parsear()
      * @param array $existentes Maestro vigente, indexado por COD_PROVEE
      * @param array|null $validos Mapa COD_PROVEE => NOM_PROVEE de CPA01, o null
      *                            si la validacion no se pudo correr
-     * @param array|null $opciones Listas vigentes de ProveedoresOpciones, o null
+     * @param array|string|null $opciones Listas vigentes, null si no existe la
+     *                            tabla, o self::LISTAS_ILEGIBLES si no se leyo
      * @return array ['filas', 'bajas', 'resumen', 'avisos']
      */
     public static function compararImportacion($filasArchivo, $existentes, $validos = null,
                                                $opciones = null) {
         $existentes = is_array($existentes) ? $existentes : [];
         $validando = is_array($validos);
+
+        /* Las listas ilegibles no se le pasan a normalizarFila(): ahi valen los
+           dos estados de siempre -hay listas o no hay-. Lo que agrega el tercer
+           estado es el bloqueo, que se resuelve acá. */
+        $listasIlegibles = ($opciones === self::LISTAS_ILEGIBLES);
+        $opciones = $listasIlegibles ? null : $opciones;
+        $validandoListas = is_array($opciones);
+
         $filas = [];
         $vistos = [];
         $tocados = [];
@@ -1022,11 +1111,33 @@ class ProveedoresCategorias {
                chequear", y son dos cosas muy distintas. */
             'valido_contra_tango' => $validando,
 
-            /* Cuantas filas traen ALGUN valor que no esta en su lista. Se
-               importan igual: es advertencia. El desglose por lista es lo que
-               dice cual de las cinco hay que mirar. */
+            /* Cuantas filas traen ALGUN valor que no esta en su lista. YA NO SE
+               IMPORTAN: cada una es un error, y el desglose por lista dice cual
+               de las cinco hay que completar. */
             'fuera_de_lista' => 0,
             'fuera_de_lista_por_tipo' => [],
+
+            /* LOS VALORES RECHAZADOS, AGRUPADOS POR LISTA Y SIN REPETIR. Es lo
+               que permite darlos de alta en Parametros de UNA pasada. Sin esto,
+               con la planilla real -1.223 filas- descubrirlos seria corregir
+               uno, reimportar, descubrir el siguiente, y asi. Mapa
+               TIPO => [valores]. */
+            'valores_fuera_de_lista' => [],
+
+            /* Si las listas llegaron a correr como validacion. Distingue el
+               cero honesto del "no habia listas", igual que con CPA01. */
+            'valido_contra_listas' => $validandoListas,
+
+            /* La tabla de opciones esta y no se pudo leer. No es lo mismo que
+               'valido_contra_listas' en false por no existir la tabla: eso es
+               configuracion pendiente y esto es un origen caido. */
+            'listas_ilegibles' => $listasIlegibles,
+
+            /* Si esta importacion se puede aplicar, y si no, por que. Lo llena
+               bloqueosImportacion() al final: no depende de ninguna fila, sino
+               de si los origenes de la validacion se pudieron leer. */
+            'puede_confirmar' => true,
+            'bloqueos' => [],
 
             /* Cuantos de los cambios pisan una version cargada a mano. Ver la
                nota en el bucle. */
@@ -1040,8 +1151,19 @@ class ProveedoresCategorias {
                duplicado: un codigo que no existe no se puede cargar ni una vez,
                asi que decir "esta repetido" seria contestar una pregunta que ya
                no importa. La fila queda en ERROR y el resto de la planilla se
-               importa igual. */
-            if ($fila['estado'] !== 'ERROR' && $validando
+               importa igual.
+
+               TAMBIEN GANA SOBRE EL MOTIVO DE FUERA DE LISTA, por lo mismo: un
+               proveedor que no existe no tiene rubro que discutir, y ademas el
+               codigo se arregla mirando OTRO sistema. La marca 'fuera_lista'
+               sigue viajando y la previsualizacion la muestra al lado, asi que
+               no se pierde ninguna de las dos cosas.
+
+               Lo que NO se pisa es un error del codigo MISMO -falta, o es mas
+               largo del que Tango admite-: esos motivos dicen que hacer, y
+               "no existe en CPA01" mandaria a buscar en Tango un codigo que de
+               entrada no puede estar ahi. */
+            if (!$fila['error_codigo'] && $validando
                 && !isset($validos[$fila['cod_provee']])) {
                 $fila['estado'] = 'ERROR';
                 $fila['no_en_tango'] = true;
@@ -1052,9 +1174,38 @@ class ProveedoresCategorias {
                 $resumen['no_en_tango']++;
             }
 
-            if ($fila['estado'] !== 'ERROR') {
-                $cod = $fila['cod_provee'];
+            $cod = $fila['cod_provee'];
 
+            /* EL ARCHIVO LO TRAE, AUNQUE LA FILA NO SE PUEDA CARGAR.
+
+               'tocados' es lo unico que decide las BAJAS, y una baja significa
+               "el archivo NO lo trae". Una fila rechazada no es una fila
+               ausente: el proveedor esta en la planilla, con un dato que hay que
+               arreglar.
+
+               Marcarlo igual importa mucho mas desde que un valor fuera de lista
+               deja la fila en error: cada una de esas filas propondria dar de
+               baja a un proveedor que la planilla SI trae y, con el interruptor
+               de bajas tildado, le borraria la clasificacion. Antes solo pasaba
+               con el codigo repetido -uno en toda la planilla- y por eso no se
+               notaba. */
+            if ($cod !== '') {
+                $tocados[$cod] = true;
+            }
+
+            /* UNA FILA RECHAZADA POR UN VALOR FUERA DE LISTA SIGUE ENTRANDO AL
+               CONTROL DE DUPLICADOS. Su codigo es valido: lo que esta mal es un
+               valor. Si quedara afuera, un codigo repetido donde una de las dos
+               filas tiene un rubro invalido se cargaria sin avisar que estaba
+               repetido, que es justo lo que el control existe para evitar.
+
+               No entran, en cambio, las que fallaron POR EL CODIGO: ese codigo
+               no se puede cargar ni una vez, asi que "esta repetido" contestaria
+               una pregunta que ya no importa. */
+            $soloFueraDeLista = ($fila['estado'] === 'ERROR' && !empty($fila['fuera_lista'])
+                && !$fila['error_codigo'] && !$fila['no_en_tango']);
+
+            if ($fila['estado'] !== 'ERROR' || $soloFueraDeLista) {
                 /* EL CODIGO REPETIDO NO SE COLAPSA. La planilla real tiene uno
                    (1.222 unicos en 1.223 filas). Quedarse con el ultimo elegiria
                    por el usuario y nadie se enteraria de que hay un duplicado.
@@ -1065,8 +1216,10 @@ class ProveedoresCategorias {
                         . $vistos[$cod] . '. Está repetido en la planilla: dejá una sola fila '
                         . 'por proveedor y volvé a importar.';
 
-                    // La primera tambien pasa a error: si no, se cargaria una de
-                    // las dos sin que nadie haya decidido cual.
+                    /* La primera tambien pasa a error: si no, se cargaria una de
+                       las dos sin que nadie haya decidido cual. La que YA estaba
+                       en error -por un valor fuera de lista- no se vuelve a
+                       contar ni se le pisa el motivo: ya no se iba a cargar. */
                     foreach ($filas as $i => $anterior) {
                         if ($anterior['cod_provee'] === $cod && $anterior['estado'] !== 'ERROR') {
                             $filas[$i]['estado'] = 'ERROR';
@@ -1082,22 +1235,27 @@ class ProveedoresCategorias {
                 } else {
                     $vistos[$cod] = $fila['linea'];
 
-                    if (!isset($existentes[$cod])) {
-                        $fila['estado'] = 'ALTA';
-                        $fila['motivo'] = 'No estaba en el maestro.';
-                    } else {
-                        $tocados[$cod] = true;
-                        $fila = self::compararContraExistente($fila, $existentes[$cod]);
+                    /* El estado solo se resuelve para las que SI se van a
+                       cargar: una fila ya rechazada no es un ALTA ni un CAMBIO,
+                       y decir que lo es la contaria entre lo que va a entrar. */
+                    if (!$soloFueraDeLista) {
+                        if (!isset($existentes[$cod])) {
+                            $fila['estado'] = 'ALTA';
+                            $fila['motivo'] = 'No estaba en el maestro.';
+                        } else {
+                            $fila = self::compararContraExistente($fila, $existentes[$cod]);
 
-                        /* PISAR TRABAJO MANUAL SE AVISA ANTES DE CONFIRMAR. La
-                           planilla manda -esa decision no cambia- pero quien
-                           importa tiene que poder ver que entre los 300 cambios
-                           hay tres que borran lo que alguien cargó a mano. Sin
-                           esto, la edición manual y la importación se pisan en
-                           silencio, que es el riesgo de tener dos fuentes. */
-                        $fila['pisa_manual'] = ($fila['estado'] === 'CAMBIO'
-                            && isset($existentes[$cod]['ORIGEN'])
-                            && $existentes[$cod]['ORIGEN'] === 'MANUAL');
+                            /* PISAR TRABAJO MANUAL SE AVISA ANTES DE CONFIRMAR.
+                               La planilla manda -esa decision no cambia- pero
+                               quien importa tiene que poder ver que entre los
+                               300 cambios hay tres que borran lo que alguien
+                               cargó a mano. Sin esto, la edición manual y la
+                               importación se pisan en silencio, que es el
+                               riesgo de tener dos fuentes. */
+                            $fila['pisa_manual'] = ($fila['estado'] === 'CAMBIO'
+                                && isset($existentes[$cod]['ORIGEN'])
+                                && $existentes[$cod]['ORIGEN'] === 'MANUAL');
+                        }
                     }
                 }
             }
@@ -1121,19 +1279,39 @@ class ProveedoresCategorias {
                     $clave = $fila['criterio_distrib'];
                     $criterios[$clave] = isset($criterios[$clave]) ? $criterios[$clave] + 1 : 1;
                 }
+            }
 
-                /* UNA FILA CUENTA UNA VEZ, aunque tenga tres campos fuera de
-                   lista: el numero que se informa arriba es "cuantas filas hay
-                   que mirar". El desglose por lista, en cambio, cuenta cada
-                   campo, porque dice CUAL de las cinco listas esta incompleta. */
-                if (!empty($fila['fuera_lista'])) {
-                    $resumen['fuera_de_lista']++;
+            /* LOS VALORES FUERA DE LISTA SE CUENTAN AUNQUE LA FILA ESTE EN
+               ERROR, y ahora SIEMPRE lo está: es el error. Contarlos sólo en
+               las filas que se cargan -como se hacía cuando era advertencia-
+               daría cero justo en el caso que hay que informar.
 
-                    foreach ($fila['fuera_lista'] as $tipo => $valor) {
-                        $resumen['fuera_de_lista_por_tipo'][$tipo] =
-                            isset($resumen['fuera_de_lista_por_tipo'][$tipo])
-                                ? $resumen['fuera_de_lista_por_tipo'][$tipo] + 1
-                                : 1;
+               UNA FILA CUENTA UNA VEZ, aunque tenga tres campos mal: el numero
+               que se informa arriba es "cuantas filas hay que arreglar". El
+               desglose por lista cuenta cada campo, porque dice CUAL de las
+               cinco esta incompleta, y la lista de valores junta los distintos
+               para poder darlos de alta de una pasada. */
+            if (!empty($fila['fuera_lista'])) {
+                $resumen['fuera_de_lista']++;
+
+                foreach ($fila['fuera_lista'] as $tipo => $valor) {
+                    $resumen['fuera_de_lista_por_tipo'][$tipo] =
+                        isset($resumen['fuera_de_lista_por_tipo'][$tipo])
+                            ? $resumen['fuera_de_lista_por_tipo'][$tipo] + 1
+                            : 1;
+
+                    if (!isset($resumen['valores_fuera_de_lista'][$tipo])) {
+                        $resumen['valores_fuera_de_lista'][$tipo] = [];
+                    }
+
+                    /* SIN REPETIR, y comparando igual que buscarEnLista(): si
+                       la planilla trae 'DEPOSITO SUR' y 'Deposito Sur', es UN
+                       valor que hay que dar de alta y no dos. Se conserva la
+                       primera escritura, que es la que alguien va a copiar. */
+                    $clave = Planilla::normalizarTitulo($valor);
+
+                    if (!isset($resumen['valores_fuera_de_lista'][$tipo][$clave])) {
+                        $resumen['valores_fuera_de_lista'][$tipo][$clave] = $valor;
                     }
                 }
             }
@@ -1169,6 +1347,18 @@ class ProveedoresCategorias {
 
         $resumen['bajas'] = count($bajas);
 
+        /* Los valores rechazados se juntaron indexados por su clave normalizada
+           -para no repetir 'DEPOSITO SUR' y 'Deposito Sur'-; lo que se publica
+           es la lista, ordenada, que es como se lee y como se carga. */
+        foreach ($resumen['valores_fuera_de_lista'] as $tipo => $valores) {
+            $lista = array_values($valores);
+            sort($lista);
+            $resumen['valores_fuera_de_lista'][$tipo] = $lista;
+        }
+
+        $resumen['bloqueos'] = self::bloqueosImportacion($validando, $listasIlegibles);
+        $resumen['puede_confirmar'] = empty($resumen['bloqueos']);
+
         $sospechosos = self::criteriosSospechosos($criterios);
 
         return [
@@ -1179,6 +1369,46 @@ class ProveedoresCategorias {
             'criterios_sospechosos' => $sospechosos,
             'avisos' => self::avisosImportacion($resumen, count($existentes), $sospechosos)
         ];
+    }
+
+    /**
+     * Por que esta importacion no se puede confirmar, si es que no se puede.
+     *
+     * UN ORIGEN QUE NO SE PUEDE LEER BLOQUEA TODO, y es la unica cosa que lo
+     * hace. No es "ninguna fila esta mal": es que no se chequeo ninguna, asi que
+     * no hay un subconjunto de filas validas que dejar pasar. El alcance por
+     * fila -que es el de siempre- supone que se sabe cuales son las malas.
+     *
+     * EL TEXTO ES EL MISMO CRITERIO QUE guardarManual(): dice que no se pudo
+     * leer, que el bloqueo es a proposito, y que hay que probar de nuevo en un
+     * rato. Un mensaje que solo diga "no se puede importar" manda a buscar el
+     * problema en la planilla, que es el lugar equivocado.
+     *
+     * Estatica y pura.
+     *
+     * @param bool $validoContraTango Si CPA01 se pudo leer
+     * @param bool $listasIlegibles Si la tabla de opciones esta y no se leyo
+     * @return array Los motivos, vacio si se puede confirmar
+     */
+    private static function bloqueosImportacion($validoContraTango, $listasIlegibles) {
+        $bloqueos = [];
+
+        if (!$validoContraTango) {
+            $bloqueos[] = 'No se pudo leer CPA01, el maestro de proveedores de Tango, así que '
+                . 'los códigos NO se pudieron validar: no es que estén todos bien, es que no se '
+                . 'chequeó ninguno. La importación se frena a propósito, porque un código que no '
+                . 'está en Tango no cruza contra ninguna cuenta a pagar y el proveedor quedaría '
+                . 'cargado sin clasificar nada. Probá de nuevo en un rato.';
+        }
+
+        if ($listasIlegibles) {
+            $bloqueos[] = 'No se pudieron leer las listas de valores de Parámetros → '
+                . 'Prov. Locales, así que el rubro, el centro de costos y el plazo NO se '
+                . 'pudieron validar: no es que estén todos bien, es que no se chequeó ninguno. '
+                . 'La importación se frena a propósito. Probá de nuevo en un rato.';
+        }
+
+        return $bloqueos;
     }
 
     /**
@@ -1263,28 +1493,34 @@ class ProveedoresCategorias {
      * proveedor cargado a mano se clasificaria distinto que el mismo proveedor
      * traido por la planilla, y nadie tendria donde notarlo.
      *
-     * LAS LISTAS DE OPCIONES LLEGAN POR PARAMETRO, Y SON UNA ADVERTENCIA
-     * ------------------------------------------------------------------
+     * LAS LISTAS DE OPCIONES LLEGAN POR PARAMETRO, Y SON UNA REGLA
+     * -------------------------------------------------------------
      * $opciones es lo que devuelve ProveedoresOpciones::vigentes(): las cinco
      * listas de valores validos. Llega por parametro para que esta funcion siga
      * siendo pura y se pueda probar sin base.
      *
-     * UN VALOR QUE NO ESTA EN SU LISTA NO ES UN ERROR: la fila se importa igual
-     * y se guarda con lo que vino, marcada. Es el mismo criterio que este modulo
-     * ya aplica a las formas de pago y a los criterios de distribucion, y el
-     * motivo esta escrito en el encabezado de la clase: la planilla viene sucia
-     * y eso se MUESTRA, no se arregla. Un importador que descarta lo que no
-     * reconoce deja la planilla rota para siempre, porque nadie se entera nunca.
+     * UN VALOR QUE NO ESTA EN SU LISTA DEJA LA FILA EN ERROR, y el motivo nombra
+     * QUE CAMPO y QUE VALOR. Esto CAMBIO: antes se importaba igual, marcado, con
+     * el argumento de que un rubro raro clasifica -crea su serie- mientras que
+     * un codigo inexistente no clasifica nada. Era cierto y no alcanzaba: la
+     * serie del tablero quedaba creada igual, porque el aviso se leia despues de
+     * importar. Ver el encabezado de la clase.
+     *
+     * El motivo nombra campo y valor porque con CINCO listas un "hay un valor
+     * invalido" no le dice a nadie donde mirar.
+     *
+     * UN CAMPO VACIO NO ESTA FUERA DE LISTA: esta vacio, que ya se cuenta
+     * aparte. Ver validarContraListas().
      *
      * Y NUNCA SE AGREGA SOLO A LA LISTA. Las listas las administra una persona
      * desde Parametros: si la importacion las ampliara, la lista se llenaria de
      * los typos de la planilla y dejaria de servir para validar nada.
      *
      * NO SE CORRIGE EL VALOR AL CANONICO. buscarEnLista() matchea ignorando
-     * mayusculas y acentos -asi que 'alquileres' reconoce a 'Alquileres'- pero
-     * lo que se guarda sigue siendo lo que vino. Pisarlo cambiaria en silencio
-     * la serie del tablero de ese proveedor, y el original es la evidencia de
-     * que la planilla tiene algo que corregir.
+     * mayusculas y acentos -asi que 'alquileres' reconoce a 'Alquileres', y esa
+     * fila NO es un error- pero lo que se guarda sigue siendo lo que vino.
+     * Pisarlo cambiaria en silencio la serie del tablero de ese proveedor, y el
+     * original es la evidencia de que la planilla tiene algo que corregir.
      *
      * EL PLAZO ES LA EXCEPCION, Y SOLO EN UNA COSA: si el valor esta en la
      * lista, los DIAS salen de la lista en lugar de derivarse del texto con
@@ -1321,10 +1557,17 @@ class ProveedoresCategorias {
                para que la pantalla no tenga que preguntar si llego. */
             'no_en_tango' => false,
 
+            /* Si la fila fallo POR EL CODIGO MISMO: falta, o es mas largo de lo
+               que Tango admite. Lo mira compararImportacion() para saber si vale
+               la pena preguntarle a CPA01 por ese codigo. Sin esta marca habria
+               que deducirlo del texto del motivo, y un motivo es para leer, no
+               para que otro codigo lo interprete. */
+            'error_codigo' => false,
+
             /* Que campos traen un valor que no esta en su lista de opciones.
                Mapa TIPO => valor, para que la previsualizacion pueda decir cual
                es el valor raro y no solo que hay uno. Vacio si no se valido o
-               si esta todo bien. */
+               si esta todo bien. Con al menos uno, la fila queda en ERROR. */
             'fuera_lista' => [],
             'estado' => 'ALTA',
             'motivo' => '',
@@ -1335,6 +1578,7 @@ class ProveedoresCategorias {
 
         if ($cod === '') {
             $fila['estado'] = 'ERROR';
+            $fila['error_codigo'] = true;
             $fila['motivo'] = 'La fila no tiene código de proveedor.';
 
             return $fila;
@@ -1350,6 +1594,12 @@ class ProveedoresCategorias {
         if (Planilla::largo($cod) > self::LARGO_CODIGO) {
             $fila['cod_provee'] = $cod;
             $fila['estado'] = 'ERROR';
+
+            /* NO ES REDUNDANTE CON EL CHEQUEO DE CPA01: un codigo de siete
+               caracteres tampoco existe en Tango, pero "tiene 7 y en Tango son
+               6" dice que hay que hacer y "no existe en CPA01" manda a buscarlo
+               a otro sistema. Gana el motivo que mas se acerca al arreglo. */
+            $fila['error_codigo'] = true;
             $fila['motivo'] = 'El código "' . $cod . '" tiene ' . Planilla::largo($cod)
                 . ' caracteres y en Tango son ' . self::LARGO_CODIGO . ' como máximo, así que '
                 . 'no va a cruzar contra ninguna cuenta a pagar.';
@@ -1392,23 +1642,29 @@ class ProveedoresCategorias {
     }
 
     /**
-     * Marca los campos cuyo valor no esta en su lista de opciones, y toma de la
-     * lista los dias del plazo cuando si esta.
+     * Deja en ERROR la fila que trae un valor que no esta en su lista, y toma
+     * de la lista los dias del plazo cuando si esta.
      *
      * Va aparte de normalizarFila() para que se lea de un saque QUE HACE Y QUE
-     * NO HACE: marca y resuelve los dias. No corrige, no descarta y no agrega
-     * nada a ninguna lista. Ver la nota de normalizarFila().
+     * NO HACE: valida y resuelve los dias. No corrige, no agrega nada a ninguna
+     * lista y no toca el valor guardado. Ver la nota de normalizarFila().
      *
      * SIN LISTAS NO VALIDA Y NO MARCA NADA. $opciones en null es "no hay listas
-     * cargadas" -el script no se corrio- y ahi el comportamiento es el de
-     * antes: texto libre. Marcar todo como fuera de lista cuando no hay ninguna
-     * lista seria informar como sospechoso el maestro entero.
+     * cargadas" -no se corrio sql/cashflow_prov_locales_opciones.sql- y ahi el
+     * comportamiento es el de antes: texto libre. Dejar en error el maestro
+     * entero porque no existe la tabla contra la cual validarlo seria apagar el
+     * modulo por una configuracion pendiente. Es la MISMA razon por la que el
+     * front no dibuja desplegables vacios.
+     *
+     * Ojo: eso vale para "no existe la tabla". Que la tabla ESTE y no se pueda
+     * leer es otra cosa y no llega hasta aca: lo corta listasVigentes(), que
+     * lanza. Ver OpcionesIlegibles.
      *
      * Estatica y pura.
      *
      * @param array $fila Fila ya normalizada
      * @param array|null $opciones Listas vigentes, o null
-     * @return array La fila, con 'fuera_lista' resuelto
+     * @return array La fila, con 'fuera_lista' resuelto y el estado decidido
      */
     private static function validarContraListas($fila, $opciones) {
         if (!is_array($opciones)) {
@@ -1421,8 +1677,8 @@ class ProveedoresCategorias {
 
             /* Un campo VACIO no esta fuera de lista: esta vacio, que es otra
                cosa y ya se cuenta aparte. En la planilla real hay 84 filas sin
-               rubro economico y 765 sin plazo; marcarlas como valor invalido
-               ahogaria el aviso de las que si tienen un typo. */
+               rubro economico y 765 sin plazo; dejarlas en error haria que no
+               se pueda importar nada. */
             if ($valor === null || trim((string) $valor) === '') {
                 continue;
             }
@@ -1445,7 +1701,63 @@ class ProveedoresCategorias {
             }
         }
 
+        if (empty($fila['fuera_lista'])) {
+            return $fila;
+        }
+
+        /* NO SE PISA UN ERROR ANTERIOR. Si la fila ya fallo por el codigo, ese
+           motivo manda: un proveedor que no existe no tiene rubro que discutir.
+           La marca 'fuera_lista' viaja igual y la previsualizacion la muestra
+           al lado, asi que no se pierde. */
+        if ($fila['estado'] !== 'ERROR') {
+            $fila['estado'] = 'ERROR';
+            $fila['motivo'] = self::motivoFueraDeLista($fila['fuera_lista']);
+        }
+
         return $fila;
+    }
+
+    /**
+     * El motivo de una fila rechazada por valores fuera de lista.
+     *
+     * NOMBRA EL CAMPO Y EL VALOR, uno por uno. Con cinco listas, un "hay un
+     * valor invalido" obliga a abrir la planilla y comparar los cinco campos
+     * contra las cinco listas para saber cual es; y como el arreglo casi nunca
+     * es corregir la planilla -suele ser dar de alta el valor en Parametros- el
+     * mensaje tiene que decir DONDE se da de alta.
+     *
+     * Los cinco nombres son masculinos ('el rubro', 'el centro de costos', 'el
+     * plazo de pago'), asi que el articulo puede ser uno solo.
+     *
+     * Estatica y pura.
+     *
+     * @param array $fuera Mapa TIPO => valor
+     * @return string
+     */
+    private static function motivoFueraDeLista($fuera) {
+        $partes = [];
+
+        foreach ($fuera as $tipo => $valor) {
+            $nombre = isset(ProveedoresOpciones::TIPOS[$tipo])
+                ? mb_strtolower(ProveedoresOpciones::TIPOS[$tipo]['nombre'], 'UTF-8')
+                : $tipo;
+
+            $partes[] = 'el ' . $nombre . ' «' . $valor . '»';
+        }
+
+        $lista = (count($partes) === 1)
+            ? ucfirst($partes[0])
+            : 'Hay valores que no están en las listas de Parámetros → Prov. Locales: '
+                . implode(', ', $partes);
+
+        /* 'agregalo' y 'agregalos' van SIN tilde: el imperativo de vos es
+           'agregá', y al pegarle el pronombre la palabra pasa a ser grave y
+           pierde el acento escrito. */
+        return $lista . ((count($partes) === 1)
+                ? ' no está en la lista de Parámetros → Prov. Locales.'
+                : '.')
+            . ' Agrega' . (count($partes) === 1 ? 'lo' : 'los') . ' ahí si el valor es '
+            . 'correcto, o corregí la planilla si es un error de tipeo.';
     }
 
     /** Un campo de texto de la planilla, o null si vino vacio */
@@ -1545,15 +1857,17 @@ class ProveedoresCategorias {
                 . 'nada. Buscá el código correcto en Tango y corregí la planilla.';
         }
 
-        /* QUE LA VALIDACION NO HAYA CORRIDO NO PUEDE PASAR DESAPERCIBIDO. Sin
-           este aviso, una previsualización sin errores de código se lee como
-           "todos los códigos existen", cuando en realidad es "no se chequeó
-           ninguno". */
-        if (array_key_exists('valido_contra_tango', $resumen)
-            && !$resumen['valido_contra_tango']) {
-            $avisos[] = 'ATENCIÓN: no se pudo leer CPA01, así que los códigos de proveedor NO se '
-                . 'validaron contra Tango. Si alguno está mal tipeado, se va a cargar igual y '
-                . 'después no va a clasificar ninguna deuda.';
+        /* QUE LA VALIDACION NO HAYA CORRIDO NO PUEDE PASAR DESAPERCIBIDO, y
+           ahora ademas FRENA la importacion. Sin el aviso, una previsualización
+           sin errores de código se lee como "todos los códigos existen", cuando
+           en realidad es "no se chequeó ninguno", y el botón apagado sin motivo
+           se lee como que la pantalla está rota.
+
+           Los textos los arma bloqueosImportacion(), que es la que decide el
+           bloqueo: dos redacciones del mismo hecho terminan diciendo cosas
+           distintas en el primer cambio. */
+        foreach (isset($resumen['bloqueos']) ? $resumen['bloqueos'] : [] as $b) {
+            $avisos[] = 'ATENCIÓN, NO SE PUEDE CONFIRMAR: ' . $b;
         }
 
         /* PISAR TRABAJO MANUAL NO ES UN ERROR, ES UN DATO. La planilla manda:
@@ -1601,25 +1915,38 @@ class ProveedoresCategorias {
                 . 'proveedores manda la fecha de vencimiento del comprobante.';
         }
 
-        /* LOS VALORES FUERA DE LISTA SON ADVERTENCIA Y SE IMPORTAN. El aviso
-           nombra CUÁLES listas, porque con cinco decir sólo "hay valores fuera
-           de lista" obliga a recorrer la previsualización entera para saber
-           dónde mirar. Y dice explícitamente que no se agregan solas: alguien
-           va a esperar que sí. */
+        /* LOS VALORES FUERA DE LISTA NO SE IMPORTAN. Esto CAMBIÓ: eran una
+           advertencia y la fila se cargaba igual.
+
+           El aviso nombra CUÁLES listas y CUÁNTOS valores distintos hay que dar
+           de alta en cada una, porque con cinco listas decir sólo "hay valores
+           fuera de lista" obliga a recorrer la previsualización entera para
+           saber dónde mirar. Los valores en sí los lista la previsualización,
+           agrupados y sin repetir: con la planilla real, descubrirlos de a uno
+           reimportando serían decenas de vueltas.
+
+           Y dice explícitamente que no se agregan solos: alguien va a esperar
+           que sí. */
         if (!empty($resumen['fuera_de_lista'])) {
             $porTipo = [];
+            $valores = isset($resumen['valores_fuera_de_lista'])
+                ? $resumen['valores_fuera_de_lista'] : [];
 
             foreach ($resumen['fuera_de_lista_por_tipo'] as $tipo => $n) {
+                $distintos = isset($valores[$tipo]) ? count($valores[$tipo]) : 0;
+
                 $porTipo[] = (isset(ProveedoresOpciones::TIPOS[$tipo])
-                    ? ProveedoresOpciones::TIPOS[$tipo]['nombre'] : $tipo) . ' (' . $n . ')';
+                        ? ProveedoresOpciones::TIPOS[$tipo]['nombre'] : $tipo)
+                    . ' (' . $n . ' fila(s), ' . $distintos . ' valor(es) distinto(s))';
             }
 
             $avisos[] = $resumen['fuera_de_lista'] . ' fila(s) traen algún valor que NO está en '
-                . 'las listas de opciones: ' . implode(', ', $porTipo) . '. Se importan igual y '
-                . 'se guardan tal como vinieron, marcadas. Los valores NO se agregan solos a las '
-                . 'listas: si alguno es correcto, cargalo en Parámetros → Prov. Locales; si es '
-                . 'un typo, corregilo en la planilla. Ojo con el RUBRO ECONÓMICO: cada valor '
-                . 'distinto crea una fila propia en el tablero.';
+                . 'las listas de opciones y POR ESO NO SE CARGAN: ' . implode(', ', $porTipo)
+                . '. Los valores NO se agregan solos a las listas: si son correctos, cargalos en '
+                . 'Parámetros → Prov. Locales —están listados acá abajo, agrupados, para darlos '
+                . 'de alta de una sola pasada— y volvé a importar; si son un typo, corregí la '
+                . 'planilla. Ojo con el RUBRO ECONÓMICO: cada valor distinto crea una fila propia '
+                . 'en el tablero, y por eso conviene mirar dos veces antes de darlo de alta.';
         }
 
         return $avisos;
@@ -1640,6 +1967,27 @@ class ProveedoresCategorias {
      * una fila mala obligaria a corregir la planilla entera antes de poder
      * cargar las mil doscientas que estan bien.
      *
+     * SE VUELVE A VALIDAR ACA, CONTRA LOS ORIGENES LEIDOS AHORA
+     * ----------------------------------------------------------
+     * $comparacion es lo que MANDA EL NAVEGADOR: se reenvia el diff para que se
+     * aplique exactamente lo que la persona vio, y eso esta bien, pero un diff
+     * que viene de afuera es un PEDIDO y no una autorizacion. Confiar en su
+     * 'estado' seria dejar que un POST armado a mano marque 'ALTA' una fila que
+     * la previsualizacion habia rechazado, y este endpoint es alcanzable sin
+     * pasar por la pantalla. Es el mismo criterio con el que guardarManual()
+     * vuelve a consultar CPA01 aunque el buscador ya haya ofrecido el codigo.
+     *
+     * Ademas cubre un caso que no es un ataque y pasa solo: entre previsualizar
+     * y confirmar puede pasar un rato, y en ese rato alguien pudo dar de baja un
+     * valor en Parametros.
+     *
+     * SI LA REVALIDACION NO COINCIDE SE FRENA TODO Y NO SE APLICA NADA, que es
+     * lo contrario del alcance por fila de la previsualizacion. La diferencia:
+     * ahi las filas malas estaban a la vista y alguien decidio importar el
+     * resto; aca lo que se descubre es que lo que se confirmo no es lo que se
+     * habia visto, y aplicar "la parte que sobrevive" seria aplicar algo que
+     * nadie miro. Se avisa y se vuelve a previsualizar, que es barato.
+     *
      * @param array $comparacion Lo que devolvio compararImportacion()
      * @param bool $aplicarBajas Si se dan de baja los que el archivo no trae
      * @param string|null $usuario
@@ -1650,6 +1998,8 @@ class ProveedoresCategorias {
             throw new Exception('Todavía no existe la tabla del maestro. '
                 . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
         }
+
+        $this->revalidarImportacion($comparacion);
 
         $cid = $this->conectar();
         $aplicadas = ['altas' => 0, 'cambios' => 0, 'bajas' => 0];
@@ -1693,6 +2043,111 @@ class ProveedoresCategorias {
         $this->mapa = null;
 
         return $aplicadas;
+    }
+
+    /**
+     * Vuelve a validar, contra la base, el diff que mando el navegador.
+     *
+     * Lanza si no se puede aplicar. No devuelve nada: la unica respuesta util es
+     * "segui" o el motivo por el que no. Ver la nota de aplicarImportacion().
+     *
+     * SE HACE ANTES DE ABRIR LA TRANSACCION, a proposito: lo que se esta
+     * decidiendo es si se toca la base, no si se deshace lo tocado.
+     *
+     * @param array $comparacion Lo que mando el navegador
+     * @throws Exception Si algun origen no se puede leer, o si alguna fila que
+     *                   viene marcada para cargar ya no pasa la validacion
+     */
+    private function revalidarImportacion($comparacion) {
+        $porCargar = [];
+
+        foreach (isset($comparacion['filas']) ? $comparacion['filas'] : [] as $fila) {
+            if (isset($fila['estado']) && ($fila['estado'] === 'ALTA'
+                || $fila['estado'] === 'CAMBIO')) {
+                $porCargar[] = $fila;
+            }
+        }
+
+        if (empty($porCargar)) {
+            return;
+        }
+
+        /* LOS DOS ORIGENES, LEIDOS AHORA. Si alguno no responde no se aplica
+           nada, con el mismo texto y el mismo criterio que la previsualizacion:
+           no se chequeo ninguna fila, asi que no hay ninguna que dejar pasar. */
+        if (!$this->tango()->disponible()) {
+            throw new Exception(self::textoBloqueoTango());
+        }
+
+        try {
+            $validos = $this->tango()->existentes(array_column($porCargar, 'cod_provee'));
+        } catch (Throwable $e) {
+            throw new Exception(self::textoBloqueoTango());
+        }
+
+        // listasVigentes() ya distingue "no existe la tabla" -null, no se
+        // valida- de "no se pudo leer", que lanza OpcionesIlegibles.
+        $listas = $this->listasVigentes();
+
+        foreach ($porCargar as $fila) {
+            $motivo = self::revalidarFila($fila, $validos, $listas);
+
+            if ($motivo === null) {
+                continue;
+            }
+
+            throw new Exception('No se importó nada. La fila ' . $fila['linea'] . ' ('
+                . $fila['cod_provee'] . ') no se puede cargar: ' . $motivo . ' Volvé a '
+                . 'previsualizar el archivo: lo que se confirmó no coincide con lo que la '
+                . 'validación dice ahora, y aplicar sólo una parte sería cargar algo que nadie '
+                . 'miró.');
+        }
+    }
+
+    /** El texto de CPA01 caido. Uno solo, para las tres pantallas que lo dicen */
+    private static function textoBloqueoTango() {
+        return 'No se pudo leer CPA01, el maestro de proveedores de Tango, así que no se puede '
+            . 'verificar que los códigos existan. La importación se frena a propósito: un código '
+            . 'que no está en Tango no cruza contra ninguna cuenta a pagar y el proveedor '
+            . 'quedaría cargado sin clasificar nada. Probá de nuevo en un rato.';
+    }
+
+    /**
+     * Si una fila que viene marcada para cargar sigue siendo cargable.
+     *
+     * ES LA MISMA REGLA QUE EL DIFF, aplicada a una fila ya normalizada: el
+     * codigo tiene que existir en CPA01 y los cinco valores tienen que estar en
+     * su lista. Se escribe una sola vez -aca- y no dos, porque dos copias de una
+     * regla de validacion se separan en el primer cambio y la que queda vieja es
+     * siempre la que decide si se escribe en la base.
+     *
+     * Estatica y pura: se prueba sin base, que es justamente lo que hace
+     * verificable que la revalidacion diga lo mismo que la previsualizacion.
+     *
+     * @param array $fila Una fila del diff
+     * @param array|null $validos Mapa COD_PROVEE => NOM_PROVEE de CPA01
+     * @param array|null $listas Listas vigentes, o null si no existe la tabla
+     * @return string|null El motivo por el que no se puede cargar, o null
+     */
+    public static function revalidarFila($fila, $validos, $listas) {
+        $cruda = isset($fila['cod_provee']) ? $fila : [];
+
+        /* Se vuelve a normalizar en vez de creerle a las claves que vinieron:
+           el largo del codigo, el plazo en dias y la pertenencia a las listas
+           los resuelve normalizarFila(), y es la misma funcion que corrio la
+           previsualizacion. */
+        $limpia = self::normalizarFila($cruda, $listas);
+
+        if ($limpia['estado'] === 'ERROR') {
+            return $limpia['motivo'];
+        }
+
+        if (is_array($validos) && !isset($validos[$limpia['cod_provee']])) {
+            return 'el código "' . $limpia['cod_provee'] . '" no existe en CPA01, el maestro de '
+                . 'proveedores de Tango.';
+        }
+
+        return null;
     }
 
     /* ====================================================================
@@ -1776,15 +2231,32 @@ class ProveedoresCategorias {
      * mostrar dos nombres para el mismo codigo. Mismo criterio que
      * Echeqs::guardarClientePrechequeado() con la razon social de GVA14.
      *
-     * SI CPA01 NO SE PUEDE LEER, EL ALTA SE BLOQUEA. Es lo contrario de lo que
-     * hace la importacion -que sigue y avisa- y la diferencia es el volumen:
-     * frenar un alta de a uno cuesta que la persona vuelva en un rato; frenar
-     * una planilla de mil doscientas filas por un origen caido bloquea un
-     * trabajo entero. Con una sola fila en juego, conviene no adivinar.
+     * SI UN ORIGEN NO SE PUEDE LEER, EL ALTA SE BLOQUEA. La importacion hace lo
+     * mismo desde que los valores de las listas son una regla: no poder chequear
+     * no es lo mismo que estar todo bien. Antes acá se decía que esto era lo
+     * contrario de lo que hacía la importación, y ya no lo es. Ver el encabezado
+     * de la clase.
+     *
+     * UN VALOR FUERA DE LISTA TAMPOCO SE GUARDA. Esto CAMBIO, y sale solo:
+     * normalizarFila() es la misma funcion que usa la importacion, y desde que
+     * ahi un valor fuera de lista deja la fila en ERROR, este metodo -que ya
+     * lanzaba con el motivo- rechaza igual. Era lo unico coherente: si la
+     * importacion rechaza un rubro que no esta en la lista, el alta manual no
+     * puede aceptarlo, porque el resultado seria el mismo dato en el mismo
+     * maestro segun por donde entro.
+     *
+     * TIENE UNA CONSECUENCIA QUE HAY QUE SABER: un proveedor cargado ANTES de
+     * que existieran las listas puede tener un valor que ninguna lista ofrece.
+     * Se lo puede abrir y el formulario NO le borra el valor -lo conserva,
+     * marcado en naranja, ver elegirValor() en el JS- pero guardar va a
+     * rechazarlo hasta que alguien elija uno de la lista o de alta el valor en
+     * Parametros. Es el precio de que las listas signifiquen algo, y la pantalla
+     * lo dice en el campo en vez de dejar que se descubra al guardar.
      *
      * @param array $datos Las mismas claves que las columnas de importacion
      * @param string|null $usuario
      * @return array ['cod_provee', 'estado' => 'ALTA'|'CAMBIO', 'fila']
+     * @throws OpcionesIlegibles Si las listas existen y no se pudieron leer
      */
     public function guardarManual($datos, $usuario = null) {
         if (!$this->tablaCreada()) {
@@ -1800,9 +2272,9 @@ class ProveedoresCategorias {
         }
 
         /* Con las listas cargadas, el PLAZO en dias sale de la lista y no de
-           derivar el texto. Un valor fuera de lista NO frena el guardado -es
-           advertencia, igual que en la importacion- pero viaja en la respuesta
-           para que la pantalla lo pueda decir. */
+           derivar el texto, y un valor que no esta en su lista deja la fila en
+           ERROR: es la misma funcion que valida la importacion. Si las listas no
+           se pueden leer, listasVigentes() lanza y no se guarda nada. */
         $fila = self::normalizarFila($datos, $this->listasVigentes());
 
         if ($fila['estado'] === 'ERROR') {

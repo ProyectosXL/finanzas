@@ -260,14 +260,38 @@ Antes el código se validaba **sólo por largo**, así que `MTDOD` entraba igual
 | **Alta manual** | Se **rechaza**. Es la tabla maestra de proveedores: no hay alta con advertencia |
 | **Importación** | La fila queda en `ERROR` y **el resto de la planilla se importa igual**. Parar todo por dos códigos malos obligaría a corregir la planilla entera antes de poder cargar las mil doscientas que están bien — el mismo criterio que ya regía para el código repetido |
 | **Lo ya cargado** | Se **audita y se avisa**. No se da de baja nada automáticamente |
+| **`CPA01` no responde** | La importación **no se puede confirmar**. Ver más abajo: no es lo mismo que "ninguna fila está mal" |
 
 **No se filtra por empresa ni por estado de baja.** `COD_PROVEE` es único en `CPA01`: si existe, vale. Un proveedor dado de baja en Tango puede seguir teniendo deuda pendiente, y excluirlo haría imposible clasificar esa deuda.
 
 **El chequeo de la importación es UNA consulta para todos los códigos del archivo**, no una por fila: la planilla real tiene 1.223 filas y una consulta por cada una serían 1.223 viajes a la base para una pantalla que responde mientras alguien espera. El diff sigue siendo **puro** —recibe el mapa de códigos válidos por parámetro— y por eso se prueba entero sin base.
 
-**Si `CPA01` no responde, la validación no corre y se dice.** Se pasa `null`, que **no es lo mismo que un mapa vacío**: con un mapa vacío se marcaría en error la planilla entera por un origen caído. Un aviso propio avisa que los códigos no se chequearon, porque sin él una previsualización limpia se lee como *"todos los códigos existen"* cuando en realidad es *"no se chequeó ninguno"*.
+#### La regla corre en el backend, no en el navegador
 
-> El alta manual es la excepción: ahí, si `CPA01` no responde, **se frena**. La diferencia es el volumen. Frenar un alta de a uno cuesta que la persona vuelva en un rato; frenar una planilla de mil doscientas filas bloquea un trabajo entero. Con una sola fila en juego, conviene no adivinar.
+`aplicarImportacion()` **vuelve a leer `CPA01` y las listas y revalida cada fila** antes de tocar la base. El diff se reenvía desde el navegador para aplicar exactamente lo que la persona vio —y eso está bien— pero un diff que viene de afuera es un **pedido, no una autorización**: creerle al `estado` dejaría que un POST armado a mano marque `ALTA` una fila que la previsualización había rechazado, y el endpoint es alcanzable sin pasar por la pantalla. Es el mismo criterio con el que `guardarManual()` vuelve a consultar `CPA01` aunque el buscador ya haya ofrecido el código.
+
+Además cubre un caso que no es un ataque y pasa solo: entre previsualizar y confirmar puede pasar un rato, y en ese rato alguien pudo dar de baja un valor desde *Parámetros*.
+
+La regla está escrita **una sola vez**, en `revalidarFila()` —estática y pura, probada sin base—, porque dos copias de una validación se separan en el primer cambio y la que queda vieja es siempre la que decide si se escribe en la base.
+
+**Si la revalidación no coincide, no se aplica nada**, que es lo contrario del alcance por fila de la previsualización. La diferencia: ahí las filas malas estaban a la vista y alguien decidió importar el resto; acá lo que se descubre es que lo confirmado no es lo que se había visto, y aplicar "la parte que sobrevive" sería aplicar algo que nadie miró.
+
+#### Una fila mala es esa fila; un origen caído es todo
+
+> Esto **cambió**. Antes un origen caído sólo avisaba, y se importaba igual.
+
+Parece una inconsistencia y no lo es:
+
+| | Alcance | Por qué |
+| --- | --- | --- |
+| Una **fila** con un código que no existe, o con un valor fuera de lista | **Sólo esa fila**. El resto de la planilla se importa | Se sabe exactamente cuál está mal. Hay 1.222 filas de las que no se sabe nada malo y no hay motivo para castigarlas |
+| El **origen** de la validación no se puede leer (`CPA01` caído, o la consulta de las listas fallando) | **No se puede confirmar la importación** | No es que ninguna esté mal: es que **no se chequeó ninguna**, así que no existe el subconjunto de filas válidas que el alcance por fila supone que hay |
+
+**Con el origen caído no se marca ninguna fila en error**: informar como malas mil doscientas filas que probablemente estén bien sería mentir. Se pasa `null`, que **no es lo mismo que un mapa vacío** —un mapa vacío es "ninguno de estos códigos existe", y ése sí deja cada fila en error—.
+
+**La previsualización se muestra igual**, con los cambios que traería: ver qué cambiaría no hace daño y sigue sirviendo para saber en qué estado está la planilla. Lo que se bloquea es **confirmar**, y la pantalla lo dice en rojo, en el mismo lugar donde estaba el botón, con el mismo texto y el mismo criterio que ya usaba el alta manual: qué no se pudo leer, que el freno es a propósito, y que hay que probar de nuevo en un rato. Un botón apagado sin motivo se lee como una pantalla rota, y un *"no se puede importar"* a secas manda a buscar el problema en la planilla, que es el lugar equivocado.
+
+> El alta manual ya se frenaba así desde antes. Lo que cambió es que la importación dejó de ser la excepción.
 
 #### El nombre sale de `CPA01` y no se edita
 
@@ -345,18 +369,47 @@ Guardar los días **en la lista** —en vez de derivarlos siempre del texto— e
 
 Se verificó antes de escribir esto: en todo el módulo se guarda, se muestra en la grilla, se compara en el diff y se audita por typos. **Ningún cálculo depende de él**: no define porcentajes por canal ni afecta a ninguna serie. La lista lo normaliza y nada más. El día que tenga que repartir un gasto entre canales, los porcentajes son columnas nuevas de esta misma tabla.
 
-#### En la importación es advertencia, y nunca se agrega solo
+#### Un valor fuera de lista es un error, y nunca se agrega solo
+
+> Esto **cambió**. Era una **advertencia**: la fila se importaba igual y se guardaba con lo que vino, marcada.
 
 | | |
 | --- | --- |
 | Código fuera de `CPA01` | **Error**. El proveedor no clasificaría *nada* |
-| Valor fuera de lista | **Advertencia**. Se importa igual y se guarda tal como vino, marcado |
+| Valor fuera de lista | **Error**. La fila no se carga, y el motivo nombra el campo y el valor |
+| Campo **vacío** | **Válido**, y eso no cambió |
 
-La diferencia es qué significa cada cosa: un código que no existe deja al proveedor sin poder clasificar nada, mientras que un rubro fuera de lista **sí** clasifica —crea su propia serie— y lo que hay que decidir es si esa serie tenía que existir. Lo primero es un dato roto; lo segundo, un dato que alguien tiene que mirar.
+El argumento de la advertencia era que un rubro raro **sí** clasifica —crea su propia serie— mientras que un código inexistente no clasifica nada. Era cierto, y lo que no alcanzaba era el resultado: la fila nueva del cuadro quedaba creada igual, porque el aviso se leía **después** de importar.
 
-**El valor no se corrige al canónico.** La comparación es tolerante —`alquileres` reconoce a `Alquileres`— pero lo que se guarda sigue siendo lo que vino. Pisarlo cambiaría en silencio la serie del tablero de ese proveedor, y el original es la evidencia de que la planilla tiene algo que arreglar. Es el mismo criterio que rige para las formas de pago desde el principio.
+**El motivo nombra el campo y el valor** — *"El centro de costos «DEPOSITO SUR» no está en la lista de Parámetros → Prov. Locales"*. Con cinco listas, un *"hay un valor inválido"* obliga a comparar los cinco campos contra las cinco listas para saber cuál es; y como el arreglo casi nunca es corregir la planilla —suele ser dar de alta el valor— el mensaje dice **dónde** se da de alta.
+
+**El alcance es por fila**, igual que con `CPA01`: la fila mala no se carga y el resto de la planilla sí.
+
+**Un campo vacío no es un valor fuera de lista.** En la planilla real hay **84 filas sin rubro económico y 765 sin plazo**: dejarlas en error haría que no se pueda importar nada.
+
+**Si las listas no existen, no se valida nada y no se bloquea.** Sin `sql/cashflow_prov_locales_opciones.sql` corrido, el módulo funciona como antes de que las listas existieran: texto libre. Eso es **configuración pendiente**, no un origen caído, y apagar el módulo por una tabla que nunca se creó sería lo contrario de lo que hace el resto de este código. Si en cambio la tabla **está y la consulta falla**, rige el criterio de `CPA01` caído: no se marca nada y no se deja confirmar.
+
+> Los dos casos daban el mismo `null` hasta ahora, porque un `catch (Throwable)` se comía la diferencia. Mientras los valores fuera de lista eran advertencia daba igual —en los dos casos no se marcaba nada—; desde que son regla deciden cosas opuestas, así que `listasVigentes()` lanza `OpcionesIlegibles` para poder distinguirlos.
+
+**El valor no se corrige al canónico.** La comparación sigue siendo tolerante —`ALQUILERES` reconoce a `Alquileres`, y esa fila **no** es un error— pero lo que se guarda sigue siendo lo que vino. Pisarlo cambiaría en silencio la serie del tablero de ese proveedor, y el original es la evidencia de que la planilla tiene algo que arreglar. Es el mismo criterio que rige para las formas de pago desde el principio.
 
 **Y nunca se agrega solo a la lista.** Si la importación las ampliara, las listas se llenarían con los typos de la planilla y dejarían de servir para validar nada.
+
+#### ⚠️ La primera importación después de este cambio puede fallar en masa
+
+Si las cinco listas de *Parámetros* no reflejan **todos** los valores en uso, la planilla tal como está hoy queda rechazada fila por fila. Es la consecuencia esperada de que las listas signifiquen algo, y la única forma de que sea manejable es no descubrir los valores de a uno.
+
+Por eso la previsualización lista **todos los valores rechazados, agrupados por lista y sin repetir**, arriba del detalle fila por fila:
+
+```
+Valores que hay que dar de alta en Parámetros → Prov. Locales
+Centro de costos: DEPOSITO SUR · PLANTA 2
+Plazo de pago: 45 DIAS · 60 DIAS
+```
+
+Con eso se cargan en *Parámetros* de una sola pasada y se vuelve a importar. Sin eso serían decenas de vueltas sobre un archivo de 1.223 filas: corregir uno, reimportar, encontrar el siguiente.
+
+**Los agrupa el backend**, que es el que sabe comparar como comparan las listas: `DEPOSITO SUR` y `Deposito Sur` son **un** valor que dar de alta, no dos — aunque sean **dos filas** rechazadas, y las dos se cuenten como tales.
 
 #### La pantalla de administración muestra cuántos proveedores usan cada valor
 
@@ -366,9 +419,33 @@ Sin ese número, dar de baja es a ciegas: no hay forma de saber si se saca una o
 
 **La baja es lógica.** Un valor dado de baja deja de ofrecerse pero no desaparece de los proveedores que ya lo tienen. Borrar la fila dejaría proveedores apuntando a un valor que ya no se puede explicar.
 
-#### Un valor fuera de lista no se pierde al editar
+#### Los desplegables son alfabéticos y tienen buscador
 
-Si a un `<select>` se le pide un valor que no tiene, queda vacío **en silencio**, y guardar el formulario le borraría el rubro al proveedor sin que nadie lo haya pedido. Por eso el formulario **agrega el valor guardado como opción**, marcada *(fuera de lista)* y con el campo en naranja: el dato no se pierde, se ve que está fuera de lista, y quien edita decide.
+> Esto es **nuevo**. Antes eran `<select>` nativos, ordenados por la columna `ORDEN`.
+
+**Alfabético siempre**, con `localeCompare` en locale `es`: con un `sort()` pelado, `Ñandú` y los acentos se van al final por su código de carácter, que en una lista de rubros escritos en castellano es justo donde nadie los busca.
+
+Se ordena en **los dos lados** —`ProveedoresOpciones::vigentes()` y el front— y no es desconfianza: el orden en el que se ofrecen los valores es una decisión de la pantalla, y dejarla escrita sólo en un `ORDER BY` la vuelve invisible para quien lee el JS; al revés, un backend que mande un orden que la pantalla ignora hace creer al que lee el SQL que ese orden significa algo.
+
+**La columna `ORDEN` no se borró y dejó de decidir esto.** La sigue usando el alta de opciones —el valor nuevo va al final (`ISNULL(MAX(ORDEN), 0) + 1`)— y sigue ordenando la tabla de *Parámetros*, que es donde se administra. Lo que dejó de hacer es decidir el orden de los desplegables del alta manual, **y la pantalla de Parámetros lo dice**: un control que parece hacer algo que no hace es peor que no tenerlo.
+
+**El buscador no agrega ninguna librería.** El patrón ya estaba resuelto a mano en este mismo módulo —el autocomplete de códigos de `CPA01`, con sus clases `.prov-tango-suge`— y esto es lo mismo contra una lista que ya está en memoria: un `<input>` que filtra sin distinguir mayúsculas ni acentos, flechas + Enter + Escape, y se cierra al hacer clic afuera.
+
+**Sólo se elige de la lista: el `<input>` filtra, no carga.** Lo que se tipea nunca se guarda. Sería incoherente que el alta manual aceptara por tipeo un valor que la importación rechaza. Cuando el filtro no encuentra nada, el desplegable dice **dónde** se dan de alta los valores; sin eso el campo parece roto.
+
+El componente **se comporta como un `<select>`**: expone `.value` de lectura y de escritura, que es lo único que usan `valor()` y `setValor()`. Fue la condición para no tener que tocar `abrirForm()` ni `guardarProveedor()`.
+
+**Y no se repueblan los campos con el formulario abierto.** `pintarMaestro()` corre en cada tecla del buscador del maestro; repoblar le borraría lo que alguien está cargando, en silencio.
+
+#### Un valor fuera de lista no se pierde al editar, pero no se puede guardar
+
+Un proveedor cargado **antes** de que existieran las listas —o traído por una importación de cuando un valor fuera de lista era advertencia— tiene valores que el desplegable no ofrece. Si el campo los descartara, quedaría vacío **en silencio** y guardar le borraría el rubro al proveedor sin que nadie lo haya pedido.
+
+Por eso el campo **conserva el valor guardado**, lo ofrece como opción al final de la lista —marcada *(fuera de lista)*, no mezclada en el orden alfabético— y se pinta en naranja.
+
+**Pero guardar lo va a rechazar**, y es la contracara de que las listas sean una regla: `guardarManual()` pasa por la misma `normalizarFila()` que la importación, así que endurecerla ahí lo endureció acá también. Sería incoherente que el alta manual aceptara lo que la planilla tiene prohibido.
+
+> El campo lo dice en el tooltip **antes** de apretar Guardar, en vez de dejar que se descubra al guardar. La salida es elegir uno de la lista, o dar de alta el valor en *Parámetros*.
 
 **Sin el script corrido, nada de esto cambia:** el backend manda las listas en `null` y los campos siguen siendo texto libre con sugerencias, que es como funcionaban antes. Dibujar desplegables vacíos dejaría una pantalla donde no se puede cargar nada.
 
@@ -483,6 +560,22 @@ Los indicadores siguen midiendo lo visible y diciendo el universo al lado, como 
 ### El rubro "Excluidos"
 
 Son los socios y los movimientos que no son deuda comercial. **No se filtran en la consulta: se clasifican**, y la fila del tablero que los agrupa se inhabilita desde Parámetros. Así sacarlos es un bit y no un cambio de código, y siguen visibles en la pestaña de detalle, que es donde alguien puede notar que uno está mal clasificado.
+
+#### Pero en la grilla no se marcan, y antes sí
+
+> Esto **cambió**.
+
+La fila se atenuaba en gris e itálica, la etiqueta del rubro tenía color propio y el `title` del código decía *"Rubro Excluidos: se lista pero su fila del tablero se puede inhabilitar"*. Las tres decían lo mismo, y lo que decían no pasa: **en esta pantalla ese rubro no saca la deuda de ningún lado.**
+
+La fila del tablero usa `PAGOS`, y `seriesDeItem()` reparte `PAGOS` por **cómo se paga** —cronograma o no— sin preguntar nunca por el rubro. Es el mismo hecho que ya estaba documentado dos secciones más arriba: los **8 vencimientos de `OGRAZ`** con rubro *Excluidos* entran a `PAGOS` igual que cualquier otro porque cobra por echeq. Tampoco los esconde el filtro ni los descuenta ninguna tarjeta.
+
+Una fila gris por un rubro que no cambia ningún número manda a descartar plata que sí está en el cuadro — que es exactamente lo contrario de lo que este módulo hace con el resto de sus filtros.
+
+Sacarlos del tablero **sigue siendo apuntar la fila a `PAGOS_CRONO_OPERATIVOS` desde Parámetros**, y hoy eso no está hecho. Hasta que lo esté, *Excluidos* es una clasificación que alimenta **otros cortes** —`PAGOS_EXCLUIDOS` y su serie por rubro— y no una decisión sobre esta grilla.
+
+**El color salía de `EXCLUIDO`, que junta el rubro con el tilde por factura**, así que una factura excluida a mano de un proveedor de *Alquileres* mostraba `Alquileres` pintado como si fuera *Excluidos*.
+
+Lo que **sí** se sigue marcando es la exclusión **por factura**: ésa va a su propia serie y efectivamente sale de `PAGOS`. Y cuánto pesa el rubro sobre el total lo sigue diciendo el aviso de la pantalla, que es donde un número agregado se lee una vez en lugar de repetirse en cada fila. Para encontrarlas en la grilla alcanza con escribir el rubro en el buscador.
 
 ### Hay una segunda lista de exclusión, y no manda
 
@@ -863,6 +956,18 @@ Guardar recarga la pestaña entera: la fecha cambia en qué columna del eje cae 
 
 Componentes estándar: tarjetas KPI, buscador, selector de eje temporal (`Js/eje-vistas.js`), columnas fijas, Actualizar, Exportar a Excel y avisos por `Js/notificaciones.js`.
 
+### La solapa Maestro: encabezado fijo y su propio Actualizar
+
+> Las dos cosas son **nuevas**, y ninguna cambia ningún número.
+
+**El encabezado de `#tablaMaestro` queda fijo al scrollear.** Son 1.223 proveedores con diez columnas: sin el encabezado a la vista, a la quinta fila ya no se sabe si lo que se está mirando es el rubro o el centro de costos. Es el mismo patrón que la cartera de Echeqs —contenedor con `max-height` y `thead` *sticky*—, con `border-collapse: separate` para que el borde inferior viaje con la celda (con `collapse` el borde es de la tabla, no de la celda, y desaparece justo cuando el encabezado se despega).
+
+El alto lleva **techo y piso**, y el piso es el que importa: arriba de la tabla hay cosas que aparecen y desaparecen —los avisos, el control de faltantes y sobre todo el formulario de alta, que mide unos 200px—. Con sólo un techo calculado para el caso cerrado, abrir el formulario dejaba la tabla en tres filas; con el piso, cuando no entra lo que cede es el alto de la página.
+
+**La solapa tiene su propio botón Actualizar**, igual que la de cuentas a pagar (mismo ícono, mismo texto, mismo estilo). El maestro se cargaba sólo al entrar a la solapa y después de guardar, así que una importación hecha desde otra pestaña no se veía sin recargar la página entera.
+
+**No pisa el trabajo a medio hacer**, que es lo que separa *actualizar* de *cancelar*: el formulario abierto no se repuebla —lo impide `aplicarListas()`— y el filtro del buscador no se toca, porque `pintarMaestro()` lo **lee** del input en vez de guardarlo. Y se apaga mientras la petición está en vuelo, como el resto de los botones del módulo.
+
 ---
 
 ## Los tres controles
@@ -889,7 +994,10 @@ php tests/run.php proveedores
 - **Que el plazo no es un número**: `DEBITO` devuelve `null` y no `0`.
 - **La suciedad de la planilla**: que el código repetido deje en error **las dos** filas, que `echeq` matchee y `eqheck` no, y que el typo del criterio se detecte sin lista declarada —y que un criterio raro pero distinto **no** se marque—.
 - **Que las filas en error no ensucien las estadísticas de calidad**: una que falló por el código ni siquiera llegó a leer el rubro.
-- **La validación contra `CPA01`**: que un código inexistente quede en error y el resto de la planilla se importe igual, que el chequeo de existencia vaya **antes** que el de duplicado —un código que no existe no se puede cargar ni una vez—, y que `null` (no se pudo leer `CPA01`) no marque nada pero **avise**, mientras que un mapa vacío sí marca, porque son dos cosas distintas.
+- **La validación contra `CPA01`**: que un código inexistente quede en error y el resto de la planilla se importe igual, que el chequeo de existencia vaya **antes** que el de duplicado —un código que no existe no se puede cargar ni una vez—, y que `null` (no se pudo leer `CPA01`) no marque ninguna fila pero **bloquee la confirmación**, mientras que un mapa vacío sí marca cada fila, porque son dos cosas distintas.
+- **La asimetría de alcance**, que es la que se rompe si alguien "unifica" los dos casos: una fila mala deja afuera esa fila y deja confirmar igual; un origen caído no deja confirmar nada.
+- **Que la regla corra al aplicar y no sólo al previsualizar**: `revalidarFila()` —pura, probada sin base— rechaza una fila que viene marcada `ALTA` con un código que `CPA01` no tiene, y rechaza un valor que la lista ya no ofrece; y `aplicarImportacion()` revalida **antes** de abrir la transacción, volviendo a leer los dos orígenes en vez de creerle al cuerpo del pedido.
+- **La pantalla del maestro**: que el encabezado sea *sticky* con techo **y piso** —el piso es lo que evita que la tabla quede en tres filas con el formulario abierto—, y que el botón Actualizar exista, esté cableado, se apague mientras carga y no pise ni el formulario ni el filtro.
 - **El diff de pagos**: que el tipo se deduzca, que un comprobante en cuotas no sea ambiguo, que dos tipos con el mismo número sí lo sean, y que lo que no cruza dé un error con motivo.
 - **Que la clave incluya al proveedor**: dos proveedores con el mismo comprobante dan claves distintas.
 - **El desvío** de la conciliación en los dos sentidos.
@@ -903,12 +1011,20 @@ Con base, además: que **ningún pendiente sea negativo** —el error que tenía
 `tests/test_prov_locales_opciones.php` fija las cinco listas, también sin base —llegan por parámetro, ya resueltas—:
 
 - **Qué es pertenecer a una lista**: que la comparación ignore mayúsculas, acentos y espacios, que `50% ECOMMERC` **no** matchee con `50% ECOMMERCE`, y que un campo vacío **no** cuente como fuera de lista (son dos cosas distintas y se cuentan aparte).
-- **Que fuera de lista es advertencia y no error**, y que el valor se guarde **tal como vino** aun cuando matchea: corregirlo al canónico cambiaría en silencio la serie del tablero.
-- **Que sin listas cargadas no se marca nada**: el comportamiento vuelve a ser el de antes.
-- **La semántica del plazo entera**: que los días salgan de la lista, que eso permita declarar `FIN DE MES` —que `plazoEnDias()` sola devuelve `null`—, que `CONTADO` sea `0` y `DEBITO` siga siendo `null`, y que un plazo fuera de lista caiga al fallback de siempre.
-- **Que el formulario no pierda un valor fuera de lista** al editar un proveedor.
+- **Que fuera de lista es un error** y la fila no se carga, que el motivo **nombre el campo, el valor y dónde se da de alta**, y que el valor se guarde **tal como vino** aun cuando matchea: corregirlo al canónico cambiaría en silencio la serie del tablero.
+- **Que un campo vacío sigue siendo válido** —incluidos los que vienen con espacios sueltos—, que es lo que evita que la planilla real quede rechazada entera.
+- **Que un error del código le gana al de fuera de lista**: los dos son errores y el motivo es uno solo, así que gana el que dice qué hacer.
+- **Que sin listas cargadas no se valida nada y se puede confirmar igual**, y que con las listas **ilegibles** no se marca nada pero **no se puede confirmar**: son los dos `null` que antes eran el mismo.
+- **Que los valores rechazados se agrupen sin repetir**: `DEPOSITO SUR` y `Deposito Sur` son un valor que dar de alta, aunque sean dos filas rechazadas.
+- **Que una fila rechazada NO sea una fila ausente**, que es el riesgo más grave del cambio y el más silencioso: las bajas son *"el archivo no los trae"*, así que si una fila rechazada no contara como traída, cada valor fuera de lista propondría dar de baja a un proveedor que la planilla **sí** trae — y con el interruptor de bajas tildado le borraría la clasificación a cientos. Y que el que el archivo realmente no trae se siga proponiendo.
+- **Que una fila rechazada siga entrando al control de duplicados**, en los dos órdenes: su código es válido, y sin eso un código repetido donde una de las dos filas tiene un rubro inválido cargaría la otra sin avisar que estaba repetido. Las que fallan **por el código** siguen sin entrar: ese código no se puede cargar ni una vez.
+- **La semántica del plazo entera**: que los días salgan de la lista, que eso permita declarar `FIN DE MES` —que `plazoEnDias()` sola devuelve `null`—, que `CONTADO` sea `0` y `DEBITO` siga siendo `null`, y que un plazo fuera de lista caiga al fallback de siempre **y además deje la fila en error**.
+- **Que el formulario no pierda un valor fuera de lista** al editar un proveedor, y que lo marque en el campo.
+- **Que el desplegable busque sin librerías** —la prueba falla si aparece Select2, Tom Select o Choices—, que exponga `.value` como un `<select>`, y que diga dónde se dan de alta los valores cuando el filtro no encuentra nada.
+- **Que el orden sea alfabético en los dos lados**, con `localeCompare` en `es` en el front y `alfabetico()` en el backend — incluido que la `Ñ` quede entre la `N` y la `O` y no al final.
+- **Que la columna `ORDEN` siga editable y que la pantalla aclare para qué sirve.**
 
-*Suite completa: 2515 OK, 0 fallas (20 archivos).*
+*Suite completa: 3427 OK, 0 fallas (24 archivos).*
 
 ---
 
@@ -948,3 +1064,5 @@ Pruebas propias de las listas: `tests/test_prov_locales_opciones.php`.
 - **639 de los 1.173 proveedores del maestro tienen la forma de pago sin normalizar en la columna** —`CAJA`, `TARJETA CORP` y `MERCADO PAGO`, las tres que faltaban en la primera versión de `FORMAS_PAGO`—. **Ya no afecta a nada**: la normalización se deriva al leer, así que esas filas se clasifican bien igual. La columna se acomoda sola la próxima vez que se reimporte el maestro por cualquier otro motivo; no hace falta hacerlo por esto.
 - **ARCA/Aduana está cargada con dos códigos** (`OGADUN` $235,4 M y `OGADUA` $131,8 M, mismo nombre). No se unifican en el resolutor: la clave es el código de Tango y arreglar el maestro no le toca a este módulo. Si los dos llevan el mismo rubro, el tablero los junta solo. El control de faltantes los muestra por separado, que es lo que va a revelar si la planilla trae uno solo.
 - **Las series por rubro se resuelven contra el maestro en cada pedido.** Con 26 rubros y un cache por request alcanza; si algún día el maestro creciera mucho, el lugar para mirar es `CashflowRegistry::resolverExtra()`.
+- **Antes de la primera importación con las listas como regla, hay que completar las cinco listas de *Parámetros*.** Mientras falten valores en uso, la planilla real va a rechazar filas en masa. La previsualización los lista agrupados justamente para poder cargarlos de una pasada, pero conviene hacerlo **antes** y no descubrirlo importando.
+- **Un proveedor viejo con un valor fuera de lista no se puede guardar hasta que alguien resuelva ese valor.** Se abre, se ve y no se pierde —y el campo lo avisa en naranja— pero `Guardar` lo rechaza, incluso si lo que se estaba editando era otro campo. Es la contracara de que las listas signifiquen algo; si resultara molesto en la práctica, la discusión es si el alta manual debe poder conservar un valor heredado, no si la importación debe aceptarlo.

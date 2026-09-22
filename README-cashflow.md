@@ -706,9 +706,9 @@ Debajo del *Flujo Neto (sin cobertura)*:
 | Fila | Tipo | Qué es |
 | --- | --- | --- |
 | Flujo Neto Acumulado (sin cobertura) | `SALDO_FINAL` | En *Resultados*, pegada al flujo neto: la posición acumulada **sin cubrir**, el rojo que dispara el rescate. Leyendo de arriba hacia abajo, es la que contesta "¿cuánto me falta?" antes de ver de dónde sale |
-| Inversiones disponibles | `STOCK_COBERTURA` | Cuánto hay en las cuentas de inversión. **No va en ninguna columna de fecha**: el importe va en la columna Total, y **cuánto queda** en la celda de Concepto, que es la que no se va al scrollear |
-| Dólares en cuenta comitente | `STOCK_COBERTURA` | Lo mismo, para las cuentas comitente, valuado a hoy |
-| Uso de Inversiones | `USO_COBERTURA` | Cuánto se rescata de las cuentas de inversión en cada fecha. **Lo calcula el motor** y se puede pisar a mano desde el tablero |
+| Inversiones disponibles | `STOCK_COBERTURA` | **No se dibuja.** Cuánto hay en las cuentas de inversión: le da al motor el tope por fondo y el stock contra el que se calcula el disponible |
+| Dólares en cuenta comitente | `STOCK_COBERTURA` | Lo mismo, para las cuentas comitente, valuado a hoy. Tampoco se dibuja |
+| Uso de Inversiones | `USO_COBERTURA` | Cuánto se rescata de las cuentas de inversión en cada fecha, con **el disponible de sus fondos** en la celda de Concepto. **Lo calcula el motor** y se puede pisar a mano desde el tablero |
 | Uso de Dólares comitente | `USO_COBERTURA` | Lo mismo, para las comitente, en dólares enteros vendidos a la cotización del día |
 | Flujo Neto (con cobertura) | `FLUJO_NETO` | El de arriba más lo aplicado en esa columna |
 | Flujo Neto Acumulado (con cobertura) | `SALDO_FINAL` | La posición proyectada, ya con la cobertura. Es la que miran los indicadores y la que pinta las columnas en rojo |
@@ -716,6 +716,38 @@ Debajo del *Flujo Neto (sin cobertura)*:
 **Dos filas de saldo, y `SALDO_FINAL` arrastra sólo lo que tiene por encima.** Esto **cambió**: era *apertura de la columna (con todo) + movimientos por encima*, y con una sola fila al final da lo mismo. Con una fila de saldo arriba de la cobertura, la apertura global la volvía un híbrido —los rescates de ayer sí, el de hoy no—; ahora es la misma regla posicional de `FLUJO_NETO` aplicada al arrastre, y la fila del final sigue dando exactamente el cierre global, que el invariante verifica. Los indicadores (*Saldo Final*, *Saldo Mínimo*) y las columnas en rojo usan **la última** fila de saldo: la de arriba muestra un rojo que la cobertura ya tapó.
 
 **Una fila de uso por clase de fondo, no una sola con un origen.** Con el motor vendiendo dólares cuando las inversiones no alcanzan, hay que ver cada cosa en su fila. El proveedor `COBERTURA` sirve `USO_INVERSION` y `USO_COMITENTE`; `APLICACION` —el total de antes— queda declarada para volver atrás y relacionada en `componentes`, así que el validador no deja activar el total y una parte a la vez. Lo crea `sql/cashflow_cobertura_automatica.sql`.
+
+### Una fila por tipo de fondo, y es la de uso
+
+> Esto **cambió**. La sección mostraba **cuatro** filas: dos de stock y dos de uso.
+
+Para quien mira el tablero, *"Inversiones disponibles"* y *"Uso de Inversiones"* son dos preguntas sobre la misma plata, y contestarlas en renglones separados obliga a leer dos para saber si conviene aplicar. Ahora queda **una fila por tipo de fondo** —la de uso— con el disponible debajo del nombre:
+
+```
+Uso de Inversiones
+$ 3.529.962 disponibles
+
+Uso de Dólares comitente
+$ 101.310.000 disponibles
+```
+
+**Las filas de stock siguen existiendo en `RO_T_CASHFLOW_CONF_FILA`, y tienen que seguir.** Es un cambio de **presentación**: las esconde el front, en `filaDibujable()`. Son las que le dan al motor el tope por fondo (`fondos_tope`), el stock contra el que `resolverCobertura()` calcula el disponible, y lo que `CoberturaAutomatica` respeta para no rescatar de más.
+
+> **Desactivarlas desde Parámetros —que es lo que parece equivalente a esconderlas— rompe el cálculo entero, en silencio:** el motor se queda sin topes y sigue rescatando, pero sin límite. Es exactamente el tipo de cosa que alguien va a intentar "simplificar" el año que viene.
+
+El criterio de aceptación del cambio fue que `test_cobertura`, `test_cobertura_automatica` y `test_fondos` siguieran pasando **sin tocarlos**: si se rompen, es que se tocó la estructura y no la presentación.
+
+**El disponible que muestra cada fila es el de SUS fondos**, no el total. Las claves están en `fondos_fila` y el detalle en `cobertura.fondos[clave]`. El total global sumaría pesos invertidos con dólares comitente y diría, en la fila de Inversiones, plata de la que esa fila no puede rescatar. Con más de un fondo en la fila **se suman los disponibles y el tooltip los desglosa**: en pantalla lo que se decide es *"¿alcanza?"*, y para eso el número es uno solo.
+
+**Una fila que no nombra ningún fondo no escribe la línea.** `$ 0 disponibles` diría que hay un fondo vacío en lugar de que no hay fondo.
+
+**Se conservan los dos avisos que daba la fila de stock**: el caso **excedido** (`disponible < 0`), en rojo, que explica que se está cubriendo con plata que todavía no figura como invertida; y el detalle largo de cuánto hay invertido, cuánto aplicó el motor y cuánto se cargó a mano, ahora **por fondo** en el tooltip de la línea. El total de toda la sección sigue estando —es el único lugar donde queda desde que las filas de stock no se dibujan— y dice explícitamente que es el total, porque dos números distintos sin decir de qué es cada uno se leen como una contradicción.
+
+**Una sola línea visible: el disponible.** La fila de uso ya tenía una segunda línea, `calculado $ X · a mano $ Y`; con el disponible agregado quedaban tres renglones en la celda de Concepto, que es lo contrario de lo que este cambio buscaba. Ese desglose **se mudó al tooltip, no se borró**: el neto que calculó el motor contra lo cargado a mano es lo que explica el número de la fila, y sin eso la fila es un importe sin causa.
+
+**Lo que muestra la columna Total no cambia**: sigue siendo lo aplicado (`total_horizonte`). El disponible es un **stock** y va en la celda de Concepto, que además es la que queda fija al scrollear a lo ancho.
+
+**Un fondo con stock que ninguna fila de uso aplica ahora sólo se ve por el aviso.** Antes la fila de stock estaba a la vista y su importe no cuadraba con nada; hoy, si ninguna fila lo nombra, no hay ningún renglón donde aparezca. `resolverCobertura()` ya detectaba el caso y lo avisa nombrando el script (`avisarSinFila()`), y ese aviso pasó a ser la **única** forma de enterarse.
 
 ### La cobertura la calcula el motor
 
@@ -742,7 +774,7 @@ Las reglas que no son obvias:
 
 **Lo manual tiene precedencia y el motor se calcula sobre el remanente.** Primero se aplican las cargas manuales de la fecha, y recién después el motor cubre lo que siga faltando. Una carga manual descuenta del tope de su fondo como cualquier rescate; una negativa lo repone. Si una devolución manual deja la columna en rojo, el motor la cubre: lo manual manda, el motor tapa.
 
-**Se distingue lo calculado de lo cargado.** Cada celda de uso lleva su desglose en `cobertura_columnas` —manual y calculado, por fondo, en pesos y en la moneda del fondo— y el front lo pinta distinto: lo calculado en itálica azul, lo manual en negrita con un punto, el `title` con el detalle (*"El motor rescata US$ 1.658 de «Cuenta comitente» ($ 2.545.030)"*), y la celda de Concepto con los totales de la fila (*calculado $ X · a mano $ Y*), que suma el motor en `cobertura_totales`. **El front no calcula ninguno.**
+**Se distingue lo calculado de lo cargado.** Cada celda de uso lleva su desglose en `cobertura_columnas` —manual y calculado, por fondo, en pesos y en la moneda del fondo— y el front lo pinta distinto: lo calculado en itálica azul, lo manual en negrita con un punto, y el `title` con el detalle (*"El motor rescata US$ 1.658 de «Cuenta comitente» ($ 2.545.030)"*). Los **totales de la fila** —*calculado* contra *a mano*, sobre todo el horizonte— los suma el motor en `cobertura_totales` y van en el tooltip de la fila; estuvieron como segunda línea en la celda de Concepto hasta que el disponible se mudó ahí. **El front no calcula ninguno.**
 
 ### No hizo falta ninguna regla nueva en el motor
 
@@ -768,7 +800,9 @@ Donde **sí** aparece es en el *Saldo Final* y en el *Saldo Mínimo*, que salen 
 
 ### El stock es un stock
 
-`STOCK_COBERTURA` no va en ninguna columna de fecha. Ponerlo en un día diría que ese día entra plata, y además lo sumaría el Total de esa vista como si fuera flujo. El motor le vacía las columnas —el front las dibuja con un guión y un `title` que explica por qué— y el importe queda **sólo en la columna Total**, igual en las tres vistas: lo disponible no depende del tramo que se elija mirar.
+`STOCK_COBERTURA` no va en ninguna columna de fecha. Ponerlo en un día diría que ese día entra plata, y además lo sumaría el Total de esa vista como si fuera flujo. El motor le vacía las columnas y el importe queda **sólo en la columna Total**, igual en las tres vistas: lo disponible no depende del tramo que se elija mirar.
+
+> Esa regla del motor **no cambió**, y ya no se ve: las filas de stock no se dibujan. El front tenía un `title` que explicaba por qué esas celdas iban con un guión, y se sacó junto con la fila.
 
 Lo alimentan las series `STOCK` de `FONDO_INVERSION` y `FONDO_COMITENTE`: el **saldo a hoy** de las cuentas de inversión y comitente del catálogo de Saldos —saldo inicial + suscripciones − rescates—, calculado por `Fondos::saldoA()`. Ver `README-saldos.md`, *Pestaña 3 — Fondos*. Antes eran dos fotos cargadas en Otros Ingresos, y de cada tabla se tomaba la última: ver `README-otros-ingresos.md`, que quedó retirado.
 
@@ -776,18 +810,18 @@ Lo alimentan las series `STOCK` de `FONDO_INVERSION` y `FONDO_COMITENTE`: el **s
 
 El importe vive en la columna Total, que con veintiocho columnas queda a un scroll horizontal de distancia: ahí no lo mira nadie. Y la pregunta de quien está decidiendo dónde aplicar no es *cuánto hay* sino **cuánto queda**.
 
-Así que la fila de stock lleva una segunda línea en su celda de **Concepto** —la columna que queda fija al scrollear a lo ancho—:
+Así que la fila de uso lleva una segunda línea en su celda de **Concepto** —la columna que queda fija al scrollear a lo ancho—:
 
 ```
-Inversiones disponibles  🐷
-$ 2.529.962 de $ 3.529.962
+Uso de Inversiones  ✨
+$ 3.529.962 disponibles
 ```
 
-Sin nada aplicado dice sólo `$ 3.529.962 disponibles`: *"queda X de X"* es ruido.
+> Antes esta línea la llevaba la **fila de stock** y mostraba el disponible **global**, en formato `$ 2.529.962 de $ 3.529.962`. Las dos cosas cambiaron a la vez y por el mismo motivo: ver *Una fila por tipo de fondo*.
 
 Va en una segunda línea y no al lado del nombre porque **el nombre sale de la configuración y puede ser largo**, y la columna tiene ancho fijo con puntos suspensivos: en la misma línea, el importe sería lo primero que se recorta.
 
-**El motor lo calcula, el front lo dibuja.** `Cashflow::resolverCobertura()` cuelga `{stock, aplicado, disponible, hay_stock}` a las dos filas de la sección, después de los totales —el stock ya no está en ninguna columna a esa altura—. Es la regla del módulo: el front de este tablero no calcula nada.
+**El motor lo calcula, el front lo dibuja.** `Cashflow::resolverCobertura()` cuelga `{stock, aplicado, disponible, hay_stock, fondos}` a las filas de la sección, después de los totales —el stock ya no está en ninguna columna a esa altura—. El front sólo **suma los fondos de la fila** y escribe. Es la regla del módulo: el front de este tablero no calcula nada.
 
 **Se mide sobre todo el horizonte, no sobre la vista activa.** El stock es un stock: no cambia porque uno mire el tramo diario en vez del mensual. Si lo aplicado se midiera por vista, el disponible cambiaría al tocar un botón —la misma plata, dos números distintos— y una aplicación cargada en un mes de más adelante no se descontaría justo mientras se mira la vista Días, que es cuando se decide aplicar más.
 
@@ -1077,6 +1111,10 @@ De la **sección Cobertura**, `tests/test_cobertura.php` fija lo que la hace fun
 Y del **saldo de cobertura**: que se mida sobre todo el horizonte y no sobre la vista —con un escenario que aplica en el tramo diario *y* en una columna mensual, donde el total del tramo diario es otro número—; que un uso negativo sume al disponible; que aplicar de más avise y no bloquee; y que sin fila de stock no se invente un disponible.
 
 De `FLUJO_NETO`, `tests/test_cashflow.php` fija que incluya el saldo **mostrado** arriba y que no lo arrastre, y que `SALDO_FINAL` no lo cuente dos veces.
+
+Y de la **presentación de Cobertura** —una fila por tipo de fondo—, el mismo archivo fija que el front esconda las filas de stock **filtrando antes de recorrer** (con un salteo adentro del bucle, una sección sin filas visibles igual dibujaría su encabezado y quedaría un título sin nada debajo); que el motor las siga leyendo y siga sacando de ahí los topes por fondo; que el disponible se arme con los fondos **de la fila** y no con el total; que una fila sin fondos no escriba nada; que el caso excedido se siga marcando; que el desglose *calculado / a mano* haya quedado en el tooltip y no en pantalla; y que el aviso del fondo sin fila de uso siga llegando, porque pasó a ser la única forma de enterarse.
+
+> Que `test_cobertura`, `test_cobertura_automatica` y `test_fondos` sigan pasando **sin tocarlos** es parte del criterio: si se rompen, es que se tocó la estructura y no la presentación.
 
 De los **fondos como cuentas**, `tests/test_cobertura.php` fija que el disponible se lleve por clave de cuenta —con un fondo sobregirado mientras el total cierra, que es el aviso que el pozo único no daba—, que un stock sin reparto y una aplicación con una clave que no es de ninguna cuenta se traten como corresponde, y que `por_fondo` **sobreviva a `series()`**, que es donde se perdió una vez. `tests/test_fondos.php` cubre el resto: ver `README-saldos.md`.
 
