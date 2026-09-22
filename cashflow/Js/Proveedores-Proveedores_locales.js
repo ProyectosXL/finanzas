@@ -478,10 +478,26 @@
 
             if (f.SIN_FECHA_CARGADA) { clases.push('prov-vencida'); }
             if (f.ORIGEN_FECHA === 'CARGADA') { clases.push('prov-con-fecha'); }
-            if (f.EXCLUIDO) { clases.push('prov-excluido'); }
 
-            // La excluida a mano se atenúa más: no está en el cashflow, y eso
-            // tiene que verse sin leer la columna del tilde.
+            /* EL RUBRO "Excluidos" NO ATENÚA LA FILA, y antes sí.
+
+               La atenuación decía "esto está afuera", y en esta pantalla no está
+               afuera de nada: la fila del tablero usa la serie PAGOS, y
+               seriesDeItem() reparte PAGOS por CÓMO se paga —cronograma o no— sin
+               preguntar nunca por el rubro. Verificado contra la base: los 8
+               vencimientos de OGRAZ con rubro Excluidos entran a PAGOS igual que
+               cualquier otro, porque cobra por echeq. Tampoco los esconde el
+               filtro ni los descuenta ninguna tarjeta.
+
+               Sacarlos del tablero sigue siendo apuntar la fila a
+               PAGOS_CRONO_OPERATIVOS desde Parámetros, y hoy eso no está hecho.
+               Hasta que lo esté, "Excluidos" es una clasificación que alimenta
+               otros cortes —PAGOS_EXCLUIDOS y su serie por rubro— y no una
+               decisión sobre esta grilla. Una fila gris por un rubro que no
+               cambia ningún número manda a buscar una plata que sí está.
+
+               Lo que SÍ se sigue marcando es la exclusión POR FACTURA, abajo:
+               ésa va a su propia serie y efectivamente sale de PAGOS. */
             if (f.EXCLUIDA_MANUAL) { clases.push('prov-excluida-mano'); }
 
             html += '<tr class="' + clases.join(' ') + '">'
@@ -578,9 +594,16 @@
             SIN_FECHA: 'No tiene vencimiento ni plazo: no se puede ubicar en el eje.'
         };
 
-        return (origen[f.ORIGEN_FECHA] || '')
-            + (f.EXCLUIDO ? ' Rubro Excluidos: se lista pero su fila del tablero se puede '
-                + 'inhabilitar.' : '');
+        /* Acá colgaba además un "Rubro Excluidos: se lista pero su fila del
+           tablero se puede inhabilitar". Se fue con las otras dos marcas del
+           rubro: decía lo mismo, y encima salía de f.EXCLUIDO —que junta el
+           rubro con el tilde por factura—, así que una factura excluida a mano
+           de otro rubro también anunciaba ser "Rubro Excluidos".
+
+           Cuánto pesa ese rubro sobre el total lo sigue diciendo getAvisos(),
+           que es donde un número agregado se lee una vez en lugar de repetirse
+           en cada fila. */
+        return origen[f.ORIGEN_FECHA] || '';
     }
 
     /** El proveedor no está en el maestro: su deuda no se puede abrir por rubro */
@@ -593,16 +616,25 @@
     }
 
     /**
-     * El RUBRO ECONÓMICO del maestro. Es el que abre la deuda por serie en el
-     * tablero, así que es el que se marca cuando el proveedor está excluido.
+     * El RUBRO ECONÓMICO del maestro, que es el que abre la deuda por serie en
+     * el tablero.
+     *
+     * TODOS LOS RUBROS SE VEN IGUAL, y "Excluidos" tampoco es la excepción acá.
+     * Se pintaba distinto por el mismo motivo por el que la fila se atenuaba
+     * —ver pintarGrilla()— y era la misma afirmación equivocada: en esta
+     * pantalla ese rubro no saca la deuda de ningún lado.
+     *
+     * Peor todavía, se pintaba con f.EXCLUIDO, que junta el rubro con el tilde
+     * por factura: una factura excluida a mano de un proveedor de Alquileres
+     * mostraba "Alquileres" con el color de Excluidos, que es decir algo que no
+     * pasa. Para encontrarlas alcanza con escribir el rubro en el buscador.
      */
     function celdaRubro(f) {
         if (!f.RUBRO_ECONOMICO) {
             return '<span class="text-muted small">sin clasificar</span>';
         }
 
-        return '<span class="prov-rubro' + (f.EXCLUIDO ? ' prov-rubro-excluido' : '') + '">'
-            + escapar(f.RUBRO_ECONOMICO) + '</span>';
+        return '<span class="prov-rubro">' + escapar(f.RUBRO_ECONOMICO) + '</span>';
     }
 
     /**

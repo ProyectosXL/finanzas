@@ -48,12 +48,15 @@
     background-color: #f2f9f5;
 }
 
-/* Excluido: se atenúa. Se sigue listando —es donde alguien puede notar que está
-   mal clasificado— pero no compite visualmente con la deuda que sí entra. */
-.tab-proveedores_locales .prov-excluido td {
-    color: #8a94a3;
-    font-style: italic;
-}
+/* Acá estaba .prov-excluido, que atenuaba la fila de un proveedor con rubro
+   "Excluidos". Se sacó porque afirmaba algo que no pasa: en esta pantalla ese
+   rubro no saca la deuda de ningún lado —la fila del tablero usa PAGOS, que se
+   reparte por cómo se paga y no por el rubro— así que la fila gris mandaba a
+   descartar plata que sí está en el cuadro. Ver pintarGrilla() y celdaRubro()
+   en Js/Proveedores-Proveedores_locales.js.
+
+   La que SÍ se atenúa es la excluida por factura, más abajo: ésa sale de PAGOS
+   de verdad. */
 
 .tab-proveedores_locales .prov-marca {
     font-size: 0.7rem;
@@ -74,10 +77,9 @@
     color: #43536b;
 }
 
-.tab-proveedores_locales .prov-rubro-excluido {
-    background-color: #f1eef7;
-    color: #6b5b8a;
-}
+/* Acá estaba .prov-rubro-excluido, el color propio de la etiqueta del rubro
+   "Excluidos". Se fue con la atenuación de la fila y por el mismo motivo: todos
+   los rubros pesan igual en esta grilla. Ver celdaRubro(). */
 
 /* El rubro, que va al lado del económico. Se ve más liviano a propósito: el de
    al lado abre las series del tablero y éste no, así que no pueden pesar igual

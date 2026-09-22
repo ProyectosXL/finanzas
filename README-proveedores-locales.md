@@ -561,6 +561,22 @@ Los indicadores siguen midiendo lo visible y diciendo el universo al lado, como 
 
 Son los socios y los movimientos que no son deuda comercial. **No se filtran en la consulta: se clasifican**, y la fila del tablero que los agrupa se inhabilita desde Parámetros. Así sacarlos es un bit y no un cambio de código, y siguen visibles en la pestaña de detalle, que es donde alguien puede notar que uno está mal clasificado.
 
+#### Pero en la grilla no se marcan, y antes sí
+
+> Esto **cambió**.
+
+La fila se atenuaba en gris e itálica, la etiqueta del rubro tenía color propio y el `title` del código decía *"Rubro Excluidos: se lista pero su fila del tablero se puede inhabilitar"*. Las tres decían lo mismo, y lo que decían no pasa: **en esta pantalla ese rubro no saca la deuda de ningún lado.**
+
+La fila del tablero usa `PAGOS`, y `seriesDeItem()` reparte `PAGOS` por **cómo se paga** —cronograma o no— sin preguntar nunca por el rubro. Es el mismo hecho que ya estaba documentado dos secciones más arriba: los **8 vencimientos de `OGRAZ`** con rubro *Excluidos* entran a `PAGOS` igual que cualquier otro porque cobra por echeq. Tampoco los esconde el filtro ni los descuenta ninguna tarjeta.
+
+Una fila gris por un rubro que no cambia ningún número manda a descartar plata que sí está en el cuadro — que es exactamente lo contrario de lo que este módulo hace con el resto de sus filtros.
+
+Sacarlos del tablero **sigue siendo apuntar la fila a `PAGOS_CRONO_OPERATIVOS` desde Parámetros**, y hoy eso no está hecho. Hasta que lo esté, *Excluidos* es una clasificación que alimenta **otros cortes** —`PAGOS_EXCLUIDOS` y su serie por rubro— y no una decisión sobre esta grilla.
+
+**El color salía de `EXCLUIDO`, que junta el rubro con el tilde por factura**, así que una factura excluida a mano de un proveedor de *Alquileres* mostraba `Alquileres` pintado como si fuera *Excluidos*.
+
+Lo que **sí** se sigue marcando es la exclusión **por factura**: ésa va a su propia serie y efectivamente sale de `PAGOS`. Y cuánto pesa el rubro sobre el total lo sigue diciendo el aviso de la pantalla, que es donde un número agregado se lee una vez en lugar de repetirse en cada fila. Para encontrarlas en la grilla alcanza con escribir el rubro en el buscador.
+
 ### Hay una segunda lista de exclusión, y no manda
 
 `RO_V_PROVEEDORES_EGRE_DIRECTORES` tiene 8 proveedores marcados como egreso de directores.
@@ -1008,7 +1024,7 @@ Con base, además: que **ningún pendiente sea negativo** —el error que tenía
 - **Que el orden sea alfabético en los dos lados**, con `localeCompare` en `es` en el front y `alfabetico()` en el backend — incluido que la `Ñ` quede entre la `N` y la `O` y no al final.
 - **Que la columna `ORDEN` siga editable y que la pantalla aclare para qué sirve.**
 
-*Suite completa: 3069 OK, 0 fallas (23 archivos; `test_otros_ingresos` necesita conexión a la base y quedó sin correr en esta medición).*
+*Suite completa: 3427 OK, 0 fallas (24 archivos).*
 
 ---
 
