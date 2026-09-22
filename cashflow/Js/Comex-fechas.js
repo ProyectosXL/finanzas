@@ -1,5 +1,7 @@
 /**
- * Comex — la celda de fecha editable y el buscador, para las dos pestañas.
+ * Comex — lo que comparten las dos pestañas: la celda de fecha editable, el
+ * tilde de pagado, la celda del dólar aplicado, el importe en pesos y el
+ * buscador.
  *
  * POR QUÉ ESTO NO ESTÁ COPIADO EN LOS DOS ARCHIVOS
  * ------------------------------------------------
@@ -18,6 +20,14 @@
  * en vez de las siete copias que tenía. Lo que queda en cada pestaña es lo que
  * de verdad es distinto: qué campo edita, qué columnas dibuja y qué hace
  * después de guardar.
+ *
+ * LA CELDA DEL DÓLAR Y LA DEL IMPORTE EN PESOS TAMBIÉN VIVEN ACÁ, desde que
+ * Crono Nacionalización descubrió que sus gastos estaban en dólares y pasó a
+ * valuarse igual —feature/comex-nac-usd—. Vivían en Comex-Proveedores_exterior.js
+ * y eran la única pestaña que las tenía. Lo compartido es la parte de SÓLO
+ * LECTURA; Proveedores Exterior le agrega encima su edición del override, que
+ * es lo único que de verdad es suyo. Ver el bloque "CON QUÉ DÓLAR SE VALUÓ LA
+ * FILA" más abajo.
  *
  * TRES MARCAS, TRES COSAS DISTINTAS
  * ---------------------------------
@@ -436,6 +446,184 @@
     }
 
     /* ================================================================
+       CON QUÉ DÓLAR SE VALUÓ LA FILA
+
+       LAS DOS PESTAÑAS ESTÁN EN DÓLARES, Y LAS DOS LO MUESTRAN IGUAL.
+       Proveedores Exterior valúa VALOR_FOB_DOLAR por el mes de la fecha de
+       pago; Crono Nacionalización valúa IMPORTE_EST —los gastos de
+       nacionalización, que también están en dólares— por el mes de la fecha de
+       nacionalización. Son dos columnas con el mismo significado, el mismo
+       tooltip y las mismas marcas, así que son el mismo código.
+
+       LA PARTE DE SÓLO LECTURA ES LA COMPARTIDA. Proveedores Exterior le suma
+       encima su comportamiento editable —el override por contenedor— pasando
+       "editable". Crono Nacionalización no lo pasa y su celda no responde al
+       clic: ahí la cotización SIEMPRE sale de la curva, y el porqué está en
+       Comex::valuar(). Resumido: el override vive en una tabla con UNA fila por
+       contenedor, y las dos pestañas miran ese mismo contenedor en dos fechas
+       que caen en meses distintos de la curva.
+
+       DOS MARCAS, DOS COSAS DISTINTAS
+         naranja   la cotización la corrigió una persona para este contenedor
+         punteado  el mes no está en la curva y se usó el más cercano
+
+       El texto del tooltip lo escribe el backend —DolarFuturo::explicar()— y no
+       este archivo: lo usan el tablero y las dos pestañas, y tres textos
+       parecidos se desincronizan en la primera corrección.
+       ================================================================ */
+
+    /**
+     * Una cotización, con DOS decimales y no con los cuatro que guarda la base.
+     *
+     * Son los que se leen; el valor exacto ya está en el tooltip y en el campo
+     * de edición. Cuatro decimales en una columna angosta no se leen y no
+     * deciden nada.
+     */
+    function cotiz(valor) {
+        var n = parseFloat(valor) || 0;
+
+        return '$ ' + n.toLocaleString('es-AR',
+            { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    /**
+     * Un importe en pesos.
+     *
+     * Vive acá porque estas dos celdas se dibujan acá. Cada pestaña conserva su
+     * formatCurrency() para las columnas del eje, que las dibuja ella.
+     */
+    function pesos(valor) {
+        var n = parseFloat(valor) || 0;
+
+        return '$ ' + n.toLocaleString('es-AR',
+            { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    /**
+     * La celda del dólar aplicado: qué cotización se usó, de qué mes y por qué.
+     *
+     * SIN COTIZACIÓN SE DIBUJA UN GUIÓN, no un cero. Es la diferencia entre "no
+     * hay dato" y "el dato es cero", y es el criterio de todo el módulo.
+     *
+     * @param {Object} item Fila del payload
+     * @param {Object} [opts] { editable, alEditar }
+     * @returns {string} HTML de la celda
+     */
+    function celdaCotizacion(item, opts) {
+        opts = opts || {};
+
+        var editable = !!opts.editable;
+        var detalle = item.COTIZ_DETALLE || '';
+        var clases = ['center', 'cotiz-cell'];
+
+        if (item.COTIZ_ORIGEN === 'OVERRIDE') {
+            clases.push('cotiz-override');
+        } else if (item.COTIZ_ORIGEN === 'APROXIMADA') {
+            clases.push('cotiz-aproximada');
+        }
+
+        if (editable) {
+            clases.push('cotiz-editable');
+        }
+
+        var cuerpo;
+
+        if (item.COTIZ_USD === null || item.COTIZ_USD === undefined) {
+            cuerpo = '<span class="cotiz-sin">—</span>';
+        } else {
+            cuerpo = '<span class="cotiz-valor">' + cotiz(item.COTIZ_USD) + '</span>'
+                + '<span class="cotiz-simbolo">'
+                + escapar(item.COTIZ_ORIGEN === 'OVERRIDE'
+                    ? 'a mano'
+                    : (item.COTIZ_SIMBOLO || item.COTIZ_MES || ''))
+                + '</span>';
+
+            if (item.COTIZ_ORIGEN === 'APROXIMADA') {
+                cuerpo += '<i class="fas fa-code-branch cotiz-marca" aria-hidden="true"></i>';
+            } else if (item.COTIZ_ORIGEN === 'OVERRIDE') {
+                cuerpo += '<i class="fas fa-pen cotiz-marca" aria-hidden="true"></i>';
+            }
+        }
+
+        return '<td class="' + clases.join(' ') + '"'
+            + ' data-id="' + item.ID + '"'
+            + ' data-cotiz="' + (item.COTIZ_USD_EDIT === null || item.COTIZ_USD_EDIT === undefined
+                ? '' : item.COTIZ_USD_EDIT) + '"'
+            + ' title="' + escapar(detalle
+                + (editable ? ' Hacé clic para corregirla sólo para este contenedor; '
+                    + 'dejala vacía para volver a la curva.' : ''))
+            + '"' + (editable && opts.alEditar
+                ? (' onclick="' + opts.alEditar + '(this)"') : '') + '>'
+            + cuerpo + '</td>';
+    }
+
+    /**
+     * El importe en pesos de la fila: sus dólares por la cotización que le tocó.
+     *
+     * EN BLANCO CUANDO NO SE PUDO VALUAR, con el motivo en el tooltip. Un cero
+     * diría que este contenedor no cuesta nada, que es una afirmación que nadie
+     * hizo.
+     *
+     * @param {Object} item Fila del payload
+     * @returns {string} HTML de la celda
+     */
+    function celdaImporteArs(item) {
+        if (item.IMPORTE_ARS === null || item.IMPORTE_ARS === undefined) {
+            return '<td class="currency cotiz-sin" title="'
+                + escapar(item.COTIZ_DETALLE || '') + '">—</td>';
+        }
+
+        return '<td class="currency importe-ars">' + pesos(item.IMPORTE_ARS) + '</td>';
+    }
+
+    /**
+     * De dónde sale el dólar con el que está valuada la tabla, para el pie.
+     *
+     * No es decoración: un importe en pesos que no se puede atar a una
+     * cotización identificada y fechada no se puede auditar contra nada. Es el
+     * mismo criterio con el que Dólares Cuenta Comitente muestra la fecha y la
+     * punta de su cotización.
+     *
+     * LA NOTA DE LA CORRECCIÓN MANUAL SÓLO SALE DONDE ESA CORRECCIÓN EXISTE:
+     * 'editable' viaja en el payload de Proveedores Exterior y no en el de
+     * Crono Nacionalización. Decir "la corrección manual está apagada: falta el
+     * script" en una pestaña donde no hay ninguna corrección que hacer mandaría
+     * a correr un script que allá no cambia nada.
+     *
+     * @param {string} idEl Id del elemento del pie
+     * @param {Object} c El bloque 'cotizacion' del payload
+     */
+    function origenCotizacion(idEl, c) {
+        var el = document.getElementById(idEl);
+
+        if (!el) {
+            return;
+        }
+
+        c = c || {};
+
+        if (!c.disponible) {
+            el.innerHTML = '<span class="text-danger">'
+                + '<i class="fas fa-triangle-exclamation me-1"></i>'
+                + 'Sin curva de dólar futuro: los importes no se pueden expresar en pesos.'
+                + '</span>';
+
+            return;
+        }
+
+        el.textContent = 'Valuado con dólar futuro ROFEX'
+            + (c.ultimo_mes ? ', curva hasta ' + c.ultimo_mes : '')
+            /* Sólo el día: 'actualizada' viene como 'Y-m-d H:i:s' y el
+               formateador de fechas espera una fecha pelada. */
+            + (c.actualizada
+                ? ' (actualizada el ' + fecha(String(c.actualizada).substring(0, 10)) + ')'
+                : '')
+            + (c.editable === false
+                ? '. La corrección manual está apagada: falta el script.'
+                : '.');
+    }
+
+    /* ================================================================
        EL BUSCADOR
 
        Client-side y sin ir al servidor, igual que el de Echeqs: esconde filas
@@ -675,6 +863,9 @@
         editar: editar,
         celdaPagado: celdaPagado,
         marcarPagado: marcarPagado,
+        celdaCotizacion: celdaCotizacion,
+        celdaImporteArs: celdaImporteArs,
+        origenCotizacion: origenCotizacion,
         textoBuscable: textoBuscable,
         sumarColumnas: sumarColumnas,
         filtrar: filtrar,

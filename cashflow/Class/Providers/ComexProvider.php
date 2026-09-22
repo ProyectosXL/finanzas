@@ -12,7 +12,9 @@ require_once __DIR__ . '/../DolarFuturo.php';
  * Sirve DOS codigos del registro, y cada instancia corre solo la consulta de la
  * suya:
  *   COMEX_PROV_EXT -> serie PAGOS, pagos a proveedores del exterior. En DOLARES.
- *   COMEX_NAC      -> serie NACIONALIZACION, gastos de nacionalizacion. En pesos.
+ *   COMEX_NAC      -> serie NACIONALIZACION, gastos de nacionalizacion. TAMBIEN
+ *                     EN DOLARES: esta linea decia "en pesos" hasta
+ *                     feature/comex-nac-usd y era falso. Ver nacionalizaciones().
  *
  * LA CONVERSION DE MONEDA YA NO VIVE ACA: VIVE EN Comex
  * -----------------------------------------------------
@@ -25,12 +27,16 @@ require_once __DIR__ . '/../DolarFuturo.php';
  * Mientras el criterio era un numero, daba lo mismo donde estuviera escrito.
  *
  * Ahora cada fila se valua con la CURVA DE DOLAR FUTURO ROFEX segun el mes de
- * SU fecha de pago, asi que ya no hay un multiplicador: hay una cotizacion por
- * fila. Y esa misma cotizacion es la que la pestana Proveedores Exterior
- * necesita mostrar. Con la cuenta en los dos lados, el tablero y la pestana
- * podrian valuar distinto el mismo contenedor; con la cuenta en el getter,
- * los dos leen el mismo IMPORTE_ARS. Ver el encabezado de Comex y el de
- * DolarFuturo.
+ * SU fecha efectiva, asi que ya no hay un multiplicador: hay una cotizacion por
+ * fila. Y esa misma cotizacion es la que la pestana necesita mostrar. Con la
+ * cuenta en los dos lados, el tablero y la pestana podrian valuar distinto el
+ * mismo contenedor; con la cuenta en el getter, los dos leen el mismo
+ * IMPORTE_ARS. Ver el encabezado de Comex y el de DolarFuturo.
+ *
+ * LA FECHA EFECTIVA NO ES LA MISMA EN LAS DOS. Proveedores Exterior valua por
+ * el mes de FECHA_PAGO_EFECTIVA y Crono Nacionalizacion por el de
+ * FECHA_NAC_EFECTIVA: es el mismo contenedor, y los dos egresos se mueven en
+ * momentos distintos, asi que les toca un punto distinto de la curva.
  *
  * EL PARAMETRO GLOBAL SE RETIRO, Y NO CONVIVE
  * -------------------------------------------
@@ -243,7 +249,32 @@ class ComexProvider extends CashflowProvider {
     }
 
     /**
-     * Gastos de nacionalizacion. Ya estan en pesos, no hay conversion.
+     * Gastos de nacionalizacion. ESTAN EN DOLARES, y se valuan fila por fila.
+     *
+     * ESTE DOCBLOCK DECIA LO CONTRARIO -"ya estan en pesos, no hay conversion"-
+     * Y ERA FALSO
+     * ---------------------------------------------------------------------
+     * IMPORTE_EST es SUM(IMPORTE) de RO_T_IMPORTACIONES_ESTIMACION_DETALLE con
+     * ID_CE entre 3 y 10, y esos ocho conceptos los calcula la pantalla de
+     * Comercio Exterior como porcentajes del CIF: derechos = CIF x param, tasa
+     * estadistica = CIF x param, y los cuatro impuestos sobre la base
+     * imponible, que es CIF + derechos + tasa. El CIF es FOB + flete + seguro,
+     * y el FOB es VALOR_FOB_DOLAR. La cadena entera arranca en dolares.
+     *
+     * Verificado contra la base el 21/09/2026, de las dos maneras:
+     *
+     *   - el cociente IMPORTE_EST / VALOR_FOB_DOLAR da entre 0,71 y 1,04 en los
+     *     12 contenedores con estimacion cargada. Es una fraccion del FOB en la
+     *     MISMA moneda; en pesos daria del orden de mil, que es la cotizacion.
+     *   - en el contenedor 733 (OC 0000100015881, FOB 77.408 USD) los conceptos
+     *     dan exactamente 20% y 3% del CIF y 21%, 20%, 6% y 4,5% de la base
+     *     imponible, con el CIF y la base construidos en dolares.
+     *
+     * O sea que el tablero venia ubicando DOLARES en columnas de pesos y
+     * sumandolos contra el resto del cashflow. Ahora Comex::valuar() los
+     * convierte con la curva ROFEX del mes de la fecha de NACIONALIZACION -no
+     * la de pago: son dos fechas distintas del mismo contenedor- y esta serie
+     * agrupa el importe en pesos, igual que la de los pagos al exterior.
      *
      * IMPORTE_EST viene de un LEFT JOIN sobre la estimacion, asi que puede ser
      * nulo cuando el contenedor todavia no tiene gastos estimados; esos casos
@@ -254,19 +285,72 @@ class ComexProvider extends CashflowProvider {
      * @return array Serie
      */
     private function nacionalizaciones($h, $comex) {
+        $dolar = $comex->dolarFuturo();
+
+        /* La curva es el criterio de valuacion entero, igual que en los pagos
+           al exterior: sin ella no hay ningun gasto que se pueda expresar en
+           pesos. La fila va en cero con el aviso que nombra la tabla. */
+        if (!$dolar->disponible()) {
+            $this->avisar('Nacionalizaciones: no se pudo leer la curva de dólar futuro ROFEX ('
+                . DolarFuturo::ORIGEN . '), así que los gastos de nacionalización van en cero. '
+                . 'Los importes en dólares están: lo que falta es a cuánto convertirlos. '
+                . ($dolar->error() === null ? '' : $dolar->error()));
+
+            $vacia = [
+                'dias' => [],
+                'meses' => [],
+                'moneda_origen' => 'USD',
+                'tipo_cambio' => null
+            ];
+
+            return [
+                'NACIONALIZACION' => $vacia,
+                'NACIONALIZACION_PAGADAS' => $vacia,
+                'NACIONALIZACION_TODO' => $vacia
+            ];
+        }
+
         $filas = $comex->getCronoNacionalizacion();
 
         /* Sobre IMPORTE_EJE, igual que los pagos al exterior: una
            nacionalizacion con la fecha ya vencida no suma. Ver
-           Comex::aporteAlEje(). */
+           Comex::aporteAlEje(). Y ese campo sale ahora de IMPORTE_ARS, o sea
+           del importe YA CONVERTIDO. */
         $serie = $h->agrupar($filas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_EJE');
 
-        $serie['moneda_origen'] = 'ARS';
+        $serie['moneda_origen'] = 'USD';
+
+        /* CON QUE COTIZACION SE CONVIRTIO: mismo criterio que pagosExterior().
+           El contrato de la serie tiene UN escalar y la valuacion es por fila,
+           asi que solo se informa cuando todas se valuaron con el mismo numero;
+           con varias va null y el tablero dibuja la marca de "valuado con la
+           curva". */
+        $usadas = [];
+
+        foreach ($filas as $f) {
+            if ($f['COTIZ_USD'] !== null) {
+                $usadas[(string) $f['COTIZ_USD']] = floatval($f['COTIZ_USD']);
+            }
+        }
+
+        $serie['tipo_cambio'] = (count($usadas) === 1) ? reset($usadas) : null;
+
+        /* Los mismos avisos que muestra la pestana, escritos una sola vez en
+           Comex::avisosValuacion(). El campo del importe en dolares y el nombre
+           de la fecha son los de ESTA pestana: con los de la otra, el aviso
+           diria "U$S 0,00" y nombraria la fecha de pago. */
+        foreach (Comex::avisosValuacion($filas, $dolar->ultimoMes(), 'IMPORTE_EST',
+                 'fecha de nacionalización') as $aviso) {
+            $this->avisar('Crono Nacionalización: ' . $aviso);
+        }
 
         /* Sin pasarle el eje: ninguna vencida entra en ninguna columna, asi que
-           no hay nada que repartir. Se informa IMPORTE_EST -lo que valen- y no
-           IMPORTE_EJE, que para estas filas es cero por definicion. */
-        foreach (Comex::avisosVencidos($filas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_EST',
+           no hay nada que repartir. Se informa IMPORTE_ARS -lo que valen EN
+           PESOS- y no IMPORTE_EJE, que para estas filas es cero por definicion.
+           Hasta feature/comex-nac-usd se informaba IMPORTE_EST, que desde que
+           se sabe que esta en dolares seria un numero en dolares con el signo
+           de pesos adelante. */
+        foreach (Comex::avisosVencidos($filas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_ARS',
                  'fecha de nacionalización') as $aviso) {
             $this->avisar('Nacionalizaciones: ' . $aviso);
         }
@@ -299,9 +383,9 @@ class ComexProvider extends CashflowProvider {
         return [
             'NACIONALIZACION' => $serie,
             'NACIONALIZACION_PAGADAS' => $this->conMoneda(
-                $h->agrupar($marcadas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_PROYECTABLE'), 'ARS'),
+                $h->agrupar($marcadas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_PROYECTABLE'), 'USD'),
             'NACIONALIZACION_TODO' => $this->conMoneda(
-                $h->agrupar($filas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_PROYECTABLE'), 'ARS')
+                $h->agrupar($filas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_PROYECTABLE'), 'USD')
         ];
     }
 

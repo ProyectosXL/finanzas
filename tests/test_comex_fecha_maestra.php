@@ -703,6 +703,143 @@ chequear('Crono Nacionalizacion sigue igual', true,
     strpos($htmlNac, 'data-exportar="tablaCronoNacionalizacion"') !== false);
 
 /* ================================================================
+   LA GRILLA DE NACIONALIZACION NO PUEDE VOLVER A UBICAR DOLARES EN EL EJE
+
+   IMPORTE_EST son los conceptos 3 a 10 de la estimacion y estan EN DOLARES:
+   salen de porcentajes del CIF, que arranca en VALOR_FOB_DOLAR. Hasta
+   feature/comex-nac-usd el eje se armaba sobre ese campo, asi que la fila del
+   tablero sumaba dolares contra el resto del cashflow en pesos.
+
+   SI ESTE CHEQUEO SE CAE, el tablero vuelve a informar unos 900 millones de
+   menos en esa fila -verificado contra la base el 21/09/2026- y no se rompe
+   nada: sigue dando un numero.
+   ================================================================ */
+seccion('el gasto de nacionalizacion se valua, y el eje va en pesos');
+
+chequear('la fila se valua con la fecha de nacionalizacion', true,
+    strpos($codigoComex, "self::valuar(\$row, \$curva, 'IMPORTE_EST', 'FECHA_NAC_EFECTIVA')")
+        !== false);
+
+/* La curva se lee UNA vez por listado y no una por fila: son 76 filas y
+   DolarFuturo::curva() es una consulta contra un servidor vinculado. */
+chequear('la curva se lee antes del while', true,
+    (bool) preg_match('/\$curva = \$this->dolarFuturo\(\)->curva\(\);\s*\n\s*while/',
+        $codigoComex));
+chequear('y una sola vez en cada getter', 2,
+    substr_count($codigoComex, '$curva = $this->dolarFuturo()->curva();'));
+
+/* LOS DOS CAMPOS DERIVADOS SALEN DEL IMPORTE EN PESOS, o sea del default. Si
+   volviera el nombre explicito, el eje volveria a ubicar dolares. */
+foreach (['importeProyectable', 'aporteAlEje'] as $fn) {
+    chequear($fn . ' ya no recibe IMPORTE_EST en el getter', false,
+        strpos($codigoComex, 'self::' . $fn . "(\$row, 'IMPORTE_EST')") !== false);
+}
+
+// La columna de la grilla SI lo sigue mostrando: es lo que vale el contenedor,
+// en la moneda en la que esta cargado.
+chequear('pero IMPORTE_EST se sigue trayendo', true,
+    strpos($codigoComex, 'C.IMPORTE_EST') !== false);
+
+seccion('la serie del tablero declara la moneda de origen');
+
+/* Las tres series son la misma plata, asi que informan la misma moneda: una
+   que dijera otra cosa haria que el tablero dibujara la marca de conversion en
+   unas filas si y en otras no, sobre los mismos contenedores. Y ninguna puede
+   seguir diciendo ARS, que era la afirmacion equivocada. */
+chequear('ninguna serie de Comex declara pesos', false,
+    strpos($provSrc, "'ARS'") !== false);
+/* Ocho: las seis series -tres por pestana- mas las dos series vacias del caso
+   "no se pudo leer la curva", que tambien tienen que declarar la moneda: si
+   dijeran pesos, un cero por falta de curva se leeria como un cero real. */
+chequear('todas las series declaran USD', 8, substr_count($provSrc, "'USD'"));
+
+/* Lo vencido se informa EN PESOS. Con IMPORTE_EST, el aviso daria un numero en
+   dolares con el signo de pesos adelante. */
+chequear('el aviso de vencidos de nacionalizacion informa pesos', true,
+    strpos($provSrc, "Comex::avisosVencidos(\$filas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_ARS'")
+        !== false);
+chequear('y el de la pestana tambien', true,
+    strpos($fuenteCtrl, "Comex::avisosVencidos(\$filasNac, 'FECHA_NAC_EFECTIVA', 'IMPORTE_ARS'")
+        !== false);
+
+/* Y sin curva la serie va en cero con aviso, igual que los pagos al exterior:
+   un proveedor no puede tumbar el tablero, y un cero sin explicacion no se
+   puede interpretar. */
+chequear('sin curva las dos series avisan y van en cero', 2,
+    substr_count($provSrc, '!$dolar->disponible()'));
+
+seccion('la cotizacion no se puede editar en Crono Nacionalizacion');
+
+/* ES UNA DECISION, no un olvido: COTIZ_USD_EDIT tiene UNA fila por contenedor
+   y las dos pestanas valuan el mismo contenedor en dos fechas que caen en
+   meses distintos. Un override cargado pensando en el pago no puede aplicarse
+   a la nacionalizacion, y descartaCotizacion() esta atada al cambio de mes DEL
+   PAGO: no sabe nada de la otra fecha. */
+preg_match('/function getCronoNacionalizacion.*?\n    \}/s', $codigoComex, $cuerpoNac);
+
+chequear('la consulta de nacionalizacion no trae el override', false,
+    strpos($cuerpoNac[0], 'COTIZ_USD_EDIT') !== false);
+chequear('y la pestana no arma su propio guardado de cotizacion', false,
+    strpos($jsNac, 'action=updateCotizacion') !== false);
+
+seccion('la celda del dolar no se reimplementa en la pestana');
+
+/* Es la misma regla con la que ya viven la celda de fecha y el buscador: son
+   la misma columna con el mismo tooltip y las mismas marcas en las dos
+   grillas. Vivian solo en Proveedores Exterior porque era la unica que valuaba
+   en dolares; ahora valuan las dos. */
+chequear('el compartido expone la celda del dolar', true,
+    strpos($compartido, 'celdaCotizacion: celdaCotizacion') !== false);
+chequear('y la del importe en pesos', true,
+    strpos($compartido, 'celdaImporteArs: celdaImporteArs') !== false);
+chequear('y el origen de la curva para el pie', true,
+    strpos($compartido, 'origenCotizacion: origenCotizacion') !== false);
+
+foreach (['Proveedores Exterior' => $jsExt, 'Crono Nacionalizacion' => $jsNac] as $n => $js) {
+    chequear($n . ' usa la celda compartida del dolar', true,
+        strpos($js, 'ComexFechas.celdaCotizacion(') !== false);
+    chequear($n . ' usa la del importe en pesos', true,
+        strpos($js, 'ComexFechas.celdaImporteArs(') !== false);
+
+    // Ninguna se guarda su propia copia, que es como divergieron el buscador y
+    // la celda de fecha antes de que se compartieran.
+    chequear($n . ' no reimplementa celdaCotizacion', false,
+        (bool) preg_match('/function\s+celdaCotizacion/', $js));
+    chequear($n . ' no reimplementa celdaImporteArs', false,
+        (bool) preg_match('/function\s+celdaImporteArs/', $js));
+}
+
+/* LO EDITABLE SIGUE SIENDO DE UNA SOLA PESTANA: el compartido dibuja la parte
+   de solo lectura y Proveedores Exterior le agrega encima el clic. */
+chequear('Proveedores Exterior le pasa el editor', true,
+    strpos($jsExt, "alEditar: 'editarCotizacion'") !== false);
+chequear('y Crono Nacionalizacion no le pasa nada', true,
+    strpos($jsNac, 'ComexFechas.celdaCotizacion(item)') !== false);
+
+seccion('el pie y el export suman el importe en PESOS');
+
+/* La columna Total del pie sumaba IMPORTE_EST, que son dolares. Sumar dolares
+   abajo de una columna de pesos da un total que no es de ninguna moneda. */
+chequear('Crono Nacionalizacion suma IMPORTE_ARS', true,
+    strpos($jsNac, 'sumaImporteArs(visibles)') !== false);
+chequear('y respeta el filtro, igual que la otra', true,
+    (bool) preg_match('/function sumaImporteArs[^}]*IMPORTE_ARS/s', $jsNac));
+
+/* Y las dos columnas nuevas estan en el encabezado: sin ellas, las celdas
+   quedarian corridas contra los titulos. */
+chequear('el thead declara el importe en dolares', true,
+    strpos($htmlNac, 'Importe Est. (USD)') !== false);
+chequear('el dolar aplicado', true, strpos($htmlNac, 'Dólar aplicado') !== false);
+chequear('y el importe en pesos', true, strpos($htmlNac, 'Importe ($)') !== false);
+
+/* LAS COLUMNAS FIJAS SE GUARDAN POR INDICE, asi que dos columnas nuevas corren
+   todo lo que esta a la derecha. columnas-fijas.js solo valida que el indice
+   siga existiendo -no puede saber que la 6 dejo de ser ETD-, asi que la clave
+   de localStorage cambia y la preferencia vieja se descarta una vez. */
+chequear('la clave de columnas fijas cambio con el layout', true,
+    strpos($jsNac, "clave: 'crono_nacionalizacion_v2'") !== false);
+
+/* ================================================================
    EL INTERRUPTOR DE VENCIDAS
 
    Va SOLO en Proveedores Exterior, que es donde se pidió: la fecha estimada de

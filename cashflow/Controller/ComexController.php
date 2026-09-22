@@ -291,13 +291,20 @@ try {
             break;
 
         case 'getCronoNacionalizacion':
-            // IMPORTE_EST viene de un LEFT JOIN sobre la estimación, así que
-            // puede ser nulo: esos casos suman cero y no distorsionan.
+            /* IMPORTE_EST viene de un LEFT JOIN sobre la estimación, así que
+               puede ser nulo: esos casos suman cero y no distorsionan.
+
+               Y ESTÁ EN DÓLARES: la fila llega valuada desde el getter, con la
+               curva ROFEX del mes de su fecha de nacionalización. Ver
+               Class/Comex.php y Class/Providers/ComexProvider.php, que es donde
+               está el porqué y cómo se verificó. */
             $filasNac = $comex->getCronoNacionalizacion();
 
             /* Sobre IMPORTE_EJE, igual que Proveedores Exterior: una
-               nacionalización con la fecha vencida no suma. La columna
-               "Importe Est." de la grilla sigue mostrando IMPORTE_EST. */
+               nacionalización con la fecha vencida no suma. Y ese campo sale
+               ahora de IMPORTE_ARS —el importe YA CONVERTIDO—, que es el cambio
+               que hace que el eje deje de ubicar dólares en columnas de pesos.
+               La grilla sigue mostrando IMPORTE_EST en su columna, en dólares. */
             $payload = EjeVista::armar(
                 ejeDelModulo(),
                 $filasNac,
@@ -306,20 +313,43 @@ try {
             );
 
             /* Mismo reparto que en Proveedores Exterior: primero lo que falta
-               para poder editar, después lo que no entra en ninguna columna, y
-               al final lo que el eje descartó. */
+               para poder editar, después lo que no se pudo valuar, después lo
+               que no entra en ninguna columna, y al final lo que el eje
+               descartó. */
             $faltantes = array_values(array_filter(
                 [$comex->avisoSinHistorial(), $comex->avisoSinPagado()]));
 
             $payload['warnings'] = array_merge(
                 $faltantes,
+                /* Los mismos avisos que el tablero, escritos una sola vez. El
+                   campo del importe en dólares y el nombre de la fecha son los
+                   de esta pestaña. */
+                Comex::avisosValuacion($filasNac, $comex->dolarFuturo()->ultimoMes(),
+                    'IMPORTE_EST', 'fecha de nacionalización'),
                 /* Sin el eje: ninguna vencida entra en ninguna columna, así que
                    no hay nada que repartir. El importe que se informa es
-                   IMPORTE_EST, que es lo que valen. */
-                Comex::avisosVencidos($filasNac, 'FECHA_NAC_EFECTIVA', 'IMPORTE_EST',
+                   IMPORTE_ARS —lo que valen en pesos—; hasta
+                   feature/comex-nac-usd se informaba IMPORTE_EST, que es un
+                   número en dólares y salía con el signo de pesos adelante. */
+                Comex::avisosVencidos($filasNac, 'FECHA_NAC_EFECTIVA', 'IMPORTE_ARS',
                     'fecha de nacionalización'),
                 $payload['warnings']
             );
+
+            /* DE DÓNDE SALE EL DÓLAR, igual que en Proveedores Exterior: un
+               importe en pesos que no se puede atar a una cotización
+               identificada no se puede auditar contra nada.
+
+               SIN 'editable'. Acá la cotización NO se corrige a mano, y no es
+               un olvido: COTIZ_USD_EDIT es una fila por contenedor y las dos
+               pestañas valúan el mismo contenedor en dos fechas —y por lo tanto
+               en dos meses— distintos. Ver Comex::valuar(). */
+            $payload['cotizacion'] = [
+                'origen' => DolarFuturo::ORIGEN,
+                'disponible' => $comex->dolarFuturo()->disponible(),
+                'ultimo_mes' => $comex->dolarFuturo()->ultimoMes(),
+                'actualizada' => $comex->dolarFuturo()->actualizada()
+            ];
 
             $payload['fechas_editables'] = $comex->tieneHistorial();
 

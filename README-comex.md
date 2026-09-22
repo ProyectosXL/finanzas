@@ -2,7 +2,7 @@
 
 Pestañas **Comercio Exterior → Proveedores Exterior** y **Crono Nacionalización**, y las filas *Proveedores del Exterior* y *Nacionalizaciones* del tablero de Cashflow.
 
-Ramas: `feature/comex-fecha-maestra` · `feature/comex-pagado`
+Ramas: `feature/comex-fecha-maestra` · `feature/comex-pagado` · `feature/comex-nac-usd`
 
 ---
 
@@ -20,7 +20,9 @@ RO_T_IMPORTACIONES_ENCABEZADO  (maestro de Comercio Exterior)
         │   Proveedores Exterior  →  ComexProvider (PAGOS / PAGOS_PAGADOS / PAGOS_TODO)
         │
         └─ FECHA_DESP_ADU ──── cuándo se nacionaliza
-                │  + RO_T_IMPORTACIONES_ESTIMACION_DETALLE (conceptos 3 a 10)
+                │  + RO_T_IMPORTACIONES_ESTIMACION_DETALLE (conceptos 3 a 10,
+                │    que TAMBIÉN están en dólares: ver la sección 6)
+                │  × curva de dólar futuro ROFEX del mes de esa fecha
                 ▼
             Crono Nacionalización  →  ComexProvider (NACIONALIZACION / _PAGADAS / _TODO)
 
@@ -156,6 +158,8 @@ Y de los escondidos, **10 tenían la fecha de pago todavía por delante** y **18
 
 La segunda es la que más dice. La fila de nacionalizaciones **daba cero** y el proveedor avisaba que *"ninguno tiene gastos de nacionalización estimados cargados"*. No era cierto en general: era cierto **de los 34 que el filtro dejaba pasar**. Los gastos estimados se cargan cuando el contenedor ya embarcó, así que el filtro escondía exactamente los contenedores que tienen el dato. El aviso describía el efecto del filtro y lo atribuía a la carga.
 
+> **Ese `$ 561.423,77` eran dólares.** Las cifras de nacionalización de esta sección y de la siguiente son las que el tablero informaba entonces, y hoy se sabe que estaban en la moneda equivocada: se corrigió en `feature/comex-nac-usd` y está contado en la sección 6. Se dejan como estaban porque describen lo que movió **este** cambio; lo que cambia de moneda es otra cosa y se mide aparte.
+
 ### Qué hace el tablero con un importe cuya fecha efectiva ya venció
 
 **Al cashflow entra lo que se paga de hoy en adelante. Un pago con la fecha ya vencida no suma.**
@@ -175,7 +179,7 @@ O el pago ya salió —y entonces no es proyección— o no salió y hay que cor
 
 ### La misma regla en las dos pestañas
 
-**Crono Nacionalización la aplica igual**: una nacionalización con la fecha vencida tampoco suma. Es la misma función — `aporteAlEje()` recibe el campo de importe de cada pestaña (`IMPORTE_ARS` en una, `IMPORTE_EST` en la otra) en vez de tenerlo escrito adentro, que habría obligado a copiarla.
+**Crono Nacionalización la aplica igual**: una nacionalización con la fecha vencida tampoco suma. Es la misma función — `aporteAlEje()` recibe el campo de importe de cada pestaña en vez de tenerlo escrito adentro, que habría obligado a copiarla. (Entonces eran dos campos distintos, `IMPORTE_ARS` en una e `IMPORTE_EST` en la otra; desde la sección 6 las dos pasan `IMPORTE_ARS`, que es el default, y el argumento queda por lo que hace posible.)
 
 | Fila del tablero | Sin la regla | Con la regla |
 | --- | --- | --- |
@@ -311,7 +315,7 @@ Para una fila no marcada los dos campos valen lo mismo y aporta a `PAGOS`; para 
 | | Antes | Después | Diferencia | Importe de la fila |
 | --- | --- | --- | --- | --- |
 | `PAGOS` (contenedor 690) | $ 4.632.182.810 | $ 4.546.462.890 | **$ 85.719.920** | **$ 85.719.920** |
-| `NACIONALIZACION` (contenedor 635) | $ 506.185,65 | $ 448.091,37 | **$ 58.094,28** | **$ 58.094,28** |
+| `NACIONALIZACION` (contenedor 635) | U$S 506.185,65 | U$S 448.091,37 | **U$S 58.094,28** | **U$S 58.094,28** |
 
 En los dos casos el universo (`..._TODO`) **no se movió**, el invariante cerró antes y después, y destildar devolvió el total al original.
 
@@ -355,10 +359,121 @@ Proveedores Exterior tenía **una columna de total que el buscador no filtraba**
 
 ---
 
+## 6. Los gastos de nacionalización estaban en dólares
+
+Rama: `feature/comex-nac-usd`
+
+### Lo que decía el código, y por qué era falso
+
+`ComexProvider::nacionalizaciones()` afirmaba en su docblock:
+
+> *Gastos de nacionalizacion. Ya estan en pesos, no hay conversion.*
+
+No era una mejora pendiente: **era un error de moneda**. `IMPORTE_EST` es `SUM(IMPORTE)` sobre `RO_T_IMPORTACIONES_ESTIMACION_DETALLE` con `ID_CE BETWEEN 3 AND 10`, y esos ocho conceptos los calcula la pantalla de Comercio Exterior como porcentajes del CIF:
+
+```
+administracion/comercioExterior/js/editar-estimacion.js
+    fob  = VALOR_FOB_DOLAR          ← la cadena entera arranca acá
+    cif  = fob + flete + seguro
+    derechos        = cif * derechosParam          (ID_CE 3)
+    tasaEstadistica = cif * tasaParam              (ID_CE 4)
+    baseImponible   = cif + derechos + tasaEstadistica
+    ivaGeneral      = baseImponible * ivaParam     (ID_CE 5)  … y así hasta ID_CE 10
+```
+
+**El tablero venía ubicando dólares en columnas de pesos**, y sumándolos contra el resto del cashflow.
+
+### Cómo se verificó contra la base
+
+Antes de tocar nada, y de dos maneras independientes. Al **21/09/2026**, sólo lectura:
+
+**1. El orden de magnitud.** Si `IMPORTE_EST` estuviera en pesos, su cociente contra el FOB en dólares tendría que dar del orden de mil —la cotización—. Da una fracción:
+
+| | Contenedores | Cociente `IMPORTE_EST / VALOR_FOB_DOLAR` |
+| --- | --- | --- |
+| Con estimación cargada | 12 | **mínimo 0,71 · promedio 0,87 · máximo 1,04** |
+
+| ID | Contenedor | OC | `VALOR_FOB_DOLAR` | `IMPORTE_EST` | Cociente |
+| --- | --- | --- | ---: | ---: | ---: |
+| 733 | INV04-27 | 0000100015881 | 77.408,00 | 71.200,76 | 0,92 |
+| 691 | VER01-26 | 0000100014945 | 24.750,00 | 25.710,50 | 1,04 |
+| 682 | VER01-26 | 0000100014861 | 185.937,00 | 152.438,87 | 0,82 |
+| 647 | VER11-26 | 0000100014378 | 60.718,00 | 43.304,36 | 0,71 |
+
+**2. La cuenta, concepto por concepto.** En el contenedor 733 —FOB 77.408 USD, flete 5.000, seguro 41,20— el detalle cierra exacto sobre un CIF construido en dólares:
+
+| | | |
+| --- | ---: | --- |
+| CIF = FOB + flete + seguro | 82.449,20 | |
+| Derechos (`ID_CE` 3) | 16.489,84 | **20,0000 %** del CIF |
+| Tasa estadística (4) | 2.473,48 | **3,0000 %** del CIF |
+| Base imponible = CIF + derechos + tasa | 101.412,52 | |
+| IVA general (5) | 21.296,63 | **21,0000 %** de la base |
+| IVA adicional (6) | 20.282,50 | **20,0000 %** de la base |
+| IIGG (7) | 6.084,75 | **6,0000 %** de la base |
+| IIBB (8) | 4.563,56 | **4,5000 %** de la base |
+| SIM (9) + Antidumping (10) | 10,00 | importes fijos |
+| **Suma 3 a 10 = `IMPORTE_EST`** | **71.200,76** | |
+
+Porcentajes exactos sobre una base armada en dólares. No hay lugar donde se haya convertido nada.
+
+### Qué cambió
+
+Crono Nacionalización funciona ahora **igual que Proveedores Exterior**:
+
+| | |
+| --- | --- |
+| **Se valúa fila por fila** | Con la curva de dólar futuro ROFEX del mes de su **fecha de nacionalización** —no la de pago— en `Comex::valuar()`, la misma función de la otra pestaña |
+| **Qué se ubica en el eje** | `IMPORTE_ARS`, o sea el importe **en pesos**. `IMPORTE_PROYECTABLE` e `IMPORTE_EJE` salen de ahí |
+| **Qué muestra la grilla** | Tres columnas donde había una: *Importe Est. (USD)*, *Dólar aplicado* e *Importe ($)* |
+| **La serie del tablero** | `moneda_origen` pasa de `ARS` a `USD` en las tres, y `tipo_cambio` informa el escalar sólo si todas las filas se valuaron igual. Lo mismo en `CashflowRegistry`, que también decía `ARS` |
+
+**La fecha que manda es la de nacionalización, y eso no es un detalle.** Es el mismo contenedor que Proveedores Exterior, pero los dos egresos se mueven en momentos distintos, así que les toca un punto distinto de la curva. Si la nacionalización mirara la fecha de pago, el gasto quedaría valuado con el dólar de un mes en el que no se mueve.
+
+`Comex::valuar()` recibe ahora el campo del importe y el de la fecha, con los de Proveedores Exterior por defecto, así que su llamada no cambió. `Comex::avisosValuacion()` recibió el mismo tratamiento por un motivo concreto: con los campos escritos adentro, el aviso de esta pestaña habría dicho *"U$S 0,00"* —sumando `VALOR_FOB_DOLAR`, que acá no existe— y habría nombrado la fecha de pago, que no es la que falta.
+
+### Cuánto se movió el tablero
+
+Verificado contra la base el **21/09/2026**, sobre las mismas 76 filas:
+
+| Fila *Nacionalizaciones*, dentro del horizonte | |
+| --- | ---: |
+| Antes (dólares puestos en columnas de pesos) | 577.386,41 |
+| **Ahora** (pesos) | **$ 906.015.190,46** |
+
+El universo en dólares es `U$S 699.828,59` y su valuación completa `$ 1.092.094.189,02`; la diferencia contra los 906 millones son las **24 vencidas**, que no suman en ninguna columna. El invariante `NACIONALIZACIÓN + NACIONALIZACIÓN_PAGADAS = NACIONALIZACIÓN_TODO` **cierra columna por columna**, ahora en pesos.
+
+Dos avisos cambiaron de número por el mismo motivo:
+
+- el de vencidos ahora informa **$ 186.078.998,56** en vez de un importe en dólares con el signo de pesos adelante;
+- aparece el de **8 contenedores valuados con el mes más cercano**, todos hacia atrás: son nacionalizaciones vencidas anteriores al inicio de la curva. Es el mismo caso que `DolarFuturo::mesMasCercano()` ya cubría en la otra pestaña.
+
+### La cotización acá no se edita, y es una decisión
+
+En Proveedores Exterior existe el override por contenedor —`COTIZ_USD_EDIT`, en `RO_T_CASHFLOW_COMEX_CRONO_NAC`—. **No se extendió a esta pestaña**, y la celda se muestra de sólo lectura con el mismo tooltip que explica de qué mes salió la cotización y si se aproximó.
+
+Esa tabla tiene **una fila por contenedor**, y las dos pestañas valúan **el mismo contenedor en dos fechas distintas**, que caen en meses distintos y por lo tanto en puntos distintos de la curva. Compartir el override sería aplicarle a la nacionalización una corrección que alguien cargó pensando en el pago. Y `descartaCotizacion()` está atada al cambio de mes **del pago**: no sabe nada de la otra fecha. Está anotado en *Pendientes conocidos* lo que haría falta para tenerlo.
+
+### Lo que no se copió
+
+`celdaCotizacion()` e `importeArs` vivían en `Comex-Proveedores_exterior.js` porque ésa era la única pestaña que valuaba en dólares. Ahora valúan las dos, así que **la parte de sólo lectura de las dos celdas se mudó a `Js/Comex-fechas.js`** —el archivo compartido— y Proveedores Exterior le agrega encima su comportamiento editable pasándole `editable` y `alEditar`. Lo mismo con el texto del pie que dice de dónde sale el dólar.
+
+Es la misma regla que ya cubren las pruebas de cableado para el buscador y la celda de fecha, y ahora también cubren esto.
+
+### Las columnas fijas se corrieron
+
+`Js/columnas-fijas.js` guarda la elección **por índice** en `localStorage`, y sólo valida que el índice siga existiendo: no tiene forma de saber que la columna 6 dejó de ser *ETD* y ahora es *Dólar aplicado*. Con dos columnas nuevas, quien tuviera fijada una columna a la derecha del importe la habría visto correrse dos lugares sin nada que lo explicara.
+
+Por eso la clave de esta pestaña pasa a ser `crono_nacionalizacion_v2`: la preferencia vieja se descarta una vez y vuelve al default (*Proveedor* y *Contenedor*), que es lo único que no puede mentir. El default no cambió: son los índices 1 y 2, que siguen siendo esas dos columnas.
+
+---
+
 ## Lo que no cambió
 
-- **La valuación con dólar futuro ROFEX**, fila por fila, según el mes de la fecha efectiva de pago. Vive en `Comex::valuar()` y `DolarFuturo::resolver()`, y la leen la pestaña y el tablero: un solo `IMPORTE_ARS`. Ver el encabezado de `Class/DolarFuturo.php`.
-- **El override de cotización por contenedor** (`COTIZ_USD_EDIT`), y que **se descarta si el pago cambia de mes**. Lo único que cambió es de dónde sale la fecha anterior para compararla: antes de la tabla del cashflow, ahora del maestro. `Comex::descartaCotizacion()` no se tocó.
+- **La valuación con dólar futuro ROFEX**, fila por fila, según el mes de la fecha efectiva. Vive en `Comex::valuar()` y `DolarFuturo::resolver()`, y la leen la pestaña y el tablero: un solo `IMPORTE_ARS`. Ver el encabezado de `Class/DolarFuturo.php`.
+
+  Lo que **sí** cambió es **quiénes la usan**: hasta `feature/comex-nac-usd` era sólo Proveedores Exterior, porque se creía que los gastos de nacionalización estaban en pesos. Ahora valúan las dos pestañas, cada una por su propia fecha efectiva. Ver la sección 6.
+- **El override de cotización por contenedor** (`COTIZ_USD_EDIT`), y que **se descarta si el pago cambia de mes**. Lo único que cambió es de dónde sale la fecha anterior para compararla: antes de la tabla del cashflow, ahora del maestro. `Comex::descartaCotizacion()` no se tocó, y **sigue siendo de Proveedores Exterior solamente** —el motivo, que ya no es el que decía su docblock, está en la sección 6—.
 - **Las tres vistas, las columnas fijas y el orden por encabezado.** Ver `README-cashflow.md`.
 
 > **Un efecto lateral de ver los vencidos**: ahora hay contenedores cuya fecha de pago cae **antes** del inicio de la curva de futuros, así que se valúan aproximando con el primer mes que la curva tiene y quedan marcados. Pasaron de 0 a 16 contenedores aproximados. El aviso y la marca ya existían y no hubo que tocar nada: es exactamente el caso que `DolarFuturo::mesMasCercano()` ya cubría, incluido el tramo hacia atrás que hasta ahora no se usaba.
@@ -371,7 +486,7 @@ Proveedores Exterior tenía **una columna de total que el buscador no filtraba**
 php tests/run.php comex
 ```
 
-- `tests/test_comex_dolar_futuro.php` — la valuación: qué cotización le toca a cada fila, el mes fuera de curva, el override y cuándo se descarta. Sin base.
+- `tests/test_comex_dolar_futuro.php` — la valuación **de las dos pestañas**: qué cotización le toca a cada fila, el mes fuera de curva, el override y cuándo se descarta. Sin base.
 - `tests/test_comex_fecha_maestra.php` — lo de esta rama.
 
 De lo nuevo, lo que se fija:
@@ -381,6 +496,8 @@ De lo nuevo, lo que se fija:
 - **Que el buscador y la celda no se copien**: que las dos pestañas deleguen en `Comex-fechas.js`, que ninguna reimplemente `sumarColumnas()` ni arme su propio `fetch`, y que las dos carguen el archivo compartido **antes** que el suyo.
 - **El tilde de pagado**: que lo marcado no aporte al eje pero **siga siendo proyectable** —que es lo que hace cerrar el invariante—, y que `PAGOS + PAGOS_PAGADOS = PAGOS_TODO` se cumpla en los **cuatro casos posibles** (nada / pagada / vencida / vencida y pagada). El corte de filas marcadas se prueba **sin base**, con una lista armada a mano, que es el punto: se puede verificar aunque no haya nada marcado en la base. Y que el registro declare las tres series con su `componentes`, que es lo que impide activar el universo y una parte a la vez.
 - **El script**: que cree la tabla con las columnas que el código espera, que el índice único esté filtrado por `VIGENTE`, que no pise el maestro en conflicto y que sea reejecutable.
+- **La valuación de Crono Nacionalización**: qué cotización le toca según la **fecha de nacionalización**, que el mismo contenedor se valúe distinto en cada pestaña porque sus dos fechas caen en meses distintos, el mes fuera de curva hacia adelante y hacia atrás, y que sin fecha el importe quede en `null` y no en cero. Y que **`valuar()` con los parámetros por defecto siga dando exactamente lo de hoy** para Proveedores Exterior: es la prueba que evita la regresión silenciosa —con los defaults invertidos, esa pestaña valuaría por un campo que no tiene y todos sus importes irían a cero sin que nada falle—.
+- **Que la grilla no vuelva a ubicar `IMPORTE_EST` en el eje**, que la curva se lea una vez por listado y no una por fila, que ninguna serie de Comex declare pesos, que la celda de cotización no se reimplemente en ninguna de las dos pestañas y que la clave de columnas fijas haya cambiado con el layout.
 - **Contra la base**, sólo lectura: que las dos consultas traigan el mismo padrón, que haya contenedores ya embarcados en la grilla, que el flag `VENCIDA` coincida con la regla pura fila por fila, que la fecha efectiva **sea** la del maestro y que el listado salga ordenado con los nulos al final.
 
 > **Las pruebas de cableado leen el código sin sus comentarios.** Estos archivos explican en prosa lo que dejaron de hacer —*"antes era `COALESCE(FECHA_PAGO_EDIT, ...)`"*— y esas notas son justamente lo que este módulo pide que se escriba. Buscar el patrón sobre el archivo entero daría positivo en la nota que dice que el patrón ya no está, y la única forma de pasar la prueba sería borrar la explicación.
@@ -396,8 +513,11 @@ sql/cashflow_comex_pagado.sql          Que pagos ya se hicieron, con su historia
 cashflow/Class/Comex.php               Las dos consultas, el guardado y las reglas puras
 cashflow/Class/DolarFuturo.php         La curva ROFEX y que cotizacion le toca a cada fila
 cashflow/Class/Providers/ComexProvider.php   Las dos series del tablero
+cashflow/Class/CashflowRegistry.php          La moneda y las series de las dos filas
 cashflow/Controller/ComexController.php      Listados, edicion de fechas y de cotizacion
-cashflow/Js/Comex-fechas.js            La celda editable y el buscador, de las dos pestanas
+cashflow/Js/Comex-fechas.js            Lo compartido por las dos pestanas: la celda de fecha
+                                       editable, el tilde, la celda del dolar, el importe en
+                                       pesos y el buscador
 cashflow/Js/Comex-Proveedores_exterior.js
 cashflow/Js/Comex-Crono_nacionalizacion.js
 cashflow/Css/Comex-Proveedores_exterior.css
@@ -430,13 +550,14 @@ habían movido desde acá. Si esa tabla no existe, saltea el backfill con un
 - **Sin login: el rastro se graba con `USUARIO = NULL`**, y la pestaña dice *"la movió desde el cashflow"* sin nombre. La costura ya está puesta: `guardarFecha()` recibe `$usuario` y el controller lo pasa. Es el mismo pendiente que el resto del módulo.
 - **El historial se guarda pero todavía no se muestra entero.** La celda muestra el rastro **vigente** en su tooltip; `getHistorialFecha` devuelve la lista completa con las no vigentes y no hay pantalla que la pida. Es el mismo lugar en el que estuvo la exclusión de echeqs antes de su diálogo.
 - **Dos ediciones huérfanas** en `RO_T_CASHFLOW_COMEX_CRONO_NAC` (`ID_MG` 558 y 560): apuntan a contenedores que ya no están en el maestro. No se migraron y el script las lista. No molestan a nadie —no aparecen en ningún join— pero alguien de Comercio Exterior tendría que decir si esos contenedores se dieron de baja a propósito.
+- **La cotización de Crono Nacionalización no se puede corregir a mano.** Es una decisión y está explicada en la sección 6: el override es por contenedor y las dos pestañas lo mirarían en dos meses distintos. Tenerlo significaría **una columna más** en `RO_T_CASHFLOW_COMEX_CRONO_NAC` —la de la nacionalización, al lado de `COTIZ_USD_EDIT`— y **su propia regla de descarte**, atada al cambio de mes de la fecha de nacionalización y no al del pago. Nadie lo pidió todavía.
 - **Los gastos de nacionalización siguen saliendo de `RO_T_IMPORTACIONES_ESTIMACION_DETALLE` con los conceptos 3 a 10 escritos en duro** en la consulta. Es anterior a este trabajo y nadie documentó de dónde sale ese rango.
 
   **El rango sí coincide con el de la pantalla de Comercio Exterior**, y desde `feature/fecha-pago-manual`. Hasta esa rama no: su *Total nacionalización* sumaba los conceptos **2 a 10** —`calcularTodosLosConceptos()` arrancaba por `seguro`— así que los dos sistemas informaban números distintos para el mismo contenedor, con el **Seguro** (`ID_CE = 2`) como única diferencia. En la OC `0000100015881`: 71.241,96 en la pantalla contra 71.200,76 acá, con el seguro en 41,20.
 
   Se corrigió del lado de la pantalla, no de acá, porque **el seguro se paga antes de nacionalizar** —junto con el flete, para poner la mercadería en el puerto de destino— y ya está contado dentro del CIF, que es la base sobre la que se calculan los impuestos que sí son de nacionalización. Sumarlo contaba dos veces el mismo concepto en dos roles distintos. La rama de Uruguay de esa misma función ya lo excluía, así que esta consulta era uno de los dos lugares que ya tenían razón.
 
-- **Flete y Seguro no los proyecta ninguna pestaña.** Proveedores Exterior cubre el pago al proveedor por `VALOR_FOB_DOLAR` y Crono Nacionalización los conceptos 3 a 10; el flete (`ID_CE = 1`) y el seguro (`ID_CE = 2`) no entran en ninguna de las dos. Al 21/09/2026 son **208.560,00 y 5.353,05** sobre 60 contenedores. El seguro es despreciable, el flete no. Es anterior a este trabajo y nadie lo documentó; hace falta que alguien de Comercio Exterior diga si esos pagos salen por otro circuito antes de sumarlos al tablero.
+- **Flete y Seguro no los proyecta ninguna pestaña.** Proveedores Exterior cubre el pago al proveedor por `VALOR_FOB_DOLAR` y Crono Nacionalización los conceptos 3 a 10; el flete (`ID_CE = 1`) y el seguro (`ID_CE = 2`) no entran en ninguna de las dos. Al 21/09/2026 son **U$S 208.560,00 y U$S 5.353,05** sobre 60 contenedores —en dólares, como todo lo que sale de esa estimación; ver la sección 6—. El seguro es despreciable, el flete no. Es anterior a este trabajo y nadie lo documentó; hace falta que alguien de Comercio Exterior diga si esos pagos salen por otro circuito antes de sumarlos al tablero.
 - **No hay BIT equivalente para la fecha de nacionalización.** Quedó fuera de alcance a propósito: el problema que el BIT resuelve es específico de `FECHA_EST_PAGO`, que es la única fecha que el JS de Comercio Exterior vuelve a calcular sobre datos ya guardados. La de nacionalización ya queda protegida ahí por su propio flag al cargar.
 - **El cálculo de +5 días sigue viviendo en el JS de Comercio Exterior**, duplicado en `Encabezado::DIAS_EMB_EST_PAGO` para que el endpoint de *volver a auto* pueda devolver la fecha resuelta. Moverlo al backend es lo que cerraría la duplicación y, de paso, haría deducible el BIT desde `RO_T_IMPORTACIONES_FECHAS_HIST` — hoy no lo es, porque el recálculo y la edición manual llegan por el mismo POST y dejan un rastro idéntico.
 - **Las dos pestañas siguen usando `alert()`** en vez de `Js/notificaciones.js`. Está en la lista de `README-cashflow.md`; cambiarlo no es parte de esta etapa y mezclarlo habría metido acá un archivo que no tiene nada que ver.

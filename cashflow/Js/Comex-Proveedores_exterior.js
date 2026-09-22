@@ -249,36 +249,14 @@
     /**
      * De dónde sale el dólar con el que está valuada la tabla.
      *
-     * Va en el pie junto al período, y no es decoración: un importe en pesos
-     * que no se puede atar a una cotización identificada y fechada no se puede
-     * auditar contra nada. Es el mismo criterio con el que Dólares Cuenta
-     * Comitente muestra la fecha y la punta de su cotización.
+     * El texto vive en Js/Comex-fechas.js desde que Crono Nacionalización
+     * también se valúa con la curva: es la misma frase sobre el mismo origen, y
+     * dos copias se desincronizan en la primera corrección. Acá queda el id del
+     * elemento, que sí es de esta pestaña.
      */
     function pintarOrigenCotizacion() {
-        var el = document.getElementById('cotizProvExt');
-
-        if (!el) {
-            return;
-        }
-
-        var c = (datosProveedores && datosProveedores.cotizacion) || {};
-
-        if (!c.disponible) {
-            el.innerHTML = '<span class="text-danger">'
-                + '<i class="fas fa-triangle-exclamation me-1"></i>'
-                + 'Sin curva de dólar futuro: los importes no se pueden expresar en pesos.'
-                + '</span>';
-            return;
-        }
-
-        el.textContent = 'Valuado con dólar futuro ROFEX'
-            + (c.ultimo_mes ? ', curva hasta ' + c.ultimo_mes : '')
-            // Sólo el día: 'actualizada' viene como 'Y-m-d H:i:s' y formatDate
-            // espera una fecha pelada.
-            + (c.actualizada
-                ? ' (actualizada el ' + formatDate(String(c.actualizada).substring(0, 10)) + ')'
-                : '')
-            + (c.editable ? '.' : '. La corrección manual está apagada: falta el script.');
+        ComexFechas.origenCotizacion('cotizProvExt',
+            (datosProveedores && datosProveedores.cotizacion) || {});
     }
 
 /**
@@ -392,9 +370,15 @@ function generarFilasDatos() {
             alEditar: 'editarFechaPago'
         });
 
-        // Con qué dólar se valuó la fila, y el importe que sale de eso.
-        html += celdaCotizacion(item);
-        html += celdaImporteArs(item);
+        // Con qué dólar se valuó la fila, y el importe que sale de eso. Las dos
+        // celdas las arma Js/Comex-fechas.js, compartidas con la otra pestaña,
+        // que desde feature/comex-nac-usd también valúa en dólares. Lo único
+        // propio de acá es que la cotización se puede corregir.
+        html += ComexFechas.celdaCotizacion(item, {
+            editable: !!(datosProveedores.cotizacion && datosProveedores.cotizacion.editable),
+            alEditar: 'editarCotizacion'
+        });
+        html += ComexFechas.celdaImporteArs(item);
 
         // El tilde de "ya se pagó". Lo dibuja Js/Comex-fechas.js, compartido
         // con la otra pestaña: es el mismo gesto sobre el otro pago del mismo
@@ -425,81 +409,12 @@ function generarFilasDatos() {
     tableBody.innerHTML = html;
 }
 
-/**
- * La celda del dólar aplicado: qué cotización se usó, de qué mes, y por qué.
- *
- * SE MARCAN LOS DOS CASOS ESPECIALES y se explican en el tooltip. El texto lo
- * escribe el backend -DolarFuturo::explicar()- y no este archivo: lo usan el
- * tablero y la pestaña, y dos textos parecidos se desincronizan.
- *
- * SIN COTIZACIÓN SE DIBUJA UN GUIÓN, no un cero. Es la diferencia entre "no hay
- * dato" y "el dato es cero", y es el criterio de todo el módulo.
- *
- * @param {Object} item Fila del payload
- * @returns {string} HTML de la celda
- */
-function celdaCotizacion(item) {
-    var editable = !!(datosProveedores.cotizacion && datosProveedores.cotizacion.editable);
-    var detalle = item.COTIZ_DETALLE || '';
-    var clases = ['center', 'cotiz-cell'];
-
-    if (item.COTIZ_ORIGEN === 'OVERRIDE') {
-        clases.push('cotiz-override');
-    } else if (item.COTIZ_ORIGEN === 'APROXIMADA') {
-        clases.push('cotiz-aproximada');
-    }
-
-    if (editable) {
-        clases.push('cotiz-editable');
-    }
-
-    var cuerpo;
-
-    if (item.COTIZ_USD === null || item.COTIZ_USD === undefined) {
-        cuerpo = '<span class="cotiz-sin">—</span>';
-    } else {
-        cuerpo = '<span class="cotiz-valor">' + formatCotiz(item.COTIZ_USD) + '</span>'
-            + '<span class="cotiz-simbolo">'
-            + escaparAttrProv(item.COTIZ_ORIGEN === 'OVERRIDE'
-                ? 'a mano'
-                : (item.COTIZ_SIMBOLO || item.COTIZ_MES || ''))
-            + '</span>';
-
-        if (item.COTIZ_ORIGEN === 'APROXIMADA') {
-            cuerpo += '<i class="fas fa-code-branch cotiz-marca" aria-hidden="true"></i>';
-        } else if (item.COTIZ_ORIGEN === 'OVERRIDE') {
-            cuerpo += '<i class="fas fa-pen cotiz-marca" aria-hidden="true"></i>';
-        }
-    }
-
-    return '<td class="' + clases.join(' ') + '"'
-        + ' data-id="' + item.ID + '"'
-        + ' data-cotiz="' + (item.COTIZ_USD_EDIT === null || item.COTIZ_USD_EDIT === undefined
-            ? '' : item.COTIZ_USD_EDIT) + '"'
-        + ' title="' + escaparAttrProv(detalle
-            + (editable ? ' Hacé clic para corregirla sólo para este contenedor; '
-                + 'dejala vacía para volver a la curva.' : ''))
-        + '"' + (editable ? ' onclick="editarCotizacion(this)"' : '') + '>'
-        + cuerpo + '</td>';
-}
-
-/**
- * El importe en pesos de la fila: el FOB por la cotización que le tocó.
- *
- * EN BLANCO CUANDO NO SE PUDO VALUAR, con el motivo en el tooltip. Un cero diría
- * que este contenedor no se paga, que es una afirmación que nadie hizo.
- *
- * @param {Object} item Fila del payload
- * @returns {string} HTML de la celda
- */
-function celdaImporteArs(item) {
-    if (item.IMPORTE_ARS === null || item.IMPORTE_ARS === undefined) {
-        return '<td class="currency cotiz-sin" title="'
-            + escaparAttrProv(item.COTIZ_DETALLE || '') + '">—</td>';
-    }
-
-    return '<td class="currency importe-ars">' + formatCurrency(item.IMPORTE_ARS) + '</td>';
-}
+/* LAS DOS CELDAS DE LA VALUACIÓN SE FUERON A Js/Comex-fechas.js.
+   celdaCotizacion() y celdaImporteArs() vivían acá porque ésta era la única
+   pestaña que valuaba en dólares. Desde feature/comex-nac-usd las dos lo hacen,
+   así que el código es uno solo y lo único que quedó de este lado es el
+   comportamiento editable —editarCotizacion(), más abajo—, que sigue siendo de
+   esta pestaña. Ver el bloque "CON QUÉ DÓLAR SE VALUÓ LA FILA" del compartido. */
 
 /**
  * Esconde las filas que el buscador o el interruptor dejan afuera, y rehace los
@@ -889,20 +804,9 @@ function formatUSD(value) {
     });
 }
 
-/**
- * Formatea una cotización.
- *
- * Con DOS decimales y no con los cuatro que guarda la base: son los que se leen,
- * y el valor exacto ya está en el tooltip y en el campo de edición. Cuatro
- * decimales en una columna angosta no se leen y no deciden nada.
- */
-function formatCotiz(value) {
-    var num = parseFloat(value) || 0;
-    return '$ ' + num.toLocaleString('es-AR', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-    });
-}
+/* NO HAY formatCotiz(). La única celda que formateaba cotizaciones se fue al
+   archivo compartido y se llevó su formateador: dejarlo acá sin llamador sería
+   la segunda copia esperando a que alguien la use. */
 
 /**
  * Formatea una fecha
