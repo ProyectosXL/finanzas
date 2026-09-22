@@ -335,3 +335,113 @@
     font-size: 12px;
     color: var(--text-muted, #7a8194);
 }
+
+/* ============================================================================
+   EL ENCABEZADO DEL MAESTRO QUEDA FIJO AL SCROLLEAR
+
+   Son 1.223 proveedores con diez columnas: sin encabezado a la vista, a la
+   quinta fila ya no se sabe si lo que se esta mirando es el rubro o el centro
+   de costos. Es el mismo patron que la cartera de Echeqs -contenedor con alto
+   maximo y thead sticky- y no uno nuevo, porque el problema es el mismo.
+   ============================================================================ */
+
+.tab-proveedores_locales #wrapperMaestroProv {
+    /* EL ALTO TIENE TECHO Y PISO, y el piso es el que importa.
+
+       Arriba de la tabla hay cosas que aparecen y desaparecen: las cuatro
+       tarjetas, los avisos del maestro, el control de proveedores faltantes y
+       -sobre todo- el formulario de alta, que mide unos 200px. Con solo un
+       max-height calculado para el caso cerrado, abrir el formulario dejaba la
+       tabla en tres filas.
+
+       Con el piso, cuando no entra lo que cede es el alto de la pagina -que
+       scrollea, y eso ya pasa en esta pantalla- y no la tabla. */
+    max-height: calc(100vh - 340px);
+    min-height: 260px;
+    overflow-y: auto;
+}
+
+/* border-collapse: separate es lo que hace que el borde inferior viaje con la
+   celda sticky. Con collapse, el borde pertenece a la tabla y no a la celda, y
+   desaparece justo cuando el encabezado se despega. Ver Css/main.css. */
+.tab-proveedores_locales #tablaMaestro {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+.tab-proveedores_locales #tablaMaestro thead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+
+    /* OPACO a proposito: un fondo heredado o transparente deja ver las filas
+       pasando por debajo del encabezado. */
+    background-color: #fff;
+
+    /* El borde, como sombra interior: ver el comentario de arriba. */
+    box-shadow: inset 0 -1px 0 var(--border-color, #e2e5ed);
+}
+
+/* ============================================================================
+   EL DESPLEGABLE CON BUSCADOR DEL ALTA MANUAL
+
+   Las listas de rubro y centro de costos son largas y un <select> nativo no
+   tiene busqueda. Esto es el MISMO patron que el buscador de proveedores de
+   Tango de mas arriba -de hecho reusa .prov-tango-vacio para el mensaje de sin
+   resultados- contra una lista que ya esta en memoria en vez de contra el
+   servidor. No hay ninguna libreria: ver Js/Proveedores-Proveedores_locales.js.
+   ============================================================================ */
+
+.prov-buscable {
+    position: relative;
+}
+
+/* Flota sobre el formulario en lugar de empujarlo, igual que el de Tango: la
+   lista aparece y desaparece con cada tecla, y un bloque que corre los otros
+   campos hacia abajo hace perder de vista donde se estaba. */
+.prov-buscable-suge {
+    position: absolute;
+    z-index: 20;
+    left: 0;
+    right: 0;
+    max-height: 260px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid var(--border-color, #e2e5ed);
+    border-radius: 4px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
+.prov-buscable-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 0;
+    background: none;
+    padding: 5px 10px;
+    font-size: 12px;
+    line-height: 1.3;
+    border-bottom: 1px solid var(--bg-light, #f5f6fa);
+}
+
+.prov-buscable-item:last-child {
+    border-bottom: 0;
+}
+
+.prov-buscable-item:hover,
+.prov-buscable-marcado {
+    background: var(--bg-light, #f5f6fa);
+}
+
+/* El valor guardado que la lista ya no ofrece. Va al final y se ve distinto: no
+   es una opcion que se este ofreciendo, es la que el proveedor ya tenia. */
+.prov-buscable-fuera {
+    color: #b07d2b;
+}
+
+/* El campo cuyo valor no esta en la lista. Se marca sin abrir el tooltip
+   porque tiene una consecuencia: guardar lo va a rechazar. */
+.tab-proveedores_locales .prov-fuera-lista {
+    border-color: #e0a800;
+    background-color: #fffaf0;
+}

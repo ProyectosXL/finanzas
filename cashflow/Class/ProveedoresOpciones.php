@@ -3,6 +3,24 @@
 require_once __DIR__ . '/Planilla.php';
 
 /**
+ * La consulta de las listas fallo: la tabla esta, pero no se pudo leer.
+ *
+ * TIENE CLASE PROPIA PARA QUE NO SE CONFUNDA CON "todavia no se corrio el
+ * script". Antes las dos situaciones terminaban en el mismo null, porque un
+ * catch (Throwable) se comia la diferencia, y mientras los valores fuera de
+ * lista eran una advertencia no importaba: en los dos casos no se marcaba nada.
+ *
+ * Ahora si importa. Un valor fuera de lista deja la fila en ERROR, asi que "no
+ * pude leer las listas" no puede resolverse dejando pasar todo: no hay un
+ * subconjunto de filas validas que dejar pasar, porque no se validó ninguna. Es
+ * el mismo criterio que CPA01 caido.
+ *
+ * Ver ProveedoresCategorias::listasVigentes(), que es quien la lanza.
+ */
+class OpcionesIlegibles extends Exception {
+}
+
+/**
  * ProveedoresOpciones
  * Las cinco listas de valores validos del maestro de Proveedores Locales.
  *
@@ -80,6 +98,14 @@ require_once __DIR__ . '/Planilla.php';
  * la pantalla vuelve al comportamiento anterior -texto libre con sugerencias- y
  * lo dice, en lugar de quedarse con desplegables vacios que no dejan cargar
  * nada.
+ *
+ * "NO EXISTE LA TABLA" Y "NO SE PUDO LEER" SON DOS COSAS DISTINTAS
+ * ----------------------------------------------------------------
+ * Y desde que las listas son REGLA y no advertencia, la diferencia decide algo:
+ * sin tabla el modulo funciona como antes -texto libre, no se valida nada- y
+ * una consulta que FALLA significa que no se pudo chequear ninguna fila, que no
+ * es lo mismo que "ninguna esta mal". Ver OpcionesIlegibles, arriba, y
+ * ProveedoresCategorias::listasVigentes().
  */
 class ProveedoresOpciones {
 
@@ -242,6 +268,12 @@ class ProveedoresOpciones {
      *
      * Quien necesita solo las que se ofrecen usa vigentes().
      *
+     * VIENEN ORDENADAS POR 'ORDEN', Y ESO ORDENA LA TABLA DE PARAMETROS Y NADA
+     * MAS. Los desplegables del alta manual son alfabeticos -los arma
+     * vigentes(), que reordena- asi que este ORDER BY ya no decide que ve quien
+     * carga un proveedor: decide en que fila de la pantalla de administracion
+     * aparece cada valor, que es para lo que administracion lo acomoda.
+     *
      * @return array Mapa TIPO => lista de opciones
      */
     public function listas() {
@@ -297,32 +329,107 @@ class ProveedoresOpciones {
     }
 
     /**
-     * Solo lo que se OFRECE hoy, listo para validar y para poblar un select.
+     * Solo lo que se OFRECE hoy, listo para validar y para poblar un select,
+     * EN ORDEN ALFABETICO.
      *
      * ES LO QUE SE LE PASA AL VALIDADOR de la importacion, que es estatico y
      * puro: la consulta se hace una vez acá y el diff no toca la base.
      *
-     * @return array Mapa TIPO => [VALOR => ['valor', 'plazo_dias']], en orden
+     * POR QUE ALFABETICO Y NO POR 'ORDEN'
+     * -----------------------------------
+     * Estas listas se ofrecen en un desplegable con buscador, y las de rubro y
+     * centro de costos son largas. En una lista larga el unico orden que
+     * permite BUSCAR con la vista es el alfabetico: con cualquier otro hay que
+     * recorrerla entera para saber si un valor esta o no esta, y el buscador
+     * tampoco ayuda a quien no sabe si lo que busca existe.
+     *
+     * LA COLUMNA 'ORDEN' SIGUE EXISTIENDO Y YA NO DECIDE ESTO. La usa el alta
+     * de opciones -el valor nuevo va al final- y sigue ordenando la tabla de
+     * Parametros, que es donde se administra. Lo que dejo de decidir es el
+     * orden de los desplegables del alta manual.
+     *
+     * SE ORDENA ACA Y NO SOLO EN EL FRONT, a proposito: un backend que mande un
+     * orden que la pantalla ignora hace creer al que lee el SQL que ese orden
+     * significa algo.
+     *
+     * @return array Mapa TIPO => [VALOR => ['valor', 'plazo_dias']], alfabetico
      */
     public function vigentes() {
         $salida = [];
 
         foreach ($this->listas() as $tipo => $opciones) {
-            $salida[$tipo] = [];
+            $vigentes = [];
 
             foreach ($opciones as $o) {
-                if (!$o['VIGENTE']) {
-                    continue;
+                if ($o['VIGENTE']) {
+                    $vigentes[] = $o;
                 }
-
-                $salida[$tipo][$o['VALOR']] = [
-                    'valor' => $o['VALOR'],
-                    'plazo_dias' => $o['PLAZO_DIAS']
-                ];
             }
+
+            $salida[$tipo] = self::alfabetico($vigentes);
         }
 
         return $salida;
+    }
+
+    /**
+     * Ordena alfabeticamente una lista de opciones y la devuelve indexada por
+     * valor, que es la forma que espera buscarEnLista().
+     *
+     * Estatica y pura: es la regla del orden, y se prueba sin base.
+     *
+     * @param array $opciones Filas como las devuelve listas()
+     * @return array Mapa VALOR => ['valor', 'plazo_dias']
+     */
+    public static function alfabetico($opciones) {
+        $filas = array_values(is_array($opciones) ? $opciones : []);
+
+        usort($filas, function ($a, $b) {
+            $x = self::claveOrden($a['VALOR']);
+            $y = self::claveOrden($b['VALOR']);
+
+            /* A igual clave desempata el texto original, para que el orden sea
+               ESTABLE: 'Fabrica' y 'Fábrica' comparan igual, y sin desempate
+               quedarian en el orden en que los devolvio la base, que puede
+               cambiar entre dos pedidos y mover una opcion de lugar sin que
+               nadie haya tocado nada. */
+            return ($x === $y) ? strcmp($a['VALOR'], $b['VALOR']) : strcmp($x, $y);
+        });
+
+        $salida = [];
+
+        foreach ($filas as $o) {
+            $salida[$o['VALOR']] = [
+                'valor' => $o['VALOR'],
+                'plazo_dias' => $o['PLAZO_DIAS']
+            ];
+        }
+
+        return $salida;
+    }
+
+    /**
+     * La clave con la que se compara un valor para ordenarlo: en mayusculas y
+     * sin acentos.
+     *
+     * NO ES normalizarTitulo(), que ademas saca espacios y simbolos. Para
+     * ordenar eso importa: '100% LOCALES' y '100 LOCALES' tienen que poder
+     * quedar en lugares distintos. Lo unico que hay que neutralizar para que el
+     * orden sea el que espera quien lee en castellano son los acentos y la
+     * caja: con un strcmp pelado, 'Ñandu' y 'Óptica' se van al final de la
+     * lista por su codigo de caracter, que es justo donde nadie los busca.
+     *
+     * @param string $valor
+     * @return string
+     */
+    private static function claveOrden($valor) {
+        $v = mb_strtoupper(trim((string) $valor), 'UTF-8');
+
+        return str_replace(
+            ['Á', 'É', 'Í', 'Ó', 'Ú', 'Ü', 'Ñ'],
+            ['A', 'E', 'I', 'O', 'U', 'U', 'N'],
+            $v
+        );
     }
 
     /* ====================================================================

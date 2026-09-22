@@ -1055,37 +1055,77 @@ chequear('por no estar en Tango', 2, $c['resumen']['no_en_tango']);
 chequear('y no por estar repetidas', true,
     strpos($c['filas'][0]['motivo'], 'repetido') === false);
 
-seccion('sin poder leer CPA01 no se marca nada, pero se avisa');
+seccion('sin poder leer CPA01 no se marca nada, y NO se puede confirmar');
 
 /* null NO ES LO MISMO QUE UN MAPA VACIO. null significa "no se pudo validar":
    con un mapa vacio se marcaria en error la planilla entera por un origen
-   caido, que es peor que no validar. */
+   caido, que es peor que no validar.
+
+   ESTO CAMBIO A MEDIAS. Lo que sigue igual: no se marca ninguna fila, porque
+   informar como malas mil doscientas filas que probablemente esten bien seria
+   mentir. Lo que cambio: la importacion YA NO SE PUEDE CONFIRMAR. No es que
+   ninguna este mal, es que no se chequeo ninguna, y entonces no existe el
+   subconjunto de filas validas que el alcance por fila supone que hay. */
 $c = ProveedoresCategorias::compararImportacion([
     $fila(2, 'MTDODI'),
     $fila(3, 'NOEXIS')
 ], [], null);
 
 chequear('ninguna fila se marca', 0, $c['resumen']['no_en_tango']);
-chequear('las dos se importan', 2, $c['resumen']['altas']);
+chequear('las dos siguen contandose como altas', 2, $c['resumen']['altas']);
 chequear('y el resumen dice que no se valido', false, $c['resumen']['valido_contra_tango']);
 
+// EL BLOQUEO. Es la unica cosa que frena una importacion entera: el alcance por
+// fila vale cuando se sabe cuales son las malas.
+chequear('no se puede confirmar', false, $c['resumen']['puede_confirmar']);
+chequear('con un motivo', 1, count($c['resumen']['bloqueos']));
+chequear('que nombra CPA01', true, strpos($c['resumen']['bloqueos'][0], 'CPA01') !== false);
+
+/* EL MISMO CRITERIO Y EL MISMO TEXTO QUE EL ALTA MANUAL: dice que no se pudo
+   leer, que el freno es a proposito, y que hay que probar de nuevo en un rato.
+   Un "no se puede importar" a secas manda a buscar el problema a la planilla,
+   que es el lugar equivocado. */
+chequear('dice que es a proposito', true,
+    strpos($c['resumen']['bloqueos'][0], 'a propósito') !== false);
+chequear('y manda a probar de nuevo en un rato', true,
+    strpos($c['resumen']['bloqueos'][0], 'de nuevo en un rato') !== false);
+
 // QUE LA VALIDACION NO HAYA CORRIDO NO PUEDE PASAR DESAPERCIBIDO: sin el
-// aviso, una previsualizacion limpia se lee como "todos los codigos existen".
+// aviso, una previsualizacion limpia se lee como "todos los codigos existen",
+// y el boton apagado sin motivo se lee como una pantalla rota.
 $avisoSinValidar = '';
 
 foreach ($c['avisos'] as $a) {
-    if (strpos($a, 'NO se validaron') !== false) { $avisoSinValidar = $a; }
+    if (strpos($a, 'NO SE PUEDE CONFIRMAR') !== false) { $avisoSinValidar = $a; }
 }
 
 chequear('y lo avisa', true, $avisoSinValidar !== '');
+chequear('el aviso tambien nombra CPA01', true, strpos($avisoSinValidar, 'CPA01') !== false);
 
-seccion('con CPA01 leido, el resumen lo dice');
+seccion('con CPA01 leido, el resumen lo dice y se puede confirmar');
 
 $c = ProveedoresCategorias::compararImportacion([$fila(2, 'MTDODI')], [], $enTango);
 
 chequear('se valido', true, $c['resumen']['valido_contra_tango']);
+chequear('se puede confirmar', true, $c['resumen']['puede_confirmar']);
+chequear('sin bloqueos', 0, count($c['resumen']['bloqueos']));
 chequear('y no hay aviso de validacion faltante', 0, count(array_filter($c['avisos'],
-    function ($a) { return strpos($a, 'NO se validaron') !== false; })));
+    function ($a) { return strpos($a, 'NO SE PUEDE CONFIRMAR') !== false; })));
+
+seccion('un codigo malo NO bloquea: esa fila queda afuera y el resto entra');
+
+/* ES LA ASIMETRIA QUE HAY QUE PODER DISTINGUIR, y es la que se rompe si alguien
+   "unifica" los dos casos: una fila mala es esa fila, un origen caido es todo.
+   Con una fila mala se sabe cual es; con el origen caido no se sabe nada de
+   ninguna. */
+$c = ProveedoresCategorias::compararImportacion([
+    $fila(2, 'MTDODI'),
+    $fila(3, 'NOEXIS')
+], [], $enTango);
+
+chequear('la mala queda en error', 1, $c['resumen']['errores']);
+chequear('la buena se carga', 1, $c['resumen']['altas']);
+chequear('y la importacion se puede confirmar igual', true, $c['resumen']['puede_confirmar']);
 
 seccion('un mapa vacio SI marca todo: es "ninguno existe", no "no se pudo"');
 
@@ -1103,6 +1143,105 @@ seccion('el codigo se compara normalizado, igual que en todo el modulo');
 $c = ProveedoresCategorias::compararImportacion([$fila(2, ' mtdodi ')], [], $enTango);
 
 chequear('minusculas y espacios no lo vuelven inexistente', 'ALTA', $c['filas'][0]['estado']);
+
+/* ================================================================
+   LA REGLA CORRE AL APLICAR, NO SOLO AL PREVISUALIZAR
+
+   El diff se reenvia desde el navegador para que se aplique exactamente lo que
+   la persona vio, y eso esta bien. Pero un diff que viene de afuera es un
+   PEDIDO y no una autorizacion: creerle al 'estado' dejaria que un POST armado
+   a mano marque 'ALTA' una fila que la previsualizacion habia rechazado, y el
+   endpoint es alcanzable sin pasar por la pantalla.
+
+   revalidarFila() es la misma regla, escrita una sola vez y pura: por eso se
+   prueba sin base, que es justamente lo que hace verificable que la
+   revalidacion diga lo mismo que la previsualizacion.
+   ================================================================ */
+seccion('al aplicar se vuelve a validar el codigo contra CPA01');
+
+/* Las listas de juguete traen lo que trae $fila(): asi lo unico que puede
+   quedar fuera de lista es lo que cada caso pise a proposito. */
+$listasRevalidar = [
+    'RUBRO_ECONOMICO' => ['Mercaderia' => ['valor' => 'Mercaderia', 'plazo_dias' => null]],
+    'RUBRO' => [], 'CENTRO_COSTOS' => [],
+    'PLAZO' => ['30 DIAS' => ['valor' => '30 DIAS', 'plazo_dias' => 30]],
+    'CRITERIO_DISTRIB' => []
+];
+
+// La fila que la previsualizacion habia aprobado sigue pasando.
+$buena = ProveedoresCategorias::normalizarFila($fila(2, 'MTDODI'), null);
+
+chequear('una fila valida pasa', null,
+    ProveedoresCategorias::revalidarFila($buena, $enTango, null));
+
+/* EL CASO DEL POST ALTERADO: la fila viene marcada 'ALTA' —como si estuviera
+   aprobada— con un codigo que CPA01 no tiene. Si esto no se chequeara, se
+   cargaria un proveedor que la pantalla habia rechazado. */
+$falsa = ProveedoresCategorias::normalizarFila($fila(3, 'NOEXIS'), null);
+$falsa['estado'] = 'ALTA';
+$falsa['motivo'] = '';
+$falsa['no_en_tango'] = false;
+
+$motivo = ProveedoresCategorias::revalidarFila($falsa, $enTango, null);
+
+chequear('un codigo inexistente se rechaza aunque venga como ALTA', true, $motivo !== null);
+chequear('y el motivo nombra CPA01', true, strpos($motivo, 'CPA01') !== false);
+
+seccion('y tambien se vuelven a validar las listas');
+
+/* Ademas del POST alterado, cubre un caso que pasa solo: entre previsualizar y
+   confirmar puede pasar un rato, y en ese rato alguien pudo dar de baja un
+   valor desde Parametros. */
+$conRubro = ProveedoresCategorias::normalizarFila(
+    array_merge($fila(2, 'MTDODI'), ['rubro_economico' => 'Logistica']), null);
+
+chequear('sin listas no hay nada que chequear', null,
+    ProveedoresCategorias::revalidarFila($conRubro, $enTango, null));
+
+$motivo = ProveedoresCategorias::revalidarFila($conRubro, $enTango, $listasRevalidar);
+
+chequear('con listas, el valor fuera de lista se rechaza', true, $motivo !== null);
+chequear('y el motivo nombra el valor', true, strpos($motivo, 'Logistica') !== false);
+
+// Y lo que SI esta en la lista sigue pasando: la revalidacion no puede ser mas
+// estricta que la previsualizacion, o nada se podria confirmar nunca.
+$okRubro = ProveedoresCategorias::normalizarFila(
+    array_merge($fila(2, 'MTDODI'), ['rubro_economico' => 'Mercaderia']), null);
+
+chequear('un valor de la lista pasa', null,
+    ProveedoresCategorias::revalidarFila($okRubro, $enTango, $listasRevalidar));
+
+seccion('aplicarImportacion revalida antes de tocar la base');
+
+$catRevalida = file_get_contents(__DIR__ . '/../cashflow/Class/ProveedoresCategorias.php');
+
+// ANTES de abrir la transaccion: lo que se decide es si se toca la base, no si
+// se deshace lo tocado.
+$posRevalida = strpos($catRevalida, '$this->revalidarImportacion($comparacion);');
+$posTrans = strpos($catRevalida, 'sqlsrv_begin_transaction($cid) === false', $posRevalida);
+
+chequear('aplicarImportacion revalida', true, $posRevalida !== false);
+chequear('y lo hace antes de abrir la transaccion', true,
+    $posRevalida !== false && $posTrans !== false && $posRevalida < $posTrans);
+
+// Y lee los dos origenes DE NUEVO, en vez de creerle al cuerpo del pedido.
+chequear('vuelve a leer CPA01', true,
+    strpos($catRevalida, '$this->tango()->existentes(array_column($porCargar,') !== false);
+chequear('y vuelve a leer las listas', true,
+    strpos($catRevalida, '$listas = $this->listasVigentes();') !== false);
+
+// Si un origen no responde, no se aplica nada: mismo criterio que la
+// previsualizacion, que directamente no deja confirmar.
+chequear('un origen caido frena todo', true,
+    strpos($catRevalida, 'throw new Exception(self::textoBloqueoTango());') !== false);
+
+seccion('las filas en ERROR no se cargan, y eso lo decide el backend');
+
+// El bucle que escribe salta todo lo que no sea ALTA o CAMBIO, y revalidar
+// vuelve a decidir cual es cual: la pantalla no es la que autoriza.
+chequear('solo se escriben ALTA y CAMBIO', true,
+    strpos($catRevalida, "if (\$fila['estado'] !== 'ALTA' && \$fila['estado'] !== 'CAMBIO') {")
+        !== false);
 
 seccion('la clase de Tango es OTRA clase, y eso es la decision');
 
@@ -2052,6 +2191,66 @@ $val = CashflowEstructura::validar($seccionEgr, [$filaProv(1, 'PL_CRON', 'PAGOS'
 
 chequear('una fila inhabilitada no cuenta como solape', true, $val['valido']);
 
+
+/* ================================================================
+   LA PANTALLA DEL MAESTRO
+
+   Dos cosas que no cambian ningun numero y si cambian si la pantalla se puede
+   usar con 1.223 proveedores adentro.
+   ================================================================ */
+seccion('el encabezado del maestro queda fijo al scrollear');
+
+/* Con diez columnas y mil doscientas filas, a la quinta ya no se sabe si lo que
+   se esta mirando es el rubro o el centro de costos. Es el mismo patron que la
+   cartera de Echeqs -contenedor con alto maximo y thead sticky- y no uno nuevo,
+   porque el problema es el mismo. */
+$cssProv = file_get_contents(__DIR__ . '/../cashflow/Css/Proveedores-Proveedores_locales.css');
+
+chequear('el contenedor tiene alto maximo', true,
+    strpos($cssProv, '#wrapperMaestroProv') !== false
+    && strpos($cssProv, 'max-height: calc(100vh - 340px);') !== false);
+chequear('y el encabezado es sticky', true,
+    strpos($cssProv, '#tablaMaestro thead th') !== false
+    && strpos($cssProv, 'position: sticky;') !== false);
+
+/* EL PISO ES LO QUE EVITA QUE LA TABLA QUEDE EN TRES FILAS con el formulario de
+   alta abierto, que mide unos 200px y aparece arriba de la tabla. Sin el, hay
+   que elegir un alto que sirva para uno de los dos casos. */
+chequear('y un alto minimo, para cuando el formulario esta abierto', true,
+    strpos($cssProv, 'min-height: 260px;') !== false);
+
+/* border-collapse: separate es lo que hace que el borde inferior viaje con la
+   celda sticky. Con collapse el borde es de la tabla y no de la celda, y
+   desaparece justo cuando el encabezado se despega. */
+chequear('la tabla no colapsa los bordes', true,
+    strpos($cssProv, 'border-collapse: separate;') !== false);
+
+seccion('la vista Maestro tiene su boton Actualizar');
+
+/* El maestro se cargaba solo al entrar a la solapa y despues de guardar, asi
+   que una importacion hecha en otra pestaña no se veia sin recargar la pagina
+   entera. Es el mismo boton que ya tiene la vista de cuentas a pagar. */
+$tabMaestro = file_get_contents(__DIR__ . '/../cashflow/Tabs/proveedores_locales.php');
+
+chequear('el boton existe', true, strpos($tabMaestro, 'id="btnRefreshMaestroProv"') !== false);
+chequear('con el mismo icono que el de cuentas a pagar', true,
+    strpos($tabMaestro, 'fa-sync-alt me-1"></i> Actualizar') !== false);
+chequear('y esta cableado', true,
+    strpos($jsCodigo, "conectar('btnRefreshMaestroProv', actualizarMaestro)") !== false);
+
+// SE APAGA MIENTRAS LA PETICION ESTA EN VUELO, como el resto de los botones del
+// modulo: dos clics seguidos son dos pedidos y el segundo pisa al primero.
+chequear('se deshabilita mientras carga', true,
+    strpos($jsCodigo, 'if (btn) { btn.disabled = true; }') !== false);
+
+/* Y NO PISA EL TRABAJO A MEDIO HACER. Son las dos cosas que distinguen
+   "actualizar" de "cancelar": el formulario abierto no se repuebla -lo impide
+   aplicarListas()- y el filtro del buscador no se toca, porque pintarMaestro()
+   lo LEE del input en vez de guardarlo. */
+chequear('no repuebla los campos con el formulario abierto', true,
+    strpos($jsCodigo, "if (!visible('formProvWrap')) {") !== false);
+chequear('y el filtro del maestro se lee del input, no se guarda', true,
+    strpos($jsCodigo, "document.getElementById('busquedaMaestroProv') || {}") !== false);
 /* ================================================================
    CONTRA LA BASE
    ================================================================ */

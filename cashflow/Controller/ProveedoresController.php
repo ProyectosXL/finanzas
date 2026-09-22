@@ -373,28 +373,45 @@ try {
                tiene que responder mientras alguien espera.
 
                Si CPA01 no responde se pasa null, que NO es lo mismo que un mapa
-               vacío: null significa "no se pudo validar" y el diff no marca
-               nada en error, sólo avisa. Con un mapa vacío marcaría en error la
-               planilla entera por un origen caído. */
+               vacío: null significa "no se pudo validar" —ninguna fila se marca
+               en error y la importación no se puede confirmar— y un mapa vacío
+               significa "ninguno de estos códigos existe", que sí deja cada
+               fila en error. Ver ProveedoresCategorias::compararImportacion().
+
+               Se pregunta primero si la tabla está: sin eso, una planilla sin
+               filas devolvería un mapa vacío sin haber consultado nada, y el
+               diff leería "ninguno existe" donde no se preguntó. */
             $validos = null;
 
             try {
-                $validos = $prov->categorias()->tango()->existentes(
-                    array_column($parse['filas'], 'cod_provee'));
+                if ($prov->categorias()->tango()->disponible()) {
+                    $validos = $prov->categorias()->tango()->existentes(
+                        array_column($parse['filas'], 'cod_provee'));
+                }
             } catch (Throwable $e) {
                 $validos = null;
             }
 
-            /* Las listas de opciones son ADVERTENCIA y no error: un valor que
-               no está en su lista se importa igual y se guarda tal como vino,
-               marcado. La diferencia con CPA01 es qué significa cada cosa: un
-               código que no existe hace que el proveedor no clasifique NADA,
-               mientras que un rubro fuera de lista sí clasifica —crea su propia
-               serie— y lo que hay que decidir es si esa serie tenía que
-               existir. */
+            /* Las listas de opciones son REGLA: un valor que no está en la suya
+               deja la fila en ERROR y no se carga. El resto de la planilla se
+               importa igual, que es el mismo alcance por fila que rige para el
+               código inexistente.
+
+               Y hay que distinguir los dos motivos por los que puede no haber
+               listas. Que no exista la tabla —el script no se corrió— NO
+               bloquea: el módulo funciona como antes, con texto libre. Que la
+               tabla esté y la consulta falle sí, porque ahí no se chequeó
+               ninguna fila. listasVigentes() lanza para poder diferenciarlo. */
+            $opciones = null;
+
+            try {
+                $opciones = $prov->categorias()->listasVigentes();
+            } catch (OpcionesIlegibles $e) {
+                $opciones = ProveedoresCategorias::LISTAS_ILEGIBLES;
+            }
+
             $comp = ProveedoresCategorias::compararImportacion(
-                $parse['filas'], $prov->categorias()->mapa(), $validos,
-                $prov->categorias()->listasVigentes());
+                $parse['filas'], $prov->categorias()->mapa(), $validos, $opciones);
 
             $comp['separador'] = $parse['separador'];
             $comp['opciones_tipos'] = ProveedoresOpciones::TIPOS;
@@ -435,7 +452,12 @@ try {
 
             /* LAS BAJAS SE CONFIRMAN APARTE. Una planilla filtrada por error
                daria de baja medio maestro, asi que aplicarlas es una decision
-               explicita y no un efecto de importar. */
+               explicita y no un efecto de importar.
+
+               NO SE MIRA EL 'puede_confirmar' QUE VINO EN EL CUERPO: lo mandó
+               el navegador, así que es un dato del pedido y no una
+               autorización. aplicarImportacion() vuelve a leer CPA01 y las
+               listas y decide con eso. */
             $r = $prov->categorias()->aplicarImportacion(
                 $data['comparacion'],
                 !empty($data['aplicar_bajas']),
@@ -452,12 +474,32 @@ try {
 
         case 'getMaestro':
             $mapa = $prov->categorias()->mapa();
+            $avisosMaestro = $prov->categorias()->getAvisos();
+
+            /* LAS LISTAS PUEDEN NO PODER LEERSE, Y ESTA PANTALLA NO SE CAE POR
+               ESO: el maestro se lee igual y verlo sigue sirviendo. Lo que no se
+               va a poder es guardar —guardarManual() lanza con el motivo— así
+               que el aviso va acá arriba y no como sorpresa al apretar Guardar.
+
+               Se manda 'opciones' en null, que para el front es "no hay listas":
+               los campos vuelven a ser texto libre. Es lo mismo que ve cuando
+               falta el script, y es lo correcto, porque dibujar desplegables con
+               listas que no se pudieron leer sería dibujarlos vacíos. */
+            $opcionesMaestro = null;
+
+            try {
+                $opcionesMaestro = $prov->categorias()->listasVigentes();
+            } catch (OpcionesIlegibles $e) {
+                $avisosMaestro[] = $e->getMessage() . ' Mientras tanto el maestro se puede mirar, '
+                    . 'pero no se puede guardar ningún proveedor ni importar la planilla: no hay '
+                    . 'contra qué validar los valores.';
+            }
 
             echo json_encode([
                 'success' => true,
                 'data' => [
                     'filas' => array_values($mapa),
-                    'avisos' => $prov->categorias()->getAvisos(),
+                    'avisos' => $avisosMaestro,
                     'directores_no_excluidos' => $prov->categorias()->directoresNoExcluidos(),
 
                     /* El segundo control del maestro: quién está cargado y
@@ -475,12 +517,14 @@ try {
                        que no aparece con el motivo al lado. */
                     'edicion_manual' => $prov->categorias()->tieneOrigen(),
 
-                    /* Las cinco listas de valores válidos. En null si todavía
-                       no se corrió su script: la pantalla vuelve a los campos
-                       de texto con sugerencias —que es como funcionaban antes—
-                       en lugar de dibujar desplegables vacíos que no dejan
-                       cargar nada. Ver ProveedoresOpciones. */
-                    'opciones' => $prov->categorias()->listasVigentes(),
+                    /* Las cinco listas de valores válidos, ya en orden
+                       alfabético: es el orden en el que se ofrecen, y lo decide
+                       el backend para que el SQL no mande un orden que la
+                       pantalla ignora. En null si todavía no se corrió su
+                       script —o si no se pudieron leer, ver arriba—: la pantalla
+                       vuelve a los campos de texto con sugerencias, en lugar de
+                       dibujar desplegables vacíos que no dejan cargar nada. */
+                    'opciones' => $opcionesMaestro,
                     'opciones_tipos' => ProveedoresOpciones::TIPOS,
 
                     /* Las sugerencias del datalist quedan para ese caso. No se

@@ -78,6 +78,7 @@
         if (busqM) { busqM.addEventListener('input', pintarMaestro); }
 
         conectar('btnNuevoProv', function() { abrirForm(null); });
+        conectar('btnRefreshMaestroProv', actualizarMaestro);
         conectar('btnGuardarProv', guardarProveedor);
         conectar('btnCancelarProv', cerrarForm);
         conectarBuscadorTango();
@@ -187,8 +188,27 @@
             });
     }
 
+    /**
+     * Vuelve a pedir el maestro SIN cancelar lo que alguien esté haciendo.
+     *
+     * NO PISA EL FORMULARIO ABIERTO —aplicarListas() no repuebla los campos
+     * mientras está a la vista, ver su nota— y NO TOCA el buscador del maestro,
+     * porque pintarMaestro() lee el filtro del input en vez de guardarlo. Las
+     * dos cosas son deliberadas: actualizar es traer datos nuevos, no descartar
+     * el trabajo a medio hacer.
+     */
+    function actualizarMaestro() {
+        var btn = document.getElementById('btnRefreshMaestroProv');
+
+        if (btn) { btn.disabled = true; }
+
+        cargarMaestro().then(function() {
+            if (btn) { btn.disabled = false; }
+        });
+    }
+
     function cargarMaestro() {
-        pedirJson('Controller/ProveedoresController.php?action=getMaestro')
+        return pedirJson('Controller/ProveedoresController.php?action=getMaestro')
             .then(function(data) {
                 maestro = data;
 
@@ -1271,7 +1291,19 @@
                 +   '</div>';
         }
 
-        html += '<button class="btn btn-sm btn-primary" id="btnConfirmarProv">'
+        /* NO SE PUEDE CONFIRMAR CON UN ORIGEN CAÍDO. El backend lo decide —es
+           el que sabe si pudo leer CPA01 y las listas— y acá se apaga el botón
+           y se dice por qué en el mismo lugar donde se lo iba a apretar. Un
+           botón apagado sin motivo se lee como una pantalla rota, y el motivo
+           sólo en los avisos de más abajo se lee después de haber intentado.
+
+           La previsualización SE MUESTRA IGUAL: ver qué cambiaría no hace daño
+           y sigue sirviendo para saber en qué estado está la planilla. */
+        var bloqueos = (r.bloqueos || []);
+        var frenado = (r.puede_confirmar === false) || bloqueos.length > 0;
+
+        html += '<button class="btn btn-sm btn-primary" id="btnConfirmarProv"'
+            +     (frenado ? ' disabled title="' + escapar(bloqueos.join(' ')) + '"' : '') + '>'
             +     '<i class="fas fa-check me-1"></i> Confirmar e importar</button>'
             +   '</div></div><div class="card-body">';
 
@@ -1281,17 +1313,69 @@
         });
         html += '</div>';
 
+        bloqueos.forEach(function(b) {
+            html += '<div class="alert alert-danger py-2 px-3 small mb-2">'
+                + '<strong>No se puede confirmar esta importación.</strong> ' + escapar(b)
+                + '</div>';
+        });
+
         (d.avisos || []).forEach(function(a) {
+            /* Los bloqueos ya se pintaron arriba, en rojo y con su título: el
+               backend los repite en los avisos para quien lea la respuesta sin
+               pantalla, y repetirlos acá sería decir dos veces lo mismo. */
+            if (a.indexOf('NO SE PUEDE CONFIRMAR') !== -1) { return; }
+
             html += '<div class="alert alert-warning py-2 px-3 small mb-2">' + escapar(a) + '</div>';
         });
 
+        html += listaValoresFueraDeLista(d);
         html += tablaPreview(que, d);
         html += '</div></div>';
 
         cont.innerHTML = html;
         mostrar('previewProv', true);
 
-        conectar('btnConfirmarProv', confirmarImportacion);
+        if (!frenado) {
+            conectar('btnConfirmarProv', confirmarImportacion);
+        }
+    }
+
+    /**
+     * Los valores rechazados por no estar en las listas, agrupados por lista y
+     * sin repetir.
+     *
+     * ES LO QUE HACE QUE EL CAMBIO SEA APLICABLE. Desde que un valor fuera de
+     * lista deja la fila en ERROR, importar la planilla tal como está hoy puede
+     * rechazar filas en masa si las cinco listas de Parámetros no reflejan todos
+     * los valores en uso. Descubrirlos de a uno —corregir, reimportar, encontrar
+     * el siguiente— serían decenas de vueltas sobre un archivo de 1.223 filas.
+     *
+     * Acá están todos juntos, agrupados por la lista a la que hay que agregarlos,
+     * así se dan de alta en Parámetros de una sola pasada.
+     *
+     * Los junta el backend (`resumen.valores_fuera_de_lista`), que es el que
+     * sabe comparar como comparan las listas: 'DEPOSITO SUR' y 'Deposito Sur'
+     * son UN valor para dar de alta, no dos.
+     */
+    function listaValoresFueraDeLista(d) {
+        var porTipo = (d.resumen && d.resumen.valores_fuera_de_lista) || {};
+        var tipos = Object.keys(porTipo);
+
+        if (!tipos.length) { return ''; }
+
+        var nombres = d.opciones_tipos || {};
+
+        return '<div class="alert alert-danger py-2 px-3 small mb-3">'
+            + '<strong>Valores que hay que dar de alta en Parámetros → Prov. Locales</strong> '
+            + '(o corregir en la planilla, si son un error de tipeo). Están agrupados y sin '
+            + 'repetir para poder cargarlos de una sola pasada; después volvé a importar.'
+            + tipos.map(function(t) {
+                return '<div class="mt-2"><u>' + escapar(nombres[t] ? nombres[t].nombre : t)
+                    + '</u>: ' + porTipo[t].map(function(v) {
+                        return '<code>' + escapar(v) + '</code>';
+                      }).join(' · ') + '</div>';
+              }).join('')
+            + '</div>';
     }
 
     function tablaPreview(que, d) {
@@ -1343,19 +1427,24 @@
                     + '">no está en Tango</span>';
             }
 
-            /* UN VALOR FUERA DE LISTA ES ADVERTENCIA, NO ERROR: la fila se
-               importa igual y se guarda tal como vino. La marca dice CUÁLES
-               campos y con QUÉ valor, porque "hay algo fuera de lista" sin
-               decir qué obliga a abrir la planilla y buscarlo. */
+            /* UN VALOR FUERA DE LISTA ES UN ERROR Y LA FILA NO SE CARGA. Esto
+               CAMBIÓ: antes se importaba igual, marcada en amarillo.
+
+               La marca dice CUÁLES campos y con QUÉ valor, porque "hay algo
+               fuera de lista" sin decir qué obliga a abrir la planilla y
+               buscarlo. Y se sigue marcando aparte del motivo aunque casi
+               siempre coincidan: cuando además el código no existe, el motivo
+               lo ocupa CPA01 —que se arregla en otro sistema— y esta marca es
+               lo único que dice que encima hay un valor que dar de alta. */
             var fuera = f.fuera_lista && Object.keys(f.fuera_lista);
 
             if (fuera && fuera.length) {
                 var tipos = (d.opciones_tipos) || {};
 
-                pisa += ' <span class="badge bg-warning text-dark" title="'
-                    + escapar('Se importa igual y se guarda tal como vino. El valor NO se '
-                        + 'agrega solo a la lista: si es correcto, cargalo en Parámetros → '
-                        + 'Prov. Locales; si es un typo, corregilo en la planilla. '
+                pisa += ' <span class="badge bg-danger" title="'
+                    + escapar('NO se carga. El valor no se agrega solo a la lista: si es '
+                        + 'correcto, cargalo en Parámetros → Prov. Locales; si es un typo, '
+                        + 'corregilo en la planilla. '
                         + fuera.map(function(t) {
                             return (tipos[t] ? tipos[t].nombre : t) + ': "'
                                 + f.fuera_lista[t] + '"';
@@ -1689,15 +1778,39 @@
 
         var sel = document.getElementById('fpFormaProv');
 
-        // Los nombres son los VALORES de la lista, no sus claves.
+        /* Los nombres son los VALORES de la lista, no sus claves.
+
+           SE ORDENA ALFABÉTICO ACÁ. La constante FORMAS_PAGO del backend está
+           en orden de uso —TRANSFERENCIA y ECHEQ primero, que son las dos del
+           cronograma— y ese orden ya no llega a la pantalla: es el mismo
+           criterio que las otras cinco listas, y tener un desplegable ordenado
+           por uso al lado de cinco ordenados alfabéticamente obliga a buscar de
+           dos maneras distintas en el mismo formulario. */
         if (sel && !sel.options.length) {
             sel.innerHTML = '<option value="">(sin forma)</option>'
-                + ((maestro && maestro.formas_pago) || []).map(function(f) {
+                + alfabetico((maestro && maestro.formas_pago) || []).map(function(f) {
                     return '<option value="' + escapar(f) + '">' + escapar(f) + '</option>';
                 }).join('');
         }
 
         aplicarListas();
+    }
+
+    /**
+     * Ordena valores alfabéticamente como los lee alguien que escribe en
+     * castellano.
+     *
+     * CON sort() PELADO, 'Ñandú' y los acentos se van al final, porque compara
+     * por código de caracter. localeCompare con 'es' y sensitivity 'base' es lo
+     * que pone 'Ñandú' entre 'Nafta' y 'Obras', que es donde se lo busca.
+     *
+     * No muta el array que recibe: varios de los que llegan acá son los mismos
+     * que guarda `maestro`.
+     */
+    function alfabetico(valores) {
+        return (valores || []).slice().sort(function(a, b) {
+            return String(a).localeCompare(String(b), 'es', { sensitivity: 'base' });
+        });
     }
 
     /* ================================================================
@@ -1727,12 +1840,13 @@
     };
 
     /**
-     * Reemplaza los cinco campos de texto por desplegables.
+     * Reemplaza los cinco campos de texto por desplegables con buscador.
      *
      * SE REEMPLAZA EL ELEMENTO, conservando el id: el resto del archivo lee y
-     * escribe por id con valor()/setValor(), y un <select> responde a .value
-     * igual que un <input>. Así el cambio no toca ni abrirForm() ni
-     * guardarProveedor().
+     * escribe por id con valor()/setValor(), así que lo único que el reemplazo
+     * tiene que respetar es responder a `.value` de lectura y de escritura. El
+     * componente lo hace —ver crearSelectBuscable()— y por eso este cambio no
+     * toca ni abrirForm() ni guardarProveedor().
      */
     function aplicarListas() {
         var listas = maestro && maestro.opciones;
@@ -1746,7 +1860,13 @@
 
             if (!el) { return; }
 
-            var valores = Object.keys(listas[tipo] || {});
+            /* Ya vienen alfabéticos del backend —lo ordena
+               ProveedoresOpciones::vigentes()— y se vuelve a ordenar acá igual.
+               No es desconfianza: es que el orden en el que se OFRECEN los
+               valores es una decisión de esta pantalla, y dejarla escrita
+               solamente en un ORDER BY la vuelve invisible para el que lee este
+               archivo. Ordenar dos veces una lista de cincuenta no cuesta. */
+            var valores = alfabetico(Object.keys(listas[tipo] || {}));
 
             /* UNA LISTA VACÍA NO REEMPLAZA NADA. Un desplegable con una sola
                opción vacía no deja cargar ese campo, y sería peor que el texto
@@ -1756,50 +1876,333 @@
 
             /* YA ESTÁ CONVERTIDO. Sólo se repuebla si el formulario está
                CERRADO, y no es un detalle: pintarMaestro() —que llama acá—
-               corre en cada tecla del buscador del maestro, y repoblar un
-               select le borra el valor elegido. Con el formulario abierto, eso
-               sería vaciarle los campos a alguien mientras los está cargando, y
-               en silencio. Las listas sólo cambian desde otra pestaña, así que
+               corre en cada tecla del buscador del maestro, y repoblar el campo
+               le borra el valor elegido. Con el formulario abierto, eso sería
+               vaciarle los campos a alguien mientras los está cargando, y en
+               silencio. Las listas sólo cambian desde otra pestaña, así que
                esperar a que el formulario se cierre no atrasa nada. */
-            if (el.tagName === 'SELECT') {
+            if (el.buscable) {
                 if (!visible('formProvWrap')) {
-                    repoblarSelect(el, valores);
+                    el.buscable.repoblar(valores);
                 }
 
                 return;
             }
 
-            var sel = document.createElement('select');
-
-            sel.id = id;
-            sel.className = 'form-select form-select-sm';
-            sel.title = el.title || '';
-
-            el.parentNode.replaceChild(sel, el);
-            repoblarSelect(sel, valores);
+            crearSelectBuscable(id, valores);
         });
     }
 
-    function repoblarSelect(sel, valores) {
-        sel.innerHTML = '<option value="">(sin definir)</option>'
-            + valores.map(function(v) {
-                return '<option value="' + escapar(v) + '">' + escapar(v) + '</option>';
+    /* ================================================================
+       EL DESPLEGABLE CON BUSCADOR
+
+       Los <select> nativos no tienen búsqueda, y las listas de rubro y de
+       centro de costos son largas: encontrar un valor obliga a desplegar y
+       recorrer con la vista.
+
+       NO SE AGREGA NINGUNA LIBRERÍA. El patrón ya está resuelto a mano en este
+       mismo archivo, en el autocomplete de códigos de Tango
+       —conectarBuscadorTango(), pintarSugerenciasTango()— y en las clases
+       .prov-tango-suge del CSS. Esto es lo mismo, contra una lista que ya está
+       en memoria en vez de contra el servidor.
+
+       SÓLO SE ELIGE DE LA LISTA: el <input> de arriba FILTRA, no carga. Lo que
+       se tipea nunca se guarda. Es lo mismo que decide la importación desde que
+       un valor fuera de lista deja la fila en ERROR, y sería incoherente que el
+       alta manual aceptara por tipeo lo que la planilla tiene prohibido. Cuando
+       el filtro no encuentra nada, el desplegable dice DÓNDE se dan de alta los
+       valores: sin eso, el campo parece roto.
+
+       SE COMPORTA COMO UN <select> PARA EL RESTO DEL ARCHIVO. Expone `.value`
+       de lectura y de escritura, que es todo lo que usan valor() y setValor().
+       Cualquier otra cosa obligaría a tocar abrirForm() y guardarProveedor().
+       ================================================================ */
+
+    /**
+     * Arma el desplegable con buscador sobre el campo `id`, con esos valores.
+     *
+     * Reemplaza el elemento que estaba y le pasa el id, así el resto del archivo
+     * lo sigue encontrando.
+     *
+     * @return El elemento nuevo, con `.value` y `.buscable`
+     */
+    function crearSelectBuscable(id, valores) {
+        var viejo = document.getElementById(id);
+
+        if (!viejo) { return null; }
+
+        var lista = alfabetico(valores);
+
+        /* El valor ELEGIDO, que es lo único que se guarda. El texto del input
+           es otra cosa —lo que se está tipeando para filtrar— y confundirlos es
+           exactamente lo que haría que se guarde lo tipeado. */
+        var elegido = '';
+
+        // Un valor guardado que la lista no ofrece. Ver elegirValor().
+        var fueraDeLista = '';
+
+        var caja = document.createElement('div');
+
+        caja.id = id;
+        caja.className = 'prov-buscable';
+
+        var input = document.createElement('input');
+
+        input.type = 'text';
+        input.id = id + 'Filtro';
+        input.className = 'form-control form-control-sm prov-buscable-campo';
+        input.autocomplete = 'off';
+        input.placeholder = '(sin definir)';
+        input.title = viejo.title || '';
+
+        var panel = document.createElement('div');
+
+        panel.className = 'prov-buscable-suge';
+        panel.style.display = 'none';
+
+        caja.appendChild(input);
+        caja.appendChild(panel);
+        viejo.parentNode.replaceChild(caja, viejo);
+
+        /* La etiqueta apuntaba al campo viejo. Sin esto, hacer clic en "Rubro
+           económico" deja de enfocar el campo, que es una de esas cosas que
+           nadie reporta y a todos les molesta. */
+        var etiqueta = document.querySelector('label[for="' + id + '"]');
+
+        if (etiqueta) { etiqueta.setAttribute('for', input.id); }
+
+        var marcado = -1;      // la opción resaltada con las flechas
+        var visibles = [];     // lo que el filtro dejó a la vista
+
+        /* La opción vacía tiene que seguir existiendo: un campo sin rubro es
+           válido —en la planilla real hay 84 filas así— y sin esta opción no
+           habría forma de volver a dejarlo vacío después de elegir algo. */
+        var SIN_DEFINIR = '(sin definir)';
+
+        function texto(v) {
+            return (v === '') ? '' : v;
+        }
+
+        function cerrar() {
+            panel.style.display = 'none';
+            panel.innerHTML = '';
+            marcado = -1;
+
+            // Lo tipeado se descarta: el campo vuelve a mostrar lo elegido.
+            input.value = texto(elegido);
+            input.placeholder = SIN_DEFINIR;
+        }
+
+        function opciones(filtro) {
+            var q = sinAcentos(filtro);
+            var todos = lista.slice();
+
+            /* El valor fuera de lista va AL FINAL y no mezclado en el orden
+               alfabético: no es una opción que se ofrezca, es la que ya estaba
+               guardada. */
+            if (fueraDeLista !== '') { todos.push(fueraDeLista); }
+
+            var r = todos.filter(function(v) {
+                return q === '' || sinAcentos(v).indexOf(q) !== -1;
+            });
+
+            // Vaciar el campo se ofrece siempre, y primero.
+            r.unshift('');
+
+            return r;
+        }
+
+        function pintar(filtro) {
+            visibles = opciones(filtro);
+
+            /* El resaltado se pierde al filtrar, a propósito: apunta a una
+               posición de la lista anterior, y conservarlo dejaría marcado un
+               valor distinto del que estaba marcado hace un momento. */
+            marcado = -1;
+
+            /* SIN RESULTADOS SE DICE DÓNDE SE AGREGAN LOS VALORES. El campo no
+               acepta texto libre, así que "no hay nada" sin más se lee como que
+               el buscador está roto. */
+            if (visibles.length <= 1 && filtro !== '') {
+                visibles = [];
+                panel.innerHTML = '<div class="prov-tango-vacio">Ningún valor coincide. Los '
+                    + 'valores se dan de alta en Parámetros → Prov. Locales.</div>';
+                panel.style.display = 'block';
+                marcado = -1;
+
+                return;
+            }
+
+            panel.innerHTML = visibles.map(function(v, i) {
+                var esFuera = (v !== '' && v === fueraDeLista);
+
+                return '<button type="button" class="prov-buscable-item'
+                    + (i === marcado ? ' prov-buscable-marcado' : '')
+                    + (esFuera ? ' prov-buscable-fuera' : '') + '" data-i="' + i + '">'
+                    + escapar(v === '' ? SIN_DEFINIR : v)
+                    + (esFuera ? ' <em>(fuera de lista)</em>' : '')
+                    + '</button>';
             }).join('');
+
+            panel.style.display = 'block';
+
+            Array.prototype.forEach.call(panel.querySelectorAll('.prov-buscable-item'),
+                function(b) {
+                    // mousedown y no click: el blur del input llega antes que el
+                    // click y cerraría el panel debajo del mouse.
+                    b.addEventListener('mousedown', function(e) {
+                        e.preventDefault();
+                        elegir(visibles[parseInt(b.getAttribute('data-i'), 10)]);
+                    });
+                });
+        }
+
+        function marcar(paso) {
+            if (!visibles.length) { return; }
+
+            marcado += paso;
+
+            if (marcado < 0) { marcado = visibles.length - 1; }
+            if (marcado >= visibles.length) { marcado = 0; }
+
+            var items = panel.querySelectorAll('.prov-buscable-item');
+
+            Array.prototype.forEach.call(items, function(b, i) {
+                b.classList.toggle('prov-buscable-marcado', i === marcado);
+            });
+
+            if (items[marcado]) { items[marcado].scrollIntoView({ block: 'nearest' }); }
+        }
+
+        function elegir(v) {
+            elegido = (v === null || v === undefined) ? '' : String(v);
+            input.value = texto(elegido);
+            pintarMarcaFuera();
+            cerrar();
+        }
+
+        /* El campo en naranja cuando lo elegido no está en la lista. Es un dato
+           que hay que ver sin abrir el tooltip: la fila se guardó cuando ese
+           valor era válido, y hoy guardar la va a rechazar. */
+        function pintarMarcaFuera() {
+            var fuera = (elegido !== '' && elegido === fueraDeLista);
+
+            input.classList.toggle('prov-fuera-lista', fuera);
+
+            input.title = fuera
+                ? 'Este valor no está en la lista de opciones. Se conserva tal como está '
+                    + 'guardado y no se pierde al abrir el formulario, pero GUARDAR LO VA A '
+                    + 'RECHAZAR: elegí uno de la lista, o agregá éste en '
+                    + 'Parámetros → Prov. Locales.'
+                : (viejo.title || '');
+        }
+
+        input.addEventListener('focus', function() {
+            /* AL ENFOCAR, EL TEXTO SE VA AL PLACEHOLDER. No es cosmético: el
+               input muestra el valor elegido, así que si se deja ahí, la primera
+               tecla se AGREGA a lo que había —'Alquileres' + 'm'— y el filtro no
+               encuentra nada nunca.
+
+               Se mueve al placeholder en vez de seleccionarlo con select(),
+               porque select() al enfocar lo deshace el clic del mouse que
+               justamente acaba de dar el foco. Así el valor elegido se sigue
+               viendo, en gris, y lo que se tipea filtra desde cero. Lo repone
+               cerrar(). */
+            input.placeholder = (elegido !== '') ? elegido : SIN_DEFINIR;
+            input.value = '';
+            pintar('');
+        });
+
+        input.addEventListener('input', function() { pintar(input.value); });
+
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowDown') { e.preventDefault(); marcar(1); return; }
+            if (e.key === 'ArrowUp') { e.preventDefault(); marcar(-1); return; }
+
+            if (e.key === 'Enter') {
+                // Enter con algo marcado elige; sin nada marcado no hace nada,
+                // y sobre todo NO guarda lo tipeado.
+                e.preventDefault();
+
+                if (marcado >= 0 && visibles[marcado] !== undefined) {
+                    elegir(visibles[marcado]);
+                }
+
+                return;
+            }
+
+            // Esc cierra la lista sin cerrar el formulario entero, igual que en
+            // el buscador de Tango.
+            if (e.key === 'Escape') { cerrar(); }
+        });
+
+        // Un clic afuera cierra. Sin esto el panel queda flotando sobre la grilla.
+        document.addEventListener('click', function(e) {
+            if (!caja.contains(e.target)) { cerrar(); }
+        });
+
+        /* ES LO QUE LO VUELVE INTERCAMBIABLE CON UN <select>: valor() y
+           setValor() leen y escriben `.value` por id, y todo el archivo pasa por
+           ahí. Sin esto habría que tocar abrirForm() y guardarProveedor().
+
+           El setter va por buscable.elegir() y no por el elegir() de adentro,
+           para que escribir un valor que la lista no tiene lo conserve y lo
+           marque igual que si hubiera entrado por elegirValor(). Si no, el mismo
+           valor se comportaría distinto según por dónde entró. */
+        Object.defineProperty(caja, 'value', {
+            get: function() { return elegido; },
+            set: function(v) { caja.buscable.elegir(v); }
+        });
+
+        caja.buscable = {
+            repoblar: function(nuevos) {
+                lista = alfabetico(nuevos);
+
+                // Lo elegido puede haber dejado de estar en la lista.
+                caja.buscable.elegir(elegido);
+            },
+
+            /**
+             * Deja elegido un valor que puede NO estar en la lista.
+             *
+             * ES LA PARTE QUE NO SE PUEDE OMITIR. Un proveedor cargado antes de
+             * que existieran las listas —o traído por una importación de cuando
+             * un valor fuera de lista era advertencia y se guardaba igual—
+             * tiene valores que el desplegable no ofrece. Descartarlo acá
+             * dejaría el campo vacío EN SILENCIO, y guardar le borraría el
+             * rubro al proveedor sin que nadie lo haya pedido.
+             *
+             * Así que el valor se agrega como opción al final, marcada, y el
+             * campo se pinta en naranja.
+             */
+            elegir: function(v) {
+                var valor = (v === null || v === undefined) ? '' : String(v);
+
+                fueraDeLista = (valor !== '' && lista.indexOf(valor) === -1) ? valor : '';
+
+                elegir(valor);
+            }
+        };
+
+        elegir('');
+
+        return caja;
+    }
+
+    /** Minúsculas y sin acentos, para que el filtro no distinga ni una cosa ni la otra */
+    function sinAcentos(s) {
+        var v = String(s === null || s === undefined ? '' : s).toLowerCase();
+
+        return v.normalize ? v.normalize('NFD').replace(/[̀-ͯ]/g, '') : v;
     }
 
     /**
-     * Deja seleccionado un valor que puede NO estar en la lista.
+     * Deja elegido un valor en un campo del formulario, conservándolo aunque no
+     * esté en su lista.
      *
-     * ES LA PARTE QUE NO SE PUEDE OMITIR. Un proveedor cargado antes de que
-     * existieran las listas —o traído por una importación, donde un valor fuera
-     * de lista es advertencia y se guarda igual— tiene valores que el
-     * desplegable no ofrece. Si se le pide a un <select> un valor que no tiene,
-     * queda vacío EN SILENCIO, y guardar el formulario le borraría el rubro al
-     * proveedor sin que nadie lo haya pedido.
-     *
-     * Así que el valor se agrega como opción, marcada, y el campo se pinta en
-     * naranja: el dato no se pierde, se ve que está fuera de lista, y quien
-     * edita decide si lo deja o elige uno de la lista.
+     * Sin listas cargadas los campos siguen siendo <input> de texto libre —es
+     * el comportamiento de antes— y ahí no hay nada que conservar: el valor
+     * entra tal cual.
      */
     function elegirValor(id, valor) {
         var el = document.getElementById(id);
@@ -1808,37 +2211,12 @@
 
         var v = valor || '';
 
-        el.classList.remove('prov-fuera-lista');
-
-        if (el.tagName !== 'SELECT') {
-            el.value = v;
+        if (el.buscable) {
+            el.buscable.elegir(v);
             return;
         }
 
-        // Se saca la opción temporal de la edición anterior.
-        var previa = el.querySelector('option[data-fuera-lista]');
-
-        if (previa) { previa.remove(); }
-
         el.value = v;
-
-        // Se le pidió un valor y el select quedó vacío: no está en la lista.
-        if (v !== '' && el.value !== v) {
-            var opt = document.createElement('option');
-
-            opt.value = v;
-            opt.textContent = v + '  (fuera de lista)';
-            opt.dataset.fueraLista = '1';
-            el.appendChild(opt);
-            el.value = v;
-        }
-
-        if (v !== '' && el.querySelector('option[data-fuera-lista]')) {
-            el.classList.add('prov-fuera-lista');
-            el.title = 'Este valor no está en la lista de opciones. Se conserva tal como está '
-                + 'guardado: elegí uno de la lista si corresponde, o agregalo en '
-                + 'Parámetros → Prov. Locales.';
-        }
     }
 
     /**
