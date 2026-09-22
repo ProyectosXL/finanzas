@@ -234,16 +234,11 @@
    flujo neto ya con esa aplicación.
    ============================================================================ */
 
-/* El stock. Se atenúa como una informativa —no entra en ninguna suma— pero sin
-   la itálica, porque el importe de su columna Total sí es un número que se lee
-   y compara contra los rojos de abajo. */
-.tab-cashflow .cf-tipo-stock_cobertura td {
-    color: #6b7c8f;
-}
-
-.tab-cashflow .cf-marca-stock {
-    color: #2e9e6b;
-}
+/* Acá estaban .cf-tipo-stock_cobertura y .cf-marca-stock, que pintaban las filas
+   de stock y su chanchito. Las filas ya no se dibujan —la sección tiene una fila
+   por tipo de fondo, la de uso— así que no hay nada que pintar. Ver
+   filaDibujable() en Js/Cashflow.js: las filas siguen en la estructura porque
+   son las que le dan el tope al motor. */
 
 /* CUÁNTO QUEDA, EN LA CELDA DE CONCEPTO
 
@@ -269,13 +264,11 @@
     color: #c0392b;
 }
 
-/* Las filas de uso. El borde superior de la primera las separa del stock:
-   son dos cosas distintas -lo que hay y lo que se usa- y sin la línea se leen
-   como un bloque de números del mismo tipo. Las de uso entre sí no llevan
-   línea: son el mismo tipo de dato, uno por fondo. */
-.tab-cashflow .cf-tipo-stock_cobertura + .cf-tipo-uso_cobertura td {
-    border-top: 1px dashed #c8d4e0;
-}
+/* Acá había una línea que separaba las filas de uso de las de stock. Se sacó
+   junto con las de stock, que ya no se dibujan: la sección quedó con una fila
+   por tipo de fondo y no hay dos bloques que separar. Ver filaDibujable() en
+   Js/Cashflow.js — las filas SIGUEN EXISTIENDO en la estructura, porque son las
+   que le dan el tope al motor; lo que no hay es un renglón. */
 
 .tab-cashflow .cf-marca-auto {
     color: #2e7cc4;
@@ -365,13 +358,11 @@
     text-align: right;
 }
 
-/* La segunda línea de una fila de uso: cuánto calculó el motor y cuánto se
-   cargó. Es el mismo estilo que el "queda X de Y" del stock, en el color de
-   la marca de la fila. */
-.tab-cashflow .cf-uso-linea {
-    color: #2e7cc4;
-    font-weight: 500;
-}
+/* Acá estaba .cf-uso-linea, el "calculado $ X · a mano $ Y" de la fila de uso.
+   Ese desglose se mudó al tooltip -ver textoUsoCobertura() en Js/Cashflow.js- y
+   la segunda línea de la fila de uso pasó a ser el disponible, que usa
+   .cf-stock-saldo de arriba: es un disponible, así que se ve verde, o rojo si
+   está excedido, como se veía cuando lo llevaba la fila de stock. */
 
 /* ============================================================================
    COLUMNAS CON SALDO FINAL NEGATIVO

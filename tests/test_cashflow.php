@@ -484,3 +484,93 @@ $p4 = porCodigo($t4);
 chequear('el resultado parcial solo ve lo que tiene arriba',
     100.0, $p4['PARCIAL']['dias']['2026-09-06']);
 chequear('el resultado final ve todo', 70.0, $p4['TOTAL']['dias']['2026-09-06']);
+
+/* ================================================================
+   LA SECCION COBERTURA: UNA FILA POR TIPO DE FONDO
+
+   Las cuatro filas -dos de stock y dos de uso- pasaron a ser dos: queda la de
+   uso, con el disponible de SUS fondos en la celda de Concepto.
+
+   ES UN CAMBIO DE PRESENTACION Y NADA MAS, y esa es la parte que hay que poder
+   verificar. Las filas de stock siguen en la estructura porque son las que le
+   dan al motor el tope por fondo, el stock contra el que se calcula el
+   disponible y lo que CoberturaAutomatica respeta para no rescatar de mas.
+   Desactivarlas -que es lo que parece equivalente a esconderlas- deja al motor
+   sin topes y rompe el calculo entero, en silencio.
+
+   Por eso el motor no se toca: test_cobertura, test_cobertura_automatica y
+   test_fondos siguen pasando sin cambios, y eso es parte del criterio. Lo que
+   se chequea aca es que la decision viva en el FRONT.
+   ================================================================ */
+seccion('las filas de stock no se dibujan, pero siguen existiendo');
+
+$jsCf = file_get_contents(__DIR__ . '/../cashflow/Js/Cashflow.js');
+
+// El front las esconde al dibujar, y lo hace filtrando ANTES de recorrer: con
+// un salteo adentro del bucle, una seccion sin filas visibles igual dibujaria
+// su encabezado y quedaria un titulo sin nada debajo.
+chequear('el front filtra las filas de stock', true,
+    strpos($jsCf, "return f.tipo !== 'STOCK_COBERTURA';") !== false);
+chequear('y filtra antes de recorrer, no adentro del bucle', true,
+    strpos($jsCf, 'datos.filas.filter(filaDibujable).forEach(') !== false);
+
+// Y el motor las sigue resolviendo igual: si esto desapareciera, el disponible
+// y los topes por fondo se irian con ellas.
+$cfFuente = file_get_contents(__DIR__ . '/../cashflow/Class/Cashflow.php');
+
+chequear('el motor sigue leyendo el stock', true,
+    strpos($cfFuente, "if (\$f['tipo'] === 'STOCK_COBERTURA') {") !== false);
+chequear('y de ahi saca los topes por fondo', true,
+    strpos($cfFuente, "foreach (\$f['fondos_tope'] as \$clave => \$d) {") !== false);
+
+seccion('el disponible que muestra la fila de uso es el de SUS fondos');
+
+/* El total global sumaria pesos invertidos con dolares comitente, y diria -en
+   la fila de Inversiones- plata de la que esa fila no puede rescatar. Las
+   claves de la fila estan en fondos_fila y el detalle en cobertura.fondos. */
+chequear('la linea corre sobre las filas de uso', true,
+    strpos($jsCf, "if (f.tipo !== 'USO_COBERTURA' || !f.cobertura || !f.cobertura.hay_stock)")
+        !== false);
+chequear('y se arma con los fondos de la fila', true,
+    strpos($jsCf, 'fondosConDetalle(f)') !== false);
+
+// SIN FONDOS NO SE ESCRIBE NADA: "$ 0 disponibles" diria que hay un fondo
+// vacio en lugar de que no hay fondo.
+chequear('una fila sin fondos no dice nada', true,
+    strpos($jsCf, 'if (!fondos.length) {') !== false);
+
+// EL EXCEDIDO SE CONSERVA. Lo daba la fila de stock y se perderia al sacarla:
+// es el aviso de que se esta cubriendo con plata que todavia no figura como
+// invertida.
+chequear('el excedido se sigue marcando', true,
+    strpos($jsCf, 'var excedido = (disponible < 0);') !== false);
+
+seccion('el desglose calculado / a mano no se borro: se mudo al tooltip');
+
+/* Con el disponible en la misma fila, dejarlo tambien en pantalla daria tres
+   lineas en la celda de Concepto, que es lo contrario de simplificar. Pero el
+   neto que calculo el motor contra lo cargado a mano es lo que explica el
+   numero de la fila: sin eso es un importe sin causa. */
+chequear('existe el texto para el tooltip', true,
+    strpos($jsCf, 'function textoUsoCobertura(f)') !== false);
+chequear('sale de cobertura_totales, que lo suma el motor', true,
+    strpos($jsCf, 'var t = f.cobertura_totales;') !== false);
+chequear('y se cuelga del tooltip de la fila', true,
+    strpos($jsCf, 'textoUsoCobertura(f) + textoSaldoCobertura(f)') !== false);
+
+// Ya no se dibuja como linea aparte.
+chequear('no quedo ninguna segunda linea de uso', false,
+    strpos($jsCf, 'cf-uso-linea') !== false);
+
+seccion('un fondo con stock que ninguna fila aplica se sigue avisando');
+
+/* ES LA UNICA FORMA DE ENTERARSE. Antes la fila de stock estaba a la vista y
+   su importe no cuadraba con nada; ahora, si ninguna fila de uso nombra ese
+   fondo, no hay ningun renglon donde aparezca. */
+chequear('el motor arma el aviso', true, strpos($cfFuente, 'avisarSinFila') !== false);
+chequear('y dice que el motor no rescata de ahi', true,
+    strpos($cfFuente, 'ninguna fila de uso los aplica') !== false);
+
+// Y llega a la pantalla: los warnings del motor se pintan.
+chequear('los avisos del motor se pintan', true,
+    strpos($jsCf, 'datos.warnings.map(') !== false);

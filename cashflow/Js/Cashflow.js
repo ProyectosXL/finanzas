@@ -470,7 +470,12 @@
         var seccionActual = null;
         var totalCols = cols.length + 2;
 
-        datos.filas.forEach(function(f) {
+        /* SE FILTRA ANTES DE RECORRER, y no salteando adentro del bucle: el
+           encabezado de sección se emite cuando CAMBIA la sección, así que con
+           un `continue` adentro una sección cuyas filas estén todas ocultas
+           igual dibujaría su título, y quedaría un encabezado sin nada debajo.
+           Filtrando primero, una sección sin filas visibles no existe. */
+        datos.filas.filter(filaDibujable).forEach(function(f) {
             if (f.seccion !== seccionActual) {
                 seccionActual = f.seccion;
 
@@ -490,6 +495,34 @@
         conectarCobertura();
     }
 
+    /**
+     * Si una fila del motor se dibuja.
+     *
+     * LAS FILAS DE STOCK NO SE DIBUJAN, Y NO ESTÁN APAGADAS: es la diferencia
+     * entera de este cambio y conviene leerla antes de "simplificar" algo.
+     *
+     * La sección Cobertura tenía cuatro filas: dos de stock —cuánto hay
+     * invertido en cada clase de fondo— y dos de uso —cuánto se rescata—. Para
+     * quien mira el tablero eso son dos preguntas sobre la misma plata, y
+     * contestarlas en filas separadas obliga a leer dos renglones para saber si
+     * conviene aplicar. Ahora queda UNA FILA POR TIPO DE FONDO, la de uso, con
+     * el disponible en su celda de Concepto: ver lineaSaldoCobertura().
+     *
+     * PERO LAS FILAS DE STOCK SIGUEN EXISTIENDO EN LA ESTRUCTURA, y tienen que
+     * seguir. Son las que le dan al motor el tope por fondo ('fondos_tope'), el
+     * stock contra el que resolverCobertura() calcula el disponible, y lo que
+     * CoberturaAutomatica respeta para no rescatar de más. Desactivarlas desde
+     * Parámetros —que es lo que parece equivalente a esconderlas— deja al motor
+     * sin topes y rompe el cálculo entero, en silencio: seguiría rescatando,
+     * pero sin límite.
+     *
+     * Por eso esto es una decisión de PRESENTACIÓN y vive acá, en el front, y
+     * no en la configuración.
+     */
+    function filaDibujable(f) {
+        return f.tipo !== 'STOCK_COBERTURA';
+    }
+
     function filaHtml(f, cols) {
         var clases = ['cf-fila', 'cf-tipo-' + f.tipo.toLowerCase()];
 
@@ -501,7 +534,7 @@
                 return celdaCobertura(f, f[c.rama][c.clave], c, i);
             }
 
-            return celdaHtml(f[c.rama][c.clave], c, i, anotacion(f, c), f.tipo);
+            return celdaHtml(f[c.rama][c.clave], c, i, anotacion(f, c));
         }).join('');
 
         var total = totalDeVista(f);
@@ -532,21 +565,21 @@
             marca = ' <i class="fas fa-arrow-right-arrow-left cf-marca cf-marca-arrastre" title="'
                 + escapar(textoArrastre(f)) + '"></i>';
         } else if (f.tipo === 'USO_COBERTURA') {
-            // La calcula el motor, y es la única fila del tablero que se puede
-            // pisar acá. Sin decirlo, nadie descubre ni una cosa ni la otra.
+            /* La calcula el motor, y es la única fila del tablero que se puede
+               pisar acá. Sin decirlo, nadie descubre ni una cosa ni la otra.
+
+               El tooltip además lleva lo que ANTES ERA UNA SEGUNDA LÍNEA en
+               pantalla —cuánto calculó el motor y cuánto se cargó a mano, ver
+               textoUsoCobertura()—. Se mudó acá cuando el disponible bajó a esta
+               misma fila: tres líneas en la celda de Concepto es lo contrario de
+               lo que este cambio venía a hacer. */
             marca = ' <i class="fas fa-wand-magic-sparkles cf-marca cf-marca-auto" title="'
                 + escapar('La calcula el motor en cada carga: rescata de ' + nombresFondos(f)
                     + ' exactamente lo que falta para que el Saldo Final no quede abajo de '
                     + 'cero, y devuelve cuando sobra. Para pisar un día, hacé clic en su celda '
                     + 'y cargá el importe a mano: lo manual va primero y el motor cubre el '
                     + 'resto. Un importe negativo devuelve plata al fondo.'
-                    + textoSaldoCobertura(f))
-                + '"></i>';
-        } else if (f.tipo === 'STOCK_COBERTURA') {
-            marca = ' <i class="fas fa-piggy-bank cf-marca cf-marca-stock" title="'
-                + escapar('Stock, no flujo: es cuánto hay invertido y disponible para cubrir. '
-                    + 'No entra en ninguna suma y no va en ninguna columna de fecha.'
-                    + textoSaldoCobertura(f))
+                    + textoUsoCobertura(f) + textoSaldoCobertura(f))
                 + '"></i>';
         } else if (f.sin_datos) {
             marca = ' <i class="fas fa-circle-info cf-marca" title="Todavía no hay datos para esta fila"></i>';
@@ -579,9 +612,8 @@
         // columna Total, porque la de Concepto es la que queda FIJA al
         // scrollear a lo ancho: con veintiocho columnas, un importe que sólo
         // vive al final de la tabla no lo mira nadie. Y el número que importa
-        // para decidir no es cuánto hay, sino cuánto QUEDA. En las filas de
-        // uso, la misma línea dice cuánto calculó el motor y cuánto se cargó.
-        var saldo = lineaSaldoCobertura(f) + lineaUsoCobertura(f);
+        // para decidir no es cuánto hay, sino cuánto QUEDA.
+        var saldo = lineaSaldoCobertura(f);
 
         if (f.tab) {
             // data-sub-tab lo lee el JS de la pestaña destino para abrirse en la
@@ -604,44 +636,92 @@
        ================================================================ */
 
     /**
-     * La segunda línea de la celda de Concepto en la fila de stock: cuánto
-     * queda disponible, y cuánto había si ya se aplicó algo.
+     * La segunda línea de la celda de Concepto de una fila de uso: cuánto queda
+     * disponible EN LOS FONDOS DE ESA FILA.
      *
-     * Sólo la lleva la fila de stock. En la de uso el número ya está en su
-     * propia columna Total, y repetirlo ahí haría parecer que son dos cosas
-     * distintas.
+     * ANTES ERA LA LÍNEA DE LA FILA DE STOCK, y mostraba el disponible GLOBAL.
+     * Las dos cosas cambiaron a la vez y por el mismo motivo: la sección tiene
+     * una fila por tipo de fondo —la de uso, ver filaDibujable()— así que el
+     * número que le corresponde a cada una es el de SUS fondos. El total global
+     * sumaría pesos invertidos con dólares comitente y diría, en la fila de
+     * Inversiones, plata de la que esa fila no puede rescatar.
+     *
+     * Los fondos de la fila están en `fondos_fila` y el detalle de cada uno en
+     * `cobertura.fondos[clave]`, que trae stock, aplicado, manual, automático y
+     * disponible. Acá sólo se suma y se dibuja: lo resolvió el motor, en
+     * Cashflow::resolverCobertura().
+     *
+     * CON MÁS DE UN FONDO SE SUMAN los disponibles y el tooltip los desglosa: en
+     * pantalla lo que se decide es "¿alcanza?", y para eso el número es uno
+     * solo.
+     *
+     * SIN FONDOS NO SE ESCRIBE NADA. Una fila de uso que no nombra ninguna
+     * cuenta no tiene de dónde rescatar, y "$ 0 disponibles" diría que hay un
+     * fondo vacío en lugar de que no hay fondo. El motor ya avisa aparte cuando
+     * pasa al revés —un fondo con stock que ninguna fila aplica— en
+     * avisarSinFila().
      */
     function lineaSaldoCobertura(f) {
-        if (f.tipo !== 'STOCK_COBERTURA' || !f.cobertura || !f.cobertura.hay_stock) {
+        if (f.tipo !== 'USO_COBERTURA' || !f.cobertura || !f.cobertura.hay_stock) {
             return '';
         }
 
-        var c = f.cobertura;
-        var aplicado = Number(c.aplicado) || 0;
+        var fondos = fondosConDetalle(f);
 
-        // Sin nada aplicado, "queda X de X" es ruido: alcanza con el importe.
-        if (aplicado === 0) {
-            return '<div class="cf-stock-saldo" title="'
-                + escapar('Todavía no se aplicó nada: está todo disponible.') + '">'
-                + '$ ' + plataCorta(c.stock) + ' disponibles</div>';
+        if (!fondos.length) {
+            return '';
         }
 
-        // Aplicar más de lo que hay no se bloquea —puede ser deliberado— pero
-        // se marca: el Saldo Final estaría tapado con plata que todavía no
-        // figura como invertida. El motor además lo dice en los avisos.
-        var excedido = (Number(c.disponible) < 0);
+        var disponible = 0;
+        var partes = [];
+
+        fondos.forEach(function(d) {
+            disponible += Number(d.disponible) || 0;
+
+            partes.push('«' + d.nombre + '»: quedan $ ' + plataCorta(d.disponible) + ' de $ '
+                + plataCorta(d.stock) + ' invertidos ($ ' + plataCorta(d.automatico)
+                + ' los aplicó el motor y $ ' + plataCorta(d.manual) + ' están cargados a mano).');
+        });
+
+        /* Aplicar más de lo que hay no se bloquea —puede ser deliberado— pero
+           se marca: el Saldo Final estaría tapado con plata que todavía no
+           figura como invertida. El motor además lo dice en los avisos. */
+        var excedido = (disponible < 0);
+
+        var detalle = (fondos.length > 1) ? (' Por fondo: ' + partes.join(' ')) : (' ' + partes[0]);
 
         return '<div class="cf-stock-saldo' + (excedido ? ' cf-negativo' : '') + '" title="'
-            + escapar('Hay $ ' + plataCorta(c.stock) + ' invertidos y se aplicaron $ '
-                + plataCorta(aplicado) + ' a lo largo de todo el horizonte'
+            + escapar('Es cuánto queda para cubrir con esta fila, sobre todo el horizonte.'
+                + detalle
                 + (excedido
-                    ? ': se está cubriendo con $ ' + plataCorta(-Number(c.disponible))
+                    ? ' Se está cubriendo con $ ' + plataCorta(-disponible)
                         + ' que todavía no figuran como invertidos.'
-                    : '.'))
-            + '">$ ' + plataCorta(c.disponible) + ' de $ ' + plataCorta(c.stock) + '</div>';
+                    : ''))
+            + '">$ ' + plataCorta(disponible) + ' disponibles</div>';
     }
 
-    /** Lo mismo, en una frase, para agregar al final de un tooltip */
+    /** Los fondos que aplica una fila de uso, con lo que el motor resolvió de cada uno */
+    function fondosConDetalle(f) {
+        var fondos = (f.cobertura && f.cobertura.fondos) ? f.cobertura.fondos : {};
+
+        return (f.fondos_fila || []).map(function(clave) {
+            return fondos[clave] || null;
+        }).filter(function(d) { return d !== null; });
+    }
+
+    /**
+     * El total de TODA la sección Cobertura, en una frase para el final de un
+     * tooltip: cuánto hay invertido entre todos los fondos, cuánto se aplicó y
+     * cuánto queda.
+     *
+     * DICE EXPLÍCITAMENTE QUE ES EL TOTAL, y antes no hacía falta: lo llevaba la
+     * fila de stock, que era la fila del total. Ahora lo lleva una fila de uso
+     * que tiene al lado SU propio disponible, el de sus fondos, y dos números
+     * distintos sin decir de qué es cada uno se leen como una contradicción.
+     *
+     * Sigue estando porque es el único lugar donde queda el total de la sección
+     * desde que las filas de stock no se dibujan.
+     */
     function textoSaldoCobertura(f) {
         if (!f.cobertura || !f.cobertura.hay_stock) {
             return '';
@@ -649,7 +729,8 @@
 
         var c = f.cobertura;
 
-        return ' Hay $ ' + plataCorta(c.stock) + ' invertidos, se aplican $ '
+        return ' En TODA la sección Cobertura, sumando los fondos de las otras filas, hay $ '
+            + plataCorta(c.stock) + ' invertidos, se aplican $ '
             + plataCorta(c.aplicado) + ' ($ ' + plataCorta(c.automatico) + ' calculados por el '
             + 'motor y $ ' + plataCorta(c.manual) + ' cargados a mano) y quedan $ '
             + plataCorta(c.disponible)
@@ -658,14 +739,24 @@
     }
 
     /**
-     * La segunda línea de la celda de Concepto en una fila de uso: cuánto
-     * calculó el motor y cuánto se cargó a mano, sobre todo el horizonte. Los
-     * dos números los suma el motor (cobertura_totales); acá sólo se dibujan.
+     * Cuánto calculó el motor y cuánto se cargó a mano en una fila de uso,
+     * sobre todo el horizonte, en una frase para el tooltip.
      *
-     * Sin nada de nada no se escribe: "calculado $ 0 · a mano $ 0" es ruido.
+     * ERA UNA LÍNEA EN PANTALLA —'calculado $ X · a mano $ Y'— y se mudó al
+     * tooltip cuando el disponible bajó a esta misma fila: con las dos, la celda
+     * de Concepto quedaba con tres renglones, que es lo contrario de lo que
+     * buscaba dejar una fila por fondo.
+     *
+     * NO SE BORRÓ, SE MUDÓ, y eso importa: el neto que calculó el motor contra
+     * lo que alguien cargó a mano es lo que explica el número de la fila. Sin
+     * eso, una fila de uso es un importe sin causa.
+     *
+     * Los dos números los suma el motor (cobertura_totales); acá sólo se
+     * escriben. Sin nada de nada no se dice: "calculado $ 0 y a mano $ 0" es
+     * ruido.
      */
-    function lineaUsoCobertura(f) {
-        if (f.tipo !== 'USO_COBERTURA' || !f.cobertura_totales) {
+    function textoUsoCobertura(f) {
+        if (!f.cobertura_totales) {
             return '';
         }
 
@@ -677,15 +768,9 @@
             return '';
         }
 
-        var partes = [];
-
-        if (auto !== 0) { partes.push('calculado $ ' + plataCorta(auto)); }
-        if (manual !== 0) { partes.push('a mano $ ' + plataCorta(manual)); }
-
-        return '<div class="cf-stock-saldo cf-uso-linea" title="'
-            + escapar('Sobre todo el horizonte. Lo calculado es el neto de lo que el motor '
-                + 'rescató menos lo que devolvió; lo manual es lo cargado en las celdas.')
-            + '">' + escapar(partes.join(' · ')) + '</div>';
+        return ' Sobre todo el horizonte se aplican $ ' + plataCorta(auto) + ' calculados por el '
+            + 'motor —el neto de lo que rescató menos lo que devolvió— y $ ' + plataCorta(manual)
+            + ' cargados a mano en las celdas.';
     }
 
     /** Los nombres de los fondos que aplica una fila de uso, para los textos */
@@ -773,21 +858,18 @@
         return f.detalle[id] || null;
     }
 
-    function celdaHtml(valor, col, i, nota, tipo) {
+    function celdaHtml(valor, col, i, nota) {
         var clases = clasesColumna(col, i).concat(['text-end']);
 
-        // null no es cero. Son dos motivos distintos y cada uno se explica con
-        // lo suyo: una columna que no cubre ningún día futuro, o una fila de
-        // stock, que no va en ninguna columna de fecha porque es plata que
-        // está, no plata que entra ese día.
-        if (valor === null || valor === undefined) {
-            var porque = (tipo === 'STOCK_COBERTURA')
-                ? 'Es un stock, no un flujo: la plata ya está invertida y no entra '
-                    + 'ningún día en particular. El importe disponible está en la columna Total.'
-                : 'Esta columna no cubre ningún día futuro';
+        /* null no es cero: es una columna que no cubre ningún día futuro.
 
+           Acá había un segundo motivo —la fila de stock, que no va en ninguna
+           columna de fecha— y se sacó porque esas filas ya no se dibujan: ver
+           filaDibujable(). La regla del motor no cambió, sigue vaciándoles las
+           columnas; lo que no hay es dónde mostrarlas. */
+        if (valor === null || valor === undefined) {
             return '<td class="' + clases.join(' ') + ' cf-nulo" '
-                + 'title="' + escapar(porque) + '">—</td>';
+                + 'title="Esta columna no cubre ningún día futuro">—</td>';
         }
 
         var n = Number(valor);
