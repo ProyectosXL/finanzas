@@ -184,12 +184,31 @@
                                 <th rowspan="2">Contenedor</th>
                                 <th rowspan="2">Orden Compra</th>
                                 <th rowspan="2">Despachante</th>
-                                <!-- El FOB en dólares queda como REFERENCIA. Es
-                                     el dato del contenedor y es con lo que se
-                                     chequea contra la factura del proveedor; lo
-                                     que entra al cashflow es la columna en
-                                     pesos. -->
-                                <th rowspan="2">Valor FOB (USD)</th>
+                                <!-- LAS TRES COLUMNAS DEL SALDO, EN ESE ORDEN:
+                                     cuánto vale el contenedor, cuánto se pagó
+                                     ya y cuánto falta. Es la resta escrita de
+                                     izquierda a derecha, que es lo que hace que
+                                     el número de la punta no haya que creerlo:
+                                     se ve de dónde sale.
+
+                                     SON LOS MISMOS NÚMEROS QUE COMERCIO
+                                     EXTERIOR. La cuenta está replicada acá
+                                     —dos apps, dos despliegues— pero tiene que
+                                     dar exactamente lo que muestra la pantalla
+                                     de pagos de allá, hasta el centavo de
+                                     tolerancia. Ver Class/Comex.php.
+
+                                     LO QUE ENTRA AL CASHFLOW ES EL PENDIENTE,
+                                     valuado en la columna en pesos. El FOB
+                                     queda como referencia: es con lo que se
+                                     chequea contra la factura del proveedor. -->
+                                <th rowspan="2">FOB total (USD)</th>
+                                <th rowspan="2">
+                                    Pagado (USD)
+                                    <i class="fas fa-list ms-1" style="font-size: 10px;"
+                                       title="Click para ver los pagos cargados en Comercio Exterior"></i>
+                                </th>
+                                <th rowspan="2">Pendiente (USD)</th>
                                 <th rowspan="2">ETD</th>
                                 <th rowspan="2">ETA</th>
                                 <th rowspan="2">
@@ -233,11 +252,71 @@
                         </tbody>
                         <tfoot class="table-light">
                             <tr id="totalsRow">
-                                <td colspan="10" class="fw-bold text-end">TOTALES</td>
+                                <td colspan="12" class="fw-bold text-end">TOTALES</td>
                                 <!-- Los totales se generan dinámicamente -->
                             </tr>
                         </tfoot>
                     </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================
+         LOS PAGOS DE UN CONTENEDOR, SOLO LECTURA
+
+         El detalle detrás de la columna "Pagado (USD)": de qué pagos sale ese
+         número. Existe porque desde feature/comex-saldo-pendiente el importe
+         que proyecta una fila DEPENDE de lo que se haya cargado en la otra
+         aplicación, y un número que cambió por algo que pasó en otra pantalla,
+         sin forma de ver qué fue, es indistinguible de un error de ésta.
+
+         NO SE CARGA NI SE EDITA NADA ACÁ, y no es una etapa pendiente: los
+         pagos se registran en Comercio Exterior, que es el dueño del circuito.
+         El pie del modal lo dice, para que nadie busque el botón que no está.
+         ================================================================ -->
+    <div class="modal fade" id="modalPagosComex" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h6 class="modal-title">
+                        <i class="fas fa-receipt me-1"></i>
+                        Pagos de <span id="pagosComexContenedor"></span>
+                    </h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"
+                            aria-label="Cerrar"></button>
+                </div>
+
+                <!-- La resta, arriba y completa. El modal contesta "¿de dónde
+                     sale el pendiente?", así que el pendiente tiene que estar
+                     acá y no sólo en la fila de atrás. -->
+                <div class="card-body py-2 border-bottom">
+                    <small class="text-muted" id="pagosComexResumen"></small>
+                </div>
+
+                <div class="modal-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0" id="tablaPagosComex">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="text-center" style="width: 110px;">Fecha</th>
+                                    <th>Forma</th>
+                                    <th>Medio</th>
+                                    <th class="text-end" style="width: 150px;">Monto (USD)</th>
+                                    <th class="text-center" style="width: 160px;">Cargado el</th>
+                                </tr>
+                            </thead>
+                            <tbody id="bodyPagosComex"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer py-2">
+                    <small class="text-muted me-auto">
+                        <i class="fas fa-lock me-1"></i>
+                        Sólo lectura: los pagos se cargan en Comercio Exterior.
+                    </small>
+                    <button type="button" class="btn btn-sm btn-secondary"
+                            data-bs-dismiss="modal">Cerrar</button>
                 </div>
             </div>
         </div>

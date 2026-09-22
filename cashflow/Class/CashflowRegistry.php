@@ -122,23 +122,37 @@ class CashflowRegistry {
             'moneda' => 'USD',
             'disponible' => true,
             'tab' => 'proveedores_exterior',
-            /* EL CORTE ES POR "YA SE PAGO", y nace con el tilde de la pestana.
-               Mismo criterio que la exclusion de cheques de cartera: el importe
-               marcado NO DESAPARECE, cambia de serie.
+            /* EL CORTE ES POR QUE SALE DE LA PROYECCION, y son DOS cosas
+               distintas. Mismo criterio que la exclusion de cheques de cartera:
+               el importe que sale NO DESAPARECE, cambia de serie.
 
-                   PAGOS + PAGOS_PAGADOS = PAGOS_TODO
+                   PAGOS + PAGOS_PAGADOS + PAGOS_COMEX = PAGOS_TODO
+
+               PAGOS_PAGADOS lo saca el TILDE de la pestana: una afirmacion del
+               cashflow sobre su propia proyeccion, que se pone y se saca desde
+               acá. PAGOS_COMEX lo sacan los PAGOS CARGADOS EN COMERCIO
+               EXTERIOR, que este modulo solo lee. Con una sola serie para las
+               dos, el tablero baja y nadie puede contestar cual de las dos
+               cosas lo bajo.
 
                PAGOS cambia de significado y NO de codigo, a proposito: es el
                que la fila del tablero ya tiene configurado, asi que el circuito
-               entra sin repuntar ninguna fila ni tocar Parametros. Mientras no
-               haya nada marcado vale exactamente lo mismo que antes. */
+               entra sin repuntar ninguna fila ni tocar Parametros. Desde
+               feature/comex-saldo-pendiente mide LO QUE FALTA PAGAR y no el FOB
+               entero; mientras no haya pagos cargados ni nada marcado vale
+               exactamente lo mismo que antes.
+
+               Y PAGOS_TODO PASA A SER EL FOB COMPLETO, que es lo que esta fila
+               proyectaba antes de esa rama: quien quiera ver el antes y el
+               despues del cambio lo tiene en el mismo tablero. */
             'series' => [
-                'PAGOS' => 'Pagos pendientes a proveedores del exterior',
-                'PAGOS_PAGADOS' => 'Solo los pagos marcados como ya hechos',
-                'PAGOS_TODO' => 'Pagos al exterior, TODOS: pendientes y ya hechos'
+                'PAGOS' => 'Lo que falta pagar a proveedores del exterior',
+                'PAGOS_PAGADOS' => 'Solo lo tildado como ya hecho desde el cashflow',
+                'PAGOS_COMEX' => 'Lo que Comercio Exterior ya registro como pagado',
+                'PAGOS_TODO' => 'Pagos al exterior, TODO: el FOB completo de lo listado'
             ],
             'componentes' => [
-                'PAGOS_TODO' => ['PAGOS', 'PAGOS_PAGADOS']
+                'PAGOS_TODO' => ['PAGOS', 'PAGOS_PAGADOS', 'PAGOS_COMEX']
             ]
         ],
 

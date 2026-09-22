@@ -333,13 +333,28 @@ seccion('el corte esta declarado en el registro');
 
 require_once __DIR__ . '/../cashflow/Class/CashflowRegistry.php';
 
+/* LAS DOS PESTANAS YA NO TIENEN LA MISMA CANTIDAD DE PARTES. Proveedores
+   Exterior ganó una tercera en feature/comex-saldo-pendiente -PAGOS_COMEX, lo
+   que Comercio Exterior ya registró como pagado- porque hay DOS formas
+   distintas de que un egreso salga de su proyección, y el tablero tiene que
+   poder contestar cuál de las dos fue. Crono Nacionalización sigue con dos:
+   allá no hay pagos parciales contra un saldo.
+
+   Por eso el total va explícito y no como $series[2]: escribir la lista entera
+   es lo que hace que agregar o sacar una parte tenga que pasar por acá. */
 foreach ([
-    'COMEX_PROV_EXT' => ['PAGOS', 'PAGOS_PAGADOS', 'PAGOS_TODO'],
-    'COMEX_NAC' => ['NACIONALIZACION', 'NACIONALIZACION_PAGADAS', 'NACIONALIZACION_TODO']
-] as $cod => $series) {
+    'COMEX_PROV_EXT' => [
+        'partes' => ['PAGOS', 'PAGOS_PAGADOS', 'PAGOS_COMEX'],
+        'total' => 'PAGOS_TODO'
+    ],
+    'COMEX_NAC' => [
+        'partes' => ['NACIONALIZACION', 'NACIONALIZACION_PAGADAS'],
+        'total' => 'NACIONALIZACION_TODO'
+    ]
+] as $cod => $corte) {
     $reg = CashflowRegistry::meta($cod);
 
-    foreach ($series as $s) {
+    foreach (array_merge($corte['partes'], [$corte['total']]) as $s) {
         chequear($cod . ' sirve ' . $s, true, isset($reg['series'][$s]));
     }
 
@@ -347,8 +362,8 @@ foreach ([
        el tablero el universo Y una de sus partes: serian dos filas contando el
        mismo importe, y la regla de origen repetido no lo ve porque son series
        distintas. */
-    chequear($cod . ' declara el total como compuesto', [$series[0], $series[1]],
-        $reg['componentes'][$series[2]]);
+    chequear($cod . ' declara el total como compuesto', $corte['partes'],
+        $reg['componentes'][$corte['total']]);
 }
 
 seccion('la fila del tablero no hay que repuntarla');
@@ -748,10 +763,18 @@ seccion('la serie del tablero declara la moneda de origen');
    seguir diciendo ARS, que era la afirmacion equivocada. */
 chequear('ninguna serie de Comex declara pesos', false,
     strpos($provSrc, "'ARS'") !== false);
-/* Ocho: las seis series -tres por pestana- mas las dos series vacias del caso
-   "no se pudo leer la curva", que tambien tienen que declarar la moneda: si
-   dijeran pesos, un cero por falta de curva se leeria como un cero real. */
-chequear('todas las series declaran USD', 8, substr_count($provSrc, "'USD'"));
+/* Nueve: las siete series -cuatro en Proveedores Exterior desde
+   feature/comex-saldo-pendiente, tres en Crono Nacionalizacion- mas las dos
+   series vacias del caso "no se pudo leer la curva", que tambien tienen que
+   declarar la moneda: si dijeran pesos, un cero por falta de curva se leeria
+   como un cero real.
+
+   LAS CUATRO DE PROVEEDORES EXTERIOR SON LA MISMA PLATA MIRADA POR DONDE SALE
+   -lo que falta, lo tildado, lo que Comex ya pago y el FOB completo- asi que
+   las cuatro declaran USD. Una que dijera otra cosa haria que el tablero
+   dibujara la marca de conversion en unas filas si y en otras no, sobre los
+   mismos contenedores. */
+chequear('todas las series declaran USD', 9, substr_count($provSrc, "'USD'"));
 
 /* Lo vencido se informa EN PESOS. Con IMPORTE_EST, el aviso daria un numero en
    dolares con el signo de pesos adelante. */

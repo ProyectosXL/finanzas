@@ -55,8 +55,15 @@
    sql/cashflow_echeqs_excluir.sql- y por la misma razon: un importe que sale
    del tablero sin dejar rastro es un agujero que nadie puede auditar.
 
-       PAGOS + PAGOS_PAGADOS = PAGOS_TODO
-       NACIONALIZACION + NACIONALIZACION_PAGADAS = NACIONALIZACION_TODO
+       PAGOS + PAGOS_PAGADOS + PAGOS_COMEX = PAGOS_TODO
+       NACIONALIZACION + NACIONALIZACION_PAGADAS      = NACIONALIZACION_TODO
+
+   PAGOS_COMEX no es de este script y se nombra igual, porque el invariante es
+   uno solo: desde feature/comex-saldo-pendiente hay DOS formas distintas de que
+   un egreso de Proveedores Exterior salga de la proyeccion -este tilde, y un
+   pago cargado en la app de Comercio Exterior- y el tablero tiene que poder
+   contestar cual de las dos fue. Crono Nacionalizacion sigue con dos partes:
+   alla no hay pagos parciales contra un saldo. Ver README-comex.md, seccion 8.
 
    La fila del tablero ya esta apuntada a PAGOS y a NACIONALIZACION, asi que NO
    HAY QUE REPUNTAR NADA: esos dos codigos pasan a significar "lo que falta

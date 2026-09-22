@@ -16,6 +16,20 @@ require_once __DIR__ . '/../DolarFuturo.php';
  *                     EN DOLARES: esta linea decia "en pesos" hasta
  *                     feature/comex-nac-usd y era falso. Ver nacionalizaciones().
  *
+ * LOS PAGOS AL EXTERIOR PROYECTAN EL SALDO, NO EL FOB
+ * ---------------------------------------------------
+ * Esto CAMBIO con feature/comex-saldo-pendiente, y es el cambio de numeros mas
+ * grande que tuvo esta fila desde que se valua con la curva. Comercio Exterior
+ * permite pagos parciales al proveedor y esta serie proyectaba el VALOR_FOB_
+ * DOLAR entero: un contenedor con el anticipo ya girado entraba al tablero por
+ * el total. Ahora entra por lo que FALTA pagar. La cuenta vive en
+ * Comex::saldoPendiente() y es, literalmente, la de Comercio Exterior.
+ *
+ * Y POR ESO LA FILA TIENE CUATRO SERIES Y NO TRES. Hay dos formas distintas de
+ * que un egreso salga de la proyeccion -el tilde de esta pestana y un pago
+ * cargado en la otra aplicacion- y el tablero tiene que poder contestar cual de
+ * las dos fue. Ver el reparto en pagosExterior().
+ *
  * LA CONVERSION DE MONEDA YA NO VIVE ACA: VIVE EN Comex
  * -----------------------------------------------------
  * El motor sigue sin ver dolares -todos los proveedores le entregan pesos- pero
@@ -135,24 +149,38 @@ class ComexProvider extends CashflowProvider {
                 'tipo_cambio' => null
             ];
 
-            return ['PAGOS' => $vacia, 'PAGOS_PAGADOS' => $vacia, 'PAGOS_TODO' => $vacia];
+            return [
+                'PAGOS' => $vacia,
+                'PAGOS_PAGADOS' => $vacia,
+                'PAGOS_COMEX' => $vacia,
+                'PAGOS_TODO' => $vacia
+            ];
         }
 
         $filas = $comex->getProveedoresExterior();
 
-        /* LAS TRES SERIES DEL CORTE, y cual campo usa cada una NO es un
+        /* LAS CUATRO SERIES DEL CORTE, y cual campo usa cada una NO es un
            detalle: es lo que hace que el invariante cierre columna por columna.
 
              PAGOS         IMPORTE_EJE sobre TODAS las filas. Ese campo ya vale
-                           cero para lo pagado Y para lo vencido.
+                           cero para lo pagado Y para lo vencido, y ademas sale
+                           del PENDIENTE: lo que Comercio Exterior ya cobro no
+                           esta adentro.
              PAGOS_PAGADOS IMPORTE_PROYECTABLE sobre las MARCADAS. Ese campo
-                           vale cero solo para lo vencido.
-             PAGOS_TODO    IMPORTE_PROYECTABLE sobre todas.
+                           vale cero solo para lo vencido, y tambien mide el
+                           pendiente: el tilde saca lo que FALTABA pagar.
+             PAGOS_COMEX   IMPORTE_PAGADO_PROYECTABLE sobre todas. Es lo que los
+                           pagos de la otra aplicacion sacaron de la proyeccion.
+             PAGOS_TODO    IMPORTE_FOB_PROYECTABLE sobre todas, o sea el FOB
+                           ENTERO: el universo contra el que cierran las otras
+                           tres.
 
-           Con eso, PAGOS + PAGOS_PAGADOS = PAGOS_TODO: para una fila no
-           marcada los dos campos valen lo mismo y aporta a PAGOS; para una
-           marcada, IMPORTE_EJE es cero y aporta a PAGOS_PAGADOS. Ver
-           Comex::aporteAlEje(). */
+           Con eso, PAGOS + PAGOS_PAGADOS + PAGOS_COMEX = PAGOS_TODO. Para una
+           fila no marcada, PAGOS lleva el pendiente y PAGOS_COMEX lo ya pagado,
+           y los dos suman el FOB; para una marcada, IMPORTE_EJE es cero y ese
+           pendiente aporta a PAGOS_PAGADOS. Los cuatro campos se anulan juntos
+           cuando la fecha esta vencida, asi que las cuatro series dan cero en
+           esa fila y el invariante sigue cerrando. Ver Comex::aporteAlEje(). */
         $serie = $h->agrupar($filas, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_EJE');
 
         $serie['moneda_origen'] = 'USD';
@@ -177,7 +205,14 @@ class ComexProvider extends CashflowProvider {
            Comex::avisosValuacion(). Se les antepone el nombre de la fila
            porque en el tablero conviven los avisos de todos los modulos y un
            mensaje suelto no dice de cual es. */
-        foreach (Comex::avisosValuacion($filas, $dolar->ultimoMes()) as $aviso) {
+        /* SOBRE EL PENDIENTE, no sobre el FOB, y EL MISMO CAMPO QUE PASA EL
+           CONTROLLER. Los dos consumidores describen las mismas filas, asi que
+           el texto tiene que ser uno solo; con el default -VALOR_FOB_DOLAR- el
+           tablero diria de mas justamente en los contenedores que ya tienen
+           pagos hechos, que son los unicos donde los dos numeros difieren, y
+           la pestana diria otra cosa sobre las mismas filas. */
+        foreach (Comex::avisosValuacion($filas, $dolar->ultimoMes(), 'PENDIENTE_USD')
+                 as $aviso) {
             $this->avisar('Proveedores Exterior: ' . $aviso);
         }
 
@@ -198,14 +233,46 @@ class ComexProvider extends CashflowProvider {
             $this->avisar('Proveedores Exterior: ' . $aviso);
         }
 
+        /* LO QUE COMERCIO EXTERIOR YA PAGO, y por que hay tres avisos distintos
+           sobre plata que no esta en la fila del tablero:
+
+             avisosPagados()     alguien de este lado tildó "ya se hizo"
+             avisosSaldoComex()  la otra aplicación registró el pago
+             avisosSobrepago()   hay más cargado que FOB, y eso hay que mirarlo
+
+           Son tres hechos con tres acciones distintas -destildar, nada, ir a
+           corregir a Comex- y un mensaje unico no dejaria saber cual de las
+           tres es la que bajo el numero. */
+        foreach (Comex::avisosSaldoComex($filas) as $aviso) {
+            $this->avisar('Proveedores Exterior: ' . $aviso);
+        }
+
+        foreach (Comex::avisosSobrepago($filas) as $aviso) {
+            $this->avisar('Proveedores Exterior: ' . $aviso);
+        }
+
+        foreach (Comex::avisosGrupo($filas) as $aviso) {
+            $this->avisar('Proveedores Exterior: ' . $aviso);
+        }
+
+        /* Y si no se pudo leer la tabla de pagos de Comex, el tablero proyecta
+           el FOB completo. Es la unica degradacion del modulo que cambia
+           numeros en vez de apagar un boton, asi que se avisa en las dos
+           pantallas. Ver Comex::avisoSinPagosComex(). */
+        if ($comex->avisoSinPagosComex() !== '') {
+            $this->avisar('Proveedores Exterior: ' . $comex->avisoSinPagosComex());
+        }
+
         $marcadas = self::soloPagadas($filas);
 
         return [
             'PAGOS' => $serie,
             'PAGOS_PAGADOS' => $this->conMoneda(
                 $h->agrupar($marcadas, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_PROYECTABLE'), 'USD'),
+            'PAGOS_COMEX' => $this->conMoneda(
+                $h->agrupar($filas, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_PAGADO_PROYECTABLE'), 'USD'),
             'PAGOS_TODO' => $this->conMoneda(
-                $h->agrupar($filas, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_PROYECTABLE'), 'USD')
+                $h->agrupar($filas, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_FOB_PROYECTABLE'), 'USD')
         ];
     }
 
