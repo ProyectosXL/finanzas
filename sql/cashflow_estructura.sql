@@ -106,6 +106,13 @@ GO
    editor direcciona las filas por data-id (mismo patron que el mix de cobro) y
    las filas se crean y se renombran desde la pantalla. CODIGO es la clave
    natural y va con UNIQUE.
+
+   GRUPO, NATURALEZA y GRUPO_NOMBRE son las de las FILAS AGRUPADAS: un concepto
+   con parte real y parte proyectada son dos filas consecutivas con el mismo
+   GRUPO, que el tablero muestra como un solo renglon hasta que se lo abre. Las
+   tres nacen aca desde sql/cashflow_estructura_grupos.sql, que es el que las
+   agrega a una base ya sembrada; el criterio completo esta en el encabezado de
+   ese script y en cashflow/Class/CashflowEstructura.php.
    ---------------------------------------------------------------------------- */
 IF OBJECT_ID('dbo.RO_T_CASHFLOW_CONF_FILA', 'U') IS NULL
 BEGIN
@@ -120,6 +127,9 @@ BEGIN
         ORIGEN_SERIE    VARCHAR(30)  NULL,
         ORDEN           INT          NOT NULL CONSTRAINT DF_CF_FILA_ORDEN   DEFAULT (0),
         ACTIVO          BIT          NOT NULL CONSTRAINT DF_CF_FILA_ACTIVO  DEFAULT (1),
+        GRUPO           VARCHAR(30)  NULL,
+        NATURALEZA      VARCHAR(12)  NULL,
+        GRUPO_NOMBRE    VARCHAR(80)  NULL,
         FECHA_UPDATE    DATETIME     NOT NULL CONSTRAINT DF_CF_FILA_FUPD    DEFAULT (GETDATE()),
         USUARIO         VARCHAR(50)  NULL,
         CONSTRAINT PK_RO_T_CASHFLOW_CONF_FILA PRIMARY KEY CLUSTERED (ID),
@@ -127,6 +137,9 @@ BEGIN
         CONSTRAINT CK_RO_T_CASHFLOW_CONF_FILA_TIPO
             CHECK (TIPO IN ('SALDO_INICIAL', 'INGRESO', 'EGRESO',
                             'SUBTOTAL', 'FLUJO_NETO', 'SALDO_FINAL')),
+        /* ESTA LISTA Y CashflowEstructura::NATURALEZAS CAMBIAN JUNTAS. */
+        CONSTRAINT CK_RO_T_CASHFLOW_CONF_FILA_NATURALEZA
+            CHECK (NATURALEZA IS NULL OR NATURALEZA IN ('REAL', 'PROYECTADO')),
         CONSTRAINT FK_RO_T_CASHFLOW_CONF_FILA_SECCION
             FOREIGN KEY (SECCION) REFERENCES dbo.RO_T_CASHFLOW_CONF_SECCION (CODIGO)
     );

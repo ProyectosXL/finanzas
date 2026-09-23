@@ -288,6 +288,17 @@ class Cashflow {
                 'computa' => (intval($f['COMPUTA']) === 1),
                 'derivada' => CashflowEstructura::esDerivada($tipo),
                 'es_saldo' => CashflowEstructura::esSaldo($tipo),
+                /* AGRUPAMIENTO: se pasan tal cual y el motor no hace NADA con
+                   ellos. Las filas de un grupo calculan, computan y entran en
+                   los subtotales por separado, exactamente como si el grupo no
+                   existiera; la fila agrupada la arma el front sumando lo que
+                   dibuja. Si algún día el motor empieza a mirar estos campos,
+                   dejó de ser presentación. Ver CashflowEstructura::grupos(). */
+                'grupo' => isset($f['GRUPO']) && $f['GRUPO'] !== '' ? $f['GRUPO'] : null,
+                'naturaleza' => isset($f['NATURALEZA']) && $f['NATURALEZA'] !== ''
+                    ? $f['NATURALEZA'] : null,
+                'grupo_nombre' => isset($f['GRUPO_NOMBRE']) && $f['GRUPO_NOMBRE'] !== ''
+                    ? $f['GRUPO_NOMBRE'] : null,
                 // Si lo que la fila MUESTRA lo calcula el arrastre y no su
                 // proveedor. Lo marca resolverDerivadas(). Sin esto, una fila
                 // de saldo sin modulo de origen aparece con numeros y con el
