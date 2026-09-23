@@ -1508,6 +1508,7 @@ class CashflowEstructura {
             throw new Exception(implode(' ', $val['errores']));
         }
 
+        $conGrupo = $this->tieneColumnasGrupo();
         $cid = $this->conexion();
 
         if (sqlsrv_begin_transaction($cid) === false) {
@@ -1555,13 +1556,20 @@ class CashflowEstructura {
 
                 // CODIGO no se actualiza nunca: es la clave con la que se
                 // referencia la fila. Si quedo mal, se inhabilita y se crea otra.
+                //
+                // Las tres columnas de grupo se escriben SOLO si estan: contra
+                // una base sin el script, nombrarlas haria fallar el guardado
+                // entero de la estructura por una funcion que esa base no
+                // tiene. El editor ademas ya las dibuja apagadas.
                 $sql = "UPDATE RO_T_CASHFLOW_CONF_FILA
                         SET NOMBRE = ?, SECCION = ?, TIPO = ?, COMPUTA = ?,
-                            ORIGEN_PROVIDER = ?, ORIGEN_SERIE = ?, ORDEN = ?, ACTIVO = ?,
-                            FECHA_UPDATE = GETDATE(), USUARIO = ?
+                            ORIGEN_PROVIDER = ?, ORIGEN_SERIE = ?, ORDEN = ?, ACTIVO = ?,"
+                    . ($conGrupo ? " GRUPO = ?, NATURALEZA = ?, GRUPO_NOMBRE = ?," : "")
+                    . " FECHA_UPDATE = GETDATE(), USUARIO = ?
                         WHERE ID = ?";
 
                 $derivada = self::esDerivada($f['tipo']);
+                $grupo = self::normalizarGrupo($f);
 
                 $params = [
                     trim($f['nombre']),
@@ -1571,10 +1579,17 @@ class CashflowEstructura {
                     ($derivada || empty($f['origen_provider'])) ? null : $f['origen_provider'],
                     ($derivada || empty($f['origen_serie'])) ? null : $f['origen_serie'],
                     $ordenPorSeccion[$seccion],
-                    !empty($f['activo']) ? 1 : 0,
-                    $usuario,
-                    intval($f['id'])
+                    !empty($f['activo']) ? 1 : 0
                 ];
+
+                if ($conGrupo) {
+                    $params[] = $grupo['GRUPO'];
+                    $params[] = $grupo['NATURALEZA'];
+                    $params[] = $grupo['GRUPO_NOMBRE'];
+                }
+
+                $params[] = $usuario;
+                $params[] = intval($f['id']);
 
                 if (sqlsrv_query($cid, $sql, $params) === false) {
                     throw new Exception($this->errorSql('Error al guardar la fila '
@@ -1664,6 +1679,46 @@ class CashflowEstructura {
         return $sim;
     }
 
+    /**
+     * Los tres campos de agrupamiento de una fila que llega del editor, listos
+     * para guardar.
+     *
+     * EL SERVIDOR SLUGIFICA EL CODIGO, sin importar lo que mande el cliente.
+     * Es la misma regla que el CODIGO de la fila y por el mismo motivo: es una
+     * clave interna, y una tipeada con espacios o acentos haría que dos filas
+     * que el usuario cree del mismo grupo no lo sean.
+     *
+     * Y SE VACIAN LOS TRES DONDE NO SIGNIFICAN NADA -filas derivadas y de
+     * cobertura-, igual que se vacía el origen de datos de una fila que pasa a
+     * ser un subtotal. Así cambiarle el tipo a una fila agrupada la saca del
+     * grupo sola, en vez de dejar una configuración que el validador después
+     * rechaza.
+     *
+     * @param array $f Fila del editor
+     * @return array ['GRUPO', 'NATURALEZA', 'GRUPO_NOMBRE'], cada uno o null
+     */
+    private static function normalizarGrupo($f) {
+        $vacio = ['GRUPO' => null, 'NATURALEZA' => null, 'GRUPO_NOMBRE' => null];
+
+        if (!self::puedeAgruparse($f['tipo'])) {
+            return $vacio;
+        }
+
+        $grupo = isset($f['grupo']) ? self::slug($f['grupo']) : '';
+        $nat = isset($f['naturaleza']) ? strtoupper(trim((string) $f['naturaleza'])) : '';
+        $nombre = isset($f['grupo_nombre'])
+            ? substr(trim((string) $f['grupo_nombre']), 0, 80) : '';
+
+        return [
+            'GRUPO' => $grupo !== '' ? $grupo : null,
+            'NATURALEZA' => in_array($nat, self::NATURALEZAS, true) ? $nat : null,
+            // Un nombre de grupo sin grupo no se muestra en ningún lado; el
+            // validador lo avisa, así que se guarda tal cual en vez de
+            // descartarlo en silencio y dejar al usuario tipeándolo de nuevo.
+            'GRUPO_NOMBRE' => $nombre !== '' ? $nombre : null
+        ];
+    }
+
     /** Superpone las filas que llegan sobre las de la base */
     private function simularFilas($actual, $entrantes) {
         $porId = [];
@@ -1701,6 +1756,12 @@ class CashflowEstructura {
                 ? null : $e['origen_serie'];
             $a['ORDEN'] = $ordenPorSeccion[$e['seccion']];
             $a['ACTIVO'] = !empty($e['activo']) ? 1 : 0;
+
+            // Lo mismo que va a escribir guardar(), para que lo validado sea
+            // exactamente lo que se guarda y no lo que mandó el cliente.
+            foreach (self::normalizarGrupo($e) as $col => $valor) {
+                $a[$col] = $valor;
+            }
 
             $sim[] = $a;
         }

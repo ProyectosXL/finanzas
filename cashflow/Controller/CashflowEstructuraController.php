@@ -76,6 +76,15 @@ try {
                     'roles' => CashflowEstructura::ROLES,
                     'tipos_derivados' => CashflowEstructura::TIPOS_DERIVADOS,
                     'tipos_con_origen' => CashflowEstructura::TIPOS_CON_ORIGEN,
+                    // Agrupamiento. 'tipos_sin_grupo' es lo que el editor usa
+                    // para no ofrecer el campo donde no significa nada, y
+                    // 'columnas_grupo' para apagarlo entero si el script
+                    // todavia no se corrio: sin las columnas, guardar un grupo
+                    // fallaria contra la base y el usuario no tendria como
+                    // saber por que.
+                    'naturalezas' => CashflowEstructura::NATURALEZAS,
+                    'tipos_sin_grupo' => CashflowEstructura::TIPOS_SIN_GRUPO,
+                    'columnas_grupo' => $estructura->tieneColumnasGrupo(),
                     'validacion' => CashflowEstructura::validar($secciones, $filas),
                     'avisos' => $estructura->getAvisos()
                 ]
