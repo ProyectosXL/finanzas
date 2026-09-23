@@ -66,10 +66,35 @@
  *     descubrimiento automático, así que declarar opciones sobre una tabla que
  *     ya se ordenaba sola NO le cambia la clave ni le pierde la preferencia.
  *
+ *   - Para declarar que una fila VIAJA PEGADA a la anterior, con
+ *     `data-orden-sigue` en el `<tr>`. Ver *Las filas que viajan pegadas*.
+ *
  *   - Para NO ordenarse, con `data-orden="no"` en la `<table>`. Es para las
  *     tablas donde el orden de las filas ES el dato: el editor de la estructura
  *     del tablero, que se reordena con botones, y las tablas con una columna de
  *     acumulado, que sólo se lee en orden cronológico.
+ *
+ * LAS FILAS QUE VIAJAN PEGADAS
+ * ----------------------------
+ * Hay tablas donde una fila no es un dato suelto sino el detalle de la de
+ * arriba: en el tablero, las dos partes —real y proyectada— de un concepto
+ * agrupado cuelgan de la fila que muestra su suma. Ordenar por importe las
+ * separaría, y el resultado no sería un error visible: quedaría un cuadro con
+ * la pinta de siempre en el que la parte real de un concepto aparece debajo de
+ * otro.
+ *
+ * Un `<tr data-orden-sigue>` no se ordena: se queda pegado a la fila anterior
+ * que sí se ordena, y se mueve con ella. Varias seguidas viajan todas, en su
+ * orden.
+ *
+ * NO ES LO MISMO QUE UN ANCLA, y la diferencia es la que importa acá: un ancla
+ * se queda QUIETA y parte el cuerpo en bloques —es lo que hace que un SUBTOTAL
+ * cierre su sección—; una fila pegada se MUEVE, pero nunca sola. Marcar las
+ * partes como ancla las clavaría en su lugar mientras la fila agrupada se va a
+ * ordenar a otro lado, que es exactamente lo que había que evitar.
+ *
+ * Una fila pegada al principio del cuerpo, sin nadie adelante, se ordena como
+ * cualquier otra: no hay de quién colgar.
  *
  * LA PREFERENCIA SE GUARDA POR NOMBRE DE COLUMNA, NO POR ÍNDICE
  * -------------------------------------------------------------
@@ -445,6 +470,20 @@ var OrdenTabla = (function() {
     }
 
     /**
+     * Una fila PEGADA no se ordena por su cuenta: viaja con la fila anterior.
+     *
+     * Es para las filas que son el detalle de la de arriba —las dos partes de
+     * un concepto agrupado del tablero—, donde separarlas no da un error
+     * visible sino un cuadro que se lee mal. Ver el encabezado.
+     *
+     * @param {HTMLTableRowElement} fila
+     * @returns {boolean}
+     */
+    function esPegada(fila) {
+        return fila.hasAttribute('data-orden-sigue');
+    }
+
+    /**
      * El orden natural es el que tenía la tabla cuando la dibujó el backend, y
      * es a lo que se vuelve en el tercer click.
      *
@@ -774,19 +813,26 @@ var OrdenTabla = (function() {
         var tipo = tipoDeColumna(valores);
         var parser = PARSERS[tipo];
         var resultado = [];
+
+        /* Cada UNIDAD es una fila que se ordena más las que viajan pegadas a
+           ella. Ordenar unidades y no filas sueltas es todo el mecanismo: la
+           unidad se mueve entera y sus partes nunca se separan de su fila. */
         var bloque = [];
 
         function volcar() {
             bloque.sort(function(a, b) {
                 return comparar(
-                    parser(valorCrudo(a.cells[columna.indice])),
-                    parser(valorCrudo(b.cells[columna.indice])),
+                    parser(valorCrudo(a[0].cells[columna.indice])),
+                    parser(valorCrudo(b[0].cells[columna.indice])),
                     dir,
-                    a.__ordenNatural - b.__ordenNatural
+                    a[0].__ordenNatural - b[0].__ordenNatural
                 );
             });
 
-            resultado = resultado.concat(bloque);
+            bloque.forEach(function(unidad) {
+                resultado = resultado.concat(unidad);
+            });
+
             bloque = [];
         }
 
@@ -794,9 +840,19 @@ var OrdenTabla = (function() {
             if (esAncla(f, selectorAnclas)) {
                 volcar();
                 resultado.push(f);
-            } else {
-                bloque.push(f);
+
+                return;
             }
+
+            // Sin nadie adelante en el bloque no hay de quién colgar, así que
+            // se ordena como cualquier otra fila.
+            if (esPegada(f) && bloque.length) {
+                bloque[bloque.length - 1].push(f);
+
+                return;
+            }
+
+            bloque.push([f]);
         });
 
         volcar();

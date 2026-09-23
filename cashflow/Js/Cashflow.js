@@ -14,6 +14,25 @@
  * con un guión. Un cero en Saldo Final se leería como "proyectamos cero pesos
  * de caja", que sería mentira.
  *
+ * LA ÚNICA EXCEPCIÓN A "ACÁ NO SE CALCULA NADA": LA FILA AGRUPADA
+ * ---------------------------------------------------------------
+ * Un concepto con parte real y parte proyectada son DOS filas del motor, y el
+ * tablero las muestra como un renglón que se abre. Ese renglón lo arma este
+ * archivo sumando columna a columna las filas del grupo, y es la única suma
+ * que se hace en el navegador.
+ *
+ * Es defendible por lo que NO toca: la fila agrupada no existe para el motor,
+ * así que los subtotales, el Flujo Neto, el Saldo Final y los KPIs siguen
+ * midiendo las mismas filas de siempre y dan exactamente lo mismo con el grupo
+ * abierto o cerrado. La suma es lo que ya está en pantalla, puesta en un
+ * renglón; si se calculara en el backend habría que inventarle una fila al
+ * motor, y esa fila sí entraría en las cuentas.
+ *
+ * Y el agrupamiento es POSICIONAL, igual que del lado del servidor: corridas de
+ * filas seguidas de la misma sección, del mismo tipo y con el mismo `grupo`.
+ * No hay ninguna fila padre que declare hijas. Ver armarRenglones(), y
+ * CashflowEstructura::grupos(), que es la misma regla sobre la configuración.
+ *
  * OJO CON EL ORDEN DE CARGA: ésta es la pestaña por defecto, así que index.php
  * la incluye del lado del servidor ARRIBA de los <script> de jQuery y Bootstrap.
  * Nada del nivel superior de este archivo puede tocar jQuery, Bootstrap ni el
@@ -47,6 +66,7 @@
     function inicializar() {
         var btnRefresh = document.getElementById('cfBtnRefresh');
         var btnExport = document.getElementById('cfBtnExport');
+        var btnGrupos = document.getElementById('cfBtnGrupos');
 
         vistas = crearEjeVistas({
             botones: 'cfVistas',
@@ -68,6 +88,12 @@
         crearOrdenTabla({
             tabla: 'cfTabla',
             clave: 'cashflow',
+            /* Las filas agrupadas NO son ancla: son filas de movimiento como
+               cualquier otra y se ordenan por su suma. Lo que no se puede es
+               que sus partes se queden atrás, y de eso se ocupa el
+               `data-orden-sigue` que llevan —ver el encabezado de
+               Js/tabla-orden.js—. Marcarlas ancla las clavaría en su lugar
+               mientras el renglón que las resume se va a otro lado. */
             anclas: '.cf-seccion, .cf-tipo-subtotal, .cf-tipo-flujo_neto,'
                 + ' .cf-tipo-saldo_inicial, .cf-tipo-saldo_final,'
                 // Las de Cobertura también quedan clavadas. El stock no es
@@ -84,6 +110,10 @@
 
         if (btnExport) {
             btnExport.addEventListener('click', exportar);
+        }
+
+        if (btnGrupos) {
+            btnGrupos.addEventListener('click', alternarTodos);
         }
 
         cargar();
@@ -474,10 +504,16 @@
            encabezado de sección se emite cuando CAMBIA la sección, así que con
            un `continue` adentro una sección cuyas filas estén todas ocultas
            igual dibujaría su título, y quedaría un encabezado sin nada debajo.
-           Filtrando primero, una sección sin filas visibles no existe. */
-        datos.filas.filter(filaDibujable).forEach(function(f) {
-            if (f.seccion !== seccionActual) {
-                seccionActual = f.seccion;
+           Filtrando primero, una sección sin filas visibles no existe.
+
+           Y EL AGRUPAMIENTO SE ARMA SOBRE LO YA FILTRADO, por el mismo motivo
+           invertido: una fila que no se dibuja no puede partir un grupo en dos
+           renglones que en pantalla están pegados. */
+        armarRenglones(datos.filas.filter(filaDibujable)).forEach(function(r) {
+            var primera = r.grupo ? r.grupo.filas[0] : r.fila;
+
+            if (primera.seccion !== seccionActual) {
+                seccionActual = primera.seccion;
 
                 var s = secciones[seccionActual];
 
@@ -487,12 +523,500 @@
                     '</td></tr>';
             }
 
-            html += filaHtml(f, cols);
+            if (!r.grupo) {
+                html += filaHtml(r.fila, cols, null);
+
+                return;
+            }
+
+            var abierto = grupoAbierto(r.grupo.codigo);
+
+            html += filaGrupoHtml(r.grupo, cols, abierto);
+
+            r.grupo.filas.forEach(function(f) {
+                html += filaHtml(f, cols, { grupo: r.grupo, abierto: abierto });
+            });
         });
 
         document.getElementById('cfBody').innerHTML = html;
         conectarEnlaces();
         conectarCobertura();
+        conectarGrupos();
+    }
+
+    /* ================================================================
+       LOS CONCEPTOS CON PARTE REAL Y PARTE PROYECTADA
+
+       Son DOS filas del motor y un renglón en pantalla, que se abre. La
+       declaración vive en la estructura —dos filas consecutivas con el mismo
+       GRUPO y su NATURALEZA— y acá se resuelve por POSICIÓN, sin ninguna
+       referencia fila a fila: corridas de filas seguidas de la misma sección,
+       del mismo tipo y con el mismo código de grupo.
+
+       ES LA MISMA REGLA QUE CashflowEstructura::grupos(), escrita dos veces a
+       propósito: el validador la corre sobre la CONFIGURACIÓN —todas las filas
+       activas, para poder avisar antes de guardar— y acá se corre sobre lo que
+       se DIBUJA, que no es lo mismo (las filas de stock de cobertura no se
+       pintan). Las dos listas coinciden salvo que alguien le ponga un grupo a
+       una fila que no se dibuja, y eso el validador lo rechaza. Si se tocan las
+       condiciones, hay que tocar las dos.
+       ================================================================ */
+
+    /**
+     * Las filas del tablero repartidas en renglones: `{fila}` para una fila
+     * suelta y `{grupo}` para un concepto agrupado con sus partes.
+     *
+     * DOS CASOS SE DIBUJAN SUELTOS, y los dos a propósito:
+     *
+     *   - Un grupo cuyas filas NO quedan seguidas —hay otra fila en el medio,
+     *     o cambian de sección, o mezclan un ingreso con un egreso—. El
+     *     validador ya lo avisa en Parámetros; acá lo que importa es que el
+     *     tablero muestre de más y nunca una suma que no corresponde.
+     *   - Un grupo de UNA sola fila. Un renglón que se abre para mostrar una
+     *     fila igual a él no agrupa nada.
+     *
+     * @param {Array} filas Las filas dibujables, en orden
+     * @returns {Array} Renglones
+     */
+    function armarRenglones(filas) {
+        var renglones = [];
+        var corrida = null;
+        var corridasPorCodigo = {};
+
+        filas.forEach(function(f) {
+            var codigo = f.grupo || '';
+
+            var sigue = codigo !== '' && corrida !== null
+                && corrida.codigo === codigo
+                && corrida.seccion === f.seccion
+                && corrida.tipo === f.tipo;
+
+            if (sigue) {
+                corrida.filas.push(f);
+
+                return;
+            }
+
+            if (codigo === '') {
+                // Una fila sin grupo corta la corrida: es lo que hace que
+                // "seguidas" signifique algo.
+                corrida = null;
+                renglones.push({ fila: f });
+
+                return;
+            }
+
+            // El nombre NO se resuelve acá: lo hace nombreGrupo() sobre las
+            // filas ya juntas, que es donde está la regla completa (gana la
+            // primera que lo declare, y la primera puede no ser ésta).
+            corrida = {
+                codigo: codigo,
+                seccion: f.seccion,
+                tipo: f.tipo,
+                filas: [f]
+            };
+
+            corridasPorCodigo[codigo] = (corridasPorCodigo[codigo] || 0) + 1;
+            renglones.push({ grupo: corrida });
+        });
+
+        var salida = [];
+
+        renglones.forEach(function(r) {
+            var g = r.grupo;
+
+            if (g && g.filas.length > 1 && corridasPorCodigo[g.codigo] === 1) {
+                salida.push(r);
+
+                return;
+            }
+
+            (g ? g.filas : [r.fila]).forEach(function(f) {
+                salida.push({ fila: f });
+            });
+        });
+
+        return salida;
+    }
+
+    /**
+     * El nombre del grupo: el que declare la PRIMERA de sus filas que declare
+     * alguno, y si ninguna lo hace, el código.
+     *
+     * Es la misma regla del servidor, y la primera fila en orden de dibujo es
+     * la misma de los dos lados. Que dos filas declaren nombres distintos lo
+     * avisa el validador; acá no hay nada que decidir.
+     */
+    function nombreGrupo(g) {
+        for (var i = 0; i < g.filas.length; i++) {
+            if (g.filas[i].grupo_nombre) {
+                return g.filas[i].grupo_nombre;
+            }
+        }
+
+        return g.codigo;
+    }
+
+    /** Cómo se llama en pantalla la parte que aporta una fila */
+    function etiquetaNaturaleza(f) {
+        if (f.naturaleza === 'REAL') { return 'Real'; }
+        if (f.naturaleza === 'PROYECTADO') { return 'Proyectado'; }
+
+        return null;
+    }
+
+    /**
+     * La suma del grupo en una columna.
+     *
+     * null NO se trata como cero, y no es un detalle: una columna que no cubre
+     * ningún día futuro vale null en todas las filas, y sumar ceros ahí
+     * mostraría `$ 0` justo donde el resto de la tabla dibuja un guión. Si
+     * TODAS las partes están en null, la suma es null; si alguna tiene importe,
+     * se suman las que lo tienen.
+     */
+    function sumaGrupo(g, col) {
+        var total = null;
+
+        g.filas.forEach(function(f) {
+            var v = f[col.rama][col.clave];
+
+            if (v === null || v === undefined) {
+                return;
+            }
+
+            total = (total === null ? 0 : total) + Number(v);
+        });
+
+        return total;
+    }
+
+    /** El total de la vista activa del grupo, que es la suma de los de sus partes */
+    function totalGrupo(g) {
+        var total = 0;
+
+        g.filas.forEach(function(f) {
+            total += Number(totalDeVista(f) || 0);
+        });
+
+        return total;
+    }
+
+    /**
+     * El desglose de una celda agrupada: cuánto pone cada parte.
+     *
+     * ES LO QUE EL RENGLÓN CERRADO NO MUESTRA, así que va en el tooltip de cada
+     * celda. Sin esto, agrupar sería esconder: el número se ve, pero de dónde
+     * sale no.
+     *
+     * Y ARRASTRA LAS ANOTACIONES DE LAS PARTES. Una celda tiene un solo title,
+     * y la parte proyectada de la cobranza anota las suyas con qué porción
+     * tiene fecha pactada a mano. Con el grupo cerrado esa nota no tendría
+     * dónde aparecer, así que se pega abajo del desglose y la celda agrupada
+     * queda marcada igual. Ver anotacion().
+     */
+    function textoGrupo(g, col) {
+        var partes = [];
+        var notas = [];
+
+        g.filas.forEach(function(f) {
+            var v = f[col.rama][col.clave];
+
+            partes.push((etiquetaNaturaleza(f) || f.nombre) + ': '
+                + (v === null || v === undefined ? '—' : plata(v)));
+
+            var nota = anotacion(f, col);
+
+            if (nota) {
+                notas.push(nota.nota);
+            }
+        });
+
+        return partes.join(' · ') + (notas.length ? '\n\n' + notas.join('\n\n') : '');
+    }
+
+    /** Si alguna parte del grupo tiene una anotación en esa columna */
+    function grupoAnotado(g, col) {
+        for (var i = 0; i < g.filas.length; i++) {
+            if (anotacion(g.filas[i], col)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * La pestaña de detalle del grupo, si TODAS sus partes van a la misma.
+     *
+     * Con el grupo cerrado no hay ninguna otra forma de llegar al detalle, y
+     * hoy todas las filas del tablero son navegables: perder eso al agrupar
+     * sería cobrar un precio por una mejora de lectura. Si las partes salen de
+     * módulos distintos no hay un destino único y el renglón no queda como
+     * enlace; sus partes sí, cada una al suyo.
+     */
+    function tabDeGrupo(g) {
+        var tab = g.filas[0].tab;
+        var subtab = g.filas[0].subtab || null;
+
+        if (!tab) {
+            return null;
+        }
+
+        for (var i = 1; i < g.filas.length; i++) {
+            if (g.filas[i].tab !== tab || (g.filas[i].subtab || null) !== subtab) {
+                return null;
+            }
+        }
+
+        return { tab: tab, subtab: subtab };
+    }
+
+    function filaGrupoHtml(g, cols, abierto) {
+        var clases = ['cf-fila', 'cf-grupo', 'cf-tipo-' + g.tipo.toLowerCase()];
+
+        if (abierto) { clases.push('cf-grupo-abierto'); }
+
+        var celdas = cols.map(function(c, i) {
+            var valor = sumaGrupo(g, c);
+            var clasesCelda = clasesColumna(c, i).concat(['text-end']);
+
+            if (valor === null) {
+                return '<td class="' + clasesCelda.join(' ') + ' cf-nulo" '
+                    + 'title="Esta columna no cubre ningún día futuro">—</td>';
+            }
+
+            if (valor === 0) { clasesCelda.push('cf-cero'); }
+            if (valor < 0) { clasesCelda.push('cf-negativo'); }
+            if (grupoAnotado(g, c)) { clasesCelda.push('cf-anotada'); }
+
+            return '<td class="' + clasesCelda.join(' ') + '" title="'
+                + escapar(textoGrupo(g, c)) + '">' + plataCorta(valor) + '</td>';
+        }).join('');
+
+        var total = totalGrupo(g);
+
+        return '<tr class="' + clases.join(' ') + '" data-grupo="' + escapar(g.codigo) + '">' +
+            '<td class="cf-col-concepto" title="' + escapar(conceptoGrupoTitle(g)) + '">' +
+                conceptoGrupoHtml(g, abierto) +
+            '</td>' +
+            celdas +
+            '<td class="text-end cf-col-total' + (total < 0 ? ' cf-negativo' : '') + '">' +
+                plataCorta(total) +
+            '</td></tr>';
+    }
+
+    function conceptoGrupoTitle(g) {
+        var partes = g.filas.map(function(f) {
+            var etiqueta = etiquetaNaturaleza(f);
+
+            return f.nombre + (etiqueta ? ' (' + etiqueta + ')' : '');
+        });
+
+        return nombreGrupo(g) + ' — suma de ' + partes.join(' + ')
+            + '. Abrí el renglón para verlas por separado.';
+    }
+
+    function conceptoGrupoHtml(g, abierto) {
+        var nombre = escapar(nombreGrupo(g));
+        var destino = tabDeGrupo(g);
+
+        // El chevron es un <button> y no un ícono suelto: es un control, y
+        // TablaExport lo saca del clon junto con el resto de los controles, así
+        // que la planilla baja el nombre del concepto y no un signo de más.
+        var chevron = '<button type="button" class="cf-chevron" data-grupo="'
+            + escapar(g.codigo) + '" aria-expanded="' + (abierto ? 'true' : 'false')
+            + '" title="' + (abierto ? 'Agrupar en un solo renglón'
+                : 'Ver la parte real y la proyectada') + '">'
+            + '<i class="fas fa-chevron-' + (abierto ? 'down' : 'right') + '"></i></button>';
+
+        var texto = destino
+            ? '<a href="#" class="cf-link" data-ir-a="' + escapar(destino.tab) + '"'
+                + (destino.subtab ? ' data-sub-tab="' + escapar(destino.subtab) + '"' : '')
+                + '>' + nombre + '</a>'
+            : nombre;
+
+        return chevron + texto;
+    }
+
+    /* ---- Abierto o cerrado, recordado por usuario ---------------------- */
+
+    /**
+     * UNA CLAVE POR GRUPO, y no un JSON con todos.
+     *
+     * Un grupo que deja de existir se lleva su clave y no queda escrito en un
+     * blob que hay que migrar, y dos pestañas abiertas que abren grupos
+     * distintos no se pisan la una a la otra al escribir.
+     */
+    function claveGrupo(codigo) {
+        return 'cashflow_grupo_' + codigo;
+    }
+
+    /**
+     * SIN ESTADO GUARDADO, AGRUPADO. Es el default del tablero: el renglón
+     * único es lo que este cambio vino a dar, y quien quiera ver las partes las
+     * abre.
+     *
+     * El try/catch no es ceremonia: en una ventana privada o con las cookies de
+     * sitio bloqueadas, `localStorage` tira al leer. Ahí el grupo abre cerrado
+     * y se puede abrir igual; lo único que se pierde es que se recuerde.
+     */
+    function grupoAbierto(codigo) {
+        try {
+            return localStorage.getItem(claveGrupo(codigo)) === '1';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function guardarGrupo(codigo, abierto) {
+        try {
+            localStorage.setItem(claveGrupo(codigo), abierto ? '1' : '0');
+        } catch (e) {
+            // Se abre igual: es una preferencia de cómo mirar la tabla, no un
+            // dato. Lo único que no pasa es que se recuerde en la próxima carga.
+        }
+    }
+
+    /* ---- Abrir y cerrar ------------------------------------------------ */
+
+    function conectarGrupos() {
+        var chevrones = document.querySelectorAll('#cfBody .cf-chevron');
+
+        Array.prototype.forEach.call(chevrones, function(b) {
+            b.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                var codigo = b.getAttribute('data-grupo');
+
+                mostrarGrupo(codigo, !estaAbierto(codigo));
+            });
+        });
+
+        actualizarBotonGrupos();
+    }
+
+    /**
+     * Abre o cierra un grupo SIN redibujar la grilla.
+     *
+     * Se prende y se apaga el `display` de las partes y nada más: la suma del
+     * renglón no cambia —es la de sus partes, estén a la vista o no—, así que
+     * no hay nada que recalcular. Redibujar además volvería a correr el orden y
+     * las medidas de las columnas fijas por un cambio que no mueve ninguna
+     * columna.
+     */
+    function mostrarGrupo(codigo, abierto) {
+        var fila = filasDe('cf-grupo', codigo)[0];
+        var partes = filasDe('cf-parte', codigo);
+
+        if (!fila) {
+            return;
+        }
+
+        fila.classList.toggle('cf-grupo-abierto', abierto);
+
+        var chevron = fila.querySelector('.cf-chevron');
+
+        if (chevron) {
+            chevron.setAttribute('aria-expanded', abierto ? 'true' : 'false');
+            chevron.setAttribute('title', abierto
+                ? 'Agrupar en un solo renglón' : 'Ver la parte real y la proyectada');
+
+            var icono = chevron.querySelector('i');
+
+            if (icono) {
+                icono.className = 'fas fa-chevron-' + (abierto ? 'down' : 'right');
+            }
+        }
+
+        partes.forEach(function(tr) {
+            tr.classList.toggle('cf-oculta', !abierto);
+        });
+
+        guardarGrupo(codigo, abierto);
+        actualizarBotonGrupos();
+    }
+
+    /**
+     * Las filas de una clase que pertenecen a un grupo.
+     *
+     * Se comparan los atributos en JS en vez de armar un selector con el
+     * código adentro: el código sale de la configuración, y un selector
+     * interpolado se rompe con cualquier carácter que el validador todavía no
+     * haya rechazado. Acá lo peor que puede pasar es que no encuentre nada.
+     */
+    function filasDe(clase, codigo) {
+        var filas = document.querySelectorAll('#cfBody tr.' + clase + '[data-grupo]');
+
+        return Array.prototype.filter.call(filas, function(tr) {
+            return tr.getAttribute('data-grupo') === codigo;
+        });
+    }
+
+    /**
+     * Si un grupo está abierto AHORA, preguntándoselo a la pantalla.
+     *
+     * No a `localStorage`, y la diferencia se ve justo donde nadie prueba: en
+     * una ventana privada el guardado falla en silencio, así que preguntarle a
+     * la preferencia daría "cerrado" para siempre y el chevron abriría un
+     * grupo ya abierto en vez de cerrarlo. La preferencia decide con qué
+     * estado ARRANCA el renglón; lo que está pasando lo dice el DOM.
+     */
+    function estaAbierto(codigo) {
+        var fila = filasDe('cf-grupo', codigo)[0];
+
+        return !!fila && fila.classList.contains('cf-grupo-abierto');
+    }
+
+    /** Los códigos de los grupos que hay dibujados, en orden */
+    function codigosDeGrupo() {
+        var filas = document.querySelectorAll('#cfBody tr.cf-grupo[data-grupo]');
+
+        return Array.prototype.map.call(filas, function(tr) {
+            return tr.getAttribute('data-grupo');
+        });
+    }
+
+    /**
+     * Un solo botón para los dos gestos: si queda alguno cerrado, abre todos;
+     * si están todos abiertos, los cierra.
+     *
+     * Con dos botones, uno de los dos siempre está de más, y con un estado
+     * mezclado —dos abiertos y uno cerrado— "Agrupar todo" sería lo primero que
+     * se aprieta queriendo ver el resto.
+     */
+    function alternarTodos() {
+        var codigos = codigosDeGrupo();
+
+        var abrir = codigos.some(function(c) { return !estaAbierto(c); });
+
+        codigos.forEach(function(c) { mostrarGrupo(c, abrir); });
+    }
+
+    function actualizarBotonGrupos() {
+        var btn = document.getElementById('cfBtnGrupos');
+
+        if (!btn) {
+            return;
+        }
+
+        var codigos = codigosDeGrupo();
+
+        // Sin grupos en pantalla el botón no hace nada, y un botón que no hace
+        // nada es peor que no tenerlo: se aprieta y parece que falló.
+        mostrar('cfBtnGrupos', codigos.length > 0);
+
+        if (!codigos.length) {
+            return;
+        }
+
+        var abrir = codigos.some(function(c) { return !estaAbierto(c); });
+
+        btn.innerHTML = '<i class="fas fa-' + (abrir ? 'angles-down' : 'angles-up')
+            + ' me-1"></i> ' + (abrir ? 'Expandir todo' : 'Agrupar todo');
+        btn.setAttribute('title', abrir
+            ? 'Abrir todos los conceptos con parte real y proyectada'
+            : 'Volver a mostrar cada concepto en un solo renglón');
     }
 
     /**
@@ -523,11 +1047,24 @@
         return f.tipo !== 'STOCK_COBERTURA';
     }
 
-    function filaHtml(f, cols) {
+    /**
+     * @param {Object} f La fila del motor
+     * @param {Array} cols
+     * @param {Object|null} parte Si la fila es una de las partes de un grupo:
+     *        `{grupo, abierto}`. Cambia cómo se dibuja, no lo que dice.
+     */
+    function filaHtml(f, cols, parte) {
         var clases = ['cf-fila', 'cf-tipo-' + f.tipo.toLowerCase()];
 
         if (!f.computa && !f.derivada) { clases.push('cf-informativa'); }
         if (f.sin_datos) { clases.push('cf-sin-datos'); }
+
+        if (parte) {
+            clases.push('cf-parte');
+
+            if (f.naturaleza === 'PROYECTADO') { clases.push('cf-parte-proyectada'); }
+            if (!parte.abierto) { clases.push('cf-oculta'); }
+        }
 
         var celdas = cols.map(function(c, i) {
             if (f.tipo === 'USO_COBERTURA') {
@@ -539,9 +1076,15 @@
 
         var total = totalDeVista(f);
 
-        return '<tr class="' + clases.join(' ') + '">' +
+        /* data-orden-sigue: la parte VIAJA PEGADA al renglón que la resume. Sin
+           esto, ordenar por importe manda la suma a un lado y sus dos partes a
+           otro, y el cuadro queda con la pinta de siempre diciendo algo que no
+           es. Ver el encabezado de Js/tabla-orden.js. */
+        return '<tr class="' + clases.join(' ') + '"'
+            + (parte ? ' data-orden-sigue data-grupo="' + escapar(parte.grupo.codigo) + '"' : '')
+            + '>' +
             '<td class="cf-col-concepto" title="' + escapar(f.nombre) + '">' +
-                conceptoHtml(f, cols) +
+                conceptoHtml(f, cols, parte) +
             '</td>' +
             celdas +
             '<td class="text-end cf-col-total' + (Number(total) < 0 ? ' cf-negativo' : '') + '">' +
@@ -554,7 +1097,7 @@
      * tiene. Es lo que hace navegable el tablero: desde el número consolidado se
      * llega al detalle que lo produce.
      */
-    function conceptoHtml(f, cols) {
+    function conceptoHtml(f, cols, parte) {
         var nombre = escapar(f.nombre);
         var marca = '';
 
@@ -615,16 +1158,43 @@
         // para decidir no es cuánto hay, sino cuánto QUEDA.
         var saldo = lineaSaldoCobertura(f);
 
+        /* LA SANGRÍA Y LA ETIQUETA VAN EN EL TEXTO, no sólo en el CSS. La
+           planilla que baja Exportar no interpreta un padding: sin esto, las
+           dos partes de un grupo abierto llegan a Excel al mismo nivel que el
+           renglón que las suma y la columna se lee como si hubiera tres
+           conceptos. Los espacios duros son lo único que sobrevive al clon.
+
+           Y LA ETIQUETA VA ANTES DEL NOMBRE, no después. La columna Concepto
+           tiene ancho fijo y recorta con puntos suspensivos, así que lo que va
+           al final es lo primero que desaparece — y el nombre de estas filas es
+           largo justamente porque nació teniendo que distinguirse de su par
+           ("Cobranzas Franq. Prop. aceptadas"). Adelante, la etiqueta se ve
+           siempre y lo que se recorta es la parte del nombre que la etiqueta ya
+           está diciendo. */
+        var sangria = '';
+        var etiqueta = '';
+
+        if (parte) {
+            sangria = '<span class="cf-sangria">&nbsp;&nbsp;&nbsp;&nbsp;</span>';
+
+            var texto = etiquetaNaturaleza(f);
+
+            if (texto) {
+                etiqueta = '<span class="cf-naturaleza">' + escapar(texto) + '</span> ';
+            }
+        }
+
         if (f.tab) {
             // data-sub-tab lo lee el JS de la pestaña destino para abrirse en la
             // vista correcta: hay módulos con más de una, y llegar a la primera
             // deja al usuario sin el detalle del número que clickeó.
-            return '<a href="#" class="cf-link" data-ir-a="' + escapar(f.tab) + '"'
+            return sangria + etiqueta
+                + '<a href="#" class="cf-link" data-ir-a="' + escapar(f.tab) + '"'
                 + (f.subtab ? ' data-sub-tab="' + escapar(f.subtab) + '"' : '') + '>'
                 + nombre + '</a>' + marca + saldo;
         }
 
-        return nombre + marca + saldo;
+        return sangria + etiqueta + nombre + marca + saldo;
     }
 
     /* ================================================================

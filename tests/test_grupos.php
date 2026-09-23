@@ -6,11 +6,16 @@
  * entera sin conexion. Es la regla que decide que filas forman un grupo, y lo
  * que se fija aca es que sea POSICIONAL: nada de referencias fila->fila.
  *
- * Lo que NO se prueba aca porque no cambia: que los subtotales, el flujo neto,
- * el saldo final y los KPIs den lo mismo con grupos y sin grupos. Eso lo fija
- * test_cashflow.php, que corre sobre el motor, y el punto es justamente que el
- * motor no sabe que los grupos existen. Si alguna de esas pruebas se cae por
- * un cambio de esta rama, el agrupamiento dejo de ser presentacion.
+ * La segunda mitad del archivo prueba el principio de diseño entero: el mismo
+ * escenario corrido por el motor DOS VECES, con los grupos declarados y sin
+ * declarar, tiene que dar dos tableros identicos. Si alguna vez deja de darlos,
+ * el agrupamiento dejo de ser presentacion.
+ *
+ * LO QUE ESTE ARCHIVO NO PRUEBA, y conviene saberlo: el JavaScript que arma la
+ * fila agrupada. No hay corredor de JS en el proyecto. Lo que si esta cubierto
+ * es la aritmetica que ese codigo tiene que reproducir -contra el motor de
+ * verdad, mas abajo- y el cableado que se rompe en silencio, en
+ * test_tablas_controles.php. Lo demas se verifica en pantalla.
  */
 
 require_once __DIR__ . '/../cashflow/Class/CashflowEstructura.php';
@@ -397,3 +402,174 @@ $r = CashflowEstructura::validar($secs3, $filas, $GPROVS);
 chequear('valida', true, $r['valido']);
 chequear('y el grupo queda consecutivo', true,
     CashflowEstructura::grupos($secs3, $filas)['COB']['consecutivo']);
+
+/* ================================================================
+   EL MOTOR NO SE ENTERA DE QUE LOS GRUPOS EXISTEN
+
+   Es el principio de diseño de toda esta etapa y el unico que, si se rompe,
+   se rompe en silencio: la fila agrupada es PRESENTACION, asi que subtotales,
+   Flujo Neto, Saldo Final y KPIs tienen que dar EXACTAMENTE lo mismo con los
+   grupos declarados y sin declarar.
+
+   Se prueba de la forma mas dura que se puede: el mismo escenario dos veces,
+   una con GRUPO y NATURALEZA puestos y otra sin nada, y los dos tableros
+   tienen que ser identicos salvo por esos tres campos. Si manana alguien hace
+   que el motor mire 'grupo' -para sumar, para saltear, para lo que sea- esta
+   prueba se cae, y esa es toda su razon de ser.
+   ================================================================ */
+
+require_once __DIR__ . '/../cashflow/Class/Cashflow.php';
+
+/* Dobles propios: el corredor incluye todos los archivos en el mismo proceso y
+   los de test_cashflow.php ya ocupan sus nombres. */
+
+class EstructuraDeGrupos {
+    public $secciones = [];
+    public $filas = [];
+    public function getAvisos() { return []; }
+    public function getEstructura($soloActivas = false) {
+        return ['secciones' => $this->secciones, 'filas' => $this->filas];
+    }
+}
+
+class ParametrosDeGrupos extends Parametros {
+    public function __construct() { /* a proposito: no abre conexion */ }
+    public function getParametrosMap() {
+        return ['horizonte_dias' => 3, 'horizonte_meses' => 3];
+    }
+    public function getFeriadosComercio($map = null) { return []; }
+}
+
+class CashflowDeGrupos extends Cashflow {
+    public $series = [];
+    protected function pedirSeries($h, $filas) { return $this->series; }
+}
+
+function gSerie($h, $dias = [], $meses = []) {
+    $s = $h->serieVacia();
+
+    foreach ($dias as $k => $v)  { $s['dias'][$k] = $v; }
+    foreach ($meses as $k => $v) { $s['meses'][$k] = $v; }
+
+    $s['moneda_origen'] = 'ARS';
+    $s['tipo_cambio'] = null;
+    $s['fuera_horizonte'] = 0;
+    $s['sin_fecha'] = 0;
+    $s['warnings'] = [];
+    $s['detalle'] = [];
+
+    return $s;
+}
+
+function gConf($id, $codigo, $seccion, $tipo, $orden, $prov = null, $serie = null, $extra = []) {
+    return array_merge([
+        'ID' => $id, 'CODIGO' => $codigo, 'NOMBRE' => $codigo, 'SECCION' => $seccion,
+        'TIPO' => $tipo, 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => $prov,
+        'ORIGEN_SERIE' => $serie, 'ORDEN' => $orden, 'ACTIVO' => 1,
+        'GRUPO' => null, 'NATURALEZA' => null, 'GRUPO_NOMBRE' => null
+    ], $extra);
+}
+
+/** El tablero del escenario, con o sin los grupos declarados */
+function gTablero($conGrupos) {
+    $marcaReal = $conGrupos
+        ? ['GRUPO' => 'COB', 'NATURALEZA' => 'REAL', 'GRUPO_NOMBRE' => 'Cobranzas'] : [];
+    $marcaProy = $conGrupos
+        ? ['GRUPO' => 'COB', 'NATURALEZA' => 'PROYECTADO'] : [];
+
+    $est = new EstructuraDeGrupos();
+    $est->secciones = [
+        ['CODIGO' => 'DISP', 'NOMBRE' => 'Disponible', 'ROL' => 'SALDO',
+         'ID_PADRE' => null, 'ORDEN' => 10, 'ACTIVO' => 1],
+        ['CODIGO' => 'ING', 'NOMBRE' => 'Ingresos', 'ROL' => 'MOVIMIENTO',
+         'ID_PADRE' => null, 'ORDEN' => 20, 'ACTIVO' => 1],
+        ['CODIGO' => 'RES', 'NOMBRE' => 'Resultados', 'ROL' => 'DERIVADO',
+         'ID_PADRE' => null, 'ORDEN' => 30, 'ACTIVO' => 1]
+    ];
+    $est->filas = [
+        gConf(1, 'DISPONIBLE', 'DISP', 'SALDO_INICIAL', 10, 'SALDOS', 'DISPONIBLE'),
+        gConf(2, 'COB_REAL', 'ING', 'INGRESO', 10, 'COBR', 'REAL', $marcaReal),
+        gConf(3, 'COB_PROY', 'ING', 'INGRESO', 20, 'COBR', 'PROY', $marcaProy),
+        gConf(4, 'SUB_ING', 'ING', 'SUBTOTAL', 30),
+        gConf(5, 'FLUJO', 'RES', 'FLUJO_NETO', 10),
+        gConf(6, 'SALDO_FIN', 'RES', 'SALDO_FINAL', 20)
+    ];
+
+    $h = new Horizonte(3, 3, [], new DateTime('2026-09-06'));
+
+    $motor = new CashflowDeGrupos($est, new ParametrosDeGrupos(), $h);
+    $motor->series = [
+        'SALDOS' => ['DISPONIBLE' => gSerie($h, ['2026-09-06' => 1000])],
+        'COBR' => [
+            // La parte real tiene importe el 6 y el 7; la proyectada, el 7 y en
+            // octubre. El 8 no tiene ninguna de las dos: esa columna es la que
+            // fija que la suma de un grupo sin datos sea cero y no otra cosa.
+            'REAL' => gSerie($h, ['2026-09-06' => 100, '2026-09-07' => 200]),
+            'PROY' => gSerie($h, ['2026-09-07' => 50], ['2026-10' => 500])
+        ]
+    ];
+
+    return $motor->proyectar();
+}
+
+/** Saca de cada fila los tres campos de agrupamiento */
+function gSinMarcas($tablero) {
+    foreach ($tablero['filas'] as $i => $f) {
+        unset($tablero['filas'][$i]['grupo'], $tablero['filas'][$i]['naturaleza'],
+              $tablero['filas'][$i]['grupo_nombre']);
+    }
+
+    return $tablero;
+}
+
+seccion('el tablero es identico con grupos y sin grupos');
+
+$con = gTablero(true);
+$sin = gTablero(false);
+
+chequear('todo el tablero, campo por campo', gSinMarcas($sin), gSinMarcas($con));
+
+seccion('y los campos de agrupamiento viajan en el payload');
+
+$porCod = [];
+foreach ($con['filas'] as $f) { $porCod[$f['codigo']] = $f; }
+
+chequear('el grupo de la parte real', 'COB', $porCod['COB_REAL']['grupo']);
+chequear('su naturaleza', 'REAL', $porCod['COB_REAL']['naturaleza']);
+chequear('el nombre del grupo', 'Cobranzas', $porCod['COB_REAL']['grupo_nombre']);
+chequear('la naturaleza de la otra parte', 'PROYECTADO', $porCod['COB_PROY']['naturaleza']);
+chequear('la proyectada no repite el nombre', null, $porCod['COB_PROY']['grupo_nombre']);
+chequear('una fila sin grupo lo trae en null', null, $porCod['DISPONIBLE']['grupo']);
+chequear('y una derivada tambien', null, $porCod['SUB_ING']['grupo']);
+
+/* ================================================================
+   LO QUE TIENE QUE MOSTRAR LA FILA AGRUPADA
+
+   La suma la hace el front, pero el numero que le tiene que dar sale de estas
+   filas. Se fija aca -contra el motor de verdad- para que la aritmetica que
+   Js/Cashflow.js reproduce este escrita en algun lado que se ejecuta.
+   ================================================================ */
+seccion('la suma del grupo es la suma de sus partes, columna a columna');
+
+$real = $porCod['COB_REAL'];
+$proy = $porCod['COB_PROY'];
+
+chequear('el 6, solo la real', 100.0, $real['dias']['2026-09-06'] + $proy['dias']['2026-09-06']);
+chequear('el 7, las dos', 250.0, $real['dias']['2026-09-07'] + $proy['dias']['2026-09-07']);
+chequear('el 8, ninguna', 0.0, $real['dias']['2026-09-08'] + $proy['dias']['2026-09-08']);
+chequear('octubre, solo la proyectada', 500.0,
+    $real['meses']['2026-10'] + $proy['meses']['2026-10']);
+
+seccion('y el subtotal ya daba eso, que es el punto');
+
+chequear('el 7 el subtotal coincide con la suma del grupo',
+    250.0, $porCod['SUB_ING']['dias']['2026-09-07']);
+chequear('y el 8 tambien', 0.0, $porCod['SUB_ING']['dias']['2026-09-08']);
+
+seccion('el total del grupo es la suma de los totales de sus partes');
+
+foreach (['total_tramo', 'total_meses', 'total_horizonte'] as $total) {
+    chequear($total . ' de la real mas la proyectada es el del subtotal',
+        round($porCod['SUB_ING'][$total], 2),
+        round($real[$total] + $proy[$total], 2));
+}

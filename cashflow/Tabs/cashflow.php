@@ -118,6 +118,15 @@
                      pestaña que explica una de sus filas no pueden ofrecer
                      vistas distintas ni medir períodos distintos. -->
                 <div id="cfVistas"></div>
+                <!-- Abre o cierra TODOS los conceptos con parte real y
+                     proyectada. Arranca escondido y lo muestra Js/Cashflow.js
+                     sólo si hay alguno dibujado: un botón que no hace nada se
+                     aprieta y parece que falló. El rótulo también lo pone el
+                     JS, porque depende de si queda alguno cerrado. -->
+                <button id="cfBtnGrupos" class="btn btn-sm btn-outline-secondary"
+                        style="display: none;">
+                    <i class="fas fa-angles-down me-1"></i> Expandir todo
+                </button>
                 <button id="cfBtnRefresh" class="btn btn-sm btn-outline-primary">
                     <i class="fas fa-sync-alt me-1"></i> Actualizar
                 </button>
