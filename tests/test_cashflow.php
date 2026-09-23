@@ -511,8 +511,13 @@ $jsCf = file_get_contents(__DIR__ . '/../cashflow/Js/Cashflow.js');
 // su encabezado y quedaria un titulo sin nada debajo.
 chequear('el front filtra las filas de stock', true,
     strpos($jsCf, "return f.tipo !== 'STOCK_COBERTURA';") !== false);
+// El filtrado se aplica sobre la lista ENTERA antes de recorrerla. Desde las
+// filas agrupadas la lista filtrada pasa antes por armarRenglones(), que junta
+// las partes de cada concepto; el orden importa y es el mismo motivo: una fila
+// que no se dibuja tampoco puede partir un grupo en dos renglones que en
+// pantalla estan pegados.
 chequear('y filtra antes de recorrer, no adentro del bucle', true,
-    strpos($jsCf, 'datos.filas.filter(filaDibujable).forEach(') !== false);
+    strpos($jsCf, 'armarRenglones(datos.filas.filter(filaDibujable)).forEach(') !== false);
 
 // Y el motor las sigue resolviendo igual: si esto desapareciera, el disponible
 // y los topes por fondo se irian con ellas.

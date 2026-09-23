@@ -38,13 +38,44 @@ require_once __DIR__ . '/CashflowRegistry.php';
  * Por eso no puede haber referencias colgadas, ni ciclos entre filas, ni una
  * formula que quede apuntando a algo que se renombro.
  *
+ * CONCEPTOS CON PARTE REAL Y PROYECTADA: EL AGRUPAMIENTO TAMBIEN ES POSICIONAL
+ * ---------------------------------------------------------------------------
+ * Un concepto que tiene una parte REAL y una PROYECTADA -la cobranza de
+ * franquicias; manana las compras proyectadas del exterior- son DOS series del
+ * proveedor y DOS filas del tablero, nunca una sola serie que las mezcle. Para
+ * leer el cuadro de arriba hacia abajo el tablero las muestra como un solo
+ * renglon, que se abre.
+ *
+ * ESO NO PUEDE SER UNA FILA PADRE QUE SUMA HIJAS, por lo mismo que no hay
+ * formulas: seria la primera referencia fila->fila del modulo y traeria de
+ * vuelta todo lo que la ausencia de referencias evita. Se declara con tres
+ * columnas y se resuelve por POSICION, igual que un SUBTOTAL:
+ *
+ *   GRUPO        -> filas CONSECUTIVAS de la misma seccion, del mismo TIPO y
+ *                   con el mismo GRUPO forman un grupo
+ *   NATURALEZA   -> 'REAL' o 'PROYECTADO': que parte es cada fila. Se puede
+ *                   declarar sin GRUPO -una fila sola que sea toda proyectada-
+ *   GRUPO_NOMBRE -> como se llama el grupo en pantalla. Lo declara cualquiera
+ *                   de sus filas y gana la primera no vacia
+ *
+ * Y LA FILA AGRUPADA ES PRESENTACION, NO ESTRUCTURA. El motor no la conoce:
+ * las filas del grupo calculan y computan por separado, y la suma la arma el
+ * front con las filas que dibuja. Subtotales, Flujo Neto, Saldo Final y KPIs
+ * dan lo mismo con el grupo abierto o cerrado. Ver grupos(), que es la regla
+ * de agrupamiento en su unica version del lado del servidor.
+ *
  * SI LAS TABLAS NO EXISTEN
  * ------------------------
  * Las lecturas devuelven vacio y getAvisos() dice que hay que correr el script,
- * en vez de romper. Es un unico chequeo con OBJECT_ID; no hace falta el sondeo
- * por columna que hace Parametros::tieneColumnaModulo(), que existe solo porque
- * RO_T_CASHFLOW_PARAMETROS es anterior a su columna MODULO en bases ya
- * desplegadas. Estas tablas nacen completas.
+ * en vez de romper. Es un unico chequeo con OBJECT_ID.
+ *
+ * SI FALTAN LAS COLUMNAS DE GRUPO
+ * -------------------------------
+ * Eso si necesita el sondeo por columna que hace Parametros::tieneColumnaModulo()
+ * -ver tieneColumnasGrupo()-, y es la excepcion a lo que decia aca antes ("estas
+ * tablas nacen completas"): desde sql/cashflow_estructura_grupos.sql dejo de ser
+ * cierto para una base ya desplegada, que las recibe por ALTER. Sin las
+ * columnas el tablero funciona exactamente como hoy, sin grupos, y lo avisa.
  */
 class CashflowEstructura {
 
@@ -93,11 +124,46 @@ class CashflowEstructura {
     /** Tipos que calcula el motor y no traen datos de ningun modulo */
     const TIPOS_DERIVADOS = ['SUBTOTAL', 'FLUJO_NETO', 'SALDO_FINAL'];
 
+    /**
+     * Valores validos de NATURALEZA: que parte de un concepto es la fila.
+     *
+     * ESTA LISTA Y EL CHECK DEL DDL CAMBIAN JUNTOS, igual que TIPOS. Ver
+     * CK_RO_T_CASHFLOW_CONF_FILA_NATURALEZA en
+     * sql/cashflow_estructura_grupos.sql y en la semilla.
+     *
+     * NULL es un valor legitimo y el mas comun: un subtotal no es ni real ni
+     * proyectado, y una fila de un concepto que no se parte tampoco necesita
+     * declararlo.
+     */
+    const NATURALEZAS = ['REAL', 'PROYECTADO'];
+
+    /**
+     * Tipos que NO pueden llevar GRUPO.
+     *
+     * Las derivadas porque lo que muestran es una consecuencia de su posicion
+     * -un SUBTOTAL cierra su seccion- y meterlas adentro de un grupo que se
+     * abre y se cierra dejaria el cuadro diciendo cosas distintas segun como
+     * este el chevron. Las de cobertura porque las de stock no se dibujan y
+     * las de uso tienen que quedar ENTRE los dos flujos netos: agruparlas es
+     * moverlas.
+     *
+     * A diferencia de las advertencias de grupo -no consecutivo, sin una de
+     * las dos naturalezas-, esto es un ERROR que bloquea el guardado: no hay
+     * nada sensato que dibujar, y la correccion es vaciar el campo en la misma
+     * pantalla.
+     */
+    const TIPOS_SIN_GRUPO = [
+        'SUBTOTAL', 'FLUJO_NETO', 'SALDO_FINAL', 'STOCK_COBERTURA', 'USO_COBERTURA'
+    ];
+
     /** @var Conexion */
     private $conn;
 
     /** @var bool|null Cache del chequeo de existencia de las tablas */
     private $tablas = null;
+
+    /** @var bool|null Cache del sondeo de las columnas de grupo */
+    private $columnasGrupo = null;
 
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
@@ -143,6 +209,11 @@ class CashflowEstructura {
     /** @param string $tipo @return bool Si es una fila de saldo (su total es un cierre, no una suma) */
     public static function esSaldo($tipo) {
         return ($tipo === 'SALDO_INICIAL' || $tipo === 'SALDO_FINAL');
+    }
+
+    /** @param string $tipo @return bool Si una fila de ese tipo puede llevar GRUPO */
+    public static function puedeAgruparse($tipo) {
+        return !in_array($tipo, self::TIPOS_SIN_GRUPO, true);
     }
 
     /**
@@ -219,6 +290,55 @@ class CashflowEstructura {
     }
 
     /**
+     * Si RO_T_CASHFLOW_CONF_FILA ya tiene las columnas de agrupamiento.
+     *
+     * ES UN SONDEO POR COLUMNA Y NO ALCANZA CON tablasCreadas(): la tabla
+     * existe desde la primera version del modulo y estas tres columnas se le
+     * agregan por ALTER, asi que una base desplegada puede tener la tabla y no
+     * tenerlas. Es el mismo caso que Parametros::tieneColumnaModulo().
+     *
+     * Se pregunta por las TRES: media migracion es tan mala como ninguna, y
+     * leer GRUPO sin GRUPO_NOMBRE dejaria grupos sin nombre sin decir por que.
+     *
+     * @return bool
+     */
+    public function tieneColumnasGrupo() {
+        if ($this->columnasGrupo !== null) {
+            return $this->columnasGrupo;
+        }
+
+        if (!$this->tablasCreadas()) {
+            $this->columnasGrupo = false;
+
+            return false;
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $sql = "SELECT COL_LENGTH('dbo.RO_T_CASHFLOW_CONF_FILA', 'GRUPO')        AS G,
+                       COL_LENGTH('dbo.RO_T_CASHFLOW_CONF_FILA', 'NATURALEZA')   AS N,
+                       COL_LENGTH('dbo.RO_T_CASHFLOW_CONF_FILA', 'GRUPO_NOMBRE') AS M";
+
+        $stmt = sqlsrv_query($cid, $sql);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar las columnas de grupo'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->columnasGrupo = ($row && $row['G'] !== null && $row['N'] !== null
+            && $row['M'] !== null);
+
+        return $this->columnasGrupo;
+    }
+
+    /**
      * Avisos de configuracion pendiente, para mostrar en pantalla.
      *
      * @return array Lista de mensajes
@@ -230,6 +350,18 @@ class CashflowEstructura {
             $avisos[] = 'Todavía no existen las tablas de estructura del Cashflow. '
                       . 'Corré sql/cashflow_estructura.sql contra la base central '
                       . 'para crear las secciones y filas del tablero.';
+
+            // Sin las tablas, hablar de las columnas que les faltan es ruido:
+            // el aviso que hay que leer es el de arriba.
+            return $avisos;
+        }
+
+        if (!$this->tieneColumnasGrupo()) {
+            $avisos[] = 'Las filas del tablero todavía no se pueden agrupar: faltan las '
+                      . 'columnas GRUPO, NATURALEZA y GRUPO_NOMBRE. Corré '
+                      . 'sql/cashflow_estructura_grupos.sql contra la base central. '
+                      . 'Mientras tanto el tablero funciona igual, con una fila por cada '
+                      . 'parte.';
         }
 
         return $avisos;
@@ -300,9 +432,17 @@ class CashflowEstructura {
             throw new Exception('No se pudo conectar a la base de datos');
         }
 
+        // Las tres de grupo se piden sólo si están: contra una base sin el
+        // script, nombrarlas en el SELECT haría fallar la consulta entera y el
+        // tablero se caería por una función que todavía no se usa. Se
+        // completan en null más abajo, así que quien lee estas filas ve
+        // siempre la misma forma.
+        $conGrupo = $this->tieneColumnasGrupo();
+
         $sql = "SELECT ID, CODIGO, NOMBRE, SECCION, TIPO, COMPUTA,
-                       ORIGEN_PROVIDER, ORIGEN_SERIE, ORDEN, ACTIVO
-                FROM RO_T_CASHFLOW_CONF_FILA";
+                       ORIGEN_PROVIDER, ORIGEN_SERIE, ORDEN, ACTIVO"
+             . ($conGrupo ? ", GRUPO, NATURALEZA, GRUPO_NOMBRE" : "")
+             . " FROM RO_T_CASHFLOW_CONF_FILA";
 
         if ($soloActivas) {
             $sql .= " WHERE ACTIVO = 1";
@@ -323,6 +463,12 @@ class CashflowEstructura {
             $row['ORDEN'] = intval($row['ORDEN']);
             $row['ACTIVO'] = intval($row['ACTIVO']);
             $row['COMPUTA'] = intval($row['COMPUTA']);
+
+            foreach (['GRUPO', 'NATURALEZA', 'GRUPO_NOMBRE'] as $col) {
+                $row[$col] = isset($row[$col]) && trim((string) $row[$col]) !== ''
+                    ? trim((string) $row[$col]) : null;
+            }
+
             $v[] = $row;
         }
 
@@ -343,9 +489,30 @@ class CashflowEstructura {
         $secciones = $this->getSecciones($soloActivas);
         $filas = $this->getFilas($soloActivas);
 
+        return [
+            'secciones' => $secciones,
+            'filas' => self::ordenarFilas($secciones, $filas)
+        ];
+    }
+
+    /**
+     * Las filas en el orden en que se dibujan: por orden de seccion y, dentro
+     * de cada una, por orden de fila.
+     *
+     * Estatica y pura porque no la usa solo getEstructura(): el agrupamiento
+     * es POSICIONAL, asi que el validador tiene que poder resolver el mismo
+     * orden sobre una estructura simulada que nunca paso por la base. Si cada
+     * uno ordenara a su manera, "filas consecutivas" querria decir dos cosas
+     * distintas segun quien pregunte.
+     *
+     * @param array $secciones En el orden en que se muestran
+     * @param array $filas
+     * @return array Las mismas filas, ordenadas
+     */
+    public static function ordenarFilas($secciones, $filas) {
         $posSeccion = [];
 
-        foreach ($secciones as $i => $s) {
+        foreach (array_values($secciones) as $i => $s) {
             $posSeccion[$s['CODIGO']] = $i;
         }
 
@@ -369,7 +536,130 @@ class CashflowEstructura {
             return strcmp($a['CODIGO'], $b['CODIGO']);
         });
 
-        return ['secciones' => $secciones, 'filas' => $filas];
+        return $filas;
+    }
+
+    /* ====================================================================
+       AGRUPAMIENTO
+       ==================================================================== */
+
+    /**
+     * Los grupos que declara una estructura, resueltos por POSICION.
+     *
+     * LA REGLA, ENTERA: dentro de la lista de filas ACTIVAS puesta en orden de
+     * dibujo, cada corrida de filas seguidas que comparten GRUPO, SECCION y
+     * TIPO es una corrida del grupo. Un grupo bien declarado tiene UNA sola
+     * corrida; si tiene dos o mas, sus filas no son consecutivas -o cambian de
+     * seccion, o cambian de tipo- y el front las dibuja sueltas.
+     *
+     * POR QUE SOBRE LAS ACTIVAS. Una fila inhabilitada no se dibuja, asi que no
+     * parte nada: hoy mismo COBRANZAS_FR (inactiva) esta entre las dos filas
+     * que hay que agrupar, y contarla las dejaria "no consecutivas" cuando en
+     * pantalla estan pegadas.
+     *
+     * ESTA REGLA ESTA ESCRITA DOS VECES, ACA Y EN Js/Cashflow.js, Y ES A
+     * PROPOSITO: el validador la corre sobre la CONFIGURACION -todas las filas
+     * activas- para poder avisar, y el front sobre lo que DIBUJA -sin las filas
+     * de stock de cobertura, que no se pintan-. Las dos listas coinciden salvo
+     * que una fila no dibujable llevara GRUPO, y eso es un error del validador.
+     * Si se tocan las condiciones hay que tocar las dos.
+     *
+     * @param array $secciones
+     * @param array $filas
+     * @return array Mapa codigo de grupo => [
+     *     'codigo', 'nombre', 'consecutivo' => bool,
+     *     'corridas' => [[fila, ...], ...], 'filas' => [fila, ...],
+     *     'secciones' => [...], 'tipos' => [...],
+     *     'naturalezas' => ['REAL' => n, 'PROYECTADO' => n, '' => n],
+     *     'nombres' => [los GRUPO_NOMBRE distintos que declararon sus filas]
+     * ]
+     */
+    public static function grupos($secciones, $filas) {
+        $ordenadas = self::ordenarFilas($secciones, $filas);
+        $grupos = [];
+        $anterior = null;
+
+        foreach ($ordenadas as $f) {
+            $codigo = isset($f['GRUPO']) ? trim((string) $f['GRUPO']) : '';
+
+            /* UNA FILA INHABILITADA NO EXISTE ACA, y no corta nada: no se
+               dibuja, así que no se mete entre dos filas que en pantalla
+               quedan pegadas. Es el caso de hoy mismo -COBRANZAS_FR, la fila
+               total, quedó inhabilitada justo arriba de sus dos partes-. Y
+               tampoco suma al grupo aunque declare uno: lo que no está en el
+               cuadro no es parte de nada. */
+            if (intval($f['ACTIVO']) !== 1) {
+                continue;
+            }
+
+            if ($codigo === '') {
+                // Una fila sin grupo sí corta la corrida abierta: es lo que
+                // hace que "consecutivas" signifique algo.
+                $anterior = null;
+                continue;
+            }
+
+            if (!isset($grupos[$codigo])) {
+                $grupos[$codigo] = [
+                    'codigo' => $codigo,
+                    'nombre' => $codigo,
+                    'consecutivo' => true,
+                    'corridas' => [],
+                    'filas' => [],
+                    'secciones' => [],
+                    'tipos' => [],
+                    'naturalezas' => ['REAL' => 0, 'PROYECTADO' => 0, '' => 0],
+                    'nombres' => []
+                ];
+            }
+
+            $sigue = $anterior !== null
+                && isset($anterior['GRUPO']) && trim((string) $anterior['GRUPO']) === $codigo
+                && $anterior['SECCION'] === $f['SECCION']
+                && $anterior['TIPO'] === $f['TIPO'];
+
+            if ($sigue) {
+                $grupos[$codigo]['corridas'][count($grupos[$codigo]['corridas']) - 1][] = $f;
+            } else {
+                $grupos[$codigo]['corridas'][] = [$f];
+            }
+
+            $grupos[$codigo]['filas'][] = $f;
+
+            if (!in_array($f['SECCION'], $grupos[$codigo]['secciones'], true)) {
+                $grupos[$codigo]['secciones'][] = $f['SECCION'];
+            }
+
+            if (!in_array($f['TIPO'], $grupos[$codigo]['tipos'], true)) {
+                $grupos[$codigo]['tipos'][] = $f['TIPO'];
+            }
+
+            $nat = isset($f['NATURALEZA']) ? trim((string) $f['NATURALEZA']) : '';
+            $nat = in_array($nat, self::NATURALEZAS, true) ? $nat : '';
+            $grupos[$codigo]['naturalezas'][$nat]++;
+
+            $nombre = isset($f['GRUPO_NOMBRE']) ? trim((string) $f['GRUPO_NOMBRE']) : '';
+
+            if ($nombre !== '' && !in_array($nombre, $grupos[$codigo]['nombres'], true)) {
+                $grupos[$codigo]['nombres'][] = $nombre;
+            }
+
+            $anterior = $f;
+        }
+
+        // GANA LA PRIMERA FILA QUE LO DECLARA, en orden de dibujo. Es la regla
+        // mas simple que se puede explicar en la pantalla de Parametros; que
+        // dos filas declaren nombres distintos se avisa, no se resuelve por
+        // precedencia oculta.
+        foreach ($grupos as $cod => $g) {
+            $grupos[$cod]['consecutivo'] = (count($g['corridas']) === 1);
+
+            if (!empty($g['nombres'])) {
+                $grupos[$cod]['nombre'] = $g['nombres'][0];
+            }
+        }
+
+        return $grupos;
     }
 
     /* ====================================================================
@@ -564,6 +854,12 @@ class CashflowEstructura {
                     . $f['TIPO'] . ', que lo calcula el sistema: su origen de datos se ignora.');
             }
 
+            /* Agrupamiento. Se chequea este a la fila esté activa o no: una
+               fila inhabilitada con el grupo mal puesto no rompe nada hoy,
+               pero rompe el día que alguien la activa, y ahí el error ya no
+               se va a leer al lado del cambio que lo causó. */
+            self::validarGrupoDeFila($r, $f);
+
             if (!$activa) {
                 continue;
             }
@@ -613,6 +909,7 @@ class CashflowEstructura {
         }
 
         self::validarCortes($r, $providers, $origenesUsados);
+        self::validarGrupos($r, $secciones, $filas);
 
         // Un SUBTOTAL que no suma nada muestra cero y se lee como un error del
         // sistema. Se mira la seccion y sus descendientes, porque el subtotal
@@ -659,6 +956,128 @@ class CashflowEstructura {
         }
 
         return $r;
+    }
+
+    /**
+     * Lo que se puede decir de UNA fila mirando sólo esa fila.
+     *
+     * Lo demás -si el grupo es consecutivo, si tiene las dos naturalezas- sale
+     * de mirar el conjunto y vive en validarGrupos().
+     *
+     * @param array $r Resultado de la validacion, se modifica
+     * @param array $f La fila
+     */
+    private static function validarGrupoDeFila(&$r, $f) {
+        $id = $f['ID'];
+        $grupo = isset($f['GRUPO']) ? trim((string) $f['GRUPO']) : '';
+        $nat = isset($f['NATURALEZA']) ? trim((string) $f['NATURALEZA']) : '';
+        $nombre = isset($f['GRUPO_NOMBRE']) ? trim((string) $f['GRUPO_NOMBRE']) : '';
+
+        if ($grupo !== '') {
+            if (!self::codigoValido($grupo)) {
+                self::errorFila($r, $id, 'El grupo "' . $grupo . '" de la fila "' . $f['NOMBRE']
+                    . '" no es un código válido: debe empezar con una letra y usar sólo '
+                    . 'letras, números y guión bajo.');
+            }
+
+            // ERROR Y NO ADVERTENCIA: no hay nada sensato que dibujar. Un
+            // subtotal metido adentro de un grupo que se abre y se cierra
+            // haría que el cuadro diga cosas distintas según el chevron, y una
+            // fila de uso de cobertura agrupada se movería de entre los dos
+            // flujos netos, que es lo único que hace que esos dos den lo que
+            // prometen. La corrección es vaciar el campo, acá mismo.
+            if (!self::puedeAgruparse($f['TIPO'])) {
+                self::errorFila($r, $id, 'La fila "' . $f['NOMBRE'] . '" es de tipo '
+                    . $f['TIPO'] . ' y no se puede agrupar: lo que muestra depende de dónde '
+                    . 'está, así que esconderla o moverla dentro de un grupo cambiaría lo que '
+                    . 'dice el cuadro. Sacale el grupo.');
+            }
+        }
+
+        if ($nat !== '' && !in_array($nat, self::NATURALEZAS, true)) {
+            self::errorFila($r, $id, 'La fila "' . $f['NOMBRE'] . '" tiene una naturaleza '
+                . 'desconocida: "' . $nat . '". Sólo vale REAL o PROYECTADO.');
+        }
+
+        // Se informa, no se bloquea: es el mismo criterio que el origen de
+        // datos de una fila derivada. El dato queda guardado y no hace nada.
+        if ($nat !== '' && !self::puedeAgruparse($f['TIPO'])) {
+            self::advertenciaFila($r, $id, 'La fila "' . $f['NOMBRE'] . '" es de tipo '
+                . $f['TIPO'] . ', que no es ni real ni proyectado: su naturaleza se ignora.');
+        }
+
+        if ($nombre !== '' && $grupo === '') {
+            self::advertenciaFila($r, $id, 'La fila "' . $f['NOMBRE'] . '" declara el nombre '
+                . 'de grupo "' . $nombre . '" pero no está en ningún grupo: ese nombre no se '
+                . 'muestra en ningún lado.');
+        }
+    }
+
+    /**
+     * LAS FILAS DE UN GRUPO TIENEN QUE SER CONSECUTIVAS, DE LA MISMA SECCION Y
+     * DEL MISMO TIPO.
+     *
+     * Y esto son ADVERTENCIAS, no errores, a diferencia de casi todo lo que
+     * bloquea el guardado. El motivo es que el front no depende de que estén
+     * bien: grupos() resuelve corridas, y una corrida rota se dibuja como
+     * filas sueltas. O sea que una estructura con un grupo mal declarado
+     * muestra de más -dos renglones en vez de uno- y nunca de menos ni mal
+     * sumado, que es la falla que había que hacer imposible. Bloquear el
+     * guardado sobre algo que no puede dar un número equivocado sería impedir
+     * el paso intermedio de cualquier reacomodamiento.
+     *
+     * UN GRUPO SIN PARTE REAL O SIN PARTE PROYECTADA ES VALIDO Y SE AVISA. Es
+     * un estado legítimo y puede ser transitorio -una temporada sin
+     * presupuesto cargado deja el grupo con la parte real sola-, pero también
+     * es exactamente lo que se ve cuando alguien se olvidó de declarar la
+     * naturaleza de una fila.
+     *
+     * @param array $r Resultado de la validacion, se modifica
+     * @param array $secciones
+     * @param array $filas
+     */
+    private static function validarGrupos(&$r, $secciones, $filas) {
+        foreach (self::grupos($secciones, $filas) as $g) {
+            $cuantas = count($g['filas']);
+
+            if (!$g['consecutivo']) {
+                if (count($g['secciones']) > 1) {
+                    $porque = 'están repartidas en más de una sección ('
+                        . implode(', ', $g['secciones']) . ')';
+                } elseif (count($g['tipos']) > 1) {
+                    $porque = 'no son todas del mismo tipo (' . implode(', ', $g['tipos'])
+                        . '): no se agrupa un ingreso con un egreso';
+                } else {
+                    $porque = 'hay otra fila en el medio';
+                }
+
+                self::advertencia($r, 'Las ' . $cuantas . ' filas del grupo "' . $g['nombre']
+                    . '" no quedan una al lado de la otra: ' . $porque . '. El tablero las '
+                    . 'dibuja sueltas, como hasta ahora, en vez de sumarlas en un renglón que '
+                    . 'no correspondería. Ponelas seguidas para que se agrupen.');
+
+                foreach ($g['filas'] as $f) {
+                    self::advertenciaFila($r, $f['ID'], 'La fila "' . $f['NOMBRE'] . '" no se '
+                        . 'va a agrupar: las filas del grupo "' . $g['nombre'] . '" no quedan '
+                        . 'una al lado de la otra.');
+                }
+            }
+
+            if ($g['naturalezas']['REAL'] === 0 || $g['naturalezas']['PROYECTADO'] === 0) {
+                $falta = $g['naturalezas']['REAL'] === 0 ? 'real' : 'proyectada';
+
+                self::advertencia($r, 'El grupo "' . $g['nombre'] . '" no tiene ninguna fila '
+                    . 'con la parte ' . $falta . '. Es válido -puede ser transitorio- pero si '
+                    . 'no era la idea, revisá la naturaleza de sus '
+                    . $cuantas . ' fila' . ($cuantas === 1 ? '' : 's') . '.');
+            }
+
+            if (count($g['nombres']) > 1) {
+                self::advertencia($r, 'Las filas del grupo "' . $g['codigo'] . '" declaran '
+                    . 'nombres distintos (' . implode(', ', $g['nombres']) . '). Se muestra el '
+                    . 'de la primera: "' . $g['nombre'] . '".');
+            }
+        }
     }
 
     /**
@@ -848,6 +1267,11 @@ class CashflowEstructura {
     private static function error(&$r, $mensaje) {
         $r['valido'] = false;
         $r['errores'][] = $mensaje;
+    }
+
+    /** Advertencia de conjunto: no es de ninguna fila ni de ninguna sección */
+    private static function advertencia(&$r, $mensaje) {
+        $r['advertencias'][] = $mensaje;
     }
 
     private static function errorFila(&$r, $id, $mensaje) {
@@ -1084,6 +1508,7 @@ class CashflowEstructura {
             throw new Exception(implode(' ', $val['errores']));
         }
 
+        $conGrupo = $this->tieneColumnasGrupo();
         $cid = $this->conexion();
 
         if (sqlsrv_begin_transaction($cid) === false) {
@@ -1131,13 +1556,20 @@ class CashflowEstructura {
 
                 // CODIGO no se actualiza nunca: es la clave con la que se
                 // referencia la fila. Si quedo mal, se inhabilita y se crea otra.
+                //
+                // Las tres columnas de grupo se escriben SOLO si estan: contra
+                // una base sin el script, nombrarlas haria fallar el guardado
+                // entero de la estructura por una funcion que esa base no
+                // tiene. El editor ademas ya las dibuja apagadas.
                 $sql = "UPDATE RO_T_CASHFLOW_CONF_FILA
                         SET NOMBRE = ?, SECCION = ?, TIPO = ?, COMPUTA = ?,
-                            ORIGEN_PROVIDER = ?, ORIGEN_SERIE = ?, ORDEN = ?, ACTIVO = ?,
-                            FECHA_UPDATE = GETDATE(), USUARIO = ?
+                            ORIGEN_PROVIDER = ?, ORIGEN_SERIE = ?, ORDEN = ?, ACTIVO = ?,"
+                    . ($conGrupo ? " GRUPO = ?, NATURALEZA = ?, GRUPO_NOMBRE = ?," : "")
+                    . " FECHA_UPDATE = GETDATE(), USUARIO = ?
                         WHERE ID = ?";
 
                 $derivada = self::esDerivada($f['tipo']);
+                $grupo = self::normalizarGrupo($f);
 
                 $params = [
                     trim($f['nombre']),
@@ -1147,10 +1579,17 @@ class CashflowEstructura {
                     ($derivada || empty($f['origen_provider'])) ? null : $f['origen_provider'],
                     ($derivada || empty($f['origen_serie'])) ? null : $f['origen_serie'],
                     $ordenPorSeccion[$seccion],
-                    !empty($f['activo']) ? 1 : 0,
-                    $usuario,
-                    intval($f['id'])
+                    !empty($f['activo']) ? 1 : 0
                 ];
+
+                if ($conGrupo) {
+                    $params[] = $grupo['GRUPO'];
+                    $params[] = $grupo['NATURALEZA'];
+                    $params[] = $grupo['GRUPO_NOMBRE'];
+                }
+
+                $params[] = $usuario;
+                $params[] = intval($f['id']);
 
                 if (sqlsrv_query($cid, $sql, $params) === false) {
                     throw new Exception($this->errorSql('Error al guardar la fila '
@@ -1240,6 +1679,46 @@ class CashflowEstructura {
         return $sim;
     }
 
+    /**
+     * Los tres campos de agrupamiento de una fila que llega del editor, listos
+     * para guardar.
+     *
+     * EL SERVIDOR SLUGIFICA EL CODIGO, sin importar lo que mande el cliente.
+     * Es la misma regla que el CODIGO de la fila y por el mismo motivo: es una
+     * clave interna, y una tipeada con espacios o acentos haría que dos filas
+     * que el usuario cree del mismo grupo no lo sean.
+     *
+     * Y SE VACIAN LOS TRES DONDE NO SIGNIFICAN NADA -filas derivadas y de
+     * cobertura-, igual que se vacía el origen de datos de una fila que pasa a
+     * ser un subtotal. Así cambiarle el tipo a una fila agrupada la saca del
+     * grupo sola, en vez de dejar una configuración que el validador después
+     * rechaza.
+     *
+     * @param array $f Fila del editor
+     * @return array ['GRUPO', 'NATURALEZA', 'GRUPO_NOMBRE'], cada uno o null
+     */
+    private static function normalizarGrupo($f) {
+        $vacio = ['GRUPO' => null, 'NATURALEZA' => null, 'GRUPO_NOMBRE' => null];
+
+        if (!self::puedeAgruparse($f['tipo'])) {
+            return $vacio;
+        }
+
+        $grupo = isset($f['grupo']) ? self::slug($f['grupo']) : '';
+        $nat = isset($f['naturaleza']) ? strtoupper(trim((string) $f['naturaleza'])) : '';
+        $nombre = isset($f['grupo_nombre'])
+            ? substr(trim((string) $f['grupo_nombre']), 0, 80) : '';
+
+        return [
+            'GRUPO' => $grupo !== '' ? $grupo : null,
+            'NATURALEZA' => in_array($nat, self::NATURALEZAS, true) ? $nat : null,
+            // Un nombre de grupo sin grupo no se muestra en ningún lado; el
+            // validador lo avisa, así que se guarda tal cual en vez de
+            // descartarlo en silencio y dejar al usuario tipeándolo de nuevo.
+            'GRUPO_NOMBRE' => $nombre !== '' ? $nombre : null
+        ];
+    }
+
     /** Superpone las filas que llegan sobre las de la base */
     private function simularFilas($actual, $entrantes) {
         $porId = [];
@@ -1277,6 +1756,12 @@ class CashflowEstructura {
                 ? null : $e['origen_serie'];
             $a['ORDEN'] = $ordenPorSeccion[$e['seccion']];
             $a['ACTIVO'] = !empty($e['activo']) ? 1 : 0;
+
+            // Lo mismo que va a escribir guardar(), para que lo validado sea
+            // exactamente lo que se guarda y no lo que mandó el cliente.
+            foreach (self::normalizarGrupo($e) as $col => $valor) {
+                $a[$col] = $valor;
+            }
 
             $sim[] = $a;
         }

@@ -227,6 +227,86 @@
 }
 
 /* ============================================================================
+   CONCEPTOS CON PARTE REAL Y PROYECTADA
+
+   Un renglón que suma las dos partes y, abierto, las dos partes debajo. La
+   estructura de eso vive en Js/Cashflow.js; acá está sólo cómo se ve.
+
+   La sangría y la etiqueta "Real"/"Proyectado" NO se dibujan con CSS: van en
+   el texto de la celda, porque Exportar baja el DOM y Excel no interpreta un
+   padding. Lo que hace este archivo es darles el peso visual, no ponerlas.
+   ============================================================================ */
+
+.tab-cashflow .cf-oculta {
+    display: none;
+}
+
+/* El chevron es un <button> para que sea un control de verdad —foco con el
+   teclado, y TablaExport lo saca del clon— pero no tiene que verse como un
+   botón adentro de una celda de la grilla. */
+.tab-cashflow .cf-chevron {
+    background: none;
+    border: 0;
+    padding: 0 6px 0 0;
+    margin: 0;
+    color: var(--text-muted, #6c757d);
+    font-size: 0.72rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.tab-cashflow .cf-chevron:hover {
+    color: var(--bs-primary, #0d6efd);
+}
+
+/* El renglón agrupado es el que se lee primero, así que pesa un poco más que
+   una fila de movimiento suelta. No tanto como un subtotal: no lo es. */
+.tab-cashflow .cf-grupo td {
+    font-weight: 600;
+}
+
+/* Las partes van con un fondo apenas distinto para que se lea de un vistazo
+   dónde empieza y dónde termina lo que se abrió. Con la sangría sola, en una
+   tabla de veintiocho columnas de números, el bloque no se distingue. */
+.tab-cashflow .cf-parte td {
+    background-color: #fbfcfd;
+}
+
+.tab-cashflow .cf-parte .cf-col-concepto {
+    color: var(--text-muted, #6c757d);
+}
+
+/* LA PARTE PROYECTADA SE DISTINGUE DE LA REAL. Son dos cosas que no significan
+   lo mismo —una es plata comprometida y la otra una estimación— y en la fila
+   agrupada estaban sumadas en un número solo: si al abrirlas se vieran iguales,
+   abrir no habría servido de nada. */
+.tab-cashflow .cf-parte-proyectada td {
+    font-style: italic;
+    color: #7a8492;
+}
+
+/* La etiqueta que dice qué parte es. Va delante del nombre y no en una columna
+   propia: una columna más se paga en las veintiocho del eje, y adelante es el
+   único lugar donde el recorte de la columna no se la come. */
+.tab-cashflow .cf-naturaleza {
+    font-size: 0.68rem;
+    font-style: normal;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #97a1ae;
+    border: 1px solid #dfe3e8;
+    border-radius: 3px;
+    padding: 0 4px;
+    margin-left: 4px;
+    white-space: nowrap;
+}
+
+.tab-cashflow .cf-parte-proyectada .cf-naturaleza {
+    color: #8e7cc3;
+    border-color: #d9d2ec;
+}
+
+/* ============================================================================
    SECCIÓN COBERTURA
 
    Debajo del Flujo Neto: cuánto hay en cada fondo (stock), cuánto se usa de

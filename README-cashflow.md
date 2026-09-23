@@ -47,6 +47,7 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 | 19 | `sql/cashflow_cobertura_automatica.sql` | Reapunta la fila *Uso de Inversiones* a la serie `COBERTURA → USO_INVERSION`, crea *Uso de Dólares comitente* (`USO_COMITENTE`, `ORDEN = 25`), crea *Flujo Neto Acumulado (sin cobertura)* (`SALDO_FINAL`, en Resultados debajo del flujo neto) y fija la clave **fecha + fondo** de las aplicaciones manuales con un índice único filtrado por `VIGENTE = 1` | **El motor rescata igual de las inversiones** —la fila existente sigue leyendo `APLICACION`, que nombra los fondos de lo que tenga cargado— pero **no de la comitente**: no hay fila donde mostrarlo, y el tablero avisa nombrando el script. La clave por fondo la aplica el PHP de todos modos; sin el índice, sólo el código la garantiza |
 | 20 | `sql/cashflow_comex_fecha_maestra.sql` | Crea `RO_T_CASHFLOW_COMEX_FECHA_EDIT` —quién movió cada fecha de Comercio Exterior desde el cashflow— y **migra al maestro** las fechas que vivían en las columnas `EDIT` de `RO_T_CASHFLOW_COMEX_CRONO_NAC` | **Las dos pestañas de Comex se leen igual** —las fechas salen del maestro, que siempre está, y los vencidos se ven igual— pero **no se pueden editar**, y las dos avisan qué script falta. El tablero no cambia: lo que mueve sus números es el filtro de embarque que se sacó del código, no este script. En la base real la migración **no escribe ni una fecha**: las seis ediciones vigentes ya coinciden con el maestro. Ver `README-comex.md` |
 | 21 | `sql/cashflow_comex_pagado.sql` | Crea `RO_T_CASHFLOW_COMEX_PAGADO`: qué pagos de Comercio Exterior ya se hicieron, con su historial. Un pago marcado **sale de la proyección** y su importe pasa a una serie propia | **El tablero no cambia**: sin la tabla no hay nada marcado, así que proyecta todo lo pendiente, que es lo que hacía antes. Las dos pestañas se leen igual, la casilla se dibuja deshabilitada y las dos avisan qué script falta. Ver `README-comex.md` |
+| 22 | `sql/cashflow_estructura_grupos.sql` | Agrega `GRUPO`, `NATURALEZA` y `GRUPO_NOMBRE` a `RO_T_CASHFLOW_CONF_FILA`, y **agrupa las dos filas de Cobranzas Franquicias** en un solo renglón que se abre. De paso declara la naturaleza de las tres filas que son enteras de una parte | **El tablero funciona como hasta ahora**, con una fila por cada parte y sin ningún renglón que se abra, y lo avisa nombrando el script. Ningún importe cambia: la agrupación es presentación. Los campos de *Parámetros → Cashflow* se dibujan apagados diciendo qué falta |
 
 ### Scripts modificados — hay que volver a correrlos
 
@@ -71,6 +72,7 @@ Que ninguna fila del tablero duplique importes:
 - `ECHEQS → A_COBRAR` **activa y sola**. `A_COBRAR` ya no trae toda la cartera: trae la cobrable, sin lo excluido a mano. El universo es `A_COBRAR_TODO` y las dos mitades son `A_COBRAR` + `A_COBRAR_EXCLUIDOS`; activar el total al lado de cualquiera de las dos cuenta dos veces el mismo cheque, y eso lo rechaza el validador. **No hay que repuntar nada**: la fila ya está configurada contra `A_COBRAR`, y mientras no haya ningún cheque excluido ese código vale lo mismo que antes.
 - `STOCK_INVERSIONES → FONDO_INVERSION/STOCK` y `STOCK_DOLARES_COMITENTE → FONDO_COMITENTE/STOCK`, activas. Si alguna sigue apuntando a `SALDO_INVERSIONES` o `DOLARES_COMITENTE`, el editor la marca con la advertencia de módulo retirado y el tablero avisa. El día que se corre el script 18 **el tablero no se mueve un peso**: verificado contra la base, las dos filas dan `3.529.962,37` y `1.535,00` antes y después, porque el saldo inicial migrado es exactamente la última foto que el proveedor viejo tomaba como stock. Lo que sí aparece es el aviso por fondo de la cobertura, que antes no llegaba (ver *Los fondos son las cuentas*).
 - **Dos filas de uso, una por clase de fondo**: `USO_COBERTURA → COBERTURA/USO_INVERSION` y `USO_DOLARES_COMITENTE → COBERTURA/USO_COMITENTE`, activas, `COMPUTA = 1`, y **las dos entre** *Flujo Neto (sin cobertura)* y *Flujo Neto (con cobertura)*: el alcance de un flujo neto es posicional, así que una fila de uso puesta abajo del segundo no entraría en él. Ninguna fila activa con la serie `APLICACION` al lado de esas dos: es el total y el validador lo rechaza. El día que se corre el script 19 el tablero **no cambia ningún número salvo que ya hubiera columnas en rojo**: verificado contra la base el 19/09/2026, no había ninguna, así que el motor no rescató nada y la única aplicación manual vigente siguió en su columna.
+- `COBRANZAS_FR_REAL` y `COBRANZAS_FR_PROY` **seguidas**, con `GRUPO = 'COBRANZAS_FR'` y una `NATURALEZA` cada una. El agrupamiento es posicional: si alguien mete una fila activa entre las dos, el tablero las dibuja sueltas y el validador lo avisa. Que la fila total `COBRANZAS_FR` esté inactiva **entre medio** no molesta: no se dibuja.
 - **Dos filas de saldo**: `SALDO_ACUM_SIN_COB` en *Resultados* justo debajo de *Flujo Neto (sin cobertura)*, y `SALDO_FINAL` al final de *Cobertura*. Si la de arriba quedara **debajo** de las filas de uso las incluiría y diría lo mismo que la del final.
 
 ---
@@ -101,6 +103,7 @@ En este orden, contra `central`:
 -- 19. sql/cashflow_cobertura_automatica.sql  (Cobertura: una fila de uso por fondo; clave fecha + fondo)
 -- 20. sql/cashflow_comex_fecha_maestra.sql  (Comex: la fecha vive en el maestro, con rastro de quien edito)
 -- 21. sql/cashflow_comex_pagado.sql  (Comex: marcar un pago como ya hecho; sale de la proyeccion)
+-- 22. sql/cashflow_estructura_grupos.sql  (filas agrupadas: la cobranza FR en un renglon que se abre)
 ```
 
 **El 13 y el 14 van en ese orden y al final**, porque el 14 mueve `SALDO_FINAL` al final de la sección que crea y da de baja la fila del saldo de inversiones que crearon los anteriores. Correr el 14 sin el 13 no rompe nada, pero deja el cuadro a medio reagrupar.
@@ -108,6 +111,8 @@ En este orden, contra `central`:
 **El 18 va después del 3, del 14, de `sql/cashflow_cobertura_por_fondo.sql` y de `sql/cashflow_dolares_comitente_cobertura.sql`** (los dos de `README-otros-ingresos.md`): necesita el catálogo de cuentas, la tabla de aplicaciones con su columna `MONEDA`, y las dos filas de stock que reapunta. Si las tablas de Otros Ingresos no están, no crea las cuentas y lo dice: no hay nada que migrar, y los fondos se dan de alta desde Parámetros. Ver `README-saldos.md`.
 
 **El 19 va después del 18**: reapunta la fila de uso que creó el 14 y necesita que exista la fila de stock de la comitente para que la fila de uso nueva tenga de dónde rescatar; si no está, avisa. Es el único cuya ausencia **puede cambiar un número**: sin él el motor cubre sólo con las inversiones, y una columna que la comitente habría tapado queda en rojo, con aviso.
+
+**El 22 va después del 8**, que es el que parte la cobranza de franquicias en dos filas: lo que hace es declarar que esas dos son el mismo concepto. Si el 8 no se corrió, avisa, deja las tres columnas creadas y no agrupa nada. Es el único del grupo del que se puede afirmar que **no cambia ningún número por construcción y no sólo de hecho**: la agrupación es presentación y el motor no la ve. Verificado contra la base el 23/09/2026, en una transacción deshecha con `rollback`: toca 5 filas, la segunda corrida toca 0, y la estructura resultante valida sin un error ni un aviso nuevo.
 
 **El 20 va después de `sql/cashflow_comex_cotiz_edit.sql`** y de ningún otro. Es el único script del módulo que **escribe sobre una tabla que no es del cashflow** —el maestro de la plataforma Comex—, así que su encabezado documenta el criterio de conflicto y el script lista al final lo que decidió no migrar en vez de resolverlo solo. Ver `README-comex.md`.
 
@@ -697,6 +702,90 @@ Activar a la vez la serie total y sus componentes cuenta **dos veces** el mismo 
 
 ---
 
+## Conceptos con parte real y proyectada
+
+Hay conceptos del tablero que son **dos cosas a la vez**: una parte ya comprometida y una parte estimada. La cobranza de franquicias es el caso que existe hoy —lo aceptado en una propuesta de pago contra lo que proyecta el PPP—, y el próximo van a ser las **compras proyectadas del exterior**.
+
+**La convención, para todo concepto futuro con parte real y proyectada:**
+
+| | |
+| --- | --- |
+| En el proveedor | **Dos series**, una por parte. Nunca una sola serie que las mezcle |
+| En la estructura | **Dos filas consecutivas** con el mismo `GRUPO`, cada una con su `NATURALEZA` (`REAL` / `PROYECTADO`) |
+| En el tablero | **Un renglón** con la suma, que se abre y muestra las dos partes |
+
+Las tres columnas —`GRUPO`, `NATURALEZA` y `GRUPO_NOMBRE`— las agrega `sql/cashflow_estructura_grupos.sql`, y se asignan desde *Parámetros → Cashflow*. Si el script no se corrió, el tablero funciona como antes, con una fila por parte, y lo avisa.
+
+### La agrupación es sólo presentación
+
+**El motor no sabe que los grupos existen.** Las filas del grupo calculan, computan y entran en su subtotal exactamente igual que si no estuvieran agrupadas; la fila agrupada la arma el front sumando columna a columna las filas que dibuja. Por eso los subtotales, el *Flujo Neto*, el *Saldo Final* y los indicadores dan lo mismo con el grupo abierto o cerrado — y hay una prueba que corre el mismo escenario dos veces, con los grupos declarados y sin declarar, y exige dos tableros idénticos campo por campo.
+
+Si alguna vez el motor empieza a mirar `grupo`, dejó de ser presentación.
+
+### El agrupamiento es posicional, como todo lo demás
+
+No hay ninguna **fila padre que declare hijas**. Sería la primera referencia fila → fila del módulo, y traería de vuelta todo lo que su ausencia evita: referencias colgadas, ciclos, fórmulas que apuntan a algo que se renombró. La regla es la misma forma que usan `SUBTOTAL` y `FLUJO_NETO`:
+
+> Filas **consecutivas**, de la **misma sección**, del **mismo tipo** y con el **mismo `GRUPO`** forman un grupo.
+
+Consecuencias que conviene tener presentes:
+
+- **Mover una fila con las flechas de Parámetros deshace el grupo.** Es lo mismo que pasa si se mueve un `SUBTOTAL`, y el validador lo avisa igual.
+- **Una fila inhabilitada no parte nada**: no se dibuja. Hoy mismo la fila total `COBRANZAS_FR` está inactiva justo arriba de sus dos partes.
+- **Un grupo de una sola fila no es un grupo**: un renglón que se abre para mostrar una fila igual a él no agrupa nada, así que se dibuja suelto.
+
+La regla está escrita **dos veces a propósito**: `CashflowEstructura::grupos()` la corre sobre la **configuración** —todas las filas activas, para poder avisar antes de guardar— y `Js/Cashflow.js` sobre lo que **dibuja**, que no es la misma lista (las filas de stock de cobertura no se pintan). Las dos coinciden salvo que alguien le ponga un grupo a una fila que no se dibuja, y eso el validador lo rechaza. Cada lado nombra al otro y se mueven juntas.
+
+### Qué avisa el validador, y qué rechaza
+
+| | |
+| --- | --- |
+| Filas del grupo **no consecutivas**, de distinta sección o de distinto tipo | **Aviso.** El tablero las dibuja sueltas |
+| Grupo **sin parte real** o **sin parte proyectada** | **Aviso.** Es válido y puede ser transitorio —una temporada sin presupuesto— |
+| Dos filas del grupo declarando **nombres distintos** | **Aviso**, diciendo cuál se muestra |
+| `GRUPO` en una fila **derivada o de cobertura** | **Error.** Bloquea el guardado |
+| La serie **total** activa junto a sus **partes** | **Error**, el de siempre. Agrupar no habilita contar dos veces |
+
+Los tres primeros son avisos y no errores porque **el front no depende de que estén bien**: una corrida rota se dibuja como filas sueltas, así que lo peor que puede pasar es ver dos renglones donde iba uno, nunca una suma que no corresponde. Bloquear el guardado sobre algo que no puede dar un número equivocado sería impedir el paso intermedio de cualquier reacomodamiento.
+
+El cuarto sí es error: lo que muestra una fila derivada depende de **dónde está**, así que meterla adentro de algo que se abre y se cierra haría que el cuadro diga cosas distintas según el chevron. Desde la pantalla no puede pasar —a esas filas el editor ni les ofrece el campo, y al guardar se les vacía, igual que se le vacía el origen de datos a una fila que pasa a ser subtotal—; el error existe para lo que llegue por SQL.
+
+### En pantalla
+
+- Por defecto, **agrupado**. El renglón muestra el nombre del grupo, un chevron y la suma.
+- Abierto, las partes van debajo **con sangría** y la etiqueta *Real* / *Proyectado*. Cada una mantiene su enlace a su pestaña, sus anotaciones y sus marcas; **la proyectada se distingue** (itálica, tono más suave), porque si al abrir las dos se vieran iguales, abrir no habría servido de nada.
+- El tooltip de cada celda del renglón agrupado trae el **desglose** (`Real: $ X · Proyectado: $ Y`), y **arrastra las anotaciones de las partes**: una celda tiene un solo `title`, y con el grupo cerrado la nota de la parte proyectada —qué porción tiene fecha pactada a mano— no tendría dónde aparecer.
+- **Expandir todo / Agrupar todo** en la barra, un botón para los dos gestos: si queda alguno cerrado abre todos, y si están todos abiertos los cierra. Con grupos, se muestra; sin grupos, no está.
+- El estado de cada grupo se recuerda **por usuario**, en `localStorage`, con **una clave por código de grupo** y `try/catch`. Sin estado guardado, agrupado.
+
+> **Que un grupo esté abierto se le pregunta al DOM, no a `localStorage`.** En una ventana privada el guardado falla en silencio, y preguntándole a la preferencia el chevron abriría para siempre un grupo que ya está abierto. La preferencia decide con qué estado **arranca** el renglón; lo que está pasando lo dice la pantalla.
+
+### Lo que hubo que tocar alrededor
+
+- **Ordenar no puede separar una suma de sus partes.** `tabla-orden.js` gana `data-orden-sigue`: una fila marcada así no se ordena, **viaja con la anterior**. No es lo mismo que un ancla, y la diferencia es la que importa: un ancla se queda **quieta** —por eso un `SUBTOTAL` cierra su sección— y una parte se **mueve**, pero nunca sola. Sin esto, ordenar por importe dejaba la parte real de un concepto debajo de otro, con la pinta de siempre.
+- **Abrir y cerrar prende y apaga `display`, no saca la fila.** De eso depende que *Exportar* siga bajando lo que se ve sin que `tabla-export.js` sepa que los grupos existen: grupo cerrado, baja el renglón; abierto, bajan las tres filas.
+- **La sangría y la etiqueta van en el texto de la celda**, no sólo en el CSS: Excel no interpreta un `padding`. Y la etiqueta va **adelante** del nombre, porque la columna Concepto recorta con puntos suspensivos y lo que va al final es lo primero que desaparece — justo cuando el nombre de estas filas es largo por haber tenido que distinguirse de su par.
+- **Las columnas fijas y el marcado de negativos no se tocaron.** Mostrar u ocultar filas no cambia ninguna columna, y las columnas en rojo salen del payload del motor y no del DOM.
+
+### Qué tiene las dos partes, y qué no
+
+Relevado sobre las filas activas del tablero. Vale tenerlo escrito porque la tentación es llamar "real y proyectado" a cualquier corte de dos:
+
+| Fila | |
+| --- | --- |
+| **Cobranzas Franquicias** | **Las dos.** `COBRANZA_REAL` (propuestas aceptadas) y `COBRANZA_PROYECTADA` (PPP). Es el grupo `COBRANZAS_FR` |
+| Cobranzas Electrónicas | Sólo **real**: acreditaciones que la procesadora ya informó, con fecha cierta |
+| Cobranzas Mayoristas | Sólo **proyectada**: facturas pendientes a +60 días. No hay circuito de propuestas de pago para mayoristas |
+| Exportaciones Tasky | Sólo **proyectada**: facturas pendientes con fecha de cobro estimada |
+| Las cuatro de Ventas | Todas proyectadas, pero se abren **por canal**, que es otro eje |
+| Proveedores Exterior · Nacionalizaciones | El corte es *"¿ya se pagó?"* |
+| Echeqs | El corte es *"¿va a entrar?"* |
+| Proveedores Locales | Los cortes son por forma de pago, por rubro y por excluido |
+
+Las tres de la mitad de arriba **declaran su `NATURALEZA` sin `GRUPO`**, y eso no es un descuido: una fila que es toda de una parte igual lo declara, y es lo que va a permitir después una vista de *"sólo real"* sin volver a tocar la configuración. Las de abajo no declaran nada.
+
+---
+
 ## La sección Cobertura
 
 El tablero proyecta el saldo día por día y en algunas columnas da negativo o queda muy justo. La plata para cubrir eso **existe** —está invertida—, y el tablero muestra cuánta hay y cuándo se usa.
@@ -1123,6 +1212,12 @@ Y de la **presentación de Cobertura** —una fila por tipo de fondo—, el mism
 De los **fondos como cuentas**, `tests/test_cobertura.php` fija que el disponible se lleve por clave de cuenta —con un fondo sobregirado mientras el total cierra, que es el aviso que el pozo único no daba—, que un stock sin reparto y una aplicación con una clave que no es de ninguna cuenta se traten como corresponde, y que `por_fondo` **sobreviva a `series()`**, que es donde se perdió una vez. `tests/test_fondos.php` cubre el resto: ver `README-saldos.md`.
 
 De la **cobertura automática**, `tests/test_cobertura_automatica.php` prueba primero `CoberturaAutomatica::calcular()` sola, con números, porque ahí viven todas las reglas: un día con flujo negativo pero caja de sobra **no rescata**; el rescate parcial saca exactamente lo que falta; las inversiones se agotan y recién ahí entra la comitente; los dólares se venden enteros hacia arriba (y un cociente exacto no sube uno por punto flotante; de USD 3,50 se venden 3); sin cotización no se vende; con los dos fondos agotados queda el faltante y ningún fondo va a negativo; la devolución es LIFO, acotada al sobrante del día y a lo rescatado, con una pila de varios rescates que se deshace en orden inverso; lo manual va primero, descuenta del tope, no se devuelve solo, y una devolución manual que deja rojo se cubre; el tope cambia con los movimientos previstos y un rescate previsto que se come lo usado deja el fondo sobregirado e informado; y el orden de consumo. Después lo enchufa al motor con dos filas de stock y dos de uso: que las celdas muestren manual más calculado, que el flujo con cobertura y el arrastre lo recojan sin aviso de descuadre, que el KPI y el saldo mínimo lo vean, que el desglose por columna y los totales separen los dos, que si no alcanza quede el faltante con su aviso, que un fondo sin fila de uso no se toque y se avise nombrando el script, que una fila informativa no calcule y que un stock sin tope no sea automatizable. Y lo de alrededor: `validarDisponible()` con la aplicación de la misma fecha que se pisa, la posterior que no cuenta y el negativo que pasa siempre; `Fondos::saldoProyectado()` y el tope por columna con un rescate previsto; `Cotizacion::ultimasHasta()` en dos consultas; `CoberturaProvider` con una `Cobertura` de mentira, repartiendo por clase y por columna; y el script y el registro.
+
+De las **filas agrupadas**, `tests/test_grupos.php` cubre las dos mitades. La regla de agrupamiento —`CashflowEstructura::grupos()`, que es pura—: dos filas seguidas son un grupo; una fila en el medio lo parte y una **inhabilitada** no, que es el caso de hoy mismo; dos secciones o dos tipos tampoco son un grupo; el orden lo deciden `SECCION` y `ORDEN` y no cómo venga armado el arreglo; y el nombre lo gana la primera fila que lo declare. Después, el validador regla por regla: qué avisa (no consecutivas, sin una de las dos partes, dos nombres distintos) sin bloquear el guardado, y qué rechaza (grupo en una fila derivada o de cobertura, código inválido, naturaleza desconocida) — más que **el total junto a sus partes se sigue rechazando**, sobre el escenario del grupo, que es donde alguien podría pensar que agrupar lo reemplaza.
+
+Y el principio de diseño entero, de la forma más dura que se puede: **el mismo escenario corrido por el motor dos veces**, con los grupos declarados y sin declarar, tiene que dar dos tableros idénticos campo por campo. Si esa prueba se cae, el motor empezó a mirar los grupos y la agrupación dejó de ser presentación.
+
+Lo que **no** cubre es el JavaScript que arma el renglón: no hay corredor de JS. Lo que sí queda fijado es la aritmética que ese código reproduce —contra el motor de verdad, en el mismo archivo— y el cableado que se rompe callado, en `tests/test_tablas_controles.php`: que el botón de *Expandir todo* exista en la pestaña **y** esté enganchado en el JS, que las partes lleven `data-orden-sigue` **y** que `tabla-orden.js` lo entienda, que el colapso sea `display: none` —de eso depende que *Exportar* baje lo que se ve—, que los dos accesos a `localStorage` estén envueltos en `try/catch`, y que las tres condiciones de la regla estén presentes de los dos lados.
 
 De **Comercio Exterior**, `tests/test_comex_fecha_maestra.php` fija las reglas puras de esta etapa —cuándo una fecha está vencida (con hoy inyectado, para que la prueba no caduque sola), cuándo la marca de *editada* describe el valor que se ve, y el reparto de lo vencido entre lo que entra en la columna del mes en curso y lo que queda fuera del eje— y, **leyendo archivos**, el cableado que se rompe en silencio: que el filtro por fecha de embarque no vuelva, que las columnas `EDIT` no vuelvan a leerse, que el endpoint de fechas siga siendo uno solo, que el cliente no vuelva a mandar la fecha anterior, y que el buscador y la celda de fecha no se copien en las dos pestañas. Es el mismo criterio de `test_tablas_controles.php`. Ver `README-comex.md`.
 

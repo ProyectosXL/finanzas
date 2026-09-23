@@ -111,6 +111,9 @@
             computa: Number(f.COMPUTA) === 1,
             origen_provider: f.ORIGEN_PROVIDER || '',
             origen_serie: f.ORIGEN_SERIE || '',
+            grupo: f.GRUPO || '',
+            naturaleza: f.NATURALEZA || '',
+            grupo_nombre: f.GRUPO_NOMBRE || '',
             activo: Number(f.ACTIVO) === 1
         };
     }
@@ -120,6 +123,7 @@
 
         pintarAvisos();
         pintarSecciones();
+        pintarGruposExistentes();
         pintarFilas();
         pintarProviders();
         pintarSelectoresAlta();
@@ -168,7 +172,7 @@
         visibles.forEach(function(f) {
             if (f.seccion !== seccionAnterior) {
                 seccionAnterior = f.seccion;
-                html += '<tr class="cfe-grupo"><td colspan="8">'
+                html += '<tr class="cfe-grupo"><td colspan="10">'
                     + escapar(nombreSeccion(f.seccion)) + '</td></tr>';
             }
 
@@ -176,7 +180,7 @@
         });
 
         if (html === '') {
-            html = '<tr><td colspan="8" class="text-center text-muted py-4">'
+            html = '<tr><td colspan="10" class="text-center text-muted py-4">'
                 + 'No hay filas configuradas.</td></tr>';
         }
 
@@ -198,6 +202,8 @@
             + '<td>' + selectSeccion(f) + '</td>'
             + '<td>' + selectTipo(f) + '</td>'
             + '<td>' + selectOrigen(f, derivada) + '</td>'
+            + '<td>' + campoGrupo(f) + '</td>'
+            + '<td>' + selectNaturaleza(f) + '</td>'
             + '<td class="text-center">' + checkComputa(f, derivada) + '</td>'
             + '<td class="text-center">'
                 + '<div class="form-check form-switch d-inline-block">'
@@ -270,6 +276,112 @@
             + '</div>';
     }
 
+    /* ================================================================
+       AGRUPAR DOS FILAS EN UN RENGLÓN DEL TABLERO
+
+       Un concepto con parte real y parte proyectada se declara acá: las dos
+       filas llevan el mismo GRUPO y cada una su NATURALEZA. El agrupamiento es
+       POSICIONAL —lo que las junta es estar una al lado de la otra, en la misma
+       sección y del mismo tipo—, así que moverlas con ↑ y ↓ las separa, y el
+       validador lo avisa en cuanto pasa.
+       ================================================================ */
+
+    /** Si el tipo de la fila admite grupo. Lo dice el servidor, no una lista de acá. */
+    function agrupable(f) {
+        return (datos.tipos_sin_grupo || []).indexOf(f.tipo) === -1;
+    }
+
+    /**
+     * El código del grupo y, debajo, cómo se llama en pantalla.
+     *
+     * Los dos en la misma celda porque son una sola decisión —"esta fila es
+     * parte del concepto X, que se llama Y"— y una columna más se paga en una
+     * tabla que ya tiene diez.
+     *
+     * El nombre lo puede declarar CUALQUIERA de las filas del grupo y gana la
+     * primera; el campo lo dice en su placeholder, para que nadie lo tipee dos
+     * veces creyendo que hace falta.
+     */
+    function campoGrupo(f) {
+        if (!agrupable(f)) {
+            return '<span class="text-muted small">'
+                + '<i class="fas fa-minus me-1"></i>No se agrupa</span>';
+        }
+
+        if (!datos.columnas_grupo) {
+            return '<span class="text-muted small">'
+                + '<i class="fas fa-database me-1"></i>Falta el script</span>';
+        }
+
+        return '<input type="text" class="form-control form-control-sm cfe-grupo-cod mb-1" '
+            + 'list="cfeGruposExistentes" maxlength="30" placeholder="sin grupo" '
+            + 'title="Dos filas seguidas con el mismo código se muestran como un solo '
+            + 'renglón que se abre" value="' + escapar(f.grupo) + '">'
+            + '<input type="text" class="form-control form-control-sm cfe-grupo-nombre" '
+            + 'maxlength="80" placeholder="nombre en pantalla (opcional)" '
+            + 'title="Cómo se llama el renglón agrupado. Lo declara una sola de las filas '
+            + 'del grupo; si ninguna lo hace, se muestra el código" '
+            + 'value="' + escapar(f.grupo_nombre) + '">';
+    }
+
+    /**
+     * Qué parte del concepto es la fila.
+     *
+     * Se puede declarar SIN grupo, y no es un descuido: una fila que es toda
+     * proyectada y no se agrupa con nadie —Cobranzas Mayoristas,
+     * Exportaciones— igual lo declara, y eso es lo que va a permitir después
+     * una vista de "solo real" sin volver a tocar la configuración.
+     */
+    function selectNaturaleza(f) {
+        if (!agrupable(f)) {
+            return '<span class="text-muted">—</span>';
+        }
+
+        if (!datos.columnas_grupo) {
+            return '<span class="text-muted">—</span>';
+        }
+
+        var opciones = ['<option value="">— sin declarar —</option>'].concat(
+            (datos.naturalezas || []).map(function(n) {
+                return '<option value="' + n + '"' + (n === f.naturaleza ? ' selected' : '')
+                    + '>' + rotuloNaturaleza(n) + '</option>';
+            })
+        ).join('');
+
+        return '<select class="form-select form-select-sm cfe-naturaleza">'
+            + opciones + '</select>';
+    }
+
+    function rotuloNaturaleza(n) {
+        return n === 'REAL' ? 'Real' : (n === 'PROYECTADO' ? 'Proyectado' : n);
+    }
+
+    /**
+     * Los códigos de grupo que ya están en uso, para sugerirlos al tipear.
+     *
+     * No hay ningún alta de grupos: un grupo es el código que comparten dos
+     * filas seguidas, así que la única lista que puede existir es la de los que
+     * alguien ya escribió. Sin esto, la segunda fila de un grupo se tipea de
+     * memoria y un dedazo la deja sola sin que se note hasta mirar el tablero.
+     */
+    function pintarGruposExistentes() {
+        var lista = document.getElementById('cfeGruposExistentes');
+
+        if (!lista) {
+            return;
+        }
+
+        var vistos = {};
+
+        filas.forEach(function(f) {
+            if (f.grupo) { vistos[f.grupo] = true; }
+        });
+
+        lista.innerHTML = Object.keys(vistos).sort().map(function(c) {
+            return '<option value="' + escapar(c) + '"></option>';
+        }).join('');
+    }
+
     function checkComputa(f, derivada) {
         if (derivada) {
             return '<span class="text-muted">—</span>';
@@ -313,6 +425,33 @@
                 f.origen_serie = '';   // cambió el módulo: la serie anterior ya no aplica
             }, true);
             enlazar(tr, '.cfe-serie', 'change', function(el) { f.origen_serie = el.value; }, false);
+            // El código se slugifica en el servidor igual que el de la fila,
+            // pero se normaliza también acá: si no, dos filas que el usuario
+            // cree del mismo grupo se ven distintas hasta que guarda, y el
+            // aviso de "no quedan una al lado de la otra" no aparece.
+            enlazar(tr, '.cfe-grupo-cod', 'input', function(el) {
+                f.grupo = slug(el.value);
+            }, false);
+            enlazar(tr, '.cfe-grupo-nombre', 'input', function(el) {
+                f.grupo_nombre = el.value;
+            }, false);
+            enlazar(tr, '.cfe-naturaleza', 'change', function(el) {
+                f.naturaleza = el.value;
+            }, false);
+
+            // Al salir del campo se muestra el código tal como se va a
+            // guardar. Reescribirlo en cada tecla pelearía con el cursor —un
+            // espacio se vuelve guión bajo y el caret salta—, y no mostrarlo
+            // nunca dejaría al usuario leyendo "cob fr" donde la base va a
+            // tener COB_FR.
+            var campoCod = tr.querySelector('.cfe-grupo-cod');
+
+            if (campoCod) {
+                campoCod.addEventListener('change', function() {
+                    campoCod.value = f.grupo;
+                    pintarGruposExistentes();
+                });
+            }
             enlazar(tr, '.cfe-computa', 'change', function(el) { f.computa = el.checked; }, false);
             enlazar(tr, '.cfe-activo', 'change', function(el) { f.activo = el.checked; }, true);
         });
@@ -727,6 +866,8 @@
                 + '): el arrastre tomaría dos aperturas distintas.');
         }
 
+        validarGrupos(advertencias);
+
         pintarValidacion(errores, advertencias);
 
         var btn = document.getElementById('cfeBtnGuardar');
@@ -734,6 +875,122 @@
         if (btn) {
             btn.disabled = (errores.length > 0);
         }
+    }
+
+    /**
+     * Los avisos de agrupamiento, en vivo y mientras se mueven las filas.
+     *
+     * TODOS SON ADVERTENCIAS y ninguno bloquea el guardado, igual que del lado
+     * del servidor: un grupo mal declarado hace que el tablero dibuje las
+     * filas sueltas —muestra de más y nunca una suma que no corresponde—, así
+     * que impedir guardar sería impedir el paso intermedio de cualquier
+     * reacomodamiento. El que sí es error —un grupo en una fila derivada— no
+     * puede pasar desde acá: a esas filas el editor ni les ofrece el campo.
+     *
+     * Espeja a CashflowEstructura::validarGrupos(), que es la que manda: el
+     * servidor valida el estado resultante antes de escribir nada. Esto existe
+     * para que el aviso aparezca al mover la fila y no después de guardar.
+     *
+     * @param {Array} advertencias Se le agregan los avisos
+     */
+    function validarGrupos(advertencias) {
+        var corridas = [];
+        var anterior = null;
+
+        // La misma regla posicional de las otras dos capas: corridas de filas
+        // ACTIVAS seguidas, de la misma sección y del mismo tipo. Una fila
+        // inhabilitada no se dibuja, así que no parte nada.
+        filas.forEach(function(f) {
+            if (!f.activo) {
+                return;
+            }
+
+            if (!f.grupo) {
+                anterior = null;
+                return;
+            }
+
+            var sigue = anterior && anterior.codigo === f.grupo
+                && anterior.seccion === f.seccion && anterior.tipo === f.tipo;
+
+            if (sigue) {
+                anterior.filas.push(f);
+                return;
+            }
+
+            anterior = { codigo: f.grupo, seccion: f.seccion, tipo: f.tipo, filas: [f] };
+            corridas.push(anterior);
+        });
+
+        var porCodigo = {};
+
+        corridas.forEach(function(c) {
+            if (!porCodigo[c.codigo]) {
+                porCodigo[c.codigo] = { codigo: c.codigo, corridas: [], filas: [] };
+            }
+
+            porCodigo[c.codigo].corridas.push(c);
+            porCodigo[c.codigo].filas = porCodigo[c.codigo].filas.concat(c.filas);
+        });
+
+        Object.keys(porCodigo).forEach(function(cod) {
+            var g = porCodigo[cod];
+            var nombre = nombreDeGrupo(g.filas) || cod;
+
+            if (g.corridas.length > 1) {
+                advertencias.push('Las ' + g.filas.length + ' filas del grupo "' + nombre
+                    + '" no quedan una al lado de la otra. El tablero las dibuja sueltas, '
+                    + 'como hasta ahora, en vez de sumarlas en un renglón que no '
+                    + 'correspondería.');
+            }
+
+            ['REAL', 'PROYECTADO'].forEach(function(nat) {
+                var tiene = g.filas.some(function(f) { return f.naturaleza === nat; });
+
+                if (!tiene) {
+                    advertencias.push('El grupo "' + nombre + '" no tiene ninguna fila con '
+                        + 'la parte ' + (nat === 'REAL' ? 'real' : 'proyectada') + '. Es '
+                        + 'válido —puede ser transitorio— pero si no era la idea, revisá la '
+                        + 'columna Parte.');
+                }
+            });
+
+            var nombres = [];
+
+            g.filas.forEach(function(f) {
+                if (f.grupo_nombre && nombres.indexOf(f.grupo_nombre) === -1) {
+                    nombres.push(f.grupo_nombre);
+                }
+            });
+
+            if (nombres.length > 1) {
+                advertencias.push('Las filas del grupo "' + cod + '" declaran nombres '
+                    + 'distintos (' + nombres.join(', ') + '). Se muestra el de la primera: "'
+                    + nombres[0] + '".');
+            }
+        });
+
+        // Un nombre de grupo tipeado en una fila sin grupo no se muestra en
+        // ningún lado, y es fácil de hacer: se completa el de abajo y se
+        // olvida el de arriba.
+        filas.forEach(function(f) {
+            if (f.grupo_nombre && !f.grupo) {
+                advertencias.push('La fila "' + f.nombre + '" declara el nombre de grupo "'
+                    + f.grupo_nombre + '" pero no está en ningún grupo: ese nombre no se '
+                    + 'muestra en ningún lado.');
+            }
+        });
+    }
+
+    /** El primer nombre de grupo declarado entre esas filas, o '' */
+    function nombreDeGrupo(lista) {
+        for (var i = 0; i < lista.length; i++) {
+            if (lista[i].grupo_nombre) {
+                return lista[i].grupo_nombre;
+            }
+        }
+
+        return '';
     }
 
     function pintarValidacion(errores, advertencias) {

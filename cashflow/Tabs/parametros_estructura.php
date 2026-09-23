@@ -61,6 +61,13 @@
             <!-- Resumen de la validación: qué impide guardar y por qué -->
             <div id="cfeValidacion"></div>
 
+            <!-- Los grupos que ya existen, para sugerirlos al tipear el código.
+                 Lo llena Js/Parametros-Estructura.js con los que están en uso:
+                 un grupo no es una entidad que se dé de alta en ningún lado, es
+                 el código que comparten dos filas seguidas, así que la única
+                 lista posible es la de los que alguien ya escribió. -->
+            <datalist id="cfeGruposExistentes"></datalist>
+
             <div class="card-body p-0">
                 <div class="table-responsive">
                     <!-- data-orden="no": acá el ORDEN DE LAS FILAS ES EL DATO.
@@ -77,6 +84,13 @@
                                 <th style="width: 170px;">Sección</th>
                                 <th style="width: 150px;">Tipo</th>
                                 <th style="width: 320px;">Origen de datos</th>
+                                <!-- Un concepto con parte real y parte proyectada son dos
+                                     filas seguidas con el mismo grupo. El agrupamiento es
+                                     POSICIONAL: no hay una fila padre que declare hijas,
+                                     así que lo que las junta es estar una al lado de la
+                                     otra, y moverlas con ↑ y ↓ es lo que las separa. -->
+                                <th style="width: 210px;">Grupo</th>
+                                <th style="width: 130px;">Parte</th>
                                 <th class="text-center" style="width: 90px;">Computa</th>
                                 <th class="text-center" style="width: 80px;">Activa</th>
                             </tr>
