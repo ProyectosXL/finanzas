@@ -43,13 +43,16 @@ try {
             /* EL EJE ESTÁ EN PESOS y no en dólares. El cashflow es en pesos y
                esta pestaña es el detalle de una fila del tablero: si mostrara
                dólares, sus totales no se podrían comparar contra la fila que
-               explica. La columna en dólares (VALOR_FOB_DOLAR) sigue en la
-               grilla como referencia.
+               explica. Las TRES columnas en dólares —FOB, pagado y pendiente—
+               quedan en la grilla como referencia, y son las que se comparan
+               contra la pantalla de Comercio Exterior: tienen que dar los
+               mismos números que Pagos::obtenerResumen() de allá.
 
                La valuación fila por fila -con la curva de dólar futuro ROFEX,
                o con el override que alguien cargó- ya viene resuelta del
-               getter, así que acá no hay ninguna multiplicación. Ver
-               Class/Comex.php y Class/DolarFuturo.php. */
+               getter, así que acá no hay ninguna multiplicación. Y se aplica
+               sobre el PENDIENTE: lo que el cashflow proyecta es lo que falta
+               pagar. Ver Class/Comex.php y Class/DolarFuturo.php. */
             $filasExt = $comex->getProveedoresExterior();
 
             /* Y SE ARMA SOBRE IMPORTE_EJE, NO SOBRE IMPORTE_ARS. Los dos son la
@@ -77,7 +80,23 @@ try {
                esta misma pantalla. */
             $payload['warnings'] = array_merge(
                 $comex->getAvisosExterior(),
-                Comex::avisosValuacion($filasExt, $comex->dolarFuturo()->ultimoMes()),
+
+                /* LO QUE COMERCIO EXTERIOR YA PAGÓ VA ARRIBA DE TODO lo demás
+                   de esta pestaña, y no es orden de importancia genérico: es
+                   plata que salió de la proyección sin que nadie de este lado
+                   hiciera nada, así que es lo primero que hay que poder leer
+                   cuando el número de ayer no es el de hoy. El sobrepago va
+                   pegado porque es el mismo circuito mirado donde no cierra. */
+                Comex::avisosSaldoComex($filasExt),
+                Comex::avisosSobrepago($filasExt),
+                Comex::avisosGrupo($filasExt),
+
+                /* EN DÓLARES, y sobre el PENDIENTE: lo que no se pudo valuar es
+                   lo que esta pantalla proyecta, no el FOB. Con VALOR_FOB_DOLAR
+                   el aviso diría de más justamente en los contenedores que ya
+                   tienen pagos hechos. */
+                Comex::avisosValuacion($filasExt, $comex->dolarFuturo()->ultimoMes(),
+                    'PENDIENTE_USD'),
                 /* SIN EL EJE: acá no hay nada que repartir, porque ninguna
                    vencida entra en ninguna columna —no es que su fecha caiga
                    afuera, es que no suman por regla—. El importe que se informa
@@ -119,7 +138,36 @@ try {
                dice qué script falta. */
             $payload['pagado_editable'] = $comex->tienePagado();
 
+            /* SI SE PUDO LEER LO YA PAGADO EN COMERCIO EXTERIOR. La grilla lo
+               pregunta para no ofrecer un detalle de pagos que no va a poder
+               traer, y para poder decir en la columna que el pendiente que
+               muestra es el FOB entero porque no hay con qué descontarlo. El
+               aviso con el motivo ya está arriba. */
+            $payload['pagos_comex'] = $comex->tienePagosComex();
+
             echo json_encode(['success' => true, 'data' => $payload], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           LOS PAGOS YA CARGADOS DE UN CONTENEDOR — SOLO LECTURA
+
+           Es el detalle detrás de la columna "Pagado U$S": de qué pagos sale
+           ese número, con fecha, forma, medio e importe.
+
+           NO HAY UN ENDPOINT PARA CARGARLOS, Y NO ES UNA ETAPA PENDIENTE. Los
+           pagos se cargan en Comercio Exterior, que es el dueño del circuito;
+           un alta de este lado serían dos formularios escribiendo la misma
+           tabla con dos validaciones distintas. Es la decisión opuesta a la de
+           las fechas —que sí se editan desde acá— y la diferencia está en quién
+           es dueño del dato: la fecha estimada de pago la usan las dos
+           aplicaciones, el pago al proveedor lo registra una sola.
+           ================================================================ */
+        case 'getPagosContenedor':
+            echo json_encode([
+                'success' => true,
+                'data' => $comex->getPagosDelContenedor(
+                    isset($_GET['id_mg']) ? $_GET['id_mg'] : 0)
+            ], JSON_UNESCAPED_UNICODE);
             break;
 
         /* ================================================================

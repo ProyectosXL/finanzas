@@ -2,7 +2,7 @@
 
 Pestañas **Comercio Exterior → Proveedores Exterior** y **Crono Nacionalización**, y las filas *Proveedores del Exterior* y *Nacionalizaciones* del tablero de Cashflow.
 
-Ramas: `feature/comex-fecha-maestra` · `feature/comex-pagado` · `feature/comex-nac-usd`
+Ramas: `feature/comex-fecha-maestra` · `feature/comex-pagado` · `feature/comex-nac-usd` · `feature/comex-saldo-pendiente`
 
 ---
 
@@ -15,9 +15,14 @@ RO_T_IMPORTACIONES_ENCABEZADO  (maestro de Comercio Exterior)
         │  sin detalle cargado: el contenedor todavía no cerró
         │
         ├─ FECHA_EST_PAGO ──── cuándo se le paga al proveedor del exterior
+        │       │
+        │       │  VALOR_FOB_DOLAR de la OC principal
+        │       │    − RO_T_IMPORTACIONES_ENCABEZADO_PAGOS  (lo ya pagado, en U$S)
+        │       │    = lo que FALTA pagar, que es lo único que se proyecta
         │       │  × curva de dólar futuro ROFEX del mes de esa fecha
         │       ▼
-        │   Proveedores Exterior  →  ComexProvider (PAGOS / PAGOS_PAGADOS / PAGOS_TODO)
+        │   Proveedores Exterior  →  ComexProvider
+        │                            (PAGOS / PAGOS_PAGADOS / PAGOS_COMEX / PAGOS_TODO)
         │
         └─ FECHA_DESP_ADU ──── cuándo se nacionaliza
                 │  + RO_T_IMPORTACIONES_ESTIMACION_DETALLE (conceptos 3 a 10,
@@ -31,6 +36,8 @@ Del lado del cashflow:
   RO_T_CASHFLOW_COMEX_PAGADO       qué pagos ya se hicieron, con su historial
   RO_T_CASHFLOW_COMEX_CRONO_NAC    el override de cotización por contenedor
 ```
+
+**De las tres tablas de Comercio Exterior que el cashflow lee, la de pagos es la única que no estaba** hasta `feature/comex-saldo-pendiente` — y es la única cuya ausencia **cambia números** en vez de apagar un botón. Ver la sección 8. El cashflow la lee y **nunca la escribe**: los pagos se cargan en Comercio Exterior.
 
 Al cuadro entra **lo que falta mover, de hoy en adelante**: lo vencido y lo ya pagado quedan afuera, y las dos cosas se ven en la pestaña detrás de su interruptor.
 
@@ -292,11 +299,13 @@ A diferencia de las fechas —que se escriben sobre el maestro porque son el mis
 ### El importe no desaparece: cambia de serie
 
 ```
-PAGOS + PAGOS_PAGADOS = PAGOS_TODO
-NACIONALIZACION + NACIONALIZACION_PAGADAS = NACIONALIZACION_TODO
+PAGOS + PAGOS_PAGADOS + PAGOS_COMEX = PAGOS_TODO
+NACIONALIZACION + NACIONALIZACION_PAGADAS      = NACIONALIZACION_TODO
 ```
 
 Mismo criterio que la exclusión de cheques de cartera: un importe que sale del tablero sin dejar rastro es un agujero que nadie puede auditar. `PAGOS` y `NACIONALIZACION` **cambian de significado y no de código** —pasan a ser *"lo que falta pagar"*—, así que **no hay que repuntar ninguna fila** ni tocar Parámetros. El día que se corre el script la tabla nace vacía y el tablero no se mueve un peso.
+
+> **`PAGOS_COMEX` es de la sección 8**, no de ésta. Aparece acá porque el invariante es uno solo: desde `feature/comex-saldo-pendiente` hay **dos formas distintas** de que un egreso salga de la proyección de Proveedores Exterior —el tilde de esta sección y un pago cargado en la otra aplicación— y el tablero tiene que poder contestar cuál de las dos fue. *Crono Nacionalización* sigue con dos partes: allá no hay pagos parciales contra un saldo.
 
 El proveedor informa en cada carga cuánto se marcó, con el conteo. Sin ese aviso, un egreso que el tablero debería estar proyectando desaparece y nada en pantalla lo explica.
 
@@ -306,9 +315,12 @@ El proveedor informa en cada carga cuánto se marcó, con el conteo. Sin ese avi
 | --- | --- | --- |
 | `PAGOS` | `IMPORTE_EJE` — vale cero si está pagado **o** vencido | todas las filas |
 | `PAGOS_PAGADOS` | `IMPORTE_PROYECTABLE` — vale cero sólo si está vencido | las marcadas |
-| `PAGOS_TODO` | `IMPORTE_PROYECTABLE` | todas |
+| `PAGOS_COMEX` | `IMPORTE_PAGADO_PROYECTABLE` | todas |
+| `PAGOS_TODO` | `IMPORTE_FOB_PROYECTABLE` — el FOB **entero** | todas |
 
-Para una fila no marcada los dos campos valen lo mismo y aporta a `PAGOS`; para una marcada, `IMPORTE_EJE` es cero y aporta a `PAGOS_PAGADOS`. Por eso las dos reglas viven en funciones separadas (`importeProyectable()` y `aporteAlEje()`) en vez de en una sola.
+Los cuatro campos salen de la misma fila y **se anulan juntos** cuando está vencida, así que las cuatro series dan cero ahí y el invariante sigue cerrando. Para una fila no marcada, `PAGOS` lleva el pendiente y `PAGOS_COMEX` lo ya pagado, y los dos suman el FOB; para una marcada, `IMPORTE_EJE` es cero y ese pendiente aporta a `PAGOS_PAGADOS`. Por eso las reglas viven en funciones separadas (`importeProyectable()` y `aporteAlEje()`) en vez de en una sola.
+
+> **El tilde se aplica sobre el pendiente, no sobre el FOB.** Tildar un contenedor que ya tiene la mitad pagada en Comex saca de la proyección **la mitad que faltaba**, que es lo único que estaba proyectado. La otra mitad ya había salido por `PAGOS_COMEX`.
 
 **Verificado contra la base**, marcando una fila real en cada pestaña y deshaciéndolo:
 
@@ -511,6 +523,123 @@ Las dos cosas viven en `Js/Comex-fechas.js` —`errorDeCarga()` y `limpiarErrorD
 
 ---
 
+## 8. Proveedores Exterior proyecta lo que FALTA pagar
+
+Rama: `feature/comex-saldo-pendiente`
+
+La app de Comercio Exterior permite **pagos parciales** al proveedor del exterior —un anticipo, un saldo contra embarque— y los guarda en `RO_T_IMPORTACIONES_ENCABEZADO_PAGOS`. El cashflow no los miraba: proyectaba el `VALOR_FOB_DOLAR` entero. Un contenedor con el anticipo ya girado entraba al tablero **por el total**.
+
+Ahora entra por el saldo.
+
+### La regla es la de Comex, replicada y no incluida
+
+```
+pendiente U$S = VALOR_FOB_DOLAR − SUMA(RO_T_IMPORTACIONES_ENCABEZADO_PAGOS.MONTO)
+```
+
+Es literalmente la cuenta de `Pagos::obtenerResumen()` del repo `administracion`, con los **mismos cuatro estados** (`SIN_FOB`, `PENDIENTE`, `CANCELADO`, `SOBREPAGO`) y **la misma tolerancia de un centavo**. `MONTO` está en dólares desde `comercioExterior/sql/08_pagos_en_dolares.sql`.
+
+**Replicada, no incluida**: son dos aplicaciones y dos despliegues, y el cashflow no puede requerir un archivo que vive en otro repo. Lo que sí tiene que hacer es dar **exactamente el mismo número**, y eso es lo que la deja en `Comex::saldoPendiente()`, que es pura, se prueba sin base y se puede comparar línea por línea contra la otra.
+
+> **Si la regla del saldo cambia allá, hay que cambiarla acá.** No hay forma de que el código lo detecte solo. El encabezado de `Pagos.php` del otro lado lo dice —`docs/pagos-lectura-cashflow` en ese repo lo corrigió, porque afirmaba que nadie más leía esa tabla— y el encabezado de `Class/Comex.php` es la otra mitad del pacto.
+
+### El FOB y los pagos salen de la OC principal
+
+`COALESCE(ID_PADRE, ID)`, igual que `encabezado.php::resolverIdPrincipal()`: **un contenedor con varias órdenes de compra tiene un solo pago al proveedor**, no uno por orden.
+
+**Verificado contra la base el 22/09/2026, y hoy no cambia ninguna fila**: de los 76 contenedores del listado, los 76 son principales. No hay **ni una** fila con `ID_PADRE` cargado en `central`, ni pagos imputados a una hija. Así que la pregunta del pedido —*si una hija tiene FOB propio, o si principal e hija se suman dos veces*— **hoy no se puede responder con datos, porque no hay hijas**.
+
+Lo que sí introduce este cambio es el **riesgo**: hasta ahora cada fila proyectaba su propio FOB, así que dos filas del mismo grupo eran dos importes distintos y no había nada que deduplicar. Ahora las dos leerían el FOB y los pagos **de la principal**, o sea que valdrían lo mismo, y sumar las dos contaría el egreso dos veces. Por eso el corte se implementa igual, aunque esté dormido:
+
+| | |
+| --- | --- |
+| **Quién lleva el importe** | Una sola fila por grupo: la principal si está en el listado, y si no la de `ID` más chico |
+| **Por qué el respaldo** | El listado deja afuera los contenedores con detalle cargado, así que puede pasar que la principal no esté. Dejar el grupo sin titular haría **desaparecer** ese egreso, que es peor que elegir por un criterio estable |
+| **Qué hacen las demás** | Van en cero en **las cuatro series** —si `PAGOS_TODO` las contara, el invariante quedaría sin cerrar por el FOB entero— y quedan marcadas *Repetido* en la grilla, con su motivo en el `title` |
+| **Cómo se calcula** | `ROW_NUMBER()` particionado por la OC principal. Las funciones de ventana corren **después** del `WHERE`, así que dos filas sólo se pisan si las dos están efectivamente en la grilla |
+
+El aviso correspondiente **no manda a corregir nada**, a diferencia del de vencidos y el de sobrepago: no hay nada que corregir. Es como Comercio Exterior modela un contenedor con varias órdenes, y el cashflow se limita a no contarlo dos veces.
+
+### Los tres casos de borde
+
+| Caso | Qué hace el cashflow |
+| --- | --- |
+| **Sin pagos** | `pendiente = FOB`. Exactamente lo que se mostraba antes de esta rama |
+| **Saldo cero** (cancelado en Comex) | Sale del flujo **solo**, sin que nadie lo tilde: su pendiente vale cero, así que no entra en ninguna columna. El importe se sirve por `PAGOS_COMEX` y el invariante sigue cerrando. **El tilde manual sigue existiendo** para lo que no se cargó allá |
+| **Sobrepago** | El pendiente se toma como **cero, nunca negativo** —un egreso negativo sería un ingreso que nadie afirmó, y encima compensado en silencio contra el resto de la columna de ese día—. El exceso se informa aparte, **en dólares**, que es la moneda en la que se va a ir a buscar del otro lado |
+
+> **Pagos con fecha futura**: se cuentan todos, porque en Comex un pago cargado es un hecho. **Verificado contra la base el 22/09/2026: no hay ninguno** con `FECHA_PAGO` posterior a hoy —los 75 pagos van del 11/09/2025 al 21/09/2026—.
+
+### La valuación no cambió de criterio
+
+Sigue siendo el **dólar futuro ROFEX del mes de la fecha efectiva de pago** (`Comex::valuar()`), aplicado al **pendiente** en vez de al FOB. El override manual `COTIZ_USD_EDIT` tampoco cambió: es una corrección sobre **qué dólar** se aplica, no sobre qué importe, y `descartaCotizacion()` sigue atada al cambio de mes del pago. Un contenedor cancelado con override cargado vale cero, porque cero por cualquier cotización es cero — y eso es lo correcto: lo que dejó de haber es el importe, no el dólar.
+
+**Los avisos de valuación pasan a hablar del pendiente.** Con `VALOR_FOB_DOLAR` dirían de más justamente en los contenedores que ya tienen pagos hechos, que son los únicos donde los dos números difieren.
+
+### Qué se ve en la pestaña
+
+- **Tres columnas en dólares, en ese orden: FOB total, pagado y pendiente.** La resta escrita de izquierda a derecha, que es lo que hace que el número de la punta no haya que creerlo. Son los mismos números que muestra la pantalla de pagos de Comercio Exterior.
+- **El importe en pesos, los totales de la pestaña, el export y la fila del tablero salen del pendiente.**
+- **El pie totaliza las tres columnas en dólares**, sobre las filas que se están viendo. Es donde se ve el cuadre del módulo entero sin sumar 76 filas a mano.
+- **La celda de pagado se abre** y muestra los pagos uno por uno —fecha, forma, medio, monto y cuándo se cargó—, con un contador al lado que dice cuántos son. Un mismo total puede salir de un anticipo o de seis cuotas.
+- **El estado va pegado al pendiente** cuando no es el caso normal: *Parcial*, *Cancelado*, *Sobrepago*, *Sin FOB* o *Repetido*. Un contenedor sin pagos no lleva nada, porque no hay nada que explicar.
+- **Las canceladas se marcan en verde** y **no tienen interruptor para esconderlas**, a diferencia de vencidas y pagadas. Es deliberado: acá no hay nada que corregir ni que destildar, así que un interruptor sólo agregaría un control más que entender. Y sus tres columnas en dólares son el comprobante de que el contenedor se pagó entero.
+
+> **Sólo lectura, y no es una etapa pendiente.** Los pagos se cargan en Comercio Exterior, que es el dueño del circuito; un alta de este lado serían dos formularios escribiendo la misma tabla con dos validaciones distintas. Es la decisión **opuesta** a la de la fecha estimada de pago —que sí se edita desde acá, ver la sección 1— y la diferencia está en quién es dueño del dato: la fecha la usan las dos aplicaciones, el pago al proveedor lo registra una sola.
+
+### Si no se puede leer la tabla
+
+Es de la otra plataforma, así que **se pregunta antes de nombrarla**: nombrar una tabla ausente rompe la pantalla entera con *"Invalid object name"*, que es un error que no se ve hasta que alguien la abre. Sin la tabla, el pendiente vuelve a valer el FOB completo —o sea lo que esta pestaña mostraba antes de esta rama— **y se avisa**.
+
+> **Es la única degradación del módulo que cambia números en vez de apagar un botón.** Las otras tres —el rastro de fechas, el tilde de pagado, el override de cotización— apagan una función y todo lo demás sigue igual. Ésta hace que el tablero proyecte **de más**, que es plata que puede haber salido ya, y por eso su aviso va primero y el texto dice que se está proyectando de más, no sólo que falta algo.
+
+### Cuánto se movió el tablero
+
+Verificado contra la base el **22/09/2026**, sobre los 76 contenedores del listado:
+
+| | U$S |
+| --- | --- |
+| FOB total | 4.707.371,91 |
+| Ya pagado en Comercio Exterior | **34.750,00** |
+| Pendiente — lo que el cashflow proyecta ahora | 4.672.621,91 |
+
+Son **2 contenedores** los que tienen pagos: el `733` (OC `0000100015881`) con un anticipo parcial, y el `691` (OC `0000100014945`) cancelado con dos pagos. Ningún sobrepago, ninguna OC repetida.
+
+**El contenedor 733, contra `Pagos::obtenerResumen(733)` de Comercio Exterior:**
+
+| | U$S |
+| --- | --- |
+| `VALOR_FOB_DOLAR` | 77.408,00 |
+| Pagos cargados (1, del 21/09/2026, transferencia anticipada) | 10.000,00 |
+| **Pendiente** | **67.408,00** |
+
+Los tres coinciden con lo que devuelve esa función. La prueba `tests/test_comex_saldo_pendiente.php` los fija: si falla, una de las dos aplicaciones se movió.
+
+**El total de la pestaña, antes y después:**
+
+| | $ |
+| --- | --- |
+| Pie de la grilla, antes | 7.210.653.092,56 |
+| Pie de la grilla, después | 7.155.531.592,56 |
+| **Diferencia** | **55.121.500,00** |
+| Suma de los pagos de los contenedores listados, cada uno a la cotización de su fila | **55.121.500,00** |
+
+Cuadra exacto: `24.750 × 1.534` (el 691, que paga en septiembre) más `10.000 × 1.715,50` (el 733, que paga en marzo de 2027).
+
+**En el horizonte la diferencia es menor**, y eso también cierra:
+
+| | $ |
+| --- | --- |
+| Total del horizonte, antes | 5.842.518.578,32 |
+| Total del horizonte, después | 5.825.363.578,32 |
+| **Diferencia** | **17.155.000,00** |
+
+El 691 **ya valía cero** —su fecha de pago está vencida—, así que cancelarlo no movió ninguna columna: lo único que cambió es que ahora la pestaña dice por qué. La diferencia es exactamente el pago del 733.
+
+`PAGOS_TODO` quedó en **$ 7.210.653.092,56**, que es el total que el pie de la grilla tenía antes de la rama: el antes y el después se pueden leer en el mismo tablero. **El invariante cerró en las 40 columnas del eje**, sin un centavo de descuadre.
+
+---
+
 ## Lo que no cambió
 
 - **La valuación con dólar futuro ROFEX**, fila por fila, según el mes de la fecha efectiva. Vive en `Comex::valuar()` y `DolarFuturo::resolver()`, y la leen la pestaña y el tablero: un solo `IMPORTE_ARS`. Ver el encabezado de `Class/DolarFuturo.php`.
@@ -530,14 +659,27 @@ php tests/run.php comex
 ```
 
 - `tests/test_comex_dolar_futuro.php` — la valuación **de las dos pestañas**: qué cotización le toca a cada fila, el mes fuera de curva, el override y cuándo se descarta. Sin base.
-- `tests/test_comex_fecha_maestra.php` — lo de esta rama.
+- `tests/test_comex_fecha_maestra.php` — la fecha en el maestro, los vencidos y el tilde de pagado.
+- `tests/test_comex_fecha_pago_manual.php` — la fecha de pago fijada a mano, y de dónde sale la marca de cada fecha.
+- `tests/test_comex_saldo_pendiente.php` — lo de la sección 8.
+
+De la sección 8, lo que se fija:
+
+- **La regla del saldo, caso por caso**: sin pagos, parcial, cancelado, sobrepago y sin FOB, con los cuatro estados nombrados como los nombra Comercio Exterior. **Los números del contenedor 733 están escritos en la prueba**, y ése es el punto: son el ancla entre las dos aplicaciones, así que si esta prueba falla una de las dos se movió.
+- **Los dos bordes de la tolerancia**: que medio centavo para cualquier lado siga siendo `CANCELADO`, que dos centavos ya no lo sean, y que el medio centavo de más **no dispare el aviso de sobrepago** — sin ese tope, la tolerancia declararía el contenedor cancelado y el aviso mandaría igual a corregir a mano una diferencia que la tolerancia ya declaró irrelevante.
+- **Que el pendiente nunca sea negativo**, y que `pendiente + imputado = FOB` se cumpla también en el sobrepago: es lo que hace cerrar el invariante de series cuando hay plata cargada de más.
+- **El invariante de tres partes sobre los ocho casos posibles**, que es el producto de las tres cosas que pueden pasarle a una fila: estar vencida, estar tildada y tener pagos en Comex. Se prueba **sin base**, con filas armadas a mano — que es el punto, porque en la base real hay dos contenedores con pagos y ninguno tildado.
+- **Que una fila que repite un contenedor no aporte a ninguna de las cuatro series**, incluido `PAGOS_TODO`. Hoy **no hay ninguna OC hija en la base**, así que esto sólo se puede verificar acá. Y que la condición sea `!empty()` y no la inversa: con la condición invertida, *Crono Nacionalización* —que no trae ese campo— se habría ido entera a cero.
+- **Que el cashflow no escriba la tabla de pagos**: se busca `INSERT`, `UPDATE` y `DELETE` sobre ella y las tres tienen que dar cero.
+- **El cableado**: que la consulta resuelva la OC principal con `COALESCE`, que el FOB salga de ahí, que el `ROW_NUMBER` de la deduplicación no se vaya, que la valuación se pida sobre `PENDIENTE_USD` y que el aviso de valuación mida el pendiente y no el FOB.
+- **Contra la base**, sólo lectura: que el 733 dé los tres números de Comercio Exterior, que su importe en pesos salga del pendiente, y que `FOB = pendiente + pagado` cierre **en las 76 filas del padrón**.
 
 De lo nuevo, lo que se fija:
 
 - **Las reglas puras**: `estaVencida()` (con hoy inyectado, para que la prueba no caduque sola), `marcaVigente()` y los dos avisos de `avisosVencidos()`, incluido el reparto entre lo que entra en la columna del mes en curso y lo que no.
 - **El cableado**, leyendo archivos, con el mismo criterio de `test_tablas_controles.php`: que el filtro de embarque no vuelva, que las columnas `EDIT` no vuelvan a leerse, que el orden sea por la fecha efectiva con los nulos al final, que el endpoint de fechas sea uno solo y que el cliente no vuelva a mandar la fecha anterior.
 - **Que el buscador y la celda no se copien**: que las dos pestañas deleguen en `Comex-fechas.js`, que ninguna reimplemente `sumarColumnas()` ni arme su propio `fetch`, y que las dos carguen el archivo compartido **antes** que el suyo.
-- **El tilde de pagado**: que lo marcado no aporte al eje pero **siga siendo proyectable** —que es lo que hace cerrar el invariante—, y que `PAGOS + PAGOS_PAGADOS = PAGOS_TODO` se cumpla en los **cuatro casos posibles** (nada / pagada / vencida / vencida y pagada). El corte de filas marcadas se prueba **sin base**, con una lista armada a mano, que es el punto: se puede verificar aunque no haya nada marcado en la base. Y que el registro declare las tres series con su `componentes`, que es lo que impide activar el universo y una parte a la vez.
+- **El tilde de pagado**: que lo marcado no aporte al eje pero **siga siendo proyectable** —que es lo que hace cerrar el invariante—, y que el corte se cumpla en los **cuatro casos posibles** (nada / pagada / vencida / vencida y pagada). El corte de filas marcadas se prueba **sin base**, con una lista armada a mano, que es el punto: se puede verificar aunque no haya nada marcado en la base. Y que el registro declare las series con su `componentes`, que es lo que impide activar el universo y una parte a la vez — la lista de partes va escrita entera en la prueba, y por eso Proveedores Exterior tuvo que actualizarse cuando ganó la tercera. El invariante completo, con `PAGOS_COMEX`, se verifica en `test_comex_saldo_pendiente.php`.
 - **El script**: que cree la tabla con las columnas que el código espera, que el índice único esté filtrado por `VIGENTE`, que no pise el maestro en conflicto y que sea reejecutable.
 - **Que `alert()` no vuelva** a ninguno de los tres archivos, que los fallos vayan a `Notificacion.error()`, que la fecha guardada no avise igual cuando se descartó la cotización, y que la falla de carga se pinte adentro de `tableWrapper` **sin pisar la tabla** —si la pisara, *Actualizar* no tendría dónde dibujar—.
 - **La valuación de Crono Nacionalización**: qué cotización le toca según la **fecha de nacionalización**, que el mismo contenedor se valúe distinto en cada pestaña porque sus dos fechas caen en meses distintos, el mes fuera de curva hacia adelante y hacia atrás, y que sin fecha el importe quede en `null` y no en cero. Y que **`valuar()` con los parámetros por defecto siga dando exactamente lo de hoy** para Proveedores Exterior: es la prueba que evita la regresión silenciosa —con los defaults invertidos, esa pestaña valuaría por un campo que no tiene y todos sus importes irían a cero sin que nada falle—.
@@ -556,7 +698,7 @@ sql/cashflow_comex_cotiz_edit.sql      El override de cotizacion por contenedor
 sql/cashflow_comex_pagado.sql          Que pagos ya se hicieron, con su historial
 cashflow/Class/Comex.php               Las dos consultas, el guardado y las reglas puras
 cashflow/Class/DolarFuturo.php         La curva ROFEX y que cotizacion le toca a cada fila
-cashflow/Class/Providers/ComexProvider.php   Las dos series del tablero
+cashflow/Class/Providers/ComexProvider.php   Las dos filas del tablero y sus siete series
 cashflow/Class/CashflowRegistry.php          La moneda y las series de las dos filas
 cashflow/Controller/ComexController.php      Listados, edicion de fechas y de cotizacion
 cashflow/Js/Comex-fechas.js            Lo compartido por las dos pestanas: la celda de fecha
@@ -570,8 +712,23 @@ cashflow/Tabs/proveedores_exterior.php
 cashflow/Tabs/crono_nacionalizacion.php
 tests/test_comex_fecha_maestra.php
 tests/test_comex_fecha_pago_manual.php  El BIT de fecha de pago fijada, y su degradacion
+tests/test_comex_saldo_pendiente.php    La regla del saldo, el invariante de cuatro series
+                                        y la deduplicacion de OC hijas
 tests/test_comex_dolar_futuro.php
 ```
+
+**La tabla de pagos NO tiene script**: es de Comercio Exterior y ya existe. Lo
+unico que hace esta rama del lado de la base es LEERLA:
+
+```
+RO_T_IMPORTACIONES_ENCABEZADO_PAGOS    lo ya pagado a cada proveedor, en U$S
+```
+
+La regla del saldo que se calcula sobre ella vive replicada en
+`Comex::saldoPendiente()` y su original en
+`administracion/comercioExterior/class/Pagos.php::obtenerResumen()`. **Son dos
+copias de la misma cuenta, en dos repos**, y el encabezado de cada una nombra a
+la otra: es lo unico que hay para que no se separen.
 
 El BIT lo crea un script del **otro** repo, porque la columna es del maestro de
 Comercio Exterior:

@@ -115,6 +115,51 @@ require_once __DIR__ . '/Horizonte.php';
  * periodo no cambia ningun total: el interruptor es para poder ir a
  * corregirlas.
  *
+ * LO QUE SE PROYECTA ES LO QUE FALTA PAGAR, NO EL FOB
+ * ---------------------------------------------------
+ * Esto CAMBIO con feature/comex-saldo-pendiente. La app de Comercio Exterior
+ * permite pagos parciales al proveedor del exterior -los guarda en
+ * RO_T_IMPORTACIONES_ENCABEZADO_PAGOS, en DOLARES- y el cashflow proyectaba el
+ * VALOR_FOB_DOLAR entero, como si no se hubiera pagado nada. Un contenedor con
+ * el 80% anticipado entraba al tablero por el 100%.
+ *
+ * Ahora la fila proyecta el SALDO, con la regla de Comex y ni una coma mas:
+ *
+ *     pendiente U$S = VALOR_FOB_DOLAR - SUM(PAGOS.MONTO)
+ *
+ * Es literalmente la cuenta de Pagos::obtenerResumen() del repo administracion,
+ * replicada aca -no incluida- porque son DOS APLICACIONES Y DOS DESPLIEGUES: el
+ * cashflow no puede requerir un archivo que vive en otro repo. Lo que si tiene
+ * que dar es EL MISMO NUMERO, y por eso la regla vive en saldoPendiente(), que
+ * es pura, se prueba sin base y copia hasta la tolerancia de un centavo.
+ *
+ * SI LA REGLA DEL SALDO CAMBIA ALLA, HAY QUE CAMBIARLA ACA. No hay forma de que
+ * el codigo lo detecte solo: son dos repos. El encabezado de Pagos.php del otro
+ * lado lo dice, y esta nota es la otra mitad del pacto.
+ *
+ * EL FOB Y LOS PAGOS SALEN DE LA OC PRINCIPAL -COALESCE(ID_PADRE, ID)-, igual
+ * que en Comex: un contenedor con varias ordenes de compra tiene UN pago al
+ * proveedor, no uno por orden. Al 22/09/2026 el padron de central no tiene NI
+ * UNA hija -los 76 contenedores del listado son principales- asi que hoy ese
+ * COALESCE no cambia ninguna fila; se escribe igual porque la columna existe y
+ * el dia que aparezca una hija la cuenta tiene que dar lo mismo de los dos
+ * lados. Ver la nota de DUPLICA_GRUPO en getProveedoresExterior(), que es lo
+ * que impide que ese dia el contenedor se cuente dos veces.
+ *
+ * TRES COSAS QUE SE SIGUEN DE ESTO, y que estan donde dice cada una:
+ *
+ *   - SOBREPAGO: si lo cargado supera al FOB, el pendiente es CERO y no
+ *     negativo. El cashflow no proyecta egresos negativos, y la diferencia se
+ *     informa aparte porque es un dato a corregir en Comex.
+ *   - SALDO CERO: un contenedor cancelado sale del flujo SOLO, sin que nadie
+ *     lo tilde, porque su pendiente vale cero. El tilde manual sigue existiendo
+ *     para lo que no se cargo en Comex.
+ *   - EL IMPORTE NO DESAPARECE DEL MODELO. Lo que los pagos de Comex sacaron de
+ *     la proyeccion se sirve por una serie propia -PAGOS_COMEX- igual que el
+ *     tilde se sirve por PAGOS_PAGADOS, y el invariante pasa a ser
+ *     PAGOS + PAGOS_PAGADOS + PAGOS_COMEX = PAGOS_TODO, con PAGOS_TODO
+ *     valiendo el FOB completo. Ver aporteAlEje() y ComexProvider.
+ *
  * EL CODIGO NO ASUME QUE EL DDL SE CORRIO
  * ---------------------------------------
  * COTIZ_USD_EDIT -el override por contenedor- y la tabla del rastro son de
@@ -136,6 +181,38 @@ class Comex {
 
     /** El maestro de la plataforma Comex, donde viven las dos fechas */
     const TABLA_MAESTRO = 'RO_T_IMPORTACIONES_ENCABEZADO';
+
+    /**
+     * Los pagos al proveedor del exterior, de la plataforma Comex.
+     *
+     * EL CASHFLOW LA LEE Y NUNCA LA ESCRIBE. Los pagos se cargan en Comercio
+     * Exterior, que es el dueno del circuito; de este lado son el dato que dice
+     * cuanto falta pagar. MONTO esta en DOLARES desde
+     * comercioExterior/sql/08_pagos_en_dolares.sql.
+     */
+    const TABLA_PAGOS = 'RO_T_IMPORTACIONES_ENCABEZADO_PAGOS';
+
+    /**
+     * Un centavo. Es LA MISMA tolerancia de Pagos::obtenerResumen() en Comercio
+     * Exterior, y esta copiada a proposito: los pagos se cargan redondeados a
+     * dos decimales y la suma de varios parciales casi nunca da exacta, asi que
+     * sin ella un contenedor efectivamente cancelado quedaria proyectando
+     * "U$S 0,01" para siempre. Si alla se mueve, se mueve aca.
+     */
+    const TOLERANCIA_SALDO = 0.01;
+
+    /**
+     * Los cuatro estados de pago, con los nombres EXACTOS de Comercio Exterior.
+     *
+     * No son sinonimos elegidos de nuevo: son los que devuelve
+     * Pagos::obtenerResumen(), y que las dos aplicaciones nombren igual el
+     * mismo estado es lo que permite comparar una pantalla contra la otra sin
+     * un diccionario en el medio.
+     */
+    const ESTADO_SIN_FOB   = 'SIN_FOB';
+    const ESTADO_PENDIENTE = 'PENDIENTE';
+    const ESTADO_CANCELADO = 'CANCELADO';
+    const ESTADO_SOBREPAGO = 'SOBREPAGO';
 
     /**
      * Los dos campos editables, y en que columna del maestro vive cada uno.
@@ -160,6 +237,9 @@ class Comex {
 
     /** @var bool|null Cache de si el maestro ya tiene el BIT FECHA_PAGO_CONF */
     private $fechaPagoConf = null;
+
+    /** @var bool|null Cache de si existe la tabla de pagos de Comercio Exterior */
+    private $pagosComex = null;
 
     /** @var DolarFuturo|null Se construye una vez: la curva se lee y se cachea adentro */
     private $dolar = null;
@@ -357,6 +437,73 @@ class Comex {
     }
 
     /**
+     * Si existe la tabla de pagos de Comercio Exterior.
+     *
+     * ES DE LA OTRA PLATAFORMA Y ESTA DESDE SIEMPRE, asi que preguntar parece
+     * de mas. No lo es: son DOS REPOS Y DOS DESPLIEGUES, esta pestana ya lee
+     * dos cosas de Comex que pueden no estar -FECHA_PAGO_CONF, del script 10- y
+     * nombrar una tabla ausente rompe la pantalla entera con "Invalid object
+     * name", que es un error que no se ve hasta que alguien la abre.
+     *
+     * SIN LA TABLA el pendiente vale el FOB completo, o sea exactamente lo que
+     * esta pestana mostraba antes de feature/comex-saldo-pendiente, Y SE AVISA:
+     * un tablero que proyecta de mas sin decirlo es peor que uno que falla. Ver
+     * avisoSinPagosComex().
+     *
+     * Mismo patron que tienePagado() y tieneCotizEdit().
+     *
+     * @return bool
+     */
+    public function tienePagosComex() {
+        if ($this->pagosComex !== null) {
+            return $this->pagosComex;
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo." . self::TABLA_PAGOS . "', 'U') AS T");
+
+        if ($stmt === false) {
+            throw new Exception('Error al verificar la tabla de pagos de Comercio Exterior');
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->pagosComex = ($row && $row['T'] !== null);
+
+        return $this->pagosComex;
+    }
+
+    /**
+     * El aviso de que no se puede leer lo ya pagado en Comex, o cadena vacia.
+     *
+     * NO ES UN AVISO DE CONFIGURACION COMO LOS OTROS DOS. Los otros apagan una
+     * funcion -editar una fecha, marcar un tilde- y todo lo demas sigue igual.
+     * Este cambia LOS NUMEROS: sin la tabla el tablero vuelve a proyectar el FOB
+     * completo, que es plata que puede haber salido ya. Por eso el texto dice
+     * que se esta proyectando de mas, y no solo que falta algo.
+     *
+     * @return string
+     */
+    public function avisoSinPagosComex() {
+        if ($this->tienePagosComex()) {
+            return '';
+        }
+
+        return 'No se encuentra la tabla ' . self::TABLA_PAGOS . ' de Comercio Exterior, así '
+            . 'que no se puede saber qué se le pagó ya a cada proveedor del exterior: esta '
+            . 'pantalla y la fila del tablero proyectan el FOB COMPLETO de cada contenedor, '
+            . 'que es de más si hay pagos hechos. Es una tabla de la otra aplicación: '
+            . 'revisalo con quien administra la base central.';
+    }
+
+    /**
      * El aviso de que el tilde de pagado esta apagado, o cadena vacia.
      *
      * @return string
@@ -419,10 +566,15 @@ class Comex {
         $avisos = [];
         $dolar = $this->dolarFuturo();
 
-        /* Los dos scripts que esta pantalla puede no tener corridos. Se avisan
-           los dos: cada uno apaga una cosa distinta -editar fechas y marcar
-           pagos- y un solo mensaje generico no diria cual falta. */
-        foreach ([$this->avisoSinHistorial(), $this->avisoSinPagado()] as $falta) {
+        /* Lo que esta pantalla puede no tener. Se avisan por separado porque
+           cada uno apaga una cosa distinta y un solo mensaje generico no diria
+           cual falta.
+
+           EL DE LOS PAGOS VA PRIMERO, y no es orden alfabetico: los otros dos
+           apagan una funcion -editar una fecha, marcar un tilde- y ese cambia
+           LOS NUMEROS que muestra la pantalla. Ver avisoSinPagosComex(). */
+        foreach ([$this->avisoSinPagosComex(), $this->avisoSinHistorial(),
+                  $this->avisoSinPagado()] as $falta) {
             if ($falta !== '') {
                 $avisos[] = $falta;
             }
@@ -551,6 +703,239 @@ class Comex {
                        ON P.ID_MG = A.ID AND P.VIGENTE = 1 AND P.CONCEPTO = '" . $concepto . "'";
     }
 
+    /* ====================================================================
+       LO QUE FALTA PAGAR
+
+       El FOB y los pagos salen de la OC PRINCIPAL -COALESCE(ID_PADRE, ID)-,
+       que es la regla de Comercio Exterior: ver encabezado.php::
+       resolverIdPrincipal() y Pagos::obtenerResumen() del repo administracion.
+       Un contenedor con varias ordenes de compra tiene UN pago al proveedor.
+       ==================================================================== */
+
+    /** El ID de la OC principal de una fila, que es de donde sale todo */
+    const OC_PRINCIPAL = 'COALESCE(A.ID_PADRE, A.ID)';
+
+    /**
+     * El FOB y lo pagado, listos para el SELECT.
+     *
+     * SIN LA TABLA DE PAGOS se piden literales con el mismo nombre y CERO
+     * pagado, que es lo unico que se puede afirmar: sin poder leerla, no hay
+     * ningun pago conocido. El pendiente queda valiendo el FOB completo -lo que
+     * esta pestana mostraba antes- y avisoSinPagosComex() dice que eso es de
+     * mas. Mismo truco que rastroSelect() y pagadoSelect(), con una diferencia
+     * que importa: aca la degradacion cambia numeros, no apaga un boton.
+     *
+     * @return string
+     */
+    private function saldoSelect() {
+        $pagado = $this->tienePagosComex()
+            ? "ISNULL(PG.MONTO, 0)  PAGADO_USD,
+               ISNULL(PG.CANT, 0)   PAGOS_CANT"
+            : "CAST(0 AS DECIMAL(18,2)) PAGADO_USD,
+               CAST(0 AS INT)          PAGOS_CANT";
+
+        /* EL FOB SALE DE LA PRINCIPAL, con la propia como respaldo. El ISNULL
+           no es defensivo de mas: ID_PADRE es una FK al mismo maestro y si
+           apuntara a una fila que ya no esta, sin respaldo este contenedor
+           pasaria a valer NULL y desapareceria del tablero en silencio. */
+        return "ISNULL(OC.VALOR_FOB_DOLAR, A.VALOR_FOB_DOLAR) VALOR_FOB_DOLAR,
+                " . self::OC_PRINCIPAL . " GRUPO_ID,
+                " . $pagado . ",
+                " . self::duplicaGrupoSelect();
+    }
+
+    /**
+     * Los APPLY que traen el FOB y los pagos de la OC principal.
+     *
+     * @return string
+     */
+    private function saldoApply() {
+        $sql = "OUTER APPLY (SELECT OC0.VALOR_FOB_DOLAR
+                             FROM " . self::TABLA_MAESTRO . " OC0
+                             WHERE OC0.ID = " . self::OC_PRINCIPAL . ") OC";
+
+        if (!$this->tienePagosComex()) {
+            return $sql;
+        }
+
+        return $sql . "
+                OUTER APPLY (SELECT ISNULL(SUM(PG0.MONTO), 0) MONTO, COUNT(PG0.ID) CANT
+                             FROM " . self::TABLA_PAGOS . " PG0
+                             WHERE PG0.ID_ENCABEZADO = " . self::OC_PRINCIPAL . ") PG";
+    }
+
+    /**
+     * El BIT que dice que esta fila REPITE un contenedor que ya esta en el
+     * listado, y que por lo tanto no tiene que volver a proyectarlo.
+     *
+     * POR QUE HACE FALTA, Y POR QUE NO HACIA FALTA ANTES
+     * --------------------------------------------------
+     * Hasta feature/comex-saldo-pendiente cada fila proyectaba SU PROPIO
+     * VALOR_FOB_DOLAR, asi que dos filas del mismo grupo eran dos importes
+     * distintos y no habia nada que deduplicar. Ahora las dos leen el FOB y los
+     * pagos DE LA PRINCIPAL -que es la regla de Comex- y por lo tanto valen lo
+     * MISMO: si las dos aportaran al eje, el contenedor entraria dos veces.
+     *
+     * O sea que el riesgo lo introduce este cambio, y por eso se cierra aca.
+     *
+     * EL TITULAR ES LA PRINCIPAL SI ESTA, Y SI NO LA DE ID MAS CHICO. Lo
+     * segundo no es un capricho: el listado deja afuera los contenedores que ya
+     * tienen detalle cargado, asi que puede pasar que la principal no este y
+     * queden solo hijas. Dejar el grupo sin titular haria desaparecer ese
+     * egreso del tablero, que es peor que elegir una fila por un criterio
+     * estable.
+     *
+     * ESTA DORMIDO EN LA BASE DE HOY. Al 22/09/2026 los 76 contenedores del
+     * listado son principales -no hay NI UNA fila con ID_PADRE cargado en
+     * central- asi que este CASE vale 0 en todas. Se escribe igual porque la
+     * columna existe, Comex la resuelve, y el dia que aparezca una hija el
+     * tablero no puede empezar a contar doble sin que nadie se entere.
+     *
+     * LA PARTICION MIRA EL LISTADO, NO EL MAESTRO: las funciones de ventana
+     * corren DESPUES del WHERE, asi que dos filas solo se pisan si las dos
+     * estan efectivamente en la grilla.
+     *
+     * @return string
+     */
+    private static function duplicaGrupoSelect() {
+        return "COUNT(*) OVER (PARTITION BY " . self::OC_PRINCIPAL . ") GRUPO_FILAS,
+                CASE WHEN ROW_NUMBER() OVER (
+                          PARTITION BY " . self::OC_PRINCIPAL . "
+                          ORDER BY CASE WHEN A.ID_PADRE IS NULL THEN 0 ELSE 1 END, A.ID) = 1
+                     THEN 0 ELSE 1 END DUPLICA_GRUPO";
+    }
+
+    /**
+     * EL SALDO PENDIENTE, LA REGLA ENTERA, PURA.
+     *
+     * Es la cuenta de Pagos::obtenerResumen() del repo administracion, con los
+     * mismos estados y la misma tolerancia. Vive replicada y no incluida porque
+     * son dos aplicaciones y dos despliegues; vive SOLA y pura para que se
+     * pueda probar sin base y comparar linea por linea contra la otra.
+     *
+     *     pendiente = VALOR_FOB_DOLAR - SUMA(MONTO)
+     *
+     * EL PENDIENTE NUNCA ES NEGATIVO. Si lo cargado supera al FOB, vale cero:
+     * un egreso negativo en el cashflow seria un INGRESO que nadie afirmo, y
+     * ademas se compensaria en silencio contra el resto de la columna. Lo que
+     * sobra se devuelve aparte, en 'sobrepago', para que la pantalla lo pueda
+     * decir con su importe.
+     *
+     * 'IMPUTADO' ES EL COMPLEMENTO Y SE DEVUELVE CALCULADO, no vuelto a medir:
+     * es el pedazo del FOB que los pagos ya cubrieron, topeado en el FOB. Por
+     * construccion vale FOB - pendiente, y eso es justo lo que hace que el
+     * invariante de series cierre al centavo en vez de al centavo mas o menos.
+     * Medirlo como min(pagado, fob) daria lo mismo casi siempre y no siempre,
+     * que es la peor de las dos opciones.
+     *
+     * LOS CUATRO ESTADOS SE EVALUAN EN EL ORDEN DE COMEX, y ese orden es el que
+     * decide los bordes: un contenedor sin FOB cargado es SIN_FOB aunque tenga
+     * pagos -no hay contra que compararlos- y no SOBREPAGO. El exceso se
+     * informa igual, porque existe.
+     *
+     * @param mixed $fobUsd VALOR_FOB_DOLAR de la OC principal
+     * @param mixed $pagadoUsd SUMA de los pagos de la OC principal, en U$S
+     * @return array ['fob','pagado','pendiente','imputado','sobrepago','estado']
+     */
+    public static function saldoPendiente($fobUsd, $pagadoUsd) {
+        $fob = floatval($fobUsd);
+        $pagado = floatval($pagadoUsd);
+        $saldo = $fob - $pagado;
+
+        if ($fob <= 0) {
+            $estado = self::ESTADO_SIN_FOB;
+        } elseif ($saldo < -self::TOLERANCIA_SALDO) {
+            $estado = self::ESTADO_SOBREPAGO;
+        } elseif (abs($saldo) <= self::TOLERANCIA_SALDO) {
+            $estado = self::ESTADO_CANCELADO;
+        } else {
+            $estado = self::ESTADO_PENDIENTE;
+        }
+
+        /* Un FOB negativo no existe, pero si lo hubiera no puede volverse un
+           'imputado' negativo que despues se sume al tablero. */
+        $base = ($fob > 0) ? $fob : 0.0;
+        $pendiente = ($estado === self::ESTADO_PENDIENTE) ? $saldo : 0.0;
+        $exceso = $pagado - $base;
+
+        return [
+            'fob' => $fob,
+            'pagado' => $pagado,
+            'pendiente' => $pendiente,
+            'imputado' => $base - $pendiente,
+
+            /* CON LA MISMA TOLERANCIA que el estado, y no a secas: sin esto un
+               contenedor cancelado que pago medio centavo de mas dispararia el
+               aviso de sobrepago, que manda a corregir a mano una diferencia
+               que la tolerancia ya declaro irrelevante. */
+            'sobrepago' => ($exceso > self::TOLERANCIA_SALDO) ? $exceso : 0.0,
+            'estado' => $estado
+        ];
+    }
+
+    /**
+     * Le pone a una fila leida su saldo pendiente y todo lo que se deriva de el.
+     *
+     * VALOR_FOB_DOLAR SE PISA CON EL FLOAT ya normalizado: la base lo devuelve
+     * como string y la grilla, los avisos y las tres valuaciones lo leen por
+     * nombre. Normalizarlo una vez aca es lo mismo que hace conFechaEfectiva()
+     * con los BIT.
+     *
+     * 'PAGO_PARCIAL' NO ES UN QUINTO ESTADO, y por eso no esta en las
+     * constantes: es PENDIENTE con pagos encima. Se deriva aca -y no en el
+     * front- porque es lo que la pestana tiene que poder mostrar de un vistazo
+     * y la regla de cuando vale no puede quedar escrita en el navegador.
+     *
+     * @param array $row Fila cruda, con VALOR_FOB_DOLAR y PAGADO_USD de la principal
+     * @return array
+     */
+    private static function conSaldo($row) {
+        $s = self::saldoPendiente(
+            isset($row['VALOR_FOB_DOLAR']) ? $row['VALOR_FOB_DOLAR'] : 0,
+            isset($row['PAGADO_USD']) ? $row['PAGADO_USD'] : 0);
+
+        $row['VALOR_FOB_DOLAR'] = $s['fob'];
+        $row['PAGADO_USD'] = $s['pagado'];
+        $row['PENDIENTE_USD'] = $s['pendiente'];
+        $row['IMPUTADO_USD'] = $s['imputado'];
+        $row['SOBREPAGO_USD'] = $s['sobrepago'];
+        $row['ESTADO_PAGO'] = $s['estado'];
+
+        $row['PAGOS_CANT'] = isset($row['PAGOS_CANT']) ? intval($row['PAGOS_CANT']) : 0;
+        $row['PAGO_PARCIAL'] =
+            ($row['PAGOS_CANT'] > 0 && $s['estado'] === self::ESTADO_PENDIENTE);
+
+        /* Un BIT de SQL Server llega como '1'/'0', igual que PAGADO: se
+           normaliza aca, una sola vez, porque de el depende si la fila aporta
+           al eje. Un '0' verdadero en PHP sacaria del tablero medio padron. */
+        $row['DUPLICA_GRUPO'] =
+            !empty($row['DUPLICA_GRUPO']) && $row['DUPLICA_GRUPO'] != '0';
+        $row['GRUPO_FILAS'] = isset($row['GRUPO_FILAS']) ? intval($row['GRUPO_FILAS']) : 1;
+
+        return $row;
+    }
+
+    /**
+     * Un importe en dolares llevado a pesos con la cotizacion que le toco.
+     *
+     * SIN COTIZACION DEVUELVE null Y NO CERO, que es el criterio de todo el
+     * modulo: null es "no se pudo valuar" -y tiene su propio aviso, en
+     * dolares-, cero seria "este contenedor no cuesta nada".
+     *
+     * Existe porque desde feature/comex-saldo-pendiente la fila tiene TRES
+     * importes en pesos -el pendiente, lo ya pagado y el FOB completo- y los
+     * tres se convierten con la MISMA cotizacion. Con la cuenta escrita tres
+     * veces, cambiar el redondeo en una sola rompe el invariante de series sin
+     * que nada falle.
+     *
+     * @param mixed $usd
+     * @param mixed $cotizacion
+     * @return float|null
+     */
+    public static function enPesos($usd, $cotizacion) {
+        return ($cotizacion === null) ? null : round(floatval($usd) * floatval($cotizacion), 2);
+    }
+
     /**
      * Le pone a una fila leida su fecha efectiva, si esta vencida y si la marca
      * de editada corresponde al valor que se ve.
@@ -629,12 +1014,22 @@ class Comex {
      * que decide es la fecha de pago, y los vencidos se muestran marcados para
      * poder corregirles la fecha, que es lo unico que los devuelve al eje.
      *
+     * LO QUE SE VALUA ES EL PENDIENTE, NO EL FOB. Cada fila trae el FOB de su
+     * OC principal, lo que Comercio Exterior ya registro como pagado y la resta
+     * de los dos, y es esa resta la que se lleva la cotizacion. Ver el
+     * encabezado de la clase y saldoPendiente().
+     *
      * Cada fila vuelve con su valuacion en pesos resuelta -IMPORTE_ARS- y con
      * QUE DOLAR se le aplico: el simbolo de la curva, el mes, la cotizacion y
      * por que es esa y no otra. Las cuatro cosas viajan juntas porque un
      * importe en pesos que no se puede atar a una cotizacion identificada no se
      * puede auditar contra nada, que es el mismo criterio de
      * Cotizacion::ultimaHasta().
+     *
+     * Y VUELVE CON LOS OTROS DOS IMPORTES EN PESOS -lo ya pagado y el FOB
+     * completo- porque son las dos series que hacen que el egreso que sale de
+     * la proyeccion no desaparezca del modelo. No son datos de la grilla: son
+     * lo que el tablero necesita para que el invariante cierre.
      *
      * @param string|null $hoy Para poder probar el corte de vencidos sin
      *                         depender de que dia es. Por defecto, hoy.
@@ -662,7 +1057,7 @@ class Comex {
                     A.CONTENEDOR,
                     A.ORDEN_COMPRA,
                     UPPER(A.DESPACHANTE) DESPACHANTE,
-                    A.VALOR_FOB_DOLAR,
+                    " . $this->saldoSelect() . ",
                     ISNULL(A.FECHA_EMB, A.FECHA_EST_EMB) ETD,
                     CASE WHEN A.FECHA_EMB IS NULL THEN 0 ELSE 1 END ETD_CONFIRM,
                     A.FECHA_ARR ETA,
@@ -677,6 +1072,7 @@ class Comex {
                 LEFT JOIN " . self::TABLA_EDIT . " D ON A.ID = D.ID_MG
                 " . $this->rastroJoin('PAGO') . "
                 " . $this->pagadoJoin('PAGO') . "
+                " . $this->saldoApply() . "
                 WHERE B.ID_MG IS NULL
                 ORDER BY CASE WHEN A.FECHA_EST_PAGO IS NULL THEN 1 ELSE 0 END,
                          A.FECHA_EST_PAGO,
@@ -713,13 +1109,42 @@ class Comex {
 
             $row = self::conFechaEfectiva($row, 'FECHA_EST_PAGO', 'FECHA_PAGO_EFECTIVA', $hoy,
                                           $conBitPago);
-            $row = self::valuar($row, $curva);
 
-            /* Los dos importes derivados. Van DESPUES de valuar porque salen de
-               IMPORTE_ARS, y son dos porque el reparto en series necesita las
-               dos reglas por separado: ver aporteAlEje(). */
+            /* EL SALDO VA ANTES DE VALUAR, porque es lo que se valua. Lo que el
+               cashflow proyecta es el PENDIENTE -ver el encabezado de la
+               clase-, asi que la curva se aplica sobre PENDIENTE_USD y no sobre
+               el FOB. */
+            $row = self::conSaldo($row);
+            $row = self::valuar($row, $curva, 'PENDIENTE_USD');
+
+            /* LAS OTRAS DOS VALUACIONES, con la MISMA cotizacion de la fila.
+               Lo ya pagado y el FOB completo no entran a la proyeccion, pero
+               tienen que existir en pesos: son las dos series que hacen que el
+               importe que sale del flujo no desaparezca del modelo. */
+            $row['IMPORTE_PAGADO_ARS'] = self::enPesos($row['IMPUTADO_USD'], $row['COTIZ_USD']);
+
+            /* EL FOB EN PESOS SE DERIVA SUMANDO, y no multiplicando otra vez.
+               round(a*c) + round(b*c) no siempre es round((a+b)*c): la
+               diferencia es de un centavo por fila, y multiplicada por 76 filas
+               deja el invariante PAGOS + PAGOS_PAGADOS + PAGOS_COMEX =
+               PAGOS_TODO sin cerrar, que es justo lo que estas tres series
+               existen para poder verificar. Entre un FOB en pesos exacto al
+               centavo y un invariante que cierra, gana el invariante: el FOB
+               se muestra EN DOLARES, que es la moneda en la que es el dato. */
+            $row['IMPORTE_FOB_ARS'] =
+                ($row['IMPORTE_ARS'] === null || $row['IMPORTE_PAGADO_ARS'] === null)
+                    ? null
+                    : round($row['IMPORTE_ARS'] + $row['IMPORTE_PAGADO_ARS'], 2);
+
+            /* Los cuatro importes derivados. Van DESPUES de valuar porque salen
+               de los tres campos en pesos, y son cuatro porque el reparto en
+               series necesita cada regla por separado: ver aporteAlEje(). */
             $row['IMPORTE_PROYECTABLE'] = self::importeProyectable($row);
             $row['IMPORTE_EJE'] = self::aporteAlEje($row);
+            $row['IMPORTE_PAGADO_PROYECTABLE'] =
+                self::importeProyectable($row, 'IMPORTE_PAGADO_ARS');
+            $row['IMPORTE_FOB_PROYECTABLE'] =
+                self::importeProyectable($row, 'IMPORTE_FOB_ARS');
 
             $v[] = $row;
         }
@@ -727,6 +1152,116 @@ class Comex {
         sqlsrv_free_stmt($stmt);
 
         return $v;
+    }
+
+    /**
+     * Los pagos ya cargados de un contenedor, uno por uno. SOLO LECTURA.
+     *
+     * POR QUE LA PESTANA TIENE QUE PODER VERLOS
+     * -----------------------------------------
+     * Porque desde feature/comex-saldo-pendiente el importe que proyecta una
+     * fila depende de ellos, y un numero que cambio por algo que paso en OTRA
+     * aplicacion, sin forma de ver que fue, es indistinguible de un error de
+     * esta. La columna dice CUANTO se pagó; esto dice de que pagos sale.
+     *
+     * NO SE ESCRIBE NADA, Y NO ES UNA ETAPA PENDIENTE: los pagos se cargan en
+     * Comercio Exterior, que es el dueno del circuito. Duplicar el alta de este
+     * lado significaria dos formularios escribiendo la misma tabla con dos
+     * validaciones distintas, que es exactamente el problema que las dos
+     * aplicaciones vienen resolviendo con las fechas.
+     *
+     * LOS PAGOS SON DE LA OC PRINCIPAL, igual que el saldo: se pide por
+     * COALESCE(ID_PADRE, ID) para que pedir el detalle de una hija devuelva los
+     * pagos del contenedor y no una lista vacia. Es la misma resolucion que
+     * hace Pagos::obtenerPagosPorEncabezado() del otro lado.
+     *
+     * MONTO_ORIGEN_ARS SE TRAE y puede no existir: es de un script posterior
+     * -comercioExterior/sql/08_pagos_en_dolares.sql-. Sin la columna se pide
+     * NULL con su nombre, que significa lo correcto: sin el script no hay
+     * ninguna fila convertida. Mismo recurso que usa Pagos.php alla.
+     *
+     * @param int $idMg ID del contenedor, principal o hija
+     * @return array Lista de pagos, la mas vieja primero
+     */
+    public function getPagosDelContenedor($idMg) {
+        if (!$this->tienePagosComex()) {
+            return [];
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $origenArs = $this->tieneOrigenArs()
+            ? 'P.MONTO_ORIGEN_ARS'
+            : 'CAST(NULL AS DECIMAL(18,2))';
+
+        $sql = "SELECT P.ID, P.ID_ENCABEZADO, P.FECHA_PAGO, P.FORMA_PAGO, P.MEDIO_PAGO,
+                       P.MONTO, P.FECHA_CREACION, " . $origenArs . " AS MONTO_ORIGEN_ARS
+                FROM " . self::TABLA_PAGOS . " P
+                WHERE P.ID_ENCABEZADO = (SELECT COALESCE(E.ID_PADRE, E.ID)
+                                         FROM " . self::TABLA_MAESTRO . " E
+                                         WHERE E.ID = ?)
+                ORDER BY P.FECHA_PAGO, P.ID";
+
+        $stmt = sqlsrv_query($cid, $sql, [intval($idMg)]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSqlEn(self::TABLA_PAGOS, 'leer los pagos cargados'));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $row = self::aTexto($row, ['FECHA_PAGO', 'FECHA_CREACION']);
+            $row['MONTO'] = floatval($row['MONTO']);
+            $row['MONTO_ORIGEN_ARS'] =
+                ($row['MONTO_ORIGEN_ARS'] === null) ? null : floatval($row['MONTO_ORIGEN_ARS']);
+
+            $v[] = $row;
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $v;
+    }
+
+    /** @var bool|null Cache de si la tabla de pagos ya tiene MONTO_ORIGEN_ARS */
+    private $origenArs = null;
+
+    /**
+     * Si la tabla de pagos ya tiene MONTO_ORIGEN_ARS, del script 08 de Comex.
+     *
+     * Mismo patron que tieneCotizEdit(), y el mismo que usa Pagos.php del otro
+     * lado para la misma columna.
+     *
+     * @return bool
+     */
+    private function tieneOrigenArs() {
+        if ($this->origenArs !== null) {
+            return $this->origenArs;
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT COL_LENGTH('dbo." . self::TABLA_PAGOS . "', 'MONTO_ORIGEN_ARS') AS C");
+
+        $this->origenArs = false;
+
+        if ($stmt !== false) {
+            $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+            $this->origenArs = ($row && $row['C'] !== null);
+            sqlsrv_free_stmt($stmt);
+        }
+
+        return $this->origenArs;
     }
 
     /**
@@ -749,7 +1284,8 @@ class Comex {
         foreach ($campos as $c) {
             if (isset($row[$c]) && $row[$c] instanceof DateTime) {
                 $row[$c] = $row[$c]->format(
-                    in_array($c, ['EDIT_FECHA', 'PAGADO_FECHA'], true) ? 'Y-m-d H:i:s' : 'Y-m-d');
+                    in_array($c, ['EDIT_FECHA', 'PAGADO_FECHA', 'FECHA_CREACION'], true)
+                        ? 'Y-m-d H:i:s' : 'Y-m-d');
             }
         }
 
@@ -817,12 +1353,25 @@ class Comex {
      * tercera pestana con otro campo no necesita una copia de esta funcion, que
      * es como se desincronizan las reglas. El default es el de las dos.
      *
+     * Y UNA FILA QUE REPITE UN CONTENEDOR TAMPOCO SUMA. Desde
+     * feature/comex-saldo-pendiente el FOB y los pagos salen de la OC
+     * PRINCIPAL, asi que dos ordenes de compra del mismo contenedor valen
+     * exactamente lo mismo y sumar las dos contaria el egreso dos veces. La
+     * fila viaja igual -se ve en la grilla, marcada- por la misma razon por la
+     * que viajan las vencidas: esconder una fila no explica nada.
+     *
+     * EL FLAG SE PREGUNTA CON !empty() Y NO AL REVES, y eso es lo que hace que
+     * Crono Nacionalizacion siga andando: esa pestana no trae DUPLICA_GRUPO
+     * -no comparte pagos con nadie- y un campo ausente es falso, o sea que
+     * todas sus filas suman. Con la condicion invertida -"suma solo si es
+     * titular"- esa pestana se habria ido entera a cero.
+     *
      * @param array $fila Fila ya valuada, con VENCIDA resuelta
      * @param string $campoImporte De donde sale el importe de esa pestana
      * @return float|null
      */
     public static function importeProyectable($fila, $campoImporte = 'IMPORTE_ARS') {
-        if (!empty($fila['VENCIDA'])) {
+        if (!empty($fila['VENCIDA']) || !empty($fila['DUPLICA_GRUPO'])) {
             return 0.0;
         }
 
@@ -844,8 +1393,29 @@ class Comex {
      * UN PAGO MARCADO COMO HECHO SALE DEL FLUJO. Es lo que el tilde significa:
      * ese egreso ya no se espera. Pero el importe NO DESAPARECE DEL MODELO: el
      * proveedor lo sirve por una serie propia -PAGOS_PAGADOS- y el invariante
-     * PAGOS + PAGOS_PAGADOS = PAGOS_TODO se cumple columna por columna. Es el
-     * mismo criterio de la exclusion de cheques de cartera.
+     * se cumple columna por columna. Es el mismo criterio de la exclusion de
+     * cheques de cartera.
+     *
+     * EL INVARIANTE TIENE TRES PARTES DESDE feature/comex-saldo-pendiente:
+     *
+     *     PAGOS + PAGOS_PAGADOS + PAGOS_COMEX = PAGOS_TODO
+     *
+     * porque ahora hay DOS formas de que un egreso salga de la proyeccion, y
+     * son distintas: el TILDE es una afirmacion del cashflow sobre su propia
+     * proyeccion -se pone y se saca desde la pestana- y los PAGOS DE COMEX son
+     * un hecho cargado en la otra aplicacion, que este modulo solo lee. Una
+     * sola serie para las dos no dejaria contestar cual de las dos cosas
+     * explica que la fila del tablero haya bajado.
+     *
+     * Y PAGOS_TODO PASA A VALER EL FOB COMPLETO, que es lo que esta pestana
+     * proyectaba antes de esta rama. No es un efecto colateral: es lo que hace
+     * que el tablero mismo muestre el antes y el despues del cambio, sin tener
+     * que ir a buscarlo a ningun lado.
+     *
+     * EL TILDE SE APLICA SOBRE EL PENDIENTE, NO SOBRE EL FOB. Tildar un
+     * contenedor que ya tiene la mitad pagada en Comex saca de la proyeccion
+     * LA MITAD QUE FALTABA, que es lo unico que estaba proyectado. La otra
+     * mitad ya habia salido por PAGOS_COMEX.
      *
      * SI YA ESTABA VENCIDO, marcarlo no mueve ningun numero del tablero: ya
      * valia cero. Lo que cambia es que la fila sale de la pantalla y deja de
@@ -1041,6 +1611,153 @@ class Comex {
             . 'se destilda desde la pestaña si se marcó por error.'];
     }
 
+    /**
+     * El aviso por lo que Comercio Exterior ya registro como pagado.
+     *
+     * ES EL AVISO MAS IMPORTANTE DE LA PANTALLA, porque describe plata que
+     * SALIO DE LA PROYECCION SIN QUE NADIE DE ESTE LADO HAGA NADA. El tilde de
+     * pagado por lo menos lo puso una persona mirando la grilla; esto pasa solo,
+     * cuando alguien carga un pago en la otra aplicacion. Sin el aviso, la fila
+     * del tablero baja de un dia para el otro y no hay nada en esta pantalla
+     * que explique por que.
+     *
+     * DICE CUANTOS ESTAN CANCELADOS APARTE, y no es un detalle decorativo: un
+     * contenedor con saldo cero DESAPARECE del cuadro entero -sus celdas del
+     * eje quedan vacias, igual que un vencido- y eso se lee como un contenedor
+     * sin importe. Un parcial, en cambio, sigue estando con lo que falta.
+     *
+     * SE MIDE SOBRE EL IMPORTE PROYECTABLE DE LO PAGADO -no sobre lo pagado a
+     * secas- por el mismo motivo que avisosPagados(): lo que hay que informar
+     * es cuanto salio DE LA PROYECCION. Un contenedor con pagos que ademas
+     * tiene la fecha vencida ya no sumaba, asi que sus pagos no sacaron nada
+     * del tablero y contarlos aca inflaria el aviso.
+     *
+     * ESTATICA Y PURA, y la usan la pestana y el tablero: un solo texto, igual
+     * que avisosValuacion() y avisosVencidos().
+     *
+     * @param array $filas Filas con ESTADO_PAGO y PAGOS_CANT resueltos
+     * @return array Lista de mensajes
+     */
+    public static function avisosSaldoComex($filas) {
+        $conPagos = 0;
+        $cancelados = 0;
+        $importe = 0.0;
+
+        foreach (is_array($filas) ? $filas : [] as $f) {
+            if (empty($f['PAGOS_CANT'])) {
+                continue;
+            }
+
+            $conPagos++;
+            $importe += isset($f['IMPORTE_PAGADO_PROYECTABLE'])
+                ? floatval($f['IMPORTE_PAGADO_PROYECTABLE']) : 0.0;
+
+            if (isset($f['ESTADO_PAGO']) && $f['ESTADO_PAGO'] === self::ESTADO_CANCELADO) {
+                $cancelados++;
+            }
+        }
+
+        if ($conPagos === 0) {
+            return [];
+        }
+
+        return [$conPagos . ' contenedor(es) ya tienen pagos cargados en Comercio Exterior, '
+            . 'así que acá se proyecta sólo lo que FALTA pagar: ' . self::plata($importe)
+            . ' que la fila del tablero ya no cuenta. '
+            . ($cancelados === 0 ? '' : ($cancelados === 1
+                ? '1 de ellos quedó CANCELADO —saldo cero— y salió del cuadro entero, sin '
+                    . 'que nadie lo tildara. '
+                : $cancelados . ' de ellos quedaron CANCELADOS —saldo cero— y salieron del '
+                    . 'cuadro enteros, sin que nadie los tildara. '))
+            . 'El importe no se perdió: sale por su propia serie. Los pagos se cargan en '
+            . 'Comercio Exterior; desde acá se miran, con el detalle en la columna Pagado.'];
+    }
+
+    /**
+     * El aviso por los contenedores que tienen cargado MAS de lo que valen.
+     *
+     * EL PENDIENTE SE TOMA COMO CERO Y NUNCA NEGATIVO -ver saldoPendiente()-
+     * asi que el sobrepago no se ve en ninguna columna: no baja el total, no
+     * aparece como ingreso, no hace nada. Ese silencio es exactamente el
+     * problema, porque un sobrepago es casi siempre un dato mal cargado -un
+     * pago imputado al contenedor equivocado, un FOB desactualizado- y es en
+     * Comercio Exterior donde hay que arreglarlo.
+     *
+     * SE INFORMA EN DOLARES, que es la moneda en la que esta el dato y en la
+     * que se va a ir a buscar del otro lado. Convertirlo a pesos con la curva
+     * del mes de pago le agregaria una cotizacion a un numero que hay que
+     * comparar contra una factura.
+     *
+     * INCLUYE A LOS 'SIN_FOB' CON PAGOS, que Comex clasifica aparte: un
+     * contenedor sin FOB cargado y con pagos encima tiene el mismo problema
+     * -plata imputada contra nada- y mandarlo a otro aviso solo por el nombre
+     * del estado lo dejaria sin quien lo cuente.
+     *
+     * @param array $filas Filas con SOBREPAGO_USD resuelto
+     * @return array Lista de mensajes
+     */
+    public static function avisosSobrepago($filas) {
+        $cuantos = 0;
+        $usd = 0.0;
+
+        foreach (is_array($filas) ? $filas : [] as $f) {
+            $exceso = isset($f['SOBREPAGO_USD']) ? floatval($f['SOBREPAGO_USD']) : 0.0;
+
+            if ($exceso <= 0) {
+                continue;
+            }
+
+            $cuantos++;
+            $usd += $exceso;
+        }
+
+        if ($cuantos === 0) {
+            return [];
+        }
+
+        return [$cuantos . ' contenedor(es) tienen cargado en Comercio Exterior MÁS de lo que '
+            . 'dice su FOB: U$S ' . number_format($usd, 2, ',', '.') . ' de más. El pendiente '
+            . 'de esos se toma como CERO —el cashflow no proyecta egresos negativos, que serían '
+            . 'un ingreso que nadie afirmó— así que la diferencia no se ve en ninguna columna. '
+            . 'Revisá en Comercio Exterior si hay un pago imputado al contenedor equivocado o '
+            . 'un FOB desactualizado.'];
+    }
+
+    /**
+     * El aviso por las ordenes de compra que repiten un contenedor del listado.
+     *
+     * SE INFORMA AUNQUE HOY NO PASE NUNCA. Al 22/09/2026 no hay ninguna OC hija
+     * en central, asi que este aviso no sale; el dia que salga va a estar
+     * describiendo la unica razon por la que una fila con importe tiene todas
+     * las celdas del eje vacias, y sin el eso se lee como un error de la
+     * pantalla.
+     *
+     * NO DICE "CORREGILO", a diferencia del de vencidos y el de sobrepago: no
+     * hay nada que corregir. Es como Comercio Exterior modela un contenedor con
+     * varias ordenes de compra, y el cashflow se limita a no contarlo dos veces.
+     *
+     * @param array $filas Filas con DUPLICA_GRUPO resuelto
+     * @return array Lista de mensajes
+     */
+    public static function avisosGrupo($filas) {
+        $cuantas = 0;
+
+        foreach (is_array($filas) ? $filas : [] as $f) {
+            if (!empty($f['DUPLICA_GRUPO'])) {
+                $cuantas++;
+            }
+        }
+
+        if ($cuantas === 0) {
+            return [];
+        }
+
+        return [$cuantas . ' orden(es) de compra son del mismo contenedor que otra fila del '
+            . 'listado. El FOB y los pagos son del contenedor, no de cada orden, así que el '
+            . 'importe lo proyecta UNA sola fila —la de la orden principal— y estas van en cero '
+            . 'para no contar el mismo egreso dos veces. Están marcadas en la grilla.'];
+    }
+
     /** Un importe en pesos, con el formato del modulo */
     private static function plata($n) {
         return '$ ' . number_format(floatval($n), 2, ',', '.');
@@ -1062,13 +1779,28 @@ class Comex {
      *
      * LAS DOS PESTANAS VALUAN, Y POR ESO LOS DOS CAMPOS SON ARGUMENTOS
      * ----------------------------------------------------------------
-     * Proveedores Exterior valua VALOR_FOB_DOLAR por el mes de
+     * Proveedores Exterior valua PENDIENTE_USD por el mes de
      * FECHA_PAGO_EFECTIVA; Crono Nacionalizacion valua IMPORTE_EST por el mes
      * de FECHA_NAC_EFECTIVA. La regla es la misma -el importe en dolares por la
      * cotizacion del mes en que se mueve- y el campo es lo unico distinto. Con
      * los nombres escritos adentro, la segunda pestana habria necesitado una
      * copia de esta funcion, que es como se desincronizan las reglas; es el
      * mismo criterio de importeProyectable() y aporteAlEje().
+     *
+     * EL DEFAULT SIGUE SIENDO VALOR_FOB_DOLAR Y NINGUN LLAMADOR LO USA. No es
+     * un olvido de feature/comex-saldo-pendiente: el unico llamador que valuaba
+     * el FOB ahora pasa PENDIENTE_USD explicito, y dejar el default apuntando
+     * al FOB hace que quien escriba la llamada tenga que DECIDIR cual de los
+     * dos quiere, en vez de heredar en silencio el que le toque al default del
+     * dia. Los dos campos existen en la fila y valen cosas distintas.
+     *
+     * LA COTIZACION NO CAMBIO DE CRITERIO, NI SIQUIERA EL OVERRIDE. COTIZ_USD_
+     * EDIT sigue siendo una correccion sobre QUE DOLAR se aplica, no sobre que
+     * importe: se multiplica por el pendiente igual que antes se multiplicaba
+     * por el FOB, y descartaCotizacion() sigue atada al cambio de mes del pago.
+     * Un contenedor cancelado con override cargado vale cero, porque cero por
+     * cualquier cotizacion es cero, y eso es lo correcto: lo que dejo de haber
+     * es el importe, no el dolar.
      *
      * LOS NOMBRES DE SALIDA SON LOS MISMOS EN LAS DOS -IMPORTE_ARS, COTIZ_USD,
      * COTIZ_MES, COTIZ_ORIGEN, COTIZ_MOTIVO, COTIZ_DETALLE- porque es el mismo

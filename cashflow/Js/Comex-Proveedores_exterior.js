@@ -19,6 +19,28 @@
  * En el navegador no queda ninguna multiplicación, por el mismo motivo por el
  * que no quedó ninguna aritmética de fechas.
  *
+ * LO QUE SE PROYECTA ES EL PENDIENTE, Y LA RESTA ESTÁ A LA VISTA
+ * ---------------------------------------------------------------
+ * Comercio Exterior permite pagos parciales al proveedor del exterior, y hasta
+ * feature/comex-saldo-pendiente esta pestaña proyectaba el FOB entero: un
+ * contenedor con el anticipo ya girado entraba al cashflow por el total.
+ *
+ * Ahora la grilla tiene TRES columnas en dólares —FOB total, pagado y
+ * pendiente, en ese orden— y la columna en pesos, los totales, el export y la
+ * fila del tablero salen de la tercera. Las tres están porque un saldo sin sus
+ * dos términos es un número que hay que creer; con la resta escrita, se
+ * verifica mirando.
+ *
+ * Y SON LOS MISMOS NÚMEROS QUE COMERCIO EXTERIOR. La cuenta vive replicada del
+ * lado del cashflow —dos apps, dos despliegues— pero tiene que dar exactamente
+ * lo que muestra la pantalla de pagos de allá. Ver Class/Comex.php.
+ *
+ * LOS PAGOS SE MIRAN, NO SE CARGAN. La celda de pagado se abre y muestra fecha,
+ * forma, medio e importe de cada uno, sin salir del cashflow. No hay alta ni
+ * edición, y no es una etapa pendiente: ese circuito es de Comercio Exterior.
+ * Es la decisión opuesta a la de la fecha estimada de pago, que sí se edita
+ * desde acá, y la diferencia está en quién es dueño del dato.
+ *
  * DOS MARCAS, DOS COSAS DISTINTAS
  * -------------------------------
  *   naranja  la cotización la corrigió una persona para este contenedor
@@ -120,10 +142,16 @@
         // Proveedor y Contenedor: entre los dos identifican la fila, y son lo
         // que uno necesita tener a la vista al scrollear hasta la columna del
         // mes que le interesa.
+        /* LA CLAVE CAMBIA CUANDO CAMBIA EL LAYOUT, y acá cambió: las columnas
+           fijas se guardan POR ÍNDICE, y feature/comex-saldo-pendiente metió
+           dos columnas nuevas en la posición 5. Sin el sufijo, a quien tuviera
+           fijada una columna del medio se le quedaría fijada OTRA, sin nada
+           que lo explique. Es el mismo `_v2` que ya lleva Crono
+           Nacionalización por el mismo motivo. */
         crearColumnasFijas({
             tabla: 'tablaProveedoresExterior',
             control: 'colFijasProvExt',
-            clave: 'proveedores_exterior',
+            clave: 'proveedores_exterior_v2',
             porDefecto: [0, 1]
         });
 
@@ -334,6 +362,19 @@ function generarFilasDatos() {
         if (item.VENCIDA) { clases.push('fila-vencida'); }
         if (item.PAGADO) { clases.push('fila-pagada'); }
 
+        /* CANCELADO EN COMERCIO EXTERIOR: saldo cero, así que la fila no aporta
+           a ninguna columna del eje, igual que una vencida o una tildada. Sin
+           una marca propia se leería como un contenedor sin importe —tiene FOB
+           y no tiene celdas—, y las otras dos marcas dirían algo falso: nadie
+           lo tildó y su fecha puede estar perfectamente en el futuro.
+
+           NO TIENE INTERRUPTOR PARA ESCONDERLA, a diferencia de vencidas y
+           pagadas, y es deliberado: acá no hay nada que corregir ni que
+           destildar, así que un interruptor sólo agregaría un control más que
+           entender. Se distingue mirando, que es todo lo que hace falta. */
+        if (item.ESTADO_PAGO === 'CANCELADO') { clases.push('fila-cancelada'); }
+        if (item.DUPLICA_GRUPO) { clases.push('fila-duplicada'); }
+
         html += '<tr data-buscar="' + escaparAttrProv(textoBuscable(item)) + '"'
             + (item.VENCIDA ? ' data-vencida="1"' : '')
             + (item.PAGADO ? ' data-pagado="1"' : '')
@@ -346,7 +387,10 @@ function generarFilasDatos() {
         html += `<td class="center">${item.CONTENEDOR || ''}</td>`;
         html += `<td class="center">${item.ORDEN_COMPRA || ''}</td>`;
         html += `<td>${item.DESPACHANTE || ''}</td>`;
-        html += `<td class="currency">${formatUSD(item.VALOR_FOB_DOLAR)}</td>`;
+
+        // Las tres del saldo: FOB, pagado y pendiente, en ese orden. La resta
+        // escrita de izquierda a derecha.
+        html += celdasSaldo(item);
         
         // ETD con indicador de confirmación
         var etdConfirm = item.ETD_CONFIRM == 1;
@@ -407,6 +451,240 @@ function generarFilasDatos() {
     });
 
     tableBody.innerHTML = html;
+}
+
+/* ================================================================
+   LAS TRES CELDAS DEL SALDO
+
+   FOB total, pagado y pendiente, en ese orden, en dólares. El cashflow proyecta
+   la tercera; las dos primeras están para que la tercera no haya que creerla.
+
+   VIVEN EN ESTA PESTAÑA Y NO EN Js/Comex-fechas.js, a diferencia de la fecha,
+   la cotización y el importe en pesos. La razón no es que sean nuevas: es que
+   Crono Nacionalización NO TIENE ESTA CUENTA. Esa pestaña proyecta el gasto de
+   nacionalización estimado, que no se paga en cuotas contra un saldo. Mudarlas
+   al archivo compartido sería poner ahí código que una de las dos pestañas no
+   puede usar, que es lo contrario de lo que ese archivo es.
+   ================================================================ */
+
+/**
+ * Las tres celdas del saldo de una fila.
+ *
+ * LA DE PAGADO ES CLICKEABLE cuando hay pagos, y muestra cuántos son. Un
+ * importe que salió de otra aplicación tiene que poder abrirse: es la única
+ * forma de contestar por qué esta fila proyecta menos de lo que vale, sin
+ * salir del cashflow.
+ *
+ * EL PENDIENTE LLEVA EL ESTADO AL LADO cuando no es el caso normal. "Cancelado"
+ * y "Parcial" son los dos que cambian cómo se lee el número: el primero explica
+ * por qué la fila no tiene ninguna celda del eje, el segundo por qué el importe
+ * no es el FOB. Un contenedor sin pagos no lleva nada, porque no hay nada que
+ * explicar.
+ *
+ * @param {Object} item Fila del payload
+ * @returns {string} HTML de las tres celdas
+ */
+function celdasSaldo(item) {
+    var cant = Number(item.PAGOS_CANT) || 0;
+    var hayPagos = cant > 0;
+
+    /* LAS TRES LLEVAN data-orden CON EL NÚMERO CRUDO, y la del medio lo
+       NECESITA: Js/tabla-orden.js saca del texto todo lo que no sea dígito, así
+       que el contador de pagos se le pegaría al importe —"U$S 10.000,00" con un
+       "1" al lado ordenaría como 10.000,001— y esa columna quedaría ordenada
+       por un número que no existe. En las otras dos es exactitud a secas: el
+       valor real en vez del texto formateado. */
+    var html = '<td class="currency saldo-fob" data-orden="'
+        + (Number(item.VALOR_FOB_DOLAR) || 0) + '">'
+        + formatUSD(item.VALOR_FOB_DOLAR) + '</td>';
+
+    /* SIN PAGOS SE DIBUJA EL CERO Y NO UN GUIÓN, al revés que la cotización sin
+       valuar. Acá el cero es un dato cierto y verificado —no se le pagó nada
+       todavía— y no un "no se pudo". */
+    var tituloPagos = hayPagos
+        ? (cant === 1 ? 'Un pago cargado en Comercio Exterior. Click para verlo.'
+                      : (cant + ' pagos cargados en Comercio Exterior. Click para verlos.'))
+        : 'Todavía no hay ningún pago cargado en Comercio Exterior para este contenedor.';
+
+    html += '<td class="currency saldo-pagado' + (hayPagos ? ' saldo-pagado-hay' : '') + '"'
+        + ' data-id="' + item.ID + '"'
+        + ' data-orden="' + (Number(item.PAGADO_USD) || 0) + '"'
+        + ' title="' + escaparAttrProv(tituloPagos) + '"'
+        + (hayPagos ? ' onclick="verPagosComex(this)"' : '') + '>'
+        + formatUSD(item.PAGADO_USD)
+        + (hayPagos ? ('<span class="saldo-pagos-cant">' + cant + '</span>') : '')
+        + '</td>';
+
+    var etiqueta = '';
+    var tituloPend = 'Es lo que el cashflow proyecta: FOB total menos lo ya pagado.';
+
+    if (item.ESTADO_PAGO === 'CANCELADO') {
+        etiqueta = 'Cancelado';
+        tituloPend = 'Cancelado en Comercio Exterior: no queda saldo, así que este contenedor '
+            + 'no entra en ninguna columna del período. No hace falta tildarlo.';
+    } else if (item.ESTADO_PAGO === 'SOBREPAGO') {
+        etiqueta = 'Sobrepago';
+        tituloPend = 'Hay cargado más de lo que dice el FOB: U$S '
+            + formatNumeroUSD(item.SOBREPAGO_USD) + ' de más. El pendiente se toma como cero '
+            + '—nunca se proyecta un egreso negativo— y la diferencia se corrige en Comercio '
+            + 'Exterior.';
+    } else if (item.ESTADO_PAGO === 'SIN_FOB') {
+        etiqueta = 'Sin FOB';
+        tituloPend = 'Este contenedor no tiene FOB cargado en el maestro de Comercio Exterior, '
+            + 'así que no hay contra qué medir el saldo y no se proyecta nada.'
+            + (hayPagos ? ' Y tiene pagos cargados encima: revisalo en Comercio Exterior.' : '');
+    } else if (item.PAGO_PARCIAL) {
+        etiqueta = 'Parcial';
+        tituloPend = 'Este contenedor tiene pagos parciales cargados en Comercio Exterior: lo '
+            + 'que se proyecta es lo que falta, no el FOB total.';
+    }
+
+    /* LA FILA QUE REPITE UN CONTENEDOR PISA A TODAS LAS DEMÁS ETIQUETAS. Su
+       pendiente es correcto y aun así no se proyecta, que es el caso más raro
+       de todos: si dijera "Parcial" y nada más, no habría nada en pantalla que
+       explique por qué las celdas del eje están vacías. */
+    if (item.DUPLICA_GRUPO) {
+        etiqueta = 'Repetido';
+        tituloPend = 'Otra orden de compra del listado es del mismo contenedor, y el FOB y los '
+            + 'pagos son del contenedor. El importe lo proyecta esa otra fila: ésta va en cero '
+            + 'para no contar el mismo egreso dos veces.';
+    }
+
+    html += '<td class="currency saldo-pendiente"'
+        + ' data-orden="' + (Number(item.PENDIENTE_USD) || 0) + '"'
+        + ' title="' + escaparAttrProv(tituloPend) + '">'
+        + formatUSD(item.PENDIENTE_USD)
+        + (etiqueta
+            ? ('<span class="saldo-estado saldo-estado-'
+                + etiqueta.toLowerCase().replace(/\s/g, '') + '">' + etiqueta + '</span>')
+            : '')
+        + '</td>';
+
+    return html;
+}
+
+/**
+ * Abre el detalle de los pagos de un contenedor.
+ *
+ * SE PIDE AL SERVIDOR Y NO VIAJA EN EL PAYLOAD. La grilla trae 76 filas y casi
+ * ninguna tiene pagos: mandar el detalle de todas en cada carga sería pagar el
+ * peso de un dato que casi nunca se mira. Es el mismo reparto que el historial
+ * de fechas y el de movimientos de Saldos.
+ *
+ * @param {HTMLElement} celda La celda de Pagado
+ */
+window.verPagosComex = function(celda) {
+    var id = Number(celda.dataset.id);
+    var item = ((datosProveedores && datosProveedores.filas) || []).filter(function(f) {
+        return Number(f.ID) === id;
+    })[0];
+
+    if (!item) {
+        return;
+    }
+
+    texto('pagosComexContenedor',
+        (item.CONTENEDOR || '') + ' · OC ' + String(item.ORDEN_COMPRA || '').trim());
+
+    /* LA RESTA, ESCRITA. El modal contesta "¿de dónde sale el pendiente?", y la
+       respuesta completa es la cuenta, no sólo la lista de pagos. */
+    texto('pagosComexResumen',
+        'FOB total ' + formatUSD(item.VALOR_FOB_DOLAR)
+        + '  −  pagado ' + formatUSD(item.PAGADO_USD)
+        + '  =  pendiente ' + formatUSD(item.PENDIENTE_USD)
+        + (Number(item.SOBREPAGO_USD) > 0
+            ? ('   (hay U$S ' + formatNumeroUSD(item.SOBREPAGO_USD)
+                + ' cargados de más: el pendiente se toma como cero)')
+            : ''));
+
+    document.getElementById('bodyPagosComex').innerHTML =
+        '<tr><td colspan="5" class="text-center text-muted py-3">Cargando…</td></tr>';
+
+    abrirModalPagos();
+
+    fetch('Controller/ComexController.php?action=getPagosContenedor&id_mg=' + id)
+        .then(function(r) { return r.json(); })
+        .then(function(result) {
+            if (!result.success) {
+                throw new Error(result.message || 'respuesta sin detalle');
+            }
+
+            pintarPagosComex(result.data || []);
+        })
+        .catch(function(error) {
+            /* EL ERROR SE PINTA ADENTRO DEL MODAL, y no sólo como notificación:
+               lo que queda en pantalla es una tabla vacía, que se lee como
+               "este contenedor no tiene pagos" —justo lo contrario de lo que
+               pasó—. Mismo criterio que ComexFechas.errorDeCarga(). */
+            document.getElementById('bodyPagosComex').innerHTML =
+                '<tr><td colspan="5" class="text-center text-danger py-3">'
+                + 'No se pudieron leer los pagos: ' + escaparAttrProv(error.message)
+                + '. El importe de la columna sigue siendo el que usó el cálculo.</td></tr>';
+        });
+};
+
+/** El modal, si Bootstrap está. Sin Bootstrap no hay modal y no se rompe nada más */
+function abrirModalPagos() {
+    var el = document.getElementById('modalPagosComex');
+
+    if (el && window.bootstrap && bootstrap.Modal) {
+        bootstrap.Modal.getOrCreateInstance(el).show();
+    }
+}
+
+/**
+ * Las filas del detalle de pagos.
+ *
+ * MONTO_ORIGEN_ARS SE MUESTRA CUANDO ESTÁ. Es el importe tal como se tipeó,
+ * antes de que el script 08 de Comercio Exterior lo pasara a dólares: sin eso,
+ * una fila convertida y una cargada en dólares desde el principio son
+ * indistinguibles, y la primera es la que alguien podría querer revisar.
+ *
+ * @param {Array} pagos
+ */
+function pintarPagosComex(pagos) {
+    var cuerpo = document.getElementById('bodyPagosComex');
+
+    if (!pagos.length) {
+        cuerpo.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">'
+            + 'No hay pagos cargados para este contenedor en Comercio Exterior.</td></tr>';
+
+        return;
+    }
+
+    var html = '';
+
+    pagos.forEach(function(p) {
+        var convertido = (p.MONTO_ORIGEN_ARS !== null && p.MONTO_ORIGEN_ARS !== undefined);
+
+        html += '<tr>';
+        html += '<td class="center">' + formatDate(p.FECHA_PAGO) + '</td>';
+        html += '<td>' + escaparAttrProv(p.FORMA_PAGO || '') + '</td>';
+        html += '<td>' + escaparAttrProv(p.MEDIO_PAGO || '') + '</td>';
+        html += '<td class="currency">' + formatUSD(p.MONTO)
+            + (convertido
+                ? ('<i class="fas fa-right-left pago-convertido ms-1" title="'
+                    + escaparAttrProv('Se cargó en pesos (' + formatCurrency(p.MONTO_ORIGEN_ARS)
+                        + ') y lo convirtió a dólares el script 08 de Comercio Exterior.')
+                    + '"></i>')
+                : '')
+            + '</td>';
+        html += '<td class="center text-muted">' + formatFechaHora(p.FECHA_CREACION) + '</td>';
+        html += '</tr>';
+    });
+
+    cuerpo.innerHTML = html;
+}
+
+/** Una fecha con hora, para "cargado el" */
+function formatFechaHora(valor) {
+    if (!valor) {
+        return '—';
+    }
+
+    var partes = String(valor).split(' ');
+
+    return formatDate(partes[0]) + (partes[1] ? (' ' + partes[1].substring(0, 5)) : '');
 }
 
 /* LAS DOS CELDAS DE LA VALUACIÓN SE FUERON A Js/Comex-fechas.js.
@@ -558,10 +836,30 @@ function generarFilaTotales() {
         ? (datosProveedores.totales || {})
         : ComexFechas.sumarColumnas(visibles);
 
-    /* Ocho columnas fijas más las dos de la valuación. El pie NO totaliza la
-       cotización: promediar cotizaciones de meses distintos daría un número que
-       no es el tipo de cambio de nada. Lo que sí suma es la columna en pesos. */
-    var html = '<td colspan="9" class="total-label">TOTALES</td>'
+    /* EL PIE TOTALIZA LAS TRES COLUMNAS EN DÓLARES, y eso es nuevo: es donde
+       se ve el cuadre del módulo entero —FOB total menos pagado igual a
+       pendiente— sobre las filas que se están viendo. Sin esto, la única forma
+       de verificar que el cashflow descontó lo que tenía que descontar sería
+       sumar 76 filas a mano.
+
+       EL PIE NO TOTALIZA LA COTIZACIÓN: promediar cotizaciones de meses
+       distintos daría un número que no es el tipo de cambio de nada. Lo que sí
+       suma es la columna en pesos. */
+    var html = '<td colspan="4" class="total-label">TOTALES</td>'
+        + '<td class="currency" title="' + escaparAttrProv('Lo que valen los contenedores que '
+            + 'se están viendo, según el maestro de Comercio Exterior.') + '">'
+        + formatUSD(sumaUsd(visibles, 'VALOR_FOB_DOLAR')) + '</td>'
+        + '<td class="currency" title="' + escaparAttrProv('Lo que ya se le pagó a los '
+            + 'proveedores, según lo cargado en Comercio Exterior. Esta plata NO se proyecta: '
+            + 'ya salió.') + '">'
+        + formatUSD(sumaUsd(visibles, 'PAGADO_USD')) + '</td>'
+        + '<td class="currency" title="' + escaparAttrProv('Lo que falta pagar, que es lo que '
+            + 'el cashflow proyecta. Es FOB total menos pagado, contenedor por contenedor: '
+            + 'los sobrepagos cuentan como cero y no restan de más.') + '">'
+        + formatUSD(sumaUsd(visibles, 'PENDIENTE_USD')) + '</td>'
+        /* ETD, ETA y la fecha de pago: tres fechas, nada que sumar. */
+        + '<td colspan="3"></td>'
+        + '<td></td>'
         + '<td class="currency" title="' + escaparAttrProv('Suma el importe de las filas que se '
             + 'están viendo, incluidas las que caen fuera del horizonte —las vencidas y las '
             + 'posteriores al último mes—. Por eso puede no coincidir con el total de las '
@@ -775,12 +1073,34 @@ function escaparAttrProv(texto) {
  * @returns {number}
  */
 function sumaImporteArs(visibles) {
+    return sumarCampo(visibles, 'IMPORTE_ARS');
+}
+
+/**
+ * Suma una de las tres columnas en dólares de las filas que se están viendo.
+ *
+ * LAS TRES SE SUMAN IGUAL Y POR SEPARADO, y no se derivan una de la otra: el
+ * pendiente del pie tiene que ser la suma de los pendientes POR FILA, no
+ * "FOB total menos pagado total". Con un solo contenedor sobrepagado las dos
+ * cuentas dan distinto —el sobrepago de uno restaría del pendiente de los
+ * otros— y la que corresponde es ésta, que es la que usa el tablero.
+ *
+ * @param {Array|null} visibles Las filas filtradas, o null si no hay filtro
+ * @param {string} campo
+ * @returns {number}
+ */
+function sumaUsd(visibles, campo) {
+    return sumarCampo(visibles, campo);
+}
+
+/** Suma un campo numérico sobre las filas visibles, o sobre todas si no hay filtro */
+function sumarCampo(visibles, campo) {
     var filas = (visibles === null || visibles === undefined)
         ? ((datosProveedores && datosProveedores.filas) || [])
         : visibles;
 
     return filas.reduce(function(a, f) {
-        return a + (Number(f.IMPORTE_ARS) || 0);
+        return a + (Number(f[campo]) || 0);
     }, 0);
 }
 
@@ -799,10 +1119,25 @@ function formatCurrency(value) {
     });
 }
 
-/** Formatea un valor en dólares: el FOB, que queda como referencia */
+/**
+ * Formatea un valor en dólares: las tres columnas del saldo y el detalle de
+ * pagos. El cashflow es en pesos; los dólares son el dato de origen.
+ */
 function formatUSD(value) {
+    return 'U$S ' + formatNumeroUSD(value);
+}
+
+/**
+ * El número solo, sin el signo.
+ *
+ * Existe porque hay textos que ya traen el "U$S" adelante —los tooltips del
+ * sobrepago, el aviso del backend— y meterle otro daría "U$S U$S 500,00". Es
+ * el mismo formato, partido en el lugar donde una de las dos cosas sobra.
+ */
+function formatNumeroUSD(value) {
     var num = parseFloat(value) || 0;
-    return 'U$S ' + num.toLocaleString('es-AR', {
+
+    return num.toLocaleString('es-AR', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
     });

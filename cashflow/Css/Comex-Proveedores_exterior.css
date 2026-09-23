@@ -556,3 +556,152 @@
     cursor: pointer;
     margin: 0;
 }
+
+/* ================================================================
+   LAS TRES COLUMNAS DEL SALDO
+
+   FOB total, pagado y pendiente. La que decide el cashflow es la tercera, y
+   las otras dos estan para que la tercera no haya que creerla: la resta se lee
+   de izquierda a derecha.
+
+   EL PENDIENTE ES LA UNICA QUE SE DESTACA. Las tres tienen el mismo peso
+   visual salvo esa, porque es la que se compara contra la columna en pesos de
+   mas a la derecha y la que explica el total de la pestana. Destacar las tres
+   seria no destacar ninguna.
+   ================================================================ */
+.tab-proveedores_exterior .saldo-fob,
+.tab-proveedores_exterior .saldo-pagado,
+.tab-proveedores_exterior .saldo-pendiente {
+    white-space: nowrap;
+}
+
+.tab-proveedores_exterior .saldo-pendiente {
+    font-weight: 600;
+}
+
+/* La celda de pagado se abre cuando hay algo que mirar, y solo entonces: una
+   celda que parece clickeable y no hace nada se prueba una vez y no se vuelve
+   a probar nunca. */
+.tab-proveedores_exterior .saldo-pagado-hay {
+    cursor: pointer;
+    color: #0d6efd;
+}
+
+.tab-proveedores_exterior .saldo-pagado-hay:hover {
+    background-color: #e7f1ff;
+}
+
+/* CUANTOS PAGOS SON, al lado del importe. Un mismo total puede salir de un
+   anticipo o de seis cuotas, y eso cambia que se espera que pase despues. */
+.tab-proveedores_exterior .saldo-pagos-cant {
+    display: inline-block;
+    min-width: 16px;
+    margin-left: 5px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background-color: #0d6efd;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 14px;
+    text-align: center;
+    vertical-align: middle;
+}
+
+/* El estado, pegado al pendiente y solo cuando no es el caso normal. Un
+   contenedor sin pagos no lleva nada: no hay nada que explicar. */
+.tab-proveedores_exterior .saldo-estado {
+    display: inline-block;
+    margin-left: 5px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    vertical-align: middle;
+}
+
+/* Cancelado: verde, porque no hay nada que hacer. Es el unico de los cuatro
+   que es una buena noticia -el contenedor esta pago- y el color lo separa de
+   los otros tres, que son cosas para mirar. */
+.tab-proveedores_exterior .saldo-estado-cancelado {
+    background-color: #d1e7dd;
+    color: #0a3622;
+}
+
+/* Parcial: azul, el mismo del contador de pagos, porque son la misma cosa
+   dicha dos veces -hay pagos y por eso el pendiente no es el FOB-. */
+.tab-proveedores_exterior .saldo-estado-parcial {
+    background-color: #cfe2ff;
+    color: #052c65;
+}
+
+/* Sobrepago y sin FOB: rojo. Son las dos unicas de las cuatro que hay que ir a
+   corregir a Comercio Exterior. */
+.tab-proveedores_exterior .saldo-estado-sobrepago,
+.tab-proveedores_exterior .saldo-estado-sinfob {
+    background-color: #f8d7da;
+    color: #58151c;
+}
+
+/* Repetido: gris, porque no es ni bueno ni malo ni hay nada que corregir. Es
+   como Comercio Exterior modela un contenedor con varias ordenes de compra, y
+   lo unico que dice la marca es cual de las filas lleva el importe. */
+.tab-proveedores_exterior .saldo-estado-repetido {
+    background-color: #e2e3e5;
+    color: #2b2f32;
+}
+
+/* ================================================================
+   LAS FILAS QUE NO APORTAN AL EJE
+
+   Son tres, y cada una por un motivo distinto: vencida (fecha a corregir),
+   pagada (alguien la tildo) y ahora CANCELADA (saldo cero en Comercio
+   Exterior) o REPETIDA (otra fila del listado lleva el importe).
+
+   LAS CUATRO SE VEN DISTINTO. Todas terminan con las celdas del eje vacias, y
+   una fila con FOB y sin ninguna celda se lee como un error de la pantalla si
+   nada dice por que. El color es lo que separa "esto hay que arreglarlo" de
+   "esto esta bien asi".
+   ================================================================ */
+
+/* Cancelada: verde muy suave. No se atenua como la pagada -que se esconde
+   detras de su interruptor- porque esta no tiene interruptor y tiene que
+   poder leerse: sus tres columnas en dolares son el comprobante de que el
+   contenedor efectivamente se pago entero. */
+.tab-proveedores_exterior .fila-cancelada > td {
+    background-color: #f2fbf6;
+}
+
+/* Repetida: gris y en cursiva, que es lo mas cerca de "esto es una nota al
+   pie" que se puede decir sin esconder la fila. Sus importes son correctos y
+   aun asi no se proyectan, que es el estado mas facil de leer como un error. */
+.tab-proveedores_exterior .fila-duplicada > td {
+    background-color: #f6f6f7;
+    font-style: italic;
+}
+
+/* GANA LA VENCIDA sobre las dos nuevas, por lo mismo que gana sobre la editada:
+   el rosa dice "hay que hacer algo con esta fila" y las otras dos dicen "esta
+   asi por algo". Una vencida que ademas quedo cancelada sigue siendo una fecha
+   para corregir en el maestro. */
+.tab-proveedores_exterior .fila-vencida.fila-cancelada > td,
+.tab-proveedores_exterior .fila-vencida.fila-duplicada > td {
+    background-color: #fff5f5;
+}
+
+/* La marca de que ese pago se cargo en pesos y lo convirtio el script 08 de
+   Comercio Exterior. Va en el detalle, no en la grilla: es un dato de auditoria
+   del pago, no del contenedor. */
+.tab-proveedores_exterior .pago-convertido,
+#modalPagosComex .pago-convertido {
+    font-size: 9px;
+    opacity: 0.65;
+}
+
+/* El resumen del modal es la resta completa, y es lo primero que se lee: la
+   lista de pagos de abajo es el respaldo. */
+#modalPagosComex #pagosComexResumen {
+    font-variant-numeric: tabular-nums;
+}

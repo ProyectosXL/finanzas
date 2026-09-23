@@ -120,6 +120,45 @@
                                         </div>
                                     </div>
                                 </div>
+                                <!-- LO QUE COMERCIO EXTERIOR YA PAGÓ. Va antes
+                                     del tilde a propósito: son las dos formas
+                                     de que un egreso salga de la proyección, y
+                                     ésta pasa SOLA. Quien lee la ayuda por el
+                                     tilde tiene que enterarse de que hay una
+                                     segunda, que no depende de él. -->
+                                <div class="col-12">
+                                    <div class="d-flex align-items-center gap-2 p-2 border rounded">
+                                        <!-- Badge de Bootstrap y NO la clase .saldo-estado de la
+                                             grilla: esa vive bajo .tab-proveedores_exterior y
+                                             este modal también lo incluye Crono Nacionalización,
+                                             donde no se cargaría y quedaría un texto suelto.
+                                             Mismo problema que resuelve .badge-fecha-vencida
+                                             estando declarada en los dos CSS sin prefijo. -->
+                                        <span class="badge bg-primary">Parcial</span>
+                                        <div>
+                                            <strong>En Proveedores Exterior se proyecta lo que
+                                                FALTA pagar</strong>
+                                            <br><small class="text-muted">
+                                                Comercio Exterior permite pagos parciales al
+                                                proveedor del exterior, y esa pestaña descuenta
+                                                lo que ya se pagó:
+                                                <strong>FOB total − Pagado = Pendiente</strong>,
+                                                y lo que entra al cashflow es el pendiente.
+                                                <strong>Hacé clic en la columna Pagado</strong>
+                                                para ver de qué pagos sale ese número —fecha,
+                                                forma, medio e importe—. Es sólo lectura: los
+                                                pagos se cargan en Comercio Exterior.
+                                                Un contenedor que allá quedó
+                                                <strong>Cancelado</strong> sale del cuadro solo,
+                                                sin que nadie lo tilde.
+                                                <strong>En Crono Nacionalización no aplica</strong>:
+                                                el gasto de nacionalización no se paga en cuotas
+                                                contra un saldo, así que ahí el tilde es la única
+                                                forma de sacar una fila de la proyección.
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
                                 <!-- EL TILDE DE PAGADO. Va acá, entre las
                                      marcas, porque es lo que resuelve las filas
                                      vencidas: se marcan y dejan de pedir
@@ -336,8 +375,14 @@
                             <strong>La tabla está en pesos.</strong> El cashflow es en pesos, y
                             esta pestaña es el detalle de una fila del tablero: si mostrara
                             dólares, sus totales no se podrían comparar contra la fila que
-                            explica. El <strong>Valor FOB (USD)</strong> queda como referencia,
-                            que es el dato con el que se chequea contra la factura del proveedor.
+                            explica. En <strong>Proveedores Exterior</strong> quedan como
+                            referencia las tres columnas en dólares —<strong>FOB total</strong>,
+                            <strong>Pagado</strong> y <strong>Pendiente</strong>—: son los
+                            números que se chequean contra la factura del proveedor y contra la
+                            pantalla de pagos de Comercio Exterior, y
+                            <strong>lo que se valúa ahí es el pendiente</strong>, no el FOB. En
+                            <strong>Crono Nacionalización</strong> la referencia es el gasto de
+                            nacionalización estimado, que también está en dólares.
                         </div>
 
                         <div class="help-section mb-4">
