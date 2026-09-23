@@ -147,3 +147,146 @@ GO
 
 PRINT 'Listo: RO_T_CASHFLOW_CONF_FILA ya puede declarar grupos.';
 GO
+
+/* ============================================================================
+   4. LA COBRANZA DE FRANQUICIAS, AGRUPADA
+
+   Es el unico concepto del tablero que HOY tiene las dos partes de verdad. Lo
+   partio en dos filas sql/cashflow_estructura_split_cobranzas_fr.sql; lo que
+   falta es decir que esas dos filas son el mismo concepto.
+
+   NO CAMBIA NINGUN IMPORTE. Las dos filas siguen activas, computando y
+   entrando en Total Disponibilidades exactamente igual; lo unico que cambia es
+   que el tablero las dibuja en un renglon que se abre.
+
+   ES REEJECUTABLE: cada UPDATE pregunta por el valor que va a poner, asi que
+   correrlo dos veces no toca ninguna fila la segunda vez -ni siquiera
+   FECHA_UPDATE-.
+   ============================================================================ */
+
+IF (SELECT COUNT(*) FROM dbo.RO_T_CASHFLOW_CONF_FILA
+     WHERE CODIGO IN ('COBRANZAS_FR_REAL', 'COBRANZAS_FR_PROY')) < 2
+BEGIN
+    PRINT 'AVISO: no estan las dos filas de Cobranzas FR (COBRANZAS_FR_REAL y '
+        + 'COBRANZAS_FR_PROY). Corre antes sql/cashflow_estructura_split_cobranzas_fr.sql. '
+        + 'Las columnas quedaron creadas igual y el tablero funciona como hasta ahora.';
+END
+ELSE
+BEGIN
+    SET XACT_ABORT ON;
+    BEGIN TRANSACTION;
+
+    /* ---- Las partes activas y la total inhabilitada -------------------------
+       Lo normal es que esto ya este asi -lo dejo el script del split- y estos
+       dos UPDATE no toquen nada. Van igual, y en la MISMA transaccion, porque
+       mientras la total conviva activa con sus dos componentes la estructura
+       es invalida: el validador rechaza el doble conteo, y esa ventana no
+       tiene que existir para nadie que lea la tabla. */
+    UPDATE dbo.RO_T_CASHFLOW_CONF_FILA
+    SET ACTIVO = 1, FECHA_UPDATE = GETDATE()
+    WHERE CODIGO IN ('COBRANZAS_FR_REAL', 'COBRANZAS_FR_PROY')
+      AND ACTIVO = 0;
+
+    UPDATE dbo.RO_T_CASHFLOW_CONF_FILA
+    SET ACTIVO = 0, FECHA_UPDATE = GETDATE()
+    WHERE CODIGO = 'COBRANZAS_FR'
+      AND ACTIVO = 1;
+
+    /* ---- El grupo -----------------------------------------------------------
+       GRUPO_NOMBRE lo declara UNA sola de las dos, la real, que es la que va
+       primero. Ponerlo en las dos no rompe nada -gana la primera- pero deja
+       dos lugares donde cambiar el nombre del renglon. */
+    UPDATE dbo.RO_T_CASHFLOW_CONF_FILA
+    SET GRUPO = 'COBRANZAS_FR',
+        NATURALEZA = 'REAL',
+        GRUPO_NOMBRE = 'Cobranzas Franquicias',
+        FECHA_UPDATE = GETDATE()
+    WHERE CODIGO = 'COBRANZAS_FR_REAL'
+      AND (ISNULL(GRUPO, '') <> 'COBRANZAS_FR'
+           OR ISNULL(NATURALEZA, '') <> 'REAL'
+           OR ISNULL(GRUPO_NOMBRE, '') <> 'Cobranzas Franquicias');
+
+    UPDATE dbo.RO_T_CASHFLOW_CONF_FILA
+    SET GRUPO = 'COBRANZAS_FR',
+        NATURALEZA = 'PROYECTADO',
+        GRUPO_NOMBRE = NULL,
+        FECHA_UPDATE = GETDATE()
+    WHERE CODIGO = 'COBRANZAS_FR_PROY'
+      AND (ISNULL(GRUPO, '') <> 'COBRANZAS_FR'
+           OR ISNULL(NATURALEZA, '') <> 'PROYECTADO'
+           OR GRUPO_NOMBRE IS NOT NULL);
+
+    COMMIT TRANSACTION;
+
+    PRINT 'Cobranzas Franquicias: las dos partes quedan agrupadas en un renglon.';
+END
+GO
+
+/* ----------------------------------------------------------------------------
+   5. Control: las dos filas del grupo tienen que quedar SEGUIDAS.
+
+   El agrupamiento es posicional, asi que una fila activa metida entre las dos
+   deshace el grupo -el tablero las dibuja sueltas y el validador lo avisa-.
+   El script NO reordena: el orden de las filas del tablero es una decision de
+   quien lo configura, y moverlas desde aca cambiaria el cuadro sin que nadie
+   lo pida. Si esto imprime algo, se resuelve desde Parametros con las flechas.
+   ---------------------------------------------------------------------------- */
+IF COL_LENGTH('dbo.RO_T_CASHFLOW_CONF_FILA', 'GRUPO') IS NOT NULL
+BEGIN
+    DECLARE @entre INT;
+
+    SELECT @entre = COUNT(*)
+    FROM dbo.RO_T_CASHFLOW_CONF_FILA f
+    WHERE f.ACTIVO = 1
+      AND ISNULL(f.GRUPO, '') <> 'COBRANZAS_FR'
+      AND f.SECCION = (SELECT SECCION FROM dbo.RO_T_CASHFLOW_CONF_FILA
+                        WHERE CODIGO = 'COBRANZAS_FR_REAL')
+      AND f.ORDEN > (SELECT ORDEN FROM dbo.RO_T_CASHFLOW_CONF_FILA
+                      WHERE CODIGO = 'COBRANZAS_FR_REAL')
+      AND f.ORDEN < (SELECT ORDEN FROM dbo.RO_T_CASHFLOW_CONF_FILA
+                      WHERE CODIGO = 'COBRANZAS_FR_PROY');
+
+    IF @entre > 0
+        PRINT 'AVISO: hay ' + CAST(@entre AS VARCHAR(10)) + ' fila(s) activa(s) entre las dos '
+            + 'partes de Cobranzas Franquicias, asi que NO se van a agrupar. Ponelas seguidas '
+            + 'desde Parametros -> Cashflow.';
+END
+GO
+
+/* ============================================================================
+   6. LA NATURALEZA DE LAS FILAS QUE NO SE AGRUPAN CON NADIE
+
+   Estas tres NO forman grupo -no tienen dos partes- pero cada una es entera de
+   una de las dos naturalezas, y declararlo ahora es lo que va a permitir
+   despues una vista de "solo real" sin volver a tocar la configuracion.
+
+   NO CAMBIA NADA EN PANTALLA: la etiqueta Real / Proyectado solo se dibuja en
+   las filas abiertas de un grupo.
+
+   Lo que se relevo, y por que estas tres y no otras:
+     COB_ELECTRONICOS -> REAL. Son acreditaciones que la procesadora YA
+                         informo, con fecha cierta. No hay parte proyectada.
+     COBRANZAS_MAY    -> PROYECTADO. Facturas pendientes de Tango a +60 dias (o
+                         la fecha manual). No hay circuito de propuestas de
+                         pago para mayoristas, asi que no hay parte real.
+     EXPORTACIONES    -> PROYECTADO. Facturas pendientes a Tasky, con fecha de
+                         cobro estimada.
+
+   Y LAS QUE NO ESTAN: las cuatro filas de Ventas son todas proyectadas pero se
+   abren POR CANAL, que es otro eje; los cortes de Comercio Exterior y de
+   Echeqs son "ya se pago" y "va a entrar", que tampoco son este. Declararles
+   una naturaleza a esas seria empezar a llamar "real y proyectado" a cualquier
+   corte de dos.
+   ============================================================================ */
+UPDATE dbo.RO_T_CASHFLOW_CONF_FILA
+SET NATURALEZA = 'REAL', FECHA_UPDATE = GETDATE()
+WHERE CODIGO = 'COB_ELECTRONICOS' AND ISNULL(NATURALEZA, '') <> 'REAL';
+
+UPDATE dbo.RO_T_CASHFLOW_CONF_FILA
+SET NATURALEZA = 'PROYECTADO', FECHA_UPDATE = GETDATE()
+WHERE CODIGO IN ('COBRANZAS_MAY', 'EXPORTACIONES')
+  AND ISNULL(NATURALEZA, '') <> 'PROYECTADO';
+GO
+
+PRINT 'Listo.';
+GO
