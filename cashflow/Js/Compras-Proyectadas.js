@@ -359,8 +359,15 @@
                 '<td>' + fecha(m.nacionalizacion) + '</td>' +
                 '<td class="text-end">' + usd(m.nacionalizacion_usd) + '</td>' +
                 '<td class="text-end">' + pesos(m.IMPORTE_NAC_ARS) + '</td>' +
+                '<td class="text-center">' + botonAjuste(m) + '</td>' +
             '</tr>';
         }).join('');
+
+        body.querySelectorAll('[data-ajuste-mes]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                abrirAjuste(btn.getAttribute('data-ajuste-mes'));
+            });
+        });
 
         var t = datos.totales || {};
 
@@ -437,6 +444,36 @@
         }
 
         return html;
+    }
+
+    /**
+     * El boton de ajuste de cada mes.
+     *
+     * UN MES SIN VERSION OFICIAL NO SE PUEDE AJUSTAR, y el boton se dibuja
+     * deshabilitado diciendo por que. No es una restriccion de pantalla: el
+     * ajuste queda atado a la version oficial de su temporada, y sin una no
+     * tendria forma de caducar -quedaria aplicandose para siempre sobre una
+     * temporada que nadie presupuesto-. El servidor lo rechaza igual; esto es
+     * para no ofrecer algo que va a fallar.
+     */
+    function botonAjuste(m) {
+        if (!m.version) {
+            return '<button class="btn btn-sm btn-outline-secondary" disabled ' +
+                'title="Este mes no tiene versión oficial de presupuesto, así que no hay a qué ' +
+                'atar un ajuste. Marcá una versión oficial en la app de compras.">' +
+                '<i class="fas fa-ban"></i></button>';
+        }
+
+        var puesto = m.ajuste && m.ajuste.aplicado;
+        var descartado = m.estado === 'AJUSTE_DESCARTADO';
+
+        return '<button class="btn btn-sm ' +
+            (puesto ? 'btn-primary' : (descartado ? 'btn-outline-danger' : 'btn-outline-secondary')) +
+            '" data-ajuste-mes="' + esc(m.mes) + '" title="' +
+            (puesto ? 'Ajustado a mano. Click para corregirlo o sacarlo.'
+                    : (descartado ? 'Tenía un ajuste que se descartó. Click para ver el historial.'
+                                  : 'Cargar un importe a mano para este mes.')) + '">' +
+            '<i class="fas fa-pen"></i></button>';
     }
 
     /**
@@ -605,6 +642,198 @@
     }
 
     /* ================================================================
+       EL AJUSTE MANUAL
+       ================================================================ */
+
+    /** El mes que el modal esta editando */
+    var mesAjuste = null;
+
+    function abrirAjuste(mes) {
+        var modalEl = document.getElementById('modalAjuste');
+
+        if (!modalEl || !window.bootstrap || !bootstrap.Modal) {
+            Notificacion.error('No se puede abrir el ajuste: falta Bootstrap en la página.');
+
+            return;
+        }
+
+        var m = null;
+
+        (datos.meses || []).forEach(function(x) { if (x.mes === mes) { m = x; } });
+
+        if (!m) { return; }
+
+        mesAjuste = mes;
+
+        setTexto('cpAjusteTitulo', mes + ' · ' + (m.temporada || ''));
+
+        /* CONTRA QUE SE ESTA PONIENDO EL NUMERO. Sin esto, quien carga el
+           ajuste no ve qué está reemplazando, y el ajuste existe justamente
+           para apartarse de esa cuenta. */
+        var ctx = document.getElementById('cpAjusteContexto');
+
+        if (ctx) {
+            ctx.innerHTML =
+                '<div><strong>Estimación automática:</strong> ' + usd(
+                    m.proyectado_usd - Math.min(m.cargado_usd, m.proyectado_usd)) +
+                ' — la cuota de ' + pct(m.cuota_pct) + ' sobre el presupuesto de ' +
+                esc(m.temporada) + ' (' + usd(m.version ? m.version.fob_usd : 0) + ')' +
+                (m.cargado_usd ? ', menos ' + usd(m.cargado_usd) + ' ya comprados' : '') + '.</div>' +
+                '<div class="mt-1 text-muted">Queda atado a la versión <strong>v' +
+                esc(m.version ? m.version.id_version : '') + '</strong>, calculada el ' +
+                fecha(m.version ? m.version.fecha_calculo : null) +
+                '. Si se marca otra versión oficial de ' + esc(m.temporada) +
+                ', el ajuste deja de aplicarse y el mes vuelve a la estimación automática.</div>';
+        }
+
+        var inputImporte = document.getElementById('cpAjusteImporte');
+        var inputMotivo = document.getElementById('cpAjusteMotivo');
+
+        /* Se precarga el ajuste VIGENTE si lo hay, y si no la estimación: así
+           corregir un número es tocarlo, y cargar uno nuevo arranca del valor
+           que se está por reemplazar. */
+        if (inputImporte) {
+            inputImporte.value = (m.ajuste && m.ajuste.importe_usd !== undefined)
+                ? m.ajuste.importe_usd
+                : Number(m.estimacion_usd).toFixed(2);
+        }
+
+        if (inputMotivo) {
+            inputMotivo.value = (m.ajuste && m.ajuste.motivo) ? m.ajuste.motivo : '';
+        }
+
+        var btnQuitar = document.getElementById('cpAjusteQuitar');
+
+        if (btnQuitar) {
+            btnQuitar.style.display = (m.ajuste ? '' : 'none');
+        }
+
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+
+        cargarHistorial(mes);
+    }
+
+    function cargarHistorial(mes) {
+        var body = document.getElementById('cpHistorialBody');
+
+        if (!body) { return; }
+
+        body.innerHTML = '<tr><td colspan="7" class="text-muted small">Cargando…</td></tr>';
+
+        fetch(ENDPOINT + '?action=getHistorialAjustes&mes=' + encodeURIComponent(mes))
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                var lista = (d && d.success) ? d.historial : [];
+
+                if (!lista.length) {
+                    body.innerHTML = '<tr><td colspan="7" class="text-muted small">' +
+                        'Este mes nunca tuvo un ajuste.</td></tr>';
+
+                    return;
+                }
+
+                body.innerHTML = lista.map(function(a) {
+                    return '<tr' + (a.vigente ? '' : ' class="text-muted"') + '>' +
+                        '<td>' + (a.vigente
+                            ? '<span class="badge bg-primary-subtle text-primary-emphasis">Vigente</span>'
+                            : '<span class="badge bg-secondary-subtle text-secondary-emphasis">De baja</span>') +
+                        '</td>' +
+                        '<td class="text-end">' + usd(a.importe_usd) + '</td>' +
+                        '<td>v' + esc(a.id_version) + '</td>' +
+                        '<td class="small">' + esc(a.motivo) + '</td>' +
+                        '<td class="small">' + esc(a.usuario || '—') + '</td>' +
+                        '<td class="small">' + esc(a.fecha_alta || '—') + '</td>' +
+                        '<td class="small">' + esc(a.fecha_baja || '—') + '</td>' +
+                    '</tr>';
+                }).join('');
+            })
+            .catch(function(e) {
+                body.innerHTML = '<tr><td colspan="7" class="text-danger small">' +
+                    esc('No se pudo leer el historial: ' + e.message) + '</td></tr>';
+            });
+    }
+
+    function guardarAjuste() {
+        var importe = document.getElementById('cpAjusteImporte');
+        var motivo = document.getElementById('cpAjusteMotivo');
+
+        if (!mesAjuste || !importe || !motivo) { return; }
+
+        /* SE VALIDA ACA Y TAMBIEN EN EL SERVIDOR. Lo de acá es para no hacer un
+           viaje que ya se sabe que falla; la validación que VALE es la del
+           servidor, porque el endpoint es alcanzable sin pasar por este modal. */
+        if (importe.value === '' || isNaN(Number(importe.value)) || Number(importe.value) < 0) {
+            Notificacion.campoInvalido(importe,
+                'El importe tiene que ser un número en dólares, y no puede ser negativo.');
+
+            return;
+        }
+
+        if (motivo.value.trim() === '') {
+            Notificacion.campoInvalido(motivo,
+                'Hace falta el motivo: es lo único que después explica por qué ese mes no ' +
+                'muestra la estimación automática.');
+
+            return;
+        }
+
+        enviar('guardarAjuste', {
+            mes: mesAjuste,
+            importe_usd: Number(importe.value),
+            motivo: motivo.value.trim()
+        }, 'Ajuste guardado. El mes muestra el importe cargado y la nacionalización se ' +
+           'recalculó sobre él.');
+    }
+
+    function quitarAjuste() {
+        if (!mesAjuste) { return; }
+
+        Notificacion.confirmar({
+            titulo: 'Sacar el ajuste de ' + mesAjuste,
+            mensaje: '¿Volver a la estimación automática?',
+            detalle: 'El ajuste no se borra: queda en el historial con su fecha de baja.',
+            confirmar: 'Sacar el ajuste',
+            peligro: true
+        }).then(function(ok) {
+            if (!ok) { return; }
+
+            enviar('quitarAjuste', { mes: mesAjuste },
+                'El mes vuelve a la estimación automática.');
+        });
+    }
+
+    function enviar(accion, cuerpo, exito) {
+        fetch(ENDPOINT + '?action=' + accion, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(cuerpo)
+        })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (!d || !d.success) {
+                    throw new Error((d && d.message) || 'Respuesta inesperada del servidor');
+                }
+
+                var modalEl = document.getElementById('modalAjuste');
+
+                if (modalEl && window.bootstrap && bootstrap.Modal) {
+                    bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+                }
+
+                Notificacion.exito(d.message || exito);
+
+                /* SE RECARGA TODO y no se parchea la fila: el ajuste cambia la
+                   estimación, la nacionalización, los KPIs y los totales del
+                   eje. Parchear la celda dejaría el resto del cuadro diciendo
+                   lo de antes. */
+                cargar();
+            })
+            .catch(function(e) {
+                Notificacion.error('No se pudo guardar: ' + e.message);
+            });
+    }
+
+    /* ================================================================
        BUSCADOR
        ================================================================ */
 
@@ -635,6 +864,12 @@
         var input = document.getElementById('busquedaComprasProy');
 
         if (input) { input.addEventListener('input', filtrar); }
+
+        var btnGuardar = document.getElementById('cpAjusteGuardar');
+        var btnQuitar = document.getElementById('cpAjusteQuitar');
+
+        if (btnGuardar) { btnGuardar.addEventListener('click', guardarAjuste); }
+        if (btnQuitar) { btnQuitar.addEventListener('click', quitarAjuste); }
 
         if (typeof crearColumnasFijas === 'function') {
             colFijas = crearColumnasFijas({

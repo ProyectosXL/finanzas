@@ -9,8 +9,9 @@
  * getter: con la cuenta en dos lados, la pestana y el tablero podrian mostrar
  * dos estimaciones distintas del mismo mes y nadie podria decir cual vale.
  *
- * TODO ES DE LECTURA. El alta y la baja de ajustes manuales viven en su propio
- * endpoint, que se agrega junto con la tabla; aca no se escribe nada.
+ * LO UNICO QUE SE ESCRIBE ES EL AJUSTE MANUAL, que es una tabla del cashflow:
+ * una afirmacion del cashflow sobre su propia proyeccion. El presupuesto de
+ * compras, Tango y el maestro de Comercio Exterior se LEEN y nada mas.
  */
 
 error_reporting(E_ALL);
@@ -23,9 +24,35 @@ try {
     require_once __DIR__ . '/../Class/Parametros.php';
     require_once __DIR__ . '/../Class/ComprasProyectadas.php';
     require_once __DIR__ . '/../Class/ComprasProyectadasDatos.php';
+    require_once __DIR__ . '/../Class/ComprasProyectadasAjustes.php';
     require_once __DIR__ . '/../Class/Providers/ComprasProyectadasProvider.php';
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
+
+    /** El cuerpo JSON de un POST */
+    function cuerpo() {
+        $raw = file_get_contents('php://input');
+        $d = json_decode($raw, true);
+
+        return is_array($d) ? $d : [];
+    }
+
+    /**
+     * Los meses que la ventana proyecta HOY.
+     *
+     * Se resuelve en el servidor y no se acepta del cliente: es lo que impide
+     * guardar un ajuste sobre un mes que no aplica a nada. El endpoint es
+     * alcanzable sin pasar por la grilla.
+     *
+     * @param Horizonte $h
+     * @return array
+     */
+    function mesesDeLaVentana($h) {
+        $p = new ComprasProyectadasProvider('COMPRAS_PROY');
+        $g = $p->grilla($h);
+
+        return array_column($g['meses'], 'mes');
+    }
 
     switch ($action) {
         case 'getGrilla':
@@ -122,6 +149,54 @@ try {
                 'success' => true,
                 'id_version' => $id,
                 'detalle' => $datos->detalleVersion($id)
+            ]);
+            break;
+
+        case 'guardarAjuste':
+            $body = cuerpo();
+
+            $ajustes = new ComprasProyectadasAjustes;
+            $h = Horizonte::desdeParametros(new Parametros());
+
+            /* EL USUARIO TODAVIA LLEGA NULL: no hay login en el modulo. La
+               costura esta puesta -guardar() lo recibe y la tabla lo guarda-
+               para que el dia que exista no haya que tocar nada. Es el mismo
+               pendiente que el resto del modulo. */
+            $r = $ajustes->guardar(
+                isset($body['mes']) ? $body['mes'] : '',
+                isset($body['importe_usd']) ? $body['importe_usd'] : null,
+                isset($body['motivo']) ? $body['motivo'] : '',
+                mesesDeLaVentana($h),
+                null
+            );
+
+            echo json_encode(['success' => true, 'ajuste' => $r]);
+            break;
+
+        case 'quitarAjuste':
+            $body = cuerpo();
+
+            $ajustes = new ComprasProyectadasAjustes;
+            $r = $ajustes->quitar(isset($body['mes']) ? $body['mes'] : '');
+
+            echo json_encode([
+                'success' => true,
+                'mes' => $r['mes'],
+                'sin_cambios' => $r['sin_cambios'],
+                'message' => $r['sin_cambios']
+                    ? 'Ese mes no tenía ningún ajuste vigente.'
+                    : 'El mes vuelve a la estimación automática.'
+            ]);
+            break;
+
+        case 'getHistorialAjustes':
+            $ajustes = new ComprasProyectadasAjustes;
+            $mes = isset($_GET['mes']) && $_GET['mes'] !== '' ? $_GET['mes'] : null;
+
+            echo json_encode([
+                'success' => true,
+                'mes' => $mes,
+                'historial' => $ajustes->historial($mes)
             ]);
             break;
 

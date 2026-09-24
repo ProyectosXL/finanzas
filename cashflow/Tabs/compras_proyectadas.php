@@ -158,6 +158,13 @@
                                 <th>Fecha nac.</th>
                                 <th class="text-end">Nac. U$S</th>
                                 <th class="text-end">Nac. $</th>
+                                <!-- EL AJUSTE VA AL FINAL Y NO AL LADO DE LA
+                                     ESTIMACIÓN, a propósito: la columna que
+                                     alimenta al tablero es Estimación, y el
+                                     ajuste es lo que la pisa. Ponerlo antes
+                                     haría leer el cuadro como si el ajuste
+                                     fuera un insumo más de la cuenta. -->
+                                <th class="text-center">Ajuste</th>
                             </tr>
                         </thead>
                         <tbody id="cpTableBody">
@@ -174,6 +181,7 @@
                                 <td></td>
                                 <td class="text-end fw-bold" id="cpTotNacUsd">—</td>
                                 <td class="text-end fw-bold" id="cpTotNacArs">—</td>
+                                <td></td>
                             </tr>
                         </tfoot>
                     </table>
@@ -274,6 +282,99 @@
                         data-exportar-nombre="Presupuesto_Detalle">
                     <i class="fas fa-file-excel me-1"></i> Exportar
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     EL AJUSTE MANUAL DE UN MES
+     Dos campos y un historial. Va en un modal propio y no en el
+     diálogo genérico de Notificacion porque son DOS datos: el
+     importe y el motivo. El motivo es obligatorio, igual que en la
+     exclusión de cheques: meses después es lo único que explica por
+     qué ese mes no muestra la estimación automática.
+     ============================================================ -->
+<div class="modal fade" id="modalAjuste" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    Ajuste manual
+                    <small class="text-muted ms-2" id="cpAjusteTitulo"></small>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+
+                <!-- Lo que el ajuste va a reemplazar. Sin esto, quien carga el
+                     número no ve contra qué lo está poniendo. -->
+                <div class="alert alert-light border py-2 px-3 small mb-3" id="cpAjusteContexto"></div>
+
+                <div class="row g-3">
+                    <div class="col-md-5">
+                        <label class="form-label form-label-sm" for="cpAjusteImporte">
+                            Importe FOB en dólares
+                        </label>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">U$S</span>
+                            <input type="number" step="0.01" min="0" class="form-control"
+                                   id="cpAjusteImporte">
+                        </div>
+                        <div class="form-text">
+                            Reemplaza la estimación del mes. La nacionalización se recalcula
+                            sobre este importe. Cero es un valor válido: significa que ese mes
+                            no se compra nada.
+                        </div>
+                    </div>
+                    <div class="col-md-7">
+                        <label class="form-label form-label-sm" for="cpAjusteMotivo">
+                            Motivo
+                        </label>
+                        <textarea class="form-control form-control-sm" id="cpAjusteMotivo"
+                                  rows="3" maxlength="300"
+                                  placeholder="Por qué este mes no lleva la estimación automática"></textarea>
+                        <div class="form-text">
+                            Obligatorio. Es lo único que después explica el número.
+                        </div>
+                    </div>
+                </div>
+
+                <hr class="my-3">
+
+                <h6 class="mb-2">
+                    Historial
+                    <small class="text-muted">— los ajustes no se borran: se dan de baja</small>
+                </h6>
+                <div class="table-responsive" style="max-height: 220px; overflow-y: auto;">
+                    <table class="table table-sm mb-0" id="tablaHistorialAjuste">
+                        <thead>
+                            <tr>
+                                <th>Estado</th>
+                                <th class="text-end">Importe U$S</th>
+                                <th>Versión</th>
+                                <th>Motivo</th>
+                                <th>Usuario</th>
+                                <th>Alta</th>
+                                <th>Baja</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cpHistorialBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer justify-content-between">
+                <button type="button" class="btn btn-sm btn-outline-danger" id="cpAjusteQuitar">
+                    <i class="fas fa-rotate-left me-1"></i> Volver a la estimación automática
+                </button>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-sm btn-secondary"
+                            data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-sm btn-primary" id="cpAjusteGuardar">
+                        <i class="fas fa-check me-1"></i> Guardar
+                    </button>
+                </div>
             </div>
         </div>
     </div>
