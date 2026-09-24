@@ -359,7 +359,9 @@ function generarFilasDatos() {
         // cambiar; el atributo es el dato.
         var clases = [];
 
-        if (item.VENCIDA) { clases.push('fila-vencida'); }
+        // VENCIDA_PENDIENTE: una vencida ya pagada no es una fecha a corregir.
+        // Ver Comex::vencidaPendiente().
+        if (item.VENCIDA_PENDIENTE) { clases.push('fila-vencida'); }
         if (item.PAGADO) { clases.push('fila-pagada'); }
 
         /* CANCELADO EN COMERCIO EXTERIOR: saldo cero, así que la fila no aporta
@@ -376,7 +378,7 @@ function generarFilasDatos() {
         if (item.DUPLICA_GRUPO) { clases.push('fila-duplicada'); }
 
         html += '<tr data-buscar="' + escaparAttrProv(textoBuscable(item)) + '"'
-            + (item.VENCIDA ? ' data-vencida="1"' : '')
+            + (item.VENCIDA_PENDIENTE ? ' data-vencida="1"' : '')
             + (item.PAGADO ? ' data-pagado="1"' : '')
             + (clases.length ? (' class="' + clases.join(' ') + '"') : '') + '>';
 

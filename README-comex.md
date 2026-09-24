@@ -220,6 +220,8 @@ Una fecha vencida es un dato a corregir, y hasta que alguien la corrija ese cont
 
 **Crono Nacionalización tiene el suyo**, idéntico: `verVencidasCronoNac`, apagado, con su contador. Son 24 de 76 filas.
 
+> **Desde la sección 9, el interruptor mira las vencidas *pendientes*.** Una vencida que ya se pagó —tildada, o cancelada en Comercio Exterior— no hay que corregirla: la esconde *Ver pagados* y no lleva el badge rojo. Los importes siguen decidiéndose por `VENCIDA`, que no cambió.
+
 > `ComexFechas.verVencidas()` devuelve `true` cuando la pantalla **no** declara el control. La guarda sigue importando aunque hoy las dos lo tengan: sin ella, una pestaña nueva que dibujara filas con `data-vencida` abriría escondiéndolas sin ningún control que las traiga de vuelta, y nada lo diría.
 
 ### Cómo se ven en la grilla
@@ -230,7 +232,7 @@ Tres marcas, tres cosas distintas, y las tres las decide el backend:
 | --- | --- |
 | **Manual** (amarillo, sólo fecha de pago) | Esta fecha está **fijada a mano** y el recálculo automático de Comercio Exterior no la pisa. Sale del BIT `FECHA_PAGO_CONF` del maestro |
 | **Editada** (naranja, sólo fecha de nacionalización) | Esta fecha del maestro la puso alguien desde el cashflow. El tooltip dice quién, cuándo y qué decía antes |
-| **Vencida** (rojo) | La fecha ya pasó. El `title` explica la consecuencia: *"este importe no entra en ninguna columna del eje"*. En Proveedores Exterior además está escondida por defecto |
+| **Vencida** (rojo) | La fecha ya pasó **y el pago no se hizo** (desde la sección 9, una ya pagada no la lleva). El `title` explica la consecuencia: *"este importe no entra en ninguna columna del eje"*. En Proveedores Exterior además está escondida por defecto |
 | **Sin fecha** (gris) | No hay dónde ubicar el importe en el tiempo. Es **otro problema** que vencida — uno se corrige, el otro se carga — y por eso es otra marca |
 
 #### Por qué la fecha de pago dejó de decir "Editada"
@@ -640,6 +642,60 @@ El 691 **ya valía cero** —su fecha de pago está vencida—, así que cancela
 
 ---
 
+## 9. Una vencida que ya se pagó no es una vencida
+
+> Esto **cambió** en `feature/cashflow-vto-exclusiones-pestanas`, y vale en las dos pestañas.
+
+Una fecha vencida es un dato a corregir: o el pago salió, o hay que cargarle la fecha nueva. El contador *"N vencidas escondidas"*, el interruptor **Ver vencidas**, el badge rojo y el aviso *"tienen la fecha ya vencida… cargales la fecha nueva"* existen para eso. Pero miraban `VENCIDA` a secas, que sólo dice que la fecha pasó, y **contaban igual los pagos que ya se habían hecho**.
+
+No era un caso de borde. Medido contra la base el **24/09/2026**:
+
+| | Vencidas | de ésas, ya pagadas | Vencidas a corregir |
+| --- | --- | --- | --- |
+| Proveedores Exterior | 10 ($ 679.390.192,00) | **10** — 8 tildadas, 2 tildadas y además canceladas en Comex | **0** |
+| Crono Nacionalización | 21 ($ 505.714.709,79) | **21** — tildadas | **0** |
+
+El aviso le pedía a alguien que corrigiera treinta y una fechas que nadie tenía que tocar.
+
+### Pagada es cualquiera de dos cosas
+
+- el **tilde** de pagado de la sección 4, que puso alguien desde la pestaña;
+- el saldo **`CANCELADO`** de la sección 8, por los pagos cargados en Comercio Exterior, **aunque nadie lo haya tildado**. Su pendiente es cero y no hay nada que corregir.
+
+Un pago **parcial** en Comex no alcanza: todavía falta plata, y la fecha sigue pidiendo atención.
+
+### Un flag aparte, y `VENCIDA` no se toca
+
+Ésta es la parte delicada. `importeProyectable()` anula por `VENCIDA`, y de ese campo salen `PAGOS_PAGADOS`, `PAGOS_COMEX` y `PAGOS_TODO` (sección 4). Si una fila pagada dejara de ser `VENCIDA`, **su importe pasaría a sumar en `PAGOS_PAGADOS` y el tablero se movería**: en Proveedores Exterior serían los $ 679,4 millones de la tabla de arriba.
+
+Por eso la fila viaja con **dos** flags:
+
+| Flag | Qué dice | Qué decide |
+| --- | --- | --- |
+| `VENCIDA` | La fecha ya pasó | **Los importes**: `importeProyectable()`, `aporteAlEje()` y con ellos las series. No cambió |
+| `VENCIDA_PENDIENTE` | Vencida **y** no pagada —ni tildada ni cancelada— | **Lo que se muestra**: el contador, el interruptor Ver vencidas (vía `data-vencida`), el badge y la marca de la fila, y el aviso de vencidos |
+
+La regla está escrita una vez, en `Comex::vencidaPendiente()`, que es pura. Se calcula **al final** de cada consulta, porque necesita el tilde y el saldo ya resueltos, y `avisosVencidos()` la usa directamente: el mismo texto sale en la pestaña y en el tablero.
+
+**Verificado contra la base**: las siete series de Comex —`PAGOS`, `PAGOS_PAGADOS`, `PAGOS_COMEX`, `PAGOS_TODO`, `NACIONALIZACION`, `NACIONALIZACION_PAGADAS` y `NACIONALIZACION_TODO`— dan **idénticas columna por columna** antes y después del cambio. Lo único que se movió son los avisos.
+
+### Cómo se ve
+
+- **Se esconde sólo con *Ver pagados***. Para el interruptor de vencidas esa fila ya no es vencida. Una cancelada sin tilde no tiene interruptor —sección 8— y queda a la vista con su marca de cancelada.
+- **Sin badge rojo, y la fecha queda sola**, en la fila atenuada de pagada. El `title` de la vencida decía *"cargale la fecha nueva"*, que para un pago hecho es falso.
+- **Las tarjetas no cambian**, y no por decisión de este cambio: salen de los totales del payload, que se arman con `IMPORTE_EJE`, y ahí una fila vencida o pagada ya valía cero.
+- La regla CSS de *vencida y cancelada* se fue: esa combinación ya no existe.
+
+### El aviso de lo marcado dice cuántos ya estaban vencidos
+
+`avisosPagados()` —el del tablero— informa lo que el tilde sacó de la proyección, medido con `IMPORTE_PROYECTABLE`, que para una vencida es cero. Con casi todo lo tildado vencido, el aviso decía *"21 contenedores… $ 0,00"*, que se lee como un error. Ahora lo dice:
+
+> *21 contenedor(es) tienen el nacionalización marcado como YA HECHO, así que salieron de la proyección: $ 0,00 que la fila del tablero ya no cuenta. Todos ya tenían la fecha vencida, así que no sumaban: marcarlos no movió ningún número.*
+
+Y cuando son algunos: *"10 de ellos ya tenían la fecha vencida y no sumaban, así que no entran en ese importe"*.
+
+---
+
 ## Lo que no cambió
 
 - **La valuación con dólar futuro ROFEX**, fila por fila, según el mes de la fecha efectiva. Vive en `Comex::valuar()` y `DolarFuturo::resolver()`, y la leen la pestaña y el tablero: un solo `IMPORTE_ARS`. Ver el encabezado de `Class/DolarFuturo.php`.
@@ -685,6 +741,14 @@ De lo nuevo, lo que se fija:
 - **La valuación de Crono Nacionalización**: qué cotización le toca según la **fecha de nacionalización**, que el mismo contenedor se valúe distinto en cada pestaña porque sus dos fechas caen en meses distintos, el mes fuera de curva hacia adelante y hacia atrás, y que sin fecha el importe quede en `null` y no en cero. Y que **`valuar()` con los parámetros por defecto siga dando exactamente lo de hoy** para Proveedores Exterior: es la prueba que evita la regresión silenciosa —con los defaults invertidos, esa pestaña valuaría por un campo que no tiene y todos sus importes irían a cero sin que nada falle—.
 - **Que la grilla no vuelva a ubicar `IMPORTE_EST` en el eje**, que la curva se lea una vez por listado y no una por fila, que ninguna serie de Comex declare pesos, que la celda de cotización no se reimplemente en ninguna de las dos pestañas y que la clave de columnas fijas haya cambiado con el layout.
 - **Contra la base**, sólo lectura: que las dos consultas traigan el mismo padrón, que haya contenedores ya embarcados en la grilla, que el flag `VENCIDA` coincida con la regla pura fila por fila, que la fecha efectiva **sea** la del maestro y que el listado salga ordenado con los nulos al final.
+
+De la sección 9, lo que se fija:
+
+- **`vencidaPendiente()` caso por caso**: vencida sin pagar, tildada, cancelada sin tilde, con pago parcial, al día, y sin los campos de pago —que es como llega Crono Nacionalización—.
+- **Que ninguna serie cambie**: sobre las **ocho** combinaciones de vencida × tildada × cancelada, los aportes a `PAGOS`, `PAGOS_PAGADOS`, `PAGOS_COMEX` y `PAGOS_TODO` dan lo mismo con el flag nuevo y sin él, y el invariante de tres partes cierra en las ocho. Y, dicho directo, que una vencida y pagada siga sin sumar al eje ni a `PAGOS_PAGADOS`.
+- **Los dos avisos**: `avisosVencidos()` no cuenta tildadas ni canceladas y no avisa nada si están todas pagadas; `avisosPagados()` dice cuántas de las marcadas ya estaban vencidas, con los dos textos —*"N de ellos"* y *"Todos"*—.
+- **El cableado de la pantalla**: que el contador, el filtro, el badge y el `data-vencida` de las dos pestañas lean `VENCIDA_PENDIENTE`, y que ninguno de los tres JS siga mirando `item.VENCIDA` a secas.
+- **Contra la base**, sólo lectura: que toda fila traiga el flag y coincida con la regla pura, y que ninguna cancelada quede como vencida pendiente.
 
 > **Las pruebas de cableado leen el código sin sus comentarios.** Estos archivos explican en prosa lo que dejaron de hacer —*"antes era `COALESCE(FECHA_PAGO_EDIT, ...)`"*— y esas notas son justamente lo que este módulo pide que se escriba. Buscar el patrón sobre el archivo entero daría positivo en la nota que dice que el patrón ya no está, y la única forma de pasar la prueba sería borrar la explicación.
 

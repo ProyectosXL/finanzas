@@ -173,7 +173,12 @@
         var clase = opts.clase || 'fecha-pago';
         var valor = item[EFECTIVA[campo]] || null;
         var editada = !!item.EDITADA;
-        var vencida = !!item.VENCIDA;
+        /* VENCIDA_PENDIENTE y no VENCIDA: una fecha vencida de un pago que YA
+           SALIÓ —tildado, o cancelado en Comercio Exterior— no pide que nadie
+           la corrija, así que no lleva el badge rojo ni el title de "cargale la
+           fecha nueva". Queda la fecha sola, en la fila atenuada de pagada.
+           Ver Comex::vencidaPendiente(). */
+        var vencida = !!item.VENCIDA_PENDIENTE;
         var sinFecha = (valor === null || valor === '');
 
         /* La de pago dice "Manual" porque afirma otra cosa: que está fijada, no
@@ -943,7 +948,7 @@
         return (filas || []).filter(function(item) {
             return pasaFiltros(estado, {
                 texto: textoBuscable(item).toLowerCase(),
-                vencida: !!item.VENCIDA,
+                vencida: !!item.VENCIDA_PENDIENTE,
                 pagado: !!item.PAGADO
             });
         });
@@ -953,11 +958,17 @@
      * Cuántas filas vencidas hay, para poder decir cuánto esconde el
      * interruptor.
      *
+     * CUENTA LAS VENCIDAS PENDIENTES, no las vencidas a secas. Una vencida
+     * que ya se pagó —tildada, o cancelada en Comercio Exterior— no hay que
+     * corregirla, y la esconde el interruptor de pagados, no éste. Contarla acá
+     * decía "10 vencidas escondidas" de diez filas que estaban todas pagadas.
+     * Ver Comex::vencidaPendiente().
+     *
      * @param {Array} filas
      * @returns {number}
      */
     function contarVencidas(filas) {
-        return (filas || []).filter(function(item) { return !!item.VENCIDA; }).length;
+        return (filas || []).filter(function(item) { return !!item.VENCIDA_PENDIENTE; }).length;
     }
 
     /**

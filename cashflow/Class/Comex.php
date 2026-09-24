@@ -1146,6 +1146,10 @@ class Comex {
             $row['IMPORTE_FOB_PROYECTABLE'] =
                 self::importeProyectable($row, 'IMPORTE_FOB_ARS');
 
+            /* Va AL FINAL porque necesita el tilde y el saldo resueltos. Solo
+               decide lo que se muestra: ver vencidaPendiente(). */
+            $row['VENCIDA_PENDIENTE'] = self::vencidaPendiente($row);
+
             $v[] = $row;
         }
 
@@ -1323,6 +1327,44 @@ class Comex {
     }
 
     /**
+     * Si una fila vencida TODAVIA PIDE QUE ALGUIEN HAGA ALGO con ella.
+     *
+     * Una fecha vencida es un dato a corregir: o el pago salio, o hay que
+     * cargarle la fecha nueva. Si el pago YA SALIO no hay nada que corregir, y
+     * eso lo dice cualquiera de dos cosas:
+     *
+     *   - el TILDE de pagado, que puso alguien desde la pestana
+     *   - el saldo CANCELADO por los pagos cargados en Comercio Exterior
+     *
+     * Una fila asi deja de ser "vencida" para el contador, el interruptor Ver
+     * vencidas, el badge rojo y el aviso de vencidos. Antes esas cuatro cosas
+     * miraban VENCIDA a secas, y al 24/09/2026 contaban como vencidas 31 filas
+     * que estaban TODAS pagadas: el aviso pedia corregir fechas que nadie tenia
+     * que corregir.
+     *
+     * ES UN FLAG APARTE Y NO UN CAMBIO EN VENCIDA, y eso es lo delicado.
+     * importeProyectable() anula por VENCIDA, y de ese campo salen PAGOS_PAGADOS
+     * y PAGOS_TODO. Si una fila pagada dejara de ser VENCIDA, su importe pasaria
+     * a sumar en PAGOS_PAGADOS y el tablero se moveria. VENCIDA sigue diciendo
+     * lo que siempre dijo -la fecha ya paso- y decide los importes; esto decide
+     * solo lo que se muestra.
+     *
+     * Estatica y pura. Un campo ausente es falso, asi que una fila sin PAGADO
+     * ni ESTADO_PAGO -la de Crono Nacionalizacion no trae saldo- se trata como
+     * no pagada.
+     *
+     * @param array $fila Fila con VENCIDA resuelta, y PAGADO / ESTADO_PAGO si los tiene
+     * @return bool
+     */
+    public static function vencidaPendiente($fila) {
+        if (empty($fila['VENCIDA']) || !empty($fila['PAGADO'])) {
+            return false;
+        }
+
+        return !(isset($fila['ESTADO_PAGO']) && $fila['ESTADO_PAGO'] === self::ESTADO_CANCELADO);
+    }
+
+    /**
      * Cuanto vale una fila PARA PROYECTAR, mirando solo su fecha.
      *
      * UN PAGO CON LA FECHA VENCIDA NO SUMA. Es una regla de negocio, no una
@@ -1496,7 +1538,8 @@ class Comex {
      * LA USAN LA PESTANA Y EL TABLERO: un solo texto, igual que
      * avisosValuacion().
      *
-     * @param array $filas Filas con 'VENCIDA' resuelta
+     * @param array $filas Filas con 'VENCIDA' resuelta, y 'PAGADO' / 'ESTADO_PAGO'
+     *        si los tienen: una vencida ya pagada no se avisa
      * @param string $campoFecha Campo con la fecha efectiva
      * @param string $campoImporte Campo con el importe a informar
      * @param string $queEs Como se nombra la fecha en el mensaje
@@ -1510,7 +1553,10 @@ class Comex {
         $impAdentro = 0.0;
 
         foreach (is_array($filas) ? $filas : [] as $f) {
-            if (empty($f['VENCIDA'])) {
+            /* LO VENCIDO QUE YA SE PAGO NO SE AVISA: el aviso pide cargar una
+               fecha nueva, y a un pago hecho no hay que cargarle nada. Ya lo
+               cuenta avisosPagados(). Ver vencidaPendiente(). */
+            if (!self::vencidaPendiente($f)) {
                 continue;
             }
 
@@ -1590,6 +1636,7 @@ class Comex {
      */
     public static function avisosPagados($filas, $campoImporte, $queEs) {
         $marcados = 0;
+        $vencidos = 0;
         $importe = 0.0;
 
         foreach (is_array($filas) ? $filas : [] as $f) {
@@ -1599,16 +1646,35 @@ class Comex {
 
             $marcados++;
             $importe += isset($f[$campoImporte]) ? floatval($f[$campoImporte]) : 0.0;
+
+            if (!empty($f['VENCIDA'])) {
+                $vencidos++;
+            }
         }
 
         if ($marcados === 0) {
             return [];
         }
 
+        /* CUANTOS YA ESTABAN VENCIDOS SE DICE APARTE. Esos no sacaron nada de la
+           proyeccion -valian cero por la fecha-, asi que el importe del aviso
+           no los incluye. Sin decirlo, el texto contaba "21 contenedores... $
+           0,00" y se leia como un error: al 24/09/2026 eran todos vencidos en
+           Crono Nacionalizacion y 10 de 16 en Proveedores Exterior. */
+        $detalleVencidos = '';
+
+        if ($vencidos === $marcados) {
+            $detalleVencidos = ($marcados === 1 ? ' Ya tenía' : ' Todos ya tenían')
+                . ' la fecha vencida, así que no sumaban: marcarlos no movió ningún número.';
+        } elseif ($vencidos > 0) {
+            $detalleVencidos = ' ' . $vencidos . ' de ellos ya tenían la fecha vencida y no '
+                . 'sumaban, así que no entran en ese importe.';
+        }
+
         return [$marcados . ' contenedor(es) tienen el ' . $queEs . ' marcado como YA HECHO, '
             . 'así que salieron de la proyección: ' . self::plata($importe) . ' que la fila '
-            . 'del tablero ya no cuenta. El importe no se perdió —sale por su propia serie— y '
-            . 'se destilda desde la pestaña si se marcó por error.'];
+            . 'del tablero ya no cuenta.' . $detalleVencidos . ' El importe no se perdió —sale '
+            . 'por su propia serie— y se destilda desde la pestaña si se marcó por error.'];
     }
 
     /**
@@ -2678,6 +2744,9 @@ class Comex {
                de dolares, la fila del tablero sumaba dolares contra pesos. */
             $row['IMPORTE_PROYECTABLE'] = self::importeProyectable($row);
             $row['IMPORTE_EJE'] = self::aporteAlEje($row);
+
+            // Solo decide lo que se muestra: ver vencidaPendiente().
+            $row['VENCIDA_PENDIENTE'] = self::vencidaPendiente($row);
 
             $v[] = $row;
         }
