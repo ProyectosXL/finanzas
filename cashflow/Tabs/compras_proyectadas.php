@@ -39,7 +39,7 @@
                 </div>
                 <div class="kpi-card-value" id="cpCargado">U$S 0,00</div>
                 <div class="kpi-card-footer">
-                    <span class="text-muted" id="cpCargadoPie">Descontado de lo proyectado</span>
+                    <span class="text-muted" id="cpCargadoPie">OC posteriores al presupuesto</span>
                 </div>
             </div>
         </div>
@@ -158,7 +158,16 @@
                                 <th>Estado</th>
                                 <th class="text-end">Cuota</th>
                                 <th class="text-end">Proyectado U$S</th>
-                                <th class="text-end">Ya comprado U$S</th>
+                                <!-- NO ES LA PARTE REAL: es solo lo comprado
+                                     DESPUÉS de calcular el presupuesto. Lo
+                                     anterior ya está adentro del presupuesto.
+                                     Se lee al revés con facilidad, y por eso
+                                     la explicación va en el encabezado. -->
+                                <th class="text-end">
+                                    Ya comprado U$S
+                                    <i class="fas fa-info-circle ms-1 text-muted"
+                                       title="Solo las órdenes de compra emitidas DESPUÉS de la fecha de cálculo de la versión oficial de su temporada. Las anteriores ya están dentro del presupuesto (su stock proyectado incluye las OC pendientes), así que no se descuentan: se ven en gris al lado, y su pago está en la pestaña Proveedores Exterior."></i>
+                                </th>
                                 <th class="text-end">Estimación U$S</th>
                                 <th>Fecha pago</th>
                                 <th class="text-end">Dólar pago</th>

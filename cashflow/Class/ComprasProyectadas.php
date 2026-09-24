@@ -642,6 +642,10 @@ class ComprasProyectadas {
            comparten mes de pago no descuenten dos veces lo mismo. */
         $saldoCargado = [];
 
+        /* Los contenedores de la ventana anteriores al corte, sin repetir: dos
+           meses de recepcion que comparten mes de pago ven los mismos. */
+        $previos = [];
+
         $filas = [];
         $sinPresupuesto = [];
         $sinHistoria = [];
@@ -672,7 +676,13 @@ class ComprasProyectadas {
                 'ajuste' => null,
                 'estado' => self::ESTIMADO,
                 'marcas' => [],
-                'contenedores' => []
+                'contenedores' => [],
+                /* Lo que se paga en este mes pero NO descuenta porque su OC es
+                   anterior a la fecha de calculo de la version: ya esta adentro
+                   del presupuesto. Es solo para explicarlo en la pantalla; no
+                   entra en ninguna cuenta. */
+                'previos_usd' => 0.0,
+                'previos' => []
             ];
 
             $ajuste = isset($ajustes[$m['mes']]) ? $ajustes[$m['mes']] : null;
@@ -717,6 +727,13 @@ class ComprasProyectadas {
             if ($corte !== null && isset($porPago[$m['mes_pago']])) {
                 foreach ($porPago[$m['mes_pago']] as $i => $c) {
                     if ($c['fec_emisio'] <= $corte) {
+                        /* NO DESCUENTA, y se anota por que. Sin esto la columna
+                           "Ya comprado" queda en cero con contenedores reales en
+                           ese mes, y se lee como que el cashflow no los vio. */
+                        $fila['previos'][] = $c + ['corte' => $corte];
+                        $fila['previos_usd'] += $c['pendiente_usd'];
+                        $previos[$m['mes_pago'] . '#' . $i] = $c['pendiente_usd'];
+
                         continue;
                     }
 
@@ -876,6 +893,21 @@ class ComprasProyectadas {
             $notas[] = $afueraCant . ' contenedor' . ($afueraCant === 1 ? '' : 'es')
                 . ' ya cargado' . ($afueraCant === 1 ? '' : 's') . ' por ' . self::usd($afuera)
                 . ' se pagan fuera de la ventana: no descuentan de ningun mes proyectado.';
+        }
+
+        /* LO CARGADO DENTRO DE LA VENTANA QUE NO DESCUENTA. "Ya comprado" no es
+           la parte real: es solo lo comprado DESPUES de calcular el presupuesto.
+           Lo anterior ya esta adentro del presupuesto -su stock proyectado
+           incluye las OC pendientes- y restarlo seria contarlo dos veces. La
+           parte real de esos contenedores esta en Proveedores Exterior. */
+        if (!empty($previos)) {
+            $notas[] = count($previos) . ' contenedor' . (count($previos) === 1 ? '' : 'es')
+                . ' por ' . self::usd(array_sum($previos)) . ' se paga'
+                . (count($previos) === 1 ? '' : 'n') . ' dentro de la ventana pero su orden de '
+                . 'compra es anterior al calculo del presupuesto oficial: ya esta'
+                . (count($previos) === 1 ? '' : 'n') . ' dentro del presupuesto, asi que no '
+                . 'descuenta' . (count($previos) === 1 ? '' : 'n') . '. Su pago se ve en la '
+                . 'pestana Proveedores Exterior.';
         }
 
         return [

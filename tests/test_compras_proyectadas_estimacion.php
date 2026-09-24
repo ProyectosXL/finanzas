@@ -187,6 +187,28 @@ chequear('emitido ANTES de la fecha de calculo, no descuenta', 0.0,
 chequear('y la estimacion queda entera', 100.0,
     round(mesCP($r, '2027-07')['estimacion_usd'], 6));
 
+/* PERO SE INFORMA. "Ya comprado" en cero con un contenedor real en ese mes se
+   lee como que el cashflow no lo vio: la fila dice cuanto no desconto y por
+   que, y una nota lo resume. Informativo: no entra en ninguna cuenta. */
+chequear('la fila informa lo que no desconto', 40.0,
+    round(mesCP($r, '2027-07')['previos_usd'], 6));
+
+chequear('con el contenedor y el corte que lo dejo afuera', '2026-09-23',
+    mesCP($r, '2027-07')['previos'][0]['corte']);
+
+$nota = implode(' ', $r['notas']);
+
+chequear('una nota dice que es anterior al presupuesto', true,
+    strpos($nota, 'anterior al calculo del presupuesto oficial') !== false);
+
+chequear('y cuanto es', true, strpos($nota, '1 contenedor por U$S 40,00') !== false);
+
+$r = ComprasProyectadas::estimar(ventanaCP(), cuotaParejaCP(), presupuestosCP(),
+    [contenedorCP('2027-05', '2026-10-01', 40.0)]);
+
+chequear('uno que SI descuenta no figura como previo', 0.0,
+    round(mesCP($r, '2027-07')['previos_usd'], 6));
+
 /* EL BORDE: emitido EL MISMO DIA que se calculo la version. El corte es
    estrictamente posterior -la version vio lo de ese dia- asi que no descuenta. */
 $r = ComprasProyectadas::estimar(ventanaCP(), cuotaParejaCP(), presupuestosCP(),

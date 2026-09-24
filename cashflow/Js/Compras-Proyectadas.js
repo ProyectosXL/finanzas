@@ -439,10 +439,10 @@
         /* EL EXCESO SE DICE EN EL PIE DE "YA COMPRADO" y no se resta de ningún
            lado: no se compensa contra otros meses. */
         if (t.exceso_usd > 0.01) {
-            setTexto('cpCargadoPie', 'Descontado · ' + usd(t.exceso_usd) +
+            setTexto('cpCargadoPie', 'OC posteriores al presupuesto · ' + usd(t.exceso_usd) +
                 ' de exceso que no se compensa');
         } else {
-            setTexto('cpCargadoPie', 'Descontado de lo proyectado');
+            setTexto('cpCargadoPie', 'OC posteriores al presupuesto');
         }
 
         var eje = datos.totales_eje || {};
@@ -564,7 +564,7 @@
      * silencio contra el resto de la columna.
      */
     function celdaCargado(m) {
-        if (!m.cargado_usd) { return '—'; }
+        if (!m.cargado_usd) { return '—' + celdaPrevios(m); }
 
         var html = usd(m.cargado_usd);
 
@@ -583,7 +583,30 @@
                 }).join('\n')) + '">(' + m.contenedores.length + ')</span>';
         }
 
-        return html;
+        return html + celdaPrevios(m);
+    }
+
+    /**
+     * Lo que se paga en este mes y NO descuenta, en gris.
+     *
+     * SIN ESTO LA COLUMNA SE LEE COMO LA PARTE REAL, y no lo es: un mes con
+     * contenedores de verdad mostraba "—", como si el cashflow no los hubiera
+     * visto. Son OC anteriores al calculo del presupuesto, que ya las incluye.
+     */
+    function celdaPrevios(m) {
+        if (!m.previos || !m.previos.length) { return ''; }
+
+        var ayuda = 'No se descuentan: su orden de compra es anterior al cálculo del ' +
+            'presupuesto (' + fecha(m.previos[0].corte) + '), que ya las incluye. Su pago está ' +
+            'en la pestaña Proveedores Exterior.\n\n' +
+            m.previos.map(function(c) {
+                return c.contenedor + ' · OC emitida ' + fecha(c.fec_emisio) + ' · ' +
+                    usd(c.pendiente_usd);
+            }).join('\n');
+
+        return '<div class="small text-muted" title="' + esc(ayuda) + '">' +
+            '<i class="fas fa-circle-info me-1"></i>' + m.previos.length + ' previa' +
+            (m.previos.length === 1 ? '' : 's') + ' · ' + usd(m.previos_usd) + '</div>';
     }
 
     /**

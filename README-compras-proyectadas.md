@@ -334,6 +334,7 @@ Desde el cashflow ese filtro es **invisible**: la vista devuelve 55 filas y nada
 - **Las versiones oficiales**, con el `inc_fob` del presupuesto al lado del porcentaje que el cashflow aplica, fila por fila.
 - **El detalle por rubro** de cada versión, en un modal. Las filas **sin costo** se marcan en vez de multiplicarse por cero: un `NULL` tratado como cero es una afirmación —*"esa mercadería no cuesta nada"*— que nadie hizo. En la base hay dos por versión.
 - **Cuatro KPIs**. El exceso se dice en el pie de *Ya comprado* y no se resta de ningún lado.
+- **"Ya comprado" no es la parte real.** Es sólo lo comprado **después** de calcular el presupuesto oficial de la temporada; lo anterior ya está adentro del presupuesto. Se leía al revés —un mes con contenedores reales mostraba "—"—, así que el encabezado lo explica, la celda muestra en gris las OC **previas** que se pagan ese mes con su importe, y una nota al pie las suma. Al 24/09/2026, con 8 meses de ventana: **18 contenedores por U$S 1.120.365,00**, todos con OC del 13/08/2026, contra versiones calculadas el 22 y el 23/09. Su pago está en *Proveedores Exterior*.
 - **El ajuste manual** por mes, con su historial completo.
 
 La pestaña **no calcula nada**: le pide la grilla al mismo proveedor que alimenta al tablero. Con la cuenta en los dos lados, la pestaña y el tablero podrían mostrar dos estimaciones distintas del mismo mes y nadie podría decir cuál vale. Es la misma decisión que tomó Comercio Exterior cuando la valuación se mudó al getter.
