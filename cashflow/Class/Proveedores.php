@@ -3,6 +3,7 @@
 require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/Ingresos.php';
 require_once __DIR__ . '/ProveedoresCategorias.php';
+require_once __DIR__ . '/ProveedoresExclusion.php';
 require_once __DIR__ . '/Planilla.php';
 
 /**
@@ -115,19 +116,35 @@ class Proveedores {
     /** @var array Cache de que columnas de override tiene la tabla de pagos */
     private $columnasPago = [];
 
+    /** @var ProveedoresExclusion */
+    private $exclusion;
+
     /**
      * @param ProveedoresCategorias|null $categorias Se puede inyectar para poder
      *        probar la clasificacion sin base.
+     * @param ProveedoresExclusion|null $exclusion Idem, para los excluidos por
+     *        proveedor
      */
-    function __construct($categorias = null) {
+    function __construct($categorias = null, $exclusion = null) {
         require_once __DIR__ . '/../../class/conexion.php';
         $this->conn = new Conexion;
         $this->categorias = ($categorias === null) ? new ProveedoresCategorias() : $categorias;
+
+        /* Comparte el lector de CPA01 con el maestro: los dos validan codigos
+           contra el mismo CPA01, y una sola instancia es un solo cache. */
+        $this->exclusion = ($exclusion === null)
+            ? new ProveedoresExclusion($this->categorias->tango())
+            : $exclusion;
     }
 
     /** @return ProveedoresCategorias El resolutor de categorias */
     public function categorias() {
         return $this->categorias;
+    }
+
+    /** @return ProveedoresExclusion Los proveedores excluidos por modulo */
+    public function exclusion() {
+        return $this->exclusion;
     }
 
     /* ====================================================================
@@ -173,6 +190,12 @@ class Proveedores {
                 . 'pago distingue igual lo importado de lo cargado a mano, pero una factura con '
                 . 'fecha de la planilla que después se excluya o cambie de forma va a figurar '
                 . 'como cargada a mano.';
+        }
+
+        $sinExclusion = $this->exclusion->avisoSinTabla();
+
+        if ($sinExclusion !== '') {
+            $avisos[] = $sinExclusion;
         }
 
         return array_merge($avisos, $this->categorias->getAvisos());
@@ -252,6 +275,9 @@ class Proveedores {
         }
 
         $pagos = $this->getPagos();
+
+        // Una consulta para todo el listado. Vacio si falta el script.
+        $excluidosProv = $this->exclusion->vigentes(ProveedoresExclusion::MODULO_PROV_LOCALES);
         $items = [];
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
@@ -276,6 +302,7 @@ class Proveedores {
 
             $forma = self::formaQueSeMuestra($cat, $pago);
             $excluidaManual = ($pago !== null && !empty($pago['EXCLUIDA']));
+            $exclProv = isset($excluidosProv[$cod]) ? $excluidosProv[$cod] : null;
 
             $items[] = [
                 'COD_PROVEE' => $cod,
@@ -341,9 +368,19 @@ class Proveedores {
                    EXCLUIDA_MANUAL viaja aparte porque NO hacen lo mismo en el
                    otro corte -sólo el tilde sale de PAGOS- y porque la pantalla
                    y los avisos tienen que poder decir cuanto es de cada uno. */
-                'EXCLUIDO' => ($cat['excluido'] || $excluidaManual),
+                'EXCLUIDO' => ($cat['excluido'] || $excluidaManual || $exclProv !== null),
                 'EXCLUIDA_MANUAL' => $excluidaManual,
                 'MOTIVO_EXCLUSION' => ($pago === null) ? null : $pago['MOTIVO_EXCLUSION'],
+
+                /* EL PROVEEDOR ENTERO ESTA EXCLUIDO de Proveedores Locales,
+                   porque su deuda ya se considera en otra pestana. Alcanza a
+                   toda su deuda. Entra en EXCLUIDO -el segundo corte- igual que
+                   la exclusion por factura, y en el primer corte va a su propia
+                   serie. Si ademas la factura esta excluida a mano, gana el
+                   proveedor: el importe se cuenta una vez. Ver
+                   ProveedoresProvider::seriesDeItem() y ProveedoresExclusion. */
+                'EXCLUIDO_PROVEEDOR' => ($exclProv !== null),
+                'MOTIVO_EXCLUSION_PROVEEDOR' => ($exclProv === null) ? null : $exclProv['MOTIVO'],
                 'SERIE' => $cat['serie'],
 
                 /* EL OVERRIDE DE ESTA FACTURA, si alguien lo puso. Es una REGLA

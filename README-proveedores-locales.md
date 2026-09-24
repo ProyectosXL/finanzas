@@ -40,7 +40,10 @@ Contra `central`, en cualquier momento:
 -- 5. sql/cashflow_prov_locales_excluir_factura.sql   (excluir facturas sueltas)
 -- 6. sql/cashflow_prov_locales_opciones.sql          (las cinco listas de opciones)
 -- 7. sql/cashflow_prov_locales_fuente_fecha.sql      (de dónde salió cada fecha de pago)
+-- 8. sql/cashflow_prov_exclusion_modulo.sql          (excluir un proveedor entero del módulo)
 ```
+
+El octavo crea `RO_T_CASHFLOW_PROV_EXCLUIDO_MODULO`, vacía: **el día que se corre el tablero no se mueve**. No depende de ningún otro. **Sin él** nadie está excluido —que es lo cierto—, la columna *PROV. LOCALES* del maestro se dibuja con un guion y la pestaña avisa qué script falta. Ver *Excluir un proveedor entero del módulo*.
 
 El séptimo agrega `FUENTE_FECHA` a la tabla de pagos y la rellena desde `ORIGEN` en las filas que ya tienen fecha —hoy es exacto, ver *De dónde sale cada fecha*—. **Sin él la columna *Fecha de pago* distingue igual** lo importado de lo cargado a mano, leyendo `ORIGEN`, y la pestaña avisa que falta el script. El tablero no se mueve: la fuente sólo decide cómo se ve la fecha.
 
@@ -592,6 +595,8 @@ PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA = PAGOS_TODO
 - **Sigue en `PAGOS_TODO` y en `PAGOS_EXCLUIDOS`.** El importe no desaparece: queda auditable, y el proveedor **avisa cuánto es y con qué motivos** en cada carga del tablero.
 - **Un proveedor excluido por rubro no se mueve.** Sacarlo de `PAGOS` sigue siendo apuntar la fila a `PAGOS_CRONO_OPERATIVOS` desde Parámetros; este cambio no toma esa decisión por nadie.
 
+> **Desde la exclusión por proveedor el corte tiene cuatro partes**, por el mismo motivo: ver *Excluir un proveedor entero del módulo*.
+
 > **El criterio se reusó en Echeqs.** *Cheques en Cartera* excluye con el mismo patrón —serie propia, motivo obligatorio, acción masiva, sin bajas físicas— y ahí el corte `A_COBRAR + A_COBRAR_EXCLUIDOS = A_COBRAR_TODO` nace con esa etapa, porque `ECHEQS` tenía una sola serie y era el universo entero. Ver *Excluir un cheque que no se va a poder cobrar* en `README-cashflow.md`. Lo que cambia allá es que la exclusión guarda **historial**: el cheque puede entrar y salir varias veces, y cada decisión queda con su motivo, su autor y sus fechas de alta y de baja.
 
 #### No se ven por defecto, y el cartel dice cuántas son
@@ -603,6 +608,52 @@ Pero esconder plata sin decir cuánta es exactamente lo que este módulo no hace
 > *Hay 1 factura(s) excluida(s) a mano por $ 7.110.342,48, escondidas y fuera del cashflow — tildá Ver excluidas para revisarlas.*
 
 Los indicadores siguen midiendo lo visible y diciendo el universo al lado, como con los otros dos filtros. Cuando se muestran, la fila se atenúa y el pendiente va tachado: es la fila la que cambió de significado, no una celda.
+
+### Excluir un proveedor entero del módulo
+
+> Esto es **nuevo**, de `feature/cashflow-vto-exclusiones-pestanas`.
+
+Hay proveedores cuya deuda **ya se considera en otra pestaña** —la aduana, por ejemplo, en Crono Nacionalización— y que además aparecen en las cuentas a pagar de Tango. Si los dos lados los proyectan, el tablero cuenta dos veces la misma plata. Cuáles son lo sabe quien maneja Proveedores Locales; esto le da dónde decirlo. **El código no decide cuáles**: no hay ninguna lista precargada.
+
+**Es por proveedor y alcanza a toda su deuda**, la ya emitida y la que venga. Para sacar una factura suelta está la exclusión por factura, que es otra decisión: *"esta factura no va"* y no *"este proveedor ya está contado"*.
+
+#### Dónde vive, y por qué no en el maestro
+
+En su propia tabla, `RO_T_CASHFLOW_PROV_EXCLUIDO_MODULO`, con la clave `(COD_PROVEE, MODULO)`. Lo maneja `Class/ProveedoresExclusion.php`.
+
+- **No es una columna del maestro** porque el maestro es una copia reimportable de la planilla de administración, y la reimportación propone bajas: la exclusión se perdería. Tampoco es un dato que la planilla tenga.
+- **Un proveedor se puede excluir sin estar en el maestro.** La deuda de un proveedor sin clasificar se proyecta igual, y obligar a clasificarlo para poder excluirlo mezcla dos decisiones. El código **sí** se valida contra `CPA01`, como el alta manual: uno que no existe no tiene deuda que excluir.
+- **Es por módulo y no un bit.** Hoy el único es `PROV_LOCALES`; agregar otro es sumarlo a `ProveedoresExclusion::MODULOS` y al `CHECK` de la tabla —un `ALTER` de una línea— y escribir el código que lo lea. La tabla no cambia. `MODULO` es un `CHECK` y no una lista administrable desde Parámetros porque un módulo nuevo siempre viene con código: no hay nada que un usuario pueda dar de alta sin un despliegue. `tests/test_proveedores.php` fija que las dos listas coincidan.
+
+#### Motivo obligatorio, y con historial
+
+Como la exclusión de cheques de Echeqs: **sin bajas físicas**. Volver a incluir marca `VIGENTE = 0` y sella `FECHA_BAJA`; volver a excluir inserta una fila nueva. Un índice único filtrado por `VIGENTE = 1` impide dos vigentes para el mismo proveedor y módulo.
+
+- **El motivo es obligatorio**, y lo valida el backend —el endpoint se alcanza sin pasar por la pantalla— y un `CHECK` de la tabla.
+- **Excluir a uno ya excluido es un error, no un cambio de motivo**: pisar el motivo en silencio borraría el porqué de la decisión que estaba vigente. Para cambiarlo se incluye y se vuelve a excluir, y quedan las dos en el historial.
+- El historial se abre desde la misma celda del maestro, con desde, hasta, motivo y quién.
+
+#### Cómo se usa
+
+- **Solapa Maestro**, columna *PROV. LOCALES*: el botón *excluir* pide el motivo; un excluido muestra la marca —con motivo, quién y cuándo en el `title`—, el botón para volver a incluirlo y el del historial. El interruptor **Sólo excluidos** los junta, con el conteo al lado.
+- **Los excluidos que no están en el maestro** aparecen al final de la grilla del maestro, con el nombre de Tango, para poder verlos y volver a incluirlos. Y **se excluyen desde el aviso de proveedores con deuda que no están en el maestro**, que es el único lugar donde aparecen: por eso ese aviso ya no se recorta a doce.
+- **En Cuentas a Pagar** los esconde el mismo interruptor **Ver excluidas** que a las facturas: las dos contestan *"¿esto va al cashflow?"* con un no. El cartel del período desglosa cuánto es de cada una.
+
+#### En el tablero: la cuarta parte del corte
+
+```
+PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA + PAGOS_EXCLUIDOS_PROVEEDOR = PAGOS_TODO
+```
+
+Por lo mismo que la factura es la tercera: la fila del tablero usa `PAGOS`, y sólo una serie propia de ese corte saca el importe de ahí. **El importe no desaparece**: queda en `PAGOS_TODO` y en su serie, y el proveedor avisa en cada carga cuántos proveedores, cuánto y cuánto de eso estaba en la fila —excluir a uno que cobra por débito no mueve la fila, y el aviso no puede dar a entender que sí—.
+
+- **En el segundo corte cuenta como excluido** (`PAGOS_EXCLUIDOS`, fuera de `PAGOS_OPERATIVOS` y de `PAGOS_CRONO_OPERATIVOS`), igual que la factura excluida a mano.
+- **Si la factura también está excluida a mano, gana el proveedor**: el importe va una sola vez a `PAGOS_EXCLUIDOS_PROVEEDOR`. El tilde de la factura queda guardado y marcado, y vuelve a aplicar solo si el proveedor se reincluye. Por eso el aviso de facturas excluidas y el cartel no las cuentan dos veces.
+- **Un excluido no cuenta en *Vencido sin fecha*** ni en el aviso de *lo que queda fuera del cronograma*: de él ya se decidió que no va, y ese aviso dice *"igual va a salir de la caja"*, que para un excluido es justo lo contrario.
+
+**Verificado contra la base**, con la tabla todavía sin crear: las 33 series de `PROV_LOCALES` dan idénticas antes y después, y la nueva da cero. Y con una exclusión **simulada en memoria** —sin escribir nada— sobre un proveedor de $ 620.010,00: `PAGOS` bajó exactamente $ 620.010,00, `PAGOS_EXCLUIDOS_PROVEEDOR` subió lo mismo, `PAGOS_TODO` no se movió y el corte de cuatro partes cerró.
+
+> `RO_V_PROVEEDORES_EGRE_DIRECTORES` y el rubro *Excluidos* **no cambiaron**: clasifican y controlan, que es otra cosa. Ver las dos secciones que siguen.
 
 ### El rubro "Excluidos"
 
@@ -793,6 +844,7 @@ Como las dos importaciones, **no escribe nada hasta confirmar**.
 | `PAGOS_CRONO_OPERATIVOS` | **Los dos criterios a la vez** |
 | `PAGOS_SIN_RUBRO` | Sólo los que no están en el maestro |
 | `PAGOS_EXCLUIDOS_FACTURA` | Sólo las facturas excluidas a mano, una por una |
+| `PAGOS_EXCLUIDOS_PROVEEDOR` | Sólo los proveedores excluidos del módulo, enteros |
 | `RUBRO_*` | Una por cada rubro económico del maestro |
 
 **`PAGOS` no trae todo**, y el nombre engaña: trae el cronograma. Ver la sección anterior.
@@ -800,7 +852,8 @@ Como las dos importaciones, **no escribe nada hasta confirmar**.
 Son **dos particiones del mismo universo**, y las dos tienen que cerrar contra `PAGOS_TODO`:
 
 ```
-PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA = PAGOS_TODO  (por cómo se paga)
+PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA
+      + PAGOS_EXCLUIDOS_PROVEEDOR                        = PAGOS_TODO  (por cómo se paga)
 PAGOS_OPERATIVOS + PAGOS_EXCLUIDOS                       = PAGOS_TODO  (por qué rubro es)
 ```
 
@@ -836,6 +889,7 @@ Por eso el registro declara `particiones`: un mapa `total → corte → series`.
 
 ```
 por cómo se paga      PAGOS · PAGOS_FUERA_CRONOGRAMA · PAGOS_EXCLUIDOS_FACTURA
+                      · PAGOS_EXCLUIDOS_PROVEEDOR
 por si está excluido  PAGOS_OPERATIVOS · PAGOS_EXCLUIDOS
 por rubro             PAGOS_SIN_RUBRO · RUBRO_*
 ```

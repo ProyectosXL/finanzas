@@ -434,6 +434,15 @@
                                    placeholder="Buscar código, nombre o rubro..." style="min-width: 240px;">
                         </div>
                     </div>
+                    <!-- Los excluidos de Proveedores Locales son pocos y se
+                         buscan para revisarlos: este filtro los junta,
+                         incluidos los que no están en el maestro. -->
+                    <div class="form-check form-switch mb-0" title="Mostrar sólo los proveedores excluidos de Proveedores Locales, estén o no en el maestro.">
+                        <input class="form-check-input" type="checkbox" id="soloExcluidosMaestroProv">
+                        <label class="form-check-label small" for="soloExcluidosMaestroProv">
+                            Sólo excluidos <span id="cuentaExcluidosMaestroProv" class="text-muted"></span>
+                        </label>
+                    </div>
                     <!-- El maestro se cargaba sólo al entrar a la solapa y
                          después de guardar, así que una importación hecha
                          desde otra pestaña no se veía sin recargar la página
@@ -586,6 +595,14 @@
                                      una fila MANUAL es una que se va a perder
                                      en la próxima importación. -->
                                 <th class="text-center">ORIGEN</th>
+                                <!-- Si el proveedor está excluido de
+                                     Proveedores Locales porque su deuda ya se
+                                     considera en otra pestaña. No es un dato
+                                     de la planilla: vive en su propia tabla y
+                                     la reimportación no lo toca. Ver
+                                     Class/ProveedoresExclusion.php. -->
+                                <th class="text-center"
+                                    title="Excluido de Proveedores Locales: toda su deuda sale de la fila del tablero porque ya se considera en otra pestaña.">PROV. LOCALES</th>
                                 <th class="text-center">Historial</th>
                                 <th class="text-center" style="width: 90px;"></th>
                             </tr>

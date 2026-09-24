@@ -125,6 +125,27 @@ class ProveedoresProvider extends CashflowProvider {
      */
     const SERIE_EXCLUIDOS_FACTURA = 'PAGOS_EXCLUIDOS_FACTURA';
 
+    /**
+     * LA DEUDA DE LOS PROVEEDORES EXCLUIDOS DE ESTE MODULO, entera.
+     *
+     * Son proveedores cuya deuda ya se considera en otra pestana -la aduana en
+     * Crono Nacionalizacion, por ejemplo- y que proyectarlos tambien aca
+     * contaria dos veces. Los marca quien maneja Proveedores Locales, desde la
+     * solapa Maestro. Ver ProveedoresExclusion.
+     *
+     * Es el CUARTO miembro del corte "por como se paga", por lo mismo que la
+     * exclusion por factura es el tercero: la fila del tablero usa PAGOS, y
+     * solo una serie propia en ese corte saca el importe de ahi.
+     *
+     *     PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA
+     *           + PAGOS_EXCLUIDOS_PROVEEDOR = PAGOS_TODO
+     *
+     * SI LA FACTURA TAMBIEN ESTA EXCLUIDA A MANO, GANA EL PROVEEDOR: el importe
+     * va una sola vez, aca. El tilde de la factura queda guardado y vuelve a
+     * aplicar solo si el proveedor se reincluye.
+     */
+    const SERIE_EXCLUIDOS_PROVEEDOR = 'PAGOS_EXCLUIDOS_PROVEEDOR';
+
     protected function calcular($h) {
         if ($this->codigo() !== 'PROV_LOCALES') {
             $this->avisar('Proveedores Locales: el codigo de proveedor "' . $this->codigo()
@@ -151,6 +172,10 @@ class ProveedoresProvider extends CashflowProvider {
         $this->avisarFaltantes($prov, $items);
         $this->avisarFueraDelCronograma($items);
         $this->avisarExcluidasAMano($items);
+
+        foreach (self::avisosExcluidosProveedor($items) as $aviso) {
+            $this->avisar($aviso);
+        }
 
         return $this->repartir($h, $items);
     }
@@ -179,7 +204,11 @@ class ProveedoresProvider extends CashflowProvider {
         $total = 0;
 
         foreach ($items as $item) {
-            if (!empty($item['CRONOGRAMA'])) {
+            /* UN PROVEEDOR EXCLUIDO NO SE CUENTA ACA: este aviso dice "queda
+               fuera del tablero y igual va a salir de la caja", y de un
+               excluido se decidio justo lo contrario -que ya esta contado en
+               otra pestana-. Tiene su propio aviso. */
+            if (!empty($item['CRONOGRAMA']) || !empty($item['EXCLUIDO_PROVEEDOR'])) {
                 continue;
             }
 
@@ -230,7 +259,10 @@ class ProveedoresProvider extends CashflowProvider {
         $motivos = [];
 
         foreach ($items as $item) {
-            if (empty($item['EXCLUIDA_MANUAL'])) {
+            /* La de un proveedor excluido no se cuenta aca: su importe va a la
+               serie del proveedor y lo informa avisosExcluidosProveedor().
+               Contarla en los dos avisos la sumaria dos veces. */
+            if (empty($item['EXCLUIDA_MANUAL']) || !empty($item['EXCLUIDO_PROVEEDOR'])) {
                 continue;
             }
 
@@ -262,6 +294,75 @@ class ProveedoresProvider extends CashflowProvider {
     }
 
     /**
+     * El aviso por la deuda de los proveedores excluidos de este modulo.
+     *
+     * ES PLATA QUE LA FILA DEL TABLERO DEJA DE MOSTRAR POR UNA DECISION, igual
+     * que la de las facturas excluidas a mano, y se avisa por lo mismo: una
+     * exclusion puesta hace meses que nadie recuerda es justo lo que este aviso
+     * evita.
+     *
+     * DICE CUANTO ESTABA EN LA FILA -PAGOS, lo del cronograma- y cuanto no:
+     * excluir a un proveedor que cobra por debito no mueve la fila, y el aviso
+     * no puede dar a entender que si. Nombra a los proveedores, hasta cinco,
+     * porque son pocos y es lo que alguien va a querer saber.
+     *
+     * SI ADEMAS HAY FACTURAS EXCLUIDAS A MANO del mismo proveedor, las cuenta:
+     * no suman aparte -gana el proveedor- pero vuelven a aplicar si se lo
+     * reincluye.
+     *
+     * Estatica y pura.
+     *
+     * @param array $items Filas de Proveedores::getPendientes()
+     * @return array Lista de mensajes
+     */
+    public static function avisosExcluidosProveedor($items) {
+        $total = 0.0;
+        $enFila = 0.0;
+        $cuantos = 0;
+        $conFactura = 0;
+        $proveedores = [];
+
+        foreach (is_array($items) ? $items : [] as $item) {
+            if (empty($item['EXCLUIDO_PROVEEDOR'])) {
+                continue;
+            }
+
+            $importe = floatval($item['IMPORTE_PENDIENTE']);
+            $total += $importe;
+            $cuantos++;
+
+            if (!empty($item['CRONOGRAMA'])) {
+                $enFila += $importe;
+            }
+
+            if (!empty($item['EXCLUIDA_MANUAL'])) {
+                $conFactura++;
+            }
+
+            $proveedores[$item['COD_PROVEE']] = true;
+        }
+
+        if ($cuantos === 0) {
+            return [];
+        }
+
+        $codigos = array_keys($proveedores);
+        $nombres = implode(', ', array_slice($codigos, 0, 5))
+            . (count($codigos) > 5 ? ' y ' . (count($codigos) - 5) . ' más' : '');
+
+        return ['Cuentas a Pagar Locales: ' . count($codigos) . ' proveedor(es) están excluidos '
+            . 'de Proveedores Locales porque su deuda ya se considera en otra pestaña (' . $nombres
+            . '): ' . $cuantos . ' vencimiento(s) por $ ' . number_format($total, 2, ',', '.')
+            . ', de los que $ ' . number_format($enFila, 2, ',', '.') . ' estaban en la fila '
+            . 'del tablero. El importe no se perdió: sale por su propia serie.'
+            . ($conFactura > 0
+                ? ' ' . $conFactura . ' de esos vencimientos además tienen la factura excluida '
+                    . 'a mano; se cuentan una sola vez.'
+                : '')
+            . ' Se revisan en la solapa Maestro, con el motivo.'];
+    }
+
+    /**
      * Reparte los vencimientos en las series.
      *
      * @param Horizonte $h
@@ -277,7 +378,8 @@ class ProveedoresProvider extends CashflowProvider {
             self::SERIE_EXCLUIDOS => $this->serieVacia($h),
             self::SERIE_CRONO_OPERATIVOS => $this->serieVacia($h),
             self::SERIE_SIN_RUBRO => $this->serieVacia($h),
-            self::SERIE_EXCLUIDOS_FACTURA => $this->serieVacia($h)
+            self::SERIE_EXCLUIDOS_FACTURA => $this->serieVacia($h),
+            self::SERIE_EXCLUIDOS_PROVEEDOR => $this->serieVacia($h)
         ];
 
         /* SE CREA UNA SERIE POR CADA RUBRO DEL MAESTRO, aunque hoy no tenga
@@ -339,6 +441,7 @@ class ProveedoresProvider extends CashflowProvider {
      * DOS PARTICIONES INDEPENDIENTES, y una tercera serie que las cruza:
      *
      *   por COMO se paga   PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA
+     *                            + PAGOS_EXCLUIDOS_PROVEEDOR
      *   por QUE rubro es   PAGOS_OPERATIVOS + PAGOS_EXCLUIDOS
      *   las dos juntas     PAGOS_CRONO_OPERATIVOS
      *
@@ -358,6 +461,7 @@ class ProveedoresProvider extends CashflowProvider {
         $cronograma = !empty($item['CRONOGRAMA']);
         $excluido = !empty($item['EXCLUIDO']);
         $excluidaManual = !empty($item['EXCLUIDA_MANUAL']);
+        $excluidoProveedor = !empty($item['EXCLUIDO_PROVEEDOR']);
 
         // PAGOS_TODO es el universo; PAGOS trae solo el cronograma. Las
         // aperturas por rubro y por excluidos parten PAGOS_TODO, no PAGOS:
@@ -372,7 +476,12 @@ class ProveedoresProvider extends CashflowProvider {
            con rubro "Excluidos" sigue repartiendose por como se le paga, como
            siempre. Sacarlo de PAGOS es otra decision y se toma desde Parametros
            apuntando la fila a PAGOS_CRONO_OPERATIVOS. */
-        if ($excluidaManual) {
+        /* Y UNA CUARTA: el proveedor entero excluido de este modulo. VA ANTES
+           que la factura: si las dos cosas pasan, gana el proveedor y el
+           importe se cuenta una sola vez. Ver SERIE_EXCLUIDOS_PROVEEDOR. */
+        if ($excluidoProveedor) {
+            $destinos[] = self::SERIE_EXCLUIDOS_PROVEEDOR;
+        } elseif ($excluidaManual) {
             $destinos[] = self::SERIE_EXCLUIDOS_FACTURA;
         } else {
             $destinos[] = $cronograma ? self::SERIE_TOTAL : self::SERIE_FUERA;

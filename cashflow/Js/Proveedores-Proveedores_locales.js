@@ -77,6 +77,9 @@
         var busqM = document.getElementById('busquedaMaestroProv');
         if (busqM) { busqM.addEventListener('input', pintarMaestro); }
 
+        var soloExclM = document.getElementById('soloExcluidosMaestroProv');
+        if (soloExclM) { soloExclM.addEventListener('change', pintarMaestro); }
+
         conectar('btnNuevoProv', function() { abrirForm(null); });
         conectar('btnRefreshMaestroProv', actualizarMaestro);
         conectar('btnGuardarProv', guardarProveedor);
@@ -318,6 +321,11 @@
             k.total += importe;
             provs[f.COD_PROVEE] = true;
 
+            /* De un proveedor excluido ya se decidió que no va: no es trabajo
+               pendiente de fechar. Mismo criterio que indicadores() del
+               controller, que es el universo contra el que se compara esto. */
+            if (f.EXCLUIDO_PROVEEDOR) { return; }
+
             if (f.ORIGEN_FECHA === 'CARGADA') {
                 k.con_fecha += importe;
                 k.n_con_fecha++;
@@ -361,7 +369,10 @@
             /* LAS EXCLUIDAS NO SE VEN POR DEFECTO: ya se decidió que no van al
                cashflow, así que en el trabajo normal son ruido. Cuánto esconde
                este filtro se dice al lado del período. */
-            if (!verExcluidas && f.EXCLUIDA_MANUAL) { return false; }
+            /* EL MISMO INTERRUPTOR PARA LAS DOS EXCLUSIONES —la factura y el
+               proveedor entero—: las dos contestan "¿esto va al cashflow?" con
+               un no, y el cartel desglosa cuánto es de cada una. */
+            if (!verExcluidas && (f.EXCLUIDA_MANUAL || f.EXCLUIDO_PROVEEDOR)) { return false; }
 
             if (soloCronograma && !f.CRONOGRAMA) { return false; }
             if (soloVencidos && !f.SIN_FECHA_CARGADA) { return false; }
@@ -371,7 +382,7 @@
                es la que se ve en la columna, y buscar "CAJA" tiene que traer lo
                que la grilla muestra como CAJA. */
             return [f.COD_PROVEE, f.RAZON_SOC, f.N_COMP, f.RUBRO_ECONOMICO, f.RUBRO,
-                    f.FORMA_PAGO_VIGENTE, f.MOTIVO_EXCLUSION]
+                    f.FORMA_PAGO_VIGENTE, f.MOTIVO_EXCLUSION, f.MOTIVO_EXCLUSION_PROVEEDOR]
                 .join(' ').toLowerCase().indexOf(q) !== -1;
         });
     }
@@ -444,10 +455,28 @@
            ninguna pantalla donde alguien note que existen. Es la misma regla que
            el filtro de al lado: un filtro que esconde plata sin decir cuánta es
            un filtro que miente. */
-        if (!verExcluidas && k.n_excluido_manual) {
-            partes.push('Hay ' + k.n_excluido_manual + ' factura(s) excluida(s) a mano por '
-                + escapar(plata(k.excluido_manual)) + ', escondidas y fuera del cashflow '
-                + '— tildá <em>Ver excluidas</em> para revisarlas.');
+        /* UN SOLO INTERRUPTOR, DOS EXCLUSIONES, y el cartel dice cuánto es de
+           cada una: son decisiones distintas —"esta factura no va" y "este
+           proveedor ya está contado en otra pestaña"— y quien revisa tiene que
+           saber cuál buscar. Una factura de un proveedor excluido cuenta en el
+           del proveedor, que es el que gana: indicadores() no la suma dos
+           veces. */
+        if (!verExcluidas && (k.n_excluido_manual || k.n_excluido_proveedor)) {
+            var excl = [];
+
+            if (k.n_excluido_proveedor) {
+                excl.push(k.n_proveedores_excluidos + ' proveedor(es) excluido(s) de Proveedores '
+                    + 'Locales, con ' + k.n_excluido_proveedor + ' vencimiento(s) por '
+                    + escapar(plata(k.excluido_proveedor)));
+            }
+
+            if (k.n_excluido_manual) {
+                excl.push(k.n_excluido_manual + ' factura(s) excluida(s) a mano por '
+                    + escapar(plata(k.excluido_manual)));
+            }
+
+            partes.push('Hay ' + excl.join(' y ') + ', escondidos y fuera del cashflow '
+                + '— tildá <em>Ver excluidas</em> para revisarlos.');
         }
 
         el.innerHTML = partes.length
@@ -505,7 +534,7 @@
 
                Lo que SÍ se sigue marcando es la exclusión POR FACTURA, abajo:
                ésa va a su propia serie y efectivamente sale de PAGOS. */
-            if (f.EXCLUIDA_MANUAL) { clases.push('prov-excluida-mano'); }
+            if (f.EXCLUIDA_MANUAL || f.EXCLUIDO_PROVEEDOR) { clases.push('prov-excluida-mano'); }
 
             html += '<tr class="' + clases.join(' ') + '">'
                 + '<td title="' + escapar(tituloProveedor(f)) + '"><strong>'
@@ -614,6 +643,12 @@
             PLAZO: 'No tiene vencimiento: se proyecta con el plazo del maestro.',
             SIN_FECHA: 'No tiene vencimiento ni plazo: no se puede ubicar en el eje.'
         };
+
+        if (f.EXCLUIDO_PROVEEDOR) {
+            return 'Proveedor excluido de Proveedores Locales: '
+                + (f.MOTIVO_EXCLUSION_PROVEEDOR || 'sin motivo registrado') + '. '
+                + (origen[f.ORIGEN_FECHA] || '');
+        }
 
         /* Acá colgaba además un "Rubro Excluidos: se lista pero su fila del
            tablero se puede inhabilitar". Se fue con las otras dos marcas del
@@ -1041,12 +1076,29 @@
      */
     function celdaExcluir(f) {
         var clave = claveFila(f);
-        var marca = f.EXCLUIDA_MANUAL
-            ? '<div><span class="prov-badge-excluida" title="'
-              + escapar('Excluida del cashflow: '
-                  + (f.MOTIVO_EXCLUSION || 'sin motivo registrado'))
-              + '">excluida</span></div>'
-            : '';
+        var marca = '';
+
+        /* SI EL PROVEEDOR ESTÁ EXCLUIDO, ESA ES LA MARCA: gana sobre la de la
+           factura, igual que en el tablero. Si además la factura tiene su
+           tilde, se dice en el title, porque vuelve a aplicar el día que se
+           reincluya al proveedor. */
+        if (f.EXCLUIDO_PROVEEDOR) {
+            marca = '<div><span class="prov-badge-excluida" title="'
+                + escapar('Proveedor excluido de Proveedores Locales: su deuda ya se considera '
+                    + 'en otra pestaña. Motivo: '
+                    + (f.MOTIVO_EXCLUSION_PROVEEDOR || 'sin motivo registrado')
+                    + (f.EXCLUIDA_MANUAL
+                        ? '. Esta factura además está excluida a mano ('
+                          + (f.MOTIVO_EXCLUSION || 'sin motivo') + ').'
+                        : '')
+                    + ' Se revisa en la solapa Maestro.')
+                + '">proveedor excluido</span></div>';
+        } else if (f.EXCLUIDA_MANUAL) {
+            marca = '<div><span class="prov-badge-excluida" title="'
+                + escapar('Excluida del cashflow: '
+                    + (f.MOTIVO_EXCLUSION || 'sin motivo registrado'))
+                + '">excluida</span></div>';
+        }
 
         return '<input type="checkbox" class="form-check-input prov-sel"'
             + (seleccion[clave] ? ' checked' : '')
@@ -1819,15 +1871,31 @@
 
         if (faltan.length) {
             var total = faltan.reduce(function(a, f) { return a + Number(f.IMPORTE); }, 0);
+            var puedeExcluir = !!(maestro && maestro.excluir_proveedor);
+            var yaExcl = (maestro && maestro.excluidos) || {};
 
-            html += '<div class="alert alert-warning">'
+            /* DESDE ACÁ SE PUEDE EXCLUIR a uno que no está en el maestro: es
+               el único lugar donde aparecen con su deuda. Por eso ya no se
+               recorta a doce: uno que quedara en "y N más" no se podría
+               excluir desde ninguna pantalla. Un excluido sigue en la lista
+               —su deuda sigue sin clasificar— pero marcado. */
+            html += '<div class="alert alert-warning" id="faltantesExclProv">'
                 + '<strong>' + faltan.length + ' proveedor(es) con deuda no están en el maestro</strong>'
                 + ' — ' + plata(total) + ' sin poder clasificar.'
                 + '<div class="small mt-2">'
-                + faltan.slice(0, 12).map(function(f) {
-                    return escapar(f.COD_PROVEE) + ' (' + plataCorta(f.IMPORTE) + ')';
+                + faltan.map(function(f) {
+                    var accion = '';
+
+                    if (yaExcl[f.COD_PROVEE]) {
+                        accion = ' <span class="prov-badge-excluida">excluido</span>';
+                    } else if (puedeExcluir) {
+                        accion = ' <button class="btn btn-link btn-sm p-0 align-baseline '
+                            + 'prov-excluir-mod" data-cod="' + escapar(f.COD_PROVEE) + '" '
+                            + 'data-nombre="" title="Excluir de Proveedores Locales">excluir</button>';
+                    }
+
+                    return escapar(f.COD_PROVEE) + ' (' + plataCorta(f.IMPORTE) + ')' + accion;
                   }).join(' · ')
-                + (faltan.length > 12 ? ' y ' + (faltan.length - 12) + ' más' : '')
                 + '</div></div>';
         }
 
@@ -1866,6 +1934,7 @@
         }
 
         cont.innerHTML = html;
+        conectarExclusion('#faltantesProv');
     }
 
     function pintarMaestro() {
@@ -1873,17 +1942,52 @@
 
         var q = ((document.getElementById('busquedaMaestroProv') || {}).value || '')
             .trim().toLowerCase();
+        var soloExcl = !!(document.getElementById('soloExcluidosMaestroProv') || {}).checked;
+        var excluidos = maestro.excluidos || {};
 
-        var filas = maestro.filas.filter(function(f) {
+        /* LOS EXCLUIDOS QUE NO ESTÁN EN EL MAESTRO TAMBIÉN SON FILAS. Un
+           proveedor se puede excluir sin estar clasificado, y si no apareciera
+           acá no habría ninguna pantalla donde verlo ni desde donde volver a
+           incluirlo. Van al final, con el nombre de Tango y sin datos de
+           clasificación. */
+        var enMaestro = {};
+        maestro.filas.forEach(function(f) { enMaestro[f.COD_PROVEE] = true; });
+
+        var sueltos = Object.keys(excluidos).filter(function(cod) {
+            return !enMaestro[cod];
+        }).map(function(cod) {
+            return { COD_PROVEE: cod, NOMBRE: (maestro.nombres_excluidos || {})[cod] || '',
+                     FUERA_MAESTRO: true };
+        });
+
+        texto('cuentaExcluidosMaestroProv', '(' + Object.keys(excluidos).length + ')');
+
+        var filas = maestro.filas.concat(sueltos).filter(function(f) {
+            if (soloExcl && !excluidos[f.COD_PROVEE]) { return false; }
             if (q === '') { return true; }
 
-            return [f.COD_PROVEE, f.NOMBRE, f.RUBRO_ECONOMICO, f.RUBRO, f.CENTRO_COSTOS]
+            var ex = excluidos[f.COD_PROVEE];
+
+            return [f.COD_PROVEE, f.NOMBRE, f.RUBRO_ECONOMICO, f.RUBRO, f.CENTRO_COSTOS,
+                    ex ? ex.MOTIVO : '']
                 .join(' ').toLowerCase().indexOf(q) !== -1;
         });
 
         var editable = !!maestro.edicion_manual;
 
         var html = filas.map(function(f) {
+            if (f.FUERA_MAESTRO) {
+                return '<tr class="prov-maestro-suelto">'
+                    + '<td><strong>' + escapar(f.COD_PROVEE) + '</strong></td>'
+                    + '<td class="col-texto" title="' + escapar(f.NOMBRE) + '">'
+                    +   escapar(f.NOMBRE) + '</td>'
+                    + '<td colspan="6" class="text-muted small fst-italic">No está en el maestro: '
+                    +   'su deuda no se clasifica, pero está excluida de Proveedores Locales.</td>'
+                    + '<td class="text-center">' + celdaExclusion(f) + '</td>'
+                    + '<td></td><td></td>'
+                    + '</tr>';
+            }
+
             return '<tr>'
                 + '<td><strong>' + escapar(f.COD_PROVEE) + '</strong></td>'
                 + '<td class="col-texto" title="' + escapar(f.NOMBRE || '') + '">'
@@ -1896,6 +2000,7 @@
                 +   (f.PLAZO_DIAS !== null ? ' <span class="text-muted small">('
                       + f.PLAZO_DIAS + ' d)</span>' : '') + '</td>'
                 + '<td class="text-center">' + celdaOrigen(f) + '</td>'
+                + '<td class="text-center">' + celdaExclusion(f) + '</td>'
                 + '<td class="text-center"><span class="text-muted small">'
                 +   escapar((f.FECHA_IMPORTACION || '').substring(0, 10)) + '</span></td>'
                 + '<td class="text-center">'
@@ -1915,8 +2020,8 @@
         }).join('');
 
         if (!filas.length) {
-            html = '<tr><td colspan="10" class="text-center text-muted py-4">'
-                 + (maestro.filas.length
+            html = '<tr><td colspan="11" class="text-center text-muted py-4">'
+                 + (maestro.filas.length || sueltos.length
                     ? 'Ningún proveedor coincide con el filtro.'
                     : 'El maestro está vacío: importá la hoja "Maestro proveedores" o agregá '
                       + 'los proveedores de a uno.')
@@ -1932,6 +2037,8 @@
         document.querySelectorAll('.prov-baja').forEach(function(b) {
             b.addEventListener('click', function() { darDeBaja(b.getAttribute('data-cod')); });
         });
+
+        conectarExclusion('#bodyMaestroProv');
 
         mostrar('btnNuevoProv', editable);
         pintarSugerencias();
@@ -1954,6 +2061,164 @@
             + escapar('Se cargó o se editó desde esta pantalla. La planilla sigue siendo la '
                 + 'fuente: la próxima importación lo va a pisar, y el diff lo avisa antes.')
             + '">a mano</span>';
+    }
+
+    /* ================================================================
+       EXCLUIR UN PROVEEDOR DE PROVEEDORES LOCALES
+
+       Para los proveedores cuya deuda ya se considera en otra pestaña: toda
+       su deuda —la emitida y la que venga— sale de la fila del tablero y va a
+       su propia serie. Cuáles son lo decide quien maneja Proveedores Locales.
+       Para una factura suelta está la exclusión por factura, en Cuentas a
+       Pagar.
+
+       EL MOTIVO ES OBLIGATORIO y se pide en el diálogo del módulo; lo valida
+       también el backend. INCLUIR DE NUEVO NO BORRA NADA: la exclusión queda
+       en el historial, que se abre desde la misma celda.
+
+       No vive en el formulario del maestro porque no es un dato de la
+       planilla: la reimportación no lo toca, y un proveedor se puede excluir
+       sin estar en el maestro. Ver Class/ProveedoresExclusion.php.
+       ================================================================ */
+
+    /** La celda de la columna PROV. LOCALES: la marca y las dos acciones */
+    function celdaExclusion(f) {
+        if (!maestro || !maestro.excluir_proveedor) {
+            return '<span class="text-muted small" title="Falta '
+                + 'sql/cashflow_prov_exclusion_modulo.sql: todavía no se puede excluir.">—</span>';
+        }
+
+        var ex = (maestro.excluidos || {})[f.COD_PROVEE];
+        var cod = escapar(f.COD_PROVEE);
+        var nombre = escapar(f.NOMBRE || '');
+
+        if (!ex) {
+            return '<button class="btn btn-sm btn-outline-secondary py-0 px-2 prov-excluir-mod" '
+                + 'data-cod="' + cod + '" data-nombre="' + nombre + '" title="Excluir de '
+                + 'Proveedores Locales: toda su deuda sale de la fila del tablero porque ya se '
+                + 'considera en otra pestaña.">excluir</button>';
+        }
+
+        return '<span class="prov-badge-excluida" title="' + escapar('Excluido: ' + ex.MOTIVO
+                + ' — ' + (ex.USUARIO || 'sin usuario') + ', ' + (ex.FECHA_ALTA || ''))
+            + '">excluido</span> '
+            + '<button class="btn btn-sm btn-outline-secondary py-0 px-1 prov-incluir-mod" '
+            + 'data-cod="' + cod + '" title="Volver a incluirlo. La exclusión queda en el '
+            + 'historial."><i class="fas fa-rotate-left"></i></button> '
+            + '<button class="btn btn-sm btn-outline-secondary py-0 px-1 prov-hist-excl" '
+            + 'data-cod="' + cod + '" title="Historial de exclusiones de este proveedor.">'
+            + '<i class="fas fa-clock-rotate-left"></i></button>';
+    }
+
+    /** Engancha las tres acciones dentro de un contenedor */
+    function conectarExclusion(selector) {
+        var raizExcl = document.querySelector(selector);
+
+        if (!raizExcl) { return; }
+
+        raizExcl.querySelectorAll('.prov-excluir-mod').forEach(function(b) {
+            b.addEventListener('click', function() {
+                excluirProveedorModulo(b.getAttribute('data-cod'), b.getAttribute('data-nombre'));
+            });
+        });
+
+        raizExcl.querySelectorAll('.prov-incluir-mod').forEach(function(b) {
+            b.addEventListener('click', function() {
+                incluirProveedorModulo(b.getAttribute('data-cod'));
+            });
+        });
+
+        raizExcl.querySelectorAll('.prov-hist-excl').forEach(function(b) {
+            b.addEventListener('click', function() {
+                verHistorialExclusion(b.getAttribute('data-cod'));
+            });
+        });
+    }
+
+    function excluirProveedorModulo(cod, nombre) {
+        Notificacion.pedirTexto({
+            titulo: 'Excluir de Proveedores Locales',
+            mensaje: '¿Excluir a ' + cod + (nombre ? ' (' + nombre + ')' : '')
+                + ' de Proveedores Locales?',
+            detalle: 'Toda su deuda —la emitida y la que venga— sale de la fila del tablero y '
+                + 'pasa a su propia serie, porque ya se considera en otra pestaña. Para sacar '
+                + 'una factura suelta está la exclusión por factura, en Cuentas a Pagar.',
+            etiqueta: 'Motivo',
+            placeholder: 'Ej.: ya se proyecta en Crono Nacionalización',
+            maxlargo: 200,
+            invalido: 'El motivo es obligatorio: sin él nadie va a poder explicar después por '
+                + 'qué esta deuda no está en el cashflow.',
+            confirmar: 'Excluir',
+            peligro: true
+        }).then(function(motivo) {
+            if (motivo === null) { return; }
+
+            return pedirJson('Controller/ProveedoresController.php?action=excluirProveedor',
+                    { cod_provee: cod, motivo: motivo })
+                .then(function(r) {
+                    Notificacion.exito(r.cod_provee + ' quedó excluido de Proveedores Locales.', {
+                        detalle: 'Toda su deuda sale de la fila del tablero y pasa a su propia '
+                            + 'serie. En Cuentas a Pagar se ve con "Ver excluidas".'
+                    });
+
+                    recargarMaestroYListado();
+                });
+        }).catch(function(error) {
+            Notificacion.error('No se pudo excluir: ' + error.message);
+        });
+    }
+
+    function incluirProveedorModulo(cod) {
+        Notificacion.confirmar({
+            titulo: 'Volver a incluir',
+            mensaje: '¿Volver a incluir a ' + cod + ' en Proveedores Locales?',
+            detalle: 'Su deuda vuelve a la fila del tablero según cómo se le paga. La exclusión '
+                + 'no se borra: queda en el historial, con su motivo.',
+            confirmar: 'Incluir'
+        }).then(function(ok) {
+            if (!ok) { return; }
+
+            return pedirJson('Controller/ProveedoresController.php?action=incluirProveedor',
+                    { cod_provee: cod })
+                .then(function() {
+                    Notificacion.exito(cod + ' incluido de nuevo en Proveedores Locales.');
+                    recargarMaestroYListado();
+                });
+        }).catch(function(error) {
+            Notificacion.error('No se pudo volver a incluir: ' + error.message);
+        });
+    }
+
+    function verHistorialExclusion(cod) {
+        pedirJson('Controller/ProveedoresController.php?action=getHistorialExclusion&cod_provee='
+                + encodeURIComponent(cod))
+            .then(function(filas) {
+                var tabla = '<table class="table table-sm small mt-3 mb-0"><thead><tr>'
+                    + '<th>Desde</th><th>Hasta</th><th>Motivo</th><th>Quién</th>'
+                    + '</tr></thead><tbody>'
+                    + (filas || []).map(function(h) {
+                        return '<tr' + (h.VIGENTE ? ' class="fw-semibold"' : '') + '>'
+                            + '<td>' + escapar(h.FECHA_ALTA || '') + '</td>'
+                            + '<td>' + (h.VIGENTE ? 'vigente' : escapar(h.FECHA_BAJA || '')) + '</td>'
+                            + '<td>' + escapar(h.MOTIVO || '') + '</td>'
+                            + '<td>' + escapar(h.USUARIO || '—') + '</td>'
+                            + '</tr>';
+                    }).join('')
+                    + '</tbody></table>';
+
+                return Notificacion.confirmar({
+                    titulo: 'Historial de exclusión',
+                    mensaje: cod + ': cada vez que se lo excluyó de Proveedores Locales, y hasta '
+                        + 'cuándo.',
+                    html: (filas && filas.length) ? tabla
+                        : '<p class="text-muted small mt-3 mb-0">Nunca se lo excluyó.</p>',
+                    confirmar: 'Cerrar',
+                    cancelar: 'Cerrar'
+                });
+            })
+            .catch(function(error) {
+                Notificacion.error('No se pudo leer el historial: ' + error.message);
+            });
     }
 
     /* ================================================================

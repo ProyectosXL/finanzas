@@ -405,7 +405,9 @@ class CashflowRegistry {
                 'PAGOS_CRONO_OPERATIVOS' => 'Del cronograma y sin los rubros excluidos '
                     . '(los dos criterios a la vez)',
                 'PAGOS_SIN_RUBRO' => 'Solo los proveedores que no estan en el maestro',
-                'PAGOS_EXCLUIDOS_FACTURA' => 'Solo las facturas excluidas a mano, una por una'
+                'PAGOS_EXCLUIDOS_FACTURA' => 'Solo las facturas excluidas a mano, una por una',
+                'PAGOS_EXCLUIDOS_PROVEEDOR' => 'Solo los proveedores excluidos de Proveedores '
+                    . 'Locales porque ya se consideran en otra pestaña'
             ],
             'series_extra' => ['ProveedoresProvider', 'seriesDeRubro'],
             /* EL TOTAL ES 'PAGOS_TODO', NO 'PAGOS'. La fila del tablero usa
@@ -417,7 +419,8 @@ class CashflowRegistry {
             'componentes' => [
                 'PAGOS_TODO' => ['PAGOS', 'PAGOS_FUERA_CRONOGRAMA', 'PAGOS_OPERATIVOS',
                                  'PAGOS_EXCLUIDOS', 'PAGOS_CRONO_OPERATIVOS',
-                                 'PAGOS_SIN_RUBRO', 'PAGOS_EXCLUIDOS_FACTURA']
+                                 'PAGOS_SIN_RUBRO', 'PAGOS_EXCLUIDOS_FACTURA',
+                                 'PAGOS_EXCLUIDOS_PROVEEDOR']
             ],
 
             /* LOS CORTES DEL MISMO UNIVERSO. 'componentes' dice que estas seis
@@ -446,8 +449,13 @@ class CashflowRegistry {
                        a PAGOS ni a PAGOS_FUERA_CRONOGRAMA. Es lo que hace que el
                        tilde saque el importe de la fila del tablero, que usa
                        PAGOS. Ver ProveedoresProvider::SERIE_EXCLUIDOS_FACTURA. */
+                    /* Y CUATRO desde la exclusion por proveedor, por el mismo
+                       motivo: un proveedor excluido de este modulo tiene que
+                       salir de PAGOS, y solo una serie de este corte lo saca.
+                       Ver ProveedoresProvider::SERIE_EXCLUIDOS_PROVEEDOR. */
                     'por cómo se paga' => ['PAGOS', 'PAGOS_FUERA_CRONOGRAMA',
-                                           'PAGOS_EXCLUIDOS_FACTURA'],
+                                           'PAGOS_EXCLUIDOS_FACTURA',
+                                           'PAGOS_EXCLUIDOS_PROVEEDOR'],
                     'por si está excluido' => ['PAGOS_OPERATIVOS', 'PAGOS_EXCLUIDOS'],
                     'por rubro' => ['PAGOS_SIN_RUBRO']
                 ]

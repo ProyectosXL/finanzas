@@ -637,8 +637,11 @@ seccion('las excluidas no se ven por defecto, y se dice cuantas son');
    que hay que pagar- son ruido. Pero esconder plata sin decir cuanta es
    exactamente lo que este modulo no hace: el cartel del periodo lo dice aunque
    -y sobre todo porque- las filas no se ven. */
+/* EL MISMO INTERRUPTOR esconde las dos exclusiones: la de la factura y la del
+   proveedor entero. Las dos contestan "¿esto va al cashflow?" con un no. */
 chequear('el filtro las esconde salvo que se pidan', true,
-    strpos($js, 'if (!verExcluidas && f.EXCLUIDA_MANUAL) { return false; }') !== false);
+    strpos($js, 'if (!verExcluidas && (f.EXCLUIDA_MANUAL || f.EXCLUIDO_PROVEEDOR)) '
+        . '{ return false; }') !== false);
 
 chequear('el interruptor arranca APAGADO', true,
     preg_match('/id="verExcluidasProv"(?![^>]*\bchecked\b)/',
@@ -1990,18 +1993,63 @@ chequear('un excluido por RUBRO sigue entrando a PAGOS', true, in_array('PAGOS',
 chequear('y no va a la serie de las excluidas a mano', false,
     in_array('PAGOS_EXCLUIDOS_FACTURA', $d, true));
 
-seccion('el corte por como se paga sigue cerrando, con tres partes');
+seccion('un proveedor excluido del modulo sale de la fila entero');
 
-/* CADA VENCIMIENTO CAE EN EXACTAMENTE UNA de las tres. Si cayera en dos, la
+/* LA CUARTA PARTE DEL CORTE: el proveedor entero excluido de Proveedores
+   Locales porque su deuda ya se considera en otra pestana. Como la factura,
+   tiene que salir de PAGOS, y solo una serie propia de este corte lo saca. */
+$exclProv = function ($crono, $factura = false) {
+    return ['CRONOGRAMA' => $crono, 'EXCLUIDO' => true, 'EXCLUIDA_MANUAL' => $factura,
+            'EXCLUIDO_PROVEEDOR' => true, 'EN_MAESTRO' => true, 'SERIE' => 'RUBRO_MERCADERIA'];
+};
+
+$d = ProveedoresProvider::seriesDeItem($exclProv(true));
+
+chequear('un excluido del modulo NO va a PAGOS', false, in_array('PAGOS', $d, true));
+chequear('va a la suya', true, in_array('PAGOS_EXCLUIDOS_PROVEEDOR', $d, true));
+chequear('sigue en el universo', true, in_array('PAGOS_TODO', $d, true));
+// El segundo corte: cuenta como EXCLUIDO, igual que la factura excluida a mano.
+chequear('y en el corte de excluidos', true, in_array('PAGOS_EXCLUIDOS', $d, true));
+chequear('ni en el de los dos criterios', false, in_array('PAGOS_CRONO_OPERATIVOS', $d, true));
+
+/* SI LA FACTURA TAMBIEN ESTA EXCLUIDA, GANA EL PROVEEDOR: el importe va una
+   sola vez. Si fuera a las dos, el corte contaria de mas. */
+$d = ProveedoresProvider::seriesDeItem($exclProv(true, true));
+
+chequear('con la factura tambien excluida gana el proveedor', true,
+    in_array('PAGOS_EXCLUIDOS_PROVEEDOR', $d, true));
+chequear('y no va ademas a la de la factura', false,
+    in_array('PAGOS_EXCLUIDOS_FACTURA', $d, true));
+
+$d = ProveedoresProvider::seriesDeItem($exclProv(false));
+
+chequear('fuera del cronograma tampoco va a PAGOS_FUERA_CRONOGRAMA', false,
+    in_array('PAGOS_FUERA_CRONOGRAMA', $d, true));
+
+seccion('el corte por como se paga sigue cerrando, con cuatro partes');
+
+/* CADA VENCIMIENTO CAE EN EXACTAMENTE UNA de las cuatro. Si cayera en dos, la
    particion contaria de mas y el validador dejaria pasar dos filas solapadas;
-   si no cayera en ninguna, el importe desapareceria de PAGOS_TODO sin aviso. */
-$corte = ['PAGOS', 'PAGOS_FUERA_CRONOGRAMA', 'PAGOS_EXCLUIDOS_FACTURA'];
-$casos = [
-    'cronograma'            => ['CRONOGRAMA' => true,  'EXCLUIDA_MANUAL' => false],
-    'fuera del cronograma'  => ['CRONOGRAMA' => false, 'EXCLUIDA_MANUAL' => false],
-    'excluida a mano'       => ['CRONOGRAMA' => true,  'EXCLUIDA_MANUAL' => true],
-    'excluida y fuera'      => ['CRONOGRAMA' => false, 'EXCLUIDA_MANUAL' => true]
-];
+   si no cayera en ninguna, el importe desapareceria de PAGOS_TODO sin aviso.
+   Son las ocho combinaciones de cronograma x factura excluida x proveedor
+   excluido. */
+$corte = ['PAGOS', 'PAGOS_FUERA_CRONOGRAMA', 'PAGOS_EXCLUIDOS_FACTURA',
+          'PAGOS_EXCLUIDOS_PROVEEDOR'];
+$casos = [];
+
+foreach ([true, false] as $crono) {
+    foreach ([false, true] as $factura) {
+        foreach ([false, true] as $proveedor) {
+            $casos[($crono ? 'cronograma' : 'fuera del cronograma')
+                . ($factura ? ', factura excluida' : '')
+                . ($proveedor ? ', proveedor excluido' : '')] = [
+                'CRONOGRAMA' => $crono,
+                'EXCLUIDA_MANUAL' => $factura,
+                'EXCLUIDO_PROVEEDOR' => $proveedor
+            ];
+        }
+    }
+}
 
 foreach ($casos as $nombre => $caso) {
     $d = ProveedoresProvider::seriesDeItem(array_merge(
@@ -2015,10 +2063,71 @@ foreach ($casos as $nombre => $caso) {
 // Y el registro lo declara igual, o el validador mediria contra otro corte.
 $meta = CashflowRegistry::meta('PROV_LOCALES');
 
-chequear('el registro declara las tres partes del corte',
+chequear('el registro declara las cuatro partes del corte',
     $corte, $meta['particiones']['PAGOS_TODO']['por cómo se paga']);
-chequear('y la serie nueva es parte de PAGOS_TODO', true,
+chequear('y la serie de la factura es parte de PAGOS_TODO', true,
     in_array('PAGOS_EXCLUIDOS_FACTURA', $meta['componentes']['PAGOS_TODO'], true));
+chequear('y la del proveedor tambien', true,
+    in_array('PAGOS_EXCLUIDOS_PROVEEDOR', $meta['componentes']['PAGOS_TODO'], true));
+
+seccion('el aviso de los proveedores excluidos');
+
+$avisos = ProveedoresProvider::avisosExcluidosProveedor([
+    ['COD_PROVEE' => 'OGADUA', 'EXCLUIDO_PROVEEDOR' => true, 'CRONOGRAMA' => true,
+     'EXCLUIDA_MANUAL' => false, 'IMPORTE_PENDIENTE' => 1000000],
+    ['COD_PROVEE' => 'OGADUA', 'EXCLUIDO_PROVEEDOR' => true, 'CRONOGRAMA' => true,
+     'EXCLUIDA_MANUAL' => true, 'IMPORTE_PENDIENTE' => 500000],
+    ['COD_PROVEE' => 'OGADUN', 'EXCLUIDO_PROVEEDOR' => true, 'CRONOGRAMA' => false,
+     'EXCLUIDA_MANUAL' => false, 'IMPORTE_PENDIENTE' => 250000],
+    ['COD_PROVEE' => 'OTRO', 'EXCLUIDO_PROVEEDOR' => false, 'CRONOGRAMA' => true,
+     'EXCLUIDA_MANUAL' => false, 'IMPORTE_PENDIENTE' => 9999999]
+]);
+
+chequear('es uno', 1, count($avisos));
+chequear('cuenta los proveedores', true, strpos($avisos[0], '2 proveedor(es)') !== false);
+chequear('y los nombra', true, strpos($avisos[0], 'OGADUA, OGADUN') !== false);
+chequear('dice el total excluido', true, strpos($avisos[0], '$ 1.750.000,00') !== false);
+// Excluir a uno que no esta en el cronograma no mueve la fila, y el aviso no
+// puede dar a entender que si.
+chequear('y cuanto estaba en la fila del tablero', true,
+    strpos($avisos[0], '$ 1.500.000,00 estaban en la fila') !== false);
+chequear('y que una factura tambien excluida se cuenta una vez', true,
+    strpos($avisos[0], '1 de esos vencimientos además tienen la factura excluida') !== false);
+chequear('sin excluidos no hay aviso', 0,
+    count(ProveedoresProvider::avisosExcluidosProveedor([['EXCLUIDO_PROVEEDOR' => false]])));
+chequear('ni con basura', 0, count(ProveedoresProvider::avisosExcluidosProveedor(null)));
+
+seccion('el modulo y el motivo de la exclusion se validan');
+
+chequear('PROV_LOCALES es un modulo valido', 'PROV_LOCALES',
+    ProveedoresExclusion::validarModulo('prov_locales'));
+
+$fallo = false;
+try { ProveedoresExclusion::validarModulo('COMEX'); } catch (Exception $e) { $fallo = true; }
+chequear('un modulo que no existe se rechaza', true, $fallo);
+
+$fallo = false;
+try { ProveedoresExclusion::validarMotivo('   '); } catch (Exception $e) { $fallo = true; }
+chequear('un motivo en blanco se rechaza', true, $fallo);
+chequear('el motivo se recorta al largo de la columna', 200,
+    mb_strlen(ProveedoresExclusion::validarMotivo(str_repeat('x', 300))));
+
+/* LA LISTA DEL PHP Y EL CHECK DE LA TABLA SON LA MISMA LISTA. Un modulo que
+   este en una y no en la otra o lo rechaza la base o no lo puede escribir
+   nadie. */
+$sqlExcl = file_get_contents(__DIR__ . '/../sql/cashflow_prov_exclusion_modulo.sql');
+
+foreach (array_keys(ProveedoresExclusion::MODULOS) as $mod) {
+    chequear('el CHECK de la tabla admite ' . $mod, true,
+        strpos($sqlExcl, "CHECK (MODULO IN ('" . $mod . "'") !== false);
+}
+
+chequear('el script es reejecutable: pregunta antes de crear', true,
+    strpos($sqlExcl, "IF OBJECT_ID('dbo.RO_T_CASHFLOW_PROV_EXCLUIDO_MODULO', 'U') IS NULL") !== false);
+chequear('y una sola vigente por proveedor y modulo', true,
+    strpos($sqlExcl, 'WHERE VIGENTE = 1;') !== false);
+chequear('la collation es la de CPA01', true,
+    strpos($sqlExcl, 'COD_PROVEE  VARCHAR(6)   COLLATE Latin1_General_BIN') !== false);
 
 $meta = CashflowRegistry::meta('PROV_LOCALES');
 
@@ -2495,6 +2604,8 @@ chequear('y las tres aperturas fijas', true,
     && isset($series['PAGOS_SIN_RUBRO']));
 chequear('y la de las facturas excluidas a mano', true,
     isset($series['PAGOS_EXCLUIDOS_FACTURA']));
+chequear('y la de los proveedores excluidos del modulo', true,
+    isset($series['PAGOS_EXCLUIDOS_PROVEEDOR']));
 
 chequear('la serie del cronograma tiene los dias del horizonte',
     $h->cantidadDias(), count($series['PAGOS']['dias']));
@@ -2510,11 +2621,13 @@ $suma = function ($s) {
    EL PRIMER CORTE TIENE TRES PARTES desde que se pueden excluir facturas
    sueltas: la excluida no va ni a PAGOS ni a PAGOS_FUERA_CRONOGRAMA, va a la
    suya. Es lo que hace que el tilde saque el importe de la fila del tablero,
-   que usa PAGOS. */
-chequear('cronograma + fuera + excluidas a mano = universo',
+   que usa PAGOS. Y CUATRO desde que se puede excluir un proveedor entero del
+   modulo, por lo mismo. */
+chequear('cronograma + fuera + excluidas a mano + proveedores excluidos = universo',
     $suma($series['PAGOS_TODO']),
     $suma($series['PAGOS']) + $suma($series['PAGOS_FUERA_CRONOGRAMA'])
-        + $suma($series['PAGOS_EXCLUIDOS_FACTURA']));
+        + $suma($series['PAGOS_EXCLUIDOS_FACTURA'])
+        + $suma($series['PAGOS_EXCLUIDOS_PROVEEDOR']));
 
 chequear('operativos + excluidos = universo',
     $suma($series['PAGOS_TODO']),
