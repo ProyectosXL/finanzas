@@ -329,6 +329,171 @@ chequear('sin marcados no hay aviso', 0,
         'IMPORTE_PROYECTABLE', 'pago')));
 chequear('ni con basura', 0, count(Comex::avisosPagados(null, 'X', 'pago')));
 
+/* LOS QUE YA ESTABAN VENCIDOS SE DICEN APARTE. No sacaron nada de la
+   proyeccion -valian cero por la fecha-, y sin decirlo el aviso contaba "21
+   contenedores... $ 0,00", que se lee como un error. */
+$avisos = Comex::avisosPagados([
+    ['PAGADO' => true, 'VENCIDA' => false, 'IMPORTE_PROYECTABLE' => 1000000],
+    ['PAGADO' => true, 'VENCIDA' => true,  'IMPORTE_PROYECTABLE' => 0],
+    ['PAGADO' => true, 'VENCIDA' => true,  'IMPORTE_PROYECTABLE' => 0]
+], 'IMPORTE_PROYECTABLE', 'pago');
+
+chequear('con algunos vencidos cuenta a todos los marcados', true,
+    strpos($avisos[0], '3 contenedor(es)') === 0);
+chequear('el importe es solo el de los que sumaban', true,
+    strpos($avisos[0], '$ 1.000.000,00') !== false);
+chequear('y dice cuantos ya estaban vencidos', true,
+    strpos($avisos[0], '2 de ellos ya tenían la fecha vencida') !== false);
+
+$avisos = Comex::avisosPagados([
+    ['PAGADO' => true, 'VENCIDA' => true, 'IMPORTE_PROYECTABLE' => 0],
+    ['PAGADO' => true, 'VENCIDA' => true, 'IMPORTE_PROYECTABLE' => 0]
+], 'IMPORTE_PROYECTABLE', 'nacionalización');
+
+chequear('si todos estaban vencidos lo dice asi', true,
+    strpos($avisos[0], 'Todos ya tenían la fecha vencida') !== false);
+chequear('y que no movio ningun numero', true,
+    strpos($avisos[0], 'no movió ningún número') !== false);
+
+$avisos = Comex::avisosPagados([
+    ['PAGADO' => true, 'VENCIDA' => false, 'IMPORTE_PROYECTABLE' => 5]
+], 'IMPORTE_PROYECTABLE', 'pago');
+
+chequear('sin vencidos no agrega nada', false, strpos($avisos[0], 'vencida') !== false);
+
+/* ================================================================
+   UNA VENCIDA YA PAGADA NO CUENTA COMO VENCIDA
+
+   Pagada es cualquiera de dos cosas: el tilde del cashflow o el saldo
+   CANCELADO por los pagos cargados en Comercio Exterior. Para el contador, el
+   interruptor, el badge y el aviso de vencidos esa fila deja de ser vencida:
+   no hay fecha que corregir. Al 24/09/2026 eran 31 filas y TODAS pagadas.
+
+   LO DELICADO ES QUE VENCIDA NO CAMBIA. De ella dependen importeProyectable()
+   y aporteAlEje(), y con ellos PAGOS_PAGADOS y PAGOS_TODO. El flag nuevo es
+   aparte y solo decide lo que se muestra.
+   ================================================================ */
+seccion('la vencida pendiente es vencida y no pagada');
+
+chequear('vencida sin pagar: pendiente', true,
+    Comex::vencidaPendiente(['VENCIDA' => true, 'PAGADO' => false]));
+chequear('vencida y tildada: no', false,
+    Comex::vencidaPendiente(['VENCIDA' => true, 'PAGADO' => true]));
+chequear('vencida y cancelada en Comex, sin tilde: no', false,
+    Comex::vencidaPendiente(['VENCIDA' => true, 'PAGADO' => false, 'ESTADO_PAGO' => 'CANCELADO']));
+chequear('vencida con pago parcial en Comex: si, todavia falta', true,
+    Comex::vencidaPendiente(['VENCIDA' => true, 'PAGADO' => false, 'ESTADO_PAGO' => 'PENDIENTE']));
+chequear('no vencida: no, este pagada o no', false,
+    Comex::vencidaPendiente(['VENCIDA' => false, 'PAGADO' => false]));
+// Crono Nacionalizacion no trae saldo: un campo ausente es "no pagado".
+chequear('sin PAGADO ni ESTADO_PAGO: manda la fecha', true,
+    Comex::vencidaPendiente(['VENCIDA' => true]));
+
+seccion('el aviso de vencidos no cuenta las pagadas');
+
+$avisos = Comex::avisosVencidos([
+    ['VENCIDA' => true, 'IMPORTE_ARS' => 1000000],
+    ['VENCIDA' => true, 'PAGADO' => true, 'IMPORTE_ARS' => 7000000],
+    ['VENCIDA' => true, 'ESTADO_PAGO' => 'CANCELADO', 'IMPORTE_ARS' => 0]
+], 'FECHA_PAGO_EFECTIVA', 'IMPORTE_ARS', 'fecha estimada de pago');
+
+chequear('cuenta solo la pendiente', true, strpos($avisos[0], '1 contenedor(es)') === 0);
+chequear('con su importe y no el de las pagadas', true,
+    strpos($avisos[0], '$ 1.000.000,00') !== false);
+
+chequear('si todas estan pagadas no hay aviso', 0, count(Comex::avisosVencidos([
+    ['VENCIDA' => true, 'PAGADO' => true, 'IMPORTE_ARS' => 7000000],
+    ['VENCIDA' => true, 'ESTADO_PAGO' => 'CANCELADO', 'IMPORTE_ARS' => 0]
+], 'FECHA_NAC_EFECTIVA', 'IMPORTE_ARS', 'fecha de nacionalización')));
+
+seccion('y ninguna serie del tablero cambia');
+
+/* Las ocho combinaciones de vencida x tilde x cancelada. Para cada una se
+   calculan los aportes a las cuatro series CON el flag nuevo puesto -como sale
+   hoy de la consulta- y SIN el -como salia antes-, y tienen que ser los
+   mismos. Y el invariante de tres partes tiene que cerrar en las dos.
+
+   Los importes son los de una fila real: con el saldo cancelado lo pendiente
+   vale cero y lo pagado en Comex es el FOB entero. */
+$distintas = [];
+$sinCerrar = [];
+
+foreach ([false, true] as $vencida) {
+    foreach ([false, true] as $tildada) {
+        foreach ([false, true] as $cancelada) {
+            $fila = [
+                'VENCIDA' => $vencida,
+                'PAGADO' => $tildada,
+                'ESTADO_PAGO' => $cancelada ? 'CANCELADO' : 'PENDIENTE',
+                'IMPORTE_ARS' => $cancelada ? 0.0 : 600.0,
+                'IMPORTE_PAGADO_ARS' => $cancelada ? 1000.0 : 400.0,
+                'IMPORTE_FOB_ARS' => 1000.0
+            ];
+            $nombre = ($vencida ? 'vencida' : 'al dia') . ($tildada ? ', tildada' : '')
+                . ($cancelada ? ', cancelada' : '');
+
+            $series = function ($f) {
+                $proy = floatval(Comex::importeProyectable($f));
+
+                return [
+                    'PAGOS' => floatval(Comex::aporteAlEje($f)),
+                    'PAGOS_PAGADOS' => empty($f['PAGADO']) ? 0.0 : $proy,
+                    'PAGOS_COMEX' => floatval(Comex::importeProyectable($f, 'IMPORTE_PAGADO_ARS')),
+                    'PAGOS_TODO' => floatval(Comex::importeProyectable($f, 'IMPORTE_FOB_ARS'))
+                ];
+            };
+
+            $antes = $series($fila);
+            $despues = $series($fila + ['VENCIDA_PENDIENTE' => Comex::vencidaPendiente($fila)]);
+
+            if ($antes !== $despues) {
+                $distintas[] = $nombre;
+            }
+
+            if (abs($despues['PAGOS'] + $despues['PAGOS_PAGADOS'] + $despues['PAGOS_COMEX']
+                    - $despues['PAGOS_TODO']) > 0.005) {
+                $sinCerrar[] = $nombre;
+            }
+        }
+    }
+}
+
+chequear('las cuatro series dan lo mismo en las ocho combinaciones', [], $distintas);
+chequear('y el invariante cierra en las ocho', [], $sinCerrar);
+
+/* LO QUE LO GARANTIZA, dicho directo: una vencida y pagada deja de ser
+   pendiente pero sigue anulada, porque las dos funciones siguen mirando
+   VENCIDA. Si alguna pasara a mirar el flag nuevo, este chequeo lo agarra. */
+$vencidaPagada = ['VENCIDA' => true, 'PAGADO' => true, 'VENCIDA_PENDIENTE' => false,
+                  'IMPORTE_ARS' => 1000];
+
+chequear('una vencida y pagada sigue sin sumar al eje', 0.0,
+    Comex::aporteAlEje($vencidaPagada));
+chequear('ni a PAGOS_PAGADOS', 0.0, Comex::importeProyectable($vencidaPagada));
+
+seccion('la pantalla mira el flag nuevo');
+
+/* El contador, el filtro, el badge y la marca de la fila. Se lee la fuente
+   porque son cuatro lugares en tres archivos y basta con que uno quede mirando
+   VENCIDA para que la pantalla diga dos cosas distintas. */
+$fechasJs = file_get_contents(__DIR__ . '/../cashflow/Js/Comex-fechas.js');
+$provExtJs = file_get_contents(__DIR__ . '/../cashflow/Js/Comex-Proveedores_exterior.js');
+$cronoJs = file_get_contents(__DIR__ . '/../cashflow/Js/Comex-Crono_nacionalizacion.js');
+
+chequear('el contador cuenta las pendientes', true,
+    strpos($fechasJs, 'return !!item.VENCIDA_PENDIENTE; }).length') !== false);
+chequear('el filtro las usa', true,
+    strpos($fechasJs, 'vencida: !!item.VENCIDA_PENDIENTE') !== false);
+chequear('y el badge', true, strpos($fechasJs, 'var vencida = !!item.VENCIDA_PENDIENTE;') !== false);
+chequear('Proveedores Exterior marca la fila con el flag nuevo', true,
+    strpos($provExtJs, "item.VENCIDA_PENDIENTE ? ' data-vencida=\"1\"'") !== false);
+chequear('Crono Nacionalizacion tambien', true,
+    strpos($cronoJs, "item.VENCIDA_PENDIENTE ? ' data-vencida=\"1\"'") !== false);
+
+$sueltas = preg_match_all('/item\.VENCIDA\b(?!_)/', $fechasJs . $provExtJs . $cronoJs);
+
+chequear('y ninguna de las tres sigue mirando VENCIDA a secas', 0, $sueltas);
+
 seccion('el corte esta declarado en el registro');
 
 require_once __DIR__ . '/../cashflow/Class/CashflowRegistry.php';

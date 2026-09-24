@@ -233,8 +233,8 @@ function updateHeader(tabName) {
     const link = $('.menu-link[data-tab="' + tabName + '"]').first();
     const encabezado = link.length ? link.data('encabezado') : '';
 
-    // Sin enlace en el menú (una pestaña a la que se llega por código, como
-    // nacionalizacion_2) se humaniza el código, que es mejor que el crudo.
+    // Sin enlace en el menú (una pestaña a la que se llegara por código) se
+    // humaniza el código, que es mejor que el crudo.
     const title = encabezado || tabName.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
 
     $('#pageTitle').text(title);

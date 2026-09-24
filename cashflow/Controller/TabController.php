@@ -28,20 +28,15 @@ $validTabs = [
     'proveedores_exterior',
     'crono_nacionalizacion',
     'compras_proyectadas',
-    'nacionalizacion_2',
     'proveedores_locales',
-    'cronograma',
     'logistica_local',
     'haberes',
     'impuestos',
     'alquileres',
-    'seguros',
     'llaves_renov',
     'pagos_tarjetas',
     'otros_socios',
-    'bopreal',
-    'prestamos',
-    'pagos_div'
+    'prestamos'
 ];
 
 // Validar tab

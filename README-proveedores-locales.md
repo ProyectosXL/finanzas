@@ -39,7 +39,13 @@ Contra `central`, en cualquier momento:
 -- 4. sql/cashflow_prov_locales_forma_por_factura.sql (forma de pago por factura)
 -- 5. sql/cashflow_prov_locales_excluir_factura.sql   (excluir facturas sueltas)
 -- 6. sql/cashflow_prov_locales_opciones.sql          (las cinco listas de opciones)
+-- 7. sql/cashflow_prov_locales_fuente_fecha.sql      (de dónde salió cada fecha de pago)
+-- 8. sql/cashflow_prov_exclusion_modulo.sql          (excluir un proveedor entero del módulo)
 ```
+
+El octavo crea `RO_T_CASHFLOW_PROV_EXCLUIDO_MODULO`, vacía: **el día que se corre el tablero no se mueve**. No depende de ningún otro. **Sin él** nadie está excluido —que es lo cierto—, la columna *PROV. LOCALES* del maestro se dibuja con un guion y la pestaña avisa qué script falta. Ver *Excluir un proveedor entero del módulo*.
+
+El séptimo agrega `FUENTE_FECHA` a la tabla de pagos y la rellena desde `ORIGEN` en las filas que ya tienen fecha —hoy es exacto, ver *De dónde sale cada fecha*—. **Sin él la columna *Fecha de pago* distingue igual** lo importado de lo cargado a mano, leyendo `ORIGEN`, y la pestaña avisa que falta el script. El tablero no se mueve: la fuente sólo decide cómo se ve la fecha.
 
 **El gesto de fechar en masa no agrega ningún script**, y eso es parte de su diseño: escribe `FECHA_PAGO` en la tabla que ya existe desde el primero, con el mismo camino de escritura que la celda de la grilla. En una base que corrió el primer script, funciona sin tocar nada.
 
@@ -159,6 +165,50 @@ Escrita una sola vez, en `Proveedores::resolverFechaPago()`:
 El escalón 3 existe para cuando Tango trae su centinela `1800-01-01` en lugar de una fecha. Hoy no hay ninguno en `CPA54`, pero la consulta de referencia lo contempla, así que el código también: es una red, no la norma.
 
 **Una fecha cargada no se reubica aunque esté vencida.** La cargó una persona; moverla a hoy sería pisar su decisión con una regla automática y mostrarle su propia carga en otra columna. Se marca vencida —eso es un hecho— y se dibuja donde está.
+
+### La columna muestra la fecha que usa el eje
+
+> Esto **cambió** en `feature/cashflow-vto-exclusiones-pestanas`.
+
+La jerarquía ya existía y el eje ya proyectaba al vencimiento, pero **no se veía**: sin fecha cargada, la columna *Fecha de pago* quedaba vacía y el vencimiento aparecía sólo en el tooltip. Ahora la columna muestra siempre la fecha con la que el comprobante entra al eje, y dice de dónde salió. Medido contra la base el 24/09/2026:
+
+| Fuente | Marca | Vencimientos | Importe |
+| --- | --- | --- | --- |
+| **Manual** — la tipeó alguien, en la celda o con el fechado masivo | azul | 6 | $ 168.114.825,44 |
+| **Planilla** — vino de la planilla de pagos importada | azul + *planilla* | 15 | $ 6.502.283,08 |
+| **Vencimiento** de Tango | gris + *vto.* / *vto. vencido* | 465 | $ 1.562.057.939,77 |
+| **Plazo** del maestro | gris + *plazo* | 0 | — |
+
+**Se calcula al leer y no se graba.** Grabar el vencimiento lo convertiría en una fecha *cargada*: rompería el indicador *vencido sin fecha*, la conciliación —que compara lo previsto contra lo real— y el contador del fechado masivo, y además dejaría de seguir a Tango si el vencimiento cambia. Es la regla de siempre del módulo: lo que se deriva, se deriva al leer.
+
+**Una fecha vencida muestra su vencimiento original, no el día 1 del eje.** Son **382 de los 465** ($ 1.326.960.887,25): el eje los proyecta en su primer día, pero poner *hoy* en la columna diría que alguien decidió pagarlos hoy. La marca dice *vto. vencido* y el `title` explica dónde se proyecta y cómo reubicarlo.
+
+**Mostrarla no la guarda.** El input guarda sólo en `change`, así que dejarlo como está no escribe nada. Para fijar una fecha hay que elegir otra, o usar el fechado masivo; elegir en el calendario la misma fecha que ya muestra no dispara nada. Es deliberado: confirmar el vencimiento no es una decisión nueva.
+
+**La marca va en un atributo y la dibuja el CSS**, no como texto de la celda: el export a Excel se queda con el texto, y *"15/03/2026vto."* no es una fecha. Lo que baja es la fecha sola —antes, sin fecha cargada, bajaba vacía—.
+
+### De dónde sale cada fecha: `FUENTE_FECHA`, y por qué no alcanzaba `ORIGEN`
+
+La fila viaja con dos campos, y los dos quedan:
+
+- `ORIGEN_FECHA` — el escalón de la jerarquía: `CARGADA`, `VENCIMIENTO`, `PLAZO` o `SIN_FECHA`. **No cambió**: lo miran los indicadores, el fechado masivo, el aviso de vencidos sin fecha y la conciliación, y para todos ellos una fecha tipeada y una importada son lo mismo, *alguien decidió*.
+- `FUENTE_FECHA` — lo mismo con la carga desdoblada en `MANUAL` y `ARCHIVO`. Es lo que muestra la columna. Lo arma `Proveedores::fuenteFecha()`, que es pura.
+
+Para desdoblar la carga ya había una columna, `ORIGEN`, y **no alcanza: describe la fila, no la fecha.** La tabla de pagos es la de *los overrides del comprobante* —fecha, forma, exclusión— y cualquier escritura pisa `ORIGEN`. Una fecha importada pasaría a figurar como manual el día que alguien excluyera esa factura o le cambiara la forma. Hoy no hay ningún caso —las 78 filas con fecha no tienen otro override—, así que el relleno desde `ORIGEN` es exacto; lo que la columna evita es que deje de serlo.
+
+`FUENTE_FECHA` la escribe `guardarPago()`, **sólo cuando la escritura trae `FECHA_PAGO`**, con el mismo origen: `MANUAL` desde la grilla y el fechado masivo, `ARCHIVO` desde la importación. No se llama `ORIGEN_FECHA` porque ese nombre ya es el del escalón.
+
+> **Fechar una cuota mueve todas las del comprobante.** La fecha cargada es por comprobante —la clave es proveedor + tipo + número—, y un comprobante en cuotas tiene una fila por vencimiento. Hoy son 6 comprobantes, 47 vencimientos, $ 63.520.993,81, y **ninguno tiene fecha cargada**. Se dejó así a propósito; cada cuota muestra su propio vencimiento mientras nadie cargue nada.
+
+### Volver al vencimiento borra la fecha, no la fila
+
+> Esto **cambió**, y era un bug.
+
+El botón ↺ de la celda hacía `DELETE` de la fila entera de la tabla de pagos, y con ella se iban **la exclusión con su motivo, el override de forma y la observación**, decisiones que nadie había pedido deshacer.
+
+Ahora `deletePago()` hace dos pasos en una transacción: pone `FECHA_PAGO` y `FUENTE_FECHA` en `NULL` —con eso sólo el comprobante ya cae al vencimiento— y **borra la fila únicamente si no le queda nada**: ni forma ni observación de la planilla, ni override de forma, ni exclusión, ni conciliación. La condición está escrita una vez, en `Proveedores::condicionFilaVacia()`, y pregunta sólo por las columnas que la base tiene.
+
+**Sin `sql/cashflow_prov_locales_forma_por_factura.sql`** `FECHA_PAGO` no admite `NULL` y se hace lo de antes, el `DELETE` directo. Sin ese script tampoco existen la forma por factura ni la exclusión, así que lo único que se pierde es lo que se perdía antes.
 
 ### El plazo del maestro no es un número
 
@@ -545,6 +595,8 @@ PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA = PAGOS_TODO
 - **Sigue en `PAGOS_TODO` y en `PAGOS_EXCLUIDOS`.** El importe no desaparece: queda auditable, y el proveedor **avisa cuánto es y con qué motivos** en cada carga del tablero.
 - **Un proveedor excluido por rubro no se mueve.** Sacarlo de `PAGOS` sigue siendo apuntar la fila a `PAGOS_CRONO_OPERATIVOS` desde Parámetros; este cambio no toma esa decisión por nadie.
 
+> **Desde la exclusión por proveedor el corte tiene cuatro partes**, por el mismo motivo: ver *Excluir un proveedor entero del módulo*.
+
 > **El criterio se reusó en Echeqs.** *Cheques en Cartera* excluye con el mismo patrón —serie propia, motivo obligatorio, acción masiva, sin bajas físicas— y ahí el corte `A_COBRAR + A_COBRAR_EXCLUIDOS = A_COBRAR_TODO` nace con esa etapa, porque `ECHEQS` tenía una sola serie y era el universo entero. Ver *Excluir un cheque que no se va a poder cobrar* en `README-cashflow.md`. Lo que cambia allá es que la exclusión guarda **historial**: el cheque puede entrar y salir varias veces, y cada decisión queda con su motivo, su autor y sus fechas de alta y de baja.
 
 #### No se ven por defecto, y el cartel dice cuántas son
@@ -556,6 +608,52 @@ Pero esconder plata sin decir cuánta es exactamente lo que este módulo no hace
 > *Hay 1 factura(s) excluida(s) a mano por $ 7.110.342,48, escondidas y fuera del cashflow — tildá Ver excluidas para revisarlas.*
 
 Los indicadores siguen midiendo lo visible y diciendo el universo al lado, como con los otros dos filtros. Cuando se muestran, la fila se atenúa y el pendiente va tachado: es la fila la que cambió de significado, no una celda.
+
+### Excluir un proveedor entero del módulo
+
+> Esto es **nuevo**, de `feature/cashflow-vto-exclusiones-pestanas`.
+
+Hay proveedores cuya deuda **ya se considera en otra pestaña** —la aduana, por ejemplo, en Crono Nacionalización— y que además aparecen en las cuentas a pagar de Tango. Si los dos lados los proyectan, el tablero cuenta dos veces la misma plata. Cuáles son lo sabe quien maneja Proveedores Locales; esto le da dónde decirlo. **El código no decide cuáles**: no hay ninguna lista precargada.
+
+**Es por proveedor y alcanza a toda su deuda**, la ya emitida y la que venga. Para sacar una factura suelta está la exclusión por factura, que es otra decisión: *"esta factura no va"* y no *"este proveedor ya está contado"*.
+
+#### Dónde vive, y por qué no en el maestro
+
+En su propia tabla, `RO_T_CASHFLOW_PROV_EXCLUIDO_MODULO`, con la clave `(COD_PROVEE, MODULO)`. Lo maneja `Class/ProveedoresExclusion.php`.
+
+- **No es una columna del maestro** porque el maestro es una copia reimportable de la planilla de administración, y la reimportación propone bajas: la exclusión se perdería. Tampoco es un dato que la planilla tenga.
+- **Un proveedor se puede excluir sin estar en el maestro.** La deuda de un proveedor sin clasificar se proyecta igual, y obligar a clasificarlo para poder excluirlo mezcla dos decisiones. El código **sí** se valida contra `CPA01`, como el alta manual: uno que no existe no tiene deuda que excluir.
+- **Es por módulo y no un bit.** Hoy el único es `PROV_LOCALES`; agregar otro es sumarlo a `ProveedoresExclusion::MODULOS` y al `CHECK` de la tabla —un `ALTER` de una línea— y escribir el código que lo lea. La tabla no cambia. `MODULO` es un `CHECK` y no una lista administrable desde Parámetros porque un módulo nuevo siempre viene con código: no hay nada que un usuario pueda dar de alta sin un despliegue. `tests/test_proveedores.php` fija que las dos listas coincidan.
+
+#### Motivo obligatorio, y con historial
+
+Como la exclusión de cheques de Echeqs: **sin bajas físicas**. Volver a incluir marca `VIGENTE = 0` y sella `FECHA_BAJA`; volver a excluir inserta una fila nueva. Un índice único filtrado por `VIGENTE = 1` impide dos vigentes para el mismo proveedor y módulo.
+
+- **El motivo es obligatorio**, y lo valida el backend —el endpoint se alcanza sin pasar por la pantalla— y un `CHECK` de la tabla.
+- **Excluir a uno ya excluido es un error, no un cambio de motivo**: pisar el motivo en silencio borraría el porqué de la decisión que estaba vigente. Para cambiarlo se incluye y se vuelve a excluir, y quedan las dos en el historial.
+- El historial se abre desde la misma celda del maestro, con desde, hasta, motivo y quién.
+
+#### Cómo se usa
+
+- **Solapa Maestro**, columna *PROV. LOCALES*: el botón *excluir* pide el motivo; un excluido muestra la marca —con motivo, quién y cuándo en el `title`—, el botón para volver a incluirlo y el del historial. El interruptor **Sólo excluidos** los junta, con el conteo al lado.
+- **Los excluidos que no están en el maestro** aparecen al final de la grilla del maestro, con el nombre de Tango, para poder verlos y volver a incluirlos. Y **se excluyen desde el aviso de proveedores con deuda que no están en el maestro**, que es el único lugar donde aparecen: por eso ese aviso ya no se recorta a doce.
+- **En Cuentas a Pagar** los esconde el mismo interruptor **Ver excluidas** que a las facturas: las dos contestan *"¿esto va al cashflow?"* con un no. El cartel del período desglosa cuánto es de cada una.
+
+#### En el tablero: la cuarta parte del corte
+
+```
+PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA + PAGOS_EXCLUIDOS_PROVEEDOR = PAGOS_TODO
+```
+
+Por lo mismo que la factura es la tercera: la fila del tablero usa `PAGOS`, y sólo una serie propia de ese corte saca el importe de ahí. **El importe no desaparece**: queda en `PAGOS_TODO` y en su serie, y el proveedor avisa en cada carga cuántos proveedores, cuánto y cuánto de eso estaba en la fila —excluir a uno que cobra por débito no mueve la fila, y el aviso no puede dar a entender que sí—.
+
+- **En el segundo corte cuenta como excluido** (`PAGOS_EXCLUIDOS`, fuera de `PAGOS_OPERATIVOS` y de `PAGOS_CRONO_OPERATIVOS`), igual que la factura excluida a mano.
+- **Si la factura también está excluida a mano, gana el proveedor**: el importe va una sola vez a `PAGOS_EXCLUIDOS_PROVEEDOR`. El tilde de la factura queda guardado y marcado, y vuelve a aplicar solo si el proveedor se reincluye. Por eso el aviso de facturas excluidas y el cartel no las cuentan dos veces.
+- **Un excluido no cuenta en *Vencido sin fecha*** ni en el aviso de *lo que queda fuera del cronograma*: de él ya se decidió que no va, y ese aviso dice *"igual va a salir de la caja"*, que para un excluido es justo lo contrario.
+
+**Verificado contra la base**, con la tabla todavía sin crear: las 33 series de `PROV_LOCALES` dan idénticas antes y después, y la nueva da cero. Y con una exclusión **simulada en memoria** —sin escribir nada— sobre un proveedor de $ 620.010,00: `PAGOS` bajó exactamente $ 620.010,00, `PAGOS_EXCLUIDOS_PROVEEDOR` subió lo mismo, `PAGOS_TODO` no se movió y el corte de cuatro partes cerró.
+
+> `RO_V_PROVEEDORES_EGRE_DIRECTORES` y el rubro *Excluidos* **no cambiaron**: clasifican y controlan, que es otra cosa. Ver las dos secciones que siguen.
 
 ### El rubro "Excluidos"
 
@@ -746,6 +844,7 @@ Como las dos importaciones, **no escribe nada hasta confirmar**.
 | `PAGOS_CRONO_OPERATIVOS` | **Los dos criterios a la vez** |
 | `PAGOS_SIN_RUBRO` | Sólo los que no están en el maestro |
 | `PAGOS_EXCLUIDOS_FACTURA` | Sólo las facturas excluidas a mano, una por una |
+| `PAGOS_EXCLUIDOS_PROVEEDOR` | Sólo los proveedores excluidos del módulo, enteros |
 | `RUBRO_*` | Una por cada rubro económico del maestro |
 
 **`PAGOS` no trae todo**, y el nombre engaña: trae el cronograma. Ver la sección anterior.
@@ -753,7 +852,8 @@ Como las dos importaciones, **no escribe nada hasta confirmar**.
 Son **dos particiones del mismo universo**, y las dos tienen que cerrar contra `PAGOS_TODO`:
 
 ```
-PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA = PAGOS_TODO  (por cómo se paga)
+PAGOS + PAGOS_FUERA_CRONOGRAMA + PAGOS_EXCLUIDOS_FACTURA
+      + PAGOS_EXCLUIDOS_PROVEEDOR                        = PAGOS_TODO  (por cómo se paga)
 PAGOS_OPERATIVOS + PAGOS_EXCLUIDOS                       = PAGOS_TODO  (por qué rubro es)
 ```
 
@@ -789,6 +889,7 @@ Por eso el registro declara `particiones`: un mapa `total → corte → series`.
 
 ```
 por cómo se paga      PAGOS · PAGOS_FUERA_CRONOGRAMA · PAGOS_EXCLUIDOS_FACTURA
+                      · PAGOS_EXCLUIDOS_PROVEEDOR
 por si está excluido  PAGOS_OPERATIVOS · PAGOS_EXCLUIDOS
 por rubro             PAGOS_SIN_RUBRO · RUBRO_*
 ```

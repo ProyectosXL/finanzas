@@ -653,11 +653,11 @@
     font-style: italic;
 }
 
-/* GANA LA VENCIDA sobre las dos nuevas, por lo mismo que gana sobre la editada:
-   el rosa dice "hay que hacer algo con esta fila" y las otras dos dicen "esta
-   asi por algo". Una vencida que ademas quedo cancelada sigue siendo una fecha
-   para corregir en el maestro. */
-.tab-proveedores_exterior .fila-vencida.fila-cancelada > td,
+/* GANA LA VENCIDA sobre la repetida, por lo mismo que gana sobre la editada:
+   el rosa dice "hay que hacer algo con esta fila" y la otra dice "esta asi por
+   algo". Con la cancelada ya no se cruza: un saldo cancelado en Comercio
+   Exterior deja de ser una vencida a corregir, asi que no lleva .fila-vencida.
+   Ver Comex::vencidaPendiente(). */
 .tab-proveedores_exterior .fila-vencida.fila-duplicada > td {
     background-color: #fff5f5;
 }

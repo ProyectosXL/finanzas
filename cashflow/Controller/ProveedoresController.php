@@ -146,6 +146,7 @@ try {
                dibuja y despues falla al guardar es peor que uno que no esta. */
             $payload['forma_por_factura'] = $prov->tieneColumnaPago('FORMA_PAGO_CRONOGRAMA');
             $payload['excluir_factura'] = $prov->tieneColumnaPago('EXCLUIDA');
+            $payload['excluir_proveedor'] = $prov->exclusion()->tablaCreada();
 
             echo json_encode(['success' => true, 'data' => $payload], JSON_UNESCAPED_UNICODE);
             break;
@@ -476,6 +477,27 @@ try {
             $mapa = $prov->categorias()->mapa();
             $avisosMaestro = $prov->categorias()->getAvisos();
 
+            $excluidos = $prov->exclusion()->vigentes(ProveedoresExclusion::MODULO_PROV_LOCALES);
+            $nombresExcluidos = [];
+
+            if ($prov->exclusion()->avisoSinTabla() !== '') {
+                $avisosMaestro[] = $prov->exclusion()->avisoSinTabla();
+            }
+
+            /* El nombre de los excluidos que NO están en el maestro sale de
+               Tango: sin él, la fila sería un código suelto. Son pocos, así que
+               una consulta por código alcanza; si CPA01 no se puede leer se
+               muestran sin nombre, que no rompe nada. */
+            foreach (array_keys($excluidos) as $codExcl) {
+                if (!isset($mapa[$codExcl])) {
+                    try {
+                        $nombresExcluidos[$codExcl] = $prov->categorias()->tango()->existe($codExcl);
+                    } catch (Exception $e) {
+                        $nombresExcluidos[$codExcl] = null;
+                    }
+                }
+            }
+
             /* LAS LISTAS PUEDEN NO PODER LEERSE, Y ESTA PANTALLA NO SE CAE POR
                ESO: el maestro se lee igual y verlo sigue sirviendo. Lo que no se
                va a poder es guardar —guardarManual() lanza con el motivo— así
@@ -529,8 +551,75 @@ try {
 
                     /* Las sugerencias del datalist quedan para ese caso. No se
                        sacan: son el respaldo de cuando no hay listas. */
-                    'rubros' => $prov->categorias()->rubrosCargados()
+                    'rubros' => $prov->categorias()->rubrosCargados(),
+
+                    /* LOS EXCLUIDOS DE PROVEEDORES LOCALES, por código, con su
+                       motivo y quién y cuándo. Van aparte de 'filas' porque no
+                       son del maestro: un proveedor se puede excluir sin estar
+                       en él, y la reimportación de la planilla no los toca.
+                       'nombres' trae el de Tango de los que no están en el
+                       maestro, para poder mostrarlos. Ver ProveedoresExclusion. */
+                    'excluir_proveedor' => $prov->exclusion()->tablaCreada(),
+                    'excluidos' => $excluidos,
+                    'nombres_excluidos' => $nombresExcluidos
                 ]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           EXCLUIR UN PROVEEDOR DE PROVEEDORES LOCALES
+
+           Por proveedor y para toda su deuda: su deuda ya se considera en otra
+           pestaña. Motivo obligatorio, código validado contra CPA01, sin bajas
+           físicas. Ver ProveedoresExclusion.
+           ================================================================ */
+        case 'excluirProveedor':
+            $data = bodyJson();
+
+            $r = $prov->exclusion()->excluir(
+                isset($data['cod_provee']) ? $data['cod_provee'] : '',
+                ProveedoresExclusion::MODULO_PROV_LOCALES,
+                isset($data['motivo']) ? $data['motivo'] : '',
+                usuarioActual());
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['cod_provee'] . ' (' . $r['nombre'] . ') quedó excluido de '
+                    . 'Proveedores Locales: toda su deuda sale de la fila del tablero y pasa a '
+                    . 'su propia serie.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'incluirProveedor':
+            $data = bodyJson();
+
+            if (empty($data['cod_provee'])) {
+                throw new Exception('Falta el código del proveedor.');
+            }
+
+            $habia = $prov->exclusion()->incluir($data['cod_provee'],
+                ProveedoresExclusion::MODULO_PROV_LOCALES, usuarioActual());
+
+            echo json_encode([
+                'success' => true,
+                'message' => $habia
+                    ? 'Proveedor incluido de nuevo en Proveedores Locales. La exclusión anterior '
+                        . 'queda en el historial.'
+                    : 'Ese proveedor no estaba excluido.',
+                'data' => ['habia' => $habia]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'getHistorialExclusion':
+            if (!isset($_GET['cod_provee'])) {
+                throw new Exception('Falta el código de proveedor.');
+            }
+
+            echo json_encode([
+                'success' => true,
+                'data' => $prov->exclusion()->historial($_GET['cod_provee'],
+                    ProveedoresExclusion::MODULO_PROV_LOCALES)
             ], JSON_UNESCAPED_UNICODE);
             break;
 
@@ -662,6 +751,14 @@ function indicadores($items) {
     $excluidoManual = 0.0;
     $nExcluidoManual = 0;
 
+    /* Y el proveedor entero excluido de este modulo, que es la tercera
+       decision: "esta deuda ya se cuenta en otra pestana". Si una factura
+       tiene las dos -proveedor y factura-, gana el proveedor y se cuenta una
+       sola vez, aca. Es el mismo reparto que ProveedoresProvider::seriesDeItem(). */
+    $excluidoProveedor = 0.0;
+    $nExcluidoProveedor = 0;
+    $provExcluidos = [];
+
     foreach ($items as $i) {
         $importe = floatval($i['IMPORTE_PENDIENTE']);
         $total += $importe;
@@ -669,6 +766,18 @@ function indicadores($items) {
 
         if (!empty($i['EXCLUIDO'])) {
             $excluido += $importe;
+        }
+
+        if (!empty($i['EXCLUIDO_PROVEEDOR'])) {
+            $excluidoProveedor += $importe;
+            $nExcluidoProveedor++;
+            $provExcluidos[$i['COD_PROVEE']] = true;
+
+            /* Un excluido no queda "fuera del filtro por forma" -ya se decidio
+               que no va, y el cartel lo dice en su propia parte- ni es trabajo
+               pendiente de fechar: la tarjeta "Vencido sin fecha" mide cuanto
+               falta decidir, y de este proveedor ya se decidio. */
+            continue;
         }
 
         if (!empty($i['EXCLUIDA_MANUAL'])) {
@@ -710,6 +819,9 @@ function indicadores($items) {
         'excluido' => round($excluido, 2),
         'excluido_manual' => round($excluidoManual, 2),
         'n_excluido_manual' => $nExcluidoManual,
+        'excluido_proveedor' => round($excluidoProveedor, 2),
+        'n_excluido_proveedor' => $nExcluidoProveedor,
+        'n_proveedores_excluidos' => count($provExcluidos),
         'cronograma' => round($total - $fuera, 2),
         'fuera_cronograma' => round($fuera, 2),
         'n_fuera_cronograma' => $nFuera,

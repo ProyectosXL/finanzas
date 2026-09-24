@@ -3,6 +3,7 @@
 require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/Ingresos.php';
 require_once __DIR__ . '/ProveedoresCategorias.php';
+require_once __DIR__ . '/ProveedoresExclusion.php';
 require_once __DIR__ . '/Planilla.php';
 
 /**
@@ -115,19 +116,35 @@ class Proveedores {
     /** @var array Cache de que columnas de override tiene la tabla de pagos */
     private $columnasPago = [];
 
+    /** @var ProveedoresExclusion */
+    private $exclusion;
+
     /**
      * @param ProveedoresCategorias|null $categorias Se puede inyectar para poder
      *        probar la clasificacion sin base.
+     * @param ProveedoresExclusion|null $exclusion Idem, para los excluidos por
+     *        proveedor
      */
-    function __construct($categorias = null) {
+    function __construct($categorias = null, $exclusion = null) {
         require_once __DIR__ . '/../../class/conexion.php';
         $this->conn = new Conexion;
         $this->categorias = ($categorias === null) ? new ProveedoresCategorias() : $categorias;
+
+        /* Comparte el lector de CPA01 con el maestro: los dos validan codigos
+           contra el mismo CPA01, y una sola instancia es un solo cache. */
+        $this->exclusion = ($exclusion === null)
+            ? new ProveedoresExclusion($this->categorias->tango())
+            : $exclusion;
     }
 
     /** @return ProveedoresCategorias El resolutor de categorias */
     public function categorias() {
         return $this->categorias;
+    }
+
+    /** @return ProveedoresExclusion Los proveedores excluidos por modulo */
+    public function exclusion() {
+        return $this->exclusion;
     }
 
     /* ====================================================================
@@ -164,6 +181,21 @@ class Proveedores {
                 . 'Corré sql/cashflow_prov_locales.sql contra la base central. '
                 . 'Mientras tanto, todo se proyecta a la fecha de vencimiento y no se '
                 . 'puede cargar ninguna fecha.';
+        } elseif (!$this->tieneColumnaPago('FUENTE_FECHA')) {
+            /* No bloquea nada: la columna Fecha de pago distingue igual la
+               planilla de la carga manual, leyendo ORIGEN. Lo que se pierde es
+               que esa marca siga siendo cierta el dia que alguien excluya una
+               factura con fecha importada. Ver fuenteFecha(). */
+            $avisos[] = 'Falta sql/cashflow_prov_locales_fuente_fecha.sql. La columna Fecha de '
+                . 'pago distingue igual lo importado de lo cargado a mano, pero una factura con '
+                . 'fecha de la planilla que después se excluya o cambie de forma va a figurar '
+                . 'como cargada a mano.';
+        }
+
+        $sinExclusion = $this->exclusion->avisoSinTabla();
+
+        if ($sinExclusion !== '') {
+            $avisos[] = $sinExclusion;
         }
 
         return array_merge($avisos, $this->categorias->getAvisos());
@@ -243,6 +275,9 @@ class Proveedores {
         }
 
         $pagos = $this->getPagos();
+
+        // Una consulta para todo el listado. Vacio si falta el script.
+        $excluidosProv = $this->exclusion->vigentes(ProveedoresExclusion::MODULO_PROV_LOCALES);
         $items = [];
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
@@ -267,6 +302,7 @@ class Proveedores {
 
             $forma = self::formaQueSeMuestra($cat, $pago);
             $excluidaManual = ($pago !== null && !empty($pago['EXCLUIDA']));
+            $exclProv = isset($excluidosProv[$cod]) ? $excluidosProv[$cod] : null;
 
             $items[] = [
                 'COD_PROVEE' => $cod,
@@ -285,6 +321,14 @@ class Proveedores {
                 'Pago' => $resuelta['fecha'],
                 'PAGO_ORIGINAL' => $resuelta['original'],
                 'ORIGEN_FECHA' => $resuelta['origen'],
+
+                /* ORIGEN_FECHA con la carga desdoblada: MANUAL / ARCHIVO /
+                   VENCIMIENTO / PLAZO / SIN_FECHA. Es lo que la columna Fecha
+                   de pago muestra. ORIGEN_FECHA queda como estaba -CARGADA o
+                   no- porque es lo que miran los indicadores, el fechado
+                   masivo y los avisos, y para ellos las dos cargas son lo
+                   mismo. Ver fuenteFecha(). */
+                'FUENTE_FECHA' => self::fuenteFecha($resuelta['origen'], $pago),
                 'VENCIDA' => $resuelta['vencida'],
                 'SIN_FECHA_CARGADA' => $resuelta['sin_fecha_cargada'],
 
@@ -324,9 +368,19 @@ class Proveedores {
                    EXCLUIDA_MANUAL viaja aparte porque NO hacen lo mismo en el
                    otro corte -sólo el tilde sale de PAGOS- y porque la pantalla
                    y los avisos tienen que poder decir cuanto es de cada uno. */
-                'EXCLUIDO' => ($cat['excluido'] || $excluidaManual),
+                'EXCLUIDO' => ($cat['excluido'] || $excluidaManual || $exclProv !== null),
                 'EXCLUIDA_MANUAL' => $excluidaManual,
                 'MOTIVO_EXCLUSION' => ($pago === null) ? null : $pago['MOTIVO_EXCLUSION'],
+
+                /* EL PROVEEDOR ENTERO ESTA EXCLUIDO de Proveedores Locales,
+                   porque su deuda ya se considera en otra pestana. Alcanza a
+                   toda su deuda. Entra en EXCLUIDO -el segundo corte- igual que
+                   la exclusion por factura, y en el primer corte va a su propia
+                   serie. Si ademas la factura esta excluida a mano, gana el
+                   proveedor: el importe se cuenta una vez. Ver
+                   ProveedoresProvider::seriesDeItem() y ProveedoresExclusion. */
+                'EXCLUIDO_PROVEEDOR' => ($exclProv !== null),
+                'MOTIVO_EXCLUSION_PROVEEDOR' => ($exclProv === null) ? null : $exclProv['MOTIVO'],
                 'SERIE' => $cat['serie'],
 
                 /* EL OVERRIDE DE ESTA FACTURA, si alguien lo puso. Es una REGLA
@@ -559,6 +613,55 @@ class Proveedores {
         ];
     }
 
+    /** De donde puede salir una fecha CARGADA */
+    const FUENTES_CARGA = ['MANUAL', 'ARCHIVO'];
+
+    /**
+     * De donde sale la fecha que muestra la columna Fecha de pago.
+     *
+     * Es ORIGEN_FECHA con la carga desdoblada en sus dos caminos:
+     *
+     *   MANUAL       la tipeo una persona, en la grilla o con el fechado masivo
+     *   ARCHIVO      vino de la planilla de pagos importada
+     *   VENCIMIENTO  nadie cargo nada: es el vencimiento de Tango
+     *   PLAZO        sin vencimiento usable: emision + plazo del maestro
+     *   SIN_FECHA    no hay con que ubicarlo
+     *
+     * NO REEMPLAZA A ORIGEN_FECHA, que sigue diciendo CARGADA para las dos
+     * primeras. Los indicadores, el fechado masivo, el aviso de vencidos sin
+     * fecha y la conciliacion preguntan "¿alguien decidio una fecha?", y para
+     * esa pregunta una fecha tipeada y una importada son lo mismo. Partir
+     * CARGADA en dos habria obligado a cambiar cada uno de esos lugares para que
+     * sigan diciendo lo que ya dicen.
+     *
+     * LA CARGA SALE DE FUENTE_FECHA, Y SI NO ESTA, DE ORIGEN. FUENTE_FECHA es la
+     * columna que se escribe junto con la fecha y nada mas; ORIGEN describe la
+     * ultima escritura sobre la fila, que puede haber sido excluir la factura o
+     * cambiarle la forma. Sin el script la unica fuente es ORIGEN, que hoy es
+     * exacta. Un valor que no es ninguno de los dos se muestra como MANUAL: una
+     * fecha que nadie sabe de donde salio no se puede atribuir a la planilla.
+     *
+     * Estatica y pura.
+     *
+     * @param string $origen El 'origen' de resolverFechaPago()
+     * @param array|null $pago La fila de overrides, si hay
+     * @return string
+     */
+    public static function fuenteFecha($origen, $pago) {
+        if ($origen !== 'CARGADA') {
+            return $origen;
+        }
+
+        foreach (['FUENTE_FECHA', 'ORIGEN'] as $campo) {
+            if ($pago !== null && isset($pago[$campo])
+                && in_array($pago[$campo], self::FUENTES_CARGA, true)) {
+                return $pago[$campo];
+            }
+        }
+
+        return 'MANUAL';
+    }
+
     /**
      * Normaliza una fecha y descarta los centinelas de Tango.
      *
@@ -691,7 +794,8 @@ class Proveedores {
                        OBSERVACION, ESTADO, FECHA_CANCELADO, ORIGEN, USUARIO, "
                        . $this->overrideSql('FORMA_PAGO_CRONOGRAMA') . " AS FORMA_PAGO_CRONOGRAMA, "
                        . ($this->tieneColumnaPago('EXCLUIDA') ? 'EXCLUIDA' : '0') . " AS EXCLUIDA, "
-                       . $this->overrideSql('MOTIVO_EXCLUSION') . " AS MOTIVO_EXCLUSION
+                       . $this->overrideSql('MOTIVO_EXCLUSION') . " AS MOTIVO_EXCLUSION, "
+                       . $this->overrideSql('FUENTE_FECHA') . " AS FUENTE_FECHA
                 FROM dbo." . self::TABLA_PAGO;
 
         $stmt = sqlsrv_query($cid, $sql);
@@ -735,6 +839,12 @@ class Proveedores {
                 'ESTADO' => $row['ESTADO'],
                 'FECHA_CANCELADO' => Horizonte::normalizarFecha($row['FECHA_CANCELADO']),
                 'ORIGEN' => $row['ORIGEN'],
+
+                /* De donde salio LA FECHA, que no es lo mismo que ORIGEN: ese
+                   describe la ultima escritura sobre la fila. NULL sin el
+                   script, y ahi fuenteFecha() cae a ORIGEN. Ver
+                   sql/cashflow_prov_locales_fuente_fecha.sql. */
+                'FUENTE_FECHA' => $row['FUENTE_FECHA'],
                 'USUARIO' => $row['USUARIO']
             ];
         }
@@ -1471,37 +1581,155 @@ class Proveedores {
     /**
      * Borra la fecha de pago de un comprobante: vuelve a valer el vencimiento.
      *
-     * ACA SI HAY BORRADO FISICO, igual que en la fecha manual de Cobranzas FR y
-     * por el mismo motivo: la fila no es un importe ni un dato historico, es un
-     * override puntual de un calculo, y su baja logica seria indistinguible de
-     * no tenerla. Lo que este modulo no borra son las categorias del maestro,
-     * que si explican como se clasificaba antes.
+     * BORRA LA FECHA, NO LA FILA. Esto CAMBIO. La tabla dejo de ser "las fechas
+     * de pago" y paso a ser "los overrides de este comprobante" -la fecha, la
+     * forma con la que se lo trata, si se lo excluye y con que motivo, y lo que
+     * trajo la planilla de pagos-, y el boton "Volver a proyectar al
+     * vencimiento" hacia un DELETE de la fila entera: se llevaba puesta la
+     * exclusion con su motivo, el override de forma y la observacion, que son
+     * decisiones que nadie pidio deshacer.
+     *
+     * Ahora son dos pasos, en una transaccion:
+     *
+     *   1. FECHA_PAGO y FUENTE_FECHA a NULL. Eso solo ya hace caer al
+     *      comprobante al vencimiento: resolverFechaPago() no ve fecha cargada.
+     *   2. Si a la fila no le queda NADA -ver condicionFilaVacia()-, se borra.
+     *      Una fila vacia no es un dato: es un override que ya no dice nada, y
+     *      dejarla seria indistinguible de no tenerla. Ahi si hay borrado
+     *      fisico, como en la fecha manual de Cobranzas FR.
+     *
+     * SIN sql/cashflow_prov_locales_forma_por_factura.sql FECHA_PAGO NO ADMITE
+     * NULL, y el paso 1 no se puede dar. Ahi se hace lo de antes, el DELETE
+     * directo: sin ese script tampoco existen la forma por factura ni la
+     * exclusion -dependen de el-, asi que lo unico que se pierde es la forma y
+     * la observacion de la planilla, que es exactamente lo que se perdia antes.
      *
      * @param string $codProvee
      * @param string $tComp
      * @param string $nComp
-     * @return bool
+     * @return bool Si habia una fecha cargada
      */
     public function deletePago($codProvee, $tComp, $nComp) {
         if (!$this->tablaCreada()) {
             throw new Exception('Todavía no existe la tabla de fechas de pago.');
         }
 
-        $stmt = sqlsrv_query($this->conectar(),
-            "DELETE FROM dbo." . self::TABLA_PAGO . "
-             WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?",
-            [Planilla::codigo($codProvee),
-             Planilla::codigo($tComp),
-             Planilla::codigo($nComp)]);
+        $clave = [Planilla::codigo($codProvee), Planilla::codigo($tComp),
+                  Planilla::codigo($nComp)];
+        $cid = $this->conectar();
 
-        if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al borrar la fecha de pago'));
+        // La columna la crea el mismo script que hace nullable a FECHA_PAGO.
+        if (!$this->tieneColumnaPago('FORMA_PAGO_CRONOGRAMA')) {
+            $stmt = sqlsrv_query($cid,
+                "DELETE FROM dbo." . self::TABLA_PAGO . "
+                 WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?", $clave);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al borrar la fecha de pago'));
+            }
+
+            $filas = sqlsrv_rows_affected($stmt);
+            sqlsrv_free_stmt($stmt);
+
+            return ($filas > 0);
         }
 
-        $filas = sqlsrv_rows_affected($stmt);
-        sqlsrv_free_stmt($stmt);
+        $opcionales = array_values(array_filter(
+            ['FORMA_PAGO_CRONOGRAMA', 'EXCLUIDA', 'MOTIVO_EXCLUSION', 'FUENTE_FECHA'],
+            [$this, 'tieneColumnaPago']));
 
-        return ($filas > 0);
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción'));
+        }
+
+        try {
+            $stmt = sqlsrv_query($cid,
+                "UPDATE dbo." . self::TABLA_PAGO . "
+                 SET FECHA_PAGO = NULL"
+                    . (in_array('FUENTE_FECHA', $opcionales, true) ? ', FUENTE_FECHA = NULL' : '')
+                    . ", FECHA_MOD = GETDATE()
+                 WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?
+                   AND FECHA_PAGO IS NOT NULL", $clave);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al borrar la fecha de pago'));
+            }
+
+            $habia = (sqlsrv_rows_affected($stmt) > 0);
+            sqlsrv_free_stmt($stmt);
+
+            $stmt = sqlsrv_query($cid,
+                "DELETE FROM dbo." . self::TABLA_PAGO . "
+                 WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?
+                   AND " . self::condicionFilaVacia($opcionales), $clave);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al limpiar la fila sin datos'));
+            }
+
+            sqlsrv_free_stmt($stmt);
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar el borrado'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return $habia;
+    }
+
+    /**
+     * La condicion SQL de "a esta fila de overrides no le queda nada".
+     *
+     * Es lo que decide si deletePago() borra la fila despues de sacarle la
+     * fecha. NADA quiere decir ninguna de estas cosas:
+     *
+     *   FECHA_PAGO                 la fecha, que se acaba de sacar
+     *   FORMA_PAGO / _ORIG         la forma con la que salio el pago, segun la
+     *                              planilla: un HECHO, no se tira
+     *   OBSERVACION                lo que dijo la planilla o una persona
+     *   ESTADO = 'CONCILIADO'      Tango ya dijo que se pago: es la prevision
+     *                              contra la realidad, que es para lo que se
+     *                              concilia
+     *   FORMA_PAGO_CRONOGRAMA      el override de forma de esta factura
+     *   EXCLUIDA / MOTIVO          la exclusion de esta factura
+     *
+     * LAS TRES ULTIMAS SON DE SCRIPTS POSTERIORES y entran solo si la columna
+     * existe: preguntar por una que no esta seria un error de SQL. FUENTE_FECHA
+     * no se pregunta: sin fecha no tiene nada que decir, y deletePago() la acaba
+     * de poner en NULL.
+     *
+     * Estatica y pura: devuelve texto, no toca la base. Los nombres son
+     * constantes del codigo, nunca algo que mande el cliente.
+     *
+     * @param array $opcionales Columnas opcionales que la tabla tiene
+     * @return string
+     */
+    public static function condicionFilaVacia($opcionales) {
+        $conds = [
+            'FECHA_PAGO IS NULL',
+            'FORMA_PAGO IS NULL',
+            'FORMA_PAGO_ORIG IS NULL',
+            'OBSERVACION IS NULL',
+            "ESTADO <> 'CONCILIADO'"
+        ];
+
+        if (in_array('FORMA_PAGO_CRONOGRAMA', $opcionales, true)) {
+            $conds[] = 'FORMA_PAGO_CRONOGRAMA IS NULL';
+        }
+
+        if (in_array('EXCLUIDA', $opcionales, true)) {
+            $conds[] = 'EXCLUIDA = 0';
+        }
+
+        if (in_array('MOTIVO_EXCLUSION', $opcionales, true)) {
+            $conds[] = 'MOTIVO_EXCLUSION IS NULL';
+        }
+
+        return '(' . implode(' AND ', $conds) . ')';
     }
 
     /**
@@ -1744,6 +1972,15 @@ class Proveedores {
     private function guardarPago($cid, $cod, $t, $n, $campos, $origen, $usuario) {
         if (empty($campos)) {
             throw new Exception('No hay nada que guardar para ese comprobante.');
+        }
+
+        /* LA FUENTE VIAJA CON LA FECHA, y solo con ella. ORIGEN -mas abajo-
+           describe esta escritura, sea cual sea; FUENTE_FECHA describe la fecha,
+           asi que se escribe cuando se escribe FECHA_PAGO y nada mas. Excluir
+           una factura o cambiarle la forma no la toca. Ver fuenteFecha() y
+           sql/cashflow_prov_locales_fuente_fecha.sql. */
+        if (array_key_exists('FECHA_PAGO', $campos) && $this->tieneColumnaPago('FUENTE_FECHA')) {
+            $campos['FUENTE_FECHA'] = ($campos['FECHA_PAGO'] === null) ? null : $origen;
         }
 
         $sets = [];

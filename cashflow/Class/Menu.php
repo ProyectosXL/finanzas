@@ -97,7 +97,22 @@ class Menu {
         ['tab' => 'parametros', 'nombre' => 'Parámetros', 'icono' => 'fa-sliders', 'estado' => self::DATOS]
     ];
 
-    /** Las categorias, en el orden en que se muestran */
+    /**
+     * Las categorias, en el orden en que se muestran.
+     *
+     * CUATRO PESTANAS EN DESUSO SE SACARON DEL MENU: Proveedores -> Cronograma,
+     * RRHH y Operativos -> Seguros, Financiero -> Bopreal y Financiero -> Pagos
+     * Div. Marzo. Las cuatro eran el aviso de "en construccion" y nada mas: no
+     * tenian proveedor en CashflowRegistry, ni SP, ni tabla, ni JS, ni fila en
+     * RO_T_CASHFLOW_CONF_FILA. Se borraron tambien sus archivos de Tabs/ y su
+     * entrada en TabController, asi que no queda ningun camino para llegar.
+     *
+     * OJO CON EL NOMBRE: la pestana 'cronograma' que se fue NO ES el cronograma
+     * de pagos de Proveedores Locales -FORMA_PAGO_CRONOGRAMA, las series
+     * PAGOS_FUERA_CRONOGRAMA y PAGOS_CRONO_OPERATIVOS-, que sigue vivo y vive
+     * dentro de la pestana proveedores_locales. Tampoco es Crono
+     * Nacionalizacion. Era un placeholder que nunca se construyo.
+     */
     private static $categorias = [
         [
             'codigo' => 'Ingresos',
@@ -145,7 +160,6 @@ class Menu {
             'abierta' => false,
             'items' => [
                 ['tab' => 'proveedores_locales', 'nombre' => 'Proveedores Locales', 'icono' => 'fa-store',         'estado' => self::DATOS, 'encabezado' => 'Cuentas a Pagar Locales'],
-                ['tab' => 'cronograma',          'nombre' => 'Cronograma',          'icono' => 'fa-calendar-days', 'estado' => self::PENDIENTE],
                 ['tab' => 'logistica_local',     'nombre' => 'Logística Local',     'icono' => 'fa-truck-fast',    'estado' => self::PENDIENTE]
             ]
         ],
@@ -158,7 +172,6 @@ class Menu {
                 ['tab' => 'haberes',      'nombre' => 'Haberes',                  'icono' => 'fa-users-gear',     'estado' => self::PENDIENTE],
                 ['tab' => 'impuestos',    'nombre' => 'Impuestos',                'icono' => 'fa-file-invoice',   'estado' => self::PENDIENTE],
                 ['tab' => 'alquileres',   'nombre' => 'Alquileres',               'icono' => 'fa-building',       'estado' => self::PENDIENTE],
-                ['tab' => 'seguros',      'nombre' => 'Seguros',                  'icono' => 'fa-shield-halved',  'estado' => self::PENDIENTE],
                 ['tab' => 'llaves_renov', 'nombre' => 'Llaves y Renov. Contratos','icono' => 'fa-key',            'estado' => self::PENDIENTE]
             ]
         ],
@@ -170,9 +183,7 @@ class Menu {
             'items' => [
                 ['tab' => 'pagos_tarjetas', 'nombre' => 'Pagos con Tarjetas y Otros', 'icono' => 'fa-money-check',          'estado' => self::PENDIENTE],
                 ['tab' => 'otros_socios',   'nombre' => 'Otros Socios y No Prog.',    'icono' => 'fa-handshake',            'estado' => self::PENDIENTE],
-                ['tab' => 'bopreal',        'nombre' => 'Bopreal',                    'icono' => 'fa-certificate',          'estado' => self::PENDIENTE],
-                ['tab' => 'prestamos',      'nombre' => 'Préstamos',                  'icono' => 'fa-money-bill-trend-up',  'estado' => self::PENDIENTE],
-                ['tab' => 'pagos_div',      'nombre' => 'Pagos Div. Marzo',           'icono' => 'fa-money-bill-transfer',  'estado' => self::PENDIENTE]
+                ['tab' => 'prestamos',      'nombre' => 'Préstamos',                  'icono' => 'fa-money-bill-trend-up',  'estado' => self::PENDIENTE]
             ]
         ]
     ];

@@ -617,4 +617,41 @@ if ($filas === null) {
 
     chequear('el FOB en pesos es el pendiente mas lo pagado, en las ' . count($filas)
         . ' filas', 0, $descuadre);
+
+    /* UNA VENCIDA CANCELADA EN COMEX NO ES UNA VENCIDA PENDIENTE, aunque nadie
+       la haya tildado: su saldo es cero y no hay fecha que corregir. Se chequea
+       sobre el padron real que la consulta traiga el flag y que diga lo mismo
+       que la regla pura, fila por fila. */
+    $malFlag = 0;
+    $canceladaPendiente = 0;
+
+    foreach ($filas as $f) {
+        if (!array_key_exists('VENCIDA_PENDIENTE', $f)
+            || $f['VENCIDA_PENDIENTE'] !== Comex::vencidaPendiente($f)) {
+            $malFlag++;
+        }
+
+        if (!empty($f['VENCIDA_PENDIENTE']) && $f['ESTADO_PAGO'] === Comex::ESTADO_CANCELADO) {
+            $canceladaPendiente++;
+        }
+    }
+
+    chequear('toda fila trae VENCIDA_PENDIENTE y coincide con la regla', 0, $malFlag);
+    chequear('y ninguna cancelada queda como vencida pendiente', 0, $canceladaPendiente);
 }
+
+seccion('una vencida cancelada en Comex no pide corregir la fecha');
+
+/* Sin tilde y con saldo cero: el pago salio por Comercio Exterior. Deja de ser
+   vencida para la pantalla y el aviso, pero sus importes siguen anulados por la
+   fecha -VENCIDA no cambia-, asi que el invariante de tres partes no se mueve. */
+$vencidaCancelada = ['VENCIDA' => true, 'ESTADO_PAGO' => Comex::ESTADO_CANCELADO,
+    'IMPORTE_ARS' => 0.0, 'IMPORTE_PAGADO_ARS' => 1000.0, 'IMPORTE_FOB_ARS' => 1000.0];
+
+chequear('no es vencida pendiente', false, Comex::vencidaPendiente($vencidaCancelada));
+chequear('no entra al aviso de vencidos', 0, count(Comex::avisosVencidos([$vencidaCancelada],
+    'FECHA_PAGO_EFECTIVA', 'IMPORTE_ARS', 'fecha estimada de pago')));
+chequear('y PAGOS_COMEX sigue anulado por la fecha', 0.0,
+    Comex::importeProyectable($vencidaCancelada, 'IMPORTE_PAGADO_ARS'));
+chequear('igual que PAGOS_TODO', 0.0,
+    Comex::importeProyectable($vencidaCancelada, 'IMPORTE_FOB_ARS'));

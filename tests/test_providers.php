@@ -83,6 +83,59 @@ foreach ($todos as $p) {
 chequear('todas las entradas del registro estan completas', true, $completos);
 
 /* ================================================================
+   Proveedores Locales: el corte por como se paga, con cuatro partes
+   ================================================================ */
+seccion('el corte de Proveedores Locales cierra con cuatro partes');
+
+require_once __DIR__ . '/../cashflow/Class/Providers/ProveedoresProvider.php';
+
+/* SIN BASE, CON IMPORTES. Se reparte un padron armado a mano -las ocho
+   combinaciones de cronograma x factura excluida x proveedor excluido, cada
+   una con un importe distinto- y se suma cada serie como lo haria el eje. Las
+   cuatro partes tienen que dar PAGOS_TODO al centavo, y el registro tiene que
+   declarar exactamente esas cuatro: es lo que el validador de estructura usa
+   para rechazar dos filas que se solapan. */
+$partes = CashflowRegistry::meta('PROV_LOCALES')['particiones']['PAGOS_TODO']['por cómo se paga'];
+
+chequear('el registro declara cuatro partes', ['PAGOS', 'PAGOS_FUERA_CRONOGRAMA',
+    'PAGOS_EXCLUIDOS_FACTURA', 'PAGOS_EXCLUIDOS_PROVEEDOR'], $partes);
+
+$totales = [];
+$importe = 1000.0;
+
+foreach ([true, false] as $crono) {
+    foreach ([false, true] as $factura) {
+        foreach ([false, true] as $proveedor) {
+            $item = ['CRONOGRAMA' => $crono, 'EXCLUIDA_MANUAL' => $factura,
+                     'EXCLUIDO_PROVEEDOR' => $proveedor,
+                     'EXCLUIDO' => ($factura || $proveedor), 'EN_MAESTRO' => true,
+                     'SERIE' => 'SIN_RUBRO'];
+
+            foreach (ProveedoresProvider::seriesDeItem($item) as $s) {
+                $totales[$s] = (isset($totales[$s]) ? $totales[$s] : 0) + $importe;
+            }
+
+            $importe += 137.25;
+        }
+    }
+}
+
+$sumaPartes = 0.0;
+
+foreach ($partes as $p) {
+    $sumaPartes += isset($totales[$p]) ? $totales[$p] : 0.0;
+}
+
+chequear('las cuatro partes suman PAGOS_TODO', $totales['PAGOS_TODO'], $sumaPartes);
+chequear('y el segundo corte tambien', $totales['PAGOS_TODO'],
+    $totales['PAGOS_OPERATIVOS'] + $totales['PAGOS_EXCLUIDOS']);
+
+// La serie nueva es parte del universo: sin eso el validador no ve el solape.
+chequear('la serie del proveedor excluido es componente de PAGOS_TODO', true,
+    in_array('PAGOS_EXCLUIDOS_PROVEEDOR',
+        CashflowRegistry::meta('PROV_LOCALES')['componentes']['PAGOS_TODO'], true));
+
+/* ================================================================
    La garantia de que un proveedor no puede tumbar el tablero
    ================================================================ */
 seccion('un proveedor que falla no lanza');
