@@ -400,6 +400,13 @@ foreach (ComprasProyectadas::ESTADOS as $estado) {
 
 seccion('El panel de parametros cubre los siete');
 
+/* getTodo devuelve los modulos en d.data. Buscarlos en la raiz dejaba el panel
+   vacio con "El modulo no esta declarado en Parametros", sin ningun error. */
+chequear('el panel busca el modulo en d.data, donde lo deja getTodo',
+    true, strpos($srcParamJs, "buscarModulo(d.data, 'COMPRAS_PROY')") !== false);
+
+chequear('y no en la raiz de la respuesta', 0, substr_count($srcParamJs, 'd.modulos'));
+
 foreach (array_keys(ComprasProyectadasProvider::DEFAULTS) as $clave) {
     chequear('el panel edita ' . $clave, true, strpos($srcParamJs, "'" . $clave . "'") !== false);
 }

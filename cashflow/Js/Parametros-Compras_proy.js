@@ -96,11 +96,10 @@
     function cargar() {
         pedir(ENDPOINT + '?action=getTodo')
             .then(function(d) {
-                var modulo = null;
-
-                (d.modulos || []).forEach(function(m) {
-                    if (m.codigo === 'COMPRAS_PROY') { modulo = m; }
-                });
+                /* getTodo devuelve los modulos en d.data, no en la raiz: pedir()
+                   devuelve la respuesta entera porque saveParametro no trae
+                   'data'. Mismo criterio que Parametros-Cob-Electronicos.js. */
+                var modulo = buscarModulo(d.data, 'COMPRAS_PROY');
 
                 if (!modulo) {
                     avisar(['El módulo Compras Proyectadas no está declarado en Parámetros.']);
@@ -137,6 +136,20 @@
             .catch(function(e) {
                 avisar(['No se pudieron leer los parámetros: ' + e.message]);
             });
+    }
+
+    function buscarModulo(data, codigo) {
+        if (!data || !data.modulos) {
+            return null;
+        }
+
+        for (var i = 0; i < data.modulos.length; i++) {
+            if (data.modulos[i].codigo === codigo) {
+                return data.modulos[i];
+            }
+        }
+
+        return null;
     }
 
     /* ================================================================
