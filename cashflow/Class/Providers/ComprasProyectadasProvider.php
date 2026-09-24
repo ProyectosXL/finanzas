@@ -54,9 +54,10 @@ require_once __DIR__ . '/../ComprasProyectadasDatos.php';
  *
  * SI FALLA ALGO, LA FILA VA EN CERO Y EL AVISO DICE QUE ES DE MENOS
  * -----------------------------------------------------------------
- * La degradacion mas grave es que no se pueda leer el presupuesto: sin el no
- * hay nada que proyectar. El aviso va PRIMERO y dice que se esta proyectando de
- * MENOS, no solo que falta algo. Una fila de egresos en cero se lee como "no
+ * La degradacion mas grave es que falte un insumo materializado -la historia
+ * de recepciones o el presupuesto oficial, que llenan dos SP-: sin ellos no hay
+ * nada que proyectar. El aviso va PRIMERO, dice que se esta proyectando de
+ * MENOS, no solo que falta algo, y nombra el job que falta correr. Una fila de egresos en cero se lee como "no
  * hay que pagar nada", que es lo contrario de lo que pasa. Mismo criterio que
  * Comex::avisoSinPagosComex().
  */
@@ -87,6 +88,42 @@ class ComprasProyectadasProvider extends CashflowProvider {
     /** @var array Lo ultimo que calculo, para que la pestana lo pueda mostrar */
     private $ultimaGrilla = null;
 
+    /** @var ComprasProyectadasDatos|null La unica instancia de lecturas del pedido */
+    private $datos = null;
+
+    /**
+     * Las lecturas del modulo, UNA instancia por proveedor.
+     *
+     * ES PUBLICA PARA QUE EL CONTROLLER USE LA MISMA. Sus caches -que tablas
+     * existen, el estado del log, si hay tabla de pagos o de ajustes- son por
+     * instancia: con una segunda, la pestana volvia a preguntar todo. Medido
+     * el 24/09/2026, el contraste y la existencia de la vista se leian dos
+     * veces por pedido de la pestana, por eso.
+     *
+     * @return ComprasProyectadasDatos
+     */
+    public function datos() {
+        if ($this->datos === null) {
+            $this->datos = new ComprasProyectadasDatos;
+        }
+
+        return $this->datos;
+    }
+
+    /**
+     * Reemplaza las lecturas. Para las pruebas, que ejercitan la degradacion
+     * sin tablas sin tener que borrar ninguna.
+     *
+     * @param ComprasProyectadasDatos $datos
+     * @return $this
+     */
+    public function conDatos($datos) {
+        $this->datos = $datos;
+        $this->ultimaGrilla = null;
+
+        return $this;
+    }
+
     protected function calcular($h) {
         if ($this->codigo() !== 'COMPRAS_PROY') {
             $this->avisar('Compras Exterior: el codigo de proveedor "' . $this->codigo()
@@ -95,16 +132,28 @@ class ComprasProyectadasProvider extends CashflowProvider {
             return [];
         }
 
-        $datos = new ComprasProyectadasDatos;
-        $params = $this->parametros();
+        $datos = $this->datos();
 
         /* --- Las degradaciones, en orden de gravedad --------------------- */
-        $aviso = $datos->avisoSinVista();
+
+        /* SIN LOS INSUMOS MATERIALIZADOS LA FILA VA EN CERO, y el aviso va
+           PRIMERO -antes incluso que el de parametros faltantes- y dice que se
+           proyecta DE MENOS. No hay vuelta a la consulta en vivo: ver el
+           encabezado de ComprasProyectadasDatos. */
+        $aviso = $datos->avisoFaltaJob();
 
         if ($aviso !== '') {
             $this->avisar('Compras Exterior: ' . $aviso);
 
             return $this->seriesVacias();
+        }
+
+        $params = $this->parametros();
+
+        /* Los insumos estan, pero pueden estar viejos. No cambian ningun
+           numero: dicen de cuando es el que se esta mostrando. */
+        foreach ($datos->avisosInsumos($params['compras_proy_anios_cuota'], $h->hoy(), self::PAIS) as $a) {
+            $this->avisar('Compras Exterior: ' . $a);
         }
 
         $dolar = new DolarFuturo;
@@ -124,7 +173,7 @@ class ComprasProyectadasProvider extends CashflowProvider {
             }
         }
 
-        $contraste = ComprasProyectadasDatos::avisoContraste($datos->contrasteVista());
+        $contraste = ComprasProyectadasDatos::avisoContraste($datos->contrasteVista(self::PAIS));
 
         if ($contraste !== '') {
             $this->avisar('Compras Exterior: ' . $contraste);
@@ -213,7 +262,7 @@ class ComprasProyectadasProvider extends CashflowProvider {
             return $this->ultimaGrilla;
         }
 
-        $datos = ($datos === null) ? new ComprasProyectadasDatos : $datos;
+        $datos = ($datos === null) ? $this->datos() : $datos;
         $params = ($params === null) ? $this->parametros() : $params;
         $dolar = ($dolar === null) ? new DolarFuturo : $dolar;
 

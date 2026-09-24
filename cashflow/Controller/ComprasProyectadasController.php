@@ -10,9 +10,11 @@
  * getter: con la cuenta en dos lados, la pestana y el tablero podrian mostrar
  * dos estimaciones distintas del mismo mes y nadie podria decir cual vale.
  *
- * LO UNICO QUE SE ESCRIBE ES EL AJUSTE MANUAL, que es una tabla del cashflow:
- * una afirmacion del cashflow sobre su propia proyeccion. El presupuesto de
- * compras, Tango y el maestro de Comercio Exterior se LEEN y nada mas.
+ * LO UNICO QUE SE ESCRIBE ES DEL CASHFLOW: el ajuste manual -una afirmacion
+ * del cashflow sobre su propia proyeccion- y los insumos materializados, que
+ * el boton "Actualizar ahora" recalcula corriendo los mismos SP que el job.
+ * El presupuesto de compras, Tango y el maestro de Comercio Exterior se LEEN
+ * y nada mas.
  */
 
 error_reporting(E_ALL);
@@ -26,9 +28,19 @@ try {
     require_once __DIR__ . '/../Class/ComprasProyectadas.php';
     require_once __DIR__ . '/../Class/ComprasProyectadasDatos.php';
     require_once __DIR__ . '/../Class/ComprasProyectadasAjustes.php';
+    require_once __DIR__ . '/../Class/ComprasProyectadasJob.php';
     require_once __DIR__ . '/../Class/Providers/ComprasProyectadasProvider.php';
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
+
+    /** El usuario logueado, o null. Mismo criterio que el resto de los controllers */
+    function usuarioActual() {
+        if (session_status() === PHP_SESSION_NONE) {
+            @session_start();
+        }
+
+        return isset($_SESSION['usuario']) ? $_SESSION['usuario'] : null;
+    }
 
     /** El cuerpo JSON de un POST */
     function cuerpo() {
@@ -79,16 +91,21 @@ try {
             $g = $provider->grilla($h);
 
             /* Los avisos de lectura van ADELANTE de los del calculo: explican
-               por que puede faltar plata entera -no hay presupuesto, no se
-               puede leer lo pagado- y eso se lee antes que un mes sin historia.
-               El de la vista va primero de todos: es el unico que deja la fila
-               en CERO. */
-            $datos = new ComprasProyectadasDatos;
+               por que puede faltar plata entera -falta un insumo, no se puede
+               leer lo pagado- y eso se lee antes que un mes sin historia. El
+               del job va primero de todos: es el unico que deja la fila en
+               CERO.
+
+               LAS LECTURAS SON LAS DEL PROVEEDOR, no una instancia nueva: sus
+               caches son por instancia, y con otra se volvia a preguntar todo.
+               Asi que nada de esto vuelve a la base. */
+            $datos = $provider->datos();
             $avisos = [];
 
-            foreach ([$datos->avisoSinVista(), $datos->avisoSinPagos(),
+            foreach ([$datos->avisoFaltaJob(), $datos->avisoSinPagos(),
                       $datos->avisoSinAjustes(),
-                      ComprasProyectadasDatos::avisoContraste($datos->contrasteVista())] as $a) {
+                      ComprasProyectadasDatos::avisoContraste(
+                          $datos->contrasteVista(ComprasProyectadasProvider::PAIS))] as $a) {
                 if ($a !== '') {
                     $avisos[] = $a;
                 }
@@ -126,9 +143,26 @@ try {
                 'parametros' => $g['parametros'],
                 'avisos' => $avisos,
                 'notas' => $g['notas'],
+                /* "Historia al dd/mm hh:mm" y "Presupuesto al dd/mm hh:mm":
+                   de cuando son los insumos con que se calculo todo lo de
+                   arriba. */
+                'insumos' => ComprasProyectadasDatos::insumosParaPantalla($datos->estadoInsumos()),
                 'hoy' => $h->hoy(),
                 'fin_horizonte' => $h->fin()
             ]);
+            break;
+
+        case 'actualizarInsumo':
+            /* EL BOTON "ACTUALIZAR AHORA". Corre UNO de los dos SP -la pantalla
+               los pide de a uno para marcar cada paso- con el usuario de la
+               pantalla, que queda en el log como quien lo pidio. */
+            $body = cuerpo();
+            $proceso = isset($body['proceso']) ? (string) $body['proceso'] : '';
+
+            $job = new ComprasProyectadasJob;
+            $r = $job->correr($proceso, usuarioActual());
+
+            echo json_encode(['success' => true] + $r);
             break;
 
         case 'getDetalleVersion':

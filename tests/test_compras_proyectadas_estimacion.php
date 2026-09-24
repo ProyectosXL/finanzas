@@ -618,10 +618,21 @@ if (!Pruebas::hayBase()) {
 } else {
     $d = new ComprasProyectadasDatos;
 
-    $hayVista = $d->tieneVista();
-    chequear('la vista del presupuesto existe', true, $hayVista);
+    /* La vista se sigue leyendo en vivo para el detalle por rubro. */
+    chequear('la vista del presupuesto existe', true, $d->tieneVista());
 
-    if ($hayVista) {
+    /* EL PRESUPUESTO Y LA HISTORIA SE LEEN DE LAS TABLAS MATERIALIZADAS: sin
+       una corrida buena de sus SP no hay nada que verificar aca. */
+    $estado = $d->estadoInsumos();
+    $hayPresupuesto = ($estado['presupuesto']['ok'] !== null);
+    $hayHistoria = ($estado['historia']['filas'] > 0);
+
+    if (!$hayPresupuesto) {
+        Pruebas::saltear('el presupuesto materializado no tiene ninguna corrida buena: falta correr '
+            . ComprasProyectadasDatos::SP_PRESUPUESTO);
+    }
+
+    if ($hayPresupuesto) {
         $versiones = $d->versionesOficiales();
 
         chequear('hay al menos una version oficial vigente', true, count($versiones) > 0);
@@ -668,39 +679,46 @@ if (!Pruebas::hayBase()) {
         }
     }
 
-    $historia = $d->historiaRecepciones(3);
-
-    chequear('la historia de recepciones trae datos', true, count($historia) > 0);
-
-    $mesesRaros = 0;
-    $negativos = 0;
-
-    foreach ($historia as $h) {
-        if ($h['mes'] < 1 || $h['mes'] > 12) {
-            $mesesRaros++;
-        }
-
-        if ($h['unidades'] < 0 || $h['importe_usd'] < 0) {
-            $negativos++;
-        }
+    if (!$hayHistoria) {
+        Pruebas::saltear('la historia materializada esta vacia: falta correr '
+            . ComprasProyectadasDatos::SP_HISTORIA);
     }
 
-    chequear('con meses entre 1 y 12', 0, $mesesRaros);
-    chequear('y sin importes ni unidades negativas', 0, $negativos);
+    $historia = $hayHistoria ? $d->historiaRecepciones(3) : [];
 
-    chequear('cubre a lo sumo tres anios calendario',
-        true, count(array_unique(array_column($historia, 'anio'))) <= 3);
+    if ($hayHistoria) {
+        chequear('la historia de recepciones trae datos', true, count($historia) > 0);
 
-    $cuotaReal = ComprasProyectadas::cuota(ComprasProyectadasDatos::conPeso($historia));
+        $mesesRaros = 0;
+        $negativos = 0;
 
-    foreach (['VER', 'INV'] as $tipo) {
-        $suma = 0.0;
+        foreach ($historia as $h) {
+            if ($h['mes'] < 1 || $h['mes'] > 12) {
+                $mesesRaros++;
+            }
 
-        foreach ($cuotaReal[$tipo]['pct'] as $p) {
-            $suma += floatval($p);
+            if ($h['unidades'] < 0 || $h['importe_usd'] < 0) {
+                $negativos++;
+            }
         }
 
-        chequear('la cuota real de ' . $tipo . ' suma 100', 100.0, round($suma, 6));
+        chequear('con meses entre 1 y 12', 0, $mesesRaros);
+        chequear('y sin importes ni unidades negativas', 0, $negativos);
+
+        chequear('cubre a lo sumo tres anios calendario',
+            true, count(array_unique(array_column($historia, 'anio'))) <= 3);
+
+        $cuotaReal = ComprasProyectadas::cuota(ComprasProyectadasDatos::conPeso($historia));
+
+        foreach (['VER', 'INV'] as $tipo) {
+            $suma = 0.0;
+
+            foreach ($cuotaReal[$tipo]['pct'] as $p) {
+                $suma += floatval($p);
+            }
+
+            chequear('la cuota real de ' . $tipo . ' suma 100', 100.0, round($suma, 6));
+        }
     }
 
     /* EL PADRON TIENE QUE SER EL MISMO QUE EL DE PROVEEDORES EXTERIOR. Si los
@@ -749,32 +767,34 @@ if (!Pruebas::hayBase()) {
 
     /* La cuenta entera contra la base, con los parametros reales. No se fija un
        importe -cambia con cada version oficial- sino los invariantes. */
-    $hoy = date('Y-m-d');
-    $v = ComprasProyectadas::ventana(substr($hoy, 0, 7),
-        date('Y-m-t', strtotime(substr($hoy, 0, 7) . '-01 +11 month')), 6, 15, 47, 2);
+    if ($hayHistoria && $hayPresupuesto) {
+        $hoy = date('Y-m-d');
+        $v = ComprasProyectadas::ventana(substr($hoy, 0, 7),
+            date('Y-m-t', strtotime(substr($hoy, 0, 7) . '-01 +11 month')), 6, 15, 47, 2);
 
-    $r = ComprasProyectadas::estimar($v, $cuotaReal, $d->versionesOficiales(), $cargado,
-        ['nac_pct' => 89.0]);
+        $r = ComprasProyectadas::estimar($v, $cuotaReal, $d->versionesOficiales(), $cargado,
+            ['nac_pct' => 89.0]);
 
-    chequear('la ventana real devuelve seis meses', 6, count($r['meses']));
+        chequear('la ventana real devuelve seis meses', 6, count($r['meses']));
 
-    $negativas = 0;
-    $sinEstado = 0;
+        $negativas = 0;
+        $sinEstado = 0;
 
-    foreach ($r['meses'] as $f) {
-        if ($f['estimacion_usd'] < 0) {
-            $negativas++;
+        foreach ($r['meses'] as $f) {
+            if ($f['estimacion_usd'] < 0) {
+                $negativas++;
+            }
+
+            if (!in_array($f['estado'], ComprasProyectadas::ESTADOS, true)) {
+                $sinEstado++;
+            }
         }
 
-        if (!in_array($f['estado'], ComprasProyectadas::ESTADOS, true)) {
-            $sinEstado++;
-        }
+        chequear('ninguna estimacion es negativa', 0, $negativas);
+        chequear('y todos los meses tienen un estado declarado', 0, $sinEstado);
+
+        chequear('la nacionalizacion es el 89 % de la estimacion',
+            round($r['totales']['estimacion_usd'] * 0.89, 4),
+            round($r['totales']['nacionalizacion_usd'], 4));
     }
-
-    chequear('ninguna estimacion es negativa', 0, $negativas);
-    chequear('y todos los meses tienen un estado declarado', 0, $sinEstado);
-
-    chequear('la nacionalizacion es el 89 % de la estimacion',
-        round($r['totales']['estimacion_usd'] * 0.89, 4),
-        round($r['totales']['nacionalizacion_usd'], 4));
 }

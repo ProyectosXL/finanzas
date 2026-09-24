@@ -146,10 +146,8 @@
 
     function cargar() {
         var spinner = document.getElementById('cpSpinner');
-        var wrapper = document.getElementById('cpTableWrapper');
 
-        if (spinner) { spinner.style.display = 'block'; }
-        if (wrapper) { wrapper.style.display = 'none'; }
+        progreso('Calculando la proyección…');
 
         fetch(ENDPOINT + '?action=getGrilla')
             .then(function(r) { return r.json(); })
@@ -177,6 +175,7 @@
         pintarAvisos(datos.avisos, 'aviso');
         pintarNotas(datos.notas);
         pintarCabecera();
+        pintarInsumos();
         pintarKpis();
         pintarGrilla();
         pintarVersiones();
@@ -285,6 +284,105 @@
                 (par.compras_proy_base_cuota === 'UNIDADES' ? 'unidades' : 'importe') + '. ' +
                 'Nacionalización ' + pct(par.compras_proy_nac_pct) + ' del FOB.';
         }
+    }
+
+    /**
+     * "Historia al dd/mm hh:mm · Presupuesto al dd/mm hh:mm".
+     *
+     * LOS DOS INSUMOS PESADOS LOS CALCULA UN JOB, no este pedido. Sin la fecha,
+     * un presupuesto de ayer se lee como el de hoy. Si la ultima corrida fallo
+     * se marca en rojo, con el error en el tooltip: el numero de arriba sigue
+     * siendo el de la ultima corrida buena.
+     */
+    function pintarInsumos() {
+        var cont = document.getElementById('cpInsumosTexto');
+        var ins = datos.insumos || {};
+
+        if (!cont) { return; }
+
+        cont.innerHTML = [['historia', 'Historia'], ['presupuesto', 'Presupuesto']].map(function(par) {
+            var i = ins[par[0]] || {};
+            var texto = i.al ? par[1] + ' al ' + i.al : par[1] + ': sin calcular';
+            var ayuda = i.al
+                ? 'Calculado' + (i.usuario ? ' por ' + i.usuario : '') +
+                  (i.filas !== null && i.filas !== undefined ? ' · ' + i.filas + ' filas' : '')
+                : 'Nunca corrió su job: la fila va en cero.';
+            var clase = (!i.al) ? 'text-danger' : (i.fallo ? 'text-danger' : 'text-muted');
+            var icono = (!i.al || i.fallo) ? 'fa-triangle-exclamation' : 'fa-database';
+
+            if (i.fallo) { ayuda += '\nLa última corrida falló: ' + i.fallo; }
+
+            return '<span class="' + clase + ' me-3" title="' + esc(ayuda) + '">' +
+                '<i class="fas ' + icono + ' me-1"></i>' + esc(texto) + '</span>';
+        }).join('');
+    }
+
+    /**
+     * El boton "Actualizar ahora": los dos SP, de a uno, y despues la grilla.
+     *
+     * DE A UNO Y EN ORDEN, y no los dos en paralelo: si el del presupuesto
+     * falla -el linked server es lo mas fragil-, la historia ya quedo al dia y
+     * la pantalla dice cual de los dos fallo.
+     */
+    function actualizarAhora() {
+        var btn = document.getElementById('btnActualizarInsumos');
+        var pasos = [
+            { proceso: 'historia', texto: 'Historia de recepciones' },
+            { proceso: 'presupuesto', texto: 'Presupuesto oficial' }
+        ];
+
+        if (btn) { btn.disabled = true; }
+
+        var cadena = Promise.resolve();
+
+        pasos.forEach(function(p) {
+            cadena = cadena.then(function() {
+                progreso('Recalculando: ' + p.texto + '…');
+
+                return fetch(ENDPOINT + '?action=actualizarInsumo', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ proceso: p.proceso })
+                })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (!d || !d.success) {
+                            throw new Error(p.texto + ': ' +
+                                ((d && d.message) || 'respuesta inesperada del servidor'));
+                        }
+                    });
+            });
+        });
+
+        cadena
+            .then(function() {
+                Notificacion.exito('Historia y presupuesto recalculados.');
+            })
+            .catch(function(e) {
+                Notificacion.error('No se pudo actualizar: ' + e.message, {
+                    detalle: 'La grilla se vuelve a leer igual, con lo último que quedó calculado.'
+                });
+            })
+            .then(function() {
+                if (btn) { btn.disabled = false; }
+
+                cargar();
+            });
+    }
+
+    function progreso(texto) {
+        var spinner = document.getElementById('cpSpinner');
+        var wrapper = document.getElementById('cpTableWrapper');
+
+        if (spinner) {
+            spinner.style.display = 'block';
+
+            var p = spinner.querySelector('p');
+
+            if (p) { p.textContent = texto; }
+        }
+
+        if (wrapper) { wrapper.style.display = 'none'; }
     }
 
     function pintarKpis() {
@@ -860,6 +958,10 @@
         var btn = document.getElementById('btnRefreshComprasProy');
 
         if (btn) { btn.addEventListener('click', cargar); }
+
+        var btnInsumos = document.getElementById('btnActualizarInsumos');
+
+        if (btnInsumos) { btnInsumos.addEventListener('click', actualizarAhora); }
 
         var input = document.getElementById('busquedaComprasProy');
 

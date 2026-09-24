@@ -455,11 +455,53 @@ Lo ideal para el presupuesto es que la app de compras arranque el job (`sp_start
 
 > **Ojo con el login del linked server.** Corriendo desde el Agent, la consulta a `[XL-APPS]` sale con el mapeo de login de la cuenta del servicio. Si no existe, el job falla con *Login failed*: queda en el log y la pestaña lo muestra.
 
+### Cómo lo lee el cashflow
+
+`ComprasProyectadasDatos` lee las tres tablas en vez de las fuentes: `historiaRecepciones()` filtra de la tabla los años que pide la cuota, `versionesOficiales()` y `contrasteVista()` leen el resumen y el contraste. La consulta en vivo de la historia **no se borró**: quedó como `historiaRecepcionesEnVivo()`, la definición contra la que una prueba verifica el SP. El proveedor no la llama.
+
+El estado de los insumos —qué tablas existen, cuánto tienen y cómo salieron las últimas corridas— se lee **una vez por pedido** (`estadoInsumos()`), y **la pestaña usa las mismas lecturas que el proveedor** (`$provider->datos()`). Antes el controller creaba otra instancia y volvía a preguntar todo: el contraste y la existencia de la vista se leían dos veces por pedido.
+
+### Qué pasa si el job no corre
+
+| Situación | Qué pasa | Aviso |
+| --- | --- | --- |
+| No existen las tablas | **Filas en cero** | Primero: *se está proyectando DE MENOS*, y qué job y qué script faltan |
+| Historia vacía | **Filas en cero** | Ídem, con el error de la última corrida si falló |
+| Presupuesto sin ninguna corrida buena | **Filas en cero** | Ídem |
+| Presupuesto vacío **después** de una corrida buena | Meses en `SIN_PRESUPUESTO` | El de siempre: no hay versión oficial |
+| La última corrida falló, pero hubo una buena antes | Se usa la buena | *La última corrida … falló: …. Se sigue usando el cálculo del dd/mm hh:mm* |
+| A la historia le falta el año que cerró | La cuota se arma sin él | *Le falta el año X* — el 1 de enero, hasta que corra el job |
+| La cuota pide más años de los guardados | Se arma con los que hay | *Arranca en X y la cuota pide desde Y* |
+| Presupuesto de hace más de 24 h | Se usa igual | *Se calculó hace N horas: su job no está corriendo* |
+| Una oficial marcada o calculada **después** del último cálculo | Se usa el anterior | *Hay una versión oficial más nueva …* |
+
+**No hay vuelta a la consulta en vivo.** Con 40 segundos de lectura el tablero entero queda esperando, y un fallback silencioso escondería que el job no corre.
+
+Para el último aviso se leen **en vivo** las oficiales de la cabecera, por el linked server desde central: es la única lectura del presupuesto que sigue en cada pedido, y es chica a propósito (un `SELECT` de tres columnas).
+
+> **Un ajuste manual guardado antes de que corra el job se ata a la versión que la pantalla mostraba.** Es lo correcto: el número se puso mirando esa versión. Cuando el job traiga la nueva, el ajuste se descarta con su aviso, como con cualquier cambio de oficial.
+
+### En la pestaña
+
+- **"Historia al dd/mm hh:mm · Presupuesto al dd/mm hh:mm"**, debajo de la ventana: la última corrida **buena** de cada SP. En rojo si nunca corrió o si la última falló, con el error en el tooltip.
+- **"Actualizar ahora"** corre los dos SP **de a uno** —primero la historia, después el presupuesto— y recién después vuelve a leer la grilla. De a uno para que, si falla el presupuesto (el linked server es lo más frágil), la historia ya quede al día y la pantalla diga cuál de los dos falló. Queda en el log con el usuario de la pantalla. La clase que los corre es `ComprasProyectadasJob`, aparte de la de lectura, que sigue sin escribir nada.
+
+### Antes y después
+
+Medido contra la base el 24/09/2026:
+
+| | Antes | Después |
+| --- | ---: | ---: |
+| Pestaña *Proyección* | 33,9 s / 39,9 s | **0,66 s / 0,15 s / 0,65 s** |
+| Pestaña sin las tablas (degradada, filas en cero) | — | 0,35 s / 0,46 s |
+
+El **después** se midió con las tablas creadas y vacías: las lecturas de la historia, el resumen y el contraste **ejecutaron su consulta real** contra su tabla y devolvieron los datos que calcula el SP. Todo lo demás —lo ya comprado, los ajustes, la curva, los parámetros y las oficiales por linked server— fue real. La estimación dio **U$S 4.020.940,50**, la misma de la sección 9. Con los SP corridos, `tests/test_compras_proyectadas_materializado.php` lo mide sobre las tablas llenas y exige menos de 2 s.
+
 ---
 
 ## Lo que este módulo no hace
 
-- **No escribe en tablas de compras, de Tango ni de Comercio Exterior.** Las tres se leen y se dejan como están. Hay una prueba que busca `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `DROP` y `TRUNCATE` sobre `ComprasProyectadas.php` y `ComprasProyectadasDatos.php` y exige cero en las seis. Lo único que escribe es la tabla de ajustes, que es del cashflow, y vive en una clase aparte **para que esa prueba siga siendo posible**.
+- **No escribe en tablas de compras, de Tango ni de Comercio Exterior.** Las tres se leen y se dejan como están. Hay una prueba que busca `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `DROP` y `TRUNCATE` sobre `ComprasProyectadas.php` y `ComprasProyectadasDatos.php` y exige cero en las seis. Lo único que escribe es del cashflow: la tabla de ajustes y, desde *Actualizar ahora*, las tablas materializadas —corriendo los mismos SP que el job—. Las dos cosas viven en clases aparte (`ComprasProyectadasAjustes` y `ComprasProyectadasJob`) **para que esa prueba siga siendo posible**.
 - **No toca las filas existentes del tablero.** *Proveedores Exterior* y *Nacionalizaciones* siguen trayendo exactamente lo que traían: los contenedores cargados, ubicados por sus fechas del maestro. El script sólo les declara su `NATURALEZA`.
 - **No proyecta flete ni seguro.** Son costos logísticos y quedaron fuera de alcance. Es el mismo pendiente que anota `README-comex.md`: al 21/09/2026 son U$S 208.560,00 y U$S 5.353,05 sobre 60 contenedores.
 - **Sólo Argentina.** Uruguay tiene su propia base (`POWER_BI_CONTROL_URUGUAY`) y su propio presupuesto.
@@ -478,7 +520,8 @@ php tests/run.php compras_proyectadas
 | `tests/test_compras_proyectadas_estimacion.php` | La cuenta entera y los siete estados. 120, de las cuales 47 contra la base |
 | `tests/test_compras_proyectadas_provider.php` | El proveedor, el registro, el script y el cableado de la pantalla. 112 |
 | `tests/test_compras_proyectadas_ajustes.php` | El ajuste manual y su descarte. 64 |
-| | **394 en total** |
+| `tests/test_compras_proyectadas_materializado.php` | Los scripts del job, la lectura de las tablas, los avisos de insumos faltantes o viejos, y —contra la base, con los SP corridos— que el SP de historia dé lo mismo que la lectura en vivo para 2023–2025 y que la pestaña tarde menos de 2 s |
+| | **459 en total** |
 
 Lo que necesita SQL Server se saltea solo, y **es todo de lectura**: ninguna prueba da de alta ni de baja un ajuste contra la base real.
 
@@ -513,8 +556,9 @@ sql/cashflow_comex_materializado.sql          El log de corridas y las tres tabl
 sql/RO_SP_CASHFLOW_COMEX_RECEP_HIST.sql       El SP de la historia de recepciones
 sql/RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN.sql   El SP del presupuesto oficial y el contraste
 cashflow/Class/ComprasProyectadas.php         Las reglas PURAS: temporada, cuota, ventana y la estimacion
-cashflow/Class/ComprasProyectadasDatos.php    Las tres lecturas. NO escribe nada
-cashflow/Class/ComprasProyectadasAjustes.php  Lo unico que escribe: el ajuste manual
+cashflow/Class/ComprasProyectadasDatos.php    Las lecturas y el estado de los insumos. NO escribe nada
+cashflow/Class/ComprasProyectadasAjustes.php  Escribe el ajuste manual
+cashflow/Class/ComprasProyectadasJob.php      Corre los dos SP desde "Actualizar ahora"
 cashflow/Class/Providers/ComprasProyectadasProvider.php   Las dos series del tablero
 cashflow/Class/CashflowRegistry.php           El modulo y sus dos series
 cashflow/Controller/ComprasProyectadasController.php      La grilla, el detalle y el ABM del ajuste
@@ -527,14 +571,17 @@ tests/test_compras_proyectadas.php
 tests/test_compras_proyectadas_estimacion.php
 tests/test_compras_proyectadas_provider.php
 tests/test_compras_proyectadas_ajustes.php
+tests/test_compras_proyectadas_materializado.php
 ```
 
 Lo que se lee y **nunca** se escribe, de tres duenios distintos:
 
 ```
-POWER_BI_CONTROL   RO_V_COMPRA_PROYECTADA_VIGENTE     el presupuesto oficial
-                   RO_T_HISTORIAL_COMPRAS_PROYECTADAS_*  solo para el contraste
-central (Tango)    CPA35 + STA20                      la historia de recepciones
+POWER_BI_CONTROL   RO_V_COMPRA_PROYECTADA_VIGENTE     el presupuesto oficial (lo resume el SP;
+                                                      en vivo, solo el detalle por rubro)
+                   RO_T_HISTORIAL_COMPRAS_PROYECTADAS_*  el contraste (lo resume el SP), y la
+                                                      cabecera en vivo para el aviso de oficial nueva
+central (Tango)    CPA35 + STA20                      la historia de recepciones (la agrupa el SP)
 central (Comex)    RO_T_IMPORTACIONES_ENCABEZADO      lo ya comprado
                    RO_T_IMPORTACIONES_ENCABEZADO_PAGOS   y lo ya pagado de eso
                    RO_T_IMPORTACIONES_DETALLE         para saber cual ya cerro

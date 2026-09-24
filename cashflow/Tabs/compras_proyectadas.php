@@ -112,8 +112,16 @@
             <div class="d-flex gap-2">
                 <!-- El selector de columnas fijas lo dibuja Js/columnas-fijas.js -->
                 <div id="colFijasComprasProy"></div>
-                <button id="btnRefreshComprasProy" class="btn btn-sm btn-outline-primary">
+                <button id="btnRefreshComprasProy" class="btn btn-sm btn-outline-primary"
+                        title="Vuelve a leer la grilla con los insumos que ya están calculados">
                     <i class="fas fa-sync-alt me-1"></i> Actualizar
+                </button>
+                <!-- Corre los mismos dos SP que el job del SQL Agent: la
+                     historia de recepciones y el presupuesto oficial. Queda en
+                     el log con el usuario de la pantalla. -->
+                <button id="btnActualizarInsumos" class="btn btn-sm btn-outline-secondary"
+                        title="Recalcula ahora la historia de recepciones y el presupuesto oficial (los mismos SP que corre el job), y después la grilla">
+                    <i class="fas fa-database me-1"></i> Actualizar ahora
                 </button>
                 <!-- Lo engancha Js/tabla-export.js por el data-exportar, igual
                      que el resto del módulo: baja exactamente lo que se ve. -->
@@ -131,6 +139,9 @@
         <div class="card-body py-2 border-bottom">
             <small class="text-muted" id="cpVentanaTexto"></small>
             <small class="text-muted ms-2" id="cpParametrosTexto"></small>
+            <!-- De cuándo son los dos insumos que calcula el job. Sin esto, un
+                 presupuesto de ayer se lee como el de hoy. -->
+            <div class="small mt-1" id="cpInsumosTexto"></div>
         </div>
 
         <div class="card-body p-0">

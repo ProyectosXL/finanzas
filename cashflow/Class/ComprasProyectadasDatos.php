@@ -16,24 +16,37 @@ require_once __DIR__ . '/Comex.php';
  * LAS TRES FUENTES, Y SON DE TRES DUENIOS DISTINTOS
  * -------------------------------------------------
  *
- *   1. EL PRESUPUESTO OFICIAL        conexion 'power'  (POWER_BI_CONTROL)
- *      RO_V_COMPRA_PROYECTADA_VIGENTE, la vista de la app de compras. Es la
- *      unica de las tres que puede NO EXISTIR, y su ausencia cambia numeros:
- *      sin ella no hay nada que proyectar y la fila va en cero. Ver
- *      avisoSinVista().
+ *   1. EL PRESUPUESTO OFICIAL        MATERIALIZADO en central
+ *      RO_V_COMPRA_PROYECTADA_VIGENTE, la vista de la app de compras en
+ *      POWER_BI_CONTROL, resumida por RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN en
+ *      RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN. Solo el detalle por rubro de una
+ *      version se sigue leyendo en vivo, de la vista.
  *
- *   2. LA HISTORIA DE RECEPCIONES    conexion 'central' (Tango)
- *      CPA35 + STA20. De aca sale la cuota: cuanto entra en cada mes
- *      calendario. Es historia, asi que no cambia de un dia para el otro.
+ *   2. LA HISTORIA DE RECEPCIONES    MATERIALIZADA en central
+ *      CPA35 + STA20, agrupada por RO_SP_CASHFLOW_COMEX_RECEP_HIST en
+ *      RO_T_CASHFLOW_COMEX_RECEP_HIST. De aca sale la cuota.
  *
- *   3. LO YA COMPRADO                conexion 'central' (maestro de Comex)
+ *   3. LO YA COMPRADO                EN VIVO, conexion 'central'
  *      RO_T_IMPORTACIONES_ENCABEZADO, el MISMO padron que arma la pestana
  *      Proveedores Exterior, con el mismo pendiente. Ver cargado().
  *
+ * POR QUE DOS DE LAS TRES VIENEN DE UN JOB. La historia tardaba entre 38 y 57
+ * segundos por pedido, y era el 95 % de lo que tardaban la pestana y la fila
+ * del tablero. Es historia de anios cerrados, y el presupuesto cambia cuando
+ * alguien marca una version, no en cada pedido. Lo ya comprado NO va al job:
+ * un contenedor cargado tiene que descontar en el momento. Ver la seccion 10
+ * de README-compras-proyectadas.md.
+ *
+ * SIN LAS TABLAS NO HAY VUELTA A LA CONSULTA EN VIVO. La fila va en cero y el
+ * primer aviso dice que job falta correr: ver avisoFaltaJob(). Un fallback
+ * silencioso escondería que el job no corre, y volveria a dejar el tablero
+ * esperando cuarenta segundos.
+ *
  * ESTA CLASE NO ESCRIBE NADA. Ni en las tablas de compras, ni en las de
- * Comercio Exterior, ni en Tango. Las tres son de otras aplicaciones y las tres
- * se leen y se dejan como estan. Hay una prueba que lo verifica buscando
- * INSERT, UPDATE y DELETE sobre este archivo.
+ * Comercio Exterior, ni en Tango, ni en las materializadas: esas las llenan
+ * los SP, y el boton "Actualizar ahora" los corre desde ComprasProyectadasJob.
+ * Hay una prueba que lo verifica buscando los verbos de escritura sobre este
+ * archivo.
  */
 class ComprasProyectadasDatos {
 
@@ -60,6 +73,30 @@ class ComprasProyectadasDatos {
      * que busca los verbos de escritura sobre el archivo entero-.
      */
     const TABLA_AJUSTE = 'RO_T_CASHFLOW_COMPRAS_PROY_AJUSTE';
+
+    /** Lo que llenan los SP. Ver sql/cashflow_comex_materializado.sql */
+    const TABLA_RECEP_HIST = 'RO_T_CASHFLOW_COMEX_RECEP_HIST';
+    const TABLA_PRESUP_RESUMEN = 'RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN';
+    const TABLA_PRESUP_CONTRASTE = 'RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE';
+    const TABLA_JOB_LOG = 'RO_T_CASHFLOW_JOB_LOG';
+
+    /** El PROCESO con que cada SP se anota en el log */
+    const PROCESO_HISTORIA = 'COMEX_RECEP_HIST';
+    const PROCESO_PRESUPUESTO = 'COMEX_PRESUP_RESUMEN';
+
+    /** Los SP, para nombrarlos en los avisos */
+    const SP_HISTORIA = 'RO_SP_CASHFLOW_COMEX_RECEP_HIST';
+    const SP_PRESUPUESTO = 'RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN';
+
+    /**
+     * Pasadas estas horas desde el ultimo calculo, el presupuesto se avisa como
+     * viejo. El job sugerido corre cada 30 minutos en horario habil y a las
+     * 05:00: un dia entero sin correr es que el job no esta corriendo.
+     */
+    const HORAS_PRESUPUESTO_VIEJO = 24;
+
+    /** El linked server a POWER_BI_CONTROL desde central, el mismo de los SP */
+    const POWER_REMOTO = '[XL-APPS].POWER_BI_CONTROL.dbo.';
 
     /** El encabezado de compras de Tango, de donde sale la fecha de emision */
     const TABLA_OC = 'CPA35';
@@ -96,6 +133,12 @@ class ComprasProyectadasDatos {
     /** @var string Ultimo error de lectura del presupuesto */
     private $errorPresupuesto = '';
 
+    /** @var array|null Cache de estadoInsumos(): se lee una vez por pedido */
+    private $estado = null;
+
+    /** @var array|null Cache de oficialesEnVivo() */
+    private $oficiales = null;
+
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
         $this->conn = new Conexion;
@@ -108,6 +151,9 @@ class ComprasProyectadasDatos {
 
     /**
      * Si la vista de la app de compras existe y se puede leer.
+     *
+     * HOY SOLO LA USA detalleVersion(), que es lo unico del presupuesto que se
+     * sigue leyendo en vivo. La proyeccion lee el resumen materializado.
      *
      * SE PREGUNTA ANTES DE NOMBRARLA, igual que Comex::tienePagosComex() con la
      * tabla de pagos: nombrar una vista ausente rompe la consulta entera con
@@ -154,31 +200,19 @@ class ComprasProyectadasDatos {
     }
 
     /**
-     * El aviso de que no hay presupuesto que leer, o cadena vacia.
-     *
-     * VA PRIMERO Y DICE QUE SE PROYECTA DE MENOS. Es la misma clase de
-     * degradacion que la de la tabla de pagos de Comex: no apaga un boton,
-     * cambia los numeros. Sin presupuesto la fila entera va en cero, y una fila
-     * en cero en un tablero de egresos se lee como "no hay que pagar nada", que
-     * es lo contrario de lo que pasa.
-     *
-     * @return string
-     */
-    public function avisoSinVista() {
-        if ($this->tieneVista()) {
-            return '';
-        }
-
-        return 'No se puede leer el presupuesto de compras (' . $this->errorPresupuesto
-            . '). Las filas de compras proyectadas van en CERO: se está proyectando de '
-            . 'MENOS, no de más. La vista la crea el bloque 4 de '
-            . 'presupuestos/sql/05_baja_logica_versiones.sql en el repo de compras, contra '
-            . 'POWER_BI_CONTROL.';
-    }
-
-    /**
      * Las versiones oficiales vigentes, una por temporada, con el FOB del tramo
      * objetivo ya valorizado.
+     *
+     * SE LEEN DEL RESUMEN MATERIALIZADO, no de la vista. Lo llena
+     * RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN con la misma consulta que esta
+     * funcion hacia en vivo -verificado temporada por temporada el
+     * 24/09/2026-, asi que las reglas de abajo siguen valiendo tal cual: lo que
+     * cambio es CUANDO se aplican, no cuales son.
+     *
+     * Un ajuste manual guardado mientras el job no corrio se ata a la version
+     * que la pantalla estaba mostrando. Es lo correcto: el numero se puso
+     * mirando esa version, y cuando el job traiga la nueva el ajuste se
+     * descarta con su aviso, como con cualquier cambio de oficial.
      *
      * SOLO EL TRAMO OBJETIVO (es_objetivo = 1). Los demas tramos de una version
      * son CONTROL: cada temporada la aporta su propia version oficial, y sumar
@@ -210,42 +244,41 @@ class ComprasProyectadasDatos {
      * @return array Mapa codigo de temporada => version
      */
     public function versionesOficiales($pais = 'argentina') {
-        if (!$this->tieneVista()) {
+        $e = $this->estadoInsumos();
+
+        if (!$e['presupuesto']['tabla']) {
             return [];
         }
 
-        $cid = @$this->conn->conectar('power');
+        $cid = $this->conn->conectar('central');
 
         if (!$cid) {
             return [];
         }
 
         $sql = "SELECT
-                    temporada_codigo,
-                    MAX(id_version)                    id_version,
-                    MAX(nombre_presupuesto)            nombre,
-                    MAX(solapa)                        solapa,
-                    MAX(fecha_calculo)                 fecha_calculo,
-                    MAX(tramos_estado)                 tramos_estado,
-                    MIN(temporada_desde)               temporada_desde,
-                    MAX(temporada_hasta)               temporada_hasta,
-                    COUNT(*)                           filas,
-                    SUM(CASE WHEN costo_prom IS NULL THEN 1 ELSE 0 END) filas_sin_costo,
-                    SUM(ISNULL(compra, 0))             unidades,
-                    SUM(CASE WHEN costo_prom IS NULL THEN ISNULL(compra, 0) ELSE 0 END)
-                                                       unidades_sin_costo,
-                    SUM(ISNULL(compra, 0) * ISNULL(costo_prom, 0))  fob_usd,
-                    SUM(ISNULL(compra, 0) * ISNULL(costo_prom, 0) * ISNULL(inc_fob, 0) / 100.0)
-                                                       nac_segun_inc_fob,
-                    SUM(ISNULL(compra_deficit_cobertura, 0)) deficit_cobertura
-                FROM " . self::VISTA_PRESUPUESTO . "
-                WHERE es_objetivo = 1 AND pais = ?
-                GROUP BY temporada_codigo";
+                    TEMPORADA             temporada_codigo,
+                    ID_VERSION            id_version,
+                    NOMBRE                nombre,
+                    SOLAPA                solapa,
+                    FECHA_CALCULO_VERSION fecha_calculo,
+                    TRAMOS_ESTADO         tramos_estado,
+                    TEMPORADA_DESDE       temporada_desde,
+                    TEMPORADA_HASTA       temporada_hasta,
+                    FILAS                 filas,
+                    FILAS_SIN_COSTO       filas_sin_costo,
+                    UNIDADES              unidades,
+                    UNIDADES_SIN_COSTO    unidades_sin_costo,
+                    FOB_USD               fob_usd,
+                    NAC_SEGUN_INC_FOB     nac_segun_inc_fob,
+                    DEFICIT_COBERTURA     deficit_cobertura
+                FROM " . self::TABLA_PRESUP_RESUMEN . "
+                WHERE PAIS = ?";
 
         $stmt = sqlsrv_query($cid, $sql, [$pais]);
 
         if ($stmt === false) {
-            $this->errorPresupuesto = 'No se pudo leer ' . self::VISTA_PRESUPUESTO;
+            $this->errorPresupuesto = 'No se pudo leer ' . self::TABLA_PRESUP_RESUMEN;
 
             return [];
         }
@@ -350,39 +383,31 @@ class ComprasProyectadasDatos {
      * en silencio. Este control no opina sobre el filtro; solo hace que la
      * diferencia se vea.
      *
+     * SE LEE DE RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE, que llena el mismo SP y en
+     * la misma corrida que el resumen: el contraste describe exactamente el
+     * presupuesto que se esta proyectando, no uno mas nuevo.
+     *
      * @return array ['filas_vista','filas_tablas','fob_vista','fob_tablas'] o []
      */
     public function contrasteVista($pais = 'argentina') {
-        if (!$this->tieneVista()) {
+        $e = $this->estadoInsumos();
+
+        if (!$e['contraste']) {
             return [];
         }
 
-        $cid = @$this->conn->conectar('power');
+        $cid = $this->conn->conectar('central');
 
         if (!$cid) {
             return [];
         }
 
-        $sql = "SELECT
-                    (SELECT COUNT(*) FROM " . self::VISTA_PRESUPUESTO . "
-                     WHERE es_objetivo = 1 AND pais = ?) filas_vista,
-                    (SELECT SUM(ISNULL(compra,0) * ISNULL(costo_prom,0))
-                     FROM " . self::VISTA_PRESUPUESTO . "
-                     WHERE es_objetivo = 1 AND pais = ?) fob_vista,
-                    (SELECT COUNT(*)
-                     FROM " . self::TABLA_CABECERA . " c
-                     JOIN " . self::TABLA_DETALLE . " d ON d.id_cabecera = c.id
-                     JOIN " . self::TABLA_TRAMO . " t ON t.id_detalle = d.id
-                     WHERE c.es_oficial = 1 AND c.eliminada = 0
-                       AND t.es_objetivo = 1 AND c.pais = ?) filas_tablas,
-                    (SELECT SUM(ISNULL(t.compra,0) * ISNULL(d.costo_prom,0))
-                     FROM " . self::TABLA_CABECERA . " c
-                     JOIN " . self::TABLA_DETALLE . " d ON d.id_cabecera = c.id
-                     JOIN " . self::TABLA_TRAMO . " t ON t.id_detalle = d.id
-                     WHERE c.es_oficial = 1 AND c.eliminada = 0
-                       AND t.es_objetivo = 1 AND c.pais = ?) fob_tablas";
+        $sql = "SELECT FILAS_VISTA filas_vista, FOB_VISTA fob_vista,
+                       FILAS_TABLAS filas_tablas, FOB_TABLAS fob_tablas
+                FROM " . self::TABLA_PRESUP_CONTRASTE . "
+                WHERE PAIS = ?";
 
-        $stmt = sqlsrv_query($cid, $sql, [$pais, $pais, $pais, $pais]);
+        $stmt = sqlsrv_query($cid, $sql, [$pais]);
 
         if ($stmt === false) {
             return [];
@@ -469,11 +494,75 @@ class ComprasProyectadasDatos {
      * vez de por importe: es un parametro del modulo y las dos cuotas difieren
      * hasta 4,5 puntos en un mes.
      *
+     * SE LEE DE RO_T_CASHFLOW_COMEX_RECEP_HIST. La llena
+     * RO_SP_CASHFLOW_COMEX_RECEP_HIST con diez anios, y de ahi se toman los que
+     * pide la cuota: cambiar compras_proy_anios_cuota no obliga a correr nada.
+     * La definicion del calculo -lo de arriba- es la de
+     * historiaRecepcionesEnVivo(), y una prueba compara las dos contra la base.
+     *
+     * Si a la tabla le faltan anios de los que la cuota pide, no se inventan:
+     * se devuelve lo que hay y avisosInsumos() lo dice.
+     *
      * @param int $anios Cuantos anios calendario COMPLETOS hacia atras
      * @param string|null $hoy 'Y-m-d'. Inyectable para las pruebas
-     * @return array Lista de ['anio','mes','peso','unidades','importe_usd']
+     * @return array Lista de ['anio','mes','unidades','importe_usd']
      */
     public function historiaRecepciones($anios = 3, $hoy = null) {
+        $e = $this->estadoInsumos();
+
+        if (!$e['historia']['tabla']) {
+            return [];
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base central');
+        }
+
+        $anios = self::aniosDeLaCuota($anios, $hoy);
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT ANIO anio, MES mes, UNIDADES unidades, IMPORTE_USD importe_usd
+             FROM " . self::TABLA_RECEP_HIST . "
+             WHERE ANIO BETWEEN ? AND ?
+             ORDER BY ANIO, MES",
+            [$anios[0], $anios[count($anios) - 1]]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('No se pudo leer ' . self::TABLA_RECEP_HIST));
+        }
+
+        $out = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $out[] = [
+                'anio' => intval($row['anio']),
+                'mes' => intval($row['mes']),
+                'unidades' => floatval($row['unidades']),
+                'importe_usd' => floatval($row['importe_usd'])
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $out;
+    }
+
+    /**
+     * LA DEFINICION DE LA HISTORIA, leida en vivo de CPA35 + STA20.
+     *
+     * EL PROVEEDOR NO LA LLAMA: tarda entre 31 y 57 segundos. Queda como la
+     * referencia contra la que se verifica el SP -hay una prueba que compara
+     * las dos para 2023-2025- y para poder auditar un mes puntual sin esperar
+     * al job. Si se toca un filtro aca, se toca en
+     * sql/RO_SP_CASHFLOW_COMEX_RECEP_HIST.sql, y al reves.
+     *
+     * @param int $anios
+     * @param string|null $hoy
+     * @return array Lista de ['anio','mes','unidades','importe_usd']
+     */
+    public function historiaRecepcionesEnVivo($anios = 3, $hoy = null) {
         $cid = $this->conn->conectar('central');
 
         if (!$cid) {
@@ -520,7 +609,7 @@ class ComprasProyectadasDatos {
 
         $stmt = sqlsrv_query($cid, $sql,
             [self::PREFIJO_PROVEEDOR_EXTERIOR . '%', self::COMPROBANTE_RECEPCION,
-             $desde, $hasta . ' 23:59:59']);
+             $desde, $hasta . ' 23:59:59'], ['QueryTimeout' => 300]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('No se pudo leer la historia de recepciones'));
@@ -846,6 +935,451 @@ class ComprasProyectadasDatos {
     }
 
     /* ====================================================================
+       5. EL ESTADO DE LOS INSUMOS MATERIALIZADOS (solo lectura)
+       ==================================================================== */
+
+    /**
+     * Que tablas existen, cuanto tienen y como salieron las ultimas corridas de
+     * cada SP.
+     *
+     * SE LEE UNA SOLA VEZ POR PEDIDO, con dos consultas: una que pregunta que
+     * tablas existen y otra que lee solo las que existen. Van separadas porque
+     * nombrar una tabla ausente rompe la consulta entera con "Invalid object
+     * name", y eso es justamente lo que pasa antes de correr el script.
+     *
+     * NO LANZA. Si no se puede leer, lo dice en 'error' y avisoFaltaJob() lo
+     * trata como lo que es: no se sabe si hay insumos, asi que la fila va en
+     * cero avisando.
+     *
+     * @return array ['error','log','contraste','historia','presupuesto']
+     */
+    public function estadoInsumos() {
+        if ($this->estado !== null) {
+            return $this->estado;
+        }
+
+        $proceso = ['tabla' => false, 'filas' => 0, 'ok' => null, 'ultima' => null];
+
+        $e = [
+            'error' => null,
+            'log' => false,
+            'contraste' => false,
+            'historia' => $proceso + ['anio_min' => null, 'anio_max' => null],
+            'presupuesto' => $proceso
+        ];
+
+        $this->estado = $e;
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            $this->estado['error'] = 'no se pudo conectar a la base central';
+
+            return $this->estado;
+        }
+
+        $stmt = sqlsrv_query($cid, "SELECT
+            OBJECT_ID('dbo." . self::TABLA_JOB_LOG . "', 'U') L,
+            OBJECT_ID('dbo." . self::TABLA_RECEP_HIST . "', 'U') H,
+            OBJECT_ID('dbo." . self::TABLA_PRESUP_RESUMEN . "', 'U') R,
+            OBJECT_ID('dbo." . self::TABLA_PRESUP_CONTRASTE . "', 'U') C");
+
+        if ($stmt === false) {
+            $this->estado['error'] = $this->errorSql('no se pudo verificar las tablas materializadas');
+
+            return $this->estado;
+        }
+
+        $obj = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $e['log'] = ($obj['L'] !== null);
+        $e['historia']['tabla'] = ($obj['H'] !== null);
+        $e['presupuesto']['tabla'] = ($obj['R'] !== null);
+        $e['contraste'] = ($obj['C'] !== null);
+
+        /* Solo se nombran las que existen. */
+        $partes = [];
+
+        if ($e['historia']['tabla']) {
+            $partes[] = "(SELECT COUNT(*) FROM " . self::TABLA_RECEP_HIST . ") h_filas,
+                         (SELECT MIN(ANIO) FROM " . self::TABLA_RECEP_HIST . ") h_min,
+                         (SELECT MAX(ANIO) FROM " . self::TABLA_RECEP_HIST . ") h_max";
+        }
+
+        if ($e['presupuesto']['tabla']) {
+            $partes[] = "(SELECT COUNT(*) FROM " . self::TABLA_PRESUP_RESUMEN . ") p_filas";
+        }
+
+        if ($e['log']) {
+            foreach (['h' => self::PROCESO_HISTORIA, 'p' => self::PROCESO_PRESUPUESTO] as $k => $p) {
+                /* La ultima corrida BUENA -de donde sale "Historia al ..."- y la
+                   ultima a secas, que puede ser una que fallo despues. */
+                $ok = "FROM " . self::TABLA_JOB_LOG . " WHERE PROCESO = '" . $p . "'
+                       AND FIN IS NOT NULL AND ERROR IS NULL ORDER BY INICIO DESC";
+                $ul = "FROM " . self::TABLA_JOB_LOG . " WHERE PROCESO = '" . $p . "'
+                       ORDER BY INICIO DESC";
+
+                $partes[] = "(SELECT TOP 1 INICIO $ok) {$k}_ok_inicio,
+                             (SELECT TOP 1 FIN $ok) {$k}_ok_fin,
+                             (SELECT TOP 1 FILAS $ok) {$k}_ok_filas,
+                             (SELECT TOP 1 USUARIO $ok) {$k}_ok_usuario,
+                             (SELECT TOP 1 INICIO $ul) {$k}_u_inicio,
+                             (SELECT TOP 1 FIN $ul) {$k}_u_fin,
+                             (SELECT TOP 1 ERROR $ul) {$k}_u_error,
+                             (SELECT TOP 1 USUARIO $ul) {$k}_u_usuario";
+            }
+        }
+
+        if (!empty($partes)) {
+            $stmt = sqlsrv_query($cid, "SELECT " . implode(",\n", $partes));
+
+            if ($stmt === false) {
+                $e['error'] = $this->errorSql('no se pudo leer el estado de las tablas materializadas');
+                $this->estado = $e;
+
+                return $this->estado;
+            }
+
+            $r = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+            sqlsrv_free_stmt($stmt);
+
+            if ($e['historia']['tabla']) {
+                $e['historia']['filas'] = intval($r['h_filas']);
+                $e['historia']['anio_min'] = ($r['h_min'] === null) ? null : intval($r['h_min']);
+                $e['historia']['anio_max'] = ($r['h_max'] === null) ? null : intval($r['h_max']);
+            }
+
+            if ($e['presupuesto']['tabla']) {
+                $e['presupuesto']['filas'] = intval($r['p_filas']);
+            }
+
+            if ($e['log']) {
+                foreach (['h' => 'historia', 'p' => 'presupuesto'] as $k => $cual) {
+                    if ($r[$k . '_ok_inicio'] !== null) {
+                        $e[$cual]['ok'] = [
+                            'inicio' => self::aFechaHora($r[$k . '_ok_inicio']),
+                            'fin' => self::aFechaHora($r[$k . '_ok_fin']),
+                            'filas' => intval($r[$k . '_ok_filas']),
+                            'usuario' => $r[$k . '_ok_usuario']
+                        ];
+                    }
+
+                    if ($r[$k . '_u_inicio'] !== null) {
+                        $e[$cual]['ultima'] = [
+                            'inicio' => self::aFechaHora($r[$k . '_u_inicio']),
+                            'fin' => self::aFechaHora($r[$k . '_u_fin']),
+                            'error' => $r[$k . '_u_error'],
+                            'usuario' => $r[$k . '_u_usuario']
+                        ];
+                    }
+                }
+            }
+        }
+
+        $this->estado = $e;
+
+        return $this->estado;
+    }
+
+    /**
+     * Las versiones oficiales que la app de compras tiene HOY, leidas en vivo.
+     *
+     * ES LA UNICA LECTURA DEL PRESUPUESTO QUE SIGUE EN CADA PEDIDO, y es a
+     * proposito chica: la cabecera, sin la vista ni el detalle. Sirve para una
+     * sola cosa, avisar que se marco una oficial despues del ultimo calculo.
+     * Va por el linked server desde central, igual que el SP, asi que no abre
+     * otra conexion.
+     *
+     * @param string $pais
+     * @return array ['lista' => [['id','fecha_calculo','oficial_fecha']], 'error' => string|null]
+     */
+    public function oficialesEnVivo($pais = 'argentina') {
+        if ($this->oficiales !== null) {
+            return $this->oficiales;
+        }
+
+        $this->oficiales = ['lista' => [], 'error' => null];
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            $this->oficiales['error'] = 'no se pudo conectar a la base central';
+
+            return $this->oficiales;
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT id, fecha_calculo, oficial_fecha
+             FROM " . self::POWER_REMOTO . self::TABLA_CABECERA . "
+             WHERE es_oficial = 1 AND eliminada = 0 AND pais = ?",
+            [$pais], ['QueryTimeout' => 15]);
+
+        if ($stmt === false) {
+            $this->oficiales['error'] = $this->errorSql('no se pudo leer la cabecera de versiones');
+
+            return $this->oficiales;
+        }
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $this->oficiales['lista'][] = [
+                'id' => intval($row['id']),
+                'fecha_calculo' => self::aFecha($row['fecha_calculo']),
+                'oficial_fecha' => self::aFechaHora($row['oficial_fecha'])
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $this->oficiales;
+    }
+
+    /**
+     * El aviso que deja la fila en CERO, o cadena vacia.
+     *
+     * @return string
+     */
+    public function avisoFaltaJob() {
+        return self::avisoFaltaJobDe($this->estadoInsumos());
+    }
+
+    /**
+     * Los avisos que NO dejan la fila en cero: una corrida que fallo despues
+     * de una buena, anios que le faltan a la historia, un presupuesto viejo o
+     * mas viejo que una version oficial.
+     *
+     * @param int $aniosCuota compras_proy_anios_cuota
+     * @param string $hoy 'Y-m-d'
+     * @param string $pais
+     * @return array Lista de textos
+     */
+    public function avisosInsumos($aniosCuota, $hoy, $pais = 'argentina') {
+        $e = $this->estadoInsumos();
+
+        /* Sin un calculo bueno del presupuesto no hay contra que comparar las
+           oficiales, y ya hay un aviso mas grave: no se lee la cabecera. */
+        $oficiales = ($e['presupuesto']['ok'] === null) ? null : $this->oficialesEnVivo($pais);
+
+        return self::avisosInsumosDe($e, self::aniosDeLaCuota($aniosCuota, $hoy),
+            date('Y-m-d H:i:s'), $oficiales);
+    }
+
+    /**
+     * EL PRIMER AVISO, cuando falta un insumo sin el cual no hay proyeccion.
+     *
+     * DICE QUE SE PROYECTA DE MENOS, no solo que falta algo. Una fila de
+     * egresos en cero se lee como "no hay que pagar nada", que es lo contrario
+     * de lo que pasa. Es el mismo criterio que tenia el aviso de la vista
+     * ausente, que este reemplaza.
+     *
+     * Cuando falta:
+     *   historia     la tabla no existe, o esta vacia. Vacia no es un estado
+     *                valido: el SP no graba una historia vacia.
+     *   presupuesto  la tabla no existe, o el SP nunca corrio bien. Una tabla
+     *                vacia DESPUES de una corrida buena si es valida -no hay
+     *                ninguna version oficial- y la grilla lo muestra mes por
+     *                mes como SIN_PRESUPUESTO.
+     *
+     * Es estatica para poder probarla sin base.
+     *
+     * @param array $e Lo que devuelve estadoInsumos()
+     * @return string
+     */
+    public static function avisoFaltaJobDe($e) {
+        if (!empty($e['error'])) {
+            return 'Se está proyectando DE MENOS: las filas proyectadas de compras del exterior '
+                . 'van en CERO porque no se pudo leer el estado de sus insumos (' . $e['error']
+                . ').';
+        }
+
+        $faltan = [];
+
+        foreach (['historia' => ['la historia de recepciones', self::SP_HISTORIA],
+                  'presupuesto' => ['el presupuesto oficial', self::SP_PRESUPUESTO]] as $cual => $d) {
+            $p = $e[$cual];
+
+            if (!$p['tabla']) {
+                $faltan[] = $d[0] . ' (' . $d[1] . '; antes, correr '
+                    . 'sql/cashflow_comex_materializado.sql)';
+
+                continue;
+            }
+
+            $vacio = ($cual === 'historia') ? ($p['filas'] <= 0) : ($p['ok'] === null);
+
+            if (!$vacio) {
+                continue;
+            }
+
+            $porQue = ($p['ultima'] !== null && !empty($p['ultima']['error']))
+                ? '; la última corrida, del ' . self::fechaCorta($p['ultima']['inicio'])
+                    . ', falló: ' . $p['ultima']['error']
+                : '; nunca corrió';
+
+            $faltan[] = $d[0] . ' (' . $d[1] . $porQue . ')';
+        }
+
+        if (empty($faltan)) {
+            return '';
+        }
+
+        return 'Se está proyectando DE MENOS: las filas proyectadas de compras del exterior van '
+            . 'en CERO porque falta correr el job de ' . implode(' y el de ', $faltan) . '. Se '
+            . 'corre desde Comercio Exterior › Proyección con «Actualizar ahora», o con su job '
+            . 'del SQL Agent.';
+    }
+
+    /**
+     * Los avisos que no dejan la fila en cero. Ver avisosInsumos().
+     *
+     * Es estatica para poder probarla sin base: el estado, los anios, la hora
+     * y las oficiales entran por parametro.
+     *
+     * @param array $e Lo que devuelve estadoInsumos()
+     * @param array $aniosCuota Los anios que pide la cuota, en orden
+     * @param string $ahora 'Y-m-d H:i:s'
+     * @param array|null $oficiales Lo que devuelve oficialesEnVivo(), o null
+     *                              si no hay contra que comparar
+     * @return array
+     */
+    public static function avisosInsumosDe($e, $aniosCuota, $ahora, $oficiales = null) {
+        $out = [];
+
+        if (!empty($e['error'])) {
+            return $out;
+        }
+
+        /* UNA CORRIDA QUE FALLO DESPUES DE UNA BUENA. La pantalla sigue con el
+           calculo anterior, y eso esta bien, pero tiene que decir por que no
+           es el de hoy. */
+        foreach (['historia' => 'la historia de recepciones',
+                  'presupuesto' => 'el presupuesto oficial'] as $cual => $nombre) {
+            $p = $e[$cual];
+
+            if ($p['ok'] !== null && $p['ultima'] !== null && !empty($p['ultima']['error'])
+                && $p['ultima']['inicio'] > $p['ok']['inicio']) {
+                $out[] = 'La última corrida del job de ' . $nombre . ', del '
+                    . self::fechaCorta($p['ultima']['inicio']) . ', falló: '
+                    . $p['ultima']['error'] . ' Se sigue usando el cálculo del '
+                    . self::fechaCorta($p['ok']['fin']) . '.';
+            }
+        }
+
+        /* LOS ANIOS DE LA HISTORIA. El 1 de enero el anio que termino pasa a
+           contar, y si el job no corrio desde entonces a la tabla le falta. */
+        $h = $e['historia'];
+
+        if ($h['tabla'] && $h['filas'] > 0 && !empty($aniosCuota)) {
+            $primero = $aniosCuota[0];
+            $ultimo = $aniosCuota[count($aniosCuota) - 1];
+
+            if ($h['anio_max'] !== null && $h['anio_max'] < $ultimo) {
+                $uno = ($h['anio_max'] + 1 === $ultimo);
+
+                $out[] = 'A la historia de recepciones ' . ($uno
+                        ? 'le falta el año ' . $ultimo
+                        : 'le faltan los años ' . ($h['anio_max'] + 1) . ' a ' . $ultimo)
+                    . ($h['ok'] !== null ? ': se calculó el ' . self::fechaCorta($h['ok']['fin']) : '')
+                    . '. La cuota se arma sin ' . ($uno ? 'ese año' : 'esos años')
+                    . ' hasta que el job vuelva a correr.';
+            }
+
+            if ($h['anio_min'] !== null && $h['anio_min'] > $primero) {
+                $out[] = 'La historia de recepciones guardada arranca en ' . $h['anio_min']
+                    . ' y la cuota pide desde ' . $primero . ' (' . count($aniosCuota)
+                    . ' años): se arma con los que hay. El SP guarda diez años; para más, '
+                    . 'hay que correrlo con un @Anios mayor.';
+            }
+        }
+
+        /* EL PRESUPUESTO VIEJO: por horas, y contra las oficiales de hoy. */
+        $p = $e['presupuesto'];
+
+        if ($p['tabla'] && $p['ok'] !== null) {
+            $fin = $p['ok']['fin'];
+            $horas = (strtotime($ahora) - strtotime($fin)) / 3600;
+
+            if ($horas > self::HORAS_PRESUPUESTO_VIEJO) {
+                $out[] = 'El presupuesto oficial se calculó el ' . self::fechaCorta($fin)
+                    . ', hace ' . intval(floor($horas)) . ' horas: su job no está corriendo. '
+                    . 'Las filas proyectan con ese presupuesto.';
+            }
+
+            if (is_array($oficiales) && !empty($oficiales['error'])) {
+                $out[] = 'No se pudo verificar si hay una versión oficial más nueva que el '
+                    . 'último cálculo del presupuesto (' . $oficiales['error'] . ').';
+            } elseif (is_array($oficiales)) {
+                $nuevas = [];
+
+                foreach ($oficiales['lista'] as $o) {
+                    /* Marcada oficial despues del calculo, o calculada despues:
+                       fecha_calculo es DATE, asi que se compara contra el dia. */
+                    $marcadaDespues = ($o['oficial_fecha'] !== null && $o['oficial_fecha'] > $fin);
+                    $calculadaDespues = ($o['fecha_calculo'] !== null
+                        && $o['fecha_calculo'] > substr($fin, 0, 10));
+
+                    if ($marcadaDespues || $calculadaDespues) {
+                        $nuevas[] = $o['id'] . ($o['oficial_fecha'] !== null
+                            ? ', marcada oficial el ' . self::fechaCorta($o['oficial_fecha']) : '');
+                    }
+                }
+
+                if (!empty($nuevas)) {
+                    $out[] = 'Hay ' . (count($nuevas) === 1 ? 'una versión oficial más nueva'
+                            : 'versiones oficiales más nuevas') . ' que el último cálculo del '
+                        . 'presupuesto, del ' . self::fechaCorta($fin) . ' (versión '
+                        . implode('; versión ', $nuevas) . '). Las filas proyectan con el '
+                        . 'presupuesto anterior hasta que su job vuelva a correr.';
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Lo que la pestana muestra de cada insumo: "Historia al dd/mm hh:mm".
+     *
+     * @param array $e Lo que devuelve estadoInsumos()
+     * @return array ['historia' => [...], 'presupuesto' => [...]]
+     */
+    public static function insumosParaPantalla($e) {
+        $out = [];
+
+        foreach (['historia', 'presupuesto'] as $cual) {
+            $p = $e[$cual];
+
+            $out[$cual] = [
+                'tabla' => $p['tabla'],
+                'al' => ($p['ok'] === null) ? null : self::fechaCorta($p['ok']['fin']),
+                'fin' => ($p['ok'] === null) ? null : $p['ok']['fin'],
+                'filas' => ($p['ok'] === null) ? null : $p['ok']['filas'],
+                'usuario' => ($p['ok'] === null) ? null : $p['ok']['usuario'],
+                'fallo' => ($p['ultima'] !== null && !empty($p['ultima']['error'])
+                            && ($p['ok'] === null || $p['ultima']['inicio'] > $p['ok']['inicio']))
+                    ? $p['ultima']['error'] : null
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * 'Y-m-d H:i:s' -> 'dd/mm hh:mm'
+     *
+     * @param string|null $fechaHora
+     * @return string
+     */
+    public static function fechaCorta($fechaHora) {
+        if ($fechaHora === null || $fechaHora === '') {
+            return '—';
+        }
+
+        return substr($fechaHora, 8, 2) . '/' . substr($fechaHora, 5, 2) . ' '
+            . substr($fechaHora, 11, 5);
+    }
+
+    /* ====================================================================
        UTILIDADES
        ==================================================================== */
 
@@ -872,6 +1406,20 @@ class ComprasProyectadasDatos {
         }
 
         return $s;
+    }
+
+    /**
+     * Un valor de fecha y hora de sqlsrv a 'Y-m-d H:i:s', o null.
+     *
+     * @param mixed $v
+     * @return string|null
+     */
+    private static function aFechaHora($v) {
+        if ($v === null) {
+            return null;
+        }
+
+        return ($v instanceof DateTime) ? $v->format('Y-m-d H:i:s') : substr((string) $v, 0, 19);
     }
 
     /**

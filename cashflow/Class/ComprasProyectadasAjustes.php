@@ -5,8 +5,9 @@ require_once __DIR__ . '/ComprasProyectadasDatos.php';
 
 /**
  * ComprasProyectadasAjustes
- * El alta y la baja del ajuste manual por mes. Es la UNICA clase del modulo que
- * escribe.
+ * El alta y la baja del ajuste manual por mes. Con ComprasProyectadasJob -que
+ * corre los SP de los insumos materializados- son las dos unicas clases del
+ * modulo que escriben.
  *
  * POR QUE VIVE APARTE DE ComprasProyectadasDatos
  * ----------------------------------------------
