@@ -39,7 +39,10 @@ Contra `central`, en cualquier momento:
 -- 4. sql/cashflow_prov_locales_forma_por_factura.sql (forma de pago por factura)
 -- 5. sql/cashflow_prov_locales_excluir_factura.sql   (excluir facturas sueltas)
 -- 6. sql/cashflow_prov_locales_opciones.sql          (las cinco listas de opciones)
+-- 7. sql/cashflow_prov_locales_fuente_fecha.sql      (de dónde salió cada fecha de pago)
 ```
+
+El séptimo agrega `FUENTE_FECHA` a la tabla de pagos y la rellena desde `ORIGEN` en las filas que ya tienen fecha —hoy es exacto, ver *De dónde sale cada fecha*—. **Sin él la columna *Fecha de pago* distingue igual** lo importado de lo cargado a mano, leyendo `ORIGEN`, y la pestaña avisa que falta el script. El tablero no se mueve: la fuente sólo decide cómo se ve la fecha.
 
 **El gesto de fechar en masa no agrega ningún script**, y eso es parte de su diseño: escribe `FECHA_PAGO` en la tabla que ya existe desde el primero, con el mismo camino de escritura que la celda de la grilla. En una base que corrió el primer script, funciona sin tocar nada.
 
@@ -159,6 +162,50 @@ Escrita una sola vez, en `Proveedores::resolverFechaPago()`:
 El escalón 3 existe para cuando Tango trae su centinela `1800-01-01` en lugar de una fecha. Hoy no hay ninguno en `CPA54`, pero la consulta de referencia lo contempla, así que el código también: es una red, no la norma.
 
 **Una fecha cargada no se reubica aunque esté vencida.** La cargó una persona; moverla a hoy sería pisar su decisión con una regla automática y mostrarle su propia carga en otra columna. Se marca vencida —eso es un hecho— y se dibuja donde está.
+
+### La columna muestra la fecha que usa el eje
+
+> Esto **cambió** en `feature/cashflow-vto-exclusiones-pestanas`.
+
+La jerarquía ya existía y el eje ya proyectaba al vencimiento, pero **no se veía**: sin fecha cargada, la columna *Fecha de pago* quedaba vacía y el vencimiento aparecía sólo en el tooltip. Ahora la columna muestra siempre la fecha con la que el comprobante entra al eje, y dice de dónde salió. Medido contra la base el 24/09/2026:
+
+| Fuente | Marca | Vencimientos | Importe |
+| --- | --- | --- | --- |
+| **Manual** — la tipeó alguien, en la celda o con el fechado masivo | azul | 6 | $ 168.114.825,44 |
+| **Planilla** — vino de la planilla de pagos importada | azul + *planilla* | 15 | $ 6.502.283,08 |
+| **Vencimiento** de Tango | gris + *vto.* / *vto. vencido* | 465 | $ 1.562.057.939,77 |
+| **Plazo** del maestro | gris + *plazo* | 0 | — |
+
+**Se calcula al leer y no se graba.** Grabar el vencimiento lo convertiría en una fecha *cargada*: rompería el indicador *vencido sin fecha*, la conciliación —que compara lo previsto contra lo real— y el contador del fechado masivo, y además dejaría de seguir a Tango si el vencimiento cambia. Es la regla de siempre del módulo: lo que se deriva, se deriva al leer.
+
+**Una fecha vencida muestra su vencimiento original, no el día 1 del eje.** Son **382 de los 465** ($ 1.326.960.887,25): el eje los proyecta en su primer día, pero poner *hoy* en la columna diría que alguien decidió pagarlos hoy. La marca dice *vto. vencido* y el `title` explica dónde se proyecta y cómo reubicarlo.
+
+**Mostrarla no la guarda.** El input guarda sólo en `change`, así que dejarlo como está no escribe nada. Para fijar una fecha hay que elegir otra, o usar el fechado masivo; elegir en el calendario la misma fecha que ya muestra no dispara nada. Es deliberado: confirmar el vencimiento no es una decisión nueva.
+
+**La marca va en un atributo y la dibuja el CSS**, no como texto de la celda: el export a Excel se queda con el texto, y *"15/03/2026vto."* no es una fecha. Lo que baja es la fecha sola —antes, sin fecha cargada, bajaba vacía—.
+
+### De dónde sale cada fecha: `FUENTE_FECHA`, y por qué no alcanzaba `ORIGEN`
+
+La fila viaja con dos campos, y los dos quedan:
+
+- `ORIGEN_FECHA` — el escalón de la jerarquía: `CARGADA`, `VENCIMIENTO`, `PLAZO` o `SIN_FECHA`. **No cambió**: lo miran los indicadores, el fechado masivo, el aviso de vencidos sin fecha y la conciliación, y para todos ellos una fecha tipeada y una importada son lo mismo, *alguien decidió*.
+- `FUENTE_FECHA` — lo mismo con la carga desdoblada en `MANUAL` y `ARCHIVO`. Es lo que muestra la columna. Lo arma `Proveedores::fuenteFecha()`, que es pura.
+
+Para desdoblar la carga ya había una columna, `ORIGEN`, y **no alcanza: describe la fila, no la fecha.** La tabla de pagos es la de *los overrides del comprobante* —fecha, forma, exclusión— y cualquier escritura pisa `ORIGEN`. Una fecha importada pasaría a figurar como manual el día que alguien excluyera esa factura o le cambiara la forma. Hoy no hay ningún caso —las 78 filas con fecha no tienen otro override—, así que el relleno desde `ORIGEN` es exacto; lo que la columna evita es que deje de serlo.
+
+`FUENTE_FECHA` la escribe `guardarPago()`, **sólo cuando la escritura trae `FECHA_PAGO`**, con el mismo origen: `MANUAL` desde la grilla y el fechado masivo, `ARCHIVO` desde la importación. No se llama `ORIGEN_FECHA` porque ese nombre ya es el del escalón.
+
+> **Fechar una cuota mueve todas las del comprobante.** La fecha cargada es por comprobante —la clave es proveedor + tipo + número—, y un comprobante en cuotas tiene una fila por vencimiento. Hoy son 6 comprobantes, 47 vencimientos, $ 63.520.993,81, y **ninguno tiene fecha cargada**. Se dejó así a propósito; cada cuota muestra su propio vencimiento mientras nadie cargue nada.
+
+### Volver al vencimiento borra la fecha, no la fila
+
+> Esto **cambió**, y era un bug.
+
+El botón ↺ de la celda hacía `DELETE` de la fila entera de la tabla de pagos, y con ella se iban **la exclusión con su motivo, el override de forma y la observación**, decisiones que nadie había pedido deshacer.
+
+Ahora `deletePago()` hace dos pasos en una transacción: pone `FECHA_PAGO` y `FUENTE_FECHA` en `NULL` —con eso sólo el comprobante ya cae al vencimiento— y **borra la fila únicamente si no le queda nada**: ni forma ni observación de la planilla, ni override de forma, ni exclusión, ni conciliación. La condición está escrita una vez, en `Proveedores::condicionFilaVacia()`, y pregunta sólo por las columnas que la base tiene.
+
+**Sin `sql/cashflow_prov_locales_forma_por_factura.sql`** `FECHA_PAGO` no admite `NULL` y se hace lo de antes, el `DELETE` directo. Sin ese script tampoco existen la forma por factura ni la exclusión, así que lo único que se pierde es lo que se perdía antes.
 
 ### El plazo del maestro no es un número
 

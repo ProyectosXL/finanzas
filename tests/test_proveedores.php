@@ -2251,6 +2251,117 @@ chequear('no repuebla los campos con el formulario abierto', true,
     strpos($jsCodigo, "if (!visible('formProvWrap')) {") !== false);
 chequear('y el filtro del maestro se lee del input, no se guarda', true,
     strpos($jsCodigo, "document.getElementById('busquedaMaestroProv') || {}") !== false);
+
+/* ================================================================
+   DE DONDE SALE LA FECHA QUE SE MUESTRA
+
+   La columna Fecha de pago ya no queda vacia sin fecha cargada: muestra el
+   vencimiento -o emision + plazo- y dice de donde sale cada fecha. La carga se
+   desdobla en MANUAL y ARCHIVO; ORIGEN_FECHA sigue diciendo CARGADA porque es
+   lo que miran los indicadores, el fechado masivo y los avisos.
+   ================================================================ */
+seccion('la fuente de la fecha desdobla la carga');
+
+chequear('una carga con FUENTE_FECHA manual', 'MANUAL',
+    Proveedores::fuenteFecha('CARGADA', ['FUENTE_FECHA' => 'MANUAL', 'ORIGEN' => 'ARCHIVO']));
+chequear('una de la planilla', 'ARCHIVO',
+    Proveedores::fuenteFecha('CARGADA', ['FUENTE_FECHA' => 'ARCHIVO', 'ORIGEN' => 'MANUAL']));
+
+/* EL CASO QUE JUSTIFICA LA COLUMNA: fecha importada y despues la factura se
+   excluyo a mano. ORIGEN dice MANUAL -describe la ultima escritura- y la fecha
+   sigue siendo la de la planilla. */
+chequear('FUENTE_FECHA le gana a ORIGEN', 'ARCHIVO',
+    Proveedores::fuenteFecha('CARGADA', ['FUENTE_FECHA' => 'ARCHIVO', 'ORIGEN' => 'MANUAL']));
+
+// Sin el script la columna llega en NULL y se cae a ORIGEN, que hoy es exacto.
+chequear('sin el script cae a ORIGEN', 'ARCHIVO',
+    Proveedores::fuenteFecha('CARGADA', ['FUENTE_FECHA' => null, 'ORIGEN' => 'ARCHIVO']));
+chequear('una fuente desconocida se muestra como manual', 'MANUAL',
+    Proveedores::fuenteFecha('CARGADA', ['FUENTE_FECHA' => null, 'ORIGEN' => 'CONCILIA']));
+
+chequear('sin carga manda el escalon: vencimiento', 'VENCIMIENTO',
+    Proveedores::fuenteFecha('VENCIMIENTO', null));
+chequear('plazo', 'PLAZO', Proveedores::fuenteFecha('PLAZO', null));
+chequear('sin fecha', 'SIN_FECHA', Proveedores::fuenteFecha('SIN_FECHA', null));
+
+/* UNA FILA DE OVERRIDES SIN FECHA -solo una exclusion, o solo la forma- no es
+   una carga: resolverFechaPago() cae al vencimiento, y la fuente tambien. */
+$r = Proveedores::resolverFechaPago(null, '2026-10-05', '2026-09-01', null, $hoy);
+
+chequear('un override sin fecha no es una carga', 'VENCIMIENTO',
+    Proveedores::fuenteFecha($r['origen'], ['FUENTE_FECHA' => null, 'ORIGEN' => 'MANUAL',
+                                            'EXCLUIDA' => true]));
+
+seccion('la fuente se escribe con la fecha, y solo con ella');
+
+$cuerpo = $cuerpoDe('guardarPago');
+
+chequear('guardarPago la agrega si la escritura trae FECHA_PAGO', true,
+    strpos($cuerpo, "array_key_exists('FECHA_PAGO', \$campos)") !== false);
+chequear('con el mismo origen de la escritura', true,
+    strpos($cuerpo, "\$campos['FUENTE_FECHA'] = (\$campos['FECHA_PAGO'] === null) ? null : \$origen;") !== false);
+chequear('y solo si la columna existe', true,
+    strpos($cuerpo, "\$this->tieneColumnaPago('FUENTE_FECHA')") !== false);
+
+seccion('volver al vencimiento borra la fecha, no la fila');
+
+/* EL BUG: el boton hacia un DELETE de la fila entera y se llevaba la exclusion
+   con su motivo, el override de forma y la observacion. Ahora saca la fecha y
+   borra la fila solo si no le queda nada. */
+$cond = Proveedores::condicionFilaVacia(['FORMA_PAGO_CRONOGRAMA', 'EXCLUIDA',
+                                         'MOTIVO_EXCLUSION', 'FUENTE_FECHA']);
+
+foreach (['FECHA_PAGO IS NULL', 'FORMA_PAGO IS NULL', 'FORMA_PAGO_ORIG IS NULL',
+          'OBSERVACION IS NULL', "ESTADO <> 'CONCILIADO'", 'FORMA_PAGO_CRONOGRAMA IS NULL',
+          'EXCLUIDA = 0', 'MOTIVO_EXCLUSION IS NULL'] as $parte) {
+    chequear('la fila vacia exige ' . $parte, true, strpos($cond, $parte) !== false);
+}
+
+/* SIN LAS COLUMNAS DE SCRIPTS POSTERIORES no se preguntan: una columna que no
+   existe en el WHERE seria un error de SQL, y el boton dejaria de andar en una
+   base que no corrio la exclusion. */
+$sinScripts = Proveedores::condicionFilaVacia([]);
+
+chequear('sin la exclusion no pregunta por EXCLUIDA', false,
+    strpos($sinScripts, 'EXCLUIDA') !== false);
+chequear('ni por la forma por factura', false,
+    strpos($sinScripts, 'FORMA_PAGO_CRONOGRAMA') !== false);
+chequear('pero si por lo que esta desde el primer script', true,
+    strpos($sinScripts, 'OBSERVACION IS NULL') !== false);
+
+$cuerpo = $cuerpoDe('deletePago');
+
+chequear('primero pone la fecha en NULL', true,
+    strpos($cuerpo, 'SET FECHA_PAGO = NULL') !== false);
+chequear('y borra solo si la fila quedo vacia', true,
+    strpos($cuerpo, 'self::condicionFilaVacia($opcionales)') !== false);
+chequear('en una transaccion', true, strpos($cuerpo, 'sqlsrv_begin_transaction') !== false);
+
+seccion('la columna muestra la fecha que usa el eje');
+
+$celda = $jsCodigo;
+
+/* LA ORIGINAL, no la reubicada: una vencida sin fecha se proyecta el primer dia
+   del eje, pero mostrar "hoy" en 382 filas diria que alguien decidio pagarlas
+   hoy. El title explica donde se proyecta. */
+chequear('sin carga muestra PAGO_ORIGINAL', true,
+    strpos($celda, "cargada ? (f.FECHA_PAGO || '') : (f.PAGO_ORIGINAL || '')") !== false);
+chequear('la marca sale de FUENTE_FECHA', true,
+    strpos($celda, 'switch (f.FUENTE_FECHA)') !== false);
+
+foreach (['MANUAL', 'ARCHIVO', 'VENCIMIENTO', 'PLAZO'] as $f) {
+    chequear('hay marca para ' . $f, true, strpos($celda, "case '" . $f . "':") !== false);
+}
+
+/* LA ETIQUETA VA EN UN ATRIBUTO, no como texto: el export se queda con el
+   texto de la celda y "15/03/2026vto." no es una fecha. */
+chequear('la etiqueta viaja en data-etiqueta', true,
+    strpos($celda, "'data-etiqueta=\"' + escapar(fuente.etiqueta)") !== false);
+
+$css = file_get_contents(__DIR__ . '/../cashflow/Css/Proveedores-Proveedores_locales.css');
+
+chequear('y la dibuja el CSS', true, strpos($css, 'content: attr(data-etiqueta);') !== false);
+
 /* ================================================================
    CONTRA LA BASE
    ================================================================ */
@@ -2297,6 +2408,22 @@ foreach ($items as $i) {
 
 chequear('ningun pendiente es negativo', 0, $negativos);
 chequear('toda forma de pago normalizada esta declarada', true, $formaOk);
+
+/* LA FUENTE Y EL ESCALON DICEN LO MISMO: una carga es MANUAL o ARCHIVO, y lo
+   que no es carga repite el escalon. Si no coincidieran, la columna diria
+   "planilla" sobre una fecha que el eje trata como vencimiento. */
+$fuenteMal = 0;
+
+foreach ($items as $i) {
+    $esCarga = in_array($i['FUENTE_FECHA'], Proveedores::FUENTES_CARGA, true);
+
+    if ($esCarga !== ($i['ORIGEN_FECHA'] === 'CARGADA')
+        || (!$esCarga && $i['FUENTE_FECHA'] !== $i['ORIGEN_FECHA'])) {
+        $fuenteMal++;
+    }
+}
+
+chequear('toda fila trae una fuente coherente con su escalon', 0, $fuenteMal);
 
 /* EL FILTRO SALE DEL MAESTRO Y SOLO DEL MAESTRO. Con datos reales: para toda
    fila, CRONOGRAMA tiene que ser exactamente esDelCronograma() de la forma del

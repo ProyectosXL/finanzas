@@ -604,8 +604,12 @@
 
     /** De dónde sale la fecha con la que el comprobante entra al eje */
     function tituloProveedor(f) {
+        /* CARGADA dice "la decidió alguien" sin distinguir cómo: la columna
+           Fecha de pago es la que dice si fue a mano o por la planilla. */
         var origen = {
-            CARGADA: 'La fecha de pago la cargó una persona.',
+            CARGADA: f.FUENTE_FECHA === 'ARCHIVO'
+                ? 'La fecha de pago vino de la planilla de pagos importada.'
+                : 'La fecha de pago la cargó una persona.',
             VENCIMIENTO: 'Se proyecta a la fecha de vencimiento de Tango.',
             PLAZO: 'No tiene vencimiento: se proyecta con el plazo del maestro.',
             SIN_FECHA: 'No tiene vencimiento ni plazo: no se puede ubicar en el eje.'
@@ -789,26 +793,97 @@
     function celdaFechaPago(f) {
         var cargada = (f.ORIGEN_FECHA === 'CARGADA');
         var conciliado = (f.ESTADO_PAGO === 'CONCILIADO');
+        var fuente = fuenteDeLaFecha(f);
 
-        var titulo = cargada
-            ? 'Fecha cargada a mano.' + (conciliado
-                ? ' Ya está CONCILIADA contra Tango: el comprobante se pagó.' : '')
-            : 'Sin cargar: se proyecta al vencimiento. Escribí una fecha para reubicarla.';
+        /* SIN FECHA CARGADA SE MUESTRA LA QUE USA EL EJE, y no un input vacío:
+           el vencimiento de Tango, o emisión + plazo si no hay vencimiento. Es
+           la ORIGINAL (PAGO_ORIGINAL), no el primer día del eje donde se
+           reubica lo vencido: poner "hoy" en 382 filas diría que alguien decidió
+           pagarlas hoy. Cuándo se proyecta de verdad lo dice el title.
 
-        return '<td class="center prov-celda-fecha' + (cargada ? ' prov-fecha-cargada' : '') + '">'
+           NO SE GRABA NADA: se calcula al leer. El input guarda sólo en
+           'change', así que dejarlo como está no escribe; elegir otra fecha
+           sí, como MANUAL. Ver README-proveedores-locales.md. */
+        var valor = cargada ? (f.FECHA_PAGO || '') : (f.PAGO_ORIGINAL || '');
+
+        var clases = ['center', 'prov-celda-fecha', fuente.clase];
+
+        if (cargada) { clases.push('prov-fecha-cargada'); }
+
+        var titulo = fuente.titulo + (conciliado
+            ? ' Ya está CONCILIADA contra Tango: el comprobante se pagó.' : '');
+
+        return '<td class="' + clases.join(' ') + '"'
+            + ' data-orden="' + escapar(valor) + '">'
             + '<div class="input-group input-group-sm flex-nowrap">'
             +   '<input type="date" class="form-control form-control-sm prov-input-fecha" '
-            +     'value="' + escapar(f.FECHA_PAGO || '') + '" '
+            +     'value="' + escapar(valor) + '" '
             +     'title="' + escapar(titulo) + '" '
             +     'data-cod="' + escapar(f.COD_PROVEE) + '" '
             +     'data-tcomp="' + escapar(f.T_COMP) + '" '
             +     'data-ncomp="' + escapar(f.N_COMP) + '">'
+            /* La etiqueta va en un atributo y la dibuja el CSS (::after), no
+               como texto del span: el export a Excel se queda con el texto de
+               la celda, y "15/03/2026vto." no es una fecha. Así baja la fecha
+               sola. Ver Js/tabla-export.js. */
+            +   (fuente.etiqueta
+                  ? '<span class="input-group-text prov-fuente-fecha" '
+                    + 'data-etiqueta="' + escapar(fuente.etiqueta) + '" '
+                    + 'title="' + escapar(titulo) + '"></span>'
+                  : '')
             +   (cargada
                   ? '<button class="btn btn-outline-secondary prov-btn-borrar" type="button" '
-                    + 'title="Volver a proyectar al vencimiento">'
+                    + 'title="Volver a proyectar al vencimiento. Borra sólo la fecha: la '
+                    + 'exclusión y la forma de esta factura, si tiene, se conservan.">'
                     + '<i class="fas fa-rotate-left"></i></button>'
                   : '')
             + '</div></td>';
+    }
+
+    /**
+     * De dónde sale la fecha de la columna, con su marca y su explicación.
+     *
+     * LA DECIDE EL BACKEND (FUENTE_FECHA, en Proveedores::fuenteFecha()); acá
+     * sólo se le pone nombre. Cuatro marcas para cuatro cosas distintas:
+     *
+     *   MANUAL       la tipeó una persona               sin etiqueta, azul
+     *   ARCHIVO      vino de la planilla de pagos       "planilla", azul
+     *   VENCIMIENTO  nadie cargó nada: vence en Tango   "vto.", gris
+     *   PLAZO        sin vencimiento: emisión + plazo   "plazo", gris
+     *
+     * Las dos primeras son una decisión y se ven igual de firmes; las dos
+     * últimas son un cálculo y se ven apagadas. Un vencimiento ya pasado dice
+     * "vto. vencido" y el title explica que se proyecta al primer día del eje.
+     *
+     * @param {Object} f Fila del payload
+     * @returns {{clase: string, etiqueta: string, titulo: string}}
+     */
+    function fuenteDeLaFecha(f) {
+        var vencido = !!f.SIN_FECHA_CARGADA && f.ORIGEN_FECHA !== 'CARGADA';
+        var reubicada = vencido
+            ? ' Como ya pasó y nadie le cargó fecha, el eje la proyecta en su primer día. '
+              + 'Elegí otra fecha para reubicarla.'
+            : ' Elegí otra fecha para reubicarla.';
+
+        switch (f.FUENTE_FECHA) {
+            case 'MANUAL':
+                return { clase: 'prov-fuente-manual', etiqueta: '',
+                         titulo: 'Fecha cargada a mano.' };
+            case 'ARCHIVO':
+                return { clase: 'prov-fuente-archivo', etiqueta: 'planilla',
+                         titulo: 'Fecha importada de la planilla de pagos.' };
+            case 'VENCIMIENTO':
+                return { clase: 'prov-fuente-vto', etiqueta: vencido ? 'vto. vencido' : 'vto.',
+                         titulo: 'Sin fecha cargada: es el vencimiento de Tango.' + reubicada };
+            case 'PLAZO':
+                return { clase: 'prov-fuente-vto', etiqueta: 'plazo',
+                         titulo: 'Sin fecha cargada ni vencimiento: es la emisión más el plazo '
+                             + 'del maestro.' + reubicada };
+            default:
+                return { clase: 'prov-fuente-sin', etiqueta: '',
+                         titulo: 'No tiene vencimiento ni plazo: no se puede ubicar en el eje. '
+                             + 'Cargale una fecha.' };
+        }
     }
 
     /* ================================================================

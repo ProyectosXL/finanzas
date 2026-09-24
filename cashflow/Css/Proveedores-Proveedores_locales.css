@@ -260,6 +260,46 @@
 }
 
 /* ----------------------------------------------------------------------------
+   DE DÓNDE SALE LA FECHA
+
+   Una fecha CARGADA —a mano o de la planilla— es una decisión y se ve firme,
+   con el azul de arriba. La planilla lleva además su etiqueta. Un vencimiento
+   o un plazo es un cálculo que nadie decidió: el input muestra la fecha para
+   que la columna no quede vacía, pero apagado, en gris y cursiva, para que no
+   se lea como cargada. Ver fuenteDeLaFecha() en el JS.
+   ---------------------------------------------------------------------------- */
+
+.tab-proveedores_locales .prov-fuente-fecha {
+    font-size: 10px;
+    padding: 2px 5px;
+    white-space: nowrap;
+}
+
+/* El texto sale del atributo y no del contenido: así el export a Excel baja
+   la fecha sola y no "15/03/2026vto.". */
+.tab-proveedores_locales .prov-fuente-fecha::after {
+    content: attr(data-etiqueta);
+}
+
+.tab-proveedores_locales .prov-fuente-archivo .prov-fuente-fecha {
+    border-color: #0d6efd;
+    background-color: #cfe2ff;
+    color: #084298;
+    font-weight: 600;
+}
+
+.tab-proveedores_locales .prov-fuente-vto .prov-input-fecha {
+    color: #6c757d;
+    font-style: italic;
+    background-color: #f8f9fa;
+}
+
+.tab-proveedores_locales .prov-fuente-vto .prov-fuente-fecha {
+    color: #6c757d;
+    background-color: #f1f3f5;
+}
+
+/* ----------------------------------------------------------------------------
    LA PREVISUALIZACIÓN DE LA IMPORTACIÓN
 
    Lo que no se puede cargar va primero y se ve distinto: es lo que hay que
