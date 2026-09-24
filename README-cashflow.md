@@ -1052,7 +1052,19 @@ La guarda va en esa dirección a propósito: lo que hay que evitar es que el men
 
 ### El contador de cada categoría
 
-Cada categoría muestra `n/m`: cuántas de sus pestañas tienen datos del sistema. Sirve para ver el avance sin abrirla, y **cuenta sólo `datos`** —una maqueta no suma—, que es lo que hace que el número sea confiable. Hoy: Ingresos 7/7, Comercio Exterior 2/2, Proveedores 1/3, y el resto en cero.
+Cada categoría muestra `n/m`: cuántas de sus pestañas tienen datos del sistema. Sirve para ver el avance sin abrirla, y **cuenta sólo `datos`** —una maqueta no suma—, que es lo que hace que el número sea confiable. Hoy: Ingresos 7/7, Comercio Exterior 3/3, Proveedores 1/2, y el resto en cero.
+
+### Pestañas en desuso que se sacaron
+
+> Esto **cambió**. El menú tenía veintiséis ítems; ahora tiene veintidós.
+
+Se sacaron **Proveedores › Cronograma**, **RRHH y Operativos › Seguros**, **Financiero › Bopreal** y **Financiero › Pagos Div. Marzo**. Las cuatro eran el aviso de *en construcción* y nada más: sin proveedor en `CashflowRegistry`, sin SP, sin tabla, sin JS ni CSS, y sin ninguna fila en `RO_T_CASHFLOW_CONF_FILA` (verificado contra la base el 24/09/2026). Se fueron de `Class/Menu.php`, de `$validTabs` de `TabController` y del disco (`Tabs/*.php`), así que no queda ningún camino para llegar. No había datos que conservar.
+
+Es el mismo criterio que con las dos pestañas de Otros Ingresos, con una diferencia: aquellas funcionaban y sus tablas quedaron por el histórico; éstas nunca se construyeron, así que no dejan nada atrás.
+
+> **La pestaña *Cronograma* no era el cronograma de pagos.** El cronograma de Proveedores Locales —`FORMA_PAGO_CRONOGRAMA`, las series `PAGOS_FUERA_CRONOGRAMA` y `PAGOS_CRONO_OPERATIVOS`— vive dentro de la pestaña *Proveedores Locales* y no se tocó, igual que *Crono Nacionalización*. Ver `README-proveedores-locales.md`.
+
+Con ellas se fue `nacionalizacion_2` de `$validTabs`, que no tenía archivo ni entrada de menú. `tests/test_menu.php` chequea que ninguna de las cinco vuelva al menú, a `TabController` ni a `Tabs/`.
 
 **Otros Ingresos va después de Ingresos y aparte**: Ingresos agrupa lo que sale de un circuito del sistema y esa categoría agrupa lo que se tipea. La diferencia importa al leer un número — en una fila de Ingresos un cero es *"no hay movimientos"* y en una de esas es *"nadie cargó nada todavía"*. Ver `README-otros-ingresos.md`.
 
@@ -1370,7 +1382,6 @@ Eliminado: `Tabs/resumen.php`.
 - **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** en *Detalle Facturas*, para traer la fecha de emisión de cada comprobante. El tablero no lo sufre —usa `getCobranzasFRTotales()`— y el Resumen tampoco, que desde que no muestra esa columna se la saltea; lo paga *Detalle Facturas*, que es donde se pidió el detalle, **y el Resumen cuando hay filtro por fecha de emisión**, porque ahí esa fecha es lo que decide si la fila entra.
 - **El Dashboard es una maqueta**: no tiene ninguna llamada al servidor, sus números están escritos a mano. El menú lo marca como tal. Cuando se construya de verdad, hay que pasarlo a `datos` en `Class/Menu.php`.
 - **Las fechas de Comercio Exterior se graban con `USUARIO = NULL`**, como todo lo demás, y el rastro de quién editó existe pero **todavía no tiene pantalla que muestre el historial completo**: la celda muestra sólo la edición vigente en su tooltip. `getHistorialFecha` ya lo devuelve entero. Ver `README-comex.md`.
-- **`nacionalizacion_2` está en `$validTabs` de `TabController` pero no tiene archivo ni entrada de menú.** Es configuración muerta: nadie puede llegar ahí, y si llegara vería el placeholder.
 - **`VentasController?action=saveMixCobro` puede grabar un mix que Parámetros rechazaría**: no valida el 100%. Es anterior a este trabajo.
 - `pedir()` está duplicado en `Ingresos-Ventas.js` y `Parametros.js`. El código nuevo usa `pedirJson()` de `main.js`; sacar las dos copias viejas es un cambio aparte.
 - **Algunas pestañas de datos todavía usan `alert()`.** `Js/notificaciones.js` está enchufado en toda la pestaña Parámetros, en Cobranzas FR, en Otros Ingresos y —desde la exclusión de cartera— en la sub-pestaña *Cheques en Cartera* de Echeqs; está disponible para el resto. Las dos pestañas de Comex también lo usan desde `feature/comex-nac-usd` —los nueve `alert()` que les quedaban, con la falla de carga pintada además adentro de la tabla vacía; ver `README-comex.md`—. Ventas, Saldos, Cob. Electrónicos y Cobranzas May siguen con el diálogo del navegador, y **la otra sub-pestaña de Echeqs sigue con un `confirm()` en el tildado masivo**: quedó así a propósito, porque cambiarla no es parte de la exclusión y mezclarla habría metido en esa etapa un archivo que no tiene nada que ver con ella. Es el mismo reemplazo, archivo por archivo.

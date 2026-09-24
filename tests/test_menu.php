@@ -38,8 +38,9 @@ foreach ($menu['categorias'] as $cat) {
     $todos = array_merge($todos, $cat['items']);
 }
 
-// 2 arriba + 25 en las seis categorias + 1 al pie
-chequear('el menu tiene los 26 items', 26, count($todos));
+// 2 arriba + 19 en las cinco categorias + 1 al pie. Eran 26 hasta que se
+// sacaron Cronograma, Seguros, Bopreal y Pagos Div. Marzo.
+chequear('el menu tiene los 22 items', 22, count($todos));
 
 $incompletos = [];
 
@@ -208,9 +209,41 @@ $orden = array_column($menu['categorias'], 'codigo');
 chequear('Comex tiene sus 3 pestanas con datos', 3, $porCategoria['Comex']['con_datos']);
 chequear('y son 3 en total, ya sin Despachante', 3, $porCategoria['Comex']['total']);
 // Proveedores Locales ya tiene datos: sale de Tango (CPA04 + CPA54 + CPA01).
-// Cronograma y Logistica Local siguen siendo maquetas.
+// Logistica Local sigue pendiente; Cronograma se saco del menu.
 chequear('Proveedores tiene 1 pestana con datos', 1, $porCategoria['Proveedores']['con_datos']);
-chequear('y 3 en total', 3, $porCategoria['Proveedores']['total']);
+chequear('y 2 en total, ya sin Cronograma', 2, $porCategoria['Proveedores']['total']);
+chequear('RRHH y Operativos son 4, ya sin Seguros', 4, $porCategoria['RRHH']['total']);
+chequear('Financiero son 3, ya sin Bopreal ni Pagos Div. Marzo',
+    3, $porCategoria['Financiero']['total']);
+
+/* LAS CUATRO PESTANAS EN DESUSO NO VUELVEN. Eran placeholders sin datos, sin
+   proveedor y sin tabla: se fueron del menu, de TabController y del disco. El
+   chequeo contra TabController busca el codigo entre comillas, igual que el de
+   "enlaces muertos" de arriba, asi que 'crono_nacionalizacion' no lo confunde
+   con 'cronograma'. nacionalizacion_2 era configuracion muerta en
+   TabController -sin archivo ni menu- y se fue con ellas. */
+$retiradas = ['cronograma', 'seguros', 'bopreal', 'pagos_div'];
+
+chequear('las cuatro retiradas ya no estan en el menu', [],
+    array_values(array_intersect($retiradas, $tabs)));
+
+$enController = [];
+$enDisco = [];
+
+foreach (array_merge($retiradas, ['nacionalizacion_2']) as $tab) {
+    if (strpos($controller, "'" . $tab . "'") !== false) {
+        $enController[] = $tab;
+    }
+
+    if (file_exists(__DIR__ . '/../cashflow/Tabs/' . $tab . '.php')) {
+        $enDisco[] = $tab;
+    }
+}
+
+chequear('ni en TabController', [], $enController);
+chequear('ni sus archivos en Tabs/', [], $enDisco);
+chequear('y Proveedores Locales, que tiene el cronograma de pagos, sigue',
+    Menu::DATOS, $porTab['proveedores_locales']['estado']);
 
 // El contador cuenta SOLO las que tienen datos: una maqueta no cuenta, que es
 // lo que hace que el numero sea confiable.
