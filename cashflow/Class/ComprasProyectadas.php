@@ -435,6 +435,551 @@ class ComprasProyectadas {
     }
 
     /* ====================================================================
+       4. LA ESTIMACION Y LOS ESTADOS DE COBERTURA
+       ==================================================================== */
+
+    /** La temporada del mes no tiene version oficial */
+    const SIN_PRESUPUESTO = 'SIN_PRESUPUESTO';
+
+    /** Tenia ajuste manual, pero cambio la version oficial de su temporada */
+    const AJUSTE_DESCARTADO = 'AJUSTE_DESCARTADO';
+
+    /** Un importe cargado a mano reemplaza a la estimacion */
+    const AJUSTADO = 'AJUSTADO';
+
+    /** La cuota no tiene datos para ese mes calendario */
+    const SIN_HISTORIA = 'SIN_HISTORIA';
+
+    /** Lo ya comprado alcanza o supera lo proyectado */
+    const CUBIERTO = 'CUBIERTO';
+
+    /** Hay estimacion, pero el mes de pago no esta en la curva de futuros */
+    const SIN_COTIZACION = 'SIN_COTIZACION';
+
+    /** Tiene version, cuota y cotizacion */
+    const ESTIMADO = 'ESTIMADO';
+
+    /**
+     * EL ORDEN EN QUE SE EVALUAN LOS ESTADOS, y el orden ES la regla.
+     *
+     * Un mes puede cumplir varias condiciones a la vez -estar ajustado y ademas
+     * valuado con el mes mas cercano- y 'estado' es uno solo, porque la grilla
+     * muestra una columna. Gana el primero de esta lista; los demas viajan en
+     * 'marcas', asi que no se pierde ninguno.
+     *
+     * POR QUE ESTE ORDEN:
+     *
+     *   SIN_PRESUPUESTO va primero porque sin version oficial no hay nada que
+     *   calcular: ni cuota que aplicar ni cargado que descontar. Cualquier otro
+     *   estado sobre ese mes describiria una cuenta que no se hizo.
+     *
+     *   AJUSTE_DESCARTADO va antes que AJUSTADO por lo mismo que existe: es el
+     *   caso en el que alguien cargo un numero a mano y el sistema decidio no
+     *   usarlo. Si quedara tapado por el estado que corresponde a la
+     *   estimacion automatica, el mes se veria normal y nadie se enteraria de
+     *   que su ajuste dejo de aplicarse.
+     *
+     *   AJUSTADO va antes que todo lo que sigue porque REEMPLAZA la
+     *   estimacion: que la cuota no tenga historia o que lo cargado cubra el
+     *   mes deja de importar cuando el importe lo puso una persona.
+     *
+     *   SIN_COTIZACION va ultimo antes de ESTIMADO, y es a proposito que no
+     *   gane sobre CUBIERTO: un mes cubierto vale cero, y cero por cualquier
+     *   cotizacion es cero, asi que no hay ninguna aproximacion que informar.
+     */
+    const ESTADOS = [
+        self::SIN_PRESUPUESTO,
+        self::AJUSTE_DESCARTADO,
+        self::AJUSTADO,
+        self::SIN_HISTORIA,
+        self::CUBIERTO,
+        self::SIN_COTIZACION,
+        self::ESTIMADO
+    ];
+
+    /** Tolerancia en U$S para comparar lo proyectado contra lo cargado */
+    const TOLERANCIA_USD = 0.01;
+
+    /**
+     * LA CUENTA ENTERA, PURA: de la ventana y el presupuesto a la grilla de
+     * cobertura, mes por mes, con su estado y sus avisos.
+     *
+     * No lee la base, no lee el reloj y no valua: todo lo que necesita entra
+     * por parametro. Es lo que permite fijar en una prueba los casos que en la
+     * base real no se pueden producir a voluntad -una temporada sin oficial, un
+     * exceso de lo cargado, un ajuste que se descarta- y que son justamente los
+     * que el tablero no puede equivocar.
+     *
+     * LAS CUATRO DECISIONES QUE VIVEN ACA
+     * -----------------------------------
+     *
+     * 1. CADA TEMPORADA SE DESCUENTA CONTRA LA FECHA DE SU PROPIA VERSION.
+     *    No hay una fecha de corte global. Lo anterior a la fecha de calculo de
+     *    una version ya esta descontado adentro de su presupuesto -el
+     *    stock_proyectado de la app de compras incluye las OC pendientes de
+     *    ingreso- asi que restarlo seria contarlo dos veces. Y como la ventana
+     *    puede cruzar dos o tres temporadas, con una sola fecha de corte los
+     *    meses de una temporada descontarian contenedores que su presupuesto ya
+     *    tenia netos.
+     *
+     * 2. LA RESTA VA SOBRE EL EJE DE PAGO. Lo proyectado nace en el eje de
+     *    recepcion -la cuota reparte meses de recepcion- pero un contenedor del
+     *    maestro de Comex se ubica por su FECHA_EST_PAGO, que es lo que hace la
+     *    pestana Proveedores Exterior. Es el unico eje en el que los dos lados
+     *    estan definidos: en la base real la distancia entre FECHA_EST_PAGO y
+     *    FECHA_DESP_ADU va de -60 a +68 dias, asi que no hay formula que
+     *    convierta un eje en el otro.
+     *
+     * 3. LO CARGADO DE UN MES DE PAGO SE CONSUME UNA SOLA VEZ. Si dos meses de
+     *    recepcion caen en el mismo mes de pago -pasa segun D y X, ver
+     *    porMesDePago()- se reparte en orden cronologico: cada mes toma lo que
+     *    puede hasta su proyectado y el siguiente recibe el resto. Es el mismo
+     *    criterio con el que la app de compras consume el stock proyectado
+     *    entre tramos, y evita que el descuento se aplique dos veces.
+     *
+     * 4. UN EXCESO NO SE COMPENSA CONTRA OTROS MESES. Si lo cargado supera a lo
+     *    proyectado, la estimacion es CERO y nunca negativa, y el sobrante se
+     *    informa aparte en U$S. Un egreso negativo seria un ingreso que nadie
+     *    afirmo, y encima compensado en silencio contra el resto de la columna.
+     *    Es la misma regla que Comex::saldoPendiente() con el sobrepago.
+     *
+     * @param array $ventana Lo que devuelve ventana()
+     * @param array $cuota Lo que devuelve cuota()
+     * @param array $presupuestos Mapa codigo de temporada => version oficial:
+     *              ['id_version','fecha_calculo','fob_usd','unidades',...]
+     * @param array $cargado Contenedores del maestro, uno por fila:
+     *              ['id','contenedor','mes_pago'|null,'fec_emisio'|null,'pendiente_usd']
+     * @param array $opciones 'ajustes', 'nac_pct', 'meses_cotizacion'
+     * @return array ['meses'=>[...], 'warnings'=>[...], 'totales'=>[...]]
+     */
+    public static function estimar($ventana, $cuota, $presupuestos, $cargado, $opciones = []) {
+        $ajustes = isset($opciones['ajustes']) && is_array($opciones['ajustes'])
+            ? $opciones['ajustes'] : [];
+        $nacPct = isset($opciones['nac_pct']) ? floatval($opciones['nac_pct']) : 0.0;
+        $conCotiz = isset($opciones['meses_cotizacion']) && is_array($opciones['meses_cotizacion'])
+            ? $opciones['meses_cotizacion'] : null;
+
+        $meses = isset($ventana['meses']) && is_array($ventana['meses']) ? $ventana['meses'] : [];
+
+        /* DOS LISTAS, Y LA DIFERENCIA ES A QUIEN LE HABLAN.
+           'warnings' son los que el proveedor sube al tablero: dicen que la
+           proyeccion esta INCOMPLETA y por que -una temporada sin presupuesto,
+           un mes sin historia, un ajuste descartado, un exceso-.
+           'notas' son de reconciliacion y se quedan en la pestana: explican por
+           que el numero no coincide con otra pantalla. Van separadas porque la
+           mas comun de las notas -los contenedores que se pagan fuera de la
+           ventana- aparece SIEMPRE y con casi todo el padron adentro. Mezclada
+           con los avisos, ensenia a ignorar el bloque entero, que es la unica
+           forma de que un aviso que si importa pase desapercibido. */
+        $warnings = [];
+        $notas = [];
+
+        if (empty($meses)) {
+            return ['meses' => [], 'warnings' => $warnings, 'notas' => $notas,
+                    'totales' => self::totalesVacios()];
+        }
+
+        /* Lo cargado, indexado por mes de pago Y por fecha de emision de la OC.
+           La fecha de emision no se puede aplicar todavia: depende de la
+           temporada de cada mes, y recien se sabe adentro del recorrido. */
+        $porPago = [];
+        $sinFecha = 0.0;
+        $sinFechaCant = 0;
+        $sinEmision = 0.0;
+        $sinEmisionCant = 0;
+
+        foreach (is_array($cargado) ? $cargado : [] as $c) {
+            $pendiente = floatval(isset($c['pendiente_usd']) ? $c['pendiente_usd'] : 0);
+
+            if ($pendiente <= 0) {
+                continue;
+            }
+
+            /* SIN FECHA ESTIMADA DE PAGO NO DESCUENTA EN NINGUN MES, y no se
+               reparte ni se manda al primero. Un contenedor sin fecha es un
+               contenedor del que no se sabe cuando sale la plata; elegirle un
+               mes seria inventar el dato que falta. Se informa y se sigue. */
+            if (empty($c['mes_pago'])) {
+                $sinFecha += $pendiente;
+                $sinFechaCant++;
+
+                continue;
+            }
+
+            /* SIN FECHA DE EMISION DE LA OC tampoco descuenta: el corte es
+               "emitida DESPUES de la fecha de calculo", y de una OC que no
+               esta en Tango no se puede afirmar eso. Descontarla sin poder
+               fecharla restaria algo que el presupuesto quizas ya tenia neto. */
+            if (empty($c['fec_emisio'])) {
+                $sinEmision += $pendiente;
+                $sinEmisionCant++;
+
+                continue;
+            }
+
+            $porPago[$c['mes_pago']][] = [
+                'id' => isset($c['id']) ? $c['id'] : null,
+                'contenedor' => isset($c['contenedor']) ? $c['contenedor'] : '',
+                'fec_emisio' => substr((string) $c['fec_emisio'], 0, 10),
+                'pendiente_usd' => $pendiente
+            ];
+        }
+
+        if ($sinFechaCant > 0) {
+            $warnings[] = $sinFechaCant . ' contenedor' . ($sinFechaCant === 1 ? '' : 'es')
+                . ' del maestro de Comercio Exterior sin fecha estimada de pago, por '
+                . self::usd($sinFecha) . ': no descuentan en ningun mes.';
+        }
+
+        if ($sinEmisionCant > 0) {
+            $warnings[] = $sinEmisionCant . ' contenedor' . ($sinEmisionCant === 1 ? '' : 'es')
+                . ' cuya orden de compra no esta en Tango, por ' . self::usd($sinEmision)
+                . ': no se puede saber si se emitio despues del presupuesto, asi que no descuentan.';
+        }
+
+        /* Cuanto queda por consumir de cada mes de pago. Vive afuera del
+           recorrido a proposito: es lo que hace que dos meses de recepcion que
+           comparten mes de pago no descuenten dos veces lo mismo. */
+        $saldoCargado = [];
+
+        $filas = [];
+        $sinPresupuesto = [];
+        $sinHistoria = [];
+        $descartados = [];
+        $excesoTotal = 0.0;
+
+        foreach ($meses as $m) {
+            $codigo = isset($m['temporada']['codigo']) ? $m['temporada']['codigo'] : null;
+            $version = ($codigo !== null && isset($presupuestos[$codigo]))
+                ? $presupuestos[$codigo] : null;
+
+            $fila = [
+                'mes' => $m['mes'],
+                'recepcion' => $m['recepcion'],
+                'pago' => $m['pago'],
+                'nacionalizacion' => $m['nacionalizacion'],
+                'mes_pago' => $m['mes_pago'],
+                'mes_nacionalizacion' => $m['mes_nacionalizacion'],
+                'temporada' => $codigo,
+                'version' => null,
+                'cuota_pct' => null,
+                'proyectado_usd' => 0.0,
+                'cargado_usd' => 0.0,
+                'consumido_usd' => 0.0,
+                'exceso_usd' => 0.0,
+                'estimacion_usd' => 0.0,
+                'nacionalizacion_usd' => 0.0,
+                'ajuste' => null,
+                'estado' => self::ESTIMADO,
+                'marcas' => [],
+                'contenedores' => []
+            ];
+
+            $ajuste = isset($ajustes[$m['mes']]) ? $ajustes[$m['mes']] : null;
+
+            /* --- Sin version oficial: no hay nada que calcular ------------- */
+            if ($version === null) {
+                $fila['estado'] = self::SIN_PRESUPUESTO;
+                $filas[] = $fila;
+
+                if ($codigo !== null) {
+                    $sinPresupuesto[$codigo][] = $m['mes'];
+                }
+
+                continue;
+            }
+
+            $fila['version'] = [
+                'id_version' => isset($version['id_version']) ? $version['id_version'] : null,
+                'fecha_calculo' => isset($version['fecha_calculo'])
+                    ? substr((string) $version['fecha_calculo'], 0, 10) : null,
+                'nombre' => isset($version['nombre']) ? $version['nombre'] : '',
+                'fob_usd' => floatval(isset($version['fob_usd']) ? $version['fob_usd'] : 0)
+            ];
+
+            /* --- Lo proyectado: la cuota sobre el FOB de la temporada ------ */
+            $pct = self::pctDelMes($cuota, $m['mes']);
+            $fila['cuota_pct'] = $pct;
+
+            if ($pct === null) {
+                $sinHistoria[] = $m['mes'];
+            } else {
+                $fila['proyectado_usd'] = $fila['version']['fob_usd'] * $pct / 100.0;
+            }
+
+            /* --- Lo cargado: solo lo emitido DESPUES de SU fecha de calculo -
+               El filtro es por temporada, no global, y por eso se aplica aca
+               adentro y no al armar $porPago. */
+            $corte = $fila['version']['fecha_calculo'];
+            $disponible = 0.0;
+            $elegibles = [];
+
+            if ($corte !== null && isset($porPago[$m['mes_pago']])) {
+                foreach ($porPago[$m['mes_pago']] as $i => $c) {
+                    if ($c['fec_emisio'] <= $corte) {
+                        continue;
+                    }
+
+                    $clave = $m['mes_pago'] . '#' . $i;
+
+                    if (!array_key_exists($clave, $saldoCargado)) {
+                        $saldoCargado[$clave] = $c['pendiente_usd'];
+                    }
+
+                    if ($saldoCargado[$clave] <= self::TOLERANCIA_USD) {
+                        continue;
+                    }
+
+                    $elegibles[] = $clave;
+                    $disponible += $saldoCargado[$clave];
+                    $fila['contenedores'][] = ['clave' => $clave]
+                        + $c + ['disponible_usd' => $saldoCargado[$clave]];
+                }
+            }
+
+            /* 'cargado_usd' ES LO QUE ESTE MES TENIA PARA DESCONTAR, no lo que
+               termino usando. Asi la formula del pedido se lee literal en la
+               grilla -estimacion = MAX(0, proyectado - cargado)- y el exceso es
+               la diferencia visible. Lo que efectivamente se consumio va en
+               'consumido_usd', que es lo unico que se puede sumar entre meses:
+               dos meses que comparten mes de pago ven el mismo contenedor, asi
+               que sus 'cargado_usd' se superponen y su suma no significa nada. */
+            $fila['cargado_usd'] = $disponible;
+
+            /* --- La resta, que nunca da negativo -------------------------- */
+            $estimacion = $fila['proyectado_usd'] - $disponible;
+            $consumido = $disponible;
+
+            if ($estimacion < 0) {
+                $fila['exceso_usd'] = -$estimacion;
+                $excesoTotal += $fila['exceso_usd'];
+                $consumido = $fila['proyectado_usd'];
+                $estimacion = 0.0;
+            }
+
+            $fila['consumido_usd'] = $consumido;
+
+            /* Se descuenta del saldo lo que ESTE mes efectivamente consumio, y
+               SOLO de los contenedores que este mes tenia derecho a usar. El
+               sobrante queda disponible para otro mes de recepcion que comparta
+               el mismo mes de pago.
+               Pasarle los elegibles y no el mes de pago entero no es una
+               optimizacion: dos meses de recepcion que comparten mes de pago
+               pueden ser de temporadas DISTINTAS, con fechas de calculo
+               distintas, asi que cada uno ve un subconjunto distinto. Consumir
+               del monton dejaria a un mes gastando el cupo del otro. */
+            self::consumir($saldoCargado, $elegibles, $consumido);
+
+            $fila['estimacion_usd'] = $estimacion;
+
+            /* --- El ajuste manual reemplaza la estimacion ------------------ */
+            if ($ajuste !== null) {
+                $idAjuste = isset($ajuste['id_version']) ? $ajuste['id_version'] : null;
+
+                if ($idAjuste !== null && $idAjuste != $fila['version']['id_version']) {
+                    /* LA VERSION OFICIAL CAMBIO DESDE QUE SE CARGO EL AJUSTE.
+                       No se aplica: el numero se puso mirando otro presupuesto.
+                       Mismo criterio que Comex::descartaCotizacion(), que tira
+                       el override cuando el pago cambia de mes. */
+                    $fila['estado'] = self::AJUSTE_DESCARTADO;
+                    $fila['ajuste'] = $ajuste + ['aplicado' => false];
+                    $descartados[] = $m['mes'];
+                    $filas[] = self::conNacionalizacion($fila, $nacPct);
+
+                    continue;
+                }
+
+                $fila['ajuste'] = $ajuste + ['aplicado' => true];
+                $fila['estimacion_usd'] = floatval(
+                    isset($ajuste['importe_usd']) ? $ajuste['importe_usd'] : 0);
+                $fila['estado'] = self::AJUSTADO;
+                $filas[] = self::conNacionalizacion($fila, $nacPct);
+
+                continue;
+            }
+
+            /* --- El estado, en el orden de self::ESTADOS ------------------ */
+            if ($pct === null) {
+                $fila['estado'] = self::SIN_HISTORIA;
+            } elseif ($fila['estimacion_usd'] <= self::TOLERANCIA_USD && $disponible > 0) {
+                $fila['estado'] = self::CUBIERTO;
+            } elseif ($conCotiz !== null && empty($conCotiz[$m['mes_pago']])) {
+                $fila['estado'] = self::SIN_COTIZACION;
+            }
+
+            /* SIN_COTIZACION tambien viaja como MARCA cuando no gano el estado:
+               un mes ajustado y ademas valuado con el mes mas cercano tiene las
+               dos cosas que contar, y 'estado' es una sola columna. */
+            if ($conCotiz !== null && empty($conCotiz[$m['mes_pago']])
+                && $fila['estado'] !== self::SIN_COTIZACION
+                && $fila['estimacion_usd'] > self::TOLERANCIA_USD) {
+                $fila['marcas'][] = self::SIN_COTIZACION;
+            }
+
+            $filas[] = self::conNacionalizacion($fila, $nacPct);
+        }
+
+        /* --- Los avisos resumidos para el tablero ------------------------- */
+        foreach ($sinPresupuesto as $codigo => $ms) {
+            $warnings[] = 'La temporada ' . $codigo . ' no tiene version oficial de presupuesto: '
+                . count($ms) . ' mes' . (count($ms) === 1 ? '' : 'es')
+                . ' (' . implode(', ', $ms) . ') se proyectan en CERO. Se esta proyectando de MENOS.';
+        }
+
+        if (!empty($sinHistoria)) {
+            $warnings[] = 'Sin historia de recepciones para ' . count($sinHistoria) . ' mes'
+                . (count($sinHistoria) === 1 ? '' : 'es') . ' (' . implode(', ', $sinHistoria)
+                . '): la cuota no tiene con que repartir esos meses.';
+        }
+
+        if (!empty($descartados)) {
+            $warnings[] = 'Se descartaron ' . count($descartados) . ' ajuste'
+                . (count($descartados) === 1 ? '' : 's') . ' manual'
+                . (count($descartados) === 1 ? '' : 'es') . ' (' . implode(', ', $descartados)
+                . '): cambio la version oficial de su temporada desde que se cargaron.';
+        }
+
+        if ($excesoTotal > self::TOLERANCIA_USD) {
+            $warnings[] = 'Lo ya comprado supera a lo proyectado por ' . self::usd($excesoTotal)
+                . '. El exceso NO se compensa contra otros meses: esos meses van en cero.';
+        }
+
+        /* LO CARGADO CUYO MES DE PAGO NO ESTA EN LA VENTANA. No es un error ni
+           un exceso: son contenedores que se pagan fuera del tramo que se
+           proyecta, asi que no hay nada contra lo cual restarlos. Se informa
+           porque sin este numero la diferencia contra el padron de Proveedores
+           Exterior no se puede explicar desde ninguna pantalla.
+
+           NO se cuenta lo que quedo sin consumir DENTRO de la ventana: eso es
+           el exceso, y ya tiene su propio aviso. */
+        $mesesDePago = [];
+
+        foreach ($meses as $m) {
+            $mesesDePago[$m['mes_pago']] = true;
+        }
+
+        $afuera = 0.0;
+        $afueraCant = 0;
+
+        foreach ($porPago as $mesPago => $lista) {
+            if (isset($mesesDePago[$mesPago])) {
+                continue;
+            }
+
+            foreach ($lista as $c) {
+                $afuera += $c['pendiente_usd'];
+                $afueraCant++;
+            }
+        }
+
+        if ($afueraCant > 0) {
+            $notas[] = $afueraCant . ' contenedor' . ($afueraCant === 1 ? '' : 'es')
+                . ' ya cargado' . ($afueraCant === 1 ? '' : 's') . ' por ' . self::usd($afuera)
+                . ' se pagan fuera de la ventana: no descuentan de ningun mes proyectado.';
+        }
+
+        return [
+            'meses' => $filas,
+            'warnings' => $warnings,
+            'notas' => $notas,
+            'totales' => self::totales($filas)
+        ];
+    }
+
+    /**
+     * Descuenta $consumido del saldo de los contenedores indicados, en orden.
+     *
+     * @param array $saldoCargado Por referencia
+     * @param array $claves Contenedores que ESTE mes podia usar
+     * @param float $consumido
+     */
+    private static function consumir(&$saldoCargado, $claves, $consumido) {
+        if ($consumido <= 0) {
+            return;
+        }
+
+        foreach ($claves as $clave) {
+            if (!isset($saldoCargado[$clave]) || $saldoCargado[$clave] <= 0) {
+                continue;
+            }
+
+            $toma = min($saldoCargado[$clave], $consumido);
+            $saldoCargado[$clave] -= $toma;
+            $consumido -= $toma;
+
+            if ($consumido <= 0) {
+                return;
+            }
+        }
+    }
+
+    /**
+     * La nacionalizacion se DERIVA del FOB ya descontado.
+     *
+     * POR QUE NO SE DESCUENTA APARTE contra la estimacion de gastos de cada
+     * contenedor: verificado contra la base, de 28 contenedores ordenados
+     * despues de una fecha de calculo, 27 NO tienen IMPORTE_EST cargado. La
+     * estimacion se carga mas tarde en el circuito de Comercio Exterior, asi
+     * que descontar contra ella restaria casi cero hoy y saltaria de golpe el
+     * dia que alguien la cargue, moviendo el tablero sin que haya cambiado
+     * ninguna compra.
+     *
+     * Derivandola del FOB descontado queda consistente: lo que Crono
+     * Nacionalizacion empiece a mostrar de esos contenedores es lo mismo que
+     * esta fila dejo de mostrar cuando se descontó su FOB.
+     *
+     * EL COSTO, Y ESTA ASUMIDO: ese pedazo de nacionalizacion queda ubicado en
+     * el mes que deriva de la cuota y no en el FECHA_DESP_ADU real del
+     * contenedor, que puede ser otro mes.
+     *
+     * @param array $fila
+     * @param float $nacPct Porcentaje sobre el FOB
+     * @return array
+     */
+    private static function conNacionalizacion($fila, $nacPct) {
+        $fila['nacionalizacion_usd'] = $fila['estimacion_usd'] * floatval($nacPct) / 100.0;
+
+        return $fila;
+    }
+
+    /** @return array Totales de la grilla */
+    private static function totales($filas) {
+        $t = self::totalesVacios();
+
+        foreach ($filas as $f) {
+            $t['proyectado_usd'] += $f['proyectado_usd'];
+            /* Se totaliza lo CONSUMIDO y no lo disponible: ver la nota de
+               'cargado_usd'. Sumar lo disponible contaria dos veces un
+               contenedor que dos meses de recepcion se disputan. */
+            $t['cargado_usd'] += $f['consumido_usd'];
+            $t['exceso_usd'] += $f['exceso_usd'];
+            $t['estimacion_usd'] += $f['estimacion_usd'];
+            $t['nacionalizacion_usd'] += $f['nacionalizacion_usd'];
+            $t['por_estado'][$f['estado']] = (isset($t['por_estado'][$f['estado']])
+                ? $t['por_estado'][$f['estado']] : 0) + 1;
+        }
+
+        return $t;
+    }
+
+    /** @return array */
+    private static function totalesVacios() {
+        return [
+            'proyectado_usd' => 0.0,
+            'cargado_usd' => 0.0,
+            'exceso_usd' => 0.0,
+            'estimacion_usd' => 0.0,
+            'nacionalizacion_usd' => 0.0,
+            'por_estado' => []
+        ];
+    }
+
+    /** Un importe en dolares, para los avisos */
+    private static function usd($n) {
+        return 'U$S ' . number_format(floatval($n), 2, ',', '.');
+    }
+
+    /* ====================================================================
        UTILIDADES DE FECHA
        ==================================================================== */
 
