@@ -28,6 +28,10 @@ session_start();
          pestaña porque su contenedor cuelga de <body> y tiene que sobrevivir al
          reemplazo de #tabContent. -->
     <link href="Css/notificaciones.css?v=<?php echo time(); ?>" rel="stylesheet">
+    <!-- El indicador de carga de todas las pestañas (Js/cargando.js). Una sola
+         hoja: antes cada pestaña traía su copia, y las que no la traían se
+         veían bien solo si antes se había abierto otra. -->
+    <link href="Css/cargando.css?v=<?php echo time(); ?>" rel="stylesheet">
 </head>
 <body>
   
@@ -61,6 +65,9 @@ session_start();
     
     <!-- Custom JS -->
     <script src="Js/sidebar.js"></script>
+    <!-- El indicador de carga. Va ANTES de main.js, que lo usa en loadTab(), y
+         antes que cualquier pestaña: todas lo llaman al empezar a cargar. -->
+    <script src="Js/cargando.js?v=<?php echo time(); ?>"></script>
     <script src="Js/main.js"></script>
     <!-- Notificaciones de una acción del usuario: reemplazan a alert() y
          confirm(). Van acá por el mismo motivo que eje-vistas.js: las pestañas

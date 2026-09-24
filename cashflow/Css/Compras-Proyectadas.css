@@ -2,8 +2,8 @@
    Compras Proyectadas
    ----------------------------------------------------------------------------
    Casi todo lo dibuja Bootstrap y las clases compartidas del modulo (kpi-card,
-   table-wrapper, loading-spinner, search-box-container). Aca va SOLO lo propio
-   de esta pantalla.
+   table-wrapper, search-box-container, y el indicador de Css/cargando.css).
+   Aca va SOLO lo propio de esta pantalla.
    ============================================================================ */
 
 /* La grilla tiene catorce columnas y la mayoria son numeros: tabulares para que

@@ -177,22 +177,27 @@ function initTabNavigation() {
  * @param {string} tabName - Nombre del tab a cargar
  */
 function loadTab(tabName) {
-    
-    // Mostrar loader
-    $('#tabContent').html(`
-        <div class="d-flex justify-content-center align-items-center" style="min-height: 300px;">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Cargando...</span>
-            </div>
-        </div>
-    `);
-    
+
+    // Mostrar loader: el mismo componente que usan las pestañas adentro
+    // (Js/cargando.js), con el nombre de la que se está abriendo.
+    const link = $('.menu-link[data-tab="' + tabName + '"]').first();
+    const nombre = (link.length && link.data('encabezado')) || tabName.replace(/_/g, ' ');
+
+    $('#tabContent').html('<div id="cargandoPestana" style="min-height: 300px;"></div>');
+
+    if (window.Cargando) {
+        Cargando.mostrar('cargandoPestana', { titulo: 'Abriendo ' + nombre + '…' });
+    }
+
     // Cargar contenido via AJAX
     $.ajax({
         url: 'Controller/TabController.php',
         type: 'POST',
         data: { tab: tabName },
         success: function(response) {
+            // Se corta el contador antes de pisar el contenido.
+            if (window.Cargando) { Cargando.ocultar('cargandoPestana'); }
+
             $('#tabContent').html(response);
             
             // Actualizar título y breadcrumb
@@ -202,6 +207,8 @@ function loadTab(tabName) {
             initComponents();
         },
         error: function() {
+            if (window.Cargando) { Cargando.ocultar('cargandoPestana'); }
+
             $('#tabContent').html(`
                 <div class="alert alert-danger">
                     <i class="fas fa-exclamation-circle me-2"></i>

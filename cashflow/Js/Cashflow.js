@@ -130,7 +130,7 @@
        ================================================================ */
 
     function cargar() {
-        mostrar('cfLoading', true);
+        Cargando.mostrar('cfLoading');
         mostrar('cfWrapper', false);
         mostrar('cfKpis', false);
 
@@ -144,7 +144,7 @@
                 pintarKpis();
                 pintarGrilla();
 
-                mostrar('cfLoading', false);
+                Cargando.ocultar('cfLoading');
                 mostrar('cfWrapper', true);
                 mostrar('cfKpis', true);
 
@@ -153,7 +153,7 @@
                 }
             })
             .catch(function(error) {
-                mostrar('cfLoading', false);
+                Cargando.ocultar('cfLoading');
                 mostrarError('No se pudo armar el tablero: ' + error.message);
             });
     }

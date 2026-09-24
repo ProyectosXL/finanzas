@@ -132,7 +132,7 @@
        ================================================================ */
 
     function cargar() {
-        mostrar('loadingParametros', true, 'flex');
+        Cargando.mostrar('loadingParametros');
         mostrar('wrapperParametros', false);
 
         pedir('Controller/ParametrosController.php?action=getTodo')
@@ -151,11 +151,11 @@
                 generarGenerales();
                 generarMix();
                 generarRespaldo();
-                mostrar('loadingParametros', false);
+                Cargando.ocultar('loadingParametros');
                 mostrar('wrapperParametros', true);
             })
             .catch(function(error) {
-                mostrar('loadingParametros', false);
+                Cargando.ocultar('loadingParametros');
                 mostrarError('Error al cargar los parámetros: ' + error.message);
             });
     }

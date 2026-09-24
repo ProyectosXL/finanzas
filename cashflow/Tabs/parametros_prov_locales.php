@@ -32,10 +32,7 @@
 
     <div id="avisosParamPplo"></div>
 
-    <div class="loading-spinner" id="loadingParamPplo">
-        <div class="spinner"></div>
-        <p>Cargando listas de opciones...</p>
-    </div>
+    <div class="cargando-slot" id="loadingParamPplo" data-cargando="Cargando listas de opciones…"></div>
 
     <div id="wrapperParamPplo" style="display: none;">
 

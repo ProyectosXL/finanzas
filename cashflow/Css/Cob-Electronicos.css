@@ -7,34 +7,6 @@
    porque los selectores del modulo son globales al documento.
    ============================================================================ */
 
-.tab-cobel .loading-spinner {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 60px 20px;
-}
-
-.tab-cobel .spinner {
-    border: 3px solid var(--border-light, #eef0f5);
-    border-top: 3px solid var(--primary-color, #3366ff);
-    border-radius: 50%;
-    width: 40px;
-    height: 40px;
-    animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-.tab-cobel .loading-spinner p {
-    margin-top: 15px;
-    color: var(--text-muted, #8c93a8);
-    font-size: 13px;
-}
-
 /* Falta en main.css y la usa la tarjeta del importe neto */
 .tab-cobel .kpi-card-icon.purple {
     background: rgba(111, 66, 193, 0.1);

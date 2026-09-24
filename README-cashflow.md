@@ -1101,6 +1101,24 @@ Las notificaciones las resuelve `Js/notificaciones.js` (`Notificacion.exito / er
 
 **Los tres diálogos comparten un solo armazón** (`abrirDialogo()`): `confirmar()` contesta sí o no, `pedirTexto()` devuelve el texto o `null`, y `pedirFecha()` devuelve `'aaaa-mm-dd'` o `null` —nunca un `Date`: el módulo mueve fechas como string para no pasar por `new Date(string)`—. Lo delicado no es el HTML: es que cerrar con la cruz, con Escape o clickeando afuera **también sea una respuesta, y sea la negativa**. Tres copias de eso se desincronizan en la primera corrección. Cuando el diálogo tiene un campo, el foco arranca ahí y un campo obligatorio vacío **no cierra**: dice por qué en el mismo lugar donde se completa, en vez de fallar después contra el servidor.
 
+### Mientras algo carga: `Js/cargando.js`
+
+Un solo indicador para las diecinueve pestañas y para `loadTab()`, cargado una vez en `index.php` con su hoja `Css/cargando.css`. Antes había diecinueve copias del marcado `.loading-spinner` y diez del CSS, y las pestañas sin copia propia —el tablero, *Proyección*, *Proveedores Locales* y las sub-pestañas de *Parámetros*— se veían bien sólo si antes se había abierto otra cuyo CSS definía la regla sin prefijo.
+
+```js
+Cargando.mostrar(contenedor, { titulo, pasos: [...], overlay })
+Cargando.paso(contenedor, indice, 'pendiente' | 'en_curso' | 'listo' | 'error')
+Cargando.ocultar(contenedor)
+```
+
+- **El lugar va en el HTML de la pestaña**, vacío y con su texto: `<div class="cargando-slot" id="…" data-cargando="Cargando cheques en cartera…"></div>`. El JS sólo lo enciende y lo apaga; el título no se repite en el código.
+- **Cuenta los segundos en vivo**, y a los 10 agrega *"Esto puede tardar un poco más"*. Con pedidos de 30 o 40 segundos, un círculo que gira no distingue *está trabajando* de *se colgó*.
+- **Los pasos**, para las pestañas que hacen varios pedidos: *Ventas › Proyección* (venta y cobranza, en paralelo) y *Proyección › Actualizar ahora* (historia, presupuesto y grilla, en serie). Cada uno se marca cuando **su** respuesta llega.
+- **`overlay: true`** va encima de contenido ya dibujado, sin sacarlo: la tabla no salta ni pierde el scroll. Lo usa *Proyección* para recargar.
+- **Accesible**: `role="status"` y `aria-live="polite"`; el contador de segundos no se anuncia —cada segundo sería ruido—, el título, los pasos y la demora sí. Con `prefers-reduced-motion` el anillo no gira.
+
+`tests/test_cargando.php` verifica que ninguna pestaña vuelva a traer su copia, que cada lugar lo encienda y lo apague el JS de su pestaña, y que nadie le toque el `display` a mano.
+
 ---
 
 ## Lo que el tablero avisa, y por qué
@@ -1266,6 +1284,8 @@ cashflow/Js/tabla-orden.js                  Ordenar por encabezado, en las 36 ta
 cashflow/Js/tabla-export.js                 Exportar a Excel lo que se ve (idem)
 cashflow/Js/notificaciones.js               Avisos de accion y confirmaciones (idem)
 cashflow/Css/notificaciones.css
+cashflow/Js/cargando.js                     El indicador de carga de todas las pestanas (idem)
+cashflow/Css/cargando.css
 cashflow/Class/Menu.php                     Menu lateral y estado de cada pestana
 cashflow/Class/CashflowProvider.php         Contrato de proveedor
 cashflow/Class/CashflowRegistry.php         Registro de orígenes de datos

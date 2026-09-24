@@ -129,10 +129,7 @@
 
                         <!-- Venta Cashflow: la tabla que alimenta la proyección -->
                         <div class="tab-pane fade show active" id="paneVentaCashflow" role="tabpanel">
-                            <div class="loading-spinner" id="loadingAnalisis">
-                                <div class="spinner"></div>
-                                <p>Cargando datos...</p>
-                            </div>
+                            <div class="cargando-slot" id="loadingAnalisis" data-cargando="Cargando datos…"></div>
 
                             <div id="wrapperAnalisis" style="display: none;">
                                 <div class="table-responsive tabla-temporal">
@@ -157,10 +154,7 @@
 
                         <!-- Venta Acumulada: año calendario, real, neta, $ y USD -->
                         <div class="tab-pane fade" id="paneVentaAcumulada" role="tabpanel">
-                            <div class="loading-spinner" id="loadingAcumulada">
-                                <div class="spinner"></div>
-                                <p>Cargando venta acumulada...</p>
-                            </div>
+                            <div class="cargando-slot" id="loadingAcumulada" data-cargando="Cargando venta acumulada…"></div>
 
                             <div id="wrapperAcumulada" style="display: none;">
                                 <div class="table-responsive tabla-temporal">
@@ -184,10 +178,7 @@
 
                         <!-- Venta Balance: 1/8 al 31/7, real + proyectado, con IVA -->
                         <div class="tab-pane fade" id="paneVentaBalance" role="tabpanel">
-                            <div class="loading-spinner" id="loadingBalance">
-                                <div class="spinner"></div>
-                                <p>Cargando venta del balance...</p>
-                            </div>
+                            <div class="cargando-slot" id="loadingBalance" data-cargando="Cargando venta del balance…"></div>
 
                             <div id="wrapperBalance" style="display: none;">
                                 <div class="table-responsive tabla-temporal">
@@ -393,10 +384,7 @@
                 </div>
 
                 <div class="card-body p-0">
-                    <div class="loading-spinner" id="loadingProyeccion">
-                        <div class="spinner"></div>
-                        <p>Calculando proyección...</p>
-                    </div>
+                    <div class="cargando-slot" id="loadingProyeccion" data-cargando="Calculando proyección…"></div>
 
                     <div id="wrapperVenta" style="display: none;">
                         <div class="table-responsive tabla-temporal">

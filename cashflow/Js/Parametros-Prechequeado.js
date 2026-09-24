@@ -65,7 +65,7 @@
        ================================================================ */
 
     function cargar() {
-        mostrar('loadingParamPpq', true, 'flex');
+        Cargando.mostrar('loadingParamPpq');
         mostrar('wrapperParamPpq', false);
 
         pedirJson(URL_PARAM + '?action=getTodo')
@@ -80,11 +80,11 @@
                 pintarAvisos();
                 pintarClientes();
 
-                mostrar('loadingParamPpq', false);
+                Cargando.ocultar('loadingParamPpq');
                 mostrar('wrapperParamPpq', true);
             })
             .catch(function(error) {
-                mostrar('loadingParamPpq', false);
+                Cargando.ocultar('loadingParamPpq');
                 avisar('Error al cargar los clientes pre-chequeados: ' + error.message);
             });
     }

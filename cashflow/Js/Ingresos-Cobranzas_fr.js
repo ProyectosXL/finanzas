@@ -813,7 +813,7 @@
     }
 
     function mostrarCargando(mostrar) {
-        document.getElementById('loadingSpinnerCob').style.display = mostrar ? 'flex' : 'none';
+        if (mostrar) { Cargando.mostrar('loadingSpinnerCob'); } else { Cargando.ocultar('loadingSpinnerCob'); }
         document.getElementById('tableWrapperCob').style.display = mostrar ? 'none' : 'block';
     }
 

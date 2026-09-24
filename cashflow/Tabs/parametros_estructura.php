@@ -17,10 +17,7 @@
 
     <div id="cfeAvisos"></div>
 
-    <div class="loading-spinner" id="cfeLoading">
-        <div class="spinner"></div>
-        <p>Cargando la estructura...</p>
-    </div>
+    <div class="cargando-slot" id="cfeLoading" data-cargando="Cargando la estructura…"></div>
 
     <div id="cfeWrapper" style="display: none;">
 

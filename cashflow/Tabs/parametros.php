@@ -14,10 +14,7 @@
         </div>
     </div>
 
-    <div class="loading-spinner" id="loadingParametros">
-        <div class="spinner"></div>
-        <p>Cargando parámetros...</p>
-    </div>
+    <div class="cargando-slot" id="loadingParametros" data-cargando="Cargando parámetros…"></div>
 
     <div id="wrapperParametros" style="display: none;">
 

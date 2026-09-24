@@ -134,10 +134,7 @@
         </div>
 
         <div class="card-body p-0">
-            <div class="loading-spinner" id="loadingSpinnerExpTasky">
-                <div class="spinner"></div>
-                <p>Cargando facturas de exportación...</p>
-            </div>
+            <div class="cargando-slot" id="loadingSpinnerExpTasky" data-cargando="Cargando facturas de exportación…"></div>
 
             <!-- .tabla-temporal: header de dos filas fijo arriba, pie de
                  totales fijo abajo y columnas descriptivas fijas a la

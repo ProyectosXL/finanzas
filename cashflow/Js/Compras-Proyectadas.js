@@ -144,12 +144,51 @@
        CARGA
        ================================================================ */
 
-    function cargar() {
-        var spinner = document.getElementById('cpSpinner');
+    /**
+     * Muestra el indicador de carga donde corresponde.
+     *
+     * LA PRIMERA VEZ va en el lugar de la tabla, que todavia no existe. DESPUES
+     * va ENCIMA de la tabla ya dibujada (modo overlay): recargar no la saca, asi
+     * que no salta ni se pierde el scroll, y mientras tanto se sigue viendo lo
+     * que habia.
+     *
+     * @return {string} El id del contenedor que lo muestra, para marcar pasos
+     */
+    function indicador(opciones) {
+        var wrapper = document.getElementById('cpTableWrapper');
+        var dibujada = !!(datos && wrapper && wrapper.style.display !== 'none');
 
-        progreso('Calculando la proyección…');
+        if (dibujada) {
+            Cargando.mostrar(wrapper, Object.assign({ overlay: true }, opciones));
 
-        fetch(ENDPOINT + '?action=getGrilla')
+            return 'cpTableWrapper';
+        }
+
+        if (wrapper) { wrapper.style.display = 'none'; }
+
+        Cargando.mostrar('cpSpinner', opciones);
+
+        return 'cpSpinner';
+    }
+
+    function finIndicador() {
+        Cargando.ocultar('cpTableWrapper');
+        Cargando.ocultar('cpSpinner');
+    }
+
+    /**
+     * Lee la grilla y la dibuja.
+     *
+     * @param {boolean} sinIndicador true cuando ya hay uno a la vista -el de
+     *        "Actualizar ahora", que tiene este pedido como ultimo paso-
+     * @return {Promise}
+     */
+    function cargar(sinIndicador) {
+        if (sinIndicador !== true) {
+            indicador({ titulo: 'Calculando la proyección…' });
+        }
+
+        return fetch(ENDPOINT + '?action=getGrilla')
             .then(function(r) { return r.json(); })
             .then(function(d) {
                 if (!d || !d.success) {
@@ -157,7 +196,7 @@
                        LA TABLA, igual que en las dos pestañas de Comex: si la
                        pisara, "Actualizar" no tendría dónde dibujar. */
                     pintarAvisos([(d && d.message) || 'No se pudo cargar la proyección.'], 'error');
-                    if (spinner) { spinner.style.display = 'none'; }
+                    finIndicador();
 
                     return;
                 }
@@ -167,7 +206,7 @@
             })
             .catch(function(e) {
                 pintarAvisos(['No se pudo cargar la proyección: ' + e.message], 'error');
-                if (spinner) { spinner.style.display = 'none'; }
+                finIndicador();
             });
     }
 
@@ -180,10 +219,9 @@
         pintarGrilla();
         pintarVersiones();
 
-        var spinner = document.getElementById('cpSpinner');
         var wrapper = document.getElementById('cpTableWrapper');
 
-        if (spinner) { spinner.style.display = 'none'; }
+        finIndicador();
         if (wrapper) { wrapper.style.display = 'block'; }
 
         if (colFijas) { colFijas.aplicar(); }
@@ -333,11 +371,19 @@
 
         if (btn) { btn.disabled = true; }
 
+        /* TRES PASOS EN EL INDICADOR: los dos SP y la grilla. El tercero es el
+           mismo getGrilla de siempre, que corre adentro de este indicador en
+           vez de abrir otro. */
+        var cont = indicador({
+            titulo: 'Actualizando historia y presupuesto…',
+            pasos: pasos.map(function(p) { return p.texto; }).concat(['Recalcular la grilla'])
+        });
+
         var cadena = Promise.resolve();
 
-        pasos.forEach(function(p) {
+        pasos.forEach(function(p, i) {
             cadena = cadena.then(function() {
-                progreso('Recalculando: ' + p.texto + '…');
+                Cargando.paso(cont, i, 'en_curso');
 
                 return fetch(ENDPOINT + '?action=actualizarInsumo', {
                     method: 'POST',
@@ -347,9 +393,17 @@
                     .then(function(r) { return r.json(); })
                     .then(function(d) {
                         if (!d || !d.success) {
+                            Cargando.paso(cont, i, 'error');
+
                             throw new Error(p.texto + ': ' +
                                 ((d && d.message) || 'respuesta inesperada del servidor'));
                         }
+
+                        Cargando.paso(cont, i, 'listo');
+                    }, function(e) {
+                        Cargando.paso(cont, i, 'error');
+
+                        throw e;
                     });
             });
         });
@@ -364,25 +418,13 @@
                 });
             })
             .then(function() {
+                Cargando.paso(cont, pasos.length, 'en_curso');
+
+                return cargar(true);
+            })
+            .then(function() {
                 if (btn) { btn.disabled = false; }
-
-                cargar();
             });
-    }
-
-    function progreso(texto) {
-        var spinner = document.getElementById('cpSpinner');
-        var wrapper = document.getElementById('cpTableWrapper');
-
-        if (spinner) {
-            spinner.style.display = 'block';
-
-            var p = spinner.querySelector('p');
-
-            if (p) { p.textContent = texto; }
-        }
-
-        if (wrapper) { wrapper.style.display = 'none'; }
     }
 
     function pintarKpis() {
@@ -664,10 +706,9 @@
 
         setTexto('cpDetalleTitulo', nombre + ' · versión ' + idVersion);
 
-        var spinner = document.getElementById('cpDetalleSpinner');
         var wrapper = document.getElementById('cpDetalleWrapper');
 
-        if (spinner) { spinner.style.display = 'block'; }
+        Cargando.mostrar('cpDetalleSpinner');
         if (wrapper) { wrapper.style.display = 'none'; }
 
         bootstrap.Modal.getOrCreateInstance(modalEl).show();
@@ -677,14 +718,14 @@
             .then(function(d) {
                 if (!d || !d.success) {
                     Notificacion.error((d && d.message) || 'No se pudo leer el detalle.');
-                    if (spinner) { spinner.style.display = 'none'; }
+                    Cargando.ocultar('cpDetalleSpinner');
 
                     return;
                 }
 
                 pintarDetalle(d.detalle || []);
 
-                if (spinner) { spinner.style.display = 'none'; }
+                Cargando.ocultar('cpDetalleSpinner');
                 if (wrapper) { wrapper.style.display = 'block'; }
 
                 if (typeof TablaExport !== 'undefined' && TablaExport.reaplicar) {
@@ -693,7 +734,7 @@
             })
             .catch(function(e) {
                 Notificacion.error('No se pudo leer el detalle: ' + e.message);
-                if (spinner) { spinner.style.display = 'none'; }
+                Cargando.ocultar('cpDetalleSpinner');
             });
     }
 

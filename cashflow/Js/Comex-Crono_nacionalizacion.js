@@ -716,7 +716,7 @@
      * rojo arriba de una tabla que cargó bien es peor que no haberlo puesto.
      */
     function mostrarCargando(mostrar) {
-        document.getElementById('loadingSpinner').style.display = mostrar ? 'flex' : 'none';
+        if (mostrar) { Cargando.mostrar('loadingSpinner'); } else { Cargando.ocultar('loadingSpinner'); }
         document.getElementById('tableWrapper').style.display = mostrar ? 'none' : 'block';
 
         if (mostrar) {

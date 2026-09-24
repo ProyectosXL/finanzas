@@ -30,10 +30,7 @@
     -->
     <div id="resultadoCobel"></div>
 
-    <div class="loading-spinner" id="loadingParamCobel">
-        <div class="spinner"></div>
-        <p>Cargando parámetros de Cob. Electrónicos...</p>
-    </div>
+    <div class="cargando-slot" id="loadingParamCobel" data-cargando="Cargando parámetros de Cob. Electrónicos…"></div>
 
     <div id="wrapperParamCobel" style="display: none;">
 

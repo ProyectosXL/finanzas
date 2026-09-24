@@ -294,10 +294,7 @@
                 </div>
             </div>
 
-            <div class="loading-spinner" id="loadingCobel">
-                <div class="spinner"></div>
-                <p>Cargando acreditaciones...</p>
-            </div>
+            <div class="cargando-slot" id="loadingCobel" data-cargando="Cargando acreditaciones…"></div>
 
             <div class="table-responsive" id="wrapperCobel" style="display: none;">
                 <table class="table table-hover mb-0" id="tablaCobel">

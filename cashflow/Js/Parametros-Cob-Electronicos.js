@@ -82,7 +82,7 @@
        ================================================================ */
 
     function cargar() {
-        mostrar('loadingParamCobel', true, 'flex');
+        Cargando.mostrar('loadingParamCobel');
         mostrar('wrapperParamCobel', false);
 
         pedirJson(URL_PARAM + '?action=getTodo')
@@ -100,11 +100,11 @@
                 pintarSelectores();
                 pintarSuma();
 
-                mostrar('loadingParamCobel', false);
+                Cargando.ocultar('loadingParamCobel');
                 mostrar('wrapperParamCobel', true);
             })
             .catch(function(error) {
-                mostrar('loadingParamCobel', false);
+                Cargando.ocultar('loadingParamCobel');
                 avisar('Error al cargar los parámetros de Cob. Electrónicos: ' + error.message);
             });
     }

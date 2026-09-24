@@ -202,10 +202,7 @@
             </div>
 
             <div class="card-body p-0">
-                <div class="loading-spinner" id="loadingEch">
-                    <div class="spinner"></div>
-                    <p>Cargando cheques en cartera...</p>
-                </div>
+                <div class="cargando-slot" id="loadingEch" data-cargando="Cargando cheques en cartera…"></div>
 
                 <!-- .tabla-temporal: header de dos filas fijo arriba y
                      columnas descriptivas fijas a la izquierda. Ver
@@ -432,10 +429,7 @@
             <div id="avisosEjePre"></div>
 
             <div class="card-body p-0">
-                <div class="loading-spinner" id="loadingPre">
-                    <div class="spinner"></div>
-                    <p>Cargando cheques pre-chequeados...</p>
-                </div>
+                <div class="cargando-slot" id="loadingPre" data-cargando="Cargando cheques pre-chequeados…"></div>
 
                 <div class="table-wrapper table-responsive tabla-temporal" id="wrapperPre"
                      style="display: none;">

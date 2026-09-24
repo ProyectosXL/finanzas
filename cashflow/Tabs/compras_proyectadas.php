@@ -145,10 +145,7 @@
         </div>
 
         <div class="card-body p-0">
-            <div class="loading-spinner" id="cpSpinner">
-                <div class="spinner"></div>
-                <p>Calculando la proyección...</p>
-            </div>
+            <div class="cargando-slot" id="cpSpinner" data-cargando="Calculando la proyección…"></div>
 
             <div class="table-wrapper" id="cpTableWrapper" style="display: none;">
                 <div class="table-responsive">
@@ -266,9 +263,7 @@
                         aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
-                <div id="cpDetalleSpinner" class="text-center py-4">
-                    <div class="spinner"></div>
-                </div>
+                <div class="cargando-slot" id="cpDetalleSpinner" data-cargando="Leyendo el detalle de la versión…"></div>
                 <div class="table-responsive" id="cpDetalleWrapper" style="display: none;">
                     <table id="tablaDetalleVersion" class="table table-sm table-hover mb-0">
                         <thead>
