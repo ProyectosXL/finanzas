@@ -272,6 +272,149 @@ chequear('ningun PRINT arma su texto con una subconsulta',
     0, preg_match_all('/PRINT[^;]*\(\s*SELECT\b/is', $sqlLimpio));
 
 /* ========================================================================
+   LA PANTALLA
+   ======================================================================== */
+
+$tab = __DIR__ . '/../cashflow/Tabs/compras_proyectadas.php';
+$js = __DIR__ . '/../cashflow/Js/Compras-Proyectadas.js';
+$ctrl = __DIR__ . '/../cashflow/Controller/ComprasProyectadasController.php';
+$paramTab = __DIR__ . '/../cashflow/Tabs/parametros_compras_proy.php';
+$paramJs = __DIR__ . '/../cashflow/Js/Parametros-Compras_proy.js';
+
+seccion('Los archivos de la pantalla existen y estan enganchados');
+
+foreach (['la pestana' => $tab, 'su JS' => $js, 'su controller' => $ctrl,
+          'el panel de parametros' => $paramTab, 'su JS' => $paramJs,
+          'su CSS' => __DIR__ . '/../cashflow/Css/Compras-Proyectadas.css'] as $que => $ruta) {
+    chequear($que . ' existe', true, file_exists($ruta));
+}
+
+$menu = file_get_contents(__DIR__ . '/../cashflow/Class/Menu.php');
+
+chequear('el menu declara la pestana',
+    true, strpos($menu, "'tab' => 'compras_proyectadas'") !== false);
+
+/* EL PLACEHOLDER SE DETECTA, NO SE DECLARA: si la pestana todavia incluyera
+   Components/tab_placeholder.php, Menu la baja a 'pendiente' sin importar lo
+   declarado. Declararla con datos Y dejar el placeholder seria prometer datos
+   que no existen. */
+chequear('y la pestana no incluye el placeholder',
+    false, strpos(file_get_contents($tab), 'tab_placeholder') !== false);
+
+$parametros = file_get_contents(__DIR__ . '/../cashflow/Class/Parametros.php');
+
+chequear('Parametros declara el modulo',
+    true, strpos($parametros, "'COMPRAS_PROY' => [") !== false);
+
+/* El id del tab-pane lo arma parametros.php como 'paneParam' . ucfirst(
+   strtolower(codigo)). Si no coincide, la sub-pestana se dibuja y no abre
+   nada: un boton que no hace nada, sin ningun error. */
+chequear('el tab-pane de Parametros tiene el id que arma la lista',
+    true, strpos(file_get_contents(__DIR__ . '/../cashflow/Tabs/parametros.php'),
+                 'id="paneParam' . ucfirst(strtolower('COMPRAS_PROY')) . '"') !== false);
+
+seccion('La pantalla no calcula: le pide la grilla al proveedor');
+
+$srcCtrl = codigoSinComentariosCPP($ctrl);
+
+chequear('el controller usa el mismo proveedor que el tablero',
+    true, strpos($srcCtrl, "new ComprasProyectadasProvider('COMPRAS_PROY')") !== false);
+
+/* SI LA PESTANA REIMPLEMENTARA LA CUENTA, podria mostrar una estimacion
+   distinta de la que el tablero suma, y nadie podria decir cual vale. Es la
+   misma razon por la que Comercio Exterior mudo la valuacion al getter. */
+chequear('y no vuelve a llamar a estimar() por su cuenta',
+    0, substr_count($srcCtrl, 'ComprasProyectadas::estimar'));
+
+chequear('ni arma su propia ventana',
+    0, substr_count($srcCtrl, 'ComprasProyectadas::ventana'));
+
+chequear('ni su propia cuota',
+    0, substr_count($srcCtrl, 'ComprasProyectadas::cuota'));
+
+/* EL ORDEN IMPORTA: series() es lo que acumula los avisos del proveedor. Si la
+   grilla se pidiera primero, esos avisos todavia no existirian y la pestana
+   diria menos que el tablero sobre los mismos numeros. */
+chequear('pide las series ANTES que la grilla',
+    true, strpos($srcCtrl, '$provider->series($h)') < strpos($srcCtrl, '$provider->grilla($h)'));
+
+chequear('y sube los avisos del proveedor a la pantalla',
+    true, strpos($srcCtrl, '$provider->warnings()') !== false);
+
+seccion('El controller es de solo lectura');
+
+foreach (['INSERT', 'UPDATE ', 'DELETE', 'MERGE', 'DROP'] as $verbo) {
+    chequear('el controller no tiene ' . trim($verbo),
+        0, preg_match_all('/\b' . trim($verbo) . '\b/i', $srcCtrl));
+}
+
+seccion('El JS reutiliza lo compartido del modulo y no usa alert()');
+
+$srcJs = codigoSinComentariosCPP($js);
+$srcParamJs = codigoSinComentariosCPP($paramJs);
+
+foreach (['Compras-Proyectadas.js' => $srcJs,
+          'Parametros-Compras_proy.js' => $srcParamJs] as $nombre => $s) {
+    chequear($nombre . ' no usa alert()', 0, preg_match_all('/\balert\s*\(/', $s));
+    chequear($nombre . ' no usa confirm()', 0, preg_match_all('/\bconfirm\s*\(/', $s));
+    chequear($nombre . ' manda los fallos a Notificacion',
+        true, strpos($s, 'Notificacion.') !== false);
+}
+
+/* LOS TEXTOS DEL SERVIDOR NUNCA SE INYECTAN COMO HTML: las dos pantallas arman
+   filas con innerHTML y los avisos vienen con nombres de tabla y de archivo. */
+foreach (['Compras-Proyectadas.js' => $srcJs,
+          'Parametros-Compras_proy.js' => $srcParamJs] as $nombre => $s) {
+    chequear($nombre . ' escapa lo que interpola',
+        true, preg_match('/function esc\(/', $s) === 1);
+}
+
+$tabHtml = file_get_contents($tab);
+
+chequear('el boton de exportar es declarativo, con data-exportar',
+    true, strpos($tabHtml, 'data-exportar="tablaComprasProy"') !== false);
+
+chequear('el detalle por rubro tambien se exporta',
+    true, strpos($tabHtml, 'data-exportar="tablaDetalleVersion"') !== false);
+
+/* Un boton con data-exportar lo engancha solo Js/tabla-export.js. Un listener
+   propio seria la envoltura que el modulo ya saco de las otras pestanas. */
+chequear('el JS no arma su propio exportador',
+    0, preg_match_all('/function exportar\w*\s*\(/', $srcJs));
+
+chequear('usa el control compartido de columnas fijas',
+    true, strpos($srcJs, 'crearColumnasFijas(') !== false);
+
+chequear('y el buscador filtra por un atributo, no por el texto de la fila',
+    true, strpos($srcJs, 'data-busca') !== false);
+
+seccion('La pantalla explica los siete estados');
+
+/* Es el dato por el que se abre esta pantalla: el tablero muestra un numero y
+   no puede decir POR QUE un mes vale cero. Si un estado nuevo no tuviera su
+   entrada, la grilla lo dibujaria como ESTIMADO y diria algo falso. */
+foreach (ComprasProyectadas::ESTADOS as $estado) {
+    chequear('el JS sabe dibujar ' . $estado,
+        true, preg_match('/\b' . $estado . ':\s*\{/', $srcJs) === 1);
+}
+
+seccion('El panel de parametros cubre los siete');
+
+foreach (array_keys(ComprasProyectadasProvider::DEFAULTS) as $clave) {
+    chequear('el panel edita ' . $clave, true, strpos($srcParamJs, "'" . $clave . "'") !== false);
+}
+
+/* Cada campo VALIDA ANTES DE MANDAR, con su rango: un dia 45 o un porcentaje
+   negativo son numeros validos para la base y producen una proyeccion que no
+   significa nada. */
+chequear('cada parametro declara su rango',
+    7, preg_match_all('/min:\s*-?\d+,\s*max:\s*\d+/', $srcParamJs)
+     + preg_match_all("/tipo:\s*'opciones'/", $srcParamJs));
+
+chequear('y se valida contra ese rango antes de guardar',
+    true, strpos($srcParamJs, 'Notificacion.campoInvalido') !== false);
+
+/* ========================================================================
    CONTRA LA BASE, SOLO LECTURA
    ======================================================================== */
 

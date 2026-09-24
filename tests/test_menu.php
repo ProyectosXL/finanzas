@@ -38,8 +38,8 @@ foreach ($menu['categorias'] as $cat) {
     $todos = array_merge($todos, $cat['items']);
 }
 
-// 2 arriba + 24 en las seis categorias + 1 al pie
-chequear('el menu tiene los 25 items', 25, count($todos));
+// 2 arriba + 25 en las seis categorias + 1 al pie
+chequear('el menu tiene los 26 items', 26, count($todos));
 
 $incompletos = [];
 
@@ -201,10 +201,12 @@ chequear('para el menu son pendientes, por si alguien las vuelve a listar',
     Menu::PENDIENTE, Menu::estado('saldo_inversiones', Menu::DATOS));
 
 $orden = array_column($menu['categorias'], 'codigo');
-// Comercio Exterior queda completa: sus dos pestanas tienen datos. Despachante
-// y Asesor se dio de baja del menu porque no se usa mas.
-chequear('Comex tiene sus 2 pestanas con datos', 2, $porCategoria['Comex']['con_datos']);
-chequear('y son 2 en total, ya sin Despachante', 2, $porCategoria['Comex']['total']);
+// Comercio Exterior queda completa: sus TRES pestanas tienen datos. Despachante
+// y Asesor se dio de baja del menu porque no se usa mas. La tercera es Compras
+// Proyectadas: el mismo circuito mirado un paso antes, cuando la compra todavia
+// no tiene contenedor cargado.
+chequear('Comex tiene sus 3 pestanas con datos', 3, $porCategoria['Comex']['con_datos']);
+chequear('y son 3 en total, ya sin Despachante', 3, $porCategoria['Comex']['total']);
 // Proveedores Locales ya tiene datos: sale de Tango (CPA04 + CPA54 + CPA01).
 // Cronograma y Logistica Local siguen siendo maquetas.
 chequear('Proveedores tiene 1 pestana con datos', 1, $porCategoria['Proveedores']['con_datos']);

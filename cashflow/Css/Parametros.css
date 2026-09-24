@@ -627,3 +627,67 @@
     border-color: #ff9800 !important;
     background-color: #fff8e1;
 }
+
+/* ============================================================================
+   COMPRAS PROYECTADAS
+   ----------------------------------------------------------------------------
+   La cadena de fechas. Los tres parametros de dias no se leen sueltos: hay que
+   verlos como una secuencia para entender que mueven la misma fecha en dos
+   direcciones, y que subir los dias de pago corre el egreso HACIA ATRAS.
+   ============================================================================ */
+.pcpr-cadena {
+    display: flex;
+    align-items: stretch;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.pcpr-paso {
+    flex: 1 1 180px;
+    min-width: 160px;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.5rem;
+    background: var(--bs-body-bg, #fff);
+    text-align: center;
+}
+
+.pcpr-paso-icono {
+    font-size: 1.25rem;
+    margin-bottom: 0.35rem;
+}
+
+.pcpr-paso-titulo {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.pcpr-paso-fecha {
+    font-size: 1.05rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.pcpr-paso-detalle {
+    font-size: 0.75rem;
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+/* La flecha apunta hacia adelante en el TIEMPO: primero se paga, despues se
+   nacionaliza, despues llega. Es el orden en el que ocurren, no el orden en el
+   que estan los parametros. */
+.pcpr-flecha {
+    display: flex;
+    align-items: center;
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+@media (max-width: 575.98px) {
+    .pcpr-flecha {
+        transform: rotate(90deg);
+        justify-content: center;
+        width: 100%;
+    }
+}

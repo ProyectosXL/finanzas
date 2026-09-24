@@ -1,0 +1,67 @@
+/* ============================================================================
+   Compras Proyectadas
+   ----------------------------------------------------------------------------
+   Casi todo lo dibuja Bootstrap y las clases compartidas del modulo (kpi-card,
+   table-wrapper, loading-spinner, search-box-container). Aca va SOLO lo propio
+   de esta pantalla.
+   ============================================================================ */
+
+/* La grilla tiene catorce columnas y la mayoria son numeros: tabulares para que
+   los importes se alineen digito con digito al leerlos en vertical. Sin esto,
+   comparar dos meses obliga a leer el numero entero en vez de la longitud. */
+.tab-compras_proyectadas #tablaComprasProy td,
+.tab-compras_proyectadas #tablaComprasProy tfoot td,
+.tab-compras_proyectadas #tablaVersionesComprasProy td,
+.tab-compras_proyectadas #tablaDetalleVersion td {
+    font-variant-numeric: tabular-nums;
+}
+
+.tab-compras_proyectadas #tablaComprasProy th,
+.tab-compras_proyectadas #tablaVersionesComprasProy th {
+    white-space: nowrap;
+    font-size: 0.8125rem;
+}
+
+.tab-compras_proyectadas #tablaComprasProy td {
+    white-space: nowrap;
+    font-size: 0.8125rem;
+    vertical-align: middle;
+}
+
+/* El badge de estado es la columna por la que se abre esta pantalla: se lee
+   antes que cualquier importe, asi que no se achica con el resto. */
+.tab-compras_proyectadas #tablaComprasProy .badge {
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+/* La columna de estimacion es la que alimenta al tablero. Va separada de las
+   dos que la producen -proyectado y ya comprado- con una linea, para que se lea
+   como el RESULTADO de esa resta y no como una columna mas. */
+.tab-compras_proyectadas #tablaComprasProy td:nth-child(8),
+.tab-compras_proyectadas #tablaComprasProy th:nth-child(8) {
+    border-right: 2px solid var(--bs-border-color, #dee2e6);
+}
+
+/* La cuarta tarjeta necesita su color: las tres que ya existen en el modulo
+   son blue, orange y green. */
+.tab-compras_proyectadas .kpi-card-icon.purple {
+    background: rgba(111, 66, 193, 0.12);
+    color: #6f42c1;
+}
+
+/* Un mes cubierto vale cero y no hay nada que corregirle: se atenua para que la
+   vista salte a los que si tienen importe, sin esconderlo. Es la misma idea con
+   la que Comercio Exterior marca en verde las canceladas. */
+.tab-compras_proyectadas #tablaComprasProy tr:has(.fa-ship) td:nth-child(n + 5) {
+    opacity: 0.65;
+}
+
+/* El detalle por rubro puede tener sesenta filas: el encabezado se queda
+   quieto al scrollear adentro del modal. */
+#modalDetalleVersion #tablaDetalleVersion thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bs-body-bg, #fff);
+}

@@ -203,6 +203,16 @@ class ComprasProyectadasProvider extends CashflowProvider {
      *                'versiones','parametros']
      */
     public function grilla($h, $datos = null, $params = null, $dolar = null) {
+        /* SE CALCULA UNA SOLA VEZ POR PEDIDO. La pestana necesita la grilla Y
+           las series -los totales del eje no se pueden sumar de la grilla,
+           porque hay meses cuya nacionalizacion cae fuera del horizonte- y
+           series() vuelve a pasar por aca. Sin la cache, un solo pedido leia
+           dos veces el presupuesto, la historia de recepciones y el maestro de
+           Comex. Es el mismo criterio que el cache de CashflowProvider::series().*/
+        if ($this->ultimaGrilla !== null) {
+            return $this->ultimaGrilla;
+        }
+
         $datos = ($datos === null) ? new ComprasProyectadasDatos : $datos;
         $params = ($params === null) ? $this->parametros() : $params;
         $dolar = ($dolar === null) ? new DolarFuturo : $dolar;

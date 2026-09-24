@@ -228,15 +228,20 @@ INSERT INTO @p (CLAVE, VALOR, TIPO_DATO, DESCRIPCION, GRUPO) VALUES
  ('compras_proy_nac_pct', '89', 'DECIMAL',
   'Porcentaje de nacionalizacion sobre el FOB. Es el cociente ponderado de los contenedores reales; el inc_fob del presupuesto da 41 % y deja el 30 % del FOB en cero',
   'GENERAL'),
+/* LOS TRES DE FECHAS VAN TAMBIEN EN GRUPO 'GENERAL', y no en uno propio.
+   La pestana Parametros resuelve la seccion 'generales' pidiendo el GRUPO
+   'GENERAL' del modulo; un grupo nuevo necesitaria ademas una seccion nueva en
+   Parametros::getModulosConDatos() y su bloque en el front. Son tres campos: no
+   justifica tocar el renderizado que comparten seis modulos. */
  ('compras_proy_dia_llegada', '15', 'INT',
   'Dia del mes en el que se ubica la recepcion de cada mes proyectado',
-  'FECHAS'),
+  'GENERAL'),
  ('compras_proy_dias_pago', '47', 'INT',
   'Dias entre el pago del FOB y la recepcion. Valor inicial: el que da hoy la cadena de Comercio Exterior',
-  'FECHAS'),
+  'GENERAL'),
  ('compras_proy_dias_nac', '2', 'INT',
   'Dias entre la nacionalizacion y la recepcion. Valor inicial: DIAS_DESP_REC de Comercio Exterior',
-  'FECHAS');
+  'GENERAL');
 
 IF COL_LENGTH('dbo.RO_T_CASHFLOW_PARAMETROS', 'MODULO') IS NULL
 BEGIN
@@ -260,6 +265,22 @@ BEGIN
     JOIN @p p ON p.CLAVE = x.CLAVE
     WHERE ISNULL(x.MODULO, '') <> 'COMPRAS_PROY';
 END
+
+/* EL GRUPO TAMBIEN SE CORRIGE, Y TAMPOCO TOCA EL VALOR.
+   La pestana Parametros resuelve la seccion 'generales' pidiendo el GRUPO
+   'GENERAL' del modulo, asi que un parametro con otro grupo EXISTE pero no se
+   dibuja: el campo no aparece y la pantalla dice que falta. Una version
+   anterior de este script sembraba los tres de dias con GRUPO = 'FECHAS', y sin
+   esto una base que la corrio se queda con tres campos invisibles para siempre,
+   porque el INSERT de arriba solo crea lo que falta.
+
+   TIPO_DATO va en el mismo UPDATE por el mismo motivo: decide que control
+   dibuja el formulario. */
+UPDATE x
+SET GRUPO = p.GRUPO, TIPO_DATO = p.TIPO_DATO
+FROM dbo.RO_T_CASHFLOW_PARAMETROS x
+JOIN @p p ON p.CLAVE = x.CLAVE
+WHERE ISNULL(x.GRUPO, '') <> p.GRUPO OR ISNULL(x.TIPO_DATO, '') <> p.TIPO_DATO;
 
 /* El contador va a una variable antes del PRINT: PRINT toma una expresion
    escalar y una subconsulta ahi es un error de sintaxis, no de ejecucion, asi

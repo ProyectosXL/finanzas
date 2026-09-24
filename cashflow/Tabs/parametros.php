@@ -234,6 +234,14 @@
             <?php include __DIR__ . '/parametros_prov_locales.php'; ?>
         </div>
 
+        <!-- Parámetros del módulo Compras Proyectadas: cuántos meses, cuánta
+             historia para la cuota y los tres días de la cadena de fechas.
+             Mismo criterio que los anteriores: archivo y JS propios, y clases
+             con prefijo pcpr-. -->
+        <div class="tab-pane fade" id="paneParamCompras_proy" role="tabpanel">
+            <?php include __DIR__ . '/parametros_compras_proy.php'; ?>
+        </div>
+
         <!-- Estructura del tablero de Cashflow.
              Va en su propio archivo y con su propio JS: no comparte nada con
              los bloques de Ventas, y así un problema acá no puede llevarse
