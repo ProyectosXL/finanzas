@@ -48,6 +48,7 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 | 20 | `sql/cashflow_comex_fecha_maestra.sql` | Crea `RO_T_CASHFLOW_COMEX_FECHA_EDIT` —quién movió cada fecha de Comercio Exterior desde el cashflow— y **migra al maestro** las fechas que vivían en las columnas `EDIT` de `RO_T_CASHFLOW_COMEX_CRONO_NAC` | **Las dos pestañas de Comex se leen igual** —las fechas salen del maestro, que siempre está, y los vencidos se ven igual— pero **no se pueden editar**, y las dos avisan qué script falta. El tablero no cambia: lo que mueve sus números es el filtro de embarque que se sacó del código, no este script. En la base real la migración **no escribe ni una fecha**: las seis ediciones vigentes ya coinciden con el maestro. Ver `README-comex.md` |
 | 21 | `sql/cashflow_comex_pagado.sql` | Crea `RO_T_CASHFLOW_COMEX_PAGADO`: qué pagos de Comercio Exterior ya se hicieron, con su historial. Un pago marcado **sale de la proyección** y su importe pasa a una serie propia | **El tablero no cambia**: sin la tabla no hay nada marcado, así que proyecta todo lo pendiente, que es lo que hacía antes. Las dos pestañas se leen igual, la casilla se dibuja deshabilitada y las dos avisan qué script falta. Ver `README-comex.md` |
 | 22 | `sql/cashflow_estructura_grupos.sql` | Agrega `GRUPO`, `NATURALEZA` y `GRUPO_NOMBRE` a `RO_T_CASHFLOW_CONF_FILA`, y **agrupa las dos filas de Cobranzas Franquicias** en un solo renglón que se abre. De paso declara la naturaleza de las tres filas que son enteras de una parte | **El tablero funciona como hasta ahora**, con una fila por cada parte y sin ningún renglón que se abra, y lo avisa nombrando el script. Ningún importe cambia: la agrupación es presentación. Los campos de *Parámetros → Cashflow* se dibujan apagados diciendo qué falta |
+| 23 | `sql/cashflow_compras_proyectadas.sql` | Crea las filas **Proveedores Exterior Proyectado** y **Nacionalizaciones Proyectado** (órdenes 15 y 25, pegadas a su parte real), asigna los grupos `PROV_EXTERIOR` y `NACIONALIZACIONES`, crea `RO_T_CASHFLOW_COMPRAS_PROY_AJUSTE` y siembra los siete parámetros del módulo `COMPRAS_PROY` | **El tablero queda exactamente como hoy**: sin parte proyectada y sin ningún número cambiado. La pestaña *Compras Proyectadas* avisa qué script falta y no rompe. Ver `README-compras-proyectadas.md` |
 
 ### Scripts modificados — hay que volver a correrlos
 
@@ -73,6 +74,7 @@ Que ninguna fila del tablero duplique importes:
 - `STOCK_INVERSIONES → FONDO_INVERSION/STOCK` y `STOCK_DOLARES_COMITENTE → FONDO_COMITENTE/STOCK`, activas. Si alguna sigue apuntando a `SALDO_INVERSIONES` o `DOLARES_COMITENTE`, el editor la marca con la advertencia de módulo retirado y el tablero avisa. El día que se corre el script 18 **el tablero no se mueve un peso**: verificado contra la base, las dos filas dan `3.529.962,37` y `1.535,00` antes y después, porque el saldo inicial migrado es exactamente la última foto que el proveedor viejo tomaba como stock. Lo que sí aparece es el aviso por fondo de la cobertura, que antes no llegaba (ver *Los fondos son las cuentas*).
 - **Dos filas de uso, una por clase de fondo**: `USO_COBERTURA → COBERTURA/USO_INVERSION` y `USO_DOLARES_COMITENTE → COBERTURA/USO_COMITENTE`, activas, `COMPUTA = 1`, y **las dos entre** *Flujo Neto (sin cobertura)* y *Flujo Neto (con cobertura)*: el alcance de un flujo neto es posicional, así que una fila de uso puesta abajo del segundo no entraría en él. Ninguna fila activa con la serie `APLICACION` al lado de esas dos: es el total y el validador lo rechaza. El día que se corre el script 19 el tablero **no cambia ningún número salvo que ya hubiera columnas en rojo**: verificado contra la base el 19/09/2026, no había ninguna, así que el motor no rescató nada y la única aplicación manual vigente siguió en su columna.
 - `COBRANZAS_FR_REAL` y `COBRANZAS_FR_PROY` **seguidas**, con `GRUPO = 'COBRANZAS_FR'` y una `NATURALEZA` cada una. El agrupamiento es posicional: si alguien mete una fila activa entre las dos, el tablero las dibuja sueltas y el validador lo avisa. Que la fila total `COBRANZAS_FR` esté inactiva **entre medio** no molesta: no se dibuja.
+- `PROV_EXTERIOR_PROY` y `NACIONALIZACIONES_PROY` **activas**, en los órdenes 15 y 25, cada una **pegada** a su parte real (10 y 20). Los dos grupos —`PROV_EXTERIOR` y `NACIONALIZACIONES`— con una fila `REAL` y una `PROYECTADO` cada uno. Sus series **nunca** se suman a las de `COMEX_PROV_EXT` ni `COMEX_NAC`: son universos disjuntos, no partes de un total, y por eso el registro no las declara como `componentes`. Con las dos filas inactivas, cada grupo queda de una sola fila y el tablero las dibuja sueltas, que es lo correcto y no un error.
 - **Dos filas de saldo**: `SALDO_ACUM_SIN_COB` en *Resultados* justo debajo de *Flujo Neto (sin cobertura)*, y `SALDO_FINAL` al final de *Cobertura*. Si la de arriba quedara **debajo** de las filas de uso las incluiría y diría lo mismo que la del final.
 
 ---
@@ -104,6 +106,7 @@ En este orden, contra `central`:
 -- 20. sql/cashflow_comex_fecha_maestra.sql  (Comex: la fecha vive en el maestro, con rastro de quien edito)
 -- 21. sql/cashflow_comex_pagado.sql  (Comex: marcar un pago como ya hecho; sale de la proyeccion)
 -- 22. sql/cashflow_estructura_grupos.sql  (filas agrupadas: la cobranza FR en un renglon que se abre)
+-- 23. sql/cashflow_compras_proyectadas.sql  (la parte PROYECTADA de los dos egresos de Comex)
 ```
 
 **El 13 y el 14 van en ese orden y al final**, porque el 14 mueve `SALDO_FINAL` al final de la sección que crea y da de baja la fila del saldo de inversiones que crearon los anteriores. Correr el 14 sin el 13 no rompe nada, pero deja el cuadro a medio reagrupar.
@@ -113,6 +116,8 @@ En este orden, contra `central`:
 **El 19 va después del 18**: reapunta la fila de uso que creó el 14 y necesita que exista la fila de stock de la comitente para que la fila de uso nueva tenga de dónde rescatar; si no está, avisa. Es el único cuya ausencia **puede cambiar un número**: sin él el motor cubre sólo con las inversiones, y una columna que la comitente habría tapado queda en rojo, con aviso.
 
 **El 22 va después del 8**, que es el que parte la cobranza de franquicias en dos filas: lo que hace es declarar que esas dos son el mismo concepto. Si el 8 no se corrió, avisa, deja las tres columnas creadas y no agrupa nada. Es el único del grupo del que se puede afirmar que **no cambia ningún número por construcción y no sólo de hecho**: la agrupación es presentación y el motor no la ve. Verificado contra la base el 23/09/2026, en una transacción deshecha con `rollback`: toca 5 filas, la segunda corrida toca 0, y la estructura resultante valida sin un error ni un aviso nuevo.
+
+**El 23 va después del 22**, que es el que agrega las tres columnas de agrupación. Si el 22 no se corrió, las dos filas nuevas **se crean igual** —sueltas, al lado de su parte real— y el script lo avisa: el tablero muestra cuatro filas en vez de dos renglones que se abren, y ningún importe cambia. Corriendo el 22 y después éste otra vez, los grupos se arman solos. Necesita además que `RO_V_COMPRA_PROYECTADA_VIGENTE` exista en `POWER_BI_CONTROL` (bloque 4 del `05_baja_logica_versiones.sql` del repo **compras**): sin esa vista las dos filas van en **cero**, y ése es el único aviso del módulo que dice que se está proyectando de menos. Ver `README-compras-proyectadas.md`.
 
 **El 20 va después de `sql/cashflow_comex_cotiz_edit.sql`** y de ningún otro. Es el único script del módulo que **escribe sobre una tabla que no es del cashflow** —el maestro de la plataforma Comex—, así que su encabezado documenta el criterio de conflicto y el script lista al final lo que decidió no migrar en vez de resolverlo solo. Ver `README-comex.md`.
 
@@ -587,7 +592,7 @@ El ícono de la fila mide **sólo las columnas de la vista activa**, igual que l
 
 Van igual en el registro, con `'disponible' => false` y sin clase. Una fila que los apunte se muestra **en cero** y el tablero avisa, en vez de desaparecer del cuadro: así la pantalla tiene desde el primer día la forma completa del Excel y se ve qué falta. Cuando el módulo exista, se escribe su proveedor y se da vuelta el flag; la fila ya está configurada y se llena sola.
 
-Hoy tienen datos reales dieciséis: **Ventas**, **Cobranzas FR**, **Cobranzas Mayoristas**, **Proveedores Exterior**, **Nacionalizaciones**, **Saldos**, **Caja Locales**, **Cuentas de inversión**, **Cuentas comitente**, **Cobranzas Electrónicas**, **Echeqs**, **Exportaciones Tasky**, **Proveedores Locales**, **Cobertura**, y los dos de Otros Ingresos —**Dólares Cuenta Comitente** y **Saldo de Inversiones**— que están **retirados**: siguen sirviendo lo que tienen cargado, pero ya no alimentan ninguna fila. Los otros están declarados y rinden cero.
+Hoy tienen datos reales diecisiete: **Ventas**, **Cobranzas FR**, **Cobranzas Mayoristas**, **Proveedores Exterior**, **Nacionalizaciones**, **Compras Proyectadas**, **Saldos**, **Caja Locales**, **Cuentas de inversión**, **Cuentas comitente**, **Cobranzas Electrónicas**, **Echeqs**, **Exportaciones Tasky**, **Proveedores Locales**, **Cobertura**, y los dos de Otros Ingresos —**Dólares Cuenta Comitente** y **Saldo de Inversiones**— que están **retirados**: siguen sirviendo lo que tienen cargado, pero ya no alimentan ninguna fila. Los otros están declarados y rinden cero.
 
 ### Módulos retirados
 
@@ -774,13 +779,16 @@ Relevado sobre las filas activas del tablero. Vale tenerlo escrito porque la ten
 | Fila | |
 | --- | --- |
 | **Cobranzas Franquicias** | **Las dos.** `COBRANZA_REAL` (propuestas aceptadas) y `COBRANZA_PROYECTADA` (PPP). Es el grupo `COBRANZAS_FR` |
+| **Proveedores Exterior** | **Las dos.** `COMEX_PROV_EXT → PAGOS` (los contenedores ya cargados, ubicados por sus fechas del maestro) y `COMPRAS_PROY → PAGOS_PROYECTADOS` (lo que falta comprar del presupuesto oficial). Es el grupo `PROV_EXTERIOR` |
+| **Nacionalizaciones** | **Las dos.** `COMEX_NAC → NACIONALIZACION` y `COMPRAS_PROY → NACIONALIZACION_PROYECTADA`. Es el grupo `NACIONALIZACIONES` |
 | Cobranzas Electrónicas | Sólo **real**: acreditaciones que la procesadora ya informó, con fecha cierta |
 | Cobranzas Mayoristas | Sólo **proyectada**: facturas pendientes a +60 días. No hay circuito de propuestas de pago para mayoristas |
 | Exportaciones Tasky | Sólo **proyectada**: facturas pendientes con fecha de cobro estimada |
 | Las cuatro de Ventas | Todas proyectadas, pero se abren **por canal**, que es otro eje |
-| Proveedores Exterior · Nacionalizaciones | El corte es *"¿ya se pagó?"* |
 | Echeqs | El corte es *"¿va a entrar?"* |
 | Proveedores Locales | Los cortes son por forma de pago, por rubro y por excluido |
+
+> **Los dos grupos de Comercio Exterior son el caso que este diseño estaba esperando**, y el que muestra que el corte real/proyectado no es el único que existe. Esas dos filas **ya tenían** un corte —*"¿ya se pagó?"*, en cuatro y tres series— y ése sigue estando: es interno a la parte **real**. Lo que se agregó al lado es otra cosa, un universo que esas series no median y que **no se puede sumar a ellas**: la compra que todavía no tiene contenedor cargado. Por eso son dos proveedores y no series nuevas de `ComexProvider`. Ver `README-compras-proyectadas.md`.
 
 Las tres de la mitad de arriba **declaran su `NATURALEZA` sin `GRUPO`**, y eso no es un descuido: una fila que es toda de una parte igual lo declara, y es lo que va a permitir después una vista de *"sólo real"* sin volver a tocar la configuración. Las de abajo no declaran nada.
 
@@ -1223,6 +1231,10 @@ De **Comercio Exterior**, `tests/test_comex_fecha_maestra.php` fija las reglas p
 
 > Esas pruebas leen el código **sin sus comentarios**, y eso no es un detalle: estos archivos explican en prosa lo que dejaron de hacer —*"antes era `COALESCE(FECHA_PAGO_EDIT, ...)`"*—, que es justamente lo que este módulo pide que se escriba. Buscando el patrón sobre el archivo entero, la única forma de pasar la prueba sería borrar la explicación.
 
+De las **compras proyectadas**, cuatro archivos y 394 comprobaciones. El grueso corre **sin base**, y ahí está el punto: en la base de hoy no se puede producir ninguno de los casos que más importan —el descuento da cero, no hay ningún ajuste cargado, y una versión oficial no se puede cambiar a voluntad para ver qué pasa—. Se fijan con datos escritos a mano: cada temporada descontando contra la fecha de **su** versión con dos cortes distintos en la misma ventana; el exceso que no se compensa y la estimación que nunca es negativa; dos meses de recepción compartiendo mes de pago y consumiendo lo cargado **una** vez; un mes sin oficial en `SIN_PRESUPUESTO` con el aviso nombrando la temporada; y el ajuste manual que se descarta al cambiar la versión, dejando intacto el de la otra temporada. Contra la base, sólo lectura: que este módulo y la pestaña *Proveedores Exterior* lean el **mismo padrón**, fila por fila y dólar por dólar. Ver `README-compras-proyectadas.md`.
+
+> Dos de esas pruebas existen **porque ya fallaron de verdad** en la primera corrida del script: que un `PRINT` no arme su texto con una subconsulta —es error de sintaxis, así que el lote entero no corre y ningún parámetro se crea— y que los parámetros declaren `TIPO_DATO`, que es `NOT NULL`. Y el lector de SQL sin comentarios saca **sólo los de bloque**: un `--` también vive adentro de un literal, y ese script tiene un `PRINT '--- Estado ---'`.
+
 **El motor acepta un `Horizonte` inyectado, y hace falta para poder probarlo.** El arrastre del saldo depende de qué día es hoy, así que un escenario con importes en fechas fijas deja de tener sentido en cuanto pasa esa fecha. Sin esa costura las pruebas del motor caducaban solas —y caducaron: 48 casos empezaron a devolver `null` al pasar el 06/09/2026, y la parte más delicada del módulo se quedó sin red. Es la misma costura que ya tenían `Ventas::proyectarVentas()` y `proyectarCobranzas()`.
 
 ```php
@@ -1281,6 +1293,12 @@ cashflow/Class/Fondos.php                   Cuentas de inversión y comitente (R
 cashflow/Class/Providers/FondosProvider.php Stock de cobertura por cuenta de fondo
 sql/cashflow_saldos_cuentas_fondo.sql       CLASE, saldo inicial, movimientos y la migración desde Otros Ingresos
 cashflow/Class/Providers/CoberturaProvider.php   Lo cargado a mano, una serie por clase de fondo; no declara pestaña
+sql/cashflow_compras_proyectadas.sql        Las dos filas PROYECTADAS de Comex, sus grupos, la tabla de
+                                            ajustes y los parametros (README-compras-proyectadas.md)
+cashflow/Class/ComprasProyectadas.php       Temporada, cuota, ventana y la estimacion. Todo PURO
+cashflow/Class/ComprasProyectadasDatos.php  Las tres lecturas; no escribe nada
+cashflow/Class/ComprasProyectadasAjustes.php  El ajuste manual por mes, con historial
+cashflow/Class/Providers/ComprasProyectadasProvider.php  PAGOS_PROYECTADOS y NACIONALIZACION_PROYECTADA
 cashflow/Class/CoberturaAutomatica.php           El algoritmo del uso de cobertura, puro
 sql/cashflow_cobertura_automatica.sql            Una fila de uso por fondo; clave fecha + fondo
 cashflow/Controller/CoberturaController.php      Se llama desde el tablero, no desde una pestaña
