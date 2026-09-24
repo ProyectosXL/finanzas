@@ -1,5 +1,5 @@
 /**
- * Parametros -> Compras Proyectadas
+ * Parametros -> Compras Exterior (codigo interno COMPRAS_PROY)
  *
  * Los siete parametros del modulo, y el dibujo de la cadena de fechas que los
  * tres de dias producen.
@@ -102,7 +102,7 @@
                 var modulo = buscarModulo(d.data, 'COMPRAS_PROY');
 
                 if (!modulo) {
-                    avisar(['El módulo Compras Proyectadas no está declarado en Parámetros.']);
+                    avisar(['El módulo Compras Exterior no está declarado en Parámetros.']);
 
                     return;
                 }
@@ -127,7 +127,7 @@
                     ? ['Faltan ' + faltan.length + ' parámetro' + (faltan.length === 1 ? '' : 's') +
                        ' de este módulo. Corré sql/cashflow_compras_proyectadas.sql contra la ' +
                        'base central. Mientras tanto la proyección usa los valores iniciales y ' +
-                       'la pestaña Compras Proyectadas lo avisa.']
+                       'la pestaña Comercio Exterior › Proyección lo avisa.']
                     : []);
 
                 pintar();

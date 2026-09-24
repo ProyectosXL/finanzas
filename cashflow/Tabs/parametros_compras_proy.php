@@ -1,6 +1,6 @@
 <?php
 /**
- * Parametros -> Compras Proyectadas
+ * Parametros -> Compras Exterior (codigo interno COMPRAS_PROY)
  *
  * Archivo y JS propios, como los demas modulos de esta pestana, y clases con
  * prefijo pcpr-. Parametros.js busca .param-input en TODO el documento, asi que

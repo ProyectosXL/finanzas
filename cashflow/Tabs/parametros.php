@@ -234,7 +234,7 @@
             <?php include __DIR__ . '/parametros_prov_locales.php'; ?>
         </div>
 
-        <!-- Parámetros del módulo Compras Proyectadas: cuántos meses, cuánta
+        <!-- Parámetros del módulo Compras Exterior (código COMPRAS_PROY): cuántos meses, cuánta
              historia para la cuota y los tres días de la cadena de fechas.
              Mismo criterio que los anteriores: archivo y JS propios, y clases
              con prefijo pcpr-. -->

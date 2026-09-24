@@ -204,7 +204,7 @@ class CashflowRegistry {
            PROYECTADO. Eso es presentacion y lo arma sql/cashflow_compras_
            proyectadas.sql; el motor no sabe que los grupos existen. */
         'COMPRAS_PROY' => [
-            'nombre' => 'Compras Proyectadas',
+            'nombre' => 'Compras Exterior',
             'descripcion' => 'Pagos de FOB y nacionalizacion de las compras del exterior que '
                 . 'todavia no tienen contenedor cargado, segun el presupuesto oficial de compras',
             'archivo' => 'Providers/ComprasProyectadasProvider.php',

@@ -1,4 +1,4 @@
-<?php $tabName = 'Compras Proyectadas'; ?>
+<?php $tabName = 'Proyección'; ?>
 <link rel="stylesheet" href="Css/Compras-Proyectadas.css?v=<?php echo time(); ?>">
 
 <div class="tab-compras_proyectadas">
@@ -118,7 +118,7 @@
                 <!-- Lo engancha Js/tabla-export.js por el data-exportar, igual
                      que el resto del módulo: baja exactamente lo que se ve. -->
                 <button class="btn btn-sm btn-success" data-exportar="tablaComprasProy"
-                        data-exportar-nombre="Compras_Proyectadas"
+                        data-exportar-nombre="Comex_Proyeccion"
                         title="Exportar a Excel lo que se está viendo">
                     <i class="fas fa-file-excel me-1"></i> Exportar
                 </button>

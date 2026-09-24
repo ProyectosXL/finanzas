@@ -99,11 +99,12 @@ class Parametros {
             'secciones' => ['cobranzas_clientes']
         ],
         'COMPRAS_PROY' => [
-            'nombre' => 'Compras Proyectadas',
+            'nombre' => 'Compras Exterior',
             'icono' => 'fa-boxes-packing',
-            'descripcion' => 'Cuántos meses se proyectan, con cuánta historia se arma la cuota '
+            'descripcion' => 'La proyección de las compras del exterior que todavía no tienen '
+                . 'contenedor: cuántos meses se proyectan, con cuánta historia se arma la cuota '
                 . 'mensual, en qué día del mes llega la mercadería y cuántos días antes se paga '
-                . 'el FOB y se nacionaliza. Alimentan la pestaña Compras Proyectadas y las dos '
+                . 'el FOB y se nacionaliza. Alimentan la pestaña Comercio Exterior › Proyección y las dos '
                 . 'filas proyectadas del tablero, dentro de los grupos Proveedores Exterior y '
                 . 'Nacionalizaciones',
             'secciones' => ['generales']

@@ -132,8 +132,10 @@ class Menu {
                 /* Va TERCERA y en esta categoria: es el mismo circuito que las
                    dos de arriba mirado un paso antes -la compra que todavia no
                    tiene contenedor- y sus dos filas del tablero son la parte
-                   PROYECTADA de las filas que alimentan esas dos pestanas. */
-                ['tab' => 'compras_proyectadas',   'nombre' => 'Compras Proyectadas',    'icono' => 'fa-boxes-packing',        'estado' => self::DATOS]
+                   PROYECTADA de las filas que alimentan esas dos pestanas.
+                   Se ve como "Proyeccion"; el 'tab' sigue siendo
+                   compras_proyectadas para no romper enlaces ni estados. */
+                ['tab' => 'compras_proyectadas',   'nombre' => 'Proyección',             'icono' => 'fa-boxes-packing',        'estado' => self::DATOS, 'encabezado' => 'Comercio Exterior › Proyección']
             ]
         ],
         [

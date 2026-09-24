@@ -89,7 +89,7 @@ class ComprasProyectadasProvider extends CashflowProvider {
 
     protected function calcular($h) {
         if ($this->codigo() !== 'COMPRAS_PROY') {
-            $this->avisar('Compras Proyectadas: el codigo de proveedor "' . $this->codigo()
+            $this->avisar('Compras Exterior: el codigo de proveedor "' . $this->codigo()
                 . '" no tiene serie definida.');
 
             return [];
@@ -102,7 +102,7 @@ class ComprasProyectadasProvider extends CashflowProvider {
         $aviso = $datos->avisoSinVista();
 
         if ($aviso !== '') {
-            $this->avisar('Compras Proyectadas: ' . $aviso);
+            $this->avisar('Compras Exterior: ' . $aviso);
 
             return $this->seriesVacias();
         }
@@ -110,7 +110,7 @@ class ComprasProyectadasProvider extends CashflowProvider {
         $dolar = new DolarFuturo;
 
         if (!$dolar->disponible()) {
-            $this->avisar('Compras Proyectadas: no se pudo leer la curva de dólar futuro ROFEX ('
+            $this->avisar('Compras Exterior: no se pudo leer la curva de dólar futuro ROFEX ('
                 . DolarFuturo::ORIGEN . '), así que las compras proyectadas van en cero. Los '
                 . 'importes en dólares están: lo que falta es a cuánto convertirlos. '
                 . ($dolar->error() === null ? '' : $dolar->error()));
@@ -120,21 +120,21 @@ class ComprasProyectadasProvider extends CashflowProvider {
 
         foreach ([$datos->avisoSinPagos(), $datos->avisoSinAjustes()] as $a) {
             if ($a !== '') {
-                $this->avisar('Compras Proyectadas: ' . $a);
+                $this->avisar('Compras Exterior: ' . $a);
             }
         }
 
         $contraste = ComprasProyectadasDatos::avisoContraste($datos->contrasteVista());
 
         if ($contraste !== '') {
-            $this->avisar('Compras Proyectadas: ' . $contraste);
+            $this->avisar('Compras Exterior: ' . $contraste);
         }
 
         /* --- La cuenta ---------------------------------------------------- */
         $grilla = $this->grilla($h, $datos, $params, $dolar);
 
         foreach ($grilla['warnings'] as $w) {
-            $this->avisar('Compras Proyectadas: ' . $w);
+            $this->avisar('Compras Exterior: ' . $w);
         }
 
         /* --- Las dos series ----------------------------------------------- */
@@ -157,12 +157,12 @@ class ComprasProyectadasProvider extends CashflowProvider {
            de la ventana, y el texto de Comex lo recibe por parametro. */
         foreach (Comex::avisosValuacion($grilla['filas_fob'], $dolar->ultimoMes(), 'FOB_USD',
                  'fecha de pago estimada', 'mes(es) proyectado(s)') as $a) {
-            $this->avisar('Compras Proyectadas: ' . $a);
+            $this->avisar('Compras Exterior: ' . $a);
         }
 
         foreach (Comex::avisosValuacion($grilla['filas_nac'], $dolar->ultimoMes(), 'NAC_USD',
                  'fecha de nacionalización estimada', 'mes(es) proyectado(s)') as $a) {
-            $this->avisar('Compras Proyectadas (nacionalización): ' . $a);
+            $this->avisar('Compras Exterior (nacionalización): ' . $a);
         }
 
         /* LO QUE CAE FUERA DEL EJE, NOMBRADO. El motor ya informa
@@ -324,7 +324,7 @@ class ComprasProyectadasProvider extends CashflowProvider {
             $p = new Parametros;
             $map = $p->getParametrosMap();
         } catch (Throwable $e) {
-            $this->avisar('Compras Proyectadas: no se pudieron leer los parámetros ('
+            $this->avisar('Compras Exterior: no se pudieron leer los parámetros ('
                 . $e->getMessage() . '). Se usan los valores iniciales.');
         }
 
@@ -353,7 +353,7 @@ class ComprasProyectadasProvider extends CashflowProvider {
             ? 'UNIDADES' : 'IMPORTE';
 
         if (!empty($faltan)) {
-            $this->avisar('Compras Proyectadas: faltan ' . count($faltan) . ' parámetro'
+            $this->avisar('Compras Exterior: faltan ' . count($faltan) . ' parámetro'
                 . (count($faltan) === 1 ? '' : 's') . ' del módulo (' . implode(', ', $faltan)
                 . '). Se proyecta con los valores iniciales. Corré '
                 . 'sql/cashflow_compras_proyectadas.sql contra la base central.');
@@ -373,7 +373,7 @@ class ComprasProyectadasProvider extends CashflowProvider {
             return;
         }
 
-        $this->avisar('Compras Proyectadas: $ '
+        $this->avisar('Compras Exterior: $ '
             . number_format($serie['fuera_horizonte'], 2, ',', '.') . ' de ' . $queEs
             . ' caen FUERA del horizonte del tablero y no suman en ninguna columna. La ventana '
             . 'se corta con el último mes cuyo PAGO entra en el eje, y la nacionalización va '

@@ -1,7 +1,8 @@
 <?php
 /**
  * ComprasProyectadasController.php
- * Endpoints de la pestana Compras Proyectadas.
+ * Endpoints de la pestana Comercio Exterior > Proyeccion (codigo interno
+ * compras_proyectadas).
  *
  * LA PESTANA NO CALCULA NADA. Le pide la grilla al MISMO proveedor que alimenta
  * al tablero -ComprasProyectadasProvider::grilla()- y solo la dibuja. Es la
@@ -93,11 +94,11 @@ try {
                 }
             }
 
-            /* Los del proveedor ya vienen prefijados con "Compras Proyectadas:"
+            /* Los del proveedor ya vienen prefijados con "Compras Exterior:"
                porque en el tablero conviven con los de todos los modulos. Aca
                ese prefijo sobra: la pantalla ya dice de que modulo es. */
             foreach ($provider->warnings() as $a) {
-                $limpio = preg_replace('/^Compras Proyectadas[^:]*:\s*/', '', $a);
+                $limpio = preg_replace('/^Compras Exterior[^:]*:\s*/', '', $a);
 
                 if (!in_array($limpio, $avisos, true)) {
                     $avisos[] = $limpio;

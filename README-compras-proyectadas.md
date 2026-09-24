@@ -1,8 +1,10 @@
-# Módulo Compras Proyectadas — lo que todavía no tiene contenedor
+# Módulo Compras Exterior — lo que todavía no tiene contenedor
 
-Pestaña **Comercio Exterior → Compras Proyectadas**, y las filas *Proveedores Exterior Proyectado* y *Nacionalizaciones Proyectado* del tablero de Cashflow.
+Pestaña **Comercio Exterior → Proyección**, y las filas *Proveedores Exterior Proyectado* y *Nacionalizaciones Proyectado* del tablero de Cashflow.
 
 Rama: `feature/comex-compras-proyectadas`
+
+> **Nombre visible y código interno.** En pantalla el módulo se llama *Compras Exterior* (sub-pestaña de Parámetros, módulo del registro, prefijo de los avisos) y su pestaña *Proyección*. **El código interno sigue siendo `COMPRAS_PROY` / `compras_proyectadas`**: claves de parámetros, `GRUPO` de las filas, clases, archivos y claves de `localStorage` no cambiaron, para no romper parámetros guardados ni estados.
 
 ---
 
@@ -279,7 +281,7 @@ Los errores se **acumulan** en vez de cortar en el primero: quien carga el formu
 
 ## 6. Los parámetros
 
-Módulo **`COMPRAS_PROY`** en *Parámetros*.
+Módulo **`COMPRAS_PROY`** en *Parámetros*, sub-pestaña *Compras Exterior*.
 
 | Clave | Inicial | Qué decide |
 | --- | ---: | --- |

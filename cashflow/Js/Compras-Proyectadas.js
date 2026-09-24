@@ -1,5 +1,5 @@
 /**
- * Compras Proyectadas
+ * Comercio Exterior > Proyeccion (codigo interno compras_proyectadas)
  * La pantalla de la proyeccion de compras del exterior.
  *
  * NO CALCULA NADA. Todo lo que dibuja llega resuelto del servidor, del MISMO
