@@ -54,6 +54,11 @@ Contra `central`:
 | --- | --- | --- | --- |
 | 1 | `sql/cashflow_estructura_grupos.sql` | *(ya existía)* Agrega `GRUPO`, `NATURALEZA` y `GRUPO_NOMBRE` | Las dos filas nuevas se crean igual, **sueltas**, y el script lo avisa. El tablero muestra cuatro filas en vez de dos renglones que se abren. **Ningún importe cambia**: la agrupación es presentación |
 | 2 | `sql/cashflow_compras_proyectadas.sql` | Crea las dos filas del tablero, asigna los dos grupos, crea `RO_T_CASHFLOW_COMPRAS_PROY_AJUSTE` y siembra los siete parámetros | La pestaña avisa y no rompe. Las dos filas no existen, así que **el tablero queda exactamente como hoy**, sin parte proyectada y sin ningún número cambiado |
+| 3 | `sql/cashflow_comex_materializado.sql` | Crea `RO_T_CASHFLOW_JOB_LOG`, `RO_T_CASHFLOW_COMEX_RECEP_HIST`, `RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN` y `RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE` | **Las dos filas van en CERO** y el primer aviso dice qué job falta. Ver la sección 10 |
+| 4 | `sql/RO_SP_CASHFLOW_COMEX_RECEP_HIST.sql` | El SP de la historia de recepciones, con la programación sugerida al pie | Historia vacía: filas en cero, avisando |
+| 5 | `sql/RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN.sql` | El SP del presupuesto oficial y el contraste, por `[XL-APPS]`, con la programación sugerida al pie | Presupuesto vacío: filas en cero, avisando |
+
+Después de los scripts 4 y 5 hay que **correr los dos SP una vez** (o apretar *Actualizar ahora* en la pestaña) y **crear los jobs** del SQL Agent. Los jobs no los crea ningún script.
 
 Y en el repo **compras**, contra `POWER_BI_CONTROL`:
 
@@ -377,6 +382,81 @@ La ventana toma el **40,45 %** de `INV 27` y el **64,02 %** de `VER 27-28`: el r
 
 ---
 
+## 10. Los insumos pesados van a un job
+
+### Por qué
+
+Medido contra la base el **24/09/2026**, antes del cambio:
+
+| Pedido | Tiempo |
+| --- | ---: |
+| Pestaña *Proyección* (`getGrilla`) | 33,9 s / 39,9 s |
+| Fila del tablero (`COMPRAS_PROY`) | 31,0 s / 33,3 s |
+| Tablero entero | 39,1 s |
+
+Y adentro de eso, por paso (tres corridas en frío):
+
+| Paso | ms |
+| --- | ---: |
+| **Historia de recepciones** (CPA35 + STA20) | **38.312 / 45.410 / 47.660** |
+| Contraste de la vista | 59 / 186 / 184 |
+| Versiones oficiales | 36 / 162 / 90 |
+| Lo ya comprado | 47 / 47 / 47 |
+| Ajustes, curva, parámetros | menos de 500 cada uno |
+| La cuenta en PHP | **0,5** |
+
+Una sola consulta era el 95 % del tiempo. STA20 tiene 11,9 millones de filas, y la consulta entraba por el índice de `TCOMP_IN_S` —todos los remitos de proveedor de todos los proveedores— y evaluaba dos veces el mismo CTE.
+
+### Qué se materializa y qué no
+
+| Insumo | Dónde queda | Por qué |
+| --- | --- | --- |
+| Historia de recepciones | `RO_T_CASHFLOW_COMEX_RECEP_HIST`, por `RO_SP_CASHFLOW_COMEX_RECEP_HIST` | Es historia de años cerrados. Se guardan **diez años**: cambiar `compras_proy_anios_cuota` no obliga a correr nada, PHP filtra los que usa |
+| Presupuesto oficial por temporada | `RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN`, por `RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN` | Cambia cuando alguien marca una versión, no en cada pedido |
+| Contraste de la vista | `RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE`, mismo SP | Sale de las mismas tablas y en el mismo momento |
+| Detalle por rubro de una versión | **en vivo** | Sólo se pide al abrir el modal |
+| Lo ya comprado, los ajustes, la curva | **en vivo** | Un contenedor cargado tiene que descontar en el momento. Y juntos tardan menos de medio segundo |
+
+**La cuenta no se movió.** Ventana, cuota, descuento, ajustes y valuación siguen en `ComprasProyectadas`, con sus pruebas. Duplicarla en SQL dejaría dos definiciones del mismo número.
+
+El presupuesto se trae **desde central** por el linked server `[XL-APPS]`, el mismo que usa la curva de dólar futuro, y no con un SP en `POWER_BI_CONTROL`. Así el cashflow lee **una** base, y la pestaña deja de abrir cinco conexiones a `POWER_BI_CONTROL` en cada pedido.
+
+### El SP de la historia, y por qué tarda un segundo
+
+Va al revés que la consulta en vivo. Primero las **órdenes** del exterior (unas 1.600, de CPA35); después sus movimientos por `IX_6` (`N_ORDEN_CO`), **una sola vez**, a una temporal. Diez años en ~1 s.
+
+**El filtro por fecha va al final, a propósito.** El denominador del prorrateo es el total recibido de la orden, y tiene que sumar **todas** sus recepciones: una orden recibida en diciembre y en enero reparte su importe entre los dos años. Filtrar STA20 por fecha antes cambiaría el prorrateo. Y lo que achica la lectura no es la fecha —diez años son casi toda la tabla— sino la orden.
+
+Verificado contra la base, corriendo la lógica del SP sin escribir nada: para 2023–2025 da **los mismos 36 meses** que la consulta en vivo, con **0 unidades** de diferencia y **U$S 0,000035** de diferencia máxima por redondeo. En 1,4 s contra 31,2 s.
+
+### Cómo reemplazan las tablas
+
+Los dos SP calculan todo en temporales —el presupuesto trae lo remoto **antes** de abrir la transacción, así que no necesita MSDTC— y recién al final hacen `DELETE` + `INSERT` en **una** transacción. Quien lee durante la corrida ve la versión anterior entera, nunca una tabla vacía.
+
+- **Una historia vacía no se graba**: es señal de que algo se rompió, no de que se dejó de importar. Se registra el error y queda la anterior.
+- **Un presupuesto sin versiones oficiales sí se graba**: es un estado válido de la app de compras, y la pestaña lo muestra mes por mes como `SIN_PRESUPUESTO`.
+- **Sin la vista no se pisa nada**: la corrida falla con el error en el log y queda el presupuesto anterior, que la pantalla avisa como viejo.
+- **Dos corridas a la vez no se pisan**: la segunda encuentra el lock de aplicación tomado, lo deja en el log y sale.
+
+### El log
+
+`RO_T_CASHFLOW_JOB_LOG`: una fila por corrida, con `PROCESO`, `INICIO`, `FIN`, `FILAS`, `ERROR` y `USUARIO`. La fila se inserta al **empezar**, fuera de la transacción, así que una corrida que se cae queda registrada igual. El `CATCH` completa `FIN` y `ERROR` y relanza el error, para que el paso del job quede fallido también en el SQL Agent.
+
+### Los jobs
+
+**No los crea ningún script.** La programación sugerida está al pie de cada SP:
+
+| Job | Frecuencia |
+| --- | --- |
+| Historia de recepciones | Diaria, 05:00 |
+| Presupuesto de compras | Diaria, 05:00, y cada 30 minutos de 08 a 20 en días hábiles |
+
+Lo ideal para el presupuesto es que la app de compras arranque el job (`sp_start_job`) al marcar una versión oficial. Eso vive en el repo de compras.
+
+> **Ojo con el login del linked server.** Corriendo desde el Agent, la consulta a `[XL-APPS]` sale con el mapeo de login de la cuenta del servicio. Si no existe, el job falla con *Login failed*: queda en el log y la pestaña lo muestra.
+
+---
+
 ## Lo que este módulo no hace
 
 - **No escribe en tablas de compras, de Tango ni de Comercio Exterior.** Las tres se leen y se dejan como están. Hay una prueba que busca `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `DROP` y `TRUNCATE` sobre `ComprasProyectadas.php` y `ComprasProyectadasDatos.php` y exige cero en las seis. Lo único que escribe es la tabla de ajustes, que es del cashflow, y vive en una clase aparte **para que esa prueba siga siendo posible**.
@@ -429,6 +509,9 @@ Dos cosas que las pruebas fijan **porque ya fallaron de verdad** en la primera c
 
 ```
 sql/cashflow_compras_proyectadas.sql          Las dos filas, los grupos, la tabla y los parametros
+sql/cashflow_comex_materializado.sql          El log de corridas y las tres tablas materializadas
+sql/RO_SP_CASHFLOW_COMEX_RECEP_HIST.sql       El SP de la historia de recepciones
+sql/RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN.sql   El SP del presupuesto oficial y el contraste
 cashflow/Class/ComprasProyectadas.php         Las reglas PURAS: temporada, cuota, ventana y la estimacion
 cashflow/Class/ComprasProyectadasDatos.php    Las tres lecturas. NO escribe nada
 cashflow/Class/ComprasProyectadasAjustes.php  Lo unico que escribe: el ajuste manual
