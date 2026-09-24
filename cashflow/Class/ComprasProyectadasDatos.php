@@ -51,6 +51,16 @@ class ComprasProyectadasDatos {
     /** El detalle: un contenedor CON detalle ya cerro y sale del padron */
     const TABLA_DETALLE_COMEX = 'RO_T_IMPORTACIONES_DETALLE';
 
+    /**
+     * Los ajustes manuales por mes, del lado del cashflow.
+     *
+     * ESTA CLASE SOLO LA LEE. El alta y la baja viven en
+     * ComprasProyectadasAjustes, aparte, para que la regla de que este archivo
+     * no escribe nada siga siendo verificable de un vistazo -y por una prueba
+     * que busca los verbos de escritura sobre el archivo entero-.
+     */
+    const TABLA_AJUSTE = 'RO_T_CASHFLOW_COMPRAS_PROY_AJUSTE';
+
     /** El encabezado de compras de Tango, de donde sale la fecha de emision */
     const TABLA_OC = 'CPA35';
 
@@ -79,6 +89,9 @@ class ComprasProyectadasDatos {
 
     /** @var bool|null Cache de si la vista existe */
     private $vista = null;
+
+    /** @var bool|null Cache de si la tabla de ajustes existe */
+    private $ajustes = null;
 
     /** @var string Ultimo error de lectura del presupuesto */
     private $errorPresupuesto = '';
@@ -710,6 +723,126 @@ class ComprasProyectadasDatos {
             . 'ya comprado se descuenta por el FOB COMPLETO de cada contenedor en vez de por '
             . 'su saldo, así que la estimación de compras proyectadas queda de MENOS. Es una '
             . 'tabla de la otra aplicación: revisalo con quien administra la base central.';
+    }
+
+    /* ====================================================================
+       4. LOS AJUSTES MANUALES (solo lectura)
+       ==================================================================== */
+
+    /**
+     * Si la tabla de ajustes ya existe.
+     *
+     * Se pregunta por lo mismo que con la vista: sin el script la tabla no
+     * esta, y nombrarla igual rompe la pantalla entera con "Invalid object
+     * name". Aca la degradacion es la mas benigna del modulo -sin tabla no hay
+     * ningun ajuste cargado, que es exactamente lo que la proyeccion automatica
+     * ya supone- asi que ningun numero cambia.
+     *
+     * @return bool
+     */
+    public function tieneAjustes() {
+        if ($this->ajustes !== null) {
+            return $this->ajustes;
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            $this->ajustes = false;
+
+            return false;
+        }
+
+        $stmt = sqlsrv_query($cid, "SELECT OBJECT_ID('dbo." . self::TABLA_AJUSTE . "', 'U') AS T");
+
+        if ($stmt === false) {
+            $this->ajustes = false;
+
+            return false;
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->ajustes = ($row && $row['T'] !== null);
+
+        return $this->ajustes;
+    }
+
+    /**
+     * Los ajustes VIGENTES, uno por mes de recepcion.
+     *
+     * Devuelve el mapa con la forma que espera ComprasProyectadas::estimar():
+     * ahi adentro se decide si el ajuste se aplica o se descarta, comparando
+     * ID_VERSION contra la version oficial que el mes tiene HOY. Esa decision
+     * no vive en la consulta a proposito -es una regla de negocio y se prueba
+     * sin base-, asi que aca se devuelven todos los vigentes, aplicables o no.
+     *
+     * @return array Mapa 'Y-m' => ajuste
+     */
+    public function ajustes() {
+        if (!$this->tieneAjustes()) {
+            return [];
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            return [];
+        }
+
+        $sql = "SELECT ID, MES, IMPORTE_USD, ID_VERSION, TEMPORADA, MOTIVO,
+                       USUARIO, FECHA_ALTA
+                FROM " . self::TABLA_AJUSTE . "
+                WHERE VIGENTE = 1
+                ORDER BY MES";
+
+        $stmt = sqlsrv_query($cid, $sql);
+
+        if ($stmt === false) {
+            return [];
+        }
+
+        $out = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $mes = trim((string) $row['MES']);
+
+            $out[$mes] = [
+                'id' => intval($row['ID']),
+                'mes' => $mes,
+                'importe_usd' => floatval($row['IMPORTE_USD']),
+                'id_version' => intval($row['ID_VERSION']),
+                'temporada' => ($row['TEMPORADA'] === null) ? null : trim((string) $row['TEMPORADA']),
+                'motivo' => ($row['MOTIVO'] === null) ? null : (string) $row['MOTIVO'],
+                'usuario' => ($row['USUARIO'] === null) ? null : (string) $row['USUARIO'],
+                'fecha' => self::aFecha($row['FECHA_ALTA'])
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $out;
+    }
+
+    /**
+     * El aviso de que el ajuste manual esta apagado, o cadena vacia.
+     *
+     * APAGA UNA FUNCION Y NO CAMBIA NINGUN NUMERO, a diferencia de los otros
+     * dos avisos de esta clase. Sin la tabla no hay ningun ajuste cargado, que
+     * es el mismo estado que tiene una instalacion donde nadie ajusto nada.
+     *
+     * @return string
+     */
+    public function avisoSinAjustes() {
+        if ($this->tieneAjustes()) {
+            return '';
+        }
+
+        return 'El ajuste manual por mes está apagado: falta la tabla ' . self::TABLA_AJUSTE
+            . '. Corré sql/cashflow_compras_proyectadas.sql contra la base central. Todo lo '
+            . 'demás funciona igual: mientras tanto no hay ningún ajuste cargado, así que '
+            . 'cada mes muestra su estimación automática.';
     }
 
     /* ====================================================================

@@ -36,11 +36,29 @@ chequear('todos() no expone la clase interna', false, isset($todos[0]['clase']))
 $disponibles = array_values(array_filter($todos, function ($p) { return $p['disponible']; }));
 
 // Ventas, Cobranzas FR, Cobranzas May, Proveedores Exterior, Nacionalizaciones,
-// Saldos, Caja Locales, Cuentas de inversion, Cuentas comitente, Cobranzas
-// Electronicas, Echeqs, Dolares Cuenta Comitente, Exportaciones Tasky, Saldo de
-// Inversiones, Cobertura y Proveedores Locales. Los dos de Otros Ingresos
-// estan retirados pero siguen disponibles: sirven lo que tienen cargado.
-chequear('hay 16 modulos con datos reales', 16, count($disponibles));
+// Compras Proyectadas, Saldos, Caja Locales, Cuentas de inversion, Cuentas
+// comitente, Cobranzas Electronicas, Echeqs, Dolares Cuenta Comitente,
+// Exportaciones Tasky, Saldo de Inversiones, Cobertura y Proveedores Locales.
+// Los dos de Otros Ingresos estan retirados pero siguen disponibles: sirven lo
+// que tienen cargado.
+chequear('hay 17 modulos con datos reales', 17, count($disponibles));
+
+/* COMPRAS_PROY ES UN PROVEEDOR APARTE DE LOS DOS DE COMEX, y tiene que serlo:
+   miden universos disjuntos -lo que ya tiene contenedor cargado contra lo que
+   todavia no-. Si alguna vez alguien los unifica, sus series se sumarian a las
+   de Comex y el mismo egreso entraria dos veces al tablero. */
+chequear('Compras Proyectadas esta registrado', true, CashflowRegistry::existe('COMPRAS_PROY'));
+chequear('y disponible', true, CashflowRegistry::disponible('COMPRAS_PROY'));
+
+chequear('ofrece la serie de pagos proyectados',
+    true, CashflowRegistry::serieExiste('COMPRAS_PROY', 'PAGOS_PROYECTADOS'));
+chequear('y la de nacionalizacion proyectada',
+    true, CashflowRegistry::serieExiste('COMPRAS_PROY', 'NACIONALIZACION_PROYECTADA'));
+
+chequear('sus series NO son de ComexProvider',
+    false, CashflowRegistry::serieExiste('COMEX_PROV_EXT', 'PAGOS_PROYECTADOS'));
+chequear('ni al reves',
+    false, CashflowRegistry::serieExiste('COMPRAS_PROY', 'PAGOS'));
 
 $retirados = array_values(array_map(function ($p) { return $p['codigo']; },
     array_filter($todos, function ($p) { return !empty($p['retirado']); })));
