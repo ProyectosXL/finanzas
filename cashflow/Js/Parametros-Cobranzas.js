@@ -366,10 +366,9 @@
        ================================================================ */
 
     function mostrarCargando(mostrar) {
-        var spinner = document.getElementById('loadingParamCob');
         var wrapper = document.getElementById('wrapperTablaParamCob');
 
-        if (spinner) spinner.style.display = mostrar ? 'flex' : 'none';
+        if (mostrar) { Cargando.mostrar('loadingParamCob'); } else { Cargando.ocultar('loadingParamCob'); }
         if (wrapper) wrapper.style.display = mostrar ? 'none' : 'block';
     }
 

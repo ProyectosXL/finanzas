@@ -174,10 +174,7 @@
             </div>
 
             <div class="card-body p-0">
-                <div class="loading-spinner" id="loadingSaldos">
-                    <div class="spinner"></div>
-                    <p>Cargando saldos...</p>
-                </div>
+                <div class="cargando-slot" id="loadingSaldos" data-cargando="Cargando saldos…"></div>
 
                 <div class="table-responsive" id="wrapperSaldos" style="display: none;">
                     <table class="table table-hover mb-0" id="tablaSaldos">
@@ -303,10 +300,7 @@
             </div>
 
             <div class="card-body p-0">
-                <div class="loading-spinner" id="loadingLocales">
-                    <div class="spinner"></div>
-                    <p>Consultando la caja de los locales...</p>
-                </div>
+                <div class="cargando-slot" id="loadingLocales" data-cargando="Consultando la caja de los locales…"></div>
 
                 <div class="table-responsive" id="wrapperLocales" style="display: none;">
                     <table class="table table-hover mb-0" id="tablaLocales">
@@ -417,10 +411,7 @@
             </div>
 
             <div class="card-body p-0">
-                <div class="loading-spinner" id="loadingFondos">
-                    <div class="spinner"></div>
-                    <p>Cargando fondos...</p>
-                </div>
+                <div class="cargando-slot" id="loadingFondos" data-cargando="Cargando fondos…"></div>
 
                 <div class="table-responsive" id="wrapperFondos" style="display: none;">
                     <table class="table table-hover mb-0" id="tablaFondos">

@@ -27,6 +27,7 @@ $validTabs = [
     'exportaciones_tasky',
     'proveedores_exterior',
     'crono_nacionalizacion',
+    'compras_proyectadas',
     'nacionalizacion_2',
     'proveedores_locales',
     'cronograma',

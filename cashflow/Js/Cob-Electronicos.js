@@ -80,7 +80,7 @@
        ================================================================ */
 
     function cargar() {
-        mostrar('loadingCobel', true, 'flex');
+        Cargando.mostrar('loadingCobel');
         mostrar('wrapperCobel', false);
 
         pedirJson(URL_COBEL + '?action=getPestana' + queryFiltros())
@@ -96,11 +96,11 @@
                 pintarCuadros();
                 pintarPreview();
 
-                mostrar('loadingCobel', false);
+                Cargando.ocultar('loadingCobel');
                 mostrar('wrapperCobel', true);
             })
             .catch(function(error) {
-                mostrar('loadingCobel', false);
+                Cargando.ocultar('loadingCobel');
                 avisar('No se pudieron cargar las acreditaciones: ' + error.message);
             });
     }

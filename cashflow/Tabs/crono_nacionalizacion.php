@@ -154,10 +154,7 @@
         </div>
 
         <div class="card-body p-0">
-            <div class="loading-spinner" id="loadingSpinner">
-                <div class="spinner"></div>
-                <p>Cargando datos...</p>
-            </div>
+            <div class="cargando-slot" id="loadingSpinner" data-cargando="Cargando datos…"></div>
             
             <div class="table-wrapper" id="tableWrapper" style="display: none;">
                 <div class="table-responsive tabla-temporal">

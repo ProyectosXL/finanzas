@@ -14,10 +14,7 @@
         </div>
     </div>
 
-    <div class="loading-spinner" id="loadingParametros">
-        <div class="spinner"></div>
-        <p>Cargando parámetros...</p>
-    </div>
+    <div class="cargando-slot" id="loadingParametros" data-cargando="Cargando parámetros…"></div>
 
     <div id="wrapperParametros" style="display: none;">
 
@@ -232,6 +229,14 @@
              con prefijo pplo-. -->
         <div class="tab-pane fade" id="paneParamProv_locales" role="tabpanel">
             <?php include __DIR__ . '/parametros_prov_locales.php'; ?>
+        </div>
+
+        <!-- Parámetros del módulo Compras Exterior (código COMPRAS_PROY): cuántos meses, cuánta
+             historia para la cuota y los tres días de la cadena de fechas.
+             Mismo criterio que los anteriores: archivo y JS propios, y clases
+             con prefijo pcpr-. -->
+        <div class="tab-pane fade" id="paneParamCompras_proy" role="tabpanel">
+            <?php include __DIR__ . '/parametros_compras_proy.php'; ?>
         </div>
 
         <!-- Estructura del tablero de Cashflow.

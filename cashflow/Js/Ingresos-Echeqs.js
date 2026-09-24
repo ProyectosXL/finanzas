@@ -124,7 +124,7 @@
        ================================================================ */
 
     function cargarCartera() {
-        mostrar('loadingEch', true, 'flex');
+        Cargando.mostrar('loadingEch');
         mostrar('wrapperEch', false);
 
         pedirJson(URL_ECHEQS + '?action=getEcheqsCartera')
@@ -139,11 +139,11 @@
                 pintarKpiCartera();
                 dibujarCartera();
 
-                mostrar('loadingEch', false);
+                Cargando.ocultar('loadingEch');
                 mostrar('wrapperEch', true);
             })
             .catch(function(error) {
-                mostrar('loadingEch', false);
+                Cargando.ocultar('loadingEch');
                 avisar('No se pudieron cargar los cheques en cartera: ' + error.message);
             });
     }
@@ -707,7 +707,7 @@
     function cargarPrechequeado() {
         prePedido = true;
 
-        mostrar('loadingPre', true, 'flex');
+        Cargando.mostrar('loadingPre');
         mostrar('wrapperPre', false);
         ocultarLuegoDe('avisoGuardadoPre', 6000);
 
@@ -724,11 +724,11 @@
                 pintarFiltroClientes();
                 dibujarPrechequeado();
 
-                mostrar('loadingPre', false);
+                Cargando.ocultar('loadingPre');
                 mostrar('wrapperPre', true);
             })
             .catch(function(error) {
-                mostrar('loadingPre', false);
+                Cargando.ocultar('loadingPre');
                 avisar('No se pudieron cargar los cheques pre-chequeados: ' + error.message);
             });
     }

@@ -152,7 +152,7 @@
        ================================================================ */
 
     function cargarSaldos() {
-        mostrar('loadingSaldos', true, 'flex');
+        Cargando.mostrar('loadingSaldos');
         mostrar('wrapperSaldos', false);
 
         pedirJson(URL_SALDOS + '?action=getSaldos')
@@ -169,11 +169,11 @@
                 pintarTablaSaldos();
                 botonesCarga(false);
 
-                mostrar('loadingSaldos', false);
+                Cargando.ocultar('loadingSaldos');
                 mostrar('wrapperSaldos', true);
             })
             .catch(function(error) {
-                mostrar('loadingSaldos', false);
+                Cargando.ocultar('loadingSaldos');
                 avisar('No se pudieron cargar los saldos: ' + error.message);
             });
     }
@@ -450,7 +450,7 @@
 
     function cargarLocales() {
         localesPedidos = true;
-        mostrar('loadingLocales', true, 'flex');
+        Cargando.mostrar('loadingLocales');
         mostrar('wrapperLocales', false);
 
         // El aviso del guardado anterior no sobrevive a una recarga de datos:
@@ -465,11 +465,11 @@
                 pintarTablaLocales();
                 recalcularLocales();
 
-                mostrar('loadingLocales', false);
+                Cargando.ocultar('loadingLocales');
                 mostrar('wrapperLocales', true);
             })
             .catch(function(error) {
-                mostrar('loadingLocales', false);
+                Cargando.ocultar('loadingLocales');
                 avisar('No se pudo consultar la caja de los locales: ' + error.message);
             });
     }
@@ -757,7 +757,7 @@
 
     function cargarFondos() {
         fondosPedidos = true;
-        mostrar('loadingFondos', true, 'flex');
+        Cargando.mostrar('loadingFondos');
         mostrar('wrapperFondos', false);
         mostrar('formMovimiento', false);
 
@@ -783,11 +783,11 @@
                             : '');
                 }
 
-                mostrar('loadingFondos', false);
+                Cargando.ocultar('loadingFondos');
                 mostrar('wrapperFondos', true);
             })
             .catch(function(error) {
-                mostrar('loadingFondos', false);
+                Cargando.ocultar('loadingFondos');
                 Notificacion.error('No se pudieron cargar los fondos: ' + error.message);
             });
     }

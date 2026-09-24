@@ -27,10 +27,7 @@
 
     <div id="avisosParamSaldos"></div>
 
-    <div class="loading-spinner" id="loadingParamSaldos">
-        <div class="spinner"></div>
-        <p>Cargando parámetros de Saldos...</p>
-    </div>
+    <div class="cargando-slot" id="loadingParamSaldos" data-cargando="Cargando parámetros de Saldos…"></div>
 
     <div id="wrapperParamSaldos" style="display: none;">
 

@@ -426,7 +426,7 @@
     }
 
     function mostrarCargando(mostrar) {
-        document.getElementById('loadingSpinnerExpTasky').style.display = mostrar ? 'flex' : 'none';
+        if (mostrar) { Cargando.mostrar('loadingSpinnerExpTasky'); } else { Cargando.ocultar('loadingSpinnerExpTasky'); }
         document.getElementById('tableWrapperExpTasky').style.display = mostrar ? 'none' : 'block';
     }
 

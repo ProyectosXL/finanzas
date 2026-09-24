@@ -155,7 +155,7 @@
        ================================================================ */
 
     function cargar() {
-        mostrar('loadingProv', true);
+        Cargando.mostrar('loadingProv');
         mostrar('wrapperProv', false);
 
         pedirJson('Controller/ProveedoresController.php?action=getPendientes')
@@ -181,7 +181,7 @@
                 // filas visibles, así que cambian con cada filtro.
                 pintarGrilla();
 
-                mostrar('loadingProv', false);
+                Cargando.ocultar('loadingProv');
                 mostrar('wrapperProv', true);
                 mostrar('summaryProv', modoVista === 'cuentas');
 
@@ -190,7 +190,7 @@
                 }
             })
             .catch(function(error) {
-                mostrar('loadingProv', false);
+                Cargando.ocultar('loadingProv');
                 mostrarError('No se pudieron cargar las cuentas a pagar: ' + error.message);
             });
     }

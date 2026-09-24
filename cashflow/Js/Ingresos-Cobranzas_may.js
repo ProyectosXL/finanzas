@@ -720,7 +720,7 @@
     }
 
     function mostrarCargando(mostrar) {
-        document.getElementById('loadingSpinnerCobMay').style.display = mostrar ? 'flex' : 'none';
+        if (mostrar) { Cargando.mostrar('loadingSpinnerCobMay'); } else { Cargando.ocultar('loadingSpinnerCobMay'); }
         document.getElementById('tableWrapperCobMay').style.display = mostrar ? 'none' : 'block';
     }
 

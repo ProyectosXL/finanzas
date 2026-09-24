@@ -87,7 +87,7 @@
        ================================================================ */
 
     function cargar() {
-        mostrar('loadingParamSaldos', true, 'flex');
+        Cargando.mostrar('loadingParamSaldos');
         mostrar('wrapperParamSaldos', false);
 
         pedirJson(URL_PARAM + '?action=getTodo')
@@ -104,11 +104,11 @@
                 pintarCuentas();
                 pintarSucursales();
 
-                mostrar('loadingParamSaldos', false);
+                Cargando.ocultar('loadingParamSaldos');
                 mostrar('wrapperParamSaldos', true);
             })
             .catch(function(error) {
-                mostrar('loadingParamSaldos', false);
+                Cargando.ocultar('loadingParamSaldos');
                 avisar('Error al cargar los parámetros de Saldos: ' + error.message);
             });
     }

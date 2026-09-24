@@ -181,6 +181,45 @@ class CashflowRegistry {
             ]
         ],
 
+        /* LA PARTE PROYECTADA DE LOS DOS EGRESOS DE COMERCIO EXTERIOR.
+           Es un proveedor SEPARADO de COMEX_PROV_EXT y COMEX_NAC, y tiene que
+           serlo: miden dos universos que no se pisan.
+
+             COMEX_*        lo que YA tiene contenedor cargado, ubicado por las
+                            fechas del maestro, contenedor por contenedor.
+             COMPRAS_PROY   lo que TODAVIA NO, repartido por la cuota historica
+                            sobre lo que falta comprar del presupuesto oficial
+                            de la app de compras.
+
+           SUS SERIES NUNCA SE SUMAN A LAS DE COMEX, y por eso no hay
+           'componentes' que las relacione: no son partes de un mismo total sino
+           dos universos disjuntos. Lo que garantiza que no se pisen no es una
+           regla del registro sino la cuenta misma: la estimacion de cada mes ya
+           viene NETA del pendiente de los contenedores cuya orden se emitio
+           despues de la fecha de calculo del presupuesto, y lo anterior a esa
+           fecha ya esta descontado adentro del presupuesto.
+
+           EN EL TABLERO CADA PAR VA EN UN GRUPO -PROV_EXTERIOR y
+           NACIONALIZACIONES-, con la fila de Comex como parte REAL y esta como
+           PROYECTADO. Eso es presentacion y lo arma sql/cashflow_compras_
+           proyectadas.sql; el motor no sabe que los grupos existen. */
+        'COMPRAS_PROY' => [
+            'nombre' => 'Compras Exterior',
+            'descripcion' => 'Pagos de FOB y nacionalizacion de las compras del exterior que '
+                . 'todavia no tienen contenedor cargado, segun el presupuesto oficial de compras',
+            'archivo' => 'Providers/ComprasProyectadasProvider.php',
+            'clase' => 'ComprasProyectadasProvider',
+            /* En dolares, como las dos de Comex: el presupuesto da el FOB
+               unitario en U$S y el proveedor lo valua con la curva ROFEX. */
+            'moneda' => 'USD',
+            'disponible' => true,
+            'tab' => 'compras_proyectadas',
+            'series' => [
+                'PAGOS_PROYECTADOS' => 'Pagos de FOB estimados de lo que falta comprar',
+                'NACIONALIZACION_PROYECTADA' => 'Nacionalizacion estimada de lo que falta comprar'
+            ]
+        ],
+
         /* SaldosProvider sirve dos codigos, igual que ComexProvider: cada
            instancia corre solo la consulta de su serie. Van separados porque
            leen dos servidores distintos, y asi una caida del servidor de

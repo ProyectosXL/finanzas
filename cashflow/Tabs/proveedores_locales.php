@@ -226,10 +226,7 @@
             </div>
 
             <div class="card-body p-0">
-                <div class="loading-spinner" id="loadingProv">
-                    <div class="spinner"></div>
-                    <p>Cargando cuentas a pagar...</p>
-                </div>
+                <div class="cargando-slot" id="loadingProv" data-cargando="Cargando cuentas a pagar…"></div>
 
                 <div class="table-wrapper table-responsive tabla-temporal" id="wrapperProv"
                      style="display: none;">

@@ -30,10 +30,7 @@
 
     <div id="avisosParamPpq"></div>
 
-    <div class="loading-spinner" id="loadingParamPpq">
-        <div class="spinner"></div>
-        <p>Cargando clientes pre-chequeados...</p>
-    </div>
+    <div class="cargando-slot" id="loadingParamPpq" data-cargando="Cargando clientes pre-chequeados…"></div>
 
     <div id="wrapperParamPpq" style="display: none;">
 

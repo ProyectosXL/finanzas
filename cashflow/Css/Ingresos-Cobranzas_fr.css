@@ -3,39 +3,10 @@
 .tab-cobranzas_fr {
 }
 
-/* Loading Spinner */
-.loading-spinner {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 60px 20px;
-}
-
 .table-wrapper {
     max-height: calc(100vh - 420px);
     overflow-y: auto;
     overflow-x: auto;
-}
-
-.spinner {
-    border: 3px solid var(--border-light, #eef0f5);
-    border-top: 3px solid #28a745; /* Green for income */
-    border-radius: 50%;
-    width: 40px;
-    height: 40px;
-    animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-.loading-spinner p {
-    margin-top: 15px;
-    color: var(--text-muted, #8c93a8);
-    font-size: 13px;
 }
 
 /* Table Headers */
@@ -240,7 +211,6 @@
     font-weight: 600;
     color: #856404 !important;
 }
-
 
 /* ============================================================================
    FECHA DE COBRO MANUAL

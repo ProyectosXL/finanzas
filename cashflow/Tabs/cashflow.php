@@ -137,10 +137,7 @@
         </div>
 
         <div class="card-body p-0">
-            <div class="loading-spinner" id="cfLoading">
-                <div class="spinner"></div>
-                <p>Consolidando los módulos...</p>
-            </div>
+            <div class="cargando-slot" id="cfLoading" data-cargando="Calculando el cashflow…"></div>
 
             <div class="table-responsive tabla-temporal" id="cfWrapper" style="display: none;">
                 <table id="cfTabla" class="table table-hover mb-0">

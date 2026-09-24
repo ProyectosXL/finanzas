@@ -62,7 +62,7 @@
        ================================================================ */
 
     function cargar() {
-        mostrar('cfeLoading', true);
+        Cargando.mostrar('cfeLoading');
         mostrar('cfeWrapper', false);
 
         pedirJson(URL_BASE + '?action=getEstructura')
@@ -82,11 +82,11 @@
 
                 pintarTodo();
 
-                mostrar('cfeLoading', false);
+                Cargando.ocultar('cfeLoading');
                 mostrar('cfeWrapper', true);
             })
             .catch(function(error) {
-                mostrar('cfeLoading', false);
+                Cargando.ocultar('cfeLoading');
                 avisoError('No se pudo cargar la estructura: ' + error.message);
             });
     }

@@ -1882,9 +1882,18 @@ class Comex {
      * @param string $queEs Como se nombra en el mensaje la fecha que falta
      * @return array Lista de mensajes
      */
+    /**
+     * @param string $queSon Como se nombra lo que se cuenta. Los dos
+     *        consumidores originales cuentan CONTENEDORES, pero Compras
+     *        Proyectadas cuenta MESES: su unidad no es una fila del maestro
+     *        sino un mes de la ventana. Con el sustantivo escrito adentro, su
+     *        aviso mandaria a "cargarle la fecha" a un contenedor que no
+     *        existe.
+     */
     public static function avisosValuacion($filas, $ultimoMesCurva = null,
                                            $campoImporte = 'VALOR_FOB_DOLAR',
-                                           $queEs = 'fecha estimada de pago') {
+                                           $queEs = 'fecha estimada de pago',
+                                           $queSon = 'contenedor(es)') {
         $sinValuar = 0;
         $usdSinValuar = 0.0;
         $aproximadas = 0;
@@ -1907,7 +1916,7 @@ class Comex {
         }
 
         if ($sinValuar > 0) {
-            $avisos[] = $sinValuar . ' contenedor(es) por U$S '
+            $avisos[] = $sinValuar . ' ' . $queSon . ' por U$S '
                 . number_format($usdSinValuar, 2, ',', '.') . ' no tienen ' . $queEs
                 . ', así que no hay mes al que pedirle cotización y no se pueden valuar en '
                 . 'pesos. No se les aplica ningún tipo de cambio inventado: cargales la fecha '
@@ -1918,7 +1927,7 @@ class Comex {
            Nacionalización, donde lo que cae en ese mes es la nacionalización y
            no un pago. */
         if ($aproximadas > 0) {
-            $avisos[] = $aproximadas . ' contenedor(es) caen en un mes que la curva de '
+            $avisos[] = $aproximadas . ' ' . $queSon . ' caen en un mes que la curva de '
                 . 'dólar futuro no cubre'
                 . ($ultimoMesCurva === null ? '' : ' (llega hasta ' . $ultimoMesCurva . ')')
                 . ', así que se valuaron con la cotización del mes más cercano. Están marcados '
@@ -1926,7 +1935,7 @@ class Comex {
         }
 
         if ($overrides > 0) {
-            $avisos[] = $overrides . ' contenedor(es) tienen la cotización corregida a mano, '
+            $avisos[] = $overrides . ' ' . $queSon . ' tienen la cotización corregida a mano, '
                 . 'que manda sobre la curva. Están marcados en la grilla.';
         }
 

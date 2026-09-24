@@ -98,6 +98,17 @@ class Parametros {
             'descripcion' => 'Plazos promedio de pago (PPP) calculados y editables, y escalas de descuento por cliente',
             'secciones' => ['cobranzas_clientes']
         ],
+        'COMPRAS_PROY' => [
+            'nombre' => 'Compras Exterior',
+            'icono' => 'fa-boxes-packing',
+            'descripcion' => 'La proyección de las compras del exterior que todavía no tienen '
+                . 'contenedor: cuántos meses se proyectan, con cuánta historia se arma la cuota '
+                . 'mensual, en qué día del mes llega la mercadería y cuántos días antes se paga '
+                . 'el FOB y se nacionaliza. Alimentan la pestaña Comercio Exterior › Proyección y las dos '
+                . 'filas proyectadas del tablero, dentro de los grupos Proveedores Exterior y '
+                . 'Nacionalizaciones',
+            'secciones' => ['generales']
+        ],
         'PROV_LOCALES' => [
             'nombre' => 'Prov. Locales',
             'icono' => 'fa-file-invoice-dollar',

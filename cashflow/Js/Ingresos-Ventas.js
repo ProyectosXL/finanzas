@@ -119,7 +119,7 @@
        ================================================================ */
 
     function cargarAnalisis() {
-        mostrar('loadingAnalisis', true);
+        Cargando.mostrar('loadingAnalisis');
         mostrar('wrapperAnalisis', false);
 
         pedir('Controller/VentasController.php?action=getAnalisisVentas&anioDesde=2025')
@@ -128,12 +128,12 @@
                 generarTablaTendencias();
                 generarTablaAnalisis();
                 generarTablaFacturacion();
-                mostrar('loadingAnalisis', false);
+                Cargando.ocultar('loadingAnalisis');
                 mostrar('wrapperAnalisis', true);
                 ajustarStickyHeaders();
             })
             .catch(function(error) {
-                mostrar('loadingAnalisis', false);
+                Cargando.ocultar('loadingAnalisis');
                 mostrarError('Error al cargar el análisis de ventas: ' + error.message);
             });
     }
@@ -523,7 +523,7 @@
        --------------------------------------------------------------- */
 
     function cargarAcumulada() {
-        mostrar('loadingAcumulada', true);
+        Cargando.mostrar('loadingAcumulada');
         mostrar('wrapperAcumulada', false);
 
         pedir('Controller/VentasController.php?action=getVentaAcumulada')
@@ -532,12 +532,12 @@
                 generarTablaAcumulada();
                 actualizarSubtituloAnual();
                 pintarWarningsAnuales();
-                mostrar('loadingAcumulada', false);
+                Cargando.ocultar('loadingAcumulada');
                 mostrar('wrapperAcumulada', true);
                 ajustarStickyHeaders();
             })
             .catch(function(error) {
-                mostrar('loadingAcumulada', false);
+                Cargando.ocultar('loadingAcumulada');
                 mostrarError('Error al cargar la venta acumulada: ' + error.message);
             });
     }
@@ -649,7 +649,7 @@
        --------------------------------------------------------------- */
 
     function cargarBalance() {
-        mostrar('loadingBalance', true);
+        Cargando.mostrar('loadingBalance');
         mostrar('wrapperBalance', false);
 
         pedir('Controller/VentasController.php?action=getVentaBalance')
@@ -658,12 +658,12 @@
                 generarTablaBalance();
                 actualizarSubtituloAnual();
                 pintarWarningsAnuales();
-                mostrar('loadingBalance', false);
+                Cargando.ocultar('loadingBalance');
                 mostrar('wrapperBalance', true);
                 ajustarStickyHeaders();
             })
             .catch(function(error) {
-                mostrar('loadingBalance', false);
+                Cargando.ocultar('loadingBalance');
                 mostrarError('Error al cargar la venta del balance: ' + error.message);
             });
     }
@@ -858,7 +858,14 @@
        ================================================================ */
 
     function cargarProyeccion() {
-        mostrar('loadingProyeccion', true);
+        // Los dos pedidos arrancan juntos, así que los dos pasos arrancan
+        // "en curso", y cada uno se marca cuando SU respuesta llega.
+        Cargando.mostrar('loadingProyeccion', {
+            pasos: [
+                { texto: 'Venta proyectada', estado: 'en_curso' },
+                { texto: 'Cobranza proyectada', estado: 'en_curso' }
+            ]
+        });
         mostrar('wrapperVenta', false);
         mostrar('cardCobranza', false);
         mostrar('cardParticipacion', false);
@@ -867,8 +874,8 @@
         // Venta y cobranza se piden en paralelo: son dos acciones distintas del
         // controller y ninguna depende del resultado de la otra.
         Promise.all([
-            pedir('Controller/VentasController.php?action=getProyeccionVentas'),
-            pedir('Controller/VentasController.php?action=getProyeccionCobranzas')
+            conPaso(pedir('Controller/VentasController.php?action=getProyeccionVentas'), 0),
+            conPaso(pedir('Controller/VentasController.php?action=getProyeccionCobranzas'), 1)
         ])
         .then(function(res) {
             datosProyeccion = res[0];
@@ -887,7 +894,7 @@
             generarKpis();
             generarWarnings();
 
-            mostrar('loadingProyeccion', false);
+            Cargando.ocultar('loadingProyeccion');
             mostrar('wrapperVenta', true);
             mostrar('cardCobranza', true);
             mostrar('cardParticipacion', true);
@@ -895,11 +902,24 @@
             ajustarStickyHeaders();
         })
         .catch(function(error) {
-            mostrar('loadingProyeccion', false);
+            Cargando.ocultar('loadingProyeccion');
             // Si el recálculo falla, el bloque no se re-renderiza: hay que soltar
             // el botón acá o queda con el spinner para siempre.
             resetBotonParticipacion();
             mostrarError('Error al calcular la proyección: ' + error.message);
+        });
+    }
+
+    /** Marca el paso 'indice' de la proyección cuando la promesa se resuelve. */
+    function conPaso(promesa, indice) {
+        return promesa.then(function(r) {
+            Cargando.paso('loadingProyeccion', indice, 'listo');
+
+            return r;
+        }, function(e) {
+            Cargando.paso('loadingProyeccion', indice, 'error');
+
+            throw e;
         });
     }
 

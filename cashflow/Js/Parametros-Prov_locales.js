@@ -56,7 +56,7 @@
        ================================================================ */
 
     function cargar() {
-        mostrar('loadingParamPplo', true, 'flex');
+        Cargando.mostrar('loadingParamPplo');
         mostrar('wrapperParamPplo', false);
 
         pedirJson(URL_PARAM + '?action=getTodo')
@@ -74,11 +74,11 @@
                 pintarAvisos();
                 pintarListas();
 
-                mostrar('loadingParamPplo', false);
+                Cargando.ocultar('loadingParamPplo');
                 mostrar('wrapperParamPplo', true);
             })
             .catch(function(error) {
-                mostrar('loadingParamPplo', false);
+                Cargando.ocultar('loadingParamPplo');
                 Notificacion.error('Error al cargar las listas de opciones: ' + error.message);
             });
     }

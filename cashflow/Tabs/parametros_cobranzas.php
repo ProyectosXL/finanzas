@@ -166,10 +166,7 @@
     <div class="card-body p-0">
         <div id="avisosParamCob" class="px-3 pt-3"></div>
 
-        <div class="loading-spinner" id="loadingParamCob" style="display: none;">
-            <div class="spinner"></div>
-            <p>Cargando grupos y franquicias...</p>
-        </div>
+        <div class="cargando-slot" id="loadingParamCob" data-cargando="Cargando grupos y franquicias…"></div>
 
         <div class="table-responsive" id="wrapperTablaParamCob">
             <table class="table table-hover align-middle mb-0" id="tablaParamCob">

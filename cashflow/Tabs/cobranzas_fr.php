@@ -153,10 +153,7 @@
         </div>
 
         <div class="card-body p-0">
-            <div class="loading-spinner" id="loadingSpinnerCob">
-                <div class="spinner"></div>
-                <p>Cargando matriz de cobranzas...</p>
-            </div>
+            <div class="cargando-slot" id="loadingSpinnerCob" data-cargando="Cargando matriz de cobranzas…"></div>
             
             <!-- .tabla-temporal: header de dos filas fijo arriba, pie de
                  totales fijo abajo y columnas descriptivas fijas a la

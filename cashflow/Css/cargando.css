@@ -1,0 +1,149 @@
+/* ============================================================================
+   Cargando: el indicador de carga de todas las pestanas (Js/cargando.js)
+
+   Reemplaza las diez copias de .loading-spinner / .spinner / @keyframes spin
+   que tenia cada Css/*.css. Usa las variables de color de main.css, con el
+   valor de hoy como respaldo por si esta hoja se carga sola.
+   ============================================================================ */
+
+.cargando {
+    display: flex;
+    justify-content: center;
+    padding: 48px 16px;
+}
+
+.cargando-caja {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 240px;
+    max-width: 420px;
+}
+
+.cargando-cabeza {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+/* El anillo: un borde con un tramo de color que gira. Liviano -solo
+   transform, que no fuerza recalcular el layout- y sin imagenes. */
+.cargando-anillo {
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 3px solid var(--border-light, #eef0f5);
+    border-top-color: var(--primary-color, #3366ff);
+    animation: cargando-giro 0.9s linear infinite;
+}
+
+.cargando-textos {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.25;
+}
+
+.cargando-titulo {
+    color: var(--text-primary, #1a1d29);
+    font-weight: 500;
+    font-size: 0.95rem;
+}
+
+.cargando-tiempo {
+    color: var(--text-muted, #8c93a8);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.cargando-demora {
+    color: var(--text-secondary, #5a6178);
+    font-size: 0.8rem;
+    padding-left: 50px;
+}
+
+/* --- Los pasos ------------------------------------------------------------ */
+
+.cargando-pasos {
+    list-style: none;
+    margin: 0;
+    padding: 0 0 0 50px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.cargando-paso {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--text-secondary, #5a6178);
+}
+
+.cargando-paso-icono {
+    width: 16px;
+    display: inline-flex;
+    justify-content: center;
+    font-size: 0.8rem;
+}
+
+.cargando-paso--pendiente { color: var(--text-muted, #8c93a8); }
+.cargando-paso--en_curso { color: var(--text-primary, #1a1d29); }
+.cargando-paso--listo .cargando-paso-icono { color: var(--success-color, #28a745); }
+.cargando-paso--error { color: var(--danger-color, #dc3545); }
+
+.cargando-mini {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--border-light, #eef0f5);
+    border-top-color: var(--primary-color, #3366ff);
+    animation: cargando-giro 0.9s linear infinite;
+}
+
+/* --- Overlay: recargar sobre contenido ya dibujado ------------------------- */
+
+/* El anfitrion no cambia de tamanio: el overlay es absoluto, asi que la tabla
+   no salta ni pierde el scroll. */
+.cargando-anfitrion {
+    position: relative;
+    min-height: 140px;
+}
+
+.cargando--overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    align-items: flex-start;
+    padding-top: 40px;
+    background: rgba(255, 255, 255, 0.72);
+    backdrop-filter: blur(1px);
+}
+
+.cargando--overlay .cargando-caja {
+    background: var(--bg-white, #ffffff);
+    border: 1px solid var(--border-color, #e2e5ed);
+    border-radius: 10px;
+    box-shadow: var(--shadow-md, 0 2px 8px rgba(0, 0, 0, 0.06));
+    padding: 16px 20px;
+}
+
+@keyframes cargando-giro {
+    to { transform: rotate(360deg); }
+}
+
+/* Sin movimiento para quien lo pidio: el anillo queda quieto y el contador de
+   segundos sigue diciendo que esta trabajando. */
+@media (prefers-reduced-motion: reduce) {
+    .cargando-anillo,
+    .cargando-mini {
+        animation: none;
+        border-top-color: var(--primary-color, #3366ff);
+        border-right-color: var(--primary-color, #3366ff);
+    }
+
+    .cargando--overlay {
+        backdrop-filter: none;
+    }
+}
