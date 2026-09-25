@@ -46,6 +46,8 @@
  * siga figurando como pendiente hasta que alguien actualice la lista -que es un
  * error visible y sin consecuencias-.
  */
+require_once __DIR__ . '/AuthCashflow.php';
+
 class Menu {
 
     /** La pestana lee del sistema */
@@ -189,22 +191,43 @@ class Menu {
     ];
 
     /**
-     * El menu completo, con el estado de cada pestana ya resuelto y el conteo
-     * por categoria.
+     * El menu completo, filtrado por los permisos del rol del usuario actual,
+     * con el estado de cada pestana ya resuelto y el conteo por categoria.
      *
      * @return array ['principales' => [...], 'categorias' => [...], 'pie' => [...]]
      */
     public static function estructura() {
-        return [
-            'principales' => self::resolverItems(self::$principales),
-            'categorias' => array_map(function ($cat) {
-                $cat['items'] = self::resolverItems($cat['items']);
-                $cat['con_datos'] = self::contarConDatos($cat['items']);
-                $cat['total'] = count($cat['items']);
+        // 1. Filtrar pestañas principales por permisos
+        $principalesPermitidas = array_values(array_filter(self::$principales, function($item) {
+            return AuthCashflow::puede($item['tab']);
+        }));
 
-                return $cat;
-            }, self::$categorias),
-            'pie' => self::resolverItems(self::$pie)
+        // 2. Filtrar categorías y sus ítems
+        $categorias = [];
+        foreach (self::$categorias as $cat) {
+            $itemsPermitidos = array_values(array_filter($cat['items'], function($item) {
+                return AuthCashflow::puede($item['tab']);
+            }));
+
+            // Si la categoría tiene al menos un ítem con permiso, la incluimos
+            if (!empty($itemsPermitidos)) {
+                $itemsResueltos = self::resolverItems($itemsPermitidos);
+                $cat['items'] = $itemsResueltos;
+                $cat['con_datos'] = self::contarConDatos($itemsResueltos);
+                $cat['total'] = count($itemsResueltos);
+                $categorias[] = $cat;
+            }
+        }
+
+        // 3. Filtrar pie (Parámetros) por permisos
+        $piePermitido = array_values(array_filter(self::$pie, function($item) {
+            return AuthCashflow::puede($item['tab']);
+        }));
+
+        return [
+            'principales' => self::resolverItems($principalesPermitidas),
+            'categorias' => $categorias,
+            'pie' => self::resolverItems($piePermitido)
         ];
     }
 
@@ -335,5 +358,32 @@ class Menu {
         }
 
         return $tabs;
+    }
+
+    /**
+     * Devuelve el título legible o encabezado de una pestaña.
+     *
+     * @param string $tab
+     * @return string
+     */
+    public static function tituloTab($tab) {
+        foreach (self::$principales as $i) {
+            if ($i['tab'] === $tab) {
+                return !empty($i['encabezado']) ? $i['encabezado'] : $i['nombre'];
+            }
+        }
+        foreach (self::$categorias as $cat) {
+            foreach ($cat['items'] as $i) {
+                if ($i['tab'] === $tab) {
+                    return !empty($i['encabezado']) ? $i['encabezado'] : $i['nombre'];
+                }
+            }
+        }
+        foreach (self::$pie as $i) {
+            if ($i['tab'] === $tab) {
+                return !empty($i['encabezado']) ? $i['encabezado'] : $i['nombre'];
+            }
+        }
+        return ucwords(str_replace('_', ' ', $tab));
     }
 }

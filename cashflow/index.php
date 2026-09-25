@@ -1,12 +1,50 @@
 <?php
 session_start();
+require_once __DIR__ . '/Class/AuthCashflow.php';
+
+// Redirección si no hay sesión
+if (!AuthCashflow::estaAutenticado()) {
+    header('Location: https://app.xl.com.ar/sistemas/login.php');
+    exit;
+}
+
+$u = AuthCashflow::usuario();
+$tabsPermitidos = AuthCashflow::tabsPermitidos();
+
+// Si el usuario no tiene permisos para ninguna pestaña ni es admin
+if (empty($tabsPermitidos)) {
+    http_response_code(403);
+    echo '<!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <title>Acceso Restringido · Cashflow</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-light d-flex align-items-center justify-content-center" style="min-height: 100vh;">
+        <div class="card border-0 shadow-sm rounded-4 p-5 text-center" style="max-width: 480px;">
+            <div class="mb-3 text-danger"><i class="fas fa-lock fa-3x"></i></div>
+            <h4 class="fw-bold text-dark mb-2">Acceso No Autorizado</h4>
+            <p class="text-muted small mb-4">El usuario <strong>@' . htmlspecialchars($u['username']) . '</strong> (Rol: ' . htmlspecialchars($u['rol_nombre']) . ') no tiene solapas habilitadas en el <strong>Flujo de Fondos</strong>.</p>
+            <a href="/sistemas/hub/index.php" class="btn btn-primary rounded-pill px-4">Volver al Hub</a>
+        </div>
+    </body>
+    </html>';
+    exit;
+}
+
+$tabInicial = AuthCashflow::primeraTabPermitida('cashflow');
+$tabInicialFile = __DIR__ . '/Tabs/' . $tabInicial . '.php';
+require_once __DIR__ . '/Class/Menu.php';
+$tituloInicial = Menu::tituloTab($tabInicial);
 ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flujo de Fondos | XL</title>
+    <title><?php echo htmlspecialchars($tituloInicial); ?> | Flujo de Fondos | XL</title>
     <link rel="icon" type="image/jpeg" href="../images/logo.jpg">
     
     <!-- Bootstrap 5 -->
@@ -46,7 +84,13 @@ session_start();
         <!-- Content Area -->
         <div class="content-area">
             <div id="tabContent">
-                <?php include 'Tabs/cashflow.php'; ?>
+                <?php 
+                if (file_exists($tabInicialFile)) {
+                    include $tabInicialFile;
+                } else {
+                    include __DIR__ . '/Tabs/cashflow.php';
+                }
+                ?>
             </div>
         </div>
     </div>

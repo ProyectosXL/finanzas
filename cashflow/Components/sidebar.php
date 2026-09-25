@@ -69,21 +69,29 @@
 
     <div class="sidebar-menu">
 
-        <!-- Pestañas de nivel raíz. Cashflow es la que carga index.php. -->
-        <?php foreach ($menu['principales'] as $i => $item): ?>
+        <!-- Pestañas de nivel raíz -->
+        <?php foreach ($menu['principales'] as $item): ?>
             <div class="menu-item-main">
-                <?php echo menuLink($item, $i === 0); ?>
+                <?php echo menuLink($item, $item['tab'] === $tabInicial); ?>
             </div>
         <?php endforeach; ?>
 
-        <div class="menu-divider"></div>
+        <?php if(!empty($menu['principales']) && !empty($menu['categorias'])): ?>
+            <div class="menu-divider"></div>
+        <?php endif; ?>
 
-        <!-- Categorías.
-             El contador dice cuántas pestañas de la categoría tienen datos, para
-             ver el avance sin abrirla. -->
+        <!-- Categorías permitidas -->
         <?php foreach ($menu['categorias'] as $cat): ?>
+            <?php 
+                // Verificar si esta categoría contiene el tab activo
+                $tieneTabActivo = false;
+                foreach($cat['items'] as $it) {
+                    if ($it['tab'] === $tabInicial) { $tieneTabActivo = true; break; }
+                }
+                $catAbierta = $cat['abierta'] || $tieneTabActivo;
+            ?>
             <div class="menu-category">
-                <a href="#" class="category-header<?php echo $cat['abierta'] ? '' : ' collapsed'; ?>"
+                <a href="#" class="category-header<?php echo $catAbierta ? '' : ' collapsed'; ?>"
                    data-bs-toggle="collapse" data-bs-target="#menu<?php echo $cat['codigo']; ?>">
                     <div class="category-title">
                         <i class="fas <?php echo htmlspecialchars($cat['icono']); ?>"></i>
@@ -95,26 +103,26 @@
                     </div>
                     <i class="fas fa-chevron-down category-arrow"></i>
                 </a>
-                <div class="collapse<?php echo $cat['abierta'] ? ' show' : ''; ?>"
+                <div class="collapse<?php echo $catAbierta ? ' show' : ''; ?>"
                      id="menu<?php echo $cat['codigo']; ?>">
                     <ul class="category-items">
                         <?php foreach ($cat['items'] as $item): ?>
-                            <li><?php echo menuLink($item); ?></li>
+                            <li><?php echo menuLink($item, $item['tab'] === $tabInicial); ?></li>
                         <?php endforeach; ?>
                     </ul>
                 </div>
             </div>
         <?php endforeach; ?>
 
-        <!-- Al pie: Parámetros. No es un módulo de datos como los de arriba, es
-             la configuración de todos ellos. -->
-        <div class="menu-divider"></div>
-
-        <?php foreach ($menu['pie'] as $item): ?>
-            <div class="menu-item-main">
-                <?php echo menuLink($item); ?>
-            </div>
-        <?php endforeach; ?>
+        <!-- Al pie: Parámetros / Configuración -->
+        <?php if(!empty($menu['pie'])): ?>
+            <div class="menu-divider"></div>
+            <?php foreach ($menu['pie'] as $item): ?>
+                <div class="menu-item-main">
+                    <?php echo menuLink($item, $item['tab'] === $tabInicial); ?>
+                </div>
+            <?php endforeach; ?>
+        <?php endif; ?>
     </div>
 
     <!-- Referencia de las marcas. Sin esto, los íconos de la derecha son
