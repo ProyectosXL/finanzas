@@ -97,8 +97,20 @@ if (!class_exists('Conexion')) {
             } elseif ($nameServer == 'power_franquicias') {
                 return array($this->host_apps, $this->database_power_franquicias);
             } else {
-                // Solo usar sesión si no se especifica servidor o si se especifica uno no reconocido
-                if (session_status() === PHP_SESSION_NONE) {
+                /* Solo usar sesión si no se especifica servidor o si se especifica
+                   uno no reconocido.
+
+                   !headers_sent(): arrancar una sesión después de haber emitido
+                   salida NO FUNCIONA y sólo deja un warning. Pasa por línea de
+                   comandos -las pruebas- y el warning no avisaba de nada: la
+                   sesión no arrancaba ni con la guarda ni sin ella, así que el
+                   comportamiento es el mismo y lo único que cambia es que ya no
+                   ensucia la salida.
+
+                   Y acá el camino sin sesión ya está resuelto abajo: sin
+                   'conexion_dns' se cae a central, que es exactamente lo que pasaba
+                   igual. Mismo criterio y mismo comentario que AuthCashflow::init(). */
+                if (session_status() === PHP_SESSION_NONE && !headers_sent()) {
                     session_start();
                 }
 
@@ -151,12 +163,24 @@ if (!class_exists('Conexion')) {
 
                 error_log("Conexión exitosa a: " . $serverDB[0] . " - " . $serverDB[1]);
 
-                // Iniciar sesión si no está iniciada
-                if (session_status() === PHP_SESSION_NONE) {
+                /* Iniciar sesión si no está iniciada.
+
+                   !headers_sent() por el mismo motivo que arriba: después de haber
+                   emitido salida, session_start() falla y sólo deja un warning. Es
+                   lo que pasaba en las pruebas, y eran 772 warnings en una corrida
+                   de la suite -uno por cada conexión- sobre un session_start() que
+                   no arrancaba nada.
+
+                   Sin sesión, la línea de abajo escribe en $_SESSION como si fuera
+                   un array común y no persiste, que es exactamente lo que ya
+                   ocurría. */
+                if (session_status() === PHP_SESSION_NONE && !headers_sent()) {
                     session_start();
                 }
 
-                // este cid va a cambiar mil veces
+                /* este cid va a cambiar mil veces -y NADIE lo lee: es el único
+                   $_SESSION['cid'] del repo-. Se deja porque este archivo lo usa
+                   todo htdocs/finanzas y sacarlo no arregla nada que esté roto. */
                 $_SESSION['cid'] = $cid;
                 return $cid;
 
