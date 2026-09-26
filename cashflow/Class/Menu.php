@@ -162,7 +162,7 @@ class Menu {
             'abierta' => false,
             'items' => [
                 ['tab' => 'proveedores_locales', 'nombre' => 'Proveedores Locales', 'icono' => 'fa-store',         'estado' => self::DATOS, 'encabezado' => 'Cuentas a Pagar Locales'],
-                ['tab' => 'logistica_local',     'nombre' => 'Logística Local',     'icono' => 'fa-truck-fast',    'estado' => self::PENDIENTE]
+                ['tab' => 'logistica_local',     'nombre' => 'Logística Local',     'icono' => 'fa-truck-fast',    'estado' => self::DATOS]
             ]
         ],
         [

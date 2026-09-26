@@ -215,9 +215,15 @@ $orden = array_column($menu['categorias'], 'codigo');
 chequear('Comex tiene sus 3 pestanas con datos', 3, $porCategoria['Comex']['con_datos']);
 chequear('y son 3 en total, ya sin Despachante', 3, $porCategoria['Comex']['total']);
 // Proveedores Locales ya tiene datos: sale de Tango (CPA04 + CPA54 + CPA01).
-// Logistica Local sigue pendiente; Cronograma se saco del menu.
-chequear('Proveedores tiene 1 pestana con datos', 1, $porCategoria['Proveedores']['con_datos']);
+// Las DOS tienen datos: Logistica Local dejo de ser un placeholder y proyecta
+// los pagos a los fleteros. Cronograma se saco del menu.
+chequear('Proveedores tiene sus 2 pestanas con datos',
+    2, $porCategoria['Proveedores']['con_datos']);
 chequear('y 2 en total, ya sin Cronograma', 2, $porCategoria['Proveedores']['total']);
+chequear('Logistica Local ya no es un placeholder',
+    false, Menu::esPlaceholder('logistica_local'));
+chequear('y el menu la declara con datos',
+    Menu::DATOS, $porTab['logistica_local']['estado']);
 chequear('RRHH y Operativos son 4, ya sin Seguros', 4, $porCategoria['RRHH']['total']);
 chequear('Financiero son 3, ya sin Bopreal ni Pagos Div. Marzo',
     3, $porCategoria['Financiero']['total']);

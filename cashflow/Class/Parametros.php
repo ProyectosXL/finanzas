@@ -127,6 +127,26 @@ class Parametros {
                 . 'Nacionalizaciones',
             'secciones' => ['generales']
         ],
+        /* Va PEGADA a Prov. Locales, y no es casual: un fletero es un proveedor
+           local al que ademas se le proyecta el pago por horas, asi que las dos
+           pantallas se miran juntas. La exclusion que evita contarlo dos veces
+           se carga en la otra. */
+        'LOGISTICA' => [
+            'nombre' => 'Logística',
+            'icono' => 'fa-truck-fast',
+            'descripcion' => 'Quiénes son fleteros, cuántas horas por mes trabajan y cuánto '
+                . 'vale su hora. Alimentan la pestaña Logística Local y la fila Logística del '
+                . 'tablero. El valor hora se ajusta cada tres meses con la inflación de '
+                . 'Parámetros › Generales',
+            'secciones' => ['fleteros'],
+            /* El maestro se escribe desde las DOS pantallas -el alta acá, las
+               horas y el valor hora también desde la planilla- así que sus
+               endpoints viven en el controller del módulo y no en este. Dos
+               endpoints escribiendo la misma tabla se desincronizan en la
+               primera validación que alguien agregue de un solo lado. Mismo
+               criterio que el módulo CASHFLOW. */
+            'endpoint' => 'Controller/LogisticaController.php'
+        ],
         'PROV_LOCALES' => [
             'nombre' => 'Prov. Locales',
             'icono' => 'fa-file-invoice-dollar',
@@ -361,6 +381,41 @@ class Parametros {
                         $modulo['avisos'][] = 'No se pudo resolver el cronograma de pagos: '
                             . $e->getMessage();
                     }
+                } elseif ($seccion === 'fleteros') {
+                    /* Mismo criterio que Saldos, Cob. Electrónicos y los demás:
+                       la tabla es del módulo Logística y la lee su propia
+                       clase, dentro de un try porque su script puede no haberse
+                       corrido todavía.
+
+                       SE PIDEN TODOS, también los inactivos: el editor tiene
+                       que poder reactivar una baja, y un fletero que dejó de
+                       trabajar conserva las horas y el valor hora con los que
+                       se proyectó. */
+                    try {
+                        $logistica = $this->logistica();
+
+                        $modulo['fleteros'] = [
+                            'filas' => $logistica->getFleteros(false),
+                            'tabla_creada' => $logistica->tablaCreada(),
+                            'tango_disponible' => $logistica->tango()->disponible(),
+                            'min_busqueda' => ProveedoresTango::MIN_BUSQUEDA
+                        ];
+
+                        if ($logistica->avisoSinTabla() !== '') {
+                            $modulo['avisos'][] = $logistica->avisoSinTabla();
+                        }
+
+                        if (!$modulo['fleteros']['tango_disponible']) {
+                            $modulo['avisos'][] = 'No se puede leer CPA01, así que no se pueden '
+                                . 'dar de alta fleteros ni refrescar sus nombres. Los que ya '
+                                . 'están cargados se ven con el nombre guardado.';
+                        }
+                    } catch (Throwable $e) {
+                        $modulo['fleteros'] = ['filas' => [], 'tabla_creada' => false,
+                                               'tango_disponible' => false, 'min_busqueda' => 2];
+                        $modulo['avisos'][] = 'No se pudieron leer los fleteros: '
+                            . $e->getMessage();
+                    }
                 } elseif ($seccion === 'cotizaciones') {
                     $modulo['cotizaciones'] = $this->cotizaciones($modulo['avisos']);
                 } elseif ($seccion === 'prov_locales_opciones') {
@@ -411,6 +466,21 @@ class Parametros {
         }
 
         return $this->inflacion;
+    }
+
+    /**
+     * Puerta al maestro de fleteros.
+     *
+     * @return Logistica
+     */
+    public function logistica() {
+        require_once __DIR__ . '/Logistica.php';
+
+        if ($this->logistica === null) {
+            $this->logistica = new Logistica();
+        }
+
+        return $this->logistica;
     }
 
     /**
@@ -639,6 +709,9 @@ class Parametros {
 
     /** @var CronogramaDatos|null Puerta al cronograma de pagos; la resuelve cronograma() */
     private $cronograma = null;
+
+    /** @var Logistica|null Puerta al maestro de fleteros; la resuelve logistica() */
+    private $logistica = null;
 
     function __construct(){
         require_once __DIR__.'/../../class/conexion.php';

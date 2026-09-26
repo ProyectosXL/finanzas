@@ -224,6 +224,27 @@ class CashflowRegistry {
            instancia corre solo la consulta de su serie. Van separados porque
            leen dos servidores distintos, y asi una caida del servidor de
            locales no se lleva puesto el disponible bancario. */
+        /* TODO LO QUE APORTA ES PROYECCION, y por eso su fila NO esta partida
+           en REAL y PROYECTADO como las dos de Comex: los pagos a fleteros no
+           salen de ningun comprobante, se calculan con las horas del mes y el
+           valor hora. No hay parte real que conciliar.
+
+           La fila LOGISTICA ya existe en RO_T_CASHFLOW_CONF_FILA desde
+           sql/cashflow_estructura.sql, apuntada a este par. Lo que cambio es
+           que el proveedor existe, asi que dejo de rendir cero. */
+        'LOGISTICA' => [
+            'nombre' => 'Logistica',
+            'descripcion' => 'Pagos proyectados a los fleteros: horas por mes por el valor hora '
+                . 'del mes, ajustado cada tres meses por inflacion, repartido mitad y mitad en '
+                . 'el 2do y el 4to viernes. Sin IVA ni otros conceptos',
+            'archivo' => 'Providers/LogisticaProvider.php',
+            'clase' => 'LogisticaProvider',
+            'moneda' => 'ARS',
+            'disponible' => true,
+            'tab' => 'logistica_local',
+            'series' => ['PAGOS' => 'Pagos proyectados a fleteros']
+        ],
+
         'SALDOS' => [
             'nombre' => 'Saldos',
             'descripcion' => 'Disponible inicial en bancos, Mercado Pago y efectivo de tesoreria',
@@ -461,15 +482,6 @@ class CashflowRegistry {
                 ]
             ],
             'particion_extra' => 'por rubro'
-        ],
-
-        'LOGISTICA' => [
-            'nombre' => 'Logistica',
-            'descripcion' => 'Fletes y servicios logisticos locales',
-            'moneda' => 'ARS',
-            'disponible' => false,
-            'tab' => 'logistica_local',
-            'series' => ['PAGOS' => 'Pagos de logistica']
         ],
 
         'HABERES' => [

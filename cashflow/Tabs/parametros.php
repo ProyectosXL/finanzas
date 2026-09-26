@@ -225,6 +225,14 @@
             <?php include __DIR__ . '/parametros_cobranzas.php'; ?>
         </div>
 
+        <!-- Maestro de fleteros: quiénes son, cuántas horas por mes trabajan y
+             cuánto vale su hora. El alta busca el código en CPA01, igual que el
+             alta manual del maestro de Proveedores Locales. Mismo criterio que
+             los anteriores: archivo y JS propios, y clases con prefijo plog-. -->
+        <div class="tab-pane fade" id="paneParamLogistica" role="tabpanel">
+            <?php include __DIR__ . '/parametros_logistica.php'; ?>
+        </div>
+
         <!-- Listas de opciones del maestro de Proveedores Locales: rubro
              económico, rubro, centro de costos, plazo y criterio de
              distribución. Antes eran texto libre, y el rubro económico no es

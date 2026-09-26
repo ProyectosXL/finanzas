@@ -1,0 +1,66 @@
+/* ============================================================================
+   Logistica Local
+   ----------------------------------------------------------------------------
+   Casi todo lo dibuja Bootstrap y las clases compartidas del modulo (kpi-card,
+   table-wrapper, search-box-container, columnas fijas y el indicador de
+   Css/cargando.css). Aca va SOLO lo propio de esta pantalla.
+   ============================================================================ */
+
+/* Doce columnas de meses, todas numeros: tabulares para que los importes se
+   alineen digito con digito al leerlos en vertical. Sin esto, comparar dos
+   meses obliga a leer el numero entero en vez de la longitud. */
+.tab-logistica_local #tablaLogistica td,
+.tab-logistica_local #tablaLogistica tfoot td,
+.tab-logistica_local #tablaValorHora td,
+.tab-logistica_local #tablaDetalleFletero td {
+    font-variant-numeric: tabular-nums;
+}
+
+.tab-logistica_local #tablaLogistica th,
+.tab-logistica_local #tablaValorHora th {
+    white-space: nowrap;
+    font-size: 0.8125rem;
+}
+
+.tab-logistica_local #tablaLogistica td,
+.tab-logistica_local #tablaValorHora td {
+    white-space: nowrap;
+    font-size: 0.8125rem;
+    vertical-align: middle;
+}
+
+/* Los tres campos editables van angostos y a la derecha: son numeros, y un
+   input ancho al lado de doce columnas de importes hace creer que la fila
+   empieza ahi. */
+.tab-logistica_local #tablaLogistica .log-edit {
+    min-width: 92px;
+    max-width: 130px;
+    display: inline-block;
+}
+
+/* EL MES DE AJUSTE SE MARCA. Es la unica columna del valor hora que cambia de
+   numero, y sin marca se lee como un error de carga en vez de como lo que es.
+   El color va sobre el texto y no sobre el fondo: el fondo compite con el
+   resaltado de fila del hover, que es lo que se usa para leer en horizontal. */
+.tab-logistica_local #tablaValorHora .log-ajuste {
+    font-weight: 600;
+    color: var(--primary-color, #0d6efd);
+}
+
+.tab-logistica_local #tablaValorHora .log-ajuste i {
+    opacity: 0.6;
+}
+
+/* Un mes sin proyectar lleva un guion con el motivo en el title. El cursor de
+   ayuda es lo que avisa que HAY una explicacion: sin el, el guion se lee como
+   una celda vacia y nadie pasa el mouse. */
+.tab-logistica_local #tablaLogistica td span[title],
+.tab-logistica_local #tablaValorHora td[title] {
+    cursor: help;
+}
+
+/* El nombre del fletero abre su detalle: se comporta como un enlace y tiene
+   que verse como uno al pasar por encima. */
+.tab-logistica_local #tablaLogistica a[data-detalle]:hover {
+    text-decoration: underline !important;
+}
