@@ -54,6 +54,8 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 | 26 | `sql/RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN.sql` | `CREATE OR ALTER` del SP que trae el presupuesto oficial y el contraste por el linked server `[XL-APPS]` (~0,5 s). Al pie, la programación sugerida | Igual que el 24, para el presupuesto |
 | 27 | `sql/cashflow_prov_locales_fuente_fecha.sql` | Agrega `FUENTE_FECHA` a `RO_T_CASHFLOW_PROV_LOCALES_PAGO` —si cada fecha de pago se cargó a mano o vino de la planilla— y la rellena desde `ORIGEN` en las filas que ya tienen fecha | **El tablero no cambia**. La columna *Fecha de pago* de Proveedores Locales distingue igual lo importado de lo manual, leyendo `ORIGEN`, y la pestaña avisa. Lo que se pierde es que la marca siga siendo cierta cuando se excluye o cambia de forma una factura con fecha importada. Ver `README-proveedores-locales.md` |
 | 28 | `sql/cashflow_prov_exclusion_modulo.sql` | Crea `RO_T_CASHFLOW_PROV_EXCLUIDO_MODULO`: qué proveedores quedan fuera de un módulo porque su deuda ya se considera en otra pestaña, con motivo e historial. Hoy el único módulo es Proveedores Locales | **El tablero no cambia**: nace vacía. Sin ella nadie está excluido, el maestro dibuja la columna con un guion y la pestaña avisa. Ver `README-proveedores-locales.md` |
+| 29 | `sql/cashflow_parametros_generales.sql` | Mueve a un módulo `GENERALES` los parámetros que hoy figuran como de Ventas —`horizonte_dias`, `horizonte_meses`, `alicuota_iva`, `feriados_comercio`—, **sin tocar ningún VALOR**, y crea `RO_T_CASHFLOW_INFLACION_MES` (el % esperado de cada mes calendario) y `RO_T_CASHFLOW_CRONOGRAMA_PAGO_EDIT` (los overrides de las fechas de pago) | **Ningún cálculo cambia** y nada se rompe: el único lugar que pide parámetros por MODULO es la pantalla de Parámetros; las fórmulas los leen por clave. Los cuatro parámetros **se siguen viendo y editando** en la sub-pestaña Generales, que los rescata de `VENTAS/GENERAL` y avisa qué script falta. Lo que no se puede es cargar inflación —los valores hora de Logística se proyectan sin ajuste trimestral— ni mover una fecha del cronograma, y las dos tarjetas lo dicen. Ver `README-logistica-local.md` |
+| 30 | `sql/cashflow_logistica_fleteros.sql` | Crea `RO_T_CASHFLOW_LOGISTICA_FLETEROS`: quién es fletero, cuántas horas por mes trabaja y cuánto vale su hora. **No siembra ninguno** | **El tablero no cambia**: la fila `LOGISTICA` ya existe y ya apunta a `LOGISTICA/PAGOS`, así que sigue en cero —que es lo que va hoy— y ahora además el proveedor **avisa por qué**. La pestaña Logística Local se lee igual, con la planilla vacía, y la sub-pestaña de alta se dibuja apagada nombrando este script. Ver `README-logistica-local.md` |
 
 ### Scripts modificados — hay que volver a correrlos
 
@@ -81,6 +83,8 @@ Que ninguna fila del tablero duplique importes:
 - `COBRANZAS_FR_REAL` y `COBRANZAS_FR_PROY` **seguidas**, con `GRUPO = 'COBRANZAS_FR'` y una `NATURALEZA` cada una. El agrupamiento es posicional: si alguien mete una fila activa entre las dos, el tablero las dibuja sueltas y el validador lo avisa. Que la fila total `COBRANZAS_FR` esté inactiva **entre medio** no molesta: no se dibuja.
 - `PROV_EXTERIOR_PROY` y `NACIONALIZACIONES_PROY` **activas**, en los órdenes 15 y 25, cada una **pegada** a su parte real (10 y 20). Los dos grupos —`PROV_EXTERIOR` y `NACIONALIZACIONES`— con una fila `REAL` y una `PROYECTADO` cada uno. Sus series **nunca** se suman a las de `COMEX_PROV_EXT` ni `COMEX_NAC`: son universos disjuntos, no partes de un total, y por eso el registro no las declara como `componentes`. Con las dos filas inactivas, cada grupo queda de una sola fila y el tablero las dibuja sueltas, que es lo correcto y no un error.
 - **Dos filas de saldo**: `SALDO_ACUM_SIN_COB` en *Resultados* justo debajo de *Flujo Neto (sin cobertura)*, y `SALDO_FINAL` al final de *Cobertura*. Si la de arriba quedara **debajo** de las filas de uso las incluiría y diría lo mismo que la del final.
+- **Ningún parámetro en `MODULO = 'VENTAS'` con `GRUPO = 'GENERAL'`.** El script 29 lo verifica e imprime el resultado. La sub-pestaña Ventas ya no dibuja generales, así que un parámetro que quede ahí **existe y no se ve en ninguna pantalla**. Ningún importe cambia por moverlos: las fórmulas leen por clave.
+- **`LOGISTICA` activa, con serie `PAGOS`**, en *Costos Directos*. Esa fila ya existía y no la toca ningún script: lo que cambió es que ahora tiene proveedor. **El día que se corre el script 30 el tablero no se mueve un peso**, porque el maestro nace vacío; se mueve cuando se cargan los fleteros con sus horas y su valor hora. Y antes de eso hay que **excluirlos de Cuentas a Pagar Locales** desde el maestro de Proveedores Locales: su deuda real ya está en el tablero, así que mientras no estén excluidos el mismo pago se cuenta dos veces y **el cuadro cierra igual**. La pestaña Logística Local y el tablero lo avisan mientras falte. Ver `README-logistica-local.md`.
 
 ---
 
@@ -112,7 +116,12 @@ En este orden, contra `central`:
 -- 21. sql/cashflow_comex_pagado.sql  (Comex: marcar un pago como ya hecho; sale de la proyeccion)
 -- 22. sql/cashflow_estructura_grupos.sql  (filas agrupadas: la cobranza FR en un renglon que se abre)
 -- 23. sql/cashflow_compras_proyectadas.sql  (la parte PROYECTADA de los dos egresos de Comex)
+-- 24. sql/migracion_parametros_modulo.sql  (la columna MODULO, si la tabla venia de antes)
+-- 25. sql/cashflow_parametros_generales.sql  (sub-pestana Generales: inflacion y cronograma)
+-- 26. sql/cashflow_logistica_fleteros.sql  (el maestro de fleteros de Logistica Local)
 ```
+
+**El 25 va después del 24**, que es el que agrega la columna `MODULO`: sin ella no hay nada que migrar y el script lo dice, pero deja el trabajo a medias. **El 26 va después del 25**, aunque no lo necesite para crearse: sin la inflación, los valores hora se proyectan sin ajuste trimestral y la pestaña avisa.
 
 **El 13 y el 14 van en ese orden y al final**, porque el 14 mueve `SALDO_FINAL` al final de la sección que crea y da de baja la fila del saldo de inversiones que crearon los anteriores. Correr el 14 sin el 13 no rompe nada, pero deja el cuadro a medio reagrupar.
 
@@ -176,7 +185,7 @@ Todos son reejecutables y no pisan nada ya editado. Si no se corrieron, la panta
 | Cálculo | `Class/EjeVista.php` — `armarAgrupado()` | Lo mismo, pero con una fila por **grupo** en vez de una por item |
 | Presentación | `Js/eje-vistas.js` | Dibuja los botones, mantiene la vista activa y entrega las columnas visibles |
 
-Las usan **Cashflow, Ventas, Proveedores Exterior, Crono Nacionalización, Cobranzas FR, Cobranzas May, Exportaciones Tasky y las dos sub-pestañas de Echeqs**.
+Las usan **Cashflow, Ventas, Proveedores Exterior, Crono Nacionalización, Cobranzas FR, Cobranzas May, Exportaciones Tasky, Logística Local y las dos sub-pestañas de Echeqs**.
 
 > En *Echeqs → Venta Cobrada Anticipada* cada cheque se ubica en la **fecha estimada de venta** —la del cheque menos los días de pre-chequeado del cliente— y no en la del cheque: es la fecha en la que ese importe netea la cobranza proyectada de Ventas, así que es donde tiene que verse. La del cheque queda como columna de referencia y los días efectivos van al lado, para que se vea de dónde sale la estimación. Ver `README-ventas.md`.
 >
@@ -597,7 +606,9 @@ El ícono de la fila mide **sólo las columnas de la vista activa**, igual que l
 
 Van igual en el registro, con `'disponible' => false` y sin clase. Una fila que los apunte se muestra **en cero** y el tablero avisa, en vez de desaparecer del cuadro: así la pantalla tiene desde el primer día la forma completa del Excel y se ve qué falta. Cuando el módulo exista, se escribe su proveedor y se da vuelta el flag; la fila ya está configurada y se llena sola.
 
-Hoy tienen datos reales diecisiete: **Ventas**, **Cobranzas FR**, **Cobranzas Mayoristas**, **Proveedores Exterior**, **Nacionalizaciones**, **Compras Exterior** (código interno `COMPRAS_PROY`), **Saldos**, **Caja Locales**, **Cuentas de inversión**, **Cuentas comitente**, **Cobranzas Electrónicas**, **Echeqs**, **Exportaciones Tasky**, **Proveedores Locales**, **Cobertura**, y los dos de Otros Ingresos —**Dólares Cuenta Comitente** y **Saldo de Inversiones**— que están **retirados**: siguen sirviendo lo que tienen cargado, pero ya no alimentan ninguna fila. Los otros están declarados y rinden cero.
+Hoy tienen datos reales dieciocho: **Ventas**, **Cobranzas FR**, **Cobranzas Mayoristas**, **Proveedores Exterior**, **Nacionalizaciones**, **Compras Exterior** (código interno `COMPRAS_PROY`), **Saldos**, **Caja Locales**, **Cuentas de inversión**, **Cuentas comitente**, **Cobranzas Electrónicas**, **Echeqs**, **Exportaciones Tasky**, **Proveedores Locales**, **Logística**, **Cobertura**, y los dos de Otros Ingresos —**Dólares Cuenta Comitente** y **Saldo de Inversiones**— que están **retirados**: siguen sirviendo lo que tienen cargado, pero ya no alimentan ninguna fila. Los otros están declarados y rinden cero.
+
+> **Logística** es el último en sumarse, y es el único del grupo de egresos pendientes que ya tiene proveedor. Su fila ya existía apuntada a `LOGISTICA/PAGOS`: no hizo falta ningún script de estructura, sólo escribir el proveedor y dar vuelta el flag, que es exactamente lo que este diseño promete. Ver `README-logistica-local.md`.
 
 ### Módulos retirados
 
@@ -1080,7 +1091,15 @@ Los ítems de las categorías ahora tienen ícono propio, así que el sangrado d
 
 ## Administración desde Parámetros
 
-Sub-pestaña **Parámetros → Cashflow**. Permite crear filas y secciones, renombrarlas, cambiarles la sección, reordenarlas, habilitarlas e inhabilitarlas.
+Las sub-pestañas salen de `Parametros::$modulos`, así que **agregar un módulo es declararlo ahí y sumar su `tab-pane`**: el `<li>` se genera solo. Cada módulo tiene su propio archivo de `Tabs/`, su propio JS y un prefijo de clase propio, porque `Parametros.js` busca `.param-input`, `.mix-*` y `.respaldo-*` en **todo** el documento.
+
+> **La primera es Generales**, y ahí viven los parámetros que afectan a todo el módulo: el horizonte —que es el eje del tablero y de las diez pantallas con eje temporal—, la alícuota, los feriados de comercio, la inflación mensual esperada y el cronograma de pagos. Estaban bajo *Ventas*, donde tocarlos parecía mover una sola pantalla. **Ningún cálculo se enteró del cambio**: el único lugar que pide parámetros por `MODULO` es esta pantalla; las fórmulas los leen por clave con `getParametrosMap()`, que no filtra. Ver `README-logistica-local.md`.
+>
+> Generales muestra además la **curva de dólar futuro** y la **cotización del BCRA**, las dos de **solo lectura**: llegan por API y las mantiene otro proceso. Un campo editable al lado haría creer que se pueden corregir desde ahí.
+
+### Parámetros → Cashflow
+
+Permite crear filas y secciones, renombrarlas, cambiarles la sección, reordenarlas, habilitarlas e inhabilitarlas.
 
 - **El orden nunca lo manda el cliente.** Los botones ↑ y ↓ mueven la fila en la pantalla y el servidor renumera desde cero con `(índice+1)*10` en cada guardado. Así el orden se repara solo y no existen los órdenes duplicados ni los huecos.
 - **El código interno lo slugifica el servidor**, sin importar lo que mande el cliente, y es **inmutable** después del alta: es la clave con la que se referencia la fila. Si quedó mal, se inhabilita y se crea otra.
@@ -1270,6 +1289,10 @@ De las **compras proyectadas**, cuatro archivos y 394 comprobaciones. El grueso 
 
 > Dos de esas pruebas existen **porque ya fallaron de verdad** en la primera corrida del script: que un `PRINT` no arme su texto con una subconsulta —es error de sintaxis, así que el lote entero no corre y ningún parámetro se crea— y que los parámetros declaren `TIPO_DATO`, que es `NOT NULL`. Y el lector de SQL sin comentarios saca **sólo los de bloque**: un `--` también vive adentro de un literal, y ese script tiene un `PRINT '--- Estado ---'`.
 
+De **Logística Local**, cuatro archivos que corren enteros **sin base**: el cronograma de viernes —con el mes de cinco viernes, el corrimiento **hacia atrás** (al revés que el de Ventas) y los tres feriados reales del horizonte que caen justo en un 2do o 4to viernes—, el ajuste trimestral del valor hora —incluido el **histórico real de los tres fleteros, al centavo**, y la verificación de que un ajuste suma *su mes y los dos anteriores*, probada con inflación **variable** porque con constante las tres cuentas posibles dan lo mismo—, el reparto mitad y mitad con el **mes partido por el final del tramo diario**, y el proveedor con sus tres casos de fila en cero. Ver `README-logistica-local.md`.
+
+> Esa rama destapó dos cosas que se tapaban entre sí. `AuthCashflow` **abortaba la suite entera** con un fatal cuando `htdocs/Gestionusuarios` no estaba al lado —un checkout de este repo solo—, y con el fatal fuera del camino aparecieron **32 fallas de `test_menu`**: medía la estructura del menú contra `Menu::estructura()`, que **filtra por permisos**, y por línea de comandos no hay sesión. La estructura del menú es un hecho del código, así que ahora se pide con `Menu::estructuraCompleta()`; el filtrado por permisos tiene su propia sección, que fija que **sin sesión no se ve nada**.
+
 **El motor acepta un `Horizonte` inyectado, y hace falta para poder probarlo.** El arrastre del saldo depende de qué día es hoy, así que un escenario con importes en fechas fijas deja de tener sentido en cuanto pasa esa fecha. Sin esa costura las pruebas del motor caducaban solas —y caducaron: 48 casos empezaron a devolver `null` al pasar el 06/09/2026, y la parte más delicada del módulo se quedó sin red. Es la misma costura que ya tenían `Ventas::proyectarVentas()` y `proyectarCobranzas()`.
 
 ```php
@@ -1346,6 +1369,21 @@ cashflow/Class/Comex.php                    Comercio Exterior (README-comex.md)
 cashflow/Js/Comex-fechas.js                 La celda editable, el tilde de pagado y el buscador, de las dos pestanas
 sql/cashflow_comex_fecha_maestra.sql        La fecha vive en el maestro, con rastro de quien edito
 sql/cashflow_comex_pagado.sql               Que pagos ya se hicieron: salen de la proyeccion, con historial
+sql/cashflow_parametros_generales.sql       Sub-pestana Generales: migra los parametros del eje,
+                                            crea la inflacion mensual y los overrides del
+                                            cronograma (README-logistica-local.md)
+sql/cashflow_logistica_fleteros.sql         El maestro de fleteros. No siembra ninguno
+cashflow/Class/Inflacion.php                El % de cada mes y la suma de a tres, sin componer
+cashflow/Class/CronogramaPagos.php          2do y 4to viernes, corrimiento y override. PURO
+cashflow/Class/CronogramaDatos.php          Su lectura: calendario bancario y overrides
+cashflow/Class/LogisticaValorHora.php       El ajuste trimestral del valor hora. PURO
+cashflow/Class/LogisticaPlanilla.php        Importes, mitades y los cinco motivos de null. PURO
+cashflow/Class/Logistica.php                El maestro de fleteros y la lectura de los insumos
+cashflow/Class/Providers/LogisticaProvider.php  LOGISTICA / PAGOS
+cashflow/Controller/LogisticaController.php La planilla y el maestro; lo usan las dos pantallas
+cashflow/Tabs/logistica_local.php           La pestana (era un placeholder)
+cashflow/Tabs/parametros_generales.php      Sub-pestana Generales
+cashflow/Tabs/parametros_logistica.php      Sub-pestana Logistica: alta de fleteros contra CPA01
 tests/                                      Arnés de pruebas
 ```
 
@@ -1368,6 +1406,10 @@ De la rama `feature/comex-pagado`: `sql/cashflow_comex_pagado.sql` (nuevo) · `C
 De la rama `feature/comex-saldo-pendiente`: `tests/test_comex_saldo_pendiente.php` (nuevo) · `Class/Comex.php` (**el cashflow pasa a leer `RO_T_IMPORTACIONES_ENCABEZADO_PAGOS`**, la tabla de pagos de Comercio Exterior, y sólo a leerla: `saldoPendiente()` replica la regla de `Pagos::obtenerResumen()` de ese repo, `enPesos()`, `conSaldo()`, `getPagosDelContenedor()`, `tienePagosComex()` y su aviso; el FOB y los pagos salen de la OC principal —`COALESCE(ID_PADRE, ID)`— con el corte que impide contar dos veces un contenedor con varias órdenes de compra; `valuar()` se aplica al pendiente; `avisosSaldoComex()`, `avisosSobrepago()` y `avisosGrupo()`) · `Providers/ComexProvider.php` (cuatro series en vez de tres: `PAGOS_COMEX`, y `PAGOS_TODO` pasa a valer el FOB completo) · `Class/CashflowRegistry.php` (la serie nueva y sus `componentes`) · `Controller/ComexController.php` (`getPagosContenedor`, sólo lectura; el aviso de valuación mide el pendiente) · `Tabs/proveedores_exterior.php` (tres columnas en dólares y el modal del detalle de pagos) · `Js/Comex-Proveedores_exterior.js` y su CSS (las tres celdas, las marcas de estado y los totales en dólares del pie) · `tests/test_comex_fecha_maestra.php` (el corte pasó a tener tres partes).
 
 > **Ningún script.** No hay DDL nuevo: la tabla es de Comercio Exterior y ya existe. Lo único que cambia del lado de la base es que el cashflow ahora la lee — y si no la encontrara, lo dice y vuelve a proyectar el FOB completo.
+
+De la rama `feature/logistica-local-parametros-generales`: `sql/cashflow_parametros_generales.sql`, `sql/cashflow_logistica_fleteros.sql`, `Class/Inflacion.php`, `Class/CronogramaPagos.php`, `Class/CronogramaDatos.php`, `Class/LogisticaValorHora.php`, `Class/LogisticaPlanilla.php`, `Class/Logistica.php`, `Providers/LogisticaProvider.php`, `Controller/LogisticaController.php`, `Tabs/parametros_generales.php`, `Tabs/parametros_logistica.php`, `Js/Logistica-Local.js`, `Js/Parametros-Generales.js`, `Js/Parametros-Logistica.js`, `Css/Logistica-Local.css` y cuatro archivos de pruebas (nuevos) · `Tabs/logistica_local.php` (era un placeholder) · `Class/Parametros.php` (los módulos `GENERALES` y `LOGISTICA`; las cuatro secciones nuevas; el rescate de los parámetros sin migrar) · `Class/CashflowRegistry.php` (`LOGISTICA` pasa a `disponible`) · `Class/Menu.php` (`logistica_local` pasa a `DATOS`; **`estructuraCompleta()`**, sin filtrar por permisos) · `Class/AuthCashflow.php` (el `require` del padrón va condicionado y **falla cerrada**; la sesión no se arranca con la salida ya emitida) · `Controller/ParametrosController.php` (inflación y cronograma) · `Tabs/parametros.php` (los dos panes nuevos; la tarjeta *Generales* se fue de Ventas) · `Js/Parametros.js` (**se fue el bloque de generales**, con su `FORMATO`, sus hints y sus helpers) · `tests/test_menu.php`, `tests/test_providers.php`, `tests/test_cargando.php`.
+
+> **Ningún script toca la estructura del tablero.** La fila `LOGISTICA` ya existía apuntada a `LOGISTICA/PAGOS`: alcanzó con escribir el proveedor y dar vuelta el flag, que es exactamente lo que el registro promete. Ver `README-logistica-local.md`.
 
 Eliminado: `Tabs/resumen.php`.
 
