@@ -609,14 +609,47 @@ preg_match('/var COLS_DESC = (\d+);/', $jsCodigo, $mCols);
 chequear('el encabezado tiene tantas descriptivas como declara COLS_DESC',
     substr_count($encabezado, '<th rowspan="2"'), intval($mCols[1]));
 
-/* El pie las reparte en tres tramos -las que llevan el rotulo, la del total, y
-   las editables- y los tres tienen que sumar lo mismo. Un colspan mal contado
-   deja el total debajo de otra columna. */
-preg_match('/<td colspan="(\d+)" class="fw-bold text-end">TOTALES<\/td>/', $jsCodigo, $mPie);
-preg_match('/COLS_DESC - (\d+)/', $jsCodigo, $mResto);
+/* El pie tiene que repartir las mismas columnas que el encabezado: un colspan
+   mal contado deja el total debajo de otra columna y el numero queda diciendo
+   otra cosa.
 
-chequear('y el pie reparte esas mismas columnas', intval($mCols[1]),
-    intval($mPie[1]) + 1 + (intval($mCols[1]) - intval($mResto[1])));
+   SE SUMAN LAS CELDAS DEL PIE UNA POR UNA, en vez de escribir la cuenta aca.
+   La version anterior sumaba "el rotulo + la del total + las editables" y daba
+   12 contra 13, porque el pie tiene DOS celdas sueltas -el Importe y el
+   Pendiente- y la cuenta contaba una sola. Lo que estaba mal era la cuenta de
+   la prueba: el pie reparte 8 + 1 + 1 + 3 = 13, igual que el encabezado, y el
+   colspan inicial del HTML tambien dice 13.
+
+   Fallaba desde que la columna Importe se agrego al lado del Pendiente, y es
+   exactamente el sintoma que la prueba existe para atrapar, sufrido por la
+   prueba misma. Contando celdas, agregar una columna al pie ya no obliga a
+   actualizar tambien la aritmetica de aca, que es el segundo numero que se
+   olvida. */
+$pie = substr($jsCodigo, strpos($jsCodigo, 'function pintarTotales'));
+$pie = substr($pie, strpos($pie, 'var html ='));
+$pie = substr($pie, 0, strpos($pie, 'cols.forEach'));
+
+$anchoPie = 0;
+$celdas = explode('<td', $pie);
+array_shift($celdas);
+
+foreach ($celdas as $celda) {
+    $celda = substr($celda, 0, strpos($celda, '>'));
+
+    /* Tres formas de declarar el ancho, y las tres cuentan: un colspan escrito
+       contra COLS_DESC, un colspan con un numero fijo, y una celda sin colspan,
+       que vale una columna. */
+    if (preg_match('/colspan="\'\s*\+\s*\(COLS_DESC\s*-\s*(\d+)\)/', $celda, $m)) {
+        $anchoPie += intval($mCols[1]) - intval($m[1]);
+    } elseif (preg_match('/colspan="(\d+)"/', $celda, $m)) {
+        $anchoPie += intval($m[1]);
+    } else {
+        $anchoPie++;
+    }
+}
+
+chequear('el pie del JS tiene celdas', true, count($celdas) > 0);
+chequear('y el pie reparte esas mismas columnas', intval($mCols[1]), $anchoPie);
 
 // El colspan del HTML es solo el estado inicial -pintarTotales lo reescribe-,
 // pero si arranca mal la tabla parpadea desalineada en cada carga.
