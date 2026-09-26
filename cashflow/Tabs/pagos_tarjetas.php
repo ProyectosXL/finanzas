@@ -198,15 +198,29 @@
                                         % EFEC / % TARJ
                                     </th>
                                     <th rowspan="2">TARJETA ASOCIADA</th>
-                                    <th rowspan="2" class="text-end">TOTAL</th>
                                     <th id="headerEjeSup" class="text-center"></th>
+                                    <!-- EL TOTAL VA AL FINAL, DESPUES DE LAS
+                                         COLUMNAS QUE SUMA. Antes estaba antes del
+                                         eje y confundía: se leía un total y recién
+                                         después los meses de los que sale. Ahora se
+                                         lee en el orden en que se arma.
+
+                                         Y dice TOTAL PERÍODO, no TOTAL: suma las
+                                         columnas que se están viendo, y la vista
+                                         Meses cubre sólo los días de fuera del
+                                         tramo diario, así que no es el total del
+                                         horizonte. -->
+                                    <th rowspan="2" class="text-end"
+                                        title="Suma las columnas que se están viendo. La vista Meses cubre sólo los días de fuera del tramo diario, así que su total no es el del horizonte completo.">
+                                        TOTAL PERÍODO
+                                    </th>
                                 </tr>
                                 <tr id="headerEjeSup2"></tr>
                             </thead>
                             <tbody id="bodySup"></tbody>
                             <tfoot>
                                 <tr id="totalesSup">
-                                    <td colspan="5" class="fw-bold text-end">TOTALES</td>
+                                    <td colspan="4" class="fw-bold text-end">TOTALES</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -422,6 +436,22 @@
                                     <th rowspan="2" class="text-end">PENDIENTE</th>
                                     <th rowspan="2">ESTADO</th>
                                     <th id="headerEjeCorp" class="text-center"></th>
+                                    <!-- ESTA GRILLA NO TENÍA COLUMNA DE TOTAL, y el
+                                         pie sí dibujaba una: el pie quedaba una
+                                         columna más ancho que el encabezado y corría
+                                         el último total del eje. Ahora las dos
+                                         tienen la misma cantidad.
+
+                                         No es redundante con PENDIENTE: PENDIENTE es
+                                         cuánto se debe, y esto es cuánto de eso cae
+                                         en el período que se está viendo. Una
+                                         factura con pendiente y total en cero es una
+                                         que no entra a estas columnas, y eso es
+                                         justamente lo que hay que poder ver. -->
+                                    <th rowspan="2" class="text-end"
+                                        title="Cuánto de esta factura cae en las columnas que se están viendo. En cero significa que no entra a este período, o que no se proyecta.">
+                                        TOTAL PERÍODO
+                                    </th>
                                 </tr>
                                 <tr id="headerEjeCorp2"></tr>
                             </thead>
@@ -570,15 +600,19 @@
                                         BASE
                                     </th>
                                     <th rowspan="2">CONCEPTO</th>
-                                    <th rowspan="2" class="text-end">TOTAL</th>
                                     <th id="headerEjeSoc" class="text-center"></th>
+                                    <!-- Al final, como en las otras dos. -->
+                                    <th rowspan="2" class="text-end"
+                                        title="Suma las columnas que se están viendo. La fila en U$S está en dólares; las otras tres, en pesos.">
+                                        TOTAL PERÍODO
+                                    </th>
                                 </tr>
                                 <tr id="headerEjeSoc2"></tr>
                             </thead>
                             <tbody id="bodySoc"></tbody>
                             <tfoot>
                                 <tr id="totalesSoc">
-                                    <td colspan="4" class="fw-bold text-end">TOTALES EN PESOS</td>
+                                    <td colspan="3" class="fw-bold text-end">TOTALES EN PESOS</td>
                                 </tr>
                             </tfoot>
                         </table>

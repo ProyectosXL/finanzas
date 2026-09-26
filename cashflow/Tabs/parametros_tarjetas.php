@@ -161,7 +161,12 @@
                 <table id="ptarTabla" class="table table-hover mb-0" data-orden="no">
                     <thead>
                         <tr>
-                            <th style="width: 140px;">Tipo</th>
+                            <!-- 170px y no 140: el <select> tiene que mostrar
+                                 "Supervisora" entera más la flecha del
+                                 desplegable, y con 140 se cortaba. El ancho lo
+                                 fija la opción más larga, no el título de la
+                                 columna. -->
+                            <th style="width: 170px;">Tipo</th>
                             <th>Banco</th>
                             <th>Usuario</th>
                             <th class="text-center" style="width: 110px;">Últimos 4</th>

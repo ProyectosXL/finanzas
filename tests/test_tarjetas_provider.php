@@ -517,3 +517,83 @@ chequear('y esa serie existe', true, CashflowRegistry::serieExiste('TARJETAS', '
    pestana; las series de cada parte quedan para poder partirla desde Parametros. */
 chequear('va en Costos Indirectos', true, strpos($sqlFila, "'COSTOS_INDIRECTOS'") !== false);
 chequear('y es un EGRESO que computa', true, strpos($sqlFila, "'EGRESO', 1") !== false);
+
+/* ================================================================
+   LAS TRES GRILLAS DE LA PESTANA: ENCABEZADO, CUERPO Y PIE ALINEADOS
+
+   QUE SE ROMPE EN SILENCIO SI ESTO NO SE PRUEBA, y ya se rompio una vez: el pie de
+   Corporativas dibujaba una columna de total que el encabezado NO tenia, asi que
+   quedaba una celda mas ancho y corria TODOS los totales del eje un mes. Eso no se
+   ve como un error: se ve como numeros.
+
+   Se mide sobre el HTML y el JS -no se confia en las constantes- porque la
+   constante es justamente el numero que alguien se olvida de actualizar al agregar
+   una columna. Es el mismo criterio que la prueba del pie de Proveedores Locales.
+   ================================================================ */
+seccion('las tres grillas tienen las mismas columnas en el encabezado y en el pie');
+
+$htmlTarj = preg_replace('/<!--.*?-->/s', '',
+    file_get_contents(__DIR__ . '/../cashflow/Tabs/pagos_tarjetas.php'));
+$jsTarj = preg_replace(['/\/\*.*?\*\//s', '/\/\/[^\n]*/'], '',
+    file_get_contents(__DIR__ . '/../cashflow/Js/Financiero-Pagos_tarjetas.js'));
+
+$grillas = [
+    'Supervisoras' => ['tabla' => 'tablaSup', 'eje' => 'headerEjeSup',
+                       'pie' => 'totalesSup', 'const' => 'COLS_SUP'],
+    'Corporativas' => ['tabla' => 'tablaCorp', 'eje' => 'headerEjeCorp',
+                       'pie' => 'totalesCorp', 'const' => 'COLS_CORP'],
+    'Socios' => ['tabla' => 'tablaSoc', 'eje' => 'headerEjeSoc',
+                 'pie' => 'totalesSoc', 'const' => 'COLS_SOC']
+];
+
+foreach ($grillas as $nombre => $g) {
+    $ini = strpos($htmlTarj, '<table id="' . $g['tabla'] . '"');
+
+    chequear($nombre . ': la tabla existe', true, $ini !== false);
+
+    if ($ini === false) {
+        continue;
+    }
+
+    $thead = substr($htmlTarj, $ini, strpos($htmlTarj, '</thead>', $ini) - $ini);
+
+    /* La primera fila del encabezado son los <th rowspan="2"> mas UN <th> con el
+       grupo del eje. De esos rowspan, el ultimo es TOTAL PERIODO -que va despues
+       del eje- asi que las descriptivas son los demas. */
+    $rowspan = substr_count($thead, 'rowspan="2"');
+    $descriptivas = $rowspan - 1;
+
+    chequear($nombre . ': tiene el grupo del eje', true,
+        strpos($thead, 'id="' . $g['eje'] . '"') !== false);
+
+    /* LA CONSTANTE DEL JS CUENTA LAS DESCRIPTIVAS, sin la de total. */
+    preg_match('/var ' . $g['const'] . ' = (\d+);/', $jsTarj, $m);
+
+    chequear($nombre . ': ' . $g['const'] . ' coincide con el encabezado',
+        $descriptivas, intval($m[1]));
+
+    /* EL COLSPAN INICIAL DEL PIE tiene que ser el mismo: es sólo el estado inicial
+       -pintarTotales() lo reescribe- pero si arranca mal la tabla parpadea
+       desalineada en cada carga. */
+    preg_match('/id="' . $g['pie'] . '">\s*<td colspan="(\d+)"/', $htmlTarj, $mp);
+
+    chequear($nombre . ': el colspan inicial del pie tambien', $descriptivas, intval($mp[1]));
+
+    /* EL TOTAL VA DESPUES DEL EJE, que es lo que esta pestana cambio: antes estaba
+       antes y se leia un total seguido de los meses de los que sale. */
+    $posEje = strpos($thead, 'id="' . $g['eje'] . '"');
+    $posTotal = strpos($thead, 'TOTAL PERÍODO');
+
+    chequear($nombre . ': el total va DESPUES de las columnas que suma',
+        true, $posTotal !== false && $posTotal > $posEje);
+}
+
+/* pintarTotales() ARMA LAS TRES IGUAL: un colspan, las del eje, y el total al
+   final. Una firma con un parametro de ajuste por tabla es justamente como se
+   colaba el desajuste de Corporativas. */
+chequear('pintarTotales ya no recibe un ajuste por tabla', false,
+    strpos($jsTarj, 'cols, 1)') !== false);
+chequear('y pone el total al final', true,
+    strpos($jsTarj, 'El total del período, en la última columna') !== false
+    || strpos($jsTarj, "html += '<td class=\"currency fw-bold\">' + plata(vistas.total(totales))")
+       !== false);

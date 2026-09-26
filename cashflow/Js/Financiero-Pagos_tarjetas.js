@@ -34,10 +34,19 @@
 
     var ENDPOINT = 'Controller/TarjetasController.php';
 
-    /** Cuantas columnas descriptivas tiene cada grilla, antes de las del eje */
-    var COLS_SUP = 5;
+    /**
+     * Cuantas columnas descriptivas tiene cada grilla ANTES de las del eje.
+     *
+     * NO INCLUYEN LA DE TOTAL PERIODO, que va DESPUES del eje: el total se lee
+     * despues de las columnas que suma, que es el orden en el que se arma. Antes
+     * estaba antes del eje y confundia -se leia un total y recien despues los meses
+     * de los que sale-.
+     *
+     * Asi que cada tabla tiene, en total, COLS_* + columnas del eje + 1.
+     */
+    var COLS_SUP = 4;
     var COLS_CORP = 9;
-    var COLS_SOC = 4;
+    var COLS_SOC = 3;
 
     var datos = null;
     var vistas = null;
@@ -106,7 +115,7 @@
         if (!cuerpo) { return; }
 
         if (!s.filas.length) {
-            cuerpo.innerHTML = filaVacia(COLS_SUP + cols.length, s.disponible
+            cuerpo.innerHTML = filaVacia(COLS_SUP + cols.length + 1, s.disponible
                 ? 'Ninguna supervisora tiene gastos autorizados en la ventana '
                   + esc(s.ventana.rotulo) + '.'
                 : 'No se pudieron leer los gastos de supervisión. Los avisos de arriba dicen '
@@ -145,8 +154,8 @@
                 + '<td class="text-center"><small>' + pct(f.pct_efectivo) + ' / '
                     + pct(f.pct_tarjeta) + '</small></td>'
                 + '<td>' + celdaTarjeta(f) + '</td>'
-                + '<td class="currency fw-bold">' + plata(vistas.total(eje)) + '</td>'
                 + celdasEje(eje, cols, true)
+                + '<td class="currency fw-bold">' + plata(vistas.total(eje)) + '</td>'
             + '</tr>';
 
             if (abierta) {
@@ -188,8 +197,8 @@
             + '<td class="ps-4"><small class="text-muted">' + esc(nombre) + '</small>'
                 + marca + '</td>'
             + '<td colspan="3"></td>'
-            + '<td class="currency"><small>' + plata(vistas.total(eje)) + '</small></td>'
             + celdasEje(eje, cols, false)
+            + '<td class="currency"><small>' + plata(vistas.total(eje)) + '</small></td>'
         + '</tr>';
     }
 
@@ -283,7 +292,7 @@
             cuerpo.innerHTML = visibles.map(filaCorp).join('');
         }
 
-        pintarTotales('totalesCorp', COLS_CORP, c.eje.totales, cols, 1);
+        pintarTotales('totalesCorp', COLS_CORP, c.eje.totales, cols);
         dibujarExtras();
         engancharCorp(cuerpo);
         actualizarBarraSel();
@@ -324,6 +333,7 @@
             + '<td class="currency">' + importe + '</td>'
             + '<td>' + estadoCorp(f) + '</td>'
             + celdasEje(f, cols, true)
+            + '<td class="currency fw-bold">' + plata(vistas.total(f)) + '</td>'
         + '</tr>';
     }
 
@@ -662,10 +672,11 @@
         if (!cuerpo) { return; }
 
         if (!s.filas.length) {
-            cuerpo.innerHTML = filaVacia(COLS_SOC + cols.length,
+            cuerpo.innerHTML = filaVacia(COLS_SOC + cols.length + 1,
                 'No hay ninguna tarjeta de tipo Socio activa. Se dan de alta en '
                 + 'Parámetros › Tarjetas.');
-            pintarTotales('totalesSoc', COLS_SOC, s.eje_total.totales, cols);
+            pintarTotales('totalesSoc', COLS_SOC, s.eje_total.totales, cols,
+                'TOTALES EN PESOS');
 
             return;
         }
@@ -716,10 +727,13 @@
                 }
 
                 html += '<td><small>' + esc(l.nombre) + '</small></td>'
-                    + '<td class="currency">'
+                    + celdasEjeSocios(eje, cols, f, l.usd)
+                    /* La fila en U$S totaliza en DOLARES, como sus celdas: es
+                       informativa y no suma en pesos, así que mostrarla con signo
+                       de peso la haría sumable con la vista. */
+                    + '<td class="currency' + (l.usd ? '' : ' fw-bold') + '">'
                     + (l.usd ? dolares(vistas.total(eje)) : plata(vistas.total(eje)))
                     + '</td>'
-                    + celdasEjeSocios(eje, cols, f, l.usd)
                 + '</tr>';
 
                 if (!abierta) { return false; }
@@ -728,7 +742,7 @@
 
         cuerpo.innerHTML = html;
 
-        pintarTotales('totalesSoc', COLS_SOC, s.eje_total.totales, cols);
+        pintarTotales('totalesSoc', COLS_SOC, s.eje_total.totales, cols, 'TOTALES EN PESOS');
         engancharAbrir(cuerpo);
     }
 
@@ -984,18 +998,28 @@
     /**
      * El pie de totales.
      *
-     * Las celdas del pie suman las columnas descriptivas de su tabla: un colspan mal
-     * contado corre el total debajo de otra columna y el número queda diciendo otra
-     * cosa.
+     * TIENE QUE TENER EXACTAMENTE LAS MISMAS COLUMNAS QUE EL ENCABEZADO, y no es
+     * cosmético: un colspan mal contado corre todos los totales del eje una celda y
+     * cada número queda debajo de otro mes. Pasó en esta misma grilla —el pie de
+     * Corporativas dibujaba una columna de total que el encabezado no tenía— y no se
+     * ve como un error: se ve como números.
+     *
+     * La cuenta es una sola para las tres tablas: `colsDesc` celdas descriptivas
+     * juntas en un colspan, las del eje una por una, y el total del período AL FINAL.
+     *
+     * @param {string} id Id del <tr> del pie
+     * @param {number} colsDesc Columnas descriptivas, antes del eje
+     * @param {Object} totales La fila de totales del payload
+     * @param {Array} cols Las columnas visibles del eje
+     * @param {string} [rotulo] Qué dice la celda del rótulo
      */
-    function pintarTotales(id, colsDesc, totales, cols, extra) {
+    function pintarTotales(id, colsDesc, totales, cols, rotulo) {
         var pie = document.getElementById(id);
 
         if (!pie) { return; }
 
-        var html = '<td colspan="' + (colsDesc + (extra || 0) - 1)
-            + '" class="fw-bold text-end">TOTALES</td>'
-            + '<td class="currency fw-bold">' + plata(vistas.total(totales)) + '</td>';
+        var html = '<td colspan="' + colsDesc + '" class="fw-bold text-end">'
+            + esc(rotulo || 'TOTALES') + '</td>';
 
         cols.forEach(function(col) {
             var v = vistas.valor(totales, col);
@@ -1003,6 +1027,10 @@
             html += '<td class="currency fw-bold">'
                 + (v === 0 || v === null ? '' : plataCorta(v)) + '</td>';
         });
+
+        // El total del período, en la última columna: la misma posición que en las
+        // filas de arriba.
+        html += '<td class="currency fw-bold">' + plata(vistas.total(totales)) + '</td>';
 
         pie.innerHTML = html;
     }
