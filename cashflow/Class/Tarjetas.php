@@ -61,6 +61,18 @@ require_once __DIR__ . '/TarjetasVencimiento.php';
  * cierto- y lo que falla, con el motivo, es guardar. Sin la vista de usuarios no
  * se puede dar de alta, porque el nombre sale de ahi. Mismo patron que el resto
  * del modulo.
+ *
+ * UNA CONSULTA A LA VEZ, Y NO ES UN DETALLE DE ESTILO
+ * --------------------------------------------------
+ * El driver sqlsrv usa POOL DE CONEXIONES, asi que Conexion::conectar() puede
+ * devolver la MISMA conexion fisica que ya tiene un statement con resultados
+ * pendientes. Lanzar otra consulta en el medio lo invalida, y el fetch siguiente
+ * falla con "supplied resource is not a valid ss_sqlsrv_stmt resource".
+ *
+ * Por eso getTarjetas() vacia su statement ANTES de pedir los bancos y los
+ * usuarios. Es el mismo orden que usa Logistica::getFleteros() con los nombres de
+ * CPA01, y el sintoma es de los peores: aparece solo cuando la segunda consulta
+ * existe, asi que un metodo que funcionaba se rompe al agregarle una lectura.
  */
 class Tarjetas {
 
@@ -460,15 +472,30 @@ class Tarjetas {
             throw new Exception($this->errorSql('Error al leer las tarjetas'));
         }
 
+        /* SE VACIA EL STATEMENT ANTES DE PEDIR NADA MAS, y no es prolijidad: el
+           driver sqlsrv usa POOL DE CONEXIONES, asi que Conexion::conectar()
+           puede devolver la MISMA conexion que ya tiene este statement pendiente.
+           Cualquier consulta en el medio -los bancos, los usuarios- lo invalida, y
+           el fetch siguiente falla con "supplied resource is not a valid
+           ss_sqlsrv_stmt resource".
+           Es el mismo orden que usa Logistica::getFleteros() con los nombres de
+           CPA01, y por el mismo motivo. */
+        $crudas = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $crudas[] = $row;
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        // Recien ahora, con el statement cerrado, se pueden leer las dos fuentes.
         $bancos = $this->bancos();
         $usuarios = $this->usuarios();
         $filas = [];
 
-        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+        foreach ($crudas as $row) {
             $filas[] = $this->fila($row, $bancos, $usuarios);
         }
-
-        sqlsrv_free_stmt($stmt);
 
         return $filas;
     }
