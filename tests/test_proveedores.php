@@ -2567,25 +2567,50 @@ foreach ($items as $i) {
 
 chequear('toda fila trae una fuente coherente con su escalon', 0, $fuenteMal);
 
-/* EL FILTRO SALE DEL MAESTRO Y SOLO DEL MAESTRO. Con datos reales: para toda
-   fila, CRONOGRAMA tiene que ser exactamente esDelCronograma() de la forma del
-   maestro, tenga o no fecha de pago cargada. Si alguna difiriera, seria una
-   fila que entro o salio del cashflow por como se registro un pago y no por
-   como se le paga al proveedor. */
+/* EL FILTRO SALE DE UNA REGLA Y NO DE UN HECHO. Con datos reales: para toda
+   fila, CRONOGRAMA tiene que ser exactamente esDelCronograma() de la FORMA
+   VIGENTE, tenga o no fecha de pago cargada. Si alguna difiriera, seria una fila
+   que entro o salio del cashflow por como se REGISTRO un pago -FORMA_PAGO, que
+   es un hecho y la escribe la importacion de la planilla en todas sus filas- y
+   no por como hay que tratar a ese comprobante.
+
+   SE COMPARA CONTRA LA VIGENTE Y NO CONTRA LA DEL MAESTRO, y eso cambio.
+   Proveedores::formaDelCronograma() tiene DOS escalones desde que existe el
+   override por factura: el override de esta factura si lo hay, y si no la forma
+   del maestro. Comparar contra el maestro daba una discrepancia legitima por
+   cada factura con override -hoy OGHALL FAC A0000100008942, con el maestro vacio
+   y un override 'TARJETA CORP'- y la prueba llamaba error a la feature.
+
+   Los dos escalones se siguen verificando: el de abajo, porque sin override
+   FORMA_PAGO_VIGENTE ES la del maestro, y eso es la mayoria de las filas; y el
+   de arriba, con la comprobacion de mas abajo, que exige que la vigente sea
+   siempre una de las dos y nunca la del pago registrado. */
 $discrepan = 0;
 $sinFormaMaestro = 0;
+$vigenteAjena = 0;
 
 foreach ($items as $i) {
     if (!array_key_exists('FORMA_PAGO_MAESTRO', $i)) { $sinFormaMaestro++; continue; }
 
     if ($i['CRONOGRAMA']
-        !== ProveedoresCategorias::esDelCronograma($i['FORMA_PAGO_MAESTRO'])) {
+        !== ProveedoresCategorias::esDelCronograma($i['FORMA_PAGO_VIGENTE'])) {
         $discrepan++;
+    }
+
+    /* La vigente NO PUEDE SALIR DE NINGUN OTRO LADO: es el override de la
+       factura o la del maestro, y nada mas. Esto es lo que impide que un pago
+       registrado por una via distinta de la habitual reclasifique el
+       comprobante. */
+    if ($i['FORMA_PAGO_VIGENTE'] !== $i['FORMA_PAGO_CRONOGRAMA']
+        && $i['FORMA_PAGO_VIGENTE'] !== $i['FORMA_PAGO_MAESTRO']) {
+        $vigenteAjena++;
     }
 }
 
 chequear('toda fila trae la forma del maestro aparte', 0, $sinFormaMaestro);
 chequear('y el filtro sale de esa y no de la del pago', 0, $discrepan);
+chequear('la forma vigente es el override o la del maestro, nunca la del pago',
+    0, $vigenteAjena);
 
 /* CRE_DEB viajaba en cada fila y no lo consumia nadie, ni el JS ni el provider.
    Y ademas no distinguia nada: es una funcion de T_COMP via CPA21, y T_COMP ya
