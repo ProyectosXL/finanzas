@@ -998,11 +998,31 @@ Un filtro que esconde plata sin decir cuánta es un filtro que miente.
 
 ### El tablero también filtra, y eso deja plata afuera
 
-La fila *Cuentas a Pagar Locales* usa la serie `PAGOS`, que **no trae todo**: trae el cronograma. Es una decisión de negocio, y su consecuencia es que **los débitos automáticos, la caja y la tarjeta corporativa no se proyectan en el cashflow aunque esa plata igual salga**.
+La fila *Cuentas a Pagar Locales* usa la serie `PAGOS`, que **no trae todo**: trae el cronograma. Es una decisión de negocio, y su consecuencia es que **los débitos automáticos y la caja no se proyectan en el cashflow aunque esa plata igual salga**.
 
-Por eso el proveedor **avisa cuánto quedó afuera, desglosado por forma**, en cada carga del tablero. Si esa plata tiene que entrar por otra fila, esa fila todavía no existe; mientras tanto el aviso es lo único que impide que desaparezca en silencio.
+Por eso el proveedor **avisa cuánto quedó afuera, desglosado por forma**, en cada carga del tablero.
 
-Meterla es configuración, no código: `PAGOS` y `PAGOS_FUERA_CRONOGRAMA` son las dos mitades del universo y **pueden convivir** en dos filas distintas —el validador lo permite justamente porque no se pisan—. Lo que no puede es `PAGOS_TODO` junto a cualquiera de sus partes.
+### `TARJETA CORP` ya no queda afuera del cuadro: entra por otra fila
+
+Desde `feature/financiero-pagos-tarjetas`, las facturas cuya **forma de pago vigente** es `TARJETA CORP` **entran al tablero** por la fila *Pagos con Tarjetas y Otros* (proveedor `TARJETAS`, serie `TOTAL`, sección *Costos Indirectos*). Siguen quedando fuera de **esta** fila —`TARJETA CORP` no es una forma del cronograma— pero ya no fuera del cuadro.
+
+El aviso lo dice separado, porque si no mandaría a buscar plata que ya está contada:
+
+> *De eso, $ 89.858.783,43 de TARJETA CORP **SÍ** entran al cuadro, por la fila «Pagos con Tarjetas y Otros»: no hay que contarlos dos veces. Los otros $ 34.404.742,67 no entran por ninguna fila y van a salir de la caja igual.*
+
+**Y ahí está el riesgo, que es la otra cara:** como entran por allá, esta fila **no** tiene que traerlas.
+
+> ⚠️ **Si alguien apunta una fila activa a `PAGOS_TODO` o a `PAGOS_FUERA_CRONOGRAMA`, esas facturas se cuentan DOS VECES** —una acá y otra en *Pagos con Tarjetas y Otros*— y **el cuadro cierra igual**, así que nada lo delata.
+
+**El validador de estructura no lo puede ver, y no se intentó que lo viera**: son dos proveedores distintos y el solapamiento es de **datos** —las mismas facturas de Tango—, no de series. `componentes` y `particiones` describen relaciones *dentro* de un proveedor; hacer que uno sepa qué datos lee otro acoplaría los dos y rompería justamente lo que hace que agregar un módulo al tablero no toque el motor.
+
+En su lugar hay dos avisos, y alcanzan: el control al pie de `sql/cashflow_tarjetas_fila.sql`, que lo verifica al correr el script y lista las filas culpables, y el de `ProveedoresProvider`, que sale en cada carga del tablero. Verificado contra la base el 26/09/2026: la fila usa `PAGOS` y no hay doble conteo. Ver `README-pagos-tarjetas.md`.
+
+### Lo que sigue quedando afuera del cuadro
+
+Los **débitos automáticos** y la **caja**: ésos no entran por ninguna fila, y el aviso los separa de la tarjeta corporativa justamente para que se vea cuáles son. Si tienen que entrar por otra fila, esa fila todavía no existe; mientras tanto el aviso es lo único que impide que desaparezcan en silencio.
+
+Meterlos es configuración, no código: `PAGOS` y `PAGOS_FUERA_CRONOGRAMA` son las dos mitades del universo y **pueden convivir** en dos filas distintas —el validador lo permite justamente porque no se pisan—. Pero **hoy activar `PAGOS_FUERA_CRONOGRAMA` duplicaría la tarjeta corporativa**, así que meter los débitos y la caja pide antes partir esa mitad, o excluirlos. Lo que nunca puede es `PAGOS_TODO` junto a cualquiera de sus partes.
 
 Lo que entra al filtro, abierto por qué entra:
 
