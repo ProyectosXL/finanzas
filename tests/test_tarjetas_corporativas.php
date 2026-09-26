@@ -568,3 +568,49 @@ $r = TarjetasCorporativas::resolver($vencidaVinculada, $dos, [], $TARJETAS, $res
 chequear('con el resumen de octubre, la reubicada queda cubierta', false,
     $r['filas'][0]['PROYECTA']);
 chequear('y su motivo es CUBIERTA', TarjetasCorporativas::CUBIERTA, $r['filas'][0]['MOTIVO']);
+
+/* ================================================================
+   LA EXPLICACION VIAJA CON LA FILA
+
+   Es el tooltip de la grilla, y lo arma el backend porque describe una decision
+   que toma el backend. Con el texto en el front, cambiar la regla obligaria a
+   cambiarla en dos lados y el segundo se olvida.
+   ================================================================ */
+seccion('cada fila trae su explicacion ya armada');
+
+$mezcla = [
+    facturaTC('OGAAA', 'A001', '2026-08-01', 111111),   // vencida sin tarjeta
+    facturaTC('OGBBB', 'A002', '2026-10-06', 222222),   // entra por su vencimiento
+    facturaTC('OGCCC', 'A003', '2026-10-07', 333333)    // excluida
+];
+
+$excl = [Proveedores::clavePago('OGCCC', 'FAC', 'A003') => ['MOTIVO' => 'Ya está en Supervisoras']];
+$r = TarjetasCorporativas::resolver($mezcla, [], $excl, $TARJETAS, [], $HABILES, $MESES, $HOY);
+
+$sinExplicacion = 0;
+
+foreach ($r['filas'] as $f) {
+    if (!isset($f['EXPLICACION']) || trim($f['EXPLICACION']) === '') {
+        $sinExplicacion++;
+    }
+}
+
+chequear('ninguna fila queda sin explicacion', 0, $sinExplicacion);
+
+chequear('la que entra dice por que fecha', true,
+    strpos($r['filas'][1]['EXPLICACION'], 'fecha de vencimiento de Tango') !== false);
+chequear('la excluida trae su motivo', true,
+    strpos($r['filas'][2]['EXPLICACION'], 'Ya está en Supervisoras') !== false);
+chequear('y la vencida sin tarjeta dice que hacer', true,
+    strpos($r['filas'][0]['EXPLICACION'], 'Vinculala a una tarjeta') !== false);
+
+/* Una reubicada explica las DOS fechas: cuando vencio y cuando sale. Con una
+   sola, el numero de la columna no se puede relacionar con la factura. */
+$vinc = [Proveedores::clavePago('OGAAA', 'FAC', 'A001') => 7];
+$r = TarjetasCorporativas::resolver([$mezcla[0]], $vinc, [], $TARJETAS, [], $HABILES,
+    $MESES, $HOY);
+
+chequear('una reubicada nombra su vencimiento', true,
+    strpos($r['filas'][0]['EXPLICACION'], '01/08/2026') !== false);
+chequear('y la fecha en la que sale', true,
+    strpos($r['filas'][0]['EXPLICACION'], '12/10/2026') !== false);

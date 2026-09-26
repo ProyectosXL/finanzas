@@ -287,6 +287,13 @@ class TarjetasCorporativas {
             $fila['MOTIVO'] = self::motivoDe($fila);
             $fila['PROYECTA'] = ($fila['MOTIVO'] === self::OK);
 
+            /* LA EXPLICACION VIAJA CON LA FILA, armada por el backend. Es el
+               tooltip de la fila en la grilla, y describe una decision que toma el
+               backend: con el texto en el front, cambiar la regla obligaria a
+               cambiarla en dos lados y el segundo se olvida. Mismo criterio que
+               LogisticaValorHora::explicar() y que el resto del modulo. */
+            $fila['EXPLICACION'] = self::explicar($fila);
+
             $filas[] = $fila;
         }
 
