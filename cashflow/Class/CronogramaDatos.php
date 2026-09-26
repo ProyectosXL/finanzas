@@ -24,6 +24,13 @@ require_once __DIR__ . '/CronogramaPagos.php';
  * proximo dia habil y un pago se corre al anterior. Ver el encabezado de
  * CronogramaPagos.
  *
+ * Y NO ES EL CRONOGRAMA EL UNICO QUE PIDE EL CALENDARIO. El vencimiento del
+ * resumen de una tarjeta tambien lo necesita, corriendose hacia ADELANTE
+ * (Class/TarjetasVencimiento.php), y pide un rango distinto: dias DESPUES del
+ * fin del eje en vez de un mes antes del principio. Por eso habilesEntre() es
+ * publica y habiles() es un caso suyo. Un rango por consumidor sobre la misma
+ * consulta no es una segunda definicion de nada; una segunda consulta si.
+ *
  * SI EL CALENDARIO NO SE PUEDE LEER, SE SIGUE
  * --------------------------------------------
  * La conexion 'power' es otro servidor. Si no responde, el cronograma se
@@ -132,12 +139,39 @@ class CronogramaDatos {
     public function habiles($h) {
         $rango = CronogramaPagos::rangoCalendario($h);
 
+        return $this->habilesEntre($rango['desde'], $rango['hasta']);
+    }
+
+    /**
+     * Mapa 'Y-m-d' => bool de dias habiles entre dos fechas.
+     *
+     * POR QUE ES PUBLICA Y APARTE DE habiles(): porque el cronograma de pagos no
+     * es el unico que necesita el calendario, y el rango que necesita cada uno es
+     * distinto. El cronograma corre los pagos hacia ATRAS, asi que pide un mes
+     * ANTES del eje (CronogramaPagos::rangoCalendario()); el vencimiento de una
+     * tarjeta corre hacia ADELANTE, asi que pide dias DESPUES del fin del eje
+     * (TarjetasVencimiento::rangoCalendario()).
+     *
+     * Lo que NO se duplica es la lectura: los dos pasan por acá, y acá por
+     * Ventas::getDiasHabiles(), que es la unica lectura de RO_T_CALENDARIO del
+     * modulo. Dos consultas serian dos definiciones de "dia habil" esperando a
+     * desincronizarse; dos RANGOS sobre la misma consulta no son nada.
+     *
+     * DEVUELVE UN MAPA VACIO SI EL CALENDARIO NO SE PUEDE LEER, y deja el motivo
+     * en los avisos: con el mapa vacio, quien corre una fecha aplica su fallback
+     * de lunes a viernes. Es el mismo criterio de DolarFuturo::curva().
+     *
+     * @param string $desde 'Y-m-d'
+     * @param string $hasta 'Y-m-d'
+     * @return array
+     */
+    public function habilesEntre($desde, $hasta) {
         try {
-            return $this->ventas()->getDiasHabiles($rango['desde'], $rango['hasta']);
+            return $this->ventas()->getDiasHabiles($desde, $hasta);
         } catch (Throwable $e) {
             $this->avisos[] = 'No se pudo leer el calendario bancario (' . $e->getMessage()
-                . '). Las fechas del cronograma se calculan asumiendo hábiles los días de '
-                . 'lunes a viernes, así que un feriado no corre ningún pago.';
+                . '). Las fechas se calculan asumiendo hábiles los días de lunes a viernes, '
+                . 'así que un feriado no corre ninguna fecha.';
 
             return [];
         }
