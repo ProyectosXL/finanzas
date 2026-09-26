@@ -243,6 +243,17 @@
             <?php include __DIR__ . '/parametros_prov_locales.php'; ?>
         </div>
 
+        <!-- Maestro de tarjetas: de qué tipo es cada una —y con eso, en qué
+             sub-pestaña de Financiero › Pagos con Tarjetas y Otros aparece—, de
+             qué banco, de quién, su % de cobertura y qué día del mes vence su
+             resumen. Va PEGADA a Prov. Locales, igual que Logística: las
+             facturas de Pagos Corporativos son facturas pendientes de Tango de
+             proveedores locales. Mismo criterio que los anteriores: archivo y JS
+             propios, y clases con prefijo ptar-. -->
+        <div class="tab-pane fade" id="paneParamTarjetas" role="tabpanel">
+            <?php include __DIR__ . '/parametros_tarjetas.php'; ?>
+        </div>
+
         <!-- Parámetros del módulo Compras Exterior (código COMPRAS_PROY): cuántos meses, cuánta
              historia para la cuota y los tres días de la cadena de fechas.
              Mismo criterio que los anteriores: archivo y JS propios, y clases

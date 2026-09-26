@@ -520,9 +520,64 @@ class CashflowRegistry {
             'series' => ['PAGOS' => 'Impuestos']
         ],
 
+        /* ---- Pagos con Tarjetas y Otros -------------------------------------
+           Las tres partes de la pestana Financiero -> Pagos con Tarjetas y Otros:
+           los gastos con tarjeta de las supervisoras, las facturas de Tango que se
+           pagan con tarjeta corporativa, y las tarjetas de los socios.
+
+           LA FILA DEL TABLERO USA 'TOTAL', UNA SOLA. Las tres partes quedan
+           declaradas y sin usar, para poder partir la fila desde Parametros el dia
+           que se quiera, sin tocar codigo. Ver sql/cashflow_tarjetas_fila.sql.
+
+           NO SE TOCA LA ENTRADA 'FINANCIERO', que sigue apuntando a la pestana
+           prestamos: es otro circuito -prestamos y movimientos financieros- y su
+           fila del tablero vive en la seccion AJUSTES, hoy inhabilitada. Meter las
+           tarjetas ahi adentro habria mezclado dos cosas que se cargan y se miran
+           por separado. */
+        'TARJETAS' => [
+            'nombre' => 'Pagos con Tarjetas y Otros',
+            'descripcion' => 'Los gastos con tarjeta y en efectivo de las supervisoras '
+                . '(promedio de los ultimos 3 meses, ajustado por inflacion), las facturas '
+                . 'pendientes de Tango de proveedores con forma de pago TARJETA CORP con su '
+                . 'cobertura, y las tarjetas de los socios (promedio de los ultimos 3 resumenes, '
+                . 'con el componente en U$S convertido). Un resumen cargado pisa la estimacion '
+                . 'del mes',
+            'archivo' => 'Providers/TarjetasProvider.php',
+            'clase' => 'TarjetasProvider',
+            'moneda' => 'ARS',
+            'disponible' => true,
+            'tab' => 'pagos_tarjetas',
+            'series' => [
+                'TOTAL' => 'Las tres partes juntas (es la que usa la fila del tablero)',
+                'SUPERVISORAS' => 'Gastos de supervision: efectivo + tarjeta',
+                'CORPORATIVAS' => 'Facturas de tarjeta corporativa + cobertura, o el resumen',
+                'SOCIOS' => 'Tarjetas de socios, en pesos y con el U$S ya convertido',
+                'CORPORATIVAS_EXCLUIDAS' => 'Solo las facturas excluidas a mano de esta pestana '
+                    . '(informativa, FUERA del total)'
+            ],
+
+            /* EL TOTAL Y SUS TRES PARTES NO PUEDEN CONVIVIR: activar una fila con
+               SUPERVISORAS al lado de la que usa TOTAL contaria dos veces el mismo
+               peso, y el validador lo rechaza. Para partir la fila hay que
+               inhabilitar la del total y activar las tres.
+
+               CORPORATIVAS_EXCLUIDAS NO ENTRA ACA a proposito: su importe NO esta
+               en el total -por eso es informativa- asi que puede convivir con la
+               fila del total sin duplicar nada.
+
+               NO HAY SERIE DE UNIVERSO, a diferencia de PAGOS_TODO y de
+               A_COBRAR_TODO: CORPORATIVAS no es solo facturas -lleva la cobertura y
+               puede quedar reemplazada por el resumen- asi que un "TODO" seria la
+               suma de cosas de distinta naturaleza y no la particion de nada. Ver
+               el encabezado de TarjetasProvider. */
+            'componentes' => [
+                'TOTAL' => ['SUPERVISORAS', 'CORPORATIVAS', 'SOCIOS']
+            ]
+        ],
+
         'FINANCIERO' => [
             'nombre' => 'Financiero',
-            'descripcion' => 'Prestamos, tarjetas y movimientos financieros',
+            'descripcion' => 'Prestamos y movimientos financieros',
             'moneda' => 'ARS',
             'disponible' => false,
             'tab' => 'prestamos',

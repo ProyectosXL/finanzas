@@ -7,11 +7,26 @@
  *
  * POR QUE EXISTE
  * --------------
- * Hoy la usa un solo consumidor -el valor hora de Logistica Local, que se
- * ajusta cada tres meses- pero no es un dato de Logistica: es una expectativa
- * de la empresa sobre la economia, y cualquier costo que se proyecte a doce
- * meses la va a necesitar. Por eso vive en Parametros -> Generales, al lado del
- * horizonte y de la alicuota, y no adentro del modulo que hoy la consume.
+ * No es un dato de ningun modulo en particular: es una expectativa de la empresa
+ * sobre la economia, y cualquier costo que se proyecte a doce meses la va a
+ * necesitar. Por eso vive en Parametros -> Generales, al lado del horizonte y de
+ * la alicuota, y no adentro de los modulos que la consumen.
+ *
+ * DOS FORMAS DE AJUSTAR, Y NO SON INTERCAMBIABLES
+ * -----------------------------------------------
+ *   acumulada()  SUMA SIN COMPONER la inflacion de un mes y los dos anteriores.
+ *                Es el % de un AJUSTE PACTADO, y se enuncia asi en la
+ *                negociacion. Lo usa el valor hora de Logistica Local.
+ *
+ *   compuesta()  MULTIPLICA (1 + inf/100) mes a mes. Es llevar un promedio
+ *                historico a moneda de un mes futuro, donde no hay nada pactado
+ *                y el segundo mes sube sobre el primero ya aumentado. La usan
+ *                Gastos Supervisoras y Tarjetas Socios.
+ *
+ * Las dos estan bien y dan distinto -6 % contra 6,12 % en un trimestre al 2 %-,
+ * y por eso conviven en vez de que una reemplace a la otra: la primera reproduce
+ * un acuerdo y la segunda calcula una proyeccion. Usar la equivocada no falla,
+ * solo da un numero que nadie puede explicar contra su papel.
  *
  * SE GUARDA POR MES CALENDARIO, Y LOS MESES VIEJOS NO SE BORRAN
  * -------------------------------------------------------------
@@ -185,6 +200,179 @@ class Inflacion {
             'meses' => $detalle,
             'faltan' => $faltan
         ];
+    }
+
+    /**
+     * El factor de inflacion COMPUESTA entre el mes siguiente a un mes base y un
+     * mes destino:
+     *
+     *     factor = Π (1 + inf_k / 100)   con k desde mesBase+1 hasta mesHasta
+     *
+     * POR QUE COMPUESTA, SI acumulada() SUMA SIN COMPONER
+     * --------------------------------------------------
+     * Son dos cosas distintas y las dos son correctas:
+     *
+     *   acumulada()  es el % de un AJUSTE PACTADO. Se enuncia como "la suma de la
+     *                inflacion del trimestre", asi que componer daria 6,12 %
+     *                donde la negociacion dice 6 % y el valor no coincidiria con
+     *                ningun papel. Es un acuerdo, no una cuenta.
+     *
+     *   esta         es llevar un PROMEDIO HISTORICO a moneda de un mes futuro.
+     *                Ahi no hay nada pactado: un gasto que sube 2 % por mes
+     *                durante tres meses sube 6,12 %, no 6 %, porque el segundo
+     *                mes sube sobre el primero ya aumentado. Sumar sin componer
+     *                proyectaria DE MENOS, y cada vez mas a medida que el mes se
+     *                aleja.
+     *
+     * LA USAN GASTOS SUPERVISORAS Y TARJETAS SOCIOS, con la misma funcion y por
+     * la misma razon: las dos parten de un promedio de meses ya pasados y lo
+     * tienen que expresar en el mes en que se va a pagar.
+     *
+     * EL MES BASE NO SE AJUSTA. El promedio YA ESTA en moneda del mes base, asi
+     * que el producto arranca en el mes SIGUIENTE. Un mesHasta igual o anterior
+     * al base da factor 1: no hay nada que ajustar, y un mes anterior no se
+     * deflaciona -eso seria afirmar cuanto valia ese gasto antes de la ventana,
+     * que es algo que nadie midio-.
+     *
+     * SI FALTA EL % DE ALGUN MES DEL CAMINO, EL FACTOR ES null
+     * -------------------------------------------------------
+     * No se toma el mes que falta como cero. Un cero daria un factor mas chico
+     * que el real -o sea un egreso proyectado DE MENOS- y nadie tendria donde
+     * enterarse. 'faltan' dice QUE meses cargar, que es lo unico accionable.
+     *
+     * Es el mismo criterio de acumulada(), de Cotizacion y de DolarFuturo, y es
+     * la regla del modulo entero: un dato que falta es null y un aviso, nunca un
+     * cero.
+     *
+     * DEVUELVE SIEMPRE LA MISMA ESTRUCTURA, con 'factor' en null cuando no se
+     * puede resolver, asi que quien consume no tiene que preguntar si el array
+     * existe.
+     *
+     * 'meses' trae el % de cada mes del camino -null el que falta- porque es lo
+     * que el tooltip de la celda muestra: un factor de 1,2434 sin decir de donde
+     * sale no se puede verificar contra nada.
+     *
+     * Estatica y pura.
+     *
+     * @param array $mapa Mapa 'Y-m' => float, en PUNTOS porcentuales
+     * @param string $mesBase Mes en cuya moneda esta el importe de partida, 'Y-m'
+     * @param string $mesHasta Mes al que hay que llevarlo, 'Y-m'
+     * @return array ['factor' => float|null, 'meses' => ['Y-m' => float|null],
+     *                'faltan' => ['Y-m'], 'base' => 'Y-m', 'hasta' => 'Y-m']
+     */
+    public static function compuesta($mapa, $mesBase, $mesHasta) {
+        $base = self::validarMes($mesBase);
+        $hasta = self::validarMes($mesHasta);
+
+        $detalle = [];
+        $faltan = [];
+        $factor = 1.0;
+        $pasos = self::distancia($base, $hasta);
+
+        /* El mes base no se ajusta y los anteriores no se deflacionan: en los dos
+           casos el producto es vacio y el factor vale 1. Ver el encabezado. */
+        for ($i = 1; $i <= $pasos; $i++) {
+            $m = self::mesMas($base, $i);
+
+            if (isset($mapa[$m]) && $mapa[$m] !== null) {
+                $detalle[$m] = floatval($mapa[$m]);
+                $factor *= (1 + $detalle[$m] / 100);
+            } else {
+                $detalle[$m] = null;
+                $faltan[] = $m;
+            }
+        }
+
+        return [
+            'factor' => empty($faltan) ? $factor : null,
+            'meses' => $detalle,
+            'faltan' => $faltan,
+            'base' => $base,
+            'hasta' => $hasta
+        ];
+    }
+
+    /**
+     * El factor compuesto para VARIOS meses destino desde un mismo mes base.
+     *
+     * Devuelve lo mismo que compuesta() para cada uno. Existe para que un
+     * consumidor que tiene que ajustar los doce meses del horizonte no repita el
+     * bucle -y no lo repita distinto-, y porque asi el detalle de cada mes se
+     * resuelve una sola vez por mes y no una vez por mes y por tarjeta.
+     *
+     * Estatica y pura.
+     *
+     * @param array $mapa Mapa 'Y-m' => float, en puntos
+     * @param string $mesBase 'Y-m'
+     * @param array $meses Lista de 'Y-m'
+     * @return array ['factores' => ['Y-m' => (lo de compuesta())], 'faltan' => ['Y-m']]
+     */
+    public static function compuestaParaMeses($mapa, $mesBase, $meses) {
+        $factores = [];
+        $faltan = [];
+
+        foreach (is_array($meses) ? $meses : [] as $mes) {
+            $r = self::compuesta($mapa, $mesBase, $mes);
+            $factores[$r['hasta']] = $r;
+
+            foreach ($r['faltan'] as $f) {
+                if (!in_array($f, $faltan, true)) {
+                    $faltan[] = $f;
+                }
+            }
+        }
+
+        sort($faltan);
+
+        return ['factores' => $factores, 'faltan' => $faltan];
+    }
+
+    /**
+     * El aviso por los meses de inflacion que faltan para poder proyectar.
+     *
+     * DICE SI EL MES ESTA FUERA DE LA VENTANA EDITABLE, y eso es la mitad del
+     * aviso: la grilla de Parametros -> Generales ofrece desde dos meses antes
+     * del actual, asi que un mes mas viejo que eso NO TIENE DONDE TIPEARSE.
+     * Decir "cargá la inflación de 2026-04" sobre un mes que la pantalla no
+     * muestra manda a alguien a buscar un campo que no existe.
+     *
+     * Estatica y pura.
+     *
+     * @param array $faltan Lista de 'Y-m'
+     * @param string|null $hoy 'Y-m-d'
+     * @return string El aviso, o '' si no falta ninguno
+     */
+    public static function avisoFaltan($faltan, $hoy = null) {
+        if (empty($faltan)) {
+            return '';
+        }
+
+        $ventana = self::mesesVentana($hoy);
+        $editables = [];
+        $viejos = [];
+
+        foreach ($faltan as $m) {
+            if (in_array($m, $ventana, true)) {
+                $editables[] = $m;
+            } else {
+                $viejos[] = $m;
+            }
+        }
+
+        $texto = 'Falta la inflación esperada de ' . implode(', ', $faltan) . '. ';
+
+        if (!empty($editables)) {
+            $texto .= 'Se carga en Parámetros › Generales. ';
+        }
+
+        if (!empty($viejos)) {
+            $texto .= implode(', ', $viejos) . ' queda FUERA de la ventana editable de la '
+                . 'grilla, que arranca ' . self::MESES_ATRAS . ' meses antes del mes en curso, '
+                . 'así que hoy no hay dónde tipearlo. ';
+        }
+
+        return $texto . 'Los meses que dependen de eso quedan en blanco y NO en cero: un cero '
+            . 'se leería como que no hay nada que pagar.';
     }
 
     /**

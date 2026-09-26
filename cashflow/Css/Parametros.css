@@ -659,3 +659,20 @@
         width: 100%;
     }
 }
+
+/* ----------------------------------------------------------------------------
+   PARAMETROS -> TARJETAS
+
+   EL SELECT DE TIPO TIENE QUE MOSTRAR SU OPCION MAS LARGA ENTERA.
+   El ancho de la columna es una sugerencia -el navegador la achica si necesita
+   lugar para las demas- y "Supervisora" mas la flecha del desplegable no entraban:
+   se veia "Supervisor...". El min-width lo garantiza sin importar como quede el
+   reparto del resto de la tabla.
+
+   Va con el prefijo ptar- porque Parametros.css es de TODAS las sub-pestanas, y
+   una regla sobre .form-select suelta le cambiaria el ancho a los desplegables de
+   las otras nueve.
+   ---------------------------------------------------------------------------- */
+.tab-parametros .ptar-tipo {
+    min-width: 150px;
+}

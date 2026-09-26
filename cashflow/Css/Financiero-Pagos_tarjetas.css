@@ -1,0 +1,86 @@
+/*
+ * Financiero -> Pagos con Tarjetas y Otros
+ *
+ * Solo lo que esta pestana necesita y no existe en main.css. Las clases llevan el
+ * prefijo tarj- para que no choquen con nada: main.css define reglas por nombre de
+ * clase sin prefijo (.currency, .col-mes) y dos pestanas compartiendo una clase de
+ * estado se pisan el estilo.
+ *
+ * NO SE REDEFINE NADA QUE YA EXISTA. El spinner, las tarjetas de KPI, las tablas
+ * temporales y las columnas fijas vienen de main.css y de cargando.css: una copia
+ * local se desactualiza sola en cuanto alguien toca la original. Es la leccion que
+ * dejaron las diecinueve copias del .loading-spinner.
+ */
+
+/* ----------------------------------------------------------------------------
+   LO QUE NO ENTRA AL TABLERO SE VE DISTINTO
+
+   Es la marca mas importante de la pestana: una fila que no proyecta y una que si
+   no pueden verse igual, porque la primera es plata que el tablero NO muestra.
+   ---------------------------------------------------------------------------- */
+.tab-pagos_tarjetas .tarj-sin-proyectar > td {
+    opacity: .62;
+}
+
+/* Las excluidas van mas atenuadas todavia Y con el importe tachado -eso lo pone el
+   JS-: son las dos marcas juntas las que hacen que no se las lea como plata que
+   entra. Con una sola, una excluida se confunde con una que simplemente no
+   proyecta este mes. */
+.tab-pagos_tarjetas .tarj-excluida > td {
+    opacity: .45;
+    background-color: rgba(220, 53, 69, .04);
+}
+
+/* ----------------------------------------------------------------------------
+   LAS SUBFILAS
+
+   Una supervisora se abre en Efectivo y Tarjeta; una tarjeta de socio en sus
+   cuatro renglones. Se sangran y se aclaran para que se lean como parte de la fila
+   de arriba y no como filas sueltas: sin eso, la grilla de seis supervisoras
+   abiertas parece de dieciocho.
+   ---------------------------------------------------------------------------- */
+.tab-pagos_tarjetas .tarj-subfila > td {
+    background-color: rgba(0, 0, 0, .015);
+    border-top-style: dashed;
+    font-size: .92em;
+}
+
+/* La fila en U$S es INFORMATIVA: no suma en pesos, y por eso se marca. Un importe
+   en dolares alineado debajo de tres importes en pesos se suma con la vista sin
+   que nadie se de cuenta. */
+.tab-pagos_tarjetas .tarj-informativa > td {
+    font-style: italic;
+    color: #6c757d;
+}
+
+/* ----------------------------------------------------------------------------
+   LA CELDA CON UN RESUMEN CARGADO
+
+   El mismo subrayado violeta que usa el tablero para las celdas anotadas con
+   'detalle', y a proposito: es el mismo hecho -este importe tiene algo que
+   contar- y dos marcas distintas para lo mismo se leen como dos cosas distintas.
+   ---------------------------------------------------------------------------- */
+.tab-pagos_tarjetas .tarj-resumen {
+    border-bottom: 2px solid #6f42c1;
+}
+
+/* ----------------------------------------------------------------------------
+   EL BOTON QUE ABRE UNA FILA
+
+   Sin decoracion y del color del texto: es un control de la fila, no un enlace.
+   ---------------------------------------------------------------------------- */
+.tab-pagos_tarjetas .tarj-abrir,
+.tab-pagos_tarjetas .tarj-resumenes {
+    color: inherit;
+    text-decoration: none;
+    opacity: .55;
+}
+
+.tab-pagos_tarjetas .tarj-abrir:hover,
+.tab-pagos_tarjetas .tarj-resumenes:hover {
+    opacity: 1;
+}
+
+.tab-pagos_tarjetas .tarj-abrir i {
+    width: .8em;
+}

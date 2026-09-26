@@ -2,6 +2,11 @@
 
 require_once __DIR__ . '/../CashflowProvider.php';
 require_once __DIR__ . '/../Proveedores.php';
+/* Solo por la constante FORMA: el aviso de lo que queda fuera de la fila tiene que
+   nombrar la misma forma de pago que define el universo de Tarjetas Pagos
+   Corporativos, y escribir 'TARJETA CORP' a mano en dos lados es como se
+   desincronizan el dia que ese valor cambie. */
+require_once __DIR__ . '/../TarjetasCorporativas.php';
 
 /**
  * ProveedoresProvider
@@ -185,13 +190,25 @@ class ProveedoresProvider extends CashflowProvider {
      *
      * ES EL AVISO MAS IMPORTANTE DE ESTE PROVEEDOR. La fila trae solo lo que se
      * gestiona por cronograma -echeq y transferencia-, asi que un debito
-     * automatico, una compra con tarjeta corporativa o un pago por caja NO se
-     * proyectan en el cashflow, aunque esa plata igual salga.
+     * automatico o un pago por caja NO se proyectan en el cashflow, aunque esa
+     * plata igual salga.
      *
-     * Al 16/09/2026 son $51,8 millones, todos DEBITO. Si tienen que entrar por
-     * otra fila, esa fila todavia no existe; mientras tanto este aviso es lo
-     * unico que impide que la plata desaparezca del tablero sin que nadie lo
-     * note.
+     * TARJETA CORP YA NO ES UNO DE ESOS CASOS, y por eso se nombra aparte: desde
+     * que existe la pestana Financiero -> Pagos con Tarjetas y Otros, esas
+     * facturas ENTRAN al tablero por la fila "Pagos con Tarjetas y Otros"
+     * (proveedor TARJETAS, serie TOTAL). Siguen quedando fuera de ESTA fila
+     * -TARJETA CORP no es una forma del cronograma- pero no fuera del cuadro, y
+     * decir lo contrario mandaria a buscar plata que ya esta contada.
+     *
+     * Es tambien la otra cara del doble conteo: como entran por alla, esta fila NO
+     * tiene que traerlas. Con la configuracion de hoy no las trae -usa PAGOS- pero
+     * si alguien la reapunta a PAGOS_TODO o a PAGOS_FUERA_CRONOGRAMA, el mismo peso
+     * se cuenta dos veces y el cuadro cierra igual. Ver README-pagos-tarjetas.md y
+     * el control al pie de sql/cashflow_tarjetas_fila.sql.
+     *
+     * Al 26/09/2026 el total fuera de la fila son $124,3 millones, de los cuales
+     * $89,9 son TARJETA CORP -que ahora si entran por la otra fila- y el resto
+     * DEBITO y CAJA, que todavia no entran por ninguna.
      *
      * Se desglosa por forma de pago porque cada una se resuelve distinto: un
      * debito automatico podria entrar por Financiero, y una caja por Haberes o
@@ -233,10 +250,28 @@ class ProveedoresProvider extends CashflowProvider {
             $detalle[] = $forma . ' $ ' . number_format($importe, 2, ',', '.');
         }
 
+        /* LA TARJETA CORPORATIVA SE SEPARA DEL RESTO, porque ya no es lo mismo:
+           esas facturas quedan fuera de ESTA fila pero entran al cuadro por "Pagos
+           con Tarjetas y Otros". Meterlas en el mismo "quedan fuera del tablero"
+           mandaria a buscar plata que ya esta contada, y es el aviso que alguien
+           lee para decidir si falta algo. */
+        $tarjeta = isset($porForma[TarjetasCorporativas::FORMA])
+            ? $porForma[TarjetasCorporativas::FORMA] : 0.0;
+        $fueraDelCuadro = $total - $tarjeta;
+
         $this->avisar('Cuentas a Pagar Locales: la fila trae SÓLO lo que se paga por echeq o '
-            . 'transferencia. Quedan fuera del tablero $ ' . number_format($total, 2, ',', '.')
-            . ' (' . implode('; ', $detalle) . '), que igual van a salir de la caja. El detalle '
-            . 'está en la pestaña, quitando el filtro por forma de pago.');
+            . 'transferencia. Quedan fuera de ESTA fila $ ' . number_format($total, 2, ',', '.')
+            . ' (' . implode('; ', $detalle) . '). El detalle está en la pestaña, quitando el '
+            . 'filtro por forma de pago.'
+            . ($tarjeta > 0
+                ? ' De eso, $ ' . number_format($tarjeta, 2, ',', '.') . ' de '
+                  . TarjetasCorporativas::FORMA . ' SÍ entran al cuadro, por la fila «Pagos con '
+                  . 'Tarjetas y Otros»: no hay que contarlos dos veces.'
+                : '')
+            . ($fueraDelCuadro > 0
+                ? ' Los otros $ ' . number_format($fueraDelCuadro, 2, ',', '.')
+                  . ' no entran por ninguna fila y van a salir de la caja igual.'
+                : ''));
     }
 
     /**

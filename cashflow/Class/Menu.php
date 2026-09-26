@@ -183,7 +183,7 @@ class Menu {
             'icono' => 'fa-landmark',
             'abierta' => false,
             'items' => [
-                ['tab' => 'pagos_tarjetas', 'nombre' => 'Pagos con Tarjetas y Otros', 'icono' => 'fa-money-check',          'estado' => self::PENDIENTE],
+                ['tab' => 'pagos_tarjetas', 'nombre' => 'Pagos con Tarjetas y Otros', 'icono' => 'fa-money-check',          'estado' => self::DATOS],
                 ['tab' => 'otros_socios',   'nombre' => 'Otros Socios y No Prog.',    'icono' => 'fa-handshake',            'estado' => self::PENDIENTE],
                 ['tab' => 'prestamos',      'nombre' => 'Préstamos',                  'icono' => 'fa-money-bill-trend-up',  'estado' => self::PENDIENTE]
             ]

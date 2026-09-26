@@ -394,11 +394,18 @@ class Cashflow {
             $fila['fondos_tope'] = isset($s['fondos_tope']) ? $s['fondos_tope'] : [];
             $fila['fondos_manual'] = isset($s['fondos_manual']) ? $s['fondos_manual'] : [];
 
-            // Las anotaciones viajan tal cual. Las filas DERIVADAS -subtotales,
-            // flujo neto, saldo final- no las heredan y se quedan con el arreglo
-            // vacio: una anotacion dice algo sobre el origen de un importe, y el
-            // de un subtotal es la suma de varias filas, no ese origen.
-            $fila['detalle'] = $s['detalle'];
+            /* Las anotaciones viajan tal cual. Las filas DERIVADAS -subtotales,
+               flujo neto, saldo final- no las heredan y se quedan con el arreglo
+               vacio: una anotacion dice algo sobre el origen de un importe, y el
+               de un subtotal es la suma de varias filas, no ese origen.
+
+               EL isset() VA POR EL MISMO MOTIVO QUE EN LAS SEIS LINEAS DE ARRIBA, y
+               era la unica de las siete que no lo tenia. En produccion la clave
+               siempre esta -CashflowProvider::normalizar() la crea en toda serie-
+               pero quien reemplaza pedirSeries() para probar el motor inyecta series
+               armadas a mano, y ahi faltaba: eran 134 warnings por corrida de la
+               suite. Un warning conocido esconde al proximo que sea real. */
+            $fila['detalle'] = isset($s['detalle']) ? $s['detalle'] : [];
 
             foreach ($s['warnings'] as $w) {
                 $this->warnings[] = $w;
