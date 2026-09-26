@@ -4,7 +4,24 @@
  * Verificación centralizada de autenticación y permisos de usuario para Cashflow.
  */
 
-require_once __DIR__ . '/../../../Gestionusuarios/config/Database.php';
+/**
+ * El padrón de usuarios vive en OTRO módulo de htdocs, no en este repo.
+ *
+ * El require va condicionado porque un checkout de finanzas sin Gestionusuarios
+ * al lado es un caso real -es lo que pasa al correr tests/run.php en una máquina
+ * que sólo clonó este repo- y ahí un require_once directo mata el proceso con un
+ * fatal, sin llegar a ninguna prueba.
+ *
+ * FALLA CERRADA, y eso es lo que hace que la guarda sea segura: sin el padrón no
+ * hay usuario, así que puede() devuelve false para TODO y TabController
+ * responde 403. Nadie entra de más; lo que se pierde es la aplicación, no el
+ * control de acceso.
+ */
+define('AUTH_CASHFLOW_PADRON', __DIR__ . '/../../../Gestionusuarios/config/Database.php');
+
+if (file_exists(AUTH_CASHFLOW_PADRON)) {
+    require_once AUTH_CASHFLOW_PADRON;
+}
 
 class AuthCashflow {
 
@@ -18,7 +35,19 @@ class AuthCashflow {
             return;
         }
 
-        if (session_status() === PHP_SESSION_NONE) {
+        // Sin el padrón no hay a quién preguntarle: se queda sin usuario, que es
+        // el estado en el que puede() deniega todo.
+        if (!class_exists('\GestionUsuarios\Config\Database')) {
+            self::$inicializado = true;
+
+            return;
+        }
+
+        /* !headers_sent(): arrancar una sesión después de haber emitido salida
+           no funciona y sólo deja un warning. Pasa por línea de comandos -las
+           pruebas- y ahí el estado correcto es justamente el que queda: sin
+           sesión, o sea sin usuario, o sea denegando todo. */
+        if (session_status() === PHP_SESSION_NONE && !headers_sent()) {
             session_start();
         }
 

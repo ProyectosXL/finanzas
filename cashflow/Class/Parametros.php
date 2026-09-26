@@ -62,11 +62,29 @@ class Parametros {
      * para el, y asi esta clase no tiene que saber nada del Cashflow.
      */
     private static $modulos = [
+        /* VA PRIMERO, y no es una preferencia de orden: es lo que afecta a
+           TODAS las pestañas. El horizonte es el eje de todo el módulo -lo lee
+           Horizonte::desdeParametros() y con él se dibujan el tablero y las
+           diez pantallas con eje temporal- y los feriados de comercio marcan
+           columnas en todas ellas. Mientras vivieron bajo la sub-pestaña
+           Ventas, tocarlos parecía mover una sola pantalla. */
+        'GENERALES' => [
+            'nombre' => 'Generales',
+            'icono' => 'fa-gears',
+            'descripcion' => 'Lo que afecta a todo el módulo: el horizonte de proyección, la '
+                . 'alícuota de IVA, los feriados de comercio, la inflación mensual esperada y '
+                . 'el cronograma de pagos. Acá también se ven, sin poder editarlas, la curva '
+                . 'de dólar futuro y la cotización del BCRA',
+            'secciones' => ['generales', 'inflacion', 'cronograma', 'cotizaciones']
+        ],
         'VENTAS' => [
             'nombre' => 'Ventas',
             'icono' => 'fa-arrow-trend-up',
             'descripcion' => 'Alimentan la proyección de ventas y cobranzas de la pestaña Ventas',
-            'secciones' => ['generales', 'mix', 'respaldo']
+            /* Ya no tiene 'generales': sus cuatro parámetros se fueron a
+               GENERALES con sql/cashflow_parametros_generales.sql. Lo que queda
+               es lo que de verdad solo mueve esta pestaña. */
+            'secciones' => ['mix', 'respaldo']
         ],
         'SALDOS' => [
             'nombre' => 'Saldos',
@@ -108,6 +126,26 @@ class Parametros {
                 . 'filas proyectadas del tablero, dentro de los grupos Proveedores Exterior y '
                 . 'Nacionalizaciones',
             'secciones' => ['generales']
+        ],
+        /* Va PEGADA a Prov. Locales, y no es casual: un fletero es un proveedor
+           local al que ademas se le proyecta el pago por horas, asi que las dos
+           pantallas se miran juntas. La exclusion que evita contarlo dos veces
+           se carga en la otra. */
+        'LOGISTICA' => [
+            'nombre' => 'Logística',
+            'icono' => 'fa-truck-fast',
+            'descripcion' => 'Quiénes son fleteros, cuántas horas por mes trabajan y cuánto '
+                . 'vale su hora. Alimentan la pestaña Logística Local y la fila Logística del '
+                . 'tablero. El valor hora se ajusta cada tres meses con la inflación de '
+                . 'Parámetros › Generales',
+            'secciones' => ['fleteros'],
+            /* El maestro se escribe desde las DOS pantallas -el alta acá, las
+               horas y el valor hora también desde la planilla- así que sus
+               endpoints viven en el controller del módulo y no en este. Dos
+               endpoints escribiendo la misma tabla se desincronizan en la
+               primera validación que alguien agregue de un solo lado. Mismo
+               criterio que el módulo CASHFLOW. */
+            'endpoint' => 'Controller/LogisticaController.php'
         ],
         'PROV_LOCALES' => [
             'nombre' => 'Prov. Locales',
@@ -152,6 +190,12 @@ class Parametros {
     public function getModulosConDatos() {
         $modulos = [];
 
+        /* El mapa CLAVE => VALOR se lee UNA vez para toda la pestaña. Lo usan la
+           inflación -que necesita su modalidad- y el cronograma -que arma el
+           horizonte-, y sin esto cada uno haría su propia consulta a la misma
+           tabla que la sección 'generales' ya trajo. */
+        $map = $this->getParametrosMap();
+
         foreach (self::getModulos() as $modulo) {
             $codigo = $modulo['codigo'];
             $modulo['avisos'] = [];
@@ -159,6 +203,30 @@ class Parametros {
             foreach ($modulo['secciones'] as $seccion) {
                 if ($seccion === 'generales') {
                     $modulo['generales'] = $this->getParametros('GENERAL', $codigo);
+
+                    /* ANTES DE CORRER LA MIGRACIÓN, LOS GENERALES SIGUEN EN
+                       VENTAS. Y la sub-pestaña Ventas ya no los dibuja, así que
+                       sin este rescate el horizonte y la alícuota no se verían
+                       en NINGÚN lado hasta que alguien corriera el script: una
+                       pantalla que esconde cuatro parámetros es peor que una
+                       que avisa.
+
+                       Se editan igual, porque saveParametro() guarda por CLAVE
+                       y no le importa el módulo. Lo único que falta es dónde se
+                       muestran, y eso es lo que el script arregla. */
+                    if ($codigo === 'GENERALES' && empty($modulo['generales'])) {
+                        $pendientes = $this->getParametros('GENERAL', 'VENTAS');
+
+                        if (!empty($pendientes)) {
+                            $modulo['generales'] = $pendientes;
+                            $modulo['avisos'][] = 'Estos ' . count($pendientes) . ' parámetros '
+                                . 'todavía figuran como del módulo Ventas: corré '
+                                . 'sql/cashflow_parametros_generales.sql contra la base central '
+                                . 'para moverlos. Se editan igual —el valor se guarda por clave— '
+                                . 'y ningún cálculo cambia: el horizonte y la alícuota se leen '
+                                . 'por clave, no por módulo.';
+                        }
+                    }
                 } elseif ($seccion === 'respaldo') {
                     $modulo['respaldo'] = $this->getParametros('RESPALDO', $codigo);
                 } elseif ($seccion === 'mix') {
@@ -251,6 +319,105 @@ class Parametros {
                         $modulo['avisos'][] = 'No se pudieron leer los parámetros de Cobranzas: '
                             . $e->getMessage();
                     }
+                } elseif ($seccion === 'inflacion') {
+                    /* Mismo criterio que las demás: la tabla es del módulo y la
+                       lee su propia clase, dentro de un try porque su script
+                       puede no haberse corrido todavía y eso no puede tumbar la
+                       pestaña entera.
+
+                       LA MODALIDAD Y EL % CONSTANTE SON PARÁMETROS y viajan
+                       aparte de la grilla: el % constante es lo último que
+                       alguien tipeó, y lo que se aplica es siempre la grilla.
+                       Ver el encabezado de Inflacion. */
+                    try {
+                        $inflacion = $this->inflacion();
+
+                        $modulo['inflacion'] = [
+                            'meses' => $inflacion->grilla(),
+                            'modalidad' => Inflacion::modalidad(
+                                isset($map['inflacion_modalidad']) ? $map['inflacion_modalidad'] : ''),
+                            'pct_constante' => isset($map['inflacion_pct_constante'])
+                                ? floatval($map['inflacion_pct_constante']) : null,
+                            'tabla_creada' => $inflacion->tablaCreada()
+                        ];
+
+                        if ($inflacion->avisoSinTabla() !== '') {
+                            $modulo['avisos'][] = $inflacion->avisoSinTabla();
+                        }
+                    } catch (Throwable $e) {
+                        $modulo['inflacion'] = ['meses' => [], 'modalidad' => Inflacion::VARIABLE,
+                                                'pct_constante' => null, 'tabla_creada' => false];
+                        $modulo['avisos'][] = 'No se pudo leer la inflación mensual: '
+                            . $e->getMessage();
+                    }
+                } elseif ($seccion === 'cronograma') {
+                    /* SE RESUELVE EL HORIZONTE ENTERO y la pantalla muestra
+                       sólo las fechas del tramo diario. Los meses de más no son
+                       de adorno: son los que Logística Local usa para decidir
+                       qué mitad de un importe va a una columna diaria y cuál a
+                       la del mes. Ver CronogramaPagos::paraHorizonte(). */
+                    try {
+                        /* El require va acá y no en la cabecera: Horizonte ya
+                           requiere esta clase, así que los dos arriba serían un
+                           ciclo de carga. Mismo motivo que saldos(). */
+                        require_once __DIR__ . '/Horizonte.php';
+
+                        $h = Horizonte::desdeParametros($this, $map);
+                        $crono = $this->cronograma()->paraHorizonte($h);
+
+                        $modulo['cronograma'] = [
+                            'pagos' => $crono['pagos'],
+                            'hoy' => $h->hoy(),
+                            'fin_tramo' => $this->finTramo($h),
+                            'tabla_creada' => $crono['tabla_creada']
+                        ];
+
+                        foreach ($crono['avisos'] as $a) {
+                            $modulo['avisos'][] = $a;
+                        }
+                    } catch (Throwable $e) {
+                        $modulo['cronograma'] = ['pagos' => [], 'hoy' => date('Y-m-d'),
+                                                 'fin_tramo' => null, 'tabla_creada' => false];
+                        $modulo['avisos'][] = 'No se pudo resolver el cronograma de pagos: '
+                            . $e->getMessage();
+                    }
+                } elseif ($seccion === 'fleteros') {
+                    /* Mismo criterio que Saldos, Cob. Electrónicos y los demás:
+                       la tabla es del módulo Logística y la lee su propia
+                       clase, dentro de un try porque su script puede no haberse
+                       corrido todavía.
+
+                       SE PIDEN TODOS, también los inactivos: el editor tiene
+                       que poder reactivar una baja, y un fletero que dejó de
+                       trabajar conserva las horas y el valor hora con los que
+                       se proyectó. */
+                    try {
+                        $logistica = $this->logistica();
+
+                        $modulo['fleteros'] = [
+                            'filas' => $logistica->getFleteros(false),
+                            'tabla_creada' => $logistica->tablaCreada(),
+                            'tango_disponible' => $logistica->tango()->disponible(),
+                            'min_busqueda' => ProveedoresTango::MIN_BUSQUEDA
+                        ];
+
+                        if ($logistica->avisoSinTabla() !== '') {
+                            $modulo['avisos'][] = $logistica->avisoSinTabla();
+                        }
+
+                        if (!$modulo['fleteros']['tango_disponible']) {
+                            $modulo['avisos'][] = 'No se puede leer CPA01, así que no se pueden '
+                                . 'dar de alta fleteros ni refrescar sus nombres. Los que ya '
+                                . 'están cargados se ven con el nombre guardado.';
+                        }
+                    } catch (Throwable $e) {
+                        $modulo['fleteros'] = ['filas' => [], 'tabla_creada' => false,
+                                               'tango_disponible' => false, 'min_busqueda' => 2];
+                        $modulo['avisos'][] = 'No se pudieron leer los fleteros: '
+                            . $e->getMessage();
+                    }
+                } elseif ($seccion === 'cotizaciones') {
+                    $modulo['cotizaciones'] = $this->cotizaciones($modulo['avisos']);
                 } elseif ($seccion === 'prov_locales_opciones') {
                     /* Mismo criterio que Saldos, Cob. Electrónicos y
                        Pre-chequeado: la tabla es del módulo Proveedores Locales
@@ -281,6 +448,153 @@ class Parametros {
         }
 
         return $modulos;
+    }
+
+    /**
+     * Puerta a la inflacion mensual.
+     *
+     * Lazy por el mismo motivo que las demas: no pagar la carga cuando la
+     * pestana solo mira otro modulo.
+     *
+     * @return Inflacion
+     */
+    public function inflacion() {
+        require_once __DIR__ . '/Inflacion.php';
+
+        if ($this->inflacion === null) {
+            $this->inflacion = new Inflacion();
+        }
+
+        return $this->inflacion;
+    }
+
+    /**
+     * Puerta al maestro de fleteros.
+     *
+     * @return Logistica
+     */
+    public function logistica() {
+        require_once __DIR__ . '/Logistica.php';
+
+        if ($this->logistica === null) {
+            $this->logistica = new Logistica();
+        }
+
+        return $this->logistica;
+    }
+
+    /**
+     * Puerta al cronograma de pagos.
+     *
+     * @return CronogramaDatos
+     */
+    public function cronograma() {
+        require_once __DIR__ . '/CronogramaDatos.php';
+
+        if ($this->cronograma === null) {
+            $this->cronograma = new CronogramaDatos();
+        }
+
+        return $this->cronograma;
+    }
+
+    /**
+     * Hasta que dia llega el tramo diario del eje, o null si no hay tramo.
+     *
+     * Es lo unico que la pantalla necesita para decir que fechas del cronograma
+     * puede editar: fuera del tramo, correr un pago tres dias no mueve ningun
+     * numero del tablero porque la columna del mes es la misma.
+     *
+     * @param Horizonte $h
+     * @return string|null 'Y-m-d'
+     */
+    private function finTramo($h) {
+        $dias = $h->dias();
+
+        return empty($dias) ? null : $dias[count($dias) - 1]['fecha'];
+    }
+
+    /**
+     * Las dos cotizaciones que la sub-pestana Generales muestra SIN DEJAR
+     * EDITAR: la curva de dolar futuro y el dolar oficial del BCRA.
+     *
+     * VAN JUNTAS Y SON DE SOLO LECTURA, y eso es la mitad de lo que la tarjeta
+     * comunica. Las dos llegan por API y las mantiene otro proceso; un campo
+     * editable al lado haria creer que se pueden corregir desde acá, y el unico
+     * override que existe en todo el modulo es por contenedor, en Comercio
+     * Exterior. Ver el encabezado de DolarFuturo.
+     *
+     * LA PUNTA DEL BCRA ES COMPRADORA, que es la que usa todo el cashflow
+     * -Ventas, Saldos, Exportaciones Tasky, Comex- y el default de la clase. La
+     * unica pantalla que valua a vendedor es Dolares Cuenta Comitente, y es
+     * deliberado. La punta VIAJA con el valor: un importe valuado sin decir con
+     * que punta se compara contra el BCRA comprador y parece estar mal.
+     *
+     * SE PIDE LA ULTIMA COTIZACION HASTA HOY y no el cierre del mes en curso:
+     * el cierre de este mes no existe todavia. ultimaHasta() devuelve ademas EL
+     * DIA del que sale, que es lo que permite auditar el numero; delMes() no lo
+     * devuelve, y un valor sin fecha no se puede contrastar contra nada.
+     *
+     * NINGUNA DE LAS DOS TUMBA LA PESTANA: las dos van dentro de un try y lo
+     * que falla queda en null con su motivo, igual que el resto del modulo.
+     *
+     * @param array $avisos Avisos del modulo, por referencia
+     * @return array
+     */
+    private function cotizaciones(&$avisos) {
+        $out = [
+            'dolar_futuro' => ['curva' => [], 'actualizada' => null, 'disponible' => false,
+                               'error' => null, 'origen' => null],
+            'bcra' => ['valor' => null, 'fecha' => null, 'punta' => null,
+                       'punta_nombre' => null, 'mes' => date('Y-m'), 'error' => null]
+        ];
+
+        try {
+            require_once __DIR__ . '/DolarFuturo.php';
+
+            $df = new DolarFuturo();
+            $curva = $df->curva();
+
+            $out['dolar_futuro'] = [
+                'curva' => array_values($curva),
+                'actualizada' => $df->actualizada(),
+                'disponible' => $df->disponible(),
+                'error' => $df->error(),
+                'origen' => DolarFuturo::ORIGEN
+            ];
+
+            if (!$df->disponible()) {
+                $avisos[] = 'No se pudo leer la curva de dólar futuro'
+                    . ($df->error() ? ' (' . $df->error() . ')' : '')
+                    . '. Los pagos en dólares de Comercio Exterior se muestran sin valuar y '
+                    . 'las pestañas lo avisan.';
+            }
+        } catch (Throwable $e) {
+            $out['dolar_futuro']['error'] = $e->getMessage();
+            $avisos[] = 'No se pudo leer la curva de dólar futuro: ' . $e->getMessage();
+        }
+
+        try {
+            require_once __DIR__ . '/Cotizacion.php';
+
+            $cot = new Cotizacion();
+            $ultima = $cot->ultimaHasta(date('Y-m-d'), Cotizacion::COMPRADOR);
+
+            if ($ultima === null) {
+                $out['bcra']['error'] = 'No hay ninguna cotización del BCRA anterior a hoy.';
+                $avisos[] = $out['bcra']['error'];
+            } else {
+                $out['bcra']['valor'] = $ultima['valor'];
+                $out['bcra']['fecha'] = $ultima['fecha'];
+                $out['bcra']['punta'] = $ultima['punta'];
+                $out['bcra']['punta_nombre'] = Cotizacion::nombrePunta($ultima['punta']);
+            }
+        } catch (Throwable $e) {
+            $out['bcra']['error'] = $e->getMessage();
+            $avisos[] = 'No se pudo leer la cotización del BCRA: ' . $e->getMessage();
+        }
+
+        return $out;
     }
 
     /**
@@ -389,6 +703,15 @@ class Parametros {
 
     /** @var Echeqs|null Puerta al modulo Echeqs; la resuelve echeqs() */
     private $echeqs = null;
+
+    /** @var Inflacion|null Puerta a la inflacion mensual; la resuelve inflacion() */
+    private $inflacion = null;
+
+    /** @var CronogramaDatos|null Puerta al cronograma de pagos; la resuelve cronograma() */
+    private $cronograma = null;
+
+    /** @var Logistica|null Puerta al maestro de fleteros; la resuelve logistica() */
+    private $logistica = null;
 
     function __construct(){
         require_once __DIR__.'/../../class/conexion.php';

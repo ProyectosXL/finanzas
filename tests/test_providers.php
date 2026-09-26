@@ -38,10 +38,17 @@ $disponibles = array_values(array_filter($todos, function ($p) { return $p['disp
 // Ventas, Cobranzas FR, Cobranzas May, Proveedores Exterior, Nacionalizaciones,
 // Compras Proyectadas, Saldos, Caja Locales, Cuentas de inversion, Cuentas
 // comitente, Cobranzas Electronicas, Echeqs, Dolares Cuenta Comitente,
-// Exportaciones Tasky, Saldo de Inversiones, Cobertura y Proveedores Locales.
-// Los dos de Otros Ingresos estan retirados pero siguen disponibles: sirven lo
-// que tienen cargado.
-chequear('hay 17 modulos con datos reales', 17, count($disponibles));
+// Exportaciones Tasky, Saldo de Inversiones, Cobertura, Proveedores Locales y
+// Logistica. Los dos de Otros Ingresos estan retirados pero siguen disponibles:
+// sirven lo que tienen cargado.
+chequear('hay 18 modulos con datos reales', 18, count($disponibles));
+
+/* LOGISTICA es el ultimo en sumarse, y es el unico del grupo de egresos
+   pendientes que ya tiene proveedor: los demas -Haberes, Alquileres, Impuestos,
+   Llaves, Financiero, Otros- siguen en 'disponible' => false, rindiendo cero y
+   avisando. */
+chequear('Logistica ya tiene proveedor', true, CashflowRegistry::disponible('LOGISTICA'));
+chequear('Haberes todavia no', false, CashflowRegistry::disponible('HABERES'));
 
 /* COMPRAS_PROY ES UN PROVEEDOR APARTE DE LOS DOS DE COMEX, y tiene que serlo:
    miden universos disjuntos -lo que ya tiene contenedor cargado contra lo que

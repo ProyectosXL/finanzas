@@ -44,29 +44,33 @@
         </ul>
 
         <div class="tab-content">
-        <div class="tab-pane fade show active" id="paneParamVentas" role="tabpanel">
 
-        <div class="modulo-descripcion mb-3" id="descripcionVentas"></div>
-
-        <!-- ========================================================
-             GENERALES
-             ======================================================== -->
-        <div class="card mb-4">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <div>
-                    <h5 class="mb-0">Generales</h5>
-                    <small class="text-muted">Alícuota de IVA, prechequeado y horizonte de proyección</small>
-                </div>
-                <button id="btnRefreshParametros" class="btn btn-sm btn-outline-primary">
-                    <i class="fas fa-sync-alt me-1"></i> Actualizar
-                </button>
-            </div>
-            <div class="card-body">
-                <div class="row g-3" id="gridGenerales">
-                    <!-- Se genera dinámicamente -->
-                </div>
-            </div>
+        <!-- Lo que afecta a TODAS las pestañas: el horizonte, la alícuota, los
+             feriados, la inflación mensual y el cronograma de pagos; más las
+             dos cotizaciones, que se muestran y no se editan. Va PRIMERA por
+             eso mismo. Mismo criterio que los demás módulos: archivo y JS
+             propios, y clases con prefijo pgen- porque Parametros.js busca
+             .param-input, .mix-* y .respaldo-* en TODO el documento. -->
+        <div class="tab-pane fade show active" id="paneParamGenerales" role="tabpanel">
+            <?php include __DIR__ . '/parametros_generales.php'; ?>
         </div>
+
+        <div class="tab-pane fade" id="paneParamVentas" role="tabpanel">
+
+        <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
+            <div class="modulo-descripcion flex-grow-1" id="descripcionVentas"></div>
+            <!-- El botón vivía en la tarjeta Generales, que se fue a su propia
+                 sub-pestaña. Recarga el payload entero, así que sigue sirviendo
+                 para los dos bloques que quedan. -->
+            <button id="btnRefreshParametros" class="btn btn-sm btn-outline-primary flex-shrink-0">
+                <i class="fas fa-sync-alt me-1"></i> Actualizar
+            </button>
+        </div>
+
+        <!-- La tarjeta "Generales" ESTUVO ACÁ y se fue a la sub-pestaña
+             Generales: el horizonte y los feriados mueven las diez pantallas
+             con eje temporal, y bajo Ventas parecían mover una sola. Lo que
+             queda abajo es lo que de verdad sólo afecta a esta pestaña. -->
 
         <!-- ========================================================
              MIX DE COBRO Y PLAZOS
@@ -221,6 +225,14 @@
             <?php include __DIR__ . '/parametros_cobranzas.php'; ?>
         </div>
 
+        <!-- Maestro de fleteros: quiénes son, cuántas horas por mes trabajan y
+             cuánto vale su hora. El alta busca el código en CPA01, igual que el
+             alta manual del maestro de Proveedores Locales. Mismo criterio que
+             los anteriores: archivo y JS propios, y clases con prefijo plog-. -->
+        <div class="tab-pane fade" id="paneParamLogistica" role="tabpanel">
+            <?php include __DIR__ . '/parametros_logistica.php'; ?>
+        </div>
+
         <!-- Listas de opciones del maestro de Proveedores Locales: rubro
              económico, rubro, centro de costos, plazo y criterio de
              distribución. Antes eran texto libre, y el rubro económico no es
@@ -255,6 +267,7 @@
 </div><!-- /tab-parametros -->
 
 <script src="Js/Parametros.js?v=<?php echo time(); ?>"></script>
+<script src="Js/Parametros-Generales.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Saldos.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Cob-Electronicos.js?v=<?php echo time(); ?>"></script>
 <script src="Js/Parametros-Prechequeado.js?v=<?php echo time(); ?>"></script>

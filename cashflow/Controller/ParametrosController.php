@@ -89,6 +89,10 @@ function mensajeRecalculo($rec) {
 
 try {
     require_once __DIR__ . '/../Class/Parametros.php';
+    /* Las constantes de Inflacion las usan los endpoints del modulo Generales.
+       Parametros::inflacion() carga la clase de forma perezosa, pero el switch
+       nombra Inflacion::VARIABLE antes de llamarlo. */
+    require_once __DIR__ . '/../Class/Inflacion.php';
 
     // Obtener accion del request
     $action = isset($_GET['action']) ? $_GET['action'] : '';
@@ -135,6 +139,125 @@ try {
             echo json_encode([
                 'success' => true,
                 'message' => 'Parametro guardado correctamente'
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           MODULO GENERALES: INFLACION Y CRONOGRAMA
+
+           LA VALIDACION QUE VALE ES LA DE LAS CLASES. La pantalla acota lo que
+           se puede tipear, pero lo que manda el navegador es un pedido y no una
+           autorizacion: estos endpoints son alcanzables sin pasar por ella.
+           ================================================================ */
+        case 'saveInflacionMes':
+            $data = bodyJson();
+
+            if (!isset($data['mes']) || !isset($data['porcentaje'])) {
+                throw new Exception('Faltan el mes y el porcentaje');
+            }
+
+            $r = $parametros->inflacion()->guardar(
+                $data['mes'],
+                $data['porcentaje'],
+                Inflacion::VARIABLE,
+                usuarioActual()
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Inflación de ' . $r['mes'] . ' guardada.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'aplicarInflacionConstante':
+            $data = bodyJson();
+
+            if (!isset($data['porcentaje'])) {
+                throw new Exception('Falta el porcentaje');
+            }
+
+            /* ESCRIBE TODOS LOS MESES DE LA VENTANA, y por eso el mensaje dice
+               cuantos: es una edicion masiva disparada por un solo campo, y sin
+               decir el alcance se lee como si hubiera guardado uno. */
+            $r = $parametros->inflacion()->guardarConstante(
+                $data['porcentaje'],
+                usuarioActual()
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Se aplicó ' . $r['porcentaje'] . ' % a los ' . $r['meses']
+                    . ' meses de la ventana. Los meses anteriores no se tocaron: describen '
+                    . 'lo que ya pasó.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'getHistorialCronograma':
+            echo json_encode([
+                'success' => true,
+                'data' => $parametros->cronograma()->historial(
+                    isset($_GET['mes']) ? $_GET['mes'] : '',
+                    isset($_GET['nro']) ? $_GET['nro'] : 0
+                )
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'saveFechaCronograma':
+            $data = bodyJson();
+
+            foreach (['mes', 'nro', 'fecha'] as $campo) {
+                if (!isset($data[$campo])) {
+                    throw new Exception('Faltan parámetros obligatorios');
+                }
+            }
+
+            /* EL MOTIVO ES OBLIGATORIO y se exige acá y no sólo en la pantalla:
+               meses después es lo único que explica por qué ese pago no cayó
+               donde la cuenta decía. Mismo criterio que la exclusión de cheques. */
+            if (empty(trim((string) (isset($data['motivo']) ? $data['motivo'] : '')))) {
+                throw new Exception('El motivo es obligatorio: es lo único que después '
+                    . 'explica por qué este pago no va en la fecha calculada.');
+            }
+
+            $r = $parametros->cronograma()->guardar(
+                $data['mes'],
+                $data['nro'],
+                $data['fecha'],
+                isset($data['fecha_calculada']) ? $data['fecha_calculada'] : null,
+                $data['motivo'],
+                usuarioActual()
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => ($r['reemplazo'] ? 'Fecha corregida' : 'Fecha movida') . ': el pago '
+                    . $r['nro'] . ' de ' . $r['mes'] . ' va el ' . $r['fecha'] . '.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'quitarFechaCronograma':
+            $data = bodyJson();
+
+            if (!isset($data['mes']) || !isset($data['nro'])) {
+                throw new Exception('Faltan parámetros obligatorios');
+            }
+
+            $r = $parametros->cronograma()->volverACalculado(
+                $data['mes'],
+                $data['nro'],
+                usuarioActual()
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['habia']
+                    ? 'El pago vuelve a su fecha calculada. La fecha anterior queda en el '
+                      . 'historial: no se borra.'
+                    : 'Este pago ya estaba en su fecha calculada.',
+                'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
 

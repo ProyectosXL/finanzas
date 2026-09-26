@@ -8,7 +8,13 @@
 
 require_once __DIR__ . '/../cashflow/Class/Menu.php';
 
-$menu = Menu::estructura();
+/* SIN FILTRAR POR PERMISOS, y es a propósito.
+   Esta prueba mide la ESTRUCTURA del menú, que es un hecho del código.
+   estructura() devuelve lo que puede ver el usuario de la sesión, y por línea de
+   comandos no hay sesión: devolvería un menú vacío y esto fallaría entero sin
+   que hubiera nada roto. El filtrado por permisos tiene su propia sección, al
+   pie de este archivo. */
+$menu = Menu::estructuraCompleta();
 
 /* ================================================================
    Estructura
@@ -209,9 +215,15 @@ $orden = array_column($menu['categorias'], 'codigo');
 chequear('Comex tiene sus 3 pestanas con datos', 3, $porCategoria['Comex']['con_datos']);
 chequear('y son 3 en total, ya sin Despachante', 3, $porCategoria['Comex']['total']);
 // Proveedores Locales ya tiene datos: sale de Tango (CPA04 + CPA54 + CPA01).
-// Logistica Local sigue pendiente; Cronograma se saco del menu.
-chequear('Proveedores tiene 1 pestana con datos', 1, $porCategoria['Proveedores']['con_datos']);
+// Las DOS tienen datos: Logistica Local dejo de ser un placeholder y proyecta
+// los pagos a los fleteros. Cronograma se saco del menu.
+chequear('Proveedores tiene sus 2 pestanas con datos',
+    2, $porCategoria['Proveedores']['con_datos']);
 chequear('y 2 en total, ya sin Cronograma', 2, $porCategoria['Proveedores']['total']);
+chequear('Logistica Local ya no es un placeholder',
+    false, Menu::esPlaceholder('logistica_local'));
+chequear('y el menu la declara con datos',
+    Menu::DATOS, $porTab['logistica_local']['estado']);
 chequear('RRHH y Operativos son 4, ya sin Seguros', 4, $porCategoria['RRHH']['total']);
 chequear('Financiero son 3, ya sin Bopreal ni Pagos Div. Marzo',
     3, $porCategoria['Financiero']['total']);
@@ -258,3 +270,49 @@ seccion('la primera categoria abre y el resto no');
 
 chequear('Ingresos abre por defecto', true, $porCategoria['Ingresos']['abierta']);
 chequear('Financiero no', false, $porCategoria['Financiero']['abierta']);
+
+/* ================================================================
+   EL FILTRADO POR PERMISOS
+
+   Es la otra mitad del menu, y va aparte de todo lo de arriba porque contesta
+   otra pregunta: no "que pestanas tiene el modulo" sino "cuales puede ver ESTE
+   usuario". Depende de la sesion, y por linea de comandos no hay ninguna.
+
+   POR LINEA DE COMANDOS EL RESULTADO ES EL MENU VACIO, y eso es lo correcto:
+   sin sesion AuthCashflow no tiene usuario, asi que puede() deniega todo y
+   TabController responde 403. FALLA CERRADA. Esta prueba existe para que ese
+   comportamiento quede fijado: el dia que alguien invierta la guarda y el menu
+   anonimo pase a mostrarlo todo, esto lo dice.
+
+   La prueba corre igual en una maquina que no tenga el modulo Gestionusuarios
+   al lado -donde vive el padron de usuarios- porque el resultado es el mismo
+   por las dos vias: sin padron tampoco hay usuario.
+   ================================================================ */
+seccion('el menu filtrado por permisos');
+
+require_once __DIR__ . '/../cashflow/Class/AuthCashflow.php';
+
+if (AuthCashflow::estaAutenticado()) {
+    // En una maquina con sesion abierta el filtrado devuelve lo permitido, que
+    // depende del rol: no hay un numero fijo que chequear.
+    Pruebas::saltear('hay una sesion abierta: el menu filtrado depende del rol');
+} else {
+    $filtrado = Menu::estructura();
+
+    chequear('sin sesion no se ve ninguna pestana principal', 0, count($filtrado['principales']));
+    chequear('ni ninguna categoria', 0, count($filtrado['categorias']));
+    chequear('ni Parametros al pie', 0, count($filtrado['pie']));
+
+    chequear('puede() deniega una pestana que existe', false, AuthCashflow::puede('cashflow'));
+    chequear('y tambien la nueva', false, AuthCashflow::puede('logistica_local'));
+    chequear('el usuario es null', null, AuthCashflow::usuario());
+    chequear('y no es admin', false, AuthCashflow::esAdmin());
+}
+
+/* LA ESTRUCTURA COMPLETA NO SE FILTRA NUNCA. Si alguien le pusiera el filtro,
+   todo lo de arriba pasaria a medir permisos sin que el nombre lo diga. */
+chequear('estructuraCompleta no depende de la sesion',
+    22, count(Menu::estructuraCompleta()['principales'])
+        + count(Menu::estructuraCompleta()['pie'])
+        + array_sum(array_map(function ($c) { return count($c['items']); },
+                              Menu::estructuraCompleta()['categorias'])));
