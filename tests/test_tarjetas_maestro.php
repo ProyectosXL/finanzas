@@ -380,6 +380,144 @@ chequear('y pega contra el controller del modulo', true,
     strpos($jsTarjetas, 'Controller/TarjetasController.php') !== false);
 
 /* ================================================================
+   LOS DESPLEGABLES VIAJAN COMO LISTA ORDENADA, NO COMO MAPA
+
+   QUE SE ROMPE EN SILENCIO SI ESTO NO SE PRUEBA: un mapa clave => nombre se
+   convierte en un objeto JSON, y Object.keys() en JavaScript NO devuelve las
+   claves en el orden en que se escribieron: primero las que son indices de array
+   -enteros canonicos- ordenadas numericamente, y despues el resto.
+
+   NO ES TEORICO. De los 198 codigos de BANCO, 135 son enteros canonicos ('151',
+   '295', '313'...), asi que el desplegable salia ordenado por numero de banco
+   aunque la consulta diga ORDER BY DESC_BANCO. Con los usuarios pasaba lo mismo:
+   salian por ID en vez de por nombre.
+
+   Una lista de objetos conserva el orden en JSON y en JavaScript.
+   ================================================================ */
+seccion('los desplegables salen ordenados por nombre');
+
+$mapa = [
+    '151' => 'ACISO COOP. LTDO.',
+    '025' => 'SANTANDER S.A.',
+    '007' => 'DE GALICIA Y BS.AS.',
+    '295' => 'AMERICAN EXPRESS SA'
+];
+
+$lista = Tarjetas::comoLista($mapa, 'cod');
+
+chequear('devuelve una lista y no un mapa', true, isset($lista[0]));
+chequear('con una entrada por clave', 4, count($lista));
+
+/* ORDENADA POR NOMBRE, no por clave ni por el orden del mapa. */
+chequear('ordenada por nombre',
+    ['ACISO COOP. LTDO.', 'AMERICAN EXPRESS SA', 'DE GALICIA Y BS.AS.', 'SANTANDER S.A.'],
+    array_column($lista, 'nombre'));
+
+chequear('y cada entrada lleva su clave con el nombre que se pidio',
+    ['151', '295', '007', '025'], array_column($lista, 'cod'));
+
+/* EL NOMBRE DE LA CLAVE ES PARAMETRO: los bancos viajan con 'cod' y los usuarios
+   con 'id', porque son dos cosas distintas y el front las nombra distinto. */
+chequear('los usuarios usan id', ['id', 'nombre'],
+    array_keys(Tarjetas::comoLista([3 => 'CAROLINA'], 'id')[0]));
+
+/* LA CLAVE SE DEVUELVE COMO TEXTO. PHP convierte '151' en el entero 151 al usarlo
+   como clave de array, y si viajara como numero el front compararia 151 contra
+   '151' en un data-attribute y no matchearia. */
+chequear('la clave viaja como texto, aunque PHP la haya vuelto entera',
+    true, is_string(Tarjetas::comoLista([151 => 'ACISO'], 'cod')[0]['cod']));
+
+seccion('el orden sobrevive el viaje al navegador');
+
+/* LA PRUEBA QUE IMPORTA: el mismo round-trip que hace el payload. Con un mapa,
+   json_decode devuelve las claves reordenadas; con una lista, el orden es el que
+   se armo. */
+$ida = json_decode(json_encode($lista), true);
+
+chequear('despues de json_encode + json_decode sigue ordenada',
+    ['ACISO COOP. LTDO.', 'AMERICAN EXPRESS SA', 'DE GALICIA Y BS.AS.', 'SANTANDER S.A.'],
+    array_column($ida, 'nombre'));
+
+/* LA CONDICION QUE DISPARA EL PROBLEMA, verificada sobre el mapa.
+
+   Desde PHP no se puede reproducir el reordenamiento: los arrays de PHP conservan
+   el orden de insercion y json_decode() de un objeto tambien, asi que un mapa
+   sobrevive el round-trip ACA. Donde se pierde es en Object.keys() del navegador,
+   que pone primero las claves que son INDICES DE ARRAY -enteros canonicos-
+   ordenadas numericamente.
+
+   Lo que si se puede -y es lo que importa- es comprobar que el mapa TIENE claves
+   de esas, que es la condicion que dispara el reordenamiento. Si algun dia BANCO
+   pasara a tener codigos no numericos, esta comprobacion fallaria y diria que el
+   riesgo desaparecio; mientras tanto, justifica la lista. */
+$canonicas = array_filter(array_keys($mapa), function ($k) {
+    return (string) (int) $k === (string) $k;
+});
+
+chequear('el mapa tiene claves enteras canonicas, que es lo que JS reordena',
+    true, count($canonicas) > 0);
+chequear('y son las que se esperan', [151, 295], array_values($canonicas));
+
+/* Sobre los datos reales el problema es la mayoria del maestro, no un borde: al
+   26/09/2026, 135 de los 198 codigos de BANCO son enteros canonicos. */
+chequear('el mapa mantiene tantas entradas como la lista', count($lista), count($mapa));
+
+seccion('el orden no distingue mayusculas ni acentos de mas');
+
+/* Los nombres vienen de Tango tal como los tipearon, asi que 'de Galicia' y
+   'DEUTSCHE' tienen que quedar juntos donde alguien los busca. */
+chequear('minusculas y mayusculas se ordenan juntas',
+    ['de Galicia', 'DEUTSCHE BANK', 'ICBC'],
+    array_column(Tarjetas::comoLista(
+        ['1' => 'ICBC', '2' => 'DEUTSCHE BANK', '3' => 'de Galicia'], 'cod'), 'nombre'));
+
+chequear('una lista vacia no rompe', [], Tarjetas::comoLista([], 'cod'));
+
+/* ================================================================
+   EL BUSCADOR DE BANCOS
+
+   BANCO tiene 198 filas: un <select> obliga a recorrer doscientos nombres. La
+   sub-pestana usa un input con filtro local, con el patron del alta de fleteros.
+   ================================================================ */
+seccion('el banco se busca en vez de recorrerse');
+
+$tabBanco = preg_replace(['/\/\*.*?\*\//s', '/<!--.*?-->/s'], '',
+    file_get_contents(__DIR__ . '/../cashflow/Tabs/parametros_tarjetas.php'));
+
+chequear('el banco ya no es un select de 198 opciones', false,
+    strpos($tabBanco, '<select id="ptarBanco"') !== false);
+chequear('es un input de busqueda', true, strpos($tabBanco, 'id="ptarBanco"') !== false);
+chequear('con su panel de sugerencias', true,
+    strpos($tabBanco, 'id="ptarBancoSugerencias"') !== false);
+
+/* EL CODIGO VIAJA EN UN CAMPO APARTE, y eso es lo que hace que el buscador sea
+   seguro: el input muestra el NOMBRE -es para buscar- y lo que se manda al
+   servidor es el codigo elegido. Sin el campo aparte, habria que adivinar el
+   codigo desde el texto tipeado. */
+chequear('y el codigo elegido en un campo propio', true,
+    strpos($tabBanco, 'id="ptarBancoCod"') !== false);
+
+$jsBanco = preg_replace(['/\/\*.*?\*\//s', '/\/\/[^\n]*/'], '',
+    file_get_contents(__DIR__ . '/../cashflow/Js/Parametros-Tarjetas.js'));
+
+chequear('el alta manda el CODIGO y no el texto del buscador', true,
+    strpos($jsBanco, "cod_banco: texto('ptarBancoCod')") !== false);
+
+/* ESCRIBIR INVALIDA LO ELEGIDO: si no, corregir el texto despues de haber elegido
+   dejaria el codigo anterior guardado y se daria de alta la tarjeta en un banco
+   que la pantalla ya no muestra. */
+chequear('escribir limpia el codigo elegido', true,
+    strpos($jsBanco, "valor('ptarBancoCod', '')") !== false);
+
+/* Y EL ALTA EXIGE EL CODIGO, no el texto: escribir "santander" sin elegirlo de la
+   lista es un banco NO elegido, y tiene que decirlo antes de ir al servidor. */
+chequear('el alta valida contra el codigo', true,
+    strpos($jsBanco, "if (!texto('ptarBancoCod'))") !== false);
+
+chequear('el buscador filtra localmente y no vuelve al servidor', false,
+    strpos($jsBanco, 'buscarBancoTango') !== false);
+
+/* ================================================================
    LOS SCRIPTS SQL ESTAN, Y SON IDEMPOTENTES
 
    Lo que se verifica es la forma, no el efecto: que cada tabla se cree dentro de

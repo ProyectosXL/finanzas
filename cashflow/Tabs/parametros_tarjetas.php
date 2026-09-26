@@ -72,9 +72,33 @@
                     <label class="form-label form-label-sm" for="ptarTipo">Tipo</label>
                     <select id="ptarTipo" class="form-select form-select-sm"></select>
                 </div>
-                <div class="col-md-3">
+                <!-- ========================================================
+                     EL BANCO SE BUSCA, NO SE RECORRE
+                     BANCO tiene 198 filas, así que un <select> obliga a
+                     scrollear una lista de doscientos nombres para encontrar
+                     uno. Mismo patrón que el alta del maestro de fleteros: se
+                     escribe y se elige de las coincidencias.
+
+                     SE BUSCA POR NOMBRE Y POR CÓDIGO, porque quien carga una
+                     tarjeta puede acordarse de cualquiera de los dos.
+
+                     FILTRA LO QUE YA ESTÁ CARGADO y no vuelve al servidor: los
+                     198 bancos vienen en el payload, y una consulta por cada
+                     letra tipeada sería ir a buscar algo que ya está acá.
+                     ======================================================== -->
+                <div class="col-md-3 position-relative">
                     <label class="form-label form-label-sm" for="ptarBanco">Banco</label>
-                    <select id="ptarBanco" class="form-select form-select-sm"></select>
+                    <input type="text" id="ptarBanco" class="form-control form-control-sm"
+                           placeholder="Nombre o código…" autocomplete="off">
+                    <!-- El código elegido. Es lo que viaja al servidor: el texto
+                         del input es para buscar, no el dato. -->
+                    <input type="hidden" id="ptarBancoCod" value="">
+                    <div id="ptarBancoSugerencias" class="list-group position-absolute w-100 shadow"
+                         style="z-index: 1050; max-height: 260px; overflow-y: auto; display: none;">
+                    </div>
+                    <div class="form-text" id="ptarBancoElegido">
+                        Se elige de la lista: el código se valida contra Tango.
+                    </div>
                 </div>
                 <div class="col-md-3">
                     <label class="form-label form-label-sm" for="ptarUsuario">Usuario</label>

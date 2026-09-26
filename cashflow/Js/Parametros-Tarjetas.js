@@ -41,11 +41,22 @@
 
     var tarjetas = [];
     var tipos = {};
-    var bancos = {};
-    var usuarios = {};
+
+    /* LISTAS ORDENADAS, NO MAPAS. El backend las manda como arrays de objetos
+       porque un mapa se convierte en un objeto JSON y Object.keys() NO respeta el
+       orden en que se escribió: pone primero las claves que son índices de array,
+       ordenadas numéricamente. De los 198 códigos de banco, 135 son enteros
+       canónicos, así que el desplegable salía por número de banco y no por nombre.
+       Ver Tarjetas::comoLista(). */
+    var bancos = [];
+    var usuarios = [];
+
     var tablaCreada = false;
     var vistaCreada = false;
     var bancosOk = false;
+
+    /** Cuántas coincidencias se muestran a la vez en el buscador de bancos */
+    var MAX_SUGERENCIAS = 12;
 
     /* ================================================================
        CARGA
@@ -72,8 +83,8 @@
             .then(function(d) {
                 tarjetas = d.data.filas || [];
                 tipos = d.data.tipos || {};
-                bancos = d.data.bancos || {};
-                usuarios = d.data.usuarios || {};
+                bancos = d.data.bancos || [];
+                usuarios = d.data.usuarios || [];
                 tablaCreada = !!d.data.tabla_creada;
                 vistaCreada = !!d.data.vista_creada;
                 bancosOk = !!d.data.bancos_disponibles;
@@ -320,23 +331,139 @@
        ================================================================ */
 
     function llenarDesplegables() {
-        opciones('ptarTipo', tipos, 'Elegí el tipo…');
-        opciones('ptarBanco', bancos, 'Elegí el banco…');
-        opciones('ptarUsuario', usuarios, 'Elegí el usuario…');
+        /* El tipo sigue siendo un mapa de tres entradas: con tres, el orden es el
+           que tiene y no hace falta nada más. */
+        opcionesMapa('ptarTipo', tipos, 'Elegí el tipo…');
+
+        /* Los usuarios son catorce, así que un desplegable alcanza; lo que hacía
+           falta era que estuvieran ORDENADOS por nombre, y para eso el backend los
+           manda como lista. El banco no: son 198 y se busca. */
+        opcionesLista('ptarUsuario', usuarios, 'id', 'Elegí el usuario…');
     }
 
-    function opciones(id, mapa, vacio) {
+    function opcionesMapa(id, mapa, vacio) {
         var sel = document.getElementById(id);
 
         if (!sel) { return; }
 
-        var html = '<option value="">' + esc(vacio) + '</option>';
+        sel.innerHTML = '<option value="">' + esc(vacio) + '</option>'
+            + Object.keys(mapa).map(function(k) {
+                return '<option value="' + esc(k) + '">' + esc(mapa[k]) + '</option>';
+            }).join('');
+    }
 
-        Object.keys(mapa).forEach(function(k) {
-            html += '<option value="' + esc(k) + '">' + esc(mapa[k]) + '</option>';
+    /** Un desplegable desde una LISTA, que es la que conserva el orden */
+    function opcionesLista(id, lista, clave, vacio) {
+        var sel = document.getElementById(id);
+
+        if (!sel) { return; }
+
+        sel.innerHTML = '<option value="">' + esc(vacio) + '</option>'
+            + lista.map(function(x) {
+                return '<option value="' + esc(x[clave]) + '">' + esc(x.nombre) + '</option>';
+            }).join('');
+    }
+
+    /* ---- el buscador de bancos ----------------------------------------------
+       Filtra los 198 bancos que ya vinieron en el payload. No vuelve al servidor:
+       una consulta por cada letra tipeada sería ir a buscar algo que ya está acá.
+       ------------------------------------------------------------------------- */
+
+    /**
+     * Los bancos que coinciden con lo que se escribió.
+     *
+     * BUSCA POR NOMBRE Y POR CODIGO, porque quien carga una tarjeta puede acordarse
+     * de cualquiera de los dos.
+     *
+     * SIN NADA ESCRITO DEVUELVE LOS PRIMEROS, y no una lista vacía: al hacer foco
+     * conviene ver que hay algo para elegir. Ya vienen ordenados por nombre.
+     */
+    function bancosQueCoinciden(q) {
+        var t = String(q || '').trim().toLowerCase();
+
+        if (t === '') { return bancos.slice(0, MAX_SUGERENCIAS); }
+
+        return bancos.filter(function(b) {
+            return b.nombre.toLowerCase().indexOf(t) !== -1
+                || b.cod.toLowerCase().indexOf(t) !== -1;
+        }).slice(0, MAX_SUGERENCIAS);
+    }
+
+    function buscarBanco() {
+        var input = document.getElementById('ptarBanco');
+        var caja = document.getElementById('ptarBancoSugerencias');
+
+        if (!input || !caja) { return; }
+
+        /* Escribir INVALIDA lo elegido: si no, corregir el texto después de haber
+           elegido dejaría el código anterior guardado y se daría de alta la tarjeta
+           en un banco que la pantalla ya no muestra. */
+        valor('ptarBancoCod', '');
+        marcarBancoElegido(null);
+
+        var coincidencias = bancosQueCoinciden(input.value);
+
+        if (!coincidencias.length) {
+            caja.innerHTML = '<div class="list-group-item small text-muted">'
+                + 'Ningún banco coincide. Se buscan por nombre y por código.</div>';
+            caja.style.display = '';
+
+            return;
+        }
+
+        caja.innerHTML = coincidencias.map(function(b) {
+            return '<button type="button" class="list-group-item list-group-item-action '
+                + 'py-1 ptar-banco-op" data-cod="' + esc(b.cod) + '" '
+                + 'data-nombre="' + esc(b.nombre) + '">'
+                + '<span class="small">' + esc(b.nombre) + '</span>'
+                + ' <small class="text-muted">' + esc(b.cod) + '</small>'
+            + '</button>';
+        }).join('');
+
+        caja.style.display = '';
+
+        caja.querySelectorAll('.ptar-banco-op').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                elegirBanco(btn.getAttribute('data-cod'), btn.getAttribute('data-nombre'));
+            });
         });
+    }
 
-        sel.innerHTML = html;
+    function elegirBanco(cod, nombre) {
+        valor('ptarBanco', nombre);
+        valor('ptarBancoCod', cod);
+        marcarBancoElegido({cod: cod, nombre: nombre});
+        ocultarSugerenciasBanco();
+    }
+
+    /**
+     * El pie del campo dice si hay un banco elegido, y cuál.
+     *
+     * HACE FALTA porque el input muestra el NOMBRE y lo que viaja es el CÓDIGO: sin
+     * esta marca, un texto que parece completo puede no tener ningún banco elegido
+     * —por ejemplo si alguien lo escribió a mano sin tocar la lista— y eso se
+     * descubriría recién al guardar.
+     */
+    function marcarBancoElegido(banco) {
+        var pie = document.getElementById('ptarBancoElegido');
+
+        if (!pie) { return; }
+
+        if (banco === null) {
+            pie.className = 'form-text';
+            pie.textContent = 'Se elige de la lista: el código se valida contra Tango.';
+
+            return;
+        }
+
+        pie.className = 'form-text text-success';
+        pie.textContent = 'Banco ' + banco.cod + ' — ' + banco.nombre;
+    }
+
+    function ocultarSugerenciasBanco() {
+        var caja = document.getElementById('ptarBancoSugerencias');
+
+        if (caja) { caja.style.display = 'none'; }
     }
 
     function mostrarForm(visible) {
@@ -350,17 +477,26 @@
     function limpiarForm() {
         valor('ptarTipo', '');
         valor('ptarBanco', '');
+        valor('ptarBancoCod', '');
         valor('ptarUsuario', '');
         valor('ptarUltimos4', '');
         valor('ptarPct', '0');
         valor('ptarDia', '');
+        marcarBancoElegido(null);
+        ocultarSugerenciasBanco();
     }
 
     function agregar() {
         var faltan = [];
 
         if (!texto('ptarTipo')) { faltan.push('el tipo'); }
-        if (!texto('ptarBanco')) { faltan.push('el banco'); }
+
+        /* SE MIRA EL CODIGO, NO EL TEXTO DEL BUSCADOR: escribir "santander" sin
+           elegirlo de la lista deja el input con texto y el código vacío, y eso es
+           un banco NO elegido. Sin esta distinción, el alta iría al servidor a
+           fallar por un campo que en pantalla parecía completo. */
+        if (!texto('ptarBancoCod')) { faltan.push('el banco (elegilo de la lista)'); }
+
         if (!texto('ptarUsuario')) { faltan.push('el usuario'); }
         if (!texto('ptarDia')) { faltan.push('el día de vencimiento'); }
 
@@ -374,7 +510,7 @@
 
         pedir(ENDPOINT + '?action=saveTarjeta', {
             tipo: texto('ptarTipo'),
-            cod_banco: texto('ptarBanco'),
+            cod_banco: texto('ptarBancoCod'),
             id_usuario: texto('ptarUsuario'),
             ultimos_4: texto('ptarUltimos4'),
             pct_cobertura: texto('ptarPct'),
@@ -453,6 +589,23 @@
         enganchar('ptarBtnNuevo', 'click', function() { mostrarForm(true); });
         enganchar('ptarBtnCancelar', 'click', function() { mostrarForm(false); });
         enganchar('ptarBtnAgregar', 'click', agregar);
+
+        /* El buscador de bancos: se abre al escribir y también al hacer foco, para
+           que se vea que hay una lista y no un campo libre. */
+        enganchar('ptarBanco', 'input', buscarBanco);
+        enganchar('ptarBanco', 'focus', buscarBanco);
+
+        /* Cerrar el desplegable al hacer clic afuera. Mismo criterio que el
+           autocomplete del maestro de fleteros: un panel que queda abierto tapa la
+           fila de abajo del formulario. */
+        document.addEventListener('click', function(ev) {
+            var caja = document.getElementById('ptarBancoSugerencias');
+            var input = document.getElementById('ptarBanco');
+
+            if (caja && input && !caja.contains(ev.target) && ev.target !== input) {
+                ocultarSugerenciasBanco();
+            }
+        });
 
         cargar();
     }

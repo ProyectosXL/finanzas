@@ -461,8 +461,12 @@ try {
                 'data' => [
                     'filas' => $tarjetas->getTarjetas(false, $tipo),
                     'tipos' => Tarjetas::TIPOS,
-                    'bancos' => $tarjetas->bancos(),
-                    'usuarios' => $tarjetas->usuarios(),
+
+                    /* LISTAS ORDENADAS Y NO MAPAS: un mapa se convierte en un
+                       objeto JSON y Object.keys() no respeta el orden en que se
+                       escribio. Ver Tarjetas::comoLista(). */
+                    'bancos' => $tarjetas->bancosLista(),
+                    'usuarios' => $tarjetas->usuariosLista(),
                     'tabla_creada' => $tarjetas->tablaCreada(),
                     'vista_creada' => $tarjetas->vistaUsuariosCreada(),
                     'bancos_disponibles' => $tarjetas->bancosDisponibles(),

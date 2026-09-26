@@ -432,6 +432,83 @@ class Tarjetas {
         return !empty($this->bancos());
     }
 
+    /* ====================================================================
+       LAS MISMAS DOS LISTAS, PERO ORDENADAS Y PARA EL FRONT
+
+       POR QUE NO ALCANZA CON EL MAPA
+       ------------------------------
+       bancos() y usuarios() devuelven mapas -clave => nombre- porque en PHP se
+       usan para BUSCAR: getTarjetas() pide $bancos[$cod] y guardarTarjeta()
+       pregunta isset(). Para eso un mapa es exactamente lo correcto.
+
+       PERO UN MAPA NO SOBREVIVE EL VIAJE AL NAVEGADOR CON SU ORDEN. json_encode()
+       lo convierte en un objeto, y Object.keys() en JavaScript NO devuelve las
+       claves en el orden en que se escribieron: primero las que son indices de
+       array -enteros canonicos- ordenadas numericamente, y despues el resto.
+
+       NO ES TEORICO: de los 198 codigos de BANCO, 135 son enteros canonicos
+       ('151', '295', '313'...), asi que el desplegable salia ordenado por numero
+       de banco y no por nombre, aunque la consulta dice ORDER BY DESC_BANCO. Con
+       los usuarios pasaba lo mismo: salian por ID en vez de por nombre.
+
+       Una lista de objetos conserva el orden en JSON y en JavaScript, asi que el
+       orden que decide la consulta es el que se ve. Y ordenar en el front seria
+       peor: seria una segunda definicion de "como se ordena esto", en el lugar
+       donde no esta el criterio.
+       ==================================================================== */
+
+    /**
+     * Los bancos como LISTA ORDENADA por nombre, para el desplegable.
+     *
+     * @return array Lista de ['cod' => string, 'nombre' => string]
+     */
+    public function bancosLista() {
+        return self::comoLista($this->bancos(), 'cod');
+    }
+
+    /**
+     * Los usuarios como LISTA ORDENADA por nombre, para el desplegable.
+     *
+     * @return array Lista de ['id' => string, 'nombre' => string]
+     */
+    public function usuariosLista() {
+        return self::comoLista($this->usuarios(), 'id');
+    }
+
+    /**
+     * Convierte un mapa clave => nombre en una lista ordenada por nombre.
+     *
+     * SE REORDENA ACA Y NO SE CONFIA EN EL ORDEN DEL MAPA, aunque las dos
+     * consultas ya traigan ORDER BY: las claves numericas de un array de PHP
+     * pueden quedar en cualquier orden despues de pasar por json_encode y volver,
+     * y el orden es lo que esta funcion existe para garantizar. Ordenar dos veces
+     * no cuesta nada sobre doscientas filas; no ordenar cuesta un desplegable que
+     * nadie puede recorrer.
+     *
+     * ORDEN NATURAL Y SIN DISTINGUIR MAYUSCULAS: los nombres de banco vienen de
+     * Tango tal como los tipearon, asi que 'de Galicia' y 'DEUTSCHE' tienen que
+     * quedar juntos donde alguien los busca.
+     *
+     * Estatica y pura.
+     *
+     * @param array $mapa Mapa clave => nombre
+     * @param string $nombreClave Como se llama la clave en la salida
+     * @return array
+     */
+    public static function comoLista($mapa, $nombreClave) {
+        $lista = [];
+
+        foreach ($mapa as $clave => $nombre) {
+            $lista[] = [$nombreClave => (string) $clave, 'nombre' => (string) $nombre];
+        }
+
+        usort($lista, function ($a, $b) {
+            return strnatcasecmp($a['nombre'], $b['nombre']);
+        });
+
+        return $lista;
+    }
+
     /**
      * Las tarjetas cargadas, con la descripcion de su banco y si su usuario
      * sigue en la vista.

@@ -114,6 +114,18 @@ Sale de la vista y **no se tipea**: si se pudiera, dos pantallas mostrarían dos
 
 Una tarjeta cuyo usuario ya no está en la vista **se marca y no se da de baja sola**: puede ser una supervisora que dejó de estar activa, y decidir qué hacer con su tarjeta es de una persona. Mismo criterio que un fletero cuyo código ya no está en `CPA01`.
 
+### El banco se busca, y las dos listas van ordenadas por nombre
+
+`BANCO` tiene **198 filas**, así que el banco no es un desplegable: es un campo que se escribe y filtra las coincidencias, con el mismo patrón que el alta del maestro de fleteros. Busca **por nombre y por código**, porque quien carga una tarjeta puede acordarse de cualquiera de los dos, y **filtra lo que ya vino en el payload**: una consulta por cada letra tipeada sería ir a buscar algo que ya está en la pantalla.
+
+El **código elegido viaja en un campo aparte** del texto que se escribe. Eso es lo que hace que el buscador sea seguro: el input muestra el nombre —es para buscar— y lo que se manda al servidor es el código. Escribir **invalida lo elegido**, porque si no, corregir el texto después de haber elegido dejaría el código anterior guardado y se daría de alta la tarjeta en un banco que la pantalla ya no muestra.
+
+> **Las dos listas viajan como lista y no como mapa, y no es un detalle de forma.** Un mapa `clave => nombre` se convierte en un objeto JSON, y `Object.keys()` en JavaScript **no** devuelve las claves en el orden en que se escribieron: pone primero las que son índices de array —enteros canónicos— ordenadas numéricamente.
+>
+> No es teórico: **de los 198 códigos de `BANCO`, 135 son enteros canónicos** (`151`, `295`, `313`…), así que el desplegable salía ordenado por número de banco aunque la consulta diga `ORDER BY DESC_BANCO`. Con los usuarios pasaba lo mismo: salían por ID en vez de por nombre.
+>
+> `Tarjetas::comoLista()` devuelve una lista de objetos, que conserva el orden en JSON y en JavaScript, y **reordena por nombre igual** aunque la consulta ya lo haga: ordenar dos veces no cuesta nada sobre doscientas filas, y no ordenar cuesta un desplegable que nadie puede recorrer. El orden es natural y no distingue mayúsculas, porque los nombres vienen de Tango tal como los tipearon y *"de Galicia"* y *"DEUTSCHE"* tienen que quedar juntos donde alguien los busca.
+
 ### El % de cobertura se aplica sobre la base estimada, y en Corporativas no
 
 Va en **puntos** —5 es 5 %, igual que la inflación mensual y al revés que la alícuota de IVA, que se guarda como tasa—. Se aplica en los tres tipos, **sobre la base estimada de cada uno**:
