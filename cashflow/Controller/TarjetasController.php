@@ -77,6 +77,121 @@ function bodyJson() {
     return $data;
 }
 
+/* ============================================================================
+   ARMADO DE LAS FILAS DEL EJE
+
+   Cuatro helpers de PRESENTACION: adaptan lo que PagosTarjetas calculo a la forma
+   que EjeVista::armar() y armarAgrupado() esperan. No deciden nada de negocio -no
+   suman, no filtran por reglas, no eligen fechas- y por eso viven aca y no en las
+   clases: lo unico que hacen es acomodar campos.
+   ============================================================================ */
+
+/**
+ * Agrega a cada item una 'clave_eje' compuesta, para poder agrupar por mas de un
+ * campo.
+ *
+ * armarAgrupado() agrupa por UN campo. Las subfilas de una supervisora se agrupan
+ * por (supervisora, parte), asi que la clave se arma antes en vez de agregarle un
+ * segundo parametro a una funcion que usan cuatro pestanas.
+ *
+ * @param array $items
+ * @param array $campos
+ * @return array
+ */
+function conClave($items, $campos) {
+    $v = [];
+
+    foreach ($items as $item) {
+        $partes = [];
+
+        foreach ($campos as $c) {
+            $partes[] = isset($item[$c]) ? (string) $item[$c] : '';
+        }
+
+        $item['clave_eje'] = implode('|', $partes);
+        $v[] = $item;
+    }
+
+    return $v;
+}
+
+/**
+ * Agrega 'IMPORTE_EJE' a cada factura: su importe si proyecta, y CERO si no.
+ *
+ * ES LO QUE PERMITE QUE LAS QUE NO ENTRAN SIGAN EN LA GRILLA. Una factura
+ * excluida, cubierta por un resumen o vencida sin vincular tiene que verse -con sus
+ * columnas descriptivas, su marca y su motivo- y aportar cero al eje. Filtrarlas
+ * las escondería, y usar 'IMPORTE' las haria sumar.
+ *
+ * @param array $filas
+ * @return array
+ */
+function conImporteEje($filas) {
+    $v = [];
+
+    foreach ($filas as $f) {
+        $f['IMPORTE_EJE'] = !empty($f['PROYECTA']) ? floatval($f['IMPORTE']) : 0.0;
+        $v[] = $f;
+    }
+
+    return $v;
+}
+
+/**
+ * Deja solo los items que proyectan.
+ *
+ * A diferencia de las facturas, la cobertura y los resumenes que no proyectan SI se
+ * filtran del eje: no son filas de un listado que haya que poder revisar entera,
+ * son renglones calculados que se muestran aparte con su motivo.
+ *
+ * @param array $items
+ * @param string $campo
+ * @return array
+ */
+function soloProyectan($items, $campo) {
+    $v = [];
+
+    foreach ($items as $i) {
+        if (!empty($i[$campo])) {
+            $v[] = $i;
+        }
+    }
+
+    return $v;
+}
+
+/**
+ * Extrae de las filas de socios un item por (tarjeta, mes) con un campo como
+ * importe.
+ *
+ * SOLO LOS MESES QUE PROYECTAN, y solo los que tienen ese campo resuelto: un mes en
+ * null no es un cero, y mandarlo como cero al eje lo convertiria en uno.
+ *
+ * @param array $filas
+ * @param string $campo 'usd', 'usd_en_pesos' o 'ars'
+ * @return array
+ */
+function celdasDe($filas, $campo) {
+    $v = [];
+
+    foreach ($filas as $f) {
+        foreach ($f['celdas'] as $mes => $c) {
+            if (empty($c['proyecta']) || !isset($c[$campo]) || $c[$campo] === null) {
+                continue;
+            }
+
+            $v[] = [
+                'id_tarjeta' => $f['tarjeta']['ID'],
+                'mes' => $mes,
+                'fecha' => $c['fecha'],
+                'importe' => $c[$campo]
+            ];
+        }
+    }
+
+    return $v;
+}
+
 try {
     require_once __DIR__ . '/../Class/Tarjetas.php';
     require_once __DIR__ . '/../Class/TarjetasResumen.php';
@@ -85,6 +200,254 @@ try {
     $tarjetas = new Tarjetas();
 
     switch ($action) {
+        /* ================================================================
+           LA PESTANA COMPLETA
+
+           UN SOLO PEDIDO PARA LAS TRES SUB-PESTANAS, y no tres. Los insumos son
+           compartidos -las tarjetas, los resumenes, el calendario, la inflacion,
+           las dos cotizaciones- y PagosTarjetas los lee UNA vez: tres endpoints
+           harian tres veces la misma lectura, que contra la base real son unos
+           1,4 segundos cada una.
+
+           Y hay una razon mas fuerte: las tres sub-pestanas tienen que describir
+           el MISMO estado. Con tres pedidos, uno puede salir antes y otro despues
+           de que alguien cargue un resumen, y la pantalla mostraria dos momentos
+           distintos a la vez.
+           ================================================================ */
+        case 'getDatos':
+            require_once __DIR__ . '/../Class/PagosTarjetas.php';
+            require_once __DIR__ . '/../Class/Parametros.php';
+            require_once __DIR__ . '/../Class/Horizonte.php';
+            require_once __DIR__ . '/../Class/EjeVista.php';
+
+            $parametros = new Parametros();
+            $h = Horizonte::desdeParametros($parametros);
+            $datos = (new PagosTarjetas())->calcular($h);
+
+            /* LAS FILAS DEL EJE LAS ARMA EjeVista, Y NO EL NAVEGADOR.
+               armarAgrupado() ubica cada importe en su columna aplicando la regla
+               "un importe va a un dia O a su mes, nunca a los dos", que es la
+               misma que usa el tablero. Si el front repartiera los importes por
+               mes a partir del detalle, esa regla quedaria escrita una segunda vez
+               -y en JavaScript- y las columnas diarias se perderian.
+
+               UNA LLAMADA POR TIPO DE FILA: armarAgrupado() ubica en el eje UN
+               solo campo -el que recibe como importe- y sus 'camposSuma' son
+               totales escalares, no series por columna. Asi que cada renglon que
+               la pantalla dibuja con importes por columna necesita su propia
+               pasada sobre los mismos items. Son pasadas sobre listas de decenas
+               de elementos. */
+            $sup = $datos['supervisoras'];
+            $corp = $datos['corporativas'];
+            $soc = $datos['socios'];
+
+            echo json_encode([
+                'success' => true,
+                'data' => [
+                    /* EL EJE VA UNA SOLA VEZ: las tres sub-pestanas dibujan las
+                       mismas columnas, y crearEjeVistas() sabe armarse con esto.
+                       Un eje por sub-pestana serian tres copias del mismo dato. */
+                    'eje' => EjeVista::eje($h),
+                    'hoy' => $datos['hoy'],
+                    'meses' => $datos['meses'],
+                    'tablas' => $datos['tablas'],
+                    'avisos' => $datos['avisos'],
+                    'tarjetas' => array_values($datos['tarjetas']),
+                    'tipos' => Tarjetas::TIPOS,
+                    'origenes' => TarjetasResumen::ORIGENES,
+
+                    'supervisoras' => [
+                        'ventana' => $sup['ventana'],
+                        'cartel' => $sup['cartel'],
+                        'filas' => $sup['filas'],
+                        'avisos' => $sup['avisos'],
+                        'sin_tarjeta' => $sup['sin_tarjeta'],
+                        'disponible' => $sup['disponible'],
+
+                        /* Una fila por supervisora -el renglon que se ve- y una por
+                           supervisora y parte, que son las dos subfilas
+                           expandibles. */
+                        'eje_total' => EjeVista::armarAgrupado($h, $sup['pagos'],
+                            'supervisora', 'fecha', 'importe'),
+                        'eje_partes' => EjeVista::armarAgrupado($h,
+                            conClave($sup['pagos'], ['supervisora', 'parte']),
+                            'clave_eje', 'fecha', 'importe')
+                    ],
+
+                    'corporativas' => [
+                        'avisos' => $corp['avisos'],
+                        'disponible' => $corp['disponible'],
+                        'cobertura' => $corp['cobertura'],
+                        'resumenes' => $corp['resumenes'],
+
+                        /* UNA FILA POR VENCIMIENTO, con armar() y no
+                           armarAgrupado(): la grilla es el listado de facturas y
+                           cada fila es un vencimiento, igual que en Proveedores
+                           Locales.
+
+                           SE UBICA 'IMPORTE_EJE' Y NO 'IMPORTE': las que no
+                           proyectan -excluidas, cubiertas por un resumen, vencidas
+                           sin vincular- tienen que SEGUIR EN LA GRILLA con sus
+                           columnas descriptivas, pero aportar CERO al eje. Con
+                           'IMPORTE' aportarian su importe y el pie de la tabla
+                           dejaria de coincidir con la fila del tablero. */
+                        'eje' => EjeVista::armar($h,
+                            conImporteEje($corp['filas']), 'FECHA', 'IMPORTE_EJE'),
+
+                        'eje_cobertura' => EjeVista::armar($h,
+                            soloProyectan($corp['cobertura'], 'proyecta'),
+                            'fecha', 'importe'),
+                        'eje_resumenes' => EjeVista::armar($h,
+                            soloProyectan($corp['resumenes'], 'proyecta'),
+                            'fecha', 'importe')
+                    ],
+
+                    'socios' => [
+                        'cartel' => $soc['cartel'],
+                        'filas' => $soc['filas'],
+                        'avisos' => $soc['avisos'],
+                        'bcra' => $soc['bcra'],
+
+                        /* CUATRO RENGLONES POR TARJETA, y cada uno necesita su
+                           propia pasada: el total en pesos, el componente en U$S
+                           -informativo, no suma en pesos-, su equivalente en pesos
+                           y el componente en pesos. */
+                        'eje_total' => EjeVista::armarAgrupado($h, $soc['pagos'],
+                            'id_tarjeta', 'fecha', 'importe'),
+                        'eje_usd' => EjeVista::armarAgrupado($h,
+                            celdasDe($soc['filas'], 'usd'),
+                            'id_tarjeta', 'fecha', 'importe'),
+                        'eje_usd_pesos' => EjeVista::armarAgrupado($h,
+                            celdasDe($soc['filas'], 'usd_en_pesos'),
+                            'id_tarjeta', 'fecha', 'importe'),
+                        'eje_ars' => EjeVista::armarAgrupado($h,
+                            celdasDe($soc['filas'], 'ars'),
+                            'id_tarjeta', 'fecha', 'importe')
+                    ]
+                ]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           EL VINCULO FACTURA-TARJETA
+           ================================================================ */
+        case 'vincularFacturas':
+            require_once __DIR__ . '/../Class/TarjetasFactura.php';
+
+            $data = bodyJson();
+
+            if (!isset($data['comprobantes']) || !isset($data['id_tarjeta'])) {
+                throw new Exception('Faltan las facturas o la tarjeta');
+            }
+
+            $r = (new TarjetasFactura())->vincular($data['comprobantes'], $data['id_tarjeta'],
+                usuarioActual());
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['vinculadas'] . ' factura(s) vinculadas.'
+                    . ($r['movidas'] > 0
+                        ? ' ' . $r['movidas'] . ' estaban en otra tarjeta y se movieron; las dos '
+                          . 'decisiones quedan en el historial.'
+                        : '')
+                    . ' Ahora generan cobertura y un resumen de esa tarjeta las puede reemplazar.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'desvincularFacturas':
+            require_once __DIR__ . '/../Class/TarjetasFactura.php';
+
+            $data = bodyJson();
+
+            if (!isset($data['comprobantes'])) {
+                throw new Exception('Faltan las facturas');
+            }
+
+            $r = (new TarjetasFactura())->desvincular($data['comprobantes'], usuarioActual());
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['desvinculadas'] . ' factura(s) desvinculadas. No se borra nada: '
+                    . 'queda en el historial. Dejan de generar cobertura, y si están vencidas '
+                    . 'dejan de entrar al flujo, porque sin tarjeta no hay fecha de pago.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           LA EXCLUSION POR FACTURA, DE ESTA PESTANA
+           ================================================================ */
+        case 'excluirFacturas':
+            require_once __DIR__ . '/../Class/TarjetasExclusion.php';
+
+            $data = bodyJson();
+
+            if (!isset($data['comprobantes'])) {
+                throw new Exception('Faltan las facturas');
+            }
+
+            $r = (new TarjetasExclusion())->excluir($data['comprobantes'],
+                isset($data['motivo']) ? $data['motivo'] : null, usuarioActual());
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['excluidas'] . ' factura(s) excluidas de Pagos con Tarjetas y '
+                    . 'Otros.'
+                    . ($r['ya_estaban'] > 0
+                        ? ' ' . $r['ya_estaban'] . ' ya estaban excluidas y no se tocaron: su '
+                          . 'motivo anterior se conserva.'
+                        : '')
+                    . ' Salen de la fila del tablero y van a su propia serie, que es '
+                    . 'informativa. NO se excluyen de Cuentas a Pagar Locales.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'incluirFacturas':
+            require_once __DIR__ . '/../Class/TarjetasExclusion.php';
+
+            $data = bodyJson();
+
+            if (!isset($data['comprobantes'])) {
+                throw new Exception('Faltan las facturas');
+            }
+
+            $r = (new TarjetasExclusion())->incluir($data['comprobantes'], usuarioActual());
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['incluidas'] . ' factura(s) volvieron al flujo. El motivo de la '
+                    . 'exclusión queda en el historial: describe una decisión que estuvo '
+                    . 'vigente.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* El historial de un comprobante: a que tarjetas estuvo vinculado y que
+           exclusiones tuvo. Los dos juntos, porque la pregunta que alguien se hace
+           frente a una factura rara es "que le pasó a esta factura". */
+        case 'getHistorialFactura':
+            require_once __DIR__ . '/../Class/TarjetasFactura.php';
+            require_once __DIR__ . '/../Class/TarjetasExclusion.php';
+
+            foreach (['cod_provee', 't_comp', 'n_comp'] as $campo) {
+                if (!isset($_GET[$campo])) {
+                    throw new Exception('Falta ' . $campo);
+                }
+            }
+
+            echo json_encode([
+                'success' => true,
+                'data' => [
+                    'vinculos' => (new TarjetasFactura())->historial($_GET['cod_provee'],
+                        $_GET['t_comp'], $_GET['n_comp']),
+                    'exclusiones' => (new TarjetasExclusion())->historial($_GET['cod_provee'],
+                        $_GET['t_comp'], $_GET['n_comp'])
+                ]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         /* ================================================================
            EL MAESTRO
            Lo pide Parametros -> Tarjetas, y tambien las tres sub-pestanas para
