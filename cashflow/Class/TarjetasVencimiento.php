@@ -277,6 +277,86 @@ class TarjetasVencimiento {
         return null;
     }
 
+    /**
+     * El PROXIMO PAGO de una tarjeta: la primera fecha posterior a hoy, sea la de
+     * un resumen ya cargado o la de una estimacion.
+     *
+     * PARA QUE EXISTE, Y POR QUE MIRA LAS DOS COSAS
+     * ---------------------------------------------
+     * Dos partes del modulo necesitan exactamente esta pregunta, y tienen que
+     * contestarla igual:
+     *
+     *   - Tarjetas Pagos Corporativos, para ubicar una factura YA VENCIDA: una
+     *     tarjeta se paga una vez por mes, asi que esa factura sale en el proximo
+     *     pago de su tarjeta y no apilada en el primer dia del eje.
+     *
+     *   - Tarjetas Socios, para decidir con que dolar se convierte el componente
+     *     en U$S: el proximo vencimiento se valua con el dolar oficial del BCRA y
+     *     los siguientes con dolar futuro.
+     *
+     * MIRA LOS RESUMENES Y LAS ESTIMACIONES JUNTOS porque el proximo pago real
+     * puede ser cualquiera de los dos: si hay un resumen cargado para el mes en
+     * curso que vence dentro de tres dias, ESE es el proximo pago, y no el
+     * vencimiento estimado del mes que viene. Mirar solo las estimaciones correria
+     * la fecha un mes entero.
+     *
+     * UN RESUMEN PAGADO NO CUENTA. Ya salio: no es un pago que venga, y tomarlo
+     * como el proximo dejaria afuera al que si viene.
+     *
+     * DEVUELVE null SI NINGUNO ES POSTERIOR. No se estira el calendario para
+     * encontrar uno: si el eje se termina antes, eso es lo que hay que informar.
+     *
+     * Estatica y pura.
+     *
+     * @param int $dia Dia de vencimiento de la tarjeta
+     * @param array $resumenes Mapa 'Y-m' => resumen vigente de esa tarjeta
+     * @param array $meses Lista de 'Y-m' EN ORDEN CRONOLOGICO
+     * @param array $habiles Mapa 'Y-m-d' => bool
+     * @param string $hoy 'Y-m-d'
+     * @return array|null ['mes', 'fecha', 'origen' => 'RESUMEN'|'ESTIMACION',
+     *                     'vencimiento' => (lo de delMes()) | null]
+     */
+    public static function proximoPago($dia, $resumenes, $meses, $habiles, $hoy) {
+        $hoyStr = substr((string) $hoy, 0, 10);
+        $mejor = null;
+
+        foreach (is_array($meses) ? $meses : [] as $mes) {
+            $r = isset($resumenes[$mes]) ? $resumenes[$mes] : null;
+
+            if ($r !== null) {
+                /* UN RESUMEN PAGADO NO ES UN PAGO QUE VENGA. Se saltea el mes
+                   entero: el resumen pisa la estimacion, asi que tampoco hay una
+                   estimacion que cobrar en ese mes. */
+                if (!empty($r['PAGADO'])) {
+                    continue;
+                }
+
+                $fecha = $r['FECHA_VENCIMIENTO'];
+                $origen = 'RESUMEN';
+                $vencimiento = null;
+            } else {
+                $v = self::delMes($dia, $mes, $habiles);
+                $fecha = $v['fecha'];
+                $origen = 'ESTIMACION';
+                $vencimiento = $v;
+            }
+
+            if ($fecha === null || $fecha <= $hoyStr) {
+                continue;
+            }
+
+            /* EL MAS TEMPRANO GANA, y no el primero que aparece: la fecha de un
+               resumen se tipea, asi que puede caer antes que la estimacion de un
+               mes anterior. Recorrer los meses en orden no alcanza. */
+            if ($mejor === null || $fecha < $mejor['fecha']) {
+                $mejor = ['mes' => $mes, 'fecha' => $fecha, 'origen' => $origen,
+                          'vencimiento' => $vencimiento];
+            }
+        }
+
+        return $mejor;
+    }
+
     /* ====================================================================
        PARA LA PANTALLA
        ==================================================================== */
