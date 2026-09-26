@@ -38,17 +38,42 @@ $disponibles = array_values(array_filter($todos, function ($p) { return $p['disp
 // Ventas, Cobranzas FR, Cobranzas May, Proveedores Exterior, Nacionalizaciones,
 // Compras Proyectadas, Saldos, Caja Locales, Cuentas de inversion, Cuentas
 // comitente, Cobranzas Electronicas, Echeqs, Dolares Cuenta Comitente,
-// Exportaciones Tasky, Saldo de Inversiones, Cobertura, Proveedores Locales y
-// Logistica. Los dos de Otros Ingresos estan retirados pero siguen disponibles:
-// sirven lo que tienen cargado.
-chequear('hay 18 modulos con datos reales', 18, count($disponibles));
+// Exportaciones Tasky, Saldo de Inversiones, Cobertura, Proveedores Locales,
+// Logistica y Pagos con Tarjetas y Otros. Los dos de Otros Ingresos estan
+// retirados pero siguen disponibles: sirven lo que tienen cargado.
+chequear('hay 19 modulos con datos reales', 19, count($disponibles));
 
-/* LOGISTICA es el ultimo en sumarse, y es el unico del grupo de egresos
-   pendientes que ya tiene proveedor: los demas -Haberes, Alquileres, Impuestos,
-   Llaves, Financiero, Otros- siguen en 'disponible' => false, rindiendo cero y
-   avisando. */
+/* TARJETAS es el ultimo en sumarse, y LOGISTICA el anterior: son los dos unicos
+   del grupo de egresos pendientes que ya tienen proveedor. Los demas -Haberes,
+   Alquileres, Impuestos, Llaves, Financiero, Otros- siguen en
+   'disponible' => false, rindiendo cero y avisando. */
 chequear('Logistica ya tiene proveedor', true, CashflowRegistry::disponible('LOGISTICA'));
+chequear('y Tarjetas tambien', true, CashflowRegistry::disponible('TARJETAS'));
 chequear('Haberes todavia no', false, CashflowRegistry::disponible('HABERES'));
+
+/* FINANCIERO NO SE TOCO, y no es un olvido: es otro circuito -prestamos y
+   movimientos financieros-, sigue apuntando a la pestana prestamos y su fila del
+   tablero vive en la seccion AJUSTES, hoy inhabilitada. Las tarjetas entraron por
+   un proveedor propio en vez de adentro de el, porque son dos cosas que se cargan
+   y se miran por separado. */
+chequear('Financiero sigue sin proveedor', false, CashflowRegistry::disponible('FINANCIERO'));
+chequear('y sigue apuntando a prestamos', 'prestamos',
+    CashflowRegistry::meta('FINANCIERO')['tab']);
+chequear('Tarjetas apunta a su propia pestana', 'pagos_tarjetas',
+    CashflowRegistry::meta('TARJETAS')['tab']);
+
+/* EL TOTAL Y SUS TRES PARTES estan declarados como componentes, asi que el
+   validador rechaza activar una parte al lado del total: el mismo peso entraria
+   dos veces. */
+$compTarjetas = CashflowRegistry::meta('TARJETAS')['componentes']['TOTAL'];
+
+chequear('TOTAL declara sus tres partes',
+    ['SUPERVISORAS', 'CORPORATIVAS', 'SOCIOS'], $compTarjetas);
+
+/* LAS EXCLUIDAS NO SON COMPONENTE DEL TOTAL, y por eso pueden convivir con la fila
+   del total: su importe NO esta en el total, que es lo que las hace informativas. */
+chequear('las excluidas no son componente del total', false,
+    in_array('CORPORATIVAS_EXCLUIDAS', $compTarjetas, true));
 
 /* COMPRAS_PROY ES UN PROVEEDOR APARTE DE LOS DOS DE COMEX, y tiene que serlo:
    miden universos disjuntos -lo que ya tiene contenedor cargado contra lo que
