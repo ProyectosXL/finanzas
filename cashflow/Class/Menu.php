@@ -191,6 +191,42 @@ class Menu {
     ];
 
     /**
+     * El menu completo, SIN filtrar por permisos, con el estado de cada pestana
+     * ya resuelto y el conteo por categoria.
+     *
+     * POR QUE EXISTE APARTE DE estructura()
+     * -------------------------------------
+     * Son dos preguntas distintas y conviene no mezclarlas:
+     *
+     *   "que pestanas TIENE el modulo"    -> esta. Es un hecho del codigo.
+     *   "cuales puede ver ESTE usuario"   -> estructura(). Depende de la sesion.
+     *
+     * La vista usa la segunda. La primera la usan las pruebas, que corren por
+     * linea de comandos y no tienen sesion: con la filtrada, un test de la
+     * ESTRUCTURA del menu mediria los permisos del usuario anonimo -o sea,
+     * ninguno- y fallaria entero sin que hubiera nada roto en el menu.
+     *
+     * @return array ['principales' => [...], 'categorias' => [...], 'pie' => [...]]
+     */
+    public static function estructuraCompleta() {
+        $categorias = [];
+
+        foreach (self::$categorias as $cat) {
+            $items = self::resolverItems($cat['items']);
+            $cat['items'] = $items;
+            $cat['con_datos'] = self::contarConDatos($items);
+            $cat['total'] = count($items);
+            $categorias[] = $cat;
+        }
+
+        return [
+            'principales' => self::resolverItems(self::$principales),
+            'categorias' => $categorias,
+            'pie' => self::resolverItems(self::$pie)
+        ];
+    }
+
+    /**
      * El menu completo, filtrado por los permisos del rol del usuario actual,
      * con el estado de cada pestana ya resuelto y el conteo por categoria.
      *

@@ -1,8 +1,15 @@
 /**
  * Parámetros JavaScript
- * Pestaña de nivel raíz. Hoy expone los parámetros del módulo de Ventas
- * (generales, mix de cobro y participación de respaldo) y está pensada para ir
- * absorbiendo los de los demás módulos.
+ * La pestaña de nivel raíz y la sub-pestaña VENTAS: el mix de cobro y la
+ * participación fija de respaldo.
+ *
+ * Carga el payload de TODOS los módulos —cada sub-pestaña resuelve el suyo con
+ * buscarModulo()— y es quien muestra el wrapper y los avisos comunes. Los demás
+ * módulos tienen cada uno su propio archivo y su propio JS.
+ *
+ * LOS PARÁMETROS GENERALES YA NO ESTÁN ACÁ: la alícuota, el horizonte y los
+ * feriados se fueron a la sub-pestaña Generales (Js/Parametros-Generales.js).
+ * No movían sólo esta pantalla, así que vivir bajo Ventas los describía mal.
  */
 
 (function() {
@@ -66,20 +73,6 @@
             cont.innerHTML = '<i class="fas fa-circle-info me-1"></i>' + escapar(modulo.descripcion);
         }
     }
-
-    // Cómo se edita cada parámetro general. Los porcentajes se muestran en % y
-    // se guardan en tasa; el resto va tal cual.
-    var FORMATO = {
-        // 'dias_prechequeado' ya no está: los días de pre-chequeado son POR
-        // CLIENTE y se editan en Parámetros → Pre-chequeado. La fila sigue en
-        // la tabla, pero Parametros::RETIRADOS la saca del listado.
-        'alicuota_iva':            { tipo: 'porcentaje', sufijo: '%',     paso: '0.01' },
-        'horizonte_dias':          { tipo: 'entero',     sufijo: 'días',  paso: '1' },
-        'horizonte_meses':         { tipo: 'entero',     sufijo: 'meses', paso: '1' },
-        'feriados_comercio':       { tipo: 'texto',      sufijo: '',      paso: null },
-        'cobranzas_may_dias_vto':  { tipo: 'entero',     sufijo: 'días',  paso: '1' },
-        'exportaciones_tasky_dias_cobro': { tipo: 'entero', sufijo: 'días', paso: '1' }
-    };
 
     function inicializar() {
         console.log('Inicializando Parámetros');
@@ -148,7 +141,6 @@
 
                 pintarAvisos();
                 pintarDescripcion();
-                generarGenerales();
                 generarMix();
                 generarRespaldo();
                 Cargando.ocultar('loadingParametros');
@@ -161,107 +153,16 @@
     }
 
     /* ================================================================
-       GENERALES
+       GENERALES: YA NO ESTÁN ACÁ
+
+       La alícuota, el horizonte y los feriados de comercio se fueron a la
+       sub-pestaña Generales, que tiene su propio archivo y su propio JS
+       (Js/Parametros-Generales.js). No movían sólo esta pantalla: el horizonte
+       es el eje de todo el módulo.
+
+       Lo que este archivo dibuja es lo que de verdad sólo afecta a Ventas: el
+       mix de cobro y la participación fija de respaldo.
        ================================================================ */
-
-    function generarGenerales() {
-        var html = '';
-
-        modulo.generales.forEach(function(param) {
-            var fmt = FORMATO[param.CLAVE] || { tipo: 'texto', sufijo: '', paso: null };
-            var valor = param.VALOR;
-
-            if (fmt.tipo === 'porcentaje') {
-                valor = (parseFloat(valor) * 100).toFixed(2);
-            }
-
-            var input = (fmt.tipo === 'texto')
-                ? '<input type="text" class="form-control param-input text-start" ' +
-                      'data-clave="' + param.CLAVE + '" data-tipo="' + fmt.tipo + '" ' +
-                      'value="' + escapar(valor) + '">'
-                : '<input type="number" step="' + fmt.paso + '" class="form-control param-input" ' +
-                      'data-clave="' + param.CLAVE + '" data-tipo="' + fmt.tipo + '" ' +
-                      'value="' + escapar(valor) + '">';
-
-            html += '<div class="col-md-6 col-lg-4">' +
-                        '<div class="param-card" id="card-' + param.CLAVE + '">' +
-                            '<div class="param-clave">' + etiqueta(param.CLAVE) + '</div>' +
-                            '<div class="param-descripcion">' + escapar(param.DESCRIPCION || '') + '</div>' +
-                            '<div class="input-group input-group-sm">' +
-                                input +
-                                (fmt.sufijo ? '<span class="input-group-text">' + fmt.sufijo + '</span>' : '') +
-                            '</div>' +
-                            '<div class="param-hint">' + hint(param.CLAVE) + '</div>' +
-                        '</div>' +
-                    '</div>';
-        });
-
-        // Los ids de esta pestaña son globales y únicos: si el bloque no está
-        // en el DOM, hay que salir en vez de romper. Antes esto reventaba el
-        // resto del pintado.
-        var gridGenerales = document.getElementById('gridGenerales');
-
-        if (!gridGenerales) {
-            return;
-        }
-
-        gridGenerales.innerHTML = html;
-
-        // Guardado al salir del campo
-        document.querySelectorAll('#gridGenerales .param-input').forEach(function(input) {
-            input.addEventListener('change', function() {
-                guardarGeneral(input);
-            });
-        });
-    }
-
-    function guardarGeneral(input) {
-        var clave = input.dataset.clave;
-        var tipo = input.dataset.tipo;
-        var valor = input.value;
-
-        if (tipo === 'porcentaje') {
-            var num = parseFloat(valor);
-
-            if (isNaN(num)) {
-                // Se marca el campo y no sólo se avisa: el bloque de generales
-                // tiene cinco inputs iguales y el mensaje solo no dice cuál.
-                Notificacion.campoInvalido(input,
-                    'El valor de ' + etiqueta(clave) + ' debe ser numérico.');
-
-                return;
-            }
-
-            valor = String(num / 100);
-        } else if (tipo === 'entero') {
-            var ent = parseInt(valor, 10);
-
-            if (isNaN(ent) || ent < 0) {
-                Notificacion.campoInvalido(input,
-                    'El valor de ' + etiqueta(clave) + ' debe ser un entero no negativo.');
-
-                return;
-            }
-
-            valor = String(ent);
-        }
-
-        pedir('Controller/ParametrosController.php?action=saveParametro', {
-            clave: clave,
-            valor: valor
-        })
-        .then(function() {
-            destacar('card-' + clave);
-        })
-        .catch(function(error) {
-            // El campo se recarga con el valor que quedó guardado, así que hay
-            // que decir que lo tipeado NO es lo que está en la base.
-            Notificacion.error('No se pudo guardar ' + etiqueta(clave) + ': ' + error.message, {
-                detalle: 'El campo vuelve al último valor guardado.'
-            });
-            cargar();
-        });
-    }
 
     /* ================================================================
        MIX DE COBRO
@@ -708,28 +609,11 @@
         }) + '%';
     }
 
-    /** alicuota_iva -> Alicuota Iva */
-    function etiqueta(clave) {
-        return titulo(String(clave).replace(/_/g, ' '));
-    }
-
+    /** LOCALES -> Locales. Lo usa el mix, que muestra canales y medios de pago */
     function titulo(texto) {
         return String(texto).toLowerCase().replace(/(^|\s)\S/g, function(c) {
             return c.toUpperCase();
         });
-    }
-
-    function hint(clave) {
-        var hints = {
-            'alicuota_iva': 'Se aplica sobre la venta neta proyectada de los cuatro canales.',
-            'horizonte_dias': 'Cantidad de columnas diarias de la proyección.',
-            'horizonte_meses': 'Cantidad de columnas mensuales de la proyección.',
-            'feriados_comercio': 'Formato MM-DD separado por coma. Únicos días del año sin venta estimada.',
-            'cobranzas_may_dias_vto': 'Días de plazo a sumar a la fecha de emisión para proyectar la fecha probable de cobro mayorista.',
-            'exportaciones_tasky_dias_cobro': 'Días a sumar a la fecha de emisión de las facturas en dólares a Tasky para estimar su cobro.'
-        };
-
-        return hints[clave] || '';
     }
 
     function escapar(texto) {
@@ -738,19 +622,6 @@
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
-    }
-
-    function destacar(id) {
-        var el = document.getElementById(id);
-
-        if (!el) {
-            return;
-        }
-
-        el.classList.add('param-guardado');
-        setTimeout(function() {
-            el.classList.remove('param-guardado');
-        }, 1200);
     }
 
     function mostrar(id, visible, display) {
