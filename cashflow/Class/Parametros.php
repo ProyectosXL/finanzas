@@ -156,6 +156,29 @@ class Parametros {
                 . 'y la validación de su importación',
             'secciones' => ['prov_locales_opciones']
         ],
+        /* VA PEGADA A PROV. LOCALES, igual que Logistica y por el mismo motivo:
+           las facturas de Tarjetas Pagos Corporativos son facturas pendientes de
+           Tango de proveedores locales -las de forma de pago vigente TARJETA
+           CORP-, asi que las dos pantallas se miran juntas. Y la exclusion que
+           evita contar dos veces un gasto de supervisora cargado tambien en Tango
+           se carga en la otra. */
+        'TARJETAS' => [
+            'nombre' => 'Tarjetas',
+            'icono' => 'fa-credit-card',
+            'descripcion' => 'El maestro de tarjetas: de qué tipo es cada una —y con eso, en '
+                . 'qué sub-pestaña aparece—, de qué banco, de quién, su % de cobertura y qué '
+                . 'día del mes vence su resumen. Alimentan las tres sub-pestañas de Financiero '
+                . '› Pagos con Tarjetas y Otros y la fila Pagos con Tarjetas y Otros del '
+                . 'tablero',
+            'secciones' => ['tarjetas'],
+            /* El maestro se lee desde CUATRO pantallas -esta y las tres
+               sub-pestanas, que ademas cargan los resumenes contra la misma
+               tarjeta- asi que sus endpoints viven en el controller del modulo y
+               no en este. Dos endpoints escribiendo las mismas tablas se
+               desincronizan en la primera validacion que alguien agregue de un
+               solo lado. Mismo criterio que LOGISTICA y que CASHFLOW. */
+            'endpoint' => 'Controller/TarjetasController.php'
+        ],
         'CASHFLOW' => [
             'nombre' => 'Cashflow',
             'icono' => 'fa-table-cells',
@@ -416,6 +439,46 @@ class Parametros {
                         $modulo['avisos'][] = 'No se pudieron leer los fleteros: '
                             . $e->getMessage();
                     }
+                } elseif ($seccion === 'tarjetas') {
+                    /* Mismo criterio que Saldos, Logistica y los demas: las
+                       tablas son del modulo Tarjetas y las lee su propia clase,
+                       dentro de un try porque su script puede no haberse corrido
+                       todavia y eso no puede tumbar la pestana entera.
+
+                       SE PIDEN TODAS, tambien las inactivas: el editor tiene que
+                       poder reactivar una baja, y una tarjeta que se dejo de usar
+                       conserva sus resumenes.
+
+                       LOS BANCOS Y LOS USUARIOS VIAJAN CON LA GRILLA. Sin ellos
+                       el alta no tiene de donde elegir, y el nombre del usuario
+                       no se tipea: sale de la vista. */
+                    try {
+                        $tarjetas = $this->tarjetas();
+
+                        $modulo['tarjetas'] = [
+                            'filas' => $tarjetas->getTarjetas(false),
+                            'tipos' => Tarjetas::TIPOS,
+                            'bancos' => $tarjetas->bancos(),
+                            'usuarios' => $tarjetas->usuarios(),
+                            'tabla_creada' => $tarjetas->tablaCreada(),
+                            'vista_creada' => $tarjetas->vistaUsuariosCreada(),
+                            'bancos_disponibles' => $tarjetas->bancosDisponibles(),
+                            'dia_max' => TarjetasVencimiento::DIA_MAX,
+                            'pct_max' => Tarjetas::PCT_MAX
+                        ];
+
+                        foreach ($tarjetas->avisos() as $a) {
+                            $modulo['avisos'][] = $a;
+                        }
+                    } catch (Throwable $e) {
+                        $modulo['tarjetas'] = ['filas' => [], 'tipos' => Tarjetas::TIPOS,
+                                               'bancos' => [], 'usuarios' => [],
+                                               'tabla_creada' => false, 'vista_creada' => false,
+                                               'bancos_disponibles' => false,
+                                               'dia_max' => 31, 'pct_max' => 100];
+                        $modulo['avisos'][] = 'No se pudieron leer las tarjetas: '
+                            . $e->getMessage();
+                    }
                 } elseif ($seccion === 'cotizaciones') {
                     $modulo['cotizaciones'] = $this->cotizaciones($modulo['avisos']);
                 } elseif ($seccion === 'prov_locales_opciones') {
@@ -481,6 +544,25 @@ class Parametros {
         }
 
         return $this->logistica;
+    }
+
+    /**
+     * Puerta al maestro de tarjetas.
+     *
+     * Lazy por el mismo motivo que las demas: no pagar la carga -que arrastra la
+     * lectura de BANCO y de la vista de usuarios- cuando la pestana solo mira
+     * otro modulo.
+     *
+     * @return Tarjetas
+     */
+    public function tarjetas() {
+        require_once __DIR__ . '/Tarjetas.php';
+
+        if ($this->tarjetas === null) {
+            $this->tarjetas = new Tarjetas();
+        }
+
+        return $this->tarjetas;
     }
 
     /**
@@ -712,6 +794,9 @@ class Parametros {
 
     /** @var Logistica|null Puerta al maestro de fleteros; la resuelve logistica() */
     private $logistica = null;
+
+    /** @var Tarjetas|null Puerta al maestro de tarjetas; la resuelve tarjetas() */
+    private $tarjetas = null;
 
     function __construct(){
         require_once __DIR__.'/../../class/conexion.php';
