@@ -157,8 +157,8 @@ class InformeEconomico {
         $tccAA = null;
 
         if ($moneda === 'USD') {
-            $c = Cotizacion::promedio($this->cid, $okActual);
-            $cAA = $okAA ? Cotizacion::promedio($this->cid, $okAA) : ['tcc' => null, 'faltantes' => []];
+            $c = Cotizacion::porMes($this->cid, $okActual);
+            $cAA = $okAA ? Cotizacion::porMes($this->cid, $okAA) : ['tcc' => null, 'faltantes' => []];
             $falta = array_merge($c['faltantes'], $cAA['faltantes']);
 
             if ($c['tcc'] === null || ($okAA && $cAA['tcc'] === null)) {
@@ -177,7 +177,7 @@ class InformeEconomico {
         if ($moneda === 'USD') {
             $ix = Cascada::convertir($ix, $tcc);
 
-            if ($tccAA) {
+            if ($tccAA !== null) {
                 $ixAA = Cascada::convertir($ixAA, $tccAA);
             }
         }

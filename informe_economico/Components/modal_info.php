@@ -55,7 +55,7 @@
             <details>
                 <summary><i class="bi bi-currency-exchange"></i> Moneda y comparativo</summary>
                 <div class="ie-acordeon-body">
-                    <p>En U$S cada importe se divide por el TCC promedio del rango (<code>RO_V_DOLAR_OFICIAL_BCRA</code>); los % no cambian. Si falta la cotización de algún mes, el informe se muestra en pesos con un aviso.</p>
+                    <p>En U$S cada importe se divide por el TCC de cierre de su propio mes (<code>RO_V_DOLAR_OFICIAL_BCRA</code>), y las columnas de varios meses suman esos dólares. Dentro de un mes los % no cambian. Si falta la cotización de algún mes, el informe se muestra en pesos con un aviso.</p>
                     <p>"Comparar con año anterior" usa el mismo rango doce meses antes. La variación de un importe es % sobre el valor absoluto del año anterior; la de un % es la diferencia en puntos.</p>
                 </div>
             </details>

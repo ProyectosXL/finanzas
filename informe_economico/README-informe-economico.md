@@ -61,7 +61,7 @@ Tener la clave `hub.app.informe_economico` no alcanza para que la tarjeta aparez
 | | `Class/Semaforo.php` | El color de un indicador |
 | | `Class/HistorialEdicion.php` | Marca de editado, pisado, deshacer, restaurar, validación del importe |
 | Base | `Class/BaseIE.php` | Conexión y helpers; todo parametrizado |
-| | `Class/Cotizacion.php` | TCC promedio de `RO_V_DOLAR_OFICIAL_BCRA` |
+| | `Class/Cotizacion.php` | TCC de cierre de cada mes de `RO_V_DOLAR_OFICIAL_BCRA` |
 | | `Class/Sucursales.php` | Locales cerrados, de `SUCURSALES_LAKERS` |
 | | `Class/EstructuraFilas.php`, `Class/ParametrosIE.php` | Configuración |
 | | `Class/Ediciones.php` | Detalle de una celda y escritura con historial |
@@ -150,9 +150,9 @@ Nunca un 0 inventado. Una suma es `null` solo si todos sus términos lo son: un 
 
 ### Moneda
 
-En U$S, cada importe se divide por el **TCC promedio del rango** en `RO_V_DOLAR_OFICIAL_BCRA`, y el año anterior por el suyo. La conversión se hace **antes** de la cascada, así que todo ratio queda igual; está probado.
+En U$S, cada importe se divide por el **TCC de cierre de su propio mes** en `RO_V_DOLAR_OFICIAL_BCRA` (la vista ya trae una fila por mes con el último día cargado). No hay un TCC único del rango: una columna de enero a marzo suma enero al cierre de enero, febrero al de febrero y marzo al de marzo. El año anterior, igual con sus meses. La conversión se hace **antes** de la cascada: dentro de un mes todo ratio queda igual que en pesos; en un rango, cada mes pesa por su valor en dólares. Está probado.
 
-Si falta la cotización de **algún** mes, el informe se muestra en pesos con un aviso. Acá hay una diferencia con rentabilidad_rubro, que promedia los meses que encuentra: un promedio de 11 meses presentado como de 12 es un número inventado.
+Si falta la cotización de **algún** mes, el informe se muestra en pesos con un aviso: un mes sin convertir sumado a meses en dólares es un número inventado. Acá hay una diferencia con rentabilidad_rubro, que promedia las cotizaciones de los meses que encuentra.
 
 ### Avisos que no cortan el informe
 

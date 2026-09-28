@@ -38,6 +38,6 @@ chequear('Sin nombre en el maestro lo dice', '9.1. Rubro sin nombre en el maestr
 $sinNada = EstructuraFilas::expandir($config, Rubros::clasificar(['1.5.'], $maestro), $maestro);
 chequear('Sin rubros huerfanos no hay bloque', false, in_array('TIT_SIN_SECCION', array_column($sinNada['filas'], 'id'), true));
 
-seccion('Cotizacion promedio del rango');
-chequear('Promedio de los meses', ['tcc' => 1450.0, 'faltantes' => []], Cotizacion::promediar(['1-2026', '2-2026'], ['1-2026' => 1400.0, '2-2026' => 1500.0]));
-chequear('Si falta un mes no hay USD', ['tcc' => null, 'faltantes' => ['2-2026']], Cotizacion::promediar(['1-2026', '2-2026'], ['1-2026' => 1400.0]));
+seccion('Cotizacion de cierre de cada mes');
+chequear('El cierre de cada mes, sin promediar', ['tcc' => ['1-2026' => 1400.0, '2-2026' => 1500.0], 'faltantes' => []], Cotizacion::completar(['1-2026', '2-2026'], ['1-2026' => 1400.0, '2-2026' => 1500.0]));
+chequear('Si falta un mes no hay USD', ['tcc' => null, 'faltantes' => ['2-2026']], Cotizacion::completar(['1-2026', '2-2026'], ['1-2026' => 1400.0]));

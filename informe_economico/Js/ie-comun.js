@@ -122,8 +122,14 @@ IE.pintarAvisos = function (id, avisos) {
     if (!el) return;
 
     var iconos = { info: 'bi-info-circle', warning: 'bi-exclamation-triangle', danger: 'bi-exclamation-octagon' };
+    avisos = avisos || [];
 
-    el.innerHTML = (avisos || []).map(function (a) {
+    if (!avisos.length) {
+        el.innerHTML = '';
+        return;
+    }
+
+    var items = avisos.map(function (a) {
         var det = '';
 
         if (a.detalle && a.detalle.length) {
@@ -140,6 +146,113 @@ IE.pintarAvisos = function (id, avisos) {
         return '<div class="ie-aviso ie-aviso-' + a.nivel + '"><i class="bi ' + (iconos[a.nivel] || iconos.info) + '"></i>'
             + '<div>' + IE.esc(a.texto) + link + det + '</div></div>';
     }).join('');
+
+    // Contraíble: el resumen dice cuántos hay de cada nivel. Se recuerda si
+    // el usuario lo dejó abierto; un aviso danger lo abre siempre.
+    var cuenta = {};
+    avisos.forEach(function (a) { cuenta[a.nivel] = (cuenta[a.nivel] || 0) + 1; });
+
+    var chips = ['danger', 'warning', 'info'].filter(function (n) { return cuenta[n]; }).map(function (n) {
+        return '<span class="ie-avisos-chip ie-aviso-' + n + '"><i class="bi ' + iconos[n] + '"></i> ' + cuenta[n] + '</span>';
+    }).join('');
+
+    var abierto = false;
+    try { abierto = localStorage.getItem('ieAvisosAbierto') === '1'; } catch (e) { /* sin storage */ }
+    if (cuenta.danger) abierto = true;
+
+    el.innerHTML = '<details class="ie-avisos-panel"' + (abierto ? ' open' : '') + '>'
+        + '<summary><span>Avisos (' + avisos.length + ')</span>' + chips + '</summary>'
+        + '<div class="ie-avisos-lista">' + items + '</div></details>';
+
+    el.querySelector('details').addEventListener('toggle', function () {
+        try { localStorage.setItem('ieAvisosAbierto', this.open ? '1' : '0'); } catch (e) { /* sin storage */ }
+    });
+};
+
+/* ── Tablas ordenables ───────────────────────────────────────────────────── */
+
+/**
+ * Ordena las filas del tbody haciendo clic en el encabezado. Cada celda lleva
+ * su valor crudo en data-orden (vacío = sin dato, va siempre al final); sin
+ * data-orden se usa el texto. Las filas con data-fijo quedan abajo, en su
+ * orden. Un th con data-no-ord no ordena.
+ *
+ * El estado {col, dir} lo guarda quien llama, así sobrevive a un redibujo.
+ * col es el texto del encabezado (o su data-col), no la posición: si un
+ * redibujo agrega o saca columnas, el orden sigue en la misma.
+ * Primer clic: los números de mayor a menor, los textos (th data-tipo="txt")
+ * de la A a la Z (data-dir="1" o "-1" lo fija); el segundo invierte.
+ */
+IE.ordenable = function (tabla, estado) {
+    if (!tabla || !tabla.tHead) return;
+
+    var ths = Array.prototype.slice.call(tabla.tHead.rows[0].cells);
+    var body = tabla.tBodies[0];
+
+    function clave(th) { return th.dataset.col || th.textContent.trim(); }
+
+    Array.prototype.forEach.call(body.rows, function (tr, i) { tr.dataset.i = i; });
+
+    function aplicar() {
+        var idx = ths.findIndex(function (th) { return clave(th) === estado.col; });
+        var txt = idx >= 0 && ths[idx].dataset.tipo === 'txt';
+
+        function valor(tr) {
+            var td = tr.cells[idx];
+            if (!td) return null;
+
+            var v = td.dataset.orden !== undefined ? td.dataset.orden : td.textContent.trim();
+            if (v === '' || v === 'NA') return null;
+
+            return txt ? v.toLowerCase() : parseFloat(v);
+        }
+
+        var filas = Array.prototype.slice.call(body.rows);
+        var fijas = filas.filter(function (tr) { return tr.hasAttribute('data-fijo'); });
+        var movibles = filas.filter(function (tr) { return !tr.hasAttribute('data-fijo'); });
+
+        movibles.sort(function (a, b) {
+            if (idx >= 0) {
+                var va = valor(a), vb = valor(b);
+
+                if (va === null && vb !== null) return 1;
+                if (vb === null && va !== null) return -1;
+
+                if (va !== null && va !== vb) {
+                    if (txt) return va.localeCompare(vb, 'es') * estado.dir;
+                    if (!isNaN(va) && !isNaN(vb)) return (va - vb) * estado.dir;
+                }
+            }
+
+            return a.dataset.i - b.dataset.i;
+        });
+
+        movibles.concat(fijas).forEach(function (tr) { body.appendChild(tr); });
+
+        ths.forEach(function (th, i) {
+            th.classList.remove('ie-ord-asc', 'ie-ord-desc');
+            if (i === idx) th.classList.add(estado.dir > 0 ? 'ie-ord-asc' : 'ie-ord-desc');
+        });
+    }
+
+    ths.forEach(function (th) {
+        if (th.hasAttribute('data-no-ord')) return;
+
+        th.classList.add('ie-ord');
+        th.title = 'Ordenar';
+        th.addEventListener('click', function () {
+            if (estado.col === clave(th)) {
+                estado.dir = -estado.dir;
+            } else {
+                estado.col = clave(th);
+                estado.dir = th.dataset.dir ? +th.dataset.dir : (th.dataset.tipo === 'txt' ? 1 : -1);
+            }
+
+            aplicar();
+        });
+    });
+
+    aplicar();
 };
 
 IE.cargando = function (id, texto) {

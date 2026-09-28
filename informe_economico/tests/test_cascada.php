@@ -69,12 +69,18 @@ chequear('Resultado bruto de LOCALES', 1100.0, $res['calc']['RESULTADO_BRUTO']);
 chequear('Participacion locales de LOCALES es 1', 1.0, $res['calc']['PART_LOCALES']);
 
 seccion('Conversion a USD: los ratios no cambian');
-$usd = Cascada::convertir($ix, 1000.0);
+$usd = Cascada::convertir($ix, ['1-2026' => 1000.0, '2-2026' => 1000.0]);
 $resUsd = Cascada::columna($usd, $cols[0], $clasif, ['total19' => 3.0, 'locales19' => 1.5]);
 chequear('El importe se divide por el TCC', 1.1, $resUsd['calc']['RESULTADO_BRUTO']);
 chequear('Margen bruto igual en ARS y USD', $res['calc']['MARGEN_BRUTO'], $resUsd['calc']['MARGEN_BRUTO']);
 chequear('Relacion costo igual en ARS y USD', $res['calc']['REL_COSTO_VENTAS'], $resUsd['calc']['REL_COSTO_VENTAS']);
 chequear('Participacion igual en ARS y USD', $res['calc']['PART_TOTAL'], $resUsd['calc']['PART_TOTAL']);
+
+seccion('Conversion a USD: cada mes con su cierre');
+$usdMes = Cascada::convertir($ix, ['1-2026' => 1000.0, '2-2026' => 500.0]);
+chequear('Enero con el cierre de enero', 1.0, $usdMes['1-2026'][2]['1.5.']);
+chequear('Febrero con el cierre de febrero', 0.1, $usdMes['2-2026'][2]['1.5.']);
+chequear('La columna del rango suma dolares ya convertidos', 1.1, Cascada::agregar($usdMes, [2], ['1-2026', '2-2026'])['1.5.']);
 
 seccion('Variacion contra el anio anterior');
 chequear('Subio 10%', 0.1, Cascada::variacion(110, 100));

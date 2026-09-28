@@ -34,17 +34,27 @@ IE.tabs.dashboard = (function () {
         }).join('') + '</div>';
     }
 
+    /* El orden de cada tabla sobrevive al redibujo (toggle Comparar) */
+    var ordenEstructura = { col: null, dir: -1 };
+    var ordenRanking = { col: null, dir: -1 };
+
+    /** Valor crudo para IE.ordenable: sin dato o "no aplica" van al final */
+    function ord(v) {
+        return ' data-orden="' + (v === null || v === undefined || v === 'NA' ? '' : IE.esc(String(v))) + '"';
+    }
+
+    /* Filas = segmentos de costo; ordenar por un canal dice qué costo pesa más ahí. El resultado queda fijo abajo. */
     function tablaEstructura(p) {
         var e = p.estructura;
-        var h = '<table class="ie-tabla-simple" id="ieTablaEstructura"><thead><tr><th>% sobre venta (1.9)</th>'
+        var h = '<table class="ie-tabla-simple" id="ieTablaEstructura"><thead><tr><th data-tipo="txt">% sobre venta (1.9)</th>'
             + e.canales.map(function (c) { return '<th>' + IE.esc(c.etiqueta) + '</th>'; }).join('') + '</tr></thead><tbody>';
 
         e.segmentos.forEach(function (s, i) {
-            h += '<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' + COLORES[i] + ';margin-right:6px"></span>'
-                + IE.esc(s) + '</td>' + e.canales.map(function (c) { return '<td>' + IE.fmtPct(c.valores[i]) + '</td>'; }).join('') + '</tr>';
+            h += '<tr><td' + ord(s) + '><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' + COLORES[i] + ';margin-right:6px"></span>'
+                + IE.esc(s) + '</td>' + e.canales.map(function (c) { return '<td' + ord(c.valores[i]) + '>' + IE.fmtPct(c.valores[i]) + '</td>'; }).join('') + '</tr>';
         });
 
-        h += '<tr style="font-weight:700"><td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' + COLORES[7]
+        h += '<tr data-fijo style="font-weight:700"><td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' + COLORES[7]
             + ';margin-right:6px"></span>Resultado de explotación</td>'
             + e.canales.map(function (c) { return '<td>' + IE.fmtPct(c.resultado) + '</td>'; }).join('') + '</tr>';
 
@@ -93,18 +103,19 @@ IE.tabs.dashboard = (function () {
             ['PERSONAL', 'Personal'], ['OCUPACION', 'Ocupación']
         ];
 
-        var h = '<table class="ie-tabla-simple" id="ieTablaRanking"><thead><tr><th>#</th><th>Local</th>'
+        // "#" es siempre el puesto por rentabilidad, aunque se ordene por otra columna
+        var h = '<table class="ie-tabla-simple" id="ieTablaRanking"><thead><tr><th data-dir="1">#</th><th data-tipo="txt">Local</th>'
             + ind.map(function (x) { return '<th>' + x[1] + '</th>'; }).join('')
             + (comparar ? '<th>vs. año ant.</th>' : '') + '<th>Part. total</th><th>Part. locales</th></tr></thead><tbody>';
 
         p.ranking.forEach(function (l, i) {
-            h += '<tr><td>' + (i + 1) + '</td><td>' + IE.esc(l.nombre) + ' <span class="ie-null">(' + l.nro + ')</span>'
+            h += '<tr><td' + ord(i + 1) + '>' + (i + 1) + '</td><td' + ord(l.nombre) + '>' + IE.esc(l.nombre) + ' <span class="ie-null">(' + l.nro + ')</span>'
                 + (l.cerrada ? ' <span class="ie-badge ie-badge-pisado">cerrada</span>' : '') + '</td>';
 
             ind.forEach(function (x) {
                 var col = l.colores[x[0]];
                 var val = IE.fmtPct(l.valores[x[0]]);
-                h += '<td>' + (col ? '<span class="ie-sem ie-sem-' + col + '" title="' + col.toLowerCase() + '"><i class="bi ' + ICONO_SEM[col] + '"></i>' + val + '</span>' : val) + '</td>';
+                h += '<td' + ord(l.valores[x[0]]) + '>' + (col ? '<span class="ie-sem ie-sem-' + col + '" title="' + col.toLowerCase() + '"><i class="bi ' + ICONO_SEM[col] + '"></i>' + val + '</span>' : val) + '</td>';
             });
 
             if (comparar) {
@@ -112,10 +123,10 @@ IE.tabs.dashboard = (function () {
                 var flecha = (d === null || d === undefined) ? IE.nulo
                     : (d > 0 ? '<span class="ie-pos"><i class="bi bi-arrow-up"></i> mejora</span>'
                         : (d < 0 ? '<span class="ie-neg"><i class="bi bi-arrow-down"></i> empeora</span>' : '='));
-                h += '<td>' + flecha + ' ' + IE.fmtVar(d, true) + '</td>';
+                h += '<td' + ord(d) + '>' + flecha + ' ' + IE.fmtVar(d, true) + '</td>';
             }
 
-            h += '<td>' + IE.fmtPct(l.partTotal) + '</td><td>' + IE.fmtPct(l.partLocales) + '</td></tr>';
+            h += '<td' + ord(l.partTotal) + '>' + IE.fmtPct(l.partTotal) + '</td><td' + ord(l.partLocales) + '>' + IE.fmtPct(l.partLocales) + '</td></tr>';
         });
 
         return h + '</tbody></table>';
@@ -146,8 +157,11 @@ IE.tabs.dashboard = (function () {
             + (p.caidaPp !== null ? '<p class="ie-nota">Caída de rentabilidad a partir de ' + p.caidaPp + ' puntos (se cambia en Parámetros).</p>' : '')
             + '</div></div>'
             + '<div class="ie-panel"><h3><i class="bi bi-trophy"></i> Ranking de Locales</h3>'
-            + '<p class="ie-nota">Ordenado por rentabilidad total (resultado de explotación / 1.9 de cada local). Costos sobre 1.9. El color es el semáforo de Parámetros; el ícono lo repite para quien no distingue colores.</p>'
+            + '<p class="ie-nota">Ordenado por rentabilidad total (resultado de explotación / 1.9 de cada local); hacé clic en un encabezado para ordenar por esa columna, el # sigue siendo el puesto por rentabilidad. Costos sobre 1.9. El color es el semáforo de Parámetros; el ícono lo repite para quien no distingue colores.</p>'
             + '<div style="overflow-x:auto">' + ranking(p, comparar) + '</div></div>';
+
+        IE.ordenable(document.getElementById('ieTablaEstructura'), ordenEstructura);
+        IE.ordenable(document.getElementById('ieTablaRanking'), ordenRanking);
 
         grafica(p);
         IE.exportable(true);

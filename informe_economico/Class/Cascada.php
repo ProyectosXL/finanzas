@@ -49,15 +49,18 @@ class Cascada {
     }
 
     /**
-     * Pasa el indice a dolares. Se divide cada importe por el TCC ANTES de la
-     * cascada: asi todo importe queda en USD y todo ratio, que es un cociente
-     * de dos importes divididos por el mismo numero, queda igual.
+     * Pasa el indice a dolares. Cada importe se divide por el TCC de cierre de
+     * SU mes, ANTES de la cascada: las columnas de varios meses suman dolares
+     * ya convertidos. Dentro de un mes todo ratio queda igual que en pesos;
+     * en un rango, pondera cada mes por su valor en dolares.
+     *
+     * @param array $tcc [periodo => float], con todos los periodos del indice
      */
-    public static function convertir(array $ix, $tcc) {
+    public static function convertir(array $ix, array $tcc) {
         foreach ($ix as $p => $sucs) {
             foreach ($sucs as $k => $rubros) {
                 foreach ($rubros as $c => $v) {
-                    $ix[$p][$k][$c] = $v / $tcc;
+                    $ix[$p][$k][$c] = $v / $tcc[$p];
                 }
             }
         }

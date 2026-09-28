@@ -22,14 +22,26 @@ IE.Informe = function (vista) {
         };
     }
 
+    /** p.tcc es {periodo: cierre}: cada mes se convierte con el suyo */
     function meta(p) {
-        var t = 'Período: ' + IE.rangoTexto(p.periodos) + ' · ' + (p.moneda === 'USD'
-            ? 'U$S (TCC promedio ' + (p.tcc ? p.tcc.toFixed(2).replace('.', ',') : '—') + ')'
-            : '$ ARS');
+        var el = document.getElementById('ieMeta');
+        var tcc = p.moneda === 'USD' ? Object.assign({}, p.tcc || {}, p.tccAA || {}) : {};
+        var meses = Object.keys(tcc);
+        var fmt = function (v) { return v.toFixed(2).replace('.', ','); };
+        var t = 'Período: ' + IE.rangoTexto(p.periodos) + ' · ';
+
+        if (p.moneda !== 'USD') {
+            t += '$ ARS';
+        } else if (p.periodos.length === 1 && p.tcc) {
+            t += 'U$S (TCC cierre ' + fmt(p.tcc[p.periodos[0]]) + ')';
+        } else {
+            t += 'U$S (TCC de cierre de cada mes)';
+        }
 
         if (p.comparar) t += ' · vs. ' + IE.rangoTexto(p.periodosAA);
 
-        document.getElementById('ieMeta').textContent = t;
+        el.textContent = t;
+        el.title = meses.map(function (m) { return IE.nombreMes(m) + ': ' + fmt(tcc[m]); }).join('\n');
     }
 
     function dibujar() {
