@@ -96,6 +96,23 @@ Que ninguna fila del tablero duplique importes:
 - **Ninguna fila activa de Proveedores Locales con serie `PAGOS_TODO` ni `PAGOS_FUERA_CRONOGRAMA`.** Las dos incluyen las facturas de tarjeta corporativa, que desde el script 33 entran al cuadro por *Pagos con Tarjetas y Otros*: el mismo peso se contaría dos veces y **el cuadro cerraría igual**, así que nada lo delataría. **El validador no lo puede ver** —son dos proveedores distintos y el solapamiento es de datos, no de series— así que el control lo hace el propio script al correr, y `ProveedoresProvider` lo avisa en cada carga separando lo que sí entra por la otra fila de lo que no entra por ninguna. Verificado contra la base el 26/09/2026: la fila usa `PAGOS` y no hay doble conteo. Ver `README-pagos-tarjetas.md`.
 - **El día que se corren los scripts 31 a 33 el tablero SÍ se mueve**, a diferencia de Logística: las facturas de tarjeta corporativa no vencidas entran solas, sin cargar nada. Al 26/09/2026 son **$ 44.890.493,84** en 45 vencimientos. Lo que NO entra hasta que se carguen las tarjetas son los **$ 60,1 millones** de parte tarjeta de las supervisoras y los **$ 45,0 millones** de facturas vencidas sin vincular, y el proveedor lo avisa con el importe.
 
+### Sin scripts, pero con orden: `feature/comex-visibilidad-saldo`
+
+No agrega DDL. Lo que pide es **desplegar primero ProyectosXL/administracion**:
+después de mover una fecha de nacionalización, `Js/Comex-fechas.js` llama a
+`/administracion/comercioExterior/controller/recalcularEstimacion.php`, y si el
+endpoint no existe la fecha se guarda igual pero sale el aviso de que no se
+recalculó. La URL vive en `RECALCULO_ESTIMACION_URL`, al principio de ese
+archivo: si en producción las dos apps no comparten host, se cambia ahí.
+
+**El día que se despliega, Proveedores Exterior se mueve** sin que nadie cargue
+nada: el padrón pasa de 70 a 348 filas, porque los contenedores con costos
+cargados y saldo pendiente vuelven a la proyección. Al 01/10/2026, de esos 278,
+**250 no tienen fecha estimada de pago** (no suman en ninguna columna; el aviso de
+valuación los informa en dólares), 26 tienen la fecha vencida (no suman) y **2
+entran al eje**, por U$S 131.705. Es la decisión: ver la sección 10 de
+`README-comex.md`.
+
 ---
 
 ## Ejecución de los scripts — la instalación completa
