@@ -594,7 +594,14 @@ require_once __DIR__ . '/../Class/Horizonte.php';
 
 // Eje conocido: 28 dias desde el 19/09, asi que la columna de 2026-09 cubre
 // del 1 al 18 -dias ya pasados- y la de 2026-08 no existe.
-$eje = new Horizonte(28, 12, [], '2026-09-19');
+//
+// HOY VA COMO DateTime, NO COMO TEXTO. Horizonte::__construct() solo acepta un
+// DateTime y con cualquier otra cosa usa el dia de hoy SIN AVISAR: esta linea
+// pasaba '2026-09-19' y el eje se armaba con la fecha real. Andaba de
+// casualidad mientras hoy cayera en un mes con columna para septiembre, y
+// fallaba los dias 1 -el mes en curso queda sin dias pasados- y en cualquier
+// mes posterior.
+$eje = new Horizonte(28, 12, [], new DateTime('2026-09-19'));
 
 $mezcla = [
     ['VENCIDA' => true, 'FECHA_PAGO_EFECTIVA' => '2026-09-07', 'IMPORTE_ARS' => 1000000],
