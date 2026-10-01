@@ -148,7 +148,7 @@
                 <small class="text-muted">
                     El <strong>2do y el 4to viernes</strong> de cada mes. Si el viernes no es
                     hábil, el pago se corre al día hábil <strong>anterior</strong>.
-                    Hoy lo usa sólo Logística Local.
+                    Acá se editan los <strong>dos próximos pagos</strong>.
                 </small>
             </div>
             <button class="btn btn-sm btn-outline-success" data-exportar="pgenTablaCronograma"
@@ -158,23 +158,18 @@
             </button>
         </div>
 
-        <div class="card-body py-2 border-bottom">
-            <small class="text-muted" id="pgenCronoTramo"></small>
-        </div>
-
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table id="pgenTablaCronograma" class="table table-sm table-hover mb-0"
+                <table id="pgenTablaCronograma" class="table table-sm table-hover mb-0 align-middle"
                        data-orden="no">
                     <thead>
                         <tr>
-                            <th>Mes</th>
                             <th>Pago</th>
                             <th>Viernes</th>
                             <th>Calculada</th>
-                            <th style="width: 180px;">Fecha de pago</th>
+                            <th style="width: 170px;">Fecha de pago</th>
                             <th>Motivo</th>
-                            <th class="text-center" style="width: 90px;"></th>
+                            <th class="text-center" style="width: 130px;"></th>
                         </tr>
                     </thead>
                     <tbody id="pgenCronogramaBody">
@@ -186,11 +181,9 @@
 
         <div class="card-body py-2 border-top">
             <small class="text-muted">
-                <strong>Se editan sólo las fechas del tramo diario.</strong> Más allá de él
-                el tablero muestra un total por mes, así que correr un pago tres días no
-                cambia ninguna columna. Las fechas del resto del horizonte se calculan
-                igual —y se ven abajo— porque son las que deciden qué mitad de un importe
-                mensual cae dentro del tramo y cuál va a la columna del mes.
+                La fecha cargada a mano <strong>no se corre</strong> al día hábil: se respeta
+                tal cual. El <strong>motivo es obligatorio</strong>: es lo único que después
+                explica por qué ese pago no cayó donde la cuenta decía.
             </small>
         </div>
     </div>
@@ -265,58 +258,25 @@
 </div>
 
 <!-- ============================================================
-     MOVER UNA FECHA DEL CRONOGRAMA
-     Va en un modal propio y no en el diálogo genérico de
-     Notificacion porque son DOS datos: la fecha y el motivo. El
-     motivo es lo único que, meses después, explica por qué ese
-     pago no cayó donde la cuenta decía.
+     HISTORIAL DE UNA FECHA DEL CRONOGRAMA
+     La fecha y el motivo se editan en la fila; el modal queda sólo
+     para ver qué fechas tuvo ese pago y quién las cambió.
      ============================================================ -->
 <div class="modal fade" id="pgenModalFecha" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">
-                    Mover la fecha de pago
+                    Historial de la fecha de pago
                     <small class="text-muted ms-2" id="pgenFechaTitulo"></small>
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"
                         aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
-
-                <!-- Contra qué se está cambiando. Sin esto, quien mueve la
-                     fecha no ve de cuánto es la corrección. -->
-                <div class="alert alert-light border py-2 px-3 small mb-3" id="pgenFechaContexto"></div>
-
-                <div class="row g-3">
-                    <div class="col-md-5">
-                        <label class="form-label form-label-sm" for="pgenFechaInput">
-                            Fecha de pago
-                        </label>
-                        <input type="date" class="form-control form-control-sm" id="pgenFechaInput">
-                        <div class="form-text">
-                            La fecha cargada a mano <strong>no se corre</strong> al día hábil:
-                            se respeta tal cual, porque la puso alguien que sabe algo que el
-                            calendario no sabe.
-                        </div>
-                    </div>
-                    <div class="col-md-7">
-                        <label class="form-label form-label-sm" for="pgenFechaMotivo">Motivo</label>
-                        <textarea class="form-control form-control-sm" id="pgenFechaMotivo"
-                                  rows="3" maxlength="300"
-                                  placeholder="Por qué este pago no va en la fecha calculada"></textarea>
-                        <div class="form-text">
-                            Obligatorio. Es lo único que después explica la fecha.
-                        </div>
-                    </div>
+                <div class="small text-muted mb-2">
+                    Las fechas no se borran: se dan de baja.
                 </div>
-
-                <hr class="my-3">
-
-                <h6 class="mb-2">
-                    Historial
-                    <small class="text-muted">— las fechas no se borran: se dan de baja</small>
-                </h6>
                 <div class="table-responsive" style="max-height: 220px; overflow-y: auto;">
                     <table class="table table-sm mb-0" id="pgenTablaHistorialFecha">
                         <thead>
@@ -334,17 +294,9 @@
                     </table>
                 </div>
             </div>
-            <div class="modal-footer justify-content-between">
-                <button type="button" class="btn btn-sm btn-outline-danger" id="pgenFechaVolver">
-                    <i class="fas fa-rotate-left me-1"></i> Volver a la fecha calculada
-                </button>
-                <div class="d-flex gap-2">
-                    <button type="button" class="btn btn-sm btn-secondary"
-                            data-bs-dismiss="modal">Cancelar</button>
-                    <button type="button" class="btn btn-sm btn-primary" id="pgenFechaGuardar">
-                        <i class="fas fa-check me-1"></i> Guardar
-                    </button>
-                </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary"
+                        data-bs-dismiss="modal">Cerrar</button>
             </div>
         </div>
     </div>

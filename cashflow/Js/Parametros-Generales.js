@@ -16,12 +16,12 @@
  *
  * POR QUE EL CRONOGRAMA VA EN DOS TABLAS
  * ---------------------------------------
- * Arriba, las fechas del TRAMO DIARIO: son las unicas donde el dia exacto mueve
- * una columna del tablero, y son las unicas editables. Abajo, el resto del
- * horizonte: se calculan igual porque son las que deciden que mitad de un
- * importe mensual cae dentro del tramo, pero editarlas no cambiaria ningun
- * numero. Una sola tabla con la mitad de las filas editables y la otra mitad no
- * se lee como un error de la pantalla.
+ * Arriba, los DOS PROXIMOS PAGOS desde hoy: son los de las primeras cuatro
+ * semanas, y son los unicos que se editan, en la misma fila (fecha y motivo).
+ * Abajo, el resto del horizonte: se calculan igual porque son las que deciden
+ * que mitad de un importe mensual cae dentro del tramo diario, pero no se
+ * editan. Una sola tabla con unas filas editables y otras no se lee como un
+ * error de la pantalla.
  *
  * NADA DE alert(). Todo va a Notificacion, igual que el resto del modulo.
  */
@@ -83,7 +83,9 @@
     var valores = {};
     var inflacion = null;
     var cronograma = null;
-    var editando = null;
+
+    /** Cuantos pagos se editan: los de las primeras cuatro semanas */
+    var PAGOS_EDITABLES = 2;
 
     /* ================================================================
        CARGA
@@ -391,33 +393,41 @@
     function pintarCronograma() {
         var cuerpo = document.getElementById('pgenCronogramaBody');
         var resto = document.getElementById('pgenCronoRestoBody');
-        var pie = document.getElementById('pgenCronoTramo');
 
         if (!cuerpo || !cronograma) { return; }
 
         var pagos = cronograma.pagos || [];
-        var enTramo = pagos.filter(function(p) { return p.en_tramo; });
-        var fuera = pagos.filter(function(p) { return !p.en_tramo; });
+        var hoy = cronograma.hoy || '';
 
-        if (pie) {
-            pie.innerHTML = cronograma.fin_tramo
-                ? 'Tramo diario: del <strong>' + esc(fecha(cronograma.hoy)) + '</strong> al ' +
-                  '<strong>' + esc(fecha(cronograma.fin_tramo)) + '</strong>. ' +
-                  'Hay <strong>' + enTramo.length + '</strong> pago(s) del cronograma adentro.'
-                : 'El horizonte no tiene tramo diario (columnas diarias en 0), así que no hay ' +
-                  'ninguna fecha editable: todos los pagos van a la columna de su mes.';
-        }
+        /* LOS DOS PROXIMOS: los primeros cuya fecha -la que vale o la
+           calculada- no paso todavia. Con la calculada tambien, para que un
+           pago adelantado a mano a ayer no desaparezca de la tabla editable
+           sin que nadie pueda volverlo atras. Los pagos ya vienen en orden. */
+        var proximos = pagos.filter(function(p) {
+            return p.fecha >= hoy || p.calculada >= hoy;
+        }).slice(0, PAGOS_EDITABLES);
+
+        var fuera = pagos.filter(function(p) { return proximos.indexOf(p) === -1; });
 
         var editable = !!cronograma.tabla_creada;
 
-        cuerpo.innerHTML = enTramo.length
-            ? enTramo.map(function(p) { return filaCrono(p, editable); }).join('')
-            : '<tr><td colspan="7" class="text-center text-muted py-3">' +
-              'Ningún pago del cronograma cae dentro del tramo diario.</td></tr>';
+        cuerpo.innerHTML = proximos.length
+            ? proximos.map(function(p) { return filaCrono(p, editable); }).join('')
+            : '<tr><td colspan="6" class="text-center text-muted py-3">' +
+              'No hay pagos próximos en el horizonte.</td></tr>';
 
-        cuerpo.querySelectorAll('[data-editar]').forEach(function(btn) {
-            btn.addEventListener('click', function() {
-                abrirModal(btn.getAttribute('data-mes'), Number(btn.getAttribute('data-nro')));
+        cuerpo.querySelectorAll('tr[data-mes]').forEach(function(fila) {
+            var acciones = {
+                guardar: function() { guardarFecha(fila); },
+                volver: function() { volverACalculado(fila); },
+                historial: function() {
+                    abrirHistorial(fila.getAttribute('data-mes'),
+                                   Number(fila.getAttribute('data-nro')));
+                }
+            };
+
+            fila.querySelectorAll('[data-accion]').forEach(function(btn) {
+                btn.addEventListener('click', acciones[btn.getAttribute('data-accion')]);
             });
         });
 
@@ -443,28 +453,40 @@
     }
 
     function filaCrono(p, editable) {
-        var marca = '';
+        var off = editable ? '' : ' disabled';
+        var corrida = p.corrida
+            ? ' <span class="badge bg-warning text-dark" ' +
+              'title="El viernes no es hábil: el pago se corrió al día hábil anterior">' +
+              'corrida</span>'
+            : '';
+        var aMano = p.override
+            ? '<span class="badge bg-info text-dark mt-1">a mano</span>' : '';
 
-        if (p.override) {
-            marca = '<span class="badge bg-info text-dark ms-2">a mano</span>';
-        } else if (p.corrida) {
-            marca = '<span class="badge bg-warning text-dark ms-2" ' +
-                'title="El viernes no es hábil: el pago se corrió al día hábil anterior">' +
-                'corrida</span>';
-        }
-
-        return '<tr>' +
-            '<td class="fw-semibold">' + esc(rotuloMes(p.mes)) + '</td>' +
-            '<td><small class="text-muted">' + esc(NOMBRE_PAGO[p.nro]) + '</small></td>' +
+        return '<tr data-mes="' + esc(p.mes) + '" data-nro="' + p.nro + '" ' +
+                'data-calculada="' + esc(p.calculada) + '">' +
+            '<td class="fw-semibold">' + esc(rotuloMes(p.mes)) +
+                '<div><small class="text-muted">' + esc(NOMBRE_PAGO[p.nro]) + '</small></div></td>' +
             '<td><small class="text-muted">' + esc(fecha(p.teorica)) + '</small></td>' +
-            '<td><small class="text-muted">' + esc(fecha(p.calculada)) + '</small></td>' +
-            '<td class="fw-semibold">' + esc(fecha(p.fecha)) + marca + '</td>' +
-            '<td><small class="text-muted">' + esc(p.motivo || '—') + '</small></td>' +
-            '<td class="text-center">' +
-                '<button class="btn btn-sm btn-outline-secondary" data-editar="1" ' +
-                    'data-mes="' + esc(p.mes) + '" data-nro="' + p.nro + '"' +
+            '<td><small class="text-muted">' + esc(fecha(p.calculada)) + '</small>' + corrida + '</td>' +
+            '<td>' +
+                '<input type="date" class="form-control form-control-sm pgen-crono-fecha" ' +
+                    'value="' + esc(p.fecha) + '"' + off + '>' + aMano +
+            '</td>' +
+            '<td>' +
+                '<input type="text" class="form-control form-control-sm pgen-crono-motivo" ' +
+                    'maxlength="300" placeholder="Por qué no va en la fecha calculada" ' +
+                    'value="' + esc(p.motivo || '') + '"' + off + '>' +
+            '</td>' +
+            '<td class="text-center text-nowrap">' +
+                '<button class="btn btn-sm btn-primary" data-accion="guardar" title="Guardar"' +
                     (editable ? '' : ' disabled title="Falta correr sql/cashflow_parametros_generales.sql"') +
-                    '><i class="fas fa-pen"></i></button>' +
+                    '><i class="fas fa-check"></i></button> ' +
+                '<button class="btn btn-sm btn-outline-danger" data-accion="volver" ' +
+                    'title="Volver a la fecha calculada"' +
+                    (editable && p.override ? '' : ' disabled') +
+                    '><i class="fas fa-rotate-left"></i></button> ' +
+                '<button class="btn btn-sm btn-outline-secondary" data-accion="historial" ' +
+                    'title="Historial"><i class="fas fa-clock-rotate-left"></i></button>' +
             '</td>' +
         '</tr>';
     }
@@ -478,39 +500,11 @@
     }
 
     /* ================================================================
-       EL MODAL DE UNA FECHA
+       LA EDICION EN LA FILA Y EL HISTORIAL
        ================================================================ */
 
-    function abrirModal(mes, nro) {
-        var pago = (cronograma.pagos || []).filter(function(p) {
-            return p.mes === mes && p.nro === nro;
-        })[0];
-
-        if (!pago) { return; }
-
-        editando = pago;
-
+    function abrirHistorial(mes, nro) {
         texto('pgenFechaTitulo', rotuloMes(mes) + ' — ' + NOMBRE_PAGO[nro]);
-
-        var contexto = document.getElementById('pgenFechaContexto');
-
-        if (contexto) {
-            contexto.innerHTML =
-                'El ' + esc(NOMBRE_PAGO[nro]) + ' de ' + esc(rotuloMes(mes)) + ' es el ' +
-                '<strong>' + esc(fecha(pago.teorica)) + '</strong>. ' +
-                (pago.teorica !== pago.calculada
-                    ? 'No es hábil, así que el cálculo lo corre al <strong>' +
-                      esc(fecha(pago.calculada)) + '</strong>.'
-                    : 'Es hábil, así que el cálculo lo deja ahí.');
-        }
-
-        valor('pgenFechaInput', pago.override ? pago.fecha : pago.calculada);
-        valor('pgenFechaMotivo', pago.motivo || '');
-
-        var volver = document.getElementById('pgenFechaVolver');
-
-        if (volver) { volver.disabled = !pago.override; }
-
         cargarHistorial(mes, nro);
         modal().show();
     }
@@ -550,11 +544,9 @@
             });
     }
 
-    function guardarFecha() {
-        if (!editando) { return; }
-
-        var input = document.getElementById('pgenFechaInput');
-        var motivo = document.getElementById('pgenFechaMotivo');
+    function guardarFecha(fila) {
+        var input = fila.querySelector('.pgen-crono-fecha');
+        var motivo = fila.querySelector('.pgen-crono-motivo');
 
         if (!input || !input.value) {
             Notificacion.campoInvalido(input, 'Elegí una fecha.');
@@ -572,14 +564,13 @@
         }
 
         pedir(ENDPOINT + '?action=saveFechaCronograma', {
-            mes: editando.mes,
-            nro: editando.nro,
+            mes: fila.getAttribute('data-mes'),
+            nro: Number(fila.getAttribute('data-nro')),
             fecha: input.value,
-            fecha_calculada: editando.calculada,
+            fecha_calculada: fila.getAttribute('data-calculada'),
             motivo: motivo.value.trim()
         })
             .then(function(d) {
-                modal().hide();
                 Notificacion.exito(d.message || 'Fecha guardada.');
                 cargar();
             })
@@ -588,13 +579,12 @@
             });
     }
 
-    function volverACalculado() {
-        if (!editando) { return; }
-
-        pedir(ENDPOINT + '?action=quitarFechaCronograma',
-              { mes: editando.mes, nro: editando.nro })
+    function volverACalculado(fila) {
+        pedir(ENDPOINT + '?action=quitarFechaCronograma', {
+            mes: fila.getAttribute('data-mes'),
+            nro: Number(fila.getAttribute('data-nro'))
+        })
             .then(function(d) {
-                modal().hide();
                 Notificacion.exito(d.message || 'La fecha volvió al valor calculado.');
                 cargar();
             })
@@ -732,12 +722,6 @@
         if (el) { el.textContent = t; }
     }
 
-    function valor(id, v) {
-        var el = document.getElementById(id);
-
-        if (el) { el.value = (v === null || v === undefined) ? '' : v; }
-    }
-
     function destacar(id) {
         var el = document.getElementById(id);
 
@@ -781,8 +765,6 @@
         enganchar('pgenBtnRefresh', 'click', cargar);
         enganchar('pgenModalidad', 'change', guardarModalidad);
         enganchar('pgenAplicarConstante', 'click', aplicarConstante);
-        enganchar('pgenFechaGuardar', 'click', guardarFecha);
-        enganchar('pgenFechaVolver', 'click', volverACalculado);
 
         cargar();
     }
