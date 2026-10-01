@@ -555,12 +555,21 @@ chequear('y PAGOS_TODO tiene las tres partes',
 /* ================================================================
    CONTRA LA BASE
 
-   Lo unico que no se puede verificar sin ella: que la consulta corra y que el
-   contenedor 733 de exactamente lo que dice Comercio Exterior. Se saltea solo
-   si no hay conexion, igual que el resto del modulo.
+   Lo unico que no se puede verificar sin ella: que la consulta corra y que un
+   contenedor con pagos de exactamente lo que dice la regla pura sobre los
+   datos crudos de Comercio Exterior. Se saltea solo si no hay conexion, igual
+   que el resto del modulo.
+
+   EL ANCLA YA NO ES UN CONTENEDOR FIJO. Era el 733, con sus tres numeros
+   escritos aca, y la prueba fallo el dia que alguien le borro el pago en
+   Comercio Exterior: la base cambio, no el codigo. Ahora el ancla es
+   CUALQUIER contenedor del listado con pagos cargados, y lo esperado se arma
+   leyendo el FOB de su principal y la suma de sus pagos directo de las
+   tablas, y pasandolos por saldoPendiente(). Los numeros del 733 siguen mas
+   arriba, como caso puro: ahi si son el ancla entre las dos aplicaciones.
    ================================================================ */
 
-seccion('el contenedor 733, contra la base');
+seccion('un contenedor con pagos, contra la base y la regla pura');
 
 $comexDb = null;
 
@@ -575,30 +584,49 @@ try {
 if ($filas === null) {
     echo '    salteado' . PHP_EOL;
 } else {
-    $f733 = null;
+    /* El primero con pagos que no repita grupo: el que lleva el importe. */
+    $ancla = null;
 
     foreach ($filas as $f) {
-        if (intval($f['ID']) === 733) {
-            $f733 = $f;
+        if ($f['PAGOS_CANT'] > 0 && empty($f['DUPLICA_GRUPO'])) {
+            $ancla = $f;
+            break;
         }
     }
 
-    if ($f733 === null) {
-        /* Si el 733 ya tiene detalle cargado sale del listado, que es correcto
-           y no una falla: lo dice en vez de fallar. */
-        echo '    (el contenedor 733 ya no esta en el listado: tiene detalle cargado)'
+    if ($ancla === null) {
+        /* Sin ningun pago cargado en todo el padron no hay ancla posible. No es
+           una falla del codigo: lo dice en vez de fallar. */
+        echo '    (ningun contenedor del listado tiene pagos cargados: no hay ancla)'
             . PHP_EOL;
     } else {
-        chequear('el FOB del 733', 77408.00, $f733['VALOR_FOB_DOLAR']);
-        chequear('lo pagado', 10000.00, $f733['PAGADO_USD']);
-        chequear('el pendiente', 67408.00, $f733['PENDIENTE_USD']);
-        chequear('el estado', 'PENDIENTE', $f733['ESTADO_PAGO']);
-        chequear('y tiene un pago cargado', 1, $f733['PAGOS_CANT']);
+        /* Lo esperado, leido de las tablas SIN pasar por la consulta de la
+           pestana: el FOB de la principal y la suma de los pagos. */
+        $cxAncla = (new Conexion)->conectar('central');
+        $stmt = sqlsrv_query($cxAncla,
+            "SELECT P.VALOR_FOB_DOLAR FOB,
+                    (SELECT ISNULL(SUM(MONTO), 0) FROM " . Comex::TABLA_PAGOS . "
+                     WHERE ID_ENCABEZADO = P.ID) PAGADO,
+                    (SELECT COUNT(*) FROM " . Comex::TABLA_PAGOS . "
+                     WHERE ID_ENCABEZADO = P.ID) CANT
+             FROM " . Comex::TABLA_MAESTRO . " E
+             INNER JOIN " . Comex::TABLA_MAESTRO . " P ON P.ID = COALESCE(E.ID_PADRE, E.ID)
+             WHERE E.ID = ?", [intval($ancla['ID'])]);
+        $crudo = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        $esperado = Comex::saldoPendiente($crudo['FOB'], $crudo['PAGADO']);
+
+        echo '    (ancla: contenedor ' . $ancla['ID'] . ', ' . $crudo['CANT'] . ' pago(s))' . PHP_EOL;
+
+        chequear('el FOB es el de la principal', $esperado['fob'], $ancla['VALOR_FOB_DOLAR']);
+        chequear('lo pagado es la suma de sus pagos', $esperado['pagado'], $ancla['PAGADO_USD']);
+        chequear('el pendiente es el de la regla pura', $esperado['pendiente'], $ancla['PENDIENTE_USD']);
+        chequear('el estado tambien', $esperado['estado'], $ancla['ESTADO_PAGO']);
+        chequear('y la cantidad de pagos', intval($crudo['CANT']), $ancla['PAGOS_CANT']);
 
         /* LO QUE SE PROYECTA ES EL PENDIENTE VALUADO, y no el FOB: es el
            chequeo de punta a punta de toda la rama. */
         chequear('el importe en pesos sale del pendiente',
-            Comex::enPesos(67408.00, $f733['COTIZ_USD']), $f733['IMPORTE_ARS']);
+            Comex::enPesos($esperado['pendiente'], $ancla['COTIZ_USD']), $ancla['IMPORTE_ARS']);
     }
 
     /* Y EL INVARIANTE, SOBRE EL PADRON ENTERO. Fila por fila, sin eje: si no

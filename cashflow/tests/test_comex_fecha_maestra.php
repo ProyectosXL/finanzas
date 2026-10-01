@@ -594,7 +594,14 @@ require_once __DIR__ . '/../Class/Horizonte.php';
 
 // Eje conocido: 28 dias desde el 19/09, asi que la columna de 2026-09 cubre
 // del 1 al 18 -dias ya pasados- y la de 2026-08 no existe.
-$eje = new Horizonte(28, 12, [], '2026-09-19');
+//
+// HOY VA COMO DateTime, NO COMO TEXTO. Horizonte::__construct() solo acepta un
+// DateTime y con cualquier otra cosa usa el dia de hoy SIN AVISAR: esta linea
+// pasaba '2026-09-19' y el eje se armaba con la fecha real. Andaba de
+// casualidad mientras hoy cayera en un mes con columna para septiembre, y
+// fallaba los dias 1 -el mes en curso queda sin dias pasados- y en cualquier
+// mes posterior.
+$eje = new Horizonte(28, 12, [], new DateTime('2026-09-19'));
 
 $mezcla = [
     ['VENCIDA' => true, 'FECHA_PAGO_EFECTIVA' => '2026-09-07', 'IMPORTE_ARS' => 1000000],
@@ -1286,10 +1293,31 @@ if (!Pruebas::hayBase()) {
     chequear('Proveedores Exterior trae filas', true, count($ext) > 0);
     chequear('Crono Nacionalizacion trae filas', true, count($nac) > 0);
 
-    /* LAS DOS MIRAN EL MISMO PADRON. Es el mismo contenedor visto desde los dos
-       lados del circuito: si una trae mas que la otra, alguna volvio a filtrar
-       por su cuenta. */
-    chequear('y las dos traen el mismo padron', count($ext), count($nac));
+    /* LOS DOS PADRONES YA NO SON EL MISMO, y es a proposito. Hasta
+       feature/comex-visibilidad-saldo las dos pestanas cortaban igual -"sin
+       detalle cargado"- y esta prueba lo exigia. Ahora Proveedores Exterior
+       retiene los contenedores con costos cargados mientras les quede saldo
+       -ver Comex::sigueEnProveedores()- y Crono Nacionalizacion no cambio su
+       criterio.
+
+       Lo que si tiene que valer: todo lo de Crono esta en Proveedores -un
+       contenedor sin costos nunca sale de Proveedores-, y lo que Proveedores
+       tiene de mas son, TODAS, filas con costos cargados. Si aparece una de mas
+       sin costos, alguna de las dos volvio a filtrar por su cuenta. */
+    $idsExt = array_map('intval', array_column($ext, 'ID'));
+    $idsNac = array_map('intval', array_column($nac, 'ID'));
+
+    chequear('todo lo de Crono Nacionalizacion esta en Proveedores Exterior', [],
+        array_values(array_diff($idsNac, $idsExt)));
+
+    $deMasSinCostos = 0;
+    foreach ($ext as $f) {
+        if (!in_array(intval($f['ID']), $idsNac, true) && !$f['TIENE_COSTOS']) {
+            $deMasSinCostos++;
+        }
+    }
+    chequear('y lo que Proveedores tiene de mas son contenedores con costos cargados', 0,
+        $deMasSinCostos);
 
     // EL FILTRO SE FUE DE VERDAD, y no solo del texto de la consulta: tiene que
     // haber contenedores con el embarque ya pasado.

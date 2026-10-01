@@ -2,7 +2,7 @@
 
 Pestañas **Comercio Exterior → Proveedores Exterior** y **Crono Nacionalización**, y las filas *Proveedores del Exterior* y *Nacionalizaciones* del tablero de Cashflow.
 
-Ramas: `feature/comex-fecha-maestra` · `feature/comex-pagado` · `feature/comex-nac-usd` · `feature/comex-saldo-pendiente`
+Ramas: `feature/comex-fecha-maestra` · `feature/comex-pagado` · `feature/comex-nac-usd` · `feature/comex-saldo-pendiente` · `feature/comex-visibilidad-saldo`
 
 ---
 
@@ -12,7 +12,8 @@ Ramas: `feature/comex-fecha-maestra` · `feature/comex-pagado` · `feature/comex
 
 ```
 RO_T_IMPORTACIONES_ENCABEZADO  (maestro de Comercio Exterior)
-        │  sin detalle cargado: el contenedor todavía no cerró
+        │  Proveedores Exterior: sale sólo con costos cargados Y el FOB pagado (sección 10)
+        │  Crono Nacionalización: sin detalle cargado, como siempre
         │
         ├─ FECHA_EST_PAGO ──── cuándo se le paga al proveedor del exterior
         │       │
@@ -696,6 +697,105 @@ Y cuando son algunos: *"10 de ellos ya tenían la fecha vencida y no sumaban, as
 
 ---
 
+## 10. Un contenedor con costos cargados sigue mientras le quede saldo
+
+Rama: `feature/comex-visibilidad-saldo`
+
+### Qué pasaba
+
+El padrón de Proveedores Exterior era *"sin detalle cargado"*: un contenedor
+salía de la proyección en cuanto Comercio Exterior cargaba sus costos de
+nacionalización (`RO_T_IMPORTACIONES_DETALLE`), **aunque al proveedor del
+exterior todavía se le debiera el FOB**. El saldo desaparecía del tablero sin
+haberse pagado. Al 01/10/2026 eran **278 contenedores** de central con costos y
+saldo pendiente, por **U$S 18,97 millones** de FOB.
+
+### La regla
+
+Un contenedor **deja de verse sólo cuando cumple las dos**:
+
+| | Condición |
+| --- | --- |
+| **(A)** | Tiene **costos de nacionalización confirmados**: filas en `RO_T_IMPORTACIONES_DETALLE` para cualquier OC del grupo. La estimación de PCI **no** cuenta |
+| **(B)** | **Los pagos cubren el FOB**: `saldoPendiente()` da `CANCELADO` o `SOBREPAGO`. `SIN_FOB` no cuenta como cubierto |
+
+- **Por grupo**, `COALESCE(ID_PADRE, ID)`: (A) mira el detalle de cualquier OC
+  —se replica a todas— y (B) el FOB y los pagos de la principal, como el saldo.
+- **Sin ventana de tiempo**, como siempre en esta pestaña.
+- Un contenedor con costos y saldo pendiente **proyecta su saldo con la lógica de
+  siempre**: saldo, valuación, vencidos y tildes no cambian. Uno con costos y el
+  FOB cubierto desaparece.
+- Las filas que siguen con costos cargados llevan la etiqueta **Costos cargados**
+  junto al contenedor: están ahí por el saldo, no porque les falten los costos.
+
+**Es la misma regla que Gestión de Despachos** en Comercio Exterior, replicada y
+no incluida, igual que la del saldo. Allá vive en `VisibilidadContenedor` y suma
+una ventana de 6 meses para lo que no tiene saldo; acá en
+`Comex::sigueEnProveedores()` (pura) y `Comex::sqlSigueVisible()` (el `WHERE`).
+Los encabezados de `Pagos.php` y de `Comex.php` son las dos mitades del pacto.
+
+### Cómo está escrita
+
+- **`EXISTS` y no el `LEFT JOIN ... WHERE ID_MG IS NULL` de antes.** Ese JOIN no
+  multiplicaba filas porque sólo dejaba pasar las que no tenían detalle. Con
+  contenedores con detalle en la lista, daría una fila por cada línea de costo, y
+  `DUPLICA_GRUPO` y `GRUPO_FILAS` contarían líneas de costo como si fueran OCs
+  repetidas.
+- **En `FLOAT`.** `saldoPendiente()` resta en double, así que el SQL castea antes
+  de restar: con `DECIMAL`, 100,01 contra 100,00 sería cubierto en SQL y
+  pendiente en PHP.
+- **Un solo filtro para los dos padrones**: `Comex::filtroPadron()`. Lo usan
+  `getProveedoresExterior()` y `ComprasProyectadasDatos::cargado()`, que descuenta
+  el pendiente de esos mismos contenedores. Si los dos padrones difirieran, el
+  tablero contaría dos veces el mismo saldo.
+- **Crono Nacionalización no cambió su criterio**: un contenedor con costos
+  cargados ya no tiene gasto de nacionalización que proyectar.
+
+### Lo que esto trae al tablero
+
+De los 278, **250 no tienen fecha estimada de pago** (`FECHA_MOV` de 2023-03 a
+2025-12, antes de que existiera la tabla de pagos): van como **Sin fecha** y el
+aviso de valuación informa su saldo en dólares, porque sin mes no hay cotización.
+Otros 26 tienen la fecha de pago vencida —no suman, como cualquier vencida— y 2
+la tienen por delante. **Se sabe y se acepta, sin fecha de corte**: los pagos se
+van a cargar desde Comercio Exterior y cada contenedor cancelado sale solo.
+
+Verificado contra la base el 01/10/2026: el padrón pasó de 70 a **348** filas, es
+exactamente el que dice la regla pura sobre las 408 del maestro, `cargado()` trae
+los mismos 348 contenedores, y el invariante de cuatro series cierra en las 40
+columnas del eje.
+
+---
+
+## 11. Mover la nacionalización recalcula la estimación en Comex
+
+Rama: `feature/comex-visibilidad-saldo`
+
+Las alícuotas de la estimación de PCI se resuelven contra `FECHA_DESP_ADU`, y
+Comercio Exterior la recalcula sola cuando esa fecha cambia —ver
+`REGLAS_CALCULO.md` en ese repo—. Pero cuando la fecha la mueve **esta**
+pestaña, la escritura no pasa por Comex, y sin aviso los gastos de
+nacionalización que Crono Nacionalización proyecta quedarían calculados con la
+fecha vieja.
+
+Por eso, después de que `updateFecha` guarda bien una fecha **NAC que cambió**,
+`Js/Comex-fechas.js` llama a
+`/administracion/comercioExterior/controller/recalcularEstimacion.php` con
+`{id, entorno: 'central'}`:
+
+| | |
+| --- | --- |
+| **Desde el navegador, no desde `guardarFecha()`** | El cashflow no puede requerir código de otro repo, y las dos apps ya comparten origen |
+| **El entorno viaja explícito** | Las dos apps comparten la cookie de sesión, y la de Comex puede estar parada en `uy` |
+| **La URL está en un solo lugar** | `RECALCULO_ESTIMACION_URL`, al principio de `Js/Comex-fechas.js`. Si en producción las apps dejan de compartir host, se cambia ahí |
+| **Si el recálculo falla** | La fecha queda grabada igual y sale una advertencia: *"la fecha se guardó pero no se pudo recalcular la estimación en Comex"* |
+| **Después, siempre** | Se llama a `cargarDatos()`, salga como salga, para que la grilla muestre los importes nuevos |
+
+El endpoint sólo recalcula: valida el ID y el entorno y no expone ninguna otra
+operación. Comercio Exterior no tiene autenticación.
+
+---
+
 ## Lo que no cambió
 
 - **La valuación con dólar futuro ROFEX**, fila por fila, según el mes de la fecha efectiva. Vive en `Comex::valuar()` y `DolarFuturo::resolver()`, y la leen la pestaña y el tablero: un solo `IMPORTE_ARS`. Ver el encabezado de `Class/DolarFuturo.php`.
@@ -718,17 +818,32 @@ php cashflow/tests/run.php comex
 - `tests/test_comex_fecha_maestra.php` — la fecha en el maestro, los vencidos y el tilde de pagado.
 - `tests/test_comex_fecha_pago_manual.php` — la fecha de pago fijada a mano, y de dónde sale la marca de cada fecha.
 - `tests/test_comex_saldo_pendiente.php` — lo de la sección 8.
+- `tests/test_comex_visibilidad.php` — lo de las secciones 10 y 11.
+
+De las secciones 10 y 11, lo que se fija:
+
+- **La regla pura caso por caso**, los ocho cruces de (A) × estado, y el borde del centavo pasado por `saldoPendiente()`.
+- **El SQL**: que (A) sea un `EXISTS` sobre el grupo, que castee a `FLOAT`, que Proveedores Exterior ya no tenga el `LEFT JOIN` al detalle, que `cargado()` use el mismo `filtroPadron()` y que **Crono Nacionalización conserve su criterio**.
+- **Contra la base**, sólo lectura: que Proveedores Exterior liste **exactamente** lo que dice la regla pura sobre el maestro entero, sin filas repetidas y sin ninguna con costos y el FOB cubierto; que `GRUPO_FILAS` cuente OCs y no líneas de costo; que `cargado()` traiga **los mismos IDs** y el mismo pendiente; que el invariante de cuatro series cierre en todas las columnas; y que el aviso de saldo sin fecha aparezca.
+- **El disparador del recálculo**, leyendo `Comex-fechas.js`: la URL en un solo lugar, el entorno explícito, sólo para NAC que cambió, el refresco en los dos casos y la advertencia si falla.
+
+`test_comex_fecha_maestra.php` exigía que las dos pestañas trajeran **el mismo padrón**, y ya no es así a propósito. Ahora exige que todo lo de Crono Nacionalización esté en Proveedores Exterior y que lo que Proveedores tiene de más sean, todas, filas con costos cargados.
+
+> **Dos pruebas que fallaban antes de esta rama**, arregladas en ella:
+>
+> - **Las del contenedor 733**: alguien le borró el pago en Comercio Exterior y la prueba esperaba los números escritos a mano. Ahora el ancla contra la base es **cualquier contenedor del listado con pagos**, y lo esperado se arma leyendo de las tablas el FOB de su principal y la suma de sus pagos y pasándolos por `saldoPendiente()`. Los números del 733 siguen como caso **puro**.
+> - **Las 7 de "vencido del mes en curso"** en `test_comex_fecha_maestra.php`: la prueba le pasaba `'2026-09-19'` como texto a `Horizonte`, que sólo acepta un `DateTime` y con cualquier otra cosa usa el día de hoy **sin avisar**. Andaba de casualidad y fallaba los días 1. Ahora va `new DateTime('2026-09-19')`.
 
 De la sección 8, lo que se fija:
 
-- **La regla del saldo, caso por caso**: sin pagos, parcial, cancelado, sobrepago y sin FOB, con los cuatro estados nombrados como los nombra Comercio Exterior. **Los números del contenedor 733 están escritos en la prueba**, y ése es el punto: son el ancla entre las dos aplicaciones, así que si esta prueba falla una de las dos se movió.
+- **La regla del saldo, caso por caso**: sin pagos, parcial, cancelado, sobrepago y sin FOB, con los cuatro estados nombrados como los nombra Comercio Exterior. **Los números del contenedor 733 están escritos en la prueba como caso puro**: son el ancla entre las dos aplicaciones, así que si esta prueba falla una de las dos se movió.
 - **Los dos bordes de la tolerancia**: que medio centavo para cualquier lado siga siendo `CANCELADO`, que dos centavos ya no lo sean, y que el medio centavo de más **no dispare el aviso de sobrepago** — sin ese tope, la tolerancia declararía el contenedor cancelado y el aviso mandaría igual a corregir a mano una diferencia que la tolerancia ya declaró irrelevante.
 - **Que el pendiente nunca sea negativo**, y que `pendiente + imputado = FOB` se cumpla también en el sobrepago: es lo que hace cerrar el invariante de series cuando hay plata cargada de más.
 - **El invariante de tres partes sobre los ocho casos posibles**, que es el producto de las tres cosas que pueden pasarle a una fila: estar vencida, estar tildada y tener pagos en Comex. Se prueba **sin base**, con filas armadas a mano — que es el punto, porque en la base real hay dos contenedores con pagos y ninguno tildado.
 - **Que una fila que repite un contenedor no aporte a ninguna de las cuatro series**, incluido `PAGOS_TODO`. Hoy **no hay ninguna OC hija en la base**, así que esto sólo se puede verificar acá. Y que la condición sea `!empty()` y no la inversa: con la condición invertida, *Crono Nacionalización* —que no trae ese campo— se habría ido entera a cero.
 - **Que el cashflow no escriba la tabla de pagos**: se busca `INSERT`, `UPDATE` y `DELETE` sobre ella y las tres tienen que dar cero.
 - **El cableado**: que la consulta resuelva la OC principal con `COALESCE`, que el FOB salga de ahí, que el `ROW_NUMBER` de la deduplicación no se vaya, que la valuación se pida sobre `PENDIENTE_USD` y que el aviso de valuación mida el pendiente y no el FOB.
-- **Contra la base**, sólo lectura: que el 733 dé los tres números de Comercio Exterior, que su importe en pesos salga del pendiente, y que `FOB = pendiente + pagado` cierre **en las 76 filas del padrón**.
+- **Contra la base**, sólo lectura: que un contenedor con pagos —cualquiera, ver arriba— dé lo que dice `saldoPendiente()` sobre sus datos crudos, que su importe en pesos salga del pendiente, y que `FOB = pendiente + pagado` cierre **en todas las filas del padrón**.
 
 De lo nuevo, lo que se fija:
 
@@ -778,6 +893,8 @@ tests/test_comex_fecha_maestra.php
 tests/test_comex_fecha_pago_manual.php  El BIT de fecha de pago fijada, y su degradacion
 tests/test_comex_saldo_pendiente.php    La regla del saldo, el invariante de cuatro series
                                         y la deduplicacion de OC hijas
+tests/test_comex_visibilidad.php        Cuando un contenedor deja de verse, los dos padrones
+                                        iguales y el disparador del recalculo en Comex
 tests/test_comex_dolar_futuro.php
 ```
 

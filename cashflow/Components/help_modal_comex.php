@@ -159,6 +159,39 @@
                                         </div>
                                     </div>
                                 </div>
+                                <!-- COSTOS CARGADOS. Va pegado a "Parcial" porque
+                                     explica lo mismo desde el otro lado: por qué
+                                     un contenedor sigue en la proyección. Badge
+                                     con estilo en línea por lo mismo que el de
+                                     arriba: la clase de la grilla vive bajo
+                                     .tab-proveedores_exterior. -->
+                                <div class="col-12">
+                                    <div class="d-flex align-items-center gap-2 p-2 border rounded">
+                                        <span class="badge" style="background-color: #e2d9f3; color: #3d1a78;">Costos cargados</span>
+                                        <div>
+                                            <strong>Un contenedor sale de Proveedores Exterior
+                                                cuando tiene los costos cargados Y el FOB
+                                                pagado</strong>
+                                            <br><small class="text-muted">
+                                                Antes salía en cuanto Comercio Exterior cargaba
+                                                los costos de nacionalización, aunque al
+                                                proveedor todavía se le debiera plata. Ahora
+                                                sigue mientras le quede saldo, y lleva esta
+                                                etiqueta: <strong>está acá por el saldo</strong>,
+                                                no porque le falten los costos. Sale solo cuando
+                                                los pagos cargados en Comercio Exterior cubren el
+                                                FOB. Es la misma regla que usa Gestión de
+                                                Despachos. Muchos son de antes de que se cargaran
+                                                pagos y no tienen fecha estimada de pago: van
+                                                como <strong>Sin fecha</strong>, y el aviso de
+                                                arriba dice cuánto saldo no se pudo valuar.
+                                                <strong>En Crono Nacionalización no cambia
+                                                nada</strong>: ahí un contenedor con costos
+                                                cargados ya no tiene nada que proyectar.
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
                                 <!-- EL TILDE DE PAGADO. Va acá, entre las
                                      marcas, porque es lo que resuelve las filas
                                      vencidas: se marcan y dejan de pedir
@@ -237,6 +270,7 @@
                                 <li>El cronograma se actualiza automáticamente al guardar</li>
                                 <li>Puede cambiar una fecha cuantas veces necesite: cada cambio queda en el historial</li>
                                 <li>En Proveedores Exterior, si el pago pasa a <strong>otro mes</strong> y tenía una cotización cargada a mano, esa cotización se descarta y la fila vuelve a la curva de dólar futuro. La pantalla lo avisa</li>
+                                <li>Al mover la <strong>fecha de nacionalización</strong>, Comercio Exterior <strong>recalcula la estimación de costos</strong> del contenedor con las alícuotas de la fecha nueva, y los importes de esta pestaña se actualizan. Si el recálculo falla, la fecha queda guardada igual y la pantalla lo avisa</li>
                             </ul>
                         </div>
                     </div>

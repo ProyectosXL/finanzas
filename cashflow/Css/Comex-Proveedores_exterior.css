@@ -624,6 +624,25 @@
     color: #2b2f32;
 }
 
+/* Costos cargados: el contenedor ya tiene los costos de nacionalizacion y
+   sigue aca por el saldo del FOB. Mismo formato que las etiquetas del estado,
+   en violeta porque no es un estado del pago: es la razon por la que la fila
+   sigue en la grilla, y no pide ninguna correccion. */
+.tab-proveedores_exterior .marca-costos-cargados {
+    display: inline-block;
+    margin-left: 5px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    vertical-align: middle;
+    background-color: #e2d9f3;
+    color: #3d1a78;
+    white-space: nowrap;
+}
+
 /* ================================================================
    LAS FILAS QUE NO APORTAN AL EJE
 

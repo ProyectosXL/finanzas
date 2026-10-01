@@ -68,6 +68,25 @@
     'use strict';
 
     /**
+     * El endpoint de Comercio Exterior que recalcula la estimación de PCI de un
+     * contenedor. ÚNICO LUGAR donde está escrita la URL: hoy las dos
+     * aplicaciones comparten host y origen en el mismo XAMPP, y si en
+     * producción dejan de compartirlo, se cambia acá y en ningún otro lado.
+     *
+     * Ver recalcularEstimacionComex() más abajo, y
+     * administracion/comercioExterior/controller/recalcularEstimacion.php.
+     */
+    var RECALCULO_ESTIMACION_URL = '/administracion/comercioExterior/controller/recalcularEstimacion.php';
+
+    /**
+     * El entorno de Comercio Exterior del que lee el cashflow. Viaja EXPLÍCITO
+     * en cada llamada: las dos aplicaciones comparten la cookie de sesión, y la
+     * de Comex puede estar parada en 'uy' por la última pestaña que alguien
+     * abrió allá.
+     */
+    var ENTORNO_COMEX = 'central';
+
+    /**
      * De qué campo de la fila sale la fecha efectiva de cada campo editable.
      *
      * Declarado y no derivado del nombre: son dos claves que ya existían en el
@@ -354,6 +373,52 @@
     }
 
     /**
+     * Le pide a Comercio Exterior que recalcule la estimación de un contenedor
+     * cuya fecha de nacionalización se acaba de mover desde acá.
+     *
+     * DESDE EL NAVEGADOR Y NO DESDE Comex::guardarFecha(): el cashflow no
+     * puede requerir código de otro repo, y las dos aplicaciones ya comparten
+     * origen, así que la llamada es un fetch más. El entorno viaja explícito.
+     *
+     * NUNCA RECHAZA. La fecha ya quedó grabada en el maestro: si el recálculo
+     * falla, eso no se deshace, y lo que hace falta es que se SEPA. Va a
+     * Notificacion.advertencia() y no a error(), porque lo que se pidió -mover
+     * la fecha- salió bien.
+     *
+     * @param {string|number} idMg
+     * @returns {Promise<void>}
+     */
+    function recalcularEstimacionComex(idMg) {
+        var avisar = function(detalle) {
+            Notificacion.advertencia('La fecha se guardó pero no se pudo recalcular la estimación '
+                + 'en Comex. Los gastos de nacionalización de este contenedor siguen calculados '
+                + 'con la fecha anterior hasta que alguien la guarde desde PCI. '
+                + (detalle ? '(' + detalle + ')' : ''),
+                { titulo: 'No se recalculó la estimación' });
+        };
+
+        return fetch(RECALCULO_ESTIMACION_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: idMg, entorno: ENTORNO_COMEX })
+        })
+        .then(function(r) {
+            return r.json().catch(function() {
+                return { success: false, message: 'respuesta inválida (HTTP ' + r.status + ')' };
+            });
+        })
+        .then(function(res) {
+            if (!res || !res.success) {
+                avisar(res && res.message);
+            }
+        })
+        .catch(function(error) {
+            console.error('Error:', error);
+            avisar(error.message);
+        });
+    }
+
+    /**
      * Abre el editor de una celda de fecha y la guarda contra el maestro.
      *
      * MISMA MECÁNICA QUE LA COTIZACIÓN —clic, input, Enter o blur para guardar,
@@ -447,8 +512,25 @@
                     Notificacion.exito(result.message);
                 }
 
-                if (typeof alGuardar === 'function') {
-                    alGuardar(result);
+                var refrescar = function() {
+                    if (typeof alGuardar === 'function') {
+                        alGuardar(result);
+                    }
+                };
+
+                /* MOVER LA NACIONALIZACIÓN RECALCULA LA ESTIMACIÓN EN COMEX.
+                   Las alícuotas de la estimación de PCI se resuelven contra
+                   esta fecha, y esta escritura no pasa por Comercio Exterior:
+                   si nadie le avisa, los gastos de nacionalización que esta
+                   misma pestaña proyecta quedan calculados con la fecha vieja.
+
+                   Sólo si la fecha cambió de verdad, como en los disparadores
+                   de Comex. Y se refresca DESPUÉS, salga como salga: si el
+                   recálculo cambió importes, la grilla los tiene que mostrar. */
+                if (cell.dataset.campo === 'NAC' && !(result.data && result.data.sin_cambios)) {
+                    recalcularEstimacionComex(cell.dataset.id).then(refrescar);
+                } else {
+                    refrescar();
                 }
             })
             .catch(function(error) {
