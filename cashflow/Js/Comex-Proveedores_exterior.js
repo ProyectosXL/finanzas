@@ -386,7 +386,7 @@ function generarFilasDatos() {
         // Recortado con puntos suspensivos (.col-texto); el nombre completo va
         // en el title. Ver Css/main.css.
         html += `<td class="col-texto" title="${escaparAttrProv(item.PROVEEDOR)}">${escaparAttrProv(item.PROVEEDOR)}</td>`;
-        html += `<td class="center">${item.CONTENEDOR || ''}</td>`;
+        html += celdaContenedorProv(item);
         html += `<td class="center">${item.ORDEN_COMPRA || ''}</td>`;
         html += `<td>${item.DESPACHANTE || ''}</td>`;
 
@@ -468,6 +468,38 @@ function generarFilasDatos() {
    al archivo compartido sería poner ahí código que una de las dos pestañas no
    puede usar, que es lo contrario de lo que ese archivo es.
    ================================================================ */
+
+/**
+ * La celda del contenedor, con la etiqueta "Costos cargados" si corresponde.
+ *
+ * POR QUÉ. Desde feature/comex-visibilidad-saldo un contenedor ya no sale de
+ * esta pestaña cuando Comercio Exterior carga sus costos de nacionalización:
+ * sale cuando además el FOB está pagado. Los que siguen con costos cargados
+ * están acá POR EL SALDO, y sin la marca se confunden con un contenedor al
+ * que todavía le faltan los costos. Ver Comex::sigueEnProveedores().
+ *
+ * TIENE_COSTOS lo decide el backend, a nivel grupo. El buscador sigue
+ * mirando data-buscar, así que la etiqueta no le cambia nada.
+ *
+ * @param {Object} item Fila del payload
+ * @returns {string} HTML de la celda
+ */
+function celdaContenedorProv(item) {
+    var contenedor = item.CONTENEDOR || '';
+
+    if (!item.TIENE_COSTOS) {
+        return '<td class="center">' + contenedor + '</td>';
+    }
+
+    /* data-orden con el contenedor a secas: Js/tabla-orden.js ordena por el
+       textContent, y la etiqueta se le pegaría al nombre. */
+    return '<td class="center" data-orden="' + escaparAttrProv(contenedor) + '">' + contenedor
+        + '<span class="marca-costos-cargados" title="'
+        + escaparAttrProv('Comercio Exterior ya cargó los costos de nacionalización de este '
+            + 'contenedor. Sigue en la proyección porque al proveedor del exterior todavía no '
+            + 'se le terminó de pagar el FOB; sale solo cuando el saldo queda cubierto.')
+        + '">Costos cargados</span></td>';
+}
 
 /**
  * Las tres celdas del saldo de una fila.

@@ -61,9 +61,6 @@ class ComprasProyectadasDatos {
     /** El maestro de Comercio Exterior */
     const TABLA_MAESTRO = 'RO_T_IMPORTACIONES_ENCABEZADO';
 
-    /** El detalle: un contenedor CON detalle ya cerro y sale del padron */
-    const TABLA_DETALLE_COMEX = 'RO_T_IMPORTACIONES_DETALLE';
-
     /**
      * Los ajustes manuales por mes, del lado del cashflow.
      *
@@ -680,11 +677,17 @@ class ComprasProyectadasDatos {
      * que se emitio su orden de compra.
      *
      * ES EL MISMO PADRON QUE LA PESTANA PROVEEDORES EXTERIOR, y tiene que
-     * seguir siendolo: el mismo corte por detalle cargado, el mismo FOB de la
-     * OC PRINCIPAL y el mismo pendiente de Comex::saldoPendiente(). Si los dos
-     * se separan, el tablero descontaria un numero que la pestana no muestra, y
-     * la diferencia no se podria explicar desde ninguna pantalla. Hay una
-     * prueba que compara los dos padrones contra la base.
+     * seguir siendolo: el mismo filtro -Comex::filtroPadron(), escrito UNA vez
+     * y usado por las dos consultas-, el mismo FOB de la OC PRINCIPAL y el
+     * mismo pendiente de Comex::saldoPendiente(). Si los dos se separan, el
+     * tablero descontaria un numero que la pestana no muestra, o contaria dos
+     * veces el mismo saldo, y la diferencia no se podria explicar desde
+     * ninguna pantalla. Hay una prueba que compara los dos padrones contra la
+     * base.
+     *
+     * DESDE feature/comex-visibilidad-saldo EL CORTE YA NO ES "SIN DETALLE
+     * CARGADO": un contenedor con costos sigue mientras le quede saldo, y su
+     * pendiente se descuenta. Ver Comex::sigueEnProveedores().
      *
      * LA FECHA QUE UBICA ES FECHA_EST_PAGO Y NO LA RECEPCION ESTIMADA. Es la
      * que usa esa pestana, y es la unica que sirve: lo proyectado nace en el
@@ -743,13 +746,12 @@ class ComprasProyectadasDatos {
                               ORDER BY CASE WHEN A.ID_PADRE IS NULL THEN 0 ELSE 1 END, A.ID) = 1
                          THEN 0 ELSE 1 END DUPLICA_GRUPO
                 FROM " . self::TABLA_MAESTRO . " A
-                LEFT JOIN " . self::TABLA_DETALLE_COMEX . " B ON A.ID = B.ID_MG
                 LEFT JOIN " . self::TABLA_OC . " C ON C.N_ORDEN_CO = A.ORDEN_COMPRA
                 OUTER APPLY (SELECT OC0.VALOR_FOB_DOLAR
                              FROM " . self::TABLA_MAESTRO . " OC0
                              WHERE OC0.ID = ISNULL(A.ID_PADRE, A.ID)) OC
                 " . $applyPagos . "
-                WHERE B.ID_MG IS NULL";
+                WHERE " . $this->comex->filtroPadron();
 
         $stmt = sqlsrv_query($cid, $sql);
 

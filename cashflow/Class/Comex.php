@@ -137,6 +137,14 @@ require_once __DIR__ . '/Horizonte.php';
  * el codigo lo detecte solo: son dos repos. El encabezado de Pagos.php del otro
  * lado lo dice, y esta nota es la otra mitad del pacto.
  *
+ * Y EL PACTO TIENE UNA SEGUNDA CLAUSULA desde feature/comex-visibilidad-saldo:
+ * CUANDO UN CONTENEDOR DEJA DE VERSE. Gestion de Despachos (alla) y Proveedores
+ * Exterior (aca) lo sacan solo cuando tiene costos de nacionalizacion cargados
+ * Y los pagos cubren el FOB, evaluado por grupo. Aca vive en
+ * sigueEnProveedores() y sqlSigueVisible(); alla en VisibilidadContenedor. Si
+ * cambia de un lado, se cambia del otro: si no, un contenedor estaria en una
+ * pantalla y no en la otra sin que nadie pueda explicar por que.
+ *
  * EL FOB Y LOS PAGOS SALEN DE LA OC PRINCIPAL -COALESCE(ID_PADRE, ID)-, igual
  * que en Comex: un contenedor con varias ordenes de compra tiene UN pago al
  * proveedor, no uno por orden. Al 22/09/2026 el padron de central no tiene NI
@@ -873,6 +881,111 @@ class Comex {
         ];
     }
 
+    /* ====================================================================
+       CUANDO UN CONTENEDOR DEJA DE VERSE
+
+       Esto CAMBIO con feature/comex-visibilidad-saldo. Hasta ahi el padron de
+       Proveedores Exterior era "sin detalle cargado": un contenedor salia de
+       la proyeccion en cuanto Comercio Exterior cargaba sus costos de
+       nacionalizacion, AUNQUE AL PROVEEDOR TODAVIA SE LE DEBIERA el FOB. El
+       saldo desaparecia del tablero sin haberse pagado.
+
+       Ahora sale solo cuando cumple LAS DOS:
+
+         (A) tiene costos de nacionalizacion confirmados: filas en
+             RO_T_IMPORTACIONES_DETALLE para cualquier OC del grupo. La
+             estimacion de PCI no cuenta;
+         (B) los pagos cubren el FOB: saldoPendiente() da CANCELADO o
+             SOBREPAGO. SIN_FOB no cuenta como cubierto.
+
+       Por GRUPO: (A) mira el detalle de cualquier OC -se replica a todas- y
+       (B) el FOB y los pagos de la principal, como el saldo. Sin ventana de
+       tiempo: aca nunca la hubo.
+
+       ES LA REGLA DE GESTION DE DESPACHOS, replicada y no incluida, como la del
+       saldo: vive en VisibilidadContenedor del repo administracion y el
+       encabezado de su Pagos.php es la otra mitad del pacto. La de alla suma
+       una ventana de 6 meses para lo que no tiene saldo, que aca no aplica.
+       ==================================================================== */
+
+    /** (B): los pagos cubren el FOB. SIN_FOB no: no hay contra que medir */
+    public static function fobCubierto($estado) {
+        return $estado === self::ESTADO_CANCELADO || $estado === self::ESTADO_SOBREPAGO;
+    }
+
+    /**
+     * NOT (A AND B): si el contenedor sigue en el padron de Proveedores
+     * Exterior -y por lo tanto en el de ComprasProyectadasDatos::cargado()-.
+     *
+     * @param bool $tieneCostos (A), a nivel grupo
+     * @param string $estado saldoPendiente()['estado']
+     * @return bool
+     */
+    public static function sigueEnProveedores($tieneCostos, $estado) {
+        return !($tieneCostos && self::fobCubierto($estado));
+    }
+
+    /**
+     * (A) en SQL, para la fila de alias A.
+     *
+     * EXISTS Y NO EL LEFT JOIN DE ANTES. El corte viejo era LEFT JOIN
+     * RO_T_IMPORTACIONES_DETALLE ... WHERE ID_MG IS NULL, que no multiplicaba
+     * filas porque se quedaba solo con las que no tenian detalle. Ahora pasan
+     * contenedores con detalle, y el mismo JOIN daria una fila por cada linea
+     * de costo: DUPLICA_GRUPO y GRUPO_FILAS contarian lineas de costo como si
+     * fueran OCs repetidas.
+     *
+     * @return string
+     */
+    public static function sqlTieneCostos() {
+        return "EXISTS (SELECT 1
+                        FROM RO_T_IMPORTACIONES_DETALLE DV
+                        INNER JOIN " . self::TABLA_MAESTRO . " GV ON GV.ID = DV.ID_MG
+                        WHERE COALESCE(GV.ID_PADRE, GV.ID) = " . self::OC_PRINCIPAL . ")";
+    }
+
+    /**
+     * sigueEnProveedores() en SQL, para el WHERE.
+     *
+     * EN FLOAT, a proposito: saldoPendiente() resta en double, y con DECIMAL
+     * los dos lados caerian en estados distintos justo en el borde del
+     * centavo -100,01 contra 100,00 es 0,01 exacto en DECIMAL y
+     * 0,010000000000005 en double-. Es el mismo CAST que usa
+     * VisibilidadContenedor del otro repo.
+     *
+     * @param string $fobExpr FOB de la principal
+     * @param string $pagadoExpr SUM(MONTO) de la principal, nunca NULL
+     * @return string
+     */
+    public static function sqlSigueVisible($fobExpr, $pagadoExpr) {
+        $fob = "CAST(ISNULL(" . $fobExpr . ", 0) AS FLOAT)";
+
+        return "NOT (" . self::sqlTieneCostos() . "
+                     AND " . $fob . " > 0
+                     AND " . $fob . " - CAST(" . $pagadoExpr . " AS FLOAT) <= " . self::TOLERANCIA_SALDO . ")";
+    }
+
+    /**
+     * El WHERE del padron de Proveedores Exterior, sobre los alias de
+     * saldoApply(): OC para el FOB de la principal y PG para sus pagos.
+     *
+     * UN SOLO LUGAR PARA LOS DOS PADRONES. ComprasProyectadasDatos::cargado()
+     * descuenta el pendiente de ESTOS contenedores, y arma su consulta con los
+     * mismos alias para poder usar exactamente este filtro: si los dos
+     * padrones se separaran, el tablero contaria dos veces el mismo saldo.
+     *
+     * SIN LA TABLA DE PAGOS lo pagado es cero, igual que en saldoSelect(): nada
+     * esta cubierto y todo contenedor con FOB sigue en el padron. Es la misma
+     * degradacion -proyectar de mas- que avisoSinPagosComex() ya avisa.
+     *
+     * @return string
+     */
+    public function filtroPadron() {
+        return self::sqlSigueVisible(
+            'ISNULL(OC.VALOR_FOB_DOLAR, A.VALOR_FOB_DOLAR)',
+            $this->tienePagosComex() ? 'ISNULL(PG.MONTO, 0)' : 'CAST(0 AS DECIMAL(18,2))');
+    }
+
     /**
      * Le pone a una fila leida su saldo pendiente y todo lo que se deriva de el.
      *
@@ -911,6 +1024,13 @@ class Comex {
         $row['DUPLICA_GRUPO'] =
             !empty($row['DUPLICA_GRUPO']) && $row['DUPLICA_GRUPO'] != '0';
         $row['GRUPO_FILAS'] = isset($row['GRUPO_FILAS']) ? intval($row['GRUPO_FILAS']) : 1;
+
+        /* Mismo cuidado que DUPLICA_GRUPO. TIENE_COSTOS es la (A) de
+           sigueEnProveedores(): decide la etiqueta "Costos cargados" de la
+           grilla. Que la fila este aca con costos quiere decir que esta por el
+           saldo, y sin la marca se confunde con una a la que le faltan. */
+        $row['TIENE_COSTOS'] =
+            !empty($row['TIENE_COSTOS']) && $row['TIENE_COSTOS'] != '0';
 
         return $row;
     }
@@ -1014,6 +1134,12 @@ class Comex {
      * que decide es la fecha de pago, y los vencidos se muestran marcados para
      * poder corregirles la fecha, que es lo unico que los devuelve al eje.
      *
+     * EL PADRON YA NO ES "SIN DETALLE CARGADO". Un contenedor con costos
+     * cargados sigue mientras le quede saldo por pagar, y sale cuando el FOB
+     * esta cubierto: ver sigueEnProveedores() y filtroPadron(). Al 01/10/2026
+     * eso suma 278 contenedores, 250 de ellos sin fecha estimada de pago: van
+     * como "Sin fecha" y el aviso de valuacion informa su saldo en dolares.
+     *
      * LO QUE SE VALUA ES EL PENDIENTE, NO EL FOB. Cada fila trae el FOB de su
      * OC principal, lo que Comercio Exterior ya registro como pagado y la resta
      * de los dos, y es esa resta la que se lleva la cotizacion. Ver el
@@ -1066,14 +1192,14 @@ class Comex {
                     " . $this->confPagoSelect() . ",
                     " . $this->rastroSelect('PAGO') . ",
                     " . $this->pagadoSelect() . ",
-                    " . $cotizSql . " AS COTIZ_USD_EDIT
+                    " . $cotizSql . " AS COTIZ_USD_EDIT,
+                    CASE WHEN " . self::sqlTieneCostos() . " THEN 1 ELSE 0 END TIENE_COSTOS
                 FROM " . self::TABLA_MAESTRO . " A
-                LEFT JOIN RO_T_IMPORTACIONES_DETALLE B ON A.ID = B.ID_MG
                 LEFT JOIN " . self::TABLA_EDIT . " D ON A.ID = D.ID_MG
                 " . $this->rastroJoin('PAGO') . "
                 " . $this->pagadoJoin('PAGO') . "
                 " . $this->saldoApply() . "
-                WHERE B.ID_MG IS NULL
+                WHERE " . $this->filtroPadron() . "
                 ORDER BY CASE WHEN A.FECHA_EST_PAGO IS NULL THEN 1 ELSE 0 END,
                          A.FECHA_EST_PAGO,
                          A.FECHA_ARR,

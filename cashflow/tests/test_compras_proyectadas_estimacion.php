@@ -745,7 +745,12 @@ if (!Pruebas::hayBase()) {
 
     /* EL PADRON TIENE QUE SER EL MISMO QUE EL DE PROVEEDORES EXTERIOR. Si los
        dos se separan, el tablero descontaria un numero que esa pestana no
-       muestra, y la diferencia no se podria explicar desde ninguna pantalla. */
+       muestra, y la diferencia no se podria explicar desde ninguna pantalla.
+
+       DESDE feature/comex-visibilidad-saldo SE COMPARAN LOS IDS, no solo
+       cuantos son: el padron cambio de regla -sigue un contenedor con costos
+       mientras le quede saldo- y dos listas del mismo tamano con un contenedor
+       cambiado por otro contarian dos veces un saldo y ninguna el otro. */
     $cargado = $d->cargado();
     $comex = new Comex;
     $padron = $comex->getProveedoresExterior();
@@ -760,6 +765,13 @@ if (!Pruebas::hayBase()) {
 
     chequear('lo cargado trae la misma cantidad de contenedores que la pestana',
         count($vivos), count($cargado));
+
+    $idsVivos = array_map(function ($p) { return intval($p['ID']); }, $vivos);
+    $idsCargado = array_map(function ($c) { return $c['id']; }, $cargado);
+    sort($idsVivos);
+    sort($idsCargado);
+
+    chequear('y son los mismos contenedores, uno por uno', $idsVivos, $idsCargado);
 
     $pendienteCargado = 0.0;
 
