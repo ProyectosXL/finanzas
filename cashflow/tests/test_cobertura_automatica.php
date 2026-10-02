@@ -716,7 +716,7 @@ $cuerpoGuardarAuto = (function () {
 chequear('guardar() valida contra el disponible', true,
     strpos($cuerpoGuardarAuto, 'self::validarDisponible(') !== false);
 chequear('y pisa por fecha Y fondo', true,
-    strpos($cuerpoGuardarAuto, '$this->bajaVigentes($cid, $f, $org)') !== false);
+    strpos($cuerpoGuardarAuto, '$this->bajaVigentes($cid, $f, $org, $usuario)') !== false);
 
 /* ================================================================
    EL TOPE POR COLUMNA, DESDE LAS CUENTAS

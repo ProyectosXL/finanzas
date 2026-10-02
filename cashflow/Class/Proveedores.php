@@ -5,6 +5,8 @@ require_once __DIR__ . '/Ingresos.php';
 require_once __DIR__ . '/ProveedoresCategorias.php';
 require_once __DIR__ . '/ProveedoresExclusion.php';
 require_once __DIR__ . '/Planilla.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * Proveedores
@@ -791,7 +793,7 @@ class Proveedores {
         $cid = $this->conectar();
 
         $sql = "SELECT COD_PROVEE, T_COMP, N_COMP, FECHA_PAGO, FORMA_PAGO, FORMA_PAGO_ORIG,
-                       OBSERVACION, ESTADO, FECHA_CANCELADO, ORIGEN, USUARIO, "
+                       OBSERVACION, ESTADO, FECHA_CANCELADO, ORIGEN, USUARIO_MODIF, FECHA_MODIF, "
                        . $this->overrideSql('FORMA_PAGO_CRONOGRAMA') . " AS FORMA_PAGO_CRONOGRAMA, "
                        . ($this->tieneColumnaPago('EXCLUIDA') ? 'EXCLUIDA' : '0') . " AS EXCLUIDA, "
                        . $this->overrideSql('MOTIVO_EXCLUSION') . " AS MOTIVO_EXCLUSION, "
@@ -845,7 +847,9 @@ class Proveedores {
                    script, y ahi fuenteFecha() cae a ORIGEN. Ver
                    sql/cashflow_prov_locales_fuente_fecha.sql. */
                 'FUENTE_FECHA' => $row['FUENTE_FECHA'],
-                'USUARIO' => $row['USUARIO']
+                'USUARIO' => $row['USUARIO_MODIF'],
+                'FECHA_MODIF' => ($row['FECHA_MODIF'] instanceof DateTime)
+                    ? $row['FECHA_MODIF']->format('Y-m-d H:i:s') : $row['FECHA_MODIF']
             ];
         }
 
@@ -1338,10 +1342,12 @@ class Proveedores {
      * cargar las buenas.
      *
      * @param array $comparacion Lo que devolvio compararImportacion()
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['altas', 'cambios']
      */
-    public function aplicarImportacion($comparacion, $usuario = null) {
+    public function aplicarImportacion($comparacion, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablaCreada()) {
             throw new Exception('Todavía no existe la tabla de fechas de pago. '
                 . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
@@ -1409,11 +1415,13 @@ class Proveedores {
      * @param string $fecha 'Y-m-d'
      * @param string|null $formaPago Si no viene, la que haya queda como esta
      * @param string|null $observacion Idem
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['fecha', 'forma']
      */
-    public function savePago($codProvee, $tComp, $nComp, $fecha, $formaPago = null,
-                             $observacion = null, $usuario = null) {
+    public function savePago($codProvee, $tComp, $nComp, $fecha, $formaPago, $observacion,
+                             $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablaCreada()) {
             throw new Exception('Todavía no existe la tabla de fechas de pago. '
                 . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
@@ -1486,10 +1494,12 @@ class Proveedores {
      *
      * @param array $comprobantes Filas con 'cod_provee', 't_comp', 'n_comp'
      * @param mixed $fecha 'Y-m-d'
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['fecha' => string, 'tocados' => int]
      */
-    public function saveFechaMasiva($comprobantes, $fecha, $usuario = null) {
+    public function saveFechaMasiva($comprobantes, $fecha, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablaCreada()) {
             throw new Exception('Todavía no existe la tabla de fechas de pago. '
                 . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
@@ -1522,10 +1532,12 @@ class Proveedores {
      * @param string $tComp
      * @param string $nComp
      * @param string|null $forma Una de FORMAS_PAGO, o vacio para sacar el override
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['forma' => string|null]
      */
-    public function saveFormaCronograma($codProvee, $tComp, $nComp, $forma, $usuario = null) {
+    public function saveFormaCronograma($codProvee, $tComp, $nComp, $forma, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablaCreada()) {
             throw new Exception('Todavía no existe la tabla de overrides por comprobante. '
                 . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
@@ -1607,9 +1619,13 @@ class Proveedores {
      * @param string $codProvee
      * @param string $tComp
      * @param string $nComp
+     * @param string $usuario Firma el UPDATE. El DELETE de la fila vacia no deja
+     *        rastro de quien: no queda fila donde anotarlo
      * @return bool Si habia una fecha cargada
      */
-    public function deletePago($codProvee, $tComp, $nComp) {
+    public function deletePago($codProvee, $tComp, $nComp, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablaCreada()) {
             throw new Exception('Todavía no existe la tabla de fechas de pago.');
         }
@@ -1647,9 +1663,9 @@ class Proveedores {
                 "UPDATE dbo." . self::TABLA_PAGO . "
                  SET FECHA_PAGO = NULL"
                     . (in_array('FUENTE_FECHA', $opcionales, true) ? ', FUENTE_FECHA = NULL' : '')
-                    . ", FECHA_MOD = GETDATE()
+                    . ", " . Auditoria::SET_MODIF . "
                  WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?
-                   AND FECHA_PAGO IS NOT NULL", $clave);
+                   AND FECHA_PAGO IS NOT NULL", array_merge([$usuario], $clave));
 
             if ($stmt === false) {
                 throw new Exception($this->errorSql('Error al borrar la fecha de pago'));
@@ -1758,11 +1774,10 @@ class Proveedores {
      * @param string $nComp
      * @param bool $excluida
      * @param string|null $motivo Obligatorio si $excluida es true
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['excluida' => bool, 'motivo' => string|null]
      */
-    public function saveExclusion($codProvee, $tComp, $nComp, $excluida, $motivo = null,
-                                  $usuario = null) {
+    public function saveExclusion($codProvee, $tComp, $nComp, $excluida, $motivo, $usuario) {
         $r = $this->saveExclusionMasiva(
             [['cod_provee' => $codProvee, 't_comp' => $tComp, 'n_comp' => $nComp]],
             $excluida, $motivo, $usuario);
@@ -1794,11 +1809,12 @@ class Proveedores {
      * @param array $comprobantes Filas con 'cod_provee', 't_comp', 'n_comp'
      * @param bool $excluida
      * @param string|null $motivo Obligatorio si $excluida es true
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['excluida', 'motivo', 'tocados' => int]
      */
-    public function saveExclusionMasiva($comprobantes, $excluida, $motivo = null,
-                                        $usuario = null) {
+    public function saveExclusionMasiva($comprobantes, $excluida, $motivo, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablaCreada()) {
             throw new Exception('Todavía no existe la tabla de overrides por comprobante. '
                 . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
@@ -1926,7 +1942,7 @@ class Proveedores {
      * @param array $claves Las de normalizarClaves()
      * @param array $campos Mapa columna => valor, el mismo para todas
      * @param string $origen 'MANUAL' o 'ARCHIVO'
-     * @param string|null $usuario
+     * @param string $usuario
      */
     private function guardarLote($claves, $campos, $origen, $usuario) {
         $cid = $this->conectar();
@@ -1992,8 +2008,7 @@ class Proveedores {
         }
 
         $sets[] = 'ORIGEN = ?';
-        $sets[] = 'USUARIO = ?';
-        $sets[] = 'FECHA_MOD = GETDATE()';
+        $sets[] = Auditoria::SET_MODIF;
         $params[] = $origen;
         $params[] = $usuario;
 
@@ -2022,9 +2037,11 @@ class Proveedores {
 
         $cols[] = 'ESTADO';
         $cols[] = 'ORIGEN';
-        $cols[] = 'USUARIO';
+        $cols[] = 'USUARIO_ALTA';
+        $cols[] = 'USUARIO_MODIF';
         $vals[] = 'PREVISTO';
         $vals[] = $origen;
+        $vals[] = $usuario;
         $vals[] = $usuario;
 
         $sql = "INSERT INTO dbo." . self::TABLA_PAGO . "
@@ -2082,11 +2099,15 @@ class Proveedores {
      * NO ESCRIBE NADA SI $aplicar es false: primero se mira que cambiaria, igual
      * que en las dos importaciones.
      *
-     * @param bool $aplicar
-     * @param string|null $usuario
+     * @param bool $aplicar false solo arma la vista previa
+     * @param string $usuario Quien concilia. Se exige tambien en la vista previa:
+     *        es el primer paso de una escritura, y la pantalla no la ofrece a quien
+     *        no puede aplicar
      * @return array ['concilia', 'reabre', 'sin_cambios', 'resumen']
      */
-    public function conciliar($aplicar = false, $usuario = null) {
+    public function conciliar($aplicar, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablaCreada()) {
             throw new Exception('Todavía no existe la tabla de fechas de pago. '
                 . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
@@ -2261,7 +2282,7 @@ class Proveedores {
                 $stmt = sqlsrv_query($cid,
                     "UPDATE dbo." . self::TABLA_PAGO . "
                      SET ESTADO = 'CONCILIADO', FECHA_CANCELADO = ?, FECHA_CONCILIA = GETDATE(),
-                         USUARIO = ?, FECHA_MOD = GETDATE()
+                         " . Auditoria::SET_MODIF . "
                      WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?",
                     [$c['fecha_cancelado'], $usuario,
                      $c['cod_provee'], $c['t_comp'], $c['n_comp']]);
@@ -2278,7 +2299,7 @@ class Proveedores {
                 $stmt = sqlsrv_query($cid,
                     "UPDATE dbo." . self::TABLA_PAGO . "
                      SET ESTADO = 'PREVISTO', FECHA_CANCELADO = NULL, FECHA_CONCILIA = NULL,
-                         USUARIO = ?, FECHA_MOD = GETDATE()
+                         " . Auditoria::SET_MODIF . "
                      WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?",
                     [$usuario, $r['cod_provee'], $r['t_comp'], $r['n_comp']]);
 

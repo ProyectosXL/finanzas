@@ -1,6 +1,8 @@
 <?php
 
 require_once __DIR__ . '/Planilla.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * La consulta de las listas fallo: la tabla esta, pero no se pudo leer.
@@ -291,7 +293,8 @@ class ProveedoresOpciones {
             return $this->listas;
         }
 
-        $sql = "SELECT ID, TIPO, VALOR, ORDEN, VIGENTE, PLAZO_DIAS, FECHA_ALTA, FECHA_BAJA
+        $sql = "SELECT ID, TIPO, VALOR, ORDEN, VIGENTE, PLAZO_DIAS, USUARIO_ALTA, FECHA_ALTA,
+                       USUARIO_MODIF, FECHA_MODIF, USUARIO_BAJA, FECHA_BAJA
                 FROM dbo." . self::TABLA . "
                 ORDER BY TIPO, VIGENTE DESC, ORDEN, VALOR";
 
@@ -318,7 +321,11 @@ class ProveedoresOpciones {
                 'ORDEN' => intval($row['ORDEN']),
                 'VIGENTE' => (intval($row['VIGENTE']) === 1),
                 'PLAZO_DIAS' => ($row['PLAZO_DIAS'] === null) ? null : intval($row['PLAZO_DIAS']),
+                'USUARIO_ALTA' => $row['USUARIO_ALTA'],
                 'FECHA_ALTA' => $this->fechaHora($row['FECHA_ALTA']),
+                'USUARIO_MODIF' => $row['USUARIO_MODIF'],
+                'FECHA_MODIF' => $this->fechaHora($row['FECHA_MODIF']),
+                'USUARIO_BAJA' => $row['USUARIO_BAJA'],
                 'FECHA_BAJA' => $this->fechaHora($row['FECHA_BAJA'])
             ];
         }
@@ -561,10 +568,12 @@ class ProveedoresOpciones {
      *
      * @param string $tipo
      * @param string $valor
-     * @param mixed $plazoDias Solo para TIPO = PLAZO
+     * @param mixed $plazoDias Solo para TIPO = PLAZO; null en las otras listas
+     * @param string $usuario
      * @return array ['id', 'valor', 'reactivado']
      */
-    public function agregar($tipo, $valor, $plazoDias = null) {
+    public function agregar($tipo, $valor, $plazoDias, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $v = self::validarValor($tipo, $valor);
@@ -589,12 +598,13 @@ class ProveedoresOpciones {
 
             $up = sqlsrv_query($cid,
                 "UPDATE dbo." . self::TABLA . "
-                 SET VIGENTE = 1, FECHA_BAJA = NULL, FECHA_ALTA = GETDATE()
+                 SET VIGENTE = 1, USUARIO_BAJA = NULL, FECHA_BAJA = NULL,
+                     USUARIO_ALTA = ?, FECHA_ALTA = GETDATE(), " . Auditoria::SET_MODIF . "
                      " . ($tipo === self::TIPO_PLAZO ? ', PLAZO_DIAS = ?' : '') . "
                  WHERE ID = ?",
                 ($tipo === self::TIPO_PLAZO)
-                    ? [$dias, intval($existe['ID'])]
-                    : [intval($existe['ID'])]);
+                    ? [$usuario, $usuario, $dias, intval($existe['ID'])]
+                    : [$usuario, $usuario, intval($existe['ID'])]);
 
             if ($up === false) {
                 throw new Exception($this->errorSql('Error al reactivar la opción'));
@@ -609,11 +619,12 @@ class ProveedoresOpciones {
         /* Va al FINAL de la lista. Lo nuevo no se cuela arriba de lo que el
            usuario ya ordeno: si tiene que ir arriba, lo sube él. */
         $ins = sqlsrv_query($cid,
-            "INSERT INTO dbo." . self::TABLA . " (TIPO, VALOR, ORDEN, VIGENTE, PLAZO_DIAS)
+            "INSERT INTO dbo." . self::TABLA . "
+                 (TIPO, VALOR, ORDEN, VIGENTE, PLAZO_DIAS, USUARIO_ALTA, USUARIO_MODIF)
              VALUES (?, ?,
                      (SELECT ISNULL(MAX(ORDEN), 0) + 1 FROM dbo." . self::TABLA . " WHERE TIPO = ?),
-                     1, ?)",
-            [$tipo, $v, $tipo, $dias]);
+                     1, ?, ?, ?)",
+            [$tipo, $v, $tipo, $dias, $usuario, $usuario]);
 
         if ($ins === false) {
             throw new Exception($this->errorSql('Error al agregar la opción'));
@@ -642,9 +653,11 @@ class ProveedoresOpciones {
      *
      * @param int $id
      * @param array $datos ['valor', 'orden', 'plazo_dias']
+     * @param string $usuario
      * @return array
      */
-    public function guardar($id, $datos) {
+    public function guardar($id, $datos, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $id = intval($id);
@@ -678,6 +691,10 @@ class ProveedoresOpciones {
             return ['id' => $id, 'cambios' => 0];
         }
 
+        // Despues del empty(): un guardado que no cambia nada no es una modificacion.
+        $cambios = count($sets);
+        $sets[] = Auditoria::SET_MODIF;
+        $params[] = $usuario;
         $params[] = $id;
 
         $stmt = sqlsrv_query($this->conectar(),
@@ -691,7 +708,7 @@ class ProveedoresOpciones {
         sqlsrv_free_stmt($stmt);
         $this->listas = null;
 
-        return ['id' => $id, 'cambios' => count($sets)];
+        return ['id' => $id, 'cambios' => $cambios];
     }
 
     /**
@@ -704,9 +721,11 @@ class ProveedoresOpciones {
      *
      * @param int $id
      * @param bool $vigente
+     * @param string $usuario
      * @return array
      */
-    public function baja($id, $vigente = false) {
+    public function baja($id, $vigente, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $id = intval($id);
@@ -718,10 +737,11 @@ class ProveedoresOpciones {
 
         $stmt = sqlsrv_query($this->conectar(),
             "UPDATE dbo." . self::TABLA . "
-             SET VIGENTE = ?,
-                 FECHA_BAJA = " . ($vigente ? 'NULL' : 'GETDATE()') . "
+             SET " . Auditoria::sqlBajaSegunEstado('VIGENTE') . ", VIGENTE = ?,
+                 " . Auditoria::SET_MODIF . "
              WHERE ID = ?",
-            [$vigente ? 1 : 0, $id]);
+            array_merge(Auditoria::paramsBajaSegunEstado($vigente, $usuario),
+                [$vigente ? 1 : 0, $usuario, $id]));
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al dar de baja la opción'));

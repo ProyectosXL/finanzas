@@ -3,6 +3,7 @@
 require_once __DIR__ . '/Planilla.php';
 require_once __DIR__ . '/Proveedores.php';
 require_once __DIR__ . '/Tarjetas.php';
+require_once __DIR__ . '/AuthCashflow.php';
 
 /**
  * TarjetasFactura
@@ -217,10 +218,11 @@ class TarjetasFactura {
      *
      * @param array $comprobantes Filas con 'cod_provee', 't_comp', 'n_comp'
      * @param mixed $idTarjeta
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['id_tarjeta', 'vinculadas' => int, 'movidas' => int]
      */
-    public function vincular($comprobantes, $idTarjeta, $usuario = null) {
+    public function vincular($comprobantes, $idTarjeta, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $id = intval($idTarjeta);
@@ -261,10 +263,11 @@ class TarjetasFactura {
      * NO BORRA NADA: marca ACTIVO = 0 con quien y cuando.
      *
      * @param array $comprobantes
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['desvinculadas' => int]
      */
-    public function desvincular($comprobantes, $usuario = null) {
+    public function desvincular($comprobantes, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $claves = self::normalizarClaves($comprobantes, 'desvincular');

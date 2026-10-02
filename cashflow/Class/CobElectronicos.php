@@ -2,6 +2,8 @@
 
 require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/Planilla.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * CobElectronicos
@@ -1634,7 +1636,8 @@ class CobElectronicos {
 
         $cid = $this->conectar('central');
 
-        $sql = "SELECT ID, RAZON_SOCIAL, ORDEN, ACTIVO, FECHA_UPDATE, USUARIO
+        $sql = "SELECT ID, RAZON_SOCIAL, ORDEN, ACTIVO, FECHA_MODIF AS FECHA_UPDATE,
+                       USUARIO_MODIF AS USUARIO
                 FROM RO_T_CASHFLOW_COBEL_PROCESADORA";
 
         if ($soloActivas) {
@@ -1682,7 +1685,8 @@ class CobElectronicos {
         $cid = $this->conectar('central');
 
         $sql = "SELECT A.ID, A.ID_PROCESADORA, P.RAZON_SOCIAL, A.CONCEPTO, A.ALICUOTA,
-                       A.VIGENCIA_DESDE, A.ACTIVO, A.FECHA_UPDATE, A.USUARIO
+                       A.VIGENCIA_DESDE, A.ACTIVO, A.FECHA_MODIF AS FECHA_UPDATE,
+                       A.USUARIO_MODIF AS USUARIO
                 FROM RO_T_CASHFLOW_COBEL_ALICUOTA A
                 INNER JOIN RO_T_CASHFLOW_COBEL_PROCESADORA P ON P.ID = A.ID_PROCESADORA";
 
@@ -1755,7 +1759,7 @@ class CobElectronicos {
         $sql = "SELECT M.ID, M.ID_PROCESADORA, P.RAZON_SOCIAL, M.IMPORTE_BRUTO,
                        M.FECHA_ACREDITACION, M.TASA_APLICADA, M.IMPORTE_NETO,
                        M.ORIGEN_DATO, M.ID_EXTERNO, M.ARCHIVO_ORIGEN, M.OBSERVACIONES,
-                       M.FECHA_ALTA, M.FECHA_UPDATE, M.USUARIO
+                       M.FECHA_ALTA, M.FECHA_MODIF AS FECHA_UPDATE, M.USUARIO_MODIF AS USUARIO
                 FROM RO_T_CASHFLOW_COBEL_MOVIMIENTO M
                 INNER JOIN RO_T_CASHFLOW_COBEL_PROCESADORA P ON P.ID = M.ID_PROCESADORA
                 WHERE M.ACTIVO = 1";
@@ -2030,14 +2034,15 @@ class CobElectronicos {
      * @param string $archivo Nombre del archivo, se guarda en ARCHIVO_ORIGEN
      * @param bool $aplicarBajas Si se dan de baja los cargados que el archivo
      *        no trae. Por defecto NO: un archivo parcial no puede borrar nada
-     * @param string|null $usuario
+     * @param string $usuario
      * @param array $periodo Periodo que cubre el archivo, si se declaro. Tiene
      *        que ser el MISMO que se uso al previsualizar, o las bajas que se
      *        aplican no serian las que se mostraron
      * @return array El diff aplicado, con lo que efectivamente se escribio
      */
-    public function importar($filas, $archivo = '', $aplicarBajas = false, $usuario = null,
-                             $periodo = []) {
+    public function importar($filas, $archivo, $aplicarBajas, $usuario, $periodo = []) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablasCreadas()) {
             throw new Exception('No existen las tablas del módulo Cob. Electrónicos. '
                 . 'Corré sql/cashflow_cob_electronicos.sql.');
@@ -2074,13 +2079,13 @@ class CobElectronicos {
             $sqlAlta = "INSERT INTO RO_T_CASHFLOW_COBEL_MOVIMIENTO
                             (ID_PROCESADORA, IMPORTE_BRUTO, FECHA_ACREDITACION, TASA_APLICADA,
                              IMPORTE_NETO, ORIGEN_DATO, ID_EXTERNO, ARCHIVO_ORIGEN,
-                             OBSERVACIONES, ACTIVO, FECHA_ALTA, FECHA_UPDATE, USUARIO)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, GETDATE(), GETDATE(), ?)";
+                             OBSERVACIONES, ACTIVO, USUARIO_ALTA, USUARIO_MODIF)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)";
 
             $sqlCambio = "UPDATE RO_T_CASHFLOW_COBEL_MOVIMIENTO
                           SET IMPORTE_BRUTO = ?, FECHA_ACREDITACION = ?, TASA_APLICADA = ?,
                               IMPORTE_NETO = ?, ORIGEN_DATO = ?, ID_EXTERNO = ?,
-                              ARCHIVO_ORIGEN = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                              ARCHIVO_ORIGEN = ?, " . Auditoria::SET_MODIF . "
                           WHERE ID = ? AND ACTIVO = 1";
 
             foreach ($diff['filas'] as $f) {
@@ -2089,7 +2094,8 @@ class CobElectronicos {
                         $f['id_procesadora'], $f['importe_bruto'], $f['fecha_acreditacion'],
                         $f['tasa_aplicada'], $f['importe_neto'], self::ORIGEN_ARCHIVO,
                         ($f['id_externo'] === '' ? null : $f['id_externo']), $archivo,
-                        ($f['observaciones'] === '' ? null : $f['observaciones']), $usuario
+                        ($f['observaciones'] === '' ? null : $f['observaciones']), $usuario,
+                        $usuario
                     ]);
 
                     if ($ok === false) {
@@ -2101,7 +2107,7 @@ class CobElectronicos {
                     continue;
                 }
 
-                // SIN_CAMBIOS no se escribe: pisarle FECHA_UPDATE a todo lo que
+                // SIN_CAMBIOS no se escribe: pisarle FECHA_MODIF a todo lo que
                 // el archivo repite dejaria la columna diciendo que se edito
                 // todo en cada importacion, igual que el diff de las sucursales
                 // de Saldos.
@@ -2126,11 +2132,11 @@ class CobElectronicos {
 
             if ($aplicarBajas) {
                 $sqlBaja = "UPDATE RO_T_CASHFLOW_COBEL_MOVIMIENTO
-                            SET ACTIVO = 0, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                            SET ACTIVO = 0, " . Auditoria::SET_BAJA . "
                             WHERE ID = ? AND ACTIVO = 1";
 
                 foreach ($diff['bajas'] as $b) {
-                    if (sqlsrv_query($cid, $sqlBaja, [$usuario, $b['id']]) === false) {
+                    if (sqlsrv_query($cid, $sqlBaja, [$usuario, $usuario, $b['id']]) === false) {
                         throw new Exception($this->errorSql('Error al dar de baja el movimiento '
                             . $b['id']));
                     }
@@ -2194,11 +2200,11 @@ class CobElectronicos {
      * @param float $bruto Importe bruto informado por la procesadora
      * @param string $fecha 'Y-m-d' de acreditacion
      * @param string|null $observaciones
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['id', 'tasa', 'neto', 'avisos']
      */
-    public function addMovimiento($idProcesadora, $bruto, $fecha, $observaciones = null,
-                                  $usuario = null) {
+    public function addMovimiento($idProcesadora, $bruto, $fecha, $observaciones, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $datos = $this->prepararMovimiento($idProcesadora, $bruto, $fecha);
         $cid = $this->conectar('central');
 
@@ -2207,9 +2213,9 @@ class CobElectronicos {
         $sql = "INSERT INTO RO_T_CASHFLOW_COBEL_MOVIMIENTO
                     (ID_PROCESADORA, IMPORTE_BRUTO, FECHA_ACREDITACION, TASA_APLICADA,
                      IMPORTE_NETO, ORIGEN_DATO, OBSERVACIONES, ACTIVO,
-                     FECHA_ALTA, FECHA_UPDATE, USUARIO)
+                     USUARIO_ALTA, USUARIO_MODIF)
                 OUTPUT INSERTED.ID
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1, GETDATE(), GETDATE(), ?)";
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)";
 
         $stmt = sqlsrv_query($cid, $sql, [
             $datos['id_procesadora'],
@@ -2219,6 +2225,7 @@ class CobElectronicos {
             $datos['neto'],
             self::ORIGEN_MANUAL,
             ($obs === '' ? null : substr($obs, 0, 200)),
+            $usuario,
             $usuario
         ]);
 
@@ -2249,10 +2256,11 @@ class CobElectronicos {
      * @param float $bruto
      * @param string $fecha
      * @param string|null $observaciones
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['tasa', 'neto', 'avisos']
      */
-    public function saveMovimiento($id, $bruto, $fecha, $observaciones = null, $usuario = null) {
+    public function saveMovimiento($id, $bruto, $fecha, $observaciones, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $id = intval($id);
         $actual = $this->movimientoPorId($id);
 
@@ -2272,7 +2280,7 @@ class CobElectronicos {
 
         $sql = "UPDATE RO_T_CASHFLOW_COBEL_MOVIMIENTO
                 SET IMPORTE_BRUTO = ?, FECHA_ACREDITACION = ?, TASA_APLICADA = ?,
-                    IMPORTE_NETO = ?, OBSERVACIONES = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                    IMPORTE_NETO = ?, OBSERVACIONES = ?, " . Auditoria::SET_MODIF . "
                 WHERE ID = ? AND ACTIVO = 1";
 
         $stmt = sqlsrv_query($cid, $sql, [
@@ -2303,17 +2311,18 @@ class CobElectronicos {
      * sumar al tablero y de verse en la pantalla, pero la fila queda.
      *
      * @param int $id
-     * @param string|null $usuario
+     * @param string $usuario
      * @return bool
      */
-    public function bajaMovimiento($id, $usuario = null) {
+    public function bajaMovimiento($id, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $cid = $this->conectar('central');
 
         $sql = "UPDATE RO_T_CASHFLOW_COBEL_MOVIMIENTO
-                SET ACTIVO = 0, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                SET ACTIVO = 0, " . Auditoria::SET_BAJA . "
                 WHERE ID = ? AND ACTIVO = 1";
 
-        $stmt = sqlsrv_query($cid, $sql, [$usuario, intval($id)]);
+        $stmt = sqlsrv_query($cid, $sql, [$usuario, $usuario, intval($id)]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al dar de baja el movimiento ' . $id));
@@ -2434,10 +2443,12 @@ class CobElectronicos {
      * y no como cero.
      *
      * @param string $razonSocial
-     * @param string|null $usuario
+     * @param string $usuario
      * @return int ID de la procesadora creada
      */
-    public function addProcesadora($razonSocial, $usuario = null) {
+    public function addProcesadora($razonSocial, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablasCreadas()) {
             throw new Exception('No existen las tablas del módulo Cob. Electrónicos. '
                 . 'Corré sql/cashflow_cob_electronicos.sql.');
@@ -2475,13 +2486,13 @@ class CobElectronicos {
         }
 
         $sql = "INSERT INTO RO_T_CASHFLOW_COBEL_PROCESADORA
-                    (RAZON_SOCIAL, ORDEN, ACTIVO, FECHA_UPDATE, USUARIO)
+                    (RAZON_SOCIAL, ORDEN, ACTIVO, USUARIO_ALTA, USUARIO_MODIF)
                 OUTPUT INSERTED.ID
                 VALUES (?,
                     (SELECT ISNULL(MAX(ORDEN), 0) + 10 FROM RO_T_CASHFLOW_COBEL_PROCESADORA),
-                    0, GETDATE(), ?)";
+                    0, ?, ?)";
 
-        $stmt = sqlsrv_query($cid, $sql, [$razonSocial, $usuario]);
+        $stmt = sqlsrv_query($cid, $sql, [$razonSocial, $usuario, $usuario]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al crear la procesadora'));
@@ -2534,10 +2545,11 @@ class CobElectronicos {
      * @param int $id
      * @param string $razonSocial
      * @param bool $activo
-     * @param string|null $usuario
+     * @param string $usuario
      * @return bool
      */
-    public function saveProcesadora($id, $razonSocial, $activo = true, $usuario = null) {
+    public function saveProcesadora($id, $razonSocial, $activo, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $id = intval($id);
         $razonSocial = self::normalizarRazonSocial($razonSocial);
 
@@ -2569,10 +2581,12 @@ class CobElectronicos {
         $cid = $this->conectar('central');
 
         $sql = "UPDATE RO_T_CASHFLOW_COBEL_PROCESADORA
-                SET RAZON_SOCIAL = ?, ACTIVO = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                SET RAZON_SOCIAL = ?, " . Auditoria::sqlBajaSegunEstado('ACTIVO') . ", ACTIVO = ?,
+                    " . Auditoria::SET_MODIF . "
                 WHERE ID = ?";
 
-        $stmt = sqlsrv_query($cid, $sql, [$razonSocial, ($activo ? 1 : 0), $usuario, $id]);
+        $stmt = sqlsrv_query($cid, $sql, array_merge([$razonSocial],
+            Auditoria::paramsBajaSegunEstado($activo, $usuario), [($activo ? 1 : 0), $usuario, $id]));
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al guardar la procesadora ' . $id));
@@ -2600,11 +2614,12 @@ class CobElectronicos {
      * @param string $concepto 'IIBB', 'SICREB' o el que aparezca
      * @param float $alicuota Fraccion: 2,5% es 0.025
      * @param string $vigenciaDesde 'Y-m-d'
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['id', 'tasa_total', 'recalculo']
      */
-    public function addAlicuota($idProcesadora, $concepto, $alicuota, $vigenciaDesde,
-                                $usuario = null) {
+    public function addAlicuota($idProcesadora, $concepto, $alicuota, $vigenciaDesde, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablasCreadas()) {
             throw new Exception('No existen las tablas del módulo Cob. Electrónicos. '
                 . 'Corré sql/cashflow_cob_electronicos.sql.');
@@ -2635,12 +2650,12 @@ class CobElectronicos {
 
         $sql = "INSERT INTO RO_T_CASHFLOW_COBEL_ALICUOTA
                     (ID_PROCESADORA, CONCEPTO, ALICUOTA, VIGENCIA_DESDE, ACTIVO,
-                     FECHA_UPDATE, USUARIO)
+                     USUARIO_ALTA, USUARIO_MODIF)
                 OUTPUT INSERTED.ID
-                VALUES (?, ?, ?, ?, 1, GETDATE(), ?)";
+                VALUES (?, ?, ?, ?, 1, ?, ?)";
 
         $stmt = sqlsrv_query($cid, $sql,
-            [$idProcesadora, $concepto, floatval($alicuota), $vigencia, $usuario]);
+            [$idProcesadora, $concepto, floatval($alicuota), $vigencia, $usuario, $usuario]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al guardar la alicuota'));
@@ -2667,10 +2682,11 @@ class CobElectronicos {
      * inhabilita la procesadora.
      *
      * @param int $id
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['recalculo' => array]
      */
-    public function bajaAlicuota($id, $usuario = null) {
+    public function bajaAlicuota($id, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $id = intval($id);
         $alicuota = null;
 
@@ -2721,10 +2737,10 @@ class CobElectronicos {
         $cid = $this->conectar('central');
 
         $sql = "UPDATE RO_T_CASHFLOW_COBEL_ALICUOTA
-                SET ACTIVO = 0, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                SET ACTIVO = 0, " . Auditoria::SET_BAJA . "
                 WHERE ID = ? AND ACTIVO = 1";
 
-        $stmt = sqlsrv_query($cid, $sql, [$usuario, $id]);
+        $stmt = sqlsrv_query($cid, $sql, [$usuario, $usuario, $id]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al dar de baja la alicuota ' . $id));
@@ -2750,11 +2766,16 @@ class CobElectronicos {
      * con la tasa nueva y otra con la vieja, sin ninguna forma de saber cual es
      * cual.
      *
+     * QUEDA FIRMADO POR QUIEN GUARDO LA ALICUOTA, no por un origen SISTEMA:. No
+     * es un efecto lateral que el codigo hace solo: es parte de la accion de esa
+     * persona, que ademas ve en la respuesta cuantos movimientos cambio.
+     *
      * @param int $idProcesadora
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array El plan aplicado, con 'aplicados'
      */
-    public function recalcularPendientes($idProcesadora, $usuario = null) {
+    public function recalcularPendientes($idProcesadora, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $idProcesadora = intval($idProcesadora);
         $corte = self::cortePendientes(date('Y-m-d'));
 
@@ -2776,7 +2797,7 @@ class CobElectronicos {
 
         try {
             $sql = "UPDATE RO_T_CASHFLOW_COBEL_MOVIMIENTO
-                    SET TASA_APLICADA = ?, IMPORTE_NETO = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                    SET TASA_APLICADA = ?, IMPORTE_NETO = ?, " . Auditoria::SET_MODIF . "
                     WHERE ID = ? AND ACTIVO = 1";
 
             foreach ($plan['cambios'] as $c) {
@@ -2824,7 +2845,7 @@ class CobElectronicos {
         $sql = "SELECT M.ID, M.ID_PROCESADORA, P.RAZON_SOCIAL, M.IMPORTE_BRUTO,
                        M.FECHA_ACREDITACION, M.TASA_APLICADA, M.IMPORTE_NETO,
                        M.ORIGEN_DATO, M.ID_EXTERNO, M.ARCHIVO_ORIGEN, M.OBSERVACIONES,
-                       M.FECHA_ALTA, M.FECHA_UPDATE, M.USUARIO
+                       M.FECHA_ALTA, M.FECHA_MODIF AS FECHA_UPDATE, M.USUARIO_MODIF AS USUARIO
                 FROM RO_T_CASHFLOW_COBEL_MOVIMIENTO M
                 INNER JOIN RO_T_CASHFLOW_COBEL_PROCESADORA P ON P.ID = M.ID_PROCESADORA
                 WHERE M.ID = ? AND M.ACTIVO = 1";

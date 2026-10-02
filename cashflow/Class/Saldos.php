@@ -3,6 +3,8 @@
 require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/Parametros.php';
 require_once __DIR__ . '/Fondos.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * Saldos
@@ -1057,7 +1059,8 @@ class Saldos {
         $cid = $this->conectar('central');
 
         $sql = "WITH Ultimo AS (
-                    SELECT ID, NRO_SUCURSAL, FECHA_SALDO, SALDO_MONEDA, FECHA_UPDATE, USUARIO,
+                    SELECT ID, NRO_SUCURSAL, FECHA_SALDO, SALDO_MONEDA,
+                           FECHA_MODIF AS FECHA_UPDATE, USUARIO_MODIF AS USUARIO,
                            ROW_NUMBER() OVER (
                                PARTITION BY NRO_SUCURSAL
                                ORDER BY FECHA_SALDO DESC, ID DESC
@@ -1203,7 +1206,7 @@ class Saldos {
                            D.PROJECTED_BALANCE_24HS, D.PROJECTED_BALANCE_48HS,
                            D.DAY_BALANCE, D.TOTAL_DEBITS, D.TOTAL_CREDITS,
                            D.MESSAGE, D.ORIGEN_DATO,
-                           C.ID AS ID_CARGA, C.FECHA_CARGA, C.USUARIO AS USUARIO_CARGA,
+                           C.ID AS ID_CARGA, C.FECHA_CARGA, C.USUARIO_MODIF AS USUARIO_CARGA,
                            ROW_NUMBER() OVER (
                                PARTITION BY D.ID_CUENTA
                                ORDER BY D.FECHA_SALDO DESC, C.FECHA_CARGA DESC, D.ID DESC
@@ -1305,7 +1308,7 @@ class Saldos {
 
         $cid = $this->conectar('central');
 
-        $sql = "SELECT TOP (?) ID, TIPO, FECHA_CARGA, ORIGEN, OBSERVACIONES, USUARIO
+        $sql = "SELECT TOP (?) ID, TIPO, FECHA_CARGA, ORIGEN, OBSERVACIONES, USUARIO_MODIF AS USUARIO
                 FROM RO_T_CASHFLOW_SALDOS_CARGA
                 WHERE TIPO = ? AND ACTIVO = 1
                 ORDER BY FECHA_CARGA DESC, ID DESC";
@@ -1436,7 +1439,7 @@ class Saldos {
         $cid = $this->conectar('central');
 
         $sql = "SELECT NRO_SUCURSAL, DESC_SUCURSAL, GESTION, RESERVA, ACTIVO,
-                       FECHA_UPDATE, USUARIO
+                       FECHA_MODIF AS FECHA_UPDATE, USUARIO_MODIF AS USUARIO
                 FROM RO_T_CASHFLOW_SALDOS_SUCURSAL";
 
         if ($soloActivas) {
@@ -1505,7 +1508,7 @@ class Saldos {
 
         $sql = "SELECT ID, TIPO, " . $colsFondo . ", NOMBRE, MONEDA, ORIGEN_DATO,
                        BANK_ID, BANK_NAME, ACCOUNT_NUMBER, ACCOUNT_TYPE, CBU, ACCOUNT_LABEL,
-                       ORDEN, ACTIVO, FECHA_UPDATE, USUARIO
+                       ORDEN, ACTIVO, FECHA_MODIF AS FECHA_UPDATE, USUARIO_MODIF AS USUARIO
                 FROM RO_T_CASHFLOW_SALDOS_CUENTA";
 
         if ($soloActivas) {
@@ -1567,13 +1570,14 @@ class Saldos {
      * @param string $nombre
      * @param string $moneda ARS o USD
      * @param bool $activo
-     * @param string|null $usuario
+     * @param string $usuario
      * @param string|null $clase null deja la que tiene
      * @param array|null $inicial ['saldo' => mixed, 'fecha' => mixed], o null para no tocar
      * @return bool
      */
-    public function saveCuenta($id, $nombre, $moneda, $activo = true, $usuario = null,
-                               $clase = null, $inicial = null) {
+    public function saveCuenta($id, $nombre, $moneda, $activo, $usuario, $clase = null,
+                               $inicial = null) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $nombre = trim((string) $nombre);
         $moneda = strtoupper(trim((string) $moneda));
 
@@ -1591,8 +1595,10 @@ class Saldos {
 
         $cid = $this->conectar('central');
 
-        $sets = "NOMBRE = ?, MONEDA = ?, ACTIVO = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?";
-        $args = [$nombre, $moneda, ($activo ? 1 : 0), $usuario];
+        $sets = "NOMBRE = ?, MONEDA = ?, " . Auditoria::sqlBajaSegunEstado('ACTIVO') . ", ACTIVO = ?, "
+            . Auditoria::SET_MODIF;
+        $args = array_merge([$nombre, $moneda], Auditoria::paramsBajaSegunEstado($activo, $usuario),
+            [($activo ? 1 : 0), $usuario]);
 
         $tocaFondo = ($clase !== null && trim((string) $clase) !== '') || $inicial !== null;
 
@@ -1708,13 +1714,14 @@ class Saldos {
      * @param string $tipo BANCO, MERCADO_PAGO, EFECTIVO_CENTRAL u OTRO
      * @param string $nombre Nombre del banco o de la billetera
      * @param string $moneda ARS o USD
-     * @param string|null $usuario
+     * @param string $usuario
      * @param string|null $clase Una de Fondos::CLASES; null es cuenta corriente
      * @param array|null $inicial ['saldo' => mixed, 'fecha' => mixed], solo para un fondo
      * @return int ID de la cuenta creada
      */
-    public function addCuenta($tipo, $nombre, $moneda, $usuario = null, $clase = null,
-                              $inicial = null) {
+    public function addCuenta($tipo, $nombre, $moneda, $usuario, $clase = null, $inicial = null) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablasCreadas()) {
             throw new Exception('No existen las tablas del módulo Saldos. '
                 . 'Corré sql/cashflow_saldos.sql.');
@@ -1797,22 +1804,22 @@ class Saldos {
         if ($this->fondosCreados()) {
             $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_CUENTA
                         (TIPO, CLASE, NOMBRE, MONEDA, ORIGEN_DATO, SALDO_INICIAL,
-                         FECHA_SALDO_INICIAL, ORDEN, ACTIVO, FECHA_UPDATE, USUARIO)
+                         FECHA_SALDO_INICIAL, ORDEN, ACTIVO, USUARIO_ALTA, USUARIO_MODIF)
                     OUTPUT INSERTED.ID
                     VALUES (?, ?, ?, ?, ?, ?, ?,
                         (SELECT ISNULL(MAX(ORDEN), 0) + 10 FROM RO_T_CASHFLOW_SALDOS_CUENTA),
-                        1, GETDATE(), ?)";
+                        1, ?, ?)";
             $args = [$tipo, $clase, $nombre, $moneda, $origen,
                      ($ini === null) ? null : $ini['saldo'],
-                     ($ini === null) ? null : $ini['fecha'], $usuario];
+                     ($ini === null) ? null : $ini['fecha'], $usuario, $usuario];
         } else {
             $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_CUENTA
-                        (TIPO, NOMBRE, MONEDA, ORIGEN_DATO, ORDEN, ACTIVO, FECHA_UPDATE, USUARIO)
+                        (TIPO, NOMBRE, MONEDA, ORIGEN_DATO, ORDEN, ACTIVO, USUARIO_ALTA, USUARIO_MODIF)
                     OUTPUT INSERTED.ID
                     VALUES (?, ?, ?, ?,
                         (SELECT ISNULL(MAX(ORDEN), 0) + 10 FROM RO_T_CASHFLOW_SALDOS_CUENTA),
-                        1, GETDATE(), ?)";
-            $args = [$tipo, $nombre, $moneda, $origen, $usuario];
+                        1, ?, ?)";
+            $args = [$tipo, $nombre, $moneda, $origen, $usuario, $usuario];
         }
 
         $stmt = sqlsrv_query($cid, $sql, $args);
@@ -1837,10 +1844,11 @@ class Saldos {
      * @param int $nroSucursal
      * @param string $gestion DEPOSITA o ENVIA
      * @param float $reserva Minimo que la sucursal conserva en caja
-     * @param string|null $usuario
+     * @param string $usuario
      * @return bool
      */
-    public function saveSucursal($nroSucursal, $gestion, $reserva, $usuario = null) {
+    public function saveSucursal($nroSucursal, $gestion, $reserva, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $gestion = strtoupper(trim((string) $gestion));
 
         if ($gestion !== self::DEPOSITA && $gestion !== self::ENVIA) {
@@ -1857,7 +1865,7 @@ class Saldos {
         $cid = $this->conectar('central');
 
         $sql = "UPDATE RO_T_CASHFLOW_SALDOS_SUCURSAL
-                SET GESTION = ?, RESERVA = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                SET GESTION = ?, RESERVA = ?, " . Auditoria::SET_MODIF . "
                 WHERE NRO_SUCURSAL = ?";
 
         $stmt = sqlsrv_query($cid, $sql, [$gestion, $reserva, $usuario, intval($nroSucursal)]);
@@ -2120,10 +2128,12 @@ class Saldos {
      *
      * @param array $filas [['id_cuenta' => int, 'saldo' => float, 'fecha_saldo' => 'Y-m-d'], ...]
      * @param string|null $observaciones
-     * @param string|null $usuario
+     * @param string $usuario
      * @return int ID de la carga creada
      */
-    public function guardarCargaSaldos($filas, $observaciones, $usuario = null) {
+    public function guardarCargaSaldos($filas, $observaciones, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablasCreadas()) {
             throw new Exception('No existen las tablas del módulo Saldos. '
                 . 'Corré sql/cashflow_saldos.sql.');
@@ -2196,13 +2206,13 @@ class Saldos {
 
             $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_DETALLE
                         (ID_CARGA, ID_CUENTA, FECHA_SALDO, MONEDA, COUNTABLE_BALANCE,
-                         ORIGEN_DATO, FECHA_UPDATE, USUARIO)
-                    VALUES (?, ?, ?, ?, ?, ?, GETDATE(), ?)";
+                         ORIGEN_DATO, USUARIO_ALTA, USUARIO_MODIF)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
 
             foreach ($aInsertar as $d) {
                 $params = [
                     $idCarga, $d['id_cuenta'], $d['fecha_saldo'], $d['moneda'],
-                    $d['saldo'], $d['origen'], $usuario
+                    $d['saldo'], $d['origen'], $usuario, $usuario
                 ];
 
                 if (sqlsrv_query($cid, $sql, $params) === false) {
@@ -2268,10 +2278,12 @@ class Saldos {
      * @param array $overrides [['nro_sucursal' => int, 'gestion' => str, 'reserva' => float,
      *        'saldo' => float|null], ...]
      * @param string|null $observaciones
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['id' => int, 'filas' => int, 'parametros' => int, 'saldos_manuales' => int]
      */
-    public function guardarCargaLocales($overrides, $observaciones, $usuario = null) {
+    public function guardarCargaLocales($overrides, $observaciones, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablasCreadas()) {
             throw new Exception('No existen las tablas del módulo Saldos. '
                 . 'Corré sql/cashflow_saldos.sql.');
@@ -2350,13 +2362,13 @@ class Saldos {
 
             $sqlManual = "INSERT INTO RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL
                               (NRO_SUCURSAL, FECHA_SALDO, SALDO_MONEDA, SALDO_CONSULTA,
-                               FECHA_CONSULTA, OBSERVACIONES, ACTIVO, FECHA_UPDATE, USUARIO)
-                          VALUES (?, ?, ?, ?, ?, ?, 1, GETDATE(), ?)";
+                               FECHA_CONSULTA, OBSERVACIONES, ACTIVO, USUARIO_ALTA, USUARIO_MODIF)
+                          VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)";
 
             foreach ($nuevos as $n) {
                 $ok = sqlsrv_query($cid, $sqlManual, [
                     $n['nro_sucursal'], $ayer, $n['saldo'], $n['saldo_consulta'],
-                    $n['fecha_consulta'], $observaciones, $usuario
+                    $n['fecha_consulta'], $observaciones, $usuario, $usuario
                 ]);
 
                 if ($ok === false) {
@@ -2374,13 +2386,13 @@ class Saldos {
                 ? "INSERT INTO RO_T_CASHFLOW_SALDOS_LOCAL
                        (ID_CARGA, NRO_SUCURSAL, DESC_SUCURSAL, FECHA_SALDO,
                         COD_CTA_CUENTA_TESORERIA, CUENTAS, SALDO_MONEDA,
-                        GESTION, RESERVA, NETO_DEPOSITAR, FECHA_UPDATE, USUARIO, ORIGEN_DATO)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), ?, ?)"
+                        GESTION, RESERVA, NETO_DEPOSITAR, USUARIO_ALTA, USUARIO_MODIF, ORIGEN_DATO)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 : "INSERT INTO RO_T_CASHFLOW_SALDOS_LOCAL
                        (ID_CARGA, NRO_SUCURSAL, DESC_SUCURSAL, FECHA_SALDO,
                         COD_CTA_CUENTA_TESORERIA, CUENTAS, SALDO_MONEDA,
-                        GESTION, RESERVA, NETO_DEPOSITAR, FECHA_UPDATE, USUARIO)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), ?)";
+                        GESTION, RESERVA, NETO_DEPOSITAR, USUARIO_ALTA, USUARIO_MODIF)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
             foreach ($armado['filas'] as $f) {
                 $valores = [
@@ -2397,6 +2409,7 @@ class Saldos {
                     // de la sucursal. El recorte a cero es del aporte al
                     // cashflow, no del dato.
                     $f['neto'],
+                    $usuario,
                     $usuario
                 ];
 
@@ -2444,12 +2457,12 @@ class Saldos {
      * @param string $gestion Ya validada
      * @param float $reserva Ya validada
      * @param string $descripcion Nombre del local, para el caso de alta
-     * @param string|null $usuario
+     * @param string $usuario
      */
     private function guardarSucursalEnTransaccion($cid, $nro, $gestion, $reserva,
                                                   $descripcion, $usuario) {
         $sql = "UPDATE RO_T_CASHFLOW_SALDOS_SUCURSAL
-                SET GESTION = ?, RESERVA = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                SET GESTION = ?, RESERVA = ?, " . Auditoria::SET_MODIF . "
                 WHERE NRO_SUCURSAL = ?";
 
         $stmt = sqlsrv_query($cid, $sql, [$gestion, $reserva, $usuario, $nro]);
@@ -2467,11 +2480,11 @@ class Saldos {
 
         $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_SUCURSAL
                     (NRO_SUCURSAL, DESC_SUCURSAL, GESTION, RESERVA, ACTIVO,
-                     FECHA_UPDATE, USUARIO)
-                VALUES (?, ?, ?, ?, 1, GETDATE(), ?)";
+                     USUARIO_ALTA, USUARIO_MODIF)
+                VALUES (?, ?, ?, ?, 1, ?, ?)";
 
         if (sqlsrv_query($cid, $sql,
-            [$nro, $descripcion, $gestion, $reserva, $usuario]) === false) {
+            [$nro, $descripcion, $gestion, $reserva, $usuario, $usuario]) === false) {
             throw new Exception($this->errorSql('Error al crear el parámetro del local ' . $nro));
         }
     }
@@ -2483,10 +2496,15 @@ class Saldos {
      * cargo una persona. Y no borra: una sucursal que desaparece del origen
      * queda con ACTIVO = 0 y su historico intacto.
      *
-     * @param string|null $usuario
+     * LO DISPARA UNA PERSONA desde Parametros -> Saldos, asi que las altas, las
+     * bajas y las reactivaciones quedan con su usuario, no con un origen SISTEMA:.
+     *
+     * @param string $usuario
      * @return array ['altas' => int, 'bajas' => int, 'reactivadas' => int]
      */
-    public function sincronizarSucursales($usuario = null) {
+    public function sincronizarSucursales($usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablasCreadas()) {
             throw new Exception('No existen las tablas del módulo Saldos. '
                 . 'Corré sql/cashflow_saldos.sql.');
@@ -2511,11 +2529,11 @@ class Saldos {
             if (!isset($actuales[$nro])) {
                 $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_SUCURSAL
                             (NRO_SUCURSAL, DESC_SUCURSAL, GESTION, RESERVA, ACTIVO,
-                             FECHA_UPDATE, USUARIO)
-                        VALUES (?, ?, ?, 0, 1, GETDATE(), ?)";
+                             USUARIO_ALTA, USUARIO_MODIF)
+                        VALUES (?, ?, ?, 0, 1, ?, ?)";
 
                 if (sqlsrv_query($cid, $sql,
-                    [$nro, $s['DESC_SUCURSAL'], self::DEPOSITA, $usuario]) === false) {
+                    [$nro, $s['DESC_SUCURSAL'], self::DEPOSITA, $usuario, $usuario]) === false) {
                     throw new Exception($this->errorSql('Error al dar de alta la sucursal ' . $nro));
                 }
 
@@ -2528,10 +2546,12 @@ class Saldos {
             $reactiva = (intval($actuales[$nro]['ACTIVO']) !== 1);
 
             $sql = "UPDATE RO_T_CASHFLOW_SALDOS_SUCURSAL
-                    SET DESC_SUCURSAL = ?, ACTIVO = 1, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                    SET DESC_SUCURSAL = ?, " . Auditoria::sqlBajaSegunEstado('ACTIVO') . ", ACTIVO = 1,
+                        " . Auditoria::SET_MODIF . "
                     WHERE NRO_SUCURSAL = ?";
 
-            if (sqlsrv_query($cid, $sql, [$s['DESC_SUCURSAL'], $usuario, $nro]) === false) {
+            if (sqlsrv_query($cid, $sql, array_merge([$s['DESC_SUCURSAL']],
+                Auditoria::paramsBajaSegunEstado(true, $usuario), [$usuario, $nro])) === false) {
                 throw new Exception($this->errorSql('Error al actualizar la sucursal ' . $nro));
             }
 
@@ -2546,10 +2566,10 @@ class Saldos {
             }
 
             $sql = "UPDATE RO_T_CASHFLOW_SALDOS_SUCURSAL
-                    SET ACTIVO = 0, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                    SET ACTIVO = 0, " . Auditoria::SET_BAJA . "
                     WHERE NRO_SUCURSAL = ?";
 
-            if (sqlsrv_query($cid, $sql, [$usuario, $nro]) === false) {
+            if (sqlsrv_query($cid, $sql, [$usuario, $usuario, $nro]) === false) {
                 throw new Exception($this->errorSql('Error al inhabilitar la sucursal ' . $nro));
             }
 
@@ -2566,14 +2586,14 @@ class Saldos {
     /** Inserta la cabecera de una carga y devuelve su ID */
     private function insertarCabecera($cid, $tipo, $origen, $observaciones, $usuario) {
         $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_CARGA
-                    (TIPO, FECHA_CARGA, ORIGEN, OBSERVACIONES, ACTIVO, FECHA_UPDATE, USUARIO)
+                    (TIPO, FECHA_CARGA, ORIGEN, OBSERVACIONES, ACTIVO, USUARIO_ALTA, USUARIO_MODIF)
                 OUTPUT INSERTED.ID
-                VALUES (?, GETDATE(), ?, ?, 1, GETDATE(), ?)";
+                VALUES (?, GETDATE(), ?, ?, 1, ?, ?)";
 
         $obs = trim((string) $observaciones);
 
         $stmt = sqlsrv_query($cid, $sql, [
-            $tipo, $origen, ($obs === '' ? null : substr($obs, 0, 500)), $usuario
+            $tipo, $origen, ($obs === '' ? null : substr($obs, 0, 500)), $usuario, $usuario
         ]);
 
         if ($stmt === false) {

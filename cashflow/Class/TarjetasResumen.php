@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/Tarjetas.php';
 require_once __DIR__ . '/Horizonte.php';
+require_once __DIR__ . '/AuthCashflow.php';
 
 /**
  * TarjetasResumen
@@ -482,10 +483,11 @@ class TarjetasResumen {
      * @param string $mes 'Y-m'
      * @param array $datos importe_ars, importe_usd, fecha_vencimiento, origen,
      *                     observacion
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['id', 'mes', 'nuevo' => bool, 'aviso' => string]
      */
-    public function guardar($idTarjeta, $mes, $datos, $usuario = null) {
+    public function guardar($idTarjeta, $mes, $datos, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $id = intval($idTarjeta);
@@ -568,10 +570,11 @@ class TarjetasResumen {
      *
      * @param mixed $id
      * @param bool $pagado
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['id', 'pagado', 'mes']
      */
-    public function marcarPagado($id, $pagado, $usuario = null) {
+    public function marcarPagado($id, $pagado, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $actual = $this->getResumen($id);
@@ -615,10 +618,11 @@ class TarjetasResumen {
      * que se busca.
      *
      * @param mixed $id
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['id', 'mes', 'id_tarjeta']
      */
-    public function darDeBaja($id, $usuario = null) {
+    public function darDeBaja($id, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $actual = $this->getResumen($id);
@@ -670,10 +674,11 @@ class TarjetasResumen {
      * @param mixed $idTarjeta
      * @param array $resumenes Filas con mes, importe_ars, importe_usd,
      *                         fecha_vencimiento, observacion
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['id_tarjeta', 'cargados' => int, 'meses' => ['Y-m'], 'avisos' => []]
      */
-    public function cargarBase($idTarjeta, $resumenes, $usuario = null) {
+    public function cargarBase($idTarjeta, $resumenes, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $id = intval($idTarjeta);

@@ -303,3 +303,97 @@ foreach (glob(__DIR__ . '/../Controller/*.php') as $archivo) {
 }
 
 chequear('el usuario sale solo de autorizar()', [], $sueltos);
+
+seccion('los SP graban solo origenes declarados');
+
+/* Los origenes JOB: los arma el SQL, no el PHP. Si un SP grabara uno que no
+   esta en AuthCashflow::ORIGENES, la pantalla lo mostraria crudo en vez de con
+   su nombre: la lista y los SP no pueden divergir. */
+$sinDeclarar = [];
+$conOrigen = 0;
+
+foreach (glob(__DIR__ . '/../sql/*.sql') as $archivo) {
+    preg_match_all("/'(JOB:[A-Z_]+)'/", file_get_contents($archivo), $m);
+
+    foreach (array_unique($m[1]) as $origen) {
+        $conOrigen++;
+
+        if (!isset(AuthCashflow::ORIGENES[$origen])) {
+            $sinDeclarar[] = basename($archivo) . ' -> ' . $origen;
+        }
+    }
+}
+
+chequear('hay SP que graban un origen JOB:', true, $conOrigen >= 8);
+chequear('todos estan en AuthCashflow::ORIGENES', [], $sinDeclarar);
+
+$conSuser = [];
+
+foreach (glob(__DIR__ . '/../sql/RO_SP_*.sql') as $archivo) {
+    // Fuera de los comentarios: el encabezado explica por que ya no se usa.
+    $codigo = preg_replace('#/\*.*?\*/#s', '', file_get_contents($archivo));
+
+    if (stripos($codigo, 'SUSER_SNAME') !== false) {
+        $conSuser[] = basename($archivo);
+    }
+}
+
+chequear('ningun SP cae en SUSER_SNAME()', [], $conSuser);
+
+/* ================================================================
+   Auditoria: los fragmentos compartidos de las escrituras
+   ================================================================ */
+seccion('Auditoria');
+
+require_once __DIR__ . '/../Class/Auditoria.php';
+
+chequear('SET_MODIF pone la fecha el servidor y un solo parametro', 1,
+    substr_count(Auditoria::SET_MODIF, '?'));
+chequear('y la fecha es GETDATE()', true, strpos(Auditoria::SET_MODIF, 'FECHA_MODIF = GETDATE()') !== false);
+chequear('SET_BAJA lleva baja y modificacion, dos parametros', 2, substr_count(Auditoria::SET_BAJA, '?'));
+
+$frag = Auditoria::sqlBajaSegunEstado('ACTIVO');
+
+chequear('el fragmento de estado tiene tres parametros', 3, substr_count($frag, '?'));
+chequear('y los parametros son tres, en ese orden', [1, 'ana', 1],
+    Auditoria::paramsBajaSegunEstado(true, 'ana'));
+chequear('desactivar', [0, 'ana', 0], Auditoria::paramsBajaSegunEstado(false, 'ana'));
+chequear('sella la baja solo si estaba activa', true,
+    strpos($frag, 'WHEN ACTIVO = 1 THEN ?') !== false);
+chequear('y reactivar la limpia', true, strpos($frag, 'CASE WHEN ? = 1 THEN NULL') !== false);
+
+chequearLanza('una columna de estado desconocida no entra al SQL', function () {
+    Auditoria::sqlBajaSegunEstado('ACTIVO; DROP TABLE X');
+});
+
+seccion('defensa en profundidad: ninguna clase acepta escribir sin usuario');
+
+chequearLanza('usuarioDeEscritura rechaza vacio', function () {
+    AuthCashflow::usuarioDeEscritura('   ');
+});
+chequear('y recorta a 50', 50, mb_strlen(AuthCashflow::usuarioDeEscritura(str_repeat('x', 60))));
+
+/* Los metodos de escritura se reconocen porque validan el usuario. Ninguno
+   puede tener $usuario = null por defecto: con un default, olvidarse de pasarlo
+   no falla, graba NULL. OtrosIngresos queda afuera: sus pestañas se eliminaron
+   y sus metodos no tienen ningun endpoint que los llame. */
+$conDefault = [];
+$validan = 0;
+
+foreach (glob(__DIR__ . '/../Class/*.php') as $archivo) {
+    if (basename($archivo) === 'OtrosIngresos.php') {
+        continue;
+    }
+
+    $texto = file_get_contents($archivo);
+    $validan += substr_count($texto, 'AuthCashflow::usuarioDeEscritura($usuario)');
+
+    if (preg_match_all('/function (\w+)\([^)]*\$usuario = null/', $texto, $m)) {
+        foreach ($m[1] as $metodo) {
+            $conDefault[] = basename($archivo, '.php') . '::' . $metodo;
+        }
+    }
+}
+
+chequear('hay metodos de escritura que validan el usuario', true, $validan >= 60);
+chequear('ninguno con $usuario = null por defecto', [], $conDefault);

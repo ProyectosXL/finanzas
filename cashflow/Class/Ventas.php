@@ -5,6 +5,8 @@ require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/EjeVista.php';
 require_once __DIR__ . '/Cotizacion.php';
 require_once __DIR__ . '/Echeqs.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * Ventas
@@ -240,7 +242,7 @@ class Ventas {
             throw new Exception('No se pudo conectar a la base de datos');
         }
 
-        $sql = "SELECT ANIO, MES, INDICE, FECHA_UPDATE, USUARIO
+        $sql = "SELECT ANIO, MES, INDICE, FECHA_MODIF AS FECHA_UPDATE, USUARIO_MODIF AS USUARIO
                 FROM RO_T_CASHFLOW_VENTAS_INDICE
                 ORDER BY ANIO, MES";
 
@@ -273,10 +275,11 @@ class Ventas {
      * @param int $anio Anio del mes
      * @param int $mes Numero de mes (1-12)
      * @param float $indice Indice de variacion (0.10 = +10%)
-     * @param string|null $usuario Usuario que edita (todavia no hay login)
+     * @param string $usuario Usuario que edita
      * @return bool True si se guardo correctamente
      */
-    public function saveIndice($anio, $mes, $indice, $usuario = null) {
+    public function saveIndice($anio, $mes, $indice, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $cid = $this->conn->conectar('central');
 
         if (!$cid) {
@@ -302,14 +305,14 @@ class Ventas {
 
         if ($exists) {
             $sql = "UPDATE RO_T_CASHFLOW_VENTAS_INDICE
-                    SET INDICE = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                    SET INDICE = ?, " . Auditoria::SET_MODIF . "
                     WHERE ANIO = ? AND MES = ?";
             $params = [floatval($indice), $usuario, $anio, $mes];
         } else {
             $sql = "INSERT INTO RO_T_CASHFLOW_VENTAS_INDICE
-                        (ANIO, MES, INDICE, FECHA_UPDATE, USUARIO)
-                    VALUES (?, ?, ?, GETDATE(), ?)";
-            $params = [$anio, $mes, floatval($indice), $usuario];
+                        (ANIO, MES, INDICE, USUARIO_ALTA, USUARIO_MODIF)
+                    VALUES (?, ?, ?, ?, ?)";
+            $params = [$anio, $mes, floatval($indice), $usuario, $usuario];
         }
 
         $stmt = sqlsrv_query($cid, $sql, $params);
@@ -336,7 +339,7 @@ class Ventas {
         }
 
         $sql = "SELECT TIPO, ANIO, MES, CANAL, PORCENTAJE_CALC, PORCENTAJE_EDIT,
-                       FECHA_UPDATE, USUARIO
+                       FECHA_MODIF AS FECHA_UPDATE, USUARIO_MODIF AS USUARIO
                 FROM RO_T_CASHFLOW_VENTAS_PARTIC";
         $params = [];
 
@@ -385,10 +388,11 @@ class Ventas {
      * @param int $anio Anio de anclaje
      * @param int $mes Mes de anclaje
      * @param array $valores Mapa CANAL => ['calc' => float, 'edit' => float|null]
-     * @param string|null $usuario Usuario que edita (todavia no hay login)
+     * @param string $usuario Usuario que edita
      * @return bool True si se guardo correctamente
      */
-    public function saveParticipacion($tipo, $anio, $mes, $valores, $usuario = null) {
+    public function saveParticipacion($tipo, $anio, $mes, $valores, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         if (!in_array($tipo, ['TRAMO28', 'MENSUAL'])) {
             throw new Exception('Tipo de participacion invalido: ' . $tipo);
         }
@@ -449,15 +453,15 @@ class Ventas {
             if ($exists) {
                 $sql = "UPDATE RO_T_CASHFLOW_VENTAS_PARTIC
                         SET PORCENTAJE_CALC = ?, PORCENTAJE_EDIT = ?,
-                            FECHA_UPDATE = GETDATE(), USUARIO = ?
+                            " . Auditoria::SET_MODIF . "
                         WHERE TIPO = ? AND ANIO = ? AND MES = ? AND CANAL = ?";
                 $params = [$calc, $edit, $usuario, $tipo, $anio, $mes, $canal];
             } else {
                 $sql = "INSERT INTO RO_T_CASHFLOW_VENTAS_PARTIC
                             (TIPO, ANIO, MES, CANAL, PORCENTAJE_CALC, PORCENTAJE_EDIT,
-                             FECHA_UPDATE, USUARIO)
-                        VALUES (?, ?, ?, ?, ?, ?, GETDATE(), ?)";
-                $params = [$tipo, $anio, $mes, $canal, $calc, $edit, $usuario];
+                             USUARIO_ALTA, USUARIO_MODIF)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                $params = [$tipo, $anio, $mes, $canal, $calc, $edit, $usuario, $usuario];
             }
 
             $stmt = sqlsrv_query($cid, $sql, $params);

@@ -2,6 +2,8 @@
 
 require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/Parametros.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * Echeqs
@@ -765,7 +767,7 @@ class Echeqs {
                        CAST(s.FECHA_CHEQ AS DATE)  AS FECHA_PAGO,
                        " . ($excl ? 'x.MOTIVO'     : 'CAST(NULL AS VARCHAR(200))')
                        . " AS MOTIVO_EXCLUSION,
-                       " . ($excl ? 'x.USUARIO'    : 'CAST(NULL AS VARCHAR(50))')
+                       " . ($excl ? 'x.USUARIO_ALTA' : 'CAST(NULL AS VARCHAR(50))')
                        . " AS EXCLUSION_USUARIO,
                        " . ($excl ? 'x.FECHA_ALTA' : 'CAST(NULL AS DATETIME)')
                        . " AS EXCLUSION_FECHA
@@ -914,11 +916,13 @@ class Echeqs {
      * @param array $ids Ids de dbo.SBA14
      * @param bool $excluir true saca del cashflow, false devuelve
      * @param string|null $motivo Obligatorio si $excluir es true
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['excluidos' => bool, 'motivo', 'tocados' => int,
      *         'rechazados' => [...], 'filas' => [...]]
      */
-    public function excluirCheques($ids, $excluir, $motivo = null, $usuario = null) {
+    public function excluirCheques($ids, $excluir, $motivo, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->excluirCreada()) {
             throw new Exception('Todavía no se pueden excluir cheques. '
                 . 'Corré sql/cashflow_echeqs_excluir.sql contra la base central.');
@@ -981,7 +985,7 @@ class Echeqs {
                    excluido corrija el motivo en vez de chocar contra el indice
                    unico de exclusiones vigentes, y lo que deja el historial
                    completo en los dos casos. */
-                $this->bajaExclusiones($cid, $tanda);
+                $this->bajaExclusiones($cid, $tanda, $usuario);
 
                 if ($sacar) {
                     $this->insertarExclusiones($cid, $tanda, $texto, $usuario);
@@ -1018,15 +1022,16 @@ class Echeqs {
      *
      * @param resource $cid Conexion con la transaccion ya abierta
      * @param array $ids
+     * @param string $usuario
      */
-    private function bajaExclusiones($cid, $ids) {
+    private function bajaExclusiones($cid, $ids, $usuario) {
         $marcas = implode(', ', array_fill(0, count($ids), '?'));
 
         $stmt = sqlsrv_query($cid,
             "UPDATE dbo." . self::TABLA_EXCLUIDO . "
-             SET VIGENTE = 0, FECHA_BAJA = GETDATE()
+             SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
              WHERE VIGENTE = 1 AND ID_SBA14 IN (" . $marcas . ")",
-            array_map('intval', $ids));
+            array_merge([$usuario, $usuario], array_map('intval', $ids)));
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al dar de baja la exclusión anterior'));
@@ -1041,20 +1046,23 @@ class Echeqs {
      * @param resource $cid Conexion con la transaccion ya abierta
      * @param array $ids
      * @param string $motivo Ya validado
-     * @param string|null $usuario
+     * @param string $usuario
      */
     private function insertarExclusiones($cid, $ids, $motivo, $usuario) {
-        $filas = implode(', ', array_fill(0, count($ids), '(?, ?, 1, ?)'));
+        // 4 parametros por fila: una tanda de 500 son 2000, debajo del tope de 2100.
+        $filas = implode(', ', array_fill(0, count($ids), '(?, ?, 1, ?, ?)'));
         $params = [];
 
         foreach ($ids as $id) {
             $params[] = intval($id);
             $params[] = $motivo;
             $params[] = $usuario;
+            $params[] = $usuario;
         }
 
         $stmt = sqlsrv_query($cid,
-            "INSERT INTO dbo." . self::TABLA_EXCLUIDO . " (ID_SBA14, MOTIVO, VIGENTE, USUARIO)
+            "INSERT INTO dbo." . self::TABLA_EXCLUIDO . "
+                 (ID_SBA14, MOTIVO, VIGENTE, USUARIO_ALTA, USUARIO_MODIF)
              VALUES " . $filas,
             $params);
 
@@ -1082,7 +1090,7 @@ class Echeqs {
 
         $cid = $this->conectar('central');
 
-        $sql = "SELECT ID_SBA14, MOTIVO, USUARIO, FECHA_ALTA
+        $sql = "SELECT ID_SBA14, MOTIVO, USUARIO_ALTA AS USUARIO, FECHA_ALTA
                 FROM dbo." . self::TABLA_EXCLUIDO . "
                 WHERE VIGENTE = 1";
         $params = [];
@@ -1195,7 +1203,8 @@ class Echeqs {
         $cid = $this->conectar('central');
 
         $stmt = sqlsrv_query($cid,
-            "SELECT ID, MOTIVO, VIGENTE, USUARIO, FECHA_ALTA, FECHA_BAJA
+            "SELECT ID, MOTIVO, VIGENTE, USUARIO_ALTA AS USUARIO, FECHA_ALTA, USUARIO_BAJA,
+                    FECHA_BAJA
              FROM dbo." . self::TABLA_EXCLUIDO . "
              WHERE ID_SBA14 = ?
              ORDER BY ID DESC",
@@ -1214,6 +1223,7 @@ class Echeqs {
                 'VIGENTE' => intval($row['VIGENTE']),
                 'USUARIO' => $row['USUARIO'],
                 'FECHA_ALTA' => $this->fechaHora($row['FECHA_ALTA']),
+                'USUARIO_BAJA' => $row['USUARIO_BAJA'],
                 'FECHA_BAJA' => $this->fechaHora($row['FECHA_BAJA'])
             ];
         }
@@ -1322,10 +1332,12 @@ class Echeqs {
      *
      * @param array $ids Ids de dbo.SBA14
      * @param bool $marcado
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['tocados' => int, 'filas' => [...]] con el estado efectivo
      */
-    public function marcarCheques($ids, $marcado, $usuario = null) {
+    public function marcarCheques($ids, $marcado, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablasCreadas()) {
             throw new Exception('No existen las tablas de venta cobrada anticipada. '
                 . 'Corré sql/echeqs_prechequeado.sql.');
@@ -1411,7 +1423,7 @@ class Echeqs {
      * @param resource $cid Conexion con la transaccion ya abierta
      * @param array $ids
      * @param int $valor 1 o 0
-     * @param string|null $usuario
+     * @param string $usuario
      */
     private function mergeMarcas($cid, $ids, $valor, $usuario) {
         $filas = implode(', ', array_fill(0, count($ids), '(?)'));
@@ -1420,12 +1432,12 @@ class Echeqs {
                 USING (VALUES $filas) AS S (ID_SBA14)
                     ON T.ID_SBA14 = S.ID_SBA14
                 WHEN MATCHED THEN
-                    UPDATE SET MARCADO = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                    UPDATE SET MARCADO = ?, " . Auditoria::SET_MODIF . "
                 WHEN NOT MATCHED BY TARGET THEN
-                    INSERT (ID_SBA14, MARCADO, FECHA_UPDATE, USUARIO)
-                    VALUES (S.ID_SBA14, ?, GETDATE(), ?);";
+                    INSERT (ID_SBA14, MARCADO, USUARIO_ALTA, USUARIO_MODIF)
+                    VALUES (S.ID_SBA14, ?, ?, ?);";
 
-        $params = array_merge($ids, [$valor, $usuario, $valor, $usuario]);
+        $params = array_merge($ids, [$valor, $usuario, $valor, $usuario, $usuario]);
 
         $stmt = sqlsrv_query($cid, $sql, $params);
 
@@ -1467,7 +1479,7 @@ class Echeqs {
            cliente sin cheques siga apareciendo con cero, que es justamente el
            caso que hay que poder ver. */
         $sql = "SELECT c.CLIENTE, c.RAZON_SOCIAL, c.DIAS_PRECHEQUEADO,
-                       c.ACTIVO, c.FECHA_UPDATE, c.USUARIO,
+                       c.ACTIVO, c.FECHA_MODIF AS FECHA_UPDATE, c.USUARIO_MODIF AS USUARIO,
                        (SELECT COUNT(*)
                           FROM dbo.SBA14 s
                          WHERE s.CLIENTE = c.CLIENTE
@@ -1531,10 +1543,12 @@ class Echeqs {
      *
      * @param string $codigo
      * @param int $dias
-     * @param string|null $usuario
+     * @param string $usuario
      * @return int Los dias guardados
      */
-    public function guardarDiasCliente($codigo, $dias, $usuario = null) {
+    public function guardarDiasCliente($codigo, $dias, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablasCreadas()) {
             throw new Exception('No existen las tablas de venta cobrada anticipada. '
                 . 'Corré sql/echeqs_prechequeado.sql.');
@@ -1547,7 +1561,7 @@ class Echeqs {
 
         $stmt = sqlsrv_query($cid,
             "UPDATE dbo.RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE
-             SET DIAS_PRECHEQUEADO = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+             SET DIAS_PRECHEQUEADO = ?, " . Auditoria::SET_MODIF . "
              WHERE CLIENTE = ?",
             [$dias, $usuario, $codigo]);
 
@@ -1658,11 +1672,13 @@ class Echeqs {
      *
      * @param string $codigo Codigo de cliente
      * @param int|null $dias Dias de pre-chequeado. null solo vale reactivando
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['cliente', 'razon_social', 'dias_prechequeado', 'reactivado',
      *                'cheques_vivos']
      */
-    public function guardarClientePrechequeado($codigo, $dias = null, $usuario = null) {
+    public function guardarClientePrechequeado($codigo, $dias, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablasCreadas()) {
             throw new Exception('No existen las tablas de venta cobrada anticipada. '
                 . 'Corré sql/echeqs_prechequeado.sql.');
@@ -1717,17 +1733,19 @@ class Echeqs {
 
         if ($existe !== null) {
             // Estaba de baja: se reactiva en vez de insertar de nuevo, asi la
-            // fila conserva su historia.
+            // fila conserva su historia. La baja se limpia: una fila activa
+            // con FECHA_BAJA diria a la vez que esta y que no esta.
             $sql = "UPDATE dbo.RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE
                     SET ACTIVO = 1, RAZON_SOCIAL = ?, DIAS_PRECHEQUEADO = ?,
-                        FECHA_UPDATE = GETDATE(), USUARIO = ?
+                        USUARIO_BAJA = NULL, FECHA_BAJA = NULL, " . Auditoria::SET_MODIF . "
                     WHERE CLIENTE = ?";
             $params = [$cliente['RAZON_SOCI'], $dias, $usuario, $codigo];
         } else {
             $sql = "INSERT INTO dbo.RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE
-                        (CLIENTE, RAZON_SOCIAL, DIAS_PRECHEQUEADO, ACTIVO, FECHA_UPDATE, USUARIO)
-                    VALUES (?, ?, ?, 1, GETDATE(), ?)";
-            $params = [$codigo, $cliente['RAZON_SOCI'], $dias, $usuario];
+                        (CLIENTE, RAZON_SOCIAL, DIAS_PRECHEQUEADO, ACTIVO, USUARIO_ALTA,
+                         USUARIO_MODIF)
+                    VALUES (?, ?, ?, 1, ?, ?)";
+            $params = [$codigo, $cliente['RAZON_SOCI'], $dias, $usuario, $usuario];
         }
 
         $stmt = sqlsrv_query($cid, $sql, $params);
@@ -1764,10 +1782,12 @@ class Echeqs {
      * nada, aunque tengan excepcion cargada.
      *
      * @param string $codigo
-     * @param string|null $usuario
+     * @param string $usuario
      * @return bool
      */
-    public function bajaClientePrechequeado($codigo, $usuario = null) {
+    public function bajaClientePrechequeado($codigo, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablasCreadas()) {
             throw new Exception('No existen las tablas de venta cobrada anticipada. '
                 . 'Corré sql/echeqs_prechequeado.sql.');
@@ -1777,10 +1797,10 @@ class Echeqs {
         $cid = $this->conectar('central');
 
         $sql = "UPDATE dbo.RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE
-                SET ACTIVO = 0, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                SET ACTIVO = 0, " . Auditoria::SET_BAJA . "
                 WHERE CLIENTE = ?";
 
-        $stmt = sqlsrv_query($cid, $sql, [$usuario, $codigo]);
+        $stmt = sqlsrv_query($cid, $sql, [$usuario, $usuario, $codigo]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al dar de baja el cliente pre-chequeado'));
@@ -1870,7 +1890,7 @@ class Echeqs {
     private function getExcepciones($ids = null) {
         $cid = $this->conectar('central');
 
-        $sql = "SELECT ID_SBA14, MARCADO, FECHA_UPDATE, USUARIO
+        $sql = "SELECT ID_SBA14, MARCADO, FECHA_MODIF AS FECHA_UPDATE, USUARIO_MODIF AS USUARIO
                 FROM dbo.RO_T_CASHFLOW_ECHEQ_PRECHEQ";
         $params = [];
 

@@ -3,6 +3,7 @@
 require_once __DIR__ . '/Planilla.php';
 require_once __DIR__ . '/Proveedores.php';
 require_once __DIR__ . '/TarjetasFactura.php';
+require_once __DIR__ . '/AuthCashflow.php';
 
 /**
  * TarjetasExclusion
@@ -257,10 +258,11 @@ class TarjetasExclusion {
      *
      * @param array $comprobantes Filas con 'cod_provee', 't_comp', 'n_comp'
      * @param string $motivo
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['excluidas' => int, 'ya_estaban' => int, 'motivo' => string]
      */
-    public function excluir($comprobantes, $motivo, $usuario = null) {
+    public function excluir($comprobantes, $motivo, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         // Todo se valida antes de escribir nada.
@@ -320,10 +322,11 @@ class TarjetasExclusion {
      * porque dice quien excluyo, que es otra persona y otra decision.
      *
      * @param array $comprobantes
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['incluidas' => int, 'pedidas' => int]
      */
-    public function incluir($comprobantes, $usuario = null) {
+    public function incluir($comprobantes, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $claves = TarjetasFactura::normalizarClaves($comprobantes, 'volver a incluir');

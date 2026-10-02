@@ -156,8 +156,13 @@ seccion('Sin bajas fisicas');
 
 chequear('no hay ningun DELETE', 0, preg_match_all('/\bDELETE\b/i', $src));
 
+/* La fecha y el usuario de la baja los pone Auditoria::SET_BAJA, el mismo
+   fragmento que usan todas las bajas del modulo. */
 chequear('la baja marca VIGENTE = 0 y deja FECHA_BAJA',
-    2, preg_match_all('/SET VIGENTE = 0, FECHA_BAJA = GETDATE\(\)/i', $src));
+    2, preg_match_all('/SET VIGENTE = 0, " \. Auditoria::SET_BAJA/', $src));
+chequear('y SET_BAJA sella la fecha y quien',
+    true, strpos(Auditoria::SET_BAJA, 'FECHA_BAJA = GETDATE()') !== false
+        && strpos(Auditoria::SET_BAJA, 'USUARIO_BAJA = ?') !== false);
 
 chequear('corregir un ajuste inserta uno nuevo',
     1, preg_match_all('/INSERT INTO/i', $src));

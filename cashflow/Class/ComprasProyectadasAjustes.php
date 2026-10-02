@@ -2,6 +2,8 @@
 
 require_once __DIR__ . '/ComprasProyectadas.php';
 require_once __DIR__ . '/ComprasProyectadasDatos.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * ComprasProyectadasAjustes
@@ -137,11 +139,13 @@ class ComprasProyectadasAjustes {
      * @param string $mes 'Y-m' de RECEPCION
      * @param mixed $importeUsd
      * @param string $motivo
-     * @param array $mesesVentana Meses que la ventana proyecta hoy
-     * @param string|null $usuario
+     * @param array|null $mesesVentana Meses que la ventana proyecta hoy
+     * @param string $usuario
      * @return array ['mes','importe_usd','id_version','temporada']
      */
-    public function guardar($mes, $importeUsd, $motivo, $mesesVentana = null, $usuario = null) {
+    public function guardar($mes, $importeUsd, $motivo, $mesesVentana, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->datos->tieneAjustes()) {
             throw new Exception($this->datos->avisoSinAjustes());
         }
@@ -193,16 +197,18 @@ class ComprasProyectadasAjustes {
                un importe sin que nadie lo haya pedido. */
             $this->ejecutar($cid,
                 "UPDATE " . self::TABLA . "
-                 SET VIGENTE = 0, FECHA_BAJA = GETDATE()
+                 SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
                  WHERE MES = ? AND VIGENTE = 1",
-                [$mes],
+                [$usuario, $usuario, $mes],
                 'Error al dar de baja el ajuste anterior');
 
             $this->ejecutar($cid,
                 "INSERT INTO " . self::TABLA . "
-                     (MES, IMPORTE_USD, ID_VERSION, TEMPORADA, MOTIVO, VIGENTE, USUARIO, FECHA_ALTA)
-                 VALUES (?, ?, ?, ?, ?, 1, ?, GETDATE())",
-                [$mes, $importeUsd, $idVersion, $temporada['codigo'], $motivo, $usuario],
+                     (MES, IMPORTE_USD, ID_VERSION, TEMPORADA, MOTIVO, VIGENTE, USUARIO_ALTA,
+                      USUARIO_MODIF)
+                 VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+                [$mes, $importeUsd, $idVersion, $temporada['codigo'], $motivo, $usuario,
+                 $usuario],
                 'Error al guardar el ajuste');
 
             sqlsrv_commit($cid);
@@ -227,9 +233,12 @@ class ComprasProyectadasAjustes {
      * permite despues contestar cuanto tiempo estuvo puesto ese numero.
      *
      * @param string $mes 'Y-m'
+     * @param string $usuario
      * @return array ['mes','sin_cambios']
      */
-    public function quitar($mes) {
+    public function quitar($mes, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->datos->tieneAjustes()) {
             throw new Exception($this->datos->avisoSinAjustes());
         }
@@ -248,9 +257,9 @@ class ComprasProyectadasAjustes {
 
         $stmt = sqlsrv_query($cid,
             "UPDATE " . self::TABLA . "
-             SET VIGENTE = 0, FECHA_BAJA = GETDATE()
+             SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
              WHERE MES = ? AND VIGENTE = 1",
-            [$mes]);
+            [$usuario, $usuario, $mes]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al quitar el ajuste'));
@@ -287,7 +296,7 @@ class ComprasProyectadasAjustes {
         }
 
         $sql = "SELECT ID, MES, IMPORTE_USD, ID_VERSION, TEMPORADA, MOTIVO,
-                       VIGENTE, USUARIO, FECHA_ALTA, FECHA_BAJA
+                       VIGENTE, USUARIO_ALTA, FECHA_ALTA, USUARIO_BAJA, FECHA_BAJA
                 FROM " . self::TABLA;
 
         $params = [];
@@ -316,8 +325,9 @@ class ComprasProyectadasAjustes {
                 'temporada' => ($row['TEMPORADA'] === null) ? null : trim((string) $row['TEMPORADA']),
                 'motivo' => ($row['MOTIVO'] === null) ? '' : (string) $row['MOTIVO'],
                 'vigente' => (intval($row['VIGENTE']) === 1),
-                'usuario' => ($row['USUARIO'] === null) ? null : (string) $row['USUARIO'],
+                'usuario' => ($row['USUARIO_ALTA'] === null) ? null : (string) $row['USUARIO_ALTA'],
                 'fecha_alta' => self::aFechaHora($row['FECHA_ALTA']),
+                'usuario_baja' => ($row['USUARIO_BAJA'] === null) ? null : (string) $row['USUARIO_BAJA'],
                 'fecha_baja' => self::aFechaHora($row['FECHA_BAJA'])
             ];
         }

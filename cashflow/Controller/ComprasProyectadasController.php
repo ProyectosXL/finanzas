@@ -189,16 +189,12 @@ try {
             $ajustes = new ComprasProyectadasAjustes;
             $h = Horizonte::desdeParametros(new Parametros());
 
-            /* EL USUARIO TODAVIA LLEGA NULL: no hay login en el modulo. La
-               costura esta puesta -guardar() lo recibe y la tabla lo guarda-
-               para que el dia que exista no haya que tocar nada. Es el mismo
-               pendiente que el resto del modulo. */
             $r = $ajustes->guardar(
                 isset($body['mes']) ? $body['mes'] : '',
                 isset($body['importe_usd']) ? $body['importe_usd'] : null,
                 isset($body['motivo']) ? $body['motivo'] : '',
                 mesesDeLaVentana($h),
-                null
+                $usuario
             );
 
             echo json_encode(['success' => true, 'ajuste' => $r]);

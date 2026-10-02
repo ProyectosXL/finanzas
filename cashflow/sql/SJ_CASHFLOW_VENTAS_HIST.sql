@@ -20,9 +20,10 @@
      5. Persiste con DELETE del rango + INSERT, de modo que es reejecutable sin
         duplicar filas.
 
-   Parametros (ambos opcionales, para poder recorrer el historico hacia atras):
+   Parametros (todos opcionales, para poder recorrer el historico hacia atras):
      @Desde  NULL -> DATEADD(DAY, -30, GETDATE())
      @Hasta  NULL -> GETDATE()
+     @Usuario quien lo corre. El paso del job pasa 'JOB:VENTAS_HIST'; vacio -> 'JOB:SJ_CASHFLOW_VENTAS_HIST'
 
    IMPORTANTE - normalizacion del rango:
    La tabla destino agrega al grano de MES. Si el rango pedido empezara o
@@ -46,12 +47,19 @@ IF OBJECT_ID('dbo.SJ_CASHFLOW_VENTAS_HIST', 'P') IS NOT NULL
 GO
 
 CREATE PROCEDURE dbo.SJ_CASHFLOW_VENTAS_HIST
-    @Desde DATE = NULL,
-    @Hasta DATE = NULL
+    @Desde   DATE         = NULL,
+    @Hasta   DATE         = NULL,
+    @Usuario VARCHAR(128) = NULL
 AS
 BEGIN
     SET XACT_ABORT ON;
     SET NOCOUNT ON;
+
+    /* QUIEN LO CORRIO, para USUARIO_ALTA de cada fila: el job pasa 'JOB:VENTAS_HIST'
+       y una corrida a mano sin @Usuario queda como el nombre del SP. Nunca
+       SUSER_SNAME(): es la cuenta del servicio, no contesta quien. Los
+       origenes estan declarados en AuthCashflow::ORIGENES. */
+    SET @Usuario = LEFT(ISNULL(NULLIF(LTRIM(RTRIM(@Usuario)), ''), 'JOB:SJ_CASHFLOW_VENTAS_HIST'), 50);
 
     IF @Desde IS NULL SET @Desde = DATEADD(DAY, -30, CAST(GETDATE() AS DATE));
     IF @Hasta IS NULL SET @Hasta = CAST(GETDATE() AS DATE);
@@ -180,7 +188,8 @@ BEGIN
             WHERE DATEFROMPARTS(ANIO, MES, 1) BETWEEN @DesdeMes AND @HastaMes;
 
             INSERT INTO dbo.RO_T_CASHFLOW_VENTAS_HIST
-                (ANIO, MES, CANAL, TIPO_COMPROBANTE, IMPORTE_NETO, CANTIDAD, FECHA_CARGA)
+                (ANIO, MES, CANAL, TIPO_COMPROBANTE, IMPORTE_NETO, CANTIDAD, FECHA_CARGA,
+                 USUARIO_ALTA, FECHA_ALTA)
             SELECT
                 YEAR(T.FECHA),
                 MONTH(T.FECHA),
@@ -188,6 +197,8 @@ BEGIN
                 T.TIPO_COMPROBANTE,
                 SUM(T.IMPORTE_NETO),
                 SUM(T.CANTIDAD),
+                GETDATE(),
+                @Usuario,
                 GETDATE()
             FROM #TempVentas T
             WHERE T.CANAL <> ''

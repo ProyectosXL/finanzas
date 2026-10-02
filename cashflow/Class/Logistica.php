@@ -3,6 +3,8 @@
 require_once __DIR__ . '/LogisticaPlanilla.php';
 require_once __DIR__ . '/ProveedoresTango.php';
 require_once __DIR__ . '/Planilla.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * Logistica
@@ -268,7 +270,8 @@ class Logistica {
         }
 
         $sql = "SELECT COD_PROVEE, NOMBRE, HORAS_MES, VALOR_HORA_BASE, MES_BASE, ACTIVO,
-                       USUARIO, FECHA_ALTA, FECHA_UPDATE, FECHA_BAJA
+                       USUARIO_MODIF AS USUARIO, FECHA_ALTA, FECHA_MODIF AS FECHA_UPDATE,
+                       USUARIO_BAJA, FECHA_BAJA
                 FROM dbo." . self::TABLA
               . ($soloActivos ? " WHERE ACTIVO = 1" : "")
               . " ORDER BY NOMBRE, COD_PROVEE";
@@ -343,10 +346,11 @@ class Logistica {
      *
      * @param string $codProvee
      * @param array $datos horas, valor_hora, mes_base (los tres opcionales)
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['cod_provee', 'nombre', 'nuevo' => bool, 'reactivado' => bool]
      */
-    public function guardarFletero($codProvee, $datos, $usuario = null) {
+    public function guardarFletero($codProvee, $datos, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $cod = Planilla::codigo($codProvee);
@@ -381,9 +385,10 @@ class Logistica {
         if ($actual === null) {
             $stmt = sqlsrv_query($cid,
                 "INSERT INTO dbo." . self::TABLA . "
-                    (COD_PROVEE, NOMBRE, HORAS_MES, VALOR_HORA_BASE, MES_BASE, ACTIVO, USUARIO)
-                 VALUES (?, ?, ?, ?, ?, 1, ?)",
-                [$cod, $nombre, $horas, $valor, $mesBase, $usuario]);
+                    (COD_PROVEE, NOMBRE, HORAS_MES, VALOR_HORA_BASE, MES_BASE, ACTIVO, USUARIO_ALTA,
+                     USUARIO_MODIF)
+                 VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+                [$cod, $nombre, $horas, $valor, $mesBase, $usuario, $usuario]);
 
             if ($stmt === false) {
                 throw new Exception($this->errorSql('Error al dar de alta el fletero'));
@@ -395,12 +400,12 @@ class Logistica {
                     'nuevo' => true, 'reactivado' => false];
         }
 
-        /* REACTIVA SI ESTABA DE BAJA. FECHA_BAJA se limpia: si quedara, la fila
-           diría a la vez que está activa y cuándo se dio de baja. */
+        /* REACTIVA SI ESTABA DE BAJA. La baja se limpia: si quedara, la fila
+           diría a la vez que está activa y cuándo y quién la dio de baja. */
         $stmt = sqlsrv_query($cid,
             "UPDATE dbo." . self::TABLA . "
              SET NOMBRE = ?, HORAS_MES = ?, VALOR_HORA_BASE = ?, MES_BASE = ?,
-                 ACTIVO = 1, FECHA_BAJA = NULL, USUARIO = ?, FECHA_UPDATE = GETDATE()
+                 ACTIVO = 1, USUARIO_BAJA = NULL, FECHA_BAJA = NULL, " . Auditoria::SET_MODIF . "
              WHERE COD_PROVEE = ?",
             [$nombre, $horas, $valor, $mesBase, $usuario, $cod]);
 
@@ -422,10 +427,11 @@ class Logistica {
      *
      * @param string $codProvee
      * @param bool $activo
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['cod_provee', 'activo', 'nombre']
      */
-    public function activarFletero($codProvee, $activo, $usuario = null) {
+    public function activarFletero($codProvee, $activo, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $cod = Planilla::codigo($codProvee);
@@ -437,10 +443,11 @@ class Logistica {
 
         $stmt = sqlsrv_query($this->conectar(),
             "UPDATE dbo." . self::TABLA . "
-             SET ACTIVO = ?, FECHA_BAJA = CASE WHEN ? = 1 THEN NULL ELSE GETDATE() END,
-                 USUARIO = ?, FECHA_UPDATE = GETDATE()
+             SET " . Auditoria::sqlBajaSegunEstado('ACTIVO') . ", ACTIVO = ?,
+                 " . Auditoria::SET_MODIF . "
              WHERE COD_PROVEE = ?",
-            [$activo ? 1 : 0, $activo ? 1 : 0, $usuario, $cod]);
+            array_merge(Auditoria::paramsBajaSegunEstado($activo, $usuario),
+                [$activo ? 1 : 0, $usuario, $cod]));
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al cambiar el estado del fletero'));

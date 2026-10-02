@@ -1,6 +1,8 @@
 <?php
 
 require_once __DIR__ . '/TarjetasVencimiento.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * Tarjetas
@@ -538,7 +540,7 @@ class Tarjetas {
 
         $sql = "SELECT ID, TIPO, COD_BANCO, ID_USUARIO, NOMBRE_USUARIO, ULTIMOS_4,
                        PCT_COBERTURA, DIA_VENCIMIENTO, ACTIVA,
-                       USUARIO_ALTA, FECHA_ALTA, USUARIO_MODIF, FECHA_MODIF
+                       USUARIO_ALTA, FECHA_ALTA, USUARIO_MODIF, FECHA_MODIF, USUARIO_BAJA, FECHA_BAJA
                 FROM dbo." . self::TABLA
               . (empty($where) ? '' : ' WHERE ' . implode(' AND ', $where))
               . " ORDER BY TIPO, NOMBRE_USUARIO, ULTIMOS_4, ID";
@@ -594,7 +596,7 @@ class Tarjetas {
         $stmt = sqlsrv_query($this->conectar(),
             "SELECT ID, TIPO, COD_BANCO, ID_USUARIO, NOMBRE_USUARIO, ULTIMOS_4,
                     PCT_COBERTURA, DIA_VENCIMIENTO, ACTIVA,
-                    USUARIO_ALTA, FECHA_ALTA, USUARIO_MODIF, FECHA_MODIF
+                    USUARIO_ALTA, FECHA_ALTA, USUARIO_MODIF, FECHA_MODIF, USUARIO_BAJA, FECHA_BAJA
              FROM dbo." . self::TABLA . " WHERE ID = ?",
             [intval($id)]);
 
@@ -666,7 +668,9 @@ class Tarjetas {
             'USUARIO_ALTA' => $row['USUARIO_ALTA'],
             'USUARIO_MODIF' => $row['USUARIO_MODIF'],
             'FECHA_ALTA' => self::momento($row['FECHA_ALTA']),
-            'FECHA_MODIF' => self::momento($row['FECHA_MODIF'])
+            'FECHA_MODIF' => self::momento($row['FECHA_MODIF']),
+            'USUARIO_BAJA' => $row['USUARIO_BAJA'],
+            'FECHA_BAJA' => self::momento($row['FECHA_BAJA'])
         ];
 
         /* El nombre de la vista MANDA cuando esta: asi un cambio de nombre se ve
@@ -702,10 +706,11 @@ class Tarjetas {
      * @param int|null $id null para un alta
      * @param array $datos tipo, cod_banco, id_usuario, ultimos_4, pct_cobertura,
      *                     dia_vencimiento
-     * @param string|null $usuario Usuario de la sesion, para la auditoria
+     * @param string $usuario Usuario de la sesion, para la auditoria
      * @return array ['id', 'rotulo', 'nuevo' => bool, 'reactivada' => bool]
      */
-    public function guardarTarjeta($id, $datos, $usuario = null) {
+    public function guardarTarjeta($id, $datos, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $tipo = self::validarTipo(isset($datos['tipo']) ? $datos['tipo'] : null);
@@ -787,15 +792,16 @@ class Tarjetas {
             ];
         }
 
-        /* REACTIVA SI ESTABA DE BAJA. A diferencia de un fletero, NO se limpia
-           ninguna fecha de baja: esta tabla no la tiene, porque una tarjeta que
-           se reactiva no pierde nada -sus resumenes siguen ahi- y FECHA_MODIF
-           alcanza para saber cuando se la toco. */
+        /* REACTIVA SI ESTABA DE BAJA, y la baja se limpia como en un fletero:
+           una tarjeta activa con FECHA_BAJA diria a la vez que esta y que no
+           esta. USUARIO_BAJA / FECHA_BAJA llegaron con
+           sql/cashflow_auditoria_usuario.sql; hasta entonces FECHA_MODIF era lo
+           unico que decia cuando se la habia dado de baja. */
         $stmt = sqlsrv_query($cid,
             "UPDATE dbo." . self::TABLA . "
              SET TIPO = ?, COD_BANCO = ?, ID_USUARIO = ?, NOMBRE_USUARIO = ?, ULTIMOS_4 = ?,
                  PCT_COBERTURA = ?, DIA_VENCIMIENTO = ?, ACTIVA = 1,
-                 USUARIO_MODIF = ?, FECHA_MODIF = GETDATE()
+                 USUARIO_BAJA = NULL, FECHA_BAJA = NULL, " . Auditoria::SET_MODIF . "
              WHERE ID = ?",
             [$tipo, $banco, $idUsuario, $nombre, $ultimos, $pct, $dia, $usuario,
              intval($actual['ID'])]);
@@ -825,10 +831,11 @@ class Tarjetas {
      *
      * @param mixed $id
      * @param bool $activa
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['id', 'activa', 'rotulo']
      */
-    public function activarTarjeta($id, $activa, $usuario = null) {
+    public function activarTarjeta($id, $activa, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $actual = $this->getTarjeta($id);
@@ -839,9 +846,11 @@ class Tarjetas {
 
         $stmt = sqlsrv_query($this->conectar(),
             "UPDATE dbo." . self::TABLA . "
-             SET ACTIVA = ?, USUARIO_MODIF = ?, FECHA_MODIF = GETDATE()
+             SET " . Auditoria::sqlBajaSegunEstado('ACTIVA') . ", ACTIVA = ?,
+                 " . Auditoria::SET_MODIF . "
              WHERE ID = ?",
-            [$activa ? 1 : 0, $usuario, intval($actual['ID'])]);
+            array_merge(Auditoria::paramsBajaSegunEstado($activa, $usuario),
+                [$activa ? 1 : 0, $usuario, intval($actual['ID'])]));
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al cambiar el estado de la tarjeta'));

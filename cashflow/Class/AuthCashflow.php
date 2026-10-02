@@ -68,6 +68,7 @@ class AuthCashflow {
         'JOB:COMEX_PRESUP' => 'Presupuesto Comex',
         'JOB:RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN' => 'Presupuesto Comex',
         'JOB:VENTAS_HIST' => 'Histórico de ventas',
+        'JOB:SJ_CASHFLOW_VENTAS_HIST' => 'Histórico de ventas',
         'JOB:VENTAS_HIST_DIA' => 'Histórico de ventas por día',
         'JOB:RO_SP_CASHFLOW_VENTAS_HIST_DIA' => 'Histórico de ventas por día'
     ];
@@ -459,6 +460,30 @@ class AuthCashflow {
         $valor = trim((string) $valor);
 
         return ($valor === '') ? null : mb_substr($valor, 0, self::LARGO_USUARIO);
+    }
+
+    /**
+     * El usuario que recibe un metodo de escritura, validado.
+     *
+     * DEFENSA EN PROFUNDIDAD. El controller ya lo exigio, pero las clases se
+     * llaman tambien desde pruebas, sondas y procesos, y un metodo que acepta un
+     * usuario vacio graba una fila que no dice quien la hizo -justo lo que la
+     * auditoria tiene que impedir-. Por eso ningun metodo de escritura tiene
+     * $usuario = null por defecto, y todos pasan por aca antes de tocar la base.
+     *
+     * @param mixed $usuario Un username o un origen SISTEMA:/JOB:
+     * @return string Recortado a LARGO_USUARIO
+     * @throws InvalidArgumentException si viene vacio
+     */
+    public static function usuarioDeEscritura($usuario) {
+        $u = self::recortarUsuario($usuario);
+
+        if ($u === null) {
+            throw new InvalidArgumentException('No se puede guardar un cambio sin saber quién lo '
+                . 'hace: falta el usuario.');
+        }
+
+        return $u;
     }
 
     /**
