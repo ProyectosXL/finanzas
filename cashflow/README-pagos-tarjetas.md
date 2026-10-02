@@ -487,11 +487,9 @@ La pestaña pasa por `AuthCashflow::puede('pagos_tarjetas')`, que busca la clave
 
 ## 10. La auditoría de este módulo graba al usuario de verdad
 
-`TarjetasController::usuarioActual()` pide `AuthCashflow::usuario()` y cae a `$_SESSION['usuario']`, **a diferencia del resto de los controllers del módulo**, que sólo miran lo segundo y graban `NULL`.
+Este módulo fue el primero con auditoría de verdad, y fue el modelo del resto: desde `feature/cashflow-auditoria-usuario` **todo el módulo** usa su esquema y lo escribe igual. El usuario sale sólo del padrón de Gestionusuarios, por la guarda común de los controllers (`Controller/autorizacion.php`): se fue `TarjetasController::usuarioActual()`, y con él la vuelta a `$_SESSION['usuario']`, que firmaba con un nombre al que nunca se le preguntó si podía. Sin usuario del padrón la escritura se rechaza (401), y sin `cashflow.editar.pagos_tarjetas` —o `cashflow.editar.parametros.tarjetas`, para el maestro— también (403).
 
-Las cuatro tablas exigen auditoría y grabarla en `NULL` la convierte en decoración: la columna existe, el campo está, y no contesta quién hizo el cambio. `AuthCashflow::init()` ya resuelve el usuario mirando las cuatro claves con las que las distintas pantallas del sistema escriben la sesión, así que preguntarle a él es preguntar una sola vez y bien.
-
-> **El resto del módulo sigue grabando `NULL`.** Cambiarlo para diecinueve pantallas es un refactor que no es de esta tarea, y quedó anotado como pendiente.
+El maestro `RO_T_CASHFLOW_TARJETAS` recibió además `USUARIO_BAJA` / `FECHA_BAJA` para su `ACTIVA`, y reactivar una tarjeta las limpia. Ver *Auditoría y permisos de escritura* en `README-cashflow.md`.
 
 ---
 

@@ -494,7 +494,7 @@ Contra la base: que ninguna cuenta de fondo entre al disponible, que el saldo li
 
 ## Usuario
 
-Todavía no hay login. Todas las tablas tienen `USUARIO VARCHAR(50) NULL` y hoy se graba `NULL`. Los métodos de guardado ya reciben `$usuario` y los controllers lo resuelven con `usuarioActual()`, que lee `$_SESSION['usuario']`.
+Las tablas llevan el esquema de auditoría del módulo —`USUARIO_ALTA` / `FECHA_ALTA`, `USUARIO_MODIF` / `FECHA_MODIF` y, donde hay baja lógica, `USUARIO_BAJA` / `FECHA_BAJA`—, y cada escritura graba el `username` del padrón de Gestionusuarios, que resuelve el servidor: el navegador no manda usuario ni fecha. Sin usuario la escritura se rechaza (401) y sin el permiso de edición de la pestaña, también (403). Las filas de antes de `feature/cashflow-auditoria-usuario` quedan con lo que tenían —casi siempre sin usuario— y la pantalla lo dice. Ver *Auditoría y permisos de escritura* en `README-cashflow.md`.
 
 ---
 

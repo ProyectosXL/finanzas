@@ -30,7 +30,61 @@ Las tres capas están separadas a propósito: **configuración** (`CashflowEstru
 
 ## Para pasar a producción: los scripts, en orden
 
-**Todos van contra `central`.** Todos son reejecutables y ninguno borra nada: lo que reemplazan queda inhabilitado. Si no se corren, la pantalla **no falla** — avisa.
+**Todos van contra `central`, salvo uno de la sección que sigue**, que va contra `apps`. Todos son reejecutables y ninguno borra nada: lo que reemplazan queda inhabilitado. Si no se corren, la pantalla **no falla** — avisa. **Esa sección es la excepción también en esto**: sus scripts van antes que el código, y sin ellos el código nuevo sí falla.
+
+### Primero que nada: auditoría y permisos de escritura (`feature/cashflow-auditoria-usuario`)
+
+**Acá el orden es al revés que en el resto de esta sección: primero los scripts, después el código.** Sin las columnas nuevas, las escrituras del código nuevo **fallan** —no hay vuelta a las columnas viejas— y algunas lecturas también. Con los scripts corridos y el código viejo todavía publicado, en cambio, no pasa nada: el código viejo no lee las columnas nuevas, y las nuevas son NULL o tienen default.
+
+**Un script va contra `apps`**, la base de Gestionusuarios. Es el único del módulo que no va contra `central`.
+
+| # | Base | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- | --- |
+| A1 | `apps` | `sql/cashflow_permisos_edicion.sql` | Da de alta `cashflow.editar.<pestaña>` para las 13 pestañas con escrituras y `cashflow.editar.parametros.<sub>` para las 11 sub-pestañas de Parámetros. **Migra sin quitarle nada a nadie**: todo rol que ve una pestaña recibe su edición, y todo rol que ve Parámetros recibe las 11 | **Sólo el administrador puede guardar.** Todos los demás ven las pantallas sin controles de edición, y si llaman al endpoint igual, el servidor responde 403 |
+| A2 | `central` | `sql/cashflow_auditoria_usuario.sql` | Lleva a 42 tablas el esquema `USUARIO_ALTA` / `FECHA_ALTA` / `USUARIO_MODIF` / `FECHA_MODIF` (+ `USUARIO_BAJA` / `FECHA_BAJA` donde hay baja lógica) y copia lo que ya había (ver *Auditoría y permisos de escritura*) | **Las escrituras fallan** con `Invalid column name 'USUARIO_ALTA'`. Y peor, en silencio: `Ingresos::getFechasManuales()` devuelve vacío si su consulta falla, así que **las fechas de cobro manuales de Cobranzas FR y May dejan de aplicarse sin aviso** |
+| A3 | `central` | `sql/RO_SP_CASHFLOW_COMEX_RECEP_HIST.sql`, `sql/RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN.sql`, `sql/RO_SP_CASHFLOW_VENTAS_HIST_DIA.sql`, `sql/SJ_CASHFLOW_VENTAS_HIST.sql` | **Modificados: hay que volver a correrlos.** Dejan de grabar `SUSER_SNAME()` —la cuenta del servicio, que no dice quién—: desde la pantalla reciben el username; desde el job, `JOB:<proceso>`; vacíos, `JOB:<nombre del SP>`. Escriben `USUARIO_ALTA` en sus tablas y en `RO_T_CASHFLOW_JOB_LOG`. **Dependen del A2** | Los SP viejos siguen andando —escriben `JOB_LOG.USUARIO`, que sigue existiendo— pero la pantalla ya no lee esa columna: *Proyección* muestra "Calculado" sin decir por quién |
+| A4 | SQL Agent | Los pasos de los jobs | Que el paso pase su origen. Ver abajo | El SP graba `JOB:<nombre del SP>` en vez del nombre corto. Se lee igual —los dos están en `AuthCashflow::ORIGENES`—, sólo que más largo |
+
+**El A2 ya se corrió contra esta base `central` el 02/10/2026.** Es reejecutable: una segunda corrida no agrega nada y no pisa ninguna copia.
+
+Los pasos de los jobs (A4), para quien administra el SQL Agent:
+
+```sql
+EXEC msdb.dbo.sp_update_jobstep @job_name = N'CASHFLOW - Historia de recepciones Comex', @step_id = 1,
+     @command = N'EXEC dbo.RO_SP_CASHFLOW_COMEX_RECEP_HIST @Usuario = ''JOB:COMEX_RECEP_HIST'';';
+EXEC msdb.dbo.sp_update_jobstep @job_name = N'CASHFLOW - Presupuesto de compras Comex', @step_id = 1,
+     @command = N'EXEC dbo.RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN @Usuario = ''JOB:COMEX_PRESUP'';';
+-- El job que corre el historico de ventas (el nombre lo sabe quien lo creo):
+--   EXEC dbo.SJ_CASHFLOW_VENTAS_HIST @Usuario = 'JOB:VENTAS_HIST';
+--   EXEC dbo.RO_SP_CASHFLOW_VENTAS_HIST_DIA @Usuario = 'JOB:VENTAS_HIST_DIA';
+```
+
+**La migración del A1 da editar a todos los que hoy ven.** Es a propósito: el día del pase nadie pierde nada. **Lo que haya que restringir se recorta después desde Gestionusuarios**, quitándole al rol la clave `cashflow.editar.*` que no corresponda. Y por lo mismo, **no hay que volver a correr el A1 después de recortar**: la migración volvería a dar editar a quien ve.
+
+#### Después de correrlos, verificar
+
+En `apps`, que estén las 24 claves y cuántos roles tiene cada una (el script mismo termina con esta tabla):
+
+```sql
+SELECT p.clave, COUNT(rp.rol_id) AS roles
+FROM dbo.FP_PERMISOS p
+LEFT JOIN dbo.FP_ROL_PERMISO rp ON rp.permiso_id = p.id
+WHERE p.clave LIKE 'cashflow.editar.%'
+GROUP BY p.clave
+ORDER BY p.clave;
+```
+
+Y que el `modulo_id` de las claves nuevas sea el 7: es el que lee `AuthCashflow`. Si el script avisó que el módulo es otro, las claves están pero el PHP no las ve.
+
+En `central`, el script termina con un `SELECT` de **qué columna le falta a qué tabla**: tiene que volver vacío. Después de publicar el código, una edición cualquiera tiene que dejar su firma:
+
+```sql
+SELECT TOP 5 ID_MG, CAMPO, USUARIO_ALTA, FECHA_ALTA, USUARIO_BAJA, FECHA_BAJA
+FROM dbo.RO_T_CASHFLOW_COMEX_FECHA_EDIT ORDER BY ID DESC;
+
+SELECT TOP 5 PROCESO, INICIO, USUARIO_ALTA, USUARIO_MODIF
+FROM dbo.RO_T_CASHFLOW_JOB_LOG ORDER BY ID DESC;   -- JOB:... o un username, nunca la cuenta del servicio
+```
 
 ### Scripts nuevos
 
@@ -1288,6 +1342,85 @@ La crea `sql/cashflow_echeqs_excluir.sql`.
 
 ---
 
+## Auditoría y permisos de escritura
+
+**Todo lo que el módulo escribe dice quién y cuándo, y sólo puede escribirlo quien tiene permiso.** Hasta `feature/cashflow-auditoria-usuario` el usuario se grababa `NULL` en casi todas las tablas —no había login en el módulo— y cualquiera que viera una pestaña la podía editar.
+
+### El esquema, uno solo en todas las tablas
+
+El de Tarjetas, llevado a las 42 tablas que escribe el módulo por `sql/cashflow_auditoria_usuario.sql`:
+
+| Columna | Qué dice |
+| --- | --- |
+| `USUARIO_ALTA` / `FECHA_ALTA` | Quién creó la fila y cuándo |
+| `USUARIO_MODIF` / `FECHA_MODIF` | Quién la tocó por última vez y cuándo. Un alta también la llena |
+| `USUARIO_BAJA` / `FECHA_BAJA` | Quién la dio de baja y cuándo. Sólo donde hay baja lógica (`VIGENTE`, `ACTIVO`, `ACTIVA`) |
+
+- **Se graba el `username` del padrón de Gestionusuarios**, recortado a 50 caracteres. No el nombre, no el id.
+- **Las fechas las pone siempre el servidor**: `GETDATE()` en el SQL, o el `DEFAULT` de la columna. Nunca vienen del navegador.
+- **El front nunca manda usuario ni fecha.** El usuario sale de la sesión, en el servidor, y lo que venga en el request se ignora. Comex lo tomaba del cuerpo del request (`$data['usuario']`) para firmar el rastro de la fecha y la marca `FECHA_PAGO_CONF_USUARIO` del maestro de Comercio Exterior: eso ya no existe. El editor de la estructura, que manda su modelo entero al guardar, guarda la auditoría **fuera** del modelo por lo mismo.
+- **Sin usuario resoluble, la escritura se rechaza** con 401. No hay vuelta a `$_SESSION['usuario']` ni se graba `NULL`: un nombre que no está en el padrón no tiene permisos que verificar.
+- **Una baja que se deshace limpia la baja.** Reactivar una tarjeta, un fletero, un cliente de pre-chequeado o una opción deja `USUARIO_BAJA` y `FECHA_BAJA` en `NULL`: una fila activa con fecha de baja diría a la vez que está y que no está. Y en un guardado masivo —la estructura, las cuentas de Saldos— la baja se sella **sólo en la transición** de activo a inactivo: volver a guardar una fila que ya estaba de baja no cambia quién la dio de baja. Es `Auditoria::sqlBajaSegunEstado()`.
+
+Los fragmentos SQL compartidos viven en `Class/Auditoria.php` (`SET_MODIF`, `SET_BAJA` y la baja según el estado), y **ningún método de escritura acepta `$usuario = null`**: es obligatorio, y `AuthCashflow::usuarioDeEscritura()` lanza si llega vacío. Es defensa en profundidad: el controller ya lo exigió, pero las clases se llaman también desde pruebas, sondas y procesos.
+
+**Las filas viejas no se reconstruyen.** Lo único que se copió es lo que ya decía la tabla, y sólo donde la columna nueva estaba vacía:
+
+- **Tablas de "última edición"** (`USUARIO` + `FECHA_UPDATE` o `FECHA_MOD`, que se pisan en cada cambio): `USUARIO → USUARIO_MODIF`, `FECHA_UPDATE`/`FECHA_MOD → FECHA_MODIF`.
+- **Tablas de "una fila por carga"** (`USUARIO` + `FECHA_ALTA` + `VIGENTE`/`FECHA_BAJA`, como `COMEX_FECHA_EDIT` o `COMEX_PAGADO`): `USUARIO → USUARIO_ALTA`. `PROV_LOCALES_CATEG` además `FECHA_IMPORTACION → FECHA_ALTA`.
+- Las filas de antes del script quedan con `FECHA_ALTA`/`FECHA_MODIF` en `NULL` donde no había de dónde copiar, y la pantalla dice **"sin usuario registrado"**. Como hasta ahora el usuario era `NULL` casi siempre, eso es lo que va a decir el histórico.
+
+**`RO_T_PARAMETROS_DESC_CLIENTES` no es de este módulo**: la escribe también Tesorería (`administracion/tesoreria/cobranzas/api/parametros_controller.php`) y la leen otras tres pantallas de allá. Recibió las columnas `NULL` y **sin defaults**, para no cambiar lo que hace el otro sistema, y el cashflow **sigue escribiendo su `FECHA_MOD`**, que Tesorería usa.
+
+### Las columnas viejas, en desuso
+
+`USUARIO`, `FECHA_UPDATE` y `FECHA_MOD` **no se borraron**: el código dejó de leerlas y de escribirlas, y quedan con el último valor que tenían. Todas son `NULL` o tienen default, así que no bloquean ningún `INSERT` que ya no las nombra (verificado contra la base el 02/10/2026). **Su `DROP` es un script aparte, posterior al pase a producción**, que todavía no está escrito: hay que esperar a que el código nuevo esté publicado y estable, porque con el código viejo esas columnas son las que se leen. La excepción es `RO_T_PARAMETROS_DESC_CLIENTES.FECHA_MOD`, que no se borra nunca: es de Tesorería.
+
+### Los procesos no son personas
+
+Una escritura que no hizo una persona se firma con un **origen explícito**, nunca con `NULL` —que ya significa "fila histórica"— ni con `SUSER_SNAME()`, que devuelve la cuenta del servicio y no contesta quién:
+
+| Caso | Qué se graba |
+| --- | --- |
+| Una persona lo dispara desde la pantalla: *Actualizar ahora* de Proyección, sincronizar sucursales, importar, conciliar | Su `username`. Si queda log (`RO_T_CASHFLOW_JOB_LOG`), el proceso va en `PROCESO` y la persona en `USUARIO_ALTA` |
+| Un efecto en cascada de una acción de una persona: el recálculo de pendientes al guardar una alícuota, el descarte de la cotización al mover una fecha de Comex | El `username` de esa persona: es parte de su acción, y ella ve el resultado en la respuesta |
+| Un efecto lateral que el código hace solo, sin acción de nadie | `SISTEMA:<Clase.metodo>`, con `AuthCashflow::origen()`. **Hoy no hay ninguno**: no hay escrituras al leer |
+| Un job del SQL Agent, o un SP corrido a mano sin `@Usuario` | `JOB:<proceso>` —`JOB:COMEX_RECEP_HIST`, `JOB:COMEX_PRESUP`, `JOB:VENTAS_HIST`, `JOB:VENTAS_HIST_DIA`—, o `JOB:<nombre del SP>` si nadie lo pasó |
+
+Los orígenes `JOB:` los arma el SQL, no el PHP, así que **la lista vive en un solo lugar**, `AuthCashflow::ORIGENES`, con el nombre con el que se muestran; `index.php` la publica para el JavaScript, y una prueba verifica que todo `'JOB:...'` de los scripts esté declarado ahí. Todo va recortado a 50 caracteres.
+
+### Leer no es escribir: dos permisos por pestaña
+
+Los permisos siguen viniendo de `FP_ROL_PERMISO` / `FP_PERMISOS` (módulo 7), como `cashflow.tab.<pestaña>`, y ahora hay uno más:
+
+- `cashflow.tab.<pestaña>` deja **ver** la pestaña. No cambió.
+- `cashflow.editar.<pestaña>` deja **escribir** en ella. Existe sólo para las 13 pestañas que tienen alguna escritura; las de sólo lectura —Dashboard, Exportaciones Tasky y las que todavía están en construcción— no llevan clave.
+- En Parámetros la lectura sigue siendo una sola, `cashflow.tab.parametros`, y la escritura va **por sub-pestaña**: `cashflow.editar.parametros.<código en minúscula>` (`generales`, `ventas`, `saldos`, `cob_electronicos`, `prechequeado`, `cobranzas`, `compras_proy`, `logistica`, `prov_locales`, `tarjetas`, `cashflow`). Quien carga las cuentas de Saldos no necesariamente es quien toca el horizonte de todo el módulo.
+- **Escribir implica leer**: una clave de edición sin la de la pestaña no habilita nada. Y el administrador (sector Proyectos con `es_admin` o `CONTROLTOTAL`) puede todo, como antes.
+
+**La seguridad es el servidor.** Cada controller llama una vez, antes de su `switch`, a `autorizar('<Controller>', $action)` (`Controller/autorizacion.php`), que pregunta al mapa de `AuthCashflow`: sin usuario corta con **401**, sin permiso con **403**, los dos con el `{success: false, message}` de siempre. Una acción que no está en el mapa **se rechaza**: un `case` nuevo no puede quedar abierto por olvido.
+
+**El mapa es la única fuente**: `AuthCashflow::ESCRITURAS` dice, para cada acción de cada controller, qué (pestaña, sub-pestaña) hay que poder editar, y `AuthCashflow::LECTURAS` lista las que sólo leen. Tres casos que lo explican:
+
+- **Una acción en dos pestañas** lleva una lista, y alcanza con poder editar **cualquiera**: la fecha de Comex se mueve desde Proveedores Exterior y desde Crono Nacionalización; la fecha de cobro, desde Cobranzas FR y May; un fletero, desde Logística Local y desde Parámetros.
+- **`saveParametro`**, que usan cuatro sub-pestañas, pide la sub-pestaña **del parámetro**: la saca del `MODULO` de su fila (`Parametros::subPestanaDe()`). Los generales que todavía figuran en `VENTAS/GENERAL` se editan desde Generales y piden ese permiso.
+- **Los *preview* también piden edición** —previsualizar una importación, una conciliación—: no escriben, pero son el primer paso de una escritura.
+
+**La interfaz esconde lo que no se puede usar, y es comodidad.** La raíz de cada pestaña —y en Parámetros, cada sub-pestaña— lleva `data-puede-editar`, que escribe `AuthCashflow::atributoEdicion()`. Lo que es HTML lo resuelve el PHP (`<?php if ($edita): ?>`: botones de alta, guardar, importar, conciliar, los formularios de alta); lo que arma el JS lo resuelve `Js/permisos.js` —`Permisos.puedeEditar()`, `siEdita()`, `segun()`, y `soloLectura()` para las grillas de Parámetros, que cambia cada control por su valor y saca los botones salvo los `data-lectura`, como los de historial—. Quien sólo lee ve lo mismo que antes: los datos, los filtros, exportar, ordenar y los historiales. Ocultar un botón no impide llamar al endpoint; lo que lo impide es el 403.
+
+### Quién modificó y cuándo, en pantalla
+
+`Js/auditoria.js` es el único lugar que convierte el esquema en texto: *"Modificado por X · dd/mm/aaaa hh:mm"*, y *"Cargado por…"* y *"Dado de baja por…"* para el alta y la baja. Un origen `JOB:` se lee *"Proceso automático (Presupuesto Comex)"*. Va como tooltip donde la celda ya existe —fechas, importes y ajustes cargados a mano: Comex, Cobranzas, Proveedores Locales, Ventas, Echeqs, Proyección, Tarjetas, Logística— y como un ícono chico en las grillas de Parámetros y los maestros. **En el tablero consolidado no hay nada**: es para leer el flujo, no para auditarlo.
+
+### Para agregar una pestaña o una acción que escribe
+
+1. Declarar la acción en `AuthCashflow::ESCRITURAS` con su (pestaña, sub-pestaña), o en `LECTURAS` si sólo lee. `tests/test_auth_cashflow.php` lee los `case` de los controllers y **falla si alguno no está declarado**.
+2. Si es una pestaña nueva con escrituras, sumar su `cashflow.editar.<pestaña>` a `sql/cashflow_permisos_edicion.sql`, que es reejecutable. La misma prueba verifica que las claves del script sean exactamente las que pide el mapa.
+3. Poner `AuthCashflow::atributoEdicion('<pestaña>')` en la raíz de la pestaña y esconder sus controles con `$edita` y `Js/permisos.js`. La prueba verifica el atributo.
+4. Si la acción escribe una tabla nueva, crearla con las seis columnas y escribirlas con `Class/Auditoria.php`.
+
+---
+
 ## Pruebas
 
 ```bash
@@ -1328,6 +1461,10 @@ De las **compras proyectadas**, cuatro archivos y 394 comprobaciones. El grueso 
 De **Logística Local**, cuatro archivos que corren enteros **sin base**: el cronograma de viernes —con el mes de cinco viernes, el corrimiento **hacia atrás** (al revés que el de Ventas) y los tres feriados reales del horizonte que caen justo en un 2do o 4to viernes—, el ajuste trimestral del valor hora —incluido el **histórico real de los tres fleteros, al centavo**, y la verificación de que un ajuste suma *su mes y los dos anteriores*, probada con inflación **variable** porque con constante las tres cuentas posibles dan lo mismo—, el reparto mitad y mitad con el **mes partido por el final del tramo diario**, y el proveedor con sus tres casos de fila en cero. Ver `README-logistica-local.md`.
 
 > Esa rama destapó dos cosas que se tapaban entre sí. `AuthCashflow` **abortaba la suite entera** con un fatal cuando `htdocs/Gestionusuarios` no estaba al lado —un checkout de este repo solo—, y con el fatal fuera del camino aparecieron **32 fallas de `test_menu`**: medía la estructura del menú contra `Menu::estructura()`, que **filtra por permisos**, y por línea de comandos no hay sesión. La estructura del menú es un hecho del código, así que ahora se pide con `Menu::estructuraCompleta()`; el filtrado por permisos tiene su propia sección, que fija que **sin sesión no se ve nada**.
+
+De la **auditoría y los permisos de escritura**, `tests/test_auth_cashflow.php` corre entero sin sesión y sin base. Las reglas con permisos simulados —admin, ver sin editar, editar sin ver, la sub-pestaña de Parámetros—; `origen()` con su formato y su recorte; y, leyendo archivos, el cableado que se rompe en silencio: **que todo `case` de los catorce controllers esté declarado** como lectura o escritura en el mapa —agregar uno sin declararlo hace fallar la prueba—, que las claves de `sql/cashflow_permisos_edicion.sql` sean exactamente las que pide el mapa, que ningún controller tome el usuario de la sesión o del request, que ningún método de escritura tenga `$usuario = null`, que ningún SP caiga en `SUSER_SNAME()` ni grabe un origen `JOB:` que no esté en `AuthCashflow::ORIGENES`, y que cada pestaña con escrituras lleve `data-puede-editar` en su raíz y cada sub-pestaña en su pane. `Js/auditoria.js` no tiene corredor —no hay JS en la suite—; se probó con node aparte.
+
+> Las escrituras no las ejecuta ninguna prueba: escriben en la base viva. Para esta rama se verificaron con una sonda que **compiló las 190 escrituras de 61 métodos contra `central` con `SET NOEXEC ON`** —columnas, sintaxis y cantidad de parámetros— sin escribir nada, y se confirmó después que no quedara ninguna fila de la sonda.
 
 **El motor acepta un `Horizonte` inyectado, y hace falta para poder probarlo.** El arrastre del saldo depende de qué día es hoy, así que un escenario con importes en fechas fijas deja de tener sentido en cuanto pasa esa fecha. Sin esa costura las pruebas del motor caducaban solas —y caducaron: 48 casos empezaron a devolver `null` al pasar el 06/09/2026, y la parte más delicada del módulo se quedó sin red. Es la misma costura que ya tenían `Ventas::proyectarVentas()` y `proyectarCobranzas()`.
 
@@ -1447,6 +1584,8 @@ De la rama `feature/logistica-local-parametros-generales`: `sql/cashflow_paramet
 
 > **Ningún script toca la estructura del tablero.** La fila `LOGISTICA` ya existía apuntada a `LOGISTICA/PAGOS`: alcanzó con escribir el proveedor y dar vuelta el flag, que es exactamente lo que el registro promete. Ver `README-logistica-local.md`.
 
+De la rama `feature/cashflow-auditoria-usuario`: `sql/cashflow_permisos_edicion.sql` (base `apps`), `sql/cashflow_auditoria_usuario.sql`, `Class/Auditoria.php`, `Controller/autorizacion.php`, `Js/permisos.js`, `Js/auditoria.js` y `tests/test_auth_cashflow.php` (nuevos) · `Class/AuthCashflow.php` (`username()`, `exigirUsuario()`, `puedeEditar()`, `exigirEdicion()`, `exigirAccion()`, `origen()`, `atributoEdicion()`, el mapa `ESCRITURAS` / `LECTURAS` y `ORIGENES`) · los catorce controllers (la guarda antes del `switch`; se fueron los `usuarioActual()`; `VentasController` pierde `saveMixCobro` y `saveParametro`, que no tenían llamador) · todas las clases que escriben (las seis columnas, el usuario obligatorio) · los cuatro SP del histórico y de Comex (el origen `JOB:`) · las 13 pestañas con escrituras, las 11 sub-pestañas de Parámetros y sus JS (los controles se esconden sin permiso; el quién y cuándo) · `index.php` (`permisos.js`, `auditoria.js` y los orígenes en el `<head>`) · `Css/main.css` (`.auditoria-icono`).
+
 Eliminado: `Tabs/resumen.php`.
 
 ---
@@ -1461,8 +1600,11 @@ Eliminado: `Tabs/resumen.php`.
 - **El neteo de cheques adelantados resta importes que ninguna fila del tablero suma.** Un cheque en cartera cierra solo: suma en *Echeqs en cartera* y resta de la cobranza de Ventas. Uno ya aplicado —depositado o endosado a un proveedor— no lo suma nadie, y se netea igual: **el neteo va por tilde y no por estado**, porque los cheques pre-chequeados están casi todos aplicados y filtrarlos dejaría el circuito sin efecto. Es una decisión tomada, no un pendiente; el pie de la sub-pestaña muestra el corte por estado para poder auditar el número. El detalle de lo verificado contra la base está en `README-ventas.md`.
 - **`Ingresos::getCobranzasFR()` sigue haciendo una consulta por fila** en *Detalle Facturas*, para traer la fecha de emisión de cada comprobante. El tablero no lo sufre —usa `getCobranzasFRTotales()`— y el Resumen tampoco, que desde que no muestra esa columna se la saltea; lo paga *Detalle Facturas*, que es donde se pidió el detalle, **y el Resumen cuando hay filtro por fecha de emisión**, porque ahí esa fecha es lo que decide si la fila entra.
 - **El Dashboard es una maqueta**: no tiene ninguna llamada al servidor, sus números están escritos a mano. El menú lo marca como tal. Cuando se construya de verdad, hay que pasarlo a `datos` en `Class/Menu.php`.
-- **Las fechas de Comercio Exterior se graban con `USUARIO = NULL`**, como todo lo demás, y el rastro de quién editó existe pero **todavía no tiene pantalla que muestre el historial completo**: la celda muestra sólo la edición vigente en su tooltip. `getHistorialFecha` ya lo devuelve entero. Ver `README-comex.md`.
-- **`VentasController?action=saveMixCobro` puede grabar un mix que Parámetros rechazaría**: no valida el 100%. Es anterior a este trabajo.
+- **El rastro de las fechas de Comercio Exterior todavía no tiene pantalla que muestre el historial completo**: la celda muestra sólo la edición vigente en su tooltip. `getHistorialFecha` ya lo devuelve entero, con alta y baja. Ver `README-comex.md`.
 - `pedir()` está duplicado en `Ingresos-Ventas.js` y `Parametros.js`. El código nuevo usa `pedirJson()` de `main.js`; sacar las dos copias viejas es un cambio aparte.
 - **Algunas pestañas de datos todavía usan `alert()`.** `Js/notificaciones.js` está enchufado en toda la pestaña Parámetros, en Cobranzas FR, en Otros Ingresos y —desde la exclusión de cartera— en la sub-pestaña *Cheques en Cartera* de Echeqs; está disponible para el resto. Las dos pestañas de Comex también lo usan desde `feature/comex-nac-usd` —los nueve `alert()` que les quedaban, con la falla de carga pintada además adentro de la tabla vacía; ver `README-comex.md`—. Ventas, Saldos, Cob. Electrónicos y Cobranzas May siguen con el diálogo del navegador, y **la otra sub-pestaña de Echeqs sigue con un `confirm()` en el tildado masivo**: quedó así a propósito, porque cambiarla no es parte de la exclusión y mezclarla habría metido en esa etapa un archivo que no tiene nada que ver con ella. Es el mismo reemplazo, archivo por archivo.
-- Sin login: todo se graba con `USUARIO = NULL`. La costura ya está puesta.
+- **Dos borrados físicos no dejan rastro de quién borró**: volver una factura de Cobranzas FR o May a la fecha calculada (`Ingresos::deleteFechaManual()`) y la fila de override de Proveedores Locales que queda vacía al sacarle la fecha (`Proveedores::deletePago()`, que antes firma el `UPDATE`). No queda fila donde anotarlo; pasarlos a baja lógica cambia el comportamiento y es una decisión aparte.
+- **El `DROP` de las columnas viejas** (`USUARIO`, `FECHA_UPDATE`, `FECHA_MOD`) es un script que todavía no está escrito, para después de que el código nuevo esté publicado y estable. Ver *Auditoría y permisos de escritura*.
+- **`Class/OtrosIngresos.php` conserva `$usuario = null` y las columnas viejas**: sus pestañas se eliminaron, sus métodos de escritura no tienen ningún endpoint y sus dos tablas no recibieron las columnas nuevas. Si alguna vez vuelven a usarse, hay que pasarlas al esquema.
+- **El PPP manual por grupo y el medio de pago por cliente (Parámetros → Cobranzas) se graban con auditoría pero no la muestran**: su grilla sale de `Ingresos`, que es la misma lectura que usa el motor, y no se le sumó nada que la pueda hacer fallar.
+- **Las sub-pestañas de Parámetros esconden los controles por permiso, pero los dos endpoints de Logística y de la fecha de Comex aceptan cualquiera de sus dos pestañas** (ver *Leer no es escribir*): quien edita Parámetros → Logística puede guardar un fletero aunque en Logística Local lo vea sin controles. Es lo pedido —el endpoint hace lo mismo venga de donde venga—, y se nota sólo desde la consola.

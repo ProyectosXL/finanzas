@@ -594,7 +594,7 @@ central (Comex)    RO_T_IMPORTACIONES_ENCABEZADO      lo ya comprado
 
 - **El filtro de cuero vive sólo en la base.** Hay que bajarlo al `05_baja_logica_versiones.sql` del repo compras o la próxima corrida lo borra. Ver la sección 7.
 - **La nacionalización de los últimos meses de la ventana cae fuera del eje.** Es estructural, está avisado con su importe, y se corrige subiendo `horizonte_meses`. Ver la sección 9.
-- **Sin login: el ajuste se graba con `USUARIO = NULL`.** La costura está puesta —`guardar()` lo recibe y la tabla lo guarda— para que el día que exista no haya que tocar nada. Es el mismo pendiente que el resto del módulo.
+- **El ajuste se firma con el usuario de la sesión** (`USUARIO_ALTA`, y `USUARIO_BAJA` al sacarlo), y *Actualizar ahora* deja en `RO_T_CASHFLOW_JOB_LOG` a la persona que lo apretó. El job del SQL Agent pasa `JOB:COMEX_RECEP_HIST` / `JOB:COMEX_PRESUP`, y los SP ya no caen en `SUSER_SNAME()`. Ver *Auditoría y permisos de escritura* en `README-cashflow.md`.
 - **El ajuste manual no tiene una pantalla propia de historial global.** Se ve por mes, desde el modal. `getHistorialAjustes` sin `mes` ya devuelve todo; falta la pantalla. Mismo estado que el historial de fechas de Comex.
 - **La ventana no puede empezar antes del mes en curso.** Un mes de recepción ya pasado cuyo pago todavía no se hizo no se proyecta. No apareció como necesidad, pero es la primera cosa que va a faltar si alguien quiere ver un pago atrasado.
 - **Flete y seguro no los proyecta nadie**, ni acá ni en las dos pestañas de Comex. Ver *Pendientes conocidos* de `README-comex.md`.
