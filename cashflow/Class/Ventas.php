@@ -482,19 +482,6 @@ class Ventas {
     }
 
     /**
-     * Guarda una fila del mix de cobro
-     * @param int $id ID de la fila
-     * @param float $porcentaje Porcentaje del mix (0 a 1)
-     * @param int $diasAcreditacion Dias hasta la acreditacion
-     * @param bool $activo Si el medio se usa en la proyeccion
-     * @param string|null $usuario Usuario que edita (todavia no hay login)
-     * @return bool True si se guardo correctamente
-     */
-    public function saveMixCobro($id, $porcentaje, $diasAcreditacion, $activo = true, $usuario = null) {
-        return $this->parametros->saveMixCobro($id, $porcentaje, $diasAcreditacion, $activo, $usuario);
-    }
-
-    /**
      * Parametros generales del modulo
      * @param string|null $grupo Grupo a filtrar
      * @param string|null $modulo Modulo a filtrar
@@ -502,17 +489,6 @@ class Ventas {
      */
     public function getParametros($grupo = null, $modulo = null) {
         return $this->parametros->getParametros($grupo, $modulo);
-    }
-
-    /**
-     * Guarda un parametro
-     * @param string $clave Clave del parametro
-     * @param string $valor Valor a guardar
-     * @param string|null $usuario Usuario que edita (todavia no hay login)
-     * @return bool True si se guardo correctamente
-     */
-    public function saveParametro($clave, $valor, $usuario = null) {
-        return $this->parametros->saveParametro($clave, $valor, $usuario);
     }
 
     /**

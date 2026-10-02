@@ -144,46 +144,11 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
-        case 'saveMixCobro':
-            $data = bodyJson();
-
-            if (!isset($data['id']) || !isset($data['porcentaje']) ||
-                !isset($data['dias_acreditacion'])) {
-                throw new Exception('Faltan parametros obligatorios');
-            }
-
-            $ventas->saveMixCobro(
-                $data['id'],
-                $data['porcentaje'],
-                $data['dias_acreditacion'],
-                isset($data['activo']) ? (bool)$data['activo'] : true,
-                usuarioActual()
-            );
-
-            echo json_encode([
-                'success' => true,
-                'message' => 'Mix de cobro guardado correctamente'
-            ], JSON_UNESCAPED_UNICODE);
-            break;
-
-        case 'saveParametro':
-            $data = bodyJson();
-
-            if (!isset($data['clave']) || !isset($data['valor'])) {
-                throw new Exception('Faltan parametros obligatorios');
-            }
-
-            $ventas->saveParametro(
-                $data['clave'],
-                $data['valor'],
-                usuarioActual()
-            );
-
-            echo json_encode([
-                'success' => true,
-                'message' => 'Parametro guardado correctamente'
-            ], JSON_UNESCAPED_UNICODE);
-            break;
+        /* NO HAY CASOS saveMixCobro NI saveParametro, y se sacaron a proposito.
+           Duplicaban los de ParametrosController -que son los que usa la
+           pantalla- y no tenian ningun llamador. Un endpoint de ESCRITURA sin
+           consumidor es una puerta mas que hay que proteger sin que nadie la
+           use: el mix y los parametros se guardan solo desde Parametros. */
 
         /* NO HAY CASO 'getNeteoPrechequeado', y se saco a proposito. Existia
            para que la pestana Ventas dibujara el neteo en su pie, y esa fila ya
