@@ -1,6 +1,8 @@
 <?php
 
 require_once __DIR__ . '/Horizonte.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * Fondos
@@ -524,7 +526,8 @@ class Fondos {
         $cid = $this->conectar();
 
         $sql = "SELECT ID, TIPO, CLASE, NOMBRE, MONEDA, ORIGEN_DATO, SALDO_INICIAL,
-                       FECHA_SALDO_INICIAL, ORDEN, ACTIVO, FECHA_UPDATE, USUARIO
+                       FECHA_SALDO_INICIAL, ORDEN, ACTIVO, FECHA_MODIF AS FECHA_UPDATE,
+                       USUARIO_MODIF AS USUARIO
                 FROM dbo." . self::TABLA_CUENTA . "
                 WHERE CLASE IN (" . $this->inSql(self::CLASES_FONDO) . ")"
                 . ($soloActivas ? " AND ACTIVO = 1" : "") . "
@@ -657,12 +660,14 @@ class Fondos {
      * @param mixed $tipo SUSCRIPCION | RESCATE
      * @param mixed $importe Positivo
      * @param string|null $observacion
-     * @param string|null $usuario
+     * @param string $usuario
      * @param int|null $idReemplaza El movimiento que esta version pisa
      * @return array ['id', 'fecha', 'tipo', 'importe', 'moneda', 'reemplazo' => bool]
      */
-    public function guardarMovimiento($idCuenta, $fecha, $tipo, $importe, $observacion = null,
-                                      $usuario = null, $idReemplaza = null) {
+    public function guardarMovimiento($idCuenta, $fecha, $tipo, $importe, $observacion, $usuario,
+                                      $idReemplaza = null) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->creado()) {
             throw new Exception('Todavía no existen las cuentas de fondo. Corré '
                 . 'sql/cashflow_saldos_cuentas_fondo.sql contra la base central.');
@@ -691,7 +696,8 @@ class Fondos {
             $reemplazo = false;
 
             if ($idReemplaza !== null && $idReemplaza !== '') {
-                $reemplazo = $this->bajaVigente($cid, intval($idReemplaza), intval($cuenta['ID']));
+                $reemplazo = $this->bajaVigente($cid, intval($idReemplaza), intval($cuenta['ID']),
+                    $usuario);
 
                 if (!$reemplazo) {
                     throw new Exception('El movimiento que se quiere corregir ya no está vigente '
@@ -702,11 +708,11 @@ class Fondos {
             $stmt = sqlsrv_query($cid,
                 "INSERT INTO dbo." . self::TABLA_MOV . "
                     (ID_CUENTA, FECHA, TIPO, IMPORTE, MONEDA, OBSERVACION, VIGENTE,
-                     ID_REEMPLAZA, USUARIO)
+                     ID_REEMPLAZA, USUARIO_ALTA, USUARIO_MODIF)
                  OUTPUT INSERTED.ID
-                 VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                 VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
                 [intval($cuenta['ID']), $f, $t, $monto, $cuenta['MONEDA'], $obs,
-                 $reemplazo ? intval($idReemplaza) : null, $usuario]);
+                 $reemplazo ? intval($idReemplaza) : null, $usuario, $usuario]);
 
             if ($stmt === false) {
                 throw new Exception($this->errorSql('Error al guardar el movimiento'));
@@ -733,16 +739,20 @@ class Fondos {
      *
      * @param int $idCuenta
      * @param int $idMovimiento
+     * @param string $usuario
      * @return bool Si estaba vigente
      */
-    public function bajaMovimiento($idCuenta, $idMovimiento) {
+    public function bajaMovimiento($idCuenta, $idMovimiento, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->creado()) {
             throw new Exception('Todavía no existen las cuentas de fondo.');
         }
 
         $cuenta = $this->cuentaFondo($idCuenta);
 
-        return $this->bajaVigente($this->conectar(), intval($idMovimiento), intval($cuenta['ID']));
+        return $this->bajaVigente($this->conectar(), intval($idMovimiento), intval($cuenta['ID']),
+            $usuario);
     }
 
     /* ====================================================================
@@ -787,12 +797,12 @@ class Fondos {
     }
 
     /** Marca VIGENTE = 0 un movimiento de una cuenta. @return bool si lo estaba */
-    private function bajaVigente($cid, $idMovimiento, $idCuenta) {
+    private function bajaVigente($cid, $idMovimiento, $idCuenta, $usuario) {
         $stmt = sqlsrv_query($cid,
             "UPDATE dbo." . self::TABLA_MOV . "
-             SET VIGENTE = 0, FECHA_BAJA = GETDATE()
+             SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
              WHERE ID = ? AND ID_CUENTA = ? AND VIGENTE = 1",
-            [$idMovimiento, $idCuenta]);
+            [$usuario, $usuario, $idMovimiento, $idCuenta]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al dar de baja el movimiento'));
@@ -819,7 +829,7 @@ class Fondos {
         }
 
         $sql = "SELECT ID, ID_CUENTA, FECHA, TIPO, IMPORTE, MONEDA, OBSERVACION, VIGENTE,
-                       ID_REEMPLAZA, USUARIO, FECHA_ALTA, FECHA_BAJA
+                       ID_REEMPLAZA, USUARIO_ALTA, FECHA_ALTA, USUARIO_BAJA, FECHA_BAJA
                 FROM dbo." . self::TABLA_MOV . "
                 WHERE ID_CUENTA IN (" . implode(',', array_fill(0, count($ids), '?')) . ")"
                 . ($soloVigentes ? " AND VIGENTE = 1" : "") . "
@@ -844,8 +854,9 @@ class Fondos {
                 'OBSERVACION' => $row['OBSERVACION'],
                 'VIGENTE' => intval($row['VIGENTE']),
                 'ID_REEMPLAZA' => ($row['ID_REEMPLAZA'] === null) ? null : intval($row['ID_REEMPLAZA']),
-                'USUARIO' => $row['USUARIO'],
+                'USUARIO' => $row['USUARIO_ALTA'],
                 'FECHA_ALTA' => $this->fechaHora($row['FECHA_ALTA']),
+                'USUARIO_BAJA' => $row['USUARIO_BAJA'],
                 'FECHA_BAJA' => $this->fechaHora($row['FECHA_BAJA'])
             ];
         }

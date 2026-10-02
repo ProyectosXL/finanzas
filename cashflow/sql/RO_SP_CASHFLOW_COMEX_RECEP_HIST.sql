@@ -63,8 +63,9 @@
      @Anios    cuantos anios calendario COMPLETOS hacia atras. 10 por defecto:
                alcanza de sobra para cualquier compras_proy_anios_cuota
                razonable (hoy 3) y cuesta lo mismo que tres.
-     @Usuario  quien lo pidio, para el log. NULL -> el login de la sesion (el
-               del SQL Agent si lo corre el job).
+     @Usuario  quien lo pidio: el username si lo pide una persona desde la
+               pantalla, 'JOB:COMEX_RECEP_HIST' desde el job. Vacio ->
+               'JOB:RO_SP_CASHFLOW_COMEX_RECEP_HIST'. Va al log y a cada fila.
    ============================================================================ */
 
 CREATE OR ALTER PROCEDURE dbo.RO_SP_CASHFLOW_COMEX_RECEP_HIST
@@ -78,12 +79,18 @@ BEGIN
     DECLARE @Proceso VARCHAR(60) = 'COMEX_RECEP_HIST';
     DECLARE @IdLog INT, @Filas INT = 0, @Lock INT;
 
-    SET @Usuario = ISNULL(NULLIF(LTRIM(RTRIM(@Usuario)), ''), SUSER_SNAME());
+    /* QUIEN LO PIDIO, y nunca el login de la sesion: SUSER_SNAME() devolvia la
+       cuenta del servicio del Agent o la del pool de PHP, que no contestan
+       quien. Desde la pantalla llega el username; desde el job, el origen
+       'JOB:COMEX_RECEP_HIST'; vacio -alguien lo corrio a mano sin pasarlo-, el nombre del SP.
+       Los origenes estan declarados en AuthCashflow::ORIGENES. Recortado a 50,
+       el largo de las columnas USUARIO_*. */
+    SET @Usuario = LEFT(ISNULL(NULLIF(LTRIM(RTRIM(@Usuario)), ''), 'JOB:RO_SP_CASHFLOW_COMEX_RECEP_HIST'), 50);
 
     /* El intento se registra ANTES de cualquier otra cosa y fuera de la
        transaccion: si la corrida se cae, queda igual en el log. */
-    INSERT INTO dbo.RO_T_CASHFLOW_JOB_LOG (PROCESO, INICIO, USUARIO)
-    VALUES (@Proceso, GETDATE(), @Usuario);
+    INSERT INTO dbo.RO_T_CASHFLOW_JOB_LOG (PROCESO, INICIO, USUARIO_ALTA, USUARIO_MODIF)
+    VALUES (@Proceso, GETDATE(), @Usuario, @Usuario);
 
     SET @IdLog = SCOPE_IDENTITY();
 
@@ -95,7 +102,8 @@ BEGIN
     BEGIN
         UPDATE dbo.RO_T_CASHFLOW_JOB_LOG
         SET FIN = GETDATE(),
-            ERROR = N'Ya hay otra corrida en curso; esta no hizo nada.'
+            ERROR = N'Ya hay otra corrida en curso; esta no hizo nada.',
+            USUARIO_MODIF = @Usuario, FECHA_MODIF = GETDATE()
         WHERE ID = @IdLog;
 
         RETURN;
@@ -162,8 +170,8 @@ BEGIN
             DELETE FROM dbo.RO_T_CASHFLOW_COMEX_RECEP_HIST;
 
             INSERT INTO dbo.RO_T_CASHFLOW_COMEX_RECEP_HIST
-                (ANIO, MES, UNIDADES, IMPORTE_USD, FECHA_CALCULO)
-            SELECT ANIO, MES, ISNULL(UNIDADES, 0), ISNULL(IMPORTE_USD, 0), @Ahora
+                (ANIO, MES, UNIDADES, IMPORTE_USD, FECHA_CALCULO, USUARIO_ALTA, FECHA_ALTA)
+            SELECT ANIO, MES, ISNULL(UNIDADES, 0), ISNULL(IMPORTE_USD, 0), @Ahora, @Usuario, @Ahora
             FROM #RES;
 
             SET @Filas = @@ROWCOUNT;
@@ -171,7 +179,7 @@ BEGIN
         COMMIT TRANSACTION;
 
         UPDATE dbo.RO_T_CASHFLOW_JOB_LOG
-        SET FIN = GETDATE(), FILAS = @Filas
+        SET FIN = GETDATE(), FILAS = @Filas, USUARIO_MODIF = @Usuario, FECHA_MODIF = GETDATE()
         WHERE ID = @IdLog;
     END TRY
     BEGIN CATCH
@@ -181,7 +189,7 @@ BEGIN
         DECLARE @Error NVARCHAR(4000) = ERROR_MESSAGE();
 
         UPDATE dbo.RO_T_CASHFLOW_JOB_LOG
-        SET FIN = GETDATE(), ERROR = @Error
+        SET FIN = GETDATE(), ERROR = @Error, USUARIO_MODIF = @Usuario, FECHA_MODIF = GETDATE()
         WHERE ID = @IdLog;
 
         EXEC sp_releaseapplock @Resource = 'RO_SP_CASHFLOW_COMEX_RECEP_HIST', @LockOwner = 'Session';
@@ -202,7 +210,7 @@ GO
    Job      : CASHFLOW - Historia de recepciones Comex
    Servidor : XL-TANGO, base LAKER_SA
    Paso 1   : T-SQL
-                EXEC dbo.RO_SP_CASHFLOW_COMEX_RECEP_HIST;
+                EXEC dbo.RO_SP_CASHFLOW_COMEX_RECEP_HIST @Usuario = 'JOB:COMEX_RECEP_HIST';
    Frecuencia: DIARIA a las 05:00. Tarda alrededor de 1,5 s.
 
    Con una vez por dia sobra: es historia de anios CERRADOS y el mes en curso
@@ -219,7 +227,7 @@ GO
    -- EXEC msdb.dbo.sp_add_job @job_name = N'CASHFLOW - Historia de recepciones Comex';
    -- EXEC msdb.dbo.sp_add_jobstep @job_name = N'CASHFLOW - Historia de recepciones Comex',
    --      @step_name = N'RO_SP_CASHFLOW_COMEX_RECEP_HIST', @subsystem = N'TSQL',
-   --      @database_name = N'LAKER_SA', @command = N'EXEC dbo.RO_SP_CASHFLOW_COMEX_RECEP_HIST;';
+   --      @database_name = N'LAKER_SA', @command = N'EXEC dbo.RO_SP_CASHFLOW_COMEX_RECEP_HIST @Usuario = ''JOB:COMEX_RECEP_HIST'';';
    -- EXEC msdb.dbo.sp_add_jobschedule @job_name = N'CASHFLOW - Historia de recepciones Comex',
    --      @name = N'Diaria 05:00', @freq_type = 4, @freq_interval = 1,
    --      @active_start_time = 050000;

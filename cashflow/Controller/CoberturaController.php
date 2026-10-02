@@ -39,16 +39,6 @@ if (session_status() === PHP_SESSION_NONE) {
 
 header('Content-Type: application/json');
 
-/**
- * Usuario que realiza la edicion.
- * Todavia no hay login: devuelve NULL y se graba NULL. Cuando exista, solo hay
- * que poblar $_SESSION['usuario'].
- * @return string|null
- */
-function usuarioActual() {
-    return isset($_SESSION['usuario']) ? $_SESSION['usuario'] : null;
-}
-
 /** @return array El cuerpo JSON del request */
 function bodyJson() {
     $data = json_decode(file_get_contents('php://input'), true);
@@ -64,6 +54,12 @@ try {
     require_once __DIR__ . '/../Class/Cobertura.php';
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
+
+    /* Quien escribe y si puede, antes de tocar nada: null en las acciones
+       que solo leen. Ver Controller/autorizacion.php. */
+    require_once __DIR__ . '/autorizacion.php';
+    $usuario = autorizar('Cobertura', $action);
+
     $cobertura = new Cobertura();
 
     switch ($action) {
@@ -120,7 +116,7 @@ try {
                 $data['importe'],
                 isset($data['origen']) ? $data['origen'] : null,
                 isset($data['observacion']) ? $data['observacion'] : null,
-                usuarioActual()
+                $usuario
             );
 
             $cuanto = ($r['moneda'] === 'USD')
@@ -150,7 +146,7 @@ try {
             }
 
             $habia = $cobertura->borrar($data['fecha'],
-                isset($data['origen']) ? $data['origen'] : null);
+                isset($data['origen']) ? $data['origen'] : null, $usuario);
 
             echo json_encode([
                 'success' => true,

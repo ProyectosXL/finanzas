@@ -17,6 +17,11 @@ try {
     // Obtener acción del request
     $action = isset($_GET['action']) ? $_GET['action'] : '';
 
+    /* Quien escribe y si puede, antes de tocar nada: null en las acciones
+       que solo leen. Ver Controller/autorizacion.php. */
+    require_once __DIR__ . '/autorizacion.php';
+    $usuario = autorizar('Comex', $action);
+
     $comex = new Comex();
 
     /**
@@ -187,7 +192,8 @@ try {
 
             $r = $comex->updateCotizacion(
                 $data['id_mg'],
-                array_key_exists('cotizacion', $data) ? $data['cotizacion'] : null
+                array_key_exists('cotizacion', $data) ? $data['cotizacion'] : null,
+                $usuario
             );
 
             echo json_encode([
@@ -223,6 +229,11 @@ try {
            valor original: el cliente decidía qué decía que había pisado. Ahora
            el servidor lee el maestro en la misma transacción en la que escribe,
            que es la única forma de que el rastro diga la verdad.
+
+           POR LO MISMO, EL USUARIO TAMPOCO VIAJA. Hasta esta entrega salía de
+           el campo 'usuario' del cuerpo: el navegador decía quién firmaba el rastro y la
+           marca FECHA_PAGO_CONF_USUARIO del maestro de Comercio Exterior. Ahora
+           es el de la sesión, el mismo que pasó la guarda de permisos.
            ================================================================ */
         case 'updateFecha':
             $data = json_decode(file_get_contents('php://input'), true);
@@ -237,7 +248,7 @@ try {
                 $data['campo'],
                 $data['id_mg'],
                 $data['fecha'],
-                isset($data['usuario']) ? $data['usuario'] : null
+                $usuario
             );
 
             /* EL DESCARTE DE LA COTIZACIÓN SE AVISA. Si el pago se corrió a
@@ -293,7 +304,7 @@ try {
                 $data['id_mg'],
                 !empty($data['pagado']),
                 isset($data['observacion']) ? $data['observacion'] : null,
-                isset($data['usuario']) ? $data['usuario'] : null
+                $usuario
             );
 
             if ($r['sin_cambios']) {

@@ -14,16 +14,6 @@ if (session_status() === PHP_SESSION_NONE) {
 header('Content-Type: application/json');
 
 /**
- * Usuario que realiza la edicion.
- * Todavia no hay login: devuelve NULL y se graba NULL. Cuando exista, solo hay
- * que poblar $_SESSION['usuario'] y toda la trazabilidad queda enchufada.
- * @return string|null Usuario actual
- */
-function usuarioActual() {
-    return isset($_SESSION['usuario']) ? $_SESSION['usuario'] : null;
-}
-
-/**
  * Lee y decodifica el body JSON del request
  * @return array Datos del POST
  */
@@ -43,6 +33,11 @@ try {
 
     // Obtener accion del request
     $action = isset($_GET['action']) ? $_GET['action'] : '';
+
+    /* Quien escribe y si puede, antes de tocar nada: null en las acciones
+       que solo leen. Ver Controller/autorizacion.php. */
+    require_once __DIR__ . '/autorizacion.php';
+    $usuario = autorizar('Ventas', $action);
 
     $ventas = new Ventas();
 
@@ -106,7 +101,7 @@ try {
                 $data['anio'],
                 $data['mes'],
                 $data['valores'],
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -135,7 +130,7 @@ try {
                 $data['anio'],
                 $data['mes'],
                 $data['indice'],
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -144,46 +139,11 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
-        case 'saveMixCobro':
-            $data = bodyJson();
-
-            if (!isset($data['id']) || !isset($data['porcentaje']) ||
-                !isset($data['dias_acreditacion'])) {
-                throw new Exception('Faltan parametros obligatorios');
-            }
-
-            $ventas->saveMixCobro(
-                $data['id'],
-                $data['porcentaje'],
-                $data['dias_acreditacion'],
-                isset($data['activo']) ? (bool)$data['activo'] : true,
-                usuarioActual()
-            );
-
-            echo json_encode([
-                'success' => true,
-                'message' => 'Mix de cobro guardado correctamente'
-            ], JSON_UNESCAPED_UNICODE);
-            break;
-
-        case 'saveParametro':
-            $data = bodyJson();
-
-            if (!isset($data['clave']) || !isset($data['valor'])) {
-                throw new Exception('Faltan parametros obligatorios');
-            }
-
-            $ventas->saveParametro(
-                $data['clave'],
-                $data['valor'],
-                usuarioActual()
-            );
-
-            echo json_encode([
-                'success' => true,
-                'message' => 'Parametro guardado correctamente'
-            ], JSON_UNESCAPED_UNICODE);
-            break;
+        /* NO HAY CASOS saveMixCobro NI saveParametro, y se sacaron a proposito.
+           Duplicaban los de ParametrosController -que son los que usa la
+           pantalla- y no tenian ningun llamador. Un endpoint de ESCRITURA sin
+           consumidor es una puerta mas que hay que proteger sin que nadie la
+           use: el mix y los parametros se guardan solo desde Parametros. */
 
         /* NO HAY CASO 'getNeteoPrechequeado', y se saco a proposito. Existia
            para que la pestana Ventas dibujara el neteo en su pie, y esa fila ya

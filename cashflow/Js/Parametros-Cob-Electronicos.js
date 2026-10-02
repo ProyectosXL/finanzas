@@ -160,6 +160,9 @@
             ? procs.map(filaProcesadora).join('')
             : '<tr><td colspan="4" class="text-center text-muted py-4">' +
               'Todavía no hay procesadoras cargadas.</td></tr>';
+
+        // Sin permiso de edicion, como texto (Js/permisos.js)
+        Permisos.soloLectura('bodyProcesadoras');
     }
 
     function filaProcesadora(p) {
@@ -186,7 +189,8 @@
             '</td>' +
             '<td class="text-center pce-num">' + textoTasa(tasa) + '</td>' +
             '<td class="text-center pce-fecha">' +
-                (p.FECHA_UPDATE ? fechaHora(p.FECHA_UPDATE) : '—') + '</td>' +
+                (p.FECHA_UPDATE ? fechaHora(p.FECHA_UPDATE) : '—') +
+                Auditoria.icono({ usuario: p.USUARIO, fecha: p.FECHA_UPDATE }) + '</td>' +
             // La celda del estado no se atenúa (ver Parametros.css): un switch
             // apagado y gris se lee como "no se puede tocar".
             '<td class="text-center pce-celda-estado">' +
@@ -427,6 +431,8 @@
             : '<tr><td colspan="6" class="text-center text-muted py-4">' +
               'Todavía no hay alícuotas cargadas. Sin alícuotas no se puede dar de alta ningún ' +
               'movimiento.</td></tr>';
+
+        Permisos.soloLectura('bodyAlicuotas');
     }
 
     function filaAlicuota(a, esVigente) {
@@ -442,7 +448,7 @@
 
         return '<tr class="' + (activa ? '' : 'pce-inactiva') + '">' +
             '<td class="fw-semibold">' + escapar(a.RAZON_SOCIAL) + '</td>' +
-            '<td>' + escapar(a.CONCEPTO) + '</td>' +
+            '<td>' + escapar(a.CONCEPTO) + Auditoria.icono({ usuario: a.USUARIO, fecha: a.FECHA_UPDATE }) + '</td>' +
             '<td class="text-end pce-num">' + porcentaje(a.ALICUOTA) + '</td>' +
             '<td class="text-center">' + fechaCorta(a.VIGENCIA_DESDE) + '</td>' +
             '<td class="text-center">' + estado + '</td>' +

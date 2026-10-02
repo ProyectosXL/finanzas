@@ -186,7 +186,8 @@
 
             return '<div class="col-md-6 col-lg-3">' +
                 '<div class="param-card" id="pgen-card-' + esc(clave) + '">' +
-                    '<div class="param-clave">' + esc(ETIQUETAS[clave] || etiqueta(clave)) + '</div>' +
+                    '<div class="param-clave">' + esc(ETIQUETAS[clave] || etiqueta(clave)) +
+                        Auditoria.icono({ usuario: p.USUARIO, fecha: p.FECHA_UPDATE }) + '</div>' +
                     '<div class="param-descripcion">' + esc(p.DESCRIPCION || '') + '</div>' +
                     '<div class="input-group input-group-sm">' +
                         input +
@@ -198,6 +199,9 @@
                 '</div>' +
             '</div>';
         }).join('');
+
+        // Sin permiso de edicion, los valores como texto (Js/permisos.js)
+        Permisos.soloLectura(grid);
 
         grid.querySelectorAll('.pgen-input').forEach(function(input) {
             input.addEventListener('change', function() { guardarParametro(input); });
@@ -294,13 +298,14 @@
                 '<td class="text-center"><small class="text-muted">' +
                     esc(m.modalidad || '—') + '</small></td>' +
                 '<td><small class="text-muted">' +
-                    (m.fecha_update ? esc(m.fecha_update.substring(0, 16)) : '—') +
-                    (m.usuario ? ' — ' + esc(m.usuario) : '') + '</small></td>' +
+                    (esc(Auditoria.linea('modif', m.usuario, m.fecha_update)) || '—') + '</small></td>' +
                 '<td><small class="text-muted">' +
                     (m.proyecta ? 'Sí' : 'Ya pasó: sólo sirve para un ajuste viejo') +
                     '</small></td>' +
             '</tr>';
         }).join('');
+
+        Permisos.soloLectura(cuerpo);
 
         cuerpo.querySelectorAll('.pgen-infla').forEach(function(input) {
             input.addEventListener('change', function() { guardarInflacion(input); });
@@ -416,6 +421,9 @@
             : '<tr><td colspan="6" class="text-center text-muted py-3">' +
               'No hay pagos próximos en el horizonte.</td></tr>';
 
+        // El historial se puede mirar sin permiso de edicion: va con data-lectura
+        Permisos.soloLectura(cuerpo);
+
         cuerpo.querySelectorAll('tr[data-mes]').forEach(function(fila) {
             var acciones = {
                 guardar: function() { guardarFecha(fila); },
@@ -460,7 +468,8 @@
               'corrida</span>'
             : '';
         var aMano = p.override
-            ? '<span class="badge bg-info text-dark mt-1">a mano</span>' : '';
+            ? '<span class="badge bg-info text-dark mt-1">a mano</span>' +
+              Auditoria.icono({ alta: { usuario: p.usuario, fecha: p.fecha_alta } }) : '';
 
         return '<tr data-mes="' + esc(p.mes) + '" data-nro="' + p.nro + '" ' +
                 'data-calculada="' + esc(p.calculada) + '">' +
@@ -485,7 +494,7 @@
                     'title="Volver a la fecha calculada"' +
                     (editable && p.override ? '' : ' disabled') +
                     '><i class="fas fa-rotate-left"></i></button> ' +
-                '<button class="btn btn-sm btn-outline-secondary" data-accion="historial" ' +
+                '<button class="btn btn-sm btn-outline-secondary" data-accion="historial" data-lectura ' +
                     'title="Historial"><i class="fas fa-clock-rotate-left"></i></button>' +
             '</td>' +
         '</tr>';
@@ -530,7 +539,7 @@
                             '<td>' + esc(fecha(f.fecha)) + '</td>' +
                             '<td>' + esc(fecha(f.fecha_calculada)) + '</td>' +
                             '<td><small>' + esc(f.motivo || '—') + '</small></td>' +
-                            '<td><small>' + esc(f.usuario || '—') + '</small></td>' +
+                            '<td><small>' + esc(Auditoria.quien(f.usuario) || '—') + '</small></td>' +
                             '<td><small>' + esc((f.fecha_alta || '').substring(0, 16)) + '</small></td>' +
                             '<td><small>' + esc((f.fecha_baja || '—').substring(0, 16)) + '</small></td>' +
                         '</tr>';

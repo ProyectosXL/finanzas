@@ -441,14 +441,19 @@
        facturas la tiene.
        ================================================================ */
 
-    /** Si esta vista permite editar la fecha de cobro */
-    function editable() {
+    /** Si esta vista es la de la fecha de cobro por comprobante */
+    function vistaEditable() {
         return modoVista === 'deepdive';
+    }
+
+    /** Si la fecha de cobro se puede editar: esta vista, y con permiso (Js/permisos.js) */
+    function editable() {
+        return vistaEditable() && Permisos.puedeEditar(document.querySelector('.tab-cobranzas_may'));
     }
 
     /** El indicador del Resumen: este cliente tiene alguna fecha cargada a mano */
     function marcaManual(item) {
-        if (editable() || !item.FECHA_MANUAL) {
+        if (vistaEditable() || !item.FECHA_MANUAL) {
             return '';
         }
 
@@ -487,14 +492,18 @@
                     + formatDate(item.COBRO_ORIGINAL) + '</span></td>';
             }
 
-            return '<td class="center"' + orden + '>'
+            // Una fecha cargada a mano dice quién y cuándo (Js/auditoria.js)
+            return '<td class="center"' + orden
+                + (item.FECHA_MANUAL ? ' title="' + Auditoria.titulo({ usuario: item.MANUAL_USUARIO,
+                    fecha: item.MANUAL_FECHA }) + '"' : '') + '>'
                 + '<span class="badge-cobro-may">' + formatDate(item.Cobro) + '</span></td>';
         }
 
         var manual = !!item.FECHA_MANUAL;
         var titulo = manual
             ? 'Fecha cargada a mano. El importe no cambia: mayoristas no tiene escala de '
-                + 'descuento.'
+                + 'descuento.\n'
+                + Auditoria.titulo({ usuario: item.MANUAL_USUARIO, fecha: item.MANUAL_FECHA })
             : 'Calculada como fecha de emisión + ' + (item.PLAZO || 60) + ' días. Se puede pisar.';
 
         if (item.VENCIDA) {

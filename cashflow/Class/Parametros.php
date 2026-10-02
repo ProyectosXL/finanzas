@@ -1,5 +1,8 @@
 <?php
 
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
+
 /**
  * Parametros
  * Acceso a la tabla clave/valor RO_T_CASHFLOW_PARAMETROS y al mix de cobro.
@@ -879,7 +882,7 @@ class Parametros {
 
         $sql = "SELECT CLAVE, VALOR, TIPO_DATO, DESCRIPCION, "
              . ($tieneModulo ? "MODULO, " : "")
-             . "GRUPO, FECHA_UPDATE, USUARIO
+             . "GRUPO, FECHA_MODIF AS FECHA_UPDATE, USUARIO_MODIF AS USUARIO
                 FROM RO_T_CASHFLOW_PARAMETROS";
         $where = [];
         $params = [];
@@ -910,7 +913,8 @@ class Parametros {
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             if (isset($row['FECHA_UPDATE']) && $row['FECHA_UPDATE'] instanceof DateTime) {
-                $row['FECHA_UPDATE'] = $row['FECHA_UPDATE']->format('Y-m-d');
+                // Con la hora: es el "cuando" de la auditoria (Js/auditoria.js)
+                $row['FECHA_UPDATE'] = $row['FECHA_UPDATE']->format('Y-m-d H:i:s');
             }
 
             if (!$tieneModulo) {
@@ -969,13 +973,63 @@ class Parametros {
     }
 
     /**
+     * En que sub-pestaña se edita un parametro, segun su fila. Pura.
+     *
+     * Es la que decide que permiso pide saveParametro(): un solo endpoint que
+     * usan cuatro sub-pestañas. Casi siempre es el MODULO, con una excepcion:
+     * los generales que todavia figuran en VENTAS/GENERAL -antes de correr
+     * sql/cashflow_parametros_generales.sql- se ven y se editan en Generales
+     * (ver el rescate en getModulosConDatos()), asi que piden ese permiso.
+     *
+     * @param string $modulo
+     * @param string $grupo
+     * @return string
+     */
+    public static function subPestanaDe($modulo, $grupo) {
+        $modulo = strtoupper(trim((string) $modulo));
+
+        if ($modulo === 'VENTAS' && strtoupper(trim((string) $grupo)) === 'GENERAL') {
+            return 'GENERALES';
+        }
+
+        return $modulo;
+    }
+
+    /**
+     * La sub-pestaña de un parametro, leida de su fila. null si no existe.
+     *
+     * @param string $clave
+     * @return string|null
+     */
+    public function subPestanaDelParametro($clave) {
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT MODULO, GRUPO FROM RO_T_CASHFLOW_PARAMETROS WHERE CLAVE = ?", [$clave]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer el parametro'));
+        }
+
+        $fila = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        return $fila ? self::subPestanaDe($fila['MODULO'], $fila['GRUPO']) : null;
+    }
+
+    /**
      * Guarda (o crea) un parametro
      * @param string $clave Clave del parametro
      * @param string $valor Valor a guardar
-     * @param string|null $usuario Usuario que edita (todavia no hay login)
+     * @param string $usuario Usuario que edita
      * @return bool True si se guardo correctamente
      */
-    public function saveParametro($clave, $valor, $usuario = null) {
+    public function saveParametro($clave, $valor, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $cid = $this->conn->conectar('central');
 
         if (!$cid) {
@@ -997,7 +1051,7 @@ class Parametros {
         }
 
         $sql = "UPDATE RO_T_CASHFLOW_PARAMETROS
-                SET VALOR = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                SET VALOR = ?, " . Auditoria::SET_MODIF . "
                 WHERE CLAVE = ?";
 
         $stmt = sqlsrv_query($cid, $sql, [$valor, $usuario, $clave]);
@@ -1023,7 +1077,8 @@ class Parametros {
             throw new Exception('No se pudo conectar a la base de datos');
         }
 
-        $sql = "SELECT ID, CANAL, MEDIO_PAGO, PORCENTAJE, DIAS_ACREDITACION, ACTIVO, ORDEN
+        $sql = "SELECT ID, CANAL, MEDIO_PAGO, PORCENTAJE, DIAS_ACREDITACION, ACTIVO, ORDEN,
+                       USUARIO_MODIF, FECHA_MODIF
                 FROM RO_T_CASHFLOW_VENTAS_MIX";
 
         if ($soloActivos) {
@@ -1045,6 +1100,8 @@ class Parametros {
             $row['DIAS_ACREDITACION'] = intval($row['DIAS_ACREDITACION']);
             $row['ACTIVO'] = intval($row['ACTIVO']);
             $row['ORDEN'] = intval($row['ORDEN']);
+            $row['FECHA_MODIF'] = ($row['FECHA_MODIF'] instanceof DateTime)
+                ? $row['FECHA_MODIF']->format('Y-m-d H:i:s') : $row['FECHA_MODIF'];
             $v[] = $row;
         }
 
@@ -1059,10 +1116,11 @@ class Parametros {
      * @param float $porcentaje Porcentaje del mix (0 a 1)
      * @param int $diasAcreditacion Dias hasta la acreditacion
      * @param bool $activo Si el medio se usa en la proyeccion
-     * @param string|null $usuario Usuario que edita (todavia no hay login)
+     * @param string $usuario Usuario que edita
      * @return bool True si se guardo correctamente
      */
-    public function saveMixCobro($id, $porcentaje, $diasAcreditacion, $activo = true, $usuario = null) {
+    public function saveMixCobro($id, $porcentaje, $diasAcreditacion, $activo, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $cid = $this->conn->conectar('central');
 
         if (!$cid) {
@@ -1070,17 +1128,18 @@ class Parametros {
         }
 
         $sql = "UPDATE RO_T_CASHFLOW_VENTAS_MIX
-                SET PORCENTAJE = ?, DIAS_ACREDITACION = ?, ACTIVO = ?,
-                    FECHA_UPDATE = GETDATE(), USUARIO = ?
+                SET PORCENTAJE = ?, DIAS_ACREDITACION = ?, " . Auditoria::sqlBajaSegunEstado('ACTIVO') . ",
+                    ACTIVO = ?, " . Auditoria::SET_MODIF . "
                 WHERE ID = ?";
 
-        $params = [
+        $params = array_merge([
             floatval($porcentaje),
-            intval($diasAcreditacion),
+            intval($diasAcreditacion)
+        ], Auditoria::paramsBajaSegunEstado($activo, $usuario), [
             $activo ? 1 : 0,
             $usuario,
             intval($id)
-        ];
+        ]);
 
         $stmt = sqlsrv_query($cid, $sql, $params);
 
@@ -1103,10 +1162,11 @@ class Parametros {
      * @param string $canal Canal del modelo
      * @param string $medioPago Nombre del medio de pago
      * @param int $diasAcreditacion Dias hasta la acreditacion
-     * @param string|null $usuario Usuario que edita (todavia no hay login)
+     * @param string $usuario Usuario que edita
      * @return int ID de la fila creada
      */
-    public function addMixCobro($canal, $medioPago, $diasAcreditacion, $usuario = null) {
+    public function addMixCobro($canal, $medioPago, $diasAcreditacion, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $canal = trim($canal);
         $medioPago = trim($medioPago);
 
@@ -1169,11 +1229,11 @@ class Parametros {
 
         $sql = "INSERT INTO RO_T_CASHFLOW_VENTAS_MIX
                     (CANAL, MEDIO_PAGO, PORCENTAJE, DIAS_ACREDITACION, ACTIVO, ORDEN,
-                     FECHA_UPDATE, USUARIO)
+                     USUARIO_ALTA, USUARIO_MODIF)
                 OUTPUT INSERTED.ID
-                VALUES (?, ?, 0, ?, 0, ?, GETDATE(), ?)";
+                VALUES (?, ?, 0, ?, 0, ?, ?, ?)";
 
-        $stmt = sqlsrv_query($cid, $sql, [$canal, $medioPago, $dias, $orden, $usuario]);
+        $stmt = sqlsrv_query($cid, $sql, [$canal, $medioPago, $dias, $orden, $usuario, $usuario]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al agregar el medio de pago'));
@@ -1553,10 +1613,11 @@ class Parametros {
      *
      * @param string $codAgrup Grupo empresario, o el cliente si no tiene grupo
      * @param int|null $pppManual Valor, o null/vacio para volver al calculado
-     * @param string|null $usuario
+     * @param string $usuario
      * @return bool
      */
-    public function savePPPManualGrupo($codAgrup, $pppManual, $usuario = null) {
+    public function savePPPManualGrupo($codAgrup, $pppManual, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $cid = $this->conn->conectar('central');
         if (!$cid) {
             throw new Exception('No se pudo conectar a la base de datos central');
@@ -1589,13 +1650,14 @@ class Parametros {
 
         if ($exists) {
             $sql = "UPDATE RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO
-                    SET PPP_MANUAL = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                    SET PPP_MANUAL = ?, " . Auditoria::SET_MODIF . "
                     WHERE COD_AGRUP = ?";
             $params = [$val, $usuario, $agrup];
         } else {
-            $sql = "INSERT INTO RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO (COD_AGRUP, PPP_MANUAL, FECHA_UPDATE, USUARIO)
-                    VALUES (?, ?, GETDATE(), ?)";
-            $params = [$agrup, $val, $usuario];
+            $sql = "INSERT INTO RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO
+                        (COD_AGRUP, PPP_MANUAL, USUARIO_ALTA, USUARIO_MODIF)
+                    VALUES (?, ?, ?, ?)";
+            $params = [$agrup, $val, $usuario, $usuario];
         }
 
         $stmt = sqlsrv_query($cid, $sql, $params);
@@ -1612,10 +1674,19 @@ class Parametros {
      * 
      * @param string $codCliente Código de cliente
      * @param string $medioPago Medio de pago ('ECHEQ', 'TRANSFERENCIA')
-     * @param string|null $usuario Usuario que realiza la acción
+     * LA TABLA NO ES DE ESTE MODULO: la escribe tambien Tesoreria
+     * (administracion/tesoreria/cobranzas). Por eso se sigue escribiendo
+     * FECHA_MOD, que alla se lee, ademas de las columnas de auditoria, y las
+     * fechas nuevas van explicitas: sql/cashflow_auditoria_usuario.sql les
+     * agrega las columnas SIN DEFAULT para no cambiar lo que hace el otro
+     * sistema.
+     *
+     * @param string $usuario Usuario que realiza la acción
      * @return bool True si se guardó
      */
-    public function saveMedioPagoCliente($codCliente, $medioPago, $usuario = null) {
+    public function saveMedioPagoCliente($codCliente, $medioPago, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         $cid = $this->conn->conectar('central');
         if (!$cid) {
             throw new Exception('No se pudo conectar a la base de datos central');
@@ -1632,13 +1703,15 @@ class Parametros {
 
         if ($exists) {
             $sql = "UPDATE RO_T_PARAMETROS_DESC_CLIENTES 
-                    SET MEDIO_PAGO_DEFAULT = ?, FECHA_MOD = GETDATE() 
+                    SET MEDIO_PAGO_DEFAULT = ?, FECHA_MOD = GETDATE(), " . Auditoria::SET_MODIF . "
                     WHERE COD_CLIENT = ?";
-            $params = [$medio, $cod];
+            $params = [$medio, $usuario, $cod];
         } else {
-            $sql = "INSERT INTO RO_T_PARAMETROS_DESC_CLIENTES (COD_CLIENT, PPP_MANUAL, DIAS_PP_MAX, DESC_PP_MAX, MEDIO_PAGO_DEFAULT, FECHA_MOD) 
-                    VALUES (?, NULL, 30, 0.08, ?, GETDATE())";
-            $params = [$cod, $medio];
+            $sql = "INSERT INTO RO_T_PARAMETROS_DESC_CLIENTES
+                        (COD_CLIENT, PPP_MANUAL, DIAS_PP_MAX, DESC_PP_MAX, MEDIO_PAGO_DEFAULT, FECHA_MOD,
+                         USUARIO_ALTA, FECHA_ALTA, USUARIO_MODIF, FECHA_MODIF)
+                    VALUES (?, NULL, 30, 0.08, ?, GETDATE(), ?, GETDATE(), ?, GETDATE())";
+            $params = [$cod, $medio, $usuario, $usuario];
         }
 
         $stmt = sqlsrv_query($cid, $sql, $params);
@@ -1669,6 +1742,41 @@ class Parametros {
      *
      * @return array Lista de tramos ordenados por dias_desde
      */
+    /**
+     * Quien cargo la escala vigente y cuando, para la pantalla.
+     *
+     * APARTE DE getEscalaDescuentoGeneral(), que es la que lee el motor: esa
+     * devuelve vacio si la consulta falla -y sin escala se proyecta con 0% de
+     * descuento-, asi que no se le suma nada que la pueda hacer fallar. La escala
+     * se reemplaza entera en cada guardado, asi que todos sus tramos tienen el
+     * mismo alta: alcanza con uno.
+     *
+     * @return array|null ['usuario', 'fecha']
+     */
+    public function getAuditoriaEscala() {
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            return null;
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT TOP 1 USUARIO_ALTA, FECHA_ALTA FROM RO_T_CASHFLOW_COBRANZAS_ESCALA_DESC
+             WHERE ACTIVO = 1 ORDER BY FECHA_ALTA DESC");
+
+        $row = ($stmt === false) ? null : sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+
+        if (!$row) {
+            return null;
+        }
+
+        return [
+            'usuario' => $row['USUARIO_ALTA'],
+            'fecha' => ($row['FECHA_ALTA'] instanceof DateTime)
+                ? $row['FECHA_ALTA']->format('Y-m-d H:i:s') : $row['FECHA_ALTA']
+        ];
+    }
+
     public function getEscalaDescuentoGeneral() {
         require_once __DIR__ . '/Ingresos.php';
 
@@ -1685,10 +1793,11 @@ class Parametros {
      * pantalla: es el mismo criterio del editor de estructura del tablero.
      *
      * @param array $tramos Lista con dias_desde, dias_hasta, porcentaje_desc
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array La escala guardada
      */
-    public function saveEscalaDescuentoGeneral($tramos, $usuario = null) {
+    public function saveEscalaDescuentoGeneral($tramos, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         require_once __DIR__ . '/Ingresos.php';
 
         $lista = is_array($tramos) ? array_values($tramos) : [];
@@ -1723,9 +1832,9 @@ class Parametros {
             // auditar con que porcentajes se proyecto hasta hoy.
             $stmt = sqlsrv_query($cid,
                 "UPDATE RO_T_CASHFLOW_COBRANZAS_ESCALA_DESC
-                 SET ACTIVO = 0, USUARIO = ?, FECHA_MOD = GETDATE()
+                 SET ACTIVO = 0, " . Auditoria::SET_BAJA . "
                  WHERE ACTIVO = 1",
-                [$usuario]);
+                [$usuario, $usuario]);
 
             if ($stmt === false) {
                 throw new Exception($this->errorSql('Error al dar de baja la escala anterior'));
@@ -1736,10 +1845,10 @@ class Parametros {
             foreach ($lista as $t) {
                 $stmt = sqlsrv_query($cid,
                     "INSERT INTO RO_T_CASHFLOW_COBRANZAS_ESCALA_DESC
-                        (DIAS_DESDE, DIAS_HASTA, PORCENTAJE_DESC, ACTIVO, USUARIO, FECHA_MOD)
-                     VALUES (?, ?, ?, 1, ?, GETDATE())",
+                        (DIAS_DESDE, DIAS_HASTA, PORCENTAJE_DESC, ACTIVO, USUARIO_ALTA, USUARIO_MODIF)
+                     VALUES (?, ?, ?, 1, ?, ?)",
                     [intval($t['dias_desde']), intval($t['dias_hasta']),
-                     floatval($t['porcentaje_desc']), $usuario]);
+                     floatval($t['porcentaje_desc']), $usuario, $usuario]);
 
                 if ($stmt === false) {
                     throw new Exception($this->errorSql('Error al guardar un tramo de la escala'));

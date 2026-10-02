@@ -342,7 +342,7 @@
             var i = ins[par[0]] || {};
             var texto = i.al ? par[1] + ' al ' + i.al : par[1] + ': sin calcular';
             var ayuda = i.al
-                ? 'Calculado' + (i.usuario ? ' por ' + i.usuario : '') +
+                ? 'Calculado' + (i.usuario ? ' por ' + Auditoria.quien(i.usuario) : '') +
                   (i.filas !== null && i.filas !== undefined ? ' · ' + i.filas + ' filas' : '')
                 : 'Nunca corrió su job: la fila va en cero.';
             var clase = (!i.al) ? 'text-danger' : (i.fallo ? 'text-danger' : 'text-muted');
@@ -532,8 +532,8 @@
         var ayuda = e.ayuda;
 
         if (m.estado === 'AJUSTADO' && m.ajuste) {
-            ayuda += ' Cargado' + (m.ajuste.usuario ? ' por ' + m.ajuste.usuario : '') +
-                (m.ajuste.fecha ? ' el ' + fecha(m.ajuste.fecha) : '') + '.';
+            // Quién y cuándo, con el formato de Js/auditoria.js
+            ayuda += ' ' + Auditoria.linea('alta', m.ajuste.usuario, m.ajuste.fecha) + '.';
 
             if (m.ajuste.motivo) { ayuda += ' Motivo: ' + m.ajuste.motivo; }
         }
@@ -620,6 +620,17 @@
      * para no ofrecer algo que va a fallar.
      */
     function botonAjuste(m) {
+        /* SIN PERMISO DE EDICION, el boton abre el historial y nada mas, y
+           solo donde hay algo que ver: el modal se dibuja sin el formulario.
+           Ver Js/permisos.js. */
+        if (!Permisos.puedeEditar('tablaComprasProy')) {
+            return (m.ajuste || m.estado === 'AJUSTE_DESCARTADO')
+                ? '<button class="btn btn-sm btn-outline-secondary" data-ajuste-mes="' + esc(m.mes) +
+                    '" title="Ver el historial de ajustes de este mes">' +
+                    '<i class="fas fa-clock-rotate-left"></i></button>'
+                : '';
+        }
+
         if (!m.version) {
             return '<button class="btn btn-sm btn-outline-secondary" disabled ' +
                 'title="Este mes no tiene versión oficial de presupuesto, así que no hay a qué ' +

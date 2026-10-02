@@ -155,7 +155,8 @@
                 '<td>' +
                     '<a href="#" class="fw-semibold text-decoration-none" data-detalle="' +
                         esc(f.cod_provee) + '">' + esc(f.nombre || f.cod_provee) + '</a>' +
-                    '<div><small class="text-muted">' + esc(f.cod_provee) + '</small></div>' +
+                    '<div><small class="text-muted">' + esc(f.cod_provee) + '</small>' +
+                        Auditoria.icono({ usuario: f.usuario, fecha: f.fecha_modif }) + '</div>' +
                 '</td>' +
                 celdaNum(f.cod_provee, 'horas', f.horas_mes, '0.5', 'Horas por mes') +
                 celdaNum(f.cod_provee, 'valor_hora', f.valor_hora_base, '0.01',
@@ -207,7 +208,20 @@
             ? '<span class="text-muted">—</span>' : importe(v);
     }
 
+    /* Sin permiso de edicion, las horas, el valor hora y el mes base son
+       texto: se ven igual, sin el input. Ver Js/permisos.js. */
+    function puedeEditar() {
+        return Permisos.puedeEditar(document.querySelector('.tab-logistica_local'));
+    }
+
     function celdaNum(cod, campo, valor, paso, titulo) {
+        if (!puedeEditar()) {
+            return '<td class="text-end" title="' + esc(titulo) + '">' +
+                (valor === null ? '<span class="text-muted">—</span>'
+                    : Number(valor).toLocaleString('es-AR', { maximumFractionDigits: 2 })) +
+                '</td>';
+        }
+
         return '<td class="text-end">' +
             '<input type="number" step="' + paso + '" min="0" ' +
                 'class="form-control form-control-sm text-end log-edit" ' +
@@ -218,6 +232,13 @@
     }
 
     function celdaMes(cod, mesBase) {
+        if (!puedeEditar()) {
+            var p = (mesBase || '').split('-');
+
+            return '<td class="text-center">' + (p.length === 2 ? (p[1] + '/' + p[0])
+                : '<span class="text-muted">—</span>') + '</td>';
+        }
+
         return '<td class="text-center">' +
             '<input type="month" class="form-control form-control-sm log-edit" ' +
                 'data-cod="' + esc(cod) + '" data-campo="mes_base" ' +

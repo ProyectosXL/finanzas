@@ -5,6 +5,8 @@ require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/EjeVista.php';
 require_once __DIR__ . '/Cotizacion.php';
 require_once __DIR__ . '/Echeqs.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * Ventas
@@ -240,7 +242,7 @@ class Ventas {
             throw new Exception('No se pudo conectar a la base de datos');
         }
 
-        $sql = "SELECT ANIO, MES, INDICE, FECHA_UPDATE, USUARIO
+        $sql = "SELECT ANIO, MES, INDICE, FECHA_MODIF AS FECHA_UPDATE, USUARIO_MODIF AS USUARIO
                 FROM RO_T_CASHFLOW_VENTAS_INDICE
                 ORDER BY ANIO, MES";
 
@@ -273,10 +275,11 @@ class Ventas {
      * @param int $anio Anio del mes
      * @param int $mes Numero de mes (1-12)
      * @param float $indice Indice de variacion (0.10 = +10%)
-     * @param string|null $usuario Usuario que edita (todavia no hay login)
+     * @param string $usuario Usuario que edita
      * @return bool True si se guardo correctamente
      */
-    public function saveIndice($anio, $mes, $indice, $usuario = null) {
+    public function saveIndice($anio, $mes, $indice, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $cid = $this->conn->conectar('central');
 
         if (!$cid) {
@@ -302,14 +305,14 @@ class Ventas {
 
         if ($exists) {
             $sql = "UPDATE RO_T_CASHFLOW_VENTAS_INDICE
-                    SET INDICE = ?, FECHA_UPDATE = GETDATE(), USUARIO = ?
+                    SET INDICE = ?, " . Auditoria::SET_MODIF . "
                     WHERE ANIO = ? AND MES = ?";
             $params = [floatval($indice), $usuario, $anio, $mes];
         } else {
             $sql = "INSERT INTO RO_T_CASHFLOW_VENTAS_INDICE
-                        (ANIO, MES, INDICE, FECHA_UPDATE, USUARIO)
-                    VALUES (?, ?, ?, GETDATE(), ?)";
-            $params = [$anio, $mes, floatval($indice), $usuario];
+                        (ANIO, MES, INDICE, USUARIO_ALTA, USUARIO_MODIF)
+                    VALUES (?, ?, ?, ?, ?)";
+            $params = [$anio, $mes, floatval($indice), $usuario, $usuario];
         }
 
         $stmt = sqlsrv_query($cid, $sql, $params);
@@ -336,7 +339,7 @@ class Ventas {
         }
 
         $sql = "SELECT TIPO, ANIO, MES, CANAL, PORCENTAJE_CALC, PORCENTAJE_EDIT,
-                       FECHA_UPDATE, USUARIO
+                       FECHA_MODIF AS FECHA_UPDATE, USUARIO_MODIF AS USUARIO
                 FROM RO_T_CASHFLOW_VENTAS_PARTIC";
         $params = [];
 
@@ -385,10 +388,11 @@ class Ventas {
      * @param int $anio Anio de anclaje
      * @param int $mes Mes de anclaje
      * @param array $valores Mapa CANAL => ['calc' => float, 'edit' => float|null]
-     * @param string|null $usuario Usuario que edita (todavia no hay login)
+     * @param string $usuario Usuario que edita
      * @return bool True si se guardo correctamente
      */
-    public function saveParticipacion($tipo, $anio, $mes, $valores, $usuario = null) {
+    public function saveParticipacion($tipo, $anio, $mes, $valores, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         if (!in_array($tipo, ['TRAMO28', 'MENSUAL'])) {
             throw new Exception('Tipo de participacion invalido: ' . $tipo);
         }
@@ -449,15 +453,15 @@ class Ventas {
             if ($exists) {
                 $sql = "UPDATE RO_T_CASHFLOW_VENTAS_PARTIC
                         SET PORCENTAJE_CALC = ?, PORCENTAJE_EDIT = ?,
-                            FECHA_UPDATE = GETDATE(), USUARIO = ?
+                            " . Auditoria::SET_MODIF . "
                         WHERE TIPO = ? AND ANIO = ? AND MES = ? AND CANAL = ?";
                 $params = [$calc, $edit, $usuario, $tipo, $anio, $mes, $canal];
             } else {
                 $sql = "INSERT INTO RO_T_CASHFLOW_VENTAS_PARTIC
                             (TIPO, ANIO, MES, CANAL, PORCENTAJE_CALC, PORCENTAJE_EDIT,
-                             FECHA_UPDATE, USUARIO)
-                        VALUES (?, ?, ?, ?, ?, ?, GETDATE(), ?)";
-                $params = [$tipo, $anio, $mes, $canal, $calc, $edit, $usuario];
+                             USUARIO_ALTA, USUARIO_MODIF)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                $params = [$tipo, $anio, $mes, $canal, $calc, $edit, $usuario, $usuario];
             }
 
             $stmt = sqlsrv_query($cid, $sql, $params);
@@ -482,19 +486,6 @@ class Ventas {
     }
 
     /**
-     * Guarda una fila del mix de cobro
-     * @param int $id ID de la fila
-     * @param float $porcentaje Porcentaje del mix (0 a 1)
-     * @param int $diasAcreditacion Dias hasta la acreditacion
-     * @param bool $activo Si el medio se usa en la proyeccion
-     * @param string|null $usuario Usuario que edita (todavia no hay login)
-     * @return bool True si se guardo correctamente
-     */
-    public function saveMixCobro($id, $porcentaje, $diasAcreditacion, $activo = true, $usuario = null) {
-        return $this->parametros->saveMixCobro($id, $porcentaje, $diasAcreditacion, $activo, $usuario);
-    }
-
-    /**
      * Parametros generales del modulo
      * @param string|null $grupo Grupo a filtrar
      * @param string|null $modulo Modulo a filtrar
@@ -502,17 +493,6 @@ class Ventas {
      */
     public function getParametros($grupo = null, $modulo = null) {
         return $this->parametros->getParametros($grupo, $modulo);
-    }
-
-    /**
-     * Guarda un parametro
-     * @param string $clave Clave del parametro
-     * @param string $valor Valor a guardar
-     * @param string|null $usuario Usuario que edita (todavia no hay login)
-     * @return bool True si se guardo correctamente
-     */
-    public function saveParametro($clave, $valor, $usuario = null) {
-        return $this->parametros->saveParametro($clave, $valor, $usuario);
     }
 
     /**
@@ -1306,7 +1286,11 @@ class Ventas {
             $resultado[$canal] = [
                 'calc' => isset($calc[$canal]) ? $calc[$canal] : 0,
                 'edit' => $edit,
-                'efectivo' => ($edit === null) ? (isset($calc[$canal]) ? $calc[$canal] : 0) : $edit
+                'efectivo' => ($edit === null) ? (isset($calc[$canal]) ? $calc[$canal] : 0) : $edit,
+
+                // Quien la edito y cuando (Js/auditoria.js)
+                'usuario' => isset($edits[$canal]) ? $edits[$canal]['USUARIO'] : null,
+                'fecha' => isset($edits[$canal]) ? $edits[$canal]['FECHA_UPDATE'] : null
             ];
         }
 
@@ -1648,9 +1632,14 @@ class Ventas {
         // atras respecto del mes proyectado.
         $hist = $this->historicoIndexado();
         $indices = [];
+        $indicesAud = [];
 
         foreach ($this->getIndices() as $row) {
-            $indices[sprintf('%04d-%02d', $row['ANIO'], $row['MES'])] = $row['INDICE'];
+            $clave = sprintf('%04d-%02d', $row['ANIO'], $row['MES']);
+            $indices[$clave] = $row['INDICE'];
+
+            // Quien lo edito y cuando, para el tooltip de la celda (Js/auditoria.js)
+            $indicesAud[$clave] = ['usuario' => $row['USUARIO'], 'fecha' => $row['FECHA_UPDATE']];
         }
 
         /* ---- 1. Proyeccion por mes --------------------------------------- */
@@ -1683,6 +1672,8 @@ class Ventas {
                 'variacion' => $b['variacion'],
                 'indice' => $b['indice'],
                 'indice_editado' => isset($indices[$b['clave']]),
+                'indice_usuario' => isset($indicesAud[$b['clave']]) ? $indicesAud[$b['clave']]['usuario'] : null,
+                'indice_fecha' => isset($indicesAud[$b['clave']]) ? $indicesAud[$b['clave']]['fecha'] : null,
                 // Paso intermedio: ya tiene el indice aplicado pero todavia no
                 // el IVA. Es lo que hace visible de donde sale la diferencia
                 // entre el neto del anio anterior y la venta proyectada.

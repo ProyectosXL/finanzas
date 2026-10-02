@@ -5,6 +5,8 @@
 // DateTime y no un string.
 require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/Cotizacion.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * Ingresos
@@ -572,7 +574,8 @@ class Ingresos {
      * Por eso no hay filtro por cliente: quien llama ya trae su propia lista de
      * comprobantes y busca en este mapa los que le tocan.
      *
-     * @return array Mapa 'T_COMP|N_COMP' => ['fecha' => 'Y-m-d', 'usuario' => ...]
+     * @return array Mapa 'T_COMP|N_COMP' => ['fecha' => 'Y-m-d', 'usuario' => ...,
+     *               'fecha_modif' => 'Y-m-d H:i:s']
      */
     public function getFechasManuales() {
         $cid = $this->conn->conectar('central');
@@ -581,7 +584,7 @@ class Ingresos {
             return [];
         }
 
-        $sql = "SELECT COD_CLIENTE, T_COMP, N_COMP, FECHA_COBRO, USUARIO
+        $sql = "SELECT COD_CLIENTE, T_COMP, N_COMP, FECHA_COBRO, USUARIO_MODIF, FECHA_MODIF
                 FROM RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL";
 
         $stmt = sqlsrv_query($cid, $sql);
@@ -601,7 +604,9 @@ class Ingresos {
             $mapa[$clave] = [
                 'fecha' => Horizonte::normalizarFecha($row['FECHA_COBRO']),
                 'cod_cliente' => strtoupper(trim($row['COD_CLIENTE'])),
-                'usuario' => $row['USUARIO']
+                'usuario' => $row['USUARIO_MODIF'],
+                'fecha_modif' => ($row['FECHA_MODIF'] instanceof DateTime)
+                    ? $row['FECHA_MODIF']->format('Y-m-d H:i:s') : $row['FECHA_MODIF']
             ];
         }
 
@@ -621,10 +626,11 @@ class Ingresos {
      * @param string $tComp
      * @param string $nComp
      * @param string $fecha 'Y-m-d'
-     * @param string|null $usuario
+     * @param string $usuario
      * @return string La fecha guardada, normalizada
      */
-    public function saveFechaManual($codCliente, $tComp, $nComp, $fecha, $usuario = null) {
+    public function saveFechaManual($codCliente, $tComp, $nComp, $fecha, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $cod = strtoupper(trim($codCliente));
         $t = strtoupper(trim($tComp));
         $n = strtoupper(trim($nComp));
@@ -643,7 +649,7 @@ class Ingresos {
         // Un UPDATE que no toca ninguna fila y despues un INSERT: la unicidad
         // esta en (T_COMP, N_COMP), asi que no puede quedar duplicado.
         $sql = "UPDATE RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL
-                SET FECHA_COBRO = ?, COD_CLIENTE = ?, USUARIO = ?, FECHA_MOD = GETDATE()
+                SET FECHA_COBRO = ?, COD_CLIENTE = ?, " . Auditoria::SET_MODIF . "
                 WHERE T_COMP = ? AND N_COMP = ?";
 
         $stmt = sqlsrv_query($cid, $sql, [$f, $cod, $usuario, $t, $n]);
@@ -660,10 +666,10 @@ class Ingresos {
         }
 
         $sql = "INSERT INTO RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL
-                    (COD_CLIENTE, T_COMP, N_COMP, FECHA_COBRO, USUARIO)
-                VALUES (?, ?, ?, ?, ?)";
+                    (COD_CLIENTE, T_COMP, N_COMP, FECHA_COBRO, USUARIO_ALTA, USUARIO_MODIF)
+                VALUES (?, ?, ?, ?, ?, ?)";
 
-        $stmt = sqlsrv_query($cid, $sql, [$cod, $t, $n, $f, $usuario]);
+        $stmt = sqlsrv_query($cid, $sql, [$cod, $t, $n, $f, $usuario, $usuario]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSqlIngresos('Error al guardar la fecha de cobro'));
@@ -681,6 +687,10 @@ class Ingresos {
      * proposito: la fila no es un dato de negocio historico sino un override
      * puntual, y su baja logica seria indistinguible de no tenerla. Lo que el
      * modulo no borra son los importes y la configuracion del tablero.
+     *
+     * POR ESO NO RECIBE USUARIO: no queda fila donde anotarlo. El borrado no
+     * deja rastro de quien lo hizo; esta anotado como pendiente en
+     * README-cashflow.md ("Auditoria y permisos de escritura").
      *
      * @param string $tComp
      * @param string $nComp
@@ -1228,6 +1238,9 @@ class Ingresos {
                 'COBRO_ORIGINAL' => $ubic['original'],
                 'VENCIDA' => $ubic['vencida'],
                 'FECHA_MANUAL' => $cobro['manual'],
+                // Quien la cargo y cuando, para el tooltip de la celda (Js/auditoria.js)
+                'MANUAL_USUARIO' => $cobro['manual'] ? $fechasManuales[$key]['usuario'] : null,
+                'MANUAL_FECHA' => $cobro['manual'] ? $fechasManuales[$key]['fecha_modif'] : null,
                 'TIPO_REGISTRO' => 'PROYECCION' // Distintivo para pintar en amarillo
             ];
         }
@@ -1723,6 +1736,9 @@ class Ingresos {
                 'COBRO_ORIGINAL' => $ubic['original'],
                 'VENCIDA' => $ubic['vencida'],
                 'FECHA_MANUAL' => $cobro['manual'],
+                // Quien la cargo y cuando, para el tooltip de la celda (Js/auditoria.js)
+                'MANUAL_USUARIO' => $cobro['manual'] ? $fechasManuales[$key]['usuario'] : null,
+                'MANUAL_FECHA' => $cobro['manual'] ? $fechasManuales[$key]['fecha_modif'] : null,
                 'TIPO_REGISTRO' => 'PROYECCION',
                 // El plazo del parámetro, para poder auditar la proyección
                 // automática aunque la fila tenga fecha manual.

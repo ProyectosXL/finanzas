@@ -27,15 +27,6 @@ if (session_status() === PHP_SESSION_NONE) {
 
 header('Content-Type: application/json');
 
-/**
- * Usuario que realiza la edicion.
- * Todavia no hay login: devuelve NULL y se graba NULL.
- * @return string|null
- */
-function usuarioActual() {
-    return isset($_SESSION['usuario']) ? $_SESSION['usuario'] : null;
-}
-
 /** @return array El cuerpo JSON del request */
 function bodyJson() {
     $data = json_decode(file_get_contents('php://input'), true);
@@ -55,6 +46,12 @@ try {
     require_once __DIR__ . '/../Class/ProveedoresTango.php';
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
+
+    /* Quien escribe y si puede, antes de tocar nada: null en las acciones
+       que solo leen. Ver Controller/autorizacion.php. */
+    require_once __DIR__ . '/autorizacion.php';
+    $usuario = autorizar('Logistica', $action);
+
     $log = new Logistica();
 
     switch ($action) {
@@ -163,7 +160,7 @@ try {
                 'horas' => isset($data['horas']) ? $data['horas'] : null,
                 'valor_hora' => isset($data['valor_hora']) ? $data['valor_hora'] : null,
                 'mes_base' => isset($data['mes_base']) ? $data['mes_base'] : null
-            ], usuarioActual());
+            ], $usuario);
 
             $mensaje = $r['nuevo']
                 ? ('Fletero dado de alta: ' . $r['nombre'] . ' (' . $r['cod_provee'] . ').')
@@ -200,7 +197,7 @@ try {
             }
 
             $r = $log->activarFletero($data['cod_provee'], !empty($data['activo']),
-                usuarioActual());
+                $usuario);
 
             echo json_encode([
                 'success' => true,

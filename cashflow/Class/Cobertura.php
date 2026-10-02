@@ -3,6 +3,8 @@
 require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/Cotizacion.php';
 require_once __DIR__ . '/Fondos.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * Cobertura
@@ -281,7 +283,7 @@ class Cobertura {
 
         $cid = $this->conectar();
 
-        $sql = "SELECT a.FECHA, a.IMPORTE, a.ORIGEN, a.OBSERVACION, a.USUARIO, a.FECHA_ALTA, "
+        $sql = "SELECT a.FECHA, a.IMPORTE, a.ORIGEN, a.OBSERVACION, a.USUARIO_ALTA, a.FECHA_ALTA, "
                      . $this->monedaSql() . " AS MONEDA,
                        (SELECT COUNT(*)
                           FROM dbo." . self::TABLA . " h
@@ -305,7 +307,7 @@ class Cobertura {
                 'MONEDA' => self::monedaValida($row['MONEDA']),
                 'ORIGEN' => (string) $row['ORIGEN'],
                 'OBSERVACION' => (string) $row['OBSERVACION'],
-                'USUARIO' => $row['USUARIO'],
+                'USUARIO' => $row['USUARIO_ALTA'],
                 'FECHA_ALTA' => $this->fechaHora($row['FECHA_ALTA']),
                 'VERSIONES' => intval($row['VERSIONES'])
             ];
@@ -464,7 +466,8 @@ class Cobertura {
             $args[] = strtoupper(trim((string) $origen));
         }
 
-        $sql = "SELECT ID, FECHA, IMPORTE, ORIGEN, OBSERVACION, VIGENTE, USUARIO, FECHA_ALTA
+        $sql = "SELECT ID, FECHA, IMPORTE, ORIGEN, OBSERVACION, VIGENTE, USUARIO_ALTA, FECHA_ALTA,
+                       USUARIO_BAJA, FECHA_BAJA
                 FROM dbo." . self::TABLA . "
                 WHERE FECHA = ?" . $filtro . "
                 ORDER BY ID DESC";
@@ -485,8 +488,10 @@ class Cobertura {
                 'ORIGEN' => (string) $row['ORIGEN'],
                 'OBSERVACION' => (string) $row['OBSERVACION'],
                 'VIGENTE' => intval($row['VIGENTE']),
-                'USUARIO' => $row['USUARIO'],
-                'FECHA_ALTA' => $this->fechaHora($row['FECHA_ALTA'])
+                'USUARIO' => $row['USUARIO_ALTA'],
+                'FECHA_ALTA' => $this->fechaHora($row['FECHA_ALTA']),
+                'USUARIO_BAJA' => $row['USUARIO_BAJA'],
+                'FECHA_BAJA' => $this->fechaHora($row['FECHA_BAJA'])
             ];
         }
 
@@ -530,11 +535,12 @@ class Cobertura {
      * @param string|null $origen Clave de una cuenta de fondo (Fondos::claveFondo());
      *        null toma la primera cuenta en pesos del catalogo
      * @param string|null $observacion
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['fecha', 'importe', 'moneda', 'origen', 'piso' => bool]
      */
-    public function guardar($fecha, $importe, $origen = null, $observacion = null,
-                           $usuario = null) {
+    public function guardar($fecha, $importe, $origen, $observacion, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablaCreada()) {
             throw new Exception('Todavía no existe la tabla de aplicación de cobertura. '
                 . 'Corré sql/cashflow_cobertura.sql contra la base central.');
@@ -559,9 +565,9 @@ class Cobertura {
         self::validarDisponible($monto, $saldo, $this->getAplicaciones(), $f, $org,
             $origenes[$org]['nombre'], $mon);
 
-        $cols = 'FECHA, IMPORTE, ORIGEN, OBSERVACION, VIGENTE, USUARIO';
-        $vals = '?, ?, ?, ?, 1, ?';
-        $args = [$f, $monto, $org, $obs, $usuario];
+        $cols = 'FECHA, IMPORTE, ORIGEN, OBSERVACION, VIGENTE, USUARIO_ALTA, USUARIO_MODIF';
+        $vals = '?, ?, ?, ?, 1, ?, ?';
+        $args = [$f, $monto, $org, $obs, $usuario, $usuario];
 
         if ($this->tieneMoneda()) {
             $cols .= ', MONEDA';
@@ -576,7 +582,7 @@ class Cobertura {
         }
 
         try {
-            $piso = $this->bajaVigentes($cid, $f, $org);
+            $piso = $this->bajaVigentes($cid, $f, $org, $usuario);
 
             $stmt = sqlsrv_query($cid,
                 "INSERT INTO dbo." . self::TABLA . " (" . $cols . ") VALUES (" . $vals . ")",
@@ -614,9 +620,12 @@ class Cobertura {
      *
      * @param string $fecha 'Y-m-d'
      * @param string|null $origen Clave de fondo; null toma el defecto, como guardar()
+     * @param string $usuario
      * @return bool Si habia algo que dar de baja
      */
-    public function borrar($fecha, $origen = null) {
+    public function borrar($fecha, $origen, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablaCreada()) {
             throw new Exception('Todavía no existe la tabla de aplicación de cobertura.');
         }
@@ -624,16 +633,16 @@ class Cobertura {
         $f = self::validarFecha($fecha);
         $org = $this->validarOrigen($origen);
 
-        return $this->bajaVigentes($this->conectar(), $f, $org);
+        return $this->bajaVigentes($this->conectar(), $f, $org, $usuario);
     }
 
     /** Marca VIGENTE = 0 las cargas vigentes de una fecha y un fondo. @return bool si habia alguna */
-    private function bajaVigentes($cid, $fecha, $origen) {
+    private function bajaVigentes($cid, $fecha, $origen, $usuario) {
         $stmt = sqlsrv_query($cid,
             "UPDATE dbo." . self::TABLA . "
-             SET VIGENTE = 0, FECHA_BAJA = GETDATE()
+             SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
              WHERE FECHA = ? AND ORIGEN = ? AND VIGENTE = 1",
-            [$fecha, $origen]);
+            [$usuario, $usuario, $fecha, $origen]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al dar de baja la cobertura anterior'));

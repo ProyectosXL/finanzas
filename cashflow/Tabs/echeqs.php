@@ -1,4 +1,10 @@
-<?php $tabName = 'Echeqs'; ?>
+<?php
+$tabName = 'Echeqs';
+
+/* Sin permiso de edicion los controles de escritura no se dibujan. Es
+   comodidad: lo que frena una escritura es el 403 del servidor. */
+$edita = AuthCashflow::puedeEditar('echeqs');
+?>
 <link rel="stylesheet" href="Css/Ingresos-Echeqs.css?v=<?php echo time(); ?>">
 
 <!--
@@ -27,7 +33,7 @@
     La segunda se pide recién cuando se abre: depende de un maestro que puede no
     estar cargado, y no tiene por qué demorar la que se abre primero.
 -->
-<div class="tab-echeqs">
+<div class="tab-echeqs"<?php echo AuthCashflow::atributoEdicion('echeqs'); ?>>
 
     <div id="avisosEcheqs"></div>
 
@@ -188,15 +194,21 @@
                 <div class="d-flex align-items-center gap-3 flex-wrap">
                     <span class="fw-semibold" id="selResumenEch"></span>
                     <div class="d-flex gap-2 ms-auto">
+                        <?php if ($edita): ?>
                         <button class="btn btn-sm btn-outline-danger" id="btnExcluirSelEch">
                             <i class="fas fa-ban me-1"></i> Excluir del cashflow
                         </button>
+                        <?php endif; ?>
+                        <?php if ($edita): ?>
                         <button class="btn btn-sm btn-outline-success" id="btnIncluirSelEch">
                             <i class="fas fa-rotate-left me-1"></i> Volver a incluir
                         </button>
+                        <?php endif; ?>
+                        <?php if ($edita): ?>
                         <button class="btn btn-sm btn-outline-secondary" id="btnLimpiarSelEch">
                             Limpiar selección
                         </button>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -241,9 +253,11 @@
                                      fila —atenuada y con el importe tachado— y
                                      en la marca de esta misma celda. -->
                                 <th rowspan="2" class="text-center" style="width: 46px;">
+                                    <?php if ($edita): ?>
                                     <input type="checkbox" class="form-check-input"
                                            id="selTodosEch"
                                            title="Seleccionar todos los cheques que se están viendo. Con el buscador puesto, son los de ese cliente.">
+                                    <?php endif; ?>
                                 </th>
                                 <th colspan="1" class="table-group-divider" id="ejeHeaderEch">Días</th>
                             </tr>
@@ -468,8 +482,10 @@
                                     <!-- Marca o desmarca TODO LO VISIBLE según el
                                          filtro actual, y dice cuántas filas va a
                                          afectar antes de hacerlo. -->
+                                    <?php if ($edita): ?>
                                     <input type="checkbox" class="form-check-input" id="marcarTodosPre"
                                            title="Marca o desmarca todo lo que se está viendo">
+                                    <?php endif; ?>
                                 </th>
                                 <!-- Se llamaba "Fecha de pago". Con dos columnas
                                      de fecha al lado, el nombre del dato es lo

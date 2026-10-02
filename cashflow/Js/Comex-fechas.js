@@ -127,16 +127,17 @@
     /**
      * El tooltip del rastro: quién movió esta fecha, cuándo y qué decía antes.
      *
-     * SIN LOGIN TODAVÍA, así que el usuario llega null y se dice "desde el
-     * cashflow" sin nombre. Decir "editada por null" sería peor que no decir
-     * quién; la costura ya está puesta para el día que haya login.
+     * Quién y cuándo los dice Js/auditoria.js, igual que en el resto del
+     * módulo. "desde el cashflow" queda SOLO para las filas históricas, de
+     * antes de que se guardara el usuario: decir "editada por null" sería peor
+     * que no decir quién.
      */
     function tooltipRastro(item) {
         var quien = item.EDIT_USUARIO
-            ? escapar(item.EDIT_USUARIO)
+            ? escapar(Auditoria.quien(item.EDIT_USUARIO))
             : 'desde el cashflow';
 
-        var cuando = item.EDIT_FECHA ? fecha(item.EDIT_FECHA) : '';
+        var cuando = item.EDIT_FECHA ? Auditoria.fecha(item.EDIT_FECHA) : '';
 
         return '<div class="fecha-tooltip">'
             + '<span class="fecha-tooltip-label">'
@@ -179,6 +180,25 @@
     }
 
     /**
+     * Las opciones de una celda, con lo editable recortado por el permiso.
+     *
+     * Las pestañas dicen si la celda ES editable -una fecha que se puede
+     * mover, un pago que se puede tildar-; si este usuario PUEDE editarla lo
+     * decide el permiso de la pestaña que esta cargada (Js/permisos.js). Va
+     * aca y no en cada pestaña para que las tres celdas lo apliquen igual.
+     */
+    function conPermiso(opts) {
+        var copia = {};
+
+        Object.keys(opts || {}).forEach(function(k) { copia[k] = opts[k]; });
+
+        copia.editable = !!copia.editable && Permisos.puedeEditar(
+            document.querySelector('.tab-proveedores_exterior, .tab-crono_nacionalizacion'));
+
+        return copia;
+    }
+
+    /**
      * El HTML de una celda de fecha editable.
      *
      * @param {Object} item Fila del payload
@@ -187,7 +207,7 @@
      * @returns {string}
      */
     function celda(item, campo, opts) {
-        opts = opts || {};
+        opts = conPermiso(opts);
 
         var clase = opts.clase || 'fecha-pago';
         var valor = item[EFECTIVA[campo]] || null;
@@ -286,17 +306,18 @@
      * @returns {string}
      */
     function celdaPagado(item, concepto, opts) {
-        opts = opts || {};
+        opts = conPermiso(opts);
 
         var pagado = !!item.PAGADO;
 
         /* Quién lo marcó y cuándo, en el title. Sin eso, una marca puesta en
            marzo que nadie recuerda es indistinguible de un dato del sistema. */
-        var quien = item.PAGADO_USUARIO ? escapar(item.PAGADO_USUARIO) : 'desde el cashflow';
+        var quien = item.PAGADO_USUARIO
+            ? 'por ' + Auditoria.quien(item.PAGADO_USUARIO) : 'desde el cashflow';
         var titulo = pagado
             ? ('Marcado como pagado ' + quien
-                + (item.PAGADO_FECHA ? (' el ' + fecha(item.PAGADO_FECHA)) : '')
-                + (item.PAGADO_OBS ? ('. ' + escapar(item.PAGADO_OBS)) : '')
+                + (item.PAGADO_FECHA ? (' · ' + Auditoria.fecha(item.PAGADO_FECHA)) : '')
+                + (item.PAGADO_OBS ? ('. ' + item.PAGADO_OBS) : '')
                 + '. No entra en la proyección; destildalo para que vuelva.')
             : (opts.editable
                 ? 'Tildá si este pago ya se hizo: sale de la proyección y el tablero deja de '
@@ -619,7 +640,7 @@
      * @returns {string} HTML de la celda
      */
     function celdaCotizacion(item, opts) {
-        opts = opts || {};
+        opts = conPermiso(opts);
 
         var editable = !!opts.editable;
         var detalle = item.COTIZ_DETALLE || '';
@@ -659,6 +680,9 @@
             + ' data-cotiz="' + (item.COTIZ_USD_EDIT === null || item.COTIZ_USD_EDIT === undefined
                 ? '' : item.COTIZ_USD_EDIT) + '"'
             + ' title="' + escapar(detalle
+                + (item.COTIZ_ORIGEN === 'OVERRIDE'
+                    ? ('\n' + Auditoria.linea('modif', item.COTIZ_USUARIO, item.COTIZ_FECHA))
+                    : '')
                 + (editable ? ' Hacé clic para corregirla sólo para este contenedor; '
                     + 'dejala vacía para volver a la curva.' : ''))
             + '"' + (editable && opts.alEditar

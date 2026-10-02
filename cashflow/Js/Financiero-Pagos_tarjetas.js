@@ -313,11 +313,23 @@
             ? '<s>' + plata(f.IMPORTE) + '</s>'
             : plata(f.IMPORTE);
 
-        return '<tr class="' + clases.join(' ') + '" title="' + esc(f.EXPLICACION || '') + '">'
+        // Quién la vinculó o la excluyó, y cuándo (Js/auditoria.js)
+        var aud = [f.VINCULO_FECHA || f.VINCULO_USUARIO
+                ? 'Vinculada a la tarjeta por ' + (Auditoria.quien(f.VINCULO_USUARIO) || 'sin usuario registrado')
+                    + (f.VINCULO_FECHA ? ' · ' + Auditoria.fecha(f.VINCULO_FECHA) : '') : '',
+            f.EXCLUSION_FECHA || f.EXCLUSION_USUARIO
+                ? 'Excluida por ' + (Auditoria.quien(f.EXCLUSION_USUARIO) || 'sin usuario registrado')
+                    + (f.EXCLUSION_FECHA ? ' · ' + Auditoria.fecha(f.EXCLUSION_FECHA) : '') : '']
+            .filter(function(l) { return l !== ''; }).join('\n');
+
+        return '<tr class="' + clases.join(' ') + '" title="'
+            + esc((f.EXPLICACION || '') + (aud ? '\n' + aud : '')) + '">'
             + '<td class="text-center">'
-                + '<input type="checkbox" class="form-check-input tarj-sel" '
+                // Sin permiso no hay que seleccionar: la seleccion es para escribir
+                + Permisos.siEdita('bodyCorp',
+                    '<input type="checkbox" class="form-check-input tarj-sel" '
                     + 'data-clave="' + esc(clave) + '"'
-                    + (seleccion[clave] ? ' checked' : '') + '>'
+                    + (seleccion[clave] ? ' checked' : '') + '>')
             + '</td>'
             + '<td>' + esc(f.COD_PROVEE) + '</td>'
             + '<td class="col-texto">' + esc(f.RAZON_SOC) + '</td>'
@@ -825,20 +837,24 @@
                 + '<td><small>' + esc(r.ORIGEN_NOMBRE) + '</small></td>'
                 + '<td class="text-center">'
                     + (r.ACTIVO
-                        ? '<div class="form-check form-switch d-inline-block">'
-                          + '<input class="form-check-input tarj-pagado" type="checkbox" '
-                          + 'data-id="' + esc(r.ID) + '"' + (r.PAGADO ? ' checked' : '')
-                          + ' title="Marcarlo como pagado lo saca del horizonte"></div>'
+                        ? Permisos.segun('bodyResumenes',
+                            '<div class="form-check form-switch d-inline-block">'
+                            + '<input class="form-check-input tarj-pagado" type="checkbox" '
+                            + 'data-id="' + esc(r.ID) + '"' + (r.PAGADO ? ' checked' : '')
+                            + ' title="Marcarlo como pagado lo saca del horizonte"></div>',
+                            r.PAGADO ? '<i class="fas fa-check text-success" title="Pagado"></i>'
+                                     : '<small class="text-muted">no</small>')
                         : '<small class="text-muted">—</small>')
                 + '</td>'
                 + '<td><small>' + esc(r.OBSERVACION || '') + '</small></td>'
-                + '<td><small class="text-muted">' + esc(r.FECHA_MODIF || '')
-                    + (r.USUARIO_MODIF ? ' — ' + esc(r.USUARIO_MODIF) : '')
-                    + (r.ACTIVO ? '' : '<div>De baja: ' + esc(r.FECHA_BAJA || '')
-                        + (r.USUARIO_BAJA ? ' — ' + esc(r.USUARIO_BAJA) : '') + '</div>')
+                // Quién y cuándo, con el formato de Js/auditoria.js
+                + '<td><small class="text-muted">'
+                    + esc(Auditoria.linea('modif', r.USUARIO_MODIF, r.FECHA_MODIF))
+                    + (r.ACTIVO ? '' : '<div>' + esc(Auditoria.linea('baja', r.USUARIO_BAJA, r.FECHA_BAJA))
+                        + '</div>')
                 + '</small></td>'
                 + '<td class="text-center">'
-                    + (r.ACTIVO
+                    + (r.ACTIVO && Permisos.puedeEditar('bodyResumenes')
                         ? '<button class="btn btn-sm btn-link text-danger p-0 tarj-baja" '
                           + 'data-id="' + esc(r.ID) + '" title="Dar de baja: no se borra, y ese '
                           + 'mes vuelve a proyectarse con la estimación">'

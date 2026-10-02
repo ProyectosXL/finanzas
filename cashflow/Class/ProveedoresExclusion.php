@@ -2,6 +2,8 @@
 
 require_once __DIR__ . '/Planilla.php';
 require_once __DIR__ . '/ProveedoresTango.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * ProveedoresExclusion
@@ -140,7 +142,7 @@ class ProveedoresExclusion {
         }
 
         $stmt = sqlsrv_query($this->conectar(),
-            "SELECT COD_PROVEE, MOTIVO, USUARIO, FECHA_ALTA
+            "SELECT COD_PROVEE, MOTIVO, USUARIO_ALTA AS USUARIO, FECHA_ALTA
              FROM dbo." . self::TABLA . "
              WHERE MODULO = ? AND VIGENTE = 1",
             [$modulo]);
@@ -182,10 +184,11 @@ class ProveedoresExclusion {
      * @param string $codProvee
      * @param string $modulo
      * @param string $motivo
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['cod_provee', 'nombre', 'motivo']
      */
-    public function excluir($codProvee, $modulo, $motivo, $usuario = null) {
+    public function excluir($codProvee, $modulo, $motivo, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $modulo = self::validarModulo($modulo);
         $cod = Planilla::codigo($codProvee);
         $m = self::validarMotivo($motivo);
@@ -224,9 +227,10 @@ class ProveedoresExclusion {
         /* EL INDICE UNICO FILTRADO es la red contra dos pantallas excluyendo a
            la vez: la segunda falla en vez de dejar dos vigentes. */
         $stmt = sqlsrv_query($this->conectar(),
-            "INSERT INTO dbo." . self::TABLA . " (COD_PROVEE, MODULO, MOTIVO, USUARIO)
-             VALUES (?, ?, ?, ?)",
-            [$cod, $modulo, $m, $usuario]);
+            "INSERT INTO dbo." . self::TABLA . "
+                 (COD_PROVEE, MODULO, MOTIVO, USUARIO_ALTA, USUARIO_MODIF)
+             VALUES (?, ?, ?, ?, ?)",
+            [$cod, $modulo, $m, $usuario, $usuario]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al excluir el proveedor'));
@@ -247,10 +251,11 @@ class ProveedoresExclusion {
      *
      * @param string $codProvee
      * @param string $modulo
-     * @param string|null $usuario
+     * @param string $usuario
      * @return bool Si estaba excluido
      */
-    public function incluir($codProvee, $modulo, $usuario = null) {
+    public function incluir($codProvee, $modulo, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $modulo = self::validarModulo($modulo);
         $cod = Planilla::codigo($codProvee);
 
@@ -262,14 +267,13 @@ class ProveedoresExclusion {
             throw new Exception($this->avisoSinTabla());
         }
 
-        /* USUARIO no se pisa: dice quien excluyo. Quien volvio a incluir no
-           tiene columna propia, y pisar esa diria que el que incluyo fue el que
-           excluyo. Cuando haya login y haga falta, es una columna mas. */
+        /* USUARIO_ALTA no se pisa: dice quien excluyo. Quien volvio a incluir
+           va en USUARIO_BAJA, su propia columna. */
         $stmt = sqlsrv_query($this->conectar(),
             "UPDATE dbo." . self::TABLA . "
-             SET VIGENTE = 0, FECHA_BAJA = GETDATE()
+             SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
              WHERE COD_PROVEE = ? AND MODULO = ? AND VIGENTE = 1",
-            [$cod, $modulo]);
+            [$usuario, $usuario, $cod, $modulo]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al volver a incluir el proveedor'));
@@ -299,7 +303,7 @@ class ProveedoresExclusion {
         }
 
         $stmt = sqlsrv_query($this->conectar(),
-            "SELECT MOTIVO, VIGENTE, USUARIO, FECHA_ALTA, FECHA_BAJA
+            "SELECT MOTIVO, VIGENTE, USUARIO_ALTA AS USUARIO, FECHA_ALTA, USUARIO_BAJA, FECHA_BAJA
              FROM dbo." . self::TABLA . "
              WHERE COD_PROVEE = ? AND MODULO = ?
              ORDER BY FECHA_ALTA DESC, ID DESC",
@@ -317,6 +321,7 @@ class ProveedoresExclusion {
                 'VIGENTE' => (intval($row['VIGENTE']) === 1),
                 'USUARIO' => $row['USUARIO'],
                 'FECHA_ALTA' => self::fechaHora($row['FECHA_ALTA']),
+                'USUARIO_BAJA' => $row['USUARIO_BAJA'],
                 'FECHA_BAJA' => self::fechaHora($row['FECHA_BAJA'])
             ];
         }

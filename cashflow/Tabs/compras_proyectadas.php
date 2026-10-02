@@ -1,7 +1,13 @@
-<?php $tabName = 'Proyección'; ?>
+<?php
+$tabName = 'Proyección';
+
+/* Sin permiso de edicion los controles de escritura no se dibujan. Es
+   comodidad: lo que frena una escritura es el 403 del servidor. */
+$edita = AuthCashflow::puedeEditar('compras_proyectadas');
+?>
 <link rel="stylesheet" href="Css/Compras-Proyectadas.css?v=<?php echo time(); ?>">
 
-<div class="tab-compras_proyectadas">
+<div class="tab-compras_proyectadas"<?php echo AuthCashflow::atributoEdicion('compras_proyectadas'); ?>>
 
     <!-- Los avisos de este módulo son la mitad de la pantalla, y van arriba de
          todo a propósito: el primero puede ser que NO HAY PRESUPUESTO que leer,
@@ -119,10 +125,12 @@
                 <!-- Corre los mismos dos SP que el job del SQL Agent: la
                      historia de recepciones y el presupuesto oficial. Queda en
                      el log con el usuario de la pantalla. -->
+                <?php if ($edita): ?>
                 <button id="btnActualizarInsumos" class="btn btn-sm btn-outline-secondary"
                         title="Recalcula ahora la historia de recepciones y el presupuesto oficial (los mismos SP que corre el job), y después la grilla">
                     <i class="fas fa-database me-1"></i> Actualizar ahora
                 </button>
+                <?php endif; ?>
                 <!-- Lo engancha Js/tabla-export.js por el data-exportar, igual
                      que el resto del módulo: baja exactamente lo que se ve. -->
                 <button class="btn btn-sm btn-success" data-exportar="tablaComprasProy"
@@ -327,6 +335,7 @@
                      número no ve contra qué lo está poniendo. -->
                 <div class="alert alert-light border py-2 px-3 small mb-3" id="cpAjusteContexto"></div>
 
+                <?php if ($edita): ?>
                 <div class="row g-3">
                     <div class="col-md-5">
                         <label class="form-label form-label-sm" for="cpAjusteImporte">
@@ -357,6 +366,7 @@
                 </div>
 
                 <hr class="my-3">
+                <?php endif; ?>
 
                 <h6 class="mb-2">
                     Historial
@@ -380,15 +390,19 @@
                 </div>
             </div>
             <div class="modal-footer justify-content-between">
+                <?php if ($edita): ?>
                 <button type="button" class="btn btn-sm btn-outline-danger" id="cpAjusteQuitar">
                     <i class="fas fa-rotate-left me-1"></i> Volver a la estimación automática
                 </button>
+                <?php endif; ?>
                 <div class="d-flex gap-2">
                     <button type="button" class="btn btn-sm btn-secondary"
                             data-bs-dismiss="modal">Cancelar</button>
+                    <?php if ($edita): ?>
                     <button type="button" class="btn btn-sm btn-primary" id="cpAjusteGuardar">
                         <i class="fas fa-check me-1"></i> Guardar
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>

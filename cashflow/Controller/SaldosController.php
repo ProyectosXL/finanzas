@@ -25,16 +25,6 @@ if (session_status() === PHP_SESSION_NONE) {
 header('Content-Type: application/json');
 
 /**
- * Usuario que realiza la edicion.
- * Todavia no hay login: devuelve NULL y se graba NULL. Cuando exista, solo hay
- * que poblar $_SESSION['usuario'].
- * @return string|null
- */
-function usuarioActual() {
-    return isset($_SESSION['usuario']) ? $_SESSION['usuario'] : null;
-}
-
-/**
  * Lee y decodifica el body JSON del request
  * @return array
  */
@@ -52,6 +42,12 @@ try {
     require_once __DIR__ . '/../Class/Saldos.php';
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
+
+    /* Quien escribe y si puede, antes de tocar nada: null en las acciones
+       que solo leen. Ver Controller/autorizacion.php. */
+    require_once __DIR__ . '/autorizacion.php';
+    $usuario = autorizar('Saldos', $action);
+
     $saldos = new Saldos();
 
     switch ($action) {
@@ -81,7 +77,7 @@ try {
             $id = $saldos->guardarCargaSaldos(
                 $data['filas'],
                 isset($data['observaciones']) ? $data['observaciones'] : null,
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -100,7 +96,7 @@ try {
             $r = $saldos->guardarCargaLocales(
                 isset($data['filas']) ? $data['filas'] : [],
                 isset($data['observaciones']) ? $data['observaciones'] : null,
-                usuarioActual()
+                $usuario
             );
 
             $mensaje = 'Guardado: ' . $r['filas'] . ' locales en el histórico';
@@ -168,7 +164,7 @@ try {
                 $data['tipo'],
                 $data['importe'],
                 isset($data['observacion']) ? $data['observacion'] : null,
-                usuarioActual(),
+                $usuario,
                 (isset($data['id_reemplaza']) && $data['id_reemplaza'] !== '')
                     ? intval($data['id_reemplaza']) : null
             );
@@ -198,7 +194,8 @@ try {
 
             require_once __DIR__ . '/../Class/Fondos.php';
 
-            $habia = (new Fondos())->bajaMovimiento(intval($data['id_cuenta']), intval($data['id']));
+            $habia = (new Fondos())->bajaMovimiento(intval($data['id_cuenta']), intval($data['id']),
+                $usuario);
 
             echo json_encode([
                 'success' => true,

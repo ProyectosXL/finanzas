@@ -1,7 +1,7 @@
 <?php $tabName = 'Crono Nacionalización'; ?>
 <link rel="stylesheet" href="Css/Comex-Crono_nacionalizacion.css?v=<?php echo time(); ?>">
 
-<div class="tab-crono_nacionalizacion">
+<div class="tab-crono_nacionalizacion"<?php echo AuthCashflow::atributoEdicion('crono_nacionalizacion'); ?>>
 
     <!-- Lo que quedó fuera del horizonte o sin fecha. Antes se descartaba en
          silencio, así que la tabla podía informar de menos sin decirlo. -->

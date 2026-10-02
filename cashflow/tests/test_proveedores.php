@@ -1634,7 +1634,7 @@ chequear('la misma factura repetida no se escribe dos veces', true,
     strpos($cuerpoClaves, '$claves[self::clavePago($cod, $t, $n)]') !== false);
 
 chequearLanza('sin comprobantes no hace nada y lo dice', function () {
-    (new Proveedores())->saveExclusionMasiva([], true, 'x');
+    (new Proveedores())->saveExclusionMasiva([], true, 'x', 'pruebas');
 });
 
 /* ================================================================

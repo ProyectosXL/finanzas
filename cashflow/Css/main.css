@@ -658,3 +658,16 @@ body {
         padding: 16px;
     }
 }
+
+/* Quién modificó y cuándo (Js/auditoria.js). Discreto a propósito: está para
+   el que lo busca, no para competir con el dato. */
+.auditoria-icono {
+    color: #adb5bd;
+    font-size: 0.75em;
+    margin-left: 0.3rem;
+    cursor: help;
+}
+
+.auditoria-icono:hover {
+    color: #6c757d;
+}

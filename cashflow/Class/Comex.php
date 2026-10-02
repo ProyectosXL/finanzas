@@ -2,6 +2,8 @@
 
 require_once __DIR__ . '/DolarFuturo.php';
 require_once __DIR__ . '/Horizonte.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * Comex
@@ -635,7 +637,7 @@ class Comex {
                     CAST(NULL AS DATE)        EDIT_VALOR";
         }
 
-        return "E.USUARIO        EDIT_USUARIO,
+        return "E.USUARIO_ALTA   EDIT_USUARIO,
                 E.FECHA_ALTA     EDIT_FECHA,
                 E.FECHA_ANTERIOR EDIT_ANTERIOR,
                 E.FECHA_NUEVA    EDIT_VALOR";
@@ -688,7 +690,7 @@ class Comex {
 
         return "CASE WHEN P.ID IS NULL THEN 0 ELSE 1 END PAGADO,
                 P.FECHA_ALTA  PAGADO_FECHA,
-                P.USUARIO     PAGADO_USUARIO,
+                P.USUARIO_ALTA PAGADO_USUARIO,
                 P.OBSERVACION PAGADO_OBS";
     }
 
@@ -1177,6 +1179,12 @@ class Comex {
            ningun override cargado, y NULL es exactamente eso. */
         $cotizSql = $this->tieneCotizEdit() ? 'D.COTIZ_USD_EDIT' : 'CAST(NULL AS DECIMAL(12,4))';
 
+        /* Quien cargo la cotizacion a mano y cuando: la fila de CRONO_NAC es una
+           por contenedor y su ultima modificacion es la del override. */
+        $cotizAudSql = $this->tieneCotizEdit()
+            ? 'D.USUARIO_MODIF AS COTIZ_USUARIO, D.FECHA_MODIF AS COTIZ_FECHA'
+            : 'CAST(NULL AS VARCHAR(50)) AS COTIZ_USUARIO, CAST(NULL AS DATETIME) AS COTIZ_FECHA';
+
         $sql = "SELECT
                     A.ID,
                     A.PROVEEDOR,
@@ -1193,6 +1201,7 @@ class Comex {
                     " . $this->rastroSelect('PAGO') . ",
                     " . $this->pagadoSelect() . ",
                     " . $cotizSql . " AS COTIZ_USD_EDIT,
+                    " . $cotizAudSql . ",
                     CASE WHEN " . self::sqlTieneCostos() . " THEN 1 ELSE 0 END TIENE_COSTOS
                 FROM " . self::TABLA_MAESTRO . " A
                 LEFT JOIN " . self::TABLA_EDIT . " D ON A.ID = D.ID_MG
@@ -1231,7 +1240,7 @@ class Comex {
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $row = self::aTexto($row,
                 ['ETD', 'ETA', 'FECHA_EST_PAGO', 'EDIT_ANTERIOR', 'EDIT_VALOR', 'EDIT_FECHA',
-                 'PAGADO_FECHA', 'FECHA_PAGO_CONF_FECHA']);
+                 'PAGADO_FECHA', 'FECHA_PAGO_CONF_FECHA', 'COTIZ_FECHA']);
 
             $row = self::conFechaEfectiva($row, 'FECHA_EST_PAGO', 'FECHA_PAGO_EFECTIVA', $hoy,
                                           $conBitPago);
@@ -2197,11 +2206,14 @@ class Comex {
      * @param string $campo 'PAGO' o 'NAC'
      * @param int $idMg ID del contenedor en el maestro
      * @param mixed $fechaNueva Fecha nueva, 'Y-m-d'
-     * @param string|null $usuario Quien edita. Todavia no hay login: llega null
+     * @param string $usuario Quien edita: el de la sesion. Firma el rastro y la
+     *        marca FECHA_PAGO_CONF_USUARIO del maestro
      * @return array ['campo', 'id_mg', 'fecha_anterior', 'fecha_nueva',
      *                'sin_cambios', 'cotizacion_descartada', …]
      */
-    public function guardarFecha($campo, $idMg, $fechaNueva, $usuario = null) {
+    public function guardarFecha($campo, $idMg, $fechaNueva, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tieneHistorial()) {
             throw new Exception($this->avisoSinHistorial());
         }
@@ -2334,16 +2346,17 @@ class Comex {
 
             $this->ejecutar($cid,
                 "UPDATE " . self::TABLA_HISTORIAL . "
-                 SET VIGENTE = 0, FECHA_BAJA = GETDATE()
+                 SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
                  WHERE ID_MG = ? AND CAMPO = ? AND VIGENTE = 1",
-                [$idMg, $campo],
+                [$usuario, $usuario, $idMg, $campo],
                 'Error al dar de baja el rastro anterior');
 
             $this->ejecutar($cid,
                 "INSERT INTO " . self::TABLA_HISTORIAL . "
-                     (ID_MG, CAMPO, FECHA_ANTERIOR, FECHA_NUEVA, VIGENTE, USUARIO, FECHA_ALTA)
-                 VALUES (?, ?, ?, ?, 1, ?, GETDATE())",
-                [$idMg, $campo, $anterior, $nueva, $usuario],
+                     (ID_MG, CAMPO, FECHA_ANTERIOR, FECHA_NUEVA, VIGENTE, USUARIO_ALTA,
+                      USUARIO_MODIF)
+                 VALUES (?, ?, ?, ?, 1, ?, ?)",
+                [$idMg, $campo, $anterior, $nueva, $usuario, $usuario],
                 'Error al guardar el rastro de la edición');
 
             /* El override solo se limpia si la columna existe: sin el script de
@@ -2351,9 +2364,9 @@ class Comex {
             if ($tieneCotiz && $r['cotizacion_descartada']) {
                 $this->ejecutar($cid,
                     "UPDATE " . self::TABLA_EDIT . "
-                     SET COTIZ_USD_EDIT = NULL, FECHA_UPDATE = GETDATE()
+                     SET COTIZ_USD_EDIT = NULL, " . Auditoria::SET_MODIF . "
                      WHERE ID_MG = ?",
-                    [$idMg],
+                    [$usuario, $idMg],
                     'Error al descartar la cotización cargada a mano');
             }
 
@@ -2417,11 +2430,13 @@ class Comex {
      * @param string $concepto 'PAGO' o 'NAC'
      * @param int $idMg ID del contenedor en el maestro
      * @param bool $pagado Si queda marcado o no
-     * @param mixed $obs Observacion opcional
-     * @param string|null $usuario Quien marca. Todavia no hay login: llega null
+     * @param mixed $obs Observacion opcional, null si no hay
+     * @param string $usuario Quien marca: el de la sesion
      * @return array ['concepto', 'id_mg', 'pagado', 'sin_cambios']
      */
-    public function marcarPagado($concepto, $idMg, $pagado, $obs = null, $usuario = null) {
+    public function marcarPagado($concepto, $idMg, $pagado, $obs, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tienePagado()) {
             throw new Exception($this->avisoSinPagado());
         }
@@ -2484,17 +2499,17 @@ class Comex {
         try {
             $this->ejecutar($cid,
                 "UPDATE " . self::TABLA_PAGADO . "
-                 SET VIGENTE = 0, FECHA_BAJA = GETDATE()
+                 SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
                  WHERE ID_MG = ? AND CONCEPTO = ? AND VIGENTE = 1",
-                [$idMg, $concepto],
+                [$usuario, $usuario, $idMg, $concepto],
                 'Error al dar de baja la marca anterior');
 
             if ($pagado) {
                 $this->ejecutar($cid,
                     "INSERT INTO " . self::TABLA_PAGADO . "
-                         (ID_MG, CONCEPTO, OBSERVACION, VIGENTE, USUARIO, FECHA_ALTA)
-                     VALUES (?, ?, ?, 1, ?, GETDATE())",
-                    [$idMg, $concepto, $obs, $usuario],
+                         (ID_MG, CONCEPTO, OBSERVACION, VIGENTE, USUARIO_ALTA, USUARIO_MODIF)
+                     VALUES (?, ?, ?, 1, ?, ?)",
+                    [$idMg, $concepto, $obs, $usuario, $usuario],
                     'Error al marcar el pago');
             }
 
@@ -2540,7 +2555,8 @@ class Comex {
         }
 
         $stmt = sqlsrv_query($cid,
-            "SELECT ID, ID_MG, CONCEPTO, OBSERVACION, VIGENTE, USUARIO, FECHA_ALTA, FECHA_BAJA
+            "SELECT ID, ID_MG, CONCEPTO, OBSERVACION, VIGENTE, USUARIO_ALTA, FECHA_ALTA,
+                    USUARIO_BAJA, FECHA_BAJA
              FROM " . self::TABLA_PAGADO . "
              WHERE ID_MG = ?" . $filtro . "
              ORDER BY VIGENTE DESC, FECHA_ALTA DESC, ID DESC", $params);
@@ -2601,7 +2617,7 @@ class Comex {
 
         $stmt = sqlsrv_query($cid,
             "SELECT ID, ID_MG, CAMPO, FECHA_ANTERIOR, FECHA_NUEVA, VIGENTE,
-                    USUARIO, FECHA_ALTA, FECHA_BAJA
+                    USUARIO_ALTA, FECHA_ALTA, USUARIO_BAJA, FECHA_BAJA
              FROM " . self::TABLA_HISTORIAL . "
              WHERE ID_MG = ?" . $filtro . "
              ORDER BY VIGENTE DESC, FECHA_ALTA DESC, ID DESC", $params);
@@ -2673,9 +2689,12 @@ class Comex {
      *
      * @param int $idMg ID del maestro de importación
      * @param mixed $cotizacion Cotizacion, o vacio para volver a la curva
+     * @param string $usuario
      * @return array ['cotizacion' => float|null, 'id_mg' => int]
      */
-    public function updateCotizacion($idMg, $cotizacion) {
+    public function updateCotizacion($idMg, $cotizacion, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tieneCotizEdit()) {
             throw new Exception('La corrección manual de la cotización está apagada: falta la '
                 . 'columna COTIZ_USD_EDIT. Corré sql/cashflow_comex_cotiz_edit.sql contra la '
@@ -2721,9 +2740,9 @@ class Comex {
         if ($existe) {
             $stmt = sqlsrv_query($cid,
                 "UPDATE " . self::TABLA_EDIT . "
-                 SET COTIZ_USD_EDIT = ?, FECHA_UPDATE = GETDATE()
+                 SET COTIZ_USD_EDIT = ?, " . Auditoria::SET_MODIF . "
                  WHERE ID_MG = ?",
-                [$valor, $idMg]);
+                [$valor, $usuario, $idMg]);
         } else {
             /* LOS CENTINELAS SIGUEN HACIENDO FALTA aunque nadie lea ya esas
                columnas: FECHA_NAC_ORIG y FECHA_NAC_EDIT nacieron NOT NULL, y
@@ -2732,9 +2751,10 @@ class Comex {
                cambiar, y ponerles una fecha real inventaria una edicion. */
             $stmt = sqlsrv_query($cid,
                 "INSERT INTO " . self::TABLA_EDIT . "
-                     (ID_MG, FECHA_NAC_ORIG, FECHA_NAC_EDIT, COTIZ_USD_EDIT, FECHA_UPDATE)
-                 VALUES (?, '1900-01-01', '1900-01-01', ?, GETDATE())",
-                [$idMg, $valor]);
+                     (ID_MG, FECHA_NAC_ORIG, FECHA_NAC_EDIT, COTIZ_USD_EDIT, USUARIO_ALTA,
+                      USUARIO_MODIF)
+                 VALUES (?, '1900-01-01', '1900-01-01', ?, ?, ?)",
+                [$idMg, $valor, $usuario, $usuario]);
         }
 
         if ($stmt === false) {

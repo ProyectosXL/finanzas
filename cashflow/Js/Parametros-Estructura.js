@@ -75,6 +75,17 @@
                 secciones = data.secciones.map(clonarSeccion);
                 filas = data.filas.map(clonarFila);
 
+                /* Quien toco cada fila y seccion, APARTE del modelo: el modelo
+                   vuelve entero al servidor al guardar, y el front no manda
+                   usuario ni fecha. Ver Js/auditoria.js. */
+                auditoria = { filas: {}, secciones: {} };
+                data.filas.forEach(function(f) {
+                    auditoria.filas[Number(f.ID)] = { usuario: f.USUARIO_MODIF, fecha: f.FECHA_MODIF };
+                });
+                data.secciones.forEach(function(s) {
+                    auditoria.secciones[s.CODIGO] = { usuario: s.USUARIO_MODIF, fecha: s.FECHA_MODIF };
+                });
+
                 // El servidor ya las manda agrupadas, pero se reagrupa igual:
                 // es lo que mantiene el invariante después de cada cambio de
                 // sección, y así el encabezado de grupo nunca se repite.
@@ -90,6 +101,9 @@
                 avisoError('No se pudo cargar la estructura: ' + error.message);
             });
     }
+
+    /** Quien toco cada fila (por ID) y cada seccion (por codigo). Lo llena cargar() */
+    var auditoria = { filas: {}, secciones: {} };
 
     function clonarSeccion(s) {
         return {
@@ -185,6 +199,9 @@
         }
 
         cuerpo.innerHTML = html;
+
+        // Sin permiso de edicion, la estructura como texto (Js/permisos.js)
+        Permisos.soloLectura(cuerpo);
         conectarFilas();
     }
 
@@ -197,7 +214,8 @@
                 + botonMover(idx, -1, '&uarr;') + botonMover(idx, 1, '&darr;')
             + '</td>'
             + '<td><input type="text" class="form-control form-control-sm cfe-nombre" '
-                + 'maxlength="80" value="' + escapar(f.nombre) + '"></td>'
+                + 'maxlength="80" value="' + escapar(f.nombre) + '">'
+                + Auditoria.icono(auditoria.filas[f.id]) + '</td>'
             + '<td><code class="cfe-codigo">' + escapar(f.codigo) + '</code></td>'
             + '<td>' + selectSeccion(f) + '</td>'
             + '<td>' + selectTipo(f) + '</td>'
@@ -560,7 +578,8 @@
                         + 'data-idx="' + i + '" data-delta="1">&darr;</button>'
                 + '</td>'
                 + '<td><input type="text" class="form-control form-control-sm cfe-sec-nombre" '
-                    + 'maxlength="80" value="' + escapar(s.nombre) + '"></td>'
+                    + 'maxlength="80" value="' + escapar(s.nombre) + '">'
+                    + Auditoria.icono(auditoria.secciones[s.codigo]) + '</td>'
                 + '<td><code class="cfe-codigo">' + escapar(s.codigo) + '</code></td>'
                 + '<td><select class="form-select form-select-sm cfe-sec-rol">' + roles + '</select></td>'
                 + '<td><select class="form-select form-select-sm cfe-sec-padre">' + padres + '</select></td>'
@@ -571,6 +590,7 @@
                 + '</td></tr>';
         }).join('');
 
+        Permisos.soloLectura(cuerpo);
         conectarSecciones();
     }
 

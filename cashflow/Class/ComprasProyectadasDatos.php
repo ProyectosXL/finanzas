@@ -883,7 +883,7 @@ class ComprasProyectadasDatos {
         }
 
         $sql = "SELECT ID, MES, IMPORTE_USD, ID_VERSION, TEMPORADA, MOTIVO,
-                       USUARIO, FECHA_ALTA
+                       USUARIO_ALTA, FECHA_ALTA
                 FROM " . self::TABLA_AJUSTE . "
                 WHERE VIGENTE = 1
                 ORDER BY MES";
@@ -906,7 +906,7 @@ class ComprasProyectadasDatos {
                 'id_version' => intval($row['ID_VERSION']),
                 'temporada' => ($row['TEMPORADA'] === null) ? null : trim((string) $row['TEMPORADA']),
                 'motivo' => ($row['MOTIVO'] === null) ? null : (string) $row['MOTIVO'],
-                'usuario' => ($row['USUARIO'] === null) ? null : (string) $row['USUARIO'],
+                'usuario' => ($row['USUARIO_ALTA'] === null) ? null : (string) $row['USUARIO_ALTA'],
                 'fecha' => self::aFecha($row['FECHA_ALTA'])
             ];
         }
@@ -1025,11 +1025,11 @@ class ComprasProyectadasDatos {
                 $partes[] = "(SELECT TOP 1 INICIO $ok) {$k}_ok_inicio,
                              (SELECT TOP 1 FIN $ok) {$k}_ok_fin,
                              (SELECT TOP 1 FILAS $ok) {$k}_ok_filas,
-                             (SELECT TOP 1 USUARIO $ok) {$k}_ok_usuario,
+                             (SELECT TOP 1 USUARIO_ALTA $ok) {$k}_ok_usuario,
                              (SELECT TOP 1 INICIO $ul) {$k}_u_inicio,
                              (SELECT TOP 1 FIN $ul) {$k}_u_fin,
                              (SELECT TOP 1 ERROR $ul) {$k}_u_error,
-                             (SELECT TOP 1 USUARIO $ul) {$k}_u_usuario";
+                             (SELECT TOP 1 USUARIO_ALTA $ul) {$k}_u_usuario";
             }
         }
 

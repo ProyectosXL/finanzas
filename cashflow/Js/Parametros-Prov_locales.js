@@ -144,6 +144,9 @@
 
         cont.innerHTML = html || '<div class="text-muted">No hay listas declaradas.</div>';
 
+        // Sin permiso de edicion, las listas como texto; exportar queda (data-lectura)
+        Permisos.soloLectura(cont);
+
         conectarTarjetas();
     }
 
@@ -161,7 +164,7 @@
             +     '<small class="text-muted">' + escapar(def.ayuda) + '</small>'
             +   '</div>'
             +   '<div class="d-flex gap-2">'
-            +     '<button class="btn btn-sm btn-outline-success" data-exportar="tablaPplo_'
+            +     '<button class="btn btn-sm btn-outline-success" data-lectura data-exportar="tablaPplo_'
             +       escapar(tipo) + '" data-exportar-nombre="Opciones_' + escapar(tipo) + '"'
             +       ' title="Exportar a Excel lo que se está viendo">'
             +       '<i class="fas fa-file-excel me-1"></i> Exportar</button>'
@@ -264,7 +267,8 @@
                 +   'data-previo="' + escapar(o.VALOR) + '" '
                 +   'title="' + escapar('Renombrar NO cambia los proveedores que ya lo tienen: '
                       + 'el maestro guarda el texto, no un id. Van a quedar marcados como fuera '
-                      + 'de lista hasta que alguien los edite.') + '"></td>'
+                      + 'de lista hasta que alguien los edite.') + '">'
+                + Auditoria.icono(o) + '</td>'
                 + (esPlazo ? '<td>' + celdaDias(o) + '</td>' : '')
                 + '<td class="text-center">' + celdaUsos(cuantos) + '</td>'
                 + '<td class="text-center">'

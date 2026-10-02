@@ -18,16 +18,6 @@ if (session_status() === PHP_SESSION_NONE) {
 header('Content-Type: application/json');
 
 /**
- * Usuario que realiza la edicion.
- * Todavia no hay login: devuelve NULL y se graba NULL. Cuando exista, solo hay
- * que poblar $_SESSION['usuario'].
- * @return string|null Usuario actual
- */
-function usuarioActual() {
-    return isset($_SESSION['usuario']) ? $_SESSION['usuario'] : null;
-}
-
-/**
  * Lee y decodifica el body JSON del request
  * @return array Datos del POST
  */
@@ -40,6 +30,32 @@ function bodyJson() {
     }
 
     return $data;
+}
+
+/**
+ * La sub-pestaña de lo que se guarda, para las acciones cuyo permiso depende
+ * del parametro y no de la accion (saveParametro: lo usan Generales, Saldos,
+ * Cobranzas y Compras Proyectadas). null en el resto, y tambien si la clave no
+ * existe: ahi la guarda rechaza porque no hay contra que verificar.
+ *
+ * Lee el cuerpo antes del switch; php://input se puede volver a leer, asi que
+ * el case lo lee de nuevo sin problema.
+ *
+ * @param string $action
+ * @return string|null
+ */
+function subPestanaPedida($action) {
+    if (!AuthCashflow::necesitaSubDelParametro('Parametros', $action)) {
+        return null;
+    }
+
+    $data = json_decode(file_get_contents('php://input'), true);
+
+    if (!is_array($data) || !isset($data['clave']) || trim((string) $data['clave']) === '') {
+        return null;
+    }
+
+    return (new Parametros())->subPestanaDelParametro($data['clave']);
 }
 
 /**
@@ -97,6 +113,11 @@ try {
     // Obtener accion del request
     $action = isset($_GET['action']) ? $_GET['action'] : '';
 
+    /* Quien escribe y si puede, antes de tocar nada: null en las acciones
+       que solo leen. Ver Controller/autorizacion.php. */
+    require_once __DIR__ . '/autorizacion.php';
+    $usuario = autorizar('Parametros', $action, subPestanaPedida($action));
+
     $parametros = new Parametros();
 
     switch ($action) {
@@ -133,7 +154,7 @@ try {
             $parametros->saveParametro(
                 $data['clave'],
                 $data['valor'],
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -160,7 +181,7 @@ try {
                 $data['mes'],
                 $data['porcentaje'],
                 Inflacion::VARIABLE,
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -182,7 +203,7 @@ try {
                decir el alcance se lee como si hubiera guardado uno. */
             $r = $parametros->inflacion()->guardarConstante(
                 $data['porcentaje'],
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -227,7 +248,7 @@ try {
                 $data['fecha'],
                 isset($data['fecha_calculada']) ? $data['fecha_calculada'] : null,
                 $data['motivo'],
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -248,7 +269,7 @@ try {
             $r = $parametros->cronograma()->volverACalculado(
                 $data['mes'],
                 $data['nro'],
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -329,7 +350,7 @@ try {
                     $fila['porcentaje'],
                     $fila['dias_acreditacion'],
                     !empty($fila['activo']),
-                    usuarioActual()
+                    $usuario
                 );
             }
 
@@ -352,7 +373,7 @@ try {
                 $data['canal'],
                 $data['medio_pago'],
                 isset($data['dias_acreditacion']) ? $data['dias_acreditacion'] : 0,
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -395,7 +416,7 @@ try {
                 $parametros->saveParametro(
                     $clave,
                     (string)floatval($data['valores'][$clave]),
-                    usuarioActual()
+                    $usuario
                 );
             }
 
@@ -438,7 +459,7 @@ try {
                 $data['tipo'],
                 $data['nombre'],
                 $data['moneda'],
-                usuarioActual(),
+                $usuario,
                 $clase,
                 $inicial
             );
@@ -484,7 +505,7 @@ try {
                     isset($fila['nombre']) ? $fila['nombre'] : '',
                     isset($fila['moneda']) ? $fila['moneda'] : 'ARS',
                     !empty($fila['activo']),
-                    usuarioActual(),
+                    $usuario,
                     isset($fila['clase']) ? $fila['clase'] : null,
                     $inicial
                 );
@@ -516,7 +537,7 @@ try {
                     $fila['nro_sucursal'],
                     isset($fila['gestion']) ? $fila['gestion'] : 'DEPOSITA',
                     isset($fila['reserva']) ? $fila['reserva'] : 0,
-                    usuarioActual()
+                    $usuario
                 );
             }
 
@@ -532,7 +553,7 @@ try {
             // Trae los locales propios habilitados desde el servidor de
             // locales. NO pisa la gestion ni la reserva ya cargadas, y a los
             // que desaparecen del origen los inhabilita en lugar de borrarlos.
-            $r = (new Saldos())->sincronizarSucursales(usuarioActual());
+            $r = (new Saldos())->sincronizarSucursales($usuario);
 
             echo json_encode([
                 'success' => true,
@@ -570,7 +591,7 @@ try {
 
             $id = (new CobElectronicos())->addProcesadora(
                 $data['razon_social'],
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -605,7 +626,7 @@ try {
                     $fila['id'],
                     isset($fila['razon_social']) ? $fila['razon_social'] : '',
                     !empty($fila['activo']),
-                    usuarioActual()
+                    $usuario
                 );
             }
 
@@ -632,7 +653,7 @@ try {
                 $data['concepto'],
                 $data['alicuota'],
                 $data['vigencia_desde'],
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -653,7 +674,7 @@ try {
 
             // Baja LOGICA. Deja de regir, pero la fila queda: es lo que explica
             // con que tasa se calculo un movimiento de ese periodo.
-            $r = (new CobElectronicos())->bajaAlicuota($data['id'], usuarioActual());
+            $r = (new CobElectronicos())->bajaAlicuota($data['id'], $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -711,7 +732,7 @@ try {
             $r = (new Echeqs())->guardarClientePrechequeado(
                 $data['codigo'],
                 array_key_exists('dias', $data) ? $data['dias'] : null,
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -737,7 +758,7 @@ try {
             require_once __DIR__ . '/../Class/Echeqs.php';
 
             $dias = (new Echeqs())->guardarDiasCliente(
-                $data['codigo'], $data['dias'], usuarioActual());
+                $data['codigo'], $data['dias'], $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -760,7 +781,7 @@ try {
 
             // Baja LOGICA: la fila queda, sus cheques salen del listado y dejan
             // de netear la cobranza de Ventas.
-            (new Echeqs())->bajaClientePrechequeado($data['codigo'], usuarioActual());
+            (new Echeqs())->bajaClientePrechequeado($data['codigo'], $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -799,7 +820,8 @@ try {
             $r = (new ProveedoresOpciones())->agregar(
                 $data['tipo'],
                 $data['valor'],
-                array_key_exists('plazo_dias', $data) ? $data['plazo_dias'] : null
+                array_key_exists('plazo_dias', $data) ? $data['plazo_dias'] : null,
+                $usuario
             );
 
             echo json_encode([
@@ -821,7 +843,7 @@ try {
 
             require_once __DIR__ . '/../Class/ProveedoresOpciones.php';
 
-            $r = (new ProveedoresOpciones())->guardar($data['id'], $data);
+            $r = (new ProveedoresOpciones())->guardar($data['id'], $data, $usuario);
 
             /* RENOMBRAR NO PROPAGA AL MAESTRO, y hay que decirlo: el maestro
                guarda el TEXTO, no un id, así que los proveedores cargados
@@ -852,7 +874,7 @@ try {
             require_once __DIR__ . '/../Class/ProveedoresOpciones.php';
 
             $vigente = !empty($data['vigente']);
-            $r = (new ProveedoresOpciones())->baja($data['id'], $vigente);
+            $r = (new ProveedoresOpciones())->baja($data['id'], $vigente, $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -886,7 +908,7 @@ try {
             $parametros->savePPPManualGrupo(
                 $data['cod_agrup'],
                 isset($data['ppp_manual']) ? $data['ppp_manual'] : null,
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -905,7 +927,7 @@ try {
             $parametros->saveMedioPagoCliente(
                 $data['cod_cliente'],
                 $data['medio_pago'],
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -920,7 +942,8 @@ try {
         case 'getEscalaDescuento':
             echo json_encode([
                 'success' => true,
-                'data' => $parametros->getEscalaDescuentoGeneral()
+                'data' => $parametros->getEscalaDescuentoGeneral(),
+                'auditoria' => $parametros->getAuditoriaEscala()
             ], JSON_UNESCAPED_UNICODE);
             break;
 
@@ -931,7 +954,7 @@ try {
                 throw new Exception('Faltan los tramos de la escala de descuento');
             }
 
-            $escala = $parametros->saveEscalaDescuentoGeneral($data['tramos'], usuarioActual());
+            $escala = $parametros->saveEscalaDescuentoGeneral($data['tramos'], $usuario);
 
             echo json_encode([
                 'success' => true,

@@ -85,6 +85,12 @@ try {
     require_once __DIR__ . '/../Class/Parametros.php';
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
+
+    /* Quien escribe y si puede, antes de tocar nada: null en las acciones
+       que solo leen. Ver Controller/autorizacion.php. */
+    require_once __DIR__ . '/autorizacion.php';
+    $usuario = autorizar('Ingresos', $action);
+
     $ingresos = new Ingresos();
 
     /** El cuerpo JSON de un POST */
@@ -93,11 +99,6 @@ try {
         $data = json_decode($crudo, true);
 
         return is_array($data) ? $data : [];
-    };
-
-    /** Usuario de sesion. Todavia no hay login: hoy graba NULL. */
-    $usuarioActual = function () {
-        return isset($_SESSION['usuario']) ? $_SESSION['usuario'] : null;
     };
 
     switch ($action) {
@@ -211,7 +212,7 @@ try {
                 $data['t_comp'],
                 $data['n_comp'],
                 $data['fecha_cobro'],
-                $usuarioActual()
+                $usuario
             );
 
             echo json_encode([

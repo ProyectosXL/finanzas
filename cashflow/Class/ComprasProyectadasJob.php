@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/ComprasProyectadasDatos.php';
+require_once __DIR__ . '/AuthCashflow.php';
 
 /**
  * ComprasProyectadasJob
@@ -10,8 +11,9 @@ require_once __DIR__ . '/ComprasProyectadasDatos.php';
  *
  * LOS SP SON LOS MISMOS QUE CORRE EL JOB DEL SQL AGENT, y registran la corrida
  * igual en RO_T_CASHFLOW_JOB_LOG. La unica diferencia es quien la pidio: aca
- * va el usuario de la pantalla, y alla el login del Agent. Un calculo hecho a
- * mano y uno programado se leen en el log exactamente igual.
+ * va el username de quien apreto el boton, y alla el origen JOB: que le pasa el
+ * paso del job (ver AuthCashflow::ORIGENES). Un calculo hecho a mano y uno
+ * programado se leen en el log exactamente igual, y en los dos se sabe quien.
  *
  * POR QUE VIVE APARTE DE ComprasProyectadasDatos: esa clase no escribe nada, y
  * hay una prueba que lo verifica sobre el archivo entero. Correr un SP que
@@ -59,7 +61,7 @@ class ComprasProyectadasJob {
      * dejo en el log, y la pantalla lo muestra en el paso que fallo.
      *
      * @param string $proceso 'historia' o 'presupuesto'
-     * @param string|null $usuario Quien lo pidio
+     * @param string $usuario Quien lo pidio: el username de la sesion
      * @return array ['proceso','segundos','insumo']
      */
     public function correr($proceso, $usuario) {
@@ -86,8 +88,9 @@ class ComprasProyectadasJob {
                 . 'sql/cashflow_comex_materializado.sql).');
         }
 
-        $usuario = ($usuario === null || trim((string) $usuario) === '')
-            ? 'Pantalla (sin usuario)' : mb_substr(trim((string) $usuario), 0, 128);
+        /* Sin vuelta a un texto fijo: una corrida pedida desde la pantalla la
+           pidio alguien, y si no se sabe quien, no se corre. */
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
 
         if (function_exists('set_time_limit')) {
             @set_time_limit(self::TIMEOUT_SEGUNDOS + 30);

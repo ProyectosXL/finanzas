@@ -462,6 +462,11 @@
               + '">excluido</span></div>'
             : '';
 
+        // Sin permiso no hay que seleccionar: queda la marca de excluido
+        if (!Permisos.puedeEditar('bodyEch')) {
+            return marca;
+        }
+
         return '<input type="checkbox" class="form-check-input ech-sel"'
             + (seleccion[f.ID_SBA14] ? ' checked' : '')
             + ' data-id="' + f.ID_SBA14 + '"'
@@ -471,8 +476,9 @@
 
     /** Quién excluyó ese cheque y cuándo. Un tilde sin autor no lo explica nadie */
     function detalleExclusion(f) {
-        return 'Excluido por ' + (f.EXCLUSION_USUARIO || 'sin usuario (todavía no hay login)')
-            + (f.EXCLUSION_FECHA ? ' el ' + fechaHora(f.EXCLUSION_FECHA) : '');
+        // Quién y cuándo, con el formato de Js/auditoria.js
+        return 'Excluido por ' + (Auditoria.quien(f.EXCLUSION_USUARIO) || 'sin usuario registrado')
+            + (f.EXCLUSION_FECHA ? ' · ' + Auditoria.fecha(f.EXCLUSION_FECHA) : '');
     }
 
     /** Los cheques seleccionados que hoy están a la vista */
@@ -847,9 +853,14 @@
             html += '<tr class="' + (f.MARCADO ? 'ech-marcado' : 'ech-sin-marcar') + '"'
                  + ' data-id="' + f.ID_SBA14 + '">';
 
+            // Sin permiso, el estado como icono: la casilla es para cambiarlo
             html += '<td class="text-center">'
-                 + '<input type="checkbox" class="form-check-input ech-marca" '
-                 + 'data-id="' + f.ID_SBA14 + '"' + (f.MARCADO ? ' checked' : '') + '>'
+                 + Permisos.segun('bodyPre',
+                     '<input type="checkbox" class="form-check-input ech-marca" '
+                         + 'data-id="' + f.ID_SBA14 + '"' + (f.MARCADO ? ' checked' : '') + '>',
+                     f.MARCADO
+                         ? '<i class="fas fa-check text-success" title="Marcado"></i>'
+                         : '<i class="fas fa-minus text-muted" title="Sin marcar"></i>')
                  + '</td>';
 
             // LA DEL CHEQUE ES LA QUE UBICA EL IMPORTE EN LA GRILLA, así que va
@@ -1205,10 +1216,10 @@
     }
 
     function detalleMarca(f) {
-        var quien = f.MARCA_USUARIO || 'sin usuario (todavía no hay login)';
+        var quien = Auditoria.quien(f.MARCA_USUARIO) || 'sin usuario registrado';
 
         return (f.MARCADO ? 'Tildado' : 'Destildado') + ' por ' + quien
-            + (f.MARCA_FECHA ? ' el ' + fechaHora(f.MARCA_FECHA) : '');
+            + (f.MARCA_FECHA ? ' · ' + Auditoria.fecha(f.MARCA_FECHA) : '');
     }
 
     function subtituloCodigo(codigo) {

@@ -195,6 +195,8 @@
             'No hay parámetros generales cargados para este módulo. ' +
             'Corré sql/cashflow_saldos.sql.</div>';
 
+        Permisos.soloLectura(grid);
+
         document.querySelectorAll('#gridGeneralesSaldos .sp-param-input').forEach(function(input) {
             input.addEventListener('change', function() {
                 guardarGeneral(input);
@@ -278,6 +280,9 @@
                   'cobertura del tablero.'
                 : 'Falta correr sql/cashflow_saldos_cuentas_fondo.sql.') + '</td></tr>';
 
+        // Sin permiso de edicion, las tres grillas de cuentas como texto (Js/permisos.js)
+        ['bodyBancos', 'bodyOtros', 'bodySpFondos'].forEach(Permisos.soloLectura);
+
         // Sin el script no hay columna CLASE ni fondos: los selectores de
         // clase se deshabilitan y el alta de fondos también, con el motivo.
         var sinFondos = !modulo.fondos_creados;
@@ -358,8 +363,10 @@
     }
 
     function inputNombre(c) {
+        // El icono de auditoria va al lado: soloLectura() cambia el input y no lo toca
         return '<input type="text" class="form-control form-control-sm sp-cuenta-nombre" ' +
-               'data-id="' + c.ID + '" maxlength="80" value="' + escapar(c.NOMBRE) + '">';
+               'data-id="' + c.ID + '" maxlength="80" value="' + escapar(c.NOMBRE) + '">' +
+               Auditoria.icono({ usuario: c.USUARIO, fecha: c.FECHA_UPDATE });
     }
 
     function selectMoneda(c) {
@@ -607,7 +614,8 @@
                     '</td>';
 
             html += '<td class="text-center sp-fecha">' +
-                    (s.FECHA_UPDATE ? fechaHora(s.FECHA_UPDATE) : '—') + '</td>';
+                    (s.FECHA_UPDATE ? fechaHora(s.FECHA_UPDATE) : '—') +
+                    Auditoria.icono({ usuario: s.USUARIO, fecha: s.FECHA_UPDATE }) + '</td>';
             html += '</tr>';
         });
 
@@ -615,6 +623,8 @@
             '<tr><td colspan="5" class="text-center text-muted py-4">' +
             'Todavía no hay locales cargados. Usá <strong>Sincronizar con locales</strong> ' +
             'para traerlos.</td></tr>';
+
+        Permisos.soloLectura('bodySucursales');
     }
 
     function guardarSucursales() {

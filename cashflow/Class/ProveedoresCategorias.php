@@ -3,6 +3,8 @@
 require_once __DIR__ . '/Planilla.php';
 require_once __DIR__ . '/ProveedoresTango.php';
 require_once __DIR__ . '/ProveedoresOpciones.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * ProveedoresCategorias
@@ -532,7 +534,7 @@ class ProveedoresCategorias {
 
         $sql = "SELECT COD_PROVEE, NOMBRE, RUBRO_ECONOMICO, RUBRO, CENTRO_COSTOS,
                        FORMA_PAGO, FORMA_PAGO_ORIG, PLAZO_PAGO, PLAZO_DIAS,
-                       CRITERIO_DISTRIB, FECHA_IMPORTACION, "
+                       CRITERIO_DISTRIB, FECHA_IMPORTACION, USUARIO_ALTA, "
                        . self::origenSql() . " AS ORIGEN
                 FROM dbo." . self::TABLA . "
                 WHERE VIGENTE = 1";
@@ -565,6 +567,9 @@ class ProveedoresCategorias {
                 'PLAZO_DIAS' => ($row['PLAZO_DIAS'] === null) ? null : intval($row['PLAZO_DIAS']),
                 'CRITERIO_DISTRIB' => $row['CRITERIO_DISTRIB'],
                 'FECHA_IMPORTACION' => $this->fechaHora($row['FECHA_IMPORTACION']),
+
+                // Quien cargo esta version (Js/auditoria.js)
+                'USUARIO_ALTA' => $row['USUARIO_ALTA'],
 
                 /* De donde salio esta version. Lo usa el diff para avisar antes
                    de pisar trabajo manual, y la grilla para marcarlo. */
@@ -1990,10 +1995,12 @@ class ProveedoresCategorias {
      *
      * @param array $comparacion Lo que devolvio compararImportacion()
      * @param bool $aplicarBajas Si se dan de baja los que el archivo no trae
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['altas', 'cambios', 'bajas']
      */
-    public function aplicarImportacion($comparacion, $aplicarBajas, $usuario = null) {
+    public function aplicarImportacion($comparacion, $aplicarBajas, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablaCreada()) {
             throw new Exception('Todavía no existe la tabla del maestro. '
                 . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
@@ -2016,7 +2023,7 @@ class ProveedoresCategorias {
 
                 // Un CAMBIO es una baja mas un alta: asi queda el historial.
                 if ($fila['estado'] === 'CAMBIO') {
-                    $this->bajaVigente($cid, $fila['cod_provee']);
+                    $this->bajaVigente($cid, $fila['cod_provee'], $usuario);
                     $aplicadas['cambios']++;
                 } else {
                     $aplicadas['altas']++;
@@ -2027,7 +2034,7 @@ class ProveedoresCategorias {
 
             if ($aplicarBajas) {
                 foreach ($comparacion['bajas'] as $baja) {
-                    $this->bajaVigente($cid, $baja['cod_provee']);
+                    $this->bajaVigente($cid, $baja['cod_provee'], $usuario);
                     $aplicadas['bajas']++;
                 }
             }
@@ -2254,11 +2261,13 @@ class ProveedoresCategorias {
      * lo dice en el campo en vez de dejar que se descubra al guardar.
      *
      * @param array $datos Las mismas claves que las columnas de importacion
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['cod_provee', 'estado' => 'ALTA'|'CAMBIO', 'fila']
      * @throws OpcionesIlegibles Si las listas existen y no se pudieron leer
      */
-    public function guardarManual($datos, $usuario = null) {
+    public function guardarManual($datos, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablaCreada()) {
             throw new Exception('Todavía no existe la tabla del maestro. '
                 . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
@@ -2311,7 +2320,7 @@ class ProveedoresCategorias {
 
         try {
             if ($existia) {
-                $this->bajaVigente($cid, $fila['cod_provee']);
+                $this->bajaVigente($cid, $fila['cod_provee'], $usuario);
             }
 
             $this->insertar($cid, $fila, $usuario, 'MANUAL');
@@ -2339,9 +2348,12 @@ class ProveedoresCategorias {
      * explicando como se clasificaba antes.
      *
      * @param string $codProvee
+     * @param string $usuario
      * @return bool Si habia algo vigente para dar de baja
      */
-    public function bajaManual($codProvee) {
+    public function bajaManual($codProvee, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablaCreada()) {
             throw new Exception('Todavía no existe la tabla del maestro.');
         }
@@ -2358,19 +2370,19 @@ class ProveedoresCategorias {
             return false;
         }
 
-        $this->bajaVigente($this->conectar(), $cod);
+        $this->bajaVigente($this->conectar(), $cod, $usuario);
         $this->mapa = null;
 
         return true;
     }
 
     /** Marca VIGENTE = 0 la fila vigente de un proveedor */
-    private function bajaVigente($cid, $codProvee) {
+    private function bajaVigente($cid, $codProvee, $usuario) {
         $stmt = sqlsrv_query($cid,
             "UPDATE dbo." . self::TABLA . "
-             SET VIGENTE = 0, FECHA_BAJA = GETDATE()
+             SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
              WHERE COD_PROVEE = ? AND VIGENTE = 1",
-            [$codProvee]);
+            [$usuario, $usuario, $codProvee]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al dar de baja el maestro anterior'));
@@ -2390,8 +2402,8 @@ class ProveedoresCategorias {
     private function insertar($cid, $fila, $usuario, $origen = 'IMPORT') {
         $cols = ['COD_PROVEE', 'NOMBRE', 'RUBRO_ECONOMICO', 'RUBRO', 'CENTRO_COSTOS',
                  'FORMA_PAGO', 'FORMA_PAGO_ORIG', 'PLAZO_PAGO', 'PLAZO_DIAS',
-                 'CRITERIO_DISTRIB', 'CRITERIO_ORIG', 'VIGENTE', 'USUARIO'];
-        $vals = ['?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '1', '?'];
+                 'CRITERIO_DISTRIB', 'CRITERIO_ORIG', 'VIGENTE', 'USUARIO_ALTA', 'USUARIO_MODIF'];
+        $vals = ['?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '1', '?', '?'];
 
         $params = [
             $fila['cod_provee'],
@@ -2405,6 +2417,7 @@ class ProveedoresCategorias {
             $fila['plazo_dias'],
             $fila['criterio_distrib'],
             ($fila['criterio_orig'] === '') ? null : $fila['criterio_orig'],
+            $usuario,
             $usuario
         ];
 
@@ -2451,7 +2464,8 @@ class ProveedoresCategorias {
            rubro. */
         $sql = "SELECT ID, COD_PROVEE, NOMBRE, RUBRO_ECONOMICO, RUBRO, CENTRO_COSTOS,
                        FORMA_PAGO, FORMA_PAGO_ORIG, PLAZO_PAGO, PLAZO_DIAS,
-                       CRITERIO_DISTRIB, VIGENTE, USUARIO, FECHA_IMPORTACION, FECHA_BAJA, "
+                       CRITERIO_DISTRIB, VIGENTE, USUARIO_ALTA AS USUARIO, FECHA_IMPORTACION,
+                       USUARIO_BAJA, FECHA_BAJA, "
                        . $this->origenSql() . " AS ORIGEN
                 FROM dbo." . self::TABLA . "
                 WHERE COD_PROVEE = ?

@@ -1,3 +1,9 @@
+<?php
+/* Sin permiso de edicion de esta sub-pestaña los controles de escritura no
+   se dibujan. Se define aca y no en parametros.php porque cada sub-pestaña
+   tiene su permiso, y todas comparten el alcance de ese archivo. */
+$edita = AuthCashflow::puedeEditar('parametros', 'PRECHEQUEADO');
+?>
 <!--
     Parámetros → Pre-chequeado.
 
@@ -58,12 +64,15 @@
                     <button id="btnRefreshParamPpq" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
+                    <?php if ($edita): ?>
                     <button id="btnNuevoClientePpq" class="btn btn-sm btn-primary">
                         <i class="fas fa-plus me-1"></i> Agregar cliente
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
 
+            <?php if ($edita): ?>
             <div class="card-body border-bottom" id="formClientePpq" style="display: none;">
                 <div class="row g-2 align-items-end">
                     <div class="col-md-3">
@@ -110,6 +119,7 @@
                     mismo cliente.
                 </div>
             </div>
+            <?php endif; ?>
 
             <div class="card-body p-0">
                 <div class="table-responsive">

@@ -41,16 +41,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'plantilla') {
 header('Content-Type: application/json');
 
 /**
- * Usuario que realiza la edicion.
- * Todavia no hay login: devuelve NULL y se graba NULL. Cuando exista, solo hay
- * que poblar $_SESSION['usuario'].
- * @return string|null
- */
-function usuarioActual() {
-    return isset($_SESSION['usuario']) ? $_SESSION['usuario'] : null;
-}
-
-/**
  * Lee y decodifica el body JSON del request
  * @return array
  */
@@ -68,6 +58,12 @@ try {
     require_once __DIR__ . '/../Class/CobElectronicos.php';
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
+
+    /* Quien escribe y si puede, antes de tocar nada: null en las acciones
+       que solo leen. Ver Controller/autorizacion.php. */
+    require_once __DIR__ . '/autorizacion.php';
+    $usuario = autorizar('CobElectronicos', $action);
+
     $modulo = new CobElectronicos();
 
     switch ($action) {
@@ -101,7 +97,7 @@ try {
                 $data['importe_bruto'],
                 $data['fecha_acreditacion'],
                 isset($data['observaciones']) ? $data['observaciones'] : null,
-                usuarioActual()
+                $usuario
             );
 
             // El mensaje dice con que tasa se calculo: es el dato que el usuario
@@ -137,7 +133,7 @@ try {
                 $data['importe_bruto'],
                 $data['fecha_acreditacion'],
                 isset($data['observaciones']) ? $data['observaciones'] : null,
-                usuarioActual()
+                $usuario
             );
 
             $mensaje = 'Movimiento actualizado. Importe neto $ '
@@ -221,7 +217,7 @@ try {
                 // Las bajas son opt-in: un archivo parcial no puede dar de baja
                 // lo que no estaba mirando.
                 !empty($data['aplicar_bajas']),
-                usuarioActual(),
+                $usuario,
                 // El mismo periodo con el que se previsualizo: si no, las bajas
                 // que se aplican no serian las que se mostraron.
                 [
@@ -253,7 +249,7 @@ try {
             }
 
             // Baja LOGICA: la fila queda, deja de sumar al tablero.
-            $modulo->bajaMovimiento($data['id'], usuarioActual());
+            $modulo->bajaMovimiento($data['id'], $usuario);
 
             echo json_encode([
                 'success' => true,

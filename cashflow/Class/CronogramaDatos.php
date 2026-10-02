@@ -1,6 +1,8 @@
 <?php
 
 require_once __DIR__ . '/CronogramaPagos.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * CronogramaDatos
@@ -246,7 +248,7 @@ class CronogramaDatos {
         }
 
         $stmt = sqlsrv_query($this->conectar(),
-            "SELECT MES, NRO_PAGO, FECHA, FECHA_CALCULADA, MOTIVO, USUARIO, FECHA_ALTA
+            "SELECT MES, NRO_PAGO, FECHA, FECHA_CALCULADA, MOTIVO, USUARIO_ALTA, FECHA_ALTA
              FROM dbo." . self::TABLA . "
              WHERE VIGENTE = 1
              ORDER BY MES, NRO_PAGO");
@@ -262,7 +264,7 @@ class CronogramaDatos {
                 'fecha' => self::dia($row['FECHA']),
                 'fecha_calculada' => self::dia($row['FECHA_CALCULADA']),
                 'motivo' => $row['MOTIVO'],
-                'usuario' => $row['USUARIO'],
+                'usuario' => $row['USUARIO_ALTA'],
                 'fecha_alta' => self::momento($row['FECHA_ALTA'])
             ];
         }
@@ -286,7 +288,8 @@ class CronogramaDatos {
         }
 
         $stmt = sqlsrv_query($this->conectar(),
-            "SELECT FECHA, FECHA_CALCULADA, MOTIVO, VIGENTE, USUARIO, FECHA_ALTA, FECHA_BAJA
+            "SELECT FECHA, FECHA_CALCULADA, MOTIVO, VIGENTE, USUARIO_ALTA, FECHA_ALTA,
+                    USUARIO_BAJA, FECHA_BAJA
              FROM dbo." . self::TABLA . "
              WHERE MES = ? AND NRO_PAGO = ?
              ORDER BY ID DESC",
@@ -304,8 +307,9 @@ class CronogramaDatos {
                 'fecha_calculada' => self::dia($row['FECHA_CALCULADA']),
                 'motivo' => $row['MOTIVO'],
                 'vigente' => (intval($row['VIGENTE']) === 1),
-                'usuario' => $row['USUARIO'],
+                'usuario' => $row['USUARIO_ALTA'],
                 'fecha_alta' => self::momento($row['FECHA_ALTA']),
+                'usuario_baja' => $row['USUARIO_BAJA'],
                 'fecha_baja' => self::momento($row['FECHA_BAJA'])
             ];
         }
@@ -331,11 +335,11 @@ class CronogramaDatos {
      * @param string $fecha 'Y-m-d'
      * @param string|null $fechaCalculada 'Y-m-d', lo que daba el calculo
      * @param string|null $motivo
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['mes', 'nro', 'fecha', 'reemplazo' => bool]
      */
-    public function guardar($mes, $nro, $fecha, $fechaCalculada = null, $motivo = null,
-                            $usuario = null) {
+    public function guardar($mes, $nro, $fecha, $fechaCalculada, $motivo, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $m = self::validarMes($mes);
@@ -363,9 +367,9 @@ class CronogramaDatos {
 
         $stmt = sqlsrv_query($cid,
             "INSERT INTO dbo." . self::TABLA . "
-                (MES, NRO_PAGO, FECHA, FECHA_CALCULADA, MOTIVO, USUARIO)
-             VALUES (?, ?, ?, ?, ?, ?)",
-            [$m, $n, $f, $calc, $motivo, $usuario]);
+                (MES, NRO_PAGO, FECHA, FECHA_CALCULADA, MOTIVO, USUARIO_ALTA, USUARIO_MODIF)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [$m, $n, $f, $calc, $motivo, $usuario, $usuario]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al guardar la fecha del cronograma'));
@@ -384,10 +388,11 @@ class CronogramaDatos {
      *
      * @param string $mes 'Y-m'
      * @param int $nro 1 o 2
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['habia' => bool]
      */
-    public function volverACalculado($mes, $nro, $usuario = null) {
+    public function volverACalculado($mes, $nro, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $bajas = $this->darDeBaja($this->conectar(),
@@ -399,14 +404,18 @@ class CronogramaDatos {
     /**
      * Marca VIGENTE = 0 el override vigente de un pago.
      *
+     * La baja va en sus propias columnas. Hasta esta entrega pisaba USUARIO, que
+     * era quien lo habia CARGADO: el historial terminaba diciendo que la fecha
+     * la puso quien la saco.
+     *
      * @return int Cuantas filas se dieron de baja
      */
     private function darDeBaja($cid, $mes, $nro, $usuario) {
         $stmt = sqlsrv_query($cid,
             "UPDATE dbo." . self::TABLA . "
-             SET VIGENTE = 0, FECHA_BAJA = GETDATE(), USUARIO = ISNULL(?, USUARIO)
+             SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
              WHERE MES = ? AND NRO_PAGO = ? AND VIGENTE = 1",
-            [$usuario, $mes, $nro]);
+            [$usuario, $usuario, $mes, $nro]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al dar de baja la fecha anterior'));

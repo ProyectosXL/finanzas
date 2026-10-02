@@ -1,5 +1,8 @@
 <?php
 
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
+
 /**
  * Inflacion
  * El % de inflacion esperado de cada mes calendario, y la suma de a tres meses
@@ -601,7 +604,7 @@ class Inflacion {
         }
 
         $stmt = sqlsrv_query($this->conectar(),
-            "SELECT MES, PORCENTAJE, MODALIDAD, USUARIO, FECHA_UPDATE
+            "SELECT MES, PORCENTAJE, MODALIDAD, USUARIO_MODIF AS USUARIO, FECHA_MODIF AS FECHA_UPDATE
              FROM dbo.RO_T_CASHFLOW_INFLACION_MES ORDER BY MES");
 
         if ($stmt === false) {
@@ -636,10 +639,11 @@ class Inflacion {
      * @param string $mes 'Y-m'
      * @param mixed $porcentaje En puntos porcentuales
      * @param string $modalidad Con cual se cargo
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['mes', 'porcentaje', 'nuevo' => bool]
      */
-    public function guardar($mes, $porcentaje, $modalidad = self::VARIABLE, $usuario = null) {
+    public function guardar($mes, $porcentaje, $modalidad, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $m = self::validarMes($mes);
@@ -659,12 +663,19 @@ class Inflacion {
 
         $sql = $existe
             ? "UPDATE dbo.RO_T_CASHFLOW_INFLACION_MES
-               SET PORCENTAJE = ?, MODALIDAD = ?, USUARIO = ?, FECHA_UPDATE = GETDATE()
+               SET PORCENTAJE = ?, MODALIDAD = ?, " . Auditoria::SET_MODIF . "
                WHERE MES = ?"
-            : "INSERT INTO dbo.RO_T_CASHFLOW_INFLACION_MES (PORCENTAJE, MODALIDAD, USUARIO, MES)
-               VALUES (?, ?, ?, ?)";
+            : "INSERT INTO dbo.RO_T_CASHFLOW_INFLACION_MES
+                   (PORCENTAJE, MODALIDAD, USUARIO_MODIF, MES, USUARIO_ALTA)
+               VALUES (?, ?, ?, ?, ?)";
 
-        $stmt = sqlsrv_query($cid, $sql, [$pct, $mod, $usuario, $m]);
+        $params = [$pct, $mod, $usuario, $m];
+
+        if (!$existe) {
+            $params[] = $usuario;
+        }
+
+        $stmt = sqlsrv_query($cid, $sql, $params);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al guardar la inflación del mes'));
@@ -691,11 +702,12 @@ class Inflacion {
      * correccion del pasado.
      *
      * @param mixed $porcentaje En puntos porcentuales
-     * @param string|null $usuario
+     * @param string $usuario
      * @param string|null $hoy 'Y-m-d'
      * @return array ['porcentaje', 'meses' => int]
      */
-    public function guardarConstante($porcentaje, $usuario = null, $hoy = null) {
+    public function guardarConstante($porcentaje, $usuario, $hoy = null) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $this->exigirTabla();
 
         $pct = self::validar($porcentaje);

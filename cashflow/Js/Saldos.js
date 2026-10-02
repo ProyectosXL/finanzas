@@ -231,7 +231,8 @@
 
         texto('ultimaCargaSaldos', uc ? fechaHora(uc.fecha_carga) : 'Sin cargas');
         texto('ultimaCargaSaldosDetalle', uc
-            ? ((uc.usuario || 'sin usuario') + ' · ' + (uc.observaciones || 'sin observaciones'))
+            ? ((uc.usuario ? 'Cargado por ' + Auditoria.quien(uc.usuario) : 'Sin usuario registrado')
+                + ' · ' + (uc.observaciones || 'sin observaciones'))
             : 'Todavía no se cargó ningún saldo');
 
         var ec = datosSaldos.efectivo_central;
@@ -476,7 +477,10 @@
 
     function pintarTablaLocales() {
         var html = '';
-        var editable = !!datosLocales.manuales_disponibles;
+        // Sin permiso, el saldo, la gestion y la reserva se muestran como texto
+        // (Js/permisos.js): recalcularLocales() toma el dato cuando no hay input.
+        var puede = Permisos.puedeEditar('bodyLocales');
+        var editable = !!datosLocales.manuales_disponibles && puede;
 
         datosLocales.filas.forEach(function(f) {
             var envia = (f.gestion === 'ENVIA');
@@ -510,21 +514,22 @@
             html += '<td class="text-end">' + celdaSaldoLocal(f, editable, manual) + '</td>';
             html += '<td class="text-center">' + celdaFechaLocal(f) + '</td>';
 
-            html += '<td class="text-center">' +
-                        '<select class="form-select form-select-sm sal-gestion" ' +
+            html += '<td class="text-center">' + (puede
+                        ? '<select class="form-select form-select-sm sal-gestion" ' +
                             'data-suc="' + f.nro_sucursal + '" ' +
                             'title="Los locales en Envía no entran al cashflow: su efectivo no ' +
                             'llega al banco por esta vía">' +
                             '<option value="DEPOSITA"' + (envia ? '' : ' selected') + '>Deposita</option>' +
                             '<option value="ENVIA"' + (envia ? ' selected' : '') + '>Envía</option>' +
-                        '</select>' +
+                          '</select>'
+                        : (envia ? 'Envía' : 'Deposita')) +
                     '</td>';
 
-            html += '<td>' +
-                        '<input type="number" step="0.01" min="0" ' +
+            html += (puede
+                        ? '<td><input type="number" step="0.01" min="0" ' +
                             'class="form-control form-control-sm text-end sal-reserva" ' +
-                            'data-suc="' + f.nro_sucursal + '" value="' + f.reserva + '">' +
-                    '</td>';
+                            'data-suc="' + f.nro_sucursal + '" value="' + f.reserva + '"></td>'
+                        : '<td class="text-end">' + pesos(f.reserva) + '</td>');
 
             html += '<td class="text-end sal-neto" data-suc="' + f.nro_sucursal + '"></td>';
             html += '<td class="text-end sal-aporta" data-suc="' + f.nro_sucursal + '"></td>';
@@ -1076,8 +1081,12 @@
             html += '<td class="text-center"><span class="sal-origen" title="' + escapar(titulo) + '">' +
                     estado + '</span></td>';
             html += '<td class="text-center sal-fecha-carga">' + fechaHora(m.FECHA_ALTA) +
-                    (m.USUARIO ? '<div class="sal-subtitulo">' + escapar(m.USUARIO) + '</div>' : '') + '</td>';
-            html += '<td class="text-center text-nowrap">' + (vigente
+                    (m.USUARIO ? '<div class="sal-subtitulo">' + escapar(Auditoria.quien(m.USUARIO)) + '</div>' : '') +
+                    // Alta y, si la tiene, baja (Js/auditoria.js)
+                    Auditoria.icono({ alta: { usuario: m.USUARIO, fecha: m.FECHA_ALTA },
+                        baja: m.FECHA_BAJA ? { usuario: m.USUARIO_BAJA, fecha: m.FECHA_BAJA } : null }) +
+                    '</td>';
+            html += '<td class="text-center text-nowrap">' + (vigente && Permisos.puedeEditar('modalMovimientos')
                 ? '<button class="btn btn-sm btn-outline-primary sal-btn-corregir" data-id="' + m.ID +
                       '" title="Corregir: da de baja este movimiento e inserta uno nuevo">' +
                       '<i class="fas fa-pen"></i></button> ' +

@@ -189,13 +189,17 @@
                             (tablaCreada ? '' : ' disabled') + '>' +
                     '</div>' +
                 '</td>' +
+                // Quién y cuándo, con el formato de Js/auditoria.js
                 '<td><small class="text-muted">' +
-                    esc(t.FECHA_MODIF || '') +
-                    (t.USUARIO_MODIF ? ' — ' + esc(t.USUARIO_MODIF) : '') +
-                    (t.ACTIVA ? '' : '<div>De baja</div>') +
+                    esc(Auditoria.linea('modif', t.USUARIO_MODIF, t.FECHA_MODIF)) +
+                    (t.ACTIVA ? '' : '<div>' + (esc(Auditoria.linea('baja', t.USUARIO_BAJA, t.FECHA_BAJA))
+                        || 'De baja') + '</div>') +
                 '</small></td>' +
             '</tr>';
         }).join('');
+
+        // Sin permiso de edicion, como texto (Js/permisos.js)
+        Permisos.soloLectura(cuerpo);
 
         cuerpo.querySelectorAll('.ptar-input').forEach(function(input) {
             input.addEventListener('change', function() { guardarCampo(input); });

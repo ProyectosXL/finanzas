@@ -1,6 +1,8 @@
 <?php
 
 require_once __DIR__ . '/CashflowRegistry.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * CashflowEstructura
@@ -387,7 +389,7 @@ class CashflowEstructura {
             throw new Exception('No se pudo conectar a la base de datos');
         }
 
-        $sql = "SELECT CODIGO, NOMBRE, ROL, ID_PADRE, ORDEN, ACTIVO
+        $sql = "SELECT CODIGO, NOMBRE, ROL, ID_PADRE, ORDEN, ACTIVO, USUARIO_MODIF, FECHA_MODIF
                 FROM RO_T_CASHFLOW_CONF_SECCION";
 
         if ($soloActivas) {
@@ -407,6 +409,7 @@ class CashflowEstructura {
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $row['ORDEN'] = intval($row['ORDEN']);
             $row['ACTIVO'] = intval($row['ACTIVO']);
+            $row['FECHA_MODIF'] = self::momento($row['FECHA_MODIF']);
             $v[] = $row;
         }
 
@@ -421,6 +424,14 @@ class CashflowEstructura {
      * @param bool $soloActivas true para el motor, false para el editor
      * @return array Filas de RO_T_CASHFLOW_CONF_FILA
      */
+    /**
+     * Un DATETIME de la base como 'Y-m-d H:i:s', o null. Para la auditoria
+     * de cada fila y seccion, que el editor muestra (Js/auditoria.js).
+     */
+    private static function momento($v) {
+        return ($v instanceof DateTime) ? $v->format('Y-m-d H:i:s') : $v;
+    }
+
     public function getFilas($soloActivas = false) {
         if (!$this->tablasCreadas()) {
             return [];
@@ -440,7 +451,7 @@ class CashflowEstructura {
         $conGrupo = $this->tieneColumnasGrupo();
 
         $sql = "SELECT ID, CODIGO, NOMBRE, SECCION, TIPO, COMPUTA,
-                       ORIGEN_PROVIDER, ORIGEN_SERIE, ORDEN, ACTIVO"
+                       ORIGEN_PROVIDER, ORIGEN_SERIE, ORDEN, ACTIVO, USUARIO_MODIF, FECHA_MODIF"
              . ($conGrupo ? ", GRUPO, NATURALEZA, GRUPO_NOMBRE" : "")
              . " FROM RO_T_CASHFLOW_CONF_FILA";
 
@@ -463,6 +474,7 @@ class CashflowEstructura {
             $row['ORDEN'] = intval($row['ORDEN']);
             $row['ACTIVO'] = intval($row['ACTIVO']);
             $row['COMPUTA'] = intval($row['COMPUTA']);
+            $row['FECHA_MODIF'] = self::momento($row['FECHA_MODIF']);
 
             foreach (['GRUPO', 'NATURALEZA', 'GRUPO_NOMBRE'] as $col) {
                 $row[$col] = isset($row[$col]) && trim((string) $row[$col]) !== ''
@@ -1327,10 +1339,11 @@ class CashflowEstructura {
      *
      * @param string $nombre
      * @param string $rol SALDO, MOVIMIENTO o DERIVADO
-     * @param string|null $usuario
+     * @param string $usuario
      * @return string El codigo asignado
      */
-    public function addSeccion($nombre, $rol, $usuario = null) {
+    public function addSeccion($nombre, $rol, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $nombre = trim((string) $nombre);
 
         if ($nombre === '') {
@@ -1369,12 +1382,12 @@ class CashflowEstructura {
         }
 
         $sql = "INSERT INTO RO_T_CASHFLOW_CONF_SECCION
-                    (CODIGO, NOMBRE, ROL, ID_PADRE, ORDEN, ACTIVO, FECHA_UPDATE, USUARIO)
+                    (CODIGO, NOMBRE, ROL, ID_PADRE, ORDEN, ACTIVO, USUARIO_ALTA, USUARIO_MODIF)
                 VALUES (?, ?, ?, NULL,
                     (SELECT ISNULL(MAX(ORDEN), 0) + 10 FROM RO_T_CASHFLOW_CONF_SECCION),
-                    0, GETDATE(), ?)";
+                    0, ?, ?)";
 
-        $stmt = sqlsrv_query($cid, $sql, [$codigo, $nombre, $rol, $usuario]);
+        $stmt = sqlsrv_query($cid, $sql, [$codigo, $nombre, $rol, $usuario, $usuario]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al crear la sección'));
@@ -1397,10 +1410,11 @@ class CashflowEstructura {
      * @param string $nombre
      * @param string $seccion Codigo de seccion
      * @param string $tipo
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array ['id' => int, 'codigo' => string]
      */
-    public function addFila($nombre, $seccion, $tipo, $usuario = null) {
+    public function addFila($nombre, $seccion, $tipo, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
         $nombre = trim((string) $nombre);
 
         if ($nombre === '') {
@@ -1447,13 +1461,14 @@ class CashflowEstructura {
 
         $sql = "INSERT INTO RO_T_CASHFLOW_CONF_FILA
                     (CODIGO, NOMBRE, SECCION, TIPO, COMPUTA, ORIGEN_PROVIDER, ORIGEN_SERIE,
-                     ORDEN, ACTIVO, FECHA_UPDATE, USUARIO)
+                     ORDEN, ACTIVO, USUARIO_ALTA, USUARIO_MODIF)
                 OUTPUT INSERTED.ID
                 VALUES (?, ?, ?, ?, 1, NULL, NULL,
                     (SELECT ISNULL(MAX(ORDEN), 0) + 10 FROM RO_T_CASHFLOW_CONF_FILA WHERE SECCION = ?),
-                    0, GETDATE(), ?)";
+                    0, ?, ?)";
 
-        $stmt = sqlsrv_query($cid, $sql, [$codigo, $nombre, $seccion, $tipo, $seccion, $usuario]);
+        $stmt = sqlsrv_query($cid, $sql, [$codigo, $nombre, $seccion, $tipo, $seccion, $usuario,
+            $usuario]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al crear la fila'));
@@ -1483,10 +1498,12 @@ class CashflowEstructura {
      *
      * @param array $secciones En el orden en que se muestran
      * @param array $filas En el orden en que se muestran
-     * @param string|null $usuario
+     * @param string $usuario
      * @return array El resultado de validar(), con las advertencias
      */
-    public function guardar($secciones, $filas, $usuario = null) {
+    public function guardar($secciones, $filas, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
         if (!$this->tablasCreadas()) {
             throw new Exception('No existen las tablas de estructura. '
                 . 'Corré sql/cashflow_estructura.sql.');
@@ -1522,19 +1539,21 @@ class CashflowEstructura {
                 $orden += 10;
 
                 $sql = "UPDATE RO_T_CASHFLOW_CONF_SECCION
-                        SET NOMBRE = ?, ROL = ?, ID_PADRE = ?, ORDEN = ?, ACTIVO = ?,
-                            FECHA_UPDATE = GETDATE(), USUARIO = ?
+                        SET NOMBRE = ?, ROL = ?, ID_PADRE = ?, ORDEN = ?, "
+                    . Auditoria::sqlBajaSegunEstado('ACTIVO') . ", ACTIVO = ?, "
+                    . Auditoria::SET_MODIF . "
                         WHERE CODIGO = ?";
 
-                $params = [
+                $params = array_merge([
                     trim($s['nombre']),
                     $s['rol'],
                     empty($s['id_padre']) ? null : $s['id_padre'],
-                    $orden,
+                    $orden
+                ], Auditoria::paramsBajaSegunEstado(!empty($s['activo']), $usuario), [
                     !empty($s['activo']) ? 1 : 0,
                     $usuario,
                     $s['codigo']
-                ];
+                ]);
 
                 if (sqlsrv_query($cid, $sql, $params) === false) {
                     throw new Exception($this->errorSql('Error al guardar la sección '
@@ -1563,9 +1582,10 @@ class CashflowEstructura {
                 // tiene. El editor ademas ya las dibuja apagadas.
                 $sql = "UPDATE RO_T_CASHFLOW_CONF_FILA
                         SET NOMBRE = ?, SECCION = ?, TIPO = ?, COMPUTA = ?,
-                            ORIGEN_PROVIDER = ?, ORIGEN_SERIE = ?, ORDEN = ?, ACTIVO = ?,"
+                            ORIGEN_PROVIDER = ?, ORIGEN_SERIE = ?, ORDEN = ?, "
+                    . Auditoria::sqlBajaSegunEstado('ACTIVO') . ", ACTIVO = ?,"
                     . ($conGrupo ? " GRUPO = ?, NATURALEZA = ?, GRUPO_NOMBRE = ?," : "")
-                    . " FECHA_UPDATE = GETDATE(), USUARIO = ?
+                    . " " . Auditoria::SET_MODIF . "
                         WHERE ID = ?";
 
                 $derivada = self::esDerivada($f['tipo']);
@@ -1578,9 +1598,12 @@ class CashflowEstructura {
                     !empty($f['computa']) ? 1 : 0,
                     ($derivada || empty($f['origen_provider'])) ? null : $f['origen_provider'],
                     ($derivada || empty($f['origen_serie'])) ? null : $f['origen_serie'],
-                    $ordenPorSeccion[$seccion],
-                    !empty($f['activo']) ? 1 : 0
+                    $ordenPorSeccion[$seccion]
                 ];
+
+                $params = array_merge($params,
+                    Auditoria::paramsBajaSegunEstado(!empty($f['activo']), $usuario),
+                    [!empty($f['activo']) ? 1 : 0]);
 
                 if ($conGrupo) {
                     $params[] = $grupo['GRUPO'];

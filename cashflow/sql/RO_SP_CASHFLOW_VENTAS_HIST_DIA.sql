@@ -35,9 +35,10 @@
    hoy alimenta la proyeccion y su job, asi que se dejo para un cambio propio.
    Si se toca un filtro aca, hay que tocarlo tambien alla.
 
-   Parametros (ambos opcionales):
+   Parametros (todos opcionales):
      @Desde  NULL -> DATEADD(DAY, -30, GETDATE())
      @Hasta  NULL -> ayer, que es hasta donde llega la carga de madrugada
+     @Usuario quien lo corre. El paso del job pasa 'JOB:VENTAS_HIST_DIA'; vacio -> 'JOB:RO_SP_CASHFLOW_VENTAS_HIST_DIA'
 
    CARGA INICIAL
    El bloque de tendencias muestra los ultimos N meses y los compara contra los
@@ -56,12 +57,19 @@ IF OBJECT_ID('dbo.RO_SP_CASHFLOW_VENTAS_HIST_DIA', 'P') IS NOT NULL
 GO
 
 CREATE PROCEDURE dbo.RO_SP_CASHFLOW_VENTAS_HIST_DIA
-    @Desde DATE = NULL,
-    @Hasta DATE = NULL
+    @Desde   DATE         = NULL,
+    @Hasta   DATE         = NULL,
+    @Usuario VARCHAR(128) = NULL
 AS
 BEGIN
     SET XACT_ABORT ON;
     SET NOCOUNT ON;
+
+    /* QUIEN LO CORRIO, para USUARIO_ALTA de cada fila: el job pasa 'JOB:VENTAS_HIST_DIA'
+       y una corrida a mano sin @Usuario queda como el nombre del SP. Nunca
+       SUSER_SNAME(): es la cuenta del servicio, no contesta quien. Los
+       origenes estan declarados en AuthCashflow::ORIGENES. */
+    SET @Usuario = LEFT(ISNULL(NULLIF(LTRIM(RTRIM(@Usuario)), ''), 'JOB:RO_SP_CASHFLOW_VENTAS_HIST_DIA'), 50);
 
     IF @Desde IS NULL SET @Desde = DATEADD(DAY, -30, CAST(GETDATE() AS DATE));
 
@@ -169,13 +177,16 @@ BEGIN
             WHERE FECHA BETWEEN @Desde AND @Hasta;
 
             INSERT INTO dbo.RO_T_CASHFLOW_VENTAS_HIST_DIA
-                (FECHA, CANAL, TIPO_COMPROBANTE, IMPORTE_NETO, CANTIDAD, FECHA_CARGA)
+                (FECHA, CANAL, TIPO_COMPROBANTE, IMPORTE_NETO, CANTIDAD, FECHA_CARGA,
+                 USUARIO_ALTA, FECHA_ALTA)
             SELECT
                 T.FECHA,
                 T.CANAL,
                 T.TIPO_COMPROBANTE,
                 SUM(T.IMPORTE_NETO),
                 SUM(T.CANTIDAD),
+                GETDATE(),
+                @Usuario,
                 GETDATE()
             FROM #TempVentasDia T
             WHERE T.CANAL <> ''

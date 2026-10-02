@@ -99,6 +99,13 @@
                     });
 
                     renderizarEscala();
+
+                    // Quién cargó la escala vigente y cuándo (Js/auditoria.js)
+                    var aud = document.getElementById('audEscalaCob');
+
+                    if (aud) {
+                        aud.innerHTML = result.auditoria ? Auditoria.icono({ alta: result.auditoria }) : '';
+                    }
                 } else {
                     Notificacion.error('No se pudo leer la escala de descuento: ' + result.message);
                 }
@@ -145,6 +152,9 @@
         });
 
         tbody.innerHTML = html;
+
+        // Sin permiso de edicion, la escala como texto (Js/permisos.js)
+        Permisos.soloLectura(tbody);
 
         tbody.querySelectorAll('input').forEach(function(inp) {
             inp.addEventListener('input', leerEscalaDelDom);
@@ -321,9 +331,13 @@
                         input.value = p.VALOR;
                     }
                 });
+
+                // Con el valor ya puesto: sin permiso, como texto (Js/permisos.js)
+                PLAZOS_GLOBALES.forEach(function(c) { Permisos.soloLectura('card-' + c); });
             })
             .catch(err => {
                 console.error('Error al cargar los plazos globales de cobranzas:', err);
+                PLAZOS_GLOBALES.forEach(function(c) { Permisos.soloLectura('card-' + c); });
             });
     }
 
@@ -483,6 +497,8 @@
         });
 
         tbody.innerHTML = html;
+
+        Permisos.soloLectura(tbody);
 
         if (pie) {
             pie.textContent = grupos.length + ' grupo(s) · ' + totalClientes + ' franquicia(s) habilitada(s)'

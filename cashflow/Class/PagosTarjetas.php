@@ -506,6 +506,20 @@ class PagosTarjetas {
         $r = TarjetasCorporativas::resolver($facturas, $vinculos, $excluidas, $corporativas,
             $resumenes, $habiles, $meses, $hoy);
 
+        /* Quien vinculo y quien excluyo cada factura, y cuando, para el tooltip
+           de la fila (Js/auditoria.js). Se agrega aca y no en resolver(), que
+           es puro y no necesita saberlo. */
+        $audVinculo = $this->leer(function () { return $this->vinculo->auditoriaVigentes(); },
+            'quién vinculó cada factura', $salida['avisos']);
+
+        foreach ($r['filas'] as $i => $f) {
+            $c = $f['CLAVE'];
+            $r['filas'][$i]['VINCULO_USUARIO'] = isset($audVinculo[$c]) ? $audVinculo[$c]['USUARIO_ALTA'] : null;
+            $r['filas'][$i]['VINCULO_FECHA'] = isset($audVinculo[$c]) ? $audVinculo[$c]['FECHA_ALTA'] : null;
+            $r['filas'][$i]['EXCLUSION_USUARIO'] = isset($excluidas[$c]) ? $excluidas[$c]['USUARIO_ALTA'] : null;
+            $r['filas'][$i]['EXCLUSION_FECHA'] = isset($excluidas[$c]) ? $excluidas[$c]['FECHA_ALTA'] : null;
+        }
+
         $salida['filas'] = $r['filas'];
 
         foreach (TarjetasVencimiento::avisosCalendario($r['faltan_calendario']) as $a) {

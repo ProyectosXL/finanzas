@@ -51,7 +51,9 @@
    mes como SIN_PRESUPUESTO. Grabar el vacio es decir la verdad.
 
    Parametros (opcionales):
-     @Usuario  quien lo pidio, para el log. NULL -> el login de la sesion.
+     @Usuario  quien lo pidio: el username si lo pide una persona desde la
+               pantalla, 'JOB:COMEX_PRESUP' desde el job. Vacio ->
+               'JOB:RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN'. Va al log y a cada fila.
    ============================================================================ */
 
 CREATE OR ALTER PROCEDURE dbo.RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN
@@ -64,10 +66,16 @@ BEGIN
     DECLARE @Proceso VARCHAR(60) = 'COMEX_PRESUP_RESUMEN';
     DECLARE @IdLog INT, @Filas INT = 0, @Lock INT;
 
-    SET @Usuario = ISNULL(NULLIF(LTRIM(RTRIM(@Usuario)), ''), SUSER_SNAME());
+    /* QUIEN LO PIDIO, y nunca el login de la sesion: SUSER_SNAME() devolvia la
+       cuenta del servicio del Agent o la del pool de PHP, que no contestan
+       quien. Desde la pantalla llega el username; desde el job, el origen
+       'JOB:COMEX_PRESUP'; vacio -alguien lo corrio a mano sin pasarlo-, el nombre del SP.
+       Los origenes estan declarados en AuthCashflow::ORIGENES. Recortado a 50,
+       el largo de las columnas USUARIO_*. */
+    SET @Usuario = LEFT(ISNULL(NULLIF(LTRIM(RTRIM(@Usuario)), ''), 'JOB:RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN'), 50);
 
-    INSERT INTO dbo.RO_T_CASHFLOW_JOB_LOG (PROCESO, INICIO, USUARIO)
-    VALUES (@Proceso, GETDATE(), @Usuario);
+    INSERT INTO dbo.RO_T_CASHFLOW_JOB_LOG (PROCESO, INICIO, USUARIO_ALTA, USUARIO_MODIF)
+    VALUES (@Proceso, GETDATE(), @Usuario, @Usuario);
 
     SET @IdLog = SCOPE_IDENTITY();
 
@@ -79,7 +87,8 @@ BEGIN
     BEGIN
         UPDATE dbo.RO_T_CASHFLOW_JOB_LOG
         SET FIN = GETDATE(),
-            ERROR = N'Ya hay otra corrida en curso; esta no hizo nada.'
+            ERROR = N'Ya hay otra corrida en curso; esta no hizo nada.',
+            USUARIO_MODIF = @Usuario, FECHA_MODIF = GETDATE()
         WHERE ID = @IdLog;
 
         RETURN;
@@ -176,11 +185,11 @@ BEGIN
                 (PAIS, TEMPORADA, ID_VERSION, NOMBRE, SOLAPA, FECHA_CALCULO_VERSION,
                  TRAMOS_ESTADO, TEMPORADA_DESDE, TEMPORADA_HASTA, FILAS, FILAS_SIN_COSTO,
                  UNIDADES, UNIDADES_SIN_COSTO, FOB_USD, NAC_SEGUN_INC_FOB, DEFICIT_COBERTURA,
-                 FECHA_CALCULO)
+                 FECHA_CALCULO, USUARIO_ALTA, FECHA_ALTA)
             SELECT PAIS, LTRIM(RTRIM(TEMPORADA)), ID_VERSION, NOMBRE, SOLAPA,
                    FECHA_CALCULO_VERSION, TRAMOS_ESTADO, TEMPORADA_DESDE, TEMPORADA_HASTA,
                    FILAS, FILAS_SIN_COSTO, UNIDADES, UNIDADES_SIN_COSTO, FOB_USD,
-                   NAC_SEGUN_INC_FOB, DEFICIT_COBERTURA, @Ahora
+                   NAC_SEGUN_INC_FOB, DEFICIT_COBERTURA, @Ahora, @Usuario, @Ahora
             FROM #RES;
 
             SET @Filas = @@ROWCOUNT;
@@ -190,18 +199,19 @@ BEGIN
             /* Un pais con tablas y sin nada en la vista tambien va: es
                justamente el caso en que la vista filtra TODO. */
             INSERT INTO dbo.RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE
-                (PAIS, FILAS_VISTA, FOB_VISTA, FILAS_TABLAS, FOB_TABLAS, FECHA_CALCULO)
+                (PAIS, FILAS_VISTA, FOB_VISTA, FILAS_TABLAS, FOB_TABLAS, FECHA_CALCULO,
+                 USUARIO_ALTA, FECHA_ALTA)
             SELECT ISNULL(t.PAIS, v.PAIS),
                    ISNULL(v.FILAS_VISTA, 0), ISNULL(v.FOB_VISTA, 0),
                    ISNULL(t.FILAS_TABLAS, 0), ISNULL(t.FOB_TABLAS, 0),
-                   @Ahora
+                   @Ahora, @Usuario, @Ahora
             FROM #TABLAS t
             FULL OUTER JOIN #VISTA v ON v.PAIS = t.PAIS;
 
         COMMIT TRANSACTION;
 
         UPDATE dbo.RO_T_CASHFLOW_JOB_LOG
-        SET FIN = GETDATE(), FILAS = @Filas
+        SET FIN = GETDATE(), FILAS = @Filas, USUARIO_MODIF = @Usuario, FECHA_MODIF = GETDATE()
         WHERE ID = @IdLog;
     END TRY
     BEGIN CATCH
@@ -211,7 +221,7 @@ BEGIN
         DECLARE @Error NVARCHAR(4000) = ERROR_MESSAGE();
 
         UPDATE dbo.RO_T_CASHFLOW_JOB_LOG
-        SET FIN = GETDATE(), ERROR = @Error
+        SET FIN = GETDATE(), ERROR = @Error, USUARIO_MODIF = @Usuario, FECHA_MODIF = GETDATE()
         WHERE ID = @IdLog;
 
         EXEC sp_releaseapplock @Resource = 'RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN', @LockOwner = 'Session';
@@ -230,7 +240,7 @@ GO
    Job      : CASHFLOW - Presupuesto de compras Comex
    Servidor : XL-TANGO, base LAKER_SA
    Paso 1   : T-SQL
-                EXEC dbo.RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN;
+                EXEC dbo.RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN @Usuario = 'JOB:COMEX_PRESUP';
    Frecuencia, dos programaciones en el mismo job:
      - DIARIA a las 05:00, con el de la historia.
      - Cada 30 minutos de 08:00 a 20:00, lunes a viernes. Tarda menos de un
@@ -257,7 +267,7 @@ GO
    -- EXEC msdb.dbo.sp_add_job @job_name = N'CASHFLOW - Presupuesto de compras Comex';
    -- EXEC msdb.dbo.sp_add_jobstep @job_name = N'CASHFLOW - Presupuesto de compras Comex',
    --      @step_name = N'RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN', @subsystem = N'TSQL',
-   --      @database_name = N'LAKER_SA', @command = N'EXEC dbo.RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN;';
+   --      @database_name = N'LAKER_SA', @command = N'EXEC dbo.RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN @Usuario = ''JOB:COMEX_PRESUP'';';
    -- EXEC msdb.dbo.sp_add_jobschedule @job_name = N'CASHFLOW - Presupuesto de compras Comex',
    --      @name = N'Diaria 05:00', @freq_type = 4, @freq_interval = 1,
    --      @active_start_time = 050000;

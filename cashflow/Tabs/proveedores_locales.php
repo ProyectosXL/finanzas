@@ -1,4 +1,10 @@
-<?php $tabName = 'Proveedores Locales'; ?>
+<?php
+$tabName = 'Proveedores Locales';
+
+/* Sin permiso de edicion los controles de escritura no se dibujan. Es
+   comodidad: lo que frena una escritura es el 403 del servidor. */
+$edita = AuthCashflow::puedeEditar('proveedores_locales');
+?>
 <link rel="stylesheet" href="Css/Proveedores-Proveedores_locales.css?v=<?php echo time(); ?>">
 
 <!--
@@ -18,7 +24,7 @@
     resuelve la conciliación. Un rótulo que dijera "reales" prometería un hecho
     donde hay un plan.
 -->
-<div class="tab-proveedores_locales">
+<div class="tab-proveedores_locales"<?php echo AuthCashflow::atributoEdicion('proveedores_locales'); ?>>
 
     <div id="avisosProv"></div>
 
@@ -89,11 +95,13 @@
                         <i class="fas fa-list me-1"></i> Cuentas a Pagar
                     </button>
                 </li>
+                <?php if ($edita): ?>
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="btnVistaImportarProv" type="button" role="tab">
                         <i class="fas fa-file-import me-1"></i> Importar
                     </button>
                 </li>
+                <?php endif; ?>
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="btnVistaMaestroProv" type="button" role="tab">
                         <i class="fas fa-address-book me-1"></i> Maestro
@@ -169,10 +177,12 @@
                 <div class="d-flex gap-2 flex-wrap align-items-center">
                     <div id="vistasProv"></div>
                     <div id="colFijasProv"></div>
+                    <?php if ($edita): ?>
                     <button id="btnConciliarProv" class="btn btn-sm btn-outline-secondary"
                             title="Comparar contra Tango: qué de lo previsto ya se pagó">
                         <i class="fas fa-code-compare me-1"></i> Conciliar
                     </button>
+                    <?php endif; ?>
                     <button id="btnRefreshProv" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
@@ -209,18 +219,26 @@
                              importe que se va a mover, y no acá: ese número es
                              lo que hace notar que se seleccionó de más, y hay
                              que leerlo antes de elegir la fecha. -->
+                        <?php if ($edita): ?>
                         <button class="btn btn-sm btn-outline-primary" id="btnFecharSelProv">
                             <i class="fas fa-calendar-day me-1"></i> Poner fecha de pago
                         </button>
+                        <?php endif; ?>
+                        <?php if ($edita): ?>
                         <button class="btn btn-sm btn-outline-danger" id="btnExcluirSelProv">
                             <i class="fas fa-ban me-1"></i> Excluir del cashflow
                         </button>
+                        <?php endif; ?>
+                        <?php if ($edita): ?>
                         <button class="btn btn-sm btn-outline-success" id="btnIncluirSelProv">
                             <i class="fas fa-rotate-left me-1"></i> Volver a incluir
                         </button>
+                        <?php endif; ?>
+                        <?php if ($edita): ?>
                         <button class="btn btn-sm btn-outline-secondary" id="btnLimpiarSelProv">
                             Limpiar selección
                         </button>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -308,9 +326,11 @@
                                      fila —atenuada y con el pendiente tachado— y
                                      en la marca de esta misma celda. -->
                                 <th rowspan="2" class="text-center" style="width: 46px;">
+                                    <?php if ($edita): ?>
                                     <input type="checkbox" class="form-check-input"
                                            id="selTodasProv"
                                            title="Seleccionar todas las facturas que se están viendo. Con el buscador puesto, son las de ese proveedor.">
+                                    <?php endif; ?>
                                 </th>
                                 <th colspan="1" class="table-group-divider" id="headerEjeProv">Días</th>
                             </tr>
@@ -333,6 +353,7 @@
         <!-- ============================================================
              IMPORTAR
              ============================================================ -->
+        <?php if ($edita): ?>
         <div id="vistaImportarProv" style="display: none;">
             <div class="card-body">
                 <!-- ES CSV Y NO .xlsx, Y HAY QUE DECIRLO ACÁ. El motivo está en
@@ -409,6 +430,7 @@
                 <div id="previewProv" class="mt-4" style="display: none;"></div>
             </div>
         </div>
+        <?php endif; ?>
 
         <!-- ============================================================
              MAESTRO
@@ -453,9 +475,11 @@
                             title="Vuelve a traer el maestro. No cancela lo que estés cargando ni borra el filtro.">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
+                    <?php if ($edita): ?>
                     <button class="btn btn-sm btn-primary" id="btnNuevoProv">
                         <i class="fas fa-plus me-1"></i> Agregar
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -471,6 +495,7 @@
                  que cruza contra Tango. Cambiarlo sería dar de baja un
                  proveedor y dar de alta otro, y eso son dos gestos.
                  ======================================================== -->
+            <?php if ($edita): ?>
             <div id="formProvWrap" class="card-body border-bottom bg-light bg-opacity-50"
                  style="display: none;">
                 <div class="row g-2 align-items-end">
@@ -565,6 +590,7 @@
                 </div>
                 <div class="param-hint mt-2" id="hintProv"></div>
             </div>
+            <?php endif; ?>
 
             <div class="card-body p-0">
                 <!-- EL CONTROL QUE EVITA QUE EL MAESTRO SE DESACTUALICE SIN QUE

@@ -33,14 +33,10 @@ try {
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
 
-    /** El usuario logueado, o null. Mismo criterio que el resto de los controllers */
-    function usuarioActual() {
-        if (session_status() === PHP_SESSION_NONE) {
-            @session_start();
-        }
-
-        return isset($_SESSION['usuario']) ? $_SESSION['usuario'] : null;
-    }
+    /* Quien escribe y si puede, antes de tocar nada: null en las acciones
+       que solo leen. Ver Controller/autorizacion.php. */
+    require_once __DIR__ . '/autorizacion.php';
+    $usuario = autorizar('ComprasProyectadas', $action);
 
     /** El cuerpo JSON de un POST */
     function cuerpo() {
@@ -160,7 +156,7 @@ try {
             $proceso = isset($body['proceso']) ? (string) $body['proceso'] : '';
 
             $job = new ComprasProyectadasJob;
-            $r = $job->correr($proceso, usuarioActual());
+            $r = $job->correr($proceso, $usuario);
 
             echo json_encode(['success' => true] + $r);
             break;
@@ -193,16 +189,12 @@ try {
             $ajustes = new ComprasProyectadasAjustes;
             $h = Horizonte::desdeParametros(new Parametros());
 
-            /* EL USUARIO TODAVIA LLEGA NULL: no hay login en el modulo. La
-               costura esta puesta -guardar() lo recibe y la tabla lo guarda-
-               para que el dia que exista no haya que tocar nada. Es el mismo
-               pendiente que el resto del modulo. */
             $r = $ajustes->guardar(
                 isset($body['mes']) ? $body['mes'] : '',
                 isset($body['importe_usd']) ? $body['importe_usd'] : null,
                 isset($body['motivo']) ? $body['motivo'] : '',
                 mesesDeLaVentana($h),
-                null
+                $usuario
             );
 
             echo json_encode(['success' => true, 'ajuste' => $r]);
@@ -212,7 +204,7 @@ try {
             $body = cuerpo();
 
             $ajustes = new ComprasProyectadasAjustes;
-            $r = $ajustes->quitar(isset($body['mes']) ? $body['mes'] : '');
+            $r = $ajustes->quitar(isset($body['mes']) ? $body['mes'] : '', $usuario);
 
             echo json_encode([
                 'success' => true,
