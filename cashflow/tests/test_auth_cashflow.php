@@ -276,3 +276,30 @@ sort($enScript);
 chequear('las mismas claves en el script y en el codigo', $esperadas, $enScript);
 chequear('ninguna pestaña de solo lectura lleva clave', false,
     in_array('cashflow.editar.dashboard', $enScript, true));
+
+seccion('saveParametro: la sub-pestaña sale del parametro');
+
+chequear('el modulo es la sub-pestaña', 'SALDOS', Parametros::subPestanaDe('SALDOS', 'GENERAL'));
+chequear('sin importar mayusculas', 'COMPRAS_PROY', Parametros::subPestanaDe('compras_proy', 'X'));
+chequear('el respaldo de Ventas es de Ventas', 'VENTAS', Parametros::subPestanaDe('VENTAS', 'RESPALDO'));
+// Antes de sql/cashflow_parametros_generales.sql los generales siguen en
+// VENTAS/GENERAL, pero se ven y se editan en la sub-pestaña Generales.
+chequear('los generales sin migrar se editan desde Generales', 'GENERALES',
+    Parametros::subPestanaDe('VENTAS', 'GENERAL'));
+chequear('saveParametro necesita la sub-pestaña', true,
+    AuthCashflow::necesitaSubDelParametro('Parametros', 'saveParametro'));
+chequear('saveMixCobro no', false, AuthCashflow::necesitaSubDelParametro('Parametros', 'saveMixCobro'));
+
+seccion('ningun controller toma el usuario de la sesion o del request');
+
+$sueltos = [];
+
+foreach (glob(__DIR__ . '/../Controller/*.php') as $archivo) {
+    $texto = file_get_contents($archivo);
+
+    if (preg_match('/usuarioActual|\$_SESSION\[\'usuario\'\]|\$data\[\'usuario\'\]/', $texto)) {
+        $sueltos[] = basename($archivo);
+    }
+}
+
+chequear('el usuario sale solo de autorizar()', [], $sueltos);

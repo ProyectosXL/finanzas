@@ -566,6 +566,23 @@ class AuthCashflow {
     }
 
     /**
+     * Si la accion necesita que le pasen la sub-pestaña (SUB_DEL_PARAMETRO).
+     *
+     * @param string $controlador
+     * @param string $accion
+     * @return bool
+     */
+    public static function necesitaSubDelParametro($controlador, $accion) {
+        foreach (self::ESCRITURAS[$controlador][$accion] ?? [] as $d) {
+            if ($d[1] === self::SUB_DEL_PARAMETRO) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Arma el valor que se graba cuando la escritura no la hizo una persona.
      *
      * @param string $proceso Clase.metodo para SISTEMA, nombre corto para JOB

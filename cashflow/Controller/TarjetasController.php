@@ -31,41 +31,6 @@ header('Content-Type: application/json');
 
 require_once __DIR__ . '/../Class/AuthCashflow.php';
 
-/**
- * Usuario que realiza la edicion, para la auditoria de las cuatro tablas.
- *
- * PIDE EL USUARIO DEL PADRON Y NO SOLO $_SESSION['usuario'], a diferencia del
- * resto de los controllers del modulo. Esas cuatro tablas exigen auditoria
- * -USUARIO_ALTA, USUARIO_MODIF, USUARIO_BAJA- y grabarla en NULL la convierte en
- * decoracion: la columna existe, el campo esta, y no contesta quien hizo el
- * cambio.
- *
- * AuthCashflow::init() ya resuelve el usuario de la sesion mirando las cuatro
- * claves con las que las distintas pantallas del sistema la escriben
- * ('username', 'usuario', 'nodo_usuario_activo', 'fp_auth_user'), asi que
- * preguntarle a el es preguntar una sola vez y bien.
- *
- * EL FALLBACK A $_SESSION['usuario'] QUEDA para el caso en que el padron no se
- * pueda leer -Gestionusuarios es otro modulo de htdocs y puede no estar-: ahi
- * AuthCashflow falla cerrado y devuelve null, pero la sesion puede tener el
- * nombre igual. Y si tampoco, se graba NULL, que es lo que hace hoy todo el
- * modulo.
- *
- * El resto del modulo sigue grabando NULL y eso se resuelve aparte: cambiarlo
- * aca para diecinueve pantallas seria un refactor que no es de esta tarea.
- *
- * @return string|null
- */
-function usuarioActual() {
-    $u = AuthCashflow::usuario();
-
-    if ($u !== null && !empty($u['username'])) {
-        return substr(trim((string) $u['username']), 0, 50);
-    }
-
-    return isset($_SESSION['usuario']) ? substr(trim((string) $_SESSION['usuario']), 0, 50) : null;
-}
-
 /** @return array El cuerpo JSON del request */
 function bodyJson() {
     $data = json_decode(file_get_contents('php://input'), true);
@@ -197,6 +162,12 @@ try {
     require_once __DIR__ . '/../Class/TarjetasResumen.php';
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
+
+    /* Quien escribe y si puede, antes de tocar nada: null en las acciones
+       que solo leen. Ver Controller/autorizacion.php. */
+    require_once __DIR__ . '/autorizacion.php';
+    $usuario = autorizar('Tarjetas', $action);
+
     $tarjetas = new Tarjetas();
 
     switch ($action) {
@@ -341,7 +312,7 @@ try {
             }
 
             $r = (new TarjetasFactura())->vincular($data['comprobantes'], $data['id_tarjeta'],
-                usuarioActual());
+                $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -364,7 +335,7 @@ try {
                 throw new Exception('Faltan las facturas');
             }
 
-            $r = (new TarjetasFactura())->desvincular($data['comprobantes'], usuarioActual());
+            $r = (new TarjetasFactura())->desvincular($data['comprobantes'], $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -388,7 +359,7 @@ try {
             }
 
             $r = (new TarjetasExclusion())->excluir($data['comprobantes'],
-                isset($data['motivo']) ? $data['motivo'] : null, usuarioActual());
+                isset($data['motivo']) ? $data['motivo'] : null, $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -413,7 +384,7 @@ try {
                 throw new Exception('Faltan las facturas');
             }
 
-            $r = (new TarjetasExclusion())->incluir($data['comprobantes'], usuarioActual());
+            $r = (new TarjetasExclusion())->incluir($data['comprobantes'], $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -494,7 +465,7 @@ try {
                     'dia_vencimiento' => isset($data['dia_vencimiento'])
                         ? $data['dia_vencimiento'] : null
                 ],
-                usuarioActual());
+                $usuario);
 
             $mensaje = $r['nuevo']
                 ? ('Tarjeta dada de alta: ' . $r['rotulo'] . '.')
@@ -516,7 +487,7 @@ try {
                 throw new Exception('Faltan parámetros obligatorios');
             }
 
-            $r = $tarjetas->activarTarjeta($data['id'], !empty($data['activa']), usuarioActual());
+            $r = $tarjetas->activarTarjeta($data['id'], !empty($data['activa']), $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -574,7 +545,7 @@ try {
                     ? $data['fecha_vencimiento'] : null,
                 'origen' => isset($data['origen']) ? $data['origen'] : null,
                 'observacion' => isset($data['observacion']) ? $data['observacion'] : null
-            ], usuarioActual());
+            ], $usuario);
 
             /* SE DICE QUE PISA LA ESTIMACION, y en el mismo mensaje: un "guardado"
                a secas no explica por que la fila del tablero cambio de numero. */
@@ -597,7 +568,7 @@ try {
             }
 
             $resumen = new TarjetasResumen();
-            $r = $resumen->marcarPagado($data['id'], !empty($data['pagado']), usuarioActual());
+            $r = $resumen->marcarPagado($data['id'], !empty($data['pagado']), $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -617,7 +588,7 @@ try {
             }
 
             $resumen = new TarjetasResumen();
-            $r = $resumen->darDeBaja($data['id'], usuarioActual());
+            $r = $resumen->darDeBaja($data['id'], $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -637,7 +608,7 @@ try {
             }
 
             $resumen = new TarjetasResumen();
-            $r = $resumen->cargarBase($data['id_tarjeta'], $data['resumenes'], usuarioActual());
+            $r = $resumen->cargarBase($data['id_tarjeta'], $data['resumenes'], $usuario);
 
             $mensaje = 'Base histórica cargada: ' . $r['cargados'] . ' resumen(es) ('
                 . implode(', ', $r['meses']) . '). Entran como ya pagados, así que no suman al '

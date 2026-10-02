@@ -969,6 +969,55 @@ class Parametros {
     }
 
     /**
+     * En que sub-pestaña se edita un parametro, segun su fila. Pura.
+     *
+     * Es la que decide que permiso pide saveParametro(): un solo endpoint que
+     * usan cuatro sub-pestañas. Casi siempre es el MODULO, con una excepcion:
+     * los generales que todavia figuran en VENTAS/GENERAL -antes de correr
+     * sql/cashflow_parametros_generales.sql- se ven y se editan en Generales
+     * (ver el rescate en getModulosConDatos()), asi que piden ese permiso.
+     *
+     * @param string $modulo
+     * @param string $grupo
+     * @return string
+     */
+    public static function subPestanaDe($modulo, $grupo) {
+        $modulo = strtoupper(trim((string) $modulo));
+
+        if ($modulo === 'VENTAS' && strtoupper(trim((string) $grupo)) === 'GENERAL') {
+            return 'GENERALES';
+        }
+
+        return $modulo;
+    }
+
+    /**
+     * La sub-pestaña de un parametro, leida de su fila. null si no existe.
+     *
+     * @param string $clave
+     * @return string|null
+     */
+    public function subPestanaDelParametro($clave) {
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT MODULO, GRUPO FROM RO_T_CASHFLOW_PARAMETROS WHERE CLAVE = ?", [$clave]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer el parametro'));
+        }
+
+        $fila = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        return $fila ? self::subPestanaDe($fila['MODULO'], $fila['GRUPO']) : null;
+    }
+
+    /**
      * Guarda (o crea) un parametro
      * @param string $clave Clave del parametro
      * @param string $valor Valor a guardar

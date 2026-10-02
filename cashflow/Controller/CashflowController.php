@@ -29,6 +29,11 @@ try {
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
 
+    /* Quien escribe y si puede, antes de tocar nada: null en las acciones
+       que solo leen. Ver Controller/autorizacion.php. */
+    require_once __DIR__ . '/autorizacion.php';
+    $usuario = autorizar('Cashflow', $action);
+
     $cashflow = new Cashflow();
 
     switch ($action) {

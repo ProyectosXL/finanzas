@@ -24,14 +24,6 @@ if (session_status() === PHP_SESSION_NONE) {
 
 header('Content-Type: application/json');
 
-/**
- * Usuario para la auditoría. Todavía no hay login: devuelve NULL y se graba
- * NULL. Cuando exista, sólo hay que poblar $_SESSION['usuario'].
- */
-function usuarioActual() {
-    return isset($_SESSION['usuario']) ? $_SESSION['usuario'] : null;
-}
-
 function bodyJson() {
     $data = json_decode(file_get_contents('php://input'), true);
 
@@ -47,6 +39,11 @@ try {
     require_once __DIR__ . '/../Class/CashflowRegistry.php';
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
+
+    /* Quien escribe y si puede, antes de tocar nada: null en las acciones
+       que solo leen. Ver Controller/autorizacion.php. */
+    require_once __DIR__ . '/autorizacion.php';
+    $usuario = autorizar('CashflowEstructura', $action);
 
     $estructura = new CashflowEstructura();
 
@@ -98,7 +95,7 @@ try {
                 throw new Exception('Faltan las secciones o las filas en el request');
             }
 
-            $val = $estructura->guardar($data['secciones'], $data['filas'], usuarioActual());
+            $val = $estructura->guardar($data['secciones'], $data['filas'], $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -114,7 +111,7 @@ try {
                 isset($data['nombre']) ? $data['nombre'] : '',
                 isset($data['seccion']) ? $data['seccion'] : '',
                 isset($data['tipo']) ? $data['tipo'] : '',
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -131,7 +128,7 @@ try {
             $codigo = $estructura->addSeccion(
                 isset($data['nombre']) ? $data['nombre'] : '',
                 isset($data['rol']) ? $data['rol'] : '',
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([

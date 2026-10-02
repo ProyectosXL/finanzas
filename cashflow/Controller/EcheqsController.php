@@ -30,16 +30,6 @@ if (session_status() === PHP_SESSION_NONE) {
 header('Content-Type: application/json');
 
 /**
- * Usuario que realiza la edicion.
- * Todavia no hay login: devuelve NULL y se graba NULL. Cuando exista, solo hay
- * que poblar $_SESSION['usuario'].
- * @return string|null Usuario actual
- */
-function usuarioActual() {
-    return isset($_SESSION['usuario']) ? $_SESSION['usuario'] : null;
-}
-
-/**
  * Lee y decodifica el body JSON del request
  * @return array
  */
@@ -59,6 +49,12 @@ try {
     require_once __DIR__ . '/../Class/Parametros.php';
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
+
+    /* Quien escribe y si puede, antes de tocar nada: null en las acciones
+       que solo leen. Ver Controller/autorizacion.php. */
+    require_once __DIR__ . '/autorizacion.php';
+    $usuario = autorizar('Echeqs', $action);
+
     $echeqs = new Echeqs();
 
     switch ($action) {
@@ -161,7 +157,7 @@ try {
             $r = $echeqs->marcarCheques(
                 $data['ids'],
                 !empty($data['marcado']),
-                usuarioActual()
+                $usuario
             );
 
             $mensaje = ($data['marcado'] ? 'Se tildaron ' : 'Se destildaron ')
@@ -209,7 +205,7 @@ try {
                 $data['ids'],
                 !empty($data['excluir']),
                 isset($data['motivo']) ? $data['motivo'] : null,
-                usuarioActual()
+                $usuario
             );
 
             $cuantos = $r['tocados'];

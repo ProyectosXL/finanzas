@@ -14,16 +14,6 @@ if (session_status() === PHP_SESSION_NONE) {
 header('Content-Type: application/json');
 
 /**
- * Usuario que realiza la edicion.
- * Todavia no hay login: devuelve NULL y se graba NULL. Cuando exista, solo hay
- * que poblar $_SESSION['usuario'] y toda la trazabilidad queda enchufada.
- * @return string|null Usuario actual
- */
-function usuarioActual() {
-    return isset($_SESSION['usuario']) ? $_SESSION['usuario'] : null;
-}
-
-/**
  * Lee y decodifica el body JSON del request
  * @return array Datos del POST
  */
@@ -43,6 +33,11 @@ try {
 
     // Obtener accion del request
     $action = isset($_GET['action']) ? $_GET['action'] : '';
+
+    /* Quien escribe y si puede, antes de tocar nada: null en las acciones
+       que solo leen. Ver Controller/autorizacion.php. */
+    require_once __DIR__ . '/autorizacion.php';
+    $usuario = autorizar('Ventas', $action);
 
     $ventas = new Ventas();
 
@@ -106,7 +101,7 @@ try {
                 $data['anio'],
                 $data['mes'],
                 $data['valores'],
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -135,7 +130,7 @@ try {
                 $data['anio'],
                 $data['mes'],
                 $data['indice'],
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([

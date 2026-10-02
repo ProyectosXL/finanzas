@@ -29,15 +29,6 @@ if (session_status() === PHP_SESSION_NONE) {
 
 header('Content-Type: application/json');
 
-/**
- * Usuario que realiza la edicion.
- * Todavia no hay login: devuelve NULL y se graba NULL.
- * @return string|null
- */
-function usuarioActual() {
-    return isset($_SESSION['usuario']) ? $_SESSION['usuario'] : null;
-}
-
 /** @return array El cuerpo JSON del request */
 function bodyJson() {
     $data = json_decode(file_get_contents('php://input'), true);
@@ -92,6 +83,11 @@ try {
     require_once __DIR__ . '/../Class/Parametros.php';
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
+
+    /* Quien escribe y si puede, antes de tocar nada: null en las acciones
+       que solo leen. Ver Controller/autorizacion.php. */
+    require_once __DIR__ . '/autorizacion.php';
+    $usuario = autorizar('Proveedores', $action);
 
     /* Las dos plantillas van ANTES del try de negocio: son descargas, no JSON, y
        no necesitan ni base ni datos cargados. */
@@ -167,7 +163,7 @@ try {
                 $data['cod_provee'], $data['t_comp'], $data['n_comp'], $data['fecha_pago'],
                 isset($data['forma_pago']) ? $data['forma_pago'] : null,
                 isset($data['observacion']) ? $data['observacion'] : null,
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -203,7 +199,7 @@ try {
                 throw new Exception('Falta la fecha de pago que hay que ponerles.');
             }
 
-            $r = $prov->saveFechaMasiva($comprobantes, $data['fecha_pago'], usuarioActual());
+            $r = $prov->saveFechaMasiva($comprobantes, $data['fecha_pago'], $usuario);
 
             $cuantas = $r['tocados'];
 
@@ -242,7 +238,7 @@ try {
             $r = $prov->saveFormaCronograma(
                 $data['cod_provee'], $data['t_comp'], $data['n_comp'],
                 isset($data['forma']) ? $data['forma'] : '',
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -287,7 +283,7 @@ try {
                 $comprobantes,
                 !empty($data['excluida']),
                 isset($data['motivo']) ? $data['motivo'] : null,
-                usuarioActual()
+                $usuario
             );
 
             $cuantas = $r['tocados'];
@@ -315,7 +311,8 @@ try {
                 }
             }
 
-            $habia = $prov->deletePago($data['cod_provee'], $data['t_comp'], $data['n_comp']);
+            $habia = $prov->deletePago($data['cod_provee'], $data['t_comp'], $data['n_comp'],
+                $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -351,7 +348,7 @@ try {
                 throw new Exception('No hay nada para importar. Volvé a subir el archivo.');
             }
 
-            $r = $prov->aplicarImportacion($data['comparacion'], usuarioActual());
+            $r = $prov->aplicarImportacion($data['comparacion'], $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -462,7 +459,7 @@ try {
             $r = $prov->categorias()->aplicarImportacion(
                 $data['comparacion'],
                 !empty($data['aplicar_bajas']),
-                usuarioActual()
+                $usuario
             );
 
             echo json_encode([
@@ -580,7 +577,7 @@ try {
                 isset($data['cod_provee']) ? $data['cod_provee'] : '',
                 ProveedoresExclusion::MODULO_PROV_LOCALES,
                 isset($data['motivo']) ? $data['motivo'] : '',
-                usuarioActual());
+                $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -599,7 +596,7 @@ try {
             }
 
             $habia = $prov->exclusion()->incluir($data['cod_provee'],
-                ProveedoresExclusion::MODULO_PROV_LOCALES, usuarioActual());
+                ProveedoresExclusion::MODULO_PROV_LOCALES, $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -640,7 +637,7 @@ try {
                 throw new Exception('Falta el código del proveedor.');
             }
 
-            $r = $prov->categorias()->guardarManual($data, usuarioActual());
+            $r = $prov->categorias()->guardarManual($data, $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -659,7 +656,7 @@ try {
                 throw new Exception('Falta el código del proveedor que hay que dar de baja.');
             }
 
-            $habia = $prov->categorias()->bajaManual($data['cod_provee']);
+            $habia = $prov->categorias()->bajaManual($data['cod_provee'], $usuario);
 
             echo json_encode([
                 'success' => true,
@@ -688,12 +685,12 @@ try {
         case 'previewConciliacion':
             echo json_encode([
                 'success' => true,
-                'data' => $prov->conciliar(false, usuarioActual())
+                'data' => $prov->conciliar(false, $usuario)
             ], JSON_UNESCAPED_UNICODE);
             break;
 
         case 'aplicarConciliacion':
-            $r = $prov->conciliar(true, usuarioActual());
+            $r = $prov->conciliar(true, $usuario);
 
             echo json_encode([
                 'success' => true,
