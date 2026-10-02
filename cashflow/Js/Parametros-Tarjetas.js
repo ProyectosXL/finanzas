@@ -197,6 +197,9 @@
             '</tr>';
         }).join('');
 
+        // Sin permiso de edicion, como texto (Js/permisos.js)
+        Permisos.soloLectura(cuerpo);
+
         cuerpo.querySelectorAll('.ptar-input').forEach(function(input) {
             input.addEventListener('change', function() { guardarCampo(input); });
         });

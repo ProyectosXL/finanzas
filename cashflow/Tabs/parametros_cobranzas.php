@@ -1,4 +1,10 @@
 <?php
+/* Sin permiso de edicion de esta sub-pestaña los controles de escritura no
+   se dibujan. Se define aca y no en parametros.php porque cada sub-pestaña
+   tiene su permiso, y todas comparten el alcance de ese archivo. */
+$edita = AuthCashflow::puedeEditar('parametros', 'COBRANZAS');
+?>
+<?php
 /**
  * Sub-pestaña Parámetros -> Cobranzas
  * Escala de descuento y PPP de Cobranzas Franquicias, y los plazos globales
@@ -84,12 +90,16 @@
                             title="Exportar a Excel la escala tal como está cargada">
                         <i class="fas fa-file-excel me-1"></i> Exportar
                     </button>
+                    <?php if ($edita): ?>
                     <button id="btnAgregarTramoEsc" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-plus me-1"></i> Agregar tramo
                     </button>
+                    <?php endif; ?>
+                    <?php if ($edita): ?>
                     <button id="btnGuardarEscala" class="btn btn-sm btn-primary">
                         <i class="fas fa-save me-1"></i> Guardar escala
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
             <div class="card-body">

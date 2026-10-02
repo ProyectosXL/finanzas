@@ -70,6 +70,10 @@ $tituloInicial = Menu::tituloTab($tabInicial);
          hoja: antes cada pestaña traía su copia, y las que no la traían se
          veían bien solo si antes se había abierto otra. -->
     <link href="Css/cargando.css?v=<?php echo time(); ?>" rel="stylesheet">
+    <!-- Si se pueden dibujar los controles de edición (Js/permisos.js). Va en
+         el <head> y no al pie con los demás: la pestaña inicial se incluye en
+         línea más abajo y su JS ya pregunta al dibujar. No depende de nada. -->
+    <script src="Js/permisos.js?v=<?php echo time(); ?>"></script>
 </head>
 <body>
   

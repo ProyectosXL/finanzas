@@ -1,4 +1,10 @@
-<?php $tabName = 'Cob. Electrónicos'; ?>
+<?php
+$tabName = 'Cob. Electrónicos';
+
+/* Sin permiso de edicion los controles de escritura no se dibujan. Es
+   comodidad: lo que frena una escritura es el 403 del servidor. */
+$edita = AuthCashflow::puedeEditar('cob_electronicos');
+?>
 <link rel="stylesheet" href="Css/Cob-Electronicos.css?v=<?php echo time(); ?>">
 
 <!--
@@ -31,7 +37,7 @@
       · Esta fila NO se cruza con "Cobros s/ ventas estimadas" de Ventas, por
         decisión del negocio. No hay deducción ni prorrateo entre las dos.
 -->
-<div class="tab-cobel">
+<div class="tab-cobel"<?php echo AuthCashflow::atributoEdicion('cob_electronicos'); ?>>
 
     <div id="avisosCobel"></div>
 
@@ -126,16 +132,21 @@
                 <button id="btnRefreshCobel" class="btn btn-sm btn-outline-primary">
                     <i class="fas fa-sync-alt me-1"></i> Actualizar
                 </button>
+                <?php if ($edita): ?>
                 <button id="btnImportar" class="btn btn-sm btn-outline-primary">
                     <i class="fas fa-file-import me-1"></i> Importar planilla
                 </button>
+                <?php endif; ?>
+                <?php if ($edita): ?>
                 <button id="btnNuevoMovimiento" class="btn btn-sm btn-primary">
                     <i class="fas fa-plus me-1"></i> Nuevo movimiento
                 </button>
+                <?php endif; ?>
             </div>
         </div>
 
         <!-- Alta inline -->
+        <?php if ($edita): ?>
         <div class="card-body border-bottom" id="formMovimiento" style="display: none;">
             <div class="row g-2 align-items-end">
                 <div class="col-md-3">
@@ -174,6 +185,7 @@
                  que devuelve el guardado. -->
             <div class="cobel-preview mt-2" id="previewNeto"></div>
         </div>
+        <?php endif; ?>
 
         <!-- ========================================================
              IMPORTADOR
@@ -182,6 +194,7 @@
              Es lo que permite actualizar seguido sin tener que comparar a mano
              qué cambió respecto de lo ya cargado.
         -->
+        <?php if ($edita): ?>
         <div class="card-body border-bottom cobel-importador" id="panelImportar"
              style="display: none;">
             <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
@@ -247,6 +260,7 @@
             <!-- El resultado de la previsualización y la confirmación -->
             <div id="resultadoImportar"></div>
         </div>
+        <?php endif; ?>
 
         <div class="card-body p-0">
             <div class="cobel-filtros border-bottom">

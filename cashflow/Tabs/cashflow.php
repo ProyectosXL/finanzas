@@ -14,7 +14,7 @@
     todo va dentro de inicializar().
 -->
 
-<div class="tab-cashflow">
+<div class="tab-cashflow"<?php echo AuthCashflow::atributoEdicion('cashflow'); ?>>
 
     <!-- Indicadores -->
     <div class="row g-3 mb-3" id="cfKpis" style="display: none;">

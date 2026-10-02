@@ -1,4 +1,10 @@
 <?php
+/* Sin permiso de edicion de esta sub-pestaña los controles de escritura no
+   se dibujan. Se define aca y no en parametros.php porque cada sub-pestaña
+   tiene su permiso, y todas comparten el alcance de ese archivo. */
+$edita = AuthCashflow::puedeEditar('parametros', 'LOGISTICA');
+?>
+<?php
 /**
  * Parametros -> Logistica
  *
@@ -45,9 +51,11 @@
                         title="Exportar a Excel lo que se está viendo">
                     <i class="fas fa-file-excel me-1"></i> Exportar
                 </button>
+                <?php if ($edita): ?>
                 <button id="plogBtnNuevo" class="btn btn-sm btn-outline-primary">
                     <i class="fas fa-plus me-1"></i> Agregar fletero
                 </button>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -57,6 +65,7 @@
              Locales: se busca en CPA01 por código o por nombre y se
              elige de la lista. El nombre NO se tipea.
              ======================================================== -->
+        <?php if ($edita): ?>
         <div class="card-body border-bottom" id="plogFormNuevo" style="display: none;">
             <div class="row g-2 align-items-end">
                 <div class="col-md-5 position-relative">
@@ -107,6 +116,7 @@
                 + 6, + 9…— así que no es la fecha de alta, es el mes del último ajuste pactado.
             </div>
         </div>
+        <?php endif; ?>
 
         <div class="card-body p-0">
             <div class="table-responsive">

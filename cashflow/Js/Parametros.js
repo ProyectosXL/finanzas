@@ -191,33 +191,46 @@
 
             // Inhabilitar un medio lo saca de la proyección sin borrar el dato:
             // se puede volver a activar cuando se use.
-            html += '<td class="text-center">' +
-                        '<div class="form-check form-switch d-inline-block">' +
+            /* Sin permiso de edicion, texto con el valor en data-valor: las sumas
+               por canal (validarMix) lo leen igual que de un input. */
+            var puede = Permisos.puedeEditar('mixBody');
+
+            html += '<td class="text-center">' + (puede
+                        ? '<div class="form-check form-switch d-inline-block">' +
                             '<input class="form-check-input mix-input mix-activo" type="checkbox" ' +
                                 'role="switch" ' +
                                 'data-id="' + fila.ID + '" data-canal="' + fila.CANAL + '" ' +
                                 (activo ? 'checked' : '') + ' ' +
                                 'title="Si se inhabilita, no se usa en la proyección">' +
-                        '</div>' +
+                          '</div>'
+                        : '<span class="mix-activo" data-id="' + fila.ID + '" data-valor="' +
+                            (activo ? '1' : '0') + '">' + (activo ? 'Sí' : 'No') + '</span>') +
                     '</td>';
 
-            html += '<td>' +
-                        '<div class="input-group input-group-sm">' +
+            html += (puede
+                        ? '<td>' +
+                            '<div class="input-group input-group-sm">' +
                             '<input type="number" step="0.01" class="form-control mix-input mix-porcentaje" ' +
                                 'data-id="' + fila.ID + '" data-canal="' + fila.CANAL + '" ' +
                                 'value="' + (fila.PORCENTAJE * 100).toFixed(2) + '"' +
                                 (activo ? '' : ' disabled') + '>' +
                             '<span class="input-group-text">%</span>' +
-                        '</div>' +
-                    '</td>';
-            html += '<td>' +
-                        '<div class="input-group input-group-sm">' +
+                            '</div>' +
+                          '</td>'
+                        : '<td class="text-end"><span class="mix-porcentaje" data-id="' + fila.ID + '" ' +
+                            'data-canal="' + fila.CANAL + '" data-valor="' +
+                            (fila.PORCENTAJE * 100).toFixed(2) + '">' + formatPercent(fila.PORCENTAJE) +
+                          '</span></td>');
+            html += (puede
+                        ? '<td>' +
+                            '<div class="input-group input-group-sm">' +
                             '<input type="number" step="1" min="0" class="form-control mix-input mix-dias" ' +
                                 'data-id="' + fila.ID + '" ' +
                                 'value="' + fila.DIAS_ACREDITACION + '">' +
                             '<span class="input-group-text">días</span>' +
-                        '</div>' +
-                    '</td>';
+                            '</div>' +
+                          '</td>'
+                        : '<td class="text-end">' + fila.DIAS_ACREDITACION + ' días</td>');
             html += '</tr>';
         });
 
@@ -265,11 +278,11 @@
 
             var chk = document.querySelector('.mix-activo[data-id="' + input.dataset.id + '"]');
 
-            if (!chk || !chk.checked) {
+            if (!chk || !marcado(chk)) {
                 return;
             }
 
-            sumas[canal] += (parseFloat(input.value) || 0) / 100;
+            sumas[canal] += (parseFloat(valorDe(input)) || 0) / 100;
             activos[canal]++;
         });
 
@@ -304,7 +317,7 @@
         // El % de un medio inhabilitado no se edita: no participa del cálculo
         document.querySelectorAll('.mix-porcentaje').forEach(function(input) {
             var chk = document.querySelector('.mix-activo[data-id="' + input.dataset.id + '"]');
-            var activo = chk && chk.checked;
+            var activo = !!chk && marcado(chk);
             input.disabled = !activo;
 
             var tr = input.closest('tr');
@@ -471,12 +484,16 @@
                         '<div class="param-card">' +
                             '<div class="param-clave">' + titulo(canal) + '</div>' +
                             '<div class="param-descripcion">' + escapar(param.DESCRIPCION || '') + '</div>' +
-                            '<div class="input-group input-group-sm">' +
-                                '<input type="number" step="0.01" class="form-control param-input respaldo-input" ' +
-                                    'data-clave="' + param.CLAVE + '" ' +
-                                    'value="' + (parseFloat(param.VALOR) * 100).toFixed(2) + '">' +
-                                '<span class="input-group-text">%</span>' +
-                            '</div>' +
+                            Permisos.segun('gridRespaldo',
+                                '<div class="input-group input-group-sm">' +
+                                    '<input type="number" step="0.01" class="form-control param-input respaldo-input" ' +
+                                        'data-clave="' + param.CLAVE + '" ' +
+                                        'value="' + (parseFloat(param.VALOR) * 100).toFixed(2) + '">' +
+                                    '<span class="input-group-text">%</span>' +
+                                '</div>',
+                                '<span class="respaldo-input fw-semibold" data-clave="' + param.CLAVE + '" ' +
+                                    'data-valor="' + (parseFloat(param.VALOR) * 100).toFixed(2) + '">' +
+                                    formatPercent(parseFloat(param.VALOR)) + '</span>') +
                         '</div>' +
                     '</div>';
         });
@@ -500,7 +517,7 @@
         var suma = 0;
 
         document.querySelectorAll('.respaldo-input').forEach(function(input) {
-            suma += (parseFloat(input.value) || 0) / 100;
+            suma += (parseFloat(valorDe(input)) || 0) / 100;
         });
 
         var span = document.getElementById('sumaRespaldo');
@@ -598,6 +615,19 @@
 
                 return result.data;
             });
+    }
+
+    /**
+     * El valor de un campo del formulario: el del input o, sin permiso de
+     * edicion, el que la celda de texto trae en data-valor.
+     */
+    function valorDe(el) {
+        return (el.tagName === 'INPUT') ? el.value : el.dataset.valor;
+    }
+
+    /** Si un interruptor esta prendido, sea casilla o texto de solo lectura */
+    function marcado(el) {
+        return (el.tagName === 'INPUT') ? el.checked : el.dataset.valor === '1';
     }
 
     function formatPercent(value) {

@@ -1,4 +1,10 @@
 <?php
+/* Sin permiso de edicion de esta sub-pestaña los controles de escritura no
+   se dibujan. Se define aca y no en parametros.php porque cada sub-pestaña
+   tiene su permiso, y todas comparten el alcance de ese archivo. */
+$edita = AuthCashflow::puedeEditar('parametros', 'TARJETAS');
+?>
+<?php
 /**
  * Parametros -> Tarjetas
  *
@@ -55,9 +61,11 @@
                         title="Exportar a Excel lo que se está viendo">
                     <i class="fas fa-file-excel me-1"></i> Exportar
                 </button>
+                <?php if ($edita): ?>
                 <button id="ptarBtnNuevo" class="btn btn-sm btn-outline-primary">
                     <i class="fas fa-plus me-1"></i> Agregar tarjeta
                 </button>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -66,6 +74,7 @@
              El banco y el usuario se eligen de su fuente; los últimos
              4 dígitos, el % y el día se tipean.
              ======================================================== -->
+        <?php if ($edita): ?>
         <div class="card-body border-bottom" id="ptarFormNuevo" style="display: none;">
             <div class="row g-2 align-items-end">
                 <div class="col-md-2">
@@ -154,6 +163,7 @@
                 —son deuda real de Tango— sino que entra como un renglón de cobertura aparte.
             </div>
         </div>
+        <?php endif; ?>
 
         <div class="card-body p-0">
             <div class="table-responsive">

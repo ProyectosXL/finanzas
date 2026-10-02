@@ -199,6 +199,9 @@
             '</div>';
         }).join('');
 
+        // Sin permiso de edicion, los valores como texto (Js/permisos.js)
+        Permisos.soloLectura(grid);
+
         grid.querySelectorAll('.pgen-input').forEach(function(input) {
             input.addEventListener('change', function() { guardarParametro(input); });
         });
@@ -301,6 +304,8 @@
                     '</small></td>' +
             '</tr>';
         }).join('');
+
+        Permisos.soloLectura(cuerpo);
 
         cuerpo.querySelectorAll('.pgen-infla').forEach(function(input) {
             input.addEventListener('change', function() { guardarInflacion(input); });
@@ -416,6 +421,9 @@
             : '<tr><td colspan="6" class="text-center text-muted py-3">' +
               'No hay pagos próximos en el horizonte.</td></tr>';
 
+        // El historial se puede mirar sin permiso de edicion: va con data-lectura
+        Permisos.soloLectura(cuerpo);
+
         cuerpo.querySelectorAll('tr[data-mes]').forEach(function(fila) {
             var acciones = {
                 guardar: function() { guardarFecha(fila); },
@@ -485,7 +493,7 @@
                     'title="Volver a la fecha calculada"' +
                     (editable && p.override ? '' : ' disabled') +
                     '><i class="fas fa-rotate-left"></i></button> ' +
-                '<button class="btn btn-sm btn-outline-secondary" data-accion="historial" ' +
+                '<button class="btn btn-sm btn-outline-secondary" data-accion="historial" data-lectura ' +
                     'title="Historial"><i class="fas fa-clock-rotate-left"></i></button>' +
             '</td>' +
         '</tr>';

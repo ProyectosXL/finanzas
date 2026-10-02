@@ -370,6 +370,23 @@ class AuthCashflow {
     }
 
     /**
+     * El atributo que la vista pone en la raiz de una pestaña -o de una
+     * sub-pestaña de Parametros- para que el JS sepa si dibujar los controles
+     * de edicion. Ver Js/permisos.js.
+     *
+     * ES COMODIDAD, NO SEGURIDAD. Quien no puede editar no ve los botones, pero
+     * lo que lo frena es el 403 del servidor (Controller/autorizacion.php): un
+     * atributo del HTML lo cambia cualquiera desde la consola.
+     *
+     * @param string $tab
+     * @param string|null $sub
+     * @return string ' data-puede-editar="1"' o ' data-puede-editar="0"'
+     */
+    public static function atributoEdicion($tab, $sub = null) {
+        return ' data-puede-editar="' . (self::puedeEditar($tab, $sub) ? '1' : '0') . '"';
+    }
+
+    /**
      * Regla pura de lectura, sobre un juego de permisos dado.
      *
      * @param array $permisos clave => true

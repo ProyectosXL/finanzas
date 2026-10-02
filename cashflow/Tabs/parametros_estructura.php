@@ -1,3 +1,9 @@
+<?php
+/* Sin permiso de edicion de esta sub-pestaña los controles de escritura no
+   se dibujan. Se define aca y no en parametros.php porque cada sub-pestaña
+   tiene su permiso, y todas comparten el alcance de ese archivo. */
+$edita = AuthCashflow::puedeEditar('parametros', 'CASHFLOW');
+?>
 <!--
     Estructura del tablero de Cashflow.
 
@@ -49,9 +55,11 @@
                             Mostrar inhabilitadas
                         </label>
                     </div>
+                    <?php if ($edita): ?>
                     <button id="cfeBtnGuardar" class="btn btn-sm btn-primary" disabled>
                         <i class="fas fa-floppy-disk me-1"></i> Guardar
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -98,6 +106,7 @@
             </div>
         </div>
 
+        <?php if ($edita): ?>
         <!-- ========================================================
              ALTA DE FILA
              ======================================================== -->
@@ -133,6 +142,7 @@
                 </div>
             </div>
         </div>
+        <?php endif; ?>
 
         <!-- ========================================================
              SECCIONES
@@ -171,6 +181,7 @@
                     </table>
                 </div>
             </div>
+            <?php if ($edita): ?>
             <div class="card-footer bg-white">
                 <div class="row g-2 align-items-end">
                     <div class="col-md-5">
@@ -189,6 +200,7 @@
                     </div>
                 </div>
             </div>
+            <?php endif; ?>
         </div>
 
         <!-- ========================================================

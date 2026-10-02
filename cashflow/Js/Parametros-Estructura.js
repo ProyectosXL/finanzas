@@ -185,6 +185,9 @@
         }
 
         cuerpo.innerHTML = html;
+
+        // Sin permiso de edicion, la estructura como texto (Js/permisos.js)
+        Permisos.soloLectura(cuerpo);
         conectarFilas();
     }
 
@@ -571,6 +574,7 @@
                 + '</td></tr>';
         }).join('');
 
+        Permisos.soloLectura(cuerpo);
         conectarSecciones();
     }
 

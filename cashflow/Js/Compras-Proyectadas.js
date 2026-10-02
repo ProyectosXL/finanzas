@@ -620,6 +620,17 @@
      * para no ofrecer algo que va a fallar.
      */
     function botonAjuste(m) {
+        /* SIN PERMISO DE EDICION, el boton abre el historial y nada mas, y
+           solo donde hay algo que ver: el modal se dibuja sin el formulario.
+           Ver Js/permisos.js. */
+        if (!Permisos.puedeEditar('tablaComprasProy')) {
+            return (m.ajuste || m.estado === 'AJUSTE_DESCARTADO')
+                ? '<button class="btn btn-sm btn-outline-secondary" data-ajuste-mes="' + esc(m.mes) +
+                    '" title="Ver el historial de ajustes de este mes">' +
+                    '<i class="fas fa-clock-rotate-left"></i></button>'
+                : '';
+        }
+
         if (!m.version) {
             return '<button class="btn btn-sm btn-outline-secondary" disabled ' +
                 'title="Este mes no tiene versión oficial de presupuesto, así que no hay a qué ' +

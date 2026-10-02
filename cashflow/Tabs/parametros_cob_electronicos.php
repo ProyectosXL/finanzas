@@ -1,3 +1,9 @@
+<?php
+/* Sin permiso de edicion de esta sub-pestaña los controles de escritura no
+   se dibujan. Se define aca y no en parametros.php porque cada sub-pestaña
+   tiene su permiso, y todas comparten el alcance de ese archivo. */
+$edita = AuthCashflow::puedeEditar('parametros', 'COB_ELECTRONICOS');
+?>
 <!--
     Parámetros → Cob. Electrónicos.
 
@@ -58,15 +64,20 @@
                     <button id="btnRefreshParamCobel" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
+                    <?php if ($edita): ?>
                     <button id="btnNuevaProcesadora" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-plus me-1"></i> Agregar procesadora
                     </button>
+                    <?php endif; ?>
+                    <?php if ($edita): ?>
                     <button id="btnGuardarProcesadoras" class="btn btn-sm btn-primary">
                         <i class="fas fa-floppy-disk me-1"></i> Guardar procesadoras
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
 
+            <?php if ($edita): ?>
             <div class="card-body border-bottom" id="formProcesadora" style="display: none;">
                 <div class="row g-2 align-items-end">
                     <div class="col-md-6">
@@ -92,6 +103,7 @@
                     Saldos, que nace activa porque no rompe ningún invariante.
                 </div>
             </div>
+            <?php endif; ?>
 
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -133,12 +145,15 @@
                             title="Exportar a Excel lo que se está viendo">
                         <i class="fas fa-file-excel me-1"></i> Exportar
                     </button>
+                    <?php if ($edita): ?>
                     <button id="btnNuevaAlicuota" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-plus me-1"></i> Cargar alícuota
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
 
+            <?php if ($edita): ?>
             <div class="card-body border-bottom" id="formAlicuota" style="display: none;">
                 <div class="row g-2 align-items-end">
                     <div class="col-md-3">
@@ -178,6 +193,7 @@
                      botón se bloquea: el neto saldría cero o negativo. -->
                 <div class="pce-suma mt-2" id="sumaAlicuota"></div>
             </div>
+            <?php endif; ?>
 
             <div class="card-body p-0">
                 <div class="table-responsive">

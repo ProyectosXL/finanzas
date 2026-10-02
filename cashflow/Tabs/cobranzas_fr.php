@@ -1,7 +1,7 @@
 <?php $tabName = 'Cobranzas FR'; ?>
 <link rel="stylesheet" href="Css/Ingresos-Cobranzas_fr.css?v=<?php echo time(); ?>">
 
-<div class="tab-cobranzas_fr">
+<div class="tab-cobranzas_fr"<?php echo AuthCashflow::atributoEdicion('cobranzas_fr'); ?>>
 
     <!-- Avisos de importes fuera del horizonte o sin fecha -->
     <div id="avisosCob"></div>

@@ -201,6 +201,9 @@
             '</div>';
         }).join('');
 
+        // Sin permiso de edicion, como texto (Js/permisos.js)
+        Permisos.soloLectura(grid);
+
         grid.querySelectorAll('.pcpr-input').forEach(function(input) {
             input.addEventListener('change', function() { guardar(input); });
         });

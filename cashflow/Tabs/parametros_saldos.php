@@ -1,3 +1,9 @@
+<?php
+/* Sin permiso de edicion de esta sub-pestaña los controles de escritura no
+   se dibujan. Se define aca y no en parametros.php porque cada sub-pestaña
+   tiene su permiso, y todas comparten el alcance de ese archivo. */
+$edita = AuthCashflow::puedeEditar('parametros', 'SALDOS');
+?>
 <!--
     Parámetros → Saldos.
 
@@ -72,15 +78,20 @@
                             title="Exportar a Excel lo que se está viendo">
                         <i class="fas fa-file-excel me-1"></i> Exportar
                     </button>
+                    <?php if ($edita): ?>
                     <button class="btn btn-sm btn-outline-primary sp-btn-nueva" data-tipo="BANCO">
                         <i class="fas fa-plus me-1"></i> Agregar banco
                     </button>
+                    <?php endif; ?>
+                    <?php if ($edita): ?>
                     <button id="btnGuardarCuentas" class="btn btn-sm btn-primary">
                         <i class="fas fa-floppy-disk me-1"></i> Guardar cuentas
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
 
+            <?php if ($edita): ?>
             <div class="card-body border-bottom sp-form-nueva" data-tipo="BANCO" style="display: none;">
                 <div class="row g-2 align-items-end">
                     <div class="col-md-4">
@@ -122,6 +133,7 @@
                     integración cuando exista.
                 </div>
             </div>
+            <?php endif; ?>
 
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -160,12 +172,15 @@
                             title="Exportar a Excel lo que se está viendo">
                         <i class="fas fa-file-excel me-1"></i> Exportar
                     </button>
+                    <?php if ($edita): ?>
                     <button class="btn btn-sm btn-outline-primary sp-btn-nueva" data-tipo="OTRO">
                         <i class="fas fa-plus me-1"></i> Agregar saldo
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
 
+            <?php if ($edita): ?>
             <div class="card-body border-bottom sp-form-nueva" data-tipo="OTRO" style="display: none;">
                 <div class="row g-2 align-items-end">
                     <div class="col-md-4">
@@ -197,6 +212,7 @@
                     </div>
                 </div>
             </div>
+            <?php endif; ?>
 
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -246,15 +262,20 @@
                             title="Exportar a Excel lo que se está viendo">
                         <i class="fas fa-file-excel me-1"></i> Exportar
                     </button>
+                    <?php if ($edita): ?>
                     <button class="btn btn-sm btn-outline-primary sp-btn-nueva" data-tipo="FONDO">
                         <i class="fas fa-plus me-1"></i> Agregar fondo
                     </button>
+                    <?php endif; ?>
+                    <?php if ($edita): ?>
                     <button id="btnGuardarFondos" class="btn btn-sm btn-primary">
                         <i class="fas fa-floppy-disk me-1"></i> Guardar fondos
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
 
+            <?php if ($edita): ?>
             <div class="card-body border-bottom sp-form-nueva" data-tipo="FONDO" style="display: none;">
                 <div class="row g-2 align-items-end">
                     <div class="col-md-3">
@@ -303,6 +324,7 @@
                     Saldos → Fondos.
                 </div>
             </div>
+            <?php endif; ?>
 
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -343,12 +365,16 @@
                             title="Exportar a Excel lo que se está viendo">
                         <i class="fas fa-file-excel me-1"></i> Exportar
                     </button>
+                    <?php if ($edita): ?>
                     <button id="btnSincronizarLocales" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-rotate me-1"></i> Sincronizar con locales
                     </button>
+                    <?php endif; ?>
+                    <?php if ($edita): ?>
                     <button id="btnGuardarSucursales" class="btn btn-sm btn-primary">
                         <i class="fas fa-floppy-disk me-1"></i> Guardar locales
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
 

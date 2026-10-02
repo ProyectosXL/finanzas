@@ -1600,11 +1600,17 @@
                 + ': los fondos no alcanzan y la columna queda en rojo.';
         }
 
-        if (col.rama !== 'dias') {
+        /* Sin permiso de edicion, la celda de un dia se dibuja como la de un
+           mes: con su valor y su desglose, sin el clic que abre el editor. */
+        var editable = (col.rama === 'dias') && Permisos.puedeEditar('cfBody');
+
+        if (!editable) {
             return '<td class="' + clases.join(' ') + '" title="'
                 + escapar((detalle ? detalle + ' ' : '')
-                    + 'Esta celda acumula el mes; la cobertura manual se carga por día, en '
-                    + 'la vista Días.')
+                    + (col.rama === 'dias'
+                        ? ''
+                        : 'Esta celda acumula el mes; la cobertura manual se carga por día, en '
+                            + 'la vista Días.'))
                 + '">' + plataCorta(n) + '</td>';
         }
 

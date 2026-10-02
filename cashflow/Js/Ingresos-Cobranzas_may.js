@@ -441,14 +441,19 @@
        facturas la tiene.
        ================================================================ */
 
-    /** Si esta vista permite editar la fecha de cobro */
-    function editable() {
+    /** Si esta vista es la de la fecha de cobro por comprobante */
+    function vistaEditable() {
         return modoVista === 'deepdive';
+    }
+
+    /** Si la fecha de cobro se puede editar: esta vista, y con permiso (Js/permisos.js) */
+    function editable() {
+        return vistaEditable() && Permisos.puedeEditar(document.querySelector('.tab-cobranzas_may'));
     }
 
     /** El indicador del Resumen: este cliente tiene alguna fecha cargada a mano */
     function marcaManual(item) {
-        if (editable() || !item.FECHA_MANUAL) {
+        if (vistaEditable() || !item.FECHA_MANUAL) {
             return '';
         }
 

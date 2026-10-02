@@ -1,4 +1,10 @@
 <?php
+/* Sin permiso de edicion de esta sub-pestaña los controles de escritura no
+   se dibujan. Se define aca y no en parametros.php porque cada sub-pestaña
+   tiene su permiso, y todas comparten el alcance de ese archivo. */
+$edita = AuthCashflow::puedeEditar('parametros', 'GENERALES');
+?>
+<?php
 /**
  * Parametros -> Generales
  *
@@ -73,6 +79,7 @@
              edita un campo o catorce. -->
         <div class="card-body border-bottom">
             <div class="row g-3 align-items-end">
+                <?php if ($edita): ?>
                 <div class="col-md-4">
                     <label class="form-label form-label-sm" for="pgenModalidad">Modalidad</label>
                     <select id="pgenModalidad" class="form-select form-select-sm">
@@ -80,6 +87,8 @@
                         <option value="VARIABLE">Variable — un % por mes</option>
                     </select>
                 </div>
+                <?php endif; ?>
+                <?php if ($edita): ?>
                 <div class="col-md-4" id="pgenConstanteWrap">
                     <label class="form-label form-label-sm" for="pgenPctConstante">
                         % mensual
@@ -92,6 +101,7 @@
                         </button>
                     </div>
                 </div>
+                <?php endif; ?>
                 <div class="col-md-4">
                     <div class="param-hint mb-0">
                         Aplicar escribe ese % en <strong>cada mes</strong> de la grilla de

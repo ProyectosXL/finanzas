@@ -142,6 +142,9 @@
               'Todavía no hay clientes cargados. Mientras tanto, la sub-pestaña Venta Cobrada ' +
               'Anticipada se muestra vacía y no se netea nada de Ventas.</td></tr>';
 
+        // Sin permiso de edicion, como texto (Js/permisos.js)
+        Permisos.soloLectura('bodyClientesPpq');
+
         document.querySelectorAll('.ppq-activo').forEach(function(c) {
             c.addEventListener('change', function() {
                 cambiarEstado(c.dataset.codigo, c.checked, c);

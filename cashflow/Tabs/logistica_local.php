@@ -1,7 +1,7 @@
 <?php $tabName = 'Logística Local'; ?>
 <link rel="stylesheet" href="Css/Logistica-Local.css?v=<?php echo time(); ?>">
 
-<div class="tab-logistica_local">
+<div class="tab-logistica_local"<?php echo AuthCashflow::atributoEdicion('logistica_local'); ?>>
 
     <!-- Los avisos van arriba de todo a propósito. El primero puede ser que los
          fleteros NO estén excluidos de Cuentas a Pagar Locales, y en ese caso

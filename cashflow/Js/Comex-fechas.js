@@ -179,6 +179,25 @@
     }
 
     /**
+     * Las opciones de una celda, con lo editable recortado por el permiso.
+     *
+     * Las pestañas dicen si la celda ES editable -una fecha que se puede
+     * mover, un pago que se puede tildar-; si este usuario PUEDE editarla lo
+     * decide el permiso de la pestaña que esta cargada (Js/permisos.js). Va
+     * aca y no en cada pestaña para que las tres celdas lo apliquen igual.
+     */
+    function conPermiso(opts) {
+        var copia = {};
+
+        Object.keys(opts || {}).forEach(function(k) { copia[k] = opts[k]; });
+
+        copia.editable = !!copia.editable && Permisos.puedeEditar(
+            document.querySelector('.tab-proveedores_exterior, .tab-crono_nacionalizacion'));
+
+        return copia;
+    }
+
+    /**
      * El HTML de una celda de fecha editable.
      *
      * @param {Object} item Fila del payload
@@ -187,7 +206,7 @@
      * @returns {string}
      */
     function celda(item, campo, opts) {
-        opts = opts || {};
+        opts = conPermiso(opts);
 
         var clase = opts.clase || 'fecha-pago';
         var valor = item[EFECTIVA[campo]] || null;
@@ -286,7 +305,7 @@
      * @returns {string}
      */
     function celdaPagado(item, concepto, opts) {
-        opts = opts || {};
+        opts = conPermiso(opts);
 
         var pagado = !!item.PAGADO;
 
@@ -619,7 +638,7 @@
      * @returns {string} HTML de la celda
      */
     function celdaCotizacion(item, opts) {
-        opts = opts || {};
+        opts = conPermiso(opts);
 
         var editable = !!opts.editable;
         var detalle = item.COTIZ_DETALLE || '';

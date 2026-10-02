@@ -397,3 +397,85 @@ foreach (glob(__DIR__ . '/../Class/*.php') as $archivo) {
 
 chequear('hay metodos de escritura que validan el usuario', true, $validan >= 60);
 chequear('ninguno con $usuario = null por defecto', [], $conDefault);
+
+/* ================================================================
+   La interfaz: cada pestaña dice si se puede editar
+   ================================================================ */
+seccion('cada pestaña con escrituras lleva el permiso en su raiz');
+
+$tabsConEscritura = [];
+
+foreach (AuthCashflow::ESCRITURAS as $acciones) {
+    foreach ($acciones as $destinos) {
+        foreach ($destinos as $d) {
+            if ($d[0] !== 'parametros') {
+                $tabsConEscritura[$d[0]] = true;
+            }
+        }
+    }
+}
+
+$sinAtributo = [];
+
+foreach (array_keys($tabsConEscritura) as $tab) {
+    $texto = file_get_contents(__DIR__ . '/../Tabs/' . $tab . '.php');
+
+    if (strpos($texto, "AuthCashflow::atributoEdicion('" . $tab . "')") === false) {
+        $sinAtributo[] = $tab;
+    }
+}
+
+chequear('las trece pestañas', 13, count($tabsConEscritura));
+chequear('todas con data-puede-editar', [], $sinAtributo);
+
+$param = file_get_contents(__DIR__ . '/../Tabs/parametros.php');
+$panesSin = [];
+
+foreach (Parametros::getModulos() as $m) {
+    if (strpos($param, "AuthCashflow::atributoEdicion('parametros', '" . $m['codigo'] . "')") === false) {
+        $panesSin[] = $m['codigo'];
+    }
+}
+
+chequear('cada sub-pestaña de Parametros con el permiso en su pane', [], $panesSin);
+
+seccion('$edita se define antes de usarse');
+
+$malDefinida = [];
+
+foreach (glob(__DIR__ . '/../Tabs/*.php') as $archivo) {
+    $texto = file_get_contents($archivo);
+    $uso = strpos($texto, 'if ($edita)');
+
+    if ($uso === false) {
+        continue;
+    }
+
+    $def = strpos($texto, '$edita = AuthCashflow::puedeEditar(');
+
+    if ($def === false || $def > $uso) {
+        $malDefinida[] = basename($archivo);
+    }
+}
+
+chequear('en todos los archivos que lo usan', [], $malDefinida);
+
+$abre = 0;
+$cierra = 0;
+
+foreach (glob(__DIR__ . '/../Tabs/*.php') as $archivo) {
+    $texto = file_get_contents($archivo);
+    $abre += substr_count($texto, 'if ($edita): ?>');
+    $cierra += substr_count($texto, '<?php endif; ?>');
+}
+
+chequear('cada if ($edita) cierra', true, $cierra >= $abre && $abre > 30);
+
+seccion('el JS compartido de permisos');
+
+$index = file_get_contents(__DIR__ . '/../index.php');
+// El ultimo </head>: el primero es el de la pagina de acceso denegado
+$cabeza = substr($index, 0, strrpos($index, '</head>'));
+
+chequear('index.php carga Js/permisos.js en el <head>', true,
+    strpos($cabeza, 'Js/permisos.js') !== false);

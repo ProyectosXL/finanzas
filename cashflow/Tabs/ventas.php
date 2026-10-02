@@ -1,7 +1,13 @@
-<?php $tabName = 'Ventas'; ?>
+<?php
+$tabName = 'Ventas';
+
+/* Sin permiso de edicion los controles de escritura no se dibujan. Es
+   comodidad: lo que frena una escritura es el 403 del servidor. */
+$edita = AuthCashflow::puedeEditar('ventas');
+?>
 <link rel="stylesheet" href="Css/Ingresos-Ventas.css?v=<?php echo time(); ?>">
 
-<div class="tab-ventas">
+<div class="tab-ventas"<?php echo AuthCashflow::atributoEdicion('ventas'); ?>>
 
     <!-- Sub-pestañas -->
     <ul class="nav nav-tabs mb-3" id="ventasTabs" role="tablist">
@@ -328,9 +334,11 @@
                     </div>
                     <div class="d-flex align-items-center gap-3">
                         <span id="sumaParticipacion" class="suma-participacion">0,0000%</span>
+                        <?php if ($edita): ?>
                         <button id="btnGuardarParticipacion" class="btn btn-sm btn-primary" disabled>
                             <i class="fas fa-floppy-disk me-1"></i> Guardar
                         </button>
+                        <?php endif; ?>
                     </div>
                 </div>
                 <div class="card-body">

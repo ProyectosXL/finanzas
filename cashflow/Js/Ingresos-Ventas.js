@@ -323,16 +323,18 @@
     function celdaIndice(fila) {
         var editado = !!fila.indice_editado;
         var valor = fila.indice || 0;
+        // Sin permiso, el valor sin el clic ni el lapiz (Js/permisos.js)
+        var puede = Permisos.puedeEditar('gridParticipacion');
 
         return '<td class="center indice-cell ' + (editado ? 'fecha-editada' : '') + '"' +
                ' data-anio="' + fila.anio + '"' +
                ' data-mes="' + fila.mes + '"' +
                ' data-indice="' + valor + '"' +
-               ' onclick="editarIndice(this)">' +
+               (puede ? ' onclick="editarIndice(this)"' : '') + '>' +
                    '<div class="indice-display">' +
                        '<span class="indice-value">' + formatPercent(valor) + '</span>' +
                        (editado ? '<span class="badge-fecha-editada">Editado</span>' : '') +
-                       '<i class="fas fa-pen indice-icon"></i>' +
+                       (puede ? '<i class="fas fa-pen indice-icon"></i>' : '') +
                    '</div>' +
                    '<div class="fecha-tooltip">' +
                        '<span class="fecha-tooltip-label">Proyecta</span>' +
@@ -1329,13 +1331,16 @@
                             '</div>' +
                             '<div class="partic-edit">' +
                                 '<span class="partic-label">Editado</span>' +
-                                '<div class="input-group input-group-sm">' +
-                                    '<input type="number" step="0.0001" class="form-control partic-input" ' +
-                                        'data-canal="' + canal + '" ' +
-                                        'data-calc="' + p.calc + '" ' +
-                                        'value="' + (p.efectivo * 100).toFixed(4) + '">' +
-                                    '<span class="input-group-text">%</span>' +
-                                '</div>' +
+                                Permisos.segun('gridParticipacion',
+                                    '<div class="input-group input-group-sm">' +
+                                        '<input type="number" step="0.0001" class="form-control partic-input" ' +
+                                            'data-canal="' + canal + '" ' +
+                                            'data-calc="' + p.calc + '" ' +
+                                            'value="' + (p.efectivo * 100).toFixed(4) + '">' +
+                                        '<span class="input-group-text">%</span>' +
+                                    '</div>',
+                                    '<span class="partic-valor partic-lectura" data-efectivo="' + p.efectivo + '">' +
+                                        formatPercent(p.efectivo) + '</span>') +
                             '</div>' +
                         '</div>' +
                     '</div>';
@@ -1370,6 +1375,11 @@
             suma += (parseFloat(input.value) || 0) / 100;
         });
 
+        // Sin permiso no hay inputs: la suma es la de lo guardado
+        document.querySelectorAll('.partic-lectura').forEach(function(el) {
+            suma += parseFloat(el.dataset.efectivo) || 0;
+        });
+
         var span = document.getElementById('sumaParticipacion');
         var btn = document.getElementById('btnGuardarParticipacion');
         var valido = Math.abs(suma - 1) < 0.000001;
@@ -1387,7 +1397,9 @@
                 ' (' + (desvio > 0 ? '+' : '') + desvio.toFixed(4) + ')';
         }
 
-        btn.disabled = !valido;
+        if (btn) {
+            btn.disabled = !valido;
+        }
 
         return valido;
     }

@@ -315,9 +315,11 @@
 
         return '<tr class="' + clases.join(' ') + '" title="' + esc(f.EXPLICACION || '') + '">'
             + '<td class="text-center">'
-                + '<input type="checkbox" class="form-check-input tarj-sel" '
+                // Sin permiso no hay que seleccionar: la seleccion es para escribir
+                + Permisos.siEdita('bodyCorp',
+                    '<input type="checkbox" class="form-check-input tarj-sel" '
                     + 'data-clave="' + esc(clave) + '"'
-                    + (seleccion[clave] ? ' checked' : '') + '>'
+                    + (seleccion[clave] ? ' checked' : '') + '>')
             + '</td>'
             + '<td>' + esc(f.COD_PROVEE) + '</td>'
             + '<td class="col-texto">' + esc(f.RAZON_SOC) + '</td>'
@@ -825,10 +827,13 @@
                 + '<td><small>' + esc(r.ORIGEN_NOMBRE) + '</small></td>'
                 + '<td class="text-center">'
                     + (r.ACTIVO
-                        ? '<div class="form-check form-switch d-inline-block">'
-                          + '<input class="form-check-input tarj-pagado" type="checkbox" '
-                          + 'data-id="' + esc(r.ID) + '"' + (r.PAGADO ? ' checked' : '')
-                          + ' title="Marcarlo como pagado lo saca del horizonte"></div>'
+                        ? Permisos.segun('bodyResumenes',
+                            '<div class="form-check form-switch d-inline-block">'
+                            + '<input class="form-check-input tarj-pagado" type="checkbox" '
+                            + 'data-id="' + esc(r.ID) + '"' + (r.PAGADO ? ' checked' : '')
+                            + ' title="Marcarlo como pagado lo saca del horizonte"></div>',
+                            r.PAGADO ? '<i class="fas fa-check text-success" title="Pagado"></i>'
+                                     : '<small class="text-muted">no</small>')
                         : '<small class="text-muted">—</small>')
                 + '</td>'
                 + '<td><small>' + esc(r.OBSERVACION || '') + '</small></td>'
@@ -838,7 +843,7 @@
                         + (r.USUARIO_BAJA ? ' — ' + esc(r.USUARIO_BAJA) : '') + '</div>')
                 + '</small></td>'
                 + '<td class="text-center">'
-                    + (r.ACTIVO
+                    + (r.ACTIVO && Permisos.puedeEditar('bodyResumenes')
                         ? '<button class="btn btn-sm btn-link text-danger p-0 tarj-baja" '
                           + 'data-id="' + esc(r.ID) + '" title="Dar de baja: no se borra, y ese '
                           + 'mes vuelve a proyectarse con la estimación">'

@@ -1,4 +1,10 @@
-<?php $tabName = 'Pagos con Tarjetas y Otros'; ?>
+<?php
+$tabName = 'Pagos con Tarjetas y Otros';
+
+/* Sin permiso de edicion los controles de escritura no se dibujan. Es
+   comodidad: lo que frena una escritura es el 403 del servidor. */
+$edita = AuthCashflow::puedeEditar('pagos_tarjetas');
+?>
 <link rel="stylesheet" href="Css/Financiero-Pagos_tarjetas.css?v=<?php echo time(); ?>">
 
 <!--
@@ -34,7 +40,7 @@
     aparte: entre la fecha estimada y la del resumen hay unos cinco días, así que
     van en la misma fila y la celda queda marcada.
 -->
-<div class="tab-pagos_tarjetas">
+<div class="tab-pagos_tarjetas"<?php echo AuthCashflow::atributoEdicion('pagos_tarjetas'); ?>>
 
     <div id="avisosTarj"></div>
 
@@ -390,6 +396,7 @@
                      dice CUÁNTAS y CUÁNTO antes de que se apriete nada: vincular
                      cambia dónde cae la plata y excluir la saca del tablero, así que
                      el importe es el dato que hace notar que se seleccionó de más. -->
+                <?php if ($edita): ?>
                 <div id="barraSelCorp" class="card-body py-2 border-bottom prov-barra-sel"
                      style="display: none;">
                     <div class="d-flex align-items-center gap-3 flex-wrap">
@@ -416,6 +423,7 @@
                         </div>
                     </div>
                 </div>
+                <?php endif; ?>
 
                 <div class="card-body p-0">
                     <div class="table-wrapper table-responsive tabla-temporal" id="wrapperCorp">
@@ -423,9 +431,11 @@
                             <thead>
                                 <tr>
                                     <th rowspan="2" class="text-center" style="width: 46px;">
+                                        <?php if ($edita): ?>
                                         <input type="checkbox" class="form-check-input"
                                                id="selTodasCorp"
                                                title="Seleccionar todo lo que se está viendo">
+                                        <?php endif; ?>
                                     </th>
                                     <th rowspan="2">PROVEEDOR</th>
                                     <th rowspan="2" class="col-texto">RAZON SOCIAL</th>
@@ -653,13 +663,17 @@
                     </small>
                 </div>
                 <div class="d-flex gap-2">
+                    <?php if ($edita): ?>
                     <button id="btnNuevoResumen" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-plus me-1"></i> Cargar resumen
                     </button>
+                    <?php endif; ?>
+                    <?php if ($edita): ?>
                     <button id="btnBaseHistorica" class="btn btn-sm btn-outline-secondary"
                             title="Cargar los últimos 3 resúmenes de una, como base de la estimación">
                         <i class="fas fa-clock-rotate-left me-1"></i> Cargar base histórica
                     </button>
+                    <?php endif; ?>
                     <button id="btnCerrarResumenes" class="btn btn-sm btn-outline-secondary">
                         <i class="fas fa-xmark"></i>
                     </button>

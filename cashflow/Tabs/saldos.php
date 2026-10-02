@@ -1,4 +1,10 @@
-<?php $tabName = 'Saldos'; ?>
+<?php
+$tabName = 'Saldos';
+
+/* Sin permiso de edicion los controles de carga no se dibujan. Es comodidad:
+   lo que frena una escritura es el 403 del servidor. */
+$edita = AuthCashflow::puedeEditar('saldos');
+?>
 <link rel="stylesheet" href="Css/Saldos.css?v=<?php echo time(); ?>">
 
 <!--
@@ -23,7 +29,7 @@
     dato, para ver cuál es la última actualización. Por eso cada fila tiene su
     propia columna de fecha y no alcanza con un cartel arriba.
 -->
-<div class="tab-saldos">
+<div class="tab-saldos"<?php echo AuthCashflow::atributoEdicion('saldos'); ?>>
 
     <div id="avisosSaldos"></div>
 
@@ -146,6 +152,7 @@
                     <button id="btnRefreshSaldos" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
+                    <?php if ($edita): ?>
                     <button id="btnNuevaCarga" class="btn btn-sm btn-primary">
                         <i class="fas fa-plus me-1"></i> Nueva carga
                     </button>
@@ -155,9 +162,11 @@
                     <button id="btnCancelarCarga" class="btn btn-sm btn-outline-secondary" style="display: none;">
                         <i class="fas fa-xmark"></i>
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
 
+            <?php if ($edita): ?>
             <div class="card-body border-bottom" id="formCarga" style="display: none;">
                 <div class="alert alert-info py-2 px-3 mb-3">
                     <small>
@@ -172,6 +181,7 @@
                 <input type="text" id="observacionesCarga" class="form-control form-control-sm"
                        maxlength="500" placeholder="Opcional: de dónde salieron los saldos, quién los pasó…">
             </div>
+            <?php endif; ?>
 
             <div class="card-body p-0">
                 <div class="cargando-slot" id="loadingSaldos" data-cargando="Cargando saldos…"></div>
@@ -292,10 +302,12 @@
                     <button id="btnRefreshLocales" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
+                    <?php if ($edita): ?>
                     <button id="btnGuardarLocales" class="btn btn-sm btn-success"
                             title="Guarda la gestión y la reserva del local, los saldos tipeados a mano, y la foto del día en el histórico">
                         <i class="fas fa-floppy-disk me-1"></i> Guardar
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -355,9 +367,11 @@
                     <button id="btnRefreshFondos" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
+                    <?php if ($edita): ?>
                     <button id="btnNuevoMovimiento" class="btn btn-sm btn-primary">
                         <i class="fas fa-plus me-1"></i> Nuevo movimiento
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -365,6 +379,7 @@
                  importe y una observación. La moneda no se elige: es la de la
                  cuenta, y se muestra al lado del importe para que se sepa en
                  qué se está cargando. -->
+            <?php if ($edita): ?>
             <div class="card-body border-bottom" id="formMovimiento" style="display: none;">
                 <div class="row g-2 align-items-end">
                     <div class="col-md-3">
@@ -409,6 +424,7 @@
                     </small>
                 </div>
             </div>
+            <?php endif; ?>
 
             <div class="card-body p-0">
                 <div class="cargando-slot" id="loadingFondos" data-cargando="Cargando fondos…"></div>

@@ -462,6 +462,11 @@
               + '">excluido</span></div>'
             : '';
 
+        // Sin permiso no hay que seleccionar: queda la marca de excluido
+        if (!Permisos.puedeEditar('bodyEch')) {
+            return marca;
+        }
+
         return '<input type="checkbox" class="form-check-input ech-sel"'
             + (seleccion[f.ID_SBA14] ? ' checked' : '')
             + ' data-id="' + f.ID_SBA14 + '"'
@@ -847,9 +852,14 @@
             html += '<tr class="' + (f.MARCADO ? 'ech-marcado' : 'ech-sin-marcar') + '"'
                  + ' data-id="' + f.ID_SBA14 + '">';
 
+            // Sin permiso, el estado como icono: la casilla es para cambiarlo
             html += '<td class="text-center">'
-                 + '<input type="checkbox" class="form-check-input ech-marca" '
-                 + 'data-id="' + f.ID_SBA14 + '"' + (f.MARCADO ? ' checked' : '') + '>'
+                 + Permisos.segun('bodyPre',
+                     '<input type="checkbox" class="form-check-input ech-marca" '
+                         + 'data-id="' + f.ID_SBA14 + '"' + (f.MARCADO ? ' checked' : '') + '>',
+                     f.MARCADO
+                         ? '<i class="fas fa-check text-success" title="Marcado"></i>'
+                         : '<i class="fas fa-minus text-muted" title="Sin marcar"></i>')
                  + '</td>';
 
             // LA DEL CHEQUE ES LA QUE UBICA EL IMPORTE EN LA GRILLA, así que va

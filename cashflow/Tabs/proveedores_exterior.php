@@ -1,7 +1,7 @@
 <?php $tabName = 'Proveedores Exterior'; ?>
 <link rel="stylesheet" href="Css/Comex-Proveedores_exterior.css?v=<?php echo time(); ?>">
 
-<div class="tab-proveedores_exterior">
+<div class="tab-proveedores_exterior"<?php echo AuthCashflow::atributoEdicion('proveedores_exterior'); ?>>
 
     <!-- Lo que quedó fuera del horizonte o sin fecha, y lo que no se pudo
          valuar. Antes se descartaba en silencio, así que la tabla podía

@@ -51,11 +51,12 @@
              eso mismo. Mismo criterio que los demás módulos: archivo y JS
              propios, y clases con prefijo pgen- porque Parametros.js busca
              .param-input, .mix-* y .respaldo-* en TODO el documento. -->
-        <div class="tab-pane fade show active" id="paneParamGenerales" role="tabpanel">
+        <div class="tab-pane fade show active" id="paneParamGenerales" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'GENERALES'); ?>>
             <?php include __DIR__ . '/parametros_generales.php'; ?>
         </div>
 
-        <div class="tab-pane fade" id="paneParamVentas" role="tabpanel">
+        <div class="tab-pane fade" id="paneParamVentas" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'VENTAS'); ?>>
+            <?php /* La sub-pestaña Ventas vive en este archivo: su permiso se toma acá. */ $edita = AuthCashflow::puedeEditar('parametros', 'VENTAS'); ?>
 
         <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
             <div class="modulo-descripcion flex-grow-1" id="descripcionVentas"></div>
@@ -95,16 +96,21 @@
                             title="Exportar a Excel lo que se está viendo">
                         <i class="fas fa-file-excel me-1"></i> Exportar
                     </button>
+                    <?php if ($edita): ?>
                     <button id="btnNuevoMedio" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-plus me-1"></i> Agregar medio
                     </button>
+                    <?php endif; ?>
+                    <?php if ($edita): ?>
                     <button id="btnGuardarMix" class="btn btn-sm btn-primary" disabled>
                         <i class="fas fa-floppy-disk me-1"></i> Guardar Mix
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
 
             <!-- Alta de medio de pago -->
+            <?php if ($edita): ?>
             <div class="card-body border-bottom" id="formNuevoMedio" style="display: none;">
                 <div class="row g-2 align-items-end">
                     <div class="col-md-3">
@@ -137,6 +143,7 @@
                     activalo y reacomodá los porcentajes del canal hasta que sumen 100%.
                 </div>
             </div>
+            <?php endif; ?>
 
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -176,9 +183,11 @@
                 </div>
                 <div class="d-flex align-items-center gap-3">
                     <span id="sumaRespaldo" class="suma-participacion">0,00%</span>
+                    <?php if ($edita): ?>
                     <button id="btnGuardarRespaldo" class="btn btn-sm btn-primary" disabled>
                         <i class="fas fa-floppy-disk me-1"></i> Guardar
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
             <div class="card-body">
@@ -195,7 +204,7 @@
              estructura: archivo y JS propios, y clases con prefijo sp- porque
              Parametros.js busca .param-input, .mix-* y .respaldo-* en TODO el
              documento. -->
-        <div class="tab-pane fade" id="paneParamSaldos" role="tabpanel">
+        <div class="tab-pane fade" id="paneParamSaldos" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'SALDOS'); ?>>
             <?php include __DIR__ . '/parametros_saldos.php'; ?>
         </div>
 
@@ -205,7 +214,7 @@
              ucfirst(strtolower($codigo)), que es lo que usa el <li> generado
              arriba. Mismo criterio que Saldos: archivo y JS propios, y clases
              con prefijo pce-. -->
-        <div class="tab-pane fade" id="paneParamCob_electronicos" role="tabpanel">
+        <div class="tab-pane fade" id="paneParamCob_electronicos" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'COB_ELECTRONICOS'); ?>>
             <?php include __DIR__ . '/parametros_cob_electronicos.php'; ?>
         </div>
 
@@ -214,14 +223,14 @@
              sale el neteo de cheques adelantados de Ventas. Mismo criterio que
              Saldos y Cob. Electrónicos: archivo y JS propios, y clases con
              prefijo ppq-. -->
-        <div class="tab-pane fade" id="paneParamPrechequeado" role="tabpanel">
+        <div class="tab-pane fade" id="paneParamPrechequeado" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'PRECHEQUEADO'); ?>>
             <?php include __DIR__ . '/parametros_prechequeado.php'; ?>
         </div>
 
         <!-- Parámetros del módulo Cobranzas: PPP calculado y editable, y
              escalas de descuento por cliente. Mismo criterio que los anteriores:
              archivo y JS propios, y clases con prefijo pcob-. -->
-        <div class="tab-pane fade" id="paneParamCobranzas" role="tabpanel">
+        <div class="tab-pane fade" id="paneParamCobranzas" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'COBRANZAS'); ?>>
             <?php include __DIR__ . '/parametros_cobranzas.php'; ?>
         </div>
 
@@ -229,7 +238,7 @@
              cuánto vale su hora. El alta busca el código en CPA01, igual que el
              alta manual del maestro de Proveedores Locales. Mismo criterio que
              los anteriores: archivo y JS propios, y clases con prefijo plog-. -->
-        <div class="tab-pane fade" id="paneParamLogistica" role="tabpanel">
+        <div class="tab-pane fade" id="paneParamLogistica" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'LOGISTICA'); ?>>
             <?php include __DIR__ . '/parametros_logistica.php'; ?>
         </div>
 
@@ -239,7 +248,7 @@
              cosmético: cada valor distinto crea una fila propia en el tablero.
              Mismo criterio que los anteriores: archivo y JS propios, y clases
              con prefijo pplo-. -->
-        <div class="tab-pane fade" id="paneParamProv_locales" role="tabpanel">
+        <div class="tab-pane fade" id="paneParamProv_locales" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'PROV_LOCALES'); ?>>
             <?php include __DIR__ . '/parametros_prov_locales.php'; ?>
         </div>
 
@@ -250,7 +259,7 @@
              facturas de Pagos Corporativos son facturas pendientes de Tango de
              proveedores locales. Mismo criterio que los anteriores: archivo y JS
              propios, y clases con prefijo ptar-. -->
-        <div class="tab-pane fade" id="paneParamTarjetas" role="tabpanel">
+        <div class="tab-pane fade" id="paneParamTarjetas" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'TARJETAS'); ?>>
             <?php include __DIR__ . '/parametros_tarjetas.php'; ?>
         </div>
 
@@ -258,7 +267,7 @@
              historia para la cuota y los tres días de la cadena de fechas.
              Mismo criterio que los anteriores: archivo y JS propios, y clases
              con prefijo pcpr-. -->
-        <div class="tab-pane fade" id="paneParamCompras_proy" role="tabpanel">
+        <div class="tab-pane fade" id="paneParamCompras_proy" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'COMPRAS_PROY'); ?>>
             <?php include __DIR__ . '/parametros_compras_proy.php'; ?>
         </div>
 
@@ -268,7 +277,7 @@
              puesta la pestaña que ya funciona. Sus clases llevan el prefijo
              cfe- porque Parametros.js busca .param-input, .mix-* y .respaldo-*
              en TODO el documento. -->
-        <div class="tab-pane fade" id="paneParamCashflow" role="tabpanel">
+        <div class="tab-pane fade" id="paneParamCashflow" role="tabpanel"<?php echo AuthCashflow::atributoEdicion('parametros', 'CASHFLOW'); ?>>
             <?php include __DIR__ . '/parametros_estructura.php'; ?>
         </div>
 

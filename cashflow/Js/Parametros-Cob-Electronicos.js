@@ -160,6 +160,9 @@
             ? procs.map(filaProcesadora).join('')
             : '<tr><td colspan="4" class="text-center text-muted py-4">' +
               'Todavía no hay procesadoras cargadas.</td></tr>';
+
+        // Sin permiso de edicion, como texto (Js/permisos.js)
+        Permisos.soloLectura('bodyProcesadoras');
     }
 
     function filaProcesadora(p) {
@@ -427,6 +430,8 @@
             : '<tr><td colspan="6" class="text-center text-muted py-4">' +
               'Todavía no hay alícuotas cargadas. Sin alícuotas no se puede dar de alta ningún ' +
               'movimiento.</td></tr>';
+
+        Permisos.soloLectura('bodyAlicuotas');
     }
 
     function filaAlicuota(a, esVigente) {

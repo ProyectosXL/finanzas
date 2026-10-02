@@ -848,6 +848,18 @@
         var titulo = fuente.titulo + (conciliado
             ? ' Ya está CONCILIADA contra Tango: el comprobante se pagó.' : '');
 
+        /* Sin permiso de edicion, la fecha y de donde sale, sin el input ni el
+           boton de volver al vencimiento. Ver Js/permisos.js. */
+        if (!Permisos.puedeEditar('bodyProv')) {
+            return '<td class="' + clases.join(' ') + '" data-orden="' + escapar(valor) + '"'
+                + ' title="' + escapar(titulo) + '">' + fechaCorta(valor)
+                + (fuente.etiqueta
+                    ? ' <span class="prov-fuente-fecha" data-etiqueta="' + escapar(fuente.etiqueta)
+                        + '"></span>'
+                    : '')
+                + '</td>';
+        }
+
         return '<td class="' + clases.join(' ') + '"'
             + ' data-orden="' + escapar(valor) + '">'
             + '<div class="input-group input-group-sm flex-nowrap">'
@@ -960,7 +972,7 @@
         /* Sin el script del override no se puede escribir, así que se muestra
            lo que decide en texto en vez de un desplegable que falla al
            guardar. */
-        if (!datos || !datos.forma_por_factura) {
+        if (!datos || !datos.forma_por_factura || !Permisos.puedeEditar('bodyProv')) {
             return textoForma(f, delMaestro);
         }
 
@@ -1098,6 +1110,10 @@
                 + escapar('Excluida del cashflow: '
                     + (f.MOTIVO_EXCLUSION || 'sin motivo registrado'))
                 + '">excluida</span></div>';
+        }
+
+        if (!Permisos.puedeEditar('bodyProv')) {
+            return marca;
         }
 
         return '<input type="checkbox" class="form-check-input prov-sel"'
@@ -1973,7 +1989,7 @@
                 .join(' ').toLowerCase().indexOf(q) !== -1;
         });
 
-        var editable = !!maestro.edicion_manual;
+        var editable = !!maestro.edicion_manual && Permisos.puedeEditar('bodyMaestroProv');
 
         var html = filas.map(function(f) {
             if (f.FUERA_MAESTRO) {
@@ -2092,8 +2108,10 @@
         var cod = escapar(f.COD_PROVEE);
         var nombre = escapar(f.NOMBRE || '');
 
+        var puede = Permisos.puedeEditar('bodyMaestroProv');
+
         if (!ex) {
-            return '<button class="btn btn-sm btn-outline-secondary py-0 px-2 prov-excluir-mod" '
+            return !puede ? '' : '<button class="btn btn-sm btn-outline-secondary py-0 px-2 prov-excluir-mod" '
                 + 'data-cod="' + cod + '" data-nombre="' + nombre + '" title="Excluir de '
                 + 'Proveedores Locales: toda su deuda sale de la fila del tablero porque ya se '
                 + 'considera en otra pestaña.">excluir</button>';
@@ -2102,9 +2120,9 @@
         return '<span class="prov-badge-excluida" title="' + escapar('Excluido: ' + ex.MOTIVO
                 + ' — ' + (ex.USUARIO || 'sin usuario') + ', ' + (ex.FECHA_ALTA || ''))
             + '">excluido</span> '
-            + '<button class="btn btn-sm btn-outline-secondary py-0 px-1 prov-incluir-mod" '
+            + (!puede ? '' : '<button class="btn btn-sm btn-outline-secondary py-0 px-1 prov-incluir-mod" '
             + 'data-cod="' + cod + '" title="Volver a incluirlo. La exclusión queda en el '
-            + 'historial."><i class="fas fa-rotate-left"></i></button> '
+            + 'historial."><i class="fas fa-rotate-left"></i></button> ')
             + '<button class="btn btn-sm btn-outline-secondary py-0 px-1 prov-hist-excl" '
             + 'data-cod="' + cod + '" title="Historial de exclusiones de este proveedor.">'
             + '<i class="fas fa-clock-rotate-left"></i></button>';
