@@ -243,3 +243,36 @@ foreach (AuthCashflow::ESCRITURAS as $c => $acciones) {
 
 chequear('todas las pestañas estan en el menu', [], $tabsMalas);
 chequear('todas las sub-pestañas estan en Parametros::$modulos', [], $subsMalas);
+
+seccion('el script de permisos da de alta exactamente las claves que pide el codigo');
+
+/* Las claves que el codigo puede llegar a pedir: una por pestaña con
+   escrituras y una por cada sub-pestaña de Parametros -todas, tenga hoy o no
+   una escritura propia: saveParametro llega a cualquiera-. */
+$esperadas = [];
+
+foreach (AuthCashflow::ESCRITURAS as $acciones) {
+    foreach ($acciones as $destinos) {
+        foreach ($destinos as $d) {
+            if ($d[0] !== 'parametros') {
+                $esperadas[] = AuthCashflow::claveEdicion($d[0]);
+            }
+        }
+    }
+}
+
+foreach ($subs as $s) {
+    $esperadas[] = AuthCashflow::claveEdicion('parametros', $s);
+}
+
+$esperadas = array_values(array_unique($esperadas));
+sort($esperadas);
+
+preg_match_all("/\('(cashflow\.editar\.[a-z_.]+)'/",
+    file_get_contents(__DIR__ . '/../sql/cashflow_permisos_edicion.sql'), $m);
+$enScript = array_values(array_unique($m[1]));
+sort($enScript);
+
+chequear('las mismas claves en el script y en el codigo', $esperadas, $enScript);
+chequear('ninguna pestaña de solo lectura lleva clave', false,
+    in_array('cashflow.editar.dashboard', $enScript, true));
