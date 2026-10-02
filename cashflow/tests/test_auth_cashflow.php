@@ -479,3 +479,22 @@ $cabeza = substr($index, 0, strrpos($index, '</head>'));
 
 chequear('index.php carga Js/permisos.js en el <head>', true,
     strpos($cabeza, 'Js/permisos.js') !== false);
+
+seccion('quien modifico y cuando: el componente compartido');
+
+chequear('index.php carga Js/auditoria.js en el <head>', true,
+    strpos($cabeza, 'Js/auditoria.js') !== false);
+chequear('y le publica los origenes de AuthCashflow::ORIGENES', true,
+    strpos($cabeza, 'window.CASHFLOW_ORIGENES = <?php echo json_encode(AuthCashflow::ORIGENES') !== false);
+
+/* Nadie arma el texto a mano: el que decia "todavia no hay login" era el
+   sintoma de que cada pestaña tenia el suyo. */
+$aMano = [];
+
+foreach (glob(__DIR__ . '/../Js/*.js') as $archivo) {
+    if (preg_match('/no hay login/i', file_get_contents($archivo))) {
+        $aMano[] = basename($archivo);
+    }
+}
+
+chequear('ningun JS dice "todavia no hay login"', [], $aMano);

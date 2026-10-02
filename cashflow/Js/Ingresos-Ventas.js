@@ -327,6 +327,9 @@
         var puede = Permisos.puedeEditar('gridParticipacion');
 
         return '<td class="center indice-cell ' + (editado ? 'fecha-editada' : '') + '"' +
+               // Un indice editado dice quien y cuando (Js/auditoria.js)
+               (editado ? ' title="' + Auditoria.titulo({ usuario: fila.indice_usuario,
+                   fecha: fila.indice_fecha }) + '"' : '') +
                ' data-anio="' + fila.anio + '"' +
                ' data-mes="' + fila.mes + '"' +
                ' data-indice="' + valor + '"' +
@@ -1323,7 +1326,9 @@
             var editado = (p.edit !== null && p.edit !== undefined);
 
             html += '<div class="col-md-6 col-lg-3">' +
-                        '<div class="partic-card' + (editado ? ' partic-editada' : '') + '">' +
+                        '<div class="partic-card' + (editado ? ' partic-editada' : '') + '"' +
+                            (editado ? ' title="' + Auditoria.titulo({ usuario: p.usuario, fecha: p.fecha }) + '"' : '') +
+                            '>' +
                             '<div class="partic-canal">' + titulo(canal) + '</div>' +
                             '<div class="partic-calc">' +
                                 '<span class="partic-label">Calculado</span>' +

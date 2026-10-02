@@ -67,6 +67,9 @@ class TarjetasFactura {
     /** @var array|null Cache de vigentes() */
     private $vigentes = null;
 
+    /** @var array Quien y cuando de cada vinculo vigente. Lo llena vigentes() */
+    private $auditoria = [];
+
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
         $this->conn = new Conexion;
@@ -121,6 +124,20 @@ class TarjetasFactura {
      *
      * @return array Mapa 'COD|T|N' => int
      */
+    /**
+     * Quien vinculo cada factura vigente y cuando, por la misma clave que
+     * vigentes(). Aparte y no dentro de vigentes() porque ese mapa clave => id
+     * es el que consume TarjetasCorporativas::resolver(), que es puro y esta
+     * probado con esa forma.
+     *
+     * @return array clave => ['USUARIO_ALTA', 'FECHA_ALTA']
+     */
+    public function auditoriaVigentes() {
+        $this->vigentes();
+
+        return $this->auditoria;
+    }
+
     public function vigentes() {
         if ($this->vigentes !== null) {
             return $this->vigentes;
@@ -133,7 +150,7 @@ class TarjetasFactura {
         }
 
         $stmt = sqlsrv_query($this->conectar(),
-            "SELECT COD_PROVEE, T_COMP, N_COMP, ID_TARJETA
+            "SELECT COD_PROVEE, T_COMP, N_COMP, ID_TARJETA, USUARIO_ALTA, FECHA_ALTA
              FROM dbo." . self::TABLA . "
              WHERE ACTIVO = 1");
 
@@ -144,6 +161,8 @@ class TarjetasFactura {
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $clave = Proveedores::clavePago($row['COD_PROVEE'], $row['T_COMP'], $row['N_COMP']);
             $this->vigentes[$clave] = intval($row['ID_TARJETA']);
+            $this->auditoria[$clave] = ['USUARIO_ALTA' => $row['USUARIO_ALTA'],
+                                        'FECHA_ALTA' => self::momento($row['FECHA_ALTA'])];
         }
 
         sqlsrv_free_stmt($stmt);

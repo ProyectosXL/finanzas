@@ -557,13 +557,17 @@
 
             var badge = esProy ? 'badge-proyeccion' : 'badge-cobro';
 
-            return '<td class="center" data-orden="' + escaparAttr(item.Cobro || '') + '">'
+            // Una fecha cargada a mano dice quién y cuándo (Js/auditoria.js)
+            return '<td class="center" data-orden="' + escaparAttr(item.Cobro || '') + '"'
+                + (item.FECHA_MANUAL ? ' title="' + Auditoria.titulo({ usuario: item.MANUAL_USUARIO,
+                    fecha: item.MANUAL_FECHA }) + '"' : '') + '>'
                 + '<span class="' + badge + '">' + formatDate(item.Cobro) + '</span></td>';
         }
 
         var manual = !!item.FECHA_MANUAL;
         var titulo = manual
-            ? 'Fecha cargada a mano. Los días y el descuento se recalculan sobre ella.'
+            ? 'Fecha cargada a mano. Los días y el descuento se recalculan sobre ella.\n'
+                + Auditoria.titulo({ usuario: item.MANUAL_USUARIO, fecha: item.MANUAL_FECHA })
             : 'Calculada como fecha de emisión + PPP del cliente. Se puede pisar.';
 
         // Vencida: el input muestra dónde quedó ubicada, así que el title es el

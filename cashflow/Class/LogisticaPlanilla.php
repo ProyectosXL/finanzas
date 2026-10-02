@@ -172,6 +172,10 @@ class LogisticaPlanilla {
             'horas_mes' => $horas,
             'valor_hora_base' => $valorBase,
             'mes_base' => ($mesBase === '' ? null : $mesBase),
+
+            // Quien toco por ultima vez las horas o el valor hora (Js/auditoria.js)
+            'usuario' => isset($f['USUARIO']) ? $f['USUARIO'] : null,
+            'fecha_modif' => isset($f['FECHA_UPDATE']) ? $f['FECHA_UPDATE'] : null,
             'meses' => [],
             'pagos' => [],
             'total' => null,

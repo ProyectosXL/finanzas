@@ -389,7 +389,7 @@ class CashflowEstructura {
             throw new Exception('No se pudo conectar a la base de datos');
         }
 
-        $sql = "SELECT CODIGO, NOMBRE, ROL, ID_PADRE, ORDEN, ACTIVO
+        $sql = "SELECT CODIGO, NOMBRE, ROL, ID_PADRE, ORDEN, ACTIVO, USUARIO_MODIF, FECHA_MODIF
                 FROM RO_T_CASHFLOW_CONF_SECCION";
 
         if ($soloActivas) {
@@ -409,6 +409,7 @@ class CashflowEstructura {
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $row['ORDEN'] = intval($row['ORDEN']);
             $row['ACTIVO'] = intval($row['ACTIVO']);
+            $row['FECHA_MODIF'] = self::momento($row['FECHA_MODIF']);
             $v[] = $row;
         }
 
@@ -423,6 +424,14 @@ class CashflowEstructura {
      * @param bool $soloActivas true para el motor, false para el editor
      * @return array Filas de RO_T_CASHFLOW_CONF_FILA
      */
+    /**
+     * Un DATETIME de la base como 'Y-m-d H:i:s', o null. Para la auditoria
+     * de cada fila y seccion, que el editor muestra (Js/auditoria.js).
+     */
+    private static function momento($v) {
+        return ($v instanceof DateTime) ? $v->format('Y-m-d H:i:s') : $v;
+    }
+
     public function getFilas($soloActivas = false) {
         if (!$this->tablasCreadas()) {
             return [];
@@ -442,7 +451,7 @@ class CashflowEstructura {
         $conGrupo = $this->tieneColumnasGrupo();
 
         $sql = "SELECT ID, CODIGO, NOMBRE, SECCION, TIPO, COMPUTA,
-                       ORIGEN_PROVIDER, ORIGEN_SERIE, ORDEN, ACTIVO"
+                       ORIGEN_PROVIDER, ORIGEN_SERIE, ORDEN, ACTIVO, USUARIO_MODIF, FECHA_MODIF"
              . ($conGrupo ? ", GRUPO, NATURALEZA, GRUPO_NOMBRE" : "")
              . " FROM RO_T_CASHFLOW_CONF_FILA";
 
@@ -465,6 +474,7 @@ class CashflowEstructura {
             $row['ORDEN'] = intval($row['ORDEN']);
             $row['ACTIVO'] = intval($row['ACTIVO']);
             $row['COMPUTA'] = intval($row['COMPUTA']);
+            $row['FECHA_MODIF'] = self::momento($row['FECHA_MODIF']);
 
             foreach (['GRUPO', 'NATURALEZA', 'GRUPO_NOMBRE'] as $col) {
                 $row[$col] = isset($row[$col]) && trim((string) $row[$col]) !== ''

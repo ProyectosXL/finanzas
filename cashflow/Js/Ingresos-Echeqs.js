@@ -476,8 +476,9 @@
 
     /** Quién excluyó ese cheque y cuándo. Un tilde sin autor no lo explica nadie */
     function detalleExclusion(f) {
-        return 'Excluido por ' + (f.EXCLUSION_USUARIO || 'sin usuario (todavía no hay login)')
-            + (f.EXCLUSION_FECHA ? ' el ' + fechaHora(f.EXCLUSION_FECHA) : '');
+        // Quién y cuándo, con el formato de Js/auditoria.js
+        return 'Excluido por ' + (Auditoria.quien(f.EXCLUSION_USUARIO) || 'sin usuario registrado')
+            + (f.EXCLUSION_FECHA ? ' · ' + Auditoria.fecha(f.EXCLUSION_FECHA) : '');
     }
 
     /** Los cheques seleccionados que hoy están a la vista */
@@ -1215,10 +1216,10 @@
     }
 
     function detalleMarca(f) {
-        var quien = f.MARCA_USUARIO || 'sin usuario (todavía no hay login)';
+        var quien = Auditoria.quien(f.MARCA_USUARIO) || 'sin usuario registrado';
 
         return (f.MARCADO ? 'Tildado' : 'Destildado') + ' por ' + quien
-            + (f.MARCA_FECHA ? ' el ' + fechaHora(f.MARCA_FECHA) : '');
+            + (f.MARCA_FECHA ? ' · ' + Auditoria.fecha(f.MARCA_FECHA) : '');
     }
 
     function subtituloCodigo(codigo) {

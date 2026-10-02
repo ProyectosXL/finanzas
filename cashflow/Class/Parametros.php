@@ -913,7 +913,8 @@ class Parametros {
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             if (isset($row['FECHA_UPDATE']) && $row['FECHA_UPDATE'] instanceof DateTime) {
-                $row['FECHA_UPDATE'] = $row['FECHA_UPDATE']->format('Y-m-d');
+                // Con la hora: es el "cuando" de la auditoria (Js/auditoria.js)
+                $row['FECHA_UPDATE'] = $row['FECHA_UPDATE']->format('Y-m-d H:i:s');
             }
 
             if (!$tieneModulo) {
@@ -1076,7 +1077,8 @@ class Parametros {
             throw new Exception('No se pudo conectar a la base de datos');
         }
 
-        $sql = "SELECT ID, CANAL, MEDIO_PAGO, PORCENTAJE, DIAS_ACREDITACION, ACTIVO, ORDEN
+        $sql = "SELECT ID, CANAL, MEDIO_PAGO, PORCENTAJE, DIAS_ACREDITACION, ACTIVO, ORDEN,
+                       USUARIO_MODIF, FECHA_MODIF
                 FROM RO_T_CASHFLOW_VENTAS_MIX";
 
         if ($soloActivos) {
@@ -1098,6 +1100,8 @@ class Parametros {
             $row['DIAS_ACREDITACION'] = intval($row['DIAS_ACREDITACION']);
             $row['ACTIVO'] = intval($row['ACTIVO']);
             $row['ORDEN'] = intval($row['ORDEN']);
+            $row['FECHA_MODIF'] = ($row['FECHA_MODIF'] instanceof DateTime)
+                ? $row['FECHA_MODIF']->format('Y-m-d H:i:s') : $row['FECHA_MODIF'];
             $v[] = $row;
         }
 
@@ -1738,6 +1742,41 @@ class Parametros {
      *
      * @return array Lista de tramos ordenados por dias_desde
      */
+    /**
+     * Quien cargo la escala vigente y cuando, para la pantalla.
+     *
+     * APARTE DE getEscalaDescuentoGeneral(), que es la que lee el motor: esa
+     * devuelve vacio si la consulta falla -y sin escala se proyecta con 0% de
+     * descuento-, asi que no se le suma nada que la pueda hacer fallar. La escala
+     * se reemplaza entera en cada guardado, asi que todos sus tramos tienen el
+     * mismo alta: alcanza con uno.
+     *
+     * @return array|null ['usuario', 'fecha']
+     */
+    public function getAuditoriaEscala() {
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            return null;
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT TOP 1 USUARIO_ALTA, FECHA_ALTA FROM RO_T_CASHFLOW_COBRANZAS_ESCALA_DESC
+             WHERE ACTIVO = 1 ORDER BY FECHA_ALTA DESC");
+
+        $row = ($stmt === false) ? null : sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+
+        if (!$row) {
+            return null;
+        }
+
+        return [
+            'usuario' => $row['USUARIO_ALTA'],
+            'fecha' => ($row['FECHA_ALTA'] instanceof DateTime)
+                ? $row['FECHA_ALTA']->format('Y-m-d H:i:s') : $row['FECHA_ALTA']
+        ];
+    }
+
     public function getEscalaDescuentoGeneral() {
         require_once __DIR__ . '/Ingresos.php';
 

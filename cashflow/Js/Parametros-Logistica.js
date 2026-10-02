@@ -170,11 +170,11 @@
                             (tablaCreada ? '' : ' disabled') + '>' +
                     '</div>' +
                 '</td>' +
+                // Quién y cuándo, con el formato de Js/auditoria.js
                 '<td><small class="text-muted">' +
-                    esc((f.FECHA_UPDATE || '').substring(0, 16)) +
-                    (f.USUARIO ? ' — ' + esc(f.USUARIO) : '') +
-                    (f.ACTIVO ? '' : '<div>De baja el ' +
-                        esc((f.FECHA_BAJA || '').substring(0, 16)) + '</div>') +
+                    esc(Auditoria.linea('modif', f.USUARIO, f.FECHA_UPDATE)) +
+                    (f.ACTIVO ? '' : '<div>' +
+                        esc(Auditoria.linea('baja', f.USUARIO_BAJA, f.FECHA_BAJA)) + '</div>') +
                 '</small></td>' +
             '</tr>';
         }).join('');

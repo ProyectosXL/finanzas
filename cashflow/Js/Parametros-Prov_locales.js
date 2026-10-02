@@ -267,7 +267,8 @@
                 +   'data-previo="' + escapar(o.VALOR) + '" '
                 +   'title="' + escapar('Renombrar NO cambia los proveedores que ya lo tienen: '
                       + 'el maestro guarda el texto, no un id. Van a quedar marcados como fuera '
-                      + 'de lista hasta que alguien los edite.') + '"></td>'
+                      + 'de lista hasta que alguien los edite.') + '">'
+                + Auditoria.icono(o) + '</td>'
                 + (esPlazo ? '<td>' + celdaDias(o) + '</td>' : '')
                 + '<td class="text-center">' + celdaUsos(cuantos) + '</td>'
                 + '<td class="text-center">'

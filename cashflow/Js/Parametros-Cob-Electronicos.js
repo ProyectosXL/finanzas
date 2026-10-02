@@ -189,7 +189,8 @@
             '</td>' +
             '<td class="text-center pce-num">' + textoTasa(tasa) + '</td>' +
             '<td class="text-center pce-fecha">' +
-                (p.FECHA_UPDATE ? fechaHora(p.FECHA_UPDATE) : '—') + '</td>' +
+                (p.FECHA_UPDATE ? fechaHora(p.FECHA_UPDATE) : '—') +
+                Auditoria.icono({ usuario: p.USUARIO, fecha: p.FECHA_UPDATE }) + '</td>' +
             // La celda del estado no se atenúa (ver Parametros.css): un switch
             // apagado y gris se lee como "no se puede tocar".
             '<td class="text-center pce-celda-estado">' +
@@ -447,7 +448,7 @@
 
         return '<tr class="' + (activa ? '' : 'pce-inactiva') + '">' +
             '<td class="fw-semibold">' + escapar(a.RAZON_SOCIAL) + '</td>' +
-            '<td>' + escapar(a.CONCEPTO) + '</td>' +
+            '<td>' + escapar(a.CONCEPTO) + Auditoria.icono({ usuario: a.USUARIO, fecha: a.FECHA_UPDATE }) + '</td>' +
             '<td class="text-end pce-num">' + porcentaje(a.ALICUOTA) + '</td>' +
             '<td class="text-center">' + fechaCorta(a.VIGENCIA_DESDE) + '</td>' +
             '<td class="text-center">' + estado + '</td>' +

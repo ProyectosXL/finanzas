@@ -231,7 +231,8 @@
 
         texto('ultimaCargaSaldos', uc ? fechaHora(uc.fecha_carga) : 'Sin cargas');
         texto('ultimaCargaSaldosDetalle', uc
-            ? ((uc.usuario || 'sin usuario') + ' · ' + (uc.observaciones || 'sin observaciones'))
+            ? ((uc.usuario ? 'Cargado por ' + Auditoria.quien(uc.usuario) : 'Sin usuario registrado')
+                + ' · ' + (uc.observaciones || 'sin observaciones'))
             : 'Todavía no se cargó ningún saldo');
 
         var ec = datosSaldos.efectivo_central;
@@ -1080,7 +1081,11 @@
             html += '<td class="text-center"><span class="sal-origen" title="' + escapar(titulo) + '">' +
                     estado + '</span></td>';
             html += '<td class="text-center sal-fecha-carga">' + fechaHora(m.FECHA_ALTA) +
-                    (m.USUARIO ? '<div class="sal-subtitulo">' + escapar(m.USUARIO) + '</div>' : '') + '</td>';
+                    (m.USUARIO ? '<div class="sal-subtitulo">' + escapar(Auditoria.quien(m.USUARIO)) + '</div>' : '') +
+                    // Alta y, si la tiene, baja (Js/auditoria.js)
+                    Auditoria.icono({ alta: { usuario: m.USUARIO, fecha: m.FECHA_ALTA },
+                        baja: m.FECHA_BAJA ? { usuario: m.USUARIO_BAJA, fecha: m.FECHA_BAJA } : null }) +
+                    '</td>';
             html += '<td class="text-center text-nowrap">' + (vigente && Permisos.puedeEditar('modalMovimientos')
                 ? '<button class="btn btn-sm btn-outline-primary sal-btn-corregir" data-id="' + m.ID +
                       '" title="Corregir: da de baja este movimiento e inserta uno nuevo">' +

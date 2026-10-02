@@ -313,7 +313,17 @@
             ? '<s>' + plata(f.IMPORTE) + '</s>'
             : plata(f.IMPORTE);
 
-        return '<tr class="' + clases.join(' ') + '" title="' + esc(f.EXPLICACION || '') + '">'
+        // Quién la vinculó o la excluyó, y cuándo (Js/auditoria.js)
+        var aud = [f.VINCULO_FECHA || f.VINCULO_USUARIO
+                ? 'Vinculada a la tarjeta por ' + (Auditoria.quien(f.VINCULO_USUARIO) || 'sin usuario registrado')
+                    + (f.VINCULO_FECHA ? ' · ' + Auditoria.fecha(f.VINCULO_FECHA) : '') : '',
+            f.EXCLUSION_FECHA || f.EXCLUSION_USUARIO
+                ? 'Excluida por ' + (Auditoria.quien(f.EXCLUSION_USUARIO) || 'sin usuario registrado')
+                    + (f.EXCLUSION_FECHA ? ' · ' + Auditoria.fecha(f.EXCLUSION_FECHA) : '') : '']
+            .filter(function(l) { return l !== ''; }).join('\n');
+
+        return '<tr class="' + clases.join(' ') + '" title="'
+            + esc((f.EXPLICACION || '') + (aud ? '\n' + aud : '')) + '">'
             + '<td class="text-center">'
                 // Sin permiso no hay que seleccionar: la seleccion es para escribir
                 + Permisos.siEdita('bodyCorp',
@@ -837,10 +847,11 @@
                         : '<small class="text-muted">—</small>')
                 + '</td>'
                 + '<td><small>' + esc(r.OBSERVACION || '') + '</small></td>'
-                + '<td><small class="text-muted">' + esc(r.FECHA_MODIF || '')
-                    + (r.USUARIO_MODIF ? ' — ' + esc(r.USUARIO_MODIF) : '')
-                    + (r.ACTIVO ? '' : '<div>De baja: ' + esc(r.FECHA_BAJA || '')
-                        + (r.USUARIO_BAJA ? ' — ' + esc(r.USUARIO_BAJA) : '') + '</div>')
+                // Quién y cuándo, con el formato de Js/auditoria.js
+                + '<td><small class="text-muted">'
+                    + esc(Auditoria.linea('modif', r.USUARIO_MODIF, r.FECHA_MODIF))
+                    + (r.ACTIVO ? '' : '<div>' + esc(Auditoria.linea('baja', r.USUARIO_BAJA, r.FECHA_BAJA))
+                        + '</div>')
                 + '</small></td>'
                 + '<td class="text-center">'
                     + (r.ACTIVO && Permisos.puedeEditar('bodyResumenes')

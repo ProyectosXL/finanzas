@@ -204,6 +204,10 @@ class CronogramaPagos {
                 'corrida' => $corrida['corrida'],
                 'override' => (bool) ($ov && !empty($ov['fecha'])),
                 'motivo' => ($ov && isset($ov['motivo'])) ? $ov['motivo'] : null,
+
+                // Quien movio la fecha y cuando, para la pantalla (Js/auditoria.js)
+                'usuario' => ($ov && isset($ov['usuario'])) ? $ov['usuario'] : null,
+                'fecha_alta' => ($ov && isset($ov['fecha_alta'])) ? $ov['fecha_alta'] : null,
                 'faltan' => $corrida['faltan']
             ];
         }

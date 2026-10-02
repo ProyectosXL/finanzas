@@ -492,14 +492,18 @@
                     + formatDate(item.COBRO_ORIGINAL) + '</span></td>';
             }
 
-            return '<td class="center"' + orden + '>'
+            // Una fecha cargada a mano dice quién y cuándo (Js/auditoria.js)
+            return '<td class="center"' + orden
+                + (item.FECHA_MANUAL ? ' title="' + Auditoria.titulo({ usuario: item.MANUAL_USUARIO,
+                    fecha: item.MANUAL_FECHA }) + '"' : '') + '>'
                 + '<span class="badge-cobro-may">' + formatDate(item.Cobro) + '</span></td>';
         }
 
         var manual = !!item.FECHA_MANUAL;
         var titulo = manual
             ? 'Fecha cargada a mano. El importe no cambia: mayoristas no tiene escala de '
-                + 'descuento.'
+                + 'descuento.\n'
+                + Auditoria.titulo({ usuario: item.MANUAL_USUARIO, fecha: item.MANUAL_FECHA })
             : 'Calculada como fecha de emisión + ' + (item.PLAZO || 60) + ' días. Se puede pisar.';
 
         if (item.VENCIDA) {

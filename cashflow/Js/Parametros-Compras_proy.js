@@ -188,7 +188,8 @@
 
             return '<div class="col-md-6 col-lg-4">' +
                 '<div class="param-card" id="pcpr-card-' + clave + '">' +
-                    '<div class="param-clave">' + esc(ETIQUETAS[clave] || clave) + '</div>' +
+                    '<div class="param-clave">' + esc(ETIQUETAS[clave] || clave) +
+                        Auditoria.icono({ usuario: p.USUARIO, fecha: p.FECHA_UPDATE }) + '</div>' +
                     '<div class="param-descripcion">' + esc(p.DESCRIPCION || '') + '</div>' +
                     '<div class="input-group input-group-sm">' +
                         input +

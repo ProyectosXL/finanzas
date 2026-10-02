@@ -534,7 +534,7 @@ class ProveedoresCategorias {
 
         $sql = "SELECT COD_PROVEE, NOMBRE, RUBRO_ECONOMICO, RUBRO, CENTRO_COSTOS,
                        FORMA_PAGO, FORMA_PAGO_ORIG, PLAZO_PAGO, PLAZO_DIAS,
-                       CRITERIO_DISTRIB, FECHA_IMPORTACION, "
+                       CRITERIO_DISTRIB, FECHA_IMPORTACION, USUARIO_ALTA, "
                        . self::origenSql() . " AS ORIGEN
                 FROM dbo." . self::TABLA . "
                 WHERE VIGENTE = 1";
@@ -567,6 +567,9 @@ class ProveedoresCategorias {
                 'PLAZO_DIAS' => ($row['PLAZO_DIAS'] === null) ? null : intval($row['PLAZO_DIAS']),
                 'CRITERIO_DISTRIB' => $row['CRITERIO_DISTRIB'],
                 'FECHA_IMPORTACION' => $this->fechaHora($row['FECHA_IMPORTACION']),
+
+                // Quien cargo esta version (Js/auditoria.js)
+                'USUARIO_ALTA' => $row['USUARIO_ALTA'],
 
                 /* De donde salio esta version. Lo usa el diff para avisar antes
                    de pisar trabajo manual, y la grilla para marcarlo. */

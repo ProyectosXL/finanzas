@@ -74,7 +74,7 @@ $edita = AuthCashflow::puedeEditar('parametros', 'COBRANZAS');
         <div class="card h-100" id="cardEscalaCob">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div>
-                    <h5 class="mb-0">Escala de Descuento &mdash; Cobranzas Franquicias</h5>
+                    <h5 class="mb-0">Escala de Descuento &mdash; Cobranzas Franquicias<span id="audEscalaCob"></span></h5>
                     <small class="text-muted">
                         Aplica sólo a las facturas de franquicias. Una sola escala para todas. <strong>No depende del medio de pago.</strong>
                         Los días son los que van de la emisión a la fecha de cobro.

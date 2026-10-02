@@ -309,7 +309,9 @@
                 'alícuota no reescribe lo ya informado.">' + porcentaje(f.tasa_aplicada) + '</td>' +
             '<td class="text-end cobel-num cobel-neto">' + pesos(f.importe_neto) + '</td>' +
             '<td class="text-center"><span class="cobel-origen">' +
-                etiquetaOrigen(f.origen_dato) + '</span></td>' +
+                etiquetaOrigen(f.origen_dato) + '</span>' +
+                // Quién lo cargó o lo tocó por última vez (Js/auditoria.js)
+                Auditoria.icono({ usuario: f.usuario, fecha: f.fecha_update }) + '</td>' +
             '<td class="text-center">' + Permisos.siEdita('tablaCobel',
                 '<button class="btn btn-sm btn-link cobel-editar" data-mov="' + f.id + '" ' +
                     'title="Editar el importe bruto o la fecha"><i class="fas fa-pen"></i></button>' +

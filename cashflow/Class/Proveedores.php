@@ -374,6 +374,12 @@ class Proveedores {
                 'EXCLUIDA_MANUAL' => $excluidaManual,
                 'MOTIVO_EXCLUSION' => ($pago === null) ? null : $pago['MOTIVO_EXCLUSION'],
 
+                /* Quien toco por ultima vez los overrides de este comprobante -la
+                   fecha, la forma, la exclusion- y cuando. Es una fila por
+                   comprobante, asi que es UNA modificacion para las tres. */
+                'PAGO_USUARIO' => ($pago === null) ? null : $pago['USUARIO'],
+                'PAGO_FECHA_MODIF' => ($pago === null) ? null : $pago['FECHA_MODIF'],
+
                 /* EL PROVEEDOR ENTERO ESTA EXCLUIDO de Proveedores Locales,
                    porque su deuda ya se considera en otra pestana. Alcanza a
                    toda su deuda. Entra en EXCLUIDO -el segundo corte- igual que

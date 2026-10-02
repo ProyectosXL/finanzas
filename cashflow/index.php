@@ -74,6 +74,11 @@ $tituloInicial = Menu::tituloTab($tabInicial);
          el <head> y no al pie con los demás: la pestaña inicial se incluye en
          línea más abajo y su JS ya pregunta al dibujar. No depende de nada. -->
     <script src="Js/permisos.js?v=<?php echo time(); ?>"></script>
+    <!-- Quién modificó y cuándo (Js/auditoria.js). Los nombres de los
+         procesos automáticos salen de AuthCashflow::ORIGENES, que es el único
+         lugar donde están: así la pantalla y los SP no pueden decir distinto. -->
+    <script>window.CASHFLOW_ORIGENES = <?php echo json_encode(AuthCashflow::ORIGENES, JSON_UNESCAPED_UNICODE); ?>;</script>
+    <script src="Js/auditoria.js?v=<?php echo time(); ?>"></script>
 </head>
 <body>
   

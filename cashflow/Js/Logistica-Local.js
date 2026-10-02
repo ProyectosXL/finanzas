@@ -155,7 +155,8 @@
                 '<td>' +
                     '<a href="#" class="fw-semibold text-decoration-none" data-detalle="' +
                         esc(f.cod_provee) + '">' + esc(f.nombre || f.cod_provee) + '</a>' +
-                    '<div><small class="text-muted">' + esc(f.cod_provee) + '</small></div>' +
+                    '<div><small class="text-muted">' + esc(f.cod_provee) + '</small>' +
+                        Auditoria.icono({ usuario: f.usuario, fecha: f.fecha_modif }) + '</div>' +
                 '</td>' +
                 celdaNum(f.cod_provee, 'horas', f.horas_mes, '0.5', 'Horas por mes') +
                 celdaNum(f.cod_provee, 'valor_hora', f.valor_hora_base, '0.01',

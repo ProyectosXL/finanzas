@@ -1286,7 +1286,11 @@ class Ventas {
             $resultado[$canal] = [
                 'calc' => isset($calc[$canal]) ? $calc[$canal] : 0,
                 'edit' => $edit,
-                'efectivo' => ($edit === null) ? (isset($calc[$canal]) ? $calc[$canal] : 0) : $edit
+                'efectivo' => ($edit === null) ? (isset($calc[$canal]) ? $calc[$canal] : 0) : $edit,
+
+                // Quien la edito y cuando (Js/auditoria.js)
+                'usuario' => isset($edits[$canal]) ? $edits[$canal]['USUARIO'] : null,
+                'fecha' => isset($edits[$canal]) ? $edits[$canal]['FECHA_UPDATE'] : null
             ];
         }
 
@@ -1628,9 +1632,14 @@ class Ventas {
         // atras respecto del mes proyectado.
         $hist = $this->historicoIndexado();
         $indices = [];
+        $indicesAud = [];
 
         foreach ($this->getIndices() as $row) {
-            $indices[sprintf('%04d-%02d', $row['ANIO'], $row['MES'])] = $row['INDICE'];
+            $clave = sprintf('%04d-%02d', $row['ANIO'], $row['MES']);
+            $indices[$clave] = $row['INDICE'];
+
+            // Quien lo edito y cuando, para el tooltip de la celda (Js/auditoria.js)
+            $indicesAud[$clave] = ['usuario' => $row['USUARIO'], 'fecha' => $row['FECHA_UPDATE']];
         }
 
         /* ---- 1. Proyeccion por mes --------------------------------------- */
@@ -1663,6 +1672,8 @@ class Ventas {
                 'variacion' => $b['variacion'],
                 'indice' => $b['indice'],
                 'indice_editado' => isset($indices[$b['clave']]),
+                'indice_usuario' => isset($indicesAud[$b['clave']]) ? $indicesAud[$b['clave']]['usuario'] : null,
+                'indice_fecha' => isset($indicesAud[$b['clave']]) ? $indicesAud[$b['clave']]['fecha'] : null,
                 // Paso intermedio: ya tiene el indice aplicado pero todavia no
                 // el IVA. Es lo que hace visible de donde sale la diferencia
                 // entre el neto del anio anterior y la venta proyectada.

@@ -278,7 +278,7 @@
 
     function subtituloUsuario(usuario) {
         return '<div class="ppq-subtitulo">' +
-               escapar(usuario || 'sin usuario') + '</div>';
+               escapar(Auditoria.quien(usuario) || 'sin usuario registrado') + '</div>';
     }
 
     /* ================================================================

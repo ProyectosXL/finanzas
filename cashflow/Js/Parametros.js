@@ -187,7 +187,8 @@
             html += '<tr class="' + (esNuevoCanal ? 'mix-canal-inicio' : '') +
                     (activo ? '' : ' mix-inactivo') + '" data-fila-id="' + fila.ID + '">';
             html += '<td class="fw-semibold">' + (esNuevoCanal ? titulo(fila.CANAL) : '') + '</td>';
-            html += '<td>' + titulo(fila.MEDIO_PAGO) + '</td>';
+            html += '<td>' + titulo(fila.MEDIO_PAGO) +
+                Auditoria.icono({ usuario: fila.USUARIO_MODIF, fecha: fila.FECHA_MODIF }) + '</td>';
 
             // Inhabilitar un medio lo saca de la proyección sin borrar el dato:
             // se puede volver a activar cuando se use.
@@ -482,7 +483,8 @@
 
             html += '<div class="col-md-6 col-lg-3">' +
                         '<div class="param-card">' +
-                            '<div class="param-clave">' + titulo(canal) + '</div>' +
+                            '<div class="param-clave">' + titulo(canal) +
+                                Auditoria.icono({ usuario: param.USUARIO, fecha: param.FECHA_UPDATE }) + '</div>' +
                             '<div class="param-descripcion">' + escapar(param.DESCRIPCION || '') + '</div>' +
                             Permisos.segun('gridRespaldo',
                                 '<div class="input-group input-group-sm">' +

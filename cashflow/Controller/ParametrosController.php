@@ -942,7 +942,8 @@ try {
         case 'getEscalaDescuento':
             echo json_encode([
                 'success' => true,
-                'data' => $parametros->getEscalaDescuentoGeneral()
+                'data' => $parametros->getEscalaDescuentoGeneral(),
+                'auditoria' => $parametros->getAuditoriaEscala()
             ], JSON_UNESCAPED_UNICODE);
             break;
 

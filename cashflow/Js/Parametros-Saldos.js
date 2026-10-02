@@ -363,8 +363,10 @@
     }
 
     function inputNombre(c) {
+        // El icono de auditoria va al lado: soloLectura() cambia el input y no lo toca
         return '<input type="text" class="form-control form-control-sm sp-cuenta-nombre" ' +
-               'data-id="' + c.ID + '" maxlength="80" value="' + escapar(c.NOMBRE) + '">';
+               'data-id="' + c.ID + '" maxlength="80" value="' + escapar(c.NOMBRE) + '">' +
+               Auditoria.icono({ usuario: c.USUARIO, fecha: c.FECHA_UPDATE });
     }
 
     function selectMoneda(c) {
@@ -612,7 +614,8 @@
                     '</td>';
 
             html += '<td class="text-center sp-fecha">' +
-                    (s.FECHA_UPDATE ? fechaHora(s.FECHA_UPDATE) : '—') + '</td>';
+                    (s.FECHA_UPDATE ? fechaHora(s.FECHA_UPDATE) : '—') +
+                    Auditoria.icono({ usuario: s.USUARIO, fecha: s.FECHA_UPDATE }) + '</td>';
             html += '</tr>';
         });
 

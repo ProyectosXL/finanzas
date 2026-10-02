@@ -825,6 +825,15 @@
      * sin techo de antigüedad y una fecha de la semana pasada es una decisión
      * legítima —se pensó pagar y no se pagó—.
      */
+    /**
+     * Quién tocó por última vez los overrides del comprobante. Es una sola
+     * fila para la fecha, la forma y la exclusión, así que es la misma
+     * modificación para las tres celdas. Ver Js/auditoria.js.
+     */
+    function auditoriaPago(f) {
+        return { usuario: f.PAGO_USUARIO, fecha: f.PAGO_FECHA_MODIF };
+    }
+
     function celdaFechaPago(f) {
         var cargada = (f.ORIGEN_FECHA === 'CARGADA');
         var conciliado = (f.ESTADO_PAGO === 'CONCILIADO');
@@ -846,7 +855,8 @@
         if (cargada) { clases.push('prov-fecha-cargada'); }
 
         var titulo = fuente.titulo + (conciliado
-            ? ' Ya está CONCILIADA contra Tango: el comprobante se pagó.' : '');
+            ? ' Ya está CONCILIADA contra Tango: el comprobante se pagó.' : '')
+            + (cargada ? '\n' + Auditoria.texto(auditoriaPago(f)) : '');
 
         /* Sin permiso de edicion, la fecha y de donde sale, sin el input ni el
            boton de volver al vencimiento. Ver Js/permisos.js. */
@@ -998,7 +1008,8 @@
                 + 'factura de otra manera: el maestro y las demás facturas de este proveedor '
                 + 'no cambian.'
             : 'Esta factura se trata como ' + actual + ', en lugar de la del maestro ('
-                + delMaestro + '). El maestro no cambió. Volvé a "del maestro" para sacarlo.';
+                + delMaestro + '). El maestro no cambió. Volvé a "del maestro" para sacarlo.\n'
+                + Auditoria.texto(auditoriaPago(f));
 
         return '<div class="prov-forma-celda">'
             + '<select class="form-select form-select-sm prov-select-forma'
@@ -1108,7 +1119,8 @@
         } else if (f.EXCLUIDA_MANUAL) {
             marca = '<div><span class="prov-badge-excluida" title="'
                 + escapar('Excluida del cashflow: '
-                    + (f.MOTIVO_EXCLUSION || 'sin motivo registrado'))
+                    + (f.MOTIVO_EXCLUSION || 'sin motivo registrado')
+                    + '\n' + Auditoria.texto(auditoriaPago(f)))
                 + '">excluida</span></div>';
         }
 
@@ -2018,7 +2030,9 @@
                 + '<td class="text-center">' + celdaOrigen(f) + '</td>'
                 + '<td class="text-center">' + celdaExclusion(f) + '</td>'
                 + '<td class="text-center"><span class="text-muted small">'
-                +   escapar((f.FECHA_IMPORTACION || '').substring(0, 10)) + '</span></td>'
+                +   escapar((f.FECHA_IMPORTACION || '').substring(0, 10)) + '</span>'
+                +   Auditoria.icono({ alta: { usuario: f.USUARIO_ALTA, fecha: f.FECHA_IMPORTACION } })
+                + '</td>'
                 + '<td class="text-center">'
                 +   (editable
                         ? '<button class="btn btn-sm btn-outline-secondary py-0 px-2 prov-editar" '
@@ -2118,7 +2132,7 @@
         }
 
         return '<span class="prov-badge-excluida" title="' + escapar('Excluido: ' + ex.MOTIVO
-                + ' — ' + (ex.USUARIO || 'sin usuario') + ', ' + (ex.FECHA_ALTA || ''))
+                + '\n' + Auditoria.linea('alta', ex.USUARIO, ex.FECHA_ALTA))
             + '">excluido</span> '
             + (!puede ? '' : '<button class="btn btn-sm btn-outline-secondary py-0 px-1 prov-incluir-mod" '
             + 'data-cod="' + cod + '" title="Volver a incluirlo. La exclusión queda en el '

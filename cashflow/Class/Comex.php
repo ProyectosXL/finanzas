@@ -1179,6 +1179,12 @@ class Comex {
            ningun override cargado, y NULL es exactamente eso. */
         $cotizSql = $this->tieneCotizEdit() ? 'D.COTIZ_USD_EDIT' : 'CAST(NULL AS DECIMAL(12,4))';
 
+        /* Quien cargo la cotizacion a mano y cuando: la fila de CRONO_NAC es una
+           por contenedor y su ultima modificacion es la del override. */
+        $cotizAudSql = $this->tieneCotizEdit()
+            ? 'D.USUARIO_MODIF AS COTIZ_USUARIO, D.FECHA_MODIF AS COTIZ_FECHA'
+            : 'CAST(NULL AS VARCHAR(50)) AS COTIZ_USUARIO, CAST(NULL AS DATETIME) AS COTIZ_FECHA';
+
         $sql = "SELECT
                     A.ID,
                     A.PROVEEDOR,
@@ -1195,6 +1201,7 @@ class Comex {
                     " . $this->rastroSelect('PAGO') . ",
                     " . $this->pagadoSelect() . ",
                     " . $cotizSql . " AS COTIZ_USD_EDIT,
+                    " . $cotizAudSql . ",
                     CASE WHEN " . self::sqlTieneCostos() . " THEN 1 ELSE 0 END TIENE_COSTOS
                 FROM " . self::TABLA_MAESTRO . " A
                 LEFT JOIN " . self::TABLA_EDIT . " D ON A.ID = D.ID_MG
@@ -1233,7 +1240,7 @@ class Comex {
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $row = self::aTexto($row,
                 ['ETD', 'ETA', 'FECHA_EST_PAGO', 'EDIT_ANTERIOR', 'EDIT_VALOR', 'EDIT_FECHA',
-                 'PAGADO_FECHA', 'FECHA_PAGO_CONF_FECHA']);
+                 'PAGADO_FECHA', 'FECHA_PAGO_CONF_FECHA', 'COTIZ_FECHA']);
 
             $row = self::conFechaEfectiva($row, 'FECHA_EST_PAGO', 'FECHA_PAGO_EFECTIVA', $hoy,
                                           $conBitPago);

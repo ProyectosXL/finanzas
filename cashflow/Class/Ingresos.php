@@ -1238,6 +1238,9 @@ class Ingresos {
                 'COBRO_ORIGINAL' => $ubic['original'],
                 'VENCIDA' => $ubic['vencida'],
                 'FECHA_MANUAL' => $cobro['manual'],
+                // Quien la cargo y cuando, para el tooltip de la celda (Js/auditoria.js)
+                'MANUAL_USUARIO' => $cobro['manual'] ? $fechasManuales[$key]['usuario'] : null,
+                'MANUAL_FECHA' => $cobro['manual'] ? $fechasManuales[$key]['fecha_modif'] : null,
                 'TIPO_REGISTRO' => 'PROYECCION' // Distintivo para pintar en amarillo
             ];
         }
@@ -1733,6 +1736,9 @@ class Ingresos {
                 'COBRO_ORIGINAL' => $ubic['original'],
                 'VENCIDA' => $ubic['vencida'],
                 'FECHA_MANUAL' => $cobro['manual'],
+                // Quien la cargo y cuando, para el tooltip de la celda (Js/auditoria.js)
+                'MANUAL_USUARIO' => $cobro['manual'] ? $fechasManuales[$key]['usuario'] : null,
+                'MANUAL_FECHA' => $cobro['manual'] ? $fechasManuales[$key]['fecha_modif'] : null,
                 'TIPO_REGISTRO' => 'PROYECCION',
                 // El plazo del parámetro, para poder auditar la proyección
                 // automática aunque la fila tenga fecha manual.

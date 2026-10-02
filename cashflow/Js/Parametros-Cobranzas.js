@@ -99,6 +99,13 @@
                     });
 
                     renderizarEscala();
+
+                    // Quién cargó la escala vigente y cuándo (Js/auditoria.js)
+                    var aud = document.getElementById('audEscalaCob');
+
+                    if (aud) {
+                        aud.innerHTML = result.auditoria ? Auditoria.icono({ alta: result.auditoria }) : '';
+                    }
                 } else {
                     Notificacion.error('No se pudo leer la escala de descuento: ' + result.message);
                 }
