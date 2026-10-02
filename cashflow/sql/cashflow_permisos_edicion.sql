@@ -111,7 +111,8 @@ SELECT @MODULO, P.clave, P.nombre, P.descripcion
 FROM @PERMISOS P
 WHERE NOT EXISTS (SELECT 1 FROM dbo.FP_PERMISOS X WHERE X.clave = P.clave);
 
-PRINT CONCAT('Permisos de edicion: ', @@ROWCOUNT, ' nuevos de ', (SELECT COUNT(*) FROM @PERMISOS), '.');
+DECLARE @nuevos INT = @@ROWCOUNT, @total INT = (SELECT COUNT(*) FROM @PERMISOS);
+PRINT CONCAT('Permisos de edicion: ', @nuevos, ' nuevos de ', @total, '.');
 
 IF EXISTS (SELECT 1 FROM dbo.FP_PERMISOS X JOIN @PERMISOS P ON P.clave = X.clave WHERE X.modulo_id <> @MODULO)
     PRINT 'ATENCION: hay claves cashflow.editar.* colgadas de OTRO modulo. No se tocan, y el PHP no las ve: revisalas en Gestionusuarios.';
