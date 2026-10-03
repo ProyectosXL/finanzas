@@ -35,9 +35,6 @@
 
     var ENDPOINT = 'Controller/LogisticaController.php';
 
-    /** Los dos pagos del mes */
-    var NOMBRE_PAGO = { 1: '2do viernes', 2: '4to viernes' };
-
     /* POR QUÉ NO HAY UNA LISTA DE MOTIVOS ACÁ. Cada celda trae su propio
        'tooltip' ya redactado por el backend, porque es la explicación de una
        cuenta que hace el backend: de qué ajuste sale el valor, qué meses de
@@ -363,13 +360,13 @@
                     estado += ' <span class="badge bg-warning text-dark">fecha a mano</span>';
                 } else if (p.corrida) {
                     estado += ' <span class="badge bg-light text-dark" ' +
-                        'title="El viernes no era hábil: se corrió al día hábil anterior">' +
+                        'title="El día de pago no era hábil: se corrió al día hábil anterior">' +
                         'corrida</span>';
                 }
 
                 return '<tr class="' + (p.excluido ? 'text-muted' : '') + '">' +
                     '<td>' + esc(rotuloMes(p.mes)) + '</td>' +
-                    '<td><small>' + esc(NOMBRE_PAGO[p.nro] || p.nro) + '</small></td>' +
+                    '<td><small>' + esc(p.nombre || p.nro) + '</small></td>' +
                     '<td>' + esc(fecha(p.fecha)) + '</td>' +
                     '<td class="text-end">' +
                         (celda && celda.valor_hora !== null ? importe(celda.valor_hora) : '—') +
@@ -475,7 +472,17 @@
 
         var enTramo = (datos.cronograma || []).filter(function(p) { return p.en_tramo; });
 
-        el.innerHTML = 'Se paga el <strong>2do y el 4to viernes</strong> de cada mes' +
+        /* Cuándo se paga lo dice la configuración del cronograma LOGISTICA, no
+           un texto fijo: el día y la frecuencia se cambian en Parámetros ›
+           Generales. */
+        var regla = (datos.cronograma_config && datos.cronograma_config.descripcion) || '';
+        var ayuda = document.getElementById('logRegla');
+
+        if (ayuda) {
+            ayuda.textContent = regla ? 'en partes iguales, ' + regla : '';
+        }
+
+        el.innerHTML = 'Se paga <strong>' + esc(regla || 'según el cronograma') + '</strong> de cada mes' +
             (enTramo.length
                 ? '; dentro del tramo diario caen ' + enTramo.length + ' fecha(s).'
                 : '.') +

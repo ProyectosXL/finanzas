@@ -234,6 +234,7 @@ try {
                         'avisos' => $sup['avisos'],
                         'sin_tarjeta' => $sup['sin_tarjeta'],
                         'disponible' => $sup['disponible'],
+                        'cronograma' => isset($sup['cronograma']) ? $sup['cronograma'] : null,
 
                         /* Una fila por supervisora -el renglon que se ve- y una por
                            supervisora y parte, que son las dos subfilas

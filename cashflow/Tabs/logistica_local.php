@@ -72,8 +72,8 @@
                 <div>
                     <h5 class="mb-0">Pagos proyectados por fletero</h5>
                     <small class="text-muted">
-                        Horas por mes × valor hora del mes, mitad y mitad en el 2do y el 4to
-                        viernes
+                        Horas por mes × valor hora del mes, <span id="logRegla">en partes
+                        iguales en los pagos del cronograma</span>
                         <i class="fas fa-info-circle ms-1" id="logAyuda"
                            title="TODO es proyección: no hay parte real. El valor hora base rige su mes y los dos siguientes; cada tres meses hay un ajuste, cuyo % es la suma SIN componer de la inflación del mes del ajuste y de los dos anteriores. Los importes son finales: sin IVA ni otros conceptos."></i>
                     </small>

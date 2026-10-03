@@ -104,6 +104,13 @@
         encabezadoEje('headerEjeSup', 'headerEjeSup2', cols);
 
         texto('supCartel', s.cartel);
+
+        /* Cuándo sale el efectivo lo dice la configuración del cronograma
+           SUPERVISORAS, no un texto fijo: se cambia en Parámetros › Generales. */
+        if (s.cronograma && s.cronograma.descripcion) {
+            texto('supRegla', s.cronograma.descripcion);
+        }
+
         texto('supCuantas', String(s.filas.length));
         texto('supSinTarjeta', plata(s.sin_tarjeta));
 

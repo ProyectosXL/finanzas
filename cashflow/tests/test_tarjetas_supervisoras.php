@@ -330,7 +330,12 @@ chequear('y el motivo es SIN_IMPORTE', TarjetasSupervisoras::SIN_IMPORTE, $e['EV
 seccion('el efectivo se reparte mitad y mitad');
 
 $habiles = calendarioTS('2026-01-01', '2028-12-31');
-$crono = CronogramaPagos::delMes('2026-11', $habiles);
+
+/* Se prueba el reparto con el cronograma QUINCENAL de viernes, que era el de
+   siempre: dos partes. El semanal de lunes, que es el defecto de SUPERVISORAS
+   desde que el cronograma es por concepto, va en su propia seccion. */
+$VIE_TS = CronogramaPagos::config(5, CronogramaPagos::QUINCENAL);
+$crono = CronogramaPagos::delMes('2026-11', $VIE_TS, $habiles);
 $delMes = [];
 
 foreach ($crono as $pago) {
@@ -361,7 +366,7 @@ seccion('un pago con fecha anterior o igual a hoy no se proyecta');
 /* ESA PLATA YA SALIO y ya esta reflejada en el saldo bancario que abre el cuadro.
    Proyectarla seria pedir dos veces la misma plata. Mismo criterio que Logistica
    Local. */
-$crono = CronogramaPagos::delMes('2026-09', $habiles);
+$crono = CronogramaPagos::delMes('2026-09', $VIE_TS, $habiles);
 $delSep = [];
 
 foreach ($crono as $pago) {
@@ -549,3 +554,43 @@ $eNueva = TarjetasSupervisoras::estimar($pNueva, $meses, $inflacion, $v,
 
 chequear('con un solo mes, el tooltip lo dice', true,
     strpos($eNueva['BEA']['meses']['2026-11']['tooltip'], '1 de los 3 meses') !== false);
+
+/* ================================================================
+   EL EFECTIVO CON EL CRONOGRAMA SUPERVISORAS: TODOS LOS LUNES
+   ================================================================ */
+seccion('el efectivo se reparte en los lunes del mes, en partes iguales');
+
+/* Es el defecto de SUPERVISORAS desde que el cronograma es por concepto. Un mes
+   de cinco lunes reparte en quintos y uno de cuatro en cuartos: con las dos
+   mitades fijas de antes, agosto habria quedado con tres lunes sin pago. */
+$LUN_TS = CronogramaPagos::configDesdeMapa([], 'SUPERVISORAS');
+$delAgo = [];
+
+foreach (CronogramaPagos::delMes('2026-08', $LUN_TS, $habiles) as $pago) {
+    $delAgo[$pago['nro']] = $pago;
+}
+
+$pagosAgo = TarjetasSupervisoras::repartirEfectivo(100000, $delAgo, '2026-07-01');
+
+chequear('agosto 2026 tiene cinco lunes: cinco pagos', 5, count($pagosAgo));
+chequear('cada uno es un quinto', 20000.0, $pagosAgo[0]['importe']);
+chequear('el primero es el lunes 3', '2026-08-03', $pagosAgo[0]['fecha']);
+chequear('y el ultimo el lunes 31', '2026-08-31', $pagosAgo[4]['fecha']);
+chequear('los cinco suman el importe', 100000.0, array_sum(array_column($pagosAgo, 'importe')));
+
+$delSepL = [];
+
+foreach (CronogramaPagos::delMes('2026-09', $LUN_TS, $habiles) as $pago) {
+    $delSepL[$pago['nro']] = $pago;
+}
+
+$pagosSepL = TarjetasSupervisoras::repartirEfectivo(100000, $delSepL, '2026-09-15');
+
+chequear('septiembre 2026 tiene cuatro lunes: cuartos', 25000.0, $pagosSepL[0]['importe']);
+
+/* LOS QUE YA PASARON NO SE PROYECTAN, PERO LA PARTE NO CAMBIA: el mes se sigue
+   repartiendo en cuatro. Si se repartiera entre los que quedan, a mitad de mes
+   se proyectaria de mas. */
+chequear('el 7 y el 14 ya pasaron y no se proyectan', [false, false, true, true],
+    array_column($pagosSepL, 'proyecta'));
+chequear('y el que queda sigue siendo un cuarto, no un medio', 25000.0, $pagosSepL[3]['importe']);

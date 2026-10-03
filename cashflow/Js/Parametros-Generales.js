@@ -14,14 +14,23 @@
  * pantalla no ofrece tipear. Los meses pasados van marcados: se editan, pero no
  * se proyectan.
  *
- * POR QUE EL CRONOGRAMA VA EN DOS TABLAS
- * ---------------------------------------
- * Arriba, los DOS PROXIMOS PAGOS desde hoy: son los de las primeras cuatro
- * semanas, y son los unicos que se editan, en la misma fila (fecha y motivo).
- * Abajo, el resto del horizonte: se calculan igual porque son las que deciden
- * que mitad de un importe mensual cae dentro del tramo diario, pero no se
- * editan. Una sola tabla con unas filas editables y otras no se lee como un
- * error de la pantalla.
+ * POR QUE EL CRONOGRAMA VA EN TRES TABLAS
+ * ----------------------------------------
+ * Hay un cronograma por concepto -Proveedores Locales, Logistica, Supervisoras-
+ * y la card los muestra en tres tablas, una por pregunta:
+ *
+ *   1. La CONFIGURACION: el dia y la frecuencia de cada concepto. Cambiarla da de
+ *      baja los pagos movidos a mano de ese concepto desde este mes, y antes de
+ *      guardar se confirma diciendo cuantos.
+ *   2. Los DOS PROXIMOS PAGOS de cada concepto: los unicos que se editan, en la
+ *      misma fila (fecha y motivo).
+ *   3. El RESTO DEL HORIZONTE: se calcula igual porque decide que parte de un
+ *      importe mensual cae dentro del tramo diario, pero no se edita. Una sola
+ *      tabla con unas filas editables y otras no se lee como un error de la
+ *      pantalla.
+ *
+ * Los textos que decian "2do y 4to viernes" salen de la configuracion: la
+ * descripcion la arma el backend (CronogramaPagos::describir()).
  *
  * NADA DE alert(). Todo va a Notificacion, igual que el resto del modulo.
  */
@@ -77,14 +86,11 @@
             'del mes no cambia.'
     };
 
-    /** Los dos nombres de pago, para no repetir el condicional */
-    var NOMBRE_PAGO = { 1: '2do viernes', 2: '4to viernes' };
-
     var valores = {};
     var inflacion = null;
     var cronograma = null;
 
-    /** Cuantos pagos se editan: los de las primeras cuatro semanas */
+    /** Cuantos pagos se editan POR CONCEPTO: los dos proximos */
     var PAGOS_EDITABLES = 2;
 
     /* ================================================================
@@ -392,34 +398,197 @@
     }
 
     /* ================================================================
-       CRONOGRAMA
+       CRONOGRAMA: UNO POR CONCEPTO
        ================================================================ */
 
+    /** Los conceptos, en el orden en que vienen del backend */
+    function conceptos() {
+        return (cronograma && cronograma.configuraciones) || [];
+    }
+
     function pintarCronograma() {
-        var cuerpo = document.getElementById('pgenCronogramaBody');
-        var resto = document.getElementById('pgenCronoRestoBody');
+        if (!cronograma) { return; }
 
-        if (!cuerpo || !cronograma) { return; }
+        pintarConfig();
+        pintarProximos();
+        pintarResto();
+    }
 
-        var pagos = cronograma.pagos || [];
+    /**
+     * Cómo se dice una configuración: "el 2do y el 4to miércoles" o "todos los
+     * lunes".
+     *
+     * ES LA MISMA REDACCIÓN QUE CronogramaPagos::describir(), y está acá sólo
+     * para la confirmación ANTES de guardar, cuando el backend todavía no la
+     * armó. Lo que ya está guardado se muestra con la descripción del backend.
+     */
+    function describir(dia, frecuencia) {
+        var nombre = (cronograma.dias || {})[dia] || '';
+
+        if (frecuencia === 'SEMANAL') {
+            return 'todos los ' + (/s$/.test(nombre) ? nombre : nombre + 's');
+        }
+
+        return 'el 2do y el 4to ' + nombre;
+    }
+
+    /* ---- 1. la configuración ---- */
+
+    function pintarConfig() {
+        var cuerpo = document.getElementById('pgenCronoConfigBody');
+
+        if (!cuerpo) { return; }
+
+        var dias = cronograma.dias || {};
+        var frecuencias = cronograma.frecuencias || [];
+
+        cuerpo.innerHTML = conceptos().length ? conceptos().map(function(c) {
+            var off = c.configurable ? '' :
+                ' disabled title="Falta correr sql/cashflow_cronograma_conceptos.sql"';
+
+            var optDias = Object.keys(dias).map(function(d) {
+                return '<option value="' + esc(d) + '"' +
+                    (Number(d) === Number(c.dia) ? ' selected' : '') + '>' + esc(dias[d]) +
+                    '</option>';
+            }).join('');
+
+            var optFrec = frecuencias.map(function(f) {
+                return '<option value="' + esc(f) + '"' + (f === c.frecuencia ? ' selected' : '') +
+                    '>' + esc(f === 'SEMANAL' ? 'Semanal' : 'Quincenal') + '</option>';
+            }).join('');
+
+            return '<tr data-concepto="' + esc(c.concepto) + '">' +
+                '<td class="fw-semibold">' + esc(c.nombre) +
+                    Auditoria.icono({ usuario: c.usuario, fecha: c.fecha_modif }) +
+                    (c.defecto
+                        ? ' <span class="badge bg-warning text-dark" ' +
+                          'title="No hay parámetro cargado: se usa el valor por defecto">' +
+                          'por defecto</span>'
+                        : '') +
+                '</td>' +
+                '<td><small class="text-muted">' + esc(c.usa) + '</small></td>' +
+                '<td><select class="form-select form-select-sm pgen-crono-dia"' + off + '>' +
+                    optDias + '</select></td>' +
+                '<td><select class="form-select form-select-sm pgen-crono-frec"' + off + '>' +
+                    optFrec + '</select></td>' +
+                '<td>' + esc(c.descripcion) + ' de cada mes</td>' +
+            '</tr>';
+        }).join('') :
+            '<tr><td colspan="5" class="text-center text-muted py-3">' +
+            'No se pudo resolver el cronograma.</td></tr>';
+
+        // Sin permiso, el día y la frecuencia se ven como texto. Ver Js/permisos.js.
+        Permisos.soloLectura(cuerpo);
+
+        cuerpo.querySelectorAll('tr[data-concepto]').forEach(function(fila) {
+            fila.querySelectorAll('select').forEach(function(sel) {
+                sel.addEventListener('change', function() { cambiarConfig(fila); });
+            });
+        });
+    }
+
+    /**
+     * Cambiar el día o la frecuencia de un concepto.
+     *
+     * PRIMERO PREGUNTA CUÁNTOS PAGOS MOVIDOS A MANO SE DAN DE BAJA, y lo dice en
+     * la confirmación: con otro día el número de pago apunta a otra fecha, y el
+     * override quedaría colgado de un pago que ya no es el mismo. Un cambio que
+     * se lleva puestos tres pagos sin decirlo no lo decidió nadie entero.
+     *
+     * Si se cancela, la fila vuelve a lo guardado: un desplegable que muestra un
+     * valor que no está guardado se lee como guardado.
+     */
+    function cambiarConfig(fila) {
+        var concepto = fila.getAttribute('data-concepto');
+        var dia = Number(fila.querySelector('.pgen-crono-dia').value);
+        var frecuencia = fila.querySelector('.pgen-crono-frec').value;
+        var nombre = (buscarConfig(concepto) || {}).nombre || concepto;
+
+        pedir(ENDPOINT + '?action=contarOverridesCronograma&concepto=' +
+              encodeURIComponent(concepto))
+            .then(function(d) {
+                var bajas = (d.data && d.data.bajas) || 0;
+
+                return Notificacion.confirmar({
+                    titulo: 'Cambiar el cronograma de ' + nombre,
+                    mensaje: '¿Pagar ' + nombre + ' ' + describir(dia, frecuencia) +
+                        ' de cada mes?',
+                    detalle: bajas > 0
+                        ? 'Se dan de baja ' + bajas + ' pago(s) movido(s) a mano de ' + nombre +
+                          ' desde este mes: con otro día apuntan a otra fecha. Quedan en el ' +
+                          'historial.'
+                        : 'No hay pagos movidos a mano de ' + nombre + ' desde este mes, así ' +
+                          'que no se da de baja ninguno.',
+                    confirmar: 'Cambiar',
+                    peligro: bajas > 0
+                });
+            })
+            .then(function(si) {
+                if (!si) {
+                    pintarConfig();
+
+                    return null;
+                }
+
+                return pedir(ENDPOINT + '?action=saveConfigCronograma', {
+                    concepto: concepto, dia: dia, frecuencia: frecuencia
+                }).then(function(d) {
+                    Notificacion.exito(d.message || 'Cronograma guardado.');
+                    cargar();
+                });
+            })
+            .catch(function(e) {
+                Notificacion.error('No se pudo cambiar el cronograma: ' + e.message);
+                pintarConfig();
+            });
+    }
+
+    function buscarConfig(concepto) {
+        var lista = conceptos();
+
+        for (var i = 0; i < lista.length; i++) {
+            if (lista[i].concepto === concepto) { return lista[i]; }
+        }
+
+        return null;
+    }
+
+    /* ---- 2. los próximos pagos de cada concepto ---- */
+
+    /**
+     * Los dos próximos pagos de un concepto: los primeros cuya fecha -la que
+     * vale o la calculada- no pasó todavía. Con la calculada también, para que
+     * un pago adelantado a mano a ayer no desaparezca de la tabla editable sin
+     * que nadie pueda volverlo atrás. Sólo del horizonte: los meses extra que
+     * pide Proveedores Locales no se ofrecen.
+     */
+    function proximosDe(concepto) {
         var hoy = cronograma.hoy || '';
+        var datos = (cronograma.conceptos || {})[concepto] || {};
 
-        /* LOS DOS PROXIMOS: los primeros cuya fecha -la que vale o la
-           calculada- no paso todavia. Con la calculada tambien, para que un
-           pago adelantado a mano a ayer no desaparezca de la tabla editable
-           sin que nadie pueda volverlo atras. Los pagos ya vienen en orden. */
-        var proximos = pagos.filter(function(p) {
-            return p.fecha >= hoy || p.calculada >= hoy;
+        return (datos.pagos || []).filter(function(p) {
+            return p.en_horizonte !== false && (p.fecha >= hoy || p.calculada >= hoy);
         }).slice(0, PAGOS_EDITABLES);
+    }
 
-        var fuera = pagos.filter(function(p) { return proximos.indexOf(p) === -1; });
+    function pintarProximos() {
+        var cuerpo = document.getElementById('pgenCronogramaBody');
 
-        var editable = !!cronograma.tabla_creada;
+        if (!cuerpo) { return; }
 
-        cuerpo.innerHTML = proximos.length
-            ? proximos.map(function(p) { return filaCrono(p, editable); }).join('')
-            : '<tr><td colspan="6" class="text-center text-muted py-3">' +
-              'No hay pagos próximos en el horizonte.</td></tr>';
+        var html = '';
+
+        conceptos().forEach(function(c) {
+            var datos = (cronograma.conceptos || {})[c.concepto] || {};
+
+            proximosDe(c.concepto).forEach(function(p) {
+                html += filaCrono(c, p, !!datos.editable);
+            });
+        });
+
+        cuerpo.innerHTML = html ||
+            '<tr><td colspan="7" class="text-center text-muted py-3">' +
+            'No hay pagos próximos en el horizonte.</td></tr>';
 
         // El historial se puede mirar sin permiso de edicion: va con data-lectura
         Permisos.soloLectura(cuerpo);
@@ -428,53 +597,34 @@
             var acciones = {
                 guardar: function() { guardarFecha(fila); },
                 volver: function() { volverACalculado(fila); },
-                historial: function() {
-                    abrirHistorial(fila.getAttribute('data-mes'),
-                                   Number(fila.getAttribute('data-nro')));
-                }
+                historial: function() { abrirHistorial(fila); }
             };
 
             fila.querySelectorAll('[data-accion]').forEach(function(btn) {
                 btn.addEventListener('click', acciones[btn.getAttribute('data-accion')]);
             });
         });
-
-        if (!resto) { return; }
-
-        /* El resto va de a un renglón por MES con sus dos fechas al lado: es
-           como se lee un cronograma, y con una fila por pago la tabla duplica
-           el largo sin decir nada más. */
-        var porMes = {};
-
-        fuera.forEach(function(p) {
-            porMes[p.mes] = porMes[p.mes] || {};
-            porMes[p.mes][p.nro] = p;
-        });
-
-        resto.innerHTML = Object.keys(porMes).sort().map(function(mes) {
-            return '<tr>' +
-                '<td class="fw-semibold">' + esc(rotuloMes(mes)) + '</td>' +
-                '<td>' + celdaResto(porMes[mes][1]) + '</td>' +
-                '<td>' + celdaResto(porMes[mes][2]) + '</td>' +
-            '</tr>';
-        }).join('');
     }
 
-    function filaCrono(p, editable) {
+    function filaCrono(c, p, editable) {
         var off = editable ? '' : ' disabled';
         var corrida = p.corrida
             ? ' <span class="badge bg-warning text-dark" ' +
-              'title="El viernes no es hábil: el pago se corrió al día hábil anterior">' +
+              'title="El día de pago no es hábil: se corrió al día hábil anterior">' +
               'corrida</span>'
             : '';
         var aMano = p.override
             ? '<span class="badge bg-info text-dark mt-1">a mano</span>' +
               Auditoria.icono({ alta: { usuario: p.usuario, fecha: p.fecha_alta } }) : '';
+        var motivoOff = editable ? '' :
+            ' title="Falta correr sql/cashflow_cronograma_conceptos.sql"';
 
-        return '<tr data-mes="' + esc(p.mes) + '" data-nro="' + p.nro + '" ' +
+        return '<tr data-concepto="' + esc(c.concepto) + '" data-mes="' + esc(p.mes) + '" ' +
+                'data-nro="' + p.nro + '" data-nombre="' + esc(p.nombre) + '" ' +
                 'data-calculada="' + esc(p.calculada) + '">' +
-            '<td class="fw-semibold">' + esc(rotuloMes(p.mes)) +
-                '<div><small class="text-muted">' + esc(NOMBRE_PAGO[p.nro]) + '</small></div></td>' +
+            '<td class="fw-semibold">' + esc(c.nombre) + '</td>' +
+            '<td>' + esc(rotuloMes(p.mes)) +
+                '<div><small class="text-muted">' + esc(p.nombre) + '</small></div></td>' +
             '<td><small class="text-muted">' + esc(fecha(p.teorica)) + '</small></td>' +
             '<td><small class="text-muted">' + esc(fecha(p.calculada)) + '</small>' + corrida + '</td>' +
             '<td>' +
@@ -484,12 +634,11 @@
             '<td>' +
                 '<input type="text" class="form-control form-control-sm pgen-crono-motivo" ' +
                     'maxlength="300" placeholder="Por qué no va en la fecha calculada" ' +
-                    'value="' + esc(p.motivo || '') + '"' + off + '>' +
+                    'value="' + esc(p.motivo || '') + '"' + off + motivoOff + '>' +
             '</td>' +
             '<td class="text-center text-nowrap">' +
                 '<button class="btn btn-sm btn-primary" data-accion="guardar" title="Guardar"' +
-                    (editable ? '' : ' disabled title="Falta correr sql/cashflow_parametros_generales.sql"') +
-                    '><i class="fas fa-check"></i></button> ' +
+                    (editable ? '' : ' disabled') + '><i class="fas fa-check"></i></button> ' +
                 '<button class="btn btn-sm btn-outline-danger" data-accion="volver" ' +
                     'title="Volver a la fecha calculada"' +
                     (editable && p.override ? '' : ' disabled') +
@@ -500,33 +649,83 @@
         '</tr>';
     }
 
-    function celdaResto(p) {
-        if (!p) { return '—'; }
+    /* ---- 3. el resto del horizonte ---- */
 
-        return esc(fecha(p.fecha)) +
-            (p.override ? ' <span class="badge bg-info text-dark">a mano</span>' : '') +
-            (p.corrida ? ' <span class="badge bg-warning text-dark">corrida</span>' : '');
+    /**
+     * Un renglón por MES y una columna por CONCEPTO, con todas las fechas del
+     * mes en la celda: es como se lee un cronograma, y en semanal son cuatro o
+     * cinco fechas. Una fila por pago triplicaría el largo sin decir más.
+     */
+    function pintarResto() {
+        var head = document.getElementById('pgenCronoRestoHead');
+        var cuerpo = document.getElementById('pgenCronoRestoBody');
+
+        if (!head || !cuerpo) { return; }
+
+        head.innerHTML = '<th>Mes</th>' + conceptos().map(function(c) {
+            return '<th>' + esc(c.nombre) +
+                '<div><small class="text-muted fw-normal">' + esc(c.descripcion) +
+                '</small></div></th>';
+        }).join('');
+
+        var porMes = {};
+
+        conceptos().forEach(function(c) {
+            var proximos = proximosDe(c.concepto);
+            var datos = (cronograma.conceptos || {})[c.concepto] || {};
+
+            (datos.pagos || []).forEach(function(p) {
+                if (p.en_horizonte === false || proximos.indexOf(p) !== -1) { return; }
+
+                porMes[p.mes] = porMes[p.mes] || {};
+                (porMes[p.mes][c.concepto] = porMes[p.mes][c.concepto] || []).push(p);
+            });
+        });
+
+        cuerpo.innerHTML = Object.keys(porMes).sort().map(function(mes) {
+            return '<tr><td class="fw-semibold">' + esc(rotuloMes(mes)) + '</td>' +
+                conceptos().map(function(c) {
+                    return '<td>' + celdaResto(porMes[mes][c.concepto]) + '</td>';
+                }).join('') +
+            '</tr>';
+        }).join('');
+    }
+
+    function celdaResto(pagos) {
+        if (!pagos || !pagos.length) { return '—'; }
+
+        return pagos.map(function(p) {
+            return '<span class="text-nowrap" title="' + esc(p.nombre) + '">' +
+                esc(fecha(p.fecha)) +
+                (p.override ? ' <span class="badge bg-info text-dark">a mano</span>' : '') +
+                (p.corrida ? ' <span class="badge bg-warning text-dark">corrida</span>' : '') +
+                '</span>';
+        }).join('<br>');
     }
 
     /* ================================================================
        LA EDICION EN LA FILA Y EL HISTORIAL
        ================================================================ */
 
-    function abrirHistorial(mes, nro) {
-        texto('pgenFechaTitulo', rotuloMes(mes) + ' — ' + NOMBRE_PAGO[nro]);
-        cargarHistorial(mes, nro);
+    function abrirHistorial(fila) {
+        var concepto = fila.getAttribute('data-concepto');
+
+        texto('pgenFechaTitulo', ((buscarConfig(concepto) || {}).nombre || concepto) + ' — ' +
+            rotuloMes(fila.getAttribute('data-mes')) + ' — ' + fila.getAttribute('data-nombre'));
+        cargarHistorial(concepto, fila.getAttribute('data-mes'),
+            Number(fila.getAttribute('data-nro')));
         modal().show();
     }
 
-    function cargarHistorial(mes, nro) {
+    function cargarHistorial(concepto, mes, nro) {
         var cuerpo = document.getElementById('pgenHistorialFechaBody');
 
         if (!cuerpo) { return; }
 
         cuerpo.innerHTML = '<tr><td colspan="7" class="text-muted">Leyendo…</td></tr>';
 
-        pedir(ENDPOINT + '?action=getHistorialCronograma&mes=' + encodeURIComponent(mes) +
-              '&nro=' + nro)
+        pedir(ENDPOINT + '?action=getHistorialCronograma&concepto=' + encodeURIComponent(concepto) +
+              '&mes=' + encodeURIComponent(mes) + '&nro=' + nro)
             .then(function(d) {
                 var filas = (d.data || []);
 
@@ -541,7 +740,9 @@
                             '<td><small>' + esc(f.motivo || '—') + '</small></td>' +
                             '<td><small>' + esc(Auditoria.quien(f.usuario) || '—') + '</small></td>' +
                             '<td><small>' + esc((f.fecha_alta || '').substring(0, 16)) + '</small></td>' +
-                            '<td><small>' + esc((f.fecha_baja || '—').substring(0, 16)) + '</small></td>' +
+                            '<td><small>' + esc((f.fecha_baja || '—').substring(0, 16)) +
+                                (f.usuario_baja ? ' · ' + esc(Auditoria.quien(f.usuario_baja)) : '') +
+                            '</small></td>' +
                         '</tr>';
                     }).join('')
                     : '<tr><td colspan="7" class="text-muted">' +
@@ -573,6 +774,7 @@
         }
 
         pedir(ENDPOINT + '?action=saveFechaCronograma', {
+            concepto: fila.getAttribute('data-concepto'),
             mes: fila.getAttribute('data-mes'),
             nro: Number(fila.getAttribute('data-nro')),
             fecha: input.value,
@@ -590,6 +792,7 @@
 
     function volverACalculado(fila) {
         pedir(ENDPOINT + '?action=quitarFechaCronograma', {
+            concepto: fila.getAttribute('data-concepto'),
             mes: fila.getAttribute('data-mes'),
             nro: Number(fila.getAttribute('data-nro'))
         })

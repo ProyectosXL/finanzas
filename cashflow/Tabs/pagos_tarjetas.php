@@ -15,7 +15,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
       Gastos Supervisoras   se ESTIMA a partir del histórico de
                             RO_T_GASTOS_SUPERVISION: el promedio de los últimos 3
                             meses completos, ajustado por inflación, partido en
-                            efectivo (2 pagos del cronograma) y tarjeta (el día de
+                            efectivo (pagos del cronograma Supervisoras) y tarjeta (el día de
                             vencimiento de su tarjeta).
 
       Pagos Corporativos    son facturas REALES de Tango —forma de pago vigente
@@ -174,8 +174,9 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                     <div>
                         <h5 class="mb-0">Por supervisora</h5>
                         <small class="text-muted">
-                            El <strong>efectivo</strong> sale en 2 pagos iguales del cronograma de
-                            <em>Parámetros › Generales</em>; la <strong>tarjeta</strong>, el día de
+                            El <strong>efectivo</strong> sale en partes iguales en los pagos del
+                            cronograma Supervisoras de <em>Parámetros › Generales</em>
+                            (<span id="supRegla">todos los lunes</span>); la <strong>tarjeta</strong>, el día de
                             vencimiento de su tarjeta. Un resumen cargado pisa la estimación del
                             mes.
                         </small>

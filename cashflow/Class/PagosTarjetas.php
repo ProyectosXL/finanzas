@@ -192,9 +192,12 @@ class PagosTarjetas {
            nombre y no un ID. */
         $porSupervisora = $this->tarjetasPorSupervisora($tarjetas);
 
-        /* EL CRONOGRAMA DE PAGOS, el MISMO que usa Logistica Local: el 2do y el
-           4to viernes de Parametros -> Generales, con sus overrides. */
+        /* EL CRONOGRAMA SUPERVISORAS de Parametros -> Generales, con sus
+           overrides: por defecto todos los lunes del mes. Hasta
+           feature/cronogramas-tarjetas-corporativas era el de Logistica Local,
+           el 2do y el 4to viernes. */
         $crono = $this->leerCronograma($h);
+        $salida['cronograma'] = isset($crono['config']) ? $crono['config'] : null;
         $porMes = [];
 
         foreach ($crono['pagos'] as $p) {
@@ -229,7 +232,7 @@ class PagosTarjetas {
             foreach ($meses as $mes) {
                 $celda = $fila['meses'][$mes];
 
-                /* EL EFECTIVO: dos pagos iguales del cronograma. */
+                /* EL EFECTIVO: partes iguales en los pagos del mes del cronograma. */
                 $pagosEfectivo = TarjetasSupervisoras::repartirEfectivo(
                     $celda['efectivo'], isset($porMes[$mes]) ? $porMes[$mes] : [], $hoy);
 
@@ -750,7 +753,7 @@ class PagosTarjetas {
     /** El cronograma de pagos del horizonte. @return array */
     private function leerCronograma($h) {
         try {
-            return $this->cronograma->paraHorizonte($h);
+            return $this->cronograma->paraHorizonte($h, 'SUPERVISORAS');
         } catch (Throwable $e) {
             return ['pagos' => [], 'tabla_creada' => false,
                     'avisos' => ['No se pudo resolver el cronograma de pagos ('

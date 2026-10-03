@@ -119,7 +119,11 @@ class Logistica {
 
         require_once __DIR__ . '/CronogramaDatos.php';
 
-        $crono = (new CronogramaDatos())->paraHorizonte($h);
+        /* EL CRONOGRAMA DE LOGISTICA, que es uno de tres: el dia y la frecuencia
+           salen de Parametros -> Generales. Con el defecto -el 2do y el 4to
+           viernes- da exactamente lo mismo que cuando el viernes estaba escrito
+           en el codigo. */
+        $crono = (new CronogramaDatos())->paraHorizonte($h, 'LOGISTICA');
 
         foreach ($crono['avisos'] as $a) {
             $avisos[] = $a;
@@ -138,6 +142,10 @@ class Logistica {
         return [
             'planilla' => $planilla,
             'cronograma' => $crono['pagos'],
+
+            // El dia y la frecuencia, para que la pantalla diga cuando se paga
+            // sin tenerlo escrito: ver CronogramaPagos::describir().
+            'cronograma_config' => $crono['config'],
             'avisos' => $avisos,
             'tabla_creada' => $this->tablaCreada()
         ];

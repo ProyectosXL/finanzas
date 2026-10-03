@@ -148,6 +148,10 @@ class AuthCashflow {
             'aplicarInflacionConstante' => [['parametros', 'GENERALES']],
             'saveFechaCronograma' => [['parametros', 'GENERALES']],
             'quitarFechaCronograma' => [['parametros', 'GENERALES']],
+            /* El conteo de overrides que se darian de baja es el primer paso de
+               cambiar el dia de un concepto: como los preview, pide edicion. */
+            'contarOverridesCronograma' => [['parametros', 'GENERALES']],
+            'saveConfigCronograma' => [['parametros', 'GENERALES']],
             'saveMixCobro' => [['parametros', 'VENTAS']],
             'addMixCobro' => [['parametros', 'VENTAS']],
             'saveRespaldo' => [['parametros', 'VENTAS']],

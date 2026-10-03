@@ -149,33 +149,75 @@ $edita = AuthCashflow::puedeEditar('parametros', 'GENERALES');
     </div>
 
     <!-- ========================================================
-         CRONOGRAMA DE PAGOS
+         CRONOGRAMA DE PAGOS — UNO POR CONCEPTO
+         Tres tablas en la misma card, porque son tres caras del mismo
+         dato: cómo se calcula cada cronograma, los pagos que se pueden
+         mover a mano y el resto del horizonte, que sólo se mira.
          ======================================================== -->
     <div class="card mb-4">
         <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
             <div>
                 <h5 class="mb-0">Cronograma de pagos</h5>
                 <small class="text-muted">
-                    El <strong>2do y el 4to viernes</strong> de cada mes. Si el viernes no es
-                    hábil, el pago se corre al día hábil <strong>anterior</strong>.
-                    Acá se editan los <strong>dos próximos pagos</strong>.
+                    <strong>Un cronograma por concepto</strong>, cada uno con su día de la
+                    semana y su frecuencia: <em>quincenal</em> es el 2do y el 4to de ese día
+                    del mes; <em>semanal</em>, todos los de ese día. Si el día no es hábil, el
+                    pago se corre al día hábil <strong>anterior</strong>.
                 </small>
             </div>
             <button class="btn btn-sm btn-outline-success" data-exportar="pgenTablaCronograma"
                     data-exportar-nombre="Parametros_Cronograma_Pagos"
-                    title="Exportar a Excel lo que se está viendo">
+                    title="Exportar a Excel los próximos pagos">
                 <i class="fas fa-file-excel me-1"></i> Exportar
             </button>
         </div>
 
+        <!-- 1. CÓMO SE CALCULA CADA UNO -->
+        <div class="card-body pb-0">
+            <h6 class="mb-1">Configuración</h6>
+            <small class="text-muted d-block mb-2">
+                Cambiar el día o la frecuencia de un concepto <strong>da de baja los pagos
+                movidos a mano</strong> de ese concepto desde este mes: con otro día, el número
+                de pago apunta a otra fecha. Antes de guardar se dice cuántos son.
+            </small>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table id="pgenTablaCronoConfig" class="table table-sm table-hover mb-0 align-middle"
+                       data-orden="no">
+                    <thead>
+                        <tr>
+                            <th>Concepto</th>
+                            <th>Lo usa</th>
+                            <th style="width: 160px;">Día de la semana</th>
+                            <th style="width: 160px;">Frecuencia</th>
+                            <th>Se paga</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pgenCronoConfigBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 2. LOS DOS PRÓXIMOS PAGOS DE CADA CONCEPTO: los únicos que se editan -->
+        <div class="card-body pb-0 border-top">
+            <h6 class="mb-1">Próximos pagos</h6>
+            <small class="text-muted d-block mb-2">
+                Los <strong>dos próximos</strong> de cada concepto. La fecha cargada a mano
+                <strong>no se corre</strong> al día hábil: se respeta tal cual. El
+                <strong>motivo es obligatorio</strong>: es lo único que después explica por qué
+                ese pago no cayó donde la cuenta decía.
+            </small>
+        </div>
         <div class="card-body p-0">
             <div class="table-responsive">
                 <table id="pgenTablaCronograma" class="table table-sm table-hover mb-0 align-middle"
                        data-orden="no">
                     <thead>
                         <tr>
+                            <th>Concepto</th>
                             <th>Pago</th>
-                            <th>Viernes</th>
+                            <th>Teórica</th>
                             <th>Calculada</th>
                             <th style="width: 170px;">Fecha de pago</th>
                             <th>Motivo</th>
@@ -189,22 +231,13 @@ $edita = AuthCashflow::puedeEditar('parametros', 'GENERALES');
             </div>
         </div>
 
-        <div class="card-body py-2 border-top">
-            <small class="text-muted">
-                La fecha cargada a mano <strong>no se corre</strong> al día hábil: se respeta
-                tal cual. El <strong>motivo es obligatorio</strong>: es lo único que después
-                explica por qué ese pago no cayó donde la cuenta decía.
-            </small>
-        </div>
-    </div>
-
-    <!-- Las fechas del resto del horizonte: se ven, no se editan. -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0">Resto del horizonte</h5>
-            <small class="text-muted">
-                Calculadas, no editables. Cada mes aporta su total a la columna mensual del
-                tablero.
+        <!-- 3. EL RESTO DEL HORIZONTE: se ve, no se edita -->
+        <div class="card-body pb-0 border-top">
+            <h6 class="mb-1">Resto del horizonte</h6>
+            <small class="text-muted d-block mb-2">
+                Calculadas, no editables. Cada mes reparte su importe <strong>en partes
+                iguales</strong> entre sus pagos: mitad y mitad en quincenal, un cuarto o un
+                quinto en semanal.
             </small>
         </div>
         <div class="card-body p-0">
@@ -212,10 +245,8 @@ $edita = AuthCashflow::puedeEditar('parametros', 'GENERALES');
                 <table id="pgenTablaCronoResto" class="table table-sm table-hover mb-0"
                        data-orden="no">
                     <thead>
-                        <tr>
+                        <tr id="pgenCronoRestoHead">
                             <th>Mes</th>
-                            <th>Pago 1 (2do viernes)</th>
-                            <th>Pago 2 (4to viernes)</th>
                         </tr>
                     </thead>
                     <tbody id="pgenCronoRestoBody"></tbody>
