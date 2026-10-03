@@ -259,6 +259,45 @@ chequear('ni se informa como importe fuera del horizonte', 0, $s['fuera_horizont
 chequear('ni genera avisos', [], $s['warnings']);
 
 /* ================================================================
+   TARJETA CORP: SOLO ENTRAN AL CUADRO LAS VINCULADAS
+   ================================================================ */
+seccion('el aviso de TARJETA CORP separa vinculadas de no vinculadas');
+
+/* Desde que Tarjetas Pagos Corporativos deja afuera las facturas sin tarjeta, el
+   aviso de Cuentas a Pagar Locales no puede decir que TODO TARJETA CORP "sí entra
+   al cuadro": entra lo vinculado, y lo demas no entra por ninguna fila. */
+$itemsTC = [
+    ['COD_PROVEE' => 'OGA', 'T_COMP' => 'FAC', 'N_COMP' => 'A1', 'CRONOGRAMA' => false,
+     'EXCLUIDO_PROVEEDOR' => false, 'FORMA_PAGO_MAESTRO' => 'TARJETA CORP',
+     'IMPORTE_PENDIENTE' => 1000.0],
+    ['COD_PROVEE' => 'OGB', 'T_COMP' => 'FAC', 'N_COMP' => 'B1', 'CRONOGRAMA' => false,
+     'EXCLUIDO_PROVEEDOR' => false, 'FORMA_PAGO_MAESTRO' => 'TARJETA CORP',
+     'IMPORTE_PENDIENTE' => 250.0],
+    // Una de echeq: es del cronograma, no cuenta.
+    ['COD_PROVEE' => 'OGC', 'T_COMP' => 'FAC', 'N_COMP' => 'C1', 'CRONOGRAMA' => true,
+     'EXCLUIDO_PROVEEDOR' => false, 'FORMA_PAGO_MAESTRO' => 'ECHEQ',
+     'IMPORTE_PENDIENTE' => 9999.0]
+];
+
+$partesTC = ProveedoresProvider::tarjetaVinculada($itemsTC, ['OGA|FAC|A1' => 7]);
+
+chequear('las vinculadas por un lado y las no vinculadas por el otro',
+    ['vinculadas' => 1000.0, 'sin_vincular' => 250.0], $partesTC);
+
+$textoTC = ProveedoresProvider::textoTarjeta(1250.0, $partesTC);
+chequear('el texto dice que las vinculadas entran', true,
+    strpos($textoTC, '$ 1.000,00 vinculadas a una tarjeta SÍ entran al cuadro') !== false);
+chequear('y que las otras no entran por ninguna fila', true,
+    strpos($textoTC, '$ 250,00 sin vincular no entran por ninguna fila') !== false);
+
+/* SIN LOS VINCULOS, el texto queda sin importes: decir cuanto entra sin saberlo
+   seria inventarlo. */
+chequear('sin poder leer los vinculos no hay partes', null,
+    ProveedoresProvider::tarjetaVinculada($itemsTC, null));
+chequear('y el texto lo dice sin importes', true,
+    strpos(ProveedoresProvider::textoTarjeta(1250.0, null), 'SÓLO las vinculadas') !== false);
+
+/* ================================================================
    Contra datos reales
    ================================================================ */
 seccion('proveedores reales');

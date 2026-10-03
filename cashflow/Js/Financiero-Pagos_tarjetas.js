@@ -276,9 +276,9 @@
         var kpis = kpisCorp(todas);
         texto('corpTotal', plata(vistas.total(c.eje.totales)
             + vistas.total(c.eje_cobertura.totales) + vistas.total(c.eje_resumenes.totales)));
-        texto('corpVencidas', plata(kpis.vencidasSinVincular));
-        texto('corpVencidasDetalle', kpis.cuantasVencidas
-            + ' factura(s): sin tarjeta no hay fecha de pago');
+        texto('corpVencidas', plata(kpis.sinVincular));
+        texto('corpVencidasDetalle', kpis.cuantasSinVincular
+            + ' factura(s) que no entran al flujo: vinculalas a una tarjeta');
         texto('corpCobertura', plata(vistas.total(c.eje_cobertura.totales)));
         texto('corpExcluidas', plata(kpis.excluidas));
         texto('corpExcluidasDetalle', kpis.cuantasExcluidas
@@ -361,7 +361,7 @@
         var marcas = {
             EXCLUIDA: ['bg-danger', 'excluida'],
             CUBIERTA: ['bg-info text-dark', 'cubierta por resumen'],
-            VENCIDA_SIN_TARJETA: ['bg-warning text-dark', 'vencida sin tarjeta: no entra'],
+            SIN_TARJETA: ['bg-warning text-dark', 'sin tarjeta: no entra'],
             SIN_FECHA: ['bg-secondary', 'sin fecha']
         };
 
@@ -451,12 +451,13 @@
     }
 
     function kpisCorp(filas) {
-        var k = {vencidasSinVincular: 0, cuantasVencidas: 0, excluidas: 0, cuantasExcluidas: 0};
+        var k = {sinVincular: 0, cuantasSinVincular: 0, excluidas: 0, cuantasExcluidas: 0};
 
         filas.forEach(function(f) {
-            if (f.MOTIVO === 'VENCIDA_SIN_TARJETA') {
-                k.vencidasSinVincular += Number(f.IMPORTE) || 0;
-                k.cuantasVencidas++;
+            /* TODAS LAS NO VINCULADAS, vencidas o no: ninguna entra al flujo. */
+            if (f.MOTIVO === 'SIN_TARJETA') {
+                k.sinVincular += Number(f.IMPORTE) || 0;
+                k.cuantasSinVincular++;
             }
 
             if (f.MOTIVO === 'EXCLUIDA') {

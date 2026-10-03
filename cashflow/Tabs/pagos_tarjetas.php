@@ -272,7 +272,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                 <div class="col-md-6 col-lg-3">
                     <div class="kpi-card">
                         <div class="kpi-card-header">
-                            <span class="kpi-card-title">Vencidas sin vincular</span>
+                            <span class="kpi-card-title">Sin vincular</span>
                             <div class="kpi-card-icon orange">
                                 <i class="fas fa-triangle-exclamation"></i>
                             </div>
@@ -280,7 +280,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                         <div class="kpi-card-value kpi-card-value-sm" id="corpVencidas">$ 0,00</div>
                         <div class="kpi-card-footer">
                             <span class="text-muted" id="corpVencidasDetalle">
-                                no entran: sin tarjeta no hay fecha de pago
+                                no entran al flujo: vinculalas a una tarjeta
                             </span>
                         </div>
                     </div>
@@ -320,15 +320,17 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                 <small>
                     Son las facturas pendientes de Tango de proveedores cuya <strong>forma de pago
                     vigente</strong> es <code>TARJETA CORP</code> —el override por factura de
-                    Proveedores Locales, o la del maestro—. <strong>Van directo al flujo</strong>
-                    por su fecha de vencimiento de Tango: no hace falta vincularlas para que
-                    entren.
+                    Proveedores Locales, o la del maestro—. <strong>Sólo entran al flujo las
+                    vinculadas a una tarjeta</strong>: una factura sin tarjeta se ve en la grilla
+                    con su pendiente y su estado, pero no suma, esté vencida o no —sin tarjeta no
+                    se sabe en qué débito sale—.
                     <br>
-                    Vincularlas a una tarjeta hace dos cosas: <strong>generan cobertura</strong>
-                    y <strong>un resumen de esa tarjeta las puede reemplazar</strong>. Y una
-                    tercera si están vencidas: sin tarjeta no hay fecha de pago, así que una
-                    <strong>vencida sin vincular no se proyecta</strong> —una tarjeta se paga una
-                    vez por mes, y apilarla en el primer día del eje afirmaría que se paga hoy—.
+                    Una vinculada entra por su vencimiento, o si ya venció, en el
+                    <strong>próximo pago de su tarjeta</strong>; <strong>genera cobertura</strong>
+                    y <strong>un resumen de esa tarjeta la puede reemplazar</strong>. El
+                    vencimiento se puede <strong>corregir</strong> en la columna VTO TANGO —sólo
+                    vale en esta pestaña— y una factura que se repite todos los meses se puede
+                    <strong>marcar como mensual</strong> para estimar los meses siguientes.
                 </small>
             </div>
 

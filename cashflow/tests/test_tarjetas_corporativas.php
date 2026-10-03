@@ -137,10 +137,11 @@ chequear('dos cuotas del mismo comprobante dan la misma clave',
 /* ================================================================
    LA FECHA: EL VENCIMIENTO DE TANGO
    ================================================================ */
-seccion('una factura no vencida entra por su vencimiento de Tango');
+seccion('una factura VINCULADA no vencida entra por su vencimiento de Tango');
 
 $facturas = [facturaTC('OGAAA', 'A001', '2026-10-05', 100000)];
-$r = TarjetasCorporativas::resolver($facturas, [], [], $TARJETAS, [], $HABILES, $MESES, $HOY);
+$vincA = [Proveedores::clavePago('OGAAA', 'FAC', 'A001') => 7];
+$r = TarjetasCorporativas::resolver($facturas, $vincA, [], $TARJETAS, [], $HABILES, $MESES, $HOY);
 $fila = $r['filas'][0];
 
 chequear('la fecha es el vencimiento', '2026-10-05', $fila['FECHA']);
@@ -150,10 +151,22 @@ chequear('no se reubico', false, $fila['REUBICADA']);
 chequear('entra al flujo', true, $fila['PROYECTA']);
 chequear('el mes de pago es el del vencimiento', '2026-10', $fila['MES_PAGO']);
 
-/* SIN VINCULAR ENTRA IGUAL. Vincular no decide si entra: decide si genera
-   cobertura y si un resumen la puede reemplazar. */
-chequear('sin tarjeta vinculada entra igual', null, $fila['ID_TARJETA']);
-chequear('y proyecta', true, $fila['PROYECTA']);
+seccion('una factura SIN vincular no entra al flujo, aunque no este vencida');
+
+/* SIN TARJETA NO SE PROYECTA, vencida o no: no se sabe en que debito sale. Hasta
+   feature/cronogramas-tarjetas-corporativas una no vencida entraba igual por su
+   vencimiento; ahora se ve en la grilla y no suma. */
+$sinV = TarjetasCorporativas::resolver($facturas, [], [], $TARJETAS, [], $HABILES, $MESES,
+    $HOY)['filas'][0];
+
+chequear('no tiene tarjeta', null, $sinV['ID_TARJETA']);
+chequear('no proyecta', false, $sinV['PROYECTA']);
+chequear('el motivo es SIN_TARJETA', TarjetasCorporativas::SIN_TARJETA, $sinV['MOTIVO']);
+chequear('pero sigue con su fecha y su importe, para la grilla', ['2026-10-05', 100000.0],
+    [$sinV['FECHA'], $sinV['IMPORTE']]);
+chequear('y el texto dice que no entra y que hacer', true,
+    strpos(TarjetasCorporativas::explicar($sinV), 'NO entra al flujo') !== false
+    && strpos(TarjetasCorporativas::explicar($sinV), 'Vinculala') !== false);
 
 /* UNA QUE VENCE HOY NO ESTA VENCIDA, y entra en la columna de hoy: mismo criterio
    que Ingresos::ubicarCobroVencido(), donde vencida es fecha < hoy. */
@@ -196,8 +209,8 @@ $r = TarjetasCorporativas::resolver($vencida, [], [], $TARJETAS, [], $HABILES, $
 $fila = $r['filas'][0];
 
 chequear('no proyecta', false, $fila['PROYECTA']);
-chequear('el motivo es VENCIDA_SIN_TARJETA',
-    TarjetasCorporativas::VENCIDA_SIN_TARJETA, $fila['MOTIVO']);
+chequear('el motivo es SIN_TARJETA',
+    TarjetasCorporativas::SIN_TARJETA, $fila['MOTIVO']);
 chequear('el importe se sigue informando, para poder decir cuanto queda afuera',
     500000.0, $fila['IMPORTE']);
 chequear('y el texto dice que hacer', true,
@@ -217,7 +230,10 @@ $excluidas = [
     Proveedores::clavePago('OGBBB', 'FAC', 'A002') => ['MOTIVO' => 'Ya está en Supervisoras']
 ];
 
-$r = TarjetasCorporativas::resolver($facturas, [], $excluidas, $TARJETAS, [], $HABILES,
+$vincAB = [Proveedores::clavePago('OGAAA', 'FAC', 'A001') => 7,
+           Proveedores::clavePago('OGBBB', 'FAC', 'A002') => 7];
+
+$r = TarjetasCorporativas::resolver($facturas, $vincAB, $excluidas, $TARJETAS, [], $HABILES,
     $MESES, $HOY);
 
 /* SIGUE EN EL UNIVERSO: son dos filas. Una factura que desaparece del listado no
@@ -275,8 +291,8 @@ chequear('y no la de ninguna de las dos', true,
 
 seccion('las no vinculadas no generan cobertura');
 
-/* SIN TARJETA NO SE SABE QUE % APLICAR. Entran al flujo igual, por su vencimiento,
-   pero no hay cobertura que calcular. */
+/* SIN TARJETA NO SE SABE QUE % APLICAR, y ademas no entran al flujo: no hay nada
+   que acompañar. */
 $cob = TarjetasCorporativas::cobertura(
     TarjetasCorporativas::resolver($facturas, [], [], $TARJETAS, [], $HABILES, $MESES,
         $HOY)['filas'],
@@ -372,25 +388,27 @@ chequear('con el resumen pagado, las facturas siguen cubiertas', false,
 chequear('y el motivo sigue siendo CUBIERTA',
     TarjetasCorporativas::CUBIERTA, $r['filas'][0]['MOTIVO']);
 
-seccion('las NO vinculadas del mismo mes no las toca el resumen');
+seccion('una NO vinculada en un mes con resumen: no suma, y no hay doble conteo');
 
-/* SOLO LAS VINCULADAS. El resumen no puede saber que hay adentro de una factura que
-   nadie le asigno, asi que esa deuda sigue entrando. Lo que se hace es AVISAR. */
+/* SOLO LAS VINCULADAS LAS CUBRE EL RESUMEN, y las no vinculadas ya no suman. Hasta
+   feature/cronogramas-tarjetas-corporativas la no vinculada seguia entrando, y
+   por eso habia un aviso de POSIBLE DOBLE CONTEO: podia estar adentro del resumen.
+   Ese riesgo ya no existe y el aviso se fue. */
 $soloUna = [Proveedores::clavePago('OGAAA', 'FAC', 'A001') => 7];
 
 $r = TarjetasCorporativas::resolver($facturas, $soloUna, [], $TARJETAS, $resumenes,
     $HABILES, $MESES, $HOY);
 
 chequear('la vinculada queda cubierta', false, $r['filas'][0]['PROYECTA']);
-chequear('la NO vinculada sigue entrando', true, $r['filas'][1]['PROYECTA']);
+chequear('la NO vinculada no suma: SIN_TARJETA', [false, TarjetasCorporativas::SIN_TARJETA],
+    [$r['filas'][1]['PROYECTA'], $r['filas'][1]['MOTIVO']]);
 
-$avisos = TarjetasCorporativas::avisos($r['filas'], $resumenes);
-$texto = implode(' | ', $avisos);
+$texto = implode(' | ', TarjetasCorporativas::avisos($r['filas']));
 
-chequear('y se avisa del posible doble conteo', true,
-    strpos($texto, 'POSIBLE DOBLE CONTEO') !== false);
-chequear('nombrando el mes', true, strpos($texto, '2026-10') !== false);
-chequear('y el importe', true, strpos($texto, '300.000,00') !== false);
+chequear('ya no hay aviso de posible doble conteo', false,
+    strpos($texto, 'DOBLE CONTEO') !== false);
+chequear('lo que se avisa es que no entra sin vincular', true,
+    strpos($texto, 'sin vincular no entran al flujo') !== false);
 
 /* ================================================================
    LA EXCLUSION GANA SOBRE LA COBERTURA POR RESUMEN
@@ -423,7 +441,8 @@ $r = TarjetasCorporativas::resolver([$facturas[0]], $roto, [], $TARJETAS, [], $H
 
 chequear('se marca el vinculo roto', true, $r['filas'][0]['VINCULO_ROTO']);
 chequear('la tarjeta queda en null', null, $r['filas'][0]['ID_TARJETA']);
-chequear('la factura entra igual, por su vencimiento', true, $r['filas'][0]['PROYECTA']);
+chequear('y como no tiene tarjeta, no entra', [false, TarjetasCorporativas::SIN_TARJETA],
+    [$r['filas'][0]['PROYECTA'], $r['filas'][0]['MOTIVO']]);
 
 chequear('y se avisa', true,
     strpos(implode(' ', TarjetasCorporativas::avisos($r['filas'])),
@@ -436,7 +455,7 @@ seccion('cada aviso describe un hecho distinto');
 
 $mezcla = [
     facturaTC('OGAAA', 'A001', '2026-08-01', 111111),   // vencida sin tarjeta
-    facturaTC('OGBBB', 'A002', '2026-10-06', 222222),   // entra sin vincular
+    facturaTC('OGBBB', 'A002', '2026-10-06', 222222),   // no vencida sin tarjeta
     facturaTC('OGCCC', 'A003', '2026-10-07', 333333)    // excluida
 ];
 
@@ -446,21 +465,21 @@ $r = TarjetasCorporativas::resolver($mezcla, [], $excl, $TARJETAS, [], $HABILES,
 $avisos = TarjetasCorporativas::avisos($r['filas']);
 $texto = implode(' | ', $avisos);
 
-chequear('avisa por las vencidas sin vincular', true,
-    strpos($texto, 'no están vinculadas a ninguna tarjeta') !== false);
-chequear('con su importe', true, strpos($texto, '111.111,00') !== false);
-
-chequear('avisa por las que entran sin vincular', true,
-    strpos($texto, 'no generan cobertura') !== false);
-chequear('con su importe', true, strpos($texto, '222.222,00') !== false);
+chequear('avisa por las sin vincular, que no entran al flujo', true,
+    strpos($texto, '2 factura(s) por $ 333.333,00 sin vincular no entran al flujo: '
+        . 'vinculalas a una tarjeta') !== false);
+chequear('con el desglose de vencidas', true,
+    strpos($texto, '1 vencida(s) por $ 111.111,00') !== false);
+chequear('y de no vencidas', true, strpos($texto, '1 no vencida(s) por $ 222.222,00') !== false);
 
 chequear('avisa por las excluidas', true, strpos($texto, 'están excluidas') !== false);
 chequear('con su importe', true, strpos($texto, '333.333,00') !== false);
 chequear('y con el motivo', true, strpos($texto, 'Ya está en otra pestaña') !== false);
 
-/* SON TRES AVISOS Y NO UNO. Juntarlos haria que el importe total no se pudiera
-   atribuir a ninguna causa, que es justamente lo que un aviso tiene que permitir. */
-chequear('son tres avisos separados', 3, count($avisos));
+/* SON DOS AVISOS Y NO UNO: la plata sin vincular y la excluida son dos causas
+   distintas. Juntarlos haria que el importe total no se pudiera atribuir a
+   ninguna, que es justamente lo que un aviso tiene que permitir. */
+chequear('son dos avisos separados', 2, count($avisos));
 
 seccion('sin nada que avisar, no hay avisos');
 
@@ -585,7 +604,9 @@ $mezcla = [
 ];
 
 $excl = [Proveedores::clavePago('OGCCC', 'FAC', 'A003') => ['MOTIVO' => 'Ya está en Supervisoras']];
-$r = TarjetasCorporativas::resolver($mezcla, [], $excl, $TARJETAS, [], $HABILES, $MESES, $HOY);
+// La que entra tiene que estar vinculada: sin tarjeta, nada entra.
+$vincB = [Proveedores::clavePago('OGBBB', 'FAC', 'A002') => 7];
+$r = TarjetasCorporativas::resolver($mezcla, $vincB, $excl, $TARJETAS, [], $HABILES, $MESES, $HOY);
 
 $sinExplicacion = 0;
 

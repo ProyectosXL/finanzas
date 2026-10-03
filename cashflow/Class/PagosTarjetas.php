@@ -567,8 +567,7 @@ class PagosTarjetas {
             }
         }
 
-        foreach (TarjetasCorporativas::avisos($r['filas'], $this->soloDe($resumenes,
-                $corporativas)) as $a) {
+        foreach (TarjetasCorporativas::avisos($r['filas']) as $a) {
             $salida['avisos'][] = $a;
         }
 
@@ -807,30 +806,6 @@ class PagosTarjetas {
 
             return $default;
         }
-    }
-
-    /**
-     * Los resumenes de un subconjunto de tarjetas.
-     *
-     * Hace falta para que los avisos de una sub-pestana no miren los resumenes de
-     * las otras: el aviso de posible doble conteo de Corporativas se dispara con
-     * "hay un resumen para este mes", y con los resumenes de todas las tarjetas se
-     * dispararia por el de una supervisora.
-     *
-     * @param array $resumenes Mapa ID_TARJETA => ['Y-m' => resumen]
-     * @param array $tarjetas Mapa ID => tarjeta
-     * @return array
-     */
-    private function soloDe($resumenes, $tarjetas) {
-        $v = [];
-
-        foreach ($resumenes as $id => $porMes) {
-            if (isset($tarjetas[$id])) {
-                $v[$id] = $porMes;
-            }
-        }
-
-        return $v;
     }
 
     /** Un importe con el formato del modulo */

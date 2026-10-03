@@ -260,28 +260,103 @@ class ProveedoresProvider extends CashflowProvider {
             $detalle[] = $forma . ' $ ' . number_format($importe, 2, ',', '.');
         }
 
-        /* LA TARJETA CORPORATIVA SE SEPARA DEL RESTO, porque ya no es lo mismo:
-           esas facturas quedan fuera de ESTA fila pero entran al cuadro por "Pagos
-           con Tarjetas y Otros". Meterlas en el mismo "quedan fuera del tablero"
-           mandaria a buscar plata que ya esta contada, y es el aviso que alguien
-           lee para decidir si falta algo. */
+        /* LA TARJETA CORPORATIVA SE SEPARA DEL RESTO, y en dos partes. Esas
+           facturas quedan fuera de ESTA fila, pero las VINCULADAS a una tarjeta
+           entran al cuadro por "Pagos con Tarjetas y Otros"; las NO vinculadas
+           no entran por ninguna fila (ver TarjetasCorporativas). Meter las dos en
+           el mismo "sí entran" diria que esta contada plata que no lo esta, y es
+           el aviso que alguien lee para decidir si falta algo. */
         $tarjeta = isset($porForma[TarjetasCorporativas::FORMA])
             ? $porForma[TarjetasCorporativas::FORMA] : 0.0;
+        $partes = self::tarjetaVinculada($items, $this->vinculosTarjeta());
         $fueraDelCuadro = $total - $tarjeta;
 
         $this->avisar('Cuentas a Pagar Locales: la fila trae SÓLO lo que se paga por echeq o '
             . 'transferencia. Quedan fuera de ESTA fila $ ' . number_format($total, 2, ',', '.')
             . ' (' . implode('; ', $detalle) . '). El detalle está en la pestaña, quitando el '
             . 'filtro por forma de pago.'
-            . ($tarjeta > 0
-                ? ' De eso, $ ' . number_format($tarjeta, 2, ',', '.') . ' de '
-                  . TarjetasCorporativas::FORMA . ' SÍ entran al cuadro, por la fila «Pagos con '
-                  . 'Tarjetas y Otros»: no hay que contarlos dos veces.'
-                : '')
+            . ($tarjeta > 0 ? self::textoTarjeta($tarjeta, $partes) : '')
             . ($fueraDelCuadro > 0
                 ? ' Los otros $ ' . number_format($fueraDelCuadro, 2, ',', '.')
                   . ' no entran por ninguna fila y van a salir de la caja igual.'
                 : ''));
+    }
+
+    /**
+     * Los vinculos factura-tarjeta de Pagos con Tarjetas y Otros, o null si no se
+     * pudieron leer.
+     *
+     * ES LA UNICA LECTURA DE ESA PESTANA QUE HACE ESTE PROVEEDOR, y solo para el
+     * aviso: de las facturas de TARJETA CORP, entran al cuadro las vinculadas. Si
+     * falla, el aviso queda con el texto y sin importes, y lo dice: el tablero no
+     * puede caerse por un aviso.
+     *
+     * @return array|null Mapa 'COD|T|N' => ID_TARJETA
+     */
+    protected function vinculosTarjeta() {
+        try {
+            require_once __DIR__ . '/../TarjetasFactura.php';
+
+            return (new TarjetasFactura())->vigentes();
+        } catch (Throwable $e) {
+            $this->avisar('Cuentas a Pagar Locales: no se pudieron leer los vínculos de las '
+                . 'facturas de ' . TarjetasCorporativas::FORMA . ' con sus tarjetas (' . $e->getMessage()
+                . '), así que el aviso de abajo no puede decir cuánto entra por la fila de Tarjetas.');
+
+            return null;
+        }
+    }
+
+    /**
+     * Cuanto de TARJETA CORP esta vinculado a una tarjeta y cuanto no.
+     *
+     * Estatica y pura.
+     *
+     * @param array $items Filas de Proveedores::getPendientes()
+     * @param array|null $vinculos Mapa 'COD|T|N' => ID_TARJETA, o null si no se leyo
+     * @return array|null ['vinculadas' => float, 'sin_vincular' => float], o null
+     */
+    public static function tarjetaVinculada($items, $vinculos) {
+        if ($vinculos === null) {
+            return null;
+        }
+
+        $v = ['vinculadas' => 0.0, 'sin_vincular' => 0.0];
+
+        foreach ($items as $item) {
+            if (!empty($item['CRONOGRAMA']) || !empty($item['EXCLUIDO_PROVEEDOR'])
+                || $item['FORMA_PAGO_MAESTRO'] !== TarjetasCorporativas::FORMA) {
+                continue;
+            }
+
+            $clave = Proveedores::clavePago($item['COD_PROVEE'], $item['T_COMP'], $item['N_COMP']);
+            $v[isset($vinculos[$clave]) ? 'vinculadas' : 'sin_vincular'] += floatval($item['IMPORTE_PENDIENTE']);
+        }
+
+        return $v;
+    }
+
+    /**
+     * La parte del aviso que dice que pasa con TARJETA CORP.
+     *
+     * @param float $tarjeta
+     * @param array|null $partes Lo que devolvio tarjetaVinculada()
+     * @return string
+     */
+    public static function textoTarjeta($tarjeta, $partes) {
+        $plata = function ($n) { return '$ ' . number_format($n, 2, ',', '.'); };
+
+        if ($partes === null) {
+            return ' De eso, ' . $plata($tarjeta) . ' son de ' . TarjetasCorporativas::FORMA
+                . ': entran al cuadro por la fila «Pagos con Tarjetas y Otros» SÓLO las '
+                . 'vinculadas a una tarjeta; las demás no entran por ninguna fila.';
+        }
+
+        return ' De eso, ' . $plata($tarjeta) . ' son de ' . TarjetasCorporativas::FORMA . ': '
+            . $plata($partes['vinculadas']) . ' vinculadas a una tarjeta SÍ entran al cuadro, '
+            . 'por la fila «Pagos con Tarjetas y Otros» (no hay que contarlas dos veces), y '
+            . $plata($partes['sin_vincular']) . ' sin vincular no entran por ninguna fila: '
+            . 'vinculalas en esa pestaña.';
     }
 
     /**
