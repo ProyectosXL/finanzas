@@ -251,6 +251,7 @@ try {
                         'disponible' => $corp['disponible'],
                         'cobertura' => $corp['cobertura'],
                         'resumenes' => $corp['resumenes'],
+                        'vtos_inertes' => $corp['vtos_inertes'],
 
                         /* UNA FILA POR VENCIMIENTO, con armar() y no
                            armarAgrupado(): la grilla es el listado de facturas y
@@ -343,6 +344,85 @@ try {
                 'message' => $r['desvinculadas'] . ' factura(s) desvinculadas. No se borra nada: '
                     . 'queda en el historial. Dejan de generar cobertura, y si están vencidas '
                     . 'dejan de entrar al flujo, porque sin tarjeta no hay fecha de pago.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           EL VENCIMIENTO CORREGIDO DE UNA CUOTA
+
+           Solo vale en esta pestana: Cuentas a Pagar Locales no se entera. La
+           clave es la cuota -el comprobante y su vencimiento de Tango- y la
+           fecha minima es hoy, validada en TarjetasCorporativas.
+           ================================================================ */
+        case 'editarVtoFactura':
+            require_once __DIR__ . '/../Class/TarjetasFacturaVto.php';
+            require_once __DIR__ . '/../Class/TarjetasCorporativas.php';
+            require_once __DIR__ . '/../Class/Proveedores.php';
+
+            $data = bodyJson();
+
+            foreach (['cod_provee', 't_comp', 'n_comp', 'fecha_vto_tango', 'fecha'] as $campo) {
+                if (!isset($data[$campo])) {
+                    throw new Exception('Faltan datos de la cuota o la fecha');
+                }
+            }
+
+            $hoy = date('Y-m-d');
+
+            /* LA CUOTA TIENE QUE ESTAR EN ESTA PESTANA: el endpoint es alcanzable
+               sin la pantalla, y una correccion sobre una cuota que no existe
+               nacería inerte. Se mira el mismo universo que la grilla. */
+            $cuota = TarjetasFacturaVto::clave($data['cod_provee'], $data['t_comp'],
+                $data['n_comp'], $data['fecha_vto_tango']);
+            $existe = false;
+
+            foreach (TarjetasCorporativas::universo((new Proveedores())->getPendientes($hoy)) as $fu) {
+                if (TarjetasCorporativas::claveCuota($fu) === implode('|', $cuota)) {
+                    $existe = true;
+                    break;
+                }
+            }
+
+            if (!$existe) {
+                throw new Exception('Esa cuota no está entre las facturas pendientes de '
+                    . TarjetasCorporativas::FORMA . ': puede que se haya pagado o que Tango le '
+                    . 'haya cambiado el vencimiento. Actualizá la pantalla.');
+            }
+
+            $r = (new TarjetasFacturaVto())->guardar($cuota[0], $cuota[1], $cuota[2], $cuota[3],
+                $data['fecha'], isset($data['motivo']) ? $data['motivo'] : null, $usuario, $hoy);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['deshecha']
+                    ? 'Es el mismo vencimiento de Tango: la cuota vuelve a usarlo.'
+                    : 'Vencimiento corregido: en esta pestaña la cuota vence el ' . $r['fecha']
+                      . '. En Tango sigue como estaba, y Cuentas a Pagar Locales no cambia.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'deshacerVtoFactura':
+            require_once __DIR__ . '/../Class/TarjetasFacturaVto.php';
+
+            $data = bodyJson();
+
+            foreach (['cod_provee', 't_comp', 'n_comp', 'fecha_vto_tango'] as $campo) {
+                if (!isset($data[$campo])) {
+                    throw new Exception('Faltan datos de la cuota');
+                }
+            }
+
+            $r = (new TarjetasFacturaVto())->deshacer($data['cod_provee'], $data['t_comp'],
+                $data['n_comp'], $data['fecha_vto_tango'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['habia']
+                    ? 'La cuota vuelve al vencimiento de Tango. La corrección queda en el '
+                      . 'historial: no se borra.'
+                    : 'Esta cuota ya usaba el vencimiento de Tango.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

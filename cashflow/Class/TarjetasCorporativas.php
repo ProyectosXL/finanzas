@@ -172,6 +172,133 @@ class TarjetasCorporativas {
             isset($f['N_COMP']) ? $f['N_COMP'] : '');
     }
 
+    /**
+     * La clave de una CUOTA: el comprobante mas su vencimiento de Tango.
+     *
+     * ES LA CLAVE DE LA CORRECCION DEL VENCIMIENTO, y no la del comprobante: una
+     * factura en cuotas tiene una fila por vencimiento y cada una se corrige por
+     * separado. El vinculo a la tarjeta, en cambio, es del comprobante entero
+     * (clave()).
+     *
+     * Estatica y pura.
+     *
+     * @param array $f Una fila de getPendientes(), o de la tabla de correcciones
+     * @return string 'COD|T|N|Y-m-d'
+     */
+    public static function claveCuota($f) {
+        $vto = isset($f['FECHA_VTO_TANGO']) ? $f['FECHA_VTO_TANGO']
+            : (isset($f['FECHA_VTO']) ? $f['FECHA_VTO'] : '');
+
+        return self::clave($f) . '|' . substr((string) $vto, 0, 10);
+    }
+
+    /** El vencimiento que vale en una fila resuelta: el corregido o el de Tango */
+    public static function vtoVigente($fila) {
+        return !empty($fila['FECHA_VTO_VIGENTE']) ? $fila['FECHA_VTO_VIGENTE']
+            : (isset($fila['FECHA_VTO']) ? $fila['FECHA_VTO'] : null);
+    }
+
+    /**
+     * Valida el vencimiento corregido de una cuota.
+     *
+     * LA FECHA MINIMA ES HOY, y la que vale es esta validacion: el min del input
+     * es comodidad, y el endpoint es alcanzable sin pasar por la pantalla.
+     * Corregir a una fecha pasada seria decir que la cuota ya se debito, y para
+     * eso no hace falta corregir nada: sale de pendientes cuando se paga.
+     *
+     * Estatica y pura.
+     *
+     * @param mixed $fecha
+     * @param string $hoy 'Y-m-d'
+     * @return string 'Y-m-d'
+     */
+    public static function validarVtoEditado($fecha, $hoy) {
+        $f = substr(trim((string) $fecha), 0, 10);
+        $d = DateTime::createFromFormat('Y-m-d', $f);
+
+        if (!$d || $d->format('Y-m-d') !== $f) {
+            throw new Exception("Fecha inválida: '$fecha'. Se esperaba el formato AAAA-MM-DD.");
+        }
+
+        if ($f < substr((string) $hoy, 0, 10)) {
+            throw new Exception('El vencimiento corregido no puede ser anterior a hoy ('
+                . self::corto(substr((string) $hoy, 0, 10)) . '): una cuota que ya se debitó '
+                . 'sale de pendientes sola.');
+        }
+
+        return $f;
+    }
+
+    /**
+     * Las correcciones de vencimiento que ya no tienen a que cuota aplicarse.
+     *
+     * PASA CUANDO TANGO CAMBIA EL VENCIMIENTO de esa cuota: el comprobante sigue
+     * pendiente en esta pestana, pero ninguna de sus cuotas tiene el FECHA_VTO con
+     * el que se guardo la correccion. Queda inerte -no se reapunta sola: el
+     * vencimiento nuevo de Tango puede ser justamente la correccion- y se avisa
+     * para que alguien la de de baja.
+     *
+     * LAS DE UN COMPROBANTE QUE YA NO ESTA PENDIENTE NO SE AVISAN: se pago, o
+     * cambio de forma, y la correccion no tiene nada que corregir. Avisarlas haria
+     * crecer el aviso para siempre con cuotas que ya se debitaron.
+     *
+     * Estatica y pura.
+     *
+     * @param array $facturas Lo que devolvio universo()
+     * @param array $vtos Mapa claveCuota() => ['COD_PROVEE', 'T_COMP', 'N_COMP',
+     *              'FECHA_VTO_TANGO', 'FECHA_VTO', ...]
+     * @return array Lista de las correcciones inertes
+     */
+    public static function vtosInertes($facturas, $vtos) {
+        $cuotas = [];
+        $comprobantes = [];
+
+        foreach ($facturas as $f) {
+            $cuotas[self::claveCuota($f)] = true;
+            $comprobantes[self::clave($f)] = true;
+        }
+
+        $v = [];
+
+        foreach ($vtos as $claveCuota => $edit) {
+            if (isset($cuotas[$claveCuota])) {
+                continue;
+            }
+
+            if (isset($comprobantes[self::clave($edit)])) {
+                $v[] = $edit;
+            }
+        }
+
+        return $v;
+    }
+
+    /**
+     * El aviso de las correcciones inertes, con los comprobantes.
+     *
+     * @param array $inertes Lo que devolvio vtosInertes()
+     * @return string '' si no hay
+     */
+    public static function avisoVtosInertes($inertes) {
+        if (empty($inertes)) {
+            return '';
+        }
+
+        $nombres = [];
+
+        foreach ($inertes as $i) {
+            $nombres[] = trim($i['T_COMP'] . ' ' . $i['N_COMP']) . ' de ' . $i['COD_PROVEE']
+                . ' (vto. Tango ' . self::corto($i['FECHA_VTO_TANGO']) . ')';
+        }
+
+        return count($inertes) . ' vencimiento(s) corregido(s) ya no se aplican: Tango cambió el '
+            . 'vencimiento de esa cuota y la corrección quedó sin cuota a la que aplicarse. '
+            . 'Son: ' . implode('; ', array_slice($nombres, 0, 5))
+            . (count($nombres) > 5 ? '; y ' . (count($nombres) - 5) . ' más' : '')
+            . '. Dalos de baja en la lista de abajo de la grilla, y si hace falta corregí el '
+            . 'vencimiento nuevo.';
+    }
+
     /* ====================================================================
        LA RESOLUCION
        ==================================================================== */
@@ -193,6 +320,17 @@ class TarjetasCorporativas {
      *   3. SIN_TARJETA: sin tarjeta vinculada, vencida o no.
      *   4. entra, en su fecha.
      *
+     * EL VENCIMIENTO VIGENTE, NO EL DE TANGO: si alguien corrigio el vencimiento
+     * de una cuota en esta pestana ($vtos), la fecha corregida reemplaza a
+     * FECHA_VTO en TODA la logica -si esta vencida, la reubicacion al proximo pago
+     * de la tarjeta, el mes de pago, la cobertura y el reemplazo por resumen-. Una
+     * vencida que se corrige a una fecha futura deja de estar vencida. Es porque
+     * quien carga en Tango ya no pone el vencimiento de la factura sino el del
+     * resumen en el que se paga: corregirlo es decir en que debito cae.
+     *
+     * FECHA_VTO SIGUE SIENDO EL DE TANGO en la fila -es la columna VTO TANGO y la
+     * clave de la correccion- y el que vale viaja en FECHA_VTO_VIGENTE.
+     *
      * Estatica y pura.
      *
      * @param array $facturas Lo que devolvio universo()
@@ -203,10 +341,12 @@ class TarjetasCorporativas {
      * @param array $habiles Mapa 'Y-m-d' => bool
      * @param array $meses Los meses del horizonte, 'Y-m'
      * @param string $hoy 'Y-m-d'
+     * @param array $vtos Mapa claveCuota() => ['FECHA_VTO', 'MOTIVO', 'USUARIO_ALTA',
+     *              'FECHA_ALTA']: los vencimientos corregidos vigentes
      * @return array ['filas' => [...], 'faltan_calendario' => ['Y-m']]
      */
     public static function resolver($facturas, $vinculos, $excluidas, $tarjetas,
-                                    $resumenes, $habiles, $meses, $hoy) {
+                                    $resumenes, $habiles, $meses, $hoy, $vtos = []) {
         $hoyStr = substr((string) $hoy, 0, 10);
         $filas = [];
         $faltan = [];
@@ -247,11 +387,23 @@ class TarjetasCorporativas {
                 'IMPORTE' => round(floatval($f['IMPORTE_PENDIENTE']), 2)
             ]);
 
-            $fechaVto = isset($f['FECHA_VTO']) ? $f['FECHA_VTO'] : null;
+            /* EL VENCIMIENTO VIGENTE: el corregido en esta pestana si lo hay, si
+               no el de Tango. Ver el encabezado del metodo. */
+            $fechaTango = isset($f['FECHA_VTO']) ? $f['FECHA_VTO'] : null;
+            $edit = isset($vtos[self::claveCuota($f)]) ? $vtos[self::claveCuota($f)] : null;
+            $fechaVto = ($edit !== null && !empty($edit['FECHA_VTO'])) ? $edit['FECHA_VTO'] : $fechaTango;
+
+            $fila['CLAVE_CUOTA'] = self::claveCuota($f);
+            $fila['FECHA_VTO_VIGENTE'] = $fechaVto;
+            $fila['VTO_EDITADO'] = ($fechaVto !== $fechaTango);
+            $fila['VTO_EDIT_MOTIVO'] = $edit ? $edit['MOTIVO'] : null;
+            $fila['VTO_EDIT_USUARIO'] = $edit ? $edit['USUARIO_ALTA'] : null;
+            $fila['VTO_EDIT_FECHA'] = $edit ? $edit['FECHA_ALTA'] : null;
+
             $fila['VENCIDA'] = ($fechaVto !== null && $fechaVto < $hoyStr);
 
-            /* LA FECHA: el vencimiento de Tango, salvo que este vencida y
-               vinculada, que se reubica en el proximo pago de su tarjeta. */
+            /* LA FECHA: el vencimiento vigente, salvo que este vencido y la
+               factura vinculada, que se reubica en el proximo pago de su tarjeta. */
             $fila['FECHA'] = $fechaVto;
             $fila['FECHA_ORIGEN'] = self::FECHA_VTO;
             $fila['MES_PAGO'] = ($fechaVto === null) ? null : substr($fechaVto, 0, 7);
@@ -374,14 +526,20 @@ class TarjetasCorporativas {
                 return 'No tiene fecha de vencimiento en Tango y no se pudo ubicar en el eje.';
         }
 
+        $corregido = empty($fila['VTO_EDITADO']) ? ''
+            : ' (vencimiento corregido en esta pestaña; en Tango vence el '
+              . self::corto($fila['FECHA_VTO']) . ')';
+
         if (!empty($fila['REUBICADA'])) {
-            return 'Venció el ' . self::corto($fila['FECHA_VTO']) . ' y sale en el próximo pago '
-                . 'de su tarjeta, el ' . self::corto($fila['FECHA']) . ': una tarjeta se paga una '
-                . 'vez por mes.';
+            return 'Venció el ' . self::corto(self::vtoVigente($fila)) . $corregido
+                . ' y sale en el próximo pago de su tarjeta, el ' . self::corto($fila['FECHA'])
+                . ': una tarjeta se paga una vez por mes.';
         }
 
-        return 'Entra por su fecha de vencimiento de Tango, el '
-            . self::corto($fila['FECHA']) . '.';
+        return empty($fila['VTO_EDITADO'])
+            ? 'Entra por su fecha de vencimiento de Tango, el ' . self::corto($fila['FECHA']) . '.'
+            : 'Entra por su vencimiento corregido, el ' . self::corto($fila['FECHA'])
+              . '. En Tango vence el ' . self::corto($fila['FECHA_VTO']) . '.';
     }
 
     /* ====================================================================

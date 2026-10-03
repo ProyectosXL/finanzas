@@ -4,6 +4,7 @@ require_once __DIR__ . '/Tarjetas.php';
 require_once __DIR__ . '/TarjetasResumen.php';
 require_once __DIR__ . '/TarjetasFactura.php';
 require_once __DIR__ . '/TarjetasExclusion.php';
+require_once __DIR__ . '/TarjetasFacturaVto.php';
 require_once __DIR__ . '/TarjetasVencimiento.php';
 require_once __DIR__ . '/TarjetasSupervisoras.php';
 require_once __DIR__ . '/TarjetasCorporativas.php';
@@ -63,6 +64,9 @@ class PagosTarjetas {
     /** @var TarjetasExclusion */
     private $exclusion;
 
+    /** @var TarjetasFacturaVto Los vencimientos corregidos de Corporativas */
+    private $vtoEdit;
+
     /** @var GastosSupervision */
     private $gastos;
 
@@ -80,6 +84,7 @@ class PagosTarjetas {
         $this->resumen = new TarjetasResumen();
         $this->vinculo = new TarjetasFactura();
         $this->exclusion = new TarjetasExclusion();
+        $this->vtoEdit = new TarjetasFacturaVto();
         $this->gastos = new GastosSupervision();
         $this->cronograma = new CronogramaDatos();
         $this->inflacion = new Inflacion();
@@ -116,6 +121,7 @@ class PagosTarjetas {
                 'resumen' => $this->resumen->tablaCreada(),
                 'factura' => $this->vinculo->tablaCreada(),
                 'exclusion' => $this->exclusion->tablaCreada(),
+                'factura_vto' => $this->vtoEdit->tablaCreada(),
                 'gastos' => $this->gastos->tablaCreada(),
                 'vista_usuarios' => $this->tarjetas->vistaUsuariosCreada()
             ],
@@ -471,6 +477,7 @@ class PagosTarjetas {
             'resumenes' => [],
             'pagos' => [],
             'pagos_excluidos' => [],
+            'vtos_inertes' => [],
             'avisos' => [],
             'disponible' => false
         ];
@@ -506,8 +513,22 @@ class PagosTarjetas {
         $excluidas = $this->leer(function () { return $this->exclusion->vigentes(); },
             'las facturas excluidas', $salida['avisos']);
 
+        /* LOS VENCIMIENTOS CORREGIDOS EN ESTA PESTANA: reemplazan al de Tango en
+           toda la logica. Vacio si falta el script, que es lo cierto. */
+        $vtos = $this->leer(function () { return $this->vtoEdit->vigentes(); },
+            'los vencimientos corregidos', $salida['avisos'], []);
+
         $r = TarjetasCorporativas::resolver($facturas, $vinculos, $excluidas, $corporativas,
-            $resumenes, $habiles, $meses, $hoy);
+            $resumenes, $habiles, $meses, $hoy, $vtos);
+
+        /* LAS CORRECCIONES QUE QUEDARON SIN CUOTA: Tango cambio el vencimiento.
+           Viajan a la pantalla para poder darlas de baja. */
+        $salida['vtos_inertes'] = TarjetasCorporativas::vtosInertes($facturas, $vtos);
+        $avisoInertes = TarjetasCorporativas::avisoVtosInertes($salida['vtos_inertes']);
+
+        if ($avisoInertes !== '') {
+            $salida['avisos'][] = $avisoInertes;
+        }
 
         /* Quien vinculo y quien excluyo cada factura, y cuando, para el tooltip
            de la fila (Js/auditoria.js). Se agrega aca y no en resolver(), que

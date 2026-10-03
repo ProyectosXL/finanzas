@@ -201,6 +201,8 @@ class AuthCashflow {
             'desvincularFacturas' => [['pagos_tarjetas', null]],
             'excluirFacturas' => [['pagos_tarjetas', null]],
             'incluirFacturas' => [['pagos_tarjetas', null]],
+            'editarVtoFactura' => [['pagos_tarjetas', null]],
+            'deshacerVtoFactura' => [['pagos_tarjetas', null]],
             'saveResumen' => [['pagos_tarjetas', null]],
             'pagarResumen' => [['pagos_tarjetas', null]],
             'bajaResumen' => [['pagos_tarjetas', null]],

@@ -666,3 +666,113 @@ chequear('PagosTarjetas pide getPendientes() sin horizonte', true,
 chequear('y TarjetasCorporativas no lee la fecha resuelta de Proveedores Locales', false,
     (bool) preg_match('/\[\'(Pago|PAGO_BASE|PAGO_CRONO)\'\]/',
         file_get_contents(__DIR__ . '/../Class/TarjetasCorporativas.php')));
+
+/* ================================================================
+   EL VENCIMIENTO CORREGIDO REEMPLAZA AL DE TANGO EN TODA LA LOGICA
+   ================================================================ */
+seccion('un vencimiento corregido reemplaza al de Tango');
+
+/* Quien carga en Tango pone el vencimiento del RESUMEN en el que se paga. Si lo
+   puso mal, se corrige en esta pestaña, y la fecha corregida manda en todo: si
+   esta vencida, la reubicacion, el mes de pago, la cobertura y el resumen. */
+$fv = facturaTC('OGVTO', 'B100', '2026-08-15', 200000);
+$vincV = [Proveedores::clavePago('OGVTO', 'FAC', 'B100') => 7];
+$vtoA = function ($fecha) use ($fv) {
+    return [TarjetasCorporativas::claveCuota($fv) => [
+        'COD_PROVEE' => 'OGVTO', 'T_COMP' => 'FAC', 'N_COMP' => 'B100',
+        'FECHA_VTO_TANGO' => '2026-08-15', 'FECHA_VTO' => $fecha, 'MOTIVO' => 'Otro resumen',
+        'USUARIO_ALTA' => 'sistemas', 'FECHA_ALTA' => '2026-09-26 10:00']];
+};
+
+$sinEd = TarjetasCorporativas::resolver([$fv], $vincV, [], $TARJETAS, [], $HABILES, $MESES,
+    $HOY)['filas'][0];
+chequear('sin corregir: vencida y reubicada al proximo pago', [true, true, '2026-10-12'],
+    [$sinEd['VENCIDA'], $sinEd['REUBICADA'], $sinEd['FECHA']]);
+
+$ed = TarjetasCorporativas::resolver([$fv], $vincV, [], $TARJETAS, [], $HABILES, $MESES,
+    $HOY, $vtoA('2026-11-20'))['filas'][0];
+chequear('corregida a una fecha futura deja de estar vencida', false, $ed['VENCIDA']);
+chequear('no se reubica: entra en la fecha corregida', [false, '2026-11-20', '2026-11'],
+    [$ed['REUBICADA'], $ed['FECHA'], $ed['MES_PAGO']]);
+chequear('la fila dice que esta corregida, y conserva el de Tango', [true, '2026-08-15', '2026-11-20'],
+    [$ed['VTO_EDITADO'], $ed['FECHA_VTO'], $ed['FECHA_VTO_VIGENTE']]);
+chequear('y quien la corrigio, con el motivo', ['sistemas', 'Otro resumen'],
+    [$ed['VTO_EDIT_USUARIO'], $ed['VTO_EDIT_MOTIVO']]);
+chequear('el texto nombra el vencimiento de Tango', true,
+    strpos($ed['EXPLICACION'], 'En Tango vence el 15/08/2026') !== false);
+
+/* LA COBERTURA SE MUEVE CON LA FECHA: el mes de pago es el corregido. */
+$cobEd = TarjetasCorporativas::cobertura([$ed], $TARJETAS, [], $HABILES, $MESES, $HOY);
+chequear('la cobertura cae en el mes corregido', '2026-11', $cobEd[0]['mes']);
+
+/* EL RESUMEN TAMBIEN: con un resumen cargado en noviembre, la cuota corregida a
+   noviembre queda cubierta; sin corregir caeria en octubre y no. */
+$resNov = [7 => ['2026-11' => ['ID' => 81, 'MES' => '2026-11', 'IMPORTE_ARS' => 900000.0,
+                               'IMPORTE_USD' => null, 'FECHA_VENCIMIENTO' => '2026-11-10',
+                               'PAGADO' => false]]];
+chequear('corregida a noviembre: cubierta por el resumen de noviembre', TarjetasCorporativas::CUBIERTA,
+    TarjetasCorporativas::resolver([$fv], $vincV, [], $TARJETAS, $resNov, $HABILES, $MESES, $HOY,
+        $vtoA('2026-11-20'))['filas'][0]['MOTIVO']);
+chequear('sin corregir no la cubre: sale en octubre', TarjetasCorporativas::OK,
+    TarjetasCorporativas::resolver([$fv], $vincV, [], $TARJETAS, $resNov, $HABILES, $MESES,
+        $HOY)['filas'][0]['MOTIVO']);
+
+/* UNA CORRECCION QUE QUEDA EN EL PASADO se comporta como un vencimiento pasado:
+   vencida, y al proximo pago de la tarjeta. */
+$pasada = TarjetasCorporativas::resolver([$fv], $vincV, [], $TARJETAS, [], $HABILES, $MESES,
+    $HOY, $vtoA('2026-09-20'))['filas'][0];
+chequear('corregida a una fecha que ya paso: vencida y reubicada', [true, true, '2026-10-12'],
+    [$pasada['VENCIDA'], $pasada['REUBICADA'], $pasada['FECHA']]);
+
+seccion('deshacer vuelve al de Tango, y la correccion es por cuota');
+
+/* DESHACER ES DAR DE BAJA: sin la correccion vigente, la cuota vuelve sola a su
+   vencimiento de Tango. */
+chequear('sin la correccion, vuelve a Tango', ['2026-08-15', false],
+    [$sinEd['FECHA_VTO_VIGENTE'], $sinEd['VTO_EDITADO']]);
+
+/* POR CUOTA: dos cuotas del mismo comprobante tienen claves distintas, asi que
+   corregir una no toca la otra. */
+$c1 = facturaTC('OGRSA', 'A010', '2026-10-05', 100000);
+$c2 = facturaTC('OGRSA', 'A010', '2026-11-05', 100000);
+chequear('dos cuotas del mismo comprobante tienen claves de cuota distintas', true,
+    TarjetasCorporativas::claveCuota($c1) !== TarjetasCorporativas::claveCuota($c2));
+
+$soloC1 = [TarjetasCorporativas::claveCuota($c1) => ['COD_PROVEE' => 'OGRSA', 'T_COMP' => 'FAC',
+    'N_COMP' => 'A010', 'FECHA_VTO_TANGO' => '2026-10-05', 'FECHA_VTO' => '2026-10-25',
+    'MOTIVO' => null, 'USUARIO_ALTA' => 'x', 'FECHA_ALTA' => null]];
+$cuotas = TarjetasCorporativas::resolver([$c1, $c2], [], [], $TARJETAS, [], $HABILES, $MESES,
+    $HOY, $soloC1)['filas'];
+chequear('se corrige solo la cuota pedida', ['2026-10-25', '2026-11-05'],
+    [$cuotas[0]['FECHA_VTO_VIGENTE'], $cuotas[1]['FECHA_VTO_VIGENTE']]);
+
+seccion('la fecha minima es hoy, en el backend');
+
+chequear('hoy se acepta', $HOY, TarjetasCorporativas::validarVtoEditado($HOY, $HOY));
+chequearLanza('ayer no', function () use ($HOY) {
+    TarjetasCorporativas::validarVtoEditado('2026-09-25', $HOY);
+});
+chequearLanza('una fecha que no existe tampoco', function () use ($HOY) {
+    TarjetasCorporativas::validarVtoEditado('2026-02-30', $HOY);
+});
+
+seccion('una correccion sin cuota queda inerte y se avisa');
+
+/* TANGO CAMBIO EL VENCIMIENTO: el comprobante sigue pendiente pero ninguna cuota
+   tiene el vencimiento con el que se guardo la correccion. */
+$movida = facturaTC('OGVTO', 'B100', '2026-09-10', 200000);
+$inertes = TarjetasCorporativas::vtosInertes([$movida], $vtoA('2026-11-20'));
+chequear('una correccion cuyo vencimiento de Tango ya no esta es inerte', 1, count($inertes));
+chequear('y no se aplica a la cuota nueva', '2026-09-10',
+    TarjetasCorporativas::resolver([$movida], $vincV, [], $TARJETAS, [], $HABILES, $MESES, $HOY,
+        $vtoA('2026-11-20'))['filas'][0]['FECHA_VTO_VIGENTE']);
+chequear('el aviso nombra el comprobante', true,
+    strpos(TarjetasCorporativas::avisoVtosInertes($inertes), 'FAC B100 de OGVTO') !== false);
+
+/* UN COMPROBANTE QUE YA NO ESTA PENDIENTE (se pago) no se avisa: no hay nada que
+   corregir, y el aviso creceria para siempre. */
+chequear('si el comprobante ya no esta, no se avisa', 0,
+    count(TarjetasCorporativas::vtosInertes([facturaTC('OGOTRO', 'Z1', '2026-10-01', 1)],
+        $vtoA('2026-11-20'))));
+chequear('y si la cuota sigue, no es inerte', 0,
+    count(TarjetasCorporativas::vtosInertes([$fv], $vtoA('2026-11-20'))));

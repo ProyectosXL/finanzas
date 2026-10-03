@@ -444,7 +444,10 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                                     <th rowspan="2" class="col-texto">RAZON SOCIAL</th>
                                     <th rowspan="2">T_COMP</th>
                                     <th rowspan="2">N_COMP</th>
-                                    <th rowspan="2">VTO TANGO</th>
+                                    <th rowspan="2" style="min-width: 165px;"
+                                        title="El vencimiento de Tango, que se puede corregir: sólo vale en esta pestaña">
+                                        VTO TANGO
+                                    </th>
                                     <th rowspan="2">TARJETA</th>
                                     <th rowspan="2" class="text-end">PENDIENTE</th>
                                     <th rowspan="2">ESTADO</th>
@@ -477,6 +480,11 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                         </table>
                     </div>
                 </div>
+
+                <!-- Las correcciones de vencimiento que quedaron sin cuota: se
+                     dibuja sólo cuando hay alguna. Ver dibujarVtosInertes(). -->
+                <div id="vtosInertesCorp" class="card-body py-2 border-top bg-warning bg-opacity-10"
+                     style="display: none;"></div>
 
                 <div class="card-body py-2 border-top">
                     <small class="text-muted">

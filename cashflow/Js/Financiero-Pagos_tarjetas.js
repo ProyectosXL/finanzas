@@ -301,6 +301,7 @@
 
         pintarTotales('totalesCorp', COLS_CORP, c.eje.totales, cols);
         dibujarExtras();
+        dibujarVtosInertes();
         engancharCorp(cuerpo);
         actualizarBarraSel();
     }
@@ -342,9 +343,7 @@
             + '<td class="col-texto">' + esc(f.RAZON_SOC) + '</td>'
             + '<td>' + esc(f.T_COMP) + '</td>'
             + '<td>' + esc(f.N_COMP) + '</td>'
-            + '<td>' + fecha(f.FECHA_VTO)
-                + (f.VENCIDA ? ' <span class="badge bg-danger">vencida</span>' : '')
-            + '</td>'
+            + celdaVtoCorp(f)
             + '<td>' + (f.TARJETA
                 ? '<small>' + esc(f.TARJETA.ROTULO) + '</small>'
                 : '<small class="text-muted">sin vincular</small>')
@@ -495,9 +494,182 @@
         });
     }
 
+    /* ---- el vencimiento, editable ---- */
+
+    /**
+     * La celda VTO TANGO: el vencimiento que vale en esta pestaña.
+     *
+     * Quien carga en Tango pone ahí el vencimiento del RESUMEN en el que se paga
+     * la cuota; si lo puso mal, se corrige acá sin tocar Tango y sin mover
+     * Cuentas a Pagar Locales. Mismo patrón que la fecha de Proveedores Locales
+     * y de Cobranzas FR: un input date que guarda en 'change' y un ↺ que vuelve
+     * al de Tango.
+     *
+     * EDITADA SE VE DISTINTA, y el title dice el original de Tango y quién lo
+     * cambió: una fecha corregida que se ve igual que una de Tango se lee como si
+     * Tango dijera eso.
+     *
+     * Sin permiso se ve sólo la fecha. Sin el script, el input se dibuja apagado
+     * nombrando el archivo.
+     */
+    function celdaVtoCorp(f) {
+        var vigente = f.FECHA_VTO_VIGENTE || f.FECHA_VTO;
+        var vencida = f.VENCIDA ? ' <span class="badge bg-danger">vencida</span>' : '';
+        var titulo = f.VTO_EDITADO
+            ? 'Vencimiento corregido en esta pestaña. En Tango vence el ' + fecha(f.FECHA_VTO) + '.'
+              + (f.VTO_EDIT_MOTIVO ? '\nMotivo: ' + f.VTO_EDIT_MOTIVO : '')
+              + '\n' + Auditoria.texto({ alta: { usuario: f.VTO_EDIT_USUARIO, fecha: f.VTO_EDIT_FECHA } })
+            : 'Vencimiento de Tango. Corregilo si la cuota se paga en otro resumen: sólo vale en '
+              + 'esta pestaña.';
+
+        if (!Permisos.puedeEditar('bodyCorp')) {
+            return '<td data-orden="' + esc(vigente) + '" title="' + esc(titulo) + '"'
+                + (f.VTO_EDITADO ? ' class="tarj-vto-editado"' : '') + '>'
+                + fecha(vigente)
+                + (f.VTO_EDITADO ? ' <span class="badge bg-info text-dark">corregido</span>' : '')
+                + vencida + '</td>';
+        }
+
+        var sinTabla = !datos.tablas.factura_vto;
+
+        return '<td data-orden="' + esc(vigente) + '"'
+            + (f.VTO_EDITADO ? ' class="tarj-vto-editado"' : '') + '>'
+            + '<div class="input-group input-group-sm flex-nowrap">'
+            +   '<input type="date" class="form-control form-control-sm tarj-vto" '
+            +     'value="' + esc(vigente) + '" min="' + esc(datos.hoy) + '" '
+            +     'data-cod="' + esc(f.COD_PROVEE) + '" data-tcomp="' + esc(f.T_COMP) + '" '
+            +     'data-ncomp="' + esc(f.N_COMP) + '" data-vto-tango="' + esc(f.FECHA_VTO) + '" '
+            +     'data-vigente="' + esc(vigente) + '" '
+            +     'title="' + esc(sinTabla
+                    ? 'Para corregir el vencimiento falta correr '
+                      + 'sql/cashflow_tarjetas_vto_mensual.sql'
+                    : titulo) + '"'
+            +     (sinTabla ? ' disabled' : '') + '>'
+            +   (f.VTO_EDITADO && !sinTabla
+                  ? '<button class="btn btn-outline-secondary tarj-vto-volver" type="button" '
+                    + 'title="Volver al vencimiento de Tango (' + esc(fecha(f.FECHA_VTO)) + ')">'
+                    + '<i class="fas fa-rotate-left"></i></button>'
+                  : '')
+            + '</div>' + vencida + '</td>';
+    }
+
+    /** Los datos de la cuota de un control de la celda VTO */
+    function cuotaDe(el) {
+        var input = el.closest('td').querySelector('.tarj-vto');
+
+        return {
+            cod_provee: input.getAttribute('data-cod'),
+            t_comp: input.getAttribute('data-tcomp'),
+            n_comp: input.getAttribute('data-ncomp'),
+            fecha_vto_tango: input.getAttribute('data-vto-tango')
+        };
+    }
+
+    /**
+     * Guardar el vencimiento corregido. El motivo se pide y es OPCIONAL:
+     * corregir una fecha cargada con el resumen equivocado no necesita
+     * explicación, y obligarla volvería la corrección un trámite. Cancelar deja
+     * la celda como estaba.
+     */
+    function editarVto(input) {
+        var nueva = input.value;
+
+        if (!nueva || nueva === input.getAttribute('data-vigente')) { return; }
+
+        if (nueva < datos.hoy) {
+            Notificacion.campoInvalido(input, 'El vencimiento corregido no puede ser anterior a hoy.');
+            input.value = input.getAttribute('data-vigente');
+
+            return;
+        }
+
+        var cuota = cuotaDe(input);
+
+        Notificacion.pedirTexto({
+            titulo: 'Corregir el vencimiento',
+            mensaje: cuota.t_comp + ' ' + cuota.n_comp + ' de ' + cuota.cod_provee + ': vence el '
+                + fecha(nueva) + ' en esta pestaña.',
+            detalle: 'En Tango vence el ' + fecha(cuota.fecha_vto_tango) + ' y ahí no cambia, ni '
+                + 'en Cuentas a Pagar Locales.',
+            etiqueta: 'Motivo',
+            opcional: true,
+            maxlargo: 300,
+            confirmar: 'Guardar'
+        }).then(function(motivo) {
+            if (motivo === null) {
+                input.value = input.getAttribute('data-vigente');
+
+                return;
+            }
+
+            cuota.fecha = nueva;
+            cuota.motivo = motivo;
+            guardar('editarVtoFactura', cuota);
+        });
+    }
+
+    /**
+     * La lista de las correcciones que quedaron sin cuota: Tango cambió el
+     * vencimiento. Va abajo de la grilla y sólo cuando hay alguna, con un botón
+     * para darlas de baja: el aviso dice que existen y esto es dónde se arreglan.
+     */
+    function dibujarVtosInertes() {
+        var caja = document.getElementById('vtosInertesCorp');
+
+        if (!caja) { return; }
+
+        var lista = datos.corporativas.vtos_inertes || [];
+
+        if (!lista.length) {
+            caja.innerHTML = '';
+            caja.style.display = 'none';
+
+            return;
+        }
+
+        caja.style.display = '';
+        caja.innerHTML = '<small class="fw-semibold d-block mb-1">'
+            + '<i class="fas fa-triangle-exclamation text-warning me-1"></i>'
+            + 'Vencimientos corregidos que ya no se aplican: Tango cambió el vencimiento de la cuota'
+            + '</small>'
+            + lista.map(function(v) {
+                return '<div class="d-flex align-items-center gap-2 small">'
+                    + '<span>' + esc(v.T_COMP + ' ' + v.N_COMP + ' de ' + v.COD_PROVEE)
+                    + ' · vto. Tango ' + fecha(v.FECHA_VTO_TANGO) + ' → corregido al '
+                    + fecha(v.FECHA_VTO) + '</span>'
+                    + Permisos.siEdita('bodyCorp',
+                        '<button class="btn btn-sm btn-outline-secondary py-0 tarj-vto-inerte" '
+                        + 'data-cod="' + esc(v.COD_PROVEE) + '" data-tcomp="' + esc(v.T_COMP) + '" '
+                        + 'data-ncomp="' + esc(v.N_COMP) + '" '
+                        + 'data-vto-tango="' + esc(v.FECHA_VTO_TANGO) + '">Dar de baja</button>')
+                    + '</div>';
+            }).join('');
+
+        caja.querySelectorAll('.tarj-vto-inerte').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                guardar('deshacerVtoFactura', {
+                    cod_provee: btn.getAttribute('data-cod'),
+                    t_comp: btn.getAttribute('data-tcomp'),
+                    n_comp: btn.getAttribute('data-ncomp'),
+                    fecha_vto_tango: btn.getAttribute('data-vto-tango')
+                });
+            });
+        });
+    }
+
     /* ---- selección y acciones masivas ---- */
 
     function engancharCorp(cuerpo) {
+        cuerpo.querySelectorAll('.tarj-vto').forEach(function(input) {
+            input.addEventListener('change', function() { editarVto(input); });
+        });
+
+        cuerpo.querySelectorAll('.tarj-vto-volver').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                guardar('deshacerVtoFactura', cuotaDe(btn));
+            });
+        });
+
         cuerpo.querySelectorAll('.tarj-sel').forEach(function(chk) {
             chk.addEventListener('change', function() {
                 var clave = chk.getAttribute('data-clave');
