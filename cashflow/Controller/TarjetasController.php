@@ -126,6 +126,25 @@ function soloProyectan($items, $campo) {
 }
 
 /**
+ * Deja solo los pagos de un tipo (FACTURA, COBERTURA, RESUMEN, ESTIMACION).
+ *
+ * @param array $pagos
+ * @param string $tipo
+ * @return array
+ */
+function soloTipo($pagos, $tipo) {
+    $v = [];
+
+    foreach ($pagos as $p) {
+        if (isset($p['tipo']) && $p['tipo'] === $tipo) {
+            $v[] = $p;
+        }
+    }
+
+    return $v;
+}
+
+/**
  * Extrae de las filas de socios un item por (tarjeta, mes) con un campo como
  * importe.
  *
@@ -159,6 +178,8 @@ function celdasDe($filas, $campo) {
 
 try {
     require_once __DIR__ . '/../Class/Tarjetas.php';
+    require_once __DIR__ . '/../Class/TarjetasMensual.php';
+    require_once __DIR__ . '/../Class/TarjetasCorporativas.php';
     require_once __DIR__ . '/../Class/TarjetasResumen.php';
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
@@ -252,6 +273,14 @@ try {
                         'cobertura' => $corp['cobertura'],
                         'resumenes' => $corp['resumenes'],
                         'vtos_inertes' => $corp['vtos_inertes'],
+                        'estimaciones' => $corp['estimaciones'],
+
+                        /* UNA FILA POR ESTIMACION, con sus meses en el eje: la
+                           seccion Estimaciones mensuales tiene las mismas
+                           columnas y vistas que la grilla. */
+                        'eje_estimaciones' => EjeVista::armarAgrupado($h,
+                            soloTipo($corp['pagos'], 'ESTIMACION'),
+                            'id_estimacion', 'fecha', 'importe'),
 
                         /* UNA FILA POR VENCIMIENTO, con armar() y no
                            armarAgrupado(): la grilla es el listado de facturas y
@@ -423,6 +452,73 @@ try {
                     ? 'La cuota vuelve al vencimiento de Tango. La corrección queda en el '
                       . 'historial: no se borra.'
                     : 'Esta cuota ya usaba el vencimiento de Tango.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           LA FACTURA MENSUAL (ABONOS)
+
+           Marcarla guarda una copia y estima los meses siguientes. Lo que se
+           guarda sale de la fila tal como la ve la pantalla, resuelta por
+           PagosTarjetas, y lo valida TarjetasCorporativas::datosMarcaMensual():
+           solo una vinculada y no excluida.
+           ================================================================ */
+        case 'marcarMensual':
+            require_once __DIR__ . '/../Class/PagosTarjetas.php';
+            require_once __DIR__ . '/../Class/Parametros.php';
+            require_once __DIR__ . '/../Class/Horizonte.php';
+
+            $data = bodyJson();
+
+            foreach (['cod_provee', 't_comp', 'n_comp', 'fecha_vto_tango'] as $campo) {
+                if (!isset($data[$campo])) {
+                    throw new Exception('Faltan datos de la factura');
+                }
+            }
+
+            $h = Horizonte::desdeParametros(new Parametros());
+            $fila = (new PagosTarjetas())->filaCorporativa($h, TarjetasCorporativas::claveCuota([
+                'COD_PROVEE' => trim((string) $data['cod_provee']),
+                'T_COMP' => trim((string) $data['t_comp']),
+                'N_COMP' => trim((string) $data['n_comp']),
+                'FECHA_VTO_TANGO' => $data['fecha_vto_tango']]));
+
+            if ($fila === null) {
+                throw new Exception('Esa factura no está entre las pendientes de '
+                    . TarjetasCorporativas::FORMA . '. Actualizá la pantalla.');
+            }
+
+            $r = (new TarjetasMensual())->marcar(TarjetasCorporativas::datosMarcaMensual($fila),
+                $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Marcada como mensual: se estiman $ '
+                    . number_format($r['datos']['IMPORTE'], 2, ',', '.') . ' el día '
+                    . $r['datos']['DIA'] . ' de cada mes desde ' . $r['datos']['MES_DESDE'] . '.'
+                    . ($r['reemplazo'] > 0
+                        ? ' La estimación anterior de este proveedor se dio de baja: queda en el '
+                          . 'historial.'
+                        : ''),
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'desmarcarMensual':
+            $data = bodyJson();
+
+            if (!isset($data['id'])) {
+                throw new Exception('Falta la estimación');
+            }
+
+            $r = (new TarjetasMensual())->desmarcar($data['id'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['habia']
+                    ? 'Estimación desmarcada: deja de proyectarse. Queda en el historial.'
+                    : 'Esa estimación ya estaba desmarcada.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

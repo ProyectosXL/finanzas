@@ -500,6 +500,54 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                 </div>
             </div>
 
+            <!-- LAS ESTIMACIONES MENSUALES, aparte de la grilla de facturas por lo
+                 mismo que la cobertura y los resúmenes: no son facturas. Tienen las
+                 columnas del eje, con las mismas vistas, porque suman en la serie
+                 CORPORATIVAS del tablero. Se desmarcan desde acá también cuando la
+                 factura de origen ya se pagó. -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Estimaciones mensuales</h5>
+                    <small class="text-muted">
+                        Las facturas que se repiten todos los meses (abonos), marcadas con el
+                        ícono <i class="fas fa-repeat"></i> de la grilla. Se estima el
+                        <strong>importe de la cuota marcada</strong>, fijo y sin inflación, el día
+                        de su vencimiento, desde el mes siguiente. Un mes se apaga solo si aparece
+                        la <strong>factura real</strong> del proveedor, y queda cubierto si la
+                        tarjeta tiene <strong>resumen</strong> cargado. Generan cobertura como una
+                        factura vinculada.
+                    </small>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-wrapper table-responsive tabla-temporal">
+                        <table id="tablaCorpEst" class="table table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th rowspan="2" class="col-texto">PROVEEDOR</th>
+                                    <th rowspan="2">ORIGEN</th>
+                                    <th rowspan="2">TARJETA</th>
+                                    <th rowspan="2" class="text-end">IMPORTE</th>
+                                    <th rowspan="2" class="text-center">DÍA</th>
+                                    <th rowspan="2">ESTADO POR MES</th>
+                                    <th id="headerEjeEst" class="text-center"></th>
+                                    <th rowspan="2" class="text-end"
+                                        title="Suma las columnas que se están viendo">
+                                        TOTAL PERÍODO
+                                    </th>
+                                </tr>
+                                <tr id="headerEjeEst2"></tr>
+                            </thead>
+                            <tbody id="bodyCorpEst"></tbody>
+                            <tfoot>
+                                <tr id="totalesCorpEst">
+                                    <td colspan="6" class="fw-bold text-end">TOTALES</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <!-- La cobertura y los resúmenes, aparte de la grilla de facturas:
                  no son facturas y ponerlos como filas más de la misma tabla haría
                  que el total de la columna PENDIENTE dejara de significar algo. -->

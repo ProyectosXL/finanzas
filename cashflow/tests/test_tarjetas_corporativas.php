@@ -776,3 +776,148 @@ chequear('si el comprobante ya no esta, no se avisa', 0,
         $vtoA('2026-11-20'))));
 chequear('y si la cuota sigue, no es inerte', 0,
     count(TarjetasCorporativas::vtosInertes([$fv], $vtoA('2026-11-20'))));
+
+/* ================================================================
+   LA FACTURA MENSUAL (ABONOS)
+   ================================================================ */
+seccion('marcar como mensual: solo una vinculada y no excluida');
+
+/* Una factura de abono, vinculada, que vence el 31 de octubre: el dia 31 tiene
+   que acotarse en los meses cortos. */
+$abono = facturaTC('OGABO', 'C500', '2026-10-31', 80000);
+$abono['IMPORTE_VTO'] = 100000;   // la cuota entera; el pendiente es menor
+$vincAbo = [Proveedores::clavePago('OGABO', 'FAC', 'C500') => 7];
+
+$filaAbo = TarjetasCorporativas::resolver([$abono], $vincAbo, [], $TARJETAS, [], $HABILES, $MESES,
+    $HOY)['filas'][0];
+$datosAbo = TarjetasCorporativas::datosMarcaMensual($filaAbo);
+
+chequear('el importe es el de la cuota (IMPORTE_VTO), no el pendiente', 100000.0,
+    $datosAbo['IMPORTE']);
+chequear('el dia es el del vencimiento', 31, $datosAbo['DIA']);
+chequear('y se proyecta desde el mes siguiente', '2026-11', $datosAbo['MES_DESDE']);
+chequear('con la tarjeta de la factura', 7, $datosAbo['ID_TARJETA']);
+
+chequearLanza('sin tarjeta vinculada no se puede marcar', function () use ($abono, $TARJETAS,
+        $HABILES, $MESES, $HOY) {
+    TarjetasCorporativas::datosMarcaMensual(TarjetasCorporativas::resolver([$abono], [], [],
+        $TARJETAS, [], $HABILES, $MESES, $HOY)['filas'][0]);
+});
+
+chequearLanza('excluida tampoco', function () use ($abono, $vincAbo, $TARJETAS, $HABILES, $MESES,
+        $HOY) {
+    TarjetasCorporativas::datosMarcaMensual(TarjetasCorporativas::resolver([$abono], $vincAbo,
+        [Proveedores::clavePago('OGABO', 'FAC', 'C500') => ['MOTIVO' => 'x']], $TARJETAS, [],
+        $HABILES, $MESES, $HOY)['filas'][0]);
+});
+
+/* EL VENCIMIENTO VIGENTE: si se corrigio, el dia y el primer mes salen de la
+   fecha corregida. */
+$filaAboEd = TarjetasCorporativas::resolver([$abono], $vincAbo, [], $TARJETAS, [], $HABILES,
+    $MESES, $HOY, [TarjetasCorporativas::claveCuota($abono) => ['COD_PROVEE' => 'OGABO',
+        'T_COMP' => 'FAC', 'N_COMP' => 'C500', 'FECHA_VTO_TANGO' => '2026-10-31',
+        'FECHA_VTO' => '2026-11-15', 'MOTIVO' => null, 'USUARIO_ALTA' => 'x',
+        'FECHA_ALTA' => null]])['filas'][0];
+$datosEd = TarjetasCorporativas::datosMarcaMensual($filaAboEd);
+chequear('con el vencimiento corregido, el dia y el mes salen de la correccion', [15, '2026-12'],
+    [$datosEd['DIA'], $datosEd['MES_DESDE']]);
+
+seccion('la estimacion: desde el mes siguiente, dia acotado, sin correr al habil');
+
+$mensualAbo = array_merge($datosAbo, ['ID' => 1, 'USUARIO_ALTA' => 'sistemas',
+                                      'FECHA_ALTA' => '2026-09-26 10:00']);
+$MESES6 = ['2026-09', '2026-10', '2026-11', '2026-12', '2027-01', '2027-02'];
+$TARJ_TODAS = [7 => array_merge($TARJETAS[7], ['ACTIVA' => true])];
+
+$est = TarjetasCorporativas::estimaciones([$mensualAbo], [$filaAbo], $TARJ_TODAS, [], $MESES6,
+    $HOY)[0];
+
+chequear('empieza en noviembre: septiembre y octubre no',
+    ['2026-11', '2026-12', '2027-01', '2027-02'], array_column($est['meses'], 'mes'));
+chequear('el 31 se acota: 30/11, 31/12 y 28/02', ['2026-11-30', '2026-12-31', '2027-02-28'],
+    [$est['meses'][0]['fecha'], $est['meses'][1]['fecha'], $est['meses'][3]['fecha']]);
+chequear('el 31/01/2027 es domingo y NO se corre al habil', '2027-01-31', $est['meses'][2]['fecha']);
+chequear('el importe es fijo en todos los meses', [100000.0, 100000.0, 100000.0, 100000.0],
+    array_column($est['meses'], 'importe'));
+chequear('y todos proyectan', [true, true, true, true], array_column($est['meses'], 'proyecta'));
+
+seccion('una factura real del mismo proveedor apaga ese mes');
+
+/* LA FACTURA DE DICIEMBRE YA ESTA EN TANGO: la estimacion de diciembre no
+   proyecta, y dice por cual. Cualquier factura del universo, aunque no sume:
+   aca no esta vinculada. */
+$realDic = facturaTC('OGABO', 'C777', '2026-12-31', 100000);
+$filasConReal = TarjetasCorporativas::resolver([$abono, $realDic], $vincAbo, [], $TARJETAS, [],
+    $HABILES, $MESES6, $HOY)['filas'];
+$estR = TarjetasCorporativas::estimaciones([$mensualAbo], $filasConReal, $TARJ_TODAS, [], $MESES6,
+    $HOY)[0];
+
+chequear('diciembre queda reemplazado', [TarjetasCorporativas::EST_REEMPLAZADA, false],
+    [$estR['meses'][1]['estado'], $estR['meses'][1]['proyecta']]);
+chequear('por la factura real, que se nombra aunque no sume', 'FAC C777', $estR['meses'][1]['por']);
+chequear('los otros meses siguen', [true, true, true],
+    [$estR['meses'][0]['proyecta'], $estR['meses'][2]['proyecta'], $estR['meses'][3]['proyecta']]);
+
+$otraDic = facturaTC('OGOTRO', 'X1', '2026-12-10', 5);
+$estOtro = TarjetasCorporativas::estimaciones([$mensualAbo], [$filaAbo, $otraDic], $TARJ_TODAS, [],
+    $MESES6, $HOY)[0];
+chequear('una factura de otro proveedor no la apaga', true, $estOtro['meses'][1]['proyecta']);
+
+seccion('la estimacion se comporta como una factura vinculada');
+
+/* CUBIERTA POR EL RESUMEN DE SU MES: el resumen ya la incluye. */
+$resEne = [7 => ['2027-01' => ['ID' => 90, 'MES' => '2027-01', 'IMPORTE_ARS' => 1.0,
+                               'IMPORTE_USD' => null, 'FECHA_VENCIMIENTO' => '2027-01-11',
+                               'PAGADO' => false]]];
+$estC = TarjetasCorporativas::estimaciones([$mensualAbo], [$filaAbo], $TARJ_TODAS, $resEne,
+    $MESES6, $HOY)[0];
+chequear('enero, con resumen cargado, queda cubierto y no suma',
+    [TarjetasCorporativas::EST_CUBIERTA, false],
+    [$estC['meses'][2]['estado'], $estC['meses'][2]['proyecta']]);
+
+/* GENERA COBERTURA con el % de la tarjeta en su mes. */
+$cobEst = TarjetasCorporativas::cobertura(TarjetasCorporativas::estimacionesComoFilas([$est]),
+    $TARJETAS, [], $HABILES, $MESES6, $HOY);
+chequear('genera cobertura en cada mes que proyecta', 4, count($cobEst));
+chequear('el 10 % de la estimacion', 10000.0, $cobEst[0]['importe']);
+chequear('y se cuenta como estimacion, no como factura', [0, 1],
+    [$cobEst[0]['facturas'], $cobEst[0]['estimaciones']]);
+
+seccion('una estimacion con fecha pasada o sin tarjeta activa no proyecta');
+
+$estHoy = TarjetasCorporativas::estimaciones([$mensualAbo], [$filaAbo], $TARJ_TODAS, [], $MESES6,
+    '2026-11-30')[0];
+chequear('la del mismo dia de hoy ya no proyecta', [TarjetasCorporativas::EST_PASADA, false],
+    [$estHoy['meses'][0]['estado'], $estHoy['meses'][0]['proyecta']]);
+
+$inactiva = [7 => array_merge($TARJETAS[7], ['ACTIVA' => false])];
+$estIn = TarjetasCorporativas::estimaciones([$mensualAbo], [$filaAbo], $inactiva, [], $MESES6,
+    $HOY)[0];
+chequear('con la tarjeta inactiva no proyecta ningun mes', [false, false, false, false],
+    array_column($estIn['meses'], 'proyecta'));
+chequear('y se avisa', 1, count(TarjetasCorporativas::avisosEstimaciones([$estIn])));
+
+$estSinT = TarjetasCorporativas::estimaciones([$mensualAbo], [$filaAbo], [], [], $MESES6, $HOY)[0];
+chequear('una tarjeta que ya no existe, igual', false, $estSinT['TARJETA_OK']);
+
+/* LA FACTURA DE ORIGEN YA PAGADA: la estimacion sigue viva, que es para lo que se
+   guarda una copia. */
+$sinOrigen = TarjetasCorporativas::estimaciones([$mensualAbo], [], $TARJ_TODAS, [], $MESES6, $HOY)[0];
+chequear('con la factura de origen ya pagada, sigue proyectando', [false, true],
+    [$sinOrigen['ORIGEN_PENDIENTE'], $sinOrigen['meses'][0]['proyecta']]);
+
+seccion('una sola estimacion vigente por proveedor');
+
+/* LA RED ES EL INDICE UNICO FILTRADO del script; lo que se fija aca es que la
+   clase lo respete: marcar da de baja la anterior DEL MISMO PROVEEDOR, en la misma
+   transaccion, antes de insertar. */
+$fuenteMen = file_get_contents(__DIR__ . '/../Class/TarjetasMensual.php');
+$posBaja = strpos($fuenteMen, 'WHERE COD_PROVEE = ? AND VIGENTE = 1');
+chequear('marcar da de baja la vigente del proveedor antes de insertar', true,
+    $posBaja !== false && $posBaja < strpos($fuenteMen, 'INSERT INTO dbo.'));
+
+$scriptMen = str_replace("\r\n", "\n",
+    file_get_contents(__DIR__ . '/../sql/cashflow_tarjetas_vto_mensual.sql'));
+chequear('y el script declara una vigente por proveedor', true,
+    strpos($scriptMen, "ON dbo.RO_T_CASHFLOW_TARJETAS_MENSUAL (COD_PROVEE)\n        WHERE VIGENTE = 1")
+        !== false);

@@ -556,6 +556,10 @@ class TarjetasCorporativas {
      * exclusiones son por el mismo motivo: la cobertura acompaña a un importe que
      * esta en la fila, y un importe que no esta no necesita cobertura.
      *
+     * LAS ESTIMACIONES MENSUALES QUE PROYECTAN TAMBIEN SON BASE: se comportan como
+     * una factura vinculada de su tarjeta y su mes. Llegan como filas con
+     * ESTIMACION => true (estimacionesComoFilas()) y se cuentan aparte.
+     *
      * SE UBICA EN EL DIA_VENCIMIENTO DE LA TARJETA, no en la fecha de cada
      * factura: es un gasto de la tarjeta, no de la factura, y la tarjeta se debita
      * una vez por mes.
@@ -593,11 +597,11 @@ class TarjetasCorporativas {
             $mes = $f['MES_PAGO'];
 
             if (!isset($base[$id][$mes])) {
-                $base[$id][$mes] = ['importe' => 0.0, 'facturas' => 0];
+                $base[$id][$mes] = ['importe' => 0.0, 'facturas' => 0, 'estimaciones' => 0];
             }
 
             $base[$id][$mes]['importe'] += $f['IMPORTE'];
-            $base[$id][$mes]['facturas']++;
+            $base[$id][$mes][empty($f['ESTIMACION']) ? 'facturas' : 'estimaciones']++;
         }
 
         $v = [];
@@ -635,6 +639,7 @@ class TarjetasCorporativas {
                     'pct' => $pct,
                     'importe' => $importe,
                     'facturas' => $b['facturas'],
+                    'estimaciones' => $b['estimaciones'],
                     'fecha' => $vto['fecha'],
                     'proyecta' => !$vencida,
                     'motivo' => $vencida
@@ -643,7 +648,9 @@ class TarjetasCorporativas {
                         : null,
                     'tooltip' => 'Cobertura gastos excepcionales: ' . self::pct($pct) . ' % de '
                         . self::plata($b['importe']) . ' en ' . $b['facturas'] . ' factura(s) '
-                        . 'vinculadas que se pagan en ' . $mes . '. '
+                        . 'vinculadas' . ($b['estimaciones'] > 0
+                            ? ' y ' . $b['estimaciones'] . ' estimación(es) mensual(es)' : '')
+                        . ' que se pagan en ' . $mes . '. '
                         . TarjetasVencimiento::explicar($vto)
                 ];
             }
@@ -727,6 +734,246 @@ class TarjetasCorporativas {
         }
 
         return $v;
+    }
+
+    /* ====================================================================
+       LAS ESTIMACIONES MENSUALES
+
+       Para las facturas que se repiten todos los meses (abonos): marcar una
+       genera una estimacion de los meses siguientes. Se guarda una COPIA de la
+       factura (RO_T_CASHFLOW_TARJETAS_MENSUAL) porque la factura sale de
+       pendientes cuando se paga, y la estimacion tiene que seguir viva.
+       ==================================================================== */
+
+    /** Por que un mes de una estimacion no proyecta, o PROYECTA */
+    const EST_PROYECTA = 'PROYECTA';
+    const EST_REEMPLAZADA = 'REEMPLAZADA';
+    const EST_CUBIERTA = 'CUBIERTA';
+    const EST_PASADA = 'PASADA';
+    const EST_SIN_TARJETA = 'SIN_TARJETA';
+
+    /**
+     * Lo que se guarda al marcar una factura como mensual, a partir de su fila ya
+     * resuelta.
+     *
+     * SOLO UNA VINCULADA Y NO EXCLUIDA: la estimacion se comporta como una factura
+     * vinculada -cobertura, resumen, fecha de debito- y sin tarjeta no hay nada de
+     * eso; una excluida es una que se decidio que no entra, y estimar sus meses
+     * siguientes contradiria esa decision. Lo valida aca el backend, no la
+     * pantalla.
+     *
+     * EL IMPORTE ES EL DE LA CUOTA MARCADA, ANTES DE IMPUTACIONES (IMPORTE_VTO),
+     * NO EL PENDIENTE: el pendiente puede estar parcialmente pagado, y lo que se
+     * repite es lo que se debita por mes. En una factura de una sola cuota
+     * coincide con el total; en una en cuotas, el total multiplicaria el importe
+     * por la cantidad de cuotas.
+     *
+     * EL DIA ES EL DEL VENCIMIENTO VIGENTE -el corregido si lo hay- y el primer
+     * mes, el siguiente al de ese vencimiento.
+     *
+     * Estatica y pura.
+     *
+     * @param array $fila Una fila de resolver()
+     * @return array Los campos de RO_T_CASHFLOW_TARJETAS_MENSUAL
+     */
+    public static function datosMarcaMensual($fila) {
+        if (!empty($fila['EXCLUIDA_TARJETAS'])) {
+            throw new Exception('Esta factura está excluida de la pestaña: no se puede marcar como '
+                . 'mensual. Volvé a incluirla primero.');
+        }
+
+        if (empty($fila['ID_TARJETA'])) {
+            throw new Exception('Sólo se puede marcar como mensual una factura vinculada a una '
+                . 'tarjeta: la estimación sale en el débito de esa tarjeta.');
+        }
+
+        $importe = isset($fila['IMPORTE_VTO']) ? floatval($fila['IMPORTE_VTO']) : 0.0;
+
+        if ($importe <= 0) {
+            throw new Exception('La cuota no tiene importe en Tango (IMPORTE_VTO): no hay nada que '
+                . 'repetir.');
+        }
+
+        $vto = self::vtoVigente($fila);
+
+        if (empty($vto)) {
+            throw new Exception('La factura no tiene vencimiento: no se sabe qué día del mes se '
+                . 'debita.');
+        }
+
+        $desde = new DateTime(substr($vto, 0, 7) . '-01');
+        $desde->modify('+1 month');
+
+        return [
+            'COD_PROVEE' => $fila['COD_PROVEE'],
+            'RAZON_SOC' => isset($fila['RAZON_SOC']) ? mb_substr((string) $fila['RAZON_SOC'], 0, 100) : null,
+            'T_COMP' => $fila['T_COMP'],
+            'N_COMP' => $fila['N_COMP'],
+            'FECHA_VTO_TANGO' => $fila['FECHA_VTO'],
+            'FECHA_VTO_ORIGEN' => $vto,
+            'ID_TARJETA' => intval($fila['ID_TARJETA']),
+            'IMPORTE' => round($importe, 2),
+            'DIA' => intval(substr($vto, 8, 2)),
+            'MES_DESDE' => $desde->format('Y-m')
+        ];
+    }
+
+    /**
+     * La fecha de la estimacion en un mes: el dia guardado, acotado al ultimo dia
+     * si el mes no lo tiene.
+     *
+     * NO SE CORRE AL HABIL: ese dia ya es el vencimiento del resumen que cargan en
+     * Tango, no un dia que haya que ajustar.
+     *
+     * @param int $dia 1..31
+     * @param string $mes 'Y-m'
+     * @return string 'Y-m-d'
+     */
+    public static function fechaEstimacion($dia, $mes) {
+        $ultimo = intval((new DateTime($mes . '-01'))->format('t'));
+
+        return $mes . '-' . sprintf('%02d', min(max(1, intval($dia)), $ultimo));
+    }
+
+    /**
+     * Las estimaciones, mes por mes, con su estado.
+     *
+     * DESDE MES_DESDE HASTA EL FIN DEL HORIZONTE, sin fecha de fin: se corta
+     * desmarcando. IMPORTE FIJO, sin inflacion: es un abono pactado.
+     *
+     * POR MES, EN ESTE ORDEN:
+     *
+     *   1. REEMPLAZADA: hay en el universo de la pestana una factura REAL del mismo
+     *      proveedor con vencimiento vigente en ese mes. Cualquiera, este vinculada,
+     *      excluida o cubierta: la factura real existe, y si no suma es por otra
+     *      decision que se ve en la grilla. Se dice cual.
+     *   2. SIN_TARJETA: la tarjeta de la estimacion esta inactiva o ya no existe.
+     *   3. PASADA: la fecha es anterior o igual a hoy. Esa plata ya salio.
+     *   4. CUBIERTA: la tarjeta tiene resumen cargado en ese mes; el resumen ya la
+     *      incluye, igual que a una factura vinculada.
+     *   5. PROYECTA.
+     *
+     * Estatica y pura.
+     *
+     * @param array $mensuales Las vigentes de RO_T_CASHFLOW_TARJETAS_MENSUAL
+     * @param array $filas Lo que devolvio resolver()['filas']: el universo
+     * @param array $tarjetas Mapa ID => tarjeta, TODAS (tambien las inactivas)
+     * @param array $resumenes Mapa ID_TARJETA => ['Y-m' => resumen]
+     * @param array $meses Los meses del horizonte
+     * @param string $hoy 'Y-m-d'
+     * @return array Lista de estimaciones, cada una con 'meses' => [...]
+     */
+    public static function estimaciones($mensuales, $filas, $tarjetas, $resumenes, $meses, $hoy) {
+        $hoyStr = substr((string) $hoy, 0, 10);
+
+        /* Las facturas reales por proveedor y mes de vencimiento vigente. */
+        $reales = [];
+        $origenes = [];
+
+        foreach ($filas as $f) {
+            $vto = self::vtoVigente($f);
+
+            if ($vto !== null && !isset($reales[$f['COD_PROVEE']][substr($vto, 0, 7)])) {
+                $reales[$f['COD_PROVEE']][substr($vto, 0, 7)] = trim($f['T_COMP'] . ' ' . $f['N_COMP']);
+            }
+
+            $origenes[self::claveCuota($f)] = true;
+        }
+
+        $v = [];
+
+        foreach ($mensuales as $m) {
+            $id = intval($m['ID_TARJETA']);
+            $t = isset($tarjetas[$id]) ? $tarjetas[$id] : null;
+            $tarjetaOk = ($t !== null && !empty($t['ACTIVA']) && $t['TIPO'] === 'CORPORATIVA');
+
+            $est = $m;
+            $est['TARJETA'] = $t;
+            $est['TARJETA_OK'] = $tarjetaOk;
+            $est['ORIGEN_PENDIENTE'] = isset($origenes[self::claveCuota($m)]);
+            $est['meses'] = [];
+
+            foreach ($meses as $mes) {
+                if ($mes < $m['MES_DESDE']) {
+                    continue;
+                }
+
+                $fecha = self::fechaEstimacion($m['DIA'], $mes);
+                $por = isset($reales[$m['COD_PROVEE']][$mes]) ? $reales[$m['COD_PROVEE']][$mes] : null;
+
+                if ($por !== null) {
+                    $estado = self::EST_REEMPLAZADA;
+                } elseif (!$tarjetaOk) {
+                    $estado = self::EST_SIN_TARJETA;
+                } elseif ($fecha <= $hoyStr) {
+                    $estado = self::EST_PASADA;
+                } elseif (isset($resumenes[$id][$mes])) {
+                    $estado = self::EST_CUBIERTA;
+                } else {
+                    $estado = self::EST_PROYECTA;
+                }
+
+                $est['meses'][] = [
+                    'mes' => $mes,
+                    'fecha' => $fecha,
+                    'importe' => floatval($m['IMPORTE']),
+                    'estado' => $estado,
+                    'por' => $por,
+                    'proyecta' => ($estado === self::EST_PROYECTA)
+                ];
+            }
+
+            $v[] = $est;
+        }
+
+        return $v;
+    }
+
+    /**
+     * Los meses que proyectan, como filas que cobertura() entiende: se comportan
+     * como una factura vinculada de su tarjeta y su mes.
+     *
+     * @param array $estimaciones Lo que devolvio estimaciones()
+     * @return array
+     */
+    public static function estimacionesComoFilas($estimaciones) {
+        $v = [];
+
+        foreach ($estimaciones as $e) {
+            foreach ($e['meses'] as $m) {
+                if ($m['proyecta']) {
+                    $v[] = ['PROYECTA' => true, 'ID_TARJETA' => intval($e['ID_TARJETA']),
+                            'MES_PAGO' => $m['mes'], 'IMPORTE' => $m['importe'],
+                            'ESTIMACION' => true];
+                }
+            }
+        }
+
+        return $v;
+    }
+
+    /**
+     * Los avisos de las estimaciones: las que no proyectan porque su tarjeta esta
+     * inactiva o ya no existe. Un abono que deja de estimarse sin decirlo es plata
+     * que desaparece del tablero.
+     *
+     * @param array $estimaciones
+     * @return array
+     */
+    public static function avisosEstimaciones($estimaciones) {
+        $sin = [];
+
+        foreach ($estimaciones as $e) {
+            if (!$e['TARJETA_OK']) {
+                $sin[] = ($e['RAZON_SOC'] ?: $e['COD_PROVEE']) . ' (' . self::plata($e['IMPORTE'])
+                    . '/mes)';
+            }
+        }
+
+        return empty($sin) ? [] : [count($sin) . ' estimación(es) mensual(es) no se proyectan '
+            . 'porque su tarjeta está inactiva, ya no existe o no es corporativa: '
+            . implode(', ', $sin) . '. Desmarcalas, o marcá de nuevo la factura con la tarjeta '
+            . 'que corresponde.'];
     }
 
     /* ====================================================================

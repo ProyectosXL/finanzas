@@ -5,6 +5,7 @@ require_once __DIR__ . '/TarjetasResumen.php';
 require_once __DIR__ . '/TarjetasFactura.php';
 require_once __DIR__ . '/TarjetasExclusion.php';
 require_once __DIR__ . '/TarjetasFacturaVto.php';
+require_once __DIR__ . '/TarjetasMensual.php';
 require_once __DIR__ . '/TarjetasVencimiento.php';
 require_once __DIR__ . '/TarjetasSupervisoras.php';
 require_once __DIR__ . '/TarjetasCorporativas.php';
@@ -67,6 +68,9 @@ class PagosTarjetas {
     /** @var TarjetasFacturaVto Los vencimientos corregidos de Corporativas */
     private $vtoEdit;
 
+    /** @var TarjetasMensual Las facturas marcadas como mensuales */
+    private $mensual;
+
     /** @var GastosSupervision */
     private $gastos;
 
@@ -85,6 +89,7 @@ class PagosTarjetas {
         $this->vinculo = new TarjetasFactura();
         $this->exclusion = new TarjetasExclusion();
         $this->vtoEdit = new TarjetasFacturaVto();
+        $this->mensual = new TarjetasMensual();
         $this->gastos = new GastosSupervision();
         $this->cronograma = new CronogramaDatos();
         $this->inflacion = new Inflacion();
@@ -122,6 +127,7 @@ class PagosTarjetas {
                 'factura' => $this->vinculo->tablaCreada(),
                 'exclusion' => $this->exclusion->tablaCreada(),
                 'factura_vto' => $this->vtoEdit->tablaCreada(),
+                'mensual' => $this->mensual->tablaCreada(),
                 'gastos' => $this->gastos->tablaCreada(),
                 'vista_usuarios' => $this->tarjetas->vistaUsuariosCreada()
             ],
@@ -478,6 +484,7 @@ class PagosTarjetas {
             'pagos' => [],
             'pagos_excluidos' => [],
             'vtos_inertes' => [],
+            'estimaciones' => [],
             'avisos' => [],
             'disponible' => false
         ];
@@ -544,13 +551,42 @@ class PagosTarjetas {
             $r['filas'][$i]['EXCLUSION_FECHA'] = isset($excluidas[$c]) ? $excluidas[$c]['FECHA_ALTA'] : null;
         }
 
+        /* LAS ESTIMACIONES MENSUALES: las facturas marcadas como abono, mes por
+           mes desde el siguiente al de su vencimiento. Se comportan como una
+           factura vinculada -cobertura y resumen- y se apagan solas en el mes en
+           que aparece la factura real del proveedor. Ver
+           TarjetasCorporativas::estimaciones(). */
+        $mensuales = $this->leer(function () { return $this->mensual->vigentes(); },
+            'las estimaciones mensuales', $salida['avisos'], []);
+        $porCuota = [];
+
+        foreach ($mensuales as $m) {
+            $porCuota[TarjetasCorporativas::claveCuota($m)] = $m;
+        }
+
+        foreach ($r['filas'] as $i => $f) {
+            $m = isset($porCuota[$f['CLAVE_CUOTA']]) ? $porCuota[$f['CLAVE_CUOTA']] : null;
+            $r['filas'][$i]['MENSUAL'] = ($m !== null);
+            $r['filas'][$i]['MENSUAL_ID'] = ($m === null) ? null : $m['ID'];
+        }
+
+        $salida['estimaciones'] = TarjetasCorporativas::estimaciones($mensuales, $r['filas'],
+            $tarjetas, $resumenes, $meses, $hoy);
+
+        foreach (TarjetasCorporativas::avisosEstimaciones($salida['estimaciones']) as $a) {
+            $salida['avisos'][] = $a;
+        }
+
         $salida['filas'] = $r['filas'];
 
         foreach (TarjetasVencimiento::avisosCalendario($r['faltan_calendario']) as $a) {
             $salida['avisos'][] = $a;
         }
 
-        $salida['cobertura'] = TarjetasCorporativas::cobertura($r['filas'], $corporativas,
+        /* La cobertura se calcula sobre las facturas Y las estimaciones que
+           proyectan: una estimacion es una factura vinculada mas. */
+        $salida['cobertura'] = TarjetasCorporativas::cobertura(array_merge($r['filas'],
+            TarjetasCorporativas::estimacionesComoFilas($salida['estimaciones'])), $corporativas,
             $resumenes, $habiles, $meses, $hoy);
 
         $salida['resumenes'] = TarjetasCorporativas::resumenesAProyectar($corporativas,
@@ -568,6 +604,17 @@ class PagosTarjetas {
                 $salida['pagos_excluidos'][] = ['fecha' => $f['FECHA'],
                                                 'importe' => $f['IMPORTE'],
                                                 'clave' => $f['CLAVE']];
+            }
+        }
+
+        foreach ($salida['estimaciones'] as $e) {
+            foreach ($e['meses'] as $m) {
+                if ($m['proyecta']) {
+                    $salida['pagos'][] = ['tipo' => 'ESTIMACION', 'fecha' => $m['fecha'],
+                                          'importe' => $m['importe'], 'id_estimacion' => $e['ID'],
+                                          'id_tarjeta' => intval($e['ID_TARJETA']), 'mes' => $m['mes'],
+                                          'proveedor' => ($e['RAZON_SOC'] ?: $e['COD_PROVEE'])];
+                }
             }
         }
 
@@ -593,6 +640,32 @@ class PagosTarjetas {
         }
 
         return $salida;
+    }
+
+    /**
+     * La fila resuelta de una cuota de Corporativas, o null si no esta en la
+     * pestana.
+     *
+     * LA USA EL ENDPOINT DE MARCAR MENSUAL: lo que se guarda sale de la fila tal
+     * como la ve la pantalla -vinculada o no, excluida o no, con el vencimiento
+     * corregido-, y resolverla aca es la unica forma de que la validacion y la
+     * grilla miren lo mismo.
+     *
+     * @param Horizonte $h
+     * @param string $claveCuota
+     * @return array|null
+     */
+    public function filaCorporativa($h, $claveCuota) {
+        $c = $this->corporativas($h, $this->leerTarjetas(), $this->leerResumenes(),
+            $this->leerHabiles($h));
+
+        foreach ($c['filas'] as $f) {
+            if ($f['CLAVE_CUOTA'] === $claveCuota) {
+                return $f;
+            }
+        }
+
+        return null;
     }
 
     /* ====================================================================
