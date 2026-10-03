@@ -375,20 +375,28 @@ chequear('y las dos estan declaradas como incompatibles', true,
     && isset($metaDol['componentes']['INGRESO'])
     && in_array('STOCK', $metaDol['componentes']['INGRESO'], true));
 
-// El proveedor devuelve exactamente las dos que el registro declara.
-$provDol = CashflowRegistry::instanciar('DOLARES_COMITENTE');
-$seriesDol = $provDol->series(Horizonte::desdeParametros(new Parametros()));
+/* El proveedor devuelve exactamente las dos que el registro declara.
 
-chequear('el proveedor rinde la serie STOCK', true, isset($seriesDol['STOCK']));
-chequear('y tambien la vieja', true, isset($seriesDol['INGRESO']));
+   NECESITA LA BASE: el horizonte sale de RO_T_CASHFLOW_PARAMETROS, y sin conexion
+   Horizonte::desdeParametros() lanza. Antes eso cortaba la suite entera con un
+   fatal en vez de saltear este bloque, que es lo que promete run.php. */
+if (Pruebas::hayBase()) {
+    $provDol = CashflowRegistry::instanciar('DOLARES_COMITENTE');
+    $seriesDol = $provDol->series(Horizonte::desdeParametros(new Parametros()));
 
-$declaradas = array_keys($metaDol['series']);
-$devueltas = array_keys($seriesDol);
-sort($declaradas);
-sort($devueltas);
+    chequear('el proveedor rinde la serie STOCK', true, isset($seriesDol['STOCK']));
+    chequear('y tambien la vieja', true, isset($seriesDol['INGRESO']));
 
-chequear('el registro declara exactamente lo que el proveedor devuelve',
-    $declaradas, $devueltas);
+    $declaradas = array_keys($metaDol['series']);
+    $devueltas = array_keys($seriesDol);
+    sort($declaradas);
+    sort($devueltas);
+
+    chequear('el registro declara exactamente lo que el proveedor devuelve',
+        $declaradas, $devueltas);
+} else {
+    Pruebas::saltear('sin conexion a la base: el horizonte sale de los parametros');
+}
 
 seccion('el stock es la ULTIMA carga, no la suma');
 
