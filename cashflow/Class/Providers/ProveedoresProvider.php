@@ -56,9 +56,11 @@ require_once __DIR__ . '/../TarjetasCorporativas.php';
  *
  * LO VENCIDO SIN FECHA CARGADA SE INFORMA, NO SE ESCONDE
  * ------------------------------------------------------
- * Al 16/09/2026 son 378 vencimientos por $965 millones. Entran al eje en su
- * primer dia -no hay otro lugar donde ponerlos- y el aviso dice cuanto es, para
- * que nadie lea esa columna como "hoy se paga todo esto". Ver
+ * Al 16/09/2026 eran 378 vencimientos por $965 millones, apilados en el primer
+ * dia del eje. Desde feature/cronogramas-tarjetas-corporativas lo vencido DEL
+ * CRONOGRAMA va al proximo dia de pago (Parametros -> Generales, concepto
+ * PROV_LOCALES), y solo lo de las otras formas -debito, caja, tarjeta- sigue en
+ * el primer dia. El aviso dice cuanto es cada parte. Ver
  * Proveedores::avisosPendientes().
  */
 class ProveedoresProvider extends CashflowProvider {
@@ -165,7 +167,15 @@ class ProveedoresProvider extends CashflowProvider {
             $this->avisar($aviso);
         }
 
-        $items = $prov->getPendientes($h->hoy());
+        /* CON EL HORIZONTE: las facturas del cronograma van a sus dias de pago.
+           Lo unico que cambia en las series es en que columna cae cada importe de
+           PAGOS; ninguna serie gana ni pierde un peso. Ver
+           Proveedores::resolverFechaPago(). */
+        $items = $prov->getPendientes($h->hoy(), $h);
+
+        foreach ($prov->avisosCronograma() as $aviso) {
+            $this->avisar($aviso);
+        }
 
         foreach (Proveedores::avisosPendientes($items) as $aviso) {
             $this->avisar($aviso);

@@ -112,7 +112,7 @@ try {
            ================================================================ */
         case 'getPendientes':
             $h = Horizonte::desdeParametros(new Parametros());
-            $items = $prov->getPendientes($h->hoy());
+            $items = $prov->getPendientes($h->hoy(), $h);
 
             $payload = EjeVista::armar($h, $items, 'Pago', 'IMPORTE_PENDIENTE');
 
@@ -121,6 +121,7 @@ try {
                que quedo afuera del horizonte. */
             $payload['warnings'] = array_merge(
                 $prov->getAvisos(),
+                $prov->avisosCronograma(),
                 Proveedores::avisosPendientes($items),
                 $payload['warnings']
             );

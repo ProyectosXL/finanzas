@@ -614,3 +614,34 @@ chequear('una reubicada nombra su vencimiento', true,
     strpos($r['filas'][0]['EXPLICACION'], '01/08/2026') !== false);
 chequear('y la fecha en la que sale', true,
     strpos($r['filas'][0]['EXPLICACION'], '12/10/2026') !== false);
+
+/* ================================================================
+   EL VENCIMIENTO DE TANGO, NO LA FECHA DE PROVEEDORES LOCALES
+   ================================================================ */
+seccion('Corporativas lee FECHA_VTO de Tango y no la fecha que reubica el cronograma');
+
+/* Desde que Proveedores Locales proyecta sus facturas en los dias de pago del
+   cronograma, cada fila de getPendientes() trae dos fechas: FECHA_VTO, el
+   vencimiento crudo de Tango, y 'Pago', la del proximo dia de pago. Esta pestana
+   tiene que seguir mirando la PRIMERA: el pago de una tarjeta lo fija el banco,
+   no el cronograma de echeqs. Si leyera 'Pago', una factura que vence el 15/10
+   saldria el 28/10 y caeria en otro resumen. */
+$conPago = facturaTC('OGVTO', 'A777', '2026-10-15', 50000);
+$conPago['Pago'] = '2026-10-28';
+$conPago['PAGO_CRONO'] = true;
+$conPago['PAGO_BASE'] = '2026-10-15';
+
+$rVto = TarjetasCorporativas::resolver([$conPago], [], [], $TARJETAS, [], $HABILES, $MESES, $HOY);
+
+chequear('la fecha con la que entra es el vencimiento de Tango', '2026-10-15',
+    $rVto['filas'][0]['FECHA']);
+chequear('y su mes de pago tambien', '2026-10', $rVto['filas'][0]['MES_PAGO']);
+
+/* Y la lectura: PagosTarjetas pide los pendientes SIN el horizonte, que es lo que
+   hace que getPendientes() ni siquiera resuelva el cronograma para esta pestana. */
+$fuentePT = file_get_contents(__DIR__ . '/../Class/PagosTarjetas.php');
+chequear('PagosTarjetas pide getPendientes() sin horizonte', true,
+    strpos($fuentePT, '$prov->getPendientes($hoy);') !== false);
+chequear('y TarjetasCorporativas no lee la fecha resuelta de Proveedores Locales', false,
+    (bool) preg_match('/\[\'(Pago|PAGO_BASE|PAGO_CRONO)\'\]/',
+        file_get_contents(__DIR__ . '/../Class/TarjetasCorporativas.php')));
