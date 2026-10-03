@@ -185,6 +185,40 @@ class CronogramaPagos {
     }
 
     /**
+     * Si pasar de una configuracion a otra da de baja los overrides del concepto.
+     *
+     * SOLO SI CAMBIA EL DIA O LA FRECUENCIA. Con otra configuracion el numero de
+     * pago apunta a otra fecha y el override quedaria colgado de un pago que ya no
+     * es el mismo; guardar la misma configuracion, en cambio, no puede llevarse
+     * puestos los pagos movidos a mano.
+     *
+     * Cuales se dan de baja lo dice desdeMesBaja(): los de mes >= el actual. Los de
+     * meses anteriores describen lo que ya paso.
+     *
+     * Estatica y pura.
+     *
+     * @param array $actual ['dia', 'frecuencia']
+     * @param array $nueva ['dia', 'frecuencia']
+     * @return bool
+     */
+    public static function requiereBaja($actual, $nueva) {
+        return intval($actual['dia']) !== intval($nueva['dia'])
+            || $actual['frecuencia'] !== $nueva['frecuencia'];
+    }
+
+    /**
+     * Desde que mes se dan de baja los overrides al cambiar la configuracion: el
+     * actual, incluido. Un override de un mes que ya paso describe un pago que ya
+     * se hizo.
+     *
+     * @param string $hoy 'Y-m-d'
+     * @return string 'Y-m'
+     */
+    public static function desdeMesBaja($hoy) {
+        return substr((string) $hoy, 0, 7);
+    }
+
+    /**
      * Las claves de RO_T_CASHFLOW_PARAMETROS de un concepto.
      *
      * @param string $concepto

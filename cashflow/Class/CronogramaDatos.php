@@ -328,7 +328,7 @@ class CronogramaDatos {
             return 0;
         }
 
-        $mes = ($mes === null) ? date('Y-m') : self::validarMes($mes);
+        $mes = ($mes === null) ? CronogramaPagos::desdeMesBaja(date('Y-m-d')) : self::validarMes($mes);
         list($where, $params) = $this->filtroTipo($concepto);
 
         $stmt = sqlsrv_query($this->conectar(),
@@ -380,7 +380,7 @@ class CronogramaDatos {
 
         $actual = $this->config($concepto);
 
-        if ($actual['dia'] === $nueva['dia'] && $actual['frecuencia'] === $nueva['frecuencia']) {
+        if (!CronogramaPagos::requiereBaja($actual, $nueva)) {
             return ['concepto' => $concepto, 'config' => $nueva, 'cambio' => false, 'bajas' => 0];
         }
 
@@ -416,7 +416,8 @@ class CronogramaDatos {
                     "UPDATE dbo." . self::TABLA . "
                      SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
                      WHERE VIGENTE = 1 AND MES >= ?" . $where,
-                    array_merge([$usuario, $usuario, date('Y-m')], $params));
+                    array_merge([$usuario, $usuario, CronogramaPagos::desdeMesBaja(date('Y-m-d'))],
+                        $params));
 
                 if ($stmt === false) {
                     throw new Exception($this->errorSql('Error al dar de baja los pagos movidos'));

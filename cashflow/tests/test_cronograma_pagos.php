@@ -486,3 +486,37 @@ seccion('el rango de calendario con meses extra');
 
 $rangoExtra = CronogramaPagos::rangoCalendario($hNov, 1);
 chequear('llega hasta el fin del mes extra', '2027-01-31', $rangoExtra['hasta']);
+
+seccion('cambiar el dia o la frecuencia da de baja los overrides desde el mes actual');
+
+/* EL NUMERO DE PAGO ES LA IDENTIDAD: con otro dia, el pago 2 de un mes apunta a
+   otra fecha, y el override quedaria colgado de un pago que ya no es el mismo. */
+$vie = ['dia' => 5, 'frecuencia' => 'QUINCENAL'];
+
+chequear('cambiar el dia da de baja', true,
+    CronogramaPagos::requiereBaja($vie, ['dia' => 3, 'frecuencia' => 'QUINCENAL']));
+chequear('cambiar la frecuencia da de baja', true,
+    CronogramaPagos::requiereBaja($vie, ['dia' => 5, 'frecuencia' => 'SEMANAL']));
+chequear('guardar lo mismo NO da de baja nada', false,
+    CronogramaPagos::requiereBaja($vie, ['dia' => '5', 'frecuencia' => 'QUINCENAL']));
+chequear('desde el mes actual, incluido', '2026-10', CronogramaPagos::desdeMesBaja('2026-10-05'));
+
+/* Y EL CABLEADO, que sin base no se puede ejecutar: guardarConfig() decide con
+   requiereBaja(), cambia los dos parametros y da de baja -VIGENTE = 0 con usuario y
+   fecha de baja- los overrides del concepto con MES >= el actual, todo en UNA
+   transaccion. Se lee el cuerpo del metodo, como en test_proveedores. */
+$fuenteCD = file_get_contents(__DIR__ . '/../Class/CronogramaDatos.php');
+$iniCD = strpos($fuenteCD, 'public function guardarConfig(');
+$cuerpoCD = substr($fuenteCD, $iniCD, strpos($fuenteCD, "\n    /* ====", $iniCD) - $iniCD);
+
+chequear('guardarConfig decide con requiereBaja()', true,
+    strpos($cuerpoCD, 'CronogramaPagos::requiereBaja($actual, $nueva)') !== false);
+chequear('abre una transaccion y la confirma', true,
+    strpos($cuerpoCD, 'sqlsrv_begin_transaction') !== false
+    && strpos($cuerpoCD, 'sqlsrv_commit') !== false && strpos($cuerpoCD, 'sqlsrv_rollback') !== false);
+chequear('da de baja con auditoria, solo los vigentes desde el mes actual', true,
+    strpos($cuerpoCD, 'SET VIGENTE = 0, " . Auditoria::SET_BAJA') !== false
+    && strpos($cuerpoCD, 'WHERE VIGENTE = 1 AND MES >= ?') !== false
+    && strpos($cuerpoCD, 'CronogramaPagos::desdeMesBaja(') !== false);
+chequear('y solo los del concepto que cambio', true,
+    strpos($cuerpoCD, '$this->filtroTipo($concepto)') !== false);
