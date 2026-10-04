@@ -148,7 +148,34 @@ Que ninguna fila del tablero duplique importes:
 - **`LOGISTICA` activa, con serie `PAGOS`**, en *Costos Directos*. Esa fila ya existía y no la toca ningún script: lo que cambió es que ahora tiene proveedor. **El día que se corre el script 30 el tablero no se mueve un peso**, porque el maestro nace vacío; se mueve cuando se cargan los fleteros con sus horas y su valor hora. Y antes de eso hay que **excluirlos de Cuentas a Pagar Locales** desde el maestro de Proveedores Locales: su deuda real ya está en el tablero, así que mientras no estén excluidos el mismo pago se cuenta dos veces y **el cuadro cierra igual**. La pestaña Logística Local y el tablero lo avisan mientras falte. Ver `README-logistica-local.md`.
 - **`TARJETAS_PAGOS` activa y sola**, en *Costos Indirectos* con `ORDEN = 45`, apuntada a `TARJETAS` / `TOTAL`. Las otras cuatro series del proveedor —`SUPERVISORAS`, `CORPORATIVAS`, `SOCIOS` y `CORPORATIVAS_EXCLUIDAS`— quedan declaradas y **sin usar**, para poder partir la fila desde Parámetros el día que se quiera. El registro declara `TOTAL = [SUPERVISORAS, CORPORATIVAS, SOCIOS]`, así que activar una parte al lado del total lo rechaza el validador; `CORPORATIVAS_EXCLUIDAS` **no** es componente y sí puede convivir con él, porque su importe no está en el total.
 - **Ninguna fila activa de Proveedores Locales con serie `PAGOS_TODO` ni `PAGOS_FUERA_CRONOGRAMA`.** Las dos incluyen las facturas de tarjeta corporativa, que desde el script 33 entran al cuadro por *Pagos con Tarjetas y Otros*: el mismo peso se contaría dos veces y **el cuadro cerraría igual**, así que nada lo delataría. **El validador no lo puede ver** —son dos proveedores distintos y el solapamiento es de datos, no de series— así que el control lo hace el propio script al correr, y `ProveedoresProvider` lo avisa en cada carga separando lo que sí entra por la otra fila de lo que no entra por ninguna. Verificado contra la base el 26/09/2026: la fila usa `PAGOS` y no hay doble conteo. Ver `README-pagos-tarjetas.md`.
-- **El día que se corren los scripts 31 a 33 el tablero SÍ se mueve**, a diferencia de Logística: las facturas de tarjeta corporativa no vencidas entran solas, sin cargar nada. Al 26/09/2026 son **$ 44.890.493,84** en 45 vencimientos. Lo que NO entra hasta que se carguen las tarjetas son los **$ 60,1 millones** de parte tarjeta de las supervisoras y los **$ 45,0 millones** de facturas vencidas sin vincular, y el proveedor lo avisa con el importe.
+- **El día que se corren los scripts 31 a 33 el tablero SÍ se mueve**, a diferencia de Logística. Desde `feature/cronogramas-tarjetas-corporativas`, **ninguna factura corporativa sin tarjeta vinculada entra al flujo**, así que lo que entra solo es la parte en efectivo de las supervisoras; las facturas entran a medida que se vinculan. Lo que NO entra hasta que se carguen las tarjetas son los **$ 60,1 millones** de parte tarjeta de las supervisoras y todas las facturas corporativas sin vincular (al 26/09/2026, **$ 89,9 millones** en 135 vencimientos), y el proveedor lo avisa con el importe.
+
+### Cronogramas por concepto y Tarjetas Pagos Corporativos (`feature/cronogramas-tarjetas-corporativas`)
+
+Dos scripts nuevos, los dos contra `central`, reejecutables y sin borrar nada. **Van después del A1/A2 de auditoría**, como todo lo que escribe con las seis columnas.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 34 | `sql/cashflow_cronograma_conceptos.sql` | Siembra los seis parámetros del cronograma por concepto —día y frecuencia de `PROV_LOCALES` (miércoles, quincenal), `LOGISTICA` (viernes, quincenal) y `SUPERVISORAS` (lunes, semanal)— en `GENERALES` / `CRONOGRAMA`, y a `RO_T_CASHFLOW_CRONOGRAMA_PAGO_EDIT` le suma `TIPO` (los overrides existentes quedan `LOGISTICA`), el `CHECK` de `NRO_PAGO` 1..5 y el índice único `(TIPO, MES, NRO_PAGO) WHERE VIGENTE = 1`. El `CHECK` y el índice se recrean sólo si tienen la forma vieja | **Cada concepto usa su valor por defecto**, que es el mismo que siembra el script, y *Parámetros › Generales* lo avisa. No se puede cambiar el día ni la frecuencia, ni mover a mano un pago de Proveedores Locales o de Supervisoras: los overrides que ya existen siguen valiendo para Logística. **Ojo: con el código publicado, el efectivo de Gastos Supervisoras pasa a los lunes y Cuentas a Pagar Locales a los días de pago aunque el script no se corra**, porque ése es su defecto |
+| 35 | `sql/cashflow_tarjetas_vto_mensual.sql` | Crea `RO_T_CASHFLOW_TARJETAS_FACTURA_VTO` (el vencimiento corregido de una cuota) y `RO_T_CASHFLOW_TARJETAS_MENSUAL` (las facturas marcadas como mensuales, con FK al maestro de tarjetas). **Corta con mensaje si falta `sql/cashflow_tarjetas.sql`** | *Tarjetas Pagos Corporativos* se lee igual: los controles de corregir el vencimiento y de marcar mensual se dibujan apagados nombrando el script, todas las cuotas usan el vencimiento de Tango y no hay estimaciones. El tablero no cambia por el script |
+
+Las dos tablas nuevas nacen con las seis columnas de auditoría, así que **no van en `sql/cashflow_auditoria_usuario.sql`**, igual que las de Tarjetas que ya cumplían.
+
+**El día que se publica el código, el tablero SÍ se mueve, con o sin los scripts**, y es lo pedido:
+
+- **Cuentas a Pagar Locales** deja de apilar lo vencido del cronograma en el primer día del eje: va al próximo día de pago (por defecto, 2do y 4to miércoles). Los importes de la fila no cambian; cambia la columna. Ver `README-proveedores-locales.md`.
+- **Gastos Supervisoras** reparte el efectivo en los lunes del mes en vez de dos viernes.
+- **Pagos con Tarjetas y Otros** deja de sumar las facturas corporativas **sin tarjeta vinculada**: hasta que se vinculen, la parte de Corporativas baja. Ver `README-pagos-tarjetas.md`.
+- **Logística Local no cambia**: con su valor por defecto da exactamente lo mismo, y una prueba lo fija.
+
+#### Después de correrlos, verificar
+
+```sql
+SELECT CLAVE, VALOR, MODULO, GRUPO FROM dbo.RO_T_CASHFLOW_PARAMETROS WHERE CLAVE LIKE 'cronograma[_]%';   -- seis filas
+SELECT TIPO, VIGENTE, COUNT(*) FROM dbo.RO_T_CASHFLOW_CRONOGRAMA_PAGO_EDIT GROUP BY TIPO, VIGENTE;       -- los de antes, LOGISTICA
+```
+
+Y en *Parámetros › Generales*, que la tabla de configuración muestre los tres conceptos **sin** la marca *por defecto*.
 
 ### Sin scripts, pero con orden: `feature/comex-visibilidad-saldo`
 
@@ -203,7 +230,11 @@ En este orden, contra `central`:
 -- 27. sql/cashflow_tarjetas.sql  (el maestro de tarjetas y sus resumenes)
 -- 28. sql/cashflow_tarjetas_facturas.sql  (vinculo factura-tarjeta y exclusion)
 -- 29. sql/cashflow_tarjetas_fila.sql  (la fila Pagos con Tarjetas y Otros)
+-- 30. sql/cashflow_cronograma_conceptos.sql  (un cronograma de pagos por concepto)
+-- 31. sql/cashflow_tarjetas_vto_mensual.sql  (Corporativas: vencimiento corregido y facturas mensuales)
 ```
+
+**El 30 va después del 25**, que crea la tabla de overrides a la que le agrega `TIPO`; sin ella siembra los parámetros igual y avisa. **El 31 va después del 27** —una FK contra el maestro de tarjetas— y corta si falta.
 
 **El 25 va después del 24**, que es el que agrega la columna `MODULO`: sin ella no hay nada que migrar y el script lo dice, pero deja el trabajo a medias. **El 26 va después del 25**, aunque no lo necesite para crearse: sin la inflación, los valores hora se proyectan sin ajuste trimestral y la pestaña avisa.
 
@@ -1458,6 +1489,8 @@ De las **compras proyectadas**, cuatro archivos y 394 comprobaciones. El grueso 
 
 > Dos de esas pruebas existen **porque ya fallaron de verdad** en la primera corrida del script: que un `PRINT` no arme su texto con una subconsulta —es error de sintaxis, así que el lote entero no corre y ningún parámetro se crea— y que los parámetros declaren `TIPO_DATO`, que es `NOT NULL`. Y el lector de SQL sin comentarios saca **sólo los de bloque**: un `--` también vive adentro de un literal, y ese script tiene un `PRINT '--- Estado ---'`.
 
+Del **cronograma por concepto** (`feature/cronogramas-tarjetas-corporativas`), `tests/test_cronograma_pagos.php` fija quincenal y semanal para los siete días, el mes de cinco lunes, el corrimiento al hábil anterior en cualquier concepto —incluido el pago que cae en el mes anterior—, que el override de un concepto no toque a los otros, el reparto en 2, 4 y 5 partes sin redondear, el próximo pago que usa Proveedores Locales y la baja de overrides al cambiar día o frecuencia. `tests/test_logistica_planilla.php` tiene **la prueba de no regresión**: con el valor por defecto, Logística da cada pago igual que una foto sacada con el código anterior. Ver `README-logistica-local.md`, `README-proveedores-locales.md` y `README-pagos-tarjetas.md`.
+
 De **Logística Local**, cuatro archivos que corren enteros **sin base**: el cronograma de viernes —con el mes de cinco viernes, el corrimiento **hacia atrás** (al revés que el de Ventas) y los tres feriados reales del horizonte que caen justo en un 2do o 4to viernes—, el ajuste trimestral del valor hora —incluido el **histórico real de los tres fleteros, al centavo**, y la verificación de que un ajuste suma *su mes y los dos anteriores*, probada con inflación **variable** porque con constante las tres cuentas posibles dan lo mismo—, el reparto mitad y mitad con el **mes partido por el final del tramo diario**, y el proveedor con sus tres casos de fila en cero. Ver `README-logistica-local.md`.
 
 > Esa rama destapó dos cosas que se tapaban entre sí. `AuthCashflow` **abortaba la suite entera** con un fatal cuando `htdocs/Gestionusuarios` no estaba al lado —un checkout de este repo solo—, y con el fatal fuera del camino aparecieron **32 fallas de `test_menu`**: medía la estructura del menú contra `Menu::estructura()`, que **filtra por permisos**, y por línea de comandos no hay sesión. La estructura del menú es un hecho del código, así que ahora se pide con `Menu::estructuraCompleta()`; el filtrado por permisos tiene su propia sección, que fija que **sin sesión no se ve nada**.
@@ -1547,8 +1580,13 @@ sql/cashflow_parametros_generales.sql       Sub-pestana Generales: migra los par
   cronograma (README-logistica-local.md)
 sql/cashflow_logistica_fleteros.sql         El maestro de fleteros. No siembra ninguno
 Class/Inflacion.php                         El % de cada mes y la suma de a tres, sin componer
-Class/CronogramaPagos.php                   2do y 4to viernes, corrimiento y override. PURO
-Class/CronogramaDatos.php                   Su lectura: calendario bancario y overrides
+Class/CronogramaPagos.php                   Un cronograma por concepto: día, frecuencia, corrimiento,
+  override, reparto y próximo pago. PURO
+Class/CronogramaDatos.php                   Su lectura: configuración, calendario bancario y overrides
+sql/cashflow_cronograma_conceptos.sql       Día y frecuencia por concepto; TIPO en los overrides
+Class/TarjetasFacturaVto.php                El vencimiento corregido de una cuota de Corporativas
+Class/TarjetasMensual.php                   Las facturas mensuales de Corporativas
+sql/cashflow_tarjetas_vto_mensual.sql       Las dos tablas de esas dos clases
 Class/LogisticaValorHora.php                El ajuste trimestral del valor hora. PURO
 Class/LogisticaPlanilla.php                 Importes, mitades y los cinco motivos de null. PURO
 Class/Logistica.php                         El maestro de fleteros y la lectura de los insumos
@@ -1585,6 +1623,8 @@ De la rama `feature/logistica-local-parametros-generales`: `sql/cashflow_paramet
 > **Ningún script toca la estructura del tablero.** La fila `LOGISTICA` ya existía apuntada a `LOGISTICA/PAGOS`: alcanzó con escribir el proveedor y dar vuelta el flag, que es exactamente lo que el registro promete. Ver `README-logistica-local.md`.
 
 De la rama `feature/cashflow-auditoria-usuario`: `sql/cashflow_permisos_edicion.sql` (base `apps`), `sql/cashflow_auditoria_usuario.sql`, `Class/Auditoria.php`, `Controller/autorizacion.php`, `Js/permisos.js`, `Js/auditoria.js` y `tests/test_auth_cashflow.php` (nuevos) · `Class/AuthCashflow.php` (`username()`, `exigirUsuario()`, `puedeEditar()`, `exigirEdicion()`, `exigirAccion()`, `origen()`, `atributoEdicion()`, el mapa `ESCRITURAS` / `LECTURAS` y `ORIGENES`) · los catorce controllers (la guarda antes del `switch`; se fueron los `usuarioActual()`; `VentasController` pierde `saveMixCobro` y `saveParametro`, que no tenían llamador) · todas las clases que escriben (las seis columnas, el usuario obligatorio) · los cuatro SP del histórico y de Comex (el origen `JOB:`) · las 13 pestañas con escrituras, las 11 sub-pestañas de Parámetros y sus JS (los controles se esconden sin permiso; el quién y cuándo) · `index.php` (`permisos.js`, `auditoria.js` y los orígenes en el `<head>`) · `Css/main.css` (`.auditoria-icono`).
+
+De la rama `feature/cronogramas-tarjetas-corporativas`: `sql/cashflow_cronograma_conceptos.sql`, `sql/cashflow_tarjetas_vto_mensual.sql`, `Class/TarjetasFacturaVto.php` y `Class/TarjetasMensual.php` (nuevos) · `Class/CronogramaPagos.php` (día y frecuencia por parámetro; `parte()`, `proximoPago()`, `requiereBaja()`) · `Class/CronogramaDatos.php` (todo por concepto; `guardarConfig()` con la baja de overrides) · `Class/Parametros.php`, `Controller/ParametrosController.php`, `Tabs/parametros_generales.php`, `Js/Parametros-Generales.js` (la card del cronograma por concepto) · `Class/Logistica.php`, `Class/LogisticaPlanilla.php`, `Js/Logistica-Local.js`, `Tabs/logistica_local.php` (el reparto y los textos salen de la configuración) · `Class/Proveedores.php`, `Controller/ProveedoresController.php`, `Providers/ProveedoresProvider.php`, `Js/Proveedores-Proveedores_locales.js`, `Tabs/proveedores_locales.php` y su CSS (los días de pago del cronograma; el aviso de `TARJETA CORP` partido) · `Class/TarjetasCorporativas.php`, `Class/PagosTarjetas.php`, `Class/TarjetasSupervisoras.php`, `Providers/TarjetasProvider.php`, `Controller/TarjetasController.php`, `Tabs/pagos_tarjetas.php`, `Js/Financiero-Pagos_tarjetas.js` y su CSS (sin vincular fuera del flujo, vencimiento corregido, estimaciones mensuales, lunes de supervisoras) · `Class/AuthCashflow.php` (seis acciones nuevas) · los tests de cronograma, logística, proveedores, providers y tarjetas, y `test_otros_ingresos.php` (se saltea sin conexión en vez de cortar la suite).
 
 Eliminado: `Tabs/resumen.php`.
 
