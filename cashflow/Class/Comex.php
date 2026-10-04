@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/DolarFuturo.php';
+require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
@@ -1682,6 +1683,20 @@ class Comex {
      * @return array Lista de mensajes
      */
     public static function avisosVencidos($filas, $campoFecha, $campoImporte, $queEs, $h = null) {
+        return Aviso::textos(self::avisosVencidosConNivel($filas, $campoFecha, $campoImporte, $queEs, $h));
+    }
+
+    /**
+     * Los mismos avisos de avisosVencidos(), con su gravedad. Lo lee el
+     * tablero; las pestanas leen los textos.
+     *
+     * Lo que NO suma pide cargar una fecha nueva: atencion. Lo que SI entra,
+     * en la columna del mes en curso, esta en el cuadro y solo explica por
+     * que aparece en dias que ya pasaron: informativo.
+     *
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public static function avisosVencidosConNivel($filas, $campoFecha, $campoImporte, $queEs, $h = null) {
         $afuera = 0;
         $adentro = 0;
         $impAfuera = 0.0;
@@ -1730,18 +1745,20 @@ class Comex {
            en Crono Nacionalización no suma cuando su fecha cayó fuera del eje.
            El hecho es el mismo y la acción también, así que el mensaje es uno. */
         if ($afuera > 0) {
-            $avisos[] = $afuera . ' contenedor(es) por ' . self::plata($impAfuera)
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $afuera . ' contenedor(es) por '
+                . self::plata($impAfuera)
                 . ' tienen la ' . $queEs . ' ya vencida, así que NO suman en ninguna columna '
                 . 'del período. No se los reubica en hoy, porque nadie afirmó que ese importe '
-                . 'se mueve hoy: cargales la fecha nueva y entran solos.';
+                . 'se mueve hoy: cargales la fecha nueva y entran solos.');
         }
 
         if ($adentro > 0) {
-            $avisos[] = $adentro . ' contenedor(es) por ' . self::plata($impAdentro)
+            $avisos[] = Aviso::nuevo(Aviso::INFO, $adentro . ' contenedor(es) por '
+                . self::plata($impAdentro)
                 . ' tienen la ' . $queEs . ' vencida pero dentro del mes en curso, así que SÍ '
                 . 'entran, en la columna de ese mes —que cubre los días previos al tramo '
                 . 'diario—. Están en el cuadro, en días que ya pasaron: es plata que todavía no '
-                . 'se movió, no proyección.';
+                . 'se movió, no proyección.');
         }
 
         return $avisos;
@@ -2095,6 +2112,25 @@ class Comex {
                                            $campoImporte = 'VALOR_FOB_DOLAR',
                                            $queEs = 'fecha estimada de pago',
                                            $queSon = 'contenedor(es)') {
+        return Aviso::textos(self::avisosValuacionConNivel($filas, $ultimoMesCurva,
+            $campoImporte, $queEs, $queSon));
+    }
+
+    /**
+     * Los mismos avisos de avisosValuacion(), con su gravedad. Lo lee el
+     * tablero; las pestanas leen los textos.
+     *
+     * Lo que no se pudo valuar no entra y se arregla cargando la fecha:
+     * atencion. Valuado con el mes mas cercano o con la cotizacion corregida a
+     * mano es un criterio ya aplicado, y esta marcado en la grilla:
+     * informativo.
+     *
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public static function avisosValuacionConNivel($filas, $ultimoMesCurva = null,
+                                                   $campoImporte = 'VALOR_FOB_DOLAR',
+                                                   $queEs = 'fecha estimada de pago',
+                                                   $queSon = 'contenedor(es)') {
         $sinValuar = 0;
         $usdSinValuar = 0.0;
         $aproximadas = 0;
@@ -2117,27 +2153,28 @@ class Comex {
         }
 
         if ($sinValuar > 0) {
-            $avisos[] = $sinValuar . ' ' . $queSon . ' por U$S '
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $sinValuar . ' ' . $queSon . ' por U$S '
                 . number_format($usdSinValuar, 2, ',', '.') . ' no tienen ' . $queEs
                 . ', así que no hay mes al que pedirle cotización y no se pueden valuar en '
                 . 'pesos. No se les aplica ningún tipo de cambio inventado: cargales la fecha '
-                . 'y el importe aparece.';
+                . 'y el importe aparece.');
         }
 
         /* "CAEN EN" y no "se pagan en": el mismo texto lo usa Crono
            Nacionalización, donde lo que cae en ese mes es la nacionalización y
            no un pago. */
         if ($aproximadas > 0) {
-            $avisos[] = $aproximadas . ' ' . $queSon . ' caen en un mes que la curva de '
-                . 'dólar futuro no cubre'
+            $avisos[] = Aviso::nuevo(Aviso::INFO, $aproximadas . ' ' . $queSon
+                . ' caen en un mes que la curva de dólar futuro no cubre'
                 . ($ultimoMesCurva === null ? '' : ' (llega hasta ' . $ultimoMesCurva . ')')
                 . ', así que se valuaron con la cotización del mes más cercano. Están marcados '
-                . 'en la grilla.';
+                . 'en la grilla.');
         }
 
         if ($overrides > 0) {
-            $avisos[] = $overrides . ' ' . $queSon . ' tienen la cotización corregida a mano, '
-                . 'que manda sobre la curva. Están marcados en la grilla.';
+            $avisos[] = Aviso::nuevo(Aviso::INFO, $overrides . ' ' . $queSon
+                . ' tienen la cotización corregida a mano, que manda sobre la curva. Están '
+                . 'marcados en la grilla.');
         }
 
         return $avisos;

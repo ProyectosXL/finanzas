@@ -47,6 +47,15 @@ require_once __DIR__ . '/../Cotizacion.php';
  */
 class SaldosProvider extends CashflowProvider {
 
+    /**
+     * Las secciones de los avisos. La pestana Saldos junta dos filas del
+     * tablero -el disponible y la caja de los locales- y ademas las cuentas de
+     * fondo: en el panel del tablero los tres caen en el mismo grupo, y sin el
+     * subtitulo no se sabe de cual habla cada aviso.
+     */
+    const SECCION_SALDO = 'Saldo Inicial';
+    const SECCION_LOCALES = 'Caja Locales';
+
     protected function calcular($h) {
         $saldos = new Saldos();
 
@@ -58,8 +67,8 @@ class SaldosProvider extends CashflowProvider {
                 return ['DEPOSITOS' => $this->depositosLocales($h, $saldos)];
         }
 
-        $this->avisar('Saldos: el codigo de proveedor "' . $this->codigo()
-            . '" no tiene serie definida.');
+        $this->avisar('El codigo de proveedor "' . $this->codigo()
+            . '" no tiene serie definida.', Aviso::DANGER);
 
         return [];
     }
@@ -83,8 +92,8 @@ class SaldosProvider extends CashflowProvider {
      */
     private function disponible($h, $saldos) {
         if (!$saldos->tablasCreadas()) {
-            $this->avisar('Saldo Inicial: todavia no existen las tablas del modulo Saldos, asi '
-                . 'que el disponible se muestra en cero. Corre sql/cashflow_saldos.sql.');
+            $this->avisar('Todavia no existen las tablas del modulo Saldos, asi '
+                . 'que el disponible se muestra en cero. Corre sql/cashflow_saldos.sql.', Aviso::DANGER, self::SECCION_SALDO);
 
             return ['dias' => [], 'meses' => [], 'moneda_origen' => 'ARS'];
         }
@@ -107,23 +116,23 @@ class SaldosProvider extends CashflowProvider {
         }
 
         if (empty($cargadas)) {
-            $this->avisar('Saldo Inicial: hay ' . count($filas) . ' cuenta(s) configuradas pero '
+            $this->avisar('Hay ' . count($filas) . ' cuenta(s) configuradas pero '
                 . 'ninguna tiene saldo cargado todavia, asi que la fila va en cero. Carga los '
-                . 'saldos desde la pestana Saldos.');
+                . 'saldos desde la pestana Saldos.', Aviso::WARNING, self::SECCION_SALDO);
 
             return ['dias' => [], 'meses' => [], 'moneda_origen' => 'ARS'];
         }
 
         if ($sinCargar > 0) {
-            $this->avisar('Saldo Inicial: ' . $sinCargar . ' cuenta(s) todavia no tienen ningun '
-                . 'saldo cargado y no suman al disponible.');
+            $this->avisar($sinCargar . ' cuenta(s) todavia no tienen ningun '
+                . 'saldo cargado y no suman al disponible.', Aviso::WARNING, self::SECCION_SALDO);
         }
 
         $armado = Saldos::armarSerieDisponible($cargadas, $h, $this->cotizaciones($h, $cargadas));
 
-        foreach ($armado['avisos'] as $a) {
-            $this->avisar($a);
-        }
+        // Con el nivel y la seccion que les puso Saldos::armarSerieDisponible().
+        $this->avisarTodos(isset($armado['avisos_con_nivel'])
+            ? $armado['avisos_con_nivel'] : $armado['avisos'], Aviso::WARNING, self::SECCION_SALDO);
 
         return $armado['serie'];
     }
@@ -161,8 +170,9 @@ class SaldosProvider extends CashflowProvider {
             // relevante es el de esa columna y no el de la fecha original.
             return (new Cotizacion())->mapaMensual(substr($h->hoy(), 0, 7), substr($h->fin(), 0, 7));
         } catch (Throwable $e) {
-            $this->avisar('Saldo Inicial: no se pudo leer el tipo de cambio ('
-                . $e->getMessage() . '), asi que los saldos en dolares no entran al tablero.');
+            $this->avisar('No se pudo leer el tipo de cambio ('
+                . $e->getMessage() . '), asi que los saldos en dolares no entran al tablero.', Aviso::DANGER,
+                self::SECCION_SALDO);
 
             return [];
         }
@@ -188,8 +198,9 @@ class SaldosProvider extends CashflowProvider {
         try {
             $consulta = $saldos->getSaldosLocalesOrigen();
         } catch (Throwable $e) {
-            $this->avisar('Caja Locales: no se pudo leer la caja de los locales ('
-                . $e->getMessage() . '), asi que la fila se muestra en cero.');
+            $this->avisar('No se pudo leer la caja de los locales ('
+                . $e->getMessage() . '), asi que la fila se muestra en cero.', Aviso::DANGER,
+                self::SECCION_LOCALES);
 
             return ['dias' => [], 'meses' => [], 'moneda_origen' => 'ARS'];
         }
@@ -199,8 +210,9 @@ class SaldosProvider extends CashflowProvider {
         try {
             $params = $saldos->getParametrosSucursales(true);
         } catch (Throwable $e) {
-            $this->avisar('Caja Locales: no se pudieron leer las reservas de caja por sucursal ('
-                . $e->getMessage() . '), asi que se toma reserva cero y todas depositan.');
+            $this->avisar('No se pudieron leer las reservas de caja por sucursal ('
+                . $e->getMessage() . '), asi que se toma reserva cero y todas depositan.',
+                Aviso::DANGER, self::SECCION_LOCALES);
         }
 
         // Los saldos tipeados a mano cuando la consulta no trajo el cierre.
@@ -211,23 +223,24 @@ class SaldosProvider extends CashflowProvider {
         try {
             $manuales = $saldos->getSaldosLocalesManuales();
         } catch (Throwable $e) {
-            $this->avisar('Caja Locales: no se pudieron leer los saldos cargados a mano ('
-                . $e->getMessage() . '), asi que se usa lo que trajo la consulta.');
+            $this->avisar('No se pudieron leer los saldos cargados a mano ('
+                . $e->getMessage() . '), asi que se usa lo que trajo la consulta.',
+                Aviso::DANGER, self::SECCION_LOCALES);
         }
 
         $armado = Saldos::armarSaldosLocales($consulta, $params, $manuales,
             Saldos::ayer($h->hoy()));
 
-        foreach ($armado['avisos'] as $a) {
-            $this->avisar('Caja Locales: ' . $a);
-        }
+        $this->avisarTodos(isset($armado['avisos_con_nivel'])
+            ? $armado['avisos_con_nivel'] : $armado['avisos'], Aviso::WARNING, self::SECCION_LOCALES);
 
         // Un cero no dice si no hay locales o si los locales no tienen caja por
         // encima de su reserva. Se distingue, igual que en Nacionalizaciones.
+        // Informativo: es un cero correcto, por las reglas de reserva y Envia.
         if (!empty($armado['filas']) && $armado['totales']['aporta'] == 0) {
-            $this->avisar('Caja Locales: los ' . count($armado['filas']) . ' locales de la '
+            $this->avisar('Los ' . count($armado['filas']) . ' locales de la '
                 . 'consulta no superan su reserva de caja o estan en Envia, asi que la fila va '
-                . 'en cero.');
+                . 'en cero.', Aviso::INFO, self::SECCION_LOCALES);
         }
 
         return Saldos::armarSerieLocales($armado['filas'], $h);

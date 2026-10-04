@@ -103,7 +103,8 @@ class ComexProvider extends CashflowProvider {
                 return $this->nacionalizaciones($h, $comex);
         }
 
-        $this->avisar('Comex: el codigo de proveedor "' . $this->codigo() . '" no tiene serie definida.');
+        $this->avisar('El codigo de proveedor "' . $this->codigo() . '" no tiene serie definida.',
+            Aviso::DANGER);
 
         return [];
     }
@@ -137,10 +138,11 @@ class ComexProvider extends CashflowProvider {
            pago que se pueda expresar en pesos. La fila va en cero con el aviso
            que nombra la tabla, igual que antes con el parametro faltante. */
         if (!$dolar->disponible()) {
-            $this->avisar('Proveedores Exterior: no se pudo leer la curva de dólar futuro ROFEX ('
+            // Critico: la fila entera en cero por falta de cotizacion.
+            $this->avisar('No se pudo leer la curva de dólar futuro ROFEX ('
                 . DolarFuturo::ORIGEN . '), así que los pagos al exterior van en cero. '
                 . 'Los importes en dólares están: lo que falta es a cuánto convertirlos. '
-                . ($dolar->error() === null ? '' : $dolar->error()));
+                . ($dolar->error() === null ? '' : $dolar->error()), Aviso::DANGER);
 
             $vacia = [
                 'dias' => [],
@@ -202,19 +204,17 @@ class ComexProvider extends CashflowProvider {
         $serie['tipo_cambio'] = (count($usadas) === 1) ? reset($usadas) : null;
 
         /* Los mismos avisos que muestra la pestana, escritos una sola vez en
-           Comex::avisosValuacion(). Se les antepone el nombre de la fila
-           porque en el tablero conviven los avisos de todos los modulos y un
-           mensaje suelto no dice de cual es. */
+           Comex::avisosValuacion(). Ya no se les antepone el nombre de la
+           fila: el tablero agrupa los avisos por pestana, y el grupo es el que
+           dice de cual son. El nivel lo trae cada aviso. */
         /* SOBRE EL PENDIENTE, no sobre el FOB, y EL MISMO CAMPO QUE PASA EL
            CONTROLLER. Los dos consumidores describen las mismas filas, asi que
            el texto tiene que ser uno solo; con el default -VALOR_FOB_DOLAR- el
            tablero diria de mas justamente en los contenedores que ya tienen
            pagos hechos, que son los unicos donde los dos numeros difieren, y
            la pestana diria otra cosa sobre las mismas filas. */
-        foreach (Comex::avisosValuacion($filas, $dolar->ultimoMes(), 'PENDIENTE_USD')
-                 as $aviso) {
-            $this->avisar('Proveedores Exterior: ' . $aviso);
-        }
+        $this->avisarTodos(Comex::avisosValuacionConNivel($filas, $dolar->ultimoMes(),
+            'PENDIENTE_USD'));
 
         /* Lo vencido no suma, y eso hay que decirlo con su importe: sin el
            aviso, esa plata desaparece del tablero sin que nada lo explique.
@@ -224,14 +224,12 @@ class ComexProvider extends CashflowProvider {
            SIN PASARLE EL EJE: aca no hay nada que repartir, porque ninguna
            vencida entra en ninguna columna. Nacionalizaciones si se lo pasa,
            porque alla la regla no aplica y las del mes en curso entran. */
-        foreach (Comex::avisosVencidos($filas, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_ARS',
-                 'fecha estimada de pago') as $aviso) {
-            $this->avisar('Proveedores Exterior: ' . $aviso);
-        }
+        $this->avisarTodos(Comex::avisosVencidosConNivel($filas, 'FECHA_PAGO_EFECTIVA',
+            'IMPORTE_ARS', 'fecha estimada de pago'));
 
-        foreach (Comex::avisosPagados($filas, 'IMPORTE_PROYECTABLE', 'pago') as $aviso) {
-            $this->avisar('Proveedores Exterior: ' . $aviso);
-        }
+        // Marcado como ya hecho: lo decidio alguien, y sale por su serie.
+        $this->avisarTodos(Comex::avisosPagados($filas, 'IMPORTE_PROYECTABLE', 'pago'),
+            Aviso::INFO);
 
         /* LO QUE COMERCIO EXTERIOR YA PAGO, y por que hay tres avisos distintos
            sobre plata que no esta en la fila del tablero:
@@ -243,24 +241,21 @@ class ComexProvider extends CashflowProvider {
            Son tres hechos con tres acciones distintas -destildar, nada, ir a
            corregir a Comex- y un mensaje unico no dejaria saber cual de las
            tres es la que bajo el numero. */
-        foreach (Comex::avisosSaldoComex($filas) as $aviso) {
-            $this->avisar('Proveedores Exterior: ' . $aviso);
-        }
-
-        foreach (Comex::avisosSobrepago($filas) as $aviso) {
-            $this->avisar('Proveedores Exterior: ' . $aviso);
-        }
-
-        foreach (Comex::avisosGrupo($filas) as $aviso) {
-            $this->avisar('Proveedores Exterior: ' . $aviso);
-        }
+        /* Los niveles siguen la misma lectura: lo pagado del otro lado sale por
+           su serie y no pide nada (informativo); el sobrepago hay que ir a
+           corregirlo a Comex (atencion); la orden que comparte contenedor es
+           un criterio para no contar dos veces (informativo). */
+        $this->avisarTodos(Comex::avisosSaldoComex($filas), Aviso::INFO);
+        $this->avisarTodos(Comex::avisosSobrepago($filas), Aviso::WARNING);
+        $this->avisarTodos(Comex::avisosGrupo($filas), Aviso::INFO);
 
         /* Y si no se pudo leer la tabla de pagos de Comex, el tablero proyecta
            el FOB completo. Es la unica degradacion del modulo que cambia
            numeros en vez de apagar un boton, asi que se avisa en las dos
-           pantallas. Ver Comex::avisoSinPagosComex(). */
+           pantallas. Critico: proyecta de mas y no lo decidio nadie. Ver
+           Comex::avisoSinPagosComex(). */
         if ($comex->avisoSinPagosComex() !== '') {
-            $this->avisar('Proveedores Exterior: ' . $comex->avisoSinPagosComex());
+            $this->avisar($comex->avisoSinPagosComex(), Aviso::DANGER);
         }
 
         $marcadas = self::soloPagadas($filas);
@@ -358,10 +353,10 @@ class ComexProvider extends CashflowProvider {
            al exterior: sin ella no hay ningun gasto que se pueda expresar en
            pesos. La fila va en cero con el aviso que nombra la tabla. */
         if (!$dolar->disponible()) {
-            $this->avisar('Nacionalizaciones: no se pudo leer la curva de dólar futuro ROFEX ('
+            $this->avisar('No se pudo leer la curva de dólar futuro ROFEX ('
                 . DolarFuturo::ORIGEN . '), así que los gastos de nacionalización van en cero. '
                 . 'Los importes en dólares están: lo que falta es a cuánto convertirlos. '
-                . ($dolar->error() === null ? '' : $dolar->error()));
+                . ($dolar->error() === null ? '' : $dolar->error()), Aviso::DANGER);
 
             $vacia = [
                 'dias' => [],
@@ -406,10 +401,10 @@ class ComexProvider extends CashflowProvider {
            Comex::avisosValuacion(). El campo del importe en dolares y el nombre
            de la fecha son los de ESTA pestana: con los de la otra, el aviso
            diria "U$S 0,00" y nombraria la fecha de pago. */
-        foreach (Comex::avisosValuacion($filas, $dolar->ultimoMes(), 'IMPORTE_EST',
-                 'fecha de nacionalización') as $aviso) {
-            $this->avisar('Crono Nacionalización: ' . $aviso);
-        }
+        /* Sin prefijo y sin seccion: esta serie tiene su propia pestana, Crono
+           Nacionalizacion, y el grupo del tablero ya lo dice. */
+        $this->avisarTodos(Comex::avisosValuacionConNivel($filas, $dolar->ultimoMes(),
+            'IMPORTE_EST', 'fecha de nacionalización'));
 
         /* Sin pasarle el eje: ninguna vencida entra en ninguna columna, asi que
            no hay nada que repartir. Se informa IMPORTE_ARS -lo que valen EN
@@ -417,15 +412,11 @@ class ComexProvider extends CashflowProvider {
            Hasta feature/comex-nac-usd se informaba IMPORTE_EST, que desde que
            se sabe que esta en dolares seria un numero en dolares con el signo
            de pesos adelante. */
-        foreach (Comex::avisosVencidos($filas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_ARS',
-                 'fecha de nacionalización') as $aviso) {
-            $this->avisar('Nacionalizaciones: ' . $aviso);
-        }
+        $this->avisarTodos(Comex::avisosVencidosConNivel($filas, 'FECHA_NAC_EFECTIVA',
+            'IMPORTE_ARS', 'fecha de nacionalización'));
 
-        foreach (Comex::avisosPagados($filas, 'IMPORTE_PROYECTABLE', 'nacionalización')
-                 as $aviso) {
-            $this->avisar('Nacionalizaciones: ' . $aviso);
-        }
+        $this->avisarTodos(Comex::avisosPagados($filas, 'IMPORTE_PROYECTABLE', 'nacionalización'),
+            Aviso::INFO);
 
         /* Un cero no dice si no hay contenedores o si los hay sin importe
            cargado. La estimacion sale de un LEFT JOIN sobre
@@ -438,10 +429,12 @@ class ComexProvider extends CashflowProvider {
            completamente. Midiendo la serie, ese caso diria "ninguno tiene
            gastos cargados" sobre contenedores que si los tienen. */
         if (count($filas) > 0 && self::totalImporte($filas, 'IMPORTE_EST') == 0) {
+            // Atencion: se arregla cargando la estimacion de gastos.
             $this->avisar(
-                'Nacionalizaciones: hay ' . count($filas) . ' contenedores en el cronograma pero '
-                . 'ninguno tiene gastos de nacionalizacion estimados cargados, asi que la fila va '
-                . 'en cero. Es lo mismo que muestra la pestana Crono Nacionalizacion.'
+                'Hay ' . count($filas) . ' contenedores en el cronograma pero ninguno tiene '
+                . 'gastos de nacionalizacion estimados cargados, asi que la fila va en cero. Es lo '
+                . 'mismo que muestra la pestana Crono Nacionalizacion.',
+                Aviso::WARNING
             );
         }
 

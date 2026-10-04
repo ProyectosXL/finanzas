@@ -91,18 +91,21 @@ class TarjetasProvider extends CashflowProvider {
         $this->datos = $datos;
 
         /* LOS AVISOS SE LEVANTAN TAL CUAL. Ya vienen con el nombre, el conteo y el
-           importe: rearmarlos aca los dejaria diciendo menos que en la pestana. */
-        foreach ($datos['avisos'] as $a) {
-            $this->avisar('Pagos con Tarjetas: ' . $a);
-        }
+           importe: rearmarlos aca los dejaria diciendo menos que en la pestana.
+           Sin el "Pagos con Tarjetas:" de antes: el tablero los agrupa por
+           pestana. Con el nivel que les puso PagosTarjetas. */
+        $this->avisarTodos(self::conNivel($datos));
 
+        /* Las tres partes van con SECCION, y no con su nombre pegado al texto:
+           dentro del grupo de la pestana es lo que dice de cual de las tres
+           habla cada aviso. */
         $series = [
             self::SERIE_SUPERVISORAS => $this->serieDe($h, $datos['supervisoras']['pagos'],
-                $datos['supervisoras']['avisos'], 'Gastos Supervisoras'),
+                self::conNivel($datos['supervisoras']), 'Supervisoras'),
             self::SERIE_CORPORATIVAS => $this->serieDe($h, $datos['corporativas']['pagos'],
-                $datos['corporativas']['avisos'], 'Tarjetas Pagos Corporativos'),
+                self::conNivel($datos['corporativas']), 'Corporativas'),
             self::SERIE_SOCIOS => $this->serieDe($h, $datos['socios']['pagos'],
-                $datos['socios']['avisos'], 'Tarjetas Socios'),
+                self::conNivel($datos['socios']), 'Socios'),
 
             /* LAS EXCLUIDAS NO GENERAN AVISOS PROPIOS ACA: los de Corporativas ya
                dicen cuantas son, por cuanto y con que motivo. Repetirlos seria el
@@ -165,8 +168,8 @@ class TarjetasProvider extends CashflowProvider {
      *
      * @param Horizonte $h
      * @param array $pagos
-     * @param array $avisos Avisos de esa parte
-     * @param string|null $nombre Como se la nombra en los avisos, o null para no avisar
+     * @param array $avisos Avisos de esa parte, textos o con nivel
+     * @param string|null $nombre La seccion de sus avisos, o null para no avisar
      * @return array Serie
      */
     private function serieDe($h, $pagos, $avisos, $nombre) {
@@ -193,25 +196,40 @@ class TarjetasProvider extends CashflowProvider {
         }
 
         if ($nombre !== null) {
-            foreach ($avisos as $a) {
-                $this->avisar($nombre . ': ' . $a);
-            }
+            $this->avisarTodos($avisos, Aviso::WARNING, $nombre);
 
+            // Fuera del horizonte: informativo. Sin fecha: atencion.
             if ($serie['fuera_horizonte'] > 0) {
-                $this->avisar($nombre . ': hay pagos proyectados por $ '
+                $this->avisar('Hay pagos proyectados por $ '
                     . number_format($serie['fuera_horizonte'], 2, ',', '.') . ' con fecha '
                     . 'posterior al final del horizonte, así que no entran en ninguna columna. '
-                    . 'Se ven igual en la pestaña.');
+                    . 'Se ven igual en la pestaña.', Aviso::INFO, $nombre);
             }
 
             if ($serie['sin_fecha'] > 0) {
-                $this->avisar($nombre . ': hay $ '
+                $this->avisar('Hay $ '
                     . number_format($serie['sin_fecha'], 2, ',', '.') . ' sin una fecha con la '
-                    . 'que entrar al eje. Se ven en la pestaña, con el motivo.');
+                    . 'que entrar al eje. Se ven en la pestaña, con el motivo.', Aviso::WARNING,
+                    $nombre);
             }
         }
 
         return $serie;
+    }
+
+    /**
+     * Los avisos de un bloque de PagosTarjetas::calcular(), con nivel si los
+     * trae, o los textos -que valen 'warning'- si son datos armados a mano.
+     *
+     * @param array $bloque
+     * @return array
+     */
+    private static function conNivel($bloque) {
+        if (isset($bloque['avisos_con_nivel'])) {
+            return $bloque['avisos_con_nivel'];
+        }
+
+        return isset($bloque['avisos']) ? $bloque['avisos'] : [];
     }
 
     /**
@@ -349,17 +367,17 @@ class TarjetasProvider extends CashflowProvider {
      * Por que la fila va en cero.
      *
      * UN EGRESO EN CERO SE LEE COMO "no hay que pagar nada", que es lo contrario de
-     * lo que pasa. Los avisos de arriba ya dicen QUE falta; este dice la
+     * lo que pasa. Los otros avisos de la pestaña ya dicen QUE falta; este dice la
      * CONSECUENCIA sobre el cuadro, que es lo que se ve en el tablero.
      *
      * @param array $datos
      */
     private function avisarCero($datos) {
         if (!$datos['tablas']['tarjetas']) {
-            $this->avisar('Pagos con Tarjetas: la fila va en CERO porque todavía no existen las '
+            $this->avisar('La fila va en CERO porque todavía no existen las '
                 . 'tablas del módulo. Corré sql/cashflow_tarjetas.sql y '
                 . 'sql/cashflow_tarjetas_facturas.sql contra la base central. Un egreso en cero '
-                . 'no significa que no haya que pagar nada.');
+                . 'no significa que no haya que pagar nada.', Aviso::DANGER);
 
             return;
         }
@@ -378,10 +396,11 @@ class TarjetasProvider extends CashflowProvider {
             $partes[] = 'no hay tarjetas de socios activas';
         }
 
-        $this->avisar('Pagos con Tarjetas: la fila va en CERO'
-            . (empty($partes) ? ', y los avisos de arriba dicen por qué'
+        // Atencion: el cero sale de que falta cargar algo, no de un error.
+        $this->avisar('La fila va en CERO'
+            . (empty($partes) ? ', y los otros avisos de esta pestaña dicen por qué'
                               : ' porque ' . implode(', ' , $partes))
-            . '. NO significa que no haya que pagar nada.');
+            . '. NO significa que no haya que pagar nada.', Aviso::WARNING);
     }
 
     /** 'Y-m-d' => 'd/m' */

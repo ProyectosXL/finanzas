@@ -41,15 +41,14 @@ class IngresosProvider extends CashflowProvider {
             $cobranzaMay = $h->agrupar($filasMay, 'FECHA', 'IMPORTE');
             $cobranzaMay['moneda_origen'] = 'ARS';
 
-            $this->avisarVencidas('Cobranzas Mayoristas', $filasMay);
+            $this->avisarVencidas($filasMay);
 
             // Lo mismo que muestra la pestaña: una factura sobre-imputada no
             // entra al tablero, y no puede salir del cuadro sin que nadie lo
             // diga. El aviso se lee DESPUES de la consulta, que es quien lo
             // llena, y getCobranzasMayTotales() ya la corrio.
-            foreach ($ingresos->avisosPendienteSinSaldo() as $aviso) {
-                $this->avisar('Cobranzas Mayoristas: ' . $aviso);
-            }
+            // Atencion: el desvio se corrige en Tango.
+            $this->avisarTodos($ingresos->avisosPendienteSinSaldo(), Aviso::WARNING);
 
             return [
                 'COBRANZA' => $cobranzaMay
@@ -71,7 +70,7 @@ class IngresosProvider extends CashflowProvider {
         $total['moneda_origen'] = 'ARS';
         $total['detalle'] = $this->detallePactado($h, $filasTotal);
 
-        $this->avisarVencidas('Cobranzas Franquicias', $filasProy);
+        $this->avisarVencidas($filasProy);
 
         return [
             'COBRANZA' => $total,
@@ -95,10 +94,9 @@ class IngresosProvider extends CashflowProvider {
      * notas compitiendo por la misma celda dejarian ver sola una, y cual de las
      * dos dependeria del orden en que se escribieron.
      *
-     * @param string $nombre Como se llama la serie en el aviso
      * @param array $filas Filas con 'IMPORTE_VENCIDO' y 'COMP_VENCIDOS'
      */
-    private function avisarVencidas($nombre, $filas) {
+    private function avisarVencidas($filas) {
         $importe = 0.0;
         $comprobantes = 0;
 
@@ -111,12 +109,12 @@ class IngresosProvider extends CashflowProvider {
             return;
         }
 
-        $this->avisar($nombre . ': ' . $comprobantes . ' factura'
+        $this->avisar($comprobantes . ' factura'
             . ($comprobantes === 1 ? '' : 's') . ' por ' . self::plata($importe) . ' '
             . ($comprobantes === 1 ? 'tiene' : 'tienen') . ' la fecha probable de cobro ya '
             . 'vencida y se ' . ($comprobantes === 1 ? 'ubica' : 'ubican') . ' en el primer dia '
             . 'del eje. ' . ($comprobantes === 1 ? 'Es una factura vencida' : 'Son facturas vencidas')
-            . ' sin cobrar, no cobranza estimada para hoy.');
+            . ' sin cobrar, no cobranza estimada para hoy.', Aviso::WARNING);
     }
 
     /**

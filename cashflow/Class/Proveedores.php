@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/Horizonte.php';
+require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/Ingresos.php';
 require_once __DIR__ . '/ProveedoresCategorias.php';
 require_once __DIR__ . '/ProveedoresExclusion.php';
@@ -178,33 +179,48 @@ class Proveedores {
         return $this->tabla;
     }
 
-    /** @return array Avisos de configuracion pendiente */
+    /** @return array Avisos de configuracion pendiente (textos) */
     public function getAvisos() {
+        return Aviso::textos($this->getAvisosConNivel());
+    }
+
+    /**
+     * Los mismos avisos de getAvisos(), con su gravedad. Lo lee el tablero; la
+     * pestana lee los textos.
+     *
+     * Sin la tabla de fechas todo cae en el vencimiento y nadie lo decidio:
+     * critico. Las columnas y la tabla de exclusion que faltan no cambian
+     * ningun numero de hoy, pero alguien tiene que correr el script: atencion.
+     *
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function getAvisosConNivel() {
         $avisos = [];
 
         if (!$this->tablaCreada()) {
-            $avisos[] = 'Todavía no existe la tabla de fechas de pago. '
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, 'Todavía no existe la tabla de fechas de pago. '
                 . 'Corré sql/cashflow_prov_locales.sql contra la base central. '
                 . 'Mientras tanto, todo se proyecta a la fecha de vencimiento y no se '
-                . 'puede cargar ninguna fecha.';
+                . 'puede cargar ninguna fecha.');
         } elseif (!$this->tieneColumnaPago('FUENTE_FECHA')) {
             /* No bloquea nada: la columna Fecha de pago distingue igual la
                planilla de la carga manual, leyendo ORIGEN. Lo que se pierde es
                que esa marca siga siendo cierta el dia que alguien excluya una
                factura con fecha importada. Ver fuenteFecha(). */
-            $avisos[] = 'Falta sql/cashflow_prov_locales_fuente_fecha.sql. La columna Fecha de '
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Falta '
+                . 'sql/cashflow_prov_locales_fuente_fecha.sql. La columna Fecha de '
                 . 'pago distingue igual lo importado de lo cargado a mano, pero una factura con '
                 . 'fecha de la planilla que después se excluya o cambie de forma va a figurar '
-                . 'como cargada a mano.';
+                . 'como cargada a mano.');
         }
 
         $sinExclusion = $this->exclusion->avisoSinTabla();
 
         if ($sinExclusion !== '') {
-            $avisos[] = $sinExclusion;
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $sinExclusion);
         }
 
-        return array_merge($avisos, $this->categorias->getAvisos());
+        return array_merge($avisos, $this->categorias->getAvisosConNivel());
     }
 
     /**
@@ -212,9 +228,24 @@ class Proveedores {
      * la configuracion por defecto, el calendario que no responde. Van aparte de
      * getAvisos() porque solo existen despues de getPendientes() con horizonte.
      *
-     * @return array
+     * @return array Textos
      */
     public function avisosCronograma() {
+        return Aviso::textos($this->avisosCrono);
+    }
+
+    /**
+     * Los mismos avisos de avisosCronograma(), con su gravedad y la seccion
+     * "Cronograma". Lo lee el tablero.
+     *
+     * EL PREFIJO "Cronograma de Proveedores Locales:" SE SACO DEL TEXTO. En el
+     * tablero el grupo ya dice la pestana y la seccion dice que son del
+     * cronograma; en la pestana el usuario ya esta ahi, y cada texto nombra
+     * el cronograma o el calendario por si solo.
+     *
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosCronogramaConNivel() {
         return $this->avisosCrono;
     }
 
@@ -238,15 +269,16 @@ class Proveedores {
 
             $crono = (new CronogramaDatos())->paraHorizonte($h, 'PROV_LOCALES', 1);
 
-            foreach ($crono['avisos'] as $a) {
-                $this->avisosCrono[] = 'Cronograma de Proveedores Locales: ' . $a;
+            foreach ($crono['avisos_con_nivel'] as $a) {
+                $this->avisosCrono[] = Aviso::nuevo($a['nivel'], $a['texto'], 'Cronograma');
             }
 
             return $crono['pagos'];
         } catch (Throwable $e) {
-            $this->avisosCrono[] = 'No se pudo resolver el cronograma de pagos de Proveedores '
+            $this->avisosCrono[] = Aviso::nuevo(Aviso::DANGER,
+                'No se pudo resolver el cronograma de pagos de Proveedores '
                 . 'Locales (' . $e->getMessage() . '). Las facturas se proyectan en su '
-                . 'vencimiento, y lo vencido en el primer día del eje.';
+                . 'vencimiento, y lo vencido en el primer día del eje.', 'Cronograma');
 
             return null;
         }
@@ -881,6 +913,21 @@ class Proveedores {
      * @return array Lista de mensajes
      */
     public static function avisosPendientes($items) {
+        return Aviso::textos(self::avisosPendientesConNivel($items));
+    }
+
+    /**
+     * Los mismos avisos de avisosPendientes(), con su gravedad. Lo lee el
+     * tablero; la pestana lee los textos.
+     *
+     * Los vencidos sin fecha y lo que no tiene vencimiento se arreglan
+     * cargando la fecha: atencion. Los del rubro excluido son una decision ya
+     * tomada en el maestro: informativo.
+     *
+     * @param array $items Filas de getPendientes()
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public static function avisosPendientesConNivel($items) {
         $avisos = [];
 
         $vencidoSinFecha = 0.0;
@@ -924,34 +971,34 @@ class Proveedores {
             . 'muestra la pantalla si hay un filtro puesto.';
 
         if ($compVencidosCrono > 0) {
-            $avisos[] = $compVencidosCrono . ' vencimiento(s) por ' . self::plata($vencidoCrono)
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $compVencidosCrono . ' vencimiento(s) por ' . self::plata($vencidoCrono)
                 . ' del cronograma de pagos ya vencieron y NO tienen fecha de pago cargada. '
                 . 'Se proyectan en el próximo día de pago del cronograma de Proveedores '
                 . 'Locales (Parámetros › Generales), no en el primer día del eje. Si se van a '
-                . 'pagar otro día, cargales la fecha.' . $alcance;
+                . 'pagar otro día, cargales la fecha.' . $alcance);
         }
 
         if ($compVencidos > 0) {
-            $avisos[] = $compVencidos . ' vencimiento(s) por ' . self::plata($vencidoSinFecha)
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $compVencidos . ' vencimiento(s) por ' . self::plata($vencidoSinFecha)
                 . ' que no van a un día de pago del cronograma (débito, caja, tarjeta) ya vencieron '
                 . 'y NO tienen fecha de pago cargada. Se muestran en el primer día del eje '
                 . 'porque no se pagan en un día de pago, pero eso no significa que se paguen '
                 . 'hoy: cargales la fecha, de a uno en la grilla o importando la planilla de '
-                . 'pagos.' . $alcance;
+                . 'pagos.' . $alcance);
         }
 
         if ($compSinFecha > 0) {
-            $avisos[] = $compSinFecha . ' vencimiento(s) por ' . self::plata($sinFecha)
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $compSinFecha . ' vencimiento(s) por ' . self::plata($sinFecha)
                 . ' no tienen fecha de vencimiento en Tango ni plazo de pago en el maestro, '
-                . 'así que no se pueden ubicar en el eje.' . $alcance;
+                . 'así que no se pueden ubicar en el eje.' . $alcance);
         }
 
         if ($compExcluidos > 0) {
-            $avisos[] = $compExcluidos . ' vencimiento(s) por ' . self::plata($excluido)
+            $avisos[] = Aviso::nuevo(Aviso::INFO, $compExcluidos . ' vencimiento(s) por ' . self::plata($excluido)
                 . ' son de proveedores con rubro "' . ProveedoresCategorias::RUBRO_EXCLUIDOS
                 . '" en el maestro. Se listan acá pero su fila del tablero se puede '
                 . 'inhabilitar desde Parámetros, o apuntarla a la serie que ya los deja '
-                . 'afuera sin perder el criterio del cronograma.' . $alcance;
+                . 'afuera sin perder el criterio del cronograma.' . $alcance);
         }
 
         return $avisos;

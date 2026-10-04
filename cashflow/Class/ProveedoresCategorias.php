@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/Planilla.php';
+require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/ProveedoresTango.php';
 require_once __DIR__ . '/ProveedoresOpciones.php';
 require_once __DIR__ . '/AuthCashflow.php';
@@ -395,18 +396,34 @@ class ProveedoresCategorias {
      * @return array
      */
     public function getAvisos() {
+        return Aviso::textos($this->getAvisosConNivel());
+    }
+
+    /**
+     * Los mismos avisos de getAvisos(), con su gravedad. Lo lee el tablero; la
+     * pestana lee los textos.
+     *
+     * Sin la tabla nada se clasifica y nadie lo decidio: critico. El maestro
+     * vacio y la carga manual apagada se arreglan con una accion: atencion.
+     * No poder leer CPA01 es critico por la regla de "no se pudo leer",
+     * aunque no cambie ningun numero del tablero.
+     *
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function getAvisosConNivel() {
         if (!$this->tablaCreada()) {
-            return ['Todavía no existe la tabla del maestro de proveedores. '
-                . 'Corré sql/cashflow_prov_locales.sql contra la base central. '
-                . 'Mientras tanto, los comprobantes se muestran sin clasificar.'];
+            return [Aviso::nuevo(Aviso::DANGER, 'Todavía no existe la tabla del maestro de '
+                . 'proveedores. Corré sql/cashflow_prov_locales.sql contra la base central. '
+                . 'Mientras tanto, los comprobantes se muestran sin clasificar.')];
         }
 
         $avisos = [];
 
         if (empty($this->mapa())) {
-            $avisos[] = 'El maestro de proveedores está vacío: importá la hoja '
-                . '"Maestro proveedores" del Excel Cronograma de Pagos. Mientras tanto, '
-                . 'todos los comprobantes se muestran sin clasificar y ninguno queda excluido.';
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'El maestro de proveedores está vacío: '
+                . 'importá la hoja "Maestro proveedores" del Excel Cronograma de Pagos. Mientras '
+                . 'tanto, todos los comprobantes se muestran sin clasificar y ninguno queda '
+                . 'excluido.');
         }
 
         /* LO QUE FALTA SE DICE, AUNQUE NO ROMPA NADA. Sin la columna ORIGEN el
@@ -416,17 +433,18 @@ class ProveedoresCategorias {
            construyó: quien la fue a buscar no tiene dónde enterarse de que
            existe y de que falta un script. */
         if (!$this->tieneOrigen()) {
-            $avisos[] = 'La carga manual de proveedores está apagada: falta la columna ORIGEN '
-                . 'en el maestro. Corré sql/cashflow_prov_locales_maestro_manual.sql contra la '
-                . 'base central y el botón de agregar aparece solo. Todo lo demás de esta '
-                . 'pantalla funciona igual; lo único que no se puede es cargar o editar un '
-                . 'proveedor de a uno.';
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'La carga manual de proveedores está '
+                . 'apagada: falta la columna ORIGEN en el maestro. Corré '
+                . 'sql/cashflow_prov_locales_maestro_manual.sql contra la base central y el botón '
+                . 'de agregar aparece solo. Todo lo demás de esta pantalla funciona igual; lo '
+                . 'único que no se puede es cargar o editar un proveedor de a uno.');
         }
 
         if (!$this->tango()->disponible()) {
-            $avisos[] = 'No se pudo leer CPA01, el maestro de proveedores de Tango, así que los '
-                . 'códigos no se están validando: un código mal tipeado se puede cargar y '
-                . 'después no va a clasificar ninguna deuda. Todo lo demás funciona igual.';
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, 'No se pudo leer CPA01, el maestro de '
+                . 'proveedores de Tango, así que los códigos no se están validando: un código mal '
+                . 'tipeado se puede cargar y después no va a clasificar ninguna deuda. Todo lo '
+                . 'demás funciona igual.');
         }
 
         return $avisos;

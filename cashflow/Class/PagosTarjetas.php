@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/Tarjetas.php';
+require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/TarjetasResumen.php';
 require_once __DIR__ . '/TarjetasFactura.php';
 require_once __DIR__ . '/TarjetasExclusion.php';
@@ -143,12 +144,41 @@ class PagosTarjetas {
            cada una lo escondería. */
         $datos['avisos'] = array_merge($this->maestroAvisos(), $this->avisos);
 
+        /* LOS AVISOS SE ARMAN MEZCLADOS Y SE SEPARAN ACA, una sola vez. Adentro
+           de la clase cada lista admite textos -que valen 'warning', el caso
+           mas comun- y avisos con nivel para los que no lo son. Al salir, cada
+           bloque lleva 'avisos' con los textos, que es lo que lee la pestana, y
+           'avisos_con_nivel' con la gravedad, que es lo que lee el tablero. Un
+           solo punto de salida porque cada sub-pestana tiene varios return
+           tempranos, y normalizar en cada uno seria facil de olvidar. */
+        foreach (['supervisoras', 'corporativas', 'socios'] as $parte) {
+            $datos[$parte] = self::separarAvisos($datos[$parte]);
+        }
+
+        $datos = self::separarAvisos($datos);
+
         return $datos;
     }
 
-    /** @return array Avisos del modulo */
+    /**
+     * Deja en un bloque 'avisos' con los textos y 'avisos_con_nivel' con la
+     * misma lista con gravedad. Ver calcular().
+     *
+     * @param array $bloque
+     * @return array
+     */
+    private static function separarAvisos($bloque) {
+        $conNivel = Aviso::lista(isset($bloque['avisos']) ? $bloque['avisos'] : []);
+
+        $bloque['avisos'] = Aviso::textos($conNivel);
+        $bloque['avisos_con_nivel'] = $conNivel;
+
+        return $bloque;
+    }
+
+    /** @return array Textos de los avisos generales del modulo */
     public function avisos() {
-        return $this->avisos;
+        return Aviso::textos($this->avisos);
     }
 
     /* ====================================================================
@@ -178,13 +208,15 @@ class PagosTarjetas {
         try {
             $base = $this->gastos->paraVentana($ventana);
         } catch (Throwable $e) {
-            $salida['avisos'][] = 'No se pudieron leer los gastos de supervisión: '
-                . $e->getMessage() . '. Gastos Supervisoras va en cero.';
+            $salida['avisos'][] = Aviso::nuevo(Aviso::DANGER, 'No se pudieron leer los gastos de '
+                . 'supervisión: ' . $e->getMessage() . '. Gastos Supervisoras va en cero.');
 
             return $salida;
         }
 
-        foreach ($base['avisos'] as $a) {
+        // Los de GastosSupervision son la tabla que falta o el maestro que no
+        // se pudo leer: los dos dejan la proyeccion en cero, critico.
+        foreach (Aviso::lista($base['avisos'], Aviso::DANGER) as $a) {
             $salida['avisos'][] = $a;
         }
 
@@ -216,7 +248,8 @@ class PagosTarjetas {
             $porMes[$p['mes']][intval($p['nro'])] = $p;
         }
 
-        foreach ($crono['avisos'] as $a) {
+        foreach (isset($crono['avisos_con_nivel']) ? $crono['avisos_con_nivel'] : $crono['avisos']
+                 as $a) {
             $salida['avisos'][] = $a;
         }
 
@@ -404,12 +437,14 @@ class PagosTarjetas {
                 $this->gastos->maestro());
 
             if (!empty($sinGastos)) {
-                $avisos[] = count($sinGastos) . ' supervisora(s) están activas y NO tienen '
-                    . 'gastos autorizados en la ventana ' . $ventana['rotulo'] . ', así que no '
-                    . 'aparecen en la grilla y no se proyecta nada por ellas: '
+                // Informativo: explica el criterio de no inventar un promedio, y
+                // autorizar gastos no es una accion de quien mira el tablero.
+                $avisos[] = Aviso::nuevo(Aviso::INFO, count($sinGastos) . ' supervisora(s) están '
+                    . 'activas y NO tienen gastos autorizados en la ventana ' . $ventana['rotulo']
+                    . ', así que no aparecen en la grilla y no se proyecta nada por ellas: '
                     . implode(', ', $sinGastos) . '. No se les pone un promedio en cero —eso '
                     . 'afirmaría que no gastan—; si cargaron gastos y no están autorizados, '
-                    . 'todavía no cuentan.';
+                    . 'todavía no cuentan.');
             }
         } catch (Throwable $e) {
             // El maestro ya avisó por su cuenta; este aviso es un extra.
@@ -431,7 +466,10 @@ class PagosTarjetas {
         $avisoInf = Inflacion::avisoFaltan($faltan, $hoy);
 
         if ($avisoInf !== '') {
-            $avisos[] = 'Gastos Supervisoras: ' . $avisoInf;
+            // Sin el nombre de la sub-pestana adelante: en la pestana ya va en su
+            // bloque, y en el tablero lo dice la seccion. Con el prefijo, el
+            // proveedor lo duplicaba ("Gastos Supervisoras: Gastos Supervisoras: ...").
+            $avisos[] = $avisoInf;
         }
 
         return $avisos;
@@ -505,9 +543,9 @@ class PagosTarjetas {
             $prov = new Proveedores();
             $pendientes = $prov->getPendientes($hoy);
         } catch (Throwable $e) {
-            $salida['avisos'][] = 'No se pudieron leer las cuentas a pagar de Tango: '
-                . $e->getMessage() . '. Tarjetas Pagos Corporativos va en cero, y eso NO '
-                . 'significa que no haya facturas que pagar.';
+            $salida['avisos'][] = Aviso::nuevo(Aviso::DANGER, 'No se pudieron leer las cuentas a '
+                . 'pagar de Tango: ' . $e->getMessage() . '. Tarjetas Pagos Corporativos va en '
+                . 'cero, y eso NO significa que no haya facturas que pagar.');
 
             return $salida;
         }
@@ -635,7 +673,7 @@ class PagosTarjetas {
             }
         }
 
-        foreach (TarjetasCorporativas::avisos($r['filas']) as $a) {
+        foreach (TarjetasCorporativas::avisosConNivel($r['filas']) as $a) {
             $salida['avisos'][] = $a;
         }
 
@@ -757,8 +795,12 @@ class PagosTarjetas {
 
             $avisoBase = TarjetasSocios::avisoBase($base, $t['ROTULO']);
 
+            /* Sin base no hay estimacion y se arregla cargandola: atencion. La
+               base incompleta solo explica que el promedio es menos firme:
+               informativo. */
             if ($avisoBase !== '') {
-                $salida['avisos'][] = $avisoBase;
+                $salida['avisos'][] = Aviso::nuevo($base['motivo'] === TarjetasSocios::SIN_BASE
+                    ? Aviso::WARNING : Aviso::INFO, $avisoBase);
             }
 
             foreach ($e['faltan_inflacion'] as $m) {
@@ -790,7 +832,8 @@ class PagosTarjetas {
         $avisoInf = Inflacion::avisoFaltan($faltanInflacion, $hoy);
 
         if ($avisoInf !== '') {
-            $salida['avisos'][] = 'Tarjetas Socios: ' . $avisoInf;
+            // Sin prefijo: ver el de Gastos Supervisoras.
+            $salida['avisos'][] = $avisoInf;
         }
 
         foreach (TarjetasVencimiento::avisosCalendario($faltanCalendario) as $a) {
@@ -836,7 +879,7 @@ class PagosTarjetas {
         $rango = TarjetasVencimiento::rangoCalendario($h);
         $habiles = $this->cronograma->habilesEntre($rango['desde'], $rango['hasta']);
 
-        foreach ($this->cronograma->avisos() as $a) {
+        foreach ($this->cronograma->avisosConNivel() as $a) {
             $this->avisos[] = $a;
         }
 
@@ -849,9 +892,9 @@ class PagosTarjetas {
             return $this->cronograma->paraHorizonte($h, 'SUPERVISORAS');
         } catch (Throwable $e) {
             return ['pagos' => [], 'tabla_creada' => false,
-                    'avisos' => ['No se pudo resolver el cronograma de pagos ('
-                        . $e->getMessage() . '), así que la parte en EFECTIVO de Gastos '
-                        . 'Supervisoras no tiene fechas y no se proyecta.']];
+                    'avisos' => [Aviso::nuevo(Aviso::DANGER, 'No se pudo resolver el cronograma '
+                        . 'de pagos (' . $e->getMessage() . '), así que la parte en EFECTIVO de '
+                        . 'Gastos Supervisoras no tiene fechas y no se proyecta.')]];
         }
     }
 
@@ -863,7 +906,8 @@ class PagosTarjetas {
         $sinTabla = $this->inflacion->avisoSinTabla();
 
         if ($sinTabla !== '') {
-            $this->avisos[] = $sinTabla;
+            // Sin inflacion los meses que la necesitan quedan sin proyectar.
+            $this->avisos[] = Aviso::nuevo(Aviso::DANGER, $sinTabla);
         }
 
         return $mapa;
@@ -872,9 +916,10 @@ class PagosTarjetas {
     /** Los avisos del maestro de tarjetas */
     private function maestroAvisos() {
         try {
-            return $this->tarjetas->avisos();
+            return $this->tarjetas->avisosConNivel();
         } catch (Throwable $e) {
-            return ['No se pudieron revisar las tarjetas: ' . $e->getMessage()];
+            return [Aviso::nuevo(Aviso::DANGER, 'No se pudieron revisar las tarjetas: '
+                . $e->getMessage())];
         }
     }
 
@@ -895,8 +940,9 @@ class PagosTarjetas {
         try {
             return $fn();
         } catch (Throwable $e) {
-            $avisos[] = 'No se pudo leer ' . $que . ': ' . $e->getMessage()
-                . '. La parte que depende de eso queda sin resolver.';
+            // Critico: una lectura que fallo deja una parte sin resolver.
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, 'No se pudo leer ' . $que . ': '
+                . $e->getMessage() . '. La parte que depende de eso queda sin resolver.');
 
             return $default;
         }

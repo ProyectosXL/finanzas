@@ -74,11 +74,11 @@ class VentasProvider extends CashflowProvider {
         // Los avisos del motor de Ventas (por ejemplo una fecha que falta en el
         // calendario bancario) tienen que llegar al tablero: si se perdieran,
         // el usuario veria numeros sin saber que se estimaron.
-        if (!empty($p['warnings'])) {
-            foreach ($p['warnings'] as $w) {
-                $this->avisar('Ventas: ' . $w);
-            }
-        }
+        //
+        // Con el nivel que les puso Ventas y sin el "Ventas:" de antes: el
+        // tablero los agrupa por pestana.
+        $this->avisarTodos(isset($p['avisos_con_nivel']) ? $p['avisos_con_nivel']
+            : (isset($p['warnings']) ? $p['warnings'] : []));
 
         $series = [
             'COBRANZA' => [

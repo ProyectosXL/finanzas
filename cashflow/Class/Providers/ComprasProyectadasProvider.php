@@ -126,8 +126,8 @@ class ComprasProyectadasProvider extends CashflowProvider {
 
     protected function calcular($h) {
         if ($this->codigo() !== 'COMPRAS_PROY') {
-            $this->avisar('Compras Exterior: el codigo de proveedor "' . $this->codigo()
-                . '" no tiene serie definida.');
+            $this->avisar('El codigo de proveedor "' . $this->codigo()
+                . '" no tiene serie definida.', Aviso::DANGER);
 
             return [];
         }
@@ -143,7 +143,7 @@ class ComprasProyectadasProvider extends CashflowProvider {
         $aviso = $datos->avisoFaltaJob();
 
         if ($aviso !== '') {
-            $this->avisar('Compras Exterior: ' . $aviso);
+            $this->avisar($aviso, Aviso::DANGER);
 
             return $this->seriesVacias();
         }
@@ -152,39 +152,42 @@ class ComprasProyectadasProvider extends CashflowProvider {
 
         /* Los insumos estan, pero pueden estar viejos. No cambian ningun
            numero: dicen de cuando es el que se esta mostrando. */
-        foreach ($datos->avisosInsumos($params['compras_proy_anios_cuota'], $h->hoy(), self::PAIS) as $a) {
-            $this->avisar('Compras Exterior: ' . $a);
-        }
+        $this->avisarTodos($datos->avisosInsumosConNivel($params['compras_proy_anios_cuota'],
+            $h->hoy(), self::PAIS));
 
         $dolar = new DolarFuturo;
 
         if (!$dolar->disponible()) {
-            $this->avisar('Compras Exterior: no se pudo leer la curva de dólar futuro ROFEX ('
+            $this->avisar('No se pudo leer la curva de dólar futuro ROFEX ('
                 . DolarFuturo::ORIGEN . '), así que las compras proyectadas van en cero. Los '
                 . 'importes en dólares están: lo que falta es a cuánto convertirlos. '
-                . ($dolar->error() === null ? '' : $dolar->error()));
+                . ($dolar->error() === null ? '' : $dolar->error()), Aviso::DANGER);
 
             return $this->seriesVacias();
         }
 
-        foreach ([$datos->avisoSinPagos(), $datos->avisoSinAjustes()] as $a) {
-            if ($a !== '') {
-                $this->avisar('Compras Exterior: ' . $a);
-            }
+        /* Sin la tabla de pagos de Comex se descuenta de mas y se proyecta de
+           MENOS: critico. Sin la tabla de ajustes solo se apaga la edicion:
+           atencion, alguien tiene que correr el script. */
+        if ($datos->avisoSinPagos() !== '') {
+            $this->avisar($datos->avisoSinPagos(), Aviso::DANGER);
         }
 
+        if ($datos->avisoSinAjustes() !== '') {
+            $this->avisar($datos->avisoSinAjustes(), Aviso::WARNING);
+        }
+
+        // El filtro propio de la vista es un criterio: informativo.
         $contraste = ComprasProyectadasDatos::avisoContraste($datos->contrasteVista(self::PAIS));
 
         if ($contraste !== '') {
-            $this->avisar('Compras Exterior: ' . $contraste);
+            $this->avisar($contraste, Aviso::INFO);
         }
 
         /* --- La cuenta ---------------------------------------------------- */
         $grilla = $this->grilla($h, $datos, $params, $dolar);
 
-        foreach ($grilla['warnings'] as $w) {
-            $this->avisar('Compras Exterior: ' . $w);
-        }
+        $this->avisarTodos($grilla['avisos']);
 
         /* --- Las dos series ----------------------------------------------- */
         $filas = $grilla['filas'];
@@ -204,15 +207,15 @@ class ComprasProyectadasProvider extends CashflowProvider {
         /* Los avisos de valuacion de cada serie, sobre SUS filas valuadas. Se
            cuentan MESES y no contenedores: la unidad de este modulo es un mes
            de la ventana, y el texto de Comex lo recibe por parametro. */
-        foreach (Comex::avisosValuacion($grilla['filas_fob'], $dolar->ultimoMes(), 'FOB_USD',
-                 'fecha de pago estimada', 'mes(es) proyectado(s)') as $a) {
-            $this->avisar('Compras Exterior: ' . $a);
-        }
+        $this->avisarTodos(Comex::avisosValuacionConNivel($grilla['filas_fob'], $dolar->ultimoMes(),
+            'FOB_USD', 'fecha de pago estimada', 'mes(es) proyectado(s)'));
 
-        foreach (Comex::avisosValuacion($grilla['filas_nac'], $dolar->ultimoMes(), 'NAC_USD',
-                 'fecha de nacionalización estimada', 'mes(es) proyectado(s)') as $a) {
-            $this->avisar('Compras Exterior (nacionalización): ' . $a);
-        }
+        /* La de nacionalizacion lleva seccion: dentro de la pestana Proyeccion
+           los dos juegos de avisos se leen iguales, y sin el subtitulo no se
+           sabe de cual de las dos filas habla. */
+        $this->avisarTodos(Comex::avisosValuacionConNivel($grilla['filas_nac'], $dolar->ultimoMes(),
+            'NAC_USD', 'fecha de nacionalización estimada', 'mes(es) proyectado(s)'),
+            Aviso::WARNING, 'Nacionalización');
 
         /* LO QUE CAE FUERA DEL EJE, NOMBRADO. El motor ya informa
            'fuera_horizonte', pero como un numero suelto al pie del tablero; acá
@@ -343,6 +346,7 @@ class ComprasProyectadasProvider extends CashflowProvider {
             'filas_nac' => $filasNac,
             'meses' => $r['meses'],
             'warnings' => $r['warnings'],
+            'avisos' => $r['avisos'],
             'notas' => $r['notas'],
             'totales' => $r['totales'],
             'ventana' => $ventana,
@@ -373,8 +377,8 @@ class ComprasProyectadasProvider extends CashflowProvider {
             $p = new Parametros;
             $map = $p->getParametrosMap();
         } catch (Throwable $e) {
-            $this->avisar('Compras Exterior: no se pudieron leer los parámetros ('
-                . $e->getMessage() . '). Se usan los valores iniciales.');
+            $this->avisar('No se pudieron leer los parámetros ('
+                . $e->getMessage() . '). Se usan los valores iniciales.', Aviso::DANGER);
         }
 
         $out = [];
@@ -402,10 +406,12 @@ class ComprasProyectadasProvider extends CashflowProvider {
             ? 'UNIDADES' : 'IMPORTE';
 
         if (!empty($faltan)) {
-            $this->avisar('Compras Exterior: faltan ' . count($faltan) . ' parámetro'
+            // Atencion: se proyecta con los valores iniciales, que son un
+            // numero razonable, pero alguien tiene que correr el script.
+            $this->avisar('Faltan ' . count($faltan) . ' parámetro'
                 . (count($faltan) === 1 ? '' : 's') . ' del módulo (' . implode(', ', $faltan)
                 . '). Se proyecta con los valores iniciales. Corré '
-                . 'sql/cashflow_compras_proyectadas.sql contra la base central.');
+                . 'sql/cashflow_compras_proyectadas.sql contra la base central.', Aviso::WARNING);
         }
 
         return $out;
@@ -422,12 +428,13 @@ class ComprasProyectadasProvider extends CashflowProvider {
             return;
         }
 
-        $this->avisar('Compras Exterior: $ '
+        // Informativo, como todo lo que cae fuera del horizonte.
+        $this->avisar('$ '
             . number_format($serie['fuera_horizonte'], 2, ',', '.') . ' de ' . $queEs
             . ' caen FUERA del horizonte del tablero y no suman en ninguna columna. La ventana '
             . 'se corta con el último mes cuyo PAGO entra en el eje, y la nacionalización va '
             . 'sólo unos días antes de la recepción: los últimos meses de la ventana aportan '
-            . 'su FOB y no su nacionalización. Se arregla alargando el horizonte de meses.');
+            . 'su FOB y no su nacionalización. Se arregla alargando el horizonte de meses.', Aviso::INFO);
     }
 
     /**

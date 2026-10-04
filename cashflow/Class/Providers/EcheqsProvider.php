@@ -195,9 +195,10 @@ class EcheqsProvider extends CashflowProvider {
                 . (count($motivos) > 3 ? '; y ' . (count($motivos) - 3) . ' más.' : '.');
         }
 
-        $this->avisar('Echeqs en cartera: ' . $r['cheques'] . ' cheque(s) por $ '
+        // Informativo: excluirlos fue una decision, y el aviso no pide nada.
+        $this->avisar($r['cheques'] . ' cheque(s) por $ '
             . number_format($total, 2, ',', '.') . ' están excluidos a mano y no entran al '
-            . 'cashflow.' . $detalle . ' Se ven en la pestaña, tildando "Ver excluidos".');
+            . 'cashflow.' . $detalle . ' Se ven en la pestaña, tildando "Ver excluidos".', Aviso::INFO);
     }
 
     /** Una serie vacia con los escalares en su valor por defecto */

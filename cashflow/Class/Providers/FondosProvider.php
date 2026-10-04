@@ -106,8 +106,8 @@ class FondosProvider extends CashflowProvider {
 
     protected function calcular($h) {
         if (!isset(self::CLASE_POR_CODIGO[$this->codigo()])) {
-            $this->avisar('Fondos: el codigo de proveedor "' . $this->codigo()
-                . '" no tiene serie definida.');
+            $this->avisar('El codigo de proveedor "' . $this->codigo()
+                . '" no tiene serie definida.', Aviso::DANGER);
 
             return [];
         }
@@ -133,12 +133,18 @@ class FondosProvider extends CashflowProvider {
         $serie['fondos'] = [];
         $serie['fondos_tope'] = [];
 
+        /* La clase va como SECCION de cada aviso y no pegada al texto: en el
+           tablero estos avisos caen en el grupo Saldos, junto con los de Saldo
+           Inicial y Caja Locales, y sin el subtitulo no se sabe de cual de las
+           cuentas hablan. Niveles: lo que deja el stock en cero sin que nadie
+           lo decida es critico; lo que se arregla cargando algo, atencion; los
+           movimientos posteriores a hoy son el criterio del stock, informativo. */
         $rotulo = Fondos::CLASES[$clase];
         $fondos = $this->fondos();
 
         if (!$fondos->creado()) {
-            $this->avisar($rotulo . ': todavia no existen las cuentas de fondo, asi que el stock '
-                . 'se muestra en cero. Corre sql/cashflow_saldos_cuentas_fondo.sql.');
+            $this->avisar('Todavia no existen las cuentas de fondo, asi que el stock '
+                . 'se muestra en cero. Corre sql/cashflow_saldos_cuentas_fondo.sql.', Aviso::DANGER, $rotulo);
 
             return $serie;
         }
@@ -149,8 +155,8 @@ class FondosProvider extends CashflowProvider {
             }));
 
         if (empty($cuentas)) {
-            $this->avisar($rotulo . ': no hay ninguna cuenta de esa clase dada de alta, asi que '
-                . 'el stock va en cero. Se cargan desde Parametros -> Saldos.');
+            $this->avisar('No hay ninguna cuenta de esa clase dada de alta, asi que '
+                . 'el stock va en cero. Se cargan desde Parametros -> Saldos.', Aviso::WARNING, $rotulo);
 
             return $serie;
         }
@@ -221,24 +227,24 @@ class FondosProvider extends CashflowProvider {
         }
 
         if ($errorCotizacion !== null) {
-            $this->avisar($rotulo . ': no se pudo leer el tipo de cambio oficial ('
+            $this->avisar('No se pudo leer el tipo de cambio oficial ('
                 . Cotizacion::VISTA_DIARIA . '), asi que las cuentas en dolares no entran al '
-                . 'stock. Los dolares estan, lo que falta es a cuanto valuarlos.');
+                . 'stock. Los dolares estan, lo que falta es a cuanto valuarlos.', Aviso::DANGER, $rotulo);
         } elseif ($usdSinCotizar != 0) {
-            $this->avisar($rotulo . ': USD ' . number_format($usdSinCotizar, 2, ',', '.')
+            $this->avisar('USD ' . number_format($usdSinCotizar, 2, ',', '.')
                 . ' no se pueden valuar porque no hay ninguna cotizacion oficial anterior a hoy, '
-                . 'asi que no entran al stock.');
+                . 'asi que no entran al stock.', Aviso::WARNING, $rotulo);
         }
 
         if (!empty($sinInicial)) {
-            $this->avisar($rotulo . ': ' . count($sinInicial) . ' cuenta(s) no tienen saldo '
+            $this->avisar(count($sinInicial) . ' cuenta(s) no tienen saldo '
                 . 'inicial cargado (' . implode(', ', $sinInicial) . '): su stock arranca de '
-                . 'cero y solo cuenta los movimientos. Cargalo desde Parametros -> Saldos.');
+                . 'cero y solo cuenta los movimientos. Cargalo desde Parametros -> Saldos.', Aviso::WARNING, $rotulo);
         }
 
         if ($posteriores > 0) {
-            $this->avisar($rotulo . ': ' . $posteriores . ' movimiento(s) tienen fecha posterior '
-                . 'a hoy y no entran al stock, que es el saldo de hoy. Se ven en Saldos -> Fondos.');
+            $this->avisar($posteriores . ' movimiento(s) tienen fecha posterior '
+                . 'a hoy y no entran al stock, que es el saldo de hoy. Se ven en Saldos -> Fondos.', Aviso::INFO, $rotulo);
         }
 
         // Con una sola cotizacion usada se informa cual: es la que hay que

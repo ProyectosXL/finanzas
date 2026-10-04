@@ -85,8 +85,8 @@ class CoberturaProvider extends CashflowProvider {
 
     protected function calcular($h) {
         if ($this->codigo() !== 'COBERTURA') {
-            $this->avisar('Cobertura: el codigo de proveedor "' . $this->codigo()
-                . '" no tiene serie definida.');
+            $this->avisar('El codigo de proveedor "' . $this->codigo()
+                . '" no tiene serie definida.', Aviso::DANGER);
 
             return [];
         }
@@ -117,9 +117,9 @@ class CoberturaProvider extends CashflowProvider {
 
         $cobertura = $this->cobertura();
 
-        foreach ($cobertura->getAvisos() as $aviso) {
-            $this->avisar($aviso);
-        }
+        // El unico aviso de Cobertura es la tabla que falta: la fila va en
+        // cero, critico.
+        $this->avisarTodos($cobertura->getAvisos(), Aviso::DANGER);
 
         $origenes = $cobertura->origenes();
 
@@ -146,16 +146,16 @@ class CoberturaProvider extends CashflowProvider {
         $val = $cobertura->valuarAplicaciones();
 
         if ($val['error'] !== null) {
-            $this->avisar('Cobertura: no se pudo leer el tipo de cambio oficial, así que las '
+            $this->avisar('No se pudo leer el tipo de cambio oficial, así que las '
                 . 'aplicaciones cargadas en dólares no se están mostrando. Las de pesos no '
-                . 'cambian.');
+                . 'cambian.', Aviso::DANGER);
         }
 
         if ($val['sin_cotizacion'] > 0) {
-            $this->avisar('Cobertura: USD '
+            $this->avisar('USD '
                 . number_format($val['sin_cotizacion'], 2, ',', '.') . ' aplicados no se pueden '
                 . 'valuar porque no hay cotización oficial anterior a su fecha, así que no '
-                . 'entran al cuadro.');
+                . 'entran al cuadro.', Aviso::WARNING);
         }
 
         $huerfanas = 0;
@@ -220,9 +220,9 @@ class CoberturaProvider extends CashflowProvider {
            descuenta de nadie. Se dice, porque el disponible por fondo queda
            informado de mas. */
         if ($huerfanas != 0) {
-            $this->avisar('Cobertura: $ ' . number_format($huerfanas, 2, ',', '.') . ' aplicados '
+            $this->avisar('$ ' . number_format($huerfanas, 2, ',', '.') . ' aplicados '
                 . 'salen de un origen que no es ninguna cuenta de fondo, así que no descuentan '
-                . 'del saldo de ninguna. Reasignalos desde el tablero.');
+                . 'del saldo de ninguna. Reasignalos desde el tablero.', Aviso::WARNING);
         }
 
         return $series;

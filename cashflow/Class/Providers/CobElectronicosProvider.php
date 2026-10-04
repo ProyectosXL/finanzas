@@ -93,9 +93,8 @@ class CobElectronicosProvider extends CashflowProvider {
      */
     private function cobranza($h, $modulo) {
         if (!$modulo->tablasCreadas()) {
-            $this->avisar('Cobranzas Pagos Electronicos: todavia no existen las tablas del '
-                . 'modulo, asi que la fila se muestra en cero. Corre '
-                . 'sql/cashflow_cob_electronicos.sql.');
+            $this->avisar('Todavia no existen las tablas del modulo, asi que la fila se '
+                . 'muestra en cero. Corre sql/cashflow_cob_electronicos.sql.', Aviso::DANGER);
 
             return $this->vacia();
         }
@@ -103,9 +102,8 @@ class CobElectronicosProvider extends CashflowProvider {
         $procesadoras = $modulo->getProcesadoras(false);
 
         if (empty($procesadoras)) {
-            $this->avisar('Cobranzas Pagos Electronicos: todavia no hay ninguna procesadora '
-                . 'cargada, asi que la fila va en cero. Cargalas en Parametros -> '
-                . 'Cob. Electronicos.');
+            $this->avisar('Todavia no hay ninguna procesadora cargada, asi que la fila va en '
+                . 'cero. Cargalas en Parametros -> Cob. Electronicos.', Aviso::WARNING);
 
             return $this->vacia();
         }
@@ -128,14 +126,18 @@ class CobElectronicosProvider extends CashflowProvider {
         if (empty($movimientos)) {
             $cargados = count($modulo->getMovimientos());
 
-            $this->avisar($cargados > 0
-                ? ('Cobranzas Pagos Electronicos: los ' . $cargados . ' movimientos cargados '
-                    . 'tienen fecha de acreditacion de hoy o anterior, asi que ya estan '
-                    . 'informados en el saldo bancario y la fila va en cero. No hay '
-                    . 'acreditaciones pendientes cargadas.')
-                : ('Cobranzas Pagos Electronicos: hay ' . count($procesadoras)
-                    . ' procesadora(s) configuradas pero ningun movimiento cargado todavia, asi '
-                    . 'que la fila va en cero. Cargalos en la pestana Cob. Electronicos.'));
+            // Todo acreditado explica un cero correcto: informativo. Sin ningun
+            // movimiento cargado falta una carga: atencion.
+            if ($cargados > 0) {
+                $this->avisar('Los ' . $cargados . ' movimientos cargados tienen fecha de '
+                    . 'acreditacion de hoy o anterior, asi que ya estan informados en el saldo '
+                    . 'bancario y la fila va en cero. No hay acreditaciones pendientes cargadas.',
+                    Aviso::INFO);
+            } else {
+                $this->avisar('Hay ' . count($procesadoras) . ' procesadora(s) configuradas pero '
+                    . 'ningun movimiento cargado todavia, asi que la fila va en cero. Cargalos en '
+                    . 'la pestana Cob. Electronicos.', Aviso::WARNING);
+            }
 
             return $this->vacia();
         }
@@ -148,9 +150,9 @@ class CobElectronicosProvider extends CashflowProvider {
         // Los avisos de la serie ya vienen con el importe y la fecha de lo que
         // quedo afuera: se levantan al tablero para que un total mas chico que
         // el de la pestana tenga explicacion en la misma pantalla.
-        foreach ($serie['warnings'] as $w) {
-            $this->avisar($w);
-        }
+        // Lo unico que arma armarSerie() es lo que cae despues del horizonte:
+        // informativo, como todo lo que queda fuera del eje.
+        $this->avisarTodos($serie['warnings'], Aviso::INFO);
 
         $serie['warnings'] = [];
 
@@ -161,13 +163,14 @@ class CobElectronicosProvider extends CashflowProvider {
         if (array_sum($serie['dias']) == 0 && array_sum($serie['meses']) == 0) {
             $yaAcreditado = isset($serie['ya_acreditado']) ? $serie['ya_acreditado'] : 0;
 
+            // Los dos explican un cero que es correcto: informativos.
             $this->avisar(($yaAcreditado != 0 && $serie['fuera_horizonte'] == 0)
-                ? ('Cobranzas Pagos Electronicos: los movimientos cargados ya se acreditaron, '
-                    . 'asi que estan informados en el saldo bancario y la fila va en cero. No hay '
-                    . 'acreditaciones pendientes cargadas.')
-                : ('Cobranzas Pagos Electronicos: los ' . count($movimientos) . ' movimientos '
-                    . 'pendientes tienen fecha posterior al final del horizonte, asi que la fila '
-                    . 'va en cero. Se ven igual en la pestana Cob. Electronicos.'));
+                ? ('Los movimientos cargados ya se acreditaron, asi que estan informados en el '
+                    . 'saldo bancario y la fila va en cero. No hay acreditaciones pendientes '
+                    . 'cargadas.')
+                : ('Los ' . count($movimientos) . ' movimientos pendientes tienen fecha posterior '
+                    . 'al final del horizonte, asi que la fila va en cero. Se ven igual en la '
+                    . 'pestana Cob. Electronicos.'), Aviso::INFO);
         }
 
         return $serie;
@@ -189,9 +192,8 @@ class CobElectronicosProvider extends CashflowProvider {
         try {
             $alicuotas = $modulo->getAlicuotasPorProcesadora();
         } catch (Throwable $e) {
-            $this->avisar('Cobranzas Pagos Electronicos: no se pudieron leer las alicuotas ('
-                . $e->getMessage() . '). Los movimientos suman igual, con el neto que ya tenian '
-                . 'guardado.');
+            $this->avisar('No se pudieron leer las alicuotas (' . $e->getMessage() . '). Los '
+                . 'movimientos suman igual, con el neto que ya tenian guardado.', Aviso::DANGER);
 
             return;
         }
@@ -218,10 +220,10 @@ class CobElectronicosProvider extends CashflowProvider {
         $nombres = array_keys($sinAlicuota);
         sort($nombres);
 
-        $this->avisar('Cobranzas Pagos Electronicos: hay movimientos de ' . implode(', ', $nombres)
-            . ' cuya procesadora no tiene alicuotas vigentes a su fecha de acreditacion. Suman '
-            . 'con el neto que ya tenian guardado, pero no se van a poder cargar movimientos '
-            . 'nuevos hasta que se le cargue una alicuota.');
+        $this->avisar('Hay movimientos de ' . implode(', ', $nombres) . ' cuya procesadora no '
+            . 'tiene alicuotas vigentes a su fecha de acreditacion. Suman con el neto que ya '
+            . 'tenian guardado, pero no se van a poder cargar movimientos nuevos hasta que se le '
+            . 'cargue una alicuota.', Aviso::WARNING);
     }
 
     /** Serie en cero. series() le completa las claves del eje y los escalares. */

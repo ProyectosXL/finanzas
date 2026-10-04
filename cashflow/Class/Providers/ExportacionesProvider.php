@@ -57,8 +57,8 @@ class ExportacionesProvider extends CashflowProvider {
 
     protected function calcular($h) {
         if ($this->codigo() !== 'EXPORTACIONES') {
-            $this->avisar('Exportaciones: el codigo de proveedor "' . $this->codigo()
-                . '" no tiene serie definida.');
+            $this->avisar('El codigo de proveedor "' . $this->codigo()
+                . '" no tiene serie definida.', Aviso::DANGER);
 
             return [];
         }
@@ -101,10 +101,11 @@ class ExportacionesProvider extends CashflowProvider {
 
         if ($cotiz === null) {
             if ($usdTotal != 0) {
-                $this->avisar('Exportaciones Tasky: no hay cotizacion del dolar oficial BCRA para el '
+                // Critico: la fila entera en cero por falta de cotizacion.
+                $this->avisar('No hay cotizacion del dolar oficial BCRA para el '
                     . 'mes en curso (' . Cotizacion::VISTA . '), asi que la fila se muestra en cero. '
                     . 'Hay ' . self::usd($usdTotal) . ' pendientes de cobro; lo que falta es a '
-                    . 'cuanto valuarlos. No se asume ningun tipo de cambio.');
+                    . 'cuanto valuarlos. No se asume ningun tipo de cambio.', Aviso::DANGER);
             }
 
             return [
@@ -121,12 +122,14 @@ class ExportacionesProvider extends CashflowProvider {
         $serie['detalle'] = $this->detalleVencidas($h, $filas, $cotiz);
 
         if ($compVencidos > 0) {
-            $this->avisar('Exportaciones Tasky: ' . $compVencidos . ' factura'
+            // Atencion: la plata entra, pero en otro lugar -el primer dia del
+            // eje- que no es una estimacion de cobro.
+            $this->avisar($compVencidos . ' factura'
                 . ($compVencidos === 1 ? '' : 's') . ' por ' . self::usd($usdVencidas)
                 . ' ' . ($compVencidos === 1 ? 'tiene' : 'tienen') . ' la fecha de cobro estimada '
                 . 'ya vencida y se ' . ($compVencidos === 1 ? 'ubica' : 'ubican')
                 . ' en el primer dia del eje. ' . ($compVencidos === 1 ? 'Es una factura vencida' : 'Son facturas vencidas')
-                . ' sin cobrar, no cobranza estimada para hoy.');
+                . ' sin cobrar, no cobranza estimada para hoy.', Aviso::WARNING);
         }
 
         return $serie;

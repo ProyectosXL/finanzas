@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/TarjetasVencimiento.php';
+require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
 
@@ -918,12 +919,28 @@ class Tarjetas {
      * @return array Lista de mensajes
      */
     public function avisos() {
+        return Aviso::textos($this->avisosConNivel());
+    }
+
+    /**
+     * Los mismos avisos de avisos(), con su gravedad. Lo lee el tablero; la
+     * pestana lee los textos.
+     *
+     * Sin la tabla la fila va en cero y no lo decidio nadie: critico. No poder
+     * leer los bancos es critico por la regla de "no se pudo leer". La vista de
+     * usuarios que falta y la tarjeta de un usuario que ya no esta piden que
+     * alguien haga algo: atencion. El banco que ya no esta en Tango solo cambia
+     * como se muestra la tarjeta: informativo.
+     *
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosConNivel() {
         $avisos = [];
 
         $sinTabla = $this->avisoSinTabla();
 
         if ($sinTabla !== '') {
-            $avisos[] = $sinTabla;
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, $sinTabla);
 
             // Sin la tabla no hay tarjetas que revisar: los demas avisos no
             // tendrian sobre que hablar.
@@ -933,12 +950,12 @@ class Tarjetas {
         $sinVista = $this->avisoSinVista();
 
         if ($sinVista !== '') {
-            $avisos[] = $sinVista;
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $sinVista);
         }
 
         // Los que dejo bancos() al fallar.
         foreach ($this->avisos as $a) {
-            $avisos[] = $a;
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, $a);
         }
 
         $tarjetas = $this->getTarjetas(false);
@@ -958,16 +975,17 @@ class Tarjetas {
         /* SE NOMBRAN, hasta tres. Son pocas y es lo que alguien va a querer
            saber; un conteo suelto obliga a buscarlas en la grilla igual. */
         if (!empty($sinUsuario)) {
-            $avisos[] = count($sinUsuario) . ' tarjeta(s) tienen un usuario que ya no está '
-                . 'activo en ' . self::VISTA_USUARIOS . ': ' . self::primeros($sinUsuario)
-                . '. Se siguen viendo con el nombre guardado y NO se dan de baja solas: si esa '
-                . 'persona dejó la empresa, la tarjeta se da de baja a mano.';
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, count($sinUsuario) . ' tarjeta(s) tienen '
+                . 'un usuario que ya no está activo en ' . self::VISTA_USUARIOS . ': '
+                . self::primeros($sinUsuario) . '. Se siguen viendo con el nombre guardado y NO '
+                . 'se dan de baja solas: si esa persona dejó la empresa, la tarjeta se da de baja '
+                . 'a mano.');
         }
 
         if (!empty($sinBanco)) {
-            $avisos[] = count($sinBanco) . ' tarjeta(s) tienen un código de banco que ya no está '
-                . 'en el maestro de Tango: ' . self::primeros($sinBanco) . '. Se ven con el '
-                . 'código en vez del nombre.';
+            $avisos[] = Aviso::nuevo(Aviso::INFO, count($sinBanco) . ' tarjeta(s) tienen un '
+                . 'código de banco que ya no está en el maestro de Tango: '
+                . self::primeros($sinBanco) . '. Se ven con el código en vez del nombre.');
         }
 
         return $avisos;
