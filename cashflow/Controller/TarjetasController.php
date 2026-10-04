@@ -126,6 +126,25 @@ function soloProyectan($items, $campo) {
 }
 
 /**
+ * Deja solo los pagos de un tipo (FACTURA, COBERTURA, RESUMEN, ESTIMACION).
+ *
+ * @param array $pagos
+ * @param string $tipo
+ * @return array
+ */
+function soloTipo($pagos, $tipo) {
+    $v = [];
+
+    foreach ($pagos as $p) {
+        if (isset($p['tipo']) && $p['tipo'] === $tipo) {
+            $v[] = $p;
+        }
+    }
+
+    return $v;
+}
+
+/**
  * Extrae de las filas de socios un item por (tarjeta, mes) con un campo como
  * importe.
  *
@@ -159,6 +178,8 @@ function celdasDe($filas, $campo) {
 
 try {
     require_once __DIR__ . '/../Class/Tarjetas.php';
+    require_once __DIR__ . '/../Class/TarjetasMensual.php';
+    require_once __DIR__ . '/../Class/TarjetasCorporativas.php';
     require_once __DIR__ . '/../Class/TarjetasResumen.php';
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
@@ -234,6 +255,7 @@ try {
                         'avisos' => $sup['avisos'],
                         'sin_tarjeta' => $sup['sin_tarjeta'],
                         'disponible' => $sup['disponible'],
+                        'cronograma' => isset($sup['cronograma']) ? $sup['cronograma'] : null,
 
                         /* Una fila por supervisora -el renglon que se ve- y una por
                            supervisora y parte, que son las dos subfilas
@@ -250,6 +272,15 @@ try {
                         'disponible' => $corp['disponible'],
                         'cobertura' => $corp['cobertura'],
                         'resumenes' => $corp['resumenes'],
+                        'vtos_inertes' => $corp['vtos_inertes'],
+                        'estimaciones' => $corp['estimaciones'],
+
+                        /* UNA FILA POR ESTIMACION, con sus meses en el eje: la
+                           seccion Estimaciones mensuales tiene las mismas
+                           columnas y vistas que la grilla. */
+                        'eje_estimaciones' => EjeVista::armarAgrupado($h,
+                            soloTipo($corp['pagos'], 'ESTIMACION'),
+                            'id_estimacion', 'fecha', 'importe'),
 
                         /* UNA FILA POR VENCIMIENTO, con armar() y no
                            armarAgrupado(): la grilla es el listado de facturas y
@@ -342,6 +373,152 @@ try {
                 'message' => $r['desvinculadas'] . ' factura(s) desvinculadas. No se borra nada: '
                     . 'queda en el historial. Dejan de generar cobertura, y si están vencidas '
                     . 'dejan de entrar al flujo, porque sin tarjeta no hay fecha de pago.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           EL VENCIMIENTO CORREGIDO DE UNA CUOTA
+
+           Solo vale en esta pestana: Cuentas a Pagar Locales no se entera. La
+           clave es la cuota -el comprobante y su vencimiento de Tango- y la
+           fecha minima es hoy, validada en TarjetasCorporativas.
+           ================================================================ */
+        case 'editarVtoFactura':
+            require_once __DIR__ . '/../Class/TarjetasFacturaVto.php';
+            require_once __DIR__ . '/../Class/TarjetasCorporativas.php';
+            require_once __DIR__ . '/../Class/Proveedores.php';
+
+            $data = bodyJson();
+
+            foreach (['cod_provee', 't_comp', 'n_comp', 'fecha_vto_tango', 'fecha'] as $campo) {
+                if (!isset($data[$campo])) {
+                    throw new Exception('Faltan datos de la cuota o la fecha');
+                }
+            }
+
+            $hoy = date('Y-m-d');
+
+            /* LA CUOTA TIENE QUE ESTAR EN ESTA PESTANA: el endpoint es alcanzable
+               sin la pantalla, y una correccion sobre una cuota que no existe
+               nacería inerte. Se mira el mismo universo que la grilla. */
+            $cuota = TarjetasFacturaVto::clave($data['cod_provee'], $data['t_comp'],
+                $data['n_comp'], $data['fecha_vto_tango']);
+            $existe = false;
+
+            foreach (TarjetasCorporativas::universo((new Proveedores())->getPendientes($hoy)) as $fu) {
+                if (TarjetasCorporativas::claveCuota($fu) === implode('|', $cuota)) {
+                    $existe = true;
+                    break;
+                }
+            }
+
+            if (!$existe) {
+                throw new Exception('Esa cuota no está entre las facturas pendientes de '
+                    . TarjetasCorporativas::FORMA . ': puede que se haya pagado o que Tango le '
+                    . 'haya cambiado el vencimiento. Actualizá la pantalla.');
+            }
+
+            $r = (new TarjetasFacturaVto())->guardar($cuota[0], $cuota[1], $cuota[2], $cuota[3],
+                $data['fecha'], isset($data['motivo']) ? $data['motivo'] : null, $usuario, $hoy);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['deshecha']
+                    ? 'Es el mismo vencimiento de Tango: la cuota vuelve a usarlo.'
+                    : 'Vencimiento corregido: en esta pestaña la cuota vence el ' . $r['fecha']
+                      . '. En Tango sigue como estaba, y Cuentas a Pagar Locales no cambia.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'deshacerVtoFactura':
+            require_once __DIR__ . '/../Class/TarjetasFacturaVto.php';
+
+            $data = bodyJson();
+
+            foreach (['cod_provee', 't_comp', 'n_comp', 'fecha_vto_tango'] as $campo) {
+                if (!isset($data[$campo])) {
+                    throw new Exception('Faltan datos de la cuota');
+                }
+            }
+
+            $r = (new TarjetasFacturaVto())->deshacer($data['cod_provee'], $data['t_comp'],
+                $data['n_comp'], $data['fecha_vto_tango'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['habia']
+                    ? 'La cuota vuelve al vencimiento de Tango. La corrección queda en el '
+                      . 'historial: no se borra.'
+                    : 'Esta cuota ya usaba el vencimiento de Tango.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           LA FACTURA MENSUAL (ABONOS)
+
+           Marcarla guarda una copia y estima los meses siguientes. Lo que se
+           guarda sale de la fila tal como la ve la pantalla, resuelta por
+           PagosTarjetas, y lo valida TarjetasCorporativas::datosMarcaMensual():
+           solo una vinculada y no excluida.
+           ================================================================ */
+        case 'marcarMensual':
+            require_once __DIR__ . '/../Class/PagosTarjetas.php';
+            require_once __DIR__ . '/../Class/Parametros.php';
+            require_once __DIR__ . '/../Class/Horizonte.php';
+
+            $data = bodyJson();
+
+            foreach (['cod_provee', 't_comp', 'n_comp', 'fecha_vto_tango'] as $campo) {
+                if (!isset($data[$campo])) {
+                    throw new Exception('Faltan datos de la factura');
+                }
+            }
+
+            $h = Horizonte::desdeParametros(new Parametros());
+            $fila = (new PagosTarjetas())->filaCorporativa($h, TarjetasCorporativas::claveCuota([
+                'COD_PROVEE' => trim((string) $data['cod_provee']),
+                'T_COMP' => trim((string) $data['t_comp']),
+                'N_COMP' => trim((string) $data['n_comp']),
+                'FECHA_VTO_TANGO' => $data['fecha_vto_tango']]));
+
+            if ($fila === null) {
+                throw new Exception('Esa factura no está entre las pendientes de '
+                    . TarjetasCorporativas::FORMA . '. Actualizá la pantalla.');
+            }
+
+            $r = (new TarjetasMensual())->marcar(TarjetasCorporativas::datosMarcaMensual($fila),
+                $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Marcada como mensual: se estiman $ '
+                    . number_format($r['datos']['IMPORTE'], 2, ',', '.') . ' el día '
+                    . $r['datos']['DIA'] . ' de cada mes desde ' . $r['datos']['MES_DESDE'] . '.'
+                    . ($r['reemplazo'] > 0
+                        ? ' La estimación anterior de este proveedor se dio de baja: queda en el '
+                          . 'historial.'
+                        : ''),
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'desmarcarMensual':
+            $data = bodyJson();
+
+            if (!isset($data['id'])) {
+                throw new Exception('Falta la estimación');
+            }
+
+            $r = (new TarjetasMensual())->desmarcar($data['id'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['habia']
+                    ? 'Estimación desmarcada: deja de proyectarse. Queda en el historial.'
+                    : 'Esa estimación ya estaba desmarcada.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

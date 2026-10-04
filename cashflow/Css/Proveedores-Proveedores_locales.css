@@ -299,6 +299,21 @@
     background-color: #f1f3f5;
 }
 
+/* EL CRONOGRAMA: la fecha es la del próximo día de pago, que tampoco decidió
+   nadie para ESTA factura —es una regla— pero que sí es un día de pago real.
+   Se ve calculada como un vencimiento, con su propia etiqueta "crono" en verde
+   para que no se confunda con "vto.": esa fecha no es la de Tango. */
+.tab-proveedores_locales .prov-fuente-crono .prov-input-fecha {
+    color: #0f5132;
+    font-style: italic;
+    background-color: #f3faf6;
+}
+
+.tab-proveedores_locales .prov-fuente-crono .prov-fuente-fecha {
+    color: #0f5132;
+    background-color: #d1e7dd;
+}
+
 /* ----------------------------------------------------------------------------
    LA PREVISUALIZACIÓN DE LA IMPORTACIÓN
 

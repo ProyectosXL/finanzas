@@ -16,7 +16,8 @@ require_once __DIR__ . '/../PagosTarjetas.php';
  * ------------------------------------
  *   TOTAL                   la suma de las tres partes. Es la que usa la fila.
  *   SUPERVISORAS            efectivo + tarjeta de los gastos de supervision
- *   CORPORATIVAS            facturas no excluidas + cobertura, o el resumen
+ *   CORPORATIVAS            facturas VINCULADAS no excluidas + estimaciones mensuales
+ *                           + cobertura, o el resumen
  *   SOCIOS                  en pesos, con el componente en U$S ya convertido
  *   CORPORATIVAS_EXCLUIDAS  solo informativa, FUERA del total
  *
@@ -258,7 +259,8 @@ class TarjetasProvider extends CashflowProvider {
      *
      * SE ANOTA LO QUE PISA UNA ESTIMACION, no todo resumen: un resumen de una
      * tarjeta corporativa sin facturas vinculadas no reemplaza nada, asi que no hay
-     * nada que distinguir en esa celda.
+     * nada que distinguir en esa celda. Y SE ANOTA TODA ESTIMACION MENSUAL de
+     * Corporativas: es una estimacion en una parte que casi siempre es deuda real.
      *
      * @param Horizonte $h
      * @param array $datos
@@ -278,6 +280,21 @@ class TarjetasProvider extends CashflowProvider {
                 . number_format($r['importe'], 2, ',', '.') . ', vence el '
                 . self::corto($r['fecha']) . '. Reemplaza a las facturas vinculadas de ese mes '
                 . 'y a su cobertura.');
+        }
+
+        /* LAS ESTIMACIONES MENSUALES de Corporativas: un abono que todavia no tiene
+           factura en Tango. Se anota porque es una estimacion dentro de una fila
+           que, en Corporativas, es casi toda deuda real: quien mira la celda tiene
+           que saber que parte no es una factura. */
+        foreach ($datos['corporativas']['pagos'] as $p) {
+            if (!isset($p['tipo']) || $p['tipo'] !== 'ESTIMACION') {
+                continue;
+            }
+
+            self::anotar($detalle, $h->columna($p['fecha']), $p['importe'],
+                'Estimación mensual de ' . $p['proveedor'] . ' (' . $p['mes'] . '): $ '
+                . number_format($p['importe'], 2, ',', '.') . ', el ' . self::corto($p['fecha'])
+                . '. Es un abono marcado como mensual: todavía no hay factura de ese mes.');
         }
 
         // La parte tarjeta de las supervisoras que salio de un resumen.

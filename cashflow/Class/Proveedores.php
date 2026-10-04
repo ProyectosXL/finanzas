@@ -7,6 +7,7 @@ require_once __DIR__ . '/ProveedoresExclusion.php';
 require_once __DIR__ . '/Planilla.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
+require_once __DIR__ . '/CronogramaPagos.php';
 
 /**
  * Proveedores
@@ -121,6 +122,9 @@ class Proveedores {
     /** @var ProveedoresExclusion */
     private $exclusion;
 
+    /** @var array Avisos del cronograma de la ultima lectura. Ver avisosCronograma() */
+    private $avisosCrono = [];
+
     /**
      * @param ProveedoresCategorias|null $categorias Se puede inyectar para poder
      *        probar la clasificacion sin base.
@@ -203,6 +207,51 @@ class Proveedores {
         return array_merge($avisos, $this->categorias->getAvisos());
     }
 
+    /**
+     * Los avisos del cronograma PROV_LOCALES de la ultima lectura de pendientes:
+     * la configuracion por defecto, el calendario que no responde. Van aparte de
+     * getAvisos() porque solo existen despues de getPendientes() con horizonte.
+     *
+     * @return array
+     */
+    public function avisosCronograma() {
+        return $this->avisosCrono;
+    }
+
+    /**
+     * Los pagos del cronograma PROV_LOCALES del horizonte MAS UN MES: una factura
+     * que vence despues del ultimo pago del eje tiene que ir a un pago que existe,
+     * aunque quede fuera del horizonte -y se informa como tal-. Ver
+     * resolverFechaPago().
+     *
+     * SI NO SE PUEDE RESOLVER, null: las facturas quedan con su fecha de antes y
+     * se avisa. Un cronograma roto no puede dejar la pestaña sin fechas.
+     *
+     * @param Horizonte $h
+     * @return array|null
+     */
+    private function leerCronograma($h) {
+        $this->avisosCrono = [];
+
+        try {
+            require_once __DIR__ . '/CronogramaDatos.php';
+
+            $crono = (new CronogramaDatos())->paraHorizonte($h, 'PROV_LOCALES', 1);
+
+            foreach ($crono['avisos'] as $a) {
+                $this->avisosCrono[] = 'Cronograma de Proveedores Locales: ' . $a;
+            }
+
+            return $crono['pagos'];
+        } catch (Throwable $e) {
+            $this->avisosCrono[] = 'No se pudo resolver el cronograma de pagos de Proveedores '
+                . 'Locales (' . $e->getMessage() . '). Las facturas se proyectan en su '
+                . 'vencimiento, y lo vencido en el primer día del eje.';
+
+            return null;
+        }
+    }
+
     /* ====================================================================
        LOS PENDIENTES
        ==================================================================== */
@@ -216,13 +265,22 @@ class Proveedores {
      * entra al eje. Quien consume no vuelve a mirar el maestro ni a resolver
      * fechas: eso pasa una sola vez, aca.
      *
+     * CON EL HORIZONTE, LAS FACTURAS DEL CRONOGRAMA VAN A SUS DIAS DE PAGO: se lee
+     * el cronograma PROV_LOCALES de Parametros -> Generales y cada una se ubica en
+     * su proximo pago (ver resolverFechaPago()). Sin el horizonte no se lee -lo
+     * pide Tarjetas Pagos Corporativos, que usa FECHA_VTO y no esta fecha- y
+     * 'Pago' queda como antes. FECHA_VTO es SIEMPRE el vencimiento crudo de
+     * Tango, con o sin cronograma.
+     *
      * @param string|null $hoy 'Y-m-d'; por defecto el dia de hoy. Se inyecta
      *        para poder probar sin que las pruebas caduquen.
+     * @param Horizonte|null $h El eje, para resolver el cronograma
      * @return array Listado de vencimientos
      */
-    public function getPendientes($hoy = null) {
+    public function getPendientes($hoy = null, $h = null) {
         $cid = $this->conectar();
         $hoyStr = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+        $pagosCrono = ($h === null) ? null : $this->leerCronograma($h);
 
         /* LA SUBCONSULTA DE IMPUTACIONES ES LA PARTE DELICADA. Ver la tabla de
            signos en el encabezado de la clase y en
@@ -294,12 +352,19 @@ class Proveedores {
             $fechaVto = Horizonte::normalizarFecha($row['FECHA_VTO']);
             $fechaEmis = Horizonte::normalizarFecha($row['FECHA_EMIS']);
 
+            /* La forma vigente decide si la factura se paga en el cronograma, y
+               con eso si su fecha va al proximo dia de pago. */
+            $enCronograma = ProveedoresCategorias::esDelCronograma(
+                self::formaDelCronograma($cat, $pago));
+
             $resuelta = self::resolverFechaPago(
                 ($pago === null) ? null : $pago['FECHA_PAGO'],
                 $fechaVto,
                 $fechaEmis,
                 $cat['plazo_dias'],
-                $hoyStr
+                $hoyStr,
+                $pagosCrono,
+                $enCronograma
             );
 
             $forma = self::formaQueSeMuestra($cat, $pago);
@@ -323,6 +388,15 @@ class Proveedores {
                 'Pago' => $resuelta['fecha'],
                 'PAGO_ORIGINAL' => $resuelta['original'],
                 'ORIGEN_FECHA' => $resuelta['origen'],
+
+                /* SI LA FECHA LA PUSO EL CRONOGRAMA: la del proximo dia de pago a
+                   partir de PAGO_BASE -el vencimiento, la emision + plazo o la
+                   fecha cargada vencida-. La columna Fecha de pago la marca
+                   "crono" y el tooltip dice de donde sale la base. */
+                'PAGO_CRONO' => $resuelta['crono'],
+                'PAGO_BASE' => $resuelta['base'],
+                'PAGO_CRONO_NOMBRE' => $resuelta['pago_nombre'],
+                'PAGO_CRONO_A_MANO' => $resuelta['pago_override'],
 
                 /* ORIGEN_FECHA con la carga desdoblada: MANUAL / ARCHIVO /
                    VENCIMIENTO / PLAZO / SIN_FECHA. Es lo que la columna Fecha
@@ -420,8 +494,7 @@ class Proveedores {
                    todas sus filas: si decidiera, importar reclasificaria
                    comprobantes dentro y fuera del cashflow sin que nadie lo
                    pida. Ver Proveedores::formaDelCronograma(). */
-                'CRONOGRAMA' => ProveedoresCategorias::esDelCronograma(
-                    self::formaDelCronograma($cat, $pago))
+                'CRONOGRAMA' => $enCronograma
             ];
         }
 
@@ -526,6 +599,57 @@ class Proveedores {
      *   3. si no hay vencimiento usable, EMISION + PLAZO del maestro
      *   4. si nada de eso alcanza, sin fecha
      *
+     * Y ENCIMA DE ESO, EL CRONOGRAMA DE PAGOS (PROV_LOCALES de Parametros ->
+     * Generales, por defecto el 2do y el 4to miercoles), solo para las facturas
+     * cuya forma de pago vigente es del cronograma (esDelCronograma(): echeq,
+     * transferencia, o forma desconocida):
+     *
+     *   - sin fecha cargada (VENCIMIENTO o PLAZO), y
+     *   - con fecha cargada que YA PASO
+     *
+     * se pagan en el PRIMER PAGO DEL CRONOGRAMA con fecha efectiva >= max(fecha
+     * base, hoy). La fecha base es el vencimiento, la emision + plazo, o la fecha
+     * cargada vencida. Lo resuelve CronogramaPagos::proximoPago(), que es puro y
+     * recibe los pagos ya resueltos -corridos al habil anterior y con los
+     * overrides aplicados-: una factura que vence entre el pago corrido y el
+     * teorico va al siguiente, y eso es correcto.
+     *
+     * NO SE GRABA NADA POR FACTURA. Las facturas se asignan a un PAGO, no a una
+     * fecha guardada: mover ese pago a mano en Parametros mueve todas las
+     * facturas que caen en el, y esto se calcula de nuevo en cada lectura.
+     *
+     * UNA FECHA CARGADA FUTURA SE RESPETA TAL CUAL. La cargo una persona para un
+     * dia que todavia no llego; moverla al dia de pago seria pisar su decision.
+     * Una cargada que ya paso, en cambio, describe un pago que no ocurrio -la
+     * factura sigue pendiente en Tango- y queda en el proximo dia de pago.
+     *
+     * LO VENCIDO YA NO SE APILA EN EL PRIMER DIA DEL EJE, salvo que esa factura
+     * no sea del cronograma: los debitos automaticos, la caja y TARJETA CORP no se
+     * pagan en un dia de pago, conservan su fecha, y su vencido sigue en el
+     * primer dia del eje como antes (Ingresos::ubicarCobroVencido()). Nada DEL
+     * CRONOGRAMA cae en el primer dia del eje salvo que ese dia sea de pago.
+     *
+     * EL PAGO DE HOY CUENTA, y eso es distinto de Logistica, donde el pago de hoy
+     * no se proyecta porque ya se hizo. Aca la factura sigue pendiente en Tango,
+     * asi que todavia no se pago: cuando se pague, sale de pendientes y deja de
+     * estar en el eje.
+     *
+     * SI NO HAY NINGUN PAGO DESPUES DE LA FECHA BASE se sigue como antes: la
+     * fecha queda donde estaba. Los pagos traen un mes despues del horizonte
+     * (CronogramaDatos::paraHorizonte(..., 1)), asi que una factura que vence
+     * despues del ultimo pago del eje recibe uno que queda fuera del horizonte y
+     * se informa como tal. Que no haya ninguno solo pasa con una base mas alla de
+     * ese mes extra, que ya esta fuera del horizonte.
+     *
+     * $pagosCrono null ES "SIN CRONOGRAMA": el comportamiento de antes, para quien
+     * no lo necesita (Tarjetas Pagos Corporativos lee FECHA_VTO y no esta fecha).
+     *
+     * LO QUE NO CAMBIA: 'origen' sigue diciendo CARGADA / VENCIMIENTO / PLAZO /
+     * SIN_FECHA, y 'sin_fecha_cargada' sigue siendo "vencido sin que nadie haya
+     * dicho cuando se paga". Los indicadores, el fechado masivo y la conciliacion
+     * preguntan "¿alguien decidio una fecha?", y esa respuesta no depende de en
+     * que columna cae el importe.
+     *
      * EL VENCIMIENTO VA ANTES QUE EL PLAZO, y no al reves. El vencimiento es un
      * dato del comprobante; el plazo es una costumbre del proveedor. Cuando los
      * dos existen, el que describe a ESTA factura es el vencimiento. El plazo
@@ -537,16 +661,6 @@ class Proveedores {
      * ProveedoresCategorias::plazoEnDias(), que devuelve null cuando el plazo no
      * permite calcular una fecha, y null hace caer al escalon siguiente.
      *
-     * UNA FECHA CARGADA NO SE REUBICA AUNQUE ESTE VENCIDA. La cargo una persona;
-     * moverla a hoy seria pisar su decision con una regla automatica y mostrarle
-     * su propia carga en otra columna. Se marca vencida -eso es un hecho- y se
-     * dibuja donde esta.
-     *
-     * UN VENCIMIENTO PASADO SIN FECHA CARGADA SI SE UBICA EN EL PRIMER DIA DEL
-     * EJE, pero queda marcado con 'sin_fecha_cargada'. Esa marca es la que
-     * alimenta el indicador de la pestana: sin ella, el tablero mostraria
-     * ochocientos millones cayendo hoy como si estuviera decidido pagarlos hoy.
-     *
      * NO HAY TECHO DE ANTIGUEDAD, a diferencia de cobranzas. Ver el encabezado
      * de la clase.
      *
@@ -557,22 +671,33 @@ class Proveedores {
      * @param string|null $fechaEmis Emision, 'Y-m-d'
      * @param int|null $plazoDias Plazo del maestro en dias, o null
      * @param string $hoy Primer dia del eje, 'Y-m-d'
-     * @return array ['fecha', 'original', 'origen', 'vencida', 'sin_fecha_cargada']
+     * @param array|null $pagosCrono Pagos del cronograma PROV_LOCALES ya
+     *        resueltos (CronogramaPagos::paraHorizonte()['pagos']), o null
+     * @param bool $delCronograma Si la forma de pago vigente es del cronograma
+     * @return array ['fecha', 'original', 'origen', 'vencida', 'sin_fecha_cargada',
+     *                'crono' => bool, 'base', 'pago_nombre', 'pago_override']
      */
     public static function resolverFechaPago($fechaPago, $fechaVto, $fechaEmis,
-                                             $plazoDias, $hoy) {
+                                             $plazoDias, $hoy, $pagosCrono = null,
+                                             $delCronograma = false) {
         $hoyStr = substr((string) $hoy, 0, 10);
         $cargada = self::fechaUtil($fechaPago);
+        $usaCrono = ($pagosCrono !== null && $delCronograma);
 
-        /* 1. La fecha cargada manda y no se reubica. */
+        /* 1. La fecha cargada manda. Si ya paso y la factura es del cronograma,
+              va al proximo pago; si es futura, se respeta tal cual. */
         if ($cargada !== null) {
-            return [
+            $r = [
                 'fecha' => $cargada,
                 'original' => $cargada,
                 'origen' => 'CARGADA',
                 'vencida' => ($cargada < $hoyStr),
                 'sin_fecha_cargada' => false
             ];
+
+            return ($usaCrono && $r['vencida'])
+                ? self::alCronograma($r, $cargada, $pagosCrono, $hoyStr)
+                : self::sinCronograma($r, $cargada);
         }
 
         /* 2. El vencimiento de Tango. */
@@ -593,32 +718,69 @@ class Proveedores {
         }
 
         /* 4. Sin nada con que ubicarlo. Se transporta asi y el eje lo informa en
-              'sin_fecha' en lugar de perderlo. */
+              'sin_fecha' en lugar de perderlo. Igual con o sin cronograma: sin
+              fecha base no hay "proximo pago" de nada. */
         if ($base === null) {
-            return [
+            return self::sinCronograma([
                 'fecha' => null,
                 'original' => null,
                 'origen' => 'SIN_FECHA',
                 'vencida' => false,
                 'sin_fecha_cargada' => true
-            ];
+            ], null);
         }
 
-        /* Lo vencido se ubica en el primer dia del eje SIN TECHO de antiguedad:
-           se reusa la regla de las pestanas de cobranza con $diasAtras en null,
-           que es como la usa Exportaciones Tasky. Ver
+        /* Fuera del cronograma, lo vencido se ubica en el primer dia del eje SIN
+           TECHO de antiguedad: se reusa la regla de las pestanas de cobranza con
+           $diasAtras en null, que es como la usa Exportaciones Tasky. Ver
            Ingresos::ubicarCobroVencido(). */
         $ubic = Ingresos::ubicarCobroVencido($base, $hoyStr, null, false);
 
-        return [
+        $r = [
             'fecha' => $ubic['fecha'],
             'original' => $ubic['original'],
             'origen' => $origen,
             'vencida' => $ubic['vencida'],
             // Lo que alimenta el indicador: vencido y sin que nadie haya dicho
-            // cuando se paga.
+            // cuando se paga. No cambia con el cronograma.
             'sin_fecha_cargada' => $ubic['vencida']
         ];
+
+        return $usaCrono
+            ? self::alCronograma($r, $base, $pagosCrono, $hoyStr)
+            : self::sinCronograma($r, $base);
+    }
+
+    /**
+     * Lleva una fecha resuelta al proximo pago del cronograma. Si no hay ninguno
+     * despues de la base, la deja como estaba (ver resolverFechaPago()).
+     *
+     * @return array
+     */
+    private static function alCronograma($r, $base, $pagosCrono, $hoy) {
+        $pago = CronogramaPagos::proximoPago($base, $pagosCrono, $hoy);
+
+        if ($pago === null) {
+            return self::sinCronograma($r, $base);
+        }
+
+        $r['fecha'] = $pago['fecha'];
+        $r['crono'] = true;
+        $r['base'] = $base;
+        $r['pago_nombre'] = isset($pago['nombre']) ? $pago['nombre'] : null;
+        $r['pago_override'] = !empty($pago['override']);
+
+        return $r;
+    }
+
+    /** Completa una fecha resuelta que no paso por el cronograma. @return array */
+    private static function sinCronograma($r, $base) {
+        $r['crono'] = false;
+        $r['base'] = $base;
+        $r['pago_nombre'] = null;
+        $r['pago_override'] = false;
+
+        return $r;
     }
 
     /** De donde puede salir una fecha CARGADA */
@@ -699,9 +861,11 @@ class Proveedores {
      * Lo que NO se ve en los numeros y hay que decir.
      *
      * EL PRIMERO ES EL MAS IMPORTANTE DEL MODULO: cuanto hay vencido sin que
-     * nadie haya dicho cuando se paga. Ese importe se dibuja en el primer dia
-     * del eje porque no hay otro lugar donde ponerlo, y sin este aviso se leeria
-     * como "hoy se pagan ochocientos millones".
+     * nadie haya dicho cuando se paga. Va en DOS PARTES desde que el cronograma
+     * de Proveedores Locales reubica lo vencido: lo del cronograma ya no se apila
+     * en el primer dia del eje -va al proximo dia de pago- y lo de las otras
+     * formas si, como antes. Sin decir cual es cual, el importe del primer dia se
+     * leeria como "hoy se pagan ochocientos millones" o se buscaria donde no esta.
      *
      * CUENTAN TODO LO PENDIENTE, Y LO DICEN. Los usan los dos lados -la pestaña
      * y el proveedor del tablero- y los dos muestran MENOS que eso: la pestaña
@@ -721,6 +885,8 @@ class Proveedores {
 
         $vencidoSinFecha = 0.0;
         $compVencidos = 0;
+        $vencidoCrono = 0.0;
+        $compVencidosCrono = 0;
         $sinFecha = 0.0;
         $compSinFecha = 0;
         $excluido = 0.0;
@@ -741,8 +907,13 @@ class Proveedores {
             }
 
             if (!empty($i['SIN_FECHA_CARGADA'])) {
-                $vencidoSinFecha += $importe;
-                $compVencidos++;
+                if (!empty($i['PAGO_CRONO'])) {
+                    $vencidoCrono += $importe;
+                    $compVencidosCrono++;
+                } else {
+                    $vencidoSinFecha += $importe;
+                    $compVencidos++;
+                }
             }
         }
 
@@ -752,12 +923,21 @@ class Proveedores {
         $alcance = ' Es sobre TODAS las cuentas a pagar, así que no coincide con lo que '
             . 'muestra la pantalla si hay un filtro puesto.';
 
+        if ($compVencidosCrono > 0) {
+            $avisos[] = $compVencidosCrono . ' vencimiento(s) por ' . self::plata($vencidoCrono)
+                . ' del cronograma de pagos ya vencieron y NO tienen fecha de pago cargada. '
+                . 'Se proyectan en el próximo día de pago del cronograma de Proveedores '
+                . 'Locales (Parámetros › Generales), no en el primer día del eje. Si se van a '
+                . 'pagar otro día, cargales la fecha.' . $alcance;
+        }
+
         if ($compVencidos > 0) {
             $avisos[] = $compVencidos . ' vencimiento(s) por ' . self::plata($vencidoSinFecha)
-                . ' ya vencieron y NO tienen fecha de pago cargada. Se muestran en el primer '
-                . 'día del eje porque no hay otro lugar donde ponerlos, pero eso no significa '
-                . 'que se paguen hoy: cargales la fecha, de a uno en la grilla o importando '
-                . 'la planilla de pagos.' . $alcance;
+                . ' que no van a un día de pago del cronograma (débito, caja, tarjeta) ya vencieron '
+                . 'y NO tienen fecha de pago cargada. Se muestran en el primer día del eje '
+                . 'porque no se pagan en un día de pago, pero eso no significa que se paguen '
+                . 'hoy: cargales la fecha, de a uno en la grilla o importando la planilla de '
+                . 'pagos.' . $alcance;
         }
 
         if ($compSinFecha > 0) {

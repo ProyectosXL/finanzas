@@ -137,10 +137,11 @@ chequear('dos cuotas del mismo comprobante dan la misma clave',
 /* ================================================================
    LA FECHA: EL VENCIMIENTO DE TANGO
    ================================================================ */
-seccion('una factura no vencida entra por su vencimiento de Tango');
+seccion('una factura VINCULADA no vencida entra por su vencimiento de Tango');
 
 $facturas = [facturaTC('OGAAA', 'A001', '2026-10-05', 100000)];
-$r = TarjetasCorporativas::resolver($facturas, [], [], $TARJETAS, [], $HABILES, $MESES, $HOY);
+$vincA = [Proveedores::clavePago('OGAAA', 'FAC', 'A001') => 7];
+$r = TarjetasCorporativas::resolver($facturas, $vincA, [], $TARJETAS, [], $HABILES, $MESES, $HOY);
 $fila = $r['filas'][0];
 
 chequear('la fecha es el vencimiento', '2026-10-05', $fila['FECHA']);
@@ -150,10 +151,22 @@ chequear('no se reubico', false, $fila['REUBICADA']);
 chequear('entra al flujo', true, $fila['PROYECTA']);
 chequear('el mes de pago es el del vencimiento', '2026-10', $fila['MES_PAGO']);
 
-/* SIN VINCULAR ENTRA IGUAL. Vincular no decide si entra: decide si genera
-   cobertura y si un resumen la puede reemplazar. */
-chequear('sin tarjeta vinculada entra igual', null, $fila['ID_TARJETA']);
-chequear('y proyecta', true, $fila['PROYECTA']);
+seccion('una factura SIN vincular no entra al flujo, aunque no este vencida');
+
+/* SIN TARJETA NO SE PROYECTA, vencida o no: no se sabe en que debito sale. Hasta
+   feature/cronogramas-tarjetas-corporativas una no vencida entraba igual por su
+   vencimiento; ahora se ve en la grilla y no suma. */
+$sinV = TarjetasCorporativas::resolver($facturas, [], [], $TARJETAS, [], $HABILES, $MESES,
+    $HOY)['filas'][0];
+
+chequear('no tiene tarjeta', null, $sinV['ID_TARJETA']);
+chequear('no proyecta', false, $sinV['PROYECTA']);
+chequear('el motivo es SIN_TARJETA', TarjetasCorporativas::SIN_TARJETA, $sinV['MOTIVO']);
+chequear('pero sigue con su fecha y su importe, para la grilla', ['2026-10-05', 100000.0],
+    [$sinV['FECHA'], $sinV['IMPORTE']]);
+chequear('y el texto dice que no entra y que hacer', true,
+    strpos(TarjetasCorporativas::explicar($sinV), 'NO entra al flujo') !== false
+    && strpos(TarjetasCorporativas::explicar($sinV), 'Vinculala') !== false);
 
 /* UNA QUE VENCE HOY NO ESTA VENCIDA, y entra en la columna de hoy: mismo criterio
    que Ingresos::ubicarCobroVencido(), donde vencida es fecha < hoy. */
@@ -196,8 +209,8 @@ $r = TarjetasCorporativas::resolver($vencida, [], [], $TARJETAS, [], $HABILES, $
 $fila = $r['filas'][0];
 
 chequear('no proyecta', false, $fila['PROYECTA']);
-chequear('el motivo es VENCIDA_SIN_TARJETA',
-    TarjetasCorporativas::VENCIDA_SIN_TARJETA, $fila['MOTIVO']);
+chequear('el motivo es SIN_TARJETA',
+    TarjetasCorporativas::SIN_TARJETA, $fila['MOTIVO']);
 chequear('el importe se sigue informando, para poder decir cuanto queda afuera',
     500000.0, $fila['IMPORTE']);
 chequear('y el texto dice que hacer', true,
@@ -217,7 +230,10 @@ $excluidas = [
     Proveedores::clavePago('OGBBB', 'FAC', 'A002') => ['MOTIVO' => 'Ya está en Supervisoras']
 ];
 
-$r = TarjetasCorporativas::resolver($facturas, [], $excluidas, $TARJETAS, [], $HABILES,
+$vincAB = [Proveedores::clavePago('OGAAA', 'FAC', 'A001') => 7,
+           Proveedores::clavePago('OGBBB', 'FAC', 'A002') => 7];
+
+$r = TarjetasCorporativas::resolver($facturas, $vincAB, $excluidas, $TARJETAS, [], $HABILES,
     $MESES, $HOY);
 
 /* SIGUE EN EL UNIVERSO: son dos filas. Una factura que desaparece del listado no
@@ -275,8 +291,8 @@ chequear('y no la de ninguna de las dos', true,
 
 seccion('las no vinculadas no generan cobertura');
 
-/* SIN TARJETA NO SE SABE QUE % APLICAR. Entran al flujo igual, por su vencimiento,
-   pero no hay cobertura que calcular. */
+/* SIN TARJETA NO SE SABE QUE % APLICAR, y ademas no entran al flujo: no hay nada
+   que acompañar. */
 $cob = TarjetasCorporativas::cobertura(
     TarjetasCorporativas::resolver($facturas, [], [], $TARJETAS, [], $HABILES, $MESES,
         $HOY)['filas'],
@@ -372,25 +388,27 @@ chequear('con el resumen pagado, las facturas siguen cubiertas', false,
 chequear('y el motivo sigue siendo CUBIERTA',
     TarjetasCorporativas::CUBIERTA, $r['filas'][0]['MOTIVO']);
 
-seccion('las NO vinculadas del mismo mes no las toca el resumen');
+seccion('una NO vinculada en un mes con resumen: no suma, y no hay doble conteo');
 
-/* SOLO LAS VINCULADAS. El resumen no puede saber que hay adentro de una factura que
-   nadie le asigno, asi que esa deuda sigue entrando. Lo que se hace es AVISAR. */
+/* SOLO LAS VINCULADAS LAS CUBRE EL RESUMEN, y las no vinculadas ya no suman. Hasta
+   feature/cronogramas-tarjetas-corporativas la no vinculada seguia entrando, y
+   por eso habia un aviso de POSIBLE DOBLE CONTEO: podia estar adentro del resumen.
+   Ese riesgo ya no existe y el aviso se fue. */
 $soloUna = [Proveedores::clavePago('OGAAA', 'FAC', 'A001') => 7];
 
 $r = TarjetasCorporativas::resolver($facturas, $soloUna, [], $TARJETAS, $resumenes,
     $HABILES, $MESES, $HOY);
 
 chequear('la vinculada queda cubierta', false, $r['filas'][0]['PROYECTA']);
-chequear('la NO vinculada sigue entrando', true, $r['filas'][1]['PROYECTA']);
+chequear('la NO vinculada no suma: SIN_TARJETA', [false, TarjetasCorporativas::SIN_TARJETA],
+    [$r['filas'][1]['PROYECTA'], $r['filas'][1]['MOTIVO']]);
 
-$avisos = TarjetasCorporativas::avisos($r['filas'], $resumenes);
-$texto = implode(' | ', $avisos);
+$texto = implode(' | ', TarjetasCorporativas::avisos($r['filas']));
 
-chequear('y se avisa del posible doble conteo', true,
-    strpos($texto, 'POSIBLE DOBLE CONTEO') !== false);
-chequear('nombrando el mes', true, strpos($texto, '2026-10') !== false);
-chequear('y el importe', true, strpos($texto, '300.000,00') !== false);
+chequear('ya no hay aviso de posible doble conteo', false,
+    strpos($texto, 'DOBLE CONTEO') !== false);
+chequear('lo que se avisa es que no entra sin vincular', true,
+    strpos($texto, 'sin vincular no entran al flujo') !== false);
 
 /* ================================================================
    LA EXCLUSION GANA SOBRE LA COBERTURA POR RESUMEN
@@ -423,7 +441,8 @@ $r = TarjetasCorporativas::resolver([$facturas[0]], $roto, [], $TARJETAS, [], $H
 
 chequear('se marca el vinculo roto', true, $r['filas'][0]['VINCULO_ROTO']);
 chequear('la tarjeta queda en null', null, $r['filas'][0]['ID_TARJETA']);
-chequear('la factura entra igual, por su vencimiento', true, $r['filas'][0]['PROYECTA']);
+chequear('y como no tiene tarjeta, no entra', [false, TarjetasCorporativas::SIN_TARJETA],
+    [$r['filas'][0]['PROYECTA'], $r['filas'][0]['MOTIVO']]);
 
 chequear('y se avisa', true,
     strpos(implode(' ', TarjetasCorporativas::avisos($r['filas'])),
@@ -436,7 +455,7 @@ seccion('cada aviso describe un hecho distinto');
 
 $mezcla = [
     facturaTC('OGAAA', 'A001', '2026-08-01', 111111),   // vencida sin tarjeta
-    facturaTC('OGBBB', 'A002', '2026-10-06', 222222),   // entra sin vincular
+    facturaTC('OGBBB', 'A002', '2026-10-06', 222222),   // no vencida sin tarjeta
     facturaTC('OGCCC', 'A003', '2026-10-07', 333333)    // excluida
 ];
 
@@ -446,21 +465,21 @@ $r = TarjetasCorporativas::resolver($mezcla, [], $excl, $TARJETAS, [], $HABILES,
 $avisos = TarjetasCorporativas::avisos($r['filas']);
 $texto = implode(' | ', $avisos);
 
-chequear('avisa por las vencidas sin vincular', true,
-    strpos($texto, 'no están vinculadas a ninguna tarjeta') !== false);
-chequear('con su importe', true, strpos($texto, '111.111,00') !== false);
-
-chequear('avisa por las que entran sin vincular', true,
-    strpos($texto, 'no generan cobertura') !== false);
-chequear('con su importe', true, strpos($texto, '222.222,00') !== false);
+chequear('avisa por las sin vincular, que no entran al flujo', true,
+    strpos($texto, '2 factura(s) por $ 333.333,00 sin vincular no entran al flujo: '
+        . 'vinculalas a una tarjeta') !== false);
+chequear('con el desglose de vencidas', true,
+    strpos($texto, '1 vencida(s) por $ 111.111,00') !== false);
+chequear('y de no vencidas', true, strpos($texto, '1 no vencida(s) por $ 222.222,00') !== false);
 
 chequear('avisa por las excluidas', true, strpos($texto, 'están excluidas') !== false);
 chequear('con su importe', true, strpos($texto, '333.333,00') !== false);
 chequear('y con el motivo', true, strpos($texto, 'Ya está en otra pestaña') !== false);
 
-/* SON TRES AVISOS Y NO UNO. Juntarlos haria que el importe total no se pudiera
-   atribuir a ninguna causa, que es justamente lo que un aviso tiene que permitir. */
-chequear('son tres avisos separados', 3, count($avisos));
+/* SON DOS AVISOS Y NO UNO: la plata sin vincular y la excluida son dos causas
+   distintas. Juntarlos haria que el importe total no se pudiera atribuir a
+   ninguna, que es justamente lo que un aviso tiene que permitir. */
+chequear('son dos avisos separados', 2, count($avisos));
 
 seccion('sin nada que avisar, no hay avisos');
 
@@ -585,7 +604,9 @@ $mezcla = [
 ];
 
 $excl = [Proveedores::clavePago('OGCCC', 'FAC', 'A003') => ['MOTIVO' => 'Ya está en Supervisoras']];
-$r = TarjetasCorporativas::resolver($mezcla, [], $excl, $TARJETAS, [], $HABILES, $MESES, $HOY);
+// La que entra tiene que estar vinculada: sin tarjeta, nada entra.
+$vincB = [Proveedores::clavePago('OGBBB', 'FAC', 'A002') => 7];
+$r = TarjetasCorporativas::resolver($mezcla, $vincB, $excl, $TARJETAS, [], $HABILES, $MESES, $HOY);
 
 $sinExplicacion = 0;
 
@@ -614,3 +635,289 @@ chequear('una reubicada nombra su vencimiento', true,
     strpos($r['filas'][0]['EXPLICACION'], '01/08/2026') !== false);
 chequear('y la fecha en la que sale', true,
     strpos($r['filas'][0]['EXPLICACION'], '12/10/2026') !== false);
+
+/* ================================================================
+   EL VENCIMIENTO DE TANGO, NO LA FECHA DE PROVEEDORES LOCALES
+   ================================================================ */
+seccion('Corporativas lee FECHA_VTO de Tango y no la fecha que reubica el cronograma');
+
+/* Desde que Proveedores Locales proyecta sus facturas en los dias de pago del
+   cronograma, cada fila de getPendientes() trae dos fechas: FECHA_VTO, el
+   vencimiento crudo de Tango, y 'Pago', la del proximo dia de pago. Esta pestana
+   tiene que seguir mirando la PRIMERA: el pago de una tarjeta lo fija el banco,
+   no el cronograma de echeqs. Si leyera 'Pago', una factura que vence el 15/10
+   saldria el 28/10 y caeria en otro resumen. */
+$conPago = facturaTC('OGVTO', 'A777', '2026-10-15', 50000);
+$conPago['Pago'] = '2026-10-28';
+$conPago['PAGO_CRONO'] = true;
+$conPago['PAGO_BASE'] = '2026-10-15';
+
+$rVto = TarjetasCorporativas::resolver([$conPago], [], [], $TARJETAS, [], $HABILES, $MESES, $HOY);
+
+chequear('la fecha con la que entra es el vencimiento de Tango', '2026-10-15',
+    $rVto['filas'][0]['FECHA']);
+chequear('y su mes de pago tambien', '2026-10', $rVto['filas'][0]['MES_PAGO']);
+
+/* Y la lectura: PagosTarjetas pide los pendientes SIN el horizonte, que es lo que
+   hace que getPendientes() ni siquiera resuelva el cronograma para esta pestana. */
+$fuentePT = file_get_contents(__DIR__ . '/../Class/PagosTarjetas.php');
+chequear('PagosTarjetas pide getPendientes() sin horizonte', true,
+    strpos($fuentePT, '$prov->getPendientes($hoy);') !== false);
+chequear('y TarjetasCorporativas no lee la fecha resuelta de Proveedores Locales', false,
+    (bool) preg_match('/\[\'(Pago|PAGO_BASE|PAGO_CRONO)\'\]/',
+        file_get_contents(__DIR__ . '/../Class/TarjetasCorporativas.php')));
+
+/* ================================================================
+   EL VENCIMIENTO CORREGIDO REEMPLAZA AL DE TANGO EN TODA LA LOGICA
+   ================================================================ */
+seccion('un vencimiento corregido reemplaza al de Tango');
+
+/* Quien carga en Tango pone el vencimiento del RESUMEN en el que se paga. Si lo
+   puso mal, se corrige en esta pestaña, y la fecha corregida manda en todo: si
+   esta vencida, la reubicacion, el mes de pago, la cobertura y el resumen. */
+$fv = facturaTC('OGVTO', 'B100', '2026-08-15', 200000);
+$vincV = [Proveedores::clavePago('OGVTO', 'FAC', 'B100') => 7];
+$vtoA = function ($fecha) use ($fv) {
+    return [TarjetasCorporativas::claveCuota($fv) => [
+        'COD_PROVEE' => 'OGVTO', 'T_COMP' => 'FAC', 'N_COMP' => 'B100',
+        'FECHA_VTO_TANGO' => '2026-08-15', 'FECHA_VTO' => $fecha, 'MOTIVO' => 'Otro resumen',
+        'USUARIO_ALTA' => 'sistemas', 'FECHA_ALTA' => '2026-09-26 10:00']];
+};
+
+$sinEd = TarjetasCorporativas::resolver([$fv], $vincV, [], $TARJETAS, [], $HABILES, $MESES,
+    $HOY)['filas'][0];
+chequear('sin corregir: vencida y reubicada al proximo pago', [true, true, '2026-10-12'],
+    [$sinEd['VENCIDA'], $sinEd['REUBICADA'], $sinEd['FECHA']]);
+
+$ed = TarjetasCorporativas::resolver([$fv], $vincV, [], $TARJETAS, [], $HABILES, $MESES,
+    $HOY, $vtoA('2026-11-20'))['filas'][0];
+chequear('corregida a una fecha futura deja de estar vencida', false, $ed['VENCIDA']);
+chequear('no se reubica: entra en la fecha corregida', [false, '2026-11-20', '2026-11'],
+    [$ed['REUBICADA'], $ed['FECHA'], $ed['MES_PAGO']]);
+chequear('la fila dice que esta corregida, y conserva el de Tango', [true, '2026-08-15', '2026-11-20'],
+    [$ed['VTO_EDITADO'], $ed['FECHA_VTO'], $ed['FECHA_VTO_VIGENTE']]);
+chequear('y quien la corrigio, con el motivo', ['sistemas', 'Otro resumen'],
+    [$ed['VTO_EDIT_USUARIO'], $ed['VTO_EDIT_MOTIVO']]);
+chequear('el texto nombra el vencimiento de Tango', true,
+    strpos($ed['EXPLICACION'], 'En Tango vence el 15/08/2026') !== false);
+
+/* LA COBERTURA SE MUEVE CON LA FECHA: el mes de pago es el corregido. */
+$cobEd = TarjetasCorporativas::cobertura([$ed], $TARJETAS, [], $HABILES, $MESES, $HOY);
+chequear('la cobertura cae en el mes corregido', '2026-11', $cobEd[0]['mes']);
+
+/* EL RESUMEN TAMBIEN: con un resumen cargado en noviembre, la cuota corregida a
+   noviembre queda cubierta; sin corregir caeria en octubre y no. */
+$resNov = [7 => ['2026-11' => ['ID' => 81, 'MES' => '2026-11', 'IMPORTE_ARS' => 900000.0,
+                               'IMPORTE_USD' => null, 'FECHA_VENCIMIENTO' => '2026-11-10',
+                               'PAGADO' => false]]];
+chequear('corregida a noviembre: cubierta por el resumen de noviembre', TarjetasCorporativas::CUBIERTA,
+    TarjetasCorporativas::resolver([$fv], $vincV, [], $TARJETAS, $resNov, $HABILES, $MESES, $HOY,
+        $vtoA('2026-11-20'))['filas'][0]['MOTIVO']);
+chequear('sin corregir no la cubre: sale en octubre', TarjetasCorporativas::OK,
+    TarjetasCorporativas::resolver([$fv], $vincV, [], $TARJETAS, $resNov, $HABILES, $MESES,
+        $HOY)['filas'][0]['MOTIVO']);
+
+/* UNA CORRECCION QUE QUEDA EN EL PASADO se comporta como un vencimiento pasado:
+   vencida, y al proximo pago de la tarjeta. */
+$pasada = TarjetasCorporativas::resolver([$fv], $vincV, [], $TARJETAS, [], $HABILES, $MESES,
+    $HOY, $vtoA('2026-09-20'))['filas'][0];
+chequear('corregida a una fecha que ya paso: vencida y reubicada', [true, true, '2026-10-12'],
+    [$pasada['VENCIDA'], $pasada['REUBICADA'], $pasada['FECHA']]);
+
+seccion('deshacer vuelve al de Tango, y la correccion es por cuota');
+
+/* DESHACER ES DAR DE BAJA: sin la correccion vigente, la cuota vuelve sola a su
+   vencimiento de Tango. */
+chequear('sin la correccion, vuelve a Tango', ['2026-08-15', false],
+    [$sinEd['FECHA_VTO_VIGENTE'], $sinEd['VTO_EDITADO']]);
+
+/* POR CUOTA: dos cuotas del mismo comprobante tienen claves distintas, asi que
+   corregir una no toca la otra. */
+$c1 = facturaTC('OGRSA', 'A010', '2026-10-05', 100000);
+$c2 = facturaTC('OGRSA', 'A010', '2026-11-05', 100000);
+chequear('dos cuotas del mismo comprobante tienen claves de cuota distintas', true,
+    TarjetasCorporativas::claveCuota($c1) !== TarjetasCorporativas::claveCuota($c2));
+
+$soloC1 = [TarjetasCorporativas::claveCuota($c1) => ['COD_PROVEE' => 'OGRSA', 'T_COMP' => 'FAC',
+    'N_COMP' => 'A010', 'FECHA_VTO_TANGO' => '2026-10-05', 'FECHA_VTO' => '2026-10-25',
+    'MOTIVO' => null, 'USUARIO_ALTA' => 'x', 'FECHA_ALTA' => null]];
+$cuotas = TarjetasCorporativas::resolver([$c1, $c2], [], [], $TARJETAS, [], $HABILES, $MESES,
+    $HOY, $soloC1)['filas'];
+chequear('se corrige solo la cuota pedida', ['2026-10-25', '2026-11-05'],
+    [$cuotas[0]['FECHA_VTO_VIGENTE'], $cuotas[1]['FECHA_VTO_VIGENTE']]);
+
+seccion('la fecha minima es hoy, en el backend');
+
+chequear('hoy se acepta', $HOY, TarjetasCorporativas::validarVtoEditado($HOY, $HOY));
+chequearLanza('ayer no', function () use ($HOY) {
+    TarjetasCorporativas::validarVtoEditado('2026-09-25', $HOY);
+});
+chequearLanza('una fecha que no existe tampoco', function () use ($HOY) {
+    TarjetasCorporativas::validarVtoEditado('2026-02-30', $HOY);
+});
+
+seccion('una correccion sin cuota queda inerte y se avisa');
+
+/* TANGO CAMBIO EL VENCIMIENTO: el comprobante sigue pendiente pero ninguna cuota
+   tiene el vencimiento con el que se guardo la correccion. */
+$movida = facturaTC('OGVTO', 'B100', '2026-09-10', 200000);
+$inertes = TarjetasCorporativas::vtosInertes([$movida], $vtoA('2026-11-20'));
+chequear('una correccion cuyo vencimiento de Tango ya no esta es inerte', 1, count($inertes));
+chequear('y no se aplica a la cuota nueva', '2026-09-10',
+    TarjetasCorporativas::resolver([$movida], $vincV, [], $TARJETAS, [], $HABILES, $MESES, $HOY,
+        $vtoA('2026-11-20'))['filas'][0]['FECHA_VTO_VIGENTE']);
+chequear('el aviso nombra el comprobante', true,
+    strpos(TarjetasCorporativas::avisoVtosInertes($inertes), 'FAC B100 de OGVTO') !== false);
+
+/* UN COMPROBANTE QUE YA NO ESTA PENDIENTE (se pago) no se avisa: no hay nada que
+   corregir, y el aviso creceria para siempre. */
+chequear('si el comprobante ya no esta, no se avisa', 0,
+    count(TarjetasCorporativas::vtosInertes([facturaTC('OGOTRO', 'Z1', '2026-10-01', 1)],
+        $vtoA('2026-11-20'))));
+chequear('y si la cuota sigue, no es inerte', 0,
+    count(TarjetasCorporativas::vtosInertes([$fv], $vtoA('2026-11-20'))));
+
+/* ================================================================
+   LA FACTURA MENSUAL (ABONOS)
+   ================================================================ */
+seccion('marcar como mensual: solo una vinculada y no excluida');
+
+/* Una factura de abono, vinculada, que vence el 31 de octubre: el dia 31 tiene
+   que acotarse en los meses cortos. */
+$abono = facturaTC('OGABO', 'C500', '2026-10-31', 80000);
+$abono['IMPORTE_VTO'] = 100000;   // la cuota entera; el pendiente es menor
+$vincAbo = [Proveedores::clavePago('OGABO', 'FAC', 'C500') => 7];
+
+$filaAbo = TarjetasCorporativas::resolver([$abono], $vincAbo, [], $TARJETAS, [], $HABILES, $MESES,
+    $HOY)['filas'][0];
+$datosAbo = TarjetasCorporativas::datosMarcaMensual($filaAbo);
+
+chequear('el importe es el de la cuota (IMPORTE_VTO), no el pendiente', 100000.0,
+    $datosAbo['IMPORTE']);
+chequear('el dia es el del vencimiento', 31, $datosAbo['DIA']);
+chequear('y se proyecta desde el mes siguiente', '2026-11', $datosAbo['MES_DESDE']);
+chequear('con la tarjeta de la factura', 7, $datosAbo['ID_TARJETA']);
+
+chequearLanza('sin tarjeta vinculada no se puede marcar', function () use ($abono, $TARJETAS,
+        $HABILES, $MESES, $HOY) {
+    TarjetasCorporativas::datosMarcaMensual(TarjetasCorporativas::resolver([$abono], [], [],
+        $TARJETAS, [], $HABILES, $MESES, $HOY)['filas'][0]);
+});
+
+chequearLanza('excluida tampoco', function () use ($abono, $vincAbo, $TARJETAS, $HABILES, $MESES,
+        $HOY) {
+    TarjetasCorporativas::datosMarcaMensual(TarjetasCorporativas::resolver([$abono], $vincAbo,
+        [Proveedores::clavePago('OGABO', 'FAC', 'C500') => ['MOTIVO' => 'x']], $TARJETAS, [],
+        $HABILES, $MESES, $HOY)['filas'][0]);
+});
+
+/* EL VENCIMIENTO VIGENTE: si se corrigio, el dia y el primer mes salen de la
+   fecha corregida. */
+$filaAboEd = TarjetasCorporativas::resolver([$abono], $vincAbo, [], $TARJETAS, [], $HABILES,
+    $MESES, $HOY, [TarjetasCorporativas::claveCuota($abono) => ['COD_PROVEE' => 'OGABO',
+        'T_COMP' => 'FAC', 'N_COMP' => 'C500', 'FECHA_VTO_TANGO' => '2026-10-31',
+        'FECHA_VTO' => '2026-11-15', 'MOTIVO' => null, 'USUARIO_ALTA' => 'x',
+        'FECHA_ALTA' => null]])['filas'][0];
+$datosEd = TarjetasCorporativas::datosMarcaMensual($filaAboEd);
+chequear('con el vencimiento corregido, el dia y el mes salen de la correccion', [15, '2026-12'],
+    [$datosEd['DIA'], $datosEd['MES_DESDE']]);
+
+seccion('la estimacion: desde el mes siguiente, dia acotado, sin correr al habil');
+
+$mensualAbo = array_merge($datosAbo, ['ID' => 1, 'USUARIO_ALTA' => 'sistemas',
+                                      'FECHA_ALTA' => '2026-09-26 10:00']);
+$MESES6 = ['2026-09', '2026-10', '2026-11', '2026-12', '2027-01', '2027-02'];
+$TARJ_TODAS = [7 => array_merge($TARJETAS[7], ['ACTIVA' => true])];
+
+$est = TarjetasCorporativas::estimaciones([$mensualAbo], [$filaAbo], $TARJ_TODAS, [], $MESES6,
+    $HOY)[0];
+
+chequear('empieza en noviembre: septiembre y octubre no',
+    ['2026-11', '2026-12', '2027-01', '2027-02'], array_column($est['meses'], 'mes'));
+chequear('el 31 se acota: 30/11, 31/12 y 28/02', ['2026-11-30', '2026-12-31', '2027-02-28'],
+    [$est['meses'][0]['fecha'], $est['meses'][1]['fecha'], $est['meses'][3]['fecha']]);
+chequear('el 31/01/2027 es domingo y NO se corre al habil', '2027-01-31', $est['meses'][2]['fecha']);
+chequear('el importe es fijo en todos los meses', [100000.0, 100000.0, 100000.0, 100000.0],
+    array_column($est['meses'], 'importe'));
+chequear('y todos proyectan', [true, true, true, true], array_column($est['meses'], 'proyecta'));
+
+seccion('una factura real del mismo proveedor apaga ese mes');
+
+/* LA FACTURA DE DICIEMBRE YA ESTA EN TANGO: la estimacion de diciembre no
+   proyecta, y dice por cual. Cualquier factura del universo, aunque no sume:
+   aca no esta vinculada. */
+$realDic = facturaTC('OGABO', 'C777', '2026-12-31', 100000);
+$filasConReal = TarjetasCorporativas::resolver([$abono, $realDic], $vincAbo, [], $TARJETAS, [],
+    $HABILES, $MESES6, $HOY)['filas'];
+$estR = TarjetasCorporativas::estimaciones([$mensualAbo], $filasConReal, $TARJ_TODAS, [], $MESES6,
+    $HOY)[0];
+
+chequear('diciembre queda reemplazado', [TarjetasCorporativas::EST_REEMPLAZADA, false],
+    [$estR['meses'][1]['estado'], $estR['meses'][1]['proyecta']]);
+chequear('por la factura real, que se nombra aunque no sume', 'FAC C777', $estR['meses'][1]['por']);
+chequear('los otros meses siguen', [true, true, true],
+    [$estR['meses'][0]['proyecta'], $estR['meses'][2]['proyecta'], $estR['meses'][3]['proyecta']]);
+
+$otraDic = facturaTC('OGOTRO', 'X1', '2026-12-10', 5);
+$estOtro = TarjetasCorporativas::estimaciones([$mensualAbo], [$filaAbo, $otraDic], $TARJ_TODAS, [],
+    $MESES6, $HOY)[0];
+chequear('una factura de otro proveedor no la apaga', true, $estOtro['meses'][1]['proyecta']);
+
+seccion('la estimacion se comporta como una factura vinculada');
+
+/* CUBIERTA POR EL RESUMEN DE SU MES: el resumen ya la incluye. */
+$resEne = [7 => ['2027-01' => ['ID' => 90, 'MES' => '2027-01', 'IMPORTE_ARS' => 1.0,
+                               'IMPORTE_USD' => null, 'FECHA_VENCIMIENTO' => '2027-01-11',
+                               'PAGADO' => false]]];
+$estC = TarjetasCorporativas::estimaciones([$mensualAbo], [$filaAbo], $TARJ_TODAS, $resEne,
+    $MESES6, $HOY)[0];
+chequear('enero, con resumen cargado, queda cubierto y no suma',
+    [TarjetasCorporativas::EST_CUBIERTA, false],
+    [$estC['meses'][2]['estado'], $estC['meses'][2]['proyecta']]);
+
+/* GENERA COBERTURA con el % de la tarjeta en su mes. */
+$cobEst = TarjetasCorporativas::cobertura(TarjetasCorporativas::estimacionesComoFilas([$est]),
+    $TARJETAS, [], $HABILES, $MESES6, $HOY);
+chequear('genera cobertura en cada mes que proyecta', 4, count($cobEst));
+chequear('el 10 % de la estimacion', 10000.0, $cobEst[0]['importe']);
+chequear('y se cuenta como estimacion, no como factura', [0, 1],
+    [$cobEst[0]['facturas'], $cobEst[0]['estimaciones']]);
+
+seccion('una estimacion con fecha pasada o sin tarjeta activa no proyecta');
+
+$estHoy = TarjetasCorporativas::estimaciones([$mensualAbo], [$filaAbo], $TARJ_TODAS, [], $MESES6,
+    '2026-11-30')[0];
+chequear('la del mismo dia de hoy ya no proyecta', [TarjetasCorporativas::EST_PASADA, false],
+    [$estHoy['meses'][0]['estado'], $estHoy['meses'][0]['proyecta']]);
+
+$inactiva = [7 => array_merge($TARJETAS[7], ['ACTIVA' => false])];
+$estIn = TarjetasCorporativas::estimaciones([$mensualAbo], [$filaAbo], $inactiva, [], $MESES6,
+    $HOY)[0];
+chequear('con la tarjeta inactiva no proyecta ningun mes', [false, false, false, false],
+    array_column($estIn['meses'], 'proyecta'));
+chequear('y se avisa', 1, count(TarjetasCorporativas::avisosEstimaciones([$estIn])));
+
+$estSinT = TarjetasCorporativas::estimaciones([$mensualAbo], [$filaAbo], [], [], $MESES6, $HOY)[0];
+chequear('una tarjeta que ya no existe, igual', false, $estSinT['TARJETA_OK']);
+
+/* LA FACTURA DE ORIGEN YA PAGADA: la estimacion sigue viva, que es para lo que se
+   guarda una copia. */
+$sinOrigen = TarjetasCorporativas::estimaciones([$mensualAbo], [], $TARJ_TODAS, [], $MESES6, $HOY)[0];
+chequear('con la factura de origen ya pagada, sigue proyectando', [false, true],
+    [$sinOrigen['ORIGEN_PENDIENTE'], $sinOrigen['meses'][0]['proyecta']]);
+
+seccion('una sola estimacion vigente por proveedor');
+
+/* LA RED ES EL INDICE UNICO FILTRADO del script; lo que se fija aca es que la
+   clase lo respete: marcar da de baja la anterior DEL MISMO PROVEEDOR, en la misma
+   transaccion, antes de insertar. */
+$fuenteMen = file_get_contents(__DIR__ . '/../Class/TarjetasMensual.php');
+$posBaja = strpos($fuenteMen, 'WHERE COD_PROVEE = ? AND VIGENTE = 1');
+chequear('marcar da de baja la vigente del proveedor antes de insertar', true,
+    $posBaja !== false && $posBaja < strpos($fuenteMen, 'INSERT INTO dbo.'));
+
+$scriptMen = str_replace("\r\n", "\n",
+    file_get_contents(__DIR__ . '/../sql/cashflow_tarjetas_vto_mensual.sql'));
+chequear('y el script declara una vigente por proveedor', true,
+    strpos($scriptMen, "ON dbo.RO_T_CASHFLOW_TARJETAS_MENSUAL (COD_PROVEE)\n        WHERE VIGENTE = 1")
+        !== false);

@@ -8,7 +8,7 @@ Rama: `feature/logistica-local-parametros-generales`
 
 ## La idea en una línea
 
-**A cuatro fleteros se les paga por hora, con un régimen mensual constante; el valor hora se reajusta cada tres meses por inflación, y el pago sale en dos cuotas iguales, el 2do y el 4to viernes de cada mes.**
+**A cuatro fleteros se les paga por hora, con un régimen mensual constante; el valor hora se reajusta cada tres meses por inflación, y el pago sale en partes iguales en los días del cronograma `LOGISTICA` de *Parámetros › Generales* —por defecto el 2do y el 4to viernes, dos cuotas iguales—.**
 
 ```
 Parámetros › Logística              Parámetros › Generales
@@ -128,7 +128,23 @@ Cambiar la modalidad **no toca ningún mes**: sólo cambia cómo se edita. La pa
 
 ## 3. El cronograma de pagos
 
-**2do y 4to viernes de cada mes.** Si el viernes no es hábil (`RO_T_CALENDARIO.DIA_LABORAL`, conexión `power`), el pago se corre al día hábil **ANTERIOR**.
+**El concepto `LOGISTICA` del cronograma de pagos: por defecto, el 2do y el 4to viernes de cada mes.** Si el día no es hábil (`RO_T_CALENDARIO.DIA_LABORAL`, conexión `power`), el pago se corre al día hábil **ANTERIOR**.
+
+### Es uno de tres cronogramas, y el día ya no está en el código
+
+Desde `feature/cronogramas-tarjetas-corporativas` hay **un cronograma por concepto**, cada uno con su día de la semana y su frecuencia, en *Parámetros › Generales*:
+
+| Concepto | Por defecto | Lo usa |
+| --- | --- | --- |
+| `PROV_LOCALES` | miércoles, quincenal | Cuentas a Pagar Locales (ver `README-proveedores-locales.md`) |
+| `LOGISTICA` | **viernes, quincenal** | Esta pestaña |
+| `SUPERVISORAS` | lunes, semanal | El efectivo de Gastos Supervisoras (ver `README-pagos-tarjetas.md`) |
+
+*Quincenal* es el 2do y el 4to de ese día del mes; *semanal*, todos los de ese día (cuatro o cinco). El día y la frecuencia son parámetros de `RO_T_CASHFLOW_PARAMETROS` (`cronograma_logistica_dia` y `cronograma_logistica_frecuencia`, módulo `GENERALES`, grupo `CRONOGRAMA`) que siembra `sql/cashflow_cronograma_conceptos.sql`; sin el script se usa el defecto con un aviso. **`CronogramaPagos` ya no tiene el viernes escrito**: recibe la configuración.
+
+**Con el valor por defecto, Logística no cambia un peso ni una fecha.** Lo fija una prueba de no regresión contra una foto que sacó el código anterior (ver *Pruebas*).
+
+**Cambiar el día o la frecuencia da de baja los overrides vigentes de Logística desde el mes actual**, después de una confirmación que dice cuántos son: con otro día el número de pago apunta a otra fecha, y el override quedaría colgado de un pago que ya no es el mismo. Los overrides llevan el concepto (`RO_T_CASHFLOW_CRONOGRAMA_PAGO_EDIT.TIPO`); los que existían antes de la columna son todos de Logística, y el script les pone `LOGISTICA`.
 
 ### El corrimiento va para el otro lado que en Ventas, y no es un detalle
 
@@ -145,9 +161,9 @@ Las dos reglas son correctas y van en direcciones opuestas, así que **no compar
 
 Si la conexión `power` no responde, el cronograma se resuelve entero con ese fallback y se avisa: sin eso, una caída de ese servidor dejaría la pestaña de Parámetros y la fila del tablero en blanco por no poder decidir si un viernes es feriado.
 
-### Siempre son exactamente dos pagos por mes
+### En quincenal, siempre son exactamente dos pagos por mes
 
-También en un mes con cinco viernes. El 2do y el 4to están definidos en cualquier mes —el más corto posible, un febrero de 28 días que arranca lunes, tiene exactamente cuatro— así que no hay un caso en el que falte uno. **El quinto viernes, cuando existe, no es un pago**: el acuerdo es quincenal, no semanal.
+También en un mes con cinco viernes. El 2do y el 4to están definidos en cualquier mes —el más corto posible, un febrero de 28 días que arranca lunes, tiene exactamente cuatro— así que no hay un caso en el que falte uno. **El quinto viernes, cuando existe, no es un pago**: el acuerdo es quincenal, no semanal. Si alguna vez se pasa Logística a *semanal*, el mes tiene cuatro o cinco pagos y el importe se reparte en esa cantidad de partes.
 
 > Es el error que la prueba del mes con cinco viernes existe para atrapar: *"el cuarto viernes"* y *"el último viernes"* coinciden en tres de cada cuatro meses.
 
@@ -244,9 +260,9 @@ Si aportara cero sería indistinguible de un mes que proyecta cero. Un total sob
 
 ## 6. Cómo cae cada mitad en el eje del tablero
 
-`importe del mes = HORAS_MES × valor hora del mes`, y **se paga mitad y mitad** en los dos pagos del mes.
+`importe del mes = HORAS_MES × valor hora del mes`, y **se paga en partes iguales** entre los pagos del mes: con el cronograma por defecto, **mitad y mitad**. La cantidad de partes la da el cronograma de ese mes (`CronogramaPagos::parte()`), no una constante.
 
-Las dos mitades **no se redondean**: el redondeo es presentación, y redondear acá haría que un importe impar perdiera un centavo por mes, todos los meses.
+Las partes **no se redondean**: el redondeo es presentación, y redondear acá haría que un importe impar perdiera un centavo por mes, todos los meses.
 
 ### Un mes partido por el final del tramo diario lleva media columna
 
@@ -414,14 +430,14 @@ La pestaña pasa por `AuthCashflow::puede('logistica_local')`, que busca la clav
 
 ```
 php cashflow/tests/run.php logistica     los tres archivos del módulo
-php cashflow/tests/run.php cronograma    el cronograma de viernes
+php cashflow/tests/run.php cronograma    el cronograma de pagos por concepto
 ```
 
 | Archivo | Qué fija |
 | --- | --- |
-| `tests/test_cronograma_pagos.php` | Qué viernes son el 2do y el 4to, el **mes con cinco viernes**, el corrimiento **hacia atrás**, el feriado encadenado, el **cruce de mes y de año**, el fallback de calendario con su aviso, el override (y que **no** se corre al día hábil), y el cronograma completo del horizonte con **los tres feriados reales** que caen en un 2do o 4to viernes: 25/12/2026, 26/03/2027 y 09/07/2027 |
+| `tests/test_cronograma_pagos.php` | Quincenal y semanal para los siete días de la semana, el mes de cinco lunes, el corrimiento al hábil anterior en los tres conceptos, que el override de un concepto no toque a los otros, el reparto en 2, 4 y 5 partes sin redondear, la baja de overrides al cambiar día o frecuencia, el próximo pago para Proveedores Locales; y lo de siempre: qué viernes son el 2do y el 4to, el **mes con cinco viernes**, el corrimiento **hacia atrás**, el feriado encadenado, el **cruce de mes y de año**, el fallback de calendario con su aviso, el override (y que **no** se corre al día hábil), y el cronograma completo del horizonte con **los tres feriados reales** que caen en un 2do o 4to viernes: 25/12/2026, 26/03/2027 y 09/07/2027 |
 | `tests/test_logistica_valor_hora.php` | Que un ajuste suma **su mes y los dos anteriores** (probado con inflación **variable**, porque con constante las tres cuentas posibles dan lo mismo), la aritmética de meses cruzando año, la inflación constante y variable, que **la base se corre**, el **histórico real de los tres fleteros al centavo**, los tres motivos de `null` y la ventana de meses editables |
-| `tests/test_logistica_planilla.php` | El reparto **mitad y mitad** (también con centavos impares), la **exclusión de los pagos ≤ hoy** (incluido el de hoy), que **la columna de hoy queda vacía**, el **mes partido por el final del tramo** —media columna mensual—, que las tres vistas siguen siendo **sumables**, los cinco casos de `null` y los totales |
+| `tests/test_logistica_planilla.php` | **La no regresión**: con el cronograma `LOGISTICA` por defecto, cada pago de una planilla de dos fleteros, doce meses, siete feriados y un override da la misma fecha, el mismo importe y el mismo estado que la foto que sacó el código anterior. El reparto **mitad y mitad** (también con centavos impares), la **exclusión de los pagos ≤ hoy** (incluido el de hoy), que **la columna de hoy queda vacía**, el **mes partido por el final del tramo** —media columna mensual—, que las tres vistas siguen siendo **sumables**, los cinco casos de `null` y los totales |
 | `tests/test_logistica_provider.php` | El registro, que **no declara componentes**, la serie contra el eje **después de `normalizar()`**, los tres casos de fila en cero con su aviso, que un módulo que lanza **no tumba el tablero**, y el menú |
 | `tests/test_menu.php` | Que `logistica_local` dejó de ser un placeholder y que la categoría Proveedores pasa a 2 de 2. Y, nuevo, que **sin sesión el menú filtrado viene vacío**: falla cerrada |
 | `tests/test_providers.php` | 18 módulos disponibles (era 17) |
@@ -438,8 +454,9 @@ php cashflow/tests/run.php cronograma    el cronograma de viernes
 ```
 Class/
   Inflacion.php              el % de cada mes y la suma de a tres. Puro + lectura
-  CronogramaPagos.php        2do y 4to viernes, corrimiento y override. PURO
-  CronogramaDatos.php        el calendario bancario y los overrides. Lectura
+  CronogramaPagos.php        un cronograma por concepto: día, frecuencia, corrimiento,
+                             override, reparto y próximo pago. PURO
+  CronogramaDatos.php        la configuración, el calendario bancario y los overrides
   LogisticaValorHora.php     el ajuste trimestral. PURO
   LogisticaPlanilla.php      importes, mitades y motivos. PURO
   Logistica.php              el maestro de fleteros y la lectura de los insumos
@@ -483,5 +500,4 @@ tests/
 - **El permiso `cashflow.tab.logistica_local` hay que darlo a mano** en Gestión de Usuarios. Este repo no siembra permisos para ninguna pestaña.
 - **La exclusión de los cuatro fleteros de Cuentas a Pagar Locales es manual** y hay que hacerla, o el tablero cuenta su pago dos veces. El módulo avisa mientras falte.
 - **Las horas son constantes en todos los meses.** Si algún fletero pasa a tener un régimen distinto por mes, hoy no hay dónde cargarlo: habría que agregar una tabla por (fletero, mes), y la planilla ya está preparada para mostrar un importe distinto por mes.
-- **El cronograma es uno solo** y hoy lo usa sólo Logística Local. Si otro egreso se paga con otro calendario, hará falta un cronograma por circuito, no un segundo juego de fechas en la misma tabla.
 - **`RO_T_CALENDARIO` llega hasta el 31/12/2027.** Cubre el horizonte actual, pero en cuanto `horizonte_meses` lo pase, las fechas se resuelven por lunes-a-viernes y los feriados dejan de correr pagos. Se avisa, pero hay que extender la tabla.

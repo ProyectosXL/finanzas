@@ -597,3 +597,49 @@ chequear('y pone el total al final', true,
     strpos($jsTarj, 'El total del período, en la última columna') !== false
     || strpos($jsTarj, "html += '<td class=\"currency fw-bold\">' + plata(vistas.total(totales))")
        !== false);
+
+/* ================================================================
+   LAS ESTIMACIONES MENSUALES ENTRAN EN CORPORATIVAS, Y EL INVARIANTE SIGUE
+   ================================================================ */
+seccion('una estimacion mensual suma en CORPORATIVAS y en TOTAL, anotada');
+
+/* Las estimaciones mensuales viajan en los pagos de Corporativas con tipo
+   ESTIMACION, igual que una factura. Lo que se fija: que sumen en CORPORATIVAS, que
+   el invariante TOTAL = SUPERVISORAS + CORPORATIVAS + SOCIOS se siga cumpliendo
+   columna por columna, y que la celda diga que parte es estimacion. */
+$datosEst = datosTP(
+    ['pagos' => [['parte' => 'EFECTIVO', 'supervisora' => 'ANA', 'mes' => '2026-10',
+                  'fecha' => '2026-10-05', 'importe' => 1000]]],
+    ['pagos' => [
+        ['tipo' => 'FACTURA', 'fecha' => '2026-10-05', 'importe' => 100000],
+        ['tipo' => 'ESTIMACION', 'fecha' => '2026-10-20', 'importe' => 30000, 'id_estimacion' => 4,
+         'id_tarjeta' => 7, 'mes' => '2026-10', 'proveedor' => 'ABONO SA'],
+        ['tipo' => 'ESTIMACION', 'fecha' => '2026-11-20', 'importe' => 30000, 'id_estimacion' => 4,
+         'id_tarjeta' => 7, 'mes' => '2026-11', 'proveedor' => 'ABONO SA']
+    ]]
+);
+
+$sEst = proveedorTP($datosEst)->series($H);
+
+chequear('CORPORATIVAS lleva las facturas y las estimaciones', 160000.0,
+    totalTP($sEst['CORPORATIVAS']));
+chequear('la estimacion de octubre cae en su dia', 30000.0, $sEst['CORPORATIVAS']['dias']['2026-10-20']);
+
+$malasEst = [];
+
+foreach (['dias', 'meses'] as $rama) {
+    foreach ($sEst['TOTAL'][$rama] as $clave => $valor) {
+        if (abs($valor - ($sEst['SUPERVISORAS'][$rama][$clave] + $sEst['CORPORATIVAS'][$rama][$clave]
+                + $sEst['SOCIOS'][$rama][$clave])) > 0.001) {
+            $malasEst[] = $rama . '|' . $clave;
+        }
+    }
+}
+
+chequear('el invariante se sigue cumpliendo en todas las columnas', [], $malasEst);
+chequear('la celda de la estimacion queda anotada', true,
+    isset($sEst['TOTAL']['detalle']['DIA|2026-10-20'])
+    && strpos($sEst['TOTAL']['detalle']['DIA|2026-10-20']['nota'], 'Estimación mensual de ABONO SA')
+        !== false);
+chequear('con el importe de la estimacion', 30000.0,
+    $sEst['TOTAL']['detalle']['DIA|2026-10-20']['importe']);

@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/LogisticaValorHora.php';
+require_once __DIR__ . '/CronogramaPagos.php';
 
 /**
  * LogisticaPlanilla
@@ -15,7 +16,8 @@ require_once __DIR__ . '/LogisticaValorHora.php';
  * LA CUENTA, EN TRES LINEAS
  * -------------------------
  *   importe del mes = HORAS_MES x valor hora DE ESE MES
- *   se paga MITAD Y MITAD en los dos pagos del mes (2do y 4to viernes)
+ *   se paga EN PARTES IGUALES en los pagos del mes del cronograma LOGISTICA
+ *   (con su valor por defecto, el 2do y el 4to viernes: mitad y mitad)
  *   un pago con fecha ANTERIOR O IGUAL A HOY no se proyecta
  *
  * Los importes son FINALES: sin IVA y sin ningun otro concepto. Es lo que sale
@@ -65,9 +67,6 @@ require_once __DIR__ . '/LogisticaValorHora.php';
  * cronograma y el mapa de inflacion, y devuelve numeros.
  */
 class LogisticaPlanilla {
-
-    /** Cuantos pagos tiene un mes. Ver CronogramaPagos */
-    const PAGOS_POR_MES = 2;
 
     /* Por que un mes no proyecta. Los de valor hora salen de
        LogisticaValorHora; este es el propio de la planilla. */
@@ -144,7 +143,7 @@ class LogisticaPlanilla {
     }
 
     /**
-     * Una fila de la planilla: un fletero, sus doce meses y sus veinticuatro
+     * Una fila de la planilla: un fletero, sus doce meses y todos sus
      * pagos.
      *
      * @param array $f Fila del fletero
@@ -256,8 +255,7 @@ class LogisticaPlanilla {
     }
 
     /**
-     * Una celda de la planilla: el valor hora del mes, el importe y sus dos
-     * pagos.
+     * Una celda de la planilla: el valor hora del mes, el importe y sus pagos.
      *
      * @param array $detalle Lo que devolvio LogisticaValorHora::delMes()
      * @param float|null $horas
@@ -297,15 +295,18 @@ class LogisticaPlanilla {
 
         $delMes = isset($porMes[$mes]) ? $porMes[$mes] : [];
 
-        /* SIEMPRE SE DIBUJAN LOS DOS PAGOS, tambien cuando no hay importe: la
-           fecha de pago es un dato del cronograma y no del fletero, y una
-           planilla que esconde la fecha cuando falta el importe obliga a ir a
-           buscarla a otra pantalla. */
+        /* SIEMPRE SE DIBUJAN TODOS LOS PAGOS DEL MES, tambien cuando no hay
+           importe: la fecha de pago es un dato del cronograma y no del fletero,
+           y una planilla que esconde la fecha cuando falta el importe obliga a
+           ir a buscarla a otra pantalla. */
         foreach ($delMes as $nro => $pago) {
-            /* LA MITAD Y LA MITAD. No se redondea el medio importe: el redondeo
-               es presentacion, y redondear aca haria que los dos pagos no sumen
-               el importe del mes en los centavos. */
-            $importe = ($importeMes === null) ? null : $importeMes / self::PAGOS_POR_MES;
+            /* PARTES IGUALES ENTRE LOS PAGOS DEL MES: mitad y mitad con el
+               cronograma de siempre, un cuarto o un quinto si alguien lo pasa a
+               semanal. Cuantos son lo dice el cronograma de ESE mes y no una
+               constante: con el viernes escrito en el codigo eran siempre dos, y
+               ahora el dia y la frecuencia salen de Parametros -> Generales. No
+               se redondea: ver CronogramaPagos::parte(). */
+            $importe = CronogramaPagos::parte($importeMes, count($delMes));
 
             /* UN PAGO CON FECHA ANTERIOR O IGUAL A HOY YA SE HIZO. Ver el
                encabezado: no se proyecta y no se avisa, pero se ve marcado. */
@@ -372,8 +373,8 @@ class LogisticaPlanilla {
             $mapa[$p['mes']][intval($p['nro'])] = $p;
         }
 
-        /* Los dos pagos de un mes van EN ORDEN: la planilla los dibuja asi y el
-           reparto mitad/mitad se lee mal si el 4to viernes aparece primero. */
+        /* Los pagos de un mes van EN ORDEN: la planilla los dibuja asi y el
+           reparto se lee mal si el 4to pago aparece antes que el 2do. */
         foreach ($mapa as $mes => $delMes) {
             ksort($mapa[$mes]);
         }

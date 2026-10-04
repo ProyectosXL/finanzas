@@ -26,16 +26,27 @@ require_once __DIR__ . '/ProveedoresCategorias.php';
  * reproduce a Tango al centavo -con la tabla de signos de las imputaciones, que es
  * la parte facil de hacer mal- y duplicarla seria duplicar ese riesgo.
  *
- * VAN DIRECTO AL FLUJO
- * --------------------
- * No hace falta marcarlas ni vincularlas para que entren: son deuda real y ya
- * emitida. Vincularlas a una tarjeta cambia DOS cosas -generan cobertura y las
- * puede reemplazar un resumen- pero no si entran.
+ * SOLO LAS VINCULADAS ENTRAN AL FLUJO
+ * -----------------------------------
+ * Una factura SIN TARJETA VINCULADA NO SE PROYECTA, este vencida o no: se ve en la
+ * grilla con su pendiente, su vencimiento y su estado, pero no suma en el eje, ni
+ * en el pie, ni en la serie CORPORATIVAS del tablero. Sin tarjeta no se sabe en
+ * que debito sale, y una factura de tarjeta se paga en el debito de su tarjeta.
+ *
+ * Hasta feature/cronogramas-tarjetas-corporativas las no vencidas entraban por su
+ * vencimiento de Tango, y con eso venia el aviso de POSIBLE DOBLE CONTEO: una no
+ * vinculada en un mes con resumen podia estar incluida en el resumen. Ya no suman,
+ * asi que el riesgo no existe y el aviso se fue; el aviso que queda dice cuantas
+ * son y por cuanto, para que se vinculen.
+ *
+ * Vincularla a una tarjeta hace que entre, que genere cobertura y que un resumen
+ * la pueda reemplazar.
  *
  * LA FECHA ES EL VENCIMIENTO DE TANGO
  * -----------------------------------
  * Y NO la jerarquia de Proveedores Locales, que prefiere la fecha de pago cargada
- * a mano. Es una diferencia deliberada: esta pestana es la dueña del circuito de
+ * a mano y desde feature/cronogramas-tarjetas-corporativas reubica en el
+ * cronograma de pagos. Se lee FECHA_VTO, que getPendientes() deja siempre crudo. Es una diferencia deliberada: esta pestana es la dueña del circuito de
  * tarjeta corporativa, y el pago de una tarjeta lo fija el banco, no una fecha que
  * alguien cargo pensando en un echeq. La consecuencia hay que tenerla presente: la
  * MISMA factura puede verse en fechas distintas en las dos pestanas. Ver
@@ -53,11 +64,10 @@ require_once __DIR__ . '/ProveedoresCategorias.php';
  *                                        pisa el resumen de ese mes, igual que las
  *                                        facturas que vencen ahi.
  *
- *   vencida Y SIN VINCULAR             -> NO se proyecta, y se avisa con el
- *                                        conteo y el importe. Sin tarjeta no hay
- *                                        fecha de pago, y apilarla en el dia uno
- *                                        seria inventar una: afirmaria que se paga
- *                                        hoy.
+ *   sin vincular, vencida o no         -> NO se proyecta (ver mas arriba), y se
+ *                                        avisa con el conteo y el importe. Apilar
+ *                                        una vencida en el dia uno seria inventar
+ *                                        una fecha: afirmaria que se paga hoy.
  *
  * SOLO EN PESOS. Las facturas de Tango de estos proveedores estan en pesos; la
  * consulta de getPendientes() ademas deja afuera a los de clausula de moneda
@@ -79,11 +89,6 @@ require_once __DIR__ . '/ProveedoresCategorias.php';
  * El resumen es lo que el banco va a debitar: si esta cargado, las facturas
  * vinculadas que vencen en ese mes ya estan adentro. Siguen viendose en la grilla,
  * marcadas, pero no suman.
- *
- * LAS NO VINCULADAS DEL MISMO MES NO SE TOCAN, y ahi hay un riesgo que se avisa:
- * pueden estar incluidas en el resumen y contarse dos veces. No se puede resolver
- * por codigo -saber si un consumo del resumen corresponde a una factura concreta
- * es mirar el resumen- asi que se avisa y se resuelve vinculando o excluyendo.
  */
 class TarjetasCorporativas {
 
@@ -94,7 +99,9 @@ class TarjetasCorporativas {
     const OK = 'OK';
     const EXCLUIDA = 'EXCLUIDA';
     const CUBIERTA = 'CUBIERTA';
-    const VENCIDA_SIN_TARJETA = 'VENCIDA_SIN_TARJETA';
+    /* Sin tarjeta vinculada, vencida o no. Era VENCIDA_SIN_TARJETA cuando las no
+       vencidas entraban igual. */
+    const SIN_TARJETA = 'SIN_TARJETA';
     const SIN_FECHA = 'SIN_FECHA';
 
     /** De donde sale la fecha con la que entra al eje */
@@ -165,6 +172,133 @@ class TarjetasCorporativas {
             isset($f['N_COMP']) ? $f['N_COMP'] : '');
     }
 
+    /**
+     * La clave de una CUOTA: el comprobante mas su vencimiento de Tango.
+     *
+     * ES LA CLAVE DE LA CORRECCION DEL VENCIMIENTO, y no la del comprobante: una
+     * factura en cuotas tiene una fila por vencimiento y cada una se corrige por
+     * separado. El vinculo a la tarjeta, en cambio, es del comprobante entero
+     * (clave()).
+     *
+     * Estatica y pura.
+     *
+     * @param array $f Una fila de getPendientes(), o de la tabla de correcciones
+     * @return string 'COD|T|N|Y-m-d'
+     */
+    public static function claveCuota($f) {
+        $vto = isset($f['FECHA_VTO_TANGO']) ? $f['FECHA_VTO_TANGO']
+            : (isset($f['FECHA_VTO']) ? $f['FECHA_VTO'] : '');
+
+        return self::clave($f) . '|' . substr((string) $vto, 0, 10);
+    }
+
+    /** El vencimiento que vale en una fila resuelta: el corregido o el de Tango */
+    public static function vtoVigente($fila) {
+        return !empty($fila['FECHA_VTO_VIGENTE']) ? $fila['FECHA_VTO_VIGENTE']
+            : (isset($fila['FECHA_VTO']) ? $fila['FECHA_VTO'] : null);
+    }
+
+    /**
+     * Valida el vencimiento corregido de una cuota.
+     *
+     * LA FECHA MINIMA ES HOY, y la que vale es esta validacion: el min del input
+     * es comodidad, y el endpoint es alcanzable sin pasar por la pantalla.
+     * Corregir a una fecha pasada seria decir que la cuota ya se debito, y para
+     * eso no hace falta corregir nada: sale de pendientes cuando se paga.
+     *
+     * Estatica y pura.
+     *
+     * @param mixed $fecha
+     * @param string $hoy 'Y-m-d'
+     * @return string 'Y-m-d'
+     */
+    public static function validarVtoEditado($fecha, $hoy) {
+        $f = substr(trim((string) $fecha), 0, 10);
+        $d = DateTime::createFromFormat('Y-m-d', $f);
+
+        if (!$d || $d->format('Y-m-d') !== $f) {
+            throw new Exception("Fecha inválida: '$fecha'. Se esperaba el formato AAAA-MM-DD.");
+        }
+
+        if ($f < substr((string) $hoy, 0, 10)) {
+            throw new Exception('El vencimiento corregido no puede ser anterior a hoy ('
+                . self::corto(substr((string) $hoy, 0, 10)) . '): una cuota que ya se debitó '
+                . 'sale de pendientes sola.');
+        }
+
+        return $f;
+    }
+
+    /**
+     * Las correcciones de vencimiento que ya no tienen a que cuota aplicarse.
+     *
+     * PASA CUANDO TANGO CAMBIA EL VENCIMIENTO de esa cuota: el comprobante sigue
+     * pendiente en esta pestana, pero ninguna de sus cuotas tiene el FECHA_VTO con
+     * el que se guardo la correccion. Queda inerte -no se reapunta sola: el
+     * vencimiento nuevo de Tango puede ser justamente la correccion- y se avisa
+     * para que alguien la de de baja.
+     *
+     * LAS DE UN COMPROBANTE QUE YA NO ESTA PENDIENTE NO SE AVISAN: se pago, o
+     * cambio de forma, y la correccion no tiene nada que corregir. Avisarlas haria
+     * crecer el aviso para siempre con cuotas que ya se debitaron.
+     *
+     * Estatica y pura.
+     *
+     * @param array $facturas Lo que devolvio universo()
+     * @param array $vtos Mapa claveCuota() => ['COD_PROVEE', 'T_COMP', 'N_COMP',
+     *              'FECHA_VTO_TANGO', 'FECHA_VTO', ...]
+     * @return array Lista de las correcciones inertes
+     */
+    public static function vtosInertes($facturas, $vtos) {
+        $cuotas = [];
+        $comprobantes = [];
+
+        foreach ($facturas as $f) {
+            $cuotas[self::claveCuota($f)] = true;
+            $comprobantes[self::clave($f)] = true;
+        }
+
+        $v = [];
+
+        foreach ($vtos as $claveCuota => $edit) {
+            if (isset($cuotas[$claveCuota])) {
+                continue;
+            }
+
+            if (isset($comprobantes[self::clave($edit)])) {
+                $v[] = $edit;
+            }
+        }
+
+        return $v;
+    }
+
+    /**
+     * El aviso de las correcciones inertes, con los comprobantes.
+     *
+     * @param array $inertes Lo que devolvio vtosInertes()
+     * @return string '' si no hay
+     */
+    public static function avisoVtosInertes($inertes) {
+        if (empty($inertes)) {
+            return '';
+        }
+
+        $nombres = [];
+
+        foreach ($inertes as $i) {
+            $nombres[] = trim($i['T_COMP'] . ' ' . $i['N_COMP']) . ' de ' . $i['COD_PROVEE']
+                . ' (vto. Tango ' . self::corto($i['FECHA_VTO_TANGO']) . ')';
+        }
+
+        return count($inertes) . ' vencimiento(s) corregido(s) ya no se aplican: Tango cambió el '
+            . 'vencimiento de esa cuota y la corrección quedó sin cuota a la que aplicarse. '
+            . 'Son: ' . implode('; ', array_slice($nombres, 0, 5))
+            . (count($nombres) > 5 ? '; y ' . (count($nombres) - 5) . ' más' : '')
+            . '. Dalos de baja en la lista de abajo de la grilla, y si hace falta corregí el '
+            . 'vencimiento nuevo.';
+    }
+
     /* ====================================================================
        LA RESOLUCION
        ==================================================================== */
@@ -183,8 +317,19 @@ class TarjetasCorporativas {
      *      una factura excluida que ademas estuviera cubierta por un resumen se
      *      contaria en la serie informativa Y en el resumen.
      *   2. CUBIERTA por el resumen de su tarjeta y su mes.
-     *   3. VENCIDA_SIN_TARJETA.
+     *   3. SIN_TARJETA: sin tarjeta vinculada, vencida o no.
      *   4. entra, en su fecha.
+     *
+     * EL VENCIMIENTO VIGENTE, NO EL DE TANGO: si alguien corrigio el vencimiento
+     * de una cuota en esta pestana ($vtos), la fecha corregida reemplaza a
+     * FECHA_VTO en TODA la logica -si esta vencida, la reubicacion al proximo pago
+     * de la tarjeta, el mes de pago, la cobertura y el reemplazo por resumen-. Una
+     * vencida que se corrige a una fecha futura deja de estar vencida. Es porque
+     * quien carga en Tango ya no pone el vencimiento de la factura sino el del
+     * resumen en el que se paga: corregirlo es decir en que debito cae.
+     *
+     * FECHA_VTO SIGUE SIENDO EL DE TANGO en la fila -es la columna VTO TANGO y la
+     * clave de la correccion- y el que vale viaja en FECHA_VTO_VIGENTE.
      *
      * Estatica y pura.
      *
@@ -196,10 +341,12 @@ class TarjetasCorporativas {
      * @param array $habiles Mapa 'Y-m-d' => bool
      * @param array $meses Los meses del horizonte, 'Y-m'
      * @param string $hoy 'Y-m-d'
+     * @param array $vtos Mapa claveCuota() => ['FECHA_VTO', 'MOTIVO', 'USUARIO_ALTA',
+     *              'FECHA_ALTA']: los vencimientos corregidos vigentes
      * @return array ['filas' => [...], 'faltan_calendario' => ['Y-m']]
      */
     public static function resolver($facturas, $vinculos, $excluidas, $tarjetas,
-                                    $resumenes, $habiles, $meses, $hoy) {
+                                    $resumenes, $habiles, $meses, $hoy, $vtos = []) {
         $hoyStr = substr((string) $hoy, 0, 10);
         $filas = [];
         $faltan = [];
@@ -240,11 +387,23 @@ class TarjetasCorporativas {
                 'IMPORTE' => round(floatval($f['IMPORTE_PENDIENTE']), 2)
             ]);
 
-            $fechaVto = isset($f['FECHA_VTO']) ? $f['FECHA_VTO'] : null;
+            /* EL VENCIMIENTO VIGENTE: el corregido en esta pestana si lo hay, si
+               no el de Tango. Ver el encabezado del metodo. */
+            $fechaTango = isset($f['FECHA_VTO']) ? $f['FECHA_VTO'] : null;
+            $edit = isset($vtos[self::claveCuota($f)]) ? $vtos[self::claveCuota($f)] : null;
+            $fechaVto = ($edit !== null && !empty($edit['FECHA_VTO'])) ? $edit['FECHA_VTO'] : $fechaTango;
+
+            $fila['CLAVE_CUOTA'] = self::claveCuota($f);
+            $fila['FECHA_VTO_VIGENTE'] = $fechaVto;
+            $fila['VTO_EDITADO'] = ($fechaVto !== $fechaTango);
+            $fila['VTO_EDIT_MOTIVO'] = $edit ? $edit['MOTIVO'] : null;
+            $fila['VTO_EDIT_USUARIO'] = $edit ? $edit['USUARIO_ALTA'] : null;
+            $fila['VTO_EDIT_FECHA'] = $edit ? $edit['FECHA_ALTA'] : null;
+
             $fila['VENCIDA'] = ($fechaVto !== null && $fechaVto < $hoyStr);
 
-            /* LA FECHA: el vencimiento de Tango, salvo que este vencida y
-               vinculada, que se reubica en el proximo pago de su tarjeta. */
+            /* LA FECHA: el vencimiento vigente, salvo que este vencido y la
+               factura vinculada, que se reubica en el proximo pago de su tarjeta. */
             $fila['FECHA'] = $fechaVto;
             $fila['FECHA_ORIGEN'] = self::FECHA_VTO;
             $fila['MES_PAGO'] = ($fechaVto === null) ? null : substr($fechaVto, 0, 7);
@@ -317,11 +476,10 @@ class TarjetasCorporativas {
             return self::CUBIERTA;
         }
 
-        /* VENCIDA Y SIN TARJETA: no se proyecta. Sin tarjeta no hay fecha de pago,
-           y el vencimiento de Tango ya paso, asi que no queda ninguna fecha que
-           no sea inventada. */
-        if (!empty($fila['VENCIDA']) && empty($fila['ID_TARJETA'])) {
-            return self::VENCIDA_SIN_TARJETA;
+        /* SIN TARJETA: no se proyecta, este vencida o no. Sin tarjeta no se sabe
+           en que debito sale. Ver el encabezado. */
+        if (empty($fila['ID_TARJETA'])) {
+            return self::SIN_TARJETA;
         }
 
         if (empty($fila['FECHA'])) {
@@ -356,25 +514,32 @@ class TarjetasCorporativas {
                     . 'importe ya incluye esta factura, así que no suma aparte. Se sigue viendo '
                     . 'para poder controlarla contra el resumen.';
 
-            case self::VENCIDA_SIN_TARJETA:
-                return 'Venció el ' . self::corto($fila['FECHA_VTO']) . ' y no está vinculada a '
-                    . 'ninguna tarjeta, así que no hay fecha de pago con la que proyectarla. '
-                    . 'Vinculala a una tarjeta para que entre al flujo: sale en el próximo '
-                    . 'vencimiento de esa tarjeta. No se apila en el primer día del eje, porque '
-                    . 'eso afirmaría que se paga hoy.';
+            case self::SIN_TARJETA:
+                return (!empty($fila['VENCIDA'])
+                        ? 'Venció el ' . self::corto($fila['FECHA']) . ' y no '
+                        : 'Vence el ' . self::corto($fila['FECHA']) . ' pero no ')
+                    . 'está vinculada a ninguna tarjeta, así que NO entra al flujo: sin tarjeta '
+                    . 'no se sabe en qué débito sale. Vinculala a una tarjeta para que entre'
+                    . (!empty($fila['VENCIDA']) ? ', en el próximo vencimiento de esa tarjeta.' : '.');
 
             case self::SIN_FECHA:
                 return 'No tiene fecha de vencimiento en Tango y no se pudo ubicar en el eje.';
         }
 
+        $corregido = empty($fila['VTO_EDITADO']) ? ''
+            : ' (vencimiento corregido en esta pestaña; en Tango vence el '
+              . self::corto($fila['FECHA_VTO']) . ')';
+
         if (!empty($fila['REUBICADA'])) {
-            return 'Venció el ' . self::corto($fila['FECHA_VTO']) . ' y sale en el próximo pago '
-                . 'de su tarjeta, el ' . self::corto($fila['FECHA']) . ': una tarjeta se paga una '
-                . 'vez por mes.';
+            return 'Venció el ' . self::corto(self::vtoVigente($fila)) . $corregido
+                . ' y sale en el próximo pago de su tarjeta, el ' . self::corto($fila['FECHA'])
+                . ': una tarjeta se paga una vez por mes.';
         }
 
-        return 'Entra por su fecha de vencimiento de Tango, el '
-            . self::corto($fila['FECHA']) . '.';
+        return empty($fila['VTO_EDITADO'])
+            ? 'Entra por su fecha de vencimiento de Tango, el ' . self::corto($fila['FECHA']) . '.'
+            : 'Entra por su vencimiento corregido, el ' . self::corto($fila['FECHA'])
+              . '. En Tango vence el ' . self::corto($fila['FECHA_VTO']) . '.';
     }
 
     /* ====================================================================
@@ -390,6 +555,10 @@ class TarjetasCorporativas {
      * SOBRE LAS VINCULADAS Y NO EXCLUIDAS, Y NO CUBIERTAS POR UN RESUMEN. Las tres
      * exclusiones son por el mismo motivo: la cobertura acompaña a un importe que
      * esta en la fila, y un importe que no esta no necesita cobertura.
+     *
+     * LAS ESTIMACIONES MENSUALES QUE PROYECTAN TAMBIEN SON BASE: se comportan como
+     * una factura vinculada de su tarjeta y su mes. Llegan como filas con
+     * ESTIMACION => true (estimacionesComoFilas()) y se cuentan aparte.
      *
      * SE UBICA EN EL DIA_VENCIMIENTO DE LA TARJETA, no en la fecha de cada
      * factura: es un gasto de la tarjeta, no de la factura, y la tarjeta se debita
@@ -428,11 +597,11 @@ class TarjetasCorporativas {
             $mes = $f['MES_PAGO'];
 
             if (!isset($base[$id][$mes])) {
-                $base[$id][$mes] = ['importe' => 0.0, 'facturas' => 0];
+                $base[$id][$mes] = ['importe' => 0.0, 'facturas' => 0, 'estimaciones' => 0];
             }
 
             $base[$id][$mes]['importe'] += $f['IMPORTE'];
-            $base[$id][$mes]['facturas']++;
+            $base[$id][$mes][empty($f['ESTIMACION']) ? 'facturas' : 'estimaciones']++;
         }
 
         $v = [];
@@ -470,6 +639,7 @@ class TarjetasCorporativas {
                     'pct' => $pct,
                     'importe' => $importe,
                     'facturas' => $b['facturas'],
+                    'estimaciones' => $b['estimaciones'],
                     'fecha' => $vto['fecha'],
                     'proyecta' => !$vencida,
                     'motivo' => $vencida
@@ -478,7 +648,9 @@ class TarjetasCorporativas {
                         : null,
                     'tooltip' => 'Cobertura gastos excepcionales: ' . self::pct($pct) . ' % de '
                         . self::plata($b['importe']) . ' en ' . $b['facturas'] . ' factura(s) '
-                        . 'vinculadas que se pagan en ' . $mes . '. '
+                        . 'vinculadas' . ($b['estimaciones'] > 0
+                            ? ' y ' . $b['estimaciones'] . ' estimación(es) mensual(es)' : '')
+                        . ' que se pagan en ' . $mes . '. '
                         . TarjetasVencimiento::explicar($vto)
                 ];
             }
@@ -565,6 +737,246 @@ class TarjetasCorporativas {
     }
 
     /* ====================================================================
+       LAS ESTIMACIONES MENSUALES
+
+       Para las facturas que se repiten todos los meses (abonos): marcar una
+       genera una estimacion de los meses siguientes. Se guarda una COPIA de la
+       factura (RO_T_CASHFLOW_TARJETAS_MENSUAL) porque la factura sale de
+       pendientes cuando se paga, y la estimacion tiene que seguir viva.
+       ==================================================================== */
+
+    /** Por que un mes de una estimacion no proyecta, o PROYECTA */
+    const EST_PROYECTA = 'PROYECTA';
+    const EST_REEMPLAZADA = 'REEMPLAZADA';
+    const EST_CUBIERTA = 'CUBIERTA';
+    const EST_PASADA = 'PASADA';
+    const EST_SIN_TARJETA = 'SIN_TARJETA';
+
+    /**
+     * Lo que se guarda al marcar una factura como mensual, a partir de su fila ya
+     * resuelta.
+     *
+     * SOLO UNA VINCULADA Y NO EXCLUIDA: la estimacion se comporta como una factura
+     * vinculada -cobertura, resumen, fecha de debito- y sin tarjeta no hay nada de
+     * eso; una excluida es una que se decidio que no entra, y estimar sus meses
+     * siguientes contradiria esa decision. Lo valida aca el backend, no la
+     * pantalla.
+     *
+     * EL IMPORTE ES EL DE LA CUOTA MARCADA, ANTES DE IMPUTACIONES (IMPORTE_VTO),
+     * NO EL PENDIENTE: el pendiente puede estar parcialmente pagado, y lo que se
+     * repite es lo que se debita por mes. En una factura de una sola cuota
+     * coincide con el total; en una en cuotas, el total multiplicaria el importe
+     * por la cantidad de cuotas.
+     *
+     * EL DIA ES EL DEL VENCIMIENTO VIGENTE -el corregido si lo hay- y el primer
+     * mes, el siguiente al de ese vencimiento.
+     *
+     * Estatica y pura.
+     *
+     * @param array $fila Una fila de resolver()
+     * @return array Los campos de RO_T_CASHFLOW_TARJETAS_MENSUAL
+     */
+    public static function datosMarcaMensual($fila) {
+        if (!empty($fila['EXCLUIDA_TARJETAS'])) {
+            throw new Exception('Esta factura está excluida de la pestaña: no se puede marcar como '
+                . 'mensual. Volvé a incluirla primero.');
+        }
+
+        if (empty($fila['ID_TARJETA'])) {
+            throw new Exception('Sólo se puede marcar como mensual una factura vinculada a una '
+                . 'tarjeta: la estimación sale en el débito de esa tarjeta.');
+        }
+
+        $importe = isset($fila['IMPORTE_VTO']) ? floatval($fila['IMPORTE_VTO']) : 0.0;
+
+        if ($importe <= 0) {
+            throw new Exception('La cuota no tiene importe en Tango (IMPORTE_VTO): no hay nada que '
+                . 'repetir.');
+        }
+
+        $vto = self::vtoVigente($fila);
+
+        if (empty($vto)) {
+            throw new Exception('La factura no tiene vencimiento: no se sabe qué día del mes se '
+                . 'debita.');
+        }
+
+        $desde = new DateTime(substr($vto, 0, 7) . '-01');
+        $desde->modify('+1 month');
+
+        return [
+            'COD_PROVEE' => $fila['COD_PROVEE'],
+            'RAZON_SOC' => isset($fila['RAZON_SOC']) ? mb_substr((string) $fila['RAZON_SOC'], 0, 100) : null,
+            'T_COMP' => $fila['T_COMP'],
+            'N_COMP' => $fila['N_COMP'],
+            'FECHA_VTO_TANGO' => $fila['FECHA_VTO'],
+            'FECHA_VTO_ORIGEN' => $vto,
+            'ID_TARJETA' => intval($fila['ID_TARJETA']),
+            'IMPORTE' => round($importe, 2),
+            'DIA' => intval(substr($vto, 8, 2)),
+            'MES_DESDE' => $desde->format('Y-m')
+        ];
+    }
+
+    /**
+     * La fecha de la estimacion en un mes: el dia guardado, acotado al ultimo dia
+     * si el mes no lo tiene.
+     *
+     * NO SE CORRE AL HABIL: ese dia ya es el vencimiento del resumen que cargan en
+     * Tango, no un dia que haya que ajustar.
+     *
+     * @param int $dia 1..31
+     * @param string $mes 'Y-m'
+     * @return string 'Y-m-d'
+     */
+    public static function fechaEstimacion($dia, $mes) {
+        $ultimo = intval((new DateTime($mes . '-01'))->format('t'));
+
+        return $mes . '-' . sprintf('%02d', min(max(1, intval($dia)), $ultimo));
+    }
+
+    /**
+     * Las estimaciones, mes por mes, con su estado.
+     *
+     * DESDE MES_DESDE HASTA EL FIN DEL HORIZONTE, sin fecha de fin: se corta
+     * desmarcando. IMPORTE FIJO, sin inflacion: es un abono pactado.
+     *
+     * POR MES, EN ESTE ORDEN:
+     *
+     *   1. REEMPLAZADA: hay en el universo de la pestana una factura REAL del mismo
+     *      proveedor con vencimiento vigente en ese mes. Cualquiera, este vinculada,
+     *      excluida o cubierta: la factura real existe, y si no suma es por otra
+     *      decision que se ve en la grilla. Se dice cual.
+     *   2. SIN_TARJETA: la tarjeta de la estimacion esta inactiva o ya no existe.
+     *   3. PASADA: la fecha es anterior o igual a hoy. Esa plata ya salio.
+     *   4. CUBIERTA: la tarjeta tiene resumen cargado en ese mes; el resumen ya la
+     *      incluye, igual que a una factura vinculada.
+     *   5. PROYECTA.
+     *
+     * Estatica y pura.
+     *
+     * @param array $mensuales Las vigentes de RO_T_CASHFLOW_TARJETAS_MENSUAL
+     * @param array $filas Lo que devolvio resolver()['filas']: el universo
+     * @param array $tarjetas Mapa ID => tarjeta, TODAS (tambien las inactivas)
+     * @param array $resumenes Mapa ID_TARJETA => ['Y-m' => resumen]
+     * @param array $meses Los meses del horizonte
+     * @param string $hoy 'Y-m-d'
+     * @return array Lista de estimaciones, cada una con 'meses' => [...]
+     */
+    public static function estimaciones($mensuales, $filas, $tarjetas, $resumenes, $meses, $hoy) {
+        $hoyStr = substr((string) $hoy, 0, 10);
+
+        /* Las facturas reales por proveedor y mes de vencimiento vigente. */
+        $reales = [];
+        $origenes = [];
+
+        foreach ($filas as $f) {
+            $vto = self::vtoVigente($f);
+
+            if ($vto !== null && !isset($reales[$f['COD_PROVEE']][substr($vto, 0, 7)])) {
+                $reales[$f['COD_PROVEE']][substr($vto, 0, 7)] = trim($f['T_COMP'] . ' ' . $f['N_COMP']);
+            }
+
+            $origenes[self::claveCuota($f)] = true;
+        }
+
+        $v = [];
+
+        foreach ($mensuales as $m) {
+            $id = intval($m['ID_TARJETA']);
+            $t = isset($tarjetas[$id]) ? $tarjetas[$id] : null;
+            $tarjetaOk = ($t !== null && !empty($t['ACTIVA']) && $t['TIPO'] === 'CORPORATIVA');
+
+            $est = $m;
+            $est['TARJETA'] = $t;
+            $est['TARJETA_OK'] = $tarjetaOk;
+            $est['ORIGEN_PENDIENTE'] = isset($origenes[self::claveCuota($m)]);
+            $est['meses'] = [];
+
+            foreach ($meses as $mes) {
+                if ($mes < $m['MES_DESDE']) {
+                    continue;
+                }
+
+                $fecha = self::fechaEstimacion($m['DIA'], $mes);
+                $por = isset($reales[$m['COD_PROVEE']][$mes]) ? $reales[$m['COD_PROVEE']][$mes] : null;
+
+                if ($por !== null) {
+                    $estado = self::EST_REEMPLAZADA;
+                } elseif (!$tarjetaOk) {
+                    $estado = self::EST_SIN_TARJETA;
+                } elseif ($fecha <= $hoyStr) {
+                    $estado = self::EST_PASADA;
+                } elseif (isset($resumenes[$id][$mes])) {
+                    $estado = self::EST_CUBIERTA;
+                } else {
+                    $estado = self::EST_PROYECTA;
+                }
+
+                $est['meses'][] = [
+                    'mes' => $mes,
+                    'fecha' => $fecha,
+                    'importe' => floatval($m['IMPORTE']),
+                    'estado' => $estado,
+                    'por' => $por,
+                    'proyecta' => ($estado === self::EST_PROYECTA)
+                ];
+            }
+
+            $v[] = $est;
+        }
+
+        return $v;
+    }
+
+    /**
+     * Los meses que proyectan, como filas que cobertura() entiende: se comportan
+     * como una factura vinculada de su tarjeta y su mes.
+     *
+     * @param array $estimaciones Lo que devolvio estimaciones()
+     * @return array
+     */
+    public static function estimacionesComoFilas($estimaciones) {
+        $v = [];
+
+        foreach ($estimaciones as $e) {
+            foreach ($e['meses'] as $m) {
+                if ($m['proyecta']) {
+                    $v[] = ['PROYECTA' => true, 'ID_TARJETA' => intval($e['ID_TARJETA']),
+                            'MES_PAGO' => $m['mes'], 'IMPORTE' => $m['importe'],
+                            'ESTIMACION' => true];
+                }
+            }
+        }
+
+        return $v;
+    }
+
+    /**
+     * Los avisos de las estimaciones: las que no proyectan porque su tarjeta esta
+     * inactiva o ya no existe. Un abono que deja de estimarse sin decirlo es plata
+     * que desaparece del tablero.
+     *
+     * @param array $estimaciones
+     * @return array
+     */
+    public static function avisosEstimaciones($estimaciones) {
+        $sin = [];
+
+        foreach ($estimaciones as $e) {
+            if (!$e['TARJETA_OK']) {
+                $sin[] = ($e['RAZON_SOC'] ?: $e['COD_PROVEE']) . ' (' . self::plata($e['IMPORTE'])
+                    . '/mes)';
+            }
+        }
+
+        return empty($sin) ? [] : [count($sin) . ' estimación(es) mensual(es) no se proyectan '
+            . 'porque su tarjeta está inactiva, ya no existe o no es corporativa: '
+            . implode(', ', $sin) . '. Desmarcalas, o marcá de nuevo la factura con la tarjeta '
+            . 'que corresponde.'];
+    }
+
+    /* ====================================================================
        LOS AVISOS
        ==================================================================== */
 
@@ -578,44 +990,38 @@ class TarjetasCorporativas {
      * Estatica y pura.
      *
      * @param array $filas Lo que devolvio resolver()['filas']
-     * @param array $resumenes Mapa ID_TARJETA => ['Y-m' => resumen]
      * @return array Lista de mensajes
      */
-    public static function avisos($filas, $resumenes = []) {
+    public static function avisos($filas) {
         $avisos = [];
 
-        /* 1. VENCIDAS SIN VINCULAR: es el aviso que va PRIMERO, porque es plata
-              real y ya emitida que el tablero NO esta mostrando, y se arregla con
-              una accion concreta en esta misma pantalla. */
-        $vencidas = self::juntar($filas, self::VENCIDA_SIN_TARJETA);
+        /* 1. SIN VINCULAR: es el aviso que va PRIMERO, porque es plata real y ya
+              emitida que el tablero NO esta mostrando, y se arregla con una accion
+              concreta en esta misma pantalla. Se desglosa en vencidas y no
+              vencidas porque cuando se vinculan no caen en el mismo lugar: las
+              vencidas salen en el proximo pago de la tarjeta, las otras en su
+              vencimiento. */
+        $sin = self::juntar($filas, self::SIN_TARJETA);
 
-        if ($vencidas['cuantas'] > 0) {
-            $avisos[] = $vencidas['cuantas'] . ' factura(s) vencidas por '
-                . self::plata($vencidas['importe']) . ' NO entran al flujo porque no están '
-                . 'vinculadas a ninguna tarjeta: sin tarjeta no hay fecha de pago. Vinculalas a '
-                . 'una tarjeta para que entren, en el próximo vencimiento de esa tarjeta.';
-        }
+        if ($sin['cuantas'] > 0) {
+            $venc = 0;
+            $impVenc = 0.0;
 
-        /* 2. SIN VINCULAR PERO NO VENCIDAS: entran igual, por su vencimiento de
-              Tango. Lo que NO generan es cobertura, y eso es lo que el aviso dice:
-              no es plata que falte, es cobertura que falta. */
-        $sinVincular = 0;
-        $impSinVincular = 0.0;
-
-        foreach ($filas as $f) {
-            if ($f['PROYECTA'] && empty($f['ID_TARJETA'])) {
-                $sinVincular++;
-                $impSinVincular += $f['IMPORTE'];
+            foreach ($filas as $f) {
+                if ($f['MOTIVO'] === self::SIN_TARJETA && !empty($f['VENCIDA'])) {
+                    $venc++;
+                    $impVenc += $f['IMPORTE'];
+                }
             }
+
+            $avisos[] = $sin['cuantas'] . ' factura(s) por ' . self::plata($sin['importe'])
+                . ' sin vincular no entran al flujo: vinculalas a una tarjeta. '
+                . 'De esas, ' . $venc . ' vencida(s) por ' . self::plata($impVenc) . ' y '
+                . ($sin['cuantas'] - $venc) . ' no vencida(s) por '
+                . self::plata($sin['importe'] - $impVenc) . '.';
         }
 
-        if ($sinVincular > 0) {
-            $avisos[] = $sinVincular . ' factura(s) por ' . self::plata($impSinVincular)
-                . ' entran al flujo por su vencimiento de Tango pero NO están vinculadas a una '
-                . 'tarjeta, así que no generan cobertura y ningún resumen las puede reemplazar.';
-        }
-
-        /* 3. EXCLUIDAS: plata que el tablero deja de mostrar POR UNA DECISION. Se
+        /* 2. EXCLUIDAS: plata que el tablero deja de mostrar POR UNA DECISION. Se
               avisa siempre, tambien cuando el interruptor las tiene escondidas: una
               exclusion puesta hace tres meses que nadie recuerda es exactamente lo
               que este aviso evita. */
@@ -633,7 +1039,7 @@ class TarjetasCorporativas {
                 . 'Pagar Locales: son dos decisiones distintas.';
         }
 
-        /* 4. CUBIERTAS POR UN RESUMEN: no es un problema, es el mecanismo
+        /* 3. CUBIERTAS POR UN RESUMEN: no es un problema, es el mecanismo
               funcionando. Se avisa porque explica por que la fila bajó de importe
               sin que ninguna factura desapareciera. */
         $cubiertas = self::juntar($filas, self::CUBIERTA);
@@ -645,48 +1051,11 @@ class TarjetasCorporativas {
                 . 'viendo en la grilla para poder controlarlas contra el resumen.';
         }
 
-        /* 5. EL DOBLE CONTEO POSIBLE, y es el aviso mas delicado de la pestana:
-              si hay un resumen cargado para un mes y quedan facturas NO VINCULADAS
-              que se pagan en ese mes, esas facturas pueden estar incluidas en el
-              resumen y contarse dos veces. No se puede resolver por codigo -saber
-              si un consumo del resumen corresponde a una factura concreta es
-              mirar el resumen- asi que se avisa. */
-        $mesesConResumen = [];
+        /* EL AVISO DE POSIBLE DOBLE CONTEO -no vinculadas en un mes con resumen-
+           SE FUE: las no vinculadas ya no suman, asi que no se pueden contar dos
+           veces. Ver el encabezado. */
 
-        foreach ($resumenes as $id => $porMes) {
-            foreach ($porMes as $mes => $r) {
-                $mesesConResumen[$mes] = true;
-            }
-        }
-
-        $riesgo = 0;
-        $impRiesgo = 0.0;
-        $mesesRiesgo = [];
-
-        foreach ($filas as $f) {
-            if (!$f['PROYECTA'] || !empty($f['ID_TARJETA']) || $f['MES_PAGO'] === null) {
-                continue;
-            }
-
-            if (isset($mesesConResumen[$f['MES_PAGO']])) {
-                $riesgo++;
-                $impRiesgo += $f['IMPORTE'];
-                $mesesRiesgo[$f['MES_PAGO']] = true;
-            }
-        }
-
-        if ($riesgo > 0) {
-            $meses = array_keys($mesesRiesgo);
-            sort($meses);
-
-            $avisos[] = 'POSIBLE DOBLE CONTEO: hay ' . $riesgo . ' factura(s) por '
-                . self::plata($impRiesgo) . ' sin vincular que se pagan en '
-                . implode(', ', $meses) . ', y esos meses ya tienen un resumen cargado. Si esas '
-                . 'facturas están incluidas en el resumen, el mismo peso se cuenta dos veces. '
-                . 'Vinculalas a la tarjeta del resumen —y el resumen las reemplaza— o excluilas.';
-        }
-
-        /* 6. UN VINCULO QUE APUNTA A UNA TARJETA QUE YA NO ESTA. La FK lo impide,
+        /* 4. UN VINCULO QUE APUNTA A UNA TARJETA QUE YA NO ESTA. La FK lo impide,
               asi que solo puede pasar si alguien la borro a mano: es una base
               inconsistente y confundirlo con "sin vincular" lo esconderia. */
         $rotos = 0;

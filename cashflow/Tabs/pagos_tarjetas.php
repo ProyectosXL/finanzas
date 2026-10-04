@@ -15,7 +15,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
       Gastos Supervisoras   se ESTIMA a partir del histórico de
                             RO_T_GASTOS_SUPERVISION: el promedio de los últimos 3
                             meses completos, ajustado por inflación, partido en
-                            efectivo (2 pagos del cronograma) y tarjeta (el día de
+                            efectivo (pagos del cronograma Supervisoras) y tarjeta (el día de
                             vencimiento de su tarjeta).
 
       Pagos Corporativos    son facturas REALES de Tango —forma de pago vigente
@@ -174,8 +174,9 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                     <div>
                         <h5 class="mb-0">Por supervisora</h5>
                         <small class="text-muted">
-                            El <strong>efectivo</strong> sale en 2 pagos iguales del cronograma de
-                            <em>Parámetros › Generales</em>; la <strong>tarjeta</strong>, el día de
+                            El <strong>efectivo</strong> sale en partes iguales en los pagos del
+                            cronograma Supervisoras de <em>Parámetros › Generales</em>
+                            (<span id="supRegla">todos los lunes</span>); la <strong>tarjeta</strong>, el día de
                             vencimiento de su tarjeta. Un resumen cargado pisa la estimación del
                             mes.
                         </small>
@@ -271,7 +272,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                 <div class="col-md-6 col-lg-3">
                     <div class="kpi-card">
                         <div class="kpi-card-header">
-                            <span class="kpi-card-title">Vencidas sin vincular</span>
+                            <span class="kpi-card-title">Sin vincular</span>
                             <div class="kpi-card-icon orange">
                                 <i class="fas fa-triangle-exclamation"></i>
                             </div>
@@ -279,7 +280,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                         <div class="kpi-card-value kpi-card-value-sm" id="corpVencidas">$ 0,00</div>
                         <div class="kpi-card-footer">
                             <span class="text-muted" id="corpVencidasDetalle">
-                                no entran: sin tarjeta no hay fecha de pago
+                                no entran al flujo: vinculalas a una tarjeta
                             </span>
                         </div>
                     </div>
@@ -319,15 +320,17 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                 <small>
                     Son las facturas pendientes de Tango de proveedores cuya <strong>forma de pago
                     vigente</strong> es <code>TARJETA CORP</code> —el override por factura de
-                    Proveedores Locales, o la del maestro—. <strong>Van directo al flujo</strong>
-                    por su fecha de vencimiento de Tango: no hace falta vincularlas para que
-                    entren.
+                    Proveedores Locales, o la del maestro—. <strong>Sólo entran al flujo las
+                    vinculadas a una tarjeta</strong>: una factura sin tarjeta se ve en la grilla
+                    con su pendiente y su estado, pero no suma, esté vencida o no —sin tarjeta no
+                    se sabe en qué débito sale—.
                     <br>
-                    Vincularlas a una tarjeta hace dos cosas: <strong>generan cobertura</strong>
-                    y <strong>un resumen de esa tarjeta las puede reemplazar</strong>. Y una
-                    tercera si están vencidas: sin tarjeta no hay fecha de pago, así que una
-                    <strong>vencida sin vincular no se proyecta</strong> —una tarjeta se paga una
-                    vez por mes, y apilarla en el primer día del eje afirmaría que se paga hoy—.
+                    Una vinculada entra por su vencimiento, o si ya venció, en el
+                    <strong>próximo pago de su tarjeta</strong>; <strong>genera cobertura</strong>
+                    y <strong>un resumen de esa tarjeta la puede reemplazar</strong>. El
+                    vencimiento se puede <strong>corregir</strong> en la columna VTO TANGO —sólo
+                    vale en esta pestaña— y una factura que se repite todos los meses se puede
+                    <strong>marcar como mensual</strong> para estimar los meses siguientes.
                 </small>
             </div>
 
@@ -441,7 +444,10 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                                     <th rowspan="2" class="col-texto">RAZON SOCIAL</th>
                                     <th rowspan="2">T_COMP</th>
                                     <th rowspan="2">N_COMP</th>
-                                    <th rowspan="2">VTO TANGO</th>
+                                    <th rowspan="2" style="min-width: 165px;"
+                                        title="El vencimiento de Tango, que se puede corregir: sólo vale en esta pestaña">
+                                        VTO TANGO
+                                    </th>
                                     <th rowspan="2">TARJETA</th>
                                     <th rowspan="2" class="text-end">PENDIENTE</th>
                                     <th rowspan="2">ESTADO</th>
@@ -475,6 +481,11 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                     </div>
                 </div>
 
+                <!-- Las correcciones de vencimiento que quedaron sin cuota: se
+                     dibuja sólo cuando hay alguna. Ver dibujarVtosInertes(). -->
+                <div id="vtosInertesCorp" class="card-body py-2 border-top bg-warning bg-opacity-10"
+                     style="display: none;"></div>
+
                 <div class="card-body py-2 border-top">
                     <small class="text-muted">
                         <strong>La cobertura y los resúmenes van al pie</strong>, en sus propias
@@ -486,6 +497,54 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                         <strong>Excluir acá no toca Cuentas a Pagar Locales</strong>: son dos
                         decisiones distintas sobre la misma factura.
                     </small>
+                </div>
+            </div>
+
+            <!-- LAS ESTIMACIONES MENSUALES, aparte de la grilla de facturas por lo
+                 mismo que la cobertura y los resúmenes: no son facturas. Tienen las
+                 columnas del eje, con las mismas vistas, porque suman en la serie
+                 CORPORATIVAS del tablero. Se desmarcan desde acá también cuando la
+                 factura de origen ya se pagó. -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Estimaciones mensuales</h5>
+                    <small class="text-muted">
+                        Las facturas que se repiten todos los meses (abonos), marcadas con el
+                        ícono <i class="fas fa-repeat"></i> de la grilla. Se estima el
+                        <strong>importe de la cuota marcada</strong>, fijo y sin inflación, el día
+                        de su vencimiento, desde el mes siguiente. Un mes se apaga solo si aparece
+                        la <strong>factura real</strong> del proveedor, y queda cubierto si la
+                        tarjeta tiene <strong>resumen</strong> cargado. Generan cobertura como una
+                        factura vinculada.
+                    </small>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-wrapper table-responsive tabla-temporal">
+                        <table id="tablaCorpEst" class="table table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th rowspan="2" class="col-texto">PROVEEDOR</th>
+                                    <th rowspan="2">ORIGEN</th>
+                                    <th rowspan="2">TARJETA</th>
+                                    <th rowspan="2" class="text-end">IMPORTE</th>
+                                    <th rowspan="2" class="text-center">DÍA</th>
+                                    <th rowspan="2">ESTADO POR MES</th>
+                                    <th id="headerEjeEst" class="text-center"></th>
+                                    <th rowspan="2" class="text-end"
+                                        title="Suma las columnas que se están viendo">
+                                        TOTAL PERÍODO
+                                    </th>
+                                </tr>
+                                <tr id="headerEjeEst2"></tr>
+                            </thead>
+                            <tbody id="bodyCorpEst"></tbody>
+                            <tfoot>
+                                <tr id="totalesCorpEst">
+                                    <td colspan="6" class="fw-bold text-end">TOTALES</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
                 </div>
             </div>
 

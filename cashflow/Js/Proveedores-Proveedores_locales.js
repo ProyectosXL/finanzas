@@ -12,8 +12,10 @@
  * tarjeta dice además cuánto es el universo: ver pintarIndicadores().
  *
  * LA FECHA DE PAGO ES LO ÚNICO EDITABLE. Las cuentas a pagar salen de Tango y no
- * se tocan; lo que se carga es cuándo se piensa pagar cada comprobante. Es lo
- * que disuelve los importes vencidos apilados en el primer día del eje.
+ * se tocan; lo que se carga es cuándo se piensa pagar cada comprobante. Sin
+ * fecha cargada, lo del cronograma va al próximo día de pago ("crono") y lo
+ * vencido de las otras formas al primer día del eje; la fecha cargada es lo que
+ * dice que se paga otro día.
  *
  * Se carga de dos formas y las dos escriben lo mismo: celda por celda, y para
  * VARIAS DE UNA desde la barra de selección. La segunda existe porque lo
@@ -258,9 +260,10 @@
      * cartel de al lado del período —un filtro que esconde plata sin decir
      * cuánta es un filtro que miente—, aplicada a las tarjetas.
      *
-     * El segundo indicador es el que importa: lo vencido sin fecha cargada. Ese
-     * importe está dibujado en el primer día del eje porque no hay otro lugar
-     * donde ponerlo, y NO significa que se pague hoy. La tarjeta se apaga
+     * El segundo indicador es el que importa: lo vencido sin fecha cargada.
+     * Nadie dijo cuándo se paga: lo del cronograma se proyecta en el próximo día
+     * de pago y lo demás en el primer día del eje, y ninguna de las dos es una
+     * decisión. No cambió con el cronograma: mide lo mismo. La tarjeta se apaga
      * cuando llega a cero: mientras haya algo, tiene que verse.
      */
     function pintarIndicadores(filas) {
@@ -274,7 +277,7 @@
 
         texto('vencidoProv', plata(k.vencido_sin_fecha));
         texto('detalleVencidoProv', (k.n_vencido_sin_fecha
-            ? k.n_vencido_sin_fecha + ' comprobantes — se dibujan hoy, no se pagan hoy'
+            ? k.n_vencido_sin_fecha + ' comprobantes — nadie dijo cuándo se pagan'
             : 'Nada pendiente de fechar')
             + deTotal(k.n_vencido_sin_fecha !== u.n_vencido_sin_fecha,
                 'de ' + plata(u.vencido_sin_fecha) + ' en ' + u.n_vencido_sin_fecha));
@@ -714,18 +717,24 @@
     }
 
     /**
-     * El vencimiento. Cuando ya pasó y no hay fecha cargada, se marca: ese es
-     * exactamente el importe que está apilado en el primer día del eje.
+     * El vencimiento. Cuando ya pasó y no hay fecha cargada, se marca: nadie
+     * dijo cuándo se paga. Dónde se proyecta depende de la forma: si es del
+     * cronograma va al próximo día de pago, y si no, al primer día del eje.
      */
     function celdaVto(f) {
         if (!f.SIN_FECHA_CARGADA) {
             return fechaCorta(f.FECHA_VTO);
         }
 
+        var donde = f.PAGO_CRONO
+            ? 'se proyecta en el próximo día de pago del cronograma, el ' + fechaCorta(f.Pago)
+              + '. Si se paga otro día, cargale la fecha.'
+            : 'se dibuja en el primer día del eje. Eso no significa que se pague hoy: '
+              + 'cargale la fecha.';
+
         return '<span class="badge-vencida-exp" title="'
             + escapar('Venció el ' + fechaCorta(f.FECHA_VTO) + ' y no tiene fecha de pago '
-                + 'cargada, así que se dibuja en el primer día del eje. Eso no significa que '
-                + 'se pague hoy: cargale la fecha.')
+                + 'cargada, así que ' + donde)
             + '"><i class="fas fa-triangle-exclamation me-1"></i>'
             + fechaCorta(f.FECHA_VTO) + '</span>';
     }
@@ -842,17 +851,24 @@
         /* SIN FECHA CARGADA SE MUESTRA LA QUE USA EL EJE, y no un input vacío:
            el vencimiento de Tango, o emisión + plazo si no hay vencimiento. Es
            la ORIGINAL (PAGO_ORIGINAL), no el primer día del eje donde se
-           reubica lo vencido: poner "hoy" en 382 filas diría que alguien decidió
-           pagarlas hoy. Cuándo se proyecta de verdad lo dice el title.
+           reubica lo vencido fuera del cronograma: poner "hoy" en 382 filas
+           diría que alguien decidió pagarlas hoy. Cuándo se proyecta de verdad
+           lo dice el title.
+
+           SALVO QUE LA HAYA PUESTO EL CRONOGRAMA: ahí la fecha que usa el eje es
+           un día de pago de verdad, el próximo a partir del vencimiento -o de la
+           fecha cargada, si ya pasó-, y es la que se muestra, con la etiqueta
+           "crono". La base de la que sale va en el title.
 
            NO SE GRABA NADA: se calcula al leer. El input guarda sólo en
            'change', así que dejarlo como está no escribe; elegir otra fecha
            sí, como MANUAL. Ver README-proveedores-locales.md. */
-        var valor = cargada ? (f.FECHA_PAGO || '') : (f.PAGO_ORIGINAL || '');
+        var valor = f.PAGO_CRONO ? (f.Pago || '')
+            : (cargada ? (f.FECHA_PAGO || '') : (f.PAGO_ORIGINAL || ''));
 
         var clases = ['center', 'prov-celda-fecha', fuente.clase];
 
-        if (cargada) { clases.push('prov-fecha-cargada'); }
+        if (cargada && !f.PAGO_CRONO) { clases.push('prov-fecha-cargada'); }
 
         var titulo = fuente.titulo + (conciliado
             ? ' Ya está CONCILIADA contra Tango: el comprobante se pagó.' : '')
@@ -890,8 +906,11 @@
                   : '')
             +   (cargada
                   ? '<button class="btn btn-outline-secondary prov-btn-borrar" type="button" '
-                    + 'title="Volver a proyectar al vencimiento. Borra sólo la fecha: la '
-                    + 'exclusión y la forma de esta factura, si tiene, se conservan.">'
+                    + 'title="' + escapar((f.CRONOGRAMA
+                        ? 'Borrar la fecha cargada: la factura vuelve al cronograma de pagos. '
+                        : 'Volver a proyectar al vencimiento. ')
+                        + 'Borra sólo la fecha: la exclusión y la forma de esta factura, si '
+                        + 'tiene, se conservan.') + '">'
                     + '<i class="fas fa-rotate-left"></i></button>'
                   : '')
             + '</div></td>';
@@ -908,6 +927,10 @@
      *   VENCIMIENTO  nadie cargó nada: vence en Tango   "vto.", gris
      *   PLAZO        sin vencimiento: emisión + plazo   "plazo", gris
      *
+     * Y UNA QUINTA ENCIMA DE TODAS: "crono", en verde, cuando la fecha la
+     * puso el cronograma de pagos (PAGO_CRONO). Va primero porque es la fecha
+     * que el eje usa; de cuál de las otras sale la base lo dice el title.
+     *
      * Las dos primeras son una decisión y se ven igual de firmes; las dos
      * últimas son un cálculo y se ven apagadas. Un vencimiento ya pasado dice
      * "vto. vencido" y el title explica que se proyecta al primer día del eje.
@@ -916,9 +939,27 @@
      * @returns {{clase: string, etiqueta: string, titulo: string}}
      */
     function fuenteDeLaFecha(f) {
+        if (f.PAGO_CRONO) {
+            var base = {
+                MANUAL: 'la fecha cargada a mano del ',
+                ARCHIVO: 'la fecha de la planilla del ',
+                VENCIMIENTO: 'el vencimiento de Tango del ',
+                PLAZO: 'la emisión más el plazo del maestro, el '
+            }[f.FUENTE_FECHA] || 'la fecha del ';
+            var yaPaso = (f.ORIGEN_FECHA === 'CARGADA') ? ', que ya pasó' : '';
+
+            return { clase: 'prov-fuente-crono', etiqueta: 'crono',
+                     titulo: 'Se paga en el próximo día de pago del cronograma de Proveedores '
+                         + 'Locales' + (f.PAGO_CRONO_NOMBRE ? ' (' + f.PAGO_CRONO_NOMBRE
+                             + (f.PAGO_CRONO_A_MANO ? ', movido a mano' : '') + ')' : '')
+                         + '. La base es ' + base + fechaCorta(f.PAGO_BASE) + yaPaso + '. '
+                         + 'Elegí otra fecha para cargarla a mano.' };
+        }
+
         var vencido = !!f.SIN_FECHA_CARGADA && f.ORIGEN_FECHA !== 'CARGADA';
         var reubicada = vencido
-            ? ' Como ya pasó y nadie le cargó fecha, el eje la proyecta en su primer día. '
+            ? ' Como ya pasó y nadie le cargó fecha, y no se paga por cronograma, el eje la '
+              + 'proyecta en su primer día. '
               + 'Elegí otra fecha para reubicarla.'
             : ' Elegí otra fecha para reubicarla.';
 
@@ -1340,8 +1381,8 @@
        ES EL MISMO GESTO QUE LA EXCLUSIÓN MASIVA: se seleccionan con los
        checks, se ve cuántas son y por cuánta plata, se elige la fecha y
        recién ahí se guarda. Y es la acción que se usa todos los días: lo
-       que disuelve los vencimientos apilados en el primer día del eje es
-       cargar fechas, y el caso real no es una factura sino las ocho de un
+       que dice cuándo se paga lo vencido es cargar fechas, y el caso real
+       no es una factura sino las ocho de un
        proveedor al que se le decide una fecha de una vez.
 
        SÓLO LA FECHA. La forma del cronograma y la exclusión de cada factura
@@ -1414,8 +1455,8 @@
                pasadas porque el listado no tiene techo de antigüedad y "se
                pensó pagar y no se pagó" es una decisión legítima. */
             valor: valorComun(sel, 'FECHA_PAGO'),
-            invalido: 'Elegí la fecha en la que se piensan pagar: es lo único que saca '
-                + 'estos importes del primer día del eje.',
+            invalido: 'Elegí la fecha en la que se piensan pagar: es lo único que dice '
+                + 'que se pagan un día distinto del que calcula el cuadro.',
             confirmar: 'Fechar ' + sel.length + ' factura(s)'
         }).then(function(fecha) {
             if (fecha !== null) { guardarFechaMasiva(sel, fecha); }

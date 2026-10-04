@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/Inflacion.php';
 require_once __DIR__ . '/TarjetasVencimiento.php';
+require_once __DIR__ . '/CronogramaPagos.php';
 
 /**
  * TarjetasSupervisoras
@@ -73,15 +74,6 @@ class TarjetasSupervisoras {
 
     /** Cuantos meses calendario completos entran en la ventana */
     const MESES_VENTANA = 3;
-
-    /**
-     * En cuantos pagos iguales sale la parte en efectivo.
-     *
-     * Son los dos pagos del cronograma de Parametros -> Generales, el mismo que
-     * usa Logistica Local: el 2do y el 4to viernes, corridos al dia habil
-     * ANTERIOR. Ver CronogramaPagos.
-     */
-    const PAGOS_EFECTIVO = 2;
 
     /* Los motivos por los que una fila no proyecta */
     const OK = 'OK';
@@ -494,16 +486,22 @@ class TarjetasSupervisoras {
        ==================================================================== */
 
     /**
-     * El reparto de la parte en EFECTIVO: dos pagos iguales en las fechas del
-     * cronograma del mes.
+     * El reparto de la parte en EFECTIVO: partes iguales en los pagos del mes
+     * del cronograma SUPERVISORAS.
      *
-     * ES EL MISMO CRONOGRAMA QUE LOGISTICA LOCAL -el 2do y el 4to viernes de
-     * Parametros -> Generales, con sus overrides- y por eso recibe los pagos ya
+     * ES EL CRONOGRAMA SUPERVISORAS DE Parametros -> Generales -por defecto
+     * todos los lunes del mes, con sus overrides-, y por eso recibe los pagos ya
      * resueltos en vez de calcularlos: la regla vive en CronogramaPagos y una
-     * segunda version aca se desincronizaria en el primer feriado nuevo.
+     * segunda version aca se desincronizaria en el primer feriado nuevo. Hasta
+     * feature/cronogramas-tarjetas-corporativas era el mismo que Logistica -el
+     * 2do y el 4to viernes, siempre dos pagos-; ahora un mes de cinco lunes
+     * reparte en quintos y uno de cuatro en cuartos.
      *
-     * LAS DOS MITADES NO SE REDONDEAN. El redondeo es presentacion, y redondear
-     * aca haria que un importe impar perdiera un centavo por mes, todos los meses.
+     * CUANTAS PARTES LO DICE EL MES, no una constante: todos los pagos que tiene,
+     * tambien los que ya pasaron. Ver CronogramaPagos::parte().
+     *
+     * LAS PARTES NO SE REDONDEAN. El redondeo es presentacion, y redondear aca
+     * haria que un importe impar perdiera un centavo por mes, todos los meses.
      *
      * UN PAGO CON FECHA ANTERIOR O IGUAL A HOY NO SE PROYECTA. Esa plata ya salio
      * y ya esta reflejada en el saldo bancario que abre el cuadro; proyectarla
@@ -511,7 +509,7 @@ class TarjetasSupervisoras {
      * Local, y tiene la misma consecuencia: la columna de hoy nunca recibe nada de
      * la parte en efectivo.
      *
-     * SIEMPRE SE DEVUELVEN LOS DOS PAGOS, tambien cuando no hay importe y tambien
+     * SIEMPRE SE DEVUELVEN TODOS LOS PAGOS, tambien cuando no hay importe y tambien
      * los excluidos: la fecha es un dato del cronograma y no de la supervisora, y
      * esconderla cuando falta el importe obliga a buscarla en otra pantalla. Quien
      * acumula contra el eje filtra por 'proyecta'.
@@ -528,22 +526,22 @@ class TarjetasSupervisoras {
         $hoyStr = substr((string) $hoy, 0, 10);
 
         foreach ($delMes as $nro => $p) {
-            $mitad = ($importe === null) ? null : $importe / self::PAGOS_EFECTIVO;
+            $parte = CronogramaPagos::parte($importe, count($delMes));
             $excluido = ($p['fecha'] <= $hoyStr);
 
             $pagos[] = [
                 'mes' => $p['mes'],
                 'nro' => intval($nro),
                 'fecha' => $p['fecha'],
-                'importe' => $mitad,
+                'importe' => $parte,
                 'en_tramo' => !empty($p['en_tramo']),
                 'override' => !empty($p['override']),
                 'corrida' => !empty($p['corrida']),
-                'proyecta' => (!$excluido && $mitad !== null),
+                'proyecta' => (!$excluido && $parte !== null),
                 'motivo' => $excluido
                     ? (($p['fecha'] === $hoyStr) ? 'Es hoy: ese pago ya se hizo.'
                                                  : 'Ya pasó: ese pago ya se hizo.')
-                    : (($mitad === null) ? 'No hay importe estimado para este mes.' : null)
+                    : (($parte === null) ? 'No hay importe estimado para este mes.' : null)
             ];
         }
 

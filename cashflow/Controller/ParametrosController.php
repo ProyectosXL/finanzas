@@ -109,6 +109,8 @@ try {
        Parametros::inflacion() carga la clase de forma perezosa, pero el switch
        nombra Inflacion::VARIABLE antes de llamarlo. */
     require_once __DIR__ . '/../Class/Inflacion.php';
+    // Los nombres de los conceptos del cronograma, para los mensajes.
+    require_once __DIR__ . '/../Class/CronogramaPagos.php';
 
     // Obtener accion del request
     $action = isset($_GET['action']) ? $_GET['action'] : '';
@@ -215,10 +217,15 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* EL CRONOGRAMA ES POR CONCEPTO: todos sus endpoints reciben 'concepto'
+           (PROV_LOCALES, LOGISTICA o SUPERVISORAS). Si no viene, es LOGISTICA:
+           era el unico cronograma con overrides, y una pantalla vieja todavia
+           cargada en un navegador manda los pedidos sin concepto. */
         case 'getHistorialCronograma':
             echo json_encode([
                 'success' => true,
                 'data' => $parametros->cronograma()->historial(
+                    isset($_GET['concepto']) ? $_GET['concepto'] : 'LOGISTICA',
                     isset($_GET['mes']) ? $_GET['mes'] : '',
                     isset($_GET['nro']) ? $_GET['nro'] : 0
                 )
@@ -243,6 +250,7 @@ try {
             }
 
             $r = $parametros->cronograma()->guardar(
+                isset($data['concepto']) ? $data['concepto'] : 'LOGISTICA',
                 $data['mes'],
                 $data['nro'],
                 $data['fecha'],
@@ -253,8 +261,10 @@ try {
 
             echo json_encode([
                 'success' => true,
-                'message' => ($r['reemplazo'] ? 'Fecha corregida' : 'Fecha movida') . ': el pago '
-                    . $r['nro'] . ' de ' . $r['mes'] . ' va el ' . $r['fecha'] . '.',
+                'message' => ($r['reemplazo'] ? 'Fecha corregida' : 'Fecha movida') . ': el '
+                    . $r['nombre'] . ' de ' . $r['mes'] . ' de '
+                    . CronogramaPagos::CONCEPTOS[$r['concepto']]['nombre'] . ' va el '
+                    . $r['fecha'] . '.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
@@ -267,6 +277,7 @@ try {
             }
 
             $r = $parametros->cronograma()->volverACalculado(
+                isset($data['concepto']) ? $data['concepto'] : 'LOGISTICA',
                 $data['mes'],
                 $data['nro'],
                 $usuario
@@ -278,6 +289,50 @@ try {
                     ? 'El pago vuelve a su fecha calculada. La fecha anterior queda en el '
                       . 'historial: no se borra.'
                     : 'Este pago ya estaba en su fecha calculada.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* Cuantos pagos movidos a mano se darian de baja si cambia el dia o la
+           frecuencia de un concepto. La pantalla lo pregunta ANTES de guardar,
+           para que la confirmacion diga el numero. */
+        case 'contarOverridesCronograma':
+            echo json_encode([
+                'success' => true,
+                'data' => [
+                    'bajas' => $parametros->cronograma()->contarOverridesABajar(
+                        isset($_GET['concepto']) ? $_GET['concepto'] : '')
+                ]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'saveConfigCronograma':
+            $data = bodyJson();
+
+            foreach (['concepto', 'dia', 'frecuencia'] as $campo) {
+                if (!isset($data[$campo])) {
+                    throw new Exception('Faltan el concepto, el día o la frecuencia');
+                }
+            }
+
+            $r = $parametros->cronograma()->guardarConfig($data['concepto'], $data['dia'],
+                $data['frecuencia'], $usuario);
+
+            $nombre = CronogramaPagos::CONCEPTOS[$r['concepto']]['nombre'];
+
+            /* DICE CUANTOS OVERRIDES SE DIERON DE BAJA, el numero real y no el de
+               la confirmacion: entre una y otra alguien pudo mover otro pago. */
+            echo json_encode([
+                'success' => true,
+                'message' => !$r['cambio']
+                    ? 'El cronograma de ' . $nombre . ' ya era ese: no se cambió nada.'
+                    : 'El cronograma de ' . $nombre . ' pasa a ser '
+                      . CronogramaPagos::describir($r['config']) . ' de cada mes.'
+                      . ($r['bajas'] > 0
+                        ? ' Se dieron de baja ' . $r['bajas'] . ' pago(s) movido(s) a mano '
+                          . 'desde este mes: con otro día apuntaban a otra fecha. Quedan en el '
+                          . 'historial.'
+                        : ''),
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

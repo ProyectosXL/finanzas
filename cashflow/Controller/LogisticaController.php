@@ -102,6 +102,7 @@ try {
                        Un fletero sin horas no tiene ninguna fila en el eje. */
                     'planilla' => $datos['planilla'],
                     'cronograma' => $datos['cronograma'],
+                    'cronograma_config' => $datos['cronograma_config'],
                     'hoy' => $h->hoy(),
                     'avisos' => $datos['avisos'],
                     'tabla_creada' => $datos['tabla_creada']

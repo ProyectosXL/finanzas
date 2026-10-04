@@ -69,7 +69,8 @@ if (!function_exists('inflacionLP')) {
 $hLP = new Horizonte(28, 12, [], new DateTime('2026-09-25'));
 $habilesLP = calendarioLP('2026-08-01', '2027-10-31',
     ['2026-12-25', '2027-01-01', '2027-03-26', '2027-07-09']);
-$cronoLP = CronogramaPagos::paraHorizonte($hLP, $habilesLP)['pagos'];
+$VIE_LP = CronogramaPagos::config(5, CronogramaPagos::QUINCENAL);  // el defecto de LOGISTICA
+$cronoLP = CronogramaPagos::paraHorizonte($hLP, $VIE_LP, $habilesLP)['pagos'];
 $inflaLP = inflacionLP('2026-07', '2027-12', 2.0);
 
 /* Un fletero de numeros redondos: 100 horas a $1.000 = $100.000 por mes, o sea
@@ -156,7 +157,7 @@ seccion('un solo pago excluido deja medio mes proyectado');
 /* Si hoy fuera el 12/10, el pago del 9 ya paso y el del 23 no: octubre
    proyectaria la mitad. */
 $hMedio = new Horizonte(28, 12, [], new DateTime('2026-10-12'));
-$cronoMedio = CronogramaPagos::paraHorizonte($hMedio, $habilesLP)['pagos'];
+$cronoMedio = CronogramaPagos::paraHorizonte($hMedio, $VIE_LP, $habilesLP)['pagos'];
 $planMedio = LogisticaPlanilla::calcular($unFletero, $hMedio, $cronoMedio, $inflaLP);
 $octMedio = $planMedio['fleteros'][0]['meses']['2026-10'];
 
@@ -361,3 +362,63 @@ chequear('quedan 22 de los 24', 22, count($aProy));
 
 chequear('de un fletero sin datos no queda ninguno',
     0, count(LogisticaPlanilla::pagosAProyectar($sinHoras)));
+
+/* ================================================================
+   NO REGRESION: CON EL VALOR POR DEFECTO, LOGISTICA DA LO MISMO QUE ANTES
+   ================================================================ */
+seccion('no regresion: el cronograma por concepto no mueve un peso de Logistica');
+
+/* LA FOTO DE ABAJO LA SACO EL CODIGO DE develop, antes de que el cronograma fuera
+   por concepto -con el viernes y los ordinales escritos en CronogramaPagos y el
+   reparto en PAGOS_POR_MES = 2-, sobre este mismo escenario: dos fleteros (uno
+   con importes que no dan redondo), doce meses, siete feriados reales -dos caen
+   en un 2do o 4to viernes- y un override en noviembre. Es una lista literal, y
+   no una cuenta, a proposito: una prueba que recalcula lo esperado con la misma
+   logica que prueba no puede detectar que esa logica cambio.
+
+   Con la configuracion por DEFECTO de LOGISTICA -sin ningun parametro cargado-
+   cada pago tiene que dar la misma fecha y el mismo importe que la foto. */
+$fotoVieja = json_decode('[["F1","2026-09",1,"2026-09-11",50000,true],["F1","2026-09",2,"2026-09-25",50000,true],["F1","2026-10",1,"2026-10-09",53000,false],["F1","2026-10",2,"2026-10-23",53000,false],["F1","2026-11",1,"2026-11-13",53000,false],["F1","2026-11",2,"2026-11-26",53000,false],["F1","2026-12",1,"2026-12-11",53000,false],["F1","2026-12",2,"2026-12-24",53000,false],["F1","2027-01",1,"2027-01-08",56180,false],["F1","2027-01",2,"2027-01-22",56180,false],["F1","2027-02",1,"2027-02-12",56180,false],["F1","2027-02",2,"2027-02-26",56180,false],["F1","2027-03",1,"2027-03-12",56180,false],["F1","2027-03",2,"2027-03-25",56180,false],["F1","2027-04",1,"2027-04-09",59550.8,false],["F1","2027-04",2,"2027-04-23",59550.8,false],["F1","2027-05",1,"2027-05-14",59550.8,false],["F1","2027-05",2,"2027-05-28",59550.8,false],["F1","2027-06",1,"2027-06-11",59550.8,false],["F1","2027-06",2,"2027-06-25",59550.8,false],["F1","2027-07",1,"2027-07-08",63123.848,false],["F1","2027-07",2,"2027-07-23",63123.848,false],["F1","2027-08",1,"2027-08-13",63123.848,false],["F1","2027-08",2,"2027-08-27",63123.848,false],["F2","2026-09",1,"2026-09-11",84876.6875,true],["F2","2026-09",2,"2026-09-25",84876.6875,true],["F2","2026-10",1,"2026-10-09",84876.6875,false],["F2","2026-10",2,"2026-10-23",84876.6875,false],["F2","2026-11",1,"2026-11-13",89969.28875,false],["F2","2026-11",2,"2026-11-26",89969.28875,false],["F2","2026-12",1,"2026-12-11",89969.28875,false],["F2","2026-12",2,"2026-12-24",89969.28875,false],["F2","2027-01",1,"2027-01-08",89969.28875,false],["F2","2027-01",2,"2027-01-22",89969.28875,false],["F2","2027-02",1,"2027-02-12",95367.446075,false],["F2","2027-02",2,"2027-02-26",95367.446075,false],["F2","2027-03",1,"2027-03-12",95367.446075,false],["F2","2027-03",2,"2027-03-25",95367.446075,false],["F2","2027-04",1,"2027-04-09",95367.446075,false],["F2","2027-04",2,"2027-04-23",95367.446075,false],["F2","2027-05",1,"2027-05-14",101089.49284,false],["F2","2027-05",2,"2027-05-28",101089.49284,false],["F2","2027-06",1,"2027-06-11",101089.49284,false],["F2","2027-06",2,"2027-06-25",101089.49284,false],["F2","2027-07",1,"2027-07-08",101089.49284,false],["F2","2027-07",2,"2027-07-23",101089.49284,false],["F2","2027-08",1,"2027-08-13",107154.86241,false],["F2","2027-08",2,"2027-08-27",107154.86241,false]]', true);
+
+$habNR = [];
+$cNR = new DateTime('2026-08-01');
+$ferNR = ['2026-10-12', '2026-11-20', '2026-12-25', '2027-01-01', '2027-03-26',
+          '2027-04-02', '2027-07-09'];
+
+while ($cNR <= new DateTime('2027-10-31')) {
+    $fNR = $cNR->format('Y-m-d');
+    $habNR[$fNR] = (intval($cNR->format('N')) <= 5) && !in_array($fNR, $ferNR, true);
+    $cNR->modify('+1 day');
+}
+
+$cfgDefecto = CronogramaPagos::configDesdeMapa([], 'LOGISTICA');
+$cronoNR = CronogramaPagos::paraHorizonte(new Horizonte(28, 12, [], new DateTime('2026-09-25')),
+    $cfgDefecto, $habNR, ['2026-11' => [2 => ['fecha' => '2026-11-26', 'motivo' => 'x']]]);
+
+$infNR = [];
+$mNR = new DateTime('2026-06-01');
+
+for ($i = 0; $i < 20; $i++) {
+    $infNR[$mNR->format('Y-m')] = 2.0;
+    $mNR->modify('+1 month');
+}
+
+$planNR = LogisticaPlanilla::calcular([
+    ['COD_PROVEE' => 'F1', 'NOMBRE' => 'UNO', 'HORAS_MES' => 100,
+     'VALOR_HORA_BASE' => 1000, 'MES_BASE' => '2026-07'],
+    ['COD_PROVEE' => 'F2', 'NOMBRE' => 'DOS', 'HORAS_MES' => 137.5,
+     'VALOR_HORA_BASE' => 1234.57, 'MES_BASE' => '2026-08']
+], new Horizonte(28, 12, [], new DateTime('2026-09-25')), $cronoNR['pagos'], $infNR);
+
+$fotoNueva = [];
+
+foreach ($planNR['pagos'] as $x) {
+    $fotoNueva[] = [$x['cod_provee'], $x['mes'], $x['nro'], $x['fecha'],
+                    round($x['importe'], 6), $x['excluido']];
+}
+
+chequear('el defecto de LOGISTICA es el 2do y el 4to viernes', true, $cfgDefecto['defecto']
+    && $cfgDefecto['dia'] === 5 && $cfgDefecto['frecuencia'] === CronogramaPagos::QUINCENAL);
+chequear('la misma cantidad de pagos que antes', count($fotoVieja), count($fotoNueva));
+chequear('y cada pago con la misma fecha, el mismo importe y el mismo estado',
+    json_encode($fotoVieja), json_encode($fotoNueva));

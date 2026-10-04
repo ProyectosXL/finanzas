@@ -108,7 +108,8 @@ function planillaDoble($fleteros, $h, $inflacion = [], $tablaCreada = true, $avi
         $cursor->modify('+1 day');
     }
 
-    $crono = CronogramaPagos::paraHorizonte($h, $habiles);
+    $crono = CronogramaPagos::paraHorizonte($h,
+        CronogramaPagos::config(5, CronogramaPagos::QUINCENAL), $habiles);
     $planilla = LogisticaPlanilla::calcular($fleteros, $h, $crono['pagos'], $inflacion);
 
     return [

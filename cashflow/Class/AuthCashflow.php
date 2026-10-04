@@ -148,6 +148,10 @@ class AuthCashflow {
             'aplicarInflacionConstante' => [['parametros', 'GENERALES']],
             'saveFechaCronograma' => [['parametros', 'GENERALES']],
             'quitarFechaCronograma' => [['parametros', 'GENERALES']],
+            /* El conteo de overrides que se darian de baja es el primer paso de
+               cambiar el dia de un concepto: como los preview, pide edicion. */
+            'contarOverridesCronograma' => [['parametros', 'GENERALES']],
+            'saveConfigCronograma' => [['parametros', 'GENERALES']],
             'saveMixCobro' => [['parametros', 'VENTAS']],
             'addMixCobro' => [['parametros', 'VENTAS']],
             'saveRespaldo' => [['parametros', 'VENTAS']],
@@ -197,6 +201,10 @@ class AuthCashflow {
             'desvincularFacturas' => [['pagos_tarjetas', null]],
             'excluirFacturas' => [['pagos_tarjetas', null]],
             'incluirFacturas' => [['pagos_tarjetas', null]],
+            'editarVtoFactura' => [['pagos_tarjetas', null]],
+            'deshacerVtoFactura' => [['pagos_tarjetas', null]],
+            'marcarMensual' => [['pagos_tarjetas', null]],
+            'desmarcarMensual' => [['pagos_tarjetas', null]],
             'saveResumen' => [['pagos_tarjetas', null]],
             'pagarResumen' => [['pagos_tarjetas', null]],
             'bajaResumen' => [['pagos_tarjetas', null]],

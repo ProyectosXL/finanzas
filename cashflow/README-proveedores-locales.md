@@ -8,7 +8,7 @@ Rama: `feature/proveedores-locales-pagos-reales`
 
 ## La idea en una línea
 
-**Tango dice cuánto se debe y cuándo vence; acá se decide cuándo se paga, y esa decisión es lo único que saca a la deuda vencida del primer día del eje.**
+**Tango dice cuánto se debe y cuándo vence; acá se decide cuándo se paga. Sin decisión, lo del cronograma se paga en el próximo día de pago, y lo demás en su vencimiento.**
 
 ```
 Tango (CPA04 + CPA54 + CPA01, con las imputaciones de CPA05)
@@ -17,6 +17,7 @@ Tango (CPA04 + CPA54 + CPA01, con las imputaciones de CPA05)
 Class/Proveedores.php  ──────────────┐
         │                            │  resuelve la fecha con la que entra al eje:
         │                            │    fecha cargada → vencimiento → emisión + plazo
+        │                            │    → si es del cronograma, el próximo día de pago
         ├─ Class/ProveedoresCategorias.php
         │     el maestro: qué es cada proveedor, y cómo se le paga
         ▼
@@ -141,7 +142,7 @@ Con ese techo quedaban afuera **$346,8 millones — el 29%** del total, y no era
 
 **Pero no se apila en silencio.** El indicador *Vencido sin fecha* dice cuánto hay vencido **sin que nadie haya decidido cuándo se paga**: son **378 vencimientos por $965.189.059,14**.
 
-Ese importe se dibuja en el primer día del eje porque no hay otro lugar donde ponerlo. **Eso no significa que se pague hoy**, y por eso el número está a la vista en rojo, con un filtro de un clic para aislarlo.
+Lo del **cronograma** se proyecta en el **próximo día de pago** (ver *El cronograma de pagos*, más abajo); lo de las **otras formas** —débito, caja, tarjeta— se dibuja en el primer día del eje porque no hay otro lugar donde ponerlo. **Ninguna de las dos es una decisión**, y por eso el número está a la vista en rojo, con un filtro de un clic para aislarlo.
 
 **La herramienta para redistribuirlo es cargar la fecha, no un filtro por antigüedad.** Verificado: cargarle fecha a 5 comprobantes bajó el vencido sin fecha de $839.609.418 a $525.591.802.
 
@@ -158,13 +159,16 @@ Escrita una sola vez, en `Proveedores::resolverFechaPago()`:
 2. si no, la FECHA DE VENCIMIENTO de Tango
 3. si no hay vencimiento usable, EMISIÓN + PLAZO del maestro
 4. si nada de eso alcanza, sin fecha
+
+y encima, si la forma vigente es del cronograma y no hay fecha cargada futura:
+5. el PRÓXIMO DÍA DE PAGO del cronograma PROV_LOCALES a partir de esa fecha (o de hoy)
 ```
 
 **El vencimiento va antes que el plazo, y no al revés.** El vencimiento es un dato de *esta* factura; el plazo es una costumbre del proveedor. Cuando los dos existen, el que la describe es el vencimiento.
 
 El escalón 3 existe para cuando Tango trae su centinela `1800-01-01` en lugar de una fecha. Hoy no hay ninguno en `CPA54`, pero la consulta de referencia lo contempla, así que el código también: es una red, no la norma.
 
-**Una fecha cargada no se reubica aunque esté vencida.** La cargó una persona; moverla a hoy sería pisar su decisión con una regla automática y mostrarle su propia carga en otra columna. Se marca vencida —eso es un hecho— y se dibuja donde está.
+**Una fecha cargada no se reubica a hoy aunque esté vencida.** La cargó una persona; moverla a hoy sería pisar su decisión con una regla automática. **Pero si la factura es del cronograma, va al próximo día de pago**: una fecha cargada que ya pasó describe un pago que no ocurrió —la factura sigue pendiente en Tango—, y el próximo día de pago es cuando se va a hacer. Las de otras formas se marcan vencidas y se dibujan donde están.
 
 ### La columna muestra la fecha que usa el eje
 
@@ -181,7 +185,7 @@ La jerarquía ya existía y el eje ya proyectaba al vencimiento, pero **no se ve
 
 **Se calcula al leer y no se graba.** Grabar el vencimiento lo convertiría en una fecha *cargada*: rompería el indicador *vencido sin fecha*, la conciliación —que compara lo previsto contra lo real— y el contador del fechado masivo, y además dejaría de seguir a Tango si el vencimiento cambia. Es la regla de siempre del módulo: lo que se deriva, se deriva al leer.
 
-**Una fecha vencida muestra su vencimiento original, no el día 1 del eje.** Son **382 de los 465** ($ 1.326.960.887,25): el eje los proyecta en su primer día, pero poner *hoy* en la columna diría que alguien decidió pagarlos hoy. La marca dice *vto. vencido* y el `title` explica dónde se proyecta y cómo reubicarlo.
+**Una fecha vencida fuera del cronograma muestra su vencimiento original, no el día 1 del eje** (una del cronograma muestra su día de pago, con *crono*). Son **382 de los 465** ($ 1.326.960.887,25): el eje los proyecta en su primer día, pero poner *hoy* en la columna diría que alguien decidió pagarlos hoy. La marca dice *vto. vencido* y el `title` explica dónde se proyecta y cómo reubicarlo.
 
 **Mostrarla no la guarda.** El input guarda sólo en `change`, así que dejarlo como está no escribe nada. Para fijar una fecha hay que elegir otra, o usar el fechado masivo; elegir en el calendario la misma fecha que ya muestra no dispara nada. Es deliberado: confirmar el vencimiento no es una decisión nueva.
 
@@ -225,11 +229,55 @@ vacío     → null
 
 ---
 
+## El cronograma de pagos: lo del cronograma se paga en sus días
+
+> Esto **cambió** en `feature/cronogramas-tarjetas-corporativas`.
+
+Las facturas que se pagan por cronograma no salen el día que vencen: salen **el día de pago siguiente**. Por eso el cuadro las proyecta ahí, con el cronograma `PROV_LOCALES` de *Parámetros › Generales* —por defecto **el 2do y el 4to miércoles** de cada mes, corrido al hábil anterior si el miércoles no es hábil—. Ver `README-logistica-local.md`, sección 3: es uno de tres cronogramas, uno por concepto, con su día y su frecuencia configurables.
+
+### A qué facturas aplica
+
+| Factura | Qué pasa |
+| --- | --- |
+| Forma vigente **del cronograma** (echeq, transferencia, o sin forma conocida: `esDelCronograma()`) **sin fecha cargada** —origen vencimiento o plazo— | Va al **próximo día de pago** |
+| Del cronograma, con **fecha cargada que ya pasó** | Va al **próximo día de pago** a partir de hoy |
+| Del cronograma, con **fecha cargada futura** | **Se respeta tal cual**, como siempre |
+| Débito automático, caja, `TARJETA CORP` | **Conserva su fecha**: no se paga en un día de pago. Su vencido sigue en el primer día del eje |
+| Sin vencimiento ni plazo (`SIN_FECHA`) | Igual que antes |
+
+### La regla
+
+**Fecha de pago = el primer pago del cronograma con fecha efectiva ≥ max(fecha base, hoy).** La fecha base es el vencimiento, la emisión + plazo, o la fecha cargada vencida. Lo resuelve `CronogramaPagos::proximoPago()`, que es puro y recibe los pagos ya resueltos.
+
+- **"Fecha efectiva" es la del pago ya corrido al hábil anterior, o la del override, nunca la teórica.** Una factura que vence el miércoles 28 cuando el 28 es feriado y el pago se hizo el martes 27 va al pago siguiente: el del 27 ya pasó cuando venció. Es correcto, y si no es lo que se quiere, se mueve el pago a mano en Parámetros.
+- **Una factura que vence el mismo día de pago se paga ese día.**
+- **El pago de hoy cuenta.** Si hoy es día de pago, lo vencido del cronograma cae en la columna de hoy. Es **distinto de Logística**, donde el pago de hoy no se proyecta porque ya se hizo: acá la factura sigue pendiente en Tango, así que todavía no se pagó, y cuando se pague sale de pendientes y del eje.
+- **Lo vencido del cronograma ya no se apila en el primer día del eje**: va al próximo pago. Esto reemplaza, para estas facturas, la reubicación de `Ingresos::ubicarCobroVencido()`. **Nada del cronograma cae en el primer día del eje salvo que ese día sea de pago.**
+- **Si no hay ningún pago en el horizonte después de la fecha base**, la factura queda fuera del horizonte y se informa, como antes. Para eso `getPendientes()` pide el cronograma con **un mes más** que el horizonte: una factura que vence el 30/12 con el horizonte terminando el 31/12 va al primer pago de enero, que está afuera, y no cae el 30/12 adentro del eje.
+
+### No se graba nada por factura
+
+Las facturas se asignan a un **pago**, no a una fecha guardada. **Mover un pago a mano en Parámetros mueve todas las facturas que caen en él**, sin tocarlas: se calcula al leer, como todo lo derivado en este módulo.
+
+### Lo que no cambia
+
+- **`ORIGEN_FECHA` y `SIN_FECHA_CARGADA` dicen lo mismo que antes.** Los indicadores, el fechado masivo y la conciliación preguntan *"¿alguien decidió una fecha?"*, y esa respuesta no depende de en qué columna cae el importe. *Vencido sin fecha* mide lo mismo; lo que cambió es dónde se dibuja ese importe.
+- **Las series del tablero y sus invariantes no cambian.** `PAGOS`, `PAGOS_FUERA_CRONOGRAMA` y las demás traen los mismos importes; sólo cambia en qué columna cae cada importe de `PAGOS`.
+- **`FECHA_VTO` sigue siendo el vencimiento crudo de Tango** en cada fila. *Tarjetas Pagos Corporativos* lee esa fecha, no la del cronograma, y además pide los pendientes sin horizonte, así que ni siquiera resuelve el cronograma. Lo fija una prueba.
+
+### En la pantalla
+
+La columna *Fecha de pago* muestra **la fecha del cronograma** con la etiqueta **`crono`**, en verde —el mismo mecanismo `data-etiqueta` + `::after` que *vto.* y *plazo*, así el export a Excel baja la fecha sola—. El tooltip dice la fecha base y de dónde sale (vencimiento, plazo o fecha cargada que ya pasó), y en qué día de pago cae (*2do miércoles*, y si se movió a mano).
+
+El input funciona igual: **elegir otra fecha la graba como MANUAL**; el botón **↺ la borra y la factura vuelve al cronograma**. El aviso de vencidos sin fecha se partió en dos —los del cronograma, que van al próximo día de pago, y los de las otras formas, que siguen en el primer día del eje— y el cartel de la pestaña lo explica arriba de la grilla.
+
+---
+
 ## La fecha se carga de a una, o de a muchas
 
 > El gesto masivo es **nuevo**. La celda editable de la grilla no cambió.
 
-Cargar la fecha es lo único que saca a la deuda vencida del primer día del eje, y **lo que hay para fechar son 378 vencimientos**. De a uno, eso son 378 gestos.
+Cargar la fecha es lo único que dice cuándo se paga lo vencido —sin ella, lo del cronograma va al próximo día de pago y lo demás al primer día del eje—, y **lo que hay para fechar son 378 vencimientos**. De a uno, eso son 378 gestos.
 
 Y el caso real casi nunca es una factura: es *"a este proveedor le pagamos el 30"*, que son las ocho facturas que tiene abiertas. La pantalla ya sabía resolverlo —buscar el proveedor, *seleccionar todas las que se ven*— porque es exactamente lo mismo que hace la exclusión masiva.
 
@@ -1002,13 +1050,13 @@ La fila *Cuentas a Pagar Locales* usa la serie `PAGOS`, que **no trae todo**: tr
 
 Por eso el proveedor **avisa cuánto quedó afuera, desglosado por forma**, en cada carga del tablero.
 
-### `TARJETA CORP` ya no queda afuera del cuadro: entra por otra fila
+### `TARJETA CORP` entra por otra fila, pero sólo lo vinculado
 
-Desde `feature/financiero-pagos-tarjetas`, las facturas cuya **forma de pago vigente** es `TARJETA CORP` **entran al tablero** por la fila *Pagos con Tarjetas y Otros* (proveedor `TARJETAS`, serie `TOTAL`, sección *Costos Indirectos*). Siguen quedando fuera de **esta** fila —`TARJETA CORP` no es una forma del cronograma— pero ya no fuera del cuadro.
+Desde `feature/financiero-pagos-tarjetas`, las facturas cuya **forma de pago vigente** es `TARJETA CORP` entran al tablero por la fila *Pagos con Tarjetas y Otros* (proveedor `TARJETAS`, serie `TOTAL`, sección *Costos Indirectos*). **Desde `feature/cronogramas-tarjetas-corporativas`, sólo las vinculadas a una tarjeta**: una sin tarjeta no entra por ninguna fila. Siguen quedando fuera de **esta** fila —`TARJETA CORP` no es una forma del cronograma—.
 
-El aviso lo dice separado, porque si no mandaría a buscar plata que ya está contada:
+El aviso lo dice partido, porque si no mandaría a buscar plata que ya está contada o daría por contada plata que no lo está. Para eso `ProveedoresProvider` lee los vínculos factura-tarjeta; si no puede, queda el texto sin importes y un aviso:
 
-> *De eso, $ 89.858.783,43 de TARJETA CORP **SÍ** entran al cuadro, por la fila «Pagos con Tarjetas y Otros»: no hay que contarlos dos veces. Los otros $ 34.404.742,67 no entran por ninguna fila y van a salir de la caja igual.*
+> *De eso, $ X son de TARJETA CORP: $ Y vinculadas a una tarjeta **SÍ** entran al cuadro, por la fila «Pagos con Tarjetas y Otros» (no hay que contarlas dos veces), y $ Z sin vincular no entran por ninguna fila: vinculalas en esa pestaña.*
 
 **Y ahí está el riesgo, que es la otra cara:** como entran por allá, esta fila **no** tiene que traerlas.
 
@@ -1111,6 +1159,7 @@ php cashflow/tests/run.php proveedores
 
 `tests/test_proveedores.php` fija sin base lo que decide **qué número sale y dónde cae**:
 
+- **El cronograma de pagos** (`feature/cronogramas-tarjetas-corporativas`): vencimiento entre dos pagos, igual al día de pago, entre el pago corrido y el teórico, vencida sin fecha que va al próximo pago y **no** al primer día del eje, fecha cargada futura respetada, fecha cargada vencida reubicada, forma fuera del cronograma sin reubicar, sin pagos en el horizonte —con el mes extra—, override de un pago que **arrastra sus facturas**, y que `FECHA_VTO` siga siendo el de Tango. Más el cableado: que `CRONOGRAMA` y la reubicación salgan del mismo `$enCronograma`.
 - **La jerarquía de la fecha** entera, incluida la parte que es fácil romper: que el vencimiento le gane al plazo, que una fecha cargada no se reubique aunque esté vencida, que no haya techo de antigüedad, y que `CONTADO` (cero días) **se use** en lugar de tratarse como "sin plazo".
 - **Que el plazo no es un número**: `DEBITO` devuelve `null` y no `0`.
 - **La suciedad de la planilla**: que el código repetido deje en error **las dos** filas, que `echeq` matchee y `eqheck` no, y que el typo del criterio se detecte sin lista declarada —y que un criterio raro pero distinto **no** se marque—.

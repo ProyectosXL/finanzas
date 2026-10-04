@@ -27,7 +27,7 @@ require_once __DIR__ . '/../Logistica.php';
  * ubica con Horizonte::acumular(), que aplica la regla "un importe va a un dia
  * O a su mes, nunca a los dos". Eso es lo que hace que un mes partido por el
  * final del tramo diario -octubre, con el pago del 9 adentro y el del 23
- * afuera- lleve en su columna mensual SOLO la mitad que queda afuera, sin que
+ * afuera- lleve en su columna mensual SOLO la parte que queda afuera, sin que
  * nadie tenga que programarlo acá.
  *
  * LO QUE YA SE PAGO NO ENTRA, Y NO SE AVISA
@@ -77,7 +77,7 @@ class LogisticaProvider extends CashflowProvider {
     }
 
     /**
-     * Serie PAGOS: las mitades del importe mensual de cada fletero, en la fecha
+     * Serie PAGOS: las partes del importe mensual de cada fletero, en la fecha
      * del cronograma que les toca.
      *
      * @param Horizonte $h

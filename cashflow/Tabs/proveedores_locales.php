@@ -11,8 +11,13 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
     Proveedores Locales → Cuentas a Pagar.
 
     Las cuentas a pagar salen de Tango y no se editan acá: lo que se carga es
-    CUÁNDO se piensa pagar cada comprobante. Esa fecha es lo único que disuelve
-    los importes vencidos apilados en el primer día del eje.
+    CUÁNDO se piensa pagar cada comprobante.
+
+    LO QUE SE PAGA POR CRONOGRAMA (echeq, transferencia) Y NO TIENE FECHA CARGADA
+    -o la tiene vencida- se proyecta en el PRÓXIMO DÍA DE PAGO del cronograma de
+    Proveedores Locales (Parámetros › Generales), no en el primer día del eje. Lo
+    de las otras formas (débito, caja, tarjeta) conserva su fecha, y su vencido
+    sigue en el primer día del eje.
 
     LAS TRES SUB-SOLAPAS son tres momentos distintos del mismo circuito:
       Cuentas a Pagar  el listado, con la fecha editable celda por celda
@@ -27,6 +32,20 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
 <div class="tab-proveedores_locales"<?php echo AuthCashflow::atributoEdicion('proveedores_locales'); ?>>
 
     <div id="avisosProv"></div>
+
+    <!-- EL CRONOGRAMA, DICHO UNA VEZ ARRIBA: explica por qué la columna de fecha
+         muestra días que nadie cargó y por qué lo vencido ya no se apila hoy. -->
+    <div class="alert alert-info d-flex align-items-start gap-2 py-2 px-3 mb-3">
+        <i class="fas fa-circle-info mt-1"></i>
+        <small>
+            Las facturas que se pagan por <strong>echeq o transferencia</strong> y no tienen
+            fecha cargada —o la tienen y ya pasó— se proyectan en el <strong>próximo día de
+            pago del cronograma</strong> de Proveedores Locales (<em>Parámetros › Generales</em>),
+            a partir de su vencimiento o de hoy. En la columna de fecha llevan la etiqueta
+            <strong>crono</strong>. Una fecha cargada futura se respeta tal cual. Mover un día
+            de pago en Parámetros mueve todas sus facturas.
+        </small>
+    </div>
 
     <!-- KPI Cards -->
     <div class="row g-3 mb-4" id="summaryProv" style="display: none;">
@@ -43,8 +62,9 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
             </div>
         </div>
 
-        <!-- EL INDICADOR QUE IMPORTA. Es el importe que está apilado en el
-             primer día del eje por no tener fecha, y el único número que dice
+        <!-- EL INDICADOR QUE IMPORTA. Es el importe vencido que nadie dijo cuándo
+             se paga -el del cronograma va al próximo día de pago, el resto al
+             primer día del eje-, y el único número que dice
              cuánto trabajo queda por hacer en esta pantalla. Va en rojo a
              propósito. -->
         <div class="col-md-6 col-lg-3">
@@ -55,7 +75,7 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                 </div>
                 <div class="kpi-card-value" id="vencidoProv">$ 0,00</div>
                 <div class="kpi-card-footer">
-                    <span class="text-muted" id="detalleVencidoProv">Se dibuja hoy, no se paga hoy</span>
+                    <span class="text-muted" id="detalleVencidoProv">Nadie dijo cuándo se paga</span>
                 </div>
             </div>
         </div>

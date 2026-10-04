@@ -346,9 +346,18 @@ chequear('y uno de ECHEQ con override de CAJA sale',
    una forma por su cuenta. */
 $cuerpoPend = $cuerpoDe('getPendientes');
 
+/* Desde que el cronograma de pagos reubica las fechas, el mismo valor decide
+   DOS cosas -la serie y si la fecha va al proximo dia de pago- y se calcula una
+   vez en $enCronograma. Lo que se fija es que salga de formaDelCronograma() y
+   que sea el MISMO para las dos: si cada una lo calculara por su cuenta, una
+   factura podria ir al cronograma y quedar fuera de PAGOS. */
 chequear('CRONOGRAMA sale de formaDelCronograma()', true,
-    preg_match('/\'CRONOGRAMA\'\s*=>\s*ProveedoresCategorias::esDelCronograma\(\s*'
-        . 'self::formaDelCronograma\(/', $cuerpoPend) === 1);
+    preg_match('/\$enCronograma\s*=\s*ProveedoresCategorias::esDelCronograma\(\s*'
+        . 'self::formaDelCronograma\(/', $cuerpoPend) === 1
+    && preg_match('/\'CRONOGRAMA\'\s*=>\s*\$enCronograma/', $cuerpoPend) === 1);
+
+chequear('y la fecha va al cronograma con ese mismo valor', true,
+    preg_match('/resolverFechaPago\([^;]*\$pagosCrono,\s*\$enCronograma\s*\)/s', $cuerpoPend) === 1);
 
 /* LA GRILLA TIENE UNA SOLA COLUMNA DE FORMA, Y MUESTRA LA QUE DECIDE. Por eso
    la fila trae el valor ya resuelto: si el navegador lo recalculara, la columna
@@ -2503,6 +2512,137 @@ chequear('la etiqueta viaja en data-etiqueta', true,
 $css = file_get_contents(__DIR__ . '/../Css/Proveedores-Proveedores_locales.css');
 
 chequear('y la dibuja el CSS', true, strpos($css, 'content: attr(data-etiqueta);') !== false);
+
+/* ================================================================
+   EL CRONOGRAMA DE PAGOS DE PROVEEDORES LOCALES
+   ================================================================ */
+seccion('las facturas del cronograma se pagan en el proximo dia de pago');
+
+/* El escenario: hoy lunes 05/10/2026, tres meses de horizonte (oct a dic) mas
+   el mes extra que pide getPendientes() (enero). El cronograma PROV_LOCALES por
+   defecto: el 2do y el 4to miercoles. Octubre 14 y 28, noviembre 11 y 25,
+   diciembre 9 y 23, enero 13 y 27. */
+function calendarioPL($desde, $hasta, $feriados = []) {
+    $mapa = [];
+    $c = new DateTime($desde);
+
+    while ($c <= new DateTime($hasta)) {
+        $f = $c->format('Y-m-d');
+        $mapa[$f] = (intval($c->format('N')) <= 5) && !in_array($f, $feriados, true);
+        $c->modify('+1 day');
+    }
+
+    return $mapa;
+}
+
+$hPL = new Horizonte(28, 3, [], new DateTime('2026-10-05'));
+$cfgPL = CronogramaPagos::configDesdeMapa([], 'PROV_LOCALES');
+$pagosPL = CronogramaPagos::paraHorizonte($hPL, $cfgPL,
+    calendarioPL('2026-09-01', '2027-01-31'), [], 1)['pagos'];
+
+/* Los mismos pagos, con el miercoles 28 de octubre feriado: el pago se corre al
+   martes 27. */
+$pagosFer = CronogramaPagos::paraHorizonte($hPL, $cfgPL,
+    calendarioPL('2026-09-01', '2027-01-31', ['2026-10-28']), [], 1)['pagos'];
+
+$rPL = function ($fechaPago, $vto, $pagos, $delCrono = true, $emis = null, $plazo = null) {
+    return Proveedores::resolverFechaPago($fechaPago, $vto, $emis, $plazo, '2026-10-05',
+        $pagos, $delCrono);
+};
+
+$entre = $rPL(null, '2026-10-20', $pagosPL);
+chequear('vence entre dos pagos (20/10): se paga el siguiente, el 28',
+    '2026-10-28', $entre['fecha']);
+chequear('y queda marcado como del cronograma, con su base', [true, '2026-10-20'],
+    [$entre['crono'], $entre['base']]);
+chequear('el pago se nombra', '4to miércoles', $entre['pago_nombre']);
+chequear('el origen sigue siendo el vencimiento', 'VENCIMIENTO', $entre['origen']);
+
+chequear('vence el mismo dia de pago: se paga ese dia', '2026-10-28',
+    $rPL(null, '2026-10-28', $pagosPL)['fecha']);
+
+/* ENTRE EL PAGO CORRIDO Y EL TEORICO: el 28 es feriado y el pago se hizo el 27.
+   Una factura que vence el 28 ya no llega a ese pago: va al siguiente. Es
+   correcto y esta documentado; quien quiera otra cosa mueve el pago a mano. */
+chequear('vence el 28 con el pago corrido al 27: va al siguiente, el 11/11',
+    '2026-11-11', $rPL(null, '2026-10-28', $pagosFer)['fecha']);
+
+$vencida = $rPL(null, '2026-09-01', $pagosPL);
+chequear('vencida sin fecha: va al proximo pago (14/10), NO al primer dia del eje',
+    '2026-10-14', $vencida['fecha']);
+chequear('y sigue marcada como vencida sin fecha cargada: el indicador no cambia',
+    [true, true], [$vencida['vencida'], $vencida['sin_fecha_cargada']]);
+
+$porPlazo = $rPL(null, null, $pagosPL, true, '2026-09-20', 30);
+chequear('sin vencimiento, la base es emision + plazo (20/10) y va al 28',
+    ['2026-10-28', 'PLAZO', '2026-10-20'],
+    [$porPlazo['fecha'], $porPlazo['origen'], $porPlazo['base']]);
+
+seccion('una fecha cargada futura se respeta; una vencida va al cronograma');
+
+$futura = $rPL('2026-10-20', '2026-10-01', $pagosPL);
+chequear('una fecha cargada futura queda tal cual, aunque no sea dia de pago',
+    ['2026-10-20', false, 'CARGADA'], [$futura['fecha'], $futura['crono'], $futura['origen']]);
+
+$cargadaVencida = $rPL('2026-09-30', '2026-09-15', $pagosPL);
+chequear('una fecha cargada que ya paso va al proximo pago', '2026-10-14',
+    $cargadaVencida['fecha']);
+chequear('desde la fecha cargada, que es su base', '2026-09-30', $cargadaVencida['base']);
+chequear('y sigue siendo CARGADA y no "sin fecha": alguien decidio una fecha',
+    ['CARGADA', false], [$cargadaVencida['origen'], $cargadaVencida['sin_fecha_cargada']]);
+
+seccion('una forma fuera del cronograma conserva su fecha');
+
+$debito = $rPL(null, '2026-10-20', $pagosPL, false);
+chequear('un debito que vence el 20 se proyecta el 20', ['2026-10-20', false],
+    [$debito['fecha'], $debito['crono']]);
+chequear('y vencido sigue en el primer dia del eje, como antes', '2026-10-05',
+    $rPL(null, '2026-09-01', $pagosPL, false)['fecha']);
+
+seccion('sin pagos en el horizonte despues de la base');
+
+/* El horizonte termina el 31/12. Una factura que vence el 30/12 ya no tiene un
+   pago adentro: va al primero del mes extra, el 13/01, que queda FUERA del
+   horizonte y se informa como tal. Sin el mes extra caeria el 30/12, adentro. */
+$finAno = $rPL(null, '2026-12-30', $pagosPL);
+chequear('vence el 30/12: va al 13/01, despues del fin del eje', '2027-01-13', $finAno['fecha']);
+chequear('que es fuera del horizonte', true, $finAno['fecha'] > $hPL->fin());
+
+$lejos = $rPL(null, '2027-03-01', $pagosPL);
+chequear('sin ningun pago despues: queda en su fecha, tambien fuera del horizonte',
+    ['2027-03-01', false], [$lejos['fecha'], $lejos['crono']]);
+
+seccion('mover un pago a mano arrastra todas sus facturas');
+
+/* NO SE GRABA NADA POR FACTURA: se asignan al PAGO. Si el 2do miercoles de
+   noviembre (11) se mueve al jueves 12, las dos facturas que caen en el se
+   mueven solas, sin tocarlas. */
+$pagosOv = CronogramaPagos::paraHorizonte($hPL, $cfgPL, calendarioPL('2026-09-01', '2027-01-31'),
+    ['2026-11' => [1 => ['fecha' => '2026-11-12', 'motivo' => 'feria bancaria']]], 1)['pagos'];
+
+chequear('sin el override, las dos van el 11/11', ['2026-11-11', '2026-11-11'],
+    [$rPL(null, '2026-10-29', $pagosPL)['fecha'], $rPL(null, '2026-11-05', $pagosPL)['fecha']]);
+chequear('con el pago movido al 12, las dos van el 12', ['2026-11-12', '2026-11-12'],
+    [$rPL(null, '2026-10-29', $pagosOv)['fecha'], $rPL(null, '2026-11-05', $pagosOv)['fecha']]);
+chequear('y dice que ese pago se movio a mano', true,
+    $rPL(null, '2026-10-29', $pagosOv)['pago_override']);
+
+seccion('sin cronograma, todo como antes');
+
+$sinCrono = Proveedores::resolverFechaPago(null, '2026-09-01', null, null, '2026-10-05');
+chequear('sin los pagos, lo vencido sigue en el primer dia del eje', ['2026-10-05', false],
+    [$sinCrono['fecha'], $sinCrono['crono']]);
+chequear('SIN_FECHA sigue igual con cronograma', ['SIN_FECHA', null],
+    (function ($r) { return [$r['origen'], $r['fecha']]; })($rPL(null, null, $pagosPL)));
+
+/* getPendientes() pide el cronograma SOLO con el horizonte, con un mes extra, y
+   FECHA_VTO sigue siendo el vencimiento crudo de Tango. */
+chequear('getPendientes() pide el cronograma PROV_LOCALES con un mes extra', true,
+    strpos(file_get_contents(__DIR__ . '/../Class/Proveedores.php'),
+        "paraHorizonte(\$h, 'PROV_LOCALES', 1)") !== false);
+chequear('y FECHA_VTO es el vencimiento de Tango, no la fecha resuelta', true,
+    strpos($cuerpoPend, "'FECHA_VTO' => \$fechaVto,") !== false
+    && strpos($cuerpoPend, "'Pago' => \$resuelta['fecha'],") !== false);
 
 /* ================================================================
    CONTRA LA BASE

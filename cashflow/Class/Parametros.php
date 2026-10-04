@@ -377,11 +377,16 @@ class Parametros {
                             . $e->getMessage();
                     }
                 } elseif ($seccion === 'cronograma') {
-                    /* SE RESUELVE EL HORIZONTE ENTERO y la pantalla muestra
-                       sólo las fechas del tramo diario. Los meses de más no son
-                       de adorno: son los que Logística Local usa para decidir
-                       qué mitad de un importe va a una columna diaria y cuál a
-                       la del mes. Ver CronogramaPagos::paraHorizonte(). */
+                    /* UN CRONOGRAMA POR CONCEPTO: Proveedores Locales,
+                       Logística y Supervisoras, cada uno con su día, su
+                       frecuencia y sus overrides. Ver CronogramaPagos.
+
+                       SE RESUELVE EL HORIZONTE ENTERO y la pantalla muestra
+                       editables sólo los dos próximos pagos de cada concepto.
+                       Los meses de más no son de adorno: son los que cada
+                       consumidor usa para decidir qué parte de un importe va a
+                       una columna diaria y cuál a la del mes. Ver
+                       CronogramaPagos::paraHorizonte(). */
                     try {
                         /* El require va acá y no en la cabecera: Horizonte ya
                            requiere esta clase, así que los dos arriba serían un
@@ -389,20 +394,46 @@ class Parametros {
                         require_once __DIR__ . '/Horizonte.php';
 
                         $h = Horizonte::desdeParametros($this, $map);
-                        $crono = $this->cronograma()->paraHorizonte($h);
+                        $datos = $this->cronograma();
+                        $conceptos = [];
+                        $vistos = [];
+
+                        foreach (CronogramaPagos::CONCEPTOS as $concepto => $meta) {
+                            $crono = $datos->paraHorizonte($h, $concepto);
+
+                            $conceptos[$concepto] = [
+                                'pagos' => $crono['pagos'],
+                                'config' => $crono['config'],
+                                'editable' => $crono['editable']
+                            ];
+
+                            /* Los avisos del calendario son los mismos para los
+                               tres conceptos: se dicen una vez. */
+                            foreach ($crono['avisos'] as $a) {
+                                if (!isset($vistos[$a])) {
+                                    $vistos[$a] = true;
+                                    $modulo['avisos'][] = $a;
+                                }
+                            }
+                        }
+
+                        if ($datos->avisoSinTipo() !== '') {
+                            $modulo['avisos'][] = $datos->avisoSinTipo();
+                        }
 
                         $modulo['cronograma'] = [
-                            'pagos' => $crono['pagos'],
+                            'conceptos' => $conceptos,
+                            'configuraciones' => $datos->configuraciones(),
+                            'dias' => CronogramaPagos::DIAS,
+                            'frecuencias' => CronogramaPagos::FRECUENCIAS,
                             'hoy' => $h->hoy(),
                             'fin_tramo' => $this->finTramo($h),
-                            'tabla_creada' => $crono['tabla_creada']
+                            'tabla_creada' => $datos->tablaCreada()
                         ];
-
-                        foreach ($crono['avisos'] as $a) {
-                            $modulo['avisos'][] = $a;
-                        }
                     } catch (Throwable $e) {
-                        $modulo['cronograma'] = ['pagos' => [], 'hoy' => date('Y-m-d'),
+                        $modulo['cronograma'] = ['conceptos' => [], 'configuraciones' => [],
+                                                 'dias' => [], 'frecuencias' => [],
+                                                 'hoy' => date('Y-m-d'),
                                                  'fin_tramo' => null, 'tabla_creada' => false];
                         $modulo['avisos'][] = 'No se pudo resolver el cronograma de pagos: '
                             . $e->getMessage();
