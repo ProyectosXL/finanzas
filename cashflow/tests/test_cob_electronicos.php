@@ -627,7 +627,7 @@ chequear('con un solo aviso', 1, count($sinTablas->warnings()));
 chequear('que dice que script hay que correr', true,
     strpos($sinTablas->warnings()[0], 'cashflow_cob_electronicos.sql') !== false);
 chequear('y no es el mensaje generico de la clase base', false,
-    strpos($sinTablas->warnings()[0], 'no se pudo calcular') !== false);
+    stripos($sinTablas->warnings()[0], 'no se pudo calcular') !== false);
 
 // 2. Ninguna procesadora cargada.
 $sinProcesadoras = proveedorConDoble(function ($f) {

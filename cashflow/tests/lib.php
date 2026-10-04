@@ -113,3 +113,46 @@ function chequear($nombre, $esperado, $obtenido) {
 function chequearLanza($nombre, $fn, $mensajeEsperado = null) {
     return Pruebas::chequearLanza($nombre, $fn, $mensajeEsperado);
 }
+
+/**
+ * Los avisos del tablero en una lista plana, cada uno con 'grupo' y 'nombre'
+ * del grupo al que fue. El tablero los devuelve agrupados por pestana
+ * (Cashflow::proyectar()['avisos']); las pruebas que solo quieren saber si un
+ * aviso esta, no en que grupo, leen esto.
+ *
+ * @param array $tablero Lo que devolvio proyectar()
+ * @return array
+ */
+function avisosTablero($tablero) {
+    $out = [];
+
+    foreach ((isset($tablero['avisos']) ? $tablero['avisos'] : []) as $g) {
+        foreach ($g['avisos'] as $a) {
+            $a['grupo_nombre'] = $g['nombre'];
+            $out[] = $a;
+        }
+    }
+
+    return $out;
+}
+
+/**
+ * Los textos de los avisos del tablero; con $seccion, solo los de esa seccion.
+ * Reemplaza a la lista plana 'warnings' que el tablero devolvia antes, y a los
+ * filtros por prefijo ("Cobertura: ...") que ahora es la seccion.
+ *
+ * @param array $tablero
+ * @param string|null $seccion
+ * @return string[]
+ */
+function textosTablero($tablero, $seccion = null) {
+    $out = [];
+
+    foreach (avisosTablero($tablero) as $a) {
+        if ($seccion === null || $a['seccion'] === $seccion) {
+            $out[] = $a['texto'];
+        }
+    }
+
+    return $out;
+}

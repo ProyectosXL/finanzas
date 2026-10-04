@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/CashflowRegistry.php';
+require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
 
@@ -341,17 +342,34 @@ class CashflowEstructura {
     }
 
     /**
-     * Avisos de configuracion pendiente, para mostrar en pantalla.
+     * Avisos de configuracion pendiente, para mostrar en pantalla. Solo los
+     * textos: es lo que lee el editor de Parametros. El motor usa
+     * avisosConNivel().
      *
      * @return array Lista de mensajes
      */
     public function getAvisos() {
+        return Aviso::textos($this->avisosConNivel());
+    }
+
+    /**
+     * Los mismos avisos de getAvisos(), con su gravedad.
+     *
+     * Sin las tablas no hay tablero que mostrar: critico. Sin las columnas de
+     * agrupamiento el tablero esta bien y solo se pierde la presentacion
+     * agrupada: atencion, porque alguien tiene que correr el script aunque
+     * ningun numero cambie.
+     *
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosConNivel() {
         $avisos = [];
 
         if (!$this->tablasCreadas()) {
-            $avisos[] = 'Todavía no existen las tablas de estructura del Cashflow. '
-                      . 'Corré sql/cashflow_estructura.sql contra la base central '
-                      . 'para crear las secciones y filas del tablero.';
+            $avisos[] = Aviso::nuevo(Aviso::DANGER,
+                'Todavía no existen las tablas de estructura del Cashflow. '
+                . 'Corré sql/cashflow_estructura.sql contra la base central '
+                . 'para crear las secciones y filas del tablero.');
 
             // Sin las tablas, hablar de las columnas que les faltan es ruido:
             // el aviso que hay que leer es el de arriba.
@@ -359,11 +377,12 @@ class CashflowEstructura {
         }
 
         if (!$this->tieneColumnasGrupo()) {
-            $avisos[] = 'Las filas del tablero todavía no se pueden agrupar: faltan las '
-                      . 'columnas GRUPO, NATURALEZA y GRUPO_NOMBRE. Corré '
-                      . 'sql/cashflow_estructura_grupos.sql contra la base central. '
-                      . 'Mientras tanto el tablero funciona igual, con una fila por cada '
-                      . 'parte.';
+            $avisos[] = Aviso::nuevo(Aviso::WARNING,
+                'Las filas del tablero todavía no se pueden agrupar: faltan las '
+                . 'columnas GRUPO, NATURALEZA y GRUPO_NOMBRE. Corré '
+                . 'sql/cashflow_estructura_grupos.sql contra la base central. '
+                . 'Mientras tanto el tablero funciona igual, con una fila por cada '
+                . 'parte.');
         }
 
         return $avisos;

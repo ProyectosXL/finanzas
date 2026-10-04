@@ -252,7 +252,7 @@ if (!Pruebas::hayBase()) {
         0, $descuadre);
 
     $fallaDura = array_filter($prov->warnings(), function ($w) {
-        return strpos($w, 'no se pudo calcular') !== false;
+        return stripos($w, 'no se pudo calcular') !== false;
     });
     chequear('el proveedor no cae en su aviso de falla', [], array_values($fallaDura));
 

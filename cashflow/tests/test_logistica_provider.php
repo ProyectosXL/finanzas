@@ -243,8 +243,8 @@ chequear('series() no lanza y devuelve un mapa', true, is_array($sR));
 chequear('sin ninguna serie: calcular() no llego a devolver nada', [], array_keys($sR));
 chequear('y el aviso dice que paso', true,
     strpos(implode(' ', $roto->warnings()), 'la base no responde') !== false);
-chequear('nombrando al proveedor', true,
-    strpos(implode(' ', $roto->warnings()), 'LOGISTICA') !== false);
+// Sin el codigo adelante: en el tablero lo dicen el grupo y el 'origen'.
+chequear('como critico', 'danger', $roto->avisos()[0]['nivel']);
 
 /* ================================================================
    LO QUE CAE FUERA DEL HORIZONTE SE INFORMA

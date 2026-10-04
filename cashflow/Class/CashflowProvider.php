@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/Horizonte.php';
+require_once __DIR__ . '/Aviso.php';
 
 /**
  * CashflowProvider
@@ -39,7 +40,9 @@ require_once __DIR__ . '/Horizonte.php';
  *   'tipo_cambio'     float | null        con cual se convirtio, si se convirtio
  *   'fuera_horizonte' float               importe que quedo fuera del eje
  *   'sin_fecha'       float               importe sin fecha utilizable
- *   'warnings'        string[]            avisos propios de la serie
+ *   'warnings'        array               avisos propios de la serie: textos o
+ *                                         ['nivel', 'texto', 'seccion'] (ver
+ *                                         AVISOS, abajo). Sale siempre con nivel.
  *   'detalle'         array               anotaciones por columna (ver abajo)
  *   'por_fondo'       [clave => float]    cuanto de la serie corresponde a cada
  *                                         fondo de cobertura (ver abajo)
@@ -128,13 +131,32 @@ require_once __DIR__ . '/Horizonte.php';
  * 'fuera_horizonte' no es opcional: si un importe cae fuera del eje hay que
  * informarlo. Un tablero de consolidacion que informa de menos sin decirlo es
  * peor que uno que falla.
+ *
+ * AVISOS
+ * ------
+ * avisar($mensaje, $nivel, $seccion) deja un aviso con gravedad: 'danger',
+ * 'warning' (el defecto) o 'info'. El criterio de cada nivel esta en
+ * Class/Aviso.php y en README-cashflow.md, "Avisos del tablero". El texto NO
+ * lleva el nombre de la pestana adelante: el tablero los agrupa por pestana.
+ * $seccion es el subtitulo para cuando la pestana sola no dice de que parte
+ * habla el aviso (Saldo Inicial o Caja Locales dentro de Saldos, por ejemplo).
+ *
+ * Hay dos formas de leerlos, y las dos existen a proposito:
+ *
+ *   avisos()    la lista con nivel. La lee el motor para el panel del tablero.
+ *   warnings()  solo los textos. La leen los controllers de las pestanas, cuyo
+ *               panel sigue siendo una lista de textos y no cambia.
+ *
+ * El 'warnings' de una serie acepta las dos formas: un texto suelto se toma
+ * como 'warning', asi una serie vieja o armada a mano en una prueba sigue
+ * andando. normalizar() lo deja siempre con nivel.
  */
 abstract class CashflowProvider {
 
     /** @var array|null Cache del resultado: el motor pide las series una sola vez por pedido */
     private $cache = null;
 
-    /** @var array Avisos acumulados */
+    /** @var array Avisos acumulados, cada uno ['nivel', 'texto', 'seccion'] */
     protected $warnings = [];
 
     /** @var string Codigo con el que el registro lo instancio */
@@ -198,8 +220,11 @@ abstract class CashflowProvider {
             }
         } catch (Throwable $e) {
             // Throwable y no Exception: tambien atrapa TypeError y compania.
-            $this->warnings[] = $this->codigo() . ': no se pudo calcular ('
-                . $e->getMessage() . '). Sus filas se muestran en cero.';
+            // Critico: el numero esta mal y nadie lo decidio. Sin el codigo
+            // adelante: en el tablero el grupo y el 'origen' ya dicen de que
+            // modulo es, y en el panel de la pestana el usuario ya esta ahi.
+            $this->avisar('No se pudo calcular (' . $e->getMessage()
+                . '). Sus filas se muestran en cero.', Aviso::DANGER);
             $crudas = [];
         }
 
@@ -215,21 +240,54 @@ abstract class CashflowProvider {
     }
 
     /**
-     * Avisos acumulados en el ultimo series(). Incluye el de una falla atrapada.
+     * Textos de los avisos del ultimo series(). Incluye el de una falla
+     * atrapada. Es lo que leen los paneles de cada pestana: solo texto.
      *
-     * @return array
+     * @return string[]
      */
     public function warnings() {
+        return Aviso::textos($this->warnings);
+    }
+
+    /**
+     * Avisos del ultimo series(), con nivel y seccion. Es lo que lee el motor
+     * para el panel del tablero.
+     *
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisos() {
         return $this->warnings;
     }
 
     /**
      * Deja un aviso no fatal. Para usar desde calcular().
      *
-     * @param string $mensaje
+     * @param string $mensaje Sin el nombre de la pestana adelante
+     * @param string $nivel 'danger' | 'warning' | 'info'. Uno invalido se toma
+     *        como 'warning' (ver Aviso::nivel()).
+     * @param string|null $seccion Subtitulo dentro de la pestana, o null
      */
-    protected function avisar($mensaje) {
-        $this->warnings[] = $mensaje;
+    protected function avisar($mensaje, $nivel = Aviso::WARNING, $seccion = null) {
+        $this->warnings[] = Aviso::nuevo($nivel, $mensaje, $seccion);
+    }
+
+    /**
+     * Deja varios avisos de una vez: los textos sueltos con el nivel que se
+     * pase, y los que ya traen nivel con el suyo. Es lo que usan los
+     * proveedores para levantar la lista de su modulo.
+     *
+     * @param array $lista Textos y/o ['nivel', 'texto', 'seccion']
+     * @param string $nivel Nivel para los textos sueltos
+     * @param string|null $seccion Seccion para los que no traen una
+     */
+    protected function avisarTodos($lista, $nivel = Aviso::WARNING, $seccion = null) {
+        foreach (Aviso::lista($lista, $nivel, $seccion) as $a) {
+            if ($a['seccion'] === null && $seccion !== null) {
+                $a['seccion'] = $seccion;
+            }
+
+            $this->warnings[] = $a;
+        }
     }
 
     /**
@@ -382,8 +440,10 @@ abstract class CashflowProvider {
             }
         }
 
+        // Textos o avisos con nivel; sale siempre con nivel. Un texto suelto
+        // es 'warning': ver la nota AVISOS del encabezado.
         if (isset($serie['warnings']) && is_array($serie['warnings'])) {
-            $out['warnings'] = array_values($serie['warnings']);
+            $out['warnings'] = Aviso::lista($serie['warnings']);
         }
 
         // Solo sobreviven las anotaciones de columnas que EXISTEN en el eje.
