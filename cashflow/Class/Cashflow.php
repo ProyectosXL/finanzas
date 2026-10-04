@@ -6,6 +6,8 @@ require_once __DIR__ . '/EjeVista.php';
 require_once __DIR__ . '/CashflowRegistry.php';
 require_once __DIR__ . '/CashflowEstructura.php';
 require_once __DIR__ . '/CoberturaAutomatica.php';
+require_once __DIR__ . '/Aviso.php';
+require_once __DIR__ . '/Menu.php';
 
 /**
  * Cashflow
@@ -48,8 +50,13 @@ class Cashflow {
     /** @var Horizonte|null Eje inyectado. null = se arma desde los parametros */
     private $horizonte;
 
-    /** @var array Avisos no fatales que se devuelven en el JSON */
-    private $warnings = [];
+    /**
+     * Avisos no fatales, cada uno ['nivel', 'texto', 'seccion', 'grupo',
+     * 'origen']. Salen en el JSON agrupados por pestana (ver avisosAgrupados()).
+     *
+     * @var array
+     */
+    private $avisos = [];
 
     /** Arrastre resuelto, indexado por columna. Lo llena resolverDerivadas(). */
     private $apertura = [];
@@ -96,7 +103,7 @@ class Cashflow {
      * @return array Estructura descrita en README-cashflow.md
      */
     public function proyectar() {
-        $this->warnings = [];
+        $this->avisos = [];
 
         /* ---- 1. Eje temporal --------------------------------------------- */
         // Si lo inyectaron, manda el inyectado: es lo que permite fijar el dia
@@ -106,8 +113,16 @@ class Cashflow {
             : Horizonte::desdeParametros($this->parametros);
 
         /* ---- 2. Estructura configurada ----------------------------------- */
-        foreach ($this->estructura->getAvisos() as $aviso) {
-            $this->warnings[] = $aviso;
+        // Con nivel si la estructura lo sabe dar. Una estructura inyectada en
+        // una prueba puede tener solo getAvisos(): sus textos van como
+        // 'warning', que es lo que hace normalizar() con un texto suelto.
+        $avisosEstructura = method_exists($this->estructura, 'avisosConNivel')
+            ? $this->estructura->avisosConNivel()
+            : Aviso::lista($this->estructura->getAvisos());
+
+        foreach ($avisosEstructura as $a) {
+            $this->avisar($a['nivel'], $a['texto'], null, null,
+                $a['seccion'] !== null ? $a['seccion'] : 'Configuración');
         }
 
         $conf = $this->estructura->getEstructura(true);
@@ -125,8 +140,10 @@ class Cashflow {
         // en un unico aviso y no en uno por fila).
         $val = CashflowEstructura::validar($secciones, $filas);
 
+        // Critico: una fila mal configurada va en cero, y no es una decision
+        // de nadie que lo este.
         foreach ($val['errores'] as $e) {
-            $this->warnings[] = 'Configuración: ' . $e;
+            $this->avisar(Aviso::DANGER, $e, null, null, 'Configuración');
         }
 
         /* ---- 3. Series de los modulos ------------------------------------ */
@@ -165,8 +182,94 @@ class Cashflow {
             'secciones' => $this->salidaSecciones($secciones),
             'filas' => $this->salidaFilas($resueltas),
             'kpi' => $this->calcularKpi($h, $resueltas),
-            'warnings' => $this->warnings
+            // Ya agrupados y ordenados. La lista plana 'warnings' se saco:
+            // solo la leia Js/Cashflow.js.
+            'avisos' => $this->avisosAgrupados()
         ]);
+    }
+
+    /* ====================================================================
+       AVISOS
+       ==================================================================== */
+
+    /**
+     * Deja un aviso para el panel del tablero.
+     *
+     * @param string $nivel 'danger' | 'warning' | 'info'
+     * @param string $texto Sin el nombre de la pestana adelante
+     * @param string|null $grupo Pestana ('tab' del registro), o null para el
+     *        grupo Tablero: los avisos del motor y los de modulos sin pestana
+     * @param string|null $origen Codigo del proveedor, si vino de uno
+     * @param string|null $seccion Subtitulo dentro del grupo
+     */
+    private function avisar($nivel, $texto, $grupo = null, $origen = null, $seccion = null) {
+        $a = Aviso::nuevo($nivel, $texto, $seccion);
+        $a['grupo'] = ($grupo === null || $grupo === '') ? Aviso::GRUPO_TABLERO : $grupo;
+        $a['origen'] = $origen;
+
+        $this->avisos[] = $a;
+    }
+
+    /**
+     * Levanta avisos que vienen de un proveedor -los suyos o los de una de sus
+     * series- con la pestana de ese proveedor.
+     *
+     * UN PROVEEDOR SIN 'tab' VA AL GRUPO TABLERO, y ahi el nombre del modulo
+     * pasa a ser la seccion: entre los avisos del motor, "Cobertura" o
+     * "Dolares Cuenta Comitente" es lo que dice de que habla cada uno. Si el
+     * aviso ya trae su seccion, manda la suya.
+     *
+     * @param array $avisos Lista de ['nivel', 'texto', 'seccion']
+     * @param string $codigo Codigo del proveedor
+     */
+    private function avisarDeProveedor($avisos, $codigo) {
+        $tab = $this->tabDe($codigo);
+        $meta = CashflowRegistry::meta($codigo);
+
+        foreach (Aviso::lista($avisos) as $a) {
+            $seccion = $a['seccion'];
+
+            if ($seccion === null && $tab === null && $meta !== null) {
+                $seccion = $meta['nombre'];
+            }
+
+            $this->avisar($a['nivel'], $a['texto'], $tab, $codigo, $seccion);
+        }
+    }
+
+    /**
+     * La pestana de un proveedor segun el registro, o null si no tiene.
+     *
+     * @param string $codigo
+     * @return string|null
+     */
+    private function tabDe($codigo) {
+        $meta = CashflowRegistry::meta($codigo);
+
+        return ($meta !== null && !empty($meta['tab'])) ? $meta['tab'] : null;
+    }
+
+    /**
+     * Los avisos agrupados por pestana y ordenados, listos para dibujar.
+     *
+     * El orden y el nombre salen del menu: el panel tiene que nombrar cada
+     * grupo como el encabezado de la pestana a la que lleva su link, y
+     * ordenarlos como el sidebar. Se usa el encabezado (Menu::tituloTab()) y
+     * no el nombre corto del sidebar: fuera del menu, "Proyeccion" sola no
+     * dice de que es; "Comercio Exterior › Proyeccion" si.
+     *
+     * @return array Ver Aviso::agrupar()
+     */
+    private function avisosAgrupados() {
+        $titulos = [];
+
+        foreach ($this->avisos as $a) {
+            if ($a['grupo'] !== Aviso::GRUPO_TABLERO && !isset($titulos[$a['grupo']])) {
+                $titulos[$a['grupo']] = Menu::tituloTab($a['grupo']);
+            }
+        }
+
+        return Aviso::agrupar($this->avisos, Menu::tabs(), $titulos);
     }
 
     /* ====================================================================
@@ -200,11 +303,14 @@ class Cashflow {
         foreach (array_keys($necesarios) as $codigo) {
             $meta = CashflowRegistry::meta($codigo);
 
+            // Sin registro no hay pestana a la que mandarlo: va a Tablero.
             if ($meta === null) {
-                $this->warnings[] = 'El módulo "' . $codigo . '" no está registrado como origen '
-                    . 'de datos: las filas que lo usan se muestran en cero.';
+                $this->avisar(Aviso::DANGER, 'El módulo "' . $codigo . '" no está registrado '
+                    . 'como origen de datos: las filas que lo usan se muestran en cero.', null, $codigo);
                 continue;
             }
+
+            $tab = $this->tabDe($codigo);
 
             if (empty($meta['disponible'])) {
                 $sinConstruir[] = $meta['nombre'];
@@ -218,17 +324,19 @@ class Cashflow {
                cargo, que puede ser viejo, y sin el aviso se leeria como de
                hoy. Es lo que pasa con Otros Ingresos desde que el stock sale
                de las cuentas de fondo. */
+            // Atencion y no critico: el numero es el ultimo que se cargo, y se
+            // arregla apuntando la fila al circuito nuevo desde Parametros.
             if (!empty($meta['retirado'])) {
-                $this->warnings[] = 'El módulo ' . $meta['nombre'] . ' está retirado: '
+                $this->avisar(Aviso::WARNING, 'El módulo ' . $meta['nombre'] . ' está retirado: '
                     . $meta['retirado'] . ' Las filas que todavía lo usan muestran lo último '
-                    . 'que se cargó ahí, que ya no se mantiene.';
+                    . 'que se cargó ahí, que ya no se mantiene.', $tab, $codigo);
             }
 
-            $prov = CashflowRegistry::instanciar($codigo);
+            $prov = $this->instanciar($codigo);
 
             if ($prov === null) {
-                $this->warnings[] = 'No se pudo cargar el módulo ' . $meta['nombre']
-                    . ': sus filas se muestran en cero.';
+                $this->avisar(Aviso::DANGER, 'No se pudo cargar el módulo ' . $meta['nombre']
+                    . ': sus filas se muestran en cero.', $tab, $codigo);
                 continue;
             }
 
@@ -237,25 +345,40 @@ class Cashflow {
             try {
                 $series[$codigo] = $prov->series($h);
 
-                foreach ($prov->warnings() as $w) {
-                    $this->warnings[] = $w;
-                }
+                $this->avisarDeProveedor($prov->avisos(), $codigo);
             } catch (Throwable $e) {
-                $this->warnings[] = 'El módulo ' . $meta['nombre'] . ' no pudo calcularse ('
-                    . $e->getMessage() . '): sus filas se muestran en cero.';
+                $this->avisar(Aviso::DANGER, 'El módulo ' . $meta['nombre'] . ' no pudo calcularse ('
+                    . $e->getMessage() . '): sus filas se muestran en cero.', $tab, $codigo);
             }
         }
 
         // Un aviso agrupado en lugar de uno por fila: son doce modulos y la
-        // lista suelta taparia los avisos que si requieren accion.
+        // lista suelta taparia los avisos que si requieren accion. Informativo:
+        // que un modulo todavia no exista ya esta decidido, y la fila en cero
+        // lo dice.
         if (!empty($sinConstruir)) {
             sort($sinConstruir);
 
-            $this->warnings[] = 'Estos módulos todavía no están construidos y sus filas se '
-                . 'muestran en cero: ' . implode(', ', $sinConstruir) . '.';
+            $this->avisar(Aviso::INFO, 'Estos módulos todavía no están construidos y sus filas '
+                . 'se muestran en cero: ' . implode(', ', $sinConstruir) . '.');
         }
 
         return $series;
+    }
+
+    /**
+     * El proveedor de un codigo del registro, o null si no se pudo cargar.
+     *
+     * Es protected por lo mismo que pedirSeries(): las pruebas del panel de
+     * avisos necesitan correr pedirSeries() de verdad -es ahi donde cada aviso
+     * recibe su grupo- pero con proveedores que no abren conexion. Reemplazar
+     * pedirSeries() entero se saltearia justo lo que hay que probar.
+     *
+     * @param string $codigo
+     * @return CashflowProvider|null
+     */
+    protected function instanciar($codigo) {
+        return CashflowRegistry::instanciar($codigo);
     }
 
     /**
@@ -407,11 +530,13 @@ class Cashflow {
                suite. Un warning conocido esconde al proximo que sea real. */
             $fila['detalle'] = isset($s['detalle']) ? $s['detalle'] : [];
 
-            foreach ($s['warnings'] as $w) {
-                $this->warnings[] = $w;
-            }
+            // Los de la serie y los descartes van con la pestana del proveedor
+            // de ESTA fila: es donde se explica el importe. El isset() por lo
+            // mismo que el de 'detalle': una serie armada a mano en una prueba
+            // puede no traer la clave.
+            $this->avisarDeProveedor(isset($s['warnings']) ? $s['warnings'] : [], $prov);
 
-            $this->avisarDescartes($fila['nombre'], $s);
+            $this->avisarDescartes($fila['nombre'], $s, $prov);
 
             $resueltas[] = $fila;
         }
@@ -439,10 +564,12 @@ class Cashflow {
                 continue;
             }
 
-            $this->warnings[] = 'La fila "' . $f['nombre'] . '" se muestra en CERO porque el '
-                . 'módulo que la alimenta todavía no está desarrollado. Como no hay saldo de '
-                . 'apertura, el Saldo Final arranca de cero: muestra la caja que generan los '
-                . 'ingresos proyectados, no la posición real de los bancos.';
+            // Critico: el Saldo Final deja de ser la posicion real, y no lo
+            // decidio nadie.
+            $this->avisar(Aviso::DANGER, 'La fila "' . $f['nombre'] . '" se muestra en CERO '
+                . 'porque el módulo que la alimenta todavía no está desarrollado. Como no hay '
+                . 'saldo de apertura, el Saldo Final arranca de cero: muestra la caja que generan '
+                . 'los ingresos proyectados, no la posición real de los bancos.');
 
             return;
         }
@@ -453,19 +580,34 @@ class Cashflow {
      * un tablero de consolidacion que muestra de menos sin decirlo es peor que
      * uno que falla.
      *
+     * LOS DOS TIENEN NIVEL DISTINTO. Lo que cae fuera del horizonte es
+     * informativo: el tablero muestra, por definicion, solo el horizonte, y eso
+     * no es un error ni algo a corregir. Lo que no tiene fecha es atencion: es
+     * plata que deberia estar en alguna columna y se arregla cargandola.
+     *
+     * El nombre de la FILA queda en el texto: no es el de la pestana -el grupo
+     * ya la dice- sino cual de sus filas pierde el importe.
+     *
      * @param string $nombreFila
      * @param array $s Serie normalizada
+     * @param string $prov Codigo del proveedor de la fila, para el grupo
      */
-    private function avisarDescartes($nombreFila, $s) {
+    private function avisarDescartes($nombreFila, $s, $prov) {
+        $avisos = [];
+
         if (!empty($s['fuera_horizonte'])) {
-            $this->warnings[] = $nombreFila . ': ' . $this->plata($s['fuera_horizonte'])
-                . ' con fecha fuera del horizonte proyectado no se muestran en el tablero.';
+            $avisos[] = Aviso::nuevo(Aviso::INFO, $nombreFila . ': '
+                . $this->plata($s['fuera_horizonte'])
+                . ' con fecha fuera del horizonte proyectado no se muestran en el tablero.');
         }
 
         if (!empty($s['sin_fecha'])) {
-            $this->warnings[] = $nombreFila . ': ' . $this->plata($s['sin_fecha'])
-                . ' sin fecha asignada no se pueden ubicar en el tablero.';
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $nombreFila . ': '
+                . $this->plata($s['sin_fecha'])
+                . ' sin fecha asignada no se pueden ubicar en el tablero.');
         }
+
+        $this->avisarDeProveedor($avisos, $prov);
     }
 
     /* ====================================================================
@@ -631,8 +773,8 @@ class Cashflow {
             $b = $apertura[$columnas[$i + 1]];
 
             if (abs($a - $b) > 0.01) {
-                $this->warnings[] = 'El arrastre del saldo no cierra entre '
-                    . $this->rotulo($columnas[$i]) . ' y ' . $this->rotulo($columnas[$i + 1]) . '.';
+                $this->avisar(Aviso::DANGER, 'El arrastre del saldo no cierra entre '
+                    . $this->rotulo($columnas[$i]) . ' y ' . $this->rotulo($columnas[$i + 1]) . '.');
                 break;
             }
         }
@@ -646,9 +788,9 @@ class Cashflow {
         if ($this->automatico !== null) {
             foreach ($columnas as $col) {
                 if (abs($cierre[$col] - $this->automatico['saldo'][$col]) > 0.01) {
-                    $this->warnings[] = 'La cobertura automática no cierra con el arrastre en '
-                        . $this->rotulo($col) . ': el saldo final puede no reflejar lo que se '
-                        . 'rescató. Avisá a Sistemas.';
+                    $this->avisar(Aviso::DANGER, 'La cobertura automática no cierra con el '
+                        . 'arrastre en ' . $this->rotulo($col) . ': el saldo final puede no '
+                        . 'reflejar lo que se rescató. Avisá a Sistemas.', null, null, 'Cobertura');
                     break;
                 }
             }
@@ -1206,11 +1348,11 @@ class Cashflow {
                     $col = array_key_first($auto['sobregirado'][$clave]);
                     $exceso = $auto['sobregirado'][$clave][$col];
 
-                    $this->warnings[] = 'Cobertura: el ' . $this->rotulo($col) . ' lo aplicado de "'
+                    $this->avisar(Aviso::WARNING, 'El ' . $this->rotulo($col) . ' lo aplicado de "'
                         . $d['nombre'] . '" supera en ' . $this->moneda($exceso, $d['moneda'])
                         . ' lo que hay en ese fondo a esa fecha (rescates previstos en Saldos → '
                         . 'Fondos incluidos). El motor no rescata de ahí hasta que vuelva a '
-                        . 'haber saldo.';
+                        . 'haber saldo.', null, null, 'Cobertura');
                 }
 
                 continue;
@@ -1221,18 +1363,19 @@ class Cashflow {
             }
 
             if ($d['aplicado'] > $d['stock'] + 0.01) {
-                $this->warnings[] = 'Cobertura: se aplican ' . $this->plata($d['aplicado'])
+                $this->avisar(Aviso::WARNING, 'Se aplican ' . $this->plata($d['aplicado'])
                     . ' de "' . $d['nombre'] . '" pero ahí hay ' . $this->plata($d['stock'])
                     . '. Faltan ' . $this->plata($d['aplicado'] - $d['stock'])
-                    . ' de ese fondo.';
+                    . ' de ese fondo.', null, null, 'Cobertura');
             }
         }
 
         if ($auto === null && $hayStock && $aplicado > $stock + 0.01) {
-            $this->warnings[] = 'Cobertura: se aplican ' . $this->plata($aplicado)
+            $this->avisar(Aviso::WARNING, 'Se aplican ' . $this->plata($aplicado)
                 . ' pero el total disponible para cubrir es ' . $this->plata($stock)
                 . '. Faltan ' . $this->plata($aplicado - $stock) . ', así que el Saldo Final '
-                . 'está cubierto con plata que todavía no figura como disponible.';
+                . 'está cubierto con plata que todavía no figura como disponible.',
+                null, null, 'Cobertura');
         }
 
         if ($auto === null) {
@@ -1251,9 +1394,12 @@ class Cashflow {
                 $partes[] = $this->rotulo($col) . ' ' . $this->plata($v);
             }
 
-            $this->warnings[] = 'Cobertura: aun aplicando todo lo invertido, el Saldo Final queda '
+            // Atencion y no critico: no es un descuadre del calculo sino un
+            // dato del negocio -falta plata- que pide una decision.
+            $this->avisar(Aviso::WARNING, 'Aun aplicando todo lo invertido, el Saldo Final queda '
                 . 'en rojo en ' . count($auto['faltante']) . ' columna(s). Falta: '
-                . implode(', ', $partes) . '. No se inventa plata: esas columnas quedan marcadas.';
+                . implode(', ', $partes) . '. No se inventa plata: esas columnas quedan marcadas.',
+                null, null, 'Cobertura');
         }
 
         $this->avisarSinFila($auto['sin_fila']);
@@ -1271,12 +1417,12 @@ class Cashflow {
             return;
         }
 
-        $this->warnings[] = 'Cobertura: ' . implode(', ', array_map(function ($n) {
+        $this->avisar(Aviso::WARNING, implode(', ', array_map(function ($n) {
                 return '"' . $n . '"';
             }, $nombres)) . ' tiene(n) stock pero ninguna fila de uso los aplica, así que el '
             . 'motor no rescata de ahí. Corré sql/cashflow_cobertura_automatica.sql, o apuntá una '
             . 'fila de tipo USO_COBERTURA a la serie de esa clase de fondo desde Parámetros → '
-            . 'Cashflow.';
+            . 'Cashflow.', null, null, 'Cobertura');
     }
 
     /** Un importe en la moneda del fondo, para los avisos */

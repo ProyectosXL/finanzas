@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/Horizonte.php';
+require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/Parametros.php';
 require_once __DIR__ . '/Fondos.php';
 require_once __DIR__ . '/AuthCashflow.php';
@@ -511,9 +512,9 @@ class Saldos {
             $aporta = ($deposita && $neto > 0) ? $neto : 0;
 
             if ($deposita && $neto < 0) {
-                $avisos[] = 'El local ' . $nro . ' ' . $s['desc_sucursal'] . ' tiene la caja por '
+                $avisos[] = Aviso::nuevo(Aviso::INFO, 'El local ' . $nro . ' ' . $s['desc_sucursal'] . ' tiene la caja por '
                     . 'debajo de su reserva (' . self::plata($neto) . '): no aporta al cashflow, '
-                    . 'pero tampoco resta.';
+                    . 'pero tampoco resta.');
             }
 
             // Desactualizado: el saldo que manda no es el cierre de ayer. Sin
@@ -576,26 +577,27 @@ class Saldos {
         if (!empty($sinParametro)) {
             sort($sinParametro);
 
-            $avisos[] = 'Estos locales todavía no tienen gestión ni reserva configuradas y se '
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Estos locales todavía no tienen gestión ni reserva configuradas y se '
                 . 'están tomando como Deposita con reserva cero: ' . implode(', ', $sinParametro)
-                . '. Configuralos en Parámetros → Saldos.';
+                . '. Configuralos en Parámetros → Saldos.');
         }
 
         if ($totales['envian'] > 0) {
-            $avisos[] = $totales['envian'] . ' local(es) están en Envía: se muestran en la tabla '
-                . 'pero su efectivo no entra al cashflow, porque no llega al banco por esta vía.';
+            $avisos[] = Aviso::nuevo(Aviso::INFO, $totales['envian'] . ' local(es) están en Envía: se muestran en la tabla '
+                . 'pero su efectivo no entra al cashflow, porque no llega al banco por esta vía.');
         }
 
         // Lo desactualizado se avisa con la lista: es lo que hay que ir a
         // tipear, y el aviso sube tambien al tablero.
         if (!empty($desactualizados)) {
-            $avisos[] = count($desactualizados) . ' local(es) no tienen el saldo de caja de ayer ('
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, count($desactualizados) . ' local(es) no tienen el saldo de caja de ayer ('
                 . self::fechaCorta($ayer) . '): ' . implode(', ', $desactualizados) . '. Se '
                 . 'proyecta con el último saldo conocido; si la consulta no lo trajo, cargalo a '
-                . 'mano en Saldos → Saldos Locales.';
+                . 'mano en Saldos → Saldos Locales.');
         }
 
-        return ['filas' => $filas, 'totales' => $totales, 'avisos' => $avisos];
+        return ['filas' => $filas, 'totales' => $totales, 'avisos' => Aviso::textos($avisos),
+                'avisos_con_nivel' => $avisos];
     }
 
     /**
@@ -671,10 +673,13 @@ class Saldos {
         }
 
         if ($reubicado != 0) {
-            $serie['warnings'][] = 'Caja Locales: ' . self::plata($reubicado) . ' salen del último '
-                . 'saldo de caja registrado, del ' . self::fechaCorta($fechaMasVieja) . ', y se '
-                . 'imputan en la primera columna del horizonte. Es plata que todavía está en el '
-                . 'local y que no llegó al banco.';
+            // Informativo: explica por que la primera columna trae plata con
+            // fecha vieja, y no pide nada. Con seccion: va al grupo Saldos.
+            $serie['warnings'][] = Aviso::nuevo(Aviso::INFO, self::plata($reubicado)
+                . ' salen del último saldo de caja registrado, del '
+                . self::fechaCorta($fechaMasVieja) . ', y se imputan en la primera columna del '
+                . 'horizonte. Es plata que todavía está en el local y que no llegó al banco.',
+                'Caja Locales');
         }
 
         return $serie;
@@ -863,17 +868,24 @@ class Saldos {
             }
         }
 
+        /* "Saldo Inicial" va como SECCION y no pegado al texto: en el tablero
+           estos avisos caen en el grupo Saldos junto con los de Caja Locales y
+           los de las cuentas de fondo. Niveles: el saldo desactualizado deja
+           el disponible mal sin que nadie lo decida (critico); el dolar sin
+           valuar se arregla cargando la cotizacion (atencion); con que
+           cotizacion se valuo es un criterio (informativo). */
         if ($reubicado != 0) {
-            $avisos[] = 'Saldo Inicial: ' . self::plata($reubicado) . ' corresponden a saldos '
-                . 'cargados el ' . self::fechaCorta($fechaMasVieja) . ' o antes y se muestran en '
-                . 'la primera columna, que es la apertura del horizonte. Actualizá la carga de '
-                . 'saldos para que el disponible sea el de hoy.';
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, self::plata($reubicado) . ' corresponden a '
+                . 'saldos cargados el ' . self::fechaCorta($fechaMasVieja) . ' o antes y se '
+                . 'muestran en la primera columna, que es la apertura del horizonte. Actualizá la '
+                . 'carga de saldos para que el disponible sea el de hoy.', 'Saldo Inicial');
         }
 
         if ($usdSinCotizar != 0) {
-            $avisos[] = 'Saldo Inicial: US$ ' . number_format($usdSinCotizar, 2, ',', '.')
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'US$ '
+                . number_format($usdSinCotizar, 2, ',', '.')
                 . ' no se pudieron valuar porque falta la cotización del mes, así que no entran '
-                . 'al tablero. La pestaña Saldos los muestra igual, en dólares.';
+                . 'al tablero. La pestaña Saldos los muestra igual, en dólares.', 'Saldo Inicial');
         }
 
         // 'tipo_cambio' informa con cual se convirtio. Con un solo mes en juego
@@ -883,18 +895,23 @@ class Saldos {
         if (count($tiposUsados) === 1) {
             $serie['tipo_cambio'] = array_values($tiposUsados)[0];
         } elseif (count($tiposUsados) > 1) {
-            $avisos[] = 'Saldo Inicial: los saldos en dólares se valuaron con la cotización de '
-                . 'cierre de cada mes (' . implode(', ', array_keys($tiposUsados)) . ').';
+            $avisos[] = Aviso::nuevo(Aviso::INFO, 'Los saldos en dólares se valuaron con la '
+                . 'cotización de cierre de cada mes (' . implode(', ', array_keys($tiposUsados))
+                . ').', 'Saldo Inicial');
         }
 
         return self::resultadoDisponible($serie, $avisos, $reubicado, $usdSinCotizar);
     }
 
-    /** Empaqueta el resultado de armarSerieDisponible() */
+    /**
+     * Empaqueta el resultado de armarSerieDisponible(). 'avisos' son los
+     * textos y 'avisos_con_nivel' la misma lista con gravedad y seccion.
+     */
     private static function resultadoDisponible($serie, $avisos, $reubicado, $usdSinCotizar) {
         return [
             'serie' => $serie,
-            'avisos' => $avisos,
+            'avisos' => Aviso::textos($avisos),
+            'avisos_con_nivel' => $avisos,
             'reubicado' => $reubicado,
             'usd_sin_cotizar' => $usdSinCotizar
         ];

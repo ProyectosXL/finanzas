@@ -504,7 +504,7 @@ seccion('el motor: el flujo con cobertura y el arrastre recogen lo calculado');
 chequear('flujo sin cobertura del 08/09', -2600.0, $pa['FLUJO']['dias']['2026-09-08']);
 chequear('flujo con cobertura = sin cobertura + los dos usos', -100.0, $pa['FLUJO_COB']['dias']['2026-09-08']);
 
-$descuadre = array_values(array_filter($ta['warnings'], function ($w) {
+$descuadre = array_values(array_filter(textosTablero($ta), function ($w) {
     return strpos($w, 'no cierra') !== false;
 }));
 chequear('ni el arrastre ni la cobertura automatica dejan aviso de descuadre', [], $descuadre);
@@ -533,9 +533,7 @@ chequear('y se sabe que el motor la maneja', true, $cob['fondos']['CTA_2']['auto
 chequear('con su moneda', 'USD', $cob['fondos']['CTA_2']['moneda']);
 chequear('sin faltante', [], $cob['faltante']);
 
-$avisosCob = array_values(array_filter($ta['warnings'], function ($w) {
-    return strpos($w, 'Cobertura:') === 0;
-}));
+$avisosCob = textosTablero($ta, 'Cobertura');
 chequear('con todo cubierto no hay ningun aviso de cobertura', [], $avisosCob);
 
 seccion('el motor: una carga manual va primero y queda separada de lo calculado');
@@ -574,8 +572,8 @@ chequear('el saldo final queda en rojo', -12700.0, $pf['SALDO_FIN']['dias']['202
 chequear('el faltante viaja en el resumen', 12700.0, $pf['STOCK_INV']['cobertura']['faltante']['DIA|2026-09-08']);
 
 $avisoFalta = null;
-foreach ($tf['warnings'] as $w) {
-    if (strpos($w, 'Cobertura: aun aplicando') === 0) { $avisoFalta = $w; }
+foreach (textosTablero($tf, 'Cobertura') as $w) {
+    if (strpos($w, 'Aun aplicando') === 0) { $avisoFalta = $w; }
 }
 
 chequear('hay un aviso de que no alcanza', true, $avisoFalta !== null);
@@ -599,7 +597,7 @@ chequear('Inversiones pone lo suyo', 1000.0, $ps['USO_INV']['dias']['2026-09-08'
 chequear('y el saldo queda en rojo por lo que la comitente habria puesto', -1200.0, $ps['SALDO_FIN']['dias']['2026-09-08']);
 
 $avisoSinFila = null;
-foreach ($ts['warnings'] as $w) {
+foreach (textosTablero($ts) as $w) {
     if (strpos($w, 'ninguna fila de uso') !== false) { $avisoSinFila = $w; }
 }
 
@@ -991,7 +989,7 @@ chequear('las dos son filas de arrastre', [true, true],
     [$pDos['SALDO_SIN_COB']['arrastre'], $pDos['SALDO_FIN']['arrastre']]);
 chequear('el total del tramo de la de arriba es su ultimo dia', -2200.0, $pDos['SALDO_SIN_COB']['total_tramo']);
 
-$descuadreDos = array_values(array_filter($tDos['warnings'], function ($w) {
+$descuadreDos = array_values(array_filter(textosTablero($tDos), function ($w) {
     return strpos($w, 'no cierra') !== false;
 }));
 chequear('los invariantes siguen cerrando con dos filas de saldo', [], $descuadreDos);

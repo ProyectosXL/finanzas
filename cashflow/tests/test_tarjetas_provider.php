@@ -459,7 +459,13 @@ $avisos = implode(' | ', $p->warnings());
 chequear('el del modulo llega', true, strpos($avisos, 'falta la vista de usuarios') !== false);
 chequear('el de supervisoras tambien', true,
     strpos($avisos, '6 supervisoras no tienen tarjeta') !== false);
-chequear('nombrado', true, strpos($avisos, 'Gastos Supervisoras:') !== false);
+// Nombrado con la seccion, no con un prefijo pegado al texto.
+chequear('sin prefijo en el texto', false, strpos($avisos, 'Gastos Supervisoras:') !== false);
+$secciones = array_column($p->avisos(), 'seccion', 'texto');
+chequear('con la seccion de cada parte',
+    ['Supervisoras', 'Corporativas', 'Socios', null],
+    [$secciones['6 supervisoras no tienen tarjeta'], $secciones['90 facturas vencidas no entran'],
+     $secciones['cargá la base histórica'], $secciones['falta la vista de usuarios']]);
 chequear('el de corporativas', true, strpos($avisos, '90 facturas vencidas') !== false);
 chequear('y el de socios', true, strpos($avisos, 'cargá la base histórica') !== false);
 
@@ -476,7 +482,8 @@ $s = $p->series($H);
 
 chequear('series() no lanza', true, is_array($s));
 chequear('y deja un aviso', 1, count($p->warnings()));
-chequear('que nombra el proveedor', true, strpos($p->warnings()[0], 'TARJETAS') !== false);
+// Sin el codigo adelante: en el tablero lo dicen el grupo y el 'origen'.
+chequear('que es critico', 'danger', $p->avisos()[0]['nivel']);
 chequear('y el motivo', true, strpos($p->warnings()[0], 'la base no responde') !== false);
 
 /* ================================================================

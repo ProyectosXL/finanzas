@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/TarjetasVencimiento.php';
+require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/ProveedoresCategorias.php';
 
 /**
@@ -993,6 +994,22 @@ class TarjetasCorporativas {
      * @return array Lista de mensajes
      */
     public static function avisos($filas) {
+        return Aviso::textos(self::avisosConNivel($filas));
+    }
+
+    /**
+     * Los mismos avisos de avisos(), con su gravedad. Lo lee el tablero; la
+     * pestana lee los textos.
+     *
+     * Sin vincular es plata que no entra y se arregla vinculando: atencion.
+     * Excluidas y cubiertas por el resumen son decisiones o criterios ya
+     * aplicados: informativo. El vinculo roto es una base inconsistente que
+     * nadie decidio: critico.
+     *
+     * @param array $filas Lo que devolvio resolver()['filas']
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public static function avisosConNivel($filas) {
         $avisos = [];
 
         /* 1. SIN VINCULAR: es el aviso que va PRIMERO, porque es plata real y ya
@@ -1014,11 +1031,11 @@ class TarjetasCorporativas {
                 }
             }
 
-            $avisos[] = $sin['cuantas'] . ' factura(s) por ' . self::plata($sin['importe'])
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $sin['cuantas'] . ' factura(s) por ' . self::plata($sin['importe'])
                 . ' sin vincular no entran al flujo: vinculalas a una tarjeta. '
                 . 'De esas, ' . $venc . ' vencida(s) por ' . self::plata($impVenc) . ' y '
                 . ($sin['cuantas'] - $venc) . ' no vencida(s) por '
-                . self::plata($sin['importe'] - $impVenc) . '.';
+                . self::plata($sin['importe'] - $impVenc) . '.');
         }
 
         /* 2. EXCLUIDAS: plata que el tablero deja de mostrar POR UNA DECISION. Se
@@ -1028,7 +1045,7 @@ class TarjetasCorporativas {
         $excluidas = self::juntar($filas, self::EXCLUIDA);
 
         if ($excluidas['cuantas'] > 0) {
-            $avisos[] = $excluidas['cuantas'] . ' factura(s) por '
+            $avisos[] = Aviso::nuevo(Aviso::INFO, $excluidas['cuantas'] . ' factura(s) por '
                 . self::plata($excluidas['importe']) . ' están excluidas de esta pestaña y no '
                 . 'suman a la fila del tablero.'
                 . (empty($excluidas['motivos']) ? ''
@@ -1036,7 +1053,7 @@ class TarjetasCorporativas {
                       . (count($excluidas['motivos']) > 3
                         ? '; y ' . (count($excluidas['motivos']) - 3) . ' más.' : '.'))
                 . ' Van a su propia serie, que es informativa. NO están excluidas de Cuentas a '
-                . 'Pagar Locales: son dos decisiones distintas.';
+                . 'Pagar Locales: son dos decisiones distintas.');
         }
 
         /* 3. CUBIERTAS POR UN RESUMEN: no es un problema, es el mecanismo
@@ -1045,10 +1062,10 @@ class TarjetasCorporativas {
         $cubiertas = self::juntar($filas, self::CUBIERTA);
 
         if ($cubiertas['cuantas'] > 0) {
-            $avisos[] = $cubiertas['cuantas'] . ' factura(s) por '
+            $avisos[] = Aviso::nuevo(Aviso::INFO, $cubiertas['cuantas'] . ' factura(s) por '
                 . self::plata($cubiertas['importe']) . ' están cubiertas por el resumen cargado '
                 . 'de su tarjeta: ese importe ya las incluye, así que no suman aparte. Se siguen '
-                . 'viendo en la grilla para poder controlarlas contra el resumen.';
+                . 'viendo en la grilla para poder controlarlas contra el resumen.');
         }
 
         /* EL AVISO DE POSIBLE DOBLE CONTEO -no vinculadas en un mes con resumen-
@@ -1067,9 +1084,9 @@ class TarjetasCorporativas {
         }
 
         if ($rotos > 0) {
-            $avisos[] = $rotos . ' factura(s) están vinculadas a una tarjeta que ya no existe. '
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, $rotos . ' factura(s) están vinculadas a una tarjeta que ya no existe. '
                 . 'Se tratan como no vinculadas. Eso no debería poder pasar —la tabla tiene una '
-                . 'FK— así que revisá si alguien borró una tarjeta a mano.';
+                . 'FK— así que revisá si alguien borró una tarjeta a mano.');
         }
 
         return $avisos;

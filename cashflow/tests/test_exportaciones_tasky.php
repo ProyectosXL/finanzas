@@ -349,7 +349,8 @@ $roto = new ExportacionesProviderRoto('EXPORTACIONES');
 
 chequear('con la base caida no lanza', [], $roto->series($h));
 chequear('deja un aviso', 1, count($roto->warnings()));
-chequear('que nombra al modulo', true, strpos($roto->warnings()[0], 'EXPORTACIONES') === 0);
+// Sin el codigo adelante: en el tablero lo dicen el grupo y el 'origen'.
+chequear('que es critico', 'danger', $roto->avisos()[0]['nivel']);
 
 $otro = new ExportacionesProvider('NO_ES_MIO');
 

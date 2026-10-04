@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/Aviso.php';
+
 /**
  * ComprasProyectadas
  * Las reglas PURAS de la proyeccion de compras del exterior: a que temporada
@@ -575,7 +577,7 @@ class ComprasProyectadas {
         $notas = [];
 
         if (empty($meses)) {
-            return ['meses' => [], 'warnings' => $warnings, 'notas' => $notas,
+            return ['meses' => [], 'warnings' => [], 'avisos' => [], 'notas' => $notas,
                     'totales' => self::totalesVacios()];
         }
 
@@ -626,15 +628,15 @@ class ComprasProyectadas {
         }
 
         if ($sinFechaCant > 0) {
-            $warnings[] = $sinFechaCant . ' contenedor' . ($sinFechaCant === 1 ? '' : 'es')
+            $warnings[] = Aviso::nuevo(Aviso::WARNING, $sinFechaCant . ' contenedor' . ($sinFechaCant === 1 ? '' : 'es')
                 . ' del maestro de Comercio Exterior sin fecha estimada de pago, por '
-                . self::usd($sinFecha) . ': no descuentan en ningun mes.';
+                . self::usd($sinFecha) . ': no descuentan en ningun mes.');
         }
 
         if ($sinEmisionCant > 0) {
-            $warnings[] = $sinEmisionCant . ' contenedor' . ($sinEmisionCant === 1 ? '' : 'es')
+            $warnings[] = Aviso::nuevo(Aviso::WARNING, $sinEmisionCant . ' contenedor' . ($sinEmisionCant === 1 ? '' : 'es')
                 . ' cuya orden de compra no esta en Tango, por ' . self::usd($sinEmision)
-                . ': no se puede saber si se emitio despues del presupuesto, asi que no descuentan.';
+                . ': no se puede saber si se emitio despues del presupuesto, asi que no descuentan.');
         }
 
         /* Cuanto queda por consumir de cada mes de pago. Vive afuera del
@@ -837,28 +839,33 @@ class ComprasProyectadas {
         }
 
         /* --- Los avisos resumidos para el tablero ------------------------- */
+        /* Con nivel, y 'warnings' sale como textos para la pestana. La
+           temporada sin version oficial y el ajuste descartado se arreglan
+           con una accion (atencion); sin historia la cuota no puede repartir y
+           eso no lo decidio nadie (critico); el exceso que no se compensa es
+           un criterio (informativo). */
         foreach ($sinPresupuesto as $codigo => $ms) {
-            $warnings[] = 'La temporada ' . $codigo . ' no tiene version oficial de presupuesto: '
+            $warnings[] = Aviso::nuevo(Aviso::WARNING, 'La temporada ' . $codigo . ' no tiene version oficial de presupuesto: '
                 . count($ms) . ' mes' . (count($ms) === 1 ? '' : 'es')
-                . ' (' . implode(', ', $ms) . ') se proyectan en CERO. Se esta proyectando de MENOS.';
+                . ' (' . implode(', ', $ms) . ') se proyectan en CERO. Se esta proyectando de MENOS.');
         }
 
         if (!empty($sinHistoria)) {
-            $warnings[] = 'Sin historia de recepciones para ' . count($sinHistoria) . ' mes'
+            $warnings[] = Aviso::nuevo(Aviso::DANGER, 'Sin historia de recepciones para ' . count($sinHistoria) . ' mes'
                 . (count($sinHistoria) === 1 ? '' : 'es') . ' (' . implode(', ', $sinHistoria)
-                . '): la cuota no tiene con que repartir esos meses.';
+                . '): la cuota no tiene con que repartir esos meses.');
         }
 
         if (!empty($descartados)) {
-            $warnings[] = 'Se descartaron ' . count($descartados) . ' ajuste'
+            $warnings[] = Aviso::nuevo(Aviso::WARNING, 'Se descartaron ' . count($descartados) . ' ajuste'
                 . (count($descartados) === 1 ? '' : 's') . ' manual'
                 . (count($descartados) === 1 ? '' : 'es') . ' (' . implode(', ', $descartados)
-                . '): cambio la version oficial de su temporada desde que se cargaron.';
+                . '): cambio la version oficial de su temporada desde que se cargaron.');
         }
 
         if ($excesoTotal > self::TOLERANCIA_USD) {
-            $warnings[] = 'Lo ya comprado supera a lo proyectado por ' . self::usd($excesoTotal)
-                . '. El exceso NO se compensa contra otros meses: esos meses van en cero.';
+            $warnings[] = Aviso::nuevo(Aviso::INFO, 'Lo ya comprado supera a lo proyectado por ' . self::usd($excesoTotal)
+                . '. El exceso NO se compensa contra otros meses: esos meses van en cero.');
         }
 
         /* LO CARGADO CUYO MES DE PAGO NO ESTA EN LA VENTANA. No es un error ni
@@ -912,7 +919,8 @@ class ComprasProyectadas {
 
         return [
             'meses' => $filas,
-            'warnings' => $warnings,
+            'warnings' => Aviso::textos($warnings),
+            'avisos' => $warnings,
             'notas' => $notas,
             'totales' => self::totales($filas)
         ];

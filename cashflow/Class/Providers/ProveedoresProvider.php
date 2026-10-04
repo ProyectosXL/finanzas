@@ -155,17 +155,16 @@ class ProveedoresProvider extends CashflowProvider {
 
     protected function calcular($h) {
         if ($this->codigo() !== 'PROV_LOCALES') {
-            $this->avisar('Proveedores Locales: el codigo de proveedor "' . $this->codigo()
-                . '" no tiene serie definida.');
+            $this->avisar('El codigo de proveedor "' . $this->codigo()
+                . '" no tiene serie definida.', Aviso::DANGER);
 
             return [];
         }
 
         $prov = new Proveedores();
 
-        foreach ($prov->getAvisos() as $aviso) {
-            $this->avisar($aviso);
-        }
+        // Cada aviso trae su nivel: ver Proveedores::getAvisosConNivel().
+        $this->avisarTodos($prov->getAvisosConNivel());
 
         /* CON EL HORIZONTE: las facturas del cronograma van a sus dias de pago.
            Lo unico que cambia en las series es en que columna cae cada importe de
@@ -173,13 +172,8 @@ class ProveedoresProvider extends CashflowProvider {
            Proveedores::resolverFechaPago(). */
         $items = $prov->getPendientes($h->hoy(), $h);
 
-        foreach ($prov->avisosCronograma() as $aviso) {
-            $this->avisar($aviso);
-        }
-
-        foreach (Proveedores::avisosPendientes($items) as $aviso) {
-            $this->avisar($aviso);
-        }
+        $this->avisarTodos($prov->avisosCronogramaConNivel());
+        $this->avisarTodos(Proveedores::avisosPendientesConNivel($items));
 
         // Un proveedor con deuda que no esta en el maestro no se clasifica, y
         // eso hay que decirlo ACA y no solo en la pestana: quien mira el tablero
@@ -188,9 +182,8 @@ class ProveedoresProvider extends CashflowProvider {
         $this->avisarFueraDelCronograma($items);
         $this->avisarExcluidasAMano($items);
 
-        foreach (self::avisosExcluidosProveedor($items) as $aviso) {
-            $this->avisar($aviso);
-        }
+        // Excluir al proveedor fue una decision, y su deuda sale por su serie.
+        $this->avisarTodos(self::avisosExcluidosProveedor($items), Aviso::INFO);
 
         return $this->repartir($h, $items);
     }
@@ -271,7 +264,10 @@ class ProveedoresProvider extends CashflowProvider {
         $partes = self::tarjetaVinculada($items, $this->vinculosTarjeta());
         $fueraDelCuadro = $total - $tarjeta;
 
-        $this->avisar('Cuentas a Pagar Locales: la fila trae SÓLO lo que se paga por echeq o '
+        /* Atencion y no informativo: una parte entra por otra fila -eso solo
+           seria informativo-, pero "los otros" no entran por ninguna y van a
+           salir de la caja igual, y eso es plata que el tablero no muestra. */
+        $this->avisar('La fila trae SÓLO lo que se paga por echeq o '
             . 'transferencia. Quedan fuera de ESTA fila $ ' . number_format($total, 2, ',', '.')
             . ' (' . implode('; ', $detalle) . '). El detalle está en la pestaña, quitando el '
             . 'filtro por forma de pago.'
@@ -279,7 +275,7 @@ class ProveedoresProvider extends CashflowProvider {
             . ($fueraDelCuadro > 0
                 ? ' Los otros $ ' . number_format($fueraDelCuadro, 2, ',', '.')
                   . ' no entran por ninguna fila y van a salir de la caja igual.'
-                : ''));
+                : ''), Aviso::WARNING);
     }
 
     /**
@@ -299,9 +295,12 @@ class ProveedoresProvider extends CashflowProvider {
 
             return (new TarjetasFactura())->vigentes();
         } catch (Throwable $e) {
-            $this->avisar('Cuentas a Pagar Locales: no se pudieron leer los vínculos de las '
-                . 'facturas de ' . TarjetasCorporativas::FORMA . ' con sus tarjetas (' . $e->getMessage()
-                . '), así que el aviso de abajo no puede decir cuánto entra por la fila de Tarjetas.');
+            // "El aviso de las formas de pago" y no "el de abajo": el panel del
+            // tablero ordena por gravedad, y este critico queda arriba de todo.
+            $this->avisar('No se pudieron leer los vínculos de las facturas de '
+                . TarjetasCorporativas::FORMA . ' con sus tarjetas (' . $e->getMessage()
+                . '), así que el aviso de las formas de pago que quedan fuera de la fila no '
+                . 'puede decir cuánto entra por la fila de Tarjetas.', Aviso::DANGER);
 
             return null;
         }
@@ -408,9 +407,9 @@ class ProveedoresProvider extends CashflowProvider {
                 . (count($motivos) > 3 ? '; y ' . (count($motivos) - 3) . ' más.' : '.');
         }
 
-        $this->avisar('Cuentas a Pagar Locales: ' . $cuantas . ' factura(s) por $ '
+        $this->avisar($cuantas . ' factura(s) por $ '
             . number_format($total, 2, ',', '.') . ' están excluidas a mano y no entran al '
-            . 'cashflow.' . $detalle . ' Se ven en la pestaña, con el motivo al lado.');
+            . 'cashflow.' . $detalle . ' Se ven en la pestaña, con el motivo al lado.', Aviso::INFO);
     }
 
     /**
@@ -470,7 +469,7 @@ class ProveedoresProvider extends CashflowProvider {
         $nombres = implode(', ', array_slice($codigos, 0, 5))
             . (count($codigos) > 5 ? ' y ' . (count($codigos) - 5) . ' más' : '');
 
-        return ['Cuentas a Pagar Locales: ' . count($codigos) . ' proveedor(es) están excluidos '
+        return [count($codigos) . ' proveedor(es) están excluidos '
             . 'de Proveedores Locales porque su deuda ya se considera en otra pestaña (' . $nombres
             . '): ' . $cuantos . ' vencimiento(s) por $ ' . number_format($total, 2, ',', '.')
             . ', de los que $ ' . number_format($enFila, 2, ',', '.') . ' estaban en la fila '
@@ -666,11 +665,11 @@ class ProveedoresProvider extends CashflowProvider {
             $nombres[] = $f['RAZON_SOC'];
         }
 
-        $this->avisar('Cuentas a Pagar Locales: ' . count($faltan) . ' proveedor(es) con deuda '
+        $this->avisar(count($faltan) . ' proveedor(es) con deuda '
             . 'por $ ' . number_format($total, 2, ',', '.') . ' no están en el maestro, así que '
             . 'su importe no se puede abrir por rubro (' . implode(', ', $nombres)
             . (count($faltan) > 3 ? ' y otros' : '') . '). Importá la hoja "Maestro proveedores" '
-            . 'actualizada.');
+            . 'actualizada.', Aviso::WARNING);
     }
 
     /**

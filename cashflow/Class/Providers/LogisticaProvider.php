@@ -89,10 +89,11 @@ class LogisticaProvider extends CashflowProvider {
 
         /* Los avisos de la planilla se levantan tal cual: ya vienen con el
            nombre del fletero y con qué le falta, que es lo que explica un total
-           más chico de lo esperado sin tener que abrir la pestaña. */
-        foreach ($datos['avisos'] as $a) {
-            $this->avisar('Logística: ' . $a);
-        }
+           más chico de lo esperado sin tener que abrir la pestaña. Con el nivel
+           que les puso Logistica::planilla(); unos datos que solo traen los
+           textos -una planilla armada a mano en una prueba- van como atencion. */
+        $this->avisarTodos(isset($datos['avisos_con_nivel'])
+            ? $datos['avisos_con_nivel'] : $datos['avisos']);
 
         $serie = $h->serieVacia();
         $serie['moneda_origen'] = 'ARS';
@@ -112,10 +113,10 @@ class LogisticaProvider extends CashflowProvider {
         }
 
         if ($serie['fuera_horizonte'] > 0) {
-            $this->avisar('Logística: hay pagos proyectados por $ '
+            $this->avisar('Hay pagos proyectados por $ '
                 . number_format($serie['fuera_horizonte'], 2, ',', '.')
                 . ' con fecha posterior al final del horizonte, así que no entran en ninguna '
-                . 'columna. Se ven igual en la pestaña Logística Local.');
+                . 'columna. Se ven igual en la pestaña Logística Local.', Aviso::INFO);
         }
 
         /* UNA FILA EN CERO SE EXPLICA SIEMPRE. Cuál de los motivos es se decide
@@ -142,8 +143,9 @@ class LogisticaProvider extends CashflowProvider {
         if (!$datos['tabla_creada']) {
             // El aviso del script ya salió con los de la planilla; acá va la
             // consecuencia sobre el cuadro.
-            $this->avisar('Logística: la fila va en CERO porque todavía no existe el maestro '
-                . 'de fleteros. Un egreso en cero no significa que no haya que pagar nada.');
+            $this->avisar('La fila va en CERO porque todavía no existe el maestro '
+                . 'de fleteros. Un egreso en cero no significa que no haya que pagar nada.',
+                Aviso::DANGER);
 
             return;
         }
@@ -151,14 +153,18 @@ class LogisticaProvider extends CashflowProvider {
         $fleteros = $datos['planilla']['fleteros'];
 
         if (empty($fleteros)) {
-            $this->avisar('Logística: la fila va en CERO porque no hay ningún fletero activo '
-                . 'cargado. Se dan de alta en Parámetros › Logística.');
+            $this->avisar('La fila va en CERO porque no hay ningún fletero activo '
+                . 'cargado. Se dan de alta en Parámetros › Logística.', Aviso::WARNING);
 
             return;
         }
 
-        $this->avisar('Logística: hay ' . count($fleteros) . ' fletero(s) activos pero la fila '
-            . 'va en CERO: a ninguno se le pudo calcular un importe. Los avisos de arriba dicen '
-            . 'qué le falta a cada uno. NO significa que no haya que pagarles.');
+        /* "Los otros avisos de esta pestaña" y no "los de arriba": el panel del
+           tablero ordena por gravedad, asi que el que explica que le falta a
+           cada fletero puede no estar arriba de este. */
+        $this->avisar('Hay ' . count($fleteros) . ' fletero(s) activos pero la fila '
+            . 'va en CERO: a ninguno se le pudo calcular un importe. Los otros avisos de esta '
+            . 'pestaña dicen qué le falta a cada uno. NO significa que no haya que pagarles.',
+            Aviso::WARNING);
     }
 }

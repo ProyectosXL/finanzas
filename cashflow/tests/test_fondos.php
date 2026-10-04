@@ -307,7 +307,7 @@ $provVacio = $armar('FONDO_COMITENTE', [$cuentaFalsa(1, 'INVERSION', 'ARS', 3000
 $provVacio->series($h);
 
 chequear('sin cuentas de esa clase, avisa y va en cero', true,
-    strpos(implode(' ', $provVacio->warnings()), 'no hay ninguna cuenta') !== false);
+    stripos(implode(' ', $provVacio->warnings()), 'no hay ninguna cuenta') !== false);
 
 $provSinDdl = $armar('FONDO_INVERSION', $cuentas, null, false);
 $sDdl = $provSinDdl->series($h);

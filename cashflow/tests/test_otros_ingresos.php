@@ -119,8 +119,8 @@ $roto = new OtrosIngresosProviderRoto('DOLARES_COMITENTE');
 
 chequear('con la base caida no lanza', [], $roto->series($h));
 chequear('deja un aviso', 1, count($roto->warnings()));
-chequear('que nombra al modulo', true,
-    strpos($roto->warnings()[0], 'DOLARES_COMITENTE') === 0);
+// Sin el codigo adelante: en el tablero lo dicen el grupo y el 'origen'.
+chequear('que es critico', 'danger', $roto->avisos()[0]['nivel']);
 
 // Un codigo que el proveedor no sirve no revienta: avisa y devuelve vacio.
 $otro = new OtrosIngresosProvider('NO_ES_MIO');
@@ -292,8 +292,7 @@ $rotoInv = new InversionesProviderRoto('SALDO_INVERSIONES');
 
 chequear('con la base caida no lanza', [], $rotoInv->series($h));
 chequear('deja un aviso', 1, count($rotoInv->warnings()));
-chequear('que nombra al modulo', true,
-    strpos($rotoInv->warnings()[0], 'SALDO_INVERSIONES') === 0);
+chequear('que es critico', 'danger', $rotoInv->avisos()[0]['nivel']);
 
 seccion('las pestanas de Otros Ingresos se eliminaron; las tablas quedan');
 

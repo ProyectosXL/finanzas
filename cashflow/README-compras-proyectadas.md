@@ -4,7 +4,7 @@ Pestaña **Comercio Exterior → Proyección**, y las filas *Proveedores Exterio
 
 Rama: `feature/comex-compras-proyectadas`
 
-> **Nombre visible y código interno.** En pantalla el módulo se llama *Compras Exterior* (sub-pestaña de Parámetros, módulo del registro, prefijo de los avisos) y su pestaña *Proyección*. **El código interno sigue siendo `COMPRAS_PROY` / `compras_proyectadas`**: claves de parámetros, `GRUPO` de las filas, clases, archivos y claves de `localStorage` no cambiaron, para no romper parámetros guardados ni estados.
+> **Nombre visible y código interno.** En pantalla el módulo se llama *Compras Exterior* (sub-pestaña de Parámetros y módulo del registro; los avisos ya no llevan prefijo, el tablero los agrupa bajo «Comercio Exterior › Proyección») y su pestaña *Proyección*. **El código interno sigue siendo `COMPRAS_PROY` / `compras_proyectadas`**: claves de parámetros, `GRUPO` de las filas, clases, archivos y claves de `localStorage` no cambiaron, para no romper parámetros guardados ni estados.
 
 ---
 

@@ -415,7 +415,10 @@ chequear('un saldo de caja anterior al eje se imputa en la primera columna',
 chequear('y no se descarta como fuera de horizonte',
     0.0, floatval($serieAyer['fuera_horizonte']));
 chequear('con un aviso que dice de que fecha es el saldo',
-    true, strpos(implode(' ', $serieAyer['warnings']), '05/09/2026') !== false);
+    true, strpos(implode(' ', Aviso::textos($serieAyer['warnings'])), '05/09/2026') !== false);
+chequear('informativo y con la seccion Caja Locales',
+    ['info', 'Caja Locales'],
+    [$serieAyer['warnings'][0]['nivel'], $serieAyer['warnings'][0]['seccion']]);
 
 // Lo que cae DESPUES del eje si queda afuera: es una fecha futura que el
 // horizonte no cubre, no un dato que ya es cierto hoy.

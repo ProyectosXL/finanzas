@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/CronogramaPagos.php';
+require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
 
@@ -129,7 +130,15 @@ class CronogramaDatos {
      * @param Horizonte $h
      * @param string $concepto PROV_LOCALES, LOGISTICA o SUPERVISORAS
      * @param int $mesesExtra Meses despues del horizonte. Ver CronogramaPagos::paraHorizonte()
-     * @return array ['pagos', 'avisos', 'config', 'tabla_creada', 'editable']
+     * LOS AVISOS SALEN DOS VECES: 'avisos' con los textos, que leen las
+     * pestanas, y 'avisos_con_nivel' con la gravedad, que lee el tablero. Son
+     * la misma lista. No poder leer los overrides o el calendario es critico
+     * -las fechas pueden estar mal y nadie lo decidio-; la configuracion por
+     * defecto, el calendario sin datos de un mes y el script que solo apaga
+     * la edicion son atencion: alguien tiene que hacer algo.
+     *
+     * @return array ['pagos', 'avisos', 'avisos_con_nivel', 'config',
+     *                'tabla_creada', 'editable']
      */
     public function paraHorizonte($h, $concepto, $mesesExtra = 0) {
         $concepto = CronogramaPagos::validarConcepto($concepto);
@@ -138,7 +147,7 @@ class CronogramaDatos {
         $config = $this->config($concepto);
 
         if ($config['aviso'] !== null) {
-            $this->avisos[] = $config['aviso'];
+            $this->avisos[] = Aviso::nuevo(Aviso::WARNING, $config['aviso']);
         }
 
         $rango = CronogramaPagos::rangoCalendario($h, $mesesExtra);
@@ -149,32 +158,39 @@ class CronogramaDatos {
         try {
             $overrides = $this->overrides($concepto);
         } catch (Throwable $e) {
-            $this->avisos[] = 'No se pudieron leer los pagos movidos a mano del cronograma de '
+            $this->avisos[] = Aviso::nuevo(Aviso::DANGER,
+                'No se pudieron leer los pagos movidos a mano del cronograma de '
                 . CronogramaPagos::CONCEPTOS[$concepto]['nombre'] . ' (' . $e->getMessage()
-                . '). Se usan las fechas calculadas.';
+                . '). Se usan las fechas calculadas.');
         }
 
         $crono = CronogramaPagos::paraHorizonte($h, $config, $habiles, $overrides, $mesesExtra);
 
         foreach (CronogramaPagos::avisosCalendario($crono['faltan']) as $a) {
-            $this->avisos[] = $a;
+            $this->avisos[] = Aviso::nuevo(Aviso::WARNING, $a);
         }
 
         if (!$this->tablaCreada()) {
-            $this->avisos[] = $this->avisoSinTabla();
+            $this->avisos[] = Aviso::nuevo(Aviso::WARNING, $this->avisoSinTabla());
         }
 
         return [
             'pagos' => $crono['pagos'],
-            'avisos' => $this->avisos,
+            'avisos' => Aviso::textos($this->avisos),
+            'avisos_con_nivel' => $this->avisos,
             'config' => $config,
             'tabla_creada' => $this->tablaCreada(),
             'editable' => $this->editable($concepto)
         ];
     }
 
-    /** @return array Avisos de la ultima resolucion */
+    /** @return array Textos de los avisos de la ultima resolucion */
     public function avisos() {
+        return Aviso::textos($this->avisos);
+    }
+
+    /** @return array Los mismos avisos de avisos(), con su gravedad */
+    public function avisosConNivel() {
         return $this->avisos;
     }
 
@@ -486,9 +502,10 @@ class CronogramaDatos {
         try {
             return $this->ventas()->getDiasHabiles($desde, $hasta);
         } catch (Throwable $e) {
-            $this->avisos[] = 'No se pudo leer el calendario bancario (' . $e->getMessage()
+            $this->avisos[] = Aviso::nuevo(Aviso::DANGER,
+                'No se pudo leer el calendario bancario (' . $e->getMessage()
                 . '). Las fechas se calculan asumiendo hábiles los días de lunes a viernes, '
-                . 'así que un feriado no corre ninguna fecha.';
+                . 'así que un feriado no corre ninguna fecha.');
 
             return [];
         }

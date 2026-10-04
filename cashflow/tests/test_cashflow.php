@@ -210,7 +210,7 @@ chequear('y noviembre lo mantiene', 1650.0, $p['SALDO_FIN']['meses']['2026-11'])
 
 $descuadre = false;
 
-foreach ($t['warnings'] as $w) {
+foreach (textosTablero($t) as $w) {
     if (strpos($w, 'arrastre del saldo no cierra') !== false) {
         $descuadre = true;
     }

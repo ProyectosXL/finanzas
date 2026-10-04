@@ -146,8 +146,8 @@ class OtrosIngresosProvider extends CashflowProvider {
             ];
         }
 
-        $this->avisar('Otros Ingresos: el codigo de proveedor "' . $this->codigo()
-            . '" no tiene serie definida.');
+        $this->avisar('El codigo de proveedor "' . $this->codigo()
+            . '" no tiene serie definida.', Aviso::DANGER);
 
         return [];
     }
@@ -273,9 +273,9 @@ class OtrosIngresosProvider extends CashflowProvider {
         $v = (new OtrosIngresos())->valuarDolares();
 
         if ($v['error'] !== null) {
-            $this->avisar('Dolares Cuenta Comitente: no se pudo leer el tipo de cambio oficial '
+            $this->avisar('No se pudo leer el tipo de cambio oficial '
                 . '(' . Cotizacion::VISTA_DIARIA . '), asi que la fila se muestra en cero. Los '
-                . 'dolares cargados estan, lo que falta es a cuanto valuarlos.');
+                . 'dolares cargados estan, lo que falta es a cuanto valuarlos.', Aviso::DANGER);
 
             return $serie;
         }
@@ -297,9 +297,9 @@ class OtrosIngresosProvider extends CashflowProvider {
         }
 
         if ($v['sin_cotizacion'] > 0) {
-            $this->avisar('Dolares Cuenta Comitente: USD '
+            $this->avisar('USD '
                 . number_format($v['sin_cotizacion'], 2, ',', '.') . ' no se pueden valuar '
-                . 'porque no hay ninguna cotizacion oficial anterior a su fecha.');
+                . 'porque no hay ninguna cotizacion oficial anterior a su fecha.', Aviso::WARNING);
         }
 
         if ($ultima === null) {
@@ -345,9 +345,9 @@ class OtrosIngresosProvider extends CashflowProvider {
         $v = (new OtrosIngresos())->valuarDolares();
 
         if ($v['error'] !== null) {
-            $this->avisar('Dolares Cuenta Comitente: no se pudo leer el tipo de cambio oficial '
+            $this->avisar('No se pudo leer el tipo de cambio oficial '
                 . '(' . Cotizacion::VISTA_DIARIA . '), asi que la fila se muestra en cero. Los '
-                . 'dolares cargados estan, lo que falta es a cuanto valuarlos.');
+                . 'dolares cargados estan, lo que falta es a cuanto valuarlos.', Aviso::DANGER);
 
             return $serie;
         }
@@ -373,10 +373,10 @@ class OtrosIngresosProvider extends CashflowProvider {
         }
 
         if ($v['sin_cotizacion'] > 0) {
-            $this->avisar('Dolares Cuenta Comitente: USD '
+            $this->avisar('USD '
                 . number_format($v['sin_cotizacion'], 2, ',', '.') . ' no se muestran porque no '
                 . 'hay ninguna cotizacion oficial anterior a su fecha. No se asume ningun tipo '
-                . 'de cambio.');
+                . 'de cambio.', Aviso::WARNING);
         }
 
         // Con una sola cotizacion usada se informa cual: es la que hay que

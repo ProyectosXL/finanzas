@@ -194,6 +194,11 @@ valuación los informa en dólares), 26 tienen la fecha vencida (no suman) y **2
 entran al eje**, por U$S 131.705. Es la decisión: ver la sección 10 de
 `README-comex.md`.
 
+### Sin scripts: `feature/cashflow-avisos-agrupados`
+
+No agrega ni modifica ningún script: cambia cómo se muestran los avisos del
+tablero (ver *Avisos del tablero*). Se despliega solo con el código.
+
 ---
 
 ## Ejecución de los scripts — la instalación completa
@@ -687,7 +692,9 @@ Esa división es lo importante: hace cumplir por construcción la regla de que *
 | `tipo_cambio` | Con cuál se convirtió, si se convirtió. **Es un escalar**: cuando la serie se valúa fila por fila —con una cotización distinta por mes— sólo se informa si todas las filas usaron la misma, y si no queda en `null` |
 | `fuera_horizonte` | Importe que cayó fuera del eje |
 | `sin_fecha` | Importe sin fecha utilizable |
-| `warnings` | Avisos propios de la serie |
+| `warnings` | Avisos propios de la serie: textos o `['nivel', 'texto', 'seccion']`. Un texto suelto es `warning`. Ver *Avisos del tablero* |
+
+Los avisos del proveedor se dejan con `avisar($mensaje, $nivel, $seccion)`: el nivel es `'danger'`, `'warning'` (el defecto) o `'info'`, y el texto **no lleva el nombre de la pestaña** adelante, porque el tablero los agrupa por pestaña. `warnings()` devuelve solo los textos —lo que leen las pestañas— y `avisos()` la lista con nivel —lo que lee el motor—. El criterio de cada nivel está en *Avisos del tablero*.
 
 **Los importes siempre se devuelven en pesos.** La conversión la hace el proveedor y no el motor: el tipo de cambio de un pago futuro es criterio de negocio del módulo que paga.
 
@@ -1299,6 +1306,316 @@ Los avisos no son decoración: son lo que evita leer un cero como si fuera un da
 
 ---
 
+## Avisos del tablero
+
+Desde `feature/cashflow-avisos-agrupados` cada aviso tiene **gravedad** y sabe **a qué pestaña pertenece**. El panel *Sobre estos números* los muestra agrupados por pestaña, contraíbles y con el color y el ícono de su nivel, con el patrón del Informe Económico (`informe_economico/Js/ie-comun.js`, `IE.pintarAvisos()`). Antes eran una lista plana de más de treinta textos, y el que decía *"el número está mal"* se veía igual que el que decía *"esto lo excluyó alguien a mano"*.
+
+**Solo cambió el panel del tablero.** Los paneles de cada pestaña siguen recibiendo `string[]`, con los mismos textos. Ningún número, regla de cálculo ni serie cambió, y no hay scripts.
+
+### Tres niveles, los mismos del Informe Económico
+
+| Nivel | En pantalla | Criterio |
+| --- | --- | --- |
+| `danger` | Crítico | El número del tablero está mal o incompleto por algo que **no es una decisión de nadie**: un módulo que no se pudo calcular o cargar, un error de configuración, el arrastre o la cobertura que no cierran, el saldo inicial desactualizado, una fila entera en cero por falta de cotización, un script que falta y deja la fila en cero, una lectura que falló ("no se pudo leer…"), el pago contado dos veces. |
+| `warning` | Atención | Plata que no entra al tablero, o entra en otro lugar, y que **se arregla con una acción**: cargar una fecha, un saldo, una cotización, vincular una factura, completar el maestro, correr un script que solo apaga la edición. |
+| `info` | Informativo | Explica un criterio o algo que **alguien ya decidió**, y no pide nada: excluidos a mano, marcados como ya hechos, lo que sale por otra fila, lo que cae fuera del horizonte, los módulos sin construir. |
+
+Un nivel mal escrito se toma como `warning` (`Aviso::nivel()`): ni `info`, que lo escondería entre los que no piden nada, ni `danger`, que abriría el panel por un error de tipeo.
+
+Que el usuario pueda arreglar algo **no le baja la gravedad** si el número está mal y nadie lo decidió: el fletero no excluido de Proveedores Locales es crítico, y el texto dice cómo arreglarlo.
+
+### Cómo se agrupan y ordenan
+
+- **Grupo = la pestaña** del proveedor que emitió el aviso: el `'tab'` de `CashflowRegistry`. Los avisos propios del proveedor, los del `'warnings'` de cada serie, los descartes de la fila (fuera del horizonte / sin fecha), la falla al calcular o al cargar el módulo y el aviso de módulo retirado van con la pestaña de ese módulo.
+- **Grupo "Tablero"**: los avisos del motor (estructura y validación, módulo no registrado, módulos sin construir, apertura en cero, arrastre, cobertura) y los de proveedores **sin `'tab'`** (Cobertura y los retirados de Otros Ingresos). Ahí el nombre del módulo pasa a ser la `seccion`.
+- **El nombre del grupo** es el encabezado de la pestaña, `Menu::tituloTab()`: fuera del sidebar, "Proyección" sola no dice nada y "Comercio Exterior › Proyección" sí. Dos proveedores con el mismo `'tab'` (Saldos, Caja Locales y las dos clases de cuentas de fondo) caen en un solo grupo.
+- **Orden de los grupos**: primero los que tienen algún crítico, después los que tienen atención, al final los que solo informan. A igual gravedad, *Tablero* primero y después en el orden del menú (`Menu::tabs()`); un grupo cuya pestaña no está en el menú va al final de su nivel.
+- **Dentro de cada grupo**: de más grave a menos y, a igual gravedad, en el orden en que se emitieron.
+
+El agrupamiento y el orden están en **una función pura del backend**, `Aviso::agrupar()`, y no en el JS: el repo prueba en PHP y no tiene corredor para JS, y el orden es una regla que tiene que poder probarse sin navegador. La respuesta del tablero trae `'avisos'` con los grupos ya ordenados —cada uno con `grupo`, `nombre`, `link`, `nivel`, `cuenta` y sus `avisos` (`nivel`, `texto`, `seccion`, `grupo`, `origen`)— y **dejó de traer `'warnings'`**, que solo leía `Js/Cashflow.js`.
+
+### Sin prefijo, con `seccion` cuando hace falta
+
+El texto **no repite el nombre de la pestaña**: "Proveedores Exterior: 255 contenedor(es)…" pasó a "255 contenedor(es)…". Se sacó **en el origen** —el provider o la clase—, no se recorta en pantalla.
+
+Cuando la pestaña sola no dice de qué parte habla el aviso, el aviso lleva **`seccion`**, que el panel muestra en negrita antes del texto. Es un campo aparte y no un prefijo, porque es presentación: los paneles de cada pestaña reciben solo el texto.
+
+| Grupo | Secciones |
+| --- | --- |
+| Saldos | `Saldo Inicial`, `Caja Locales`, `Inversión`, `Cuenta comitente` |
+| Pagos con Tarjetas y Otros | `Supervisoras`, `Corporativas`, `Socios` |
+| Cuentas a Pagar Locales | `Cronograma` |
+| Comercio Exterior › Proyección | `Nacionalización` (la valuación de la fila de nacionalización) |
+| Tablero | `Configuración`, `Cobertura`, o el nombre del módulo sin pestaña |
+
+Crono Nacionalización **no lleva sección**: tiene su propia pestaña, así que "Nacionalizaciones:" sobraba.
+
+De paso se arreglaron dos cosas que el agrupamiento dejó a la vista: los avisos de inflación de Supervisoras y Socios salían con el prefijo **duplicado** ("Tarjetas Socios: Tarjetas Socios: …", lo ponían la clase y el provider), y tres textos decían *"los avisos de arriba"*, que dejó de ser cierto al ordenar por gravedad: ahora dicen *"los otros avisos de esta pestaña"*.
+
+Los paneles de las pestañas quedan bien sin el prefijo: ahí el usuario ya está en la pestaña. El único que pierde algo de contexto es el aviso del calendario bancario dentro del cronograma de Proveedores Locales (*"RO_T_CALENDARIO no tiene datos para 2026-12…"*), que antes decía "Cronograma de Proveedores Locales:" adelante; se entiende igual.
+
+### El contrato
+
+- `CashflowProvider::avisar($mensaje, $nivel = 'warning', $seccion = null)` guarda `['nivel', 'texto', 'seccion']`.
+- `warnings()` sigue devolviendo **solo los textos**; ningún consumidor actual cambia. `avisos()` devuelve la lista con nivel, y es lo que lee el motor.
+- `avisarTodos($lista, $nivel, $seccion)` levanta una lista entera: los textos sueltos con el nivel que se pase, los avisos con nivel con el suyo.
+- El `'warnings'` de una serie acepta **textos y avisos con nivel**; un texto suelto es `warning`, así una serie vieja o armada a mano en una prueba sigue andando. `normalizar()` lo deja siempre con nivel.
+- La **falla atrapada** en `series()` es crítica y **ya no empieza con el código** del módulo: en el tablero lo dicen el grupo y el `origen`.
+- Las funciones de las clases que arman avisos de **niveles mezclados** devuelven la lista con nivel (`…ConNivel()`, o la clave `avisos_con_nivel`), y la versión que leen las pestañas es un envoltorio de una línea con `Aviso::textos()`. El texto se escribe una sola vez.
+
+### Pantalla
+
+- El alert amarillo con la X se reemplazó por un `<details>`: *Sobre estos números (N avisos)* con chips por nivel. **No hay X**: contraído sigue diciendo cuántos hay de cada nivel.
+- Cada grupo es contraíble, con su nombre, su cuenta, sus chips y **"Ir a la pestaña"**, que hace clic en el `.menu-link[data-tab]` igual que el menú. Sale solo si ese ítem existe: sin permiso sobre la pestaña no hay link, pero el aviso se muestra igual porque el número lo incluye. *Tablero* no lleva link. Saldos abre su primera vista: el grupo junta varias.
+- Cada aviso con el fondo, el borde y el ícono de su nivel: Font Awesome 6.4.2 free, `fa-circle-info`, `fa-triangle-exclamation` y `fa-circle-exclamation` (`fa-octagon-exclamation` es de la versión Pro). Los colores son los de `.ie-aviso-*`, copiados en variables de `Css/Cashflow.css`.
+- **Qué arranca abierto**: el panel, si hay algún crítico; si no, como lo dejó el usuario. Los grupos con un crítico, siempre; el resto, como los dejó el usuario, por pestaña. Se recuerda en `localStorage` (`cashflow_avisos_abierto`, `cashflow_avisos_grupo_<tab>`) con `try/catch`.
+
+### Todos los avisos, con su nivel
+
+Texto resumido. "Sección" vacía es sin sección. Para revisar.
+
+**Motor y estructura** (grupo *Tablero*, salvo donde se indica)
+
+| Origen | Aviso | Nivel | Sección |
+| --- | --- | --- | --- |
+| `CashflowEstructura` | Faltan las tablas de estructura | danger | Configuración |
+| `CashflowEstructura` | Faltan las columnas de agrupamiento (`GRUPO`…) | warning | Configuración |
+| `Cashflow` | Error de configuración del validador | danger | Configuración |
+| `Cashflow` | Módulo no registrado como origen | danger | |
+| `Cashflow` | Módulo retirado (grupo: su pestaña, o Tablero) | warning | |
+| `Cashflow` | No se pudo cargar el módulo (grupo: su pestaña) | danger | |
+| `Cashflow` | El módulo no pudo calcularse (grupo: su pestaña) | danger | |
+| `Cashflow` | Módulos todavía no construidos | info | |
+| `Cashflow` | Fila de saldo en CERO: no hay saldo de apertura | danger | |
+| `Cashflow` | *Fila*: importe fuera del horizonte (grupo: la pestaña de la fila) | info | |
+| `Cashflow` | *Fila*: importe sin fecha (grupo: la pestaña de la fila) | warning | |
+| `Cashflow` | El arrastre del saldo no cierra | danger | |
+| `Cashflow` | La cobertura automática no cierra con el arrastre | danger | Cobertura |
+| `Cashflow` | Lo aplicado de un fondo supera su saldo a esa fecha | warning | Cobertura |
+| `Cashflow` | Se aplica de un fondo más de lo que hay | warning | Cobertura |
+| `Cashflow` | Se aplica más que el total disponible | warning | Cobertura |
+| `Cashflow` | Aun aplicando todo, el Saldo Final queda en rojo | warning | Cobertura |
+| `Cashflow` | Fondo con stock que ninguna fila de uso aplica | warning | Cobertura |
+| `CashflowProvider` | No se pudo calcular (falla atrapada) | danger | |
+| todos los providers | El código de proveedor no tiene serie definida | danger | |
+
+**Cobertura** (sin pestaña: grupo *Tablero*, sección *Cobertura*)
+
+| Aviso | Nivel |
+| --- | --- |
+| Falta la tabla de aplicación de cobertura | danger |
+| No se pudo leer el tipo de cambio: las aplicaciones en dólares no se muestran | danger |
+| USD aplicados sin cotización anterior a su fecha | warning |
+| Aplicaciones desde un origen que no es ninguna cuenta | warning |
+
+**Otros Ingresos, retirados** (grupo *Tablero*, sección = nombre del módulo)
+
+| Aviso | Nivel |
+| --- | --- |
+| No se pudo leer el tipo de cambio: fila en cero | danger |
+| USD sin cotización anterior a su fecha | warning |
+
+**Ventas**
+
+| Aviso | Nivel |
+| --- | --- |
+| No se pudo leer el neteo de cheques adelantados | danger |
+| Neteo: cheques que vencen después del cuadro | warning |
+| Neteo: importe sin canal | warning |
+| `RO_T_CALENDARIO` sin datos de un mes | warning |
+
+**Saldos**
+
+| Sección | Aviso | Nivel |
+| --- | --- | --- |
+| Saldo Inicial | Faltan las tablas del módulo | danger |
+| Saldo Inicial | Ninguna cuenta tiene saldo cargado | warning |
+| Saldo Inicial | N cuentas sin ningún saldo cargado | warning |
+| Saldo Inicial | Saldos viejos que se muestran en la primera columna | danger |
+| Saldo Inicial | US$ sin cotización del mes | warning |
+| Saldo Inicial | Con qué cotización de cierre se valuó | info |
+| Saldo Inicial | No se pudo leer el tipo de cambio | danger |
+| Caja Locales | No se pudo leer la caja / las reservas / los saldos a mano | danger |
+| Caja Locales | Local con la caja debajo de su reserva | info |
+| Caja Locales | Locales sin gestión ni reserva configuradas | warning |
+| Caja Locales | Locales en Envía | info |
+| Caja Locales | Locales sin el saldo de ayer | warning |
+| Caja Locales | Ningún local supera su reserva: fila en cero | info |
+| Caja Locales | Saldo de caja anterior imputado en la primera columna | info |
+| Inversión / Cuenta comitente | Faltan las cuentas de fondo | danger |
+| Inversión / Cuenta comitente | Ninguna cuenta de esa clase dada de alta | warning |
+| Inversión / Cuenta comitente | No se pudo leer el tipo de cambio | danger |
+| Inversión / Cuenta comitente | USD sin cotización | warning |
+| Inversión / Cuenta comitente | Cuentas sin saldo inicial | warning |
+| Inversión / Cuenta comitente | Movimientos posteriores a hoy | info |
+
+**Echeqs**
+
+| Aviso | Nivel |
+| --- | --- |
+| Cheques excluidos a mano | info |
+
+**Cobranzas Franquicias / Cobranzas Mayoristas**
+
+| Aviso | Nivel |
+| --- | --- |
+| Facturas vencidas ubicadas en el primer día del eje | warning |
+| Mayoristas: facturas con saldo pendiente negativo | warning |
+
+**Cobranzas Electrónicas**
+
+| Aviso | Nivel |
+| --- | --- |
+| Faltan las tablas del módulo | danger |
+| No hay procesadoras cargadas | warning |
+| Todos los movimientos ya se acreditaron: fila en cero | info |
+| Procesadoras sin ningún movimiento cargado | warning |
+| Acreditaciones posteriores al horizonte | info |
+| Movimientos pendientes posteriores al horizonte: fila en cero | info |
+| No se pudieron leer las alícuotas | danger |
+| Procesadora sin alícuotas vigentes | warning |
+
+**Exportaciones Tasky**
+
+| Aviso | Nivel |
+| --- | --- |
+| Sin cotización del mes: fila en cero | danger |
+| Facturas vencidas ubicadas en el primer día del eje | warning |
+
+**Proveedores Exterior** y **Crono Nacionalización**
+
+| Aviso | Nivel |
+| --- | --- |
+| No se pudo leer la curva de dólar futuro: fila en cero | danger |
+| Sin fecha: no se pueden valuar | warning |
+| Valuados con el mes más cercano de la curva | info |
+| Cotización corregida a mano | info |
+| Fecha vencida: no suman | warning |
+| Fecha vencida dentro del mes en curso: sí entran | info |
+| Marcados como ya hechos | info |
+| Ya pagados en Comercio Exterior (Proveedores Exterior) | info |
+| Sobrepago (Proveedores Exterior) | warning |
+| Órdenes del mismo contenedor (Proveedores Exterior) | info |
+| Falta la tabla de pagos de Comercio Exterior: proyecta de más (Proveedores Exterior) | danger |
+| Contenedores sin gastos de nacionalización estimados (Crono Nacionalización) | warning |
+
+**Comercio Exterior › Proyección**
+
+| Aviso | Nivel |
+| --- | --- |
+| Falta correr el job: se proyecta de MENOS | danger |
+| La última corrida del job falló: se usa el cálculo anterior | warning |
+| A la historia le faltan años | warning |
+| La historia arranca después de lo que pide la cuota | info |
+| El presupuesto se calculó hace más de N horas | warning |
+| No se pudo verificar si hay una versión oficial más nueva | danger |
+| Hay una versión oficial más nueva que el cálculo | warning |
+| No se pudo leer la curva de dólar futuro: fila en cero | danger |
+| Falta la tabla de pagos de Comercio Exterior: se descuenta de más | danger |
+| Ajuste manual apagado: falta la tabla | warning |
+| La vista del presupuesto deja filas afuera | info |
+| Contenedores sin fecha estimada de pago | warning |
+| Órdenes de compra que no están en Tango | warning |
+| Temporada sin versión oficial de presupuesto | warning |
+| Sin historia de recepciones para N meses | danger |
+| Ajustes manuales descartados | warning |
+| Lo comprado supera lo proyectado | info |
+| Valuación (los tres de Comex, arriba), también con sección *Nacionalización* | warning / info |
+| No se pudieron leer los parámetros | danger |
+| Faltan parámetros: se proyecta con los iniciales | warning |
+| Importe fuera del horizonte | info |
+
+**Cuentas a Pagar Locales**
+
+| Sección | Aviso | Nivel |
+| --- | --- | --- |
+| | Falta la tabla de fechas de pago | danger |
+| | Falta `cashflow_prov_locales_fuente_fecha.sql` | warning |
+| | Falta la tabla de exclusión | warning |
+| | Falta la tabla del maestro | danger |
+| | Maestro vacío | warning |
+| | Carga manual del maestro apagada | warning |
+| | No se pudo leer CPA01 | danger |
+| Cronograma | Falta configurar el cronograma / valor que no se entiende | warning |
+| Cronograma | No se pudieron leer los pagos movidos a mano | danger |
+| Cronograma | `RO_T_CALENDARIO` sin datos de un mes | warning |
+| Cronograma | No se pudo leer el calendario bancario | danger |
+| Cronograma | Falta la tabla de overrides: no se pueden editar | warning |
+| Cronograma | No se pudo resolver el cronograma | danger |
+| | Vencidos del cronograma sin fecha de pago | warning |
+| | Vencidos fuera del cronograma sin fecha de pago | warning |
+| | Sin vencimiento ni plazo | warning |
+| | Proveedores con rubro excluido | info |
+| | Proveedores con deuda fuera del maestro | warning |
+| | La fila trae solo echeq y transferencia; el resto queda afuera | warning |
+| | No se pudieron leer los vínculos con tarjetas | danger |
+| | Facturas excluidas a mano | info |
+| | Proveedores excluidos porque su deuda va por otra pestaña | info |
+
+**Logística Local**
+
+| Aviso | Nivel |
+| --- | --- |
+| Falta el maestro de fleteros | danger |
+| Falta la tabla de inflación / no se pudo leer | danger |
+| Cronograma (los de Cuentas a Pagar Locales, sin sección) | warning / danger |
+| A un fletero le faltan horas, valor hora, mes base o inflación | warning |
+| Meses anteriores al mes base de un fletero | warning |
+| No hay fleteros activos | warning |
+| Fleteros no excluidos de Proveedores Locales: se cuentan dos veces | danger |
+| Falta la tabla de exclusión / no se pudo verificar: podría contarse dos veces | danger |
+| Pagos posteriores al horizonte | info |
+| La fila va en CERO: falta el maestro | danger |
+| La fila va en CERO: sin fleteros / ninguno se pudo calcular | warning |
+
+**Pagos con Tarjetas y Otros**
+
+| Sección | Aviso | Nivel |
+| --- | --- | --- |
+| | Falta la tabla de tarjetas | danger |
+| | Falta la vista de usuarios | warning |
+| | No se pudo leer el maestro de bancos | danger |
+| | Tarjetas de usuarios que ya no están activos | warning |
+| | Tarjetas con un banco que ya no está en Tango | info |
+| | No se pudo leer *X* (tarjetas, resúmenes, inflación, vínculos…) | danger |
+| | Falta la tabla de inflación | danger |
+| | La fila va en CERO: faltan las tablas | danger |
+| | La fila va en CERO: no hay datos cargados | warning |
+| Supervisoras | No se pudieron leer los gastos / el maestro / falta la tabla | danger |
+| Supervisoras | Supervisoras que no se proyectan (fuera del maestro, inactivas, en cero) | warning |
+| Supervisoras | Sin tarjeta de tipo Supervisora | warning |
+| Supervisoras | Más de una tarjeta activa | warning |
+| Supervisoras | Activas sin gastos autorizados en la ventana | info |
+| Supervisoras | Falta inflación de algunos meses | warning |
+| Supervisoras | Cronograma (los de Cuentas a Pagar Locales) | warning / danger |
+| Supervisoras / Socios | `RO_T_CALENDARIO` sin datos de un mes | warning |
+| Corporativas | No se pudieron leer las cuentas a pagar de Tango | danger |
+| Corporativas | Facturas sin vincular | warning |
+| Corporativas | Facturas excluidas | info |
+| Corporativas | Facturas cubiertas por el resumen | info |
+| Corporativas | Vinculadas a una tarjeta que ya no existe | danger |
+| Corporativas | Vencimientos corregidos que ya no se aplican | warning |
+| Corporativas | Estimaciones mensuales que no se proyectan | warning |
+| Socios | Sin base histórica | warning |
+| Socios | Base incompleta | info |
+| Socios | Meses sin cotización | warning |
+| Socios | Falta inflación de algunos meses | warning |
+| las tres | Pagos posteriores al horizonte | info |
+| las tres | Importe sin fecha | warning |
+
+### Los que se dudaron
+
+Quedaron con el nivel de la tabla, pero son los que vale la pena revisar:
+
+- **No se pudo leer CPA01** (Cuentas a Pagar Locales), **el maestro de bancos** (Tarjetas) y **verificar si hay una versión oficial más nueva** (Proyección): crítico por la regla de *"no se pudo leer"*, aunque ninguno cambia un número del tablero.
+- **Sin historia de recepciones para N meses** (Proyección): crítico porque esos meses no se reparten y nadie lo decidió; podría ser atención si se considera que se arregla corriendo el job.
+- **La fila trae solo echeq y transferencia** (Cuentas a Pagar Locales): atención y no informativo porque una parte no entra por ninguna fila; la otra parte sí sale por otra fila, que solo sería informativo.
+- **Neteo: cheques que vencen después del cuadro** (Ventas): atención; el texto dice que la cobranza queda de más por ese importe, que es un número mal.
+- **Faltan parámetros de Compras Proyectadas** y **cronograma sin configurar**: atención y no crítico, porque se usan los valores por defecto, que son razonables.
+- **Supervisoras activas sin gastos autorizados**: informativo, aunque es plata que el tablero no proyecta, porque autorizar gastos no es una acción de quien mira el tablero.
+
+---
+
 ## Relación con Ventas
 
 `COBROS_VENTAS` (proyectada) y `COBRANZAS_FR` (real) **no se pisan**: Ventas proyecta cobranza de ventas *futuras* y Cobranzas FR trae cobranza de facturas *ya emitidas*. Se suman a propósito.
@@ -1465,6 +1782,8 @@ De la **sección Cobertura**, `tests/test_cobertura.php` fija lo que la hace fun
 
 Y del **saldo de cobertura**: que se mida sobre todo el horizonte y no sobre la vista —con un escenario que aplica en el tramo diario *y* en una columna mensual, donde el total del tramo diario es otro número—; que un uso negativo sume al disponible; que aplicar de más avise y no bloquee; y que sin fila de stock no se invente un disponible.
 
+Del **panel de avisos**, `tests/test_avisos.php` fija el nivel por defecto y el inválido; que `warnings()` siga devolviendo solo textos; que el `'warnings'` de una serie acepte las dos formas; que el motor mande cada aviso a su grupo —el del proveedor, el de la serie, los descartes, el módulo que falla o no carga, el proveedor sin `'tab'` y los del motor a *Tablero*— y junte en uno a dos proveedores con la misma pestaña; el orden de grupos y de avisos; que cada envoltorio devuelva los mismos textos que su lista con nivel; y que cada `avisar()` de cada proveedor del registro diga su nivel, y —con base— que todo lo que emiten tenga un nivel válido. Las pruebas que leían la lista plana del tablero la leen con `textosTablero()` (`tests/lib.php`), y las que filtraban por el prefijo "Cobertura:" ahora filtran por la sección.
+
 De `FLUJO_NETO`, `tests/test_cashflow.php` fija que incluya el saldo **mostrado** arriba y que no lo arrastre, y que `SALDO_FINAL` no lo cuente dos veces.
 
 Y de la **presentación de Cobertura** —una fila por tipo de fondo—, el mismo archivo fija que el front esconda las filas de stock **filtrando antes de recorrer** (con un salteo adentro del bucle, una sección sin filas visibles igual dibujaría su encabezado y quedaría un título sin nada debajo); que el motor las siga leyendo y siga sacando de ahí los topes por fondo; que el disponible se arme con los fondos **de la fila** y no con el total; que una fila sin fondos no escriba nada; que el caso excedido se siga marcando; que el desglose *calculado / a mano* haya quedado en el tooltip y no en pantalla; y que el aviso del fondo sin fila de uso siga llegando, porque pasó a ser la única forma de enterarse.
@@ -1531,6 +1850,7 @@ Js/cargando.js                              El indicador de carga de todas las p
 Css/cargando.css
 Class/Menu.php                              Menu lateral y estado de cada pestana
 Class/CashflowProvider.php                  Contrato de proveedor
+Class/Aviso.php                             Nivel de cada aviso y el orden del panel del tablero
 Class/CashflowRegistry.php                  Registro de orígenes de datos
 Class/CashflowEstructura.php                Configuración: lectura, validación y CRUD
 Class/Cashflow.php                          El motor
@@ -1631,6 +1951,9 @@ Eliminado: `Tabs/resumen.php`.
 ---
 
 ## Pendientes conocidos
+
+- **Las listas que van metidas en el texto de un aviso** —los proveedores fuera del maestro, los locales sin saldo, las supervisoras sin tarjeta, los fleteros no excluidos— deberían pasar a un *Ver detalle* desplegable, como `detalle` en los avisos del Informe Económico. Quedó fuera de `feature/cashflow-avisos-agrupados`.
+- **Los paneles de cada pestaña todavía no muestran el nivel**: siguen recibiendo los textos (`warnings()`, el `'avisos'` de cada clase). Adoptarlo es pasarles la lista con nivel —que ya existe en cada módulo— y dibujarla con el mismo componente del tablero.
 
 - **Una aplicación manual no es un movimiento del fondo.** El motor y las cargas manuales son *proyección*: cuando el rescate se hace de verdad, la plata sale del fondo y entra al banco, y eso lo tienen que reflejar un `RESCATE` en Saldos → Fondos y el saldo bancario del día siguiente. Una carga manual con fecha pasada no descuenta del stock a hoy (`Fondos::saldoA()` no la conoce) ni entra al saldo proyectado (su columna ya no está en la secuencia): queda en su celda y en el "queda X de Y", nada más. Hoy hay una así en la base —`$ 4.000.000` de *Inversiones* el 18/09, más que el fondo—, y **bloquea cualquier carga manual nueva desde ese fondo** porque `validarDisponible()` la descuenta: hay que darla de baja desde el tablero (o registrar el rescate real). Qué hacer con una aplicación cuando su fecha pasa —convertirla en movimiento, darla de baja sola, dejarla— es una decisión pendiente.
 - **Las columnas mensuales son un solo paso para el motor.** Un bache a mitad de un mes fuera del tramo diario que se tape solo antes de fin de mes no se ve, y uno que no se tape se rescata "en el mes", sin día. Es la resolución del eje, no del algoritmo; si hace falta más, se alarga `horizonte_dias`.

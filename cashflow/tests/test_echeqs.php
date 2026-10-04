@@ -676,7 +676,8 @@ $series = $roto->series($h);
 
 chequear('con la base caida no lanza', [], $series);
 chequear('deja un aviso', 1, count($roto->warnings()));
-chequear('el aviso nombra al modulo', true, strpos($roto->warnings()[0], 'ECHEQS') === 0);
+// Sin el codigo adelante: en el tablero lo dicen el grupo y el 'origen'.
+chequear('el aviso es critico', 'danger', $roto->avisos()[0]['nivel']);
 chequear('y explica la consecuencia', true, strpos($roto->warnings()[0], 'en cero') !== false);
 
 // El registro tiene que declarar UNA sola serie, y que salga de cartera. Si

@@ -278,7 +278,7 @@ chequear('sin la cobertura habria quedado en 400',
     400.0, $pc['SALDO_FIN']['dias']['2026-09-07'] - $pc['USO']['dias']['2026-09-07']);
 
 $descuadreC = false;
-foreach ($tc['warnings'] as $w) {
+foreach (textosTablero($tc) as $w) {
     if (strpos($w, 'arrastre del saldo no cierra') !== false) { $descuadreC = true; }
 }
 
@@ -380,20 +380,16 @@ foreach ($tEx['filas'] as $f) { $pEx[$f['codigo']] = $f; }
 chequear('el disponible queda negativo', -3000.0, $pEx['STOCK']['cobertura']['disponible']);
 chequear('la cobertura se aplica igual', 8000.0, $pEx['USO']['dias']['2026-09-07']);
 
-$avisoExceso = null;
-foreach ($tEx['warnings'] as $w) {
-    if (strpos($w, 'Cobertura:') === 0) { $avisoExceso = $w; }
-}
+// Los avisos de cobertura van con seccion "Cobertura" (antes, con ese prefijo).
+$avisosEx = textosTablero($tEx, 'Cobertura');
+$avisoExceso = empty($avisosEx) ? null : end($avisosEx);
 
 chequear('hay un aviso', true, $avisoExceso !== null);
 chequear('que dice cuanto falta', true,
     $avisoExceso !== null && strpos($avisoExceso, '3.000,00') !== false);
 
 // Sin exceso NO se avisa: un aviso que aparece siempre deja de leerse.
-$sinAviso = true;
-foreach ($tc['warnings'] as $w) {
-    if (strpos($w, 'Cobertura:') === 0) { $sinAviso = false; }
-}
+$sinAviso = (textosTablero($tc, 'Cobertura') === []);
 
 chequear('y no aparece cuando alcanza', true, $sinAviso);
 
@@ -418,10 +414,7 @@ chequear('la fila de uso sigue llevando el bloque', true, is_array($pSin['USO'][
 chequear('pero avisa que no hay stock de donde sacarlo',
     false, $pSin['USO']['cobertura']['hay_stock']);
 
-$avisoSinStock = false;
-foreach ($tSin['warnings'] as $w) {
-    if (strpos($w, 'Cobertura:') === 0) { $avisoSinStock = true; }
-}
+$avisoSinStock = (textosTablero($tSin, 'Cobertura') !== []);
 
 chequear('y no avisa de un exceso que no puede calcular', false, $avisoSinStock);
 
@@ -476,9 +469,7 @@ chequear('el disponible por fondo es la resta', 500.0, $fondosF['CTA_1']['dispon
 chequear('y el nombre es el de la cuenta, no la clave', 'Fondo Alyc', $fondosF['CTA_1']['nombre']);
 
 // Sin exceso en ningun fondo ni en el total: ningun aviso de cobertura.
-$avisosF = array_values(array_filter($tF['warnings'], function ($w) {
-    return strpos($w, 'Cobertura:') === 0;
-}));
+$avisosF = textosTablero($tF, 'Cobertura');
 
 chequear('con todos los fondos alcanzando, no hay aviso', [], $avisosF);
 
@@ -491,9 +482,7 @@ $motorFE = new CashflowCobertura($ecFondos, new ParametrosCobertura(), $hc);
 $motorFE->series = array_merge($motorF->series, ['COBERTURA' => ['APLICACION' => $usoExceso]]);
 
 $tFE = $motorFE->proyectar();
-$avisosFE = array_values(array_filter($tFE['warnings'], function ($w) {
-    return strpos($w, 'Cobertura:') === 0;
-}));
+$avisosFE = textosTablero($tFE, 'Cobertura');
 
 chequear('un fondo sobregirado avisa aunque el total cierre', 1, count($avisosFE));
 chequear('y el aviso nombra la cuenta', true,

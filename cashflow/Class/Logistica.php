@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/LogisticaPlanilla.php';
+require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/ProveedoresTango.php';
 require_once __DIR__ . '/Planilla.php';
 require_once __DIR__ . '/AuthCashflow.php';
@@ -86,15 +87,25 @@ class Logistica {
      * casos avisan. Lo unico que rinde la pantalla en blanco es que no se pueda
      * conectar a central, y eso ya lo maneja quien llama.
      *
+     * LOS AVISOS SALEN DOS VECES: 'avisos' con los textos, que es lo que lee
+     * la pestana, y 'avisos_con_nivel' con la gravedad de cada uno, que es lo
+     * que lee el tablero. Son la misma lista: 'avisos' es Aviso::textos() de
+     * la otra, asi las dos pantallas no pueden decir cosas distintas.
+     *
+     * Niveles: lo que deja la fila en cero o cambia el numero sin que nadie lo
+     * decida es critico (sin maestro de fleteros, sin inflacion, el pago que
+     * se cuenta dos veces); lo que se arregla cargando algo es atencion (los
+     * datos que le faltan a un fletero, el cronograma, el calendario).
+     *
      * @param Horizonte $h
      * @return array ['planilla' => ..., 'cronograma' => ..., 'avisos' => [...],
-     *                'tabla_creada' => bool]
+     *                'avisos_con_nivel' => [...], 'tabla_creada' => bool]
      */
     public function planilla($h) {
         $avisos = [];
 
         if (!$this->tablaCreada()) {
-            $avisos[] = $this->avisoSinTabla();
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, $this->avisoSinTabla());
         }
 
         $fleteros = $this->getFleteros(true);
@@ -110,11 +121,11 @@ class Logistica {
             $inflacion = $inf->valores();
 
             if ($inf->avisoSinTabla() !== '') {
-                $avisos[] = $inf->avisoSinTabla();
+                $avisos[] = Aviso::nuevo(Aviso::DANGER, $inf->avisoSinTabla());
             }
         } catch (Throwable $e) {
-            $avisos[] = 'No se pudo leer la inflación mensual (' . $e->getMessage()
-                . '). Los valores hora se proyectan sin ajuste trimestral.';
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, 'No se pudo leer la inflación mensual ('
+                . $e->getMessage() . '). Los valores hora se proyectan sin ajuste trimestral.');
         }
 
         require_once __DIR__ . '/CronogramaDatos.php';
@@ -125,17 +136,20 @@ class Logistica {
            en el codigo. */
         $crono = (new CronogramaDatos())->paraHorizonte($h, 'LOGISTICA');
 
-        foreach ($crono['avisos'] as $a) {
+        foreach ($crono['avisos_con_nivel'] as $a) {
             $avisos[] = $a;
         }
 
         $planilla = LogisticaPlanilla::calcular($fleteros, $h, $crono['pagos'], $inflacion);
 
-        foreach ($planilla['avisos'] as $a) {
+        // Lo que le falta a cada fletero se arregla cargandolo: atencion.
+        foreach (Aviso::lista($planilla['avisos'], Aviso::WARNING) as $a) {
             $avisos[] = $a;
         }
 
-        foreach ($this->avisosExclusion($fleteros) as $a) {
+        // El pago contado dos veces: critico. El numero esta mal y nadie lo
+        // decidio, aunque lo arregle el usuario; el texto dice como.
+        foreach (Aviso::lista($this->avisosExclusion($fleteros), Aviso::DANGER) as $a) {
             $avisos[] = $a;
         }
 
@@ -146,7 +160,8 @@ class Logistica {
             // El dia y la frecuencia, para que la pantalla diga cuando se paga
             // sin tenerlo escrito: ver CronogramaPagos::describir().
             'cronograma_config' => $crono['config'],
-            'avisos' => $avisos,
+            'avisos' => Aviso::textos($avisos),
+            'avisos_con_nivel' => $avisos,
             'tabla_creada' => $this->tablaCreada()
         ];
     }

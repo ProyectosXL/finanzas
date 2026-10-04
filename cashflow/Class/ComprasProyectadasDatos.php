@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/ComprasProyectadas.php';
 require_once __DIR__ . '/Comex.php';
+require_once __DIR__ . '/Aviso.php';
 
 /**
  * ComprasProyectadasDatos
@@ -1156,13 +1157,23 @@ class ComprasProyectadasDatos {
      * @return array Lista de textos
      */
     public function avisosInsumos($aniosCuota, $hoy, $pais = 'argentina') {
+        return Aviso::textos($this->avisosInsumosConNivel($aniosCuota, $hoy, $pais));
+    }
+
+    /**
+     * Los mismos avisos de avisosInsumos(), con su gravedad. Ver
+     * avisosInsumosDeConNivel().
+     *
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosInsumosConNivel($aniosCuota, $hoy, $pais = 'argentina') {
         $e = $this->estadoInsumos();
 
         /* Sin un calculo bueno del presupuesto no hay contra que comparar las
            oficiales, y ya hay un aviso mas grave: no se lee la cabecera. */
         $oficiales = ($e['presupuesto']['ok'] === null) ? null : $this->oficialesEnVivo($pais);
 
-        return self::avisosInsumosDe($e, self::aniosDeLaCuota($aniosCuota, $hoy),
+        return self::avisosInsumosDeConNivel($e, self::aniosDeLaCuota($aniosCuota, $hoy),
             date('Y-m-d H:i:s'), $oficiales);
     }
 
@@ -1245,6 +1256,22 @@ class ComprasProyectadasDatos {
      * @return array
      */
     public static function avisosInsumosDe($e, $aniosCuota, $ahora, $oficiales = null) {
+        return Aviso::textos(self::avisosInsumosDeConNivel($e, $aniosCuota, $ahora, $oficiales));
+    }
+
+    /**
+     * Los mismos avisos de avisosInsumosDe(), con su gravedad. Lo lee el
+     * tablero; la pestana lee los textos.
+     *
+     * Casi todos son atencion: el numero sale de un calculo anterior y se
+     * arregla corriendo el job. La historia que arranca despues de lo que pide
+     * la cuota es informativo: es el limite de lo que guarda el SP, no algo
+     * que este mal. No poder verificar las oficiales es critico por la regla
+     * de "no se pudo leer": no se sabe si el numero esta al dia.
+     *
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public static function avisosInsumosDeConNivel($e, $aniosCuota, $ahora, $oficiales = null) {
         $out = [];
 
         if (!empty($e['error'])) {
@@ -1260,10 +1287,10 @@ class ComprasProyectadasDatos {
 
             if ($p['ok'] !== null && $p['ultima'] !== null && !empty($p['ultima']['error'])
                 && $p['ultima']['inicio'] > $p['ok']['inicio']) {
-                $out[] = 'La última corrida del job de ' . $nombre . ', del '
+                $out[] = Aviso::nuevo(Aviso::WARNING, 'La última corrida del job de ' . $nombre . ', del '
                     . self::fechaCorta($p['ultima']['inicio']) . ', falló: '
                     . $p['ultima']['error'] . ' Se sigue usando el cálculo del '
-                    . self::fechaCorta($p['ok']['fin']) . '.';
+                    . self::fechaCorta($p['ok']['fin']) . '.');
             }
         }
 
@@ -1278,19 +1305,19 @@ class ComprasProyectadasDatos {
             if ($h['anio_max'] !== null && $h['anio_max'] < $ultimo) {
                 $uno = ($h['anio_max'] + 1 === $ultimo);
 
-                $out[] = 'A la historia de recepciones ' . ($uno
+                $out[] = Aviso::nuevo(Aviso::WARNING, 'A la historia de recepciones ' . ($uno
                         ? 'le falta el año ' . $ultimo
                         : 'le faltan los años ' . ($h['anio_max'] + 1) . ' a ' . $ultimo)
                     . ($h['ok'] !== null ? ': se calculó el ' . self::fechaCorta($h['ok']['fin']) : '')
                     . '. La cuota se arma sin ' . ($uno ? 'ese año' : 'esos años')
-                    . ' hasta que el job vuelva a correr.';
+                    . ' hasta que el job vuelva a correr.');
             }
 
             if ($h['anio_min'] !== null && $h['anio_min'] > $primero) {
-                $out[] = 'La historia de recepciones guardada arranca en ' . $h['anio_min']
+                $out[] = Aviso::nuevo(Aviso::INFO, 'La historia de recepciones guardada arranca en ' . $h['anio_min']
                     . ' y la cuota pide desde ' . $primero . ' (' . count($aniosCuota)
                     . ' años): se arma con los que hay. El SP guarda diez años; para más, '
-                    . 'hay que correrlo con un @Anios mayor.';
+                    . 'hay que correrlo con un @Anios mayor.');
             }
         }
 
@@ -1302,14 +1329,14 @@ class ComprasProyectadasDatos {
             $horas = (strtotime($ahora) - strtotime($fin)) / 3600;
 
             if ($horas > self::HORAS_PRESUPUESTO_VIEJO) {
-                $out[] = 'El presupuesto oficial se calculó el ' . self::fechaCorta($fin)
+                $out[] = Aviso::nuevo(Aviso::WARNING, 'El presupuesto oficial se calculó el ' . self::fechaCorta($fin)
                     . ', hace ' . intval(floor($horas)) . ' horas: su job no está corriendo. '
-                    . 'Las filas proyectan con ese presupuesto.';
+                    . 'Las filas proyectan con ese presupuesto.');
             }
 
             if (is_array($oficiales) && !empty($oficiales['error'])) {
-                $out[] = 'No se pudo verificar si hay una versión oficial más nueva que el '
-                    . 'último cálculo del presupuesto (' . $oficiales['error'] . ').';
+                $out[] = Aviso::nuevo(Aviso::DANGER, 'No se pudo verificar si hay una versión oficial más nueva que el '
+                    . 'último cálculo del presupuesto (' . $oficiales['error'] . ').');
             } elseif (is_array($oficiales)) {
                 $nuevas = [];
 
@@ -1327,11 +1354,11 @@ class ComprasProyectadasDatos {
                 }
 
                 if (!empty($nuevas)) {
-                    $out[] = 'Hay ' . (count($nuevas) === 1 ? 'una versión oficial más nueva'
+                    $out[] = Aviso::nuevo(Aviso::WARNING, 'Hay ' . (count($nuevas) === 1 ? 'una versión oficial más nueva'
                             : 'versiones oficiales más nuevas') . ' que el último cálculo del '
                         . 'presupuesto, del ' . self::fechaCorta($fin) . ' (versión '
                         . implode('; versión ', $nuevas) . '). Las filas proyectan con el '
-                        . 'presupuesto anterior hasta que su job vuelva a correr.';
+                        . 'presupuesto anterior hasta que su job vuelva a correr.');
                 }
             }
         }

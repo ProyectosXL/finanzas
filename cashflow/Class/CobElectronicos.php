@@ -714,7 +714,7 @@ class CobElectronicos {
         }
 
         if ($posterior != 0) {
-            $serie['warnings'][] = 'Cobranzas Pagos Electronicos: ' . self::plata($posterior)
+            $serie['warnings'][] = self::plata($posterior)
                 . ' netos tienen fecha de acreditacion posterior al final del horizonte (la mas '
                 . 'lejana, del ' . self::fechaCorta($fechaMasNueva) . '), asi que no tienen '
                 . 'columna donde mostrarse. Se ven igual en la pestana Cob. Electronicos.';

@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/Parametros.php';
+require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/EjeVista.php';
 require_once __DIR__ . '/Cotizacion.php';
@@ -616,8 +617,10 @@ class Ventas {
             $diasPorCliente = $echeqs->getDiasPrechequeadoPorCliente();
             $filas = $echeqs->getPrechequeadoTotales();
         } catch (Throwable $e) {
-            $this->warnings[] = 'No se pudo leer el neteo de cheques adelantados ('
-                . $e->getMessage() . '). La cobranza se muestra sin netear.';
+            // Critico: la cobranza queda sin netear, de mas, y nadie lo decidio.
+            // Los demas avisos de esta lista son textos: valen 'warning'.
+            $this->warnings[] = Aviso::nuevo(Aviso::DANGER, 'No se pudo leer el neteo de cheques adelantados ('
+                . $e->getMessage() . '). La cobranza se muestra sin netear.');
 
             return self::repartirNeteo([], $dias, $meses, []);
         }
@@ -1110,7 +1113,10 @@ class Ventas {
                 'venta_tramo' => $venta['total_tramo'],
                 'venta_horizonte' => $venta['total_horizonte']
             ],
-            'warnings' => $this->warnings
+            // Textos para la pestana; con nivel para el tablero (ver
+            // VentasProvider). La lista mezcla textos -'warning'- y avisos con nivel.
+            'warnings' => Aviso::textos($this->warnings),
+            'avisos_con_nivel' => Aviso::lista($this->warnings)
         ];
 
         if (!$conCobranza) {
@@ -1153,7 +1159,8 @@ class Ventas {
         $resultado['mix'] = $mix;
         $resultado['kpi']['cobranza_tramo'] = $cobranza['total_tramo'];
         $resultado['kpi']['cobranza_horizonte'] = $cobranza['total_horizonte'];
-        $resultado['warnings'] = $this->warnings;
+        $resultado['warnings'] = Aviso::textos($this->warnings);
+        $resultado['avisos_con_nivel'] = Aviso::lista($this->warnings);
 
         return $resultado;
     }
