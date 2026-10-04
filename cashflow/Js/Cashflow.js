@@ -175,6 +175,108 @@
        AVISOS
        ================================================================ */
 
+    /*
+     * EL PANEL "SOBRE ESTOS NÚMEROS", con el patrón del Informe Económico
+     * (informe_economico/Js/ie-comun.js, IE.pintarAvisos()).
+     *
+     * Los avisos llegan YA AGRUPADOS Y ORDENADOS por pestaña: el orden es una
+     * regla y vive en el backend, en una función pura con pruebas
+     * (Aviso::agrupar()). Acá solo se dibuja lo que llega.
+     *
+     * NO HAY X PARA CERRARLO: se contrae. Una X lo hacía desaparecer hasta la
+     * próxima carga, críticos incluidos; contraído sigue diciendo cuántos hay
+     * de cada nivel.
+     *
+     * QUÉ ARRANCA ABIERTO:
+     *   - el panel, si hay algún crítico; si no, como lo dejó el usuario;
+     *   - cada grupo, si tiene un crítico -siempre-; si no, si el usuario lo
+     *     dejó abierto, recordado por pestaña.
+     * Un crítico no se puede esconder recordando "cerrado": es justamente el
+     * aviso que dice que el número está mal.
+     */
+
+    /** Íconos de Font Awesome (la free 6.4.2 que carga index.php, no Bootstrap Icons) */
+    var ICONO_AVISO = {
+        danger: 'fa-circle-exclamation',
+        warning: 'fa-triangle-exclamation',
+        info: 'fa-circle-info'
+    };
+
+    var NIVELES_AVISO = ['danger', 'warning', 'info'];
+
+    var CLAVE_PANEL_AVISOS = 'cashflow_avisos_abierto';
+
+    function claveGrupoAvisos(grupo) {
+        return 'cashflow_avisos_grupo_' + grupo;
+    }
+
+    /** localStorage con try/catch: ver grupoAbierto() */
+    function leerPreferencia(clave) {
+        try {
+            return localStorage.getItem(clave) === '1';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function guardarPreferencia(clave, abierto) {
+        try {
+            localStorage.setItem(clave, abierto ? '1' : '0');
+        } catch (e) {
+            // Se abre igual; lo único que se pierde es que se recuerde.
+        }
+    }
+
+    /** Los chips con la cantidad de cada nivel, solo de los que hay */
+    function chipsAvisos(cuenta) {
+        return NIVELES_AVISO.filter(function(n) { return cuenta[n]; }).map(function(n) {
+            return '<span class="cf-avisos-chip cf-aviso-' + n + '">' +
+                '<i class="fas ' + ICONO_AVISO[n] + '"></i> ' + cuenta[n] + '</span>';
+        }).join('');
+    }
+
+    function unAviso(a) {
+        var nivel = ICONO_AVISO[a.nivel] ? a.nivel : 'warning';
+
+        return '<div class="cf-aviso cf-aviso-' + nivel + '">' +
+            '<i class="fas ' + ICONO_AVISO[nivel] + '"></i>' +
+            '<div class="cf-aviso-texto">' +
+                (a.seccion ? '<strong>' + escapar(a.seccion) + ':</strong> ' : '') +
+                escapar(a.texto) +
+            '</div>' +
+        '</div>';
+    }
+
+    /**
+     * "Ir a la pestaña" sale solo si el menú tiene el enlace: un usuario sin
+     * permiso sobre esa pestaña no lo tiene, y un link que no lleva a ningún
+     * lado es peor que ninguno. El aviso se muestra igual, porque el número del
+     * tablero lo incluye.
+     */
+    function linkPestana(g) {
+        if (!g.link || !document.querySelector('.menu-link[data-tab="' + g.grupo + '"]')) {
+            return '';
+        }
+
+        return '<a href="#" class="cf-avisos-ir" data-ir-a="' + escapar(g.grupo) + '">' +
+            'Ir a la pestaña <i class="fas fa-arrow-right"></i></a>';
+    }
+
+    function unGrupo(g) {
+        var abierto = g.cuenta.danger > 0 || leerPreferencia(claveGrupoAvisos(g.grupo));
+
+        return '<details class="cf-avisos-grupo cf-avisos-grupo-' + g.nivel + '"' +
+                ' data-grupo="' + escapar(g.grupo) + '"' + (abierto ? ' open' : '') + '>' +
+            '<summary>' +
+                '<span class="cf-avisos-grupo-nombre">' + escapar(g.nombre) + '</span>' +
+                '<span class="cf-avisos-cuenta">(' + g.avisos.length + ')</span>' +
+                chipsAvisos(g.cuenta) +
+                linkPestana(g) +
+            '</summary>' +
+            '<div class="cf-avisos-lista">' + g.avisos.map(unAviso).join('') + '</div>' +
+        '</details>';
+    }
+
     function pintarAvisos() {
         var cont = document.getElementById('cfAvisos');
 
@@ -182,26 +284,67 @@
             return;
         }
 
-        if (!datos.warnings || datos.warnings.length === 0) {
+        var grupos = datos.avisos || [];
+
+        if (grupos.length === 0) {
             cont.innerHTML = '';
             return;
         }
 
-        var items = datos.warnings.map(function(w) {
-            return '<li>' + escapar(w) + '</li>';
-        }).join('');
+        var cuenta = { danger: 0, warning: 0, info: 0 };
+        var total = 0;
+
+        grupos.forEach(function(g) {
+            NIVELES_AVISO.forEach(function(n) { cuenta[n] += g.cuenta[n] || 0; });
+            total += g.avisos.length;
+        });
+
+        var abierto = cuenta.danger > 0 || leerPreferencia(CLAVE_PANEL_AVISOS);
 
         cont.innerHTML =
-            '<div class="alert alert-warning alert-dismissible fade show cf-avisos" role="alert">' +
-                '<div class="d-flex align-items-start">' +
-                    '<i class="fas fa-circle-info me-2 mt-1"></i>' +
-                    '<div>' +
-                        '<strong>Sobre estos números</strong>' +
-                        '<ul class="mb-0 mt-1">' + items + '</ul>' +
-                    '</div>' +
-                '</div>' +
-                '<button type="button" class="btn-close" data-bs-dismiss="alert"></button>' +
-            '</div>';
+            '<details class="cf-avisos-panel"' + (abierto ? ' open' : '') + '>' +
+                '<summary>' +
+                    '<span class="cf-avisos-titulo">Sobre estos números (' + total +
+                        (total === 1 ? ' aviso' : ' avisos') + ')</span>' +
+                    chipsAvisos(cuenta) +
+                '</summary>' +
+                '<div class="cf-avisos-grupos">' + grupos.map(unGrupo).join('') + '</div>' +
+            '</details>';
+
+        conectarAvisos(cont);
+    }
+
+    function conectarAvisos(cont) {
+        var panel = cont.querySelector('.cf-avisos-panel');
+
+        panel.addEventListener('toggle', function() {
+            guardarPreferencia(CLAVE_PANEL_AVISOS, panel.open);
+        });
+
+        Array.prototype.forEach.call(cont.querySelectorAll('.cf-avisos-grupo'), function(d) {
+            d.addEventListener('toggle', function() {
+                guardarPreferencia(claveGrupoAvisos(d.getAttribute('data-grupo')), d.open);
+            });
+        });
+
+        /* El link vive dentro del <summary>: el preventDefault() evita además
+           que el clic abra o cierre el grupo. Abre la pestaña como el menú, con
+           el clic en su ítem, igual que conectarEnlaces(). Sin sub-pestaña: un
+           grupo puede juntar varias (Saldos), así que abre la primera vista. */
+        Array.prototype.forEach.call(cont.querySelectorAll('.cf-avisos-ir'), function(a) {
+            a.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                var item = document.querySelector('.menu-link[data-tab="' +
+                    a.getAttribute('data-ir-a') + '"]');
+
+                if (item) {
+                    window.cfSubTabDestino = null;
+                    item.click();
+                }
+            });
+        });
     }
 
     /* ================================================================

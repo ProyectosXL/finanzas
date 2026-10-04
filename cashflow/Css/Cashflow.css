@@ -6,13 +6,158 @@
    y Proveedores Exterior. Este archivo sólo agrega lo propio del tablero.
    ======================================== */
 
-.tab-cashflow .cf-avisos ul {
-    padding-left: 1.1rem;
+/* ---- Panel "Sobre estos números" ----
+   El patrón del Informe Económico (.ie-avisos-panel en
+   informe_economico/Css/informe_economico.css): contraíble, con chips por
+   nivel, y acá además agrupado por pestaña. Los colores de cada nivel son los
+   de .ie-aviso-info|warning|danger, copiados: el cashflow no tiene variables
+   para esos tonos (sus --warning-color y --danger-color son los de Bootstrap,
+   demasiado fuertes para un fondo de texto largo). El rojo de fondo es
+   --ie-negative-dim, rgba(217,48,37,.08). */
+.tab-cashflow {
+    --cf-aviso-info-bg: #eef5fd;
+    --cf-aviso-info-borde: #c9ddf6;
+    --cf-aviso-info-texto: #1d4f8c;
+    --cf-aviso-warning-bg: #fff7e8;
+    --cf-aviso-warning-borde: #f4d9a6;
+    --cf-aviso-warning-texto: #7c4a03;
+    --cf-aviso-danger-bg: rgba(217, 48, 37, .08);
+    --cf-aviso-danger-borde: rgba(217, 48, 37, .3);
+    --cf-aviso-danger-texto: #8f1f17;
+}
+
+.tab-cashflow #cfAvisos:empty {
+    display: none;
+}
+
+.tab-cashflow .cf-avisos-panel {
+    margin-bottom: 1rem;
+}
+
+.tab-cashflow .cf-avisos-panel > summary,
+.tab-cashflow .cf-avisos-grupo > summary {
+    cursor: pointer;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    list-style: none;
+    user-select: none;
+}
+
+.tab-cashflow .cf-avisos-panel > summary::-webkit-details-marker,
+.tab-cashflow .cf-avisos-grupo > summary::-webkit-details-marker {
+    display: none;
+}
+
+/* La flecha en lugar del marcador del navegador, como en el Informe. */
+.tab-cashflow .cf-avisos-panel > summary::before,
+.tab-cashflow .cf-avisos-grupo > summary::before {
+    content: '\25B8';
+    transition: transform .15s;
+}
+
+.tab-cashflow .cf-avisos-panel[open] > summary::before,
+.tab-cashflow .cf-avisos-grupo[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+.tab-cashflow .cf-avisos-panel > summary {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    padding: 4px 0;
+}
+
+.tab-cashflow .cf-avisos-grupos {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.tab-cashflow .cf-avisos-grupo {
+    background: var(--bg-white);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 6px 10px;
+}
+
+.tab-cashflow .cf-avisos-grupo > summary {
     font-size: 0.85rem;
 }
 
-.tab-cashflow .cf-avisos {
-    padding: 0.75rem 1rem;
+.tab-cashflow .cf-avisos-grupo-nombre {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.tab-cashflow .cf-avisos-cuenta {
+    color: var(--text-muted);
+}
+
+/* El link va a la derecha cuando entra; en pantallas angostas baja de renglón
+   con el resto del summary, que hace wrap. */
+.tab-cashflow .cf-avisos-ir {
+    margin-left: auto;
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
+.tab-cashflow .cf-avisos-chip {
+    border: 1px solid;
+    border-radius: 10px;
+    padding: 0 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.tab-cashflow .cf-avisos-lista {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.tab-cashflow .cf-aviso {
+    border: 1px solid;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.82rem;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+}
+
+.tab-cashflow .cf-aviso i {
+    margin-top: 3px;
+    flex-shrink: 0;
+}
+
+/* min-width: 0 y el corte de palabra: hay avisos con listas de códigos y
+   tablas sin espacios (RO_T_..., sql/...) que si no desbordan en el celular. */
+.tab-cashflow .cf-aviso-texto {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.tab-cashflow .cf-aviso-info {
+    background: var(--cf-aviso-info-bg);
+    border-color: var(--cf-aviso-info-borde);
+    color: var(--cf-aviso-info-texto);
+}
+
+.tab-cashflow .cf-aviso-warning {
+    background: var(--cf-aviso-warning-bg);
+    border-color: var(--cf-aviso-warning-borde);
+    color: var(--cf-aviso-warning-texto);
+}
+
+.tab-cashflow .cf-aviso-danger {
+    background: var(--cf-aviso-danger-bg);
+    border-color: var(--cf-aviso-danger-borde);
+    color: var(--cf-aviso-danger-texto);
 }
 
 /* ---- Columnas ---- */
