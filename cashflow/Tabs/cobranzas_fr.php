@@ -205,8 +205,11 @@
                                  estable, el orden guardado se perdería al
                                  cambiar de solapa. Ver Js/tabla-orden.js. -->
                             <th rowspan="2" id="thCobroCob" data-orden-nombre="cobro">Cobro</th>
-                            <!-- El rótulo y el colspan los pone el JS según la vista activa -->
-                            <th colspan="1" class="table-group-divider" id="mesActualHeaderCob">Días</th>
+                            <!-- Acá terminan las descriptivas. El resto de esta
+                                 fila son los totales de cada columna del eje,
+                                 arriba de su fecha: los pinta Js/eje-totales.js
+                                 desde generarFilaTotales(), con la misma cuenta
+                                 que el pie. -->
                         </tr>
                         <tr id="headerRowSubCob">
                             <!-- Los días se generan dinámicamente -->

@@ -591,6 +591,8 @@ En Resumen se van `FECHA`, `T_COMP`, `N_COMP`, `Desc`, `Días` y `Cobro`: son di
 
 El pie de totales pasó a tener **una celda por columna descriptiva** en lugar de un `colspan` escrito en duro, que había que actualizar a mano cada vez que cambiaba la cantidad de columnas.
 
+**Arriba de cada fecha va su total**, en la fila donde estaba la leyenda *Días* / *Meses*, y arriba de *Total* el total general. Son la misma cuenta del pie —`totalesEje()`, sobre `filasFiltradas()`— con el mismo formato, así que siguen al buscador, a *Ver excluidos*, a la solapa, al modo y a la vista exactamente como el pie. Los pinta `Js/eje-totales.js` (ver `README-cashflow.md`). Las reglas de `.modo-resumen` no se tocaron: los totales van **después** de las diez descriptivas, así que `nth-child(3..7)` y `nth-child(10)` siguen apuntando a las mismas celdas.
+
 ---
 
 ## Integración con el Tablero de Cashflow

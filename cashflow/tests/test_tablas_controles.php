@@ -574,6 +574,11 @@ $ejeTotales = [
         'tablaEcheqs' => "pintarEjeTotales('tablaEcheqs'",
         'tablaPrechequeado' => "pintarEjeTotales('tablaPrechequeado'"
     ]],
+    // Una sola tabla para las dos solapas y los dos modos: los cambios
+    // recargan y redibujan el pie, que es el que llama al componente.
+    'cobranzas_fr.php' => ['Ingresos-Cobranzas_fr.js', [
+        'tablaCobranzasFR' => "pintarEjeTotales('tablaCobranzasFR'"
+    ]],
 ];
 
 seccion('cada tabla con eje llama al componente');
