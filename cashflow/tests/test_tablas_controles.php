@@ -595,6 +595,10 @@ $ejeTotales = [
     'proveedores_locales.php' => ['Proveedores-Proveedores_locales.js', [
         'tablaProveedores' => "pintarEjeTotales('tablaProveedores'"
     ]],
+    // El thead lo arma el JS: el chequeo de la celda de grupo va aparte.
+    'logistica_local.php' => ['Logistica-Local.js', [
+        'tablaLogistica' => "pintarEjeTotales('tablaLogistica'"
+    ]],
 ];
 
 seccion('cada tabla con eje llama al componente');
@@ -612,3 +616,20 @@ foreach ($ejeTotales as $tab => $def) {
             strpos(theadTabla($html, $id), 'colspan') !== false);
     }
 }
+
+seccion('Logistica arma su encabezado en el JS, sin celda de grupo');
+
+/* El thead de Logistica no esta en la pestana: lo escribe pintarEncabezado(),
+   asi que el chequeo de arriba no ve nada ahi. Se mira el JS: la fila de
+   arriba sin colspan, y Total abajo, en la fila de los meses, para que el
+   total general tenga donde ir. */
+$logJs = file_get_contents($JS . '/Logistica-Local.js');
+$logEnc = substr($logJs, strpos($logJs, 'function pintarEncabezado('));
+$logEnc = substr($logEnc, 0, strpos($logEnc, 'function pintarFilas('));
+
+chequear('el encabezado de Logistica no tiene celda de grupo', false,
+    strpos($logEnc, 'colspan') !== false);
+chequear('y Total va en la fila de los meses, con total-column', true,
+    strpos($logEnc, "'<th class=\"text-end fw-bold total-column\">Total</th>'") !== false);
+chequear('y ya no arriba con rowspan', false,
+    strpos($logEnc, 'fw-bold">Total') !== false);
