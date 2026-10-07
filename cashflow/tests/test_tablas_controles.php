@@ -336,7 +336,15 @@ chequear('y se escribe', true,
 
 // Sin el try/catch, en una ventana privada el getItem lanza y la grilla no se
 // dibuja: se perderia el tablero entero por una preferencia de visualizacion.
-chequear('las dos veces envuelto en try/catch', 2,
+//
+// Se compara contra la cantidad de accesos y no contra un numero fijo: el
+// panel "Sobre estos numeros" sumo su propio par de lectura y escritura, y un
+// numero escrito en duro deja de controlar en cuanto alguien agrega otro.
+// Lo que importa es que NINGUNO quede afuera.
+$accesosStorage = preg_match_all('/localStorage\.(get|set)Item\(/', $cashflowJs);
+
+chequear('hay accesos a localStorage que controlar', true, $accesosStorage > 0);
+chequear('todos envueltos en try/catch', $accesosStorage,
     preg_match_all('/try\s*\{\s*\n\s*(return\s+)?localStorage\./', $cashflowJs));
 
 seccion('la regla de agrupamiento es la misma de los dos lados');
