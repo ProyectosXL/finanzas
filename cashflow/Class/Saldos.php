@@ -667,14 +667,27 @@ class Saldos {
      * llegado hoy. Es la senal de que hay que tipear el saldo, y se decide aca
      * -y no en el navegador- para que el tablero pueda avisarlo tambien.
      *
+     * Y CADA FILA TRAE SU PROXIMA FECHA DE ACREDITACION, de
+     * proximaFechaAcreditacion(), con la etiqueta y la explicacion que
+     * muestra la pantalla. Se calcula aca para que la pestana, el tablero y la
+     * foto la saquen del mismo lugar. Sin $acreditacion -el script no se
+     * corrio- la fila la trae en null y no se avisa nada por local: el aviso
+     * de que script falta lo da contextoAcreditacion().
+     *
+     * Los locales en DEPOSITA sin dia se avisan TODOS, aporten o no: el dato
+     * falta igual, y un local que hoy aporta cero porque tiene la caja bajo la
+     * reserva puede aportar manana.
+     *
      * @param array $filasConsulta Filas crudas de la consulta de locales
-     * @param array $params Mapa NRO_SUCURSAL => ['GESTION' => ..., 'RESERVA' => ...]
+     * @param array $params Mapa NRO_SUCURSAL => ['GESTION', 'RESERVA', 'DIA_ACREDITACION']
      * @param array $manuales Mapa NRO_SUCURSAL => ultimo saldo manual, o vacio
      * @param string|null $ayer 'Y-m-d' del cierre esperado; null para no marcar
+     * @param array|null $acreditacion ['hoy' => 'Y-m-d', 'habiles' => mapa] de
+     *        contextoAcreditacion(), o null sin el script
      * @return array ['filas' => [...], 'totales' => [...], 'avisos' => [...]]
      */
     public static function armarSaldosLocales($filasConsulta, $params, $manuales = [],
-                                              $ayer = null) {
+                                              $ayer = null, $acreditacion = null) {
         $agrupadas = self::aplicarSaldosManuales(
             self::agruparPorSucursal($filasConsulta), $manuales);
         $params = is_array($params) ? $params : [];
@@ -684,6 +697,9 @@ class Saldos {
         $avisos = [];
         $sinParametro = [];
         $desactualizados = [];
+        $sinDia = [];
+        $sinHabil = [];
+        $faltanCalendario = [];
 
         $totales = [
             'saldo' => 0,
@@ -694,7 +710,8 @@ class Saldos {
             'depositan' => 0,
             'envian' => 0,
             'manuales' => 0,
-            'desactualizados' => 0
+            'desactualizados' => 0,
+            'sin_dia' => 0
         ];
 
         foreach ($agrupadas as $nro => $s) {
@@ -729,6 +746,54 @@ class Saldos {
             $desactualizado = ($ayer !== null)
                 && ($s['fecha_saldo'] === null || $s['fecha_saldo'] < $ayer);
 
+            $acred = null;
+
+            if ($acreditacion !== null) {
+                $dia = ($tieneParam && isset($params[$nro]['DIA_ACREDITACION']))
+                    ? $params[$nro]['DIA_ACREDITACION'] : null;
+
+                // Un dia invalido en la tabla no puede pasar el CHECK; si
+                // llegara igual, se trata como sin dia en vez de tumbar la
+                // pestana y el tablero.
+                try {
+                    $r = self::proximaFechaAcreditacion($dia, $acreditacion['hoy'],
+                        $acreditacion['habiles']);
+                } catch (Exception $e) {
+                    $r = null;
+                }
+
+                $acred = [
+                    'dia' => $r === null ? null : $r['dia'],
+                    'fecha' => $r === null ? null : $r['fecha'],
+                    'teorica' => $r === null ? null : $r['teorica'],
+                    'corrida' => $r !== null && $r['corrida'],
+                    'sin_habil' => $r !== null && $r['sin_habil'],
+                    'etiqueta' => self::etiquetaAcreditacion($r),
+                    // Las dos explicaciones: la gestion se puede cambiar en la
+                    // pantalla antes de guardar, y el tooltip tiene que seguirla.
+                    'explicacion' => [
+                        self::DEPOSITA => self::explicarAcreditacion($r, self::DEPOSITA),
+                        self::ENVIA => self::explicarAcreditacion($r, self::ENVIA)
+                    ]
+                ];
+
+                if ($r === null) {
+                    $totales['sin_dia']++;
+
+                    if ($deposita) {
+                        $sinDia[] = $nro . ' ' . $s['desc_sucursal'];
+                    }
+                } else {
+                    if ($r['sin_habil']) {
+                        $sinHabil[] = $nro . ' ' . $s['desc_sucursal'];
+                    }
+
+                    foreach ($r['faltan'] as $mes) {
+                        $faltanCalendario[$mes] = true;
+                    }
+                }
+            }
+
             $filas[] = [
                 'nro_sucursal' => $nro,
                 'desc_sucursal' => $s['desc_sucursal'],
@@ -749,7 +814,9 @@ class Saldos {
                 // aparte de 'neto' para que la pantalla pueda mostrar los dos y
                 // se vea POR QUE un neto de -50.000 aporta cero.
                 'aporta' => $aporta,
-                'sin_parametro' => !$tieneParam
+                'sin_parametro' => !$tieneParam,
+                // null sin el script; con el, la proxima fecha y como se llego
+                'acreditacion' => $acred
             ];
 
             $totales['saldo'] += $s['saldo'];
@@ -801,6 +868,28 @@ class Saldos {
                 . self::fechaCorta($ayer) . '): ' . implode(', ', $desactualizados) . '. Se '
                 . 'proyecta con el último saldo conocido; si la consulta no lo trajo, cargalo a '
                 . 'mano en Saldos → Saldos Locales.');
+        }
+
+        // Atencion: plata que entra al tablero en otra columna que la suya, y
+        // se arregla cargando el dia.
+        if (!empty($sinDia)) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, count($sinDia) . ' local(es) en Deposita no '
+                . 'tienen día de acreditación cargado: ' . implode(', ', $sinDia) . '. Lo que '
+                . 'aportan se imputa hoy, en la primera columna. Cargalo en Parámetros → Saldos → '
+                . 'Locales.');
+        }
+
+        // Critico: es un calendario roto, no una decision de nadie. El local
+        // se imputa como si no tuviera dia, y se dice.
+        if (!empty($sinHabil)) {
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, 'No se encontró ningún día hábil en los '
+                . DiasHabiles::MAX_CORRIMIENTO . ' días siguientes al día de acreditación de: '
+                . implode(', ', $sinHabil) . '. Revisá RO_T_CALENDARIO; mientras tanto lo que '
+                . 'aportan se imputa hoy.');
+        }
+
+        foreach (DiasHabiles::avisosCalendario(array_keys($faltanCalendario)) as $a) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $a);
         }
 
         return ['filas' => $filas, 'totales' => $totales, 'avisos' => Aviso::textos($avisos),
@@ -1426,6 +1515,68 @@ class Saldos {
             && $row['F'] !== null);
 
         return $this->acreditacion;
+    }
+
+    /**
+     * Lo que armarSaldosLocales() necesita para calcular la proxima fecha de
+     * acreditacion de cada local: hoy y el calendario de dias habiles.
+     *
+     * ES EL UNICO CAMINO, y lo usan la pestana, el tablero y la foto: los tres
+     * tienen que ver la misma fecha para el mismo local, o la pestana diria
+     * martes y el tablero imputaria el lunes.
+     *
+     * EL CALENDARIO SE LEE POR CronogramaDatos::habilesEntre(), que es el
+     * camino de Ventas::getDiasHabiles() -la unica lectura de RO_T_CALENDARIO
+     * del modulo- con el mismo manejo de falla que el cronograma y las
+     * tarjetas: si no se puede leer devuelve un mapa vacio y un aviso critico,
+     * y la regla aplica el respaldo de lunes a viernes. Una segunda consulta
+     * aca seria una segunda definicion de "dia habil".
+     *
+     * SIN EL SCRIPT devuelve 'acreditacion' = null y un aviso que dice cual
+     * correr: armarSaldosLocales() se comporta como antes -todo a la primera
+     * columna- y la pantalla no se cae. Sin el script no se lee el calendario:
+     * no habria para que.
+     *
+     * @param string $hoy 'Y-m-d'
+     * @return array ['acreditacion' => ['hoy', 'habiles']|null, 'avisos' => [Aviso]]
+     */
+    public function contextoAcreditacion($hoy) {
+        $avisos = [];
+
+        try {
+            $creada = $this->acreditacionCreada();
+        } catch (Throwable $e) {
+            return ['acreditacion' => null, 'avisos' => [Aviso::nuevo(Aviso::DANGER,
+                'No se pudo verificar si existe el día de acreditación de los locales ('
+                . $e->getMessage() . '): la caja de los locales se imputa entera en la primera '
+                . 'columna.')]];
+        }
+
+        if (!$creada) {
+            if ($this->tablasCreadas()) {
+                // Atencion y no critico: el tablero muestra lo mismo que antes
+                // de que existiera el dia, y se arregla corriendo un script.
+                $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Todavía no existe el día de '
+                    . 'acreditación de los locales: corré sql/cashflow_saldos_dia_acreditacion.sql '
+                    . 'contra la base central. Mientras tanto la caja de los locales se imputa entera '
+                    . 'en la primera columna, como hasta ahora.');
+            }
+
+            return ['acreditacion' => null, 'avisos' => $avisos];
+        }
+
+        require_once __DIR__ . '/CronogramaDatos.php';
+
+        $crono = new CronogramaDatos();
+        $rango = self::rangoCalendarioAcreditacion($hoy);
+        $habiles = $crono->habilesEntre($rango['desde'], $rango['hasta']);
+
+        foreach ($crono->avisosConNivel() as $a) {
+            $avisos[] = $a;
+        }
+
+        return ['acreditacion' => ['hoy' => substr((string) $hoy, 0, 10), 'habiles' => $habiles],
+                'avisos' => $avisos];
     }
 
     /**
@@ -2497,7 +2648,17 @@ class Saldos {
 
         $hoy = date('Y-m-d');
         $ayer = self::ayer($hoy);
-        $armado = self::armarSaldosLocales($consulta, $params, $manuales, $ayer);
+
+        // La proxima fecha de acreditacion de cada local, por el mismo camino
+        // que el tablero. Sin el script, null y el aviso de cual correr.
+        $contexto = $this->contextoAcreditacion($hoy);
+
+        foreach (Aviso::textos($contexto['avisos']) as $a) {
+            $avisos[] = $a;
+        }
+
+        $armado = self::armarSaldosLocales($consulta, $params, $manuales, $ayer,
+            $contexto['acreditacion']);
 
         $cargas = $this->getCargas(self::CARGA_LOCALES);
         $ultima = self::ultimaCarga($cargas);
@@ -2508,6 +2669,8 @@ class Saldos {
             // con fecha anterior vienen marcadas con 'desactualizado'.
             'ayer' => $ayer,
             'manuales_disponibles' => $manualesDisponibles,
+            // Sin el script la columna de acreditacion dice que falta
+            'acreditacion_creada' => $contexto['acreditacion'] !== null,
             'filas' => $armado['filas'],
             'totales' => $armado['totales'],
             'ultima_carga' => $ultima === null ? null : [

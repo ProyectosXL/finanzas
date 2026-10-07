@@ -377,3 +377,134 @@ chequear('el aviso del dia ignorado se muestra', 1,
 chequear('el payload dice si el script se corrio', 1, substr_count(
     file_get_contents(__DIR__ . '/../Class/Parametros.php'),
     "\$modulo['acreditacion_creada'] = \$this->saldos()->acreditacionCreada();"));
+
+/* ================================================================
+   Donde se muestra: Saldos -> Saldos Locales
+   ================================================================ */
+
+/* Cuatro locales, vistos el miercoles 7/10/2026 con el lunes 12 feriado:
+     10 Deposita, lunes   -> el lunes es feriado: martes 13/10
+     20 Deposita, viernes -> viernes 9/10
+     30 Deposita, sin dia -> se avisa
+     40 Deposita, sin dia, caja bajo la reserva: aporta cero, y se avisa igual
+     55 Envia,    miercoles -> hoy, informativo; no aporta */
+$consultaSA = [
+    ['NRO_SUCURSAL' => 10, 'DESC_SUCURSAL' => 'CENTRO', 'FECHA' => '2026-10-06', 'COD_CTA' => '1', 'SALDO_CIER' => 700000],
+    ['NRO_SUCURSAL' => 20, 'DESC_SUCURSAL' => 'OESTE',  'FECHA' => '2026-10-06', 'COD_CTA' => '2', 'SALDO_CIER' => 500000],
+    ['NRO_SUCURSAL' => 30, 'DESC_SUCURSAL' => 'SUR',    'FECHA' => '2026-10-06', 'COD_CTA' => '3', 'SALDO_CIER' => 300000],
+    ['NRO_SUCURSAL' => 40, 'DESC_SUCURSAL' => 'FLORES', 'FECHA' => '2026-10-06', 'COD_CTA' => '4', 'SALDO_CIER' => 100000],
+    ['NRO_SUCURSAL' => 55, 'DESC_SUCURSAL' => 'NORTE',  'FECHA' => '2026-10-06', 'COD_CTA' => '5', 'SALDO_CIER' => 900000]
+];
+
+$paramLocSA = [
+    10 => ['GESTION' => 'DEPOSITA', 'RESERVA' => 100000, 'DIA_ACREDITACION' => 1],
+    20 => ['GESTION' => 'DEPOSITA', 'RESERVA' => 100000, 'DIA_ACREDITACION' => 5],
+    30 => ['GESTION' => 'DEPOSITA', 'RESERVA' => 100000, 'DIA_ACREDITACION' => null],
+    40 => ['GESTION' => 'DEPOSITA', 'RESERVA' => 150000, 'DIA_ACREDITACION' => null],
+    55 => ['GESTION' => 'ENVIA',    'RESERVA' => 100000, 'DIA_ACREDITACION' => 3]
+];
+
+$ctxSA = ['hoy' => '2026-10-07', 'habiles' => $calOct];
+$armadoSA = Saldos::armarSaldosLocales($consultaSA, $paramLocSA, [], '2026-10-06', $ctxSA);
+$filaSA = array_column($armadoSA['filas'], null, 'nro_sucursal');
+
+seccion('cada fila trae su proxima fecha de acreditacion');
+
+chequear('el lunes feriado pasa al martes', '2026-10-13', $filaSA[10]['acreditacion']['fecha']);
+chequear('con la etiqueta de la celda', 'Mar · 13/10', $filaSA[10]['acreditacion']['etiqueta']);
+chequear('marcada como corrida', true, $filaSA[10]['acreditacion']['corrida']);
+chequear('el viernes es este viernes', '2026-10-09', $filaSA[20]['acreditacion']['fecha']);
+chequear('sin dia, la fecha es null', null, $filaSA[30]['acreditacion']['fecha']);
+chequear('y la celda dice sin dia', 'sin día', $filaSA[30]['acreditacion']['etiqueta']);
+chequear('Envia tambien tiene su fecha: hoy es miercoles', '2026-10-07',
+    $filaSA[55]['acreditacion']['fecha']);
+
+// La gestion se puede cambiar en la pantalla antes de guardar: el tooltip
+// tiene que poder seguirla sin pedirle nada al servidor.
+chequear('trae el tooltip para las dos gestiones', [
+    'Envía el miércoles 07/10. Es informativo: el local está en Envía y no aporta al cashflow.',
+    'Acredita el miércoles 07/10.'
+], [$filaSA[55]['acreditacion']['explicacion']['ENVIA'],
+    $filaSA[55]['acreditacion']['explicacion']['DEPOSITA']]);
+
+seccion('los locales en Deposita sin dia se avisan');
+
+$avisoSinDiaSA = array_values(array_filter($armadoSA['avisos_con_nivel'], function ($a) {
+    return strpos($a['texto'], 'no tienen día de acreditación cargado') !== false;
+}));
+
+chequear('un solo aviso, de atencion', [1, 'warning'],
+    [count($avisoSinDiaSA), $avisoSinDiaSA ? $avisoSinDiaSA[0]['nivel'] : null]);
+chequear('lista todos los de Deposita sin dia, tambien el que hoy aporta cero',
+    '2 local(es) en Deposita no tienen día de acreditación cargado: 30 SUR, 40 FLORES. Lo que '
+        . 'aportan se imputa hoy, en la primera columna. Cargalo en Parámetros → Saldos → Locales.',
+    $avisoSinDiaSA ? $avisoSinDiaSA[0]['texto'] : null);
+chequear('el de 40 aporta cero: la caja esta bajo la reserva', 0, $filaSA[40]['aporta']);
+chequear('el total cuenta los sin dia', 2, $armadoSA['totales']['sin_dia']);
+
+$envSinDiaSA = $paramLocSA;
+$envSinDiaSA[55]['DIA_ACREDITACION'] = null;
+$r = Saldos::armarSaldosLocales($consultaSA, $envSinDiaSA, [], '2026-10-06', $ctxSA);
+
+chequear('un local en Envia sin dia no entra al aviso: no aporta', false,
+    strpos(implode(' ', $r['avisos']), '55 NORTE') !== false);
+chequear('pero se ve como sin dia en la pantalla', 'sin día',
+    array_column($r['filas'], null, 'nro_sucursal')[55]['acreditacion']['etiqueta']);
+
+seccion('el calendario que falta se avisa una vez');
+
+$r = Saldos::armarSaldosLocales($consultaSA, $paramLocSA, [], '2026-10-28',
+    ['hoy' => '2026-10-29', 'habiles' => $calOct]);
+
+chequear('noviembre no esta en el calendario',
+    ['RO_T_CALENDARIO no tiene datos para 2026-11. Se asumen hábiles los días de lunes a viernes.'],
+    array_values(array_filter($r['avisos'], function ($a) {
+        return strpos($a, 'RO_T_CALENDARIO') === 0;
+    })));
+
+$r = Saldos::armarSaldosLocales($consultaSA, $paramLocSA, [], '2026-10-06',
+    ['hoy' => '2026-10-07', 'habiles' => $rotoSA]);
+$criticosSA = array_values(array_filter($r['avisos_con_nivel'], function ($a) {
+    return $a['nivel'] === 'danger';
+}));
+
+chequear('un mapa sin habiles es critico, y nombra los locales', true,
+    count($criticosSA) === 1 && strpos($criticosSA[0]['texto'], '10 CENTRO, 20 OESTE, 55 NORTE') !== false);
+
+seccion('sin el script, la pestana funciona como antes');
+
+$r = Saldos::armarSaldosLocales($consultaSA, $paramLocSA, [], '2026-10-06', null);
+
+chequear('las filas no traen acreditacion', [null, null],
+    [$r['filas'][0]['acreditacion'], $r['filas'][4]['acreditacion']]);
+chequear('y no se avisa ningun local sin dia: el aviso es el del script', false,
+    strpos(implode(' ', $r['avisos']), 'día de acreditación cargado') !== false);
+chequear('los importes no cambian', $armadoSA['totales']['aporta'], $r['totales']['aporta']);
+
+$pestanaSA = fuenteSA('Saldos', 'getPestanaLocales');
+$contextoSA = fuenteSA('Saldos', 'contextoAcreditacion');
+
+chequear('la pestana arma con el contexto de acreditacion', 1,
+    substr_count($pestanaSA, '$contexto = $this->contextoAcreditacion($hoy);'));
+chequear('y dice si el script se corrio', 1,
+    substr_count($pestanaSA, "'acreditacion_creada' => \$contexto['acreditacion'] !== null"));
+chequear('el contexto pide el calendario por CronogramaDatos::habilesEntre()', 1,
+    substr_count($contextoSA, '$crono->habilesEntre($rango[\'desde\'], $rango[\'hasta\'])'));
+chequear('y sin el script dice cual correr', 1,
+    substr_count($contextoSA, 'corré sql/cashflow_saldos_dia_acreditacion.sql'));
+
+seccion('la pantalla de Saldos Locales');
+
+$jsSalSA = file_get_contents(__DIR__ . '/../Js/Saldos.js');
+$tabSalSA = file_get_contents(__DIR__ . '/../Tabs/saldos.php');
+
+chequear('la columna esta en la tabla', 1, substr_count($tabSalSA, '>Acreditación / envío</th>'));
+chequear('es de solo lectura: no hay selector del dia', 0, substr_count($jsSalSA, 'sal-dia'));
+chequear('sin dia se resalta', 1, substr_count($jsSalSA, "(a.dia === null ? 'sal-sin-dia' : 'sal-fecha-acred')"));
+chequear('el tooltip sigue a la gestion de la pantalla', 1,
+    substr_count($jsSalSA, "f.acreditacion.explicacion[deposita ? 'DEPOSITA' : 'ENVIA']"));
+chequear('las filas vacias ocupan las ocho columnas', 1,
+    substr_count($jsSalSA, "'<tr><td colspan=\"8\" class=\"text-center text-muted py-4\">' +\n"
+        . "                   'La consulta no devolvió ningún local.</td></tr>'")
+    + substr_count($jsSalSA, "'<tr><td colspan=\"8\" class=\"text-center text-muted py-4\">' +\r\n"
+        . "                   'La consulta no devolvió ningún local.</td></tr>'"));

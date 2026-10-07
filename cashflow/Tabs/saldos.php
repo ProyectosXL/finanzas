@@ -286,7 +286,10 @@ $edita = AuthCashflow::puedeEditar('saldos');
                         <em>Guardar</em> las deja como valor por defecto del local —es el mismo
                         dato que Parámetros → Saldos— y guarda la foto del día en el histórico.
                         Sólo los locales en <em>Deposita</em> entran al cashflow, y un neto
-                        negativo aporta cero.
+                        negativo aporta cero. Lo que aporta cada local va al tablero en su
+                        próxima fecha de <strong>acreditación</strong>, que sale del día cargado
+                        en Parámetros; un local <span class="sal-sin-dia">sin día</span> va a la
+                        primera columna.
                     </small>
                 </div>
                 <div class="d-flex gap-2 align-items-center">
@@ -322,6 +325,8 @@ $edita = AuthCashflow::puedeEditar('saldos');
                                 <th class="text-end">Saldo en caja</th>
                                 <th class="text-center">Fecha del saldo</th>
                                 <th class="text-center" style="width: 150px;">Gestión</th>
+                                <th class="text-center" style="width: 130px;"
+                                    title="La próxima vez que el local acredita (Deposita) o envía (Envía) su efectivo. El día se carga en Parámetros → Saldos → Locales">Acreditación / envío</th>
                                 <th class="text-center" style="width: 170px;">Reserva de caja</th>
                                 <th class="text-end">Neto a depositar</th>
                                 <th class="text-end">Aporta al cashflow</th>
