@@ -352,7 +352,13 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                                            title="Seleccionar todas las facturas que se están viendo. Con el buscador puesto, son las de ese proveedor.">
                                     <?php endif; ?>
                                 </th>
-                                <th colspan="1" class="table-group-divider" id="headerEjeProv">Días</th>
+                                <!-- Acá terminan las descriptivas. El resto de
+                                     esta fila son los totales de cada columna
+                                     del eje, arriba de su fecha: los pinta
+                                     Js/eje-totales.js desde pintarTotales(), con
+                                     la misma cuenta que el pie. No hay total
+                                     general porque la grilla no tiene columna
+                                     Total. -->
                             </tr>
                             <tr id="headerSubProv"></tr>
                         </thead>

@@ -591,6 +591,10 @@ $ejeTotales = [
     'crono_nacionalizacion.php' => ['Comex-Crono_nacionalizacion.js', [
         'tablaCronoNacionalizacion' => "pintarEjeTotales('tablaCronoNacionalizacion'"
     ]],
+    // Sin total general: la grilla no tiene columna Total.
+    'proveedores_locales.php' => ['Proveedores-Proveedores_locales.js', [
+        'tablaProveedores' => "pintarEjeTotales('tablaProveedores'"
+    ]],
 ];
 
 seccion('cada tabla con eje llama al componente');
