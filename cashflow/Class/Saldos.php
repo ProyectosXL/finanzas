@@ -899,11 +899,32 @@ class Saldos {
     /**
      * Serie del Cashflow para la caja de locales.
      *
-     * LA FECHA DE IMPUTACION ES LA FECHA DEL SALDO, SIN CORRIMIENTOS. No hay
-     * regla de dia habil ni calendario de feriados: cuando la sucursal deposita,
-     * el movimiento queda registrado en Tango, y como la consulta corre todos
-     * los dias el dato se actualiza solo. Un saldo de domingo se imputa el
-     * domingo; correrlo al lunes inventaria una fecha que el sistema ya conoce.
+     * CADA LOCAL VA EN SU PROXIMA FECHA DE ACREDITACION. Lo que aporta un local
+     * en DEPOSITA es plata que esta en su cajon y que entra al banco el dia que
+     * el local deposita: con el dia cargado, ese es el dia en que el tablero
+     * tiene que verla, y no hoy. La fecha la calculo armarSaldosLocales() con
+     * proximaFechaAcreditacion() -la primera vez que ese dia de la semana cae
+     * hoy o despues, corrida al habil SIGUIENTE si es feriado- y viene en
+     * $f['acreditacion']['fecha']: aca no se vuelve a calcular, asi la pestana
+     * y el tablero no pueden discrepar. Cada local va a su columna, asi que la
+     * serie se reparte en varias.
+     *
+     * Antes la regla era "la fecha del saldo, sin corrimientos". Dejo de valer
+     * para esta serie porque la fecha del saldo dice cuando se CONTO la plata,
+     * no cuando LLEGA al banco; el corrimiento por feriado es el de una
+     * acreditacion, el mismo de Ventas.
+     *
+     * LO QUE NO CAMBIA: el importe -el aporte de armarSaldosLocales(), con el
+     * neto, la reserva, el saldo manual y su precedencia- y por lo tanto el
+     * total de la serie. Solo cambia la columna en la que cae.
+     *
+     * UN LOCAL SIN DIA -o sin el script, o con un calendario roto- SE IMPUTA
+     * COMO SIEMPRE: en la fecha del saldo, y si es anterior al eje, en la
+     * primera columna (destinoEnEje()). armarSaldosLocales() ya lo avisa.
+     *
+     * UN SALDO SIN FECHA VA A sin_fecha AUNQUE EL LOCAL TENGA DIA: el importe
+     * es el mismo de siempre, y si antes no entraba, imputarlo ahora cambiaria
+     * el total de la serie, que es lo que esta regla no toca.
      *
      * UN SALDO CON FECHA ANTERIOR AL EJE SE IMPUTA EN LA PRIMERA COLUMNA, igual
      * que el disponible inicial. La consulta NO devuelve depositos: devuelve el
@@ -915,9 +936,10 @@ class Saldos {
      * importe no aparece en ningun otro lado del tablero, porque el saldo
      * bancario de la pestana 1 recien lo va a mostrar cuando se acredite.
      *
-     * Reubicar NO es el corrimiento que el relevamiento prohibe: eso era mover
-     * una fecha DENTRO del eje a otra por dia habil o feriado, y no se hace. El
-     * aviso dice de que fecha es el saldo, para que nadie lo lea como de hoy.
+     * El aviso dice de que fecha es el saldo, para que nadie lo lea como de hoy.
+     *
+     * Una fecha posterior al eje -de acreditacion o de saldo- queda en
+     * fuera_horizonte y el motor la informa, igual que siempre.
      *
      * @param array $filas Filas devueltas por armarSaldosLocales()['filas']
      * @param Horizonte $h
@@ -950,6 +972,20 @@ class Saldos {
 
             if ($fecha === null) {
                 $serie['sin_fecha'] += $importe;
+                continue;
+            }
+
+            $acreditacion = Horizonte::normalizarFecha(
+                isset($f['acreditacion']['fecha']) ? $f['acreditacion']['fecha'] : null);
+
+            if ($acreditacion !== null) {
+                // Con dia: su proxima fecha de acreditacion. Nunca es anterior
+                // a hoy, salvo que la haya calculado otro "hoy"; destinoEnEje()
+                // lo cubre igual que a cualquier fecha.
+                if (!$h->acumular($serie, self::destinoEnEje($acreditacion, $hoy), $importe)) {
+                    $serie['fuera_horizonte'] += $importe;
+                }
+
                 continue;
             }
 
@@ -1178,8 +1214,10 @@ class Saldos {
      * una fecha pasada significa "esto ya es cierto hoy" y va a la apertura del
      * horizonte. Descartarla mostraria cero teniendo el dato.
      *
-     * Una fecha que SI cae dentro del eje no se toca nunca: no hay corrimiento
-     * a dia habil ni tratamiento de feriados en ninguna de las dos series.
+     * Una fecha que SI cae dentro del eje no se toca aca. El unico corrimiento
+     * por feriado de este modulo es el de la acreditacion de los locales, y lo
+     * hace proximaFechaAcreditacion() antes de llegar aca: esta funcion solo
+     * resuelve que hacer con una fecha que ya paso.
      *
      * @param string $fecha 'Y-m-d' del dato
      * @param string $hoy 'Y-m-d', primer dia del eje

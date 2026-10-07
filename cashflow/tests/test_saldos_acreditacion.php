@@ -508,3 +508,84 @@ chequear('las filas vacias ocupan las ocho columnas', 1,
         . "                   'La consulta no devolvió ningún local.</td></tr>'")
     + substr_count($jsSalSA, "'<tr><td colspan=\"8\" class=\"text-center text-muted py-4\">' +\r\n"
         . "                   'La consulta no devolvió ningún local.</td></tr>'"));
+
+/* ================================================================
+   El tablero: Caja Locales se imputa en la fecha de acreditacion
+   ================================================================ */
+
+// El eje arranca el miercoles 7/10/2026: 28 dias y 12 meses.
+$hSA = new Horizonte(28, 12, [], new DateTime('2026-10-07'));
+
+$serieSA = Saldos::armarSerieLocales($armadoSA['filas'], $hSA);
+$sinDiaSerieSA = Saldos::armarSerieLocales(
+    Saldos::armarSaldosLocales($consultaSA, $paramLocSA, [], '2026-10-06', null)['filas'], $hSA);
+
+seccion('cada local va a su fecha de acreditacion');
+
+// Aportes: 10 CENTRO 600.000 (lunes feriado -> martes 13), 20 OESTE 400.000
+// (viernes 9), 30 SUR 200.000 (sin dia -> hoy), 40 FLORES 0 (bajo la
+// reserva), 55 NORTE en Envia, que no aporta.
+chequear('dos locales con dias distintos caen en dos columnas', [400000.0, 600000.0],
+    [$serieSA['dias']['2026-10-09'], $serieSA['dias']['2026-10-13']]);
+chequear('el lunes feriado no tiene nada: la plata entra el martes', 0.0,
+    floatval($serieSA['dias']['2026-10-12']));
+chequear('el local sin dia cae en la primera columna', 200000.0, $serieSA['dias']['2026-10-07']);
+chequear('el de Envia no aporta: con dia hoy, la primera columna tiene solo al sin dia',
+    200000.0, $serieSA['dias']['2026-10-07']);
+chequear('y nada mas en el resto del eje', 1200000.0,
+    array_sum($serieSA['dias']) + array_sum($serieSA['meses']));
+
+seccion('el total no cambia, solo la distribucion');
+
+chequear('el mismo total que sin dia de acreditacion',
+    array_sum($sinDiaSerieSA['dias']) + array_sum($sinDiaSerieSA['meses']),
+    array_sum($serieSA['dias']) + array_sum($serieSA['meses']));
+chequear('que antes iba entero a la primera columna', 1200000.0,
+    $sinDiaSerieSA['dias']['2026-10-07']);
+chequear('y que es el aporte de la pestana', floatval($armadoSA['totales']['aporta']),
+    floatval(array_sum($serieSA['dias']) + array_sum($serieSA['meses'])));
+chequear('ni fuera del horizonte ni sin fecha', [0.0, 0.0],
+    [floatval($serieSA['fuera_horizonte']), floatval($serieSA['sin_fecha'])]);
+
+seccion('lo que no cambia');
+
+// Un saldo sin fecha va a sin_fecha aunque el local tenga dia: imputarlo
+// ahora cambiaria el total, que esta regla no toca.
+$sinFechaSA = [['nro_sucursal' => 10, 'fecha_saldo' => null, 'aporta' => 50000,
+    'acreditacion' => ['fecha' => '2026-10-13']]];
+
+chequear('un saldo sin fecha va a sin_fecha aunque tenga dia', 50000.0,
+    floatval(Saldos::armarSerieLocales($sinFechaSA, $hSA)['sin_fecha']));
+
+// El aviso de "saldo de fecha vieja en la primera columna" habla solo de lo
+// que fue a la primera columna por falta de dia.
+chequear('el aviso de la primera columna cuenta solo al local sin dia', true,
+    strpos(implode(' ', Aviso::textos($serieSA['warnings'])), '$ 200.000,00') === 0);
+
+seccion('una fecha de acreditacion fuera del eje');
+
+// Un eje solo mensual de un mes, visto el 29/10: el lunes es el 2/11, que el
+// eje no cubre.
+$hCortoSA = new Horizonte(0, 1, [], new DateTime('2026-10-29'));
+$fueraSA = [['nro_sucursal' => 10, 'fecha_saldo' => '2026-10-28', 'aporta' => 300000,
+    'acreditacion' => ['fecha' => Saldos::proximaFechaAcreditacion(1, '2026-10-29', $calOct)['fecha']]]];
+$serieFueraSA = Saldos::armarSerieLocales($fueraSA, $hCortoSA);
+
+chequear('queda fuera de horizonte, y el motor lo informa', 300000.0,
+    floatval($serieFueraSA['fuera_horizonte']));
+chequear('no se apila en la primera columna', 0.0, floatval(array_sum($serieFueraSA['meses'])));
+
+seccion('el tablero usa la misma funcion que la pestana');
+
+$provSA = file_get_contents(__DIR__ . '/../Class/Providers/SaldosProvider.php');
+
+chequear('pide el contexto con el hoy del eje', 1,
+    substr_count($provSA, '$contexto = $saldos->contextoAcreditacion($h->hoy());'));
+chequear('arma los locales con el', 1, preg_match(
+    '/Saldos::armarSaldosLocales\(\$consulta, \$params, \$manuales,\s+Saldos::ayer\(\$h->hoy\(\)\), \$acreditacion\);/',
+    $provSA));
+chequear('sube los avisos del contexto a Caja Locales', 1, substr_count($provSA,
+    "\$this->avisarTodos(\$contexto['avisos'], Aviso::WARNING, self::SECCION_LOCALES);"));
+chequear('y si el contexto falla, no tumba la serie', 1,
+    substr_count($provSA, 'No se pudo calcular la fecha de acreditación de los locales ('));
+
