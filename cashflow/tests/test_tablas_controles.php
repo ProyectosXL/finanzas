@@ -657,3 +657,84 @@ chequear('y llama al componente con el', true,
 chequear('con los mismos formatos que el pie', true,
     strpos($tarjPie, 'formato: celdaEje') !== false
         && strpos($tarjPie, 'formatoTotal: celdaTotal') !== false);
+
+// ============================================================================
+// COBERTURA INVERSA: NINGUNA TABLA CON EJE QUEDA SIN SUS TOTALES
+//
+// La lista de arriba verifica que cada tabla enganchada este enganchada. Esto
+// verifica lo otro: que toda tabla con un encabezado de dos filas -que en este
+// modulo quiere decir "tiene eje"- este en esa lista o en la de excluidas, con
+// el motivo. Una tabla con eje que alguien agregue mañana sin llamar al
+// componente hace fallar la suite en vez de quedar con la fila de arriba vacia.
+// ============================================================================
+
+/* tabla => por que no lleva totales arriba del eje */
+$sinEjeTotales = [
+    // Ventas: sus dos tablas con eje quedan como estaban, con la celda de
+    // grupo y la leyenda del periodo. Se decidio dejarlas afuera de este
+    // cambio: Ventas tiene su propio pie y sus propias reglas de neteo, y
+    // sumarlas aca seria mezclar dos trabajos en una rama.
+    'tablaVenta' => 'Ventas queda afuera de este cambio, a pedido',
+    'tablaCobranza' => 'Ventas queda afuera de este cambio, a pedido',
+    // El tablero: el total de una columna seria la suma de ingresos,
+    // egresos, subtotales y saldos, que no es ningun numero. Lo que se lee
+    // por columna ya esta en sus filas de FLUJO NETO y SALDO FINAL. Su thead lo
+    // arma Js/Cashflow.js, asi que el chequeo por HTML no lo ve: va igual en la
+    // lista para que la decision quede escrita.
+    'cfTabla' => 'el tablero: la suma de una columna mezcla ingresos, egresos y saldos',
+];
+
+/* Sin eje y por eso afuera, sin necesidad de lista: tablaComprasProy (cada
+   fila es un mes), tablaCorpExtra y las tablas de maestros, historiales y
+   detalle. No tienen encabezado de dos filas y este chequeo no las mira. */
+
+seccion('cobertura inversa: toda tabla con eje lleva los totales o dice por que no');
+
+$enganchadas = [];
+
+foreach ($ejeTotales as $def) {
+    $enganchadas = array_merge($enganchadas, array_keys($def[1]));
+}
+
+$conEje = 0;
+
+foreach ($archivosTab as $ruta) {
+    $html = contenidoTab($ruta);
+    $nombre = basename($ruta);
+
+    if (!preg_match_all('/<table\b[^>]*\bid="([^"]+)"/', $html, $m)) {
+        continue;
+    }
+
+    foreach ($m[1] as $id) {
+        if (strpos(theadTabla($html, $id), 'rowspan="2"') === false) {
+            continue;
+        }
+
+        $conEje++;
+
+        chequear($nombre . ': ' . $id . ' tiene eje: lleva totales o esta excluida', true,
+            in_array($id, $enganchadas, true) || isset($sinEjeTotales[$id]));
+    }
+}
+
+chequear('el chequeo encontro tablas con eje', true, $conEje > 0);
+
+// Una tabla no puede estar en las dos listas: o se engancho o se decidio que no.
+chequear('ninguna esta enganchada y excluida a la vez', [],
+    array_values(array_intersect($enganchadas, array_keys($sinEjeTotales))));
+
+// Las excluidas existen: una exclusion de una tabla que ya no esta es una
+// decision vieja que nadie revisa.
+foreach (array_keys($sinEjeTotales) as $id) {
+    $existe = false;
+
+    foreach ($archivosTab as $ruta) {
+        if (strpos(contenidoTab($ruta), 'id="' . $id . '"') !== false) {
+            $existe = true;
+            break;
+        }
+    }
+
+    chequear('la excluida ' . $id . ' existe', true, $existe);
+}
