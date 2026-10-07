@@ -259,7 +259,11 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                            title="Seleccionar todos los cheques que se están viendo. Con el buscador puesto, son los de ese cliente.">
                                     <?php endif; ?>
                                 </th>
-                                <th colspan="1" class="table-group-divider" id="ejeHeaderEch">Días</th>
+                                <!-- Acá terminan las descriptivas. El resto de
+                                     esta fila son los totales de cada columna
+                                     del eje, arriba de su fecha: los pinta
+                                     Js/eje-totales.js con la misma cuenta que
+                                     el pie. -->
                             </tr>
                             <tr id="ejeSubHeaderEch"></tr>
                         </thead>
@@ -506,8 +510,11 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                 <th rowspan="2" class="text-center" style="width: 90px;">Estado</th>
                                 <th rowspan="2" class="text-end">Importe</th>
                                 <th rowspan="2" class="text-center" style="width: 160px;">Marca</th>
-                                <!-- El rótulo y el colspan los pone el JS según la vista activa -->
-                                <th colspan="1" class="table-group-divider" id="grupoEjePre">Días</th>
+                                <!-- Acá terminan las descriptivas. El resto de
+                                     esta fila son los totales de cada columna
+                                     del eje: los pinta Js/eje-totales.js con la
+                                     misma cuenta que el pie, o sea sólo los
+                                     cheques marcados. -->
                             </tr>
                             <tr id="headerEjePre"></tr>
                         </thead>

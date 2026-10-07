@@ -396,6 +396,8 @@ Lo único que se excluye es `'X'` y `'R'` —anulado y rechazado—, que no son 
 
 El dato sigue a la vista para poder auditarlo: el pie de la sub-pestaña muestra los marcados **abiertos por estado** y hay dos tarjetas separando *marcados en cartera* de *marcados fuera de cartera*. No genera aviso en el tablero: es el caso normal, y un aviso que aparece siempre deja de leerse.
 
+**Los totales de arriba de cada fecha también suman sólo los marcados**, igual que la grilla del pie: son la misma cuenta (`Js/eje-totales.js`, ver `README-cashflow.md`). Un cheque destildado se sigue viendo en su fila, pero no suma ni abajo ni arriba, porque no netea.
+
 ---
 
 ## Relación con las cobranzas reales

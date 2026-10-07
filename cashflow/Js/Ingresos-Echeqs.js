@@ -259,13 +259,9 @@
 
         html += '<th class="total-column">Total</th>';
 
-        var cabecera = document.getElementById('ejeHeaderEch');
-
-        if (cabecera) {
-            cabecera.textContent = datosCartera.vistas[vistas.activa()].label;
-            cabecera.setAttribute('colspan', String(cols.length + 1));
-        }
-
+        // La fila de arriba ya no lleva la leyenda de la vista -la dicen los
+        // botones- sino los totales, y esos los pinta el pie: ver
+        // pintarTotalesCartera().
         document.getElementById('ejeSubHeaderEch').innerHTML = html;
     }
 
@@ -339,6 +335,10 @@
      * Respeta el buscador, así que se suman las filas que pasan el filtro. Pero
      * se suman los importes YA AGRUPADOS por el backend, sin reinterpretar
      * ninguna fecha: la regla de "día O mes" sigue estando en un solo lugar.
+     *
+     * Los totales del eje se cuentan UNA VEZ y van a dos lugares: al pie y
+     * arriba de cada fecha (Js/eje-totales.js), con la misma función de
+     * formato. Contarlos dos veces sería dejar que algún día no coincidan.
      */
     function pintarTotalesCartera(filas, cols) {
         var html = '<td colspan="4" class="fw-bold text-end">TOTALES</td>';
@@ -351,26 +351,57 @@
         html += '<td class="currency fw-bold">' + pesos(bruto) + '</td>';
         html += '<td></td>';
 
-        cols.forEach(function(col) {
+        var tot = totalesEje(filas, cols, vistas);
+
+        tot.columnas.forEach(function(total) {
+            html += '<td class="currency ' + (total !== 0 ? 'cell-with-value' : '') + '">'
+                + celdaEje(total) + '</td>';
+        });
+
+        html += '<td class="currency total-column">' + celdaEje(tot.total) + '</td>';
+
+        document.getElementById('totalesEch').innerHTML = html;
+
+        pintarEjeTotales('tablaEcheqs', {
+            columnas: cols,
+            valores: tot.columnas,
+            total: tot.total,
+            formato: celdaEje
+        });
+    }
+
+    /**
+     * Los totales del eje de unas filas: uno por columna y el general de la
+     * vista activa. Es la cuenta del pie Y de la fila de arriba.
+     *
+     * @param {Array} filas Las que suman
+     * @param {Array} cols vistas.columnas()
+     * @param {Object} ctl El controlador de vistas de la tabla
+     * @returns {{columnas: Array, total: number}}
+     */
+    function totalesEje(filas, cols, ctl) {
+        var columnas = cols.map(function(col) {
             var total = 0;
 
             filas.forEach(function(f) {
-                total += Number(vistas.valor(f, col)) || 0;
+                total += Number(ctl.valor(f, col)) || 0;
             });
 
-            html += '<td class="currency ' + (total !== 0 ? 'cell-with-value' : '') + '">'
-                + (total !== 0 ? pesos(total) : '') + '</td>';
+            return total;
         });
 
-        var granTotal = 0;
+        var total = 0;
 
         filas.forEach(function(f) {
-            granTotal += vistas.total(f);
+            total += ctl.total(f);
         });
 
-        html += '<td class="currency total-column">' + (granTotal !== 0 ? pesos(granTotal) : '') + '</td>';
+        return { columnas: columnas, total: total };
+    }
 
-        document.getElementById('totalesEch').innerHTML = html;
+    /** El contenido de una celda de totales del eje: vacía en cero */
+    function celdaEje(total) {
+        return total !== 0 ? pesos(total) : '';
     }
 
     /** Si el interruptor de ver excluidos está prendido */
@@ -830,13 +861,7 @@
 
         html += '<th class="total-column">Total</th>';
 
-        var grupo = document.getElementById('grupoEjePre');
-
-        if (grupo && datosPre.vistas) {
-            grupo.textContent = datosPre.vistas[vistasPre.activa()].label;
-            grupo.setAttribute('colspan', String(cols.length + 1));
-        }
-
+        // Arriba van los totales, no la leyenda: ver pintarPiePre().
         document.getElementById('headerEjePre').innerHTML = html;
     }
 
@@ -991,33 +1016,16 @@
 
         // La grilla del pie suma SOLO los cheques marcados: son los únicos que
         // netean. Mostrar ahí el total del listado haría creer que se resta
-        // también lo destildado.
-        var porColumna = cols.map(function(col) {
-            var total = 0;
+        // también lo destildado. Los totales de arriba de cada fecha son esta
+        // misma cuenta, así que tampoco suman lo destildado.
+        var tot = totalesEje(filas.filter(function(f) { return f.MARCADO; }),
+            cols, vistasPre);
 
-            filas.forEach(function(f) {
-                if (f.MARCADO) {
-                    total += Number(vistasPre.valor(f, col)) || 0;
-                }
-            });
-
-            return total;
-        });
-
-        var granTotal = 0;
-
-        filas.forEach(function(f) {
-            if (f.MARCADO) {
-                granTotal += vistasPre.total(f);
-            }
-        });
-
-        var celdasEje = porColumna.map(function(t) {
+        var celdasEje = tot.columnas.map(function(t) {
             return '<td class="currency ' + (t !== 0 ? 'cell-with-value' : '') + '">'
-                + (t !== 0 ? pesos(t) : '') + '</td>';
+                + celdaEje(t) + '</td>';
         }).join('')
-            + '<td class="currency total-column">'
-            + (granTotal !== 0 ? pesos(granTotal) : '') + '</td>';
+            + '<td class="currency total-column">' + celdaEje(tot.total) + '</td>';
 
         var vacias = cols.map(function() { return '<td></td>'; }).join('') + '<td></td>';
         var anchoTotal = COLS_DESC_PRE + cols.length + 1;
@@ -1039,6 +1047,13 @@
                 ? '<tr><td colspan="' + anchoTotal + '" class="ech-detalle-estados">'
                     + detalle + '</td></tr>'
                 : '');
+
+        pintarEjeTotales('tablaPrechequeado', {
+            columnas: cols,
+            valores: tot.columnas,
+            total: tot.total,
+            formato: celdaEje
+        });
     }
 
     function pintarKpiPre() {

@@ -570,6 +570,10 @@ function theadTabla($html, $id) {
 
 /* pestana => [archivo JS, [id de tabla => la llamada que la engancha]] */
 $ejeTotales = [
+    'echeqs.php' => ['Ingresos-Echeqs.js', [
+        'tablaEcheqs' => "pintarEjeTotales('tablaEcheqs'",
+        'tablaPrechequeado' => "pintarEjeTotales('tablaPrechequeado'"
+    ]],
 ];
 
 seccion('cada tabla con eje llama al componente');
