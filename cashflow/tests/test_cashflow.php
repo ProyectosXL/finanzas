@@ -576,6 +576,9 @@ chequear('el motor arma el aviso', true, strpos($cfFuente, 'avisarSinFila') !== 
 chequear('y dice que el motor no rescata de ahi', true,
     strpos($cfFuente, 'ninguna fila de uso los aplica') !== false);
 
-// Y llega a la pantalla: los warnings del motor se pintan.
+// Y llega a la pantalla. Desde el panel "Sobre estos numeros" los avisos no
+// vienen en la lista plana `warnings` sino agrupados por pestana en `avisos`
+// -los del motor, en el grupo Tablero-, y se pinta cada aviso de cada grupo.
 chequear('los avisos del motor se pintan', true,
-    strpos($jsCf, 'datos.warnings.map(') !== false);
+    strpos($jsCf, 'var grupos = datos.avisos || [];') !== false
+        && strpos($jsCf, 'g.avisos.map(unAviso)') !== false);
