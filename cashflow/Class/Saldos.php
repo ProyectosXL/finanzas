@@ -118,6 +118,9 @@ class Saldos {
     /** @var bool|null Cache del chequeo de la tabla de saldos manuales */
     private $manuales = null;
 
+    /** @var bool|null Cache del chequeo de las columnas del dia de acreditacion */
+    private $acreditacion = null;
+
     /** @var Fondos|null Puerta al modulo de fondos; la resuelve fondos() */
     private $fondos = null;
 
@@ -1056,6 +1059,50 @@ class Saldos {
         $this->manuales = ($row && $row['M'] !== null && $row['O'] !== null);
 
         return $this->manuales;
+    }
+
+    /**
+     * Si existen las columnas del dia de acreditacion: la del parametro y las
+     * dos de la foto. Las tres las crea sql/cashflow_saldos_dia_acreditacion.sql,
+     * asi que se piden juntas: con una sola, el dia se podria elegir pero no
+     * guardar en la foto, o al reves.
+     *
+     * Va aparte de tablasCreadas() por el mismo motivo que manualesCreados():
+     * sin el script la pestana funciona como antes -todo a la primera columna-
+     * y dice que script correr, en vez de quedar en blanco.
+     *
+     * @return bool
+     */
+    public function acreditacionCreada() {
+        if ($this->acreditacion !== null) {
+            return $this->acreditacion;
+        }
+
+        if (!$this->tablasCreadas()) {
+            $this->acreditacion = false;
+
+            return false;
+        }
+
+        $cid = $this->conectar('central');
+
+        $sql = "SELECT COL_LENGTH('dbo.RO_T_CASHFLOW_SALDOS_SUCURSAL', 'DIA_ACREDITACION') AS S,
+                       COL_LENGTH('dbo.RO_T_CASHFLOW_SALDOS_LOCAL', 'DIA_ACREDITACION')    AS D,
+                       COL_LENGTH('dbo.RO_T_CASHFLOW_SALDOS_LOCAL', 'FECHA_ACREDITACION')  AS F";
+
+        $stmt = sqlsrv_query($cid, $sql);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar el día de acreditación'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->acreditacion = ($row && $row['S'] !== null && $row['D'] !== null
+            && $row['F'] !== null);
+
+        return $this->acreditacion;
     }
 
     /**
