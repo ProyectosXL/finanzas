@@ -23,6 +23,11 @@
  * `nth-child`—. Excel no interpreta ese CSS: si no se sacan, en la planilla
  * aparece todo.
  *
+ * LO QUE SE MARCA CON data-exportar-omitir TAMPOCO
+ * ------------------------------------------------
+ * Se ve, pero en la planilla sería un dato repetido: los totales arriba del
+ * eje (Js/eje-totales.js) son los mismos números del pie. Ver omitir().
+ *
  * LO QUE NO ES TEXTO NO ENTRA
  * ---------------------------
  * Del clon se van los `<input>`, `<select>`, `<button>`, `<i>` y `<svg>`,
@@ -104,9 +109,41 @@ var TablaExport = (function() {
             }
         }
 
+        omitir(clon);
         aTexto(clon);
 
         return clon;
+    }
+
+    /**
+     * Saca del clon lo que se ve pero no tiene que bajar: lo marcado con
+     * `data-exportar-omitir`.
+     *
+     * Es para lo que está en pantalla para ayudar a leer y en la planilla
+     * sería un dato repetido. El caso es la fila de totales arriba del eje
+     * (Js/eje-totales.js): son los mismos números del pie, y el Excel los
+     * tendría dos veces. El atributo es genérico a propósito: este archivo no
+     * tiene por qué saber qué es un total del eje.
+     *
+     * Va DESPUÉS de sacar lo oculto, porque eso recorre la tabla viva y el clon
+     * en paralelo por índice de celda: si el clon perdiera celdas antes, los
+     * índices dejarían de coincidir. Una fila que se queda sin celdas se va
+     * entera, para no dejar un renglón vacío en la planilla.
+     *
+     * @param {HTMLTableElement} clon
+     */
+    function omitir(clon) {
+        var marcadas = clon.querySelectorAll('[data-exportar-omitir]');
+
+        for (var i = 0; i < marcadas.length; i++) {
+            var fila = marcadas[i].parentNode;
+
+            fila.removeChild(marcadas[i]);
+
+            if (fila.tagName === 'TR' && !fila.cells.length && fila.parentNode) {
+                fila.parentNode.removeChild(fila);
+            }
+        }
     }
 
     function oculto(el) {

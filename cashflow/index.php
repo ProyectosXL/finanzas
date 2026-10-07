@@ -139,5 +139,9 @@ $tituloInicial = Menu::tituloTab($tabInicial);
          pestañas llegan por AJAX, así que tienen que existir antes que ellas. -->
     <script src="Js/tabla-orden.js?v=<?php echo time(); ?>"></script>
     <script src="Js/tabla-export.js?v=<?php echo time(); ?>"></script>
+    <!-- El total de cada columna del eje, arriba de su fecha. Mismo motivo:
+         lo llaman todas las pestañas con eje desde la función de su pie, y
+         las pestañas llegan por AJAX. -->
+    <script src="Js/eje-totales.js?v=<?php echo time(); ?>"></script>
 </body>
 </html>

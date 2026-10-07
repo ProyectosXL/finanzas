@@ -394,6 +394,38 @@ body {
 }
 
 /* ----------------------------------------------------------------------------
+   TOTALES ARRIBA DEL EJE (Js/eje-totales.js)
+   ----------------------------------------------------------------------------
+   Van en la fila de arriba del thead, cada uno encima de su fecha, donde antes
+   estaba la leyenda "Días" / "Meses". Quedan fijos con el resto del encabezado
+   por la regla de tr:first-child de arriba: no necesitan su propio sticky.
+
+   DISCRETOS A PROPÓSITO: son un dato de lectura, no un encabezado. Sin las
+   mayúsculas ni el espaciado de .table thead th, que en un importe sólo
+   estorban, y alineados a la derecha como los importes de abajo. La negrita
+   es la del pie, porque son los mismos números.
+
+   El nowrap va explícito porque no todas las tablas con eje están dentro de
+   .tabla-temporal —Logística no—, y un importe partido en dos renglones
+   estiraría toda la fila de arriba. */
+.table thead th.eje-total {
+    text-align: right;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 700;
+    font-size: 11px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    white-space: nowrap;
+}
+
+/* El total general se separa de las fechas con el mismo borde con el que la
+   columna Total se separa de las suyas en las pestañas que lo tienen. */
+.table thead th.eje-total-general {
+    border-left: 2px solid var(--border-color);
+}
+
+/* ----------------------------------------------------------------------------
    COLUMNAS FIJAS EN HORIZONTAL
    ----------------------------------------------------------------------------
    Con 28 columnas de días la tabla scrollea mucho a lo ancho y se pierde de

@@ -1,7 +1,8 @@
 <?php
 /**
- * Los dos controles compartidos de las tablas: el orden por encabezado
- * (Js/tabla-orden.js) y la exportacion a Excel (Js/tabla-export.js).
+ * Los controles compartidos de las tablas: el orden por encabezado
+ * (Js/tabla-orden.js), la exportacion a Excel (Js/tabla-export.js) y los
+ * totales arriba del eje (Js/eje-totales.js).
  *
  * POR QUE SE PRUEBAN LEYENDO ARCHIVOS
  * -----------------------------------
@@ -436,3 +437,153 @@ chequear('y la tabla no esta excluida del orden', false,
 $ordenadas = substr($ordenJs, strpos($ordenJs, 'if (esPegada(f) && bloque.length)'), 200);
 chequear('tabla-orden pega la fila sin mirar si se ve', false,
     strpos($ordenadas, 'display') !== false || strpos($ordenadas, 'oculta') !== false);
+
+// ============================================================================
+// LOS TOTALES ARRIBA DEL EJE (Js/eje-totales.js)
+//
+// Igual que los otros controles, lo que se rompe callado es el cableado: una
+// pestana que no llama al componente se queda con la fila de arriba vacia y no
+// avisa, y un componente que calcule por su cuenta muestra arriba un numero
+// distinto del pie sin que nada lo note.
+// ============================================================================
+
+seccion('el componente de los totales del eje existe y se carga');
+
+$ejeTotalesJs = file_get_contents($JS . '/eje-totales.js');
+$exportJs = file_get_contents($JS . '/tabla-export.js');
+
+// Sin comentarios: el encabezado del archivo nombra a proposito las clases y
+// las funciones que el codigo NO usa, para explicar por que.
+$ejeTotalesCodigo = preg_replace(['#/\*.*?\*/#s', '#//[^\n]*#'], '', $ejeTotalesJs);
+
+chequear('eje-totales.js existe', true, $ejeTotalesJs !== false && $ejeTotalesJs !== '');
+chequear('eje-totales.js se carga en index.php', true,
+    strpos($index, 'Js/eje-totales.js') !== false);
+
+seccion('el componente no calcula: pinta lo que le pasa la pestana');
+
+// Si sumara filas o leyera el cuerpo de la tabla, tendria su propia cuenta, y
+// el dia que una pestana cambie que filas suman, arriba y abajo dirian dos
+// cosas distintas.
+chequear('no recorre el cuerpo de la tabla', false,
+    strpos($ejeTotalesCodigo, 'tBodies') !== false || strpos($ejeTotalesCodigo, 'tbody') !== false);
+chequear('no lee el pie', false, strpos($ejeTotalesCodigo, 'tFoot') !== false);
+chequear('ni pregunta por la vista activa', false, strpos($ejeTotalesCodigo, 'vistas.') !== false);
+
+seccion('el componente convive con el orden, las columnas fijas y Exportar');
+
+// tabla-orden.js ordena en la fila de arriba las celdas con rowspan y las que
+// llevan esas dos clases: una celda de totales con cualquiera de ellas se
+// volveria un encabezado clickeable.
+chequear('las celdas de totales no llevan total-column', false,
+    strpos($ejeTotalesCodigo, "'total-column'") !== false
+        || strpos($ejeTotalesCodigo, ' total-column') !== false);
+chequear('ni cf-col-total', false, strpos($ejeTotalesCodigo, 'cf-col-total') !== false);
+// columnas-fijas.js corta las descriptivas en la primera celda sin rowspan.
+chequear('ni rowspan, que las volveria descriptivas', false,
+    stripos($ejeTotalesCodigo, 'rowSpan =') !== false
+        || stripos($ejeTotalesCodigo, "setAttribute('rowspan'") !== false);
+chequear('tabla-orden.js sigue reconociendo la columna Total por su clase', true,
+    strpos($ordenJs, "classList.contains('total-column')") !== false);
+
+// No bajan al Excel: el pie ya tiene los mismos numeros.
+chequear('las celdas se marcan para no exportarse', true,
+    strpos($ejeTotalesJs, "setAttribute('data-exportar-omitir', '')") !== false);
+chequear('y tabla-export.js omite lo marcado', true,
+    strpos($exportJs, "querySelectorAll('[data-exportar-omitir]')") !== false);
+// Sacar celdas del clon antes de recorrerlo en paralelo con la tabla viva
+// correria los indices: se esconderia la celda equivocada.
+chequear('despues de sacar lo oculto, no antes', true,
+    strpos($exportJs, 'omitir(clon);') !== false
+        && strpos($exportJs, 'omitir(clon);') > strpos($exportJs, 'clon_f.deleteCell(c)'));
+
+seccion('una fila de totales corrida no se pinta');
+
+chequear('compara las celdas de la fila de fechas con los totales', true,
+    strpos($ejeTotalesJs, 'abajo.cells.length !== lista.length') !== false);
+chequear('y un total por columna del eje', true,
+    strpos($ejeTotalesJs, 'o.columnas.length !== valores.length') !== false);
+// Agregar con appendChild y no reescribir la fila: en la fila de arriba hay
+// tildes de "seleccionar todos" con su oyente.
+chequear('no reescribe la fila de arriba con innerHTML', false,
+    strpos($ejeTotalesCodigo, 'arriba.innerHTML') !== false);
+
+seccion('la regla pura de los totales, sin navegador');
+
+/* EjeTotales.celdas() esta escrita en ES3 para poder correrla con cscript, el
+   JScript que trae Windows: el proyecto no tiene node. Donde no hay cscript
+   -cualquier maquina que no sea Windows- se saltea. */
+$wsf = realpath(__DIR__ . '/js/eje_totales.wsf');
+$cscript = (PHP_OS_FAMILY === 'Windows' && function_exists('shell_exec'))
+    ? trim((string) @shell_exec('where cscript 2>NUL')) : '';
+
+if ($wsf === false) {
+    chequear('existe tests/js/eje_totales.wsf', true, false);
+} elseif ($cscript === '') {
+    Pruebas::saltear('no hay cscript en esta maquina');
+} else {
+    $salida = trim((string) shell_exec('cscript //nologo ' . escapeshellarg($wsf) . ' 2>&1'));
+    $lineas = preg_split('/\r?\n/', $salida);
+    $ultima = trim(end($lineas));
+
+    if (!preg_match('/^OK: (\d+)\s+FALLAS: (\d+)$/', $ultima, $m)) {
+        chequear('eje_totales.wsf corre', 'OK: n   FALLAS: 0', $ultima);
+    } else {
+        chequear('eje_totales.wsf: hay casos', true, intval($m[1]) > 0);
+        chequear('eje_totales.wsf: sin fallas', 0, intval($m[2]));
+    }
+}
+
+// ============================================================================
+// CADA TABLA CON EJE LLAMA AL COMPONENTE
+//
+// Pestana por pestana, cada tabla con su llamada. Se llama desde la funcion
+// del pie, con la misma cuenta, y por eso el texto que se busca es la llamada
+// misma. Y la celda de grupo con colspan -la de la leyenda "Dias"- ya no esta:
+// si quedara, la fila de arriba tendria la leyenda y los totales a la vez, y
+// los totales quedarian corridos.
+// ============================================================================
+
+/** El HTML de una tabla, desde su id hasta su </table> */
+function bloqueTabla($html, $id) {
+    $ini = strpos($html, 'id="' . $id . '"');
+
+    if ($ini === false) {
+        return null;
+    }
+
+    $fin = strpos($html, '</table>', $ini);
+
+    return substr($html, $ini, $fin === false ? null : $fin - $ini);
+}
+
+/** El thead de una tabla, o '' si el thead lo arma el JS */
+function theadTabla($html, $id) {
+    $bloque = bloqueTabla($html, $id);
+
+    if ($bloque === null || !preg_match('/<thead\b.*?<\/thead>/s', $bloque, $m)) {
+        return '';
+    }
+
+    return $m[0];
+}
+
+/* pestana => [archivo JS, [id de tabla => la llamada que la engancha]] */
+$ejeTotales = [
+];
+
+seccion('cada tabla con eje llama al componente');
+
+foreach ($ejeTotales as $tab => $def) {
+    $js = file_get_contents($JS . '/' . $def[0]);
+    $html = contenidoTab($TABS . '/' . $tab);
+
+    foreach ($def[1] as $id => $llamada) {
+        chequear($tab . ': ' . $id . ' existe en la pestana', true,
+            bloqueTabla($html, $id) !== null);
+        chequear($tab . ': ' . $id . ' llama al componente', true,
+            strpos($js, $llamada) !== false);
+        chequear($tab . ': ' . $id . ' no tiene celda de grupo en el encabezado', false,
+            strpos(theadTabla($html, $id), 'colspan') !== false);
+    }
+}

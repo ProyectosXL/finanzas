@@ -690,6 +690,96 @@ explica cada importe proyectado es justamente lo que se pide de esas pantallas.
 
 ---
 
+## Los totales arriba del eje
+
+En una tabla con veintiocho columnas de días y cien filas, el total de una fecha estaba
+**sólo en el pie**: para saber cuánto entra el 8/9 había que bajar hasta el final, lejos de
+la fecha que lo explica. La fila de arriba del encabezado tenía una sola celda con la
+leyenda *Días* o *Meses*, que ya dicen los botones de `eje-vistas.js`.
+
+Ahora ese lugar lleva, **arriba de cada fecha, su total**, y arriba de la columna *Total*
+el total general. Lo dibuja `Js/eje-totales.js`, el quinto control compartido de las
+tablas.
+
+```js
+// En la función que dibuja el pie, con la misma cuenta:
+pintarEjeTotales('tablaEcheqs', {
+    columnas: cols,            // vistas.columnas()
+    valores: tot.columnas,     // un total por columna, en ese orden
+    total: tot.total,          // se omite si la tabla no tiene columna Total
+    formato: celdaEje,         // LA MISMA función que usa el pie
+    formatoTotal: celdaTotal   // opcional
+});
+```
+
+**El componente no calcula nada.** Recibe los totales que la pestaña ya calculó para el pie,
+y la misma función con la que el pie escribe cada celda. Si hiciera su propia cuenta, el día
+que una pestaña cambie qué filas suman —el buscador, *Ver excluidos*, los cheques
+marcados— el pie diría una cosa y el encabezado otra, sin que nada avisara. Con una sola
+cuenta son el mismo número, y por eso cada pestaña arma sus totales **una vez** y se los pasa
+a los dos.
+
+Por el mismo motivo **el formato es el del pie de cada pestaña**, aunque no sea el mismo en
+todas: Comex deja en blanco lo que no es positivo, Tarjetas escribe las fechas en formato
+corto y el total con decimales, Logística pone un guión en el cero.
+
+Se redibuja exactamente cuando el pie, porque lo llama la función del pie: al buscar, al
+filtrar, al cambiar de solapa, de modo Resumen/Detalle o de vista.
+
+### Lo que le pide al encabezado
+
+Un `thead` de dos filas: **arriba sólo las descriptivas**, con `rowspan="2"`, y **abajo una
+celda por columna del eje y al final la de *Total***. Las celdas de totales se agregan al
+final de la fila de arriba y así cada una cae encima de su fecha.
+
+Eso tiene dos consecuencias en las tablas:
+
+- **La celda de grupo con `colspan` —la de la leyenda— se fue** del encabezado, junto con
+  el código que le ponía el texto y el `colspan`.
+- **Donde *Total* estaba arriba con `rowspan="2"`** —Pagos con Tarjetas y Logística— **bajó
+  a la fila de las fechas**, con `total-column` y el mismo rótulo. Arriba de ella va el total
+  general. El orden que alguien tenía guardado por esa columna se conserva, porque se guarda
+  por nombre.
+
+**Si la fila de fechas no tiene tantas celdas como totales, no se pinta nada** y se avisa
+en la consola. Una fila de totales corrida un lugar no se ve como un error: se ve como
+números, cada uno arriba de la fecha equivocada. Es preferible que falte.
+
+### Con los otros cuatro controles
+
+| Control | Por qué no lo rompe |
+| --- | --- |
+| `tabla-orden.js` | Ordena, en la fila de arriba, las celdas con `rowspan` y las que llevan `total-column` o `cf-col-total`. Las de totales no tienen ninguna de las dos cosas: no son clickeables. *Total* se sigue ordenando desde su encabezado de abajo |
+| `columnas-fijas.js` | Las descriptivas son la corrida de celdas con `rowspan` del principio de la fila de arriba. Antes la cortaba la celda de grupo; ahora la primera de totales. La cuenta es la misma |
+| `tabla-export.js` | Las celdas llevan `data-exportar-omitir` y **no bajan al Excel**: el pie ya tiene los mismos números. El atributo es genérico; `tabla-export.js` no sabe qué es un total del eje |
+| `main.js` | Escribir en el encabezado dispara su `MutationObserver`, que reaplica orden y columnas fijas y vuelve a medir la primera fila. No llama a `eje-totales.js`, así que no hay bucle |
+
+La fila queda **fija con el resto del encabezado** al scrollear: la toma la regla de
+`thead tr:first-child` de `.tabla-temporal`, sin un `sticky` propio.
+
+### Cómo se verificó la regla
+
+Qué va en cada celda lo decide `EjeTotales.celdas()`, que no toca el DOM. El proyecto no
+tiene `node` ni un corredor de JavaScript, así que está escrita **en ES3** —sin `map` ni
+`forEach`— para poder correrla con `cscript`, el intérprete de JScript que trae Windows:
+
+```
+cscript //nologo cashflow\tests\js\eje_totales.wsf
+```
+
+Son nueve casos: una celda por columna y una para el total, la tabla sin columna *Total*,
+el total en cero, el formato de Comex, un formato propio para el total, una sola columna
+(*Período completo*) y ninguna. `tests/test_tablas_controles.php` lo corre cuando hay
+`cscript` y lo saltea donde no hay —cualquier máquina que no sea Windows—.
+
+El resto es cableado, y lo verifica la misma prueba leyendo los archivos: que el componente
+se cargue en `index.php`, que no recorra el cuerpo ni el pie, que sus celdas no lleven las
+clases que las volverían ordenables, que `tabla-export.js` omita lo marcado y que lo haga
+**después** de sacar lo oculto —hacerlo antes correría los índices con los que recorre la
+tabla viva y el clon en paralelo—.
+
+---
+
 ## Agregar un módulo al tablero
 
 Dos pasos de código y uno de pantalla:
