@@ -508,6 +508,14 @@
    grupo se leeria como si fuera del primer cliente.
    ============================================================================ */
 
+/* El bloque del título se estira y se achica: sin min-width: 0, un flex item
+   no baja de su contenido y la descripción de varias líneas empujaba las
+   acciones del header -buscador incluido- a desbordar en vez de bajar. */
+.pc-titulo {
+    flex: 1 1 360px;
+    min-width: 0;
+}
+
 #tablaParamCob .pc-grupo td {
     background: var(--bg-light, #f5f6fa);
     border-top: 2px solid var(--border-color, #e2e5ed);

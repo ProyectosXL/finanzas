@@ -137,30 +137,34 @@ $edita = AuthCashflow::puedeEditar('parametros', 'COBRANZAS');
 
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <div class="d-flex align-items-center gap-3">
-            <div>
-                <h5 class="mb-0">Gestión de Cobranza Franquicias</h5>
-                <!-- El PPP es del grupo: una fila por grupo empresario con
-                     sus locales debajo. Se listan solo las franquicias
-                     habilitadas en el direccionario de sucursales. -->
-                <small class="text-muted">
-                    Plazo Promedio de Pago por <strong>grupo empresario</strong>, con los recibos de
-                    Tango de los últimos 100 días; un cliente sin grupo es su propio grupo. Se listan
-                    sólo las franquicias <strong>habilitadas</strong> en el directorio de sucursales.
-                    El descuento sale de la escala general de arriba, y el <em>Medio de Pago</em> es
-                    un dato informativo de cada cliente.
-                </small>
-            </div>
-            <div class="search-box-container ms-3">
+        <!-- El texto ocupa lo que sobra y se puede achicar: es largo, y sin
+             min-width: 0 empujaba al buscador fuera de línea. -->
+        <div class="pc-titulo">
+            <h5 class="mb-0">Gestión de Cobranza Franquicias</h5>
+            <!-- El PPP es del grupo: una fila por grupo empresario con
+                 sus locales debajo. Se listan solo las franquicias
+                 habilitadas en el direccionario de sucursales. -->
+            <small class="text-muted">
+                Plazo Promedio de Pago por <strong>grupo empresario</strong>, con los recibos de
+                Tango de los últimos 100 días; un cliente sin grupo es su propio grupo. Se listan
+                sólo las franquicias <strong>habilitadas</strong> en el directorio de sucursales.
+                El descuento sale de la escala general de arriba, y el <em>Medio de Pago</em> es
+                un dato informativo de cada cliente.
+            </small>
+        </div>
+        <!-- El buscador va con las acciones y no debajo del título: pegado a
+             una descripción de varias líneas quedaba a media altura, y es un
+             control de la tabla como Exportar. flex-wrap lo baja de renglón
+             en pantallas angostas en vez de desbordar el header. -->
+        <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
+            <div class="search-box-container">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text bg-light border-end-0">
                         <i class="fas fa-search text-muted"></i>
                     </span>
-                    <input type="text" id="busquedaParamCob" class="form-control border-start-0 ps-0" placeholder="Buscar grupo, cliente o sucursal..." style="min-width: 250px;">
+                    <input type="text" id="busquedaParamCob" class="form-control border-start-0 ps-0" placeholder="Buscar grupo, cliente o sucursal..." style="min-width: 230px;">
                 </div>
             </div>
-        </div>
-        <div class="d-flex gap-2">
             <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
             <button class="btn btn-sm btn-outline-success" data-exportar="tablaParamCob"
                     data-exportar-nombre="Parametros_Cobranzas_Clientes"
