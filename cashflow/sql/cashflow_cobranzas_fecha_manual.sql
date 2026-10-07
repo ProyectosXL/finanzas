@@ -39,8 +39,14 @@
    la unicidad de arriba:
 
      - La clave YA ES el comprobante, y un comprobante pertenece a un solo
-       circuito: los de franquicias son COD_CLIENT LIKE 'FR%' y los de
-       mayoristas LIKE 'MA%'. No puede ser los dos.
+       circuito: los de franquicias son COD_CLIENT LIKE '[FL]%' -las L son
+       los locales con gestion asistida- y los de mayoristas LIKE 'MA%'. No
+       puede ser los dos.
+
+     - Una franquicia que sale del universo -inhabilitada en el directorio de
+       sucursales- conserva sus fechas manuales aca: no se borran, y vuelven a
+       aplicar si se la habilita. Es el mismo criterio que "la fecha manual
+       sobrevive a la factura", de mas arriba.
 
      - Una columna ORIGEN tendria que coincidir siempre con lo que dice el
        codigo de cliente, o sea que seria un dato que se puede contradecir con

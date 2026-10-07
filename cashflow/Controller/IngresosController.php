@@ -132,13 +132,23 @@ try {
             // El eje sale de horizonte_dias y horizonte_meses, el mismo del
             // tablero: esta pestaña deja de tener su ventana propia -eran los
             // dias del mes en curso y doce meses fijos-.
+            $payloadFr = payloadCobranzas(
+                $ingresos->getCobranzasFR($summary && !$conFiltro, $origen),
+                $summary,
+                $rango
+            );
+
+            /* El universo -franquicias habilitadas en el directorio- va con su
+               nivel y aparte de 'warnings', que la pantalla junta en un solo
+               cartel amarillo: el directorio caido es una ATENCION y las
+               facturas que quedan afuera son INFORMATIVAS, y mezclados en el
+               mismo cartel no se distinguiria cual es cual. Se lee DESPUES de
+               getCobranzasFR(), que es quien lo llena. */
+            $payloadFr['avisos_universo'] = $ingresos->avisosUniversoFR();
+
             echo json_encode([
                 'success' => true,
-                'data' => payloadCobranzas(
-                    $ingresos->getCobranzasFR($summary && !$conFiltro, $origen),
-                    $summary,
-                    $rango
-                )
+                'data' => $payloadFr
             ], JSON_UNESCAPED_UNICODE);
             break;
 

@@ -142,14 +142,17 @@ $edita = AuthCashflow::puedeEditar('parametros', 'COBRANZAS');
         <div class="pc-titulo">
             <h5 class="mb-0">Gestión de Cobranza Franquicias</h5>
             <!-- El PPP es del grupo: una fila por grupo empresario con
-                 sus locales debajo. Se listan solo las franquicias
-                 habilitadas en el direccionario de sucursales. -->
+                 sus locales debajo. Se listan solo las franquicias -[FL]%-
+                 habilitadas en el directorio de sucursales, que son las
+                 mismas que proyecta Cobranzas FR (Class/DirectorioFranquicias.php). -->
             <small class="text-muted">
                 Plazo Promedio de Pago por <strong>grupo empresario</strong>, con los recibos de
-                Tango de los últimos 100 días; un cliente sin grupo es su propio grupo. Se listan
-                sólo las franquicias <strong>habilitadas</strong> en el directorio de sucursales.
-                El descuento sale de la escala general de arriba, y el <em>Medio de Pago</em> es
-                un dato informativo de cada cliente.
+                Tango de los últimos 100 días; un cliente sin grupo es su propio grupo. Las
+                franquicias son los clientes que empiezan con <strong>F</strong> o con
+                <strong>L</strong> (gestión asistida), y se listan sólo las
+                <strong>habilitadas</strong> en el directorio de sucursales: son las únicas que
+                se cobran en Cobranzas FR y en el tablero. El descuento sale de la escala general
+                de arriba, y el <em>Medio de Pago</em> es un dato informativo de cada cliente.
             </small>
         </div>
         <!-- El buscador va con las acciones y no debajo del título: pegado a

@@ -7,6 +7,7 @@ require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/Cotizacion.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
+require_once __DIR__ . '/DirectorioFranquicias.php';
 
 /**
  * Ingresos
@@ -126,6 +127,24 @@ class Ingresos {
 
     /** @var array Avisos que dejo la ultima lectura del PPP (vista o tabla faltantes) */
     private $avisosPPP = [];
+
+    /**
+     * Lo que la ultima lectura de Cobranzas FR dejo FUERA DEL UNIVERSO -las
+     * franquicias que no estan habilitadas en el directorio-, y el aviso de
+     * que no se pudo filtrar si el directorio no respondio.
+     *
+     * Va aparte de las filas por el mismo motivo que $sinSaldoMay: no es
+     * plata a cobrar, pero tampoco se puede descartar en silencio. Se lee
+     * DESPUES de la consulta con avisosUniversoFR(), y cada lectura publica
+     * -getCobranzasFR(), getCobranzasFRTotales(),
+     * getCobranzasFRPendientesProyectadas()- lo vuelve a empezar: si se
+     * acumulara, el tablero, que pide la cobranza tres veces por carga,
+     * contaria tres veces las mismas facturas.
+     *
+     * @var array ['afuera' => ver DirectorioFranquicias::filtrarUniverso(),
+     *             'avisos' => [Aviso WARNING]]
+     */
+    private $universoFR = ['afuera' => [], 'avisos' => []];
 
     function __construct(){
         require_once __DIR__.'/../../class/conexion.php';
@@ -271,7 +290,9 @@ class Ingresos {
      * de su grupo empresario.
      *
      * TRES LECTURAS, TODAS EN CENTRAL, Y EL CRUCE EN PHP:
-     *   1. los clientes FR con su grupo (GVA14 + GVA62)
+     *   1. los clientes franquicia -[FL]%, ver DirectorioFranquicias- con su
+     *      grupo (GVA14 + GVA62). Todos los de Tango, sin mirar el directorio:
+     *      el PPP es del grupo y lo usa quien filtre despues.
      *   2. el PPP calculado por grupo (RO_V_CASHFLOW_PPP_GRUPO, Tango)
      *   3. el PPP manual por grupo (RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO)
      * mas DIAS_PP_MAX por cliente como respaldo. NO se hace un join SQL entre
@@ -297,7 +318,7 @@ class Ingresos {
         $sql = "SELECT C.COD_CLIENT, C.RAZON_SOCI, C.GRUPO_EMPR, G.NOMBRE_GRU
                 FROM GVA14 C
                 LEFT JOIN GVA62 G ON G.GRUPO_EMPR = C.GRUPO_EMPR
-                WHERE C.COD_CLIENT LIKE 'FR%'"
+                WHERE C.COD_CLIENT LIKE '" . DirectorioFranquicias::PATRON_SQL . "'"
             . ($codCliente ? " AND C.COD_CLIENT = ?" : "")
             . " ORDER BY C.COD_CLIENT";
 
@@ -1092,6 +1113,81 @@ class Ingresos {
         return $msg;
     }
 
+    /* ====================================================================
+       EL UNIVERSO DE COBRANZAS FRANQUICIAS
+
+       Solo las franquicias [FL]% habilitadas en el directorio de sucursales,
+       en las dos solapas y en el tablero. La regla y la lectura son de
+       DirectorioFranquicias; aca se aplica, en PHP y despues de leer -el
+       directorio esta en otro servidor y no se puede cruzar con un JOIN-, y
+       se junta lo que quedo afuera para avisarlo.
+
+       SE APLICA IGUAL A REAL Y A PROYECTADO, y por eso no toca la invariante
+       entre las dos solapas: es un filtro por CLIENTE, y un cliente queda
+       afuera de las dos o de ninguna. La particion estado por estado de cada
+       comprobante sigue siendo la misma dentro del universo.
+
+       LAS FECHAS MANUALES NO SE TOCAN. Una factura que queda afuera conserva
+       su fecha pactada en RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL, y si el
+       cliente se vuelve a habilitar la fecha aplica sola: mismo criterio que
+       "la fecha manual sobrevive a la factura".
+       ==================================================================== */
+
+    /** Empieza de cero lo que se informa del universo. Ver $universoFR. */
+    private function reiniciarUniversoFR() {
+        $this->universoFR = ['afuera' => [], 'avisos' => []];
+    }
+
+    /**
+     * Deja los items de franquicias habilitadas y suma lo que quedo afuera.
+     *
+     * @param array $items
+     * @param string $campoCliente
+     * @param string $campoImporte
+     * @param string|null $campoCantidad Si cada item agrupa varios
+     *        comprobantes, el campo que dice cuantos. null = uno por item.
+     * @return array Los items que quedan
+     */
+    private function filtrarUniversoFR($items, $campoCliente, $campoImporte, $campoCantidad = null) {
+        $r = DirectorioFranquicias::filtrarUniverso($items, DirectorioFranquicias::leer(),
+            $campoCliente, $campoImporte, $campoCantidad);
+
+        $this->universoFR['afuera'] = DirectorioFranquicias::sumarAfuera(
+            $this->universoFR['afuera'], $r['afuera']);
+
+        // El aviso de directorio caido es el mismo en cada llamada: una vez.
+        if (!empty($r['avisos'])) {
+            $this->universoFR['avisos'] = $r['avisos'];
+        }
+
+        return $r['items'];
+    }
+
+    /**
+     * Los avisos de la ultima lectura de Cobranzas FR sobre su universo:
+     * WARNING si el directorio no respondio y se trabajo sin filtrar, e INFO
+     * con lo que quedo afuera, un aviso por caso nombrando a cada cliente.
+     *
+     * @return array Lista de Aviso
+     */
+    public function avisosUniversoFR() {
+        return array_merge($this->universoFR['avisos'],
+            DirectorioFranquicias::avisosAfuera($this->universoFR['afuera']));
+    }
+
+    /**
+     * Los comprobantes pendientes proyectados de las franquicias habilitadas.
+     * Ver pendientesProyectadas(); esta es la entrada publica, que empieza de
+     * cero lo que se informa del universo.
+     *
+     * @return array Listado de comprobantes proyectados
+     */
+    public function getCobranzasFRPendientesProyectadas() {
+        $this->reiniciarUniversoFR();
+
+        return $this->pendientesProyectadas();
+    }
+
     /**
      * Los comprobantes pendientes proyectados: FAC en estado PEN que no cuenta
      * la cobranza real ni estan ya cobrados.
@@ -1112,7 +1208,7 @@ class Ingresos {
      *
      * @return array Listado de comprobantes proyectados
      */
-    public function getCobranzasFRPendientesProyectadas() {
+    private function pendientesProyectadas() {
         $cid_apps = $this->conn->conectar('apps');
         $cid_central = $this->conn->conectar('central');
 
@@ -1159,7 +1255,7 @@ class Ingresos {
                 CAST(g.IMPORTE AS FLOAT) AS IMPORTE
             FROM GVA12 g
             INNER JOIN GVA14 c ON g.COD_CLIENT = c.COD_CLIENT
-            WHERE g.COD_CLIENT LIKE 'FR%'
+            WHERE g.COD_CLIENT LIKE '" . DirectorioFranquicias::PATRON_SQL . "'
               AND g.T_COMP = 'FAC'
               AND g.ESTADO = 'PEN'
             ORDER BY g.FECHA_EMIS DESC
@@ -1246,7 +1342,12 @@ class Ingresos {
         }
         sqlsrv_free_stmt($stmt_fac);
 
-        return $itemsProyectados;
+        // SOLO LAS FRANQUICIAS HABILITADAS. Se filtra al final, sobre lo que
+        // ya paso la exclusion por propuesta y el techo de las vencidas: lo que
+        // queda afuera se avisa con lo que HUBIERA ENTRADO al tablero, y una
+        // factura de hace un anio no entraba de ninguna forma. Ver
+        // DirectorioFranquicias y el bloque "El universo" de esta clase.
+        return $this->filtrarUniversoFR($itemsProyectados, 'COD_CLI', 'importe_neto');
     }
 
     /**
@@ -1270,6 +1371,7 @@ class Ingresos {
      */
     public function getCobranzasFR($summary = false, $origen = 'todos') {
         $data = [];
+        $this->reiniciarUniversoFR();
 
         // 1. Cargar datos reales si corresponde
         if ($origen === 'todos' || $origen === 'real') {
@@ -1283,7 +1385,7 @@ class Ingresos {
             // INVARIANTE: Real cuenta UNICAMENTE las propuestas ACEPTADAS. El
             // complemento -lo que espera aprobacion del cliente- vuelve a la
             // proyeccion; la exclusion esta en
-            // getCobranzasFRPendientesProyectadas() y las dos se mueven juntas.
+            // pendientesProyectadas() y las dos se mueven juntas.
             $estadosReal = self::inSql(self::ESTADOS_REAL);
 
             // La misma consulta para los dos modos: una fila por comprobante,
@@ -1371,11 +1473,16 @@ class Ingresos {
                 $data[] = $item;
             }
             sqlsrv_free_stmt($stmt);
+
+            // Solo las franquicias habilitadas, con el MISMO filtro que la
+            // proyeccion: un cliente queda afuera de las dos solapas o de
+            // ninguna, asi que la invariante entre las dos no se mueve.
+            $data = $this->filtrarUniversoFR($data, 'COD_CLI', 'importe_neto');
         }
 
         // 2. Cargar pendientes proyectados si corresponde
         if ($origen === 'todos' || $origen === 'proyectado') {
-            $proyectados = $this->getCobranzasFRPendientesProyectadas();
+            $proyectados = $this->pendientesProyectadas();
             $data = array_merge($data, $proyectados);
         }
 
@@ -1416,6 +1523,8 @@ class Ingresos {
         $vencidoPorFecha = [];
         $compVencidosPorFecha = [];
 
+        $this->reiniciarUniversoFR();
+
         // 1. Cobranza Real
         if ($origen === 'todos' || $origen === 'real') {
             $cid = $this->conn->conectar('apps');
@@ -1424,31 +1533,48 @@ class Ingresos {
                 // ACEPTADAS. Ver la invariante en el encabezado de la clase.
                 $estadosReal = self::inSql(self::ESTADOS_REAL);
 
+                // POR FECHA Y CLIENTE, y no solo por fecha: el universo se
+                // filtra por cliente, y en PHP -el directorio vive en otro
+                // servidor-. Agrupar tambien por cliente no cambia ningun
+                // total por fecha: la suma de las partes es la misma. Se
+                // verifico contra la base al hacer el cambio (ver el README).
+                // CANT cuenta los comprobantes, para avisar lo que queda afuera.
                 $sql = "SELECT
                             p.fecha_propuesta_pago AS FECHA,
+                            p.cod_cliente AS COD_CLI,
+                            COUNT(*) AS CANT,
                             SUM(CASE WHEN i.t_comp_factura LIKE '%NC%'
                                      THEN -i.importe_neto ELSE i.importe_neto END) AS IMPORTE
                         FROM FP_propuestas_pago p
                         INNER JOIN FP_propuestas_pago_items i ON p.id = i.id_propuesta
                         WHERE p.estado IN ($estadosReal)
                         AND p.fecha_propuesta_pago >= CAST(GETDATE() AS DATE)
-                        GROUP BY p.fecha_propuesta_pago
+                        GROUP BY p.fecha_propuesta_pago, p.cod_cliente
                         ORDER BY p.fecha_propuesta_pago ASC";
 
                 $stmt = sqlsrv_query($cid, $sql);
                 if ($stmt !== false) {
+                    $filasReal = [];
+
                     while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-                        $f = $row['FECHA'] instanceof DateTime ? $row['FECHA']->format('Y-m-d') : $row['FECHA'];
-                        $totalesPorFecha[$f] = ($totalesPorFecha[$f] ?? 0.0) + floatval($row['IMPORTE']);
+                        $row['FECHA'] = $row['FECHA'] instanceof DateTime ? $row['FECHA']->format('Y-m-d') : $row['FECHA'];
+                        $filasReal[] = $row;
                     }
                     sqlsrv_free_stmt($stmt);
+
+                    // El mismo filtro que la pestana: el tablero no puede
+                    // contar plata que Cobranzas FR no muestra.
+                    foreach ($this->filtrarUniversoFR($filasReal, 'COD_CLI', 'IMPORTE', 'CANT') as $row) {
+                        $f = $row['FECHA'];
+                        $totalesPorFecha[$f] = ($totalesPorFecha[$f] ?? 0.0) + floatval($row['IMPORTE']);
+                    }
                 }
             }
         }
 
         // 2. Cobranza Proyectada (Facturas PEN con PPP)
         if ($origen === 'todos' || $origen === 'proyectado') {
-            $proy = $this->getCobranzasFRPendientesProyectadas();
+            $proy = $this->pendientesProyectadas();
 
             foreach ($proy as $p) {
                 $f = $p['Cobro'];

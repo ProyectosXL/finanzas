@@ -29,6 +29,12 @@
       de los promedios por cliente, no el promedio de todos los recibos juntos:
       un cliente con muchos recibos no pesa mas que uno con pocos.
 
+      Clientes: las franquicias, COD_CLIENT LIKE '[FL]%'. Las L son locales
+      con gestion asistida, un modelo nuevo; hasta que existieron la condicion
+      era 'FR%'. La vista NO mira el directorio de sucursales -esta en otro
+      servidor-: el PPP mide como paga el grupo, y quien entra al universo lo
+      decide el PHP (Class/DirectorioFranquicias.php).
+
    3. EL PPP MANUAL TAMBIEN ES POR GRUPO. Se guarda en la tabla nueva
       RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO. RO_T_PARAMETROS_DESC_CLIENTES.PPP_MANUAL
       (por cliente) DEJA DE LEERSE pero no se borra: mismo criterio de baja
@@ -50,6 +56,11 @@
    ES REEJECUTABLE: la vista se recrea (DROP + CREATE), la tabla se crea solo
    si no existe y la semilla entra por MERGE WHEN NOT MATCHED, asi que una
    segunda corrida no pisa un PPP manual ya editado.
+
+   POR ESO EL PASO A '[FL]%' VA EN ESTE MISMO SCRIPT, y no en uno nuevo que
+   redefina la vista: con dos scripts habria dos definiciones vivas, y quien
+   volviera a correr este por cualquier motivo devolveria la vista a 'FR%' sin
+   enterarse. Una base que ya lo corrio solo tiene que correrlo otra vez.
    ============================================================================ */
 
 SET NOCOUNT ON;
@@ -82,7 +93,7 @@ WITH BASE AS (
     INNER JOIN dbo.GVA14 G  ON V.COD_CLIENTE = G.COD_CLIENT
     LEFT  JOIN dbo.GVA62 GE ON G.GRUPO_EMPR  = GE.GRUPO_EMPR
     WHERE V.FECHA_RECIBO >= DATEADD(DAY, -100, CAST(GETDATE() AS DATE))
-      AND V.COD_CLIENTE LIKE 'FR%'
+      AND V.COD_CLIENTE LIKE '[FL]%'
 ),
 POR_CLIENTE AS (
     SELECT
@@ -137,7 +148,7 @@ USING (
     INNER JOIN dbo.GVA14 G
         ON G.COD_CLIENT COLLATE DATABASE_DEFAULT = D.COD_CLIENT COLLATE DATABASE_DEFAULT
     WHERE D.PPP_MANUAL IS NOT NULL AND D.PPP_MANUAL > 0
-      AND G.COD_CLIENT LIKE 'FR%'
+      AND G.COD_CLIENT LIKE '[FL]%'
     GROUP BY
         CASE WHEN NULLIF(LTRIM(RTRIM(G.GRUPO_EMPR)), '') IS NULL
              THEN LTRIM(RTRIM(G.COD_CLIENT)) ELSE LTRIM(RTRIM(G.GRUPO_EMPR)) END

@@ -4,6 +4,7 @@ require_once __DIR__ . '/lib.php';
 require_once __DIR__ . '/../Class/Ingresos.php';
 require_once __DIR__ . '/../Class/EjeVista.php';
 require_once __DIR__ . '/../Class/Parametros.php';
+require_once __DIR__ . '/../Class/DirectorioFranquicias.php';
 require_once __DIR__ . '/../Class/CashflowRegistry.php';
 
 // ============================================================================
@@ -515,15 +516,18 @@ chequear('un manual en cero de la tabla es "sin manual"', 25,
 
 seccion('la tarjeta lista solo franquicias con sucursal habilitada');
 
-// El direccionario: dos sucursales del mismo cliente, una fila sin cliente.
+// El directorio: dos sucursales del mismo cliente, una fila sin cliente. Es el
+// mismo caso que probaba Parametros::filtrarFranquiciasActivas(), que pasó a
+// ser DirectorioFranquicias::filtrarUniverso(): la tarjeta y la proyección
+// usan ahora la misma regla.
 $direccionario = [
-    ['NRO_SUCURSAL' => 804, 'COD_CLIENT' => 'FR001', 'DESC_SUCURSAL' => 'BAHIA BLANCA - CENTRO'],
-    ['NRO_SUCURSAL' => 805, 'COD_CLIENT' => 'FR001', 'DESC_SUCURSAL' => 'BAHIA BLANCA SHOPPING'],
-    ['NRO_SUCURSAL' => 810, 'COD_CLIENT' => 'fr003 ', 'DESC_SUCURSAL' => 'LINIERS'],
-    ['NRO_SUCURSAL' => 811, 'COD_CLIENT' => '', 'DESC_SUCURSAL' => 'SIN CLIENTE']
+    ['NRO_SUCURSAL' => 804, 'COD_CLIENT' => 'FR001', 'DESC_SUCURSAL' => 'BAHIA BLANCA - CENTRO', 'HABILITADO' => 1],
+    ['NRO_SUCURSAL' => 805, 'COD_CLIENT' => 'FR001', 'DESC_SUCURSAL' => 'BAHIA BLANCA SHOPPING', 'HABILITADO' => 1],
+    ['NRO_SUCURSAL' => 810, 'COD_CLIENT' => 'fr003 ', 'DESC_SUCURSAL' => 'LINIERS', 'HABILITADO' => 1],
+    ['NRO_SUCURSAL' => 811, 'COD_CLIENT' => '', 'DESC_SUCURSAL' => 'SIN CLIENTE', 'HABILITADO' => 1]
 ];
 
-$mapa = Parametros::mapaSucursales($direccionario);
+$mapa = DirectorioFranquicias::mapaSucursales($direccionario);
 
 chequear('un cliente por entrada, sin la fila sin cliente', 2, count($mapa));
 chequear('dos sucursales se concatenan', '804, 805', $mapa['FR001']['nro_sucursal']);
@@ -531,23 +535,189 @@ chequear('con sus descripciones', 'BAHIA BLANCA - CENTRO / BAHIA BLANCA SHOPPING
 chequear('y se cuentan', 2, $mapa['FR001']['cant_sucursales']);
 chequear('el codigo se normaliza', 'LINIERS', $mapa['FR003']['desc_sucursal']);
 
-$filtrado = Parametros::filtrarFranquiciasActivas($ppps, $mapa);
+$dir = DirectorioFranquicias::armar($direccionario);
+$filtrado = DirectorioFranquicias::filtrarUniverso($ppps, $dir, 'cod_cliente');
+$conSuc = Parametros::conSucursal($filtrado['items'], $dir);
 
-chequear('quedan solo los que estan en el direccionario', 2, count($filtrado['clientes']));
-chequear('con su sucursal colgada', '804, 805', $filtrado['clientes']['FR001']['nro_sucursal']);
-chequear('los demas se cuentan como descartados', 2, $filtrado['descartados']);
-chequear('sin aviso: las bajas son a proposito', 0, count($filtrado['avisos']));
+chequear('quedan solo los que estan en el directorio', 2, count($filtrado['items']));
+chequear('con su sucursal colgada', '804, 805', $conSuc['FR001']['nro_sucursal']);
+chequear('el mapa por cliente sigue siendo un mapa', ['FR001', 'FR003'], array_keys($filtrado['items']));
+chequear('los demas se cuentan afuera, sin directorio', 2,
+    DirectorioFranquicias::clientesAfuera($filtrado['afuera'])[DirectorioFranquicias::SIN_DIRECTORIO]);
+chequear('sin aviso de caida: las bajas son a proposito', 0, count($filtrado['avisos']));
 
-// Informar de mas antes que vacio: sin direccionario se muestran todos y se avisa.
-$sinDir = Parametros::filtrarFranquiciasActivas($ppps, null);
-chequear('sin direccionario se muestran todos', 4, count($sinDir['clientes']));
+// Informar de mas antes que vacio: sin directorio se muestran todos y se avisa.
+$sinDir = DirectorioFranquicias::filtrarUniverso($ppps, null, 'cod_cliente');
+chequear('sin directorio se muestran todos', 4, count($sinDir['items']));
 chequear('con un aviso que nombra al servidor', true,
-    strpos($sinDir['avisos'][0], 'locales') !== false);
-chequear('y sin sucursal', '', $sinDir['clientes']['FR001']['nro_sucursal']);
+    strpos($sinDir['avisos'][0]['texto'], 'locales') !== false);
+chequear('y el aviso es una ATENCION', Aviso::WARNING, $sinDir['avisos'][0]['nivel']);
+chequear('sin nada contado afuera', [], $sinDir['afuera']);
+chequear('y sin sucursal', '', Parametros::conSucursal($sinDir['items'], null)['FR001']['nro_sucursal']);
 
-$dirVacio = Parametros::filtrarFranquiciasActivas($ppps, []);
-chequear('un direccionario vacio tambien muestra todos', 4, count($dirVacio['clientes']));
+$dirVacio = DirectorioFranquicias::filtrarUniverso($ppps, DirectorioFranquicias::armar([]), 'cod_cliente');
+chequear('un directorio vacio tambien muestra todos', 4, count($dirVacio['items']));
 chequear('y avisa', 1, count($dirVacio['avisos']));
+
+// Un directorio que solo trae bajas es una consulta rota, no un hecho: si se
+// le hiciera caso, la tarjeta y la cobranza quedarian en cero.
+$soloBajas = DirectorioFranquicias::armar([
+    ['COD_CLIENT' => 'FR001', 'HABILITADO' => 0], ['COD_CLIENT' => 'FR002', 'HABILITADO' => 0]
+]);
+chequear('un directorio sin ninguna habilitada no se usa para filtrar', 4,
+    count(DirectorioFranquicias::filtrarUniverso($ppps, $soloBajas, 'cod_cliente')['items']));
+
+// ============================================================================
+// El universo de Cobranzas Franquicias: [FL]% habilitadas en el directorio
+// ============================================================================
+
+seccion('el estado de cada cliente en el directorio');
+
+$dirU = DirectorioFranquicias::armar([
+    ['NRO_SUCURSAL' => 1, 'COD_CLIENT' => 'FRHAB', 'DESC_SUCURSAL' => 'HABILITADA', 'HABILITADO' => 1],
+    ['NRO_SUCURSAL' => 2, 'COD_CLIENT' => 'LALOMA', 'DESC_SUCURSAL' => 'LOMAS (GA)', 'HABILITADO' => 1],
+    ['NRO_SUCURSAL' => 3, 'COD_CLIENT' => 'FRBAJA', 'DESC_SUCURSAL' => 'DADA DE BAJA', 'HABILITADO' => 0],
+    ['NRO_SUCURSAL' => 4, 'COD_CLIENT' => 'FRNULO', 'DESC_SUCURSAL' => 'SIN ESTADO', 'HABILITADO' => null],
+    // Una habilitada y una de baja: el cliente opera
+    ['NRO_SUCURSAL' => 5, 'COD_CLIENT' => 'FRMIXTO', 'DESC_SUCURSAL' => 'ABIERTA', 'HABILITADO' => 1],
+    ['NRO_SUCURSAL' => 6, 'COD_CLIENT' => 'FRMIXTO', 'DESC_SUCURSAL' => 'CERRADA', 'HABILITADO' => 0],
+    // Una de baja y una sin estado: manda la baja, que es un hecho
+    ['NRO_SUCURSAL' => 7, 'COD_CLIENT' => 'FRBAJANULO', 'DESC_SUCURSAL' => 'X', 'HABILITADO' => 0],
+    ['NRO_SUCURSAL' => 8, 'COD_CLIENT' => 'FRBAJANULO', 'DESC_SUCURSAL' => 'Y', 'HABILITADO' => null],
+    // HABILITADO viene como string desde la base
+    ['NRO_SUCURSAL' => 9, 'COD_CLIENT' => 'FRSTR', 'DESC_SUCURSAL' => 'Z', 'HABILITADO' => '1']
+]);
+
+chequear('habilitada', DirectorioFranquicias::HABILITADA, DirectorioFranquicias::clasificar('FRHAB', $dirU));
+chequear('una L de gestion asistida habilitada entra', DirectorioFranquicias::HABILITADA,
+    DirectorioFranquicias::clasificar('laloma', $dirU));
+chequear('dada de baja: inhabilitada', DirectorioFranquicias::INHABILITADA,
+    DirectorioFranquicias::clasificar('FRBAJA', $dirU));
+chequear('HABILITADO en NULL: estado sin cargar, no inhabilitada', DirectorioFranquicias::SIN_ESTADO,
+    DirectorioFranquicias::clasificar('FRNULO', $dirU));
+chequear('con una sucursal habilitada, el cliente esta habilitado', DirectorioFranquicias::HABILITADA,
+    DirectorioFranquicias::clasificar('FRMIXTO', $dirU));
+chequear('pero la tarjeta muestra solo la sucursal habilitada', 'ABIERTA',
+    $dirU['sucursales']['FRMIXTO']['desc_sucursal']);
+chequear('una baja y un NULL: manda la baja', DirectorioFranquicias::INHABILITADA,
+    DirectorioFranquicias::clasificar('FRBAJANULO', $dirU));
+chequear('un 1 como string es habilitada', DirectorioFranquicias::HABILITADA,
+    DirectorioFranquicias::clasificar('FRSTR', $dirU));
+chequear('un cliente que no esta: sin directorio', DirectorioFranquicias::SIN_DIRECTORIO,
+    DirectorioFranquicias::clasificar('FRNUEVO', $dirU));
+
+seccion('el universo filtra facturas y cuenta lo que deja afuera');
+
+$facturasU = [
+    ['COD_CLI' => 'FRHAB', 'importe_neto' => 100.0],
+    ['COD_CLI' => 'LALOMA', 'importe_neto' => 50.0],
+    ['COD_CLI' => 'FRBAJA', 'importe_neto' => 70.0],
+    ['COD_CLI' => 'FRBAJA', 'importe_neto' => 30.0],
+    ['COD_CLI' => 'FRNULO', 'importe_neto' => 20.0],
+    ['COD_CLI' => 'FRNUEVO', 'importe_neto' => 5.0]
+];
+
+$u = DirectorioFranquicias::filtrarUniverso($facturasU, $dirU, 'COD_CLI', 'importe_neto');
+
+chequear('quedan las habilitadas, F y L', ['FRHAB', 'LALOMA'], array_column($u['items'], 'COD_CLI'));
+chequear('una lista sigue siendo lista', [0, 1], array_keys($u['items']));
+chequear('la inhabilitada queda afuera con sus dos facturas', 2,
+    $u['afuera'][DirectorioFranquicias::INHABILITADA]['FRBAJA']['cantidad']);
+chequear('y su importe', 100.0, $u['afuera'][DirectorioFranquicias::INHABILITADA]['FRBAJA']['importe']);
+chequear('la sin estado, en su propio caso', 20.0,
+    $u['afuera'][DirectorioFranquicias::SIN_ESTADO]['FRNULO']['importe']);
+chequear('la que no esta en el directorio, en el suyo', 5.0,
+    $u['afuera'][DirectorioFranquicias::SIN_DIRECTORIO]['FRNUEVO']['importe']);
+chequear('lo que queda mas lo de afuera es todo', 275.0,
+    array_sum(array_column($u['items'], 'importe_neto')) + 100.0 + 20.0 + 5.0);
+
+// Los totales de la cobranza real llegan por fecha y cliente: una fila puede
+// ser varios comprobantes.
+$agrupadasU = DirectorioFranquicias::filtrarUniverso(
+    [['COD_CLI' => 'FRBAJA', 'IMPORTE' => 80.0, 'CANT' => 3]], $dirU, 'COD_CLI', 'IMPORTE', 'CANT');
+chequear('una fila agrupada cuenta sus comprobantes', 3,
+    $agrupadasU['afuera'][DirectorioFranquicias::INHABILITADA]['FRBAJA']['cantidad']);
+
+$sumado = DirectorioFranquicias::sumarAfuera($u['afuera'], $agrupadasU['afuera']);
+chequear('real y proyectado se suman por cliente', 5,
+    $sumado[DirectorioFranquicias::INHABILITADA]['FRBAJA']['cantidad']);
+chequear('con su importe', 180.0, $sumado[DirectorioFranquicias::INHABILITADA]['FRBAJA']['importe']);
+
+// Directorio caido: todas, con aviso. La cobranza no queda en cero.
+$caido = DirectorioFranquicias::filtrarUniverso($facturasU, null, 'COD_CLI', 'importe_neto');
+chequear('directorio caido: entran todas', 6, count($caido['items']));
+chequear('con un aviso de atencion', Aviso::WARNING, $caido['avisos'][0]['nivel']);
+chequear('que dice que puede mostrar de mas', true,
+    strpos($caido['avisos'][0]['texto'], 'de más') !== false);
+chequear('y nada afuera, que no se avisaria', [], DirectorioFranquicias::avisosAfuera($caido['afuera']));
+
+seccion('los avisos de lo que queda afuera distinguen los tres casos');
+
+$avU = DirectorioFranquicias::avisosAfuera($sumado);
+
+chequear('un aviso por caso', 3, count($avU));
+chequear('todos informativos: es la regla, no un problema', [Aviso::INFO, Aviso::INFO, Aviso::INFO],
+    array_column($avU, 'nivel'));
+chequear('el de inhabilitadas dice cuantas facturas y cuanta plata', true,
+    strpos($avU[0]['texto'], '5 facturas por $ 180,00') !== false);
+chequear('y nombra al cliente con su importe', true,
+    strpos($avU[0]['texto'], 'FRBAJA ($ 180,00)') !== false);
+chequear('el de estado sin cargar lo dice y sugiere un error de carga', true,
+    strpos($avU[1]['texto'], 'estado sin cargar') !== false
+        && strpos($avU[1]['texto'], 'error de carga') !== false);
+chequear('y nombra a FRNULO', true, strpos($avU[1]['texto'], 'FRNULO ($ 20,00)') !== false);
+chequear('el de sin directorio dice que falta darlos de alta', true,
+    strpos($avU[2]['texto'], 'Falta darlos de alta') !== false);
+chequear('en singular con una sola factura', true,
+    strpos($avU[2]['texto'], '1 factura por $ 5,00') !== false);
+
+// Los clientes van del de mayor importe al de menor, y despues de
+// MAX_NOMBRADOS se resumen: un aviso con cuarenta nombres no se lee.
+$muchos = [];
+for ($i = 1; $i <= DirectorioFranquicias::MAX_NOMBRADOS + 2; $i++) {
+    $muchos[DirectorioFranquicias::INHABILITADA]['FR' . $i] = ['cantidad' => 1, 'importe' => (float) $i];
+}
+$avMuchos = DirectorioFranquicias::avisosAfuera($muchos)[0]['texto'];
+$mayor = 'FR' . (DirectorioFranquicias::MAX_NOMBRADOS + 2) . ' (';
+$segundo = 'FR' . (DirectorioFranquicias::MAX_NOMBRADOS + 1) . ' (';
+chequear('el de mayor importe va primero', true,
+    strpos($avMuchos, $mayor) !== false && strpos($avMuchos, $mayor) < strpos($avMuchos, $segundo));
+chequear('los de menor importe son los que se resumen', false, strpos($avMuchos, 'FR1 (') !== false);
+chequear('y el resto se resume', true, strpos($avMuchos, 'y 2 más') !== false);
+chequear('sin nada afuera, ningun aviso', [], DirectorioFranquicias::avisosAfuera([]));
+
+seccion('el universo es [FL]% en todas las lecturas de franquicias');
+
+// El patron vive en una constante y las dos consultas de Tango de Ingresos lo
+// usan: si una quedara en 'FR%', las L entrarian a la tarjeta y no a la
+// proyeccion, o al reves.
+$ingresosSrc = file_get_contents(__DIR__ . '/../Class/Ingresos.php');
+chequear('el patron es [FL]%', '[FL]%', DirectorioFranquicias::PATRON_SQL);
+chequear('Ingresos ya no tiene ningun FR% en una consulta', 0,
+    preg_match_all("/LIKE 'FR%'/", $ingresosSrc));
+chequear('los clientes del PPP y las facturas usan la constante', 2,
+    substr_count($ingresosSrc, "LIKE '\" . DirectorioFranquicias::PATRON_SQL . \"'"));
+
+$vistaSql = file_get_contents(__DIR__ . '/../sql/cashflow_cobranzas_ppp_grupo.sql');
+chequear('la vista del PPP tambien', 1, substr_count($vistaSql, "AND V.COD_CLIENTE LIKE '[FL]%'"));
+chequear('y su semilla', 1, substr_count($vistaSql, "AND G.COD_CLIENT LIKE '[FL]%'"));
+chequear('y ninguna quedo en FR%', 0, substr_count($vistaSql, "LIKE 'FR%'"));
+
+chequear('los canales son una lista explicita', ['FRANQUICIAS', 'FRANQUICIAS GA'],
+    DirectorioFranquicias::CANALES);
+
+// La cobranza real, la proyeccion y los totales del tablero filtran con la
+// misma funcion: si uno se salteara el filtro, el tablero contaria plata que
+// la pestana no muestra.
+chequear('la proyeccion filtra el universo', true,
+    strpos($ingresosSrc, "return \$this->filtrarUniversoFR(\$itemsProyectados, 'COD_CLI', 'importe_neto');") !== false);
+chequear('la cobranza real de la pestana tambien', true,
+    strpos($ingresosSrc, "\$data = \$this->filtrarUniversoFR(\$data, 'COD_CLI', 'importe_neto');") !== false);
+chequear('y la de los totales del tablero', true,
+    strpos($ingresosSrc, "\$this->filtrarUniversoFR(\$filasReal, 'COD_CLI', 'IMPORTE', 'CANT')") !== false);
+chequear('IngresosProvider deja los avisos del universo', true,
+    strpos(file_get_contents(__DIR__ . '/../Class/Providers/IngresosProvider.php'),
+        'avisarTodos($ingresos->avisosUniversoFR())') !== false);
 
 seccion('la tarjeta agrupa una fila por agrupador');
 

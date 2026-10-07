@@ -25,7 +25,7 @@
 
     let grupos = [];
     let avisos = [];
-    let descartados = 0;
+    let afuera = {};
     let escala = [];
 
     /*
@@ -435,7 +435,7 @@
 
                     grupos = data.grupos || [];
                     avisos = data.avisos || [];
-                    descartados = data.descartados || 0;
+                    afuera = data.afuera || {};
 
                     pintarAvisos();
                     renderizarTabla();
@@ -699,9 +699,7 @@
 
         if (pie) {
             pie.textContent = grupos.length + ' grupo(s) · ' + totalClientes + ' franquicia(s) habilitada(s)'
-                + (descartados > 0
-                    ? ' · ' + descartados + ' franquicia(s) de Tango sin sucursal habilitada no se listan'
-                    : '');
+                + textoAfuera();
         }
 
         tbody.querySelectorAll('.select-medio-pago').forEach(function(sel) {
@@ -731,6 +729,35 @@
         // redibujo que hace guardar un PPP: el estado está en memoria, no en
         // las filas que se acaban de reemplazar.
         aplicarVisibilidad();
+    }
+
+    /**
+     * Cuántos clientes [FL] de Tango no se listan, por motivo. Es un pie y no
+     * un aviso: que una franquicia dada de baja no aparezca es la regla. Los
+     * importes de esas facturas se avisan en Cobranzas FR y en el tablero,
+     * que es donde esa plata falta.
+     */
+    function textoAfuera() {
+        var partes = [];
+        var inh = afuera.INHABILITADA || 0;
+        var sinEstado = afuera.SIN_ESTADO || 0;
+        var sinDir = afuera.SIN_DIRECTORIO || 0;
+
+        if (inh > 0) {
+            partes.push(inh + ' inhabilitada(s)');
+        }
+
+        if (sinEstado > 0) {
+            partes.push(sinEstado + ' con el estado sin cargar en el directorio');
+        }
+
+        if (sinDir > 0) {
+            partes.push(sinDir + ' sin cargar en el directorio');
+        }
+
+        return partes.length
+            ? ' · No se listan ' + partes.join(', ') + ' (clientes [FL] de Tango).'
+            : '';
     }
 
     /** La fila del grupo: es donde vive el PPP, calculado y manual */

@@ -340,11 +340,30 @@
 
         var avisos = (datosCobranzas && datosCobranzas.warnings) || [];
 
-        cont.innerHTML = avisos.length
+        cont.innerHTML = (avisos.length
             ? '<div class="alert alert-warning py-2 px-3 mb-3"><small>'
                 + '<i class="fas fa-triangle-exclamation me-1"></i>'
                 + avisos.join(' ') + '</small></div>'
-            : '';
+            : '') + avisosUniverso();
+    }
+
+    /**
+     * Los avisos del universo de franquicias, cada uno con su nivel y en su
+     * propio cartel: el directorio caído es una atención -los números pueden
+     * estar de más- y las facturas que quedan afuera son informativas -es la
+     * regla-. En el mismo cartel amarillo que el resto no se distinguirían.
+     * Cada uno nombra clientes, así que van separados y no en un solo párrafo.
+     */
+    function avisosUniverso() {
+        var lista = (datosCobranzas && datosCobranzas.avisos_universo) || [];
+
+        return lista.map(function(a) {
+            var info = a.nivel === 'info';
+
+            return '<div class="alert alert-' + (info ? 'info' : 'warning') + ' py-2 px-3 mb-3"><small>'
+                + '<i class="fas fa-' + (info ? 'circle-info' : 'triangle-exclamation') + ' me-1"></i>'
+                + escaparAttr(a.texto) + '</small></div>';
+        }).join('');
     }
 
     function generarTabla() {

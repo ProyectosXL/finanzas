@@ -1378,115 +1378,15 @@ class Parametros {
     }
 
     /* ====================================================================
-       GESTION DE COBRANZA FRANQUICIAS: HELPERS PUROS
+       GESTION DE COBRANZA FRANQUICIAS
 
        La tarjeta de Parametros -> Cobranzas agrupa a los clientes por grupo
-       empresario y solo lista las franquicias habilitadas en el direccionario
-       de sucursales. Las dos decisiones estan aca, sin base, para poder
-       probarlas; las lecturas SQL solo juntan los datos.
+       empresario y solo lista las franquicias habilitadas en el directorio de
+       sucursales. A QUIEN lista lo decide DirectorioFranquicias, la misma
+       regla y la misma lectura que usa la proyeccion: si cada lado filtrara
+       por su cuenta, la tarjeta podria listar a un cliente que Cobranzas FR no
+       proyecta. Aca solo se agrupa.
        ==================================================================== */
-
-    /**
-     * Lleva las filas del direccionario de sucursales a un mapa por cliente.
-     *
-     * Un cliente con mas de una sucursal habilitada queda en UNA entrada, con
-     * los numeros y las descripciones concatenados: la tarjeta es por cliente,
-     * no por local. Una fila sin COD_CLIENT no se puede cruzar y se ignora.
-     *
-     * @param array $filas Filas NRO_SUCURSAL, COD_CLIENT, DESC_SUCURSAL
-     * @return array Mapa COD_CLIENT => ['nro_sucursal', 'desc_sucursal', 'cant_sucursales']
-     */
-    public static function mapaSucursales($filas) {
-        $mapa = [];
-
-        foreach ((is_array($filas) ? $filas : []) as $f) {
-            $cod = strtoupper(trim((string) (isset($f['COD_CLIENT']) ? $f['COD_CLIENT'] : '')));
-
-            if ($cod === '') {
-                continue;
-            }
-
-            $nro = trim((string) (isset($f['NRO_SUCURSAL']) ? $f['NRO_SUCURSAL'] : ''));
-            $desc = trim((string) (isset($f['DESC_SUCURSAL']) ? $f['DESC_SUCURSAL'] : ''));
-
-            if (!isset($mapa[$cod])) {
-                $mapa[$cod] = ['nro_sucursal' => [], 'desc_sucursal' => [], 'cant_sucursales' => 0];
-            }
-
-            if ($nro !== '') {
-                $mapa[$cod]['nro_sucursal'][] = $nro;
-            }
-
-            if ($desc !== '') {
-                $mapa[$cod]['desc_sucursal'][] = $desc;
-            }
-
-            $mapa[$cod]['cant_sucursales']++;
-        }
-
-        foreach ($mapa as $cod => $m) {
-            $mapa[$cod]['nro_sucursal'] = implode(', ', $m['nro_sucursal']);
-            $mapa[$cod]['desc_sucursal'] = implode(' / ', $m['desc_sucursal']);
-        }
-
-        return $mapa;
-    }
-
-    /**
-     * Se queda con los clientes que tienen una sucursal habilitada en el
-     * direccionario, y les cuelga la sucursal.
-     *
-     * INFORMAR DE MAS ANTES QUE VACIO: si el direccionario no se pudo leer
-     * (null) o no devolvio ninguna franquicia (vacio, que es un problema de la
-     * consulta y no un hecho), se devuelven TODOS los clientes con un aviso.
-     * Una tarjeta en blanco sin explicacion dejaria sin editar el PPP de todo
-     * el mundo por una caida del servidor de locales.
-     *
-     * Los descartados se cuentan y no se avisan: son las franquicias dadas de
-     * baja, y decirlo en cada carga seria ruido sobre algo que es asi a
-     * proposito. La pantalla lo muestra como nota al pie.
-     *
-     * @param array $pppPorCliente Mapa COD_CLIENT => datos, de Ingresos::getPPPClientes()
-     * @param array|null $mapa Mapa de mapaSucursales(), o null si no se pudo leer
-     * @return array ['clientes' => mapa filtrado, 'avisos' => [...], 'descartados' => int]
-     */
-    public static function filtrarFranquiciasActivas($pppPorCliente, $mapa) {
-        $pppPorCliente = is_array($pppPorCliente) ? $pppPorCliente : [];
-        $avisos = [];
-
-        if ($mapa === null) {
-            $avisos[] = 'No se pudo leer el directorio de sucursales (servidor \'locales\'): se '
-                . 'muestran todas las franquicias de Tango, también las dadas de baja.';
-        } elseif (empty($mapa)) {
-            $avisos[] = 'El directorio de sucursales no devolvió ninguna franquicia habilitada: se '
-                . 'muestran todas las franquicias de Tango, también las dadas de baja.';
-        }
-
-        if (!empty($avisos)) {
-            foreach ($pppPorCliente as $cod => $c) {
-                $pppPorCliente[$cod]['nro_sucursal'] = '';
-                $pppPorCliente[$cod]['desc_sucursal'] = '';
-            }
-
-            return ['clientes' => $pppPorCliente, 'avisos' => $avisos, 'descartados' => 0];
-        }
-
-        $clientes = [];
-        $descartados = 0;
-
-        foreach ($pppPorCliente as $cod => $c) {
-            if (!isset($mapa[$cod])) {
-                $descartados++;
-                continue;
-            }
-
-            $c['nro_sucursal'] = $mapa[$cod]['nro_sucursal'];
-            $c['desc_sucursal'] = $mapa[$cod]['desc_sucursal'];
-            $clientes[$cod] = $c;
-        }
-
-        return ['clientes' => $clientes, 'avisos' => [], 'descartados' => $descartados];
-    }
 
     /**
      * Junta los clientes en UNA FILA POR AGRUPADOR (grupo empresario, o el
@@ -1552,63 +1452,24 @@ class Parametros {
     }
 
     /**
-     * Las franquicias habilitadas del direccionario de sucursales, desde el
-     * servidor 'locales'.
-     *
-     * Es la unica lectura de Parametros fuera de 'central', y va con el prefijo
-     * de Conexion::prefijoLocales() por el mismo motivo que en Saldos: en DEV
-     * la tabla se alcanza por linked server. Cualquier falla devuelve null y
-     * la decide filtrarFranquiciasActivas(), que no deja la tarjeta vacia.
-     *
-     * @return array|null Mapa de mapaSucursales(), o null si no se pudo leer
-     */
-    private function getFranquiciasActivas() {
-        $cid = $this->conn->conectar('locales');
-
-        if (!$cid) {
-            error_log('Parametros: no se pudo conectar a locales para leer las franquicias');
-
-            return null;
-        }
-
-        $p = method_exists($this->conn, 'prefijoLocales') ? $this->conn->prefijoLocales() : '';
-
-        $sql = "SELECT NRO_SUCURSAL, COD_CLIENT, DESC_SUCURSAL
-                FROM {$p}SUCURSALES_LAKERS
-                WHERE CANAL = 'FRANQUICIAS' AND HABILITADO = 1 AND NRO_SUC_MADRE IS NULL
-                ORDER BY COD_CLIENT, NRO_SUCURSAL";
-
-        $stmt = sqlsrv_query($cid, $sql);
-
-        if ($stmt === false) {
-            error_log('Parametros: ' . $this->errorSql('Error al leer las franquicias del direccionario'));
-
-            return null;
-        }
-
-        $filas = [];
-
-        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            $filas[] = $row;
-        }
-
-        sqlsrv_free_stmt($stmt);
-
-        return self::mapaSucursales($filas);
-    }
-
-    /**
      * Todo lo que necesita la tarjeta "Gestion de Cobranza Franquicias":
      * los grupos empresarios con su PPP y sus clientes habilitados.
      *
-     * El PPP viene de Ingresos::getPPPClientes() -ya por grupo-; aca solo se
-     * cruza contra el direccionario y se agrupa. Los avisos dicen si falta
-     * correr el script del PPP o si el direccionario no se pudo leer.
+     * El PPP viene de Ingresos::getPPPClientes() -ya por grupo, clientes
+     * [FL]%-; el directorio y la regla de quien entra, de
+     * DirectorioFranquicias. Los avisos dicen si falta correr el script del
+     * PPP o si el directorio no se pudo leer.
      *
-     * @return array ['grupos', 'avisos', 'total_clientes', 'total_grupos', 'descartados']
+     * 'afuera' cuenta CLIENTES por caso -inhabilitada, estado sin cargar, sin
+     * directorio- y no se avisa: es lo que dice el pie de la tarjeta. Los
+     * importes de lo que queda afuera se avisan en Cobranzas FR y en el
+     * tablero, que es donde esa plata falta.
+     *
+     * @return array ['grupos', 'avisos', 'total_clientes', 'total_grupos', 'afuera']
      */
     public function getCobranzasClientesConfig() {
         require_once __DIR__ . '/Ingresos.php';
+        require_once __DIR__ . '/DirectorioFranquicias.php';
         $ingresos = new Ingresos();
 
         $ppps = $ingresos->getPPPClientes();
@@ -1621,16 +1482,39 @@ class Parametros {
             $ppps[$cod]['desc_pp_max'] = isset($params[$cod]) ? $params[$cod]['desc_pp_max'] : 0;
         }
 
-        $filtrado = self::filtrarFranquiciasActivas($ppps, $this->getFranquiciasActivas());
-        $grupos = self::agruparPorAgrupador($filtrado['clientes']);
+        $directorio = DirectorioFranquicias::leer();
+        $filtrado = DirectorioFranquicias::filtrarUniverso($ppps, $directorio, 'cod_cliente');
+        $clientes = self::conSucursal($filtrado['items'], $directorio);
+        $grupos = self::agruparPorAgrupador($clientes);
 
         return [
             'grupos' => $grupos,
-            'avisos' => array_merge($ingresos->getAvisosPPP(), $filtrado['avisos']),
-            'total_clientes' => count($filtrado['clientes']),
+            'avisos' => array_merge($ingresos->getAvisosPPP(), Aviso::textos($filtrado['avisos'])),
+            'total_clientes' => count($clientes),
             'total_grupos' => count($grupos),
-            'descartados' => $filtrado['descartados']
+            'afuera' => DirectorioFranquicias::clientesAfuera($filtrado['afuera'])
         ];
+    }
+
+    /**
+     * Le cuelga a cada cliente sus sucursales habilitadas del directorio, o
+     * vacio si no tiene -directorio caido, o un cliente que entro sin filtro-.
+     *
+     * @param array $clientes Mapa COD_CLIENT => datos
+     * @param array|null $directorio Lo que devuelve DirectorioFranquicias::armar()
+     * @return array
+     */
+    public static function conSucursal($clientes, $directorio) {
+        $suc = (is_array($directorio) && isset($directorio['sucursales'])) ? $directorio['sucursales'] : [];
+
+        foreach ((is_array($clientes) ? $clientes : []) as $cod => $c) {
+            $s = isset($suc[$cod]) ? $suc[$cod] : null;
+
+            $clientes[$cod]['nro_sucursal'] = $s ? $s['nro_sucursal'] : '';
+            $clientes[$cod]['desc_sucursal'] = $s ? $s['desc_sucursal'] : '';
+        }
+
+        return $clientes;
     }
 
     /**
