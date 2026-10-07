@@ -165,6 +165,13 @@ $edita = AuthCashflow::puedeEditar('parametros', 'COBRANZAS');
                     <input type="text" id="busquedaParamCob" class="form-control border-start-0 ps-0" placeholder="Buscar grupo, cliente o sucursal..." style="min-width: 230px;">
                 </div>
             </div>
+            <!-- Un solo botón para abrir y cerrar todos los grupos, con el
+                 criterio de cfBtnGrupos del tablero: dice "Expandir todo"
+                 mientras quede alguno cerrado. El rótulo lo escribe
+                 Js/Parametros-Cobranzas.js según lo que hay en pantalla. -->
+            <button id="btnGruposParamCob" type="button" class="btn btn-sm btn-outline-secondary">
+                <i class="fas fa-angles-down me-1"></i> Expandir todo
+            </button>
             <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
             <button class="btn btn-sm btn-outline-success" data-exportar="tablaParamCob"
                     data-exportar-nombre="Parametros_Cobranzas_Clientes"

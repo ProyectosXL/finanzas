@@ -525,6 +525,31 @@
     font-size: 12px;
 }
 
+/* Un grupo contraído ESCONDE a sus clientes, no los saca: TablaExport mira el
+   display de la tabla viva, así que Exportar baja lo que se ve, y el orden de
+   la tabla los sigue moviendo con su grupo. La misma clase la usa el
+   buscador, para que haya un solo mecanismo que decide qué se ve. */
+#tablaParamCob .pc-oculta {
+    display: none;
+}
+
+/* El chevron es un <button>, pero no tiene que verse como un botón adentro
+   de una celda: mismo trato que .cf-chevron del tablero. */
+#tablaParamCob .pc-chevron {
+    background: none;
+    border: 0;
+    padding: 0 6px 0 0;
+    margin: 0;
+    color: var(--text-muted, #6c757d);
+    font-size: 0.72rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+#tablaParamCob .pc-chevron:hover {
+    color: var(--bs-primary, #0d6efd);
+}
+
 #tablaParamCob .pc-badge {
     display: inline-block;
     padding: 1px 7px;

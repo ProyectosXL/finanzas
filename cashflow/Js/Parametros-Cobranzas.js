@@ -28,6 +28,26 @@
     let descartados = 0;
     let escala = [];
 
+    /*
+     * QUÉ GRUPOS ESTÁN ABIERTOS, EN MEMORIA Y EN NINGÚN OTRO LADO.
+     *
+     * La tarjeta abre siempre con todo contraído: son más de ochenta grupos y
+     * lo que se viene a hacer es tocar el PPP de uno. No va a `localStorage`
+     * porque no es una preferencia sino lo que el usuario está mirando ahora,
+     * y un default guardado ahí sería indistinguible de una elección. Vive
+     * acá, y no en el DOM, porque guardar un PPP redibuja la tabla entera: si
+     * el estado estuviera en las filas, el guardado cerraría lo que el usuario
+     * acababa de abrir.
+     *
+     * `enBusqueda` es el mismo mapa pero para mientras hay texto en el
+     * buscador: ahí todo grupo con coincidencias se ve abierto, y el chevron
+     * sólo lo cierra por esa búsqueda. Es un mapa APARTE a propósito: como
+     * buscar no toca `abiertos`, al vaciar el buscador cada grupo vuelve solo
+     * al estado que tenía antes, sin tener que sacar ni restaurar una foto.
+     */
+    let abiertos = {};
+    let enBusqueda = null;
+
     /** Espejo de Ingresos::pppEfectivo(): manual > calculado > DIAS_PP_MAX > 30 */
     function pppEfectivo(manual, calculado, diasPpMax) {
         var candidatos = [manual, calculado, diasPpMax];
@@ -49,11 +69,27 @@
         conectar('btnRefreshParamCob', 'click', cargarClientes);
         conectar('btnAgregarTramoEsc', 'click', agregarTramo);
         conectar('btnGuardarEscala', 'click', guardarEscala);
+        conectar('btnGruposParamCob', 'click', alternarTodos);
 
         var inputBusqueda = document.getElementById('busquedaParamCob');
 
         if (inputBusqueda) {
-            inputBusqueda.addEventListener('keyup', filtrarClientes);
+            inputBusqueda.addEventListener('input', buscar);
+        }
+
+        // Un solo listener sobre el tbody, que sobrevive a cada redibujo: los
+        // chevrones se reemplazan con la tabla y engancharlos uno por uno
+        // obligaría a hacerlo de nuevo cada vez.
+        var tbody = document.getElementById('tbodyParamCob');
+
+        if (tbody) {
+            tbody.addEventListener('click', function(e) {
+                var chevron = e.target.closest('.pc-chevron');
+
+                if (chevron) {
+                    alternarGrupo(chevron.getAttribute('data-agrup'));
+                }
+            });
         }
 
         // Los dos plazos globales -mayoristas y exportaciones Tasky- se
@@ -435,34 +471,193 @@
             : '';
     }
 
+    /* ================================================================
+       GRUPOS: EXPANDIR, CONTRAER Y BUSCAR
+
+       Es el mismo criterio que los renglones agrupados del tablero
+       (Js/Cashflow.js): los clientes se ESCONDEN con una clase de
+       `display: none` y no se sacan del DOM, así Exportar baja lo que se ve
+       y el orden de la tabla los mueve con su grupo aunque estén ocultos.
+       ================================================================ */
+
+    function terminoBusqueda() {
+        var input = document.getElementById('busquedaParamCob');
+
+        return input ? (input.value || '').toLowerCase().trim() : '';
+    }
+
     /**
-     * Filtro consciente de grupos: un grupo se muestra si él o alguno de sus
-     * clientes matchea. Si matchea el grupo, se ven todos sus clientes; si no,
-     * sólo los que matchean. Sin término, todo.
+     * El buscador cambió. Cada búsqueda nueva arranca con todos los grupos
+     * que coinciden abiertos -es lo que se espera al buscar un cliente: verlo-,
+     * y al vaciarlo vuelve a valer `abiertos`, que buscar no tocó.
      */
-    function filtrarClientes() {
-        var term = (document.getElementById('busquedaParamCob').value || '').toLowerCase().trim();
+    function buscar() {
+        enBusqueda = terminoBusqueda() ? {} : null;
+        aplicarVisibilidad();
+    }
+
+    /** El mapa que manda ahora: el de la búsqueda, o el de siempre */
+    function estadoVigente() {
+        return enBusqueda || abiertos;
+    }
+
+    /**
+     * Si un grupo se ve abierto ahora. Buscando, un grupo está abierto salvo
+     * que lo hayan cerrado en esta búsqueda; sin buscar, cerrado salvo que lo
+     * hayan abierto.
+     */
+    function estaAbierto(agrup) {
+        return enBusqueda ? enBusqueda[agrup] !== false : abiertos[agrup] === true;
+    }
+
+    function alternarGrupo(agrup) {
+        estadoVigente()[agrup] = !estaAbierto(agrup);
+        aplicarVisibilidad();
+    }
+
+    /**
+     * Un solo botón para los dos gestos, con la regla de `cfBtnGrupos`: si
+     * queda alguno cerrado abre todos; si están todos abiertos los cierra. Con
+     * dos botones uno siempre está de más. Actúa sobre los grupos que se ven:
+     * buscando, abrir uno que la búsqueda escondió no mostraría nada.
+     */
+    function alternarTodos() {
+        var visibles = gruposVisibles();
+        var abrir = visibles.some(function(agrup) { return !estaAbierto(agrup); });
+        var estado = estadoVigente();
+
+        visibles.forEach(function(agrup) { estado[agrup] = abrir; });
+        aplicarVisibilidad();
+    }
+
+    function gruposVisibles() {
+        var tbody = document.getElementById('tbodyParamCob');
+
+        if (!tbody) {
+            return [];
+        }
+
+        return Array.prototype.filter.call(tbody.querySelectorAll('tr.pc-grupo'), function(tr) {
+            return !tr.classList.contains('pc-oculta');
+        }).map(function(tr) {
+            return tr.getAttribute('data-agrup');
+        });
+    }
+
+    /**
+     * Pone cada fila visible u oculta según el buscador y el estado de su
+     * grupo. Es la ÚNICA función que esconde filas de la tabla: si la búsqueda
+     * y los grupos escondieran cada uno por su lado, el que corre segundo
+     * pisaría al primero.
+     *
+     * Con texto en el buscador:
+     *   - un grupo que coincide por su código o su nombre se ve con todos sus
+     *     clientes;
+     *   - si no, se ve con los clientes que coinciden, y se esconde si no
+     *     coincide ninguno.
+     * Sin texto, todos los grupos, y sus clientes sólo si está abierto.
+     *
+     * Se compara por atributo en JS y no armando un selector con el código
+     * adentro: un código con comillas rompería el selector.
+     */
+    function aplicarVisibilidad() {
         var tbody = document.getElementById('tbodyParamCob');
 
         if (!tbody) {
             return;
         }
 
+        var term = terminoBusqueda();
+        var clientesPorGrupo = {};
+
+        tbody.querySelectorAll('tr.pc-cliente').forEach(function(fila) {
+            var agrup = fila.getAttribute('data-agrup');
+
+            (clientesPorGrupo[agrup] = clientesPorGrupo[agrup] || []).push(fila);
+        });
+
         tbody.querySelectorAll('tr.pc-grupo').forEach(function(filaGrupo) {
             var agrup = filaGrupo.getAttribute('data-agrup');
-            var clientes = tbody.querySelectorAll('tr.pc-cliente[data-agrup="' + agrup + '"]');
-            var grupoMatchea = !term || filaGrupo.textContent.toLowerCase().includes(term);
-            var algunCliente = false;
+            var clientes = clientesPorGrupo[agrup] || [];
+            var abierto = estaAbierto(agrup);
+            var grupoVisible = true;
 
-            clientes.forEach(function(fila) {
-                var matchea = grupoMatchea || fila.textContent.toLowerCase().includes(term);
+            if (term) {
+                var grupoMatchea = textoBuscable(filaGrupo).includes(term);
+                var alguno = false;
 
-                fila.style.display = matchea ? '' : 'none';
-                algunCliente = algunCliente || matchea;
-            });
+                clientes.forEach(function(fila) {
+                    var matchea = grupoMatchea || textoBuscable(fila).includes(term);
 
-            filaGrupo.style.display = (grupoMatchea || algunCliente) ? '' : 'none';
+                    fila.classList.toggle('pc-oculta', !(matchea && abierto));
+                    alguno = alguno || matchea;
+                });
+
+                grupoVisible = grupoMatchea || alguno;
+            } else {
+                clientes.forEach(function(fila) {
+                    fila.classList.toggle('pc-oculta', !abierto);
+                });
+            }
+
+            filaGrupo.classList.toggle('pc-oculta', !grupoVisible);
+            pintarChevron(filaGrupo, abierto);
         });
+
+        actualizarBotonGrupos();
+    }
+
+    /**
+     * Lo que se busca de una fila: su texto, sin los indicadores del grupo.
+     * "3 cliente(s)" no es un dato que alguien busque, y con él tipear "cli"
+     * abría todos los grupos.
+     */
+    function textoBuscable(fila) {
+        var clon = fila.cloneNode(true);
+
+        clon.querySelectorAll('.pc-indicador').forEach(function(el) { el.remove(); });
+
+        return clon.textContent.toLowerCase();
+    }
+
+    function pintarChevron(filaGrupo, abierto) {
+        var chevron = filaGrupo.querySelector('.pc-chevron');
+
+        if (!chevron) {
+            return;
+        }
+
+        chevron.setAttribute('aria-expanded', abierto ? 'true' : 'false');
+        chevron.setAttribute('title', abierto ? 'Contraer los clientes del grupo'
+            : 'Ver los clientes del grupo');
+
+        var icono = chevron.querySelector('i');
+
+        if (icono) {
+            icono.className = 'fas fa-chevron-' + (abierto ? 'down' : 'right');
+        }
+    }
+
+    function actualizarBotonGrupos() {
+        var btn = document.getElementById('btnGruposParamCob');
+
+        if (!btn) {
+            return;
+        }
+
+        var visibles = gruposVisibles();
+
+        // Sin grupos a la vista el botón no hace nada, y un botón que no hace
+        // nada se aprieta y parece que falló.
+        btn.style.display = visibles.length ? '' : 'none';
+
+        var abrir = visibles.some(function(agrup) { return !estaAbierto(agrup); });
+
+        btn.innerHTML = '<i class="fas fa-' + (abrir ? 'angles-down' : 'angles-up')
+            + ' me-1"></i> ' + (abrir ? 'Expandir todo' : 'Contraer todo');
+        btn.setAttribute('title', abrir
+            ? 'Ver los clientes de todos los grupos'
+            : 'Dejar sólo una fila por grupo');
     }
 
     function renderizarTabla() {
@@ -480,6 +675,8 @@
             if (pie) {
                 pie.textContent = '';
             }
+
+            actualizarBotonGrupos();
 
             return;
         }
@@ -530,8 +727,10 @@
             });
         });
 
-        // Un filtro tipeado sobrevive a un re-render (por ejemplo tras guardar)
-        filtrarClientes();
+        // Lo que estaba abierto y lo que se estaba buscando sobreviven al
+        // redibujo que hace guardar un PPP: el estado está en memoria, no en
+        // las filas que se acaban de reemplazar.
+        aplicarVisibilidad();
     }
 
     /** La fila del grupo: es donde vive el PPP, calculado y manual */
@@ -545,14 +744,23 @@
                 + 'proyecta con el manual, o con el respaldo del cliente">-</span>';
         var pppManVal = (g.ppp_manual !== null && g.ppp_manual !== undefined) ? g.ppp_manual : '';
 
+        // El chevron es un <button> para que sea un control de verdad -foco
+        // con el teclado, y TablaExport lo saca del clon-. Lleva data-lectura
+        // porque Permisos.soloLectura() saca los botones de la grilla, y
+        // abrir un grupo no es editar. El clic en el resto de la fila no hace
+        // nada: ahí está el input del PPP manual.
+        var chevron = '<button type="button" class="pc-chevron" data-lectura '
+            + 'data-agrup="' + escapar(agrup) + '" aria-expanded="false" '
+            + 'title="Ver los clientes del grupo"><i class="fas fa-chevron-right"></i></button>';
+
         return '<tr class="pc-grupo" data-agrup="' + escapar(agrup) + '">'
-            + '<td><code>' + escapar(agrup) + '</code> '
+            + '<td class="text-nowrap">' + chevron + '<code>' + escapar(agrup) + '</code> '
             +     (g.es_grupo
                     ? '<span class="pc-badge pc-badge-grupo" title="Grupo empresario de GVA62">grupo</span>'
                     : '<span class="pc-badge" title="Cliente sin grupo empresario: es su propio grupo">sin grupo</span>')
             + '</td>'
             + '<td><strong>' + escapar(g.nombre_agrup) + '</strong> '
-            +     '<small class="text-muted">' + cant + ' cliente(s)</small></td>'
+            +     '<small class="text-muted pc-indicador">' + cant + ' cliente(s)</small></td>'
             + '<td></td>'
             + '<td></td>'
             + '<td class="text-center">' + pppCalc + '</td>'
