@@ -482,9 +482,12 @@ chequear('el aviso de valuacion mide el pendiente', true,
    pendiente, la pestaña y el tablero dirían dos cosas distintas sobre los
    mismos contenedores -y sólo sobre los que ya tienen pagos, que son
    exactamente los que hay que mirar-. */
-chequear('y el del tablero usa el mismo campo', true,
-    strpos(codigoSinComentariosSP(__DIR__ . '/../Class/Providers/ComexProvider.php'),
-        "avisosValuacion(\$filas, \$dolar->ultimoMes(), 'PENDIENTE_USD')") !== false);
+/* El tablero llama a la variante ConNivel -el mismo aviso, con su gravedad- y
+   la llamada va partida en dos renglones: se comparan los argumentos, no el
+   espaciado. */
+chequear('y el del tablero usa el mismo campo', 1,
+    preg_match('/avisosValuacionConNivel\(\$filas,\s*\$dolar->ultimoMes\(\),\s*\'PENDIENTE_USD\'\)/',
+        codigoSinComentariosSP(__DIR__ . '/../Class/Providers/ComexProvider.php')));
 
 chequear('y el endpoint de lectura de pagos existe', true,
     strpos($ctrlSrc, 'getPagosContenedor') !== false);

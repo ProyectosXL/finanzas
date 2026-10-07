@@ -949,10 +949,14 @@ chequear('ninguna serie de Comex declara pesos', false,
 chequear('todas las series declaran USD', 9, substr_count($provSrc, "'USD'"));
 
 /* Lo vencido se informa EN PESOS. Con IMPORTE_EST, el aviso daria un numero en
-   dolares con el signo de pesos adelante. */
-chequear('el aviso de vencidos de nacionalizacion informa pesos', true,
-    strpos($provSrc, "Comex::avisosVencidos(\$filas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_ARS'")
-        !== false);
+   dolares con el signo de pesos adelante.
+
+   El proveedor llama a la variante ConNivel, que devuelve el mismo aviso con
+   su gravedad para el panel del tablero, y la llamada puede ir partida en dos
+   renglones: lo que importa son los argumentos, no el espaciado. */
+chequear('el aviso de vencidos de nacionalizacion informa pesos', 1,
+    preg_match("/Comex::avisosVencidosConNivel\\(\\\$filas,\\s*'FECHA_NAC_EFECTIVA',"
+        . "\\s*'IMPORTE_ARS'/", $provSrc));
 chequear('y el de la pestana tambien', true,
     strpos($fuenteCtrl, "Comex::avisosVencidos(\$filasNac, 'FECHA_NAC_EFECTIVA', 'IMPORTE_ARS'")
         !== false);

@@ -1335,8 +1335,12 @@ chequear('y el JS los pinta al cargar el maestro', true,
 
 $catJs = file_get_contents(__DIR__ . '/../Class/ProveedoresCategorias.php');
 
+/* Se buscan dos pedazos y no la frase entera: en el codigo el texto va partido
+   en varias lineas concatenadas, y el corte puede caer en el medio de la
+   frase -hoy cae entre "está" y "apagada"-. */
 chequear('el aviso nombra el script que falta', true,
-    strpos($catJs, 'La carga manual de proveedores está apagada') !== false
+    strpos($catJs, 'La carga manual de proveedores está') !== false
+    && strpos($catJs, 'apagada: falta la columna ORIGEN') !== false
     && strpos($catJs, 'sql/cashflow_prov_locales_maestro_manual.sql') !== false);
 
 // Y dice que lo demás sigue andando: un aviso que suena a "esta pantalla está

@@ -154,11 +154,13 @@ seccion('Los avisos de valuacion reciben las filas REALMENTE valuadas');
 
 /* Ver el punto 3 del encabezado: con la fila combinada, el aviso diria que
    ningun mes se pudo valuar. */
+/* La llamada es a la variante ConNivel, que devuelve los mismos avisos con su
+   gravedad para el panel del tablero. */
 chequear('el aviso del FOB usa las filas del FOB',
-    true, strpos($src, "avisosValuacion(\$grilla['filas_fob']") !== false);
+    true, strpos($src, "avisosValuacionConNivel(\$grilla['filas_fob']") !== false);
 
 chequear('y el de nacionalizacion las suyas',
-    true, strpos($src, "avisosValuacion(\$grilla['filas_nac']") !== false);
+    true, strpos($src, "avisosValuacionConNivel(\$grilla['filas_nac']") !== false);
 
 chequear('y cuentan MESES, no contenedores',
     2, substr_count($src, "'mes(es) proyectado(s)'"));
