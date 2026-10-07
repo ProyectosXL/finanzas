@@ -118,6 +118,17 @@
 
         conectarFiltroEmision();
 
+        // Ver excluidos no vuelve al servidor: las filas excluidas ya llegaron,
+        // aparte, y no suman en nada. Sólo cambia qué se dibuja.
+        var chkExcluidos = document.getElementById('verExcluidosCob');
+        if (chkExcluidos) {
+            chkExcluidos.addEventListener('change', function() {
+                generarTabla();
+                pintarExcluidos();
+                filtrarTabla();
+            });
+        }
+
         cargarDatos();
     }
 
@@ -315,6 +326,7 @@
                     generarTabla();
                     calcularResumenes();
                     pintarAvisos();
+                    pintarExcluidos();
                     pintarFiltroPeriodo();
                     acotarExtremos();
                     mostrarCargando(false);
@@ -364,6 +376,86 @@
                 + '<i class="fas fa-' + (info ? 'circle-info' : 'triangle-exclamation') + ' me-1"></i>'
                 + escaparAttr(a.texto) + '</small></div>';
         }).join('');
+    }
+
+    /* ================================================================
+       CLIENTES EXCLUIDOS A MANO
+
+       Sus facturas llegan APARTE, en `filas_excluidas`: el backend arma el
+       payload sin ellas, así que el eje, las tarjetas de arriba
+       (`totales`) y el pie -que suma `filas`, ver filasFiltradas()- no las
+       ven nunca. "Ver excluidos" sólo decide si se dibujan, atenuadas. Es la
+       forma de que no puedan sumar ni por error: no están en la lista que
+       se suma.
+       ================================================================ */
+
+    function verExcluidos() {
+        var chk = document.getElementById('verExcluidosCob');
+
+        return !!(chk && chk.checked);
+    }
+
+    /** Las filas que van a la tabla: las que se cobran, y las excluidas si se piden */
+    function filasDibujadas() {
+        var filas = datosCobranzas.filas || [];
+
+        return verExcluidos() ? filas.concat(datosCobranzas.filas_excluidas || []) : filas;
+    }
+
+    /** El ícono de una fila excluida: motivo, quién y cuándo (Js/auditoria.js) */
+    function marcaExcluido(item) {
+        if (!item.EXCLUIDO) {
+            return '';
+        }
+
+        var t = 'Cliente excluido de Cobranzas Franquicias: esta fila no suma en nada.\n'
+            + 'Motivo: ' + (item.MOTIVO_EXCLUSION || 'sin motivo registrado') + '\n'
+            + Auditoria.texto({ alta: { usuario: item.EXCLUSION_USUARIO, fecha: item.EXCLUSION_FECHA } });
+
+        return ' <i class="fas fa-circle-info text-danger cob-marca-excluido" title="'
+            + escaparAttr(t) + '"></i>';
+    }
+
+    /**
+     * Cuánta plata está excluida, y con qué motivos.
+     *
+     * SE DICE AUNQUE NO SE VEA, y sobre todo por eso: los excluidos están
+     * escondidos por defecto, así que sin este cartel la única forma de notar
+     * que falta un importe sería acordarse de prender el interruptor. Es el
+     * mismo aviso que IngresosProvider deja en el tablero.
+     */
+    function pintarExcluidos() {
+        var cont = document.getElementById('excluidosCob');
+
+        if (!cont) {
+            return;
+        }
+
+        var e = (datosCobranzas && datosCobranzas.excluidos) || {};
+
+        if (!e.facturas) {
+            cont.style.display = 'none';
+            cont.innerHTML = '';
+            return;
+        }
+
+        var motivos = (e.motivos || []).slice(0, 5);
+        var mas = (e.motivos || []).length - motivos.length;
+
+        cont.innerHTML = '<small><i class="fas fa-ban me-1"></i>'
+            + '<strong>' + e.facturas + ' factura(s) de ' + e.clientes + ' cliente(s) por '
+            + formatCurrency(e.importe) + '</strong> están excluidas de Cobranzas Franquicias: '
+            + 'esa plata no entra en esta pestaña ni en el tablero.'
+            + (motivos.length
+                ? ' Motivos: ' + motivos.map(escaparAttr).join('; ') + (mas > 0 ? '; y ' + mas + ' más.' : '.')
+                : '')
+            + (verExcluidos()
+                ? ' Se ven en la tabla, atenuadas y sin sumar.'
+                : ' Prendé <em>Ver excluidos</em> para revisarlas. Se excluyen y se vuelven a '
+                    + 'incluir en Parámetros → Cobranzas.')
+            + '</small>';
+
+        cont.style.display = '';
     }
 
     function generarTabla() {
@@ -419,9 +511,15 @@
         var cols = vistas.columnas();
         var html = '';
 
-        datosCobranzas.filas.forEach(function(item) {
+        filasDibujadas().forEach(function(item) {
             var esProy = (item.TIPO_REGISTRO === 'PROYECCION');
             var clases = [];
+
+            // Un cliente excluido a mano se ve atenuado: está para revisarlo,
+            // no para sumarlo. Ver filasDibujadas().
+            if (item.EXCLUIDO) {
+                clases.push('fila-excluida');
+            }
 
             if (esProy) {
                 clases.push('fila-proyeccion');
@@ -442,7 +540,7 @@
             // COD_CLI.
             html += '<td title="' + escaparAttr(tituloOrigen(item, esProy)) + '">'
                 + '<strong>' + escaparAttr(item.COD_CLI || '') + '</strong>'
-                + marcaManual(item) + marcaVencida(item) + '</td>';
+                + marcaManual(item) + marcaVencida(item) + marcaExcluido(item) + '</td>';
 
             // El nombre se recorta con puntos suspensivos (.col-texto) para que
             // la fila sea una sola línea. El title lo devuelve completo: lo que
@@ -559,7 +657,9 @@
     }
 
     function celdaCobro(item, esProy) {
-        if (!editable()) {
+        // La fecha de una factura excluida es de sólo lectura: no se cobra
+        // por este circuito, y pactarle una fecha no movería nada.
+        if (!editable() || item.EXCLUIDO) {
             // Una vencida dice cuál era su fecha original: está dibujada en hoy
             // por ser el primer día del eje. Mismo badge que Exportaciones
             // Tasky, que es de donde sale el criterio.
@@ -775,7 +875,13 @@
         totalsRow.innerHTML = html;
     }
 
-    /** Las filas que pasan el buscador */
+    /**
+     * Las filas que pasan el buscador, y que SUMAN en el pie.
+     *
+     * Sale de `datosCobranzas.filas` y no de filasDibujadas(), a propósito:
+     * con "Ver excluidos" prendido las facturas excluidas se ven, pero no
+     * suman. Por eso tampoco se mira el DOM.
+     */
     function filasFiltradas() {
         var input = document.getElementById('busquedaCob');
         var term = input ? input.value.toLowerCase() : '';

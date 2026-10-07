@@ -146,6 +146,18 @@ try {
                getCobranzasFR(), que es quien lo llena. */
             $payloadFr['avisos_universo'] = $ingresos->avisosUniversoFR();
 
+            /* LOS CLIENTES EXCLUIDOS A MANO van en su propio payload, armado con
+               la MISMA funcion y el mismo filtro por fecha de emision: asi
+               tienen sus importes en las mismas columnas del eje, pero no
+               entran ni en 'totales' -los KPIs- ni en 'filas' -lo que suma el
+               pie-. La pantalla los dibuja atenuados solo con "Ver excluidos".
+               El resumen va siempre: es el cartel que dice cuanta plata quedo
+               afuera aunque no se vea. Sus avisos de eje se descartan: hablan
+               de importes que de todas formas no se cuentan. */
+            $excluidas = Ingresos::filtrarPorFechaEmision($ingresos->filasExcluidasFR(), $rango)['items'];
+            $payloadFr['filas_excluidas'] = payloadCobranzas($excluidas, $summary)['filas'];
+            $payloadFr['excluidos'] = CobranzasExclusion::resumen($excluidas, 'COD_CLI', 'importe_neto');
+
             echo json_encode([
                 'success' => true,
                 'data' => $payloadFr

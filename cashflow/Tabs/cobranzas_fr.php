@@ -69,6 +69,14 @@
     </div>
 
     <!-- Header Section con Botones -->
+    <!-- Cuánta plata está excluida a mano, y con qué motivos. SE VE AUNQUE "Ver
+         excluidos" esté apagado, y sobre todo por eso: los excluidos están
+         escondidos por defecto, así que sin este cartel la única forma de
+         notar que falta un importe sería acordarse de prender el interruptor.
+         Mismo criterio que #excluidosEch de Echeqs y que el aviso que deja
+         IngresosProvider en el tablero. -->
+    <div id="excluidosCob" class="alert alert-secondary py-2 px-3 mb-3" style="display: none;"></div>
+
     <div class="card mb-4">
 
         <!-- Sub-solapas: Resumen vs Detalle Facturas. Van DENTRO del panel y
@@ -125,6 +133,19 @@
                             title="Quitar el filtro por fecha de emisión" disabled>
                         <i class="fas fa-eraser"></i>
                     </button>
+                </div>
+
+                <!-- Los clientes excluidos en Parámetros -> Cobranzas NO SE VEN por
+                     defecto: ya se decidió que esa plata no va. Prendido, sus
+                     facturas aparecen atenuadas y no suman en nada -ni eje, ni
+                     pie, ni tarjetas-. Vale en las dos solapas y en Resumen y
+                     Detalle Facturas. Mismo criterio que "Ver excluidos" de
+                     Echeqs. -->
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="verExcluidosCob">
+                    <label class="form-check-label small text-muted text-nowrap" for="verExcluidosCob">
+                        Ver excluidos
+                    </label>
                 </div>
             </div>
 

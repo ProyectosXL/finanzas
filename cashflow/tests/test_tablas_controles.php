@@ -415,7 +415,7 @@ seccion('la tarjeta de franquicias: ordenar no despega los clientes de su grupo'
 // marca cada cliente se ordenaba por su cuenta: quedaba debajo de otro grupo,
 // con un PPP que no es el suyo, y la tabla se seguia viendo normal.
 chequear('las filas de cliente llevan data-orden-sigue', true,
-    strpos($paramCobJs, '<tr class="pc-cliente" data-orden-sigue') !== false);
+    preg_match('/<tr class="pc-cliente[^\n]*data-orden-sigue data-agrup=/', $paramCobJs) === 1);
 chequear('las de grupo no: son las que se ordenan', false,
     strpos($paramCobJs, '<tr class="pc-grupo" data-orden-sigue') !== false);
 chequear('y la tabla no esta excluida del orden', false,

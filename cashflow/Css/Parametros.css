@@ -550,6 +550,25 @@
     color: var(--bs-primary, #0d6efd);
 }
 
+/* Un cliente excluido de Cobranzas Franquicias se sigue viendo -sigue en su
+   grupo y su PPP sigue contando-, pero atenuado: sus facturas no se cobran
+   por este circuito. La celda Excluir no se atenúa, que es donde se vuelve a
+   incluir. */
+#tablaParamCob .pc-excluido td:not(:last-child) {
+    opacity: 0.5;
+}
+
+#tablaParamCob .pc-badge-excluido {
+    background: rgba(220, 53, 69, 0.12);
+    color: var(--bs-danger, #dc3545);
+}
+
+#tablaParamCob .pc-icono-excluido {
+    color: var(--bs-danger, #dc3545);
+    cursor: help;
+    margin-left: 4px;
+}
+
 #tablaParamCob .pc-badge {
     display: inline-block;
     padding: 1px 7px;

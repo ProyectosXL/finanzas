@@ -48,6 +48,9 @@
     let abiertos = {};
     let enBusqueda = null;
 
+    /** Si se puede excluir: sin la tabla de exclusiones, el switch va deshabilitado */
+    let exclusionDisponible = true;
+
     /** Espejo de Ingresos::pppEfectivo(): manual > calculado > DIAS_PP_MAX > 30 */
     function pppEfectivo(manual, calculado, diasPpMax) {
         var candidatos = [manual, calculado, diasPpMax];
@@ -436,6 +439,7 @@
                     grupos = data.grupos || [];
                     avisos = data.avisos || [];
                     afuera = data.afuera || {};
+                    exclusionDisponible = data.exclusion_disponible !== false;
 
                     pintarAvisos();
                     renderizarTabla();
@@ -669,7 +673,7 @@
         }
 
         if (grupos.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">'
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">'
                 + 'No se encontraron franquicias</td></tr>';
 
             if (pie) {
@@ -701,6 +705,8 @@
             pie.textContent = grupos.length + ' grupo(s) · ' + totalClientes + ' franquicia(s) habilitada(s)'
                 + textoAfuera();
         }
+
+        conectarExclusion(tbody);
 
         tbody.querySelectorAll('.select-medio-pago').forEach(function(sel) {
             sel.addEventListener('change', function() {
@@ -787,7 +793,8 @@
                     : '<span class="pc-badge" title="Cliente sin grupo empresario: es su propio grupo">sin grupo</span>')
             + '</td>'
             + '<td><strong>' + escapar(g.nombre_agrup) + '</strong> '
-            +     '<small class="text-muted pc-indicador">' + cant + ' cliente(s)</small></td>'
+            +     '<small class="text-muted pc-indicador">' + cant + ' cliente(s)</small>'
+            +     indicadorExcluidos(g) + '</td>'
             + '<td></td>'
             + '<td></td>'
             + '<td class="text-center">' + pppCalc + '</td>'
@@ -806,6 +813,7 @@
             +     '</div>'
             + '</td>'
             + '<td class="text-center text-primary"><strong>' + g.ppp_efectivo + ' días</strong></td>'
+            + '<td></td>'
             + '</tr>';
     }
 
@@ -826,8 +834,8 @@
         // social mezclaba los clientes de todos los grupos y cada uno quedaba
         // debajo de un PPP que no es el suyo. Oculto o no, se mueve igual: la
         // clase .pc-oculta viaja con la fila.
-        return '<tr class="pc-cliente" data-orden-sigue data-agrup="' + escapar(g.cod_agrup) + '" data-cod="' + escapar(cod) + '">'
-            + '<td class="ps-4"><code>' + escapar(cod) + '</code></td>'
+        return '<tr class="pc-cliente' + (c.excluido ? ' pc-excluido' : '') + '" data-orden-sigue data-agrup="' + escapar(g.cod_agrup) + '" data-cod="' + escapar(cod) + '">'
+            + '<td class="ps-4 text-nowrap"><code>' + escapar(cod) + '</code>' + iconoExcluido(c) + '</td>'
             + '<td>' + escapar(c.razon_social) + '</td>'
             + '<td>' + sucursal + '</td>'
             + '<td class="text-center">'
@@ -843,7 +851,162 @@
             + '<td class="text-center' + (distinto ? ' text-warning' : ' text-muted') + '"'
             +     (distinto ? ' title="El grupo no tiene PPP: se usa el respaldo del cliente (DIAS_PP_MAX o 30)"' : '')
             +     '>' + c.ppp_efectivo + ' días</td>'
+            + '<td class="text-center">' + celdaExcluir(c) + '</td>'
             + '</tr>';
+    }
+
+    /* ================================================================
+       EXCLUIR UN CLIENTE DE COBRANZAS FRANQUICIAS
+
+       Sus facturas salen de las dos solapas de Cobranzas FR y del tablero.
+       Excluir pide un motivo -obligatorio, y lo valida de nuevo el servidor-
+       y volver a incluir pide confirmación: las dos cosas mueven plata del
+       tablero, y ninguna puede dispararse con un clic suelto. El PPP del
+       grupo no cambia: mide cómo paga el grupo, no si se le cobra.
+       ================================================================ */
+
+    /**
+     * "N excluido(s)" en la fila del grupo, para verlo con el grupo contraído.
+     * Es un .pc-indicador: no entra en la búsqueda, como "N cliente(s)".
+     */
+    function indicadorExcluidos(g) {
+        var n = g.cant_excluidos || 0;
+
+        return n > 0
+            ? ' <span class="pc-badge pc-badge-excluido pc-indicador" title="Clientes del grupo '
+                + 'excluidos de Cobranzas Franquicias: sus facturas no se cobran por este circuito">'
+                + n + ' excluido(s)</span>'
+            : '';
+    }
+
+    /** El texto del tooltip de un cliente excluido: motivo, quién y cuándo */
+    function textoExcluido(c) {
+        var e = c.excluido;
+
+        return 'Excluido de Cobranzas Franquicias: sus facturas no entran en Cobranzas FR ni en '
+            + 'el tablero.\nMotivo: ' + (e.motivo || '')
+            + '\n' + Auditoria.texto({ alta: { usuario: e.usuario, fecha: e.fecha } });
+    }
+
+    function iconoExcluido(c) {
+        if (!c.excluido) {
+            return '';
+        }
+
+        var t = escapar(textoExcluido(c));
+
+        return ' <i class="fas fa-circle-info pc-icono-excluido" title="' + t + '" aria-label="' + t + '"></i>';
+    }
+
+    /**
+     * La celda Excluir. Con permiso, un switch; sin permiso no se dibuja
+     * ningún control, sólo el dato -quien sólo lee tiene que ver que está
+     * excluido-. Sin la tabla de exclusiones el switch va deshabilitado y el
+     * aviso de arriba dice qué script falta.
+     */
+    function celdaExcluir(c) {
+        var tbody = document.getElementById('tbodyParamCob');
+        var excluido = !!c.excluido;
+        var lectura = excluido ? '<span class="pc-badge pc-badge-excluido">excluido</span>' : '';
+
+        var title = !exclusionDisponible
+            ? 'Todavía no se puede excluir: falta correr el script de la tabla (ver el aviso de arriba)'
+            : (excluido ? 'Volver a incluir en Cobranzas Franquicias' : 'Excluir de Cobranzas Franquicias');
+
+        var control = '<div class="form-check form-switch d-inline-block m-0">'
+            + '<input class="form-check-input pc-switch-excluir" type="checkbox" role="switch" '
+            +     'data-cod="' + escapar(c.cod_cliente) + '"'
+            +     (excluido ? ' checked' : '') + (exclusionDisponible ? '' : ' disabled')
+            +     ' title="' + escapar(title) + '">'
+            + '</div>';
+
+        return Permisos.segun(tbody, control, lectura);
+    }
+
+    function conectarExclusion(tbody) {
+        tbody.querySelectorAll('.pc-switch-excluir').forEach(function(sw) {
+            sw.addEventListener('change', function() {
+                var cod = this.getAttribute('data-cod');
+
+                // El switch vuelve a donde estaba hasta que el servidor
+                // confirme: si se cancela el diálogo o falla el guardado, no
+                // puede quedar diciendo algo que no pasó.
+                this.checked = !this.checked;
+
+                if (this.checked) {
+                    pedirInclusion(cod);
+                } else {
+                    pedirExclusion(cod);
+                }
+            });
+        });
+    }
+
+    function pedirExclusion(cod) {
+        var cli = buscarCliente(cod);
+        var nombre = cli ? cod + ' — ' + cli.razon_social : cod;
+
+        Notificacion.pedirTexto({
+            titulo: 'Excluir de Cobranzas Franquicias',
+            peligro: true,
+            mensaje: nombre,
+            detalle: 'Todas sus facturas -las emitidas y las que vengan- salen de Real a Cobrar, '
+                + 'de Pendientes Proyectados y del tablero, y quedan informadas aparte con este '
+                + 'motivo. El PPP de su grupo no cambia.',
+            etiqueta: 'Motivo',
+            placeholder: 'Ej.: en gestión judicial, refinancia por fuera, se cobra por otro circuito…',
+            maxlargo: 200,
+            invalido: 'Escribí el motivo: es lo único que después explica por qué falta esa plata '
+                + 'en el tablero.',
+            confirmar: 'Excluir'
+        }).then(function(motivo) {
+            if (motivo !== null) {
+                guardarExclusion('excluirClienteCobranza', { cod_cliente: cod, motivo: motivo });
+            }
+        });
+    }
+
+    function pedirInclusion(cod) {
+        var cli = buscarCliente(cod);
+        var motivo = cli && cli.excluido ? cli.excluido.motivo : '';
+
+        Notificacion.confirmar({
+            titulo: 'Volver a incluir en Cobranzas Franquicias',
+            mensaje: '¿Devolver ' + cod + ' a Cobranzas Franquicias?',
+            detalle: 'Sus facturas vuelven a las dos solapas y al tablero.'
+                + (motivo ? ' Estaba excluido por: ' + motivo + '.' : '')
+                + ' La exclusión no se borra: queda en el historial, dada de baja.',
+            confirmar: 'Volver a incluir'
+        }).then(function(ok) {
+            if (ok) {
+                guardarExclusion('incluirClienteCobranza', { cod_cliente: cod });
+            }
+        });
+    }
+
+    /**
+     * Guarda y recarga la tarjeta: el servidor dice quién y cuándo, y la
+     * cuenta de excluidos del grupo. Los grupos abiertos siguen abiertos: el
+     * estado está en memoria.
+     */
+    function guardarExclusion(accion, cuerpo) {
+        fetch('Controller/ParametrosController.php?action=' + accion, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(cuerpo)
+        })
+        .then(res => res.json())
+        .then(result => {
+            if (result.success) {
+                Notificacion.exito(result.message);
+                cargarClientes();
+            } else {
+                Notificacion.error(result.message);
+            }
+        })
+        .catch(err => {
+            Notificacion.error('Error de conexión: ' + err.message);
+        });
     }
 
     function buscarCliente(codCliente) {

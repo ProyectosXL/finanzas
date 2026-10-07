@@ -1397,6 +1397,11 @@ class Parametros {
      * cliente-; el de cada cliente va en su fila, y solo difiere del grupo
      * cuando el grupo no tiene ni manual ni calculado.
      *
+     * EXCLUIR NO CAMBIA EL PPP. Un cliente excluido de Cobranzas Franquicias
+     * sigue en su grupo y el PPP del grupo lo sigue contando: mide como paga
+     * el grupo, no si se le cobra. Lo unico que agrega el grupo es cuantos
+     * excluidos tiene, para verlo con el grupo contraido.
+     *
      * @param array $pppPorCliente Mapa COD_CLIENT => datos (con sucursal si se cruzo)
      * @return array Lista de grupos ordenada por nombre, cada uno con 'clientes'
      */
@@ -1418,6 +1423,7 @@ class Parametros {
                     'cant_clientes_ppp' => intval($c['cant_clientes_ppp']),
                     'ppp_manual' => $c['ppp_manual'],
                     'ppp_efectivo' => Ingresos::pppEfectivo($c['ppp_manual'], $c['ppp_calculado'], null),
+                    'cant_excluidos' => 0,
                     'clientes' => []
                 ];
             }
@@ -1430,8 +1436,13 @@ class Parametros {
                 'medio_pago_default' => isset($c['medio_pago_default']) ? $c['medio_pago_default'] : 'ECHEQ',
                 'dias_pp_max' => intval($c['dias_pp_max']),
                 'desc_pp_max' => isset($c['desc_pp_max']) ? floatval($c['desc_pp_max']) : 0,
-                'ppp_efectivo' => intval($c['ppp_efectivo'])
+                'ppp_efectivo' => intval($c['ppp_efectivo']),
+                'excluido' => isset($c['excluido']) ? $c['excluido'] : null
             ];
+
+            if (!empty($c['excluido'])) {
+                $grupos[$agrup]['cant_excluidos']++;
+            }
         }
 
         foreach ($grupos as $agrup => $g) {
@@ -1485,15 +1496,71 @@ class Parametros {
         $directorio = DirectorioFranquicias::leer();
         $filtrado = DirectorioFranquicias::filtrarUniverso($ppps, $directorio, 'cod_cliente');
         $clientes = self::conSucursal($filtrado['items'], $directorio);
+
+        // La exclusion manual: quien esta excluido, y si se puede excluir.
+        // Sin la tabla el switch se dibuja deshabilitado con el aviso de que
+        // script falta, y nadie esta excluido, que es lo cierto.
+        $exclusion = self::estadoExclusion();
+        $clientes = self::conExclusion($clientes, $exclusion['vigentes']);
         $grupos = self::agruparPorAgrupador($clientes);
 
         return [
             'grupos' => $grupos,
-            'avisos' => array_merge($ingresos->getAvisosPPP(), Aviso::textos($filtrado['avisos'])),
+            'avisos' => array_merge($ingresos->getAvisosPPP(), Aviso::textos($filtrado['avisos']),
+                $exclusion['aviso'] !== '' ? [$exclusion['aviso']] : []),
             'total_clientes' => count($clientes),
             'total_grupos' => count($grupos),
-            'afuera' => DirectorioFranquicias::clientesAfuera($filtrado['afuera'])
+            'afuera' => DirectorioFranquicias::clientesAfuera($filtrado['afuera']),
+            'exclusion_disponible' => $exclusion['disponible']
         ];
+    }
+
+    /**
+     * Si se puede excluir clientes y quienes estan excluidos.
+     *
+     * Un error al leer no tumba la tarjeta -el PPP se tiene que poder editar
+     * igual-: deja el switch deshabilitado con el motivo.
+     *
+     * @return array ['disponible' => bool, 'aviso' => string, 'vigentes' => array]
+     */
+    private static function estadoExclusion() {
+        require_once __DIR__ . '/CobranzasExclusion.php';
+
+        try {
+            $ex = new CobranzasExclusion();
+
+            if (!$ex->tablaCreada()) {
+                return ['disponible' => false, 'aviso' => $ex->avisoSinTabla(), 'vigentes' => []];
+            }
+
+            return ['disponible' => true, 'aviso' => '', 'vigentes' => $ex->vigentes()];
+        } catch (Exception $e) {
+            return ['disponible' => false, 'vigentes' => [],
+                'aviso' => 'No se pudieron leer los clientes excluidos de Cobranzas Franquicias ('
+                    . $e->getMessage() . '): por ahora no se puede excluir ni volver a incluir.'];
+        }
+    }
+
+    /**
+     * Le cuelga a cada cliente su exclusion vigente -motivo, quien y cuando-,
+     * o null.
+     *
+     * @param array $clientes Mapa COD_CLIENT => datos
+     * @param array $vigentes Lo que devuelve CobranzasExclusion::vigentes()
+     * @return array
+     */
+    public static function conExclusion($clientes, $vigentes) {
+        foreach ((is_array($clientes) ? $clientes : []) as $cod => $c) {
+            $v = isset($vigentes[$cod]) ? $vigentes[$cod] : null;
+
+            $clientes[$cod]['excluido'] = $v ? [
+                'motivo' => $v['MOTIVO'],
+                'usuario' => $v['USUARIO'],
+                'fecha' => $v['FECHA_ALTA']
+            ] : null;
+        }
+
+        return $clientes;
     }
 
     /**

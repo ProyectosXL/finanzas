@@ -710,9 +710,9 @@ chequear('los canales son una lista explicita', ['FRANQUICIAS', 'FRANQUICIAS GA'
 // misma funcion: si uno se salteara el filtro, el tablero contaria plata que
 // la pestana no muestra.
 chequear('la proyeccion filtra el universo', true,
-    strpos($ingresosSrc, "return \$this->filtrarUniversoFR(\$itemsProyectados, 'COD_CLI', 'importe_neto');") !== false);
+    strpos($ingresosSrc, "\$this->filtrarUniversoFR(\$itemsProyectados, 'COD_CLI', 'importe_neto')") !== false);
 chequear('la cobranza real de la pestana tambien', true,
-    strpos($ingresosSrc, "\$data = \$this->filtrarUniversoFR(\$data, 'COD_CLI', 'importe_neto');") !== false);
+    strpos($ingresosSrc, "\$this->filtrarUniversoFR(\$data, 'COD_CLI', 'importe_neto')") !== false);
 chequear('y la de los totales del tablero', true,
     strpos($ingresosSrc, "\$this->filtrarUniversoFR(\$filasReal, 'COD_CLI', 'IMPORTE', 'CANT')") !== false);
 chequear('IngresosProvider deja los avisos del universo', true,

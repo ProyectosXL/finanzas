@@ -88,6 +88,15 @@ class IngresosProvider extends CashflowProvider {
         // respondio, INFO por lo que quedo afuera.
         $this->avisarTodos($ingresos->avisosUniversoFR());
 
+        // Los clientes excluidos a mano tampoco suman, y la plata que sacan se
+        // dice con su importe y sus motivos. INFO: es una decision tomada, no
+        // un problema. Mismo momento de lectura que el universo.
+        $textoExcluidos = CobranzasExclusion::textoAviso($ingresos->resumenExcluidosFR());
+
+        if ($textoExcluidos !== null) {
+            $this->avisar($textoExcluidos, Aviso::INFO);
+        }
+
         return [
             'COBRANZA' => $total,
             'COBRANZA_REAL' => $real,

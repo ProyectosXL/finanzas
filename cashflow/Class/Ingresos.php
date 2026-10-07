@@ -8,6 +8,7 @@ require_once __DIR__ . '/Cotizacion.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
 require_once __DIR__ . '/DirectorioFranquicias.php';
+require_once __DIR__ . '/CobranzasExclusion.php';
 
 /**
  * Ingresos
@@ -145,6 +146,26 @@ class Ingresos {
      *             'avisos' => [Aviso WARNING]]
      */
     private $universoFR = ['afuera' => [], 'avisos' => []];
+
+    /**
+     * Las filas de clientes EXCLUIDOS A MANO que dejo la ultima lectura de
+     * Cobranzas FR (ver CobranzasExclusion), y su resumen.
+     *
+     * No se descartan como las de fuera del universo: la pestana las puede
+     * mostrar atenuadas con "Ver excluidos", y el cartel dice cuanto quedo
+     * afuera aunque no se vean. Mismo ciclo de vida que $universoFR: cada
+     * lectura publica empieza de cero.
+     *
+     * @var array ['filas' => items marcados EXCLUIDO, 'resumen' => items con
+     *             COD_CLI, _IMPORTE y _CANT para CobranzasExclusion::resumen()]
+     */
+    private $excluidosFR = ['filas' => [], 'resumen' => []];
+
+    /** @var CobranzasExclusion|null */
+    private $exclusion = null;
+
+    /** @var array|null Cache de las exclusiones vigentes de este pedido */
+    private $vigentesExclusion = null;
 
     function __construct(){
         require_once __DIR__.'/../../class/conexion.php';
@@ -1133,9 +1154,90 @@ class Ingresos {
        "la fecha manual sobrevive a la factura".
        ==================================================================== */
 
-    /** Empieza de cero lo que se informa del universo. Ver $universoFR. */
+    /**
+     * Empieza de cero lo que se informa del universo y de los excluidos. Ver
+     * $universoFR y $excluidosFR.
+     */
     private function reiniciarUniversoFR() {
         $this->universoFR = ['afuera' => [], 'avisos' => []];
+        $this->excluidosFR = ['filas' => [], 'resumen' => []];
+    }
+
+    /**
+     * Las exclusiones vigentes, leidas una vez por pedido.
+     *
+     * SI NO SE PUEDEN LEER, NADIE ESTA EXCLUIDO, y se dice: tumbar la cobranza
+     * entera porque falla una tabla de configuracion seria peor, y callarlo
+     * haria que un cliente excluido vuelva a sumar sin que nadie lo note. Sin
+     * la tabla -el script no se corrio- no hay aviso: nadie esta excluido, que
+     * es lo cierto.
+     *
+     * @return array Lo que devuelve CobranzasExclusion::vigentes()
+     */
+    private function vigentesExclusion() {
+        if ($this->vigentesExclusion !== null) {
+            return $this->vigentesExclusion;
+        }
+
+        try {
+            if ($this->exclusion === null) {
+                $this->exclusion = new CobranzasExclusion();
+            }
+
+            $this->vigentesExclusion = $this->exclusion->vigentes();
+        } catch (Exception $e) {
+            $this->vigentesExclusion = [];
+            $this->universoFR['avisos'][] = Aviso::nuevo(Aviso::WARNING,
+                'No se pudieron leer los clientes excluidos de Cobranzas Franquicias ('
+                . $e->getMessage() . '): se cobra todo, también lo que estuviera excluido.');
+        }
+
+        return $this->vigentesExclusion;
+    }
+
+    /**
+     * Saca los items de los clientes excluidos a mano y los guarda aparte.
+     * Va DESPUES del filtro del universo: una franquicia inhabilitada ya no
+     * esta, y excluirla no cambiaria nada.
+     *
+     * @param array $items
+     * @param string $campoImporte
+     * @param string|null $campoCantidad Si cada item agrupa varios comprobantes
+     * @return array Los items que se cobran
+     */
+    private function separarExcluidosFR($items, $campoImporte, $campoCantidad = null) {
+        $sep = CobranzasExclusion::separar($items, $this->vigentesExclusion(), 'COD_CLI');
+
+        foreach ($sep['excluidos'] as $e) {
+            $this->excluidosFR['filas'][] = $e;
+            $this->excluidosFR['resumen'][] = [
+                'COD_CLI' => $e['COD_CLI'],
+                'MOTIVO_EXCLUSION' => $e['MOTIVO_EXCLUSION'],
+                '_IMPORTE' => isset($e[$campoImporte]) ? floatval($e[$campoImporte]) : 0.0,
+                '_CANT' => ($campoCantidad !== null && isset($e[$campoCantidad])) ? intval($e[$campoCantidad]) : 1
+            ];
+        }
+
+        return $sep['incluidos'];
+    }
+
+    /**
+     * Las filas de clientes excluidos de la ultima lectura de getCobranzasFR(),
+     * marcadas EXCLUIDO, con motivo, quien y cuando. No suman en nada.
+     *
+     * @return array
+     */
+    public function filasExcluidasFR() {
+        return $this->excluidosFR['filas'];
+    }
+
+    /**
+     * Cuanto quedo afuera por exclusion en la ultima lectura.
+     *
+     * @return array Ver CobranzasExclusion::resumen()
+     */
+    public function resumenExcluidosFR() {
+        return CobranzasExclusion::resumen($this->excluidosFR['resumen'], 'COD_CLI', '_IMPORTE', '_CANT');
     }
 
     /**
@@ -1347,7 +1449,12 @@ class Ingresos {
         // queda afuera se avisa con lo que HUBIERA ENTRADO al tablero, y una
         // factura de hace un anio no entraba de ninguna forma. Ver
         // DirectorioFranquicias y el bloque "El universo" de esta clase.
-        return $this->filtrarUniversoFR($itemsProyectados, 'COD_CLI', 'importe_neto');
+        //
+        // Y despues, sin los clientes EXCLUIDOS A MANO: quedan aparte, para
+        // mostrarlos atenuados y decir cuanto quedo afuera. Ver
+        // CobranzasExclusion.
+        return $this->separarExcluidosFR(
+            $this->filtrarUniversoFR($itemsProyectados, 'COD_CLI', 'importe_neto'), 'importe_neto');
     }
 
     /**
@@ -1477,7 +1584,9 @@ class Ingresos {
             // Solo las franquicias habilitadas, con el MISMO filtro que la
             // proyeccion: un cliente queda afuera de las dos solapas o de
             // ninguna, asi que la invariante entre las dos no se mueve.
-            $data = $this->filtrarUniversoFR($data, 'COD_CLI', 'importe_neto');
+            // Y los excluidos a mano, aparte: mismo criterio en las dos solapas.
+            $data = $this->separarExcluidosFR(
+                $this->filtrarUniversoFR($data, 'COD_CLI', 'importe_neto'), 'importe_neto');
         }
 
         // 2. Cargar pendientes proyectados si corresponde
@@ -1564,7 +1673,11 @@ class Ingresos {
 
                     // El mismo filtro que la pestana: el tablero no puede
                     // contar plata que Cobranzas FR no muestra.
-                    foreach ($this->filtrarUniversoFR($filasReal, 'COD_CLI', 'IMPORTE', 'CANT') as $row) {
+                    // Y sin los clientes excluidos a mano.
+                    $filasReal = $this->separarExcluidosFR(
+                        $this->filtrarUniversoFR($filasReal, 'COD_CLI', 'IMPORTE', 'CANT'), 'IMPORTE', 'CANT');
+
+                    foreach ($filasReal as $row) {
                         $f = $row['FECHA'];
                         $totalesPorFecha[$f] = ($totalesPorFecha[$f] ?? 0.0) + floatval($row['IMPORTE']);
                     }

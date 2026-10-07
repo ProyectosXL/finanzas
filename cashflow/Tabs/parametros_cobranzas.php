@@ -203,6 +203,9 @@ $edita = AuthCashflow::puedeEditar('parametros', 'COBRANZAS');
                         <th class="text-center" style="width: 160px;" title="Promedio de los promedios por cliente del grupo, con los recibos de Tango de los últimos 100 días">PPP Calculado</th>
                         <th class="text-center" style="width: 180px;" title="Plazo manual del grupo: pisa el calculado para todos sus clientes">PPP Manual (Pisar)</th>
                         <th class="text-center" style="width: 130px;" title="Plazo con el que se proyecta cada cliente">PPP Efectivo</th>
+                        <!-- Excluir es por cliente: sus facturas salen de Cobranzas FR
+                             y del tablero, con motivo. El PPP del grupo no cambia. -->
+                        <th class="text-center" style="width: 90px;" title="Las facturas de un cliente excluido no entran en Cobranzas FR ni en el tablero. El PPP del grupo no cambia.">Excluir</th>
                     </tr>
                 </thead>
                 <tbody id="tbodyParamCob">
