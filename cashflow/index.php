@@ -4,7 +4,7 @@ require_once __DIR__ . '/Class/AuthCashflow.php';
 
 // Redirección si no hay sesión
 if (!AuthCashflow::estaAutenticado()) {
-    header('Location: https://app.xl.com.ar/sistemas/login.php');
+    header('Location: /sistemas/login.php');
     exit;
 }
 
