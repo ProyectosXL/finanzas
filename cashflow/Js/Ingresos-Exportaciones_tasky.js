@@ -125,7 +125,6 @@
 
     function generarEncabezados() {
         var headerRowSub = document.getElementById('headerRowSubExpTasky');
-        var ejeHeader = document.getElementById('ejeHeaderExpTasky');
         var cols = vistas.columnas();
         var headerHTML = '';
 
@@ -147,9 +146,8 @@
 
         headerHTML += '<th class="total-column">Total</th>';
 
-        ejeHeader.textContent = datos.vistas[vistas.activa()].label;
-        ejeHeader.setAttribute('colspan', String(cols.length + 1));
-
+        // La fila de arriba ya no lleva la leyenda de la vista -la dicen los
+        // botones- sino los totales, y esos los pinta generarFilaTotales().
         headerRowSub.innerHTML = headerHTML;
     }
 
@@ -274,27 +272,59 @@
             html += porNombre[col.nombre] || '<td></td>';
         });
 
-        cols.forEach(function(col) {
+        // Los totales del eje se cuentan UNA VEZ y van al pie y arriba de cada
+        // fecha (Js/eje-totales.js), con el mismo formato. Contarlos dos veces
+        // sería dejar que algún día no coincidan.
+        var tot = totalesEje(visibles, cols);
+
+        tot.columnas.forEach(function(total) {
+            html += '<td class="currency ' + (total != 0 ? 'cell-with-value' : '') + '">'
+                + celdaEje(total) + '</td>';
+        });
+
+        html += '<td class="currency total-column">' + celdaEje(tot.total) + '</td>';
+
+        totalsRow.innerHTML = html;
+
+        pintarEjeTotales('tablaExportacionesTasky', {
+            columnas: cols,
+            valores: tot.columnas,
+            total: tot.total,
+            formato: celdaEje
+        });
+    }
+
+    /**
+     * Los totales del eje de unas filas: uno por columna y el general de la
+     * vista activa. Es la cuenta del pie Y de la fila de arriba.
+     *
+     * @param {Array} filas Las que suman: filasFiltradas()
+     * @param {Array} cols vistas.columnas()
+     * @returns {{columnas: Array, total: number}}
+     */
+    function totalesEje(filas, cols) {
+        var columnas = cols.map(function(col) {
             var total = 0;
 
-            visibles.forEach(function(item) {
+            filas.forEach(function(item) {
                 total += Number(vistas.valor(item, col)) || 0;
             });
 
-            html += '<td class="currency ' + (total != 0 ? 'cell-with-value' : '') + '">'
-                + (total != 0 ? formatCurrency(total) : '') + '</td>';
+            return total;
         });
 
-        var granTotal = 0;
+        var total = 0;
 
-        visibles.forEach(function(item) {
-            granTotal += vistas.total(item);
+        filas.forEach(function(item) {
+            total += vistas.total(item);
         });
 
-        html += '<td class="currency total-column">'
-            + (granTotal != 0 ? formatCurrency(granTotal) : '') + '</td>';
+        return { columnas: columnas, total: total };
+    }
 
-        totalsRow.innerHTML = html;
+    /** El contenido de una celda de totales del eje: vacía en cero */
+    function celdaEje(total) {
+        return total != 0 ? formatCurrency(total) : '';
     }
 
     function filtrarTabla() {

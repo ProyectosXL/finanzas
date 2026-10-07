@@ -582,6 +582,9 @@ $ejeTotales = [
     'cobranzas_may.php' => ['Ingresos-Cobranzas_may.js', [
         'tablaCobranzasMay' => "pintarEjeTotales('tablaCobranzasMay'"
     ]],
+    'exportaciones_tasky.php' => ['Ingresos-Exportaciones_tasky.js', [
+        'tablaExportacionesTasky' => "pintarEjeTotales('tablaExportacionesTasky'"
+    ]],
 ];
 
 seccion('cada tabla con eje llama al componente');

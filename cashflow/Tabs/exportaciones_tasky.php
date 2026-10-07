@@ -154,8 +154,11 @@
                             <th rowspan="2" title="Dólar oficial BCRA de hoy: la misma cotización para todas las facturas">Cotiz. hoy</th>
                             <th rowspan="2" title="Importe USD × cotización de hoy. Es el que va a la grilla y al tablero">Importe pesos hoy</th>
                             <th rowspan="2">Fecha cobro estimada</th>
-                            <!-- El rótulo y el colspan los pone el JS según la vista activa -->
-                            <th colspan="1" class="table-group-divider" id="ejeHeaderExpTasky">Días</th>
+                            <!-- Acá terminan las descriptivas. El resto de esta
+                                 fila son los totales de cada columna del eje,
+                                 arriba de su fecha: los pinta Js/eje-totales.js
+                                 desde generarFilaTotales(), con la misma cuenta
+                                 que el pie. -->
                         </tr>
                         <tr id="headerRowSubExpTasky">
                             <!-- Los días se generan dinámicamente -->
