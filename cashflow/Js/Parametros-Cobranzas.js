@@ -794,7 +794,12 @@
         // tiene ni manual ni calculado y entra el DIAS_PP_MAX del cliente.
         var distinto = (c.ppp_efectivo !== g.ppp_efectivo);
 
-        return '<tr class="pc-cliente" data-agrup="' + escapar(g.cod_agrup) + '" data-cod="' + escapar(cod) + '">'
+        // data-orden-sigue: el cliente viaja pegado a su grupo cuando se ordena
+        // por una columna (Js/tabla-orden.js). Sin él, ordenar por razón
+        // social mezclaba los clientes de todos los grupos y cada uno quedaba
+        // debajo de un PPP que no es el suyo. Oculto o no, se mueve igual: la
+        // clase .pc-oculta viaja con la fila.
+        return '<tr class="pc-cliente" data-orden-sigue data-agrup="' + escapar(g.cod_agrup) + '" data-cod="' + escapar(cod) + '">'
             + '<td class="ps-4"><code>' + escapar(cod) + '</code></td>'
             + '<td>' + escapar(c.razon_social) + '</td>'
             + '<td>' + sucursal + '</td>'

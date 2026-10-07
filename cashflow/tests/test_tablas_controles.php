@@ -408,3 +408,23 @@ $render = substr($paramCobJs, strpos($paramCobJs, 'function renderizarTabla()'))
 $render = substr($render, 0, strpos($render, 'function filaGrupo('));
 chequear('el redibujo de un guardado reaplica el estado', true,
     strpos($render, 'aplicarVisibilidad();') !== false);
+
+seccion('la tarjeta de franquicias: ordenar no despega los clientes de su grupo');
+
+// tablaParamCob se ordena sola por el descubrimiento automatico, y sin la
+// marca cada cliente se ordenaba por su cuenta: quedaba debajo de otro grupo,
+// con un PPP que no es el suyo, y la tabla se seguia viendo normal.
+chequear('las filas de cliente llevan data-orden-sigue', true,
+    strpos($paramCobJs, '<tr class="pc-cliente" data-orden-sigue') !== false);
+chequear('las de grupo no: son las que se ordenan', false,
+    strpos($paramCobJs, '<tr class="pc-grupo" data-orden-sigue') !== false);
+chequear('y la tabla no esta excluida del orden', false,
+    strpos($paramCobTab, 'id="tablaParamCob" data-orden="no"') !== false);
+
+// Un grupo contraido se ordena con sus clientes ocultos pegados: tabla-orden
+// agrupa por esPegada() sin mirar la visibilidad, y el ocultamiento es una
+// clase que viaja con la fila. Si alguien agregara un filtro por visibilidad
+// al agrupar, los clientes de un grupo cerrado quedarian sueltos al final.
+$ordenadas = substr($ordenJs, strpos($ordenJs, 'if (esPegada(f) && bloque.length)'), 200);
+chequear('tabla-orden pega la fila sin mirar si se ve', false,
+    strpos($ordenadas, 'display') !== false || strpos($ordenadas, 'oculta') !== false);
