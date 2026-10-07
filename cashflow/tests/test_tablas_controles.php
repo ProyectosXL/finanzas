@@ -599,6 +599,14 @@ $ejeTotales = [
     'logistica_local.php' => ['Logistica-Local.js', [
         'tablaLogistica' => "pintarEjeTotales('tablaLogistica'"
     ]],
+    // Las cuatro pasan por pintarTotales(), que llama al componente con el id
+    // de la tabla que recibe: lo que se verifica es que cada una se lo pase.
+    'pagos_tarjetas.php' => ['Financiero-Pagos_tarjetas.js', [
+        'tablaSup' => "pintarTotales('tablaSup', 'totalesSup'",
+        'tablaCorp' => "pintarTotales('tablaCorp', 'totalesCorp'",
+        'tablaCorpEst' => "pintarTotales('tablaCorpEst', 'totalesCorpEst'",
+        'tablaSoc' => "pintarTotales('tablaSoc', 'totalesSoc'"
+    ]],
 ];
 
 seccion('cada tabla con eje llama al componente');
@@ -633,3 +641,19 @@ chequear('y Total va en la fila de los meses, con total-column', true,
     strpos($logEnc, "'<th class=\"text-end fw-bold total-column\">Total</th>'") !== false);
 chequear('y ya no arriba con rowspan', false,
     strpos($logEnc, 'fw-bold">Total') !== false);
+
+seccion('Pagos con Tarjetas: pintarTotales() le pasa la tabla al componente');
+
+/* Las cuatro grillas de Tarjetas llaman al componente desde una sola funcion,
+   con el id de tabla que reciben: la llamada literal por tabla esta en la lista
+   de arriba, y aca se verifica que esa funcion lo use. */
+$tarjJs = file_get_contents($JS . '/Financiero-Pagos_tarjetas.js');
+$tarjPie = substr($tarjJs, strpos($tarjJs, 'function pintarTotales(idTabla,'));
+$tarjPie = substr($tarjPie, 0, strpos($tarjPie, 'function celdaEje('));
+
+chequear('pintarTotales recibe el id de la tabla', true, $tarjPie !== '');
+chequear('y llama al componente con el', true,
+    strpos($tarjPie, 'pintarEjeTotales(idTabla, {') !== false);
+chequear('con los mismos formatos que el pie', true,
+    strpos($tarjPie, 'formato: celdaEje') !== false
+        && strpos($tarjPie, 'formatoTotal: celdaTotal') !== false);

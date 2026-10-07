@@ -205,8 +205,19 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                                         % EFEC / % TARJ
                                     </th>
                                     <th rowspan="2">TARJETA ASOCIADA</th>
-                                    <th id="headerEjeSup" class="text-center"></th>
-                                    <!-- EL TOTAL VA AL FINAL, DESPUES DE LAS
+                                    <!-- Acá terminan las descriptivas. El resto
+                                         de esta fila son los totales de cada
+                                         columna del eje, arriba de su fecha, y el
+                                         total general arriba de TOTAL PERÍODO: los
+                                         pinta Js/eje-totales.js desde
+                                         pintarTotales(), con la misma cuenta que
+                                         el pie. -->
+                                </tr>
+                                <tr id="headerEjeSup2">
+                                    <!-- Las fechas las agrega el JS ANTES de esta
+                                         celda.
+
+                                         EL TOTAL VA AL FINAL, DESPUES DE LAS
                                          COLUMNAS QUE SUMA. Antes estaba antes del
                                          eje y confundía: se leía un total y recién
                                          después los meses de los que sale. Ahora se
@@ -216,13 +227,19 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                                          columnas que se están viendo, y la vista
                                          Meses cubre sólo los días de fuera del
                                          tramo diario, así que no es el total del
-                                         horizonte. -->
-                                    <th rowspan="2" class="text-end"
+                                         horizonte.
+
+                                         Va en la fila de las fechas y no arriba
+                                         con rowspan para que encima vaya el total
+                                         general. total-column es lo que la hace
+                                         ordenable ahí abajo (Js/tabla-orden.js), y
+                                         el rótulo es el mismo de antes: el orden
+                                         guardado va por nombre y se conserva. -->
+                                    <th class="text-end total-column"
                                         title="Suma las columnas que se están viendo. La vista Meses cubre sólo los días de fuera del tramo diario, así que su total no es el del horizonte completo.">
                                         TOTAL PERÍODO
                                     </th>
                                 </tr>
-                                <tr id="headerEjeSup2"></tr>
                             </thead>
                             <tbody id="bodySup"></tbody>
                             <tfoot>
@@ -451,8 +468,16 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                                     <th rowspan="2">TARJETA</th>
                                     <th rowspan="2" class="text-end">PENDIENTE</th>
                                     <th rowspan="2">ESTADO</th>
-                                    <th id="headerEjeCorp" class="text-center"></th>
-                                    <!-- ESTA GRILLA NO TENÍA COLUMNA DE TOTAL, y el
+                                    <!-- Acá terminan las descriptivas. El resto
+                                         de esta fila son los totales del eje y el
+                                         general: los pinta Js/eje-totales.js desde
+                                         pintarTotales(), con la cuenta del pie. -->
+                                </tr>
+                                <tr id="headerEjeCorp2">
+                                    <!-- Las fechas las agrega el JS ANTES de esta
+                                         celda.
+
+                                         ESTA GRILLA NO TENÍA COLUMNA DE TOTAL, y el
                                          pie sí dibujaba una: el pie quedaba una
                                          columna más ancho que el encabezado y corría
                                          el último total del eje. Ahora las dos
@@ -463,13 +488,15 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                                          en el período que se está viendo. Una
                                          factura con pendiente y total en cero es una
                                          que no entra a estas columnas, y eso es
-                                         justamente lo que hay que poder ver. -->
-                                    <th rowspan="2" class="text-end"
+                                         justamente lo que hay que poder ver.
+
+                                         En la fila de las fechas, con total-column,
+                                         por lo mismo que en Supervisoras. -->
+                                    <th class="text-end total-column"
                                         title="Cuánto de esta factura cae en las columnas que se están viendo. En cero significa que no entra a este período, o que no se proyecta.">
                                         TOTAL PERÍODO
                                     </th>
                                 </tr>
-                                <tr id="headerEjeCorp2"></tr>
                             </thead>
                             <tbody id="bodyCorp"></tbody>
                             <tfoot>
@@ -529,13 +556,18 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                                     <th rowspan="2" class="text-end">IMPORTE</th>
                                     <th rowspan="2" class="text-center">DÍA</th>
                                     <th rowspan="2">ESTADO POR MES</th>
-                                    <th id="headerEjeEst" class="text-center"></th>
-                                    <th rowspan="2" class="text-end"
+                                    <!-- Acá terminan las descriptivas: el resto
+                                         lo pinta Js/eje-totales.js. -->
+                                </tr>
+                                <tr id="headerEjeEst2">
+                                    <!-- Las fechas las agrega el JS antes de esta
+                                         celda. Abajo y con total-column, como en
+                                         Supervisoras. -->
+                                    <th class="text-end total-column"
                                         title="Suma las columnas que se están viendo">
                                         TOTAL PERÍODO
                                     </th>
                                 </tr>
-                                <tr id="headerEjeEst2"></tr>
                             </thead>
                             <tbody id="bodyCorpEst"></tbody>
                             <tfoot>
@@ -669,14 +701,19 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                                         BASE
                                     </th>
                                     <th rowspan="2">CONCEPTO</th>
-                                    <th id="headerEjeSoc" class="text-center"></th>
-                                    <!-- Al final, como en las otras dos. -->
-                                    <th rowspan="2" class="text-end"
+                                    <!-- Acá terminan las descriptivas: el resto
+                                         lo pinta Js/eje-totales.js, con los
+                                         totales en pesos del pie. -->
+                                </tr>
+                                <tr id="headerEjeSoc2">
+                                    <!-- Las fechas las agrega el JS antes de esta
+                                         celda. Al final, como en las otras, y
+                                         abajo con total-column. -->
+                                    <th class="text-end total-column"
                                         title="Suma las columnas que se están viendo. La fila en U$S está en dólares; las otras tres, en pesos.">
                                         TOTAL PERÍODO
                                     </th>
                                 </tr>
-                                <tr id="headerEjeSoc2"></tr>
                             </thead>
                             <tbody id="bodySoc"></tbody>
                             <tfoot>

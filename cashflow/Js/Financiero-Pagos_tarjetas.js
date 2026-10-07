@@ -101,7 +101,7 @@
         var s = datos.supervisoras;
         var cols = vistas.columnas();
 
-        encabezadoEje('headerEjeSup', 'headerEjeSup2', cols);
+        encabezadoEje('headerEjeSup2', cols);
 
         texto('supCartel', s.cartel);
 
@@ -127,7 +127,7 @@
                   + esc(s.ventana.rotulo) + '.'
                 : 'No se pudieron leer los gastos de supervisión. Los avisos de arriba dicen '
                   + 'por qué.');
-            pintarTotales('totalesSup', COLS_SUP, s.eje_total.totales, cols);
+            pintarTotales('tablaSup', 'totalesSup', COLS_SUP, s.eje_total.totales, cols);
             texto('supTotal', plata(0));
 
             return;
@@ -173,7 +173,7 @@
 
         cuerpo.innerHTML = html;
 
-        pintarTotales('totalesSup', COLS_SUP, s.eje_total.totales, cols);
+        pintarTotales('tablaSup', 'totalesSup', COLS_SUP, s.eje_total.totales, cols);
         texto('supTotal', plata(vistas.total(s.eje_total.totales)));
         texto('supTotalDetalle', 'efectivo + tarjeta · ' + vistas.periodo());
 
@@ -252,7 +252,7 @@
         var c = datos.corporativas;
         var cols = vistas.columnas();
 
-        encabezadoEje('headerEjeCorp', 'headerEjeCorp2', cols);
+        encabezadoEje('headerEjeCorp2', cols);
 
         var todas = c.eje.filas;
         var visibles = filasCorpVisibles();
@@ -308,7 +308,7 @@
             cuerpo.innerHTML = visibles.map(filaCorp).join('');
         }
 
-        pintarTotales('totalesCorp', COLS_CORP, c.eje.totales, cols);
+        pintarTotales('tablaCorp', 'totalesCorp', COLS_CORP, c.eje.totales, cols);
         dibujarExtras();
         dibujarVtosInertes();
         dibujarEstimaciones();
@@ -782,7 +782,7 @@
         var cols = vistas.columnas();
         var cuerpo = document.getElementById('bodyCorpEst');
 
-        encabezadoEje('headerEjeEst', 'headerEjeEst2', cols);
+        encabezadoEje('headerEjeEst2', cols);
 
         if (!cuerpo) { return; }
 
@@ -823,7 +823,7 @@
             }).join('');
         }
 
-        pintarTotales('totalesCorpEst', COLS_EST, c.eje_estimaciones.totales, cols);
+        pintarTotales('tablaCorpEst', 'totalesCorpEst', COLS_EST, c.eje_estimaciones.totales, cols);
 
         cuerpo.querySelectorAll('.tarj-desmarcar').forEach(function(btn) {
             btn.addEventListener('click', function() {
@@ -1063,7 +1063,7 @@
         var s = datos.socios;
         var cols = vistas.columnas();
 
-        encabezadoEje('headerEjeSoc', 'headerEjeSoc2', cols);
+        encabezadoEje('headerEjeSoc2', cols);
 
         texto('socCartel', s.cartel);
         texto('socCuantas', String(s.filas.length));
@@ -1080,7 +1080,7 @@
             cuerpo.innerHTML = filaVacia(COLS_SOC + cols.length + 1,
                 'No hay ninguna tarjeta de tipo Socio activa. Se dan de alta en '
                 + 'Parámetros › Tarjetas.');
-            pintarTotales('totalesSoc', COLS_SOC, s.eje_total.totales, cols,
+            pintarTotales('tablaSoc', 'totalesSoc', COLS_SOC, s.eje_total.totales, cols,
                 'TOTALES EN PESOS');
 
             return;
@@ -1147,7 +1147,7 @@
 
         cuerpo.innerHTML = html;
 
-        pintarTotales('totalesSoc', COLS_SOC, s.eje_total.totales, cols, 'TOTALES EN PESOS');
+        pintarTotales('tablaSoc', 'totalesSoc', COLS_SOC, s.eje_total.totales, cols, 'TOTALES EN PESOS');
         engancharAbrir(cuerpo);
     }
 
@@ -1375,24 +1375,32 @@
      * LOS MESES SE MARCAN, porque una columna mensual y una diaria no miden lo
      * mismo: la del mes acumula sólo los días que quedaron fuera del tramo diario.
      */
-    function encabezadoEje(idFila1, idFila2, cols) {
-        var uno = document.getElementById(idFila1);
-        var dos = document.getElementById(idFila2);
+    /**
+     * La fila de las fechas.
+     *
+     * TOTAL PERÍODO vive en esta misma fila, al final, y viene del HTML con su
+     * title: se la guarda, se reescriben las fechas y se la vuelve a poner. Así
+     * conserva también las clases que le pone tabla-orden.js si está ordenada.
+     *
+     * La fila de arriba ya no lleva el período -lo dice el cartel- sino los
+     * totales, y esos los pinta pintarTotales().
+     */
+    function encabezadoEje(idFila, cols) {
+        var fila = document.getElementById(idFila);
 
-        if (uno) {
-            uno.setAttribute('colspan', String(cols.length));
-            uno.textContent = vistas.periodo();
-        }
+        if (!fila) { return; }
 
-        if (dos) {
-            dos.innerHTML = cols.map(function(col) {
-                var meta = vistas.meta(col);
+        var total = fila.querySelector('th.total-column');
 
-                return '<th class="text-end' + (vistas.esMes(col) ? ' col-mes' : '')
-                    + (meta && meta.feriado_comercio ? ' col-feriado' : '') + '">'
-                    + esc(vistas.rotulo(col)) + '</th>';
-            }).join('');
-        }
+        fila.innerHTML = cols.map(function(col) {
+            var meta = vistas.meta(col);
+
+            return '<th class="text-end' + (vistas.esMes(col) ? ' col-mes' : '')
+                + (meta && meta.feriado_comercio ? ' col-feriado' : '') + '">'
+                + esc(vistas.rotulo(col)) + '</th>';
+        }).join('');
+
+        if (total) { fila.appendChild(total); }
     }
 
     function celdasEje(eje, cols, negrita) {
@@ -1413,35 +1421,59 @@
      * Corporativas dibujaba una columna de total que el encabezado no tenía— y no se
      * ve como un error: se ve como números.
      *
-     * La cuenta es una sola para las tres tablas: `colsDesc` celdas descriptivas
+     * La cuenta es una sola para las cuatro tablas: `colsDesc` celdas descriptivas
      * juntas en un colspan, las del eje una por una, y el total del período AL FINAL.
      *
+     * Y los mismos números van arriba de cada fecha (Js/eje-totales.js): se leen
+     * UNA VEZ de la fila de totales y se escriben con las mismas dos funciones,
+     * celdaEje() y celdaTotal(). Por eso el pie y la fila de arriba no pueden
+     * decir cosas distintas.
+     *
+     * @param {string} idTabla Id de la <table>
      * @param {string} id Id del <tr> del pie
      * @param {number} colsDesc Columnas descriptivas, antes del eje
      * @param {Object} totales La fila de totales del payload
      * @param {Array} cols Las columnas visibles del eje
      * @param {string} [rotulo] Qué dice la celda del rótulo
      */
-    function pintarTotales(id, colsDesc, totales, cols, rotulo) {
+    function pintarTotales(idTabla, id, colsDesc, totales, cols, rotulo) {
         var pie = document.getElementById(id);
 
         if (!pie) { return; }
 
+        var valores = cols.map(function(col) { return vistas.valor(totales, col); });
+        var total = vistas.total(totales);
+
         var html = '<td colspan="' + colsDesc + '" class="fw-bold text-end">'
             + esc(rotulo || 'TOTALES') + '</td>';
 
-        cols.forEach(function(col) {
-            var v = vistas.valor(totales, col);
-
-            html += '<td class="currency fw-bold">'
-                + (v === 0 || v === null ? '' : plataCorta(v)) + '</td>';
+        valores.forEach(function(v) {
+            html += '<td class="currency fw-bold">' + celdaEje(v) + '</td>';
         });
 
         // El total del período, en la última columna: la misma posición que en las
         // filas de arriba.
-        html += '<td class="currency fw-bold">' + plata(vistas.total(totales)) + '</td>';
+        html += '<td class="currency fw-bold">' + celdaTotal(total) + '</td>';
 
         pie.innerHTML = html;
+
+        pintarEjeTotales(idTabla, {
+            columnas: cols,
+            valores: valores,
+            total: total,
+            formato: celdaEje,
+            formatoTotal: celdaTotal
+        });
+    }
+
+    /** Una celda de totales del eje: corta, y vacía en cero o sin dato */
+    function celdaEje(v) {
+        return (v === 0 || v === null) ? '' : plataCorta(v);
+    }
+
+    /** La del total del período: con signo y decimales, también en cero */
+    function celdaTotal(total) {
+        return plata(total);
     }
 
     /** Busca la fila del eje de una clave. null si esa clave no proyecta nada */
