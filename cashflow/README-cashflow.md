@@ -450,7 +450,7 @@ crearColumnasFijas({
 
 Tres decisiones que importan:
 
-- **Las columnas elegibles se derivan del encabezado, no se declaran.** Son la corrida de celdas con `rowspan` y `colspan="1"` que está antes del grupo del eje temporal. Una lista declarada por pestaña se desactualiza en silencio cuando alguien agrega una columna, y el síntoma sería una columna fija corrida un lugar. El corte en la primera celda de grupo es lo que deja afuera la columna *Total*, que también tiene `rowspan` pero vive al final.
+- **Las columnas elegibles se derivan del encabezado, no se declaran.** Son la corrida de celdas con `rowspan` y `colspan="1"` del principio de la fila de arriba. Una lista declarada por pestaña se desactualiza en silencio cuando alguien agrega una columna, y el síntoma sería una columna fija corrida un lugar. La corrida la corta la primera celda que no cumple: en las tablas con eje, la primera de los **totales de cada fecha** (ver *Los totales arriba del eje*), y en las de Ventas, la celda de grupo del eje. Ese corte es lo que deja afuera cualquier celda con `rowspan` que viniera después, como una columna *Total* puesta arriba y al final.
 - **El desplazamiento se mide, no se escribe.** El ancho lo reparte el navegador según el contenido: una razón social más larga de lo previsto desalinea cualquier valor puesto en el CSS.
 - **En el pie, una celda que se pasa del bloque fijo no se fija.** Donde el rótulo *TOTALES* es una sola celda con `colspan` sobre todas las descriptivas, anclarla a la izquierda estacionaría una banda de ese ancho encima de los importes. En Cobranzas FR y May el pie pasó a tener **una celda por columna** —el `colspan` estaba escrito en duro y se desactualizaba solo—, así que el rótulo va en la primera columna fija y queda a la vista.
 
@@ -534,7 +534,8 @@ importes en formato es-AR (`$ 1.234,56`, `USD -1.000,00`, `8%`), fechas (`dd/mm/
 | | |
 | --- | --- |
 | Columnas ordenables, `thead` de una fila | todas |
-| Columnas ordenables, `thead` de dos filas | las descriptivas (`rowspan="2"`) **más `Total`** |
+| Columnas ordenables, `thead` de dos filas | las descriptivas (`rowspan="2"`) **más `Total`**, reconocida por su clase `total-column` |
+| Los totales de cada fecha, arriba del eje | **no** — son un dato, no un encabezado (ver *Los totales arriba del eje*) |
 | Las 28 columnas de días | **no** — se aprieta una sin querer, y el rótulo es tan chico que no hay dónde poner el indicador |
 | El `tfoot` | **no se ordena nunca**: los totales van al pie |
 | Las filas escondidas por el buscador o por el filtro de fecha | **siguen escondidas**: el `display` viaja con la fila |
@@ -756,6 +757,29 @@ números, cada uno arriba de la fecha equivocada. Es preferible que falte.
 
 La fila queda **fija con el resto del encabezado** al scrollear: la toma la regla de
 `thead tr:first-child` de `.tabla-temporal`, sin un `sticky` propio.
+
+### Dónde está, y dónde no
+
+| Pestaña | Tablas | Desde dónde se pinta | Notas |
+| --- | --- | --- | --- |
+| Echeqs | `tablaEcheqs`, `tablaPrechequeado` | `pintarTotalesCartera()`, `pintarPiePre()` | En Venta Cobrada Anticipada suman **sólo los marcados**, como la grilla del pie |
+| Cobranzas FR · May | `tablaCobranzasFR`, `tablaCobranzasMay` | `generarFilaTotales()` | Las dos solapas y los dos modos son la misma tabla |
+| Exportaciones Tasky | `tablaExportacionesTasky` | `generarFilaTotales()` | |
+| Proveedores Exterior · Crono Nacionalización | `tablaProveedoresExterior`, `tablaCronoNacionalizacion` | `generarFilaTotales()` | Sólo lo positivo, como el pie |
+| Proveedores Locales | `tablaProveedores` | `pintarTotales()` | **Sin total general**: la grilla no tiene columna *Total* |
+| Logística Local | `tablaLogistica` | `pintarPie()` | *Total* bajó a la fila de los meses. El encabezado **no es fijo**: la tabla no está en `.tabla-temporal`, desde antes |
+| Pagos con Tarjetas | `tablaSup`, `tablaCorp`, `tablaCorpEst`, `tablaSoc` | `pintarTotales()`, una para las cuatro | *TOTAL PERÍODO* bajó a la fila de fechas. El pie de Corporativas no sigue a los interruptores, y los de arriba tampoco |
+| **Ventas** | `tablaVenta`, `tablaCobranza` | — | **Afuera de este cambio**, a pedido: siguen con la celda de grupo |
+| **Tablero** | `cfTabla` | — | **Afuera**: la suma de una columna mezclaría ingresos, egresos, subtotales y saldos |
+
+Las tablas **sin eje** —Compras Proyectadas, que tiene una fila por mes; la de cobertura y
+resúmenes de Tarjetas; maestros, historiales y detalles— no tienen nada que totalizar por
+fecha.
+
+`tests/test_tablas_controles.php` verifica las dos direcciones: que cada tabla de la lista
+llame al componente y ya no tenga la celda de grupo, y que **toda tabla con un encabezado de
+dos filas esté en la lista o en la de excluidas, con su motivo**. Una tabla con eje que
+alguien agregue sin engancharla hace fallar la suite.
 
 ### Cómo se verificó la regla
 
