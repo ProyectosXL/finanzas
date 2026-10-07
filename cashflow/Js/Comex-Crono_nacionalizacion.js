@@ -252,9 +252,8 @@
      */
     function generarEncabezados() {
         const headerRowSub = document.getElementById('headerRowSub');
-        const periodoHeader = document.getElementById('periodoHeader');
 
-        if (!headerRowSub || !periodoHeader) {
+        if (!headerRowSub) {
             console.error('Elementos de encabezado no encontrados');
             return;
         }
@@ -283,9 +282,8 @@
         // El total suma EXACTAMENTE las columnas de la vista activa.
         headerHTML += '<th class="total-column">Total</th>';
 
-        periodoHeader.textContent = datosCrono.vistas[vistas.activa()].label;
-        periodoHeader.setAttribute('colspan', String(cols.length + 1));
-
+        // La fila de arriba ya no lleva la leyenda de la vista -la dicen los
+        // botones- sino los totales, y esos los pinta generarFilaTotales().
         headerRowSub.innerHTML = headerHTML;
     }
 
@@ -557,19 +555,53 @@
             + '<td></td><td></td><td></td>'
             + '<td></td>';
 
-        vistas.columnas().forEach(function(col) {
-            var valor = Number(vistas.valor(totales, col)) || 0;
+        /* Los totales del eje se leen UNA VEZ de la fila de totales y van al
+           pie y arriba de cada fecha (Js/eje-totales.js), con el mismo
+           formato. */
+        var cols = vistas.columnas();
+        var tot = totalesEje(totales, cols);
 
+        tot.columnas.forEach(function(valor) {
             html += '<td class="currency ' + (valor > 0 ? 'cell-with-value' : '') + '">'
-                + (valor > 0 ? formatCurrency(valor) : '') + '</td>';
+                + celdaEje(valor) + '</td>';
         });
 
-        var total = vistas.total(totales);
-
-        html += '<td class="currency total-column">'
-            + (total > 0 ? formatCurrency(total) : '') + '</td>';
+        html += '<td class="currency total-column">' + celdaEje(tot.total) + '</td>';
 
         totalsRow.innerHTML = html;
+
+        pintarEjeTotales('tablaCronoNacionalizacion', {
+            columnas: cols,
+            valores: tot.columnas,
+            total: tot.total,
+            formato: celdaEje
+        });
+    }
+
+    /**
+     * Los totales del eje: uno por columna y el general de la vista activa, de
+     * la fila de totales que ya armó el pie -la del payload o la de las filas
+     * visibles-. Es la cuenta del pie Y de la fila de arriba.
+     *
+     * @param {Object} totales Fila de totales, con sus `dias` y `meses`
+     * @param {Array} cols vistas.columnas()
+     * @returns {{columnas: Array, total: number}}
+     */
+    function totalesEje(totales, cols) {
+        return {
+            columnas: cols.map(function(col) {
+                return Number(vistas.valor(totales, col)) || 0;
+            }),
+            total: vistas.total(totales)
+        };
+    }
+
+    /**
+     * El contenido de una celda de totales del eje. Sólo lo positivo: es lo
+     * que el pie mostró siempre, y arriba se tiene que leer igual.
+     */
+    function celdaEje(valor) {
+        return valor > 0 ? formatCurrency(valor) : '';
     }
 
     /**

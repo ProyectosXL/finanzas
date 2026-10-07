@@ -213,6 +213,7 @@ Una fecha vencida es un dato a corregir, y hasta que alguien la corrija ese cont
 | **Dónde filtra** | En el navegador, escondiendo filas. Las 76 ya están cargadas: un round-trip por prender un interruptor sería trabajo puro |
 | **Con el buscador** | Se combinan: los dos terminan en `filtrarTabla()`, así que no pueden quedar diciendo cosas distintas |
 | **El pie** | Se rehace con lo visible, igual que con el buscador |
+| **Los totales de arriba de cada fecha** | Son los del pie, con su mismo formato: se rehacen con él (`Js/eje-totales.js`) |
 | **Las tarjetas** | **No** se tocan: miden el cronograma completo |
 | **El export** | Baja lo que se ve, sin nada extra: `TablaExport` saca del clon las filas con `display: none` |
 | **Qué mira** | El `data-vencida` del `<tr>`, no la clase CSS: la clase es presentación y podría cambiar sin que nadie piense en el filtro |

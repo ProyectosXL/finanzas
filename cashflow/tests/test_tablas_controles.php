@@ -588,6 +588,9 @@ $ejeTotales = [
     'proveedores_exterior.php' => ['Comex-Proveedores_exterior.js', [
         'tablaProveedoresExterior' => "pintarEjeTotales('tablaProveedoresExterior'"
     ]],
+    'crono_nacionalizacion.php' => ['Comex-Crono_nacionalizacion.js', [
+        'tablaCronoNacionalizacion' => "pintarEjeTotales('tablaCronoNacionalizacion'"
+    ]],
 ];
 
 seccion('cada tabla con eje llama al componente');
