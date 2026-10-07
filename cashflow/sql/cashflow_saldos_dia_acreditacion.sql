@@ -36,7 +36,7 @@
    la caja de los locales va a la primera columna y la pantalla avisa que
    script correr.
 
-   El mismo bloque va tambien dentro de sql/cashflow_saldos.sql (4.b):
+   El mismo bloque va tambien dentro de sql/cashflow_saldos.sql (5.c):
    alcanza con correr cualquiera de los dos.
    ============================================================================ */
 
