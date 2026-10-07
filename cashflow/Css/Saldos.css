@@ -108,6 +108,25 @@
     box-shadow: inset 3px 0 0 var(--danger-color, #dc3545);
 }
 
+/* La proxima fecha de acreditacion: "Lun · 12/10", en una sola linea */
+.tab-saldos .sal-fecha-acred {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Un local sin dia de acreditacion: lo que aporta va a la primera columna
+   porque falta un dato. Ambar y no rojo: es atencion -se arregla cargando el
+   dia- y no un numero mal, que es lo que dice el rojo de "no es de ayer". */
+.tab-saldos .sal-sin-dia {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    background: rgba(240, 173, 78, 0.18);
+    color: #8a5a00;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
 /* El saldo que manda salio de una carga manual, no de la consulta */
 .tab-saldos .sal-badge-manual {
     background: rgba(111, 66, 193, 0.1);

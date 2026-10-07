@@ -18,6 +18,7 @@
      5. RO_T_CASHFLOW_SALDOS_LOCAL      saldos de caja de locales (historico)
      5.b RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL  saldo de caja tipeado a mano cuando
                                         la consulta no trajo el cierre
+     5.c DIA_ACREDITACION de cada local, y el dia y la fecha en la foto
      6. Parametros del modulo en RO_T_CASHFLOW_PARAMETROS
 
    ----------------------------------------------------------------------------
@@ -416,6 +417,45 @@ BEGIN
             CONSTRAINT DF_CF_SAL_LOC_ORIGEN DEFAULT ('CONSULTA'),
         CONSTRAINT CK_RO_T_CASHFLOW_SALDOS_LOCAL_ORIGEN
             CHECK (ORIGEN_DATO IN ('CONSULTA', 'MANUAL'));
+END
+GO
+
+/* ----------------------------------------------------------------------------
+   5.c DIA_ACREDITACION por local, y el dia y la fecha efectivos en la foto
+   El dia de la semana (1 = lunes ... 5 = viernes) en que cada local acredita
+   -o envia- su efectivo. La fila Caja Locales imputa el aporte de cada local
+   en su proxima fecha de acreditacion, corrida al habil siguiente si es
+   feriado: la regla vive en Class/Saldos.php. SIN DEFAULT, a proposito: un
+   local sin dia queda en NULL y se avisa. La sincronizacion no lo toca.
+
+   La foto guarda el dia efectivo y la fecha calculada de cada carga, por el
+   mismo motivo que la gestion y la reserva.
+
+   Mismo bloque que sql/cashflow_saldos_dia_acreditacion.sql, que es la
+   migracion para las bases donde este script ya corrio. Alcanza con correr uno.
+   ---------------------------------------------------------------------------- */
+IF COL_LENGTH('dbo.RO_T_CASHFLOW_SALDOS_SUCURSAL', 'DIA_ACREDITACION') IS NULL
+BEGIN
+    ALTER TABLE dbo.RO_T_CASHFLOW_SALDOS_SUCURSAL
+        ADD DIA_ACREDITACION TINYINT NULL
+            CONSTRAINT CK_RO_T_CASHFLOW_SALDOS_SUCURSAL_DIA
+            CHECK (DIA_ACREDITACION BETWEEN 1 AND 5);
+END
+GO
+
+IF COL_LENGTH('dbo.RO_T_CASHFLOW_SALDOS_LOCAL', 'DIA_ACREDITACION') IS NULL
+BEGIN
+    ALTER TABLE dbo.RO_T_CASHFLOW_SALDOS_LOCAL
+        ADD DIA_ACREDITACION TINYINT NULL
+            CONSTRAINT CK_RO_T_CASHFLOW_SALDOS_LOCAL_DIA
+            CHECK (DIA_ACREDITACION BETWEEN 1 AND 5);
+END
+GO
+
+IF COL_LENGTH('dbo.RO_T_CASHFLOW_SALDOS_LOCAL', 'FECHA_ACREDITACION') IS NULL
+BEGIN
+    ALTER TABLE dbo.RO_T_CASHFLOW_SALDOS_LOCAL
+        ADD FECHA_ACREDITACION DATE NULL;
 END
 GO
 

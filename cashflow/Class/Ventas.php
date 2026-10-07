@@ -8,6 +8,7 @@ require_once __DIR__ . '/Cotizacion.php';
 require_once __DIR__ . '/Echeqs.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
+require_once __DIR__ . '/DiasHabiles.php';
 
 /**
  * Ventas
@@ -1558,45 +1559,38 @@ class Ventas {
      * y se sigue extendiendo) no revienta: asume habil de lunes a viernes y
      * registra un warning.
      *
+     * La mecanica y el respaldo son DiasHabiles::siguiente(), los mismos que
+     * usan Tarjetas y la caja de los locales. Lo que decide esta clase es que
+     * hacer si el mapa no tiene ningun habil en el tope: NO LANZA -la pantalla
+     * de Ventas y el tablero no se caen- y sigue con la fecha del tope, pero
+     * AVISA. Antes ese caso pasaba en silencio y dejaba la cobranza en una
+     * fecha que nadie habia calculado.
+     *
      * @param string $fecha Fecha teorica 'Y-m-d'
      * @param array $habiles Mapa 'Y-m-d' => bool
      * @return string Fecha habil 'Y-m-d'
      */
     private function proximoHabil($fecha, $habiles) {
-        $cursor = $fecha;
+        $r = DiasHabiles::siguiente($fecha, $habiles);
 
-        // Tope defensivo: ningun feriado encadena mas de 30 dias no habiles
-        for ($i = 0; $i < 30; $i++) {
-            if (isset($habiles[$cursor])) {
-                if ($habiles[$cursor]) {
-                    return $cursor;
-                }
-            } else {
-                $this->warnCalendario($cursor);
-
-                // Fallback: lunes a viernes se consideran habiles
-                if (intval(date('N', strtotime($cursor))) <= 5) {
-                    return $cursor;
-                }
-            }
-
-            $cursor = date('Y-m-d', strtotime($cursor . ' +1 day'));
+        foreach (DiasHabiles::avisosCalendario($r['faltan']) as $msg) {
+            $this->warnUnaVez($msg);
         }
 
-        return $cursor;
+        if ($r['sin_habil']) {
+            $this->warnUnaVez(DiasHabiles::avisoSinHabil($fecha));
+        }
+
+        return $r['fecha'];
     }
 
     /**
-     * Registra un warning de calendario faltante, deduplicado por mes para no
-     * inundar la respuesta.
-     * @param string $fecha Fecha ausente en RO_T_CALENDARIO
+     * Registra un warning una sola vez: el corrimiento corre por cada fecha
+     * teorica, y el mismo mes sin calendario inundaria la respuesta.
+     * @param string $msg
      * @return void
      */
-    private function warnCalendario($fecha) {
-        $mes = substr($fecha, 0, 7);
-        $msg = 'RO_T_CALENDARIO no tiene datos para ' . $mes
-             . '. Se asumen habiles los dias de lunes a viernes.';
-
+    private function warnUnaVez($msg) {
         if (!in_array($msg, $this->warnings)) {
             $this->warnings[] = $msg;
         }

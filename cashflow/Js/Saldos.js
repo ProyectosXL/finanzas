@@ -525,6 +525,9 @@
                         : (envia ? 'Envía' : 'Deposita')) +
                     '</td>';
 
+            html += '<td class="text-center sal-acreditacion" data-suc="' + f.nro_sucursal + '">' +
+                    celdaAcreditacion(f) + '</td>';
+
             html += (puede
                         ? '<td><input type="number" step="0.01" min="0" ' +
                             'class="form-control form-control-sm text-end sal-reserva" ' +
@@ -537,7 +540,7 @@
         });
 
         if (!datosLocales.filas.length) {
-            html = '<tr><td colspan="7" class="text-center text-muted py-4">' +
+            html = '<tr><td colspan="8" class="text-center text-muted py-4">' +
                    'La consulta no devolvió ningún local.</td></tr>';
         }
 
@@ -575,6 +578,34 @@
                     'consulta: ' + pesos(f.saldo_consulta) +
                     (f.fecha_consulta ? ' del ' + fecha(f.fecha_consulta) : ' sin fecha') +
                     '</div>';
+        }
+
+        return html;
+    }
+
+    /**
+     * La próxima fecha de acreditación del local: "Lun · 12/10", o "sin día"
+     * resaltado. De sólo lectura: el día se elige en Parámetros → Saldos →
+     * Locales. La fecha, la etiqueta y el tooltip los calcula el servidor
+     * (Saldos::proximaFechaAcreditacion), que es la misma cuenta del tablero;
+     * acá sólo se muestran. El tooltip lo pone recalcularLocales(), porque
+     * depende de la gestión que haya en pantalla.
+     */
+    function celdaAcreditacion(f) {
+        var a = f.acreditacion;
+
+        if (!datosLocales.acreditacion_creada || !a) {
+            return '<span class="text-muted" title="Falta correr ' +
+                   'sql/cashflow_saldos_dia_acreditacion.sql: la caja de los locales va entera a ' +
+                   'la primera columna del tablero">—</span>';
+        }
+
+        var html = '<span class="' + (a.dia === null ? 'sal-sin-dia' : 'sal-fecha-acred') + '">' +
+                   escapar(a.etiqueta) + '</span>';
+
+        // Corrida por feriado: se dice debajo, y el detalle va en el tooltip
+        if (a.corrida) {
+            html += '<div class="sal-subtitulo">corrida por feriado</div>';
         }
 
         return html;
@@ -661,6 +692,15 @@
                 fila.classList.toggle('sal-envia', !deposita);
             }
 
+            // El tooltip de la acreditación sigue a la gestión de la pantalla:
+            // en Envía el día es de envío y es informativo. Los dos textos
+            // vienen del servidor.
+            var celdaAcred = document.querySelector('.sal-acreditacion[data-suc="' + f.nro_sucursal + '"]');
+
+            if (celdaAcred && f.acreditacion && datosLocales.acreditacion_creada) {
+                celdaAcred.title = f.acreditacion.explicacion[deposita ? 'DEPOSITA' : 'ENVIA'] || '';
+            }
+
             totales.saldo += saldo;
             totales.reserva += reserva;
             totales.neto += neto;
@@ -677,6 +717,11 @@
         // Cuántos no tienen el cierre de ayer: es lo que hay que ir a tipear.
         if (t.desactualizados > 0) {
             detalle += ' · ' + t.desactualizados + ' sin saldo de ayer';
+        }
+
+        // Cuántos no tienen día de acreditación: es lo que hay que ir a cargar
+        if (datosLocales.acreditacion_creada && t.sin_dia > 0) {
+            detalle += ' · ' + t.sin_dia + ' sin día de acreditación';
         }
 
         if (totales.editados > 0) {
@@ -698,7 +743,7 @@
             '<tr class="sal-fila-total">' +
                 '<td class="fw-bold">TOTALES</td>' +
                 '<td class="text-end fw-bold">' + pesos(totales.saldo) + '</td>' +
-                '<td></td><td></td>' +
+                '<td></td><td></td><td></td>' +
                 '<td class="text-end fw-bold">' + pesos(totales.reserva) + '</td>' +
                 '<td class="text-end fw-bold">' + pesos(totales.neto) + '</td>' +
                 '<td class="text-end fw-bold">' + pesos(totales.aporta) + '</td>' +

@@ -379,9 +379,11 @@ seccion('la serie de caja de locales');
 
 $serieLoc = Saldos::armarSerieLocales($armado['filas'], $h);
 
-// Regla 4: el importe se imputa en la fecha del saldo consultado, sin
-// corrimiento a dia habil ni tratamiento de feriados. El 8/9/2026 es martes;
-// tampoco hay que moverlo si cae fin de semana.
+// Regla 4, para un local SIN dia de acreditacion -estas filas no lo traen-:
+// el importe se imputa en la fecha del saldo consultado, sin corrimiento a dia
+// habil ni tratamiento de feriados. El 8/9/2026 es martes; tampoco hay que
+// moverlo si cae fin de semana. Con dia, cada local va a su proxima fecha de
+// acreditacion: ver test_saldos_acreditacion.php.
 chequear('el importe cae en la fecha del saldo, sin corrimientos',
     1100000.0, $serieLoc['dias']['2026-09-08']);
 chequear('y en ninguna otra columna diaria',

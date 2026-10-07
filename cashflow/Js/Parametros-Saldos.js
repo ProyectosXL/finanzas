@@ -613,6 +613,8 @@
                         '</div>' +
                     '</td>';
 
+            html += '<td class="text-center">' + selectorDia(s, envia) + '</td>';
+
             html += '<td class="text-center sp-fecha">' +
                     (s.FECHA_UPDATE ? fechaHora(s.FECHA_UPDATE) : '—') +
                     Auditoria.icono({ usuario: s.USUARIO, fecha: s.FECHA_UPDATE }) + '</td>';
@@ -620,11 +622,49 @@
         });
 
         document.getElementById('bodySucursales').innerHTML = html ||
-            '<tr><td colspan="5" class="text-center text-muted py-4">' +
+            '<tr><td colspan="6" class="text-center text-muted py-4">' +
             'Todavía no hay locales cargados. Usá <strong>Sincronizar con locales</strong> ' +
             'para traerlos.</td></tr>';
 
         Permisos.soloLectura('bodySucursales');
+    }
+
+    /**
+     * El selector del día de acreditación de un local.
+     *
+     * Sin día es una opción más y no un vacío a completar: un local nuevo entra
+     * así a propósito, y la pestaña Saldos Locales y el tablero lo avisan. Sin
+     * el script que crea la columna, el selector queda apagado diciendo cuál
+     * falta. Qué días valen lo decide el servidor (Saldos::DIAS_ACREDITACION);
+     * esto sólo los muestra.
+     */
+    function selectorDia(s, envia) {
+        var dias = modulo.dias_acreditacion || {};
+        var creada = !!modulo.acreditacion_creada;
+        var actual = (s.DIA_ACREDITACION === null || s.DIA_ACREDITACION === undefined)
+            ? '' : String(s.DIA_ACREDITACION);
+
+        var titulo = !creada
+            ? 'Falta correr sql/cashflow_saldos_dia_acreditacion.sql: mientras tanto el día no se ' +
+              'puede elegir y Caja Locales va entera a la primera columna del tablero'
+            : (envia
+                ? 'Día de envío. Es informativo: el local está en Envía y no aporta al cashflow'
+                : 'El aporte del local va al tablero la próxima vez que cae este día, corrida ' +
+                  'al hábil siguiente si es feriado');
+
+        var html = '<select class="form-select form-select-sm sp-suc-dia" ' +
+                       'data-suc="' + s.NRO_SUCURSAL + '"' + (creada ? '' : ' disabled') +
+                       ' title="' + escapar(titulo) + '">' +
+                       '<option value=""' + (actual === '' ? ' selected' : '') + '>— sin día —</option>';
+
+        Object.keys(dias).forEach(function(n) {
+            var nombre = dias[n].charAt(0).toUpperCase() + dias[n].slice(1);
+
+            html += '<option value="' + n + '"' + (actual === n ? ' selected' : '') + '>' +
+                    escapar(nombre) + '</option>';
+        });
+
+        return html + '</select>';
     }
 
     function guardarSucursales() {
@@ -640,6 +680,15 @@
             var nro = parseInt(i.dataset.suc, 10);
             porNro[nro] = porNro[nro] || { nro_sucursal: nro };
             porNro[nro].reserva = parseFloat(i.value) || 0;
+        });
+
+        // El día viaja sólo si se puede elegir: con el selector apagado (sin
+        // el script) no se manda, y el servidor no tiene nada que descartar.
+        // Vacío es "sin día", y borra uno mal cargado.
+        document.querySelectorAll('.sp-suc-dia:not([disabled])').forEach(function(s) {
+            var nro = parseInt(s.dataset.suc, 10);
+            porNro[nro] = porNro[nro] || { nro_sucursal: nro };
+            porNro[nro].dia_acreditacion = s.value === '' ? null : parseInt(s.value, 10);
         });
 
         var filas = Object.keys(porNro).map(function(k) { return porNro[k]; });
@@ -660,7 +709,14 @@
         }
 
         conBoton('btnGuardarSucursales',
-            pedirJson(URL_PARAM + '?action=saveSucursalesSaldo', { filas: filas }),
+            pedirJson(URL_PARAM + '?action=saveSucursalesSaldo', { filas: filas })
+                .then(function(r) {
+                    // Sin el script el día se descarta y lo demás se guarda:
+                    // se dice, para que no se lea como que el día quedó cargado.
+                    if (r && r.aviso_dia) {
+                        Notificacion.advertencia(r.aviso_dia);
+                    }
+                }),
             'No se pudieron guardar los locales');
     }
 
@@ -678,7 +734,7 @@
                 // hay que poder distinguir de "no funcionó".
                 Notificacion.exito('Locales sincronizados: ' + r.altas + ' nuevos, '
                     + r.reactivadas + ' reactivados, ' + r.bajas + ' inhabilitados.', {
-                    detalle: 'La gestión y la reserva ya cargadas no se tocaron.'
+                    detalle: 'La gestión, la reserva y el día de acreditación ya cargados no se tocaron.'
                 });
 
                 cargar();

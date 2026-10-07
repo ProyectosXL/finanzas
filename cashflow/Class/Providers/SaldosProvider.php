@@ -185,6 +185,11 @@ class SaldosProvider extends CashflowProvider {
      * viven en Saldos::armarSaldosLocales(), que es un helper puro y esta
      * cubierto por las pruebas.
      *
+     * CADA LOCAL EN SU PROXIMA FECHA DE ACREDITACION, si tiene dia cargado; sin
+     * dia, en la primera columna, como antes. La fecha la calcula
+     * armarSaldosLocales() -la misma que muestra la pestana- y la imputa
+     * Saldos::armarSerieLocales().
+     *
      * LA CONSULTA CORRE EN VIVO. Es una consulta contra Tango que se actualiza
      * sola todos los dias; leer la ultima carga guardada mostraria el dato de
      * ayer teniendo el de hoy. Si el servidor de locales no responde, la serie
@@ -228,8 +233,25 @@ class SaldosProvider extends CashflowProvider {
                 Aviso::DANGER, self::SECCION_LOCALES);
         }
 
+        // La proxima fecha de acreditacion de cada local, con el hoy DEL EJE y
+        // por el mismo camino que la pestana: los dos tienen que imputar al
+        // local en la misma fecha. Sin el script, null y todo va a la primera
+        // columna, como antes, con el aviso de que script correr.
+        $acreditacion = null;
+
+        try {
+            $contexto = $saldos->contextoAcreditacion($h->hoy());
+            $acreditacion = $contexto['acreditacion'];
+
+            $this->avisarTodos($contexto['avisos'], Aviso::WARNING, self::SECCION_LOCALES);
+        } catch (Throwable $e) {
+            $this->avisar('No se pudo calcular la fecha de acreditación de los locales ('
+                . $e->getMessage() . '), así que todo lo que aportan se imputa en la primera '
+                . 'columna.', Aviso::DANGER, self::SECCION_LOCALES);
+        }
+
         $armado = Saldos::armarSaldosLocales($consulta, $params, $manuales,
-            Saldos::ayer($h->hoy()));
+            Saldos::ayer($h->hoy()), $acreditacion);
 
         $this->avisarTodos(isset($armado['avisos_con_nivel'])
             ? $armado['avisos_con_nivel'] : $armado['avisos'], Aviso::WARNING, self::SECCION_LOCALES);

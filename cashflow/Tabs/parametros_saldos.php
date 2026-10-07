@@ -356,6 +356,9 @@ $edita = AuthCashflow::puedeEditar('parametros', 'SALDOS');
                         Gestión y reserva de caja por local. Son los valores por defecto de la
                         pestaña Saldos Locales, y se pueden pisar en cada carga.
                         <strong>Sólo los locales en Deposita</strong> entran al cashflow.
+                        El <strong>día de acreditación</strong> se elige sólo acá: el aporte de
+                        cada local va al tablero en la próxima vez que cae ese día, corrida al
+                        hábil siguiente si es feriado. En Envía es el día de envío, informativo.
                     </small>
                 </div>
                 <div class="d-flex gap-2">
@@ -387,6 +390,7 @@ $edita = AuthCashflow::puedeEditar('parametros', 'SALDOS');
                                 <th>Local</th>
                                 <th class="text-center" style="width: 160px;">Gestión</th>
                                 <th class="text-center" style="width: 190px;">Monto de reserva de caja</th>
+                                <th class="text-center" style="width: 190px;">Día de acreditación / envío</th>
                                 <th class="text-center" style="width: 150px;">Última edición</th>
                             </tr>
                         </thead>

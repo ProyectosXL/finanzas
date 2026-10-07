@@ -23,13 +23,18 @@
  * no comparten codigo, y agregarle la de adelante lo convertiria en "las fechas
  * de pago, para los dos lados", que ya no describe una regla sino un cajon.
  *
- * ES LA MISMA DIRECCION QUE VENTAS, Y TAMPOCO COMPARTE CODIGO CON ELLA
- * --------------------------------------------------------------------
+ * ES LA MISMA DIRECCION QUE VENTAS, Y COMPARTE CON ELLA LA MECANICA
+ * ------------------------------------------------------------------
  * Ventas::proximoHabil() corre una acreditacion de cobranza al proximo dia
- * habil, por un motivo distinto -el banco no acredita antes de poder hacerlo- y
- * es privado. Que dos reglas coincidan hoy en la direccion no las hace la misma
- * regla: si manana el debito de una tarjeta pasa a adelantarse, una sola
- * funcion compartida moveria tambien las acreditaciones de Ventas.
+ * habil por un motivo distinto -el banco no acredita antes de poder hacerlo-.
+ * Que dos reglas coincidan hoy en la direccion no las hace la misma regla, y
+ * por eso lo que se comparte NO es la decision sino la mecanica: las dos llaman
+ * a DiasHabiles::siguiente(). Si manana el debito de una tarjeta pasa a
+ * adelantarse, esta clase deja de llamarla y Ventas no se entera. Antes eran
+ * dos copias letra por letra, y ya se habian separado en el texto del aviso.
+ *
+ * Lo que NO se comparte es que hacer cuando el mapa no tiene ningun habil en
+ * treinta dias: aca se lanza -ver habilSiguiente()- y Ventas sigue con aviso.
  *
  * LO QUE SI SE COMPARTE ES EL CALENDARIO, y eso es lo que no puede estar escrito
  * dos veces: los dias habiles salen de Ventas::getDiasHabiles() -la unica
@@ -54,11 +59,13 @@
  * ----------------------------------------------------------------------------
  * RO_T_CALENDARIO esta poblada hasta el 31/12/2027. Una fecha que no este no
  * rompe: se asume habil de lunes a viernes y se deja un aviso, deduplicado por
- * mes. Es literalmente lo que hacen Ventas::proximoHabil() y
- * CronogramaPagos::habilAnterior(), y tiene que ser lo mismo: dos fallbacks
- * distintos pondrian las fechas en calendarios que no coinciden justo en los
- * meses en los que no hay dato.
+ * mes. El respaldo vive en DiasHabiles y es el mismo de Ventas;
+ * CronogramaPagos::habilAnterior() aplica el mismo criterio hacia atras. Tiene
+ * que ser uno: dos fallbacks distintos pondrian las fechas en calendarios que
+ * no coinciden justo en los meses en los que no hay dato.
  */
+require_once __DIR__ . '/DiasHabiles.php';
+
 class TarjetasVencimiento {
 
     /** Rango valido del dia del mes. El 31 vale: lo acota el mes, no el campo */
@@ -70,10 +77,10 @@ class TarjetasVencimiento {
      *
      * Ningun feriado encadena treinta dias no habiles. Si se llega al tope el
      * mapa de habiles esta mal, y devolver la fecha del tope escondería el
-     * problema detras de una fecha plausible. Mismo valor y mismo criterio que
-     * CronogramaPagos::MAX_CORRIMIENTO.
+     * problema detras de una fecha plausible. Es el de DiasHabiles, que es el
+     * que corre la fecha; el mismo valor que CronogramaPagos::MAX_CORRIMIENTO.
      */
-    const MAX_CORRIMIENTO = 30;
+    const MAX_CORRIMIENTO = DiasHabiles::MAX_CORRIMIENTO;
 
     /**
      * Cuantos dias despues de fin() puede caer un vencimiento corrido.
@@ -127,40 +134,25 @@ class TarjetasVencimiento {
      * Corre una fecha al primer dia habil SIGUIENTE, si no es habil.
      *
      * Hermana de CronogramaPagos::habilAnterior() y deliberadamente separada de
-     * ella: ver el encabezado.
+     * ella: ver el encabezado. La mecanica es DiasHabiles::siguiente().
+     *
+     * LANZA SI NO HAY NINGUN HABIL EN EL TOPE. DiasHabiles no lanza -devuelve
+     * la fecha del tope con una marca- porque Ventas no puede; aca la fecha del
+     * tope escondería un mapa roto detras de un vencimiento plausible, asi que
+     * se corta, como siempre se corto.
      *
      * @param string $fecha 'Y-m-d'
      * @param array $habiles Mapa 'Y-m-d' => bool
      * @return array ['fecha' => 'Y-m-d', 'corrida' => bool, 'faltan' => ['Y-m']]
      */
     public static function habilSiguiente($fecha, $habiles) {
-        $cursor = substr((string) $fecha, 0, 10);
-        $faltan = [];
+        $r = DiasHabiles::siguiente($fecha, $habiles);
 
-        for ($i = 0; $i < self::MAX_CORRIMIENTO; $i++) {
-            if (isset($habiles[$cursor])) {
-                if ($habiles[$cursor]) {
-                    return ['fecha' => $cursor, 'corrida' => ($i > 0), 'faltan' => $faltan];
-                }
-            } else {
-                $mes = substr($cursor, 0, 7);
-
-                if (!in_array($mes, $faltan, true)) {
-                    $faltan[] = $mes;
-                }
-
-                // Fallback: lunes a viernes se consideran habiles, igual que
-                // Ventas y que el cronograma de pagos.
-                if (intval(date('N', strtotime($cursor))) <= 5) {
-                    return ['fecha' => $cursor, 'corrida' => ($i > 0), 'faltan' => $faltan];
-                }
-            }
-
-            $cursor = date('Y-m-d', strtotime($cursor . ' +1 day'));
+        if ($r['sin_habil']) {
+            throw new Exception(DiasHabiles::avisoSinHabil($fecha));
         }
 
-        throw new Exception('No se encontró ningún día hábil en los ' . self::MAX_CORRIMIENTO
-            . ' días siguientes a ' . $fecha . '. Revisá RO_T_CALENDARIO.');
+        return ['fecha' => $r['fecha'], 'corrida' => $r['corrida'], 'faltan' => $r['faltan']];
     }
 
     /**
@@ -394,25 +386,14 @@ class TarjetasVencimiento {
     }
 
     /**
-     * El aviso de calendario faltante, con la MISMA redaccion que usan Ventas y
-     * el cronograma de pagos.
-     *
-     * Misma redaccion a proposito: es el mismo hecho -RO_T_CALENDARIO no llega
-     * hasta ahi- y dos textos distintos para la misma causa se leen como dos
-     * problemas.
+     * El aviso de calendario faltante. La redaccion es la de DiasHabiles, que
+     * es la misma que usan Ventas y el cronograma de pagos: ver alli por que.
      *
      * @param array $meses Lista de 'Y-m'
      * @return array Lista de mensajes
      */
     public static function avisosCalendario($meses) {
-        $avisos = [];
-
-        foreach ($meses as $mes) {
-            $avisos[] = 'RO_T_CALENDARIO no tiene datos para ' . $mes
-                . '. Se asumen hábiles los días de lunes a viernes.';
-        }
-
-        return $avisos;
+        return DiasHabiles::avisosCalendario($meses);
     }
 
     /**

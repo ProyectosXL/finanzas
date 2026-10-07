@@ -6,6 +6,7 @@ require_once __DIR__ . '/Parametros.php';
 require_once __DIR__ . '/Fondos.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
+require_once __DIR__ . '/DiasHabiles.php';
 
 /**
  * Saldos
@@ -103,6 +104,19 @@ class Saldos {
     const DEPOSITA = 'DEPOSITA';
     const ENVIA = 'ENVIA';
 
+    /**
+     * Los dias de acreditacion posibles, ISO como date('N'): de lunes a
+     * viernes, que es lo que permite el CHECK de la columna. Un banco no
+     * acredita en fin de semana, asi que un sabado no es un dia que se pueda
+     * elegir: seria siempre un lunes disfrazado.
+     */
+    const DIAS_ACREDITACION = [1 => 'lunes', 2 => 'martes', 3 => 'miércoles', 4 => 'jueves',
+                               5 => 'viernes'];
+
+    /** Como se abrevia el dia en la celda. Incluye el fin de semana: es de la fecha final */
+    const DIAS_ABREV = [1 => 'Lun', 2 => 'Mar', 3 => 'Mié', 4 => 'Jue', 5 => 'Vie',
+                        6 => 'Sáb', 7 => 'Dom'];
+
     /** Cuenta contable de SBA05 con el efectivo de tesoreria de casa central */
     const PARAM_CTA_TESORERIA = 'saldos_cta_tesoreria';
 
@@ -117,6 +131,9 @@ class Saldos {
 
     /** @var bool|null Cache del chequeo de la tabla de saldos manuales */
     private $manuales = null;
+
+    /** @var bool|null Cache del chequeo de las columnas del dia de acreditacion */
+    private $acreditacion = null;
 
     /** @var Fondos|null Puerta al modulo de fondos; la resuelve fondos() */
     private $fondos = null;
@@ -301,6 +318,196 @@ class Saldos {
         return date('Y-m-d', strtotime(substr((string) $hoy, 0, 10) . ' -1 day'));
     }
 
+    /* --------------------------------------------------------------------
+       EL DIA DE ACREDITACION DE UN LOCAL
+
+       Cada local acredita su efectivo -o lo envia, si esta en ENVIA- un dia
+       fijo de la semana, y el aporte del local se imputa en su PROXIMA FECHA
+       DE ACREDITACION y no en la primera columna. La regla es una sola,
+       proximaFechaAcreditacion(), y la usan la pestana, el tablero y la foto.
+       -------------------------------------------------------------------- */
+
+    /**
+     * El dia validado.
+     *
+     * LA VALIDACION QUE VALE ES ESTA, no la del <select>: el endpoint es
+     * alcanzable sin pasar por la pantalla. El CHECK de la columna es la
+     * tercera red.
+     *
+     * Vacio o null es "sin dia", y es un valor valido: es como se borra un dia
+     * mal cargado, y como queda un local nuevo.
+     *
+     * @param mixed $dia
+     * @return int|null 1..5, o null si no tiene
+     * @throws Exception si no es un entero de lunes a viernes
+     */
+    public static function validarDiaAcreditacion($dia) {
+        if ($dia === null || $dia === '') {
+            return null;
+        }
+
+        if (!is_numeric($dia) || intval($dia) != floatval($dia)
+            || !isset(self::DIAS_ACREDITACION[intval($dia)])) {
+            throw new Exception('El día de acreditación tiene que ser de lunes (1) a viernes (5). '
+                . 'Se recibió "' . $dia . '".');
+        }
+
+        return intval($dia);
+    }
+
+    /**
+     * La proxima fecha de acreditacion de un local.
+     *
+     * LA REGLA, EN DOS PASOS Y EN ESTE ORDEN:
+     *
+     *   1. la primera vez que ese dia de la semana cae HOY O DESPUES. Si hoy es
+     *      ese dia, es hoy: el deposito de hoy todavia no se acredito.
+     *   2. si esa fecha no es habil, el primer habil SIGUIENTE.
+     *
+     * VA HACIA ADELANTE, como Ventas y al reves que CronogramaPagos: es una
+     * acreditacion, no un pago. El banco no acredita un dia que no opera, asi
+     * que la plata entra despues; un pago, en cambio, se adelanta para cumplir.
+     * El corrimiento es DiasHabiles::siguiente(), el mismo de Ventas y de las
+     * tarjetas, con el mismo respaldo de lunes a viernes cuando la fecha no
+     * esta en RO_T_CALENDARIO: dos respaldos distintos darian dos calendarios.
+     *
+     * DEVUELVE LAS DOS FECHAS, la teorica y la final: la teorica explica de
+     * donde sale la final -"el lunes 12/10 es feriado: pasa al martes 13/10"-
+     * y sin ella la pantalla mostraria un martes que nadie puede justificar.
+     * Mismo criterio que TarjetasVencimiento::delMes().
+     *
+     * SIN DIA DEVUELVE null, y con el mapa roto -ningun habil en el tope- la
+     * fecha es null con 'sin_habil': un dato que falta es null y un aviso,
+     * nunca la fecha del tope disfrazada de acreditacion.
+     *
+     * Estatica y pura. Hoy se inyecta, para que las pruebas no caduquen.
+     *
+     * @param int|null $dia 1..5, o null
+     * @param string $hoy 'Y-m-d'
+     * @param array $habiles Mapa 'Y-m-d' => bool
+     * @return array|null ['dia', 'teorica', 'fecha' => 'Y-m-d'|null, 'corrida',
+     *                     'faltan' => ['Y-m'], 'sin_habil'], o null sin dia
+     */
+    public static function proximaFechaAcreditacion($dia, $hoy, $habiles) {
+        $dia = self::validarDiaAcreditacion($dia);
+
+        if ($dia === null) {
+            return null;
+        }
+
+        $hoy = substr((string) $hoy, 0, 10);
+        $faltanDias = ($dia - intval(date('N', strtotime($hoy))) + 7) % 7;
+        $teorica = date('Y-m-d', strtotime($hoy . ' +' . $faltanDias . ' day'));
+
+        $r = DiasHabiles::siguiente($teorica, $habiles);
+
+        return [
+            'dia' => $dia,
+            'teorica' => $teorica,
+            'fecha' => $r['sin_habil'] ? null : $r['fecha'],
+            'corrida' => $r['sin_habil'] ? false : $r['corrida'],
+            'faltan' => $r['faltan'],
+            'sin_habil' => $r['sin_habil']
+        ];
+    }
+
+    /**
+     * Desde y hasta que dia hay que leer el calendario para resolver la
+     * proxima fecha de cualquier local.
+     *
+     * La teorica cae como mucho seis dias despues de hoy, y el corrimiento
+     * puede sumar hasta DiasHabiles::MAX_CORRIMIENTO. Pedir el rango entero
+     * cuesta lo mismo y evita que el respaldo se dispare por un rango corto,
+     * que dejaria un aviso de calendario faltante que no describe nada real.
+     *
+     * @param string $hoy 'Y-m-d'
+     * @return array ['desde' => 'Y-m-d', 'hasta' => 'Y-m-d']
+     */
+    public static function rangoCalendarioAcreditacion($hoy) {
+        $hoy = substr((string) $hoy, 0, 10);
+
+        return [
+            'desde' => $hoy,
+            'hasta' => date('Y-m-d', strtotime($hoy . ' +' . (6 + DiasHabiles::MAX_CORRIMIENTO)
+                . ' day'))
+        ];
+    }
+
+    /**
+     * La celda de la pantalla: "Lun · 12/10", o "sin día".
+     *
+     * El dia que se muestra es el de la FECHA FINAL, no el cargado: si el
+     * lunes es feriado la plata entra el martes, y la celda tiene que decir
+     * martes. Lo cargado y el corrimiento los explica el tooltip.
+     *
+     * @param array|null $r Lo que devolvio proximaFechaAcreditacion()
+     * @return string
+     */
+    public static function etiquetaAcreditacion($r) {
+        if ($r === null) {
+            return 'sin día';
+        }
+
+        if ($r['fecha'] === null) {
+            return 'sin fecha';
+        }
+
+        $dia = intval(date('N', strtotime($r['fecha'])));
+
+        return self::DIAS_ABREV[$dia] . ' · ' . self::diaMes($r['fecha']);
+    }
+
+    /**
+     * De donde sale la fecha, en una linea, para el tooltip de la celda.
+     *
+     * LO ARMA EL BACKEND porque es la explicacion de una cuenta que hace el
+     * backend: con el texto en el JS, cambiar la regla obligaria a cambiarla en
+     * dos lados. Mismo criterio que TarjetasVencimiento::explicar().
+     *
+     * En ENVIA el dia es el de ENVIO y es informativo: el local no aporta al
+     * cashflow. Se dice, para que nadie busque esa fecha en el tablero.
+     *
+     * @param array|null $r Lo que devolvio proximaFechaAcreditacion()
+     * @param string $gestion DEPOSITA o ENVIA
+     * @return string
+     */
+    public static function explicarAcreditacion($r, $gestion) {
+        $envia = (strtoupper(trim((string) $gestion)) === self::ENVIA);
+        $que = $envia ? 'envío' : 'acreditación';
+        $informativo = $envia
+            ? ' Es informativo: el local está en Envía y no aporta al cashflow.'
+            : '';
+
+        if ($r === null) {
+            return 'Sin día de ' . $que . ' cargado'
+                . ($envia ? '.' : ': lo que aporta se imputa hoy, en la primera columna del tablero.')
+                . ' Se carga en Parámetros → Saldos → Locales.' . $informativo;
+        }
+
+        $cargado = self::DIAS_ACREDITACION[$r['dia']];
+
+        if ($r['sin_habil']) {
+            return 'El día de ' . $que . ' es el ' . $cargado . ', pero '
+                . lcfirst(DiasHabiles::avisoSinHabil($r['teorica'])) . $informativo;
+        }
+
+        if ($r['corrida']) {
+            $texto = 'El ' . $cargado . ' ' . self::diaMes($r['teorica']) . ' es feriado: pasa al '
+                . self::DIAS_ACREDITACION[intval(date('N', strtotime($r['fecha'])))] . ' '
+                . self::diaMes($r['fecha']) . '.';
+        } else {
+            $texto = ($envia ? 'Envía' : 'Acredita') . ' el ' . $cargado . ' '
+                . self::diaMes($r['fecha']) . '.';
+        }
+
+        if (!empty($r['faltan'])) {
+            $texto .= ' RO_T_CALENDARIO no tiene datos para ' . implode(', ', $r['faltan'])
+                . ': se asumió hábil de lunes a viernes.';
+        }
+
+        return $texto . $informativo;
+    }
+
     /**
      * Superpone los saldos tipeados a mano sobre lo que trajo la consulta.
      *
@@ -460,14 +667,27 @@ class Saldos {
      * llegado hoy. Es la senal de que hay que tipear el saldo, y se decide aca
      * -y no en el navegador- para que el tablero pueda avisarlo tambien.
      *
+     * Y CADA FILA TRAE SU PROXIMA FECHA DE ACREDITACION, de
+     * proximaFechaAcreditacion(), con la etiqueta y la explicacion que
+     * muestra la pantalla. Se calcula aca para que la pestana, el tablero y la
+     * foto la saquen del mismo lugar. Sin $acreditacion -el script no se
+     * corrio- la fila la trae en null y no se avisa nada por local: el aviso
+     * de que script falta lo da contextoAcreditacion().
+     *
+     * Los locales en DEPOSITA sin dia se avisan TODOS, aporten o no: el dato
+     * falta igual, y un local que hoy aporta cero porque tiene la caja bajo la
+     * reserva puede aportar manana.
+     *
      * @param array $filasConsulta Filas crudas de la consulta de locales
-     * @param array $params Mapa NRO_SUCURSAL => ['GESTION' => ..., 'RESERVA' => ...]
+     * @param array $params Mapa NRO_SUCURSAL => ['GESTION', 'RESERVA', 'DIA_ACREDITACION']
      * @param array $manuales Mapa NRO_SUCURSAL => ultimo saldo manual, o vacio
      * @param string|null $ayer 'Y-m-d' del cierre esperado; null para no marcar
+     * @param array|null $acreditacion ['hoy' => 'Y-m-d', 'habiles' => mapa] de
+     *        contextoAcreditacion(), o null sin el script
      * @return array ['filas' => [...], 'totales' => [...], 'avisos' => [...]]
      */
     public static function armarSaldosLocales($filasConsulta, $params, $manuales = [],
-                                              $ayer = null) {
+                                              $ayer = null, $acreditacion = null) {
         $agrupadas = self::aplicarSaldosManuales(
             self::agruparPorSucursal($filasConsulta), $manuales);
         $params = is_array($params) ? $params : [];
@@ -477,6 +697,9 @@ class Saldos {
         $avisos = [];
         $sinParametro = [];
         $desactualizados = [];
+        $sinDia = [];
+        $sinHabil = [];
+        $faltanCalendario = [];
 
         $totales = [
             'saldo' => 0,
@@ -487,7 +710,8 @@ class Saldos {
             'depositan' => 0,
             'envian' => 0,
             'manuales' => 0,
-            'desactualizados' => 0
+            'desactualizados' => 0,
+            'sin_dia' => 0
         ];
 
         foreach ($agrupadas as $nro => $s) {
@@ -522,6 +746,54 @@ class Saldos {
             $desactualizado = ($ayer !== null)
                 && ($s['fecha_saldo'] === null || $s['fecha_saldo'] < $ayer);
 
+            $acred = null;
+
+            if ($acreditacion !== null) {
+                $dia = ($tieneParam && isset($params[$nro]['DIA_ACREDITACION']))
+                    ? $params[$nro]['DIA_ACREDITACION'] : null;
+
+                // Un dia invalido en la tabla no puede pasar el CHECK; si
+                // llegara igual, se trata como sin dia en vez de tumbar la
+                // pestana y el tablero.
+                try {
+                    $r = self::proximaFechaAcreditacion($dia, $acreditacion['hoy'],
+                        $acreditacion['habiles']);
+                } catch (Exception $e) {
+                    $r = null;
+                }
+
+                $acred = [
+                    'dia' => $r === null ? null : $r['dia'],
+                    'fecha' => $r === null ? null : $r['fecha'],
+                    'teorica' => $r === null ? null : $r['teorica'],
+                    'corrida' => $r !== null && $r['corrida'],
+                    'sin_habil' => $r !== null && $r['sin_habil'],
+                    'etiqueta' => self::etiquetaAcreditacion($r),
+                    // Las dos explicaciones: la gestion se puede cambiar en la
+                    // pantalla antes de guardar, y el tooltip tiene que seguirla.
+                    'explicacion' => [
+                        self::DEPOSITA => self::explicarAcreditacion($r, self::DEPOSITA),
+                        self::ENVIA => self::explicarAcreditacion($r, self::ENVIA)
+                    ]
+                ];
+
+                if ($r === null) {
+                    $totales['sin_dia']++;
+
+                    if ($deposita) {
+                        $sinDia[] = $nro . ' ' . $s['desc_sucursal'];
+                    }
+                } else {
+                    if ($r['sin_habil']) {
+                        $sinHabil[] = $nro . ' ' . $s['desc_sucursal'];
+                    }
+
+                    foreach ($r['faltan'] as $mes) {
+                        $faltanCalendario[$mes] = true;
+                    }
+                }
+            }
+
             $filas[] = [
                 'nro_sucursal' => $nro,
                 'desc_sucursal' => $s['desc_sucursal'],
@@ -542,7 +814,9 @@ class Saldos {
                 // aparte de 'neto' para que la pantalla pueda mostrar los dos y
                 // se vea POR QUE un neto de -50.000 aporta cero.
                 'aporta' => $aporta,
-                'sin_parametro' => !$tieneParam
+                'sin_parametro' => !$tieneParam,
+                // null sin el script; con el, la proxima fecha y como se llego
+                'acreditacion' => $acred
             ];
 
             $totales['saldo'] += $s['saldo'];
@@ -596,6 +870,28 @@ class Saldos {
                 . 'mano en Saldos → Saldos Locales.');
         }
 
+        // Atencion: plata que entra al tablero en otra columna que la suya, y
+        // se arregla cargando el dia.
+        if (!empty($sinDia)) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, count($sinDia) . ' local(es) en Deposita no '
+                . 'tienen día de acreditación cargado: ' . implode(', ', $sinDia) . '. Lo que '
+                . 'aportan se imputa hoy, en la primera columna. Cargalo en Parámetros → Saldos → '
+                . 'Locales.');
+        }
+
+        // Critico: es un calendario roto, no una decision de nadie. El local
+        // se imputa como si no tuviera dia, y se dice.
+        if (!empty($sinHabil)) {
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, 'No se encontró ningún día hábil en los '
+                . DiasHabiles::MAX_CORRIMIENTO . ' días siguientes al día de acreditación de: '
+                . implode(', ', $sinHabil) . '. Revisá RO_T_CALENDARIO; mientras tanto lo que '
+                . 'aportan se imputa hoy.');
+        }
+
+        foreach (DiasHabiles::avisosCalendario(array_keys($faltanCalendario)) as $a) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $a);
+        }
+
         return ['filas' => $filas, 'totales' => $totales, 'avisos' => Aviso::textos($avisos),
                 'avisos_con_nivel' => $avisos];
     }
@@ -603,11 +899,32 @@ class Saldos {
     /**
      * Serie del Cashflow para la caja de locales.
      *
-     * LA FECHA DE IMPUTACION ES LA FECHA DEL SALDO, SIN CORRIMIENTOS. No hay
-     * regla de dia habil ni calendario de feriados: cuando la sucursal deposita,
-     * el movimiento queda registrado en Tango, y como la consulta corre todos
-     * los dias el dato se actualiza solo. Un saldo de domingo se imputa el
-     * domingo; correrlo al lunes inventaria una fecha que el sistema ya conoce.
+     * CADA LOCAL VA EN SU PROXIMA FECHA DE ACREDITACION. Lo que aporta un local
+     * en DEPOSITA es plata que esta en su cajon y que entra al banco el dia que
+     * el local deposita: con el dia cargado, ese es el dia en que el tablero
+     * tiene que verla, y no hoy. La fecha la calculo armarSaldosLocales() con
+     * proximaFechaAcreditacion() -la primera vez que ese dia de la semana cae
+     * hoy o despues, corrida al habil SIGUIENTE si es feriado- y viene en
+     * $f['acreditacion']['fecha']: aca no se vuelve a calcular, asi la pestana
+     * y el tablero no pueden discrepar. Cada local va a su columna, asi que la
+     * serie se reparte en varias.
+     *
+     * Antes la regla era "la fecha del saldo, sin corrimientos". Dejo de valer
+     * para esta serie porque la fecha del saldo dice cuando se CONTO la plata,
+     * no cuando LLEGA al banco; el corrimiento por feriado es el de una
+     * acreditacion, el mismo de Ventas.
+     *
+     * LO QUE NO CAMBIA: el importe -el aporte de armarSaldosLocales(), con el
+     * neto, la reserva, el saldo manual y su precedencia- y por lo tanto el
+     * total de la serie. Solo cambia la columna en la que cae.
+     *
+     * UN LOCAL SIN DIA -o sin el script, o con un calendario roto- SE IMPUTA
+     * COMO SIEMPRE: en la fecha del saldo, y si es anterior al eje, en la
+     * primera columna (destinoEnEje()). armarSaldosLocales() ya lo avisa.
+     *
+     * UN SALDO SIN FECHA VA A sin_fecha AUNQUE EL LOCAL TENGA DIA: el importe
+     * es el mismo de siempre, y si antes no entraba, imputarlo ahora cambiaria
+     * el total de la serie, que es lo que esta regla no toca.
      *
      * UN SALDO CON FECHA ANTERIOR AL EJE SE IMPUTA EN LA PRIMERA COLUMNA, igual
      * que el disponible inicial. La consulta NO devuelve depositos: devuelve el
@@ -619,9 +936,10 @@ class Saldos {
      * importe no aparece en ningun otro lado del tablero, porque el saldo
      * bancario de la pestana 1 recien lo va a mostrar cuando se acredite.
      *
-     * Reubicar NO es el corrimiento que el relevamiento prohibe: eso era mover
-     * una fecha DENTRO del eje a otra por dia habil o feriado, y no se hace. El
-     * aviso dice de que fecha es el saldo, para que nadie lo lea como de hoy.
+     * El aviso dice de que fecha es el saldo, para que nadie lo lea como de hoy.
+     *
+     * Una fecha posterior al eje -de acreditacion o de saldo- queda en
+     * fuera_horizonte y el motor la informa, igual que siempre.
      *
      * @param array $filas Filas devueltas por armarSaldosLocales()['filas']
      * @param Horizonte $h
@@ -654,6 +972,20 @@ class Saldos {
 
             if ($fecha === null) {
                 $serie['sin_fecha'] += $importe;
+                continue;
+            }
+
+            $acreditacion = Horizonte::normalizarFecha(
+                isset($f['acreditacion']['fecha']) ? $f['acreditacion']['fecha'] : null);
+
+            if ($acreditacion !== null) {
+                // Con dia: su proxima fecha de acreditacion. Nunca es anterior
+                // a hoy, salvo que la haya calculado otro "hoy"; destinoEnEje()
+                // lo cubre igual que a cualquier fecha.
+                if (!$h->acumular($serie, self::destinoEnEje($acreditacion, $hoy), $importe)) {
+                    $serie['fuera_horizonte'] += $importe;
+                }
+
                 continue;
             }
 
@@ -717,18 +1049,8 @@ class Saldos {
                 continue;
             }
 
-            $gestion = strtoupper(trim((string) (isset($o['gestion']) ? $o['gestion'] : '')));
-
-            if ($gestion !== self::DEPOSITA && $gestion !== self::ENVIA) {
-                throw new Exception('Gestión inválida para el local ' . $nro . ': "' . $gestion
-                    . '". Sólo puede ser Deposita o Envía.');
-            }
-
-            $reserva = floatval(isset($o['reserva']) ? $o['reserva'] : 0);
-
-            if ($reserva < 0) {
-                throw new Exception('La reserva del local ' . $nro . ' no puede ser negativa');
-            }
+            $gestion = self::validarGestion(isset($o['gestion']) ? $o['gestion'] : '', $nro);
+            $reserva = self::validarReserva(isset($o['reserva']) ? $o['reserva'] : 0, $nro);
 
             $antes = isset($params[$nro]) ? $params[$nro] : null;
 
@@ -736,11 +1058,16 @@ class Saldos {
                 || (strtoupper(trim((string) $antes['GESTION'])) !== $gestion)
                 || (abs(floatval($antes['RESERVA']) - $reserva) > 0.0001);
 
-            $params[$nro] = [
+            // SE PISAN SOLO LOS DOS CAMPOS QUE EDITA ESTA PANTALLA, y el resto de
+            // la fila queda. Rearmarla con solo gestion y reserva le borraba el
+            // dia de acreditacion -que se edita en Parametros y no aca- a todos
+            // los locales que manda la pantalla, que son todos, y la foto del
+            // dia se guardaba sin dia.
+            $params[$nro] = array_merge(is_array($antes) ? $antes : [], [
                 'NRO_SUCURSAL' => $nro,
                 'GESTION' => $gestion,
                 'RESERVA' => $reserva
-            ];
+            ]);
 
             if ($distinto) {
                 $cambios[] = [
@@ -755,6 +1082,130 @@ class Saldos {
     }
 
     /**
+     * Que locales cambiaron en el guardado de Parametros -> Saldos -> Locales.
+     *
+     * Es el mismo diff que resolverOverrides() hace para la pestana 2, por el
+     * mismo motivo: la grilla manda los veinte locales en cada guardado, y sin
+     * el diff cada guardado les sellaba USUARIO_MODIF y FECHA_MODIF a todos, y
+     * "Ultima edicion" decia que alguien habia editado los veinte locales el
+     * mismo segundo. Aca compara tambien el dia de acreditacion, que es el
+     * campo que solo se edita en esta pantalla.
+     *
+     * EL DIA SE DISTINGUE ENTRE AUSENTE Y VACIO. Ausente -una pantalla vieja-
+     * no lo toca; vacio o null es "sin dia" y lo borra, que es como se corrige
+     * uno mal cargado.
+     *
+     * SIN EL SCRIPT ($conDia = false) EL DIA NO SE ESCRIBE, pero el resto del
+     * guardado sigue: la gestion y la reserva no tienen nada que ver con la
+     * columna que falta, y rechazar el guardado entero por eso le haria perder
+     * a alguien una correccion de reserva. Los locales que mandaron un dia
+     * vuelven en 'dia_ignorado' para que la respuesta diga que script correr.
+     *
+     * Valida todo aca, antes de abrir la transaccion. Un local que no esta en
+     * los parametros es un error: esta pantalla lista solo los que estan, y el
+     * UPDATE no afectaria ninguna fila y la edicion se perderia en silencio.
+     *
+     * @param array $actuales Mapa NRO_SUCURSAL => fila de getParametrosSucursales(false)
+     * @param array $filas [['nro_sucursal', 'gestion', 'reserva', 'dia_acreditacion'?], ...]
+     * @param bool $conDia Si existe la columna del dia (acreditacionCreada())
+     * @return array ['cambios' => [['nro_sucursal', 'desc_sucursal', 'gestion',
+     *               'reserva', 'dia_acreditacion'], ...], 'dia_ignorado' => [nro, ...]]
+     */
+    public static function resolverParametrosLocales($actuales, $filas, $conDia) {
+        $actuales = is_array($actuales) ? $actuales : [];
+        $cambios = [];
+        $diaIgnorado = [];
+
+        foreach ((is_array($filas) ? $filas : []) as $f) {
+            $nro = intval(isset($f['nro_sucursal']) ? $f['nro_sucursal'] : 0);
+
+            if ($nro === 0) {
+                throw new Exception('Falta el número de un local');
+            }
+
+            if (!isset($actuales[$nro])) {
+                throw new Exception('El local ' . $nro . ' no está en los parámetros. Usá '
+                    . 'Sincronizar con locales y volvé a guardar.');
+            }
+
+            $antes = $actuales[$nro];
+
+            $gestion = self::validarGestion(
+                isset($f['gestion']) ? $f['gestion'] : $antes['GESTION'], $nro);
+            $reserva = self::validarReserva(
+                isset($f['reserva']) ? $f['reserva'] : $antes['RESERVA'], $nro);
+
+            $diaAntes = (isset($antes['DIA_ACREDITACION']) && $antes['DIA_ACREDITACION'] !== null)
+                ? intval($antes['DIA_ACREDITACION']) : null;
+            $dia = $diaAntes;
+
+            if (array_key_exists('dia_acreditacion', $f)) {
+                if ($conDia) {
+                    try {
+                        $dia = self::validarDiaAcreditacion($f['dia_acreditacion']);
+                    } catch (Exception $e) {
+                        throw new Exception('Local ' . $nro . ': ' . $e->getMessage());
+                    }
+                } elseif ($f['dia_acreditacion'] !== null && $f['dia_acreditacion'] !== '') {
+                    $diaIgnorado[] = $nro;
+                }
+            }
+
+            $distinto = (strtoupper(trim((string) $antes['GESTION'])) !== $gestion)
+                || (abs(floatval($antes['RESERVA']) - $reserva) > 0.0001)
+                || ($conDia && $dia !== $diaAntes);
+
+            if ($distinto) {
+                $cambios[] = [
+                    'nro_sucursal' => $nro,
+                    'desc_sucursal' => isset($antes['DESC_SUCURSAL']) ? $antes['DESC_SUCURSAL'] : '',
+                    'gestion' => $gestion,
+                    'reserva' => $reserva,
+                    'dia_acreditacion' => $dia
+                ];
+            }
+        }
+
+        return ['cambios' => $cambios, 'dia_ignorado' => $diaIgnorado];
+    }
+
+    /**
+     * La gestion validada. La comparten las dos pantallas que la editan, para
+     * que las dos rechacen lo mismo con el mismo mensaje.
+     *
+     * @param mixed $gestion
+     * @param int $nro Para el mensaje
+     * @return string DEPOSITA o ENVIA
+     */
+    private static function validarGestion($gestion, $nro) {
+        $g = strtoupper(trim((string) $gestion));
+
+        if ($g !== self::DEPOSITA && $g !== self::ENVIA) {
+            throw new Exception('Gestión inválida para el local ' . $nro . ': "' . $g
+                . '". Sólo puede ser Deposita o Envía.');
+        }
+
+        return $g;
+    }
+
+    /**
+     * La reserva validada, con el mismo criterio que la gestion.
+     *
+     * @param mixed $reserva
+     * @param int $nro Para el mensaje
+     * @return float
+     */
+    private static function validarReserva($reserva, $nro) {
+        $r = floatval($reserva);
+
+        if ($r < 0) {
+            throw new Exception('La reserva del local ' . $nro . ' no puede ser negativa');
+        }
+
+        return $r;
+    }
+
+    /**
      * Columna del eje en la que hay que imputar un importe fechado.
      *
      * El eje arranca HOY, asi que una fecha anterior no tiene columna propia.
@@ -763,8 +1214,10 @@ class Saldos {
      * una fecha pasada significa "esto ya es cierto hoy" y va a la apertura del
      * horizonte. Descartarla mostraria cero teniendo el dato.
      *
-     * Una fecha que SI cae dentro del eje no se toca nunca: no hay corrimiento
-     * a dia habil ni tratamiento de feriados en ninguna de las dos series.
+     * Una fecha que SI cae dentro del eje no se toca aca. El unico corrimiento
+     * por feriado de este modulo es el de la acreditacion de los locales, y lo
+     * hace proximaFechaAcreditacion() antes de llegar aca: esta funcion solo
+     * resuelve que hacer con una fecha que ya paso.
      *
      * @param string $fecha 'Y-m-d' del dato
      * @param string $hoy 'Y-m-d', primer dia del eje
@@ -1056,6 +1509,112 @@ class Saldos {
         $this->manuales = ($row && $row['M'] !== null && $row['O'] !== null);
 
         return $this->manuales;
+    }
+
+    /**
+     * Si existen las columnas del dia de acreditacion: la del parametro y las
+     * dos de la foto. Las tres las crea sql/cashflow_saldos_dia_acreditacion.sql,
+     * asi que se piden juntas: con una sola, el dia se podria elegir pero no
+     * guardar en la foto, o al reves.
+     *
+     * Va aparte de tablasCreadas() por el mismo motivo que manualesCreados():
+     * sin el script la pestana funciona como antes -todo a la primera columna-
+     * y dice que script correr, en vez de quedar en blanco.
+     *
+     * @return bool
+     */
+    public function acreditacionCreada() {
+        if ($this->acreditacion !== null) {
+            return $this->acreditacion;
+        }
+
+        if (!$this->tablasCreadas()) {
+            $this->acreditacion = false;
+
+            return false;
+        }
+
+        $cid = $this->conectar('central');
+
+        $sql = "SELECT COL_LENGTH('dbo.RO_T_CASHFLOW_SALDOS_SUCURSAL', 'DIA_ACREDITACION') AS S,
+                       COL_LENGTH('dbo.RO_T_CASHFLOW_SALDOS_LOCAL', 'DIA_ACREDITACION')    AS D,
+                       COL_LENGTH('dbo.RO_T_CASHFLOW_SALDOS_LOCAL', 'FECHA_ACREDITACION')  AS F";
+
+        $stmt = sqlsrv_query($cid, $sql);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar el día de acreditación'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->acreditacion = ($row && $row['S'] !== null && $row['D'] !== null
+            && $row['F'] !== null);
+
+        return $this->acreditacion;
+    }
+
+    /**
+     * Lo que armarSaldosLocales() necesita para calcular la proxima fecha de
+     * acreditacion de cada local: hoy y el calendario de dias habiles.
+     *
+     * ES EL UNICO CAMINO, y lo usan la pestana, el tablero y la foto: los tres
+     * tienen que ver la misma fecha para el mismo local, o la pestana diria
+     * martes y el tablero imputaria el lunes.
+     *
+     * EL CALENDARIO SE LEE POR CronogramaDatos::habilesEntre(), que es el
+     * camino de Ventas::getDiasHabiles() -la unica lectura de RO_T_CALENDARIO
+     * del modulo- con el mismo manejo de falla que el cronograma y las
+     * tarjetas: si no se puede leer devuelve un mapa vacio y un aviso critico,
+     * y la regla aplica el respaldo de lunes a viernes. Una segunda consulta
+     * aca seria una segunda definicion de "dia habil".
+     *
+     * SIN EL SCRIPT devuelve 'acreditacion' = null y un aviso que dice cual
+     * correr: armarSaldosLocales() se comporta como antes -todo a la primera
+     * columna- y la pantalla no se cae. Sin el script no se lee el calendario:
+     * no habria para que.
+     *
+     * @param string $hoy 'Y-m-d'
+     * @return array ['acreditacion' => ['hoy', 'habiles']|null, 'avisos' => [Aviso]]
+     */
+    public function contextoAcreditacion($hoy) {
+        $avisos = [];
+
+        try {
+            $creada = $this->acreditacionCreada();
+        } catch (Throwable $e) {
+            return ['acreditacion' => null, 'avisos' => [Aviso::nuevo(Aviso::DANGER,
+                'No se pudo verificar si existe el día de acreditación de los locales ('
+                . $e->getMessage() . '): la caja de los locales se imputa entera en la primera '
+                . 'columna.')]];
+        }
+
+        if (!$creada) {
+            if ($this->tablasCreadas()) {
+                // Atencion y no critico: el tablero muestra lo mismo que antes
+                // de que existiera el dia, y se arregla corriendo un script.
+                $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Todavía no existe el día de '
+                    . 'acreditación de los locales: corré sql/cashflow_saldos_dia_acreditacion.sql '
+                    . 'contra la base central. Mientras tanto la caja de los locales se imputa entera '
+                    . 'en la primera columna, como hasta ahora.');
+            }
+
+            return ['acreditacion' => null, 'avisos' => $avisos];
+        }
+
+        require_once __DIR__ . '/CronogramaDatos.php';
+
+        $crono = new CronogramaDatos();
+        $rango = self::rangoCalendarioAcreditacion($hoy);
+        $habiles = $crono->habilesEntre($rango['desde'], $rango['hasta']);
+
+        foreach ($crono->avisosConNivel() as $a) {
+            $avisos[] = $a;
+        }
+
+        return ['acreditacion' => ['hoy' => substr((string) $hoy, 0, 10), 'habiles' => $habiles],
+                'avisos' => $avisos];
     }
 
     /**
@@ -1443,7 +2002,13 @@ class Saldos {
     }
 
     /**
-     * Parametros de gestion y reserva por sucursal, indexados por numero.
+     * Parametros de gestion, reserva y dia de acreditacion por sucursal,
+     * indexados por numero.
+     *
+     * DIA_ACREDITACION viene SIEMPRE, como entero o null: sin el script es
+     * null para todos, que es lo que dice la verdad -no hay dia cargado-, y
+     * quien lee no tiene que preguntar si la clave existe. Si el script falta
+     * lo dice acreditacionCreada(), no la forma de la fila.
      *
      * @param bool $soloActivas
      * @return array Mapa NRO_SUCURSAL => fila
@@ -1455,7 +2020,11 @@ class Saldos {
 
         $cid = $this->conectar('central');
 
-        $sql = "SELECT NRO_SUCURSAL, DESC_SUCURSAL, GESTION, RESERVA, ACTIVO,
+        $dia = $this->acreditacionCreada()
+            ? 'DIA_ACREDITACION'
+            : 'CAST(NULL AS TINYINT) AS DIA_ACREDITACION';
+
+        $sql = "SELECT NRO_SUCURSAL, DESC_SUCURSAL, GESTION, RESERVA, ACTIVO, $dia,
                        FECHA_MODIF AS FECHA_UPDATE, USUARIO_MODIF AS USUARIO
                 FROM RO_T_CASHFLOW_SALDOS_SUCURSAL";
 
@@ -1477,6 +2046,8 @@ class Saldos {
             $row['NRO_SUCURSAL'] = intval($row['NRO_SUCURSAL']);
             $row['RESERVA'] = floatval($row['RESERVA']);
             $row['ACTIVO'] = intval($row['ACTIVO']);
+            $row['DIA_ACREDITACION'] = ($row['DIA_ACREDITACION'] === null)
+                ? null : intval($row['DIA_ACREDITACION']);
             $row['FECHA_UPDATE'] = $this->fechaHora($row['FECHA_UPDATE']);
             $v[$row['NRO_SUCURSAL']] = $row;
         }
@@ -1852,48 +2423,64 @@ class Saldos {
     }
 
     /**
-     * Edita la gestion y la reserva de una sucursal.
+     * Guarda la grilla de Parametros -> Saldos -> Locales: gestion, reserva y
+     * dia de acreditacion de cada local.
      *
      * No hay alta: la lista de locales sale del origen y se pone al dia con
      * sincronizarSucursales(). Inventar una sucursal a mano crearia una fila que
      * la consulta nunca va a llenar.
      *
-     * @param int $nroSucursal
-     * @param string $gestion DEPOSITA o ENVIA
-     * @param float $reserva Minimo que la sucursal conserva en caja
+     * SOLO SE ESCRIBEN LOS LOCALES QUE CAMBIARON, Y EN UNA TRANSACCION. Antes
+     * cada fila de la grilla era un UPDATE con su propia conexion: cada
+     * guardado sellaba a los veinte locales como editados por quien apreto el
+     * boton, y una falla a mitad de camino dejaba la mitad guardada. El diff es
+     * resolverParametrosLocales(), y la escritura es la misma que usa la
+     * pestana 2 -guardarSucursalEnTransaccion()-: un solo escritor del
+     * parametro.
+     *
+     * Sin sql/cashflow_saldos_dia_acreditacion.sql el dia no se escribe y el
+     * resto se guarda igual; 'dia_ignorado' dice de que locales se descarto,
+     * para que la respuesta pida correr el script.
+     *
+     * @param array $filas [['nro_sucursal', 'gestion', 'reserva', 'dia_acreditacion'?], ...]
      * @param string $usuario
-     * @return bool
+     * @return array ['cambios' => int, 'dia_ignorado' => [nro, ...]]
      */
-    public function saveSucursal($nroSucursal, $gestion, $reserva, $usuario) {
+    public function guardarParametrosLocales($filas, $usuario) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
-        $gestion = strtoupper(trim((string) $gestion));
 
-        if ($gestion !== self::DEPOSITA && $gestion !== self::ENVIA) {
-            throw new Exception('Gestión inválida: "' . $gestion . '". '
-                . 'Sólo puede ser Deposita o Envía.');
+        if (!$this->tablasCreadas()) {
+            throw new Exception('No existen las tablas del módulo Saldos. '
+                . 'Corré sql/cashflow_saldos.sql.');
         }
 
-        $reserva = floatval($reserva);
+        $conDia = $this->acreditacionCreada();
+        $r = self::resolverParametrosLocales($this->getParametrosSucursales(false), $filas, $conDia);
 
-        if ($reserva < 0) {
-            throw new Exception('La reserva de caja no puede ser negativa');
+        if (!empty($r['cambios'])) {
+            $cid = $this->conectar('central');
+
+            if (sqlsrv_begin_transaction($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo iniciar la transacción'));
+            }
+
+            try {
+                foreach ($r['cambios'] as $c) {
+                    $this->guardarSucursalEnTransaccion($cid, $c['nro_sucursal'], $c['gestion'],
+                        $c['reserva'], $c['desc_sucursal'], $usuario,
+                        $conDia, $c['dia_acreditacion']);
+                }
+
+                if (sqlsrv_commit($cid) === false) {
+                    throw new Exception($this->errorSql('No se pudieron confirmar los locales'));
+                }
+            } catch (Throwable $e) {
+                sqlsrv_rollback($cid);
+                throw $e;
+            }
         }
 
-        $cid = $this->conectar('central');
-
-        $sql = "UPDATE RO_T_CASHFLOW_SALDOS_SUCURSAL
-                SET GESTION = ?, RESERVA = ?, " . Auditoria::SET_MODIF . "
-                WHERE NRO_SUCURSAL = ?";
-
-        $stmt = sqlsrv_query($cid, $sql, [$gestion, $reserva, $usuario, intval($nroSucursal)]);
-
-        if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al guardar la sucursal'));
-        }
-
-        sqlsrv_free_stmt($stmt);
-
-        return true;
+        return ['cambios' => count($r['cambios']), 'dia_ignorado' => $r['dia_ignorado']];
     }
 
     /* ====================================================================
@@ -2099,7 +2686,17 @@ class Saldos {
 
         $hoy = date('Y-m-d');
         $ayer = self::ayer($hoy);
-        $armado = self::armarSaldosLocales($consulta, $params, $manuales, $ayer);
+
+        // La proxima fecha de acreditacion de cada local, por el mismo camino
+        // que el tablero. Sin el script, null y el aviso de cual correr.
+        $contexto = $this->contextoAcreditacion($hoy);
+
+        foreach (Aviso::textos($contexto['avisos']) as $a) {
+            $avisos[] = $a;
+        }
+
+        $armado = self::armarSaldosLocales($consulta, $params, $manuales, $ayer,
+            $contexto['acreditacion']);
 
         $cargas = $this->getCargas(self::CARGA_LOCALES);
         $ultima = self::ultimaCarga($cargas);
@@ -2110,6 +2707,8 @@ class Saldos {
             // con fecha anterior vienen marcadas con 'desactualizado'.
             'ayer' => $ayer,
             'manuales_disponibles' => $manualesDisponibles,
+            // Sin el script la columna de acreditacion dice que falta
+            'acreditacion_creada' => $contexto['acreditacion'] !== null,
             'filas' => $armado['filas'],
             'totales' => $armado['totales'],
             'ultima_carga' => $ultima === null ? null : [
@@ -2280,9 +2879,9 @@ class Saldos {
      *
      * LAS DOS ESCRITURAS VAN EN LA MISMA TRANSACCION. Si se separaran, una falla
      * a mitad de camino dejaria la reserva cambiada sin la foto que la explica,
-     * o al revés. Por eso el parametro se escribe con el $cid de la transaccion
-     * y no llamando a saveSucursal(), que abre su propia conexion: mismo
-     * criterio que CashflowEstructura::guardar().
+     * o al revés. Por eso el parametro se escribe con guardarSucursalEnTransaccion()
+     * y el $cid de la transaccion, y no con un metodo que abra su propia
+     * conexion: mismo criterio que CashflowEstructura::guardar().
      *
      * EL SALDO EN CAJA TAMBIEN SE PUEDE TIPEAR, para cuando la consulta no
      * trajo el cierre. Es la tercera escritura de la misma transaccion: un
@@ -2335,9 +2934,17 @@ class Saldos {
         // aplicados: la foto tiene que describir lo que el tablero va a usar.
         $manualesDisponibles = $this->manualesCreados();
         $manuales = $manualesDisponibles ? $this->getSaldosLocalesManuales() : [];
-        $ayer = self::ayer(date('Y-m-d'));
+        $hoy = date('Y-m-d');
+        $ayer = self::ayer($hoy);
 
-        $actual = self::armarSaldosLocales($consulta, $params, $manuales, $ayer);
+        // La foto guarda el dia y la fecha de acreditacion EFECTIVOS de cada
+        // local, calculados por el mismo camino que la pestana y el tablero:
+        // si alguien cambia el dia despues, la carga se reconstruye tal como
+        // entro. Sin el script las columnas no existen y no se escriben.
+        $acreditacion = $this->contextoAcreditacion($hoy)['acreditacion'];
+        $conDia = ($acreditacion !== null);
+
+        $actual = self::armarSaldosLocales($consulta, $params, $manuales, $ayer, $acreditacion);
         $nuevos = self::saldosManualesNuevos($actual['filas'], $overrides);
 
         if (!empty($nuevos) && !$manualesDisponibles) {
@@ -2356,7 +2963,7 @@ class Saldos {
             ];
         }
 
-        $armado = self::armarSaldosLocales($consulta, $params, $manuales, $ayer);
+        $armado = self::armarSaldosLocales($consulta, $params, $manuales, $ayer, $acreditacion);
 
         $cid = $this->conectar('central');
 
@@ -2397,19 +3004,26 @@ class Saldos {
             $idCarga = $this->insertarCabecera($cid, self::CARGA_LOCALES,
                 empty($nuevos) ? 'CONSULTA' : 'MIXTA', $observaciones, $usuario);
 
-            // ORIGEN_DATO existe recien con la migracion de manuales. Sin ella
-            // la foto se guarda como siempre: todo lo que hay es de la consulta.
-            $sql = $manualesDisponibles
-                ? "INSERT INTO RO_T_CASHFLOW_SALDOS_LOCAL
-                       (ID_CARGA, NRO_SUCURSAL, DESC_SUCURSAL, FECHA_SALDO,
-                        COD_CTA_CUENTA_TESORERIA, CUENTAS, SALDO_MONEDA,
-                        GESTION, RESERVA, NETO_DEPOSITAR, USUARIO_ALTA, USUARIO_MODIF, ORIGEN_DATO)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                : "INSERT INTO RO_T_CASHFLOW_SALDOS_LOCAL
-                       (ID_CARGA, NRO_SUCURSAL, DESC_SUCURSAL, FECHA_SALDO,
-                        COD_CTA_CUENTA_TESORERIA, CUENTAS, SALDO_MONEDA,
-                        GESTION, RESERVA, NETO_DEPOSITAR, USUARIO_ALTA, USUARIO_MODIF)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            // Las columnas de la foto dependen de que migraciones se corrieron:
+            // ORIGEN_DATO llega con la de manuales, y el dia y la fecha de
+            // acreditacion con la suya. Sin ellas la foto se guarda como
+            // siempre. Las columnas y los valores se arman juntos, para que
+            // no puedan desalinearse.
+            $columnas = ['ID_CARGA', 'NRO_SUCURSAL', 'DESC_SUCURSAL', 'FECHA_SALDO',
+                         'COD_CTA_CUENTA_TESORERIA', 'CUENTAS', 'SALDO_MONEDA',
+                         'GESTION', 'RESERVA', 'NETO_DEPOSITAR', 'USUARIO_ALTA', 'USUARIO_MODIF'];
+
+            if ($manualesDisponibles) {
+                $columnas[] = 'ORIGEN_DATO';
+            }
+
+            if ($conDia) {
+                $columnas[] = 'DIA_ACREDITACION';
+                $columnas[] = 'FECHA_ACREDITACION';
+            }
+
+            $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_LOCAL (" . implode(', ', $columnas) . ")
+                    VALUES (" . implode(', ', array_fill(0, count($columnas), '?')) . ")";
 
             foreach ($armado['filas'] as $f) {
                 $valores = [
@@ -2432,6 +3046,13 @@ class Saldos {
 
                 if ($manualesDisponibles) {
                     $valores[] = $f['origen_saldo'];
+                }
+
+                if ($conDia) {
+                    // El dia efectivo y la fecha calculada; null para un
+                    // local sin dia, que es lo que entro al tablero.
+                    $valores[] = isset($f['acreditacion']['dia']) ? $f['acreditacion']['dia'] : null;
+                    $valores[] = isset($f['acreditacion']['fecha']) ? $f['acreditacion']['fecha'] : null;
                 }
 
                 if (sqlsrv_query($cid, $sql, $valores) === false) {
@@ -2465,9 +3086,15 @@ class Saldos {
      * UPDATE no afectara ninguna fila y el cambio se perdiera en silencio, que
      * es peor: el local salio de la consulta, o sea que existe.
      *
-     * No reusa saveSucursal() a proposito: ese metodo abre su propia conexion
-     * (Conexion::conectar() abre una nueva en cada llamada) y quedaria FUERA de
-     * la transaccion de la carga.
+     * Es EL UNICO ESCRITOR DEL PARAMETRO: lo usan la carga de la pestana 2 y
+     * el guardado de Parametros -> Saldos -> Locales. Recibe la conexion de la
+     * transaccion de quien lo llama (Conexion::conectar() abre una nueva en
+     * cada llamada, asi que abrir la suya lo dejaria afuera).
+     *
+     * EL DIA DE ACREDITACION SE ESCRIBE SOLO SI $escribirDia: la pestana 2 no
+     * lo edita y no lo toca, y sin el script la columna no existe. Un alta por
+     * la pestana 2 entra sin dia, igual que un local nuevo de la
+     * sincronizacion.
      *
      * @param resource $cid Conexion con la transaccion abierta
      * @param int $nro
@@ -2475,14 +3102,21 @@ class Saldos {
      * @param float $reserva Ya validada
      * @param string $descripcion Nombre del local, para el caso de alta
      * @param string $usuario
+     * @param bool $escribirDia
+     * @param int|null $dia Ya validado; solo cuenta con $escribirDia
      */
     private function guardarSucursalEnTransaccion($cid, $nro, $gestion, $reserva,
-                                                  $descripcion, $usuario) {
+                                                  $descripcion, $usuario,
+                                                  $escribirDia = false, $dia = null) {
+        $setDia = $escribirDia ? 'DIA_ACREDITACION = ?, ' : '';
+        $valoresDia = $escribirDia ? [$dia] : [];
+
         $sql = "UPDATE RO_T_CASHFLOW_SALDOS_SUCURSAL
-                SET GESTION = ?, RESERVA = ?, " . Auditoria::SET_MODIF . "
+                SET GESTION = ?, RESERVA = ?, " . $setDia . Auditoria::SET_MODIF . "
                 WHERE NRO_SUCURSAL = ?";
 
-        $stmt = sqlsrv_query($cid, $sql, [$gestion, $reserva, $usuario, $nro]);
+        $stmt = sqlsrv_query($cid, $sql,
+            array_merge([$gestion, $reserva], $valoresDia, [$usuario, $nro]));
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al guardar la gestión del local ' . $nro));
@@ -2497,11 +3131,11 @@ class Saldos {
 
         $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_SUCURSAL
                     (NRO_SUCURSAL, DESC_SUCURSAL, GESTION, RESERVA, ACTIVO,
-                     USUARIO_ALTA, USUARIO_MODIF)
-                VALUES (?, ?, ?, ?, 1, ?, ?)";
+                     " . ($escribirDia ? 'DIA_ACREDITACION, ' : '') . "USUARIO_ALTA, USUARIO_MODIF)
+                VALUES (?, ?, ?, ?, 1, " . ($escribirDia ? '?, ' : '') . "?, ?)";
 
-        if (sqlsrv_query($cid, $sql,
-            [$nro, $descripcion, $gestion, $reserva, $usuario, $usuario]) === false) {
+        if (sqlsrv_query($cid, $sql, array_merge([$nro, $descripcion, $gestion, $reserva],
+            $valoresDia, [$usuario, $usuario])) === false) {
             throw new Exception($this->errorSql('Error al crear el parámetro del local ' . $nro));
         }
     }
@@ -2509,9 +3143,13 @@ class Saldos {
     /**
      * Sincroniza el parametro por sucursal con la lista de locales propios.
      *
-     * NO PISA GESTION NI RESERVA de una sucursal que ya existe: son valores que
-     * cargo una persona. Y no borra: una sucursal que desaparece del origen
-     * queda con ACTIVO = 0 y su historico intacto.
+     * NO PISA GESTION, RESERVA NI DIA_ACREDITACION de una sucursal que ya
+     * existe: son valores que cargo una persona. Sus UPDATE no nombran esas
+     * columnas, y el INSERT de un local nuevo no nombra el dia: entra SIN DIA,
+     * porque no hay default que adivinar. Una prueba lo verifica sobre el
+     * codigo. Y no borra: una
+     * sucursal que desaparece del origen queda con ACTIVO = 0 y su historico
+     * intacto.
      *
      * LO DISPARA UNA PERSONA desde Parametros -> Saldos, asi que las altas, las
      * bajas y las reactivaciones quedan con su usuario, no con un origen SISTEMA:.
@@ -2700,6 +3338,11 @@ class Saldos {
         }
 
         return date('d/m/Y', strtotime(substr((string) $fecha, 0, 10)));
+    }
+
+    /** 'Y-m-d' => 'dd/mm', para la celda y el tooltip de la acreditacion */
+    private static function diaMes($fecha) {
+        return substr((string) $fecha, 8, 2) . '/' . substr((string) $fecha, 5, 2);
     }
 
     /**
