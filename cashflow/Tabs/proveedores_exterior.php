@@ -235,10 +235,11 @@
                                     <i class="fas fa-check-square ms-1" style="font-size: 10px;"
                                        title="Tildá si el pago ya se hizo: sale de la proyección"></i>
                                 </th>
-                                <!-- El rótulo y el colspan los pone el JS según
-                                     la vista activa, y las columnas salen del
-                                     eje del backend. -->
-                                <th colspan="1" class="table-group-divider" id="mesActualHeader">Días</th>
+                                <!-- Acá terminan las descriptivas. El resto de
+                                     esta fila son los totales de cada columna
+                                     del eje, arriba de su fecha: los pinta
+                                     Js/eje-totales.js desde generarFilaTotales(),
+                                     con la misma cuenta que el pie. -->
                             </tr>
                             <tr id="headerRowSub">
                                 <!-- Las columnas se generan dinámicamente -->

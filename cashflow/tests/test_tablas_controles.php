@@ -585,6 +585,9 @@ $ejeTotales = [
     'exportaciones_tasky.php' => ['Ingresos-Exportaciones_tasky.js', [
         'tablaExportacionesTasky' => "pintarEjeTotales('tablaExportacionesTasky'"
     ]],
+    'proveedores_exterior.php' => ['Comex-Proveedores_exterior.js', [
+        'tablaProveedoresExterior' => "pintarEjeTotales('tablaProveedoresExterior'"
+    ]],
 ];
 
 seccion('cada tabla con eje llama al componente');
