@@ -266,9 +266,14 @@ if (!Pruebas::hayBase()) {
             $sinFecha++;
         }
     }
+    /* El aviso ya no empieza con "Proveedores Exterior: ": desde el panel
+       agrupado, la pestana la dice el grupo y no cada texto. Se lo reconoce
+       por lo que dice -que no se pueden valuar por falta de la fecha
+       estimada de pago-, que es lo que este control tiene que encontrar. */
     if ($sinFecha > 0) {
         $avisoValuacion = array_filter($prov->warnings(), function ($w) {
-            return strpos($w, 'Proveedores Exterior: ') === 0 && stripos($w, 'fecha') !== false;
+            return strpos($w, 'no se pueden valuar') !== false
+                && strpos($w, 'fecha estimada de pago') !== false;
         });
         chequear('hay ' . $sinFecha . ' con saldo y sin fecha de pago, y el tablero lo avisa', true,
             count($avisoValuacion) > 0);
