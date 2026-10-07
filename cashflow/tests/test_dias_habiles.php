@@ -12,10 +12,12 @@
  * mover una fecha sin que se note. Estas pruebas no se tocan con el refactor:
  * tienen que pasar igual antes y despues.
  *
- * Hay DOS diferencias entre las dos, y tambien se fijan: si en el tope de
- * treinta dias no aparece ningun habil, Tarjetas LANZA y Ventas devuelve la
- * fecha del tope y sigue -Ventas no puede pasar a lanzar: la pantalla nunca se
- * cae-; y el aviso de calendario faltante de Ventas sale sin tildes.
+ * Habia DOS diferencias entre las dos. La que queda: si en el tope de treinta
+ * dias no aparece ningun habil, Tarjetas LANZA y Ventas devuelve la fecha del
+ * tope y sigue -Ventas no puede pasar a lanzar: la pantalla nunca se cae-, solo
+ * que ahora avisa. La que se fue: el aviso de calendario faltante de Ventas
+ * salia sin tildes; ahora es el mismo texto. Esas dos expectativas son las
+ * unicas que cambiaron con el refactor, y a proposito.
  *
  * proximoHabil() es privada y de instancia -acumula el aviso de calendario en
  * $this->warnings-, asi que se prueba por reflexion y sin pasar por el
@@ -108,15 +110,11 @@ foreach ($casosDH as $nombre => $c) {
 
     chequear('Ventas: la misma fecha', $esperada, $v['fecha']);
 
-    // El aviso de Ventas es uno por mes que falta, deduplicado. Su texto es
-    // el de Tarjetas SIN TILDES: es la segunda diferencia entre las dos, y se
-    // fija tal como esta hoy.
-    chequear('Ventas: un aviso por mes sin calendario',
-        array_map(function ($mes) {
-            return 'RO_T_CALENDARIO no tiene datos para ' . $mes
-                . '. Se asumen habiles los dias de lunes a viernes.';
-        }, $faltan),
-        $v['warnings']);
+    // El aviso de Ventas es uno por mes que falta, deduplicado. Antes de
+    // DiasHabiles salia sin tildes -la misma causa, otro texto-; ahora es la
+    // misma redaccion que Tarjetas y el cronograma de pagos.
+    chequear('Ventas: un aviso por mes sin calendario, con el texto de Tarjetas',
+        TarjetasVencimiento::avisosCalendario($faltan), $v['warnings']);
 }
 
 /* ================================================================
@@ -142,4 +140,45 @@ $v = ventasProximoHabil('2026-10-01', $roto);
 
 chequear('Ventas no lanza: devuelve la fecha del tope, treinta dias despues',
     '2026-10-31', $v['fecha']);
-chequear('y hoy no deja ningun aviso', [], $v['warnings']);
+
+// Antes de DiasHabiles este caso pasaba en silencio y dejaba la cobranza en
+// una fecha que nadie habia calculado. Sigue sin lanzar, pero avisa, con la
+// misma frase con la que Tarjetas corta.
+chequear('pero avisa que no encontro ningun habil',
+    ['No se encontró ningún día hábil en los 30 días siguientes a 2026-10-01. '
+        . 'Revisá RO_T_CALENDARIO.'],
+    $v['warnings']);
+
+/* ================================================================
+   El helper, directamente
+   ================================================================ */
+require_once __DIR__ . '/../Class/DiasHabiles.php';
+
+seccion('DiasHabiles::siguiente()');
+
+$r = DiasHabiles::siguiente('2026-10-12', $octubre);
+
+chequear('devuelve las cuatro claves',
+    ['fecha', 'corrida', 'faltan', 'sin_habil'], array_keys($r));
+chequear('un feriado se corre al habil siguiente', '2026-10-13', $r['fecha']);
+chequear('y no es un caso sin habil', false, $r['sin_habil']);
+
+$r = DiasHabiles::siguiente('2026-10-01', $roto);
+
+chequear('con el mapa roto no lanza', true, $r['sin_habil']);
+chequear('y devuelve la fecha del tope', '2026-10-31', $r['fecha']);
+chequear('marcada como corrida', true, $r['corrida']);
+
+chequear('el aviso de calendario es uno por mes, con tildes',
+    ['RO_T_CALENDARIO no tiene datos para 2026-11. Se asumen hábiles los días de lunes a viernes.',
+     'RO_T_CALENDARIO no tiene datos para 2026-12. Se asumen hábiles los días de lunes a viernes.'],
+    DiasHabiles::avisosCalendario(['2026-11', '2026-12']));
+
+// La misma redaccion que el cronograma de pagos, que corre para el otro lado
+// y por eso no vive aca: el texto es uno solo en todo el modulo.
+require_once __DIR__ . '/../Class/CronogramaPagos.php';
+
+chequear('es el mismo texto que el del cronograma de pagos',
+    CronogramaPagos::avisosCalendario(['2026-11']), DiasHabiles::avisosCalendario(['2026-11']));
+chequear('el tope es el mismo que el de la direccion contraria',
+    CronogramaPagos::MAX_CORRIMIENTO, DiasHabiles::MAX_CORRIMIENTO);
