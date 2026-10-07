@@ -6,6 +6,7 @@ require_once __DIR__ . '/Parametros.php';
 require_once __DIR__ . '/Fondos.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
+require_once __DIR__ . '/DiasHabiles.php';
 
 /**
  * Saldos
@@ -102,6 +103,19 @@ class Saldos {
     /** Gestion del efectivo de una sucursal */
     const DEPOSITA = 'DEPOSITA';
     const ENVIA = 'ENVIA';
+
+    /**
+     * Los dias de acreditacion posibles, ISO como date('N'): de lunes a
+     * viernes, que es lo que permite el CHECK de la columna. Un banco no
+     * acredita en fin de semana, asi que un sabado no es un dia que se pueda
+     * elegir: seria siempre un lunes disfrazado.
+     */
+    const DIAS_ACREDITACION = [1 => 'lunes', 2 => 'martes', 3 => 'miércoles', 4 => 'jueves',
+                               5 => 'viernes'];
+
+    /** Como se abrevia el dia en la celda. Incluye el fin de semana: es de la fecha final */
+    const DIAS_ABREV = [1 => 'Lun', 2 => 'Mar', 3 => 'Mié', 4 => 'Jue', 5 => 'Vie',
+                        6 => 'Sáb', 7 => 'Dom'];
 
     /** Cuenta contable de SBA05 con el efectivo de tesoreria de casa central */
     const PARAM_CTA_TESORERIA = 'saldos_cta_tesoreria';
@@ -302,6 +316,196 @@ class Saldos {
      */
     public static function ayer($hoy) {
         return date('Y-m-d', strtotime(substr((string) $hoy, 0, 10) . ' -1 day'));
+    }
+
+    /* --------------------------------------------------------------------
+       EL DIA DE ACREDITACION DE UN LOCAL
+
+       Cada local acredita su efectivo -o lo envia, si esta en ENVIA- un dia
+       fijo de la semana, y el aporte del local se imputa en su PROXIMA FECHA
+       DE ACREDITACION y no en la primera columna. La regla es una sola,
+       proximaFechaAcreditacion(), y la usan la pestana, el tablero y la foto.
+       -------------------------------------------------------------------- */
+
+    /**
+     * El dia validado.
+     *
+     * LA VALIDACION QUE VALE ES ESTA, no la del <select>: el endpoint es
+     * alcanzable sin pasar por la pantalla. El CHECK de la columna es la
+     * tercera red.
+     *
+     * Vacio o null es "sin dia", y es un valor valido: es como se borra un dia
+     * mal cargado, y como queda un local nuevo.
+     *
+     * @param mixed $dia
+     * @return int|null 1..5, o null si no tiene
+     * @throws Exception si no es un entero de lunes a viernes
+     */
+    public static function validarDiaAcreditacion($dia) {
+        if ($dia === null || $dia === '') {
+            return null;
+        }
+
+        if (!is_numeric($dia) || intval($dia) != floatval($dia)
+            || !isset(self::DIAS_ACREDITACION[intval($dia)])) {
+            throw new Exception('El día de acreditación tiene que ser de lunes (1) a viernes (5). '
+                . 'Se recibió "' . $dia . '".');
+        }
+
+        return intval($dia);
+    }
+
+    /**
+     * La proxima fecha de acreditacion de un local.
+     *
+     * LA REGLA, EN DOS PASOS Y EN ESTE ORDEN:
+     *
+     *   1. la primera vez que ese dia de la semana cae HOY O DESPUES. Si hoy es
+     *      ese dia, es hoy: el deposito de hoy todavia no se acredito.
+     *   2. si esa fecha no es habil, el primer habil SIGUIENTE.
+     *
+     * VA HACIA ADELANTE, como Ventas y al reves que CronogramaPagos: es una
+     * acreditacion, no un pago. El banco no acredita un dia que no opera, asi
+     * que la plata entra despues; un pago, en cambio, se adelanta para cumplir.
+     * El corrimiento es DiasHabiles::siguiente(), el mismo de Ventas y de las
+     * tarjetas, con el mismo respaldo de lunes a viernes cuando la fecha no
+     * esta en RO_T_CALENDARIO: dos respaldos distintos darian dos calendarios.
+     *
+     * DEVUELVE LAS DOS FECHAS, la teorica y la final: la teorica explica de
+     * donde sale la final -"el lunes 12/10 es feriado: pasa al martes 13/10"-
+     * y sin ella la pantalla mostraria un martes que nadie puede justificar.
+     * Mismo criterio que TarjetasVencimiento::delMes().
+     *
+     * SIN DIA DEVUELVE null, y con el mapa roto -ningun habil en el tope- la
+     * fecha es null con 'sin_habil': un dato que falta es null y un aviso,
+     * nunca la fecha del tope disfrazada de acreditacion.
+     *
+     * Estatica y pura. Hoy se inyecta, para que las pruebas no caduquen.
+     *
+     * @param int|null $dia 1..5, o null
+     * @param string $hoy 'Y-m-d'
+     * @param array $habiles Mapa 'Y-m-d' => bool
+     * @return array|null ['dia', 'teorica', 'fecha' => 'Y-m-d'|null, 'corrida',
+     *                     'faltan' => ['Y-m'], 'sin_habil'], o null sin dia
+     */
+    public static function proximaFechaAcreditacion($dia, $hoy, $habiles) {
+        $dia = self::validarDiaAcreditacion($dia);
+
+        if ($dia === null) {
+            return null;
+        }
+
+        $hoy = substr((string) $hoy, 0, 10);
+        $faltanDias = ($dia - intval(date('N', strtotime($hoy))) + 7) % 7;
+        $teorica = date('Y-m-d', strtotime($hoy . ' +' . $faltanDias . ' day'));
+
+        $r = DiasHabiles::siguiente($teorica, $habiles);
+
+        return [
+            'dia' => $dia,
+            'teorica' => $teorica,
+            'fecha' => $r['sin_habil'] ? null : $r['fecha'],
+            'corrida' => $r['sin_habil'] ? false : $r['corrida'],
+            'faltan' => $r['faltan'],
+            'sin_habil' => $r['sin_habil']
+        ];
+    }
+
+    /**
+     * Desde y hasta que dia hay que leer el calendario para resolver la
+     * proxima fecha de cualquier local.
+     *
+     * La teorica cae como mucho seis dias despues de hoy, y el corrimiento
+     * puede sumar hasta DiasHabiles::MAX_CORRIMIENTO. Pedir el rango entero
+     * cuesta lo mismo y evita que el respaldo se dispare por un rango corto,
+     * que dejaria un aviso de calendario faltante que no describe nada real.
+     *
+     * @param string $hoy 'Y-m-d'
+     * @return array ['desde' => 'Y-m-d', 'hasta' => 'Y-m-d']
+     */
+    public static function rangoCalendarioAcreditacion($hoy) {
+        $hoy = substr((string) $hoy, 0, 10);
+
+        return [
+            'desde' => $hoy,
+            'hasta' => date('Y-m-d', strtotime($hoy . ' +' . (6 + DiasHabiles::MAX_CORRIMIENTO)
+                . ' day'))
+        ];
+    }
+
+    /**
+     * La celda de la pantalla: "Lun · 12/10", o "sin día".
+     *
+     * El dia que se muestra es el de la FECHA FINAL, no el cargado: si el
+     * lunes es feriado la plata entra el martes, y la celda tiene que decir
+     * martes. Lo cargado y el corrimiento los explica el tooltip.
+     *
+     * @param array|null $r Lo que devolvio proximaFechaAcreditacion()
+     * @return string
+     */
+    public static function etiquetaAcreditacion($r) {
+        if ($r === null) {
+            return 'sin día';
+        }
+
+        if ($r['fecha'] === null) {
+            return 'sin fecha';
+        }
+
+        $dia = intval(date('N', strtotime($r['fecha'])));
+
+        return self::DIAS_ABREV[$dia] . ' · ' . self::diaMes($r['fecha']);
+    }
+
+    /**
+     * De donde sale la fecha, en una linea, para el tooltip de la celda.
+     *
+     * LO ARMA EL BACKEND porque es la explicacion de una cuenta que hace el
+     * backend: con el texto en el JS, cambiar la regla obligaria a cambiarla en
+     * dos lados. Mismo criterio que TarjetasVencimiento::explicar().
+     *
+     * En ENVIA el dia es el de ENVIO y es informativo: el local no aporta al
+     * cashflow. Se dice, para que nadie busque esa fecha en el tablero.
+     *
+     * @param array|null $r Lo que devolvio proximaFechaAcreditacion()
+     * @param string $gestion DEPOSITA o ENVIA
+     * @return string
+     */
+    public static function explicarAcreditacion($r, $gestion) {
+        $envia = (strtoupper(trim((string) $gestion)) === self::ENVIA);
+        $que = $envia ? 'envío' : 'acreditación';
+        $informativo = $envia
+            ? ' Es informativo: el local está en Envía y no aporta al cashflow.'
+            : '';
+
+        if ($r === null) {
+            return 'Sin día de ' . $que . ' cargado'
+                . ($envia ? '.' : ': lo que aporta se imputa hoy, en la primera columna del tablero.')
+                . ' Se carga en Parámetros → Saldos → Locales.' . $informativo;
+        }
+
+        $cargado = self::DIAS_ACREDITACION[$r['dia']];
+
+        if ($r['sin_habil']) {
+            return 'El día de ' . $que . ' es el ' . $cargado . ', pero '
+                . lcfirst(DiasHabiles::avisoSinHabil($r['teorica'])) . $informativo;
+        }
+
+        if ($r['corrida']) {
+            $texto = 'El ' . $cargado . ' ' . self::diaMes($r['teorica']) . ' es feriado: pasa al '
+                . self::DIAS_ACREDITACION[intval(date('N', strtotime($r['fecha'])))] . ' '
+                . self::diaMes($r['fecha']) . '.';
+        } else {
+            $texto = ($envia ? 'Envía' : 'Acredita') . ' el ' . $cargado . ' '
+                . self::diaMes($r['fecha']) . '.';
+        }
+
+        if (!empty($r['faltan'])) {
+            $texto .= ' RO_T_CALENDARIO no tiene datos para ' . implode(', ', $r['faltan'])
+                . ': se asumió hábil de lunes a viernes.';
+        }
+
+        return $texto . $informativo;
     }
 
     /**
@@ -2747,6 +2951,11 @@ class Saldos {
         }
 
         return date('d/m/Y', strtotime(substr((string) $fecha, 0, 10)));
+    }
+
+    /** 'Y-m-d' => 'dd/mm', para la celda y el tooltip de la acreditacion */
+    private static function diaMes($fecha) {
+        return substr((string) $fecha, 8, 2) . '/' . substr((string) $fecha, 5, 2);
     }
 
     /**
