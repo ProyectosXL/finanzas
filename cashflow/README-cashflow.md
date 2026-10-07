@@ -772,6 +772,20 @@ el total en cero, el formato de Comex, un formato propio para el total, una sola
 (*Período completo*) y ninguna. `tests/test_tablas_controles.php` lo corre cuando hay
 `cscript` y lo saltea donde no hay —cualquier máquina que no sea Windows—.
 
+Lo que la regla pura no ve —que cada total caiga en la misma columna que su fecha, que el
+orden y las columnas fijas cuenten lo mismo que antes, que el tilde de *seleccionar todos*
+de la fila de arriba siga andando, que *Exportar* no baje los totales— se verifica con los
+cuatro controles cargados en un navegador de verdad, en
+`tests/js/eje_totales_integracion.html`. Se abre en el navegador, o sin ventana:
+
+```
+chrome --headless=new --allow-file-access-from-files --dump-dom file:///C:/xampp/htdocs/finanzas/cashflow/tests/js/eje_totales_integracion.html
+```
+
+Va a mano y no dentro de `run.php`: la suite tendría que levantar un navegador en cada
+corrida, y una prueba que cuelga la suite cuando el navegador se traba hace más daño que
+la que cubre.
+
 El resto es cableado, y lo verifica la misma prueba leyendo los archivos: que el componente
 se cargue en `index.php`, que no recorra el cuerpo ni el pie, que sus celdas no lleven las
 clases que las volverían ordenables, que `tabla-export.js` omita lo marcado y que lo haga
