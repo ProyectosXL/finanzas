@@ -175,8 +175,11 @@
                             </th>
                             <th rowspan="2" id="thImporteNetoCobMay">Importe Neto</th>
                             <th rowspan="2" id="thCobroCobMay">Cobro</th>
-                            <!-- El rótulo y el colspan los pone el JS según la vista activa -->
-                            <th colspan="1" class="table-group-divider" id="mesActualHeaderCobMay">Días</th>
+                            <!-- Acá terminan las descriptivas. El resto de esta
+                                 fila son los totales de cada columna del eje,
+                                 arriba de su fecha: los pinta Js/eje-totales.js
+                                 desde generarFilaTotales(), con la misma cuenta
+                                 que el pie. -->
                         </tr>
                         <tr id="headerRowSubCobMay">
                             <!-- Los días se generan dinámicamente -->
