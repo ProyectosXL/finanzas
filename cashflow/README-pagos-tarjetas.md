@@ -433,8 +433,14 @@ El día del mes que tiene cargado la tarjeta, **acotado al último día si el me
 | **`CronogramaPagos`** — pago a un fletero, efectivo de una supervisora | Al día hábil **ANTERIOR** | El compromiso es con una persona que cobra esa semana |
 | **`TarjetasVencimiento`** — débito de una tarjeta | Al día hábil **SIGUIENTE** | El banco no puede debitar un día que no opera |
 | **`Ventas`** — acreditación de una cobranza | Al **próximo** día hábil | El banco no acredita antes de poder hacerlo |
+| **`Saldos`** — acreditación de la caja de un local | Al **próximo** día hábil | Ídem: es una acreditación (ver `README-saldos.md`) |
 
-**Las tres viven en clases distintas y no comparten código.** El encabezado de `CronogramaPagos` dice explícitamente que las direcciones opuestas no se mezclan, y agregarle la de adelante lo convertiría en un cajón de fechas de pago en vez de una regla. Y que el vencimiento de una tarjeta coincida hoy en dirección con `Ventas::proximoHabil()` —que además es privado— no las hace la misma regla: si mañana el débito de una tarjeta pasa a adelantarse, una función compartida movería también las acreditaciones de Ventas.
+**Las reglas viven en clases distintas, y la mecánica de ir hacia adelante es una sola.** El encabezado de `CronogramaPagos` dice explícitamente que las direcciones opuestas no se mezclan, y agregarle la de adelante lo convertiría en un cajón de fechas de pago en vez de una regla. Por eso `habilAnterior()` sigue en `CronogramaPagos`. Las tres que van hacia adelante eran dos copias letra por letra, y la caja de los locales iba a ser la tercera. Desde `feature/saldos-locales-dia-acreditacion` llaman todas a `DiasHabiles::siguiente()`, que tiene el corrimiento, el respaldo de lunes a viernes y el texto del aviso.
+
+**Lo que se comparte es la mecánica, no la decisión.** Cada regla elige su dirección según la función que llama: si mañana el débito de una tarjeta pasa a adelantarse, `TarjetasVencimiento` deja de llamar a `siguiente()` y Ventas no se entera. Y cada una decide qué hacer si el mapa no tiene ningún hábil en 30 días. `DiasHabiles` no lanza: devuelve la fecha del tope con `sin_habil`. Ante eso:
+- Tarjetas lanza, como siempre;
+- Ventas sigue con aviso, porque su pantalla no se cae;
+- Saldos deja la fecha en `null` y avisa.
 
 **Lo que sí se comparte es el calendario**, que es lo que no puede estar escrito dos veces: `Ventas::getDiasHabiles()` es la única lectura de `RO_T_CALENDARIO` del módulo, y se llega por `CronogramaDatos::habilesEntre()`. Lo que cambia es el **rango**: el cronograma pide un mes *antes* del eje y el vencimiento pide 30 días *después* de `fin()`, porque el corrimiento de un día 31 del último mes puede terminar en el mes siguiente. Dos rangos sobre la misma consulta no son dos definiciones de *"día hábil"*; dos consultas sí.
 

@@ -2,7 +2,7 @@
 
 Reemplaza el placeholder de la pestaña **Saldos** y alimenta las dos filas del tablero que hasta ahora rendían cero: *Saldo Inicial* y *Caja Locales*. Desde `feature/cuentas-inversion` también lleva las **cuentas de inversión y comitente**, que son el stock de la sección Cobertura.
 
-Ramas: `feature/saldos`, `feature/cuentas-inversion`
+Ramas: `feature/saldos`, `feature/cuentas-inversion`, `feature/saldos-locales-dia-acreditacion`
 
 ---
 
@@ -38,7 +38,11 @@ Contra `central`, en este orden:
 -- 2. sql/cashflow_saldos_cuentas_fondo.sql   (después de cashflow_cobertura.sql,
 --                                             cashflow_cobertura_por_fondo.sql y
 --                                             cashflow_dolares_comitente_cobertura.sql)
+-- 3. sql/cashflow_saldos_dia_acreditacion.sql (después del 1; el bloque también va
+--                                             como 5.c dentro del 1)
 ```
+
+El tercero agrega el **día de acreditación** de cada local (`RO_T_CASHFLOW_SALDOS_SUCURSAL.DIA_ACREDITACION`) y el día y la fecha efectivos en la foto de cada carga (`RO_T_CASHFLOW_SALDOS_LOCAL.DIA_ACREDITACION` y `FECHA_ACREDITACION`). Son tres columnas nullable, sin default, cada una agregada sólo si falta. No borra ni pisa nada, y si falta la tabla del 1 lo dice y no hace nada. Sin él, la pantalla funciona como antes: el día no se puede elegir, Caja Locales va entera a la primera columna, y la pestaña, Parámetros y el tablero avisan qué script falta. Ver *La fecha de imputación: el día de acreditación de cada local*.
 
 El primero crea las cinco tablas, siembra la cuenta de efectivo de tesorería y carga los dos parámetros del módulo. **Es reejecutable**: las tablas se crean sólo si no existen y las semillas entran por `MERGE WHEN NOT MATCHED`, así que una segunda corrida no duplica nada ni pisa un valor ya editado. Verificado corriéndolo dos veces.
 
@@ -114,6 +118,7 @@ Alimenta la fila **Caja Locales** (`DEPOSITOS`). Sale de una consulta contra el 
 | Saldo en caja | `SALDO_CIER` de la consulta, o el saldo manual si es más nuevo | **sí**, para cuando la consulta no trajo el cierre |
 | Fecha del saldo | `FECHA` de la consulta | no |
 | Gestión | `Deposita` / `Envía` | **sí** |
+| Acreditación / envío | Próxima fecha en que el local acredita (o envía) su efectivo: `Lun · 12/10`, o `sin día` | no: el día se elige en Parámetros |
 | Reserva de caja | Mínimo que la sucursal debe conservar | **sí** |
 | Neto a depositar | Saldo − reserva | no |
 | Aporta al cashflow | Lo que efectivamente entra a la serie | no |
@@ -138,17 +143,52 @@ El relevamiento menciona 0,6 % de impuesto al débito y 4 % de IIBB. **Esa parte
 
 Existía porque en el Excel las cajas se actualizaban una vez por semana, así que había que estimar cuánto se iba a depositar y descontarle los impuestos a mano. Acá el saldo se lee todos los días y **el importe realmente acreditado, ya neto, aparece por sí solo en el saldo bancario de la Pestaña 1**. Calcularlo de nuevo sería estimar un dato que el sistema ya trae medido, y además lo contaría dos veces.
 
-### La fecha de imputación
+### La fecha de imputación: el día de acreditación de cada local
 
-**Es la fecha del saldo que devuelve la consulta, sin corrimientos.** No hay regla de día de semana ni tratamiento de feriados: cuando la sucursal deposita, el movimiento queda registrado en Tango, y como la consulta corre todos los días el dato se actualiza solo. Un saldo de domingo se imputa el domingo y no se mueve al lunes.
+**Lo que aporta un local en *Deposita* se imputa en su próxima fecha de acreditación**, no en la fecha del saldo. La fecha del saldo dice cuándo se *contó* la plata; lo que el tablero necesita saber es cuándo *llega al banco*, y eso pasa el día de la semana en que el local deposita. Cada local va en su fecha, así que la fila *Caja Locales* se reparte en varias columnas.
+
+> Hasta `feature/saldos-locales-dia-acreditacion` la regla era *"la fecha del saldo, sin corrimientos"*, y como el último saldo es el de ayer, en la práctica todo caía en la primera columna. **Esa regla dejó de valer para esta serie.** Sigue valiendo para un local sin día (ver abajo).
+
+El día se carga por local, de lunes (1) a viernes (5), en **Parámetros → Saldos → Locales**, y sólo ahí. La regla es una sola, `Saldos::proximaFechaAcreditacion($dia, $hoy, $habiles)`, estática y pura:
+
+1. **La primera vez que ese día de la semana cae hoy o después.** Si hoy es ese día, la fecha es **hoy**.
+2. **Si esa fecha no es hábil, se corre al hábil siguiente.** Va hacia adelante porque es una acreditación y no un pago: el banco no acredita un día que no opera. Es la misma dirección que Ventas y la contraria de `CronogramaPagos`, que adelanta los pagos.
+
+| Hoy | Día cargado | Próxima fecha | Por qué |
+| --- | --- | --- | --- |
+| mié 07/10 | miércoles | mié 07/10 | hoy es el día |
+| mié 07/10 | martes | mar 13/10 | el martes de esta semana ya pasó |
+| mié 07/10 | lunes | mar 13/10 | el lunes 12/10 es feriado: pasa al martes |
+| lun 12/10 (feriado) | lunes | mar 13/10 | hoy es el día, pero hoy no se acredita |
+| mié 30/12 | viernes | lun 04/01/2027 | el viernes 1/1 es feriado, y el fin de semana tampoco es hábil |
+
+El corrimiento es `DiasHabiles::siguiente()`, **el mismo que usan Ventas y el vencimiento de las tarjetas**, con el mismo respaldo: una fecha que no está en `RO_T_CALENDARIO` se toma hábil de lunes a viernes y se avisa el mes que falta. El calendario se lee por `CronogramaDatos::habilesEntre()`, que pasa por `Ventas::getDiasHabiles()`, la única lectura de `RO_T_CALENDARIO` del módulo. Si no se puede leer, el aviso es crítico y vale el mismo respaldo. Dos calendarios con dos respaldos terminarían en fechas que no coinciden.
+
+**La pestaña, el tablero y la foto calculan la fecha por el mismo camino.** `Saldos::contextoAcreditacion($hoy)` resuelve hoy y el calendario, y `armarSaldosLocales()` le pone a cada fila su `acreditacion`: día, fecha teórica y final, si se corrió, la etiqueta y el tooltip. `armarSerieLocales()` no la vuelve a calcular: toma la que trae la fila.
+
+**Lo que no cambia:** el neto, la reserva, el saldo manual y su precedencia. Sólo cambia la columna en la que cae el importe, **así que el total de la serie es el mismo**. Medido contra la base el 07/10/2026, con el código anterior y el nuevo uno detrás del otro: $ 4.836.469,00 en los dos casos. Sin días cargados, todo sigue en el 07/10. Con días simulados por local y el calendario real, el mismo total se reparte en 07/10 $ 1.240.314,00, 08/10 $ 1.358.580,00 y 13/10 $ 2.237.575,00.
+
+**Casos que siguen como antes:**
+
+- **Local en *Deposita* sin día:** se imputa como hasta ahora, en la fecha del saldo, y si es anterior al eje, en la primera columna (ver la sección siguiente). Además, un aviso de atención en la pestaña y en el tablero lista **todos** los locales en *Deposita* sin día, aporten o no: el dato falta igual, y un local que hoy tiene la caja bajo la reserva mañana puede aportar.
+- **Local en *Envía*:** sigue sin aportar. Su día es el de **envío** y es informativo; la pestaña lo muestra igual, con un tooltip que lo aclara.
+- **Saldo sin fecha:** va a `sin_fecha` aunque el local tenga día. Imputarlo ahora cambiaría el total, y esta regla no lo toca.
+- **Fecha de acreditación fuera del eje:** queda en `fuera_horizonte` y el motor la informa, como cualquier otra fecha.
+- **Un calendario sin ningún hábil en 30 días:** la fecha es `null`, nunca la del tope. El local se imputa como sin día, con un aviso crítico.
+
+**Sin `sql/cashflow_saldos_dia_acreditacion.sql`** todo funciona como antes, con un aviso de atención en la pestaña, en Parámetros y en el tablero.
+
+En la pantalla, la celda dice `Lun · 12/10`. Se muestra el día en que **entra la plata**, no el cargado. Si la fecha se corrió, la celda dice *corrida por feriado* debajo, y el tooltip: *"El lunes 12/10 es feriado: pasa al martes 13/10."*. Sin día dice `sin día`, resaltado en ámbar: es atención y no error, porque se arregla cargando el día. El tooltip lo arma el backend (`explicarAcreditacion()`) para las dos gestiones, así sigue a la que haya en pantalla si alguien la cambia antes de guardar.
 
 ### Un saldo con fecha anterior a hoy se imputa en la primera columna
+
+Vale para los locales **sin día de acreditación**; los que tienen día van a su fecha (ver arriba).
 
 El eje del tablero arranca hoy, y en la práctica **el último saldo que Tango tiene registrado es el de ayer**: la consulta no devuelve depósitos, devuelve el **saldo de caja** de cada local. Esa plata sigue en el cajón y todavía no llegó al banco, así que se imputa en la apertura del horizonte, con un aviso que dice de qué fecha es el saldo.
 
 Descartarla mostraba la fila en cero justo cuando había millones para depositar, y el importe **no aparecía en ningún otro lado del tablero**: el saldo bancario de la Pestaña 1 recién lo va a mostrar cuando se acredite.
 
-> **Reubicar no es el corrimiento que el relevamiento prohíbe.** Lo prohibido es mover una fecha que **sí** cae dentro del eje a otra por día hábil o feriado, y eso no se hace en ninguna de las dos series. Acá se trata una fecha que **no tiene columna** porque ya pasó. Es la misma regla que aplica el disponible inicial, y vive en un solo lugar: `Saldos::destinoEnEje()`. Las dos series describen **plata que existe ahora** —un saldo bancario, el efectivo de un cajón—, no movimientos ya ocurridos, así que una fecha pasada significa "esto ya es cierto hoy".
+> **Reubicar una fecha pasada no es correr una fecha.** Acá se trata una fecha que **no tiene columna** porque ya pasó. Es la misma regla que aplica el disponible inicial, y vive en un solo lugar: `Saldos::destinoEnEje()`. Las dos series describen **plata que existe ahora** —un saldo bancario, el efectivo de un cajón—, no movimientos ya ocurridos, así que una fecha pasada significa "esto ya es cierto hoy". El único corrimiento por feriado del módulo es el de la acreditación, y lo hace `proximaFechaAcreditacion()`, no esta regla.
 
 Una fecha **posterior** al eje sí queda `fuera_horizonte` y se informa: ésa es una fecha que el horizonte no cubre, no un dato que ya es cierto.
 
@@ -253,8 +293,8 @@ Seis tablas, prefijo `RO_T_CASHFLOW_SALDOS_`. Cumplen tres propiedades:
 | `RO_T_CASHFLOW_SALDOS_CUENTA` | Catálogo de cuentas (parámetro): tipo, **clase**, moneda, origen, **saldo inicial con su fecha** (sólo fondos) y los siete campos de `/accounts` |
 | `RO_T_CASHFLOW_SALDOS_CARGA` | Cabecera de cada carga: tipo, fecha y hora, usuario, origen, observaciones |
 | `RO_T_CASHFLOW_SALDOS_DETALLE` | Histórico de saldos por cuenta y fecha, con los cinco `balances` y el `message` |
-| `RO_T_CASHFLOW_SALDOS_SUCURSAL` | Gestión y reserva por local (parámetro) |
-| `RO_T_CASHFLOW_SALDOS_LOCAL` | Histórico de la caja de los locales, con la gestión y la reserva **efectivas** y `ORIGEN_DATO` del saldo |
+| `RO_T_CASHFLOW_SALDOS_SUCURSAL` | Gestión, reserva y **día de acreditación** por local (parámetro). El día es `NULL` si no se cargó: no tiene default |
+| `RO_T_CASHFLOW_SALDOS_LOCAL` | Histórico de la caja de los locales, con la gestión, la reserva, el día y la fecha de acreditación **efectivos** y `ORIGEN_DATO` del saldo |
 | `RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL` | Saldo de caja tipeado a mano cuando la consulta no trajo el cierre; insert-only, fechado ayer |
 | `RO_T_CASHFLOW_SALDOS_FONDO_MOV` | La cuenta corriente de cada fondo: suscripciones y rescates, con moneda copiada de la cuenta, `VIGENTE`, `ID_REEMPLAZA` y `FECHA_BAJA`. Nunca se borra ni se actualiza un importe |
 
@@ -276,14 +316,16 @@ Con `MAX(FECHA)` sobre el detalle, **dos cargas el mismo día** —que es lo que
 
 `RO_T_CASHFLOW_SALDOS_LOCAL` guarda `GESTION`, `RESERVA` y `NETO_DEPOSITAR` **de cada carga**, y no sólo el parámetro vigente. Es lo que permite reconstruir una carga vieja después de que alguien cambie la reserva de una sucursal: recalcularla con la reserva de hoy daría un neto que nunca existió.
 
+Por el mismo motivo guarda `DIA_ACREDITACION` y `FECHA_ACREDITACION`: el día efectivo y la fecha calculada con la que ese local entró al tablero el día de la carga. Si después alguien cambia el día, la carga vieja sigue diciendo en qué columna estaba. Las cargas de antes del script quedan en `NULL`, igual que un local sin día: no se sabe qué día tenían, y un valor inventado diría que sí.
+
 Lo mismo con `MONEDA` en el detalle de saldos: se copia de la cuenta en el momento de la carga y no se lee por `JOIN`, para que corregir la moneda de una cuenta no reescriba el significado del histórico.
 
 ### Qué guarda el botón *Guardar* de la Pestaña 2
 
 **Las dos cosas, en una sola transacción:**
 
-1. **El parámetro** (`RO_T_CASHFLOW_SALDOS_SUCURSAL`), con la gestión y la reserva que quedaron en pantalla. Es el mismo dato que se edita en Parámetros → Saldos: un solo lugar, editable desde los dos lados. **Es lo que el tablero va a usar de ahí en adelante.**
-2. **La foto** (`RO_T_CASHFLOW_SALDOS_LOCAL`), con la gestión y la reserva efectivas de esa carga.
+1. **El parámetro** (`RO_T_CASHFLOW_SALDOS_SUCURSAL`), con la gestión y la reserva que quedaron en pantalla. Es el mismo dato que se edita en Parámetros → Saldos: un solo lugar, editable desde los dos lados. **Es lo que el tablero va a usar de ahí en adelante.** El **día de acreditación no** viaja desde esta pantalla —es de sólo lectura acá— y el guardado no lo toca: `resolverOverrides()` pisa sólo gestión y reserva y conserva el resto de la fila.
+2. **La foto** (`RO_T_CASHFLOW_SALDOS_LOCAL`), con la gestión, la reserva, el día y la fecha de acreditación efectivos de esa carga.
 
 El **saldo no viaja desde el navegador**: al guardar, el servidor vuelve a correr la consulta y toma de ahí el saldo y la fecha. Del cliente se aceptan únicamente los dos valores editables. Si el saldo viniera del cliente, se podría grabar un número inventado como si fuera lo que dice Tango.
 
@@ -291,7 +333,7 @@ El **saldo no viaja desde el navegador**: al guardar, el servidor vuelve a corre
 
 **Sólo se escriben las sucursales que cambiaron.** La pantalla manda las veinte en cada guardado; sin el diff (`Saldos::resolverOverrides()`), cada guardado les pisaría `FECHA_UPDATE` y `USUARIO` a todas y la columna *Última edición* de Parámetros dejaría de significar algo. La reserva se compara con tolerancia: la columna es `DECIMAL(19,4)` y el valor da la vuelta por JSON y por un input numérico, así que una comparación estricta reportaría cambios que no existen.
 
-Las dos escrituras van en la **misma transacción**: separadas, una falla a mitad de camino dejaría la reserva cambiada sin la foto que la explica, o al revés. Por eso el parámetro se escribe con el `$cid` de la transacción y no llamando a `saveSucursal()`, que abre su propia conexión — mismo criterio que `CashflowEstructura::guardar()`.
+Las dos escrituras van en la **misma transacción**: separadas, una falla a mitad de camino dejaría la reserva cambiada sin la foto que la explica, o al revés. Por eso el parámetro se escribe con `guardarSucursalEnTransaccion()` y el `$cid` de la transacción —mismo criterio que `CashflowEstructura::guardar()`—. Es el **único escritor del parámetro**: lo usa también *Guardar locales* de Parámetros.
 
 Editar una sucursal que la consulta devuelve pero que **nunca se sincronizó** le crea la fila de parámetro (`UPSERT`). La alternativa sería que el `UPDATE` no afectara ninguna fila y la edición se perdiera en silencio.
 
@@ -427,7 +469,11 @@ Sin `sql/cashflow_saldos_cuentas_fondo.sql`, los selectores de clase y el alta d
 
 > Una cuenta nueva **entra activa**, a diferencia de un medio de pago del mix. No es una inconsistencia: un medio de pago nuevo rompe el 100 % de su canal, así que tiene que entrar apagado. Una cuenta no rompe ningún invariante y nace **sin saldo cargado**, que la pantalla muestra como `sin cargar` y no como cero, así que no puede informar de menos en silencio.
 
-**Locales** trae la lista desde `SUCURSALES_LAKERS` con el botón *Sincronizar con locales*. La sincronización **nunca pisa `GESTION` ni `RESERVA`** —son valores que cargó una persona— y a las sucursales que desaparecen del origen las marca `ACTIVO = 0` en lugar de borrarlas.
+**Locales** trae la lista desde `SUCURSALES_LAKERS` con el botón *Sincronizar con locales*. La sincronización **nunca pisa `GESTION`, `RESERVA` ni `DIA_ACREDITACION`** —son valores que cargó una persona—, un local nuevo entra **sin día** y a las sucursales que desaparecen del origen las marca `ACTIVO = 0` en lugar de borrarlas. Que ninguna sentencia de la sincronización nombre el día lo fija una prueba sobre el código.
+
+La grilla tiene la columna **Día de acreditación / envío**, con un selector *— sin día —* / lunes a viernes. **Es el único lugar donde se edita.** En *Deposita* decide en qué columna del tablero cae el local; en *Envía* es el día de envío y es informativo. Sin el script el selector aparece apagado, con el aviso de qué falta. Si igual llega un día al servidor, se descarta **sólo ese dato**: la gestión y la reserva se guardan, y la respuesta dice qué script correr. La validación que vale es la del servidor (`Saldos::validarDiaAcreditacion()`: 1 a 5, o vacío para *sin día*), y el `CHECK` de la columna es la tercera red.
+
+**Guardar locales escribe sólo los locales que cambiaron, en una transacción** (`Saldos::guardarParametrosLocales()`, con el diff puro `resolverParametrosLocales()`). Antes cada fila era un `UPDATE` con su propia conexión: cada guardado sellaba a los veinte locales como editados por quien apretó el botón, y una falla a mitad de camino dejaba la mitad guardada. Un día ausente del pedido no se toca; uno vacío lo borra.
 
 **La gestión y la reserva se editan en los dos lados y son el mismo dato.** Esta sección y la Pestaña 2 escriben la misma tabla: acá se administra la lista completa, y en la Pestaña 2 se corrigen mirando los saldos del día, que es el momento en que uno se da cuenta de que una reserva está mal. El valor efectivo de cada carga queda además en el histórico. Ver *Qué guarda el botón Guardar de la Pestaña 2*.
 
@@ -451,14 +497,22 @@ En `ENV = DEV` las tablas de locales se alcanzan por linked server con el nombre
 php cashflow/tests/run.php saldos
 ```
 
-85 casos, todos sin base salvo la última sección, que se saltea sola. Los criterios viven en **helpers estáticos puros**, al estilo de `Ventas::armarTendencias()`: lo delicado de este módulo no son las consultas sino las decisiones.
+Corre `tests/test_saldos.php` (122 casos) y `tests/test_saldos_acreditacion.php` (134), todos sin base salvo la última sección de cada uno, que se saltea sola. Los criterios viven en **helpers estáticos puros**, al estilo de `Ventas::armarTendencias()`: lo delicado de este módulo no son las consultas sino las decisiones. Hoy se inyecta, así que las pruebas no caducan.
 
 | Qué se verifica | Helper |
 | --- | --- |
 | Sólo las sucursales en `Deposita` aportan; las de `Envía` quedan fuera | `armarSaldosLocales()` |
 | Un neto negativo aporta cero, no negativo | `armarSaldosLocales()` |
 | El neto es saldo menos reserva, sin ajuste impositivo | `armarSaldosLocales()` |
-| El importe se imputa en la fecha del saldo, sin corrimientos (ni de fin de semana) | `armarSerieLocales()` |
+| Un local **sin día** se imputa en la fecha del saldo, sin corrimientos (ni de fin de semana) | `armarSerieLocales()` |
+| La próxima fecha: hoy es el día; hoy es el día y es feriado; el día cae feriado; feriados encadenados; cruce de mes y de año; fecha fuera del calendario; sin calendario; mapa sin hábiles; sin día | `proximaFechaAcreditacion()` |
+| El día se valida en el servidor: 1 a 5, o vacío | `validarDiaAcreditacion()` |
+| La celda (`Mar · 13/10`, `sin día`) y el tooltip, para Deposita y para Envía | `etiquetaAcreditacion()`, `explicarAcreditacion()` |
+| Cada fila trae su fecha; los locales en Deposita sin día se avisan todos, también el que aporta cero; Envía sin día no; el mes sin calendario se avisa una vez; sin el script, nada cambia | `armarSaldosLocales()` |
+| Dos locales con días distintos caen en dos columnas; el sin día, en la primera; Envía no aporta; **el total es el mismo que sin días**; un saldo sin fecha va a `sin_fecha`; una fecha fuera del eje, a `fuera_horizonte` | `armarSerieLocales()` |
+| Guardar locales escribe sólo lo que cambió; un día ausente no se toca y uno vacío lo borra; sin el script se ignora sólo el día | `resolverParametrosLocales()` |
+| La pestaña 2 no le borra el día a nadie | `resolverOverrides()` |
+| La sincronización no nombra el día; la foto guarda día y fecha sólo con el script | sobre el código |
 | Un saldo de caja de ayer se imputa en la primera columna, con aviso; uno posterior al eje queda fuera | `armarSerieLocales()` |
 | El enlace del tablero lleva a la sub-pestaña de locales | `CashflowRegistry` |
 | Reenviar los mismos valores no cuenta como cambio; sólo se escribe lo que se tocó | `resolverOverrides()` |
@@ -477,6 +531,15 @@ php cashflow/tests/run.php saldos
 | Un saldo anterior a ayer queda desactualizado, con aviso; uno de ayer, de hoy o posterior no; uno sin fecha sí | `armarSaldosLocales()` |
 | Sólo un saldo distinto del efectivo (más de un centavo) es un manual nuevo; ausente o null no cuenta | `saldosManualesNuevos()` |
 | Un saldo negativo o no numérico se rechaza antes de abrir la transacción | `saldosManualesNuevos()` |
+
+El día de acreditación se verificó además contra la base viva el 07/10/2026, sin tocar tablas permanentes. Se usó una copia de `Saldos` apuntada a `#temporales` clonadas de las seis tablas del módulo, en una sola conexión. Sin las columnas, *Guardar locales* guarda la reserva, ignora el día y lo informa. Con ellas:
+- sólo los locales tocados quedan sellados;
+- un día 6 se rechaza antes de escribir;
+- la pestaña 2 cambia una reserva sin borrarle el día a nadie;
+- la foto trae el día y la misma fecha que la regla;
+- sincronizar no pisa los días.
+
+Las tablas `dbo` quedaron iguales. El total de Caja Locales, antes y después, está en *La fecha de imputación*.
 
 Verificado además contra la base real: la pestaña marcó los 3 locales sin cierre del 13/09 y, tras cargarlos a mano desde la pantalla, la cabecera quedó `MIXTA`, la foto con 17 filas `CONSULTA` + 3 `MANUAL`, y la pestaña y el tablero dejaron de avisar. También: el script corrido dos veces sin duplicar, la consulta de `SBA05`, y un alta de cuenta + carga + lectura por el proveedor que dejó el importe en una sola columna del eje.
 
@@ -503,7 +566,9 @@ Las tablas llevan el esquema de auditoría del módulo —`USUARIO_ALTA` / `FECH
 ```
 sql/cashflow_saldos.sql                        Las 5 tablas + semillas + parámetros
 sql/cashflow_saldos_cuentas_fondo.sql          CLASE, saldo inicial, movimientos de fondos y la migración
+sql/cashflow_saldos_dia_acreditacion.sql       Día de acreditación por local, y día y fecha en la foto
 cashflow/Class/Saldos.php                      Motor del módulo y helpers puros
+cashflow/Class/DiasHabiles.php                 El paso al próximo día hábil, compartido con Ventas y Tarjetas
 cashflow/Class/Fondos.php                      Las cuentas de fondo: clases, cuenta corriente, claves de cobertura
 cashflow/Class/Providers/SaldosProvider.php    DISPONIBLE y DEPOSITOS
 cashflow/Class/Providers/FondosProvider.php    STOCK de FONDO_INVERSION y FONDO_COMITENTE
@@ -514,8 +579,12 @@ cashflow/Js/Saldos.js
 cashflow/Js/Parametros-Saldos.js
 cashflow/Css/Saldos.css
 tests/test_saldos.php
+tests/test_saldos_acreditacion.php
+tests/test_dias_habiles.php
 tests/test_fondos.php
 ```
+
+De la rama `feature/saldos-locales-dia-acreditacion`: `Class/Saldos.php` (`proximaFechaAcreditacion()` y sus helpers, `contextoAcreditacion()`, `acreditacionCreada()`, el día en `getParametrosSucursales()`, `armarSaldosLocales()`, `armarSerieLocales()` y la foto; `guardarParametrosLocales()` reemplaza a `saveSucursal()`) · `Class/Providers/SaldosProvider.php` · `Class/Parametros.php` · `Controller/ParametrosController.php` · `Tabs/saldos.php`, `Js/Saldos.js`, `Css/Saldos.css` · `Tabs/parametros_saldos.php`, `Js/Parametros-Saldos.js` · `Class/Ventas.php` y `Class/TarjetasVencimiento.php` (delegan en `DiasHabiles`).
 
 Modificados: `Class/CashflowRegistry.php` (los dos códigos a `disponible => true`) · `Class/Parametros.php` (módulo `SALDOS` y sus secciones) · `Controller/ParametrosController.php` (ABM de cuentas y locales) · `Tabs/parametros.php` (el `tab-pane`) · `Css/Parametros.css` · `class/conexion.php` (`prefijoLocales()`) · `tests/test_providers.php` (ahora hay 6 módulos con datos reales).
 

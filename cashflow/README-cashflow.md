@@ -210,6 +210,26 @@ Contra `central`, en cualquier orden y en cualquier momento respecto del código
 
 El filtro de franquicias habilitadas en el directorio **no necesita script**: entra con el código. Saca del tablero lo que proyectaban las franquicias inhabilitadas —medido al 07/10/2026, $ 198.465.750,18— y suma a los locales `L`. Las cifras, en `README-cobranzas-fr.md`.
 
+### Caja Locales en la fecha de acreditación de cada local (`feature/saldos-locales-dia-acreditacion`)
+
+Contra `central`, en cualquier momento respecto del código, **después de `sql/cashflow_saldos.sql`**:
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 1 | `sql/cashflow_saldos_dia_acreditacion.sql` | Agrega `DIA_ACREDITACION` (1 = lunes a 5 = viernes, `CHECK`, sin default) a `RO_T_CASHFLOW_SALDOS_SUCURSAL`, y `DIA_ACREDITACION` y `FECHA_ACREDITACION` a la foto `RO_T_CASHFLOW_SALDOS_LOCAL`. Nullable, sin borrar ni pisar nada. El mismo bloque va como 5.c en `cashflow_saldos.sql` | Todo funciona como hoy: el día no se puede elegir en Parámetros, Caja Locales va entera a la primera columna, y la pestaña, Parámetros y el tablero avisan qué script falta |
+
+**Después de correrlo, ningún número cambia hasta que se cargue un día.** Los locales entran sin día, a propósito, y el tablero los lista en un aviso de atención. A medida que se cargan los días en Parámetros → Saldos → Locales, el aporte de cada local pasa a su próxima fecha de acreditación. **El total de la fila no cambia; sólo su distribución.** Medido el 07/10/2026: $ 4.836.469,00 antes y después. Ver `README-saldos.md`.
+
+Para verificar después de correrlo:
+- Parámetros → Saldos → Locales tiene el selector encendido. Guardar un día deja auditados el usuario y la fecha sólo en ese local.
+- *Sincronizar con locales* no borra los días cargados.
+- Saldos Locales muestra la próxima fecha de cada local.
+- En el tablero, Caja Locales reparte el aporte por fecha, y el total es el de antes.
+
+La rama trae además `Class/DiasHabiles.php`: el paso al próximo día hábil que usan Ventas, el vencimiento de las tarjetas y la caja de los locales. Antes estaba copiado en Ventas y en Tarjetas. Tiene dos efectos visibles en Ventas:
+- el aviso de calendario faltante pasa a tener tildes, con el mismo texto que el resto del módulo;
+- un calendario sin ningún hábil en 30 días, que antes pasaba en silencio, ahora se avisa.
+
 ---
 
 ## Ejecución de los scripts — la instalación completa
@@ -250,7 +270,10 @@ En este orden, contra `central`:
 -- 31. sql/cashflow_tarjetas_vto_mensual.sql  (Corporativas: vencimiento corregido y facturas mensuales)
 -- 32. sql/cashflow_cobranzas_ppp_grupo.sql  (Cobranzas FR: PPP por grupo empresario, clientes [FL]%)
 -- 33. sql/cashflow_cobranzas_cliente_excluido.sql  (Cobranzas FR: excluir un cliente, con motivo)
+-- 34. sql/cashflow_saldos_dia_acreditacion.sql     (Saldos: dia de acreditacion por local)
 ```
+
+**El 34 va después del 3**, que crea las dos tablas a las que les agrega columnas. Si se corre antes, lo dice y no hace nada. En una instalación nueva no hace falta: el 3 ya trae el mismo bloque.
 
 **El 30 va después del 25**, que crea la tabla de overrides a la que le agrega `TIPO`; sin ella siembra los parámetros igual y avisa. **El 31 va después del 27** —una FK contra el maestro de tarjetas— y corta si falta.
 
@@ -1454,7 +1477,13 @@ Texto resumido. "Sección" vacía es sin sección. Para revisar.
 | Caja Locales | Locales en Envía | info |
 | Caja Locales | Locales sin el saldo de ayer | warning |
 | Caja Locales | Ningún local supera su reserva: fila en cero | info |
-| Caja Locales | Saldo de caja anterior imputado en la primera columna | info |
+| Caja Locales | Saldo de caja anterior imputado en la primera columna (locales sin día) | info |
+| Caja Locales | Locales en Deposita sin día de acreditación: se imputan hoy | warning |
+| Caja Locales | Falta `sql/cashflow_saldos_dia_acreditacion.sql` | warning |
+| Caja Locales | `RO_T_CALENDARIO` no tiene datos para un mes | warning |
+| Caja Locales | No se pudo leer el calendario bancario | danger |
+| Caja Locales | Ningún día hábil en 30 días después del día de acreditación | danger |
+| Caja Locales | No se pudo calcular la fecha de acreditación | danger |
 | Inversión / Cuenta comitente | Faltan las cuentas de fondo | danger |
 | Inversión / Cuenta comitente | Ninguna cuenta de esa clase dada de alta | warning |
 | Inversión / Cuenta comitente | No se pudo leer el tipo de cambio | danger |
@@ -1856,6 +1885,7 @@ sql/cashflow_saldos.sql                     Tablas del modulo Saldos (README-sal
 sql/echeqs_prechequeado.sql                 Maestro de pre-chequeado + vista del neteo
 sql/cashflow_echeqs_excluir.sql             Exclusion de cheques de cartera, con historial
 Class/Horizonte.php                         Eje temporal, compartido con Ventas
+Class/DiasHabiles.php                       El paso al proximo dia habil: Ventas, Tarjetas y Caja Locales
 Class/EjeVista.php                          Las tres vistas: columnas, totales y periodo
 Js/eje-vistas.js                            Su contraparte en el front (cargado en index.php)
 Js/columnas-fijas.js                        Que columnas quedan fijas al scrollear (idem)
