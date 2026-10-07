@@ -589,3 +589,54 @@ chequear('sube los avisos del contexto a Caja Locales', 1, substr_count($provSA,
 chequear('y si el contexto falla, no tumba la serie', 1,
     substr_count($provSA, 'No se pudo calcular la fecha de acreditación de los locales ('));
 
+/* ================================================================
+   El historico: la foto guarda el dia y la fecha efectivos
+   ================================================================ */
+seccion('la foto del dia');
+
+$cargaSA = fuenteSA('Saldos', 'guardarCargaLocales');
+
+chequear('arma con el mismo contexto que la pestana y el tablero', 1,
+    substr_count($cargaSA, "\$acreditacion = \$this->contextoAcreditacion(\$hoy)['acreditacion'];"));
+chequear('y lo pasa a las dos armadas: la de los manuales y la de la foto', 2,
+    substr_count($cargaSA, '$ayer, $acreditacion);'));
+chequear('las columnas del dia van solo con el script', 1, preg_match(
+    "/if \(\\\$conDia\) \{\s+\\\$columnas\[\] = 'DIA_ACREDITACION';\s+\\\$columnas\[\] = 'FECHA_ACREDITACION';/",
+    $cargaSA));
+chequear('columnas y valores se arman juntos: un ? por columna', 1, substr_count($cargaSA,
+    "implode(', ', array_fill(0, count(\$columnas), '?'))"));
+chequear('el valor es el dia efectivo y la fecha calculada de la fila', [1, 1], [
+    substr_count($cargaSA, "\$valores[] = isset(\$f['acreditacion']['dia']) ? \$f['acreditacion']['dia'] : null;"),
+    substr_count($cargaSA, "\$valores[] = isset(\$f['acreditacion']['fecha']) ? \$f['acreditacion']['fecha'] : null;")
+]);
+
+/* ================================================================
+   Contra la base
+   ================================================================ */
+seccion('contra la base');
+
+if (!Pruebas::hayBase()) {
+    Pruebas::saltear('sin conexion a la base');
+    return;
+}
+
+$saldosSA = new Saldos();
+$creadaSA = $saldosSA->acreditacionCreada();
+
+chequear('acreditacionCreada() responde', true, is_bool($creadaSA));
+
+$paramBaseSA = $saldosSA->getParametrosSucursales(false);
+
+chequear('el parametro trae siempre la clave del dia', 0,
+    count(array_filter($paramBaseSA, function ($p) { return !array_key_exists('DIA_ACREDITACION', $p); })));
+
+if (!$creadaSA) {
+    chequear('sin el script, el dia es null para todos', 0,
+        count(array_filter($paramBaseSA, function ($p) { return $p['DIA_ACREDITACION'] !== null; })));
+}
+
+$ctxBaseSA = $saldosSA->contextoAcreditacion(date('Y-m-d'));
+
+chequear('el contexto es null exactamente cuando falta el script', !$creadaSA,
+    $ctxBaseSA['acreditacion'] === null);
+

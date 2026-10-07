@@ -2934,9 +2934,17 @@ class Saldos {
         // aplicados: la foto tiene que describir lo que el tablero va a usar.
         $manualesDisponibles = $this->manualesCreados();
         $manuales = $manualesDisponibles ? $this->getSaldosLocalesManuales() : [];
-        $ayer = self::ayer(date('Y-m-d'));
+        $hoy = date('Y-m-d');
+        $ayer = self::ayer($hoy);
 
-        $actual = self::armarSaldosLocales($consulta, $params, $manuales, $ayer);
+        // La foto guarda el dia y la fecha de acreditacion EFECTIVOS de cada
+        // local, calculados por el mismo camino que la pestana y el tablero:
+        // si alguien cambia el dia despues, la carga se reconstruye tal como
+        // entro. Sin el script las columnas no existen y no se escriben.
+        $acreditacion = $this->contextoAcreditacion($hoy)['acreditacion'];
+        $conDia = ($acreditacion !== null);
+
+        $actual = self::armarSaldosLocales($consulta, $params, $manuales, $ayer, $acreditacion);
         $nuevos = self::saldosManualesNuevos($actual['filas'], $overrides);
 
         if (!empty($nuevos) && !$manualesDisponibles) {
@@ -2955,7 +2963,7 @@ class Saldos {
             ];
         }
 
-        $armado = self::armarSaldosLocales($consulta, $params, $manuales, $ayer);
+        $armado = self::armarSaldosLocales($consulta, $params, $manuales, $ayer, $acreditacion);
 
         $cid = $this->conectar('central');
 
@@ -2996,19 +3004,26 @@ class Saldos {
             $idCarga = $this->insertarCabecera($cid, self::CARGA_LOCALES,
                 empty($nuevos) ? 'CONSULTA' : 'MIXTA', $observaciones, $usuario);
 
-            // ORIGEN_DATO existe recien con la migracion de manuales. Sin ella
-            // la foto se guarda como siempre: todo lo que hay es de la consulta.
-            $sql = $manualesDisponibles
-                ? "INSERT INTO RO_T_CASHFLOW_SALDOS_LOCAL
-                       (ID_CARGA, NRO_SUCURSAL, DESC_SUCURSAL, FECHA_SALDO,
-                        COD_CTA_CUENTA_TESORERIA, CUENTAS, SALDO_MONEDA,
-                        GESTION, RESERVA, NETO_DEPOSITAR, USUARIO_ALTA, USUARIO_MODIF, ORIGEN_DATO)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                : "INSERT INTO RO_T_CASHFLOW_SALDOS_LOCAL
-                       (ID_CARGA, NRO_SUCURSAL, DESC_SUCURSAL, FECHA_SALDO,
-                        COD_CTA_CUENTA_TESORERIA, CUENTAS, SALDO_MONEDA,
-                        GESTION, RESERVA, NETO_DEPOSITAR, USUARIO_ALTA, USUARIO_MODIF)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            // Las columnas de la foto dependen de que migraciones se corrieron:
+            // ORIGEN_DATO llega con la de manuales, y el dia y la fecha de
+            // acreditacion con la suya. Sin ellas la foto se guarda como
+            // siempre. Las columnas y los valores se arman juntos, para que
+            // no puedan desalinearse.
+            $columnas = ['ID_CARGA', 'NRO_SUCURSAL', 'DESC_SUCURSAL', 'FECHA_SALDO',
+                         'COD_CTA_CUENTA_TESORERIA', 'CUENTAS', 'SALDO_MONEDA',
+                         'GESTION', 'RESERVA', 'NETO_DEPOSITAR', 'USUARIO_ALTA', 'USUARIO_MODIF'];
+
+            if ($manualesDisponibles) {
+                $columnas[] = 'ORIGEN_DATO';
+            }
+
+            if ($conDia) {
+                $columnas[] = 'DIA_ACREDITACION';
+                $columnas[] = 'FECHA_ACREDITACION';
+            }
+
+            $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_LOCAL (" . implode(', ', $columnas) . ")
+                    VALUES (" . implode(', ', array_fill(0, count($columnas), '?')) . ")";
 
             foreach ($armado['filas'] as $f) {
                 $valores = [
@@ -3031,6 +3046,13 @@ class Saldos {
 
                 if ($manualesDisponibles) {
                     $valores[] = $f['origen_saldo'];
+                }
+
+                if ($conDia) {
+                    // El dia efectivo y la fecha calculada; null para un
+                    // local sin dia, que es lo que entro al tablero.
+                    $valores[] = isset($f['acreditacion']['dia']) ? $f['acreditacion']['dia'] : null;
+                    $valores[] = isset($f['acreditacion']['fecha']) ? $f['acreditacion']['fecha'] : null;
                 }
 
                 if (sqlsrv_query($cid, $sql, $valores) === false) {
