@@ -357,3 +357,74 @@ foreach ([['corrida.seccion === f.seccion', $cashflowJs],
           ["\$anterior['TIPO'] === \$f['TIPO']", $estructuraPhp]] as $par) {
     chequear('condicion presente: ' . $par[0], true, strpos($par[1], $par[0]) !== false);
 }
+
+// ============================================================================
+// Parametros -> Cobranzas: los grupos de Gestion de Cobranza Franquicias
+//
+// Es el mismo mecanismo que los renglones agrupados del tablero, con dos
+// diferencias a proposito: abre siempre contraida y NO guarda preferencia
+// (es lo que el usuario esta mirando, no una eleccion), y el chevron tiene que
+// sobrevivir a Permisos.soloLectura(), que saca los botones de la grilla.
+// ============================================================================
+
+seccion('la tarjeta de franquicias: el boton de expandir todo esta cableado de los dos lados');
+
+$paramCobTab = contenidoTab($TABS . '/parametros_cobranzas.php');
+$paramCobJs = file_get_contents($JS . '/Parametros-Cobranzas.js');
+$paramCss = file_get_contents(__DIR__ . '/../Css/Parametros.css');
+
+chequear('el boton existe en la tarjeta', true,
+    strpos($paramCobTab, 'id="btnGruposParamCob"') !== false);
+chequear('y el JS le engancha alternarTodos', true,
+    strpos($paramCobJs, "conectar('btnGruposParamCob', 'click', alternarTodos)") !== false);
+chequear('el rotulo dice los dos estados', true,
+    strpos($paramCobJs, "'Expandir todo'") !== false
+        && strpos($paramCobJs, "'Contraer todo'") !== false);
+
+seccion('la tarjeta de franquicias: un grupo cerrado esconde a sus clientes, no los saca');
+
+chequear('la clase que los esconde es display:none, que es lo que TablaExport mira', true,
+    preg_match('/\.pc-oculta\s*\{\s*display:\s*none/', $paramCss) === 1);
+chequear('el JS la prende y la apaga', true,
+    strpos($paramCobJs, "classList.toggle('pc-oculta'") !== false);
+chequear('y el buscador ya no esconde por su lado con style.display', false,
+    strpos($paramCobJs, "fila.style.display") !== false);
+chequear('el chevron es un boton que soloLectura() no saca', true,
+    preg_match('/class="pc-chevron" data-lectura/', $paramCobJs) === 1);
+chequear('con los dos iconos', true,
+    strpos($paramCobJs, "'fas fa-chevron-' + (abierto ? 'down' : 'right')") !== false);
+
+seccion('la tarjeta de franquicias: abre contraida y no guarda preferencia');
+
+chequear('el estado vive en memoria', true,
+    strpos($paramCobJs, 'let abiertos = {};') !== false);
+chequear('cerrado salvo que lo hayan abierto', true,
+    strpos($paramCobJs, 'abiertos[agrup] === true') !== false);
+chequear('y nunca toca localStorage', 0,
+    preg_match_all('/localStorage\.(get|set)Item/', $paramCobJs));
+// Guardar un PPP redibuja la tabla entera: si renderizarTabla() no reaplicara
+// el estado, cerraria lo que el usuario acababa de abrir.
+$render = substr($paramCobJs, strpos($paramCobJs, 'function renderizarTabla()'));
+$render = substr($render, 0, strpos($render, 'function filaGrupo('));
+chequear('el redibujo de un guardado reaplica el estado', true,
+    strpos($render, 'aplicarVisibilidad();') !== false);
+
+seccion('la tarjeta de franquicias: ordenar no despega los clientes de su grupo');
+
+// tablaParamCob se ordena sola por el descubrimiento automatico, y sin la
+// marca cada cliente se ordenaba por su cuenta: quedaba debajo de otro grupo,
+// con un PPP que no es el suyo, y la tabla se seguia viendo normal.
+chequear('las filas de cliente llevan data-orden-sigue', true,
+    preg_match('/<tr class="pc-cliente[^\n]*data-orden-sigue data-agrup=/', $paramCobJs) === 1);
+chequear('las de grupo no: son las que se ordenan', false,
+    strpos($paramCobJs, '<tr class="pc-grupo" data-orden-sigue') !== false);
+chequear('y la tabla no esta excluida del orden', false,
+    strpos($paramCobTab, 'id="tablaParamCob" data-orden="no"') !== false);
+
+// Un grupo contraido se ordena con sus clientes ocultos pegados: tabla-orden
+// agrupa por esPegada() sin mirar la visibilidad, y el ocultamiento es una
+// clase que viaja con la fila. Si alguien agregara un filtro por visibilidad
+// al agrupar, los clientes de un grupo cerrado quedarian sueltos al final.
+$ordenadas = substr($ordenJs, strpos($ordenJs, 'if (esPegada(f) && bloque.length)'), 200);
+chequear('tabla-orden pega la fila sin mirar si se ve', false,
+    strpos($ordenadas, 'display') !== false || strpos($ordenadas, 'oculta') !== false);

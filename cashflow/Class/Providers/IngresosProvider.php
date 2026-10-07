@@ -29,6 +29,13 @@ require_once __DIR__ . '/../Ingresos.php';
  * (ver Ingresos::ubicarCobroVencido()), de modo que la columna de hoy puede
  * traer plata que nadie espera cobrar hoy: avisarVencidas() lo dice con el
  * conteo y el importe.
+ *
+ * SOLO LAS FRANQUICIAS HABILITADAS, LO MISMO QUE LA PESTANA
+ * ---------------------------------------------------------
+ * Las tres series salen de Ingresos::getCobranzasFRTotales(), que aplica el
+ * mismo universo que Cobranzas FR (ver Class/DirectorioFranquicias.php): sin
+ * excepciones, porque un tablero que cuenta plata que la pestana no muestra
+ * no se puede auditar. Lo que queda afuera se avisa, cliente por cliente.
  */
 class IngresosProvider extends CashflowProvider {
 
@@ -71,6 +78,24 @@ class IngresosProvider extends CashflowProvider {
         $total['detalle'] = $this->detallePactado($h, $filasTotal);
 
         $this->avisarVencidas($filasProy);
+
+        // Las franquicias fuera del universo -inhabilitadas, con el estado sin
+        // cargar o fuera del directorio- no entran en ninguna serie, y esa
+        // plata no puede salir del tablero sin que se diga. Se lee DESPUES de
+        // la lectura 'todos', que es la ultima y la que cubre las dos
+        // solapas: cada lectura empieza de cero, asi que no se cuenta dos
+        // veces. Cada aviso trae su nivel: WARNING si el directorio no
+        // respondio, INFO por lo que quedo afuera.
+        $this->avisarTodos($ingresos->avisosUniversoFR());
+
+        // Los clientes excluidos a mano tampoco suman, y la plata que sacan se
+        // dice con su importe y sus motivos. INFO: es una decision tomada, no
+        // un problema. Mismo momento de lectura que el universo.
+        $textoExcluidos = CobranzasExclusion::textoAviso($ingresos->resumenExcluidosFR());
+
+        if ($textoExcluidos !== null) {
+            $this->avisar($textoExcluidos, Aviso::INFO);
+        }
 
         return [
             'COBRANZA' => $total,

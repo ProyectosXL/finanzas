@@ -972,6 +972,43 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* Excluir un cliente de Cobranzas Franquicias: sus facturas salen de
+           las dos solapas y del tablero. El motivo y el codigo se validan en
+           CobranzasExclusion, no aca ni en la pantalla: el endpoint es
+           alcanzable sin pasar por ella. El permiso es el de edicion de
+           Parametros -> Cobranzas (AuthCashflow::ESCRITURAS). */
+        case 'excluirClienteCobranza':
+            require_once __DIR__ . '/../Class/CobranzasExclusion.php';
+            $data = bodyJson();
+
+            $r = (new CobranzasExclusion())->excluir(
+                isset($data['cod_cliente']) ? $data['cod_cliente'] : '',
+                isset($data['motivo']) ? $data['motivo'] : '',
+                $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['cod_cliente'] . ' (' . $r['razon_social'] . ') quedó excluido de '
+                    . 'Cobranzas Franquicias: sus facturas salen de las dos solapas y del tablero.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'incluirClienteCobranza':
+            require_once __DIR__ . '/../Class/CobranzasExclusion.php';
+            $data = bodyJson();
+
+            $habia = (new CobranzasExclusion())->incluir(
+                isset($data['cod_cliente']) ? $data['cod_cliente'] : '', $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $habia
+                    ? 'El cliente vuelve a Cobranzas Franquicias. La exclusión queda en el historial, dada de baja.'
+                    : 'El cliente no estaba excluido: no se cambió nada.'
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         case 'saveMedioPagoCliente':
             $data = bodyJson();
 

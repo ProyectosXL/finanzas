@@ -508,6 +508,14 @@
    grupo se leeria como si fuera del primer cliente.
    ============================================================================ */
 
+/* El bloque del título se estira y se achica: sin min-width: 0, un flex item
+   no baja de su contenido y la descripción de varias líneas empujaba las
+   acciones del header -buscador incluido- a desbordar en vez de bajar. */
+.pc-titulo {
+    flex: 1 1 360px;
+    min-width: 0;
+}
+
 #tablaParamCob .pc-grupo td {
     background: var(--bg-light, #f5f6fa);
     border-top: 2px solid var(--border-color, #e2e5ed);
@@ -515,6 +523,50 @@
 
 #tablaParamCob .pc-cliente td {
     font-size: 12px;
+}
+
+/* Un grupo contraído ESCONDE a sus clientes, no los saca: TablaExport mira el
+   display de la tabla viva, así que Exportar baja lo que se ve, y el orden de
+   la tabla los sigue moviendo con su grupo. La misma clase la usa el
+   buscador, para que haya un solo mecanismo que decide qué se ve. */
+#tablaParamCob .pc-oculta {
+    display: none;
+}
+
+/* El chevron es un <button>, pero no tiene que verse como un botón adentro
+   de una celda: mismo trato que .cf-chevron del tablero. */
+#tablaParamCob .pc-chevron {
+    background: none;
+    border: 0;
+    padding: 0 6px 0 0;
+    margin: 0;
+    color: var(--text-muted, #6c757d);
+    font-size: 0.72rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+#tablaParamCob .pc-chevron:hover {
+    color: var(--bs-primary, #0d6efd);
+}
+
+/* Un cliente excluido de Cobranzas Franquicias se sigue viendo -sigue en su
+   grupo y su PPP sigue contando-, pero atenuado: sus facturas no se cobran
+   por este circuito. La celda Excluir no se atenúa, que es donde se vuelve a
+   incluir. */
+#tablaParamCob .pc-excluido td:not(:last-child) {
+    opacity: 0.5;
+}
+
+#tablaParamCob .pc-badge-excluido {
+    background: rgba(220, 53, 69, 0.12);
+    color: var(--bs-danger, #dc3545);
+}
+
+#tablaParamCob .pc-icono-excluido {
+    color: var(--bs-danger, #dc3545);
+    cursor: help;
+    margin-left: 4px;
 }
 
 #tablaParamCob .pc-badge {

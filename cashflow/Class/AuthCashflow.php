@@ -171,6 +171,8 @@ class AuthCashflow {
             'bajaOpcionProvLocal' => [['parametros', 'PROV_LOCALES']],
             'savePPPManualGrupo' => [['parametros', 'COBRANZAS']],
             'saveMedioPagoCliente' => [['parametros', 'COBRANZAS']],
+            'excluirClienteCobranza' => [['parametros', 'COBRANZAS']],
+            'incluirClienteCobranza' => [['parametros', 'COBRANZAS']],
             'saveEscalaDescuento' => [['parametros', 'COBRANZAS']]
         ],
         'Proveedores' => [

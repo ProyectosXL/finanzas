@@ -137,30 +137,44 @@ $edita = AuthCashflow::puedeEditar('parametros', 'COBRANZAS');
 
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <div class="d-flex align-items-center gap-3">
-            <div>
-                <h5 class="mb-0">Gestión de Cobranza Franquicias</h5>
-                <!-- El PPP es del grupo: una fila por grupo empresario con
-                     sus locales debajo. Se listan solo las franquicias
-                     habilitadas en el direccionario de sucursales. -->
-                <small class="text-muted">
-                    Plazo Promedio de Pago por <strong>grupo empresario</strong>, con los recibos de
-                    Tango de los últimos 100 días; un cliente sin grupo es su propio grupo. Se listan
-                    sólo las franquicias <strong>habilitadas</strong> en el directorio de sucursales.
-                    El descuento sale de la escala general de arriba, y el <em>Medio de Pago</em> es
-                    un dato informativo de cada cliente.
-                </small>
-            </div>
-            <div class="search-box-container ms-3">
+        <!-- El texto ocupa lo que sobra y se puede achicar: es largo, y sin
+             min-width: 0 empujaba al buscador fuera de línea. -->
+        <div class="pc-titulo">
+            <h5 class="mb-0">Gestión de Cobranza Franquicias</h5>
+            <!-- El PPP es del grupo: una fila por grupo empresario con
+                 sus locales debajo. Se listan solo las franquicias -[FL]%-
+                 habilitadas en el directorio de sucursales, que son las
+                 mismas que proyecta Cobranzas FR (Class/DirectorioFranquicias.php). -->
+            <small class="text-muted">
+                Plazo Promedio de Pago por <strong>grupo empresario</strong>, con los recibos de
+                Tango de los últimos 100 días; un cliente sin grupo es su propio grupo. Las
+                franquicias son los clientes que empiezan con <strong>F</strong> o con
+                <strong>L</strong> (gestión asistida), y se listan sólo las
+                <strong>habilitadas</strong> en el directorio de sucursales: son las únicas que
+                se cobran en Cobranzas FR y en el tablero. El descuento sale de la escala general
+                de arriba, y el <em>Medio de Pago</em> es un dato informativo de cada cliente.
+            </small>
+        </div>
+        <!-- El buscador va con las acciones y no debajo del título: pegado a
+             una descripción de varias líneas quedaba a media altura, y es un
+             control de la tabla como Exportar. flex-wrap lo baja de renglón
+             en pantallas angostas en vez de desbordar el header. -->
+        <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
+            <div class="search-box-container">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text bg-light border-end-0">
                         <i class="fas fa-search text-muted"></i>
                     </span>
-                    <input type="text" id="busquedaParamCob" class="form-control border-start-0 ps-0" placeholder="Buscar grupo, cliente o sucursal..." style="min-width: 250px;">
+                    <input type="text" id="busquedaParamCob" class="form-control border-start-0 ps-0" placeholder="Buscar grupo, cliente o sucursal..." style="min-width: 230px;">
                 </div>
             </div>
-        </div>
-        <div class="d-flex gap-2">
+            <!-- Un solo botón para abrir y cerrar todos los grupos, con el
+                 criterio de cfBtnGrupos del tablero: dice "Expandir todo"
+                 mientras quede alguno cerrado. El rótulo lo escribe
+                 Js/Parametros-Cobranzas.js según lo que hay en pantalla. -->
+            <button id="btnGruposParamCob" type="button" class="btn btn-sm btn-outline-secondary">
+                <i class="fas fa-angles-down me-1"></i> Expandir todo
+            </button>
             <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
             <button class="btn btn-sm btn-outline-success" data-exportar="tablaParamCob"
                     data-exportar-nombre="Parametros_Cobranzas_Clientes"
@@ -189,6 +203,9 @@ $edita = AuthCashflow::puedeEditar('parametros', 'COBRANZAS');
                         <th class="text-center" style="width: 160px;" title="Promedio de los promedios por cliente del grupo, con los recibos de Tango de los últimos 100 días">PPP Calculado</th>
                         <th class="text-center" style="width: 180px;" title="Plazo manual del grupo: pisa el calculado para todos sus clientes">PPP Manual (Pisar)</th>
                         <th class="text-center" style="width: 130px;" title="Plazo con el que se proyecta cada cliente">PPP Efectivo</th>
+                        <!-- Excluir es por cliente: sus facturas salen de Cobranzas FR
+                             y del tablero, con motivo. El PPP del grupo no cambia. -->
+                        <th class="text-center" style="width: 90px;" title="Las facturas de un cliente excluido no entran en Cobranzas FR ni en el tablero. El PPP del grupo no cambia.">Excluir</th>
                     </tr>
                 </thead>
                 <tbody id="tbodyParamCob">
