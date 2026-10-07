@@ -581,24 +581,29 @@ try {
 
             require_once __DIR__ . '/../Class/Saldos.php';
 
-            $saldos = new Saldos();
+            // Gestion, reserva y dia de acreditacion; solo los locales que
+            // cambiaron, en una transaccion. La validacion es de la clase.
+            $r = (new Saldos())->guardarParametrosLocales($data['filas'], $usuario);
 
-            foreach ($data['filas'] as $fila) {
-                if (!isset($fila['nro_sucursal'])) {
-                    throw new Exception('Falta el número de una sucursal');
-                }
+            $mensaje = ($r['cambios'] > 0)
+                ? $r['cambios'] . ' local(es) actualizados.'
+                : 'No cambió ningún local.';
 
-                $saldos->saveSucursal(
-                    $fila['nro_sucursal'],
-                    isset($fila['gestion']) ? $fila['gestion'] : 'DEPOSITA',
-                    isset($fila['reserva']) ? $fila['reserva'] : 0,
-                    $usuario
-                );
-            }
+            // Sin el script, el dia se descarta y el resto se guarda: se dice
+            // aparte, para que no se lea como que el dia quedo cargado.
+            $avisoDia = empty($r['dia_ignorado']) ? null
+                : 'El día de acreditación no se guardó (locales ' . implode(', ', $r['dia_ignorado'])
+                    . '): falta correr sql/cashflow_saldos_dia_acreditacion.sql contra la base '
+                    . 'central. La gestión y la reserva sí se guardaron.';
 
             echo json_encode([
                 'success' => true,
-                'message' => 'Locales guardados correctamente'
+                'message' => $mensaje . ($avisoDia === null ? '' : ' ' . $avisoDia),
+                'data' => [
+                    'cambios' => $r['cambios'],
+                    'dia_ignorado' => $r['dia_ignorado'],
+                    'aviso_dia' => $avisoDia
+                ]
             ], JSON_UNESCAPED_UNICODE);
             break;
 
@@ -606,15 +611,17 @@ try {
             require_once __DIR__ . '/../Class/Saldos.php';
 
             // Trae los locales propios habilitados desde el servidor de
-            // locales. NO pisa la gestion ni la reserva ya cargadas, y a los
-            // que desaparecen del origen los inhabilita en lugar de borrarlos.
+            // locales. NO pisa la gestion, la reserva ni el dia de acreditacion
+            // ya cargados, y a los que desaparecen del origen los inhabilita
+            // en lugar de borrarlos.
             $r = (new Saldos())->sincronizarSucursales($usuario);
 
             echo json_encode([
                 'success' => true,
                 'message' => 'Locales sincronizados: ' . $r['altas'] . ' nuevos, '
                            . $r['reactivadas'] . ' reactivados, ' . $r['bajas']
-                           . ' inhabilitados. La gestión y la reserva ya cargadas no se tocaron.',
+                           . ' inhabilitados. La gestión, la reserva y el día de acreditación ya '
+                           . 'cargados no se tocaron.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

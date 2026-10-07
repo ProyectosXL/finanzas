@@ -924,18 +924,8 @@ class Saldos {
                 continue;
             }
 
-            $gestion = strtoupper(trim((string) (isset($o['gestion']) ? $o['gestion'] : '')));
-
-            if ($gestion !== self::DEPOSITA && $gestion !== self::ENVIA) {
-                throw new Exception('Gestión inválida para el local ' . $nro . ': "' . $gestion
-                    . '". Sólo puede ser Deposita o Envía.');
-            }
-
-            $reserva = floatval(isset($o['reserva']) ? $o['reserva'] : 0);
-
-            if ($reserva < 0) {
-                throw new Exception('La reserva del local ' . $nro . ' no puede ser negativa');
-            }
+            $gestion = self::validarGestion(isset($o['gestion']) ? $o['gestion'] : '', $nro);
+            $reserva = self::validarReserva(isset($o['reserva']) ? $o['reserva'] : 0, $nro);
 
             $antes = isset($params[$nro]) ? $params[$nro] : null;
 
@@ -943,11 +933,16 @@ class Saldos {
                 || (strtoupper(trim((string) $antes['GESTION'])) !== $gestion)
                 || (abs(floatval($antes['RESERVA']) - $reserva) > 0.0001);
 
-            $params[$nro] = [
+            // SE PISAN SOLO LOS DOS CAMPOS QUE EDITA ESTA PANTALLA, y el resto de
+            // la fila queda. Rearmarla con solo gestion y reserva le borraba el
+            // dia de acreditacion -que se edita en Parametros y no aca- a todos
+            // los locales que manda la pantalla, que son todos, y la foto del
+            // dia se guardaba sin dia.
+            $params[$nro] = array_merge(is_array($antes) ? $antes : [], [
                 'NRO_SUCURSAL' => $nro,
                 'GESTION' => $gestion,
                 'RESERVA' => $reserva
-            ];
+            ]);
 
             if ($distinto) {
                 $cambios[] = [
@@ -959,6 +954,130 @@ class Saldos {
         }
 
         return ['params' => $params, 'cambios' => $cambios];
+    }
+
+    /**
+     * Que locales cambiaron en el guardado de Parametros -> Saldos -> Locales.
+     *
+     * Es el mismo diff que resolverOverrides() hace para la pestana 2, por el
+     * mismo motivo: la grilla manda los veinte locales en cada guardado, y sin
+     * el diff cada guardado les sellaba USUARIO_MODIF y FECHA_MODIF a todos, y
+     * "Ultima edicion" decia que alguien habia editado los veinte locales el
+     * mismo segundo. Aca compara tambien el dia de acreditacion, que es el
+     * campo que solo se edita en esta pantalla.
+     *
+     * EL DIA SE DISTINGUE ENTRE AUSENTE Y VACIO. Ausente -una pantalla vieja-
+     * no lo toca; vacio o null es "sin dia" y lo borra, que es como se corrige
+     * uno mal cargado.
+     *
+     * SIN EL SCRIPT ($conDia = false) EL DIA NO SE ESCRIBE, pero el resto del
+     * guardado sigue: la gestion y la reserva no tienen nada que ver con la
+     * columna que falta, y rechazar el guardado entero por eso le haria perder
+     * a alguien una correccion de reserva. Los locales que mandaron un dia
+     * vuelven en 'dia_ignorado' para que la respuesta diga que script correr.
+     *
+     * Valida todo aca, antes de abrir la transaccion. Un local que no esta en
+     * los parametros es un error: esta pantalla lista solo los que estan, y el
+     * UPDATE no afectaria ninguna fila y la edicion se perderia en silencio.
+     *
+     * @param array $actuales Mapa NRO_SUCURSAL => fila de getParametrosSucursales(false)
+     * @param array $filas [['nro_sucursal', 'gestion', 'reserva', 'dia_acreditacion'?], ...]
+     * @param bool $conDia Si existe la columna del dia (acreditacionCreada())
+     * @return array ['cambios' => [['nro_sucursal', 'desc_sucursal', 'gestion',
+     *               'reserva', 'dia_acreditacion'], ...], 'dia_ignorado' => [nro, ...]]
+     */
+    public static function resolverParametrosLocales($actuales, $filas, $conDia) {
+        $actuales = is_array($actuales) ? $actuales : [];
+        $cambios = [];
+        $diaIgnorado = [];
+
+        foreach ((is_array($filas) ? $filas : []) as $f) {
+            $nro = intval(isset($f['nro_sucursal']) ? $f['nro_sucursal'] : 0);
+
+            if ($nro === 0) {
+                throw new Exception('Falta el número de un local');
+            }
+
+            if (!isset($actuales[$nro])) {
+                throw new Exception('El local ' . $nro . ' no está en los parámetros. Usá '
+                    . 'Sincronizar con locales y volvé a guardar.');
+            }
+
+            $antes = $actuales[$nro];
+
+            $gestion = self::validarGestion(
+                isset($f['gestion']) ? $f['gestion'] : $antes['GESTION'], $nro);
+            $reserva = self::validarReserva(
+                isset($f['reserva']) ? $f['reserva'] : $antes['RESERVA'], $nro);
+
+            $diaAntes = (isset($antes['DIA_ACREDITACION']) && $antes['DIA_ACREDITACION'] !== null)
+                ? intval($antes['DIA_ACREDITACION']) : null;
+            $dia = $diaAntes;
+
+            if (array_key_exists('dia_acreditacion', $f)) {
+                if ($conDia) {
+                    try {
+                        $dia = self::validarDiaAcreditacion($f['dia_acreditacion']);
+                    } catch (Exception $e) {
+                        throw new Exception('Local ' . $nro . ': ' . $e->getMessage());
+                    }
+                } elseif ($f['dia_acreditacion'] !== null && $f['dia_acreditacion'] !== '') {
+                    $diaIgnorado[] = $nro;
+                }
+            }
+
+            $distinto = (strtoupper(trim((string) $antes['GESTION'])) !== $gestion)
+                || (abs(floatval($antes['RESERVA']) - $reserva) > 0.0001)
+                || ($conDia && $dia !== $diaAntes);
+
+            if ($distinto) {
+                $cambios[] = [
+                    'nro_sucursal' => $nro,
+                    'desc_sucursal' => isset($antes['DESC_SUCURSAL']) ? $antes['DESC_SUCURSAL'] : '',
+                    'gestion' => $gestion,
+                    'reserva' => $reserva,
+                    'dia_acreditacion' => $dia
+                ];
+            }
+        }
+
+        return ['cambios' => $cambios, 'dia_ignorado' => $diaIgnorado];
+    }
+
+    /**
+     * La gestion validada. La comparten las dos pantallas que la editan, para
+     * que las dos rechacen lo mismo con el mismo mensaje.
+     *
+     * @param mixed $gestion
+     * @param int $nro Para el mensaje
+     * @return string DEPOSITA o ENVIA
+     */
+    private static function validarGestion($gestion, $nro) {
+        $g = strtoupper(trim((string) $gestion));
+
+        if ($g !== self::DEPOSITA && $g !== self::ENVIA) {
+            throw new Exception('Gestión inválida para el local ' . $nro . ': "' . $g
+                . '". Sólo puede ser Deposita o Envía.');
+        }
+
+        return $g;
+    }
+
+    /**
+     * La reserva validada, con el mismo criterio que la gestion.
+     *
+     * @param mixed $reserva
+     * @param int $nro Para el mensaje
+     * @return float
+     */
+    private static function validarReserva($reserva, $nro) {
+        $r = floatval($reserva);
+
+        if ($r < 0) {
+            throw new Exception('La reserva del local ' . $nro . ' no puede ser negativa');
+        }
+
+        return $r;
     }
 
     /**
@@ -1694,7 +1813,13 @@ class Saldos {
     }
 
     /**
-     * Parametros de gestion y reserva por sucursal, indexados por numero.
+     * Parametros de gestion, reserva y dia de acreditacion por sucursal,
+     * indexados por numero.
+     *
+     * DIA_ACREDITACION viene SIEMPRE, como entero o null: sin el script es
+     * null para todos, que es lo que dice la verdad -no hay dia cargado-, y
+     * quien lee no tiene que preguntar si la clave existe. Si el script falta
+     * lo dice acreditacionCreada(), no la forma de la fila.
      *
      * @param bool $soloActivas
      * @return array Mapa NRO_SUCURSAL => fila
@@ -1706,7 +1831,11 @@ class Saldos {
 
         $cid = $this->conectar('central');
 
-        $sql = "SELECT NRO_SUCURSAL, DESC_SUCURSAL, GESTION, RESERVA, ACTIVO,
+        $dia = $this->acreditacionCreada()
+            ? 'DIA_ACREDITACION'
+            : 'CAST(NULL AS TINYINT) AS DIA_ACREDITACION';
+
+        $sql = "SELECT NRO_SUCURSAL, DESC_SUCURSAL, GESTION, RESERVA, ACTIVO, $dia,
                        FECHA_MODIF AS FECHA_UPDATE, USUARIO_MODIF AS USUARIO
                 FROM RO_T_CASHFLOW_SALDOS_SUCURSAL";
 
@@ -1728,6 +1857,8 @@ class Saldos {
             $row['NRO_SUCURSAL'] = intval($row['NRO_SUCURSAL']);
             $row['RESERVA'] = floatval($row['RESERVA']);
             $row['ACTIVO'] = intval($row['ACTIVO']);
+            $row['DIA_ACREDITACION'] = ($row['DIA_ACREDITACION'] === null)
+                ? null : intval($row['DIA_ACREDITACION']);
             $row['FECHA_UPDATE'] = $this->fechaHora($row['FECHA_UPDATE']);
             $v[$row['NRO_SUCURSAL']] = $row;
         }
@@ -2103,48 +2234,64 @@ class Saldos {
     }
 
     /**
-     * Edita la gestion y la reserva de una sucursal.
+     * Guarda la grilla de Parametros -> Saldos -> Locales: gestion, reserva y
+     * dia de acreditacion de cada local.
      *
      * No hay alta: la lista de locales sale del origen y se pone al dia con
      * sincronizarSucursales(). Inventar una sucursal a mano crearia una fila que
      * la consulta nunca va a llenar.
      *
-     * @param int $nroSucursal
-     * @param string $gestion DEPOSITA o ENVIA
-     * @param float $reserva Minimo que la sucursal conserva en caja
+     * SOLO SE ESCRIBEN LOS LOCALES QUE CAMBIARON, Y EN UNA TRANSACCION. Antes
+     * cada fila de la grilla era un UPDATE con su propia conexion: cada
+     * guardado sellaba a los veinte locales como editados por quien apreto el
+     * boton, y una falla a mitad de camino dejaba la mitad guardada. El diff es
+     * resolverParametrosLocales(), y la escritura es la misma que usa la
+     * pestana 2 -guardarSucursalEnTransaccion()-: un solo escritor del
+     * parametro.
+     *
+     * Sin sql/cashflow_saldos_dia_acreditacion.sql el dia no se escribe y el
+     * resto se guarda igual; 'dia_ignorado' dice de que locales se descarto,
+     * para que la respuesta pida correr el script.
+     *
+     * @param array $filas [['nro_sucursal', 'gestion', 'reserva', 'dia_acreditacion'?], ...]
      * @param string $usuario
-     * @return bool
+     * @return array ['cambios' => int, 'dia_ignorado' => [nro, ...]]
      */
-    public function saveSucursal($nroSucursal, $gestion, $reserva, $usuario) {
+    public function guardarParametrosLocales($filas, $usuario) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
-        $gestion = strtoupper(trim((string) $gestion));
 
-        if ($gestion !== self::DEPOSITA && $gestion !== self::ENVIA) {
-            throw new Exception('Gestión inválida: "' . $gestion . '". '
-                . 'Sólo puede ser Deposita o Envía.');
+        if (!$this->tablasCreadas()) {
+            throw new Exception('No existen las tablas del módulo Saldos. '
+                . 'Corré sql/cashflow_saldos.sql.');
         }
 
-        $reserva = floatval($reserva);
+        $conDia = $this->acreditacionCreada();
+        $r = self::resolverParametrosLocales($this->getParametrosSucursales(false), $filas, $conDia);
 
-        if ($reserva < 0) {
-            throw new Exception('La reserva de caja no puede ser negativa');
+        if (!empty($r['cambios'])) {
+            $cid = $this->conectar('central');
+
+            if (sqlsrv_begin_transaction($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo iniciar la transacción'));
+            }
+
+            try {
+                foreach ($r['cambios'] as $c) {
+                    $this->guardarSucursalEnTransaccion($cid, $c['nro_sucursal'], $c['gestion'],
+                        $c['reserva'], $c['desc_sucursal'], $usuario,
+                        $conDia, $c['dia_acreditacion']);
+                }
+
+                if (sqlsrv_commit($cid) === false) {
+                    throw new Exception($this->errorSql('No se pudieron confirmar los locales'));
+                }
+            } catch (Throwable $e) {
+                sqlsrv_rollback($cid);
+                throw $e;
+            }
         }
 
-        $cid = $this->conectar('central');
-
-        $sql = "UPDATE RO_T_CASHFLOW_SALDOS_SUCURSAL
-                SET GESTION = ?, RESERVA = ?, " . Auditoria::SET_MODIF . "
-                WHERE NRO_SUCURSAL = ?";
-
-        $stmt = sqlsrv_query($cid, $sql, [$gestion, $reserva, $usuario, intval($nroSucursal)]);
-
-        if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al guardar la sucursal'));
-        }
-
-        sqlsrv_free_stmt($stmt);
-
-        return true;
+        return ['cambios' => count($r['cambios']), 'dia_ignorado' => $r['dia_ignorado']];
     }
 
     /* ====================================================================
@@ -2531,9 +2678,9 @@ class Saldos {
      *
      * LAS DOS ESCRITURAS VAN EN LA MISMA TRANSACCION. Si se separaran, una falla
      * a mitad de camino dejaria la reserva cambiada sin la foto que la explica,
-     * o al revés. Por eso el parametro se escribe con el $cid de la transaccion
-     * y no llamando a saveSucursal(), que abre su propia conexion: mismo
-     * criterio que CashflowEstructura::guardar().
+     * o al revés. Por eso el parametro se escribe con guardarSucursalEnTransaccion()
+     * y el $cid de la transaccion, y no con un metodo que abra su propia
+     * conexion: mismo criterio que CashflowEstructura::guardar().
      *
      * EL SALDO EN CAJA TAMBIEN SE PUEDE TIPEAR, para cuando la consulta no
      * trajo el cierre. Es la tercera escritura de la misma transaccion: un
@@ -2716,9 +2863,15 @@ class Saldos {
      * UPDATE no afectara ninguna fila y el cambio se perdiera en silencio, que
      * es peor: el local salio de la consulta, o sea que existe.
      *
-     * No reusa saveSucursal() a proposito: ese metodo abre su propia conexion
-     * (Conexion::conectar() abre una nueva en cada llamada) y quedaria FUERA de
-     * la transaccion de la carga.
+     * Es EL UNICO ESCRITOR DEL PARAMETRO: lo usan la carga de la pestana 2 y
+     * el guardado de Parametros -> Saldos -> Locales. Recibe la conexion de la
+     * transaccion de quien lo llama (Conexion::conectar() abre una nueva en
+     * cada llamada, asi que abrir la suya lo dejaria afuera).
+     *
+     * EL DIA DE ACREDITACION SE ESCRIBE SOLO SI $escribirDia: la pestana 2 no
+     * lo edita y no lo toca, y sin el script la columna no existe. Un alta por
+     * la pestana 2 entra sin dia, igual que un local nuevo de la
+     * sincronizacion.
      *
      * @param resource $cid Conexion con la transaccion abierta
      * @param int $nro
@@ -2726,14 +2879,21 @@ class Saldos {
      * @param float $reserva Ya validada
      * @param string $descripcion Nombre del local, para el caso de alta
      * @param string $usuario
+     * @param bool $escribirDia
+     * @param int|null $dia Ya validado; solo cuenta con $escribirDia
      */
     private function guardarSucursalEnTransaccion($cid, $nro, $gestion, $reserva,
-                                                  $descripcion, $usuario) {
+                                                  $descripcion, $usuario,
+                                                  $escribirDia = false, $dia = null) {
+        $setDia = $escribirDia ? 'DIA_ACREDITACION = ?, ' : '';
+        $valoresDia = $escribirDia ? [$dia] : [];
+
         $sql = "UPDATE RO_T_CASHFLOW_SALDOS_SUCURSAL
-                SET GESTION = ?, RESERVA = ?, " . Auditoria::SET_MODIF . "
+                SET GESTION = ?, RESERVA = ?, " . $setDia . Auditoria::SET_MODIF . "
                 WHERE NRO_SUCURSAL = ?";
 
-        $stmt = sqlsrv_query($cid, $sql, [$gestion, $reserva, $usuario, $nro]);
+        $stmt = sqlsrv_query($cid, $sql,
+            array_merge([$gestion, $reserva], $valoresDia, [$usuario, $nro]));
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al guardar la gestión del local ' . $nro));
@@ -2748,11 +2908,11 @@ class Saldos {
 
         $sql = "INSERT INTO RO_T_CASHFLOW_SALDOS_SUCURSAL
                     (NRO_SUCURSAL, DESC_SUCURSAL, GESTION, RESERVA, ACTIVO,
-                     USUARIO_ALTA, USUARIO_MODIF)
-                VALUES (?, ?, ?, ?, 1, ?, ?)";
+                     " . ($escribirDia ? 'DIA_ACREDITACION, ' : '') . "USUARIO_ALTA, USUARIO_MODIF)
+                VALUES (?, ?, ?, ?, 1, " . ($escribirDia ? '?, ' : '') . "?, ?)";
 
-        if (sqlsrv_query($cid, $sql,
-            [$nro, $descripcion, $gestion, $reserva, $usuario, $usuario]) === false) {
+        if (sqlsrv_query($cid, $sql, array_merge([$nro, $descripcion, $gestion, $reserva],
+            $valoresDia, [$usuario, $usuario])) === false) {
             throw new Exception($this->errorSql('Error al crear el parámetro del local ' . $nro));
         }
     }
@@ -2760,9 +2920,13 @@ class Saldos {
     /**
      * Sincroniza el parametro por sucursal con la lista de locales propios.
      *
-     * NO PISA GESTION NI RESERVA de una sucursal que ya existe: son valores que
-     * cargo una persona. Y no borra: una sucursal que desaparece del origen
-     * queda con ACTIVO = 0 y su historico intacto.
+     * NO PISA GESTION, RESERVA NI DIA_ACREDITACION de una sucursal que ya
+     * existe: son valores que cargo una persona. Sus UPDATE no nombran esas
+     * columnas, y el INSERT de un local nuevo no nombra el dia: entra SIN DIA,
+     * porque no hay default que adivinar. Una prueba lo verifica sobre el
+     * codigo. Y no borra: una
+     * sucursal que desaparece del origen queda con ACTIVO = 0 y su historico
+     * intacto.
      *
      * LO DISPARA UNA PERSONA desde Parametros -> Saldos, asi que las altas, las
      * bajas y las reactivaciones quedan con su usuario, no con un origen SISTEMA:.

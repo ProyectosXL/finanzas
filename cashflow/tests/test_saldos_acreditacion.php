@@ -209,3 +209,171 @@ seccion('el rango del calendario');
 chequear('de hoy a seis dias mas el tope del corrimiento',
     ['desde' => '2026-10-07', 'hasta' => '2026-11-12'],
     Saldos::rangoCalendarioAcreditacion('2026-10-07'));
+
+/* ================================================================
+   Donde se edita: Parametros -> Saldos -> Locales
+   ================================================================ */
+
+/** El codigo fuente de un metodo, para las pruebas que miran que nombra */
+function fuenteSA($clase, $metodo) {
+    $r = new ReflectionMethod($clase, $metodo);
+
+    return implode('', array_slice(file($r->getFileName()),
+        $r->getStartLine() - 1, $r->getEndLine() - $r->getStartLine() + 1));
+}
+
+$paramSA = [
+    10 => ['NRO_SUCURSAL' => 10, 'DESC_SUCURSAL' => 'CENTRO', 'GESTION' => 'DEPOSITA',
+           'RESERVA' => 200000.0, 'DIA_ACREDITACION' => 1],
+    40 => ['NRO_SUCURSAL' => 40, 'DESC_SUCURSAL' => 'FLORES', 'GESTION' => 'DEPOSITA',
+           'RESERVA' => 150000.0, 'DIA_ACREDITACION' => null],
+    55 => ['NRO_SUCURSAL' => 55, 'DESC_SUCURSAL' => 'NORTE', 'GESTION' => 'ENVIA',
+           'RESERVA' => 100000.0, 'DIA_ACREDITACION' => 3]
+];
+
+$grillaSA = [
+    ['nro_sucursal' => 10, 'gestion' => 'DEPOSITA', 'reserva' => 200000, 'dia_acreditacion' => 1],
+    ['nro_sucursal' => 40, 'gestion' => 'DEPOSITA', 'reserva' => 150000, 'dia_acreditacion' => null],
+    ['nro_sucursal' => 55, 'gestion' => 'ENVIA', 'reserva' => 100000, 'dia_acreditacion' => 3]
+];
+
+seccion('el guardado de Parametros escribe solo lo que cambio');
+
+$r = Saldos::resolverParametrosLocales($paramSA, $grillaSA, true);
+
+// La grilla manda los veinte locales. Sin el diff, cada guardado les sellaba
+// USUARIO_MODIF y FECHA_MODIF a todos.
+chequear('reenviar la grilla tal cual no es ningun cambio', 0, count($r['cambios']));
+
+$tocadaSA = $grillaSA;
+$tocadaSA[1]['dia_acreditacion'] = '2';   // a FLORES se le carga el martes
+
+$r = Saldos::resolverParametrosLocales($paramSA, $tocadaSA, true);
+
+chequear('cargar un dia es un cambio, y es el unico', [40], array_column($r['cambios'], 'nro_sucursal'));
+chequear('con el dia validado como entero', 2, $r['cambios'][0]['dia_acreditacion']);
+chequear('y la gestion y la reserva que ya tenia', ['DEPOSITA', 150000.0],
+    [$r['cambios'][0]['gestion'], $r['cambios'][0]['reserva']]);
+
+$tocadaSA = $grillaSA;
+$tocadaSA[0]['dia_acreditacion'] = '';
+
+chequear('vaciar el dia es un cambio: es como se borra uno mal cargado', [null],
+    array_column(Saldos::resolverParametrosLocales($paramSA, $tocadaSA, true)['cambios'],
+        'dia_acreditacion'));
+
+$sinClaveSA = $grillaSA;
+unset($sinClaveSA[0]['dia_acreditacion']);
+$sinClaveSA[0]['reserva'] = 250000;
+
+$r = Saldos::resolverParametrosLocales($paramSA, $sinClaveSA, true);
+
+chequear('una pantalla que no manda el dia no lo toca: conserva el que tenia', 1,
+    $r['cambios'][0]['dia_acreditacion']);
+
+chequearLanza('un dia invalido se rechaza diciendo de que local', function () use ($paramSA, $grillaSA) {
+    $g = $grillaSA;
+    $g[2]['dia_acreditacion'] = 6;
+    Saldos::resolverParametrosLocales($paramSA, $g, true);
+}, 'Local 55: El día de acreditación tiene que ser de lunes (1) a viernes (5). Se recibió "6".');
+
+chequearLanza('un local que no esta en los parametros se rechaza', function () use ($paramSA) {
+    Saldos::resolverParametrosLocales($paramSA, [['nro_sucursal' => 99, 'gestion' => 'DEPOSITA',
+        'reserva' => 0]], true);
+}, 'El local 99 no está en los parámetros. Usá Sincronizar con locales y volvé a guardar.');
+
+chequearLanza('una gestion invalida, como en la pestana 2', function () use ($paramSA) {
+    Saldos::resolverParametrosLocales($paramSA, [['nro_sucursal' => 10, 'gestion' => 'X',
+        'reserva' => 0]], true);
+});
+
+seccion('sin el script, se ignora solo el dia');
+
+$tocadaSA = $grillaSA;
+$tocadaSA[0]['dia_acreditacion'] = 4;     // el dia no se puede guardar
+$tocadaSA[1]['reserva'] = 175000;        // la reserva si
+
+$r = Saldos::resolverParametrosLocales($paramSA, $tocadaSA, false);
+
+chequear('la reserva se guarda igual', [40], array_column($r['cambios'], 'nro_sucursal'));
+chequear('el dia no entra en el diff: no hay columna donde escribirlo', 1, count($r['cambios']));
+// Sin columna no hay "dia de antes" contra el cual comparar: todo dia que
+// llega se descarta y se informa, el que se toco (10) y el que vino igual (55).
+chequear('y los locales que mandaron un dia vuelven, para pedir el script', [10, 55],
+    $r['dia_ignorado']);
+
+$r = Saldos::resolverParametrosLocales($paramSA, [['nro_sucursal' => 40, 'gestion' => 'DEPOSITA',
+    'reserva' => 150000, 'dia_acreditacion' => null]], false);
+
+chequear('un sin dia no es nada que ignorar', [], $r['dia_ignorado']);
+
+chequear('el aviso de la respuesta nombra el script', true, strpos(
+    file_get_contents(__DIR__ . '/../Controller/ParametrosController.php'),
+    "'El día de acreditación no se guardó (locales '") !== false);
+
+seccion('la pestana 2 no le borra el dia a nadie');
+
+// resolverOverrides() rearmaba cada parametro con solo gestion y reserva: a
+// todos los locales que manda la pantalla -que son todos- les borraba el dia,
+// y la foto se guardaba sin dia.
+$r = Saldos::resolverOverrides($paramSA, [
+    ['nro_sucursal' => 10, 'gestion' => 'DEPOSITA', 'reserva' => 300000]
+]);
+
+chequear('el dia queda en el parametro resultante', 1, $r['params'][10]['DIA_ACREDITACION']);
+chequear('con la reserva nueva', 300000.0, $r['params'][10]['RESERVA']);
+chequear('y los que no se tocaron, tambien', 3, $r['params'][55]['DIA_ACREDITACION']);
+
+seccion('la escritura');
+
+$guardarSA = fuenteSA('Saldos', 'guardarParametrosLocales');
+
+chequear('valida el usuario antes que nada', 1,
+    preg_match('/\{\s*\$usuario = AuthCashflow::usuarioDeEscritura\(\$usuario\);/', $guardarSA));
+chequear('escribe en una transaccion', [1, 1, 1], [
+    substr_count($guardarSA, 'sqlsrv_begin_transaction'),
+    substr_count($guardarSA, 'sqlsrv_commit'),
+    substr_count($guardarSA, 'sqlsrv_rollback')
+]);
+chequear('por el unico escritor del parametro', 1,
+    substr_count($guardarSA, '$this->guardarSucursalEnTransaccion('));
+chequear('y saveSucursal(), que abria una conexion por fila, ya no existe', false,
+    method_exists('Saldos', 'saveSucursal'));
+
+$escritorSA = fuenteSA('Saldos', 'guardarSucursalEnTransaccion');
+
+chequear('el escritor sella la auditoria', 1, substr_count($escritorSA, 'Auditoria::SET_MODIF'));
+chequear('y escribe el dia solo si se le pide, en el UPDATE y en el alta', [1, 1], [
+    substr_count($escritorSA, "\$setDia = \$escribirDia ? 'DIA_ACREDITACION = ?, ' : '';"),
+    substr_count($escritorSA, "(\$escribirDia ? 'DIA_ACREDITACION, ' : '')")
+]);
+
+seccion('la sincronizacion no pisa el dia');
+
+$sincroSA = fuenteSA('Saldos', 'sincronizarSucursales');
+
+chequear('ninguna sentencia de la sincronizacion nombra el dia', 0,
+    substr_count($sincroSA, 'DIA_ACREDITACION'));
+chequear('el alta no lo nombra: un local nuevo entra sin dia', 1, preg_match(
+    '/INSERT INTO RO_T_CASHFLOW_SALDOS_SUCURSAL\s+\(NRO_SUCURSAL, DESC_SUCURSAL, GESTION, RESERVA, ACTIVO,/',
+    $sincroSA));
+chequear('y sus UPDATE tampoco tocan gestion ni reserva', 0,
+    preg_match('/UPDATE RO_T_CASHFLOW_SALDOS_SUCURSAL\s+SET[^"]*\b(GESTION|RESERVA)\b/', $sincroSA));
+
+seccion('la pantalla de Parametros');
+
+$jsParamSA = file_get_contents(__DIR__ . '/../Js/Parametros-Saldos.js');
+$tabParamSA = file_get_contents(__DIR__ . '/../Tabs/parametros_saldos.php');
+
+chequear('la columna esta en la grilla', 1,
+    substr_count($tabParamSA, '<th class="text-center" style="width: 190px;">Día de acreditación / envío</th>'));
+chequear('el selector ofrece sin dia', 1, substr_count($jsParamSA, '— sin día —'));
+chequear('sin el script queda apagado', 1,
+    substr_count($jsParamSA, "(creada ? '' : ' disabled')"));
+chequear('y un selector apagado no manda el dia', 1,
+    substr_count($jsParamSA, "querySelectorAll('.sp-suc-dia:not([disabled])')"));
+chequear('el aviso del dia ignorado se muestra', 1,
+    substr_count($jsParamSA, 'Notificacion.advertencia(r.aviso_dia)'));
+chequear('el payload dice si el script se corrio', 1, substr_count(
+    file_get_contents(__DIR__ . '/../Class/Parametros.php'),
+    "\$modulo['acreditacion_creada'] = \$this->saldos()->acreditacionCreada();"));

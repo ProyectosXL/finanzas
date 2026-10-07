@@ -287,6 +287,21 @@ class Parametros {
                                     . 'central. Mientras tanto todas las cuentas son cuentas a la '
                                     . 'vista y no se pueden dar de alta fondos.';
                             }
+                        } else {
+                            // El dia de acreditacion: que dias se pueden elegir y
+                            // si su script se corrio. Sin el, el selector queda
+                            // apagado diciendo que falta, en vez de fallar al
+                            // guardar.
+                            $modulo['dias_acreditacion'] = Saldos::DIAS_ACREDITACION;
+                            $modulo['acreditacion_creada'] = $this->saldos()->acreditacionCreada();
+
+                            if (!$modulo['acreditacion_creada'] && $this->saldos()->tablasCreadas()) {
+                                $modulo['avisos'][] = 'Todavía no existe el día de acreditación de '
+                                    . 'los locales: corré sql/cashflow_saldos_dia_acreditacion.sql '
+                                    . 'contra la base central. Mientras tanto no se puede elegir, y '
+                                    . 'Caja Locales se imputa entera en la primera columna del '
+                                    . 'tablero, como hasta ahora.';
+                            }
                         }
                     } catch (Throwable $e) {
                         $modulo[$seccion] = [];
