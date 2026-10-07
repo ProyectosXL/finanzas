@@ -241,7 +241,10 @@ foreach ($gAv['echeqs']['avisos'] as $a) {
     }
 }
 
-chequear('los descartes de la fila van a la pestana de su proveedor', ['info', 'warning'],
+/* El orden es el del panel y no el de emision: dentro de un grupo,
+   Aviso::agrupar() pone primero lo mas grave. Se emiten "fuera del horizonte"
+   (info) y despues "sin fecha" (warning), y se leen al reves. */
+chequear('los descartes de la fila van a la pestana de su proveedor', ['warning', 'info'],
     array_keys($descartes));
 chequear('fuera del horizonte es informativo', true,
     isset($descartes['info']) && strpos($descartes['info'], 'fuera del horizonte') !== false);
