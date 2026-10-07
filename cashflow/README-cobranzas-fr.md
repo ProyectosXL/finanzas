@@ -11,9 +11,11 @@ Rama: `feature/cobranzas-fr-proyeccion`
 **Las facturas pendientes se proyectan sumando a su fecha de emisión el Plazo Promedio de Pago (PPP) del grupo empresario del cliente —salvo que alguien haya cargado la fecha de esa factura a mano, que entonces manda—, y el descuento sale de una escala general por tramo de días.**
 
 ```
-Facturas Pendientes (GVA12 FAC en estado PEN)
+Facturas Pendientes (GVA12 FAC en estado PEN, clientes [FL]%)
         │
         ├─ Excluye comprobantes ya contados por Real (ACEPTADA) o ya cobrados (PAGADO)
+        ├─ Sólo franquicias HABILITADAS en el directorio de sucursales, y sin los
+        │      clientes EXCLUIDOS a mano (las dos cosas valen también para Real)
         ├─ PPP del GRUPO EMPRESARIO = promedio de los PPP por cliente del grupo,
         │      con los recibos de Tango de los últimos 100 días (RO_V_CASHFLOW_PPP_GRUPO)
         ├─ Si el grupo tiene PPP manual en Parámetros, pisa el calculado
@@ -45,7 +47,10 @@ Contra `central`:
 -- 3. sql/cashflow_cobranzas_escala_general.sql
 -- 4. sql/cashflow_cobranzas_fecha_manual.sql
 -- 5. sql/cashflow_cobranzas_ppp_grupo.sql
+-- 6. sql/cashflow_cobranzas_cliente_excluido.sql
 ```
+
+**Si el 5 ya se había corrido, hay que volver a correrlo**: la vista pasó de `'FR%'` a `'[FL]%'` (ver *El universo*). Es reejecutable: recrea la vista y no pisa ningún PPP manual.
 
 El primero crea `RO_T_CASHFLOW_COBRANZAS_PARAM_DESC` (escalas por cliente, que ya no se leen desde el script 3) y `RO_T_CASHFLOW_COBRANZAS_CLIENTE_CONFIG` (que nunca se leyó). **No** agrega `PPP_MANUAL` a `RO_T_PARAMETROS_DESC_CLIENTES`: esa columna existe en la base pero ningún script de este repo la crea, y desde el script 5 tampoco se lee.
 
@@ -55,6 +60,8 @@ El tercero crea `RO_T_CASHFLOW_COBRANZAS_ESCALA_DESC` y siembra la escala de des
 
 El quinto crea la vista `RO_V_CASHFLOW_PPP_GRUPO` (sobre `dbo.GC_VIEW_PPP`, que tiene que existir) y la tabla `RO_T_CASHFLOW_COBRANZAS_PPP_GRUPO` del PPP manual por grupo, y migra a ella los PPP manuales por cliente que había. Sin él, el PPP calculado queda vacío, la tarjeta de Parámetros avisa qué script falta y la proyección cae al respaldo (`DIAS_PP_MAX` del cliente, o 30).
 
+El sexto crea `RO_T_CASHFLOW_COBRANZAS_CLIENTE_EXCLUIDO`, la exclusión manual de clientes (ver *Excluir un cliente*). Sin él nadie está excluido —que es lo cierto— y el switch de la tarjeta queda deshabilitado con un aviso que dice qué script falta.
+
 ---
 
 ## Las Dos Matrices (Solapas Principales)
@@ -62,13 +69,13 @@ El quinto crea la vista `RO_V_CASHFLOW_PPP_GRUPO` (sobre `dbo.GC_VIEW_PPP`, que 
 La interfaz de `Cobranzas FR` cuenta con dos pestañas de navegación dedicadas en la cabecera superior:
 
 ### 1. Solapa "Real a Cobrar"
-- **Origen de datos:** Propuestas de pago de franquicias (`FP_propuestas_pago` en la base `apps`).
+- **Origen de datos:** Propuestas de pago de franquicias (`FP_propuestas_pago` en la base `apps`), de las franquicias habilitadas en el directorio y sin los clientes excluidos a mano (ver *El universo*).
 - **Criterio:** Facturas comprometidas por fecha efectiva de cobro pactada (`fecha_propuesta_pago`), **únicamente de propuestas en estado `ACEPTADA`**.
 - **Estilo:** Visualización estándar en verde/azul (`.badge-cobro`).
 - **Serie del Tablero:** `COBRANZA_REAL`.
 
 ### 2. Solapa "Pendientes Proyectados"
-- **Origen de datos:** Comprobantes tipo `FAC` en estado `PEN` desde `GVA12` en `central` (Tango Gestión).
+- **Origen de datos:** Comprobantes tipo `FAC` en estado `PEN` desde `GVA12` en `central` (Tango Gestión), de clientes `[FL]%` habilitados en el directorio y sin los excluidos a mano (ver *El universo*).
 - **Filtro de exclusión:** Descarta los comprobantes que ya cuenta *Real* (propuestas `ACEPTADA`) y los ya cobrados (`PAGADO`). Ver la invariante más abajo.
 - **Cálculo de Fecha Probable de Cobro:**
   $$\text{Fecha Probable de Cobro} = \text{Fecha Emisión} + \text{PPP}$$
@@ -92,6 +99,10 @@ Los estados que existen de verdad en `FP_propuestas_pago` son exactamente tres: 
 Por eso la exclusión de la proyección es el **complemento exacto** de lo que cuenta *Real*, más lo ya cobrado. Vive escrita en dos constantes de `Class/Ingresos.php` (`ESTADOS_REAL` y `ESTADOS_YA_CONTADOS`), comentada en las dos funciones y probada en `tests/test_cobranzas_fr_split.php`, porque son dos consultas contra dos bases distintas y nada más las mantiene alineadas.
 
 `getPPPClientes()` sigue usando `PAGADO` y no participa de esto: es el histórico con el que se calcula el plazo, no el universo a cobrar.
+
+### Y se mantiene con el universo filtrado
+
+Las dos solapas se filtran por el directorio de sucursales y por la exclusión manual (ver más abajo). **Los dos filtros son por cliente y se aplican igual a las dos consultas**, así que un cliente queda afuera de las dos solapas o de ninguna, y dentro del universo la partición estado por estado no se mueve. Si una solapa filtrara y la otra no, la factura de una franquicia dada de baja en una propuesta pendiente de aprobación aparecería sólo en *Pendientes Proyectados*: la plata de ese cliente estaría a medias en el tablero. `tests/test_cobranzas_fr_split.php` lo prueba comprobante por comprobante con el filtro aplicado.
 
 ---
 
@@ -118,7 +129,7 @@ El script es `sql/cashflow_estructura_split_cobranzas_fr.sql`, y **toma la secci
 
 1. **PPP Calculado** — vista `RO_V_CASHFLOW_PPP_GRUPO` (script 5), sobre `dbo.GC_VIEW_PPP` de Tango:
    - `GC_VIEW_PPP` tiene un PPP **por recibo**: los días ponderados por importe entre la emisión de las facturas imputadas y el cobro. Es factura → cobro, que es lo que la proyección suma a `FECHA_EMIS`.
-   - Ventana: recibos de los últimos **100 días**, clientes `FR%`.
+   - Ventana: recibos de los últimos **100 días**, clientes `[FL]%` (las franquicias, ver *El universo*). La vista no mira el directorio de sucursales ni la exclusión manual: el PPP mide cómo paga el grupo.
    - Se promedia por cliente y después por grupo (**promedio de promedios**): un cliente con muchos recibos no pesa más que uno con pocos.
    - Un grupo sin recibos en la ventana no tiene fila: su calculado es 0 y entra el respaldo.
 
@@ -182,13 +193,121 @@ La validación corre en el servidor (`Ingresos::validarEscala()`, pura y probada
 
 ---
 
-## Qué franquicias lista la tarjeta de Parámetros
+## El universo: franquicias `[FL]%` habilitadas en el directorio
 
-La tarjeta **Gestión de Cobranza Franquicias** muestra una fila por grupo empresario y, debajo, sus clientes. Los clientes son **sólo las franquicias habilitadas en el directorio de sucursales**: `SUCURSALES_LAKERS` (servidor `locales`, con el prefijo de `Conexion::prefijoLocales()` igual que en Saldos) con `CANAL = 'FRANQUICIAS' AND HABILITADO = 1 AND NRO_SUC_MADRE IS NULL` — hoy 84, contra 204 clientes `FR%` en `GVA14`. Cada cliente muestra su número y nombre de sucursal (un cliente con dos sucursales las ve concatenadas), y el pie de la tarjeta dice cuántas franquicias de Tango quedaron afuera.
+**Las franquicias son los clientes cuyo código empieza con F o con L** (`COD_CLIENT LIKE '[FL]%'`). Los `L` son locales con **gestión asistida**, un modelo nuevo; hasta que existieron, la condición era `'FR%'`. Todas se cargan en `SUCURSALES_LAKERS`, el directorio de sucursales del servidor `locales`.
 
-**Informar de más antes que vacío:** si el servidor de locales no responde, o el directorio no devuelve ninguna franquicia, la tarjeta muestra **todas** las de Tango con un aviso. Una tarjeta en blanco dejaría sin editar el PPP de todo el mundo por una caída ajena.
+**Cobranzas Franquicias trabaja sólo con las habilitadas en ese directorio**, y en todo el circuito por igual: la tarjeta de Parámetros, *Real a Cobrar*, *Pendientes Proyectados*, `getCobranzasFRTotales()` y las series del tablero. Una franquicia dada de baja con facturas abiertas **ya no se proyecta**. Antes sí: la regla era que el filtro era sólo de la tarjeta, y una franquicia de baja seguía sumando en el tablero.
 
-**La proyección no se filtra.** Una franquicia dada de baja con una factura abierta sigue proyectando en Cobranzas FR: el filtro es de la tarjeta de Parámetros, no del universo a cobrar. El cruce (`Parametros::mapaSucursales()`, `filtrarFranquiciasActivas()`) y el agrupado (`agruparPorAgrupador()`) son helpers puros con prueba.
+```
+SUCURSALES_LAKERS
+WHERE CANAL IN ('FRANQUICIAS', 'FRANQUICIAS GA')   -- DirectorioFranquicias::CANALES
+  AND NRO_SUC_MADRE IS NULL
+-- cruzado por COD_CLIENT, en PHP
+```
+
+- **`FRANQUICIAS GA` es el canal de los locales de gestión asistida.** Hoy es uno solo, `LALOMA` (Lomas de Zamora). Con `CANAL = 'FRANQUICIAS'` a secas quedaba afuera como "no cargado en el directorio", que era falso.
+- **Un canal nuevo entra agregándolo a `DirectorioFranquicias::CANALES`**, y no por parecido: un `LIKE 'FRANQUICIAS%'` sumaría cualquier canal que alguien cree con ese prefijo sin que nadie haya decidido que se cobra por este circuito.
+- **Un cliente con varias sucursales tiene un solo estado**: alguna habilitada → habilitado; si no, alguna dada de baja → inhabilitado; si todas tienen `HABILITADO` en NULL → *estado sin cargar*. La tarjeta muestra **sólo las sucursales habilitadas** (`FRPADU` tiene una de cada una).
+
+### Una lectura y una regla
+
+Todo vive en `Class/DirectorioFranquicias.php`:
+
+| Pieza | Qué hace |
+| --- | --- |
+| `leer()` | Lee el directorio **una vez por pedido** —el tablero pide la cobranza tres veces por carga—, con el prefijo de `Conexion::prefijoLocales()`. Trae **también las filas inhabilitadas**: sin ellas no se distingue una baja de un cliente que nadie cargó |
+| `armar()`, `mapaSucursales()` | El estado de cada cliente y sus sucursales habilitadas. Puros |
+| `filtrarUniverso()` | **La única implementación de la regla.** La usan la tarjeta (un ítem por cliente) y la cobranza (un ítem por factura). Pura |
+| `avisosAfuera()` | Los avisos de lo que quedó afuera. Puro |
+
+Antes la lectura era un método privado de `Parametros` y la proyección no filtraba. Con dos lecturas, la tarjeta podría listar a un cliente que Cobranzas FR no proyecta.
+
+**El cruce se hace en PHP, después de leer**: el directorio está en otro servidor, y un JOIN entre servidores con collation distinta es justamente lo que el módulo evita. Por eso `getCobranzasFRTotales()` agrupa la cobranza real **por fecha y cliente** y no sólo por fecha. Se verificó contra la base que el total por fecha da **exactamente lo mismo** con los dos agrupamientos (12 fechas, diferencia 0, $ 318.349.088,59 los dos).
+
+### Informar de más antes que vacío
+
+Si el servidor `locales` no responde, o el directorio no devuelve **ninguna franquicia habilitada** —que es un problema de la consulta y no un hecho—, **no se filtra**: entran todas las `[FL]%` de Tango, con un aviso **WARNING** en la tarjeta, en Cobranzas FR y en el tablero que dice que los números pueden estar de más. Una tarjeta vacía o una cobranza en cero por una caída ajena es peor.
+
+### Lo que queda afuera se avisa, cliente por cliente
+
+Las facturas que no se traen salen del tablero, y eso no puede pasar en silencio. Cobranzas FR y el tablero (vía `IngresosProvider`) llevan un aviso **INFO** por caso, que **nombra a cada cliente con su importe** —de mayor a menor— para que Tesorería pueda revisarlos:
+
+| Caso | Qué significa | Quién lo resuelve |
+| --- | --- | --- |
+| Inhabilitada | Dada de baja en el directorio | Nadie: es la regla |
+| Estado sin cargar | `HABILITADO` en NULL. Probablemente un error de carga y no una baja | Quien carga el directorio, si sigue operando |
+| Sin directorio | Cliente `[FL]%` de Tango que no está en `SUCURSALES_LAKERS` | Falta darlo de alta en el directorio |
+
+**Cuenta sólo lo que hubiera entrado al tablero**: facturas fuera de propuesta y dentro del techo de 180 días de las vencidas, con su importe neto. Una factura de hace un año no entraba de ninguna forma, y avisarla como "sale del tablero" sería mentir.
+
+**Las fechas manuales no se tocan.** Una factura que queda afuera conserva su fecha pactada, y si el cliente se vuelve a habilitar la fecha aplica sola.
+
+### Lo que movió, medido
+
+Contra la base, el 07/10/2026, el mismo momento con el código anterior y con éste:
+
+| | Antes | Después |
+| --- | ---: | ---: |
+| Pendientes Proyectados | 1.052 facturas · $ 1.416.165.106,05 | 949 facturas · $ 1.294.702.482,94 |
+| Real a Cobrar | $ 318.349.088,59 | $ 318.349.088,59 (todas habilitadas) |
+| Clientes en la tarjeta | 84 | 85 (entra `LALOMA`) |
+
+- **Salen** 185 facturas por $ 198.465.750,18 de **7 inhabilitadas**: FRGIUR ($ 45.959.884,19), FRVDEV ($ 38.705.235,55), FRVUR ($ 29.093.086,72), FRRMEJ ($ 27.803.157,13), FRVPA2 ($ 27.200.469,88), FRCA2 ($ 15.075.294,23) y FRMAR ($ 14.628.622,48).
+- **Sale** 1 factura por $ 803.925,00 de `FRVPOU`, que **no está en el directorio**.
+- **Entran** 83 facturas por $ 77.807.052,07 de `LALOMA`, el primer local de gestión asistida.
+- La tarjeta deja afuera 121 clientes `[FL]%` de Tango: 22 inhabilitados, 9 con el estado sin cargar y 90 que no están en el directorio (casi todos sin facturas abiertas).
+
+---
+
+## La tarjeta de Parámetros
+
+**Gestión de Cobranza Franquicias** muestra una fila por grupo empresario y, debajo, sus clientes: las franquicias del universo de arriba, con su número y nombre de sucursal. El pie dice cuántos clientes `[FL]%` de Tango no se listan y por qué. Lo que quedó afuera **no se avisa en la tarjeta**, que lista clientes y no facturas: los importes se avisan en Cobranzas FR y en el tablero, que es donde esa plata falta.
+
+### Buscador, grupos y orden
+
+- **El buscador va con las acciones del header**, junto a *Expandir todo*, *Exportar* y *Actualizar*: pegado a una descripción de varias líneas quedaba a media altura. El header sigue bajando de renglón en pantallas angostas.
+- **Cada grupo se expande y se contrae** con el chevron de su primera celda. El clic en el resto de la fila no hace nada: ahí está el input del PPP manual.
+- **Un solo botón para todos**, con el criterio de `cfBtnGrupos` del tablero: dice *Expandir todo* mientras quede alguno cerrado y *Contraer todo* si están todos abiertos.
+- **Abre siempre contraída, y no guarda preferencia.** Son más de ochenta grupos y se viene a tocar uno. El estado vive **en memoria**: guardar un PPP o un medio de pago redibuja la tabla y no cierra lo que el usuario abrió. No va a `localStorage` porque un default guardado ahí sería indistinguible de una elección.
+- **Los clientes se esconden, no se sacan** (`.pc-oculta`, `display: none`): *Exportar* baja lo que se ve, como en el tablero.
+- **Buscando**, todo grupo con coincidencias se ve **abierto**: con los clientes que coinciden, o con todos si coincide el grupo por su código o su nombre. La búsqueda tiene **su propio mapa** de abiertos, así que al vaciar el buscador cada grupo vuelve solo a como estaba. El chevron, buscando, cierra un grupo sólo para esa búsqueda.
+- **Ordenar no despega los clientes de su grupo**: las filas de cliente llevan `data-orden-sigue` y viajan pegadas al grupo, también ocultas cuando está contraído.
+- **La fila del grupo deja ver lo importante contraída**: cuántos clientes tiene y, si los hay, cuántos están excluidos. Esos indicadores no entran en la búsqueda.
+
+---
+
+## Excluir un cliente
+
+Poder decir **"las facturas de este cliente no van"** sin depender del directorio: un cliente en gestión judicial, uno que refinancia por fuera, uno que se cobra por otro lado. El directorio dice si el local **opera**, no si se le **cobra**, y es de otra gente.
+
+**Es por cliente y alcanza a todas sus facturas**, las emitidas y las que vengan. La toma una persona, **con motivo**.
+
+### Dónde se decide
+
+En la tarjeta de Parámetros, columna **Excluir**:
+
+- **Al prenderlo** se pide el motivo en un diálogo. Sin motivo no se confirma, y el servidor lo valida de nuevo (`CobranzasExclusion::validarMotivo()`; la tabla además tiene un `CHECK`). Se valida también que el cliente sea `[FL]` y exista en `GVA14`.
+- **Al apagarlo** se pide confirmación.
+- **Un cliente excluido se ve atenuado**, con un ícono cuyo tooltip dice el motivo, quién y cuándo (`Js/auditoria.js`).
+- **Permiso:** edición de Parámetros › Cobranzas. Sin permiso el switch no se dibuja; los endpoints `excluirClienteCobranza` e `incluirClienteCobranza` están en el mapa de `AuthCashflow` y responden 403.
+- **Sin la tabla** (script 6 sin correr), el switch queda deshabilitado y un aviso dice qué script falta.
+
+**Historial sin bajas físicas**, como Proveedores y Echeqs: volver a incluir marca `VIGENTE = 0` con quién y cuándo (`USUARIO_BAJA` / `FECHA_BAJA`), y excluir de nuevo inserta otra fila. Un índice único filtrado deja una sola vigente por cliente. **Excluir lo ya excluido es un error**, no un cambio de motivo: para cambiarlo se incluye y se vuelve a excluir, y quedan las dos decisiones.
+
+**Excluir no cambia el PPP.** El cliente sigue en su grupo y el PPP calculado lo sigue contando: mide cómo paga el grupo, no si se le cobra.
+
+### Qué pasa en Cobranzas FR y en el tablero
+
+**Las facturas de un cliente excluido salen de las dos solapas y de todo lo que suma**: las columnas del eje, la columna Total, el pie, los KPIs, `getCobranzasFRTotales()` y las series `COBRANZA_REAL`, `COBRANZA_PROYECTADA` y `COBRANZA`. Se separan en PHP, después del filtro del universo, con `CobranzasExclusion::separar()`.
+
+**No se descartan: quedan aparte.** El controller arma el payload sin ellas y, con la misma función y el mismo filtro de emisión, un segundo payload con sólo las excluidas (`filas_excluidas`). Las excluidas **no están en la lista que se suma**, así que no pueden sumar ni por error.
+
+- **"Ver excluidos"**, en la barra de Cobranzas FR, apagado por defecto. Vale en las dos solapas y en Resumen y Detalle Facturas. Prendido, las facturas excluidas se dibujan **atenuadas y tachadas**, con el ícono del motivo, quién y cuándo, y **no suman** en nada. En Detalle Facturas su fecha de cobro es de sólo lectura.
+- **El cartel de arriba se ve siempre** que haya excluidas, con el switch apagado también: facturas, clientes, importe y motivos. Es la única forma de notar que hay plata afuera. Mismo criterio que `excluidosEch` de Echeqs.
+- **El tablero** lleva un aviso INFO con el importe excluido y los motivos.
+
+**Exclusión e inhabilitadas son independientes.** La exclusión se aplica sobre el universo: una franquicia inhabilitada ya no se trae, así que no hace falta excluirla.
 
 ---
 
@@ -212,7 +331,7 @@ La diferencia se calcula **con signo**: una fecha manual anterior a la emisión 
 ### Cuatro decisiones
 
 - **No se aceptan fechas pasadas.** El `input type="date"` lleva `min` en el día de hoy, y el endpoint **valida de nuevo en el servidor**: lo que manda el navegador es un pedido, no una autorización. El motivo no es formal: la pestaña sólo muestra cobros de hoy en adelante, así que una fecha de ayer haría desaparecer la factura de la grilla y el usuario leería su edición como si hubiera borrado la fila.
-- **La fecha manual sobrevive a la factura.** No se limpia cuando el comprobante sale del listado —se cancela, se paga o entra en una propuesta—. Queda guardada y vuelve a aplicar sola si reaparece. Borrarla automáticamente perdería una decisión que alguien tomó, y el síntoma sería una fecha que "se desconfigura sola".
+- **La fecha manual sobrevive a la factura.** No se limpia cuando el comprobante sale del listado —se cancela, se paga, entra en una propuesta, o su cliente sale del universo porque lo inhabilitan en el directorio o lo excluyen a mano—. Queda guardada y vuelve a aplicar sola si reaparece. Borrarla automáticamente perdería una decisión que alguien tomó, y el síntoma sería una fecha que "se desconfigura sola".
 - **La celda editada distingue lo pactado de lo estimado.** Sin esa marca, dos filas con la misma fecha en pantalla estarían diciendo cosas distintas y no habría forma de saber cuál es cuál. El botón de volver borra el override y la fecha vuelve al PPP.
 - **Al guardar se recarga la pestaña entera**, no la fila. La fecha cambia los días, el descuento, el neto, en qué columna del eje cae ese importe y los totales del pie: parchearlo en el navegador sería reimplementar en JS la cuenta que ya hace el backend, con el riesgo habitual de que las dos den distinto.
 
@@ -484,6 +603,8 @@ El proveedor `IngresosProvider` registra tres series en `CashflowRegistry`:
 | `COBRANZAS_FR` | `COBRANZA_PROYECTADA` | Cobranza proyectada pendientes (PPP) | `COBRANZAS_FR_PROY` — activa |
 | `COBRANZAS_FR` | `COBRANZA` / `COBRANZA_TOTAL` | Total franquicias (Real + Proyectada) | `COBRANZAS_FR` — **inactiva**, ver arriba |
 
+Las tres series salen de `getCobranzasFRTotales()`, con **el mismo universo y la misma exclusión que la pestaña**, sin excepción: un tablero que cuenta plata que la pestaña no muestra no se puede auditar. `IngresosProvider` deja los avisos del universo (WARNING si el directorio no respondió, INFO por lo que quedó afuera) y el de los excluidos a mano. Los lee después de la lectura `'todos'`, que cubre las dos solapas: cada lectura empieza de cero, así que nada se cuenta dos veces.
+
 ---
 
 ## Pruebas Automatizadas
@@ -499,10 +620,22 @@ El proveedor `IngresosProvider` registra tres series en `CashflowRegistry`:
 - Que `EjeVista::marcarAlguna()` marque al cliente con **una** factura vencida entre dos.
 - El filtro por fecha de emisión: extremos vacíos, extremos sueltos, los bordes del rango inclusive, el rango al revés rechazado, el calendario imposible, y que el comprobante sin emisión quede afuera **contado** y avisado.
 - El PPP por grupo: la regla del efectivo (`pppEfectivo()`: manual → calculado → `DIAS_PP_MAX` → 30, con vacíos y strings de la base), el agrupador (`codAgrupador()`), que los clientes de un grupo compartan el PPP del grupo y que un grupo sin recibos caiga al manual, al respaldo del cliente o a 30 (`armarPPPPorCliente()`).
-- La tarjeta de Parámetros: el cruce con el directorio de sucursales (`mapaSucursales()` concatena varias sucursales del mismo cliente; `filtrarFranquiciasActivas()` descarta sin avisar, y sin directorio muestra todos **con** aviso) y el agrupado en una fila por agrupador con sus clientes ordenados (`agruparPorAgrupador()`).
+- La tarjeta de Parámetros: el cruce con el directorio de sucursales (`DirectorioFranquicias::mapaSucursales()` concatena varias sucursales del mismo cliente; `filtrarUniverso()` deja afuera, contados, a los que no están, y sin directorio —caído, vacío o sin ninguna habilitada— muestra todos **con** aviso) y el agrupado en una fila por agrupador con sus clientes ordenados (`agruparPorAgrupador()`).
+- El universo: el estado de cada cliente (habilitada, `L` de gestión asistida, inhabilitada, `HABILITADO` NULL, una sucursal de cada, baja más NULL, sin directorio), el filtro de facturas con lo que queda afuera por caso, las filas agrupadas de los totales, el directorio caído, los tres avisos con sus nombres e importes y el resumen después de quince clientes, y que todas las lecturas de franquicias —las de `Ingresos` y la vista— usen `[FL]%`.
+
+`tests/test_cobranzas_exclusion.php`:
+- El motivo vacío se rechaza; sólo se excluyen franquicias.
+- Las facturas de un excluido salen de lo que suma —eje, KPIs— y quedan aparte, marcadas con motivo, quién y cuándo; en Resumen el cliente es una fila entera excluida.
+- El cartel y el aviso del tablero: facturas, clientes, importe y motivos.
+- Que las tres lecturas y las tres series apliquen la exclusión, y que con "Ver excluidos" se dibujen sin sumar y con la fecha de sólo lectura.
+- Volver a incluir deja historial (sin `DELETE`, índice único filtrado), y sin la tabla nadie está excluido y excluir falla con el script que falta.
+- El permiso en el mapa de `AuthCashflow`, y que el PPP del grupo no cambie al excluir.
+
+`tests/test_tablas_controles.php`:
+- La tarjeta de franquicias: el botón de expandir todo cableado de los dos lados, los clientes ocultos con `display: none`, sin `localStorage`, y `data-orden-sigue` en las filas de cliente.
 
 `tests/test_cobranzas_fr_split.php`:
-- Que lo que cuenta *Real* y lo que la proyección excluye sean complementarios, estado por estado.
+- Que lo que cuenta *Real* y lo que la proyección excluye sean complementarios, estado por estado, **también con el filtro de franquicias habilitadas aplicado**: un comprobante de una habilitada se cuenta una vez, uno de una inhabilitada ninguna, y queda contado afuera.
 - Que la estructura partida valide contra el registro real, y que reactivar la fila total no.
 
 ```bash

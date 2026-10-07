@@ -199,6 +199,17 @@ entran al eje**, por U$S 131.705. Es la decisión: ver la sección 10 de
 No agrega ni modifica ningún script: cambia cómo se muestran los avisos del
 tablero (ver *Avisos del tablero*). Se despliega solo con el código.
 
+### Cobranzas Franquicias: el universo y la exclusión (`feature/cobranzas-fr-franquicias-exclusion`)
+
+Contra `central`, en cualquier orden y en cualquier momento respecto del código:
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 1 | `sql/cashflow_cobranzas_ppp_grupo.sql` | **Modificado: hay que volver a correrlo.** La vista `RO_V_CASHFLOW_PPP_GRUPO` y su semilla pasan de `'FR%'` a `'[FL]%'`, para que los locales `L` de gestión asistida tengan PPP calculado | Los clientes `L` se listan y se proyectan igual, pero sin PPP calculado: caen al manual del grupo, a su `DIAS_PP_MAX` o a 30 |
+| 2 | `sql/cashflow_cobranzas_cliente_excluido.sql` | Crea `RO_T_CASHFLOW_COBRANZAS_CLIENTE_EXCLUIDO`, la exclusión manual de clientes de Cobranzas Franquicias, con motivo e historial | Nadie está excluido, que es lo cierto. El switch de *Excluir* de Parámetros → Cobranzas queda deshabilitado con un aviso que dice qué script falta |
+
+El filtro de franquicias habilitadas en el directorio **no necesita script**: entra con el código. Saca del tablero lo que proyectaban las franquicias inhabilitadas —medido al 07/10/2026, $ 198.465.750,18— y suma a los locales `L`. Las cifras, en `README-cobranzas-fr.md`.
+
 ---
 
 ## Ejecución de los scripts — la instalación completa
@@ -237,6 +248,8 @@ En este orden, contra `central`:
 -- 29. sql/cashflow_tarjetas_fila.sql  (la fila Pagos con Tarjetas y Otros)
 -- 30. sql/cashflow_cronograma_conceptos.sql  (un cronograma de pagos por concepto)
 -- 31. sql/cashflow_tarjetas_vto_mensual.sql  (Corporativas: vencimiento corregido y facturas mensuales)
+-- 32. sql/cashflow_cobranzas_ppp_grupo.sql  (Cobranzas FR: PPP por grupo empresario, clientes [FL]%)
+-- 33. sql/cashflow_cobranzas_cliente_excluido.sql  (Cobranzas FR: excluir un cliente, con motivo)
 ```
 
 **El 30 va después del 25**, que crea la tabla de overrides a la que le agrega `TIPO`; sin ella siembra los parámetros igual y avisa. **El 31 va después del 27** —una FK contra el maestro de tarjetas— y corta si falta.
@@ -1461,6 +1474,10 @@ Texto resumido. "Sección" vacía es sin sección. Para revisar.
 | --- | --- |
 | Facturas vencidas ubicadas en el primer día del eje | warning |
 | Mayoristas: facturas con saldo pendiente negativo | warning |
+| Franquicias: el directorio de sucursales no respondió y se trabaja con todas las `[FL]%` | warning |
+| Franquicias: no se pudieron leer los clientes excluidos | warning |
+| Franquicias: facturas de franquicias inhabilitadas, con el estado sin cargar o fuera del directorio (un aviso por caso, cliente por cliente) | info |
+| Franquicias: facturas de clientes excluidos a mano | info |
 
 **Cobranzas Electrónicas**
 
