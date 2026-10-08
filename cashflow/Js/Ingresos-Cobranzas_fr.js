@@ -26,6 +26,13 @@
     /** Controlador de las tres vistas, compartido con el resto del módulo */
     let vistas = null;
 
+    /**
+     * Claves T_COMP|N_COMP de las facturas seleccionadas para la fecha de
+     * cobro masiva. Arriba con el resto del estado: inicializar() puede correr
+     * antes de que el IIFE llegue a la sección de la selección.
+     */
+    var seleccion = {};
+
     function inicializar() {
         console.log('Inicializando Ingresos - Cobranzas FR');
 
@@ -68,17 +75,23 @@
         // Facturas: con veintiocho columnas de días a la derecha, sin ellas no
         // se ve de quién es el número que uno está mirando. Es la misma tabla
         // en los dos modos, así que un solo control las cubre.
-        // La clave de localStorage cambió con la columna Tipo. Los índices
-        // guardados se corrieron un lugar, y un `[0, 1, 2]` viejo dejaría
-        // fijada FECHA —que en Resumen ni se muestra—: la validación de
-        // columnas-fijas.js descarta los índices que ya no existen, pero el 2
-        // sigue existiendo y apunta a otra cosa. Cambiar la clave descarta la
-        // preferencia vieja, que es lo correcto: era sobre otra tabla.
+        //
+        // LA CLAVE CAMBIA CADA VEZ QUE CAMBIAN LOS ÍNDICES, porque la selección
+        // se guarda por número de columna. Cambió con la columna Tipo
+        // ('cobranzas_fr.sin_tipo') y vuelve a cambiar con la columna de
+        // selección, que entró PRIMERA: un `[0, 1]` viejo fijaría el check y
+        // COD_CLI en vez de COD_CLI y RAZON_SOC. Cambiar la clave devuelve la
+        // preferencia al default una vez, que es lo correcto: era sobre otra
+        // tabla.
+        //
+        // El check no queda fijo por defecto, igual que en tablaCorp de Pagos
+        // con Tarjetas: sólo se ve en una de las cuatro combinaciones de
+        // solapa y modo, y fijo ocuparía uno de los cuatro lugares sin verse.
         crearColumnasFijas({
             tabla: 'tablaCobranzasFR',
             control: 'colFijasCob',
-            clave: 'cobranzas_fr.sin_tipo',
-            porDefecto: [0, 1]
+            clave: 'cobranzas_fr.con_seleccion',
+            porDefecto: [1, 2]
         });
 
         // La tabla abre por fecha de cobro ascendente: lo más antiguo arriba,
@@ -128,6 +141,8 @@
                 filtrarTabla();
             });
         }
+
+        conectarSeleccion();
 
         cargarDatos();
     }
@@ -242,8 +257,11 @@
         
         // Recalcular totales visibles
         generarFilaTotales();
+
+        // La barra cuenta lo seleccionado QUE SE VE: el buscador cambia eso.
+        pintarSeleccion();
     }
-    
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', inicializar);
     } else {
@@ -322,6 +340,10 @@
                     // El controlador de vistas se entera del eje nuevo antes de
                     // que se dibuje la tabla.
                     vistas.usar(datosCobranzas);
+
+                    // Antes de dibujar: lo que ya no está no puede seguir
+                    // seleccionado. Ver podarSeleccion().
+                    podarSeleccion();
 
                     generarTabla();
                     calcularResumenes();
@@ -478,6 +500,10 @@
 
         table.classList.toggle('modo-resumen', modoVista === 'resumen');
 
+        // La columna de selección se ve sólo donde se puede seleccionar. Está
+        // siempre en el DOM: ver la nota de .con-seleccion en el CSS.
+        table.classList.toggle('con-seleccion', editable());
+
         var cols = vistas.columnas();
         var headerHTML = '';
 
@@ -532,6 +558,8 @@
 
             html += '<tr class="' + clases.join(' ') + '">';
 
+            html += celdaSeleccion(item);
+
             // El badge REAL/PROYECCIÓN se fue con la columna Tipo: la solapa
             // activa ya dice cuál es el origen. Lo que sí distinguía —el color
             // de la fila y el PPP con el que se proyectó— sigue acá, sobre
@@ -583,6 +611,7 @@
         tableBody.innerHTML = html;
 
         conectarEdicionFecha();
+        pintarSeleccion();
     }
 
     /**
@@ -799,7 +828,9 @@
         .then(function(res) { return res.json(); })
         .then(function(result) {
             if (result.success) {
-                Notificacion.exito(mensajeOk);
+                // El masivo no trae un texto fijo: el del servidor dice qué
+                // fecha quedó y en cuántas facturas.
+                Notificacion.exito(mensajeOk || result.message);
                 cargarDatos();
             } else {
                 Notificacion.error(result.message);
@@ -809,6 +840,373 @@
         .catch(function(err) {
             Notificacion.error('Error de conexión: ' + err.message);
         });
+    }
+
+    /* ================================================================
+       LA MISMA FECHA DE COBRO PARA VARIAS FACTURAS
+
+       Es el gesto de Proveedores Locales: se seleccionan con los checks, se
+       lee cuántas son y por cuánta plata, se elige la fecha y recién ahí se
+       guarda. El caso real no es una factura sino las de un cliente al que
+       Tesorería le acordó una fecha: buscar el cliente, "todas las que se
+       ven", y una fecha.
+
+       DÓNDE: sólo donde ya se edita de a una, Pendientes Proyectados →
+       Detalle Facturas, y con permiso. En Real a Cobrar la fecha sale de la
+       propuesta aceptada y en Resumen la fila es un cliente.
+
+       LAS EXCLUIDAS NO SE SELECCIONAN. No están en `datosCobranzas.filas`
+       -llegan aparte, ver filasDibujadas()- y su fecha es de sólo lectura.
+
+       LA SELECCIÓN SOBREVIVE A LOS REDIBUJOS: el buscador, el filtro por
+       fecha de emisión y el cambio de vista del eje. Es un mapa de claves y
+       no el estado de los checks, que se vuelven a dibujar desde acá. Lo que
+       cuenta y lo que se manda es siempre lo seleccionado QUE SE VE: ver
+       filasSeleccionadas().
+       ================================================================ */
+
+    /** La clave de una factura: la misma unicidad que la tabla de fechas manuales */
+    function claveFila(item) {
+        return (item.T_COMP || '') + '|' + (item.N_COMP || '');
+    }
+
+    /**
+     * Saca de la selección lo que ya no está.
+     *
+     * SÓLO CON UNA CARGA DE LA VISTA EDITABLE Y SIN FILTRO DE EMISIÓN, que es
+     * la única que trae el universo entero de lo seleccionable. El filtro por
+     * emisión es del servidor: lo que deja afuera no viene en la respuesta, y
+     * podar contra eso borraría la selección cada vez que se filtra -no
+     * "sobreviviría"-. Y en Resumen o en Real a Cobrar las filas no son las
+     * mismas facturas: podar ahí vaciaría la selección por cambiar de solapa.
+     *
+     * Lo que sí sale: una factura que se cobró, que entró en una propuesta o
+     * cuyo cliente se excluyó. Dejarla seleccionada haría que la próxima
+     * acción la mande al servidor sin que nadie la vea.
+     */
+    function podarSeleccion() {
+        var r = (datosCobranzas && datosCobranzas.filtro_emision) || {};
+
+        if (!vistaEditable() || r.desde || r.hasta) {
+            return;
+        }
+
+        var vivas = {};
+
+        (datosCobranzas.filas || []).forEach(function(item) { vivas[claveFila(item)] = true; });
+
+        Object.keys(seleccion).forEach(function(k) {
+            if (!vivas[k]) { delete seleccion[k]; }
+        });
+    }
+
+    /**
+     * Las seleccionadas que hoy se ven: las que pasan el buscador entre las
+     * que vinieron del servidor. Es lo que cuenta la barra y lo que se manda,
+     * así que una factura escondida por el buscador o por el filtro no se
+     * fecha sin que nadie la vea.
+     */
+    function filasSeleccionadas() {
+        if (!editable() || !datosCobranzas) {
+            return [];
+        }
+
+        return filasFiltradas().filter(function(item) { return !!seleccion[claveFila(item)]; });
+    }
+
+    /**
+     * La celda del check. SE DIBUJA SIEMPRE, vacía donde no se selecciona: la
+     * columna tiene que existir en todas las vistas para que los índices no se
+     * muevan. Ver la nota de .con-seleccion en el CSS.
+     */
+    function celdaSeleccion(item) {
+        var chk = '';
+
+        if (editable() && !item.EXCLUIDO) {
+            var clave = claveFila(item);
+
+            chk = '<input type="checkbox" class="form-check-input cob-sel"'
+                + (seleccion[clave] ? ' checked' : '')
+                + ' data-clave="' + escaparAttr(clave) + '"'
+                + ' title="Seleccionar esta factura para ponerle fecha de cobro o volverla a la calculada.">';
+        }
+
+        return '<td class="text-center col-seleccion" data-exportar-omitir>' + chk + '</td>';
+    }
+
+    /**
+     * Engancha los controles de la selección UNA VEZ. Los checks de cada fila
+     * van delegados en el tbody: se redibujan con cada cambio de vista, y
+     * engancharlos de a uno dejaría oyentes duplicados.
+     */
+    function conectarSeleccion() {
+        var cuerpo = document.getElementById('tableBodyCob');
+
+        if (cuerpo) {
+            cuerpo.addEventListener('change', function(ev) {
+                var chk = ev.target;
+
+                if (!chk.classList || !chk.classList.contains('cob-sel')) {
+                    return;
+                }
+
+                var k = chk.getAttribute('data-clave');
+
+                if (chk.checked) {
+                    seleccion[k] = true;
+                } else {
+                    delete seleccion[k];
+                }
+
+                pintarSeleccion();
+            });
+        }
+
+        /* "Todas las que se ven" es lo que hace que el caso normal -las
+           facturas de un cliente- sea buscar el cliente y tildar una vez. */
+        var todas = document.getElementById('selTodasCob');
+
+        if (todas) {
+            todas.addEventListener('change', function() {
+                filasFiltradas().forEach(function(item) {
+                    if (todas.checked) {
+                        seleccion[claveFila(item)] = true;
+                    } else {
+                        delete seleccion[claveFila(item)];
+                    }
+                });
+
+                marcarChecks();
+                pintarSeleccion();
+            });
+        }
+
+        conectarBoton('btnFecharSelCob', fecharSeleccion);
+        conectarBoton('btnVolverSelCob', volverSeleccion);
+        conectarBoton('btnLimpiarSelCob', function() {
+            seleccion = {};
+            marcarChecks();
+            pintarSeleccion();
+        });
+    }
+
+    function conectarBoton(id, fn) {
+        var el = document.getElementById(id);
+
+        if (el) {
+            el.addEventListener('click', fn);
+        }
+    }
+
+    /** Los checks de las filas reflejan el mapa, sin redibujar la tabla */
+    function marcarChecks() {
+        document.querySelectorAll('#tableBodyCob .cob-sel').forEach(function(chk) {
+            chk.checked = !!seleccion[chk.getAttribute('data-clave')];
+        });
+    }
+
+    /**
+     * La barra. Dice CUÁNTAS, POR CUÁNTO y DE CUÁNTOS CLIENTES antes de que
+     * se apriete nada: es el número que hace notar que se seleccionó de más.
+     */
+    function pintarSeleccion() {
+        var barra = document.getElementById('barraSelCob');
+        var sel = filasSeleccionadas();
+
+        sincronizarSelTodas();
+
+        if (!barra) {
+            return;
+        }
+
+        barra.style.display = sel.length ? '' : 'none';
+
+        if (!sel.length) {
+            return;
+        }
+
+        var r = resumirSeleccion(sel);
+
+        texto('selResumenCob', sel.length + ' factura(s) seleccionada(s) · ' + importeTexto(r.neto)
+            + ' de neto · ' + r.clientes + ' cliente(s)'
+            + (r.conManual ? ' · ' + r.conManual + ' con fecha cargada a mano' : ''));
+
+        /* "Volver a la fecha calculada" se apaga sin ninguna fecha manual en
+           la selección: un botón que se puede apretar y no cambia nada es peor
+           que uno apagado. */
+        var volver = document.getElementById('btnVolverSelCob');
+
+        if (volver) {
+            volver.disabled = (r.conManual === 0);
+        }
+    }
+
+    /** El check del encabezado: todo lo visible, nada, o una parte */
+    function sincronizarSelTodas() {
+        var chk = document.getElementById('selTodasCob');
+
+        if (!chk || !datosCobranzas || !editable()) {
+            return;
+        }
+
+        var visibles = filasFiltradas();
+        var elegidas = visibles.filter(function(item) { return !!seleccion[claveFila(item)]; }).length;
+
+        chk.checked = (visibles.length > 0 && elegidas === visibles.length);
+        chk.indeterminate = (elegidas > 0 && elegidas < visibles.length);
+    }
+
+    /** Cuánta plata, de cuántos clientes y cuántas ya tenían fecha manual */
+    function resumirSeleccion(sel) {
+        var clientes = {};
+        var neto = 0;
+        var conManual = 0;
+
+        sel.forEach(function(item) {
+            neto += Number(item.importe_neto) || 0;
+            clientes[item.COD_CLI] = item.RAZON_SOC || '';
+
+            if (item.FECHA_MANUAL) { conManual++; }
+        });
+
+        return {
+            neto: neto,
+            clientes: Object.keys(clientes).length,
+            conManual: conManual,
+            unCliente: Object.keys(clientes).length === 1
+                ? sel[0].COD_CLI + ' — ' + (sel[0].RAZON_SOC || '') : null
+        };
+    }
+
+    /**
+     * Pone la misma fecha a todas las seleccionadas.
+     *
+     * NO SE FILTRA LO QUE "YA ESTÁ ASÍ", igual que en Proveedores: el estado
+     * final es la fecha, y no existe hasta que se elige. Lo que sí se dice
+     * antes es cuántas ya tenían una fecha manual, porque son decisiones de
+     * alguien que este gesto pisa.
+     *
+     * Y SE DICE QUE EL NETO CAMBIA: acá la fecha mueve los días, con los días
+     * el tramo de la escala de descuento, y con el tramo el importe neto. El
+     * importe de la barra es el de hoy, no necesariamente el de después.
+     */
+    function fecharSeleccion() {
+        var sel = filasSeleccionadas();
+
+        if (!sel.length) {
+            return;
+        }
+
+        var r = resumirSeleccion(sel);
+
+        var mensaje = sel.length + ' factura(s) por ' + importeTexto(r.neto) + ' de neto'
+            + (r.unCliente ? ', todas de ' + r.unCliente : ', de ' + r.clientes + ' clientes') + '.';
+
+        var detalle = 'La fecha cambia los días de cada factura, y con ellos el tramo de la escala '
+            + 'de descuento y el importe neto: el total puede no ser el mismo después de guardar. '
+            + 'Sus importes pasan a la columna de esa fecha.';
+
+        // Pisar la fecha que puso otro es legítimo, pero no puede ser una
+        // sorpresa: el número va antes de elegir, no después de guardar.
+        if (r.conManual) {
+            detalle += ' ' + r.conManual + ' ya ten' + (r.conManual === 1 ? 'ía' : 'ían')
+                + ' una fecha cargada a mano y se pisa' + (r.conManual === 1 ? '' : 'n') + '.';
+        }
+
+        Notificacion.pedirFecha({
+            titulo: 'Fecha de cobro para varias facturas',
+            mensaje: mensaje,
+            detalle: detalle,
+            etiqueta: 'Fecha de cobro (la misma para todas)',
+            // Sin fechas pasadas, igual que la celda: la factura desaparecería
+            // del listado. El servidor lo valida de nuevo.
+            min: hoyISO(),
+            antesDelMin: 'No se aceptan fechas pasadas: la factura desaparecería del listado '
+                + 'de pendientes.',
+            valor: valorComun(sel),
+            invalido: 'Elegí la fecha en la que se acordó el cobro.',
+            confirmar: 'Fechar ' + sel.length + ' factura(s)'
+        }).then(function(fecha) {
+            if (fecha !== null) { guardarFechaMasiva(sel, fecha); }
+        });
+    }
+
+    /**
+     * Si las seleccionadas ya compartían la fecha, se ofrece de arranque; si
+     * hay dos distintas el diálogo abre vacío, porque proponer la de la primera
+     * fila sería decidir por el usuario. Es valorComun() de Proveedores.
+     *
+     * La fecha de una vencida es la ORIGINAL, no la columna de hoy donde se
+     * dibuja: si no, todas las vencidas "compartirían" el día de hoy sin que
+     * nadie lo haya decidido. Y una fecha común ya pasada no se ofrece: el
+     * diálogo no la aceptaría.
+     */
+    function valorComun(filas) {
+        var unico = null;
+
+        for (var i = 0; i < filas.length; i++) {
+            var f = filas[i].VENCIDA ? (filas[i].COBRO_ORIGINAL || '') : (filas[i].Cobro || '');
+
+            if (f === '' || (unico !== null && unico !== f)) {
+                return '';
+            }
+
+            unico = f;
+        }
+
+        return (unico && unico >= hoyISO()) ? unico : '';
+    }
+
+    function guardarFechaMasiva(filas, fecha) {
+        /* LA SELECCIÓN NO SE LIMPIA, igual que en Proveedores: las facturas
+           fechadas siguen en la tabla -movidas de columna-, y dejarlas
+           seleccionadas es lo que permite corregir la fecha ahí mismo si el
+           importe cayó donde no iba. */
+        pedirFecha('saveFechaCobroManualMasiva', {
+            fecha_cobro: fecha,
+            comprobantes: filas.map(function(item) {
+                return { cod_cliente: item.COD_CLI, t_comp: item.T_COMP, n_comp: item.N_COMP };
+            })
+        }, null);
+    }
+
+    /**
+     * Vuelve a la fecha calculada las seleccionadas que tienen fecha manual.
+     *
+     * Las que no la tienen no cuentan: ya están en la calculada, y mandarlas
+     * inflaría el número del mensaje. Se confirma diciendo cuántas son.
+     */
+    function volverSeleccion() {
+        var aplicar = filasSeleccionadas().filter(function(item) { return !!item.FECHA_MANUAL; });
+
+        if (!aplicar.length) {
+            return;
+        }
+
+        var total = filasSeleccionadas().length;
+
+        Notificacion.confirmar({
+            titulo: 'Volver a la fecha calculada',
+            mensaje: aplicar.length + ' de las ' + total + ' factura(s) seleccionadas tienen la '
+                + 'fecha de cobro cargada a mano.',
+            detalle: 'Vuelven a la fecha de emisión + PPP del grupo, y los días, el descuento y el '
+                + 'importe neto se recalculan sobre ella. Las demás no cambian.',
+            confirmar: 'Volver ' + aplicar.length + ' factura(s)'
+        }).then(function(ok) {
+            if (!ok) { return; }
+
+            pedirFecha('deleteFechaCobroManualMasiva', {
+                comprobantes: aplicar.map(function(item) {
+                    return { t_comp: item.T_COMP, n_comp: item.N_COMP };
+                })
+            }, null);
+        });
+    }
+
+    /** '$ 1.234,56' en texto plano: la barra y los diálogos no llevan HTML */
+    function importeTexto(n) {
+        return '$ ' + (Number(n) || 0).toLocaleString('es-AR',
+            { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
     function hoyISO() {
@@ -844,9 +1242,13 @@
         var descriptivas = ColumnasFijas.descriptivas(
             document.getElementById('tablaCobranzasFR'));
 
-        var html = '<td class="total-label">TOTALES</td>';
+        // La primera es la de selección, vacía y escondida donde no se
+        // selecciona: el rótulo va en COD_CLI, que es la primera fija por
+        // defecto. En la celda del check quedaría cortado en 46px, o invisible.
+        var html = '<td class="col-seleccion" data-exportar-omitir></td>'
+            + '<td class="total-label">TOTALES</td>';
 
-        for (var i = 1; i < descriptivas.length; i++) {
+        for (var i = 2; i < descriptivas.length; i++) {
             html += '<td></td>';
         }
 

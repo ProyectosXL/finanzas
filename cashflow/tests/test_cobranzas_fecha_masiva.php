@@ -385,3 +385,119 @@ if (!Pruebas::hayBase()) {
 
     sqlsrv_query($cidPrueba, 'DROP TABLE #LOTE_PRUEBA');
 }
+
+// ============================================================================
+// El gesto en la pantalla, de punta a punta
+//
+// No hay corredor de JS para la logica de la barra, pero lo que se rompe callado
+// es el CABLEADO: un boton sin su oyente no hace nada, una columna que se
+// dibuja solo en una vista corre los indices de las otras, y un check sin
+// data-orden="no" ordena la tabla al tildar "todas". Eso se verifica leyendo.
+// ============================================================================
+
+$pestanasMasivas = [
+    'Cobranzas FR' => [
+        'tab' => __DIR__ . '/../Tabs/cobranzas_fr.php',
+        'js' => __DIR__ . '/../Js/Ingresos-Cobranzas_fr.js',
+        'css' => __DIR__ . '/../Css/Ingresos-Cobranzas_fr.css',
+        'tabla' => 'tablaCobranzasFR',
+        'cuerpo' => 'tableBodyCob',
+        'sufijo' => 'Cob',
+        'permiso' => 'cobranzas_fr',
+        'claveFijas' => 'cobranzas_fr.con_seleccion',
+        // Donde se edita de a una: el mismo lugar donde se selecciona.
+        'vista' => "modoOrigen === 'proyectado' && modoVista === 'deepdive'"
+    ]
+];
+
+foreach ($pestanasMasivas as $nombre => $p) {
+    seccion($nombre . ': la seleccion y la barra estan cableadas');
+
+    $tab = file_get_contents($p['tab']);
+    $js = file_get_contents($p['js']);
+    $css = file_get_contents($p['css']);
+    $s = $p['sufijo'];
+
+    chequear('la pestana toma el permiso de edicion', true,
+        strpos($tab, "\$edita = AuthCashflow::puedeEditar('" . $p['permiso'] . "');") !== false);
+
+    // Sin permiso, ni la barra ni el check de "todas" se dibujan.
+    chequear('la barra va adentro del permiso', 1,
+        preg_match('/<\?php if \(\$edita\): \?>\s*(<!--.*?-->\s*)?<div id="barraSel' . $s . '"/s', $tab));
+    chequear('el check de "todas" tambien', 1,
+        preg_match('/<\?php if \(\$edita\): \?>\s*<input type="checkbox"[^>]*id="selTodas' . $s . '"/s', $tab));
+
+    foreach (['btnFecharSel' => 'fecharSeleccion', 'btnVolverSel' => 'volverSeleccion',
+              'btnLimpiarSel' => null] as $boton => $fn) {
+        chequear('la barra tiene ' . $boton . $s, true, strpos($tab, 'id="' . $boton . $s . '"') !== false);
+        chequear('y el JS lo engancha', true, strpos($js, "conectarBoton('" . $boton . $s . "'"
+            . ($fn ? ', ' . $fn . ')' : '')) !== false);
+    }
+
+    chequear('el boton dice "Poner fecha de cobro"', true, strpos($tab, 'Poner fecha de cobro') !== false);
+    chequear('y el otro "Volver a la fecha calculada"', true,
+        strpos($tab, 'Volver a la fecha calculada') !== false);
+
+    chequear('el check de "todas" esta enganchado', true,
+        strpos($js, "document.getElementById('selTodas" . $s . "')") !== false);
+    chequear('los checks de las filas, delegados en el cuerpo', true,
+        strpos($js, "document.getElementById('" . $p['cuerpo'] . "')") !== false
+        && strpos($js, "chk.classList.contains('cob-sel')") !== false);
+
+    // Los dos endpoints masivos, con la fecha minima en hoy.
+    chequear('fechar llama al endpoint masivo', true,
+        strpos($js, "pedirFecha('saveFechaCobroManualMasiva'") !== false);
+    chequear('volver a la calculada tambien', true,
+        strpos($js, "pedirFecha('deleteFechaCobroManualMasiva'") !== false);
+    chequear('el dialogo no acepta fechas pasadas', 1,
+        preg_match('/Notificacion\.pedirFecha\(\{[^}]*\bmin: hoyISO\(\)/s', $js));
+    chequear('y arranca con la fecha comun, si la hay', true,
+        strpos($js, 'valor: valorComun(sel)') !== false);
+
+    // Lo que se dice antes de confirmar.
+    chequear('el dialogo dice cuantas y por cuanto', true,
+        strpos($js, "sel.length + ' factura(s) por ' + importeTexto(r.neto)") !== false);
+    chequear('y cuantas ya tenian fecha manual', true,
+        strpos($js, "' una fecha cargada a mano y se pisa'") !== false);
+
+    // "Volver a la calculada" manda solo las que tienen fecha manual.
+    chequear('volver a la calculada filtra las que tienen fecha manual', true,
+        strpos($js, 'filasSeleccionadas().filter(function(item) { return !!item.FECHA_MANUAL; })') !== false);
+    chequear('y el boton se apaga sin ninguna', true,
+        strpos($js, 'volver.disabled = (r.conManual === 0);') !== false);
+
+    // Lo que se manda es lo seleccionado que se ve, y nunca una excluida.
+    chequear('lo que se manda sale de las filas que suman y se ven', true,
+        strpos($js, 'return filasFiltradas().filter(function(item) { return !!seleccion[claveFila(item)]; });') !== false);
+    chequear('una factura excluida no tiene check', true,
+        strpos($js, 'if (editable() && !item.EXCLUIDO) {') !== false);
+
+    // La seleccion sobrevive al filtro por emision: solo se poda sin filtro.
+    chequear('la seleccion se poda en cada carga', true, strpos($js, 'podarSeleccion();') !== false);
+    chequear('pero no con el filtro de emision puesto', true,
+        strpos($js, 'if (!vistaEditable() || r.desde || r.hasta) {') !== false);
+
+    // Solo donde se edita de a una.
+    chequear('la vista seleccionable es la editable', true, strpos($js, $p['vista']) !== false);
+    chequear('la columna se prende solo ahi', true,
+        strpos($js, "table.classList.toggle('con-seleccion', editable());") !== false);
+    chequear('y el CSS la esconde en el resto', true,
+        strpos($css, '#' . $p['tabla'] . ':not(.con-seleccion) .col-seleccion') !== false);
+
+    // La columna existe siempre, primera, y no se ordena ni se exporta.
+    chequear('el <th> de seleccion es el primero de la tabla', true,
+        preg_match('/id="' . $p['tabla'] . '".*?<thead>\s*<tr>\s*(<!--.*?-->\s*)*<th\b[^>]*class="[^"]*col-seleccion/s',
+            $tab) === 1);
+    chequear('y declara data-orden="no" y data-exportar-omitir', 1,
+        preg_match('/<th\b[^>]*col-seleccion[^>]*data-orden="no" data-exportar-omitir>/s', $tab));
+    chequear('cada fila dibuja su celda, aunque sea vacia', true,
+        strpos($js, "'<td class=\"text-center col-seleccion\" data-exportar-omitir>' + chk + '</td>'") !== false);
+    chequear('y el pie tambien, antes del rotulo', true,
+        strpos($js, "'<td class=\"col-seleccion\" data-exportar-omitir></td>'\n            + '<td class=\"total-label\">TOTALES</td>'") !== false
+        || strpos($js, "'<td class=\"col-seleccion\" data-exportar-omitir></td>'\r\n            + '<td class=\"total-label\">TOTALES</td>'") !== false);
+
+    // Las columnas fijas: nueva clave, y COD_CLI / RAZON_SOC como antes.
+    chequear('las columnas fijas cambian de clave', true,
+        strpos($js, "clave: '" . $p['claveFijas'] . "'") !== false);
+    chequear('y siguen fijando COD_CLI y RAZON_SOC', true, strpos($js, 'porDefecto: [1, 2]') !== false);
+}
