@@ -418,6 +418,16 @@ Con su fecha y su punta si es el BCRA, o con el mes de la curva y si es **aproxi
 
 Por tarjeta, cuatro renglones: **total en pesos**, **consumos en `$`**, **`U$S` equivalente en `$`** y **`U$S`** (informativa, en itálica y gris, porque no suma en pesos: un importe en dólares alineado debajo de tres en pesos se suma con la vista sin que nadie se dé cuenta).
 
+### Las cuatro grillas: el total de cada fecha, arriba de la fecha
+
+Supervisoras, Corporativas, Estimaciones mensuales y Socios llevan, en la fila de arriba del encabezado, **el total de cada columna del eje encima de su fecha** y el total general encima de *TOTAL PERÍODO*. Antes esa fila tenía el período, que ya dice el cartel.
+
+- **Son los números del pie**, leídos una vez en `pintarTotales()` de la fila de totales del payload y escritos con las mismas dos funciones: `celdaEje()`, corta y vacía en cero, y `celdaTotal()`, con signo y decimales. En Socios son los **totales en pesos**, como el pie.
+- **Siguen al pie también en lo que no filtra:** el pie de Corporativas mide la fila de totales del payload y no se mueve con los interruptores de la grilla. Los de arriba tampoco. Que el pie no siga a los filtros es anterior y no se tocó.
+- ***TOTAL PERÍODO* bajó a la fila de las fechas**, sin `rowspan`, para que encima tenga dónde ir el total general. Lleva `total-column`, que es como `Js/tabla-orden.js` la reconoce ahí abajo, y el mismo rótulo: el orden que alguien tenía guardado por esa columna se conserva, porque se guarda por nombre. `encabezadoEje()` agrega las fechas **antes** de ella en vez de reescribir la fila.
+
+Los pinta `Js/eje-totales.js`; ver `README-cashflow.md`.
+
 ---
 
 ## 6. El vencimiento de una tarjeta, y por qué corre para el otro lado

@@ -1,0 +1,78 @@
+<?xml version="1.0"?>
+<!--
+    La regla pura de Js/eje-totales.js, verificada sin navegador.
+
+    El proyecto no tiene node ni un corredor de JS, pero Windows trae cscript,
+    que ejecuta JScript (ES3). EjeTotales.celdas() esta escrita sin nada
+    posterior a ES3 justamente para poder correrla aca.
+
+        cscript //nologo cashflow\tests\js\eje_totales.wsf
+
+    La corre test_tablas_controles.php cuando cscript esta disponible, y espera
+    "FALLAS: 0" en la ultima linea. La ruta del src es relativa a este archivo.
+-->
+<job>
+<script language="JScript" src="../../Js/eje-totales.js"/>
+<script language="JScript">
+<![CDATA[
+var ok = 0, mal = 0;
+
+function igual(nombre, esperado, obtenido) {
+    if (esperado === obtenido) {
+        ok++;
+        WScript.Echo('OK    ' + nombre);
+    } else {
+        mal++;
+        WScript.Echo('FALLA ' + nombre + ' | esperado: ' + esperado + ' | obtenido: ' + obtenido);
+    }
+}
+
+/* Las celdas en una linea: "T:" marca la del total general */
+function resumen(lista) {
+    var partes = [];
+
+    for (var i = 0; i < lista.length; i++) {
+        partes.push((lista[i].esTotal ? 'T:' : '') + lista[i].contenido);
+    }
+
+    return partes.join('|');
+}
+
+// El formato de los pies de Cobranzas, Tasky y Echeqs: vacio en cero
+function enBlanco(v) { return v != 0 ? '$ ' + v : ''; }
+
+// El de Comex: solo lo positivo
+function positivo(v) { return v > 0 ? '$ ' + v : ''; }
+
+igual('una celda por columna y una mas para el total',
+    '$ 10||$ -5|T:$ 5', resumen(EjeTotales.celdas([10, 0, -5], 5, enBlanco)));
+
+igual('sin total, no hay celda de total (Proveedores Locales)',
+    '$ 10|', resumen(EjeTotales.celdas([10, 0], undefined, enBlanco)));
+
+igual('null tambien es "no hay columna Total"',
+    '$ 10', resumen(EjeTotales.celdas([10], null, enBlanco)));
+
+igual('un total en cero SI lleva celda, con el formato de la pestana',
+    '|T:', resumen(EjeTotales.celdas([0], 0, enBlanco)));
+
+igual('el formato de Comex deja en blanco los negativos, igual que su pie',
+    '$ 3||T:$ 3', resumen(EjeTotales.celdas([3, -2], 3, positivo)));
+
+igual('el total puede tener su propio formato (Tarjetas, Logistica)',
+    '1.000|T:$ 1.000,00', resumen(EjeTotales.celdas([1000], 1000,
+        function(v) { return '1.000'; }, function(v) { return '$ 1.000,00'; })));
+
+igual('sin formato, el numero tal cual y vacio para null',
+    '7||T:7', resumen(EjeTotales.celdas([7, null], 7)));
+
+igual('una sola columna (Periodo completo)',
+    '$ 9|T:$ 9', resumen(EjeTotales.celdas([9], 9, enBlanco)));
+
+igual('sin columnas, solo el total',
+    'T:$ 4', resumen(EjeTotales.celdas([], 4, enBlanco)));
+
+WScript.Echo('OK: ' + ok + '   FALLAS: ' + mal);
+]]>
+</script>
+</job>

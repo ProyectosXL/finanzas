@@ -609,12 +609,14 @@ chequear('el economico avisa cuando el proveedor no esta en el maestro', true,
    Por eso el conteo se verifica contra el HTML y no se confia en COLS_DESC, que
    es justamente el numero que se olvida de actualizar. */
 $encabezado = substr($htmlCodigo, strpos($htmlCodigo, '<table id="tablaProveedores"'));
-$encabezado = substr($encabezado, 0, strpos($encabezado, 'id="headerEjeProv"'));
+/* Hasta la fila de fechas. Antes se cortaba en la celda de grupo del eje, que
+   se fue: en su lugar Js/eje-totales.js pinta los totales de cada fecha. */
+$encabezado = substr($encabezado, 0, strpos($encabezado, 'id="headerSubProv"'));
 
 preg_match('/var COLS_DESC = (\d+);/', $jsCodigo, $mCols);
 
-/* Se cuentan las de rowspan="2" y no todos los <th>: la ultima del encabezado es
-   la del eje, que es una sola celda con colspan y no es descriptiva. */
+/* Se cuentan las de rowspan="2" y no todos los <th>: son las descriptivas, y
+   el resto de la fila -los totales del eje- lo agrega el JS. */
 chequear('el encabezado tiene tantas descriptivas como declara COLS_DESC',
     substr_count($encabezado, '<th rowspan="2"'), intval($mCols[1]));
 
@@ -636,7 +638,9 @@ chequear('el encabezado tiene tantas descriptivas como declara COLS_DESC',
    olvida. */
 $pie = substr($jsCodigo, strpos($jsCodigo, 'function pintarTotales'));
 $pie = substr($pie, strpos($pie, 'var html ='));
-$pie = substr($pie, 0, strpos($pie, 'cols.forEach'));
+// Hasta donde empiezan las celdas del eje, que se arman con `valores`: la
+// misma lista que va a los totales de arriba de cada fecha.
+$pie = substr($pie, 0, strpos($pie, 'var valores ='));
 
 $anchoPie = 0;
 $celdas = explode('<td', $pie);

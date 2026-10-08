@@ -1,0 +1,150 @@
+<!doctype html>
+<meta charset="utf-8">
+<!--
+    Js/eje-totales.js con los otros controles cargados, en un navegador de
+    verdad. Lo que la regla pura de eje_totales.wsf no puede ver:
+
+      - que cada total caiga en la MISMA columna que su fecha (con rowspan);
+      - que tabla-orden.js ordene las mismas columnas que antes, y Total
+        incluida, aunque viva en la fila de abajo;
+      - que columnas-fijas.js cuente las mismas descriptivas;
+      - que el tilde de "seleccionar todos" de la fila de arriba conserve su
+        oyente;
+      - que tabla-export.js no baje los totales de arriba;
+      - que una fila desalineada no se pinte.
+
+    No hay corredor de JS en el proyecto, asi que se corre a mano. Abriendo el
+    archivo en el navegador se ve el resultado, o sin ventana:
+
+      chrome --headless=new --allow-file-access-from-files --dump-dom ^
+          file:///C:/xampp/htdocs/finanzas/cashflow/tests/js/eje_totales_integracion.html
+
+    La ultima linea del <pre id="r"> tiene que decir "FALLAS: 0".
+-->
+<body>
+<div id="tabContent">
+  <!-- Como Echeqs: descriptivas con rowspan (una con un tilde), fechas + Total abajo -->
+  <table id="t1">
+    <thead>
+      <tr>
+        <th rowspan="2">Fecha</th>
+        <th rowspan="2">Cliente</th>
+        <th rowspan="2"><input type="checkbox" id="selTodos"></th>
+      </tr>
+      <tr><th>6/9</th><th>7/9</th><th>8/9</th><th class="total-column">Total</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>01/09/2026</td><td>B</td><td></td><td>$ 10,00</td><td></td><td>$ 5,00</td><td>$ 15,00</td></tr>
+      <tr><td>02/09/2026</td><td>A</td><td></td><td>$ 1,00</td><td>$ 2,00</td><td></td><td>$ 3,00</td></tr>
+    </tbody>
+    <tfoot><tr><td colspan="3">TOTALES</td><td>$ 11,00</td><td>$ 2,00</td><td>$ 5,00</td><td>$ 18,00</td></tr></tfoot>
+  </table>
+
+  <!-- Como Tarjetas despues del cambio: TOTAL PERIODO abajo, con total-column -->
+  <table id="t2">
+    <thead>
+      <tr><th rowspan="2">TARJETA</th><th rowspan="2">BASE</th></tr>
+      <tr><th>Oct-26</th><th>Nov-26</th><th class="text-end total-column">TOTAL PERÍODO</th></tr>
+    </thead>
+    <tbody><tr><td>X</td><td>1</td><td>5</td><td>6</td><td>$ 11,00</td></tr></tbody>
+  </table>
+
+  <!-- Como Proveedores Locales: sin columna Total -->
+  <table id="t3">
+    <thead>
+      <tr><th rowspan="2">PROV</th></tr>
+      <tr><th>6/9</th><th>7/9</th></tr>
+    </thead>
+    <tbody><tr><td>P</td><td>1</td><td>2</td></tr></tbody>
+  </table>
+</div>
+<pre id="r"></pre>
+
+<script src="../../Js/columnas-fijas.js"></script>
+<script src="../../Js/tabla-orden.js"></script>
+<script src="../../Js/tabla-export.js"></script>
+<script src="../../Js/eje-totales.js"></script>
+<script>
+var r = [], ok = 0, mal = 0;
+function igual(nombre, esperado, obtenido) {
+    var a = JSON.stringify(esperado), b = JSON.stringify(obtenido);
+    if (a === b) { ok++; r.push('OK    ' + nombre); }
+    else { mal++; r.push('FALLA ' + nombre + ' | esperado ' + a + ' | obtenido ' + b); }
+}
+function fmt(v) { return v !== 0 ? '$ ' + v : ''; }
+
+/** Para cada celda del thead, su indice real de columna (con rowspan/colspan) */
+function grilla(tabla) {
+    var ocup = {}, out = [];
+    for (var f = 0; f < tabla.tHead.rows.length; f++) {
+        var col = 0, fila = tabla.tHead.rows[f];
+        for (var c = 0; c < fila.cells.length; c++) {
+            while (ocup[f + '|' + col]) col++;
+            var th = fila.cells[c];
+            for (var i = 0; i < th.rowSpan; i++) for (var j = 0; j < th.colSpan; j++) ocup[(f + i) + '|' + (col + j)] = true;
+            out.push({ th: th, fila: f, col: col });
+            col += th.colSpan;
+        }
+    }
+    return out;
+}
+
+var t1 = document.getElementById('t1');
+var antesOrden = OrdenTabla.ordenables(t1).map(function(c) { return c.nombre + '@' + c.indice; });
+var antesFijas = ColumnasFijas.descriptivas(t1).length;
+var tilde = document.getElementById('selTodos');
+var clicks = 0;
+tilde.addEventListener('click', function() { clicks++; });
+
+igual('t1 pinta', true, pintarEjeTotales('t1', { columnas: ['a', 'b', 'c'], valores: [11, 2, 5], total: 18, formato: fmt }));
+
+// Alineacion: cada total arriba cae en la misma columna que su fecha abajo
+var g = grilla(t1);
+var arriba = g.filter(function(x) { return x.th.hasAttribute('data-eje-total'); });
+var abajo = g.filter(function(x) { return x.fila === 1; });
+igual('t1: una celda arriba por fecha + total', 4, arriba.length);
+igual('t1: cada total en la columna de su fecha', abajo.map(function(x) { return x.col; }), arriba.map(function(x) { return x.col; }));
+igual('t1: los numeros', ['$ 11', '$ 2', '$ 5', '$ 18'], arriba.map(function(x) { return x.th.textContent; }));
+igual('t1: el ultimo es el general', true, arriba[3].th.classList.contains('eje-total-general'));
+
+// Orden y columnas fijas: lo mismo que antes de pintar
+igual('t1: mismas columnas ordenables', antesOrden, OrdenTabla.ordenables(t1).map(function(c) { return c.nombre + '@' + c.indice; }));
+igual('t1: Total sigue ordenable', true, antesOrden.indexOf('Total@6') !== -1);
+igual('t1: mismas descriptivas', antesFijas, ColumnasFijas.descriptivas(t1).length);
+
+// El tilde de la fila de arriba conserva su oyente
+tilde.click();
+igual('t1: el tilde sigue vivo', 1, clicks);
+
+// Repintar no acumula: reemplaza
+pintarEjeTotales('t1', { columnas: ['a', 'b', 'c'], valores: [1, 0, 0], total: 1, formato: fmt });
+igual('t1: repintar reemplaza', ['$ 1', '', '', '$ 1'],
+    Array.prototype.map.call(t1.querySelectorAll('[data-eje-total]'), function(th) { return th.textContent; }));
+
+// Exportar: el clon no lleva los totales de arriba, y el resto queda igual
+var clon = TablaExport.prepararClon(t1);
+igual('export: sin celdas de totales', 0, clon.querySelectorAll('[data-eje-total]').length);
+igual('export: la fila de arriba conserva las descriptivas', 3, clon.tHead.rows[0].cells.length);
+igual('export: el pie sigue entero (TOTALES con colspan y 4 importes)', 5, clon.tFoot.rows[0].cells.length);
+
+// Alineacion mal: no pinta nada y saca lo anterior
+igual('desalineado: no pinta', false, pintarEjeTotales('t1', { columnas: ['a', 'b'], valores: [1, 2], total: 3, formato: fmt }));
+igual('desalineado: no queda nada viejo', 0, t1.querySelectorAll('[data-eje-total]').length);
+igual('columnas y valores distintos: no pinta', false, pintarEjeTotales('t1', { columnas: ['a', 'b', 'c'], valores: [1, 2], total: 3 }));
+
+// Tarjetas: TOTAL PERIODO abajo sigue ordenable con su nombre, y arriba va el general
+var t2 = document.getElementById('t2');
+igual('t2 pinta', true, pintarEjeTotales('t2', { columnas: ['x', 'y'], valores: [5, 6], total: 11, formato: String, formatoTotal: function(v) { return '$ ' + v + ',00'; } }));
+igual('t2: TOTAL PERÍODO ordenable por nombre', true, OrdenTabla.ordenables(t2).some(function(c) { return c.nombre === 'TOTAL PERÍODO' && c.indice === 4; }));
+igual('t2: el general con su formato', '$ 11,00', t2.querySelector('.eje-total-general').textContent);
+igual('t2: dos descriptivas', 2, ColumnasFijas.descriptivas(t2).length);
+
+// Proveedores Locales: sin Total
+var t3 = document.getElementById('t3');
+igual('t3 pinta sin total', true, pintarEjeTotales('t3', { columnas: ['a', 'b'], valores: [1, 2], formato: fmt }));
+igual('t3: dos celdas y ninguna general', [2, 0], [t3.querySelectorAll('[data-eje-total]').length, t3.querySelectorAll('.eje-total-general').length]);
+
+r.push('OK: ' + ok + '   FALLAS: ' + mal);
+document.getElementById('r').textContent = r.join('\n');
+</script>
+</body>

@@ -1111,6 +1111,8 @@ Los tres filtros —el buscador y los dos interruptores— son del navegador, as
 
 Antes salían del backend calculados sobre **todos** los vencimientos: con el filtro por forma de pago prendido —que es el default— la tarjeta decía *549 vencimientos* arriba de una tabla que mostraba **294**, y ni el buscador ni el interruptor de vencidos la movían.
 
+**Arriba de cada fecha va su total**, en la fila del encabezado donde estaba la leyenda *Días* / *Meses*. Es la misma cuenta del pie de TOTALES —`porCol`, sobre las mismas filas visibles— con el mismo formato corto, así que los tres filtros lo mueven igual que al pie. **No hay total general arriba** porque la grilla no tiene columna *Total*: ni las filas ni el pie la tienen, y agregarla es otro cambio. Los pinta `Js/eje-totales.js`; ver `README-cashflow.md`.
+
 **Lo que el filtro esconde no se pierde:** cuando lo visible difiere del universo, el pie de cada tarjeta dice el total. Es la misma regla del cartel de al lado del período, aplicada a las tarjetas.
 
 Con una excepción deliberada: **la tarjeta roja se apaga en verde por el universo, no por lo visible.** Apagarla porque el filtro escondió lo que falta fechar diría que no hay trabajo por hacer justo cuando lo hay.

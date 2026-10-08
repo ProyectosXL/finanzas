@@ -213,6 +213,7 @@ Una fecha vencida es un dato a corregir, y hasta que alguien la corrija ese cont
 | **Dónde filtra** | En el navegador, escondiendo filas. Las 76 ya están cargadas: un round-trip por prender un interruptor sería trabajo puro |
 | **Con el buscador** | Se combinan: los dos terminan en `filtrarTabla()`, así que no pueden quedar diciendo cosas distintas |
 | **El pie** | Se rehace con lo visible, igual que con el buscador |
+| **Los totales de arriba de cada fecha** | Son los del pie, con su mismo formato: se rehacen con él (`Js/eje-totales.js`) |
 | **Las tarjetas** | **No** se tocan: miden el cronograma completo |
 | **El export** | Baja lo que se ve, sin nada extra: `TablaExport` saca del clon las filas con `display: none` |
 | **Qué mira** | El `data-vencida` del `<tr>`, no la clase CSS: la clase es presentación y podría cambiar sin que nadie piense en el filtro |
@@ -584,6 +585,7 @@ Sigue siendo el **dólar futuro ROFEX del mes de la fecha efectiva de pago** (`C
 - **Tres columnas en dólares, en ese orden: FOB total, pagado y pendiente.** La resta escrita de izquierda a derecha, que es lo que hace que el número de la punta no haya que creerlo. Son los mismos números que muestra la pantalla de pagos de Comercio Exterior.
 - **El importe en pesos, los totales de la pestaña, el export y la fila del tablero salen del pendiente.**
 - **El pie totaliza las tres columnas en dólares**, sobre las filas que se están viendo. Es donde se ve el cuadre del módulo entero sin sumar 76 filas a mano.
+- **Arriba de cada fecha va su total**, en la fila del encabezado donde estaba la leyenda *Días* / *Meses*, y arriba de *Total* el total general. Son los del pie —la misma fila de totales, leída una vez en `totalesEjeProv()`— con el mismo formato: sólo lo positivo, como el pie mostró siempre. Así siguen al buscador y a los interruptores igual que él. Los pinta `Js/eje-totales.js`; ver `README-cashflow.md`.
 - **La celda de pagado se abre** y muestra los pagos uno por uno —fecha, forma, medio, monto y cuándo se cargó—, con un contador al lado que dice cuántos son. Un mismo total puede salir de un anticipo o de seis cuotas.
 - **El estado va pegado al pendiente** cuando no es el caso normal: *Parcial*, *Cancelado*, *Sobrepago*, *Sin FOB* o *Repetido*. Un contenedor sin pagos no lleva nada, porque no hay nada que explicar.
 - **Las canceladas se marcan en verde** y **no tienen interruptor para esconderlas**, a diferencia de vencidas y pagadas. Es deliberado: acá no hay nada que corregir ni que destildar, así que un interruptor sólo agregaría un control más que entender. Y sus tres columnas en dólares son el comprobante de que el contenedor se pagó entero.

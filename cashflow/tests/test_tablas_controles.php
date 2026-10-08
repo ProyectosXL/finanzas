@@ -1,7 +1,8 @@
 <?php
 /**
- * Los dos controles compartidos de las tablas: el orden por encabezado
- * (Js/tabla-orden.js) y la exportacion a Excel (Js/tabla-export.js).
+ * Los controles compartidos de las tablas: el orden por encabezado
+ * (Js/tabla-orden.js), la exportacion a Excel (Js/tabla-export.js) y los
+ * totales arriba del eje (Js/eje-totales.js).
  *
  * POR QUE SE PRUEBAN LEYENDO ARCHIVOS
  * -----------------------------------
@@ -436,3 +437,304 @@ chequear('y la tabla no esta excluida del orden', false,
 $ordenadas = substr($ordenJs, strpos($ordenJs, 'if (esPegada(f) && bloque.length)'), 200);
 chequear('tabla-orden pega la fila sin mirar si se ve', false,
     strpos($ordenadas, 'display') !== false || strpos($ordenadas, 'oculta') !== false);
+
+// ============================================================================
+// LOS TOTALES ARRIBA DEL EJE (Js/eje-totales.js)
+//
+// Igual que los otros controles, lo que se rompe callado es el cableado: una
+// pestana que no llama al componente se queda con la fila de arriba vacia y no
+// avisa, y un componente que calcule por su cuenta muestra arriba un numero
+// distinto del pie sin que nada lo note.
+// ============================================================================
+
+seccion('el componente de los totales del eje existe y se carga');
+
+$ejeTotalesJs = file_get_contents($JS . '/eje-totales.js');
+$exportJs = file_get_contents($JS . '/tabla-export.js');
+
+// Sin comentarios: el encabezado del archivo nombra a proposito las clases y
+// las funciones que el codigo NO usa, para explicar por que.
+$ejeTotalesCodigo = preg_replace(['#/\*.*?\*/#s', '#//[^\n]*#'], '', $ejeTotalesJs);
+
+chequear('eje-totales.js existe', true, $ejeTotalesJs !== false && $ejeTotalesJs !== '');
+chequear('eje-totales.js se carga en index.php', true,
+    strpos($index, 'Js/eje-totales.js') !== false);
+
+seccion('el componente no calcula: pinta lo que le pasa la pestana');
+
+// Si sumara filas o leyera el cuerpo de la tabla, tendria su propia cuenta, y
+// el dia que una pestana cambie que filas suman, arriba y abajo dirian dos
+// cosas distintas.
+chequear('no recorre el cuerpo de la tabla', false,
+    strpos($ejeTotalesCodigo, 'tBodies') !== false || strpos($ejeTotalesCodigo, 'tbody') !== false);
+chequear('no lee el pie', false, strpos($ejeTotalesCodigo, 'tFoot') !== false);
+chequear('ni pregunta por la vista activa', false, strpos($ejeTotalesCodigo, 'vistas.') !== false);
+
+seccion('el componente convive con el orden, las columnas fijas y Exportar');
+
+// tabla-orden.js ordena en la fila de arriba las celdas con rowspan y las que
+// llevan esas dos clases: una celda de totales con cualquiera de ellas se
+// volveria un encabezado clickeable.
+chequear('las celdas de totales no llevan total-column', false,
+    strpos($ejeTotalesCodigo, "'total-column'") !== false
+        || strpos($ejeTotalesCodigo, ' total-column') !== false);
+chequear('ni cf-col-total', false, strpos($ejeTotalesCodigo, 'cf-col-total') !== false);
+// columnas-fijas.js corta las descriptivas en la primera celda sin rowspan.
+chequear('ni rowspan, que las volveria descriptivas', false,
+    stripos($ejeTotalesCodigo, 'rowSpan =') !== false
+        || stripos($ejeTotalesCodigo, "setAttribute('rowspan'") !== false);
+chequear('tabla-orden.js sigue reconociendo la columna Total por su clase', true,
+    strpos($ordenJs, "classList.contains('total-column')") !== false);
+
+// No bajan al Excel: el pie ya tiene los mismos numeros.
+chequear('las celdas se marcan para no exportarse', true,
+    strpos($ejeTotalesJs, "setAttribute('data-exportar-omitir', '')") !== false);
+chequear('y tabla-export.js omite lo marcado', true,
+    strpos($exportJs, "querySelectorAll('[data-exportar-omitir]')") !== false);
+// Sacar celdas del clon antes de recorrerlo en paralelo con la tabla viva
+// correria los indices: se esconderia la celda equivocada.
+chequear('despues de sacar lo oculto, no antes', true,
+    strpos($exportJs, 'omitir(clon);') !== false
+        && strpos($exportJs, 'omitir(clon);') > strpos($exportJs, 'clon_f.deleteCell(c)'));
+
+seccion('una fila de totales corrida no se pinta');
+
+chequear('compara las celdas de la fila de fechas con los totales', true,
+    strpos($ejeTotalesJs, 'abajo.cells.length !== lista.length') !== false);
+chequear('y un total por columna del eje', true,
+    strpos($ejeTotalesJs, 'o.columnas.length !== valores.length') !== false);
+// Agregar con appendChild y no reescribir la fila: en la fila de arriba hay
+// tildes de "seleccionar todos" con su oyente.
+chequear('no reescribe la fila de arriba con innerHTML', false,
+    strpos($ejeTotalesCodigo, 'arriba.innerHTML') !== false);
+
+seccion('la regla pura de los totales, sin navegador');
+
+/* EjeTotales.celdas() esta escrita en ES3 para poder correrla con cscript, el
+   JScript que trae Windows: el proyecto no tiene node. Donde no hay cscript
+   -cualquier maquina que no sea Windows- se saltea. */
+$wsf = realpath(__DIR__ . '/js/eje_totales.wsf');
+$cscript = (PHP_OS_FAMILY === 'Windows' && function_exists('shell_exec'))
+    ? trim((string) @shell_exec('where cscript 2>NUL')) : '';
+
+if ($wsf === false) {
+    chequear('existe tests/js/eje_totales.wsf', true, false);
+} elseif ($cscript === '') {
+    Pruebas::saltear('no hay cscript en esta maquina');
+} else {
+    $salida = trim((string) shell_exec('cscript //nologo ' . escapeshellarg($wsf) . ' 2>&1'));
+    $lineas = preg_split('/\r?\n/', $salida);
+    $ultima = trim(end($lineas));
+
+    if (!preg_match('/^OK: (\d+)\s+FALLAS: (\d+)$/', $ultima, $m)) {
+        chequear('eje_totales.wsf corre', 'OK: n   FALLAS: 0', $ultima);
+    } else {
+        chequear('eje_totales.wsf: hay casos', true, intval($m[1]) > 0);
+        chequear('eje_totales.wsf: sin fallas', 0, intval($m[2]));
+    }
+}
+
+// ============================================================================
+// CADA TABLA CON EJE LLAMA AL COMPONENTE
+//
+// Pestana por pestana, cada tabla con su llamada. Se llama desde la funcion
+// del pie, con la misma cuenta, y por eso el texto que se busca es la llamada
+// misma. Y la celda de grupo con colspan -la de la leyenda "Dias"- ya no esta:
+// si quedara, la fila de arriba tendria la leyenda y los totales a la vez, y
+// los totales quedarian corridos.
+// ============================================================================
+
+/** El HTML de una tabla, desde su id hasta su </table> */
+function bloqueTabla($html, $id) {
+    $ini = strpos($html, 'id="' . $id . '"');
+
+    if ($ini === false) {
+        return null;
+    }
+
+    $fin = strpos($html, '</table>', $ini);
+
+    return substr($html, $ini, $fin === false ? null : $fin - $ini);
+}
+
+/** El thead de una tabla, o '' si el thead lo arma el JS */
+function theadTabla($html, $id) {
+    $bloque = bloqueTabla($html, $id);
+
+    if ($bloque === null || !preg_match('/<thead\b.*?<\/thead>/s', $bloque, $m)) {
+        return '';
+    }
+
+    return $m[0];
+}
+
+/* pestana => [archivo JS, [id de tabla => la llamada que la engancha]] */
+$ejeTotales = [
+    'echeqs.php' => ['Ingresos-Echeqs.js', [
+        'tablaEcheqs' => "pintarEjeTotales('tablaEcheqs'",
+        'tablaPrechequeado' => "pintarEjeTotales('tablaPrechequeado'"
+    ]],
+    // Una sola tabla para las dos solapas y los dos modos: los cambios
+    // recargan y redibujan el pie, que es el que llama al componente.
+    'cobranzas_fr.php' => ['Ingresos-Cobranzas_fr.js', [
+        'tablaCobranzasFR' => "pintarEjeTotales('tablaCobranzasFR'"
+    ]],
+    'cobranzas_may.php' => ['Ingresos-Cobranzas_may.js', [
+        'tablaCobranzasMay' => "pintarEjeTotales('tablaCobranzasMay'"
+    ]],
+    'exportaciones_tasky.php' => ['Ingresos-Exportaciones_tasky.js', [
+        'tablaExportacionesTasky' => "pintarEjeTotales('tablaExportacionesTasky'"
+    ]],
+    'proveedores_exterior.php' => ['Comex-Proveedores_exterior.js', [
+        'tablaProveedoresExterior' => "pintarEjeTotales('tablaProveedoresExterior'"
+    ]],
+    'crono_nacionalizacion.php' => ['Comex-Crono_nacionalizacion.js', [
+        'tablaCronoNacionalizacion' => "pintarEjeTotales('tablaCronoNacionalizacion'"
+    ]],
+    // Sin total general: la grilla no tiene columna Total.
+    'proveedores_locales.php' => ['Proveedores-Proveedores_locales.js', [
+        'tablaProveedores' => "pintarEjeTotales('tablaProveedores'"
+    ]],
+    // El thead lo arma el JS: el chequeo de la celda de grupo va aparte.
+    'logistica_local.php' => ['Logistica-Local.js', [
+        'tablaLogistica' => "pintarEjeTotales('tablaLogistica'"
+    ]],
+    // Las cuatro pasan por pintarTotales(), que llama al componente con el id
+    // de la tabla que recibe: lo que se verifica es que cada una se lo pase.
+    'pagos_tarjetas.php' => ['Financiero-Pagos_tarjetas.js', [
+        'tablaSup' => "pintarTotales('tablaSup', 'totalesSup'",
+        'tablaCorp' => "pintarTotales('tablaCorp', 'totalesCorp'",
+        'tablaCorpEst' => "pintarTotales('tablaCorpEst', 'totalesCorpEst'",
+        'tablaSoc' => "pintarTotales('tablaSoc', 'totalesSoc'"
+    ]],
+];
+
+seccion('cada tabla con eje llama al componente');
+
+foreach ($ejeTotales as $tab => $def) {
+    $js = file_get_contents($JS . '/' . $def[0]);
+    $html = contenidoTab($TABS . '/' . $tab);
+
+    foreach ($def[1] as $id => $llamada) {
+        chequear($tab . ': ' . $id . ' existe en la pestana', true,
+            bloqueTabla($html, $id) !== null);
+        chequear($tab . ': ' . $id . ' llama al componente', true,
+            strpos($js, $llamada) !== false);
+        chequear($tab . ': ' . $id . ' no tiene celda de grupo en el encabezado', false,
+            strpos(theadTabla($html, $id), 'colspan') !== false);
+    }
+}
+
+seccion('Logistica arma su encabezado en el JS, sin celda de grupo');
+
+/* El thead de Logistica no esta en la pestana: lo escribe pintarEncabezado(),
+   asi que el chequeo de arriba no ve nada ahi. Se mira el JS: la fila de
+   arriba sin colspan, y Total abajo, en la fila de los meses, para que el
+   total general tenga donde ir. */
+$logJs = file_get_contents($JS . '/Logistica-Local.js');
+$logEnc = substr($logJs, strpos($logJs, 'function pintarEncabezado('));
+$logEnc = substr($logEnc, 0, strpos($logEnc, 'function pintarFilas('));
+
+chequear('el encabezado de Logistica no tiene celda de grupo', false,
+    strpos($logEnc, 'colspan') !== false);
+chequear('y Total va en la fila de los meses, con total-column', true,
+    strpos($logEnc, "'<th class=\"text-end fw-bold total-column\">Total</th>'") !== false);
+chequear('y ya no arriba con rowspan', false,
+    strpos($logEnc, 'fw-bold">Total') !== false);
+
+seccion('Pagos con Tarjetas: pintarTotales() le pasa la tabla al componente');
+
+/* Las cuatro grillas de Tarjetas llaman al componente desde una sola funcion,
+   con el id de tabla que reciben: la llamada literal por tabla esta en la lista
+   de arriba, y aca se verifica que esa funcion lo use. */
+$tarjJs = file_get_contents($JS . '/Financiero-Pagos_tarjetas.js');
+$tarjPie = substr($tarjJs, strpos($tarjJs, 'function pintarTotales(idTabla,'));
+$tarjPie = substr($tarjPie, 0, strpos($tarjPie, 'function celdaEje('));
+
+chequear('pintarTotales recibe el id de la tabla', true, $tarjPie !== '');
+chequear('y llama al componente con el', true,
+    strpos($tarjPie, 'pintarEjeTotales(idTabla, {') !== false);
+chequear('con los mismos formatos que el pie', true,
+    strpos($tarjPie, 'formato: celdaEje') !== false
+        && strpos($tarjPie, 'formatoTotal: celdaTotal') !== false);
+
+// ============================================================================
+// COBERTURA INVERSA: NINGUNA TABLA CON EJE QUEDA SIN SUS TOTALES
+//
+// La lista de arriba verifica que cada tabla enganchada este enganchada. Esto
+// verifica lo otro: que toda tabla con un encabezado de dos filas -que en este
+// modulo quiere decir "tiene eje"- este en esa lista o en la de excluidas, con
+// el motivo. Una tabla con eje que alguien agregue mañana sin llamar al
+// componente hace fallar la suite en vez de quedar con la fila de arriba vacia.
+// ============================================================================
+
+/* tabla => por que no lleva totales arriba del eje */
+$sinEjeTotales = [
+    // Ventas: sus dos tablas con eje quedan como estaban, con la celda de
+    // grupo y la leyenda del periodo. Se decidio dejarlas afuera de este
+    // cambio: Ventas tiene su propio pie y sus propias reglas de neteo, y
+    // sumarlas aca seria mezclar dos trabajos en una rama.
+    'tablaVenta' => 'Ventas queda afuera de este cambio, a pedido',
+    'tablaCobranza' => 'Ventas queda afuera de este cambio, a pedido',
+    // El tablero: el total de una columna seria la suma de ingresos,
+    // egresos, subtotales y saldos, que no es ningun numero. Lo que se lee
+    // por columna ya esta en sus filas de FLUJO NETO y SALDO FINAL. Su thead lo
+    // arma Js/Cashflow.js, asi que el chequeo por HTML no lo ve: va igual en la
+    // lista para que la decision quede escrita.
+    'cfTabla' => 'el tablero: la suma de una columna mezcla ingresos, egresos y saldos',
+];
+
+/* Sin eje y por eso afuera, sin necesidad de lista: tablaComprasProy (cada
+   fila es un mes), tablaCorpExtra y las tablas de maestros, historiales y
+   detalle. No tienen encabezado de dos filas y este chequeo no las mira. */
+
+seccion('cobertura inversa: toda tabla con eje lleva los totales o dice por que no');
+
+$enganchadas = [];
+
+foreach ($ejeTotales as $def) {
+    $enganchadas = array_merge($enganchadas, array_keys($def[1]));
+}
+
+$conEje = 0;
+
+foreach ($archivosTab as $ruta) {
+    $html = contenidoTab($ruta);
+    $nombre = basename($ruta);
+
+    if (!preg_match_all('/<table\b[^>]*\bid="([^"]+)"/', $html, $m)) {
+        continue;
+    }
+
+    foreach ($m[1] as $id) {
+        if (strpos(theadTabla($html, $id), 'rowspan="2"') === false) {
+            continue;
+        }
+
+        $conEje++;
+
+        chequear($nombre . ': ' . $id . ' tiene eje: lleva totales o esta excluida', true,
+            in_array($id, $enganchadas, true) || isset($sinEjeTotales[$id]));
+    }
+}
+
+chequear('el chequeo encontro tablas con eje', true, $conEje > 0);
+
+// Una tabla no puede estar en las dos listas: o se engancho o se decidio que no.
+chequear('ninguna esta enganchada y excluida a la vez', [],
+    array_values(array_intersect($enganchadas, array_keys($sinEjeTotales))));
+
+// Las excluidas existen: una exclusion de una tabla que ya no esta es una
+// decision vieja que nadie revisa.
+foreach (array_keys($sinEjeTotales) as $id) {
+    $existe = false;
+
+    foreach ($archivosTab as $ruta) {
+        if (strpos(contenidoTab($ruta), 'id="' . $id . '"') !== false) {
+            $existe = true;
+            break;
+        }
+    }
+
+    chequear('la excluida ' . $id . ' existe', true, $existe);
+}

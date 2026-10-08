@@ -25,9 +25,11 @@
  * QUÉ COLUMNAS SON ORDENABLES
  * ---------------------------
  * En una tabla con eje temporal el `thead` tiene DOS filas: arriba las columnas
- * descriptivas (con `rowspan="2"`) y el encabezado de grupo del eje, y abajo las
- * veintiocho columnas de días. Ordenables son las descriptivas más la columna
- * `Total`. Las columnas de días no: ordenar por "lo que entra el 8/9" es una
+ * descriptivas (con `rowspan="2"`) y, encima de cada fecha, su total
+ * (Js/eje-totales.js) —en Ventas, el encabezado de grupo del eje—; abajo las
+ * veintiocho columnas de días y `Total`. Ordenables son las descriptivas más la
+ * columna `Total`, que se reconoce por su clase. Los totales de arriba no: no
+ * tienen rowspan ni esa clase, y ordenar por ellos sería ordenar por una fecha. Las columnas de días no: ordenar por "lo que entra el 8/9" es una
  * pregunta legítima, pero con veintiocho encabezados clickeables al lado se
  * aprieta uno sin querer, y el rótulo de esa columna es tan chico que no hay
  * dónde mostrar el indicador. Se derivan del encabezado y no se declaran por

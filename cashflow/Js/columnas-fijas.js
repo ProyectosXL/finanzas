@@ -63,10 +63,12 @@ var ColumnasFijas = (function() {
      * lista declarada se desactualiza en silencio cuando alguien agrega una
      * columna, y el síntoma sería una columna fija corrida un lugar.
      *
-     * El corte es la primera celda que no cumple: en todas estas tablas es el
-     * encabezado de grupo del eje temporal, que lleva colspan. Sin ese corte, la
-     * columna "Total" —que también tiene rowspan y vive al final— entraría en la
-     * lista.
+     * El corte es la primera celda que no cumple. En las tablas con eje es la
+     * primera de los totales de cada fecha (Js/eje-totales.js), que no tiene
+     * rowspan; en las de Ventas, que no los llevan, el encabezado de grupo del
+     * eje, que lleva colspan. Sin ese corte, cualquier celda con rowspan que
+     * viniera después —una columna "Total" puesta arriba, al final— entraría
+     * en la lista.
      *
      * @param {HTMLTableElement} tabla
      * @returns {Array} [{indice, nombre}]

@@ -201,9 +201,11 @@
                                     <i class="fas fa-check-square ms-1" style="font-size: 10px;"
                                        title="Tildá si la nacionalización ya se pagó: sale de la proyección"></i>
                                 </th>
-                                <!-- El rótulo y el colspan los pone el JS según
-                                     la vista activa. -->
-                                <th colspan="1" class="table-group-divider" id="periodoHeader">Días</th>
+                                <!-- Acá terminan las descriptivas. El resto de
+                                     esta fila son los totales de cada columna
+                                     del eje, arriba de su fecha: los pinta
+                                     Js/eje-totales.js desde generarFilaTotales(),
+                                     con la misma cuenta que el pie. -->
                             </tr>
                             <tr id="headerRowSub">
                                 <!-- Los días/meses se generan dinámicamente -->

@@ -111,20 +111,24 @@
            deriva qué columnas son "descriptivas" —o sea, elegibles para quedar
            fijas al scrollear— de las celdas con rowspan que están ANTES del
            grupo temporal. Con un thead de una sola fila, el desplegable
-           ofrecería también las doce columnas de meses. */
+           ofrecería también las doce columnas de meses.
+
+           ARRIBA VAN SÓLO LAS DESCRIPTIVAS. El resto de la fila son los
+           totales de cada columna del eje, arriba de su mes, y los pinta
+           Js/eje-totales.js desde pintarPie(). Por eso Total está en la fila
+           de los meses y no arriba con rowspan: encima de ella va el total
+           general. Lleva total-column, que es como tabla-orden.js reconoce la
+           columna Total aunque esta tabla no se ordene. */
         thead.innerHTML = '<tr>' +
             '<th rowspan="2" class="col-texto">Fletero</th>' +
             '<th rowspan="2" class="text-end" style="width: 110px;">Horas/mes</th>' +
             '<th rowspan="2" class="text-end" style="width: 140px;">Valor hora base</th>' +
             '<th rowspan="2" class="text-center" style="width: 120px;">Mes base</th>' +
-            '<th colspan="' + columnas.length + '" class="table-group-divider text-center">' +
-                esc(vistas.periodo() || 'Proyección') +
-            '</th>' +
-            '<th rowspan="2" class="text-end fw-bold">Total</th>' +
         '</tr><tr>' +
             columnas.map(function(c) {
                 return '<th class="text-end">' + esc(vistas.rotulo(c)) + '</th>';
             }).join('') +
+            '<th class="text-end fw-bold total-column">Total</th>' +
         '</tr>';
     }
 
@@ -256,22 +260,45 @@
         var ejes = filas.map(function(f) { return filaDelEje(f.cod_provee); })
                         .filter(function(e) { return !!e; });
 
+        /* Los totales se cuentan UNA VEZ y van al pie y arriba de cada mes
+           (Js/eje-totales.js), con los mismos formatos. */
+        var valores = columnas.map(function(c) {
+            var suma = 0;
+
+            ejes.forEach(function(e) { suma += Number(vistas.valor(e, c)) || 0; });
+
+            return suma;
+        });
+
         var total = 0;
 
         ejes.forEach(function(e) { total += Number(vistas.total(e)) || 0; });
 
         pie.innerHTML = '<tr>' +
             '<td colspan="4" class="fw-bold text-end">TOTALES</td>' +
-            columnas.map(function(c) {
-                var suma = 0;
-
-                ejes.forEach(function(e) { suma += Number(vistas.valor(e, c)) || 0; });
-
-                return '<td class="text-end fw-bold">' +
-                    (suma === 0 ? '<span class="text-muted">—</span>' : importe(suma)) + '</td>';
+            valores.map(function(suma) {
+                return '<td class="text-end fw-bold">' + celdaEje(suma) + '</td>';
             }).join('') +
-            '<td class="text-end fw-bold">' + (total === 0 ? '—' : importe(total)) + '</td>' +
+            '<td class="text-end fw-bold">' + celdaTotal(total) + '</td>' +
         '</tr>';
+
+        pintarEjeTotales('tablaLogistica', {
+            columnas: columnas,
+            valores: valores,
+            total: total,
+            formato: celdaEje,
+            formatoTotal: celdaTotal
+        });
+    }
+
+    /** Una celda de totales del eje: un guión gris en cero */
+    function celdaEje(suma) {
+        return suma === 0 ? '<span class="text-muted">—</span>' : importe(suma);
+    }
+
+    /** La del total general: guión sin gris, como el pie lo mostró siempre */
+    function celdaTotal(total) {
+        return total === 0 ? '—' : importe(total);
     }
 
     function filaDelEje(cod) {

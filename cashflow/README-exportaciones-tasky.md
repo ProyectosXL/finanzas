@@ -112,6 +112,7 @@ Columnas: `FECHA_EMIS`, `N_COMP`, `COD_CLIENT`, `RAZON_SOCI`, `Importe USD`, `Co
 
 - Columnas fijas con `Js/columnas-fijas.js`: `N_COMP` y `RAZON_SOCI` por defecto. El rótulo *TOTALES* del pie va en la celda de `N_COMP`, que es la primera fija, así queda a la vista al scrollear. Qué celda del pie lleva cada total se resuelve por el **nombre** de la columna del encabezado, no por índice.
 - Pie de totales: total en dólares, total en pesos de hoy y los totales del eje.
+- Totales arriba de cada fecha: en la fila del encabezado donde estaba la leyenda *Días* / *Meses*, el total de cada columna del eje y, arriba de *Total*, el total general. Son la misma cuenta del pie (`totalesEje()` sobre `filasFiltradas()`) con el mismo formato; los pinta `Js/eje-totales.js`. Los totales en dólares y en pesos de hoy siguen sólo en el pie: no son columnas del eje.
 - Indicadores: *Pendiente en USD* y *Dólar de hoy* no varían con la vista —son un hecho de hoy—; *Vista Días*, *Vista Meses* y *Período Completo* miden exactamente las columnas de cada vista, como en todo el módulo.
 - Avisos, arriba de la tabla y en este orden: falta de cotización, facturas vencidas, y lo que quedó fuera del horizonte o sin fecha. Los dos primeros los genera `Ingresos::avisosExportaciones()` y van **adelante** de los del eje a propósito: sin cotización la grilla queda vacía sin que `EjeVista` tenga nada que descartar, y una grilla vacía sin aviso no diría por qué.
 

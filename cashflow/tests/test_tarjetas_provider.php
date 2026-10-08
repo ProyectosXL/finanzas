@@ -564,13 +564,16 @@ foreach ($grillas as $nombre => $g) {
 
     $thead = substr($htmlTarj, $ini, strpos($htmlTarj, '</thead>', $ini) - $ini);
 
-    /* La primera fila del encabezado son los <th rowspan="2"> mas UN <th> con el
-       grupo del eje. De esos rowspan, el ultimo es TOTAL PERIODO -que va despues
-       del eje- asi que las descriptivas son los demas. */
-    $rowspan = substr_count($thead, 'rowspan="2"');
-    $descriptivas = $rowspan - 1;
+    /* La primera fila del encabezado son SOLO las descriptivas, con rowspan="2":
+       el resto de esa fila son los totales de cada fecha, que pinta
+       Js/eje-totales.js. TOTAL PERIODO esta en la fila de las fechas, sin
+       rowspan, para que encima vaya el total general. Asi que todos los rowspan
+       son descriptivas. */
+    $descriptivas = substr_count($thead, 'rowspan="2"');
 
-    chequear($nombre . ': tiene el grupo del eje', true,
+    chequear($nombre . ': tiene la fila de las fechas', true,
+        strpos($thead, 'id="' . $g['eje'] . '2"') !== false);
+    chequear($nombre . ': y ya no la celda de grupo del eje', false,
         strpos($thead, 'id="' . $g['eje'] . '"') !== false);
 
     /* LA CONSTANTE DEL JS CUENTA LAS DESCRIPTIVAS, sin la de total. */
@@ -587,23 +590,39 @@ foreach ($grillas as $nombre => $g) {
     chequear($nombre . ': el colspan inicial del pie tambien', $descriptivas, intval($mp[1]));
 
     /* EL TOTAL VA DESPUES DEL EJE, que es lo que esta pestana cambio: antes estaba
-       antes y se leia un total seguido de los meses de los que sale. */
-    $posEje = strpos($thead, 'id="' . $g['eje'] . '"');
+       antes y se leia un total seguido de los meses de los que sale. Ahora vive en
+       la fila de las fechas y encabezadoEje() agrega las fechas ANTES de el. */
+    $posEje = strpos($thead, 'id="' . $g['eje'] . '2"');
     $posTotal = strpos($thead, 'TOTAL PERÍODO');
 
     chequear($nombre . ': el total va DESPUES de las columnas que suma',
-        true, $posTotal !== false && $posTotal > $posEje);
+        true, $posEje !== false && $posTotal !== false && $posTotal > $posEje);
+
+    /* Y lleva total-column: es como tabla-orden.js reconoce, en la fila de abajo,
+       la columna que se puede ordenar. Sin la clase, ordenar por TOTAL PERIODO
+       dejaria de andar y el orden guardado se perderia. */
+    chequear($nombre . ': TOTAL PERÍODO lleva total-column', 1,
+        preg_match('/<th class="text-end total-column"[^>]*>\s*TOTAL PERÍODO/', $thead));
 }
+
+chequear('encabezadoEje() deja TOTAL PERÍODO al final de la fila de fechas', true,
+    strpos($jsTarj, "fila.querySelector('th.total-column')") !== false
+    && strpos($jsTarj, 'fila.appendChild(total)') !== false);
 
 /* pintarTotales() ARMA LAS TRES IGUAL: un colspan, las del eje, y el total al
    final. Una firma con un parametro de ajuste por tabla es justamente como se
    colaba el desajuste de Corporativas. */
 chequear('pintarTotales ya no recibe un ajuste por tabla', false,
     strpos($jsTarj, 'cols, 1)') !== false);
+/* El total se escribe DESPUES de las celdas del eje. Se lo busca por la llamada
+   a celdaTotal(), que es la misma que usa la fila de arriba (Js/eje-totales.js). */
+$cuerpoPie = substr($jsTarj, strpos($jsTarj, 'function pintarTotales('));
+$cuerpoPie = substr($cuerpoPie, 0, strpos($cuerpoPie, 'function celdaEje('));
+$posCeldasEje = strpos($cuerpoPie, 'valores.forEach(');
+$posTotalPie = strpos($cuerpoPie, "html += '<td class=\"currency fw-bold\">' + celdaTotal(total)");
+
 chequear('y pone el total al final', true,
-    strpos($jsTarj, 'El total del período, en la última columna') !== false
-    || strpos($jsTarj, "html += '<td class=\"currency fw-bold\">' + plata(vistas.total(totales))")
-       !== false);
+    $posCeldasEje !== false && $posTotalPie !== false && $posTotalPie > $posCeldasEje);
 
 /* ================================================================
    LAS ESTIMACIONES MENSUALES ENTRAN EN CORPORATIVAS, Y EL INVARIANTE SIGUE

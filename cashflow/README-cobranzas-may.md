@@ -169,6 +169,7 @@ Los **días sí** pasan a ser los reales (no el parámetro): mostrar `60` al lad
 
 ### En pantalla
 
+- **Totales arriba de cada fecha:** en la fila del encabezado donde estaba la leyenda *Días* / *Meses* va el total de cada columna del eje, y arriba de *Total* el total general. Son la misma cuenta del pie (`totalesEje()` sobre `filasFiltradas()`) con el mismo formato, así que cambian junto con él. Los pinta `Js/eje-totales.js`: ver `README-cashflow.md`.
 - **Detalle Facturas:** la columna *Cobro* es un `<input type="date">`. Al cargar una fecha, la celda se pinta en azul y aparece un botón para volver a la fecha calculada. Guardar recarga la pestaña entera: la fecha cambia en qué columna del eje cae el importe y los totales del pie, y rehacer eso en el navegador sería reimplementar en JS la cuenta que ya hace el backend.
 - **Resumen:** no es editable —la fila es un cliente, no un comprobante— y en su lugar aparece un indicador al lado del código diciendo que *alguna* de sus facturas tiene la fecha cargada a mano. La marca la repone `EjeVista::marcarAlguna()`, porque el agrupado descarta los campos que difieren dentro del grupo.
 - El `min` del input está en hoy, pero eso es una comodidad del navegador: **la validación que vale es la del servidor** (`Ingresos::validarFechaCobroManual()`). No se aceptan fechas pasadas, porque una factura con fecha de ayer desaparecería del listado sin aviso y el usuario vería que su edición "borró" la fila.

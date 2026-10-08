@@ -495,8 +495,10 @@
         /* EL RÓTULO SALE DE vistas.rotulo(), NO DE c.label. `columnas()` devuelve
            STRINGS —'DIA|2026-09-17', 'MES|2026-10'—, no objetos: `c.label` daba
            undefined y la fila de días y meses del encabezado salía toda vacía.
-           Es la misma API que usan Cobranzas FR y Echeqs. */
-        document.getElementById('headerEjeProv').setAttribute('colspan', cols.length || 1);
+           Es la misma API que usan Cobranzas FR y Echeqs.
+
+           La fila de arriba ya no lleva la leyenda de la vista -la dicen los
+           botones- sino los totales, y esos los pinta pintarTotales(). */
         document.getElementById('headerSubProv').innerHTML = cols.map(function(c) {
             var meta = vistas.meta(c) || {};
             var parcial = vistas.esMes(c) && meta.parcial;
@@ -625,13 +627,27 @@
             + '<td class="currency fw-bold">' + plata(total) + '</td>'
             + '<td colspan="' + (COLS_DESC - 10) + '"></td>';
 
-        cols.forEach(function(c) {
-            var v = porCol[c] || 0;
+        /* Los totales del eje van al pie y arriba de cada fecha
+           (Js/eje-totales.js): la misma cuenta -porCol- y el mismo formato.
+           Sin total general, porque la grilla no tiene columna Total. */
+        var valores = cols.map(function(c) { return porCol[c] || 0; });
 
-            html += '<td class="currency fw-bold">' + (v !== 0 ? plataCorta(v) : '') + '</td>';
+        valores.forEach(function(v) {
+            html += '<td class="currency fw-bold">' + celdaEje(v) + '</td>';
         });
 
         document.getElementById('totalesProv').innerHTML = html;
+
+        pintarEjeTotales('tablaProveedores', {
+            columnas: cols,
+            valores: valores,
+            formato: celdaEje
+        });
+    }
+
+    /** El contenido de una celda de totales del eje: vacía en cero */
+    function celdaEje(v) {
+        return v !== 0 ? plataCorta(v) : '';
     }
 
     /** De dónde sale la fecha con la que el comprobante entra al eje */
