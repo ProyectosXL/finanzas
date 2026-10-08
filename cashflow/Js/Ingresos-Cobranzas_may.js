@@ -16,6 +16,13 @@
     /** Controlador de las tres vistas, compartido con el resto del módulo */
     let vistas = null;
 
+    /**
+     * Claves T_COMP|N_COMP de las facturas seleccionadas para la fecha de
+     * cobro masiva. Arriba con el resto del estado: inicializar() puede correr
+     * antes de que el IIFE llegue a la sección de la selección.
+     */
+    var seleccion = {};
+
     function inicializar() {
         console.log('Inicializando Ingresos - Cobranzas May');
 
@@ -51,11 +58,32 @@
         // entender por qué. Cambiar la clave hace que esa selección vuelva al
         // default, que es lo correcto y lo que ya se hizo cuando se fue la
         // columna Tipo.
+        //
+        // Volvió a cambiar con la columna de selección, que entró PRIMERA:
+        // un `[0, 1]` viejo fijaría el check y COD_CLI. El check no queda fijo
+        // por defecto, igual que en Cobranzas FR y en tablaCorp.
         crearColumnasFijas({
             tabla: 'tablaCobranzasMay',
             control: 'colFijasCobMay',
-            clave: 'cobranzas_may.con_importe_factura',
-            porDefecto: [0, 1]
+            clave: 'cobranzas_may.con_seleccion',
+            porDefecto: [1, 2]
+        });
+
+        // Abre por fecha de cobro ascendente, como Cobranzas FR: lo más
+        // antiguo arriba. Las vencidas se ordenan por la fecha donde se
+        // dibujan (hoy), que es el data-orden de su celda.
+        //
+        // 'Cobro' es el data-orden-nombre del <th>, IGUAL AL RÓTULO a
+        // propósito: la preferencia se guarda por ese nombre, y cambiarlo le
+        // haría perder a quien ya ordenó a mano el orden que eligió. La clave
+        // es el id de la tabla, la misma del descubrimiento automático.
+        //
+        // No aplica en Resumen: ahí la columna está oculta y tabla-orden.js no
+        // ordena por una columna que no se ve. El orden del Resumen lo trae el
+        // servidor (EjeVista::ordenarPorFechaMasProxima()).
+        crearOrdenTabla({
+            tabla: 'tablaCobranzasMay',
+            porDefecto: { columna: 'Cobro', dir: 'asc' }
         });
 
         if (btnRefresh) {
@@ -74,6 +102,7 @@
         }
 
         conectarFiltroEmision();
+        conectarSeleccion();
 
         cargarDatos();
     }
@@ -186,6 +215,9 @@
         
         // Recalcular totales visibles
         generarFilaTotales();
+
+        // La barra cuenta lo seleccionado QUE SE VE: el buscador cambia eso.
+        pintarSeleccion();
     }
     
     if (document.readyState === 'loading') {
@@ -233,6 +265,10 @@
                     datosCobranzas = result.data;
 
                     vistas.usar(datosCobranzas);
+
+                    // Antes de dibujar: lo que ya no está no puede seguir
+                    // seleccionado. Ver podarSeleccion().
+                    podarSeleccion();
 
                     generarTabla();
                     calcularResumenes();
@@ -289,6 +325,10 @@
 
         table.classList.toggle('modo-resumen', modoVista === 'resumen');
 
+        // La columna de selección se ve sólo donde se puede seleccionar. Está
+        // siempre en el DOM: ver la nota de .con-seleccion en el CSS.
+        table.classList.toggle('con-seleccion', editable());
+
         var cols = vistas.columnas();
         var headerHTML = '';
 
@@ -325,6 +365,8 @@
             // en la columna de hoy por ser el primer día del eje, no porque se
             // estime cobrarla hoy. Ver Ingresos::ubicarCobroVencido().
             html += '<tr class="fila-proyeccion-may' + (item.VENCIDA ? ' fila-vencida' : '') + '">';
+
+            html += celdaSeleccion(item);
 
             // El badge PROY se fue con la columna Tipo: todas las filas de
             // esta pestaña son proyección, así que decía lo mismo en todas. El
@@ -388,6 +430,7 @@
         tableBody.innerHTML = html;
 
         conectarEdicionFecha();
+        pintarSeleccion();
     }
 
     /**
@@ -582,7 +625,9 @@
         .then(function(res) { return res.json(); })
         .then(function(result) {
             if (result.success) {
-                Notificacion.exito(mensajeOk);
+                // El masivo no trae un texto fijo: el del servidor dice qué
+                // fecha quedó y en cuántas facturas.
+                Notificacion.exito(mensajeOk || result.message);
             } else {
                 Notificacion.error(result.message);
             }
@@ -592,6 +637,323 @@
         .catch(function(err) {
             Notificacion.error('Error de conexión: ' + err.message);
         });
+    }
+
+    /* ================================================================
+       LA MISMA FECHA DE COBRO PARA VARIAS FACTURAS
+
+       El mismo gesto que Cobranzas FR y Proveedores Locales: se seleccionan
+       con los checks, se lee cuántas son y por cuánta plata, se elige la
+       fecha y recién ahí se guarda. Sólo en Detalle Facturas, con permiso:
+       es donde ya se edita de a una.
+
+       LA DIFERENCIA CON FR ESTÁ EN LO QUE SE DICE, no en la mecánica: acá no
+       hay escala de descuento, así que la fecha no cambia ningún importe,
+       sólo la columna donde cae. Y "volver a la fecha calculada" es volver
+       al plazo mayorista, no al PPP.
+
+       La selección es un mapa de claves y sobrevive a los redibujos -el
+       buscador, el filtro por emisión, la vista del eje-. Lo que cuenta y lo
+       que se manda es lo seleccionado QUE SE VE. Ver Ingresos-Cobranzas_fr.js.
+       ================================================================ */
+
+    /** La clave de una factura: la misma unicidad que la tabla de fechas manuales */
+    function claveFila(item) {
+        return (item.T_COMP || '') + '|' + (item.N_COMP || '');
+    }
+
+    /**
+     * Saca de la selección lo que ya no está, SÓLO con una carga de Detalle
+     * Facturas sin filtro de emisión: es la única que trae todo lo
+     * seleccionable. Con el filtro puesto, lo que queda afuera no viene en la
+     * respuesta, y podar contra eso borraría la selección cada vez que se
+     * filtra. Ver la nota equivalente en Ingresos-Cobranzas_fr.js.
+     */
+    function podarSeleccion() {
+        var r = (datosCobranzas && datosCobranzas.filtro_emision) || {};
+
+        if (!vistaEditable() || r.desde || r.hasta) {
+            return;
+        }
+
+        var vivas = {};
+
+        (datosCobranzas.filas || []).forEach(function(item) { vivas[claveFila(item)] = true; });
+
+        Object.keys(seleccion).forEach(function(k) {
+            if (!vivas[k]) { delete seleccion[k]; }
+        });
+    }
+
+    /** Las seleccionadas que hoy se ven: es lo que cuenta la barra y lo que se manda */
+    function filasSeleccionadas() {
+        if (!editable() || !datosCobranzas) {
+            return [];
+        }
+
+        return filasFiltradas().filter(function(item) { return !!seleccion[claveFila(item)]; });
+    }
+
+    /**
+     * La celda del check. SE DIBUJA SIEMPRE, vacía donde no se selecciona,
+     * para que los índices no se muevan entre Resumen y Detalle Facturas.
+     * (Mayoristas no tiene clientes excluidos; la guarda es la misma de FR
+     * para que las dos pestañas digan lo mismo si algún día los tiene.)
+     */
+    function celdaSeleccion(item) {
+        var chk = '';
+
+        if (editable() && !item.EXCLUIDO) {
+            var clave = claveFila(item);
+
+            chk = '<input type="checkbox" class="form-check-input cob-sel"'
+                + (seleccion[clave] ? ' checked' : '')
+                + ' data-clave="' + escaparAttr(clave) + '"'
+                + ' title="Seleccionar esta factura para ponerle fecha de cobro o volverla a la calculada.">';
+        }
+
+        return '<td class="text-center col-seleccion" data-exportar-omitir>' + chk + '</td>';
+    }
+
+    /** Engancha los controles de la selección UNA VEZ; los checks, delegados */
+    function conectarSeleccion() {
+        var cuerpo = document.getElementById('tableBodyCobMay');
+
+        if (cuerpo) {
+            cuerpo.addEventListener('change', function(ev) {
+                var chk = ev.target;
+
+                if (!chk.classList || !chk.classList.contains('cob-sel')) {
+                    return;
+                }
+
+                var k = chk.getAttribute('data-clave');
+
+                if (chk.checked) {
+                    seleccion[k] = true;
+                } else {
+                    delete seleccion[k];
+                }
+
+                pintarSeleccion();
+            });
+        }
+
+        var todas = document.getElementById('selTodasCobMay');
+
+        if (todas) {
+            todas.addEventListener('change', function() {
+                filasFiltradas().forEach(function(item) {
+                    if (todas.checked) {
+                        seleccion[claveFila(item)] = true;
+                    } else {
+                        delete seleccion[claveFila(item)];
+                    }
+                });
+
+                marcarChecks();
+                pintarSeleccion();
+            });
+        }
+
+        conectarBoton('btnFecharSelCobMay', fecharSeleccion);
+        conectarBoton('btnVolverSelCobMay', volverSeleccion);
+        conectarBoton('btnLimpiarSelCobMay', function() {
+            seleccion = {};
+            marcarChecks();
+            pintarSeleccion();
+        });
+    }
+
+    function conectarBoton(id, fn) {
+        var el = document.getElementById(id);
+
+        if (el) {
+            el.addEventListener('click', fn);
+        }
+    }
+
+    /** Los checks de las filas reflejan el mapa, sin redibujar la tabla */
+    function marcarChecks() {
+        document.querySelectorAll('#tableBodyCobMay .cob-sel').forEach(function(chk) {
+            chk.checked = !!seleccion[chk.getAttribute('data-clave')];
+        });
+    }
+
+    /** La barra: cuántas, por cuánto, de cuántos clientes y cuántas con fecha manual */
+    function pintarSeleccion() {
+        var barra = document.getElementById('barraSelCobMay');
+        var sel = filasSeleccionadas();
+
+        sincronizarSelTodas();
+
+        if (!barra) {
+            return;
+        }
+
+        barra.style.display = sel.length ? '' : 'none';
+
+        if (!sel.length) {
+            return;
+        }
+
+        var r = resumirSeleccion(sel);
+
+        texto('selResumenCobMay', sel.length + ' factura(s) seleccionada(s) · ' + importeTexto(r.neto)
+            + ' pendiente · ' + r.clientes + ' cliente(s)'
+            + (r.conManual ? ' · ' + r.conManual + ' con fecha cargada a mano' : ''));
+
+        // Un botón que se puede apretar y no cambia nada es peor que uno apagado.
+        var volver = document.getElementById('btnVolverSelCobMay');
+
+        if (volver) {
+            volver.disabled = (r.conManual === 0);
+        }
+    }
+
+    /** El check del encabezado: todo lo visible, nada, o una parte */
+    function sincronizarSelTodas() {
+        var chk = document.getElementById('selTodasCobMay');
+
+        if (!chk || !datosCobranzas || !editable()) {
+            return;
+        }
+
+        var visibles = filasFiltradas();
+        var elegidas = visibles.filter(function(item) { return !!seleccion[claveFila(item)]; }).length;
+
+        chk.checked = (visibles.length > 0 && elegidas === visibles.length);
+        chk.indeterminate = (elegidas > 0 && elegidas < visibles.length);
+    }
+
+    function resumirSeleccion(sel) {
+        var clientes = {};
+        var neto = 0;
+        var conManual = 0;
+
+        sel.forEach(function(item) {
+            neto += Number(item.importe_neto) || 0;
+            clientes[item.COD_CLI] = item.RAZON_SOC || '';
+
+            if (item.FECHA_MANUAL) { conManual++; }
+        });
+
+        return {
+            neto: neto,
+            clientes: Object.keys(clientes).length,
+            conManual: conManual,
+            unCliente: Object.keys(clientes).length === 1
+                ? sel[0].COD_CLI + ' — ' + (sel[0].RAZON_SOC || '') : null
+        };
+    }
+
+    /**
+     * Pone la misma fecha a todas las seleccionadas. No se filtra lo que "ya
+     * está así"; se dice antes cuántas ya tenían una fecha manual, porque este
+     * gesto las pisa. Acá NO cambia ningún importe: no hay escala de descuento.
+     */
+    function fecharSeleccion() {
+        var sel = filasSeleccionadas();
+
+        if (!sel.length) {
+            return;
+        }
+
+        var r = resumirSeleccion(sel);
+
+        var mensaje = sel.length + ' factura(s) por ' + importeTexto(r.neto) + ' pendiente'
+            + (r.unCliente ? ', todas de ' + r.unCliente : ', de ' + r.clientes + ' clientes') + '.';
+
+        var detalle = 'Sus importes pasan a la columna de esa fecha. Mayoristas no tiene escala de '
+            + 'descuento, así que ningún importe cambia.';
+
+        if (r.conManual) {
+            detalle += ' ' + r.conManual + ' ya ten' + (r.conManual === 1 ? 'ía' : 'ían')
+                + ' una fecha cargada a mano y se pisa' + (r.conManual === 1 ? '' : 'n') + '.';
+        }
+
+        Notificacion.pedirFecha({
+            titulo: 'Fecha de cobro para varias facturas',
+            mensaje: mensaje,
+            detalle: detalle,
+            etiqueta: 'Fecha de cobro (la misma para todas)',
+            // Sin fechas pasadas, igual que la celda. El servidor lo valida de nuevo.
+            min: hoyISO(),
+            antesDelMin: 'No se aceptan fechas pasadas: la factura desaparecería del listado '
+                + 'de pendientes.',
+            valor: valorComun(sel),
+            invalido: 'Elegí la fecha en la que se acordó el cobro.',
+            confirmar: 'Fechar ' + sel.length + ' factura(s)'
+        }).then(function(fecha) {
+            if (fecha !== null) { guardarFechaMasiva(sel, fecha); }
+        });
+    }
+
+    /**
+     * La fecha común de las seleccionadas, si todas la comparten y no pasó.
+     * De una vencida cuenta la ORIGINAL, no el día de hoy donde se dibuja.
+     * Ver la nota equivalente en Ingresos-Cobranzas_fr.js.
+     */
+    function valorComun(filas) {
+        var unico = null;
+
+        for (var i = 0; i < filas.length; i++) {
+            var f = filas[i].VENCIDA ? (filas[i].COBRO_ORIGINAL || '') : (filas[i].Cobro || '');
+
+            if (f === '' || (unico !== null && unico !== f)) {
+                return '';
+            }
+
+            unico = f;
+        }
+
+        return (unico && unico >= hoyISO()) ? unico : '';
+    }
+
+    function guardarFechaMasiva(filas, fecha) {
+        // La selección no se limpia: las fechadas siguen en la tabla, y dejarlas
+        // seleccionadas permite corregir la fecha ahí mismo.
+        pedirFecha('saveFechaCobroManualMasiva', {
+            fecha_cobro: fecha,
+            comprobantes: filas.map(function(item) {
+                return { cod_cliente: item.COD_CLI, t_comp: item.T_COMP, n_comp: item.N_COMP };
+            })
+        }, null);
+    }
+
+    /** Vuelve al plazo mayorista las seleccionadas que tienen fecha manual, y sólo esas */
+    function volverSeleccion() {
+        var aplicar = filasSeleccionadas().filter(function(item) { return !!item.FECHA_MANUAL; });
+
+        if (!aplicar.length) {
+            return;
+        }
+
+        var total = filasSeleccionadas().length;
+        var plazo = (aplicar[0].PLAZO || 60);
+
+        Notificacion.confirmar({
+            titulo: 'Volver a la fecha calculada',
+            mensaje: aplicar.length + ' de las ' + total + ' factura(s) seleccionadas tienen la '
+                + 'fecha de cobro cargada a mano.',
+            detalle: 'Vuelven a la fecha de emisión + ' + plazo + ' días, el plazo mayorista. '
+                + 'Las demás no cambian.',
+            confirmar: 'Volver ' + aplicar.length + ' factura(s)'
+        }).then(function(ok) {
+            if (!ok) { return; }
+
+            pedirFecha('deleteFechaCobroManualMasiva', {
+                comprobantes: aplicar.map(function(item) {
+                    return { t_comp: item.T_COMP, n_comp: item.N_COMP };
+                })
+            }, null);
+        });
+    }
+
+    /** '$ 1.234,56' en texto plano: la barra y los diálogos no llevan HTML */
+    function importeTexto(n) {
+        return '$ ' + (Number(n) || 0).toLocaleString('es-AR',
+            { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
     function hoyISO() {
@@ -633,9 +995,12 @@
         var descriptivas = ColumnasFijas.descriptivas(
             document.getElementById('tablaCobranzasMay'));
 
-        var html = '<td class="total-label">TOTALES</td>';
+        // La primera es la de selección, vacía y escondida donde no se
+        // selecciona: el rótulo va en COD_CLI. Ver Js/Ingresos-Cobranzas_fr.js.
+        var html = '<td class="col-seleccion" data-exportar-omitir></td>'
+            + '<td class="total-label">TOTALES</td>';
 
-        for (var i = 1; i < descriptivas.length; i++) {
+        for (var i = 2; i < descriptivas.length; i++) {
             html += '<td></td>';
         }
 

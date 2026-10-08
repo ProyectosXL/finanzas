@@ -341,6 +341,64 @@ chequear('un cliente sin items queda sin marca', false,
         'COD_CLI', ['VENCIDA'])['filas'][0]['VENCIDA']);
 
 // ============================================================================
+// El Resumen abre con los clientes por su cobro mas proximo
+//
+// En Resumen la fila es un cliente y su columna de cobro esta oculta, asi que
+// el navegador no ordena: el orden inicial lo trae el servidor. Es el mismo de
+// Detalle Facturas -cada cliente donde aparece su primera factura-, con el
+// codigo como desempate. Lo arma EjeVista::ordenarPorFechaMasProxima().
+// ============================================================================
+
+seccion('el Resumen abre con los clientes por su cobro mas proximo');
+
+$agrupado = ['filas' => [
+    ['COD_CLI' => 'FRAAA', 'importe_neto' => 10],
+    ['COD_CLI' => 'FRSIN', 'importe_neto' => 20],
+    ['COD_CLI' => 'FRCCC', 'importe_neto' => 30],
+    ['COD_CLI' => 'FRBBB', 'importe_neto' => 40],
+    ['COD_CLI' => 'FRPAC', 'importe_neto' => 50]
+]];
+
+$itemsCobro = [
+    // FRAAA: su cobro mas proximo es el 20, aunque tenga otro el 25.
+    ['COD_CLI' => 'FRAAA', 'Cobro' => '2026-10-25'],
+    ['COD_CLI' => 'FRAAA', 'Cobro' => '2026-10-20'],
+    // FRBBB y FRCCC empatan en el 12: desempata el codigo.
+    ['COD_CLI' => 'FRCCC', 'Cobro' => '2026-10-12'],
+    ['COD_CLI' => 'FRBBB', 'Cobro' => '2026-10-30'],
+    ['COD_CLI' => 'FRBBB', 'Cobro' => '2026-10-12'],
+    // FRPAC: una fecha pactada a mano que ya paso conserva la suya y va
+    // primera, igual que en Detalle Facturas.
+    ['COD_CLI' => 'FRPAC', 'Cobro' => '2026-09-30'],
+    // FRSIN: sin ninguna fecha, al final.
+    ['COD_CLI' => 'FRSIN', 'Cobro' => null]
+];
+
+$ordenado = EjeVista::ordenarPorFechaMasProxima($agrupado, $itemsCobro, 'COD_CLI', 'Cobro');
+
+chequear('los clientes quedan por su fecha mas proxima, ascendente, con el codigo de desempate',
+    ['FRPAC', 'FRBBB', 'FRCCC', 'FRAAA', 'FRSIN'], array_column($ordenado['filas'], 'COD_CLI'));
+chequear('las filas viajan enteras: no se pierde ningun importe',
+    [50, 40, 30, 10, 20], array_column($ordenado['filas'], 'importe_neto'));
+
+// Un DateTime de sqlsrv entra igual que un string.
+chequear('acepta las fechas como DateTime', ['FRB', 'FRA'], array_column(
+    EjeVista::ordenarPorFechaMasProxima(['filas' => [['COD_CLI' => 'FRA'], ['COD_CLI' => 'FRB']]],
+        [['COD_CLI' => 'FRA', 'Cobro' => new DateTime('2026-11-02')],
+         ['COD_CLI' => 'FRB', 'Cobro' => '2026-11-01']], 'COD_CLI', 'Cobro')['filas'], 'COD_CLI'));
+
+chequear('sin filas no rompe', [],
+    EjeVista::ordenarPorFechaMasProxima(['filas' => []], [], 'COD_CLI', 'Cobro')['filas']);
+
+// Cableado: se aplica en el Resumen -FR, sus excluidas y May pasan por la
+// misma funcion- y no en Detalle Facturas, que lo ordena el navegador.
+$ctrlIngresos = file_get_contents(__DIR__ . '/../Controller/IngresosController.php');
+
+chequear('payloadCobranzas ordena el Resumen por el cobro mas proximo', 1, preg_match(
+    '/\} else \{.*?EjeVista::armarAgrupado\(.*?EjeVista::ordenarPorFechaMasProxima\(\$payload, \$items, \'COD_CLI\', \'Cobro\'\);\s*\}/s',
+    $ctrlIngresos));
+
+// ============================================================================
 // El filtro por fecha de emisión
 //
 // Es server-side a proposito: si se filtrara escondiendo filas en el DOM, las

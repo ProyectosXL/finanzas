@@ -136,7 +136,12 @@ class AuthCashflow {
         ],
         'Ingresos' => [
             'saveFechaCobroManual' => [['cobranzas_fr', null], ['cobranzas_may', null]],
-            'deleteFechaCobroManual' => [['cobranzas_fr', null], ['cobranzas_may', null]]
+            'deleteFechaCobroManual' => [['cobranzas_fr', null], ['cobranzas_may', null]],
+            // El gesto masivo escribe la misma fila que la edicion de a una, asi
+            // que pide el mismo permiso: poder fechar una y no muchas no
+            // protegeria nada.
+            'saveFechaCobroManualMasiva' => [['cobranzas_fr', null], ['cobranzas_may', null]],
+            'deleteFechaCobroManualMasiva' => [['cobranzas_fr', null], ['cobranzas_may', null]]
         ],
         'Logistica' => [
             'saveFletero' => [['logistica_local', null], ['parametros', 'LOGISTICA']],

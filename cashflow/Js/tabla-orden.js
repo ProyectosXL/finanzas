@@ -76,6 +76,22 @@
  *     del tablero, que se reordena con botones, y las tablas con una columna de
  *     acumulado, que sólo se lee en orden cronológico.
  *
+ *   - Para que UNA COLUMNA no se ordene, con `data-orden="no"` en su `<th>`. Es
+ *     el mismo atributo, un nivel más abajo, y el caso es la columna de
+ *     selección —el check de "todas" en el encabezado—: no tiene un valor por
+ *     el cual ordenar, y como columna ordenable aparecía con la flecha y como
+ *     "Columna 1" en la preferencia guardada.
+ *
+ * UN CLIC EN UN CONTROL DEL ENCABEZADO NO ORDENA
+ * ----------------------------------------------
+ * El clic en el check de "todas" sube hasta su `<th>`, y antes eso contaba
+ * como un clic para ordenar: tildar "todas" ordenaba la tabla por la columna
+ * de selección y, peor, lo GUARDABA, pisándole al usuario el orden que había
+ * elegido a mano. Pasaba en Proveedores Locales, Tarjetas Corporativas,
+ * Echeqs y Pre-chequeado sin que nadie lo notara, porque el orden por una
+ * columna de checks deja las filas casi como estaban. Un clic sobre un campo,
+ * un botón o un label del encabezado es de ese control, no del orden.
+ *
  * LAS FILAS QUE VIAJAN PEGADAS
  * ----------------------------
  * Hay tablas donde una fila no es un dato suelto sino el detalle de la de
@@ -410,6 +426,12 @@ var OrdenTabla = (function() {
                 return false;
             }
 
+            // La columna que declara no ordenarse: la de selección. Ver el
+            // encabezado del archivo.
+            if (c.th.getAttribute('data-orden') === 'no') {
+                return false;
+            }
+
             if (unaFila) {
                 return true;
             }
@@ -700,6 +722,14 @@ var OrdenTabla = (function() {
                 var th = ev.target.closest ? ev.target.closest('th') : null;
 
                 if (!th || !t.tHead.contains(th)) {
+                    return;
+                }
+
+                // El clic en el check de "todas" es de ese check, no del
+                // orden: si siguiera de largo ordenaría la tabla y GUARDARÍA
+                // ese orden, pisando el que el usuario eligió. Ver el
+                // encabezado del archivo.
+                if (ev.target.closest('input, select, textarea, button, label, a')) {
                     return;
                 }
 

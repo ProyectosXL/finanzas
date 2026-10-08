@@ -577,6 +577,54 @@ Y hay tablas donde **el orden de las filas ES el dato**, y ésas declaran `data-
 | `tablaAcumulada`, `tablaBalance` | Llevan una columna de **acumulado**, que sólo se lee en orden cronológico |
 | `tablaMix`, `tablaEscalaCob` | Son formularios que se guardan y validan enteros, no listados |
 
+### Una columna que no se ordena, y un clic que no es para ordenar
+
+**`data-orden="no"` también va en un `<th>`**, y entonces esa columna no es ordenable. Es
+el mismo atributo un nivel más abajo, y el caso es la **columna de selección**: no tiene un
+valor por el cual ordenar, y como columna ordenable aparecía con la flecha y como
+*"Columna 1"* en la preferencia guardada. Lo llevan todas: Proveedores Locales, Tarjetas
+Corporativas, Echeqs, Pre-chequeado, Cobranzas FR y Cobranzas May.
+
+**Un clic sobre un campo del encabezado no ordena.** El clic en el check de *"todas"*
+subía hasta su `<th>` y contaba como un clic para ordenar: ordenaba la tabla por la
+columna de checks y **lo guardaba**, pisándole al usuario el orden que había elegido a
+mano. Pasaba en las cuatro primeras pestañas de arriba sin que nadie lo notara, porque
+ordenar por una columna de checks deja las filas casi como estaban. Ahora un clic sobre un
+`input`, `select`, `button`, `label` o `a` del encabezado es de ese control.
+
+`tests/test_tablas_controles.php` recorre todas las pestañas: todo `<th>` con un checkbox
+tiene que declarar `data-orden="no"`.
+
+### Las que abren ordenadas
+
+`porDefecto` en `crearOrdenTabla()` es el orden con el que abre la tabla **cuando el
+usuario no eligió nada**. No se escribe en `localStorage` —sería indistinguible de una
+elección— y lo pisa cualquier clic en un encabezado.
+
+| Pestaña | Tabla | Columna | Dirección |
+| --- | --- | --- | --- |
+| Cobranzas FR | `tablaCobranzasFR` | `cobro` | ascendente |
+| Cobranzas May | `tablaCobranzasMay` | `Cobro` | ascendente |
+| Exportaciones Tasky | `tablaExportacionesTasky` | `Fecha cobro estimada` | ascendente |
+| Echeqs › Cartera | `tablaEcheqs` | `Fecha de pago` | ascendente |
+| Proveedores Locales | `tablaProveedores` | `Fecha de pago` | ascendente |
+| Tarjetas Corporativas | `tablaCorp` | `VTO TANGO` | ascendente |
+
+- **El nombre es el `data-orden-nombre` del `<th>`, y salvo en FR es igual al rótulo.**
+  La preferencia guardada se identifica por ese nombre: uno nuevo le haría perder a quien
+  ya ordenó a mano por esa columna el orden que eligió. Igual al rótulo, no cambia nada
+  hoy y queda anclado ante un cambio de rótulo mañana. FR usa `cobro` porque su columna
+  cambia de rótulo según la solapa (ver `README-cobranzas-fr.md`).
+- **Declarar `crearOrdenTabla()` no cambia la clave:** sin `clave`, vale el id de la
+  tabla, que es la misma del descubrimiento automático.
+- **Lo que no tiene fecha va al final**, en las dos direcciones: un cheque sin fecha de
+  pago, una exportación sin fecha de emisión. Donde el texto de la celda no es una fecha
+  —el badge *"Vencida dd/mm/aaaa"*, el *"—"*— la celda lleva `data-orden` con la fecha
+  cruda. Una vencida se ordena por la fecha donde se dibuja, que es el primer día del eje.
+- **En el Resumen de Cobranzas FR y May no aplica**: la columna de cobro está oculta y no
+  se ordena por una columna que no se ve. Ese orden lo trae el servidor
+  (`EjeVista::ordenarPorFechaMasProxima()`, ver `README-cobranzas-fr.md`).
+
 ---
 
 ## Exportar a Excel: la misma función, una sola vez
@@ -1425,6 +1473,8 @@ Las notificaciones las resuelve `Js/notificaciones.js` (`Notificacion.exito / er
 **`Notificacion.confirmar()` devuelve una promesa**, así que reemplaza a `confirm()` pero no bloquea el hilo: lo que iba después del `if` va adentro del `then`. El foco arranca en *Cancelar* — son acciones que cuestan deshacer y un Enter reflejo tiene que no hacer nada.
 
 **Los tres diálogos comparten un solo armazón** (`abrirDialogo()`): `confirmar()` contesta sí o no, `pedirTexto()` devuelve el texto o `null`, y `pedirFecha()` devuelve `'aaaa-mm-dd'` o `null` —nunca un `Date`: el módulo mueve fechas como string para no pasar por `new Date(string)`—. Lo delicado no es el HTML: es que cerrar con la cruz, con Escape o clickeando afuera **también sea una respuesta, y sea la negativa**. Tres copias de eso se desincronizan en la primera corrección. Cuando el diálogo tiene un campo, el foco arranca ahí y un campo obligatorio vacío **no cierra**: dice por qué en el mismo lugar donde se completa, en vez de fallar después contra el servidor.
+
+**`pedirFecha({ min })` valida el mínimo al confirmar**, no sólo lo pone en el input: el atributo `min` limita el calendario pero deja tipear cualquier fecha, y una anterior se devolvía como buena. Ahora no cierra y lo dice (`antesDelMin` para un texto propio). Lo usan Cobranzas FR y May, que no aceptan fechas de cobro pasadas. El servidor valida igual: el diálogo explica y bloquea, no autoriza.
 
 ### Mientras algo carga: `Js/cargando.js`
 

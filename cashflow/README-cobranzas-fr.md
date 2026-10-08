@@ -337,7 +337,47 @@ La diferencia se calcula **con signo**: una fecha manual anterior a la emisión 
 
 En **Resumen** la fila es un cliente y no un comprobante, así que no hay nada que editar: se muestra un indicador cuando alguna de sus facturas tiene fecha cargada a mano, y el detalle está en Detalle Facturas.
 
-Los endpoints son `IngresosController?action=saveFechaCobroManual` y `deleteFechaCobroManual`.
+Los endpoints son `IngresosController?action=saveFechaCobroManual` y `deleteFechaCobroManual`; los del gesto masivo, `saveFechaCobroManualMasiva` y `deleteFechaCobroManualMasiva` (ver abajo).
+
+### De a una, o de a muchas
+
+> El gesto masivo es **nuevo** (`feature/cobranzas-fecha-masiva-orden`). La celda editable no cambió.
+
+El caso real casi nunca es una factura: es *"este cliente paga todo el 30"*, que son las ocho facturas que tiene abiertas. Es el gesto de Proveedores Locales (ver *La fecha se carga de a una, o de a muchas* en `README-proveedores-locales.md`): **se seleccionan, se lee cuántas son y por cuánta plata, se elige la fecha, y recién ahí se guarda.**
+
+**Dónde.** Sólo en *Pendientes Proyectados › Detalle Facturas* y con permiso de edición, que es donde ya se edita de a una. En *Real a Cobrar* la fecha sale de la propuesta aceptada; en *Resumen* la fila es un cliente.
+
+**La columna de selección va primera y está siempre en el DOM.** Se esconde con CSS donde no se puede seleccionar —Real a Cobrar, Resumen, sin permiso—: la tabla prende `.con-seleccion` sólo en la vista editable. Si se dibujara sólo ahí, los `nth-child` del modo Resumen y los índices de las columnas fijas cambiarían según la solapa. Es lo mismo que hace `tablaCorp` de Pagos con Tarjetas. No se ordena (`data-orden="no"`) ni se exporta (`data-exportar-omitir`), y sin permiso los checks no se dibujan. Los índices que movió están en *La columna TIPO se fue*, más abajo.
+
+**La barra** aparece cuando hay algo elegido y dice cuántas facturas, el **importe neto**, de cuántos clientes y cuántas tienen fecha manual. Dos acciones:
+
+| Botón | Qué hace |
+| --- | --- |
+| *Poner fecha de cobro* | La misma fecha para todas. El diálogo (`Notificacion.pedirFecha`, con `min` en hoy) dice cuántas, por cuánto y de cuántos clientes, **cuántas ya tenían una fecha manual** —se pisan— y que **la fecha cambia los días, el tramo de descuento y el neto**: el importe de la barra es el de hoy. Si todas comparten la misma fecha, arranca con ella |
+| *Volver a la fecha calculada* | Borra la fecha manual de las seleccionadas **que la tienen** —las otras no cuentan— y vuelven a emisión + PPP. Pide confirmación con el número. Sin ninguna con fecha manual, el botón se apaga |
+
+- **No se aceptan fechas pasadas, por el mismo motivo que de a una**, y el servidor lo valida de nuevo. El diálogo además no deja confirmar una fecha anterior tipeada a mano (ver `README-cashflow.md`, *Notificaciones*).
+- **Las excluidas no se seleccionan.** Con *Ver excluidos* prendido se ven, pero sin check: no están en la lista que suma, y su fecha es de sólo lectura.
+- **La selección sobrevive a los redibujos**: el buscador, el filtro por fecha de emisión y el cambio de vista del eje. Es un mapa de claves `T_COMP|N_COMP`, y **lo que se cuenta y se manda es lo seleccionado que se ve**, así que una factura escondida por el buscador o por el filtro no se fecha sin que nadie la vea.
+- **Se poda sólo con una carga de la vista editable sin filtro de emisión.** El filtro es del servidor: lo que deja afuera no viene en la respuesta, y podar contra eso borraría la selección cada vez que se filtra. Lo que sí sale es lo que dejó de existir —una factura cobrada, en una propuesta, o de un cliente excluido—.
+- **Al fechar, la selección no se limpia**, como en Proveedores: las facturas siguen a la vista, movidas de columna, y así se puede corregir ahí mismo. Al guardar se recarga la pestaña entera, igual que de a una.
+
+**Una sola transacción, escrita una sola vez.** O se fechan todas o ninguna. Los cuatro gestos —guardar y borrar, de a una y de a muchas— pasan por el mismo lote:
+
+```
+saveFechaManual ─────────┐                                  ┌─ escribirFechaManual   (UPDATE / INSERT)
+saveFechaManualMasiva ───┴─ guardarLoteFechas ─┐            │
+                                               ├─ enLoteFechas
+deleteFechaManual ───────┐                     │            │
+deleteFechaManualMasiva ─┴─ borrarLoteFechas ──┘            └─ borrarFechaManual     (DELETE)
+```
+
+- `normalizarClavesCobro()`, estática y pura, resuelve las claves **antes de abrir nada**: `T_COMP|N_COMP` sin repetidos —la clave de la tabla no incluye al cliente—, el cliente al lado y opcional como siempre fue de a una, y el lote vacío o un renglón sin comprobante se rechazan.
+- **La fecha se valida una vez, antes de abrir nada**, con el mismo `validarFechaCobroManual()`.
+- **La edición de a una es un lote de uno**: misma firma, mismos mensajes, mismo camino de escritura. Antes de este cambio no tenía transacción; no la necesitaba, y ahora la tiene sin costo.
+- *Volver a la fecha calculada* devuelve **cuántas se borraron de verdad** (`sqlsrv_rows_affected`), que es lo que dice el mensaje.
+- Los dos endpoints nuevos están en el mapa de `AuthCashflow` **con los mismos destinos que la edición de a una**: poder fechar una y no muchas no protegería nada.
+- **Es la misma tabla** y no hay script nuevo que correr.
 
 ### Y se ve en el tablero
 
@@ -477,6 +517,25 @@ ve, la misma guarda que ya protegía a las preferencias guardadas. Por eso hay
 **una sola clave de preferencia** para los dos modos y el control no necesita
 saber qué es un modo.
 
+### Y el Resumen abre con los clientes por su cobro más próximo
+
+Como el navegador no ordena el Resumen, abría en el orden del agrupado. Ahora
+**el orden lo trae el servidor**: los clientes por su fecha de cobro más
+próxima, ascendente, con `COD_CLI` de desempate. Si el usuario ordena por otra
+columna, manda su elección, como siempre.
+
+- Lo arma `EjeVista::ordenarPorFechaMasProxima()`, pura, sobre los items de a
+  uno —el agrupado descarta la fecha cuando difiere dentro del cliente—, y se
+  aplica en `payloadCobranzas()`: las dos solapas, sus excluidas y Cobranzas May.
+- **"Más próxima" es la mínima, tal como se dibuja.** Una vencida reubicada
+  cuenta como el primer día del eje, y una fecha pactada a mano que ya pasó
+  conserva la suya y va primera. Así **cada cliente queda donde aparece su
+  primera factura en Detalle Facturas**: verificado contra la base, el orden de
+  los dos coincide exactamente en Pendientes Proyectados (82 clientes), Real a
+  Cobrar (13) y Mayoristas (100).
+- Un cliente sin ninguna fecha va al final, que es donde `tabla-orden.js` pone
+  lo vacío.
+
 > Quien ya tuviera ordenada esta tabla por *Cobro* o por *F. Prob. Cobro*
 > pierde esa preferencia una vez: la columna pasó a llamarse `cobro` y el
 > nombre viejo se descarta. La tabla abre con el default y la primera elección
@@ -581,6 +640,19 @@ Sacar una columna del medio mueve más cosas de las que parece, y todas son índ
 | `.modo-resumen` — columnas de detalle | `nth-child(4..8)` | `nth-child(3..7)` |
 | `.modo-resumen` — columna `Cobro` | `nth-child(11)` | `nth-child(10)` |
 
+**Y con la columna de selección se movieron todos de nuevo**, ahora un lugar para adelante: entró **primera** (ver *De a una, o de a muchas*).
+
+| Qué | Sin Tipo | Con la selección |
+| --- | --- | --- |
+| `porDefecto` de `crearColumnasFijas()` | `[0, 1]` | `[1, 2]` — siguen siendo COD_CLI y RAZON_SOC; el check no queda fijo |
+| Clave de las columnas fijas | `cobranzas_fr.sin_tipo` | `cobranzas_fr.con_seleccion` — un `[0, 1]` guardado fijaría el check y COD_CLI. **Quien tenga columnas fijas elegidas vuelve una vez al default** |
+| `colspan` del `TOTALES` del `tfoot` en el HTML | `9` | `11` — lo reemplaza el JS al primer dibujo |
+| Pie que arma el JS | rótulo en la primera celda | **una celda vacía de selección** y el rótulo en COD_CLI |
+| `.modo-resumen` — columnas de detalle | `nth-child(3..7)` | `nth-child(4..8)` |
+| `.modo-resumen` — columna `Cobro` | `nth-child(10)` | `nth-child(11)` |
+
+Las reglas de `.modo-resumen` quedaron además **acotadas a su tabla** (`#tablaCobranzasFR.modo-resumen`): Cobranzas May usa la misma clase con otros índices. Y la prueba ya no repite los números: `tests/test_tablas_controles.php` **deriva los índices del marcado de la pestaña** y verifica que cada regla esconda la columna que dice, en encabezado, cuerpo y pie.
+
 Y una que no es un índice: **`TIPO_REGISTRO` salió del buscador**. `filtrarTabla()` esconde
 filas mirando el `textContent` de la fila, y desde que no hay columna Tipo el texto "REAL"
 o "PROYECCIÓN" no está en el DOM. Si siguiera en `filasFiltradas()`, buscar *real* dejaría
@@ -591,7 +663,7 @@ En Resumen se van `FECHA`, `T_COMP`, `N_COMP`, `Desc`, `Días` y `Cobro`: son di
 
 El pie de totales pasó a tener **una celda por columna descriptiva** en lugar de un `colspan` escrito en duro, que había que actualizar a mano cada vez que cambiaba la cantidad de columnas.
 
-**Arriba de cada fecha va su total**, en la fila donde estaba la leyenda *Días* / *Meses*, y arriba de *Total* el total general. Son la misma cuenta del pie —`totalesEje()`, sobre `filasFiltradas()`— con el mismo formato, así que siguen al buscador, a *Ver excluidos*, a la solapa, al modo y a la vista exactamente como el pie. Los pinta `Js/eje-totales.js` (ver `README-cashflow.md`). Las reglas de `.modo-resumen` no se tocaron: los totales van **después** de las diez descriptivas, así que `nth-child(3..7)` y `nth-child(10)` siguen apuntando a las mismas celdas.
+**Arriba de cada fecha va su total**, en la fila donde estaba la leyenda *Días* / *Meses*, y arriba de *Total* el total general. Son la misma cuenta del pie —`totalesEje()`, sobre `filasFiltradas()`— con el mismo formato, así que siguen al buscador, a *Ver excluidos*, a la solapa, al modo y a la vista exactamente como el pie. Los pinta `Js/eje-totales.js` (ver `README-cashflow.md`). Los totales no movieron las reglas de `.modo-resumen`: van **después** de las descriptivas, así que esos `nth-child` siguen apuntando a las mismas celdas (hoy `4..8` y `11`, desde que entró la columna de selección).
 
 ---
 
@@ -633,7 +705,20 @@ Las tres series salen de `getCobranzasFRTotales()`, con **el mismo universo y la
 - Volver a incluir deja historial (sin `DELETE`, índice único filtrado), y sin la tabla nadie está excluido y excluir falla con el script que falta.
 - El permiso en el mapa de `AuthCashflow`, y que el PPP del grupo no cambie al excluir.
 
+`tests/test_cobranzas_fecha_masiva.php` (también cubre Cobranzas May):
+- Las claves del lote: normalizadas, sin repetidos, el cliente opcional; lote vacío y renglón sin comprobante rechazados.
+- El servidor rechaza la fecha pasada, la que no existe y el lote vacío **antes de conectarse**; la fecha y las claves se validan antes de abrir el lote.
+- Que haya **una sola transacción** en `Ingresos`, que la usen los cuatro gestos, y que la tabla se escriba en dos métodos y nada más.
+- **Todo o nada, con una falla simulada en el segundo comprobante**: la subclase de prueba reemplaza la conexión y las dos escrituras y escribe **sólo en una `#temporal` de la sesión**. La prueba verifica que no nombre ninguna tabla real ni llame a las escrituras originales, porque la base es la de producción. Se comprobó que falla si se saca el rollback.
+- Que *volver a la calculada* cuente sólo las que tenían fecha, y que la edición de a una siga igual: firma, mensajes, endpoints.
+- Los endpoints masivos en el mapa de `AuthCashflow`, con los destinos de la edición de a una.
+- El diálogo no deja confirmar una fecha anterior al mínimo.
+- El cableado de punta a punta en las dos pestañas: la barra y sus botones dentro del permiso y enganchados, la columna primera con `data-orden="no"` y `data-exportar-omitir`, el CSS que la esconde fuera de la vista editable, la poda sin filtro, la clave nueva de columnas fijas.
+
+`tests/test_cobranzas_proyeccion.php`, además: el orden del Resumen por la fecha más próxima, con desempate, sin fecha al final, y que `payloadCobranzas()` lo aplique.
+
 `tests/test_tablas_controles.php`:
+- Que `.modo-resumen` esconda exactamente las columnas de detalle y `Cobro`, en FR y en May, con los índices derivados del marcado; y que ninguna regla quede sin acotar a su tabla.
 - La tarjeta de franquicias: el botón de expandir todo cableado de los dos lados, los clientes ocultos con `display: none`, sin `localStorage`, y `data-orden-sigue` en las filas de cliente.
 
 `tests/test_cobranzas_fr_split.php`:

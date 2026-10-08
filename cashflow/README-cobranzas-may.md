@@ -176,6 +176,28 @@ Los **días sí** pasan a ser los reales (no el parámetro): mostrar `60` al lad
 
 Los endpoints son los mismos de Cobranzas FR: `IngresosController.php?action=saveFechaCobroManual` y `deleteFechaCobroManual`.
 
+### De a una, o de a muchas
+
+> **Nuevo** en `feature/cobranzas-fecha-masiva-orden`. La celda editable no cambió.
+
+El mismo gesto que Cobranzas FR y Proveedores Locales, en *Detalle Facturas* y con permiso: se seleccionan facturas con los checks, la barra dice cuántas, el **pendiente**, de cuántos clientes y cuántas tienen fecha manual, y hay dos botones:
+
+- ***Poner fecha de cobro***: la misma fecha para todas, con `min` en hoy —no se aceptan fechas pasadas, y el servidor lo valida de nuevo—. El diálogo dice cuántas ya tenían una fecha manual, que se pisan.
+- ***Volver a la fecha calculada***: borra la fecha manual de las seleccionadas que la tienen, y vuelven a **emisión + el plazo mayorista**. Las que no la tienen no cuentan.
+
+Los endpoints, la transacción y la mecánica son los de Cobranzas FR: `saveFechaCobroManualMasiva` y `deleteFechaCobroManualMasiva`, todas o ninguna, la edición de a una como un lote de uno. Está explicado en *De a una, o de a muchas* de `README-cobranzas-fr.md`. **Lo único que cambia es lo que se dice:** acá la fecha **no cambia ningún importe**, sólo la columna donde cae, porque no hay escala de descuento.
+
+La columna de selección entró **primera**, siempre en el DOM y escondida en Resumen y sin permiso, así que se movieron los índices:
+
+| Qué | Antes | Ahora |
+| --- | --- | --- |
+| `porDefecto` de `crearColumnasFijas()` | `[0, 1]` | `[1, 2]` — siguen siendo COD_CLI y RAZON_SOC |
+| Clave de las columnas fijas | `cobranzas_may.con_importe_factura` | `cobranzas_may.con_seleccion` — **quien tenga columnas fijas elegidas vuelve una vez al default** |
+| `.modo-resumen` — columnas de detalle | `nth-child(3..7)` | `nth-child(4..8)` |
+| `.modo-resumen` — columna `Cobro` | `nth-child(10)` ⚠️ | `nth-child(12)` |
+
+> ⚠️ **El `10` estaba mal desde que entró *Importe Factura*.** En Mayoristas, *Cobro* va después de *Importe Factura*, *SALDO PENDIENTE* e *Importe Neto*, así que la regla apuntaba a **Importe Neto**: en Resumen se escondía el importe que se cobra y se veía una columna *Cobro* vacía. Se corrigió en un `fix` aparte, antes de la columna de selección. Las reglas quedaron además acotadas a su tabla (`#tablaCobranzasMay.modo-resumen`), y la prueba deriva los índices del marcado en vez de repetirlos.
+
 ---
 
 ## Parámetros de Configuración
@@ -207,7 +229,11 @@ La pestaña **Cobranzas May** cuenta con todos los componentes estándar del sis
    - **Acciones:** Botón de *Actualizar* y *Exportar a Excel*.
 3. **La columna *Importe Factura*** va antes de las dos del pendiente, **en gris y marcada como informativa** en su `title`. Está apagada a propósito: si se leyera como un importe más del cuadro, el lector sumaría tres columnas de plata que miden dos cosas distintas. En *Resumen* se suma por cliente, igual que las otras dos.
 
-> **La clave de columnas fijas cambió** a `cobranzas_may.con_importe_factura`. La selección se guarda por número de columna, así que agregar una columna en el medio corre todo lo que viene después: quien tuviera fijada *Importe Neto* se encontraría con *SALDO PENDIENTE* fijada y sin entender por qué. Cambiar la clave devuelve esa selección al default. Es lo mismo que se hizo cuando se fue la columna *Tipo*.
+4. **Abre ordenada por fecha de cobro ascendente**, como Cobranzas FR:
+   - En *Detalle Facturas*, por `porDefecto: { columna: 'Cobro', dir: 'asc' }` en `crearOrdenTabla()`. El `<th>` lleva `data-orden-nombre="Cobro"`, **igual a su rótulo**: la preferencia guardada se identifica por ese nombre, y uno nuevo le haría perder a quien ya ordenó a mano el orden que eligió. La clave sigue siendo el id de la tabla. Un orden elegido a mano sigue mandando, y el default nunca se escribe en `localStorage`.
+   - En *Resumen* la columna de cobro está oculta y el navegador no ordena: **el servidor devuelve los clientes por su cobro más próximo**, con `COD_CLI` de desempate (`EjeVista::ordenarPorFechaMasProxima()`, ver `README-cobranzas-fr.md`).
+
+> **La clave de columnas fijas cambió** a `cobranzas_may.con_importe_factura`, y después a `cobranzas_may.con_seleccion` con la columna de selección (ver *De a una, o de a muchas*). La selección se guarda por número de columna, así que agregar una columna en el medio corre todo lo que viene después: quien tuviera fijada *Importe Neto* se encontraría con *SALDO PENDIENTE* fijada y sin entender por qué. Cambiar la clave devuelve esa selección al default. Es lo mismo que se hizo cuando se fue la columna *Tipo*.
 
 ---
 
@@ -236,8 +262,9 @@ Suite de pruebas implementada en `tests/test_cobranzas_may.php`:
 - **El aviso de pendientes negativos**, sin base: que no aparece con cero facturas, que es **uno solo** con siete, el singular y el plural, que el importe se muestra en valor absoluto —la palabra *NEGATIVO* ya está en la frase— y que dice explícitamente que esa plata **no entra al cashflow**.
 - **Que lo que se cobra es el pendiente**, sobre las filas reales: que todos los comprobantes son `FAC`, que cada fila trae `IMPORTE_FACTURA`, que ninguna entra con pendiente cero o negativo, que **ningún pendiente supera a su importe facturado** —si lo hiciera, la tabla de signos de `IMPU` estaría al revés— y que la serie del tablero es **exactamente** el pendiente del listado y no el facturado.
 
+El gesto masivo se prueba en `tests/test_cobranzas_fecha_masiva.php`, junto con el de Cobranzas FR: el rechazo de la fecha pasada y del lote vacío en el servidor, la transacción única y todo-o-nada con una falla simulada —sobre una `#temporal`, sin tocar ninguna tabla real—, y el cableado de la barra en esta pestaña. Las reglas de `.modo-resumen` y el orden por defecto, en `tests/test_tablas_controles.php`.
+
 Ejecución de la suite completa:
 ```bash
 php cashflow/tests/run.php
 ```
-*Resultado: 2010 OK, 0 fallas (18 archivos).*

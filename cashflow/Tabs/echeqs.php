@@ -233,7 +233,11 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                 referencia: eran el mismo dato repetido.
                             -->
                             <tr>
-                                <th rowspan="2">Fecha de pago</th>
+                                <!-- data-orden-nombre igual al rótulo: ancla el
+                                     nombre del orden guardado sin cambiarlo. Es
+                                     el del porDefecto del JS. Ver
+                                     Js/tabla-orden.js. -->
+                                <th rowspan="2" data-orden-nombre="Fecha de pago">Fecha de pago</th>
                                 <th rowspan="2">N° Cheque</th>
                                 <th rowspan="2">Banco</th>
                                 <th rowspan="2" class="col-texto">Cliente</th>
@@ -252,7 +256,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                      Que un cheque ESTÉ excluido se ve en la
                                      fila —atenuada y con el importe tachado— y
                                      en la marca de esta misma celda. -->
-                                <th rowspan="2" class="text-center" style="width: 46px;">
+                                <th rowspan="2" class="text-center" style="width: 46px;" data-orden="no">
                                     <?php if ($edita): ?>
                                     <input type="checkbox" class="form-check-input"
                                            id="selTodosEch"
@@ -482,7 +486,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                 no está configurado—.
                             -->
                             <tr>
-                                <th rowspan="2" class="text-center" style="width: 60px;">
+                                <th rowspan="2" class="text-center" style="width: 60px;" data-orden="no">
                                     <!-- Marca o desmarca TODO LO VISIBLE según el
                                          filtro actual, y dice cuántas filas va a
                                          afectar antes de hacerlo. -->

@@ -153,7 +153,10 @@
                             <th rowspan="2" class="col-referencia" title="Importe en pesos al momento de facturar. Referencia histórica, no se usa para calcular">Importe pesos facturación</th>
                             <th rowspan="2" title="Dólar oficial BCRA de hoy: la misma cotización para todas las facturas">Cotiz. hoy</th>
                             <th rowspan="2" title="Importe USD × cotización de hoy. Es el que va a la grilla y al tablero">Importe pesos hoy</th>
-                            <th rowspan="2">Fecha cobro estimada</th>
+                            <!-- data-orden-nombre igual al rótulo: ancla el
+                                 nombre del orden guardado sin cambiarlo. Es el
+                                 del porDefecto del JS. Ver Js/tabla-orden.js. -->
+                            <th rowspan="2" data-orden-nombre="Fecha cobro estimada">Fecha cobro estimada</th>
                             <!-- Acá terminan las descriptivas. El resto de esta
                                  fila son los totales de cada columna del eje,
                                  arriba de su fecha: los pinta Js/eje-totales.js

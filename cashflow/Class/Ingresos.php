@@ -664,6 +664,11 @@ class Ingresos {
      * dia de hoy, pero lo que manda el navegador es un pedido, no una
      * autorizacion: el endpoint es alcanzable sin pasar por la pantalla.
      *
+     * ES UN LOTE DE UNO. Escribe por guardarLoteFechas(), lo mismo que el
+     * fechado masivo: la edicion de a una y la de muchas guardan la misma fila
+     * con el mismo significado, y dos caminos de escritura divergen en la
+     * primera correccion. Ver enLoteFechas().
+     *
      * @param string $codCliente
      * @param string $tComp
      * @param string $nComp
@@ -673,57 +678,58 @@ class Ingresos {
      */
     public function saveFechaManual($codCliente, $tComp, $nComp, $fecha, $usuario) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
-        $cod = strtoupper(trim($codCliente));
-        $t = strtoupper(trim($tComp));
-        $n = strtoupper(trim($nComp));
         $f = self::validarFechaCobroManual($fecha);
+        $claves = self::normalizarClavesCobro(
+            [['cod_cliente' => $codCliente, 't_comp' => $tComp, 'n_comp' => $nComp]],
+            'guardarle la fecha de cobro');
 
-        if ($t === '' || $n === '') {
-            throw new Exception('Falta el comprobante al que corresponde la fecha de cobro.');
-        }
-
-        $cid = $this->conn->conectar('central');
-
-        if (!$cid) {
-            throw new Exception('No se pudo conectar a la base de datos central');
-        }
-
-        // Un UPDATE que no toca ninguna fila y despues un INSERT: la unicidad
-        // esta en (T_COMP, N_COMP), asi que no puede quedar duplicado.
-        $sql = "UPDATE RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL
-                SET FECHA_COBRO = ?, COD_CLIENTE = ?, " . Auditoria::SET_MODIF . "
-                WHERE T_COMP = ? AND N_COMP = ?";
-
-        $stmt = sqlsrv_query($cid, $sql, [$f, $cod, $usuario, $t, $n]);
-
-        if ($stmt === false) {
-            throw new Exception($this->errorSqlIngresos('Error al guardar la fecha de cobro'));
-        }
-
-        $filas = sqlsrv_rows_affected($stmt);
-        sqlsrv_free_stmt($stmt);
-
-        if ($filas > 0) {
-            return $f;
-        }
-
-        $sql = "INSERT INTO RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL
-                    (COD_CLIENTE, T_COMP, N_COMP, FECHA_COBRO, USUARIO_ALTA, USUARIO_MODIF)
-                VALUES (?, ?, ?, ?, ?, ?)";
-
-        $stmt = sqlsrv_query($cid, $sql, [$cod, $t, $n, $f, $usuario, $usuario]);
-
-        if ($stmt === false) {
-            throw new Exception($this->errorSqlIngresos('Error al guardar la fecha de cobro'));
-        }
-
-        sqlsrv_free_stmt($stmt);
+        $this->guardarLoteFechas($claves, $f, $usuario);
 
         return $f;
     }
 
     /**
-     * Borra la fecha manual de un comprobante: vuelve a valer FECHA_EMIS + PPP.
+     * Pone la MISMA fecha de cobro manual a varios comprobantes, en una sola
+     * transaccion.
+     *
+     * Es el gesto de Proveedores Locales: el caso real no es una factura sino
+     * las de un cliente al que Tesoreria le acordo una fecha. Cuando las fechas
+     * son distintas son decisiones distintas, y esas se siguen cargando celda
+     * por celda.
+     *
+     * LA FECHA SE VALIDA UNA VEZ Y ANTES DE ABRIR NADA, igual que las claves:
+     * es la misma para todas, asi que una fecha pasada no puede descubrirse
+     * con diez facturas ya escritas. Y es el mismo validador que la edicion de
+     * a una -no se aceptan fechas pasadas-, por el mismo motivo: la factura
+     * desapareceria del listado y el usuario leeria su carga como un borrado.
+     *
+     * NO SE FILTRA LO QUE "YA ESTA ASI". Volver a escribir la misma fecha es
+     * alguien ratificando la decision, y queda con su fecha de modificacion.
+     * Lo que la pantalla dice antes de confirmar es cuantas ya tenian una fecha
+     * manual, porque esas son decisiones de otro que este gesto pisa.
+     *
+     * NO SE VALIDA CONTRA LOS PENDIENTES DE HOY: la fecha manual sobrevive a la
+     * factura (ver el encabezado de sql/cashflow_cobranzas_fecha_manual.sql),
+     * asi que la fila puede existir para un comprobante que hoy no se lista.
+     *
+     * @param array $comprobantes Filas con 'cod_cliente', 't_comp', 'n_comp'
+     * @param mixed $fecha 'Y-m-d'
+     * @param string $usuario
+     * @return array ['fecha' => 'Y-m-d', 'tocados' => int]
+     */
+    public function saveFechaManualMasiva($comprobantes, $fecha, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $claves = self::normalizarClavesCobro($comprobantes, 'ponerles la fecha de cobro');
+        $f = self::validarFechaCobroManual($fecha);
+
+        $this->guardarLoteFechas($claves, $f, $usuario);
+
+        return ['fecha' => $f, 'tocados' => count($claves)];
+    }
+
+    /**
+     * Borra la fecha manual de un comprobante: vuelve a valer FECHA_EMIS + PPP
+     * (o el plazo mayorista).
      *
      * Aca SI hay borrado fisico, a diferencia del resto del modulo, y es a
      * proposito: la fila no es un dato de negocio historico sino un override
@@ -734,29 +740,230 @@ class Ingresos {
      * deja rastro de quien lo hizo; esta anotado como pendiente en
      * README-cashflow.md ("Auditoria y permisos de escritura").
      *
+     * Es un lote de uno, por lo mismo que saveFechaManual().
+     *
      * @param string $tComp
      * @param string $nComp
      * @return bool
      */
     public function deleteFechaManual($tComp, $nComp) {
+        $claves = self::normalizarClavesCobro(
+            [['t_comp' => $tComp, 'n_comp' => $nComp]], 'borrarle la fecha de cobro');
+
+        $this->borrarLoteFechas($claves);
+
+        return true;
+    }
+
+    /**
+     * Vuelve varios comprobantes a la fecha calculada, en una sola transaccion.
+     *
+     * La pantalla manda solo los que tienen fecha manual, y dice cuantos son
+     * antes de confirmar. Un comprobante sin fila no es un error: el DELETE no
+     * lo toca y no cuenta, y lo que vuelve es cuantas fechas se borraron DE
+     * VERDAD, que es el numero que el mensaje tiene que decir.
+     *
+     * @param array $comprobantes Filas con 't_comp', 'n_comp'
+     * @return array ['borradas' => int]
+     */
+    public function deleteFechaManualMasiva($comprobantes) {
+        $claves = self::normalizarClavesCobro($comprobantes, 'volverlas a la fecha calculada');
+
+        return ['borradas' => $this->borrarLoteFechas($claves)];
+    }
+
+    /**
+     * Las claves de un lote de comprobantes, normalizadas y sin repetidos.
+     *
+     * SE RESUELVE ENTERO ANTES DE ABRIR NINGUNA TRANSACCION: un comprobante mal
+     * identificado en la fila once no puede descubrirse con diez ya escritas.
+     * Es el normalizarClaves() de Proveedores, con la clave de esta tabla.
+     *
+     * LA CLAVE ES (T_COMP, N_COMP), SIN EL CLIENTE, igual que la unicidad de
+     * la tabla: el cliente viaja al lado para guardarlo, pero la misma factura
+     * mandada dos veces con dos codigos es una sola, y gana la ultima.
+     *
+     * El cliente es opcional por el mismo motivo -no identifica nada- y porque
+     * la edicion de a una nunca lo exigio.
+     *
+     * Estatica y pura: lo que se considera una factura identificada tiene que
+     * ser lo mismo para guardar, borrar, de a una y de a muchas.
+     *
+     * @param array $comprobantes Filas con 't_comp', 'n_comp' y opcional 'cod_cliente'
+     * @param string $gesto Que se iba a hacer con ellas, para el mensaje
+     * @return array 'T_COMP|N_COMP' => ['cod' => string, 't' => string, 'n' => string]
+     * @throws Exception si falta un comprobante o la lista viene vacia
+     */
+    public static function normalizarClavesCobro($comprobantes, $gesto) {
+        $claves = [];
+
+        foreach (is_array($comprobantes) ? $comprobantes : [] as $c) {
+            $c = is_array($c) ? $c : [];
+            $t = strtoupper(trim((string) ($c['t_comp'] ?? '')));
+            $n = strtoupper(trim((string) ($c['n_comp'] ?? '')));
+
+            if ($t === '' || $n === '') {
+                throw new Exception('Falta el comprobante al que corresponde la fecha de cobro.');
+            }
+
+            $claves[$t . '|' . $n] = [
+                'cod' => strtoupper(trim((string) ($c['cod_cliente'] ?? ''))),
+                't' => $t,
+                'n' => $n
+            ];
+        }
+
+        if (empty($claves)) {
+            throw new Exception('No llegó ninguna factura para ' . $gesto . '.');
+        }
+
+        return $claves;
+    }
+
+    /** Escribe la misma fecha en todas las claves, todas o ninguna. */
+    private function guardarLoteFechas($claves, $fecha, $usuario) {
+        return $this->enLoteFechas($claves, function ($cid, $c) use ($fecha, $usuario) {
+            return $this->escribirFechaManual($cid, $c, $fecha, $usuario);
+        });
+    }
+
+    /** Borra la fecha manual de todas las claves, todas o ninguna. */
+    private function borrarLoteFechas($claves) {
+        return $this->enLoteFechas($claves, function ($cid, $c) {
+            return $this->borrarFechaManual($cid, $c);
+        });
+    }
+
+    /**
+     * Corre una escritura por comprobante adentro de UNA transaccion.
+     *
+     * O SE FECHAN TODAS O NINGUNA, por lo mismo que el fechado masivo de
+     * Proveedores: ocho llamadas dejan la puerta abierta a que la quinta falle
+     * y la pestania -y el tablero- queden a mitad de camino.
+     *
+     * LA TRANSACCION ESTA ESCRITA UNA SOLA VEZ, y la usan los cuatro gestos:
+     * guardar y borrar, de a una y de a muchas. Lo que cambia entre ellos es
+     * que se escribe por comprobante, y eso viaja en $escribir. Una segunda
+     * copia sin rollback no se ve hasta el dia que algo falla en el medio.
+     *
+     * @param array $claves Las de normalizarClavesCobro()
+     * @param callable $escribir function($cid, $clave): int filas tocadas
+     * @return int Total de filas tocadas
+     */
+    private function enLoteFechas($claves, $escribir) {
+        $cid = $this->conexionFechas();
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSqlIngresos('No se pudo abrir la transacción'));
+        }
+
+        try {
+            $total = 0;
+
+            foreach ($claves as $c) {
+                $total += $escribir($cid, $c);
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSqlIngresos('No se pudo confirmar el guardado'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return $total;
+    }
+
+    /**
+     * La conexion donde se escriben las fechas manuales.
+     *
+     * Protegida, junto con escribirFechaManual() y borrarFechaManual(), para
+     * poder probar que el lote es todo o nada: la prueba la reemplaza por una
+     * conexion con una tabla #temporal y hace fallar la escritura en el medio.
+     * Ver tests/test_cobranzas_proyeccion.php.
+     *
+     * @return resource
+     */
+    protected function conexionFechas() {
         $cid = $this->conn->conectar('central');
 
         if (!$cid) {
             throw new Exception('No se pudo conectar a la base de datos central');
         }
 
+        return $cid;
+    }
+
+    /**
+     * Escribe la fecha manual de UN comprobante. Un UPDATE que no toca ninguna
+     * fila y despues un INSERT: la unicidad esta en (T_COMP, N_COMP), asi que
+     * no puede quedar duplicado.
+     *
+     * Es el unico lugar del modulo que escribe en la tabla. Solo lo llama el
+     * lote: ver enLoteFechas().
+     *
+     * @param resource $cid
+     * @param array $c Una clave de normalizarClavesCobro()
+     * @param string $fecha 'Y-m-d', ya validada
+     * @param string $usuario
+     * @return int 1
+     */
+    protected function escribirFechaManual($cid, $c, $fecha, $usuario) {
+        $sql = "UPDATE RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL
+                SET FECHA_COBRO = ?, COD_CLIENTE = ?, " . Auditoria::SET_MODIF . "
+                WHERE T_COMP = ? AND N_COMP = ?";
+
+        $stmt = sqlsrv_query($cid, $sql, [$fecha, $c['cod'], $usuario, $c['t'], $c['n']]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSqlIngresos('Error al guardar la fecha de cobro'));
+        }
+
+        $filas = sqlsrv_rows_affected($stmt);
+        sqlsrv_free_stmt($stmt);
+
+        if ($filas > 0) {
+            return 1;
+        }
+
+        $sql = "INSERT INTO RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL
+                    (COD_CLIENTE, T_COMP, N_COMP, FECHA_COBRO, USUARIO_ALTA, USUARIO_MODIF)
+                VALUES (?, ?, ?, ?, ?, ?)";
+
+        $stmt = sqlsrv_query($cid, $sql, [$c['cod'], $c['t'], $c['n'], $fecha, $usuario, $usuario]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSqlIngresos('Error al guardar la fecha de cobro'));
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return 1;
+    }
+
+    /**
+     * Borra la fecha manual de UN comprobante, si la tiene.
+     *
+     * @param resource $cid
+     * @param array $c Una clave de normalizarClavesCobro()
+     * @return int Filas borradas: 0 si no tenia fecha manual
+     */
+    protected function borrarFechaManual($cid, $c) {
         $sql = "DELETE FROM RO_T_CASHFLOW_COBRANZAS_FR_FECHA_MANUAL
                 WHERE T_COMP = ? AND N_COMP = ?";
 
-        $stmt = sqlsrv_query($cid, $sql, [strtoupper(trim($tComp)), strtoupper(trim($nComp))]);
+        $stmt = sqlsrv_query($cid, $sql, [$c['t'], $c['n']]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSqlIngresos('Error al borrar la fecha de cobro'));
         }
 
+        $filas = sqlsrv_rows_affected($stmt);
         sqlsrv_free_stmt($stmt);
 
-        return true;
+        return max(0, (int) $filas);
     }
 
     /**

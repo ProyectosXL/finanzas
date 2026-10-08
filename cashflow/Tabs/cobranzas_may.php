@@ -1,4 +1,9 @@
-﻿<?php $tabName = 'Cobranzas May'; ?>
+﻿<?php
+$tabName = 'Cobranzas May';
+// Sin permiso de edición, los controles de la selección no se dibujan. El
+// endpoint lo vuelve a exigir: ver Class/AuthCashflow.php.
+$edita = AuthCashflow::puedeEditar('cobranzas_may');
+?>
 <link rel="stylesheet" href="Css/Ingresos-Cobranzas_may.css?v=<?php echo time(); ?>">
 
 <div class="tab-cobranzas_may"<?php echo AuthCashflow::atributoEdicion('cobranzas_may'); ?>>
@@ -133,6 +138,31 @@
             <small class="text-muted" id="filtroPeriodoCobMay"></small>
         </div>
 
+        <?php if ($edita): ?>
+        <!-- LA BARRA DE SELECCIÓN, la misma de Cobranzas FR: se eligen
+             facturas, se lee cuántas son y por cuánta plata, y recién ahí se
+             les pone una fecha o se las vuelve a la calculada. Sólo en Detalle
+             Facturas, donde ya se edita de a una: en Resumen la fila es un
+             cliente. Ver la nota equivalente en Tabs/cobranzas_fr.php. -->
+        <div id="barraSelCobMay" class="card-body py-2 border-bottom cob-barra-sel" style="display: none;">
+            <div class="d-flex align-items-center gap-3 flex-wrap">
+                <span class="fw-semibold" id="selResumenCobMay"></span>
+                <div class="d-flex gap-2 ms-auto flex-wrap">
+                    <button class="btn btn-sm btn-outline-primary" id="btnFecharSelCobMay">
+                        <i class="fas fa-calendar-day me-1"></i> Poner fecha de cobro
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" id="btnVolverSelCobMay"
+                            title="Borra la fecha cargada a mano de las seleccionadas que la tienen: vuelven a la fecha de emisión + el plazo mayorista.">
+                        <i class="fas fa-rotate-left me-1"></i> Volver a la fecha calculada
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" id="btnLimpiarSelCobMay">
+                        Limpiar selección
+                    </button>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+
         <div class="card-body p-0">
             <div class="cargando-slot" id="loadingSpinnerCobMay" data-cargando="Cargando matriz de cobranzas mayoristas…"></div>
             
@@ -147,6 +177,19 @@
                                  pestaña son proyección, así que el badge PROY decía
                                  lo mismo en todas. El plazo aplicado queda en el
                                  title de COD_CLI. -->
+                            <!-- LA COLUMNA DE SELECCIÓN, para la fecha de cobro
+                                 masiva. Siempre en el DOM y escondida donde no
+                                 se selecciona -Resumen, sin permiso-, para que
+                                 los índices del modo Resumen y de las columnas
+                                 fijas no cambien. Ver la nota equivalente en
+                                 Tabs/cobranzas_fr.php. -->
+                            <th rowspan="2" class="text-center col-seleccion" style="width: 46px;"
+                                data-orden="no" data-exportar-omitir>
+                                <?php if ($edita): ?>
+                                <input type="checkbox" class="form-check-input" id="selTodasCobMay"
+                                       title="Seleccionar todas las facturas que se están viendo. Con el buscador puesto, son las de ese cliente.">
+                                <?php endif; ?>
+                            </th>
                             <th rowspan="2">COD_CLI</th>
                             <th rowspan="2" class="col-texto">RAZON_SOC</th>
                             <th rowspan="2">FECHA</th>
@@ -174,7 +217,12 @@
                                 SALDO PENDIENTE
                             </th>
                             <th rowspan="2" id="thImporteNetoCobMay">Importe Neto</th>
-                            <th rowspan="2" id="thCobroCobMay">Cobro</th>
+                            <!-- data-orden-nombre IGUAL AL RÓTULO: ancla el
+                                 nombre con el que se guarda el orden elegido a
+                                 mano, sin cambiarlo -quien ya ordenó por "Cobro"
+                                 lo conserva-. Es el nombre del porDefecto del
+                                 JS. Ver Js/tabla-orden.js. -->
+                            <th rowspan="2" id="thCobroCobMay" data-orden-nombre="Cobro">Cobro</th>
                             <!-- Acá terminan las descriptivas. El resto de esta
                                  fila son los totales de cada columna del eje,
                                  arriba de su fecha: los pinta Js/eje-totales.js
@@ -190,7 +238,7 @@
                     </tbody>
                     <tfoot class="table-light">
                         <tr id="totalsRowCobMay">
-                            <td colspan="11" class="fw-bold text-end">TOTALES</td>
+                            <td colspan="12" class="fw-bold text-end">TOTALES</td>
                             <!-- Los totales se generan dinámicamente -->
                         </tr>
                     </tfoot>

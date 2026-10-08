@@ -71,6 +71,15 @@
             porDefecto: [1, 3]
         });
 
+        // La cartera abre por fecha de pago ascendente: lo que se acredita
+        // primero, arriba. Un cheque sin fecha va al final. El nombre es el
+        // data-orden-nombre del <th>, igual al rótulo a propósito: quien ya
+        // ordenó a mano conserva su orden. Ver Js/tabla-orden.js.
+        crearOrdenTabla({
+            tabla: 'tablaEcheqs',
+            porDefecto: { columna: 'Fecha de pago', dir: 'asc' }
+        });
+
         // En pre-chequeado la primera columna es el tilde, que es lo que hay
         // que tener siempre a mano, y la cuarta es el cliente.
         crearColumnasFijas({
@@ -276,7 +285,10 @@
             // cashflow, y eso tiene que verse sin leer la celda de la marca.
             html += '<tr' + (f.EXCLUIDO ? ' class="ech-excluido"' : '')
                  + ' data-id="' + f.ID_SBA14 + '">';
-            html += '<td class="center"><span class="badge-cobro">' + fecha(f.FECHA_PAGO) + '</span></td>';
+            // data-orden con la fecha cruda: sin fecha, fecha() dibuja "—", y
+            // vacío es lo que la manda al final del orden.
+            html += '<td class="center" data-orden="' + escapar(String(f.FECHA_PAGO || '').slice(0, 10)) + '">'
+                + '<span class="badge-cobro">' + fecha(f.FECHA_PAGO) + '</span></td>';
             html += '<td class="center">' + numeroCheque(f.N_CHEQUE) + '</td>';
             html += '<td>' + escapar(f.BANCO) + '</td>';
             html += '<td class="col-texto" title="' + escapar(f.CLIENTE) + '">'

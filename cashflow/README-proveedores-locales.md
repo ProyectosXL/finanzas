@@ -331,6 +331,10 @@ La columna de selección alimenta las dos acciones y **sólo una de las dos nece
 
 **La selección se poda contra lo que vino del servidor**, como ya hacía el módulo: las dos acciones mandan lo que la pantalla está mostrando, y un comprobante que se canceló en Tango ya no está en la lista.
 
+**Tildar "todas" ya no ordena la tabla.** El clic en el check del encabezado subía hasta su `<th>`, y `tabla-orden.js` lo tomaba como un clic para ordenar: ordenaba por la columna de checks y **guardaba** ese orden, pisando el que el usuario había elegido. La columna declara ahora `data-orden="no"` y el control ignora los clics sobre un campo del encabezado. Ver *Una columna que no se ordena* en `README-cashflow.md`.
+
+**Cobranzas FR y Cobranzas May copiaron este gesto** para la fecha de cobro, con una diferencia de fondo: allá **no se aceptan fechas pasadas**, porque la factura desaparecería del listado. Allá también se extrajo la transacción a un solo lote, como acá con `guardarLote()`.
+
 > **Una diferencia con la exclusión:** al fechar, la selección **no se limpia**. Es la misma pregunta de siempre —¿las filas siguen a la vista?—: una excluida se esconde por defecto, así que la barra quedaría hablando de facturas que ya no están; una fechada sigue en la tabla, movida de columna, y dejarla seleccionada es lo que permite corregir la fecha ahí mismo si el importe cayó donde no iba.
 
 ---
@@ -1124,6 +1128,8 @@ Los **avisos** sí siguen contando el universo —son la contrapartida de lo que
 Y se carga de dos formas, que escriben lo mismo: **celda por celda, o para varias de una** desde la barra de selección. Ver *La fecha se carga de a una, o de a muchas*.
 
 Guardar recarga la pestaña entera: la fecha cambia en qué columna del eje cae el importe, los totales del pie y los cuatro indicadores.
+
+**La tabla abre ordenada por *Fecha de pago* ascendente**: lo más urgente arriba. Es `porDefecto` en `crearOrdenTabla()`, y la celda ya llevaba `data-orden` con la fecha que muestra —la cargada, la del cronograma o el vencimiento—. El `<th>` lleva `data-orden-nombre` **igual a su rótulo**, para que quien ya ordenó a mano por esa columna no pierda su orden; la clave sigue siendo el id de la tabla. Un orden elegido a mano sigue mandando, y el default nunca se escribe en `localStorage`. Ver *Las que abren ordenadas* en `README-cashflow.md`.
 
 Componentes estándar: tarjetas KPI, buscador, selector de eje temporal (`Js/eje-vistas.js`), columnas fijas, Actualizar, Exportar a Excel y avisos por `Js/notificaciones.js`.
 

@@ -183,6 +183,46 @@ foreach ($sinOrden as $archivo => $tablas) {
     }
 }
 
+/* LA COLUMNA DE SELECCION NO SE ORDENA, Y TILDAR "TODAS" NO ORDENA LA TABLA.
+   El clic en el check del encabezado subia hasta su <th>, y tabla-orden.js lo
+   tomaba como un clic para ordenar: ordenaba por la columna de checks y lo
+   GUARDABA, pisando el orden que el usuario habia elegido a mano. Son dos
+   piezas: el control ignora los clics sobre un campo del encabezado, y la
+   columna declara que no es ordenable -si no, aparece con la flecha y como
+   "Columna 1" en la preferencia-. Se recorren todas las pestanas: la proxima
+   columna de seleccion que alguien agregue entra sola en el chequeo. */
+seccion('la columna de seleccion no se ordena, y tildar "todas" no ordena');
+
+$ordenJsSel = file_get_contents($JS . '/tabla-orden.js');
+
+chequear('tabla-orden.js descarta el <th> que declara data-orden="no"', true,
+    strpos($ordenJsSel, "c.th.getAttribute('data-orden') === 'no'") !== false);
+chequear('y un clic sobre un campo del encabezado no ordena', true,
+    strpos($ordenJsSel, "ev.target.closest('input, select, textarea, button, label, a')") !== false);
+
+$columnasSeleccion = 0;
+
+foreach ($archivosTab as $archivo) {
+    $html = preg_replace('/<!--.*?-->/s', '', contenidoTab($archivo));
+
+    preg_match_all('/<th\b([^>]*)>(.*?)<\/th>/s', $html, $m, PREG_SET_ORDER);
+
+    foreach ($m as $th) {
+        if (strpos($th[2], 'type="checkbox"') === false) {
+            continue;
+        }
+
+        $columnasSeleccion++;
+        preg_match('/id="([^"]+)"/', $th[2], $idChk);
+
+        chequear(basename($archivo) . ': el <th> de ' . ($idChk[1] ?? 'un check')
+            . ' declara data-orden="no"', true, strpos($th[1], 'data-orden="no"') !== false);
+    }
+}
+
+// Si el recorrido no encuentra ninguna, el chequeo de arriba no prueba nada.
+chequear('el recorrido encontro las columnas de seleccion', true, $columnasSeleccion >= 4);
+
 // Y el tablero declara sus filas ancla, que es lo que lo hace ordenable sin
 // romperse: los subtotales y las filas de arrastre significan lo que significan
 // por donde estan.
@@ -250,7 +290,160 @@ chequear('columnaActiva descarta las columnas ocultas', true,
 $frCss = file_get_contents(__DIR__ . '/../Css/Ingresos-Cobranzas_fr.css');
 
 chequear('y en Resumen la columna de cobro esta oculta', true,
-    strpos($frCss, '.modo-resumen thead tr:first-child th:nth-child(10)') !== false);
+    in_array('Cobro', columnasOcultasEnResumen($frTab, 'tablaCobranzasFR', $frCss)['thead'], true));
+
+// ============================================================================
+// EL MODO RESUMEN ESCONDE LAS COLUMNAS QUE DICE, EN LAS DOS PESTANAS
+//
+// Las reglas de .modo-resumen son nth-child escritos en duro, y un indice
+// escrito en duro se desactualiza en silencio cuando alguien agrega una columna
+// adelante. Ya paso dos veces: con la columna Tipo, y en Cobranzas May con
+// Importe Factura, que dejo la regla de Cobro apuntando a IMPORTE NETO -en
+// Resumen se escondia el neto y se veia una columna Cobro vacia-.
+//
+// Por eso la prueba no repite los indices: los DERIVA del marcado de la
+// pestana -que <th> hay en cada posicion- y verifica que cada regla esconda la
+// columna que corresponde, en el encabezado, el cuerpo y el pie.
+// ============================================================================
+
+/**
+ * Los rotulos de la primera fila del thead de una tabla, en orden de columna.
+ * Sin comentarios HTML: los <th> de ejemplo de un comentario no son columnas.
+ */
+function rotulosEncabezado($html, $idTabla) {
+    $html = preg_replace('/<!--.*?-->/s', '', $html);
+    $ini = strpos($html, 'id="' . $idTabla . '"');
+
+    if ($ini === false) {
+        return [];
+    }
+
+    $thead = strpos($html, '<thead', $ini);
+    $tr = strpos($html, '<tr', $thead);
+    $fin = strpos($html, '</tr>', $tr);
+
+    preg_match_all('/<th\b[^>]*>(.*?)<\/th>/s', substr($html, $tr, $fin - $tr), $m);
+
+    return array_map(function ($t) {
+        return trim(preg_replace('/\s+/', ' ', strip_tags(preg_replace('/<\?php.*?\?>/s', '', $t))));
+    }, $m[1]);
+}
+
+/**
+ * Que columnas esconde el modo Resumen de una tabla, por rotulo, en cada parte.
+ *
+ * @return array ['thead' => [rotulos], 'tbody' => [...], 'tfoot' => [...]]
+ */
+function columnasOcultasEnResumen($html, $idTabla, $css) {
+    $rotulos = rotulosEncabezado($html, $idTabla);
+    $sel = preg_quote('#' . $idTabla . '.modo-resumen', '/');
+    $partes = [
+        'thead' => '/' . $sel . ' thead tr:first-child th:nth-child\((\d+)\)/',
+        'tbody' => '/' . $sel . ' tbody td:nth-child\((\d+)\)/',
+        'tfoot' => '/' . $sel . ' tfoot td:nth-child\((\d+)\)/'
+    ];
+    $res = [];
+
+    foreach ($partes as $parte => $patron) {
+        preg_match_all($patron, $css, $m);
+        $res[$parte] = array_values(array_map(function ($n) use ($rotulos) {
+            return $rotulos[$n - 1] ?? ('(no hay columna ' . $n . ')');
+        }, $m[1]));
+        sort($res[$parte]);
+    }
+
+    return $res;
+}
+
+seccion('el modo Resumen esconde las columnas que dice, en FR y en May');
+
+$resumenEsperado = ['Cobro', 'Desc', 'Dias', 'FECHA', 'N_COMP', 'T_COMP'];
+
+$mayTab = contenidoTab($TABS . '/cobranzas_may.php');
+$mayCss = file_get_contents(__DIR__ . '/../Css/Ingresos-Cobranzas_may.css');
+
+foreach ([
+    'FR' => [$frTab, 'tablaCobranzasFR', $frCss],
+    'May' => [$mayTab, 'tablaCobranzasMay', $mayCss]
+] as $pestana => $p) {
+    $ocultas = columnasOcultasEnResumen($p[0], $p[1], $p[2]);
+
+    foreach (['thead', 'tbody', 'tfoot'] as $parte) {
+        chequear($pestana . ': en Resumen se esconden las de detalle y Cobro (' . $parte . ')',
+            $resumenEsperado, $ocultas[$parte]);
+    }
+
+    // El caso que se rompio: el importe que se cobra tiene que verse.
+    chequear($pestana . ': el Importe Neto se ve en Resumen', false,
+        in_array('Importe Neto', $ocultas['thead'], true));
+
+    // Una regla suelta de una hoja le apuntaria a la tabla de la otra pestana.
+    chequear($pestana . ': ninguna regla de .modo-resumen queda sin acotar a su tabla', 0,
+        preg_match('/(^|[\s,}])\.modo-resumen\s/m', $p[2]));
+}
+
+// ============================================================================
+// LAS PESTANAS DE COBRO Y PAGO ABREN POR FECHA ASCENDENTE
+//
+// Cobranzas May, Exportaciones Tasky, Echeqs (cartera), Proveedores Locales y
+// Tarjetas Corporativas declaran el mismo porDefecto que Cobranzas FR, sobre
+// su columna de fecha. Tres cosas que se rompen calladas:
+//
+//   - el nombre del porDefecto tiene que coincidir con el de la columna, o la
+//     tabla abre sin orden y no avisa;
+//   - el data-orden-nombre tiene que ser IGUAL AL ROTULO: la preferencia
+//     guardada se identifica por ese nombre, y uno nuevo le haria perder a
+//     quien ya ordeno a mano por esa columna el orden que eligio;
+//   - declarar crearOrdenTabla() no puede cambiar la clave de la preferencia:
+//     por eso no se pasa `clave`, y vale el id de la tabla, que es la del
+//     descubrimiento automatico.
+// ============================================================================
+
+seccion('las pestanas de cobro y pago abren por fecha ascendente');
+
+$ordenesPorDefecto = [
+    ['cobranzas_may.php', 'Ingresos-Cobranzas_may.js', 'tablaCobranzasMay', 'Cobro'],
+    ['exportaciones_tasky.php', 'Ingresos-Exportaciones_tasky.js', 'tablaExportacionesTasky', 'Fecha cobro estimada'],
+    ['echeqs.php', 'Ingresos-Echeqs.js', 'tablaEcheqs', 'Fecha de pago'],
+    ['proveedores_locales.php', 'Proveedores-Proveedores_locales.js', 'tablaProveedores', 'Fecha de pago'],
+    ['pagos_tarjetas.php', 'Financiero-Pagos_tarjetas.js', 'tablaCorp', 'VTO TANGO']
+];
+
+foreach ($ordenesPorDefecto as $o) {
+    list($archivoTab, $archivoJs, $idTabla, $columna) = $o;
+
+    $js = file_get_contents($JS . '/' . $archivoJs);
+    $thead = theadTabla(contenidoTab($TABS . '/' . $archivoTab), $idTabla);
+
+    // La llamada, con la tabla y el default; sin `clave`, para no cambiarla.
+    $patron = '/crearOrdenTabla\(\{\s*tabla:\s*\'' . preg_quote($idTabla, '/') . '\',\s*'
+        . 'porDefecto:\s*\{\s*columna:\s*\'' . preg_quote($columna, '/') . '\',\s*dir:\s*\'asc\'\s*\}\s*\}\)/';
+
+    chequear($idTabla . ' abre por "' . $columna . '" ascendente', 1, preg_match($patron, $js));
+
+    preg_match('/crearOrdenTabla\(\{[^)]*tabla:\s*\'' . preg_quote($idTabla, '/') . '\'[^)]*\}\)/s', $js, $llamada);
+
+    chequear($idTabla . ': declararlo no cambia la clave de la preferencia', false,
+        isset($llamada[0]) && strpos($llamada[0], 'clave') !== false);
+
+    // El <th> declara el nombre, y el nombre es su rotulo.
+    $th = preg_match('/<th\b[^>]*data-orden-nombre="' . preg_quote($columna, '/') . '"[^>]*>(.*?)<\/th>/s',
+        $thead, $m) === 1;
+
+    chequear($idTabla . ': la columna declara data-orden-nombre="' . $columna . '"', true, $th);
+    chequear($idTabla . ': y es igual al rotulo, para no perder ordenes guardados', $columna,
+        $th ? trim(preg_replace('/\s+/', ' ', strip_tags($m[1]))) : null);
+}
+
+// Las celdas cuyo texto no es una fecha llevan la fecha cruda en data-orden: el
+// badge "Vencida 03/09/2026" de Tasky y el "—" de un cheque sin fecha. Sin
+// esto, la vencida se ordenaria como texto y la sin fecha no iria al final.
+chequear('Tasky ordena la fecha de cobro por data-orden', true,
+    strpos(file_get_contents($JS . '/Ingresos-Exportaciones_tasky.js'),
+        '\'<td class="center" data-orden="\' + escaparAttr(item.Cobro || \'\') + \'">\'') !== false);
+chequear('Echeqs tambien la fecha de pago', true,
+    strpos(file_get_contents($JS . '/Ingresos-Echeqs.js'),
+        '\'<td class="center" data-orden="\' + escapar(String(f.FECHA_PAGO || \'\').slice(0, 10)) + \'">\'') !== false);
 
 // Sin orden tambien es una eleccion: si el tercer click borrara la clave, seria
 // indistinguible de no haber elegido nunca y el default volveria en la recarga

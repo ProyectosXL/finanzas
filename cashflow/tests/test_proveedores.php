@@ -1811,8 +1811,10 @@ chequear('la pestana lo usa', true,
    como string 'aaaa-mm-dd' y nunca un Date. El modulo entero mueve fechas como
    string para no pasar por new Date(string), que es de donde salen los
    corrimientos de un dia. */
-chequear('el camino sin Bootstrap devuelve la fecha o null, nunca un Date', true,
-    strpos($notiJs, 'Promise.resolve(esFecha(previo) ? previo : null)') !== false);
+// El respaldo tambien respeta el `min` desde que el dialogo lo valida -ver
+// test_cobranzas_fecha_masiva.php-; el contrato sigue siendo el mismo.
+chequear('el camino sin Bootstrap devuelve la fecha o null, nunca un Date', 1,
+    preg_match('/Promise\.resolve\(esFecha\(previo\)[^;]*\? previo : null\)/s', $notiJs));
 chequear('y el formato es el que viaja al backend', true,
     strpos($notiJs, '/^\d{4}-\d{2}-\d{2}$/.test(v)') !== false);
 

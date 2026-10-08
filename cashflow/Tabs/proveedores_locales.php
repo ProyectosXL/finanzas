@@ -320,7 +320,11 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                                     title="Lo que falta pagar: el importe menos lo que ya se le imputó. Es el número que va al cashflow.">
                                     Pendiente
                                 </th>
-                                <th rowspan="2">Fecha de pago</th>
+                                <!-- data-orden-nombre igual al rótulo: ancla el
+                                     nombre del orden guardado sin cambiarlo. Es
+                                     el del porDefecto del JS. Ver
+                                     Js/tabla-orden.js. -->
+                                <th rowspan="2" data-orden-nombre="Fecha de pago">Fecha de pago</th>
                                 <!-- UNA SOLA COLUMNA, Y MUESTRA LA QUE DECIDE.
                                      Trae la del maestro —o la que dejó la
                                      importación— y se puede editar: editarla
@@ -345,7 +349,7 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                                      Que una factura ESTÉ excluida se ve en la
                                      fila —atenuada y con el pendiente tachado— y
                                      en la marca de esta misma celda. -->
-                                <th rowspan="2" class="text-center" style="width: 46px;">
+                                <th rowspan="2" class="text-center" style="width: 46px;" data-orden="no">
                                     <?php if ($edita): ?>
                                     <input type="checkbox" class="form-check-input"
                                            id="selTodasProv"
