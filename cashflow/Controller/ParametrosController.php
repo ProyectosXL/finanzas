@@ -526,7 +526,9 @@ try {
                         . 'los movimientos se cargan desde Saldos → Fondos.'
                     : 'Cuenta agregada. Queda activa y sin saldo cargado: '
                         . 'se muestra como "sin cargar" hasta la próxima carga.',
-                'data' => ['id' => $id]
+                // Un banco manual nuevo puede ser uno que ya viene por
+                // Interbanking: el servidor no lo puede saber, asi que se avisa.
+                'data' => ['id' => $id, 'advertencia' => Saldos::advertenciaAltaCuenta($data['tipo'], $clase)]
             ], JSON_UNESCAPED_UNICODE);
             break;
 

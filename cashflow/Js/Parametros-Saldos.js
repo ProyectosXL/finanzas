@@ -561,9 +561,15 @@
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
         pedirJson(URL_PARAM + '?action=addCuentaSaldo', cuerpo)
-        .then(function() {
+        .then(function(data) {
             mostrarEl(formDe(grupo), false);
             cargar();
+
+            // Un banco manual que ya viene por Interbanking se sumaría dos
+            // veces: el servidor no lo puede saber y lo avisa.
+            if (data && data.advertencia) {
+                Notificacion.advertencia(data.advertencia);
+            }
         })
         .catch(function(error) {
             Notificacion.error('No se pudo agregar la cuenta: ' + error.message);

@@ -17,8 +17,11 @@ require_once __DIR__ . '/SaldosInterbanking.php';
  * LAS TRES PESTANAS SON TRES COSAS DISTINTAS
  * ------------------------------------------
  *   Pestana 1 "Saldos"        -> alimenta la fila DISPONIBLE (Saldo Inicial).
- *                                Carga PERIODICA (hoy, los lunes) y en parte
- *                                manual. El historico lo construye este modulo.
+ *                                Los bancos de Interbanking se leen en vivo
+ *                                (SaldosInterbanking); el efectivo, Mercado Pago,
+ *                                los otros saldos y los bancos sin Interbanking
+ *                                van en cargas, y su historico lo construye
+ *                                este modulo.
  *   Pestana 2 "Saldos Locales" -> alimenta la fila CAJA_LOCALES. Sale de una
  *                                consulta contra el servidor 'locales' que corre
  *                                todos los dias.
@@ -42,6 +45,18 @@ require_once __DIR__ . '/SaldosInterbanking.php';
  * la unica regla que decide de que lado va cada cuenta. El argumento de por
  * que CLASE es una columna y no un valor mas de TIPO esta en el encabezado de
  * sql/cashflow_saldos_cuentas_fondo.sql.
+ *
+ * LOS BANCOS VIENEN POR DOS CAMINOS
+ * ---------------------------------
+ * Los que estan en Interbanking se leen en vivo de BI_T_SALDOS_INTERBANKING y
+ * NO estan en el catalogo: no se cargan, no se copian, y su saldo lo decide
+ * SaldosInterbanking. Los que no estan -hoy, BTG Uy- son cuentas TIPO 'BANCO'
+ * del catalogo y se cargan como siempre, en Nueva carga. El catalogo no tiene
+ * NRO_BANCO, asi que no hay forma de cruzar los dos: un banco no puede estar
+ * de los dos lados, y la depuracion de los manuales que pasaron a Interbanking
+ * la hizo una sola vez sql/cashflow_saldos_borrar_bancos_manuales.sql.
+ * getFilasDisponible() junta los dos caminos y es lo unico que leen la
+ * pestana y el tablero.
  *
  * UNA CARGA ES UN EVENTO FECHADO, NO UN UPDATE
  * --------------------------------------------
@@ -2386,6 +2401,29 @@ class Saldos {
     }
 
     /**
+     * Lo que la respuesta del alta tiene que advertir, o null.
+     *
+     * UN BANCO DEL CATALOGO ES UN BANCO SIN INTERBANKING (hoy, BTG Uy). El
+     * catalogo no tiene NRO_BANCO, asi que el servidor no puede saber si el
+     * banco que se da de alta ya viene por la integracion -"Galicia" contra
+     * "DE GALICIA Y BS.AS."-, y compararlo por nombre seria fragil. Si ya
+     * viene, el disponible lo sumaria dos veces: se advierte, y quien lo da de
+     * alta lo sabe.
+     *
+     * @param string $tipo
+     * @param string|null $clase
+     * @return string|null
+     */
+    public static function advertenciaAltaCuenta($tipo, $clase = null) {
+        if (strtoupper(trim((string) $tipo)) !== 'BANCO' || Fondos::esFondo($clase)) {
+            return null;
+        }
+
+        return 'Es un banco de carga manual: sus saldos se cargan en Saldos › Nueva carga. Si '
+            . 'este banco ya viene por Interbanking, inhabilitalo: el disponible lo sumaría dos veces.';
+    }
+
+    /**
      * Alta de una cuenta.
      *
      * ENTRA ACTIVA, a diferencia de un medio de pago del mix. No es una
@@ -2400,7 +2438,7 @@ class Saldos {
      * informado. Una cuenta a la vista no lleva saldo inicial: se carga como
      * foto, y mandarselo se rechaza para que nadie crea que lo cargo.
      *
-     * @param string $tipo BANCO, MERCADO_PAGO, EFECTIVO_CENTRAL u OTRO
+     * @param string $tipo BANCO (un banco sin Interbanking), MERCADO_PAGO, EFECTIVO_CENTRAL u OTRO
      * @param string $nombre Nombre del banco o de la billetera
      * @param string $moneda ARS o USD
      * @param string $usuario
@@ -2484,8 +2522,9 @@ class Saldos {
         }
 
         // El origen del dato se deduce del tipo: el efectivo de tesoreria lo
-        // resuelve una consulta y el resto lo tipea una persona hasta que
-        // exista la integracion con Interbanking.
+        // resuelve una consulta y el resto lo tipea una persona. Un BANCO del
+        // catalogo es un banco SIN Interbanking: los que vienen por la
+        // integracion no estan en el catalogo, los lee SaldosInterbanking.
         $origen = ($tipo === 'EFECTIVO_CENTRAL') ? 'CONSULTA' : 'MANUAL';
 
         // Sin el script de fondos la tabla no tiene CLASE: se inserta como

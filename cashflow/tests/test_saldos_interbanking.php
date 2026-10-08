@@ -560,3 +560,34 @@ $authSrc = file_get_contents(__DIR__ . '/../Class/AuthCashflow.php');
 chequear('las acciones del respaldo piden el permiso de carga de saldos', true,
     ibContiene($authSrc, "'guardarRespaldoBanco' => [['saldos', null]]")
     && ibContiene($authSrc, "'quitarRespaldoBanco' => [['saldos', null]]"));
+
+// ============================================================================
+seccion('bancos sin Interbanking: carga manual');
+// ============================================================================
+
+chequear('el alta de un banco manual advierte que no sea uno de Interbanking',
+    true, ibContiene((string) Saldos::advertenciaAltaCuenta('BANCO'), 'ya viene por Interbanking'));
+chequear('el alta de otro tipo no advierte nada', null, Saldos::advertenciaAltaCuenta('MERCADO_PAGO'));
+chequear('ni la de un fondo', null, Saldos::advertenciaAltaCuenta('BANCO', 'INVERSION'));
+
+$srcSaldos = file_get_contents(__DIR__ . '/../Class/Saldos.php');
+preg_match('/function getSaldosActuales\(\).*?\n    }\n/s', $srcSaldos, $m);
+chequear('los bancos manuales siguen entrando por getSaldosActuales(): no se filtra el tipo',
+    false, (bool) preg_match("/TIPO\s*(<>|!=|NOT IN)/", isset($m[0]) ? $m[0] : ''));
+chequear('addCuenta() sigue aceptando BANCO',
+    true, ibContiene($srcSaldos, "\$tipos = ['BANCO', 'MERCADO_PAGO', 'EFECTIVO_CENTRAL', 'OTRO'];"));
+
+$pc = file_get_contents(__DIR__ . '/../Controller/ParametrosController.php');
+chequear('la respuesta del alta lleva la advertencia',
+    true, ibContiene($pc, "'advertencia' => Saldos::advertenciaAltaCuenta("));
+$jsPs = file_get_contents(__DIR__ . '/../Js/Parametros-Saldos.js');
+chequear('y el navegador la muestra', true, ibContiene($jsPs, 'Notificacion.advertencia(data.advertencia)'));
+
+// Un banco manual en USD y uno de Interbanking en ARS: la serie suma cada uno
+// en su moneda, y la pestana muestra el total en dolares aparte.
+$mixto = [$filaCarga(71000.0, IB_HOY, 'USD', 'BANCO'), $filaIb(1000.0, IB_HOY)];
+$d = Saldos::armarSerieDisponible($mixto, $hIb, ['2026-10' => 1400.0]);
+$t = Saldos::totalesPorMoneda($mixto);
+chequear('el banco manual en USD entra al tablero con su cotizacion',
+    71000.0 * 1400.0 + 1000.0, $d['serie']['dias'][IB_HOY]);
+chequear('y la pestana lo muestra en dolares, sin convertir', 71000.0, $t['USD']['total']);
