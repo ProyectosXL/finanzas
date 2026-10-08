@@ -662,6 +662,118 @@ class SaldosInterbanking {
     }
 
     /**
+     * La lista de bancos de Parametros -> Saldos -> Bancos de Interbanking.
+     *
+     * UNA FILA POR BANCO: los que vienen en Interbanking mas los que tienen
+     * fila de parametros aunque ya no vengan. Un banco que dejo de venir se
+     * sigue mostrando para poder ver su alias y reactivarlo o no; sacarlo de
+     * la lista dejaria una fila de parametros que nadie puede ver.
+     *
+     * A DIFERENCIA DE armarCuentasBancarias(), ACA ESTAN TODOS, activos e
+     * inactivos: es la pantalla donde se decide eso. Por lo mismo no hay
+     * saldos: es la lista de que cuentas trae cada banco, no cuanto tienen.
+     *
+     * @param array|null $ultimos Lo que devolvio leerUltimos(), o null si fallo
+     * @param array $ctx 'tango', 'bancos', 'respaldos' (ver armarCuentasBancarias())
+     * @return array Lista ordenada por NRO_BANCO de ['nro_banco', 'desc_banco',
+     *         'alias', 'activo', 'usuario_modif', 'fecha_modif', 'con_fila',
+     *         'ultimo_dato', 'con_respaldo', 'cuentas' => [['nro_cuenta',
+     *         'tipo_cuenta', 'moneda', 'con_respaldo', 'ultimo_dato'], ...]]
+     */
+    public static function armarBancos($ultimos, $ctx) {
+        $tango = isset($ctx['tango']) && is_array($ctx['tango']) ? $ctx['tango'] : [];
+        $bancos = isset($ctx['bancos']) && is_array($ctx['bancos']) ? $ctx['bancos'] : [];
+        $respaldos = isset($ctx['respaldos']) && is_array($ctx['respaldos']) ? $ctx['respaldos'] : [];
+
+        $agrupadas = self::agruparPorCuenta(is_array($ultimos) ? $ultimos : []);
+        $lista = [];
+
+        $banco = function ($nro) use (&$lista, $tango, $bancos) {
+            if (!isset($lista[$nro])) {
+                $p = isset($bancos[$nro]) ? $bancos[$nro] : null;
+                $n = self::nombreBanco($nro, $tango);
+
+                $lista[$nro] = [
+                    'nro_banco' => $nro,
+                    'desc_banco' => $n['desc_banco'],
+                    'alias' => ($p === null) ? null : self::validarAliasGuardado($p['ALIAS']),
+                    'activo' => self::bancoActivo($nro, $bancos),
+                    'con_fila' => ($p !== null),
+                    'usuario_modif' => ($p === null) ? null : $p['USUARIO_MODIF'],
+                    'fecha_modif' => ($p === null) ? null : $p['FECHA_MODIF'],
+                    'ultimo_dato' => null,
+                    'con_respaldo' => false,
+                    'cuentas' => []
+                ];
+            }
+        };
+
+        foreach ($agrupadas['cuentas'] as $clave => $c) {
+            $banco($c['nro_banco']);
+            $eleccion = self::elegirRegistro($c['registros']);
+            $ultimo = ($eleccion['mas_nuevo'] === null) ? null : $eleccion['mas_nuevo']['FECHA_OPERACION'];
+
+            $lista[$c['nro_banco']]['cuentas'][$clave] = [
+                'clave' => $clave,
+                'nro_cuenta' => $c['nro_cuenta'],
+                'tipo_cuenta' => $c['tipo_cuenta'],
+                'moneda' => $c['moneda'],
+                'con_respaldo' => isset($respaldos[$clave]),
+                'ultimo_dato' => $ultimo
+            ];
+
+            if ($ultimo !== null && $ultimo > (string) $lista[$c['nro_banco']]['ultimo_dato']) {
+                $lista[$c['nro_banco']]['ultimo_dato'] = $ultimo;
+            }
+        }
+
+        // Una cuenta sin moneda se lista igual: es una cuenta del banco, y es
+        // justamente la que hay que mirar.
+        foreach ($agrupadas['sin_moneda'] as $c) {
+            $banco($c['nro_banco']);
+            $lista[$c['nro_banco']]['cuentas'][$c['nro_banco'] . '|' . $c['nro_cuenta'] . '|'] = [
+                'clave' => null,
+                'nro_cuenta' => $c['nro_cuenta'],
+                'tipo_cuenta' => null,
+                'moneda' => null,
+                'con_respaldo' => false,
+                'ultimo_dato' => null
+            ];
+        }
+
+        foreach ($respaldos as $clave => $r) {
+            $nro = trim((string) $r['NRO_BANCO']);
+            $banco($nro);
+
+            if (!isset($lista[$nro]['cuentas'][$clave])) {
+                $lista[$nro]['cuentas'][$clave] = [
+                    'clave' => $clave,
+                    'nro_cuenta' => trim((string) $r['NRO_CUENTA']),
+                    'tipo_cuenta' => null,
+                    'moneda' => strtoupper(trim((string) $r['MONEDA'])),
+                    'con_respaldo' => true,
+                    'ultimo_dato' => null
+                ];
+            }
+
+            $lista[$nro]['con_respaldo'] = true;
+        }
+
+        foreach (array_keys($bancos) as $nro) {
+            $banco(trim((string) $nro));
+        }
+
+        ksort($lista);
+
+        foreach ($lista as $nro => $b) {
+            ksort($b['cuentas']);
+            $lista[$nro]['cuentas'] = array_values($b['cuentas']);
+        }
+
+        return array_values($lista);
+    }
+
+    /**
      * Una fila bancaria, con las mismas claves que Saldos::filaSaldo() para
      * que la pestana, los totales y la serie la traten igual que a una cuenta
      * manual. 'cargada' en false es "sin dato": el saldo va null, no cero.
@@ -818,6 +930,66 @@ class SaldosInterbanking {
         $r['depurado'] = true;
 
         return $r;
+    }
+
+    /**
+     * Lo que necesita Parametros -> Saldos -> Bancos de Interbanking: la
+     * lista de armarBancos() y que se puede hacer.
+     *
+     * Nunca lanza: sin BI la lista sale de los bancos con fila, y el aviso
+     * dice por que faltan los demas. Sin el script los controles se apagan y
+     * se dice cual correr.
+     *
+     * @return array ['bancos' => [...], 'avisos' => [string], 'bancos_creado' => bool,
+     *                'depurado' => bool]
+     */
+    public function getBancosParametros() {
+        $avisos = [];
+        $ctx = ['tango' => [], 'bancos' => [], 'respaldos' => []];
+        $tablas = ['banco' => false, 'manual' => false];
+        $depurado = false;
+
+        try {
+            $tablas = $this->tablas();
+            $depurado = $this->depurado();
+        } catch (Throwable $e) {
+            $avisos[] = 'No se pudieron verificar las tablas de Interbanking: ' . $e->getMessage();
+        }
+
+        if (!$tablas['banco']) {
+            $avisos[] = 'Todavía no existe la tabla de bancos de Interbanking: corré ' . self::SCRIPT
+                . ' contra la base central. Mientras tanto todos los bancos cuentan como activos y '
+                . 'sin alias, y no se pueden editar.';
+        }
+
+        if (!$depurado) {
+            $avisos[] = self::avisoSinDepurar()['texto'];
+        }
+
+        $ultimos = null;
+
+        try {
+            $ultimos = $this->leerUltimos();
+        } catch (Throwable $e) {
+            $avisos[] = 'No se pudieron leer las cuentas de Interbanking (' . $e->getMessage()
+                . '): se listan solo los bancos que ya tienen alias o estado.';
+        }
+
+        foreach (['tango' => 'leerBancosTango', 'bancos' => 'leerBancos',
+                  'respaldos' => 'leerRespaldos'] as $k => $metodo) {
+            try {
+                $ctx[$k] = $this->$metodo();
+            } catch (Throwable $e) {
+                $avisos[] = $e->getMessage();
+            }
+        }
+
+        return [
+            'bancos' => self::armarBancos($ultimos, $ctx),
+            'avisos' => $avisos,
+            'bancos_creado' => $tablas['banco'],
+            'depurado' => $depurado
+        ];
     }
 
     /**

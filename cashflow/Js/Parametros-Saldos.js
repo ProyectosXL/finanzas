@@ -8,7 +8,10 @@
  *
  * Nunca hay baja: se inhabilita con el switch de la columna Activo.
  *
- * Bancos, otros saldos y fondos son el MISMO catálogo de cuentas. Los fondos
+ * Los bancos de Interbanking NO son del catálogo: los trae Interbanking, y
+ * acá sólo se les pone alias y estado (sql/cashflow_saldos_interbanking.sql).
+ *
+ * Bancos sin Interbanking, otros saldos y fondos son el MISMO catálogo de cuentas. Los fondos
  * (clase Inversión o Cuenta comitente) se separan por CLASE y llevan además el
  * saldo inicial con su fecha; el resto por TIPO. La clase se elige sólo dentro
  * del grupo, y sin el script que la crea (sql/cashflow_saldos_cuentas_fondo.sql)
@@ -44,9 +47,14 @@
         // guarda SU grilla: apretar "Guardar fondos" no tiene que mandar
         // también los bancos que uno estaba editando a medias.
         conectar('btnGuardarCuentas', function() {
-            guardarCuentas(['bodyBancos', 'bodyOtros'], 'btnGuardarCuentas',
+            guardarCuentas(['bodyOtros'], 'btnGuardarCuentas',
                 'No se pudieron guardar las cuentas');
         });
+        conectar('btnGuardarBancosManuales', function() {
+            guardarCuentas(['bodyBancos'], 'btnGuardarBancosManuales',
+                'No se pudieron guardar los bancos manuales');
+        });
+        conectar('btnGuardarBancosIb', guardarBancosIb);
         conectar('btnGuardarFondos', function() {
             guardarCuentas(['bodySpFondos'], 'btnGuardarFondos',
                 'No se pudieron guardar los fondos');
@@ -101,6 +109,7 @@
                 pintarDescripcion();
                 pintarAvisos();
                 pintarGenerales();
+                pintarBancosIb();
                 pintarCuentas();
                 pintarSucursales();
 
@@ -266,8 +275,9 @@
         });
 
         document.getElementById('bodyBancos').innerHTML = bancos ||
-            '<tr><td colspan="5" class="text-center text-muted py-4">' +
-            'Todavía no hay bancos cargados.</td></tr>';
+            '<tr><td colspan="4" class="text-center text-muted py-4">' +
+            'No hay bancos de carga manual. Sólo hacen falta para los que no vienen por ' +
+            'Interbanking.</td></tr>';
 
         document.getElementById('bodyOtros').innerHTML = otros ||
             '<tr><td colspan="6" class="text-center text-muted py-4">' +
@@ -306,7 +316,6 @@
             '<td>' + inputNombre(c) + '</td>' +
             '<td class="text-center">' + selectClase(c, false) + '</td>' +
             '<td class="text-center">' + selectMoneda(c) + '</td>' +
-            '<td class="sp-api">' + datosApi(c) + '</td>' +
             '<td class="text-center">' + switchActivo(c) + '</td>' +
         '</tr>';
     }
@@ -406,32 +415,169 @@
     }
 
     /**
-     * Los campos que va a devolver /accounts de Interbanking. Hoy están en
-     * blanco: se muestran igual para que se vea qué va a completar la
-     * integración y qué queda pendiente.
+     * Una fila por banco: los que trae Interbanking y los que tienen alias o
+     * estado aunque ya no vengan. No hay saldos: es la lista de qué cuentas
+     * trae cada banco. Un banco inactivo se ve atenuado, para reactivarlo.
+     *
+     * Sin el script de la tabla los controles quedan apagados y el aviso de
+     * arriba dice cuál correr: todos los bancos cuentan como activos y sin
+     * alias.
      */
-    function datosApi(c) {
-        var partes = [];
+    function pintarBancosIb() {
+        var bancos = modulo.bancos_interbanking || [];
+        var html = '';
 
-        if (c.BANK_ID) {
-            partes.push('BCRA ' + escapar(c.BANK_ID));
+        bancos.forEach(function(b) {
+            html += '<tr class="' + (b.activo ? '' : 'sp-inactiva') + '" data-banco="' +
+                    escapar(b.nro_banco) + '">';
+            html += '<td class="fw-semibold">' + escapar(b.nro_banco) + '</td>';
+            html += '<td>' + (b.desc_banco
+                ? escapar(b.desc_banco)
+                : '<span class="text-muted fst-italic">no está en Tango</span>') + '</td>';
+            html += '<td><input type="text" class="form-control form-control-sm sp-banco-alias" ' +
+                    'data-banco="' + escapar(b.nro_banco) + '" maxlength="100" ' +
+                    'placeholder="' + escapar(b.desc_banco || ('Banco ' + b.nro_banco)) + '" ' +
+                    'value="' + escapar(b.alias || '') + '"></td>';
+            html += '<td>' + cuentasBanco(b) + '</td>';
+            html += '<td class="text-center sp-fecha">' +
+                    (b.ultimo_dato ? fecha(b.ultimo_dato) : '—') + '</td>';
+            html += '<td class="text-center">' +
+                        '<div class="form-check form-switch d-inline-block">' +
+                            '<input class="form-check-input sp-banco-activo" type="checkbox" ' +
+                                'role="switch" data-banco="' + escapar(b.nro_banco) + '"' +
+                                (b.activo ? ' checked' : '') +
+                                ' title="Inactivo, el banco no sale en Saldos, no suma al tablero ' +
+                                'y no avisa nada">' +
+                        '</div>' +
+                    '</td>';
+            html += '<td class="text-center sp-fecha">' +
+                    (b.fecha_modif ? fechaHora(b.fecha_modif) : '—') +
+                    (b.con_fila ? Auditoria.icono({ usuario: b.usuario_modif, fecha: b.fecha_modif }) : '') +
+                    '</td>';
+            html += '</tr>';
+        });
+
+        document.getElementById('bodyBancosIb').innerHTML = html ||
+            '<tr><td colspan="7" class="text-center text-muted py-4">' +
+            'Interbanking no trajo ningún banco todavía.</td></tr>';
+
+        Permisos.soloLectura('bodyBancosIb');
+
+        // Sin la tabla de parámetros no hay dónde guardar: se apaga y se dice.
+        var sinTabla = !modulo.bancos_creado;
+
+        document.querySelectorAll('#bodyBancosIb .sp-banco-alias, #bodyBancosIb .sp-banco-activo, ' +
+            '#btnGuardarBancosIb').forEach(function(el) {
+            el.disabled = sinTabla;
+            el.title = sinTabla ? 'Falta correr sql/cashflow_saldos_interbanking.sql' : el.title;
+        });
+    }
+
+    /**
+     * Las cuentas de un banco, una por línea: número, tipo y moneda, con la
+     * marca de respaldo manual si lo tiene.
+     */
+    function cuentasBanco(b) {
+        if (!b.cuentas || !b.cuentas.length) {
+            return '<span class="text-muted">sin cuentas en Interbanking</span>';
         }
 
-        if (c.ACCOUNT_TYPE) {
-            partes.push(c.ACCOUNT_TYPE === 'CC' ? 'Cta. Cte.' : 'Caja de Ahorro');
+        return b.cuentas.map(function(c) {
+            var partes = ['N° ' + escapar(c.nro_cuenta)];
+
+            if (c.tipo_cuenta) {
+                partes.push(c.tipo_cuenta === 'CC' ? 'Cta. Cte.'
+                    : (c.tipo_cuenta === 'CA' ? 'Caja de Ahorro' : escapar(c.tipo_cuenta)));
+            }
+
+            partes.push(c.moneda ? escapar(c.moneda) : '<span class="text-danger">sin moneda</span>');
+
+            return '<div class="sp-cuenta-ib">' + partes.join(' · ') +
+                (c.con_respaldo
+                    ? ' <span class="badge text-bg-warning sp-marca" title="Tiene un saldo cargado a ' +
+                      'mano en Saldos › Saldos">con respaldo manual</span>'
+                    : '') +
+                '</div>';
+        }).join('');
+    }
+
+    /**
+     * Guarda alias y estado. Manda todos los bancos; el servidor escribe sólo
+     * los que cambiaron (resolverBancos()). Inactivar un banco con respaldo
+     * manual vigente pide confirmación: el respaldo deja de usarse, aunque no
+     * se borra.
+     */
+    function guardarBancosIb() {
+        var filas = [];
+        var conRespaldoQueSeInactiva = [];
+        var largos = [];
+        var porNro = {};
+
+        (modulo.bancos_interbanking || []).forEach(function(b) { porNro[b.nro_banco] = b; });
+
+        document.querySelectorAll('#bodyBancosIb tr[data-banco]').forEach(function(tr) {
+            var nro = tr.dataset.banco;
+            var alias = tr.querySelector('.sp-banco-alias');
+            var activo = tr.querySelector('.sp-banco-activo');
+
+            if (!alias || !activo) {
+                return;
+            }
+
+            var f = { nro_banco: nro, alias: alias.value.trim(), activo: activo.checked };
+            var antes = porNro[nro];
+
+            if (f.alias.length > 100) {
+                largos.push(nro);
+            }
+
+            if (antes && antes.activo && !f.activo && antes.con_respaldo) {
+                conRespaldoQueSeInactiva.push(antes.alias || antes.desc_banco || ('Banco ' + nro));
+            }
+
+            filas.push(f);
+        });
+
+        // El servidor lo vuelve a rechazar: esto sólo marca antes de mandar.
+        if (largos.length) {
+            Notificacion.advertencia('El alias no puede superar los 100 caracteres.', {
+                detalle: 'Bancos: ' + largos.join(', ') + '.'
+            });
+
+            return;
         }
 
-        if (c.ACCOUNT_NUMBER) {
-            partes.push('N° ' + escapar(c.ACCOUNT_NUMBER));
+        var mandar = function() {
+            conBoton('btnGuardarBancosIb',
+                pedirJson(URL_PARAM + '?action=saveBancosSaldo', { filas: filas }),
+                'No se pudieron guardar los bancos');
+        };
+
+        if (!conRespaldoQueSeInactiva.length) {
+            mandar();
+            return;
         }
 
-        if (c.CBU) {
-            partes.push('CBU ' + escapar(c.CBU));
-        }
+        Notificacion.confirmar({
+            titulo: 'Inactivar un banco con saldo manual',
+            mensaje: conRespaldoQueSeInactiva.join(', ') + ' tiene un saldo cargado a mano como ' +
+                'respaldo. ¿Inactivarlo igual?',
+            detalle: 'Mientras el banco esté inactivo el respaldo deja de usarse y el banco no suma ' +
+                'al tablero. El respaldo no se borra: vuelve a usarse si lo reactivás.',
+            confirmar: 'Inactivar',
+            peligro: true
+        }).then(function(ok) {
+            if (ok) {
+                mandar();
+            }
+        });
+    }
 
-        return partes.length
-            ? partes.join(' · ')
-            : '<span class="text-muted">pendiente de la integración con Interbanking</span>';
+    /** 'Y-m-d' => 'dd/mm/aaaa' */
+    function fecha(valor) {
+        var f = String(valor || '').substring(0, 10).split('-');
+
+        return f.length === 3 ? f[2] + '/' + f[1] + '/' + f[0] : String(valor || '');
     }
 
     /**

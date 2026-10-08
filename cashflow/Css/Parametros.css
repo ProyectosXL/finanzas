@@ -271,12 +271,19 @@
     background: var(--bg-light, #f5f6fa);
 }
 
-/* Los campos que va a completar la integracion con Interbanking. Se muestran
-   vacios a proposito: asi se ve que existen desde ahora y que estan pendientes,
-   en lugar de que la columna aparezca el dia que alguien la agregue. */
-.sp-saldos .sp-api {
+/* Las cuentas de un banco de Interbanking, una por linea, con sus marcas
+   (nueva, con respaldo manual). Chicas: son el detalle del banco, no la fila. */
+.sp-saldos .sp-cuenta-ib {
     font-size: 11px;
+    line-height: 1.6;
     color: var(--text-secondary, #5a6178);
+    white-space: nowrap;
+}
+
+.sp-saldos .sp-marca {
+    font-size: 10px;
+    font-weight: 600;
+    vertical-align: 1px;
 }
 
 .sp-saldos .sp-origen {

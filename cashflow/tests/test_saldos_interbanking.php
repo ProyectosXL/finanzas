@@ -649,3 +649,38 @@ chequear('sin constancia no devuelve filas', true,
 preg_match('/function guardarRespaldo\(.*?\n    }\n/s', $srcIb, $m);
 chequear('el respaldo tampoco se carga sin depurar',
     true, ibContiene(isset($m[0]) ? $m[0] : '', 'if (!$this->depurado())'));
+
+// ============================================================================
+seccion('Parametros: la lista de bancos de Interbanking');
+// ============================================================================
+
+$lista = SaldosInterbanking::armarBancos($ultimos, ['tango' => $tangoIb,
+    'bancos' => ['014' => ['ALIAS' => 'Provincia', 'ACTIVO' => 0, 'USUARIO_MODIF' => 'tesoreria',
+                           'FECHA_MODIF' => '2026-10-08 12:00:00'],
+                 '044' => ['ALIAS' => null, 'ACTIVO' => 1, 'USUARIO_MODIF' => 'x', 'FECHA_MODIF' => null]],
+    'respaldos' => ['014|200|ARS' => ibResp(9, IB_HOY, 1.0)]]);
+$porNro = [];
+
+foreach ($lista as $b) {
+    $porNro[$b['nro_banco']] = $b;
+}
+
+chequear('una fila por banco, ordenada por numero',
+    ['007', '014', '015', '029', '044', '191'], array_column($lista, 'nro_banco'));
+chequear('el banco inactivo esta en la lista, para poder reactivarlo', false, $porNro['014']['activo']);
+chequear('con su alias', 'Provincia', $porNro['014']['alias']);
+chequear('el nombre en Tango sale de DESC_BANCO, sin espacios', 'ICBC', $porNro['015']['desc_banco']);
+chequear('un banco fuera de Tango no tiene nombre en Tango', null, $porNro['191']['desc_banco']);
+chequear('un banco con fila que ya no viene sigue en la lista', true, isset($porNro['044']));
+chequear('y sin cuentas', 0, count($porNro['044']['cuentas']));
+chequear('el ultimo dato es la fecha mas nueva entre sus cuentas', IB_HOY, $porNro['015']['ultimo_dato']);
+chequear('una cuenta con respaldo lleva la marca', true, $porNro['014']['cuentas'][0]['con_respaldo']);
+chequear('y el banco tambien', true, $porNro['014']['con_respaldo']);
+chequear('la cuenta sin moneda se lista igual', null, $porNro['029']['cuentas'][0]['moneda']);
+chequear('un banco sin fila esta activo y sin alias', 'activo/sin alias',
+    ($porNro['007']['activo'] ? 'activo' : 'inactivo') . '/' . ($porNro['007']['alias'] === null ? 'sin alias' : 'alias'));
+chequear('y se sabe que no tiene fila (Ultima edicion vacia)', false, $porNro['007']['con_fila']);
+
+$sinBi = SaldosInterbanking::armarBancos(null, ['tango' => $tangoIb,
+    'bancos' => ['027' => ['ALIAS' => null, 'ACTIVO' => 0, 'USUARIO_MODIF' => null, 'FECHA_MODIF' => null]]]);
+chequear('sin BI la lista sale de los bancos con fila', ['027'], array_column($sinBi, 'nro_banco'));

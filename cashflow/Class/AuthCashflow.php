@@ -162,6 +162,7 @@ class AuthCashflow {
             'saveRespaldo' => [['parametros', 'VENTAS']],
             'addCuentaSaldo' => [['parametros', 'SALDOS']],
             'saveCuentasSaldo' => [['parametros', 'SALDOS']],
+            'saveBancosSaldo' => [['parametros', 'SALDOS']],
             'saveSucursalesSaldo' => [['parametros', 'SALDOS']],
             'sincronizarSucursales' => [['parametros', 'SALDOS']],
             'addProcesadoraCobel' => [['parametros', 'COB_ELECTRONICOS']],

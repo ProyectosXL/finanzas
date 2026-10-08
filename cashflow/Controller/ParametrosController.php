@@ -532,6 +532,28 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* Alias y estado de los bancos de Interbanking. El diff, la
+           validacion del alias y el UPSERT son de SaldosInterbanking. */
+        case 'saveBancosSaldo':
+            $data = bodyJson();
+
+            if (!isset($data['filas']) || !is_array($data['filas'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/SaldosInterbanking.php';
+
+            $n = (new SaldosInterbanking())->guardarBancos($data['filas'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => ($n === 0)
+                    ? 'No cambió ningún banco.'
+                    : $n . ' banco(s) guardados.',
+                'data' => ['cambios' => $n]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         case 'saveCuentasSaldo':
             $data = bodyJson();
 

@@ -287,6 +287,18 @@ class Parametros {
                                     . 'central. Mientras tanto todas las cuentas son cuentas a la '
                                     . 'vista y no se pueden dar de alta fondos.';
                             }
+
+                            // Los bancos de Interbanking: no son del catalogo de
+                            // cuentas, los arma su clase. Nunca lanza: sin BI o
+                            // sin su script, la lista sale como puede y avisa.
+                            require_once __DIR__ . '/SaldosInterbanking.php';
+                            $ib = (new SaldosInterbanking())->getBancosParametros();
+                            $modulo['bancos_interbanking'] = $ib['bancos'];
+                            $modulo['bancos_creado'] = $ib['bancos_creado'];
+
+                            foreach ($ib['avisos'] as $a) {
+                                $modulo['avisos'][] = $a;
+                            }
                         } else {
                             // El dia de acreditacion: que dias se pueden elegir y
                             // si su script se corrio. Sin el, el selector queda
