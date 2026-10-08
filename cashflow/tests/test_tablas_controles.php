@@ -250,7 +250,97 @@ chequear('columnaActiva descarta las columnas ocultas', true,
 $frCss = file_get_contents(__DIR__ . '/../Css/Ingresos-Cobranzas_fr.css');
 
 chequear('y en Resumen la columna de cobro esta oculta', true,
-    strpos($frCss, '.modo-resumen thead tr:first-child th:nth-child(10)') !== false);
+    in_array('Cobro', columnasOcultasEnResumen($frTab, 'tablaCobranzasFR', $frCss)['thead'], true));
+
+// ============================================================================
+// EL MODO RESUMEN ESCONDE LAS COLUMNAS QUE DICE, EN LAS DOS PESTANAS
+//
+// Las reglas de .modo-resumen son nth-child escritos en duro, y un indice
+// escrito en duro se desactualiza en silencio cuando alguien agrega una columna
+// adelante. Ya paso dos veces: con la columna Tipo, y en Cobranzas May con
+// Importe Factura, que dejo la regla de Cobro apuntando a IMPORTE NETO -en
+// Resumen se escondia el neto y se veia una columna Cobro vacia-.
+//
+// Por eso la prueba no repite los indices: los DERIVA del marcado de la
+// pestana -que <th> hay en cada posicion- y verifica que cada regla esconda la
+// columna que corresponde, en el encabezado, el cuerpo y el pie.
+// ============================================================================
+
+/**
+ * Los rotulos de la primera fila del thead de una tabla, en orden de columna.
+ * Sin comentarios HTML: los <th> de ejemplo de un comentario no son columnas.
+ */
+function rotulosEncabezado($html, $idTabla) {
+    $html = preg_replace('/<!--.*?-->/s', '', $html);
+    $ini = strpos($html, 'id="' . $idTabla . '"');
+
+    if ($ini === false) {
+        return [];
+    }
+
+    $thead = strpos($html, '<thead', $ini);
+    $tr = strpos($html, '<tr', $thead);
+    $fin = strpos($html, '</tr>', $tr);
+
+    preg_match_all('/<th\b[^>]*>(.*?)<\/th>/s', substr($html, $tr, $fin - $tr), $m);
+
+    return array_map(function ($t) {
+        return trim(preg_replace('/\s+/', ' ', strip_tags(preg_replace('/<\?php.*?\?>/s', '', $t))));
+    }, $m[1]);
+}
+
+/**
+ * Que columnas esconde el modo Resumen de una tabla, por rotulo, en cada parte.
+ *
+ * @return array ['thead' => [rotulos], 'tbody' => [...], 'tfoot' => [...]]
+ */
+function columnasOcultasEnResumen($html, $idTabla, $css) {
+    $rotulos = rotulosEncabezado($html, $idTabla);
+    $sel = preg_quote('#' . $idTabla . '.modo-resumen', '/');
+    $partes = [
+        'thead' => '/' . $sel . ' thead tr:first-child th:nth-child\((\d+)\)/',
+        'tbody' => '/' . $sel . ' tbody td:nth-child\((\d+)\)/',
+        'tfoot' => '/' . $sel . ' tfoot td:nth-child\((\d+)\)/'
+    ];
+    $res = [];
+
+    foreach ($partes as $parte => $patron) {
+        preg_match_all($patron, $css, $m);
+        $res[$parte] = array_values(array_map(function ($n) use ($rotulos) {
+            return $rotulos[$n - 1] ?? ('(no hay columna ' . $n . ')');
+        }, $m[1]));
+        sort($res[$parte]);
+    }
+
+    return $res;
+}
+
+seccion('el modo Resumen esconde las columnas que dice, en FR y en May');
+
+$resumenEsperado = ['Cobro', 'Desc', 'Dias', 'FECHA', 'N_COMP', 'T_COMP'];
+
+$mayTab = contenidoTab($TABS . '/cobranzas_may.php');
+$mayCss = file_get_contents(__DIR__ . '/../Css/Ingresos-Cobranzas_may.css');
+
+foreach ([
+    'FR' => [$frTab, 'tablaCobranzasFR', $frCss],
+    'May' => [$mayTab, 'tablaCobranzasMay', $mayCss]
+] as $pestana => $p) {
+    $ocultas = columnasOcultasEnResumen($p[0], $p[1], $p[2]);
+
+    foreach (['thead', 'tbody', 'tfoot'] as $parte) {
+        chequear($pestana . ': en Resumen se esconden las de detalle y Cobro (' . $parte . ')',
+            $resumenEsperado, $ocultas[$parte]);
+    }
+
+    // El caso que se rompio: el importe que se cobra tiene que verse.
+    chequear($pestana . ': el Importe Neto se ve en Resumen', false,
+        in_array('Importe Neto', $ocultas['thead'], true));
+
+    // Una regla suelta de una hoja le apuntaria a la tabla de la otra pestana.
+    chequear($pestana . ': ninguna regla de .modo-resumen queda sin acotar a su tabla', 0,
+        preg_match('/(^|[\s,}])\.modo-resumen\s/m', $p[2]));
+}
 
 // Sin orden tambien es una eleccion: si el tercer click borrara la clave, seria
 // indistinguible de no haber elegido nunca y el default volveria en la recarga

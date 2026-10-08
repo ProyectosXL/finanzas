@@ -128,31 +128,36 @@
    Los índices son FECHA, T_COMP, N_COMP, Desc y Días, o sea de la 3 a la 7
    desde que se sacó la columna Tipo de adelante. Antes eran de la 4 a la 8:
    un índice de columna escrito en duro se desactualiza en silencio, y el
-   síntoma es una tabla corrida un lugar. */
-.modo-resumen thead tr:first-child th:nth-child(3),
-.modo-resumen thead tr:first-child th:nth-child(4),
-.modo-resumen thead tr:first-child th:nth-child(5),
-.modo-resumen thead tr:first-child th:nth-child(6),
-.modo-resumen thead tr:first-child th:nth-child(7),
-.modo-resumen tbody td:nth-child(3),
-.modo-resumen tbody td:nth-child(4),
-.modo-resumen tbody td:nth-child(5),
-.modo-resumen tbody td:nth-child(6),
-.modo-resumen tbody td:nth-child(7),
+   síntoma es una tabla corrida un lugar.
+
+   Van acotadas a #tablaCobranzasFR: Cobranzas May usa la misma clase con
+   otros índices, y una regla suelta le apuntaría a la tabla de la otra.
+   tests/test_tablas_controles.php deriva los índices del marcado de la
+   pestaña y verifica que cada regla esconda la columna que dice. */
+#tablaCobranzasFR.modo-resumen thead tr:first-child th:nth-child(3),
+#tablaCobranzasFR.modo-resumen thead tr:first-child th:nth-child(4),
+#tablaCobranzasFR.modo-resumen thead tr:first-child th:nth-child(5),
+#tablaCobranzasFR.modo-resumen thead tr:first-child th:nth-child(6),
+#tablaCobranzasFR.modo-resumen thead tr:first-child th:nth-child(7),
+#tablaCobranzasFR.modo-resumen tbody td:nth-child(3),
+#tablaCobranzasFR.modo-resumen tbody td:nth-child(4),
+#tablaCobranzasFR.modo-resumen tbody td:nth-child(5),
+#tablaCobranzasFR.modo-resumen tbody td:nth-child(6),
+#tablaCobranzasFR.modo-resumen tbody td:nth-child(7),
 /* El pie también: desde que tiene una celda por columna en vez de un colspan,
    si no se ocultan las mismas queda corrido cinco lugares. */
-.modo-resumen tfoot td:nth-child(3),
-.modo-resumen tfoot td:nth-child(4),
-.modo-resumen tfoot td:nth-child(5),
-.modo-resumen tfoot td:nth-child(6),
-.modo-resumen tfoot td:nth-child(7),
+#tablaCobranzasFR.modo-resumen tfoot td:nth-child(3),
+#tablaCobranzasFR.modo-resumen tfoot td:nth-child(4),
+#tablaCobranzasFR.modo-resumen tfoot td:nth-child(5),
+#tablaCobranzasFR.modo-resumen tfoot td:nth-child(6),
+#tablaCobranzasFR.modo-resumen tfoot td:nth-child(7),
 /* Y la columna Cobro (la 10). En el Resumen la fila es un CLIENTE y sus
    facturas se cobran en fechas distintas, así que una sola fecha ahí sería la
    de una factura cualquiera. Dónde cae cada importe lo dice la grilla del eje,
    que es para lo que está. */
-.modo-resumen thead tr:first-child th:nth-child(10),
-.modo-resumen tbody td:nth-child(10),
-.modo-resumen tfoot td:nth-child(10) {
+#tablaCobranzasFR.modo-resumen thead tr:first-child th:nth-child(10),
+#tablaCobranzasFR.modo-resumen tbody td:nth-child(10),
+#tablaCobranzasFR.modo-resumen tfoot td:nth-child(10) {
     display: none !important;
 }
 
