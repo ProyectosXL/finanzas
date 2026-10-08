@@ -684,3 +684,88 @@ chequear('y se sabe que no tiene fila (Ultima edicion vacia)', false, $porNro['0
 $sinBi = SaldosInterbanking::armarBancos(null, ['tango' => $tangoIb,
     'bancos' => ['027' => ['ALIAS' => null, 'ACTIVO' => 0, 'USUARIO_MODIF' => null, 'FECHA_MODIF' => null]]]);
 chequear('sin BI la lista sale de los bancos con fila', ['027'], array_column($sinBi, 'nro_banco'));
+
+// ============================================================================
+seccion('cuentas nuevas');
+// ============================================================================
+
+// Vistas: todas menos 191 · 400
+$vistasIb = [
+    '007|100|ARS' => ['USUARIO_ALTA' => null, 'FECHA_ALTA' => '2026-10-08 08:00:00'],
+    '014|200|ARS' => ['USUARIO_ALTA' => null, 'FECHA_ALTA' => '2026-10-08 08:00:00'],
+    '015|300|ARS' => ['USUARIO_ALTA' => 'tesoreria', 'FECHA_ALTA' => '2026-10-08 08:00:00']
+];
+
+$conVistas = SaldosInterbanking::armarCuentasBancarias($ultimos,
+    ['hoy' => IB_HOY, 'tango' => $tangoIb, 'vistas' => $vistasIb]);
+$porClave = [];
+
+foreach ($conVistas['filas'] as $f) {
+    $porClave[$f['clave']] = $f;
+}
+
+chequear('una cuenta que nadie vio es nueva', true, $porClave['191|400|ARS']['nueva']);
+chequear('y aporta igual: tiene su saldo', 70.0, $porClave['191|400|ARS']['saldo']);
+chequear('y avisa en atencion con banco, cuenta e importe', true,
+    ibContiene(ibAvisos($conVistas['avisos'], Aviso::WARNING),
+        'Cuenta nueva en Interbanking: Banco 191 · 400 ($ 70,00); revisala en Parámetros › Saldos.'));
+chequear('una cuenta vista no es nueva', false, $porClave['007|100|ARS']['nueva']);
+chequear('ni avisa', false, ibContiene(ibAvisos($conVistas['avisos']), 'Cuenta nueva en Interbanking: DE GALICIA'));
+
+$d = Saldos::armarSerieDisponible(array_filter($conVistas['filas'], function ($f) {
+    return $f['cargada'];
+}), $hIb);
+chequear('la nueva suma al tablero', 1570.0, floatval(array_sum($d['serie']['dias'])));
+
+$sinScriptVistas = SaldosInterbanking::armarCuentasBancarias($ultimos,
+    ['hoy' => IB_HOY, 'tango' => $tangoIb, 'vistas' => null]);
+chequear('sin el script ninguna es nueva', 0,
+    count(array_filter($sinScriptVistas['filas'], function ($f) { return $f['nueva']; })));
+
+$inactivaNueva = SaldosInterbanking::armarCuentasBancarias($ultimos, ['hoy' => IB_HOY,
+    'tango' => $tangoIb, 'vistas' => $vistasIb, 'bancos' => ['191' => ['ALIAS' => null, 'ACTIVO' => 0]]]);
+chequear('una cuenta nueva de un banco inactivo no se marca ni avisa', false,
+    ibContiene(ibAvisos($inactivaNueva['avisos']), 'Cuenta nueva'));
+
+$soloRespNueva = SaldosInterbanking::armarCuentasBancarias([], ['hoy' => IB_HOY, 'tango' => $tangoIb,
+    'vistas' => [], 'respaldos' => ['014|999|ARS' => ibResp(4, IB_HOY, 10.0, '014', '999')]]);
+chequear('una cuenta que solo existe por su respaldo no es nueva', false, $soloRespNueva['filas'][0]['nueva']);
+
+chequear('las nuevas de un banco, para marcarlas', [['nro_banco' => '191', 'nro_cuenta' => '400', 'moneda' => 'ARS']],
+    SaldosInterbanking::cuentasNuevasDe($ultimos, $vistasIb, '191'));
+chequear('un banco sin nuevas no tiene nada que marcar', [],
+    SaldosInterbanking::cuentasNuevasDe($ultimos, $vistasIb, '007'));
+chequear('marcada como vista, ya no es nueva', [],
+    SaldosInterbanking::cuentasNuevasDe($ultimos, array_merge($vistasIb, ['191|400|ARS' => []]), '191'));
+
+$listaVistas = SaldosInterbanking::armarBancos($ultimos, ['tango' => $tangoIb, 'vistas' => $vistasIb,
+    'bancos' => ['029' => ['ALIAS' => null, 'ACTIVO' => 0, 'USUARIO_MODIF' => null, 'FECHA_MODIF' => null]]]);
+$porNro = [];
+
+foreach ($listaVistas as $b) {
+    $porNro[$b['nro_banco']] = $b;
+}
+
+chequear('Parametros cuenta las nuevas de cada banco', 1, $porNro['191']['nuevas']);
+chequear('y marca la cuenta', true, $porNro['191']['cuentas'][0]['nueva']);
+chequear('un banco sin nuevas no ofrece marcar', 0, $porNro['007']['nuevas']);
+chequear('se sabe quien la marco como vista', 'tesoreria', $porNro['015']['cuentas'][0]['visto_por']);
+
+preg_match('/function marcarVistas\(.*?\n    }\n/s', $srcIb, $m);
+$marcar = isset($m[0]) ? $m[0] : '';
+chequear('marcar como vistas valida el usuario de escritura', true, ibContiene($marcar, 'usuarioDeEscritura'));
+chequear('relee las cuentas de Interbanking: no las acepta del navegador', true,
+    ibContiene($marcar, 'self::cuentasNuevasDe($this->leerUltimos(), $this->leerVistas(), $nroBanco)'));
+chequear('y escribe en una transaccion', true,
+    ibContiene($marcar, 'sqlsrv_begin_transaction') && ibContiene($marcar, 'sqlsrv_rollback'));
+
+$sqlIb = file_get_contents(__DIR__ . '/../sql/cashflow_saldos_interbanking.sql');
+chequear('el script crea la tabla con PK banco + cuenta + moneda', true,
+    ibContiene($sqlIb, 'PRIMARY KEY CLUSTERED (NRO_BANCO, NRO_CUENTA, MONEDA)'));
+chequear('y siembra como vistas las cuentas de hoy, sin duplicar', true,
+    (bool) preg_match('/MERGE dbo\.RO_T_CASHFLOW_SALDOS_BANCO_CUENTA AS T\s+USING \(\s+SELECT DISTINCT.*?FROM dbo\.BI_T_SALDOS_INTERBANKING.*?WHEN NOT MATCHED THEN\s+INSERT/s', $sqlIb));
+chequear('la siembra deja afuera las cuentas sin moneda', true,
+    ibContiene($sqlIb, "WHERE MONEDA IS NOT NULL AND LTRIM(RTRIM(MONEDA)) <> ''"));
+chequear('marcar como vistas pide el permiso de Parametros › Saldos', true,
+    ibContiene(file_get_contents(__DIR__ . '/../Class/AuthCashflow.php'),
+        "'marcarCuentasVistas' => [['parametros', 'SALDOS']]"));

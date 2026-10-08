@@ -70,6 +70,9 @@ class SaldosInterbanking {
     /** Respaldo manual de una cuenta que Interbanking no trae. Mismo script. */
     const TABLA_MANUAL = 'RO_T_CASHFLOW_SALDOS_BANCO_MANUAL';
 
+    /** Las cuentas ya marcadas como vistas: la que no esta, es nueva. Mismo script. */
+    const TABLA_VISTAS = 'RO_T_CASHFLOW_SALDOS_BANCO_CUENTA';
+
     /** De donde salio el saldo de una fila bancaria */
     const ORIGEN_INTERBANKING = 'INTERBANKING';
     const ORIGEN_RESPALDO = 'RESPALDO';
@@ -450,6 +453,45 @@ class SaldosInterbanking {
     }
 
     /**
+     * Si una cuenta es nueva: viene en Interbanking y nadie la marco como
+     * vista. Sin el script ($vistas null) ninguna lo es: sin la tabla no hay
+     * forma de saber cuales se vieron, y marcarlas todas taparia las que de
+     * verdad son nuevas el dia que se corra. Una cuenta que solo existe por
+     * su respaldo no es nueva: no vino de Interbanking.
+     *
+     * @param string $clave
+     * @param array $c La cuenta agrupada, con 'registros'
+     * @param array|null $vistas
+     * @return bool
+     */
+    public static function esNueva($clave, $c, $vistas) {
+        return is_array($vistas) && !empty($c['registros']) && !isset($vistas[$clave]);
+    }
+
+    /**
+     * Las claves de las cuentas nuevas de un banco, para marcarlas como
+     * vistas. Las mismas que marca armarCuentasBancarias(): la misma regla.
+     *
+     * @param array $ultimos Lo que devolvio leerUltimos()
+     * @param array $vistas
+     * @param string $nro NRO_BANCO
+     * @return array [['nro_banco', 'nro_cuenta', 'moneda'], ...]
+     */
+    public static function cuentasNuevasDe($ultimos, $vistas, $nro) {
+        $nro = trim((string) $nro);
+        $v = [];
+
+        foreach (self::agruparPorCuenta($ultimos)['cuentas'] as $clave => $c) {
+            if ($c['nro_banco'] === $nro && self::esNueva($clave, $c, is_array($vistas) ? $vistas : [])) {
+                $v[] = ['nro_banco' => $c['nro_banco'], 'nro_cuenta' => $c['nro_cuenta'],
+                        'moneda' => $c['moneda']];
+            }
+        }
+
+        return $v;
+    }
+
+    /**
      * El aviso de cuando todavia no se corrio la depuracion de las cuentas
      * bancarias manuales. Ver getCuentasBancarias().
      *
@@ -566,10 +608,13 @@ class SaldosInterbanking {
      * @param array $ctx 'hoy' => 'Y-m-d', 'tango' => mapa NRO_BANCO => DESC_BANCO,
      *        'bancos' => mapa NRO_BANCO => ['ALIAS', 'ACTIVO'] (vacio sin script),
      *        'respaldos' => mapa clave => respaldo vigente (vacio sin script),
+     *        'vistas' => mapa clave => fila de las cuentas vistas, o null sin script
+     *        (null: ninguna se marca como nueva),
      *        'error' => texto de la falla de lectura
      * @return array ['filas' => [...], 'avisos' => [Aviso]]
      */
     public static function armarCuentasBancarias($ultimos, $ctx) {
+        $vistas = (isset($ctx['vistas']) && is_array($ctx['vistas'])) ? $ctx['vistas'] : null;
         $tango = isset($ctx['tango']) && is_array($ctx['tango']) ? $ctx['tango'] : [];
         $bancos = isset($ctx['bancos']) && is_array($ctx['bancos']) ? $ctx['bancos'] : [];
         $respaldos = isset($ctx['respaldos']) && is_array($ctx['respaldos']) ? $ctx['respaldos'] : [];
@@ -649,7 +694,19 @@ class SaldosInterbanking {
                     . self::diaMes($eleccion['usado']['FECHA_OPERACION']) . '.', self::SECCION);
             }
 
-            $filas[] = self::fila($clave, $c, $banco, $eleccion, $respaldo, $fuente, $hoy);
+            $fila = self::fila($clave, $c, $banco, $eleccion, $respaldo, $fuente, $hoy);
+            $fila['nueva'] = self::esNueva($clave, $c, $vistas);
+
+            // Entra al tablero igual que cualquier otra: es plata que existe.
+            // Lo que pide es que alguien la mire.
+            if ($fila['nueva']) {
+                $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Cuenta nueva en Interbanking: ' . $nombre
+                    . ' (' . ($fila['cargada'] ? self::plataEn($fila['saldo'], $fila['moneda'])
+                        : 'sin saldo contable') . '); revisala en Parámetros › Saldos.',
+                    self::SECCION);
+            }
+
+            $filas[] = $fila;
         }
 
         foreach (array_keys($fueraDeTango) as $nro) {
@@ -674,13 +731,20 @@ class SaldosInterbanking {
      * saldos: es la lista de que cuentas trae cada banco, no cuanto tienen.
      *
      * @param array|null $ultimos Lo que devolvio leerUltimos(), o null si fallo
-     * @param array $ctx 'tango', 'bancos', 'respaldos' (ver armarCuentasBancarias())
+     * LA MARCA "NUEVA" ES LA MISMA QUE EN LA PESTANA (esNueva()), y como alla
+     * no va en un banco inactivo: de un banco que no se opera no hay nada que
+     * revisar. 'nuevas' cuenta las de cada banco, para el boton "Marcar como
+     * vistas".
+     *
+     * @param array $ctx 'tango', 'bancos', 'respaldos', 'vistas' (ver armarCuentasBancarias())
      * @return array Lista ordenada por NRO_BANCO de ['nro_banco', 'desc_banco',
      *         'alias', 'activo', 'usuario_modif', 'fecha_modif', 'con_fila',
-     *         'ultimo_dato', 'con_respaldo', 'cuentas' => [['nro_cuenta',
-     *         'tipo_cuenta', 'moneda', 'con_respaldo', 'ultimo_dato'], ...]]
+     *         'ultimo_dato', 'con_respaldo', 'nuevas', 'cuentas' => [['nro_cuenta',
+     *         'tipo_cuenta', 'moneda', 'con_respaldo', 'ultimo_dato', 'nueva',
+     *         'visto_por', 'visto_el'], ...]]
      */
     public static function armarBancos($ultimos, $ctx) {
+        $vistas = (isset($ctx['vistas']) && is_array($ctx['vistas'])) ? $ctx['vistas'] : null;
         $tango = isset($ctx['tango']) && is_array($ctx['tango']) ? $ctx['tango'] : [];
         $bancos = isset($ctx['bancos']) && is_array($ctx['bancos']) ? $ctx['bancos'] : [];
         $respaldos = isset($ctx['respaldos']) && is_array($ctx['respaldos']) ? $ctx['respaldos'] : [];
@@ -703,6 +767,7 @@ class SaldosInterbanking {
                     'fecha_modif' => ($p === null) ? null : $p['FECHA_MODIF'],
                     'ultimo_dato' => null,
                     'con_respaldo' => false,
+                    'nuevas' => 0,
                     'cuentas' => []
                 ];
             }
@@ -713,14 +778,24 @@ class SaldosInterbanking {
             $eleccion = self::elegirRegistro($c['registros']);
             $ultimo = ($eleccion['mas_nuevo'] === null) ? null : $eleccion['mas_nuevo']['FECHA_OPERACION'];
 
+            $nueva = $lista[$c['nro_banco']]['activo'] && self::esNueva($clave, $c, $vistas);
+            $vista = (is_array($vistas) && isset($vistas[$clave])) ? $vistas[$clave] : null;
+
             $lista[$c['nro_banco']]['cuentas'][$clave] = [
                 'clave' => $clave,
                 'nro_cuenta' => $c['nro_cuenta'],
                 'tipo_cuenta' => $c['tipo_cuenta'],
                 'moneda' => $c['moneda'],
                 'con_respaldo' => isset($respaldos[$clave]),
-                'ultimo_dato' => $ultimo
+                'ultimo_dato' => $ultimo,
+                'nueva' => $nueva,
+                'visto_por' => ($vista === null) ? null : $vista['USUARIO_ALTA'],
+                'visto_el' => ($vista === null) ? null : $vista['FECHA_ALTA']
             ];
+
+            if ($nueva) {
+                $lista[$c['nro_banco']]['nuevas']++;
+            }
 
             if ($ultimo !== null && $ultimo > (string) $lista[$c['nro_banco']]['ultimo_dato']) {
                 $lista[$c['nro_banco']]['ultimo_dato'] = $ultimo;
@@ -737,7 +812,10 @@ class SaldosInterbanking {
                 'tipo_cuenta' => null,
                 'moneda' => null,
                 'con_respaldo' => false,
-                'ultimo_dato' => null
+                'ultimo_dato' => null,
+                'nueva' => false,
+                'visto_por' => null,
+                'visto_el' => null
             ];
         }
 
@@ -752,7 +830,10 @@ class SaldosInterbanking {
                     'tipo_cuenta' => null,
                     'moneda' => strtoupper(trim((string) $r['MONEDA'])),
                     'con_respaldo' => true,
-                    'ultimo_dato' => null
+                    'ultimo_dato' => null,
+                    'nueva' => false,
+                    'visto_por' => null,
+                    'visto_el' => null
                 ];
             }
 
@@ -909,6 +990,15 @@ class SaldosInterbanking {
         }
 
         try {
+            $ctx['vistas'] = $this->leerVistas();
+        } catch (Throwable $e) {
+            // Sin poder leerlas no se marca ninguna: el saldo no cambia.
+            $ctx['vistas'] = null;
+            $avisosExtra[] = Aviso::nuevo(Aviso::WARNING, 'No se pudo saber qué cuentas de '
+                . 'Interbanking son nuevas (' . $e->getMessage() . ').', self::SECCION);
+        }
+
+        try {
             $ctx['respaldos'] = $this->leerRespaldos();
         } catch (Throwable $e) {
             $ctx['respaldos'] = [];
@@ -941,12 +1031,12 @@ class SaldosInterbanking {
      * se dice cual correr.
      *
      * @return array ['bancos' => [...], 'avisos' => [string], 'bancos_creado' => bool,
-     *                'depurado' => bool]
+     *                'vistas_creado' => bool, 'depurado' => bool]
      */
     public function getBancosParametros() {
         $avisos = [];
-        $ctx = ['tango' => [], 'bancos' => [], 'respaldos' => []];
-        $tablas = ['banco' => false, 'manual' => false];
+        $ctx = ['tango' => [], 'bancos' => [], 'respaldos' => [], 'vistas' => null];
+        $tablas = ['banco' => false, 'manual' => false, 'vistas' => false];
         $depurado = false;
 
         try {
@@ -956,10 +1046,11 @@ class SaldosInterbanking {
             $avisos[] = 'No se pudieron verificar las tablas de Interbanking: ' . $e->getMessage();
         }
 
-        if (!$tablas['banco']) {
-            $avisos[] = 'Todavía no existe la tabla de bancos de Interbanking: corré ' . self::SCRIPT
-                . ' contra la base central. Mientras tanto todos los bancos cuentan como activos y '
-                . 'sin alias, y no se pueden editar.';
+        if (!$tablas['banco'] || !$tablas['manual'] || !$tablas['vistas']) {
+            $avisos[] = 'Todavía no existen las tablas de los bancos de Interbanking: corré '
+                . self::SCRIPT . ' contra la base central. Mientras tanto todos los bancos cuentan '
+                . 'como activos y sin alias, no se pueden editar, ninguna cuenta se marca como nueva '
+                . 'y no se puede cargar un saldo manual de respaldo.';
         }
 
         if (!$depurado) {
@@ -976,7 +1067,7 @@ class SaldosInterbanking {
         }
 
         foreach (['tango' => 'leerBancosTango', 'bancos' => 'leerBancos',
-                  'respaldos' => 'leerRespaldos'] as $k => $metodo) {
+                  'respaldos' => 'leerRespaldos', 'vistas' => 'leerVistas'] as $k => $metodo) {
             try {
                 $ctx[$k] = $this->$metodo();
             } catch (Throwable $e) {
@@ -988,6 +1079,7 @@ class SaldosInterbanking {
             'bancos' => self::armarBancos($ultimos, $ctx),
             'avisos' => $avisos,
             'bancos_creado' => $tablas['banco'],
+            'vistas_creado' => $tablas['vistas'],
             'depurado' => $depurado
         ];
     }
@@ -1109,7 +1201,7 @@ class SaldosInterbanking {
      * o no": cada una apaga una parte distinta de la pantalla, y la que existe
      * tiene que seguir funcionando aunque falte otra.
      *
-     * @return array ['banco' => bool, 'manual' => bool]
+     * @return array ['banco' => bool, 'manual' => bool, 'vistas' => bool]
      */
     public function tablas() {
         if ($this->tablas !== null) {
@@ -1118,7 +1210,8 @@ class SaldosInterbanking {
 
         $stmt = sqlsrv_query($this->conectar('central'),
             "SELECT OBJECT_ID('dbo." . self::TABLA_BANCO . "', 'U') AS B,
-                    OBJECT_ID('dbo." . self::TABLA_MANUAL . "', 'U') AS M");
+                    OBJECT_ID('dbo." . self::TABLA_MANUAL . "', 'U') AS M,
+                    OBJECT_ID('dbo." . self::TABLA_VISTAS . "', 'U') AS V");
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al verificar las tablas de Interbanking'));
@@ -1129,7 +1222,8 @@ class SaldosInterbanking {
 
         $this->tablas = [
             'banco' => ($row && $row['B'] !== null),
-            'manual' => ($row && $row['M'] !== null)
+            'manual' => ($row && $row['M'] !== null),
+            'vistas' => ($row && $row['V'] !== null)
         ];
 
         return $this->tablas;
@@ -1164,6 +1258,38 @@ class SaldosInterbanking {
             $row['SALDO_CONTABLE'] = floatval($row['SALDO_CONTABLE']);
             $row['FECHA_ALTA'] = self::fechaHora($row['FECHA_ALTA']);
             $v[self::claveCuenta($row['NRO_BANCO'], $row['NRO_CUENTA'], $row['MONEDA'])] = $row;
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $v;
+    }
+
+    /**
+     * Las cuentas marcadas como vistas, o null sin el script (ninguna es
+     * nueva).
+     *
+     * @return array|null Mapa clave de cuenta => ['USUARIO_ALTA', 'FECHA_ALTA']
+     */
+    public function leerVistas() {
+        if (!$this->tablas()['vistas']) {
+            return null;
+        }
+
+        $stmt = sqlsrv_query($this->conectar('central'),
+            "SELECT NRO_BANCO, NRO_CUENTA, MONEDA, USUARIO_ALTA, FECHA_ALTA FROM dbo." . self::TABLA_VISTAS);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer las cuentas vistas'));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $v[self::claveCuenta($row['NRO_BANCO'], $row['NRO_CUENTA'], $row['MONEDA'])] = [
+                'USUARIO_ALTA' => $row['USUARIO_ALTA'],
+                'FECHA_ALTA' => self::fechaHora($row['FECHA_ALTA'])
+            ];
         }
 
         sqlsrv_free_stmt($stmt);
@@ -1325,6 +1451,69 @@ class SaldosInterbanking {
         if (sqlsrv_query($cid, $sql, $params) === false) {
             throw new Exception($this->errorSql('Error al guardar el banco ' . $c['nro_banco']));
         }
+    }
+
+    /**
+     * Marca como vistas TODAS las cuentas nuevas de un banco.
+     *
+     * Las cuentas se vuelven a leer de Interbanking: no se aceptan del
+     * navegador, que podria mandar una que no existe y dejarla vista antes de
+     * que llegue. Es por banco y no por cuenta porque es como se revisa: se
+     * mira el banco en Interbanking y se confirma lo que trajo. En una
+     * transaccion, con el usuario de la sesion como alta.
+     *
+     * @param string $nroBanco
+     * @param string $usuario
+     * @return int Cuantas cuentas se marcaron
+     */
+    public function marcarVistas($nroBanco, $usuario) {
+        require_once __DIR__ . '/AuthCashflow.php';
+
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
+        if (!$this->tablas()['vistas']) {
+            throw new Exception('Todavía no existe la tabla de cuentas vistas: corré ' . self::SCRIPT
+                . ' contra la base central.');
+        }
+
+        $nuevas = self::cuentasNuevasDe($this->leerUltimos(), $this->leerVistas(), $nroBanco);
+
+        if (empty($nuevas)) {
+            return 0;
+        }
+
+        $cid = $this->conectar('central');
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo iniciar la transacción'));
+        }
+
+        try {
+            foreach ($nuevas as $c) {
+                // El NOT EXISTS evita chocar con la PK si otro la marco recien.
+                $ok = sqlsrv_query($cid,
+                    "INSERT INTO dbo." . self::TABLA_VISTAS . "
+                        (NRO_BANCO, NRO_CUENTA, MONEDA, USUARIO_ALTA, USUARIO_MODIF)
+                     SELECT ?, ?, ?, ?, ?
+                     WHERE NOT EXISTS (SELECT 1 FROM dbo." . self::TABLA_VISTAS . "
+                                       WHERE NRO_BANCO = ? AND NRO_CUENTA = ? AND MONEDA = ?)",
+                    [$c['nro_banco'], $c['nro_cuenta'], $c['moneda'], $usuario, $usuario,
+                     $c['nro_banco'], $c['nro_cuenta'], $c['moneda']]);
+
+                if ($ok === false) {
+                    throw new Exception($this->errorSql('Error al marcar la cuenta ' . $c['nro_cuenta']));
+                }
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudieron confirmar las cuentas vistas'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+            throw $e;
+        }
+
+        return count($nuevas);
     }
 
     /**
@@ -1519,9 +1708,10 @@ class SaldosInterbanking {
         return substr((string) $fecha, 8, 2) . '/' . substr((string) $fecha, 5, 2);
     }
 
-    /** Formato de importe para los avisos */
-    private static function plata($n) {
-        return '$ ' . number_format(floatval($n), 2, ',', '.');
+    /** Formato de importe para los avisos, en su moneda: no se convierte nada */
+    private static function plataEn($n, $moneda) {
+        return (strtoupper((string) $moneda) === 'USD' ? 'US$ ' : '$ ')
+            . number_format(floatval($n), 2, ',', '.');
     }
 
     private function errorSql($contexto) {

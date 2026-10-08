@@ -21,6 +21,8 @@
      1. RO_T_CASHFLOW_SALDOS_BANCO          alias y estado de cada banco (parametro)
      2. RO_T_CASHFLOW_SALDOS_BANCO_MANUAL   saldo cargado a mano como respaldo de
                                             una cuenta que Interbanking no trae
+     3. RO_T_CASHFLOW_SALDOS_BANCO_CUENTA   las cuentas ya vistas, para detectar
+                                            las nuevas; se siembra con las de hoy
 
    ----------------------------------------------------------------------------
    UN BANCO SIN FILA ES UN BANCO ACTIVO Y SIN ALIAS
@@ -148,4 +150,74 @@ BEGIN
 END
 ELSE
     PRINT 'RO_T_CASHFLOW_SALDOS_BANCO_MANUAL ya existia: no se toco.';
+GO
+
+/* ----------------------------------------------------------------------------
+   3. RO_T_CASHFLOW_SALDOS_BANCO_CUENTA
+   Las cuentas de Interbanking que alguien ya MARCO COMO VISTAS.
+
+   POR QUE EXISTE: una cuenta nueva en Interbanking entra sola al disponible
+   -como cualquier otra de un banco activo-, y eso esta bien: es plata que
+   existe. Pero nadie la reviso todavia, y puede ser una cuenta que no se
+   esperaba. Una cuenta que no esta en esta tabla es NUEVA: la pestana la marca
+   y avisa, y deja de hacerlo cuando alguien la marca como vista en
+   Parametros -> Saldos.
+
+   LA FILA EXISTE SOLO SI LA CUENTA YA SE VIO, asi que el alta (USUARIO_ALTA,
+   FECHA_ALTA) ES quien y cuando la marco como vista: no hacen falta columnas
+   aparte para decir lo mismo. No hay baja: una cuenta vista no vuelve a ser
+   nueva.
+
+   SE SIEMBRA CON TODAS LAS CUENTAS QUE YA ESTAN HOY EN BI, con usuario NULL
+   (la pantalla las muestra como sembradas por este script). Sin la siembra,
+   el primer dia todas aparecerian como nuevas y el aviso no diria nada. Va
+   por MERGE WHEN NOT MATCHED: una segunda corrida no duplica nada, y una
+   cuenta que llego despues de la primera corrida tambien queda vista, que es
+   lo que se espera de correr el script.
+
+   La clave es la del origen -NRO_BANCO, NRO_CUENTA y MONEDA-, con su
+   collation. Una cuenta que llega SIN moneda no se siembra: no tiene clave.
+   ---------------------------------------------------------------------------- */
+IF OBJECT_ID('dbo.RO_T_CASHFLOW_SALDOS_BANCO_CUENTA', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.RO_T_CASHFLOW_SALDOS_BANCO_CUENTA (
+        NRO_BANCO     VARCHAR(10) COLLATE Modern_Spanish_CI_AI NOT NULL,
+        NRO_CUENTA    VARCHAR(50) COLLATE Modern_Spanish_CI_AI NOT NULL,
+        MONEDA        VARCHAR(5)  COLLATE Modern_Spanish_CI_AI NOT NULL,
+
+        USUARIO_ALTA  VARCHAR(50) NULL,
+        FECHA_ALTA    DATETIME    NULL CONSTRAINT DF_CF_SAL_BCOC_FALTA  DEFAULT (GETDATE()),
+        USUARIO_MODIF VARCHAR(50) NULL,
+        FECHA_MODIF   DATETIME    NULL CONSTRAINT DF_CF_SAL_BCOC_FMODIF DEFAULT (GETDATE()),
+
+        CONSTRAINT PK_RO_T_CASHFLOW_SALDOS_BANCO_CUENTA
+            PRIMARY KEY CLUSTERED (NRO_BANCO, NRO_CUENTA, MONEDA)
+    );
+
+    PRINT 'Creada RO_T_CASHFLOW_SALDOS_BANCO_CUENTA.';
+END
+ELSE
+    PRINT 'RO_T_CASHFLOW_SALDOS_BANCO_CUENTA ya existia: no se toco.';
+GO
+
+/* La siembra. Si la tabla de BI no existe en este entorno, no hay nada que
+   sembrar y se dice; la pantalla funciona igual. */
+IF OBJECT_ID('dbo.BI_T_SALDOS_INTERBANKING', 'U') IS NULL
+    PRINT 'No existe BI_T_SALDOS_INTERBANKING: no se siembran cuentas vistas.';
+ELSE
+BEGIN
+    MERGE dbo.RO_T_CASHFLOW_SALDOS_BANCO_CUENTA AS T
+    USING (
+        SELECT DISTINCT LTRIM(RTRIM(NRO_BANCO)) AS NRO_BANCO,
+                        LTRIM(RTRIM(NRO_CUENTA)) AS NRO_CUENTA,
+                        UPPER(LTRIM(RTRIM(MONEDA))) AS MONEDA
+        FROM dbo.BI_T_SALDOS_INTERBANKING
+        WHERE MONEDA IS NOT NULL AND LTRIM(RTRIM(MONEDA)) <> ''
+    ) AS S
+        ON T.NRO_BANCO = S.NRO_BANCO AND T.NRO_CUENTA = S.NRO_CUENTA AND T.MONEDA = S.MONEDA
+    WHEN NOT MATCHED THEN
+        INSERT (NRO_BANCO, NRO_CUENTA, MONEDA) VALUES (S.NRO_BANCO, S.NRO_CUENTA, S.MONEDA);
+
+    PRINT 'Cuentas de Interbanking sembradas como vistas: ' + CAST(@@ROWCOUNT AS VARCHAR(10)) + '.';
+END
 GO

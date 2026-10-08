@@ -554,6 +554,28 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* Las cuentas nuevas de un banco pasan a vistas. Las cuentas las
+           relee la clase de Interbanking: del cliente solo viaja el banco. */
+        case 'marcarCuentasVistas':
+            $data = bodyJson();
+
+            if (!isset($data['nro_banco']) || trim((string) $data['nro_banco']) === '') {
+                throw new Exception('Falta el banco');
+            }
+
+            require_once __DIR__ . '/../Class/SaldosInterbanking.php';
+
+            $n = (new SaldosInterbanking())->marcarVistas($data['nro_banco'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => ($n === 0)
+                    ? 'El banco no tenía cuentas nuevas.'
+                    : $n . ' cuenta(s) marcadas como vistas.',
+                'data' => ['marcadas' => $n]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         case 'saveCuentasSaldo':
             $data = bodyJson();
 

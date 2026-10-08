@@ -55,6 +55,20 @@
                 'No se pudieron guardar los bancos manuales');
         });
         conectar('btnGuardarBancosIb', guardarBancosIb);
+
+        // "Marcar como vistas" va en cada banco con cuentas nuevas: un solo
+        // listener, porque la grilla se redibuja entera en cada carga.
+        var cuerpoIb = document.getElementById('bodyBancosIb');
+
+        if (cuerpoIb) {
+            cuerpoIb.addEventListener('click', function(ev) {
+                var btn = ev.target.closest('.sp-btn-vistas');
+
+                if (btn) {
+                    marcarVistas(btn.dataset.banco, btn);
+                }
+            });
+        }
         conectar('btnGuardarFondos', function() {
             guardarCuentas(['bodySpFondos'], 'btnGuardarFondos',
                 'No se pudieron guardar los fondos');
@@ -438,7 +452,7 @@
                     'data-banco="' + escapar(b.nro_banco) + '" maxlength="100" ' +
                     'placeholder="' + escapar(b.desc_banco || ('Banco ' + b.nro_banco)) + '" ' +
                     'value="' + escapar(b.alias || '') + '"></td>';
-            html += '<td>' + cuentasBanco(b) + '</td>';
+            html += '<td>' + cuentasBanco(b) + botonVistas(b) + '</td>';
             html += '<td class="text-center sp-fecha">' +
                     (b.ultimo_dato ? fecha(b.ultimo_dato) : '—') + '</td>';
             html += '<td class="text-center">' +
@@ -493,12 +507,75 @@
             partes.push(c.moneda ? escapar(c.moneda) : '<span class="text-danger">sin moneda</span>');
 
             return '<div class="sp-cuenta-ib">' + partes.join(' · ') +
+                (c.nueva
+                    ? ' <span class="badge text-bg-info sp-marca" title="Interbanking la trae y ' +
+                      'nadie la marcó como vista. Ya suma al tablero.">nueva</span>'
+                    : '') +
                 (c.con_respaldo
                     ? ' <span class="badge text-bg-warning sp-marca" title="Tiene un saldo cargado a ' +
                       'mano en Saldos › Saldos">con respaldo manual</span>'
                     : '') +
                 '</div>';
         }).join('');
+    }
+
+    /**
+     * El botón "Marcar como vistas" de un banco con cuentas nuevas. Sin la
+     * tabla no se dibuja; sin permiso lo saca Permisos.soloLectura().
+     */
+    function botonVistas(b) {
+        if (!b.nuevas || !modulo.vistas_creado) {
+            return '';
+        }
+
+        return '<button type="button" class="btn btn-sm btn-outline-info mt-1 sp-btn-vistas" ' +
+               'data-banco="' + escapar(b.nro_banco) + '">' +
+               '<i class="fas fa-eye me-1"></i> Marcar como vistas (' + b.nuevas + ')</button>';
+    }
+
+    /**
+     * Marca como vistas todas las cuentas nuevas de un banco, con
+     * confirmación. Las cuentas las relee el servidor de Interbanking: acá
+     * sólo viaja el banco.
+     */
+    function marcarVistas(nro, btn) {
+        var b = (modulo.bancos_interbanking || []).filter(function(x) {
+            return x.nro_banco === nro;
+        })[0];
+
+        if (!b) {
+            return;
+        }
+
+        var nuevas = b.cuentas.filter(function(c) { return c.nueva; }).map(function(c) {
+            return c.nro_cuenta + (c.moneda ? ' ' + c.moneda : '');
+        });
+
+        Notificacion.confirmar({
+            titulo: 'Marcar cuentas como vistas',
+            mensaje: '¿Marcar como vistas las ' + nuevas.length + ' cuenta(s) nuevas de ' +
+                (b.alias || b.desc_banco || ('Banco ' + nro)) + '?',
+            detalle: nuevas.join(', ') + '. Dejan de marcarse como nuevas y el aviso desaparece. ' +
+                'Siguen sumando al tablero igual que antes.',
+            confirmar: 'Marcar como vistas'
+        }).then(function(ok) {
+            if (!ok) {
+                return;
+            }
+
+            btn.disabled = true;
+
+            pedirJson(URL_PARAM + '?action=marcarCuentasVistas', { nro_banco: nro })
+                .then(function(data) {
+                    Notificacion.exito((data && data.marcadas ? data.marcadas : 0) +
+                        ' cuenta(s) marcadas como vistas.');
+                    cargar();
+                })
+                .catch(function(error) {
+                    btn.disabled = false;
+                    Notificacion.error('No se pudieron marcar las cuentas: ' + error.message);
+                });
+        });
     }
 
     /**

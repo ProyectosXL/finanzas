@@ -295,6 +295,7 @@ class Parametros {
                             $ib = (new SaldosInterbanking())->getBancosParametros();
                             $modulo['bancos_interbanking'] = $ib['bancos'];
                             $modulo['bancos_creado'] = $ib['bancos_creado'];
+                            $modulo['vistas_creado'] = $ib['vistas_creado'];
 
                             foreach ($ib['avisos'] as $a) {
                                 $modulo['avisos'][] = $a;

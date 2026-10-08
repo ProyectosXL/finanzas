@@ -292,8 +292,8 @@
 
             html += '<tr data-cuenta="' + (f.id_cuenta || '') + '"' +
                     (clases.length ? ' class="' + clases.join(' ') + '"' : '') + '>';
-            html += '<td class="fw-semibold">' + escapar(f.nombre) + botonRespaldo(f) +
-                    detalleCuenta(f) + '</td>';
+            html += '<td class="fw-semibold">' + escapar(f.nombre) + marcaNueva(f) +
+                    botonRespaldo(f) + detalleCuenta(f) + '</td>';
             html += '<td><span class="sal-badge">' + etiquetaTipo(f.tipo) + '</span></td>';
             html += '<td class="text-center">' + escapar(f.moneda) + '</td>';
 
@@ -545,6 +545,18 @@
                     Notificacion.error('No se pudo quitar el saldo manual: ' + error.message);
                 });
         });
+    }
+
+    /**
+     * La marca de una cuenta que Interbanking trajo y nadie marcó como vista.
+     * Ya suma: la marca sólo pide que alguien la revise en Parámetros.
+     */
+    function marcaNueva(f) {
+        return f.nueva
+            ? ' <span class="badge text-bg-info sal-badge-nueva" title="Cuenta nueva en ' +
+              'Interbanking: ya suma al disponible. Revisala y marcala como vista en Parámetros › ' +
+              'Saldos.">nueva</span>'
+            : '';
     }
 
     /** Si la fila es una cuenta de Interbanking y no del catálogo manual */

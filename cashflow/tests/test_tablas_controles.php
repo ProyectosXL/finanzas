@@ -1007,3 +1007,20 @@ chequear('y si existe la tabla del respaldo', true, strpos($jsSal, '!datosSaldos
 chequear('las dos acciones existen en el controller', true,
     strpos(file_get_contents(__DIR__ . '/../Controller/SaldosController.php'), "case 'guardarRespaldoBanco':") !== false
     && strpos(file_get_contents(__DIR__ . '/../Controller/SaldosController.php'), "case 'quitarRespaldoBanco':") !== false);
+
+seccion('Parametros › Saldos: Marcar como vistas esta cableado');
+
+chequear('el boton se arma por banco con cuentas nuevas', true,
+    strpos($jsPs, "class=\"btn btn-sm btn-outline-info mt-1 sp-btn-vistas\"") !== false
+    && strpos($jsPs, 'if (!b.nuevas || !modulo.vistas_creado)') !== false);
+chequear('un solo listener lo engancha', true,
+    strpos($jsPs, "ev.target.closest('.sp-btn-vistas')") !== false
+    && strpos($jsPs, 'marcarVistas(btn.dataset.banco, btn)') !== false);
+chequear('pide confirmacion y llama a su accion', true,
+    (bool) preg_match("/titulo: 'Marcar cuentas como vistas'.*?\?action=marcarCuentasVistas'/s", $jsPs));
+chequear('la accion existe en el controller', true,
+    strpos(file_get_contents(__DIR__ . '/../Controller/ParametrosController.php'),
+        "case 'marcarCuentasVistas':") !== false);
+chequear('sin permiso, soloLectura saca el boton (no lleva data-lectura)', false,
+    strpos($jsPs, 'sp-btn-vistas" data-lectura') !== false);
+chequear('la pestana marca la cuenta nueva', true, strpos($jsSal, 'marcaNueva(f)') !== false);
