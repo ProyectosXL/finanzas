@@ -450,7 +450,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                         <table id="tablaCorp" class="table table-hover mb-0">
                             <thead>
                                 <tr>
-                                    <th rowspan="2" class="text-center" style="width: 46px;">
+                                    <th rowspan="2" class="text-center" style="width: 46px;" data-orden="no">
                                         <?php if ($edita): ?>
                                         <input type="checkbox" class="form-check-input"
                                                id="selTodasCorp"

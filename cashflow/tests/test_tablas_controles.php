@@ -183,6 +183,46 @@ foreach ($sinOrden as $archivo => $tablas) {
     }
 }
 
+/* LA COLUMNA DE SELECCION NO SE ORDENA, Y TILDAR "TODAS" NO ORDENA LA TABLA.
+   El clic en el check del encabezado subia hasta su <th>, y tabla-orden.js lo
+   tomaba como un clic para ordenar: ordenaba por la columna de checks y lo
+   GUARDABA, pisando el orden que el usuario habia elegido a mano. Son dos
+   piezas: el control ignora los clics sobre un campo del encabezado, y la
+   columna declara que no es ordenable -si no, aparece con la flecha y como
+   "Columna 1" en la preferencia-. Se recorren todas las pestanas: la proxima
+   columna de seleccion que alguien agregue entra sola en el chequeo. */
+seccion('la columna de seleccion no se ordena, y tildar "todas" no ordena');
+
+$ordenJsSel = file_get_contents($JS . '/tabla-orden.js');
+
+chequear('tabla-orden.js descarta el <th> que declara data-orden="no"', true,
+    strpos($ordenJsSel, "c.th.getAttribute('data-orden') === 'no'") !== false);
+chequear('y un clic sobre un campo del encabezado no ordena', true,
+    strpos($ordenJsSel, "ev.target.closest('input, select, textarea, button, label, a')") !== false);
+
+$columnasSeleccion = 0;
+
+foreach ($archivosTab as $archivo) {
+    $html = preg_replace('/<!--.*?-->/s', '', contenidoTab($archivo));
+
+    preg_match_all('/<th\b([^>]*)>(.*?)<\/th>/s', $html, $m, PREG_SET_ORDER);
+
+    foreach ($m as $th) {
+        if (strpos($th[2], 'type="checkbox"') === false) {
+            continue;
+        }
+
+        $columnasSeleccion++;
+        preg_match('/id="([^"]+)"/', $th[2], $idChk);
+
+        chequear(basename($archivo) . ': el <th> de ' . ($idChk[1] ?? 'un check')
+            . ' declara data-orden="no"', true, strpos($th[1], 'data-orden="no"') !== false);
+    }
+}
+
+// Si el recorrido no encuentra ninguna, el chequeo de arriba no prueba nada.
+chequear('el recorrido encontro las columnas de seleccion', true, $columnasSeleccion >= 4);
+
 // Y el tablero declara sus filas ancla, que es lo que lo hace ordenable sin
 // romperse: los subtotales y las filas de arrastre significan lo que significan
 // por donde estan.

@@ -252,7 +252,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                      Que un cheque ESTÉ excluido se ve en la
                                      fila —atenuada y con el importe tachado— y
                                      en la marca de esta misma celda. -->
-                                <th rowspan="2" class="text-center" style="width: 46px;">
+                                <th rowspan="2" class="text-center" style="width: 46px;" data-orden="no">
                                     <?php if ($edita): ?>
                                     <input type="checkbox" class="form-check-input"
                                            id="selTodosEch"
@@ -482,7 +482,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                 no está configurado—.
                             -->
                             <tr>
-                                <th rowspan="2" class="text-center" style="width: 60px;">
+                                <th rowspan="2" class="text-center" style="width: 60px;" data-orden="no">
                                     <!-- Marca o desmarca TODO LO VISIBLE según el
                                          filtro actual, y dice cuántas filas va a
                                          afectar antes de hacerlo. -->
