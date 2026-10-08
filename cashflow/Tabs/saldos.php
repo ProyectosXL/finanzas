@@ -10,8 +10,10 @@ $edita = AuthCashflow::puedeEditar('saldos');
 <!--
     Pestaña Saldos. Tres sub-pestañas que son tres cosas distintas:
 
-      Saldos         -> alimenta la fila "Saldo Inicial" del tablero. Carga
-                        periódica (los lunes) y en parte manual.
+      Saldos         -> alimenta la fila "Saldo Inicial" del tablero. Los
+                        bancos de Interbanking se leen en vivo; el efectivo,
+                        Mercado Pago, otros y los bancos sin Interbanking
+                        van en cargas.
       Saldos Locales -> alimenta la fila "Caja Locales". Sale de una consulta
                         contra Tango que se actualiza sola todos los días.
       Fondos         -> las cuentas de inversión y comitente, con su cuenta
@@ -94,7 +96,9 @@ $edita = AuthCashflow::puedeEditar('saldos');
             <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
-                        <span class="kpi-card-title">Última Carga</span>
+                        <!-- Sólo las cargas manuales: los bancos de Interbanking no se
+                             cargan, y la fecha de su saldo está en cada fila. -->
+                        <span class="kpi-card-title">Última carga manual</span>
                         <div class="kpi-card-icon orange"><i class="fas fa-clock-rotate-left"></i></div>
                     </div>
                     <div class="kpi-card-value kpi-card-value-sm" id="ultimaCargaSaldos">—</div>
@@ -125,8 +129,9 @@ $edita = AuthCashflow::puedeEditar('saldos');
                 <div>
                     <h5 class="mb-0">Saldos por cuenta</h5>
                     <small class="text-muted">
-                        Cada fila muestra su <strong>último saldo conocido</strong> con la fecha en
-                        que se cargó. Los datos no se pisan: cada carga es un registro nuevo.
+                        Cada fila muestra su <strong>último saldo conocido</strong> con su fecha.
+                        Los bancos de <strong>Interbanking</strong> se leen todos los días; el
+                        resto se carga a mano y cada carga es un registro nuevo, sin pisar nada.
                     </small>
                 </div>
                 <div class="d-flex gap-2 align-items-center">

@@ -257,11 +257,14 @@
 
         var uc = datosSaldos.ultima_carga;
 
+        // Habla sólo de las cargas manuales: los bancos de Interbanking no se
+        // cargan, y su fecha está en cada fila.
         texto('ultimaCargaSaldos', uc ? fechaHora(uc.fecha_carga) : 'Sin cargas');
         texto('ultimaCargaSaldosDetalle', uc
-            ? ((uc.usuario ? 'Cargado por ' + Auditoria.quien(uc.usuario) : 'Sin usuario registrado')
-                + ' · ' + (uc.observaciones || 'sin observaciones'))
-            : 'Todavía no se cargó ningún saldo');
+            ? ('Mercado Pago, otros y bancos manuales · ' +
+               (uc.usuario ? 'Cargado por ' + Auditoria.quien(uc.usuario) : 'Sin usuario registrado') +
+               ' · ' + (uc.observaciones || 'sin observaciones'))
+            : 'Mercado Pago, otros y bancos manuales: todavía no se cargó ninguno');
 
         var ec = datosSaldos.efectivo_central;
 
@@ -306,7 +309,8 @@
             // La fecha de carga de CADA dato, que es la regla transversal del
             // relevamiento: sirve para ver cuál es la última actualización.
             html += '<td class="text-center sal-fecha-carga">' +
-                    (f.fecha_carga ? fechaHora(f.fecha_carga) : 'sin cargar') + '</td>';
+                    (f.fecha_carga ? fechaHora(f.fecha_carga) : (esInterbanking(f) ? '—' : 'sin cargar')) +
+                    '</td>';
             html += '</tr>';
         });
 
@@ -1472,10 +1476,21 @@
      * un dato. Se juntan los de las tres sub-pestañas en un solo bloque arriba.
      */
     function pintarAvisos() {
-        var avisos = []
-            .concat((datosSaldos && datosSaldos.avisos) || [])
-            .concat((datosLocales && datosLocales.avisos) || [])
-            .concat((datosFondos && datosFondos.avisos) || []);
+        // La pestaña 1 trae los avisos con nivel; las otras dos, textos, que
+        // son atención. Los críticos van en su propio bloque rojo: "esta cuenta
+        // no suma" no puede leerse igual que "este saldo es de ayer".
+        var conNivel = (datosSaldos && datosSaldos.avisos_con_nivel) ||
+            ((datosSaldos && datosSaldos.avisos) || []).map(function(t) {
+                return { nivel: 'warning', texto: t };
+            });
+
+        var avisos = conNivel
+            .concat(((datosLocales && datosLocales.avisos) || []).map(function(t) {
+                return { nivel: 'warning', texto: t };
+            }))
+            .concat(((datosFondos && datosFondos.avisos) || []).map(function(t) {
+                return { nivel: 'warning', texto: t };
+            }));
 
         var cont = document.getElementById('avisosSaldos');
 
@@ -1483,15 +1498,23 @@
             return;
         }
 
-        if (!avisos.length) {
-            cont.innerHTML = '';
-            return;
+        var criticos = avisos.filter(function(a) { return a.nivel === 'danger'; });
+        var resto = avisos.filter(function(a) { return a.nivel !== 'danger'; });
+
+        cont.innerHTML = bloqueAvisos(criticos, 'alert-danger', 'fa-circle-exclamation') +
+            bloqueAvisos(resto, 'alert-warning', 'fa-triangle-exclamation');
+    }
+
+    /** Un bloque de avisos de un color, o nada si no hay ninguno */
+    function bloqueAvisos(lista, clase, icono) {
+        if (!lista.length) {
+            return '';
         }
 
-        cont.innerHTML = '<div class="alert alert-warning py-2 px-3 mb-3">' +
-            '<i class="fas fa-triangle-exclamation me-1"></i>' +
+        return '<div class="alert ' + clase + ' py-2 px-3 mb-3">' +
+            '<i class="fas ' + icono + ' me-1"></i>' +
             '<small><ul class="mb-0 ps-3">' +
-            avisos.map(function(a) { return '<li>' + escapar(a) + '</li>'; }).join('') +
+            lista.map(function(a) { return '<li>' + escapar(a.texto) + '</li>'; }).join('') +
             '</ul></small></div>';
     }
 

@@ -40,6 +40,15 @@ function ibAvisos($avisos, $nivel = null) {
     return implode(' | ', $t);
 }
 
+/**
+ * El codigo de un archivo con finales de linea LF. Con core.autocrlf la copia de
+ * trabajo puede estar en CRLF, y una regex que busca un salto de linea no
+ * encontraria nada: un chequeo de "no contiene" pasaria sin haber mirado.
+ */
+function ibFuente($ruta) {
+    return str_replace("\r\n", "\n", file_get_contents($ruta));
+}
+
 function ibContiene($texto, $aguja) {
     return strpos($texto, $aguja) !== false;
 }
@@ -207,7 +216,7 @@ chequear('el efectivo y Mercado Pago siguen entrando',
 seccion('la consulta va contra la tabla de BI sola');
 // ============================================================================
 
-$srcIb = file_get_contents(__DIR__ . '/../Class/SaldosInterbanking.php');
+$srcIb = ibFuente(__DIR__ . '/../Class/SaldosInterbanking.php');
 preg_match('/function leerUltimos\(\).*?\n    }\n/s', $srcIb, $m);
 $leer = isset($m[0]) ? $m[0] : '';
 
@@ -550,13 +559,13 @@ chequear('las dos validan el usuario de escritura', true,
     ibContiene($guardarResp, 'usuarioDeEscritura') && ibContiene($quitarResp, 'usuarioDeEscritura'));
 chequear('el guardado rechaza un banco inactivo', true, ibContiene($guardarResp, 'bancoActivo('));
 
-$sqlIb = file_get_contents(__DIR__ . '/../sql/cashflow_saldos_interbanking.sql');
+$sqlIb = ibFuente(__DIR__ . '/../sql/cashflow_saldos_interbanking.sql');
 chequear('el script deja un solo respaldo vigente por cuenta', true,
     (bool) preg_match('/CREATE UNIQUE NONCLUSTERED INDEX UX_RO_T_CASHFLOW_SALDOS_BANCO_MANUAL_VIGENTE\s+'
         . 'ON dbo\.RO_T_CASHFLOW_SALDOS_BANCO_MANUAL \(NRO_BANCO, NRO_CUENTA, MONEDA\)\s+WHERE VIGENTE = 1/',
         $sqlIb));
 
-$authSrc = file_get_contents(__DIR__ . '/../Class/AuthCashflow.php');
+$authSrc = ibFuente(__DIR__ . '/../Class/AuthCashflow.php');
 chequear('las acciones del respaldo piden el permiso de carga de saldos', true,
     ibContiene($authSrc, "'guardarRespaldoBanco' => [['saldos', null]]")
     && ibContiene($authSrc, "'quitarRespaldoBanco' => [['saldos', null]]"));
@@ -570,17 +579,17 @@ chequear('el alta de un banco manual advierte que no sea uno de Interbanking',
 chequear('el alta de otro tipo no advierte nada', null, Saldos::advertenciaAltaCuenta('MERCADO_PAGO'));
 chequear('ni la de un fondo', null, Saldos::advertenciaAltaCuenta('BANCO', 'INVERSION'));
 
-$srcSaldos = file_get_contents(__DIR__ . '/../Class/Saldos.php');
+$srcSaldos = ibFuente(__DIR__ . '/../Class/Saldos.php');
 preg_match('/function getSaldosActuales\(\).*?\n    }\n/s', $srcSaldos, $m);
 chequear('los bancos manuales siguen entrando por getSaldosActuales(): no se filtra el tipo',
     false, (bool) preg_match("/TIPO\s*(<>|!=|NOT IN)/", isset($m[0]) ? $m[0] : ''));
 chequear('addCuenta() sigue aceptando BANCO',
     true, ibContiene($srcSaldos, "\$tipos = ['BANCO', 'MERCADO_PAGO', 'EFECTIVO_CENTRAL', 'OTRO'];"));
 
-$pc = file_get_contents(__DIR__ . '/../Controller/ParametrosController.php');
+$pc = ibFuente(__DIR__ . '/../Controller/ParametrosController.php');
 chequear('la respuesta del alta lleva la advertencia',
     true, ibContiene($pc, "'advertencia' => Saldos::advertenciaAltaCuenta("));
-$jsPs = file_get_contents(__DIR__ . '/../Js/Parametros-Saldos.js');
+$jsPs = ibFuente(__DIR__ . '/../Js/Parametros-Saldos.js');
 chequear('y el navegador la muestra', true, ibContiene($jsPs, 'Notificacion.advertencia(data.advertencia)'));
 
 // Un banco manual en USD y uno de Interbanking en ARS: la serie suma cada uno
@@ -596,7 +605,7 @@ chequear('y la pestana lo muestra en dolares, sin convertir', 71000.0, $t['USD']
 seccion('el script de borrado de las cuentas bancarias manuales');
 // ============================================================================
 
-$sqlBorrar = file_get_contents(__DIR__ . '/../sql/cashflow_saldos_borrar_bancos_manuales.sql');
+$sqlBorrar = ibFuente(__DIR__ . '/../sql/cashflow_saldos_borrar_bancos_manuales.sql');
 
 chequear('arranca en simulacion', true, (bool) preg_match('/DECLARE @SIMULAR BIT = 1;/', $sqlBorrar));
 chequear('la simulacion corta antes de crear o borrar nada', true,
@@ -759,7 +768,7 @@ chequear('relee las cuentas de Interbanking: no las acepta del navegador', true,
 chequear('y escribe en una transaccion', true,
     ibContiene($marcar, 'sqlsrv_begin_transaction') && ibContiene($marcar, 'sqlsrv_rollback'));
 
-$sqlIb = file_get_contents(__DIR__ . '/../sql/cashflow_saldos_interbanking.sql');
+$sqlIb = ibFuente(__DIR__ . '/../sql/cashflow_saldos_interbanking.sql');
 chequear('el script crea la tabla con PK banco + cuenta + moneda', true,
     ibContiene($sqlIb, 'PRIMARY KEY CLUSTERED (NRO_BANCO, NRO_CUENTA, MONEDA)'));
 chequear('y siembra como vistas las cuentas de hoy, sin duplicar', true,
@@ -767,5 +776,67 @@ chequear('y siembra como vistas las cuentas de hoy, sin duplicar', true,
 chequear('la siembra deja afuera las cuentas sin moneda', true,
     ibContiene($sqlIb, "WHERE MONEDA IS NOT NULL AND LTRIM(RTRIM(MONEDA)) <> ''"));
 chequear('marcar como vistas pide el permiso de Parametros › Saldos', true,
-    ibContiene(file_get_contents(__DIR__ . '/../Class/AuthCashflow.php'),
+    ibContiene(ibFuente(__DIR__ . '/../Class/AuthCashflow.php'),
         "'marcarCuentasVistas' => [['parametros', 'SALDOS']]"));
+
+// ============================================================================
+seccion('la pestana y el tablero suman lo mismo');
+// ============================================================================
+
+// Las filas que arma getFilasDisponible(): las cargas mas las de Interbanking,
+// con una sin dato y un respaldo. La pestana suma las cargadas por moneda; el
+// tablero arma la serie con las mismas. Tienen que dar lo mismo.
+$bancarias = SaldosInterbanking::armarCuentasBancarias($ultimos, ['hoy' => IB_HOY, 'tango' => $tangoIb,
+    'respaldos' => ['014|200|ARS' => ibResp(9, '2026-10-07', 35000000.0)]])['filas'];
+$todas = array_merge($manuales, $bancarias);
+$cargadas = array_filter($todas, function ($f) { return $f['cargada']; });
+
+$totPestana = Saldos::totalesPorMoneda($cargadas);
+$serieTablero = Saldos::armarSerieDisponible($cargadas, $hIb);
+
+chequear('el total en pesos de la pestana es el Saldo Inicial del tablero',
+    $totPestana['ARS']['total'], floatval(array_sum($serieTablero['serie']['dias'])));
+chequear('y una cuenta sin dato no suma en ninguno de los dos', true,
+    $totPestana['ARS']['total'] === 1000.0 + 300.0 + 700.0 + 500.0 + 70.0 + 35000000.0);
+
+// ============================================================================
+seccion('la pestana: avisos con nivel y el rotulo de la ultima carga');
+// ============================================================================
+
+$srcSal = ibFuente(__DIR__ . '/../Class/Saldos.php');
+preg_match('/public function getPestanaSaldos\(\).*?\n    }\n/s', $srcSal, $m);
+$pestana = isset($m[0]) ? $m[0] : '';
+
+chequear('la pestana lee las mismas filas que el tablero',
+    true, ibContiene($pestana, '$this->getFilasDisponible(date(\'Y-m-d\'))'));
+chequear('y manda los avisos con nivel', true, ibContiene($pestana, "'avisos_con_nivel' => Aviso::lista(\$avisos)"));
+
+$tabSalPhp = ibFuente(__DIR__ . '/../Tabs/saldos.php');
+$jsSalT = ibFuente(__DIR__ . '/../Js/Saldos.js');
+chequear('el KPI dice "Ultima carga manual"', true, ibContiene($tabSalPhp, '>Última carga manual<'));
+chequear('y el detalle aclara que es de Mercado Pago, otros y bancos manuales',
+    true, ibContiene($jsSalT, "'Mercado Pago, otros y bancos manuales · '"));
+chequear('los criticos van en un bloque rojo aparte', true,
+    ibContiene($jsSalT, "bloqueAvisos(criticos, 'alert-danger'"));
+chequear('una cuenta de Interbanking sin dato se ve con guion, no "sin cargar"', true,
+    ibContiene($jsSalT, "(esInterbanking(f) ? '—' : 'sin cargar')"));
+
+// ============================================================================
+seccion('contra la base: la pestana y el proveedor suman lo mismo');
+// ============================================================================
+
+if (!Pruebas::hayBase()) {
+    Pruebas::saltear('sin conexion a la base');
+    return;
+}
+
+require_once __DIR__ . '/../Class/CashflowRegistry.php';
+
+$hHoy = new Horizonte(28, 12, [], new DateTime(date('Y-m-d')));
+$pestanaReal = (new Saldos())->getPestanaSaldos();
+$serieReal = CashflowRegistry::instanciar('SALDOS')->series($hHoy)['DISPONIBLE'];
+$tc = $serieReal['tipo_cambio'];
+
+chequear('el Saldo Inicial es el total en pesos mas los dolares a su cotizacion',
+    round($pestanaReal['totales']['ARS']['total'] + ($tc === null ? 0 : $pestanaReal['totales']['USD']['total'] * $tc), 2),
+    round(floatval(array_sum($serieReal['dias'])), 2));

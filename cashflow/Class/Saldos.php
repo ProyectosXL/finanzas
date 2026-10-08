@@ -2657,7 +2657,9 @@ class Saldos {
         $disponible = $this->getFilasDisponible(date('Y-m-d'));
         $filas = $disponible['filas'];
 
-        foreach (Aviso::textos($disponible['avisos']) as $a) {
+        // Con su nivel: un critico de Interbanking (una cuenta sin dato, la
+        // lectura caida) se tiene que ver distinto de un aviso de atencion.
+        foreach ($disponible['avisos'] as $a) {
             $avisos[] = $a;
         }
 
@@ -2697,7 +2699,7 @@ class Saldos {
         $noEsDeHoy = SaldosInterbanking::avisoNoEsDeHoy($filas);
 
         if ($noEsDeHoy !== null) {
-            $avisos[] = $noEsDeHoy['texto'];
+            $avisos[] = $noEsDeHoy;
         }
 
         foreach ($filas as $f) {
@@ -2730,7 +2732,10 @@ class Saldos {
             }, $cargas),
             'efectivo_central' => $efectivo,
             'respaldo_creado' => $disponible['respaldo_creado'],
-            'avisos' => $avisos
+            // Los textos, como siempre, y la misma lista con nivel: la pestana
+            // pinta los criticos aparte. Un texto suelto es atencion.
+            'avisos' => Aviso::textos($avisos),
+            'avisos_con_nivel' => Aviso::lista($avisos)
         ];
     }
 
