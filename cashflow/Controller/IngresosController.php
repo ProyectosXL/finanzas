@@ -259,6 +259,50 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* LA MISMA FECHA PARA VARIAS FACTURAS, y volverlas a la calculada.
+           Son el gesto masivo de la barra de seleccion de Cobranzas FR y May,
+           y escriben por el MISMO lote transaccional que la edicion de a una:
+           todas o ninguna. La fecha y los comprobantes se validan en
+           Ingresos antes de abrir la transaccion; aca solo se exige que la
+           fecha venga, que la pantalla no puede garantizar. */
+        case 'saveFechaCobroManualMasiva':
+            $data = $bodyJson();
+
+            if (!isset($data['fecha_cobro']) || $data['fecha_cobro'] === '') {
+                throw new Exception('Falta la fecha de cobro que hay que ponerles.');
+            }
+
+            $r = $ingresos->saveFechaManualMasiva(
+                isset($data['comprobantes']) ? $data['comprobantes'] : [],
+                $data['fecha_cobro'],
+                $usuario
+            );
+
+            // El mensaje dice QUE fecha quedo y en cuantas: es lo que el
+            // usuario tiene que poder comparar con lo que eligio.
+            echo json_encode([
+                'success' => true,
+                'message' => 'Fecha de cobro ' . date('d/m/Y', strtotime($r['fecha']))
+                    . ' guardada en ' . $r['tocados'] . ' factura(s).',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'deleteFechaCobroManualMasiva':
+            $data = $bodyJson();
+
+            $r = $ingresos->deleteFechaManualMasiva(
+                isset($data['comprobantes']) ? $data['comprobantes'] : []);
+
+            // Cuenta las que se borraron DE VERDAD: una sin fecha manual no
+            // cambia nada, y decir que se "volvio" seria inflar el numero.
+            echo json_encode([
+                'success' => true,
+                'message' => $r['borradas'] . ' factura(s) vuelven a la fecha calculada.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         default:
             echo json_encode([
                 'success' => false,
