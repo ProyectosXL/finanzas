@@ -250,8 +250,20 @@
         filas.forEach(function(f) {
             var consulta = (f.origen_cuenta === 'CONSULTA');
 
-            html += '<tr data-cuenta="' + f.id_cuenta + '"' +
-                    (f.cargada ? '' : ' class="sal-sin-cargar"') + '>';
+            // Mismo resaltado que "no es de ayer" de Saldos Locales: es la
+            // misma señal, un dato que tendría que haber llegado y no llegó.
+            var clases = [];
+
+            if (!f.cargada) {
+                clases.push('sal-sin-cargar');
+            }
+
+            if (f.no_es_de_hoy) {
+                clases.push('sal-desactualizado');
+            }
+
+            html += '<tr data-cuenta="' + (f.id_cuenta || '') + '"' +
+                    (clases.length ? ' class="' + clases.join(' ') + '"' : '') + '>';
             html += '<td class="fw-semibold">' + escapar(f.nombre) + detalleCuenta(f) + '</td>';
             html += '<td><span class="sal-badge">' + etiquetaTipo(f.tipo) + '</span></td>';
             html += '<td class="text-center">' + escapar(f.moneda) + '</td>';
@@ -259,7 +271,7 @@
             // Un guion y no un cero: "esta cuenta nunca se cargó" no es lo mismo
             // que "esta cuenta tiene cero pesos".
             html += '<td class="text-end sal-saldo">' + celdaSaldo(f, consulta) + '</td>';
-            html += '<td class="text-center">' + (f.fecha_saldo ? fecha(f.fecha_saldo) : '—') + '</td>';
+            html += '<td class="text-center">' + celdaFechaSaldo(f) + '</td>';
             html += '<td class="text-center"><span class="sal-origen">' +
                     etiquetaOrigen(consulta ? 'CONSULTA' : (f.origen_dato || 'MANUAL')) +
                     '</span></td>';
@@ -325,6 +337,22 @@
         return '<input type="number" step="0.01" class="form-control form-control-sm ' +
                'text-end sal-input-saldo" data-cuenta="' + f.id_cuenta + '" ' +
                'data-moneda="' + f.moneda + '" value="' + (f.cargada ? f.saldo : 0) + '">';
+    }
+
+    /**
+     * La fecha del saldo, y debajo "no es de hoy" cuando el saldo de
+     * Interbanking no es del día. La regla es del servidor (no_es_de_hoy): el
+     * navegador no decide qué es "hoy".
+     */
+    function celdaFechaSaldo(f) {
+        var html = f.fecha_saldo ? fecha(f.fecha_saldo) : '—';
+
+        if (f.no_es_de_hoy) {
+            html += '<div class="sal-subtitulo sal-error" title="Interbanking no trajo el saldo ' +
+                    'de hoy de esta cuenta: se muestra el último que hay.">no es de hoy</div>';
+        }
+
+        return html;
     }
 
     /** Si la fila es una cuenta de Interbanking y no del catálogo manual */

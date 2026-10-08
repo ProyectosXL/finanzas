@@ -332,3 +332,80 @@ chequear('el guardado valida el usuario de escritura',
     true, ibContiene($guardar, 'AuthCashflow::usuarioDeEscritura('));
 chequear('y escribe en una transaccion',
     true, ibContiene($guardar, 'sqlsrv_begin_transaction') && ibContiene($guardar, 'sqlsrv_rollback'));
+
+// ============================================================================
+seccion('el saldo que no es de hoy: en la pestana');
+// ============================================================================
+
+$porClave = [];
+
+foreach ($r['filas'] as $f) {
+    $porClave[$f['clave']] = $f;
+}
+
+chequear('un saldo de hoy no se marca', false, $porClave['007|100|ARS']['no_es_de_hoy']);
+chequear('uno de ayer se marca "no es de hoy"', true, $porClave['015|300|ARS']['no_es_de_hoy']);
+chequear('una cuenta sin dato no se marca: ya tiene su aviso',
+    false, $porClave['014|200|ARS']['no_es_de_hoy']);
+chequear('la regla es estricta: un sabado sin registro del dia tambien se marca',
+    true, SaldosInterbanking::noEsDeHoy('2026-10-09', '2026-10-10'));
+
+$avisoHoy = SaldosInterbanking::avisoNoEsDeHoy($r['filas']);
+chequear('el aviso de la pestana es de atencion', Aviso::WARNING, $avisoHoy['nivel']);
+chequear('y lista cada cuenta con su fecha',
+    true, ibContiene($avisoHoy['texto'], 'ICBC · 300 (07/10)'));
+chequear('sin cuentas viejas no hay aviso',
+    null, SaldosInterbanking::avisoNoEsDeHoy([$porClave['007|100|ARS']]));
+
+// ============================================================================
+seccion('el saldo que no es de hoy: en el tablero');
+// ============================================================================
+
+$filaIb = function ($saldo, $fecha, $moneda = 'ARS') {
+    return ['origen' => SaldosInterbanking::ORIGEN_INTERBANKING, 'tipo' => 'BANCO',
+            'moneda' => $moneda, 'saldo' => $saldo, 'fecha_saldo' => $fecha, 'cargada' => true];
+};
+$filaCarga = function ($saldo, $fecha, $moneda = 'ARS', $tipo = 'MERCADO_PAGO') {
+    return ['origen' => Saldos::ORIGEN_CARGA, 'tipo' => $tipo,
+            'moneda' => $moneda, 'saldo' => $saldo, 'fecha_saldo' => $fecha, 'cargada' => true];
+};
+
+$d = Saldos::armarSerieDisponible([$filaIb(1000.0, IB_HOY)], $hIb);
+chequear('un saldo de hoy va a la columna de hoy', 1000.0, $d['serie']['dias'][IB_HOY]);
+chequear('y no avisa nada', 0, count($d['avisos_con_nivel']));
+
+$d = Saldos::armarSerieDisponible([$filaIb(1000.0, '2026-10-06'), $filaIb(500.0, '2026-10-07')], $hIb);
+chequear('uno viejo de Interbanking va a la primera columna', 1500.0, $d['serie']['dias'][IB_HOY]);
+chequear('con aviso WARNING', Aviso::WARNING, $d['avisos_con_nivel'][0]['nivel']);
+chequear('y ningun DANGER', '', ibAvisos($d['avisos_con_nivel'], Aviso::DANGER));
+chequear('que dice cuantas cuentas, cuanta plata y la fecha mas vieja',
+    true, ibContiene($d['avisos'][0], '2 cuenta(s) bancaria(s) por $ 1.500,00')
+        && ibContiene($d['avisos'][0], '06/10/2026'));
+chequear('en la seccion Saldo Inicial', 'Saldo Inicial', $d['avisos_con_nivel'][0]['seccion']);
+chequear('sin pedir que se actualice una carga',
+    false, ibContiene($d['avisos'][0], 'Actualizá la carga'));
+
+$d = Saldos::armarSerieDisponible([$filaCarga(700.0, '2026-10-01')], $hIb);
+chequear('lo manual viejo conserva su aviso critico', Aviso::DANGER, $d['avisos_con_nivel'][0]['nivel']);
+chequear('el de siempre', true, ibContiene($d['avisos'][0], 'Actualizá la carga de saldos'));
+
+$d = Saldos::armarSerieDisponible([['nombre' => 'sin origen', 'moneda' => 'ARS', 'saldo' => 10.0,
+    'fecha_saldo' => '2026-10-01']], $hIb);
+chequear('una fila sin origen se trata como una carga', Aviso::DANGER, $d['avisos_con_nivel'][0]['nivel']);
+
+$d = Saldos::armarSerieDisponible([$filaIb(1000.0, '2026-10-06'), $filaCarga(700.0, '2026-10-01')], $hIb);
+chequear('mezclados, cada uno con su aviso', 'danger,warning',
+    implode(',', array_map(function ($a) { return $a['nivel']; }, $d['avisos_con_nivel'])));
+chequear('y los dos en la primera columna', 1700.0, $d['serie']['dias'][IB_HOY]);
+
+$d = Saldos::armarSerieDisponible([$filaCarga(100.0, IB_HOY, 'USD', 'BANCO')], $hIb, ['2026-10' => 1400.0]);
+chequear('un banco manual en USD entra con su cotizacion', 140000.0, $d['serie']['dias'][IB_HOY]);
+
+// ============================================================================
+seccion('la carga vieja habla solo de las cargas manuales');
+// ============================================================================
+
+chequear('el aviso de carga vieja dice que es la manual', true, ibContiene(
+    implode(' ', Saldos::avisosAntiguedad('2026-09-01', 7, IB_HOY)), 'última carga manual'));
+chequear('y nombra lo que se carga a mano', true, ibContiene(
+    implode(' ', Saldos::avisosAntiguedad('2026-09-01', 7, IB_HOY)), 'bancos manuales'));

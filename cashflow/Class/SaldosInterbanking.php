@@ -70,6 +70,13 @@ class SaldosInterbanking {
     /** De donde salio el saldo de una fila bancaria */
     const ORIGEN_INTERBANKING = 'INTERBANKING';
 
+    /**
+     * Los origenes que se esperan DEL DIA. Un saldo viejo de estos no pide
+     * "actualiza la carga" -no hay carga que actualizar- sino que avisa que
+     * no llego el de hoy. Ver Saldos::armarSerieDisponible().
+     */
+    const ORIGENES_DEL_DIA = [self::ORIGEN_INTERBANKING];
+
     /** Seccion de los avisos en el tablero: van con los del disponible */
     const SECCION = 'Saldo Inicial';
 
@@ -314,6 +321,54 @@ class SaldosInterbanking {
     }
 
     /**
+     * Si el saldo de una fila no es de hoy.
+     *
+     * LA REGLA ES ESTRICTA: el proceso de BI integra todos los dias, asi que
+     * el saldo tiene que ser del dia. Sin registro de hoy se marca, tambien a
+     * la manana antes de que corra el proceso y los fines de semana. Una
+     * tolerancia por hora o por dia habil esconderia justo el dia en que el
+     * proceso no corrio. Una fila sin dato no se marca: ya tiene su propio
+     * aviso, y "no es de hoy" de algo que no existe no dice nada.
+     *
+     * @param string|null $fecha 'Y-m-d' del saldo usado
+     * @param string $hoy 'Y-m-d'
+     * @return bool
+     */
+    public static function noEsDeHoy($fecha, $hoy) {
+        return $fecha !== null && $fecha !== '' && substr((string) $fecha, 0, 10) < $hoy;
+    }
+
+    /**
+     * El aviso de la pestana que lista las cuentas cuyo saldo no es de hoy,
+     * cada una con su fecha. Null si todas son de hoy.
+     *
+     * Va SOLO en la pestana: el tablero tiene el suyo, que arma
+     * Saldos::armarSerieDisponible() con cuantas cuentas, cuanta plata y la
+     * fecha mas vieja, porque ahi lo que importa es cuanto del Saldo Inicial
+     * no es de hoy y no el detalle de cada cuenta.
+     *
+     * @param array $filas Filas bancarias con 'no_es_de_hoy', 'nombre' y 'fecha_saldo'
+     * @return array|null Aviso
+     */
+    public static function avisoNoEsDeHoy($filas) {
+        $lista = [];
+
+        foreach ((is_array($filas) ? $filas : []) as $f) {
+            if (!empty($f['no_es_de_hoy'])) {
+                $lista[] = $f['nombre'] . ' (' . self::diaMes($f['fecha_saldo']) . ')';
+            }
+        }
+
+        if (empty($lista)) {
+            return null;
+        }
+
+        return Aviso::nuevo(Aviso::WARNING, 'No hay saldo de hoy de ' . count($lista)
+            . ' cuenta(s) bancaria(s); se muestra el último que hay: ' . implode(', ', $lista) . '.',
+            self::SECCION);
+    }
+
+    /**
      * Agrupa por cuenta lo que devolvio leerUltimos().
      *
      * Las cuentas sin moneda quedan aparte: no tienen clave valida, y se
@@ -385,6 +440,7 @@ class SaldosInterbanking {
     public static function armarCuentasBancarias($ultimos, $ctx) {
         $tango = isset($ctx['tango']) && is_array($ctx['tango']) ? $ctx['tango'] : [];
         $bancos = isset($ctx['bancos']) && is_array($ctx['bancos']) ? $ctx['bancos'] : [];
+        $hoy = isset($ctx['hoy']) ? substr((string) $ctx['hoy'], 0, 10) : date('Y-m-d');
         $avisos = [];
         $filas = [];
 
@@ -436,7 +492,7 @@ class SaldosInterbanking {
                     self::SECCION);
             }
 
-            $filas[] = self::fila($clave, $c, $banco, $eleccion);
+            $filas[] = self::fila($clave, $c, $banco, $eleccion, $hoy);
         }
 
         foreach (array_keys($fueraDeTango) as $nro) {
@@ -453,7 +509,7 @@ class SaldosInterbanking {
      * que la pestana, los totales y la serie la traten igual que a una cuenta
      * manual. 'cargada' en false es "sin dato": el saldo va null, no cero.
      */
-    private static function fila($clave, $c, $banco, $eleccion) {
+    private static function fila($clave, $c, $banco, $eleccion, $hoy) {
         $usado = $eleccion['usado'];
 
         return [
@@ -472,6 +528,7 @@ class SaldosInterbanking {
             'cargada' => ($usado !== null),
             'saldo' => ($usado === null) ? null : floatval($usado['SALDO_CONTABLE']),
             'fecha_saldo' => ($usado === null) ? null : $usado['FECHA_OPERACION'],
+            'no_es_de_hoy' => self::noEsDeHoy(($usado === null) ? null : $usado['FECHA_OPERACION'], $hoy),
             'fecha_carga' => ($usado === null) ? null : $usado['CREATED_AT'],
             'usuario_carga' => null,
             'ultimo_registro' => ($eleccion['mas_nuevo'] === null)

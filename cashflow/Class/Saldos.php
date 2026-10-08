@@ -7,6 +7,7 @@ require_once __DIR__ . '/Fondos.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
 require_once __DIR__ . '/DiasHabiles.php';
+require_once __DIR__ . '/SaldosInterbanking.php';
 
 /**
  * Saldos
@@ -1256,7 +1257,16 @@ class Saldos {
      * cero, que es exactamente el problema que este modulo viene a resolver. El
      * aviso dice de que fecha es el saldo, para que nadie lo lea como de hoy.
      *
-     * @param array $filas Filas con 'fecha_saldo', 'moneda', 'saldo'
+     * EL AVISO DEPENDE DEL ORIGEN DE CADA FILA. Lo que sale de una carga de la
+     * pestana (efectivo, Mercado Pago, otros, bancos manuales) y quedo viejo
+     * es critico y pide actualizar la carga: alguien tiene que hacerla. Lo que
+     * trae Interbanking (SaldosInterbanking::ORIGENES_DEL_DIA) no tiene carga
+     * que actualizar: lo trae un proceso todos los dias, y un saldo viejo es
+     * atencion, con cuantas cuentas, cuanta plata y la fecha mas vieja. Las
+     * dos van a la misma primera columna: la regla de imputacion es una sola.
+     *
+     * @param array $filas Filas con 'fecha_saldo', 'moneda', 'saldo' y
+     *        'origen' (sin origen, como una carga)
      * @param Horizonte $h
      * @param array $cotizaciones Mapa 'YYYY-MM' => tipo de cambio, de
      *        Cotizacion::mapaMensual(). Un mes ausente es "sin cotizacion".
@@ -1278,6 +1288,12 @@ class Saldos {
         $fechaMasVieja = null;
         $usdSinCotizar = 0;
         $tiposUsados = [];
+
+        // Lo que se espera del dia (Interbanking) y quedo viejo, aparte de lo
+        // que sale de una carga: son dos avisos distintos. Ver abajo.
+        $viejoDelDia = 0;
+        $cuentasViejasDelDia = 0;
+        $fechaMasViejaDelDia = null;
 
         if (!is_array($filas)) {
             return self::resultadoDisponible($serie, $avisos, 0, 0);
@@ -1302,8 +1318,11 @@ class Saldos {
             // y va a la primera columna. Se guarda de que fecha era para
             // poder decirlo. Misma regla que la serie de locales.
             $destino = self::destinoEnEje($fecha, $hoy);
+            $delDia = isset($f['origen'])
+                && in_array($f['origen'], SaldosInterbanking::ORIGENES_DEL_DIA, true);
+            $viejo = ($destino !== $fecha);
 
-            if ($destino !== $fecha) {
+            if ($viejo && !$delDia) {
                 $reubicado += $importe;
 
                 if ($fechaMasVieja === null || $fecha < $fechaMasVieja) {
@@ -1328,6 +1347,15 @@ class Saldos {
 
             if (!$h->acumular($serie, $destino, $importe)) {
                 $serie['fuera_horizonte'] += $importe;
+            } elseif ($viejo && $delDia) {
+                // En pesos, ya convertido: es la plata que entro a la primera
+                // columna sin ser de hoy.
+                $viejoDelDia += $importe;
+                $cuentasViejasDelDia++;
+
+                if ($fechaMasViejaDelDia === null || $fecha < $fechaMasViejaDelDia) {
+                    $fechaMasViejaDelDia = $fecha;
+                }
             }
         }
 
@@ -1342,6 +1370,17 @@ class Saldos {
                 . 'saldos cargados el ' . self::fechaCorta($fechaMasVieja) . ' o antes y se '
                 . 'muestran en la primera columna, que es la apertura del horizonte. Actualizá la '
                 . 'carga de saldos para que el disponible sea el de hoy.', 'Saldo Inicial');
+        }
+
+        /* Lo de Interbanking que no es de hoy es ATENCION, no critico, y no pide
+           "actualiza la carga": no hay ninguna carga que actualizar, el dato lo
+           trae un proceso todos los dias. Lo que hay que saber es cuanto del
+           Saldo Inicial no es del dia y de cuando es lo mas viejo. */
+        if ($cuentasViejasDelDia > 0) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $cuentasViejasDelDia . ' cuenta(s) bancaria(s) '
+                . 'por ' . self::plata($viejoDelDia) . ' no tienen saldo de hoy: se toma el último '
+                . 'que hay, el más viejo del ' . self::fechaCorta($fechaMasViejaDelDia) . ', y va en '
+                . 'la primera columna, que es la apertura del horizonte.', 'Saldo Inicial');
         }
 
         if ($usdSinCotizar != 0) {
@@ -1415,7 +1454,11 @@ class Saldos {
     }
 
     /**
-     * Avisos sobre la antiguedad de la ultima carga.
+     * Avisos sobre la antiguedad de la ultima carga MANUAL.
+     *
+     * Solo habla de las cargas de la pestana: los saldos de Interbanking no
+     * se cargan, y su antiguedad la avisa cada fila ("no es de hoy"). Por eso
+     * saldos_dias_alerta_carga aplica solo aca.
      *
      * La regla transversal del relevamiento es que se vea la fecha de carga de
      * cada dato. El aviso es el complemento: que la pantalla lo diga sola cuando
@@ -1428,15 +1471,16 @@ class Saldos {
      */
     public static function avisosAntiguedad($fechaCarga, $diasAlerta, $hoy) {
         if ($fechaCarga === null || $fechaCarga === '') {
-            return ['Todavía no hay ninguna carga de saldos. El Saldo Inicial del tablero se '
-                . 'muestra en cero hasta que se cargue la primera.'];
+            return ['Todavía no hay ninguna carga manual de saldos (Mercado Pago, otros y bancos '
+                . 'manuales): hasta la primera, esas cuentas no suman al Saldo Inicial.'];
         }
 
         $dias = (int) floor((strtotime($hoy) - strtotime(substr($fechaCarga, 0, 10))) / 86400);
 
         if ($diasAlerta > 0 && $dias > $diasAlerta) {
-            return ['La última carga de saldos es del ' . self::fechaCorta($fechaCarga)
-                . ', hace ' . $dias . ' días. El disponible que se está mostrando no es el de hoy.'];
+            return ['La última carga manual de saldos (Mercado Pago, otros y bancos manuales) es '
+                . 'del ' . self::fechaCorta($fechaCarga) . ', hace ' . $dias . ' días: esos saldos no '
+                . 'son los de hoy.'];
         }
 
         return [];
@@ -2598,6 +2642,13 @@ class Saldos {
             ) as $a) {
                 $avisos[] = $a;
             }
+        }
+
+        // Las cuentas bancarias cuyo saldo no es de hoy, cada una con su fecha.
+        $noEsDeHoy = SaldosInterbanking::avisoNoEsDeHoy($filas);
+
+        if ($noEsDeHoy !== null) {
+            $avisos[] = $noEsDeHoy['texto'];
         }
 
         foreach ($filas as $f) {
