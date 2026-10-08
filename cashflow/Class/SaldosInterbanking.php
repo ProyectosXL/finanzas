@@ -64,14 +64,26 @@ class SaldosInterbanking {
     /** La tabla que alimenta el proceso de BI. Aca solo se lee. */
     const TABLA_BI = 'BI_T_SALDOS_INTERBANKING';
 
+    /** Alias y estado de cada banco. La crea sql/cashflow_saldos_interbanking.sql */
+    const TABLA_BANCO = 'RO_T_CASHFLOW_SALDOS_BANCO';
+
     /** De donde salio el saldo de una fila bancaria */
     const ORIGEN_INTERBANKING = 'INTERBANKING';
 
     /** Seccion de los avisos en el tablero: van con los del disponible */
     const SECCION = 'Saldo Inicial';
 
+    /** Largo maximo del alias: el de la columna */
+    const ALIAS_MAX = 100;
+
+    /** El script que crea las tablas propias de esta clase */
+    const SCRIPT = 'sql/cashflow_saldos_interbanking.sql';
+
     /** @var Conexion */
     private $conn;
+
+    /** @var array|null Cache de que tablas propias existen. Ver tablas(). */
+    private $tablas = null;
 
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
@@ -190,6 +202,118 @@ class SaldosInterbanking {
     }
 
     /**
+     * Si un banco esta activo segun sus parametros.
+     *
+     * SIN FILA ES ACTIVO. Un banco que aparece por primera vez en Interbanking
+     * tiene que entrar al disponible sin que nadie lo de de alta: si
+     * dependiera de un alta, quedaria afuera en silencio. Sin el script, todos
+     * activos, que es lo que eran.
+     *
+     * @param string $nro
+     * @param array $bancos Mapa NRO_BANCO => ['ALIAS', 'ACTIVO', ...]
+     * @return bool
+     */
+    public static function bancoActivo($nro, $bancos) {
+        $nro = trim((string) $nro);
+
+        return !(is_array($bancos) && isset($bancos[$nro]) && intval($bancos[$nro]['ACTIVO']) === 0);
+    }
+
+    /** El alias de un banco segun sus parametros, o null */
+    private static function aliasDe($nro, $bancos) {
+        $nro = trim((string) $nro);
+
+        return (is_array($bancos) && isset($bancos[$nro])) ? $bancos[$nro]['ALIAS'] : null;
+    }
+
+    /**
+     * El alias validado: sin espacios alrededor, null si queda vacio, y no
+     * mas largo que la columna. Lo valida el servidor; el maxlength del input
+     * es solo una ayuda.
+     *
+     * @param mixed $alias
+     * @return string|null
+     */
+    public static function validarAlias($alias) {
+        $alias = trim((string) $alias);
+
+        if ($alias === '') {
+            return null;
+        }
+
+        if (mb_strlen($alias) > self::ALIAS_MAX) {
+            throw new Exception('El alias "' . $alias . '" supera los ' . self::ALIAS_MAX
+                . ' caracteres.');
+        }
+
+        return $alias;
+    }
+
+    /**
+     * Que bancos cambiaron en la grilla de Parametros.
+     *
+     * SOLO SE ESCRIBEN LOS QUE CAMBIARON, con el mismo criterio que
+     * Saldos::resolverParametrosLocales(): la pantalla manda todos los bancos
+     * en cada guardado, y sin el diff cada guardado sellaria a todos como
+     * editados por quien apreto el boton, y la columna "Ultima edicion"
+     * dejaria de significar algo.
+     *
+     * Un banco sin fila vale lo mismo que uno con alias null y activo: si se
+     * reenvia asi, no es un cambio y no se le crea la fila.
+     *
+     * Valida todo antes de que se abra la transaccion. Un banco que no viene en
+     * Interbanking ni tiene fila es un error: la pantalla solo lista esos, y
+     * crearle una fila a un numero inventado ensuciaria la tabla.
+     *
+     * @param array $actuales Mapa NRO_BANCO => ['ALIAS', 'ACTIVO']
+     * @param array $conocidos Los NRO_BANCO que se pueden editar
+     * @param array $filas [['nro_banco', 'alias', 'activo'], ...]
+     * @return array [['nro_banco', 'alias', 'activo', 'existe'], ...]
+     */
+    public static function resolverBancos($actuales, $conocidos, $filas) {
+        $actuales = is_array($actuales) ? $actuales : [];
+        $conocidos = array_map(function ($n) { return trim((string) $n); },
+            is_array($conocidos) ? $conocidos : []);
+        $cambios = [];
+
+        foreach ((is_array($filas) ? $filas : []) as $f) {
+            $nro = trim((string) (isset($f['nro_banco']) ? $f['nro_banco'] : ''));
+
+            if ($nro === '') {
+                throw new Exception('Falta el número de un banco');
+            }
+
+            if (!isset($actuales[$nro]) && !in_array($nro, $conocidos, true)) {
+                throw new Exception('El banco ' . $nro . ' no viene en Interbanking. '
+                    . 'Actualizá la pantalla y volvé a guardar.');
+            }
+
+            $existe = isset($actuales[$nro]);
+            $aliasAntes = $existe ? self::validarAliasGuardado($actuales[$nro]['ALIAS']) : null;
+            $activoAntes = $existe ? (intval($actuales[$nro]['ACTIVO']) === 1) : true;
+
+            $alias = array_key_exists('alias', $f)
+                ? self::validarAlias($f['alias']) : $aliasAntes;
+            $activo = array_key_exists('activo', $f)
+                ? filter_var($f['activo'], FILTER_VALIDATE_BOOLEAN) : $activoAntes;
+
+            if ($alias !== $aliasAntes || $activo !== $activoAntes) {
+                $cambios[] = ['nro_banco' => $nro, 'alias' => $alias, 'activo' => $activo,
+                              'existe' => $existe];
+            }
+        }
+
+        return $cambios;
+    }
+
+    /** Un alias ya guardado, llevado a la misma forma que validarAlias() sin lanzar */
+    private static function validarAliasGuardado($alias) {
+        $alias = trim((string) $alias);
+
+        return ($alias === '') ? null : $alias;
+    }
+
+    /**
      * Agrupa por cuenta lo que devolvio leerUltimos().
      *
      * Las cuentas sin moneda quedan aparte: no tienen clave valida, y se
@@ -247,13 +371,20 @@ class SaldosInterbanking {
      * $ultimos === null significa que la lectura de BI fallo: no hay filas de
      * Interbanking y el aviso es critico.
      *
+     * UN BANCO INACTIVO NO EXISTE PARA LA PESTANA NI PARA EL TABLERO: sus
+     * cuentas no salen y no avisan nada, ni siquiera que vinieron sin moneda.
+     * Inactivarlo es decir "este banco ya no se opera", y un aviso sobre el
+     * seria ruido que tapa los que importan. Parametros lo sigue mostrando.
+     *
      * @param array|null $ultimos Lo que devolvio leerUltimos(), o null
      * @param array $ctx 'hoy' => 'Y-m-d', 'tango' => mapa NRO_BANCO => DESC_BANCO,
+     *        'bancos' => mapa NRO_BANCO => ['ALIAS', 'ACTIVO'] (vacio sin script),
      *        'error' => texto de la falla de lectura
      * @return array ['filas' => [...], 'avisos' => [Aviso]]
      */
     public static function armarCuentasBancarias($ultimos, $ctx) {
         $tango = isset($ctx['tango']) && is_array($ctx['tango']) ? $ctx['tango'] : [];
+        $bancos = isset($ctx['bancos']) && is_array($ctx['bancos']) ? $ctx['bancos'] : [];
         $avisos = [];
         $filas = [];
 
@@ -269,16 +400,25 @@ class SaldosInterbanking {
         $fueraDeTango = [];
 
         foreach ($agrupadas['sin_moneda'] as $c) {
-            $banco = self::nombreBanco($c['nro_banco'], $tango);
+            if (!self::bancoActivo($c['nro_banco'], $bancos)) {
+                continue;
+            }
+
+            $banco = self::nombreBanco($c['nro_banco'], $tango, self::aliasDe($c['nro_banco'], $bancos));
             $avisos[] = Aviso::nuevo(Aviso::DANGER, 'La cuenta ' . $banco['nombre'] . ' · '
                 . $c['nro_cuenta'] . ' llegó de Interbanking sin moneda, así que no se suma al '
                 . 'disponible: no se puede saber si son pesos o dólares.', self::SECCION);
         }
 
         foreach ($agrupadas['cuentas'] as $clave => $c) {
-            $banco = self::nombreBanco($c['nro_banco'], $tango);
+            if (!self::bancoActivo($c['nro_banco'], $bancos)) {
+                continue;
+            }
 
-            if (!$banco['en_tango']) {
+            $banco = self::nombreBanco($c['nro_banco'], $tango, self::aliasDe($c['nro_banco'], $bancos));
+
+            // Con alias el nombre ya no depende de Tango: no hay nada que avisar.
+            if (!$banco['en_tango'] && trim((string) self::aliasDe($c['nro_banco'], $bancos)) === '') {
                 $fueraDeTango[$c['nro_banco']] = true;
             }
 
@@ -301,8 +441,8 @@ class SaldosInterbanking {
 
         foreach (array_keys($fueraDeTango) as $nro) {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, 'El banco ' . $nro . ' de Interbanking no '
-                . 'está en la tabla BANCO de Tango: se muestra como "Banco ' . $nro . '".',
-                self::SECCION);
+                . 'está en la tabla BANCO de Tango: se muestra como "Banco ' . $nro . '". '
+                . 'Ponele un alias en Parámetros › Saldos.', self::SECCION);
         }
 
         return ['filas' => $filas, 'avisos' => $avisos];
@@ -373,6 +513,18 @@ class SaldosInterbanking {
                 $avisosExtra[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer los nombres '
                     . 'de los bancos de Tango (' . $e->getMessage() . ').', self::SECCION);
             }
+        }
+
+        try {
+            $ctx['bancos'] = $this->leerBancos();
+        } catch (Throwable $e) {
+            // Sin los parametros todos los bancos cuentan como activos: es lo
+            // que pasa sin el script. Puede sumar un banco inhabilitado, asi
+            // que es critico.
+            $ctx['bancos'] = [];
+            $avisosExtra[] = Aviso::nuevo(Aviso::DANGER, 'No se pudieron leer el alias y el '
+                . 'estado de los bancos (' . $e->getMessage() . '): se toman todos como activos.',
+                self::SECCION);
         }
 
         $r = self::armarCuentasBancarias($ultimos, $ctx);
@@ -459,6 +611,68 @@ class SaldosInterbanking {
     }
 
     /**
+     * Que tablas propias existen. Se preguntan por separado y no "el script si
+     * o no": cada una apaga una parte distinta de la pantalla, y la que existe
+     * tiene que seguir funcionando aunque falte otra.
+     *
+     * @return array ['banco' => bool]
+     */
+    public function tablas() {
+        if ($this->tablas !== null) {
+            return $this->tablas;
+        }
+
+        $stmt = sqlsrv_query($this->conectar('central'),
+            "SELECT OBJECT_ID('dbo." . self::TABLA_BANCO . "', 'U') AS B");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar las tablas de Interbanking'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->tablas = ['banco' => ($row && $row['B'] !== null)];
+
+        return $this->tablas;
+    }
+
+    /**
+     * Alias y estado de cada banco con fila. Vacio sin el script: todos
+     * activos y sin alias.
+     *
+     * @return array Mapa NRO_BANCO => ['ALIAS', 'ACTIVO', 'USUARIO_MODIF', 'FECHA_MODIF']
+     */
+    public function leerBancos() {
+        if (!$this->tablas()['banco']) {
+            return [];
+        }
+
+        $stmt = sqlsrv_query($this->conectar('central'),
+            "SELECT NRO_BANCO, ALIAS, ACTIVO, USUARIO_MODIF, FECHA_MODIF FROM dbo." . self::TABLA_BANCO);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer los bancos de Interbanking'));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $nro = trim((string) $row['NRO_BANCO']);
+            $v[$nro] = [
+                'ALIAS' => $row['ALIAS'],
+                'ACTIVO' => intval($row['ACTIVO']),
+                'USUARIO_MODIF' => $row['USUARIO_MODIF'],
+                'FECHA_MODIF' => self::fechaHora($row['FECHA_MODIF'])
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $v;
+    }
+
+    /**
      * Los nombres de los bancos de Tango, por NRO_BANCO con trim. Se lee la
      * tabla entera (dos centenares de filas) y se cruza en PHP.
      *
@@ -481,6 +695,102 @@ class SaldosInterbanking {
         sqlsrv_free_stmt($stmt);
 
         return $v;
+    }
+
+    /* ====================================================================
+       ESCRITURAS
+       ==================================================================== */
+
+    /**
+     * Guarda alias y estado de los bancos de la grilla de Parametros.
+     *
+     * Solo los que cambiaron (resolverBancos()) y en UNA transaccion: una
+     * falla a mitad de camino no deja la mitad guardada. Un banco sin fila se
+     * crea (UPSERT): es el primer momento en que alguien dijo algo sobre el.
+     *
+     * Inactivar sella la baja con el mismo criterio que el resto del modulo
+     * (Auditoria::sqlBajaSegunEstado()), y reactivar la limpia.
+     *
+     * @param array $filas [['nro_banco', 'alias', 'activo'], ...]
+     * @param string $usuario
+     * @return int Cuantos bancos se escribieron
+     */
+    public function guardarBancos($filas, $usuario) {
+        require_once __DIR__ . '/AuthCashflow.php';
+        require_once __DIR__ . '/Auditoria.php';
+
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
+        if (!$this->tablas()['banco']) {
+            throw new Exception('Todavía no existe la tabla de bancos: corré ' . self::SCRIPT
+                . ' contra la base central.');
+        }
+
+        // Se pueden editar los bancos que vienen en Interbanking y los que ya
+        // tienen fila aunque hayan dejado de venir. Si BI no responde, solo
+        // los segundos: no se crea una fila a ciegas.
+        $conocidos = [];
+
+        try {
+            foreach ($this->leerUltimos() as $r) {
+                $conocidos[] = $r['NRO_BANCO'];
+            }
+        } catch (Throwable $e) {
+            $conocidos = [];
+        }
+
+        $cambios = self::resolverBancos($this->leerBancos(), array_unique($conocidos), $filas);
+
+        if (empty($cambios)) {
+            return 0;
+        }
+
+        $cid = $this->conectar('central');
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo iniciar la transacción'));
+        }
+
+        try {
+            foreach ($cambios as $c) {
+                $this->escribirBanco($cid, $c, $usuario);
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudieron confirmar los bancos'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+            throw $e;
+        }
+
+        return count($cambios);
+    }
+
+    /** UPDATE si el banco tiene fila; si no, INSERT. Dentro de la transaccion de $cid. */
+    private function escribirBanco($cid, $c, $usuario) {
+        $activo = $c['activo'] ? 1 : 0;
+
+        if ($c['existe']) {
+            $sql = "UPDATE dbo." . self::TABLA_BANCO . "
+                    SET ALIAS = ?, " . Auditoria::sqlBajaSegunEstado('ACTIVO') . ", ACTIVO = ?, "
+                        . Auditoria::SET_MODIF . "
+                    WHERE NRO_BANCO = ?";
+            $params = array_merge([$c['alias']], Auditoria::paramsBajaSegunEstado($activo, $usuario),
+                [$activo, $usuario, $c['nro_banco']]);
+        } else {
+            // Un banco que se inactiva en su primer guardado nace con la baja
+            // sellada: es la misma informacion que dejaria un UPDATE.
+            $sql = "INSERT INTO dbo." . self::TABLA_BANCO . "
+                        (NRO_BANCO, ALIAS, ACTIVO, USUARIO_ALTA, USUARIO_MODIF, USUARIO_BAJA, FECHA_BAJA)
+                    VALUES (?, ?, ?, ?, ?, ?, CASE WHEN ? = 0 THEN GETDATE() END)";
+            $params = [$c['nro_banco'], $c['alias'], $activo, $usuario, $usuario,
+                       ($activo ? null : $usuario), $activo];
+        }
+
+        if (sqlsrv_query($cid, $sql, $params) === false) {
+            throw new Exception($this->errorSql('Error al guardar el banco ' . $c['nro_banco']));
+        }
     }
 
     /* ====================================================================

@@ -219,3 +219,116 @@ chequear('ordena por fecha, CREATED_AT e ID',
 chequear('no tiene ningun JOIN', false, (bool) preg_match('/\bJOIN\b/i', $leer));
 chequear('usa el saldo contable y no otro',
     false, (bool) preg_match('/SALDO_OPERATIVO|SALDO_PROYECTADO|SALDO_DIA/', $leer));
+
+// ============================================================================
+seccion('alias e inhabilitacion de bancos');
+// ============================================================================
+
+$bancosIb = [
+    '007' => ['ALIAS' => 'Galicia', 'ACTIVO' => 1],
+    '014' => ['ALIAS' => null, 'ACTIVO' => 0]
+];
+
+$conParams = SaldosInterbanking::armarCuentasBancarias($ultimos,
+    ['hoy' => IB_HOY, 'tango' => $tangoIb, 'bancos' => $bancosIb]);
+$porClave = [];
+
+foreach ($conParams['filas'] as $f) {
+    $porClave[$f['clave']] = $f;
+}
+
+chequear('el alias se muestra en la cuenta', 'Galicia · 100', $porClave['007|100|ARS']['nombre']);
+chequear('el banco inactivo no se lista', false, isset($porClave['014|200|ARS']));
+chequear('ni avisa que no tiene saldo contable',
+    false, ibContiene(ibAvisos($conParams['avisos']), '200'));
+chequear('un banco sin fila esta activo', true, isset($porClave['015|300|ARS']));
+chequear('sin fila tambien es activo para bancoActivo()',
+    true, SaldosInterbanking::bancoActivo('191', $bancosIb));
+chequear('sin parametros (script sin correr), todos activos',
+    true, SaldosInterbanking::bancoActivo('014', []));
+
+// Galicia suma 1.000; inactivo, la serie baja exactamente eso.
+$soloCargadas = function ($filas) {
+    return array_filter($filas, function ($f) { return $f['cargada']; });
+};
+$activo007 = SaldosInterbanking::armarCuentasBancarias($ultimos, ['hoy' => IB_HOY,
+    'tango' => $tangoIb, 'bancos' => []]);
+$inactivo007 = SaldosInterbanking::armarCuentasBancarias($ultimos, ['hoy' => IB_HOY,
+    'tango' => $tangoIb, 'bancos' => ['007' => ['ALIAS' => null, 'ACTIVO' => 0]]]);
+$sumaActivo = array_sum(Saldos::armarSerieDisponible($soloCargadas($activo007['filas']), $hIb)['serie']['dias']);
+$sumaInactivo = array_sum(Saldos::armarSerieDisponible($soloCargadas($inactivo007['filas']), $hIb)['serie']['dias']);
+
+chequear('el banco inactivo no aporta al tablero', 1000.0, floatval($sumaActivo - $sumaInactivo));
+
+// Un banco fuera de Tango con alias ya no avisa: su nombre no depende de Tango.
+$conAlias191 = SaldosInterbanking::armarCuentasBancarias($ultimos, ['hoy' => IB_HOY,
+    'tango' => $tangoIb, 'bancos' => ['191' => ['ALIAS' => 'Credicoop', 'ACTIVO' => 1]]]);
+chequear('un banco fuera de Tango con alias no avisa',
+    false, ibContiene(ibAvisos($conAlias191['avisos']), 'El banco 191'));
+
+// Inactivo y sin moneda: tampoco avisa.
+$inactivoSinMoneda = SaldosInterbanking::armarCuentasBancarias($ultimos, ['hoy' => IB_HOY,
+    'tango' => $tangoIb, 'bancos' => ['029' => ['ALIAS' => null, 'ACTIVO' => 0]]]);
+chequear('un banco inactivo no avisa ni la cuenta sin moneda',
+    false, ibContiene(ibAvisos($inactivoSinMoneda['avisos']), 'sin moneda'));
+
+// ============================================================================
+seccion('guardado de bancos: solo lo que cambio');
+// ============================================================================
+
+$actuales = [
+    '007' => ['ALIAS' => 'Galicia', 'ACTIVO' => 1],
+    '027' => ['ALIAS' => null, 'ACTIVO' => 0]
+];
+$conocidosIb = ['007', '014', '015', '027'];
+
+$c = SaldosInterbanking::resolverBancos($actuales, $conocidosIb, [
+    ['nro_banco' => '007', 'alias' => 'Galicia', 'activo' => true],
+    ['nro_banco' => '014', 'alias' => '', 'activo' => true],
+    ['nro_banco' => '015', 'alias' => 'ICBC', 'activo' => true],
+    ['nro_banco' => '027', 'alias' => '', 'activo' => false]
+]);
+
+chequear('solo se escribe el que cambio', ['015'], array_column($c, 'nro_banco'));
+chequear('y se sabe que no tenia fila (UPSERT)', false, $c[0]['existe']);
+
+$c = SaldosInterbanking::resolverBancos($actuales, $conocidosIb, [
+    ['nro_banco' => '007', 'alias' => '   ', 'activo' => true]
+]);
+chequear('un alias vacio se guarda null', null, $c[0]['alias']);
+
+$c = SaldosInterbanking::resolverBancos($actuales, $conocidosIb, [
+    ['nro_banco' => '007', 'alias' => '  Galicia  ', 'activo' => 'true']
+]);
+chequear('los espacios alrededor no son un cambio', 0, count($c));
+
+$c = SaldosInterbanking::resolverBancos($actuales, $conocidosIb, [
+    ['nro_banco' => '027', 'alias' => null, 'activo' => true]
+]);
+chequear('reactivar es un cambio', true, $c[0]['activo']);
+
+$c = SaldosInterbanking::resolverBancos($actuales, $conocidosIb, [
+    ['nro_banco' => '014', 'alias' => null, 'activo' => false]
+]);
+chequear('inactivar un banco sin fila es un cambio', false, $c[0]['activo']);
+
+chequearLanza('un alias de mas de 100 caracteres se rechaza', function () use ($actuales, $conocidosIb) {
+    SaldosInterbanking::resolverBancos($actuales, $conocidosIb,
+        [['nro_banco' => '007', 'alias' => str_repeat('x', 101), 'activo' => true]]);
+});
+chequear('uno de 100 justos se acepta',
+    100, mb_strlen(SaldosInterbanking::validarAlias(str_repeat('ñ', 100))));
+chequearLanza('un banco que no viene ni tiene fila se rechaza', function () use ($actuales, $conocidosIb) {
+    SaldosInterbanking::resolverBancos($actuales, $conocidosIb,
+        [['nro_banco' => '999', 'alias' => 'X', 'activo' => true]]);
+});
+chequear('uno que ya no viene pero tiene fila se puede editar',
+    1, count(SaldosInterbanking::resolverBancos($actuales, ['007'],
+        [['nro_banco' => '027', 'alias' => 'Supervielle', 'activo' => false]])));
+
+preg_match('/function guardarBancos\(.*?\n    }\n/s', $srcIb, $m);
+$guardar = isset($m[0]) ? $m[0] : '';
+chequear('el guardado valida el usuario de escritura',
+    true, ibContiene($guardar, 'AuthCashflow::usuarioDeEscritura('));
+chequear('y escribe en una transaccion',
+    true, ibContiene($guardar, 'sqlsrv_begin_transaction') && ibContiene($guardar, 'sqlsrv_rollback'));
