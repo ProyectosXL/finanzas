@@ -966,15 +966,16 @@ class SaldosInterbanking {
 
         $avisosExtra = [];
 
-        if ($ultimos !== null) {
-            try {
-                $ctx['tango'] = $this->leerBancosTango();
-            } catch (Throwable $e) {
-                // Sin los nombres se muestra "Banco <nro>": el saldo sigue
-                // siendo correcto, asi que es atencion y no critico.
-                $avisosExtra[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer los nombres '
-                    . 'de los bancos de Tango (' . $e->getMessage() . ').', self::SECCION);
-            }
+        // Los nombres se leen aunque BI no responda: los respaldos entran
+        // igual, y sin nombres se verian como "Banco <nro>", con un aviso de
+        // "no esta en Tango" que no seria cierto.
+        try {
+            $ctx['tango'] = $this->leerBancosTango();
+        } catch (Throwable $e) {
+            // Sin los nombres se muestra "Banco <nro>": el saldo sigue
+            // siendo correcto, asi que es atencion y no critico.
+            $avisosExtra[] = Aviso::nuevo(Aviso::WARNING, 'No se pudieron leer los nombres '
+                . 'de los bancos de Tango (' . $e->getMessage() . ').', self::SECCION);
         }
 
         try {

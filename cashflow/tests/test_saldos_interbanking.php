@@ -822,6 +822,27 @@ chequear('una cuenta de Interbanking sin dato se ve con guion, no "sin cargar"',
     ibContiene($jsSalT, "(esInterbanking(f) ? '—' : 'sin cargar')"));
 
 // ============================================================================
+seccion('con BI caido, los respaldos se ven con su nombre de Tango');
+// ============================================================================
+
+$getCb2 = '';
+
+if (preg_match('/public function getCuentasBancarias\(.*?\n    }\n/s', $srcIb, $m)) {
+    $getCb2 = $m[0];
+}
+
+chequear('los nombres de Tango no dependen de que BI responda', false,
+    (bool) preg_match('/if \(\$ultimos !== null\) \{\s+try \{\s+\$ctx\[\'tango\'\] = \$this->leerBancosTango\(\);/', $getCb2));
+chequear('y se leen', true, ibContiene($getCb2, "\$ctx['tango'] = \$this->leerBancosTango();"));
+
+$caidaConNombre = SaldosInterbanking::armarCuentasBancarias(null, ['hoy' => IB_HOY, 'tango' => $tangoIb,
+    'respaldos' => ['014|200|ARS' => ibResp(9, IB_HOY, 35000000.0)]]);
+chequear('el respaldo de una cuenta con BI caido lleva el nombre de Tango',
+    'PROVINCIA DE BS.AS. · 200', $caidaConNombre['filas'][0]['nombre']);
+chequear('y no avisa que el banco no esta en Tango', false,
+    ibContiene(ibAvisos($caidaConNombre['avisos']), 'no está en la tabla BANCO'));
+
+// ============================================================================
 seccion('contra la base: la pestana y el proveedor suman lo mismo');
 // ============================================================================
 
