@@ -117,6 +117,13 @@ class Saldos {
     const DIAS_ABREV = [1 => 'Lun', 2 => 'Mar', 3 => 'Mié', 4 => 'Jue', 5 => 'Vie',
                         6 => 'Sáb', 7 => 'Dom'];
 
+    /**
+     * Origen de una fila del disponible que sale de las cargas de la pestana
+     * (efectivo, Mercado Pago, otros y bancos manuales). Las de Interbanking
+     * traen el suyo: ver SaldosInterbanking.
+     */
+    const ORIGEN_CARGA = 'CARGA';
+
     /** Cuenta contable de SBA05 con el efectivo de tesoreria de casa central */
     const PARAM_CTA_TESORERIA = 'saldos_cta_tesoreria';
 
@@ -137,6 +144,9 @@ class Saldos {
 
     /** @var Fondos|null Puerta al modulo de fondos; la resuelve fondos() */
     private $fondos = null;
+
+    /** @var SaldosInterbanking|null La resuelve interbanking() */
+    private $interbanking = null;
 
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
@@ -1823,6 +1833,49 @@ class Saldos {
     }
 
     /**
+     * Todas las filas del disponible: las de las cargas de la pestana y las de
+     * Interbanking, con los avisos de Interbanking.
+     *
+     * ES EL UNICO CAMINO, y lo usan getPestanaSaldos() y
+     * SaldosProvider::disponible(). La pestana y el tablero tienen que sumar lo
+     * mismo, y la unica forma de garantizarlo es que lean las mismas filas: si
+     * cada uno juntara las suyas, algun dia una tendria una cuenta que la otra
+     * no.
+     *
+     * Las cargas manuales siguen entrando por getSaldosActuales(): son el
+     * efectivo de tesoreria, Mercado Pago, los otros saldos y los bancos que no
+     * vienen por Interbanking. Una falla de Interbanking no las toca.
+     *
+     * @param string $hoy 'Y-m-d'. El del eje en el tablero, el del dia en la pestana.
+     * @return array ['filas' => [...], 'avisos' => [Aviso]]
+     */
+    public function getFilasDisponible($hoy) {
+        $filas = $this->tablasCreadas() ? $this->getSaldosActuales() : [];
+
+        $bancarias = $this->interbanking()->getCuentasBancarias($hoy);
+
+        return [
+            'filas' => array_merge($filas, $bancarias['filas']),
+            'avisos' => $bancarias['avisos']
+        ];
+    }
+
+    /**
+     * La puerta a los saldos de Interbanking. Una instancia por pedido, como
+     * fondos().
+     *
+     * @return SaldosInterbanking
+     */
+    private function interbanking() {
+        if ($this->interbanking === null) {
+            require_once __DIR__ . '/SaldosInterbanking.php';
+            $this->interbanking = new SaldosInterbanking();
+        }
+
+        return $this->interbanking;
+    }
+
+    /**
      * Normaliza una fila de getSaldosActuales() para la pantalla y para
      * armarSerieDisponible().
      *
@@ -1837,6 +1890,9 @@ class Saldos {
 
         return [
             'id_cuenta' => intval($row['ID']),
+            // Sale de una carga de RO_T_CASHFLOW_SALDOS_CARGA. Es lo que separa
+            // estas filas de las de Interbanking en armarSerieDisponible().
+            'origen' => self::ORIGEN_CARGA,
             'tipo' => $row['TIPO'],
             'clase' => $row['CLASE'],
             'nombre' => $row['NOMBRE'],
@@ -2495,7 +2551,7 @@ class Saldos {
      * que permite controlar que la consulta este devolviendo algo razonable.
      * Si esa consulta falla, la pestana igual se dibuja con lo que hay cargado y
      * deja el aviso: una pestana que ya funciona no se cae por un origen que
-     * hoy no responde.
+     * hoy no responde. Lo mismo con Interbanking.
      *
      * @return array
      */
@@ -2511,7 +2567,14 @@ class Saldos {
             $avisos[] = 'No se pudieron leer los parámetros: ' . $e->getMessage();
         }
 
-        $filas = $this->tablasCreadas() ? $this->getSaldosActuales() : [];
+        // Las mismas filas que suma el tablero: ver getFilasDisponible().
+        $disponible = $this->getFilasDisponible(date('Y-m-d'));
+        $filas = $disponible['filas'];
+
+        foreach (Aviso::textos($disponible['avisos']) as $a) {
+            $avisos[] = $a;
+        }
+
         $cargas = $this->getCargas(self::CARGA_SALDOS);
         $ultima = self::ultimaCarga($cargas);
 

@@ -298,10 +298,15 @@
 
     /** Celda de saldo: texto cuando se mira, input cuando se está cargando */
     function celdaSaldo(f, consulta) {
-        if (!enCarga) {
+        // Una cuenta de Interbanking no se tipea en la carga: su saldo lo
+        // trae la tabla de BI. Se ve igual que fuera de la carga.
+        if (!enCarga || esInterbanking(f)) {
             if (!f.cargada) {
-                return '<span class="text-muted" title="Esta cuenta todavía no tiene ningún ' +
-                       'saldo cargado. No suma al disponible.">sin cargar</span>';
+                return esInterbanking(f)
+                    ? '<span class="text-muted" title="Interbanking no trajo ningún saldo ' +
+                      'contable de esta cuenta. No suma al disponible.">—</span>'
+                    : '<span class="text-muted" title="Esta cuenta todavía no tiene ningún ' +
+                      'saldo cargado. No suma al disponible.">sin cargar</span>';
             }
 
             return importe(f.saldo, f.moneda);
@@ -320,6 +325,11 @@
         return '<input type="number" step="0.01" class="form-control form-control-sm ' +
                'text-end sal-input-saldo" data-cuenta="' + f.id_cuenta + '" ' +
                'data-moneda="' + f.moneda + '" value="' + (f.cargada ? f.saldo : 0) + '">';
+    }
+
+    /** Si la fila es una cuenta de Interbanking y no del catálogo manual */
+    function esInterbanking(f) {
+        return f.origen_cuenta === 'INTERBANKING';
     }
 
     /** Los campos de la API que ya estén cargados, como subtítulo de la cuenta */
@@ -396,6 +406,8 @@
             if (f.origen_cuenta === 'CONSULTA') {
                 var ec = datosSaldos.efectivo_central;
                 totales[f.moneda] = (totales[f.moneda] || 0) + (ec ? parseFloat(ec.saldo) : 0);
+            } else if (esInterbanking(f) && f.cargada) {
+                totales[f.moneda] = (totales[f.moneda] || 0) + (parseFloat(f.saldo) || 0);
             }
         });
 
@@ -414,6 +426,12 @@
         var hoy = new Date().toISOString().slice(0, 10);
 
         datosSaldos.filas.forEach(function(f) {
+            // Las cuentas de Interbanking no son de la carga: no tienen ID en
+            // el catálogo manual y el servidor las rechazaría.
+            if (esInterbanking(f)) {
+                return;
+            }
+
             if (f.origen_cuenta === 'CONSULTA') {
                 // Va igual, pero sin saldo: el servidor lo relee de su consulta.
                 filas.push({ id_cuenta: f.id_cuenta, saldo: 0, fecha_saldo: hoy });
