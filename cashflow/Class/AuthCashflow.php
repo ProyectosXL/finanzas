@@ -162,6 +162,8 @@ class AuthCashflow {
             'saveRespaldo' => [['parametros', 'VENTAS']],
             'addCuentaSaldo' => [['parametros', 'SALDOS']],
             'saveCuentasSaldo' => [['parametros', 'SALDOS']],
+            'saveBancosSaldo' => [['parametros', 'SALDOS']],
+            'marcarCuentasVistas' => [['parametros', 'SALDOS']],
             'saveSucursalesSaldo' => [['parametros', 'SALDOS']],
             'sincronizarSucursales' => [['parametros', 'SALDOS']],
             'addProcesadoraCobel' => [['parametros', 'COB_ELECTRONICOS']],
@@ -201,7 +203,11 @@ class AuthCashflow {
             'guardarCargaSaldos' => [['saldos', null]],
             'guardarCargaLocales' => [['saldos', null]],
             'guardarMovimientoFondo' => [['saldos', null]],
-            'bajaMovimientoFondo' => [['saldos', null]]
+            'bajaMovimientoFondo' => [['saldos', null]],
+            // El respaldo manual de una cuenta de Interbanking es una carga de
+            // saldo como Nueva carga: el mismo permiso.
+            'guardarRespaldoBanco' => [['saldos', null]],
+            'quitarRespaldoBanco' => [['saldos', null]]
         ],
         'Tarjetas' => [
             'vincularFacturas' => [['pagos_tarjetas', null]],

@@ -13,15 +13,17 @@ $edita = AuthCashflow::puedeEditar('parametros', 'SALDOS');
     clases llevan el prefijo sp- porque Parametros.js busca .param-input, .mix-*
     y .respaldo-* en TODO el documento.
 
-    Cinco secciones:
-      1. Generales        — la cuenta contable de tesorería y el aviso de carga vieja
-      2. Bancos y cuentas — ABM de cuentas bancarias, con moneda y clase
-      3. Otros saldos     — Mercado Pago, efectivo de tesorería y lo que aparezca
-      4. Fondos           — cuentas de inversión y comitente, con su saldo inicial
-      5. Locales          — gestión y reserva de caja por sucursal
+    Seis secciones:
+      1. Generales                — la cuenta contable de tesorería y el aviso de carga vieja
+      2. Bancos de Interbanking   — alias y estado de cada banco; no es un ABM
+      3. Bancos sin Interbanking  — ABM de los bancos de carga manual, con moneda y clase
+      4. Otros saldos             — Mercado Pago, efectivo de tesorería y lo que aparezca
+      5. Fondos                   — cuentas de inversión y comitente, con su saldo inicial
+      6. Locales                  — gestión y reserva de caja por sucursal
 
-    Las secciones 2, 3 y 4 son el MISMO ABM sobre RO_T_CASHFLOW_SALDOS_CUENTA,
-    separado por TIPO (banco / otro) y por CLASE (fondo o no). Una cuenta a la
+    La sección 2 lee Interbanking y RO_T_CASHFLOW_SALDOS_BANCO. Las secciones
+    3, 4 y 5 son el MISMO ABM sobre RO_T_CASHFLOW_SALDOS_CUENTA, separado por
+    TIPO (banco / otro) y por CLASE (fondo o no). Cada una guarda su grilla. Una cuenta a la
     vista se carga como foto del saldo en la pestaña Saldos; un fondo lleva
     cuenta corriente y sus movimientos se cargan en Saldos → Fondos.
 
@@ -59,22 +61,79 @@ $edita = AuthCashflow::puedeEditar('parametros', 'SALDOS');
         </div>
 
         <!-- ========================================================
-             BANCOS Y CUENTAS
+             BANCOS DE INTERBANKING
+
+             No es un ABM: los bancos y sus cuentas los trae Interbanking
+             (BI_T_SALDOS_INTERBANKING). Acá se decide cómo se llama cada
+             banco y si se opera. Un banco sin fila está activo y sin alias:
+             la fila se crea al guardar. "Guardar bancos" escribe sólo los que
+             cambiaron.
+             ======================================================== -->
+        <div class="card mb-4" id="cardSpBancosIb">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <div>
+                    <h5 class="mb-0">Bancos de Interbanking</h5>
+                    <small class="text-muted">
+                        Sus saldos se leen todos los días de Interbanking: no se cargan. El
+                        <strong>alias</strong> es el nombre con el que se ve el banco en todas sus
+                        cuentas; vacío, vuelve el de Tango. Un banco <strong>inactivo</strong> no
+                        sale en Saldos, no suma al tablero y no avisa nada.
+                    </small>
+                </div>
+                <div class="d-flex gap-2">
+                    <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
+                    <button class="btn btn-sm btn-outline-success" data-exportar="tablaSpBancosIb"
+                            data-exportar-nombre="Parametros_Saldos_Bancos_Interbanking"
+                            title="Exportar a Excel lo que se está viendo">
+                        <i class="fas fa-file-excel me-1"></i> Exportar
+                    </button>
+                    <?php if ($edita): ?>
+                    <button id="btnGuardarBancosIb" class="btn btn-sm btn-primary">
+                        <i class="fas fa-floppy-disk me-1"></i> Guardar bancos
+                    </button>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0" id="tablaSpBancosIb">
+                        <thead>
+                            <tr>
+                                <th style="width: 90px;">N° de banco</th>
+                                <th>Nombre en Tango</th>
+                                <th style="width: 220px;">Alias</th>
+                                <th>Cuentas</th>
+                                <th class="text-center" style="width: 120px;">Último dato</th>
+                                <th class="text-center" style="width: 90px;">Activo</th>
+                                <th class="text-center" style="width: 150px;">Última edición</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bodyBancosIb"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================================
+             BANCOS SIN INTERBANKING (CARGA MANUAL)
              ======================================================== -->
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <div>
-                    <h5 class="mb-0">Bancos y cuentas</h5>
+                    <h5 class="mb-0">Bancos sin Interbanking (carga manual)</h5>
                     <small class="text-muted">
-                        Una misma entidad puede tener saldos en pesos y en dólares, así que va una
-                        fila por banco y moneda. Las cuentas se <strong>inhabilitan</strong>, nunca
-                        se borran: su histórico queda entero.
+                        Sólo para los bancos que <strong>no vienen por Interbanking</strong>: sus
+                        saldos se cargan en Saldos › Nueva carga. Un banco que ya viene por
+                        Interbanking no se da de alta acá: el disponible lo sumaría dos veces. Va
+                        una fila por banco y moneda, y se <strong>inhabilitan</strong>, nunca se
+                        borran.
                     </small>
                 </div>
                 <div class="d-flex gap-2">
                     <!-- Lo engancha Js/tabla-export.js por el data-exportar -->
                     <button class="btn btn-sm btn-outline-success" data-exportar="tablaSpCuentas"
-                            data-exportar-nombre="Parametros_Saldos_Cuentas"
+                            data-exportar-nombre="Parametros_Saldos_Bancos_Manuales"
                             title="Exportar a Excel lo que se está viendo">
                         <i class="fas fa-file-excel me-1"></i> Exportar
                     </button>
@@ -84,8 +143,8 @@ $edita = AuthCashflow::puedeEditar('parametros', 'SALDOS');
                     </button>
                     <?php endif; ?>
                     <?php if ($edita): ?>
-                    <button id="btnGuardarCuentas" class="btn btn-sm btn-primary">
-                        <i class="fas fa-floppy-disk me-1"></i> Guardar cuentas
+                    <button id="btnGuardarBancosManuales" class="btn btn-sm btn-primary">
+                        <i class="fas fa-floppy-disk me-1"></i> Guardar bancos manuales
                     </button>
                     <?php endif; ?>
                 </div>
@@ -97,7 +156,7 @@ $edita = AuthCashflow::puedeEditar('parametros', 'SALDOS');
                     <div class="col-md-4">
                         <label class="form-label form-label-sm">Nombre del banco</label>
                         <input type="text" class="form-control form-control-sm sp-nuevo-nombre"
-                               data-tipo="BANCO" maxlength="80" placeholder="Ej: Banco Galicia">
+                               data-tipo="BANCO" maxlength="80" placeholder="Ej: BTG Uy">
                     </div>
                     <!-- La clase dice qué es la cuenta. Para un banco, cuenta
                          corriente o caja de ahorro; los fondos tienen su propia
@@ -127,10 +186,9 @@ $edita = AuthCashflow::puedeEditar('parametros', 'SALDOS');
                     </div>
                 </div>
                 <div class="param-hint mt-2">
-                    La cuenta entra <strong>activa y sin saldo cargado</strong>: se muestra como
+                    El banco entra <strong>activo y sin saldo cargado</strong>: se muestra como
                     "sin cargar" hasta la próxima carga, así que no puede informar de menos en
-                    silencio. Los campos de Interbanking (CBU, número, tipo) los va a completar la
-                    integración cuando exista.
+                    silencio. Si el banco viene por Interbanking, no lo agregues: ya está arriba.
                 </div>
             </div>
             <?php endif; ?>
@@ -143,7 +201,6 @@ $edita = AuthCashflow::puedeEditar('parametros', 'SALDOS');
                                 <th>Nombre</th>
                                 <th class="text-center" style="width: 170px;">Clase</th>
                                 <th class="text-center" style="width: 120px;">Moneda</th>
-                                <th>Datos de Interbanking</th>
                                 <th class="text-center" style="width: 110px;">Activa</th>
                             </tr>
                         </thead>
@@ -175,6 +232,11 @@ $edita = AuthCashflow::puedeEditar('parametros', 'SALDOS');
                     <?php if ($edita): ?>
                     <button class="btn btn-sm btn-outline-primary sp-btn-nueva" data-tipo="OTRO">
                         <i class="fas fa-plus me-1"></i> Agregar saldo
+                    </button>
+                    <?php endif; ?>
+                    <?php if ($edita): ?>
+                    <button id="btnGuardarCuentas" class="btn btn-sm btn-primary">
+                        <i class="fas fa-floppy-disk me-1"></i> Guardar cuentas
                     </button>
                     <?php endif; ?>
                 </div>

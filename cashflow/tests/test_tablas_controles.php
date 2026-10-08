@@ -931,3 +931,96 @@ foreach (array_keys($sinEjeTotales) as $id) {
 
     chequear('la excluida ' . $id . ' existe', true, $existe);
 }
+
+// ============================================================================
+// Parametros -> Saldos: los dos bloques de bancos, y el respaldo de la pestana
+// ============================================================================
+
+seccion('Parametros › Saldos: los bloques de bancos estan cableados');
+
+$tabPs = contenidoTab(__DIR__ . '/../Tabs/parametros_saldos.php');
+$jsPs = file_get_contents(__DIR__ . '/../Js/Parametros-Saldos.js');
+
+/** El HTML de la tarjeta que contiene $id, desde su <div class="card hasta la siguiente */
+function tarjetaDe($html, $id) {
+    $pos = strpos($html, $id);
+    $ini = ($pos === false) ? false : strrpos(substr($html, 0, $pos), '<div class="card mb-4"');
+    $fin = ($ini === false) ? false : strpos($html, '<div class="card mb-4"', $ini + 10);
+
+    return ($ini === false) ? '' : substr($html, $ini, ($fin === false ? strlen($html) : $fin) - $ini);
+}
+
+$cardIb = tarjetaDe($tabPs, 'id="tablaSpBancosIb"');
+$cardManual = tarjetaDe($tabPs, 'id="tablaSpCuentas"');
+$cardOtros = tarjetaDe($tabPs, 'id="tablaSpOtros"');
+
+chequear('el bloque de bancos de Interbanking existe', true, strpos($cardIb, 'Bancos de Interbanking') !== false);
+chequear('con su boton Guardar bancos', true, strpos($cardIb, 'id="btnGuardarBancosIb"') !== false);
+chequear('sin alta: no es un ABM', false, strpos($cardIb, 'sp-btn-nueva') !== false);
+chequear('y exporta su tabla', true, strpos($cardIb, 'data-exportar="tablaSpBancosIb"') !== false);
+chequear('el bloque de bancos sin Interbanking existe',
+    true, strpos($cardManual, 'Bancos sin Interbanking') !== false);
+chequear('con Agregar banco', true, strpos($cardManual, 'sp-btn-nueva" data-tipo="BANCO"') !== false);
+chequear('y su propio boton de guardar', true, strpos($cardManual, 'id="btnGuardarBancosManuales"') !== false);
+chequear('Guardar cuentas vive en la tarjeta de Otros saldos',
+    true, strpos($cardOtros, 'id="btnGuardarCuentas"') !== false);
+chequear('y no en la de bancos', false,
+    strpos($cardIb . $cardManual, 'id="btnGuardarCuentas"') !== false);
+
+chequear('Guardar bancos esta enganchado', true,
+    strpos($jsPs, "conectar('btnGuardarBancosIb', guardarBancosIb)") !== false);
+chequear('y llama a su accion', true, strpos($jsPs, "?action=saveBancosSaldo'") !== false);
+chequear('Guardar bancos manuales guarda solo su grilla', true,
+    (bool) preg_match("/conectar\('btnGuardarBancosManuales', function\(\) \{\s+guardarCuentas\(\['bodyBancos'\]/", $jsPs));
+chequear('Guardar cuentas guarda solo Otros saldos', true,
+    (bool) preg_match("/conectar\('btnGuardarCuentas', function\(\) \{\s+guardarCuentas\(\['bodyOtros'\]/", $jsPs));
+chequear('la grilla de Interbanking se pinta al cargar', true, strpos($jsPs, 'pintarBancosIb();') !== false);
+chequear('y sin permiso queda de solo lectura', true,
+    strpos($jsPs, "Permisos.soloLectura('bodyBancosIb')") !== false);
+chequear('inactivar un banco con respaldo pide confirmacion', true,
+    strpos($jsPs, 'conRespaldoQueSeInactiva') !== false && strpos($jsPs, 'Notificacion.confirmar(') !== false);
+
+// Los botones de escritura no se dibujan sin permiso
+foreach (['btnGuardarBancosIb', 'btnGuardarBancosManuales', 'btnGuardarCuentas'] as $btn) {
+    chequear($btn . ' solo se dibuja con permiso de edicion', true,
+        (bool) preg_match('/<\?php if \(\$edita\): \?>\s*<button id="' . $btn . '"/', $tabPs));
+}
+
+seccion('Saldos › Saldos: la accion de respaldo esta cableada');
+
+$tabSal = contenidoTab(__DIR__ . '/../Tabs/saldos.php');
+$jsSal = file_get_contents(__DIR__ . '/../Js/Saldos.js');
+
+chequear('el dialogo del respaldo existe', true, strpos($tabSal, 'id="modalRespaldo"') !== false);
+chequear('y solo se dibuja con permiso de edicion', true,
+    (bool) preg_match('/<\?php if \(\$edita\): \?>\s*<!--[^>]*?-->\s*<div class="modal fade" id="modalRespaldo"/s', $tabSal));
+chequear('Guardar esta enganchado', true,
+    strpos($jsSal, "conectar('btnGuardarRespaldo', guardarRespaldo)") !== false);
+chequear('Quitar esta enganchado', true,
+    strpos($jsSal, "conectar('btnQuitarRespaldo', quitarRespaldo)") !== false);
+chequear('los botones de cada fila abren el dialogo', true,
+    strpos($jsSal, "ev.target.closest('.sal-btn-respaldo')") !== false
+    && strpos($jsSal, 'abrirRespaldo(btn.dataset.clave)') !== false);
+chequear('el boton de la fila pregunta el permiso', true,
+    strpos($jsSal, "!Permisos.puedeEditar('bodySaldos')") !== false);
+chequear('y si existe la tabla del respaldo', true, strpos($jsSal, '!datosSaldos.respaldo_creado') !== false);
+chequear('las dos acciones existen en el controller', true,
+    strpos(file_get_contents(__DIR__ . '/../Controller/SaldosController.php'), "case 'guardarRespaldoBanco':") !== false
+    && strpos(file_get_contents(__DIR__ . '/../Controller/SaldosController.php'), "case 'quitarRespaldoBanco':") !== false);
+
+seccion('Parametros › Saldos: Marcar como vistas esta cableado');
+
+chequear('el boton se arma por banco con cuentas nuevas', true,
+    strpos($jsPs, "class=\"btn btn-sm btn-outline-info mt-1 sp-btn-vistas\"") !== false
+    && strpos($jsPs, 'if (!b.nuevas || !modulo.vistas_creado)') !== false);
+chequear('un solo listener lo engancha', true,
+    strpos($jsPs, "ev.target.closest('.sp-btn-vistas')") !== false
+    && strpos($jsPs, 'marcarVistas(btn.dataset.banco, btn)') !== false);
+chequear('pide confirmacion y llama a su accion', true,
+    (bool) preg_match("/titulo: 'Marcar cuentas como vistas'.*?\?action=marcarCuentasVistas'/s", $jsPs));
+chequear('la accion existe en el controller', true,
+    strpos(file_get_contents(__DIR__ . '/../Controller/ParametrosController.php'),
+        "case 'marcarCuentasVistas':") !== false);
+chequear('sin permiso, soloLectura saca el boton (no lleva data-lectura)', false,
+    strpos($jsPs, 'sp-btn-vistas" data-lectura') !== false);
+chequear('la pestana marca la cuenta nueva', true, strpos($jsSal, 'marcaNueva(f)') !== false);

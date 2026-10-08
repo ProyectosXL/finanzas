@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/../CashflowProvider.php';
 require_once __DIR__ . '/../Saldos.php';
+require_once __DIR__ . '/../SaldosInterbanking.php';
 require_once __DIR__ . '/../Cotizacion.php';
 
 /**
@@ -76,6 +77,11 @@ class SaldosProvider extends CashflowProvider {
     /**
      * Disponible inicial: efectivo de tesoreria, bancos y Mercado Pago.
      *
+     * LAS FILAS SON LAS DE LA PESTANA: Saldos::getFilasDisponible() junta las
+     * cargas manuales y los saldos de Interbanking, y es el unico camino. Si el
+     * tablero las juntara por su cuenta, algun dia no sumaria lo mismo que la
+     * pestana.
+     *
      * Toma el ULTIMO SALDO CONOCIDO DE CADA CUENTA, con su propia fecha. No es
      * "las filas de la ultima carga": una cuenta dada de alta despues de la
      * ultima carga, o que quedo sin completar, tiene que aportar su ultimo dato
@@ -98,16 +104,28 @@ class SaldosProvider extends CashflowProvider {
             return ['dias' => [], 'meses' => [], 'moneda_origen' => 'ARS'];
         }
 
-        $filas = $saldos->getSaldosActuales();
+        // Las mismas filas que muestra la pestana, con el hoy del eje. Las de
+        // Interbanking traen sus avisos ya resueltos -sin dato, registro sin
+        // contable, banco fuera de Tango, lectura caida- y van tal cual.
+        $disponible = $saldos->getFilasDisponible($h->hoy());
+        $filas = $disponible['filas'];
+
+        $this->avisarTodos($disponible['avisos'], Aviso::WARNING, self::SECCION_SALDO);
 
         // Una cuenta que nunca se cargo no aporta. Se cuenta aparte para poder
         // distinguir "no hay datos" de "los datos son cero", como hace
-        // ComexProvider con las nacionalizaciones.
+        // ComexProvider con las nacionalizaciones. Una cuenta de Interbanking
+        // sin dato no entra en esta cuenta: ya tiene su aviso, critico.
         $cargadas = [];
         $sinCargar = 0;
 
         foreach ($filas as $f) {
             if (empty($f['cargada'])) {
+                if (isset($f['origen_cuenta'])
+                    && $f['origen_cuenta'] === SaldosInterbanking::ORIGEN_INTERBANKING) {
+                    continue;
+                }
+
                 $sinCargar++;
                 continue;
             }

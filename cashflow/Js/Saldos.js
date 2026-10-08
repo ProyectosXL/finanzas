@@ -33,6 +33,11 @@
     var fondosPedidos = false;
     var modalMovimientos = null;
 
+    // El respaldo manual de una cuenta de Interbanking: el modal y la cuenta
+    // que tiene abierta (la fila del payload).
+    var modalRespaldo = null;
+    var respaldoFila = null;
+
     // Qué movimiento se está corrigiendo desde el formulario (null = alta).
     // Corregir no pisa: el servidor da de baja el anterior e inserta uno nuevo.
     var movReemplaza = null;
@@ -75,6 +80,29 @@
 
         if (selCuenta) {
             selCuenta.addEventListener('change', pintarMonedaMovimiento);
+        }
+
+        conectar('btnGuardarRespaldo', guardarRespaldo);
+        conectar('btnQuitarRespaldo', quitarRespaldo);
+
+        var modalResp = document.getElementById('modalRespaldo');
+
+        if (modalResp && window.bootstrap && bootstrap.Modal) {
+            modalRespaldo = new bootstrap.Modal(modalResp);
+        }
+
+        // Un solo listener para los botones de respaldo de todas las filas:
+        // la tabla se redibuja entera con cada filtro.
+        var cuerpoSaldos = document.getElementById('bodySaldos');
+
+        if (cuerpoSaldos) {
+            cuerpoSaldos.addEventListener('click', function(ev) {
+                var btn = ev.target.closest('.sal-btn-respaldo');
+
+                if (btn) {
+                    abrirRespaldo(btn.dataset.clave);
+                }
+            });
         }
 
         var modalEl = document.getElementById('modalMovimientos');
@@ -229,11 +257,14 @@
 
         var uc = datosSaldos.ultima_carga;
 
+        // Habla sólo de las cargas manuales: los bancos de Interbanking no se
+        // cargan, y su fecha está en cada fila.
         texto('ultimaCargaSaldos', uc ? fechaHora(uc.fecha_carga) : 'Sin cargas');
         texto('ultimaCargaSaldosDetalle', uc
-            ? ((uc.usuario ? 'Cargado por ' + Auditoria.quien(uc.usuario) : 'Sin usuario registrado')
-                + ' · ' + (uc.observaciones || 'sin observaciones'))
-            : 'Todavía no se cargó ningún saldo');
+            ? ('Mercado Pago, otros y bancos manuales · ' +
+               (uc.usuario ? 'Cargado por ' + Auditoria.quien(uc.usuario) : 'Sin usuario registrado') +
+               ' · ' + (uc.observaciones || 'sin observaciones'))
+            : 'Mercado Pago, otros y bancos manuales: todavía no se cargó ninguno');
 
         var ec = datosSaldos.efectivo_central;
 
@@ -250,24 +281,36 @@
         filas.forEach(function(f) {
             var consulta = (f.origen_cuenta === 'CONSULTA');
 
-            html += '<tr data-cuenta="' + f.id_cuenta + '"' +
-                    (f.cargada ? '' : ' class="sal-sin-cargar"') + '>';
-            html += '<td class="fw-semibold">' + escapar(f.nombre) + detalleCuenta(f) + '</td>';
+            // Mismo resaltado que "no es de ayer" de Saldos Locales: es la
+            // misma señal, un dato que tendría que haber llegado y no llegó.
+            var clases = [];
+
+            if (!f.cargada) {
+                clases.push('sal-sin-cargar');
+            }
+
+            if (f.no_es_de_hoy) {
+                clases.push('sal-desactualizado');
+            }
+
+            html += '<tr data-cuenta="' + (f.id_cuenta || '') + '"' +
+                    (clases.length ? ' class="' + clases.join(' ') + '"' : '') + '>';
+            html += '<td class="fw-semibold">' + escapar(f.nombre) + marcaNueva(f) +
+                    botonRespaldo(f) + detalleCuenta(f) + '</td>';
             html += '<td><span class="sal-badge">' + etiquetaTipo(f.tipo) + '</span></td>';
             html += '<td class="text-center">' + escapar(f.moneda) + '</td>';
 
             // Un guion y no un cero: "esta cuenta nunca se cargó" no es lo mismo
             // que "esta cuenta tiene cero pesos".
             html += '<td class="text-end sal-saldo">' + celdaSaldo(f, consulta) + '</td>';
-            html += '<td class="text-center">' + (f.fecha_saldo ? fecha(f.fecha_saldo) : '—') + '</td>';
-            html += '<td class="text-center"><span class="sal-origen">' +
-                    etiquetaOrigen(consulta ? 'CONSULTA' : (f.origen_dato || 'MANUAL')) +
-                    '</span></td>';
+            html += '<td class="text-center">' + celdaFechaSaldo(f) + '</td>';
+            html += '<td class="text-center">' + celdaOrigen(f, consulta) + '</td>';
 
             // La fecha de carga de CADA dato, que es la regla transversal del
             // relevamiento: sirve para ver cuál es la última actualización.
             html += '<td class="text-center sal-fecha-carga">' +
-                    (f.fecha_carga ? fechaHora(f.fecha_carga) : 'sin cargar') + '</td>';
+                    (f.fecha_carga ? fechaHora(f.fecha_carga) : (esInterbanking(f) ? '—' : 'sin cargar')) +
+                    '</td>';
             html += '</tr>';
         });
 
@@ -298,10 +341,15 @@
 
     /** Celda de saldo: texto cuando se mira, input cuando se está cargando */
     function celdaSaldo(f, consulta) {
-        if (!enCarga) {
+        // Una cuenta de Interbanking no se tipea en la carga: su saldo lo
+        // trae la tabla de BI. Se ve igual que fuera de la carga.
+        if (!enCarga || esInterbanking(f)) {
             if (!f.cargada) {
-                return '<span class="text-muted" title="Esta cuenta todavía no tiene ningún ' +
-                       'saldo cargado. No suma al disponible.">sin cargar</span>';
+                return esInterbanking(f)
+                    ? '<span class="text-muted" title="Interbanking no trajo ningún saldo ' +
+                      'contable de esta cuenta. No suma al disponible.">—</span>'
+                    : '<span class="text-muted" title="Esta cuenta todavía no tiene ningún ' +
+                      'saldo cargado. No suma al disponible.">sin cargar</span>';
             }
 
             return importe(f.saldo, f.moneda);
@@ -320,6 +368,204 @@
         return '<input type="number" step="0.01" class="form-control form-control-sm ' +
                'text-end sal-input-saldo" data-cuenta="' + f.id_cuenta + '" ' +
                'data-moneda="' + f.moneda + '" value="' + (f.cargada ? f.saldo : 0) + '">';
+    }
+
+    /**
+     * La fecha del saldo, y debajo "no es de hoy" cuando el saldo de
+     * Interbanking no es del día. La regla es del servidor (no_es_de_hoy): el
+     * navegador no decide qué es "hoy".
+     */
+    function celdaFechaSaldo(f) {
+        var html = f.fecha_saldo ? fecha(f.fecha_saldo) : '—';
+
+        if (f.no_es_de_hoy) {
+            html += '<div class="sal-subtitulo sal-error" title="Interbanking no trajo el saldo ' +
+                    'de hoy de esta cuenta: se muestra el último que hay.">no es de hoy</div>';
+        }
+
+        return html;
+    }
+
+    /**
+     * La celda Origen. Un respaldo dice "Manual (respaldo)" y el tooltip
+     * cuenta quién lo cargó, cuándo y por qué, y qué trae Interbanking: es lo
+     * que explica por qué esa cuenta no muestra el dato de la integración.
+     */
+    function celdaOrigen(f, consulta) {
+        var origen = consulta ? 'CONSULTA'
+            : (esInterbanking(f) ? (f.origen || 'INTERBANKING') : (f.origen_dato || 'MANUAL'));
+        var titulo = '';
+
+        if (f.origen === 'RESPALDO' && f.respaldo) {
+            titulo = 'Cargado a mano' +
+                (f.respaldo.usuario ? ' por ' + Auditoria.quien(f.respaldo.usuario) : '') +
+                (f.respaldo.fecha_alta ? ' el ' + fechaHora(f.respaldo.fecha_alta) : '') +
+                (f.respaldo.observacion ? ' · ' + f.respaldo.observacion : '') +
+                '. Interbanking: ' + (f.interbanking
+                    ? importe(f.interbanking.saldo, f.moneda) + ' del ' + fecha(f.interbanking.fecha)
+                    : 'sin saldo contable') + '.';
+        }
+
+        return '<span class="sal-origen"' + (titulo ? ' title="' + escapar(titulo) + '"' : '') + '>' +
+               etiquetaOrigen(origen) + '</span>';
+    }
+
+    /**
+     * El botón "Cargar saldo manual" de una cuenta de Interbanking. Sólo si se
+     * puede editar y si existe la tabla del respaldo; las filas que llegan son
+     * todas de bancos activos (las de uno inactivo no vienen). No se dibuja
+     * durante una carga: son dos cosas distintas.
+     */
+    function botonRespaldo(f) {
+        if (!esInterbanking(f) || enCarga || !datosSaldos.respaldo_creado
+            || !Permisos.puedeEditar('bodySaldos')) {
+            return '';
+        }
+
+        return ' <button type="button" class="btn btn-link btn-sm p-0 ms-1 sal-btn-respaldo" ' +
+               'data-clave="' + escapar(f.clave) + '" title="Cargar saldo manual: para cuando ' +
+               'Interbanking no trae el saldo contable de esta cuenta">' +
+               '<i class="fas fa-hand-holding-dollar"></i></button>';
+    }
+
+    /** Abre el diálogo del respaldo de una cuenta, con el vigente si lo tiene */
+    function abrirRespaldo(clave) {
+        var f = ((datosSaldos && datosSaldos.filas) || []).filter(function(x) {
+            return x.clave === clave;
+        })[0];
+
+        if (!f || !modalRespaldo) {
+            return;
+        }
+
+        respaldoFila = f;
+
+        var hoy = hoyLocal();
+        var r = f.respaldo;
+
+        texto('respaldoCuenta', f.nombre);
+        texto('respaldoMoneda', f.moneda);
+        texto('respaldoInterbanking', f.interbanking
+            ? 'Interbanking: ' + importe(f.interbanking.saldo, f.moneda) + ' del ' +
+              fecha(f.interbanking.fecha) + '.'
+            : 'Interbanking no trae ningún saldo contable de esta cuenta.');
+
+        var vigente = document.getElementById('respaldoVigente');
+
+        if (r) {
+            vigente.innerHTML = '<small><strong>Respaldo vigente:</strong> ' +
+                escapar(importe(r.saldo, f.moneda)) + ' del ' + escapar(fecha(r.fecha_saldo)) +
+                (r.usuario ? ', cargado por ' + escapar(Auditoria.quien(r.usuario)) : '') +
+                (r.fecha_alta ? ' el ' + escapar(fechaHora(r.fecha_alta)) : '') +
+                (r.observacion ? ' · ' + escapar(r.observacion) : '') +
+                '. Guardar lo reemplaza; el anterior queda en el historial.</small>';
+        }
+
+        mostrar('respaldoVigente', !!r);
+        mostrar('btnQuitarRespaldo', !!r, 'inline-block');
+
+        var inputFecha = document.getElementById('respaldoFecha');
+        inputFecha.max = hoy;
+        inputFecha.value = hoy;
+        document.getElementById('respaldoSaldo').value = '';
+        document.getElementById('respaldoObservacion').value = '';
+
+        modalRespaldo.show();
+    }
+
+    /**
+     * Hoy en la zona del navegador, 'Y-m-d'. Sólo para proponer la fecha y
+     * topear el selector: quien decide si la fecha es futura es el servidor.
+     */
+    function hoyLocal() {
+        var d = new Date();
+
+        return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' +
+               ('0' + d.getDate()).slice(-2);
+    }
+
+    function guardarRespaldo() {
+        if (!respaldoFila) {
+            return;
+        }
+
+        var saldo = document.getElementById('respaldoSaldo').value.trim();
+        var fechaSaldo = document.getElementById('respaldoFecha').value;
+
+        // El servidor lo vuelve a rechazar: esto sólo explica antes de mandar.
+        if (saldo === '' || !fechaSaldo) {
+            Notificacion.advertencia('El saldo manual necesita fecha e importe.');
+            return;
+        }
+
+        if (fechaSaldo > hoyLocal()) {
+            Notificacion.advertencia('La fecha del saldo no puede ser posterior a hoy.');
+            return;
+        }
+
+        conBoton('btnGuardarRespaldo', function() {
+            return pedirJson(URL_SALDOS + '?action=guardarRespaldoBanco', {
+                nro_banco: respaldoFila.nro_banco,
+                nro_cuenta: respaldoFila.nro_cuenta,
+                moneda: respaldoFila.moneda,
+                fecha_saldo: fechaSaldo,
+                saldo: saldo,
+                observacion: document.getElementById('respaldoObservacion').value
+            }).then(function() {
+                Notificacion.exito('Saldo manual guardado.');
+                modalRespaldo.hide();
+                cargarSaldos();
+            });
+        }, 'No se pudo guardar el saldo manual');
+    }
+
+    function quitarRespaldo() {
+        var f = respaldoFila;
+
+        if (!f || !f.respaldo) {
+            return;
+        }
+
+        Notificacion.confirmar({
+            titulo: 'Quitar el saldo manual',
+            mensaje: '¿Quitar el saldo manual de ' + f.nombre + ' (' +
+                importe(f.respaldo.saldo, f.moneda) + ' del ' + fecha(f.respaldo.fecha_saldo) + ')?',
+            detalle: 'No se borra: queda en el historial, dado de baja. Si Interbanking no trae ' +
+                'el saldo contable, la cuenta queda sin dato y no suma al disponible.',
+            confirmar: 'Quitar',
+            peligro: true
+        }).then(function(ok) {
+            if (!ok) {
+                return;
+            }
+
+            pedirJson(URL_SALDOS + '?action=quitarRespaldoBanco', { id: f.respaldo.id })
+                .then(function() {
+                    Notificacion.exito('Saldo manual quitado.');
+                    modalRespaldo.hide();
+                    cargarSaldos();
+                })
+                .catch(function(error) {
+                    Notificacion.error('No se pudo quitar el saldo manual: ' + error.message);
+                });
+        });
+    }
+
+    /**
+     * La marca de una cuenta que Interbanking trajo y nadie marcó como vista.
+     * Ya suma: la marca sólo pide que alguien la revise en Parámetros.
+     */
+    function marcaNueva(f) {
+        return f.nueva
+            ? ' <span class="badge text-bg-info sal-badge-nueva" title="Cuenta nueva en ' +
+              'Interbanking: ya suma al disponible. Revisala y marcala como vista en Parámetros › ' +
+              'Saldos.">nueva</span>'
+            : '';
+    }
+
+    /** Si la fila es una cuenta de Interbanking y no del catálogo manual */
+    function esInterbanking(f) {
+        return f.origen_cuenta === 'INTERBANKING';
     }
 
     /** Los campos de la API que ya estén cargados, como subtítulo de la cuenta */
@@ -396,6 +642,8 @@
             if (f.origen_cuenta === 'CONSULTA') {
                 var ec = datosSaldos.efectivo_central;
                 totales[f.moneda] = (totales[f.moneda] || 0) + (ec ? parseFloat(ec.saldo) : 0);
+            } else if (esInterbanking(f) && f.cargada) {
+                totales[f.moneda] = (totales[f.moneda] || 0) + (parseFloat(f.saldo) || 0);
             }
         });
 
@@ -414,6 +662,12 @@
         var hoy = new Date().toISOString().slice(0, 10);
 
         datosSaldos.filas.forEach(function(f) {
+            // Las cuentas de Interbanking no son de la carga: no tienen ID en
+            // el catálogo manual y el servidor las rechazaría.
+            if (esInterbanking(f)) {
+                return;
+            }
+
             if (f.origen_cuenta === 'CONSULTA') {
                 // Va igual, pero sin saldo: el servidor lo relee de su consulta.
                 filas.push({ id_cuenta: f.id_cuenta, saldo: 0, fecha_saldo: hoy });
@@ -1222,10 +1476,21 @@
      * un dato. Se juntan los de las tres sub-pestañas en un solo bloque arriba.
      */
     function pintarAvisos() {
-        var avisos = []
-            .concat((datosSaldos && datosSaldos.avisos) || [])
-            .concat((datosLocales && datosLocales.avisos) || [])
-            .concat((datosFondos && datosFondos.avisos) || []);
+        // La pestaña 1 trae los avisos con nivel; las otras dos, textos, que
+        // son atención. Los críticos van en su propio bloque rojo: "esta cuenta
+        // no suma" no puede leerse igual que "este saldo es de ayer".
+        var conNivel = (datosSaldos && datosSaldos.avisos_con_nivel) ||
+            ((datosSaldos && datosSaldos.avisos) || []).map(function(t) {
+                return { nivel: 'warning', texto: t };
+            });
+
+        var avisos = conNivel
+            .concat(((datosLocales && datosLocales.avisos) || []).map(function(t) {
+                return { nivel: 'warning', texto: t };
+            }))
+            .concat(((datosFondos && datosFondos.avisos) || []).map(function(t) {
+                return { nivel: 'warning', texto: t };
+            }));
 
         var cont = document.getElementById('avisosSaldos');
 
@@ -1233,15 +1498,23 @@
             return;
         }
 
-        if (!avisos.length) {
-            cont.innerHTML = '';
-            return;
+        var criticos = avisos.filter(function(a) { return a.nivel === 'danger'; });
+        var resto = avisos.filter(function(a) { return a.nivel !== 'danger'; });
+
+        cont.innerHTML = bloqueAvisos(criticos, 'alert-danger', 'fa-circle-exclamation') +
+            bloqueAvisos(resto, 'alert-warning', 'fa-triangle-exclamation');
+    }
+
+    /** Un bloque de avisos de un color, o nada si no hay ninguno */
+    function bloqueAvisos(lista, clase, icono) {
+        if (!lista.length) {
+            return '';
         }
 
-        cont.innerHTML = '<div class="alert alert-warning py-2 px-3 mb-3">' +
-            '<i class="fas fa-triangle-exclamation me-1"></i>' +
+        return '<div class="alert ' + clase + ' py-2 px-3 mb-3">' +
+            '<i class="fas ' + icono + ' me-1"></i>' +
             '<small><ul class="mb-0 ps-3">' +
-            avisos.map(function(a) { return '<li>' + escapar(a) + '</li>'; }).join('') +
+            lista.map(function(a) { return '<li>' + escapar(a.texto) + '</li>'; }).join('') +
             '</ul></small></div>';
     }
 
@@ -1305,6 +1578,8 @@
 
     function etiquetaOrigen(origen) {
         var origenes = {
+            'INTERBANKING': 'Interbanking',
+            'RESPALDO': 'Manual (respaldo)',
             'API': 'Interbanking',
             'MANUAL': 'Manual',
             'CONSULTA': 'Consulta'

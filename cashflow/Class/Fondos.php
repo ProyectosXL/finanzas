@@ -65,7 +65,7 @@ require_once __DIR__ . '/Auditoria.php';
  * NO SE REGISTRA CONTRAPARTIDA BANCARIA
  * -------------------------------------
  * Un rescate saca plata del fondo y nada mas. Lo que entra al banco se va a ver
- * en el saldo bancario, que en breve lo trae la API de Interbanking. Registrar
+ * en el saldo bancario, que trae Interbanking (SaldosInterbanking). Registrar
  * la contrapartida aca seria adelantar un dato que otro circuito ya va a medir,
  * y las dos cifras podrian discrepar.
  *

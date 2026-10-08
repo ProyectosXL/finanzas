@@ -1,20 +1,21 @@
 # Módulo Saldos — disponible inicial, caja de locales y fondos
 
-Reemplaza el placeholder de la pestaña **Saldos** y alimenta las dos filas del tablero que hasta ahora rendían cero: *Saldo Inicial* y *Caja Locales*. Desde `feature/cuentas-inversion` también lleva las **cuentas de inversión y comitente**, que son el stock de la sección Cobertura.
+Reemplaza el placeholder de la pestaña **Saldos** y alimenta las dos filas del tablero que hasta ahora rendían cero: *Saldo Inicial* y *Caja Locales*. Desde `feature/cuentas-inversion` también lleva las **cuentas de inversión y comitente**, que son el stock de la sección Cobertura. Desde `feature/saldos-interbanking` los **saldos bancarios se leen en vivo de Interbanking** y dejan de cargarse a mano.
 
-Ramas: `feature/saldos`, `feature/cuentas-inversion`, `feature/saldos-locales-dia-acreditacion`
+Ramas: `feature/saldos`, `feature/cuentas-inversion`, `feature/saldos-locales-dia-acreditacion`, `feature/saldos-interbanking`
 
 ---
 
 ## La idea en una línea
 
-**Una carga es un evento fechado, no un `UPDATE`.** Los saldos no se pisan: cada carga inserta un juego nuevo de filas y la pantalla muestra, para cada dato, su último valor conocido **con la fecha en que se cargó**. Los fondos siguen la misma idea con otra forma: no se cargan fotos, se cargan **movimientos**, y el saldo se calcula.
+**Una carga es un evento fechado, no un `UPDATE`.** Los saldos no se pisan: cada carga inserta un juego nuevo de filas y la pantalla muestra, para cada dato, su último valor conocido **con la fecha en que se cargó**. Los fondos siguen la misma idea con otra forma: no se cargan fotos, se cargan **movimientos**, y el saldo se calcula. Los bancos de Interbanking no se cargan: se leen en vivo, con la fecha de su dato.
 
 ```
-Pestaña 1 "Saldos"          Pestaña 2 "Saldos Locales"      Pestaña 3 "Fondos"
-efectivo central (SBA05)    caja de locales propios (Tango)  cuentas INVERSION / COMITENTE
-+ bancos (manual → API)     − reserva de caja                saldo inicial
-+ Mercado Pago (manual)     = neto a depositar               + suscripciones − rescates
+Pestaña 1 "Saldos"              Pestaña 2 "Saldos Locales"      Pestaña 3 "Fondos"
+efectivo central (SBA05)        caja de locales propios (Tango)  cuentas INVERSION / COMITENTE
++ bancos (Interbanking, en vivo) − reserva de caja               saldo inicial
++ bancos sin Interbanking (man.) = neto a depositar              + suscripciones − rescates
++ Mercado Pago y otros (manual)
         │                            │                                │
         ▼                            ▼                                ▼
   serie DISPONIBLE            serie DEPOSITOS                   series STOCK
@@ -40,7 +41,19 @@ Contra `central`, en este orden:
 --                                             cashflow_dolares_comitente_cobertura.sql)
 -- 3. sql/cashflow_saldos_dia_acreditacion.sql (después del 1; el bloque también va
 --                                             como 5.c dentro del 1)
+-- 4. sql/cashflow_saldos_borrar_bancos_manuales.sql  (UNA VEZ, ANTES del 5 y antes de
+--                                                    publicar feature/saldos-interbanking:
+--                                                    primero con @SIMULAR = 1, después con 0)
+-- 5. sql/cashflow_saldos_interbanking.sql            (después del 4)
 ```
+
+**El 4 borra datos, y es la única excepción a "no hay bajas físicas".** Borra las cuentas `TIPO = 'BANCO'` del catálogo que pasan a venir de Interbanking, con todo su histórico de `RO_T_CASHFLOW_SALDOS_DETALLE`. El catálogo no tiene `NRO_BANCO`, así que no adivina: conserva lo que nombra `@CONSERVAR` (por defecto `BTG Uy`) y borra el resto de las `BANCO`. Arranca en simulación (`@SIMULAR = 1`): lista lo que borra y lo que conserva, con filas de detalle y último saldo, y no toca nada. Antes de borrar busca aplicaciones de cobertura `CTA_<id>` y cualquier FK al catálogo (los movimientos de fondos, entre ellas); si hay, aborta. No toca cuentas de otro tipo, fondos ni cabeceras de carga: si alguna cabecera quedara sin filas lo informa y la deja. Todo en una transacción, y una segunda corrida dice que no hay nada para borrar.
+
+En modo real deja **constancia** en `RO_T_CASHFLOW_SALDOS_DEPURACION`, que crea: qué borró, qué conservó, quién y cuándo. **El código lee Interbanking sólo si existe esa constancia.** Mientras no se corra el 4, la pestaña y el tablero siguen con las cuentas manuales y un aviso crítico dice qué falta. El código no puede distinguir una cuenta manual vieja de un banco que ya está en Interbanking, así que sin esa traba publicar antes del borrado sumaría el mismo banco dos veces.
+
+Contra la base del 08/10/2026 la simulación lista 8 cuentas (BBVA, Ciudad, Credicoop, Galicia, ICBC, Nación, Provincia y Santander) con 24 filas de detalle, y conserva BTG Uy. Ninguna cabecera queda vacía, porque todas conservan el efectivo y Mercado Pago, y no hay referencias. Se probó contra clones `#temporales` del catálogo y del detalle, sin tocar tablas `dbo`: la simulación, el modo real, la segunda corrida y el aborto con una aplicación `CTA_<id>`.
+
+El 5 crea tres tablas: `RO_T_CASHFLOW_SALDOS_BANCO` (alias y estado de cada banco), `RO_T_CASHFLOW_SALDOS_BANCO_MANUAL` (respaldo manual de una cuenta que Interbanking no trae) y `RO_T_CASHFLOW_SALDOS_BANCO_CUENTA` (las cuentas ya vistas, para detectar las nuevas). Siembra como vistas, por `MERGE`, todas las cuentas que ya están en `BI_T_SALDOS_INTERBANKING`, para que el primer día no aparezca todo como nuevo. Es reejecutable y no borra nada. Sin él la pantalla funciona: todos los bancos activos y sin alias, ninguna cuenta nueva, sin respaldo, y Parámetros y la pestaña dicen qué script falta. Ver *Los saldos de Interbanking*.
 
 El tercero agrega el **día de acreditación** de cada local (`RO_T_CASHFLOW_SALDOS_SUCURSAL.DIA_ACREDITACION`) y el día y la fecha efectivos en la foto de cada carga (`RO_T_CASHFLOW_SALDOS_LOCAL.DIA_ACREDITACION` y `FECHA_ACREDITACION`). Son tres columnas nullable, sin default, cada una agregada sólo si falta. No borra ni pisa nada, y si falta la tabla del 1 lo dice y no hace nada. Sin él, la pantalla funciona como antes: el día no se puede elegir, Caja Locales va entera a la primera columna, y la pestaña, Parámetros y el tablero avisan qué script falta. Ver *La fecha de imputación: el día de acreditación de cada local*.
 
@@ -56,13 +69,16 @@ Si un script **no se corrió**, la pantalla no falla: muestra un aviso y el tabl
 
 ## Pestaña 1 — Saldos
 
-Alimenta la fila **Saldo Inicial** (`DISPONIBLE`). El saldo del Cashflow es la suma de tres cosas:
+Alimenta la fila **Saldo Inicial** (`DISPONIBLE`). El saldo del Cashflow es la suma de cuatro cosas:
 
-| # | Qué | De dónde sale | Origen del dato |
+| # | Qué | De dónde sale | Origen en pantalla |
 | --- | --- | --- | --- |
-| 1 | Efectivo de tesorería de casa central | `SBA05` en `central` | `CONSULTA` |
-| 2 | Saldos bancarios | Carga manual hoy, API de Interbanking después | `MANUAL` → `API` |
-| 3 | Mercado Pago | Carga manual | `MANUAL` |
+| 1 | Efectivo de tesorería de casa central | `SBA05` en `central`, en vivo | Consulta |
+| 2 | Bancos de Interbanking | `BI_T_SALDOS_INTERBANKING`, en vivo; respaldo manual si no trae el dato | Interbanking / Manual (respaldo) |
+| 3 | Bancos sin Interbanking (hoy, BTG Uy) | Carga manual | Manual |
+| 4 | Mercado Pago y otros | Carga manual | Manual |
+
+La pestaña y el tablero leen las filas por **un solo camino**, `Saldos::getFilasDisponible()`, que junta las cargas (`getSaldosActuales()`) y las cuentas de Interbanking (`SaldosInterbanking`). Si cada uno las juntara por su lado, algún día no sumarían lo mismo. Hay una prueba, contra la base, de que el total de la pestaña es el Saldo Inicial del tablero.
 
 ### El efectivo central es un saldo puntual
 
@@ -78,9 +94,11 @@ Devuelve **un solo número**: el acumulado de movimientos de esa cuenta hasta el
 
 Ese saldo **no se acepta del navegador aunque esté en la pantalla**: al guardar, la clase lo vuelve a leer de `SBA05`. Es un dato del sistema, y tomarlo del cliente permitiría guardar cualquier cosa como si fuera lo que dice la contabilidad. Si la consulta falla en ese momento, la carga **no se guarda**: guardarla dejaría ese saldo en cero y el disponible quedaría informado de menos.
 
-### El formulario manual se mantiene aunque entre la API
+### Nueva carga: Mercado Pago, otros y bancos sin Interbanking
 
-Es respaldo ante una falla de la integración. La columna *Origen* de cada fila dice si el saldo lo trajo la API, lo tipeó una persona o lo resolvió una consulta.
+*Nueva carga* lista sólo el catálogo manual: el efectivo (que relee su consulta), Mercado Pago, los otros saldos y los bancos que no vienen por Interbanking. Las cuentas de Interbanking no son de la carga: no tienen ID en el catálogo, la pantalla no las manda y `guardarCargaSaldos()` sólo acepta cuentas del catálogo. Si una cuenta de Interbanking no trae el dato, su respaldo se carga desde su propia fila (ver *El respaldo manual*). La columna *Origen* dice de dónde salió cada saldo: Interbanking, Manual (respaldo), Manual o Consulta.
+
+El KPI se llama **Última carga manual**, y su detalle dice "Mercado Pago, otros y bancos manuales": la fecha de los saldos bancarios está en cada fila y no en ese KPI. `saldos_dias_alerta_carga` también habla sólo de las cargas manuales.
 
 ### Monedas: dos totales, sin mezclar
 
@@ -94,13 +112,77 @@ Un mes **sin cotización** no vale cero: esos dólares **no entran al tablero** 
 
 Es la regla transversal del relevamiento y está en el modelo, no calculada a ojo. La pantalla no muestra "las filas de la última carga" sino **el último saldo de cada cuenta**, con la fecha de la carga en la que se registró. La diferencia importa cuando alguien da de alta una cuenta después de la última carga o cuando una carga quedó incompleta: con el otro criterio esas cuentas desaparecerían del cuadro o se verían en cero.
 
-Una cuenta que **nunca se cargó** dice `sin cargar`, no `0`. No es lo mismo.
+Una cuenta que **nunca se cargó** dice `sin cargar`, no `0`. No es lo mismo. Una cuenta de Interbanking sin dato se ve con guion, por el mismo motivo. En las de Interbanking, *Cargado el* es el `CREATED_AT` del registro, o el alta del respaldo.
 
 ### Filtro por tipo
 
 El selector de la cabecera filtra la tabla por tipo de cuenta (`Banco`, `Mercado Pago`, `Efectivo`, `Otro`) y **los KPI *Total en Pesos* y *Total en Dólares*, y el pie de la tabla, se recalculan sobre lo filtrado** —el pie de cada KPI dice qué tipo está aplicado—. Es un filtro de pantalla, resuelto en el navegador con las filas que ya trajo el payload: lo que se guarda y lo que consume el tablero es siempre el conjunto completo.
 
 Mientras dura una **carga**, el filtro se limpia y se bloquea: el guardado toma el input de cada fila, y una fila escondida por el filtro no tendría input, así que su saldo viajaría en cero.
+
+---
+
+## Los saldos de Interbanking
+
+Un proceso externo a este repo trae todos los días, por cuenta, lo que informa Interbanking y lo deja en `BI_T_SALDOS_INTERBANKING` (`central`). `Class/SaldosInterbanking.php`, al estilo de `Fondos.php`, lo lee **en vivo** cada vez que se dibuja la pestaña o se calcula el tablero, igual que `SBA05`. **No se copia** a `RO_T_CASHFLOW_SALDOS_DETALLE` ni usa las cargas: la tabla de BI ya tiene el histórico, y dos copias del mismo dato terminan discrepando.
+
+Las reglas son helpers estáticos y puros, con hoy inyectado: `elegirRegistro()`, `nombreBanco()`, `resolverSaldo()`, `armarCuentasBancarias()`, `armarBancos()`, `esNueva()`, `resolverBancos()`, `validarAlias()` y `validarRespaldo()`. Las lecturas sólo juntan datos.
+
+### Una fila por cuenta, con el último saldo contable
+
+- **La cuenta es `NRO_BANCO` + `NRO_CUENTA` + `MONEDA`.** Una cuenta que llega **sin moneda** no se toma y el aviso es crítico: asumir pesos sería inventar el dato.
+- **El importe es `SALDO_CONTABLE`.** Los otros siete saldos de la tabla no se muestran ni se usan.
+- **Se toma el último registro con contable no nulo**, por `FECHA_OPERACION`, después `CREATED_AT` (un nulo ordena como el más viejo) y después `ID`, todos descendentes. Nada impide dos registros del mismo día, y sin desempate la cuenta mostraría uno u otro.
+- **Un registro nuevo sin contable no tapa al anterior.** Se usa el último no nulo, con aviso de atención: *"el registro del 08/10 vino sin saldo contable; se muestra el del 07/10"*.
+- **Una cuenta que nunca trajo contable**, y sin respaldo, se ve **sin dato** (guion, nunca cero), no suma, y el aviso es **crítico**: es plata que existe y el disponible no incluye.
+
+**La consulta es la única con lógica, y va contra la tabla de BI sola**, sin JOIN. Usa dos `ROW_NUMBER()` y trae como máximo dos registros por cuenta: el más nuevo de todos y el más nuevo con contable. La elección final la vuelve a hacer `elegirRegistro()`, y la prueba se hace sobre él.
+
+**Si la tabla de BI no existe o falla la lectura**, no hay filas de Interbanking y va un aviso crítico: *"no se pudieron leer los saldos bancarios de Interbanking; el disponible no los incluye"*. El efectivo, Mercado Pago, los bancos manuales y los respaldos siguen entrando.
+
+### El nombre: alias o Tango
+
+Cada cuenta se ve como **`Alias o DESC_BANCO · N° cuenta`**. El nombre sale de `BANCO.DESC_BANCO` de Tango, cruzado **en PHP** y con trim: en Tango `NRO_BANCO` es `char(3)` y en BI `varchar(10)`. Tango tiene razones sociales y nombres viejos (`RIO DE LA PLATA S.A.` es Santander, `FRANCES` es BBVA), así que **el alias del banco manda** y lo muestran todas sus cuentas. Un banco que no está en Tango se ve `Banco <nro>`, con un aviso de atención que desaparece al ponerle alias.
+
+### Inhabilitar un banco
+
+`RO_T_CASHFLOW_SALDOS_BANCO` guarda alias y estado por `NRO_BANCO`. Un banco **inactivo** no sale en la pestaña, no suma al tablero, no usa su respaldo, no admite cargarlo y **no avisa nada**: ni cuentas nuevas, ni saldo viejo, ni saldo faltante. Es para un banco que ya no se opera (hoy, Supervielle). En Parámetros se sigue viendo, atenuado, para reactivarlo.
+
+**Sin fila es activo y sin alias.** La lectura nunca escribe: un banco que aparece por primera vez en Interbanking entra al disponible sin que nadie lo dé de alta. La fila se crea, con `UPSERT`, cuando alguien guarda alias o estado.
+
+### El saldo que no es de hoy
+
+**La regla es estricta.** El proceso de BI integra todos los días, así que un saldo anterior a hoy se marca, **también a la mañana antes de que corra el proceso y los fines de semana**. No hay tolerancia ni parámetro de hora: escondería justo el día en que el proceso no corrió. Vale igual para un respaldo.
+
+- **En la pestaña**, la fila se resalta como *"no es de ayer"* de Saldos Locales, dice **no es de hoy** debajo de la fecha, y un aviso de atención lista las cuentas con su fecha.
+- **En el tablero**, el importe va a la primera columna, la apertura del horizonte, como siempre con `destinoEnEje()`. `armarSerieDisponible()` avisa en **WARNING**, sección *Saldo Inicial*, cuántas cuentas y qué importe no son del día y de qué fecha es el más viejo.
+
+Cada fila lleva su **origen**, y eso decide el aviso. Lo que sale de una carga manual y quedó viejo conserva el aviso crítico *"Actualizá la carga de saldos"*: alguien tiene que hacerla. Lo de Interbanking y los respaldos (`SaldosInterbanking::ORIGENES_DEL_DIA`) no tiene carga que actualizar, y por eso es atención.
+
+### El respaldo manual
+
+Cuando Interbanking no trae el saldo contable de una cuenta por un error de la integración (hoy, 014 Provincia), se carga a mano desde su fila en Saldos › Saldos, con el ícono de saldo manual. El diálogo pide la fecha del saldo (no posterior a hoy), el importe (obligatorio, puede ser negativo) y una observación. Muestra el respaldo vigente, si lo hay, para reemplazarlo o quitarlo. El permiso es el de *Nueva carga*, `['saldos', null]`.
+
+- **Gana la fecha más nueva y, a igual fecha, Interbanking**, que es la fuente oficial (`resolverSaldo()`). Cuando BI se arregla, Interbanking vuelve a mandar solo, sin quitar el respaldo. Es la regla inversa a la caja de los locales, donde gana el manual, porque acá el manual no corrige un dato: tapa uno que falta.
+- **Historial sin bajas físicas.** Reemplazar da de baja el vigente (`VIGENTE = 0`, con usuario y fecha de baja) e inserta el nuevo con `ID_REEMPLAZA`, en una transacción. Quitar da de baja. Un índice único filtrado deja **un solo respaldo vigente por cuenta**.
+- **Las cuentas son las de Interbanking más las que tienen respaldo vigente.** Con la lectura caída, o con una cuenta que BI dejó de traer, el respaldo sigue entrando: existe justamente para eso.
+- Mientras se usa, la falla se acusa en **atención**: *"Interbanking no trae el saldo contable de <banco · cuenta>; se usa la carga manual del dd/mm"*. El origen dice "Manual (respaldo)", con un tooltip que cuenta quién lo cargó, cuándo, la observación y qué trae Interbanking.
+- El servidor rechaza un respaldo de un banco inactivo, de una cuenta que no viene en Interbanking ni tiene respaldo, y uno cargado antes de la depuración.
+
+### Las cuentas nuevas
+
+Una cuenta nueva es una cuenta de Interbanking que **nadie marcó como vista** (`RO_T_CASHFLOW_SALDOS_BANCO_CUENTA`). La fila existe sólo si la cuenta se vio, así que su alta es quién y cuándo la marcó. Una cuenta nueva **entra al tablero** como cualquier otra de un banco activo, porque es plata que existe. En la pestaña lleva la marca **nueva**, y un aviso de atención en la pestaña y en el tablero dice banco, cuenta e importe: *"cuenta nueva en Interbanking; revisala en Parámetros › Saldos"*.
+
+- Deja de ser nueva cuando alguien la marca como vista en Parámetros.
+- Un banco inactivo no marca ni avisa.
+- Una cuenta que sólo existe por su respaldo no es nueva.
+- Sin el script no se marca ninguna.
+
+La regla es una sola, `esNueva()`, y la usan la pestaña y Parámetros.
+
+### Los bancos que no vienen por Interbanking
+
+Siguen siendo cuentas `TIPO = 'BANCO'` del catálogo, se cargan en *Nueva carga*, conservan su histórico y entran por `getSaldosActuales()` con su moneda y su cotización. Hoy es BTG Uy, en USD. `addCuenta()` sigue aceptando `BANCO`, pero el catálogo no tiene `NRO_BANCO`, así que el servidor no puede saber si el banco que se da de alta ya viene por Interbanking. El alta responde con una advertencia (`Saldos::advertenciaAltaCuenta()`) que Parámetros muestra.
 
 ---
 
@@ -221,7 +303,7 @@ Las cuentas de **inversión** y **comitente** del catálogo, con su cuenta corri
 
 ### Una cuenta tiene TIPO y CLASE, y son dos preguntas
 
-`TIPO` ya existía y dice **de dónde sale** el saldo (`BANCO`, `MERCADO_PAGO`, `EFECTIVO_CENTRAL`, `OTRO`): decide el origen del dato, lo que la API va a sincronizar, el filtro de la pestaña 1, y es inmutable. `CLASE` es nueva y dice **qué es** la cuenta:
+`TIPO` ya existía y dice **de dónde sale** el saldo (`BANCO`, `MERCADO_PAGO`, `EFECTIVO_CENTRAL`, `OTRO`): decide el origen del dato, el filtro de la pestaña 1, y es inmutable. Un `BANCO` del catálogo es un banco **sin** Interbanking: los que vienen por Interbanking no están en el catálogo. `CLASE` es nueva y dice **qué es** la cuenta:
 
 | `CLASE` | Qué es | Cómo se carga | Dónde entra al tablero |
 | --- | --- | --- | --- |
@@ -250,7 +332,7 @@ La cuenta la hace `Fondos::saldoA()`, un helper puro, y la usan la pestaña y el
 
 El importe de un movimiento es **siempre positivo** y el signo lo pone el tipo (`SUSCRIPCION` suma, `RESCATE` resta), por el mismo motivo que el tablero no tiene columna de signo: "un rescate negativo" no significa nada. La moneda **no viaja**: se copia de la cuenta al guardar, como hace el detalle de saldos, así que corregir la moneda de una cuenta no reescribe lo que significan sus movimientos viejos. Por eso la moneda de un fondo **con movimientos no se deja cambiar**.
 
-**No se registra contrapartida bancaria.** Un rescate saca plata del fondo y nada más: lo que entra al banco se va a ver en el saldo bancario, que en breve lo trae la API. Registrarla acá sería adelantar un dato que otro circuito ya va a medir, y las dos cifras podrían discrepar.
+**No se registra contrapartida bancaria.** Un rescate saca plata del fondo y nada más: lo que entra al banco se ve en el saldo bancario, que trae Interbanking. Registrarla acá sería adelantar un dato que otro circuito ya va a medir, y las dos cifras podrían discrepar.
 
 ### El saldo inicial va en la cuenta
 
@@ -280,19 +362,24 @@ Las cuentas se dan de alta en **Parámetros → Saldos**, sección *Fondos de in
 
 ## Modelo de datos
 
-Seis tablas, prefijo `RO_T_CASHFLOW_SALDOS_`. Cumplen tres propiedades:
+Las tablas llevan el prefijo `RO_T_CASHFLOW_SALDOS_`. Las de las cargas cumplen dos propiedades:
 
 | Propiedad | Cómo |
 | --- | --- |
 | **El histórico no se pisa** | El detalle cuelga de `ID_CARGA` y no tiene clave `(cuenta, fecha)` que se sobrescriba |
 | **"Última carga" tiene respuesta única** | La resuelve la cabecera, con desempate por `ID` |
-| **Los campos de la API existen desde el día uno** | Creados y en `NULL` mientras la carga sea manual |
+
+Los saldos de Interbanking **no tienen tabla propia**: se leen de `BI_T_SALDOS_INTERBANKING`. Lo que guarda el módulo sobre ellos es lo que BI no sabe: cómo se llama cada banco, si se opera, qué cuentas ya se vieron y el respaldo manual.
 
 | Tabla | Qué guarda |
 | --- | --- |
-| `RO_T_CASHFLOW_SALDOS_CUENTA` | Catálogo de cuentas (parámetro): tipo, **clase**, moneda, origen, **saldo inicial con su fecha** (sólo fondos) y los siete campos de `/accounts` |
+| `RO_T_CASHFLOW_SALDOS_CUENTA` | Catálogo de cuentas manuales (parámetro): tipo, **clase**, moneda, origen y **saldo inicial con su fecha** (sólo fondos). Los siete campos de `/accounts` quedan **en desuso** (ver abajo) |
 | `RO_T_CASHFLOW_SALDOS_CARGA` | Cabecera de cada carga: tipo, fecha y hora, usuario, origen, observaciones |
-| `RO_T_CASHFLOW_SALDOS_DETALLE` | Histórico de saldos por cuenta y fecha, con los cinco `balances` y el `message` |
+| `RO_T_CASHFLOW_SALDOS_DETALLE` | Histórico de saldos por cuenta y fecha. De los cinco `balances` y el `message` sólo se usa `COUNTABLE_BALANCE`; el resto, en desuso |
+| `RO_T_CASHFLOW_SALDOS_BANCO` | Alias y estado de cada banco de Interbanking, por `NRO_BANCO`. Sin fila: activo y sin alias |
+| `RO_T_CASHFLOW_SALDOS_BANCO_MANUAL` | Respaldo manual de una cuenta de Interbanking que no trae el dato. `VIGENTE`, `ID_REEMPLAZA` y un único vigente por cuenta |
+| `RO_T_CASHFLOW_SALDOS_BANCO_CUENTA` | Las cuentas de Interbanking marcadas como vistas; la que no está es nueva |
+| `RO_T_CASHFLOW_SALDOS_DEPURACION` | La constancia del borrado de las cuentas bancarias manuales. Sin ella el código no lee Interbanking |
 | `RO_T_CASHFLOW_SALDOS_SUCURSAL` | Gestión, reserva y **día de acreditación** por local (parámetro). El día es `NULL` si no se cargó: no tiene default |
 | `RO_T_CASHFLOW_SALDOS_LOCAL` | Histórico de la caja de los locales, con la gestión, la reserva, el día y la fecha de acreditación **efectivos** y `ORIGEN_DATO` del saldo |
 | `RO_T_CASHFLOW_SALDOS_LOCAL_MANUAL` | Saldo de caja tipeado a mano cuando la consulta no trajo el cierre; insert-only, fechado ayer |
@@ -339,74 +426,38 @@ Editar una sucursal que la consulta devuelve pero que **nunca se sincronizó** l
 
 ---
 
-## Mapeo campo por campo contra la API de Interbanking
+## Mapeo campo por campo contra `BI_T_SALDOS_INTERBANKING`
 
-La integración **no está hecha**. Las columnas ya existen para que enchufarla no obligue a migrar datos. Llevan el nombre del `Anexo I` en mayúsculas a propósito: son literalmente los campos del proveedor, y nombrarlos igual hace que el mapeo sea una copia uno a uno, sin tabla de traducción que se desincronice.
+El cashflow **no llama a la API de Interbanking**. La llama un proceso externo a este repo, que deja una fila por cuenta y por día de operación en `BI_T_SALDOS_INTERBANKING` (`central`, todas las columnas de texto en `Modern_Spanish_CI_AI`). El módulo sólo lee esa tabla.
 
-### `/accounts` — Consulta de Cuentas → `RO_T_CASHFLOW_SALDOS_CUENTA`
-
-| Campo de la API | Columna | Tipo | Hoy |
-| --- | --- | --- | --- |
-| `bank_id` | `BANK_ID` | `VARCHAR(3)` | `NULL` — código BCRA, 3 dígitos |
-| `bank_name` | `BANK_NAME` | `VARCHAR(80)` | `NULL` |
-| `account_number` | `ACCOUNT_NUMBER` | `VARCHAR(30)` | `NULL` |
-| `account_type` | `ACCOUNT_TYPE` | `VARCHAR(2)` | `NULL` — `CC` / `CA` |
-| `cbu` | `CBU` | `VARCHAR(22)` | `NULL` — índice único filtrado |
-| `account_label` | `ACCOUNT_LABEL` | `VARCHAR(80)` | `NULL` |
-| `currency` | **`MONEDA`** | `CHAR(3)` | Se carga a mano — `ARS` / `USD` |
-
-**`currency` es la única que no lleva el nombre de la API.** Es el único campo de `/accounts` que el módulo ya necesita hoy —la pestaña cierra con un total por moneda y el proveedor convierte según él—, así que se le deja el nombre del dominio. Es **una** columna y no dos: dos columnas para el mismo dato terminan discrepando.
-
-Columnas propias que la API no trae:
-
-| Columna | Para qué |
+| Columna de BI | Qué hace el módulo |
 | --- | --- |
-| `NOMBRE` | Etiqueta que se ve en pantalla y que controla el usuario. `BANK_NAME` y `ACCOUNT_LABEL` son strings del proveedor, que puede cambiarlos de su lado. Cuando entre la API, una cuenta nueva nace con `NOMBRE = BANK_NAME` y el usuario puede renombrarla sin que la próxima sincronización se lo pise |
-| `TIPO` | `BANCO` / `MERCADO_PAGO` / `EFECTIVO_CENTRAL` / `OTRO` — Mercado Pago y el efectivo no salen de Interbanking |
-| `ORIGEN_DATO` | `API` / `MANUAL` / `CONSULTA` |
-| `ORDEN`, `ACTIVO`, `FECHA_UPDATE`, `USUARIO` | Orden en pantalla, baja lógica y auditoría |
+| `NRO_BANCO` | Identifica el banco. Se cruza con `BANCO.NRO_BANCO` de Tango (`char(3)`) en PHP, con trim, para el nombre. Es la clave de `RO_T_CASHFLOW_SALDOS_BANCO` |
+| `NRO_CUENTA` | Con `NRO_BANCO` y `MONEDA`, identifica la cuenta. Se muestra junto al nombre del banco |
+| `MONEDA` | Parte de la clave. Hoy todas vienen en `ARS`. Una cuenta sin moneda no se toma (crítico) |
+| `TIPO_CUENTA` | Se muestra en Parámetros (`CC` → Cta. Cte., `CA` → Caja de Ahorro). Hoy todas vienen en `CC` |
+| `FECHA_OPERACION` | La fecha del saldo, y el primer criterio para elegir el registro |
+| `SALDO_CONTABLE` | **El importe.** El último no nulo de cada cuenta |
+| `CREATED_AT` | *Cargado el*, y el segundo criterio de desempate |
+| `ID` | El tercer criterio de desempate |
+| `LABEL_CUENTA`, `NOMBRE_CUENTA` | No se usan: el nombre sale del alias o de Tango |
+| `SALDO_OPERATIVO_INICIAL`, `SALDO_OPERATIVO_ACTUAL`, `SALDO_PROYECTADO_24HS`, `SALDO_PROYECTADO_48HS`, `SALDO_DIA`, `TOTAL_DEBITOS`, `TOTAL_CREDITOS` | No se muestran ni se usan |
 
-**El `CBU` es la clave con la que la API va a reconocer una cuenta ya cargada a mano.** Va con índice único **filtrado** (`WHERE CBU IS NOT NULL`) porque hoy casi todas las filas lo tienen en `NULL`, y un `UNIQUE` común de SQL Server admite un solo `NULL`.
+**La tabla de BI no se escribe nunca**, ni para sembrar ni para marcar. Lo propio del módulo va en sus tablas, con la misma clave y la misma collation que el origen, para que el dato compare igual de los dos lados.
 
-### `/accounts/balances` — Consulta de Saldos → `RO_T_CASHFLOW_SALDOS_DETALLE`
+### Las columnas de la API, en desuso
 
-| Campo de la API | Columna | Nota |
-| --- | --- | --- |
-| `row_date` | `FECHA_SALDO` | Ver abajo |
-| `balances.countable_balance` | `COUNTABLE_BALANCE` | **El que alimenta el Cashflow** |
-| `balances.initial_operating_balance` | `INITIAL_OPERATING_BALANCE` | |
-| `balances.current_operating_balance` | `CURRENT_OPERATING_BALANCE` | |
-| `balances.projected_balance_24hs` | `PROJECTED_BALANCE_24HS` | |
-| `balances.projected_balance_48hs` | `PROJECTED_BALANCE_48HS` | |
-| `message` | `MESSAGE` | Error **por cuenta** |
+Cuando se diseñó el módulo, la idea era que el cashflow llamara a la API y guardara lo que trajera. Por eso `RO_T_CASHFLOW_SALDOS_CUENTA` tiene los campos de `/accounts` (`BANK_ID`, `BANK_NAME`, `ACCOUNT_NUMBER`, `ACCOUNT_TYPE`, `CBU` con su índice único filtrado, `ACCOUNT_LABEL`) y `RO_T_CASHFLOW_SALDOS_DETALLE` tiene los de `/accounts/balances` y `historical_balances` (`INITIAL_OPERATING_BALANCE`, `CURRENT_OPERATING_BALANCE`, `PROJECTED_BALANCE_24HS`, `PROJECTED_BALANCE_48HS`, `DAY_BALANCE`, `TOTAL_DEBITS`, `TOTAL_CREDITS`, `MESSAGE`). **Quedan en desuso**, siempre en `NULL`: los bancos de Interbanking no están en el catálogo ni en el detalle. No se borran, y el código las sigue leyendo sin usarlas. `COUNTABLE_BALANCE` sí se usa: es el saldo de las cargas manuales.
 
-**Se guardan los cinco saldos aunque el tablero use uno solo.** Son cinco columnas y evitan una migración el día que se quiera mirar el proyectado a 24/48hs.
-
-**`message` no se descarta.** La API responde `200` con cuentas que fallaron individualmente. Una fila con `MESSAGE` y los importes en `NULL` significa *"esta cuenta no se pudo leer"*, que no es lo mismo que *"esta cuenta tiene cero"* — y esa confusión es exactamente el error caro que este módulo viene a evitar. La pantalla lo muestra en rojo bajo el nombre de la cuenta y el tablero lo levanta como aviso.
-
-### `historical_balances` (hasta 180 días) → `RO_T_CASHFLOW_SALDOS_DETALLE`
-
-| Campo de la API | Columna |
-| --- | --- |
-| `operation_date` | `FECHA_SALDO` |
-| `day_balance` | `DAY_BALANCE` |
-| `total_debits` | `TOTAL_DEBITS` |
-| `total_credits` | `TOTAL_CREDITS` |
-
-**`FECHA_SALDO` mapea contra dos campos distintos** —`row_date` cuando la fila viene de `balances` y `operation_date` cuando viene de `historical_balances`— y por eso lleva nombre propio y no el de ninguno de los dos. La clave `UNIQUE (ID_CARGA, ID_CUENTA, FECHA_SALDO)` permite que una sola carga traiga los 180 días de una cuenta sin chocar.
+`ORIGEN_DATO = 'API'` también queda sin uso: ninguna cuenta del catálogo viene de Interbanking.
 
 ---
 
-## Qué queda pendiente para la integración
+## Qué queda pendiente
 
-Fuera del alcance de este cambio; el modelo y la pantalla ya están listos para recibirla.
-
-- **OAuth 2.0 client credentials.** No se escribió el cliente HTTP ni se guardan credenciales en ningún lado.
-- **El token vive 7200 s** y hay que resguardarlo y renovarlo, no pedir uno por request.
-- **Rate limits con bloqueo preventivo ante polling.** Hay que espaciar las consultas y no reintentar en bucle.
-- **Sincronización de `/accounts`**: dar de alta las cuentas nuevas y **reconocer por `CBU`** las que ya se cargaron a mano, para no duplicarlas. `NOMBRE` no se pisa.
-- **Backfill de `historical_balances`**: una carga con `ORIGEN = 'API'` y una fila por día y por cuenta.
-- Pasar `ORIGEN_DATO` de las cuentas bancarias de `MANUAL` a `API`. El formulario manual **se mantiene** como respaldo.
+- **014 Provincia no trae saldo contable** por un error de la integración del lado de BI. Hasta que se resuelva se cubre con el respaldo manual. Cuando BI lo traiga con fecha igual o más nueva, manda solo.
+- **Las columnas de la API en desuso** se pueden borrar con un script aparte, cuando se confirme que nada más las lee.
+- **`BI_T_SALDOS_INTERBANKING` sólo tiene índice por `ID`.** La consulta del último saldo recorre la tabla entera, que hoy son decenas de filas y crece unas diez por día. Si algún día pesa, el índice que sirve es `(NRO_BANCO, NRO_CUENTA, MONEDA, FECHA_OPERACION DESC, CREATED_AT DESC, ID DESC) INCLUDE (SALDO_CONTABLE, TIPO_CUENTA)`. La tabla es del proceso de BI, así que lo crea quien la administra.
 
 ---
 
@@ -416,7 +467,7 @@ Fuera del alcance de este cambio; el modelo y la pantalla ya están listos para 
 
 | Código | Serie | Qué devuelve |
 | --- | --- | --- |
-| `SALDOS` | `DISPONIBLE` | Último saldo conocido de cada cuenta, convertido a pesos |
+| `SALDOS` | `DISPONIBLE` | Último saldo conocido de cada cuenta —las de las cargas y las de Interbanking, por `Saldos::getFilasDisponible()`—, convertido a pesos |
 | `CAJA_LOCALES` | `DEPOSITOS` | Neto a depositar de los locales que depositan |
 
 Van separados porque **leen dos servidores distintos**: así una caída del servidor de locales no se lleva puesto el disponible bancario.
@@ -440,6 +491,8 @@ Las dos series aplican la misma regla, en un solo lugar (`Saldos::destinoEnEje()
 
 Vale para las dos porque las dos describen **plata que existe ahora** —un saldo bancario, el efectivo en el cajón de un local—, no movimientos ya ocurridos. Dejarlas afuera arrancaría el tablero en cero teniendo el dato, que es justamente el problema que este módulo viene a resolver.
 
+El aviso del disponible depende del **origen** de cada fila. Lo que sale de una carga manual y quedó viejo es crítico: *"Actualizá la carga de saldos"*. Lo de Interbanking y los respaldos es atención: cuántas cuentas, qué importe y la fecha más vieja. Ver *El saldo que no es de hoy*.
+
 ### El enlace del tablero abre la sub-pestaña correcta
 
 La fila *Caja Locales* la produce la **segunda** sub-pestaña, así que su entrada del registro declara `'subtab' => 'locales'` además de `'tab' => 'saldos'`. El motor lo pasa en la fila, `Cashflow.js` lo deja en `window.cfSubTabDestino` antes de navegar y `Saldos.js` lo consume al arrancar.
@@ -448,7 +501,7 @@ El tablero **no** activa la sub-pestaña por su cuenta: `loadTab()` carga por AJ
 
 ### Nunca tumba el tablero
 
-`calcular()` puede lanzar y `series()` lo envuelve. Además cada serie atrapa sus propios problemas para poder rendir cero **con un aviso que diga qué pasó**, en lugar del mensaje genérico de la clase base: tablas sin crear, servidor de locales caído, ninguna cuenta cargada todavía, cuentas cargadas cuyo neto no supera la reserva.
+`calcular()` puede lanzar y `series()` lo envuelve. Además cada serie atrapa sus propios problemas para poder rendir cero **con un aviso que diga qué pasó**, en lugar del mensaje genérico de la clase base: tablas sin crear, servidor de locales caído, Interbanking que no se pudo leer, la depuración de los bancos manuales sin correr, ninguna cuenta cargada todavía, cuentas cargadas cuyo neto no supera la reserva. Los avisos de Interbanking llegan ya resueltos, con su nivel y la sección *Saldo Inicial*. Una cuenta de Interbanking sin dato no se cuenta como "sin cargar": ya tiene su aviso crítico.
 
 `moneda_origen`, `tipo_cambio`, `fuera_horizonte` y `sin_fecha` se devuelven con valores reales. `moneda_origen` es `'ARS'`: la serie **está** en pesos y el enum del contrato sólo admite dos valores, así que el detalle de qué parte vino en dólares y con qué cotización va en `tipo_cambio` y en los avisos.
 
@@ -456,14 +509,24 @@ El tablero **no** activa la sub-pestaña por su cuenta: `loadTab()` carga por AJ
 
 ## Parámetros
 
-Sub-pestaña **Parámetros → Saldos**, con cinco secciones.
+Sub-pestaña **Parámetros → Saldos**, con seis secciones: Generales, Bancos de Interbanking, Bancos sin Interbanking, Otros saldos, Fondos y Locales.
 
 | Clave | Semilla | Qué controla |
 | --- | --- | --- |
 | `saldos_cta_tesoreria` | `100101` | Cuenta contable de `SBA05` con el efectivo de tesorería |
-| `saldos_dias_alerta_carga` | `7` | Días desde la última carga a partir de los cuales se avisa que el disponible no es el de hoy |
+| `saldos_dias_alerta_carga` | `7` | Días desde la última carga **manual** a partir de los cuales se avisa que esos saldos no son los de hoy. No aplica a Interbanking, que tiene su propia regla: el saldo es del día o no |
 
-**Bancos y cuentas**, **Otros saldos** y **Fondos de inversión y cuentas comitente** son el mismo ABM sobre `RO_T_CASHFLOW_SALDOS_CUENTA`: los fondos se separan por `CLASE` y el resto por `TIPO`. Nombre, moneda y clase (dentro del grupo) son editables; el **tipo no**, porque es lo que decide de dónde sale el saldo y cambiarlo dejaría el histórico atribuido a un origen que nunca lo produjo. Si quedó mal, se inhabilita y se crea otra. Los fondos llevan además el **saldo inicial con su fecha**, que se fija en el alta y se corrige ahí mismo; van los dos o ninguno, y la moneda de un fondo con movimientos no se cambia. Cada botón *Guardar* manda **su** grilla: apretar *Guardar fondos* no manda los bancos que uno estaba editando a medias.
+**Bancos de Interbanking** no es un ABM: es la lista de los bancos que trae Interbanking, más los que tienen fila en `RO_T_CASHFLOW_SALDOS_BANCO` aunque ya no vengan (`SaldosInterbanking::armarBancos()`).
+
+- **Columnas:** N° de banco, nombre en Tango (o *no está en Tango*), alias editable, cuentas (número, tipo y moneda, con las marcas **nueva** y **con respaldo manual**), último dato, activo y última edición.
+- ***Guardar bancos*** escribe sólo los que cambiaron, en una transacción y con `UPSERT`, con el mismo criterio de diff que *Guardar locales* (`resolverBancos()`). Un alias vacío se guarda `NULL`; uno de más de 100 caracteres lo rechaza el servidor.
+- **Inactivar un banco con respaldo vigente** pide confirmación: el respaldo deja de usarse, pero no se borra.
+- **Cada banco con cuentas nuevas** tiene *Marcar como vistas*, con confirmación. Las cuentas las vuelve a leer el servidor de Interbanking: del navegador sólo viaja el banco.
+- Los inactivos se ven atenuados.
+- Sin `sql/cashflow_saldos_interbanking.sql` los controles quedan apagados, con el aviso de qué correr.
+- Sin la depuración, el aviso dice que Interbanking todavía no se lee.
+
+**Bancos sin Interbanking**, **Otros saldos** y **Fondos de inversión y cuentas comitente** son el mismo ABM sobre `RO_T_CASHFLOW_SALDOS_CUENTA`: los fondos se separan por `CLASE` y el resto por `TIPO`. Nombre, moneda y clase (dentro del grupo) son editables; el **tipo no**, porque es lo que decide de dónde sale el saldo y cambiarlo dejaría el histórico atribuido a un origen que nunca lo produjo. Si quedó mal, se inhabilita y se crea otra. Los fondos llevan además el **saldo inicial con su fecha**, que se fija en el alta y se corrige ahí mismo; van los dos o ninguno, y la moneda de un fondo con movimientos no se cambia. Cada botón *Guardar* manda **su** grilla: apretar *Guardar fondos* no manda los bancos que uno estaba editando a medias. Por eso *Guardar cuentas* vive en la tarjeta de Otros saldos, y los bancos manuales tienen el suyo. El bloque de bancos sin Interbanking es para los que no vienen por la integración (hoy, BTG Uy): el catálogo no tiene `NRO_BANCO` para comprobarlo, así que el alta de un banco responde con una advertencia.
 
 Sin `sql/cashflow_saldos_cuentas_fondo.sql`, los selectores de clase y el alta de fondos quedan apagados diciendo qué script falta, y el resto del ABM funciona como antes.
 
@@ -497,7 +560,7 @@ En `ENV = DEV` las tablas de locales se alcanzan por linked server con el nombre
 php cashflow/tests/run.php saldos
 ```
 
-Corre `tests/test_saldos.php` (122 casos) y `tests/test_saldos_acreditacion.php` (134), todos sin base salvo la última sección de cada uno, que se saltea sola. Los criterios viven en **helpers estáticos puros**, al estilo de `Ventas::armarTendencias()`: lo delicado de este módulo no son las consultas sino las decisiones. Hoy se inyecta, así que las pruebas no caducan.
+Corre `tests/test_saldos.php`, `tests/test_saldos_acreditacion.php` y `tests/test_saldos_interbanking.php` (464 casos entre los tres), todos sin base salvo la última sección de cada uno, que se saltea sola. Los criterios viven en **helpers estáticos puros**, al estilo de `Ventas::armarTendencias()`: lo delicado de este módulo no son las consultas sino las decisiones. Hoy se inyecta, así que las pruebas no caducan.
 
 | Qué se verifica | Helper |
 | --- | --- |
@@ -543,6 +606,49 @@ Las tablas `dbo` quedaron iguales. El total de Caja Locales, antes y después, e
 
 Verificado además contra la base real: la pestaña marcó los 3 locales sin cierre del 13/09 y, tras cargarlos a mano desde la pantalla, la cabecera quedó `MIXTA`, la foto con 17 filas `CONSULTA` + 3 `MANUAL`, y la pestaña y el tablero dejaron de avisar. También: el script corrido dos veces sin duplicar, la consulta de `SBA05`, y un alta de cuenta + carga + lectura por el proveedor que dejó el importe en una sola columna del eje.
 
+### Interbanking
+
+```bash
+php cashflow/tests/run.php interbanking
+```
+
+`tests/test_saldos_interbanking.php`, 209 casos sin base salvo el último, que se saltea solo. El cableado de las pantallas está en `tests/test_tablas_controles.php`.
+
+| Qué se verifica | Helper |
+| --- | --- |
+| El registro de hoy; sin registro de hoy, el último con su fecha; dos del mismo día desempatados por `CREATED_AT` y por `ID`; un `CREATED_AT` nulo ordena como el más viejo | `elegirRegistro()` |
+| El más nuevo sin contable toma el anterior, con aviso de atención; sin ningún contable ni respaldo, sin dato (null), no aporta y aviso crítico; un cero es un dato | `elegirRegistro()`, `armarCuentasBancarias()` |
+| Alias, `DESC_BANCO` sin espacios, banco fuera de Tango con aviso (que se va con alias), trim de `NRO_BANCO` | `nombreBanco()`, `armarCuentasBancarias()` |
+| Una cuenta sin moneda no se toma y avisa en crítico | `armarCuentasBancarias()` |
+| Un banco inactivo no aporta, no se lista y no avisa nada; sin fila es activo | `bancoActivo()`, `armarCuentasBancarias()` |
+| "No es de hoy" estricto, también un sábado; sin dato no se marca; el aviso de la pestaña lista cada cuenta con su fecha | `noEsDeHoy()`, `avisoNoEsDeHoy()` |
+| Un saldo de hoy va a su columna; uno viejo de Interbanking o de respaldo, a la primera con WARNING y no DANGER; lo manual conserva su crítico; una fila sin origen es una carga | `armarSerieDisponible()` |
+| Un banco manual en USD entra con su cotización y la pestaña lo muestra en dólares | `armarSerieDisponible()`, `totalesPorMoneda()` |
+| Respaldo: sin Interbanking se usa, con aviso de atención; el más nuevo gana a un Interbanking viejo; uno más nuevo de Interbanking gana; a igual fecha gana Interbanking; un banco inactivo no lo usa; con la lectura caída entra igual y con su nombre de Tango; "no es de hoy" le aplica | `resolverSaldo()`, `armarCuentasBancarias()` |
+| Respaldo: fecha futura, importe vacío o no numérico, fecha inválida, observación larga y cuenta vacía se rechazan; un negativo se acepta | `validarRespaldo()` |
+| Respaldo: reemplazar da de baja e inserta con `ID_REEMPLAZA`, en una transacción; quitar da de baja; ninguna borra; un solo vigente por índice | sobre el código y el script |
+| Cuenta nueva: aporta, se marca y avisa; vista, ya no; en un banco inactivo no; sin script ninguna; una que sólo tiene respaldo no; Parámetros cuenta las de cada banco | `esNueva()`, `cuentasNuevasDe()`, `armarBancos()` |
+| Guardado de bancos: sólo lo que cambió; alias vacío es null; más de 100 se rechaza; un banco desconocido se rechaza; uno con fila que ya no viene se puede editar | `resolverBancos()`, `validarAlias()` |
+| La lectura caída: aviso crítico, y el efectivo y Mercado Pago siguen entrando | `armarCuentasBancarias()`, `armarSerieDisponible()` |
+| La consulta: `ROW_NUMBER()`, partición por banco, cuenta y moneda, el orden de desempate, sin JOIN, sin los otros saldos | sobre el código |
+| El script de borrado: arranca en simulación, respeta `@CONSERVAR`, no nombra otros tipos, aborta con referencias, detalle antes que cuentas en una transacción, no toca cabeceras, deja la constancia adentro | sobre el script |
+| Sin la constancia de depuración no se lee Interbanking ni se acepta un respaldo | sobre el código |
+| La pestaña y el tablero suman lo mismo; contra la base, el total de la pestaña es la serie del proveedor | `getFilasDisponible()` |
+
+**Contra la base viva**, sin tocar tablas permanentes, con una copia de `SaldosInterbanking` apuntada a `#temporales` creadas con el cuerpo de `sql/cashflow_saldos_interbanking.sql`, en una sola conexión:
+- la siembra de cuentas vistas (9) no duplica en la segunda corrida;
+- el `UPSERT` de bancos escribe sólo lo que cambió, y reactivar limpia la baja;
+- el respaldo reemplazado queda con su baja y el nuevo apunta a él; quitarlo dos veces se rechaza; el índice impide dos vigentes;
+- el respaldo rechaza un banco inactivo, una cuenta que no existe y la falta de depuración;
+- marcar como vistas es idempotente.
+
+La sonda encontró un error real: con BI caído, los respaldos perdían el nombre de Tango. Está corregido y tiene prueba.
+
+**Lo que cambia en el Saldo Inicial**, medido el 08/10/2026 sobre los mismos datos:
+- **Antes:** la última carga manual, del 16/09. Los bancos sumaban $ 47.376.627,00 y BTG Uy US$ 71.000; el total en pesos de la pestaña era $ 182.169.963,14, todo con fecha del 16/09.
+- **Con la depuración corrida:** efectivo $ 314.902,26 y Mercado Pago $ 134.478.433,88, de la carga manual, más Interbanking $ 82.266.886,09 (siete cuentas con saldo del día). Da **$ 217.060.222,23**, y BTG Uy sigue con sus US$ 71.000.
+- **Provincia (014)** pasa de los $ 35.485.388,00 manuales del 16/09 a sin dato, con aviso crítico, hasta que se cargue su respaldo. **Supervielle (027)** no estaba en la carga manual y no suma: tampoco trae dato, y se va a inhabilitar.
+
 ### Los fondos
 
 ```bash
@@ -567,9 +673,12 @@ Las tablas llevan el esquema de auditoría del módulo —`USUARIO_ALTA` / `FECH
 sql/cashflow_saldos.sql                        Las 5 tablas + semillas + parámetros
 sql/cashflow_saldos_cuentas_fondo.sql          CLASE, saldo inicial, movimientos de fondos y la migración
 sql/cashflow_saldos_dia_acreditacion.sql       Día de acreditación por local, y día y fecha en la foto
+sql/cashflow_saldos_borrar_bancos_manuales.sql Borra los bancos manuales que pasan a Interbanking; deja la constancia
+sql/cashflow_saldos_interbanking.sql           Alias y estado por banco, respaldo manual y cuentas vistas
 cashflow/Class/Saldos.php                      Motor del módulo y helpers puros
 cashflow/Class/DiasHabiles.php                 El paso al próximo día hábil, compartido con Ventas y Tarjetas
 cashflow/Class/Fondos.php                      Las cuentas de fondo: clases, cuenta corriente, claves de cobertura
+cashflow/Class/SaldosInterbanking.php          Los saldos de Interbanking: lectura en vivo, reglas puras y escrituras
 cashflow/Class/Providers/SaldosProvider.php    DISPONIBLE y DEPOSITOS
 cashflow/Class/Providers/FondosProvider.php    STOCK de FONDO_INVERSION y FONDO_COMITENTE
 cashflow/Controller/SaldosController.php       Las tres pestañas, las dos cargas y los movimientos
@@ -580,6 +689,7 @@ cashflow/Js/Parametros-Saldos.js
 cashflow/Css/Saldos.css
 tests/test_saldos.php
 tests/test_saldos_acreditacion.php
+tests/test_saldos_interbanking.php
 tests/test_dias_habiles.php
 tests/test_fondos.php
 ```
@@ -589,5 +699,16 @@ De la rama `feature/saldos-locales-dia-acreditacion`: `Class/Saldos.php` (`proxi
 Modificados: `Class/CashflowRegistry.php` (los dos códigos a `disponible => true`) · `Class/Parametros.php` (módulo `SALDOS` y sus secciones) · `Controller/ParametrosController.php` (ABM de cuentas y locales) · `Tabs/parametros.php` (el `tab-pane`) · `Css/Parametros.css` · `class/conexion.php` (`prefijoLocales()`) · `tests/test_providers.php` (ahora hay 6 módulos con datos reales).
 
 De la rama `feature/cuentas-inversion`: `Class/Saldos.php` (`fondosCreados()`, los fondos fuera de `getSaldosActuales()`, `CLASE` y saldo inicial en `getCuentas()`, `addCuenta()` y `saveCuenta()`, `getPestanaFondos()`) · `Class/Parametros.php` (clases y `fondos_creados` en el payload) · `Controller/ParametrosController.php` (clase y saldo inicial en el alta y el guardado) · `Class/CashflowRegistry.php` (`FONDO_INVERSION`, `FONDO_COMITENTE`; Otros Ingresos retirados) · `Class/Cobertura.php`, `Class/Cashflow.php`, `Class/CashflowProvider.php` y `Providers/CoberturaProvider.php` (los fondos son las cuentas: ver `README-cashflow.md`).
+
+De la rama `feature/saldos-interbanking`:
+- `Class/SaldosInterbanking.php`, nueva.
+- `Class/Saldos.php`: `getFilasDisponible()`, el origen de cada fila, los avisos de `armarSerieDisponible()` por origen, `avisosAntiguedad()` para la carga manual, `advertenciaAltaCuenta()` y el payload de la pestaña con avisos con nivel.
+- `Class/Providers/SaldosProvider.php`: lee por `getFilasDisponible()`.
+- `Class/Parametros.php`: los bancos de Interbanking en el módulo `SALDOS`.
+- `Class/AuthCashflow.php`: `guardarRespaldoBanco`, `quitarRespaldoBanco`, `saveBancosSaldo` y `marcarCuentasVistas`.
+- `Controller/SaldosController.php` y `Controller/ParametrosController.php`: esas acciones, más la advertencia del alta.
+- `Tabs/saldos.php`, `Js/Saldos.js` y `Css/Saldos.css`: las filas de Interbanking, el diálogo del respaldo, las marcas, el KPI y los avisos críticos.
+- `Tabs/parametros_saldos.php`, `Js/Parametros-Saldos.js` y `Css/Parametros.css`: los dos bloques de bancos.
+- `tests/test_saldos_interbanking.php`, nueva, y `tests/test_tablas_controles.php`.
 
 Ver `README-cashflow.md`.

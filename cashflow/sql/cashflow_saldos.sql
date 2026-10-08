@@ -43,10 +43,12 @@
       compartieran cabecera, la ultima carga de una pestana podria ser una
       cabecera sin ninguna fila de la otra.
 
-   3. LOS CAMPOS DE LA API EXISTEN DESDE EL DIA UNO. La integracion con
-      Interbanking todavia NO esta hecha: hoy los saldos bancarios se cargan a
-      mano. Las columnas que va a devolver la API estan creadas igual y quedan
-      en NULL, para que enchufar la integracion no obligue a migrar datos.
+   3. LOS CAMPOS DE LA API QUEDARON EN DESUSO. Se crearon pensando en que el
+      cashflow llamaria a la API de Interbanking. No la llama: desde
+      feature/saldos-interbanking los saldos bancarios se leen en vivo de
+      BI_T_SALDOS_INTERBANKING, que llena un proceso externo (ver
+      sql/cashflow_saldos_interbanking.sql y Class/SaldosInterbanking.php).
+      Las columnas quedan, siempre en NULL; borrarlas es un script aparte.
 
       Las columnas que salen del Anexo I llevan EL NOMBRE DE LA API en
       mayusculas (COUNTABLE_BALANCE, BANK_ID, CBU...). Es a proposito: son
@@ -78,7 +80,8 @@ GO
    Parametros -> Saldos y no se carga en cada actualizacion de saldos.
 
    TIPO dice de donde sale el saldo de esa cuenta:
-       'BANCO'            -> cuenta bancaria (hoy manual, manana API)
+       'BANCO'            -> cuenta bancaria SIN Interbanking (manual). Los
+                             bancos de Interbanking no estan en el catalogo
        'MERCADO_PAGO'     -> billetera (manual)
        'EFECTIVO_CENTRAL' -> caja de tesoreria de casa central; su saldo NO se
                              tipea, sale de la consulta sobre SBA05

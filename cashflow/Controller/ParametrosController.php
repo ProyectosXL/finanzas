@@ -526,7 +526,53 @@ try {
                         . 'los movimientos se cargan desde Saldos → Fondos.'
                     : 'Cuenta agregada. Queda activa y sin saldo cargado: '
                         . 'se muestra como "sin cargar" hasta la próxima carga.',
-                'data' => ['id' => $id]
+                // Un banco manual nuevo puede ser uno que ya viene por
+                // Interbanking: el servidor no lo puede saber, asi que se avisa.
+                'data' => ['id' => $id, 'advertencia' => Saldos::advertenciaAltaCuenta($data['tipo'], $clase)]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* Alias y estado de los bancos de Interbanking. El diff, la
+           validacion del alias y el UPSERT son de SaldosInterbanking. */
+        case 'saveBancosSaldo':
+            $data = bodyJson();
+
+            if (!isset($data['filas']) || !is_array($data['filas'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/SaldosInterbanking.php';
+
+            $n = (new SaldosInterbanking())->guardarBancos($data['filas'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => ($n === 0)
+                    ? 'No cambió ningún banco.'
+                    : $n . ' banco(s) guardados.',
+                'data' => ['cambios' => $n]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* Las cuentas nuevas de un banco pasan a vistas. Las cuentas las
+           relee la clase de Interbanking: del cliente solo viaja el banco. */
+        case 'marcarCuentasVistas':
+            $data = bodyJson();
+
+            if (!isset($data['nro_banco']) || trim((string) $data['nro_banco']) === '') {
+                throw new Exception('Falta el banco');
+            }
+
+            require_once __DIR__ . '/../Class/SaldosInterbanking.php';
+
+            $n = (new SaldosInterbanking())->marcarVistas($data['nro_banco'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => ($n === 0)
+                    ? 'El banco no tenía cuentas nuevas.'
+                    : $n . ' cuenta(s) marcadas como vistas.',
+                'data' => ['marcadas' => $n]
             ], JSON_UNESCAPED_UNICODE);
             break;
 

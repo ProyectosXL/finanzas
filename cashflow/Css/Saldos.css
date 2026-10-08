@@ -135,6 +135,29 @@
     letter-spacing: 0.3px;
 }
 
+/* Una cuenta de Interbanking que nadie marco como vista. Ya suma: la marca
+   solo pide que alguien la revise, asi que es chica y no alarma. */
+.tab-saldos .sal-badge-nueva {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    vertical-align: 1px;
+}
+
+/* La accion de saldo manual de una cuenta de Interbanking: un icono al lado
+   del nombre, para no sumar una columna que casi siempre estaria vacia. */
+.tab-saldos .sal-btn-respaldo {
+    font-size: 12px;
+    line-height: 1;
+    color: var(--text-muted, #8c93a8);
+    vertical-align: 0;
+}
+
+.tab-saldos .sal-btn-respaldo:hover {
+    color: var(--primary-color, #0d6efd);
+}
+
 /* Un saldo tipeado distinto del que vino, todavia sin guardar */
 .tab-saldos .sal-saldo-editado {
     border-color: #6f42c1;

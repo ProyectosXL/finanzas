@@ -7,6 +7,7 @@ require_once __DIR__ . '/Fondos.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
 require_once __DIR__ . '/DiasHabiles.php';
+require_once __DIR__ . '/SaldosInterbanking.php';
 
 /**
  * Saldos
@@ -16,8 +17,11 @@ require_once __DIR__ . '/DiasHabiles.php';
  * LAS TRES PESTANAS SON TRES COSAS DISTINTAS
  * ------------------------------------------
  *   Pestana 1 "Saldos"        -> alimenta la fila DISPONIBLE (Saldo Inicial).
- *                                Carga PERIODICA (hoy, los lunes) y en parte
- *                                manual. El historico lo construye este modulo.
+ *                                Los bancos de Interbanking se leen en vivo
+ *                                (SaldosInterbanking); el efectivo, Mercado Pago,
+ *                                los otros saldos y los bancos sin Interbanking
+ *                                van en cargas, y su historico lo construye
+ *                                este modulo.
  *   Pestana 2 "Saldos Locales" -> alimenta la fila CAJA_LOCALES. Sale de una
  *                                consulta contra el servidor 'locales' que corre
  *                                todos los dias.
@@ -41,6 +45,18 @@ require_once __DIR__ . '/DiasHabiles.php';
  * la unica regla que decide de que lado va cada cuenta. El argumento de por
  * que CLASE es una columna y no un valor mas de TIPO esta en el encabezado de
  * sql/cashflow_saldos_cuentas_fondo.sql.
+ *
+ * LOS BANCOS VIENEN POR DOS CAMINOS
+ * ---------------------------------
+ * Los que estan en Interbanking se leen en vivo de BI_T_SALDOS_INTERBANKING y
+ * NO estan en el catalogo: no se cargan, no se copian, y su saldo lo decide
+ * SaldosInterbanking. Los que no estan -hoy, BTG Uy- son cuentas TIPO 'BANCO'
+ * del catalogo y se cargan como siempre, en Nueva carga. El catalogo no tiene
+ * NRO_BANCO, asi que no hay forma de cruzar los dos: un banco no puede estar
+ * de los dos lados, y la depuracion de los manuales que pasaron a Interbanking
+ * la hizo una sola vez sql/cashflow_saldos_borrar_bancos_manuales.sql.
+ * getFilasDisponible() junta los dos caminos y es lo unico que leen la
+ * pestana y el tablero.
  *
  * UNA CARGA ES UN EVENTO FECHADO, NO UN UPDATE
  * --------------------------------------------
@@ -117,6 +133,13 @@ class Saldos {
     const DIAS_ABREV = [1 => 'Lun', 2 => 'Mar', 3 => 'Mié', 4 => 'Jue', 5 => 'Vie',
                         6 => 'Sáb', 7 => 'Dom'];
 
+    /**
+     * Origen de una fila del disponible que sale de las cargas de la pestana
+     * (efectivo, Mercado Pago, otros y bancos manuales). Las de Interbanking
+     * traen el suyo: ver SaldosInterbanking.
+     */
+    const ORIGEN_CARGA = 'CARGA';
+
     /** Cuenta contable de SBA05 con el efectivo de tesoreria de casa central */
     const PARAM_CTA_TESORERIA = 'saldos_cta_tesoreria';
 
@@ -137,6 +160,9 @@ class Saldos {
 
     /** @var Fondos|null Puerta al modulo de fondos; la resuelve fondos() */
     private $fondos = null;
+
+    /** @var SaldosInterbanking|null La resuelve interbanking() */
+    private $interbanking = null;
 
     function __construct() {
         require_once __DIR__ . '/../../class/conexion.php';
@@ -1246,7 +1272,16 @@ class Saldos {
      * cero, que es exactamente el problema que este modulo viene a resolver. El
      * aviso dice de que fecha es el saldo, para que nadie lo lea como de hoy.
      *
-     * @param array $filas Filas con 'fecha_saldo', 'moneda', 'saldo'
+     * EL AVISO DEPENDE DEL ORIGEN DE CADA FILA. Lo que sale de una carga de la
+     * pestana (efectivo, Mercado Pago, otros, bancos manuales) y quedo viejo
+     * es critico y pide actualizar la carga: alguien tiene que hacerla. Lo que
+     * trae Interbanking (SaldosInterbanking::ORIGENES_DEL_DIA) no tiene carga
+     * que actualizar: lo trae un proceso todos los dias, y un saldo viejo es
+     * atencion, con cuantas cuentas, cuanta plata y la fecha mas vieja. Las
+     * dos van a la misma primera columna: la regla de imputacion es una sola.
+     *
+     * @param array $filas Filas con 'fecha_saldo', 'moneda', 'saldo' y
+     *        'origen' (sin origen, como una carga)
      * @param Horizonte $h
      * @param array $cotizaciones Mapa 'YYYY-MM' => tipo de cambio, de
      *        Cotizacion::mapaMensual(). Un mes ausente es "sin cotizacion".
@@ -1268,6 +1303,12 @@ class Saldos {
         $fechaMasVieja = null;
         $usdSinCotizar = 0;
         $tiposUsados = [];
+
+        // Lo que se espera del dia (Interbanking) y quedo viejo, aparte de lo
+        // que sale de una carga: son dos avisos distintos. Ver abajo.
+        $viejoDelDia = 0;
+        $cuentasViejasDelDia = 0;
+        $fechaMasViejaDelDia = null;
 
         if (!is_array($filas)) {
             return self::resultadoDisponible($serie, $avisos, 0, 0);
@@ -1292,8 +1333,11 @@ class Saldos {
             // y va a la primera columna. Se guarda de que fecha era para
             // poder decirlo. Misma regla que la serie de locales.
             $destino = self::destinoEnEje($fecha, $hoy);
+            $delDia = isset($f['origen'])
+                && in_array($f['origen'], SaldosInterbanking::ORIGENES_DEL_DIA, true);
+            $viejo = ($destino !== $fecha);
 
-            if ($destino !== $fecha) {
+            if ($viejo && !$delDia) {
                 $reubicado += $importe;
 
                 if ($fechaMasVieja === null || $fecha < $fechaMasVieja) {
@@ -1318,6 +1362,15 @@ class Saldos {
 
             if (!$h->acumular($serie, $destino, $importe)) {
                 $serie['fuera_horizonte'] += $importe;
+            } elseif ($viejo && $delDia) {
+                // En pesos, ya convertido: es la plata que entro a la primera
+                // columna sin ser de hoy.
+                $viejoDelDia += $importe;
+                $cuentasViejasDelDia++;
+
+                if ($fechaMasViejaDelDia === null || $fecha < $fechaMasViejaDelDia) {
+                    $fechaMasViejaDelDia = $fecha;
+                }
             }
         }
 
@@ -1332,6 +1385,17 @@ class Saldos {
                 . 'saldos cargados el ' . self::fechaCorta($fechaMasVieja) . ' o antes y se '
                 . 'muestran en la primera columna, que es la apertura del horizonte. Actualizá la '
                 . 'carga de saldos para que el disponible sea el de hoy.', 'Saldo Inicial');
+        }
+
+        /* Lo de Interbanking que no es de hoy es ATENCION, no critico, y no pide
+           "actualiza la carga": no hay ninguna carga que actualizar, el dato lo
+           trae un proceso todos los dias. Lo que hay que saber es cuanto del
+           Saldo Inicial no es del dia y de cuando es lo mas viejo. */
+        if ($cuentasViejasDelDia > 0) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $cuentasViejasDelDia . ' cuenta(s) bancaria(s) '
+                . 'por ' . self::plata($viejoDelDia) . ' no tienen saldo de hoy: se toma el último '
+                . 'que hay, el más viejo del ' . self::fechaCorta($fechaMasViejaDelDia) . ', y va en '
+                . 'la primera columna, que es la apertura del horizonte.', 'Saldo Inicial');
         }
 
         if ($usdSinCotizar != 0) {
@@ -1405,7 +1469,11 @@ class Saldos {
     }
 
     /**
-     * Avisos sobre la antiguedad de la ultima carga.
+     * Avisos sobre la antiguedad de la ultima carga MANUAL.
+     *
+     * Solo habla de las cargas de la pestana: los saldos de Interbanking no
+     * se cargan, y su antiguedad la avisa cada fila ("no es de hoy"). Por eso
+     * saldos_dias_alerta_carga aplica solo aca.
      *
      * La regla transversal del relevamiento es que se vea la fecha de carga de
      * cada dato. El aviso es el complemento: que la pantalla lo diga sola cuando
@@ -1418,15 +1486,16 @@ class Saldos {
      */
     public static function avisosAntiguedad($fechaCarga, $diasAlerta, $hoy) {
         if ($fechaCarga === null || $fechaCarga === '') {
-            return ['Todavía no hay ninguna carga de saldos. El Saldo Inicial del tablero se '
-                . 'muestra en cero hasta que se cargue la primera.'];
+            return ['Todavía no hay ninguna carga manual de saldos (Mercado Pago, otros y bancos '
+                . 'manuales): hasta la primera, esas cuentas no suman al Saldo Inicial.'];
         }
 
         $dias = (int) floor((strtotime($hoy) - strtotime(substr($fechaCarga, 0, 10))) / 86400);
 
         if ($diasAlerta > 0 && $dias > $diasAlerta) {
-            return ['La última carga de saldos es del ' . self::fechaCorta($fechaCarga)
-                . ', hace ' . $dias . ' días. El disponible que se está mostrando no es el de hoy.'];
+            return ['La última carga manual de saldos (Mercado Pago, otros y bancos manuales) es '
+                . 'del ' . self::fechaCorta($fechaCarga) . ', hace ' . $dias . ' días: esos saldos no '
+                . 'son los de hoy.'];
         }
 
         return [];
@@ -1823,6 +1892,52 @@ class Saldos {
     }
 
     /**
+     * Todas las filas del disponible: las de las cargas de la pestana y las de
+     * Interbanking, con los avisos de Interbanking.
+     *
+     * ES EL UNICO CAMINO, y lo usan getPestanaSaldos() y
+     * SaldosProvider::disponible(). La pestana y el tablero tienen que sumar lo
+     * mismo, y la unica forma de garantizarlo es que lean las mismas filas: si
+     * cada uno juntara las suyas, algun dia una tendria una cuenta que la otra
+     * no.
+     *
+     * Las cargas manuales siguen entrando por getSaldosActuales(): son el
+     * efectivo de tesoreria, Mercado Pago, los otros saldos y los bancos que no
+     * vienen por Interbanking. Una falla de Interbanking no las toca.
+     *
+     * @param string $hoy 'Y-m-d'. El del eje en el tablero, el del dia en la pestana.
+     * @return array ['filas' => [...], 'avisos' => [Aviso], 'respaldo_creado' => bool,
+     *               'depurado' => bool]
+     */
+    public function getFilasDisponible($hoy) {
+        $filas = $this->tablasCreadas() ? $this->getSaldosActuales() : [];
+
+        $bancarias = $this->interbanking()->getCuentasBancarias($hoy);
+
+        return [
+            'filas' => array_merge($filas, $bancarias['filas']),
+            'avisos' => $bancarias['avisos'],
+            'respaldo_creado' => !empty($bancarias['respaldo_creado']),
+            'depurado' => !empty($bancarias['depurado'])
+        ];
+    }
+
+    /**
+     * La puerta a los saldos de Interbanking. Una instancia por pedido, como
+     * fondos().
+     *
+     * @return SaldosInterbanking
+     */
+    private function interbanking() {
+        if ($this->interbanking === null) {
+            require_once __DIR__ . '/SaldosInterbanking.php';
+            $this->interbanking = new SaldosInterbanking();
+        }
+
+        return $this->interbanking;
+    }
+
+    /**
      * Normaliza una fila de getSaldosActuales() para la pantalla y para
      * armarSerieDisponible().
      *
@@ -1837,6 +1952,9 @@ class Saldos {
 
         return [
             'id_cuenta' => intval($row['ID']),
+            // Sale de una carga de RO_T_CASHFLOW_SALDOS_CARGA. Es lo que separa
+            // estas filas de las de Interbanking en armarSerieDisponible().
+            'origen' => self::ORIGEN_CARGA,
             'tipo' => $row['TIPO'],
             'clase' => $row['CLASE'],
             'nombre' => $row['NOMBRE'],
@@ -2285,6 +2403,29 @@ class Saldos {
     }
 
     /**
+     * Lo que la respuesta del alta tiene que advertir, o null.
+     *
+     * UN BANCO DEL CATALOGO ES UN BANCO SIN INTERBANKING (hoy, BTG Uy). El
+     * catalogo no tiene NRO_BANCO, asi que el servidor no puede saber si el
+     * banco que se da de alta ya viene por la integracion -"Galicia" contra
+     * "DE GALICIA Y BS.AS."-, y compararlo por nombre seria fragil. Si ya
+     * viene, el disponible lo sumaria dos veces: se advierte, y quien lo da de
+     * alta lo sabe.
+     *
+     * @param string $tipo
+     * @param string|null $clase
+     * @return string|null
+     */
+    public static function advertenciaAltaCuenta($tipo, $clase = null) {
+        if (strtoupper(trim((string) $tipo)) !== 'BANCO' || Fondos::esFondo($clase)) {
+            return null;
+        }
+
+        return 'Es un banco de carga manual: sus saldos se cargan en Saldos › Nueva carga. Si '
+            . 'este banco ya viene por Interbanking, inhabilitalo: el disponible lo sumaría dos veces.';
+    }
+
+    /**
      * Alta de una cuenta.
      *
      * ENTRA ACTIVA, a diferencia de un medio de pago del mix. No es una
@@ -2299,7 +2440,7 @@ class Saldos {
      * informado. Una cuenta a la vista no lleva saldo inicial: se carga como
      * foto, y mandarselo se rechaza para que nadie crea que lo cargo.
      *
-     * @param string $tipo BANCO, MERCADO_PAGO, EFECTIVO_CENTRAL u OTRO
+     * @param string $tipo BANCO (un banco sin Interbanking), MERCADO_PAGO, EFECTIVO_CENTRAL u OTRO
      * @param string $nombre Nombre del banco o de la billetera
      * @param string $moneda ARS o USD
      * @param string $usuario
@@ -2383,8 +2524,9 @@ class Saldos {
         }
 
         // El origen del dato se deduce del tipo: el efectivo de tesoreria lo
-        // resuelve una consulta y el resto lo tipea una persona hasta que
-        // exista la integracion con Interbanking.
+        // resuelve una consulta y el resto lo tipea una persona. Un BANCO del
+        // catalogo es un banco SIN Interbanking: los que vienen por la
+        // integracion no estan en el catalogo, los lee SaldosInterbanking.
         $origen = ($tipo === 'EFECTIVO_CENTRAL') ? 'CONSULTA' : 'MANUAL';
 
         // Sin el script de fondos la tabla no tiene CLASE: se inserta como
@@ -2495,7 +2637,7 @@ class Saldos {
      * que permite controlar que la consulta este devolviendo algo razonable.
      * Si esa consulta falla, la pestana igual se dibuja con lo que hay cargado y
      * deja el aviso: una pestana que ya funciona no se cae por un origen que
-     * hoy no responde.
+     * hoy no responde. Lo mismo con Interbanking.
      *
      * @return array
      */
@@ -2511,7 +2653,23 @@ class Saldos {
             $avisos[] = 'No se pudieron leer los parámetros: ' . $e->getMessage();
         }
 
-        $filas = $this->tablasCreadas() ? $this->getSaldosActuales() : [];
+        // Las mismas filas que suma el tablero: ver getFilasDisponible().
+        $disponible = $this->getFilasDisponible(date('Y-m-d'));
+        $filas = $disponible['filas'];
+
+        // Con su nivel: un critico de Interbanking (una cuenta sin dato, la
+        // lectura caida) se tiene que ver distinto de un aviso de atencion.
+        foreach ($disponible['avisos'] as $a) {
+            $avisos[] = $a;
+        }
+
+        // Sin la tabla del respaldo la accion no se dibuja: se dice por que.
+        // Sin depurar no hay filas de Interbanking, y el aviso ya es otro.
+        if ($disponible['depurado'] && !$disponible['respaldo_creado']) {
+            $avisos[] = 'Todavía no se puede cargar a mano el saldo de una cuenta de Interbanking '
+                . 'que no trae dato: corré sql/cashflow_saldos_interbanking.sql contra la base central.';
+        }
+
         $cargas = $this->getCargas(self::CARGA_SALDOS);
         $ultima = self::ultimaCarga($cargas);
 
@@ -2535,6 +2693,13 @@ class Saldos {
             ) as $a) {
                 $avisos[] = $a;
             }
+        }
+
+        // Las cuentas bancarias cuyo saldo no es de hoy, cada una con su fecha.
+        $noEsDeHoy = SaldosInterbanking::avisoNoEsDeHoy($filas);
+
+        if ($noEsDeHoy !== null) {
+            $avisos[] = $noEsDeHoy;
         }
 
         foreach ($filas as $f) {
@@ -2566,7 +2731,11 @@ class Saldos {
                 ];
             }, $cargas),
             'efectivo_central' => $efectivo,
-            'avisos' => $avisos
+            'respaldo_creado' => $disponible['respaldo_creado'],
+            // Los textos, como siempre, y la misma lista con nivel: la pestana
+            // pinta los criticos aparte. Un texto suelto es atencion.
+            'avisos' => Aviso::textos($avisos),
+            'avisos_con_nivel' => Aviso::lista($avisos)
         ];
     }
 
