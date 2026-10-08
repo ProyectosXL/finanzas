@@ -69,6 +69,23 @@
             porDefecto: [1, 2]
         });
 
+        // Abre por fecha de cobro ascendente, como Cobranzas FR: lo más
+        // antiguo arriba. Las vencidas se ordenan por la fecha donde se
+        // dibujan (hoy), que es el data-orden de su celda.
+        //
+        // 'Cobro' es el data-orden-nombre del <th>, IGUAL AL RÓTULO a
+        // propósito: la preferencia se guarda por ese nombre, y cambiarlo le
+        // haría perder a quien ya ordenó a mano el orden que eligió. La clave
+        // es el id de la tabla, la misma del descubrimiento automático.
+        //
+        // No aplica en Resumen: ahí la columna está oculta y tabla-orden.js no
+        // ordena por una columna que no se ve. El orden del Resumen lo trae el
+        // servidor (EjeVista::ordenarPorFechaMasProxima()).
+        crearOrdenTabla({
+            tabla: 'tablaCobranzasMay',
+            porDefecto: { columna: 'Cobro', dir: 'asc' }
+        });
+
         if (btnRefresh) {
             btnRefresh.addEventListener('click', cargarDatos);
         }

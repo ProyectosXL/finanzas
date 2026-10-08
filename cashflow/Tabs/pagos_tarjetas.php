@@ -461,7 +461,11 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                                     <th rowspan="2" class="col-texto">RAZON SOCIAL</th>
                                     <th rowspan="2">T_COMP</th>
                                     <th rowspan="2">N_COMP</th>
-                                    <th rowspan="2" style="min-width: 165px;"
+                                    <!-- data-orden-nombre igual al rótulo: ancla
+                                         el nombre del orden guardado sin
+                                         cambiarlo. Es el del porDefecto del JS.
+                                         Ver Js/tabla-orden.js. -->
+                                    <th rowspan="2" style="min-width: 165px;" data-orden-nombre="VTO TANGO"
                                         title="El vencimiento de Tango, que se puede corregir: sólo vale en esta pestaña">
                                         VTO TANGO
                                     </th>

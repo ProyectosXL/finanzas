@@ -217,7 +217,12 @@ $edita = AuthCashflow::puedeEditar('cobranzas_may');
                                 SALDO PENDIENTE
                             </th>
                             <th rowspan="2" id="thImporteNetoCobMay">Importe Neto</th>
-                            <th rowspan="2" id="thCobroCobMay">Cobro</th>
+                            <!-- data-orden-nombre IGUAL AL RÓTULO: ancla el
+                                 nombre con el que se guarda el orden elegido a
+                                 mano, sin cambiarlo -quien ya ordenó por "Cobro"
+                                 lo conserva-. Es el nombre del porDefecto del
+                                 JS. Ver Js/tabla-orden.js. -->
+                            <th rowspan="2" id="thCobroCobMay" data-orden-nombre="Cobro">Cobro</th>
                             <!-- Acá terminan las descriptivas. El resto de esta
                                  fila son los totales de cada columna del eje,
                                  arriba de su fecha: los pinta Js/eje-totales.js

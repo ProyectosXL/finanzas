@@ -34,6 +34,19 @@
             porDefecto: [1, 3]
         });
 
+        // Abre por fecha de cobro estimada ascendente: lo que primero entra,
+        // arriba. Una factura sin fecha de emisión -sin cobro estimado- va al
+        // final, que es donde tabla-orden.js pone lo vacío.
+        //
+        // El nombre es el data-orden-nombre del <th>, igual al rótulo a
+        // propósito: quien ya ordenó a mano por esa columna conserva su orden.
+        // La clave es el id de la tabla, la misma del descubrimiento
+        // automático. Ver Js/tabla-orden.js.
+        crearOrdenTabla({
+            tabla: 'tablaExportacionesTasky',
+            porDefecto: { columna: 'Fecha cobro estimada', dir: 'asc' }
+        });
+
         conectar('btnRefreshExpTasky', 'click', cargarDatos);
         conectar('btnExportExpTasky', 'click', exportarExcel);
         conectar('busquedaExpTasky', 'keyup', filtrarTabla);
@@ -192,7 +205,11 @@
             html += '<td class="currency">' + formatCotiz(item.COTIZ_HOY) + '</td>';
             html += '<td class="currency fw-bold">' + formatCurrency(item.IMPORTE_PESOS_HOY) + '</td>';
 
-            html += '<td class="center">' + badgeCobro(item) + '</td>';
+            // data-orden con la fecha cruda: el badge de una vencida dice
+            // "Vencida 03/09/2026" y no se interpreta como fecha, y el "—" de
+            // una sin fecha tiene que ir vacío para quedar al final.
+            html += '<td class="center" data-orden="' + escaparAttr(item.Cobro || '') + '">'
+                + badgeCobro(item) + '</td>';
 
             // Columnas del eje temporal
             cols.forEach(function(col) {

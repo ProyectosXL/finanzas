@@ -382,6 +382,69 @@ foreach ([
         preg_match('/(^|[\s,}])\.modo-resumen\s/m', $p[2]));
 }
 
+// ============================================================================
+// LAS PESTANAS DE COBRO Y PAGO ABREN POR FECHA ASCENDENTE
+//
+// Cobranzas May, Exportaciones Tasky, Echeqs (cartera), Proveedores Locales y
+// Tarjetas Corporativas declaran el mismo porDefecto que Cobranzas FR, sobre
+// su columna de fecha. Tres cosas que se rompen calladas:
+//
+//   - el nombre del porDefecto tiene que coincidir con el de la columna, o la
+//     tabla abre sin orden y no avisa;
+//   - el data-orden-nombre tiene que ser IGUAL AL ROTULO: la preferencia
+//     guardada se identifica por ese nombre, y uno nuevo le haria perder a
+//     quien ya ordeno a mano por esa columna el orden que eligio;
+//   - declarar crearOrdenTabla() no puede cambiar la clave de la preferencia:
+//     por eso no se pasa `clave`, y vale el id de la tabla, que es la del
+//     descubrimiento automatico.
+// ============================================================================
+
+seccion('las pestanas de cobro y pago abren por fecha ascendente');
+
+$ordenesPorDefecto = [
+    ['cobranzas_may.php', 'Ingresos-Cobranzas_may.js', 'tablaCobranzasMay', 'Cobro'],
+    ['exportaciones_tasky.php', 'Ingresos-Exportaciones_tasky.js', 'tablaExportacionesTasky', 'Fecha cobro estimada'],
+    ['echeqs.php', 'Ingresos-Echeqs.js', 'tablaEcheqs', 'Fecha de pago'],
+    ['proveedores_locales.php', 'Proveedores-Proveedores_locales.js', 'tablaProveedores', 'Fecha de pago'],
+    ['pagos_tarjetas.php', 'Financiero-Pagos_tarjetas.js', 'tablaCorp', 'VTO TANGO']
+];
+
+foreach ($ordenesPorDefecto as $o) {
+    list($archivoTab, $archivoJs, $idTabla, $columna) = $o;
+
+    $js = file_get_contents($JS . '/' . $archivoJs);
+    $thead = theadTabla(contenidoTab($TABS . '/' . $archivoTab), $idTabla);
+
+    // La llamada, con la tabla y el default; sin `clave`, para no cambiarla.
+    $patron = '/crearOrdenTabla\(\{\s*tabla:\s*\'' . preg_quote($idTabla, '/') . '\',\s*'
+        . 'porDefecto:\s*\{\s*columna:\s*\'' . preg_quote($columna, '/') . '\',\s*dir:\s*\'asc\'\s*\}\s*\}\)/';
+
+    chequear($idTabla . ' abre por "' . $columna . '" ascendente', 1, preg_match($patron, $js));
+
+    preg_match('/crearOrdenTabla\(\{[^)]*tabla:\s*\'' . preg_quote($idTabla, '/') . '\'[^)]*\}\)/s', $js, $llamada);
+
+    chequear($idTabla . ': declararlo no cambia la clave de la preferencia', false,
+        isset($llamada[0]) && strpos($llamada[0], 'clave') !== false);
+
+    // El <th> declara el nombre, y el nombre es su rotulo.
+    $th = preg_match('/<th\b[^>]*data-orden-nombre="' . preg_quote($columna, '/') . '"[^>]*>(.*?)<\/th>/s',
+        $thead, $m) === 1;
+
+    chequear($idTabla . ': la columna declara data-orden-nombre="' . $columna . '"', true, $th);
+    chequear($idTabla . ': y es igual al rotulo, para no perder ordenes guardados', $columna,
+        $th ? trim(preg_replace('/\s+/', ' ', strip_tags($m[1]))) : null);
+}
+
+// Las celdas cuyo texto no es una fecha llevan la fecha cruda en data-orden: el
+// badge "Vencida 03/09/2026" de Tasky y el "—" de un cheque sin fecha. Sin
+// esto, la vencida se ordenaria como texto y la sin fecha no iria al final.
+chequear('Tasky ordena la fecha de cobro por data-orden', true,
+    strpos(file_get_contents($JS . '/Ingresos-Exportaciones_tasky.js'),
+        '\'<td class="center" data-orden="\' + escaparAttr(item.Cobro || \'\') + \'">\'') !== false);
+chequear('Echeqs tambien la fecha de pago', true,
+    strpos(file_get_contents($JS . '/Ingresos-Echeqs.js'),
+        '\'<td class="center" data-orden="\' + escapar(String(f.FECHA_PAGO || \'\').slice(0, 10)) + \'">\'') !== false);
+
 // Sin orden tambien es una eleccion: si el tercer click borrara la clave, seria
 // indistinguible de no haber elegido nunca y el default volveria en la recarga
 // siguiente, reponiendo un orden que el usuario acababa de sacar.

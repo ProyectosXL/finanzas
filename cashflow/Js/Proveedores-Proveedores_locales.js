@@ -53,6 +53,19 @@
             porDefecto: [0, 1]
         });
 
+        // Abre por fecha de pago ascendente: lo más urgente arriba. La celda
+        // ya lleva data-orden con la fecha que muestra -la cargada, la del
+        // cronograma o el vencimiento-, que es la que se lee en pantalla.
+        //
+        // El nombre es el data-orden-nombre del <th>, igual al rótulo a
+        // propósito: quien ya ordenó a mano por esa columna conserva su orden.
+        // La clave es el id de la tabla, la misma del descubrimiento
+        // automático. Ver Js/tabla-orden.js.
+        crearOrdenTabla({
+            tabla: 'tablaProveedores',
+            porDefecto: { columna: 'Fecha de pago', dir: 'asc' }
+        });
+
         conectar('btnVistaCuentasProv', function() { cambiarVista('cuentas'); });
         conectar('btnVistaImportarProv', function() { cambiarVista('importar'); });
         conectar('btnVistaMaestroProv', function() { cambiarVista('maestro'); });

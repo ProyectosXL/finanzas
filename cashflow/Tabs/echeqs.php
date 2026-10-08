@@ -233,7 +233,11 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                 referencia: eran el mismo dato repetido.
                             -->
                             <tr>
-                                <th rowspan="2">Fecha de pago</th>
+                                <!-- data-orden-nombre igual al rótulo: ancla el
+                                     nombre del orden guardado sin cambiarlo. Es
+                                     el del porDefecto del JS. Ver
+                                     Js/tabla-orden.js. -->
+                                <th rowspan="2" data-orden-nombre="Fecha de pago">Fecha de pago</th>
                                 <th rowspan="2">N° Cheque</th>
                                 <th rowspan="2">Banco</th>
                                 <th rowspan="2" class="col-texto">Cliente</th>

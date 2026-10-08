@@ -320,7 +320,11 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                                     title="Lo que falta pagar: el importe menos lo que ya se le imputó. Es el número que va al cashflow.">
                                     Pendiente
                                 </th>
-                                <th rowspan="2">Fecha de pago</th>
+                                <!-- data-orden-nombre igual al rótulo: ancla el
+                                     nombre del orden guardado sin cambiarlo. Es
+                                     el del porDefecto del JS. Ver
+                                     Js/tabla-orden.js. -->
+                                <th rowspan="2" data-orden-nombre="Fecha de pago">Fecha de pago</th>
                                 <!-- UNA SOLA COLUMNA, Y MUESTRA LA QUE DECIDE.
                                      Trae la del maestro —o la que dejó la
                                      importación— y se puede editar: editarla

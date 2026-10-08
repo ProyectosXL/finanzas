@@ -1731,6 +1731,17 @@
                 clave: 'tarjetas_socios', porDefecto: [0]});
         }
 
+        /* TARJETAS CORPORATIVAS ABRE POR VENCIMIENTO ASCENDENTE: lo que vence
+           primero, arriba. Es la columna VTO TANGO, que muestra el vencimiento
+           vigente -el corregido, si lo hay- y ya lleva data-orden con esa fecha.
+           El nombre es el data-orden-nombre del <th>, igual al rótulo a
+           propósito: quien ya ordenó a mano conserva su orden. La clave es el
+           id de la tabla, la misma del descubrimiento automático. Ver
+           Js/tabla-orden.js. */
+        if (typeof crearOrdenTabla === 'function') {
+            crearOrdenTabla({tabla: 'tablaCorp', porDefecto: {columna: 'VTO TANGO', dir: 'asc'}});
+        }
+
         cargar();
     }
 
