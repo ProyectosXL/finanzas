@@ -325,6 +325,75 @@ class EjeVista {
     }
 
     /**
+     * Ordena las filas de armarAgrupado() por la FECHA MAS PROXIMA de cada
+     * grupo, ascendente, con la clave como desempate.
+     *
+     * ES EL ORDEN CON EL QUE ABRE EL RESUMEN de las cobranzas. Detalle
+     * Facturas abre por fecha de cobro ascendente desde Js/tabla-orden.js,
+     * pero en Resumen la fila es un cliente y su columna de cobro esta oculta
+     * -sus facturas se cobran en fechas distintas-, asi que el navegador no
+     * tiene por que ordenar. El orden lo tiene que traer el servidor, y es el
+     * mismo de Detalle Facturas: cada cliente queda donde aparece su primera
+     * factura. Si el usuario ordena por otra columna, manda su eleccion.
+     *
+     * "La mas proxima" es la MINIMA fecha del grupo, tal como se dibuja: una
+     * vencida reubicada cuenta como el primer dia del eje, y una fecha pactada
+     * a mano que ya paso conserva la suya y va primera. Es lo mismo que mira
+     * Detalle Facturas.
+     *
+     * UN GRUPO SIN NINGUNA FECHA VA AL FINAL, que es donde tabla-orden.js pone
+     * lo vacio: arriba ocuparia el lugar de lo primero que hay que mirar.
+     *
+     * Se aplica DESPUES de armarAgrupado() y sobre los items originales, uno
+     * por comprobante: el agrupado descarta la fecha cuando difiere dentro del
+     * grupo. Pura.
+     *
+     * @param array $payload Payload de armarAgrupado()
+     * @param array $items Los items originales, uno por comprobante
+     * @param string $campoClave El mismo campo con el que se agrupo
+     * @param string $campoFecha 'Y-m-d'
+     * @return array El payload, con las filas ordenadas
+     */
+    public static function ordenarPorFechaMasProxima($payload, $items, $campoClave, $campoFecha) {
+        $minima = [];
+
+        foreach (is_array($items) ? $items : [] as $item) {
+            $clave = isset($item[$campoClave]) ? (string) $item[$campoClave] : '';
+            $fecha = Horizonte::normalizarFecha($item[$campoFecha] ?? null);
+
+            if ($fecha === null) {
+                continue;
+            }
+
+            if (!isset($minima[$clave]) || $fecha < $minima[$clave]) {
+                $minima[$clave] = $fecha;
+            }
+        }
+
+        $filas = $payload['filas'];
+
+        usort($filas, function ($a, $b) use ($minima, $campoClave) {
+            $ka = isset($a[$campoClave]) ? (string) $a[$campoClave] : '';
+            $kb = isset($b[$campoClave]) ? (string) $b[$campoClave] : '';
+            $fa = $minima[$ka] ?? null;
+            $fb = $minima[$kb] ?? null;
+
+            if ($fa !== $fb) {
+                if ($fa === null) { return 1; }
+                if ($fb === null) { return -1; }
+
+                return strcmp($fa, $fb);
+            }
+
+            return strcmp($ka, $kb);
+        });
+
+        $payload['filas'] = $filas;
+
+        return $payload;
+    }
+
+    /**
      * Agrega a un par de mapas dias/meses los tres totales por vista.
      *
      * El total de la vista Meses NO es el del horizonte: las columnas mensuales

@@ -52,6 +52,12 @@ function payloadCobranzas($items, $summary, $rango = ['desde' => null, 'hasta' =
         // Ver EjeVista::marcarAlguna().
         $payload = EjeVista::marcarAlguna($payload, $items, 'COD_CLI',
             ['VENCIDA', 'FECHA_MANUAL']);
+
+        // El Resumen abre con los clientes por su cobro mas proximo: en
+        // Resumen la columna de cobro esta oculta y el navegador no ordena,
+        // asi que el orden inicial lo trae el servidor. Si el usuario elige
+        // otra columna, manda su eleccion. Ver EjeVista::ordenarPorFechaMasProxima().
+        $payload = EjeVista::ordenarPorFechaMasProxima($payload, $items, 'COD_CLI', 'Cobro');
     }
 
     /* Los avisos de facturas vencidas van ADELANTE de los del eje, por el mismo
