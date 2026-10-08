@@ -225,7 +225,10 @@ var Notificacion = (function() {
          * @param {Object} opciones Las de confirmar(), más:
          * @param {string} [opciones.etiqueta] Rótulo del campo
          * @param {string} [opciones.valor] Con qué arranca, 'aaaa-mm-dd'
-         * @param {string} [opciones.min] Fecha mínima aceptada
+         * @param {string} [opciones.min] Fecha mínima aceptada, 'aaaa-mm-dd'.
+         *        Se VALIDA al confirmar, no sólo se pone en el input: el `min`
+         *        del input limita el calendario pero deja tipear cualquier cosa.
+         * @param {string} [opciones.antesDelMin] Qué decir si es anterior a `min`
          * @param {string} [opciones.invalido] Qué decir si quedó vacía
          * @returns {Promise<string|null>} 'aaaa-mm-dd', o null si canceló
          */
@@ -497,7 +500,8 @@ var Notificacion = (function() {
 
             previo = String(previo).trim();
 
-            return Promise.resolve(esFecha(previo) ? previo : null);
+            return Promise.resolve(esFecha(previo) && !(opciones.min && previo < opciones.min)
+                ? previo : null);
         }
 
         var id = 'cf-dlg-fecha-' + Math.random().toString(36).slice(2);
@@ -533,6 +537,25 @@ var Notificacion = (function() {
                     campo.classList.add('is-invalid');
                     modal.querySelector('.cf-dlg-error').textContent =
                         opciones.invalido || 'Elegí una fecha.';
+                    campo.focus();
+
+                    return undefined;
+                }
+
+                /* EL `min` SE VALIDA ACÁ, no sólo en el input. El atributo
+                   limita el calendario, pero una fecha anterior tipeada a mano
+                   pasa igual y el diálogo la devolvía como buena: el error
+                   aparecía recién en el servidor, después de cerrar. Las
+                   fechas viajan como 'aaaa-mm-dd', así que compararlas como
+                   texto es compararlas como fechas. El servidor valida de
+                   nuevo: esto explica y bloquea, no autoriza. */
+                if (opciones.min && v < opciones.min) {
+                    var p = String(opciones.min).split('-');
+
+                    campo.classList.add('is-invalid');
+                    modal.querySelector('.cf-dlg-error').textContent =
+                        opciones.antesDelMin || ('La fecha no puede ser anterior al '
+                            + p[2] + '/' + p[1] + '/' + p[0] + '.');
                     campo.focus();
 
                     return undefined;

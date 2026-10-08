@@ -216,6 +216,27 @@ chequear('el masivo exige la fecha, que la pantalla no puede garantizar', true,
     strpos($ctrl, 'Falta la fecha de cobro que hay que ponerles.') !== false);
 
 // ============================================================================
+// El dialogo de la fecha valida el minimo
+//
+// Las dos pestanas piden la fecha con Notificacion.pedirFecha() y `min` en hoy.
+// El `min` del input solo limita el calendario: una fecha pasada tipeada a mano
+// pasaba y el error aparecia recien en el servidor, con el dialogo ya cerrado.
+// La validacion que vale sigue siendo la del servidor -arriba-; esto explica y
+// bloquea.
+// ============================================================================
+
+seccion('el dialogo de fecha no deja confirmar una fecha anterior al minimo');
+
+$notiJs = file_get_contents(__DIR__ . '/../Js/notificaciones.js');
+
+chequear('al confirmar compara contra el minimo', true,
+    preg_match('/if \(opciones\.min && v < opciones\.min\) \{.*?return undefined;/s', $notiJs) === 1);
+chequear('y dice por que no cierra', true,
+    strpos($notiJs, "'La fecha no puede ser anterior al '") !== false);
+chequear('el respaldo sin Bootstrap tampoco la devuelve', true,
+    strpos($notiJs, '!(opciones.min && previo < opciones.min)') !== false);
+
+// ============================================================================
 // Todo o nada, con una falla simulada en el medio
 // ============================================================================
 
