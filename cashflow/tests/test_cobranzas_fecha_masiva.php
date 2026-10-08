@@ -407,6 +407,18 @@ $pestanasMasivas = [
         'claveFijas' => 'cobranzas_fr.con_seleccion',
         // Donde se edita de a una: el mismo lugar donde se selecciona.
         'vista' => "modoOrigen === 'proyectado' && modoVista === 'deepdive'"
+    ],
+    'Cobranzas May' => [
+        'tab' => __DIR__ . '/../Tabs/cobranzas_may.php',
+        'js' => __DIR__ . '/../Js/Ingresos-Cobranzas_may.js',
+        'css' => __DIR__ . '/../Css/Ingresos-Cobranzas_may.css',
+        'tabla' => 'tablaCobranzasMay',
+        'cuerpo' => 'tableBodyCobMay',
+        'sufijo' => 'CobMay',
+        'permiso' => 'cobranzas_may',
+        'claveFijas' => 'cobranzas_may.con_seleccion',
+        // Mayoristas tiene un solo origen: se edita en Detalle Facturas.
+        'vista' => "return modoVista === 'deepdive';"
     ]
 ];
 

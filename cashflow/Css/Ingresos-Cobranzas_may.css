@@ -106,39 +106,57 @@
 }
 
 /* Modo Resumen: ocultar columnas de detalle.
-   FECHA, T_COMP, N_COMP, Desc y Días son de la 3 a la 7 desde que se sacó la
-   columna Tipo de adelante. Ver la nota en Ingresos-Cobranzas_fr.css.
+   FECHA, T_COMP, N_COMP, Desc y Días son de la 4 a la 8: la columna de
+   selección va primera desde el fechado masivo. Ver la nota en
+   Ingresos-Cobranzas_fr.css.
 
    VAN ACOTADAS A ESTA TABLA (#tablaCobranzasMay.modo-resumen) y no a
    `.modo-resumen` a secas: Cobranzas FR usa la misma clase con sus propios
    índices, y una regla suelta de una hoja le apuntaría a la tabla de la otra
    el día que las dos convivan en la página. */
-#tablaCobranzasMay.modo-resumen thead tr:first-child th:nth-child(3),
 #tablaCobranzasMay.modo-resumen thead tr:first-child th:nth-child(4),
 #tablaCobranzasMay.modo-resumen thead tr:first-child th:nth-child(5),
 #tablaCobranzasMay.modo-resumen thead tr:first-child th:nth-child(6),
 #tablaCobranzasMay.modo-resumen thead tr:first-child th:nth-child(7),
-#tablaCobranzasMay.modo-resumen tbody td:nth-child(3),
+#tablaCobranzasMay.modo-resumen thead tr:first-child th:nth-child(8),
 #tablaCobranzasMay.modo-resumen tbody td:nth-child(4),
 #tablaCobranzasMay.modo-resumen tbody td:nth-child(5),
 #tablaCobranzasMay.modo-resumen tbody td:nth-child(6),
 #tablaCobranzasMay.modo-resumen tbody td:nth-child(7),
+#tablaCobranzasMay.modo-resumen tbody td:nth-child(8),
 /* El pie también: desde que tiene una celda por columna en vez de un colspan,
    si no se ocultan las mismas queda corrido cinco lugares. */
-#tablaCobranzasMay.modo-resumen tfoot td:nth-child(3),
 #tablaCobranzasMay.modo-resumen tfoot td:nth-child(4),
 #tablaCobranzasMay.modo-resumen tfoot td:nth-child(5),
 #tablaCobranzasMay.modo-resumen tfoot td:nth-child(6),
 #tablaCobranzasMay.modo-resumen tfoot td:nth-child(7),
-/* Y la columna Cobro, que es la 11 y no la 10 como en FR: acá están Importe
+#tablaCobranzasMay.modo-resumen tfoot td:nth-child(8),
+/* Y la columna Cobro, que es la 12 y no la 11 como en FR: acá están Importe
    Factura, SALDO PENDIENTE e Importe Neto antes que ella. Desde que entró
-   Importe Factura esta regla seguía diciendo 10, y en Resumen escondía el
-   IMPORTE NETO y dejaba a la vista una columna Cobro vacía —el agrupado
+   Importe Factura esta regla se quedó un lugar atrás, y en Resumen escondía
+   el IMPORTE NETO y dejaba a la vista una columna Cobro vacía —el agrupado
    descarta la fecha—. Ver la nota equivalente en Ingresos-Cobranzas_fr.css. */
-#tablaCobranzasMay.modo-resumen thead tr:first-child th:nth-child(11),
-#tablaCobranzasMay.modo-resumen tbody td:nth-child(11),
-#tablaCobranzasMay.modo-resumen tfoot td:nth-child(11) {
+#tablaCobranzasMay.modo-resumen thead tr:first-child th:nth-child(12),
+#tablaCobranzasMay.modo-resumen tbody td:nth-child(12),
+#tablaCobranzasMay.modo-resumen tfoot td:nth-child(12) {
     display: none !important;
+}
+
+/* La selección para la fecha de cobro masiva: la columna está siempre en el
+   DOM y se esconde donde no se selecciona. Ver la nota equivalente en
+   Ingresos-Cobranzas_fr.css. */
+#tablaCobranzasMay:not(.con-seleccion) .col-seleccion {
+    display: none !important;
+}
+
+#tablaCobranzasMay .col-seleccion {
+    width: 46px;
+    text-align: center;
+}
+
+.tab-cobranzas_may .cob-barra-sel {
+    background-color: #eef4ff;
+    border-bottom: 1px solid #c8d8f5;
 }
 
 .tab-cobranzas_may .total-column {
