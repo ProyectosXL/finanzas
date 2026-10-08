@@ -67,15 +67,25 @@ class SaldosInterbanking {
     /** Alias y estado de cada banco. La crea sql/cashflow_saldos_interbanking.sql */
     const TABLA_BANCO = 'RO_T_CASHFLOW_SALDOS_BANCO';
 
+    /** Respaldo manual de una cuenta que Interbanking no trae. Mismo script. */
+    const TABLA_MANUAL = 'RO_T_CASHFLOW_SALDOS_BANCO_MANUAL';
+
     /** De donde salio el saldo de una fila bancaria */
     const ORIGEN_INTERBANKING = 'INTERBANKING';
+    const ORIGEN_RESPALDO = 'RESPALDO';
 
     /**
      * Los origenes que se esperan DEL DIA. Un saldo viejo de estos no pide
      * "actualiza la carga" -no hay carga que actualizar- sino que avisa que
      * no llego el de hoy. Ver Saldos::armarSerieDisponible().
+     *
+     * El respaldo esta aca y no con las cargas: tapa a Interbanking, y lo que
+     * se espera de el es lo mismo, el saldo del dia.
      */
-    const ORIGENES_DEL_DIA = [self::ORIGEN_INTERBANKING];
+    const ORIGENES_DEL_DIA = [self::ORIGEN_INTERBANKING, self::ORIGEN_RESPALDO];
+
+    /** Largo maximo de la observacion de un respaldo: el de la columna */
+    const OBSERVACION_MAX = 500;
 
     /** Seccion de los avisos en el tablero: van con los del disponible */
     const SECCION = 'Saldo Inicial';
@@ -313,6 +323,70 @@ class SaldosInterbanking {
         return $cambios;
     }
 
+    /**
+     * Un respaldo manual validado, antes de abrir la transaccion.
+     *
+     * LA FECHA NO PUEDE SER POSTERIOR A HOY: un saldo es lo que hay en la
+     * cuenta, y un saldo "de manana" es una proyeccion. Ademas ganaria contra
+     * el dato de Interbanking de hoy por ser mas nuevo, y lo taparia.
+     *
+     * EL IMPORTE ES OBLIGATORIO y puede ser negativo -una cuenta en descubierto
+     * tiene saldo contable negativo-, pero no vacio: un vacio tomado como cero
+     * diria "esta cuenta no tiene plata" sin que nadie lo haya dicho.
+     *
+     * @param array $d ['nro_banco', 'nro_cuenta', 'moneda', 'fecha_saldo', 'saldo', 'observacion']
+     * @param string $hoy 'Y-m-d'
+     * @return array Los mismos campos, normalizados
+     */
+    public static function validarRespaldo($d, $hoy) {
+        $d = is_array($d) ? $d : [];
+        $campo = function ($k) use ($d) {
+            return isset($d[$k]) ? trim((string) $d[$k]) : '';
+        };
+
+        $banco = $campo('nro_banco');
+        $cuenta = $campo('nro_cuenta');
+        $moneda = strtoupper($campo('moneda'));
+
+        if ($banco === '' || $cuenta === '' || $moneda === '') {
+            throw new Exception('Falta el banco, la cuenta o la moneda del saldo manual.');
+        }
+
+        $fecha = $campo('fecha_saldo');
+        $f = DateTime::createFromFormat('!Y-m-d', $fecha);
+
+        if ($f === false || $f->format('Y-m-d') !== $fecha) {
+            throw new Exception('La fecha del saldo manual no es válida.');
+        }
+
+        if ($fecha > substr((string) $hoy, 0, 10)) {
+            throw new Exception('La fecha del saldo manual no puede ser posterior a hoy: un saldo es '
+                . 'lo que hay en la cuenta, no lo que va a haber.');
+        }
+
+        $saldo = $campo('saldo');
+
+        if ($saldo === '' || !is_numeric($saldo)) {
+            throw new Exception('El saldo manual necesita un importe.');
+        }
+
+        $obs = $campo('observacion');
+
+        if (mb_strlen($obs) > self::OBSERVACION_MAX) {
+            throw new Exception('La observación no puede superar los ' . self::OBSERVACION_MAX
+                . ' caracteres.');
+        }
+
+        return [
+            'nro_banco' => $banco,
+            'nro_cuenta' => $cuenta,
+            'moneda' => $moneda,
+            'fecha_saldo' => $fecha,
+            'saldo' => round(floatval($saldo), 2),
+            'observacion' => ($obs === '') ? null : $obs
+        ];
+    }
+
     /** Un alias ya guardado, llevado a la misma forma que validarAlias() sin lanzar */
     private static function validarAliasGuardado($alias) {
         $alias = trim((string) $alias);
@@ -417,42 +491,93 @@ class SaldosInterbanking {
     }
 
     /**
+     * Que saldo se usa para una cuenta: el de Interbanking o el respaldo
+     * manual.
+     *
+     * GANA LA FECHA MAS NUEVA, Y A IGUAL FECHA GANA INTERBANKING, que es la
+     * fuente oficial. Asi, cuando BI se arregla y vuelve a traer el contable,
+     * manda solo, sin que nadie tenga que quitar el respaldo. Es la regla
+     * inversa a la caja de los locales -alla gana el manual a igual fecha-
+     * porque aca el manual no corrige un dato, tapa uno que falta.
+     *
+     * @param array|null $interbanking El registro elegido por elegirRegistro()
+     * @param array|null $respaldo El respaldo vigente, con FECHA_SALDO
+     * @return string|null ORIGEN_INTERBANKING, ORIGEN_RESPALDO, o null si no hay ninguno
+     */
+    public static function resolverSaldo($interbanking, $respaldo) {
+        if ($respaldo === null) {
+            return ($interbanking === null) ? null : self::ORIGEN_INTERBANKING;
+        }
+
+        if ($interbanking === null) {
+            return self::ORIGEN_RESPALDO;
+        }
+
+        return ((string) $respaldo['FECHA_SALDO'] > (string) $interbanking['FECHA_OPERACION'])
+            ? self::ORIGEN_RESPALDO : self::ORIGEN_INTERBANKING;
+    }
+
+    /**
      * Las filas bancarias de la pestana y del tablero, con sus avisos.
      *
      * ES EL UNICO LUGAR DONDE SE DECIDE QUE SALDO TIENE UNA CUENTA. La pestana
      * y el proveedor lo reciben por Saldos::getFilasDisponible(); si cada uno
      * resolviera por su lado, algun dia no sumarian lo mismo.
      *
-     * $ultimos === null significa que la lectura de BI fallo: no hay filas de
-     * Interbanking y el aviso es critico.
+     * LAS CUENTAS SON LAS DE INTERBANKING MAS LAS QUE TIENEN RESPALDO VIGENTE.
+     * Un respaldo existe porque esa plata existe aunque BI no la traiga: si la
+     * lista saliera solo de BI, con la lectura caida -o con una cuenta que BI
+     * dejo de informar- el respaldo no entraria justo cuando hace falta.
+     *
+     * $ultimos === null significa que la lectura de BI fallo: va un aviso
+     * critico y entran solo los respaldos, sin avisos por cuenta: el critico
+     * ya dice que Interbanking no esta.
      *
      * UN BANCO INACTIVO NO EXISTE PARA LA PESTANA NI PARA EL TABLERO: sus
-     * cuentas no salen y no avisan nada, ni siquiera que vinieron sin moneda.
-     * Inactivarlo es decir "este banco ya no se opera", y un aviso sobre el
-     * seria ruido que tapa los que importan. Parametros lo sigue mostrando.
+     * cuentas no salen, no usan su respaldo y no avisan nada, ni siquiera que
+     * vinieron sin moneda. Inactivarlo es decir "este banco ya no se opera", y
+     * un aviso sobre el seria ruido que tapa los que importan. Parametros lo
+     * sigue mostrando.
      *
      * @param array|null $ultimos Lo que devolvio leerUltimos(), o null
      * @param array $ctx 'hoy' => 'Y-m-d', 'tango' => mapa NRO_BANCO => DESC_BANCO,
      *        'bancos' => mapa NRO_BANCO => ['ALIAS', 'ACTIVO'] (vacio sin script),
+     *        'respaldos' => mapa clave => respaldo vigente (vacio sin script),
      *        'error' => texto de la falla de lectura
      * @return array ['filas' => [...], 'avisos' => [Aviso]]
      */
     public static function armarCuentasBancarias($ultimos, $ctx) {
         $tango = isset($ctx['tango']) && is_array($ctx['tango']) ? $ctx['tango'] : [];
         $bancos = isset($ctx['bancos']) && is_array($ctx['bancos']) ? $ctx['bancos'] : [];
+        $respaldos = isset($ctx['respaldos']) && is_array($ctx['respaldos']) ? $ctx['respaldos'] : [];
         $hoy = isset($ctx['hoy']) ? substr((string) $ctx['hoy'], 0, 10) : date('Y-m-d');
+        $leido = ($ultimos !== null);
         $avisos = [];
         $filas = [];
 
-        if ($ultimos === null) {
+        if (!$leido) {
             $avisos[] = Aviso::nuevo(Aviso::DANGER, 'No se pudieron leer los saldos bancarios de '
                 . 'Interbanking' . (empty($ctx['error']) ? '' : ' (' . $ctx['error'] . ')')
                 . '; el disponible no los incluye.', self::SECCION);
-
-            return ['filas' => [], 'avisos' => $avisos];
         }
 
-        $agrupadas = self::agruparPorCuenta($ultimos);
+        $agrupadas = self::agruparPorCuenta($leido ? $ultimos : []);
+        $cuentas = $agrupadas['cuentas'];
+
+        // Las cuentas con respaldo que BI no trajo, o que no se pudo leer
+        foreach ($respaldos as $clave => $r) {
+            if (!isset($cuentas[$clave])) {
+                $cuentas[$clave] = [
+                    'nro_banco' => trim((string) $r['NRO_BANCO']),
+                    'nro_cuenta' => trim((string) $r['NRO_CUENTA']),
+                    'moneda' => strtoupper(trim((string) $r['MONEDA'])),
+                    'tipo_cuenta' => null,
+                    'registros' => []
+                ];
+            }
+        }
+
+        ksort($cuentas);
         $fueraDeTango = [];
 
         foreach ($agrupadas['sin_moneda'] as $c) {
@@ -466,7 +591,7 @@ class SaldosInterbanking {
                 . 'disponible: no se puede saber si son pesos o dólares.', self::SECCION);
         }
 
-        foreach ($agrupadas['cuentas'] as $clave => $c) {
+        foreach ($cuentas as $clave => $c) {
             if (!self::bancoActivo($c['nro_banco'], $bancos)) {
                 continue;
             }
@@ -479,20 +604,29 @@ class SaldosInterbanking {
             }
 
             $eleccion = self::elegirRegistro($c['registros']);
-            $usado = $eleccion['usado'];
+            $respaldo = isset($respaldos[$clave]) ? $respaldos[$clave] : null;
+            $fuente = self::resolverSaldo($eleccion['usado'], $respaldo);
             $nombre = $banco['nombre'] . ' · ' . $c['nro_cuenta'];
 
-            if ($usado === null) {
+            if ($fuente === null && $leido) {
                 $avisos[] = Aviso::nuevo(Aviso::DANGER, $nombre . ': Interbanking nunca trajo su '
-                    . 'saldo contable, así que no suma al disponible.', self::SECCION);
-            } elseif ($eleccion['tapado']) {
+                    . 'saldo contable y no tiene carga manual de respaldo, así que no suma al '
+                    . 'disponible. Cargalo desde Saldos › Saldos.', self::SECCION);
+            } elseif ($fuente === self::ORIGEN_RESPALDO && $leido) {
+                // Se acusa la falla de la integracion mientras se usa el
+                // respaldo: es atencion, porque la plata esta, pero alguien
+                // tiene que ver por que BI no la trae.
+                $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Interbanking no trae el saldo contable '
+                    . 'de ' . $nombre . '; se usa la carga manual del '
+                    . self::diaMes($respaldo['FECHA_SALDO']) . '.', self::SECCION);
+            } elseif ($fuente === self::ORIGEN_INTERBANKING && $eleccion['tapado']) {
                 $avisos[] = Aviso::nuevo(Aviso::WARNING, $nombre . ': el registro del '
                     . self::diaMes($eleccion['mas_nuevo']['FECHA_OPERACION']) . ' vino sin saldo '
-                    . 'contable; se muestra el del ' . self::diaMes($usado['FECHA_OPERACION']) . '.',
-                    self::SECCION);
+                    . 'contable; se muestra el del '
+                    . self::diaMes($eleccion['usado']['FECHA_OPERACION']) . '.', self::SECCION);
             }
 
-            $filas[] = self::fila($clave, $c, $banco, $eleccion, $hoy);
+            $filas[] = self::fila($clave, $c, $banco, $eleccion, $respaldo, $fuente, $hoy);
         }
 
         foreach (array_keys($fueraDeTango) as $nro) {
@@ -508,9 +642,30 @@ class SaldosInterbanking {
      * Una fila bancaria, con las mismas claves que Saldos::filaSaldo() para
      * que la pestana, los totales y la serie la traten igual que a una cuenta
      * manual. 'cargada' en false es "sin dato": el saldo va null, no cero.
+     *
+     * 'respaldo' es el vigente aunque no se este usando: el dialogo lo muestra
+     * para reemplazarlo o quitarlo. 'interbanking' es lo que trajo BI, para
+     * el tooltip cuando manda el respaldo.
      */
-    private static function fila($clave, $c, $banco, $eleccion, $hoy) {
-        $usado = $eleccion['usado'];
+    private static function fila($clave, $c, $banco, $eleccion, $respaldo, $fuente, $hoy) {
+        $ib = $eleccion['usado'];
+
+        if ($fuente === self::ORIGEN_RESPALDO) {
+            $saldo = floatval($respaldo['SALDO_CONTABLE']);
+            $fecha = $respaldo['FECHA_SALDO'];
+            $cargadoEl = $respaldo['FECHA_ALTA'];
+            $cargadoPor = $respaldo['USUARIO_ALTA'];
+        } elseif ($fuente === self::ORIGEN_INTERBANKING) {
+            $saldo = floatval($ib['SALDO_CONTABLE']);
+            $fecha = $ib['FECHA_OPERACION'];
+            $cargadoEl = $ib['CREATED_AT'];
+            $cargadoPor = null;
+        } else {
+            $saldo = null;
+            $fecha = null;
+            $cargadoEl = null;
+            $cargadoPor = null;
+        }
 
         return [
             'id_cuenta' => null,
@@ -523,16 +678,26 @@ class SaldosInterbanking {
             'nro_cuenta' => $c['nro_cuenta'],
             'tipo_cuenta' => $c['tipo_cuenta'],
             'moneda' => $c['moneda'],
-            'origen' => ($usado === null) ? null : self::ORIGEN_INTERBANKING,
+            'origen' => $fuente,
             'origen_cuenta' => self::ORIGEN_INTERBANKING,
-            'cargada' => ($usado !== null),
-            'saldo' => ($usado === null) ? null : floatval($usado['SALDO_CONTABLE']),
-            'fecha_saldo' => ($usado === null) ? null : $usado['FECHA_OPERACION'],
-            'no_es_de_hoy' => self::noEsDeHoy(($usado === null) ? null : $usado['FECHA_OPERACION'], $hoy),
-            'fecha_carga' => ($usado === null) ? null : $usado['CREATED_AT'],
-            'usuario_carga' => null,
+            'cargada' => ($fuente !== null),
+            'saldo' => $saldo,
+            'fecha_saldo' => $fecha,
+            'no_es_de_hoy' => self::noEsDeHoy($fecha, $hoy),
+            'fecha_carga' => $cargadoEl,
+            'usuario_carga' => $cargadoPor,
             'ultimo_registro' => ($eleccion['mas_nuevo'] === null)
-                ? null : $eleccion['mas_nuevo']['FECHA_OPERACION']
+                ? null : $eleccion['mas_nuevo']['FECHA_OPERACION'],
+            'interbanking' => ($ib === null) ? null
+                : ['fecha' => $ib['FECHA_OPERACION'], 'saldo' => floatval($ib['SALDO_CONTABLE'])],
+            'respaldo' => ($respaldo === null) ? null : [
+                'id' => intval($respaldo['ID']),
+                'fecha_saldo' => $respaldo['FECHA_SALDO'],
+                'saldo' => floatval($respaldo['SALDO_CONTABLE']),
+                'observacion' => $respaldo['OBSERVACION'],
+                'usuario' => $respaldo['USUARIO_ALTA'],
+                'fecha_alta' => $respaldo['FECHA_ALTA']
+            ]
         ];
     }
 
@@ -584,8 +749,24 @@ class SaldosInterbanking {
                 self::SECCION);
         }
 
+        try {
+            $ctx['respaldos'] = $this->leerRespaldos();
+        } catch (Throwable $e) {
+            $ctx['respaldos'] = [];
+            $avisosExtra[] = Aviso::nuevo(Aviso::DANGER, 'No se pudieron leer los saldos '
+                . 'manuales de respaldo (' . $e->getMessage() . '): las cuentas que Interbanking '
+                . 'no trae no suman al disponible.', self::SECCION);
+        }
+
         $r = self::armarCuentasBancarias($ultimos, $ctx);
         $r['avisos'] = array_merge($avisosExtra, $r['avisos']);
+
+        // Lo que la pestana necesita para saber si puede ofrecer el respaldo.
+        try {
+            $r['respaldo_creado'] = $this->tablas()['manual'];
+        } catch (Throwable $e) {
+            $r['respaldo_creado'] = false;
+        }
 
         return $r;
     }
@@ -672,7 +853,7 @@ class SaldosInterbanking {
      * o no": cada una apaga una parte distinta de la pantalla, y la que existe
      * tiene que seguir funcionando aunque falte otra.
      *
-     * @return array ['banco' => bool]
+     * @return array ['banco' => bool, 'manual' => bool]
      */
     public function tablas() {
         if ($this->tablas !== null) {
@@ -680,7 +861,8 @@ class SaldosInterbanking {
         }
 
         $stmt = sqlsrv_query($this->conectar('central'),
-            "SELECT OBJECT_ID('dbo." . self::TABLA_BANCO . "', 'U') AS B");
+            "SELECT OBJECT_ID('dbo." . self::TABLA_BANCO . "', 'U') AS B,
+                    OBJECT_ID('dbo." . self::TABLA_MANUAL . "', 'U') AS M");
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al verificar las tablas de Interbanking'));
@@ -689,9 +871,48 @@ class SaldosInterbanking {
         $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
         sqlsrv_free_stmt($stmt);
 
-        $this->tablas = ['banco' => ($row && $row['B'] !== null)];
+        $this->tablas = [
+            'banco' => ($row && $row['B'] !== null),
+            'manual' => ($row && $row['M'] !== null)
+        ];
 
         return $this->tablas;
+    }
+
+    /**
+     * El respaldo VIGENTE de cada cuenta. Hay uno como maximo: lo garantiza
+     * el indice unico filtrado del script. Vacio sin el script.
+     *
+     * @return array Mapa clave de cuenta => fila
+     */
+    public function leerRespaldos() {
+        if (!$this->tablas()['manual']) {
+            return [];
+        }
+
+        $stmt = sqlsrv_query($this->conectar('central'),
+            "SELECT ID, NRO_BANCO, NRO_CUENTA, MONEDA, FECHA_SALDO, SALDO_CONTABLE, OBSERVACION,
+                    ID_REEMPLAZA, USUARIO_ALTA, FECHA_ALTA
+             FROM dbo." . self::TABLA_MANUAL . "
+             WHERE VIGENTE = 1");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer los saldos manuales de respaldo'));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $row['ID'] = intval($row['ID']);
+            $row['FECHA_SALDO'] = Horizonte::normalizarFecha($row['FECHA_SALDO']);
+            $row['SALDO_CONTABLE'] = floatval($row['SALDO_CONTABLE']);
+            $row['FECHA_ALTA'] = self::fechaHora($row['FECHA_ALTA']);
+            $v[self::claveCuenta($row['NRO_BANCO'], $row['NRO_CUENTA'], $row['MONEDA'])] = $row;
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $v;
     }
 
     /**
@@ -848,6 +1069,164 @@ class SaldosInterbanking {
         if (sqlsrv_query($cid, $sql, $params) === false) {
             throw new Exception($this->errorSql('Error al guardar el banco ' . $c['nro_banco']));
         }
+    }
+
+    /**
+     * Carga, o reemplaza, el respaldo manual de una cuenta de Interbanking.
+     *
+     * REEMPLAZAR NO ES UN UPDATE: da de baja el vigente (VIGENTE = 0, con
+     * usuario y fecha de baja) e inserta el nuevo apuntando al anterior por
+     * ID_REEMPLAZA, en UNA transaccion. Si solo insertara, el anterior seguiria
+     * vigente y una correccion con fecha anterior perderia contra el. El
+     * indice unico filtrado del script es la segunda red: dos vigentes de la
+     * misma cuenta no pueden existir.
+     *
+     * Se valida en el servidor que la cuenta exista -que venga en
+     * Interbanking o que ya tenga respaldo- y que su banco este activo: un
+     * banco inactivo no usa el respaldo, asi que cargarlo no tendria efecto y
+     * nada lo diria.
+     *
+     * @param array $datos ['nro_banco', 'nro_cuenta', 'moneda', 'fecha_saldo', 'saldo', 'observacion']
+     * @param string $usuario
+     * @param string|null $hoy 'Y-m-d'; null es hoy
+     * @return array ['id' => int, 'reemplaza' => int|null]
+     */
+    public function guardarRespaldo($datos, $usuario, $hoy = null) {
+        require_once __DIR__ . '/AuthCashflow.php';
+        require_once __DIR__ . '/Auditoria.php';
+
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
+        if (!$this->tablas()['manual']) {
+            throw new Exception('Todavía no existe la tabla de saldos manuales de respaldo: corré '
+                . self::SCRIPT . ' contra la base central.');
+        }
+
+        $d = self::validarRespaldo($datos, ($hoy === null) ? date('Y-m-d') : $hoy);
+        $clave = self::claveCuenta($d['nro_banco'], $d['nro_cuenta'], $d['moneda']);
+
+        if (!self::bancoActivo($d['nro_banco'], $this->leerBancos())) {
+            throw new Exception('El banco ' . $d['nro_banco'] . ' está inhabilitado: su saldo no se '
+                . 'usa, así que no se le carga un respaldo. Reactivalo en Parámetros › Saldos.');
+        }
+
+        $conocida = isset($this->leerRespaldos()[$clave]);
+
+        if (!$conocida) {
+            try {
+                $conocida = isset(self::agruparPorCuenta($this->leerUltimos())['cuentas'][$clave]);
+            } catch (Throwable $e) {
+                throw new Exception('No se pudo verificar la cuenta en Interbanking ('
+                    . $e->getMessage() . '): el respaldo no se guardó.');
+            }
+        }
+
+        if (!$conocida) {
+            throw new Exception('La cuenta ' . $d['nro_banco'] . ' · ' . $d['nro_cuenta'] . ' en '
+                . $d['moneda'] . ' no viene en Interbanking.');
+        }
+
+        $cid = $this->conectar('central');
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo iniciar la transacción'));
+        }
+
+        try {
+            // El vigente, bloqueado hasta el final: dos guardados simultaneos
+            // no pueden dar de baja el mismo y dejar dos nuevos.
+            $stmt = sqlsrv_query($cid,
+                "SELECT ID FROM dbo." . self::TABLA_MANUAL . " WITH (UPDLOCK, HOLDLOCK)
+                 WHERE NRO_BANCO = ? AND NRO_CUENTA = ? AND MONEDA = ? AND VIGENTE = 1",
+                [$d['nro_banco'], $d['nro_cuenta'], $d['moneda']]);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al leer el respaldo vigente'));
+            }
+
+            $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+            sqlsrv_free_stmt($stmt);
+            $anterior = $row ? intval($row['ID']) : null;
+
+            if ($anterior !== null) {
+                $ok = sqlsrv_query($cid,
+                    "UPDATE dbo." . self::TABLA_MANUAL . "
+                     SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
+                     WHERE ID = ? AND VIGENTE = 1",
+                    [$usuario, $usuario, $anterior]);
+
+                if ($ok === false) {
+                    throw new Exception($this->errorSql('Error al dar de baja el respaldo anterior'));
+                }
+            }
+
+            $stmt = sqlsrv_query($cid,
+                "INSERT INTO dbo." . self::TABLA_MANUAL . "
+                    (NRO_BANCO, NRO_CUENTA, MONEDA, FECHA_SALDO, SALDO_CONTABLE, OBSERVACION,
+                     VIGENTE, ID_REEMPLAZA, USUARIO_ALTA, USUARIO_MODIF)
+                 OUTPUT INSERTED.ID
+                 VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                [$d['nro_banco'], $d['nro_cuenta'], $d['moneda'], $d['fecha_saldo'], $d['saldo'],
+                 $d['observacion'], $anterior, $usuario, $usuario]);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al guardar el saldo manual'));
+            }
+
+            $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+            sqlsrv_free_stmt($stmt);
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar el saldo manual'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+            throw $e;
+        }
+
+        return ['id' => intval($row['ID']), 'reemplaza' => $anterior];
+    }
+
+    /**
+     * Quita el respaldo vigente: lo da de baja y no inserta nada. La fila
+     * queda, con quien y cuando la quito, como historial. Es lo que se hace
+     * cuando BI ya trae el dato y el respaldo sobra -aunque no hace falta: un
+     * Interbanking mas nuevo ya gana solo-, o cuando se cargo por error.
+     *
+     * @param int $id
+     * @param string $usuario
+     * @return bool
+     */
+    public function quitarRespaldo($id, $usuario) {
+        require_once __DIR__ . '/AuthCashflow.php';
+        require_once __DIR__ . '/Auditoria.php';
+
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
+        if (!$this->tablas()['manual']) {
+            throw new Exception('Todavía no existe la tabla de saldos manuales de respaldo: corré '
+                . self::SCRIPT . ' contra la base central.');
+        }
+
+        $stmt = sqlsrv_query($this->conectar('central'),
+            "UPDATE dbo." . self::TABLA_MANUAL . "
+             SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
+             WHERE ID = ? AND VIGENTE = 1",
+            [$usuario, $usuario, intval($id)]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al quitar el saldo manual'));
+        }
+
+        $filas = sqlsrv_rows_affected($stmt);
+        sqlsrv_free_stmt($stmt);
+
+        if ($filas !== 1) {
+            throw new Exception('Ese saldo manual ya no está vigente: alguien lo reemplazó o lo '
+                . 'quitó. Actualizá la pantalla.');
+        }
+
+        return true;
     }
 
     /* ====================================================================

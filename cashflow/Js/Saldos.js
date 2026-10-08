@@ -33,6 +33,11 @@
     var fondosPedidos = false;
     var modalMovimientos = null;
 
+    // El respaldo manual de una cuenta de Interbanking: el modal y la cuenta
+    // que tiene abierta (la fila del payload).
+    var modalRespaldo = null;
+    var respaldoFila = null;
+
     // Qué movimiento se está corrigiendo desde el formulario (null = alta).
     // Corregir no pisa: el servidor da de baja el anterior e inserta uno nuevo.
     var movReemplaza = null;
@@ -75,6 +80,29 @@
 
         if (selCuenta) {
             selCuenta.addEventListener('change', pintarMonedaMovimiento);
+        }
+
+        conectar('btnGuardarRespaldo', guardarRespaldo);
+        conectar('btnQuitarRespaldo', quitarRespaldo);
+
+        var modalResp = document.getElementById('modalRespaldo');
+
+        if (modalResp && window.bootstrap && bootstrap.Modal) {
+            modalRespaldo = new bootstrap.Modal(modalResp);
+        }
+
+        // Un solo listener para los botones de respaldo de todas las filas:
+        // la tabla se redibuja entera con cada filtro.
+        var cuerpoSaldos = document.getElementById('bodySaldos');
+
+        if (cuerpoSaldos) {
+            cuerpoSaldos.addEventListener('click', function(ev) {
+                var btn = ev.target.closest('.sal-btn-respaldo');
+
+                if (btn) {
+                    abrirRespaldo(btn.dataset.clave);
+                }
+            });
         }
 
         var modalEl = document.getElementById('modalMovimientos');
@@ -264,7 +292,8 @@
 
             html += '<tr data-cuenta="' + (f.id_cuenta || '') + '"' +
                     (clases.length ? ' class="' + clases.join(' ') + '"' : '') + '>';
-            html += '<td class="fw-semibold">' + escapar(f.nombre) + detalleCuenta(f) + '</td>';
+            html += '<td class="fw-semibold">' + escapar(f.nombre) + botonRespaldo(f) +
+                    detalleCuenta(f) + '</td>';
             html += '<td><span class="sal-badge">' + etiquetaTipo(f.tipo) + '</span></td>';
             html += '<td class="text-center">' + escapar(f.moneda) + '</td>';
 
@@ -272,9 +301,7 @@
             // que "esta cuenta tiene cero pesos".
             html += '<td class="text-end sal-saldo">' + celdaSaldo(f, consulta) + '</td>';
             html += '<td class="text-center">' + celdaFechaSaldo(f) + '</td>';
-            html += '<td class="text-center"><span class="sal-origen">' +
-                    etiquetaOrigen(consulta ? 'CONSULTA' : (f.origen_dato || 'MANUAL')) +
-                    '</span></td>';
+            html += '<td class="text-center">' + celdaOrigen(f, consulta) + '</td>';
 
             // La fecha de carga de CADA dato, que es la regla transversal del
             // relevamiento: sirve para ver cuál es la última actualización.
@@ -353,6 +380,171 @@
         }
 
         return html;
+    }
+
+    /**
+     * La celda Origen. Un respaldo dice "Manual (respaldo)" y el tooltip
+     * cuenta quién lo cargó, cuándo y por qué, y qué trae Interbanking: es lo
+     * que explica por qué esa cuenta no muestra el dato de la integración.
+     */
+    function celdaOrigen(f, consulta) {
+        var origen = consulta ? 'CONSULTA'
+            : (esInterbanking(f) ? (f.origen || 'INTERBANKING') : (f.origen_dato || 'MANUAL'));
+        var titulo = '';
+
+        if (f.origen === 'RESPALDO' && f.respaldo) {
+            titulo = 'Cargado a mano' +
+                (f.respaldo.usuario ? ' por ' + Auditoria.quien(f.respaldo.usuario) : '') +
+                (f.respaldo.fecha_alta ? ' el ' + fechaHora(f.respaldo.fecha_alta) : '') +
+                (f.respaldo.observacion ? ' · ' + f.respaldo.observacion : '') +
+                '. Interbanking: ' + (f.interbanking
+                    ? importe(f.interbanking.saldo, f.moneda) + ' del ' + fecha(f.interbanking.fecha)
+                    : 'sin saldo contable') + '.';
+        }
+
+        return '<span class="sal-origen"' + (titulo ? ' title="' + escapar(titulo) + '"' : '') + '>' +
+               etiquetaOrigen(origen) + '</span>';
+    }
+
+    /**
+     * El botón "Cargar saldo manual" de una cuenta de Interbanking. Sólo si se
+     * puede editar y si existe la tabla del respaldo; las filas que llegan son
+     * todas de bancos activos (las de uno inactivo no vienen). No se dibuja
+     * durante una carga: son dos cosas distintas.
+     */
+    function botonRespaldo(f) {
+        if (!esInterbanking(f) || enCarga || !datosSaldos.respaldo_creado
+            || !Permisos.puedeEditar('bodySaldos')) {
+            return '';
+        }
+
+        return ' <button type="button" class="btn btn-link btn-sm p-0 ms-1 sal-btn-respaldo" ' +
+               'data-clave="' + escapar(f.clave) + '" title="Cargar saldo manual: para cuando ' +
+               'Interbanking no trae el saldo contable de esta cuenta">' +
+               '<i class="fas fa-hand-holding-dollar"></i></button>';
+    }
+
+    /** Abre el diálogo del respaldo de una cuenta, con el vigente si lo tiene */
+    function abrirRespaldo(clave) {
+        var f = ((datosSaldos && datosSaldos.filas) || []).filter(function(x) {
+            return x.clave === clave;
+        })[0];
+
+        if (!f || !modalRespaldo) {
+            return;
+        }
+
+        respaldoFila = f;
+
+        var hoy = hoyLocal();
+        var r = f.respaldo;
+
+        texto('respaldoCuenta', f.nombre);
+        texto('respaldoMoneda', f.moneda);
+        texto('respaldoInterbanking', f.interbanking
+            ? 'Interbanking: ' + importe(f.interbanking.saldo, f.moneda) + ' del ' +
+              fecha(f.interbanking.fecha) + '.'
+            : 'Interbanking no trae ningún saldo contable de esta cuenta.');
+
+        var vigente = document.getElementById('respaldoVigente');
+
+        if (r) {
+            vigente.innerHTML = '<small><strong>Respaldo vigente:</strong> ' +
+                escapar(importe(r.saldo, f.moneda)) + ' del ' + escapar(fecha(r.fecha_saldo)) +
+                (r.usuario ? ', cargado por ' + escapar(Auditoria.quien(r.usuario)) : '') +
+                (r.fecha_alta ? ' el ' + escapar(fechaHora(r.fecha_alta)) : '') +
+                (r.observacion ? ' · ' + escapar(r.observacion) : '') +
+                '. Guardar lo reemplaza; el anterior queda en el historial.</small>';
+        }
+
+        mostrar('respaldoVigente', !!r);
+        mostrar('btnQuitarRespaldo', !!r, 'inline-block');
+
+        var inputFecha = document.getElementById('respaldoFecha');
+        inputFecha.max = hoy;
+        inputFecha.value = hoy;
+        document.getElementById('respaldoSaldo').value = '';
+        document.getElementById('respaldoObservacion').value = '';
+
+        modalRespaldo.show();
+    }
+
+    /**
+     * Hoy en la zona del navegador, 'Y-m-d'. Sólo para proponer la fecha y
+     * topear el selector: quien decide si la fecha es futura es el servidor.
+     */
+    function hoyLocal() {
+        var d = new Date();
+
+        return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' +
+               ('0' + d.getDate()).slice(-2);
+    }
+
+    function guardarRespaldo() {
+        if (!respaldoFila) {
+            return;
+        }
+
+        var saldo = document.getElementById('respaldoSaldo').value.trim();
+        var fechaSaldo = document.getElementById('respaldoFecha').value;
+
+        // El servidor lo vuelve a rechazar: esto sólo explica antes de mandar.
+        if (saldo === '' || !fechaSaldo) {
+            Notificacion.advertencia('El saldo manual necesita fecha e importe.');
+            return;
+        }
+
+        if (fechaSaldo > hoyLocal()) {
+            Notificacion.advertencia('La fecha del saldo no puede ser posterior a hoy.');
+            return;
+        }
+
+        conBoton('btnGuardarRespaldo', function() {
+            return pedirJson(URL_SALDOS + '?action=guardarRespaldoBanco', {
+                nro_banco: respaldoFila.nro_banco,
+                nro_cuenta: respaldoFila.nro_cuenta,
+                moneda: respaldoFila.moneda,
+                fecha_saldo: fechaSaldo,
+                saldo: saldo,
+                observacion: document.getElementById('respaldoObservacion').value
+            }).then(function() {
+                Notificacion.exito('Saldo manual guardado.');
+                modalRespaldo.hide();
+                cargarSaldos();
+            });
+        }, 'No se pudo guardar el saldo manual');
+    }
+
+    function quitarRespaldo() {
+        var f = respaldoFila;
+
+        if (!f || !f.respaldo) {
+            return;
+        }
+
+        Notificacion.confirmar({
+            titulo: 'Quitar el saldo manual',
+            mensaje: '¿Quitar el saldo manual de ' + f.nombre + ' (' +
+                importe(f.respaldo.saldo, f.moneda) + ' del ' + fecha(f.respaldo.fecha_saldo) + ')?',
+            detalle: 'No se borra: queda en el historial, dado de baja. Si Interbanking no trae ' +
+                'el saldo contable, la cuenta queda sin dato y no suma al disponible.',
+            confirmar: 'Quitar',
+            peligro: true
+        }).then(function(ok) {
+            if (!ok) {
+                return;
+            }
+
+            pedirJson(URL_SALDOS + '?action=quitarRespaldoBanco', { id: f.respaldo.id })
+                .then(function() {
+                    Notificacion.exito('Saldo manual quitado.');
+                    modalRespaldo.hide();
+                    cargarSaldos();
+                })
+                .catch(function(error) {
+                    Notificacion.error('No se pudo quitar el saldo manual: ' + error.message);
+                });
+        });
     }
 
     /** Si la fila es una cuenta de Interbanking y no del catálogo manual */
@@ -1351,6 +1543,8 @@
 
     function etiquetaOrigen(origen) {
         var origenes = {
+            'INTERBANKING': 'Interbanking',
+            'RESPALDO': 'Manual (respaldo)',
             'API': 'Interbanking',
             'MANUAL': 'Manual',
             'CONSULTA': 'Consulta'

@@ -1891,7 +1891,7 @@ class Saldos {
      * vienen por Interbanking. Una falla de Interbanking no las toca.
      *
      * @param string $hoy 'Y-m-d'. El del eje en el tablero, el del dia en la pestana.
-     * @return array ['filas' => [...], 'avisos' => [Aviso]]
+     * @return array ['filas' => [...], 'avisos' => [Aviso], 'respaldo_creado' => bool]
      */
     public function getFilasDisponible($hoy) {
         $filas = $this->tablasCreadas() ? $this->getSaldosActuales() : [];
@@ -1900,7 +1900,8 @@ class Saldos {
 
         return [
             'filas' => array_merge($filas, $bancarias['filas']),
-            'avisos' => $bancarias['avisos']
+            'avisos' => $bancarias['avisos'],
+            'respaldo_creado' => !empty($bancarias['respaldo_creado'])
         ];
     }
 
@@ -2619,6 +2620,12 @@ class Saldos {
             $avisos[] = $a;
         }
 
+        // Sin la tabla del respaldo la accion no se dibuja: se dice por que.
+        if (!$disponible['respaldo_creado']) {
+            $avisos[] = 'Todavía no se puede cargar a mano el saldo de una cuenta de Interbanking '
+                . 'que no trae dato: corré sql/cashflow_saldos_interbanking.sql contra la base central.';
+        }
+
         $cargas = $this->getCargas(self::CARGA_SALDOS);
         $ultima = self::ultimaCarga($cargas);
 
@@ -2680,6 +2687,7 @@ class Saldos {
                 ];
             }, $cargas),
             'efectivo_central' => $efectivo,
+            'respaldo_creado' => $disponible['respaldo_creado'],
             'avisos' => $avisos
         ];
     }

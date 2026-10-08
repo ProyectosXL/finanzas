@@ -205,6 +205,69 @@ $edita = AuthCashflow::puedeEditar('saldos');
                 </div>
             </div>
         </div>
+
+        <?php if ($edita): ?>
+        <!-- Respaldo manual de una cuenta de Interbanking. Para cuando la
+             integración no trae el saldo contable: se carga a mano y se usa
+             mientras Interbanking no traiga uno igual o más nuevo. Reemplazar
+             da de baja el anterior; quitar también: nada se borra. La
+             validación que vale es la del servidor. -->
+        <div class="modal fade" id="modalRespaldo" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h6 class="modal-title">
+                            <i class="fas fa-hand-holding-dollar me-1"></i>
+                            Saldo manual de <span id="respaldoCuenta"></span>
+                        </h6>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                aria-label="Cerrar"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="sal-subtitulo mb-2" id="respaldoInterbanking"></div>
+                        <div class="alert alert-secondary py-2 px-3 mb-3" id="respaldoVigente"
+                             style="display: none;"></div>
+                        <div class="row g-2">
+                            <div class="col-md-5">
+                                <label class="form-label form-label-sm" for="respaldoFecha">Fecha del saldo</label>
+                                <input type="date" id="respaldoFecha" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-md-7">
+                                <label class="form-label form-label-sm" for="respaldoSaldo">
+                                    Saldo contable (<span id="respaldoMoneda">ARS</span>)
+                                </label>
+                                <input type="number" step="0.01" id="respaldoSaldo"
+                                       class="form-control form-control-sm text-end">
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label form-label-sm" for="respaldoObservacion">Observación</label>
+                                <input type="text" id="respaldoObservacion" class="form-control form-control-sm"
+                                       maxlength="500" placeholder="Opcional: de dónde salió el saldo">
+                            </div>
+                        </div>
+                        <div class="param-hint mt-2">
+                            Se usa mientras Interbanking no traiga un saldo contable de la misma
+                            fecha o más nuevo: a igual fecha manda Interbanking.
+                        </div>
+                    </div>
+                    <div class="modal-footer justify-content-between">
+                        <button type="button" id="btnQuitarRespaldo" class="btn btn-sm btn-outline-danger"
+                                style="display: none;">
+                            <i class="fas fa-trash-can me-1"></i> Quitar respaldo
+                        </button>
+                        <div class="d-flex gap-2 ms-auto">
+                            <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">
+                                Cancelar
+                            </button>
+                            <button type="button" id="btnGuardarRespaldo" class="btn btn-sm btn-primary">
+                                <i class="fas fa-floppy-disk me-1"></i> Guardar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
 
     <!-- ============================================================

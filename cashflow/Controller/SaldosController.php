@@ -122,6 +122,46 @@ try {
             break;
 
         /* ============================================================
+           RESPALDO MANUAL DE UNA CUENTA DE INTERBANKING
+
+           La validacion es de la clase: fecha no posterior a hoy, importe
+           obligatorio, cuenta que exista y banco activo. Aca solo se pasa lo
+           que mando el cliente.
+           ============================================================ */
+
+        case 'guardarRespaldoBanco':
+            require_once __DIR__ . '/../Class/SaldosInterbanking.php';
+
+            $r = (new SaldosInterbanking())->guardarRespaldo(bodyJson(), $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => ($r['reemplaza'] === null)
+                    ? 'Saldo manual guardado. Se usa mientras Interbanking no traiga uno igual o '
+                      . 'más nuevo.'
+                    : 'Saldo manual reemplazado. El anterior queda en el historial.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'quitarRespaldoBanco':
+            $data = bodyJson();
+
+            if (!isset($data['id'])) {
+                throw new Exception('Falta el saldo manual a quitar');
+            }
+
+            require_once __DIR__ . '/../Class/SaldosInterbanking.php';
+
+            (new SaldosInterbanking())->quitarRespaldo($data['id'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Saldo manual quitado. Queda en el historial, dado de baja.'
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ============================================================
            PESTANA 3: FONDOS
            ============================================================ */
 

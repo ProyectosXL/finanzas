@@ -201,7 +201,11 @@ class AuthCashflow {
             'guardarCargaSaldos' => [['saldos', null]],
             'guardarCargaLocales' => [['saldos', null]],
             'guardarMovimientoFondo' => [['saldos', null]],
-            'bajaMovimientoFondo' => [['saldos', null]]
+            'bajaMovimientoFondo' => [['saldos', null]],
+            // El respaldo manual de una cuenta de Interbanking es una carga de
+            // saldo como Nueva carga: el mismo permiso.
+            'guardarRespaldoBanco' => [['saldos', null]],
+            'quitarRespaldoBanco' => [['saldos', null]]
         ],
         'Tarjetas' => [
             'vincularFacturas' => [['pagos_tarjetas', null]],

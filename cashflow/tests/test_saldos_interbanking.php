@@ -409,3 +409,154 @@ chequear('el aviso de carga vieja dice que es la manual', true, ibContiene(
     implode(' ', Saldos::avisosAntiguedad('2026-09-01', 7, IB_HOY)), 'última carga manual'));
 chequear('y nombra lo que se carga a mano', true, ibContiene(
     implode(' ', Saldos::avisosAntiguedad('2026-09-01', 7, IB_HOY)), 'bancos manuales'));
+
+// ============================================================================
+seccion('respaldo manual: que saldo se usa');
+// ============================================================================
+
+/** Un respaldo vigente, como lo devuelve leerRespaldos() */
+function ibResp($id, $fecha, $saldo, $banco = '014', $cuenta = '200', $moneda = 'ARS') {
+    return ['ID' => $id, 'NRO_BANCO' => $banco, 'NRO_CUENTA' => $cuenta, 'MONEDA' => $moneda,
+            'FECHA_SALDO' => $fecha, 'SALDO_CONTABLE' => $saldo, 'OBSERVACION' => 'del extracto',
+            'ID_REEMPLAZA' => null, 'USUARIO_ALTA' => 'tesoreria', 'FECHA_ALTA' => $fecha . ' 09:00:00'];
+}
+
+$ibViejo = ['FECHA_OPERACION' => '2026-10-06'];
+$ibHoy = ['FECHA_OPERACION' => IB_HOY];
+
+chequear('sin Interbanking, el respaldo',
+    'RESPALDO', SaldosInterbanking::resolverSaldo(null, ibResp(1, '2026-10-07', 5.0)));
+chequear('un respaldo mas nuevo gana a un Interbanking viejo',
+    'RESPALDO', SaldosInterbanking::resolverSaldo($ibViejo, ibResp(1, '2026-10-07', 5.0)));
+chequear('un Interbanking mas nuevo gana al respaldo',
+    'INTERBANKING', SaldosInterbanking::resolverSaldo($ibHoy, ibResp(1, '2026-10-07', 5.0)));
+chequear('a igual fecha gana Interbanking',
+    'INTERBANKING', SaldosInterbanking::resolverSaldo($ibHoy, ibResp(1, IB_HOY, 5.0)));
+chequear('sin ninguno de los dos, nada', null, SaldosInterbanking::resolverSaldo(null, null));
+
+$conResp = SaldosInterbanking::armarCuentasBancarias($ultimos, ['hoy' => IB_HOY, 'tango' => $tangoIb,
+    'respaldos' => ['014|200|ARS' => ibResp(9, IB_HOY, 35000000.0)]]);
+$porClave = [];
+
+foreach ($conResp['filas'] as $f) {
+    $porClave[$f['clave']] = $f;
+}
+
+$prov = $porClave['014|200|ARS'];
+chequear('sin dato de Interbanking se usa el respaldo', 35000000.0, $prov['saldo']);
+chequear('con origen RESPALDO', 'RESPALDO', $prov['origen']);
+chequear('y suma: queda cargada', true, $prov['cargada']);
+chequear('"cargado el" es el alta del respaldo', IB_HOY . ' 09:00:00', $prov['fecha_carga']);
+chequear('y se sabe quien lo cargo', 'tesoreria', $prov['usuario_carga']);
+chequear('la falla de la integracion se acusa en atencion',
+    true, ibContiene(ibAvisos($conResp['avisos'], Aviso::WARNING),
+        'Interbanking no trae el saldo contable de PROVINCIA DE BS.AS. · 200; se usa la carga '
+        . 'manual del 08/10'));
+chequear('y ya no hay critico por esa cuenta',
+    false, ibContiene(ibAvisos($conResp['avisos'], Aviso::DANGER), 'PROVINCIA'));
+chequear('el respaldo vigente viaja en la fila para el dialogo', 9, $prov['respaldo']['id']);
+
+// Interbanking mas nuevo: el respaldo queda en la fila pero no se usa
+$respViejo = SaldosInterbanking::armarCuentasBancarias($ultimos, ['hoy' => IB_HOY, 'tango' => $tangoIb,
+    'respaldos' => ['007|100|ARS' => ibResp(3, '2026-10-07', 1.0, '007', '100')]]);
+$porClave = [];
+
+foreach ($respViejo['filas'] as $f) {
+    $porClave[$f['clave']] = $f;
+}
+
+chequear('con Interbanking de hoy, el respaldo de ayer no se usa',
+    1000.0, $porClave['007|100|ARS']['saldo']);
+chequear('pero se sigue mostrando en el dialogo', 3, $porClave['007|100|ARS']['respaldo']['id']);
+chequear('y no avisa falla de integracion',
+    false, ibContiene(ibAvisos($respViejo['avisos']), 'no trae el saldo contable de DE GALICIA'));
+
+$inactivoResp = SaldosInterbanking::armarCuentasBancarias($ultimos, ['hoy' => IB_HOY,
+    'tango' => $tangoIb, 'bancos' => ['014' => ['ALIAS' => null, 'ACTIVO' => 0]],
+    'respaldos' => ['014|200|ARS' => ibResp(9, IB_HOY, 35000000.0)]]);
+chequear('un banco inactivo no usa el respaldo',
+    false, in_array('014|200|ARS', array_column($inactivoResp['filas'], 'clave'), true));
+
+$caidaResp = SaldosInterbanking::armarCuentasBancarias(null, ['hoy' => IB_HOY, 'tango' => $tangoIb,
+    'respaldos' => ['014|200|ARS' => ibResp(9, IB_HOY, 35000000.0)]]);
+chequear('con la lectura caida el respaldo sigue entrando', 35000000.0, $caidaResp['filas'][0]['saldo']);
+chequear('y el critico de la lectura sigue', true,
+    ibContiene(ibAvisos($caidaResp['avisos'], Aviso::DANGER), 'No se pudieron leer los saldos bancarios'));
+chequear('sin avisos por cuenta: el critico ya lo dice', 1, count($caidaResp['avisos']));
+
+$soloResp = SaldosInterbanking::armarCuentasBancarias([], ['hoy' => IB_HOY, 'tango' => $tangoIb,
+    'respaldos' => ['014|999|ARS' => ibResp(4, IB_HOY, 10.0, '014', '999')]]);
+chequear('una cuenta con respaldo que BI dejo de traer se sigue mostrando',
+    10.0, $soloResp['filas'][0]['saldo']);
+
+$respVie = SaldosInterbanking::armarCuentasBancarias([], ['hoy' => IB_HOY, 'tango' => $tangoIb,
+    'respaldos' => ['014|200|ARS' => ibResp(4, '2026-10-05', 10.0)]]);
+chequear('"no es de hoy" aplica igual al respaldo', true, $respVie['filas'][0]['no_es_de_hoy']);
+
+$d = Saldos::armarSerieDisponible($respVie['filas'], $hIb);
+chequear('un respaldo viejo va a la primera columna con WARNING, no DANGER',
+    'warning', implode(',', array_map(function ($a) { return $a['nivel']; }, $d['avisos_con_nivel'])));
+
+// ============================================================================
+seccion('respaldo manual: validacion');
+// ============================================================================
+
+$respOk = ['nro_banco' => '014', 'nro_cuenta' => '200', 'moneda' => 'ars',
+           'fecha_saldo' => IB_HOY, 'saldo' => '35000000.5', 'observacion' => '  '];
+$v = SaldosInterbanking::validarRespaldo($respOk, IB_HOY);
+
+chequear('un respaldo de hoy se acepta', 35000000.5, $v['saldo']);
+chequear('la moneda va en mayusculas', 'ARS', $v['moneda']);
+chequear('una observacion vacia va null', null, $v['observacion']);
+chequear('un saldo negativo (descubierto) se acepta', -10.0,
+    SaldosInterbanking::validarRespaldo(array_merge($respOk, ['saldo' => '-10']), IB_HOY)['saldo']);
+
+chequearLanza('no se acepta una fecha futura', function () use ($respOk) {
+    SaldosInterbanking::validarRespaldo(array_merge($respOk, ['fecha_saldo' => '2026-10-09']), IB_HOY);
+});
+chequearLanza('ni un importe vacio', function () use ($respOk) {
+    SaldosInterbanking::validarRespaldo(array_merge($respOk, ['saldo' => '']), IB_HOY);
+});
+chequearLanza('ni un importe que no es numero', function () use ($respOk) {
+    SaldosInterbanking::validarRespaldo(array_merge($respOk, ['saldo' => 'mucho']), IB_HOY);
+});
+chequearLanza('ni una fecha invalida', function () use ($respOk) {
+    SaldosInterbanking::validarRespaldo(array_merge($respOk, ['fecha_saldo' => '2026-02-30']), IB_HOY);
+});
+chequearLanza('ni una observacion de mas de 500 caracteres', function () use ($respOk) {
+    SaldosInterbanking::validarRespaldo(array_merge($respOk, ['observacion' => str_repeat('x', 501)]), IB_HOY);
+});
+chequearLanza('ni sin cuenta', function () use ($respOk) {
+    SaldosInterbanking::validarRespaldo(array_merge($respOk, ['nro_cuenta' => ' ']), IB_HOY);
+});
+
+// ============================================================================
+seccion('respaldo manual: el historial no se borra');
+// ============================================================================
+
+preg_match('/function guardarRespaldo\(.*?\n    }\n/s', $srcIb, $m);
+$guardarResp = isset($m[0]) ? $m[0] : '';
+preg_match('/function quitarRespaldo\(.*?\n    }\n/s', $srcIb, $m);
+$quitarResp = isset($m[0]) ? $m[0] : '';
+
+chequear('reemplazar da de baja el vigente con usuario y fecha',
+    true, ibContiene($guardarResp, 'SET VIGENTE = 0, " . Auditoria::SET_BAJA'));
+chequear('e inserta el nuevo apuntando al anterior', true, ibContiene($guardarResp, 'ID_REEMPLAZA'));
+chequear('todo en una transaccion',
+    true, ibContiene($guardarResp, 'sqlsrv_begin_transaction') && ibContiene($guardarResp, 'sqlsrv_rollback'));
+chequear('quitar da de baja', true, ibContiene($quitarResp, 'SET VIGENTE = 0, " . Auditoria::SET_BAJA'));
+chequear('ninguna de las dos borra', false, (bool) preg_match('/DELETE/i', $guardarResp . $quitarResp));
+chequear('las dos validan el usuario de escritura', true,
+    ibContiene($guardarResp, 'usuarioDeEscritura') && ibContiene($quitarResp, 'usuarioDeEscritura'));
+chequear('el guardado rechaza un banco inactivo', true, ibContiene($guardarResp, 'bancoActivo('));
+
+$sqlIb = file_get_contents(__DIR__ . '/../sql/cashflow_saldos_interbanking.sql');
+chequear('el script deja un solo respaldo vigente por cuenta', true,
+    (bool) preg_match('/CREATE UNIQUE NONCLUSTERED INDEX UX_RO_T_CASHFLOW_SALDOS_BANCO_MANUAL_VIGENTE\s+'
+        . 'ON dbo\.RO_T_CASHFLOW_SALDOS_BANCO_MANUAL \(NRO_BANCO, NRO_CUENTA, MONEDA\)\s+WHERE VIGENTE = 1/',
+        $sqlIb));
+
+$authSrc = file_get_contents(__DIR__ . '/../Class/AuthCashflow.php');
+chequear('las acciones del respaldo piden el permiso de carga de saldos', true,
+    ibContiene($authSrc, "'guardarRespaldoBanco' => [['saldos', null]]")
+    && ibContiene($authSrc, "'quitarRespaldoBanco' => [['saldos', null]]"));
