@@ -172,9 +172,10 @@ $edita = AuthCashflow::puedeEditar('saldos');
                     <small>
                         <i class="fas fa-circle-info me-1"></i>
                         El <strong>efectivo de tesorería</strong> no se tipea: lo vuelve a leer el
-                        sistema de su consulta al guardar. Los saldos bancarios y de Mercado Pago
-                        se cargan a mano; el formulario se mantiene aunque más adelante entre la
-                        API de Interbanking, como respaldo ante una falla de la integración.
+                        sistema de su consulta al guardar. Acá se cargan Mercado Pago, los otros
+                        saldos y los <strong>bancos que no vienen por Interbanking</strong>. Las
+                        cuentas de Interbanking no son de esta carga: si una no trae el saldo
+                        contable, se carga a mano desde su fila, con el botón de saldo manual.
                     </small>
                 </div>
                 <label class="form-label form-label-sm">Observaciones de la carga</label>

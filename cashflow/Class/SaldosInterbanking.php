@@ -96,6 +96,13 @@ class SaldosInterbanking {
     /** El script que crea las tablas propias de esta clase */
     const SCRIPT = 'sql/cashflow_saldos_interbanking.sql';
 
+    /**
+     * La constancia de que se borraron las cuentas bancarias manuales que
+     * pasaron a Interbanking. La crea, en modo real, SCRIPT_DEPURACION.
+     */
+    const TABLA_DEPURACION = 'RO_T_CASHFLOW_SALDOS_DEPURACION';
+    const SCRIPT_DEPURACION = 'sql/cashflow_saldos_borrar_bancos_manuales.sql';
+
     /** @var Conexion */
     private $conn;
 
@@ -443,6 +450,22 @@ class SaldosInterbanking {
     }
 
     /**
+     * El aviso de cuando todavia no se corrio la depuracion de las cuentas
+     * bancarias manuales. Ver getCuentasBancarias().
+     *
+     * Es critico: mientras tanto el disponible lleva los saldos manuales
+     * viejos de los bancos y no los de Interbanking.
+     *
+     * @return array Aviso
+     */
+    public static function avisoSinDepurar() {
+        return Aviso::nuevo(Aviso::DANGER, 'Los saldos bancarios todavía no se leen de Interbanking: '
+            . 'falta correr ' . self::SCRIPT_DEPURACION . ' contra la base central. Hasta entonces '
+            . 'los bancos salen de la carga manual, para no sumar dos veces el mismo banco.',
+            self::SECCION);
+    }
+
+    /**
      * Agrupa por cuenta lo que devolvio leerUltimos().
      *
      * Las cuentas sin moneda quedan aparte: no tienen clave valida, y se
@@ -711,10 +734,34 @@ class SaldosInterbanking {
      * Nunca lanza: una falla de lectura de BI es un aviso critico y cero filas
      * de Interbanking, no una pestana caida.
      *
+     * SIN LA CONSTANCIA DE DEPURACION NO SE LEE INTERBANKING. El catalogo de
+     * cuentas manuales no tiene NRO_BANCO, asi que el codigo no puede saber si
+     * una cuenta manual TIPO 'BANCO' es un banco que ya viene por Interbanking:
+     * si se leyeran los dos, ese banco sumaria dos veces. Mientras no se corra
+     * SCRIPT_DEPURACION en modo real -que borra esas cuentas y deja la
+     * constancia- todo sigue como antes, con las cuentas manuales, y un aviso
+     * critico dice que falta. Asi el orden en que se publiquen el codigo y el
+     * script no puede inflar el disponible.
+     *
      * @param string $hoy 'Y-m-d'
-     * @return array ['filas' => [...], 'avisos' => [Aviso]]
+     * @return array ['filas' => [...], 'avisos' => [Aviso], 'respaldo_creado' => bool,
+     *               'depurado' => bool]
      */
     public function getCuentasBancarias($hoy) {
+        try {
+            $depurado = $this->depurado();
+        } catch (Throwable $e) {
+            return ['filas' => [], 'respaldo_creado' => false, 'depurado' => false,
+                    'avisos' => [Aviso::nuevo(Aviso::DANGER, 'No se pudo verificar si ya se '
+                        . 'depuraron las cuentas bancarias manuales (' . $e->getMessage() . '): '
+                        . 'los saldos de Interbanking no se incluyen.', self::SECCION)]];
+        }
+
+        if (!$depurado) {
+            return ['filas' => [], 'avisos' => [self::avisoSinDepurar()], 'respaldo_creado' => false,
+                    'depurado' => false];
+        }
+
         $ctx = ['hoy' => substr((string) $hoy, 0, 10), 'tango' => [], 'error' => null];
         $ultimos = null;
 
@@ -768,7 +815,44 @@ class SaldosInterbanking {
             $r['respaldo_creado'] = false;
         }
 
+        $r['depurado'] = true;
+
         return $r;
+    }
+
+    /**
+     * Si ya se corrio la depuracion en modo real: la tabla existe y tiene al
+     * menos una constancia. La tabla vacia no cuenta: la crea el script justo
+     * antes de borrar, y vacia significaria que el borrado no termino.
+     *
+     * @return bool
+     */
+    public function depurado() {
+        $cid = $this->conectar('central');
+        $stmt = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo." . self::TABLA_DEPURACION . "', 'U') AS T");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar la depuración'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        if (!$row || $row['T'] === null) {
+            return false;
+        }
+
+        $stmt = sqlsrv_query($cid, "SELECT TOP 1 ID FROM dbo." . self::TABLA_DEPURACION);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer la constancia de depuración'));
+        }
+
+        $hay = is_array(sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC));
+        sqlsrv_free_stmt($stmt);
+
+        return $hay;
     }
 
     /**
@@ -1100,6 +1184,11 @@ class SaldosInterbanking {
         if (!$this->tablas()['manual']) {
             throw new Exception('Todavía no existe la tabla de saldos manuales de respaldo: corré '
                 . self::SCRIPT . ' contra la base central.');
+        }
+
+        // Sin depurar, Interbanking no se lee y el respaldo no tendria efecto.
+        if (!$this->depurado()) {
+            throw new Exception(self::avisoSinDepurar()['texto']);
         }
 
         $d = self::validarRespaldo($datos, ($hoy === null) ? date('Y-m-d') : $hoy);

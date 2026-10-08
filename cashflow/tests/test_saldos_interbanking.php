@@ -591,3 +591,61 @@ $t = Saldos::totalesPorMoneda($mixto);
 chequear('el banco manual en USD entra al tablero con su cotizacion',
     71000.0 * 1400.0 + 1000.0, $d['serie']['dias'][IB_HOY]);
 chequear('y la pestana lo muestra en dolares, sin convertir', 71000.0, $t['USD']['total']);
+
+// ============================================================================
+seccion('el script de borrado de las cuentas bancarias manuales');
+// ============================================================================
+
+$sqlBorrar = file_get_contents(__DIR__ . '/../sql/cashflow_saldos_borrar_bancos_manuales.sql');
+
+chequear('arranca en simulacion', true, (bool) preg_match('/DECLARE @SIMULAR BIT = 1;/', $sqlBorrar));
+chequear('la simulacion corta antes de crear o borrar nada', true,
+    strpos($sqlBorrar, 'IF @SIMULAR = 1') < strpos($sqlBorrar, 'CREATE TABLE dbo.')
+    && strpos($sqlBorrar, 'IF @SIMULAR = 1') < strpos($sqlBorrar, 'DELETE D'));
+chequear('@CONSERVAR trae BTG Uy por defecto', true, ibContiene($sqlBorrar, "('BTG Uy')"));
+chequear('lo que esta en @CONSERVAR no entra en lo que se borra', true,
+    (bool) preg_match("/WHERE C\.TIPO = 'BANCO'\s+AND NOT EXISTS \(SELECT 1 FROM @CONSERVAR K/", $sqlBorrar));
+chequear('se puede conservar por nombre o por ID', true,
+    ibContiene($sqlBorrar, 'K.VALOR = C.NOMBRE OR K.VALOR = CAST(C.ID AS VARCHAR(12))'));
+chequear('no nombra ningun otro tipo de cuenta', false,
+    (bool) preg_match("/EFECTIVO_CENTRAL|MERCADO_PAGO|'OTRO'/", $sqlBorrar));
+chequear('el borrado de cuentas vuelve a filtrar TIPO = BANCO', true,
+    (bool) preg_match("/DELETE C\s+FROM dbo\.RO_T_CASHFLOW_SALDOS_CUENTA C\s+WHERE C\.ID IN \(SELECT ID FROM #BORRAR\)\s+AND C\.TIPO = 'BANCO'/", $sqlBorrar));
+chequear('busca aplicaciones de cobertura CTA_<id>', true,
+    ibContiene($sqlBorrar, "SELECT ''CTA_'' + CAST(B.ID AS VARCHAR(12)) FROM #BORRAR B"));
+chequear('y toda FK al catalogo salvo la del detalle', true,
+    ibContiene($sqlBorrar, "FKC.referenced_object_id = OBJECT_ID('dbo.RO_T_CASHFLOW_SALDOS_CUENTA')")
+    && ibContiene($sqlBorrar, "FKC.parent_object_id <> OBJECT_ID('dbo.RO_T_CASHFLOW_SALDOS_DETALLE')"));
+chequear('con referencias aborta antes de la simulacion y del borrado', true,
+    (bool) preg_match('/IF EXISTS \(SELECT 1 FROM #REFERENCIAS\)\s+BEGIN.*?RAISERROR\(.ABORTADO.*?RETURN;\s+END/s', $sqlBorrar)
+    && strpos($sqlBorrar, 'FROM #REFERENCIAS)') < strpos($sqlBorrar, 'IF @SIMULAR = 1'));
+chequear('borra en una transaccion: primero el detalle, despues las cuentas', true,
+    strpos($sqlBorrar, 'BEGIN TRANSACTION') < strpos($sqlBorrar, 'DELETE D')
+    && strpos($sqlBorrar, 'DELETE D') < strpos($sqlBorrar, 'DELETE C')
+    && strpos($sqlBorrar, 'DELETE C') < strpos($sqlBorrar, 'COMMIT TRANSACTION'));
+chequear('no borra cabeceras de carga', false,
+    (bool) preg_match('/DELETE\s+\w*\s*FROM dbo\.RO_T_CASHFLOW_SALDOS_CARGA/', $sqlBorrar));
+chequear('deja la constancia dentro de la misma transaccion', true,
+    strpos($sqlBorrar, 'INSERT INTO dbo.RO_T_CASHFLOW_SALDOS_DEPURACION') > strpos($sqlBorrar, 'DELETE C')
+    && strpos($sqlBorrar, 'INSERT INTO dbo.RO_T_CASHFLOW_SALDOS_DEPURACION') < strpos($sqlBorrar, 'COMMIT TRANSACTION'));
+chequear('y corta ante cualquier error (XACT_ABORT)', true, ibContiene($sqlBorrar, 'SET XACT_ABORT ON;'));
+
+// ============================================================================
+seccion('sin depurar no se lee Interbanking');
+// ============================================================================
+
+$sinDep = SaldosInterbanking::avisoSinDepurar();
+chequear('el aviso es critico', Aviso::DANGER, $sinDep['nivel']);
+chequear('y dice que script falta',
+    true, ibContiene($sinDep['texto'], 'sql/cashflow_saldos_borrar_bancos_manuales.sql'));
+
+preg_match('/public function getCuentasBancarias\(.*?\n    }\n/s', $srcIb, $m);
+$getCb = isset($m[0]) ? $m[0] : '';
+chequear('la constancia se pregunta antes de leer BI', true,
+    strpos($getCb, '$this->depurado()') !== false
+    && strpos($getCb, '$this->depurado()') < strpos($getCb, '$this->leerUltimos()'));
+chequear('sin constancia no devuelve filas', true,
+    (bool) preg_match("/if \(!\\\$depurado\) \{\s+return \['filas' => \[\]/", $getCb));
+preg_match('/function guardarRespaldo\(.*?\n    }\n/s', $srcIb, $m);
+chequear('el respaldo tampoco se carga sin depurar',
+    true, ibContiene(isset($m[0]) ? $m[0] : '', 'if (!$this->depurado())'));
