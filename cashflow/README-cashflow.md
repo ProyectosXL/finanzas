@@ -138,6 +138,7 @@ Que ninguna fila del tablero duplique importes:
 - `DOLARES_COMITENTE` **una sola vez**, activa, con serie `INGRESO`.
 - Ningún par (proveedor, serie) repetido entre filas activas. Eso también lo verifica el validador, y *Parámetros → Cashflow* lo muestra arriba del editor.
 - `NETEO_PRECHEQUEADO` **una sola vez**, activa, con `TIPO = 'INGRESO'` y `COMPUTA = 1`. Y las filas de cobranza de Ventas —las cuatro por canal, o la total— **activas al lado de ella**: la fila del neteo corrige a esas filas, no las reemplaza.
+- `COSTOS_COBRO` **una sola vez**, activa, con `TIPO = 'INGRESO'`, `COMPUTA = 1` y la serie total `COSTO_COBRO`, entre Ecommerce y *Total Ventas*. Lo mismo que el neteo: corrige a las filas de cobranza, no las reemplaza. Las cuatro `COSTO_COBRO_<CANAL>` son componentes de la total, así que activar una al lado de ella lo rechaza el validador.
 - `ECHEQS → A_COBRAR` **activa y sola**. `A_COBRAR` ya no trae toda la cartera: trae la cobrable, sin lo excluido a mano. El universo es `A_COBRAR_TODO` y las dos mitades son `A_COBRAR` + `A_COBRAR_EXCLUIDOS`; activar el total al lado de cualquiera de las dos cuenta dos veces el mismo cheque, y eso lo rechaza el validador. **No hay que repuntar nada**: la fila ya está configurada contra `A_COBRAR`, y mientras no haya ningún cheque excluido ese código vale lo mismo que antes.
 - `STOCK_INVERSIONES → FONDO_INVERSION/STOCK` y `STOCK_DOLARES_COMITENTE → FONDO_COMITENTE/STOCK`, activas. Si alguna sigue apuntando a `SALDO_INVERSIONES` o `DOLARES_COMITENTE`, el editor la marca con la advertencia de módulo retirado y el tablero avisa. El día que se corre el script 18 **el tablero no se mueve un peso**: verificado contra la base, las dos filas dan `3.529.962,37` y `1.535,00` antes y después, porque el saldo inicial migrado es exactamente la última foto que el proveedor viejo tomaba como stock. Lo que sí aparece es el aviso por fondo de la cobertura, que antes no llegaba (ver *Los fondos son las cuentas*).
 - **Dos filas de uso, una por clase de fondo**: `USO_COBERTURA → COBERTURA/USO_INVERSION` y `USO_DOLARES_COMITENTE → COBERTURA/USO_COMITENTE`, activas, `COMPUTA = 1`, y **las dos entre** *Flujo Neto (sin cobertura)* y *Flujo Neto (con cobertura)*: el alcance de un flujo neto es posicional, así que una fila de uso puesta abajo del segundo no entraría en él. Ninguna fila activa con la serie `APLICACION` al lado de esas dos: es el total y el validador lo rechaza. El día que se corre el script 19 el tablero **no cambia ningún número salvo que ya hubiera columnas en rojo**: verificado contra la base el 19/09/2026, no había ninguna, así que el motor no rescató nada y la única aplicación manual vigente siguió en su columna.
@@ -232,6 +233,23 @@ La rama trae además `Class/DiasHabiles.php`: el paso al próximo día hábil qu
 
 ---
 
+### El mix de cobro de Ventas en árbol (`feature/ventas-mix-apertura`)
+
+Dos scripts nuevos contra `central`, reejecutables y sin borrar nada. **Se corren en el mismo momento de publicar el código**, en este orden —son el 35 y el 36 de la instalación completa—. Las tablas nuevas nacen con las seis columnas de auditoría.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 1 | `sql/cashflow_ventas_mix_nodo.sql` | Crea `RO_T_CASHFLOW_VENTAS_MIX_NODO` —el mix de cobro de Ventas como **árbol** por canal, con costo, tasa y plazo por nodo— y migra el mix plano una sola vez por canal. Se corre **al publicar** `feature/ventas-mix-apertura`. Ver `README-ventas.md` | **Nada se cae ni cambia de número**: Ventas y el tablero calculan con el mix plano, bruto y sin costos, y la fila de costos da cero. Lo que no se puede es **editar el mix**: *Parámetros → Ventas* lo muestra sólo para consulta y nombra el script |
+| 2 | `sql/cashflow_estructura_costos_cobro.sql` | Agrega la fila **Costos de cobro (comisiones y tasas)** a la sección Ventas, entre Ecommerce y *Total Ventas* —lee los órdenes reales; hoy entra en 55—, apuntada a `VENTAS → COSTO_COBRO`, en negativo y computando | **El tablero muestra la cobranza de Ventas sin restar el costo de cobro**, y no avisa: como con el neteo, cada serie es correcta por separado. Mientras el mix no tenga costos cargados, da lo mismo |
+
+**El día que se publica, el tablero no se mueve un peso.** Sin costos cargados el mix migrado da la misma cobranza que el plano: medido el 09/10/2026 con `develop`, el código nuevo sin el script y el código nuevo con el árbol migrado, las 160 celdas de cobranza por canal dan iguales al último bit (tramo $ 2.441.776.733,02, horizonte $ 43.706.286.291,98) y la fila de costos da cero. Se mueve cuando se cargan costos y tasas en *Parámetros → Ventas → Mix de Cobro y Plazos*: *Total Ventas* baja exactamente lo que muestra la fila de costos.
+
+#### Después de correrlos, verificar
+
+- En *Parámetros → Ventas → Mix de Cobro y Plazos*: Locales con Efectivo, Tarjeta y Go Cuotas inhabilitado; Ecommerce con Vtex y debajo Tarjeta; Franquicias y Mayoristas como antes. Ningún error arriba de ningún canal.
+- `COSTOS_COBRO` en la sección Ventas, entre Ecommerce y *Total Ventas*, en cero. Ver *Después de correrlos, verificar*, más arriba.
+- Ventas y el tablero **sin** el aviso informativo de "el mix de cobro sale todavía del mix plano".
+
 ## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
@@ -271,7 +289,11 @@ En este orden, contra `central`:
 -- 32. sql/cashflow_cobranzas_ppp_grupo.sql  (Cobranzas FR: PPP por grupo empresario, clientes [FL]%)
 -- 33. sql/cashflow_cobranzas_cliente_excluido.sql  (Cobranzas FR: excluir un cliente, con motivo)
 -- 34. sql/cashflow_saldos_dia_acreditacion.sql     (Saldos: dia de acreditacion por local)
+-- 35. sql/cashflow_ventas_mix_nodo.sql              (Ventas: el mix de cobro como arbol)
+-- 36. sql/cashflow_estructura_costos_cobro.sql      (Ventas: la fila de costos de cobro)
 ```
+
+**El 35 y el 36 se corren al publicar el código del mix en árbol**, en ese orden. El 35 necesita el mix plano de `sql/ventas_proyeccion.sql` —es lo que migra— y el 36 la sección Ventas del 2. Hasta correr el 35, el mix de cobro no se puede editar. Apenas corridos, **la proyección no cambia**: verificado contra la base el 09/10/2026, 160 celdas de cobranza por canal iguales al último bit y la fila de costos en cero. Ver `README-ventas.md`.
 
 **El 34 va después del 3**, que crea las dos tablas a las que les agrega columnas. Si se corre antes, lo dice y no hace nada. En una instalación nueva no hace falta: el 3 ya trae el mismo bloque.
 
@@ -1057,7 +1079,7 @@ El arrastre sigue existiendo, pero lo muestra **sólo `SALDO_FINAL`**, que es la
 
 ### Totales y aperturas no se mezclan
 
-`VentasProvider` expone diez series: cobranza y venta, totales y abiertas por los cuatro canales. Las cuatro por canal suman exactamente el total.
+`VentasProvider` expone cobranza, costo de cobro y venta, totales y abiertos por los cuatro canales, más el neteo de cheques adelantados. Las cuatro por canal suman exactamente su total.
 
 Activar a la vez la serie total y sus componentes cuenta **dos veces** el mismo importe, y la regla de origen repetido no lo ve, porque son series distintas. El registro declara la relación en `componentes` y el validador la rechaza.
 
@@ -1868,6 +1890,14 @@ Hasta ahora ese neteo se restaba **adentro** de las series de cobranza del prove
 `NETEO_PRECHEQUEADO` **no** está declarada en `componentes`: no es una apertura de `COBRANZA` sino una fila que convive con ella, y declararla ahí haría que el validador rechace la combinación normal del tablero.
 
 La crea `sql/cashflow_estructura_neteo_prechequeado.sql`. Ver `README-ventas.md`.
+
+### El costo de cobro de Ventas también es una fila
+
+El mix de cobro de Ventas es un árbol con costo y tasa por nodo (comisión del marketplace, de la procesadora, tasa de las cuotas). **La cobranza sigue bruta** y lo que se queda quien cobra entra por la fila `COSTOS_COBRO`, sección *Ventas*, entre Ecommerce y *Total Ventas*, alimentada por `VENTAS → COSTO_COBRO`. Es **exactamente el criterio del neteo**: `INGRESO` con importe negativo, `COMPUTA = 1`, el signo invertido en `VentasProvider::enNegativo()`, y no es componente de `COBRANZA`. Y tiene el mismo peligro: **restar el costo adentro de la cobranza teniendo además esta fila lo descontaría dos veces**, sin ninguna validación que lo detecte.
+
+No se agrupa con las filas por canal: el neteo está entre Franquicias y Mayoristas, así que un grupo consecutivo tendría que llevar todas las filas de ingreso de la sección y, cerrado, repetiría *Total Ventas*.
+
+La crea `sql/cashflow_estructura_costos_cobro.sql`. Ver `README-ventas.md`.
 
 ### Excluir un cheque que no se va a poder cobrar
 
