@@ -157,8 +157,12 @@ class AuthCashflow {
                cambiar el dia de un concepto: como los preview, pide edicion. */
             'contarOverridesCronograma' => [['parametros', 'GENERALES']],
             'saveConfigCronograma' => [['parametros', 'GENERALES']],
-            'saveMixCobro' => [['parametros', 'VENTAS']],
-            'addMixCobro' => [['parametros', 'VENTAS']],
+            /* El mix de cobro es un arbol (Class/MixCobro.php). La previsualizacion
+               tambien pide edicion: la usa solo quien esta editando el arbol, como
+               los preview del cronograma. */
+            'previsualizarMixArbol' => [['parametros', 'VENTAS']],
+            'saveMixArbol' => [['parametros', 'VENTAS']],
+            'addMixNodo' => [['parametros', 'VENTAS']],
             'saveRespaldo' => [['parametros', 'VENTAS']],
             'addCuentaSaldo' => [['parametros', 'SALDOS']],
             'saveCuentasSaldo' => [['parametros', 'SALDOS']],
@@ -243,7 +247,7 @@ class AuthCashflow {
         'Echeqs' => ['getEcheqsCartera', 'getEcheqsPrechequeado', 'getHistorialExclusion'],
         'Ingresos' => ['getCobranzasFR', 'getCobranzasMay', 'getExportacionesTasky'],
         'Logistica' => ['getPlanilla', 'getFleteros', 'buscarProveedorTango'],
-        'Parametros' => ['getTodo', 'getParametros', 'getHistorialCronograma', 'getMixCobro',
+        'Parametros' => ['getTodo', 'getParametros', 'getHistorialCronograma',
             'buscarClientePrecheq', 'getCobranzasClientesConfig', 'getEscalaDescuento'],
         'Proveedores' => ['plantillaMaestro', 'plantillaPagos', 'getPendientes', 'buscarProveedorTango', 'getMaestro',
             'getHistorialExclusion', 'getHistorialProveedor'],

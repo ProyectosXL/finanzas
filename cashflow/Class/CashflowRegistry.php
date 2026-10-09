@@ -71,6 +71,11 @@ class CashflowRegistry {
                 'COBRANZA_MAYORISTAS' => 'Cobranza estimada - Mayoristas',
                 'COBRANZA_ECOMMERCE' => 'Cobranza estimada - Ecommerce',
                 'NETEO_PRECHEQUEADO' => 'Neteo cheques adelantados (negativo)',
+                'COSTO_COBRO' => 'Costos de cobro, comisiones y tasas (negativo)',
+                'COSTO_COBRO_LOCALES' => 'Costos de cobro - Locales (negativo)',
+                'COSTO_COBRO_FRANQUICIAS' => 'Costos de cobro - Franquicias (negativo)',
+                'COSTO_COBRO_MAYORISTAS' => 'Costos de cobro - Mayoristas (negativo)',
+                'COSTO_COBRO_ECOMMERCE' => 'Costos de cobro - Ecommerce (negativo)',
                 'VENTA' => 'Venta proyectada, total (no es caja)',
                 'VENTA_LOCALES' => 'Venta proyectada - Locales (no es caja)',
                 'VENTA_FRANQUICIAS' => 'Venta proyectada - Franquicias (no es caja)',
@@ -86,9 +91,15 @@ class CashflowRegistry {
             // con ella. Declararla como componente haria que el validador
             // rechace la combinacion normal del tablero -las cuatro filas por
             // canal mas la del neteo-, que es justamente la que hay que armar.
+            //
+            // COSTO_COBRO tampoco es componente de COBRANZA, por lo mismo: es
+            // la fila de comisiones y tasas que convive con las de cobranza
+            // bruta. Lo que si es apertura de ELLA son sus cuatro por canal.
             'componentes' => [
                 'COBRANZA' => ['COBRANZA_LOCALES', 'COBRANZA_FRANQUICIAS',
                                'COBRANZA_MAYORISTAS', 'COBRANZA_ECOMMERCE'],
+                'COSTO_COBRO' => ['COSTO_COBRO_LOCALES', 'COSTO_COBRO_FRANQUICIAS',
+                                  'COSTO_COBRO_MAYORISTAS', 'COSTO_COBRO_ECOMMERCE'],
                 'VENTA' => ['VENTA_LOCALES', 'VENTA_FRANQUICIAS',
                             'VENTA_MAYORISTAS', 'VENTA_ECOMMERCE']
             ]

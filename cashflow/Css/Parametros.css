@@ -107,60 +107,104 @@
     text-align: right;
 }
 
-/* Fila de subtotal por canal */
-.fila-suma-canal td {
-    background-color: #f8f9fc;
-    font-weight: 600;
-    font-size: 12px;
+/* ========================================
+   MIX DE COBRO: EL ÁRBOL
+   ========================================
+   Prefijo mixa-: las clases viejas del mix plano (.fila-suma-canal,
+   .mix-canal-inicio, #formNuevoMedio) se fueron con su editor. Queda
+   .mix-input, que comparten los campos numéricos, y .mix-inactivo. */
+
+/* La fila de cada canal: abre su bloque y lleva Agregar y Guardar */
+#tablaMix .mixa-canal td {
+    background-color: #eef2fb;
+    border-top: 2px solid var(--border-color, #e2e5ed);
+    vertical-align: middle;
 }
 
-.fila-suma-canal.suma-invalida td {
-    background-color: rgba(220, 53, 69, 0.08);
+/* La sangría la pone el JS con el ancho de cada nivel */
+.mixa-sangria {
+    display: inline-block;
+}
+
+#tablaMix .mixa-nombre {
+    white-space: nowrap;
+}
+
+#tablaMix .mixa-nombre input[type="text"] {
+    width: 200px;
+}
+
+/* Los campos no se achican por debajo de lo que se lee: la tabla scrollea a lo
+   ancho antes de cortar un "100,00" o el rótulo de un nivel. */
+#tablaMix .input-group {
+    flex-wrap: nowrap;
+}
+
+#tablaMix .input-group .form-control {
+    min-width: 76px;
+}
+
+#tablaMix select.form-select {
+    min-width: 160px;
+}
+
+/* Lo que resuelve la regla, en gris al lado del campo: el costo + tasa de
+   la rama y de quién se heredan los días */
+.mixa-hereda {
+    font-size: 11px;
+    color: var(--text-muted, #8c93a8);
+    margin-top: 2px;
+    white-space: nowrap;
+}
+
+.mixa-hereda.mixa-falta {
     color: var(--danger-color, #dc3545);
+    font-weight: 600;
 }
 
-.fila-suma-canal.suma-valida td {
+/* La suma de cada grupo de hermanos, en el nodo padre (o en el canal) */
+.mixa-suma {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-left: 6px;
+}
+
+.mixa-suma-ok {
+    background-color: rgba(40, 167, 69, 0.1);
     color: var(--success-color, #28a745);
 }
 
-/* Separador visual entre canales */
-.mix-canal-inicio td {
-    border-top: 2px solid var(--border-color, #e2e5ed);
+.mixa-suma-mal {
+    background-color: rgba(220, 53, 69, 0.12);
+    color: var(--danger-color, #dc3545);
 }
 
-/* Medio inhabilitado: sigue visible acá para poder reactivarlo, pero no se usa
-   en la proyección ni aparece en la tabla de cobranza. */
-.mix-inactivo td {
-    background-color: #fafbfc;
+.mixa-suma-fuera,
+.mixa-suma-vacia {
+    background-color: #f1f3f7;
     color: var(--text-muted, #8c93a8);
 }
 
-.mix-inactivo td:nth-child(2) {
-    text-decoration: line-through;
-    text-decoration-color: var(--text-muted, #8c93a8);
+.mixa-mas {
+    color: var(--primary-color, #3366ff);
+    font-size: 11px;
 }
 
-.mix-inactivo .input-group-text {
-    color: var(--text-muted, #8c93a8);
-}
-
-/* Switch de activo */
-.mix-activo {
-    cursor: pointer;
-}
-
-.form-switch .mix-activo {
-    width: 2.2em;
-    height: 1.1em;
-    margin-left: 0;
-}
-
-/* Formulario de alta de medio de pago */
-#formNuevoMedio {
+/* El formulario de alta, en su fila debajo del padre */
+#tablaMix .mixa-alta td {
     background-color: var(--bg-light, #f8f9fc);
 }
 
-#formNuevoMedio .form-label {
+.mixa-alta-titulo {
+    font-size: 12px;
+    margin-bottom: 6px;
+}
+
+#tablaMix .mixa-alta .form-label {
     font-size: 11px;
     font-weight: 600;
     color: var(--text-secondary, #5a6178);
@@ -169,6 +213,21 @@
     margin-bottom: 4px;
 }
 
+/* Fuera de juego -el nodo o uno de arriba inhabilitado-: sigue visible para
+   poder reactivarlo, pero no se usa en la proyección. */
+.mix-inactivo td {
+    background-color: #fafbfc;
+    color: var(--text-muted, #8c93a8);
+}
+
+.mix-inactivo .input-group-text {
+    color: var(--text-muted, #8c93a8);
+}
+
+.mix-inactivo .mixa-nombre input[type="text"] {
+    text-decoration: line-through;
+    text-decoration-color: var(--text-muted, #8c93a8);
+}
 /* ========================================
    INDICADOR DE SUMA
    ======================================== */

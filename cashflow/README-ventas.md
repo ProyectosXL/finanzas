@@ -23,7 +23,7 @@ Crea las seis tablas y carga las semillas:
 | `RO_T_CASHFLOW_VENTAS_HIST` | Histórico agregado por mes / canal / tipo de comprobante |
 | `RO_T_CASHFLOW_VENTAS_INDICE` | Índice de variación por mes |
 | `RO_T_CASHFLOW_VENTAS_PARTIC` | Participación calculada + editada por canal |
-| `RO_T_CASHFLOW_VENTAS_MIX` | Mix de cobro y plazos (9 filas de semilla) |
+| `RO_T_CASHFLOW_VENTAS_MIX` | Mix de cobro **plano** (9 filas de semilla). Desde `sql/cashflow_ventas_mix_nodo.sql` deja de leerse y queda por el histórico: ver el paso 5 |
 | `RO_T_CASHFLOW_PARAMETROS` | Clave/valor genérico (alícuota, horizonte, feriados, respaldo) |
 | `RO_T_CASHFLOW_VENTAS_PRECHEQ` | Neteo de cheques adelantados — vacía y cableada |
 
@@ -74,6 +74,26 @@ Hace `DROP` + `CREATE` de la vista, así que también es reejecutable. Devuelve 
 
 La usa la sub-pestaña **Venta Acumulada**. Si no está creada, esa pestaña **igual funciona**: sale sólo en pesos y avisa arriba. Ver la clase `Cotizacion` más abajo.
 
+### 5. El mix de cobro como árbol y la fila de costos de cobro
+
+**Estos dos scripts NO se corrieron todavía.** Se corren **en el mismo momento de publicar** el código de `feature/ventas-mix-apertura`, en este orden:
+
+```sql
+-- sql/cashflow_ventas_mix_nodo.sql          crea el árbol y migra el mix plano
+-- sql/cashflow_estructura_costos_cobro.sql  la fila "Costos de cobro" del tablero
+```
+
+**Por qué al publicar y no después**: el código nuevo sin el primer script **no se cae** —Ventas y el tablero siguen calculando con el mix plano, bruto y sin costos, y la fila de costos da cero—, pero en *Parámetros → Ventas* el mix se muestra **sólo para consulta**: no hay tabla donde guardar un nodo, así que **hasta correrlo el mix no se puede editar**. La pantalla lo dice y nombra el script.
+
+| Script | Qué hace | Si no se corre |
+| --- | --- | --- |
+| `sql/cashflow_ventas_mix_nodo.sql` | Crea `RO_T_CASHFLOW_VENTAS_MIX_NODO` y migra el mix plano **una sola vez por canal** (un canal que ya tiene nodos no se toca). Ver *Mix de cobro: el árbol* | Mix plano, bruto y sin costos; Parámetros lo muestra sólo para consulta, con aviso. Ventas y el tablero muestran un aviso informativo |
+| `sql/cashflow_estructura_costos_cobro.sql` | Agrega la fila **Costos de cobro (comisiones y tasas)** a la sección Ventas, entre Ecommerce y *Total Ventas*, apuntada a `VENTAS → COSTO_COBRO` | El tablero muestra la cobranza de Ventas **en bruto, sin restar el costo de cobro**, y no avisa: cada serie es correcta por separado. Mientras no haya costos cargados en el mix, da lo mismo |
+
+El primero va después de `sql/ventas_proyeccion.sql` (crea el mix plano que migra); el segundo, después de `sql/cashflow_estructura_disponibilidades.sql` (crea la sección Ventas y sus filas por canal). Los dos son reejecutables.
+
+**Apenas se corren, la proyección da exactamente lo mismo que antes.** Medido contra la base el 09/10/2026, con el código de `develop`, el código nuevo sin el script y el código nuevo con el árbol migrado (sobre `#temporales`), uno detrás del otro: las 160 celdas de cobranza por canal (28 días + 12 meses × 4 canales) dan iguales **al último bit**, el tramo da $ 2.441.776.733,02 y el horizonte $ 43.706.286.291,98 en las tres corridas, y el costo de cobro da 0,00. Ver *El invariante de la migración*.
+
 ---
 
 ## Modelo de cálculo
@@ -83,10 +103,14 @@ VentaNetaProyectada(M) = VentaNetaReal(M, año anterior) × (1 + índice_M)
 VentaConIVA(M)         = VentaNetaProyectada(M) × (1 + alícuota_iva)
 VentaCanal(c, M)       = VentaConIVA(M) × %Participación(c, M)
 VentaDiaria(c, d)      = VentaCanal(c, M(d)) / (días_del_mes − feriados_comercio)
-Monto(c, mp, d)        = VentaDiaria(c, d) × %Mix(c, mp)
-FechaAcreditación      = d + DíasAcreditación(c, mp)
+Bruto(c, h, d)         = VentaDiaria(c, d) × %efectivo(h)
+Costo(c, h, d)         = Bruto(c, h, d) × (costo + tasa acumulados de h)
+Neto(c, h, d)          = Bruto(c, h, d) − Costo(c, h, d)
+FechaAcreditación      = d + Días(h)
                          → corrida al PRÓXIMO día bancario hábil si cae en no hábil
 ```
+
+`h` es una **hoja** del árbol del mix de cobro del canal: su % efectivo es el producto de los porcentajes de su rama, su costo y su tasa se suman a lo largo de la rama y sus días son los del nivel más cercano que los tenga. Ver *Mix de cobro: el árbol*. El costo cae en la **misma fecha** que el bruto del que sale.
 
 Toda la venta del módulo es **estimada**. El histórico de Tango se usa únicamente como base de cálculo.
 
@@ -201,6 +225,26 @@ Los porcentajes del tooltip salen del **cociente de los importes**, no de la par
 - **Meses 2 a 12**: automática desde el año anterior, con override manual previsto por mes × canal.
 - **Fallback**: si el mes del año anterior no tiene datos o su venta total no es positiva, se usan los porcentajes fijos de respaldo de `RO_T_CASHFLOW_PARAMETROS` y el mes queda **marcado como estimado**.
 
+### Cobranza Proyectada: el árbol del mix
+
+La grilla de cobranza de la sub-pestaña Proyección es un **árbol que se abre y se cierra**: Canal › y cada nivel de su rama (Medio de pago › Tipo de tarjeta › Procesadora › Cuotas; en Ecommerce, un Marketplace arriba de todo). Cada nodo con ramas debajo es un subtotal. Arranca abierta hasta el primer nivel de cada canal, y dos botones abren todo o vuelven a ese punto.
+
+| Columna | Qué es |
+| --- | --- |
+| Concepto | El nombre del nodo con la sangría de su nivel. El tooltip dice el nivel, el camino completo y, en una hoja que hereda los días, de quién |
+| % efectivo | Qué parte de la venta del canal cobra esa rama: el producto de los porcentajes de su cadena |
+| Costo + tasa | En una hoja, el acumulado de su rama. En un nodo con ramas debajo —y en la fila del canal—, el **promedio de sus hojas ponderado por % efectivo**: lo que cuesta cobrar la rama entera |
+| Días | Los de la hoja. En los subtotales va vacía: cada hoja tiene los suyos |
+
+- **Selector Bruto / Costo / Neto**: qué importe muestran las columnas de fechas. Arranca en **Bruto**, que es lo que muestra la fila de cada canal en el tablero. El costo se muestra **en negativo**, como la fila del tablero.
+- **El pie muestra siempre tres filas**, sea cual sea el selector: *Cobranza bruta*, *Costos de cobro* (negativo) y *Cobranza neta*. Los tres importes vienen del servidor —el neto se calcula como bruto − costo celda por celda—, así que bruta − costos = neta en cada columna, sin que la pantalla reste nada.
+- **Los KPIs** de cobranza del tramo y del horizonte muestran la neta al lado de la bruta.
+- **Las hojas al 0%** se muestran igual, en cero. Los nodos inhabilitados —y todo lo que cuelga de ellos— no aparecen.
+- **La pantalla no resuelve nada**: el % efectivo, la carga, los días y los importes de cada nodo vienen de `Ventas::cobranzaPorHojas()`, que usa la regla de `MixCobro::resolver()`.
+- **Exportar** baja lo que se ve: las ramas cerradas no van, y los importes son los de la medida elegida. La tabla no se ordena por columna: es un árbol, y ordenar separaría cada nodo de su rama.
+
+Un mix inválido —un grupo de hermanos activos que no suma 100%, una hoja sin días en toda su rama o un canal sin hojas— **no corta la proyección**: se calcula con lo que hay y se avisa como **crítico**, arriba de la grilla y en el tablero, diciendo el canal, la rama y cuánta venta de la ventana queda afuera. Una hoja sin días **no se proyecta**: sin plazo no hay fecha, y una fecha inventada sería plata en un día que nadie eligió. Parámetros no deja guardar un árbol así, así que si aparece es porque la tabla se tocó por otro lado.
+
 ---
 
 ## Conexiones
@@ -232,7 +276,7 @@ Los meses sin cotización **no están** en el mapa: la clave ausente es lo que d
 
 ## Parámetros
 
-Ningún valor de negocio está escrito en el código. Todo sale de `RO_T_CASHFLOW_PARAMETROS` y `RO_T_CASHFLOW_VENTAS_MIX`, y se edita desde la pestaña **Parámetros**.
+Ningún valor de negocio está escrito en el código. Todo sale de `RO_T_CASHFLOW_PARAMETROS` y del árbol del mix de cobro, `RO_T_CASHFLOW_VENTAS_MIX_NODO`, y se edita desde la pestaña **Parámetros**. Lo único fijo en el código son los **tipos de nivel** del árbol, que son estructura y no valores (ver *Mix de cobro: el árbol*).
 
 ### Agrupados por módulo
 
@@ -246,7 +290,7 @@ La pestaña se organiza en **sub-pestañas, una por módulo**, para que se entie
 2. Declararlo en `Parametros::$modulos` (nombre, ícono, descripción y qué secciones muestra).
 3. Agregar el `<li>` y el `tab-pane` en `Tabs/parametros.php`.
 
-Las secciones disponibles son `generales` (clave/valor del grupo `GENERAL`), `respaldo` (grupo `RESPALDO`) y `mix` (la tabla `RO_T_CASHFLOW_VENTAS_MIX`).
+Las secciones disponibles son `generales` (clave/valor del grupo `GENERAL`), `respaldo` (grupo `RESPALDO`) y `mix` (el árbol del mix de cobro, resuelto por `MixCobro::datosEditor()`).
 
 | Clave | Semilla | Qué controla |
 | --- | --- | --- |
@@ -260,32 +304,107 @@ Las secciones disponibles son `generales` (clave/valor del grupo `GENERAL`), `re
 | `respaldo_mayoristas` | `0.140` | Participación de respaldo |
 | `respaldo_ecommerce` | `0.085` | Participación de respaldo |
 
-### Mix de cobro: alta e inhabilitación
+### Mix de cobro: el árbol
 
-Los medios de pago se administran desde **Parámetros → Mix de Cobro y Plazos**:
+El mix de cobro es un **árbol por canal**, en `RO_T_CASHFLOW_VENTAS_MIX_NODO`:
 
-- **Agregar medio**: canal, nombre y días de acreditación. Entra **inhabilitado y en 0%**, para no romper el 100% del canal en el momento del alta. Para usarlo hay que activarlo y reacomodar los porcentajes.
-- **Inhabilitar**: el switch de la columna *Activo*. Un medio inhabilitado **no se usa en la proyección y no aparece en la tabla de cobranza**, pero sigue visible en Parámetros para poder reactivarlo. No se borra el dato.
+```
+LOCALES
+├─ Efectivo                         10%   costo 3,10%           1 día
+└─ Tarjeta                          90%
+   ├─ Débito                        20%   costo 3,18%           7 días
+   └─ Crédito                       80%
+      ├─ Payway                     10%   costo 4,90%           1 día
+      ├─ Mercado Pago               10%   (sin costo)          18 días
+      ├─ Fiserv                     60%   costo 4,90%           7 días
+      │  ├─ 3 cuotas                30%            tasa 0,90%   1 día
+      │  └─ Resto                   70%                      (hereda 7)
+      └─ Promo Bancarias            20%   costo 4,90%          15 días
+ECOMMERCE
+├─ Vtex                             70%
+│  └─ Tarjeta                      100%                         2 días
+└─ Mercado Libre                    30%   comisión 14%
+   └─ Mercado Pago                 100%                        18 días
+```
 
-Reglas que valida el sistema (en el front y de nuevo en el servidor):
+*(Los porcentajes son ilustrativos: los carga el usuario en Parámetros.)*
 
-- Los medios **activos** de cada canal deben sumar 100%. Los inhabilitados no suman, sin importar qué porcentaje tengan guardado.
-- Un canal no puede quedarse **sin ningún medio activo**: su venta no se convertiría en cobranza y el importe desaparecería del cashflow.
-- No se puede repetir el mismo medio de pago dentro de un canal.
+**Los tipos de nivel son una lista fija y ordenada del código** —`MixCobro::NIVELES`—, no de la base. Es estructura, no un valor de negocio, y la misma lista está en el `CHECK` de la columna `NIVEL`: **cambian juntas**.
 
-Mix de cobro inicial (cada canal suma 100%):
+| Orden | Código | Rótulo |
+| ---: | --- | --- |
+| 1 | `MARKETPLACE` | Marketplace |
+| 2 | `MEDIO_PAGO` | Medio de pago |
+| 3 | `TIPO_TARJETA` | Tipo de tarjeta |
+| 4 | `PROCESADORA` | Procesadora |
+| 5 | `CUOTAS` | Cuotas |
 
-| Canal | Medio de pago | % Mix | Días acreditación |
-| --- | --- | ---: | ---: |
-| Locales | Cash | 10% | 1 |
-| Locales | Tarjeta | 90% | 2 |
-| Locales | Go Cuotas | 0% | 10 |
-| Franquicias | Transferencia | 3% | 30 |
-| Franquicias | Echeq | 97% | 40 |
-| Mayoristas | Cash | 0% | 1 |
-| Mayoristas | Echeq | 100% | 60 |
-| Ecommerce | Tarjeta | 100% | 2 |
-| Ecommerce | Go Cuotas | 0% | 10 |
+**Estructura** (la valida el servidor, `MixCobro::validarEstructura()`):
+
+- El nivel de un hijo es **estrictamente posterior** al de su padre, y se pueden saltear niveles: Mercado Libre › Mercado Pago (medio) puede terminar ahí o bajar directo a Cuotas.
+- Una rama puede **terminar en cualquier nivel**: Efectivo termina en Medio de pago, Payway en Procesadora, Fiserv baja a Cuotas.
+- En **Ecommerce** todo cuelga de un marketplace: su primer nivel sólo admite `MARKETPLACE`. En **los demás canales** el primer nivel es `MEDIO_PAGO`, y `MARKETPLACE` no existe.
+- **Franquicias y Mayoristas** usan el mismo árbol y hoy tienen un solo nivel. El modelo no les impide crecer, y el editor les permite cargar costo y tasa igual que a los demás.
+- El nombre es **único entre hermanos**, sin distinguir mayúsculas ni acentos —como la collation de la columna—. El mismo nombre en otra rama sí vale: "Mercado Pago" como medio de pago de Mercado Libre y como procesadora de Crédito son nodos distintos.
+- Porcentaje, costo y tasa entre 0% y 100%; días enteros y no negativos.
+
+**La regla** (`MixCobro::resolver()`, la **única** implementación: la usan el motor, la pestaña Ventas, Parámetros y el tablero):
+
+| | |
+| --- | --- |
+| **Activo y hoja** | Un nodo inactivo saca de juego **todo su subárbol**. Una hoja es un nodo en juego sin hijos en juego: inhabilitar "3 cuotas" y "Resto" convierte a Fiserv en hoja sin borrar nada, y entonces Fiserv necesita días |
+| **% efectivo** | El producto de los porcentajes de la cadena: Tarjeta 90% × Crédito 80% × Fiserv 60% × 3 cuotas 30% = 12,96% de la venta del canal |
+| **Costo y tasa** | **Se suman** a lo largo de la rama, con null como cero. Cada nivel carga sólo lo suyo y la hoja paga todo: Fiserv 4,90% + "3 cuotas" 0,90% = 5,80%. Los porcentajes **ya incluyen IVA e impuestos**. La comisión del marketplace es costo de cobro y entra en la misma fila del tablero |
+| **Días** | **Gana el nivel más cercano** que los tenga; no se suman, porque el plazo lo pone quien acredita. Se cuentan desde el día de venta y se corren al próximo hábil bancario, como siempre |
+| **Cuotas** | Una venta en cuotas se acredita **entera** a los días de su hoja. No se reparte por mes |
+
+Y lo que exige para que la venta del canal llegue entera a la caja:
+
+- Los hermanos **activos** de cada grupo suman 100%, en todos los niveles. Los inactivos no suman, tengan el porcentaje que tengan. Un grupo **fuera de juego** —debajo de un nodo inhabilitado— no se valida: apagar una rama no obliga a rehacerla.
+- Toda hoja tiene días en algún nivel de su rama.
+- El costo + tasa acumulado de una hoja es menor a 100%.
+- El canal tiene al menos una hoja: sin ninguna, su venta desaparecería del cashflow.
+
+**Vacío no es lo mismo en todos los campos, y es a propósito.** Un dato que falta es null y avisa —la regla del módulo—, **con una excepción explícita: el costo y la tasa vacíos valen cero y no avisan**, porque es una decisión de negocio que muchos nodos no tengan costo. Los días vacíos son "los define un nivel de arriba", y 0 días es "se acredita el mismo día".
+
+### Mix de cobro: el editor de Parámetros
+
+Se administra desde **Parámetros → Ventas → Mix de Cobro y Plazos**, un bloque por canal con columnas Nombre, Nivel, %, Costo %, Tasa %, Días, Activo y Última edición.
+
+- **Lo heredado, a la vista.** Al lado de cada campo, en gris, lo que resuelve la regla para ese nodo: el costo + tasa de su rama ("rama: 5,80% (costo 4,90% + tasa 0,90%)") y de quién hereda los días ("hereda 7 de Fiserv"). Es lo que hace entendible la herencia.
+- **El 100% de cada grupo.** El nodo padre —o el canal, para el primer nivel— muestra la Σ de sus hijos activos, en rojo si no da 100%. Con algún error, el canal lo lista arriba de sus nodos y **Guardar** queda bloqueado diciendo por qué.
+- **La pantalla no tiene la regla.** Lo heredado, las sumas y si se puede guardar salen del servidor: del payload inicial y, mientras se edita, de `previsualizarMixArbol`, que resuelve el canal **como quedaría** con la misma función que el motor. Se consulta al **cambiar de campo**, no en cada tecla; mientras se tipea o se espera la respuesta, Guardar queda bloqueado.
+- **Agregar**, en el encabezado de cada canal (primer nivel) y en cada nodo (hijo): nombre, nivel —sólo los que admite ese lugar—, costo, tasa y días. **No pide porcentaje: lo nuevo entra inhabilitado y en 0%**, así no rompe el 100% de su grupo. Para usarlo hay que encenderlo y reacomodar sus hermanos.
+- **Inhabilitar** es el switch de *Activo*: no se borra nada. Inhabilitar un nodo con ramas debajo pide confirmación y dice cuántas hojas saca de la proyección.
+- **Renombrar** se permite, respetando el único entre hermanos. **Cambiar el nivel de un nodo con hijos no**: si quedó mal, se inhabilita y se crea otro. Un nodo tampoco se mueve de rama.
+- **Guardar** es por canal. Manda el árbol del canal y el servidor escribe **sólo los nodos que cambiaron**, en una transacción, después de volver a validar el canal entero como quedaría: un árbol inválido corta antes de abrir la transacción. Otro canal roto —por una edición directa en la base— no impide guardar este.
+- **Exportar** baja lo que se ve, con el camino completo de cada nodo.
+- **Sin permiso de edición** (`['parametros', 'VENTAS']`), el árbol se ve sin ningún control. **Sin el script**, también, y la tarjeta dice qué correr.
+
+Las acciones son `previsualizarMixArbol`, `saveMixArbol` y `addMixNodo`. Las del mix plano —`getMixCobro`, `saveMixCobro`, `addMixCobro`— se retiraron, junto con su editor.
+
+### El invariante de la migración
+
+`sql/cashflow_ventas_mix_nodo.sql` migra el mix plano así, **una sola vez por canal** —si la tabla nueva ya tiene nodos de un canal, no lo toca—:
+
+| Canal | Árbol migrado | % | Días | Activo |
+| --- | --- | ---: | ---: | :---: |
+| Locales | Efectivo *(era CASH)* | 10% | 1 | sí |
+| Locales | Tarjeta | 90% | 2 | sí |
+| Locales | Go Cuotas | 0% | 10 | **no** |
+| Franquicias | Transferencia | 3% | 30 | sí |
+| Franquicias | Echeq | 97% | 40 | sí |
+| Mayoristas | Efectivo *(era CASH)* | 0% | 1 | no *(ya estaba)* |
+| Mayoristas | Echeq | 100% | 60 | sí |
+| Ecommerce | **Vtex** *(marketplace nuevo)* | 100% | — | sí |
+| Ecommerce | Vtex › Tarjeta | 100% | 2 | sí |
+| Ecommerce | Vtex › Go Cuotas | 0% | 10 | **no** |
+
+Todos los medios son nodos de `MEDIO_PAGO`, con mayúscula inicial y sin costo ni tasa. Los nombres se muestran **tal cual se guardan**: son texto libre ("3 cuotas", "Resto") y la pantalla ya no los normaliza. Go Cuotas queda inhabilitado en todos los canales; si en alguna base estuviera activo con porcentaje, el script lo avisa, porque inhabilitarlo rompería el 100% de su canal. Cada nodo migrado guarda en `ID_MIX_ORIGEN` de qué fila vino. Mercado Libre lo carga el usuario después.
+
+**Apenas se publica, la proyección da exactamente lo mismo que antes**: sin costos cargados, el bruto es el de antes y la fila de costos da cero. Vtex entra al 100% y sin días, así que no cambia ni el porcentaje ni el plazo de lo que cuelga de él. Medido contra la base el 09/10/2026 —ver el paso 5 de *Orden de ejecución*—: 160 celdas iguales al último bit.
+
+`RO_T_CASHFLOW_VENTAS_MIX` **no se borra**: deja de leerse cuando existe la tabla nueva —aunque esté vacía: un árbol vacío es un mix sin medios, que se avisa, no una señal para volver al mix viejo— y queda por el histórico.
 
 ---
 
@@ -424,9 +543,12 @@ Las tablas llevan el esquema de auditoría del módulo —`USUARIO_ALTA` / `FECH
 sql/ventas_proyeccion.sql               DDL de las 6 tablas + semillas
 sql/SJ_CASHFLOW_VENTAS_HIST.sql         Stored procedure del histórico
 sql/RO_V_DOLAR_OFICIAL_BCRA.sql         Vista del T/C de cierre por mes
+sql/cashflow_ventas_mix_nodo.sql        El árbol del mix de cobro y la migración del plano
+sql/cashflow_estructura_costos_cobro.sql  La fila "Costos de cobro" del tablero
 cashflow/Class/Ventas.php               Motor de proyección
+cashflow/Class/MixCobro.php             El árbol del mix: la regla, el editor y su escritura
 cashflow/Class/Cotizacion.php           Tipo de cambio — punto de acceso del cashflow
-cashflow/Class/Parametros.php           Parámetros y mix de cobro
+cashflow/Class/Parametros.php           Parámetros (y la lectura del mix plano, como respaldo)
 cashflow/Controller/VentasController.php
 cashflow/Controller/ParametrosController.php
 cashflow/Tabs/ventas.php                Reemplaza el placeholder
@@ -453,38 +575,46 @@ La clase `.tabla-temporal` (en `Css/main.css`, **no duplicada por pestaña**) ac
 
 Las **columnas fijas en horizontal** ya no están cableadas: se eligen desde la pantalla y las resuelve `Js/columnas-fijas.js`. Ver `README-cashflow.md`.
 
-En esta pestaña el selector va sólo en la tabla **Cobranza Proyectada**, con `Canal` y `Medio de Pago` fijas por defecto — que es exactamente lo que hacía el CSS viejo con `:first-child` y `.col-medio`. Las otras tablas de Ventas (tendencias, proyección por mes, venta acumulada, balance, control de facturación) tienen cuatro o cinco columnas y **no scrollean a lo ancho**: un selector ahí sería un control que no resuelve nada. Conservan su primera columna fija, que es el default automático.
+En esta pestaña el selector va sólo en la tabla **Cobranza Proyectada**, con `Concepto` fija por defecto: es el nombre del nodo con su sangría, lo que dice de qué rama es cada número. Antes eran dos columnas, Canal y Medio de Pago; con el árbol el canal es una fila más, y la preferencia guardada usa una clave nueva para no aplicar los índices de la tabla vieja. Las otras tablas de Ventas (tendencias, proyección por mes, venta acumulada, balance, control de facturación) tienen cuatro o cinco columnas y **no scrollean a lo ancho**: un selector ahí sería un control que no resuelve nada. Conservan su primera columna fija, que es el default automático.
 
-Una diferencia visible: el pie de *Cobranza Proyectada* tiene sus rótulos en celdas con `colspan="4"` sobre todo el bloque descriptivo, y una celda así **no se fija**. Antes se fijaba —era `tfoot td:first-child`— y al scrollear estacionaba una banda de cuatro columnas de ancho encima de los importes. Ahora el rótulo se va con el scroll y sigue pegado abajo, que es lo que se quería ver.
+Una diferencia visible: las tres filas del pie de *Cobranza Proyectada* tienen su rótulo en una celda con `colspan="4"` sobre todo el bloque descriptivo, y una celda así **no se fija**. Al scrollear, el rótulo se va con el scroll y sigue pegado abajo, en vez de estacionar una banda de cuatro columnas de ancho encima de los importes.
 
 ---
 
 ## Relación con el módulo Cashflow
 
-Ventas es uno de los proveedores de datos del tablero de Cashflow. Expone tres series a través del contrato común, más la apertura por canal de las dos primeras:
+Ventas es uno de los proveedores de datos del tablero de Cashflow. Expone cuatro series a través del contrato común, más la apertura por canal de `COBRANZA`, `COSTO_COBRO` y `VENTA`:
 
 | Serie | Qué es |
 | --- | --- |
-| `COBRANZA` | La caja: cobranza estimada sobre ventas futuras. **Bruta** |
+| `COBRANZA` | La caja: cobranza estimada sobre ventas futuras. **Bruta**: antes del costo de cobro y del neteo |
+| `COSTO_COBRO` | El costo de cobro —comisiones de marketplace y procesadora, tasas de cuotas—, **en negativo**. Es una fila propia del tablero |
 | `NETEO_PRECHEQUEADO` | El neteo de cheques adelantados, **en negativo**. Es una fila propia del tablero |
 | `VENTA` | La venta proyectada con IVA. **No es caja**: en el tablero es una fila informativa que no entra en ninguna suma |
 
-Las tres salen de una única llamada a `proyectarCobranzas()`, que resuelve venta, cobranza y neteo en la misma pasada.
+`COBRANZA_<CANAL>` y `COSTO_COBRO_<CANAL>` —también en negativo— son la apertura por canal, y el registro las declara como `componentes` de su total. Franquicias y Mayoristas hoy dan costo cero: su mix no tiene costos cargados.
 
-### El neteo es una fila, no un descuento dentro de la cobranza
+Todas salen de una única llamada a `proyectarCobranzas()`, que resuelve venta, cobranza, costo y neteo en la misma pasada.
 
-`COBRANZA` y las cuatro `COBRANZA_<CANAL>` salían **netas**: el neteo se restaba adentro de cada serie. Ahora salen **brutas** y el neteo tiene su propia fila.
+### El neteo y el costo de cobro son filas, no descuentos dentro de la cobranza
 
-El motivo del cambio es que el neteo es información que el tablero tiene que mostrar, no una corrección que tenga que esconder. Restado adentro de la cobranza, la única forma de saber cuánto se había neteado era abrir otra pantalla; ahora el cuadro dice la cobranza proyectada, cuánto de eso ya estaba cobrado, y el neto.
+`COBRANZA` y las cuatro `COBRANZA_<CANAL>` salían **netas**: el neteo se restaba adentro de cada serie. Ahora salen **brutas**, y lo que se resta tiene su propia fila: el neteo de cheques adelantados y, con el mix en árbol, el costo de cobro.
 
-> **Las dos cosas a la vez restarían el neteo DOS VECES.** Si alguien vuelve a netear adentro de `COBRANZA` —o de las series por canal— con la fila `NETEO_PRECHEQUEADO` activa, el tablero muestra de menos exactamente el importe del neteo, **y no hay ninguna validación que lo detecte**: las dos series son legítimas por separado. La regla es una sola: el neteo se resta en un solo lugar, y ese lugar es la fila.
+El motivo es el mismo para los dos: son información que el tablero tiene que mostrar, no una corrección que tenga que esconder. Restado adentro de la cobranza, la única forma de saber cuánto se había neteado —o cuánto se quedan las procesadoras— era abrir otra pantalla; ahora el cuadro dice la cobranza proyectada, cuánto de eso ya estaba cobrado, cuánto cuesta cobrarla, y el neto.
 
-- **El signo se invierte en un solo lugar**, `VentasProvider::enNegativo()`. La fila del tablero es de `TIPO = 'INGRESO'` y el motor suma los ingresos: un ingreso negativo resta. Ponerla como `EGRESO` le daría signo −1 a un importe que ya viene negativo y el neteo terminaría *sumando*. Invertir mal el signo es invisible —el cuadro sigue dando un número razonable—, y por eso la inversión es una función estática con pruebas propias.
-- **La serie lleva el total de TODOS los canales**, no sólo Franquicias. Hoy todo el neteo es de franquicias porque son las que operan con pre-chequeado, pero eso es un hecho del padrón de clientes y no una regla del módulo: en cuanto un mayorista entregue cheques por adelantado, su neteo entra en la misma fila **sin tocar código**.
-- **No es componente de `COBRANZA`.** El registro declara en `componentes` qué series son apertura de qué total, y el validador rechaza que convivan. `NETEO_PRECHEQUEADO` no está ahí a propósito: no es una apertura de la cobranza sino una fila que convive con ella, y declararla componente haría que el validador rechace la combinación normal del tablero.
-- **La pestaña Ventas también muestra cobranza bruta.** El pie tenía una fila de neteo y una de *cobranza neta*, y las dos se fueron: dos lugares que tienen que dar lo mismo, sin ninguna garantía de que lo hagan. `VentasController` ya no expone `getNeteoPrechequeado` —quedó sin consumidores—, pero el circuito de cálculo sigue vivo: ahora lo consume el proveedor del tablero.
+> **Restar adentro y tener además la fila descontaría DOS VECES.** Si alguien vuelve a netear —o a restar el costo de cobro— adentro de `COBRANZA` o de las series por canal con su fila activa, el tablero muestra de menos exactamente ese importe, **y no hay ninguna validación que lo detecte**: las dos series son legítimas por separado. La regla es una sola: cada cosa se resta en un solo lugar, y ese lugar es su fila. Está escrito en el encabezado de `Class/Providers/VentasProvider.php`.
 
-La fila la crea `sql/cashflow_estructura_neteo_prechequeado.sql`. **Si ese script no se corre, el tablero muestra la cobranza en bruto y no avisa**, porque cada serie por separado es correcta.
+- **El signo se invierte en un solo lugar**, `VentasProvider::enNegativo()`. Las dos filas son de `TIPO = 'INGRESO'` y el motor suma los ingresos: un ingreso negativo resta. Ponerlas como `EGRESO` le daría signo −1 a un importe que ya viene negativo y terminarían *sumando*. Invertir mal el signo es invisible —el cuadro sigue dando un número razonable—, y por eso la inversión es una función estática con pruebas propias.
+- **Las dos computan** (`COMPUTA = 1`): *Total Ventas* es la cobranza **neta**, la que efectivamente entra.
+- **El neteo lleva el total de TODOS los canales**, no sólo Franquicias. Hoy todo el neteo es de franquicias porque son las que operan con pre-chequeado, pero eso es un hecho del padrón de clientes y no una regla del módulo: en cuanto un mayorista entregue cheques por adelantado, su neteo entra en la misma fila **sin tocar código**. El costo de cobro, igual: la fila usa `COSTO_COBRO`, el total de los cuatro canales.
+- **Ninguna de las dos es componente de `COBRANZA`.** El registro declara en `componentes` qué series son apertura de qué total, y el validador rechaza que convivan. Estas dos no están ahí a propósito: no son una apertura de la cobranza sino filas que conviven con ella, y declararlas componentes haría que el validador rechace la combinación normal del tablero.
+- **La pestaña Ventas muestra la bruta y, al lado, la neta de costos.** Las columnas arrancan en Bruto —lo que muestra la fila del canal en el tablero— y el pie muestra siempre bruta, costos y neta, con los tres importes calculados en el servidor. **El neteo no se muestra ahí**: el pie tenía una fila de neteo y se fue al tablero, porque eran dos lugares que tenían que dar lo mismo sin ninguna garantía de que lo hicieran. `VentasController` ya no expone `getNeteoPrechequeado`; el circuito sigue vivo y lo consume el proveedor del tablero.
+
+La fila del neteo la crea `sql/cashflow_estructura_neteo_prechequeado.sql`, y la del costo de cobro `sql/cashflow_estructura_costos_cobro.sql`, que la ubica **entre Ecommerce y Total Ventas** leyendo los órdenes reales de la base (en `central`, 50 y 60: la fila entra en 55). **Si cualquiera de los dos no se corre, el tablero muestra la cobranza sin restar eso y no avisa**, porque cada serie por separado es correcta.
+
+### Por qué las filas de Ventas no se agrupan en un renglón
+
+Se evaluó dibujar las filas por canal, el neteo y el costo de cobro en un solo renglón que se abre, con el mecanismo de filas agrupadas de `sql/cashflow_estructura_grupos.sql`, y **se descartó**. Un grupo tiene que ser una corrida de filas consecutivas, y el neteo está entre Franquicias y Mayoristas, así que el grupo tendría que llevar **todas** las filas de ingreso de la sección: cerrado, el renglón daría exactamente *Total Ventas*, y el cuadro mostraría el mismo número dos veces, uno abajo del otro. La fila de costos queda suelta debajo de Ecommerce, y *Total Ventas* es la cobranza neta. El mecanismo de grupos no se tocó.
 
 `proyectarVentas()` y `proyectarCobranzas()` aceptan un `Horizonte` opcional. La pestaña Ventas no lo pasa y arma el suyo desde los parámetros; el Cashflow **sí** lo pasa, para que la serie caiga exactamente en las mismas columnas sobre las que consolida el resto del tablero.
 

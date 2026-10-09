@@ -74,91 +74,56 @@
              queda abajo es lo que de verdad sólo afecta a esta pestaña. -->
 
         <!-- ========================================================
-             MIX DE COBRO Y PLAZOS
+             MIX DE COBRO Y PLAZOS: EL ÁRBOL
              ======================================================== -->
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <div>
                     <h5 class="mb-0">Mix de Cobro y Plazos</h5>
                     <small class="text-muted">
-                        Porcentaje y días de acreditación por canal y medio de pago.
-                        Los medios <strong>activos</strong> de cada canal deben sumar 100%;
-                        los inhabilitados no se usan en la proyección ni aparecen en la
-                        tabla de cobranza.
+                        Un árbol por canal: Medio de pago › Tipo de tarjeta › Procesadora › Cuotas, y en
+                        Ecommerce un Marketplace arriba de todo. Cada nodo carga <strong>lo suyo</strong>:
+                        su % entre sus hermanos, su costo, su tasa y sus días. Los hermanos
+                        <strong>activos</strong> suman 100%; el costo y la tasa se suman a lo largo
+                        de la rama, y los días los pone el nivel más cercano que los tenga.
                     </small>
                 </div>
-                <div class="d-flex gap-2">
-                    <!-- Lo engancha Js/tabla-export.js por el data-exportar. El
-                         mix no se ordena (data-orden="no") pero sí se exporta:
-                         es la configuración que explica la proyección. -->
+                <div class="d-flex gap-2 flex-shrink-0">
+                    <!-- Lo engancha Js/tabla-export.js por el data-exportar. Baja lo
+                         que se ve, con el camino completo de cada nodo: cada nombre
+                         lleva su camino en un texto que la pantalla no muestra. -->
                     <button class="btn btn-sm btn-outline-success" data-exportar="tablaMix"
-                            data-exportar-nombre="Parametros_Mix_De_Cobro"
+                            data-exportar-nombre="Parametros_Mix_De_Cobro" data-lectura
                             title="Exportar a Excel lo que se está viendo">
                         <i class="fas fa-file-excel me-1"></i> Exportar
                     </button>
-                    <?php if ($edita): ?>
-                    <button id="btnNuevoMedio" class="btn btn-sm btn-outline-primary">
-                        <i class="fas fa-plus me-1"></i> Agregar medio
-                    </button>
-                    <?php endif; ?>
-                    <?php if ($edita): ?>
-                    <button id="btnGuardarMix" class="btn btn-sm btn-primary" disabled>
-                        <i class="fas fa-floppy-disk me-1"></i> Guardar Mix
-                    </button>
-                    <?php endif; ?>
                 </div>
             </div>
 
-            <!-- Alta de medio de pago -->
-            <?php if ($edita): ?>
-            <div class="card-body border-bottom" id="formNuevoMedio" style="display: none;">
-                <div class="row g-2 align-items-end">
-                    <div class="col-md-3">
-                        <label class="form-label form-label-sm">Canal</label>
-                        <select id="nuevoCanal" class="form-select form-select-sm">
-                            <!-- Se genera dinámicamente -->
-                        </select>
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label form-label-sm">Medio de Pago</label>
-                        <input type="text" id="nuevoMedio" class="form-control form-control-sm"
-                               maxlength="30" placeholder="Ej: Mercado Pago">
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label form-label-sm">Días Acreditación</label>
-                        <input type="number" id="nuevoDias" class="form-control form-control-sm"
-                               min="0" step="1" value="0">
-                    </div>
-                    <div class="col-md-2 d-flex gap-2">
-                        <button id="btnAgregarMedio" class="btn btn-sm btn-primary flex-fill">
-                            <i class="fas fa-check me-1"></i> Agregar
-                        </button>
-                        <button id="btnCancelarMedio" class="btn btn-sm btn-outline-secondary">
-                            <i class="fas fa-xmark"></i>
-                        </button>
-                    </div>
-                </div>
-                <div class="param-hint mt-2">
-                    El medio nuevo entra <strong>inhabilitado y en 0%</strong>. Para usarlo,
-                    activalo y reacomodá los porcentajes del canal hasta que sumen 100%.
-                </div>
-            </div>
-            <?php endif; ?>
+            <!-- Qué script falta, si falta: sin él, el mix se muestra sólo para consulta -->
+            <div id="mixAvisos" class="px-3 pt-3"></div>
 
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <!-- data-orden="no": no es un listado, es un formulario. Los
-                         porcentajes tienen que sumar 100% POR CANAL, y las filas
-                         de un canal vienen juntas justamente para poder leer esa
-                         suma; ordenar por otra columna las desarma. -->
+                    <!-- data-orden="no": es un árbol. Ordenar por una columna
+                         separaría cada nodo de su rama y de su grupo de hermanos,
+                         que es lo que tiene que sumar 100%.
+                         Agregar, Guardar y el formulario de alta los dibuja el JS
+                         en la fila de cada canal y de cada nodo, sólo con permiso
+                         de edición y con el script corrido. -->
                     <table id="tablaMix" class="table table-hover mb-0" data-orden="no">
                         <thead>
                             <tr>
-                                <th>Canal</th>
-                                <th>Medio de Pago</th>
-                                <th class="text-center" style="width: 110px;">Activo</th>
-                                <th class="text-center" style="width: 170px;">% Mix</th>
-                                <th class="text-center" style="width: 170px;">Días Acreditación</th>
+                                <th>Nombre</th>
+                                <th style="width: 150px;">Nivel</th>
+                                <th class="text-center" style="width: 120px;">%</th>
+                                <th class="text-center" style="width: 160px;"
+                                    title="Lo que cobra este nivel. En gris, el acumulado de costo + tasa de toda la rama">Costo %</th>
+                                <th class="text-center" style="width: 120px;">Tasa %</th>
+                                <th class="text-center" style="width: 170px;"
+                                    title="Vacío: los define un nivel de arriba. En gris, de dónde los hereda">Días</th>
+                                <th class="text-center" style="width: 80px;">Activo</th>
+                                <th style="width: 200px;">Última edición</th>
                             </tr>
                         </thead>
                         <tbody id="mixBody">

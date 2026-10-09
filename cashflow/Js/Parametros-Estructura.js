@@ -7,8 +7,8 @@
  *
  * VIVE APARTE DE Parametros.js A PROPÓSITO. Ese archivo tiene 730 líneas, todos
  * sus ids del DOM son globales y sus selectores de colección recorren TODO el
- * documento (validarMix suma sobre todos los .mix-porcentaje de la página, no
- * sobre los de su panel). Meter este editor ahí adentro los haría pisarse en
+ * documento (validarRespaldo suma sobre todos los .respaldo-input de la página,
+ * no sobre los de su panel). Meter este editor ahí adentro los haría pisarse en
  * silencio. Acá el estado es propio y las clases llevan prefijo cfe-.
  *
  * CARGA PEREZOSA: la estructura se pide recién al abrir la sub-pestaña. Si se

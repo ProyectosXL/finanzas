@@ -705,7 +705,7 @@ class CashflowEstructura {
      *
      * Siembra primero una entrada por cada fila y seccion recibida, de modo que
      * lo que falta se informe como INVALIDO y no como ausente. Es la misma idea
-     * que Parametros::validarMix().
+     * que MixCobro::resolver() con un canal sin ningun nodo.
      *
      * @param array $secciones Filas de CONF_SECCION
      * @param array $filas Filas de CONF_FILA
@@ -1423,8 +1423,8 @@ class CashflowEstructura {
      * Que entre inhabilitada no es un detalle: una fila inhabilitada NO puede
      * invalidar la estructura, asi que el alta no necesita validar el arbol
      * completo ni puede romper un tablero que estaba bien. Es el mismo criterio
-     * con el que Parametros::addMixCobro da de alta un medio de pago en 0% e
-     * inhabilitado.
+     * con el que MixCobro::agregarNodo() da de alta un nodo del mix de cobro en
+     * 0% e inhabilitado.
      *
      * @param string $nombre
      * @param string $seccion Codigo de seccion
