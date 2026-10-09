@@ -895,4 +895,120 @@ class MixCobro {
 
         return $fila;
     }
+
+    /* ====================================================================
+       LECTURA DE BASE
+       ==================================================================== */
+
+    /** @var Conexion */
+    private $conn;
+
+    /** @var bool|null Cache del sondeo de la tabla */
+    private $tabla = null;
+
+    function __construct() {
+        require_once __DIR__ . '/../../class/conexion.php';
+        $this->conn = new Conexion;
+    }
+
+    /** La conexion a central, o una excepcion que diga por que no */
+    protected function conectar() {
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        return $cid;
+    }
+
+    /**
+     * Si ya se corrio sql/cashflow_ventas_mix_nodo.sql.
+     *
+     * Sin la tabla nada se cae: el mix sale del plano (getArbol()) y
+     * Parametros lo muestra solo lectura, diciendo que script correr.
+     *
+     * @return bool
+     */
+    public function tablaCreada() {
+        if ($this->tabla !== null) {
+            return $this->tabla;
+        }
+
+        $stmt = sqlsrv_query($this->conectar(), "SELECT OBJECT_ID('dbo." . self::TABLA . "', 'U') AS T");
+
+        if ($stmt === false) {
+            throw new Exception(self::errorSql('Error al verificar la tabla del mix de cobro'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->tabla = ($row && $row['T'] !== null);
+
+        return $this->tabla;
+    }
+
+    /**
+     * Los nodos de la tabla nueva, normalizados. Todos, activos o no: la
+     * regla necesita los inactivos para saber que sacan de juego.
+     *
+     * @return array
+     */
+    public function getNodos() {
+        $sql = "SELECT ID, CANAL, ID_PADRE, NIVEL, NOMBRE, PORCENTAJE, COSTO, TASA,
+                       DIAS_ACREDITACION, ACTIVO, ORDEN, USUARIO_MODIF, FECHA_MODIF
+                FROM " . self::TABLA . "
+                ORDER BY CANAL, ORDEN, ID";
+
+        $stmt = sqlsrv_query($this->conectar(), $sql);
+
+        if ($stmt === false) {
+            throw new Exception(self::errorSql('Error al leer el mix de cobro'));
+        }
+
+        $filas = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            // Con la hora: es el "cuando" de la auditoria (Js/auditoria.js)
+            $row['FECHA_MODIF'] = ($row['FECHA_MODIF'] instanceof DateTime)
+                ? $row['FECHA_MODIF']->format('Y-m-d H:i:s') : $row['FECHA_MODIF'];
+            $filas[] = $row;
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return self::normalizar($filas);
+    }
+
+    /**
+     * El mix vigente, de donde sea que salga.
+     *
+     * CON LA TABLA NUEVA, el mix plano DEJA DE LEERSE, aunque la tabla este
+     * vacia: un arbol vacio es un mix sin medios -y el motor lo avisa-, no
+     * una senal para volver al mix viejo. Si no, borrar el ultimo nodo de un
+     * canal resucitaria sin aviso un mix que ya nadie edita.
+     *
+     * @return array ['origen' => 'NODO'|'PLANO', 'nodos' => [...]]
+     */
+    public function getArbol() {
+        if ($this->tablaCreada()) {
+            return ['origen' => 'NODO', 'nodos' => $this->getNodos()];
+        }
+
+        $parametros = new Parametros();
+
+        return ['origen' => 'PLANO', 'nodos' => self::desdeMixPlano($parametros->getMixCobro())];
+    }
+
+    /** El mensaje de un error de sqlsrv, con su contexto */
+    private static function errorSql($contexto) {
+        $errorMsg = $contexto . ': ';
+
+        foreach ((sqlsrv_errors() ?: []) as $error) {
+            $errorMsg .= $error['message'] . ' ';
+        }
+
+        return $errorMsg;
+    }
 }

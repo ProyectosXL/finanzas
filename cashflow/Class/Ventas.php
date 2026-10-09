@@ -9,6 +9,7 @@ require_once __DIR__ . '/Echeqs.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
 require_once __DIR__ . '/DiasHabiles.php';
+require_once __DIR__ . '/MixCobro.php';
 
 /**
  * Ventas
@@ -24,9 +25,21 @@ require_once __DIR__ . '/DiasHabiles.php';
  *   VentaConIVA(M)         = VentaNetaProyectada(M) * (1 + alicuota_iva)
  *   VentaCanal(c, M)       = VentaConIVA(M) * %Participacion(c, M)
  *   VentaDiaria(c, d)      = VentaCanal(c, M(d)) / (dias_del_mes - feriados_comercio)
- *   Monto(c, mp, d)        = VentaDiaria(c, d) * %Mix(c, mp)
- *   FechaAcreditacion      = d + DiasAcreditacion(c, mp), corrida al proximo
- *                            dia bancario habil si cae en no habil
+ *   Bruto(c, h, d)         = VentaDiaria(c, d) * %efectivo(h)
+ *   Costo(c, h, d)         = Bruto(c, h, d) * (costo + tasa acumulados de h)
+ *   Neto(c, h, d)          = Bruto - Costo
+ *   FechaAcreditacion      = d + Dias(h), corrida al proximo dia bancario
+ *                            habil si cae en no habil
+ *
+ * h es una HOJA del arbol del mix de cobro del canal (Medio de pago > Tipo de
+ * tarjeta > Procesadora > Cuotas, y en Ecommerce un Marketplace arriba de
+ * todo). Su % efectivo es el producto de los porcentajes de su rama, su costo
+ * y su tasa se suman a lo largo de la rama y sus dias son los del nivel mas
+ * cercano que los tenga. La regla vive en MixCobro::resolver().
+ *
+ * LA COBRANZA SIGUE SIENDO BRUTA. El costo de cobro (comisiones y tasas) es
+ * una fila propia del tablero, en negativo -serie VENTAS.COSTO_COBRO-, con el
+ * mismo criterio que el neteo de cheques adelantados. Ver VentasProvider.
  *
  * LOS DOS CALENDARIOS
  * -------------------
@@ -476,15 +489,6 @@ class Ventas {
         }
 
         return true;
-    }
-
-    /**
-     * Mix de medios de cobro y plazos por canal
-     * @param bool $soloActivos Si true, devuelve solo los medios activos
-     * @return array Listado del mix
-     */
-    public function getMixCobro($soloActivos = false) {
-        return $this->parametros->getMixCobro($soloActivos);
     }
 
     /**
@@ -1125,30 +1129,47 @@ class Ventas {
         }
 
         /* ---- 8. Cobranza -------------------------------------------------- */
-        $mix = $this->getMixCobro(true);
+        // El mix es un arbol y lo resuelve MixCobro::resolver(), la MISMA regla
+        // que usan Parametros y el tablero. Sin el script de la tabla nueva,
+        // getArbol() devuelve el mix plano como un arbol de un nivel: el motor
+        // recorre hojas igual, y da la cobranza de siempre.
+        $mixCobro = new MixCobro();
+        $mix = $mixCobro->getArbol();
+        $arbol = MixCobro::resolver($mix['nodos']);
 
-        if (count($mix) === 0) {
-            throw new Exception('No hay medios de cobro activos en RO_T_CASHFLOW_VENTAS_MIX');
+        // UN ARBOL INVALIDO NO CORTA LA PROYECCION: se calcula con lo que hay
+        // y se avisa como CRITICO, diciendo que rama y cuanta venta queda
+        // afuera. Antes un canal sin medios tiraba una excepcion y se llevaba
+        // puesta la pestana entera, incluida la venta, que no dependia del mix.
+        foreach (self::avisosDelMix($arbol, self::ventaPorCanal($ventaDiaria), $mix['origen']) as $a) {
+            $this->warnUnaVez($a);
         }
 
         $maxDias = 0;
 
-        foreach ($mix as $m) {
-            if ($m['DIAS_ACREDITACION'] > $maxDias) {
-                $maxDias = $m['DIAS_ACREDITACION'];
+        foreach ($arbol['nodos'] as $n) {
+            if ($n['hoja'] && $n['dias'] !== null && $n['dias'] > $maxDias) {
+                $maxDias = $n['dias'];
             }
         }
 
-        // Se pide el calendario con margen: el plazo maximo mas holgura para el
-        // corrimiento a habil (fines de semana largos).
+        // Se pide el calendario con margen: el plazo maximo de las hojas en
+        // juego mas holgura para el corrimiento a habil (fines de semana
+        // largos).
         $calFin = (new DateTime($ventanaFin))
             ->modify('+' . ($maxDias + 30) . ' days')
             ->format('Y-m-d');
 
         $habiles = $this->getDiasHabiles($hoy->format('Y-m-d'), $calFin);
 
-        $cobranza = $this->calcularCobranza(
-            $ventaDiaria, $mix, $habiles, $dias, $meses, $diasSet
+        // El corrimiento a habil es el de siempre, proximoHabil(), y entra
+        // como funcion: asi cobranzaPorHojas() es pura y se prueba con un
+        // calendario armado a mano.
+        $cobranza = self::cobranzaPorHojas(
+            $ventaDiaria, $arbol, $dias, $meses, $diasSet,
+            function ($fecha) use ($habiles) {
+                return $this->proximoHabil($fecha, $habiles);
+            }
         );
 
         $cobranza['neteo_prechequeado'] = $this->getNeteoPrechequeado(
@@ -1157,7 +1178,13 @@ class Ventas {
         );
 
         $resultado['cobranza'] = $cobranza;
-        $resultado['mix'] = $mix;
+        $resultado['mix'] = [
+            'origen' => $mix['origen'],
+            'valido' => $arbol['valido'],
+            'errores' => $arbol['errores']
+        ];
+        $resultado['kpi']['cobranza_neta_tramo'] = $cobranza['neto']['total_tramo'];
+        $resultado['kpi']['cobranza_neta_horizonte'] = $cobranza['neto']['total_horizonte'];
         $resultado['kpi']['cobranza_tramo'] = $cobranza['total_tramo'];
         $resultado['kpi']['cobranza_horizonte'] = $cobranza['total_horizonte'];
         $resultado['warnings'] = Aviso::textos($this->warnings);
@@ -1408,98 +1435,86 @@ class Ventas {
     }
 
     /**
-     * Resuelve la cobranza: para cada dia de venta, cada canal y cada medio de
-     * pago se calcula el monto y la fecha real de acreditacion, corriendo al
-     * proximo dia bancario habil. Recien despues se agrega por dia y por mes.
+     * Resuelve la cobranza recorriendo las HOJAS del arbol del mix: para cada
+     * dia de venta, cada canal y cada hoja se calcula el bruto, su costo y la
+     * fecha real de acreditacion, corriendo al proximo dia bancario habil.
+     * Recien despues se agrega por dia y por mes.
+     *
+     *   Bruto(hoja, d) = VentaDiaria(canal, d) * %efectivo(hoja)
+     *   Costo(hoja, d) = Bruto(hoja, d) * (costo + tasa acumulados de la hoja)
+     *   Neto(hoja, d)  = Bruto - Costo
+     *   Acreditacion   = d + dias(hoja), corrida al proximo habil bancario
+     *
+     * EL COSTO CAE EN LA MISMA FECHA QUE SU BRUTO: es lo que la procesadora
+     * se queda de esa acreditacion, no un pago aparte con su propio
+     * calendario. Y UNA VENTA EN CUOTAS SE ACREDITA ENTERA a los dias de su
+     * hoja: el plazo de la hoja ya es el que se pacto con quien acredita
+     * (adelanto de cuotas), no se reparte por mes.
      *
      * NO se usa el prorrateo lineal n/r del Excel: la fecha se resuelve dia por
      * dia. Que la cobranza se concentre los lunes es un efecto del corrimiento
      * (acumula sabado, domingo y lunes), no una regla aparte.
      *
+     * QUE SE DEVUELVE. La raiz es el BRUTO, con las mismas ramas de siempre
+     * -'subtotal_*' por canal y 'total_*'-, porque es lo que lee el tablero
+     * como COBRANZA: no cambio de significado. 'costo' y 'neto' traen la
+     * misma forma. Las ramas 'dias' y 'meses' van por clave de NODO, hojas y
+     * nodos con hijos: cada nodo suma lo de su rama, asi la pantalla dibuja
+     * los subtotales del arbol sin recalcular nada. 'arbol' son los nodos en
+     * juego en orden de dibujo, con todo lo que resolvio la regla.
+     *
+     * EL NETO SE CALCULA AL FINAL COMO BRUTO - COSTO, celda por celda, y no
+     * acumulando Bruto*(1 - carga): asi bruto - costo = neto es exacto en cada
+     * celda y en cada total, que es lo que el pie de la pestana muestra.
+     *
+     * UNA HOJA SIN DIAS NO SE PROYECTA: sin plazo no hay fecha, y una fecha
+     * inventada seria plata en un dia que nadie eligio. avisosDelMix() dice
+     * cuanta venta queda afuera. Lo que se acredita fuera del horizonte se
+     * descarta, como siempre.
+     *
+     * Es estatica y pura: el calendario entra como $corrimiento, la funcion
+     * que corre una fecha teorica al proximo habil. El motor le pasa
+     * proximoHabil().
+     *
      * @param array $ventaDiaria Mapa 'Y-m-d' => [CANAL => monto]
-     * @param array $mix Mix de cobro activo
-     * @param array $habiles Mapa 'Y-m-d' => bool de dias bancarios habiles
+     * @param array $arbol Resultado de MixCobro::resolver()
      * @param array $dias Eje de dias del tramo
      * @param array $meses Eje de meses del horizonte
      * @param array $diasSet Set de fechas del tramo
-     * @return array Grilla de cobranza por canal y por canal x medio de pago
+     * @param callable $corrimiento fn('Y-m-d') => 'Y-m-d' habil
+     * @return array Grilla bruta + ['costo' => grilla, 'neto' => grilla,
+     *               'arbol' => [...], 'filas' => [hojas]]
      */
-    private function calcularCobranza($ventaDiaria, $mix, $habiles, $dias, $meses, $diasSet) {
+    public static function cobranzaPorHojas($ventaDiaria, $arbol, $dias, $meses, $diasSet, $corrimiento) {
         $mesesClaves = array_column($meses, 'clave');
         $mesesSet = array_flip($mesesClaves);
 
-        // Mix indexado por canal
-        $mixPorCanal = [];
+        // Los nodos en juego, en orden de dibujo, y las hojas que se proyectan
+        // con la lista de claves a las que suman: ellas y sus ancestros.
+        $filasArbol = [];
+        $hojasPorCanal = [];
 
-        foreach ($mix as $m) {
-            $mixPorCanal[$m['CANAL']][] = $m;
-        }
-
-        // Estructura de salida: una fila por canal x medio de pago (aunque el
-        // porcentaje sea cero, la fila se muestra igual) y subtotales por canal
-        $filas = [];
-
-        foreach (Parametros::CANALES as $canal) {
-            if (!isset($mixPorCanal[$canal])) {
+        foreach ($arbol['nodos'] as $clave => $n) {
+            if (!$n['en_juego']) {
                 continue;
             }
 
-            foreach ($mixPorCanal[$canal] as $m) {
-                $filas[] = [
-                    'canal' => $canal,
-                    'medio_pago' => $m['MEDIO_PAGO'],
-                    'porcentaje' => $m['PORCENTAJE'],
-                    'dias_acreditacion' => $m['DIAS_ACREDITACION'],
-                    'clave' => $canal . '|' . $m['MEDIO_PAGO']
+            $filasArbol[] = self::filaArbol($n);
+
+            if ($n['hoja'] && $n['dias'] !== null) {
+                $hojasPorCanal[$n['canal']][] = [
+                    'clave' => $clave,
+                    'porcentaje' => $n['porcentaje_efectivo'],
+                    'carga' => $n['carga'],
+                    'dias' => $n['dias'],
+                    'suma_a' => array_column($n['camino'], 'clave')
                 ];
             }
         }
 
-        $grilla = [
-            'filas' => $filas,
-            'dias' => [],
-            'meses' => [],
-            'subtotal_dias' => [],
-            'subtotal_meses' => [],
-            'total_dias' => [],
-            'total_meses' => [],
-            'total_tramo' => 0,
-            'total_horizonte' => 0
-        ];
-
-        foreach ($filas as $f) {
-            $grilla['dias'][$f['clave']] = [];
-            $grilla['meses'][$f['clave']] = [];
-
-            foreach ($dias as $d) {
-                $grilla['dias'][$f['clave']][$d['fecha']] = 0;
-            }
-
-            foreach ($mesesClaves as $clave) {
-                $grilla['meses'][$f['clave']][$clave] = 0;
-            }
-        }
-
-        foreach (Parametros::CANALES as $canal) {
-            $grilla['subtotal_dias'][$canal] = [];
-            $grilla['subtotal_meses'][$canal] = [];
-
-            foreach ($dias as $d) {
-                $grilla['subtotal_dias'][$canal][$d['fecha']] = 0;
-            }
-
-            foreach ($mesesClaves as $clave) {
-                $grilla['subtotal_meses'][$canal][$clave] = 0;
-            }
-        }
-
-        foreach ($dias as $d) {
-            $grilla['total_dias'][$d['fecha']] = 0;
-        }
-
-        foreach ($mesesClaves as $clave) {
-            $grilla['total_meses'][$clave] = 0;
-        }
+        $claves = array_column($filasArbol, 'clave');
+        $bruto = self::grillaCobranzaVacia($claves, $dias, $mesesClaves);
+        $costo = self::grillaCobranzaVacia($claves, $dias, $mesesClaves);
 
         // Cache de corrimiento a habil: muchas fechas de venta distintas caen en
         // la misma fecha de acreditacion teorica.
@@ -1507,50 +1522,241 @@ class Ventas {
 
         foreach ($ventaDiaria as $fecha => $porCanal) {
             foreach ($porCanal as $canal => $ventaDia) {
-                if ($ventaDia == 0 || !isset($mixPorCanal[$canal])) {
+                if ($ventaDia == 0 || !isset($hojasPorCanal[$canal])) {
                     continue;
                 }
 
-                foreach ($mixPorCanal[$canal] as $m) {
-                    $monto = $ventaDia * $m['PORCENTAJE'];
+                foreach ($hojasPorCanal[$canal] as $h) {
+                    $monto = $ventaDia * $h['porcentaje'];
 
                     if ($monto == 0) {
                         continue;
                     }
 
-                    $teorica = date('Y-m-d', strtotime($fecha . ' +' . $m['DIAS_ACREDITACION'] . ' days'));
+                    $teorica = date('Y-m-d', strtotime($fecha . ' +' . $h['dias'] . ' days'));
 
                     if (!isset($cacheHabil[$teorica])) {
-                        $cacheHabil[$teorica] = $this->proximoHabil($teorica, $habiles);
+                        $cacheHabil[$teorica] = call_user_func($corrimiento, $teorica);
                     }
 
                     $acred = $cacheHabil[$teorica];
-                    $claveFila = $canal . '|' . $m['MEDIO_PAGO'];
 
                     if (isset($diasSet[$acred])) {
-                        $grilla['dias'][$claveFila][$acred] += $monto;
-                        $grilla['subtotal_dias'][$canal][$acred] += $monto;
-                        $grilla['total_dias'][$acred] += $monto;
-                        $grilla['total_tramo'] += $monto;
-                        $grilla['total_horizonte'] += $monto;
+                        $rama = 'dias';
+                        $col = $acred;
+                    } elseif (isset($mesesSet[substr($acred, 0, 7)])) {
+                        $rama = 'meses';
+                        $col = substr($acred, 0, 7);
+                    } else {
+                        // Fuera del horizonte: se descarta.
                         continue;
                     }
 
-                    $claveMes = substr($acred, 0, 7);
-
-                    if (isset($mesesSet[$claveMes])) {
-                        $grilla['meses'][$claveFila][$claveMes] += $monto;
-                        $grilla['subtotal_meses'][$canal][$claveMes] += $monto;
-                        $grilla['total_meses'][$claveMes] += $monto;
-                        $grilla['total_horizonte'] += $monto;
-                    }
-
-                    // Fuera del horizonte: se descarta.
+                    self::sumarCobranza($bruto, $rama, $col, $canal, $h['suma_a'], $monto);
+                    self::sumarCobranza($costo, $rama, $col, $canal, $h['suma_a'], $monto * $h['carga']);
                 }
             }
         }
 
-        return $grilla;
+        $hojas = array_values(array_filter($filasArbol, function ($f) { return $f['hoja']; }));
+
+        return array_merge($bruto, [
+            'arbol' => $filasArbol,
+            'filas' => $hojas,
+            'costo' => $costo,
+            'neto' => self::restarGrilla($bruto, $costo)
+        ]);
+    }
+
+    /** Lo que viaja de un nodo a la pantalla: lo que resolvio la regla */
+    private static function filaArbol($n) {
+        return [
+            'clave' => $n['clave'],
+            'canal' => $n['canal'],
+            'padre' => $n['padre'],
+            'nivel' => $n['nivel'],
+            'rotulo' => $n['rotulo'],
+            'nombre' => $n['nombre'],
+            'camino' => $n['camino'],
+            'profundidad' => $n['profundidad'],
+            'hoja' => $n['hoja'],
+            'porcentaje_efectivo' => $n['porcentaje_efectivo'],
+            'costo' => $n['costo'],
+            'tasa' => $n['tasa'],
+            'carga' => $n['carga'],
+            'carga_ponderada' => $n['carga_ponderada'],
+            'dias' => $n['dias'],
+            'dias_de' => $n['dias_de']
+        ];
+    }
+
+    /**
+     * Una grilla de cobranza en cero: por nodo, por canal y total, con las dos
+     * ramas del eje. Todos los nodos y todos los canales tienen su fila
+     * aunque no les toque nada: una hoja al 0% se muestra igual.
+     */
+    private static function grillaCobranzaVacia($claves, $dias, $mesesClaves) {
+        $cerosDias = [];
+        $cerosMeses = [];
+
+        foreach ($dias as $d) {
+            $cerosDias[$d['fecha']] = 0;
+        }
+
+        foreach ($mesesClaves as $clave) {
+            $cerosMeses[$clave] = 0;
+        }
+
+        $g = [
+            'dias' => [], 'meses' => [],
+            'subtotal_dias' => [], 'subtotal_meses' => [],
+            'total_dias' => $cerosDias, 'total_meses' => $cerosMeses,
+            'total_tramo' => 0, 'total_horizonte' => 0
+        ];
+
+        foreach ($claves as $clave) {
+            $g['dias'][$clave] = $cerosDias;
+            $g['meses'][$clave] = $cerosMeses;
+        }
+
+        foreach (Parametros::CANALES as $canal) {
+            $g['subtotal_dias'][$canal] = $cerosDias;
+            $g['subtotal_meses'][$canal] = $cerosMeses;
+        }
+
+        return $g;
+    }
+
+    /** Suma un importe en una columna: a la hoja, a sus ancestros, al canal y al total */
+    private static function sumarCobranza(&$g, $rama, $col, $canal, $claves, $monto) {
+        foreach ($claves as $clave) {
+            $g[$rama][$clave][$col] += $monto;
+        }
+
+        $g['subtotal_' . $rama][$canal][$col] += $monto;
+        $g['total_' . $rama][$col] += $monto;
+
+        if ($rama === 'dias') {
+            $g['total_tramo'] += $monto;
+        }
+
+        $g['total_horizonte'] += $monto;
+    }
+
+    /** a - b, celda por celda, con la misma forma */
+    private static function restarGrilla($a, $b) {
+        $r = $a;
+
+        foreach (['dias', 'meses', 'subtotal_dias', 'subtotal_meses'] as $rama) {
+            foreach ($a[$rama] as $clave => $cols) {
+                foreach ($cols as $col => $v) {
+                    $r[$rama][$clave][$col] = $v - $b[$rama][$clave][$col];
+                }
+            }
+        }
+
+        foreach (['total_dias', 'total_meses'] as $rama) {
+            foreach ($a[$rama] as $col => $v) {
+                $r[$rama][$col] = $v - $b[$rama][$col];
+            }
+        }
+
+        $r['total_tramo'] = $a['total_tramo'] - $b['total_tramo'];
+        $r['total_horizonte'] = $a['total_horizonte'] - $b['total_horizonte'];
+
+        return $r;
+    }
+
+    /**
+     * La venta proyectada de cada canal en toda la ventana, para decir cuanta
+     * plata deja afuera un mix invalido.
+     *
+     * @param array $ventaDiaria Mapa 'Y-m-d' => [CANAL => monto]
+     * @return array Mapa CANAL => importe
+     */
+    public static function ventaPorCanal($ventaDiaria) {
+        $v = [];
+
+        foreach (Parametros::CANALES as $canal) {
+            $v[$canal] = 0;
+        }
+
+        foreach ($ventaDiaria as $porCanal) {
+            foreach ($porCanal as $canal => $monto) {
+                $v[$canal] = (isset($v[$canal]) ? $v[$canal] : 0) + $monto;
+            }
+        }
+
+        return $v;
+    }
+
+    /**
+     * Los avisos de un mix invalido, para la pestana Ventas y el tablero.
+     *
+     * SON CRITICOS (danger), y no una advertencia: un grupo que no suma 100%,
+     * una hoja sin dias o un canal sin hojas hacen que el tablero muestre
+     * cobranza de menos -o de mas- sin que el numero se vea raro. Parametros
+     * no deja guardar un arbol asi, de modo que si aparece es que la tabla se
+     * toco por otro lado, y eso hay que verlo el mismo dia.
+     *
+     * Cada aviso dice el canal y la rama, y cuanta venta queda afuera cuando
+     * se puede calcular: la fraccion que da MixCobro::resolver() por la venta
+     * proyectada del canal en toda la ventana. Es venta, no cobranza: parte de
+     * esa venta se acreditaria despues del horizonte y no se veria igual.
+     *
+     * Sin el script de la tabla nueva, ademas, un aviso informativo: el mix
+     * sale del plano y no se puede editar hasta correrlo.
+     *
+     * @param array $arbol Resultado de MixCobro::resolver()
+     * @param array $ventaPorCanal Mapa CANAL => venta de la ventana
+     * @param string $origen 'NODO' | 'PLANO'
+     * @return array Avisos con nivel
+     */
+    public static function avisosDelMix($arbol, $ventaPorCanal, $origen) {
+        $avisos = [];
+        $seccion = 'Mix de cobro';
+        $donde = ' Corregilo en Parámetros › Ventas › Mix de Cobro y Plazos.';
+
+        foreach ($arbol['errores'] as $e) {
+            $venta = isset($ventaPorCanal[$e['canal']]) ? $ventaPorCanal[$e['canal']] : 0;
+            $importe = abs($e['afuera']) * $venta;
+            $plata = '$ ' . number_format($importe, 2, ',', '.');
+            $parte = MixCobro::porcentajeTexto(abs($e['afuera']));
+
+            switch ($e['tipo']) {
+                case 'SIN_DIAS':
+                    $texto = $e['texto'] . ' Esa parte no se proyecta: queda fuera de la cobranza el '
+                        . $parte . ' de la venta del canal, ' . $plata . '.';
+                    break;
+
+                case 'SUMA':
+                    $texto = $e['texto'] . ($e['afuera'] >= 0
+                        ? ' Queda fuera de la cobranza el ' . $parte . ' de la venta del canal, '
+                            . $plata . '.'
+                        : ' Se proyecta cobranza de más: el ' . $parte . ' de la venta del canal, '
+                            . $plata . '.');
+                    break;
+
+                case 'SIN_HOJAS':
+                    $texto = $e['texto'] . ' Queda afuera toda su venta: ' . $plata . '.';
+                    break;
+
+                default:
+                    // CARGA: la hoja se proyecta, pero su neto sale negativo
+                    $texto = $e['texto'] . ' Se proyecta igual, y su cobranza neta sale negativa.';
+            }
+
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, $texto . $donde, $seccion);
+        }
+
+        if ($origen === 'PLANO') {
+            $avisos[] = Aviso::nuevo(Aviso::INFO, 'El mix de cobro sale todavía del mix plano '
+                . '(RO_T_CASHFLOW_VENTAS_MIX): la cobranza es bruta y sin costos de cobro, como '
+                . 'hasta ahora. Corré sql/cashflow_ventas_mix_nodo.sql para abrirlo en árbol y '
+                . 'poder editarlo.', $seccion);
+        }
+
+        return $avisos;
     }
 
     /**
