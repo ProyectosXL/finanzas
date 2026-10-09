@@ -1560,9 +1560,33 @@ class Ventas {
 
         $hojas = array_values(array_filter($filasArbol, function ($f) { return $f['hoja']; }));
 
+        // La fila de cada canal en la pantalla: que parte de su venta cobran
+        // sus hojas y la carga ponderada del canal entero, con la misma
+        // cuenta que carga_ponderada de un nodo. Va calculado aca para que la
+        // pantalla no tenga que recalcular nada.
+        $resumen = [];
+
+        foreach (Parametros::CANALES as $canal) {
+            $peso = 0.0;
+            $carga = 0.0;
+
+            foreach ($hojas as $h) {
+                if ($h['canal'] === $canal) {
+                    $peso += $h['porcentaje_efectivo'];
+                    $carga += $h['porcentaje_efectivo'] * $h['carga'];
+                }
+            }
+
+            $resumen[$canal] = [
+                'porcentaje_efectivo' => $peso,
+                'carga_ponderada' => $peso > 0 ? $carga / $peso : null
+            ];
+        }
+
         return array_merge($bruto, [
             'arbol' => $filasArbol,
             'filas' => $hojas,
+            'resumen_canal' => $resumen,
             'costo' => $costo,
             'neto' => self::restarGrilla($bruto, $costo)
         ]);

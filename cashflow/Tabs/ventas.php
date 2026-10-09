@@ -272,7 +272,10 @@ $edita = AuthCashflow::puedeEditar('ventas');
                         </div>
                         <div class="kpi-card-value" id="kpiCobranzaTramo">$ 0,00</div>
                         <div class="kpi-card-footer">
-                            <span class="text-muted">Sobre ventas estimadas</span>
+                            <!-- Arriba la BRUTA, que es la que muestra el tablero en las filas
+                                 por canal; abajo la neta de costos de cobro. -->
+                            <span class="text-muted">Bruta &middot; Neta:
+                                <strong id="kpiCobranzaNetaTramo">$ 0,00</strong></span>
                         </div>
                     </div>
                 </div>
@@ -302,7 +305,8 @@ $edita = AuthCashflow::puedeEditar('ventas');
                         </div>
                         <div class="kpi-card-value" id="kpiCobranzaHorizonte">$ 0,00</div>
                         <div class="kpi-card-footer">
-                            <span class="text-muted">Horizonte completo</span>
+                            <span class="text-muted">Bruta &middot; Neta:
+                                <strong id="kpiCobranzaNetaHorizonte">$ 0,00</strong></span>
                         </div>
                     </div>
                 </div>
@@ -421,23 +425,58 @@ $edita = AuthCashflow::puedeEditar('ventas');
                     <div>
                         <h5 class="mb-0">Cobranza Proyectada</h5>
                         <small class="text-muted">
-                            Por canal y medio de pago, con la fecha real de acreditación
+                            Por canal y por cada rama del mix de cobro, con la fecha real de acreditación
                             <i class="fas fa-info-circle ms-1"
-                               title="Cada día de venta se acredita a los días del medio de pago y, si cae en día no laboral, se corre al próximo día hábil bancario. Que los lunes acumulen más es efecto del corrimiento del sábado y el domingo."></i>
+                               title="Cada día de venta se acredita a los días de su rama del mix y, si cae en día no laboral, se corre al próximo día hábil bancario. Que los lunes acumulen más es efecto del corrimiento del sábado y el domingo. El costo de cobro (comisiones y tasas) cae en la misma fecha que la cobranza de la que sale."></i>
                         </small>
                     </div>
-                    <!-- El selector de columnas fijas lo dibuja Js/columnas-fijas.js -->
-                    <div id="colFijasCobranza"></div>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <!-- QUÉ IMPORTE muestran las columnas de fechas. Arranca en
+                             Bruto, que es lo que muestra la fila de cada canal en el
+                             tablero. El pie muestra las tres cosas siempre. -->
+                        <div class="btn-group btn-group-sm" role="group" id="medidaCobranza"
+                             aria-label="Importe que muestran las columnas">
+                            <button type="button" class="btn btn-outline-primary active" data-medida="bruto"
+                                    title="Lo que se acredita, antes de comisiones y tasas">Bruto</button>
+                            <button type="button" class="btn btn-outline-primary" data-medida="costo"
+                                    title="Comisiones y tasas, en negativo: la fila Costos de cobro del tablero">Costo</button>
+                            <button type="button" class="btn btn-outline-primary" data-medida="neto"
+                                    title="Bruto menos costo: lo que efectivamente entra">Neto</button>
+                        </div>
+                        <div class="btn-group btn-group-sm" role="group" aria-label="Abrir y cerrar el árbol">
+                            <button type="button" class="btn btn-outline-secondary" id="btnAbrirArbolCob"
+                                    title="Abrir todas las ramas">
+                                <i class="fas fa-angles-down"></i>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" id="btnCerrarArbolCob"
+                                    title="Dejar abierto sólo el primer nivel de cada canal">
+                                <i class="fas fa-angles-up"></i>
+                            </button>
+                        </div>
+                        <!-- El selector de columnas fijas lo dibuja Js/columnas-fijas.js -->
+                        <div id="colFijasCobranza"></div>
+                        <!-- Exporta lo que se ve: las ramas cerradas no van, y los
+                             importes son los de la medida elegida. -->
+                        <button class="btn btn-sm btn-success" data-exportar="tablaCobranza"
+                                data-exportar-nombre="Cobranza_Proyectada">
+                            <i class="fas fa-file-excel me-1"></i> Exportar
+                        </button>
+                    </div>
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive tabla-temporal">
-                        <table id="tablaCobranza" class="table table-hover mb-0">
+                        <!-- data-orden="no": es un árbol. Ordenar filas por una
+                             columna separaría cada nodo de su rama. -->
+                        <table id="tablaCobranza" class="table table-hover mb-0" data-orden="no">
                             <thead>
                                 <tr>
-                                    <th rowspan="2" class="col-canal">Canal</th>
-                                    <th rowspan="2" class="col-medio">Medio de Pago</th>
-                                    <th rowspan="2" class="text-center">Mix</th>
-                                    <th rowspan="2" class="text-center">Días</th>
+                                    <th rowspan="2" class="col-concepto">Concepto</th>
+                                    <th rowspan="2" class="text-center"
+                                        title="Qué parte de la venta del canal cobra esa rama: el producto de los porcentajes de su cadena">% efectivo</th>
+                                    <th rowspan="2" class="text-center"
+                                        title="Costo + tasa acumulados a lo largo de la rama. En los nodos con ramas debajo, el promedio de sus hojas ponderado por % efectivo">Costo + tasa</th>
+                                    <th rowspan="2" class="text-center"
+                                        title="Días de acreditación de la hoja: los del nivel más cercano que los tenga">Días</th>
                                     <!-- El rótulo y el colspan los pone el JS según la vista activa -->
                                     <th colspan="1" class="table-group-divider" id="cobPeriodoHeader">Período</th>
                                 </tr>

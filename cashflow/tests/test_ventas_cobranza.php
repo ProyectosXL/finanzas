@@ -361,3 +361,16 @@ chequear('las cuatro por canal son componentes de COSTO_COBRO',
     $metaVC['componentes']['COSTO_COBRO']);
 chequear('COSTO_COBRO NO es componente de COBRANZA: convive con ella',
     false, in_array('COSTO_COBRO', $metaVC['componentes']['COBRANZA'], true));
+
+seccion('la fila de cada canal: su % y su carga ponderada');
+
+$hojasLoc = array_values(array_filter($c['filas'], function ($f) { return $f['canal'] === 'LOCALES'; }));
+$pesoLoc = array_sum(array_column($hojasLoc, 'porcentaje_efectivo'));
+$cargaLoc = array_sum(array_map(function ($f) { return $f['porcentaje_efectivo'] * $f['carga']; }, $hojasLoc)) / $pesoLoc;
+
+chequear('Locales cobra toda su venta', 1.0, $c['resumen_canal']['LOCALES']['porcentaje_efectivo']);
+chequear('con la carga de sus hojas ponderada por % efectivo', round($cargaLoc, 10),
+    round($c['resumen_canal']['LOCALES']['carga_ponderada'], 10));
+chequear('Franquicias sin costo: cero, no null', 0.0, $c['resumen_canal']['FRANQUICIAS']['carga_ponderada']);
+chequear('un canal sin hojas: sin carga, null', null,
+    cobranzaVC(arbolVC([14 => ['ACTIVO' => 0]]))['resumen_canal']['MAYORISTAS']['carga_ponderada']);

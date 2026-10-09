@@ -75,8 +75,10 @@
     white-space: nowrap;
 }
 
-.tab-ventas .col-medio {
-    min-width: 140px;
+/* Concepto de la cobranza: el nombre del nodo con la sangría de su nivel. Es
+   ancha porque una rama de Ecommerce tiene cinco niveles. */
+.tab-ventas .col-concepto {
+    min-width: 260px;
     white-space: nowrap;
 }
 
@@ -150,10 +152,59 @@
     color: #084298;
 }
 
-/* .fila-neteo y .fila-neta quedaron sin uso y se borraron: el pie de Cobranza
-   mostraba el neteo de cheques adelantados y la cobranza neta, y las dos filas
-   pasaron al tablero (serie VENTAS.NETEO_PRECHEQUEADO). El pie de esta pestaña
-   es una sola fila, COBRANZA PROYECTADA, que usa .fila-total. */
+/* ========================================
+   COBRANZA PROYECTADA: EL ÁRBOL DEL MIX
+   ======================================== */
+
+/* La fila de cada canal: el primer nivel del árbol */
+.tab-ventas #tablaCobranza .fila-canal td {
+    background-color: #eef2fb;
+    font-weight: 600;
+    color: var(--text-primary, #1a1d29);
+}
+
+/* La sangría la pone el JS con el ancho de cada nivel */
+.tab-ventas .arbol-sangria {
+    display: inline-block;
+}
+
+.tab-ventas .arbol-chevron {
+    display: inline-block;
+    width: 18px;
+    padding: 0;
+    margin-right: 4px;
+    border: 0;
+    background: none;
+    color: var(--text-muted, #8c93a8);
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.tab-ventas .arbol-chevron:hover {
+    color: var(--primary-color, #3366ff);
+}
+
+.tab-ventas .arbol-chevron-vacio {
+    cursor: default;
+}
+
+/* El costo de cobro va en negativo: plata que no entra */
+.tab-ventas .cell-negativo {
+    background-color: #fdecea;
+    font-weight: 600;
+    color: #b02a37;
+}
+
+/* El pie lleva siempre las tres: bruta, costos y neta. Las dos últimas se
+   separan con una línea fina, la neta es la que queda. */
+.tab-ventas tfoot .fila-costo td {
+    font-weight: 600;
+}
+
+.tab-ventas tfoot .fila-neta td {
+    border-top: 1px solid var(--primary-color, #3366ff);
+}
 
 /* ========================================
    BLOQUE DE CONTROL DE REMITOS

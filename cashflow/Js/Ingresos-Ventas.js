@@ -78,9 +78,9 @@
             alCambiar: cambiarVista
         });
 
-        // Canal y Medio de Pago: es el par que identifica la fila, y es lo que
-        // ya estaba fijo cuando el mecanismo estaba cableado en el CSS. Ahora
-        // además se puede cambiar.
+        // Concepto: el nombre del nodo con su sangría, que es lo que dice de
+        // qué rama es cada número. Antes eran dos columnas, Canal y Medio de
+        // Pago; con el árbol el canal es una fila más.
         //
         // Las otras tablas de la pestaña -tendencias, proyección por mes,
         // control de facturación- no llevan selector: tienen cuatro o cinco
@@ -90,9 +90,44 @@
         crearColumnasFijas({
             tabla: 'tablaCobranza',
             control: 'colFijasCobranza',
-            clave: 'ventas_cobranza',
-            porDefecto: [0, 1]
+            // Clave nueva: la vieja guardaba índices de las columnas de
+            // antes, y aplicada a esta tabla fijaría la que no es.
+            clave: 'ventas_cobranza_arbol',
+            porDefecto: [0]
         });
+
+        // Bruto / Costo / Neto y abrir / cerrar el árbol de la cobranza
+        document.querySelectorAll('#medidaCobranza [data-medida]').forEach(function(b) {
+            b.addEventListener('click', function() {
+                cambiarMedidaCobranza(b.dataset.medida);
+            });
+        });
+
+        var btnAbrirArbol = document.getElementById('btnAbrirArbolCob');
+        var btnCerrarArbol = document.getElementById('btnCerrarArbolCob');
+        var cobBody = document.getElementById('cobBody');
+
+        if (btnAbrirArbol) {
+            btnAbrirArbol.addEventListener('click', function() {
+                if (datosProyeccion) { abrirTodoCobranza(true); }
+            });
+        }
+        if (btnCerrarArbol) {
+            btnCerrarArbol.addEventListener('click', function() {
+                if (datosProyeccion) { abrirTodoCobranza(false); }
+            });
+        }
+        // Un solo listener para todos los chevrons: el tbody se redibuja entero
+        // al cambiar de vista o de medida.
+        if (cobBody) {
+            cobBody.addEventListener('click', function(e) {
+                var btn = e.target.closest('[data-abrir]');
+
+                if (btn) {
+                    alternarCobranza(btn.dataset.abrir);
+                }
+            });
+        }
 
         // La proyección se calcula recién cuando se abre la sub-pestaña
         if (tabProyeccionBtn) {
@@ -887,7 +922,12 @@
             datosProyeccion.cobranza = res[1].cobranza;
             datosProyeccion.mix = res[1].mix;
             datosProyeccion.kpi = res[1].kpi;
-            datosProyeccion.warnings = res[1].warnings || [];
+            // Con su nivel: un mix inválido es CRÍTICO y se tiene que ver
+            // distinto de un calendario que falta.
+            datosProyeccion.warnings = res[1].avisos_con_nivel || res[1].warnings || [];
+            // Un árbol nuevo puede tener otras claves: se vuelve a abrir el
+            // primer nivel.
+            abiertosCobranza = null;
 
             // El controlador de vistas se entera del eje antes de que se
             // dibujen las grillas: es el que decide qué columnas se muestran.
@@ -1204,61 +1244,255 @@
         document.getElementById('ventaTotals').innerHTML = totalsHtml;
     }
 
+    /* ================================================================
+       COBRANZA PROYECTADA: EL ÁRBOL DEL MIX
+
+       Canal › y cada nivel de su rama (Medio de pago › Tipo de tarjeta ›
+       Procesadora › Cuotas; en Ecommerce, un Marketplace arriba de todo).
+       Cada nodo con ramas debajo es un subtotal y se abre y se cierra.
+
+       LA PANTALLA NO RESUELVE NADA. El % efectivo, el costo + tasa, los días
+       y los importes de cada nodo —hojas y subtotales— vienen calculados del
+       servidor (Ventas::cobranzaPorHojas(), con la regla de
+       MixCobro::resolver()). Si esta pantalla los recalculara, algún día
+       diría una cosa y el tablero otra.
+       ================================================================ */
+
+    /** Qué importe muestran las columnas de fechas: 'bruto' | 'costo' | 'neto' */
+    var medidaCobranza = 'bruto';
+
+    /**
+     * Qué filas están abiertas, por clave ('C:LOCALES' para un canal, 'N12'
+     * para un nodo). null = todavía no se dibujó: arranca con los canales
+     * abiertos, que muestra el primer nivel de cada uno. Sobrevive a cambiar
+     * de vista y de medida, no a recargar la proyección.
+     */
+    var abiertosCobranza = null;
+
+    /** La grilla de una medida: la raíz es el bruto, 'costo' y 'neto' cuelgan */
+    function grillaDe(medida) {
+        var cob = datosProyeccion.cobranza;
+
+        return medida === 'bruto' ? cob : cob[medida];
+    }
+
+    /**
+     * El importe a mostrar. El costo se muestra NEGATIVO, como la fila
+     * Costos de cobro del tablero: es plata que no entra.
+     */
+    function conSigno(medida, valor) {
+        return medida === 'costo' ? -valor : valor;
+    }
+
+    /** Clave de la fila de un canal */
+    function claveCanal(canal) {
+        return 'C:' + canal;
+    }
+
     function generarTablaCobranza() {
         var cols = generarEncabezado('cobHeaderSub', 'cobPeriodoHeader');
-        var canales = datosProyeccion.canales;
         var cob = datosProyeccion.cobranza;
+        var arbol = cob.arbol || [];
+        var grilla = grillaDe(medidaCobranza);
+
+        // Qué nodos tienen hijos en juego: son los que se abren.
+        var conHijos = {};
+
+        arbol.forEach(function(n) {
+            conHijos[n.padre || claveCanal(n.canal)] = true;
+        });
+
+        if (abiertosCobranza === null) {
+            abiertosCobranza = {};
+
+            datosProyeccion.canales.forEach(function(canal) {
+                abiertosCobranza[claveCanal(canal)] = true;
+            });
+        }
 
         var html = '';
 
-        canales.forEach(function(canal) {
-            var filasCanal = cob.filas.filter(function(f) { return f.canal === canal; });
+        datosProyeccion.canales.forEach(function(canal) {
+            var cc = claveCanal(canal);
+            var resumen = (cob.resumen_canal || {})[canal] || {};
 
-            if (!filasCanal.length) {
-                return;
-            }
+            html += '<tr class="fila-canal" data-clave="' + cc + '">';
+            html += '<td class="col-concepto">' + chevron(cc, conHijos[cc]) +
+                    '<strong>' + escapar(titulo(canal)) + '</strong></td>';
+            html += '<td class="text-center text-muted">' + porcentajeOVacio(resumen.porcentaje_efectivo) + '</td>';
+            html += '<td class="text-center text-muted">' + porcentajeOVacio(resumen.carga_ponderada) + '</td>';
+            html += '<td></td>';
 
-            filasCanal.forEach(function(fila) {
-                html += '<tr>';
-                html += '<td class="col-canal">' + titulo(canal) + '</td>';
-                html += '<td class="col-medio">' + titulo(fila.medio_pago) + '</td>';
-                html += '<td class="text-center text-muted">' + formatPercent(fila.porcentaje) + '</td>';
-                html += '<td class="text-center text-muted">' + fila.dias_acreditacion + '</td>';
+            cols.forEach(function(col) {
+                html += celdaImporte(conSigno(medidaCobranza, subtotalEn(grilla, canal, col)));
+            });
+
+            html += '</tr>';
+
+            arbol.filter(function(n) { return n.canal === canal; }).forEach(function(n) {
+                var padre = n.padre || cc;
+
+                html += '<tr class="' + (n.hoja ? 'fila-hoja' : 'fila-subtotal') + '"' +
+                        ' data-clave="' + n.clave + '" data-padre="' + padre + '">';
+                html += '<td class="col-concepto" title="' + escapar(tituloNodo(n)) + '">' +
+                        '<span class="arbol-sangria" style="width: ' + ((n.profundidad + 1) * 16) + 'px"></span>' +
+                        chevron(n.clave, conHijos[n.clave]) + escapar(n.nombre) + '</td>';
+                html += '<td class="text-center text-muted">' + formatPercent(n.porcentaje_efectivo) + '</td>';
+                html += '<td class="text-center text-muted">' +
+                        porcentajeOVacio(n.hoja ? n.carga : n.carga_ponderada) + '</td>';
+                html += '<td class="text-center text-muted">' + (n.hoja && n.dias !== null ? n.dias : '') + '</td>';
 
                 cols.forEach(function(col) {
-                    html += celdaValor(valorEn(cob, fila.clave, col), false);
+                    html += celdaImporte(conSigno(medidaCobranza, valorEn(grilla, n.clave, col)));
                 });
 
                 html += '</tr>';
             });
-
-            // Subtotal del canal
-            html += '<tr class="fila-subtotal">';
-            html += '<td class="col-canal" colspan="2">Subtotal ' + titulo(canal) + '</td>';
-            html += '<td colspan="2"></td>';
-
-            cols.forEach(function(col) {
-                html += celdaValor(subtotalEn(cob, canal, col), false);
-            });
-
-            html += '</tr>';
         });
 
         document.getElementById('cobBody').innerHTML = html;
+        aplicarAperturaCobranza();
 
-        // Pie: cobranza proyectada BRUTA, y nada más. El neteo de cheques
-        // adelantados tenía acá su propia fila y una fila de cobranza neta
-        // debajo; las dos se fueron al tablero, que es donde se lee la caja.
-        var foot = '<tr class="fila-total">';
-        foot += '<td class="col-canal total-label" colspan="4">COBRANZA PROYECTADA</td>';
+        // EL PIE MUESTRA LAS TRES COSAS, sea cual sea la medida elegida: es lo
+        // que permite leer bruta − costos = neta sin cambiar el selector. Los
+        // tres importes vienen del servidor; ninguno se resta acá.
+        var foot = '';
 
-        cols.forEach(function(col) {
-            foot += celdaValor(totalEn(cob, col), false);
+        [
+            ['COBRANZA BRUTA', cob, 1, 'fila-total'],
+            ['COSTOS DE COBRO', cob.costo, -1, 'fila-total fila-costo'],
+            ['COBRANZA NETA', cob.neto, 1, 'fila-total fila-neta']
+        ].forEach(function(f) {
+            foot += '<tr class="' + f[3] + '">';
+            foot += '<td class="col-concepto total-label" colspan="4">' + f[0] + '</td>';
+
+            cols.forEach(function(col) {
+                foot += celdaImporte(f[2] * totalEn(f[1], col));
+            });
+
+            foot += '</tr>';
         });
 
-        foot += '</tr>';
-
         document.getElementById('cobFoot').innerHTML = foot;
+    }
+
+    /** El botón que abre y cierra una fila, o un espacio del mismo ancho */
+    function chevron(clave, tieneHijos) {
+        if (!tieneHijos) {
+            return '<span class="arbol-chevron arbol-chevron-vacio"></span>';
+        }
+
+        var abierto = abiertosCobranza && abiertosCobranza[clave];
+
+        return '<button type="button" class="arbol-chevron" data-abrir="' + clave + '"' +
+               ' aria-expanded="' + (abierto ? 'true' : 'false') + '"' +
+               ' title="' + (abierto ? 'Cerrar' : 'Abrir') + '">' +
+               '<i class="fas fa-chevron-' + (abierto ? 'down' : 'right') + '"></i></button>';
+    }
+
+    /**
+     * El tooltip del concepto: el nivel del nodo y de dónde salen sus días.
+     * Es lo que hace legible la herencia sin abrir Parámetros.
+     */
+    function tituloNodo(n) {
+        var t = n.rotulo + ' · ' + titulo(n.canal) + ' › ' +
+                n.camino.map(function(c) { return c.nombre; }).join(' › ');
+
+        if (n.hoja && n.dias_de && n.dias_de.clave !== n.clave) {
+            t += '\nDías: hereda ' + n.dias + ' de ' + n.dias_de.nombre;
+        }
+
+        return t;
+    }
+
+    /**
+     * Muestra u oculta cada fila según estén abiertos todos sus ancestros.
+     * Se esconde con display y no se borra: la exportación saca lo que no se
+     * ve (Js/tabla-export.js), así que baja exactamente el árbol abierto.
+     */
+    function aplicarAperturaCobranza() {
+        var visible = {};
+
+        document.querySelectorAll('#cobBody tr').forEach(function(tr) {
+            var clave = tr.dataset.clave;
+            var padre = tr.dataset.padre;
+            var ve = !padre || (visible[padre] && abiertosCobranza[padre]);
+
+            visible[clave] = ve;
+            tr.style.display = ve ? '' : 'none';
+        });
+    }
+
+    /** Abre o cierra una fila, sin redibujar la tabla */
+    function alternarCobranza(clave) {
+        abiertosCobranza[clave] = !abiertosCobranza[clave];
+
+        var btn = document.querySelector('#cobBody [data-abrir="' + clave + '"]');
+
+        if (btn) {
+            var abierto = !!abiertosCobranza[clave];
+
+            btn.setAttribute('aria-expanded', abierto ? 'true' : 'false');
+            btn.title = abierto ? 'Cerrar' : 'Abrir';
+            btn.innerHTML = '<i class="fas fa-chevron-' + (abierto ? 'down' : 'right') + '"></i>';
+        }
+
+        aplicarAperturaCobranza();
+        ajustarStickyHeaders();
+    }
+
+    /** Todo abierto, o sólo el primer nivel de cada canal */
+    function abrirTodoCobranza(todo) {
+        abiertosCobranza = {};
+
+        datosProyeccion.canales.forEach(function(canal) {
+            abiertosCobranza[claveCanal(canal)] = true;
+        });
+
+        if (todo) {
+            (datosProyeccion.cobranza.arbol || []).forEach(function(n) {
+                abiertosCobranza[n.clave] = true;
+            });
+        }
+
+        generarTablaCobranza();
+        ajustarStickyHeaders();
+    }
+
+    function cambiarMedidaCobranza(medida) {
+        medidaCobranza = medida;
+
+        document.querySelectorAll('#medidaCobranza [data-medida]').forEach(function(b) {
+            b.classList.toggle('active', b.dataset.medida === medida);
+        });
+
+        if (datosProyeccion) {
+            generarTablaCobranza();
+        }
+    }
+
+    /**
+     * Celda de importe que admite negativos: el costo de cobro va con signo.
+     * Cero queda vacía, como en el resto de la pestaña.
+     */
+    function celdaImporte(valor) {
+        if (!valor) {
+            return '<td class="currency"></td>';
+        }
+
+        return '<td class="currency ' + (valor < 0 ? 'cell-negativo' : 'cell-with-value') + '">' +
+               formatCurrency(valor) + '</td>';
+    }
+
+    /** Un porcentaje, o vacío si no hay dato (null no es 0%) */
+    function porcentajeOVacio(valor) {
+        return (valor === null || valor === undefined) ? '' : formatPercent(valor);
+    }
+
+    function escapar(texto) {
+        return String(texto === null || texto === undefined ? '' : texto)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
     }
 
     function celdaValor(valor, esFeriado) {
@@ -1277,6 +1511,9 @@
         document.getElementById('kpiCobranzaTramo').textContent = formatCurrency(kpi.cobranza_tramo || 0);
         document.getElementById('kpiVentaHorizonte').textContent = formatCurrency(kpi.venta_horizonte || 0);
         document.getElementById('kpiCobranzaHorizonte').textContent = formatCurrency(kpi.cobranza_horizonte || 0);
+        // La neta, al lado: bruta menos costos de cobro, ya resuelta en el servidor
+        document.getElementById('kpiCobranzaNetaTramo').textContent = formatCurrency(kpi.cobranza_neta_tramo || 0);
+        document.getElementById('kpiCobranzaNetaHorizonte').textContent = formatCurrency(kpi.cobranza_neta_horizonte || 0);
     }
 
     function generarWarnings() {
@@ -1304,9 +1541,18 @@
 
         var html = '';
 
+        // Un aviso es un texto suelto o {nivel, texto}: el crítico se pinta en
+        // rojo, el informativo en celeste y el resto como advertencia.
+        var clases = { danger: 'alert-danger', info: 'alert-info', warning: 'alert-warning' };
+        var iconos = { danger: 'fa-circle-exclamation', info: 'fa-circle-info',
+                       warning: 'fa-triangle-exclamation' };
+
         lista.forEach(function(w) {
-            html += '<div class="alert alert-warning py-2 px-3 mb-2">' +
-                    '<i class="fas fa-triangle-exclamation me-1"></i><small>' + w + '</small></div>';
+            var nivel = (w && typeof w === 'object' && clases[w.nivel]) ? w.nivel : 'warning';
+            var texto = (w && typeof w === 'object') ? w.texto : w;
+
+            html += '<div class="alert ' + clases[nivel] + ' py-2 px-3 mb-2">' +
+                    '<i class="fas ' + iconos[nivel] + ' me-1"></i><small>' + escapar(texto) + '</small></div>';
         });
 
         cont.innerHTML = html;

@@ -1024,3 +1024,70 @@ chequear('la accion existe en el controller', true,
 chequear('sin permiso, soloLectura saca el boton (no lleva data-lectura)', false,
     strpos($jsPs, 'sp-btn-vistas" data-lectura') !== false);
 chequear('la pestana marca la cuenta nueva', true, strpos($jsSal, 'marcaNueva(f)') !== false);
+
+// ============================================================================
+// VENTAS: LA COBRANZA PROYECTADA ES UN ARBOL, CON SELECTOR Y PIE DE TRES FILAS
+//
+// Lo que se rompe en silencio de esta tabla es el cableado: un data-medida mal
+// escrito deja un boton que no cambia nada, y un pie que resta en el JS en vez
+// de leer el neto del servidor es una segunda regla que algun dia no coincide.
+// ============================================================================
+
+seccion('Ventas: la cobranza es un arbol con selector Bruto / Costo / Neto');
+
+$ventasTab = str_replace("\r\n", "\n", contenidoTab($TABS . '/ventas.php'));
+$ventasJs = str_replace("\r\n", "\n", file_get_contents($JS . '/Ingresos-Ventas.js'));
+
+chequear('las tres medidas, con Bruto activo por defecto', [1, 1, 1], [
+    substr_count($ventasTab, 'class="btn btn-outline-primary active" data-medida="bruto"'),
+    substr_count($ventasTab, 'data-medida="costo"'),
+    substr_count($ventasTab, 'data-medida="neto"')
+]);
+chequear('y el JS arranca en bruto', 1, substr_count($ventasJs, "var medidaCobranza = 'bruto';"));
+chequear('cada boton de medida esta enganchado', true,
+    strpos($ventasJs, "document.querySelectorAll('#medidaCobranza [data-medida]')") !== false
+        && strpos($ventasJs, 'cambiarMedidaCobranza(b.dataset.medida)') !== false);
+chequear('abrir y cerrar todo existen y estan enganchados', [1, 1, 1, 1], [
+    substr_count($ventasTab, 'id="btnAbrirArbolCob"'),
+    substr_count($ventasTab, 'id="btnCerrarArbolCob"'),
+    substr_count($ventasJs, "getElementById('btnAbrirArbolCob')"),
+    substr_count($ventasJs, "getElementById('btnCerrarArbolCob')")
+]);
+chequear('los chevrons se atienden con un solo listener en el tbody', true,
+    strpos($ventasJs, "e.target.closest('[data-abrir]')") !== false
+        && strpos($ventasJs, 'alternarCobranza(btn.dataset.abrir)') !== false);
+chequear('un arbol no se ordena por columna', 1,
+    substr_count($ventasTab, '<table id="tablaCobranza" class="table table-hover mb-0" data-orden="no">'));
+chequear('se exporta con el control compartido', 1, substr_count($ventasTab, 'data-exportar="tablaCobranza"'));
+chequear('Concepto es la primera descriptiva y la fija por defecto', [1, 1], [
+    substr_count($ventasTab, '<th rowspan="2" class="col-concepto">Concepto</th>'),
+    substr_count($ventasJs, "clave: 'ventas_cobranza_arbol',\n            porDefecto: [0]")
+]);
+chequear('cuatro descriptivas, igual que el colspan del pie', [4, 1], [
+    preg_match_all('/<th rowspan="2"/', substr($ventasTab, strpos($ventasTab, 'id="tablaCobranza"'),
+        strpos($ventasTab, 'id="cobPeriodoHeader"') - strpos($ventasTab, 'id="tablaCobranza"'))),
+    substr_count($ventasJs, "'<td class=\"col-concepto total-label\" colspan=\"4\">'")
+]);
+
+seccion('Ventas: el pie de la cobranza tiene siempre bruta, costos y neta');
+
+chequear('las tres filas', [1, 1, 1], [
+    substr_count($ventasJs, "['COBRANZA BRUTA', cob, 1, 'fila-total']"),
+    substr_count($ventasJs, "['COSTOS DE COBRO', cob.costo, -1, 'fila-total fila-costo']"),
+    substr_count($ventasJs, "['COBRANZA NETA', cob.neto, 1, 'fila-total fila-neta']")
+]);
+chequear('la neta sale del servidor: el JS no resta bruto menos costo', 0,
+    preg_match_all('/totalEn\(cob,[^)]*\)\s*-\s*totalEn/', $ventasJs));
+chequear('el pie no depende del selector', false,
+    (bool) preg_match('/\[\s*\'COBRANZA BRUTA\', grilla/', $ventasJs));
+
+seccion('Ventas: los KPIs de cobranza llevan la neta al lado');
+
+chequear('los dos lugares en la pestana', [1, 1], [
+    substr_count($ventasTab, 'id="kpiCobranzaNetaTramo"'),
+    substr_count($ventasTab, 'id="kpiCobranzaNetaHorizonte"')
+]);
+chequear('y el JS los llena con lo que calculo el servidor', [1, 1], [
+    substr_count($ventasJs, "getElementById('kpiCobranzaNetaTramo').textContent = formatCurrency(kpi.cobranza_neta_tramo || 0)"),
+    substr_count($ventasJs, "getElementById('kpiCobranzaNetaHorizonte').textContent = formatCurrency(kpi.cobranza_neta_horizonte || 0)")
+]);
