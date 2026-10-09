@@ -19,6 +19,13 @@ require_once __DIR__ . '/../Parametros.php';
  *                          fila total o con la apertura.
  *   NETEO_PRECHEQUEADO  -> el neteo de cheques adelantados, EN NEGATIVO y como
  *                          fila propia del tablero. Ver mas abajo.
+ *   COSTO_COBRO         -> el costo de cobrar esa cobranza -comisiones de
+ *                          marketplace y procesadora, y tasas de cuotas-, EN
+ *                          NEGATIVO y como fila propia del tablero. Ver mas
+ *                          abajo.
+ *   COSTO_COBRO_<CANAL> -> lo mismo, abierto por canal, tambien en negativo.
+ *                          Franquicias y Mayoristas hoy dan cero: su mix no
+ *                          tiene costos cargados.
  *   VENTA               -> la venta proyectada con IVA. NO es caja: se muestra
  *                          como fila informativa (COMPUTA=0) para poder leer el
  *                          cuadro contra el Excel sin contarla dos veces.
@@ -41,16 +48,31 @@ require_once __DIR__ . '/../Parametros.php';
  * no una correccion que tenga que esconder: restado adentro de la cobranza, la
  * unica forma de saber cuanto se neteo era abrir otra pantalla.
  *
+ * EL COSTO DE COBRO SIGUE EXACTAMENTE EL MISMO CRITERIO, Y POR EL MISMO
+ * MOTIVO. El mix de cobro es un arbol con costo y tasa por nodo (ver
+ * Class/MixCobro.php), y lo que la procesadora y el marketplace se quedan es
+ * informacion que el cuadro tiene que mostrar. COBRANZA y las COBRANZA_<CANAL>
+ * siguen BRUTAS y el costo sale por COSTO_COBRO, en negativo.
+ *
+ * Y TIENE EL MISMO PELIGRO: RESTAR EL COSTO ADENTRO DE LA COBRANZA TENIENDO
+ * ADEMAS LA FILA COSTOS_COBRO ACTIVA LO DESCONTARIA DOS VECES. El tablero
+ * mostraria de menos exactamente el costo de cobro, y no hay validacion que
+ * lo detecte: las dos series son legitimas por separado. El costo se resta en
+ * un solo lugar, y ese lugar es la fila. Por eso la pestana Ventas, que si
+ * muestra el neto, lo muestra al lado del bruto y no en lugar de el.
+ *
  * OJO CON MEZCLAR TOTALES Y CANALES: poner en el tablero la fila del total y
  * las de los canales al mismo tiempo cuenta dos veces el mismo importe. El
  * registro declara esa relacion en 'componentes' y el validador de la
  * estructura lo rechaza. NETEO_PRECHEQUEADO NO entra en esa relacion: no es un
  * componente de la cobranza sino una fila independiente, y declararla como
  * componente haria que el validador rechace la combinacion normal del tablero.
+ * COSTO_COBRO tampoco es componente de COBRANZA, por lo mismo; SUS cuatro
+ * series por canal si son componentes de ELLA.
  *
  * UNA SOLA PASADA
  * Ventas::proyectarCobranzas() resuelve venta y cobranza en el mismo recorrido,
- * asi que las diez series salen de una unica llamada. Es un calculo caro (lee
+ * asi que todas las series salen de una unica llamada. Es un calculo caro (lee
  * el historico, los indices, la participacion y el calendario bancario, y
  * recorre dia x canal x medio de pago), y por eso el motor pide las series de
  * un proveedor una sola vez por pedido y no una vez por fila.
@@ -80,12 +102,26 @@ class VentasProvider extends CashflowProvider {
         $this->avisarTodos(isset($p['avisos_con_nivel']) ? $p['avisos_con_nivel']
             : (isset($p['warnings']) ? $p['warnings'] : []));
 
+        return self::seriesDesde($p);
+    }
+
+    /**
+     * Las series del tablero a partir del payload de Ventas::proyectarCobranzas().
+     *
+     * Estatica y pura, separada de calcular() para poder probar los signos y
+     * las aperturas sin base: es donde un error no se ve en el cuadro.
+     *
+     * @param array $p Payload de Ventas::proyectarCobranzas()
+     * @return array Mapa serie => ['dias' => [...], 'meses' => [...]]
+     */
+    public static function seriesDesde($p) {
         $series = [
             'COBRANZA' => [
                 'dias' => $p['cobranza']['total_dias'],
                 'meses' => $p['cobranza']['total_meses']
             ],
-            'NETEO_PRECHEQUEADO' => $this->neteo($p),
+            'NETEO_PRECHEQUEADO' => self::neteo($p),
+            'COSTO_COBRO' => self::costo($p, null),
             'VENTA' => [
                 'dias' => $p['venta']['total_dias'],
                 'meses' => $p['venta']['total_meses']
@@ -102,13 +138,15 @@ class VentasProvider extends CashflowProvider {
             // se restara aca ademas de en NETEO_PRECHEQUEADO se contaria dos
             // veces, y la apertura por canal dejaria de sumar el total.
             $series['COBRANZA_' . $canal] = [
-                'dias' => $this->porCanal($p['cobranza'], 'subtotal_dias', $canal),
-                'meses' => $this->porCanal($p['cobranza'], 'subtotal_meses', $canal)
+                'dias' => self::porCanal($p['cobranza'], 'subtotal_dias', $canal),
+                'meses' => self::porCanal($p['cobranza'], 'subtotal_meses', $canal)
             ];
 
+            $series['COSTO_COBRO_' . $canal] = self::costo($p, $canal);
+
             $series['VENTA_' . $canal] = [
-                'dias' => $this->porCanal($p['venta'], 'dias', $canal),
-                'meses' => $this->porCanal($p['venta'], 'meses', $canal)
+                'dias' => self::porCanal($p['venta'], 'dias', $canal),
+                'meses' => self::porCanal($p['venta'], 'meses', $canal)
             ];
         }
 
@@ -121,7 +159,7 @@ class VentasProvider extends CashflowProvider {
      * @param string $canal
      * @return array Mapa clave => importe, o vacio si el canal no esta
      */
-    private function porCanal($grilla, $rama, $canal) {
+    private static function porCanal($grilla, $rama, $canal) {
         return isset($grilla[$rama][$canal]) ? $grilla[$rama][$canal] : [];
     }
 
@@ -155,7 +193,7 @@ class VentasProvider extends CashflowProvider {
      * @param array $p Payload de Ventas::proyectarCobranzas()
      * @return array ['dias' => [...], 'meses' => [...]]
      */
-    private function neteo($p) {
+    private static function neteo($p) {
         $neteo = isset($p['cobranza']['neteo_prechequeado'])
             ? $p['cobranza']['neteo_prechequeado']
             : ['dias' => [], 'meses' => []];
@@ -163,6 +201,42 @@ class VentasProvider extends CashflowProvider {
         return [
             'dias' => self::enNegativo($neteo['dias']),
             'meses' => self::enNegativo($neteo['meses'])
+        ];
+    }
+
+    /**
+     * El costo de cobro, listo para ser una fila del tablero: el total o el de
+     * un canal.
+     *
+     * EL SIGNO SE INVIERTE ACA, con enNegativo(), por el mismo motivo que el
+     * neteo: Ventas lo devuelve POSITIVO -es "cuanto se queda quien cobra"- y
+     * la fila es de TIPO='INGRESO', asi que tiene que llegar negativa para
+     * restar. Ver neteo().
+     *
+     * SIN COSTO EN EL PAYLOAD, CERO Y NO UN HUECO: la fila tiene que dar cero,
+     * no faltar.
+     *
+     * @param array $p Payload de Ventas::proyectarCobranzas()
+     * @param string|null $canal null para el total
+     * @return array ['dias' => [...], 'meses' => [...]]
+     */
+    private static function costo($p, $canal) {
+        if (!isset($p['cobranza']['costo'])) {
+            return ['dias' => [], 'meses' => []];
+        }
+
+        $costo = $p['cobranza']['costo'];
+
+        if ($canal === null) {
+            return [
+                'dias' => self::enNegativo($costo['total_dias']),
+                'meses' => self::enNegativo($costo['total_meses'])
+            ];
+        }
+
+        return [
+            'dias' => self::enNegativo(self::porCanal($costo, 'subtotal_dias', $canal)),
+            'meses' => self::enNegativo(self::porCanal($costo, 'subtotal_meses', $canal))
         ];
     }
 

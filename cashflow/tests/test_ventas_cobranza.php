@@ -284,3 +284,80 @@ chequear('un aviso informativo que nombra el script', [1, 'info', true],
     [count($avisosPl), $avisosPl[0]['nivel'],
      strpos($avisosPl[0]['texto'], 'sql/cashflow_ventas_mix_nodo.sql') !== false]);
 chequear('con el arbol, ninguno', [], Ventas::avisosDelMix(MixCobro::resolver(arbolVC()), $ventaCanalVC, 'NODO'));
+
+/* ============================================================================
+   EL PROVEEDOR DEL TABLERO
+   ============================================================================ */
+
+require_once __DIR__ . '/../Class/Providers/VentasProvider.php';
+require_once __DIR__ . '/../Class/CashflowRegistry.php';
+
+/** Las series del tablero con la cobranza del escenario */
+function seriesVC($cobranza) {
+    return VentasProvider::seriesDesde([
+        'cobranza' => $cobranza,
+        'venta' => ['total_dias' => [], 'total_meses' => [], 'dias' => [], 'meses' => []],
+        'canales' => Parametros::CANALES
+    ]);
+}
+
+/** La suma de una serie en sus dos ramas */
+function sumaSerieVC($s) {
+    return array_sum($s['dias']) + array_sum($s['meses']);
+}
+
+$sVC = seriesVC($c);
+
+seccion('proveedor: COSTO_COBRO sale en negativo y suma los cuatro canales');
+
+chequear('es negativo', true, sumaSerieVC($sVC['COSTO_COBRO']) < 0);
+chequear('es el costo del motor con el signo dado vuelta', -$c['costo']['total_horizonte'],
+    sumaSerieVC($sVC['COSTO_COBRO']));
+
+$desvioCanales = 0;
+
+foreach (['dias', 'meses'] as $rama) {
+    foreach ($sVC['COSTO_COBRO'][$rama] as $col => $v) {
+        $suma = 0;
+
+        foreach (Parametros::CANALES as $canal) {
+            $suma += $sVC['COSTO_COBRO_' . $canal][$rama][$col];
+        }
+
+        $desvioCanales += abs($v - $suma);
+    }
+}
+
+chequear('el total es la suma de los cuatro por canal, columna por columna', 0.0, $desvioCanales);
+chequear('cada canal tambien en negativo: Locales', -(array_sum($c['costo']['subtotal_dias']['LOCALES'])
+    + array_sum($c['costo']['subtotal_meses']['LOCALES'])), sumaSerieVC($sVC['COSTO_COBRO_LOCALES']));
+chequear('Franquicias y Mayoristas dan costo cero', [0.0, 0.0],
+    [(float) sumaSerieVC($sVC['COSTO_COBRO_FRANQUICIAS']), (float) sumaSerieVC($sVC['COSTO_COBRO_MAYORISTAS'])]);
+chequear('una columna sin costo es cero, no -0', '0',
+    (string) json_encode($sVC['COSTO_COBRO_FRANQUICIAS']['dias']['2026-10-13']));
+
+seccion('proveedor: la cobranza sigue bruta');
+
+chequear('COBRANZA es el bruto del motor, sin restar el costo', $c['total_horizonte'],
+    sumaSerieVC($sVC['COBRANZA']));
+chequear('COBRANZA_LOCALES tambien', array_sum($c['subtotal_dias']['LOCALES']) + array_sum($c['subtotal_meses']['LOCALES']),
+    sumaSerieVC($sVC['COBRANZA_LOCALES']));
+chequear('cobranza + costos = el neto del motor', $c['neto']['total_horizonte'],
+    sumaSerieVC($sVC['COBRANZA']) + sumaSerieVC($sVC['COSTO_COBRO']));
+
+seccion('proveedor: el registro las declara');
+
+foreach (array_merge(['COSTO_COBRO'], array_map(function ($canal) {
+    return 'COSTO_COBRO_' . $canal;
+}, Parametros::CANALES)) as $serie) {
+    chequear("$serie es una serie de VENTAS", true, CashflowRegistry::serieExiste('VENTAS', $serie));
+    chequear("$serie sale del proveedor", true, isset($sVC[$serie]));
+}
+
+$metaVC = CashflowRegistry::meta('VENTAS');
+
+chequear('las cuatro por canal son componentes de COSTO_COBRO',
+    ['COSTO_COBRO_LOCALES', 'COSTO_COBRO_FRANQUICIAS', 'COSTO_COBRO_MAYORISTAS', 'COSTO_COBRO_ECOMMERCE'],
+    $metaVC['componentes']['COSTO_COBRO']);
+chequear('COSTO_COBRO NO es componente de COBRANZA: convive con ella',
+    false, in_array('COSTO_COBRO', $metaVC['componentes']['COBRANZA'], true));
