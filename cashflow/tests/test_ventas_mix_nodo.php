@@ -99,3 +99,48 @@ chequear('ni DELETE, ni UPDATE, ni DROP sobre RO_T_CASHFLOW_VENTAS_MIX', 0, preg
 chequear('ni sobre la tabla nueva: la migracion solo inserta', 0, preg_match_all(
     '/(DELETE\s+FROM|UPDATE|DROP\s+TABLE)\s+dbo\.RO_T_CASHFLOW_VENTAS_MIX_NODO/', $scriptNodo));
 chequear('sin un JOIN: los cruces del modulo van en PHP', 0, preg_match_all('/\bJOIN\b/', $scriptNodo));
+
+/* ============================================================================
+   LA FILA DEL TABLERO: sql/cashflow_estructura_costos_cobro.sql
+   El circuito completo se corrio contra #temporales copiadas de las tablas
+   de estructura (ver el commit): aca se verifica lo que no puede cambiar.
+   ============================================================================ */
+
+require_once __DIR__ . '/../Class/CashflowRegistry.php';
+
+$scriptFila = str_replace("\r\n", "\n",
+    file_get_contents(__DIR__ . '/../sql/cashflow_estructura_costos_cobro.sql'));
+
+seccion('la fila de costos: ingreso, computa y apunta a COSTO_COBRO');
+
+chequear('INGRESO y computando, en la seccion VENTAS, con la serie del proveedor', 1, substr_count($scriptFila,
+    "('COSTOS_COBRO', 'Costos de cobro (comisiones y tasas)', 'VENTAS', 'INGRESO', 1,\n                    'VENTAS', 'COSTO_COBRO', @orden)"));
+chequear('la serie existe en el registro', true, CashflowRegistry::serieExiste('VENTAS', 'COSTO_COBRO'));
+chequear('nunca como EGRESO: el importe ya viene negativo', 0,
+    preg_match_all("/\('COSTOS_COBRO'[^)]*'EGRESO'/", $scriptFila));
+
+seccion('la fila de costos: reejecutable y sin pisar lo editado');
+
+chequear('MERGE sobre CODIGO', 2, substr_count($scriptFila, 'ON T.CODIGO = S.CODIGO'));
+chequear('si ya existe, solo reafirma el origen', 1, substr_count($scriptFila,
+    "UPDATE SET ORIGEN_PROVIDER = S.ORIGEN_PROVIDER,\n                   ORIGEN_SERIE = S.ORIGEN_SERIE,"));
+chequear('ni NOMBRE ni ORDEN en ningun UPDATE', 0,
+    preg_match_all('/UPDATE SET[^;]*\b(NOMBRE|ORDEN)\s*=/s', $scriptFila));
+
+seccion('la fila de costos: el orden se calcula entre Ecommerce y Total Ventas');
+
+chequear('lee el orden real de las dos filas', [1, 1], [
+    substr_count($scriptFila, "WHERE CODIGO = 'VTA_ECOMMERCE' AND SECCION = 'VENTAS';"),
+    substr_count($scriptFila, "WHERE CODIGO = 'SUB_INGRESOS_VENTA' AND SECCION = 'VENTAS';")
+]);
+chequear('entra en el medio del hueco', 1,
+    substr_count($scriptFila, 'SET @orden = @ecommerce + (@subtotal - @ecommerce) / 2;'));
+chequear('sin hueco, no inserta', 1, substr_count($scriptFila, 'ELSE IF @subtotal - @ecommerce < 2'));
+chequear('con el orden ocupado, tampoco', 1,
+    substr_count($scriptFila, "WHERE SECCION = 'VENTAS' AND ORDEN = @orden)"));
+
+seccion('la fila de costos: no se agrupa');
+
+chequear('no declara GRUPO ni NATURALEZA', 0, preg_match_all('/\b(GRUPO|NATURALEZA)\s*=/', $scriptFila));
+chequear('y dice por que: cerrado repetiria Total Ventas', 1,
+    substr_count($scriptFila, 'renglon cerrado daria exactamente "Total Ventas"'));
