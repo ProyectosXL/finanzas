@@ -1,6 +1,8 @@
 <?php
 
 require_once __DIR__ . '/Parametros.php';
+require_once __DIR__ . '/AuthCashflow.php';
+require_once __DIR__ . '/Auditoria.php';
 
 /**
  * MixCobro
@@ -86,7 +88,7 @@ class MixCobro {
     /** Largo de NOMBRE en la tabla */
     const LARGO_NOMBRE = 50;
 
-    /** La misma tolerancia que Parametros::validarMix() para el 100% */
+    /** La tolerancia con la que el mix plano validaba el 100%, que es la misma */
     const TOLERANCIA = 0.000001;
 
     /** Separador del camino de nombres en pantalla y en los avisos */
@@ -656,7 +658,7 @@ class MixCobro {
      *
      * VALIDA LO DEL CAMPO ACA, y el arbol COMO QUEDARIA lo valida el llamador
      * con validarEstructura() y resolver() sobre 'simulado', antes de abrir la
-     * transaccion. Igual que saveMixCobro hacia con validarMix($simulado).
+     * transaccion, como hacia el guardado del mix plano con su simulado.
      *
      * LO QUE NO SE PUEDE CAMBIAR
      *   - El padre: mover un nodo de rama no es editarlo. ID_PADRE no viaja.
@@ -999,6 +1001,335 @@ class MixCobro {
         $parametros = new Parametros();
 
         return ['origen' => 'PLANO', 'nodos' => self::desdeMixPlano($parametros->getMixCobro())];
+    }
+
+    /* ====================================================================
+       EL EDITOR DE PARAMETROS
+       ==================================================================== */
+
+    /**
+     * Lo que necesita Parametros -> Ventas -> Mix de Cobro y Plazos para
+     * dibujar el arbol. Pura.
+     *
+     * VA RESUELTO: cada nodo con lo que la regla dice de el -su % efectivo,
+     * su costo + tasa acumulado, de quien hereda los dias-, cada grupo de
+     * hermanos con su suma, y los niveles que admite cada nodo y cada hijo
+     * nuevo. La pantalla pinta, no calcula: si tuviera su copia de la regla,
+     * algun dia diria que "Resto" hereda 7 dias y el tablero lo acreditaria a
+     * otros.
+     *
+     * SIN EL SCRIPT ('PLANO') NO ES EDITABLE: el arbol que se muestra es el
+     * mix plano, de un nivel, y no hay tabla donde guardar un nodo nuevo.
+     *
+     * @param array $nodos Nodos normalizados
+     * @param string $origen 'NODO' | 'PLANO'
+     * @return array
+     */
+    public static function datosEditor($nodos, $origen) {
+        $resuelto = self::resolver($nodos);
+        $conHijos = [];
+
+        foreach ($nodos as $n) {
+            if ($n['ID_PADRE'] !== null) {
+                $conHijos[$n['ID_PADRE']] = true;
+            }
+        }
+
+        $porId = [];
+
+        foreach ($nodos as $n) {
+            $porId[$n['ID']] = $n;
+        }
+
+        $lista = [];
+
+        foreach ($nodos as $n) {
+            $padre = ($n['ID_PADRE'] !== null && isset($porId[$n['ID_PADRE']])) ? $porId[$n['ID_PADRE']] : null;
+            $n['tiene_hijos'] = isset($conHijos[$n['ID']]);
+            $n['niveles_permitidos'] = self::nivelesPermitidos($n['CANAL'], $padre === null ? null : $padre['NIVEL']);
+            $n['niveles_hijo'] = self::nivelesPermitidos($n['CANAL'], $n['NIVEL']);
+            $lista[] = $n;
+        }
+
+        $niveles = [];
+
+        foreach (self::NIVELES as $codigo => $rotulo) {
+            $niveles[] = ['codigo' => $codigo, 'rotulo' => $rotulo];
+        }
+
+        $primerNivel = [];
+
+        foreach (Parametros::CANALES as $canal) {
+            $primerNivel[$canal] = self::nivelesPermitidos($canal, null);
+        }
+
+        return [
+            'origen' => $origen,
+            'editable' => $origen === 'NODO',
+            'canales' => Parametros::CANALES,
+            'niveles' => $niveles,
+            'niveles_primer' => $primerNivel,
+            'nodos' => $lista,
+            'resuelto' => $resuelto,
+            // El mix plano no tiene la forma de un arbol -Ecommerce no cuelga
+            // de un marketplace- y no se edita: no se le aplica la estructura.
+            'estructura' => $origen === 'NODO' ? self::validarEstructura($nodos) : []
+        ];
+    }
+
+    /**
+     * Como quedaria un canal con lo que hay en pantalla, sin guardar nada.
+     * Pura. Es lo que devuelve previsualizarMixArbol.
+     *
+     * Los errores de campo -un costo de mas de 100%, unos dias con decimales-
+     * vuelven como errores y NO como excepcion: mientras se edita, un campo
+     * mal tipeado es un estado normal y la pantalla tiene que decir cual es y
+     * bloquear Guardar, no tirar un cartel de error.
+     *
+     * @param array $actuales Nodos normalizados de todos los canales
+     * @param string $canal
+     * @param array $filas Las de resolverCambios()
+     * @return array ['canal', 'valido', 'errores' => [textos], 'nodos' => [clave =>
+     *               nodo resuelto], 'grupos' => [...], 'cambios' => int]
+     */
+    public static function previsualizar($actuales, $canal, $filas) {
+        $canal = strtoupper(trim((string) $canal));
+
+        try {
+            $r = self::resolverCambios($actuales, $canal, $filas);
+        } catch (Exception $e) {
+            $resuelto = self::resolver($actuales);
+
+            return self::vistaCanal($resuelto, $canal, [$e->getMessage()], 0);
+        }
+
+        $errores = [];
+
+        foreach (self::validarEstructura($r['simulado']) as $e) {
+            if ($e['canal'] === $canal) {
+                $errores[] = $e['texto'];
+            }
+        }
+
+        $resuelto = self::resolver($r['simulado']);
+
+        foreach ($resuelto['canales'][$canal]['errores'] as $e) {
+            $errores[] = $e['texto'];
+        }
+
+        return self::vistaCanal($resuelto, $canal, $errores, count($r['cambios']));
+    }
+
+    /** La parte de un canal de lo que resolvio la regla */
+    private static function vistaCanal($resuelto, $canal, $errores, $cambios) {
+        $nodos = [];
+
+        foreach ($resuelto['nodos'] as $clave => $n) {
+            if ($n['canal'] === $canal) {
+                $nodos[$clave] = $n;
+            }
+        }
+
+        return [
+            'canal' => $canal,
+            'valido' => count($errores) === 0,
+            'errores' => $errores,
+            'nodos' => $nodos,
+            'grupos' => isset($resuelto['canales'][$canal]) ? $resuelto['canales'][$canal]['grupos'] : [],
+            'cambios' => $cambios
+        ];
+    }
+
+    /**
+     * Que se escribe en un guardado, validado contra el arbol COMO QUEDARIA.
+     * Pura.
+     *
+     * Valida el canal entero despues de aplicar lo que llega: la estructura
+     * (niveles, nombres, rangos) y la regla (sumas, dias de las hojas, carga,
+     * hojas). Cualquier error corta ACA, antes de que el llamador abra la
+     * transaccion: un arbol invalido no se escribe ni a medias. Es lo que
+     * el guardado del mix plano hacia con su simulado, ahora sobre el arbol.
+     *
+     * Solo bloquean los errores DEL CANAL que se guarda: otro canal roto -por
+     * una edicion directa en la base- no tiene por que impedir corregir este.
+     *
+     * @param array $actuales Nodos normalizados de todos los canales
+     * @param string $canal
+     * @param array $filas Las de resolverCambios()
+     * @return array Los cambios de resolverCambios(), solo los nodos que cambiaron
+     */
+    public static function planGuardado($actuales, $canal, $filas) {
+        $canal = strtoupper(trim((string) $canal));
+        $vista = self::previsualizar($actuales, $canal, $filas);
+
+        if (!$vista['valido']) {
+            throw new Exception('El mix de ' . self::nombreCanal($canal) . ' no se guardó: '
+                . implode(' ', $vista['errores']));
+        }
+
+        return self::resolverCambios($actuales, $canal, $filas)['cambios'];
+    }
+
+    /* ====================================================================
+       ESCRITURA
+       ==================================================================== */
+
+    /** Corta si todavia no se corrio el script: sin tabla no hay donde guardar */
+    private function exigirTabla() {
+        if (!$this->tablaCreada()) {
+            throw new Exception('Falta correr sql/cashflow_ventas_mix_nodo.sql: hasta entonces el '
+                . 'mix de cobro sale del mix plano y no se puede editar.');
+        }
+    }
+
+    /**
+     * Guarda el arbol de un canal: escribe SOLO los nodos que cambiaron, en
+     * una transaccion. O se guardan todos o ninguno: un arbol a medio guardar
+     * es un arbol cuyas sumas no dan, y el tablero lo proyectaria asi.
+     *
+     * @param string $canal
+     * @param array $filas Las de resolverCambios()
+     * @param string $usuario El de AuthCashflow
+     * @return int Cuantos nodos se escribieron
+     */
+    public function guardarCanal($canal, $filas, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $this->exigirTabla();
+
+        // Se valida ANTES de pedir la conexion de escritura: un arbol invalido
+        // no llega a abrir la transaccion.
+        $cambios = self::planGuardado($this->getNodos(), $canal, $filas);
+
+        if (count($cambios) === 0) {
+            return 0;
+        }
+
+        $cid = $this->conexionEscritura();
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception(self::errorSql('No se pudo abrir la transacción'));
+        }
+
+        try {
+            foreach ($cambios as $c) {
+                $this->escribirNodo($cid, $c['id'], $c['campos'], $usuario);
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception(self::errorSql('No se pudo confirmar el guardado del mix'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return count($cambios);
+    }
+
+    /**
+     * Agrega un nodo. Entra INHABILITADO Y EN 0%: ver nodoNuevo().
+     *
+     * Va al final de sus hermanos. El UNIQUE de la tabla es la ultima red: si
+     * dos personas agregan el mismo nombre a la vez, la segunda choca ahi.
+     *
+     * @param array $datos Los de nodoNuevo()
+     * @param string $usuario
+     * @return int ID del nodo creado
+     */
+    public function agregarNodo($datos, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $this->exigirTabla();
+
+        $actuales = $this->getNodos();
+        $fila = self::nodoNuevo($actuales, $datos);
+        $orden = 0;
+
+        foreach ($actuales as $n) {
+            if ($n['CANAL'] === $fila['CANAL'] && $n['ID_PADRE'] === $fila['ID_PADRE']) {
+                $orden = max($orden, $n['ORDEN']);
+            }
+        }
+
+        $sql = "INSERT INTO " . self::TABLA . "
+                    (CANAL, ID_PADRE, NIVEL, NOMBRE, PORCENTAJE, COSTO, TASA, DIAS_ACREDITACION,
+                     ACTIVO, ORDEN, USUARIO_ALTA, USUARIO_MODIF)
+                OUTPUT INSERTED.ID
+                VALUES (?, ?, ?, ?, 0, ?, ?, ?, 0, ?, ?, ?)";
+
+        $stmt = sqlsrv_query($this->conexionEscritura(), $sql, [
+            $fila['CANAL'], $fila['ID_PADRE'], $fila['NIVEL'], $fila['NOMBRE'],
+            $fila['COSTO'], $fila['TASA'], $fila['DIAS_ACREDITACION'],
+            $orden + 1, $usuario, $usuario
+        ]);
+
+        if ($stmt === false) {
+            throw new Exception(self::errorSql('Error al agregar el nodo al mix'));
+        }
+
+        $nuevo = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        return intval($nuevo['ID']);
+    }
+
+    /**
+     * La conexion donde se escribe.
+     *
+     * Protegida, junto con escribirNodo(), para probar el guardado sin tocar
+     * la tabla real: la prueba la reemplaza por la suya y registra que se
+     * escribe. Ver tests/test_mix_cobro_guardado.php.
+     *
+     * @return resource
+     */
+    protected function conexionEscritura() {
+        return $this->conectar();
+    }
+
+    /**
+     * Un UPDATE con SOLO las columnas que cambiaron, mas la auditoria.
+     *
+     * Las columnas salen de resolverCambios(), que solo devuelve las del
+     * nodo, asi que lo que se concatena al SQL es una lista cerrada. Si cambia
+     * ACTIVO, se sella la baja o se limpia con el mismo criterio que el resto
+     * del modulo (Auditoria::sqlBajaSegunEstado).
+     *
+     * @param resource $cid
+     * @param int $id
+     * @param array $campos COLUMNA => valor
+     * @param string $usuario
+     */
+    protected function escribirNodo($cid, $id, $campos, $usuario) {
+        $columnas = ['NOMBRE', 'NIVEL', 'PORCENTAJE', 'COSTO', 'TASA', 'DIAS_ACREDITACION'];
+        $sets = [];
+        $params = [];
+
+        foreach ($campos as $col => $valor) {
+            if (in_array($col, $columnas, true)) {
+                $sets[] = $col . ' = ?';
+                $params[] = $valor;
+            }
+        }
+
+        if (array_key_exists('ACTIVO', $campos)) {
+            $sets[] = Auditoria::sqlBajaSegunEstado('ACTIVO');
+            $params = array_merge($params, Auditoria::paramsBajaSegunEstado($campos['ACTIVO'], $usuario));
+            $sets[] = 'ACTIVO = ?';
+            $params[] = $campos['ACTIVO'] ? 1 : 0;
+        }
+
+        $sets[] = Auditoria::SET_MODIF;
+        $params[] = $usuario;
+        $params[] = intval($id);
+
+        $stmt = sqlsrv_query($cid, "UPDATE " . self::TABLA . " SET " . implode(', ', $sets)
+            . " WHERE ID = ?", $params);
+
+        if ($stmt === false) {
+            throw new Exception(self::errorSql('Error al guardar el nodo ' . $id . ' del mix'));
+        }
+
+        sqlsrv_free_stmt($stmt);
     }
 
     /** El mensaje de un error de sqlsrv, con su contexto */

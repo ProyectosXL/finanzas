@@ -2178,8 +2178,8 @@ class Saldos {
     /* ====================================================================
        ABM DE LOS PARAMETROS DEL MODULO
 
-       Sigue el patron de Parametros::getMixCobro / saveMixCobro / addMixCobro,
-       que es el ABM que ya existe en el proyecto: un getter con filtro de
+       Sigue el patron que tenia el ABM del mix de cobro plano (hoy un arbol,
+       en Class/MixCobro.php), que era el que ya existia en el proyecto: un getter con filtro de
        activos, un save que no crea, un add que chequea la clave natural antes
        de insertar para dar un mensaje entendible en vez del error del indice, y
        NINGUNA baja fisica.

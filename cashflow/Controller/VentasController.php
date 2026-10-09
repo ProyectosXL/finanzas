@@ -139,7 +139,7 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
-        /* NO HAY CASOS saveMixCobro NI saveParametro, y se sacaron a proposito.
+        /* NO HAY CASOS DE ESCRITURA DEL MIX NI saveParametro, y se sacaron a proposito.
            Duplicaban los de ParametrosController -que son los que usa la
            pantalla- y no tenian ningun llamador. Un endpoint de ESCRITURA sin
            consumidor es una puerta mas que hay que proteger sin que nadie la

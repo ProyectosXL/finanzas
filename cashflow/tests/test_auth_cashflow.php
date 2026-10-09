@@ -288,7 +288,7 @@ chequear('los generales sin migrar se editan desde Generales', 'GENERALES',
     Parametros::subPestanaDe('VENTAS', 'GENERAL'));
 chequear('saveParametro necesita la sub-pestaña', true,
     AuthCashflow::necesitaSubDelParametro('Parametros', 'saveParametro'));
-chequear('saveMixCobro no', false, AuthCashflow::necesitaSubDelParametro('Parametros', 'saveMixCobro'));
+chequear('saveMixArbol no', false, AuthCashflow::necesitaSubDelParametro('Parametros', 'saveMixArbol'));
 
 seccion('ningun controller toma el usuario de la sesion o del request');
 
