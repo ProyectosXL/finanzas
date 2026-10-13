@@ -1181,10 +1181,19 @@
         var actual = f.FORMA_PAGO_CRONOGRAMA || '';
 
         /* La opción vacía NO es "vacío": es "la que trae el maestro", y se
-           nombra. Así el caso normal —que es éste— muestra la forma real y de
-           dónde sale, y volver a ella es lo que saca el override. */
-        var opciones = '<option value=""' + (actual === '' ? ' selected' : '') + '>'
-            + escapar(delMaestro + ' · maestro') + '</option>';
+           nombra CON LA FORMA SOLA. Así el caso normal —que es éste— muestra la
+           forma real, y volver a ella es lo que saca el override.
+
+           EL ORIGEN NO VA EN EL TEXTO, y antes sí, pegado a la forma: en una
+           columna angosta repetido en cada fila era ruido, y lo que importa
+           leer es la forma. De dónde sale lo dicen el title del desplegable y
+           el de la opción; que hay un override lo dice el violeta. Que la
+           primera opción y la de la lista digan lo mismo es a propósito: son
+           la misma forma, una heredada y otra fijada para esta factura. */
+        var opciones = '<option value=""' + (actual === '' ? ' selected' : '')
+            + ' title="' + escapar('La forma del maestro. Elegir ésta saca el override de '
+                + 'esta factura.') + '">'
+            + escapar(delMaestro) + '</option>';
 
         formas.forEach(function(x) {
             opciones += '<option value="' + escapar(x) + '"'
@@ -1196,7 +1205,8 @@
                 + 'factura de otra manera: el maestro y las demás facturas de este proveedor '
                 + 'no cambian.'
             : 'Esta factura se trata como ' + actual + ', en lugar de la del maestro ('
-                + delMaestro + '). El maestro no cambió. Volvé a "del maestro" para sacarlo.\n'
+                + delMaestro + '). El maestro no cambió. Para sacarlo, elegí la primera opción, '
+                + 'la del maestro.\n'
                 + Auditoria.texto(auditoriaPago(f));
 
         return '<div class="prov-forma-celda">'
@@ -1709,7 +1719,7 @@
         /* Cambiar la forma cambia en qué serie cae el importe: recargar entero
            es lo mismo que hace la fecha, y por lo mismo. El importe puede entrar
            o salir del filtro y desaparecer de la vista, y eso el mensaje lo
-           dice. Elegir "del maestro" manda vacío, que es lo que saca el
+           dice. Elegir la primera opción —la del maestro— manda vacío, que es lo que saca el
            override. */
         document.querySelectorAll('#bodyProv .prov-select-forma').forEach(function(sel) {
             sel.addEventListener('change', function() {

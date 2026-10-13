@@ -733,10 +733,29 @@ chequear('hay un solo desplegable de forma por fila', true,
 chequear('y ya no una segunda columna', false,
     strpos($js, 'prov-select-crono') !== false || strpos($js, 'celdaCronograma') !== false);
 
-// La opcion vacia se NOMBRA con la del maestro: asi el caso normal muestra la
-// forma real y de donde sale, y volver a ella es lo que saca el override.
-chequear('la opcion vacia dice que viene del maestro', true,
-    strpos($js, "escapar(delMaestro + ' · maestro')") !== false);
+/* La opcion vacia se NOMBRA con la del maestro, y con la forma SOLA: el origen
+   ya no va en el texto ("CAJA · maestro" pasa a "CAJA"), lo dicen el title del
+   desplegable y el de la opcion. Volver a ella es lo que saca el override. */
+$celdaFormaJs = preg_match('/    function celdaForma\(f\) \{.*?\n    \}\n/s',
+    str_replace("\r\n", "\n", $js), $mForma) ? $mForma[0] : '';
+
+chequear('la opcion por defecto muestra la forma sola', true,
+    strpos($celdaFormaJs, "+ escapar(delMaestro) + '</option>'") !== false);
+chequear('sin "· maestro" en ningun lado del modulo', 0,
+    preg_match_all('/· (del )?maestro/', $js . file_get_contents(__DIR__ . '/../README-proveedores-locales.md')));
+chequear('el origen lo dice el title de la opcion', true,
+    strpos($celdaFormaJs, "'La forma del maestro. Elegir ésta saca el override de '") !== false);
+chequear('y el del desplegable sigue diciendo que viene del maestro', true,
+    strpos($celdaFormaJs, "'Viene del maestro (' + delMaestro + ')") !== false);
+chequear('para sacar el override se nombra la primera opcion', true,
+    strpos($celdaFormaJs, 'Para sacarlo, elegí la primera opción, ') !== false
+    && strpos($celdaFormaJs, 'Volvé a "del maestro"') === false);
+
+// Lo demas queda igual: el violeta del override, el (?) del typo y "sin forma".
+chequear('el override sigue en violeta', true, strpos($celdaFormaJs, "' prov-forma-pisada'") !== false);
+chequear('una forma con typo sigue con (?)', true,
+    strpos($js, "return f.FORMA_PAGO_ORIG + ' (?)';") !== false);
+chequear('y sin forma sigue diciendo "sin forma"', true, strpos($js, "return 'sin forma';") !== false);
 
 /* FORMAS_PAGO ES UNA LISTA, NO UN MAPA: los nombres son los VALORES. Leerla con
    Object.keys devolvia 0..5 y el desplegable mostraba numeros en vez de las

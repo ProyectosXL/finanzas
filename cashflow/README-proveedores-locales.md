@@ -1086,7 +1086,7 @@ CRONOGRAMA = esDelCronograma( override de la factura ?? forma del maestro )
 
 **En pantalla es UNA sola columna, editable, y muestra la que decide.** `FORMA_PAGO_VIGENTE` viaja ya resuelta en cada fila —la regla se escribe una vez, en el backend, y la grilla muestra lo que decide en vez de una aproximación suya—.
 
-- La opción vacía del desplegable **se nombra**: `CAJA · del maestro`. Así el caso normal muestra la forma real *y de dónde sale*, y volver a ella es lo que saca el override.
+- La opción vacía del desplegable **se nombra con la forma sola**: `CAJA`. Así el caso normal muestra la forma real, y volver a ella —la primera opción, la del maestro— es lo que saca el override. **De dónde sale lo dice el tooltip**, no el texto: hasta `feature/cashflow-excel-medios-ux` llevaba el origen pegado a la forma, y repetido en cada fila de una columna angosta era ruido que tapaba la forma. Que la primera opción y la de la lista digan lo mismo es a propósito: son la misma forma, una heredada del maestro y otra fijada para esta factura, y la violeta es la que se fijó.
 - Elegir cualquier otra guarda el override y la celda se marca en violeta.
 - **Cuando el hecho difiere de lo que decide**, va un ícono al lado con el detalle, no una columna propia. Hubo dos columnas y se unificaron: obligaban a leer dos celdas para contestar una sola pregunta, y hoy **no hay ni un comprobante donde difieran**.
 
@@ -1104,7 +1104,7 @@ Por eso `aplicarImportacion()` **no toca `FORMA_PAGO_CRONOGRAMA`**, y hay una pr
 
 - **No toca el maestro.** Las otras facturas del mismo proveedor siguen clasificándose igual.
 - **Se valida contra `FORMAS_PAGO`**, al revés que `FORMA_PAGO`, que guarda lo que diga la planilla. Ésta *decide*: una forma que no está en la lista no decidiría nada y quedaría como un override que parece puesto y no hace nada.
-- **Sacarlo es elegir "maestro:" en el desplegable.** No borra la fila: la fecha de pago y la observación siguen estando, porque son otra cosa.
+- **Sacarlo es elegir la primera opción del desplegable, la del maestro.** No borra la fila: la fecha de pago y la observación siguen estando, porque son otra cosa.
 
 **Que el hecho difiera de la regla no es un error: es información.** Significa que a ese proveedor se le pagó por una vía distinta de la habitual, y lo que eventualmente hay que corregir es el maestro.
 
