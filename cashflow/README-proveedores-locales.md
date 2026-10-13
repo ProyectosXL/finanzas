@@ -42,7 +42,10 @@ Contra `central`, en cualquier momento:
 -- 6. sql/cashflow_prov_locales_opciones.sql          (las cinco listas de opciones)
 -- 7. sql/cashflow_prov_locales_fuente_fecha.sql      (de dónde salió cada fecha de pago)
 -- 8. sql/cashflow_prov_exclusion_modulo.sql          (excluir un proveedor entero del módulo)
+-- 9. sql/cashflow_prov_locales_pago_medio.sql        (un comprobante pagado con dos medios)
 ```
+
+El noveno crea `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO`, vacía: **el día que se corre el tablero no se mueve**. Va después del primero —necesita la tabla de pagos y aborta si no está— y no depende de ningún otro. **Sin él** un comprobante no se puede pagar con dos medios: la importación rechaza esas filas nombrando el script, todo lo demás funciona igual, y la pestaña avisa. Ver *Un comprobante pagado con dos medios*.
 
 El octavo crea `RO_T_CASHFLOW_PROV_EXCLUIDO_MODULO`, vacía: **el día que se corre el tablero no se mueve**. No depende de ningún otro. **Sin él** nadie está excluido —que es lo cierto—, la columna *PROV. LOCALES* del maestro se dibuja con un guion y la pestaña avisa qué script falta. Ver *Excluir un proveedor entero del módulo*.
 
@@ -214,6 +217,8 @@ Ahora `deletePago()` hace dos pasos en una transacción: pone `FECHA_PAGO` y `FU
 
 **Sin `sql/cashflow_prov_locales_forma_por_factura.sql`** `FECHA_PAGO` no admite `NULL` y se hace lo de antes, el `DELETE` directo. Sin ese script tampoco existen la forma por factura ni la exclusión, así que lo único que se pierde es lo que se perdía antes.
 
+**Un comprobante pagado con dos medios vuelve entero.** En la misma transacción, ↺ da de baja su apertura (`guardarApertura()` con `null`, sin borrar filas) y el comprobante vuelve a su vencimiento o al cronograma. La exclusión, el override de forma y la observación se conservan, igual que con una fecha sola: viven en la tabla de pagos, y este botón borra la fecha, no la fila.
+
 ### El plazo del maestro no es un número
 
 En la planilla los valores son `CONTADO`, `7 DÍAS`, `30 DÍAS`, `15 DÍAS`, `DEBITO`, y está **vacío en 765 de 1.223 filas (62%)**.
@@ -294,6 +299,8 @@ No es una simplificación de la pantalla. *"A este proveedor le pagamos el 30"* 
 Verificado contra la base: una factura con `EXCLUIDA = 1`, su motivo y un `FORMA_PAGO_CRONOGRAMA` puesto a mano conserva las tres después de fecharla en masa.
 
 **Tampoco desconcilia nada.** Si alguna de las elegidas ya se pagó, Tango tiene la fecha real y eso no se toca: lo que cambia es la previsión, y con ella el desvío que después contesta *"¿le acertamos a la fecha?"*. El diálogo lo dice cuando hay alguna.
+
+**Y no toca los comprobantes pagados con dos medios.** Tienen dos fechas, y una para todas no dice a cuál reemplaza. El diálogo dice cuántos hay en la selección y que no se van a tocar, el resto se fecha como siempre, y el backend los vuelve a saltear (`Proveedores::sinAbiertos()`) porque el endpoint se alcanza sin pasar por la pantalla.
 
 ### No se filtra lo que "ya está así", al revés que al excluir
 
@@ -846,7 +853,9 @@ Si el archivo daría de baja **más de la mitad** del maestro, lo más probable 
 
 ### La planilla de pagos
 
-Campos: **cód. proveedor, número de factura, fecha de pago, forma de pago**.
+Campos: **cód. proveedor, número de factura, fecha de pago, forma de pago e importe**. Los tres primeros son obligatorios.
+
+**`IMPORTE` es opcional con un medio** (sinónimos `MONTO`, `IMPORTE_PAGO`): vacío quiere decir *todo lo pendiente*. Si viene, tiene que coincidir con el pendiente del comprobante **con $1 de tolerancia**; otro número es otro comprobante o un pago parcial que Tango todavía no sabe, y la fila queda en error con la diferencia. Un importe que no es un número también es un error: tomar el pendiente porque la celda decía *"mil pesos"* sería decidir por quien armó la planilla.
 
 **El tipo de comprobante no es obligatorio**, a propósito: quien arma la planilla mira una factura y copia su número, no su tipo. Cuando falta se deduce de los pendientes del proveedor.
 
@@ -856,6 +865,67 @@ Campos: **cód. proveedor, número de factura, fecha de pago, forma de pago**.
 **Lo que no cruza contra ningún pendiente es un error visible con su motivo**, y los tres casos se distinguen porque se arreglan distinto: número mal tipeado, proveedor equivocado, o factura que ya se pagó.
 
 **El aviso que importa dice cuántos vencidos quedan resueltos.** Es la razón de ser de esta importación, y hay que verlo *antes* de confirmar.
+
+**Confirmar no le cree a lo que vuelve del navegador.** Cada fila de la previsualización viaja con lo que decía el archivo (`crudo`), y `aplicarImportacion()` vuelve a calcular el diff con eso contra los pendientes, los pagos y las aperturas de *ahora*. Si una sola línea da un estado distinto del que se previsualizó —se pagó una parte en Tango, alguien cargó otra fecha— **no se aplica nada** y el mensaje dice qué línea cambió. Antes se le creía al diff que se reenviaba; desde que hay una regla que depende de sumar importes contra el pendiente, eso no podía depender de la pantalla. Mismo criterio que el maestro y que Cob. Electrónicos.
+
+### Un comprobante pagado con dos medios
+
+> Esto es **nuevo**, de `feature/cashflow-excel-medios-ux`. Antes la segunda fila de un comprobante quedaba en error pidiendo *"dejá una sola fila por comprobante"*.
+
+Una factura se puede pagar parte con un echeq y parte con una transferencia, o con dos echeqs de fechas distintas. En la planilla son **dos filas del mismo comprobante**, cada una con su `FECHA_PAGO`, su `FORMA_PAGO` y su `IMPORTE`.
+
+| | Un medio (una fila) | Dos medios (dos filas) |
+| --- | --- | --- |
+| `FORMA_PAGO` | opcional, como siempre | **obligatoria**, `ECHEQ` o `TRANSFERENCIA`. Puede repetirse |
+| `IMPORTE` | opcional; si viene, = pendiente ± $1 | **obligatorio en las dos**, mayor a cero |
+| La suma | — | = pendiente ± $1 |
+| En cuotas | se carga | **error**: *"es un comprobante en cuotas: cargalo con un solo medio"* |
+
+- **Tres filas o más** dejan en error **todas**, nombrando las líneas. No hay tercer medio, y elegir cuáles dos valen sería decidir por quien armó la planilla.
+- **El error es del comprobante, no de una fila suelta.** Si una de las dos está mal, no se carga ninguna: media apertura dejaría el comprobante partido a medias. El motivo es uno solo, dice todo lo que está mal —la forma de qué línea, cuánto suman, cuál es el pendiente y la diferencia— y va en las dos filas. La previsualización las muestra juntas, con *1/2* y *2/2*.
+- **El orden lo da la fecha**: *1/2* es la parte que se paga primero. Con la misma fecha —dos echeqs del mismo día— desempata el orden de las filas en el archivo.
+- **El resumen cuenta comprobantes**, no filas: un comprobante en dos medios es *una* alta. Lo que no se carga sí se cuenta por fila, porque es lo que hay que ir a corregir. Hay un chip *En dos medios*.
+
+**Qué decide qué no cambió.** Si el comprobante entra al cronograma lo sigue decidiendo la **forma vigente** —el override de la factura o, si no hay, el maestro—, nunca la de la planilla. Un comprobante con `CAJA` en el maestro abierto en echeq + transferencia **se acepta**, pero la previsualización lo marca: *"se sigue tratando como CAJA; para que entre al cronograma, cambiá su forma en la grilla o el maestro"*.
+
+**Reimportar reemplaza la apertura entera.** Si el comprobante vuelve con una sola fila, deja de estar partido y vuelve a ser un comprobante con una fecha. Si vuelve igual —aunque las dos filas vengan en otro orden—, es `SIN_CAMBIOS`.
+
+#### Dónde vive: `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO`
+
+Una fila por medio, con la clave del comprobante en `Latin1_General_BIN`, `ORDEN`, `FECHA_PAGO`, `FORMA_PAGO`, `FORMA_PAGO_ORIG`, `IMPORTE` y la auditoría del módulo. **Sin bajas físicas**: reemplazar o borrar una apertura pasa las partes vigentes a `VIGENTE = 0` con quién y cuándo, y un índice único filtrado impide dos partes vigentes con el mismo orden.
+
+- **El caso de un medio funciona exactamente como antes, sin migrar nada**: un comprobante sin filas en esta tabla es lo que era.
+- **La exclusión, el override de forma y la observación siguen en la tabla de pagos**: son del comprobante entero, no de una parte.
+- **La tabla de pagos lleva la fecha MÁS TARDÍA de las dos partes**, con `FUENTE_FECHA = ARCHIVO`, la forma en `NULL` y las observaciones de las dos filas juntas. No es una copia de más: es lo que hace que la conciliación mida el desvío contra la última parte, y que un pago parcial en Tango proyecte el saldo en esa fecha sin código nuevo (ver abajo). Lo decide `Proveedores::camposDeImportacion()`, que es pura.
+- **`guardarPago()` sigue siendo el único que escribe la tabla de pagos, y `guardarApertura()` el único que escribe la de medios**, siempre dentro de la transacción de quien llama: `aplicarImportacion()` escribe las dos juntas.
+
+**Sin `sql/cashflow_prov_locales_pago_medio.sql`** las dos filas de un comprobante quedan en error con un motivo que nombra el script, y todo lo demás funciona como antes. La pestaña avisa que falta.
+
+#### En el eje y en el tablero
+
+`getPendientes()` **con el horizonte** devuelve **una fila por parte**, con `IMPORTE_PENDIENTE` = el importe de la parte y su fecha resuelta con la jerarquía de siempre, cada una por separado: una parte futura se respeta tal cual, y una que ya pasó, si la forma vigente es del cronograma, va al próximo día de pago. Lo hace `Proveedores::abrirEnMedios()`, pura.
+
+- **Las series no ganan ni pierden un peso.** La última parte se lleva el resto —pendiente menos las anteriores—, así que la tolerancia de $1 no llega al cuadro. `IMPORTE_VTO` e `IMPUTACIONES` se reparten en la misma proporción y el pie de *Importe* tampoco se mueve. Las dos particiones de `PAGOS_TODO` siguen cerrando; lo único que cambia es en qué columna cae cada peso.
+- **Excluir el comprobante excluye las dos partes**, por factura o por proveedor: las dos filas llevan las mismas marcas.
+- **Sin el horizonte no se parte.** Tarjetas Pagos Corporativos arma su clave de cuota con comprobante + vencimiento y dos filas con la misma clave le romperían el circuito; la previsualización necesita el pendiente del comprobante entero.
+
+**Medido contra la base real** (13/10/2026, 600 vencimientos), con una apertura simulada en memoria sobre un comprobante real de $117.921,30, 60/40, una parte vencida y otra futura: las 29 series dan idénticas en importe, los dos cortes cierran contra los $2.353.245.202,55 de `PAGOS_TODO`, el total de la grilla no se mueve y los indicadores siguen contando 600 vencimientos con 601 filas.
+
+#### Un pago parcial en Tango
+
+Si el pendiente deja de coincidir con la suma de la apertura —más de $1 de diferencia—, o el comprobante pasa a tener más de un vencimiento, **no se parte**: todo lo que queda pendiente se proyecta **en la fecha más tardía**, que es la que tiene la tabla de pagos, con la jerarquía de siempre. La pestaña avisa, en atención: *"N comprobante(s) abiertos en dos medios ya no coinciden con su pendiente: se proyecta el saldo en la fecha más tardía. Reimportá para corregirlo"*. En la grilla la marca dice *no coincide*, en naranja.
+
+Cuando el comprobante sale de pendientes, concilia como cualquier otro, y **el desvío en días se mide contra la fecha más tardía**.
+
+#### En la grilla de Cuentas a Pagar
+
+- Un comprobante abierto se ve en **dos filas**, una por parte, cada una con su importe en la columna de su fecha. La columna *Fecha de pago* lleva *1/2* o *2/2* —en `data-etiqueta`, así el Excel baja la fecha sola— y el tooltip dice los dos medios, sus fechas e importes, quién los cargó y cuándo.
+- **La fecha no se edita en la celda**: tiene dos, y una fecha tipeada no dice a cuál reemplaza. Se cambia reimportando, o con **↺, que borra la apertura entera** y deja la exclusión, el override de forma y la observación. El servidor rechaza `savePago` sobre un comprobante abierto.
+- **La columna Forma sigue mostrando la que decide.** El medio de cada parte va en el tooltip de la fecha, no en el selector.
+- **Tildar una de las dos filas selecciona el comprobante**: la otra se tilda sola, y la barra cuenta comprobantes y suma el importe sin duplicar. Excluir manda el comprobante una vez.
+- **Los indicadores cuentan el comprobante una vez** y suman su importe completo. La regla está escrita una vez, en `Proveedores::cuentaComoVencimiento()`, y la usan los indicadores, los avisos de la pestaña y del tablero, y el control de faltantes; la pantalla la repite en `esParteExtra()`.
+- **El fechado masivo no toca los comprobantes abiertos**: el diálogo dice cuántos son y que no se van a tocar, y el backend los vuelve a saltear (`sinAbiertos()`).
+- **Exportar a Excel** baja las dos filas, con su importe y su fecha.
 
 ---
 
@@ -882,6 +952,8 @@ Queda marcada `CONCILIADO` con la **fecha real al lado**, sin pisar la prevista.
 > Es lo único que permite después contestar la pregunta por la que vale la pena guardar las dos: **¿le acertamos a la fecha?** Borrándola, esa pregunta se queda sin respuesta para siempre.
 
 Por eso el resumen informa el **desvío promedio en días** entre lo previsto y lo real —recién con cinco casos, porque con menos no significa nada—. Ese número dice si la previsión está sirviendo o si siempre se paga más tarde de lo que se dice.
+
+**Un comprobante pagado con dos medios mide el desvío contra la fecha más tardía**: es la que guarda la tabla de pagos (ver *Un comprobante pagado con dos medios*), y es cuando termina de pagarse.
 
 ### Detecta los dos sentidos
 
@@ -1202,6 +1274,8 @@ php cashflow/tests/run.php proveedores
 
 Con base, además: que **ningún pendiente sea negativo** —el error que tenía la consulta antes de la tabla de signos—, que no entre ningún proveedor del exterior, que el total sea exactamente operativos + excluidos, y que **el registro declare exactamente las series que el proveedor devuelve**.
 
+`tests/test_prov_locales_medios.php` fija el comprobante pagado con dos medios, sin base: un medio sin importe toma el pendiente y con otro importe da error; dos medios que suman el pendiente (±$1) se cargan y los que no, quedan en error en las dos filas con la diferencia; tres filas, una forma que no es echeq ni transferencia, una fila mala de dos y un comprobante en cuotas dejan en error todo el comprobante; dos echeqs el mismo día desempatan por el orden del archivo; reimportar igual es `SIN_CAMBIOS` y con una fila deshace la apertura; lo que se escribe no toca `FORMA_PAGO_CRONOGRAMA` y lleva la fecha más tardía; cada parte entra al eje con su importe y su fecha por la jerarquía de siempre; un pendiente que ya no coincide va entero a la fecha más tardía con su aviso; las dos particiones de `PAGOS_TODO` cierran; excluir excluye las dos partes; el fechado masivo y la celda no tocan un abierto; ↺ da de baja la apertura en la misma transacción; confirmar frena si algo cambió desde la previsualización; sin el script, error que lo nombra; el `CHECK` del script es `FORMAS_CRONOGRAMA`; y el cableado de la grilla.
+
 `tests/test_planilla.php` fija el mecanismo compartido de las tres importaciones: que `Planilla::numero()` y `Planilla::fecha()` entiendan lo que manda el navegador desde un Excel, que **el número de línea sea la fila del Excel** aunque haya filas vacías en el medio o arriba del encabezado, que un `;` adentro de una celda no parta la fila, y que **la plantilla y el parser salgan de la misma definición** en pagos, maestro y Cob. Electrónicos. La conversión de celdas del navegador —fechas desde el serial, fines de mes, importes sin exponente, ceros a la izquierda— la prueba `tests/js/planilla_excel.wsf` con cscript, y su cableado `test_tablas_controles.php`.
 
 `tests/test_prov_locales_opciones.php` fija las cinco listas, también sin base —llegan por parámetro, ya resueltas—:
@@ -1233,6 +1307,7 @@ sql/cashflow_prov_locales_maestro_manual.sql   ORIGEN: habilita la carga a mano
 sql/cashflow_prov_locales_forma_por_factura.sql  El override de forma por factura
 sql/cashflow_prov_locales_excluir_factura.sql    El tilde de exclusion por factura
 sql/cashflow_prov_locales_opciones.sql         Las cinco listas de opciones + semilla
+sql/cashflow_prov_locales_pago_medio.sql       Un comprobante pagado con dos medios
 sql/_referencia_tango_pendientes.sql           La consulta de Tango, como referencia
 cashflow/Class/Planilla.php                    El mecanismo de importacion, compartido (el servidor)
 cashflow/Js/planilla-excel.js                  El lector de Excel y las plantillas, compartido (el navegador)

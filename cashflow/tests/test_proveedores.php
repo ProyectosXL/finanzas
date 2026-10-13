@@ -376,14 +376,32 @@ chequear('la forma del maestro viaja aparte', true,
    Se busca la CLAVE del mapa que se le pasa a guardarPago, no el nombre suelto:
    el nombre aparece en el comentario que explica por que NO se escribe, y ese
    comentario tiene que poder existir. */
+/* Lo que se escribe lo decide camposDeImportacion(), que es pura, y
+   aplicarImportacion() escribe exactamente eso. Se mira en los dos: el mapa y
+   quien lo usa. */
 chequear('la importacion de pagos no escribe el override', false,
-    strpos($cuerpoDe('aplicarImportacion'), "'FORMA_PAGO_CRONOGRAMA' =>") !== false);
+    strpos($cuerpoDe('aplicarImportacion'), "'FORMA_PAGO_CRONOGRAMA' =>") !== false
+    || strpos($cuerpoDe('camposDeImportacion'), "'FORMA_PAGO_CRONOGRAMA' =>") !== false);
+chequear('y escribe lo que decide camposDeImportacion()', true,
+    strpos($cuerpoDe('aplicarImportacion'), '$campos = self::camposDeImportacion($filas);') !== false
+    && strpos($cuerpoDe('aplicarImportacion'), "\$campos['pago'], 'ARCHIVO', \$usuario") !== false);
 
 // Pero sí escribe las otras tres: es lo que la planilla trae.
 foreach (["'FECHA_PAGO' =>", "'FORMA_PAGO' =>", "'OBSERVACION' =>"] as $col) {
     chequear('y sigue escribiendo ' . $col, true,
-        strpos($cuerpoDe('aplicarImportacion'), $col) !== false);
+        strpos($cuerpoDe('camposDeImportacion'), $col) !== false);
 }
+
+// Y lo mismo probado con datos: ni con un medio ni con dos aparece el override.
+$unaFila = ['fecha_pago' => '2026-10-20', 'forma_pago' => 'ECHEQ', 'forma_pago_orig' => 'echeq',
+            'observacion' => null, 'parte' => 1, 'importe' => null];
+chequear('con un medio, el override no esta en el mapa', false,
+    array_key_exists('FORMA_PAGO_CRONOGRAMA', Proveedores::camposDeImportacion([$unaFila])['pago']));
+chequear('con dos medios tampoco', false, array_key_exists('FORMA_PAGO_CRONOGRAMA',
+    Proveedores::camposDeImportacion([
+        array_merge($unaFila, ['importe' => 100.0]),
+        array_merge($unaFila, ['parte' => 2, 'fecha_pago' => '2026-10-27', 'importe' => 50.0])
+    ])['pago']));
 
 /* LA TABLA DE SIGNOS NO SE TOCA. Al sacar la columna CRE_DEB del SELECT quedo
    un solo uso de CPA21 en la consulta, y es el que importa: sin el, una nota de
@@ -1484,7 +1502,12 @@ chequear('un proveedor que no existe tambien', true,
 chequear('y una fecha ilegible dice que decia la celda', true,
     strpos($c['filas'][2]['motivo'], 'el jueves') !== false);
 
-seccion('dos filas para el mismo comprobante no se colapsan');
+/* DOS FILAS DEL MISMO COMPROBANTE SON DOS MEDIOS, y esto CAMBIO: antes la
+   segunda quedaba en error pidiendo "una sola fila por comprobante". Dos filas
+   sin forma ni importe no son un pago con dos medios bien cargado, asi que las
+   dos quedan en error -no se elige una- y el motivo dice que les falta. Las
+   reglas de los dos medios estan en tests/test_prov_locales_medios.php. */
+seccion('dos filas para el mismo comprobante son dos medios, y no se colapsan');
 
 $c = Proveedores::compararImportacion([
     ['linea' => 2, 'cod_provee' => 'MTDODI', 'n_comp' => 'A0000500001731',
@@ -1493,9 +1516,13 @@ $c = Proveedores::compararImportacion([
      'fecha_pago' => '25/12/2026', 'forma_pago' => '', 't_comp' => 'FAC', 'observacion' => '']
 ], $pendientes, [], $hoy);
 
-chequear('la primera se carga', 'ALTA', $c['filas'][0]['estado']);
-chequear('la segunda queda en error', 'ERROR', $c['filas'][1]['estado']);
-chequear('nombrando a la otra', true, strpos($c['filas'][1]['motivo'], 'línea 2') !== false);
+chequear('ninguna de las dos se carga: no se elige una', ['ERROR', 'ERROR'],
+    array_column($c['filas'], 'estado'));
+chequear('el motivo nombra las dos lineas', true,
+    strpos($c['filas'][0]['motivo'], 'líneas 2 y 3') !== false);
+chequear('y dice que les falta la forma y el importe', true,
+    strpos($c['filas'][0]['motivo'], 'no trae forma') !== false
+    && strpos($c['filas'][0]['motivo'], 'no trae IMPORTE') !== false);
 
 seccion('cambiar una fecha ya cargada dice cual era');
 

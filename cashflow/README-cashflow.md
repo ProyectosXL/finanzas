@@ -250,6 +250,18 @@ Dos scripts nuevos contra `central`, reejecutables y sin borrar nada. **Se corre
 - `COSTOS_COBRO` en la sección Ventas, entre Ecommerce y *Total Ventas*, en cero. Ver *Después de correrlos, verificar*, más arriba.
 - Ventas y el tablero **sin** el aviso informativo de "el mix de cobro sale todavía del mix plano".
 
+### Importar en Excel y pagar con dos medios (`feature/cashflow-excel-medios-ux`)
+
+Un script nuevo contra `central`, reejecutable y sin borrar nada —el 37 de la instalación completa—. Se puede correr en cualquier momento después del de Proveedores Locales; la tabla nace vacía y con las seis columnas de auditoría.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 1 | `sql/cashflow_prov_locales_pago_medio.sql` | Crea `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO`: la apertura de un comprobante de Proveedores Locales pagado con **dos medios** —echeq y/o transferencia—, una fila por medio, con su fecha y su importe. Sin bajas físicas | **El tablero no cambia.** La importación rechaza las filas de dos medios con un motivo que nombra el script, y todo lo demás funciona como hoy. La pestaña avisa. Ver `README-proveedores-locales.md` |
+
+**El día que se publica, el tablero no se mueve un peso**: sin aperturas cargadas, `getPendientes()` devuelve exactamente lo de antes. Medido el 13/10/2026 con una apertura simulada en memoria sobre un comprobante real: las 29 series de `PROV_LOCALES` dan idénticas en importe y las dos particiones de `PAGOS_TODO` cierran; sólo cambia en qué columna cae cada parte.
+
+La importación en Excel no necesita ningún script: el Excel lo lee el navegador. Ver *Importar desde Excel: un lector, tres importaciones*.
+
 ## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
@@ -291,6 +303,7 @@ En este orden, contra `central`:
 -- 34. sql/cashflow_saldos_dia_acreditacion.sql     (Saldos: dia de acreditacion por local)
 -- 35. sql/cashflow_ventas_mix_nodo.sql              (Ventas: el mix de cobro como arbol)
 -- 36. sql/cashflow_estructura_costos_cobro.sql      (Ventas: la fila de costos de cobro)
+-- 37. sql/cashflow_prov_locales_pago_medio.sql      (Prov. Locales: un comprobante pagado con dos medios)
 ```
 
 **El 35 y el 36 se corren al publicar el código del mix en árbol**, en ese orden. El 35 necesita el mix plano de `sql/ventas_proyeccion.sql` —es lo que migra— y el 36 la sección Ventas del 2. Hasta correr el 35, el mix de cobro no se puede editar. Apenas corridos, **la proyección no cambia**: verificado contra la base el 09/10/2026, 160 celdas de cobranza por canal iguales al último bit y la fila de costos en cero. Ver `README-ventas.md`.
@@ -1795,6 +1808,7 @@ Texto resumido. "Sección" vacía es sin sección. Para revisar.
 | --- | --- | --- |
 | | Falta la tabla de fechas de pago | danger |
 | | Falta `cashflow_prov_locales_fuente_fecha.sql` | warning |
+| | Falta `cashflow_prov_locales_pago_medio.sql`: no se puede pagar con dos medios | warning |
 | | Falta la tabla de exclusión | warning |
 | | Falta la tabla del maestro | danger |
 | | Maestro vacío | warning |
@@ -1808,6 +1822,7 @@ Texto resumido. "Sección" vacía es sin sección. Para revisar.
 | Cronograma | No se pudo resolver el cronograma | danger |
 | | Vencidos del cronograma sin fecha de pago | warning |
 | | Vencidos fuera del cronograma sin fecha de pago | warning |
+| | Comprobantes en dos medios que ya no coinciden con su pendiente | warning |
 | | Sin vencimiento ni plazo | warning |
 | | Proveedores con rubro excluido | info |
 | | Proveedores con deuda fuera del maestro | warning |

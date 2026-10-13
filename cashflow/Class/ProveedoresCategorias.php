@@ -869,7 +869,12 @@ class ProveedoresCategorias {
                 ];
             }
 
-            $faltan[$cod]['VENCIMIENTOS']++;
+            /* Las dos partes de un comprobante pagado con dos medios son UN
+               vencimiento: ver Proveedores::cuentaComoVencimiento(), que es la
+               regla de todos los contadores del modulo. */
+            if (Proveedores::cuentaComoVencimiento($p)) {
+                $faltan[$cod]['VENCIMIENTOS']++;
+            }
             $faltan[$cod]['IMPORTE'] += floatval($p['IMPORTE_PENDIENTE']);
         }
 

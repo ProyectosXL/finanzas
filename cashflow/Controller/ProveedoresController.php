@@ -175,13 +175,17 @@ try {
 
             /* El mensaje dice QUE FECHA quedo, y no solo que se guardo: es un
                gesto que toca muchas filas de una, y lo unico que permite notar
-               un dedazo en el año es leer la fecha que quedo escrita. */
+               un dedazo en el año es leer la fecha que quedo escrita. Y cuantas
+               se saltearon por estar pagadas con dos medios. */
             echo json_encode([
                 'success' => true,
                 'message' => ($cuantas === 1
                         ? 'La factura queda prevista para '
                         : $cuantas . ' facturas quedan previstas para ')
-                    . date('d/m/Y', strtotime($r['fecha'])) . '.',
+                    . date('d/m/Y', strtotime($r['fecha'])) . '.'
+                    . ($r['omitidos'] > 0
+                        ? ' ' . $r['omitidos'] . ' pagada(s) con dos medios no se tocaron.'
+                        : ''),
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
@@ -303,8 +307,14 @@ try {
             $h = Horizonte::desdeParametros(new Parametros());
             $parse = Planilla::parsear(contenidoSubido(), Proveedores::columnasImportacion());
 
+            /* Los pendientes SIN el horizonte: una fila por vencimiento, sin
+               partir, que es lo que el diff necesita para saber el pendiente de
+               cada comprobante. Las aperturas vigentes van aparte, para que
+               reimportar igual sea SIN_CAMBIOS y una fila sola deshaga los dos
+               medios. */
             $comp = Proveedores::compararImportacion(
-                $parse['filas'], $prov->getPendientes($h->hoy()), $prov->getPagos(), $h->hoy());
+                $parse['filas'], $prov->getPendientes($h->hoy()), $prov->getPagos(), $h->hoy(),
+                $prov->getAperturas(), $prov->tablaMedioCreada());
 
             $comp['separador'] = $parse['separador'];
 
@@ -318,12 +328,16 @@ try {
                 throw new Exception('No hay nada para importar. Volvé a subir el archivo.');
             }
 
-            $r = $prov->aplicarImportacion($data['comparacion'], $usuario);
+            /* aplicarImportacion() NO LE CREE al diff que vuelve: recalcula con
+               la entrada del archivo contra la base de ahora, y si algo cambio
+               desde la previsualizacion no aplica nada. */
+            $h = Horizonte::desdeParametros(new Parametros());
+            $r = $prov->aplicarImportacion($data['comparacion'], $usuario, $h->hoy());
 
             echo json_encode([
                 'success' => true,
-                'message' => $r['altas'] . ' fecha(s) nueva(s) y ' . $r['cambios']
-                    . ' modificada(s).',
+                'message' => $r['altas'] . ' comprobante(s) con fecha nueva y ' . $r['cambios']
+                    . ' modificado(s).',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
@@ -726,10 +740,18 @@ function indicadores($items) {
     $nExcluidoProveedor = 0;
     $provExcluidos = [];
 
+    $vencimientos = 0;
+
     foreach ($items as $i) {
         $importe = floatval($i['IMPORTE_PENDIENTE']);
         $total += $importe;
         $proveedores[$i['COD_PROVEE']] = true;
+
+        /* Las dos partes de un comprobante pagado con dos medios son UN
+           vencimiento: la segunda suma su importe y no se cuenta. Es la misma
+           regla que la pantalla, en Proveedores::cuentaComoVencimiento(). */
+        $cuenta = Proveedores::cuentaComoVencimiento($i) ? 1 : 0;
+        $vencimientos += $cuenta;
 
         if (!empty($i['EXCLUIDO'])) {
             $excluido += $importe;
@@ -737,7 +759,7 @@ function indicadores($items) {
 
         if (!empty($i['EXCLUIDO_PROVEEDOR'])) {
             $excluidoProveedor += $importe;
-            $nExcluidoProveedor++;
+            $nExcluidoProveedor += $cuenta;
             $provExcluidos[$i['COD_PROVEE']] = true;
 
             /* Un excluido no queda "fuera del filtro por forma" -ya se decidio
@@ -749,12 +771,12 @@ function indicadores($items) {
 
         if (!empty($i['EXCLUIDA_MANUAL'])) {
             $excluidoManual += $importe;
-            $nExcluidoManual++;
+            $nExcluidoManual += $cuenta;
         }
 
         if (empty($i['CRONOGRAMA'])) {
             $fuera += $importe;
-            $nFuera++;
+            $nFuera += $cuenta;
 
             /* Se desglosa por la forma DEL MAESTRO y no por la del pago
                registrado: es la que decidio que esta fila quedara afuera, y un
@@ -766,10 +788,10 @@ function indicadores($items) {
 
         if ($i['ORIGEN_FECHA'] === 'CARGADA') {
             $conFecha += $importe;
-            $nConFecha++;
+            $nConFecha += $cuenta;
         } elseif (!empty($i['SIN_FECHA_CARGADA'])) {
             $vencidoSinFecha += $importe;
-            $nVencidoSinFecha++;
+            $nVencidoSinFecha += $cuenta;
         }
     }
 
@@ -777,7 +799,7 @@ function indicadores($items) {
 
     return [
         'total' => round($total, 2),
-        'vencimientos' => count($items),
+        'vencimientos' => $vencimientos,
         'proveedores' => count($proveedores),
         'vencido_sin_fecha' => round($vencidoSinFecha, 2),
         'n_vencido_sin_fecha' => $nVencidoSinFecha,
