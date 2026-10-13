@@ -114,7 +114,7 @@
                  canales: sólo los tipos en uso, en el orden de la jerarquía. La
                  llena Js/Parametros.js con Js/mix-niveles.js. Va fuera de la
                  tabla para que Exportar no la baje como una fila. -->
-            <div id="mixLeyenda" class="mix-niveles-leyenda px-3 pt-3" style="display: none;"></div>
+            <div id="mixLeyenda" class="mix-niveles-leyenda px-3 pt-3 pb-2" style="display: none;"></div>
 
             <div class="card-body p-0">
                 <div class="table-responsive">

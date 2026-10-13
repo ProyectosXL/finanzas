@@ -1319,3 +1319,30 @@ chequear('se dibuja con el editor, con los tipos que manda el servidor', [1, 1],
 ]);
 chequear('con los nodos que se ven, inactivos incluidos', 1,
     substr_count($paramJs, "document.querySelectorAll('#mixBody tr.mixa-nodo').forEach(function(tr) {\n            codigos.push(tr.dataset.nivel);"));
+
+seccion('Cobranza Proyectada: cada nodo del arbol lleva el color de su tipo de nivel');
+
+$ventasTab = str_replace("\r\n", "\n", contenidoTab($TABS . '/ventas.php'));
+$ventasJs = str_replace("\r\n", "\n", file_get_contents($JS . '/Ingresos-Ventas.js'));
+
+// Hojas y nodos con ramas debajo (fila-subtotal): todos tienen tipo. Por
+// CODIGO (n.nivel), no por el rotulo.
+chequear('la fila de cada nodo lleva la clase de su nivel, armada por el helper', 1,
+    substr_count($ventasJs, "(n.hoja ? 'fila-hoja' : 'fila-subtotal') + ' ' + MixNiveles.clase(n.nivel)"));
+chequear('la barra va despues de la sangria y del chevron, pegada al nombre', 1,
+    substr_count($ventasJs, "chevron(n.clave, conHijos[n.clave]) + MixNiveles.barra() + escapar(n.nombre)"));
+chequear('la fila del canal no lleva color: no es un nivel', 0,
+    preg_match('/<tr class="fila-canal[^"]*mix-nivel/', $ventasJs));
+chequear('el tooltip sigue empezando por el rotulo del nivel', 1,
+    substr_count($ventasJs, "var t = n.rotulo + ' · ' + titulo(n.canal)"));
+
+seccion('Cobranza Proyectada: la leyenda de los tipos de nivel');
+
+chequear('el contenedor existe, fuera de la tabla: Exportar no la baja', [1, false], [
+    substr_count($ventasTab, '<div id="cobLeyenda" class="mix-niveles-leyenda'),
+    strpos(bloqueTabla($ventasTab, 'tablaCobranza'), 'cobLeyenda') !== false
+]);
+chequear('se dibuja con el arbol', 1,
+    substr_count($ventasJs, "        aplicarAperturaCobranza();\n        pintarLeyendaCobranza(arbol);"));
+chequear('con los tipos que manda el servidor y todos los nodos en juego, abiertos o no', 1,
+    substr_count($ventasJs, "MixNiveles.leyenda((datosProyeccion.mix || {}).niveles,\n            arbol.map(function(n) { return n.nivel; }));"));

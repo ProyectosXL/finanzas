@@ -133,7 +133,7 @@ foreach (['Parametros.css', 'Ingresos-Ventas.css'] as $archivo) {
 // escriben ningun tipo a mano: los tipos, su orden y sus rotulos llegan del
 // servidor. Un codigo escrito en el JS es una lista paralela a NIVELES que
 // nadie va a acordarse de actualizar.
-$pantallasArbol = ['Parametros.js'];
+$pantallasArbol = ['Parametros.js', 'Ingresos-Ventas.js'];
 
 foreach ($pantallasArbol as $archivo) {
     $js = (string) @file_get_contents(__DIR__ . '/../Js/' . $archivo);
