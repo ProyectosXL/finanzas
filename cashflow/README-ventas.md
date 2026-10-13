@@ -236,6 +236,11 @@ La grilla de cobranza de la sub-pestaña Proyección es un **árbol que se abre 
 | Costo + tasa | En una hoja, el acumulado de su rama. En un nodo con ramas debajo —y en la fila del canal—, el **promedio de sus hojas ponderado por % efectivo**: lo que cuesta cobrar la rama entera |
 | Días | Los de la hoja. En los subtotales va vacía: cada hoja tiene los suyos |
 
+- **El tipo de nivel, en color**, con los mismos colores que el editor de Parámetros (ver *Mix de cobro: el árbol*).
+  - Cada nodo, hoja o con ramas debajo, tiene una barra del color de su tipo, después de la sangría y del chevron. Al abrir y cerrar ramas, la barra acompaña a su fila.
+  - No hay columna Nivel, porque la tabla ya es densa con los importes. El tipo se lee en la barra, en el tooltip (que empieza con el rótulo) y en la leyenda de arriba del árbol.
+  - La leyenda muestra los tipos de todos los nodos en juego, también los de una rama cerrada, así no cambia al abrir y cerrar.
+  - La fila de cada canal y las tres filas del pie van sin color.
 - **Selector Bruto / Costo / Neto**: qué importe muestran las columnas de fechas. Arranca en **Bruto**, que es lo que muestra la fila de cada canal en el tablero. El costo se muestra **en negativo**, como la fila del tablero.
 - **El pie muestra siempre tres filas**, sea cual sea el selector: *Cobranza bruta*, *Costos de cobro* (negativo) y *Cobranza neta*. Los tres importes vienen del servidor —el neto se calcula como bruto − costo celda por celda—, así que bruta − costos = neta en cada columna, sin que la pantalla reste nada.
 - **Los KPIs** de cobranza del tramo y del horizonte muestran la neta al lado de la bruta.
@@ -331,13 +336,20 @@ ECOMMERCE
 
 **Los tipos de nivel son una lista fija y ordenada del código** —`MixCobro::NIVELES`—, no de la base. Es estructura, no un valor de negocio, y la misma lista está en el `CHECK` de la columna `NIVEL`: **cambian juntas**.
 
-| Orden | Código | Rótulo |
-| ---: | --- | --- |
-| 1 | `MARKETPLACE` | Marketplace |
-| 2 | `MEDIO_PAGO` | Medio de pago |
-| 3 | `TIPO_TARJETA` | Tipo de tarjeta |
-| 4 | `PROCESADORA` | Procesadora |
-| 5 | `CUOTAS` | Cuotas |
+| Orden | Código | Rótulo | Color |
+| ---: | --- | --- | --- |
+| 1 | `MARKETPLACE` | Marketplace | violeta `#7F77DD` |
+| 2 | `MEDIO_PAGO` | Medio de pago | verde azulado `#1D9E75` |
+| 3 | `TIPO_TARJETA` | Tipo de tarjeta | coral `#D85A30` |
+| 4 | `PROCESADORA` | Procesadora | rosa `#D4537E` |
+| 5 | `CUOTAS` | Cuotas | azul `#378ADD` |
+
+**El color es del tipo, no de la profundidad.** Como se pueden saltear niveles, la sangría sola engaña: Mercado Pago debajo de Mercado Libre es *Medio de pago* y queda a la misma sangría que Crédito, que es *Tipo de tarjeta*. Por eso cada tipo tiene un color fijo, que significa lo mismo en cualquier canal y en las dos pantallas del árbol (el editor de Parámetros y Cobranza Proyectada). El de la tabla es el tono de la barra. Cada tipo tiene además un fondo claro y un texto oscuro para su etiqueta, con contraste AA.
+
+- **Una sola fuente.** Los colores viven sólo en `Css/mix-niveles.css`, una clase por código (`.mix-nivel-PROCESADORA`) con tres variables: fondo, texto y barra. Las clases y la leyenda las arma `Js/mix-niveles.js`. Los dos se cargan en `index.php`. Ni `Parametros.css` ni `Ingresos-Ventas.css` repiten un color.
+- **Por código, no por rótulo.** Cada nodo viaja con su código en las dos respuestas, y los tipos con su orden y sus rótulos van en `niveles`, armado de `MixCobro::NIVELES` por `MixCobro::nivelesLista()`. Ninguna pantalla escribe los tipos a mano.
+- **Un tipo nuevo sin color** se ve en un gris neutro y `tests/test_mix_niveles.php` falla nombrándolo. Agregar un tipo es, entonces, `NIVELES`, el `CHECK` y su clase en `mix-niveles.css`.
+- **No pisa colores con significado.** Ningún tipo usa el rojo o el verde de la suma del 100% ni el gris de los inactivos. El color nunca es la única señal: el rótulo del tipo sigue a la vista.
 
 **Estructura** (la valida el servidor, `MixCobro::validarEstructura()`):
 
@@ -371,6 +383,13 @@ Y lo que exige para que la venta del canal llegue entera a la caja:
 
 Se administra desde **Parámetros → Ventas → Mix de Cobro y Plazos**, un bloque por canal con columnas Nombre, Nivel, %, Costo %, Tasa %, Días, Activo y Última edición.
 
+- **El tipo de nivel, en color** (ver la tabla de tipos en *Mix de cobro: el árbol*).
+  - Cada nodo tiene una barra del color de su tipo, después de la sangría y pegada al nombre.
+  - La columna Nivel muestra el rótulo en una etiqueta del mismo color. Con permiso de edición es el desplegable, con el color del tipo elegido. Al elegir otro nivel, la fila cambia de color en el momento.
+  - Arriba del árbol, una leyenda para todos los canales con los tipos que se usan, en el orden de `NIVELES`. Cuenta todos los nodos dibujados, inactivos incluidos, y se recalcula al cambiar un nivel.
+  - Un nodo fuera de juego conserva el color de su tipo, atenuado, y lo mismo el desplegable de un nodo con hijos. La fila de cada canal no es un nivel y va sin color.
+  - El desplegable de nivel del formulario de alta también toma el color del tipo elegido.
+  - Exportar no cambia: los colores no bajan al Excel.
 - **Lo heredado, a la vista.** Al lado de cada campo, en gris, lo que resuelve la regla para ese nodo: el costo + tasa de su rama ("rama: 5,80% (costo 4,90% + tasa 0,90%)") y de quién hereda los días ("hereda 7 de Fiserv"). Es lo que hace entendible la herencia.
 - **El 100% de cada grupo.** El nodo padre —o el canal, para el primer nivel— muestra la Σ de sus hijos activos, en rojo si no da 100%. Con algún error, el canal lo lista arriba de sus nodos y **Guardar** queda bloqueado diciendo por qué.
 - **La pantalla no tiene la regla.** Lo heredado, las sumas y si se puede guardar salen del servidor: del payload inicial y, mientras se edita, de `previsualizarMixArbol`, que resuelve el canal **como quedaría** con la misma función que el motor. Se consulta al **cambiar de campo**, no en cada tecla; mientras se tipea o se espera la respuesta, Guardar queda bloqueado.
@@ -557,6 +576,9 @@ cashflow/Js/Ingresos-Ventas.js
 cashflow/Js/Parametros.js
 cashflow/Css/Ingresos-Ventas.css
 cashflow/Css/Parametros.css
+cashflow/Css/mix-niveles.css            Los colores de los tipos de nivel del mix (único lugar)
+cashflow/Js/mix-niveles.js              Las clases y la leyenda de esos colores (ES3, se prueba con cscript)
+cashflow/index.php                      Modificado: carga mix-niveles.css y mix-niveles.js
 cashflow/Css/main.css                   Modificado: sticky header compartido
 cashflow/Js/main.js                     Modificado: helper de sticky header + título
 cashflow/Controller/TabController.php   Modificado: 'parametros' en $validTabs

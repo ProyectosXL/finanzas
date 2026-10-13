@@ -172,3 +172,23 @@ if ($wsf === false) {
         chequear('mix_niveles.wsf: sin fallas', 0, intval($m[2]));
     }
 }
+
+// ============================================================================
+seccion('la tabla de tipos del README dice los mismos colores que el CSS');
+// ============================================================================
+
+// El README repite el tono de la barra para que se lea sin abrir el CSS. Una
+// copia que nadie verifica termina diciendo otra cosa.
+$readme = str_replace("\r\n", "\n", (string) @file_get_contents(__DIR__ . '/../README-ventas.md'));
+$enReadme = [];
+
+preg_match_all('/^\| \d+ \| `([A-Z_]+)` \| [^|]+ \| [^|`]*`(#[0-9A-Fa-f]{6})` \|$/m', $readme, $filas, PREG_SET_ORDER);
+
+foreach ($filas as $f) {
+    $enReadme[$f[1]] = strtoupper($f[2]);
+}
+
+chequear('un color por tipo, en el orden de NIVELES', array_keys(MixCobro::NIVELES), array_keys($enReadme));
+chequear('y es el de la barra en Css/mix-niveles.css', array_map(function ($v) {
+    return $v['mix-nivel-barra'];
+}, array_intersect_key($paleta, MixCobro::NIVELES)), array_intersect_key($enReadme, $paleta));
