@@ -37,7 +37,6 @@
     'use strict';
 
     var ENDPOINT = 'Controller/TarjetasController.php';
-    var PARAMETROS = 'Controller/ParametrosController.php';
 
     var tarjetas = [];
     var tipos = {};
@@ -67,9 +66,9 @@
            vive en el payload de Parametros -que es donde el modulo esta
            declarado- y los datos en el controller del modulo. Que la descripcion
            no llegue no puede impedir ver la grilla. */
-        pedir(PARAMETROS + '?action=getTodo')
-            .then(function(d) {
-                var modulo = buscarModulo(d.data, 'TARJETAS');
+        var descripcion = ParametrosCarga.pedir('TARJETAS')
+            .then(function(data) {
+                var modulo = buscarModulo(data, 'TARJETAS');
                 var desc = document.getElementById('ptarDescripcion');
 
                 if (desc && modulo && modulo.descripcion) {
@@ -79,7 +78,10 @@
             })
             .catch(function() { /* Contexto, no dato. */ });
 
-        pedir(ENDPOINT + '?action=getTarjetas')
+        /* Devuelve los dos juntos para la carga diferida (Js/parametros-carga.js),
+           y false si fallaron los datos: la descripcion sola no hace la
+           sub-pestaña. */
+        var datos = pedir(ENDPOINT + '?action=getTarjetas')
             .then(function(d) {
                 tarjetas = d.data.filas || [];
                 tipos = d.data.tipos || {};
@@ -95,7 +97,11 @@
             })
             .catch(function(e) {
                 avisar(['No se pudieron leer las tarjetas: ' + e.message]);
+
+                return false;
             });
+
+        return Promise.all([descripcion, datos]).then(function(r) { return r[1]; });
     }
 
     function buscarModulo(data, codigo) {
@@ -611,7 +617,9 @@
             }
         });
 
-        cargar();
+        /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
+           si es la primera que se ve. Ver Js/parametros-carga.js. */
+        ParametrosCarga.registrar('TARJETAS', cargar);
     }
 
     function enganchar(id, evento, fn) {

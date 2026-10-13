@@ -51,7 +51,9 @@
             });
         }
 
-        cargar();
+        /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
+           si es la primera que se ve. Ver Js/parametros-carga.js. */
+        ParametrosCarga.registrar('PRECHEQUEADO', cargar);
     }
 
     if (document.readyState === 'loading') {
@@ -68,7 +70,7 @@
         Cargando.mostrar('loadingParamPpq');
         mostrar('wrapperParamPpq', false);
 
-        pedirJson(URL_PARAM + '?action=getTodo')
+        return ParametrosCarga.pedir('PRECHEQUEADO')
             .then(function(data) {
                 modulo = buscarModulo(data, 'PRECHEQUEADO');
 
@@ -86,6 +88,9 @@
             .catch(function(error) {
                 Cargando.ocultar('loadingParamPpq');
                 avisar('Error al cargar los clientes pre-chequeados: ' + error.message);
+
+                // Falló: que volver a la sub-pestaña lo reintente.
+                return false;
             });
     }
 

@@ -13,7 +13,9 @@
  *
  * CARGA PEREZOSA: la estructura se pide recién al abrir la sub-pestaña. Si se
  * pidiera junto con el resto, un problema leyendo la estructura se llevaría
- * puesta también la pestaña de Ventas.
+ * puesta también la pestaña de Ventas. Fue la primera sub-pestaña que cargó
+ * así, y su patrón —shown.bs.tab y una marca de "cargado"— es el que ahora
+ * escribe una sola vez Js/parametros-carga.js para todas.
  *
  * EL ORDEN NO SE MANDA. Los botones ↑ y ↓ mueven la fila en la pantalla y el
  * servidor renumera desde cero al guardar. Así el orden se repara solo y no
@@ -28,27 +30,12 @@
     var datos = null;        // lo último que devolvió el servidor
     var secciones = [];      // estado editable
     var filas = [];          // estado editable
-    var cargado = false;
     var verInactivas = true;
 
+    /* Carga cuando se abre su sub-pestaña, o al arrancar si fuera la primera
+       que se ve. Ver Js/parametros-carga.js. */
     function inicializar() {
-        var boton = document.getElementById('tabParamCashflowBtn');
-
-        if (!boton) {
-            return;   // la sub-pestaña no está en esta página
-        }
-
-        boton.addEventListener('shown.bs.tab', function() {
-            if (!cargado) {
-                cargar();
-            }
-        });
-
-        // Si la sub-pestaña ya estuviera activa al entrar (no pasa hoy, pero
-        // pasaría si Cashflow quedara primero en el orden de módulos)
-        if (boton.classList.contains('active')) {
-            cargar();
-        }
+        ParametrosCarga.registrar('CASHFLOW', cargar);
     }
 
     if (document.readyState === 'loading') {
@@ -65,10 +52,9 @@
         Cargando.mostrar('cfeLoading');
         mostrar('cfeWrapper', false);
 
-        pedirJson(URL_BASE + '?action=getEstructura')
+        return pedirJson(URL_BASE + '?action=getEstructura')
             .then(function(data) {
                 datos = data;
-                cargado = true;
 
                 // Copias editables: así "cancelar" es recargar y no hay que
                 // deshacer nada a mano.
@@ -99,6 +85,9 @@
             .catch(function(error) {
                 Cargando.ocultar('cfeLoading');
                 avisoError('No se pudo cargar la estructura: ' + error.message);
+
+                // Falló: que volver a la sub-pestaña lo reintente.
+                return false;
             });
     }
 
@@ -762,7 +751,6 @@
                        + 'Habilitala y guardá cuando tenga origen de datos.'
             });
 
-            cargado = false;
             cargar();
         }).catch(function(e) {
             Notificacion.error('No se pudo agregar la fila: ' + e.message);
@@ -787,7 +775,6 @@
                 detalle: 'Entra inhabilitada, igual que las filas.'
             });
 
-            cargado = false;
             cargar();
         }).catch(function(e) {
             Notificacion.error('No se pudo agregar la sección: ' + e.message);
@@ -1061,7 +1048,6 @@
         }).then(function() {
             Notificacion.exito('Estructura guardada. El tablero ya usa este cuadro.');
 
-            cargado = false;
             cargar();
             restaurarBoton(btn);
         }).catch(function(e) {

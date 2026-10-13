@@ -52,6 +52,26 @@ function autorizar($controlador, $accion, $sub = null) {
 }
 
 /**
+ * Exige poder VER una pestaña, con las mismas negativas que autorizar(): 401
+ * sin usuario, 403 sin permiso. Para los pedidos de lectura que nombran una
+ * parte de la pestaña; ver AuthCashflow::exigirLectura().
+ *
+ * @param string $tab
+ * @return string El username
+ */
+function autorizarLectura($tab) {
+    try {
+        return AuthCashflow::exigirLectura($tab);
+    } catch (AuthCashflowSinUsuario $e) {
+        responderSinAutorizacion(401, $e->getMessage());
+    } catch (AuthCashflowSinPermiso $e) {
+        responderSinAutorizacion(403, $e->getMessage());
+    }
+
+    return null;
+}
+
+/**
  * Corta el request con el codigo y el mensaje.
  *
  * @param int $codigo

@@ -3,8 +3,9 @@
  * La pestaña de nivel raíz y la sub-pestaña VENTAS: el editor del árbol del
  * mix de cobro y la participación fija de respaldo.
  *
- * Carga el payload de TODOS los módulos —cada sub-pestaña resuelve el suyo con
- * buscarModulo()— y es quien muestra el wrapper y los avisos comunes. Los demás
+ * Carga SÓLO el módulo VENTAS, recién cuando se abre su sub-pestaña: la carga
+ * diferida, el wrapper de la pestaña y los avisos comunes de arriba los maneja
+ * Js/parametros-carga.js, igual para todas las sub-pestañas. Los demás
  * módulos tienen cada uno su propio archivo y su propio JS.
  *
  * LOS PARÁMETROS GENERALES YA NO ESTÁN ACÁ: la alícuota, el horizonte y los
@@ -39,32 +40,6 @@
         return null;
     }
 
-    /** Avisos de configuración pendiente (por ejemplo, una migración sin correr) */
-    function pintarAvisos() {
-        var cont = document.getElementById('avisosParametros');
-
-        if (!cont) {
-            return;
-        }
-
-        var avisos = (datos && datos.avisos) || [];
-
-        if (!avisos.length) {
-            cont.innerHTML = '';
-            return;
-        }
-
-        var html = '';
-
-        avisos.forEach(function(a) {
-            html += '<div class="alert alert-warning py-2 px-3 mb-2">' +
-                    '<i class="fas fa-triangle-exclamation me-1"></i><small>' +
-                    escapar(a) + '</small></div>';
-        });
-
-        cont.innerHTML = html;
-    }
-
     /** Muestra bajo las sub-pestañas qué afecta el módulo activo */
     function pintarDescripcion() {
         var cont = document.getElementById('descripcionVentas');
@@ -92,7 +67,9 @@
             btnGuardarRespaldo.addEventListener('click', guardarRespaldo);
         }
 
-        cargar();
+        /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
+           si es la primera que se ve. Ver Js/parametros-carga.js. */
+        ParametrosCarga.registrar('VENTAS', cargar);
     }
 
     // Ejecutar cuando el DOM esté listo O inmediatamente si ya está listo
@@ -106,11 +83,17 @@
        CARGA
        ================================================================ */
 
+    /**
+     * Trae SÓLO el módulo VENTAS. Antes este archivo pedía getTodo entero y
+     * manejaba el wrapper de toda la pestaña: Parámetros no se veía hasta que
+     * cargaba Ventas, aunque lo que se abriera fuera otra sub-pestaña. Eso lo
+     * hace ahora Js/parametros-carga.js, igual para todas, y también pinta los
+     * avisos generales de arriba.
+     *
+     * @returns {Promise}
+     */
     function cargar() {
-        Cargando.mostrar('loadingParametros');
-        mostrar('wrapperParametros', false);
-
-        pedir('Controller/ParametrosController.php?action=getTodo')
+        return ParametrosCarga.pedir('VENTAS')
             .then(function(data) {
                 datos = data;
                 // Los parámetros vienen agrupados por módulo: cada sub-pestaña
@@ -121,16 +104,15 @@
                     throw new Error('El backend no devolvió el módulo VENTAS');
                 }
 
-                pintarAvisos();
                 pintarDescripcion();
                 generarMix();
                 generarRespaldo();
-                Cargando.ocultar('loadingParametros');
-                mostrar('wrapperParametros', true);
             })
             .catch(function(error) {
-                Cargando.ocultar('loadingParametros');
                 mostrarError('Error al cargar los parámetros: ' + error.message);
+
+                // Falló: que volver a la sub-pestaña lo reintente.
+                return false;
             });
     }
 

@@ -1503,6 +1503,26 @@ Las sub-pestañas salen de `Parametros::$modulos`, así que **agregar un módulo
 >
 > Generales muestra además la **curva de dólar futuro** y la **cotización del BCRA**, las dos de **solo lectura**: llegan por API y las mantiene otro proceso. Un campo editable al lado haría creer que se pueden corregir desde ahí.
 
+### Cada sub-pestaña carga cuando se abre, y una vez
+
+> Esto **cambió** en `feature/cashflow-excel-medios-ux`.
+
+Al entrar a Parámetros, nueve sub-pestañas pedían `getTodo` a la vez —y `getTodo` resolvía los once módulos en cada pedido: el cronograma, las cotizaciones, Saldos e Interbanking—, más Cobranzas con sus tres pedidos propios. Y `Parametros.js` escondía toda la pestaña hasta que cargaba **Ventas**, aunque lo que se abriera fuera otra.
+
+Ahora:
+
+- **Se carga sólo la primera sub-pestaña que se ve** —la activa del DOM; hoy, Generales— y la pantalla aparece apenas termina. Las demás cargan **la primera vez que se hace clic** en ellas, con su propio indicador.
+- **Volver a una ya abierta no pide nada.** El caché dura lo que se está en Parámetros: ir a otra pestaña del menú y volver recarga todo, porque la pestaña se vuelve a dibujar entera por AJAX.
+- **El Actualizar de una sub-pestaña recarga sólo esa**, y guardar recarga lo que ya recargaba, sin invalidar las otras.
+- **Los avisos generales de arriba** (`#avisosParametros`, scripts pendientes) llegan con la primera carga y se refrescan con cualquier Actualizar. Las sub-pestañas que no leen su módulo con `getTodo` —Cobranzas y Cashflow— los piden aparte con `getAvisosGenerales`.
+- **Una carga que falla no queda como hecha**: la sub-pestaña muestra su error y volver a abrirla lo reintenta.
+
+**`getTodo&modulo=<CÓDIGO>` resuelve sólo ese módulo** (`Parametros::getModulosConDatos($pedido)`). Sin `modulo` devuelve todo, como siempre. Pedir un módulo que no existe es un error, y pedirlo sin poder ver Parámetros también, con su 401 o su 403 (`AuthCashflow::exigirLectura()`): en Parámetros la lectura es una sola para todas las sub-pestañas —`cashflow.tab.parametros`— y la edición va por sub-pestaña. El rescate de los parámetros generales que todavía figuran como de Ventas sigue andando: vive en la rama de Generales y no depende de que se resuelva Ventas.
+
+**Ninguna sub-pestaña lee datos de otro módulo**: se verificó antes de partir el pedido. Cada una busca el suyo con `buscarModulo()`, `canales` no lo usa nadie, el horizonte y el cronograma se resuelven en el servidor dentro de Generales, y Logística y Tarjetas leen `getTodo` sólo para su descripción —sus datos vienen de su propio controller—.
+
+**El mecanismo está escrito una vez**, en `Js/parametros-carga.js`, con el patrón que ya tenía la estructura del Cashflow —`shown.bs.tab` y una marca de cargado—. Cada sub-pestaña hace `ParametrosCarga.registrar('<CÓDIGO>', cargar)` en lugar de cargar al arrancar, y pide su módulo con `ParametrosCarga.pedir('<CÓDIGO>')`. Se carga en `Tabs/parametros.php` antes que las sub-pestañas, porque Compras Exterior, Logística y Tarjetas traen su script adentro de su propio archivo. Verificado en Chrome con los datos reales de cada módulo: al entrar sale un solo pedido, `getTodo&modulo=GENERALES`; abrir Saldos pide Saldos; volver a las dos no pide nada; y Actualizar en Saldos pide sólo Saldos.
+
 ### Parámetros → Cashflow
 
 Permite crear filas y secciones, renombrarlas, cambiarles la sección, reordenarlas, habilitarlas e inhabilitarlas.

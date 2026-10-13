@@ -98,9 +98,9 @@
        ================================================================ */
 
     function cargar() {
-        pedir(ENDPOINT + '?action=getTodo')
-            .then(function(d) {
-                var modulo = buscarModulo(d.data, 'GENERALES');
+        return ParametrosCarga.pedir('GENERALES')
+            .then(function(data) {
+                var modulo = buscarModulo(data, 'GENERALES');
 
                 if (!modulo) {
                     avisar(['El módulo Generales no está declarado en Parámetros.']);
@@ -130,6 +130,9 @@
             })
             .catch(function(e) {
                 avisar(['No se pudieron leer los parámetros generales: ' + e.message]);
+
+                // Falló: que volver a la sub-pestaña lo reintente.
+                return false;
             });
     }
 
@@ -978,7 +981,9 @@
         enganchar('pgenModalidad', 'change', guardarModalidad);
         enganchar('pgenAplicarConstante', 'click', aplicarConstante);
 
-        cargar();
+        /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
+           si es la primera que se ve. Ver Js/parametros-carga.js. */
+        ParametrosCarga.registrar('GENERALES', cargar);
     }
 
     function enganchar(id, evento, fn) {

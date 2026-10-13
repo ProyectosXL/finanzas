@@ -14,6 +14,13 @@
         </div>
     </div>
 
+    <!-- La carga diferida de las sub-pestañas. Va ANTES que todas: Compras
+         Exterior, Logística y Tarjetas traen su script adentro de su propio
+         archivo, más abajo, y se registran apenas corren. Ver
+         Js/parametros-carga.js. -->
+    <script src="Js/parametros-carga.js?v=<?php echo time(); ?>"></script>
+
+    <!-- Se ve hasta que termina de cargar la PRIMERA sub-pestaña, no todas. -->
     <div class="cargando-slot" id="loadingParametros" data-cargando="Cargando parámetros…"></div>
 
     <div id="wrapperParametros" style="display: none;">

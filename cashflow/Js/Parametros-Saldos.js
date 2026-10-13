@@ -95,7 +95,9 @@
             });
         });
 
-        cargar();
+        /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
+           si es la primera que se ve. Ver Js/parametros-carga.js. */
+        ParametrosCarga.registrar('SALDOS', cargar);
     }
 
     if (document.readyState === 'loading') {
@@ -112,7 +114,7 @@
         Cargando.mostrar('loadingParamSaldos');
         mostrar('wrapperParamSaldos', false);
 
-        pedirJson(URL_PARAM + '?action=getTodo')
+        return ParametrosCarga.pedir('SALDOS')
             .then(function(data) {
                 modulo = buscarModulo(data, 'SALDOS');
 
@@ -133,6 +135,9 @@
             .catch(function(error) {
                 Cargando.ocultar('loadingParamSaldos');
                 avisar('Error al cargar los parámetros de Saldos: ' + error.message);
+
+                // Falló: que volver a la sub-pestaña lo reintente.
+                return false;
             });
     }
 

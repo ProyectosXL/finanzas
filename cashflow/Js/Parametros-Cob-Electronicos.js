@@ -68,7 +68,9 @@
             }
         });
 
-        cargar();
+        /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
+           si es la primera que se ve. Ver Js/parametros-carga.js. */
+        ParametrosCarga.registrar('COB_ELECTRONICOS', cargar);
     }
 
     if (document.readyState === 'loading') {
@@ -85,7 +87,7 @@
         Cargando.mostrar('loadingParamCobel');
         mostrar('wrapperParamCobel', false);
 
-        pedirJson(URL_PARAM + '?action=getTodo')
+        return ParametrosCarga.pedir('COB_ELECTRONICOS')
             .then(function(data) {
                 modulo = buscarModulo(data, 'COB_ELECTRONICOS');
 
@@ -106,6 +108,9 @@
             .catch(function(error) {
                 Cargando.ocultar('loadingParamCobel');
                 avisar('Error al cargar los parámetros de Cob. Electrónicos: ' + error.message);
+
+                // Falló: que volver a la sub-pestaña lo reintente.
+                return false;
             });
     }
 

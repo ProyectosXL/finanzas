@@ -402,10 +402,15 @@ foreach (ComprasProyectadas::ESTADOS as $estado) {
 
 seccion('El panel de parametros cubre los siete');
 
-/* getTodo devuelve los modulos en d.data. Buscarlos en la raiz dejaba el panel
-   vacio con "El modulo no esta declarado en Parametros", sin ningun error. */
-chequear('el panel busca el modulo en d.data, donde lo deja getTodo',
-    true, strpos($srcParamJs, "buscarModulo(d.data, 'COMPRAS_PROY')") !== false);
+/* getTodo devuelve los modulos en 'data'. Buscarlos en la raiz de la respuesta
+   dejaba el panel vacio con "El modulo no esta declarado en Parametros", sin
+   ningun error. Desde la carga diferida el pedido lo hace
+   ParametrosCarga.pedir(), que ya devuelve 'data' -no la respuesta entera,
+   como el pedir() de este archivo-: ahi tiene que buscarse. */
+chequear('el panel pide su modulo con la carga diferida',
+    true, strpos($srcParamJs, "return ParametrosCarga.pedir('COMPRAS_PROY')") !== false);
+chequear('y lo busca en lo que esta devuelve, que es data',
+    true, strpos($srcParamJs, "buscarModulo(data, 'COMPRAS_PROY')") !== false);
 
 chequear('y no en la raiz de la respuesta', 0, substr_count($srcParamJs, 'd.modulos'));
 

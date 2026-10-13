@@ -42,7 +42,9 @@
     var datos = null;
 
     function inicializar() {
-        cargar();
+        /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
+           si es la primera que se ve. Ver Js/parametros-carga.js. */
+        ParametrosCarga.registrar('PROV_LOCALES', cargar);
     }
 
     if (document.readyState === 'loading') {
@@ -59,7 +61,7 @@
         Cargando.mostrar('loadingParamPplo');
         mostrar('wrapperParamPplo', false);
 
-        pedirJson(URL_PARAM + '?action=getTodo')
+        return ParametrosCarga.pedir('PROV_LOCALES')
             .then(function(data) {
                 modulo = buscarModulo(data, 'PROV_LOCALES');
 
@@ -80,6 +82,9 @@
             .catch(function(error) {
                 Cargando.ocultar('loadingParamPplo');
                 Notificacion.error('Error al cargar las listas de opciones: ' + error.message);
+
+                // Falló: que volver a la sub-pestaña lo reintente.
+                return false;
             });
     }
 
