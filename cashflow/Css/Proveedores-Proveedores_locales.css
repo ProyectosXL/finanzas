@@ -314,6 +314,33 @@
     background-color: #d1e7dd;
 }
 
+/* PAGADO CON DOS MEDIOS: la fecha es de la planilla —una decisión—, así que
+   se ve firme como ella, con "1/2" o "2/2" al lado. No hay input: la fecha de
+   una parte se cambia reimportando. Cuando la apertura ya no coincide con el
+   pendiente, la marca va en naranja: es la misma señal de "algo para mirar"
+   que la forma con typo. */
+.tab-proveedores_locales .prov-fuente-medios {
+    color: #084298;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.tab-proveedores_locales .prov-fuente-medios .prov-fuente-fecha {
+    border-radius: 3px;
+    color: #084298;
+    background-color: #cfe2ff;
+}
+
+.tab-proveedores_locales .prov-medios-descuadrados .prov-fuente-fecha {
+    color: #8a4b00;
+    background-color: #ffe5c2;
+}
+
+.tab-proveedores_locales .prov-fuente-medios .prov-btn-borrar {
+    padding: 0 5px;
+    line-height: 1.4;
+}
+
 /* ----------------------------------------------------------------------------
    LA PREVISUALIZACIÓN DE LA IMPORTACIÓN
 

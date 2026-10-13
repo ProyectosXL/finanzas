@@ -39,7 +39,14 @@ $edita = AuthCashflow::puedeEditar('cob_electronicos');
 -->
 <div class="tab-cobel"<?php echo AuthCashflow::atributoEdicion('cob_electronicos'); ?>>
 
+    <!-- Los avisos sobre los datos, en el panel plegable de todas las
+         pestañas (Js/avisos-panel.js). -->
     <div id="avisosCobel"></div>
+
+    <!-- Las confirmaciones de un guardado puntual van aparte: no son avisos
+         sobre los datos, y dentro del panel se borrarían con el próximo
+         redibujo o quedarían escondidas con el panel cerrado. -->
+    <div id="notifCobel"></div>
 
     <!-- ============================================================
          INDICADORES
@@ -201,22 +208,25 @@ $edita = AuthCashflow::puedeEditar('cob_electronicos');
                 <div>
                     <h6 class="mb-1">Importar desde planilla</h6>
                     <small class="text-muted">
-                        Bajá la plantilla, pegá las acreditaciones y subila. Se muestra
-                        <strong>qué cambiaría</strong> y recién después se escribe. Excel guarda
-                        CSV desde <em>Archivo → Guardar como → CSV UTF-8</em>.
+                        Bajá la plantilla, pegá las acreditaciones y subí el Excel tal cual
+                        (.xlsx o .xls): se lee su <strong>primera hoja</strong>. Se muestra
+                        <strong>qué cambiaría</strong> y recién después se escribe.
                     </small>
                 </div>
-                <a href="Controller/CobElectronicosController.php?action=plantilla"
-                   class="btn btn-sm btn-outline-secondary" download>
-                    <i class="fas fa-file-arrow-down me-1"></i> Descargar plantilla
-                </a>
+                <!-- La plantilla la arma el navegador en .xlsx con la definición
+                     del backend, y el Excel que se sube también lo lee el
+                     navegador: ver Js/planilla-excel.js. -->
+                <button type="button" class="btn btn-sm btn-outline-secondary"
+                        data-plantilla-excel="Controller/CobElectronicosController.php?action=plantilla">
+                    <i class="fas fa-file-arrow-down me-1"></i> Descargar plantilla (Excel)
+                </button>
             </div>
 
             <div class="row g-2 align-items-end mt-2">
                 <div class="col-md-4">
-                    <label class="form-label form-label-sm">Archivo (.csv)</label>
+                    <label class="form-label form-label-sm">Archivo (.xlsx o .xls)</label>
                     <input type="file" id="archivoImportar" class="form-control form-control-sm"
-                           accept=".csv,.txt,text/csv">
+                           accept=".xlsx,.xls">
                 </div>
                 <!--
                     El período que cubre el archivo es OPCIONAL y sirve para una

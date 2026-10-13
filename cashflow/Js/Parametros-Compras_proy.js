@@ -94,15 +94,14 @@
        ================================================================ */
 
     function cargar() {
-        pedir(ENDPOINT + '?action=getTodo')
-            .then(function(d) {
-                /* getTodo devuelve los modulos en d.data, no en la raiz: pedir()
-                   devuelve la respuesta entera porque saveParametro no trae
-                   'data'. Mismo criterio que Parametros-Cob-Electronicos.js. */
-                var modulo = buscarModulo(d.data, 'COMPRAS_PROY');
+        /* Pide SOLO este modulo, y ParametrosCarga.pedir() ya devuelve
+           'data': no la respuesta entera, como el pedir() de este archivo. */
+        return ParametrosCarga.pedir('COMPRAS_PROY')
+            .then(function(data) {
+                var modulo = buscarModulo(data, 'COMPRAS_PROY');
 
                 if (!modulo) {
-                    avisar(['El módulo Compras Exterior no está declarado en Parámetros.']);
+                    avisar([{ nivel: 'danger', texto: 'El módulo Compras Exterior no está declarado en Parámetros.' }]);
 
                     return;
                 }
@@ -134,7 +133,10 @@
                 pintarCadena();
             })
             .catch(function(e) {
-                avisar(['No se pudieron leer los parámetros: ' + e.message]);
+                avisar([{ nivel: 'danger', texto: 'No se pudieron leer los parámetros: ' + e.message }]);
+
+                // Falló: que volver a la sub-pestaña lo reintente.
+                return false;
             });
     }
 
@@ -329,16 +331,13 @@
        UTILIDADES
        ================================================================ */
 
+    /**
+     * El panel plegable de todas las pestañas (Js/avisos-panel.js). Los textos
+     * sueltos cuentan como atención; un error de carga llega como
+     * {nivel: 'danger'} y abre el panel solo.
+     */
     function avisar(lista) {
-        var cont = document.getElementById('pcprAvisos');
-
-        if (!cont) { return; }
-
-        cont.innerHTML = (!lista || !lista.length) ? '' :
-            '<div class="alert alert-warning py-2 px-3 mb-3 small">' +
-                '<i class="fas fa-triangle-exclamation me-1"></i>' +
-                lista.map(esc).join('<br>') +
-            '</div>';
+        AvisosPanel.pintar('pcprAvisos', lista || []);
     }
 
     function destacar(id) {
@@ -385,7 +384,9 @@
 
         if (btn) { btn.addEventListener('click', cargar); }
 
-        cargar();
+        /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
+           si es la primera que se ve. Ver Js/parametros-carga.js. */
+        ParametrosCarga.registrar('COMPRAS_PROY', cargar);
     }
 
     if (document.readyState === 'loading') {

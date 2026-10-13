@@ -386,7 +386,9 @@ class ProveedoresProvider extends CashflowProvider {
             }
 
             $total += floatval($item['IMPORTE_PENDIENTE']);
-            $cuantas++;
+
+            // Las dos partes de un pago con dos medios son UNA factura.
+            $cuantas += Proveedores::cuentaComoVencimiento($item) ? 1 : 0;
 
             $m = trim((string) $item['MOTIVO_EXCLUSION']);
 
@@ -448,14 +450,17 @@ class ProveedoresProvider extends CashflowProvider {
 
             $importe = floatval($item['IMPORTE_PENDIENTE']);
             $total += $importe;
-            $cuantos++;
+
+            // Las dos partes de un pago con dos medios son UN vencimiento.
+            $cuenta = Proveedores::cuentaComoVencimiento($item) ? 1 : 0;
+            $cuantos += $cuenta;
 
             if (!empty($item['CRONOGRAMA'])) {
                 $enFila += $importe;
             }
 
             if (!empty($item['EXCLUIDA_MANUAL'])) {
-                $conFactura++;
+                $conFactura += $cuenta;
             }
 
             $proveedores[$item['COD_PROVEE']] = true;

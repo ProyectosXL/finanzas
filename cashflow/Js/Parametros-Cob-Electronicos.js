@@ -68,7 +68,9 @@
             }
         });
 
-        cargar();
+        /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
+           si es la primera que se ve. Ver Js/parametros-carga.js. */
+        ParametrosCarga.registrar('COB_ELECTRONICOS', cargar);
     }
 
     if (document.readyState === 'loading') {
@@ -85,7 +87,7 @@
         Cargando.mostrar('loadingParamCobel');
         mostrar('wrapperParamCobel', false);
 
-        pedirJson(URL_PARAM + '?action=getTodo')
+        return ParametrosCarga.pedir('COB_ELECTRONICOS')
             .then(function(data) {
                 modulo = buscarModulo(data, 'COB_ELECTRONICOS');
 
@@ -106,6 +108,9 @@
             .catch(function(error) {
                 Cargando.ocultar('loadingParamCobel');
                 avisar('Error al cargar los parámetros de Cob. Electrónicos: ' + error.message);
+
+                // Falló: que volver a la sub-pestaña lo reintente.
+                return false;
             });
     }
 
@@ -131,22 +136,13 @@
         }
     }
 
-    /** Si el script SQL del módulo no se corrió, se avisa en vez de romper */
+    /**
+     * El panel plegable de todas las pestañas (Js/avisos-panel.js). Los textos
+     * sueltos cuentan como atención; un error de carga llega como
+     * {nivel: 'danger'} y abre el panel solo.
+     */
     function pintarAvisos() {
-        var cont = document.getElementById('avisosParamCobel');
-        var avisos = modulo.avisos || [];
-
-        if (!cont) {
-            return;
-        }
-
-        cont.innerHTML = avisos.length
-            ? avisos.map(function(a) {
-                  return '<div class="alert alert-warning py-2 px-3 mb-3">' +
-                         '<i class="fas fa-triangle-exclamation me-1"></i><small>' +
-                         escapar(a) + '</small></div>';
-              }).join('')
-            : '';
+        AvisosPanel.pintar('avisosParamCobel', modulo.avisos || []);
     }
 
     /* ================================================================

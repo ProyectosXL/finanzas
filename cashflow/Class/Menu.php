@@ -72,6 +72,19 @@ class Menu {
             . 'sección en construcción'
     ];
 
+    /**
+     * El nombre corto de cada estado, el MISMO que la leyenda del pie del menu
+     * ("Maqueta", "Pendiente"). Va al lado del nombre en el tooltip del menu
+     * contraido: ahi el icono de la marca no se ve, asi que el estado tiene que
+     * decirse con palabras. 'datos' no lleva nada, por lo mismo que no lleva
+     * marca.
+     */
+    private static $etiquetas = [
+        self::DATOS => '',
+        self::MAQUETA => 'Maqueta',
+        self::PENDIENTE => 'Pendiente'
+    ];
+
     /** Icono con el que se marca cada estado. 'datos' no se marca. */
     private static $iconos = [
         self::DATOS => '',
@@ -281,6 +294,7 @@ class Menu {
             $item['estado'] = $estado;
             $item['titulo'] = self::$titulos[$estado];
             $item['icono_estado'] = self::$iconos[$estado];
+            $item['tooltip'] = self::tooltip($item['nombre'], $estado);
 
             // El titulo de la pagina sale de aca y no de una lista aparte en
             // el JS: esa lista se desactualizaba sola y el encabezado
@@ -291,6 +305,30 @@ class Menu {
 
             return $item;
         }, $items);
+    }
+
+    /**
+     * Lo que dice el tooltip de una pestaña CON EL MENU CONTRAIDO: su nombre,
+     * y el estado al lado si tiene ("Proveedores Locales · Pendiente").
+     *
+     * Contraido, el menu es una columna de iconos y el nombre no se ve: sin
+     * esto, encontrar una pestaña es pasar el mouse por todas o expandir el
+     * menu. El estado va con palabras porque la marca de la derecha tambien se
+     * esconde al contraer.
+     *
+     * Con el menu expandido NO se usa: el nombre ya se lee, y el tooltip del
+     * estado es el 'titulo' de siempre. Ver Js/sidebar.js.
+     *
+     * Estatica y pura.
+     *
+     * @param string $nombre
+     * @param string $estado Uno de DATOS, MAQUETA, PENDIENTE
+     * @return string
+     */
+    public static function tooltip($nombre, $estado) {
+        $etiqueta = isset(self::$etiquetas[$estado]) ? self::$etiquetas[$estado] : '';
+
+        return $nombre . ($etiqueta !== '' ? ' · ' . $etiqueta : '');
     }
 
     /**

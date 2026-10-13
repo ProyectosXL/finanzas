@@ -816,8 +816,15 @@ $jsSalT = ibFuente(__DIR__ . '/../Js/Saldos.js');
 chequear('el KPI dice "Ultima carga manual"', true, ibContiene($tabSalPhp, '>Última carga manual<'));
 chequear('y el detalle aclara que es de Mercado Pago, otros y bancos manuales',
     true, ibContiene($jsSalT, "'Mercado Pago, otros y bancos manuales · '"));
-chequear('los criticos van en un bloque rojo aparte', true,
-    ibContiene($jsSalT, "bloqueAvisos(criticos, 'alert-danger'"));
+/* Los criticos ya no van en un bloque rojo aparte: van al panel plegable de
+   todas las pestanas (Js/avisos-panel.js), que los pone primero, en rojo, y
+   abre el panel solo. Lo que se fija aca es que la pestaña le pase los avisos
+   CON SU NIVEL -si los pasara como texto, todos serian atencion- y que no
+   quede una copia propia del dibujo. */
+chequear('los avisos van al panel con su nivel', true,
+    ibContiene($jsSalT, "var conNivel = (datosSaldos && datosSaldos.avisos_con_nivel) ||")
+    && ibContiene($jsSalT, "AvisosPanel.pintar('avisosSaldos', conNivel"));
+chequear('sin un dibujo propio de los avisos', false, ibContiene($jsSalT, 'bloqueAvisos('));
 chequear('una cuenta de Interbanking sin dato se ve con guion, no "sin cargar"', true,
     ibContiene($jsSalT, "(esInterbanking(f) ? '—' : 'sin cargar')"));
 

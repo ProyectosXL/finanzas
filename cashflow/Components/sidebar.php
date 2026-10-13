@@ -27,9 +27,12 @@
 
         // data-encabezado es el título de la página: main.js lo lee de acá al
         // cargar la pestaña, así el menú es la única lista de nombres.
+        // data-menu-tooltip es lo que se ve al pasar el mouse con el menu
+        // CONTRAIDO: el nombre, y el estado si tiene. Lo usa Js/sidebar.js.
         $html = '<a href="#" class="' . $clases . '" data-tab="'
             . htmlspecialchars($item['tab']) . '"'
             . ' data-encabezado="' . htmlspecialchars($item['encabezado']) . '"'
+            . ' data-menu-tooltip="' . htmlspecialchars($item['tooltip']) . '"'
             . ($item['titulo'] !== '' ? ' title="' . htmlspecialchars($item['titulo']) . '"' : '')
             . '>'
             . '<i class="fas ' . htmlspecialchars($item['icono']) . ' menu-icono"></i>'
@@ -92,7 +95,8 @@
             ?>
             <div class="menu-category">
                 <a href="#" class="category-header<?php echo $catAbierta ? '' : ' collapsed'; ?>"
-                   data-bs-toggle="collapse" data-bs-target="#menu<?php echo $cat['codigo']; ?>">
+                   data-bs-toggle="collapse" data-bs-target="#menu<?php echo $cat['codigo']; ?>"
+                   data-menu-tooltip="<?php echo htmlspecialchars($cat['nombre']); ?>">
                     <div class="category-title">
                         <i class="fas <?php echo htmlspecialchars($cat['icono']); ?>"></i>
                         <span><?php echo htmlspecialchars($cat['nombre']); ?></span>

@@ -69,7 +69,13 @@
     function inicializar() {
         console.log('Inicializando Parámetros - Cobranzas');
 
-        conectar('btnRefreshParamCob', 'click', cargarClientes);
+        /* Actualizar recarga los clientes, como siempre, y los avisos generales
+           de arriba, como el Actualizar de cualquier otra sub-pestaña: esta no
+           los recibe con su pedido porque no lee su modulo con getTodo. */
+        conectar('btnRefreshParamCob', 'click', function() {
+            cargarClientes();
+            ParametrosCarga.refrescarAvisos();
+        });
         conectar('btnAgregarTramoEsc', 'click', agregarTramo);
         conectar('btnGuardarEscala', 'click', guardarEscala);
         conectar('btnGruposParamCob', 'click', alternarTodos);
@@ -107,9 +113,12 @@
             }
         });
 
-        cargarPlazosGlobales();
-        cargarEscala();
-        cargarClientes();
+        /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
+           si es la primera que se ve. Son tres pedidos y se esperan los tres.
+           Ver Js/parametros-carga.js. */
+        ParametrosCarga.registrar('COBRANZAS', function() {
+            return Promise.all([cargarPlazosGlobales(), cargarEscala(), cargarClientes()]);
+        });
     }
 
     function conectar(id, evento, fn) {
@@ -125,7 +134,7 @@
        ================================================================ */
 
     function cargarEscala() {
-        fetch('Controller/ParametrosController.php?action=getEscalaDescuento')
+        return fetch('Controller/ParametrosController.php?action=getEscalaDescuento')
             .then(res => res.json())
             .then(result => {
                 if (result.success) {
@@ -353,7 +362,7 @@
     var PLAZOS_GLOBALES = ['cobranzas_may_dias_vto', 'exportaciones_tasky_dias_cobro'];
 
     function cargarPlazosGlobales() {
-        fetch('Controller/ParametrosController.php?action=getParametros')
+        return fetch('Controller/ParametrosController.php?action=getParametros')
             .then(res => res.json())
             .then(result => {
                 if (!result.success || !result.data) {
@@ -428,7 +437,7 @@
     function cargarClientes() {
         mostrarCargando(true);
 
-        fetch('Controller/ParametrosController.php?action=getCobranzasClientesConfig')
+        return fetch('Controller/ParametrosController.php?action=getCobranzasClientesConfig')
             .then(res => res.json())
             .then(result => {
                 mostrarCargando(false);
@@ -459,20 +468,13 @@
      * de sucursales que no se pudo leer. No son decoración: explican por qué
      * un PPP está vacío o por qué aparecen franquicias dadas de baja.
      */
+    /**
+     * El panel plegable de todas las pestañas (Js/avisos-panel.js). Los textos
+     * sueltos cuentan como atención; un error de carga llega como
+     * {nivel: 'danger'} y abre el panel solo.
+     */
     function pintarAvisos() {
-        var cont = document.getElementById('avisosParamCob');
-
-        if (!cont) {
-            return;
-        }
-
-        cont.innerHTML = avisos.length
-            ? avisos.map(function(a) {
-                  return '<div class="alert alert-warning py-2 px-3 mb-2">'
-                      + '<i class="fas fa-triangle-exclamation me-1"></i><small>'
-                      + escapar(a) + '</small></div>';
-              }).join('')
-            : '';
+        AvisosPanel.pintar('avisosParamCob', avisos || []);
     }
 
     /* ================================================================

@@ -42,7 +42,9 @@
     var datos = null;
 
     function inicializar() {
-        cargar();
+        /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
+           si es la primera que se ve. Ver Js/parametros-carga.js. */
+        ParametrosCarga.registrar('PROV_LOCALES', cargar);
     }
 
     if (document.readyState === 'loading') {
@@ -59,7 +61,7 @@
         Cargando.mostrar('loadingParamPplo');
         mostrar('wrapperParamPplo', false);
 
-        pedirJson(URL_PARAM + '?action=getTodo')
+        return ParametrosCarga.pedir('PROV_LOCALES')
             .then(function(data) {
                 modulo = buscarModulo(data, 'PROV_LOCALES');
 
@@ -80,6 +82,9 @@
             .catch(function(error) {
                 Cargando.ocultar('loadingParamPplo');
                 Notificacion.error('Error al cargar las listas de opciones: ' + error.message);
+
+                // Falló: que volver a la sub-pestaña lo reintente.
+                return false;
             });
     }
 
@@ -106,22 +111,13 @@
         }
     }
 
-    /** Si el script SQL del módulo no se corrió, se avisa en vez de romper */
+    /**
+     * El panel plegable de todas las pestañas (Js/avisos-panel.js). Los textos
+     * sueltos cuentan como atención; un error de carga llega como
+     * {nivel: 'danger'} y abre el panel solo.
+     */
     function pintarAvisos() {
-        var cont = document.getElementById('avisosParamPplo');
-        var avisos = modulo.avisos || [];
-
-        if (!cont) {
-            return;
-        }
-
-        cont.innerHTML = avisos.length
-            ? avisos.map(function(a) {
-                  return '<div class="alert alert-warning py-2 px-3 mb-3">'
-                      + '<i class="fas fa-triangle-exclamation me-1"></i><small>'
-                      + escapar(a) + '</small></div>';
-              }).join('')
-            : '';
+        AvisosPanel.pintar('avisosParamPplo', modulo.avisos || []);
     }
 
     /* ================================================================

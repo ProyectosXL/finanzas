@@ -1161,3 +1161,102 @@ chequear('inhabilitar un nodo con hijos pide confirmacion', true,
     strpos($paramJs, 'confirmarInhabilitar(el, canal).then(function(ok) {') !== false);
 chequear('sin permiso o sin el script, no se dibujan controles', true,
     strpos($paramJs, "return !!datosMix().editable && Permisos.puedeEditar('mixBody');") !== false);
+
+// ============================================================================
+// LAS TRES IMPORTACIONES LEEN EXCEL, Y CON UN SOLO LECTOR
+//
+// Pagos y maestro de Proveedores Locales, y Cob. Electronicos. Lo que se rompe
+// en silencio es el cableado: un accept que vuelve a pedir .csv, una pestana que
+// se arma su propia lectura con otra conversion de fechas, una plantilla que
+// vuelve a ser un link a un CSV. Las fuentes se leen sin CRLF: con
+// core.autocrlf la copia de trabajo puede tenerlos, y una regex con "\n" no
+// encontraria nada y quedaria verde sin mirar.
+// ============================================================================
+
+seccion('las tres importaciones leen Excel con el mismo lector');
+
+$leerSinCrlf = function ($ruta) {
+    return str_replace("\r\n", "\n", (string) file_get_contents($ruta));
+};
+
+$excelJs = $leerSinCrlf($JS . '/planilla-excel.js');
+$provTab = $leerSinCrlf($TABS . '/proveedores_locales.php');
+$cobTab = $leerSinCrlf($TABS . '/cob_electronicos.php');
+$provJsImp = $leerSinCrlf($JS . '/Proveedores-Proveedores_locales.js');
+$cobJsImp = $leerSinCrlf($JS . '/Cob-Electronicos.js');
+
+foreach ([['archivoPagosProv', $provTab], ['archivoMaestroProv', $provTab],
+          ['archivoImportar', $cobTab]] as $sel) {
+    chequear('el selector ' . $sel[0] . ' acepta .xlsx y .xls, y nada mas', 1,
+        preg_match('/id="' . $sel[0] . '"[^>]*accept="\.xlsx,\.xls"/s', $sel[1]));
+}
+
+chequear('ninguna pestana pide un CSV', 0,
+    preg_match_all('/accept="[^"]*csv/i', $provTab . $cobTab));
+
+chequear('index.php carga el lector compartido', true,
+    strpos($index, 'Js/planilla-excel.js') !== false);
+chequear('y NO carga SheetJS en cada pagina: lo pide el lector al usarlo', false,
+    strpos($index, 'xlsx.full.min.js') !== false);
+chequear('SheetJS 0.18.5 de cdnjs, la version de informe_economico y bi/kpis', true,
+    strpos($excelJs, "'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'") !== false);
+chequear('se toma la primera hoja, sin preguntar', true,
+    strpos($excelJs, 'var nombreHoja = libro.SheetNames[0];') !== false);
+chequear('las fechas se leen del serial: sin cellDates', true,
+    strpos($excelJs, 'cellDates: false') !== false);
+chequear('y nunca se arma un Date para una fecha de la hoja', 0,
+    preg_match('/new Date\(/', $excelJs));
+chequear('si SheetJS no carga, la promesa se rechaza con un mensaje y se puede reintentar', true,
+    strpos($excelJs, 'script.onerror = fallar;') !== false
+    && preg_match('/function fallar\(\) \{.*?cargando = null;.*?rechazar\(new Error\(/s', $excelJs) === 1);
+
+chequear('pagos y maestro pasan por el lector compartido', true,
+    strpos($provJsImp, 'PlanillaExcel.leer(input.files[0])') !== false
+    && strpos($provJsImp, 'PlanillaExcel.formulario(leido)') !== false);
+chequear('Cob. Electronicos tambien', true,
+    strpos($cobJsImp, 'PlanillaExcel.leer(input.files[0])') !== false
+    && strpos($cobJsImp, 'PlanillaExcel.formulario(leido)') !== false);
+chequear('ninguna pestana lee el Excel por su cuenta', 0,
+    preg_match_all('/XLSX\.read|FileReader/', $provJsImp . $cobJsImp));
+chequear('y ninguna sube el archivo crudo', 0,
+    preg_match_all("/append\('archivo', /", $provJsImp . $cobJsImp));
+chequear('el boton de la vista previa de Proveedores vuelve a prenderse pase lo que pase', true,
+    preg_match('/function previewImportacion\(que\) \{.*?\.catch\(function\(err\) \{.*?\}\)\s*\.then\(function\(\) \{\s*if \(btn\) \{ btn\.disabled = false; \}/s',
+        $provJsImp) === 1);
+
+chequear('las tres plantillas se bajan en Excel desde el lector', 3,
+    preg_match_all('/data-plantilla-excel="Controller\/(ProveedoresController\.php\?action=plantilla(Pagos|Maestro)|CobElectronicosController\.php\?action=plantilla)"/',
+        $provTab . $cobTab));
+chequear('y ya no hay links a la plantilla CSV', 0,
+    preg_match_all('/href="Controller\/[A-Za-z]+\.php\?action=plantilla/', $provTab . $cobTab));
+
+$controllersImp = $leerSinCrlf(__DIR__ . '/../Controller/ProveedoresController.php')
+    . $leerSinCrlf(__DIR__ . '/../Controller/CobElectronicosController.php');
+
+chequear('los dos controllers leen lo subido con el mismo helper', 2,
+    substr_count($controllersImp, "require_once __DIR__ . '/planilla_subida.php';"));
+chequear('Cob. Electronicos acepta el contenido convertido', true,
+    strpos($controllersImp, "previsualizarImportacion(\n                    contenidoSubido(),") !== false);
+
+seccion('la conversion de celdas, sin navegador');
+
+$wsfExcel = realpath(__DIR__ . '/js/planilla_excel.wsf');
+$cscriptExcel = (PHP_OS_FAMILY === 'Windows' && function_exists('shell_exec'))
+    ? trim((string) @shell_exec('where cscript 2>NUL')) : '';
+
+if ($wsfExcel === false) {
+    chequear('existe tests/js/planilla_excel.wsf', true, false);
+} elseif ($cscriptExcel === '') {
+    Pruebas::saltear('no hay cscript en esta maquina');
+} else {
+    $salidaExcel = trim((string) shell_exec('cscript //nologo ' . escapeshellarg($wsfExcel) . ' 2>&1'));
+    $lineasExcel = preg_split('/\r?\n/', $salidaExcel);
+    $ultimaExcel = trim(end($lineasExcel));
+
+    if (!preg_match('/^OK: (\d+)\s+FALLAS: (\d+)$/', $ultimaExcel, $mExcel)) {
+        chequear('planilla_excel.wsf corre', 'OK: n   FALLAS: 0', $ultimaExcel);
+    } else {
+        chequear('planilla_excel.wsf: hay casos', true, intval($mExcel[1]) > 0);
+        chequear('planilla_excel.wsf: sin fallas', 0, intval($mExcel[2]));
+    }
+}

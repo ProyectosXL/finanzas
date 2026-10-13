@@ -335,3 +335,65 @@ chequear('estructuraCompleta no depende de la sesion',
         + count(Menu::estructuraCompleta()['pie'])
         + array_sum(array_map(function ($c) { return count($c['items']); },
                               Menu::estructuraCompleta()['categorias'])));
+
+seccion('con el menu contraido, el nombre al pasar el mouse');
+
+/* El texto: el nombre, y el estado al lado si tiene. Es el mismo nombre corto
+   de la leyenda del pie del menu. */
+chequear('una pestana con datos dice solo su nombre', 'Proveedores Locales',
+    Menu::tooltip('Proveedores Locales', Menu::DATOS));
+chequear('una pendiente agrega el estado', 'Proveedores Locales · Pendiente',
+    Menu::tooltip('Proveedores Locales', Menu::PENDIENTE));
+chequear('una maqueta tambien', 'Dashboard · Maqueta', Menu::tooltip('Dashboard', Menu::MAQUETA));
+
+/* CADA ENLACE LO LLEVA. Se dibuja cada item del menu completo con menuLink(),
+   la misma funcion que usa la pagina, y se compara contra la regla. Incluir
+   sidebar.php sin sesion dibuja un menu vacio -nadie tiene permisos- pero deja
+   definida menuLink(). */
+$tabInicial = '';
+ob_start();
+include __DIR__ . '/../Components/sidebar.php';
+$sidebarVacio = ob_get_clean();
+
+$completo = Menu::estructuraCompleta();
+$items = array_merge($completo['principales'], $completo['pie']);
+
+foreach ($completo['categorias'] as $cat) {
+    $items = array_merge($items, $cat['items']);
+}
+
+$malos = [];
+
+foreach ($items as $item) {
+    $a = menuLink($item);
+    $esperado = htmlspecialchars(Menu::tooltip($item['nombre'], $item['estado']));
+
+    if (strpos($a, ' data-menu-tooltip="' . $esperado . '"') === false) {
+        $malos[] = $item['tab'];
+    }
+}
+
+chequear('cada enlace del menu lleva su tooltip', [], $malos);
+chequear('y son todos los del menu', 22, count($items));
+
+$sidebarSrc = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Components/sidebar.php'));
+
+chequear('cada encabezado de categoria lleva su nombre', true,
+    strpos($sidebarSrc, 'data-menu-tooltip="<?php echo htmlspecialchars($cat[\'nombre\']); ?>"') !== false);
+
+/* SOLO CONTRAIDO. El tooltip se crea al contraer y se descarta al expandir:
+   expandido el nombre ya se lee, y queda el title del estado como siempre. */
+$sidebarJs = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Js/sidebar.js'));
+$sync = preg_match('/function sincronizarTooltipsMenu\(\) \{.*?\n\}\n/s', $sidebarJs, $m) ? $m[0] : '';
+
+chequear('el tooltip solo con el sidebar contraido y fuera de movil', true,
+    strpos($sync, "var contraido = \$('#sidebar').hasClass('collapsed') && \$(window).width() > 992;") !== false);
+chequear('se crea al contraer', true, strpos($sync, 'if (contraido && !actual) {') !== false);
+chequear('y se descarta al expandir', true,
+    strpos($sync, "} else if (!contraido && actual) {\n            actual.dispose();") !== false);
+chequear('a la derecha, en el body: el sidebar contraido corta lo que sobresale', true,
+    strpos($sync, "placement: 'right'") !== false && strpos($sync, "container: 'body'") !== false);
+chequear('con el texto que arma el servidor', true,
+    strpos($sync, "title: el.getAttribute('data-menu-tooltip')") !== false);
+chequear('se sincroniza al cargar, al contraer o expandir (boton y Ctrl+B) y al cambiar el ancho', 3,
+    substr_count($sidebarJs, "    sincronizarTooltipsMenu();\n"));

@@ -518,3 +518,137 @@ if (!Pruebas::hayBase()) {
             [], $malos);
     }
 }
+
+
+/* ================================================================
+   EL PANEL PLEGABLE DE TODAS LAS PESTAÑAS (Js/avisos-panel.js)
+   ================================================================ */
+seccion('el panel de avisos: las reglas, sin navegador');
+
+/* El orden por nivel, el texto sin nivel como atencion y el critico que abre el
+   panel aunque la preferencia diga cerrado: las reglas puras del componente,
+   escritas en ES3 y corridas con cscript. */
+$wsfPanel = realpath(__DIR__ . '/js/avisos_panel.wsf');
+$cscriptPanel = (PHP_OS_FAMILY === 'Windows' && function_exists('shell_exec'))
+    ? trim((string) @shell_exec('where cscript 2>NUL')) : '';
+
+if ($wsfPanel === false) {
+    chequear('existe tests/js/avisos_panel.wsf', true, false);
+} elseif ($cscriptPanel === '') {
+    Pruebas::saltear('no hay cscript en esta maquina');
+} else {
+    $salidaPanel = trim((string) shell_exec('cscript //nologo ' . escapeshellarg($wsfPanel) . ' 2>&1'));
+    $lineasPanel = preg_split('/\r?\n/', $salidaPanel);
+    $ultimaPanel = trim(end($lineasPanel));
+
+    if (!preg_match('/^OK: (\d+)\s+FALLAS: (\d+)$/', $ultimaPanel, $mPanel)) {
+        chequear('avisos_panel.wsf corre', 'OK: n   FALLAS: 0', $ultimaPanel);
+    } else {
+        chequear('avisos_panel.wsf: hay casos', true, intval($mPanel[1]) > 0);
+        chequear('avisos_panel.wsf: sin fallas', 0, intval($mPanel[2]));
+    }
+}
+
+seccion('el panel de avisos: cada contenedor lo usa');
+
+$leerJs = function ($archivo) {
+    return str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../Js/' . $archivo));
+};
+$panelJs = $leerJs('avisos-panel.js');
+
+chequear('cerrado por defecto, abierto con un critico', true,
+    strpos($panelJs, 'return cuenta.danger > 0 || preferencia === true;') !== false);
+chequear('recuerda por contenedor', true,
+    strpos($panelJs, "var clave = opciones.clave || ('avisos_panel_' + (cont.id || 'sin_id'));") !== false);
+chequear('en localStorage con try/catch', 2, preg_match_all('/try \{\s*(var v = )?localStorage\./', $panelJs));
+chequear('el titulo dice "Avisos (N)"', true, strpos($panelJs, "return 'Avisos (' + total + ')';") !== false);
+chequear('sin avisos el contenedor queda vacio', true,
+    preg_match("/if \\(total === 0\\) \\{\\s*cont\\.innerHTML = '';/", $panelJs) === 1);
+
+/* Cada contenedor del alcance, con el archivo que lo pinta. Se busca que lo
+   pinte el componente por su id. */
+$contenedores = [
+    'avisosCobel' => 'Cob-Electronicos.js', 'avisosCob' => 'Ingresos-Cobranzas_fr.js',
+    'avisosCobMay' => 'Ingresos-Cobranzas_may.js', 'avisosComprasProy' => 'Compras-Proyectadas.js',
+    'avisosCronoNac' => 'Comex-Crono_nacionalizacion.js', 'avisosEcheqs' => 'Ingresos-Echeqs.js',
+    'avisosExpTasky' => 'Ingresos-Exportaciones_tasky.js', 'avisosLogistica' => 'Logistica-Local.js',
+    'avisosTarj' => 'Financiero-Pagos_tarjetas.js', 'avisosProvExt' => 'Comex-Proveedores_exterior.js',
+    'avisosSaldos' => 'Saldos.js', 'avisosParametros' => 'parametros-carga.js',
+    'pgenAvisos' => 'Parametros-Generales.js', 'avisosParamSaldos' => 'Parametros-Saldos.js',
+    'avisosParamCobel' => 'Parametros-Cob-Electronicos.js', 'avisosParamPpq' => 'Parametros-Prechequeado.js',
+    'avisosParamCob' => 'Parametros-Cobranzas.js', 'plogAvisos' => 'Parametros-Logistica.js',
+    'avisosParamPplo' => 'Parametros-Prov_locales.js', 'ptarAvisos' => 'Parametros-Tarjetas.js',
+    'pcprAvisos' => 'Parametros-Compras_proy.js', 'cfeAvisos' => 'Parametros-Estructura.js'
+];
+
+foreach ($contenedores as $id => $archivo) {
+    chequear('#' . $id . ' usa el panel', true,
+        strpos($leerJs($archivo), "AvisosPanel.pintar('" . $id . "'") !== false);
+}
+
+// Los que se pasan por variable: el elemento ya buscado, o el id de un parametro.
+chequear('#avisosEjePre usa el panel', true,
+    preg_match("/getElementById\\('avisosEjePre'\\);.*?AvisosPanel\\.pintar\\(cont, /s",
+        $leerJs('Ingresos-Echeqs.js')) === 1);
+chequear('#mixAvisos usa el panel', true,
+    preg_match("/getElementById\\('mixAvisos'\\);.*?AvisosPanel\\.pintar\\(cont, /s",
+        $leerJs('Parametros.js')) === 1);
+
+$provJsPanel = $leerJs('Proveedores-Proveedores_locales.js');
+
+chequear('#avisosProv y #avisosMaestroProv usan el panel', true,
+    strpos($provJsPanel, 'AvisosPanel.pintar(id, avisos || []);') !== false
+    && strpos($provJsPanel, "pintarAvisos(maestro.avisos, 'avisosMaestroProv')") !== false
+    && strpos($provJsPanel, "pintarAvisos(datos.avisos_con_nivel || datos.warnings, 'avisosProv')") !== false);
+
+/* Que no falte ninguno: cada contenedor de avisos de las pestañas -id con
+   "avisos" o "Avisos"- esta cubierto, salvo los que quedan afuera a proposito:
+   el del tablero, que usa el panel con grupos, y el de la escala de descuento,
+   que muestra errores de validacion que apagan Guardar. */
+$enTabs = [];
+
+foreach (glob(__DIR__ . '/../Tabs/*.php') as $tabArchivo) {
+    preg_match_all('/id="([A-Za-z]*[Aa]visos[A-Za-z]*)"/', file_get_contents($tabArchivo), $mIds);
+    $enTabs = array_merge($enTabs, $mIds[1]);
+}
+
+$cubiertos = array_merge(array_keys($contenedores),
+    ['avisosEjePre', 'mixAvisos', 'avisosProv', 'avisosMaestroProv', 'cfAvisos', 'avisosEscalaCob']);
+
+chequear('no falta ningun contenedor de avisos de las pestañas', [],
+    array_values(array_diff(array_unique($enTabs), $cubiertos)));
+
+seccion('el tablero sigue con sus grupos');
+
+$cfJs = $leerJs('Cashflow.js');
+
+chequear('pasa los grupos al componente', true, strpos($cfJs, 'grupos: datos.avisos || [],') !== false);
+chequear('con su titulo de siempre', true,
+    strpos($cfJs, "return 'Sobre estos números (' + total + (total === 1 ? ' aviso' : ' avisos') + ')';") !== false);
+chequear('y sus claves de localStorage de siempre', true,
+    strpos($cfJs, "var CLAVE_PANEL_AVISOS = 'cashflow_avisos_abierto';") !== false
+    && strpos($cfJs, "return 'cashflow_avisos_grupo_' + grupo;") !== false);
+chequear('con el link a la pestaña de cada grupo', true,
+    strpos($cfJs, 'linkGrupo: linkPestana,') !== false && strpos($cfJs, 'alConectar: conectarLinks') !== false);
+chequear('y ya no tiene una copia propia del panel', 0,
+    preg_match_all('/function (unGrupo|chipsAvisos|unAviso)\(/', $cfJs));
+
+seccion('lo que no entra al panel se sigue viendo siempre');
+
+$indexPhp = file_get_contents(__DIR__ . '/../index.php');
+
+chequear('index.php carga el panel en el head', true,
+    strpos($indexPhp, 'Js/avisos-panel.js') !== false
+    && strpos($indexPhp, '<script src="Js/avisos-panel.js') < strrpos($indexPhp, '</head>'));
+chequear('y su hoja', true, strpos($indexPhp, 'Css/avisos-panel.css') !== false);
+chequear('la escala de descuento sigue mostrando sus errores, que apagan Guardar', false,
+    strpos($leerJs('Parametros-Cobranzas.js'), "AvisosPanel.pintar('avisosEscalaCob'") !== false);
+chequear('el bloqueo de una importacion sigue a la vista', true,
+    strpos($provJsPanel, '<strong>No se puede confirmar esta importación.</strong>') !== false);
+chequear('las confirmaciones de Cob. Electronicos van en su propio contenedor', true,
+    strpos($leerJs('Cob-Electronicos.js'), "var cont = document.getElementById('notifCobel');") !== false
+    && strpos(file_get_contents(__DIR__ . '/../Tabs/cob_electronicos.php'), '<div id="notifCobel"></div>') !== false);
+chequear('los errores de carga entran como criticos', 7, array_sum(array_map(function ($a) use ($leerJs) {
+    return substr_count($leerJs($a), "[{ nivel: 'danger', texto: ");
+}, ['Parametros-Generales.js', 'Parametros-Compras_proy.js', 'Parametros-Logistica.js',
+    'Parametros-Tarjetas.js', 'Logistica-Local.js'])));

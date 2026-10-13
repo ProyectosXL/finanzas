@@ -247,7 +247,7 @@ class AuthCashflow {
         'Echeqs' => ['getEcheqsCartera', 'getEcheqsPrechequeado', 'getHistorialExclusion'],
         'Ingresos' => ['getCobranzasFR', 'getCobranzasMay', 'getExportacionesTasky'],
         'Logistica' => ['getPlanilla', 'getFleteros', 'buscarProveedorTango'],
-        'Parametros' => ['getTodo', 'getParametros', 'getHistorialCronograma',
+        'Parametros' => ['getTodo', 'getAvisosGenerales', 'getParametros', 'getHistorialCronograma',
             'buscarClientePrecheq', 'getCobranzasClientesConfig', 'getEscalaDescuento'],
         'Proveedores' => ['plantillaMaestro', 'plantillaPagos', 'getPendientes', 'buscarProveedorTango', 'getMaestro',
             'getHistorialExclusion', 'getHistorialProveedor'],
@@ -558,6 +558,32 @@ class AuthCashflow {
 
         if (!self::puedeEditar($tab, $sub)) {
             throw new AuthCashflowSinPermiso(self::mensajeSinPermiso([[$tab, $sub]]));
+        }
+
+        return $u;
+    }
+
+    /**
+     * exigirUsuario() y ademas el permiso de LECTURA de una pestaña: el mismo
+     * cashflow.tab.<tab> con el que TabController la deja abrir.
+     *
+     * LAS LECTURAS NO PASAN POR EL MAPA: un endpoint de lectura no exige nada
+     * por si solo, y lo que impide verlo es no poder abrir la pestaña. Esto es
+     * para el pedido que nombra una parte de la pestaña -una sub-pestaña de
+     * Parametros, en getTodo&modulo=- y tiene que fallar como cualquier otra
+     * accion sin permiso, con su 401 o su 403. En Parametros la lectura es una
+     * sola para todas las sub-pestañas (ver permiteEditar()).
+     *
+     * @param string $tab
+     * @return string El username
+     * @throws AuthCashflowSinUsuario|AuthCashflowSinPermiso
+     */
+    public static function exigirLectura($tab) {
+        $u = self::exigirUsuario();
+
+        if (!self::puede($tab)) {
+            throw new AuthCashflowSinPermiso('Tu rol no tiene permiso para ver esta pestaña '
+                . '(cashflow.tab.' . trim((string) $tab) . ').');
         }
 
         return $u;

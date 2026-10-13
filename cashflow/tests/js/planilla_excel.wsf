@@ -1,0 +1,126 @@
+<?xml version="1.0"?>
+<!--
+    La parte pura de Js/planilla-excel.js, verificada sin navegador.
+
+    Mismo criterio que eje_totales.wsf: el proyecto no tiene node, pero Windows
+    trae cscript, que ejecuta JScript (ES3). La conversion de celdas a texto
+    esta escrita sin nada posterior a ES3 justamente para poder correrla aca.
+
+        cscript //nologo cashflow\tests\js\planilla_excel.wsf
+
+    La corre test_tablas_controles.php cuando cscript esta disponible, y espera
+    "FALLAS: 0" en la ultima linea.
+
+    LAS FECHAS SON LA PARTE QUE IMPORTA. Los seriales esperados salen de PHP
+    (DateTime desde 1899-12-30), no de este mismo codigo: probar la conversion
+    contra si misma no probaria nada. Van fechas de 2026 y todos los fines de
+    mes que en Argentina SheetJS + Date corria al dia anterior.
+-->
+<job>
+<script language="JScript" src="../../Js/planilla-excel.js"/>
+<script language="JScript">
+<![CDATA[
+var ok = 0, mal = 0;
+var P = PlanillaExcel;
+
+function igual(nombre, esperado, obtenido) {
+    if (esperado === obtenido) {
+        ok++;
+        WScript.Echo('OK    ' + nombre);
+    } else {
+        mal++;
+        WScript.Echo('FALLA ' + nombre + ' | esperado: ' + esperado + ' | obtenido: ' + obtenido);
+    }
+}
+
+/* ---- serial -> aaaa-mm-dd, sin Date ---- */
+var fechas = [
+    ['2026-01-01', 46023], ['2026-01-31', 46053], ['2026-02-28', 46081],
+    ['2026-03-01', 46082], ['2026-03-31', 46112], ['2026-04-30', 46142],
+    ['2026-06-30', 46203], ['2026-09-30', 46295], ['2026-10-13', 46308],
+    ['2026-12-31', 46387], ['2027-01-01', 46388], ['2028-02-29', 46812],
+    ['1954-01-01', 19725], ['2064-12-31', 60267], ['1900-03-01', 61]
+];
+
+for (var i = 0; i < fechas.length; i++) {
+    igual('serial ' + fechas[i][1] + ' es ' + fechas[i][0],
+        fechas[i][0], P.fechaDeSerial(fechas[i][1], false));
+    igual('y ' + fechas[i][0] + ' vuelve a ' + fechas[i][1],
+        fechas[i][1], P.serialDeFecha(fechas[i][0]));
+}
+
+// La hora es la parte decimal: un fin de mes a las 23:59 sigue siendo ese dia.
+igual('31/03/2026 a las 23:59 sigue siendo el 31', '2026-03-31',
+    P.fechaDeSerial(46112.9993, false));
+igual('y a las 00:00:01 tambien', '2026-03-31', P.fechaDeSerial(46112.00001, false));
+igual('el sistema de 1904 suma 1462 dias', '2026-10-13', P.fechaDeSerial(46308 - 1462, true));
+igual('antes del 01/03/1900 no se convierte', null, P.fechaDeSerial(60, false));
+igual('un serial que no es numero es null', null, P.fechaDeSerial('46308', false));
+
+/* ---- celdas ---- */
+igual('una celda de fecha viaja como aaaa-mm-dd', '2026-10-15',
+    P.textoDeCelda({ t: 'n', v: 46310, z: 'dd/mm/yyyy', w: '15/10/2026' }, true, false));
+igual('una fecha escrita como texto viaja tal cual', '15/10/2026',
+    P.textoDeCelda({ t: 's', v: '15/10/2026' }, false, false));
+igual('un importe viaja sin miles y con punto', '1069326.5',
+    P.textoDeCelda({ t: 'n', v: 1069326.5, z: '#,##0.00', w: '1,069,326.50' }, false, false));
+igual('un entero viaja sin decimales', '35257406',
+    P.textoDeCelda({ t: 'n', v: 35257406, w: '35257406' }, false, false));
+igual('un negativo conserva el signo', '-1500.25',
+    P.textoDeCelda({ t: 'n', v: -1500.25 }, false, false));
+igual('sin notacion exponencial', '0.000001', P.numeroComoTexto(0.000001));
+igual('lo que no llega a seis decimales es cero', '0', P.numeroComoTexto(0.0000001));
+igual('el error de punto flotante no viaja', '0.3', P.numeroComoTexto(0.1 + 0.2));
+igual('un codigo con formato de ceros viaja como se ve', '000123',
+    P.textoDeCelda({ t: 'n', v: 123, z: '000000', w: '000123' }, false, false));
+igual('un codigo numerico con formato General pierde los ceros, igual que el CSV', '123',
+    P.textoDeCelda({ t: 'n', v: 123, z: 'General', w: '123' }, false, false));
+igual('una celda vacia es vacio', '', P.textoDeCelda(undefined, false, false));
+igual('un error de formula se ve como en Excel', '#N/A',
+    P.textoDeCelda({ t: 'e', v: 42, w: '#N/A' }, false, false));
+
+/* ---- la matriz ---- */
+var matriz = [
+    ['CODIGO', 'RAZON; SOCIAL', 'IMPORTE'],
+    ['MTDODI', 'DONNA "DI" DIO', '100.5'],
+    null,
+    ['OGCOAN', 'linea\nrota', ''],
+    [],
+    ['', '', '']
+];
+var texto = P.textoDeMatriz(matriz);
+var lineas = texto.split('\n');
+
+igual('una linea por fila del Excel, sin las vacias del final', 4, lineas.length);
+igual('la fila vacia del medio queda como linea vacia', '', lineas[2]);
+igual('el separador del encabezado se borra', '"CODIGO"\t"RAZON  SOCIAL"\t"IMPORTE"', lineas[0]);
+igual('las comillas se duplican', '"MTDODI"\t"DONNA ""DI"" DIO"\t"100.5"', lineas[1]);
+igual('un salto adentro de una celda es un espacio y la celda vacia va sin comillas',
+    '"OGCOAN"\t"linea rota"\t', lineas[3]);
+
+// Filas vacias ARRIBA del encabezado: la numeracion sigue siendo la del Excel.
+var arriba = [];
+arriba[2] = ['CODIGO'];
+arriba[3] = ['X'];
+igual('las filas vacias de arriba se conservan', '\n\n"CODIGO"\n"X"', P.textoDeMatriz(arriba));
+igual('una hoja sin nada es texto vacio', '', P.textoDeMatriz([[], null, ['', '']]));
+
+/* ---- la plantilla ---- */
+var f = P.celdaDePlantilla('2026-10-15', 'fecha');
+igual('la fecha de ejemplo es una celda de fecha', 'n|46310|dd/mm/yyyy', f.t + '|' + f.v + '|' + f.z);
+var imp = P.celdaDePlantilla(1069326, 'importe');
+igual('el importe de ejemplo es numerico', 'n|1069326', imp.t + '|' + imp.v);
+var cod = P.celdaDePlantilla('000123', 'texto');
+igual('un codigo es texto, con formato texto', 's|000123|@', cod.t + '|' + cod.v + '|' + cod.z);
+igual('un valor vacio no escribe celda', null, P.celdaDePlantilla('', 'texto'));
+
+/* ---- que se acepta ---- */
+igual('la extension se lee en minusculas', 'xlsx', P.extension('Pagos OCTUBRE.XLSX'));
+igual('un .xlsx tiene firma de ZIP', true, P.firmaDeExcel([0x50, 0x4B, 0x03, 0x04, 1]));
+igual('un .xls tiene firma de CFB', true, P.firmaDeExcel([0xD0, 0xCF, 0x11, 0xE0, 1]));
+igual('un CSV renombrado no', false, P.firmaDeExcel([0x43, 0x4F, 0x44, 0x49]));
+
+WScript.Echo('OK: ' + ok + '   FALLAS: ' + mal);
+]]>
+</script>
+</job>

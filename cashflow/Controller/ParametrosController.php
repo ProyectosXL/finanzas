@@ -125,16 +125,39 @@ try {
 
     switch ($action) {
         case 'getTodo':
-            // Una sola llamada para pintar la pestana completa, agrupada por
-            // modulo: cada sub-pestana muestra los parametros que afectan a esa
-            // pestana de la aplicacion.
+            /* CON 'modulo', SOLO ESA SUB-PESTAÑA. Es como la pide la pantalla
+               desde que cada sub-pestaña carga recien cuando se abre
+               (Js/parametros-carga.js): resolver los once modulos para mostrar
+               uno era pagar el cronograma, las cotizaciones y los saldos cada
+               vez. Pedir un modulo que no existe es un error, y pedirlo sin
+               poder ver Parametros tambien, con su 401 o su 403.
+
+               SIN 'modulo' DEVUELVE TODO, como siempre: nadie que lo llame asi
+               se rompe. Los avisos generales viajan en las dos formas. */
+            $moduloPedido = isset($_GET['modulo']) && trim((string) $_GET['modulo']) !== ''
+                ? strtoupper(trim((string) $_GET['modulo'])) : null;
+
+            if ($moduloPedido !== null) {
+                autorizarLectura('parametros');
+            }
+
             echo json_encode([
                 'success' => true,
                 'data' => [
                     'canales' => Parametros::CANALES,
-                    'modulos' => $parametros->getModulosConDatos(),
+                    'modulos' => $parametros->getModulosConDatos($moduloPedido),
                     'avisos' => $parametros->getAvisos()
                 ]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* Los avisos de arriba de la pestaña, solos. Los piden las sub-pestañas
+           que no leen su modulo con getTodo -Cobranzas y Cashflow- para que el
+           Actualizar de cualquiera los refresque, como hace el de las demas. */
+        case 'getAvisosGenerales':
+            echo json_encode([
+                'success' => true,
+                'data' => ['avisos' => $parametros->getAvisos()]
             ], JSON_UNESCAPED_UNICODE);
             break;
 

@@ -211,12 +211,39 @@ class Parametros {
     }
 
     /**
+     * Si un codigo es el de un modulo declarado. Es lo que valida el 'modulo'
+     * que pide la pestaña: un codigo que no esta en la lista no tiene nada que
+     * resolver, y devolver una lista vacia se leeria como "ese modulo no tiene
+     * datos".
+     *
+     * @param string $codigo
+     * @return bool
+     */
+    public static function esModulo($codigo) {
+        return is_string($codigo) && isset(self::$modulos[$codigo]);
+    }
+
+    /**
      * Devuelve los modulos con los datos de cada una de sus secciones, listo
      * para que el front pinte una sub-pestana por modulo.
      *
+     * CON UN CODIGO, SOLO ESE. La pestaña carga cada sub-pestaña recien cuando
+     * se abre (Js/parametros-carga.js), y resolver los once modulos para mostrar
+     * uno era pagar el cronograma, las cotizaciones, Saldos e Interbanking cada
+     * vez que alguien abria Parametros para tocar una lista de opciones. Ninguna
+     * sub-pestaña lee datos de otro modulo: cada una busca el suyo.
+     *
+     * Sin codigo devuelve todo, como siempre: nadie que lo llame asi se rompe.
+     *
+     * @param string|null $pedido Codigo del modulo, o null para todos
      * @return array Lista de modulos con sus secciones resueltas
+     * @throws Exception si el codigo no es de un modulo declarado
      */
-    public function getModulosConDatos() {
+    public function getModulosConDatos($pedido = null) {
+        if ($pedido !== null && !self::esModulo($pedido)) {
+            throw new Exception('"' . $pedido . '" no es una sub-pestaña de Parámetros.');
+        }
+
         $modulos = [];
 
         /* El mapa CLAVE => VALOR se lee UNA vez para toda la pestaña. Lo usan la
@@ -226,6 +253,10 @@ class Parametros {
         $map = $this->getParametrosMap();
 
         foreach (self::getModulos() as $modulo) {
+            if ($pedido !== null && $modulo['codigo'] !== $pedido) {
+                continue;
+            }
+
             $codigo = $modulo['codigo'];
             $modulo['avisos'] = [];
 

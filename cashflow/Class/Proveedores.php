@@ -108,6 +108,29 @@ class Proveedores {
     /** Tabla de fechas de pago, en la base central */
     const TABLA_PAGO = 'RO_T_CASHFLOW_PROV_LOCALES_PAGO';
 
+    /**
+     * La apertura de un comprobante pagado con DOS MEDIOS: una fila por medio.
+     * Ver sql/cashflow_prov_locales_pago_medio.sql y abrirEnMedios().
+     */
+    const TABLA_MEDIO = 'RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO';
+
+    /** El script que la crea, para nombrarlo en los avisos y en los motivos */
+    const SCRIPT_MEDIO = 'sql/cashflow_prov_locales_pago_medio.sql';
+
+    /**
+     * A lo sumo dos medios por comprobante. Una tercera fila no es un tercer
+     * medio: casi siempre es un comprobante copiado de mas, y aceptarla
+     * obligaria a elegir cual de las tres sobra.
+     */
+    const MAX_MEDIOS = 2;
+
+    /**
+     * Cuanto se tolera entre un IMPORTE de la planilla y el pendiente de Tango:
+     * un peso. Es el redondeo de quien arma la planilla a mano, no un descuento;
+     * mas que eso es otro numero y la fila queda en error con la diferencia.
+     */
+    const TOLERANCIA_IMPORTE = 1.0;
+
     /** @var Conexion */
     private $conn;
 
@@ -116,6 +139,9 @@ class Proveedores {
 
     /** @var bool|null Cache del chequeo de existencia de la tabla de pagos */
     private $tabla = null;
+
+    /** @var bool|null Cache del chequeo de existencia de la tabla de medios */
+    private $tablaMedio = null;
 
     /** @var array Cache de que columnas de override tiene la tabla de pagos */
     private $columnasPago = [];
@@ -179,6 +205,40 @@ class Proveedores {
         return $this->tabla;
     }
 
+    /**
+     * Si ya se corrio sql/cashflow_prov_locales_pago_medio.sql.
+     *
+     * Sin la tabla de pagos tampoco cuenta: una apertura sin la fila del
+     * comprobante en la de pagos no tendria donde guardar su fecha mas tardia.
+     *
+     * @return bool
+     */
+    public function tablaMedioCreada() {
+        if ($this->tablaMedio !== null) {
+            return $this->tablaMedio;
+        }
+
+        if (!$this->tablaCreada()) {
+            $this->tablaMedio = false;
+
+            return false;
+        }
+
+        $stmt = sqlsrv_query($this->conectar(),
+            "SELECT OBJECT_ID('dbo." . self::TABLA_MEDIO . "', 'U') AS T");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar la tabla de medios de pago'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->tablaMedio = ($row && $row['T'] !== null);
+
+        return $this->tablaMedio;
+    }
+
     /** @return array Avisos de configuracion pendiente (textos) */
     public function getAvisos() {
         return Aviso::textos($this->getAvisosConNivel());
@@ -212,6 +272,16 @@ class Proveedores {
                 . 'pago distingue igual lo importado de lo cargado a mano, pero una factura con '
                 . 'fecha de la planilla que después se excluya o cambie de forma va a figurar '
                 . 'como cargada a mano.');
+        }
+
+        /* Sin la tabla de medios no cambia ningun numero de hoy: lo unico que
+           no se puede es cargar un comprobante en dos medios, y la importacion
+           lo rechaza nombrando el script. Atencion, como los demas scripts
+           que faltan. */
+        if ($this->tablaCreada() && !$this->tablaMedioCreada()) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Falta ' . self::SCRIPT_MEDIO . '. Mientras '
+                . 'tanto un comprobante no se puede pagar con dos medios: la importación rechaza '
+                . 'las filas de dos medios, y todo lo demás funciona igual.');
         }
 
         $sinExclusion = $this->exclusion->avisoSinTabla();
@@ -526,13 +596,264 @@ class Proveedores {
                    todas sus filas: si decidiera, importar reclasificaria
                    comprobantes dentro y fuera del cashflow sin que nadie lo
                    pida. Ver Proveedores::formaDelCronograma(). */
-                'CRONOGRAMA' => $enCronograma
+                'CRONOGRAMA' => $enCronograma,
+
+                // La apertura en dos medios, si la hay: ver abrirEnMedios().
+                'APERTURA' => null,
+                'APERTURA_DESCUADRADA' => null
             ];
         }
 
         sqlsrv_free_stmt($stmt);
 
+        /* LOS COMPROBANTES PAGADOS CON DOS MEDIOS SE PARTEN, Y SOLO CON EL
+           HORIZONTE. Partirlos es decir en que columna del eje cae cada parte,
+           que es lo que piden la grilla y el tablero. Sin el horizonte -Tarjetas
+           Pagos Corporativos y la previsualizacion de la importacion- se sigue
+           devolviendo una fila por vencimiento, como siempre: Tarjetas arma su
+           clave de cuota con comprobante + vencimiento y dos filas con la misma
+           clave le romperian el circuito, y la previsualizacion necesita el
+           pendiente del comprobante entero. Mismo criterio que el cronograma,
+           que tampoco se resuelve sin el horizonte. */
+        if ($h !== null) {
+            $items = self::abrirEnMedios($items, $this->getAperturas(), $hoyStr, $pagosCrono);
+        }
+
         return $items;
+    }
+
+    /**
+     * Parte en sus medios los comprobantes que se pagan con dos. ES LA REGLA
+     * DE COMO ENTRA AL EJE UNA APERTURA, escrita una sola vez.
+     *
+     * UNA FILA POR PARTE, con IMPORTE_PENDIENTE = el importe de la parte y su
+     * fecha resuelta con la jerarquia de siempre (resolverFechaPago()), cada
+     * una por separado: una parte con fecha futura se respeta tal cual, y una
+     * que ya paso y es del cronograma va al proximo dia de pago. Que entre al
+     * cronograma lo sigue decidiendo la forma VIGENTE del comprobante
+     * (CRONOGRAMA, que ya viene resuelto en la fila), no la de la parte.
+     *
+     * LAS SERIES SIGUEN CERRANDO AL CENTAVO. La planilla tolera un peso entre
+     * la suma de las partes y el pendiente; lo que se proyecta, no. La ultima
+     * parte se lleva el resto -pendiente menos las anteriores-, asi que el
+     * comprobante suma exactamente lo mismo que sin apertura y lo unico que
+     * cambia es en que columna cae cada peso. IMPORTE_VTO e IMPUTACIONES se
+     * reparten en la misma proporcion, con el mismo criterio, para que el pie
+     * de "Importe" de la grilla tampoco se mueva.
+     *
+     * TODO LO DEMAS DE LA FILA SE COPIA: la exclusion, el override de forma,
+     * la observacion y el rubro son del comprobante. Excluirlo excluye las dos
+     * partes.
+     *
+     * SI LA APERTURA YA NO DESCRIBE EL COMPROBANTE, NO SE PARTE. Pasa cuando
+     * en Tango se imputo un pago parcial -el pendiente dejo de coincidir con
+     * la suma, con mas de un peso de diferencia- o cuando el comprobante paso
+     * a tener mas de un vencimiento. Partir en ese caso proyectaria importes
+     * que ya no se deben. Se deja la fila como esta: su fecha cargada es la
+     * MAS TARDIA de las dos partes (ver camposDeImportacion()), asi que todo lo
+     * que queda pendiente se proyecta ahi, con la jerarquia de siempre. Y se
+     * marca, para el aviso de avisosPendientesConNivel() y para la grilla.
+     *
+     * Estatica y pura.
+     *
+     * @param array $items Filas de getPendientes()
+     * @param array $aperturas Mapa de getAperturas(): clave => medios
+     * @param string $hoy 'Y-m-d'
+     * @param array|null $pagosCrono Pagos del cronograma PROV_LOCALES
+     * @return array Las filas, con las abiertas reemplazadas por sus partes
+     */
+    public static function abrirEnMedios($items, $aperturas, $hoy, $pagosCrono = null) {
+        if (empty($aperturas)) {
+            return $items;
+        }
+
+        $porClave = [];
+
+        foreach ($items as $i => $item) {
+            $porClave[self::clavePago($item['COD_PROVEE'], $item['T_COMP'], $item['N_COMP'])][] = $i;
+        }
+
+        $reemplazo = [];
+
+        foreach ($aperturas as $clave => $medios) {
+            if (!isset($porClave[$clave]) || count($medios) < 2) {
+                continue;
+            }
+
+            $indices = $porClave[$clave];
+            $pendiente = 0.0;
+
+            foreach ($indices as $i) {
+                $pendiente += floatval($items[$i]['IMPORTE_PENDIENTE']);
+            }
+
+            $suma = 0.0;
+
+            foreach ($medios as $m) {
+                $suma += floatval($m['importe']);
+            }
+
+            $info = self::infoApertura($medios);
+
+            if (count($indices) !== 1
+                || abs(round($pendiente - $suma, 2)) > self::TOLERANCIA_IMPORTE) {
+                foreach ($indices as $i) {
+                    $items[$i]['APERTURA_DESCUADRADA'] = array_merge($info, [
+                        'suma' => round($suma, 2),
+                        'pendiente' => round($pendiente, 2),
+                        'vencimientos' => count($indices)
+                    ]);
+                }
+
+                continue;
+            }
+
+            $fila = $items[$indices[0]];
+            $partes = [];
+            $acumulado = ['IMPORTE_PENDIENTE' => 0.0, 'IMPORTE_VTO' => 0.0, 'IMPUTACIONES' => 0.0];
+            $n = count($medios);
+
+            foreach (array_values($medios) as $k => $m) {
+                $parte = $fila;
+                $ultima = ($k === $n - 1);
+                $importe = $ultima
+                    ? round($pendiente - $acumulado['IMPORTE_PENDIENTE'], 2)
+                    : round(floatval($m['importe']), 2);
+                $proporcion = ($pendiente != 0) ? $importe / $pendiente : 0.0;
+
+                foreach (['IMPORTE_VTO', 'IMPUTACIONES'] as $col) {
+                    $parte[$col] = $ultima
+                        ? round(floatval($fila[$col]) - $acumulado[$col], 2)
+                        : round(floatval($fila[$col]) * $proporcion, 2);
+                    $acumulado[$col] += $parte[$col];
+                }
+
+                $parte['IMPORTE_PENDIENTE'] = $importe;
+                $acumulado['IMPORTE_PENDIENTE'] += $importe;
+
+                $r = self::resolverFechaPago($m['fecha'], $fila['FECHA_VTO'], $fila['FECHA_EMIS'],
+                    null, $hoy, $pagosCrono, !empty($fila['CRONOGRAMA']));
+
+                $parte['Pago'] = $r['fecha'];
+                $parte['PAGO_ORIGINAL'] = $r['original'];
+                $parte['ORIGEN_FECHA'] = $r['origen'];
+                $parte['PAGO_CRONO'] = $r['crono'];
+                $parte['PAGO_BASE'] = $r['base'];
+                $parte['PAGO_CRONO_NOMBRE'] = $r['pago_nombre'];
+                $parte['PAGO_CRONO_A_MANO'] = $r['pago_override'];
+                $parte['VENCIDA'] = $r['vencida'];
+                $parte['SIN_FECHA_CARGADA'] = $r['sin_fecha_cargada'];
+                $parte['FECHA_PAGO'] = $m['fecha'];
+                $parte['FUENTE_FECHA'] = 'ARCHIVO';
+                $parte['APERTURA'] = array_merge($info, ['parte' => $k + 1, 'de' => $n]);
+
+                $partes[] = $parte;
+            }
+
+            $reemplazo[$indices[0]] = $partes;
+        }
+
+        if (empty($reemplazo)) {
+            return $items;
+        }
+
+        $salida = [];
+
+        foreach ($items as $i => $item) {
+            if (isset($reemplazo[$i])) {
+                foreach ($reemplazo[$i] as $p) {
+                    $salida[] = $p;
+                }
+            } else {
+                $salida[] = $item;
+            }
+        }
+
+        return $salida;
+    }
+
+    /**
+     * Lo que la grilla dice de una apertura: los medios -fecha, forma,
+     * importe-, quien la cargo y cuando. Va igual en las dos partes.
+     *
+     * @param array $medios
+     * @return array
+     */
+    private static function infoApertura($medios) {
+        $lista = [];
+        $usuario = null;
+        $fecha = null;
+
+        foreach ($medios as $m) {
+            $lista[] = ['orden' => $m['orden'], 'fecha' => $m['fecha'], 'forma' => $m['forma'],
+                        'importe' => round(floatval($m['importe']), 2)];
+            $usuario = isset($m['usuario']) ? $m['usuario'] : $usuario;
+            $fecha = isset($m['fecha_modif']) ? $m['fecha_modif'] : $fecha;
+        }
+
+        return ['medios' => $lista, 'usuario' => $usuario, 'fecha_modif' => $fecha];
+    }
+
+    /**
+     * Si una fila de getPendientes() CUENTA COMO UN VENCIMIENTO en los
+     * contadores. Las dos partes de un comprobante abierto son un solo
+     * vencimiento partido en dos columnas: la segunda suma su importe pero no
+     * se cuenta. Es la regla de los indicadores de la pestaña, de los avisos y
+     * de la selección, escrita una vez.
+     *
+     * Estatica y pura.
+     *
+     * @param array $item
+     * @return bool
+     */
+    public static function cuentaComoVencimiento($item) {
+        return empty($item['APERTURA']) || intval($item['APERTURA']['parte']) === 1;
+    }
+
+    /**
+     * Las aperturas vigentes, indexadas por comprobante. Vacio sin la tabla.
+     *
+     * Cada una viene ORDENADA por ORDEN, que es el que se decidio al importar:
+     * la fecha mas temprana primero y, con la misma fecha, la fila que venia
+     * antes en el archivo.
+     *
+     * @return array Mapa 'COD|T|N' => [['orden', 'fecha', 'forma', 'forma_orig',
+     *               'importe', 'usuario', 'fecha_modif'], ...]
+     */
+    public function getAperturas() {
+        if (!$this->tablaMedioCreada()) {
+            return [];
+        }
+
+        $stmt = sqlsrv_query($this->conectar(),
+            "SELECT COD_PROVEE, T_COMP, N_COMP, ORDEN, FECHA_PAGO, FORMA_PAGO, FORMA_PAGO_ORIG,
+                    CAST(IMPORTE AS FLOAT) AS IMPORTE, USUARIO_MODIF, FECHA_MODIF
+             FROM dbo." . self::TABLA_MEDIO . "
+             WHERE VIGENTE = 1
+             ORDER BY COD_PROVEE, T_COMP, N_COMP, ORDEN");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer los pagos con dos medios'));
+        }
+
+        $mapa = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $mapa[self::clavePago($row['COD_PROVEE'], $row['T_COMP'], $row['N_COMP'])][] = [
+                'orden' => intval($row['ORDEN']),
+                'fecha' => Horizonte::normalizarFecha($row['FECHA_PAGO']),
+                'forma' => $row['FORMA_PAGO'],
+                'forma_orig' => $row['FORMA_PAGO_ORIG'],
+                'importe' => round(floatval($row['IMPORTE']), 2),
+                'usuario' => $row['USUARIO_MODIF'],
+                'fecha_modif' => ($row['FECHA_MODIF'] instanceof DateTime)
+                    ? $row['FECHA_MODIF']->format('Y-m-d H:i:s') : $row['FECHA_MODIF']
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $mapa;
     }
 
     /**
@@ -938,13 +1259,22 @@ class Proveedores {
         $compSinFecha = 0;
         $excluido = 0.0;
         $compExcluidos = 0;
+        $descuadrados = [];
 
         foreach ($items as $i) {
             $importe = floatval($i['IMPORTE_PENDIENTE']);
 
+            /* Las dos partes de un comprobante abierto son UN vencimiento: la
+               segunda suma su importe pero no se cuenta. */
+            $cuenta = self::cuentaComoVencimiento($i) ? 1 : 0;
+
+            if (!empty($i['APERTURA_DESCUADRADA'])) {
+                $descuadrados[self::clavePago($i['COD_PROVEE'], $i['T_COMP'], $i['N_COMP'])] = true;
+            }
+
             if (!empty($i['EXCLUIDO'])) {
                 $excluido += $importe;
-                $compExcluidos++;
+                $compExcluidos += $cuenta;
             }
 
             if ($i['ORIGEN_FECHA'] === 'SIN_FECHA') {
@@ -969,6 +1299,17 @@ class Proveedores {
            de al lado tiene que seguir diciendo a que se refiere. */
         $alcance = ' Es sobre TODAS las cuentas a pagar, así que no coincide con lo que '
             . 'muestra la pantalla si hay un filtro puesto.';
+
+        /* UNA APERTURA QUE YA NO DESCRIBE EL COMPROBANTE. Lo mas probable es un
+           pago parcial en Tango: el pendiente dejo de ser la suma de las dos
+           partes. Se proyecta todo lo que queda en la fecha mas tardia -ver
+           abrirEnMedios()- y eso es una suposicion, asi que se dice, y se dice
+           como arreglarlo. */
+        if (!empty($descuadrados)) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, count($descuadrados) . ' comprobante(s) '
+                . 'abiertos en dos medios ya no coinciden con su pendiente: se proyecta el saldo '
+                . 'en la fecha más tardía. Reimportá para corregirlo.');
+        }
 
         if ($compVencidosCrono > 0) {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, $compVencidosCrono . ' vencimiento(s) por ' . self::plata($vencidoCrono)
@@ -1164,8 +1505,9 @@ class Proveedores {
        ella, todo lo vencido se dibuja hoy porque no hay otro lugar donde
        ponerlo.
 
-       Mismo circuito que el maestro y que Cob. Electronicos: plantilla CSV,
-       previsualizacion del diff, y nada se escribe hasta confirmar.
+       Mismo circuito que el maestro y que Cob. Electronicos: plantilla en
+       Excel, el Excel leido en el navegador, previsualizacion del diff, y nada
+       se escribe hasta confirmar.
        ==================================================================== */
 
     /**
@@ -1184,6 +1526,7 @@ class Proveedores {
             'cod_provee' => [
                 'titulo' => 'COD_PROVEEDOR',
                 'obligatoria' => true,
+                'tipo' => 'texto',
                 'ayuda' => 'Código del proveedor en Tango. Hace falta: el número de factura '
                     . 'solo no identifica un comprobante, porque lo emite el proveedor y dos '
                     . 'proveedores distintos repiten numeración.',
@@ -1193,6 +1536,7 @@ class Proveedores {
             'n_comp' => [
                 'titulo' => 'NRO_FACTURA',
                 'obligatoria' => true,
+                'tipo' => 'texto',
                 'ayuda' => 'Número de comprobante tal como figura en Tango, por ejemplo '
                     . 'A0000500001731.',
                 'sinonimos' => ['NROFACTURA', 'N_COMP', 'NCOMP', 'NUMERO', 'NROCOMPROBANTE',
@@ -1201,21 +1545,41 @@ class Proveedores {
             'fecha_pago' => [
                 'titulo' => 'FECHA_PAGO',
                 'obligatoria' => true,
+                'tipo' => 'fecha',
                 'ayuda' => 'Cuándo se piensa pagar. dd/mm/aaaa o aaaa-mm-dd.',
                 'sinonimos' => ['FECHAPAGO', 'FECHA_PAGO', 'FECHA', 'PAGO', 'FECHADEPAGO']
             ],
             'forma_pago' => [
                 'titulo' => 'FORMA_PAGO',
                 'obligatoria' => false,
+                'tipo' => 'texto',
                 'ayuda' => 'Opcional. Si no viene, se usa la forma habitual del proveedor '
                     . 'según el maestro. Válidos: '
                     . implode(', ', ProveedoresCategorias::FORMAS_PAGO) . '.',
                 'sinonimos' => ['FORMAPAGO', 'FORMA_PAGO', 'FORMA', 'MEDIODEPAGO',
                                 'FORMADEPAGO']
             ],
+            /* EL IMPORTE ES OPCIONAL CON UN MEDIO Y OBLIGATORIO CON DOS. Con una
+               sola fila por comprobante, vacio quiere decir "todo lo pendiente";
+               si viene, tiene que coincidir con el pendiente -con un peso de
+               tolerancia-, porque otro numero es otro comprobante o un pago
+               parcial que la planilla no sabe. Con dos filas es lo que dice
+               cuanto va por cada medio. Ver compararImportacion(). */
+            'importe' => [
+                'titulo' => 'IMPORTE',
+                'obligatoria' => false,
+                'tipo' => 'importe',
+                'ayuda' => 'Opcional con un solo medio: vacío es todo lo pendiente, y si viene '
+                    . 'tiene que coincidir con el pendiente. Con dos medios —dos filas del mismo '
+                    . 'comprobante, cada una ECHEQ o TRANSFERENCIA— es obligatorio en las dos, y '
+                    . 'tienen que sumar el pendiente. Sin separador de miles.',
+                'sinonimos' => ['IMPORTE', 'MONTO', 'IMPORTE_PAGO', 'IMPORTEPAGO', 'MONTO_PAGO',
+                                'MONTOPAGO']
+            ],
             't_comp' => [
                 'titulo' => 'TIPO_COMP',
                 'obligatoria' => false,
+                'tipo' => 'texto',
                 'ayuda' => 'Opcional (FAC, NDI, NCP...). Si no viene se deduce de los '
                     . 'pendientes del proveedor.',
                 'sinonimos' => ['TIPOCOMP', 'T_COMP', 'TCOMP', 'TIPO', 'TIPOCOMPROBANTE']
@@ -1223,6 +1587,7 @@ class Proveedores {
             'observacion' => [
                 'titulo' => 'OBSERVACION',
                 'obligatoria' => false,
+                'tipo' => 'texto',
                 'ayuda' => 'Opcional, hasta 200 caracteres.',
                 'sinonimos' => ['OBSERVACION', 'OBSERVACIONES', 'NOTAS', 'COMENTARIOS']
             ]
@@ -1230,36 +1595,45 @@ class Proveedores {
     }
 
     /**
-     * La plantilla que se descarga, con filas de ejemplo cargadas.
+     * La plantilla que se descarga, con filas de ejemplo cargadas. El .xlsx lo
+     * arma el navegador: ver Planilla::plantilla().
      *
      * Las fechas de ejemplo se calculan sobre hoy para que nunca se vean viejas.
      *
      * @param string|null $ejemploFecha 'Y-m-d'
-     * @return string
+     * @return array Lo que devuelve Planilla::plantilla()
      */
-    public static function plantillaCsv($ejemploFecha = null) {
+    public static function plantilla($ejemploFecha = null) {
         $fecha = ($ejemploFecha === null) ? date('Y-m-d') : substr((string) $ejemploFecha, 0, 10);
-        $enUnaSemana = date('d/m/Y', strtotime($fecha . ' +7 day'));
-        $enDosSemanas = date('d/m/Y', strtotime($fecha . ' +14 day'));
+        $enUnaSemana = date('Y-m-d', strtotime($fecha . ' +7 day'));
+        $enDosSemanas = date('Y-m-d', strtotime($fecha . ' +14 day'));
 
-        return Planilla::plantillaCsv(self::columnasImportacion(), [
-            ['MTDODI', 'A0000500001731', $enUnaSemana, 'TRANSFERENCIA', '', 'Ejemplo: borrar'],
-            ['OGCOAN', 'A0000300001234', $enDosSemanas, 'ECHEQ', 'FAC',
-             'Ejemplo: con tipo de comprobante']
-        ]);
+        /* El tercer y el cuarto ejemplo son UN comprobante pagado con dos
+           medios: dos filas, cada una con su fecha, su forma y su importe. Sin
+           el ejemplo, nadie adivina que dos medios se cargan asi. */
+        return Planilla::plantilla(self::columnasImportacion(), [
+            ['MTDODI', 'A0000500001731', $enUnaSemana, 'TRANSFERENCIA', '', '',
+             'Ejemplo: un medio, todo lo pendiente'],
+            ['OGCOAN', 'A0000300001234', $enDosSemanas, 'ECHEQ', '', 'FAC',
+             'Ejemplo: con tipo de comprobante'],
+            ['SPEDEN', 'A0000100000001', $enUnaSemana, 'ECHEQ', 150000.00, '',
+             'Ejemplo: dos medios, primera parte'],
+            ['SPEDEN', 'A0000100000001', $enDosSemanas, 'TRANSFERENCIA', 50000.00, '',
+             'Ejemplo: dos medios, segunda parte']
+        ], 'plantilla_pagos_proveedores');
     }
 
     /**
      * Compara lo que trae el archivo contra los pendientes y contra lo ya
      * cargado, y dice QUE CAMBIARIA. No escribe nada.
      *
-     * Helper PURO: recibe las filas parseadas, los pendientes y los pagos
-     * cargados. Se prueba entero sin base y sin archivos.
+     * Helper PURO: recibe las filas parseadas, los pendientes, los pagos y las
+     * aperturas cargadas. Se prueba entero sin base y sin archivos.
      *
      * ESTADOS
      *   ALTA         el comprobante no tenia fecha cargada
      *   CAMBIO       la tenia y es otra; 'antes' dice cual
-     *   SIN_CAMBIOS  ya estaba con esa fecha y esa forma
+     *   SIN_CAMBIOS  ya estaba con esa fecha y esa forma -o con esa apertura-
      *   ERROR        no se puede cargar; 'motivo' dice por que
      *
      * LO QUE NO MATCHEA CONTRA NINGUN PENDIENTE ES UN ERROR VISIBLE, no una
@@ -1268,13 +1642,56 @@ class Proveedores {
      * -y eso ultimo es informacion, no un descarte-. El motivo distingue los
      * tres casos, porque se arreglan distinto.
      *
+     * EL ESTADO ES DEL COMPROBANTE, NO DE LA FILA
+     * -------------------------------------------
+     * Las filas se juntan por comprobante y se deciden juntas:
+     *
+     *   1 fila       un medio, el caso de siempre. IMPORTE es opcional: vacio
+     *                es todo lo pendiente, y si viene tiene que coincidir con
+     *                el pendiente con TOLERANCIA_IMPORTE. La forma es opcional
+     *                y no decide nada, como siempre.
+     *   2 filas      DOS MEDIOS. Cada fila con su fecha, su forma -ECHEQ o
+     *                TRANSFERENCIA, obligatoria- y su importe -obligatorio,
+     *                mayor a cero-, y las dos tienen que sumar el pendiente.
+     *                Puede ser el mismo medio dos veces: dos echeqs de fechas
+     *                distintas.
+     *   3 o mas      error en TODAS, nombrando las lineas.
+     *
+     * CON DOS MEDIOS, SE CARGAN LAS DOS O NINGUNA. Si una de las dos filas esta
+     * mal, la otra tampoco se carga: cargar media apertura dejaria el
+     * comprobante partido a medias, con una parte en una fecha y la otra en el
+     * aire. Por eso el motivo es UNO para el comprobante y va en las dos filas.
+     *
+     * UN COMPROBANTE EN CUOTAS NO SE PARTE en dos medios: con varios
+     * vencimientos no hay forma de decir que parte de cada cuota va por cada
+     * medio. Se carga con uno solo.
+     *
+     * LA FORMA DE LA PLANILLA SIGUE SIN DECIDIR EL CRONOGRAMA. Si la forma
+     * vigente del comprobante no es del cronograma -CAJA en el maestro, por
+     * ejemplo- y se lo abre en echeq + transferencia, se acepta: es un hecho
+     * sobre como va a salir la plata. Pero se avisa, porque el comprobante se
+     * va a seguir tratando con su forma vigente y eso puede no ser lo que
+     * quien arma la planilla espera.
+     *
+     * REIMPORTAR REEMPLAZA LA APERTURA ENTERA. Un comprobante que estaba en dos
+     * medios y ahora viene en una fila deja de estar partido; si viene igual
+     * que estaba, es SIN_CAMBIOS.
+     *
+     * Las filas salen agrupadas: las dos partes de un comprobante, juntas. La
+     * previsualizacion las muestra asi.
+     *
      * @param array $filasArchivo Filas de Planilla::parsear()
-     * @param array $pendientes Filas de getPendientes()
+     * @param array $pendientes Filas de getPendientes(), SIN horizonte: una por
+     *        vencimiento, no partidas
      * @param array $pagos Mapa de getPagos()
      * @param string|null $hoy 'Y-m-d' para validar que la fecha no sea absurda
+     * @param array $aperturas Mapa de getAperturas()
+     * @param bool $conMedios Si existe la tabla de medios. Sin ella, dos filas
+     *        de un comprobante son un error que nombra el script
      * @return array ['filas', 'resumen', 'avisos']
      */
-    public static function compararImportacion($filasArchivo, $pendientes, $pagos, $hoy = null) {
+    public static function compararImportacion($filasArchivo, $pendientes, $pagos, $hoy = null,
+                                               $aperturas = [], $conMedios = true) {
         $hoyStr = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
 
         /* Los pendientes, indexados de dos formas: por clave completa -cuando la
@@ -1293,82 +1710,73 @@ class Proveedores {
         }
 
         $pagos = is_array($pagos) ? $pagos : [];
+        $aperturas = is_array($aperturas) ? $aperturas : [];
+
+        /* 1. Cada fila por su cuenta: la forma de la celda y el cruce contra
+              los pendientes. 2. Cada comprobante entero. */
+        $grupos = [];
+
+        foreach (is_array($filasArchivo) ? $filasArchivo : [] as $cruda) {
+            $fila = self::filaPago($cruda, $porClave, $porNumero, $hoyStr);
+            $grupos[self::grupoDeFila($fila, $porNumero)][] = $fila;
+        }
+
         $filas = [];
-        $vistas = [];
 
         $resumen = [
             'altas' => 0, 'cambios' => 0, 'sin_cambios' => 0, 'errores' => 0,
             'importe_con_fecha' => 0.0, 'vencidos_resueltos' => 0,
-            'forma_desconocida' => 0
+            'forma_desconocida' => 0, 'dos_medios' => 0, 'dos_medios_fuera_cronograma' => 0
         ];
 
-        foreach (is_array($filasArchivo) ? $filasArchivo : [] as $cruda) {
-            $fila = self::filaPago($cruda, $porClave, $porNumero, $hoyStr);
-
-            if ($fila['estado'] !== 'ERROR') {
-                $clave = self::clavePago($fila['cod_provee'], $fila['t_comp'], $fila['n_comp']);
-
-                /* Dos filas para el mismo comprobante no se colapsan: cual vale
-                   lo decide quien armo la planilla, no el importador. */
-                if (isset($vistas[$clave])) {
-                    $fila['estado'] = 'ERROR';
-                    $fila['motivo'] = 'Este comprobante ya aparece en la línea '
-                        . $vistas[$clave] . ' con otra fecha. Dejá una sola fila por '
-                        . 'comprobante y volvé a importar.';
-                } else {
-                    $vistas[$clave] = $fila['linea'];
-                    $existente = isset($pagos[$clave]) ? $pagos[$clave] : null;
-
-                    if ($existente === null) {
-                        $fila['estado'] = 'ALTA';
-                        $fila['motivo'] = 'No tenía fecha de pago cargada.';
-                    } elseif ($existente['FECHA_PAGO'] === $fila['fecha_pago']
-                        && trim((string) $existente['FORMA_PAGO']) === trim((string) $fila['forma_pago'])) {
-                        $fila['estado'] = 'SIN_CAMBIOS';
-                        $fila['motivo'] = 'Ya estaba cargado igual.';
-                    } else {
-                        $fila['estado'] = 'CAMBIO';
-                        $fila['antes'] = [
-                            'fecha_pago' => $existente['FECHA_PAGO'],
-                            'forma_pago' => $existente['FORMA_PAGO']
-                        ];
-                        $fila['motivo'] = 'Cambia la fecha cargada'
-                            . ($existente['FECHA_PAGO'] !== null
-                                ? ' (estaba en ' . self::formatoCorto($existente['FECHA_PAGO']) . ')'
-                                : '') . '.';
-
-                        /* Pisar una conciliada es distinto: Tango ya dijo que
-                           ese comprobante se pago. Se permite -puede ser una
-                           correccion- pero se marca. */
-                        if ($existente['ESTADO'] === 'CONCILIADO') {
-                            $fila['motivo'] .= ' OJO: este comprobante ya figura CONCILIADO '
-                                . 'contra Tango, así que se pagó de verdad. Cambiarle la '
-                                . 'fecha prevista no cambia eso.';
-                        }
-                    }
-                }
+        foreach ($grupos as $grupo) {
+            if (count($grupo) === 1) {
+                $grupo = [self::unMedio($grupo[0], $pagos, $aperturas)];
+            } elseif (count($grupo) === self::MAX_MEDIOS) {
+                $grupo = self::dosMedios($grupo, $pagos, $aperturas, $conMedios);
+            } else {
+                $grupo = self::demasiadasFilas($grupo);
             }
 
-            if ($fila['estado'] !== 'ERROR') {
+            foreach ($grupo as $fila) {
+                $filas[] = $fila;
+
+                if ($fila['estado'] === 'ERROR') {
+                    $resumen['errores']++;
+                    continue;
+                }
+
+                if (!empty($fila['forma_desconocida'])) {
+                    $resumen['forma_desconocida']++;
+                }
+
+                /* LO QUE SE CUENTA POR COMPROBANTE SE CUENTA UNA VEZ: en la
+                   primera parte. Las altas, los cambios y lo que se reubica
+                   son del comprobante; los errores, de la fila. */
+                if ($fila['parte'] !== 1) {
+                    continue;
+                }
+
                 $resumen['importe_con_fecha'] += $fila['importe_pendiente'];
 
                 if ($fila['estaba_vencido']) {
                     $resumen['vencidos_resueltos']++;
                 }
 
-                if ($fila['forma_desconocida']) {
-                    $resumen['forma_desconocida']++;
+                if ($fila['partes'] === self::MAX_MEDIOS) {
+                    $resumen['dos_medios']++;
+
+                    if ($fila['aviso'] !== null) {
+                        $resumen['dos_medios_fuera_cronograma']++;
+                    }
+                }
+
+                switch ($fila['estado']) {
+                    case 'ALTA': $resumen['altas']++; break;
+                    case 'CAMBIO': $resumen['cambios']++; break;
+                    case 'SIN_CAMBIOS': $resumen['sin_cambios']++; break;
                 }
             }
-
-            switch ($fila['estado']) {
-                case 'ALTA': $resumen['altas']++; break;
-                case 'CAMBIO': $resumen['cambios']++; break;
-                case 'SIN_CAMBIOS': $resumen['sin_cambios']++; break;
-                case 'ERROR': $resumen['errores']++; break;
-            }
-
-            $filas[] = $fila;
         }
 
         return [
@@ -1379,7 +1787,382 @@ class Proveedores {
     }
 
     /**
+     * Con que comprobante va una fila, para juntar las dos partes de un pago
+     * con dos medios.
+     *
+     * Una fila en error tambien se agrupa si se sabe de que comprobante es: con
+     * dos medios, una fila mala hace que la otra tampoco se cargue, y para eso
+     * hay que saber que son del mismo. El tipo, si no vino, se deduce igual que
+     * en el cruce; si no se puede deducir, la fila queda sola, que es lo que ya
+     * dice su propio motivo.
+     *
+     * @param array $fila Lo que devolvio filaPago()
+     * @param array $porNumero Pendientes por (proveedor, numero)
+     * @return string
+     */
+    private static function grupoDeFila($fila, $porNumero) {
+        $sola = 'LINEA|' . $fila['linea'];
+
+        if ($fila['cod_provee'] === '' || $fila['n_comp'] === '') {
+            return $sola;
+        }
+
+        $t = $fila['t_comp'];
+
+        if ($t === '') {
+            $tipos = [];
+
+            $clave = $fila['cod_provee'] . '|' . $fila['n_comp'];
+
+            foreach (isset($porNumero[$clave]) ? $porNumero[$clave] : [] as $c) {
+                $tipos[Planilla::codigo($c['T_COMP'])] = true;
+            }
+
+            if (count($tipos) !== 1) {
+                return $sola;
+            }
+
+            $t = key($tipos);
+        }
+
+        return self::clavePago($fila['cod_provee'], $t, $fila['n_comp']);
+    }
+
+    /**
+     * Un comprobante en UNA fila: el caso de siempre, mas el IMPORTE opcional.
+     *
+     * @param array $fila
+     * @param array $pagos
+     * @param array $aperturas
+     * @return array La fila, con su estado y su motivo
+     */
+    private static function unMedio($fila, $pagos, $aperturas) {
+        if ($fila['estado'] === 'ERROR') {
+            return $fila;
+        }
+
+        /* CON UN MEDIO, EL IMPORTE TIENE QUE SER EL PENDIENTE. Otro numero es
+           otro comprobante, o un pago parcial que la planilla sabe y Tango
+           todavia no: cargarle la fecha a todo el pendiente diria una cosa que
+           la planilla no dice. */
+        if ($fila['importe'] !== null) {
+            $dif = round($fila['importe'] - $fila['importe_pendiente'], 2);
+
+            if (abs($dif) > self::TOLERANCIA_IMPORTE) {
+                $fila['estado'] = 'ERROR';
+                $fila['motivo'] = 'El importe (' . self::plata($fila['importe']) . ') no coincide con '
+                    . 'el pendiente del comprobante (' . self::plata($fila['importe_pendiente'])
+                    . '): la diferencia es de ' . self::plata($dif) . '. Con un solo medio, el '
+                    . 'IMPORTE puede quedar vacío y se toma todo lo pendiente.';
+
+                return $fila;
+            }
+        }
+
+        $clave = self::clavePago($fila['cod_provee'], $fila['t_comp'], $fila['n_comp']);
+        $existente = isset($pagos[$clave]) ? $pagos[$clave] : null;
+        $apertura = isset($aperturas[$clave]) ? $aperturas[$clave] : null;
+
+        if ($existente === null && $apertura === null) {
+            $fila['estado'] = 'ALTA';
+            $fila['motivo'] = 'No tenía fecha de pago cargada.';
+        } elseif ($apertura !== null) {
+            /* Reimportar reemplaza la apertura entera: una fila sola la
+               deshace, aunque la fecha coincida con una de las dos partes. */
+            $fila['estado'] = 'CAMBIO';
+            $fila['antes'] = [
+                'fecha_pago' => $existente === null ? null : $existente['FECHA_PAGO'],
+                'forma_pago' => null,
+                'medios' => $apertura
+            ];
+            $fila['motivo'] = 'Deja de estar pagado con dos medios (' . self::textoMedios($apertura)
+                . '): vuelve a ser un comprobante con una sola fecha.';
+        } elseif ($existente['FECHA_PAGO'] === $fila['fecha_pago']
+            && trim((string) $existente['FORMA_PAGO']) === trim((string) $fila['forma_pago'])) {
+            $fila['estado'] = 'SIN_CAMBIOS';
+            $fila['motivo'] = 'Ya estaba cargado igual.';
+        } else {
+            $fila['estado'] = 'CAMBIO';
+            $fila['antes'] = [
+                'fecha_pago' => $existente['FECHA_PAGO'],
+                'forma_pago' => $existente['FORMA_PAGO']
+            ];
+            $fila['motivo'] = 'Cambia la fecha cargada'
+                . ($existente['FECHA_PAGO'] !== null
+                    ? ' (estaba en ' . self::formatoCorto($existente['FECHA_PAGO']) . ')'
+                    : '') . '.';
+        }
+
+        return self::marcarConciliado($fila, $existente);
+    }
+
+    /**
+     * Un comprobante en DOS filas: dos medios. Se cargan las dos o ninguna.
+     * Ver compararImportacion().
+     *
+     * @param array $grupo Las dos filas, en el orden del archivo
+     * @param array $pagos
+     * @param array $aperturas
+     * @param bool $conMedios
+     * @return array Las dos filas, con el mismo estado y el mismo motivo
+     */
+    private static function dosMedios($grupo, $pagos, $aperturas, $conMedios) {
+        $lineas = 'líneas ' . $grupo[0]['linea'] . ' y ' . $grupo[1]['linea'];
+
+        foreach ($grupo as $i => $f) {
+            $grupo[$i]['grupo'] = $grupo[0]['linea'];
+            $grupo[$i]['partes'] = self::MAX_MEDIOS;
+            $grupo[$i]['parte'] = $i + 1;
+        }
+
+        /* SIN LA TABLA, NO HAY DONDE GUARDAR LA APERTURA. Se dice antes que
+           cualquier otro problema: es lo unico que hay que arreglar fuera de la
+           planilla, y nombrar el script es lo que dice como. */
+        if (!$conMedios) {
+            return self::enError($grupo, 'Este comprobante viene en dos filas (' . $lineas . '), que '
+                . 'es como se carga un pago con dos medios, y para eso hace falta correr '
+                . self::SCRIPT_MEDIO . ' contra la base central. Mientras tanto, dejá una sola fila.');
+        }
+
+        /* UNA FILA MALA SE LLEVA A LA OTRA. Cada una conserva su propio motivo
+           si lo tiene; la que estaba bien dice por que no se carga. */
+        $malas = [];
+
+        foreach ($grupo as $f) {
+            if ($f['estado'] === 'ERROR') {
+                $malas[] = $f['linea'];
+            }
+        }
+
+        if (!empty($malas)) {
+            foreach ($grupo as $i => $f) {
+                $grupo[$i]['estado'] = 'ERROR';
+                $grupo[$i]['motivo'] = ($f['estado'] === 'ERROR' ? $f['motivo'] . ' ' : '')
+                    . 'Con dos medios se cargan las dos filas o ninguna (' . $lineas . '), para no '
+                    . 'dejar el comprobante partido a medias'
+                    . ($f['estado'] === 'ERROR'
+                        ? '.'
+                        : ': la línea ' . implode(' y la ', $malas) . ' no se puede cargar.');
+                $grupo[$i]['parte'] = 0;
+            }
+
+            return $grupo;
+        }
+
+        $base = $grupo[0];
+        $problemas = [];
+
+        if ($base['vencimientos'] > 1) {
+            $problemas[] = 'es un comprobante en cuotas: cargalo con un solo medio';
+        }
+
+        $formas = [];
+        $importes = [];
+        $suma = 0.0;
+        $importesOk = true;
+
+        foreach ($grupo as $f) {
+            if ($f['forma_pago_orig'] === '') {
+                $formas[] = 'la línea ' . $f['linea'] . ' no trae forma';
+            } elseif (!in_array($f['forma_pago'], ProveedoresCategorias::FORMAS_CRONOGRAMA, true)) {
+                $formas[] = 'la línea ' . $f['linea'] . ' trae «' . $f['forma_pago_orig'] . '»';
+            }
+
+            if ($f['importe'] === null) {
+                $importes[] = 'la línea ' . $f['linea'] . ' no trae IMPORTE';
+                $importesOk = false;
+            } elseif ($f['importe'] <= 0) {
+                $importes[] = 'la línea ' . $f['linea'] . ' trae un importe de '
+                    . self::plata($f['importe']);
+                $importesOk = false;
+            } else {
+                $suma += $f['importe'];
+            }
+        }
+
+        if (!empty($formas)) {
+            $problemas[] = 'cada fila tiene que ser ' . implode(' o ', ProveedoresCategorias::FORMAS_CRONOGRAMA)
+                . ', y ' . implode('; ', $formas);
+        }
+
+        if (!empty($importes)) {
+            $problemas[] = 'cada fila tiene que traer su IMPORTE, mayor a cero, y '
+                . implode('; ', $importes);
+        }
+
+        if ($importesOk) {
+            $dif = round($suma - $base['importe_pendiente'], 2);
+
+            if (abs($dif) > self::TOLERANCIA_IMPORTE) {
+                $problemas[] = 'los importes suman ' . self::plata($suma) . ' y el pendiente es '
+                    . self::plata($base['importe_pendiente']) . ': la diferencia es de '
+                    . self::plata($dif);
+            }
+        }
+
+        if (!empty($problemas)) {
+            $grupo = self::enError($grupo, 'Comprobante en dos medios (' . $lineas . '): '
+                . implode('; ', $problemas) . '. No se carga ninguna de las dos filas.');
+
+            return $grupo;
+        }
+
+        /* EL ORDEN SALE DE LA FECHA: 1/2 es la parte que se paga primero. Con
+           la misma fecha -dos echeqs del mismo dia-, desempata el orden de las
+           filas en el archivo, que es el que quien la armo eligio. */
+        usort($grupo, function ($a, $b) {
+            $porFecha = strcmp($a['fecha_pago'], $b['fecha_pago']);
+
+            return ($porFecha !== 0) ? $porFecha : ($a['linea'] - $b['linea']);
+        });
+
+        $medios = [];
+
+        foreach ($grupo as $i => $f) {
+            $grupo[$i]['parte'] = $i + 1;
+            $medios[] = ['orden' => $i + 1, 'fecha' => $f['fecha_pago'], 'forma' => $f['forma_pago'],
+                         'importe' => round($f['importe'], 2)];
+        }
+
+        $clave = self::clavePago($base['cod_provee'], $base['t_comp'], $base['n_comp']);
+        $existente = isset($pagos[$clave]) ? $pagos[$clave] : null;
+        $antes = isset($aperturas[$clave]) ? $aperturas[$clave] : null;
+
+        if ($antes !== null && self::mismaApertura($antes, $medios)) {
+            $estado = 'SIN_CAMBIOS';
+            $motivo = 'Ya estaba pagado con estos dos medios.';
+        } elseif ($antes !== null) {
+            $estado = 'CAMBIO';
+            $motivo = 'Cambia la apertura en dos medios (estaba: ' . self::textoMedios($antes) . '). '
+                . 'Queda: ' . self::textoMedios($medios) . '.';
+        } elseif ($existente !== null) {
+            $estado = 'CAMBIO';
+            $motivo = 'Pasa a pagarse con dos medios: ' . self::textoMedios($medios) . '.'
+                . ($existente['FECHA_PAGO'] !== null
+                    ? ' Tenía una sola fecha, el ' . self::formatoCorto($existente['FECHA_PAGO']) . '.'
+                    : '');
+        } else {
+            $estado = 'ALTA';
+            $motivo = 'Se paga con dos medios: ' . self::textoMedios($medios) . '.';
+        }
+
+        /* LA FORMA VIGENTE SIGUE DECIDIENDO. Se acepta, pero se dice: quien
+           abrio el comprobante en echeq y transferencia probablemente espera
+           que entre al cronograma, y no va a entrar. */
+        $aviso = null;
+
+        if (!$base['cronograma']) {
+            $aviso = 'Se sigue tratando como ' . ($base['forma_vigente'] ?: 'sin forma')
+                . '; para que entre al cronograma, cambiá su forma en la grilla o el maestro.';
+        }
+
+        foreach ($grupo as $i => $f) {
+            $grupo[$i]['estado'] = $estado;
+            $grupo[$i]['motivo'] = $motivo;
+            $grupo[$i]['medios'] = $medios;
+            $grupo[$i]['aviso'] = $aviso;
+            $grupo[$i]['antes'] = ($antes === null && $existente === null) ? null : [
+                'fecha_pago' => $existente === null ? null : $existente['FECHA_PAGO'],
+                'forma_pago' => $existente === null ? null : $existente['FORMA_PAGO'],
+                'medios' => $antes
+            ];
+            $grupo[$i] = self::marcarConciliado($grupo[$i], $existente);
+        }
+
+        return $grupo;
+    }
+
+    /**
+     * Tres filas o mas del mismo comprobante: error en TODAS. No hay tercer
+     * medio, y elegir cuales dos valen seria decidir por quien armo la
+     * planilla.
+     *
+     * @param array $grupo
+     * @return array
+     */
+    private static function demasiadasFilas($grupo) {
+        $lineas = array_column($grupo, 'linea');
+        $ultima = array_pop($lineas);
+
+        return self::enError($grupo, 'Este comprobante aparece en ' . count($grupo) . ' filas (líneas '
+            . implode(', ', $lineas) . ' y ' . $ultima . '). Se puede pagar con dos medios como '
+            . 'máximo, una fila por medio: dejá una o dos y volvé a importar.');
+    }
+
+    /** Todas las filas de un comprobante en error, con el mismo motivo */
+    private static function enError($grupo, $motivo) {
+        foreach ($grupo as $i => $f) {
+            $grupo[$i]['estado'] = 'ERROR';
+            $grupo[$i]['motivo'] = $motivo;
+            $grupo[$i]['grupo'] = $grupo[0]['linea'];
+            $grupo[$i]['partes'] = count($grupo);
+            $grupo[$i]['parte'] = 0;
+        }
+
+        return $grupo;
+    }
+
+    /**
+     * Pisar una conciliada se permite -puede ser una correccion- pero se
+     * marca: Tango ya dijo que ese comprobante se pago.
+     */
+    private static function marcarConciliado($fila, $existente) {
+        if ($fila['estado'] === 'CAMBIO' && $existente !== null
+            && $existente['ESTADO'] === 'CONCILIADO') {
+            $fila['motivo'] .= ' OJO: este comprobante ya figura CONCILIADO contra Tango, así que '
+                . 'se pagó de verdad. Cambiarle la fecha prevista no cambia eso.';
+        }
+
+        return $fila;
+    }
+
+    /**
+     * Si dos aperturas son la misma: los mismos medios, en el mismo orden, con
+     * la misma fecha, la misma forma y el mismo importe al centavo.
+     *
+     * Estatica y pura.
+     *
+     * @param array $a
+     * @param array $b
+     * @return bool
+     */
+    public static function mismaApertura($a, $b) {
+        if (count($a) !== count($b)) {
+            return false;
+        }
+
+        $a = array_values($a);
+        $b = array_values($b);
+
+        foreach ($a as $i => $m) {
+            if ($m['fecha'] !== $b[$i]['fecha'] || $m['forma'] !== $b[$i]['forma']
+                || round(floatval($m['importe']), 2) !== round(floatval($b[$i]['importe']), 2)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /** "ECHEQ $ 150.000,00 el 20/10/2026 y TRANSFERENCIA $ 50.000,00 el 27/10/2026" */
+    private static function textoMedios($medios) {
+        $partes = [];
+
+        foreach ($medios as $m) {
+            $partes[] = $m['forma'] . ' ' . self::plata($m['importe']) . ' el '
+                . self::formatoCorto($m['fecha']);
+        }
+
+        return implode(' y ', $partes);
+    }
+
+    /**
      * Normaliza y valida una fila de la planilla de pagos contra los pendientes.
+     *
+     * Decide lo que se puede decidir mirando LA FILA SOLA: la fecha, el cruce y
+     * que el importe sea un numero. Lo que depende de las otras filas del mismo
+     * comprobante -si son dos medios, si suman el pendiente- lo decide
+     * compararImportacion() despues.
      *
      * @param array $cruda
      * @param array $porClave Pendientes por clave completa
@@ -1388,6 +2171,10 @@ class Proveedores {
      * @return array
      */
     private static function filaPago($cruda, $porClave, $porNumero, $hoy) {
+        $valor = function ($campo) use ($cruda) {
+            return isset($cruda[$campo]) ? trim((string) $cruda[$campo]) : '';
+        };
+
         $fila = [
             'linea' => isset($cruda['linea']) ? intval($cruda['linea']) : 0,
             'cod_provee' => '',
@@ -1397,19 +2184,45 @@ class Proveedores {
             'forma_pago' => null,
             'forma_pago_orig' => '',
             'forma_desconocida' => false,
+            'importe' => null,
             'observacion' => null,
             'razon_social' => '',
             'importe_pendiente' => 0.0,
             'fecha_vto' => null,
             'estaba_vencido' => false,
+            // Cuantos vencimientos pendientes tiene: con mas de uno no se parte.
+            'vencimientos' => 0,
+            // La forma que decide, del pendiente: ver el aviso de dosMedios().
+            'cronograma' => true,
+            'forma_vigente' => null,
+            // Una fila sola es la parte 1 de 1; dosMedios() lo cambia.
+            'grupo' => isset($cruda['linea']) ? intval($cruda['linea']) : 0,
+            'parte' => 1,
+            'partes' => 1,
+            'medios' => null,
+            'aviso' => null,
             'estado' => 'ALTA',
             'motivo' => '',
-            'antes' => null
+            'antes' => null,
+            /* LO QUE VINO EN EL ARCHIVO, tal cual. Es lo que el navegador
+               devuelve al confirmar y lo que aplicarImportacion() vuelve a
+               comparar contra la base: la confirmacion manda la entrada, no la
+               decision. */
+            'crudo' => [
+                'linea' => isset($cruda['linea']) ? intval($cruda['linea']) : 0,
+                'cod_provee' => $valor('cod_provee'),
+                'n_comp' => $valor('n_comp'),
+                'fecha_pago' => $valor('fecha_pago'),
+                'forma_pago' => $valor('forma_pago'),
+                'importe' => $valor('importe'),
+                't_comp' => $valor('t_comp'),
+                'observacion' => $valor('observacion')
+            ]
         ];
 
-        $cod = Planilla::codigo(isset($cruda['cod_provee']) ? $cruda['cod_provee'] : '');
-        $nComp = Planilla::codigo(isset($cruda['n_comp']) ? $cruda['n_comp'] : '');
-        $tComp = Planilla::codigo(isset($cruda['t_comp']) ? $cruda['t_comp'] : '');
+        $cod = Planilla::codigo($valor('cod_provee'));
+        $nComp = Planilla::codigo($valor('n_comp'));
+        $tComp = Planilla::codigo($valor('t_comp'));
 
         $fila['cod_provee'] = $cod;
         $fila['n_comp'] = $nComp;
@@ -1424,12 +2237,11 @@ class Proveedores {
 
         /* La fecha va antes que el cruce: sin fecha no hay nada que cargar,
            aunque el comprobante exista. */
-        $fecha = Planilla::fecha(isset($cruda['fecha_pago']) ? $cruda['fecha_pago'] : '');
+        $fecha = Planilla::fecha($valor('fecha_pago'));
 
         if ($fecha === null) {
             $fila['estado'] = 'ERROR';
-            $fila['motivo'] = 'La fecha de pago no se entiende: "'
-                . trim((string) (isset($cruda['fecha_pago']) ? $cruda['fecha_pago'] : ''))
+            $fila['motivo'] = 'La fecha de pago no se entiende: "' . $valor('fecha_pago')
                 . '". Usá dd/mm/aaaa o aaaa-mm-dd.';
 
             return $fila;
@@ -1490,6 +2302,9 @@ class Proveedores {
 
         $fila['razon_social'] = isset($pendiente['RAZON_SOC']) ? $pendiente['RAZON_SOC'] : '';
         $fila['fecha_vto'] = isset($pendiente['FECHA_VTO']) ? $pendiente['FECHA_VTO'] : null;
+        $fila['cronograma'] = isset($pendiente['CRONOGRAMA']) ? !empty($pendiente['CRONOGRAMA']) : true;
+        $fila['forma_vigente'] = isset($pendiente['FORMA_PAGO_VIGENTE'])
+            ? $pendiente['FORMA_PAGO_VIGENTE'] : null;
 
         /* El importe del comprobante es la SUMA de sus vencimientos pendientes:
            la fecha de pago se carga por comprobante, no por cuota, asi que lo
@@ -1502,16 +2317,18 @@ class Proveedores {
             }
 
             $fila['importe_pendiente'] += floatval($c['IMPORTE_PENDIENTE']);
+            $fila['vencimientos']++;
 
             if (!empty($c['SIN_FECHA_CARGADA'])) {
                 $fila['estaba_vencido'] = true;
             }
         }
 
+        $fila['importe_pendiente'] = round($fila['importe_pendiente'], 2);
+
         /* La forma de pago: la de la planilla, y si no vino, la habitual del
            proveedor segun el maestro. Ver la nota de columnasImportacion(). */
-        $forma = ProveedoresCategorias::normalizarFormaPago(
-            isset($cruda['forma_pago']) ? $cruda['forma_pago'] : '');
+        $forma = ProveedoresCategorias::normalizarFormaPago($valor('forma_pago'));
 
         if ($forma['original'] === '') {
             $fila['forma_pago'] = isset($pendiente['FORMA_PAGO']) ? $pendiente['FORMA_PAGO'] : null;
@@ -1521,8 +2338,25 @@ class Proveedores {
             $fila['forma_desconocida'] = ($forma['normalizado'] === null);
         }
 
-        $obs = trim(isset($cruda['observacion']) ? (string) $cruda['observacion'] : '');
+        $obs = $valor('observacion');
         $fila['observacion'] = ($obs === '') ? null : mb_substr($obs, 0, 200);
+
+        /* UN IMPORTE QUE NO ES UN NUMERO ES UN ERROR, y no "vacio": vacio
+           quiere decir "todo lo pendiente", y tomar el pendiente porque la
+           celda decia "mil pesos" seria decidir por quien armo la planilla. */
+        if ($valor('importe') !== '') {
+            $importe = Planilla::numero($valor('importe'));
+
+            if ($importe === null) {
+                $fila['estado'] = 'ERROR';
+                $fila['motivo'] = 'El importe no se entiende: "' . $valor('importe') . '". Va sin '
+                    . 'separador de miles, por ejemplo 1069326,50.';
+
+                return $fila;
+            }
+
+            $fila['importe'] = round($importe, 2);
+        }
 
         return $fila;
     }
@@ -1548,10 +2382,21 @@ class Proveedores {
                 . 'tener una. Es lo que esta importación viene a resolver.';
         }
 
+        if ($resumen['dos_medios'] > 0) {
+            $avisos[] = $resumen['dos_medios'] . ' comprobante(s) quedan pagados con dos medios: '
+                . 'cada parte entra al eje con su importe y su fecha.'
+                . ($resumen['dos_medios_fuera_cronograma'] > 0
+                    ? ' ' . $resumen['dos_medios_fuera_cronograma'] . ' de ellos no son del '
+                        . 'cronograma por su forma vigente y se siguen tratando con esa forma: '
+                        . 'mirá la marca en cada uno.'
+                    : '');
+        }
+
         if ($resumen['errores'] > 0) {
             $avisos[] = $resumen['errores'] . ' fila(s) no se pueden cargar y quedan afuera. '
                 . 'El resto se importa igual: mirá el motivo de cada una, porque no todas '
-                . 'fallan por lo mismo.';
+                . 'fallan por lo mismo. Un comprobante en dos medios con una fila mala no carga '
+                . 'ninguna de las dos.';
         }
 
         if ($resumen['forma_desconocida'] > 0) {
@@ -1567,23 +2412,210 @@ class Proveedores {
     }
 
     /**
+     * Que se escribe para un comprobante importado: la fila de la tabla de
+     * pagos y, si se paga con dos medios, su apertura. ES LA REGLA, escrita una
+     * vez y pura, para poder probarla sin base.
+     *
+     * UN MEDIO: la fecha, la forma y la observacion, como siempre. Sin
+     * apertura -null-, y eso es lo que da de baja la que hubiera.
+     *
+     * DOS MEDIOS: en la tabla de pagos va LA FECHA MAS TARDIA de las dos
+     * partes. No es una copia de mas, y es lo que hace funcionar tres cosas sin
+     * codigo nuevo:
+     *
+     *   - la conciliacion compara la fecha prevista contra la real, y para un
+     *     comprobante pagado en dos veces el desvio se mide contra la ultima;
+     *   - si el pendiente deja de coincidir con la apertura -un pago parcial
+     *     en Tango-, abrirEnMedios() no lo parte y todo lo que queda se
+     *     proyecta en esa fecha, con la jerarquia de siempre;
+     *   - el comprobante sigue figurando como "con fecha cargada" para los
+     *     indicadores y el fechado masivo.
+     *
+     * La forma va en NULL en la tabla de pagos: los medios viven en la
+     * apertura, uno por parte. Las observaciones de las dos filas se juntan.
+     *
+     * NUNCA ESCRIBE FORMA_PAGO_CRONOGRAMA. Esa columna es una REGLA que alguien
+     * puso a mano para una factura, y la planilla trae HECHOS -por que via sale
+     * cada pago-. Si la importacion la escribiera, subir la planilla
+     * reclasificaria comprobantes dentro y fuera del cashflow sin que nadie lo
+     * haya pedido. Ver formaDelCronograma(). Hay prueba.
+     *
+     * Estatica y pura.
+     *
+     * @param array $filas Las filas de UN comprobante, de compararImportacion()
+     * @return array ['pago' => mapa columna => valor, 'medios' => array|null]
+     */
+    public static function camposDeImportacion($filas) {
+        $filas = array_values($filas);
+
+        if (count($filas) === 1) {
+            $f = $filas[0];
+
+            return [
+                'pago' => [
+                    'FECHA_PAGO' => $f['fecha_pago'],
+                    'FORMA_PAGO' => $f['forma_pago'],
+                    'FORMA_PAGO_ORIG' => ($f['forma_pago_orig'] === '') ? null : $f['forma_pago_orig'],
+                    'OBSERVACION' => $f['observacion']
+                ],
+                'medios' => null
+            ];
+        }
+
+        usort($filas, function ($a, $b) { return $a['parte'] - $b['parte']; });
+
+        $medios = [];
+        $ultima = null;
+        $obs = [];
+
+        foreach ($filas as $f) {
+            $medios[] = [
+                'orden' => $f['parte'],
+                'fecha' => $f['fecha_pago'],
+                'forma' => $f['forma_pago'],
+                'forma_orig' => ($f['forma_pago_orig'] === '') ? null : $f['forma_pago_orig'],
+                'importe' => round(floatval($f['importe']), 2)
+            ];
+
+            if ($ultima === null || $f['fecha_pago'] > $ultima) {
+                $ultima = $f['fecha_pago'];
+            }
+
+            if ($f['observacion'] !== null && !in_array($f['observacion'], $obs, true)) {
+                $obs[] = $f['observacion'];
+            }
+        }
+
+        return [
+            'pago' => [
+                'FECHA_PAGO' => $ultima,
+                'FORMA_PAGO' => null,
+                'FORMA_PAGO_ORIG' => null,
+                'OBSERVACION' => empty($obs) ? null : mb_substr(implode(' · ', $obs), 0, 200)
+            ],
+            'medios' => $medios
+        ];
+    }
+
+    /**
+     * En que difiere lo que se previsualizo de lo que hoy daria la misma
+     * planilla. Vacio si es lo mismo.
+     *
+     * Se compara el ESTADO de cada linea, que es lo que la persona vio y
+     * aprobo: si una fila que se mostro como ALTA hoy da ERROR -porque entre
+     * la previsualizacion y la confirmacion se pago una parte en Tango, o
+     * alguien cargo otra fecha-, lo que se confirmaria no es lo que se miro.
+     *
+     * Estatica y pura.
+     *
+     * @param array $vistas Filas de la comparacion que vino del navegador
+     * @param array $actuales Filas de la comparacion recalculada
+     * @return array Textos, uno por linea que cambio
+     */
+    public static function diferenciasConLoVisto($vistas, $actuales) {
+        $antes = [];
+        $ahora = [];
+
+        foreach (is_array($vistas) ? $vistas : [] as $f) {
+            $antes[intval(isset($f['linea']) ? $f['linea'] : 0)] = isset($f['estado']) ? $f['estado'] : '';
+        }
+
+        foreach ($actuales as $f) {
+            $ahora[intval($f['linea'])] = $f['estado'];
+        }
+
+        $difs = [];
+
+        foreach ($ahora as $linea => $estado) {
+            $visto = isset($antes[$linea]) ? $antes[$linea] : null;
+
+            if ($visto !== $estado) {
+                $difs[] = 'línea ' . $linea . ': ' . ($visto === null ? 'no estaba' : $visto)
+                    . ' → ' . $estado;
+            }
+        }
+
+        foreach ($antes as $linea => $estado) {
+            if (!isset($ahora[$linea])) {
+                $difs[] = 'línea ' . $linea . ': ya no está';
+            }
+        }
+
+        return $difs;
+    }
+
+    /**
      * Aplica una importacion de pagos ya confirmada.
      *
-     * TODO EN UNA TRANSACCION, y solo las filas ALTA y CAMBIO: las que estan en
-     * error no se tocan. Importar lo que se pueda es mejor que parar todo por
-     * una fila mala, que obligaria a corregir la planilla entera antes de poder
-     * cargar las buenas.
+     * LO QUE VINO DEL NAVEGADOR ES UN PEDIDO, NO UNA AUTORIZACION. Antes se le
+     * creia al diff que se reenviaba; desde que la planilla puede abrir un
+     * comprobante en dos medios -y la regla de que las partes sumen el
+     * pendiente no puede depender de la pantalla- se vuelve a calcular el diff
+     * con la entrada del archivo ('crudo') contra los pendientes, los pagos y
+     * las aperturas de AHORA, antes de abrir nada. Si alguna linea da distinto
+     * de lo que se previsualizo, NO SE APLICA NADA: aplicar "la parte que
+     * sobrevive" seria aplicar algo que nadie miro. Mismo criterio que el
+     * maestro (ProveedoresCategorias::aplicarImportacion()) y que Cob.
+     * Electronicos.
      *
-     * @param array $comparacion Lo que devolvio compararImportacion()
+     * TODO EN UNA TRANSACCION, y solo los comprobantes ALTA y CAMBIO: los que
+     * estan en error no se tocan. Importar lo que se pueda es mejor que parar
+     * todo por una fila mala, que obligaria a corregir la planilla entera antes
+     * de poder cargar las buenas. Un comprobante en dos medios escribe su fila
+     * de pagos y su apertura juntas, en la misma transaccion.
+     *
+     * @param array $comparacion Lo que devolvio compararImportacion(), tal como
+     *        volvio del navegador
      * @param string $usuario
-     * @return array ['altas', 'cambios']
+     * @param string|null $hoy 'Y-m-d'
+     * @return array ['altas', 'cambios'] por comprobante
      */
-    public function aplicarImportacion($comparacion, $usuario) {
+    public function aplicarImportacion($comparacion, $usuario, $hoy = null) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
 
         if (!$this->tablaCreada()) {
             throw new Exception('Todavía no existe la tabla de fechas de pago. '
                 . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
+        }
+
+        $vistas = isset($comparacion['filas']) && is_array($comparacion['filas'])
+            ? $comparacion['filas'] : [];
+        $crudas = [];
+
+        foreach ($vistas as $f) {
+            if (!isset($f['crudo']) || !is_array($f['crudo'])) {
+                throw new Exception('La previsualización que llegó no trae lo que decía el archivo. '
+                    . 'Volvé a subirlo y a previsualizar.');
+            }
+
+            $crudas[] = $f['crudo'];
+        }
+
+        $hoyStr = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+        $conMedios = $this->tablaMedioCreada();
+
+        $actual = self::compararImportacion($crudas, $this->getPendientes($hoyStr), $this->getPagos(),
+            $hoyStr, $this->getAperturas(), $conMedios);
+
+        $difs = self::diferenciasConLoVisto($vistas, $actual['filas']);
+
+        if (!empty($difs)) {
+            throw new Exception('Algo cambió desde que se previsualizó la planilla ('
+                . implode('; ', array_slice($difs, 0, 5))
+                . (count($difs) > 5 ? '; y ' . (count($difs) - 5) . ' más' : '')
+                . '), así que no se importó nada. Volvé a previsualizar.');
+        }
+
+        // Las filas de cada comprobante, juntas.
+        $porComprobante = [];
+
+        foreach ($actual['filas'] as $fila) {
+            if ($fila['estado'] !== 'ALTA' && $fila['estado'] !== 'CAMBIO') {
+                continue;
+            }
+
+            $porComprobante[self::clavePago($fila['cod_provee'], $fila['t_comp'], $fila['n_comp'])][]
+                = $fila;
         }
 
         $cid = $this->conectar();
@@ -1594,33 +2626,29 @@ class Proveedores {
         }
 
         try {
-            foreach ($comparacion['filas'] as $fila) {
-                if ($fila['estado'] !== 'ALTA' && $fila['estado'] !== 'CAMBIO') {
-                    continue;
+            foreach ($porComprobante as $filas) {
+                $f = $filas[0];
+                $campos = self::camposDeImportacion($filas);
+
+                /* LA IMPORTACION NO TOCA FORMA_PAGO_CRONOGRAMA: ver
+                   camposDeImportacion(). */
+                $this->guardarPago($cid, $f['cod_provee'], $f['t_comp'], $f['n_comp'],
+                    $campos['pago'], 'ARCHIVO', $usuario);
+
+                /* La apertura va con la fila, en la misma transaccion. Con un
+                   medio se manda null, y eso da de baja la que hubiera: es lo
+                   que hace que reimportar con una fila deshaga los dos medios. */
+                if ($conMedios) {
+                    $this->guardarApertura($cid, $f['cod_provee'], $f['t_comp'], $f['n_comp'],
+                        $campos['medios'], $usuario);
                 }
 
-                /* LA IMPORTACION NO TOCA FORMA_PAGO_CRONOGRAMA, y es
-                   deliberado: esa columna es una REGLA que alguien puso a mano
-                   para una factura, y la planilla trae HECHOS -por que via
-                   salio cada pago-. Si la importacion la escribiera, subir la
-                   planilla reclasificaria comprobantes dentro y fuera del
-                   cashflow sin que nadie lo haya pedido. Ver
-                   formaDelCronograma(). */
-                $this->guardarPago($cid,
-                    $fila['cod_provee'], $fila['t_comp'], $fila['n_comp'],
-                    [
-                        'FECHA_PAGO' => $fila['fecha_pago'],
-                        'FORMA_PAGO' => $fila['forma_pago'],
-                        'FORMA_PAGO_ORIG' => ($fila['forma_pago_orig'] === '')
-                            ? null : $fila['forma_pago_orig'],
-                        'OBSERVACION' => $fila['observacion']
-                    ],
-                    'ARCHIVO', $usuario);
-
-                $aplicadas[$fila['estado'] === 'ALTA' ? 'altas' : 'cambios']++;
+                $aplicadas[$f['estado'] === 'ALTA' ? 'altas' : 'cambios']++;
             }
 
-            sqlsrv_commit($cid);
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar la importación'));
+            }
         } catch (Throwable $e) {
             sqlsrv_rollback($cid);
 
@@ -1628,6 +2656,83 @@ class Proveedores {
         }
 
         return $aplicadas;
+    }
+
+    /**
+     * Escribe la apertura en dos medios de un comprobante. ES EL UNICO LUGAR
+     * DEL MODULO QUE TOCA LA TABLA DE MEDIOS, igual que guardarPago() con la de
+     * pagos, y corre siempre dentro de la transaccion de quien llama.
+     *
+     * REEMPLAZA LA APERTURA ENTERA, sin bajas fisicas: las partes vigentes
+     * pasan a VIGENTE = 0 con quien y cuando, y se insertan las nuevas. Con
+     * $medios en null o vacio solo se da de baja: es lo que hacen reimportar
+     * con una fila y el boton de volver al vencimiento.
+     *
+     * @param resource $cid Conexion con la transaccion abierta
+     * @param string $cod
+     * @param string $t
+     * @param string $n
+     * @param array|null $medios De camposDeImportacion()
+     * @param string $usuario
+     */
+    private function guardarApertura($cid, $cod, $t, $n, $medios, $usuario) {
+        $stmt = sqlsrv_query($cid,
+            "UPDATE dbo." . self::TABLA_MEDIO . "
+             SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
+             WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ? AND VIGENTE = 1",
+            [$usuario, $usuario, $cod, $t, $n]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al dar de baja la apertura en dos medios'));
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        foreach (is_array($medios) ? $medios : [] as $m) {
+            $stmt = sqlsrv_query($cid,
+                "INSERT INTO dbo." . self::TABLA_MEDIO . "
+                    (COD_PROVEE, T_COMP, N_COMP, ORDEN, FECHA_PAGO, FORMA_PAGO, FORMA_PAGO_ORIG,
+                     IMPORTE, USUARIO_ALTA, USUARIO_MODIF)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [$cod, $t, $n, intval($m['orden']), $m['fecha'], $m['forma'],
+                 isset($m['forma_orig']) ? $m['forma_orig'] : null,
+                 round(floatval($m['importe']), 2), $usuario, $usuario]);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al guardar la apertura en dos medios'));
+            }
+
+            sqlsrv_free_stmt($stmt);
+        }
+    }
+
+    /**
+     * Saca de un lote los comprobantes pagados con dos medios.
+     *
+     * El fechado masivo pone UNA fecha, y un comprobante abierto tiene dos: su
+     * fecha se cambia reimportando o con el boton de volver al vencimiento. Se
+     * dice en el dialogo antes de confirmar, y se vuelve a filtrar aca porque
+     * el endpoint se alcanza sin pasar por la pantalla.
+     *
+     * Estatica y pura.
+     *
+     * @param array $claves Las de normalizarClaves()
+     * @param array $aperturas Mapa de getAperturas()
+     * @return array [claves que se escriben, cantidad omitida]
+     */
+    public static function sinAbiertos($claves, $aperturas) {
+        $quedan = [];
+        $omitidos = 0;
+
+        foreach ($claves as $clave => $c) {
+            if (isset($aperturas[$clave])) {
+                $omitidos++;
+            } else {
+                $quedan[$clave] = $c;
+            }
+        }
+
+        return [$quedan, $omitidos];
     }
 
     /**
@@ -1672,6 +2777,16 @@ class Proveedores {
         $f = self::validarFechaPago($fecha);
         $forma = ProveedoresCategorias::normalizarFormaPago($formaPago);
         $obs = ($observacion === null) ? '' : trim((string) $observacion);
+
+        /* UN COMPROBANTE PAGADO CON DOS MEDIOS TIENE DOS FECHAS, y una fecha
+           tipeada en la celda no dice a cual de las dos reemplaza. La grilla no
+           ofrece el campo para esas filas; esto es para quien llegue al
+           endpoint por su cuenta. */
+        if (isset($this->getAperturas()[self::clavePago($cod, $t, $n)])) {
+            throw new Exception('Este comprobante está pagado con dos medios, así que tiene dos '
+                . 'fechas. Se cambian reimportando la planilla de pagos, o con el botón de volver '
+                . 'al vencimiento, que borra la apertura entera.');
+        }
 
         /* Ver la nota del docblock de guardarPago(): lo que no entra al mapa no
            se escribe. Vacio y ausente son lo mismo acá porque la grilla no tiene
@@ -1725,10 +2840,14 @@ class Proveedores {
      * masiva: la fila de override vive por comprobante y puede existir para uno
      * que hoy no esta pendiente.
      *
+     * LOS COMPROBANTES PAGADOS CON DOS MEDIOS NO SE TOCAN: tienen dos fechas, y
+     * una sola para todas no dice a cual reemplaza. Se saltean y se devuelve
+     * cuantos fueron; la pantalla lo dice antes de confirmar. Ver sinAbiertos().
+     *
      * @param array $comprobantes Filas con 'cod_provee', 't_comp', 'n_comp'
      * @param mixed $fecha 'Y-m-d'
      * @param string $usuario
-     * @return array ['fecha' => string, 'tocados' => int]
+     * @return array ['fecha' => string, 'tocados' => int, 'omitidos' => int]
      */
     public function saveFechaMasiva($comprobantes, $fecha, $usuario) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
@@ -1741,9 +2860,16 @@ class Proveedores {
         $claves = self::normalizarClaves($comprobantes, 'fechar');
         $f = self::validarFechaPago($fecha);
 
+        list($claves, $omitidos) = self::sinAbiertos($claves, $this->getAperturas());
+
+        if (empty($claves)) {
+            throw new Exception('Los ' . $omitidos . ' comprobante(s) elegidos están pagados con dos '
+                . 'medios: sus fechas se cambian reimportando la planilla de pagos.');
+        }
+
         $this->guardarLote($claves, ['FECHA_PAGO' => $f], 'MANUAL', $usuario);
 
-        return ['fecha' => $f, 'tocados' => count($claves)];
+        return ['fecha' => $f, 'tocados' => count($claves), 'omitidos' => $omitidos];
     }
 
     /**
@@ -1849,6 +2975,11 @@ class Proveedores {
      * exclusion -dependen de el-, asi que lo unico que se pierde es la forma y
      * la observacion de la planilla, que es exactamente lo que se perdia antes.
      *
+     * UN COMPROBANTE PAGADO CON DOS MEDIOS SE DESARMA ENTERO: su apertura se
+     * da de baja en la misma transaccion (guardarApertura() con null), y el
+     * comprobante vuelve a su vencimiento o al cronograma. La exclusion, el
+     * override de forma y la observacion quedan, igual que con una fecha sola.
+     *
      * @param string $codProvee
      * @param string $tComp
      * @param string $nComp
@@ -1866,24 +2997,12 @@ class Proveedores {
         $clave = [Planilla::codigo($codProvee), Planilla::codigo($tComp),
                   Planilla::codigo($nComp)];
         $cid = $this->conectar();
+        $conMedios = $this->tablaMedioCreada();
 
         // La columna la crea el mismo script que hace nullable a FECHA_PAGO.
-        if (!$this->tieneColumnaPago('FORMA_PAGO_CRONOGRAMA')) {
-            $stmt = sqlsrv_query($cid,
-                "DELETE FROM dbo." . self::TABLA_PAGO . "
-                 WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?", $clave);
+        $sinNullable = !$this->tieneColumnaPago('FORMA_PAGO_CRONOGRAMA');
 
-            if ($stmt === false) {
-                throw new Exception($this->errorSql('Error al borrar la fecha de pago'));
-            }
-
-            $filas = sqlsrv_rows_affected($stmt);
-            sqlsrv_free_stmt($stmt);
-
-            return ($filas > 0);
-        }
-
-        $opcionales = array_values(array_filter(
+        $opcionales = $sinNullable ? [] : array_values(array_filter(
             ['FORMA_PAGO_CRONOGRAMA', 'EXCLUIDA', 'MOTIVO_EXCLUSION', 'FUENTE_FECHA'],
             [$this, 'tieneColumnaPago']));
 
@@ -1892,6 +3011,35 @@ class Proveedores {
         }
 
         try {
+            /* UN COMPROBANTE PAGADO CON DOS MEDIOS VUELVE ENTERO. La apertura se
+               da de baja en la misma transaccion que la fecha: con la fecha
+               borrada y la apertura viva, el comprobante quedaria partido sin
+               fecha en la tabla de pagos. La exclusion, el override de forma y
+               la observacion no se tocan: viven en la tabla de pagos y este
+               boton borra la fecha, no la fila. */
+            if ($conMedios) {
+                $this->guardarApertura($cid, $clave[0], $clave[1], $clave[2], null, $usuario);
+            }
+
+            if ($sinNullable) {
+                $stmt = sqlsrv_query($cid,
+                    "DELETE FROM dbo." . self::TABLA_PAGO . "
+                     WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?", $clave);
+
+                if ($stmt === false) {
+                    throw new Exception($this->errorSql('Error al borrar la fecha de pago'));
+                }
+
+                $filas = sqlsrv_rows_affected($stmt);
+                sqlsrv_free_stmt($stmt);
+
+                if (sqlsrv_commit($cid) === false) {
+                    throw new Exception($this->errorSql('No se pudo confirmar el borrado'));
+                }
+
+                return ($filas > 0);
+            }
+
             $stmt = sqlsrv_query($cid,
                 "UPDATE dbo." . self::TABLA_PAGO . "
                  SET FECHA_PAGO = NULL"

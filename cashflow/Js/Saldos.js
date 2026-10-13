@@ -1476,46 +1476,18 @@
      * un dato. Se juntan los de las tres sub-pestañas en un solo bloque arriba.
      */
     function pintarAvisos() {
-        // La pestaña 1 trae los avisos con nivel; las otras dos, textos, que
-        // son atención. Los críticos van en su propio bloque rojo: "esta cuenta
-        // no suma" no puede leerse igual que "este saldo es de ayer".
+        /* La pestaña 1 trae los avisos con nivel; las otras dos, textos, que el
+           panel cuenta como atención. "Esta cuenta no suma" no puede leerse
+           igual que "este saldo es de ayer": los críticos van primero, en rojo,
+           y abren el panel solos. Antes eran dos carteles, uno rojo y otro
+           amarillo; ahora es el panel plegable de todas las pestañas
+           (Js/avisos-panel.js), que ordena por nivel. */
         var conNivel = (datosSaldos && datosSaldos.avisos_con_nivel) ||
-            ((datosSaldos && datosSaldos.avisos) || []).map(function(t) {
-                return { nivel: 'warning', texto: t };
-            });
+            (datosSaldos && datosSaldos.avisos) || [];
 
-        var avisos = conNivel
-            .concat(((datosLocales && datosLocales.avisos) || []).map(function(t) {
-                return { nivel: 'warning', texto: t };
-            }))
-            .concat(((datosFondos && datosFondos.avisos) || []).map(function(t) {
-                return { nivel: 'warning', texto: t };
-            }));
-
-        var cont = document.getElementById('avisosSaldos');
-
-        if (!cont) {
-            return;
-        }
-
-        var criticos = avisos.filter(function(a) { return a.nivel === 'danger'; });
-        var resto = avisos.filter(function(a) { return a.nivel !== 'danger'; });
-
-        cont.innerHTML = bloqueAvisos(criticos, 'alert-danger', 'fa-circle-exclamation') +
-            bloqueAvisos(resto, 'alert-warning', 'fa-triangle-exclamation');
-    }
-
-    /** Un bloque de avisos de un color, o nada si no hay ninguno */
-    function bloqueAvisos(lista, clase, icono) {
-        if (!lista.length) {
-            return '';
-        }
-
-        return '<div class="alert ' + clase + ' py-2 px-3 mb-3">' +
-            '<i class="fas ' + icono + ' me-1"></i>' +
-            '<small><ul class="mb-0 ps-3">' +
-            lista.map(function(a) { return '<li>' + escapar(a.texto) + '</li>'; }).join('') +
-            '</ul></small></div>';
+        AvisosPanel.pintar('avisosSaldos', conNivel
+            .concat((datosLocales && datosLocales.avisos) || [])
+            .concat((datosFondos && datosFondos.avisos) || []));
     }
 
     /** Corre una acción mostrando el estado en el botón */

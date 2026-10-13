@@ -1,0 +1,61 @@
+<?xml version="1.0"?>
+<!--
+    El texto que manda el navegador para una planilla de Cob. Electronicos leida
+    desde Excel.
+
+    No es una prueba por si sola: imprime el texto entre dos marcas y lo lee
+    tests/test_cob_electronicos.php, que lo pasa por el parser y el diff y lo
+    compara contra el MISMO archivo guardado como CSV. Es lo que permite
+    afirmar que importar desde Excel da el mismo diff que antes, sin un
+    navegador y sin un .xlsx binario en el repo.
+
+    Las celdas son las que entrega SheetJS sin cellDates: las fechas como
+    serial con formato de fecha, los importes como numero con su formato, y el
+    importe que no es un numero como texto. La fila 4 esta vacia a proposito:
+    no puede correr los numeros de linea de abajo.
+
+        cscript //nologo cashflow\tests\js\planilla_excel_cob.wsf
+-->
+<job>
+<script language="JScript" src="../../Js/planilla-excel.js"/>
+<script language="JScript">
+<![CDATA[
+var P = PlanillaExcel;
+
+function txt(v) { return { t: 's', v: v }; }
+function imp(v) { return { t: 'n', v: v, z: '#,##0.00' }; }
+function fec(serial) { return { t: 'n', v: serial, z: 'dd/mm/yyyy' }; }
+
+/* [celda, es fecha] por columna: PROCESADORA, IMPORTE_BRUTO,
+   FECHA_ACREDITACION, ID_EXTERNO, OBSERVACIONES */
+var hoja = [
+    [txt('PROCESADORA'), txt('IMPORTE_BRUTO'), txt('FECHA_ACREDITACION'), txt('ID_EXTERNO'),
+     txt('OBSERVACIONES')],
+    [txt('Payway'), imp(1000000), fec(46275), null, null],            // 10/09/2026
+    [txt('Payway'), imp(600000), fec(46276), null, txt('cambia')],    // 11/09/2026
+    null,
+    [txt('Mercado Pago'), imp(2000000), fec(46277), txt('LIQ-1'), null], // 12/09/2026
+    [txt('Payway'), imp(300000), fec(46266), null, null],             // 01/09/2026
+    [txt('Payway'), txt('mil pesos'), fec(46277), null, null]
+];
+
+var matriz = [];
+
+for (var i = 0; i < hoja.length; i++) {
+    var fila = [];
+
+    for (var j = 0; hoja[i] && j < hoja[i].length; j++) {
+        var c = hoja[i][j];
+
+        fila.push(P.textoDeCelda(c, !!(c && c.z === 'dd/mm/yyyy'), false));
+    }
+
+    matriz.push(fila);
+}
+
+WScript.Echo('---TEXTO---');
+WScript.Echo(P.textoDeMatriz(matriz));
+WScript.Echo('---FIN---');
+]]>
+</script>
+</job>

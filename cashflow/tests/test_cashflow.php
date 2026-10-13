@@ -579,6 +579,10 @@ chequear('y dice que el motor no rescata de ahi', true,
 // Y llega a la pantalla. Desde el panel "Sobre estos numeros" los avisos no
 // vienen en la lista plana `warnings` sino agrupados por pestana en `avisos`
 // -los del motor, en el grupo Tablero-, y se pinta cada aviso de cada grupo.
+// El panel es el componente de todas las pestanas (Js/avisos-panel.js): el
+// tablero le pasa los grupos, y el componente pinta cada aviso de cada uno.
+$jsPanel = file_get_contents(__DIR__ . '/../Js/avisos-panel.js');
+
 chequear('los avisos del motor se pintan', true,
-    strpos($jsCf, 'var grupos = datos.avisos || [];') !== false
-        && strpos($jsCf, 'g.avisos.map(unAviso)') !== false);
+    strpos($jsCf, 'grupos: datos.avisos || [],') !== false
+        && strpos($jsPanel, 'normalizar(g.avisos).map(unAviso)') !== false);

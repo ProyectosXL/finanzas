@@ -70,6 +70,10 @@ $tituloInicial = Menu::tituloTab($tabInicial);
          hoja: antes cada pestaña traía su copia, y las que no la traían se
          veían bien solo si antes se había abierto otra. -->
     <link href="Css/cargando.css?v=<?php echo time(); ?>" rel="stylesheet">
+    <!-- El panel de avisos de todas las pestañas (Js/avisos-panel.js). Mismo
+         motivo: las pestañas llegan por AJAX y el panel se tiene que ver igual
+         en todas, se haya abierto antes la que sea. -->
+    <link href="Css/avisos-panel.css?v=<?php echo time(); ?>" rel="stylesheet">
     <!-- Si se pueden dibujar los controles de edición (Js/permisos.js). Va en
          el <head> y no al pie con los demás: la pestaña inicial se incluye en
          línea más abajo y su JS ya pregunta al dibujar. No depende de nada. -->
@@ -79,6 +83,11 @@ $tituloInicial = Menu::tituloTab($tabInicial);
          lugar donde están: así la pantalla y los SP no pueden decir distinto. -->
     <script>window.CASHFLOW_ORIGENES = <?php echo json_encode(AuthCashflow::ORIGENES, JSON_UNESCAPED_UNICODE); ?>;</script>
     <script src="Js/auditoria.js?v=<?php echo time(); ?>"></script>
+    <!-- Los avisos de cada pestaña, en un panel que se pliega
+         (Js/avisos-panel.js). En el <head> por lo mismo que permisos.js: la
+         pestaña inicial se incluye en línea más abajo, y las demás llegan por
+         AJAX. No depende de nada. -->
+    <script src="Js/avisos-panel.js?v=<?php echo time(); ?>"></script>
 </head>
 <body>
   
@@ -143,5 +152,11 @@ $tituloInicial = Menu::tituloTab($tabInicial);
          lo llaman todas las pestañas con eje desde la función de su pie, y
          las pestañas llegan por AJAX. -->
     <script src="Js/eje-totales.js?v=<?php echo time(); ?>"></script>
+    <!-- Leer un Excel y bajar las plantillas: lo comparten las tres
+         importaciones (pagos y maestro de Proveedores Locales, Cob.
+         Electrónicos). Va DESPUÉS de main.js, porque baja las plantillas con
+         pedirJson(). SheetJS NO se carga acá: son ~900 KB que este archivo
+         pide a cdnjs recién la primera vez que alguien importa. -->
+    <script src="Js/planilla-excel.js?v=<?php echo time(); ?>"></script>
 </body>
 </html>

@@ -1,0 +1,72 @@
+<?xml version="1.0"?>
+<!--
+    Las reglas puras de Js/avisos-panel.js, verificadas sin navegador.
+
+    Mismo criterio que eje_totales.wsf: el proyecto no tiene node, pero Windows
+    trae cscript, que ejecuta JScript (ES3). La parte pura del panel esta
+    escrita sin nada posterior a ES3 justamente para poder correrla aca.
+
+        cscript //nologo cashflow\tests\js\avisos_panel.wsf
+
+    La corre test_avisos.php cuando cscript esta disponible, y espera
+    "FALLAS: 0" en la ultima linea.
+-->
+<job>
+<script language="JScript" src="../../Js/avisos-panel.js"/>
+<script language="JScript">
+<![CDATA[
+var ok = 0, mal = 0;
+var P = AvisosPanel;
+
+function igual(nombre, esperado, obtenido) {
+    if (esperado === obtenido) {
+        ok++;
+        WScript.Echo('OK    ' + nombre);
+    } else {
+        mal++;
+        WScript.Echo('FALLA ' + nombre + ' | esperado: ' + esperado + ' | obtenido: ' + obtenido);
+    }
+}
+
+function niveles(lista) {
+    var p = [];
+    for (var i = 0; i < lista.length; i++) { p.push(lista[i].nivel + ':' + lista[i].texto); }
+    return p.join('|');
+}
+
+/* ---- un texto sin nivel cuenta como atencion ---- */
+var n = P.normalizar(['falta un script', { nivel: 'danger', texto: 'no suma' },
+    { nivel: 'critico', texto: 'nivel mal escrito' }, { texto: 'sin nivel' }, '', '   ', null]);
+
+igual('un texto suelto es atencion, y los vacios se descartan',
+    'warning:falta un script|danger:no suma|warning:nivel mal escrito|warning:sin nivel', niveles(n));
+igual('la seccion viaja', 'Cronograma',
+    P.normalizar([{ nivel: 'info', texto: 'x', seccion: 'Cronograma' }])[0].seccion);
+
+/* ---- el orden por nivel ---- */
+var o = P.ordenar(P.normalizar([
+    { nivel: 'info', texto: 'i1' }, 'w1', { nivel: 'danger', texto: 'd1' },
+    { nivel: 'warning', texto: 'w2' }, { nivel: 'info', texto: 'i2' }, { nivel: 'danger', texto: 'd2' }
+]));
+
+igual('critico, atencion, info; y dentro de cada uno, como llegaron',
+    'danger:d1|danger:d2|warning:w1|warning:w2|info:i1|info:i2', niveles(o));
+
+/* ---- los contadores ---- */
+var c = P.contar(o);
+
+igual('cuenta cada nivel', '2|2|2', c.danger + '|' + c.warning + '|' + c.info);
+igual('el titulo dice el total', 'Avisos (6)', P.tituloPorDefecto(o.length));
+
+/* ---- arranca cerrado, salvo un critico ---- */
+igual('sin preferencia arranca cerrado', false, P.abiertoAlInicio({ danger: 0 }, null));
+igual('recuerda si lo dejaron abierto', true, P.abiertoAlInicio({ danger: 0 }, true));
+igual('y si lo dejaron cerrado', false, P.abiertoAlInicio({ danger: 0 }, false));
+igual('con un critico arranca abierto aunque la preferencia diga cerrado', true,
+    P.abiertoAlInicio({ danger: 1 }, false));
+igual('y aunque nunca lo hayan tocado', true, P.abiertoAlInicio({ danger: 2 }, null));
+
+WScript.Echo('OK: ' + ok + '   FALLAS: ' + mal);
+]]>
+</script>
+</job>

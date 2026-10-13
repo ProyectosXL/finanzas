@@ -98,12 +98,12 @@
        ================================================================ */
 
     function cargar() {
-        pedir(ENDPOINT + '?action=getTodo')
-            .then(function(d) {
-                var modulo = buscarModulo(d.data, 'GENERALES');
+        return ParametrosCarga.pedir('GENERALES')
+            .then(function(data) {
+                var modulo = buscarModulo(data, 'GENERALES');
 
                 if (!modulo) {
-                    avisar(['El módulo Generales no está declarado en Parámetros.']);
+                    avisar([{ nivel: 'danger', texto: 'El módulo Generales no está declarado en Parámetros.' }]);
 
                     return;
                 }
@@ -129,7 +129,10 @@
                 pintarCotizaciones(modulo.cotizaciones);
             })
             .catch(function(e) {
-                avisar(['No se pudieron leer los parámetros generales: ' + e.message]);
+                avisar([{ nivel: 'danger', texto: 'No se pudieron leer los parámetros generales: ' + e.message }]);
+
+                // Falló: que volver a la sub-pestaña lo reintente.
+                return false;
             });
     }
 
@@ -882,16 +885,13 @@
        UTILIDADES
        ================================================================ */
 
+    /**
+     * El panel plegable de todas las pestañas (Js/avisos-panel.js). Los textos
+     * sueltos cuentan como atención; un error de carga llega como
+     * {nivel: 'danger'} y abre el panel solo.
+     */
     function avisar(lista) {
-        var cont = document.getElementById('pgenAvisos');
-
-        if (!cont) { return; }
-
-        cont.innerHTML = (!lista || !lista.length) ? '' :
-            '<div class="alert alert-warning py-2 px-3 mb-3 small">' +
-                '<i class="fas fa-triangle-exclamation me-1"></i>' +
-                lista.map(esc).join('<br>') +
-            '</div>';
+        AvisosPanel.pintar('pgenAvisos', lista || []);
     }
 
     /** '2026-09' -> 'Sep-26'. Es el mismo rótulo que usa el eje del tablero */
@@ -978,7 +978,9 @@
         enganchar('pgenModalidad', 'change', guardarModalidad);
         enganchar('pgenAplicarConstante', 'click', aplicarConstante);
 
-        cargar();
+        /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
+           si es la primera que se ve. Ver Js/parametros-carga.js. */
+        ParametrosCarga.registrar('GENERALES', cargar);
     }
 
     function enganchar(id, evento, fn) {

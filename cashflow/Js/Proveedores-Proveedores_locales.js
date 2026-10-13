@@ -194,7 +194,9 @@
                    servidor sin que nadie lo vea en pantalla. */
                 podarSeleccion();
 
-                pintarAvisos(datos.warnings, 'avisosProv');
+                /* Con su nivel cuando el backend lo manda: "falta la tabla
+                   de fechas" es crítico y abre el panel solo. */
+                pintarAvisos(datos.avisos_con_nivel || datos.warnings, 'avisosProv');
                 // Los indicadores los pinta pintarGrilla(): se miden sobre las
                 // filas visibles, así que cambian con cada filtro.
                 pintarGrilla();
@@ -325,7 +327,7 @@
      * esto sólo los suma.
      */
     function calcularIndicadores(filas) {
-        var k = { total: 0, vencimientos: filas.length, proveedores: 0,
+        var k = { total: 0, vencimientos: 0, proveedores: 0,
                   vencido_sin_fecha: 0, n_vencido_sin_fecha: 0,
                   con_fecha: 0, n_con_fecha: 0 };
 
@@ -334,7 +336,14 @@
         filas.forEach(function(f) {
             var importe = Number(f.IMPORTE_PENDIENTE) || 0;
 
+            /* UN COMPROBANTE PAGADO CON DOS MEDIOS ES UNO: la segunda parte suma
+               su importe y no se cuenta. Misma regla que el backend
+               (Proveedores::cuentaComoVencimiento()), que es el universo contra
+               el que se compara esto. */
+            var cuenta = esParteExtra(f) ? 0 : 1;
+
             k.total += importe;
+            k.vencimientos += cuenta;
             provs[f.COD_PROVEE] = true;
 
             /* De un proveedor excluido ya se decidió que no va: no es trabajo
@@ -344,10 +353,10 @@
 
             if (f.ORIGEN_FECHA === 'CARGADA') {
                 k.con_fecha += importe;
-                k.n_con_fecha++;
+                k.n_con_fecha += cuenta;
             } else if (f.SIN_FECHA_CARGADA) {
                 k.vencido_sin_fecha += importe;
-                k.n_vencido_sin_fecha++;
+                k.n_vencido_sin_fecha += cuenta;
             }
         });
 
@@ -843,18 +852,73 @@
      */
     var cuotasPorComp = null;
 
+    /* SE CUENTAN VENCIMIENTOS DISTINTOS, no filas: un comprobante pagado con
+       dos medios son dos filas del MISMO vencimiento, y contar filas le pondría
+       "2 vtos." a una factura de una sola cuota. */
     function cuotasDe(f) {
         if (cuotasPorComp === null) {
+            var vistos = {};
+
             cuotasPorComp = {};
 
             ((datos && datos.filas) || []).forEach(function(x) {
-                var k = x.COD_PROVEE + '|' + x.T_COMP + '|' + x.N_COMP;
+                var k = claveFila(x);
+                var v = k + '|' + x.FECHA_VTO;
 
+                if (vistos[v]) { return; }
+
+                vistos[v] = true;
                 cuotasPorComp[k] = (cuotasPorComp[k] || 0) + 1;
             });
         }
 
-        return cuotasPorComp[f.COD_PROVEE + '|' + f.T_COMP + '|' + f.N_COMP] || 1;
+        return cuotasPorComp[claveFila(f)] || 1;
+    }
+
+    /* ================================================================
+       LOS COMPROBANTES PAGADOS CON DOS MEDIOS
+
+       Llegan como DOS FILAS, una por parte, cada una con su importe en la
+       columna de su fecha (Proveedores::abrirEnMedios()). Lo que la grilla
+       tiene que cuidar es no contarlos dos veces: la selección, la barra y los
+       indicadores hablan de comprobantes.
+       ================================================================ */
+
+    /** La segunda parte de un comprobante abierto: suma, pero no se cuenta */
+    function esParteExtra(f) {
+        return !!(f.APERTURA && Number(f.APERTURA.parte) > 1);
+    }
+
+    /**
+     * Si el comprobante tiene una apertura en dos medios vigente, esté partido
+     * o no: también cuando ya no coincide con el pendiente. Para esos la fecha
+     * no se edita en la celda ni con el fechado masivo.
+     */
+    function esAbierto(f) {
+        return !!(f.APERTURA || f.APERTURA_DESCUADRADA);
+    }
+
+    /** Las filas, una por comprobante: la primera que aparece */
+    function unaPorComprobante(filas) {
+        var vistos = {};
+
+        return filas.filter(function(f) {
+            var k = claveFila(f);
+
+            if (vistos[k]) { return false; }
+
+            vistos[k] = true;
+
+            return true;
+        });
+    }
+
+    /** "ECHEQ $ 150.000,00 el 20/10/2026 · TRANSFERENCIA ..." */
+    function textoMedios(info) {
+        return ((info && info.medios) || []).map(function(m) {
+            return m.orden + '/' + info.medios.length + ': ' + m.forma + ' ' + plata(m.importe)
+                + ' el ' + fechaCorta(m.fecha);
+        }).join('\n');
     }
 
     /**
@@ -872,7 +936,63 @@
         return { usuario: f.PAGO_USUARIO, fecha: f.PAGO_FECHA_MODIF };
     }
 
+    /**
+     * La celda de un comprobante pagado con DOS MEDIOS. NO SE EDITA: tiene dos
+     * fechas, y una fecha tipeada no dice a cuál reemplaza. Se cambia
+     * reimportando la planilla, o con ↺, que borra la apertura entera y deja
+     * la exclusión, el override de forma y la observación como estaban.
+     *
+     * "1/2" y "2/2" van en data-etiqueta y los dibuja el CSS, igual que "vto."
+     * o "crono": el export a Excel se queda con la fecha sola.
+     *
+     * Si la apertura ya no coincide con el pendiente —un pago parcial en
+     * Tango—, la fila no viene partida: todo el saldo va en la fecha más tardía
+     * y la marca lo dice. Ver Proveedores::abrirEnMedios().
+     */
+    function celdaFechaAbierta(f) {
+        var abierta = f.APERTURA || f.APERTURA_DESCUADRADA;
+        var valor = f.PAGO_CRONO ? (f.Pago || '') : (f.FECHA_PAGO || '');
+        var etiqueta = f.APERTURA
+            ? f.APERTURA.parte + '/' + f.APERTURA.de
+            : 'no coincide';
+
+        var titulo = (f.APERTURA
+                ? 'Pagado con dos medios. Esta fila es la parte ' + etiqueta + ' y su importe va '
+                  + 'en la columna de su fecha'
+                  + (f.PAGO_CRONO ? ' (la fecha ya pasó: va al próximo día de pago del cronograma)'
+                                  : '') + '.'
+                : 'Estaba pagado con dos medios, pero el pendiente (' + plata(abierta.pendiente)
+                  + ') ya no coincide con la suma de las partes (' + plata(abierta.suma) + '): '
+                  + 'todo el saldo se proyecta en la fecha más tardía. Reimportá para corregirlo.')
+            + '\n' + textoMedios(abierta)
+            + '\nLa fecha se cambia reimportando la planilla de pagos, o con ↺.'
+            + '\n' + Auditoria.texto({ usuario: abierta.usuario, fecha: abierta.fecha_modif });
+
+        var html = '<td class="center prov-celda-fecha prov-fuente-medios'
+            + (f.APERTURA_DESCUADRADA ? ' prov-medios-descuadrados' : '') + '"'
+            + ' data-orden="' + escapar(valor) + '" title="' + escapar(titulo) + '">'
+            + fechaCorta(valor)
+            + ' <span class="prov-fuente-fecha" data-etiqueta="' + escapar(etiqueta) + '"></span>';
+
+        if (Permisos.puedeEditar('bodyProv')) {
+            html += ' <button class="btn btn-sm btn-outline-secondary prov-btn-borrar" type="button"'
+                + ' data-cod="' + escapar(f.COD_PROVEE) + '"'
+                + ' data-tcomp="' + escapar(f.T_COMP) + '"'
+                + ' data-ncomp="' + escapar(f.N_COMP) + '"'
+                + ' title="' + escapar('Borrar los dos medios: el comprobante vuelve a su '
+                    + 'vencimiento o al cronograma. La exclusión, la forma y la observación de '
+                    + 'esta factura, si tiene, se conservan.') + '">'
+                + '<i class="fas fa-rotate-left"></i></button>';
+        }
+
+        return html + '</td>';
+    }
+
     function celdaFechaPago(f) {
+        if (esAbierto(f)) {
+            return celdaFechaAbierta(f);
+        }
+
         var cargada = (f.ORIGEN_FECHA === 'CARGADA');
         var conciliado = (f.ESTADO_PAGO === 'CONCILIADO');
         var fuente = fuenteDeLaFecha(f);
@@ -1063,10 +1183,19 @@
         var actual = f.FORMA_PAGO_CRONOGRAMA || '';
 
         /* La opción vacía NO es "vacío": es "la que trae el maestro", y se
-           nombra. Así el caso normal —que es éste— muestra la forma real y de
-           dónde sale, y volver a ella es lo que saca el override. */
-        var opciones = '<option value=""' + (actual === '' ? ' selected' : '') + '>'
-            + escapar(delMaestro + ' · maestro') + '</option>';
+           nombra CON LA FORMA SOLA. Así el caso normal —que es éste— muestra la
+           forma real, y volver a ella es lo que saca el override.
+
+           EL ORIGEN NO VA EN EL TEXTO, y antes sí, pegado a la forma: en una
+           columna angosta repetido en cada fila era ruido, y lo que importa
+           leer es la forma. De dónde sale lo dicen el title del desplegable y
+           el de la opción; que hay un override lo dice el violeta. Que la
+           primera opción y la de la lista digan lo mismo es a propósito: son
+           la misma forma, una heredada y otra fijada para esta factura. */
+        var opciones = '<option value=""' + (actual === '' ? ' selected' : '')
+            + ' title="' + escapar('La forma del maestro. Elegir ésta saca el override de '
+                + 'esta factura.') + '">'
+            + escapar(delMaestro) + '</option>';
 
         formas.forEach(function(x) {
             opciones += '<option value="' + escapar(x) + '"'
@@ -1078,7 +1207,8 @@
                 + 'factura de otra manera: el maestro y las demás facturas de este proveedor '
                 + 'no cambian.'
             : 'Esta factura se trata como ' + actual + ', en lugar de la del maestro ('
-                + delMaestro + '). El maestro no cambió. Volvé a "del maestro" para sacarlo.\n'
+                + delMaestro + '). El maestro no cambió. Para sacarlo, elegí la primera opción, '
+                + 'la del maestro.\n'
                 + Auditoria.texto(auditoriaPago(f));
 
         return '<div class="prov-forma-celda">'
@@ -1227,12 +1357,20 @@
      * importe es el dato que hace que alguien note que seleccionó de más.
      */
     function pintarSeleccion() {
-        var sel = filasSeleccionadas();
+        /* LA SELECCIÓN ES DE COMPROBANTES: las dos partes de uno pagado con dos
+           medios comparten la clave, así que tildar una tilda las dos. El
+           importe suma las dos partes —que juntas son el comprobante entero— y
+           la cuenta las cuenta una vez. */
+        var filas = filasSeleccionadas();
+        var sel = unaPorComprobante(filas);
         var total = 0;
         var yaExcluidas = 0;
 
-        sel.forEach(function(f) {
+        filas.forEach(function(f) {
             total += Number(f.IMPORTE_PENDIENTE) || 0;
+        });
+
+        sel.forEach(function(f) {
             if (f.EXCLUIDA_MANUAL) { yaExcluidas++; }
         });
 
@@ -1294,6 +1432,14 @@
                     delete seleccion[k];
                 }
 
+                /* La otra parte de un pago con dos medios tiene la misma clave:
+                   su check sigue al que se tocó. */
+                document.querySelectorAll('#bodyProv .prov-sel').forEach(function(otro) {
+                    if (otro !== chk && otro.getAttribute('data-clave') === k) {
+                        otro.checked = chk.checked;
+                    }
+                });
+
                 pintarSeleccion();
             });
         });
@@ -1307,20 +1453,29 @@
      * escribir nada, y eso en un prompt no entra.
      */
     function accionSeleccion(excluir) {
-        var sel = filasSeleccionadas();
+        var filas = filasSeleccionadas();
 
-        if (!sel.length) { return; }
+        if (!filas.length) { return; }
 
         // Lo que ya está como se lo quiere dejar no se vuelve a escribir: sería
         // una versión idéntica en la tabla y un número inflado en el mensaje.
-        var aplicar = sel.filter(function(f) { return !!f.EXCLUIDA_MANUAL !== excluir; });
+        // Un comprobante con dos medios es UNA factura: se manda una vez.
+        var aplicar = unaPorComprobante(filas).filter(function(f) {
+            return !!f.EXCLUIDA_MANUAL !== excluir;
+        });
 
         if (!aplicar.length) { return; }
 
+        var claves = {};
         var total = 0;
         var provs = {};
 
-        aplicar.forEach(function(f) {
+        aplicar.forEach(function(f) { claves[claveFila(f)] = true; });
+
+        // El importe, de todas las partes: juntas son el comprobante entero.
+        filas.forEach(function(f) {
+            if (!claves[claveFila(f)]) { return; }
+
             total += Number(f.IMPORTE_PENDIENTE) || 0;
             provs[f.COD_PROVEE] = true;
         });
@@ -1433,9 +1588,21 @@
      * cargada, porque esas son decisiones de alguien que este gesto pisa.
      */
     function fecharSeleccion() {
-        var sel = filasSeleccionadas();
+        var todas = unaPorComprobante(filasSeleccionadas());
 
-        if (!sel.length) { return; }
+        if (!todas.length) { return; }
+
+        /* LOS PAGADOS CON DOS MEDIOS NO SE TOCAN: tienen dos fechas, y una
+           para todas no dice a cuál reemplaza. Se dice cuántos son ANTES de
+           elegir la fecha, y el backend los vuelve a saltear (sinAbiertos()). */
+        var abiertos = todas.filter(esAbierto).length;
+        var sel = todas.filter(function(f) { return !esAbierto(f); });
+
+        if (!sel.length) {
+            Notificacion.error('Las ' + abiertos + ' factura(s) elegidas están pagadas con dos '
+                + 'medios: sus fechas se cambian reimportando la planilla de pagos, o con ↺.');
+            return;
+        }
 
         var total = 0;
         var provs = {};
@@ -1473,6 +1640,11 @@
         if (conciliadas) {
             detalle += ' ' + conciliadas + ' está(n) conciliada(s): se les cambia la '
                 + 'previsión, no la fecha real en la que se pagaron.';
+        }
+
+        if (abiertos) {
+            detalle += ' ' + abiertos + ' de las seleccionadas está(n) pagada(s) con dos medios y '
+                + 'no se van a tocar: sus fechas se cambian reimportando la planilla.';
         }
 
         Notificacion.pedirFecha({
@@ -1526,14 +1698,18 @@
             });
         });
 
+        /* El comprobante sale del botón si lo trae —la celda de un pago con dos
+           medios no tiene input— y si no, del input de al lado. */
         document.querySelectorAll('#bodyProv .prov-btn-borrar').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                var inp = btn.closest('.input-group').querySelector('.prov-input-fecha');
+                var grupo = btn.closest('.input-group');
+                var src = btn.hasAttribute('data-cod') ? btn
+                    : grupo.querySelector('.prov-input-fecha');
 
                 pedirPago('deletePago', {
-                    cod_provee: inp.getAttribute('data-cod'),
-                    t_comp: inp.getAttribute('data-tcomp'),
-                    n_comp: inp.getAttribute('data-ncomp')
+                    cod_provee: src.getAttribute('data-cod'),
+                    t_comp: src.getAttribute('data-tcomp'),
+                    n_comp: src.getAttribute('data-ncomp')
                 });
             });
         });
@@ -1545,7 +1721,7 @@
         /* Cambiar la forma cambia en qué serie cae el importe: recargar entero
            es lo mismo que hace la fecha, y por lo mismo. El importe puede entrar
            o salir del filtro y desaparecer de la vista, y eso el mensaje lo
-           dice. Elegir "del maestro" manda vacío, que es lo que saca el
+           dice. Elegir la primera opción —la del maestro— manda vacío, que es lo que saca el
            override. */
         document.querySelectorAll('#bodyProv .prov-select-forma').forEach(function(sel) {
             sel.addEventListener('change', function() {
@@ -1597,44 +1773,67 @@
        exactamente lo que el usuario vio y no lo que vuelva a calcular.
        ================================================================ */
 
+    /**
+     * EL EXCEL SE LEE ACÁ, en el navegador, con el lector compartido de las
+     * tres importaciones (Js/planilla-excel.js): toma la primera hoja y la
+     * manda como texto en 'contenido'. El diff lo sigue armando el backend,
+     * igual que con el CSV.
+     *
+     * Lo que no se puede leer —otro formato, un archivo dañado o protegido, la
+     * librería que no cargó— se dice acá y no llega al servidor. El botón se
+     * apaga mientras tanto y vuelve a prenderse pase lo que pase.
+     */
     function previewImportacion(que) {
         var input = document.getElementById('archivo' + que + 'Prov');
+        var btn = document.getElementById('btnPreview' + que + 'Prov');
 
         if (!input || !input.files || !input.files.length) {
-            Notificacion.error('Elegí un archivo CSV primero.');
+            Notificacion.error('Elegí el archivo de Excel primero.');
             return;
         }
 
-        var form = new FormData();
-        form.append('archivo', input.files[0]);
+        if (btn) { btn.disabled = true; }
 
-        fetch('Controller/ProveedoresController.php?action=preview' + que, {
-            method: 'POST',
-            body: form
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(res) {
-            if (!res.success) {
-                Notificacion.error(res.message);
+        PlanillaExcel.leer(input.files[0])
+            .then(function(leido) {
+                return fetch('Controller/ProveedoresController.php?action=preview' + que, {
+                    method: 'POST',
+                    body: PlanillaExcel.formulario(leido)
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    if (!res.success) {
+                        Notificacion.error(res.message);
+                        mostrar('previewProv', false);
+                        return;
+                    }
+
+                    preview = { que: que, data: res.data };
+                    pintarPreview(que, res.data);
+                }, function(err) {
+                    throw new Error('Error de conexión: ' + err.message);
+                });
+            })
+            .catch(function(err) {
+                Notificacion.error(err.message);
                 mostrar('previewProv', false);
-                return;
-            }
-
-            preview = { que: que, data: res.data };
-            pintarPreview(que, res.data);
-        })
-        .catch(function(err) {
-            Notificacion.error('Error de conexión: ' + err.message);
-        });
+            })
+            .then(function() {
+                if (btn) { btn.disabled = false; }
+            });
     }
 
     function pintarPreview(que, d) {
         var cont = document.getElementById('previewProv');
         var r = d.resumen;
 
+        /* En pagos, altas, cambios y sin cambios son COMPROBANTES —uno pagado
+           con dos medios es uno, aunque sean dos filas— y lo que no se carga
+           son FILAS, que es lo que hay que ir a corregir en la planilla. */
         var chips = que === 'Pagos'
             ? [['altas', 'Altas', 'success'], ['cambios', 'Cambios', 'warning'],
-               ['sin_cambios', 'Sin cambios', 'secondary'], ['errores', 'No se cargan', 'danger']]
+               ['sin_cambios', 'Sin cambios', 'secondary'], ['dos_medios', 'En dos medios', 'info'],
+               ['errores', 'Filas que no se cargan', 'danger']]
             : [['altas', 'Altas', 'success'], ['cambios', 'Cambios', 'warning'],
                ['sin_cambios', 'Sin cambios', 'secondary'], ['errores', 'No se cargan', 'danger'],
                ['bajas', 'Bajas', 'dark']];
@@ -1746,10 +1945,18 @@
 
         // Lo que no se puede cargar va PRIMERO: es lo que hay que mirar antes de
         // confirmar. Después los cambios, y al final lo que no cambia.
+        //
+        // LAS DOS PARTES DE UN COMPROBANTE VAN JUNTAS: tienen el mismo estado
+        // —se cargan las dos o ninguna— y el mismo 'grupo', así que se ordena
+        // por grupo antes que por línea. En la maestra 'grupo' no existe y
+        // ordena la línea, como siempre.
         var orden = { ERROR: 0, CAMBIO: 1, ALTA: 2, SIN_CAMBIOS: 3 };
 
         filas = filas.slice().sort(function(a, b) {
-            return (orden[a.estado] - orden[b.estado]) || (a.linea - b.linea);
+            return (orden[a.estado] - orden[b.estado])
+                || ((a.grupo || a.linea) - (b.grupo || b.linea))
+                || ((a.parte || 0) - (b.parte || 0))
+                || (a.linea - b.linea);
         });
 
         var html = '<div class="table-responsive prov-preview-tabla"><table class="table table-sm mb-0">'
@@ -1761,6 +1968,22 @@
                 : f.cod_provee + (f.nombre ? ' — ' + f.nombre : '');
 
             var detalle = escapar(f.motivo || '');
+
+            /* UN COMPROBANTE EN DOS MEDIOS: cada fila dice qué parte es, con
+               su forma, su importe y su fecha. El motivo es del comprobante y
+               va igual en las dos. */
+            if (que === 'Pagos' && f.partes === 2 && f.parte > 0 && f.estado !== 'ERROR') {
+                clave += ' · ' + f.parte + '/2';
+                detalle = '<strong>' + escapar(f.forma_pago + ' ' + plata(f.importe) + ' el '
+                    + fechaCorta(f.fecha_pago)) + '</strong> — ' + detalle;
+            }
+
+            /* LA FORMA VIGENTE NO ES DEL CRONOGRAMA: se acepta, y se dice que
+               el comprobante se va a seguir tratando con esa forma. */
+            if (f.aviso) {
+                detalle += ' <span class="badge bg-warning text-dark" title="' + escapar(f.aviso)
+                    + '">' + escapar(f.aviso) + '</span>';
+            }
 
             if (f.cambios && f.cambios.length) {
                 detalle += '<ul class="mb-0 small">' + f.cambios.map(function(c) {
@@ -3075,23 +3298,14 @@
        AYUDANTES
        ================================================================ */
 
+    /**
+     * El panel plegable de todas las pestañas (Js/avisos-panel.js). Antes era
+     * un cartel con X: cerrarlo lo hacía desaparecer hasta la próxima carga,
+     * críticos incluidos. Los avisos pueden venir con nivel o como texto, que
+     * cuenta como atención.
+     */
     function pintarAvisos(avisos, id) {
-        var cont = document.getElementById(id);
-
-        if (!cont) { return; }
-
-        if (!avisos || !avisos.length) {
-            cont.innerHTML = '';
-            return;
-        }
-
-        cont.innerHTML = '<div class="alert alert-warning alert-dismissible fade show" role="alert">'
-            + '<div class="d-flex align-items-start">'
-            +   '<i class="fas fa-circle-info me-2 mt-1"></i>'
-            +   '<div><strong>Sobre estos números</strong><ul class="mb-0 mt-1">'
-            +     avisos.map(function(a) { return '<li>' + escapar(a) + '</li>'; }).join('')
-            +   '</ul></div></div>'
-            + '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+        AvisosPanel.pintar(id, avisos || []);
     }
 
     function conectar(id, fn) {
@@ -3133,12 +3347,9 @@
         if (el) { el.value = (v === null || v === undefined) ? '' : v; }
     }
 
+    /** Un error de carga entra al panel como CRÍTICO: se abre solo */
     function mostrarError(mensaje) {
-        var cont = document.getElementById('avisosProv');
-
-        if (cont) {
-            cont.innerHTML = '<div class="alert alert-danger">' + escapar(mensaje) + '</div>';
-        }
+        AvisosPanel.pintar('avisosProv', [{ nivel: 'danger', texto: mensaje }]);
 
         console.error(mensaje);
     }

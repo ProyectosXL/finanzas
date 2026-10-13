@@ -216,19 +216,8 @@
      * Antes se descartaba en silencio.
      */
     function pintarAvisos() {
-        var cont = document.getElementById('avisosCronoNac');
-
-        if (!cont) {
-            return;
-        }
-
-        var avisos = (datosCrono && datosCrono.warnings) || [];
-
-        cont.innerHTML = avisos.length
-            ? '<div class="alert alert-warning py-2 px-3 mb-3"><small>'
-                + '<i class="fas fa-triangle-exclamation me-1"></i>'
-                + avisos.join(' ') + '</small></div>'
-            : '';
+        // El panel plegable de todas las pestañas: ver Js/avisos-panel.js.
+        AvisosPanel.pintar('avisosCronoNac', (datosCrono && datosCrono.warnings) || []);
     }
 
     /**

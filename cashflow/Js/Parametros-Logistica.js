@@ -29,7 +29,6 @@
     'use strict';
 
     var ENDPOINT = 'Controller/LogisticaController.php';
-    var PARAMETROS = 'Controller/ParametrosController.php';
 
     /** Desde cuantas letras se busca. El backend lo confirma en el payload */
     var MIN_BUSQUEDA = 2;
@@ -49,9 +48,9 @@
            declarado el modulo; los datos salen del controller de Logistica.
            Son dos pedidos porque son dos responsabilidades, y el de la
            descripcion no puede hacer fallar al de los datos. */
-        pedir(PARAMETROS + '?action=getTodo')
-            .then(function(d) {
-                var modulo = buscarModulo(d.data, 'LOGISTICA');
+        var descripcion = ParametrosCarga.pedir('LOGISTICA')
+            .then(function(data) {
+                var modulo = buscarModulo(data, 'LOGISTICA');
                 var desc = document.getElementById('plogDescripcion');
 
                 if (desc && modulo && modulo.descripcion) {
@@ -62,7 +61,10 @@
             .catch(function() { /* La descripcion es contexto, no dato: si no
                                    llega, la pantalla sirve igual. */ });
 
-        pedir(ENDPOINT + '?action=getFleteros')
+        /* Devuelve los dos juntos para la carga diferida (Js/parametros-carga.js),
+           y false si fallaron los datos: la descripcion sola no hace la
+           sub-pestaña. */
+        var datos = pedir(ENDPOINT + '?action=getFleteros')
             .then(function(d) {
                 fleteros = d.data.filas || [];
                 tablaCreada = !!d.data.tabla_creada;
@@ -83,8 +85,12 @@
                 pintar();
             })
             .catch(function(e) {
-                avisar(['No se pudieron leer los fleteros: ' + e.message]);
+                avisar([{ nivel: 'danger', texto: 'No se pudieron leer los fleteros: ' + e.message }]);
+
+                return false;
             });
+
+        return Promise.all([descripcion, datos]).then(function(r) { return r[1]; });
     }
 
     function buscarModulo(data, codigo) {
@@ -426,16 +432,13 @@
        UTILIDADES
        ================================================================ */
 
+    /**
+     * El panel plegable de todas las pestañas (Js/avisos-panel.js). Los textos
+     * sueltos cuentan como atención; un error de carga llega como
+     * {nivel: 'danger'} y abre el panel solo.
+     */
     function avisar(lista) {
-        var cont = document.getElementById('plogAvisos');
-
-        if (!cont) { return; }
-
-        cont.innerHTML = (!lista || !lista.length) ? '' :
-            '<div class="alert alert-warning py-2 px-3 mb-3 small">' +
-                '<i class="fas fa-triangle-exclamation me-1"></i>' +
-                lista.map(esc).join('<br>') +
-            '</div>';
+        AvisosPanel.pintar('plogAvisos', lista || []);
     }
 
     function valor(id, v) {
@@ -497,7 +500,9 @@
             }
         });
 
-        cargar();
+        /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
+           si es la primera que se ve. Ver Js/parametros-carga.js. */
+        ParametrosCarga.registrar('LOGISTICA', cargar);
     }
 
     function enganchar(id, evento, fn) {

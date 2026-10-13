@@ -37,7 +37,6 @@
     'use strict';
 
     var ENDPOINT = 'Controller/TarjetasController.php';
-    var PARAMETROS = 'Controller/ParametrosController.php';
 
     var tarjetas = [];
     var tipos = {};
@@ -67,9 +66,9 @@
            vive en el payload de Parametros -que es donde el modulo esta
            declarado- y los datos en el controller del modulo. Que la descripcion
            no llegue no puede impedir ver la grilla. */
-        pedir(PARAMETROS + '?action=getTodo')
-            .then(function(d) {
-                var modulo = buscarModulo(d.data, 'TARJETAS');
+        var descripcion = ParametrosCarga.pedir('TARJETAS')
+            .then(function(data) {
+                var modulo = buscarModulo(data, 'TARJETAS');
                 var desc = document.getElementById('ptarDescripcion');
 
                 if (desc && modulo && modulo.descripcion) {
@@ -79,7 +78,10 @@
             })
             .catch(function() { /* Contexto, no dato. */ });
 
-        pedir(ENDPOINT + '?action=getTarjetas')
+        /* Devuelve los dos juntos para la carga diferida (Js/parametros-carga.js),
+           y false si fallaron los datos: la descripcion sola no hace la
+           sub-pestaña. */
+        var datos = pedir(ENDPOINT + '?action=getTarjetas')
             .then(function(d) {
                 tarjetas = d.data.filas || [];
                 tipos = d.data.tipos || {};
@@ -94,8 +96,12 @@
                 pintar();
             })
             .catch(function(e) {
-                avisar(['No se pudieron leer las tarjetas: ' + e.message]);
+                avisar([{ nivel: 'danger', texto: 'No se pudieron leer las tarjetas: ' + e.message }]);
+
+                return false;
             });
+
+        return Promise.all([descripcion, datos]).then(function(r) { return r[1]; });
     }
 
     function buscarModulo(data, codigo) {
@@ -534,16 +540,13 @@
        UTILIDADES
        ================================================================ */
 
+    /**
+     * El panel plegable de todas las pestañas (Js/avisos-panel.js). Los textos
+     * sueltos cuentan como atención; un error de carga llega como
+     * {nivel: 'danger'} y abre el panel solo.
+     */
     function avisar(lista) {
-        var cont = document.getElementById('ptarAvisos');
-
-        if (!cont) { return; }
-
-        cont.innerHTML = (!lista || !lista.length) ? '' :
-            '<div class="alert alert-warning py-2 px-3 mb-3 small">' +
-                '<i class="fas fa-triangle-exclamation me-1"></i>' +
-                lista.map(esc).join('<br>') +
-            '</div>';
+        AvisosPanel.pintar('ptarAvisos', lista || []);
     }
 
     function valor(id, v) {
@@ -611,7 +614,9 @@
             }
         });
 
-        cargar();
+        /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
+           si es la primera que se ve. Ver Js/parametros-carga.js. */
+        ParametrosCarga.registrar('TARJETAS', cargar);
     }
 
     function enganchar(id, evento, fn) {

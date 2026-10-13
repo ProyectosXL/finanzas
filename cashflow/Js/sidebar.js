@@ -15,6 +15,10 @@ $(document).ready(function() {
             $('#mainContent').addClass('sidebar-collapsed');
         }
     }
+
+    // Si arranca contraido, los nombres tienen que aparecer desde el primer
+    // hover, no recien despues de expandir y volver a contraer.
+    sincronizarTooltipsMenu();
     
 });
 
@@ -67,6 +71,8 @@ function initSidebar() {
             sidebar.removeClass('collapsed');
             mainContent.removeClass('sidebar-collapsed');
         }
+
+        sincronizarTooltipsMenu();
     });
     
     // Keyboard shortcut (Ctrl + B) para toggle
@@ -120,4 +126,49 @@ function toggleSidebarCollapse() {
     } else {
         localStorage.setItem('sidebarCollapsed', 'false');
     }
+
+    // Lo llaman el boton, el icono de la marca y Ctrl+B: los tres pasan por aca.
+    sincronizarTooltipsMenu();
+}
+
+/**
+ * Los nombres del menu CONTRAIDO: un tooltip a la derecha de cada icono, con el
+ * nombre de la pestaña -y su estado, si tiene: "Proveedores Locales ·
+ * Pendiente"- y el de cada categoria. El texto lo arma el servidor
+ * (Menu::tooltip(), en data-menu-tooltip): aca solo se prende y se apaga.
+ *
+ * SOLO CON EL MENU CONTRAIDO. Expandido, el nombre ya se lee y un cartel con lo
+ * mismo seria ruido; ahi queda el title del estado, como siempre. Por eso el
+ * tooltip se CREA al contraer y se DESCARTA al expandir, en vez de prenderlo y
+ * apagarlo: al crearse, Bootstrap guarda el title nativo del estado -si no, se
+ * verian los dos carteles juntos- y al descartarse lo devuelve.
+ *
+ * container: 'body' porque el sidebar contraido tiene overflow: hidden y
+ * cortaria el tooltip contra su borde. En movil (<= 992 px) el menu no se
+ * contrae, se abre encima: no hay nada que nombrar.
+ *
+ * Lo llaman la carga de la pagina -por si arranca contraido desde
+ * localStorage-, toggleSidebarCollapse() -el boton y Ctrl+B- y el resize.
+ */
+function sincronizarTooltipsMenu() {
+    if (typeof bootstrap === 'undefined' || !bootstrap.Tooltip) {
+        return;
+    }
+
+    var contraido = $('#sidebar').hasClass('collapsed') && $(window).width() > 992;
+
+    document.querySelectorAll('#sidebar [data-menu-tooltip]').forEach(function(el) {
+        var actual = bootstrap.Tooltip.getInstance(el);
+
+        if (contraido && !actual) {
+            new bootstrap.Tooltip(el, {
+                title: el.getAttribute('data-menu-tooltip'),
+                placement: 'right',
+                container: 'body',
+                trigger: 'hover'
+            });
+        } else if (!contraido && actual) {
+            actual.dispose();
+        }
+    });
 }

@@ -250,6 +250,18 @@ Dos scripts nuevos contra `central`, reejecutables y sin borrar nada. **Se corre
 - `COSTOS_COBRO` en la sección Ventas, entre Ecommerce y *Total Ventas*, en cero. Ver *Después de correrlos, verificar*, más arriba.
 - Ventas y el tablero **sin** el aviso informativo de "el mix de cobro sale todavía del mix plano".
 
+### Importar en Excel y pagar con dos medios (`feature/cashflow-excel-medios-ux`)
+
+Un script nuevo contra `central`, reejecutable y sin borrar nada —el 37 de la instalación completa—. Se puede correr en cualquier momento después del de Proveedores Locales; la tabla nace vacía y con las seis columnas de auditoría.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 1 | `sql/cashflow_prov_locales_pago_medio.sql` | Crea `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO`: la apertura de un comprobante de Proveedores Locales pagado con **dos medios** —echeq y/o transferencia—, una fila por medio, con su fecha y su importe. Sin bajas físicas | **El tablero no cambia.** La importación rechaza las filas de dos medios con un motivo que nombra el script, y todo lo demás funciona como hoy. La pestaña avisa. Ver `README-proveedores-locales.md` |
+
+**El día que se publica, el tablero no se mueve un peso**: sin aperturas cargadas, `getPendientes()` devuelve exactamente lo de antes. Medido el 13/10/2026 con una apertura simulada en memoria sobre un comprobante real: las 29 series de `PROV_LOCALES` dan idénticas en importe y las dos particiones de `PAGOS_TODO` cierran; sólo cambia en qué columna cae cada parte.
+
+La importación en Excel no necesita ningún script: el Excel lo lee el navegador. Ver *Importar desde Excel: un lector, tres importaciones*.
+
 ## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
@@ -291,6 +303,7 @@ En este orden, contra `central`:
 -- 34. sql/cashflow_saldos_dia_acreditacion.sql     (Saldos: dia de acreditacion por local)
 -- 35. sql/cashflow_ventas_mix_nodo.sql              (Ventas: el mix de cobro como arbol)
 -- 36. sql/cashflow_estructura_costos_cobro.sql      (Ventas: la fila de costos de cobro)
+-- 37. sql/cashflow_prov_locales_pago_medio.sql      (Prov. Locales: un comprobante pagado con dos medios)
 ```
 
 **El 35 y el 36 se corren al publicar el código del mix en árbol**, en ese orden. El 35 necesita el mix plano de `sql/ventas_proyeccion.sql` —es lo que migra— y el 36 la sección Ventas del 2. Hasta correr el 35, el mix de cobro no se puede editar. Apenas corridos, **la proyección no cambia**: verificado contra la base el 09/10/2026, 160 celdas de cobranza por canal iguales al último bit y la fila de costos en cero. Ver `README-ventas.md`.
@@ -758,6 +771,24 @@ explica cada importe proyectado es justamente lo que se pide de esas pantallas.
 > `index.php`, que `main.js` los reaplique en el orden correcto, y que **el tipo MIME de
 > Excel siga saliendo en un solo archivo** — si reaparece en otro, alguien volvió a copiar
 > la función y esa copia va a divergir como divergieron las siete anteriores.
+
+---
+
+## Importar desde Excel: un lector, tres importaciones
+
+> Es **nuevo**, de `feature/cashflow-excel-medios-ux`. Antes las tres importaciones pedían un CSV.
+
+La planilla de pagos y el maestro de *Proveedores Locales*, y la de *Cob. Electrónicos*, se importan **subiendo el Excel tal cual** (`.xlsx` o `.xls`), y sus plantillas se bajan en `.xlsx`.
+
+**El Excel lo lee el navegador**, en `Js/planilla-excel.js`, con SheetJS `0.18.5`: el servidor no tiene habilitada la extensión `zip` que PHP necesita para abrirlo. Se lee la **primera hoja** y se manda convertida al texto que entiende `Class/Planilla.php`, en el campo `contenido`. Lo lee del lado del servidor `Controller/planilla_subida.php`. Las dos mitades están escritas **una sola vez**: una conversión de fechas copiada tres veces se desincroniza en el primer cambio, y la que queda vieja manda fechas corridas un día.
+
+- **Las fechas salen del número de serie de la celda**, con aritmética entera y nunca de un `Date`: con `cellDates`, SheetJS las arma en la zona horaria del navegador, y en Argentina algunas caen el día anterior.
+- **Los errores nombran la fila del Excel**: se manda una línea por fila, las vacías incluidas, y el parser numera antes de saltearlas.
+- **Lo que no se puede leer se dice en pantalla y no llega al servidor**: otro formato, un archivo dañado o con contraseña, o SheetJS que no cargó.
+- **SheetJS se carga recién al usarlo**, desde cdnjs, y no en cada carga de `index.php`.
+- **La plantilla sale de la misma definición que el parser**: el backend manda títulos, tipos, ayuda y ejemplos de `columnasImportacion()` y el navegador arma el `.xlsx`. Un botón con `data-plantilla-excel="<endpoint>"` alcanza: lo engancha un único oyente del documento.
+
+Los detalles de cada importación están en `README-proveedores-locales.md` (*Las dos importaciones*) y `README-cob-electronicos.md` (*El importador*).
 
 ---
 
@@ -1449,6 +1480,19 @@ No es un módulo de datos como los de arriba: es la configuración de todos ello
 
 Los ítems de las categorías ahora tienen ícono propio, así que el sangrado de 44px que hacía de guía visual se reduce y el ícono ocupa ese lugar, alineándolos con las pestañas de nivel raíz.
 
+### Con el menú contraído, el nombre aparece al pasar el mouse
+
+> Es **nuevo**, de `feature/cashflow-excel-medios-ux`.
+
+Contraído, el menú es una columna de íconos: el nombre, la marca del estado y el contador de cada categoría se esconden. Encontrar una pestaña era pasar el mouse por todas o expandir el menú. Ahora cada ícono muestra **un tooltip a la derecha con su nombre**, y el estado al lado si tiene —*Proveedores Locales · Pendiente*—, con el mismo nombre corto de la leyenda del pie. Los encabezados de categoría muestran el suyo.
+
+- **El texto lo arma el servidor**, `Menu::tooltip()`, y viaja en `data-menu-tooltip` de cada enlace y de cada encabezado. El JS no tiene ninguna lista de nombres.
+- **Sólo con el menú contraído.** Expandido el nombre ya se lee, así que no aparece nada nuevo y el tooltip del estado queda como estaba. Por eso el tooltip de Bootstrap **se crea al contraer y se descarta al expandir**: al crearse guarda el `title` nativo del estado —si no, se verían los dos carteles juntos— y al descartarse lo devuelve.
+- **`container: 'body'`**, porque el sidebar contraído tiene `overflow: hidden` y lo cortaría contra su borde.
+- **Lo sincroniza `sincronizarTooltipsMenu()`** al cargar —el menú puede arrancar contraído desde `localStorage`—, al contraer o expandir —el botón, el ícono de la marca y Ctrl+B pasan por `toggleSidebarCollapse()`— y al cambiar el ancho. **En móvil (≤ 992 px) no cambia nada**: ahí el menú no se contrae, se abre encima.
+
+Verificado en Chrome: arrancando contraído, las 27 entradas tienen su tooltip; el de Haberes dice *Haberes · Pendiente*, y al expandir no queda ninguno y vuelve el `title` del estado.
+
 ---
 
 ## Administración desde Parámetros
@@ -1458,6 +1502,26 @@ Las sub-pestañas salen de `Parametros::$modulos`, así que **agregar un módulo
 > **La primera es Generales**, y ahí viven los parámetros que afectan a todo el módulo: el horizonte —que es el eje del tablero y de las diez pantallas con eje temporal—, la alícuota, los feriados de comercio, la inflación mensual esperada y el cronograma de pagos. Estaban bajo *Ventas*, donde tocarlos parecía mover una sola pantalla. **Ningún cálculo se enteró del cambio**: el único lugar que pide parámetros por `MODULO` es esta pantalla; las fórmulas los leen por clave con `getParametrosMap()`, que no filtra. Ver `README-logistica-local.md`.
 >
 > Generales muestra además la **curva de dólar futuro** y la **cotización del BCRA**, las dos de **solo lectura**: llegan por API y las mantiene otro proceso. Un campo editable al lado haría creer que se pueden corregir desde ahí.
+
+### Cada sub-pestaña carga cuando se abre, y una vez
+
+> Esto **cambió** en `feature/cashflow-excel-medios-ux`.
+
+Al entrar a Parámetros, nueve sub-pestañas pedían `getTodo` a la vez —y `getTodo` resolvía los once módulos en cada pedido: el cronograma, las cotizaciones, Saldos e Interbanking—, más Cobranzas con sus tres pedidos propios. Y `Parametros.js` escondía toda la pestaña hasta que cargaba **Ventas**, aunque lo que se abriera fuera otra.
+
+Ahora:
+
+- **Se carga sólo la primera sub-pestaña que se ve** —la activa del DOM; hoy, Generales— y la pantalla aparece apenas termina. Las demás cargan **la primera vez que se hace clic** en ellas, con su propio indicador.
+- **Volver a una ya abierta no pide nada.** El caché dura lo que se está en Parámetros: ir a otra pestaña del menú y volver recarga todo, porque la pestaña se vuelve a dibujar entera por AJAX.
+- **El Actualizar de una sub-pestaña recarga sólo esa**, y guardar recarga lo que ya recargaba, sin invalidar las otras.
+- **Los avisos generales de arriba** (`#avisosParametros`, scripts pendientes) llegan con la primera carga y se refrescan con cualquier Actualizar. Las sub-pestañas que no leen su módulo con `getTodo` —Cobranzas y Cashflow— los piden aparte con `getAvisosGenerales`.
+- **Una carga que falla no queda como hecha**: la sub-pestaña muestra su error y volver a abrirla lo reintenta.
+
+**`getTodo&modulo=<CÓDIGO>` resuelve sólo ese módulo** (`Parametros::getModulosConDatos($pedido)`). Sin `modulo` devuelve todo, como siempre. Pedir un módulo que no existe es un error, y pedirlo sin poder ver Parámetros también, con su 401 o su 403 (`AuthCashflow::exigirLectura()`): en Parámetros la lectura es una sola para todas las sub-pestañas —`cashflow.tab.parametros`— y la edición va por sub-pestaña. El rescate de los parámetros generales que todavía figuran como de Ventas sigue andando: vive en la rama de Generales y no depende de que se resuelva Ventas.
+
+**Ninguna sub-pestaña lee datos de otro módulo**: se verificó antes de partir el pedido. Cada una busca el suyo con `buscarModulo()`, `canales` no lo usa nadie, el horizonte y el cronograma se resuelven en el servidor dentro de Generales, y Logística y Tarjetas leen `getTodo` sólo para su descripción —sus datos vienen de su propio controller—.
+
+**El mecanismo está escrito una vez**, en `Js/parametros-carga.js`, con el patrón que ya tenía la estructura del Cashflow —`shown.bs.tab` y una marca de cargado—. Cada sub-pestaña hace `ParametrosCarga.registrar('<CÓDIGO>', cargar)` en lugar de cargar al arrancar, y pide su módulo con `ParametrosCarga.pedir('<CÓDIGO>')`. Se carga en `Tabs/parametros.php` antes que las sub-pestañas, porque Compras Exterior, Logística y Tarjetas traen su script adentro de su propio archivo. Verificado en Chrome con los datos reales de cada módulo: al entrar sale un solo pedido, `getTodo&modulo=GENERALES`; abrir Saldos pide Saldos; volver a las dos no pide nada; y Actualizar en Saldos pide sólo Saldos.
 
 ### Parámetros → Cashflow
 
@@ -1497,6 +1561,30 @@ Las notificaciones las resuelve `Js/notificaciones.js` (`Notificacion.exito / er
 **Los tres diálogos comparten un solo armazón** (`abrirDialogo()`): `confirmar()` contesta sí o no, `pedirTexto()` devuelve el texto o `null`, y `pedirFecha()` devuelve `'aaaa-mm-dd'` o `null` —nunca un `Date`: el módulo mueve fechas como string para no pasar por `new Date(string)`—. Lo delicado no es el HTML: es que cerrar con la cruz, con Escape o clickeando afuera **también sea una respuesta, y sea la negativa**. Tres copias de eso se desincronizan en la primera corrección. Cuando el diálogo tiene un campo, el foco arranca ahí y un campo obligatorio vacío **no cierra**: dice por qué en el mismo lugar donde se completa, en vez de fallar después contra el servidor.
 
 **`pedirFecha({ min })` valida el mínimo al confirmar**, no sólo lo pone en el input: el atributo `min` limita el calendario pero deja tipear cualquier fecha, y una anterior se devolvía como buena. Ahora no cierra y lo dice (`antesDelMin` para un texto propio). Lo usan Cobranzas FR y May, que no aceptan fechas de cobro pasadas. El servidor valida igual: el diálogo explica y bloquea, no autoriza.
+
+### Los avisos de cada pestaña, en un panel que se pliega: `Js/avisos-panel.js`
+
+> Es **nuevo**, de `feature/cashflow-excel-medios-ux`. Antes sólo el tablero tenía panel; cada pestaña pintaba sus avisos a su manera —un cartel amarillo con una lista, los avisos pegados con un espacio, uno por renglón, un cartel con X— y siempre abiertos, así que en una pestaña con cinco avisos de configuración la tabla empezaba media pantalla más abajo todos los días.
+
+Es el panel *"Sobre estos números"* del tablero, extraído para todas, con su hoja `Css/avisos-panel.css`. Se cargan una vez en `index.php`, el script en el `<head>` como `permisos.js`, porque la pestaña inicial se incluye en línea.
+
+```js
+AvisosPanel.pintar('avisosSaldos', avisos);   // textos o {nivel, texto, seccion}
+```
+
+- **El título dice *"Avisos (N)"*** y lleva un chip por nivel con su cantidad —crítico, atención, info—, así que cerrado sigue diciendo qué hay.
+- **Arranca cerrado**, salvo que haya un **crítico**: ahí se abre solo, y no se lo puede esconder recordando *"cerrado"*.
+- **Recuerda abierto o cerrado por contenedor**, en `localStorage` (`avisos_panel_<id>`) con `try/catch`.
+- **Los avisos van ordenados por nivel** y, dentro de cada uno, en el orden en que llegaron.
+- **Un texto suelto, sin nivel, cuenta como atención**: la mayoría de las pestañas todavía manda textos. Las que ya tenían nivel lo pasan —Saldos, el universo de Cobranzas FR, y Proveedores Locales, que ahora manda `avisos_con_nivel` además de los textos—.
+- **Los errores de carga entran como críticos**, así el panel se abre solo: los de Generales, Compras Exterior, Logística y Tarjetas en Parámetros, más Logística Local, Pagos con Tarjetas, Compras Proyectadas, Proveedores Locales, la estructura del Cashflow y el tablero.
+- **Sin avisos el contenedor queda vacío**, como antes.
+
+**El tablero lo usa con grupos** —uno por pestaña, que llegan agrupados del backend (`Aviso::agrupar()`)—, con su título de siempre, el link *Ir a la pestaña* y sus mismas claves de `localStorage`: quien había dejado el panel o un grupo abierto lo sigue encontrando así.
+
+**Lo usan todos los contenedores de avisos de las pestañas**, incluidas las sub-pestañas de Parámetros; `tests/test_avisos.php` verifica con un `grep` sobre `Tabs/` que no falte ninguno. **Lo que no entra, y se sigue viendo siempre**: los carteles explicativos fijos (`alert-info` del PHP), los bloqueos y los avisos de la previsualización de una importación, los resúmenes de filtro al lado del período, las notificaciones, y `#avisosEscalaCob` de Parámetros › Cobranzas, que son errores de validación de la escala y apagan *Guardar*: plegados, el botón quedaría apagado sin que se vea por qué.
+
+**Las confirmaciones de Cob. Electrónicos van aparte**, en `#notifCobel`: compartían el contenedor de los avisos, y adentro de un panel que se redibuja entero y se pliega se borrarían con la próxima carga o quedarían escondidas.
 
 ### Mientras algo carga: `Js/cargando.js`
 
@@ -1777,6 +1865,7 @@ Texto resumido. "Sección" vacía es sin sección. Para revisar.
 | --- | --- | --- |
 | | Falta la tabla de fechas de pago | danger |
 | | Falta `cashflow_prov_locales_fuente_fecha.sql` | warning |
+| | Falta `cashflow_prov_locales_pago_medio.sql`: no se puede pagar con dos medios | warning |
 | | Falta la tabla de exclusión | warning |
 | | Falta la tabla del maestro | danger |
 | | Maestro vacío | warning |
@@ -1790,6 +1879,7 @@ Texto resumido. "Sección" vacía es sin sección. Para revisar.
 | Cronograma | No se pudo resolver el cronograma | danger |
 | | Vencidos del cronograma sin fecha de pago | warning |
 | | Vencidos fuera del cronograma sin fecha de pago | warning |
+| | Comprobantes en dos medios que ya no coinciden con su pendiente | warning |
 | | Sin vencimiento ni plazo | warning |
 | | Proveedores con rubro excluido | info |
 | | Proveedores con deuda fuera del maestro | warning |

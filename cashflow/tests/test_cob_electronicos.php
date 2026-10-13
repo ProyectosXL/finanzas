@@ -784,16 +784,31 @@ chequear('el serial de Excel se convierte con base 1899-12-30',
 seccion('el parseo de la planilla');
 
 // La plantilla que se descarga tiene que poder volver a entrar: si no, el
-// formato que se propone no es el que el parser acepta.
-$plantilla = CobElectronicos::plantillaCsv('2026-09-09');
-$leido = CobElectronicos::parsearPlanilla($plantilla);
+// formato que se propone no es el que el parser acepta. El .xlsx lo arma el
+// navegador con esta definicion, y lo que vuelve es una linea por fila con las
+// celdas separadas por tabulacion: eso es lo que se arma aca.
+$plantilla = CobElectronicos::plantilla('2026-09-09');
+$comoVuelve = implode("\t", array_column($plantilla['columnas'], 'titulo')) . "\n";
+
+foreach ($plantilla['filas'] as $f) {
+    $comoVuelve .= implode("\t", array_map('strval', $f)) . "\n";
+}
+
+$leido = CobElectronicos::parsearPlanilla($comoVuelve);
 
 chequear('la plantilla vuelve a entrar por el parser', 2, count($leido['filas']));
-chequear('con el separador que usa Excel en espanol', ';', $leido['separador']);
 chequear('y la primera fila de ejemplo es cargable',
     'Payway', $leido['filas'][0]['procesadora']);
+chequear('con su importe', 1069326.0,
+    CobElectronicos::numeroDesdePlanilla($leido['filas'][0]['importe_bruto']));
+chequear('y su fecha', '2026-09-10',
+    CobElectronicos::fechaDesdePlanilla($leido['filas'][0]['fecha_acreditacion']));
 chequear('la segunda trae numero de liquidacion',
     'LIQ-00123', $leido['filas'][1]['id_externo']);
+chequear('la plantilla dice el tipo de cada columna', ['texto', 'importe', 'fecha', 'texto', 'texto'],
+    array_column($plantilla['columnas'], 'tipo'));
+chequear('el archivo se llama como antes', 'plantilla-cobranzas-electronicas',
+    $plantilla['archivo']);
 
 // Un CSV con coma, que es lo que exporta Excel en ingles.
 $conComas = "PROCESADORA,IMPORTE_BRUTO,FECHA_ACREDITACION\nPayway,1069326.00,2026-09-10\n";
@@ -825,7 +840,9 @@ chequearLanza('un archivo sin filas de datos avisa', function () {
 });
 
 // Un .xlsx es un ZIP: se detecta por su firma para poder decir QUE HACER, en
-// lugar de fallar con un archivo lleno de bytes binarios.
+// lugar de fallar con un archivo lleno de bytes binarios. Desde la pantalla no
+// llega asi -lo lee el navegador-: es para quien llame al endpoint por su
+// cuenta.
 try {
     CobElectronicos::parsearPlanilla("PK\x03\x04algo binario");
     $mensajeXlsx = '';
@@ -833,9 +850,11 @@ try {
     $mensajeXlsx = $e->getMessage();
 }
 
-chequear('un .xlsx se detecta', true, strpos($mensajeXlsx, '.xlsx') !== false);
-chequear('y el mensaje dice como convertirlo',
-    true, strpos($mensajeXlsx, 'CSV') !== false);
+chequear('un .xlsx crudo se detecta', true, strpos($mensajeXlsx, '.xlsx') !== false);
+chequear('y el mensaje manda a la pantalla, que es la que lo lee',
+    true, strpos($mensajeXlsx, 'pantalla de importación') !== false);
+chequear('y ya no pide convertirlo a CSV',
+    false, strpos($mensajeXlsx, 'CSV') !== false);
 
 /* ================================================================
    IMPORTADOR: que cambiaria
@@ -990,6 +1009,69 @@ chequear('sin alicuota vigente la fila del archivo se rechaza',
     1, $sinAli['resumen']['errores']);
 chequear('con el motivo', true,
     strpos($sinAli['filas'][0]['motivo'], 'alícuota') !== false);
+
+seccion('el mismo archivo desde Excel y desde el CSV de antes');
+
+/* tests/js/planilla_excel_cob.wsf convierte las celdas de una hoja -como las
+   entrega SheetJS, con las fechas como serial- con el MISMO codigo que usa la
+   pantalla (Js/planilla-excel.js), e imprime el texto que se manda. Ese texto y
+   el CSV que exportaba Excel para la misma planilla tienen que dar el mismo
+   diff, fila por fila y en la misma linea. */
+$wsfCob = realpath(__DIR__ . '/js/planilla_excel_cob.wsf');
+$cscriptCob = (PHP_OS_FAMILY === 'Windows' && function_exists('shell_exec'))
+    ? trim((string) @shell_exec('where cscript 2>NUL')) : '';
+
+if ($wsfCob === false) {
+    chequear('existe tests/js/planilla_excel_cob.wsf', true, false);
+} elseif ($cscriptCob === '') {
+    Pruebas::saltear('no hay cscript en esta maquina');
+} else {
+    $salidaCob = str_replace("\r\n", "\n",
+        (string) shell_exec('cscript //nologo ' . escapeshellarg($wsfCob) . ' 2>&1'));
+    $desdeExcel = preg_match('/---TEXTO---\n(.*)\n---FIN---/s', $salidaCob, $mCob)
+        ? $mCob[1] : '';
+
+    // El mismo archivo, como lo guardaba Excel en espanol: ';', miles con
+    // punto, coma decimal y la fecha como se ve.
+    $desdeCsv = "\xEF\xBB\xBFPROCESADORA;IMPORTE_BRUTO;FECHA_ACREDITACION;ID_EXTERNO;OBSERVACIONES\r\n"
+        . "Payway;1.000.000,00;10/09/2026;;\r\n"
+        . "Payway;600.000,00;11/09/2026;;cambia\r\n"
+        . ";;;;\r\n"
+        . "Mercado Pago;2.000.000,00;12/09/2026;LIQ-1;\r\n"
+        . "Payway;300.000,00;01/09/2026;;\r\n"
+        . "Payway;mil pesos;12/09/2026;;\r\n";
+
+    $resumirDiff = function ($contenido) use ($cargados, $procesadorasImp, $alicuotasImp, $corte) {
+        $d = CobElectronicos::compararImportacion(CobElectronicos::parsearPlanilla($contenido)['filas'],
+            $cargados, $procesadorasImp, $alicuotasImp, $corte);
+        $filas = [];
+
+        foreach ($d['filas'] as $f) {
+            $filas[] = [$f['linea'], $f['estado'], isset($f['motivo']) ? $f['motivo'] : '',
+                        isset($f['importe_neto']) ? $f['importe_neto'] : null];
+        }
+
+        return ['filas' => $filas, 'resumen' => $d['resumen'], 'puede' => $d['puede_importar']];
+    };
+
+    chequear('el texto del Excel llega', true, $desdeExcel !== '');
+
+    $dExcel = $resumirDiff($desdeExcel);
+    $dCsv = $resumirDiff($desdeCsv);
+
+    chequear('el mismo diff, fila por fila', $dCsv['filas'], $dExcel['filas']);
+    chequear('el mismo resumen', $dCsv['resumen'], $dExcel['resumen']);
+    $lineasError = [];
+
+    foreach ($dExcel['filas'] as $f) {
+        if ($f[1] === 'ERROR') { $lineasError[] = $f[0]; }
+    }
+
+    chequear('la fila vacia del medio no corre los numeros: el error es la fila 7 del Excel',
+        [7], $lineasError);
+    chequear('y con un solo error no se importa nada, igual que antes',
+        false, $dExcel['puede']);
+}
 
 seccion('dos liquidaciones el mismo dia');
 

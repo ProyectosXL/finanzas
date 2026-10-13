@@ -843,13 +843,8 @@
             return;
         }
 
-        var avisos = (datosPre && datosPre.warnings) || [];
-
-        cont.innerHTML = avisos.length
-            ? '<div class="alert alert-warning py-2 px-3 mb-0 rounded-0"><small>'
-                + '<i class="fas fa-triangle-exclamation me-1"></i>'
-                + avisos.map(escapar).join(' ') + '</small></div>'
-            : '';
+        // El panel plegable de todas las pestañas: ver Js/avisos-panel.js.
+        AvisosPanel.pintar(cont, (datosPre && datosPre.warnings) || []);
     }
 
     function pintarEncabezadoEjePre(cols) {
@@ -1217,19 +1212,8 @@
             .concat((datosCartera && datosCartera.warnings) || [])
             .concat((datosPre && datosPre.avisos) || []);
 
-        var cont = document.getElementById('avisosEcheqs');
-
-        if (!cont) {
-            return;
-        }
-
-        cont.innerHTML = avisos.length
-            ? '<div class="alert alert-warning py-2 px-3 mb-3">'
-                + '<i class="fas fa-triangle-exclamation me-1"></i>'
-                + '<small><ul class="mb-0 ps-3">'
-                + avisos.map(function(a) { return '<li>' + escapar(a) + '</li>'; }).join('')
-                + '</ul></small></div>'
-            : '';
+        // El panel plegable de todas las pestañas: ver Js/avisos-panel.js.
+        AvisosPanel.pintar('avisosEcheqs', avisos);
     }
 
     function badgeEstado(estado) {
