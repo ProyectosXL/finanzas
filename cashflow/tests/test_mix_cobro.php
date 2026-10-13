@@ -390,3 +390,12 @@ chequear('mismos niveles, mismo orden', 1, substr_count($scriptMC,
     "CHECK (NIVEL IN ('" . implode("', '", array_keys(MixCobro::NIVELES)) . "'))"));
 chequear('el largo del nombre es el de la columna', 1, substr_count($scriptMC,
     'NOMBRE            VARCHAR(' . MixCobro::LARGO_NOMBRE . ')'));
+
+seccion('la lista de niveles viaja a la pantalla en orden');
+
+// Una lista y no un mapa: la leyenda de colores los muestra en este orden.
+chequear('nivelesLista() es NIVELES, en su orden y con sus rotulos',
+    array_map(null, array_keys(MixCobro::NIVELES), array_values(MixCobro::NIVELES)),
+    array_map(function ($n) { return [$n['codigo'], $n['rotulo']]; }, MixCobro::nivelesLista()));
+chequear('y es la que recibe el editor de Parametros', MixCobro::nivelesLista(),
+    MixCobro::datosEditor(arbolMC(), 'NODO')['niveles']);

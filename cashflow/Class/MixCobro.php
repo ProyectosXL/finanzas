@@ -188,6 +188,25 @@ class MixCobro {
         return isset(self::NIVELES[$nivel]) ? self::NIVELES[$nivel] : (string) $nivel;
     }
 
+    /**
+     * Los tipos de nivel como viajan a la pantalla: [['codigo', 'rotulo']],
+     * en el orden de la jerarquia.
+     *
+     * Una lista y no el mapa: la leyenda de colores (Js/mix-niveles.js)
+     * muestra los tipos en el orden de NIVELES, y una lista lo lleva escrito.
+     * Parametros y Ventas la reciben de aca, con la misma forma, asi ninguna
+     * pantalla escribe los tipos, su orden ni sus rotulos a mano.
+     */
+    public static function nivelesLista() {
+        $niveles = [];
+
+        foreach (self::NIVELES as $codigo => $rotulo) {
+            $niveles[] = ['codigo' => $codigo, 'rotulo' => $rotulo];
+        }
+
+        return $niveles;
+    }
+
     /** LOCALES -> Locales */
     public static function nombreCanal($canal) {
         return ucfirst(strtolower((string) $canal));
@@ -1051,12 +1070,6 @@ class MixCobro {
             $lista[] = $n;
         }
 
-        $niveles = [];
-
-        foreach (self::NIVELES as $codigo => $rotulo) {
-            $niveles[] = ['codigo' => $codigo, 'rotulo' => $rotulo];
-        }
-
         $primerNivel = [];
 
         foreach (Parametros::CANALES as $canal) {
@@ -1067,7 +1080,7 @@ class MixCobro {
             'origen' => $origen,
             'editable' => $origen === 'NODO',
             'canales' => Parametros::CANALES,
-            'niveles' => $niveles,
+            'niveles' => self::nivelesLista(),
             'niveles_primer' => $primerNivel,
             'nodos' => $lista,
             'resuelto' => $resuelto,
