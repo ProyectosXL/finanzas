@@ -1280,5 +1280,42 @@ chequear('Css/mix-niveles.css y Js/mix-niveles.js se cargan en index.php', [1, 1
 ]);
 chequear('y ninguna pestana los vuelve a cargar', 0,
     array_sum(array_map(function ($ruta) {
-        return substr_count(contenidoTab($ruta), 'mix-niveles.');
+        return preg_match_all('/(href|src)="[^"]*mix-niveles\./', contenidoTab($ruta));
     }, $archivosTab)));
+
+seccion('Parametros: cada nodo del editor lleva el color de su tipo de nivel');
+
+$paramTab = str_replace("\r\n", "\n", contenidoTab($TABS . '/parametros.php'));
+$paramJs = str_replace("\r\n", "\n", file_get_contents($JS . '/Parametros.js'));
+
+// Por CODIGO de nivel (n.NIVEL), no por rotulo ni por profundidad.
+chequear('la fila del nodo lleva la clase de su nivel, armada por el helper', 1,
+    substr_count($paramJs, "'<tr class=\"mixa-nodo ' + MixNiveles.clase(n.NIVEL) + '\""));
+chequear('y el nivel que se ve, para la leyenda', 1,
+    substr_count($paramJs, "data-nivel=\"' + escapar(n.NIVEL) + '\">'"));
+chequear('la barra va despues de la sangria, pegada al nombre', 1,
+    substr_count($paramJs, "sangria + MixNiveles.barra();"));
+chequear('con permiso, el desplegable de nivel toma el color de la fila', 1,
+    substr_count($paramJs, 'mixa-campo mix-nivel-select" data-campo="nivel"'));
+chequear('sin permiso, el rotulo va en una etiqueta del color', 1,
+    substr_count($paramJs, "MixNiveles.etiqueta(n.NIVEL, rotuloNivel(n.NIVEL))"));
+chequear('al cambiar el nivel, la fila cambia de color y la leyenda se recalcula', true,
+    preg_match("/if \(el\.dataset\.campo === 'nivel'\) \{\s*tr\.className = MixNiveles\.conClase\(tr\.className, el\.value\);"
+        . "\s*tr\.dataset\.nivel = el\.value;\s*pintarLeyendaMix\(\);/", $paramJs) === 1);
+chequear('el desplegable del alta tambien lleva el color del tipo elegido', [1, 1], [
+    substr_count($paramJs, "'<select class=\"form-select form-select-sm mix-nivel-select ' +"),
+    substr_count($paramJs, "alta.className = MixNiveles.conClase(alta.className, alta.value);")
+]);
+
+seccion('Parametros: la leyenda de los tipos de nivel');
+
+chequear('el contenedor existe, una sola vez para todos los canales', 1,
+    substr_count($paramTab, '<div id="mixLeyenda" class="mix-niveles-leyenda'));
+chequear('y esta fuera de la tabla: Exportar no la baja', false,
+    strpos(bloqueTabla($paramTab, 'tablaMix'), 'mixLeyenda') !== false);
+chequear('se dibuja con el editor, con los tipos que manda el servidor', [1, 1], [
+    preg_match('/function generarMix\(\) \{.*?pintarLeyendaMix\(\);\n    \}/s', $paramJs),
+    substr_count($paramJs, 'MixNiveles.leyenda(datosMix().niveles, codigos)')
+]);
+chequear('con los nodos que se ven, inactivos incluidos', 1,
+    substr_count($paramJs, "document.querySelectorAll('#mixBody tr.mixa-nodo').forEach(function(tr) {\n            codigos.push(tr.dataset.nivel);"));

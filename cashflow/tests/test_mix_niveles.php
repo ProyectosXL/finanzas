@@ -129,6 +129,23 @@ foreach (['Parametros.css', 'Ingresos-Ventas.css'] as $archivo) {
         preg_match_all('/\.MIX-NIVEL-(' . implode('|', array_keys(MixCobro::NIVELES)) . ')\b/', $css));
 }
 
+// Las pantallas del arbol arman las clases y la leyenda con el helper, y no
+// escriben ningun tipo a mano: los tipos, su orden y sus rotulos llegan del
+// servidor. Un codigo escrito en el JS es una lista paralela a NIVELES que
+// nadie va a acordarse de actualizar.
+$pantallasArbol = ['Parametros.js'];
+
+foreach ($pantallasArbol as $archivo) {
+    $js = (string) @file_get_contents(__DIR__ . '/../Js/' . $archivo);
+
+    chequear($archivo . ' usa el helper compartido para la clase y la leyenda', [true, true], [
+        strpos($js, 'MixNiveles.clase(') !== false,
+        strpos($js, 'MixNiveles.leyenda(') !== false
+    ]);
+    chequear($archivo . ' no escribe ningun codigo de nivel', 0,
+        preg_match_all("/['\"](" . implode('|', array_keys(MixCobro::NIVELES)) . ")['\"]/", $js));
+}
+
 // ============================================================================
 seccion('el helper arma las clases y la leyenda, sin navegador');
 // ============================================================================

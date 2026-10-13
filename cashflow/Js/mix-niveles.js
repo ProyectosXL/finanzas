@@ -46,13 +46,22 @@ var MixNiveles = (function() {
     var PREFIJO = 'mix-nivel-';
 
     /**
+     * Una clase de tipo: el prefijo y el código, que va SIEMPRE en mayúsculas.
+     * Las de los componentes (mix-nivel-barra, mix-nivel-etiqueta,
+     * mix-nivel-select) van en minúsculas, y así conClase() puede cambiar el
+     * tipo sin llevarse el componente.
+     */
+    var CLASE_TIPO = /^mix-nivel-[A-Z0-9_]*$/;
+
+    /**
      * El código como sufijo de clase. Los códigos son de la lista del
-     * servidor (MAYÚSCULAS y guión bajo), pero el valor termina dentro de un
-     * atributo: lo que no es letra, número o guión se descarta.
+     * servidor, que los normaliza a MAYÚSCULAS, pero el valor termina dentro
+     * de un atributo: lo que no es letra, número o guión bajo se descarta.
      */
     function sufijo(codigo) {
         return String(codigo === null || codigo === undefined ? '' : codigo)
-            .replace(/[^A-Za-z0-9_-]/g, '');
+            .toUpperCase()
+            .replace(/[^A-Z0-9_]/g, '');
     }
 
     /** Las clases de una fila o etiqueta de ese tipo: la base y la del código */
@@ -73,7 +82,7 @@ var MixNiveles = (function() {
         for (var i = 0; i < partes.length; i++) {
             var p = partes[i];
 
-            if (p !== '' && p !== 'mix-nivel' && p.indexOf(PREFIJO) !== 0) {
+            if (p !== '' && p !== 'mix-nivel' && !CLASE_TIPO.test(p)) {
                 quedan.push(p);
             }
         }

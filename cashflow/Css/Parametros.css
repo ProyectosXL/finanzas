@@ -132,6 +132,14 @@
 
 #tablaMix .mixa-nombre input[type="text"] {
     width: 200px;
+    vertical-align: middle;
+}
+
+/* La barra del tipo de nivel (Css/mix-niveles.css) acá acompaña a un campo y
+   no a un texto: tiene el alto de un form-control-sm, así se ve como su borde
+   izquierdo. El color no se toca acá: vive sólo en mix-niveles.css. */
+#tablaMix .mixa-nodo .mix-nivel-barra {
+    height: calc(1.5em + 0.5rem + 2px);
 }
 
 /* Los campos no se achican por debajo de lo que se lee: la tabla scrollea a lo

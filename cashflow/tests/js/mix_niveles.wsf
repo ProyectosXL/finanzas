@@ -48,8 +48,10 @@ var NIV = [
 // ---- la clase de una fila ---------------------------------------------------
 igual('la base y la del codigo',
     'mix-nivel mix-nivel-PROCESADORA', MixNiveles.clase('PROCESADORA'));
-igual('lo que no es letra, numero o guion no llega al atributo',
-    'mix-nivel mix-nivel-CUOTASonclickx', MixNiveles.clase('CUOTAS" onclick="x'));
+igual('lo que no es letra, numero o guion bajo no llega al atributo',
+    'mix-nivel mix-nivel-CUOTASONCLICKX', MixNiveles.clase('CUOTAS" onclick="x'));
+igual('el codigo va siempre en mayusculas: es la clase del CSS',
+    'mix-nivel mix-nivel-MEDIO_PAGO', MixNiveles.clase('medio_pago'));
 igual('sin codigo queda la base sola: el gris neutro',
     'mix-nivel mix-nivel-', MixNiveles.clase(null));
 
@@ -59,6 +61,12 @@ igual('cambia la clase de tipo y deja las demas',
     MixNiveles.conClase('mixa-nodo mix-nivel mix-nivel-MEDIO_PAGO mix-inactivo', 'CUOTAS'));
 igual('a una fila sin tipo se le agrega',
     'mixa-nodo mix-nivel mix-nivel-MEDIO_PAGO', MixNiveles.conClase('mixa-nodo', 'MEDIO_PAGO'));
+igual('no se lleva las clases de los componentes: el desplegable del alta sigue siendo desplegable',
+    'form-select mix-nivel-select mix-nivel mix-nivel-CUOTAS',
+    MixNiveles.conClase('form-select mix-nivel-select mix-nivel mix-nivel-MEDIO_PAGO', 'CUOTAS'));
+igual('ni la barra ni la etiqueta',
+    'mix-nivel-barra mix-nivel-etiqueta mix-nivel mix-nivel-CUOTAS',
+    MixNiveles.conClase('mix-nivel-barra mix-nivel-etiqueta mix-nivel mix-nivel-X', 'CUOTAS'));
 igual('no deja la base repetida',
     'mix-nivel mix-nivel-CUOTAS', MixNiveles.conClase('mix-nivel mix-nivel-CUOTAS', 'CUOTAS'));
 

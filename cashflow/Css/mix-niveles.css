@@ -112,6 +112,14 @@ select.mix-nivel-select {
     font-weight: 600;
 }
 
+/* Deshabilitado (un nodo con hijos no cambia de nivel) sigue siendo de su
+   tipo: Bootstrap lo pondría gris, y gris es "fuera de juego". Se atenúa,
+   como cualquier control deshabilitado. */
+select.mix-nivel-select:disabled {
+    background-color: var(--mix-nivel-fondo);
+    opacity: 0.75;
+}
+
 /* Las opciones de la lista se ven normales: el color es del valor elegido,
    no de cada opción, y pintarlas depende del navegador. */
 select.mix-nivel-select option {
