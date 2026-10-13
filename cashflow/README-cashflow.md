@@ -1480,6 +1480,19 @@ No es un módulo de datos como los de arriba: es la configuración de todos ello
 
 Los ítems de las categorías ahora tienen ícono propio, así que el sangrado de 44px que hacía de guía visual se reduce y el ícono ocupa ese lugar, alineándolos con las pestañas de nivel raíz.
 
+### Con el menú contraído, el nombre aparece al pasar el mouse
+
+> Es **nuevo**, de `feature/cashflow-excel-medios-ux`.
+
+Contraído, el menú es una columna de íconos: el nombre, la marca del estado y el contador de cada categoría se esconden. Encontrar una pestaña era pasar el mouse por todas o expandir el menú. Ahora cada ícono muestra **un tooltip a la derecha con su nombre**, y el estado al lado si tiene —*Proveedores Locales · Pendiente*—, con el mismo nombre corto de la leyenda del pie. Los encabezados de categoría muestran el suyo.
+
+- **El texto lo arma el servidor**, `Menu::tooltip()`, y viaja en `data-menu-tooltip` de cada enlace y de cada encabezado. El JS no tiene ninguna lista de nombres.
+- **Sólo con el menú contraído.** Expandido el nombre ya se lee, así que no aparece nada nuevo y el tooltip del estado queda como estaba. Por eso el tooltip de Bootstrap **se crea al contraer y se descarta al expandir**: al crearse guarda el `title` nativo del estado —si no, se verían los dos carteles juntos— y al descartarse lo devuelve.
+- **`container: 'body'`**, porque el sidebar contraído tiene `overflow: hidden` y lo cortaría contra su borde.
+- **Lo sincroniza `sincronizarTooltipsMenu()`** al cargar —el menú puede arrancar contraído desde `localStorage`—, al contraer o expandir —el botón, el ícono de la marca y Ctrl+B pasan por `toggleSidebarCollapse()`— y al cambiar el ancho. **En móvil (≤ 992 px) no cambia nada**: ahí el menú no se contrae, se abre encima.
+
+Verificado en Chrome: arrancando contraído, las 27 entradas tienen su tooltip; el de Haberes dice *Haberes · Pendiente*, y al expandir no queda ninguno y vuelve el `title` del estado.
+
 ---
 
 ## Administración desde Parámetros
