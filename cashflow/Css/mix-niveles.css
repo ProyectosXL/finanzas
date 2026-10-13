@@ -1,0 +1,153 @@
+/* ========================================
+   LOS TIPOS DE NIVEL DEL MIX DE COBRO — Js/mix-niveles.js
+   ========================================
+   Un color fijo por TIPO de nivel (MixCobro::NIVELES), para leer el árbol del
+   mix de un vistazo en las dos pantallas que lo muestran: el editor de
+   Parámetros › Ventas › Mix de Cobro y Plazos y Ingresos › Ventas › Cobranza
+   Proyectada.
+
+   POR TIPO Y NO POR PROFUNDIDAD. En el árbol se pueden saltear niveles:
+   Mercado Pago debajo de Mercado Libre es Medio de pago y queda a la misma
+   sangría que Crédito, que es Tipo de tarjeta. Un color por profundidad diría
+   que son lo mismo. Un color por tipo significa siempre lo mismo, en cualquier
+   canal y en las dos pantallas.
+
+   ÉSTE ES EL ÚNICO LUGAR CON ESOS COLORES. Ni Parametros.css ni
+   Ingresos-Ventas.css los repiten (lo verifica tests/test_mix_niveles.php): si
+   cada pantalla tuviera su copia, el día que se ajuste un tono las dos dirían
+   distinto. Cada tipo declara tres variables y los elementos las leen:
+
+     --mix-nivel-fondo   fondo claro de la etiqueta
+     --mix-nivel-texto   texto oscuro sobre ese fondo (contraste AA: más de 8:1)
+     --mix-nivel-barra   tono medio de la barra (más de 3:1 contra el blanco,
+                         el mínimo para algo que no es texto)
+
+   La clase va en la FILA del nodo (`.mix-nivel .mix-nivel-<CÓDIGO>`) y la
+   heredan la barra, la etiqueta y el desplegable de esa fila: cambiar el nivel
+   en el editor es cambiar una clase, y todo lo de la fila acompaña.
+
+   UN TIPO SIN COLOR SE VE GRIS. Los valores de `.mix-nivel` son el neutro: si
+   mañana se agrega un tipo a NIVELES y nadie le asigna un color, la pantalla
+   no se rompe, y la prueba de la paleta falla nombrándolo.
+
+   SIN ROJO NI VERDE PUROS: son los de la suma del 100% (.mixa-suma-ok y
+   .mixa-suma-mal) y los de los avisos. Y ningún tipo usa el gris de los
+   inactivos.
+
+   Va en index.php: las dos pestañas llegan por AJAX y el color tiene que
+   existir antes que cualquiera de ellas.
+   ======================================== */
+
+.mix-nivel {
+    --mix-nivel-fondo: #eceef2;
+    --mix-nivel-texto: #4a5068;
+    --mix-nivel-barra: #a3a9b8;
+}
+
+.mix-nivel-MARKETPLACE {
+    --mix-nivel-fondo: #EEEDFE;
+    --mix-nivel-texto: #3C3489;
+    --mix-nivel-barra: #7F77DD;     /* violeta */
+}
+
+.mix-nivel-MEDIO_PAGO {
+    --mix-nivel-fondo: #E1F5EE;
+    --mix-nivel-texto: #085041;
+    --mix-nivel-barra: #1D9E75;     /* verde azulado */
+}
+
+.mix-nivel-TIPO_TARJETA {
+    --mix-nivel-fondo: #FAECE7;
+    --mix-nivel-texto: #712B13;
+    --mix-nivel-barra: #D85A30;     /* coral */
+}
+
+.mix-nivel-PROCESADORA {
+    --mix-nivel-fondo: #FBEAF0;
+    --mix-nivel-texto: #72243E;
+    --mix-nivel-barra: #D4537E;     /* rosa */
+}
+
+.mix-nivel-CUOTAS {
+    --mix-nivel-fondo: #E6F1FB;
+    --mix-nivel-texto: #0C447C;
+    --mix-nivel-barra: #378ADD;     /* azul */
+}
+
+/* La barra: hace de borde izquierdo del NOMBRE y no de la celda. La sangría
+   está dentro de la misma celda, y un borde de la celda quedaría a la
+   izquierda de todo, a la misma altura en cualquier nivel: no diría nada de la
+   jerarquía. Pegada al nombre, después de la sangría, sí. Sin esquinas
+   redondeadas, como un borde. */
+.mix-nivel-barra {
+    display: inline-block;
+    width: 4px;
+    height: 1.4em;
+    margin-right: 6px;
+    vertical-align: middle;
+    background-color: var(--mix-nivel-barra);
+}
+
+/* La etiqueta: el rótulo del tipo, que sigue a la vista. El color nunca es la
+   única señal. */
+.mix-nivel-etiqueta {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+    white-space: nowrap;
+    background-color: var(--mix-nivel-fondo);
+    color: var(--mix-nivel-texto);
+}
+
+/* El desplegable de nivel del editor lleva el color de su tipo: fondo suave,
+   texto oscuro y el borde del tono de la barra. La flecha de Bootstrap es una
+   imagen de fondo, así que cambiar sólo el color de fondo no la pisa. */
+select.mix-nivel-select {
+    background-color: var(--mix-nivel-fondo);
+    color: var(--mix-nivel-texto);
+    border-color: var(--mix-nivel-barra);
+    font-weight: 600;
+}
+
+/* Las opciones de la lista se ven normales: el color es del valor elegido,
+   no de cada opción, y pintarlas depende del navegador. */
+select.mix-nivel-select option {
+    background-color: #fff;
+    color: #212529;
+    font-weight: 400;
+}
+
+/* La leyenda, arriba del árbol: los tipos en uso, en el orden de NIVELES */
+.mix-niveles-leyenda {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.mix-niveles-leyenda-titulo {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary, #5a6178);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-right: 2px;
+}
+
+/* Un nodo fuera de juego (.mix-inactivo, la clase del editor) conserva el
+   color de su tipo, atenuado: se sigue viendo qué es sin competir con los
+   activos. Se atenúan la barra y el fondo, no el texto: la etiqueta se tiene
+   que poder leer igual. Un navegador sin color-mix() se queda con el fondo
+   sin atenuar, que se lee igual. */
+.mix-inactivo .mix-nivel-barra {
+    opacity: 0.4;
+}
+
+.mix-inactivo .mix-nivel-etiqueta,
+.mix-inactivo select.mix-nivel-select {
+    background-color: color-mix(in srgb, var(--mix-nivel-fondo) 45%, #ffffff);
+    border-color: color-mix(in srgb, var(--mix-nivel-barra) 40%, #ffffff);
+}

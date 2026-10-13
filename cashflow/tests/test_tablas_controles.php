@@ -1260,3 +1260,25 @@ if ($wsfExcel === false) {
         chequear('planilla_excel.wsf: sin fallas', 0, intval($mExcel[2]));
     }
 }
+
+// ============================================================================
+// LOS COLORES DE LOS TIPOS DE NIVEL DEL MIX
+//
+// La paleta y el helper se prueban en test_mix_niveles.php. Aca, el cableado:
+// que se carguen antes que las pestanas y que cada pantalla del arbol pinte
+// cada fila de nodo y la leyenda con el helper. Una clase mal armada no tira
+// error: la fila sale sin color y la pantalla se ve "bien".
+// ============================================================================
+
+seccion('los colores de los tipos de nivel se cargan en index.php');
+
+// En index.php y no en cada pestana: Parametros y Ventas llegan por AJAX, y
+// las dos tienen que ver los mismos colores, se abra primero la que sea.
+chequear('Css/mix-niveles.css y Js/mix-niveles.js se cargan en index.php', [1, 1], [
+    substr_count($index, 'href="Css/mix-niveles.css'),
+    substr_count($index, 'src="Js/mix-niveles.js')
+]);
+chequear('y ninguna pestana los vuelve a cargar', 0,
+    array_sum(array_map(function ($ruta) {
+        return substr_count(contenidoTab($ruta), 'mix-niveles.');
+    }, $archivosTab)));

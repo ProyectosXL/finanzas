@@ -1,0 +1,99 @@
+<?xml version="1.0"?>
+<!--
+    Las clases y la leyenda de Js/mix-niveles.js, verificadas sin navegador.
+
+    Igual que eje_totales.wsf: MixNiveles esta escrito en ES3, sin tocar el
+    DOM, para poder correrlo con cscript, el JScript que trae Windows.
+
+        cscript //nologo cashflow\tests\js\mix_niveles.wsf
+
+    La corre test_mix_niveles.php cuando cscript esta disponible, y espera
+    "FALLAS: 0" en la ultima linea.
+-->
+<job>
+<script language="JScript" src="../../Js/mix-niveles.js"/>
+<script language="JScript">
+<![CDATA[
+var ok = 0, mal = 0;
+
+function igual(nombre, esperado, obtenido) {
+    if (esperado === obtenido) {
+        ok++;
+        WScript.Echo('OK    ' + nombre);
+    } else {
+        mal++;
+        WScript.Echo('FALLA ' + nombre + ' | esperado: ' + esperado + ' | obtenido: ' + obtenido);
+    }
+}
+
+function codigos(lista) {
+    var v = [];
+
+    for (var i = 0; i < lista.length; i++) {
+        v.push(lista[i].codigo + '=' + lista[i].rotulo);
+    }
+
+    return v.join('|');
+}
+
+// Los tipos como los manda el servidor, en el orden de MixCobro::NIVELES
+var NIV = [
+    { codigo: 'MARKETPLACE', rotulo: 'Marketplace' },
+    { codigo: 'MEDIO_PAGO', rotulo: 'Medio de pago' },
+    { codigo: 'TIPO_TARJETA', rotulo: 'Tipo de tarjeta' },
+    { codigo: 'PROCESADORA', rotulo: 'Procesadora' },
+    { codigo: 'CUOTAS', rotulo: 'Cuotas' }
+];
+
+// ---- la clase de una fila ---------------------------------------------------
+igual('la base y la del codigo',
+    'mix-nivel mix-nivel-PROCESADORA', MixNiveles.clase('PROCESADORA'));
+igual('lo que no es letra, numero o guion no llega al atributo',
+    'mix-nivel mix-nivel-CUOTASonclickx', MixNiveles.clase('CUOTAS" onclick="x'));
+igual('sin codigo queda la base sola: el gris neutro',
+    'mix-nivel mix-nivel-', MixNiveles.clase(null));
+
+// ---- cambiar el tipo de una fila ------------------------------------------
+igual('cambia la clase de tipo y deja las demas',
+    'mixa-nodo mix-inactivo mix-nivel mix-nivel-CUOTAS',
+    MixNiveles.conClase('mixa-nodo mix-nivel mix-nivel-MEDIO_PAGO mix-inactivo', 'CUOTAS'));
+igual('a una fila sin tipo se le agrega',
+    'mixa-nodo mix-nivel mix-nivel-MEDIO_PAGO', MixNiveles.conClase('mixa-nodo', 'MEDIO_PAGO'));
+igual('no deja la base repetida',
+    'mix-nivel mix-nivel-CUOTAS', MixNiveles.conClase('mix-nivel mix-nivel-CUOTAS', 'CUOTAS'));
+
+// ---- los tipos en uso -------------------------------------------------------
+igual('solo los que se usan, en el orden de NIVELES y no en el de aparicion',
+    'MEDIO_PAGO=Medio de pago|TIPO_TARJETA=Tipo de tarjeta|CUOTAS=Cuotas',
+    codigos(MixNiveles.enUso(NIV, ['CUOTAS', 'MEDIO_PAGO', 'TIPO_TARJETA', 'MEDIO_PAGO', 'CUOTAS'])));
+igual('Ecommerce suma el marketplace, primero',
+    'MARKETPLACE=Marketplace|MEDIO_PAGO=Medio de pago',
+    codigos(MixNiveles.enUso(NIV, ['MEDIO_PAGO', 'MARKETPLACE'])));
+igual('un codigo que no esta en la lista va al final, con su codigo de rotulo',
+    'MEDIO_PAGO=Medio de pago|NUEVO=NUEVO',
+    codigos(MixNiveles.enUso(NIV, ['NUEVO', 'MEDIO_PAGO', 'NUEVO'])));
+igual('sin nodos, ninguno', '', codigos(MixNiveles.enUso(NIV, [])));
+igual('sin la lista, solo los desconocidos', 'CUOTAS=CUOTAS', codigos(MixNiveles.enUso(null, ['CUOTAS'])));
+
+// ---- la etiqueta y la leyenda ----------------------------------------------
+igual('la etiqueta lleva su clase y el rotulo',
+    '<span class="mix-nivel-etiqueta mix-nivel mix-nivel-CUOTAS">Cuotas</span>',
+    MixNiveles.etiqueta('CUOTAS', 'Cuotas'));
+igual('el rotulo se escapa',
+    '<span class="mix-nivel-etiqueta mix-nivel mix-nivel-X">a &lt;b&gt; &amp; &quot;c&quot;</span>',
+    MixNiveles.etiqueta('X', 'a <b> & "c"'));
+igual('sin rotulo, el codigo',
+    '<span class="mix-nivel-etiqueta mix-nivel mix-nivel-X">X</span>', MixNiveles.etiqueta('X', ''));
+igual('la leyenda vacia es vacia: la pestana esconde el contenedor', '', MixNiveles.leyenda(NIV, []));
+
+var ley = MixNiveles.leyenda(NIV, ['CUOTAS', 'MEDIO_PAGO']);
+
+igual('la leyenda tiene titulo y una etiqueta por tipo en uso', 2, ley.split('mix-nivel-etiqueta').length - 1);
+igual('en el orden de NIVELES', true, ley.indexOf('Medio de pago') < ley.indexOf('Cuotas'));
+igual('la barra no lleva clase de tipo: la hereda de la fila',
+    '<span class="mix-nivel-barra" aria-hidden="true"></span>', MixNiveles.barra());
+
+WScript.Echo('OK: ' + ok + '   FALLAS: ' + mal);
+]]>
+</script>
+</job>
