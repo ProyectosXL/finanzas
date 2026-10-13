@@ -937,8 +937,8 @@ class ProveedoresCategorias {
 
        La hoja "Maestro proveedores" del Excel Cronograma de Pagos, que
        administracion mantiene a mano. Mismo circuito que Cob. Electronicos:
-       plantilla CSV, previsualizacion del diff, y NADA se escribe hasta que el
-       usuario confirma.
+       plantilla en Excel, el Excel leido en el navegador, previsualizacion del
+       diff, y NADA se escribe hasta que el usuario confirma.
 
        LA PLANILLA VIENE SUCIA Y ESO SE MUESTRA, NO SE ARREGLA. Tiene un codigo
        repetido, un 'echeq' en minuscula y un 'ECOMMERC' por 'ECOMMERCE'. Un
@@ -965,6 +965,7 @@ class ProveedoresCategorias {
             'cod_provee' => [
                 'titulo' => 'CODIGO',
                 'obligatoria' => true,
+                'tipo' => 'texto',
                 'ayuda' => 'Código del proveedor en Tango, de 4 a 7 caracteres. Es lo único '
                     . 'que permite cruzar la planilla contra las cuentas a pagar.',
                 'sinonimos' => ['CODIGO', 'COD_PROVEE', 'CODPROVEEDOR', 'COD_PROVEEDOR',
@@ -973,6 +974,7 @@ class ProveedoresCategorias {
             'nombre' => [
                 'titulo' => 'NOMBRE',
                 'obligatoria' => false,
+                'tipo' => 'texto',
                 'ayuda' => 'Nombre del proveedor. No se usa para cruzar -para eso está el '
                     . 'código- pero es lo que permite reconocerlo en la previsualización.',
                 'sinonimos' => ['NOMBRE', 'RAZON_SOCIAL', 'RAZONSOCIAL', 'NOM_PROVEE',
@@ -981,6 +983,7 @@ class ProveedoresCategorias {
             'rubro_economico' => [
                 'titulo' => 'RUBRO ECONOMICO',
                 'obligatoria' => false,
+                'tipo' => 'texto',
                 'ayuda' => 'Es el que mapea a las filas del tablero. "'
                     . self::RUBRO_EXCLUIDOS . '" saca al proveedor del cuadro.',
                 'sinonimos' => ['RUBROECONOMICO', 'RUBRO_ECONOMICO', 'RUBROECON', 'ECONOMICO']
@@ -988,12 +991,14 @@ class ProveedoresCategorias {
             'rubro' => [
                 'titulo' => 'RUBRO',
                 'obligatoria' => false,
+                'tipo' => 'texto',
                 'ayuda' => 'Apertura más fina que el rubro económico. Hoy sólo se guarda.',
                 'sinonimos' => ['RUBRO']
             ],
             'centro_costos' => [
                 'titulo' => 'CENTRO COSTOS',
                 'obligatoria' => false,
+                'tipo' => 'texto',
                 'ayuda' => 'Centro de costos al que se imputa. Hoy sólo se guarda.',
                 'sinonimos' => ['CENTROCOSTOS', 'CENTRO_COSTOS', 'CENTRODECOSTOS', 'CCOSTOS',
                                 'CENTRO_DE_COSTOS']
@@ -1001,6 +1006,7 @@ class ProveedoresCategorias {
             'forma_pago' => [
                 'titulo' => 'FORMA DE PAGO',
                 'obligatoria' => false,
+                'tipo' => 'texto',
                 'ayuda' => 'Cómo se le paga habitualmente. Se usa como valor por defecto al '
                     . 'importar pagos. Válidos: ' . implode(', ', self::FORMAS_PAGO) . '.',
                 'sinonimos' => ['FORMADEPAGO', 'FORMA_PAGO', 'FORMAPAGO', 'MEDIODEPAGO']
@@ -1008,6 +1014,7 @@ class ProveedoresCategorias {
             'plazo_pago' => [
                 'titulo' => 'PLAZO DE PAGO',
                 'obligatoria' => false,
+                'tipo' => 'texto',
                 'ayuda' => 'CONTADO, DEBITO o "N DIAS". Se usa para estimar la fecha sólo '
                     . 'cuando el comprobante no trae vencimiento.',
                 'sinonimos' => ['PLAZODEPAGO', 'PLAZO_PAGO', 'PLAZOPAGO', 'PLAZO', 'CONDICION']
@@ -1015,6 +1022,7 @@ class ProveedoresCategorias {
             'criterio_distrib' => [
                 'titulo' => 'CRITERIO DISTRIBUCION',
                 'obligatoria' => false,
+                'tipo' => 'texto',
                 'ayuda' => 'Cómo se reparte el gasto entre canales. Hoy sólo se guarda.',
                 'sinonimos' => ['CRITERIODISTRIBUCION', 'CRITERIO_DISTRIBUCION', 'CRITERIO',
                                 'DISTRIBUCION']
@@ -1023,18 +1031,19 @@ class ProveedoresCategorias {
     }
 
     /**
-     * La plantilla que se descarga, con filas de ejemplo cargadas.
+     * La plantilla que se descarga, con filas de ejemplo cargadas. El .xlsx lo
+     * arma el navegador: ver Planilla::plantilla().
      *
-     * @return string
+     * @return array Lo que devuelve Planilla::plantilla()
      */
-    public static function plantillaCsv() {
-        return Planilla::plantillaCsv(self::columnasImportacion(), [
+    public static function plantilla() {
+        return Planilla::plantilla(self::columnasImportacion(), [
             ['MTDODI', 'DONNA DI DIO S.R.L.', 'Mercaderia', 'Talleres', 'Fabrica',
              'TRANSFERENCIA', '30 DIAS', '100% VENTAS'],
             ['SAPALA', 'IRSA INVERSIONES Y REPRESENTACIONES SA', 'Alquileres', 'Shoppings',
              'Locales', 'TRANSFERENCIA', 'CONTADO', '100% LOCALES'],
             ['MTTESO', 'TESORERIA', self::RUBRO_EXCLUIDOS, '', '', 'EFECTIVO', '', '']
-        ]);
+        ], 'plantilla_maestro_proveedores');
     }
 
     /**

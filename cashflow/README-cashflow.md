@@ -761,6 +761,24 @@ explica cada importe proyectado es justamente lo que se pide de esas pantallas.
 
 ---
 
+## Importar desde Excel: un lector, tres importaciones
+
+> Es **nuevo**, de `feature/cashflow-excel-medios-ux`. Antes las tres importaciones pedían un CSV.
+
+La planilla de pagos y el maestro de *Proveedores Locales*, y la de *Cob. Electrónicos*, se importan **subiendo el Excel tal cual** (`.xlsx` o `.xls`), y sus plantillas se bajan en `.xlsx`.
+
+**El Excel lo lee el navegador**, en `Js/planilla-excel.js`, con SheetJS `0.18.5`: el servidor no tiene habilitada la extensión `zip` que PHP necesita para abrirlo. Se lee la **primera hoja** y se manda convertida al texto que entiende `Class/Planilla.php`, en el campo `contenido`. Lo lee del lado del servidor `Controller/planilla_subida.php`. Las dos mitades están escritas **una sola vez**: una conversión de fechas copiada tres veces se desincroniza en el primer cambio, y la que queda vieja manda fechas corridas un día.
+
+- **Las fechas salen del número de serie de la celda**, con aritmética entera y nunca de un `Date`: con `cellDates`, SheetJS las arma en la zona horaria del navegador, y en Argentina algunas caen el día anterior.
+- **Los errores nombran la fila del Excel**: se manda una línea por fila, las vacías incluidas, y el parser numera antes de saltearlas.
+- **Lo que no se puede leer se dice en pantalla y no llega al servidor**: otro formato, un archivo dañado o con contraseña, o SheetJS que no cargó.
+- **SheetJS se carga recién al usarlo**, desde cdnjs, y no en cada carga de `index.php`.
+- **La plantilla sale de la misma definición que el parser**: el backend manda títulos, tipos, ayuda y ejemplos de `columnasImportacion()` y el navegador arma el `.xlsx`. Un botón con `data-plantilla-excel="<endpoint>"` alcanza: lo engancha un único oyente del documento.
+
+Los detalles de cada importación están en `README-proveedores-locales.md` (*Las dos importaciones*) y `README-cob-electronicos.md` (*El importador*).
+
+---
+
 ## Los totales arriba del eje
 
 En una tabla con veintiocho columnas de días y cien filas, el total de una fecha estaba

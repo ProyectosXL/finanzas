@@ -143,5 +143,11 @@ $tituloInicial = Menu::tituloTab($tabInicial);
          lo llaman todas las pestañas con eje desde la función de su pie, y
          las pestañas llegan por AJAX. -->
     <script src="Js/eje-totales.js?v=<?php echo time(); ?>"></script>
+    <!-- Leer un Excel y bajar las plantillas: lo comparten las tres
+         importaciones (pagos y maestro de Proveedores Locales, Cob.
+         Electrónicos). Va DESPUÉS de main.js, porque baja las plantillas con
+         pedirJson(). SheetJS NO se carga acá: son ~900 KB que este archivo
+         pide a cdnjs recién la primera vez que alguien importa. -->
+    <script src="Js/planilla-excel.js?v=<?php echo time(); ?>"></script>
 </body>
 </html>

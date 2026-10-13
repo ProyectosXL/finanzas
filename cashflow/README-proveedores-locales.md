@@ -739,13 +739,29 @@ Lo que **sí** se sigue marcando es la exclusión **por factura**: ésa va a su 
 
 ## Las dos importaciones
 
-Mismo circuito que Cob. Electrónicos: **plantilla CSV, previsualización del diff, y nada se escribe hasta confirmar**. El mecanismo está en `Class/Planilla.php`, escrito una sola vez para los tres importadores del módulo.
+Mismo circuito que Cob. Electrónicos: **plantilla en Excel, el Excel subido tal cual, previsualización del diff, y nada se escribe hasta confirmar**. El mecanismo está escrito una sola vez para los tres importadores del módulo, en dos mitades: `Js/planilla-excel.js` lee el Excel en el navegador y `Class/Planilla.php` lee lo que llega al servidor.
 
-### Es CSV, no .xlsx, y se dice en pantalla
+### Se sube el Excel, y lo lee el navegador
 
-Leer un `.xlsx` necesita la extensión `zip` de PHP, que en este servidor **está instalada pero no habilitada**. Habilitarla es tocar el `php.ini` de producción y reiniciar Apache; el módulo no puede depender de que ese cambio esté hecho en cada entorno.
+> Esto **cambió** en `feature/cashflow-excel-medios-ux`. Antes había que guardar la planilla como CSV.
 
-Si igual se sube un `.xlsx`, el parser lo **detecta por su firma** (`PK`) y dice qué hacer, en lugar de fallar con un archivo lleno de bytes binarios. Lo mismo con un `.xls` antiguo.
+Los dos selectores aceptan **`.xlsx` y `.xls`**, y las dos plantillas se bajan en **`.xlsx`**. El CSV dejó de ofrecerse.
+
+**El servidor sigue sin abrir el Excel.** Leer un `.xlsx` en PHP necesita la extensión `zip`, que en este servidor **está instalada pero no habilitada**, y habilitarla es tocar el `php.ini` de producción y reiniciar Apache. Así que lo lee el navegador, con SheetJS (`xlsx@0.18.5`, la versión de `informe_economico` y `bi/kpis`), y al servidor llega **la primera hoja convertida al texto que ya entendía `Planilla::parsear()`**, en el campo `contenido`. La validación, el diff y la confirmación no cambiaron: reciben lo mismo de siempre.
+
+- **Se toma siempre la primera hoja**, sin preguntar su nombre. El cartel de la sub-solapa lo dice.
+- **Los errores nombran la fila del Excel**, encabezado = fila 1. El navegador manda una línea por fila de la hoja —las vacías incluidas— y `parsear()` numera antes de saltear las vacías. **Esto era un bug también con el CSV**: las vacías se filtraban antes de numerar y una fila en blanco en el medio corría todos los números de abajo.
+- **Las fechas se leen del número de serie de la celda**, con aritmética entera y sin pasar por un `Date`: con `cellDates`, SheetJS arma la fecha en la zona horaria del navegador y en Argentina algunas caen el día anterior a las 23:59. Una fecha escrita como texto en la celda viaja tal cual.
+- **Los importes viajan con su valor**, sin miles y con punto decimal.
+- **Los ceros a la izquierda, igual que con el CSV.** Excel convierte `000123` en el número `123` si la celda no es de texto, y al guardar como CSV escribía lo que la celda *muestra*. Acá se hace lo mismo: una celda numérica con formato de ceros (`000000`) viaja como se ve, cualquier otra con su número. **No se completa nada**, así que el Excel no queda ni mejor ni peor que el CSV. La plantilla, en cambio, escribe sus columnas de código como texto.
+- **Celdas combinadas** (el valor queda en la de arriba a la izquierda), **filas vacías al final** y **columnas sin título** se ignoran.
+- **Un archivo que no se puede leer no llega al servidor**: otro formato, un CSV renombrado, uno dañado o con contraseña, una primera hoja vacía, o la librería que no cargó porque no hay red. Cada caso con su mensaje, y el botón vuelve a quedar habilitado.
+
+**SheetJS se pide a cdnjs recién la primera vez que alguien importa**, y no en cada carga del módulo: son unos 900 KB que casi ninguna visita usa.
+
+**Las plantillas salen de la misma definición que el parser.** Los endpoints `plantillaPagos` y `plantillaMaestro` devuelven `Planilla::plantilla()` —títulos, tipo de cada columna, ayuda y filas de ejemplo, todo de `columnasImportacion()`— y el navegador arma el `.xlsx`, con una hoja *Planilla* y otra *Ayuda*. No hay ninguna lista de títulos en el JS que se pueda desincronizar.
+
+Si alguien llama al endpoint con un `.xlsx` binario, sin pasar por la pantalla, el parser lo **detecta por su firma** (`PK`) y dice que hay que importarlo desde la pantalla, en lugar de fallar con un archivo lleno de bytes binarios. Lo mismo con un `.xls` antiguo.
 
 ### La planilla viene sucia, y eso se muestra — no se arregla
 
@@ -1186,6 +1202,8 @@ php cashflow/tests/run.php proveedores
 
 Con base, además: que **ningún pendiente sea negativo** —el error que tenía la consulta antes de la tabla de signos—, que no entre ningún proveedor del exterior, que el total sea exactamente operativos + excluidos, y que **el registro declare exactamente las series que el proveedor devuelve**.
 
+`tests/test_planilla.php` fija el mecanismo compartido de las tres importaciones: que `Planilla::numero()` y `Planilla::fecha()` entiendan lo que manda el navegador desde un Excel, que **el número de línea sea la fila del Excel** aunque haya filas vacías en el medio o arriba del encabezado, que un `;` adentro de una celda no parta la fila, y que **la plantilla y el parser salgan de la misma definición** en pagos, maestro y Cob. Electrónicos. La conversión de celdas del navegador —fechas desde el serial, fines de mes, importes sin exponente, ceros a la izquierda— la prueba `tests/js/planilla_excel.wsf` con cscript, y su cableado `test_tablas_controles.php`.
+
 `tests/test_prov_locales_opciones.php` fija las cinco listas, también sin base —llegan por parámetro, ya resueltas—:
 
 - **Qué es pertenecer a una lista**: que la comparación ignore mayúsculas, acentos y espacios, que `50% ECOMMERC` **no** matchee con `50% ECOMMERCE`, y que un campo vacío **no** cuente como fuera de lista (son dos cosas distintas y se cuentan aparte).
@@ -1216,7 +1234,9 @@ sql/cashflow_prov_locales_forma_por_factura.sql  El override de forma por factur
 sql/cashflow_prov_locales_excluir_factura.sql    El tilde de exclusion por factura
 sql/cashflow_prov_locales_opciones.sql         Las cinco listas de opciones + semilla
 sql/_referencia_tango_pendientes.sql           La consulta de Tango, como referencia
-cashflow/Class/Planilla.php                    El mecanismo de importacion CSV, compartido
+cashflow/Class/Planilla.php                    El mecanismo de importacion, compartido (el servidor)
+cashflow/Js/planilla-excel.js                  El lector de Excel y las plantillas, compartido (el navegador)
+cashflow/Controller/planilla_subida.php        Lo que llega de una importacion, compartido
 cashflow/Class/Proveedores.php                 Cuentas a pagar, fechas de pago y conciliacion
 cashflow/Class/ProveedoresCategorias.php       El maestro y el resolutor de categoria
 cashflow/Class/ProveedoresTango.php            CPA01: quien existe como proveedor. Solo lectura

@@ -836,14 +836,15 @@ class CobElectronicos {
        la procesadora se sube completo y el modulo DICE QUE CAMBIO, en lugar de
        obligar a comparar fila por fila contra lo que ya estaba cargado.
 
-       POR QUE CSV Y NO .XLSX: leer un .xlsx sin librerias necesita la extension
-       zip de PHP, que en este servidor esta instalada pero NO habilitada
+       EL EXCEL LO LEE EL NAVEGADOR: leer un .xlsx en PHP necesita la extension
+       zip, que en este servidor esta instalada pero NO habilitada
        (extension=zip comentada en php.ini). Habilitarla es tocar la
        configuracion del servidor y reiniciar Apache, y ademas dejaria el modulo
-       dependiendo de que ese cambio este hecho en cada entorno. Excel abre y
-       guarda CSV nativamente -Archivo -> Guardar como -> CSV UTF-8-, asi que el
-       costo para el usuario es un paso y el modulo no depende de nada. Si suben
-       un .xlsx igual, el parser lo detecta por su firma y lo dice.
+       dependiendo de que ese cambio este hecho en cada entorno. Por eso el
+       usuario sube el Excel tal cual, Js/planilla-excel.js lo lee con SheetJS y
+       aca llega su primera hoja como texto. Lo que se le pedia antes -guardarlo
+       como CSV- era un paso que el usuario no tenia por que saber dar. Ver
+       Class/Planilla.php.
 
        Todo el criterio vive en helpers PUROS: el parseo de la planilla y el
        diff contra lo cargado se prueban sin base ni archivos.
@@ -890,18 +891,21 @@ class CobElectronicos {
             'procesadora' => [
                 'titulo' => 'PROCESADORA',
                 'obligatoria' => true,
+                'tipo' => 'texto',
                 'ayuda' => 'Razon social, tal como figura en Parametros. Tiene que estar activa.',
                 'sinonimos' => ['PROCESADORA', 'RAZON_SOCIAL', 'RAZON_SOC', 'RAZONSOCIAL']
             ],
             'importe_bruto' => [
                 'titulo' => 'IMPORTE_BRUTO',
                 'obligatoria' => true,
+                'tipo' => 'importe',
                 'ayuda' => 'Importe bruto informado, sin separador de miles. Ej: 1069326,00',
                 'sinonimos' => ['IMPORTE_BRUTO', 'IMPORTE', 'BRUTO', 'IMPORTEBRUTO']
             ],
             'fecha_acreditacion' => [
                 'titulo' => 'FECHA_ACREDITACION',
                 'obligatoria' => true,
+                'tipo' => 'fecha',
                 'ayuda' => 'Fecha en que se acredita. dd/mm/aaaa o aaaa-mm-dd.',
                 'sinonimos' => ['FECHA_ACREDITACION', 'FECHA', 'COBRO', 'FECHA_COBRO',
                                 'FECHAACREDITACION']
@@ -909,6 +913,7 @@ class CobElectronicos {
             'id_externo' => [
                 'titulo' => 'ID_EXTERNO',
                 'obligatoria' => false,
+                'tipo' => 'texto',
                 'ayuda' => 'Numero de liquidacion de la procesadora. Opcional, pero es lo que '
                     . 'permite reconocer un movimiento ya cargado y distinguir dos '
                     . 'liquidaciones del mismo dia.',
@@ -918,6 +923,7 @@ class CobElectronicos {
             'observaciones' => [
                 'titulo' => 'OBSERVACIONES',
                 'obligatoria' => false,
+                'tipo' => 'texto',
                 'ayuda' => 'Opcional, hasta 200 caracteres.',
                 'sinonimos' => ['OBSERVACIONES', 'OBSERVACION', 'NOTAS', 'COMENTARIOS']
             ]
@@ -932,23 +938,28 @@ class CobElectronicos {
      * falla una importacion. Las fechas de ejemplo se calculan sobre el dia de
      * hoy para que nunca se vean viejas.
      *
+     * El .xlsx lo arma el navegador: ver Planilla::plantilla(). Los importes
+     * van como numero y las fechas como aaaa-mm-dd, y el navegador los escribe
+     * como celdas de su tipo.
+     *
      * @param string $ejemploFecha 'Y-m-d' de la primera fila de ejemplo
-     * @return string Contenido del archivo
+     * @return array Lo que devuelve Planilla::plantilla()
      */
-    public static function plantillaCsv($ejemploFecha = null) {
+    public static function plantilla($ejemploFecha = null) {
         $fecha = ($ejemploFecha === null) ? date('Y-m-d') : substr((string) $ejemploFecha, 0, 10);
-        $manana = date('d/m/Y', strtotime($fecha . ' +1 day'));
-        $pasado = date('d/m/Y', strtotime($fecha . ' +2 day'));
+        $manana = date('Y-m-d', strtotime($fecha . ' +1 day'));
+        $pasado = date('Y-m-d', strtotime($fecha . ' +2 day'));
 
-        return Planilla::plantillaCsv(self::columnasImportacion(), [
-            ['Payway', '1069326,00', $manana, '', 'Ejemplo: borrar esta fila'],
-            ['Mercado Pago', '35257406,00', $pasado, 'LIQ-00123',
+        return Planilla::plantilla(self::columnasImportacion(), [
+            ['Payway', 1069326.00, $manana, '', 'Ejemplo: borrar esta fila'],
+            ['Mercado Pago', 35257406.00, $pasado, 'LIQ-00123',
              'Ejemplo: con numero de liquidacion']
-        ]);
+        ], 'plantilla-cobranzas-electronicas');
     }
 
     /**
-     * Lee el contenido de una planilla CSV y devuelve las filas crudas.
+     * Lee el contenido de una planilla -la primera hoja del Excel, que el
+     * navegador manda como texto- y devuelve las filas crudas.
      *
      * NO valida contra la base: eso es compararImportacion(). Aca solo se
      * resuelve la forma del archivo.

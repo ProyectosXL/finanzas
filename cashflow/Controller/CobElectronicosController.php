@@ -19,23 +19,21 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+/* La lectura de lo subido y la respuesta de las plantillas son las mismas que
+   las de Proveedores Locales: viven en un solo lugar. */
+require_once __DIR__ . '/planilla_subida.php';
+
 /**
- * La plantilla del importador se resuelve ANTES de declarar el JSON: es una
- * descarga de archivo y no una respuesta de datos, asi que necesita sus propios
- * encabezados. Va aca arriba y no en el switch para que no haya forma de que se
- * emita el header de JSON primero.
+ * La plantilla del importador se resuelve aca arriba, antes del switch, igual
+ * que antes: no necesita ni base ni permisos de escritura. Ya no es una
+ * descarga: devuelve la DEFINICION -titulos, tipos y ejemplos, de la misma
+ * columnasImportacion() que usa el parser- y el .xlsx lo arma el navegador.
+ * Ver Planilla::plantilla().
  */
 if (isset($_GET['action']) && $_GET['action'] === 'plantilla') {
     require_once __DIR__ . '/../Class/CobElectronicos.php';
 
-    $nombre = 'plantilla-cobranzas-electronicas.csv';
-
-    header('Content-Type: text/csv; charset=UTF-8');
-    header('Content-Disposition: attachment; filename="' . $nombre . '"');
-    header('Cache-Control: no-store');
-
-    echo CobElectronicos::plantillaCsv();
-    exit;
+    responderPlantilla(CobElectronicos::plantilla());
 }
 
 header('Content-Type: application/json');
@@ -165,34 +163,15 @@ try {
            ================================================================ */
 
         case 'previsualizarImportacion':
-            if (!isset($_FILES['archivo']) || !is_uploaded_file($_FILES['archivo']['tmp_name'])) {
-                throw new Exception('No llego ningun archivo. Elegi el CSV y volve a intentar.');
-            }
-
-            if ($_FILES['archivo']['error'] !== UPLOAD_ERR_OK) {
-                throw new Exception('El archivo no se pudo subir (codigo '
-                    . intval($_FILES['archivo']['error']) . ').');
-            }
-
-            // Tope de tamano: una planilla de acreditaciones son unos pocos
-            // kilobytes. Un archivo de 4 MB no es esto y conviene rechazarlo
-            // antes de leerlo en memoria.
-            if ($_FILES['archivo']['size'] > 4 * 1024 * 1024) {
-                throw new Exception('El archivo pesa más de 4 MB. Una planilla de acreditaciones '
-                    . 'no llega a eso: revisá que sea el archivo correcto.');
-            }
-
-            $contenido = file_get_contents($_FILES['archivo']['tmp_name']);
-
-            if ($contenido === false) {
-                throw new Exception('No se pudo leer el archivo subido');
-            }
-
+            /* LO QUE LLEGA ES TEXTO: la primera hoja del Excel, que el navegador
+               leyo y convirtio (Js/planilla-excel.js). El nombre del archivo
+               viaja aparte, porque el archivo no viaja. contenidoSubido() aplica
+               el mismo tope de 4 MB de antes y sigue aceptando un upload real. */
             echo json_encode([
                 'success' => true,
                 'data' => $modulo->previsualizarImportacion(
-                    $contenido,
-                    basename($_FILES['archivo']['name']),
+                    contenidoSubido(),
+                    nombreSubido(),
                     // El periodo que cubre el archivo es opcional y va por POST
                     // porque acompana al archivo. Sin el se infiere de las
                     // fechas que traen las filas.

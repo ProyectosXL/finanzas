@@ -1597,35 +1597,54 @@
        exactamente lo que el usuario vio y no lo que vuelva a calcular.
        ================================================================ */
 
+    /**
+     * EL EXCEL SE LEE ACÁ, en el navegador, con el lector compartido de las
+     * tres importaciones (Js/planilla-excel.js): toma la primera hoja y la
+     * manda como texto en 'contenido'. El diff lo sigue armando el backend,
+     * igual que con el CSV.
+     *
+     * Lo que no se puede leer —otro formato, un archivo dañado o protegido, la
+     * librería que no cargó— se dice acá y no llega al servidor. El botón se
+     * apaga mientras tanto y vuelve a prenderse pase lo que pase.
+     */
     function previewImportacion(que) {
         var input = document.getElementById('archivo' + que + 'Prov');
+        var btn = document.getElementById('btnPreview' + que + 'Prov');
 
         if (!input || !input.files || !input.files.length) {
-            Notificacion.error('Elegí un archivo CSV primero.');
+            Notificacion.error('Elegí el archivo de Excel primero.');
             return;
         }
 
-        var form = new FormData();
-        form.append('archivo', input.files[0]);
+        if (btn) { btn.disabled = true; }
 
-        fetch('Controller/ProveedoresController.php?action=preview' + que, {
-            method: 'POST',
-            body: form
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(res) {
-            if (!res.success) {
-                Notificacion.error(res.message);
+        PlanillaExcel.leer(input.files[0])
+            .then(function(leido) {
+                return fetch('Controller/ProveedoresController.php?action=preview' + que, {
+                    method: 'POST',
+                    body: PlanillaExcel.formulario(leido)
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    if (!res.success) {
+                        Notificacion.error(res.message);
+                        mostrar('previewProv', false);
+                        return;
+                    }
+
+                    preview = { que: que, data: res.data };
+                    pintarPreview(que, res.data);
+                }, function(err) {
+                    throw new Error('Error de conexión: ' + err.message);
+                });
+            })
+            .catch(function(err) {
+                Notificacion.error(err.message);
                 mostrar('previewProv', false);
-                return;
-            }
-
-            preview = { que: que, data: res.data };
-            pintarPreview(que, res.data);
-        })
-        .catch(function(err) {
-            Notificacion.error('Error de conexión: ' + err.message);
-        });
+            })
+            .then(function() {
+                if (btn) { btn.disabled = false; }
+            });
     }
 
     function pintarPreview(que, d) {

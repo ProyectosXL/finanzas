@@ -1164,8 +1164,9 @@ class Proveedores {
        ella, todo lo vencido se dibuja hoy porque no hay otro lugar donde
        ponerlo.
 
-       Mismo circuito que el maestro y que Cob. Electronicos: plantilla CSV,
-       previsualizacion del diff, y nada se escribe hasta confirmar.
+       Mismo circuito que el maestro y que Cob. Electronicos: plantilla en
+       Excel, el Excel leido en el navegador, previsualizacion del diff, y nada
+       se escribe hasta confirmar.
        ==================================================================== */
 
     /**
@@ -1184,6 +1185,7 @@ class Proveedores {
             'cod_provee' => [
                 'titulo' => 'COD_PROVEEDOR',
                 'obligatoria' => true,
+                'tipo' => 'texto',
                 'ayuda' => 'Código del proveedor en Tango. Hace falta: el número de factura '
                     . 'solo no identifica un comprobante, porque lo emite el proveedor y dos '
                     . 'proveedores distintos repiten numeración.',
@@ -1193,6 +1195,7 @@ class Proveedores {
             'n_comp' => [
                 'titulo' => 'NRO_FACTURA',
                 'obligatoria' => true,
+                'tipo' => 'texto',
                 'ayuda' => 'Número de comprobante tal como figura en Tango, por ejemplo '
                     . 'A0000500001731.',
                 'sinonimos' => ['NROFACTURA', 'N_COMP', 'NCOMP', 'NUMERO', 'NROCOMPROBANTE',
@@ -1201,12 +1204,14 @@ class Proveedores {
             'fecha_pago' => [
                 'titulo' => 'FECHA_PAGO',
                 'obligatoria' => true,
+                'tipo' => 'fecha',
                 'ayuda' => 'Cuándo se piensa pagar. dd/mm/aaaa o aaaa-mm-dd.',
                 'sinonimos' => ['FECHAPAGO', 'FECHA_PAGO', 'FECHA', 'PAGO', 'FECHADEPAGO']
             ],
             'forma_pago' => [
                 'titulo' => 'FORMA_PAGO',
                 'obligatoria' => false,
+                'tipo' => 'texto',
                 'ayuda' => 'Opcional. Si no viene, se usa la forma habitual del proveedor '
                     . 'según el maestro. Válidos: '
                     . implode(', ', ProveedoresCategorias::FORMAS_PAGO) . '.',
@@ -1216,6 +1221,7 @@ class Proveedores {
             't_comp' => [
                 'titulo' => 'TIPO_COMP',
                 'obligatoria' => false,
+                'tipo' => 'texto',
                 'ayuda' => 'Opcional (FAC, NDI, NCP...). Si no viene se deduce de los '
                     . 'pendientes del proveedor.',
                 'sinonimos' => ['TIPOCOMP', 'T_COMP', 'TCOMP', 'TIPO', 'TIPOCOMPROBANTE']
@@ -1223,6 +1229,7 @@ class Proveedores {
             'observacion' => [
                 'titulo' => 'OBSERVACION',
                 'obligatoria' => false,
+                'tipo' => 'texto',
                 'ayuda' => 'Opcional, hasta 200 caracteres.',
                 'sinonimos' => ['OBSERVACION', 'OBSERVACIONES', 'NOTAS', 'COMENTARIOS']
             ]
@@ -1230,23 +1237,24 @@ class Proveedores {
     }
 
     /**
-     * La plantilla que se descarga, con filas de ejemplo cargadas.
+     * La plantilla que se descarga, con filas de ejemplo cargadas. El .xlsx lo
+     * arma el navegador: ver Planilla::plantilla().
      *
      * Las fechas de ejemplo se calculan sobre hoy para que nunca se vean viejas.
      *
      * @param string|null $ejemploFecha 'Y-m-d'
-     * @return string
+     * @return array Lo que devuelve Planilla::plantilla()
      */
-    public static function plantillaCsv($ejemploFecha = null) {
+    public static function plantilla($ejemploFecha = null) {
         $fecha = ($ejemploFecha === null) ? date('Y-m-d') : substr((string) $ejemploFecha, 0, 10);
-        $enUnaSemana = date('d/m/Y', strtotime($fecha . ' +7 day'));
-        $enDosSemanas = date('d/m/Y', strtotime($fecha . ' +14 day'));
+        $enUnaSemana = date('Y-m-d', strtotime($fecha . ' +7 day'));
+        $enDosSemanas = date('Y-m-d', strtotime($fecha . ' +14 day'));
 
-        return Planilla::plantillaCsv(self::columnasImportacion(), [
+        return Planilla::plantilla(self::columnasImportacion(), [
             ['MTDODI', 'A0000500001731', $enUnaSemana, 'TRANSFERENCIA', '', 'Ejemplo: borrar'],
             ['OGCOAN', 'A0000300001234', $enDosSemanas, 'ECHEQ', 'FAC',
              'Ejemplo: con tipo de comprobante']
-        ]);
+        ], 'plantilla_pagos_proveedores');
     }
 
     /**

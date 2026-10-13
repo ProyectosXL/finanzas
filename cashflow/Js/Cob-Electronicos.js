@@ -610,21 +610,30 @@
         var input = document.getElementById('archivoImportar');
 
         if (!input || !input.files || !input.files.length) {
-            avisar('Elegí el archivo .csv que querés importar.');
+            avisar('Elegí el archivo de Excel que querés importar.');
             return;
         }
 
-        var datosForm = new FormData();
-
-        datosForm.append('archivo', input.files[0]);
-
-        // El período que cubre el archivo es opcional: sólo amplía la ventana en
-        // la que se pueden proponer bajas. Ver la nota de la pestaña.
-        datosForm.append('periodo_desde', valor('periodoDesde'));
-        datosForm.append('periodo_hasta', valor('periodoHasta'));
-
+        /* EL EXCEL SE LEE ACÁ, con el lector compartido de las tres
+           importaciones (Js/planilla-excel.js): toma la primera hoja y la manda
+           como texto en 'contenido'. El diff, la regla de "con un solo error no
+           se importa nada" y la confirmación siguen en el backend, sin cambios.
+           Si el archivo no se puede leer, el error sale en el panel —el catch
+           de abajo— sin llegar al servidor, y conBoton() vuelve a prender el
+           botón. */
         conBoton('btnPrevisualizar', function() {
-            return subirArchivo(URL_COBEL + '?action=previsualizarImportacion', datosForm)
+            return PlanillaExcel.leer(input.files[0])
+                .then(function(leido) {
+                    var datosForm = PlanillaExcel.formulario(leido);
+
+                    // El período que cubre el archivo es opcional: sólo amplía la
+                    // ventana en la que se pueden proponer bajas. Ver la nota de
+                    // la pestaña.
+                    datosForm.append('periodo_desde', valor('periodoDesde'));
+                    datosForm.append('periodo_hasta', valor('periodoHasta'));
+
+                    return subirArchivo(URL_COBEL + '?action=previsualizarImportacion', datosForm);
+                })
                 .then(function(diff) {
                     importacion = diff;
                     pintarDiff(diff);

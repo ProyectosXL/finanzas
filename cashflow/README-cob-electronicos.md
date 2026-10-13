@@ -168,19 +168,31 @@ El segundo paso **vuelve a leer la base, vuelve a validar cada fila y vuelve a c
 
 Que el diff viva en un helper puro (`compararImportacion()`) es lo que hace posible eso: se calcula dos veces con la misma regla. Si viviera dentro de la escritura, la pantalla mostraría una cosa y el servidor haría otra.
 
-### Por qué CSV y no `.xlsx`
+### Se sube el Excel, y lo lee el navegador
 
-Leer un `.xlsx` sin librerías necesita la extensión `zip` de PHP. En este servidor el `php_zip.dll` **está instalado pero la extensión está comentada en `php.ini`**: habilitarla es tocar la configuración del servidor, reiniciar Apache, y dejar el módulo dependiendo de que ese cambio esté hecho en cada entorno. Excel abre y guarda CSV nativamente (*Archivo → Guardar como → CSV UTF-8*), así que el costo para el usuario es un paso y el módulo no depende de nada.
+El selector acepta **`.xlsx` y `.xls`**, y no CSV: se sube el Excel tal cual lo dejó la procesadora o quien completó la plantilla.
 
-Si igual suben un `.xlsx`, el parser **lo detecta por su firma** (un `.xlsx` es un ZIP y empieza con `PK`) y responde con la instrucción de cómo convertirlo, en lugar de fallar con un archivo lleno de bytes binarios. Lo mismo con un `.xls` antiguo.
+**El servidor no abre el Excel.** Leer un `.xlsx` en PHP necesita la extensión `zip`, y en este servidor el `php_zip.dll` **está instalado pero la extensión está comentada en `php.ini`**: habilitarla es tocar la configuración del servidor, reiniciar Apache, y dejar el módulo dependiendo de que ese cambio esté hecho en cada entorno. Por eso lo lee **el navegador**, con SheetJS (`xlsx@0.18.5`, la misma versión que `informe_economico` y `bi/kpis`), en `Js/planilla-excel.js`: el lector compartido de las tres importaciones del módulo.
 
-### La plantilla se descarga y vuelve a entrar
+- Toma **siempre la primera hoja**, sin preguntar ni validar su nombre.
+- La convierte al texto que ya entiende `Planilla::parsear()` y la manda en el campo `contenido`, con el nombre del archivo al lado para el resumen. **El diff, la regla de "con un solo error no se importa nada" y la confirmación no cambiaron**: siguen en el backend y reciben lo mismo de siempre. `previsualizarImportacion` lee con el mismo helper que Proveedores Locales (`Controller/planilla_subida.php`), con el mismo tope de 4 MB de antes.
+- **Las fechas se leen del número de serie de la celda, no de un `Date`.** Con `cellDates`, SheetJS arma un `Date` en la zona horaria del navegador, y con la de Argentina algunas fechas caen el día anterior a las 23:59. El serial se pasa a `aaaa-mm-dd` con aritmética entera. Una fecha escrita como texto en la celda se manda tal cual.
+- **Los importes viajan con su valor**, sin separador de miles y con punto decimal, sin importar el formato con el que se veían.
+- **Un archivo que no se puede leer no llega al servidor**: otro formato, un CSV renombrado, uno dañado o protegido con contraseña, una primera hoja vacía, o SheetJS que no cargó (sin red). Cada caso tiene su mensaje en el panel, y el botón vuelve a quedar habilitado.
 
-La plantilla va con BOM de UTF-8 y separador `;`, que es lo que Excel en español abre en columnas sin preguntar nada. Sin el BOM, Excel muestra los acentos rotos; con coma, mete todo en una sola columna.
+SheetJS **se carga recién la primera vez que alguien importa**, de cdnjs: son unos 900 KB que no tienen por qué bajar en cada carga del módulo.
+
+Si alguien llama al endpoint con un `.xlsx` binario, sin pasar por la pantalla, el parser **lo detecta por su firma** (`PK`, o la de un `.xls`) y dice que hay que importarlo desde la pantalla, en lugar de fallar con un archivo lleno de bytes binarios.
+
+### La plantilla se descarga en Excel y vuelve a entrar
+
+*Descargar plantilla* baja un **`.xlsx`** con dos hojas: *Planilla*, la que se completa y se vuelve a subir, y *Ayuda*, con qué va en cada columna. La arma el navegador con SheetJS: el endpoint `plantilla` devuelve **la definición** —títulos, tipo de cada columna, ayuda y filas de ejemplo— y no un archivo.
+
+**Las celdas de ejemplo van con su tipo**: la fecha es una fecha de verdad (con el calendario de Excel), el importe un número, y los textos van con formato texto. El tipo es la clave `tipo` de `columnasImportacion()`.
 
 **Trae dos filas de ejemplo cargables**, no comentadas: una plantilla con el ejemplo comentado obliga a adivinar el formato del número y de la fecha, que es justo donde falla una importación. Una prueba verifica que la plantilla que se descarga vuelva a entrar por el parser — si no, el formato que se propone no sería el que se acepta.
 
-Las columnas y sus sinónimos se definen **una sola vez** (`columnasImportacion()`), y de ahí salen la plantilla, el mapeo del encabezado y la ayuda de la pantalla. Con tres listas separadas, se desincronizan en el primer cambio.
+Las columnas y sus sinónimos se definen **una sola vez** (`columnasImportacion()`), y de ahí salen la plantilla, el mapeo del encabezado y la ayuda de la pantalla. Con tres listas separadas, se desincronizan en el primer cambio. El navegador no tiene ninguna lista de títulos propia.
 
 | Columna | Obligatoria | Sinónimos aceptados |
 | --- | --- | --- |
@@ -194,12 +206,12 @@ Los sinónimos incluyen **los nombres de la hoja original** (`RAZON_SOC`, `Impor
 
 ### El formato del número y de la fecha no lo tiene que saber el usuario
 
-El parser acepta lo que exporta Excel en cualquiera de las dos configuraciones regionales:
+Desde el Excel eso ya no depende del usuario —las fechas y los importes viajan con su valor, ver arriba—, pero el parser sigue aceptando lo que un texto puede traer en cualquiera de las dos configuraciones regionales, porque una celda puede tener la fecha o el importe **escritos como texto**:
 
 - `1069326,00` y `1069326.00`; `3.757.900,50` y `3,757,900.50`. Con los dos separadores presentes, el que está más a la derecha es el decimal. Con uno solo, es decimal salvo que aparezca más de una vez.
 - `07/09/2026`, `2026-09-07`, `7-9-2026`, `07/09/26`, y el **serial de Excel** (`46000`) acotado a 1954–2064, que es la red para una columna que quedó con formato número.
 
-Lo que **no** se adivina: una fecha que no existe (`31/02/2026`) o sin año devuelve `null`, y la fila queda como error **con su número de línea**. Y un importe que no es un número devuelve `null` y no cero: la diferencia entre *"no es un número"* y *"es cero"* es lo que hace que la fila sea un error en vez de un movimiento de cero pesos.
+Lo que **no** se adivina: una fecha que no existe (`31/02/2026`) o sin año devuelve `null`, y la fila queda como error **con su número de línea**, que es **la fila del Excel** (encabezado = fila 1): las filas vacías del medio no corren la numeración. Y un importe que no es un número devuelve `null` y no cero: la diferencia entre *"no es un número"* y *"es cero"* es lo que hace que la fila sea un error en vez de un movimiento de cero pesos.
 
 ### Cómo se reconoce un movimiento ya cargado
 
@@ -452,11 +464,12 @@ Del importador:
 | Un vacío o un texto devuelven `null` y **no** cero | `numeroDesdePlanilla()` |
 | Las fechas se leen en cinco formatos, incluido el serial de Excel | `fechaDesdePlanilla()` |
 | Una fecha que no existe o sin año **no se adivina** | `fechaDesdePlanilla()` |
-| **La plantilla que se descarga vuelve a entrar por el parser** | `plantillaCsv()` + `parsearPlanilla()` |
+| **La plantilla que se descarga vuelve a entrar por el parser**, con su tipo por columna | `plantilla()` + `parsearPlanilla()` |
 | El separador se detecta solo (`;` y `,`) | `parsearPlanilla()` |
 | Acepta los títulos de la hoja original (`RAZON_SOC`, `Importe`, `Cobro`) | `parsearPlanilla()` |
 | Las filas vacías que Excel deja abajo se saltean; falta de columna obligatoria y archivo sin datos avisan | `parsearPlanilla()` |
-| Un `.xlsx` se detecta por su firma y el mensaje dice cómo convertirlo | `parsearPlanilla()` |
+| Un `.xlsx` binario se detecta por su firma y el mensaje manda a la pantalla, que es la que lo lee | `parsearPlanilla()` |
+| **El mismo archivo leído desde Excel y desde el CSV de antes da el mismo diff**, fila por fila y en la misma línea, y con un error no se importa nada | `tests/js/planilla_excel_cob.wsf` + `compararImportacion()` |
 | Alta, cambio de importe, cambio de fecha, sin cambios y ya acreditada, cada uno con su motivo | `compararImportacion()` |
 | **El neto de una columna del archivo se ignora**: lo calcula el servidor | `compararImportacion()` |
 | Las seis clases de fila inválida se rechazan, cada una con su motivo y su línea | `compararImportacion()` |
@@ -486,7 +499,8 @@ Con los dos scripts ya corridos:
 | Fila del tablero | *Cobranzas Pagos Electrónicos* con 516.698.068,64 y el mismo detalle por día (9/9: 35.200.603,31) |
 | Reejecutabilidad de la migración | Una segunda corrida no insertaría nada: 34 filas *"Ya estaba cargado"* + 4 *"Ya acreditado"*. Verificado corriendo su diagnóstico **sin la escritura** |
 | Importador, contra los 34 movimientos reales | Un archivo armado desde lo cargado, con una fila de más, una con otro importe y una quitada: el diff dijo **1 alta, 1 cambio, 14 iguales, 1 ya acreditada, 0 errores**, con la diferencia de neto exacta. Con la ventana inferida, 0 bajas; declarando el período, propuso la única que el archivo dejó de traer. **Nada se escribió**: 34 movimientos antes y después |
-| Los endpoints por HTTP, contra Apache | La plantilla baja con `text/csv; charset=UTF-8`, su `Content-Disposition` y el BOM. `getPestana` responde el filtro efectivo (`desde` = inicio del eje, por defecto). La previsualización con una subida real `multipart` detectó el cambio contra la fila cargada, ignoró la ya acreditada y rechazó la procesadora inexistente |
+| Los endpoints por HTTP, contra Apache | `getPestana` responde el filtro efectivo (`desde` = inicio del eje, por defecto). La previsualización con una subida real `multipart` detectó el cambio contra la fila cargada, ignoró la ya acreditada y rechazó la procesadora inexistente. *(Esto fue con el CSV. La subida real sigue aceptándose, pero la pantalla ahora manda el texto del Excel en `contenido`: ver la fila siguiente)* |
+| El Excel, en un Chrome real con la zona horaria de Argentina (`feature/cashflow-excel-medios-ux`) | La plantilla se armó con la definición del backend, se escribió como `.xlsx` y se volvió a leer con `PlanillaExcel.leer()`: los mismos títulos y ejemplos, con las fechas como `aaaa-mm-dd`. Un Excel con varias hojas, filas vacías arriba y en el medio, y fechas de **todos los fines de mes de 2026 y el 29/02/2028** —algunas a las 23:59— dio cada fecha en su día y cada fila en su número de fila. Un CSV, un CSV renombrado a `.xlsx` y un ZIP dañado se rechazaron en el navegador, cada uno con su mensaje. Con cdnjs bloqueado, el mensaje dice que falta la librería y el reintento vuelve a probar |
 | El "todo o nada" lo hace cumplir el servidor | Confirmando **con las filas con problemas incluidas**, el servidor respondió *"El archivo tiene 1 fila(s) con problemas, así que no se importó nada"* y la base quedó en 34 movimientos. La regla no depende de que el navegador filtre nada |
 | Las tres sentencias de escritura del importador | `INSERT` con `ORIGEN_DATO='ARCHIVO'` + `ID_EXTERNO` + `ARCHIVO_ORIGEN`, `UPDATE` y baja lógica, ejecutadas contra la base real y **deshechas con un `rollback` explícito**: las tres válidas, el índice único filtrado de `ID_EXTERNO` rechazó un segundo movimiento con el mismo número de liquidación, y la tabla volvió a 34 filas |
 
@@ -509,7 +523,7 @@ Las tablas llevan el esquema de auditoría del módulo —`USUARIO_ALTA` / `FECH
 3. **Dar de alta un movimiento.** Pestaña Cob. Electrónicos → *Nuevo movimiento*. Payway, 1.000.000, fecha de mañana. La vista previa tiene que mostrar el neto estimado, y el mensaje del guardado el neto definitivo con la tasa usada. **Comprobar que el neto no se puede tipear**: la columna es texto en cursiva, no un input.
 4. **Verlo en el cuadro diario.** Abajo, *Acreditaciones por día y por mes*: la fecha de mañana con su neto. El total de las dos tablas tiene que ser el mismo, y el mismo que la tarjeta *Importe Neto*.
 5. **Verlo llegar al tablero.** Pestaña Cashflow, sección Disponibilidades, fila *Cobranzas Pagos Electrónicos*: el mismo neto en la columna de esa fecha. Clickeando el importe se vuelve a esta pestaña.
-6. **Importar una planilla.** *Importar planilla* → *Descargar plantilla* → abrila en Excel, dejá las dos filas de ejemplo o pegá las acreditaciones reales, guardá como CSV y subila. *Ver diferencias* tiene que mostrar los chips del resumen y la tabla de lo que cambia **sin haber escrito nada**. Confirmá, y comprobá que la tabla de arriba y el cuadro diario se actualizan. Después **volvé a subir el mismo archivo**: tiene que decir que no cambia nada y dejar el botón deshabilitado — eso es lo que permite importar seguido sin miedo.
+6. **Importar una planilla.** *Importar planilla* → *Descargar plantilla* (baja un `.xlsx`) → abrila en Excel, dejá las dos filas de ejemplo o pegá las acreditaciones reales, guardala como `.xlsx` sin convertirla y subila. *Ver diferencias* tiene que mostrar los chips del resumen y la tabla de lo que cambia **sin haber escrito nada**. Confirmá, y comprobá que la tabla de arriba y el cuadro diario se actualizan. Después **volvé a subir el mismo archivo**: tiene que decir que no cambia nada y dejar el botón deshabilitado — eso es lo que permite importar seguido sin miedo.
 7. **Probar las bajas del importador.** Sacá una fila del medio del archivo y volvé a subirlo: aparece en *"Cargados que el archivo no trae"* con su importe, y la baja **no** se aplica salvo que marques la casilla. Si la fila que sacás es la primera o la última del período, completá *el archivo cubre desde / hasta* para que la detecte; el panel dice qué ventana usó y si la declaraste vos.
 8. **Probar el caso del Excel.** Cargá un movimiento con fecha **de hoy o anterior**: no aparece en la tabla —el filtro arranca mañana— y **el tablero no avisa nada**. Prendé *"Ver también las ya acreditadas"* y ahí sí se ve, en gris y marcada. Y desde Parámetros, intentá activar una procesadora nueva sin alícuotas: el switch está deshabilitado y el tooltip dice por qué.
 9. **La migración, al final.** `sql/cashflow_cob_electronicos_migracion.sql`, después de verificar con Tesorería los tres movimientos sin fórmula. Revisar los dos cuadros que imprime y correrlo una segunda vez: el segundo cuadro tiene que decir *"Ya estaba cargado"* en todas las filas.
@@ -534,6 +548,6 @@ tests/test_cob_electronicos.php
 
 Modificados: `Class/CashflowRegistry.php` (`disponible => true` y la clase del proveedor) · `Class/Parametros.php` (módulo `COB_ELECTRONICOS` y sus dos secciones) · `Controller/ParametrosController.php` (ABM de procesadoras y alícuotas) · `Tabs/parametros.php` (el `tab-pane` y el script) · `Css/Parametros.css` (los estilos `pce-`, incluido el panel de resultado) · `Class/Menu.php` (estado `DATOS`) · `tests/test_providers.php` (siete módulos) · `tests/test_menu.php` (el contador de Ingresos).
 
-El importador no agregó archivos: la plantilla, el parseo y el diff viven en `Class/CobElectronicos.php` con el resto de los criterios del módulo, sus dos endpoints en `Controller/CobElectronicosController.php`, y su panel en la pestaña. **Ninguna dependencia nueva**: el CSV se lee con `str_getcsv` y la conversión de codificación con `mbstring`, que ya estaba en uso.
+La definición de la plantilla y el diff viven en `Class/CobElectronicos.php` con el resto de los criterios del módulo, sus dos endpoints en `Controller/CobElectronicosController.php`, y su panel en la pestaña. El Excel lo lee `Js/planilla-excel.js`, compartido con las dos importaciones de Proveedores Locales, y lo que llega al servidor lo lee `Controller/planilla_subida.php`, también compartido. **La única dependencia nueva es SheetJS**, que se pide a cdnjs recién cuando hace falta; del lado del servidor el texto se sigue leyendo con `str_getcsv` y `mbstring`.
 
 Ver `README-cashflow.md` y `README-saldos.md`.

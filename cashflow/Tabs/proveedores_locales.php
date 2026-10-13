@@ -386,19 +386,18 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
         <?php if ($edita): ?>
         <div id="vistaImportarProv" style="display: none;">
             <div class="card-body">
-                <!-- ES CSV Y NO .xlsx, Y HAY QUE DECIRLO ACÁ. El motivo está en
-                     Class/Planilla.php: leer un .xlsx necesita la extensión zip
-                     de PHP, que en este servidor está instalada pero no
-                     habilitada. Si el usuario no se entera acá, se entera
-                     cuando falla. -->
+                <!-- SE SUBE EL EXCEL TAL CUAL. Lo lee el navegador
+                     (Js/planilla-excel.js) y al servidor llega su primera hoja
+                     como texto: este servidor no tiene la extensión zip que
+                     haría falta para abrir un .xlsx. Se dice que toma la
+                     PRIMERA hoja porque no se pregunta cuál: un libro con la
+                     hoja buena en segundo lugar se importaría vacío o mal. -->
                 <div class="alert alert-info d-flex align-items-start" role="alert">
                     <i class="fas fa-circle-info me-2 mt-1"></i>
                     <div>
-                        <strong>El archivo tiene que ser CSV, no .xlsx.</strong>
-                        Abrí la planilla en Excel y guardala como
-                        <em>Archivo → Guardar como → CSV UTF-8</em>. El contenido es el mismo.
-                        Si subís un .xlsx, el sistema lo detecta y te lo dice, pero no puede
-                        leerlo: este servidor no tiene habilitada la extensión que hace falta.
+                        <strong>Subí el Excel tal cual (.xlsx o .xls).</strong>
+                        Se lee la <strong>primera hoja</strong>, con la primera fila como
+                        encabezado. Los errores dicen la fila del Excel en la que están.
                         <br>
                         <span class="text-muted small">
                             Nada se guarda hasta que confirmes: primero vas a ver exactamente
@@ -418,11 +417,13 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                                 </small>
                             </div>
                             <div class="card-body">
-                                <a href="Controller/ProveedoresController.php?action=plantillaPagos"
-                                   class="btn btn-sm btn-outline-secondary mb-3">
-                                    <i class="fas fa-download me-1"></i> Descargar plantilla
-                                </a>
-                                <input type="file" id="archivoPagosProv" accept=".csv,text/csv"
+                                <!-- La plantilla la arma el navegador en .xlsx con la
+                                     definición del backend: ver Js/planilla-excel.js. -->
+                                <button type="button" class="btn btn-sm btn-outline-secondary mb-3"
+                                        data-plantilla-excel="Controller/ProveedoresController.php?action=plantillaPagos">
+                                    <i class="fas fa-download me-1"></i> Descargar plantilla (Excel)
+                                </button>
+                                <input type="file" id="archivoPagosProv" accept=".xlsx,.xls"
                                        class="form-control form-control-sm mb-2">
                                 <button id="btnPreviewPagosProv" class="btn btn-sm btn-primary">
                                     <i class="fas fa-eye me-1"></i> Ver qué cambiaría
@@ -441,11 +442,11 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                                 </small>
                             </div>
                             <div class="card-body">
-                                <a href="Controller/ProveedoresController.php?action=plantillaMaestro"
-                                   class="btn btn-sm btn-outline-secondary mb-3">
-                                    <i class="fas fa-download me-1"></i> Descargar plantilla
-                                </a>
-                                <input type="file" id="archivoMaestroProv" accept=".csv,text/csv"
+                                <button type="button" class="btn btn-sm btn-outline-secondary mb-3"
+                                        data-plantilla-excel="Controller/ProveedoresController.php?action=plantillaMaestro">
+                                    <i class="fas fa-download me-1"></i> Descargar plantilla (Excel)
+                                </button>
+                                <input type="file" id="archivoMaestroProv" accept=".xlsx,.xls"
                                        class="form-control form-control-sm mb-2">
                                 <button id="btnPreviewMaestroProv" class="btn btn-sm btn-primary">
                                     <i class="fas fa-eye me-1"></i> Ver qué cambiaría

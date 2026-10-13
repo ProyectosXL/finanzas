@@ -14,16 +14,23 @@
  * CobElectronicos sigue exponiendo sus mismos metodos publicos y delega aca: no
  * cambio su contrato ni su comportamiento, y sus pruebas lo fijan.
  *
- * ES CSV, NO .xlsx, Y NO ES UNA PREFERENCIA
- * -----------------------------------------
- * Leer un .xlsx necesita la extension `zip` de PHP, que en el servidor esta
+ * EL USUARIO SUBE UN EXCEL, Y ACA LLEGA TEXTO
+ * --------------------------------------------
+ * Leer un .xlsx en PHP necesita la extension `zip`, que en el servidor esta
  * instalada pero NO habilitada. Habilitarla es tocar el php.ini de produccion y
- * reiniciar Apache; el modulo no puede depender de que ese cambio este hecho en
- * cada entorno. Excel abre y guarda CSV nativamente -Archivo -> Guardar como ->
- * CSV UTF-8-, asi que el costo para el usuario es un paso.
+ * reiniciar Apache, y el modulo no puede depender de que ese cambio este hecho
+ * en cada entorno. Por eso el Excel se lee EN EL NAVEGADOR, con SheetJS
+ * (Js/planilla-excel.js), y lo que llega aca es su primera hoja convertida a
+ * texto separado por tabulaciones: una linea por fila del Excel, las fechas
+ * como aaaa-mm-dd y los importes con punto decimal.
  *
- * Y si igual suben un .xlsx, el parser lo detecta por su firma y dice que hacer,
- * en lugar de fallar con un archivo lleno de bytes binarios.
+ * Asi este parser sigue siendo uno solo y sigue siendo puro: la validacion, el
+ * diff y la confirmacion no cambiaron, porque no cambio lo que reciben. Lo
+ * unico que se movio de lugar es la lectura del binario.
+ *
+ * Y si igual llega un .xlsx crudo -alguien que llamo al endpoint sin pasar por
+ * la pantalla-, el parser lo detecta por su firma y dice que hacer, en lugar de
+ * fallar con un archivo lleno de bytes binarios.
  *
  * QUE HACE Y QUE NO
  * -----------------
@@ -38,58 +45,85 @@
  * LA DEFINICION DE COLUMNAS LA PONE EL MODULO
  * -------------------------------------------
  * Cada importacion pasa su propio mapa campo => ['titulo', 'obligatoria',
- * 'ayuda', 'sinonimos'], y de ese unico mapa salen las tres cosas: la plantilla
- * que se descarga, el mapeo del encabezado al parsear y la ayuda en pantalla.
- * Con tres listas distintas, la plantilla y el parser se desincronizan en el
- * primer cambio.
+ * 'tipo', 'ayuda', 'sinonimos'], y de ese unico mapa salen las tres cosas: la
+ * plantilla que se descarga, el mapeo del encabezado al parsear y la ayuda en
+ * pantalla. Con tres listas distintas, la plantilla y el parser se
+ * desincronizan en el primer cambio.
  */
 class Planilla {
 
     /** Separadores que puede traer un CSV exportado de Excel */
     const SEPARADORES = [';', ',', "\t", '|'];
 
+    /** Lo que puede ser una columna, para que la plantilla escriba la celda bien */
+    const TIPOS = ['texto', 'fecha', 'importe'];
+
     /**
-     * Arma la plantilla que se descarga, con sus filas de ejemplo.
+     * La plantilla que se descarga, COMO DEFINICION y no como archivo.
      *
-     * Va con BOM de UTF-8 y separador ';': es lo que Excel en espanol abre en
-     * columnas sin preguntar nada. Sin el BOM, Excel muestra los acentos rotos;
-     * con coma como separador, mete todo en una sola columna.
+     * El .xlsx lo arma el navegador con SheetJS (Js/planilla-excel.js), por el
+     * mismo motivo por el que lo lee el navegador: este servidor no tiene la
+     * extension `zip`. Lo que se manda es lo unico que el navegador no puede
+     * inventar -los titulos, el tipo de cada columna, su ayuda y las filas de
+     * ejemplo- y sale de la MISMA definicion de columnas que usa parsear(). Asi
+     * la plantilla y el parser no pueden desincronizarse: no hay una segunda
+     * lista de titulos en ningun lado, ni en el JS.
+     *
+     * EL TIPO ES LO QUE HACE QUE LA PLANTILLA SE LLENE BIEN. Una celda de fecha
+     * de verdad -y no el texto '15/10/2026'- muestra el calendario y viaja como
+     * fecha; un importe numerico no arrastra separadores de miles; y un codigo
+     * marcado como texto no pierde los ceros a la izquierda que Excel le saca a
+     * un numero. Una columna sin tipo declarado es texto, que es lo que menos
+     * puede salir mal.
      *
      * LAS FILAS DE EJEMPLO VAN CARGADAS, no comentadas. Una plantilla vacia
      * obliga a adivinar el formato del numero y de la fecha, que es justo donde
-     * falla una importacion.
+     * falla una importacion. Las fechas de ejemplo van como aaaa-mm-dd y los
+     * importes como numero: el navegador las escribe con el tipo de su columna.
      *
      * @param array $columnas Definicion de columnas del modulo
      * @param array $ejemplos Filas de ejemplo, cada una en el orden de $columnas
-     * @return string Contenido del archivo
+     * @param string $archivo Nombre del archivo que se descarga, sin extension
+     * @return array ['archivo', 'columnas' => [['titulo', 'tipo', 'obligatoria',
+     *               'ayuda']], 'filas']
      */
-    public static function plantillaCsv($columnas, $ejemplos = []) {
-        $titulos = [];
+    public static function plantilla($columnas, $ejemplos, $archivo) {
+        $cols = [];
 
         foreach ($columnas as $c) {
-            $titulos[] = $c['titulo'];
+            $tipo = isset($c['tipo']) ? $c['tipo'] : 'texto';
+
+            $cols[] = [
+                'titulo' => $c['titulo'],
+                'tipo' => in_array($tipo, self::TIPOS, true) ? $tipo : 'texto',
+                'obligatoria' => !empty($c['obligatoria']),
+                'ayuda' => isset($c['ayuda']) ? $c['ayuda'] : ''
+            ];
         }
 
-        $filas = array_merge([$titulos], $ejemplos);
-        $csv = "\xEF\xBB\xBF";   // BOM, para que Excel respete los acentos
-
-        foreach ($filas as $fila) {
-            $csv .= implode(';', $fila) . "\r\n";
-        }
-
-        return $csv;
+        return ['archivo' => $archivo, 'columnas' => $cols, 'filas' => array_values($ejemplos)];
     }
 
     /**
-     * Lee el contenido de una planilla CSV y devuelve las filas crudas.
+     * Lee el contenido de una planilla y devuelve las filas crudas.
      *
-     * Detecta el separador y acepta los formatos de numero y de fecha que
-     * exporta Excel en cualquiera de los dos idiomas: el usuario no tiene que
-     * saber en que configuracion regional esta su Excel.
+     * Lo normal es el texto que arma el navegador desde un Excel -separado por
+     * tabulaciones, con cada celda entre comillas-, pero se sigue aceptando un
+     * CSV como los que exporta Excel: detecta el separador y acepta los
+     * formatos de numero y de fecha de cualquiera de los dos idiomas, asi que
+     * quien no sabe en que configuracion regional esta su Excel no tiene que
+     * saberlo.
      *
      * Cada fila devuelta lleva su numero de 'linea' en el archivo. Sin eso, un
      * error de importacion dice "hay una fila mal" y el usuario tiene que
      * buscarla a ojo entre mil doscientas.
+     *
+     * LA LINEA ES LA DEL ARCHIVO, CONTANDO LAS VACIAS. Antes las vacias se
+     * filtraban ANTES de numerar, asi que una fila en blanco en el medio corria
+     * todos los numeros de abajo: el error decia "linea 14" de una fila que en
+     * la planilla era la 15. El texto que arma el navegador desde un Excel trae
+     * una linea por fila de la hoja -las vacias incluidas-, asi que contando asi
+     * el numero es el de la fila del Excel, encabezado = fila 1.
      *
      * @param string $contenido Contenido del archivo subido
      * @param array $columnas Definicion de columnas del modulo
@@ -98,17 +132,19 @@ class Planilla {
     public static function parsear($contenido, $columnas) {
         $contenido = (string) $contenido;
 
-        // Un .xlsx es un ZIP: empieza con 'PK'. Se detecta para poder decir que
-        // hacer, en lugar de fallar con un archivo lleno de bytes binarios.
+        /* Un .xlsx es un ZIP: empieza con 'PK'. Desde la pantalla no puede
+           llegar asi -el navegador lo lee y manda texto-, asi que esto es para
+           quien llame al endpoint por su cuenta, y le dice que hacer en lugar de
+           fallar con un archivo lleno de bytes binarios. */
         if (substr($contenido, 0, 2) === 'PK') {
-            throw new Exception('El archivo es un .xlsx y este servidor no puede leerlo. '
-                . 'Abrilo en Excel y guardalo como CSV (Archivo → Guardar como → '
-                . 'CSV UTF-8 delimitado por comas). El contenido es el mismo.');
+            throw new Exception('Llegó un .xlsx sin leer, y este servidor no abre archivos '
+                . 'de Excel: los lee el navegador. Importalo desde la pantalla de importación, '
+                . 'que convierte la primera hoja y manda su contenido.');
         }
 
         if (substr($contenido, 0, 8) === "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1") {
-            throw new Exception('El archivo es un .xls antiguo y este servidor no puede leerlo. '
-                . 'Abrilo en Excel y guardalo como CSV UTF-8.');
+            throw new Exception('Llegó un .xls sin leer, y este servidor no abre archivos de '
+                . 'Excel: los lee el navegador. Importalo desde la pantalla de importación.');
         }
 
         // BOM de UTF-8: si queda, el primer titulo no matchea con nada.
@@ -123,22 +159,33 @@ class Planilla {
             $contenido = mb_convert_encoding($contenido, 'UTF-8', 'Windows-1252');
         }
 
+        /* Se numera sobre TODAS las lineas y recien despues se saltean las
+           vacias: ver la nota del docblock sobre el numero de linea. */
         $lineas = preg_split('/\r\n|\r|\n/', $contenido);
-        $lineas = array_values(array_filter($lineas, function ($l) {
-            return trim($l) !== '';
-        }));
+        $encabezado = null;
 
-        if (empty($lineas)) {
+        foreach ($lineas as $i => $l) {
+            if (trim($l) !== '') {
+                $encabezado = $i;
+                break;
+            }
+        }
+
+        if ($encabezado === null) {
             throw new Exception('El archivo está vacío');
         }
 
-        $separador = self::detectarSeparador($lineas[0]);
-        $mapa = self::mapearEncabezado(str_getcsv($lineas[0], $separador), $columnas);
+        $separador = self::detectarSeparador($lineas[$encabezado]);
+        $mapa = self::mapearEncabezado(str_getcsv($lineas[$encabezado], $separador), $columnas);
 
         $filas = [];
         $errores = [];
 
-        for ($i = 1; $i < count($lineas); $i++) {
+        for ($i = $encabezado + 1; $i < count($lineas); $i++) {
+            if (trim($lineas[$i]) === '') {
+                continue;
+            }
+
             $celdas = str_getcsv($lineas[$i], $separador);
             $fila = ['linea' => $i + 1];
             $vacia = true;
@@ -310,6 +357,11 @@ class Planilla {
      *
      * Un solo punto o coma con tres decimales -'1.648'- es genuinamente
      * ambiguo, asi que la plantilla pide el importe SIN separador de miles.
+     *
+     * LO QUE MANDA EL NAVEGADOR DESDE UN EXCEL NO ES AMBIGUO: una celda
+     * numerica viaja con su valor, sin miles y con punto decimal ('1069326.5',
+     * '-1500'), que con un solo separador es justamente el caso decimal. El
+     * formato con el que se veia en la planilla no viaja. Hay prueba.
      *
      * @param string $valor
      * @return float|null null si no es un numero

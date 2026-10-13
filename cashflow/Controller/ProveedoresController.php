@@ -40,42 +40,9 @@ function bodyJson() {
     return $data;
 }
 
-/**
- * El contenido del archivo subido.
- *
- * Acepta las dos formas: un upload real (multipart) y el contenido pegado en un
- * campo de texto. La segunda existe para poder probar el circuito sin subir
- * nada, y porque un usuario con el CSV abierto puede pegarlo mas rapido que
- * guardarlo y buscarlo.
- *
- * @return string
- */
-function contenidoSubido() {
-    if (isset($_FILES['archivo']) && is_uploaded_file($_FILES['archivo']['tmp_name'])) {
-        if ($_FILES['archivo']['error'] !== UPLOAD_ERR_OK) {
-            throw new Exception('El archivo no se pudo subir (código '
-                . $_FILES['archivo']['error'] . ').');
-        }
-
-        return file_get_contents($_FILES['archivo']['tmp_name']);
-    }
-
-    if (isset($_POST['contenido']) && trim($_POST['contenido']) !== '') {
-        return $_POST['contenido'];
-    }
-
-    throw new Exception('No se recibió ningún archivo. Elegí el CSV y volvé a intentar.');
-}
-
-/** Devuelve un CSV como descarga */
-function descargarCsv($contenido, $nombre) {
-    header('Content-Type: text/csv; charset=UTF-8');
-    header('Content-Disposition: attachment; filename="' . $nombre . '"');
-    header('Content-Length: ' . strlen($contenido));
-
-    echo $contenido;
-    exit;
-}
+/* La lectura de lo subido y la respuesta de las plantillas son las mismas que
+   las de Cob. Electronicos: viven en un solo lugar. */
+require_once __DIR__ . '/planilla_subida.php';
 
 try {
     require_once __DIR__ . '/../Class/Proveedores.php';
@@ -89,14 +56,16 @@ try {
     require_once __DIR__ . '/autorizacion.php';
     $usuario = autorizar('Proveedores', $action);
 
-    /* Las dos plantillas van ANTES del try de negocio: son descargas, no JSON, y
-       no necesitan ni base ni datos cargados. */
+    /* Las dos plantillas van ANTES de instanciar nada: no necesitan ni base ni
+       datos cargados. Devuelven la DEFINICION -titulos, tipos y ejemplos, de la
+       misma columnasImportacion() que usa el parser- y el .xlsx lo arma el
+       navegador. Ver Planilla::plantilla(). */
     if ($action === 'plantillaPagos') {
-        descargarCsv(Proveedores::plantillaCsv(), 'plantilla_pagos_proveedores.csv');
+        responderPlantilla(Proveedores::plantilla());
     }
 
     if ($action === 'plantillaMaestro') {
-        descargarCsv(ProveedoresCategorias::plantillaCsv(), 'plantilla_maestro_proveedores.csv');
+        responderPlantilla(ProveedoresCategorias::plantilla());
     }
 
     $prov = new Proveedores();
