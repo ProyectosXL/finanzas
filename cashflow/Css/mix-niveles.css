@@ -156,6 +156,6 @@ select.mix-nivel-select option {
 
 .mix-inactivo .mix-nivel-etiqueta,
 .mix-inactivo select.mix-nivel-select {
-    background-color: color-mix(in srgb, var(--mix-nivel-fondo) 45%, #ffffff);
+    background-color: color-mix(in srgb, var(--mix-nivel-fondo) 65%, #ffffff);
     border-color: color-mix(in srgb, var(--mix-nivel-barra) 40%, #ffffff);
 }
