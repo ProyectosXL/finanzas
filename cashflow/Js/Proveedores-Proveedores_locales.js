@@ -194,7 +194,9 @@
                    servidor sin que nadie lo vea en pantalla. */
                 podarSeleccion();
 
-                pintarAvisos(datos.warnings, 'avisosProv');
+                /* Con su nivel cuando el backend lo manda: "falta la tabla
+                   de fechas" es crítico y abre el panel solo. */
+                pintarAvisos(datos.avisos_con_nivel || datos.warnings, 'avisosProv');
                 // Los indicadores los pinta pintarGrilla(): se miden sobre las
                 // filas visibles, así que cambian con cada filtro.
                 pintarGrilla();
@@ -3296,23 +3298,14 @@
        AYUDANTES
        ================================================================ */
 
+    /**
+     * El panel plegable de todas las pestañas (Js/avisos-panel.js). Antes era
+     * un cartel con X: cerrarlo lo hacía desaparecer hasta la próxima carga,
+     * críticos incluidos. Los avisos pueden venir con nivel o como texto, que
+     * cuenta como atención.
+     */
     function pintarAvisos(avisos, id) {
-        var cont = document.getElementById(id);
-
-        if (!cont) { return; }
-
-        if (!avisos || !avisos.length) {
-            cont.innerHTML = '';
-            return;
-        }
-
-        cont.innerHTML = '<div class="alert alert-warning alert-dismissible fade show" role="alert">'
-            + '<div class="d-flex align-items-start">'
-            +   '<i class="fas fa-circle-info me-2 mt-1"></i>'
-            +   '<div><strong>Sobre estos números</strong><ul class="mb-0 mt-1">'
-            +     avisos.map(function(a) { return '<li>' + escapar(a) + '</li>'; }).join('')
-            +   '</ul></div></div>'
-            + '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+        AvisosPanel.pintar(id, avisos || []);
     }
 
     function conectar(id, fn) {
@@ -3354,12 +3347,9 @@
         if (el) { el.value = (v === null || v === undefined) ? '' : v; }
     }
 
+    /** Un error de carga entra al panel como CRÍTICO: se abre solo */
     function mostrarError(mensaje) {
-        var cont = document.getElementById('avisosProv');
-
-        if (cont) {
-            cont.innerHTML = '<div class="alert alert-danger">' + escapar(mensaje) + '</div>';
-        }
+        AvisosPanel.pintar('avisosProv', [{ nivel: 'danger', texto: mensaje }]);
 
         console.error(mensaje);
     }

@@ -87,13 +87,19 @@ try {
 
             /* Los avisos propios van ADELANTE de los del eje: explican por que
                hay tanto importe en la columna de hoy, y eso se lee antes que lo
-               que quedo afuera del horizonte. */
-            $payload['warnings'] = array_merge(
-                $prov->getAvisos(),
-                $prov->avisosCronograma(),
-                Proveedores::avisosPendientes($items),
-                $payload['warnings']
+               que quedo afuera del horizonte.
+
+               Van dos veces: como textos, como siempre, y CON SU NIVEL, que es
+               lo que lee el panel de avisos de la pestaña. Son los mismos
+               metodos que lee el tablero, asi que el nivel es el mismo en los
+               dos lados; los del eje no traen nivel y son atencion. */
+            $payload['avisos_con_nivel'] = array_merge(
+                $prov->getAvisosConNivel(),
+                $prov->avisosCronogramaConNivel(),
+                Proveedores::avisosPendientesConNivel($items),
+                Aviso::lista($payload['warnings'])
             );
+            $payload['warnings'] = Aviso::textos($payload['avisos_con_nivel']);
 
             /* Los indicadores de la pestaña. El primero es el que importa: lo
                vencido sin fecha cargada es lo que esta apilado en el dia uno. */

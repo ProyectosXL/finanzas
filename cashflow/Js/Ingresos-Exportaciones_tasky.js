@@ -110,19 +110,8 @@
      * que se pintan arriba de la tabla y no como notificación.
      */
     function pintarAvisos() {
-        var cont = document.getElementById('avisosExpTasky');
-
-        if (!cont) {
-            return;
-        }
-
-        var avisos = (datos && datos.warnings) || [];
-
-        cont.innerHTML = avisos.length
-            ? '<div class="alert alert-warning py-2 px-3 mb-3"><small>'
-                + '<i class="fas fa-triangle-exclamation me-1"></i>'
-                + avisos.map(escaparAttr).join(' ') + '</small></div>'
-            : '';
+        // El panel plegable de todas las pestañas: ver Js/avisos-panel.js.
+        AvisosPanel.pintar('avisosExpTasky', (datos && datos.warnings) || []);
     }
 
     function generarTabla() {

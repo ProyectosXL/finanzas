@@ -96,7 +96,7 @@
                 pintar();
             })
             .catch(function(e) {
-                avisar(['No se pudieron leer las tarjetas: ' + e.message]);
+                avisar([{ nivel: 'danger', texto: 'No se pudieron leer las tarjetas: ' + e.message }]);
 
                 return false;
             });
@@ -540,16 +540,13 @@
        UTILIDADES
        ================================================================ */
 
+    /**
+     * El panel plegable de todas las pestañas (Js/avisos-panel.js). Los textos
+     * sueltos cuentan como atención; un error de carga llega como
+     * {nivel: 'danger'} y abre el panel solo.
+     */
     function avisar(lista) {
-        var cont = document.getElementById('ptarAvisos');
-
-        if (!cont) { return; }
-
-        cont.innerHTML = (!lista || !lista.length) ? '' :
-            '<div class="alert alert-warning py-2 px-3 mb-3 small">' +
-                '<i class="fas fa-triangle-exclamation me-1"></i>' +
-                lista.map(esc).join('<br>') +
-            '</div>';
+        AvisosPanel.pintar('ptarAvisos', lista || []);
     }
 
     function valor(id, v) {

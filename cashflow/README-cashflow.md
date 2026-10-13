@@ -1562,6 +1562,30 @@ Las notificaciones las resuelve `Js/notificaciones.js` (`Notificacion.exito / er
 
 **`pedirFecha({ min })` valida el mínimo al confirmar**, no sólo lo pone en el input: el atributo `min` limita el calendario pero deja tipear cualquier fecha, y una anterior se devolvía como buena. Ahora no cierra y lo dice (`antesDelMin` para un texto propio). Lo usan Cobranzas FR y May, que no aceptan fechas de cobro pasadas. El servidor valida igual: el diálogo explica y bloquea, no autoriza.
 
+### Los avisos de cada pestaña, en un panel que se pliega: `Js/avisos-panel.js`
+
+> Es **nuevo**, de `feature/cashflow-excel-medios-ux`. Antes sólo el tablero tenía panel; cada pestaña pintaba sus avisos a su manera —un cartel amarillo con una lista, los avisos pegados con un espacio, uno por renglón, un cartel con X— y siempre abiertos, así que en una pestaña con cinco avisos de configuración la tabla empezaba media pantalla más abajo todos los días.
+
+Es el panel *"Sobre estos números"* del tablero, extraído para todas, con su hoja `Css/avisos-panel.css`. Se cargan una vez en `index.php`, el script en el `<head>` como `permisos.js`, porque la pestaña inicial se incluye en línea.
+
+```js
+AvisosPanel.pintar('avisosSaldos', avisos);   // textos o {nivel, texto, seccion}
+```
+
+- **El título dice *"Avisos (N)"*** y lleva un chip por nivel con su cantidad —crítico, atención, info—, así que cerrado sigue diciendo qué hay.
+- **Arranca cerrado**, salvo que haya un **crítico**: ahí se abre solo, y no se lo puede esconder recordando *"cerrado"*.
+- **Recuerda abierto o cerrado por contenedor**, en `localStorage` (`avisos_panel_<id>`) con `try/catch`.
+- **Los avisos van ordenados por nivel** y, dentro de cada uno, en el orden en que llegaron.
+- **Un texto suelto, sin nivel, cuenta como atención**: la mayoría de las pestañas todavía manda textos. Las que ya tenían nivel lo pasan —Saldos, el universo de Cobranzas FR, y Proveedores Locales, que ahora manda `avisos_con_nivel` además de los textos—.
+- **Los errores de carga entran como críticos**, así el panel se abre solo: los de Generales, Compras Exterior, Logística y Tarjetas en Parámetros, más Logística Local, Pagos con Tarjetas, Compras Proyectadas, Proveedores Locales, la estructura del Cashflow y el tablero.
+- **Sin avisos el contenedor queda vacío**, como antes.
+
+**El tablero lo usa con grupos** —uno por pestaña, que llegan agrupados del backend (`Aviso::agrupar()`)—, con su título de siempre, el link *Ir a la pestaña* y sus mismas claves de `localStorage`: quien había dejado el panel o un grupo abierto lo sigue encontrando así.
+
+**Lo usan todos los contenedores de avisos de las pestañas**, incluidas las sub-pestañas de Parámetros; `tests/test_avisos.php` verifica con un `grep` sobre `Tabs/` que no falte ninguno. **Lo que no entra, y se sigue viendo siempre**: los carteles explicativos fijos (`alert-info` del PHP), los bloqueos y los avisos de la previsualización de una importación, los resúmenes de filtro al lado del período, las notificaciones, y `#avisosEscalaCob` de Parámetros › Cobranzas, que son errores de validación de la escala y apagan *Guardar*: plegados, el botón quedaría apagado sin que se vea por qué.
+
+**Las confirmaciones de Cob. Electrónicos van aparte**, en `#notifCobel`: compartían el contenedor de los avisos, y adentro de un panel que se redibuja entero y se pliega se borrarían con la próxima carga o quedarían escondidas.
+
 ### Mientras algo carga: `Js/cargando.js`
 
 Un solo indicador para las diecinueve pestañas y para `loadTab()`, cargado una vez en `index.php` con su hoja `Css/cargando.css`. Antes había diecinueve copias del marcado `.loading-spinner` y diez del CSS, y las pestañas sin copia propia —el tablero, *Proyección*, *Proveedores Locales* y las sub-pestañas de *Parámetros*— se veían bien sólo si antes se había abierto otra cuyo CSS definía la regla sin prefijo.

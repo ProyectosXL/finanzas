@@ -163,22 +163,13 @@
         }
     }
 
-    /** Si el script SQL del módulo no se corrió, se avisa en vez de romper */
+    /**
+     * El panel plegable de todas las pestañas (Js/avisos-panel.js). Los textos
+     * sueltos cuentan como atención; un error de carga llega como
+     * {nivel: 'danger'} y abre el panel solo.
+     */
     function pintarAvisos() {
-        var cont = document.getElementById('avisosParamSaldos');
-        var avisos = modulo.avisos || [];
-
-        if (!cont) {
-            return;
-        }
-
-        cont.innerHTML = avisos.length
-            ? avisos.map(function(a) {
-                  return '<div class="alert alert-warning py-2 px-3 mb-3">' +
-                         '<i class="fas fa-triangle-exclamation me-1"></i><small>' +
-                         escapar(a) + '</small></div>';
-              }).join('')
-            : '';
+        AvisosPanel.pintar('avisosParamSaldos', modulo.avisos || []);
     }
 
     /* ================================================================

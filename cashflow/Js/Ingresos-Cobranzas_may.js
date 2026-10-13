@@ -290,19 +290,8 @@
      * Los avisos del backend: lo que quedó fuera del horizonte o sin fecha.
      */
     function pintarAvisos() {
-        var cont = document.getElementById('avisosCobMay');
-
-        if (!cont) {
-            return;
-        }
-
-        var avisos = (datosCobranzas && datosCobranzas.warnings) || [];
-
-        cont.innerHTML = avisos.length
-            ? '<div class="alert alert-warning py-2 px-3 mb-3"><small>'
-                + '<i class="fas fa-triangle-exclamation me-1"></i>'
-                + avisos.join(' ') + '</small></div>'
-            : '';
+        // El panel plegable de todas las pestañas: ver Js/avisos-panel.js.
+        AvisosPanel.pintar('avisosCobMay', (datosCobranzas && datosCobranzas.warnings) || []);
     }
 
     function generarTabla() {

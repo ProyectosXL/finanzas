@@ -468,20 +468,13 @@
      * de sucursales que no se pudo leer. No son decoración: explican por qué
      * un PPP está vacío o por qué aparecen franquicias dadas de baja.
      */
+    /**
+     * El panel plegable de todas las pestañas (Js/avisos-panel.js). Los textos
+     * sueltos cuentan como atención; un error de carga llega como
+     * {nivel: 'danger'} y abre el panel solo.
+     */
     function pintarAvisos() {
-        var cont = document.getElementById('avisosParamCob');
-
-        if (!cont) {
-            return;
-        }
-
-        cont.innerHTML = avisos.length
-            ? avisos.map(function(a) {
-                  return '<div class="alert alert-warning py-2 px-3 mb-2">'
-                      + '<i class="fas fa-triangle-exclamation me-1"></i><small>'
-                      + escapar(a) + '</small></div>';
-              }).join('')
-            : '';
+        AvisosPanel.pintar('avisosParamCob', avisos || []);
     }
 
     /* ================================================================

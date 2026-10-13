@@ -247,10 +247,9 @@
             return;
         }
 
-        cont.innerHTML = (modulo.avisos || []).map(function(a) {
-            return '<div class="alert alert-warning py-2 px-3 mb-0">' +
-                   '<i class="fas fa-triangle-exclamation me-1"></i><small>' + escapar(a) + '</small></div>';
-        }).join('');
+        // El panel plegable de todas las pestañas: ver Js/avisos-panel.js. El
+        // contenedor se esconde sin avisos para no dejar su relleno vacío.
+        AvisosPanel.pintar(cont, modulo.avisos || []);
 
         cont.style.display = (modulo.avisos || []).length ? '' : 'none';
     }

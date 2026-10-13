@@ -139,22 +139,13 @@
             + 'y de qué módulo saca sus datos cada fila.';
     }
 
+    /**
+     * El panel plegable de todas las pestañas (Js/avisos-panel.js). Los textos
+     * sueltos cuentan como atención; un error de carga llega como
+     * {nivel: 'danger'} y abre el panel solo.
+     */
     function pintarAvisos() {
-        var cont = document.getElementById('cfeAvisos');
-
-        if (!cont) {
-            return;
-        }
-
-        if (!datos.avisos || datos.avisos.length === 0) {
-            cont.innerHTML = '';
-            return;
-        }
-
-        cont.innerHTML = datos.avisos.map(function(a) {
-            return '<div class="alert alert-warning py-2 px-3">'
-                + '<i class="fas fa-triangle-exclamation me-2"></i>' + escapar(a) + '</div>';
-        }).join('');
+        AvisosPanel.pintar('cfeAvisos', (datos && datos.avisos) || []);
     }
 
     /* ================================================================
@@ -1187,12 +1178,9 @@
         }
     }
 
+    /** Un error de carga entra al panel como CRÍTICO: se abre solo */
     function avisoError(mensaje) {
-        var cont = document.getElementById('cfeAvisos');
-
-        if (cont) {
-            cont.innerHTML = '<div class="alert alert-danger">' + escapar(mensaje) + '</div>';
-        }
+        AvisosPanel.pintar('cfeAvisos', [{ nivel: 'danger', texto: mensaje }]);
 
         console.error(mensaje);
     }

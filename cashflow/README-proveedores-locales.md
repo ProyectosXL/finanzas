@@ -1219,7 +1219,7 @@ Guardar recarga la pestaña entera: la fecha cambia en qué columna del eje cae 
 
 **La tabla abre ordenada por *Fecha de pago* ascendente**: lo más urgente arriba. Es `porDefecto` en `crearOrdenTabla()`, y la celda ya llevaba `data-orden` con la fecha que muestra —la cargada, la del cronograma o el vencimiento—. El `<th>` lleva `data-orden-nombre` **igual a su rótulo**, para que quien ya ordenó a mano por esa columna no pierda su orden; la clave sigue siendo el id de la tabla. Un orden elegido a mano sigue mandando, y el default nunca se escribe en `localStorage`. Ver *Las que abren ordenadas* en `README-cashflow.md`.
 
-Componentes estándar: tarjetas KPI, buscador, selector de eje temporal (`Js/eje-vistas.js`), columnas fijas, Actualizar, Exportar a Excel y avisos por `Js/notificaciones.js`.
+Componentes estándar: tarjetas KPI, buscador, selector de eje temporal (`Js/eje-vistas.js`), columnas fijas, Actualizar, Exportar a Excel, notificaciones por `Js/notificaciones.js`, y los avisos de la pestaña y del maestro en el panel plegable de todas las pestañas (`Js/avisos-panel.js`), con su nivel: cerrado, salvo que haya un crítico.
 
 ### La solapa Maestro: encabezado fijo y su propio Actualizar
 

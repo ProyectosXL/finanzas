@@ -80,7 +80,7 @@
             })
             .catch(function(e) {
                 Cargando.ocultar('loadingTarj');
-                avisar(['No se pudieron calcular los pagos con tarjetas: ' + e.message]);
+                avisar([{ nivel: 'danger', texto: 'No se pudieron calcular los pagos con tarjetas: ' + e.message }]);
             });
     }
 
@@ -1555,16 +1555,13 @@
             });
     }
 
+    /**
+     * El panel plegable de todas las pestañas (Js/avisos-panel.js). Los textos
+     * sueltos cuentan como atención; un error de carga llega como
+     * {nivel: 'danger'} y abre el panel solo.
+     */
     function avisar(lista) {
-        var cont = document.getElementById('avisosTarj');
-
-        if (!cont) { return; }
-
-        cont.innerHTML = (!lista || !lista.length) ? '' :
-            '<div class="alert alert-warning py-2 px-3 mb-3 small">'
-            + '<i class="fas fa-triangle-exclamation me-1"></i>'
-            + lista.map(esc).join('<br>')
-            + '</div>';
+        AvisosPanel.pintar('avisosTarj', lista || []);
     }
 
     function filaVacia(cols, mensaje) {

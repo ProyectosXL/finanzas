@@ -39,7 +39,14 @@ $edita = AuthCashflow::puedeEditar('cob_electronicos');
 -->
 <div class="tab-cobel"<?php echo AuthCashflow::atributoEdicion('cob_electronicos'); ?>>
 
+    <!-- Los avisos sobre los datos, en el panel plegable de todas las
+         pestañas (Js/avisos-panel.js). -->
     <div id="avisosCobel"></div>
+
+    <!-- Las confirmaciones de un guardado puntual van aparte: no son avisos
+         sobre los datos, y dentro del panel se borrarían con el próximo
+         redibujo o quedarían escondidas con el panel cerrado. -->
+    <div id="notifCobel"></div>
 
     <!-- ============================================================
          INDICADORES

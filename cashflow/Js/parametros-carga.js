@@ -110,26 +110,11 @@ var ParametrosCarga = (function() {
 
     /**
      * Los avisos de arriba de la pestaña: scripts pendientes. Llegan con la
-     * primera carga y se refrescan con cualquier Actualizar. Los pinta el panel
-     * de avisos compartido cuando existe; si no, como antes.
+     * primera carga y se refrescan con cualquier Actualizar. Van en el panel
+     * plegable de todas las pestañas (Js/avisos-panel.js).
      */
     function pintarAvisosGenerales(avisos) {
-        var cont = document.getElementById('avisosParametros');
-
-        if (!cont) {
-            return;
-        }
-
-        if (typeof AvisosPanel !== 'undefined') {
-            AvisosPanel.pintar(cont, avisos || []);
-            return;
-        }
-
-        cont.innerHTML = (avisos || []).map(function(a) {
-            return '<div class="alert alert-warning py-2 px-3 mb-2">'
-                + '<i class="fas fa-triangle-exclamation me-1"></i><small>'
-                + String(a).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</small></div>';
-        }).join('');
+        AvisosPanel.pintar('avisosParametros', avisos || []);
     }
 
     /**

@@ -233,33 +233,16 @@
        AVISOS
        ================================================================ */
 
+    /**
+     * El panel plegable de todas las pestañas (Js/avisos-panel.js). Un error
+     * de carga entra como CRÍTICO: el panel se abre solo, y no se lo puede
+     * esconder recordando "cerrado". Los avisos sin nivel cuentan como
+     * atención.
+     */
     function pintarAvisos(lista, tipo) {
-        var cont = document.getElementById('avisosComprasProy');
-
-        if (!cont) { return; }
-
-        if (!lista || !lista.length) {
-            cont.innerHTML = '';
-
-            return;
-        }
-
-        var clase = (tipo === 'error') ? 'alert-danger' : 'alert-warning';
-        var icono = (tipo === 'error') ? 'fa-circle-exclamation' : 'fa-triangle-exclamation';
-
-        cont.innerHTML =
-            '<div class="alert ' + clase + ' py-2 px-3 mb-3">' +
-                '<div class="d-flex align-items-start gap-2">' +
-                    '<i class="fas ' + icono + ' mt-1"></i>' +
-                    '<div class="flex-grow-1">' +
-                        '<ul class="mb-0 ps-3 small">' +
-                            lista.map(function(a) {
-                                return '<li>' + esc(a) + '</li>';
-                            }).join('') +
-                        '</ul>' +
-                    '</div>' +
-                '</div>' +
-            '</div>';
+        AvisosPanel.pintar('avisosComprasProy', (lista || []).map(function(a) {
+            return (tipo === 'error') ? { nivel: 'danger', texto: a } : a;
+        }));
     }
 
     /**
