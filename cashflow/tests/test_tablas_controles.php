@@ -1436,6 +1436,70 @@ foreach (['previsualizarDeposito', 'depositarCheques', 'deshacerDepositos'] as $
     ]);
 }
 
+seccion('Echeqs > Cheques en Cartera: un deposito junta cheques de varios bancos');
+
+/** El cuerpo de una funcion del JS de Echeqs, hasta la siguiente */
+function cuerpoFnEch($js, $nombre) {
+    $ini = strpos($js, 'function ' . $nombre . '(');
+
+    if ($ini === false) {
+        return '';
+    }
+
+    $fin = strpos($js, "\n    function ", $ini + 1);
+
+    return substr($js, $ini, ($fin === false ? strlen($js) : $fin) - $ini);
+}
+
+$fnBotones = cuerpoFnEch($echJs, 'pintarBotonesDeposito');
+chequear('pintarBotonesDeposito() ya no apaga Depositar por bancos mezclados', [false, false], [
+    strpos($fnBotones, 'un solo banco emisor') !== false,
+    strpos($fnBotones, 'bancos.length > 1 ?') !== false
+]);
+chequear('pero sigue apagandolo por un cheque sin banco', true,
+    strpos($fnBotones, "(sinBanco ? 'Hay ' + sinBanco + ' cheque(s) sin banco emisor") !== false);
+chequear('y su titulo dice de que banco, o de cuantos', [1, 1], [
+    substr_count($fnBotones, "var deQuien = (bancos.length === 1 ? bancos[0] : bancos.length + ' bancos');"),
+    substr_count($fnBotones, "'Depositar ' + sel.length + ' cheque(s) de ' + deQuien")
+]);
+
+$fnDialogo = cuerpoFnEch($echJs, 'confirmarDeposito');
+chequear('el dialogo dice la tanda que armo el servidor', 1,
+    substr_count($fnDialogo, "linea('Cheques', escapar(c.tanda))"));
+chequear('y dibuja el desglose por banco cuando hay mas de uno', 1,
+    substr_count($fnDialogo, "((c.bancos || []).length > 1 ? desgloseBancos(c.bancos) : '')"));
+chequear('el aviso de exito dice lo mismo que el dialogo', 1,
+    substr_count($fnDialogo, "Notificacion.exito(r.calculo.tanda + ' depositados.'"));
+
+$fnDesglose = cuerpoFnEch($echJs, 'desgloseBancos');
+chequear('el desglose muestra banco, cantidad, bruto y neto de cada uno', true,
+    strpos($fnDesglose, 'escapar(b.banco)') !== false && strpos($fnDesglose, 'b.cantidad') !== false
+    && strpos($fnDesglose, 'pesosPlano(b.bruto)') !== false && strpos($fnDesglose, 'pesosPlano(b.neto)') !== false);
+chequear('y no suma ni ordena nada: lo arma el servidor', [false, false],
+    [strpos($fnDesglose, '+=') !== false, strpos($fnDesglose, '.sort(') !== false]);
+
+$echCss = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Css/Ingresos-Echeqs.css'));
+chequear('con muchos bancos, el desglose hace scroll adentro del dialogo', true,
+    strpos($fnDesglose, 'class="ech-dialogo-bancos"') !== false
+    && preg_match('/\.ech-dialogo-bancos \{[^}]*max-height:[^}]*overflow-y: auto;/', $echCss) === 1);
+
+/* NINGUN TEXTO DEL CIRCUITO DICE YA LA REGLA VIEJA. Limitado a los archivos
+   de echeqs: "mismo banco" es correcto en Tarjetas o en Saldos. */
+$textosViejos = ['un solo banco emisor', 'mismo banco', 'bancos mezclados', 'de un banco emisor',
+                 'de UN banco'];
+$archivosDeposito = [
+    'Class/Echeqs.php', 'Controller/EcheqsController.php', 'Js/Ingresos-Echeqs.js', 'Tabs/echeqs.php'
+];
+
+foreach ($archivosDeposito as $archivo) {
+    $txt = file_get_contents(__DIR__ . '/../' . $archivo);
+    $hallados = array_values(array_filter($textosViejos, function ($t) use ($txt) {
+        return mb_stripos($txt, $t) !== false;
+    }));
+
+    chequear($archivo . ' ya no dice que un deposito es de un solo banco', [], $hallados);
+}
+
 seccion('Echeqs > Cheques en Cartera: las columnas nuevas no corren a las demas');
 
 /* LOS ENCABEZADOS DE LA PRIMERA FILA, EN ORDEN. Las columnas fijas se eligen
