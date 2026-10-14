@@ -22,9 +22,10 @@
  * vencido sin fecha son cientos de vencimientos y el caso real no es una
  * factura, son las ocho de un proveedor: ver fecharSeleccion().
  *
- * NADA SE IMPORTA SIN VER EL DIFF ANTES. Las tres operaciones masivas —maestro,
- * pagos y conciliación— tienen dos pasos: primero se pide qué cambiaría y
- * después, con otra llamada, se aplica.
+ * NADA SE IMPORTA SIN VER EL DIFF ANTES. Las operaciones masivas —maestro,
+ * pagos y asignar retenciones— tienen dos pasos: primero se pide qué cambiaría
+ * y después, con otra llamada, se aplica. La conciliación contra Tango ya no es
+ * una de ellas: corre sola en el servidor al cargar, y avisa lo que cambió.
  *
  * FECHAS: el backend manda siempre 'Y-m-d'. Nunca se hace new Date(string), que
  * es de donde salen los corrimientos de un día.
@@ -72,7 +73,6 @@
 
         conectar('btnRefreshProv', cargar);
         conectar('btnExportProv', function() { exportarTabla('tablaProveedores', nombreExport()); });
-        conectar('btnConciliarProv', previewConciliacion);
 
         conectar('btnPreviewPagosProv', function() { previewImportacion('Pagos'); });
         conectar('btnPreviewMaestroProv', function() { previewImportacion('Maestro'); });
@@ -94,6 +94,38 @@
 
         var soloExclM = document.getElementById('soloExcluidosMaestroProv');
         if (soloExclM) { soloExclM.addEventListener('change', pintarMaestro); }
+
+        ['filtroRubroEcoMaestroProv', 'filtroRubroMaestroProv', 'filtroFormaMaestroProv',
+         'filtroRetMaestroProv'].forEach(function(id) {
+            var sel = document.getElementById(id);
+            if (sel) { sel.addEventListener('change', pintarMaestro); }
+        });
+
+        /* La asignación de retenciones de a muchos: la selección, el diálogo y
+           su previsualización. Ver "LAS RETENCIONES EN EL MAESTRO". */
+        var selTodosM = document.getElementById('selTodosMaestroProv');
+        if (selTodosM) { selTodosM.addEventListener('change', seleccionarTodosMaestro); }
+
+        conectar('btnAsignarRetProv', abrirAsignarRet);
+        conectar('btnLimpiarSelMaestroProv', function() {
+            selMaestro = {};
+            pintarMaestro();
+        });
+        conectar('btnConfirmarRetProv', confirmarAsignarRet);
+
+        var impRet = document.getElementById('retProvImpuesto');
+        if (impRet) {
+            impRet.addEventListener('change', function() {
+                ajustarAccionesRet();
+                pedirPlanRet();
+            });
+        }
+
+        Array.prototype.forEach.call(document.querySelectorAll('input[name="retProvAccion"]'),
+            function(r) { r.addEventListener('change', pedirPlanRet); });
+
+        var pctRet = document.getElementById('retProvPct');
+        if (pctRet) { pctRet.addEventListener('input', pedirPlanRet); }
 
         conectar('btnNuevoProv', function() { abrirForm(null); });
         conectar('btnRefreshMaestroProv', actualizarMaestro);
@@ -246,6 +278,7 @@
                    qué, que es indistinguible de una que no se construyó. */
                 pintarAvisos(maestro.avisos, 'avisosMaestroProv');
 
+                pintarFiltrosMaestro();
                 pintarMaestro();
                 pintarFaltantes();
             })
@@ -290,6 +323,16 @@
             + deTotal(k.vencimientos !== u.vencimientos, 'de ' + plata(u.total)
                 + ' en ' + u.vencimientos));
 
+        /* Lo retenido, aparte y por impuesto activo: no sale de la caja, así que
+           no suma en el neto, pero se dice cuánto es. */
+        var imps = impuestosGrilla();
+
+        texto('retenidoProv', imps.length
+            ? 'Retenido: ' + imps.map(function(i) {
+                return i.NOMBRE + ' ' + plata(k.retenido_por_impuesto[i.CODIGO] || 0);
+              }).join(' · ')
+            : '');
+
         texto('vencidoProv', plata(k.vencido_sin_fecha));
         texto('detalleVencidoProv', (k.n_vencido_sin_fecha
             ? k.n_vencido_sin_fecha + ' comprobantes — nadie dijo cuándo se pagan'
@@ -329,12 +372,20 @@
     function calcularIndicadores(filas) {
         var k = { total: 0, vencimientos: 0, proveedores: 0,
                   vencido_sin_fecha: 0, n_vencido_sin_fecha: 0,
-                  con_fecha: 0, n_con_fecha: 0 };
+                  con_fecha: 0, n_con_fecha: 0, retenido: 0, retenido_por_impuesto: {} };
 
         var provs = {};
 
         filas.forEach(function(f) {
-            var importe = Number(f.IMPORTE_PENDIENTE) || 0;
+            /* Lo que sale de la caja, igual que el eje y la fila del tablero. */
+            var importe = aPagar(f);
+
+            k.retenido += Number(f.RETENIDO) || 0;
+
+            Object.keys(f.RETENIDO_POR_IMPUESTO || {}).forEach(function(c) {
+                k.retenido_por_impuesto[c] = (k.retenido_por_impuesto[c] || 0)
+                    + (Number(f.RETENIDO_POR_IMPUESTO[c]) || 0);
+            });
 
             /* UN COMPROBANTE PAGADO CON DOS MEDIOS ES UNO: la segunda parte suma
                su importe y no se cuenta. Misma regla que el backend
@@ -521,6 +572,8 @@
 
            La fila de arriba ya no lleva la leyenda de la vista -la dicen los
            botones- sino los totales, y esos los pinta pintarTotales(). */
+        pintarEncabezadoImpuestos();
+
         document.getElementById('headerSubProv').innerHTML = cols.map(function(c) {
             var meta = vistas.meta(c) || {};
             var parcial = vistas.esMes(c) && meta.parcial;
@@ -575,7 +628,15 @@
                 + '<td class="center">' + fechaCorta(f.FECHA_EMIS) + '</td>'
                 + '<td class="center">' + celdaVto(f) + '</td>'
                 + celdaImporte(f)
-                + '<td class="currency fw-bold">' + plata(f.IMPORTE_PENDIENTE) + '</td>'
+                + '<td class="currency">' + plata(f.IMPORTE_PENDIENTE) + '</td>'
+                + celdaRetenciones(f)
+                + impuestosGrilla().map(function(i) {
+                    var r = (f.RETENIDO_POR_IMPUESTO || {})[i.CODIGO];
+
+                    return '<td class="currency prov-solo-export" data-exportar-solo>'
+                        + (r !== undefined ? plata(r) : '') + '</td>';
+                  }).join('')
+                + '<td class="currency fw-bold">' + plata(aPagar(f)) + '</td>'
                 + celdaFechaPago(f)
                 + '<td class="center">' + celdaForma(f) + '</td>'
                 + '<td class="center">' + celdaExcluir(f) + '</td>';
@@ -591,7 +652,7 @@
         });
 
         if (!filas.length) {
-            html = '<tr><td colspan="' + (COLS_DESC + cols.length) + '" '
+            html = '<tr><td colspan="' + (COLS_DESC + impuestosGrilla().length + cols.length) + '" '
                  + 'class="text-center text-muted py-4">No hay cuentas a pagar que coincidan '
                  + 'con el filtro.</td></tr>';
         }
@@ -612,12 +673,132 @@
      * "no hay resultados", y las dos se corren en silencio cuando se agrega una
      * columna: el síntoma es una tabla desalineada que nadie relaciona con el
      * cambio que la causó.
+     *
+     * Son las VISIBLES. Las de cada impuesto, que sólo bajan al Excel, se suman
+     * aparte con impuestosGrilla().
      */
-    var COLS_DESC = 13;
+    var COLS_DESC = 15;
+
+    /* ================================================================
+       LAS RETENCIONES EN LA GRILLA
+
+       La columna Pendiente es el total de la factura; Retenciones, lo que se
+       le retiene en la orden de pago; Neto a pagar, lo que sale de la caja. El
+       eje va en NETO, igual que la fila del tablero. Ningún importe se calcula
+       acá: cada fila llega con su RETENCION, su RETENIDO y su IMPORTE_A_PAGAR
+       resueltos por el backend (Proveedores::conRetencion()).
+       ================================================================ */
+
+    /** Los impuestos activos, en su orden. Vacío sin el script. */
+    function impuestosGrilla() {
+        var r = (datos && datos.retenciones) || {};
+
+        return r.disponible ? (r.impuestos || []) : [];
+    }
+
+    /** Lo que sale de la caja. Una fila sin el campo aporta su pendiente. */
+    function aPagar(f) {
+        var v = (f.IMPORTE_A_PAGAR !== undefined && f.IMPORTE_A_PAGAR !== null)
+            ? f.IMPORTE_A_PAGAR : f.IMPORTE_PENDIENTE;
+
+        return Number(v) || 0;
+    }
+
+    /**
+     * Una columna por impuesto, después de Retenciones, OCULTAS EN PANTALLA y
+     * marcadas data-exportar-solo: el Excel baja una por impuesto, que es lo que
+     * en pantalla dice el tooltip. Ver Js/tabla-export.js.
+     */
+    function pintarEncabezadoImpuestos() {
+        var th = document.getElementById('thRetProv');
+
+        if (!th) { return; }
+
+        Array.prototype.forEach.call(th.parentNode.querySelectorAll('.prov-ret-imp-th'), function(x) {
+            x.parentNode.removeChild(x);
+        });
+
+        var despues = th.nextSibling;
+
+        impuestosGrilla().forEach(function(i) {
+            var nuevo = document.createElement('th');
+
+            nuevo.setAttribute('rowspan', '2');
+            nuevo.setAttribute('data-exportar-solo', '');
+            nuevo.className = 'prov-solo-export prov-ret-imp-th';
+            nuevo.textContent = 'Ret. ' + i.NOMBRE;
+            th.parentNode.insertBefore(nuevo, despues);
+        });
+    }
+
+    /**
+     * La celda de Retenciones: el total retenido y, en el tooltip, cada
+     * impuesto con su alícuota y de dónde sale. Vacía donde no aplica, con el
+     * motivo en el tooltip.
+     */
+    function celdaRetenciones(f) {
+        var r = f.RETENCION;
+
+        if (!r) { return '<td></td>'; }
+
+        /* En un comprobante en dos medios la retención va entera en la parte
+           1/2: la 2/2 lo dice y no la repite, para que los totales no la
+           dupliquen. */
+        if (esParteExtra(f)) {
+            return '<td class="text-center text-muted small" title="La retención de este '
+                + 'comprobante va en su parte 1/2: se calcula sobre la factura entera.">—</td>';
+        }
+
+        if (!r.aplica) {
+            var motivo = {
+                SIN_SCRIPT: '',
+                FORMA: 'No lleva retención: no se paga por orden de pago (' + (f.FORMA_PAGO_VIGENTE || '')
+                    + ').',
+                NC: 'Las notas de crédito no llevan retención.',
+                SIN_BASE: '',
+                SIN_IMPUESTOS: 'A este proveedor no se le aplica ningún impuesto.',
+                SIN_GENERAL: ''
+            }[r.motivo] || '';
+
+            if (r.motivo === 'SIN_GENERAL') {
+                return '<td class="text-center"><span class="prov-ret-sin" title="' + escapar(
+                    'Se proyecta sin retener ' + (r.sin_general || []).join(', ') + ': no hay alícuota '
+                    + 'general vigente al ' + fechaCorta(r.fecha) + '. Cargala en Parámetros › Prov. '
+                    + 'Locales.') + '">sin alícuota</span></td>';
+            }
+
+            return '<td' + (motivo ? ' title="' + escapar(motivo) + '"' : '') + '></td>';
+        }
+
+        var lineas = Object.keys(r.impuestos).map(function(k) {
+            var i = r.impuestos[k];
+            var origen = {
+                GENERAL: 'general, vigente desde el ' + fechaCorta(i.vigencia_desde),
+                PROVEEDOR: 'del proveedor, desde el ' + fechaCorta(i.vigencia_desde),
+                NO_RETIENE: 'no se retiene'
+            }[i.fuente] || '';
+
+            return i.nombre + ' ' + porcentaje(i.alicuota) + ' (' + origen + '): ' + plata(i.retencion);
+        });
+
+        if ((r.sin_general || []).length) {
+            lineas.push('Sin alícuota general vigente: ' + r.sin_general.join(', ') + ' no se retiene.');
+        }
+
+        lineas.push('Calculado al ' + fechaCorta(r.fecha) + ', la fecha de pago, sobre '
+            + plata(r.base) + '.');
+
+        return '<td class="currency" title="' + escapar(lineas.join('\n')) + '">'
+            + (Number(f.RETENIDO) ? plata(f.RETENIDO)
+                : '<span class="prov-ret-no">no se retiene</span>') + '</td>';
+    }
 
     function pintarTotales(filas, cols) {
         var total = 0;
         var totalImporte = 0;
+        var totalPendiente = 0;
+        var totalRetenido = 0;
+        var porImpuesto = {};
         var porCol = {};
 
         /* LA CLAVE ES LA COLUMNA, que ya ES el string 'DIA|2026-09-17'. Antes se
@@ -626,8 +807,14 @@
            el total del período repetido en cada una de las 28 columnas. Una fila
            de totales que miente es peor que una que falta. */
         filas.forEach(function(f) {
-            total += Number(f.IMPORTE_PENDIENTE) || 0;
+            total += aPagar(f);
+            totalPendiente += Number(f.IMPORTE_PENDIENTE) || 0;
             totalImporte += Number(f.IMPORTE_VTO) || 0;
+            totalRetenido += Number(f.RETENIDO) || 0;
+
+            Object.keys(f.RETENIDO_POR_IMPUESTO || {}).forEach(function(k) {
+                porImpuesto[k] = (porImpuesto[k] || 0) + (Number(f.RETENIDO_POR_IMPUESTO[k]) || 0);
+            });
 
             cols.forEach(function(c) {
                 porCol[c] = (porCol[c] || 0) + (Number(vistas.valor(f, c)) || 0);
@@ -644,10 +831,27 @@
            Que los dos difieran dice cuánto hay imputado sin cancelar en lo que
            se está viendo, y con eso alcanza; ponerlo con el mismo peso que el
            pendiente invitaría a usarlo como total, que es justo lo que no es. */
+        /* EL PIE DICE EL NETO —lo que suma el eje— Y, APARTE, LO RETENIDO: en la
+           celda de Retenciones va el total con el desglose por impuesto abajo,
+           y en las columnas que sólo bajan al Excel, cada uno. La retención no
+           entra en el neto ni en el eje: es plata que no sale de la caja. */
+        var desglose = impuestosGrilla().filter(function(i) {
+            return porImpuesto[i.CODIGO];
+        }).map(function(i) {
+            return '<div class="small text-muted">' + escapar(i.NOMBRE) + ' '
+                + plata(porImpuesto[i.CODIGO]) + '</div>';
+        }).join('');
+
         var html = '<td colspan="8" class="fw-bold text-end">TOTALES</td>'
             + '<td class="currency prov-importe">' + plata(totalImporte) + '</td>'
+            + '<td class="currency">' + plata(totalPendiente) + '</td>'
+            + '<td class="currency">' + (totalRetenido ? plata(totalRetenido) + desglose : '') + '</td>'
+            + impuestosGrilla().map(function(i) {
+                return '<td class="currency prov-solo-export" data-exportar-solo>'
+                    + plata(porImpuesto[i.CODIGO] || 0) + '</td>';
+              }).join('')
             + '<td class="currency fw-bold">' + plata(total) + '</td>'
-            + '<td colspan="' + (COLS_DESC - 10) + '"></td>';
+            + '<td colspan="' + (COLS_DESC - 12) + '"></td>';
 
         /* Los totales del eje van al pie y arriba de cada fecha
            (Js/eje-totales.js): la misma cuenta -porCol- y el mismo formato.
@@ -800,10 +1004,10 @@
      * millones en una factura de $15,6 sería la misma sorpresa que esta columna
      * viene a sacar.
      *
-     * SE VE ATENUADA A PROPÓSITO. La que decide y la que suma sigue siendo
-     * "Pendiente"; ésta es el contexto para leerla. Si pesaran igual, dos
-     * columnas de plata pegadas se confundirían y la que entra al cashflow
-     * dejaría de leerse sola.
+     * SE VE ATENUADA A PROPÓSITO. La que entra al cashflow es "Neto a pagar"
+     * —el pendiente menos las retenciones—; ésta es el contexto para leer el
+     * pendiente. Si pesaran igual, las columnas de plata pegadas se
+     * confundirían y la que entra al cashflow dejaría de leerse sola.
      */
     function celdaImporte(f) {
         var imputado = Number(f.IMPUTACIONES) || 0;
@@ -945,7 +1149,7 @@
      * "1/2" y "2/2" van en data-etiqueta y los dibuja el CSS, igual que "vto."
      * o "crono": el export a Excel se queda con la fecha sola.
      *
-     * Si la apertura ya no coincide con el pendiente —un pago parcial en
+     * Si la apertura ya no coincide con el neto a pagar —un pago parcial en
      * Tango—, la fila no viene partida: todo el saldo va en la fecha más tardía
      * y la marca lo dice. Ver Proveedores::abrirEnMedios().
      */
@@ -961,7 +1165,10 @@
                   + 'en la columna de su fecha'
                   + (f.PAGO_CRONO ? ' (la fecha ya pasó: va al próximo día de pago del cronograma)'
                                   : '') + '.'
-                : 'Estaba pagado con dos medios, pero el pendiente (' + plata(abierta.pendiente)
+                : 'Estaba pagado con dos medios, pero el neto a pagar ('
+                  + plata(abierta.neto !== undefined ? abierta.neto : abierta.pendiente)
+                  + (abierta.neto !== undefined && abierta.neto !== abierta.pendiente
+                      ? ', sobre un pendiente de ' + plata(abierta.pendiente) : '')
                   + ') ya no coincide con la suma de las partes (' + plata(abierta.suma) + '): '
                   + 'todo el saldo se proyecta en la fecha más tardía. Reimportá para corregirlo.')
             + '\n' + textoMedios(abierta)
@@ -1367,7 +1574,7 @@
         var yaExcluidas = 0;
 
         filas.forEach(function(f) {
-            total += Number(f.IMPORTE_PENDIENTE) || 0;
+            total += aPagar(f);
         });
 
         sel.forEach(function(f) {
@@ -1476,7 +1683,7 @@
         filas.forEach(function(f) {
             if (!claves[claveFila(f)]) { return; }
 
-            total += Number(f.IMPORTE_PENDIENTE) || 0;
+            total += aPagar(f);
             provs[f.COD_PROVEE] = true;
         });
 
@@ -1610,7 +1817,7 @@
         var conciliadas = 0;
 
         sel.forEach(function(f) {
-            total += Number(f.IMPORTE_PENDIENTE) || 0;
+            total += aPagar(f);
             provs[f.COD_PROVEE] = true;
 
             if (f.ORIGEN_FECHA === 'CARGADA') { yaTenian++; }
@@ -1833,6 +2040,7 @@
         var chips = que === 'Pagos'
             ? [['altas', 'Altas', 'success'], ['cambios', 'Cambios', 'warning'],
                ['sin_cambios', 'Sin cambios', 'secondary'], ['dos_medios', 'En dos medios', 'info'],
+               ['ya_pagadas', 'Ya pagadas en Tango', 'warning text-dark'],
                ['errores', 'Filas que no se cargan', 'danger']]
             : [['altas', 'Altas', 'success'], ['cambios', 'Cambios', 'warning'],
                ['sin_cambios', 'Sin cambios', 'secondary'], ['errores', 'No se cargan', 'danger'],
@@ -1950,7 +2158,9 @@
         // —se cargan las dos o ninguna— y el mismo 'grupo', así que se ordena
         // por grupo antes que por línea. En la maestra 'grupo' no existe y
         // ordena la línea, como siempre.
-        var orden = { ERROR: 0, CAMBIO: 1, ALTA: 2, SIN_CAMBIOS: 3 };
+        // Las ya pagadas en Tango van después de los errores: son advertencias,
+        // no frenan nada, pero conviene leerlas antes que lo que sí se carga.
+        var orden = { ERROR: 0, YA_PAGADA: 1, CAMBIO: 2, ALTA: 3, SIN_CAMBIOS: 4 };
 
         filas = filas.slice().sort(function(a, b) {
             return (orden[a.estado] - orden[b.estado])
@@ -1959,8 +2169,18 @@
                 || (a.linea - b.linea);
         });
 
+        /* EN PAGOS, CADA FILA DICE CONTRA QUÉ SE COMPARÓ: el total del
+           comprobante, sus retenciones y el neto a pagar. El IMPORTE de la
+           planilla tiene que ser el neto, y ver los tres números juntos es lo que
+           deja entender un rechazo sin abrir otra pantalla. */
+        var conNeto = (que === 'Pagos');
+
         var html = '<div class="table-responsive prov-preview-tabla"><table class="table table-sm mb-0">'
-            + '<thead><tr><th>Línea</th><th>Clave</th><th>Estado</th><th>Detalle</th></tr></thead><tbody>';
+            + '<thead><tr><th>Línea</th><th>Clave</th><th>Estado</th>'
+            + (conNeto ? '<th class="text-end">Total</th><th class="text-end">Retenciones</th>'
+                + '<th class="text-end" title="Contra este número se compara el IMPORTE de la '
+                + 'planilla, con $1 de tolerancia">Neto a pagar</th>' : '')
+            + '<th>Detalle</th></tr></thead><tbody>';
 
         filas.forEach(function(f) {
             var clave = (que === 'Pagos')
@@ -2042,7 +2262,8 @@
                 + '<td>' + f.linea + '</td>'
                 + '<td><code>' + escapar(clave) + '</code></td>'
                 + '<td><span class="badge bg-' + colorEstado(f.estado) + '">'
-                +   escapar(f.estado) + '</span>' + pisa + '</td>'
+                +   escapar(rotuloEstado(f.estado)) + '</span>' + pisa + '</td>'
+                + (conNeto ? celdasNetoPreview(f) : '')
                 + '<td class="small">' + detalle + '</td></tr>';
         });
 
@@ -2060,9 +2281,41 @@
         return html;
     }
 
+    /**
+     * Total, retenciones y neto de la fila de la planilla. Vacías si la fila
+     * no llegó a cruzar contra un comprobante. Con dos medios, el total y las
+     * retenciones son del comprobante y van en la primera parte; el neto es
+     * el del comprobante, contra el que se compara la SUMA de las dos.
+     */
+    function celdasNetoPreview(f) {
+        if (f.neto === null || f.neto === undefined) {
+            return '<td></td><td></td><td></td>';
+        }
+
+        var segunda = (f.partes === 2 && f.parte === 2);
+        var desglose = Object.keys(f.retenciones || {}).map(function(k) {
+            var r = f.retenciones[k];
+
+            return r.nombre + ' ' + porcentaje(r.alicuota) + ': ' + plata(r.retencion);
+        }).join('\n');
+
+        return '<td class="text-end small">' + (segunda ? '' : plata(f.importe_pendiente)) + '</td>'
+            + '<td class="text-end small"' + (desglose ? ' title="' + escapar(desglose) + '"' : '') + '>'
+            +   (segunda || !f.retenido ? '' : plata(f.retenido)) + '</td>'
+            + '<td class="text-end small fw-semibold">' + (segunda ? '' : plata(f.neto)) + '</td>';
+    }
+
     function colorEstado(e) {
         return { ALTA: 'success', CAMBIO: 'warning', SIN_CAMBIOS: 'secondary',
-                 ERROR: 'danger' }[e] || 'secondary';
+                 YA_PAGADA: 'warning text-dark', ERROR: 'danger' }[e] || 'secondary';
+    }
+
+    /**
+     * "Ya pagada en Tango" y no YA_PAGADA: es una advertencia que alguien va a
+     * leer junto a los errores, y tiene que decir qué pasó sin buscar el código.
+     */
+    function rotuloEstado(e) {
+        return { YA_PAGADA: 'Ya pagada en Tango' }[e] || e;
     }
 
     function confirmarImportacion() {
@@ -2095,86 +2348,9 @@
         });
     }
 
-    /* ================================================================
-       CONCILIACIÓN
-       ================================================================ */
-
-    function previewConciliacion() {
-        pedirJson('Controller/ProveedoresController.php?action=previewConciliacion')
-            .then(function(d) {
-                if (!d.resumen.concilia && !d.resumen.reabre) {
-                    Notificacion.exito((d.avisos && d.avisos[0])
-                        || 'Nada cambió respecto de Tango.');
-                    return;
-                }
-
-                pintarPreviewConciliacion(d);
-                cambiarVista('importar');
-            })
-            .catch(function(err) {
-                Notificacion.error('No se pudo conciliar: ' + err.message);
-            });
-    }
-
-    function pintarPreviewConciliacion(d) {
-        var html = '<div class="card"><div class="card-header d-flex justify-content-between '
-            + 'align-items-center flex-wrap gap-2">'
-            + '<h6 class="mb-0">Conciliación contra Tango — todavía no se guardó nada</h6>'
-            + '<button class="btn btn-sm btn-primary" id="btnConfirmarConcProv">'
-            +   '<i class="fas fa-check me-1"></i> Confirmar</button>'
-            + '</div><div class="card-body">';
-
-        (d.avisos || []).forEach(function(a) {
-            html += '<div class="alert alert-info py-2 px-3 small mb-2">' + escapar(a) + '</div>';
-        });
-
-        if (d.concilia.length) {
-            html += '<h6 class="mt-2">Ya se pagaron</h6>'
-                + '<div class="table-responsive prov-preview-tabla"><table class="table table-sm mb-0">'
-                + '<thead><tr><th>Proveedor</th><th>Comprobante</th><th>Prevista</th>'
-                + '<th>Real</th><th>Desvío</th></tr></thead><tbody>';
-
-            d.concilia.forEach(function(c) {
-                var desvio = (c.desvio_dias === null) ? '—'
-                    : (c.desvio_dias > 0 ? '+' : '') + c.desvio_dias + ' d';
-
-                html += '<tr><td>' + escapar(c.cod_provee) + '</td>'
-                    + '<td><code>' + escapar(c.t_comp + ' ' + c.n_comp) + '</code></td>'
-                    + '<td>' + fechaCorta(c.fecha_prevista) + '</td>'
-                    + '<td>' + fechaCorta(c.fecha_cancelado) + '</td>'
-                    + '<td class="' + (c.desvio_dias > 0 ? 'text-danger' : 'text-success')
-                    +   '">' + desvio + '</td></tr>';
-            });
-
-            html += '</tbody></table></div>';
-        }
-
-        if (d.reabre.length) {
-            html += '<h6 class="mt-3">Volvieron a estar pendientes</h6>'
-                + '<div class="small text-muted">'
-                + d.reabre.map(function(r) {
-                    return escapar(r.cod_provee + ' ' + r.t_comp + ' ' + r.n_comp);
-                  }).join(' · ')
-                + '</div>';
-        }
-
-        html += '</div></div>';
-
-        document.getElementById('previewProv').innerHTML = html;
-        mostrar('previewProv', true);
-
-        conectar('btnConfirmarConcProv', function() {
-            pedirJson('Controller/ProveedoresController.php?action=aplicarConciliacion')
-                .then(function() {
-                    Notificacion.exito('Conciliación aplicada.');
-                    mostrar('previewProv', false);
-                    cargar();
-                })
-                .catch(function(err) {
-                    Notificacion.error('No se pudo aplicar: ' + err.message);
-                });
-        });
-    }
+    /* LA CONCILIACIÓN NO TIENE PANTALLA: corre sola en el servidor cada vez
+       que se cargan los pendientes, y lo que cambió llega en el panel de
+       avisos. Ver Proveedores::conciliarAutomatica(). */
 
     /* ================================================================
        MAESTRO
@@ -2283,8 +2459,18 @@
 
         texto('cuentaExcluidosMaestroProv', '(' + Object.keys(excluidos).length + ')');
 
+        var ret = maestro.retenciones || { disponible: false, impuestos: [], efectivas: {} };
+        var impuestos = ret.disponible ? (ret.impuestos || []) : [];
+        var filtros = filtrosMaestro();
+
         var filas = maestro.filas.concat(sueltos).filter(function(f) {
             if (soloExcl && !excluidos[f.COD_PROVEE]) { return false; }
+
+            /* Los filtros de clasificación y de retención son del maestro: un
+               proveedor que no está en él no tiene ni rubro ni retenciones, así
+               que con cualquiera de ellos puesto no aparece. */
+            if (!pasaFiltrosMaestro(f, filtros, ret)) { return false; }
+
             if (q === '') { return true; }
 
             var ex = excluidos[f.COD_PROVEE];
@@ -2296,20 +2482,47 @@
 
         var editable = !!maestro.edicion_manual && Permisos.puedeEditar('bodyMaestroProv');
 
+        /* LA SELECCIÓN SÓLO EXISTE SI SE PUEDE ASIGNAR: con permiso, con el
+           script de retenciones corrido y con algún impuesto activo. Sin eso la
+           columna no se dibuja, en vez de dibujar casillas que no llevan a nada. */
+        var conSel = !!document.getElementById('thSelMaestroProv')
+            && Permisos.puedeEditar('bodyMaestroProv') && ret.disponible && impuestos.length > 0;
+
+        mostrar('thSelMaestroProv', conSel);
+        pintarEncabezadoRet(impuestos);
+
+        /* SE PODA LA SELECCIÓN CONTRA LO QUE SE VE. "Seleccionar todos" toma lo
+           filtrado, y si después se cambia el filtro, lo que quedó escondido no
+           puede seguir elegido: la asignación mandaría proveedores que nadie
+           está mirando. */
+        var visibles = {};
+
+        filas.forEach(function(f) { if (!f.FUERA_MAESTRO) { visibles[f.COD_PROVEE] = true; } });
+        Object.keys(selMaestro).forEach(function(cod) {
+            if (!visibles[cod] || !conSel) { delete selMaestro[cod]; }
+        });
+
         var html = filas.map(function(f) {
             if (f.FUERA_MAESTRO) {
                 return '<tr class="prov-maestro-suelto">'
+                    + (conSel ? '<td></td>' : '')
                     + '<td><strong>' + escapar(f.COD_PROVEE) + '</strong></td>'
                     + '<td class="col-texto" title="' + escapar(f.NOMBRE) + '">'
                     +   escapar(f.NOMBRE) + '</td>'
-                    + '<td colspan="6" class="text-muted small fst-italic">No está en el maestro: '
-                    +   'su deuda no se clasifica, pero está excluida de Proveedores Locales.</td>'
+                    + '<td colspan="' + (5 + impuestos.length + 1) + '" class="text-muted small fst-italic">'
+                    +   'No está en el maestro: su deuda no se clasifica, pero está excluida de '
+                    +   'Proveedores Locales.</td>'
                     + '<td class="text-center">' + celdaExclusion(f) + '</td>'
                     + '<td></td><td></td>'
                     + '</tr>';
             }
 
             return '<tr>'
+                + (conSel
+                    ? '<td class="text-center"><input type="checkbox" class="form-check-input '
+                      + 'prov-sel-maestro" data-cod="' + escapar(f.COD_PROVEE) + '"'
+                      + (selMaestro[f.COD_PROVEE] ? ' checked' : '') + '></td>'
+                    : '')
                 + '<td><strong>' + escapar(f.COD_PROVEE) + '</strong></td>'
                 + '<td class="col-texto" title="' + escapar(f.NOMBRE || '') + '">'
                 +   escapar(f.NOMBRE || '') + '</td>'
@@ -2320,6 +2533,10 @@
                 + '<td>' + escapar(f.PLAZO_PAGO || '—')
                 +   (f.PLAZO_DIAS !== null ? ' <span class="text-muted small">('
                       + f.PLAZO_DIAS + ' d)</span>' : '') + '</td>'
+                + impuestos.map(function(imp) {
+                    return '<td class="text-center">'
+                        + celdaRetMaestro(efectivaDe(ret, f.COD_PROVEE, imp.CODIGO), imp) + '</td>';
+                  }).join('')
                 + '<td class="text-center">' + celdaOrigen(f) + '</td>'
                 + '<td class="text-center">' + celdaExclusion(f) + '</td>'
                 + '<td class="text-center"><span class="text-muted small">'
@@ -2343,7 +2560,8 @@
         }).join('');
 
         if (!filas.length) {
-            html = '<tr><td colspan="11" class="text-center text-muted py-4">'
+            html = '<tr><td colspan="' + (11 + impuestos.length + (conSel ? 1 : 0))
+                 + '" class="text-center text-muted py-4">'
                  + (maestro.filas.length || sueltos.length
                     ? 'Ningún proveedor coincide con el filtro.'
                     : 'El maestro está vacío: importá la hoja "Maestro proveedores" o agregá '
@@ -2352,6 +2570,11 @@
         }
 
         document.getElementById('bodyMaestroProv').innerHTML = html;
+
+        texto('cuentaMaestroProv', filas.length + ' de '
+            + (maestro.filas.length + sueltos.length) + ' proveedor(es)');
+
+        conectarSeleccionMaestro(filas, conSel);
 
         document.querySelectorAll('.prov-editar').forEach(function(b) {
             b.addEventListener('click', function() { abrirForm(b.getAttribute('data-cod')); });
@@ -2365,6 +2588,541 @@
 
         mostrar('btnNuevoProv', editable);
         pintarSugerencias();
+    }
+
+    /* ================================================================
+       LAS RETENCIONES EN EL MAESTRO
+
+       Una columna por impuesto activo con la alícuota efectiva de hoy, un
+       filtro para encontrar a quiénes se les aplica cada uno, y la asignación
+       de a muchos —con la selección— o de a uno —desde el proveedor—.
+
+       ACÁ NO SE DECIDE NADA. De dónde sale cada alícuota —general, del
+       proveedor, no se retiene— lo resuelve el backend con la misma regla con
+       la que calcula el neto (ProveedoresRetenciones::efectiva()), y lo que
+       pasaría al asignar lo calcula el servidor antes de confirmar.
+       ================================================================ */
+
+    /** Los proveedores elegidos para asignar una retención, por código */
+    var selMaestro = {};
+
+    /** Lo que está elegido en cada filtro del maestro */
+    function filtrosMaestro() {
+        return {
+            rubroEco: valor('filtroRubroEcoMaestroProv'),
+            rubro: valor('filtroRubroMaestroProv'),
+            forma: valor('filtroFormaMaestroProv'),
+            ret: valor('filtroRetMaestroProv')
+        };
+    }
+
+    function pasaFiltrosMaestro(f, filtros, ret) {
+        var alguno = filtros.rubroEco || filtros.rubro || filtros.forma || filtros.ret;
+
+        if (f.FUERA_MAESTRO) { return !alguno; }
+
+        if (filtros.rubroEco && (f.RUBRO_ECONOMICO || '') !== filtros.rubroEco) { return false; }
+        if (filtros.rubro && (f.RUBRO || '') !== filtros.rubro) { return false; }
+
+        if (filtros.forma) {
+            var forma = f.FORMA_PAGO || (f.FORMA_PAGO_ORIG ? '(fuera de lista)' : '(sin forma)');
+
+            if (forma !== filtros.forma) { return false; }
+        }
+
+        if (filtros.ret) {
+            var p = filtros.ret.split('|');
+            var e = efectivaDe(ret, f.COD_PROVEE, p[1]);
+            var retiene = !!(e && e.aplica && Number(e.alicuota) > 0);
+
+            if (p[0] === 'CON' && !retiene) { return false; }
+            if (p[0] === 'SIN' && retiene) { return false; }
+            if (p[0] === 'PROPIA' && !(e && (e.fuente === 'PROVEEDOR' || e.fuente === 'NO_RETIENE'))) {
+                return false;
+            }
+            if (p[0] === 'NORET' && !(e && e.fuente === 'NO_RETIENE')) { return false; }
+        }
+
+        return true;
+    }
+
+    /**
+     * Las opciones de los cuatro filtros, de lo que hay en el maestro. Se
+     * conserva lo elegido: Actualizar no puede borrar el filtro de quien
+     * está trabajando, igual que con el buscador.
+     */
+    function pintarFiltrosMaestro() {
+        var filas = maestro.filas || [];
+        var ret = maestro.retenciones || { disponible: false, impuestos: [] };
+
+        var distintos = function(fn) {
+            var v = {};
+
+            filas.forEach(function(f) { var x = fn(f); if (x) { v[x] = true; } });
+
+            return alfabetico(Object.keys(v));
+        };
+
+        var llenar = function(id, todos, opciones) {
+            var sel = document.getElementById(id);
+
+            if (!sel) { return; }
+
+            var actual = sel.value;
+
+            sel.innerHTML = '<option value="">' + escapar(todos) + '</option>'
+                + opciones.map(function(o) {
+                    return '<option value="' + escapar(o[0]) + '">' + escapar(o[1]) + '</option>';
+                }).join('');
+
+            sel.value = actual;
+
+            if (sel.value !== actual) { sel.value = ''; }
+        };
+
+        var par = function(v) { return [v, v]; };
+
+        llenar('filtroRubroEcoMaestroProv', 'Rubro económico: todos',
+            distintos(function(f) { return f.RUBRO_ECONOMICO; }).map(par));
+        llenar('filtroRubroMaestroProv', 'Rubro: todos',
+            distintos(function(f) { return f.RUBRO; }).map(par));
+        llenar('filtroFormaMaestroProv', 'Forma de pago: todas',
+            distintos(function(f) {
+                return f.FORMA_PAGO || (f.FORMA_PAGO_ORIG ? '(fuera de lista)' : '(sin forma)');
+            }).map(par));
+
+        var opcionesRet = [];
+
+        (ret.disponible ? ret.impuestos : []).forEach(function(i) {
+            opcionesRet.push(['CON|' + i.CODIGO, 'con ' + i.NOMBRE]);
+            opcionesRet.push(['SIN|' + i.CODIGO, 'sin ' + i.NOMBRE]);
+            opcionesRet.push(['PROPIA|' + i.CODIGO, i.NOMBRE + ': alícuota propia']);
+
+            if (i.ALCANCE === ret.alcance_todos) {
+                opcionesRet.push(['NORET|' + i.CODIGO, i.NOMBRE + ': no se retiene']);
+            }
+        });
+
+        llenar('filtroRetMaestroProv', 'Retenciones: todas', opcionesRet);
+        mostrar('filtroRetMaestroProv', opcionesRet.length > 0);
+    }
+
+    /**
+     * Una columna por impuesto activo, entre PLAZO y ORIGEN. Los impuestos son
+     * datos: no hay columnas fijas en el HTML para ellos.
+     */
+    function pintarEncabezadoRet(impuestos) {
+        var fila = document.getElementById('headMaestroProv');
+        var origen = document.getElementById('thOrigenMaestroProv');
+
+        if (!fila || !origen) { return; }
+
+        Array.prototype.forEach.call(fila.querySelectorAll('.prov-ret-th'), function(th) {
+            th.parentNode.removeChild(th);
+        });
+
+        impuestos.forEach(function(i) {
+            var th = document.createElement('th');
+
+            th.className = 'text-center prov-ret-th';
+            th.textContent = 'RET. ' + i.NOMBRE.toUpperCase();
+            th.title = 'La alícuota de ' + i.NOMBRE + ' que rige hoy para el proveedor y de dónde '
+                + 'sale: general, del proveedor o no se retiene.'
+                + (i.ALCANCE === (maestro.retenciones || {}).alcance_todos
+                    ? '' : ' Se aplica sólo a los asignados: vacía si no lo está.');
+            fila.insertBefore(th, origen);
+        });
+    }
+
+    function efectivaDe(ret, cod, codigo) {
+        return ((ret.efectivas || {})[cod] || {})[codigo] || null;
+    }
+
+    /**
+     * La alícuota efectiva de hoy, marcada por su origen. La general va
+     * atenuada —es la de todos—, la del proveedor en negrita —es una
+     * decisión sobre él— y "no se retiene" con su propio rótulo, porque 0 y
+     * "no aplica" no son lo mismo.
+     */
+    function celdaRetMaestro(e, imp) {
+        if (!e) { return ''; }
+
+        var desde = e.vigencia_desde ? ', desde el ' + fechaCorta(e.vigencia_desde) : '';
+
+        if (!e.aplica) {
+            if (e.sin_general) {
+                return '<span class="prov-ret-sin" title="' + escapar(imp.NOMBRE + ' no tiene '
+                    + 'alícuota general vigente: no se le retiene hasta que se cargue en Parámetros › '
+                    + 'Prov. Locales.') + '">sin alícuota</span>';
+            }
+
+            return '';
+        }
+
+        if (e.fuente === 'NO_RETIENE') {
+            return '<span class="prov-ret-no" title="' + escapar('A este proveedor no se le retiene '
+                + imp.NOMBRE + desde + '.') + '">no se retiene</span>';
+        }
+
+        if (e.fuente === 'PROVEEDOR') {
+            return '<strong title="' + escapar('Alícuota del proveedor' + desde + '.') + '">'
+                + porcentaje(e.alicuota) + '</strong>';
+        }
+
+        return '<span class="text-muted" title="' + escapar('Alícuota general' + desde + '.') + '">'
+            + porcentaje(e.alicuota) + ' <small>gral.</small></span>';
+    }
+
+    /** 0.025 => '2,5%' */
+    function porcentaje(alicuota) {
+        return ((Number(alicuota) || 0) * 100).toLocaleString('es-AR', { maximumFractionDigits: 4 })
+            + '%';
+    }
+
+    function conectarSeleccionMaestro(filas, conSel) {
+        Array.prototype.forEach.call(document.querySelectorAll('.prov-sel-maestro'), function(c) {
+            c.addEventListener('change', function() {
+                if (c.checked) {
+                    selMaestro[c.dataset.cod] = true;
+                } else {
+                    delete selMaestro[c.dataset.cod];
+                }
+
+                pintarSelMaestro(filas, conSel);
+            });
+        });
+
+        pintarSelMaestro(filas, conSel);
+    }
+
+    /** La barra y el check del encabezado: "todos" es todos los que se VEN */
+    function pintarSelMaestro(filas, conSel) {
+        var cuantos = Object.keys(selMaestro).length;
+        var enMaestro = filas.filter(function(f) { return !f.FUERA_MAESTRO; });
+
+        mostrar('barraSelMaestroProv', conSel && cuantos > 0);
+        texto('selResumenMaestroProv', cuantos + ' proveedor(es) seleccionado(s)');
+
+        var todos = document.getElementById('selTodosMaestroProv');
+
+        if (todos) {
+            todos.checked = enMaestro.length > 0 && enMaestro.every(function(f) {
+                return selMaestro[f.COD_PROVEE];
+            });
+        }
+    }
+
+    /** Seleccionar todos: sólo los que dejan ver los filtros y el buscador */
+    function seleccionarTodosMaestro() {
+        var todos = document.getElementById('selTodosMaestroProv');
+
+        Array.prototype.forEach.call(document.querySelectorAll('.prov-sel-maestro'), function(c) {
+            if (todos.checked) {
+                selMaestro[c.dataset.cod] = true;
+            } else {
+                delete selMaestro[c.dataset.cod];
+            }
+        });
+
+        pintarMaestro();
+    }
+
+    /* ---------- la asignación de a muchos ---------- */
+
+    var planRet = null;
+    var planRetTimer = null;
+
+    function abrirAsignarRet() {
+        var ret = (maestro && maestro.retenciones) || {};
+        var cods = Object.keys(selMaestro);
+        var modal = document.getElementById('modalRetProv');
+
+        if (!cods.length || !modal) { return; }
+
+        var sel = document.getElementById('retProvImpuesto');
+
+        sel.innerHTML = (ret.impuestos || []).map(function(i) {
+            return '<option value="' + escapar(i.CODIGO) + '" data-alcance="' + escapar(i.ALCANCE)
+                + '">' + escapar(i.NOMBRE) + ' — ' + escapar((ret.alcances || {})[i.ALCANCE] || '')
+                + '</option>';
+        }).join('');
+
+        document.getElementById('retProvAccAlicuota').checked = true;
+        setValor('retProvPct', '');
+        texto('retProvCuantos', 'Se aplica a ' + cods.length + ' proveedor(es) seleccionado(s).');
+
+        ajustarAccionesRet();
+        pedirPlanRet();
+
+        if (window.bootstrap && bootstrap.Modal) {
+            bootstrap.Modal.getOrCreateInstance(modal).show();
+        }
+    }
+
+    /**
+     * "No se retiene" sólo existe en un impuesto "a todos": en uno "solo a los
+     * asignados" no tener alícuota ya es no retener. Y la tercera acción se
+     * nombra según el alcance: volver a la general, o quitar la asignación.
+     */
+    function ajustarAccionesRet() {
+        var ret = (maestro && maestro.retenciones) || {};
+        var sel = document.getElementById('retProvImpuesto');
+        var opt = sel.options[sel.selectedIndex];
+        var aTodos = !!opt && opt.getAttribute('data-alcance') === ret.alcance_todos;
+
+        mostrar('retProvAccNoRetieneWrap', aTodos);
+        texto('retProvAccGeneralLabel', aTodos
+            ? 'Volver a la general' : 'Quitar la asignación');
+
+        if (!aTodos && document.getElementById('retProvAccNoRetiene').checked) {
+            document.getElementById('retProvAccAlicuota').checked = true;
+        }
+    }
+
+    function accionRetElegida() {
+        var r = document.querySelector('input[name="retProvAccion"]:checked');
+
+        return r ? r.value : 'ALICUOTA';
+    }
+
+    /** El pedido de la asignación, igual para el preview y para aplicar */
+    function cuerpoRet() {
+        var accion = accionRetElegida();
+        var pct = parseFloat(String(valor('retProvPct')).replace(',', '.'));
+
+        return {
+            cods: Object.keys(selMaestro),
+            impuesto: valor('retProvImpuesto'),
+            accion: accion,
+            alicuota: (accion === 'ALICUOTA' && !isNaN(pct)) ? pct / 100 : null
+        };
+    }
+
+    /**
+     * QUÉ HARÍA, calculado por el servidor contra la base de ahora: a cuántos se
+     * aplica, cuántos ya tenían ese valor —no se tocan— y cuántos tenían otro
+     * que se reemplaza. Si alguno quedaría en 100% o más, lo nombra y no deja
+     * aplicar: es todo o nada.
+     */
+    function pedirPlanRet() {
+        var btn = document.getElementById('btnConfirmarRetProv');
+        var cuerpo = cuerpoRet();
+
+        planRet = null;
+        btn.disabled = true;
+
+        if (planRetTimer) { clearTimeout(planRetTimer); }
+
+        if (cuerpo.accion === 'ALICUOTA' && cuerpo.alicuota === null) {
+            document.getElementById('retProvPlan').innerHTML = '<span class="text-muted">Escribí el '
+                + 'porcentaje: 2,5% se carga como 2,5.</span>';
+            return;
+        }
+
+        planRetTimer = setTimeout(function() {
+            pedirJson('Controller/ProveedoresController.php?action=previewRetencionMasiva', cuerpo)
+                .then(function(p) {
+                    planRet = p;
+
+                    var bloqueado = p.rechazados && Object.keys(p.rechazados).length
+                        || (p.fuera_maestro && p.fuera_maestro.length);
+
+                    document.getElementById('retProvPlan').innerHTML =
+                        '<div><strong>' + p.aplicar + '</strong> proveedor(es) cambian desde hoy: '
+                        + p.nuevos + ' no tenían alícuota propia de ' + escapar(p.nombre) + ' y '
+                        + p.reemplaza + ' tenían otro valor, que se reemplaza (queda en el '
+                        + 'historial).</div>'
+                        + (p.iguales ? '<div class="text-muted">' + p.iguales + ' ya tenían ese mismo '
+                            + 'valor: no se tocan.</div>' : '')
+                        + (p.texto_rechazados ? '<div class="text-danger mt-1">No se puede aplicar: '
+                            + 'estos proveedores quedarían con sus retenciones sumando 100% o más — '
+                            + escapar(p.texto_rechazados) + '. Es todo o nada: no se aplica a '
+                            + 'ninguno.</div>' : '')
+                        + (p.fuera_maestro && p.fuera_maestro.length
+                            ? '<div class="text-danger mt-1">No están vigentes en el maestro: '
+                              + escapar(p.fuera_maestro.join(', ')) + '.</div>' : '');
+
+                    btn.disabled = !!bloqueado || p.aplicar === 0;
+                })
+                .catch(function(error) {
+                    document.getElementById('retProvPlan').innerHTML = '<span class="text-danger">'
+                        + escapar(error.message) + '</span>';
+                });
+        }, 300);
+    }
+
+    function confirmarAsignarRet() {
+        var btn = document.getElementById('btnConfirmarRetProv');
+        var cuerpo = cuerpoRet();
+
+        cuerpo.origen = 'MASIVA';
+        btn.disabled = true;
+
+        pedirJson('Controller/ProveedoresController.php?action=asignarRetencion', cuerpo)
+            .then(function(r) {
+                Notificacion.exito(r.nombre + ': ' + r.aplicar + ' proveedor(es) actualizado(s), desde '
+                    + 'hoy.', {
+                    detalle: (r.iguales ? r.iguales + ' ya tenían ese valor y no se tocaron. ' : '')
+                        + 'El valor anterior de cada uno queda en su historial.'
+                });
+
+                var modal = document.getElementById('modalRetProv');
+
+                if (modal && window.bootstrap && bootstrap.Modal) {
+                    bootstrap.Modal.getOrCreateInstance(modal).hide();
+                }
+
+                selMaestro = {};
+
+                /* El neto de sus facturas cambió: el listado también se recarga. */
+                recargarMaestroYListado();
+            })
+            .catch(function(error) {
+                btn.disabled = false;
+                Notificacion.error('No se aplicó a ninguno: ' + error.message);
+            });
+    }
+
+    /* ---------- la carga de a uno, desde el proveedor ---------- */
+
+    /**
+     * La sección Retenciones del formulario. Cada impuesto activo con su valor
+     * de hoy y de dónde sale, los tres gestos y el historial.
+     *
+     * EN UN ALTA NO SE PUEDE TODAVÍA: el proveedor tiene que estar en el
+     * maestro. Al guardarlo el formulario pasa a edición y la sección se
+     * habilita.
+     */
+    function pintarRetencionesForm(cod) {
+        var cont = document.getElementById('retencionesFormProv');
+        var ret = (maestro && maestro.retenciones) || {};
+
+        if (!cont) { return; }
+
+        if (!ret.disponible) {
+            cont.innerHTML = '';
+            return;
+        }
+
+        if (!cod) {
+            cont.innerHTML = '<div class="border rounded p-2 text-muted small">'
+                + '<strong>Retenciones:</strong> guardá el proveedor primero; después se le pueden '
+                + 'cargar sus alícuotas desde acá.</div>';
+            return;
+        }
+
+        cont.innerHTML = '<div class="text-muted small">Cargando retenciones…</div>';
+
+        pedirJson('Controller/ProveedoresController.php?action=getRetencionesProveedor&cod_provee='
+                + encodeURIComponent(cod))
+            .then(function(d) {
+                cont.innerHTML = tablaRetencionesForm(cod, d);
+                conectarRetencionesForm(cod);
+            })
+            .catch(function(error) {
+                cont.innerHTML = '<div class="text-danger small">No se pudieron leer las retenciones: '
+                    + escapar(error.message) + '</div>';
+            });
+    }
+
+    function tablaRetencionesForm(cod, d) {
+        var filas = (d.impuestos || []).map(function(i) {
+            var e = (d.efectivas || {})[i.CODIGO] || null;
+            var aTodos = (i.ALCANCE === d.alcance_todos);
+            var hist = (d.historial || {})[i.CODIGO] || [];
+
+            var fuente = !e || !e.aplica
+                ? (e && e.sin_general ? 'sin alícuota general' : 'no asignado')
+                : { GENERAL: 'general', PROVEEDOR: 'del proveedor',
+                    NO_RETIENE: 'no se retiene' }[e.fuente];
+
+            return '<tr data-impuesto="' + escapar(i.CODIGO) + '">'
+                + '<td><strong>' + escapar(i.NOMBRE) + '</strong></td>'
+                + '<td>' + celdaRetMaestro(e, i) + ' <small class="text-muted">(' + escapar(fuente)
+                +   ')</small></td>'
+                + '<td><div class="d-flex gap-1 align-items-center">'
+                +   '<div class="input-group input-group-sm" style="max-width: 130px;">'
+                +     '<input type="number" class="form-control prov-ret-pct" min="0" max="99.9999" '
+                +       'step="0.0001" placeholder="%">'
+                +     '<button class="btn btn-outline-primary prov-ret-cargar" type="button" '
+                +       'title="Cargar esta alícuota para este proveedor, desde hoy.">Cargar</button>'
+                +   '</div>'
+                +   (aTodos ? '<button class="btn btn-sm btn-outline-secondary prov-ret-accion" '
+                      + 'data-accion="NO_RETIENE" type="button" title="Alícuota 0: a este proveedor no '
+                      + 'se le retiene ' + escapar(i.NOMBRE) + '.">No se retiene</button>' : '')
+                +   '<button class="btn btn-sm btn-outline-secondary prov-ret-accion" '
+                +     'data-accion="GENERAL" type="button">'
+                +     (aTodos ? 'Volver a la general' : 'Quitar la asignación') + '</button>'
+                + '</div></td>'
+                + '<td class="small">' + (hist.length
+                    ? hist.slice(0, 5).map(function(h) {
+                        return (h.ALICUOTA === null ? 'sin dato' : porcentaje(h.ALICUOTA))
+                            + ' desde ' + fechaCorta(h.VIGENCIA_DESDE) + ' · ' + escapar(h.USUARIO || '')
+                            + ' <span class="text-muted">(' + (h.ORIGEN === 'MASIVA' ? 'masiva' : 'individual')
+                            + ')</span>';
+                      }).join('<br>') + (hist.length > 5 ? '<br>y ' + (hist.length - 5) + ' más' : '')
+                    : '<span class="text-muted">sin cambios</span>')
+                + '</td>'
+                + '</tr>';
+        }).join('');
+
+        return '<div class="border rounded">'
+            + '<div class="px-2 pt-2"><strong>Retenciones de ' + escapar(cod) + '</strong> '
+            + '<small class="text-muted">Cada cambio se guarda solo y rige desde hoy; el valor '
+            + 'anterior queda en el historial. La importación del maestro no las toca.</small></div>'
+            + '<table class="table table-sm mb-0" id="tablaRetFormProv"><thead><tr>'
+            + '<th>Impuesto</th><th>Hoy</th><th>Cambiar</th><th>Historial</th>'
+            + '</tr></thead><tbody>'
+            + (filas || '<tr><td colspan="4" class="text-muted">No hay impuestos activos.</td></tr>')
+            + '</tbody></table></div>';
+    }
+
+    function conectarRetencionesForm(cod) {
+        Array.prototype.forEach.call(document.querySelectorAll('#tablaRetFormProv tr[data-impuesto]'),
+            function(tr) {
+                var impuesto = tr.getAttribute('data-impuesto');
+                var pct = tr.querySelector('.prov-ret-pct');
+
+                tr.querySelector('.prov-ret-cargar').addEventListener('click', function() {
+                    var n = parseFloat(String(pct.value || '').replace(',', '.'));
+
+                    if (isNaN(n) || n < 0 || n >= 100) {
+                        Notificacion.campoInvalido(pct, 'Un porcentaje entre 0 y 100: 2,5% se carga '
+                            + 'como 2,5.');
+                        return;
+                    }
+
+                    asignarIndividual(cod, impuesto, 'ALICUOTA', n / 100);
+                });
+
+                Array.prototype.forEach.call(tr.querySelectorAll('.prov-ret-accion'), function(b) {
+                    b.addEventListener('click', function() {
+                        asignarIndividual(cod, impuesto, b.getAttribute('data-accion'), null);
+                    });
+                });
+            });
+    }
+
+    function asignarIndividual(cod, impuesto, accion, alicuota) {
+        pedirJson('Controller/ProveedoresController.php?action=asignarRetencion', {
+                cods: [cod], impuesto: impuesto, accion: accion, alicuota: alicuota,
+                origen: 'INDIVIDUAL'
+            })
+            .then(function(r) {
+                Notificacion.exito(r.aplicar
+                    ? r.nombre + ' de ' + cod + ' actualizado, desde hoy.'
+                    : 'No cambió nada: ' + cod + ' ya tenía ese valor.');
+
+                pintarRetencionesForm(cod);
+
+                /* La columna del maestro y el neto de sus facturas cambiaron. Se
+                   recarga sin cerrar el formulario. */
+                cargarMaestro();
+                cargar();
+            })
+            .catch(function(error) {
+                Notificacion.error('No se guardó: ' + error.message);
+            });
     }
 
     /**
@@ -3066,6 +3824,7 @@
                 + 'cronograma del cashflow.');
 
         mostrar('formProvWrap', true);
+        pintarRetencionesForm(f ? f.COD_PROVEE : null);
 
         if (inpCod && !f) { inpCod.focus(); }
     }
@@ -3233,17 +3992,26 @@
                 criterio_distrib: valor('fpCriterioProv')
             })
             .then(function(data) {
+                var alta = !!data && data.estado === 'ALTA';
+
                 btn.disabled = false;
                 cerrarForm();
 
-                Notificacion.exito(data && data.estado === 'ALTA'
+                Notificacion.exito(alta
                     ? 'Proveedor ' + data.cod_provee + ' agregado.'
                     : 'Proveedor ' + data.cod_provee + ' actualizado.', {
-                    detalle: 'La versión anterior queda en el historial. La planilla sigue '
-                           + 'siendo la fuente: la próxima importación puede pisarlo.'
+                    detalle: (alta ? 'Ya se le pueden cargar sus retenciones, abajo del formulario. '
+                                   : 'La versión anterior queda en el historial. ')
+                           + 'La planilla sigue siendo la fuente: la próxima importación puede '
+                           + 'pisarlo.'
                 });
 
-                recargarMaestroYListado();
+                /* DESPUÉS DE UN ALTA EL FORMULARIO VUELVE ABIERTO, EN EDICIÓN: es lo
+                   que habilita la sección Retenciones, que necesita al proveedor
+                   ya en el maestro. */
+                recargarMaestroYListado().then(function() {
+                    if (alta) { abrirForm(data.cod_provee); }
+                });
             })
             .catch(function(error) {
                 btn.disabled = false;
@@ -3280,8 +4048,9 @@
      */
     function recargarMaestroYListado() {
         maestro = null;
-        cargarMaestro();
         cargar();
+
+        return cargarMaestro();
     }
 
     function celdaFormaMaestro(f) {

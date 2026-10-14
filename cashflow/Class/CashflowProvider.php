@@ -52,6 +52,9 @@ require_once __DIR__ . '/Aviso.php';
  *                                         automatica (ver abajo)
  *   'fondos_manual'   [clave => [col => ..]] lo cargado a mano desde cada
  *                                         fondo, por columna (ver abajo)
+ *   'auditoria'       [clave => float]    escalares que explican la serie y no
+ *                                         entran en ninguna suma: hoy el bruto
+ *                                         y lo retenido de Proveedores Locales
  *
  * EL DETALLE POR FONDO: 'por_fondo' y 'fondos'
  * --------------------------------------------
@@ -333,11 +336,24 @@ abstract class CashflowProvider {
             'por_fondo' => [],
             'fondos' => [],
             'fondos_tope' => [],
-            'fondos_manual' => []
+            'fondos_manual' => [],
+            'auditoria' => []
         ];
 
         if (!is_array($serie)) {
             return $out;
+        }
+
+        /* ESCALARES DE AUDITORIA: numeros que explican la serie y no entran en
+           ninguna suma. El caso que los trajo: Proveedores Locales proyecta el
+           neto de retenciones, y para auditar el corte cada serie dice su bruto
+           y lo retenido por impuesto (ver ProveedoresProvider::sumarAuditoria()).
+           Van en esta lista cerrada a proposito: lo que un proveedor cuelga y
+           no figura aca se pierde en silencio, y ya paso una vez. */
+        if (isset($serie['auditoria']) && is_array($serie['auditoria'])) {
+            foreach ($serie['auditoria'] as $clave => $valor) {
+                $out['auditoria'][(string) $clave] = floatval($valor);
+            }
         }
 
         // El tope y lo manual por columna: solo las columnas que EXISTEN en el

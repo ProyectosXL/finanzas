@@ -4,12 +4,16 @@
  * Endpoints de Proveedores Locales: el listado de cuentas a pagar, las dos
  * importaciones y la conciliacion contra Tango.
  *
- * NADA SE ESCRIBE SIN CONFIRMAR. Las tres operaciones que tocan datos en masa
- * -importar el maestro, importar pagos y conciliar- tienen su paso de
+ * NADA SE ESCRIBE SIN CONFIRMAR. Las operaciones que tocan datos en masa
+ * -importar el maestro, importar pagos y asignar retenciones- tienen su paso de
  * previsualizacion: primero se devuelve QUE CAMBIARIA y recien despues, con una
  * llamada aparte, se aplica. Es el mismo criterio de Cob. Electronicos, y el
- * motivo es que estas tres pueden mover cientos de filas de una: sin ver el diff
- * antes, un archivo equivocado se descubre despues.
+ * motivo es que pueden mover cientos de filas de una: sin ver el diff antes, un
+ * archivo equivocado se descubre despues.
+ *
+ * LA EXCEPCION ES LA CONCILIACION, y es a proposito: no decide nada, copia lo
+ * que dice Tango. Corre sola al cargar los pendientes, para cualquiera que
+ * pueda ver la pestaña, con un usuario fijo. Ver getPendientes.
  *
  * EL ARCHIVO NO SE GUARDA EN EL SERVIDOR. Se parsea en memoria y el resultado
  * del diff vuelve al navegador, que lo reenvia al confirmar. Guardar el archivo
@@ -48,6 +52,8 @@ try {
     require_once __DIR__ . '/../Class/Proveedores.php';
     require_once __DIR__ . '/../Class/EjeVista.php';
     require_once __DIR__ . '/../Class/Parametros.php';
+    // Por importeAPagar(): los indicadores suman lo mismo que la fila del tablero.
+    require_once __DIR__ . '/../Class/Providers/ProveedoresProvider.php';
 
     $action = isset($_GET['action']) ? $_GET['action'] : '';
 
@@ -83,7 +89,30 @@ try {
             $h = Horizonte::desdeParametros(new Parametros());
             $items = $prov->getPendientes($h->hoy(), $h);
 
-            $payload = EjeVista::armar($h, $items, 'Pago', 'IMPORTE_PENDIENTE');
+            /* LA CONCILIACION CORRE SOLA, antes de devolver la grilla y para
+               cualquiera que pueda ver la pestaña: no es una decisión de nadie,
+               es copiar lo que dice Tango. Firma con un usuario fijo
+               (Proveedores::usuarioConciliacion()). Usa los pendientes que se
+               acaban de leer, así que sólo consulta Tango por las previstas que
+               salieron de ahí.
+
+               SI FALLA, LA PESTAÑA CARGA IGUAL: la grilla no depende de ella. Se
+               avisa en atención. */
+            $avisosConciliacion = [];
+
+            try {
+                $avisosConciliacion = $prov->conciliarAutomatica($items)['avisos'];
+            } catch (Throwable $e) {
+                $avisosConciliacion = [Aviso::nuevo(Aviso::WARNING, 'No se pudo conciliar con Tango ('
+                    . $e->getMessage() . '). La grilla se muestra igual; lo ya pagado sale de los '
+                    . 'pendientes por sí solo, y la conciliación se reintenta en la próxima carga.',
+                    'Conciliación')];
+            }
+
+            /* EL EJE VA EN NETO: cada comprobante cae en su fecha por lo que sale
+               de la caja -el neto de retenciones donde las hay-, igual que la
+               fila del tablero. El pendiente sigue en su columna. */
+            $payload = EjeVista::armar($h, $items, 'Pago', 'IMPORTE_A_PAGAR');
 
             /* Los avisos propios van ADELANTE de los del eje: explican por que
                hay tanto importe en la columna de hoy, y eso se lee antes que lo
@@ -95,6 +124,7 @@ try {
                dos lados; los del eje no traen nivel y son atencion. */
             $payload['avisos_con_nivel'] = array_merge(
                 $prov->getAvisosConNivel(),
+                $avisosConciliacion,
                 $prov->avisosCronogramaConNivel(),
                 Proveedores::avisosPendientesConNivel($items),
                 Aviso::lista($payload['warnings'])
@@ -116,6 +146,14 @@ try {
                en vez de suponerlo: sin el script, el listado se lee igual y lo
                que no se puede es escribir el override. Un desplegable que se
                dibuja y despues falla al guardar es peor que uno que no esta. */
+            /* Los impuestos activos, en su orden: el pie, los indicadores y el
+               Excel llevan una columna por cada uno. Vacio sin el script. */
+            $retCfg = $prov->retenciones()->config();
+            $payload['retenciones'] = [
+                'disponible' => !empty($retCfg['disponible']),
+                'impuestos' => ProveedoresRetenciones::paraMaestro($retCfg, [], $h->hoy())['impuestos']
+            ];
+
             $payload['forma_por_factura'] = $prov->tieneColumnaPago('FORMA_PAGO_CRONOGRAMA');
             $payload['excluir_factura'] = $prov->tieneColumnaPago('EXCLUIDA');
             $payload['excluir_proveedor'] = $prov->exclusion()->tablaCreada();
@@ -318,9 +356,19 @@ try {
                cada comprobante. Las aperturas vigentes van aparte, para que
                reimportar igual sea SIN_CAMBIOS y una fila sola deshaga los dos
                medios. */
+            /* El IMPORTE se compara contra el NETO a pagar: el total menos las
+               retenciones del comprobante, con las alicuotas de ahora. */
+            $pendientes = $prov->getPendientes($h->hoy());
+
+            /* LOS QUE NO CRUZAN SE MIRAN EN TANGO, y sólo ésos: si ya se
+               pagaron son una advertencia con la fecha real, no un error. */
+            $enTango = $prov->estadoComprobantesEnTango(
+                Proveedores::sinCruce($parse['filas'], $pendientes));
+
             $comp = Proveedores::compararImportacion(
-                $parse['filas'], $prov->getPendientes($h->hoy()), $prov->getPagos(), $h->hoy(),
-                $prov->getAperturas(), $prov->tablaMedioCreada());
+                $parse['filas'], $pendientes, $prov->getPagos(), $h->hoy(),
+                $prov->getAperturas(), $prov->tablaMedioCreada(), $prov->retenciones()->config(),
+                $enTango);
 
             $comp['separador'] = $parse['separador'];
 
@@ -548,7 +596,97 @@ try {
                        maestro, para poder mostrarlos. Ver ProveedoresExclusion. */
                     'excluir_proveedor' => $prov->exclusion()->tablaCreada(),
                     'excluidos' => $excluidos,
-                    'nombres_excluidos' => $nombresExcluidos
+                    'nombres_excluidos' => $nombresExcluidos,
+
+                    /* LAS RETENCIONES DE CADA PROVEEDOR: los impuestos activos y
+                       el valor efectivo de hoy, ya resuelto -general, del
+                       proveedor, no se retiene, o no aplica-. Lo resuelve la
+                       misma regla del cálculo del neto. Viven en su propia tabla:
+                       la importación del maestro no las toca. */
+                    'retenciones' => ProveedoresRetenciones::paraMaestro(
+                        $prov->retenciones()->config(), array_keys($mapa), date('Y-m-d'))
+                ]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           LAS ALÍCUOTAS DE RETENCIÓN DE LOS PROVEEDORES
+
+           Se cargan de a muchos -desde la grilla del maestro, con los
+           filtros y la selección- o de a uno -desde el proveedor-. Es la misma
+           operación: una lista de uno es el caso individual.
+
+           PRIMERO SE MIRA QUÉ HARÍA: a cuántos se aplica, cuántos ya tenían ese
+           valor y cuántos tenían otro. Después se aplica, TODO O NADA, y el
+           servidor vuelve a calcular el plan contra la base de ahora: lo que
+           mostró el diálogo es un pedido, no una autorización.
+
+           Rige DESDE HOY: la fecha la pone el servidor, no el pedido.
+           ================================================================ */
+        case 'previewRetencionMasiva':
+            $data = bodyJson();
+
+            $plan = ProveedoresRetenciones::planAsignacion(
+                $prov->retenciones()->config(),
+                isset($data['cods']) ? $data['cods'] : [],
+                isset($data['impuesto']) ? $data['impuesto'] : '',
+                isset($data['accion']) ? $data['accion'] : '',
+                isset($data['alicuota']) ? $data['alicuota'] : null,
+                date('Y-m-d'),
+                $prov->categorias()->mapa());
+
+            echo json_encode(['success' => true, 'data' => ProveedoresRetenciones::resumenPlan($plan)],
+                JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'asignarRetencion':
+            $data = bodyJson();
+
+            $origen = (isset($data['origen']) && $data['origen'] === ProveedoresRetenciones::ORIGEN_INDIVIDUAL)
+                ? ProveedoresRetenciones::ORIGEN_INDIVIDUAL : ProveedoresRetenciones::ORIGEN_MASIVA;
+
+            $plan = $prov->retenciones()->asignar(
+                isset($data['cods']) ? $data['cods'] : [],
+                isset($data['impuesto']) ? $data['impuesto'] : '',
+                isset($data['accion']) ? $data['accion'] : '',
+                isset($data['alicuota']) ? $data['alicuota'] : null,
+                $origen,
+                $prov->categorias()->mapa(),
+                $usuario);
+
+            $r = ProveedoresRetenciones::resumenPlan($plan);
+
+            echo json_encode([
+                'success' => true,
+                'message' => ($r['aplicar'] === 0
+                        ? 'No cambió nada: ' . ($r['iguales'] === 1 ? 'ya tenía' : 'ya tenían')
+                            . ' ese valor.'
+                        : $r['nombre'] . ': ' . $r['aplicar'] . ' proveedor(es) actualizado(s), '
+                            . 'desde hoy. El valor anterior queda en el historial.')
+                    . ($r['iguales'] > 0 && $r['aplicar'] > 0
+                        ? ' ' . $r['iguales'] . ' ya tenían ese valor y no se tocaron.'
+                        : ''),
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'getRetencionesProveedor':
+            if (!isset($_GET['cod_provee'])) {
+                throw new Exception('Falta el código de proveedor.');
+            }
+
+            $cod = Planilla::codigo($_GET['cod_provee']);
+            $config = $prov->retenciones()->config();
+            $ret = ProveedoresRetenciones::paraMaestro($config, [$cod], date('Y-m-d'));
+
+            echo json_encode([
+                'success' => true,
+                'data' => [
+                    'disponible' => $ret['disponible'],
+                    'impuestos' => $ret['impuestos'],
+                    'alcance_todos' => $ret['alcance_todos'],
+                    'efectivas' => isset($ret['efectivas'][$cod]) ? $ret['efectivas'][$cod] : [],
+                    'historial' => $prov->retenciones()->historialProveedor($cod)
                 ]
             ], JSON_UNESCAPED_UNICODE);
             break;
@@ -669,26 +807,8 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
-        /* ================================================================
-           CONCILIACION
-           ================================================================ */
-        case 'previewConciliacion':
-            echo json_encode([
-                'success' => true,
-                'data' => $prov->conciliar(false, $usuario)
-            ], JSON_UNESCAPED_UNICODE);
-            break;
-
-        case 'aplicarConciliacion':
-            $r = $prov->conciliar(true, $usuario);
-
-            echo json_encode([
-                'success' => true,
-                'message' => $r['resumen']['concilia'] . ' conciliado(s) y '
-                    . $r['resumen']['reabre'] . ' reabierto(s).',
-                'data' => $r
-            ], JSON_UNESCAPED_UNICODE);
-            break;
+        /* LA CONCILIACION NO TIENE ENDPOINT: corre sola en getPendientes. Ver
+           Proveedores::conciliarAutomatica(). */
 
         default:
             echo json_encode([
@@ -748,10 +868,23 @@ function indicadores($items) {
 
     $vencimientos = 0;
 
+    /* LO RETENIDO, aparte y por impuesto. Los importes de arriba son lo que sale
+       de la caja -el neto donde hay retencion-, igual que el eje y la fila del
+       tablero; la retencion es plata que no sale, y se dice cuanta es. */
+    $retenido = 0.0;
+    $retenidoPorImpuesto = [];
+
     foreach ($items as $i) {
-        $importe = floatval($i['IMPORTE_PENDIENTE']);
+        $importe = ProveedoresProvider::importeAPagar($i);
         $total += $importe;
         $proveedores[$i['COD_PROVEE']] = true;
+
+        $retenido += isset($i['RETENIDO']) ? floatval($i['RETENIDO']) : 0.0;
+
+        foreach (isset($i['RETENIDO_POR_IMPUESTO']) ? $i['RETENIDO_POR_IMPUESTO'] : [] as $codigo => $r) {
+            $retenidoPorImpuesto[$codigo] = (isset($retenidoPorImpuesto[$codigo])
+                ? $retenidoPorImpuesto[$codigo] : 0.0) + floatval($r);
+        }
 
         /* Las dos partes de un comprobante pagado con dos medios son UN
            vencimiento: la segunda suma su importe y no se cuenta. Es la misma
@@ -820,6 +953,8 @@ function indicadores($items) {
         'cronograma' => round($total - $fuera, 2),
         'fuera_cronograma' => round($fuera, 2),
         'n_fuera_cronograma' => $nFuera,
-        'fuera_por_forma' => array_map(function ($v) { return round($v, 2); }, $porFormaFuera)
+        'fuera_por_forma' => array_map(function ($v) { return round($v, 2); }, $porFormaFuera),
+        'retenido' => round($retenido, 2),
+        'retenido_por_impuesto' => array_map(function ($v) { return round($v, 2); }, $retenidoPorImpuesto)
     ];
 }

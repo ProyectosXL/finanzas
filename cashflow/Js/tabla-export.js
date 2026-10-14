@@ -28,6 +28,15 @@
  * Se ve, pero en la planilla sería un dato repetido: los totales arriba del
  * eje (Js/eje-totales.js) son los mismos números del pie. Ver omitir().
  *
+ * Y AL REVÉS, LO MARCADO CON data-exportar-solo BAJA AUNQUE NO SE VEA
+ * -------------------------------------------------------------------
+ * Una celda escondida en pantalla que la planilla sí tiene que tener. El caso
+ * que lo pide: Proveedores Locales muestra una sola columna de retenciones con
+ * el desglose en el tooltip —tres impuestos en tres columnas harían la grilla
+ * demasiado ancha—, y el Excel tiene que bajar una columna por impuesto, porque
+ * un tooltip no se exporta. Esconderla es cosa del CSS de la pestaña; acá sólo
+ * se respeta la marca. Excel no lee ese CSS, así que en la planilla se ve.
+ *
  * LO QUE NO ES TEXTO NO ENTRA
  * ---------------------------
  * Del clon se van los `<input>`, `<select>`, `<button>`, `<i>` y `<svg>`,
@@ -103,7 +112,8 @@ var TablaExport = (function() {
             }
 
             for (var c = viva_f.cells.length - 1; c >= 0; c--) {
-                if (oculto(viva_f.cells[c]) && clon_f.cells[c]) {
+                if (oculto(viva_f.cells[c]) && clon_f.cells[c]
+                        && !viva_f.cells[c].hasAttribute('data-exportar-solo')) {
                     clon_f.deleteCell(c);
                 }
             }

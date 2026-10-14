@@ -1118,6 +1118,63 @@ class ProveedoresRetenciones {
     }
 
     /**
+     * Lo que el Maestro necesita para las columnas, el filtro y la carga: los
+     * impuestos activos, en su orden, y el valor efectivo HOY de cada uno para
+     * cada proveedor. Pura.
+     *
+     * El valor de la columna lo resuelve efectiva() -la misma regla del
+     * calculo- y no el navegador: si la pantalla decidiera por su cuenta de
+     * donde sale una alicuota, podria decir "general" donde el neto usa la del
+     * proveedor.
+     *
+     * @param array $config
+     * @param array $cods Los codigos del maestro
+     * @param string $hoy
+     * @return array ['disponible', 'error', 'impuestos', 'alcances',
+     *         'alcance_todos', 'efectivas', 'hoy']
+     */
+    public static function paraMaestro($config, $cods, $hoy) {
+        $impuestos = [];
+
+        foreach (self::impuestosActivos($config) as $i) {
+            $impuestos[] = ['CODIGO' => $i['CODIGO'], 'NOMBRE' => $i['NOMBRE'], 'ALCANCE' => $i['ALCANCE']];
+        }
+
+        return [
+            'disponible' => !empty($config['disponible']),
+            'error' => isset($config['error']) ? $config['error'] : null,
+            'impuestos' => $impuestos,
+            'alcances' => self::ALCANCES,
+            'alcance_todos' => self::ALCANCE_TODOS,
+            'efectivas' => self::efectivasHoy($config, $cods, $hoy),
+            'hoy' => $hoy
+        ];
+    }
+
+    /**
+     * Un plan de asignacion como lo lee el dialogo: cuantos y cuales, sin la
+     * fila del impuesto entera. Pura.
+     *
+     * @param array $plan De planAsignacion()
+     * @return array
+     */
+    public static function resumenPlan($plan) {
+        return [
+            'impuesto' => $plan['impuesto']['CODIGO'],
+            'nombre' => $plan['impuesto']['NOMBRE'],
+            'accion' => $plan['accion'],
+            'valor' => $plan['valor'],
+            'aplicar' => count($plan['aplicar']),
+            'nuevos' => count($plan['nuevos']),
+            'reemplaza' => count($plan['reemplaza']),
+            'iguales' => count($plan['iguales']),
+            'fuera_maestro' => $plan['fuera_maestro'],
+            'rechazados' => $plan['rechazados'],
+            'texto_rechazados' => empty($plan['rechazados']) ? '' : self::textoExcedidos($plan['rechazados'])
+        ];
+    }
+
+    /**
      * Lo que la pantalla de Parametros lista de cada impuesto: su alicuota
      * vigente hoy y cuantos proveedores tienen alicuota propia. Pura.
      *

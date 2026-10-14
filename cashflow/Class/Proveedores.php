@@ -9,6 +9,7 @@ require_once __DIR__ . '/Planilla.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
 require_once __DIR__ . '/CronogramaPagos.php';
+require_once __DIR__ . '/ProveedoresRetenciones.php';
 
 /**
  * Proveedores
@@ -152,13 +153,17 @@ class Proveedores {
     /** @var array Avisos del cronograma de la ultima lectura. Ver avisosCronograma() */
     private $avisosCrono = [];
 
+    /** @var ProveedoresRetenciones */
+    private $retenciones;
+
     /**
      * @param ProveedoresCategorias|null $categorias Se puede inyectar para poder
      *        probar la clasificacion sin base.
      * @param ProveedoresExclusion|null $exclusion Idem, para los excluidos por
      *        proveedor
+     * @param ProveedoresRetenciones|null $retenciones Idem, para las alicuotas
      */
-    function __construct($categorias = null, $exclusion = null) {
+    function __construct($categorias = null, $exclusion = null, $retenciones = null) {
         require_once __DIR__ . '/../../class/conexion.php';
         $this->conn = new Conexion;
         $this->categorias = ($categorias === null) ? new ProveedoresCategorias() : $categorias;
@@ -168,6 +173,17 @@ class Proveedores {
         $this->exclusion = ($exclusion === null)
             ? new ProveedoresExclusion($this->categorias->tango())
             : $exclusion;
+
+        $this->retenciones = ($retenciones === null) ? new ProveedoresRetenciones() : $retenciones;
+    }
+
+    /**
+     * @return ProveedoresRetenciones Las alicuotas de retencion. Una instancia
+     *         por pedido: su config() se lee una vez y la comparten la grilla,
+     *         la importacion y los avisos.
+     */
+    public function retenciones() {
+        return $this->retenciones;
     }
 
     /** @return ProveedoresCategorias El resolutor de categorias */
@@ -289,6 +305,10 @@ class Proveedores {
         if ($sinExclusion !== '') {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, $sinExclusion);
         }
+
+        /* Sin el script de retenciones, o si no se pudieron leer, se proyecta el
+           total: es el numero de antes, y se dice. */
+        $avisos = array_merge($avisos, ProveedoresRetenciones::avisosConfig($this->retenciones->config()));
 
         return array_merge($avisos, $this->categorias->getAvisosConNivel());
     }
@@ -441,6 +461,11 @@ class Proveedores {
         // Una consulta para todo el listado. Vacio si falta el script.
         $excluidosProv = $this->exclusion->vigentes(ProveedoresExclusion::MODULO_PROV_LOCALES);
         $items = [];
+
+        /* Las alicuotas, leidas una vez para todo el listado. Sin el script -o
+           si no se pueden leer- 'disponible' viene en false y el neto queda
+           igual al pendiente: como antes. */
+        $retCfg = $this->retenciones->config();
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $cod = Planilla::codigo($row['COD_PROVEE']);
@@ -602,6 +627,10 @@ class Proveedores {
                 'APERTURA' => null,
                 'APERTURA_DESCUADRADA' => null
             ];
+
+            /* LA RETENCION Y EL NETO A PAGAR, con la fecha con la que cae en el
+               eje. Ver conRetencion(). */
+            $items[count($items) - 1] = self::conRetencion($items[count($items) - 1], $retCfg, $hoyStr);
         }
 
         sqlsrv_free_stmt($stmt);
@@ -616,10 +645,64 @@ class Proveedores {
            pendiente del comprobante entero. Mismo criterio que el cronograma,
            que tampoco se resuelve sin el horizonte. */
         if ($h !== null) {
-            $items = self::abrirEnMedios($items, $this->getAperturas(), $hoyStr, $pagosCrono);
+            $items = self::abrirEnMedios($items, $this->getAperturas(), $hoyStr, $pagosCrono, $retCfg);
         }
 
         return $items;
+    }
+
+    /**
+     * Le agrega a una fila de getPendientes() su retencion y su NETO A PAGAR.
+     * Es el unico lugar donde una fila recibe esos campos: lo usan
+     * getPendientes() y abrirEnMedios().
+     *
+     *   RETENCION              lo que devolvio ProveedoresRetenciones::calcular():
+     *                          base, cada impuesto con su alicuota y de donde
+     *                          sale, el motivo si no lleva ninguna, y el neto
+     *   RETENIDO               el total retenido EN ESTA FILA
+     *   RETENIDO_POR_IMPUESTO  codigo => importe, de esta fila
+     *   IMPORTE_A_PAGAR        lo que sale de la caja: el neto donde hay
+     *                          retencion, el pendiente donde no
+     *
+     * IMPORTE_PENDIENTE NO CAMBIA: sigue siendo el total que debe la factura,
+     * y lo siguen leyendo Tarjetas Pagos Corporativos, la importacion y las
+     * columnas Importe y Pendiente. Lo que va al eje y al tablero es
+     * IMPORTE_A_PAGAR.
+     *
+     * LA FECHA DE LA ALICUOTA ES LA DE PAGO, la misma con la que la fila cae en
+     * el eje ('Pago'): un cambio de alicuota rige desde una fecha. Sin fecha
+     * -SIN_FECHA- se usa la de hoy, que es lo mas cierto que se sabe.
+     *
+     * Estatica y pura.
+     *
+     * @param array $item
+     * @param array|null $config De ProveedoresRetenciones::config(); null es
+     *        "sin retenciones", el comportamiento de antes
+     * @param string $hoy 'Y-m-d'
+     * @param string|null $fecha La fecha de la alicuota, si no es 'Pago'
+     * @return array La fila con los cuatro campos
+     */
+    public static function conRetencion($item, $config, $hoy, $fecha = null) {
+        if ($fecha === null) {
+            $fecha = !empty($item['Pago']) ? $item['Pago'] : $hoy;
+        }
+
+        $r = ProveedoresRetenciones::calcular($item['IMPORTE_PENDIENTE'], $item['COD_PROVEE'],
+            $item['T_COMP'], !empty($item['CRONOGRAMA']), $fecha,
+            ($config === null) ? ['disponible' => false] : $config);
+
+        $porImpuesto = [];
+
+        foreach ($r['impuestos'] as $codigo => $i) {
+            $porImpuesto[$codigo] = $i['retencion'];
+        }
+
+        $item['RETENCION'] = $r;
+        $item['RETENIDO'] = $r['retenido'];
+        $item['RETENIDO_POR_IMPUESTO'] = $porImpuesto;
+        $item['IMPORTE_A_PAGAR'] = $r['neto'];
+
+        return $item;
     }
 
     /**
@@ -654,15 +737,37 @@ class Proveedores {
      * que queda pendiente se proyecta ahi, con la jerarquia de siempre. Y se
      * marca, para el aviso de avisosPendientesConNivel() y para la grilla.
      *
+     * LAS PARTES SON IMPORTES NETOS. La planilla trae lo que se paga por cada
+     * medio, y eso es despues de retenciones: las dos partes suman el NETO A
+     * PAGAR del comprobante, no su pendiente. Por eso:
+     *
+     *   - la retencion se calcula sobre el COMPROBANTE ENTERO, una sola vez,
+     *     a la fecha MAS TARDIA de las dos partes (la que guarda la tabla de
+     *     pagos): una orden de pago retiene sobre la factura, no sobre cada
+     *     medio;
+     *   - el descuadre se mide contra el neto: un pago parcial en Tango baja el
+     *     pendiente, la retencion se recalcula sobre el pendiente nuevo y la
+     *     apertura deja de coincidir;
+     *   - la ultima parte se lleva el resto -neto menos las anteriores-, asi
+     *     que el cuadro cierra al centavo;
+     *   - LA RETENCION VA EN LA PRIMERA PARTE, entera. El pendiente de la
+     *     primera es su neto mas la retencion, y el de la segunda, su neto: las
+     *     dos siguen sumando el pendiente, y los totales por impuesto no se
+     *     duplican.
+     *
+     * Sin alicuotas el neto es el pendiente y todo funciona como antes.
+     *
      * Estatica y pura.
      *
      * @param array $items Filas de getPendientes()
      * @param array $aperturas Mapa de getAperturas(): clave => medios
      * @param string $hoy 'Y-m-d'
      * @param array|null $pagosCrono Pagos del cronograma PROV_LOCALES
+     * @param array|null $retCfg De ProveedoresRetenciones::config(); null = sin
+     *        retenciones
      * @return array Las filas, con las abiertas reemplazadas por sus partes
      */
-    public static function abrirEnMedios($items, $aperturas, $hoy, $pagosCrono = null) {
+    public static function abrirEnMedios($items, $aperturas, $hoy, $pagosCrono = null, $retCfg = null) {
         if (empty($aperturas)) {
             return $items;
         }
@@ -688,19 +793,32 @@ class Proveedores {
             }
 
             $suma = 0.0;
+            $ultimaFecha = null;
 
             foreach ($medios as $m) {
                 $suma += floatval($m['importe']);
+
+                if ($ultimaFecha === null || $m['fecha'] > $ultimaFecha) {
+                    $ultimaFecha = $m['fecha'];
+                }
             }
 
             $info = self::infoApertura($medios);
 
-            if (count($indices) !== 1
-                || abs(round($pendiente - $suma, 2)) > self::TOLERANCIA_IMPORTE) {
+            /* La retencion del comprobante entero, a la fecha mas tardia. Con
+               mas de un vencimiento no se parte, y cada cuota conserva la suya. */
+            $entero = (count($indices) === 1)
+                ? self::conRetencion($items[$indices[0]], $retCfg, $hoy, $ultimaFecha)
+                : null;
+            $neto = ($entero === null) ? $pendiente : floatval($entero['IMPORTE_A_PAGAR']);
+
+            if ($entero === null
+                || abs(round($neto - $suma, 2)) > self::TOLERANCIA_IMPORTE) {
                 foreach ($indices as $i) {
                     $items[$i]['APERTURA_DESCUADRADA'] = array_merge($info, [
                         'suma' => round($suma, 2),
                         'pendiente' => round($pendiente, 2),
+                        'neto' => round($neto, 2),
                         'vencimientos' => count($indices)
                     ]);
                 }
@@ -708,18 +826,32 @@ class Proveedores {
                 continue;
             }
 
-            $fila = $items[$indices[0]];
+            $fila = $entero;
+            $retenido = floatval($entero['RETENIDO']);
             $partes = [];
-            $acumulado = ['IMPORTE_PENDIENTE' => 0.0, 'IMPORTE_VTO' => 0.0, 'IMPUTACIONES' => 0.0];
+            $acumulado = ['IMPORTE_PENDIENTE' => 0.0, 'IMPORTE_A_PAGAR' => 0.0, 'IMPORTE_VTO' => 0.0,
+                          'IMPUTACIONES' => 0.0];
             $n = count($medios);
 
             foreach (array_values($medios) as $k => $m) {
                 $parte = $fila;
                 $ultima = ($k === $n - 1);
+                $aPagar = $ultima
+                    ? round($neto - $acumulado['IMPORTE_A_PAGAR'], 2)
+                    : round(floatval($m['importe']), 2);
+
+                /* El pendiente de la parte: su neto, y en la primera ademas la
+                   retencion entera. La ultima se lleva el resto, asi que las
+                   partes suman el pendiente al centavo. */
                 $importe = $ultima
                     ? round($pendiente - $acumulado['IMPORTE_PENDIENTE'], 2)
-                    : round(floatval($m['importe']), 2);
+                    : round($aPagar + ($k === 0 ? $retenido : 0.0), 2);
                 $proporcion = ($pendiente != 0) ? $importe / $pendiente : 0.0;
+
+                $parte['IMPORTE_A_PAGAR'] = $aPagar;
+                $parte['RETENIDO'] = ($k === 0) ? $retenido : 0.0;
+                $parte['RETENIDO_POR_IMPUESTO'] = ($k === 0) ? $entero['RETENIDO_POR_IMPUESTO'] : [];
+                $acumulado['IMPORTE_A_PAGAR'] += $aPagar;
 
                 foreach (['IMPORTE_VTO', 'IMPUTACIONES'] as $col) {
                     $parte[$col] = $ultima
@@ -1261,12 +1393,29 @@ class Proveedores {
         $compExcluidos = 0;
         $descuadrados = [];
 
+        /* LOS DEL CRONOGRAMA QUE SE PROYECTAN SIN RETENER porque un impuesto "a
+           todos" no tiene alicuota general vigente a su fecha de pago -y el
+           proveedor tampoco tiene una propia-. No es una retencion de 0: falta
+           el dato, y el neto que se proyecta es mas alto que el real. */
+        $sinGeneral = 0;
+        $importeSinGeneral = 0.0;
+        $impuestosSinGeneral = [];
+
         foreach ($items as $i) {
             $importe = floatval($i['IMPORTE_PENDIENTE']);
 
             /* Las dos partes de un comprobante abierto son UN vencimiento: la
                segunda suma su importe pero no se cuenta. */
             $cuenta = self::cuentaComoVencimiento($i) ? 1 : 0;
+
+            if ($cuenta === 1 && !empty($i['RETENCION']['sin_general'])) {
+                $sinGeneral++;
+                $importeSinGeneral += floatval($i['RETENCION']['base']);
+
+                foreach ($i['RETENCION']['sin_general'] as $codigo) {
+                    $impuestosSinGeneral[$codigo] = true;
+                }
+            }
 
             if (!empty($i['APERTURA_DESCUADRADA'])) {
                 $descuadrados[self::clavePago($i['COD_PROVEE'], $i['T_COMP'], $i['N_COMP'])] = true;
@@ -1307,8 +1456,17 @@ class Proveedores {
            como arreglarlo. */
         if (!empty($descuadrados)) {
             $avisos[] = Aviso::nuevo(Aviso::WARNING, count($descuadrados) . ' comprobante(s) '
-                . 'abiertos en dos medios ya no coinciden con su pendiente: se proyecta el saldo '
+                . 'abiertos en dos medios ya no coinciden con su neto a pagar: se proyecta el saldo '
                 . 'en la fecha más tardía. Reimportá para corregirlo.');
+        }
+
+        if ($sinGeneral > 0) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $sinGeneral . ' comprobante(s) del cronograma '
+                . 'por ' . self::plata($importeSinGeneral) . ' se proyectan sin retener '
+                . implode(', ', array_keys($impuestosSinGeneral)) . ' porque no tienen alícuota '
+                . 'general vigente a su fecha de pago: falta cargar las retenciones en Parámetros › '
+                . 'Prov. Locales. Mientras tanto se proyecta el total, más de lo que va a salir de '
+                . 'la caja.' . $alcance, 'Retenciones');
         }
 
         if ($compVencidosCrono > 0) {
@@ -1559,20 +1717,23 @@ class Proveedores {
                 'sinonimos' => ['FORMAPAGO', 'FORMA_PAGO', 'FORMA', 'MEDIODEPAGO',
                                 'FORMADEPAGO']
             ],
-            /* EL IMPORTE ES OPCIONAL CON UN MEDIO Y OBLIGATORIO CON DOS. Con una
-               sola fila por comprobante, vacio quiere decir "todo lo pendiente";
-               si viene, tiene que coincidir con el pendiente -con un peso de
-               tolerancia-, porque otro numero es otro comprobante o un pago
-               parcial que la planilla no sabe. Con dos filas es lo que dice
-               cuanto va por cada medio. Ver compararImportacion(). */
+            /* EL IMPORTE ES OPCIONAL CON UN MEDIO Y OBLIGATORIO CON DOS, y es
+               NETO DE RETENCIONES: lo que sale de la caja, que es lo que pone
+               quien arma la planilla. Con una sola fila por comprobante, vacio
+               quiere decir "el neto a pagar"; si viene, tiene que coincidir con
+               el neto -con un peso de tolerancia-, porque otro numero es otro
+               comprobante o un pago parcial que la planilla no sabe. Con dos
+               filas es lo que dice cuanto va por cada medio, y suman el neto.
+               Sin retenciones el neto es el pendiente. Ver
+               compararImportacion(). */
             'importe' => [
                 'titulo' => 'IMPORTE',
                 'obligatoria' => false,
                 'tipo' => 'importe',
-                'ayuda' => 'Opcional con un solo medio: vacío es todo lo pendiente, y si viene '
-                    . 'tiene que coincidir con el pendiente. Con dos medios —dos filas del mismo '
-                    . 'comprobante, cada una ECHEQ o TRANSFERENCIA— es obligatorio en las dos, y '
-                    . 'tienen que sumar el pendiente. Sin separador de miles.',
+                'ayuda' => 'Neto de retenciones. Opcional con un solo medio: vacío es el neto a pagar, '
+                    . 'y si viene tiene que coincidir con el neto. Con dos medios —dos filas del '
+                    . 'mismo comprobante, cada una ECHEQ o TRANSFERENCIA— es obligatorio en las dos, '
+                    . 'y tienen que sumar el neto a pagar. Sin separador de miles.',
                 'sinonimos' => ['IMPORTE', 'MONTO', 'IMPORTE_PAGO', 'IMPORTEPAGO', 'MONTO_PAGO',
                                 'MONTOPAGO']
             ],
@@ -1634,25 +1795,33 @@ class Proveedores {
      *   ALTA         el comprobante no tenia fecha cargada
      *   CAMBIO       la tenia y es otra; 'antes' dice cual
      *   SIN_CAMBIOS  ya estaba con esa fecha y esa forma -o con esa apertura-
+     *   YA_PAGADA    ADVERTENCIA: el comprobante ya se pago en Tango. No se
+     *                carga, no frena la confirmacion y se cuenta aparte
      *   ERROR        no se puede cargar; 'motivo' dice por que
      *
-     * LO QUE NO MATCHEA CONTRA NINGUN PENDIENTE ES UN ERROR VISIBLE, no una
-     * fila que se ignora. Un comprobante que no esta en el listado puede ser un
-     * numero mal tipeado, un proveedor equivocado, o una factura que ya se pago
-     * -y eso ultimo es informacion, no un descarte-. El motivo distingue los
-     * tres casos, porque se arreglan distinto.
+     * LO QUE NO MATCHEA CONTRA NINGUN PENDIENTE SE MIRA EN TANGO ($enTango, solo
+     * esos comprobantes): si ya se pago es YA_PAGADA, con la fecha real; si no
+     * existe para ese proveedor es un ERROR -numero mal tipeado o proveedor
+     * equivocado-. Ver sinPendiente().
      *
      * EL ESTADO ES DEL COMPROBANTE, NO DE LA FILA
      * -------------------------------------------
      * Las filas se juntan por comprobante y se deciden juntas:
      *
      *   1 fila       un medio, el caso de siempre. IMPORTE es opcional: vacio
-     *                es todo lo pendiente, y si viene tiene que coincidir con
-     *                el pendiente con TOLERANCIA_IMPORTE. La forma es opcional
-     *                y no decide nada, como siempre.
+     *                es el NETO A PAGAR, y si viene tiene que coincidir con el
+     *                neto con TOLERANCIA_IMPORTE. La forma es opcional y no
+     *                decide nada, como siempre.
      *   2 filas      DOS MEDIOS. Cada fila con su fecha, su forma -ECHEQ o
      *                TRANSFERENCIA, obligatoria- y su importe -obligatorio,
-     *                mayor a cero-, y las dos tienen que sumar el pendiente.
+     *                mayor a cero-, y las dos tienen que sumar el neto.
+     *
+     * EL NETO A PAGAR ES EL TOTAL MENOS LAS RETENCIONES, resuelto con la regla
+     * de siempre -ProveedoresRetenciones::calcular()- a la fecha de pago de la
+     * planilla (la mas tardia, con dos medios). Un comprobante sin retencion
+     * -otra forma, nota de credito, proveedor sin impuestos- tiene neto = total
+     * y la regla es la de antes. Cada fila vuelve con su total, sus
+     * retenciones y el neto contra el que se comparo.
      *                Puede ser el mismo medio dos veces: dos echeqs de fechas
      *                distintas.
      *   3 o mas      error en TODAS, nombrando las lineas.
@@ -1688,10 +1857,16 @@ class Proveedores {
      * @param array $aperturas Mapa de getAperturas()
      * @param bool $conMedios Si existe la tabla de medios. Sin ella, dos filas
      *        de un comprobante son un error que nombra el script
+     * @param array|null $retCfg De ProveedoresRetenciones::config(): el IMPORTE
+     *        se compara contra el NETO a pagar. null = sin retenciones, y el
+     *        neto es el pendiente
+     * @param array|null $enTango De estadoComprobantesEnTango(): el estado en
+     *        Tango de los que no cruzaron. null = no se consulto
      * @return array ['filas', 'resumen', 'avisos']
      */
     public static function compararImportacion($filasArchivo, $pendientes, $pagos, $hoy = null,
-                                               $aperturas = [], $conMedios = true) {
+                                               $aperturas = [], $conMedios = true, $retCfg = null,
+                                               $enTango = null) {
         $hoyStr = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
 
         /* Los pendientes, indexados de dos formas: por clave completa -cuando la
@@ -1717,7 +1892,7 @@ class Proveedores {
         $grupos = [];
 
         foreach (is_array($filasArchivo) ? $filasArchivo : [] as $cruda) {
-            $fila = self::filaPago($cruda, $porClave, $porNumero, $hoyStr);
+            $fila = self::filaPago($cruda, $porClave, $porNumero, $hoyStr, $enTango);
             $grupos[self::grupoDeFila($fila, $porNumero)][] = $fila;
         }
 
@@ -1726,14 +1901,29 @@ class Proveedores {
         $resumen = [
             'altas' => 0, 'cambios' => 0, 'sin_cambios' => 0, 'errores' => 0,
             'importe_con_fecha' => 0.0, 'vencidos_resueltos' => 0,
-            'forma_desconocida' => 0, 'dos_medios' => 0, 'dos_medios_fuera_cronograma' => 0
+            'forma_desconocida' => 0, 'dos_medios' => 0, 'dos_medios_fuera_cronograma' => 0,
+            'ya_pagadas' => 0
         ];
 
         foreach ($grupos as $grupo) {
+            /* UN COMPROBANTE YA PAGADO EN TANGO ES ADVERTENCIA EN TODAS SUS
+               FILAS: dos filas de una factura ya pagada no son un error del
+               comprobante -no hay nada que cargar-, y cada una se cuenta. */
+            $yaPagadas = array_filter($grupo, function ($f) { return $f['estado'] === 'YA_PAGADA'; });
+
+            if (count($yaPagadas) === count($grupo)) {
+                foreach ($grupo as $fila) {
+                    $filas[] = $fila;
+                    $resumen['ya_pagadas']++;
+                }
+
+                continue;
+            }
+
             if (count($grupo) === 1) {
-                $grupo = [self::unMedio($grupo[0], $pagos, $aperturas)];
+                $grupo = [self::unMedio($grupo[0], $pagos, $aperturas, $retCfg)];
             } elseif (count($grupo) === self::MAX_MEDIOS) {
-                $grupo = self::dosMedios($grupo, $pagos, $aperturas, $conMedios);
+                $grupo = self::dosMedios($grupo, $pagos, $aperturas, $conMedios, $retCfg);
             } else {
                 $grupo = self::demasiadasFilas($grupo);
             }
@@ -1757,7 +1947,9 @@ class Proveedores {
                     continue;
                 }
 
-                $resumen['importe_con_fecha'] += $fila['importe_pendiente'];
+                /* Lo que se reubica es lo que sale de la caja: el neto. */
+                $resumen['importe_con_fecha'] += ($fila['neto'] !== null) ? $fila['neto']
+                    : $fila['importe_pendiente'];
 
                 if ($fila['estaba_vencido']) {
                     $resumen['vencidos_resueltos']++;
@@ -1836,24 +2028,29 @@ class Proveedores {
      * @param array $aperturas
      * @return array La fila, con su estado y su motivo
      */
-    private static function unMedio($fila, $pagos, $aperturas) {
+    private static function unMedio($fila, $pagos, $aperturas, $retCfg = null) {
         if ($fila['estado'] === 'ERROR') {
             return $fila;
         }
 
-        /* CON UN MEDIO, EL IMPORTE TIENE QUE SER EL PENDIENTE. Otro numero es
+        /* EL NETO A PAGAR, a la fecha de pago de la planilla: es la que va a
+           quedar cargada, y con la que la grilla va a resolver la alicuota. */
+        $fila = self::conNeto($fila, $retCfg, $fila['fecha_pago']);
+
+        /* CON UN MEDIO, EL IMPORTE TIENE QUE SER EL NETO A PAGAR: lo que sale de
+           la caja, que es lo que pone quien arma la planilla. Otro numero es
            otro comprobante, o un pago parcial que la planilla sabe y Tango
            todavia no: cargarle la fecha a todo el pendiente diria una cosa que
-           la planilla no dice. */
+           la planilla no dice. Sin retenciones el neto es el pendiente, y la
+           regla es la de siempre. */
         if ($fila['importe'] !== null) {
-            $dif = round($fila['importe'] - $fila['importe_pendiente'], 2);
+            $dif = round($fila['importe'] - $fila['neto'], 2);
 
             if (abs($dif) > self::TOLERANCIA_IMPORTE) {
                 $fila['estado'] = 'ERROR';
-                $fila['motivo'] = 'El importe (' . self::plata($fila['importe']) . ') no coincide con '
-                    . 'el pendiente del comprobante (' . self::plata($fila['importe_pendiente'])
-                    . '): la diferencia es de ' . self::plata($dif) . '. Con un solo medio, el '
-                    . 'IMPORTE puede quedar vacío y se toma todo lo pendiente.';
+                $fila['motivo'] = self::motivoImporte('El importe (' . self::plata($fila['importe']) . ')',
+                    $fila['importe'], $fila)
+                    . ' Con un solo medio, el IMPORTE puede quedar vacío y se toma el neto a pagar.';
 
                 return $fila;
             }
@@ -1897,16 +2094,95 @@ class Proveedores {
     }
 
     /**
+     * Le agrega a una fila de la planilla la retencion y el neto a pagar de su
+     * comprobante, con la regla de siempre (ProveedoresRetenciones::calcular())
+     * sobre el pendiente del comprobante entero.
+     *
+     * @param array $fila
+     * @param array|null $retCfg
+     * @param string $fecha 'Y-m-d' de pago
+     * @return array La fila con 'retencion', 'retenido', 'retenciones' y 'neto'
+     */
+    private static function conNeto($fila, $retCfg, $fecha) {
+        $r = ProveedoresRetenciones::calcular($fila['importe_pendiente'], $fila['cod_provee'],
+            $fila['t_comp'], $fila['cronograma'], $fecha,
+            ($retCfg === null) ? ['disponible' => false] : $retCfg);
+
+        $fila['retencion'] = $r;
+        $fila['retenido'] = $r['retenido'];
+        $fila['retenciones'] = [];
+
+        foreach ($r['impuestos'] as $codigo => $i) {
+            $fila['retenciones'][$codigo] = ['nombre' => $i['nombre'], 'alicuota' => $i['alicuota'],
+                                             'retencion' => $i['retencion']];
+        }
+
+        $fila['neto'] = $r['neto'];
+
+        return $fila;
+    }
+
+    /**
+     * El motivo de un importe que no coincide con el neto. AYUDA A CORREGIR:
+     *
+     *   - si coincide con el TOTAL sin retenciones, lo dice, dice cual es el
+     *     neto y cuanto es cada retencion, y como se hace si a ese proveedor no
+     *     se le retiene: es el error que va a aparecer el primer dia;
+     *   - si no, muestra total, retenciones, neto y diferencia;
+     *   - sin retenciones, el texto de siempre, contra el pendiente.
+     *
+     * @param string $sujeto "El importe ($ X)" o "Los importes suman $ X"
+     * @param float $importe
+     * @param array $fila Con 'importe_pendiente', 'retenido', 'retenciones', 'neto'
+     * @return string
+     */
+    private static function motivoImporte($sujeto, $importe, $fila) {
+        $total = $fila['importe_pendiente'];
+        $neto = $fila['neto'];
+        $dif = round($importe - $neto, 2);
+
+        if ($fila['retenido'] <= 0) {
+            return $sujeto . ' no coincide con el pendiente del comprobante (' . self::plata($total)
+                . '): la diferencia es de ' . self::plata($dif) . '.';
+        }
+
+        $desglose = [];
+
+        foreach ($fila['retenciones'] as $r) {
+            if ($r['retencion'] > 0) {
+                $desglose[] = $r['nombre'] . ' ' . self::plata($r['retencion']);
+            }
+        }
+
+        if (abs(round($importe - $total, 2)) <= self::TOLERANCIA_IMPORTE) {
+            return $sujeto . ' coincide con el total de la factura sin retenciones (' . self::plata($total)
+                . '). El neto a pagar con retenciones es ' . self::plata($neto) . ' ('
+                . implode(', ', $desglose) . '). Si a este proveedor no se le retiene, cargale '
+                . 'alícuota 0 en el Maestro.';
+        }
+
+        return $sujeto . ' no coincide con el neto a pagar del comprobante: total ' . self::plata($total)
+            . ', retenciones ' . self::plata($fila['retenido']) . ' (' . implode(', ', $desglose)
+            . '), neto ' . self::plata($neto) . '. La diferencia es de ' . self::plata($dif) . '.';
+    }
+
+    /**
      * Un comprobante en DOS filas: dos medios. Se cargan las dos o ninguna.
      * Ver compararImportacion().
+     *
+     * LAS DOS PARTES SON NETAS: tienen que sumar el NETO A PAGAR del
+     * comprobante. La retencion se calcula sobre el comprobante entero a la
+     * fecha mas tardia de las dos, la misma con la que abrirEnMedios() lo va a
+     * proyectar.
      *
      * @param array $grupo Las dos filas, en el orden del archivo
      * @param array $pagos
      * @param array $aperturas
      * @param bool $conMedios
+     * @param array|null $retCfg
      * @return array Las dos filas, con el mismo estado y el mismo motivo
      */
-    private static function dosMedios($grupo, $pagos, $aperturas, $conMedios) {
+    private static function dosMedios($grupo, $pagos, $aperturas, $conMedios, $retCfg = null) {
         $lineas = 'líneas ' . $grupo[0]['linea'] . ' y ' . $grupo[1]['linea'];
 
         foreach ($grupo as $i => $f) {
@@ -1947,6 +2223,12 @@ class Proveedores {
             }
 
             return $grupo;
+        }
+
+        $ultimaFecha = max($grupo[0]['fecha_pago'], $grupo[1]['fecha_pago']);
+
+        foreach ($grupo as $i => $f) {
+            $grupo[$i] = self::conNeto($f, $retCfg, $ultimaFecha);
         }
 
         $base = $grupo[0];
@@ -1991,12 +2273,14 @@ class Proveedores {
         }
 
         if ($importesOk) {
-            $dif = round($suma - $base['importe_pendiente'], 2);
+            $dif = round($suma - $base['neto'], 2);
 
             if (abs($dif) > self::TOLERANCIA_IMPORTE) {
-                $problemas[] = 'los importes suman ' . self::plata($suma) . ' y el pendiente es '
-                    . self::plata($base['importe_pendiente']) . ': la diferencia es de '
-                    . self::plata($dif);
+                $problemas[] = ($base['retenido'] > 0)
+                    ? lcfirst(rtrim(self::motivoImporte('Los importes suman ' . self::plata($suma), $suma, $base), '.'))
+                    : 'los importes suman ' . self::plata($suma) . ' y el pendiente es '
+                        . self::plata($base['importe_pendiente']) . ': la diferencia es de '
+                        . self::plata($dif);
             }
         }
 
@@ -2157,6 +2441,229 @@ class Proveedores {
     }
 
     /**
+     * Que pasa con una fila cuyo comprobante NO esta en los pendientes. Antes
+     * era el mismo error exista o no en Tango; ahora se distingue, porque se
+     * arreglan distinto -o no hay nada que arreglar-:
+     *
+     *   YA_PAGADA   existe en Tango para ese proveedor, no esta pendiente y
+     *               tiene una cancelacion (CAN o PAG, con MAX(CPA05.F_COMP_CAN),
+     *               el mismo criterio que la conciliacion). ADVERTENCIA: no se
+     *               carga, no frena la confirmacion y se cuenta aparte. Sin
+     *               TIPO_COMP, vale si TODOS los candidatos con ese numero estan
+     *               cancelados.
+     *   ERROR       no existe en Tango para ese proveedor: numero mal tipeado o
+     *               proveedor equivocado. El motivo ya no dice "si ya se pago".
+     *   ERROR       existe pero sin pago registrado y sin estar pendiente
+     *               (estado *** de CPA04, sin imputaciones): no figura en cuenta
+     *               corriente, asi que no se paga con orden de pago.
+     *   ERROR       sigue PEN en Tango pero el listado lo deja afuera (clausula,
+     *               saldo cero): como hoy, con el motivo de siempre.
+     *
+     * Sin $enTango -no se pudo consultar- queda el motivo de siempre.
+     *
+     * @param array $fila
+     * @param array|null $enTango Mapa 'COD|N_COMP' => [['T_COMP', 'ESTADO',
+     *        'FECHA_CANCELADO'], ...] de los comprobantes que no cruzaron
+     * @param string $motivoDeSiempre
+     * @return array
+     */
+    private static function sinPendiente($fila, $enTango, $motivoDeSiempre) {
+        $fila['estado'] = 'ERROR';
+        $fila['motivo'] = $motivoDeSiempre;
+
+        if (!is_array($enTango)) {
+            return $fila;
+        }
+
+        $cod = $fila['cod_provee'];
+        $n = $fila['n_comp'];
+        $t = $fila['t_comp'];
+        $candidatos = [];
+
+        foreach (isset($enTango[$cod . '|' . $n]) ? $enTango[$cod . '|' . $n] : [] as $c) {
+            if ($t === '' || Planilla::codigo($c['T_COMP']) === $t) {
+                $candidatos[] = $c;
+            }
+        }
+
+        $comp = ($t === '' ? '' : $t . ' ') . $n;
+
+        if (empty($candidatos)) {
+            $fila['motivo'] = ($t === ''
+                    ? 'El proveedor ' . $cod . ' no tiene ningún comprobante ' . $n . ' en Tango. '
+                    : 'No existe el comprobante ' . $comp . ' del proveedor ' . $cod . ' en Tango. ')
+                . 'Revisá el número' . ($t === '' ? '' : ', el tipo') . ' y el código del proveedor: '
+                . 'puede estar mal tipeado o ser de otro proveedor.';
+
+            return $fila;
+        }
+
+        $pagados = 0;
+        $fechaReal = null;
+        $tipos = [];
+
+        foreach ($candidatos as $c) {
+            $tipos[Planilla::codigo($c['T_COMP'])] = true;
+
+            if ($c['ESTADO'] !== 'PEN' && $c['FECHA_CANCELADO'] !== null) {
+                $pagados++;
+
+                if ($fechaReal === null || $c['FECHA_CANCELADO'] > $fechaReal) {
+                    $fechaReal = $c['FECHA_CANCELADO'];
+                }
+            }
+        }
+
+        if ($pagados === count($candidatos)) {
+            $fila['estado'] = 'YA_PAGADA';
+            $fila['fecha_pagada'] = $fechaReal;
+
+            if ($t === '' && count($tipos) === 1) {
+                $fila['t_comp'] = key($tipos);
+            }
+
+            $fila['motivo'] = 'Ya se pagó en Tango el ' . self::formatoCorto($fechaReal) . ' ('
+                . implode('/', array_keys($tipos)) . ' ' . $n . '). No se carga y no hace falta: '
+                . 'ya no está pendiente.';
+
+            return $fila;
+        }
+
+        foreach ($candidatos as $c) {
+            if ($c['ESTADO'] === 'PEN') {
+                return $fila;
+            }
+        }
+
+        $fila['motivo'] = 'El comprobante ' . $comp . ' del proveedor ' . $cod . ' está en Tango pero no '
+            . 'figura en cuenta corriente: no tiene pagos imputados ni queda pendiente, así que no se '
+            . 'paga con una orden de pago. Revisá si es el comprobante correcto.';
+
+        return $fila;
+    }
+
+    /**
+     * De las filas de una planilla, que comprobantes NO cruzan contra los
+     * pendientes: son los unicos que hay que ir a mirar a Tango para saber si
+     * ya se pagaron. Pura.
+     *
+     * NO SE CONSULTA TODA LA HISTORIA DE CPA04: la pregunta es por los que no
+     * cruzaron, que son pocos.
+     *
+     * @param array $filasArchivo
+     * @param array $pendientes
+     * @return array Lista de ['cod', 'n']
+     */
+    public static function sinCruce($filasArchivo, $pendientes) {
+        $hay = [];
+
+        foreach (is_array($pendientes) ? $pendientes : [] as $p) {
+            $hay[Planilla::codigo($p['COD_PROVEE']) . '|' . Planilla::codigo($p['N_COMP'])] = true;
+        }
+
+        $v = [];
+
+        foreach (is_array($filasArchivo) ? $filasArchivo : [] as $f) {
+            $cod = Planilla::codigo(isset($f['cod_provee']) ? $f['cod_provee'] : '');
+            $n = Planilla::codigo(isset($f['n_comp']) ? $f['n_comp'] : '');
+
+            if ($cod !== '' && $n !== '' && !isset($hay[$cod . '|' . $n])) {
+                $v[$cod . '|' . $n] = ['cod' => $cod, 'n' => $n];
+            }
+        }
+
+        return array_values($v);
+    }
+
+    /**
+     * El estado en Tango de los comprobantes que no cruzaron: ESTADO de CPA04 y
+     * la fecha real del pago, MAX(CPA05.F_COMP_CAN) -el criterio de la
+     * conciliacion-.
+     *
+     * Se filtra por proveedor Y por numero, con dos IN, y el par exacto se
+     * cruza en PHP: es la regla del repo, y con los dos filtros la consulta
+     * trae un punado de filas. La fecha se pide en una segunda consulta, solo
+     * para esos ID: correlacionada sobre CPA05, la primera tardaba el doble.
+     *
+     * Devuelve null si no se pudo consultar: la previsualizacion sigue, con el
+     * motivo de siempre.
+     *
+     * @param array $pares De sinCruce()
+     * @return array|null Mapa 'COD|N_COMP' => [['T_COMP', 'ESTADO', 'FECHA_CANCELADO']]
+     */
+    public function estadoComprobantesEnTango($pares) {
+        if (empty($pares)) {
+            return [];
+        }
+
+        try {
+            $cid = $this->conectar();
+            $cods = array_values(array_unique(array_column($pares, 'cod')));
+            $nums = array_values(array_unique(array_column($pares, 'n')));
+            $buscados = [];
+
+            foreach ($pares as $p) {
+                $buscados[$p['cod'] . '|' . $p['n']] = true;
+            }
+
+            $stmt = sqlsrv_query($cid,
+                "SELECT a.ID_CPA04, a.COD_PROVEE, a.T_COMP, a.N_COMP, a.ESTADO
+                 FROM CPA04 a
+                 WHERE a.COD_PROVEE IN (" . implode(',', array_fill(0, count($cods), '?')) . ")
+                   AND a.N_COMP IN (" . implode(',', array_fill(0, count($nums), '?')) . ")",
+                array_merge($cods, $nums));
+
+            if ($stmt === false) {
+                return null;
+            }
+
+            $filas = [];
+
+            while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+                $clave = Planilla::codigo($row['COD_PROVEE']) . '|' . Planilla::codigo($row['N_COMP']);
+
+                if (isset($buscados[$clave])) {
+                    $filas[intval($row['ID_CPA04'])] = ['clave' => $clave, 'T_COMP' => Planilla::codigo($row['T_COMP']),
+                                                        'ESTADO' => strtoupper(trim((string) $row['ESTADO']))];
+                }
+            }
+
+            sqlsrv_free_stmt($stmt);
+
+            $fechas = [];
+
+            if (!empty($filas)) {
+                $ids = array_keys($filas);
+                $stmt = sqlsrv_query($cid,
+                    "SELECT ID_CPA04, MAX(F_COMP_CAN) AS F FROM CPA05
+                     WHERE ID_CPA04 IN (" . implode(',', array_fill(0, count($ids), '?')) . ")
+                     GROUP BY ID_CPA04", $ids);
+
+                if ($stmt === false) {
+                    return null;
+                }
+
+                while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+                    $fechas[intval($row['ID_CPA04'])] = Horizonte::normalizarFecha($row['F']);
+                }
+
+                sqlsrv_free_stmt($stmt);
+            }
+
+            $mapa = [];
+
+            foreach ($filas as $id => $f) {
+                $mapa[$f['clave']][] = ['T_COMP' => $f['T_COMP'], 'ESTADO' => $f['ESTADO'],
+                                        'FECHA_CANCELADO' => isset($fechas[$id]) ? $fechas[$id] : null];
+            }
+
+            return $mapa;
+        } catch (Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
      * Normaliza y valida una fila de la planilla de pagos contra los pendientes.
      *
      * Decide lo que se puede decidir mirando LA FILA SOLA: la fecha, el cruce y
@@ -2168,9 +2675,10 @@ class Proveedores {
      * @param array $porClave Pendientes por clave completa
      * @param array $porNumero Pendientes por (proveedor, numero)
      * @param string $hoy
+     * @param array|null $enTango Ver sinPendiente()
      * @return array
      */
-    private static function filaPago($cruda, $porClave, $porNumero, $hoy) {
+    private static function filaPago($cruda, $porClave, $porNumero, $hoy, $enTango = null) {
         $valor = function ($campo) use ($cruda) {
             return isset($cruda[$campo]) ? trim((string) $cruda[$campo]) : '';
         };
@@ -2188,6 +2696,14 @@ class Proveedores {
             'observacion' => null,
             'razon_social' => '',
             'importe_pendiente' => 0.0,
+            // Si ya se pago en Tango: la fecha real. Ver sinPendiente().
+            'fecha_pagada' => null,
+            /* La retencion y el NETO A PAGAR del comprobante, contra el que se
+               compara el IMPORTE. Las pone conNeto() una vez cruzado. */
+            'retencion' => null,
+            'retenido' => 0.0,
+            'retenciones' => [],
+            'neto' => null,
             'fecha_vto' => null,
             'estaba_vencido' => false,
             // Cuantos vencimientos pendientes tiene: con mas de uno no se parte.
@@ -2249,8 +2765,8 @@ class Proveedores {
 
         $fila['fecha_pago'] = $fecha;
 
-        /* EL CRUCE CONTRA LOS PENDIENTES. Tres desenlaces, y cada uno se arregla
-           distinto, asi que el motivo los distingue. */
+        /* EL CRUCE CONTRA LOS PENDIENTES. Lo que no cruza se mira en Tango, y
+           se distingue porque se arregla distinto: ver sinPendiente(). */
         $pendiente = null;
 
         if ($tComp !== '') {
@@ -2258,12 +2774,9 @@ class Proveedores {
             $pendiente = isset($porClave[$clave]) ? $porClave[$clave] : null;
 
             if ($pendiente === null) {
-                $fila['estado'] = 'ERROR';
-                $fila['motivo'] = 'No hay ningún comprobante pendiente ' . $tComp . ' '
-                    . $nComp . ' del proveedor ' . $cod . '. Revisá el tipo, el número y el '
-                    . 'código; si ya se pagó, no hace falta cargarle fecha.';
-
-                return $fila;
+                return self::sinPendiente($fila, $enTango, 'No hay ningún comprobante pendiente '
+                    . $tComp . ' ' . $nComp . ' del proveedor ' . $cod . '. Revisá el tipo, el número '
+                    . 'y el código; si ya se pagó, no hace falta cargarle fecha.');
             }
         } else {
             $candidatos = isset($porNumero[$cod . '|' . $nComp]) ? $porNumero[$cod . '|' . $nComp] : [];
@@ -2279,12 +2792,9 @@ class Proveedores {
             }
 
             if (count($tipos) === 0) {
-                $fila['estado'] = 'ERROR';
-                $fila['motivo'] = 'El proveedor ' . $cod . ' no tiene ningún comprobante '
-                    . $nComp . ' pendiente. Puede ser un número mal tipeado, un proveedor '
-                    . 'equivocado, o una factura que ya se pagó.';
-
-                return $fila;
+                return self::sinPendiente($fila, $enTango, 'El proveedor ' . $cod . ' no tiene ningún '
+                    . 'comprobante ' . $nComp . ' pendiente. Puede ser un número mal tipeado, un '
+                    . 'proveedor equivocado, o una factura que ya se pagó.');
             }
 
             if (count($tipos) > 1) {
@@ -2399,12 +2909,19 @@ class Proveedores {
                 . 'ninguna de las dos.';
         }
 
+        if ($resumen['ya_pagadas'] > 0) {
+            $avisos[] = $resumen['ya_pagadas'] . ' fila(s) son de facturas que ya se pagaron en Tango: '
+                . 'no se cargan, y no hace falta. No frenan la importación del resto; cada una dice la '
+                . 'fecha real del pago.';
+        }
+
         if ($resumen['forma_desconocida'] > 0) {
             $avisos[] = $resumen['forma_desconocida'] . ' fila(s) traen una forma de pago que '
                 . 'no está en la lista de válidas. Se guarda tal como vino.';
         }
 
-        if ($resumen['altas'] === 0 && $resumen['cambios'] === 0 && $resumen['errores'] === 0) {
+        if ($resumen['altas'] === 0 && $resumen['cambios'] === 0 && $resumen['errores'] === 0
+            && $resumen['ya_pagadas'] === 0) {
             $avisos[] = 'El archivo no cambia nada: todo lo que trae ya estaba cargado igual.';
         }
 
@@ -2515,9 +3032,12 @@ class Proveedores {
     public static function diferenciasConLoVisto($vistas, $actuales) {
         $antes = [];
         $ahora = [];
+        $netoAntes = [];
 
         foreach (is_array($vistas) ? $vistas : [] as $f) {
-            $antes[intval(isset($f['linea']) ? $f['linea'] : 0)] = isset($f['estado']) ? $f['estado'] : '';
+            $l = intval(isset($f['linea']) ? $f['linea'] : 0);
+            $antes[$l] = isset($f['estado']) ? $f['estado'] : '';
+            $netoAntes[$l] = isset($f['neto']) ? $f['neto'] : null;
         }
 
         foreach ($actuales as $f) {
@@ -2526,12 +3046,25 @@ class Proveedores {
 
         $difs = [];
 
-        foreach ($ahora as $linea => $estado) {
+        foreach ($actuales as $f) {
+            $linea = intval($f['linea']);
             $visto = isset($antes[$linea]) ? $antes[$linea] : null;
 
-            if ($visto !== $estado) {
+            if ($visto !== $f['estado']) {
                 $difs[] = 'línea ' . $linea . ': ' . ($visto === null ? 'no estaba' : $visto)
-                    . ' → ' . $estado;
+                    . ' → ' . $f['estado'];
+                continue;
+            }
+
+            /* EL MISMO ESTADO CON OTRO NETO TAMBIEN ES OTRA COSA: si entre la
+               previsualizacion y la confirmacion cambio una alicuota, lo que se
+               confirmaria no es lo que se miro. */
+            $na = isset($netoAntes[$linea]) ? $netoAntes[$linea] : null;
+
+            if ($f['estado'] !== 'ERROR' && $na !== null && $f['neto'] !== null
+                && abs(round(floatval($na) - floatval($f['neto']), 2)) > 0.004) {
+                $difs[] = 'línea ' . $linea . ': el neto a pagar pasó de ' . self::plata($na) . ' a '
+                    . self::plata($f['neto']) . ' (cambió una alícuota de retención)';
             }
         }
 
@@ -2594,8 +3127,13 @@ class Proveedores {
         $hoyStr = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
         $conMedios = $this->tablaMedioCreada();
 
-        $actual = self::compararImportacion($crudas, $this->getPendientes($hoyStr), $this->getPagos(),
-            $hoyStr, $this->getAperturas(), $conMedios);
+        /* CON LAS ALICUOTAS DE AHORA: si alguna cambio desde la
+           previsualizacion, el neto de esa linea cambio y no se aplica nada. */
+        $this->retenciones->olvidar();
+        $pendientes = $this->getPendientes($hoyStr);
+        $actual = self::compararImportacion($crudas, $pendientes, $this->getPagos(),
+            $hoyStr, $this->getAperturas(), $conMedios, $this->retenciones->config(),
+            $this->estadoComprobantesEnTango(self::sinCruce($crudas, $pendientes)));
 
         $difs = self::diferenciasConLoVisto($vistas, $actual['filas']);
 
@@ -3446,7 +3984,7 @@ class Proveedores {
     }
 
     /* ====================================================================
-       CONCILIACION CONTRA LAS CANCELADAS
+       CONCILIACION CONTRA TANGO, AUTOMATICA
 
        TANGO ES LA VERDAD SOBRE EL PAGO. Lo que se carga en la pestana es una
        PREVISION: cuando se piensa pagar. Cuando el comprobante aparece
@@ -3459,196 +3997,190 @@ class Proveedores {
        que permite despues comparar lo que se planifico contra lo que paso: si
        se borrara, la unica pregunta que esta tabla puede contestar bien -"le
        acertamos a la fecha?"- quedaria sin respuesta para siempre.
+
+       CORRE SOLA, y no es una decision de nadie: es copiar lo que dice Tango.
+       Antes era un boton con previsualizacion; ahora corre cada vez que la
+       pestana carga los pendientes, para cualquier usuario que pueda verla, y
+       firma con un usuario fijo (usuarioConciliacion()).
        ==================================================================== */
 
     /**
-     * Compara las previsiones cargadas contra el estado real en Tango.
+     * Quien firma la conciliacion automatica: SISTEMA:Proveedores.conciliarAutomatica.
+     * Es la convencion del modulo para un efecto lateral del codigo (ver
+     * AuthCashflow::ORIGEN_SISTEMA): no fue una persona, y NULL ya significa
+     * "fila historica".
      *
-     * CONSULTA SOLO LO QUE TIENE PREVISION, no las 96.403 canceladas: la
-     * pregunta es "de lo que yo tengo previsto, que ya se pago", y al reves
-     * seria traer toda la historia de compras para cruzar contra un puñado.
-     *
-     * DETECTA LOS DOS SENTIDOS:
-     *
-     *   CONCILIA      estaba PREVISTO y el comprobante ya no esta pendiente en
-     *                 Tango: se pago.
-     *   REABRE        estaba CONCILIADO y el comprobante volvio a estar
-     *                 pendiente. Pasa cuando se anula una orden de pago. Sin
-     *                 esto, esa deuda quedaria marcada como pagada para siempre
-     *                 aunque el tablero la vuelva a mostrar.
-     *
-     * NO ESCRIBE NADA SI $aplicar es false: primero se mira que cambiaria, igual
-     * que en las dos importaciones.
-     *
-     * @param bool $aplicar false solo arma la vista previa
-     * @param string $usuario Quien concilia. Se exige tambien en la vista previa:
-     *        es el primer paso de una escritura, y la pantalla no la ofrece a quien
-     *        no puede aplicar
-     * @return array ['concilia', 'reabre', 'sin_cambios', 'resumen']
+     * @return string
      */
-    public function conciliar($aplicar, $usuario) {
-        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+    public static function usuarioConciliacion() {
+        return AuthCashflow::origen('Proveedores.conciliarAutomatica');
+    }
+
+    /**
+     * Concilia contra Tango las previsiones cargadas, usando los pendientes que
+     * la pestana YA LEYO. Escribe solo si hay algo que cambiar.
+     *
+     * INCREMENTAL, Y POR ESO BARATA. Una prevision cuyo comprobante sigue en los
+     * pendientes no cambio, y no hace falta preguntarle nada a Tango. Una
+     * conciliada que volvio a los pendientes se reabre sin consultar. Solo las
+     * PREVISTAS QUE SALIERON de los pendientes van a Tango, filtradas por
+     * proveedor y numero: y eso pasa solo cuando efectivamente se pago algo.
+     * La consulta completa de antes -todo CPA04 de los proveedores con
+     * prevision- tardaba entre 1,6 y 1,9 s en cada carga.
+     *
+     * UN CASO QUE NO CUBRE, a proposito: una conciliada cuyo comprobante vuelve
+     * a PEN en Tango pero queda afuera del listado (clausula de moneda
+     * extranjera, saldo cero) no se reabre, porque no se la consulta. Hoy no
+     * hay ninguna; ver el README.
+     *
+     * NO LANZA SI NO HAY TABLA: devuelve vacio. Si falla al leer o al escribir,
+     * LANZA, y quien llama decide: la pestana carga igual con un aviso.
+     *
+     * @param array $items Filas de getPendientes()
+     * @return array ['concilia' => [...], 'reabre' => [...], 'avisos' => [...]]
+     */
+    public function conciliarAutomatica($items) {
+        $vacio = ['concilia' => [], 'reabre' => [], 'avisos' => []];
 
         if (!$this->tablaCreada()) {
-            throw new Exception('Todavía no existe la tabla de fechas de pago. '
-                . 'Corré sql/cashflow_prov_locales.sql contra la base central.');
+            return $vacio;
         }
 
         $pagos = $this->getPagos();
 
         if (empty($pagos)) {
-            return [
-                'concilia' => [], 'reabre' => [], 'sin_cambios' => 0,
-                'resumen' => ['concilia' => 0, 'reabre' => 0, 'sin_cambios' => 0,
-                              'importe_conciliado' => 0.0],
-                'avisos' => ['No hay ninguna fecha de pago cargada, así que no hay nada que '
-                    . 'conciliar.']
-            ];
+            return $vacio;
         }
 
-        $estados = $this->estadoEnTango($pagos);
+        /* PRIMERO SIN TANGO: de que previstas hay que preguntar. */
+        $plan = self::planConciliacion($pagos, $items, []);
+        $enTango = [];
 
-        $concilia = [];
-        $reabre = [];
-        $sinCambios = 0;
-        $importeConciliado = 0.0;
+        if (!empty($plan['consultar'])) {
+            $enTango = $this->estadoComprobantesEnTango($plan['consultar']);
 
-        foreach ($pagos as $clave => $pago) {
-            $enTango = isset($estados[$clave]) ? $estados[$clave] : null;
-
-            /* Un comprobante que NO aparece en Tango no se toca. Puede haber
-               sido anulado, depurado, o cargado con un codigo que despues
-               cambio. Marcarlo como pagado seria inventar un hecho. */
             if ($enTango === null) {
-                $sinCambios++;
-                continue;
+                throw new Exception('no se pudo leer el estado de los comprobantes en Tango');
             }
 
-            $pendiente = ($enTango['ESTADO'] === 'PEN');
-
-            if ($pago['ESTADO'] === 'PREVISTO' && !$pendiente) {
-                $concilia[] = [
-                    'cod_provee' => $pago['COD_PROVEE'],
-                    't_comp' => $pago['T_COMP'],
-                    'n_comp' => $pago['N_COMP'],
-                    'razon_social' => $enTango['NOM_PROVEE'],
-                    'fecha_prevista' => $pago['FECHA_PAGO'],
-                    'fecha_cancelado' => $enTango['FECHA_CANCELADO'],
-                    'estado_tango' => $enTango['ESTADO'],
-                    'importe' => $enTango['IMPORTE'],
-                    // Cuantos dias antes o despues de lo previsto se pago. Es
-                    // el dato por el que existe guardar las dos fechas.
-                    'desvio_dias' => self::desvioDias($pago['FECHA_PAGO'],
-                        $enTango['FECHA_CANCELADO'])
-                ];
-
-                $importeConciliado += floatval($enTango['IMPORTE']);
-                continue;
-            }
-
-            if ($pago['ESTADO'] === 'CONCILIADO' && $pendiente) {
-                $reabre[] = [
-                    'cod_provee' => $pago['COD_PROVEE'],
-                    't_comp' => $pago['T_COMP'],
-                    'n_comp' => $pago['N_COMP'],
-                    'razon_social' => $enTango['NOM_PROVEE'],
-                    'fecha_prevista' => $pago['FECHA_PAGO'],
-                    'fecha_cancelado' => $pago['FECHA_CANCELADO']
-                ];
-
-                continue;
-            }
-
-            $sinCambios++;
+            $plan = self::planConciliacion($pagos, $items, $enTango);
         }
 
-        if ($aplicar) {
-            $this->aplicarConciliacion($concilia, $reabre, $usuario);
+        if (empty($plan['concilia']) && empty($plan['reabre'])) {
+            return $vacio;
         }
 
-        $resumen = [
-            'concilia' => count($concilia),
-            'reabre' => count($reabre),
-            'sin_cambios' => $sinCambios,
-            'importe_conciliado' => round($importeConciliado, 2)
-        ];
+        $hecho = $this->escribirConciliacion($plan['concilia'], $plan['reabre'], self::usuarioConciliacion());
 
         return [
-            'concilia' => $concilia,
-            'reabre' => $reabre,
-            'sin_cambios' => $sinCambios,
-            'resumen' => $resumen,
-            'avisos' => self::avisosConciliacion($resumen, $concilia)
+            'concilia' => $hecho['concilia'],
+            'reabre' => $hecho['reabre'],
+            'avisos' => self::avisosConciliacion($hecho['concilia'], $hecho['reabre'])
         ];
     }
 
     /**
-     * El estado real en Tango de los comprobantes que tienen prevision.
+     * QUE CAMBIA, sin escribir nada. Estatica y pura.
      *
-     * Se filtra por los PROVEEDORES involucrados y se cruza en PHP por
-     * comprobante. Es mas simple y mas seguro que armar un IN con cientos de
-     * pares, y el filtro por proveedor ya acota muchisimo.
+     *   CONCILIA   estaba PREVISTO, salio de los pendientes y en Tango figura
+     *              sin estar pendiente y con fecha de cancelacion: se pago.
+     *   REABRE     estaba CONCILIADO y volvio a estar en los pendientes. Pasa
+     *              cuando se anula una orden de pago. Sin esto, esa deuda
+     *              quedaria marcada como pagada para siempre aunque el tablero
+     *              la vuelva a mostrar.
      *
-     * La FECHA REAL de cancelacion sale del ultimo comprobante que la cancelo
-     * (MAX de CPA05.F_COMP_CAN). No de CPA04: ahi no hay fecha de pago, hay
-     * fecha de emision y de contabilizacion, que son otra cosa.
+     * UN COMPROBANTE QUE NO APARECE EN TANGO NO SE TOCA: pudo haberse anulado,
+     * depurado, o cargado con un codigo que despues cambio. Marcarlo como pagado
+     * seria inventar un hecho.
      *
      * @param array $pagos Mapa de getPagos()
-     * @return array Mapa clave => ['ESTADO', 'FECHA_CANCELADO', 'IMPORTE', 'NOM_PROVEE']
+     * @param array $items Filas de getPendientes()
+     * @param array $enTango De estadoComprobantesEnTango(); vacio en la primera
+     *        pasada
+     * @return array ['consultar' => pares cod/n, 'concilia', 'reabre']
      */
-    private function estadoEnTango($pagos) {
-        $proveedores = [];
+    public static function planConciliacion($pagos, $items, $enTango) {
+        $pendientes = [];
 
-        foreach ($pagos as $p) {
-            $proveedores[$p['COD_PROVEE']] = true;
+        foreach (is_array($items) ? $items : [] as $i) {
+            $clave = self::clavePago($i['COD_PROVEE'], $i['T_COMP'], $i['N_COMP']);
+
+            if (!isset($pendientes[$clave])) {
+                $pendientes[$clave] = ['RAZON_SOC' => $i['RAZON_SOC'], 'IMPORTE' => 0.0];
+            }
+
+            $pendientes[$clave]['IMPORTE'] += floatval($i['IMPORTE_PENDIENTE']);
         }
 
-        if (empty($proveedores)) {
-            return [];
+        $plan = ['consultar' => [], 'concilia' => [], 'reabre' => []];
+
+        foreach ($pagos as $clave => $pago) {
+            $sigue = isset($pendientes[$clave]);
+
+            if ($pago['ESTADO'] === 'CONCILIADO' && $sigue) {
+                $plan['reabre'][] = [
+                    'cod_provee' => $pago['COD_PROVEE'], 't_comp' => $pago['T_COMP'],
+                    'n_comp' => $pago['N_COMP'], 'razon_social' => $pendientes[$clave]['RAZON_SOC'],
+                    'importe' => round($pendientes[$clave]['IMPORTE'], 2),
+                    'fecha_prevista' => $pago['FECHA_PAGO'], 'fecha_cancelado' => $pago['FECHA_CANCELADO']
+                ];
+
+                continue;
+            }
+
+            if ($pago['ESTADO'] !== 'PREVISTO' || $sigue) {
+                continue;
+            }
+
+            $par = $pago['COD_PROVEE'] . '|' . $pago['N_COMP'];
+
+            if (!isset($enTango[$par])) {
+                $plan['consultar'][$par] = ['cod' => $pago['COD_PROVEE'], 'n' => $pago['N_COMP']];
+                continue;
+            }
+
+            foreach ($enTango[$par] as $c) {
+                if (Planilla::codigo($c['T_COMP']) !== $pago['T_COMP']) {
+                    continue;
+                }
+
+                if ($c['ESTADO'] !== 'PEN' && $c['FECHA_CANCELADO'] !== null) {
+                    $plan['concilia'][] = [
+                        'cod_provee' => $pago['COD_PROVEE'], 't_comp' => $pago['T_COMP'],
+                        'n_comp' => $pago['N_COMP'], 'fecha_prevista' => $pago['FECHA_PAGO'],
+                        'fecha_cancelado' => $c['FECHA_CANCELADO'],
+                        // Cuantos dias antes o despues de lo previsto se pago. Es
+                        // el dato por el que existe guardar las dos fechas.
+                        'desvio_dias' => self::desvioDias($pago['FECHA_PAGO'], $c['FECHA_CANCELADO'])
+                    ];
+                }
+            }
         }
 
-        $cid = $this->conectar();
-        $codigos = array_keys($proveedores);
-        $marcas = implode(',', array_fill(0, count($codigos), '?'));
+        $plan['consultar'] = array_values($plan['consultar']);
 
-        $sql = "SELECT a.COD_PROVEE, a.T_COMP, a.N_COMP, a.ESTADO, p.NOM_PROVEE,
-                       CAST(a.IMPORTE_TO AS FLOAT) AS IMPORTE,
-                       (SELECT MAX(i.F_COMP_CAN) FROM CPA05 i
-                         WHERE i.ID_CPA04 = a.ID_CPA04) AS FECHA_CANCELADO
-                FROM CPA04 a
-                INNER JOIN CPA01 p ON p.COD_PROVEE = a.COD_PROVEE
-                WHERE a.COD_PROVEE IN (" . $marcas . ")";
-
-        $stmt = sqlsrv_query($cid, $sql, $codigos);
-
-        if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al leer el estado en Tango'));
-        }
-
-        $estados = [];
-
-        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            $clave = self::clavePago($row['COD_PROVEE'], $row['T_COMP'], $row['N_COMP']);
-
-            $estados[$clave] = [
-                'ESTADO' => strtoupper(trim((string) $row['ESTADO'])),
-                'FECHA_CANCELADO' => Horizonte::normalizarFecha($row['FECHA_CANCELADO']),
-                'IMPORTE' => round(floatval($row['IMPORTE']), 2),
-                'NOM_PROVEE' => trim((string) $row['NOM_PROVEE'])
-            ];
-        }
-
-        sqlsrv_free_stmt($stmt);
-
-        return $estados;
+        return $plan;
     }
 
-    /** Escribe el resultado de la conciliacion, todo en una transaccion */
-    private function aplicarConciliacion($concilia, $reabre, $usuario) {
-        if (empty($concilia) && empty($reabre)) {
-            return;
-        }
-
+    /**
+     * Escribe la conciliacion, en UNA transaccion.
+     *
+     * IDEMPOTENTE Y SEGURA CON DOS USUARIOS A LA VEZ: cada UPDATE toca la fila
+     * solo si sigue en el estado de partida (PREVISTO para conciliar,
+     * CONCILIADO para reabrir). Si otra carga de la pestana ya la cambio, el
+     * UPDATE no afecta nada y no se cuenta: el aviso dice lo que hizo ESTA
+     * carga, no lo que hizo la otra.
+     *
+     * Protegida para que una prueba pueda reemplazar la escritura.
+     *
+     * @param array $concilia
+     * @param array $reabre
+     * @param string $usuario
+     * @return array ['concilia', 'reabre'] los que efectivamente cambiaron
+     */
+    protected function escribirConciliacion($concilia, $reabre, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $hecho = ['concilia' => [], 'reabre' => []];
         $cid = $this->conectar();
 
         if (sqlsrv_begin_transaction($cid) === false) {
@@ -3657,20 +4189,21 @@ class Proveedores {
 
         try {
             foreach ($concilia as $c) {
-                /* La fecha PREVISTA no se pisa: al lado se guarda la real. Es
-                   lo unico que permite comparar despues prevision contra
-                   realidad. */
+                /* La fecha PREVISTA no se pisa: al lado se guarda la real. */
                 $stmt = sqlsrv_query($cid,
                     "UPDATE dbo." . self::TABLA_PAGO . "
                      SET ESTADO = 'CONCILIADO', FECHA_CANCELADO = ?, FECHA_CONCILIA = GETDATE(),
                          " . Auditoria::SET_MODIF . "
-                     WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?",
-                    [$c['fecha_cancelado'], $usuario,
-                     $c['cod_provee'], $c['t_comp'], $c['n_comp']]);
+                     WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ? AND ESTADO = 'PREVISTO'",
+                    [$c['fecha_cancelado'], $usuario, $c['cod_provee'], $c['t_comp'], $c['n_comp']]);
 
                 if ($stmt === false) {
-                    throw new Exception($this->errorSql('Error al conciliar '
-                        . $c['t_comp'] . ' ' . $c['n_comp']));
+                    throw new Exception($this->errorSql('Error al conciliar ' . $c['t_comp'] . ' '
+                        . $c['n_comp']));
+                }
+
+                if (sqlsrv_rows_affected($stmt) > 0) {
+                    $hecho['concilia'][] = $c;
                 }
 
                 sqlsrv_free_stmt($stmt);
@@ -3681,23 +4214,31 @@ class Proveedores {
                     "UPDATE dbo." . self::TABLA_PAGO . "
                      SET ESTADO = 'PREVISTO', FECHA_CANCELADO = NULL, FECHA_CONCILIA = NULL,
                          " . Auditoria::SET_MODIF . "
-                     WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ?",
+                     WHERE COD_PROVEE = ? AND T_COMP = ? AND N_COMP = ? AND ESTADO = 'CONCILIADO'",
                     [$usuario, $r['cod_provee'], $r['t_comp'], $r['n_comp']]);
 
                 if ($stmt === false) {
-                    throw new Exception($this->errorSql('Error al reabrir '
-                        . $r['t_comp'] . ' ' . $r['n_comp']));
+                    throw new Exception($this->errorSql('Error al reabrir ' . $r['t_comp'] . ' '
+                        . $r['n_comp']));
+                }
+
+                if (sqlsrv_rows_affected($stmt) > 0) {
+                    $hecho['reabre'][] = $r;
                 }
 
                 sqlsrv_free_stmt($stmt);
             }
 
-            sqlsrv_commit($cid);
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar la conciliación'));
+            }
         } catch (Throwable $e) {
             sqlsrv_rollback($cid);
 
             throw $e;
         }
+
+        return $hecho;
     }
 
     /**
@@ -3730,34 +4271,29 @@ class Proveedores {
     }
 
     /**
-     * Los avisos de la conciliacion. Dicen QUE CAMBIO, que es lo que evita
-     * tener que comparar fila por fila.
+     * Los avisos de la conciliacion automatica, para el panel de la pestana.
+     * SI NO CAMBIO NADA NO HAY AVISO: la conciliacion corre en cada carga, y un
+     * "nada cambio" en cada una seria ruido.
+     *
+     *   INFO      cuantas previsiones se conciliaron, y con cinco o mas el
+     *             desvio promedio en dias: con menos no significa nada.
+     *   ATENCION  las que volvieron a estar pendientes -una orden de pago
+     *             anulada-, con proveedor, comprobante e importe: es deuda que
+     *             vuelve a la caja.
      *
      * Estaticos y puros.
      *
-     * @param array $resumen
      * @param array $concilia
-     * @return array
+     * @param array $reabre
+     * @return array Lista de ['nivel', 'texto', 'seccion']
      */
-    private static function avisosConciliacion($resumen, $concilia) {
+    public static function avisosConciliacion($concilia, $reabre) {
         $avisos = [];
 
-        if ($resumen['concilia'] === 0 && $resumen['reabre'] === 0) {
-            $avisos[] = 'Nada cambió: las ' . $resumen['sin_cambios'] . ' previsiones cargadas '
-                . 'siguen como estaban.';
+        if (!empty($concilia)) {
+            $texto = 'Se conciliaron ' . count($concilia) . ' previsión(es) con Tango: ya figuran '
+                . 'pagadas. Su fecha prevista queda, con la real al lado.';
 
-            return $avisos;
-        }
-
-        if ($resumen['concilia'] > 0) {
-            $avisos[] = $resumen['concilia'] . ' comprobante(s) por '
-                . self::plata($resumen['importe_conciliado']) . ' ya figuran cancelados en '
-                . 'Tango. Su previsión queda marcada como conciliada, con la fecha real al '
-                . 'lado: no se borra, porque es lo que permite comparar después lo que se '
-                . 'planificó contra lo que pasó.';
-
-            /* El desvio promedio contesta si la prevision sirve. Con pocos casos
-               no significa nada, asi que se informa recien con cinco. */
             $conDesvio = [];
 
             foreach ($concilia as $c) {
@@ -3769,17 +4305,27 @@ class Proveedores {
             if (count($conDesvio) >= 5) {
                 $promedio = array_sum($conDesvio) / count($conDesvio);
 
-                $avisos[] = 'En promedio se pagó ' . abs(round($promedio, 1)) . ' día(s) '
+                $texto .= ' En promedio se pagó ' . abs(round($promedio, 1)) . ' día(s) '
                     . ($promedio >= 0 ? 'DESPUÉS' : 'ANTES') . ' de lo previsto, sobre '
-                    . count($conDesvio) . ' comprobante(s). Es lo que dice si la previsión '
-                    . 'está sirviendo.';
+                    . count($conDesvio) . ' comprobante(s).';
             }
+
+            $avisos[] = Aviso::nuevo(Aviso::INFO, $texto, 'Conciliación');
         }
 
-        if ($resumen['reabre'] > 0) {
-            $avisos[] = $resumen['reabre'] . ' comprobante(s) estaban conciliados y volvieron a '
-                . 'estar pendientes en Tango: lo más probable es que se haya anulado una orden '
-                . 'de pago. Vuelven a proyectarse con su fecha prevista.';
+        if (!empty($reabre)) {
+            $detalle = [];
+
+            foreach (array_slice($reabre, 0, 10) as $r) {
+                $detalle[] = $r['razon_social'] . ' (' . $r['cod_provee'] . ') ' . $r['t_comp'] . ' '
+                    . $r['n_comp'] . ' ' . self::plata($r['importe']);
+            }
+
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, count($reabre) . ' factura(s) conciliadas volvieron '
+                . 'a estar pendientes (orden de pago anulada) y se proyectan de nuevo con su fecha '
+                . 'prevista: ' . implode('; ', $detalle)
+                . (count($reabre) > 10 ? '; y ' . (count($reabre) - 10) . ' más' : '') . '.',
+                'Conciliación');
         }
 
         return $avisos;

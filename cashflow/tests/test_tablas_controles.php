@@ -1588,3 +1588,122 @@ chequear('sin el script, la seccion dice cual falta', true,
 chequear('las tablas tienen id, para ordenarlas y exportarlas', [true, true],
     [strpos($jsPplo, 'id="tablaImpuestosPplo"') !== false,
      strpos($jsPplo, 'id="tablaGeneralesPplo"') !== false]);
+
+// ============================================================================
+// Proveedores Locales > Maestro: las retenciones de cada proveedor
+// ============================================================================
+
+seccion('Maestro: la asignacion de retenciones esta enganchada');
+
+$tabProv = file_get_contents($TABS . '/proveedores_locales.php');
+$jsProv = str_replace("\r\n", "\n", file_get_contents($JS . '/Proveedores-Proveedores_locales.js'));
+
+chequear('el boton "Asignar retención" esta en la barra de seleccion del maestro', true,
+    strpos($tabProv, 'id="btnAsignarRetProv"') !== false
+    && strpos($tabProv, 'Asignar retención') !== false);
+chequear('y se engancha', true, strpos($jsProv, "conectar('btnAsignarRetProv', abrirAsignarRet);") !== false);
+chequear('la barra y el dialogo solo se dibujan con permiso de edicion', true,
+    (bool) preg_match('/<\?php if \(\$edita\): \?>\s*<div id="barraSelMaestroProv"/', $tabProv));
+chequear('el check del encabezado selecciona lo que se ve', true,
+    strpos($tabProv, 'id="selTodosMaestroProv"') !== false
+    && strpos($jsProv, "selTodosM.addEventListener('change', seleccionarTodosMaestro)") !== false);
+chequear('la seleccion se poda contra lo que dejan ver los filtros', true,
+    strpos($jsProv, "if (!visibles[cod] || !conSel) { delete selMaestro[cod]; }") !== false);
+chequear('el dialogo pide el plan al servidor antes de confirmar', true,
+    strpos($jsProv, "action=previewRetencionMasiva'") !== false
+    && strpos($jsProv, "action=asignarRetencion'") !== false);
+chequear('y no deja aplicar si alguno queda en 100% o mas', true,
+    strpos($jsProv, 'btn.disabled = !!bloqueado || p.aplicar === 0;') !== false);
+
+foreach (['filtroRubroEcoMaestroProv', 'filtroRubroMaestroProv', 'filtroFormaMaestroProv',
+          'filtroRetMaestroProv'] as $id) {
+    chequear('el filtro ' . $id . ' existe y repinta', true,
+        strpos($tabProv, 'id="' . $id . '"') !== false && strpos($jsProv, "'" . $id . "'") !== false);
+}
+
+chequear('una columna por impuesto, entre PLAZO y ORIGEN', true,
+    strpos($tabProv, 'id="thOrigenMaestroProv"') !== false
+    && strpos($jsProv, 'fila.insertBefore(th, origen);') !== false);
+
+seccion('Maestro: la seccion Retenciones del proveedor');
+
+chequear('el formulario tiene su lugar', true, strpos($tabProv, 'id="retencionesFormProv"') !== false);
+chequear('abrir el formulario la pinta', true,
+    strpos($jsProv, 'pintarRetencionesForm(f ? f.COD_PROVEE : null);') !== false);
+chequear('en un alta pide guardar primero', true,
+    strpos($jsProv, 'guardá el proveedor primero') !== false);
+chequear('y despues de guardar un alta el formulario vuelve abierto en edicion', true,
+    strpos($jsProv, 'if (alta) { abrirForm(data.cod_provee); }') !== false);
+chequear('cada cambio individual va con origen INDIVIDUAL', true,
+    strpos($jsProv, "origen: 'INDIVIDUAL'") !== false);
+chequear('muestra el historial: valor, desde cuando y quien', true,
+    strpos($jsProv, "' desde ' + fechaCorta(h.VIGENCIA_DESDE) + ' · ' + escapar(h.USUARIO || '')") !== false);
+
+// ============================================================================
+// Proveedores Locales > Cuentas a Pagar: las retenciones y el neto
+// ============================================================================
+
+seccion('Cuentas a Pagar: las columnas de retenciones y neto estan enganchadas');
+
+$tabProv = file_get_contents($TABS . '/proveedores_locales.php');
+$jsProv = str_replace("\r\n", "\n", file_get_contents($JS . '/Proveedores-Proveedores_locales.js'));
+$jsExport = str_replace("\r\n", "\n", file_get_contents($JS . '/tabla-export.js'));
+$cssProv = file_get_contents(__DIR__ . '/../Css/Proveedores-Proveedores_locales.css');
+
+chequear('el encabezado tiene Retenciones y Neto a pagar, despues de Pendiente', true,
+    strpos($tabProv, 'id="thRetProv"') !== false
+    && strpos($tabProv, 'Pendiente') < strpos($tabProv, 'id="thRetProv"')
+    && strpos($tabProv, 'Neto a pagar', strpos($tabProv, 'id="thRetProv"')) !== false);
+chequear('cada fila pinta la celda de retenciones y el neto', true,
+    strpos($jsProv, '+ celdaRetenciones(f)') !== false
+    && strpos($jsProv, "plata(aPagar(f)) + '</td>'") !== false);
+chequear('el tooltip dice alicuota y de donde sale', true,
+    strpos($jsProv, "GENERAL: 'general, vigente desde el '") !== false
+    && strpos($jsProv, "PROVEEDOR: 'del proveedor, desde el '") !== false
+    && strpos($jsProv, "NO_RETIENE: 'no se retiene'") !== false);
+chequear('en dos medios la retencion va en la parte 1/2', true,
+    strpos($jsProv, "if (esParteExtra(f)) {\n            return '<td class=\"text-center text-muted small\" title=\"La retención de este '") !== false);
+chequear('el pie suma el neto y, aparte, lo retenido por impuesto', true,
+    strpos($jsProv, 'total += aPagar(f);') !== false
+    && strpos($jsProv, 'porImpuesto[k] = (porImpuesto[k] || 0)') !== false);
+chequear('los indicadores muestran lo retenido por impuesto', true,
+    strpos($tabProv, 'id="retenidoProv"') !== false
+    && strpos($jsProv, "texto('retenidoProv'") !== false);
+
+seccion('Cuentas a Pagar: el Excel baja una columna por impuesto');
+
+chequear('tabla-export.js respeta data-exportar-solo', true,
+    strpos($jsExport, "!viva_f.cells[c].hasAttribute('data-exportar-solo')") !== false);
+chequear('las columnas por impuesto llevan la marca, en encabezado, filas y pie', 3,
+    substr_count($jsProv, 'prov-solo-export'));
+chequear('y el CSS de la pestaña las esconde en pantalla', true,
+    (bool) preg_match('/\.prov-solo-export\s*\{\s*display:\s*none;/', $cssProv));
+
+seccion('Cuentas a Pagar: el eje va en neto');
+
+$ctrlProv = file_get_contents(__DIR__ . '/../Controller/ProveedoresController.php');
+chequear('el controller arma el eje con IMPORTE_A_PAGAR', true,
+    strpos($ctrlProv, "EjeVista::armar(\$h, \$items, 'Pago', 'IMPORTE_A_PAGAR')") !== false);
+chequear('y los indicadores del universo con el mismo importe que el tablero', true,
+    strpos($ctrlProv, '$importe = ProveedoresProvider::importeAPagar($i);') !== false);
+
+seccion('Importar: el estado "Ya pagada en Tango" en la previsualizacion');
+
+$jsProv = str_replace("\r\n", "\n", file_get_contents($JS . '/Proveedores-Proveedores_locales.js'));
+chequear('el estado se nombra "Ya pagada en Tango"', true,
+    strpos($jsProv, "return { YA_PAGADA: 'Ya pagada en Tango' }[e] || e;") !== false);
+chequear('con color de advertencia, no de error', true,
+    strpos($jsProv, "YA_PAGADA: 'warning text-dark', ERROR: 'danger'") !== false);
+chequear('y su propio indicador en el resumen', true,
+    strpos($jsProv, "['ya_pagadas', 'Ya pagadas en Tango', 'warning text-dark']") !== false);
+chequear('la previsualizacion muestra total, retenciones y neto por fila', true,
+    strpos($jsProv, '+ (conNeto ? celdasNetoPreview(f) : \'\')') !== false);
+
+seccion('Cuentas a Pagar: el boton Conciliar ya no esta');
+
+$tabProv = file_get_contents($TABS . '/proveedores_locales.php');
+$jsProv = str_replace("\r\n", "\n", file_get_contents($JS . '/Proveedores-Proveedores_locales.js'));
+chequear('la pestaña no tiene el boton', false, strpos($tabProv, 'id="btnConciliarProv"') !== false);
+chequear('ni el JS su previsualizacion y su confirmacion', [false, false, false],
+    [strpos($jsProv, 'btnConciliarProv') !== false, strpos($jsProv, 'previewConciliacion') !== false,
+     strpos($jsProv, 'aplicarConciliacion') !== false]);

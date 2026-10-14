@@ -212,8 +212,13 @@ class AuthCashflow {
             'incluirProveedor' => [['proveedores_locales', null]],
             'saveProveedor' => [['proveedores_locales', null]],
             'deleteProveedor' => [['proveedores_locales', null]],
-            'previewConciliacion' => [['proveedores_locales', null]],
-            'aplicarConciliacion' => [['proveedores_locales', null]]
+            /* La conciliacion ya no es una accion: corre sola al cargar los
+               pendientes, con un usuario fijo (Proveedores::usuarioConciliacion()). */
+            /* Las alicuotas de retencion de los proveedores, desde el Maestro.
+               El preview pide edicion como los demas: es el primer paso de la
+               escritura. */
+            'previewRetencionMasiva' => [['proveedores_locales', null]],
+            'asignarRetencion' => [['proveedores_locales', null]]
         ],
         'Saldos' => [
             'guardarCargaSaldos' => [['saldos', null]],
@@ -262,7 +267,7 @@ class AuthCashflow {
         'Parametros' => ['getTodo', 'getAvisosGenerales', 'getParametros', 'getHistorialCronograma',
             'buscarClientePrecheq', 'getCobranzasClientesConfig', 'getEscalaDescuento'],
         'Proveedores' => ['plantillaMaestro', 'plantillaPagos', 'getPendientes', 'buscarProveedorTango', 'getMaestro',
-            'getHistorialExclusion', 'getHistorialProveedor'],
+            'getHistorialExclusion', 'getHistorialProveedor', 'getRetencionesProveedor'],
         'Saldos' => ['getSaldos', 'getLocales', 'getFondos', 'getMovimientosFondo'],
         'Tarjetas' => ['getDatos', 'getHistorialFactura', 'getTarjetas', 'getResumenes'],
         'Ventas' => ['getProyeccionVentas', 'getProyeccionCobranzas', 'getAnalisisVentas',
