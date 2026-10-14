@@ -63,13 +63,17 @@ $edita = AuthCashflow::puedeEditar('echeqs');
              que cada una se corresponde con un botón. El rótulo lo escribe el JS
              con el período real, que depende del horizonte configurado.
 
-             MIDEN LO QUE ENTRA AL CASHFLOW, o sea SIN los cheques excluidos:
-             son los mismos números que la fila del tablero. El total con los
-             excluidos adentro diría que esa plata entra, que es justamente lo
-             que el tilde niega. Cuánto se excluyó se dice abajo de cada
-             tarjeta, y lo resta PHP: acá no se calcula nada. -->
+             MIDEN LA CARTERA COBRABLE SIN DEPOSITADOS, o sea sin los
+             excluidos ni los depositados: son los mismos números que la fila
+             "Echeqs en cartera" del tablero. El total con los excluidos
+             adentro diría que esa plata entra, que es justamente lo que el
+             tilde niega.
+
+             LOS DEPOSITADOS VAN EN LA CUARTA TARJETA, con bruto, retención y
+             neto: es la fila "Echeqs depositados". Las restas las hace PHP:
+             acá no se calcula nada. -->
         <div class="row g-3 mb-4" id="summarySectionEch" style="display: none;">
-            <div class="col-md-6 col-lg-4">
+            <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Vista Días</span>
@@ -84,7 +88,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                 </div>
             </div>
 
-            <div class="col-md-6 col-lg-4">
+            <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Vista Meses</span>
@@ -99,7 +103,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                 </div>
             </div>
 
-            <div class="col-md-6 col-lg-4">
+            <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Período Completo</span>
@@ -110,6 +114,25 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                     <div class="kpi-card-value" id="totalGeneralEch">$ 0,00</div>
                     <div class="kpi-card-footer">
                         <span class="text-muted" id="rotuloGeneralEch">Todo el horizonte</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Los depositados: el NETO que entra el día que acreditan, en
+                 todo el horizonte. Es la fila "Echeqs depositados". El pie
+                 dice el bruto y la retención, que es lo que explica la
+                 diferencia con lo que se depositó. -->
+            <div class="col-md-6 col-lg-3">
+                <div class="kpi-card">
+                    <div class="kpi-card-header">
+                        <span class="kpi-card-title">Depositados (neto)</span>
+                        <div class="kpi-card-icon purple">
+                            <i class="fas fa-building-columns"></i>
+                        </div>
+                    </div>
+                    <div class="kpi-card-value" id="totalDepositadosEch">$ 0,00</div>
+                    <div class="kpi-card-footer">
+                        <span class="text-muted" id="detalleDepositadosEch">Ninguno</span>
                     </div>
                 </div>
             </div>
@@ -159,6 +182,20 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                             Ver excluidos
                         </label>
                     </div>
+
+                    <!-- LOS DEPOSITADOS SE VEN POR DEFECTO, al revés que los
+                         excluidos: siguen entrando al cashflow —en otra
+                         fecha y por el neto— y en el trabajo de todos los días
+                         son justamente los que hay que seguir hasta que Tango
+                         registre el depósito. Esconderlos es para mirar sólo lo
+                         que falta depositar. Los acreditados sin registrar
+                         también se esconden con esto: su aviso sale siempre. -->
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="ocultarDepositadosEch">
+                        <label class="form-check-label small text-muted" for="ocultarDepositadosEch">
+                            Ocultar depositados
+                        </label>
+                    </div>
                 </div>
                 <div class="d-flex gap-2">
                     <!-- No hay Resumen / Detalle Facturas: el grano natural de esta
@@ -194,6 +231,20 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                 <div class="d-flex align-items-center gap-3 flex-wrap">
                     <span class="fw-semibold" id="selResumenEch"></span>
                     <div class="d-flex gap-2 ms-auto">
+                        <!-- DEPOSITAR: cheques de UN banco emisor. Del
+                             navegador viajan sólo los ids: el diálogo muestra
+                             lo que calculó el servidor —acreditación, tasa,
+                             neto— antes de confirmar. -->
+                        <?php if ($edita): ?>
+                        <button class="btn btn-sm btn-outline-primary" id="btnDepositarSelEch">
+                            <i class="fas fa-building-columns me-1"></i> Depositar
+                        </button>
+                        <?php endif; ?>
+                        <?php if ($edita): ?>
+                        <button class="btn btn-sm btn-outline-secondary" id="btnDeshacerDepSelEch">
+                            <i class="fas fa-rotate-left me-1"></i> Deshacer depósito
+                        </button>
+                        <?php endif; ?>
                         <?php if ($edita): ?>
                         <button class="btn btn-sm btn-outline-danger" id="btnExcluirSelEch">
                             <i class="fas fa-ban me-1"></i> Excluir del cashflow
@@ -223,14 +274,14 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                     <table id="tablaEcheqs" class="table table-hover mb-0">
                         <thead>
                             <!--
-                                Seis columnas fijas y después una por cada
-                                columna del eje, que dibuja el JS.
+                                Nueve columnas descriptivas y después una por
+                                cada columna del eje, que dibuja el JS.
 
-                                FECHA DE PAGO = FECHA DEL CHEQUE mientras no
-                                exista una regla de acreditación. Por eso hay una
-                                sola columna de fecha y una sola de importe, y no
-                                las dos de cada una que tiene la planilla de
-                                referencia: eran el mismo dato repetido.
+                                FECHA DE PAGO = FECHA DEL CHEQUE. Un cheque NO
+                                depositado cae en el eje en esa fecha y por el
+                                importe. Uno DEPOSITADO cae en Acredita y por el
+                                Neto: el depósito tiene su propia fecha —las 48
+                                hs hábiles— y la del cheque deja de intervenir.
                             -->
                             <tr>
                                 <!-- data-orden-nombre igual al rótulo: ancla el
@@ -242,20 +293,33 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                 <th rowspan="2">Banco</th>
                                 <th rowspan="2" class="col-texto">Cliente</th>
                                 <th rowspan="2" class="text-end">Importe</th>
+                                <!-- Las tres del depósito. VAN SIEMPRE, vacías
+                                     en los no depositados —no en cero: no hay
+                                     depósito—. Aparecer y desaparecer según
+                                     haya depositados movería los índices de
+                                     las columnas fijas, el orden guardado y lo
+                                     que baja el export. -->
+                                <th rowspan="2" class="text-center"
+                                    title="Fecha de acreditación del depósito: la que ubica el neto en la grilla y en el tablero.">Acredita</th>
+                                <th rowspan="2" class="text-end"
+                                    title="Lo que retiene el banco sobre el depósito: el bruto por la tasa vigente a la acreditación.">Retención</th>
+                                <th rowspan="2" class="text-end"
+                                    title="Lo que acredita: el importe menos la retención. Es lo que suma la fila Echeqs depositados.">Neto</th>
                                 <!-- LA COLUMNA ES DE SELECCIÓN, no de estado, y
-                                     alimenta las dos acciones de la barra.
-                                     Ninguna puede dispararse con un clic suelto
-                                     —sacan plata del disponible—: se eligen los
-                                     cheques y se confirman juntos, viendo
-                                     cuántos son y por cuánto.
+                                     alimenta las acciones de la barra: depositar,
+                                     deshacer el depósito, excluir y volver a
+                                     incluir. Ninguna puede dispararse con un clic
+                                     suelto —mueven plata del disponible—: se
+                                     eligen los cheques y se confirman juntos,
+                                     viendo cuántos son y por cuánto.
 
                                      Es el gesto del tildado masivo de la otra
                                      sub-pestaña: el check del encabezado toma
                                      todo lo visible según el buscador.
 
-                                     Que un cheque ESTÉ excluido se ve en la
-                                     fila —atenuada y con el importe tachado— y
-                                     en la marca de esta misma celda. -->
+                                     Que un cheque ESTÉ excluido o depositado se
+                                     ve en la fila y en la marca de esta misma
+                                     celda, con quién y cuándo en el tooltip. -->
                                 <th rowspan="2" class="text-center" style="width: 46px;" data-orden="no">
                                     <?php if ($edita): ?>
                                     <input type="checkbox" class="form-check-input"
@@ -272,7 +336,10 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                             <tr id="ejeSubHeaderEch"></tr>
                         </thead>
                         <tbody id="bodyEch"></tbody>
-                        <tfoot class="table-light">
+                        <!-- La fila TOTALES y, debajo, una por cada parte que
+                             tiene fila en el tablero: en cartera y
+                             depositados. Las dibuja pintarTotalesCartera(). -->
+                        <tfoot class="table-light" id="pieEch">
                             <tr id="totalesEch"></tr>
                         </tfoot>
                     </table>

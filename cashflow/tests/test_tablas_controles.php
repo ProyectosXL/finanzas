@@ -1399,3 +1399,88 @@ chequear('la tabla de alicuotas se exporta', 1,
 chequear('sin alicuotas dice "sin alícuotas", no 0%', true,
     strpos($ppqJs, "if (!t || t.tasa === null || t.tasa === undefined) {") !== false
     && strpos($ppqJs, "'alícuotas</span>'") !== false);
+
+seccion('Echeqs > Cheques en Cartera: el deposito esta enganchado');
+
+$echTab = str_replace("\r\n", "\n", contenidoTab($TABS . '/echeqs.php'));
+$echJs = str_replace("\r\n", "\n", file_get_contents($JS . '/Ingresos-Echeqs.js'));
+$echCtrl = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Controller/EcheqsController.php'));
+
+// Los botones de escritura, solo con permiso de edicion de Echeqs.
+foreach (['btnDepositarSelEch' => 'accionDepositar', 'btnDeshacerDepSelEch' => 'accionDeshacer'] as $id => $fn) {
+    $pos = strpos($echTab, 'id="' . $id . '"');
+    $antes = substr($echTab, 0, (int) $pos);
+
+    chequear('#' . $id . ' existe, en la barra de seleccion', true,
+        $pos !== false && $pos > strpos($echTab, 'id="barraSelEch"')
+        && $pos < strpos($echTab, 'id="btnExcluirSelEch"'));
+    chequear('#' . $id . ' se dibuja solo con permiso de edicion', true,
+        strrpos($antes, '<?php if ($edita): ?>') > strrpos($antes, '<?php endif; ?>'));
+    chequear('#' . $id . ' esta conectado a ' . $fn, 1,
+        substr_count($echJs, "conectar('" . $id . "', " . $fn . ");"));
+}
+
+chequear('el filtro "Ocultar depositados" existe, al lado de "Ver excluidos"', true,
+    strpos($echTab, 'id="ocultarDepositadosEch"') !== false
+    && strpos($echTab, 'id="ocultarDepositadosEch"') > strpos($echTab, 'id="verExcluidosEch"')
+    && strpos($echTab, 'Ocultar depositados') !== false);
+chequear('por defecto destildado: los depositados se ven', 0,
+    preg_match('/id="ocultarDepositadosEch"[^>]*checked/', $echTab));
+chequear('y redibuja la tabla al cambiar', 1,
+    substr_count($echJs, "escuchar('ocultarDepositadosEch', 'change', dibujarCartera);"));
+
+foreach (['previsualizarDeposito', 'depositarCheques', 'deshacerDepositos'] as $accion) {
+    chequear($accion . ': el JS la pide y el controller la atiende', [true, 1], [
+        strpos($echJs, "?action=" . $accion . "'") !== false,
+        substr_count($echCtrl, "case '" . $accion . "':")
+    ]);
+}
+
+seccion('Echeqs > Cheques en Cartera: las columnas nuevas no corren a las demas');
+
+/* LOS ENCABEZADOS DE LA PRIMERA FILA, EN ORDEN. Las columnas fijas se eligen
+   por indice, el orden por nombre del encabezado, el export lee el DOM y los
+   totales del eje arrancan despues de la ultima descriptiva: si las nuevas se
+   hubieran metido antes de N° Cheque o de Cliente, las fijas apuntarian a otra
+   columna sin que nada fallara. */
+$theadEch = theadTabla($echTab, 'tablaEcheqs');
+preg_match('/<tr>(.*?)<\/tr>/s', $theadEch, $primera);
+preg_match_all('/<th\b[^>]*>(.*?)<\/th>/s', $primera[1], $ths);
+
+$rotulos = array_map(function ($t) { return trim(strip_tags($t)); }, $ths[1]);
+
+chequear('nueve columnas descriptivas', 9, count($rotulos));
+chequear('en este orden', ['Fecha de pago', 'N° Cheque', 'Banco', 'Cliente', 'Importe',
+    'Acredita', 'Retención', 'Neto', ''], $rotulos);
+chequear('el JS cuenta las mismas', 1, substr_count($echJs, 'var COLS_DESC_ECH = 9;'));
+chequear('las columnas fijas por defecto siguen siendo N° Cheque y Cliente (1 y 3)', true,
+    strpos($echJs, "clave: 'echeqs_cartera',\n            porDefecto: [1, 3]") !== false
+    && $rotulos[1] === 'N° Cheque' && $rotulos[3] === 'Cliente');
+chequear('el orden por defecto sigue anclado a Fecha de pago', 1,
+    substr_count($theadEch, 'data-orden-nombre="Fecha de pago"'));
+chequear('la de seleccion sigue sin ordenarse', 1,
+    preg_match('/<th[^>]*data-orden="no"[^>]*>\s*<\?php if \(\$edita\): \?>\s*<input type="checkbox"[^>]*id="selTodosEch"/s', $theadEch));
+
+// Cada fila dibuja nueve celdas descriptivas en el mismo orden que el thead:
+// las tres del deposito entre el importe y la seleccion.
+$cuerpoFila = substr($echJs, strpos($echJs, 'function pintarFilasCartera('),
+    strpos($echJs, 'cols.forEach(function(col) {', strpos($echJs, 'function pintarFilasCartera('))
+        - strpos($echJs, 'function pintarFilasCartera('));
+chequear('cada fila dibuja nueve celdas antes del eje', 9, substr_count($cuerpoFila, "html += '<td"));
+chequear('Acredita se ordena por la fecha cruda, como la fecha de pago', 1,
+    substr_count($cuerpoFila, "data-orden=\"' + escapar(String(f.ACREDITA || '').slice(0, 10)) + '\""));
+
+// El pie: un rotulo de cuatro columnas y cinco celdas mas, antes del eje.
+$cuerpoPie = substr($echJs, strpos($echJs, 'function filaPie('),
+    strpos($echJs, 'tot.columnas.forEach', strpos($echJs, 'function filaPie(')) - strpos($echJs, 'function filaPie('));
+chequear('el pie ocupa las nueve descriptivas: 4 + 5', [1, 6],
+    [substr_count($cuerpoPie, 'colspan="4"'), substr_count($cuerpoPie, "'<td")]);
+chequear('los totales de arriba del eje salen de la misma cuenta que el pie', 1,
+    substr_count($echJs, "pintarEjeTotales('tablaEcheqs', {\n            columnas: cols,\n            valores: tot.columnas,"));
+
+// Lo que cae en el eje lo decidio el servidor: la fecha de acreditacion y el
+// neto de un depositado, la del cheque y el bruto de los demas.
+chequear('el eje de la grilla se arma con FECHA_EJE e IMPORTE_EJE', 1,
+    substr_count($echCtrl, "\$filas,\n                'FECHA_EJE',\n                'IMPORTE_EJE'\n            );"));
+chequear('el export sigue saliendo del DOM vivo: baja las columnas nuevas con lo que se ve', 1,
+    substr_count($echJs, "exportarTabla('tablaEcheqs', 'Echeqs_cartera');"));

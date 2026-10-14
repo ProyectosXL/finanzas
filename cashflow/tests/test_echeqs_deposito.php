@@ -643,3 +643,29 @@ chequear('y si ya existe no pisa el nombre ni el orden', true,
     preg_match('/WHEN MATCHED THEN.*?UPDATE SET ORIGEN_PROVIDER = S\.ORIGEN_PROVIDER,\s+ORIGEN_SERIE = S\.ORIGEN_SERIE,\s+FECHA_MODIF = GETDATE\(\)\s+WHEN NOT MATCHED/s', $SQL_FILA) === 1);
 chequear('sin la seccion no inserta una fila huerfana', true,
     strpos($SQL_FILA, "IF NOT EXISTS (SELECT 1 FROM dbo.RO_T_CASHFLOW_CONF_SECCION WHERE CODIGO = 'DISPONIBILIDADES')") !== false);
+
+seccion('las tarjetas: la cartera cobrable sin depositados, y los depositados aparte');
+
+$tot = ['total_tramo' => 1000.0, 'total_meses' => 500.0, 'total_horizonte' => 1500.0];
+$exc = ['total_tramo' => 100.0, 'total_meses' => 0.0, 'total_horizonte' => 100.0];
+$dep = ['total_tramo' => 300.0, 'total_meses' => 50.0, 'total_horizonte' => 350.0];
+
+chequear('cobrable = universo - excluidos - depositados, por vista',
+    ['total_tramo' => 600.0, 'total_meses' => 450.0, 'total_horizonte' => 1050.0],
+    Echeqs::totalesNetos(Echeqs::totalesNetos($tot, $exc), $dep));
+
+$ctrlCartera = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Controller/EcheqsController.php'));
+chequear('el controller resta los dos con el mismo helper', 1, substr_count($ctrlCartera,
+    "Echeqs::totalesNetos(\n                Echeqs::totalesNetos(\$payload['totales'], \$payload['excluidos']),\n                \$payload['depositados']);"));
+chequear('manda si se puede depositar, para apagar el boton con el motivo', 1,
+    substr_count($ctrlCartera, "\$payload['deposito'] = \$echeqs->estadoParaDepositar();"));
+chequear('el aviso de los acreditados entra al panel como atencion', 1,
+    substr_count($ctrlCartera, "\$payload['warnings'][] = ['nivel' => 'warning', 'texto' => \$aviso];"));
+chequear('y el del hueco entre scripts, como critico', 1,
+    substr_count($ctrlCartera, "\$payload['warnings'][] = ['nivel' => 'danger', 'texto' => 'Hay cheques '"));
+
+$p = Echeqs::sinDeposito('Los cheques no tienen ninguna alícuota vigente al 21/10/2026, así que no se puede '
+    . 'calcular el importe neto del depósito. Cargá sus alícuotas en Parámetros → Cheques con una '
+    . 'vigencia igual o anterior a esa fecha.', [], []);
+chequear('sin alicuotas, el dialogo ofrece ir a Parametros -> Cheques', 'PRECHEQUEADO', $p['ir_a']);
+chequear('con bancos mezclados, no', null, Echeqs::sinDeposito('un solo banco emisor', [], [])['ir_a']);

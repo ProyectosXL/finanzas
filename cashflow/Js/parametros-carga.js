@@ -199,6 +199,35 @@ var ParametrosCarga = (function() {
         return r.pendiente;
     }
 
+    /**
+     * La sub-pestaña a la que se llegó desde otra pantalla, si la hay.
+     *
+     * Un link "andá a Parámetros › Cheques" deja el código del módulo en
+     * window.cfSubTabDestino antes de abrir la pestaña -es el mismo mecanismo
+     * con el que el tablero abre una sub-pestaña de Saldos, ver Js/Saldos.js-.
+     * Se activa ANTES de que se registre la primera sub-pestaña, así la que se
+     * carga es el destino y no la primera de la lista: cargar Generales para
+     * mostrar Cheques sería pagar una carga que nadie pidió.
+     *
+     * Se consume una sola vez: volver a Parámetros por el menú abre como
+     * siempre.
+     */
+    function abrirDestino() {
+        var destino = window.cfSubTabDestino;
+
+        if (!destino) {
+            return;
+        }
+
+        var b = boton(destino);
+
+        window.cfSubTabDestino = null;
+
+        if (b && window.bootstrap && bootstrap.Tab) {
+            bootstrap.Tab.getOrCreateInstance(b).show();
+        }
+    }
+
     /** La primera vez carga; después, nada: ya está a la vista */
     function asegurar(codigo) {
         var r = registro[codigo];
@@ -221,6 +250,8 @@ var ParametrosCarga = (function() {
         if (!b) {
             return;
         }
+
+        abrirDestino();
 
         b.addEventListener('shown.bs.tab', function() { asegurar(codigo); });
 

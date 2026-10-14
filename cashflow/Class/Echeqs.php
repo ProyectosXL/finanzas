@@ -2152,26 +2152,49 @@ class Echeqs {
         $estado = $this->estadoParaDepositar();
 
         if (!$estado['puede']) {
-            return ['ok' => false, 'motivo' => $estado['motivo'], 'rechazos' => [],
-                    'bancos' => [], 'calculo' => null];
+            return self::sinDeposito($estado['motivo'], [], []);
         }
 
         $sel = self::validarSeleccionDeposito($ids, $this->getEcheqsCartera($hoy));
 
         if ($sel['error'] !== null) {
-            return ['ok' => false, 'motivo' => $sel['error'], 'rechazos' => $sel['rechazos'],
-                    'bancos' => $sel['bancos'], 'calculo' => null];
+            return self::sinDeposito($sel['error'], $sel['rechazos'], $sel['bancos']);
         }
 
         try {
             $calculo = $this->calcularParaHoy($sel['filas'], $estado['plazo'], $hoy);
         } catch (Exception $e) {
-            return ['ok' => false, 'motivo' => $e->getMessage(), 'rechazos' => [],
-                    'bancos' => $sel['bancos'], 'calculo' => null];
+            return self::sinDeposito($e->getMessage(), [], $sel['bancos']);
         }
 
-        return ['ok' => true, 'motivo' => null, 'rechazos' => [], 'bancos' => $sel['bancos'],
-                'calculo' => $calculo];
+        return ['ok' => true, 'motivo' => null, 'ir_a' => null, 'rechazos' => [],
+                'bancos' => $sel['bancos'], 'calculo' => $calculo];
+    }
+
+    /**
+     * Una vista previa que no puede depositar, con el motivo.
+     *
+     * 'ir_a' dice si lo que falta se arregla en Parametros -> Cheques -las
+     * alicuotas o el plazo-: el dialogo ofrece ir ahi en vez de dejar al
+     * usuario buscando donde se cargan. Se decide por el texto porque es el
+     * mismo texto que arman resolverTasa() y plazoDesdeValor(), que son las
+     * dos causas.
+     *
+     * @param string $motivo
+     * @param array $rechazos
+     * @param array $bancos
+     * @return array
+     */
+    public static function sinDeposito($motivo, $rechazos, $bancos) {
+        return [
+            'ok' => false,
+            'motivo' => $motivo,
+            'ir_a' => (strpos((string) $motivo, 'Parámetros → Cheques') !== false)
+                ? 'PRECHEQUEADO' : null,
+            'rechazos' => $rechazos,
+            'bancos' => $bancos,
+            'calculo' => null
+        ];
     }
 
     /**
