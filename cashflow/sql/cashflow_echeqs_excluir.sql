@@ -50,8 +50,17 @@
 
    A_COBRAR sigue siendo el codigo que la fila del tablero ya tiene configurado
    -no hay que repuntar ninguna fila ni tocar Parametros- y pasa a significar
-   "cartera cobrable". A_COBRAR_TODO es el universo, que es lo que A_COBRAR era
-   hasta hoy.
+   "cartera cobrable". A_COBRAR_TODO es el total del corte.
+
+   EL CORTE SUMO DESPUES UNA TERCERA PARTE, DEPOSITADOS, con
+   sql/cashflow_echeqs_deposito.sql: los cheques depositados salen de A_COBRAR
+   y entran por el neto en su propia fila. Hoy es
+
+       A_COBRAR + A_COBRAR_EXCLUIDOS + DEPOSITADOS = A_COBRAR_TODO
+
+   y A_COBRAR_TODO ya no es el universo en bruto. Un excluido no se deposita y
+   un depositado no se excluye, asi que cada cheque sigue en una sola parte.
+   Ver el encabezado de cashflow/Class/Providers/EcheqsProvider.php.
 
    EL IMPORTE EXCLUIDO NO DESAPARECE: queda en su propia serie, visible y
    auditable, y EcheqsProvider avisa cuanto es y con que motivos, igual que

@@ -434,7 +434,7 @@ Todos los medios son nodos de `MEDIO_PAGO`, con mayúscula inicial y sin costo n
 | Pieza | Qué hace |
 | --- | --- |
 | `Echeqs → Venta Cobrada Anticipada` | Dónde se tilda qué cheques netean, con su grilla temporal |
-| `Parámetros → Pre-chequeado` | Qué clientes operan con la modalidad **y cuántos días adelanta cada uno** |
+| `Parámetros → Cheques` | Qué clientes operan con la modalidad **y cuántos días adelanta cada uno** |
 | `RO_V_CASHFLOW_VENTAS_PRECHEQ` | La vista origen. La crea `sql/echeqs_prechequeado.sql` |
 | `RO_T_CASHFLOW_ECHEQ_PRECHEQ_CLIENTE.DIAS_PRECHEQUEADO` | Los días, **por cliente** |
 | `Echeqs::diasDeCliente()` · `Echeqs::fechaVentaEstimada()` | Resuelven el plazo y la fecha. Las usan la pantalla **y** el neteo |

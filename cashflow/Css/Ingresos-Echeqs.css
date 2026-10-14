@@ -299,3 +299,73 @@
 .tab-echeqs tr.ech-excluido .currency {
     text-decoration: line-through;
 }
+
+/* ========================================
+   DEPOSITO DE CHEQUES
+   ======================================== */
+
+/* Las marcas del deposito van en la misma celda que la de excluido, por el
+   mismo motivo: el estado del cheque se lee en un solo lugar. Son dos colores
+   distintos porque son dos cosas distintas: un depositado sigue entrando al
+   cashflow -en otra fecha y por el neto-; uno acreditado sin registrar ya no
+   suma a ninguna fila y pide una accion en Tango. */
+.tab-echeqs .ech-badge-depositado,
+.tab-echeqs .ech-badge-acreditado {
+    display: inline-block;
+    margin-top: 2px;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-radius: 3px;
+    padding: 0 4px;
+    cursor: help;
+}
+
+.tab-echeqs .ech-badge-depositado {
+    color: #1d4f91;
+    background: #e3edfb;
+}
+
+.tab-echeqs .ech-badge-acreditado {
+    color: #8a5a00;
+    background: #fdf0d5;
+    white-space: normal;
+    max-width: 130px;
+}
+
+/* El depositado NO se atenua: entra al cashflow. Se tine apenas, para que la
+   fila se distinga sin leer la marca, y su importe bruto queda en gris porque
+   lo que cae en el eje es el neto. */
+.tab-echeqs tr.ech-depositado {
+    background-color: #f5f9ff;
+}
+
+.tab-echeqs tr.ech-depositado td:nth-child(5) {
+    color: #8c93a8;
+}
+
+/* El acreditado sin registrar se atenua como el excluido: no suma a ninguna
+   fila. No se tacha: no es una decision de que no entre, ya entro. */
+.tab-echeqs tr.ech-acreditado {
+    opacity: 0.7;
+}
+
+/* Un cheque que tuvo un deposito y se deshizo: el icono lleva el historial en
+   el tooltip. Chico y gris, porque no es un estado, es historia. */
+.tab-echeqs .ech-icono-historial {
+    font-size: 0.7rem;
+    color: #8c93a8;
+    cursor: help;
+}
+
+/* Los renglones del pie que abren el total en las partes del tablero. */
+.tab-echeqs tr.ech-fila-parte td {
+    font-size: 0.78rem;
+    font-weight: normal;
+}
+
+/* El cuadro del dialogo de deposito: lo que calculo el servidor. */
+.ech-dialogo-deposito td {
+    padding: 3px 6px;
+    font-size: 0.85rem;
+}

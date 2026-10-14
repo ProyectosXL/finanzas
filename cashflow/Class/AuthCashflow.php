@@ -132,7 +132,10 @@ class AuthCashflow {
         ],
         'Echeqs' => [
             'marcarCheques' => [['echeqs', null]],
-            'excluirCheques' => [['echeqs', null]]
+            'excluirCheques' => [['echeqs', null]],
+            'previsualizarDeposito' => [['echeqs', null]],
+            'depositarCheques' => [['echeqs', null]],
+            'deshacerDepositos' => [['echeqs', null]]
         ],
         'Ingresos' => [
             'saveFechaCobroManual' => [['cobranzas_fr', null], ['cobranzas_may', null]],
@@ -177,6 +180,9 @@ class AuthCashflow {
             'addClientePrecheq' => [['parametros', 'PRECHEQUEADO']],
             'saveDiasPrecheq' => [['parametros', 'PRECHEQUEADO']],
             'bajaClientePrecheq' => [['parametros', 'PRECHEQUEADO']],
+            'savePlazoDepositoEcheq' => [['parametros', 'PRECHEQUEADO']],
+            'addAlicuotaEcheq' => [['parametros', 'PRECHEQUEADO']],
+            'bajaAlicuotaEcheq' => [['parametros', 'PRECHEQUEADO']],
             'addOpcionProvLocal' => [['parametros', 'PROV_LOCALES']],
             'saveOpcionProvLocal' => [['parametros', 'PROV_LOCALES']],
             'bajaOpcionProvLocal' => [['parametros', 'PROV_LOCALES']],

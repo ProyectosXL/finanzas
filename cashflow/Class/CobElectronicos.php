@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/Planilla.php';
+require_once __DIR__ . '/Retenciones.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
 
@@ -81,7 +82,7 @@ class CobElectronicos {
      * existen. Es el mismo criterio que Saldos::resolverOverrides() con la
      * reserva.
      */
-    const TOLERANCIA_TASA = 0.0000005;
+    const TOLERANCIA_TASA = Retenciones::TOLERANCIA_TASA;
 
     /** @var Conexion */
     private $conn;
@@ -103,22 +104,18 @@ class CobElectronicos {
        un movimiento cuya procesadora se quedo sin alicuotas, en que columna del
        eje cae una acreditacion-, y asi se pueden verificar sin base.
 
-       Aca vive la UNICA implementacion de la formula del neto.
+       LA FORMULA DEL NETO YA NO VIVE ACA: vive en Class/Retenciones.php, desde
+       que los cheques depositados pasaron a acreditar tambien un neto con su
+       propio juego de alicuotas. Los metodos de abajo conservan el nombre y el
+       contrato y delegan, igual que cuando la planilla se fue a Planilla.php:
+       quien los usa -incluidas las pruebas, que son la red del refactor- no
+       tiene por que enterarse. Lo que si sigue siendo de este modulo son los
+       textos: de quien son las alicuotas y donde se cargan.
        ==================================================================== */
 
     /**
-     * La alicuota vigente de CADA concepto a una fecha.
-     *
-     * De cada CONCEPTO se toma la ultima vigencia con VIGENCIA_DESDE <= la
-     * fecha. Una vigencia POSTERIOR no se toma: es un porcentaje que todavia no
-     * rige, y usarlo seria calcular un movimiento con una tasa que no existia
-     * cuando se acredito.
-     *
-     * EL DESEMPATE POR ID NO ES OPCIONAL. Nada impide corregir dos veces el
-     * mismo porcentaje el mismo dia -es justo lo que pasa cuando alguien se
-     * equivoca al tipearlo-, y dos vigencias de la misma fecha empatan. El ID es
-     * un IDENTITY, asi que el mayor es siempre el insertado despues. Es la misma
-     * regla que Saldos::ultimaCarga().
+     * La alicuota vigente de CADA concepto a una fecha. Ver
+     * Retenciones::alicuotasVigentes().
      *
      * @param array $alicuotas Filas con CONCEPTO, ALICUOTA, VIGENCIA_DESDE, ID
      *        y opcionalmente ACTIVO
@@ -126,109 +123,31 @@ class CobElectronicos {
      * @return array Mapa CONCEPTO => ['concepto', 'alicuota', 'vigencia_desde', 'id']
      */
     public static function alicuotasVigentes($alicuotas, $fecha) {
-        $vigentes = [];
-
-        if (!is_array($alicuotas) || $fecha === null || $fecha === '') {
-            return $vigentes;
-        }
-
-        $fecha = substr((string) $fecha, 0, 10);
-
-        foreach ($alicuotas as $a) {
-            // Una alicuota inhabilitada no rige. Si la fila no trae ACTIVO se
-            // asume vigente: los helpers tambien se llaman con datos armados a
-            // mano en las pruebas.
-            if (array_key_exists('ACTIVO', $a) && intval($a['ACTIVO']) !== 1) {
-                continue;
-            }
-
-            $concepto = trim((string) (isset($a['CONCEPTO']) ? $a['CONCEPTO'] : ''));
-
-            if ($concepto === '') {
-                continue;
-            }
-
-            $desde = Horizonte::normalizarFecha(
-                isset($a['VIGENCIA_DESDE']) ? $a['VIGENCIA_DESDE'] : null);
-
-            if ($desde === null || $desde > $fecha) {
-                continue;
-            }
-
-            $id = intval(isset($a['ID']) ? $a['ID'] : 0);
-
-            $candidata = [
-                'concepto' => $concepto,
-                'alicuota' => floatval(isset($a['ALICUOTA']) ? $a['ALICUOTA'] : 0),
-                'vigencia_desde' => $desde,
-                'id' => $id
-            ];
-
-            if (!isset($vigentes[$concepto])
-                || self::vigenciaPosterior($candidata, $vigentes[$concepto])) {
-                $vigentes[$concepto] = $candidata;
-            }
-        }
-
-        ksort($vigentes);
-
-        return $vigentes;
-    }
-
-    /**
-     * Si la vigencia $a es posterior a $b: primero por fecha, y si empatan, por
-     * ID.
-     *
-     * @param array $a
-     * @param array $b
-     * @return bool
-     */
-    private static function vigenciaPosterior($a, $b) {
-        if ($a['vigencia_desde'] !== $b['vigencia_desde']) {
-            return $a['vigencia_desde'] > $b['vigencia_desde'];
-        }
-
-        return $a['id'] > $b['id'];
+        return Retenciones::alicuotasVigentes($alicuotas, $fecha);
     }
 
     /**
      * Tasa de retencion de una procesadora a una fecha: la SUMA de las alicuotas
-     * vigentes de cada concepto.
-     *
-     * Devuelve tambien la cantidad de conceptos, porque cero conceptos NO es
-     * tasa cero: es "esta procesadora no tiene alicuotas vigentes a esta
-     * fecha", y con eso el alta de un movimiento se rechaza en lugar de guardar
-     * un neto igual al bruto. Confundir las dos cosas es exactamente la causa de
-     * que D6, D7 y D24 esten vacias en el Excel.
+     * vigentes de cada concepto. Ver Retenciones::tasaRetencion().
      *
      * @param array $alicuotas Filas de alicuotas de UNA procesadora
      * @param string $fecha 'Y-m-d' de acreditacion del movimiento
      * @return array ['tasa' => float, 'conceptos' => int, 'detalle' => mapa]
      */
     public static function tasaRetencion($alicuotas, $fecha) {
-        $vigentes = self::alicuotasVigentes($alicuotas, $fecha);
-        $tasa = 0;
-
-        foreach ($vigentes as $v) {
-            $tasa += $v['alicuota'];
-        }
-
-        return [
-            'tasa' => $tasa,
-            'conceptos' => count($vigentes),
-            'detalle' => $vigentes
-        ];
+        return Retenciones::tasaRetencion($alicuotas, $fecha);
     }
 
     /**
-     * El neto de una acreditacion. ES LA UNICA IMPLEMENTACION DE ESTA FORMULA.
+     * El neto de una acreditacion. Ver Retenciones::importeNeto(), que es la
+     * unica implementacion de la formula.
      *
      * @param float $bruto
      * @param float $tasa Suma de las alicuotas vigentes, entre 0 y 1
      * @return float Redondeado a los 4 decimales de la columna
      */
     public static function importeNeto($bruto, $tasa) {
-        return round(floatval($bruto) * (1 - floatval($tasa)), 4);
+        return Retenciones::importeNeto($bruto, $tasa);
     }
 
     /**
@@ -237,7 +156,8 @@ class CobElectronicos {
      *
      * Es la puerta por la que pasa todo alta y toda edicion: no se puede guardar
      * un movimiento cuya procesadora no tiene alicuotas vigentes a la fecha de
-     * acreditacion, porque quedaria sin neto.
+     * acreditacion, porque quedaria sin neto. La regla es
+     * Retenciones::resolverTasa(); aca se ponen los textos de este modulo.
      *
      * @param array $alicuotas Filas de alicuotas de la procesadora
      * @param string $fecha 'Y-m-d' de acreditacion
@@ -245,37 +165,19 @@ class CobElectronicos {
      * @return array ['tasa' => float, 'conceptos' => int, 'detalle' => mapa]
      */
     public static function resolverTasa($alicuotas, $fecha, $procesadora = '') {
-        $r = self::tasaRetencion($alicuotas, $fecha);
         $nombre = trim((string) $procesadora);
-        $nombre = ($nombre === '') ? 'La procesadora' : ('"' . $nombre . '"');
 
-        if ($r['conceptos'] === 0) {
-            throw new Exception($nombre . ' no tiene ninguna alícuota vigente al '
-                . self::fechaCorta($fecha) . ', así que no se puede calcular el importe neto del '
-                . 'movimiento. Cargá sus alícuotas en Parámetros → Cob. Electrónicos con una '
-                . 'vigencia igual o anterior a esa fecha.');
-        }
-
-        if ($r['tasa'] >= 1) {
-            throw new Exception('Las alícuotas vigentes de ' . $nombre . ' al '
-                . self::fechaCorta($fecha) . ' suman ' . self::porcentaje($r['tasa'])
-                . ', así que el neto saldría cero o negativo. Corregilas en '
-                . 'Parámetros → Cob. Electrónicos.');
-        }
-
-        return $r;
+        return Retenciones::resolverTasa($alicuotas, $fecha, [
+            'sin_vigentes' => ($nombre === '' ? 'La procesadora' : '"' . $nombre . '"') . ' no tiene',
+            'de' => ($nombre === '' ? 'de la procesadora' : 'de "' . $nombre . '"'),
+            'que' => 'del movimiento',
+            'donde' => 'Parámetros → Cob. Electrónicos'
+        ]);
     }
 
     /**
-     * Valida una alicuota antes de guardarla. LANZA con el motivo.
-     *
-     * LA SUMA DE LAS VIGENTES TIENE QUE SER MENOR A 1, y se valida AL GUARDAR LA
-     * ALICUOTA, no al usarla: el momento de frenar una suma imposible es cuando
-     * alguien la escribe, no cuando ya hay movimientos mal calculados.
-     *
-     * La suma se calcula sobre el ESTADO RESULTANTE -las otras vigentes mas la
-     * nueva-, no sobre lo que llega del cliente: es el mismo criterio que usa
-     * ParametrosController con el mix de cobro.
+     * Valida una alicuota antes de guardarla. LANZA con el motivo. Ver
+     * Retenciones::validarAlicuota().
      *
      * @param array $alicuotas Filas de alicuotas de la procesadora, las de ahora
      * @param string $concepto Concepto que se esta guardando
@@ -284,52 +186,7 @@ class CobElectronicos {
      * @return float Tasa total resultante
      */
     public static function validarAlicuota($alicuotas, $concepto, $nueva, $vigenciaDesde) {
-        $concepto = trim((string) $concepto);
-        $nueva = floatval($nueva);
-
-        if ($concepto === '') {
-            throw new Exception('La alícuota necesita un concepto (por ejemplo IIBB o SICREB)');
-        }
-
-        if (mb_strlen($concepto) > 30) {
-            throw new Exception('El concepto no puede superar los 30 caracteres');
-        }
-
-        if ($nueva < 0) {
-            throw new Exception('La alícuota no puede ser negativa');
-        }
-
-        if ($nueva >= 1) {
-            throw new Exception('Una alícuota de ' . self::porcentaje($nueva) . ' dejaría el '
-                . 'importe neto en cero o negativo. La alícuota se carga como fracción: '
-                . '2,5% es 0,025.');
-        }
-
-        $fecha = Horizonte::normalizarFecha($vigenciaDesde);
-
-        if ($fecha === null) {
-            throw new Exception('La alícuota necesita una fecha de vigencia');
-        }
-
-        // El estado resultante: las vigentes a esa fecha, con la nueva
-        // reemplazando a la de su propio concepto.
-        $vigentes = self::alicuotasVigentes($alicuotas, $fecha);
-        $vigentes[$concepto] = ['alicuota' => $nueva];
-
-        $suma = 0;
-
-        foreach ($vigentes as $v) {
-            $suma += floatval($v['alicuota']);
-        }
-
-        if ($suma >= 1) {
-            throw new Exception('Las alícuotas vigentes sumarían ' . self::porcentaje($suma)
-                . ' con este cambio, así que el importe neto de las acreditaciones saldría cero o '
-                . 'negativo: una cobranza restaría plata del tablero. Revisá los otros conceptos '
-                . 'antes de guardar este.');
-        }
-
-        return $suma;
+        return Retenciones::validarAlicuota($alicuotas, $concepto, $nueva, $vigenciaDesde);
     }
 
     /**
@@ -364,13 +221,7 @@ class CobElectronicos {
      * @return string 'Y-m-d'
      */
     public static function cortePendientes($hoy) {
-        $hoy = Horizonte::normalizarFecha($hoy);
-
-        if ($hoy === null) {
-            $hoy = date('Y-m-d');
-        }
-
-        return date('Y-m-d', strtotime($hoy . ' +1 day'));
+        return Retenciones::cortePendientes($hoy);
     }
 
     /**
@@ -742,70 +593,42 @@ class CobElectronicos {
      * @return array ['cambios', 'diferencia', 'pendientes', 'acreditados', 'avisos']
      */
     public static function planRecalculo($movimientos, $alicuotasPorProcesadora, $corte) {
-        $cambios = [];
-        $avisos = [];
-        $diferencia = 0;
-        $pendientes = 0;
-        $acreditados = 0;
-        $sinAlicuota = [];
-        $corte = substr((string) $corte, 0, 10);
-
-        $alicuotasPorProcesadora = is_array($alicuotasPorProcesadora)
-            ? $alicuotasPorProcesadora : [];
+        // El juego de alicuotas de un movimiento es su procesadora.
+        $items = [];
 
         foreach (is_array($movimientos) ? $movimientos : [] as $m) {
-            $fecha = Horizonte::normalizarFecha(
-                isset($m['fecha_acreditacion']) ? $m['fecha_acreditacion'] : null);
+            $m['juego'] = intval(isset($m['id_procesadora']) ? $m['id_procesadora'] : 0);
+            $items[] = $m;
+        }
 
-            if ($fecha === null) {
-                continue;
-            }
+        $plan = Retenciones::planRecalculo($items, $alicuotasPorProcesadora, $corte);
 
-            if ($fecha < $corte) {
-                $acreditados++;
-                continue;
-            }
+        $cambios = [];
 
-            $pendientes++;
-
-            $idProc = intval(isset($m['id_procesadora']) ? $m['id_procesadora'] : 0);
-            $alicuotas = isset($alicuotasPorProcesadora[$idProc])
-                ? $alicuotasPorProcesadora[$idProc] : [];
-
-            $r = self::tasaRetencion($alicuotas, $fecha);
-
-            // Sin alicuotas vigentes no se puede recalcular. El movimiento queda
-            // como esta -con su tasa vieja- y se avisa: dejarlo en cero seria
-            // informar de menos, y calcularlo sin tasa seria informar el bruto
-            // como si fuera neto.
-            if ($r['conceptos'] === 0 || $r['tasa'] >= 1) {
-                $sinAlicuota[] = (string) (isset($m['procesadora']) ? $m['procesadora'] : $idProc);
-                continue;
-            }
-
-            $tasaVieja = floatval(isset($m['tasa_aplicada']) ? $m['tasa_aplicada'] : 0);
-
-            if (abs($tasaVieja - $r['tasa']) <= self::TOLERANCIA_TASA) {
-                continue;
-            }
-
-            $netoViejo = floatval(isset($m['importe_neto']) ? $m['importe_neto'] : 0);
-            $netoNuevo = self::importeNeto(
-                isset($m['importe_bruto']) ? $m['importe_bruto'] : 0, $r['tasa']);
-
+        foreach ($plan['cambios'] as $c) {
             $cambios[] = [
-                'id' => intval(isset($m['id']) ? $m['id'] : 0),
-                'procesadora' => isset($m['procesadora']) ? $m['procesadora'] : '',
-                'fecha_acreditacion' => $fecha,
-                'importe_bruto' => floatval(isset($m['importe_bruto']) ? $m['importe_bruto'] : 0),
-                'tasa_anterior' => $tasaVieja,
-                'tasa_nueva' => $r['tasa'],
-                'neto_anterior' => $netoViejo,
-                'neto_nuevo' => $netoNuevo,
-                'diferencia' => round($netoNuevo - $netoViejo, 4)
+                'id' => $c['id'],
+                'procesadora' => isset($c['item']['procesadora']) ? $c['item']['procesadora'] : '',
+                'fecha_acreditacion' => $c['fecha_acreditacion'],
+                'importe_bruto' => $c['importe_bruto'],
+                'tasa_anterior' => $c['tasa_anterior'],
+                'tasa_nueva' => $c['tasa_nueva'],
+                'neto_anterior' => $c['neto_anterior'],
+                'neto_nuevo' => $c['neto_nuevo'],
+                'diferencia' => $c['diferencia']
             ];
+        }
 
-            $diferencia += ($netoNuevo - $netoViejo);
+        // Sin alicuotas vigentes el movimiento queda como esta -con su tasa
+        // vieja- y se avisa: dejarlo en cero seria informar de menos, y
+        // calcularlo sin tasa seria informar el bruto como si fuera neto.
+        $avisos = [];
+        $sinAlicuota = [];
+
+        foreach ($plan['sin_alicuota'] as $idProc => $filas) {
+            foreach ($filas as $m) {
+                $sinAlicuota[] = (string) (isset($m['procesadora']) ? $m['procesadora'] : $idProc);
+            }
         }
 
         if (!empty($sinAlicuota)) {
@@ -820,9 +643,9 @@ class CobElectronicos {
 
         return [
             'cambios' => $cambios,
-            'diferencia' => round($diferencia, 4),
-            'pendientes' => $pendientes,
-            'acreditados' => $acreditados,
+            'diferencia' => $plan['diferencia'],
+            'pendientes' => $plan['pendientes'],
+            'acreditados' => $plan['acreditados'],
             'avisos' => $avisos
         ];
     }
@@ -2919,16 +2742,12 @@ class CobElectronicos {
 
     /** Una tasa como porcentaje, para los mensajes: 0.031 => '3,1%' */
     private static function porcentaje($tasa) {
-        return rtrim(rtrim(number_format(floatval($tasa) * 100, 4, ',', '.'), '0'), ',') . '%';
+        return Retenciones::porcentaje($tasa);
     }
 
     /** 'Y-m-d...' => 'd/m/Y', para los mensajes */
     private static function fechaCorta($fecha) {
-        if ($fecha === null || $fecha === '') {
-            return 'sin fecha';
-        }
-
-        return date('d/m/Y', strtotime(substr((string) $fecha, 0, 10)));
+        return Retenciones::fechaCorta($fecha);
     }
 
     /**

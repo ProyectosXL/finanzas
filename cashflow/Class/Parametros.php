@@ -51,6 +51,13 @@ class Parametros {
     const RETIRADOS = ['dias_prechequeado', 'comex_tipo_cambio_usd'];
 
     /**
+     * La clave del plazo de acreditacion de los cheques depositados. Es la
+     * misma que Echeqs::CLAVE_PLAZO y una prueba las ata: va repetida porque
+     * esta clase no carga Echeqs para guardar un parametro cualquiera.
+     */
+    const CLAVE_PLAZO_ECHEQS = 'echeqs_dias_acreditacion_deposito';
+
+    /**
      * Modulos que expone la pestana Parametros, en el orden de las sub-pestanas.
      *
      * Cada parametro declara a que MODULO pertenece, asi se ve de un vistazo que
@@ -108,13 +115,22 @@ class Parametros {
                 . 'Cob. Electrónicos y la fila Cobranzas Pagos Electrónicos del tablero',
             'secciones' => ['procesadoras', 'alicuotas']
         ],
+        /* SE LLAMA "Cheques" PERO EL CODIGO SIGUE SIENDO PRECHEQUEADO, a
+           proposito: es la clave de los permisos ya asignados en apps y la que
+           usa la carga diferida de la pestaña. Cambiar el codigo dejaria a
+           todos sin poder editar la sub-pestaña hasta reasignarlos. Lo que
+           cambio es lo que aloja: ademas del maestro de venta cobrada
+           anticipada, el plazo y las alicuotas del deposito de cheques. */
         'PRECHEQUEADO' => [
-            'nombre' => 'Pre-chequeado',
+            'nombre' => 'Cheques',
             'icono' => 'fa-money-check-dollar',
-            'descripcion' => 'Qué clientes operan con venta cobrada anticipada. Acota el listado '
-                . 'de Echeqs → Venta Cobrada Anticipada, que es de donde sale el neteo de '
-                . 'cheques adelantados de la cobranza proyectada de Ventas',
-            'secciones' => ['prechequeado']
+            'descripcion' => 'Controla dos cosas de Echeqs. El listado de Venta Cobrada '
+                . 'Anticipada: qué clientes operan con esa modalidad, que es de donde sale el '
+                . 'neteo de cheques adelantados de la cobranza proyectada de Ventas. Y el '
+                . 'depósito de cheques de cartera: en cuántos días hábiles acredita y con qué '
+                . 'tasa de retención, que deciden cuándo y por cuánto entra cada cheque '
+                . 'depositado en la fila Echeqs depositados del tablero',
+            'secciones' => ['deposito', 'prechequeado']
         ],
         'COBRANZAS' => [
             'nombre' => 'Cobranzas',
@@ -385,6 +401,22 @@ class Parametros {
                         $modulo[$seccion] = [];
                         $modulo['avisos'][] = 'No se pudieron leer los parámetros de '
                             . 'Cob. Electrónicos: ' . $e->getMessage();
+                    }
+                } elseif ($seccion === 'deposito') {
+                    // El plazo y las alicuotas del deposito de cheques. Las
+                    // tablas son de Echeqs y las lee su clase, dentro de un try:
+                    // sin el script, la seccion avisa y el maestro de abajo
+                    // sigue andando.
+                    try {
+                        $modulo[$seccion] = $this->echeqs()->datosParametrosDeposito();
+
+                        foreach ($modulo[$seccion]['avisos'] as $a) {
+                            $modulo['avisos'][] = $a;
+                        }
+                    } catch (Throwable $e) {
+                        $modulo[$seccion] = null;
+                        $modulo['avisos'][] = 'No se pudo leer el depósito de cheques: '
+                            . $e->getMessage();
                     }
                 } elseif ($seccion === 'prechequeado') {
                     // Mismo criterio que los dos anteriores: la tabla es del
@@ -1149,6 +1181,15 @@ class Parametros {
 
         if (!$exists) {
             throw new Exception("El parametro '$clave' no existe");
+        }
+
+        /* EL PLAZO DEL DEPOSITO DE CHEQUES TIENE SU PROPIO CAMINO. Esta funcion
+           guarda cualquier texto, y un plazo de cero o de "dos" dejaria sin
+           poder depositar. Se rechaza aca y no se valida aca para que la regla
+           viva en un solo lugar: Echeqs::guardarPlazo(). */
+        if ($clave === self::CLAVE_PLAZO_ECHEQS) {
+            throw new Exception('El plazo de acreditación de los cheques se guarda desde '
+                . 'Parámetros → Cheques, que valida que sea un entero de días hábiles.');
         }
 
         $sql = "UPDATE RO_T_CASHFLOW_PARAMETROS

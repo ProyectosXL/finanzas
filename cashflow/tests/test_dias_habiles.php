@@ -182,3 +182,51 @@ chequear('es el mismo texto que el del cronograma de pagos',
     CronogramaPagos::avisosCalendario(['2026-11']), DiasHabiles::avisosCalendario(['2026-11']));
 chequear('el tope es el mismo que el de la direccion contraria',
     CronogramaPagos::MAX_CORRIMIENTO, DiasHabiles::MAX_CORRIMIENTO);
+
+/* ================================================================
+   N dias habiles despues: la acreditacion de un deposito de cheques
+   ================================================================ */
+seccion('DiasHabiles::habilesDespues(): 48 hs habiles');
+
+// Octubre de 2026 con el lunes 12 feriado. El 19 es lunes y el 23 viernes.
+chequear('con 2, lunes -> miercoles', '2026-10-21',
+    DiasHabiles::habilesDespues('2026-10-19', 2, $octubre)['fecha']);
+chequear('con 2, viernes -> martes', '2026-10-27',
+    DiasHabiles::habilesDespues('2026-10-23', 2, $octubre)['fecha']);
+chequear('con 2, sabado -> martes', '2026-10-27',
+    DiasHabiles::habilesDespues('2026-10-24', 2, $octubre)['fecha']);
+chequear('con 2, domingo -> martes', '2026-10-27',
+    DiasHabiles::habilesDespues('2026-10-25', 2, $octubre)['fecha']);
+chequear('con un feriado en el medio, se corre: viernes 9 -> miercoles 14', '2026-10-14',
+    DiasHabiles::habilesDespues('2026-10-09', 2, $octubre)['fecha']);
+chequear('depositado el mismo feriado, cuenta desde el habil siguiente', '2026-10-14',
+    DiasHabiles::habilesDespues('2026-10-12', 2, $octubre)['fecha']);
+
+chequear('con 1, lunes -> martes', '2026-10-20',
+    DiasHabiles::habilesDespues('2026-10-19', 1, $octubre)['fecha']);
+chequear('con 1, viernes -> lunes', '2026-10-26',
+    DiasHabiles::habilesDespues('2026-10-23', 1, $octubre)['fecha']);
+chequear('con 3, lunes -> jueves', '2026-10-22',
+    DiasHabiles::habilesDespues('2026-10-19', 3, $octubre)['fecha']);
+chequear('con 3, viernes -> miercoles', '2026-10-28',
+    DiasHabiles::habilesDespues('2026-10-23', 3, $octubre)['fecha']);
+
+$r = DiasHabiles::habilesDespues('2026-10-19', 2, $octubre);
+chequear('con el calendario completo no falta ningun mes', [], $r['faltan']);
+chequear('y no es un caso sin habil', false, $r['sin_habil']);
+
+// El viernes 30 acredita en noviembre, que el mapa no tiene: el respaldo de
+// lunes a viernes da el martes 3, y el mes tiene que quedar para el aviso.
+$r = DiasHabiles::habilesDespues('2026-10-30', 2, $octubre);
+chequear('sin calendario, el respaldo de lunes a viernes', '2026-11-03', $r['fecha']);
+chequear('y el mes queda para el aviso, una sola vez', ['2026-11'], $r['faltan']);
+chequear('el aviso es el texto de siempre',
+    ['RO_T_CALENDARIO no tiene datos para 2026-11. Se asumen hábiles los días de lunes a viernes.'],
+    DiasHabiles::avisosCalendario($r['faltan']));
+
+$r = DiasHabiles::habilesDespues('2026-09-30', 2, $roto);
+chequear('con el mapa roto no lanza: sale sin habil', true, $r['sin_habil']);
+
+$r = DiasHabiles::habilesDespues('2026-10-19', 0, $octubre);
+chequear('un plazo de cero no es un plazo: sale sin habil', true, $r['sin_habil']);
+chequear('y no inventa una fecha: devuelve la de partida', '2026-10-19', $r['fecha']);

@@ -5,7 +5,8 @@
 $edita = AuthCashflow::puedeEditar('parametros', 'PRECHEQUEADO');
 ?>
 <!--
-    Parámetros → Pre-chequeado.
+    Parámetros → Cheques (código de módulo PRECHEQUEADO, que no cambió: es la
+    clave de los permisos ya asignados).
 
     Va en su propio archivo y con su propio JS, igual que Parámetros → Saldos y
     Cob. Electrónicos: no comparte nada con los bloques de Ventas, así que un
@@ -40,10 +41,171 @@ $edita = AuthCashflow::puedeEditar('parametros', 'PRECHEQUEADO');
 
     <div id="wrapperParamPpq" style="display: none;">
 
+        <!--
+            DEPÓSITO DE CHEQUES: el plazo y la tasa con los que un cheque de
+            cartera depositado acredita en Echeqs › Cheques en Cartera.
+
+            Va PRIMERO porque mueve plata del tablero: decide en qué día y por
+            cuánto entra cada cheque depositado a la fila "Echeqs depositados".
+
+            La tasa es el mismo mecanismo que las alícuotas de una procesadora de
+            Cob. Electrónicos —conceptos libres con vigencias, la suma de las
+            vigentes a la fecha de acreditación— pero con un juego PROPIO: un
+            cambio en la tasa de Payway no puede mover el neto de un cheque.
+        -->
+        <div class="card mb-4" id="seccionDepositoPpq">
+            <div class="card-header">
+                <h5 class="mb-0">Depósito de cheques</h5>
+                <small class="text-muted">
+                    Un cheque de cartera que se marca como <strong>depositado</strong> sale de
+                    <em>Echeqs en cartera</em> y entra en <em>Echeqs depositados</em> el día que
+                    acredita, por el <strong>neto</strong>: el importe menos la tasa de retención
+                    vigente a esa fecha. La fecha del cheque no interviene.
+                </small>
+            </div>
+
+            <!-- Sin el script, la sección lo dice acá y no dibuja controles que
+                 fallarían al guardar. -->
+            <div class="card-body border-bottom" id="sinScriptDepositoPpq" style="display: none;"></div>
+
+            <div id="cuerpoDepositoPpq">
+                <div class="card-body border-bottom">
+                    <div class="row g-3 align-items-start">
+                        <div class="col-md-5">
+                            <label class="form-label form-label-sm fw-semibold" for="plazoDepositoPpq">
+                                Plazo de acreditación
+                            </label>
+                            <div class="input-group input-group-sm" style="max-width: 260px;">
+                                <input type="number" id="plazoDepositoPpq" class="form-control text-center"
+                                       min="1" step="1"
+                                       <?php echo $edita ? '' : 'disabled'; ?>>
+                                <span class="input-group-text">días hábiles</span>
+                                <?php if ($edita): ?>
+                                <button class="btn btn-outline-primary" id="btnGuardarPlazoPpq" type="button">
+                                    Guardar
+                                </button>
+                                <?php endif; ?>
+                            </div>
+                            <div class="param-hint mt-1" id="plazoHintPpq">
+                                Días hábiles bancarios después del depósito: con 2, un cheque
+                                depositado el lunes acredita el miércoles y uno del viernes, el
+                                martes. Cambiarlo <strong>no mueve los depósitos ya hechos</strong>:
+                                cada uno guarda la fecha con la que se depositó.
+                            </div>
+                            <div class="ppq-subtitulo mt-1" id="plazoAuditoriaPpq"></div>
+                        </div>
+                        <div class="col-md-7">
+                            <div class="form-label form-label-sm fw-semibold mb-1">Tasa de retención vigente hoy</div>
+                            <!-- Sin alícuotas vigentes dice "sin alícuotas" y no
+                                 0%: un cero se leería como "el banco no retiene
+                                 nada", y sin tasa no se puede depositar. -->
+                            <div id="tasaHoyPpq" ></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Lo que dejó el último guardado de una alícuota: la tabla del
+                     recálculo de los depósitos pendientes. Queda a la vista. -->
+                <div id="resultadoDepositoPpq"></div>
+
+                <div class="card-body border-bottom d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div>
+                        <div class="fw-semibold">Alícuotas de retención de los cheques</div>
+                        <small class="text-muted">
+                            Conceptos libres —hoy IIBB y SICREB— con vigencias.
+                            <strong>Una alícuota no se edita</strong>: se carga una vigencia nueva
+                            y la anterior queda en el histórico, que es lo que explica la tasa de
+                            un depósito de ese período.
+                        </small>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-success" data-exportar="tablaPpqAlicuotas"
+                                data-exportar-nombre="Parametros_Alicuotas_Cheques"
+                                title="Exportar a Excel lo que se está viendo">
+                            <i class="fas fa-file-excel me-1"></i> Exportar
+                        </button>
+                        <?php if ($edita): ?>
+                        <button id="btnNuevaAlicuotaPpq" class="btn btn-sm btn-outline-primary">
+                            <i class="fas fa-plus me-1"></i> Cargar alícuota
+                        </button>
+                        <?php endif; ?>
+                    </div>
+                </div>
+
+                <?php if ($edita): ?>
+                <div class="card-body border-bottom" id="formAlicuotaPpq" style="display: none;">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-3">
+                            <label class="form-label form-label-sm">Concepto</label>
+                            <input type="text" id="nuevaAliConceptoPpq" class="form-control form-control-sm"
+                                   maxlength="30" placeholder="IIBB" list="conceptosPpq">
+                            <datalist id="conceptosPpq"></datalist>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label form-label-sm">Alícuota</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" step="0.0001" min="0" max="99.9999"
+                                       id="nuevaAliPorcentajePpq" class="form-control text-end"
+                                       placeholder="2,5">
+                                <span class="input-group-text">%</span>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label form-label-sm">Vigencia desde</label>
+                            <input type="date" id="nuevaAliVigenciaPpq" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-md-4 d-flex gap-2">
+                            <button id="btnAgregarAlicuotaPpq" class="btn btn-sm btn-primary flex-fill">
+                                <i class="fas fa-check me-1"></i> Guardar vigencia
+                            </button>
+                            <button id="btnCancelarAlicuotaPpq" class="btn btn-sm btn-outline-secondary">
+                                <i class="fas fa-xmark"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- La suma resultante, antes de guardar. Si llega a 100% el
+                         botón se bloquea: el neto saldría cero o negativo. La
+                         validación que vale es la del servidor. -->
+                    <div class="pce-suma mt-2" id="sumaAlicuotaPpq"></div>
+                </div>
+                <?php endif; ?>
+
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0" id="tablaPpqAlicuotas">
+                            <thead>
+                                <tr>
+                                    <th>Concepto</th>
+                                    <th class="text-end" style="width: 130px;">Alícuota</th>
+                                    <th class="text-center" style="width: 150px;">Vigencia desde</th>
+                                    <th class="text-center" style="width: 130px;">Estado</th>
+                                    <th class="text-center" style="width: 180px;">Cargada</th>
+                                    <th class="text-center" style="width: 110px;" data-orden="no">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="bodyAlicuotasPpq"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card-body border-top">
+                    <div class="param-hint">
+                        <strong>Guardar o dar de baja una alícuota recalcula los depósitos
+                        pendientes</strong> —los que acreditan de mañana en adelante— y el
+                        resultado dice cuántos cambiaron y por cuánta plata. Los que ya acreditaron,
+                        hoy incluido, <strong>no se tocan</strong>: su plata entró con la tasa que
+                        entró. Sin ninguna alícuota vigente <strong>no se puede depositar</strong>;
+                        los depósitos pendientes conservan el neto con el que se hicieron.
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div>
-                    <h5 class="mb-0">Clientes con venta cobrada anticipada</h5>
+                    <h5 class="mb-0">Venta cobrada anticipada</h5>
                     <small class="text-muted">
                         Sus cheques aparecen en <strong>Echeqs → Venta Cobrada Anticipada</strong>
                         ya <strong>tildados</strong>, y lo tildado se resta de la cobranza

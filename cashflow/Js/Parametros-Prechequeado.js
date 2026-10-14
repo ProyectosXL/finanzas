@@ -1,5 +1,5 @@
 /**
- * Parámetros → Pre-chequeado
+ * Parámetros → Cheques (código de módulo PRECHEQUEADO)
  *
  * Vive aparte de Parametros.js, igual que Parametros-Saldos.js y
  * Parametros-Cob-Electronicos.js: no comparte estado con los bloques de Ventas,
@@ -18,6 +18,14 @@
  *
  * La validación que vale es la del servidor; acá se espeja sólo para bloquear el
  * botón y explicar el motivo antes de guardar.
+ *
+ * ARRIBA DEL MAESTRO, EL DEPÓSITO DE CHEQUES: el plazo de acreditación y las
+ * alícuotas de retención con las que un cheque de cartera depositado acredita en
+ * la fila Echeqs depositados. Es la pantalla de alícuotas de Cob. Electrónicos
+ * con un juego propio y sin procesadora. LA TASA DE HOY Y CUÁL ALÍCUOTA ES LA
+ * VIGENTE LAS DICE EL SERVIDOR (Echeqs::datosParametrosDeposito()): si acá se
+ * resolvieran por su cuenta, la pantalla podría mostrar una tasa que el
+ * depósito no usa.
  */
 
 (function() {
@@ -36,6 +44,22 @@
         conectar('btnCancelarClientePpq', function() { mostrar('formClientePpq', false); });
         conectar('btnBuscarClientePpq', buscar);
         conectar('btnAgregarClientePpq', agregar);
+
+        conectar('btnGuardarPlazoPpq', guardarPlazo);
+        conectar('btnNuevaAlicuotaPpq', function() {
+            alternar('formAlicuotaPpq');
+            pintarSuma();
+        });
+        conectar('btnCancelarAlicuotaPpq', function() { mostrar('formAlicuotaPpq', false); });
+        conectar('btnAgregarAlicuotaPpq', agregarAlicuota);
+
+        ['nuevaAliConceptoPpq', 'nuevaAliPorcentajePpq', 'nuevaAliVigenciaPpq'].forEach(function(id) {
+            var el = document.getElementById(id);
+
+            if (el) {
+                el.addEventListener('input', pintarSuma);
+            }
+        });
 
         var codigo = document.getElementById('nuevoCodigoPpq');
 
@@ -80,6 +104,7 @@
 
                 pintarDescripcion();
                 pintarAvisos();
+                pintarDeposito();
                 pintarClientes();
 
                 Cargando.ocultar('loadingParamPpq');
@@ -123,6 +148,430 @@
      */
     function pintarAvisos() {
         AvisosPanel.pintar('avisosParamPpq', modulo.avisos || []);
+    }
+
+    /* ================================================================
+       DEPÓSITO DE CHEQUES: PLAZO Y ALÍCUOTAS
+       ================================================================ */
+
+    /**
+     * La sección del depósito. Sin el script no dibuja controles que fallarían
+     * al guardar: dice qué falta, y el maestro de abajo sigue andando.
+     */
+    function pintarDeposito() {
+        var d = modulo.deposito;
+        var sinScript = document.getElementById('sinScriptDepositoPpq');
+
+        if (!d || !d.tablas_creadas) {
+            if (sinScript) {
+                sinScript.innerHTML = '<span class="pce-sin-alicuota">sin configurar</span> ' +
+                    '<span class="text-muted">' + escapar(d
+                        ? 'Todavía no existen las tablas del depósito de cheques: corré ' +
+                          'sql/cashflow_echeqs_deposito.sql contra la base central. Mientras ' +
+                          'tanto no se puede depositar.'
+                        : 'No se pudo leer el depósito de cheques: el motivo está en los avisos.') +
+                    '</span>';
+            }
+
+            mostrar('sinScriptDepositoPpq', true);
+            mostrar('cuerpoDepositoPpq', false);
+
+            return;
+        }
+
+        mostrar('sinScriptDepositoPpq', false);
+        mostrar('cuerpoDepositoPpq', true);
+
+        pintarPlazo(d);
+        pintarTasaHoy(d.tasa_hoy);
+        pintarAlicuotas(d.alicuotas || []);
+        pintarConceptos(d.alicuotas || []);
+
+        if (!valor('nuevaAliVigenciaPpq')) {
+            setValor('nuevaAliVigenciaPpq', d.hoy);
+        }
+    }
+
+    function pintarPlazo(d) {
+        var inp = document.getElementById('plazoDepositoPpq');
+        var p = d.plazo || {};
+
+        if (inp) {
+            inp.max = d.plazo_max;
+            // Un plazo roto se muestra tal cual está guardado, para poder
+            // corregirlo: el motivo lo dice el aviso de arriba.
+            inp.value = (p.dias !== null && p.dias !== undefined) ? p.dias : (p.valor || '');
+            inp.setAttribute('data-previo', inp.value);
+        }
+
+        var aud = document.getElementById('plazoAuditoriaPpq');
+
+        if (aud) {
+            aud.textContent = p.fecha
+                ? 'Último cambio: ' + (Auditoria.quien(p.usuario) || 'sin usuario registrado') +
+                  ' · ' + Auditoria.fecha(p.fecha)
+                : '';
+        }
+    }
+
+    /**
+     * La tasa de hoy con su desglose. Sin alícuotas vigentes dice "sin
+     * alícuotas", no 0%: un cero se leería como que el banco no retiene nada.
+     */
+    function pintarTasaHoy(t) {
+        var cont = document.getElementById('tasaHoyPpq');
+
+        if (!cont) {
+            return;
+        }
+
+        if (!t || t.tasa === null || t.tasa === undefined) {
+            cont.innerHTML = '<span class="pce-sin-alicuota" title="Sin alícuotas vigentes no se ' +
+                'puede calcular el neto de un depósito, así que no se puede depositar">sin ' +
+                'alícuotas</span>';
+
+            return;
+        }
+
+        cont.innerHTML = '<span class="fs-5 fw-semibold pce-num">' + porcentaje(t.tasa) +
+            '</span><div class="pce-detalle">' + escapar(t.desglose) + '</div>' +
+            '<div class="pce-detalle">Un cheque que acredita hoy entra por el ' +
+            porcentaje(1 - t.tasa) + ' de su importe.</div>';
+    }
+
+    function pintarAlicuotas(alicuotas) {
+        document.getElementById('bodyAlicuotasPpq').innerHTML = alicuotas.length
+            ? alicuotas.map(filaAlicuota).join('')
+            : '<tr><td colspan="6" class="text-center text-muted py-4">Todavía no hay alícuotas ' +
+              'cargadas. Sin alícuotas no se puede depositar ningún cheque.</td></tr>';
+
+        Permisos.soloLectura('bodyAlicuotasPpq');
+
+        document.querySelectorAll('.ppq-nueva-vigencia').forEach(function(b) {
+            b.addEventListener('click', function() {
+                mostrar('formAlicuotaPpq', true);
+                setValor('nuevaAliConceptoPpq', b.dataset.concepto);
+                setValor('nuevaAliVigenciaPpq', modulo.deposito.hoy);
+                pintarSuma();
+            });
+        });
+
+        document.querySelectorAll('.ppq-baja-alicuota').forEach(function(b) {
+            b.addEventListener('click', function() {
+                bajaAlicuota(parseInt(b.dataset.id, 10), b);
+            });
+        });
+    }
+
+    function filaAlicuota(a) {
+        var activa = (parseInt(a.ACTIVO, 10) === 1);
+
+        // Cuál rige hoy lo marca el servidor (VIGENTE_HOY). Una activa que no
+        // rige es histórica -la reemplazó otra- o todavía no empezó.
+        var estado = !activa
+            ? '<span class="pce-badge pce-badge-baja">dada de baja</span>'
+            : (a.VIGENTE_HOY
+                ? '<span class="pce-badge pce-badge-vigente">vigente</span>'
+                : (String(a.VIGENCIA_DESDE) > String(modulo.deposito.hoy)
+                    ? '<span class="pce-badge" title="Empieza a regir en su fecha: los depósitos ' +
+                      'que acrediten desde ese día se calculan con ella.">futura</span>'
+                    : '<span class="pce-badge" title="Quedó reemplazada por una vigencia ' +
+                      'posterior. Se muestra porque es lo que explica la tasa de los depósitos ' +
+                      'de ese período.">histórica</span>'));
+
+        return '<tr class="' + (activa ? '' : 'ppq-inactivo') + '">' +
+            '<td class="fw-semibold">' + escapar(a.CONCEPTO) + '</td>' +
+            '<td class="text-end pce-num">' + porcentaje(a.ALICUOTA) + '</td>' +
+            '<td class="text-center">' + fechaCorta(a.VIGENCIA_DESDE) + '</td>' +
+            '<td class="text-center">' + estado + '</td>' +
+            '<td class="text-center ppq-fecha">' + (a.FECHA_ALTA ? fechaHora(a.FECHA_ALTA) : '—') +
+                subtituloUsuario(a.USUARIO) + '</td>' +
+            '<td class="text-center">' +
+                (activa
+                    ? '<button class="btn btn-sm btn-link ppq-nueva-vigencia" ' +
+                          'data-concepto="' + escapar(a.CONCEPTO) + '" ' +
+                          'title="Cargar una vigencia nueva de este concepto">' +
+                          '<i class="fas fa-pen"></i></button>' +
+                      '<button class="btn btn-sm btn-link text-danger ppq-baja-alicuota" ' +
+                          'data-id="' + a.ID + '" ' +
+                          'title="Dar de baja esta vigencia: no se borra, deja de regir">' +
+                          '<i class="fas fa-ban"></i></button>'
+                    : '') +
+            '</td>' +
+        '</tr>';
+    }
+
+    /**
+     * Los conceptos ya usados, como sugerencia. El campo sigue siendo libre:
+     * el concepto no es un enum y una retención nueva se carga sin tocar código.
+     */
+    function pintarConceptos(alicuotas) {
+        var lista = document.getElementById('conceptosPpq');
+        var conceptos = {};
+
+        if (!lista) {
+            return;
+        }
+
+        alicuotas.forEach(function(a) { conceptos[a.CONCEPTO] = true; });
+
+        lista.innerHTML = Object.keys(conceptos).sort().map(function(c) {
+            return '<option value="' + escapar(c) + '"></option>';
+        }).join('');
+    }
+
+    /**
+     * La suma que va a quedar con la alícuota que se está cargando, sobre las
+     * vigentes HOY que marca el servidor. Bloquea el botón si llega a 100%: el
+     * neto saldría cero o negativo. El servidor la vuelve a validar contra las
+     * vigentes a la fecha elegida, que es donde vale.
+     */
+    function pintarSuma() {
+        var cont = document.getElementById('sumaAlicuotaPpq');
+        var btn = document.getElementById('btnAgregarAlicuotaPpq');
+
+        if (!cont || !modulo || !modulo.deposito) {
+            return;
+        }
+
+        var concepto = valor('nuevaAliConceptoPpq');
+        var nueva = (parseFloat(valor('nuevaAliPorcentajePpq')) || 0) / 100;
+
+        if (!concepto) {
+            cont.innerHTML = '<span class="text-muted">Ingresá el concepto para ver la tasa total ' +
+                'que va a quedar.</span>';
+
+            if (btn) {
+                btn.disabled = false;
+            }
+
+            return;
+        }
+
+        var suma = nueva;
+        var partes = [escapar(concepto) + ' ' + porcentaje(nueva) + ' (nueva)'];
+
+        (modulo.deposito.alicuotas || []).forEach(function(a) {
+            if (!a.VIGENTE_HOY || a.CONCEPTO === concepto) {
+                return;
+            }
+
+            suma += parseFloat(a.ALICUOTA) || 0;
+            partes.push(escapar(a.CONCEPTO) + ' ' + porcentaje(a.ALICUOTA));
+        });
+
+        var invalida = (suma >= 1);
+
+        cont.innerHTML = '<i class="fas fa-calculator me-1"></i>' +
+            'Tasa total resultante <strong class="' + (invalida ? 'text-danger' : '') + '">' +
+            porcentaje(suma) + '</strong> (' + partes.join(' + ') + ')' +
+            (invalida
+                ? '<div class="text-danger mt-1">Con esta suma el neto saldría cero o negativo: un ' +
+                  'depósito restaría plata del tablero. Revisá los otros conceptos.</div>'
+                : '<div class="text-muted mt-1">Un cheque depositado con esta tasa acredita el ' +
+                  porcentaje(1 - suma) + ' de su importe.</div>');
+
+        if (btn) {
+            btn.disabled = invalida;
+        }
+    }
+
+    function guardarPlazo() {
+        var inp = document.getElementById('plazoDepositoPpq');
+        var previo = inp.getAttribute('data-previo');
+        var maximo = (modulo.deposito && modulo.deposito.plazo_max) || 30;
+        var texto = String(inp.value).trim();
+        var dias = parseInt(texto, 10);
+
+        // Espejo de Echeqs::validarPlazo(), sólo para no mandar algo que el
+        // servidor va a rechazar. El que vale es el del servidor.
+        if (!/^\d+$/.test(texto) || dias < 1 || dias > maximo) {
+            Notificacion.campoInvalido(inp, 'El plazo tiene que ser un entero de 1 a ' + maximo +
+                ' días hábiles.', {
+                detalle: 'Con 2, un cheque depositado el lunes acredita el miércoles.'
+            });
+
+            return;
+        }
+
+        if (texto === previo) {
+            return;
+        }
+
+        conBotonEl(document.getElementById('btnGuardarPlazoPpq'), function() {
+            return pedirJson(URL_PARAM + '?action=savePlazoDepositoEcheq', { dias: dias })
+                .then(function() {
+                    Notificacion.exito('Plazo de acreditación: ' + dias + ' día(s) hábil(es).', {
+                        detalle: 'Vale para los cheques que se depositen desde ahora. Los ya ' +
+                                 'depositados conservan su fecha de acreditación.'
+                    });
+
+                    cargar();
+                });
+        }, 'No se pudo guardar el plazo');
+    }
+
+    function agregarAlicuota() {
+        var concepto = valor('nuevaAliConceptoPpq');
+        var porc = parseFloat(valor('nuevaAliPorcentajePpq'));
+        var vigencia = valor('nuevaAliVigenciaPpq');
+
+        if (!concepto) {
+            Notificacion.campoInvalido('nuevaAliConceptoPpq',
+                'Ingresá el concepto de la retención (por ejemplo IIBB o SICREB).');
+            return;
+        }
+
+        if (isNaN(porc) || porc < 0) {
+            Notificacion.campoInvalido('nuevaAliPorcentajePpq',
+                'La alícuota tiene que ser un número no negativo.');
+            return;
+        }
+
+        if (!vigencia) {
+            Notificacion.campoInvalido('nuevaAliVigenciaPpq',
+                'Ingresá desde qué fecha rige esta alícuota.', {
+                detalle: 'Es lo que permite cambiarla sin reescribir el neto de lo ya acreditado.'
+            });
+            return;
+        }
+
+        conBotonEl(document.getElementById('btnAgregarAlicuotaPpq'), function() {
+            // Viaja como fracción, que es como la guarda la base: 2,5% es 0,025.
+            return pedirJson(URL_PARAM + '?action=addAlicuotaEcheq', {
+                concepto: concepto,
+                alicuota: porc / 100,
+                vigencia_desde: vigencia
+            }).then(function(r) {
+                mostrar('formAlicuotaPpq', false);
+                setValor('nuevaAliPorcentajePpq', '');
+                mostrarResultado('Alícuota guardada como vigencia nueva: la anterior queda en el ' +
+                    'histórico y los depósitos que se calcularon con ella la conservan.', r);
+                cargar();
+            });
+        }, 'No se pudo guardar la alícuota');
+    }
+
+    function bajaAlicuota(id, boton) {
+        Notificacion.confirmar({
+            titulo: 'Dar de baja la vigencia',
+            mensaje: '¿Dar de baja esta alícuota?',
+            detalle: 'No se borra: deja de regir. Los depósitos ya acreditados conservan la tasa ' +
+                     'con la que se calcularon, y los pendientes se recalculan con lo que quede ' +
+                     'vigente. Si no queda ninguna, no se va a poder depositar hasta cargar otra.',
+            confirmar: 'Dar de baja',
+            peligro: true
+        }).then(function(confirmado) {
+            if (!confirmado) {
+                return;
+            }
+
+            conBotonEl(boton, function() {
+                return pedirJson(URL_PARAM + '?action=bajaAlicuotaEcheq', { id: id })
+                    .then(function(r) {
+                        mostrarResultado('Alícuota dada de baja: deja de regir, pero la fila ' +
+                            'queda en el histórico.', r);
+                        cargar();
+                    });
+            }, 'No se pudo dar de baja la alícuota');
+        });
+    }
+
+    /**
+     * Qué dejó el guardado, con el detalle del recálculo de los depósitos
+     * pendientes. Se informa SIEMPRE, incluso sin cambios: un recálculo que no
+     * se informa es un cambio de importes en silencio. Va en un panel y no en un
+     * alert porque lo que hay que mostrar es una tabla. Mismo criterio que
+     * Parámetros → Cob. Electrónicos.
+     */
+    function mostrarResultado(titulo, r) {
+        var cont = document.getElementById('resultadoDepositoPpq');
+
+        if (!cont) {
+            return;
+        }
+
+        var rec = (r && r.recalculo) || {};
+        var cambios = rec.cambios || [];
+        var html = '<div class="card-body border-bottom"><div class="pce-resultado mb-0">';
+
+        html += '<div class="pce-resultado-titulo"><i class="fas fa-circle-check me-1"></i>' +
+            escapar(titulo) + '</div>';
+
+        if (r && r.tasa_total !== undefined && r.tasa_total !== null) {
+            html += '<div class="pce-resultado-linea">La tasa total vigente de los cheques es ' +
+                'ahora del <strong>' + porcentaje(r.tasa_total) + '</strong>.</div>';
+        }
+
+        if (!cambios.length) {
+            html += '<div class="pce-resultado-linea">No cambió el neto de ningún depósito ' +
+                'pendiente.' + (rec.acreditados
+                    ? ' Los ' + rec.acreditados + ' ya acreditados no se tocan.' : '') + '</div>';
+        } else {
+            html += '<div class="pce-resultado-linea">Se recalcularon <strong>' + cambios.length +
+                '</strong> depósito(s) pendiente(s), con una diferencia total de <strong>' +
+                signo(rec.diferencia) + '</strong> en el neto.' + (rec.acreditados
+                    ? ' Los ' + rec.acreditados + ' ya acreditados <strong>no se tocaron</strong>.'
+                    : '') + '</div>';
+
+            html += '<div class="table-responsive pce-resultado-tabla">' +
+                '<table class="table table-sm mb-0"><thead><tr>' +
+                '<th>N° Cheque</th><th class="text-center">Acreditación</th>' +
+                '<th class="text-end">Bruto</th><th class="text-center">Tasa</th>' +
+                '<th class="text-end">Neto</th><th class="text-end">Diferencia</th>' +
+                '</tr></thead><tbody>';
+
+            cambios.forEach(function(c) {
+                var baja = (parseFloat(c.diferencia) || 0) < 0;
+
+                html += '<tr>' +
+                    '<td>' + escapar(c.n_cheque === null ? '—' : c.n_cheque) + '</td>' +
+                    '<td class="text-center">' + fechaCorta(c.fecha_acreditacion) + '</td>' +
+                    '<td class="text-end pce-num">' + pesos(c.importe_bruto) + '</td>' +
+                    '<td class="text-center pce-num">' + porcentaje(c.tasa_anterior) +
+                        ' <i class="fas fa-arrow-right pce-flecha"></i> ' +
+                        porcentaje(c.tasa_nueva) + '</td>' +
+                    '<td class="text-end pce-num">' + pesos(c.neto_anterior) +
+                        ' <i class="fas fa-arrow-right pce-flecha"></i> <strong>' +
+                        pesos(c.neto_nuevo) + '</strong></td>' +
+                    '<td class="text-end pce-num ' + (baja ? 'text-danger' : 'text-success') +
+                        '">' + signo(c.diferencia) + '</td>' +
+                '</tr>';
+            });
+
+            html += '</tbody></table></div>';
+        }
+
+        (rec.avisos || []).forEach(function(a) {
+            html += '<div class="pce-resultado-aviso">· ' + escapar(a) + '</div>';
+        });
+
+        cont.innerHTML = html + '</div></div>';
+        cont.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    /** '+ $ 1.000,00' / '− $ 1.000,00', para una diferencia */
+    function signo(v) {
+        var n = parseFloat(v) || 0;
+
+        return (n >= 0 ? '+ ' : '− ') + pesos(Math.abs(n));
+    }
+
+    function pesos(v) {
+        return '$ ' + (parseFloat(v) || 0).toLocaleString('es-AR', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+    }
+
+    /** 0.025 -> '2,5%' */
+    function porcentaje(alicuota) {
+        var n = (parseFloat(alicuota) || 0) * 100;
+
+        return n.toLocaleString('es-AR', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 4
+        }) + '%';
     }
 
     /* ================================================================

@@ -349,15 +349,22 @@ class CashflowRegistry {
            serie: su efecto es restar de la cobranza proyectada de Ventas. Ver
            el encabezado de Providers/EcheqsProvider.php.
 
-           UN SOLO CORTE: A_COBRAR + A_COBRAR_EXCLUIDOS = A_COBRAR_TODO.
+           UN SOLO CORTE, DE TRES PARTES:
+               A_COBRAR + A_COBRAR_EXCLUIDOS + DEPOSITADOS = A_COBRAR_TODO
 
            OJO CON 'A_COBRAR': YA NO TRAE TODO. Trae la cartera que se va a
-           poder cobrar, o sea sin los cheques excluidos a mano. Es el codigo
-           que la fila del tablero ya tenia configurado y por eso no cambio
-           -asi el circuito de exclusion entro sin repuntar ninguna fila-, pero
-           su significado si: lo que A_COBRAR era hasta entonces es hoy
-           A_COBRAR_TODO. Mientras no haya ningun cheque excluido los dos valen
-           lo mismo. */
+           poder cobrar y que todavia no se deposito, en bruto y en la fecha del
+           cheque. Es el codigo que la fila del tablero ya tenia configurado y
+           por eso no cambio -asi la exclusion y el deposito entraron sin
+           repuntar ninguna fila-, pero su significado si.
+
+           DEPOSITADOS ES OTRA PARTE, NO UNA APERTURA DE A_COBRAR: va en su
+           propia fila, "Echeqs depositados", con el NETO y en la fecha de
+           acreditacion. Las dos activas juntas es lo correcto.
+
+           A_COBRAR_TODO SUMA LAS TRES, asi que ya no es el universo en bruto:
+           los depositados entran por el neto. El bruto se reconstruye con la
+           retencion, ver el encabezado de Providers/EcheqsProvider.php. */
         'ECHEQS' => [
             'nombre' => 'Echeqs',
             'descripcion' => 'Echeqs en cartera pendientes de acreditacion',
@@ -367,20 +374,22 @@ class CashflowRegistry {
             'disponible' => true,
             'tab' => 'echeqs',
             'series' => [
-                'A_COBRAR' => 'Echeqs a cobrar (sin los excluidos a mano)',
+                'A_COBRAR' => 'Echeqs a cobrar (sin los excluidos a mano ni los depositados)',
                 'A_COBRAR_EXCLUIDOS' => 'Solo los echeqs excluidos a mano, uno por uno',
-                'A_COBRAR_TODO' => 'Echeqs en cartera, TODOS: cobrables y excluidos'
+                'DEPOSITADOS' => 'Echeqs depositados: el neto, el día que acreditan',
+                'A_COBRAR_TODO' => 'Echeqs en cartera, TODOS: cobrables, excluidos y depositados (neto)'
             ],
-            /* El total es A_COBRAR_TODO, igual que en Proveedores Locales: la
-               fila del tablero usa A_COBRAR porque asi se decidio, pero el
-               universo contra el que se mide el doble conteo es el otro.
+            /* El total es A_COBRAR_TODO, igual que en Proveedores Locales: las
+               filas del tablero usan A_COBRAR y DEPOSITADOS, pero el universo
+               contra el que se mide el doble conteo es el otro.
 
                NO HACE FALTA declarar 'particiones': hay un solo corte, y sin
                declaracion el validador toma todas las partes como el mismo
-               corte, que es exactamente lo que son. Las dos pueden convivir
-               -son las dos mitades- y cualquiera de ellas junto al total, no. */
+               corte, que es exactamente lo que son. Las tres pueden convivir
+               -cada cheque esta en una sola- y cualquiera de ellas junto al
+               total, no. */
             'componentes' => [
-                'A_COBRAR_TODO' => ['A_COBRAR', 'A_COBRAR_EXCLUIDOS']
+                'A_COBRAR_TODO' => ['A_COBRAR', 'A_COBRAR_EXCLUIDOS', 'DEPOSITADOS']
             ]
         ],
 
