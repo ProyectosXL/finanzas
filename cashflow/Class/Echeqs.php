@@ -691,11 +691,16 @@ class Echeqs {
      *   - NO DEPOSITADO. Un deposito vigente no se vuelve a hacer: se deshace.
      *   - NO EXCLUIDO. Un cheque que se decidio que no va a entrar no se
      *     deposita: primero hay que devolverlo al cashflow.
-     *   - CON BANCO. La tanda se arma por banco emisor, y sin banco no hay
-     *     tanda a la que pertenezca.
+     *   - CON BANCO. El banco emisor es obligatorio al cargar el cheque en
+     *     Tango, asi que uno sin banco -o con un ID_BANCO que no esta en
+     *     dbo.BANCO- es un dato roto, y no se guarda un deposito sin banco: es
+     *     lo que el tooltip y el historial muestran de cada cheque.
      *   - CON IMPORTE. Un deposito de cero o negativo restaria del tablero.
-     *   - UN SOLO BANCO EMISOR, comparado por ID_BANCO y no por el nombre: dos
-     *     bancos con la misma descripcion son dos bancos.
+     *
+     * LOS BANCOS SE PUEDEN MEZCLAR. Los cheques se cobran por el clearing
+     * bancario, asi que una misma tanda lleva cheques de cualquier banco
+     * emisor, con el plazo y la tasa unicos de Parametros -> Cheques: ninguno
+     * de los dos depende del emisor. Cada cheque guarda su propio banco.
      *
      * POR QUE TODO O NADA y no "se deposita lo que se puede": el deposito es una
      * tanda real que alguien llevo al banco. Si una parte se guarda y otra no,
@@ -704,7 +709,7 @@ class Echeqs {
      * @param array $ids Ids de dbo.SBA14 pedidos
      * @param array $cartera Filas de getEcheqsCartera()
      * @return array ['filas' => [...], 'rechazos' => [['id', 'n_cheque', 'motivo']],
-     *         'bancos' => [id => nombre], 'error' => string|null]
+     *         'error' => string|null]
      */
     public static function validarSeleccionDeposito($ids, $cartera) {
         $porId = [];
@@ -715,7 +720,6 @@ class Echeqs {
 
         $filas = [];
         $rechazos = [];
-        $bancos = [];
 
         foreach (self::idsPedidos($ids) as $id) {
             $f = isset($porId[$id]) ? $porId[$id] : null;
@@ -739,7 +743,6 @@ class Echeqs {
                 continue;
             }
 
-            $bancos[intval($f['ID_BANCO'])] = $f['BANCO'];
             $filas[] = $f;
         }
 
@@ -754,13 +757,9 @@ class Echeqs {
                     return 'N° ' . ($r['n_cheque'] === null ? $r['id'] : $r['n_cheque'])
                         . ' ' . $r['motivo'];
                 }, $rechazos)) . '.';
-        } elseif (count($bancos) > 1) {
-            $error = 'No se depositó ningún cheque: un depósito es de un solo banco emisor, y la '
-                . 'selección tiene ' . count($bancos) . ': ' . implode(', ', $bancos) . '.';
         }
 
-        return ['filas' => $filas, 'rechazos' => $rechazos, 'bancos' => $bancos,
-                'error' => $error];
+        return ['filas' => $filas, 'rechazos' => $rechazos, 'error' => $error];
     }
 
     /**
@@ -781,6 +780,12 @@ class Echeqs {
      * EL NETO SE REDONDEA CHEQUE POR CHEQUE y el total es la suma: es lo que se
      * guarda, y el total del dialogo tiene que coincidir con lo que despues
      * suma el tablero.
+     *
+     * EL BANCO ES DE CADA CHEQUE, no de la tanda: una tanda junta cheques de
+     * varios bancos emisores (ver validarSeleccionDeposito()). Cada elemento
+     * de 'cheques' lleva el suyo, tomado de la lectura de la cartera y no del
+     * pedido, y es el que se guarda. 'bancos' es el desglose para el dialogo
+     * y 'tanda' el texto que lo resume (desgloseBancos(), textoTanda()).
      *
      * @param array $filas Las de validarSeleccionDeposito(), ya validadas
      * @param int $plazo Dias habiles
@@ -815,6 +820,8 @@ class Echeqs {
                 'id' => intval($f['ID_SBA14']),
                 'n_cheque' => $f['N_CHEQUE'],
                 'cliente' => isset($f['CLIENTE']) ? $f['CLIENTE'] : '',
+                'id_banco' => intval($f['ID_BANCO']),
+                'banco' => $f['BANCO'],
                 'bruto' => $b,
                 'neto' => $n
             ];
@@ -823,21 +830,93 @@ class Echeqs {
             $neto += $n;
         }
 
+        $bancos = self::desgloseBancos($cheques);
+
         return [
             'fecha_deposito' => $hoy,
             'fecha_acreditacion' => $acr['fecha'],
             'dias_plazo' => intval($plazo),
             'tasa' => $r['tasa'],
             'desglose' => Retenciones::desglose($r['detalle']),
-            'id_banco' => intval($filas[0]['ID_BANCO']),
-            'banco' => $filas[0]['BANCO'],
             'cantidad' => count($cheques),
             'bruto' => round($bruto, 4),
             'retencion' => round($bruto - $neto, 4),
             'neto' => round($neto, 4),
+            'bancos' => $bancos,
+            'tanda' => self::textoTanda(count($cheques), $bancos),
             'cheques' => $cheques,
             'avisos' => $acr['avisos']
         ];
+    }
+
+    /**
+     * Los cheques de una tanda, agrupados por banco emisor: nombre, cantidad,
+     * bruto y neto de cada uno, de mayor a menor bruto.
+     *
+     * SE AGRUPA POR ID_BANCO y no por el nombre: dos bancos con la misma
+     * descripcion son dos bancos. A igual bruto desempata el nombre, y despues
+     * el id, para que el orden no dependa del orden en que llegaron.
+     *
+     * EL NETO DE CADA BANCO ES LA SUMA DE LOS NETOS YA REDONDEADOS cheque por
+     * cheque, como el total: los bancos suman exactamente lo que dice el pie
+     * del dialogo y lo que suma el tablero.
+     *
+     * @param array $cheques Los de calcularDeposito()['cheques']
+     * @return array [['id_banco', 'banco', 'cantidad', 'bruto', 'neto']]
+     */
+    public static function desgloseBancos($cheques) {
+        $porBanco = [];
+
+        foreach ($cheques as $c) {
+            $id = intval($c['id_banco']);
+
+            if (!isset($porBanco[$id])) {
+                $porBanco[$id] = ['id_banco' => $id, 'banco' => $c['banco'], 'cantidad' => 0,
+                                  'bruto' => 0.0, 'neto' => 0.0];
+            }
+
+            $porBanco[$id]['cantidad']++;
+            $porBanco[$id]['bruto'] += $c['bruto'];
+            $porBanco[$id]['neto'] += $c['neto'];
+        }
+
+        $bancos = array_map(function ($b) {
+            $b['bruto'] = round($b['bruto'], 4);
+            $b['neto'] = round($b['neto'], 4);
+
+            return $b;
+        }, array_values($porBanco));
+
+        usort($bancos, function ($a, $b) {
+            if (abs($a['bruto'] - $b['bruto']) > 0.00001) {
+                return ($a['bruto'] < $b['bruto']) ? 1 : -1;
+            }
+
+            return strcmp((string) $a['banco'], (string) $b['banco'])
+                ?: ($a['id_banco'] - $b['id_banco']);
+        });
+
+        return $bancos;
+    }
+
+    /**
+     * Cuantos cheques y de que banco, en una frase: "3 cheque(s) de GALICIA" o
+     * "5 cheques de 2 bancos". Lo dicen el dialogo, el mensaje del controller
+     * y el aviso de exito de la pantalla, y sale de aca para que los tres
+     * digan lo mismo.
+     *
+     * Con varios bancos no lleva "(s)": hay por lo menos dos cheques.
+     *
+     * @param int $cantidad
+     * @param array $bancos El de desgloseBancos()
+     * @return string
+     */
+    public static function textoTanda($cantidad, $bancos) {
+        if (count($bancos) === 1) {
+            return $cantidad . ' cheque(s) de ' . $bancos[0]['banco'];
+        }
+
+        return $cantidad . ' cheques de ' . count($bancos) . ' bancos';
     }
 
     /**
@@ -2051,10 +2130,12 @@ class Echeqs {
     /* ====================================================================
        EL DEPOSITO MASIVO
 
-       Se seleccionan cheques de cartera de UN banco emisor y se marcan como
-       depositados. Desde ese dia corren las 48 hs habiles -el plazo de
-       Parametros-, y el cheque sale de "Echeqs en cartera" y entra en
-       "Echeqs depositados" el dia que acredita, por el neto.
+       Se seleccionan cheques de cartera y se marcan como depositados. Una
+       tanda puede juntar cheques de varios bancos emisores: se cobran por el
+       clearing bancario, con un plazo y una tasa que no dependen del emisor.
+       Desde ese dia corren las 48 hs habiles -el plazo de Parametros-, y el
+       cheque sale de "Echeqs en cartera" y entra en "Echeqs depositados" el
+       dia que acredita, por el neto.
 
        DEL NAVEGADOR LLEGAN SOLO LOS IDS. El banco, el importe, la fecha de
        deposito, la acreditacion, la tasa y el neto los resuelve el servidor
@@ -2150,30 +2231,30 @@ class Echeqs {
      * @param array $ids
      * @param string|null $hoy 'Y-m-d'
      * @return array ['ok' => bool, 'motivo' => string|null, 'rechazos' => [...],
-     *         'bancos' => [...], 'calculo' => array|null]
+     *         'calculo' => array|null]. El desglose por banco va en el calculo
      */
     public function previsualizarDeposito($ids, $hoy = null) {
         $hoy = ($hoy === null) ? date('Y-m-d') : $hoy;
         $estado = $this->estadoParaDepositar();
 
         if (!$estado['puede']) {
-            return self::sinDeposito($estado['motivo'], [], []);
+            return self::sinDeposito($estado['motivo'], []);
         }
 
         $sel = self::validarSeleccionDeposito($ids, $this->getEcheqsCartera($hoy));
 
         if ($sel['error'] !== null) {
-            return self::sinDeposito($sel['error'], $sel['rechazos'], $sel['bancos']);
+            return self::sinDeposito($sel['error'], $sel['rechazos']);
         }
 
         try {
             $calculo = $this->calcularParaHoy($sel['filas'], $estado['plazo'], $hoy);
         } catch (Exception $e) {
-            return self::sinDeposito($e->getMessage(), [], $sel['bancos']);
+            return self::sinDeposito($e->getMessage(), []);
         }
 
         return ['ok' => true, 'motivo' => null, 'ir_a' => null, 'rechazos' => [],
-                'bancos' => $sel['bancos'], 'calculo' => $calculo];
+                'calculo' => $calculo];
     }
 
     /**
@@ -2187,17 +2268,15 @@ class Echeqs {
      *
      * @param string $motivo
      * @param array $rechazos
-     * @param array $bancos
      * @return array
      */
-    public static function sinDeposito($motivo, $rechazos, $bancos) {
+    public static function sinDeposito($motivo, $rechazos) {
         return [
             'ok' => false,
             'motivo' => $motivo,
             'ir_a' => (strpos((string) $motivo, 'Parámetros → Cheques') !== false)
                 ? 'PRECHEQUEADO' : null,
             'rechazos' => $rechazos,
-            'bancos' => $bancos,
             'calculo' => null
         ];
     }
@@ -2279,25 +2358,31 @@ class Echeqs {
     }
 
     /**
-     * Una tanda del INSERT de depositos.
+     * Los parametros del INSERT de depositos, 14 por cheque, en el orden de las
+     * columnas de insertarDepositos().
      *
-     * @param resource $cid Conexion con la transaccion ya abierta
+     * EL BANCO SALE DE CADA CHEQUE y no de la tanda: una tanda junta cheques de
+     * varios bancos emisores, y un banco unico grabaria el del primero en
+     * todos. Fechas, plazo, tasa y desglose si son de la tanda: son los mismos
+     * para todos sus cheques.
+     *
+     * Estatica y pura, para probar sin base que fila lleva que banco.
+     *
      * @param array $cheques Los de calcularDeposito()['cheques']
      * @param array $calculo
      * @param string|null $obs
      * @param string $usuario
+     * @return array
      */
-    private function insertarDepositos($cid, $cheques, $calculo, $obs, $usuario) {
-        $filas = implode(', ', array_fill(0, count($cheques),
-            '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)'));
+    public static function paramsInsertDeposito($cheques, $calculo, $obs, $usuario) {
         $params = [];
 
         foreach ($cheques as $c) {
             array_push($params,
                 $c['id'],
                 $c['n_cheque'],
-                $calculo['id_banco'],
-                mb_substr((string) $calculo['banco'], 0, 60),
+                $c['id_banco'],
+                mb_substr((string) $c['banco'], 0, 60),
                 $calculo['fecha_deposito'],
                 $calculo['fecha_acreditacion'],
                 $calculo['dias_plazo'],
@@ -2309,6 +2394,23 @@ class Echeqs {
                 $usuario,
                 $usuario);
         }
+
+        return $params;
+    }
+
+    /**
+     * Una tanda del INSERT de depositos.
+     *
+     * @param resource $cid Conexion con la transaccion ya abierta
+     * @param array $cheques Los de calcularDeposito()['cheques']
+     * @param array $calculo
+     * @param string|null $obs
+     * @param string $usuario
+     */
+    private function insertarDepositos($cid, $cheques, $calculo, $obs, $usuario) {
+        $filas = implode(', ', array_fill(0, count($cheques),
+            '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)'));
+        $params = self::paramsInsertDeposito($cheques, $calculo, $obs, $usuario);
 
         $stmt = sqlsrv_query($cid,
             "INSERT INTO dbo." . self::TABLA_DEPOSITO . "
@@ -3659,10 +3761,11 @@ class Echeqs {
             $fila['BANCO'] = 'Sin banco';
         }
 
-        /* EL BANCO SE COMPARA POR ID, no por el nombre: es lo que arma la tanda
-           de un deposito. Sale de dbo.BANCO y no de SBA14, asi que un cheque
-           cuyo ID_BANCO no esta en el maestro queda en null, igual que uno sin
-           banco: ninguno de los dos se puede depositar. */
+        /* EL BANCO SE COMPARA POR ID, no por el nombre: es como se agrupa el
+           desglose por banco de un deposito. Sale de dbo.BANCO y no de SBA14,
+           asi que un cheque cuyo ID_BANCO no esta en el maestro queda en null,
+           igual que uno sin banco: es un dato roto -el banco es obligatorio en
+           Tango- y ninguno de los dos se puede depositar. */
         if (array_key_exists('ID_BANCO', $row)) {
             $fila['ID_BANCO'] = ($row['ID_BANCO'] === null) ? null : intval($row['ID_BANCO']);
         }
