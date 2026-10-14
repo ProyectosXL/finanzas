@@ -13,18 +13,29 @@ require_once __DIR__ . '/../Class/Saldos.php';
 
 const IB_HOY = '2026-10-08';
 
-/** Un registro de BI_T_SALDOS_INTERBANKING, como lo devuelve leerUltimos() */
-function ibReg($id, $fecha, $saldo, $creado = false, $banco = '007', $cuenta = '100', $moneda = 'ARS') {
-    return [
+/**
+ * Un registro de BI_T_SALDOS_INTERBANKING, como lo devuelve leerUltimos().
+ * $saldo es el operativo actual. $contable lo agrega aparte, solo para probar
+ * que no se usa: leerUltimos() no lo trae.
+ */
+function ibReg($id, $fecha, $saldo, $creado = false, $banco = '007', $cuenta = '100', $moneda = 'ARS',
+               $contable = false) {
+    $r = [
         'ID' => $id,
         'FECHA_OPERACION' => $fecha,
         'NRO_BANCO' => $banco,
         'NRO_CUENTA' => $cuenta,
         'TIPO_CUENTA' => 'CC',
         'MONEDA' => $moneda,
-        'SALDO_CONTABLE' => $saldo,
+        'SALDO_OPERATIVO_ACTUAL' => $saldo,
         'CREATED_AT' => ($creado === false) ? $fecha . ' 10:30:00' : $creado
     ];
+
+    if ($contable !== false) {
+        $r['SALDO_CONTABLE'] = $contable;
+    }
+
+    return $r;
 }
 
 /** Los textos de una lista de avisos con un nivel dado, juntos */
@@ -58,6 +69,11 @@ $tangoIb = ['007' => 'DE GALICIA Y BS.AS.', '014' => 'PROVINCIA DE BS.AS.', '015
 // ============================================================================
 seccion('que registro se toma');
 // ============================================================================
+
+chequear('el importe es el saldo operativo actual',
+    'SALDO_OPERATIVO_ACTUAL', SaldosInterbanking::COLUMNA_SALDO);
+chequear('el respaldo conserva el nombre de su columna',
+    'SALDO_CONTABLE', SaldosInterbanking::COLUMNA_RESPALDO);
 
 $e = SaldosInterbanking::elegirRegistro([
     ibReg(1, '2026-10-07', 100.0),
@@ -101,18 +117,50 @@ $e = SaldosInterbanking::elegirRegistro([
     ibReg(2, IB_HOY, null)
 ]);
 
-chequear('el mas nuevo sin contable no tapa al anterior', 1, $e['usado']['ID']);
+chequear('el mas nuevo sin operativo no tapa al anterior', 1, $e['usado']['ID']);
 chequear('y se sabe que paso', true, $e['tapado']);
 chequear('el mas nuevo sigue siendo el de hoy', 2, $e['mas_nuevo']['ID']);
 
+$e = SaldosInterbanking::elegirRegistro([
+    ibReg(1, '2026-10-07', 100.0, false, '007', '100', 'ARS', 90.0),
+    ibReg(2, IB_HOY, null, false, '007', '100', 'ARS', 250.0)
+]);
+
+chequear('el mas nuevo con contable pero sin operativo no se usa', 1, $e['usado']['ID']);
+chequear('se toma el operativo del anterior', 100.0, $e['usado']['SALDO_OPERATIVO_ACTUAL']);
+chequear('y queda tapado, para el aviso', true, $e['tapado']);
+
+$e = SaldosInterbanking::elegirRegistro([
+    ibReg(1, '2026-10-07', null, false, '007', '100', 'ARS', 90.0),
+    ibReg(2, IB_HOY, null, false, '007', '100', 'ARS', 250.0)
+]);
+
+chequear('con contable y sin ningun operativo no se usa nada', null, $e['usado']);
+
 $e = SaldosInterbanking::elegirRegistro([ibReg(1, '2026-10-07', null), ibReg(2, IB_HOY, null)]);
 
-chequear('sin ningun contable no se usa nada', null, $e['usado']);
+chequear('sin ningun operativo no se usa nada', null, $e['usado']);
 chequear('y no cuenta como tapado: no hay nada que tapar', false, $e['tapado']);
 
 $e = SaldosInterbanking::elegirRegistro([ibReg(1, '2026-10-07', 0.0)]);
 
-chequear('un contable en cero es un dato, no un nulo', 0.0, $e['usado']['SALDO_CONTABLE']);
+chequear('un operativo en cero es un dato, no un nulo', 0.0, $e['usado']['SALDO_OPERATIVO_ACTUAL']);
+
+$e = SaldosInterbanking::elegirRegistro([
+    ibReg(1, '2026-10-07', 50.0),
+    ibReg(2, IB_HOY, 0.0, false, '007', '100', 'ARS', 900.0)
+]);
+
+chequear('un operativo en cero de hoy gana, aunque el contable diga otra cosa', 2, $e['usado']['ID']);
+chequear('y no se tapa', false, $e['tapado']);
+
+$e = SaldosInterbanking::elegirRegistro([
+    ibReg(1, IB_HOY, 400.0, IB_HOY . ' 15:00:00'),
+    ibReg(2, IB_HOY, 100.0, IB_HOY . ' 09:00:00')
+]);
+
+chequear('el operativo cambia en el dia: de dos de hoy, el de CREATED_AT mas nuevo aunque tenga menor ID',
+    400.0, $e['usado']['SALDO_OPERATIVO_ACTUAL']);
 
 // ============================================================================
 seccion('el nombre del banco');
@@ -140,9 +188,10 @@ seccion('las filas y los avisos');
 
 $ultimos = [
     ibReg(1, IB_HOY, 1000.0, false, '007', '100'),
-    ibReg(2, IB_HOY, null, false, '014', '200'),
+    // Trae el contable y nunca el operativo: el contable no la rescata.
+    ibReg(2, IB_HOY, null, false, '014', '200', 'ARS', 777.0),
     ibReg(3, '2026-10-07', 500.0, false, '015', '300'),
-    ibReg(4, IB_HOY, null, false, '015', '300'),
+    ibReg(4, IB_HOY, null, false, '015', '300', 'ARS', 888.0),
     ibReg(5, IB_HOY, 70.0, false, '191', '400'),
     ibReg(6, IB_HOY, 99.0, false, '029', '500', null)
 ];
@@ -159,19 +208,25 @@ chequear('la cuenta se muestra "banco · numero"',
     'DE GALICIA Y BS.AS. · 100', $porClave['007|100|ARS']['nombre']);
 chequear('es de tipo Banco y de origen Interbanking',
     'BANCO/INTERBANKING', $porClave['007|100|ARS']['tipo'] . '/' . $porClave['007|100|ARS']['origen']);
-chequear('el saldo es el contable', 1000.0, $porClave['007|100|ARS']['saldo']);
+chequear('el saldo es el operativo actual', 1000.0, $porClave['007|100|ARS']['saldo']);
 chequear('"cargado el" es el CREATED_AT', IB_HOY . ' 10:30:00', $porClave['007|100|ARS']['fecha_carga']);
 
-chequear('sin ningun contable: sin dato', false, $porClave['014|200|ARS']['cargada']);
-chequear('sin dato es null, no cero', null, $porClave['014|200|ARS']['saldo']);
+chequear('nunca trajo operativo, aunque traiga contable: sin dato', false, $porClave['014|200|ARS']['cargada']);
+chequear('sin dato es null, no cero ni el contable', null, $porClave['014|200|ARS']['saldo']);
 chequear('y el aviso es critico',
-    true, ibContiene(ibAvisos($r['avisos'], Aviso::DANGER), 'PROVINCIA DE BS.AS. · 200'));
+    true, ibContiene(ibAvisos($r['avisos'], Aviso::DANGER),
+        'PROVINCIA DE BS.AS. · 200: Interbanking nunca trajo su saldo operativo'));
 
-chequear('el de hoy sin contable toma el de ayer', 500.0, $porClave['015|300|ARS']['saldo']);
+$soloEsta = array_filter($r['filas'], function ($f) { return $f['clave'] === '014|200|ARS'; });
+$serieSinDato = Saldos::armarSerieDisponible($soloEsta, new Horizonte(28, 12, [], new DateTime(IB_HOY)));
+chequear('y no suma al disponible', 0.0, floatval(array_sum($serieSinDato['serie']['dias'])));
+
+chequear('el de hoy sin operativo toma el de ayer', 500.0, $porClave['015|300|ARS']['saldo']);
+chequear('y no el contable de hoy', true, $porClave['015|300|ARS']['saldo'] !== 888.0);
 chequear('con la fecha de ayer', '2026-10-07', $porClave['015|300|ARS']['fecha_saldo']);
 chequear('y el aviso de atencion dice las dos fechas',
     true, ibContiene(ibAvisos($r['avisos'], Aviso::WARNING),
-        'el registro del 08/10 vino sin saldo contable; se muestra el del 07/10'));
+        'el registro del 08/10 vino sin saldo operativo; se muestra el del 07/10'));
 
 chequear('el banco fuera de Tango se muestra igual', 'Banco 191 · 400', $porClave['191|400|ARS']['nombre']);
 chequear('y avisa en atencion',
@@ -218,7 +273,13 @@ seccion('la consulta va contra la tabla de BI sola');
 
 $srcIb = ibFuente(__DIR__ . '/../Class/SaldosInterbanking.php');
 preg_match('/function leerUltimos\(\).*?\n    }\n/s', $srcIb, $m);
-$leer = isset($m[0]) ? $m[0] : '';
+$leerUltimos = isset($m[0]) ? $m[0] : '';
+
+chequear('leerUltimos() usa la consulta del helper',
+    true, ibContiene($leerUltimos, 'sqlsrv_query($cid, self::consultaUltimos())'));
+
+// El SQL ya armado: con la columna interpolada, el codigo fuente no la nombra.
+$leer = SaldosInterbanking::consultaUltimos();
 
 chequear('usa ROW_NUMBER()', true, ibContiene($leer, 'ROW_NUMBER() OVER'));
 chequear('particiona por banco, cuenta y moneda',
@@ -226,8 +287,15 @@ chequear('particiona por banco, cuenta y moneda',
 chequear('ordena por fecha, CREATED_AT e ID',
     true, ibContiene($leer, 'ORDER BY FECHA_OPERACION DESC, CREATED_AT DESC, ID DESC'));
 chequear('no tiene ningun JOIN', false, (bool) preg_match('/\bJOIN\b/i', $leer));
-chequear('usa el saldo contable y no otro',
-    false, (bool) preg_match('/SALDO_OPERATIVO|SALDO_PROYECTADO|SALDO_DIA/', $leer));
+chequear('lee el saldo operativo actual',
+    true, ibContiene($leer, 'SALDO_OPERATIVO_ACTUAL'));
+chequear('el mas nuevo no nulo es el del operativo actual',
+    true, ibContiene($leer, 'CASE WHEN SALDO_OPERATIVO_ACTUAL IS NULL THEN 0 ELSE 1 END')
+        && ibContiene($leer, 'SALDO_OPERATIVO_ACTUAL IS NOT NULL AND RN_GRUPO = 1'));
+chequear('no lee el saldo contable',
+    false, ibContiene($leer, 'SALDO_CONTABLE'));
+chequear('ni ningun otro saldo',
+    false, (bool) preg_match('/SALDO_OPERATIVO_INICIAL|SALDO_PROYECTADO|SALDO_DIA/', $leer));
 
 // ============================================================================
 seccion('alias e inhabilitacion de bancos');
@@ -248,7 +316,7 @@ foreach ($conParams['filas'] as $f) {
 
 chequear('el alias se muestra en la cuenta', 'Galicia · 100', $porClave['007|100|ARS']['nombre']);
 chequear('el banco inactivo no se lista', false, isset($porClave['014|200|ARS']));
-chequear('ni avisa que no tiene saldo contable',
+chequear('ni avisa que no tiene saldo operativo',
     false, ibContiene(ibAvisos($conParams['avisos']), '200'));
 chequear('un banco sin fila esta activo', true, isset($porClave['015|300|ARS']));
 chequear('sin fila tambien es activo para bancoActivo()',
@@ -443,6 +511,24 @@ chequear('a igual fecha gana Interbanking',
     'INTERBANKING', SaldosInterbanking::resolverSaldo($ibHoy, ibResp(1, IB_HOY, 5.0)));
 chequear('sin ninguno de los dos, nada', null, SaldosInterbanking::resolverSaldo(null, null));
 
+// La fecha de Interbanking que compite es la del ultimo con OPERATIVO: un
+// registro de hoy que solo trae el contable no le gana al respaldo de hoy.
+$soloContableHoy = SaldosInterbanking::armarCuentasBancarias([
+    ibReg(1, '2026-10-07', 500.0, false, '015', '300'),
+    ibReg(2, IB_HOY, null, false, '015', '300', 'ARS', 888.0)
+], ['hoy' => IB_HOY, 'tango' => $tangoIb,
+    'respaldos' => ['015|300|ARS' => ibResp(4, IB_HOY, 650.0, '015', '300')]]);
+chequear('un registro de hoy con contable y sin operativo no le gana al respaldo de hoy',
+    650.0, $soloContableHoy['filas'][0]['saldo']);
+chequear('el respaldo es de origen RESPALDO', 'RESPALDO', $soloContableHoy['filas'][0]['origen']);
+
+$operativoHoy = SaldosInterbanking::armarCuentasBancarias([
+    ibReg(1, IB_HOY, 500.0, false, '015', '300', 'ARS', 888.0)
+], ['hoy' => IB_HOY, 'tango' => $tangoIb,
+    'respaldos' => ['015|300|ARS' => ibResp(4, IB_HOY, 650.0, '015', '300')]]);
+chequear('con operativo de la misma fecha gana Interbanking, con su operativo',
+    500.0, $operativoHoy['filas'][0]['saldo']);
+
 $conResp = SaldosInterbanking::armarCuentasBancarias($ultimos, ['hoy' => IB_HOY, 'tango' => $tangoIb,
     'respaldos' => ['014|200|ARS' => ibResp(9, IB_HOY, 35000000.0)]]);
 $porClave = [];
@@ -459,7 +545,7 @@ chequear('"cargado el" es el alta del respaldo', IB_HOY . ' 09:00:00', $prov['fe
 chequear('y se sabe quien lo cargo', 'tesoreria', $prov['usuario_carga']);
 chequear('la falla de la integracion se acusa en atencion',
     true, ibContiene(ibAvisos($conResp['avisos'], Aviso::WARNING),
-        'Interbanking no trae el saldo contable de PROVINCIA DE BS.AS. · 200; se usa la carga '
+        'Interbanking no trae el saldo operativo de PROVINCIA DE BS.AS. · 200; se usa la carga '
         . 'manual del 08/10'));
 chequear('y ya no hay critico por esa cuenta',
     false, ibContiene(ibAvisos($conResp['avisos'], Aviso::DANGER), 'PROVINCIA'));
@@ -478,7 +564,7 @@ chequear('con Interbanking de hoy, el respaldo de ayer no se usa',
     1000.0, $porClave['007|100|ARS']['saldo']);
 chequear('pero se sigue mostrando en el dialogo', 3, $porClave['007|100|ARS']['respaldo']['id']);
 chequear('y no avisa falla de integracion',
-    false, ibContiene(ibAvisos($respViejo['avisos']), 'no trae el saldo contable de DE GALICIA'));
+    false, ibContiene(ibAvisos($respViejo['avisos']), 'no trae el saldo operativo de DE GALICIA'));
 
 $inactivoResp = SaldosInterbanking::armarCuentasBancarias($ultimos, ['hoy' => IB_HOY,
     'tango' => $tangoIb, 'bancos' => ['014' => ['ALIAS' => null, 'ACTIVO' => 0]],
@@ -848,6 +934,26 @@ chequear('el respaldo de una cuenta con BI caido lleva el nombre de Tango',
     'PROVINCIA DE BS.AS. · 200', $caidaConNombre['filas'][0]['nombre']);
 chequear('y no avisa que el banco no esta en Tango', false,
     ibContiene(ibAvisos($caidaConNombre['avisos']), 'no está en la tabla BANCO'));
+
+// ============================================================================
+seccion('la pantalla habla del saldo operativo');
+// ============================================================================
+
+// En estos dos archivos "contable" solo podia ser el saldo de Interbanking:
+// la cuenta contable de tesoreria vive en Parametros. Se busca la palabra
+// sola porque un texto partido en dos strings ('saldo ' + 'contable') no
+// diria "saldo contable" de corrido.
+$jsSaldos = ibFuente(__DIR__ . '/../Js/Saldos.js');
+$tabSaldos = ibFuente(__DIR__ . '/../Tabs/saldos.php');
+
+chequear('Js/Saldos.js ya no dice "contable"', false, (bool) preg_match('/contable/i', $jsSaldos));
+chequear('Tabs/saldos.php ya no dice "contable"', false, (bool) preg_match('/contable/i', $tabSaldos));
+chequear('el dialogo del respaldo pide el saldo operativo',
+    true, ibContiene($tabSaldos, 'Saldo operativo (<span id="respaldoMoneda">'));
+chequear('la cuenta sin dato lo dice con el saldo operativo',
+    true, ibContiene($jsSaldos, "'operativo de esta cuenta. No suma al disponible.\">—</span>'"));
+chequear('el boton del respaldo tambien',
+    true, ibContiene($jsSaldos, 'Interbanking no trae el saldo operativo de esta cuenta'));
 
 // ============================================================================
 seccion('contra la base: la pestana y el proveedor suman lo mismo');

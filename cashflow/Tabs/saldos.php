@@ -180,7 +180,7 @@ $edita = AuthCashflow::puedeEditar('saldos');
                         sistema de su consulta al guardar. Acá se cargan Mercado Pago, los otros
                         saldos y los <strong>bancos que no vienen por Interbanking</strong>. Las
                         cuentas de Interbanking no son de esta carga: si una no trae el saldo
-                        contable, se carga a mano desde su fila, con el botón de saldo manual.
+                        operativo, se carga a mano desde su fila, con el botón de saldo manual.
                     </small>
                 </div>
                 <label class="form-label form-label-sm">Observaciones de la carga</label>
@@ -214,7 +214,7 @@ $edita = AuthCashflow::puedeEditar('saldos');
 
         <?php if ($edita): ?>
         <!-- Respaldo manual de una cuenta de Interbanking. Para cuando la
-             integración no trae el saldo contable: se carga a mano y se usa
+             integración no trae el saldo operativo: se carga a mano y se usa
              mientras Interbanking no traiga uno igual o más nuevo. Reemplazar
              da de baja el anterior; quitar también: nada se borra. La
              validación que vale es la del servidor. -->
@@ -240,7 +240,7 @@ $edita = AuthCashflow::puedeEditar('saldos');
                             </div>
                             <div class="col-md-7">
                                 <label class="form-label form-label-sm" for="respaldoSaldo">
-                                    Saldo contable (<span id="respaldoMoneda">ARS</span>)
+                                    Saldo operativo (<span id="respaldoMoneda">ARS</span>)
                                 </label>
                                 <input type="number" step="0.01" id="respaldoSaldo"
                                        class="form-control form-control-sm text-end">
@@ -252,7 +252,7 @@ $edita = AuthCashflow::puedeEditar('saldos');
                             </div>
                         </div>
                         <div class="param-hint mt-2">
-                            Se usa mientras Interbanking no traiga un saldo contable de la misma
+                            Se usa mientras Interbanking no traiga un saldo operativo de la misma
                             fecha o más nuevo: a igual fecha manda Interbanking.
                         </div>
                     </div>

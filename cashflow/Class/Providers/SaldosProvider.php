@@ -106,7 +106,7 @@ class SaldosProvider extends CashflowProvider {
 
         // Las mismas filas que muestra la pestana, con el hoy del eje. Las de
         // Interbanking traen sus avisos ya resueltos -sin dato, registro sin
-        // contable, banco fuera de Tango, lectura caida- y van tal cual.
+        // saldo operativo, banco fuera de Tango, lectura caida- y van tal cual.
         $disponible = $saldos->getFilasDisponible($h->hoy());
         $filas = $disponible['filas'];
 
