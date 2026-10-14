@@ -91,6 +91,66 @@ class DiasHabiles {
     }
 
     /**
+     * El N-esimo dia habil ESTRICTAMENTE POSTERIOR a una fecha.
+     *
+     * Es la acreditacion de un deposito de cheques: "48 hs habiles" quiere
+     * decir que el dia del deposito no cuenta y que se cuentan dos dias habiles
+     * despues de el. Con N = 2: lunes -> miercoles, viernes -> martes, sabado o
+     * domingo -> martes. Un deposito hecho un feriado tambien empieza a contar
+     * desde el habil siguiente, y eso no es un caso aparte: el feriado no es
+     * habil, asi que contar "despues de el" ya lo saltea.
+     *
+     * NO ES siguiente() N VECES SOBRE LA MISMA FECHA. siguiente() devuelve la
+     * fecha misma si es habil -es "el primer habil IGUAL o posterior"-, que es
+     * lo que quiere una cobranza que se corre. Aca el dia de partida nunca
+     * cuenta, asi que cada paso arranca el dia DESPUES del habil anterior.
+     *
+     * Los meses sin calendario se juntan de todos los pasos, para que quien
+     * llama avise una sola vez por mes: con el respaldo de lunes a viernes, un
+     * feriado que el mapa no tiene corre la acreditacion un dia antes de lo
+     * real, y eso tiene que verse.
+     *
+     * NUNCA LANZA, como siguiente(). Si un paso no encuentra habil en el tope,
+     * devuelve 'sin_habil' con la fecha del tope y quien llama decide. Un plazo
+     * menor a uno tampoco lanza: no es un plazo -el deposito acreditaria el
+     * mismo dia, o antes-, asi que sale como 'sin_habil' sobre la fecha de
+     * partida. Lo valida antes quien lee el parametro; aca solo se garantiza
+     * que nunca salga una fecha plausible de un dato roto.
+     *
+     * @param string $fecha 'Y-m-d' de partida, que no cuenta
+     * @param int $n Cuantos dias habiles despues
+     * @param array $habiles Mapa 'Y-m-d' => bool
+     * @return array ['fecha' => 'Y-m-d', 'faltan' => ['Y-m'], 'sin_habil' => bool]
+     */
+    public static function habilesDespues($fecha, $n, $habiles) {
+        $cursor = substr((string) $fecha, 0, 10);
+        $n = intval($n);
+        $faltan = [];
+
+        if ($n < 1) {
+            return ['fecha' => $cursor, 'faltan' => [], 'sin_habil' => true];
+        }
+
+        for ($i = 0; $i < $n; $i++) {
+            $r = self::siguiente(date('Y-m-d', strtotime($cursor . ' +1 day')), $habiles);
+
+            foreach ($r['faltan'] as $mes) {
+                if (!in_array($mes, $faltan, true)) {
+                    $faltan[] = $mes;
+                }
+            }
+
+            $cursor = $r['fecha'];
+
+            if ($r['sin_habil']) {
+                return ['fecha' => $cursor, 'faltan' => $faltan, 'sin_habil' => true];
+            }
+        }
+
+        return ['fecha' => $cursor, 'faltan' => $faltan, 'sin_habil' => false];
+    }
+
+    /**
      * El aviso de calendario faltante, uno por mes.
      *
      * LA REDACCION ES UNA SOLA en todo el modulo: es el mismo hecho
