@@ -59,14 +59,35 @@ try {
 
     switch ($action) {
         case 'getEcheqsCartera':
-            // El eje sale de horizonte_dias y horizonte_meses, el mismo del
-            // tablero: los importes por columna vienen ya resueltos y el
-            // navegador no calcula ninguna fecha.
+            $hoy = date('Y-m-d');
+            $filas = $echeqs->getEcheqsCartera($hoy);
+
+            /* El historial de depositos va en la fila, para el tooltip de la
+               marca: quien deposito, cuando, y quien lo deshizo. Tambien el de
+               los cheques cuyo deposito se deshizo, que ya no tienen deposito
+               vigente pero tienen historia. */
+            $historial = $echeqs->getHistorialDepositos(array_column($filas, 'ID_SBA14'));
+
+            foreach ($filas as $i => $f) {
+                $filas[$i]['HISTORIAL_DEPOSITO'] = isset($historial[$f['ID_SBA14']])
+                    ? $historial[$f['ID_SBA14']] : [];
+            }
+
+            /* El eje sale de horizonte_dias y horizonte_meses, el mismo del
+               tablero: los importes por columna vienen ya resueltos y el
+               navegador no calcula ninguna fecha.
+
+               CADA FILA SE UBICA POR FECHA_EJE E IMPORTE_EJE, que resolvio
+               Echeqs::ubicarEnEje(): un cheque no depositado en la fecha del
+               cheque y por el bruto, uno depositado en su acreditacion y por
+               el neto, y uno que ya acredito en ninguna columna. Es la misma
+               regla que usa el proveedor, asi que la grilla y el tablero ponen
+               cada peso en la misma columna. */
             $payload = EjeVista::armar(
                 Horizonte::desdeParametros(new Parametros()),
-                $echeqs->getEcheqsCartera(),
-                'FECHA_PAGO',
-                'IMPORTE'
+                $filas,
+                'FECHA_EJE',
+                'IMPORTE_EJE'
             );
 
             /* LOS EXCLUIDOS VIAJAN EN 'filas' Y LOS ESCONDE LA PANTALLA, con un
@@ -80,8 +101,41 @@ try {
                que muestran las tres tarjetas. La resta la hace PHP: en este
                modulo el front no calcula. */
             $payload['excluidos'] = Echeqs::resumenExcluidos($payload['filas']);
+            $payload['depositados'] = Echeqs::resumenDepositos($payload['filas']);
+
+            /* LAS TRES TARJETAS SON LA CARTERA COBRABLE SIN DEPOSITADOS: lo
+               mismo que la fila "Echeqs en cartera" del tablero. Los
+               depositados van en su propia tarjeta, con bruto, retencion y
+               neto, que es la fila "Echeqs depositados". Las dos restas las
+               hace PHP con el mismo helper: el front no calcula. */
             $payload['totales_netos'] = Echeqs::totalesNetos(
-                $payload['totales'], $payload['excluidos']);
+                Echeqs::totalesNetos($payload['totales'], $payload['excluidos']),
+                $payload['depositados']);
+
+            /* Si se puede depositar, y si no, por que: sin el script, sin la
+               fila del tablero o con el plazo roto, el boton queda apagado
+               diciendolo. */
+            $payload['deposito'] = $echeqs->estadoParaDepositar();
+
+            $aviso = Echeqs::avisoAcreditadosSinRegistrar(
+                $payload['depositados']['acreditados']['cheques'],
+                $payload['depositados']['acreditados']['neto']);
+
+            if ($aviso !== null) {
+                $payload['warnings'][] = ['nivel' => 'warning', 'texto' => $aviso];
+            }
+
+            // EL HUECO ENTRE SCRIPTS: hay depositos vigentes y ninguna fila
+            // activa los muestra. Esa plata salio de "Echeqs en cartera" y no
+            // entro en ningun lado.
+            if (Echeqs::hayDepositos($filas) && !$payload['deposito']['fila_activa']
+                && $echeqs->depositoCreado()) {
+                $payload['warnings'][] = ['nivel' => 'danger', 'texto' => 'Hay cheques '
+                    . 'depositados y ninguna fila activa del tablero muestra la serie ECHEQS → '
+                    . 'DEPOSITADOS: su neto salió de "Echeqs en cartera" y no entra en ninguna '
+                    . 'fila. Corré ' . Echeqs::SCRIPT_FILA_DEPOSITADOS . ' o activá la fila en '
+                    . 'Parámetros → Cashflow.'];
+            }
 
             /* Si se puede excluir. La pantalla lo pregunta en vez de suponerlo:
                sin el script, el listado se lee igual y lo que no se puede es
@@ -227,6 +281,76 @@ try {
             echo json_encode([
                 'success' => true,
                 'message' => $mensaje,
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           EL DEPOSITO MASIVO
+
+           Del navegador llegan SOLO LOS IDS de los cheques -y una observacion
+           opcional-. El banco, el importe, la fecha de deposito, la
+           acreditacion, la tasa y el neto los resuelve Echeqs con las mismas
+           reglas en la vista previa y en el guardado. Ver el encabezado de la
+           seccion en Class/Echeqs.php.
+
+           LA VISTA PREVIA VA CON EL PERMISO DE EDICION, como las de las
+           importaciones: no escribe, pero es el primer paso de una escritura,
+           y la pantalla no la ofrece a quien no puede depositar.
+           ================================================================ */
+        case 'previsualizarDeposito':
+            $data = bodyJson();
+
+            if (!isset($data['ids']) || !is_array($data['ids'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            echo json_encode([
+                'success' => true,
+                'data' => $echeqs->previsualizarDeposito($data['ids'])
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'depositarCheques':
+            $data = bodyJson();
+
+            if (!isset($data['ids']) || !is_array($data['ids'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            /* Cualquier otro campo que llegue -una fecha, un importe, un neto-
+               se ignora a proposito: no hay parametro por donde pasarlo. */
+            $r = $echeqs->depositarCheques(
+                $data['ids'],
+                isset($data['observacion']) ? $data['observacion'] : null,
+                $usuario
+            );
+
+            $c = $r['calculo'];
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['depositados'] . ' cheque(s) de ' . $c['banco']
+                    . ' depositados. Acreditan el ' . date('d/m/Y', strtotime($c['fecha_acreditacion']))
+                    . ' por $ ' . number_format($c['neto'], 2, ',', '.') . ' netos.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'deshacerDepositos':
+            $data = bodyJson();
+
+            if (!isset($data['ids']) || !is_array($data['ids'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            $r = $echeqs->deshacerDepositos($data['ids'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['deshechos'] . ' depósito(s) deshechos. Los cheques vuelven a '
+                    . 'Echeqs en cartera en su fecha, si es de hoy en adelante. El depósito queda '
+                    . 'en el historial, dado de baja.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

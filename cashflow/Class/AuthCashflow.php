@@ -132,7 +132,10 @@ class AuthCashflow {
         ],
         'Echeqs' => [
             'marcarCheques' => [['echeqs', null]],
-            'excluirCheques' => [['echeqs', null]]
+            'excluirCheques' => [['echeqs', null]],
+            'previsualizarDeposito' => [['echeqs', null]],
+            'depositarCheques' => [['echeqs', null]],
+            'deshacerDepositos' => [['echeqs', null]]
         ],
         'Ingresos' => [
             'saveFechaCobroManual' => [['cobranzas_fr', null], ['cobranzas_may', null]],
