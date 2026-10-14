@@ -685,13 +685,15 @@ chequear('y explica la consecuencia', true, strpos($roto->warnings()[0], 'en cer
 // chequeo es el que lo va a frenar: ver el encabezado de EcheqsProvider.
 $meta = CashflowRegistry::meta('ECHEQS');
 
-/* TRES SERIES, Y LAS TRES SALEN DE CARTERA. La sub-pestana de venta cobrada
-   anticipada sigue sin aportar ninguna: si algun dia aparece una cuarta serie
-   alimentada por el pre-chequeado, este chequeo es el que lo va a frenar. Ver
-   el encabezado de EcheqsProvider. */
-chequear('el registro declara las tres series de cartera', 3, count($meta['series']));
+/* CUATRO SERIES, Y LAS CUATRO SALEN DE CARTERA: cobrable, excluida, depositada
+   y el total. La sub-pestana de venta cobrada anticipada sigue sin aportar
+   ninguna: si algun dia aparece una quinta serie alimentada por el
+   pre-chequeado, este chequeo es el que lo va a frenar. Ver el encabezado de
+   EcheqsProvider. */
+chequear('el registro declara las cuatro series de cartera', 4, count($meta['series']));
 chequear('la que usa la fila del tablero', true, isset($meta['series']['A_COBRAR']));
 chequear('la de los excluidos a mano', true, isset($meta['series']['A_COBRAR_EXCLUIDOS']));
+chequear('la de los depositados', true, isset($meta['series']['DEPOSITADOS']));
 chequear('y el universo', true, isset($meta['series']['A_COBRAR_TODO']));
 chequear('la pestana a la que enlaza el tablero', 'echeqs', $meta['tab']);
 chequear('y la moneda', 'ARS', $meta['moneda']);
@@ -701,14 +703,14 @@ chequear('y la moneda', 'ARS', $meta['moneda']);
    A_COBRAR como total -que es lo que era antes de la exclusion-, el validador
    dejaria activar la fila de excluidos al lado de la de cobrables creyendo que
    son total y parte. */
-chequear('el total declarado es el universo', ['A_COBRAR', 'A_COBRAR_EXCLUIDOS'],
+chequear('el total declarado es el universo', ['A_COBRAR', 'A_COBRAR_EXCLUIDOS', 'DEPOSITADOS'],
     $meta['componentes']['A_COBRAR_TODO']);
 chequear('y A_COBRAR no se declara total de nada', false,
     isset($meta['componentes']['A_COBRAR']));
 
 /* UN SOLO CORTE, asi que NO se declaran 'particiones'. Sin declararlas el
    validador toma todas las partes como el mismo corte, que es exactamente lo
-   que son: las dos mitades pueden convivir en el tablero. Declarar un corte
+   que son: las tres partes pueden convivir en el tablero. Declarar un corte
    aca seria copiar el caso de Proveedores Locales, que tiene tres. */
 chequear('no declara particiones: hay un solo corte', false, isset($meta['particiones']));
 
@@ -839,7 +841,7 @@ chequear('y la serie de excluidos existe igual, en cero',
    el icono de que su modulo no devolvio nada- en vez de mostrar un cero limpio,
    que es lo cierto: no hay nada excluido. Es el criterio de
    ProveedoresProvider::repartir(). */
-chequear('las tres series existen siempre', 3, count($s));
+chequear('las cuatro series existen siempre', 4, count($s));
 
 // TODO EXCLUIDO: la fila del tablero va en cero y el universo no se mueve.
 $s = EcheqsProvider::repartir($h, [carteraTotal('2026-09-10', 1000.0, true)]);

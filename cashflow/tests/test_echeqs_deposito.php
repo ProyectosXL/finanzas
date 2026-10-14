@@ -489,3 +489,157 @@ chequear('sin el script, el boton Depositar dice que script falta', true,
     strpos($srcEcheqs, "'motivo' => 'Para depositar cheques hace falta correr '\n                        . self::SCRIPT_DEPOSITO") !== false);
 chequear('sin la fila del tablero, tambien', true,
     strpos($srcEcheqs, "WHERE ORIGEN_PROVIDER = 'ECHEQS' AND ORIGEN_SERIE = 'DEPOSITADOS' AND ACTIVO = 1") !== false);
+
+/* ================================================================
+   El proveedor: la particion de la cartera
+   ================================================================ */
+seccion('el proveedor: los depositados salen de A_COBRAR y entran en DEPOSITADOS');
+
+require_once __DIR__ . '/../Class/Providers/EcheqsProvider.php';
+require_once __DIR__ . '/../Class/CashflowRegistry.php';
+require_once __DIR__ . '/../Class/CashflowEstructura.php';
+
+/** Eje del 13/10/2026: 28 dias y 12 meses */
+$hDep = new Horizonte(28, 12, [], new DateTime('2026-10-13'));
+
+/** Una fila agregada de getEcheqsCarteraTotales(), armada a mano */
+function itemCartera($fecha, $importe, $extra = []) {
+    return array_merge(['FECHA_PAGO' => $fecha, 'EXCLUIDO' => false, 'IMPORTE' => $importe,
+                        'FECHA_ACREDITACION' => null, 'NETO' => null, 'BRUTO_DEPOSITO' => null,
+                        'CHEQUES' => 1], $extra);
+}
+
+/** Un deposito agregado: bruto, neto y acreditacion */
+function itemDeposito($fechaCheque, $bruto, $neto, $acredita, $cheques = 1) {
+    return itemCartera($fechaCheque, $bruto, ['FECHA_ACREDITACION' => $acredita, 'NETO' => $neto,
+                                              'BRUTO_DEPOSITO' => $bruto, 'CHEQUES' => $cheques]);
+}
+
+/** El total de una serie, con lo que quedo fuera del eje */
+function totalSerieDep($s) {
+    return array_sum($s['dias']) + array_sum($s['meses']) + $s['fuera_horizonte'] + $s['sin_fecha'];
+}
+
+$items = [
+    itemCartera('2026-10-20', 1000.0),                              // cobrable
+    itemCartera('2026-10-22', 400.0, ['EXCLUIDO' => true]),         // excluido
+    itemDeposito('2026-10-30', 2000.0, 1938.0, '2026-10-15'),       // se proyecta
+    itemDeposito('2026-10-01', 500.0, 484.5, '2026-10-16'),         // cheque vencido, se proyecta
+    itemDeposito('2026-10-25', 300.0, 290.7, '2026-10-13'),         // acredita hoy: no
+    itemDeposito('2026-10-02', 700.0, 678.3, '2026-10-09', 2)       // ya acredito y sigue en cartera
+];
+
+$s = EcheqsProvider::repartir($hDep, $items);
+
+chequear('DEPOSITADOS suma netos', 1938.0 + 484.5, totalSerieDep($s['DEPOSITADOS']));
+chequear('por fecha de ACREDITACION', [1938.0, 484.5],
+    [$s['DEPOSITADOS']['dias']['2026-10-15'], $s['DEPOSITADOS']['dias']['2026-10-16']]);
+chequear('y no en la fecha del cheque', 0.0, $s['DEPOSITADOS']['dias']['2026-10-30']);
+chequear('A_COBRAR no incluye ningun depositado', 1000.0, totalSerieDep($s['A_COBRAR']));
+chequear('los excluidos quedan donde estaban', 400.0, totalSerieDep($s['A_COBRAR_EXCLUIDOS']));
+chequear('un deposito que acredita hoy no esta en ninguna serie', 0.0,
+    $s['A_COBRAR_TODO']['dias']['2026-10-13'] + $s['DEPOSITADOS']['dias']['2026-10-13']);
+chequear('los ya acreditados se cuentan para el aviso: hoy y antes', [3, 290.7 + 678.3],
+    [$s['DEPOSITADOS']['acreditados_cheques'], $s['DEPOSITADOS']['acreditados_neto']]);
+
+/* EL INVARIANTE: cada cheque en una sola parte, y las partes cierran contra el
+   total. Columna por columna, no solo en el total: un deposito que moviera el
+   importe de fecha daria el mismo total y un cuadro distinto. */
+$cierra = true;
+
+foreach (['dias', 'meses'] as $rama) {
+    foreach ($s['A_COBRAR_TODO'][$rama] as $k => $v) {
+        if (abs($v - ($s['A_COBRAR'][$rama][$k] + $s['A_COBRAR_EXCLUIDOS'][$rama][$k]
+                + $s['DEPOSITADOS'][$rama][$k])) > 0.001) {
+            $cierra = false;
+        }
+    }
+}
+
+chequear('A_COBRAR + A_COBRAR_EXCLUIDOS + DEPOSITADOS = A_COBRAR_TODO, columna por columna', true, $cierra);
+chequear('la retencion es el bruto menos el neto de los que se proyectan', 2500.0 - 2422.5,
+    $s['DEPOSITADOS']['retencion']);
+chequear('y el universo en bruto = A_COBRAR_TODO + retencion',
+    1000.0 + 400.0 + 2000.0 + 500.0,
+    totalSerieDep($s['A_COBRAR_TODO']) + $s['DEPOSITADOS']['retencion']);
+
+$sinNada = EcheqsProvider::repartir($hDep, [itemCartera('2026-10-20', 1000.0)]);
+chequear('sin depositos, A_COBRAR vale lo mismo que antes y DEPOSITADOS va en cero',
+    [1000.0, 0.0], [floatval(totalSerieDep($sinNada['A_COBRAR'])), floatval(totalSerieDep($sinNada['DEPOSITADOS']))]);
+chequear('las cuatro series existen siempre', 4, count($sinNada));
+
+$lejos = EcheqsProvider::repartir($hDep, [itemDeposito('2026-10-20', 100.0, 96.9, '2030-01-02')]);
+chequear('una acreditacion fuera del eje se informa en la fila de depositados', 96.9,
+    $lejos['DEPOSITADOS']['fuera_horizonte']);
+chequear('y en el total', 96.9, $lejos['A_COBRAR_TODO']['fuera_horizonte']);
+
+chequear('un depositado que se proyecta va al total y a DEPOSITADOS', ['A_COBRAR_TODO', 'DEPOSITADOS'],
+    EcheqsProvider::seriesDeItem(itemDeposito('2026-10-20', 1.0, 1.0, '2026-10-15'), '2026-10-13'));
+chequear('uno que ya acredito no va a ninguna', [],
+    EcheqsProvider::seriesDeItem(itemDeposito('2026-10-20', 1.0, 1.0, '2026-10-13'), '2026-10-13'));
+
+$srcProv = file_get_contents(__DIR__ . '/../Class/Providers/EcheqsProvider.php');
+chequear('el proveedor avisa los acreditados sin registrar como atencion', true,
+    strpos($srcProv, "\$this->avisar(\$aviso, Aviso::WARNING);") !== false);
+chequear('y decide con la misma regla que la pestana', true,
+    strpos($srcProv, 'return Echeqs::estadoDeposito(') !== false);
+
+/* ================================================================
+   El registro y el validador
+   ================================================================ */
+seccion('la fila nueva y A_COBRAR juntas no cuentan dos veces');
+
+// Sin tercer argumento, el validador usa el registro real.
+$PROVS_REALES = null;
+$metaE = CashflowRegistry::meta('ECHEQS');
+
+chequear('el registro ofrece DEPOSITADOS', true, isset($metaE['series']['DEPOSITADOS']));
+chequear('como parte del total, al lado de las otras dos',
+    ['A_COBRAR', 'A_COBRAR_EXCLUIDOS', 'DEPOSITADOS'], $metaE['componentes']['A_COBRAR_TODO']);
+chequear('ni el bruto ni la retencion son series: no se pueden usar en una fila', [false, false],
+    [isset($metaE['series']['DEPOSITADOS_BRUTO']), isset($metaE['series']['DEPOSITADOS_RETENCION'])]);
+
+$secDisp = [['CODIGO' => 'DISPONIBILIDADES', 'NOMBRE' => 'Disponibilidades', 'ROL' => 'MOVIMIENTO',
+             'ID_PADRE' => null, 'ORDEN' => 10, 'ACTIVO' => 1]];
+
+/** Una fila de la estructura apuntada a ECHEQS */
+function filaEcheqs($id, $codigo, $serie, $orden) {
+    return ['ID' => $id, 'CODIGO' => $codigo, 'NOMBRE' => $codigo, 'SECCION' => 'DISPONIBILIDADES',
+            'TIPO' => 'INGRESO', 'COMPUTA' => 1, 'ORIGEN_PROVIDER' => 'ECHEQS',
+            'ORIGEN_SERIE' => $serie, 'ORDEN' => $orden, 'ACTIVO' => 1];
+}
+
+$juntas = CashflowEstructura::validar($secDisp, [
+    filaEcheqs(1, 'ECHEQS', 'A_COBRAR', 20),
+    filaEcheqs(2, 'ECHEQS_DEPOSITADOS', 'DEPOSITADOS', 25)
+], $PROVS_REALES);
+
+$erroresEcheqs = array_values(array_filter($juntas['errores'], function ($e) {
+    return mb_stripos($e, 'Echeqs') !== false;
+}));
+
+chequear('A_COBRAR y DEPOSITADOS activas juntas: el validador las acepta', [], $erroresEcheqs);
+
+$conTotal = CashflowEstructura::validar($secDisp, [
+    filaEcheqs(1, 'ECHEQS_TODO', 'A_COBRAR_TODO', 20),
+    filaEcheqs(2, 'ECHEQS_DEPOSITADOS', 'DEPOSITADOS', 25)
+], $PROVS_REALES);
+
+chequear('el total al lado de DEPOSITADOS se rechaza: contaria dos veces', true,
+    count(array_filter($conTotal['errores'], function ($e) {
+        return mb_stripos($e, 'se contaría dos veces') !== false;
+    })) > 0);
+
+seccion('el script de la fila');
+
+$SQL_FILA = str_replace("\r\n", "\n",
+    file_get_contents(__DIR__ . '/../sql/cashflow_estructura_echeqs_depositados.sql'));
+
+chequear('crea ECHEQS_DEPOSITADOS en DISPONIBILIDADES, orden 25, ingreso que computa', 1,
+    substr_count($SQL_FILA, "('ECHEQS_DEPOSITADOS', 'Echeqs depositados', 'DISPONIBILIDADES', 'INGRESO', 1,\n"
+        . "            'ECHEQS', 'DEPOSITADOS', 25)"));
+chequear('con MERGE sobre CODIGO', 1, substr_count($SQL_FILA, 'ON T.CODIGO = S.CODIGO'));
+chequear('y si ya existe no pisa el nombre ni el orden', true,
+    preg_match('/WHEN MATCHED THEN.*?UPDATE SET ORIGEN_PROVIDER = S\.ORIGEN_PROVIDER,\s+ORIGEN_SERIE = S\.ORIGEN_SERIE,\s+FECHA_MODIF = GETDATE\(\)\s+WHEN NOT MATCHED/s', $SQL_FILA) === 1);
+chequear('sin la seccion no inserta una fila huerfana', true,
+    strpos($SQL_FILA, "IF NOT EXISTS (SELECT 1 FROM dbo.RO_T_CASHFLOW_CONF_SECCION WHERE CODIGO = 'DISPONIBILIDADES')") !== false);
