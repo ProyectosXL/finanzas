@@ -31,15 +31,20 @@ require_once __DIR__ . '/Aviso.php';
  * Una cuenta que llega SIN moneda no se toma: asumir pesos seria inventar el
  * dato, y el aviso es critico porque es plata que existe y no se suma.
  *
- * EL IMPORTE ES EL SALDO CONTABLE, EL ULTIMO NO NULO
- * --------------------------------------------------
- * Los otros siete saldos de la tabla no se muestran ni se usan. "El ultimo" se
- * ordena por FECHA_OPERACION, despues por CREATED_AT y despues por ID: nada
- * impide que el proceso deje dos registros del mismo dia, y sin desempate la
- * cuenta mostraria uno u otro segun el orden en que la base entregue las
- * filas. Un registro nuevo con el contable en NULL NO tapa al anterior: se
- * toma el ultimo no nulo y se avisa. Una cuenta que nunca trajo contable se
- * muestra "sin dato" -no cero- y el aviso es critico.
+ * EL IMPORTE ES EL SALDO OPERATIVO ACTUAL, EL ULTIMO NO NULO
+ * ----------------------------------------------------------
+ * Es el saldo que se verifico, cuenta por cuenta, contra el portal de
+ * Interbanking como el que vale para el disponible. La columna se define en un solo lugar,
+ * COLUMNA_SALDO, y los otros saldos de la tabla -el contable incluido- no se
+ * muestran ni se usan. "El ultimo" se ordena por
+ * FECHA_OPERACION, despues por CREATED_AT y despues por ID: el operativo
+ * cambia durante el dia, asi que de dos registros del mismo dia el mas
+ * reciente es justamente el que vale, y sin desempate la cuenta mostraria uno
+ * u otro segun el orden en que la base entregue las filas. Un registro nuevo
+ * con el operativo en NULL NO tapa al anterior: se toma el ultimo no nulo y
+ * se avisa. Una cuenta que nunca trajo operativo se muestra "sin dato" -no
+ * cero- y el aviso es critico. NUNCA SE REEMPLAZA CON EL CONTABLE aunque el
+ * registro lo traiga: serian dos saldos distintos sumados como si fueran uno.
  *
  * LOS CRUCES SE HACEN EN PHP
  * --------------------------
@@ -69,6 +74,25 @@ class SaldosInterbanking {
 
     /** Respaldo manual de una cuenta que Interbanking no trae. Mismo script. */
     const TABLA_MANUAL = 'RO_T_CASHFLOW_SALDOS_BANCO_MANUAL';
+
+    /**
+     * La columna de TABLA_BI con el importe de cada cuenta. Es la unica
+     * definicion: la consulta, elegirRegistro(), fila() y los avisos la leen
+     * de aca, y cambiar de saldo no puede dejar a uno de ellos mirando otro.
+     */
+    const COLUMNA_SALDO = 'SALDO_OPERATIVO_ACTUAL';
+
+    /**
+     * La columna de TABLA_MANUAL con el importe del respaldo. Se llama
+     * SALDO_CONTABLE porque nacio cuando el importe de BI era el contable;
+     * hoy guarda el saldo OPERATIVO cargado a mano, y los respaldos de antes
+     * se leen igual. No se renombra: seria tocar la base sin que el usuario
+     * gane nada.
+     */
+    const COLUMNA_RESPALDO = 'SALDO_CONTABLE';
+
+    /** Como se nombra COLUMNA_SALDO en los avisos */
+    const NOMBRE_SALDO = 'saldo operativo';
 
     /** Las cuentas ya marcadas como vistas: la que no esta, es nueva. Mismo script. */
     const TABLA_VISTAS = 'RO_T_CASHFLOW_SALDOS_BANCO_CUENTA';
@@ -163,15 +187,18 @@ class SaldosInterbanking {
      * Elige, entre los registros de UNA cuenta, el que se usa.
      *
      * La consulta ya trae como maximo dos -el mas nuevo de todos y el mas
-     * nuevo con contable-, pero la regla se vuelve a aplicar aca sobre lo que
+     * nuevo con operativo-, pero la regla se vuelve a aplicar aca sobre lo que
      * llegue, para que la prueba la fije sin base y para que una consulta que
      * algun dia traiga mas registros no cambie el resultado.
      *
+     * Un registro sin COLUMNA_SALDO cuenta como nulo aunque traiga otro saldo:
+     * el contable no reemplaza al operativo.
+     *
      * @param array $registros Filas con ID, FECHA_OPERACION 'Y-m-d',
-     *        CREATED_AT 'Y-m-d H:i:s'|null y SALDO_CONTABLE float|null
+     *        CREATED_AT 'Y-m-d H:i:s'|null y COLUMNA_SALDO float|null
      * @return array ['usado' => registro|null, 'mas_nuevo' => registro|null,
      *                'tapado' => bool] 'tapado' dice que el mas nuevo vino sin
-     *                contable y se uso uno anterior
+     *                operativo y se uso uno anterior
      */
     public static function elegirRegistro($registros) {
         $masNuevo = null;
@@ -182,7 +209,8 @@ class SaldosInterbanking {
                 $masNuevo = $r;
             }
 
-            if ($r['SALDO_CONTABLE'] !== null && ($usado === null || self::masNuevo($r, $usado))) {
+            // isset es false para el null: un cero si es un dato y pasa.
+            if (isset($r[self::COLUMNA_SALDO]) && ($usado === null || self::masNuevo($r, $usado))) {
                 $usado = $r;
             }
         }
@@ -341,7 +369,7 @@ class SaldosInterbanking {
      * el dato de Interbanking de hoy por ser mas nuevo, y lo taparia.
      *
      * EL IMPORTE ES OBLIGATORIO y puede ser negativo -una cuenta en descubierto
-     * tiene saldo contable negativo-, pero no vacio: un vacio tomado como cero
+     * tiene saldo operativo negativo-, pero no vacio: un vacio tomado como cero
      * diria "esta cuenta no tiene plata" sin que nadie lo haya dicho.
      *
      * @param array $d ['nro_banco', 'nro_cuenta', 'moneda', 'fecha_saldo', 'saldo', 'observacion']
@@ -560,10 +588,14 @@ class SaldosInterbanking {
      * manual.
      *
      * GANA LA FECHA MAS NUEVA, Y A IGUAL FECHA GANA INTERBANKING, que es la
-     * fuente oficial. Asi, cuando BI se arregla y vuelve a traer el contable,
+     * fuente oficial. Asi, cuando BI se arregla y vuelve a traer el operativo,
      * manda solo, sin que nadie tenga que quitar el respaldo. Es la regla
      * inversa a la caja de los locales -alla gana el manual a igual fecha-
      * porque aca el manual no corrige un dato, tapa uno que falta.
+     *
+     * Compara solo fechas, no importes: el registro de Interbanking ya llega
+     * elegido por elegirRegistro(), que es el que mira COLUMNA_SALDO, asi que
+     * "trae un saldo operativo de esa fecha" ya esta resuelto.
      *
      * @param array|null $interbanking El registro elegido por elegirRegistro()
      * @param array|null $respaldo El respaldo vigente, con FECHA_SALDO
@@ -678,19 +710,19 @@ class SaldosInterbanking {
 
             if ($fuente === null && $leido) {
                 $avisos[] = Aviso::nuevo(Aviso::DANGER, $nombre . ': Interbanking nunca trajo su '
-                    . 'saldo contable y no tiene carga manual de respaldo, así que no suma al '
+                    . self::NOMBRE_SALDO . ' y no tiene carga manual de respaldo, así que no suma al '
                     . 'disponible. Cargalo desde Saldos › Saldos.', self::SECCION);
             } elseif ($fuente === self::ORIGEN_RESPALDO && $leido) {
                 // Se acusa la falla de la integracion mientras se usa el
                 // respaldo: es atencion, porque la plata esta, pero alguien
                 // tiene que ver por que BI no la trae.
-                $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Interbanking no trae el saldo contable '
-                    . 'de ' . $nombre . '; se usa la carga manual del '
+                $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Interbanking no trae el '
+                    . self::NOMBRE_SALDO . ' de ' . $nombre . '; se usa la carga manual del '
                     . self::diaMes($respaldo['FECHA_SALDO']) . '.', self::SECCION);
             } elseif ($fuente === self::ORIGEN_INTERBANKING && $eleccion['tapado']) {
                 $avisos[] = Aviso::nuevo(Aviso::WARNING, $nombre . ': el registro del '
-                    . self::diaMes($eleccion['mas_nuevo']['FECHA_OPERACION']) . ' vino sin saldo '
-                    . 'contable; se muestra el del '
+                    . self::diaMes($eleccion['mas_nuevo']['FECHA_OPERACION']) . ' vino sin '
+                    . self::NOMBRE_SALDO . '; se muestra el del '
                     . self::diaMes($eleccion['usado']['FECHA_OPERACION']) . '.', self::SECCION);
             }
 
@@ -702,7 +734,7 @@ class SaldosInterbanking {
             if ($fila['nueva']) {
                 $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Cuenta nueva en Interbanking: ' . $nombre
                     . ' (' . ($fila['cargada'] ? self::plataEn($fila['saldo'], $fila['moneda'])
-                        : 'sin saldo contable') . '); revisala en Parámetros › Saldos.',
+                        : 'sin ' . self::NOMBRE_SALDO) . '); revisala en Parámetros › Saldos.',
                     self::SECCION);
             }
 
@@ -862,17 +894,21 @@ class SaldosInterbanking {
      * 'respaldo' es el vigente aunque no se este usando: el dialogo lo muestra
      * para reemplazarlo o quitarlo. 'interbanking' es lo que trajo BI, para
      * el tooltip cuando manda el respaldo.
+     *
+     * Los dos importes son el mismo saldo, el operativo: el de BI sale de
+     * COLUMNA_SALDO y el del respaldo, de COLUMNA_RESPALDO, que es como se
+     * llama la columna donde se guarda el que se carga a mano.
      */
     private static function fila($clave, $c, $banco, $eleccion, $respaldo, $fuente, $hoy) {
         $ib = $eleccion['usado'];
 
         if ($fuente === self::ORIGEN_RESPALDO) {
-            $saldo = floatval($respaldo['SALDO_CONTABLE']);
+            $saldo = floatval($respaldo[self::COLUMNA_RESPALDO]);
             $fecha = $respaldo['FECHA_SALDO'];
             $cargadoEl = $respaldo['FECHA_ALTA'];
             $cargadoPor = $respaldo['USUARIO_ALTA'];
         } elseif ($fuente === self::ORIGEN_INTERBANKING) {
-            $saldo = floatval($ib['SALDO_CONTABLE']);
+            $saldo = floatval($ib[self::COLUMNA_SALDO]);
             $fecha = $ib['FECHA_OPERACION'];
             $cargadoEl = $ib['CREATED_AT'];
             $cargadoPor = null;
@@ -905,11 +941,11 @@ class SaldosInterbanking {
             'ultimo_registro' => ($eleccion['mas_nuevo'] === null)
                 ? null : $eleccion['mas_nuevo']['FECHA_OPERACION'],
             'interbanking' => ($ib === null) ? null
-                : ['fecha' => $ib['FECHA_OPERACION'], 'saldo' => floatval($ib['SALDO_CONTABLE'])],
+                : ['fecha' => $ib['FECHA_OPERACION'], 'saldo' => floatval($ib[self::COLUMNA_SALDO])],
             'respaldo' => ($respaldo === null) ? null : [
                 'id' => intval($respaldo['ID']),
                 'fecha_saldo' => $respaldo['FECHA_SALDO'],
-                'saldo' => floatval($respaldo['SALDO_CONTABLE']),
+                'saldo' => floatval($respaldo[self::COLUMNA_RESPALDO]),
                 'observacion' => $respaldo['OBSERVACION'],
                 'usuario' => $respaldo['USUARIO_ALTA'],
                 'fecha_alta' => $respaldo['FECHA_ALTA']
@@ -1121,8 +1157,9 @@ class SaldosInterbanking {
     }
 
     /**
-     * Los registros candidatos de cada cuenta: el mas nuevo de todos y el mas
-     * nuevo con saldo contable. Como maximo dos por cuenta.
+     * La consulta de leerUltimos(): los registros candidatos de cada cuenta,
+     * el mas nuevo de todos y el mas nuevo con COLUMNA_SALDO. Como maximo dos
+     * por cuenta.
      *
      * ES LA UNICA CONSULTA CON LOGICA, Y VA CONTRA LA TABLA DE BI SOLA. Traer
      * todo el historico a PHP para quedarse con dos filas por cuenta seria
@@ -1130,8 +1167,42 @@ class SaldosInterbanking {
      * del tablero. El ROW_NUMBER() no cruza nada: ordena dentro de una tabla.
      * La eleccion final la vuelve a hacer elegirRegistro().
      *
-     * El segundo ROW_NUMBER() particiona ademas por "tiene contable o no", asi
-     * que RN_GRUPO = 1 con contable es el mas nuevo no nulo de la cuenta.
+     * El segundo ROW_NUMBER() particiona ademas por "tiene operativo o no",
+     * asi que RN_GRUPO = 1 con operativo es el mas nuevo no nulo de la cuenta.
+     * Solo se trae COLUMNA_SALDO: sin el contable en la fila, nadie puede
+     * usarlo de reemplazo por error.
+     *
+     * Es un helper puro, aparte de la lectura, para que la prueba mire el SQL
+     * ya armado con la columna y no el codigo que lo arma.
+     *
+     * @return string
+     */
+    public static function consultaUltimos() {
+        $col = self::COLUMNA_SALDO;
+
+        return "WITH R AS (
+                    SELECT ID, FECHA_OPERACION, NRO_BANCO, NRO_CUENTA, TIPO_CUENTA, MONEDA,
+                           " . $col . ", CREATED_AT,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY NRO_BANCO, NRO_CUENTA, MONEDA
+                               ORDER BY FECHA_OPERACION DESC, CREATED_AT DESC, ID DESC
+                           ) AS RN_TODOS,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY NRO_BANCO, NRO_CUENTA, MONEDA,
+                                            CASE WHEN " . $col . " IS NULL THEN 0 ELSE 1 END
+                               ORDER BY FECHA_OPERACION DESC, CREATED_AT DESC, ID DESC
+                           ) AS RN_GRUPO
+                    FROM dbo." . self::TABLA_BI . "
+                )
+                SELECT ID, FECHA_OPERACION, NRO_BANCO, NRO_CUENTA, TIPO_CUENTA, MONEDA,
+                       " . $col . ", CREATED_AT
+                FROM R
+                WHERE RN_TODOS = 1 OR (" . $col . " IS NOT NULL AND RN_GRUPO = 1)";
+    }
+
+    /**
+     * Los registros candidatos de cada cuenta, con la consulta de
+     * consultaUltimos().
      *
      * @return array
      */
@@ -1151,26 +1222,7 @@ class SaldosInterbanking {
             throw new Exception('no existe la tabla ' . self::TABLA_BI);
         }
 
-        $sql = "WITH R AS (
-                    SELECT ID, FECHA_OPERACION, NRO_BANCO, NRO_CUENTA, TIPO_CUENTA, MONEDA,
-                           SALDO_CONTABLE, CREATED_AT,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY NRO_BANCO, NRO_CUENTA, MONEDA
-                               ORDER BY FECHA_OPERACION DESC, CREATED_AT DESC, ID DESC
-                           ) AS RN_TODOS,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY NRO_BANCO, NRO_CUENTA, MONEDA,
-                                            CASE WHEN SALDO_CONTABLE IS NULL THEN 0 ELSE 1 END
-                               ORDER BY FECHA_OPERACION DESC, CREATED_AT DESC, ID DESC
-                           ) AS RN_GRUPO
-                    FROM dbo." . self::TABLA_BI . "
-                )
-                SELECT ID, FECHA_OPERACION, NRO_BANCO, NRO_CUENTA, TIPO_CUENTA, MONEDA,
-                       SALDO_CONTABLE, CREATED_AT
-                FROM R
-                WHERE RN_TODOS = 1 OR (SALDO_CONTABLE IS NOT NULL AND RN_GRUPO = 1)";
-
-        $stmt = sqlsrv_query($cid, $sql);
+        $stmt = sqlsrv_query($cid, self::consultaUltimos());
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al leer los saldos de Interbanking'));
@@ -1186,8 +1238,8 @@ class SaldosInterbanking {
                 'NRO_CUENTA' => trim((string) $row['NRO_CUENTA']),
                 'TIPO_CUENTA' => $row['TIPO_CUENTA'] === null ? null : trim($row['TIPO_CUENTA']),
                 'MONEDA' => $row['MONEDA'] === null ? null : trim($row['MONEDA']),
-                'SALDO_CONTABLE' => $row['SALDO_CONTABLE'] === null
-                    ? null : floatval($row['SALDO_CONTABLE']),
+                self::COLUMNA_SALDO => $row[self::COLUMNA_SALDO] === null
+                    ? null : floatval($row[self::COLUMNA_SALDO]),
                 'CREATED_AT' => self::fechaHora($row['CREATED_AT'])
             ];
         }
@@ -1242,8 +1294,8 @@ class SaldosInterbanking {
         }
 
         $stmt = sqlsrv_query($this->conectar('central'),
-            "SELECT ID, NRO_BANCO, NRO_CUENTA, MONEDA, FECHA_SALDO, SALDO_CONTABLE, OBSERVACION,
-                    ID_REEMPLAZA, USUARIO_ALTA, FECHA_ALTA
+            "SELECT ID, NRO_BANCO, NRO_CUENTA, MONEDA, FECHA_SALDO, " . self::COLUMNA_RESPALDO . ",
+                    OBSERVACION, ID_REEMPLAZA, USUARIO_ALTA, FECHA_ALTA
              FROM dbo." . self::TABLA_MANUAL . "
              WHERE VIGENTE = 1");
 
@@ -1256,7 +1308,7 @@ class SaldosInterbanking {
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $row['ID'] = intval($row['ID']);
             $row['FECHA_SALDO'] = Horizonte::normalizarFecha($row['FECHA_SALDO']);
-            $row['SALDO_CONTABLE'] = floatval($row['SALDO_CONTABLE']);
+            $row[self::COLUMNA_RESPALDO] = floatval($row[self::COLUMNA_RESPALDO]);
             $row['FECHA_ALTA'] = self::fechaHora($row['FECHA_ALTA']);
             $v[self::claveCuenta($row['NRO_BANCO'], $row['NRO_CUENTA'], $row['MONEDA'])] = $row;
         }
@@ -1613,7 +1665,7 @@ class SaldosInterbanking {
 
             $stmt = sqlsrv_query($cid,
                 "INSERT INTO dbo." . self::TABLA_MANUAL . "
-                    (NRO_BANCO, NRO_CUENTA, MONEDA, FECHA_SALDO, SALDO_CONTABLE, OBSERVACION,
+                    (NRO_BANCO, NRO_CUENTA, MONEDA, FECHA_SALDO, " . self::COLUMNA_RESPALDO . ", OBSERVACION,
                      VIGENTE, ID_REEMPLAZA, USUARIO_ALTA, USUARIO_MODIF)
                  OUTPUT INSERTED.ID
                  VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
