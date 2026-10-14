@@ -440,7 +440,9 @@ chequear('los depositados se leen aunque su fecha haya pasado', true,
 chequear('la agregada usa el mismo universo', true,
     strpos(Echeqs::sqlCarteraTotales(true, true), '(s.FECHA_CHEQ >= CAST(GETDATE() AS DATE) OR d.ID IS NOT NULL)') !== false);
 
-$sinScript = Echeqs::sqlCartera(true, false);
+// Con core.autocrlf la copia de trabajo de Echeqs.php puede estar en CRLF, y
+// los saltos del SQL salen como \r\n: se normalizan antes de buscar.
+$sinScript = str_replace("\r\n", "\n", Echeqs::sqlCartera(true, false));
 chequear('sin el script, la consulta es la de antes: sin union ni OR', [false, true], [
     strpos($sinScript, 'ECHEQ_DEPOSITO') !== false,
     strpos($sinScript, "WHERE s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)\n                  AND s.ESTADO = ?") !== false
