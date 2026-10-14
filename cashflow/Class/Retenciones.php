@@ -174,6 +174,51 @@ class Retenciones {
     }
 
     /**
+     * Lo que se retiene de un importe POR CONCEPTO, y el neto que queda.
+     *
+     *     retencion de cada concepto = base * alicuota, redondeada a 2 decimales
+     *     neto = base - la suma de las retenciones
+     *
+     * NO ES importeNeto() CON OTRO NOMBRE, y la diferencia es a proposito.
+     * importeNeto() aplica la TASA TOTAL y redondea el neto a los 4 decimales
+     * de la columna donde Cob. Electronicos y Echeqs lo guardan: alla no hay
+     * un comprobante por concepto, hay una acreditacion. Una orden de pago, en
+     * cambio, emite UN CERTIFICADO POR IMPUESTO, cada uno en pesos y centavos,
+     * y lo que sale de la caja es la factura menos esos certificados. Redondear
+     * la tasa total daria un neto que difiere en un centavo del que paga
+     * Tesoreria, y la planilla de pagos se compara contra este numero.
+     *
+     * Por eso el neto se arma RESTANDO las retenciones ya redondeadas y no
+     * redondeando el producto: asi neto + retenciones = base, al centavo.
+     *
+     * importeNeto() no cambia: lo siguen usando los dos modulos de antes.
+     *
+     * @param float $base
+     * @param array $alicuotas Mapa concepto => alicuota (fraccion)
+     * @return array ['retenciones' => [concepto => float], 'total' => float,
+     *         'neto' => float]
+     */
+    public static function retencionesPorConcepto($base, $alicuotas) {
+        $base = round(floatval($base), 2);
+        $retenciones = [];
+        $total = 0.0;
+
+        foreach (is_array($alicuotas) ? $alicuotas : [] as $concepto => $alicuota) {
+            $r = round($base * floatval($alicuota), 2);
+            $retenciones[$concepto] = $r;
+            $total += $r;
+        }
+
+        $total = round($total, 2);
+
+        return [
+            'retenciones' => $retenciones,
+            'total' => $total,
+            'neto' => round($base - $total, 2)
+        ];
+    }
+
+    /**
      * El desglose de una tasa en una linea: "IIBB 2,5% + SICREB 0,6%".
      *
      * Es lo que se guarda junto a la tasa de un deposito y lo que muestran los

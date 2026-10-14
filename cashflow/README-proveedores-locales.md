@@ -43,7 +43,10 @@ Contra `central`, en cualquier momento:
 -- 7. sql/cashflow_prov_locales_fuente_fecha.sql      (de dónde salió cada fecha de pago)
 -- 8. sql/cashflow_prov_exclusion_modulo.sql          (excluir un proveedor entero del módulo)
 -- 9. sql/cashflow_prov_locales_pago_medio.sql        (un comprobante pagado con dos medios)
+-- 10. sql/cashflow_prov_locales_retenciones.sql      (las retenciones: impuestos y alícuotas)
 ```
+
+El décimo crea las tres tablas de las retenciones —los impuestos, sus alícuotas generales y las de cada proveedor— y siembra **IIBB** y **GANANCIAS** "a todos" y **SUSS** "solo a los asignados", **sin alícuotas**: **el día que se corre el tablero no se mueve**. No depende de ningún otro. Es reejecutable: la semilla es un `MERGE` sobre el código que sólo inserta lo que falta, así que un impuesto renombrado, con otro alcance o dado de baja no se pisa ni se reactiva. **Sin él** las facturas se proyectan por el total, como antes, y la pestaña avisa qué script falta. Después de correrlo, **hasta que se carguen las alícuotas generales** en *Parámetros › Prov. Locales* tampoco se retiene nada, y la pestaña avisa cuántos comprobantes del cronograma están sin retención por eso. Ver *Las retenciones*.
 
 El noveno crea `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO`, vacía: **el día que se corre el tablero no se mueve**. Va después del primero —necesita la tabla de pagos y aborta si no está— y no depende de ningún otro. **Sin él** un comprobante no se puede pagar con dos medios: la importación rechaza esas filas nombrando el script, todo lo demás funciona igual, y la pestaña avisa. Ver *Un comprobante pagado con dos medios*.
 
@@ -277,6 +280,45 @@ La columna *Fecha de pago* muestra **la fecha del cronograma** con la etiqueta *
 El input funciona igual: **elegir otra fecha la graba como MANUAL**; el botón **↺ la borra y la factura vuelve al cronograma**. El aviso de vencidos sin fecha se partió en dos —los del cronograma, que van al próximo día de pago, y los de las otras formas, que siguen en el primer día del eje— y el cartel de la pestaña lo explica arriba de la grilla.
 
 ---
+
+## Las retenciones: el flujo proyecta el neto a pagar
+
+> Esto es **nuevo**, de `feature/prov-locales-retenciones`.
+
+A una factura que se paga por **orden de pago** —echeq o transferencia, la forma vigente del cronograma— se le retienen impuestos: hoy IIBB, Ganancias y SUSS. Lo que sale de la caja es **el total menos las retenciones**, y es lo que quien arma la planilla de pagos pone como importe.
+
+**Por qué no se leen de Tango.** Tango calcula las retenciones *en* la orden de pago. Pero la orden de pago cancela la factura y la saca del pendiente, así que para el flujo ese cálculo llega tarde. Por eso las alícuotas se cargan en el cashflow.
+
+### Los impuestos son datos, no código
+
+Ningún impuesto está escrito en el código. Viven en `RO_T_CASHFLOW_PROV_LOCALES_IMPUESTO`, los siembra el script y se administran en *Parámetros › Prov. Locales*, sección **Retenciones**: alta, nombre, orden y baja. El **código no se edita**: es lo que guardan las alícuotas, y cambiarlo dejaría huérfano el historial.
+
+Cada impuesto tiene un **alcance**:
+
+| Alcance | Qué quiere decir | Alícuota |
+| --- | --- | --- |
+| **A todos** (IIBB, Ganancias) | Se aplica a todo proveedor salvo excepción | Una **general con vigencias**, y cada proveedor puede tener la suya —o 0, *no se le retiene*— |
+| **Solo a los asignados** (SUSS) | Se aplica únicamente a quien tenga una alícuota cargada | **No tiene general**: es por proveedor |
+
+**Cambiar el alcance se permite** y no borra nada. Pasar a *solo a los asignados* deja de aplicar la general —sus vigencias quedan en el historial— y volver a *a todos* la pone de nuevo en juego. Las alícuotas de los proveedores quedan.
+
+**La baja es lógica.** Un impuesto dado de baja deja de restarse en todas las facturas desde ese momento, y conserva su historial y las alícuotas de los proveedores; reactivarlo las vuelve a poner en juego. La confirmación dice **cuántos proveedores tienen alícuota propia** de ese impuesto, por lo mismo que las listas muestran sus usos: dar de baja a ciegas no.
+
+### La alícuota general no se edita
+
+Igual que en *Parámetros › Cheques*: **se carga una vigencia nueva** con su *vigente desde*, y la anterior sigue rigiendo para las facturas que se pagan antes. Una vigencia cargada por error se da de baja (baja lógica) y vuelve a regir la anterior. La tabla, `RO_T_CASHFLOW_PROV_LOCALES_ALICUOTA`, tiene **la misma forma** que las de Cob. Electrónicos y Echeqs, porque la regla de qué alícuota rige a qué fecha vive una sola vez —`Retenciones::alicuotasVigentes()`, con el desempate por `ID`— y recibe estas filas tal cual. Es una tabla propia: un cambio en la tasa del banco no puede mover el neto de una factura.
+
+**Las validaciones**, en el servidor:
+
+- la alícuota es ≥ 0 y < 100%;
+- **las generales vigentes suman menos de 100%**, a esa fecha y en cada vigencia posterior;
+- y **ningún proveedor queda con sus alícuotas efectivas sumando 100% o más** —contando las generales que le aplican y las propias—. Una general nueva también cambia la suma de quien tiene alícuotas propias en otros impuestos; si alguno se pasa, no se guarda y el mensaje lo nombra. Lo mismo vale al cambiar un alcance y al reactivar un impuesto.
+
+La suma es escalonada —sólo cambia cuando empieza a regir una vigencia—, así que se mira en cada escalón desde la fecha de la carga: una general cargada para el mes que viene que deja a alguien en 100% se rechaza hoy (`ProveedoresRetenciones::excedidos()`).
+
+La pantalla lista cada impuesto con su alcance, **su alícuota de hoy** —*sin alícuota* si es *a todos* y no tiene, *por proveedor* si es *solo a los asignados*— y **cuántos proveedores tienen alícuota propia**.
+
+**Sin general vigente no se retiene, y se avisa.** No es una retención de 0: nadie decidió que no se retenga, falta el dato. Ver *El cálculo*, más abajo.
 
 ## La fecha se carga de a una, o de a muchas
 
@@ -1308,6 +1350,7 @@ sql/cashflow_prov_locales_forma_por_factura.sql  El override de forma por factur
 sql/cashflow_prov_locales_excluir_factura.sql    El tilde de exclusion por factura
 sql/cashflow_prov_locales_opciones.sql         Las cinco listas de opciones + semilla
 sql/cashflow_prov_locales_pago_medio.sql       Un comprobante pagado con dos medios
+sql/cashflow_prov_locales_retenciones.sql      Las retenciones: impuestos, generales y por proveedor
 sql/_referencia_tango_pendientes.sql           La consulta de Tango, como referencia
 cashflow/Class/Planilla.php                    El mecanismo de importacion, compartido (el servidor)
 cashflow/Js/planilla-excel.js                  El lector de Excel y las plantillas, compartido (el navegador)
@@ -1316,6 +1359,7 @@ cashflow/Class/Proveedores.php                 Cuentas a pagar, fechas de pago y
 cashflow/Class/ProveedoresCategorias.php       El maestro y el resolutor de categoria
 cashflow/Class/ProveedoresTango.php            CPA01: quien existe como proveedor. Solo lectura
 cashflow/Class/ProveedoresOpciones.php         Las cinco listas de valores validos
+cashflow/Class/ProveedoresRetenciones.php      Las retenciones y el neto a pagar de cada comprobante
 cashflow/Tabs/parametros_prov_locales.php      Su ABM, en Parametros
 cashflow/Js/Parametros-Prov_locales.js
 cashflow/Class/Providers/ProveedoresProvider.php

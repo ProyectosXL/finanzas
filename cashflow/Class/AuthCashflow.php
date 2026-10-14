@@ -186,6 +186,12 @@ class AuthCashflow {
             'addOpcionProvLocal' => [['parametros', 'PROV_LOCALES']],
             'saveOpcionProvLocal' => [['parametros', 'PROV_LOCALES']],
             'bajaOpcionProvLocal' => [['parametros', 'PROV_LOCALES']],
+            // Las retenciones: los impuestos y sus alicuotas generales.
+            'addImpuestoProvLocal' => [['parametros', 'PROV_LOCALES']],
+            'saveImpuestoProvLocal' => [['parametros', 'PROV_LOCALES']],
+            'activarImpuestoProvLocal' => [['parametros', 'PROV_LOCALES']],
+            'addAlicuotaProvLocal' => [['parametros', 'PROV_LOCALES']],
+            'bajaAlicuotaProvLocal' => [['parametros', 'PROV_LOCALES']],
             'savePPPManualGrupo' => [['parametros', 'COBRANZAS']],
             'saveMedioPagoCliente' => [['parametros', 'COBRANZAS']],
             'excluirClienteCobranza' => [['parametros', 'COBRANZAS']],

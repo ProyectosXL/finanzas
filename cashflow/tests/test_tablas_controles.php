@@ -1549,3 +1549,42 @@ chequear('el eje de la grilla se arma con FECHA_EJE e IMPORTE_EJE', 1,
     substr_count($echCtrl, "\$filas,\n                'FECHA_EJE',\n                'IMPORTE_EJE'\n            );"));
 chequear('el export sigue saliendo del DOM vivo: baja las columnas nuevas con lo que se ve', 1,
     substr_count($echJs, "exportarTabla('tablaEcheqs', 'Echeqs_cartera');"));
+
+// ============================================================================
+// Parametros -> Prov. Locales: la seccion Retenciones
+// ============================================================================
+
+seccion('Parametros -> Prov. Locales: la seccion Retenciones esta enganchada');
+
+require_once __DIR__ . '/../Class/AuthCashflow.php';
+
+$tabPplo = file_get_contents($TABS . '/parametros_prov_locales.php');
+$jsPplo = str_replace("\r\n", "\n", file_get_contents($JS . '/Parametros-Prov_locales.js'));
+$ctrlParam = file_get_contents(__DIR__ . '/../Controller/ParametrosController.php');
+
+chequear('la pestaña tiene el contenedor de las retenciones', true,
+    strpos($tabPplo, 'id="retencionesPplo"') !== false);
+chequear('y va arriba de las listas: deciden cuánta plata sale de la caja', true,
+    strpos($tabPplo, 'id="retencionesPplo"') < strpos($tabPplo, 'id="listasPplo"'));
+chequear('el JS lee el bloque prov_locales_retenciones del módulo', true,
+    strpos($jsPplo, 'modulo.prov_locales_retenciones') !== false);
+chequear('y lo pinta antes que las listas', true,
+    strpos($jsPplo, "pintarRetenciones();\n                pintarListas();") !== false);
+
+foreach (['addImpuestoProvLocal', 'saveImpuestoProvLocal', 'activarImpuestoProvLocal',
+          'addAlicuotaProvLocal', 'bajaAlicuotaProvLocal'] as $accion) {
+    chequear('el JS llama a ' . $accion, true, strpos($jsPplo, "'" . $accion . "'") !== false);
+    chequear('el controller la atiende', true, strpos($ctrlParam, "case '" . $accion . "':") !== false);
+    chequear('y pide el permiso de Parametros > Prov. Locales', true,
+        AuthCashflow::ESCRITURAS['Parametros'][$accion] === [['parametros', 'PROV_LOCALES']]);
+}
+
+chequear('sin permiso de edicion los controles no quedan', true,
+    strpos($jsPplo, "cont.innerHTML = tarjetaImpuestos() + tarjetaGenerales();\n\n        Permisos.soloLectura(cont);") !== false);
+chequear('la baja de un impuesto dice cuantos proveedores lo tienen', true,
+    strpos($jsPplo, "' proveedor(es) tienen una alícuota propia de este '") !== false);
+chequear('sin el script, la seccion dice cual falta', true,
+    strpos($jsPplo, 'sql/cashflow_prov_locales_retenciones.sql') !== false);
+chequear('las tablas tienen id, para ordenarlas y exportarlas', [true, true],
+    [strpos($jsPplo, 'id="tablaImpuestosPplo"') !== false,
+     strpos($jsPplo, 'id="tablaGeneralesPplo"') !== false]);

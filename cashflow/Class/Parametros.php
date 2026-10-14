@@ -172,11 +172,15 @@ class Parametros {
         'PROV_LOCALES' => [
             'nombre' => 'Prov. Locales',
             'icono' => 'fa-file-invoice-dollar',
-            'descripcion' => 'Las listas de valores con las que se clasifica a cada proveedor: '
+            'descripcion' => 'Las retenciones que se descuentan a las facturas que se pagan por '
+                . 'orden de pago —qué impuestos, a quién se aplican y su alícuota general con '
+                . 'vigencias—, y las listas de valores con las que se clasifica a cada proveedor: '
                 . 'rubro económico, rubro, centro de costos, plazo de pago y criterio de '
-                . 'distribución. Alimentan el alta manual del maestro de Proveedores Locales '
-                . 'y la validación de su importación',
-            'secciones' => ['prov_locales_opciones']
+                . 'distribución. Alimentan el neto a pagar de Proveedores Locales, el alta manual '
+                . 'de su maestro y la validación de su importación',
+            /* LAS RETENCIONES VAN PRIMERO: deciden cuánta plata sale de la caja;
+               las listas sólo clasifican. */
+            'secciones' => ['prov_locales_retenciones', 'prov_locales_opciones']
         ],
         /* VA PEGADA A PROV. LOCALES, igual que Logistica y por el mismo motivo:
            las facturas de Tarjetas Pagos Corporativos son facturas pendientes de
@@ -621,6 +625,22 @@ class Parametros {
                     }
                 } elseif ($seccion === 'cotizaciones') {
                     $modulo['cotizaciones'] = $this->cotizaciones($modulo['avisos']);
+                } elseif ($seccion === 'prov_locales_retenciones') {
+                    /* Mismo criterio que las listas, abajo: la tabla es del
+                       módulo Proveedores Locales y la lee su propia clase, y un
+                       script sin correr no tumba la pestaña de Parámetros. */
+                    try {
+                        $modulo[$seccion] = $this->provLocalesRetenciones();
+
+                        foreach ($modulo[$seccion]['avisos'] as $a) {
+                            $modulo['avisos'][] = $a;
+                        }
+                    } catch (Throwable $e) {
+                        $modulo[$seccion] = ['disponible' => false, 'impuestos' => [],
+                                             'generales' => [], 'alcances' => [], 'avisos' => []];
+                        $modulo['avisos'][] = 'No se pudieron leer las retenciones de '
+                            . 'Proveedores Locales: ' . $e->getMessage();
+                    }
                 } elseif ($seccion === 'prov_locales_opciones') {
                     /* Mismo criterio que Saldos, Cob. Electrónicos y
                        Pre-chequeado: la tabla es del módulo Proveedores Locales
@@ -908,6 +928,35 @@ class Parametros {
             'usos' => $usos,
             'avisos' => $opciones->getAvisos(),
             'tabla_creada' => $opciones->tablaCreada()
+        ];
+    }
+
+    /**
+     * Los impuestos de Proveedores Locales y sus alícuotas generales, para la
+     * sección Retenciones.
+     *
+     * CADA IMPUESTO VIAJA CON SU ALÍCUOTA DE HOY Y CON CUÁNTOS PROVEEDORES TIENEN
+     * ALÍCUOTA PROPIA. Sin ese número, dar de baja un impuesto es a ciegas, por
+     * lo mismo que las listas viajan con sus usos. Los dos los resuelve
+     * ProveedoresRetenciones con la regla del cálculo, no el navegador.
+     *
+     * @return array
+     */
+    private function provLocalesRetenciones() {
+        require_once __DIR__ . '/ProveedoresRetenciones.php';
+
+        $ret = new ProveedoresRetenciones();
+        $config = $ret->config();
+        $hoy = date('Y-m-d');
+
+        return [
+            'disponible' => !empty($config['disponible']),
+            'impuestos' => ProveedoresRetenciones::resumenImpuestos($config, $hoy),
+            'generales' => ProveedoresRetenciones::marcarVigentesHoy($config['generales'], $hoy),
+            'alcances' => ProveedoresRetenciones::ALCANCES,
+            'alcance_todos' => ProveedoresRetenciones::ALCANCE_TODOS,
+            'hoy' => $hoy,
+            'avisos' => Aviso::textos(ProveedoresRetenciones::avisosConfig($config))
         ];
     }
 
