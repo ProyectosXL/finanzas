@@ -16,7 +16,10 @@ require_once __DIR__ . '/DiasHabiles.php';
  * -------------------------------------------------
  *   Cheques en Cartera        -> ESTADO = 'C'. Es plata que va a entrar, asi que
  *                                alimenta la fila "Echeqs en cartera" de
- *                                DISPONIBILIDADES a traves de EcheqsProvider.
+ *                                DISPONIBILIDADES a traves de EcheqsProvider; y
+ *                                los que se depositan, la fila "Echeqs
+ *                                depositados", por el neto y el dia que
+ *                                acreditan. Ver README-echeqs.md.
  *   Venta Cobrada Anticipada  -> cheques de clientes que pre-chequean. NO
  *                                alimentan ninguna serie del tablero: su efecto
  *                                es RESTAR de la cobranza proyectada de Ventas,
@@ -1434,7 +1437,8 @@ class Echeqs {
     /* ====================================================================
        SUB-PESTANA 1 - CHEQUES EN CARTERA
 
-       Alimenta la fila "Echeqs en cartera" del tablero.
+       Alimenta las filas "Echeqs en cartera" y "Echeqs depositados" del
+       tablero.
        ==================================================================== */
 
     /**
@@ -1672,8 +1676,9 @@ class Echeqs {
      * damos de baja- y lo que cambia es de qué serie del tablero sale.
      *
      * EL IMPORTE NO DESAPARECE: sale de A_COBRAR y va a A_COBRAR_EXCLUIDOS, que
-     * es la otra mitad del mismo corte. Las dos cierran contra A_COBRAR_TODO y
-     * el proveedor avisa cuánto es y con qué motivos. Ver
+     * es otra parte del mismo corte -la tercera es DEPOSITADOS-. Las partes
+     * cierran contra A_COBRAR_TODO y el proveedor avisa cuánto es y con qué
+     * motivos. Ver
      * EcheqsProvider::SERIE_EXCLUIDOS y el encabezado de
      * sql/cashflow_echeqs_excluir.sql.
      *
@@ -1696,8 +1701,8 @@ class Echeqs {
      * de override vive por comprobante y puede existir para uno que hoy no está
      * pendiente, así que rechazarla perdería la decisión el día que el
      * comprobante vuelva. Acá la exclusión sólo significa algo mientras el
-     * cheque esté en cartera: uno depositado o rechazado ya salió de la serie
-     * por su estado, y guardar una exclusión para él sería una decisión que no
+     * cheque esté en cartera: uno cuyo depósito ya registró Tango, o uno
+     * rechazado, ya salió de la serie por su estado, y guardar una exclusión para él sería una decisión que no
      * se ve en ninguna pantalla. Es la misma razón por la que marcarCheques()
      * resuelve su universo en el servidor.
      *

@@ -70,7 +70,7 @@ La tasa de un movimiento se resuelve **contra su fecha de acreditación**, no co
 
 Decisión del negocio, tomada explícitamente: al guardar (o dar de baja) una alícuota, el servidor recalcula el neto de los movimientos **pendientes** de esa procesadora —los que tienen fecha de acreditación **de mañana en adelante**, ver [el corte](#lo-de-hoy-no-es-pendiente-el-corte-es-mañana)— y el mensaje dice **cuántos cambiaron y por cuánta plata**, con el detalle de tasa vieja → tasa nueva y neto viejo → neto nuevo.
 
-> Lo propuesto era un botón explícito con vista previa, y la objeción sigue en pie: recalcular al editar un parámetro es la mitad del problema del Excel corriendo al revés —ahí un cambio de `D3` no llegaba a ningún movimiento, acá llega a todos los pendientes de una sola vez—. Se implementó automático porque así se pidió. Lo que compensa el riesgo es que **el recálculo nunca es silencioso**: el plan de cambios se calcula antes de escribir (`CobElectronicos::planRecalculo()`, que es un helper puro y devuelve un plan, no una escritura) y se informa completo en la respuesta. Si algún día se quiere volver al botón con vista previa, el plan ya está separado de la escritura y el cambio es sólo de dónde se lo llama.
+> Lo propuesto era un botón explícito con vista previa, y la objeción sigue en pie: recalcular al editar un parámetro es la mitad del problema del Excel corriendo al revés —ahí un cambio de `D3` no llegaba a ningún movimiento, acá llega a todos los pendientes de una sola vez—. Se implementó automático porque así se pidió. Lo que compensa el riesgo es que **el recálculo nunca es silencioso**: el plan de cambios se calcula antes de escribir (`CobElectronicos::planRecalculo()`, que delega en `Retenciones::planRecalculo()`, un helper puro que devuelve un plan, no una escritura) y se informa completo en la respuesta. Si algún día se quiere volver al botón con vista previa, el plan ya está separado de la escritura y el cambio es sólo de dónde se lo llama.
 
 **Los movimientos ya acreditados no se tocan nunca.** Su plata ya entró con la tasa con la que entró, y recalcularlos sería reescribir la historia. Es el mismo motivo por el que la tasa se persiste en la fila.
 
@@ -117,7 +117,7 @@ Cuando la fila del tablero queda en **cero** teniendo movimientos cargados, el p
 
 **Y es mañana a secas, no el próximo día hábil.** Se evaluó cortar en *"el siguiente día hábil"* y se descartó: puede haber acreditaciones cualquier día —una billetera acredita un sábado—, así que un sábado visto un viernes **es pendiente** y tiene que entrar al tablero. Es coherente con la regla de imputación de este módulo, que tampoco corre la fecha de acreditación a día hábil.
 
-**El corte es uno solo.** `CobElectronicos::cortePendientes()` —helper puro, probado sin base— y lo usan los cuatro caminos, para que la pantalla y el tablero cierren:
+**El corte es uno solo.** `CobElectronicos::cortePendientes()` —que delega en `Retenciones::cortePendientes()`, helper puro, probado sin base— y lo usan los cuatro caminos, para que la pantalla y el tablero cierren. **Es el mismo corte de los cheques depositados** (`README-echeqs.md`): un depósito que acredita hoy tampoco se proyecta, porque es plata que entra a la misma cuenta y que el mismo saldo ya informa. Si los dos módulos cortaran distinto, la acreditación de hoy se contaría en una fila y no en la otra.
 
 | Camino | Qué hace con el corte |
 | --- | --- |
@@ -256,6 +256,8 @@ Y la baja **nunca se aplica sola**: se lista, hay que marcar la casilla y ademá
 ---
 
 ## Modelo de datos
+
+> **La regla de la tasa ya no vive en `CobElectronicos`**: está en `Class/Retenciones.php`, compartida con el depósito de cheques, que acredita un neto con su propio juego de alícuotas. Los métodos de `CobElectronicos` conservan su nombre, su contrato y sus mensajes, y delegan. Los **datos** no se comparten: las alícuotas de los cheques viven en `RO_T_CASHFLOW_ECHEQ_ALICUOTA`, así que un cambio en la tasa de Payway no puede mover el neto de un cheque. Ver `README-echeqs.md`.
 
 Tres tablas, prefijo `RO_T_CASHFLOW_COBEL_`.
 
@@ -406,7 +408,7 @@ En la hoja hay 38 movimientos (filas 6 a 43): 18 de Payway y 20 de Mercado Pago,
 
 ### La única duplicación de la fórmula
 
-El script de migración vuelve a escribir la resolución de la tasa en SQL (`OUTER APPLY` con `ROW_NUMBER()` por concepto), porque **corre en SSMS sin PHP**. Es la única duplicación de la fórmula en todo el módulo y está deliberadamente calcada de `CobElectronicos::tasaRetencion()`: misma regla —de cada concepto, la última vigencia con `VIGENCIA_DESDE <=` la fecha de acreditación, con desempate por `ID`, sumadas—. **La versión de PHP es la que tiene pruebas**, y es la que corre en la aplicación; la de SQL se usa una vez y no vuelve.
+El script de migración vuelve a escribir la resolución de la tasa en SQL (`OUTER APPLY` con `ROW_NUMBER()` por concepto), porque **corre en SSMS sin PHP**. Es la única duplicación de la fórmula en todo el módulo y está deliberadamente calcada de `Retenciones::tasaRetencion()` —la que usa `CobElectronicos::tasaRetencion()`—: misma regla —de cada concepto, la última vigencia con `VIGENCIA_DESDE <=` la fecha de acreditación, con desempate por `ID`, sumadas—. **La versión de PHP es la que tiene pruebas**, y es la que corre en la aplicación; la de SQL se usa una vez y no vuelve.
 
 ---
 

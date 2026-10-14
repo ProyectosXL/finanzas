@@ -11,7 +11,10 @@ $edita = AuthCashflow::puedeEditar('echeqs');
     Pestaña Echeqs. Dos sub-pestañas que son dos cosas distintas:
 
       Cheques en Cartera       -> cheques de terceros con ESTADO = 'C'. Alimentan
-                                  la fila "Echeqs en cartera" de DISPONIBILIDADES.
+                                  la fila "Echeqs en cartera" de DISPONIBILIDADES,
+                                  y los depositados, "Echeqs depositados". La
+                                  barra de selección deposita, deshace el
+                                  depósito y excluye. Ver README-echeqs.md.
       Venta Cobrada Anticipada -> cheques de clientes que pre-chequean. NO
                                   alimentan ninguna fila del tablero: su efecto
                                   es restar de la cobranza proyectada de Ventas.
