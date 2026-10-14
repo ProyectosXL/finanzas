@@ -569,3 +569,28 @@
     border-color: #e0a800;
     background-color: #fffaf0;
 }
+
+/* ==========================================================================
+   RETENCIONES
+   "Sin alícuota" es un dato que falta, no un cero: va en ámbar, como lo que
+   hay que completar. "No se retiene" es una decisión: va con su rótulo,
+   apagado, porque 0 y "no aplica" no son lo mismo.
+   ========================================================================== */
+.tab-proveedores_locales .prov-ret-sin {
+    color: #b45309;
+    font-size: .8em;
+    font-weight: 600;
+}
+
+.tab-proveedores_locales .prov-ret-no {
+    color: #6c757d;
+    font-size: .8em;
+    font-style: italic;
+}
+
+/* Una columna por impuesto en Cuentas a Pagar: escondidas en pantalla -el
+   desglose esta en el tooltip de Retenciones- y marcadas data-exportar-solo,
+   asi que el Excel las baja igual. Ver Js/tabla-export.js. */
+.tab-proveedores_locales .prov-solo-export {
+    display: none;
+}

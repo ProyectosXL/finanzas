@@ -52,12 +52,17 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
         <div class="col-md-6 col-lg-3">
             <div class="kpi-card">
                 <div class="kpi-card-header">
-                    <span class="kpi-card-title">Total a pagar</span>
+                    <span class="kpi-card-title"
+                          title="Lo que sale de la caja: el neto de retenciones en las facturas que se pagan por orden de pago, el total en las demás. Es lo que va al eje y a la fila del tablero.">Neto a pagar</span>
                     <div class="kpi-card-icon blue"><i class="fas fa-file-invoice-dollar"></i></div>
                 </div>
                 <div class="kpi-card-value" id="totalProv">$ 0,00</div>
                 <div class="kpi-card-footer">
                     <span class="text-muted" id="detalleTotalProv">0 vencimientos</span>
+                    <!-- Lo retenido, APARTE y por impuesto: es plata que no sale
+                         de la caja, así que no suma en el neto, pero se dice
+                         cuánta es. -->
+                    <div class="small text-muted" id="retenidoProv"></div>
                 </div>
             </div>
         </div>
@@ -197,12 +202,9 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                 <div class="d-flex gap-2 flex-wrap align-items-center">
                     <div id="vistasProv"></div>
                     <div id="colFijasProv"></div>
-                    <?php if ($edita): ?>
-                    <button id="btnConciliarProv" class="btn btn-sm btn-outline-secondary"
-                            title="Comparar contra Tango: qué de lo previsto ya se pagó">
-                        <i class="fas fa-code-compare me-1"></i> Conciliar
-                    </button>
-                    <?php endif; ?>
+                    <!-- NO HAY BOTÓN CONCILIAR: la conciliación contra Tango corre
+                         sola cada vez que se cargan los pendientes —al entrar y con
+                         Actualizar— y lo que cambió se dice en el panel de avisos. -->
                     <button id="btnRefreshProv" class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-sync-alt me-1"></i> Actualizar
                     </button>
@@ -317,8 +319,24 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                                     Importe
                                 </th>
                                 <th rowspan="2"
-                                    title="Lo que falta pagar: el importe menos lo que ya se le imputó. Es el número que va al cashflow.">
+                                    title="Lo que falta pagar de la factura: el importe menos lo que ya se le imputó. Es la base de las retenciones.">
                                     Pendiente
+                                </th>
+                                <!-- LAS RETENCIONES Y EL NETO. Una sola columna de
+                                     retenciones, con el desglose —impuesto,
+                                     alícuota y de dónde sale— en el tooltip: con
+                                     tres impuestos, una columna por cada uno
+                                     haría la grilla demasiado ancha. El Excel sí
+                                     baja una por impuesto: el JS agrega esas
+                                     columnas ocultas en pantalla, marcadas con
+                                     data-exportar-solo. -->
+                                <th rowspan="2" id="thRetProv"
+                                    title="Lo que se le retiene a la factura en la orden de pago: IIBB, Ganancias, SUSS… Sólo a las que se pagan por echeq o transferencia. El desglose está en el tooltip de cada celda.">
+                                    Retenciones
+                                </th>
+                                <th rowspan="2"
+                                    title="Lo que sale de la caja: el pendiente menos las retenciones. Es el número que va al eje y a la fila del tablero.">
+                                    Neto a pagar
                                 </th>
                                 <!-- data-orden-nombre igual al rótulo: ancla el
                                      nombre del orden guardado sin cambiarlo. Es
@@ -372,7 +390,7 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                                  por columna. Este colspan es sólo el estado
                                  inicial, y son las 13 descriptivas. -->
                             <tr id="totalesProv">
-                                <td colspan="13" class="fw-bold text-end">TOTALES</td>
+                                <td colspan="15" class="fw-bold text-end">TOTALES</td>
                             </tr>
                         </tfoot>
                     </table>
@@ -620,6 +638,104 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                     </div>
                 </div>
                 <div class="param-hint mt-2" id="hintProv"></div>
+
+                <!-- LAS RETENCIONES DEL PROVEEDOR. Cada impuesto activo con su
+                     valor efectivo y de dónde sale, un control para cargar,
+                     poner 0 o volver a la general, y el historial.
+
+                     NO SE GUARDAN CON "Guardar": viven en su propia tabla y no
+                     en el maestro —la importación de la planilla no las toca—,
+                     así que cada cambio se guarda solo, desde hoy. En un alta
+                     se habilitan después de guardar el proveedor. Lo dibuja el
+                     JS. -->
+                <div id="retencionesFormProv" class="mt-3"></div>
+            </div>
+            <?php endif; ?>
+
+            <!-- LOS FILTROS DEL MAESTRO. Además del buscador: rubro económico,
+                 rubro, forma de pago, y a quiénes se les aplica cada retención.
+                 "Seleccionar todos" toma sólo lo que estos filtros dejan ver. -->
+            <div class="card-body py-2 border-bottom d-flex gap-2 flex-wrap align-items-center">
+                <small class="text-muted">Filtrar:</small>
+                <select id="filtroRubroEcoMaestroProv" class="form-select form-select-sm w-auto"
+                        title="Rubro económico"></select>
+                <select id="filtroRubroMaestroProv" class="form-select form-select-sm w-auto"
+                        title="Rubro"></select>
+                <select id="filtroFormaMaestroProv" class="form-select form-select-sm w-auto"
+                        title="Forma de pago"></select>
+                <select id="filtroRetMaestroProv" class="form-select form-select-sm w-auto"
+                        title="A quiénes se les aplica cada retención"></select>
+                <small class="text-muted ms-auto" id="cuentaMaestroProv"></small>
+            </div>
+
+            <!-- LA BARRA DE SELECCIÓN DEL MAESTRO. Aparece sólo cuando hay
+                 proveedores elegidos, y dice cuántos antes de apretar nada. -->
+            <?php if ($edita): ?>
+            <div id="barraSelMaestroProv" class="card-body py-2 border-bottom prov-barra-sel"
+                 style="display: none;">
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                    <span class="fw-semibold" id="selResumenMaestroProv"></span>
+                    <div class="d-flex gap-2 ms-auto">
+                        <button class="btn btn-sm btn-outline-primary" id="btnAsignarRetProv">
+                            <i class="fas fa-percent me-1"></i> Asignar retención
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" id="btnLimpiarSelMaestroProv">
+                            Limpiar selección
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- EL DIÁLOGO DE LA ASIGNACIÓN MASIVA. Primero dice qué haría —a
+                 cuántos se aplica, cuántos ya tenían ese valor y cuántos tenían
+                 otro— y recién después se confirma. Es todo o nada. -->
+            <div class="modal fade" id="modalRetProv" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">Asignar retención</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                    aria-label="Cerrar"></button>
+                        </div>
+                        <div class="modal-body">
+                            <p class="mb-2" id="retProvCuantos"></p>
+                            <label class="form-label form-label-sm" for="retProvImpuesto">Impuesto</label>
+                            <select id="retProvImpuesto" class="form-select form-select-sm mb-3"></select>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="retProvAccion"
+                                       id="retProvAccAlicuota" value="ALICUOTA" checked>
+                                <label class="form-check-label" for="retProvAccAlicuota">
+                                    Cargar una alícuota
+                                </label>
+                                <div class="input-group input-group-sm mt-1 mb-2" style="max-width: 180px;">
+                                    <input type="number" class="form-control" id="retProvPct"
+                                           min="0" max="99.9999" step="0.0001" placeholder="Ej: 2">
+                                    <span class="input-group-text">%</span>
+                                </div>
+                            </div>
+                            <div class="form-check" id="retProvAccNoRetieneWrap">
+                                <input class="form-check-input" type="radio" name="retProvAccion"
+                                       id="retProvAccNoRetiene" value="NO_RETIENE">
+                                <label class="form-check-label" for="retProvAccNoRetiene">
+                                    No se retiene (0%)
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="retProvAccion"
+                                       id="retProvAccGeneral" value="GENERAL">
+                                <label class="form-check-label" for="retProvAccGeneral"
+                                       id="retProvAccGeneralLabel">Volver a la general</label>
+                            </div>
+                            <div class="small mt-3" id="retProvPlan"></div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    data-bs-dismiss="modal">Cancelar</button>
+                            <button type="button" class="btn btn-sm btn-primary" id="btnConfirmarRetProv"
+                                    disabled>Aplicar</button>
+                        </div>
+                    </div>
+                </div>
             </div>
             <?php endif; ?>
 
@@ -639,7 +755,16 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                 <div class="table-responsive" id="wrapperMaestroProv">
                     <table id="tablaMaestro" class="table table-hover mb-0">
                         <thead>
-                            <tr>
+                            <tr id="headMaestroProv">
+                                <!-- LA SELECCIÓN, para asignar una retención de
+                                     a muchos. El check del encabezado toma sólo
+                                     lo que los filtros dejan ver. -->
+                                <?php if ($edita): ?>
+                                <th class="text-center" style="width: 40px;" data-orden="no" id="thSelMaestroProv">
+                                    <input type="checkbox" class="form-check-input" id="selTodosMaestroProv"
+                                           title="Seleccionar todos los proveedores que se están viendo.">
+                                </th>
+                                <?php endif; ?>
                                 <th>CODIGO</th>
                                 <th class="col-texto">NOMBRE</th>
                                 <th>RUBRO ECONOMICO</th>
@@ -647,11 +772,14 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
                                 <th>CENTRO COSTOS</th>
                                 <th>FORMA DE PAGO</th>
                                 <th>PLAZO</th>
+                                <!-- Acá el JS agrega una columna por impuesto
+                                     activo, con la alícuota efectiva de hoy:
+                                     los impuestos son datos, no columnas fijas. -->
                                 <!-- De dónde salió la versión vigente. Importa
                                      porque la planilla pisa lo manual, así que
                                      una fila MANUAL es una que se va a perder
                                      en la próxima importación. -->
-                                <th class="text-center">ORIGEN</th>
+                                <th class="text-center" id="thOrigenMaestroProv">ORIGEN</th>
                                 <!-- Si el proveedor está excluido de
                                      Proveedores Locales porque su deuda ya se
                                      considera en otra pestaña. No es un dato

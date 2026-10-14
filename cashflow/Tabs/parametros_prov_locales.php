@@ -1,6 +1,11 @@
 <!--
     Parámetros → Prov. Locales.
 
+    DOS SECCIONES: las RETENCIONES (qué impuestos se descuentan de una factura
+    que se paga por orden de pago, y sus alícuotas generales) y las cinco
+    LISTAS con las que se clasifica a cada proveedor. Ver
+    Class/ProveedoresRetenciones.php y README-proveedores-locales.md.
+
     Va en su propio archivo y con su propio JS, igual que Saldos,
     Cob. Electrónicos, Pre-chequeado y Cobranzas: no comparte nada con los
     bloques de Ventas, así que un problema acá no puede llevarse puesta la
@@ -35,6 +40,17 @@
     <div class="cargando-slot" id="loadingParamPplo" data-cargando="Cargando listas de opciones…"></div>
 
     <div id="wrapperParamPplo" style="display: none;">
+
+        <!-- RETENCIONES. Qué impuestos se le retienen a una factura que se paga
+             por orden de pago, a quién se aplica cada uno y su alícuota general
+             con vigencias. Van ARRIBA de las listas: deciden cuánta plata sale
+             de la caja, y las listas sólo clasifican.
+
+             Ningún impuesto está escrito en el código: los siembra
+             sql/cashflow_prov_locales_retenciones.sql y se editan acá. Las
+             alícuotas de cada proveedor se cargan desde el Maestro de
+             Proveedores Locales. Lo dibuja el JS. -->
+        <div id="retencionesPplo"></div>
 
         <div class="alert alert-secondary d-flex align-items-start gap-2 py-2 px-3 mb-3">
             <i class="fas fa-circle-info mt-1"></i>

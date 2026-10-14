@@ -667,6 +667,13 @@ array_shift($celdas);
 foreach ($celdas as $celda) {
     $celda = substr($celda, 0, strpos($celda, '>'));
 
+    /* Las de cada impuesto no ocupan columna en pantalla: estan escondidas y
+       solo bajan al Excel (data-exportar-solo, ver Js/tabla-export.js). Las
+       filas las llevan igual, asi que no desalinean nada. */
+    if (strpos($celda, 'data-exportar-solo') !== false) {
+        continue;
+    }
+
     /* Tres formas de declarar el ancho, y las tres cuentan: un colspan escrito
        contra COLS_DESC, un colspan con un numero fijo, y una celda sin colspan,
        que vale una columna. */

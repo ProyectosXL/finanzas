@@ -1099,6 +1099,133 @@ try {
             break;
 
         /* ================================================================
+           MODULO PROVEEDORES LOCALES: RETENCIONES
+           Que impuestos se le retienen a una factura que se paga por orden de
+           pago, a quien se aplica cada uno y su alicuota general.
+
+           NINGUN IMPUESTO ESTA EN EL CODIGO: son datos, se editan aca. La
+           validacion -rango, sumas, que ningun proveedor quede en 100% o mas-
+           la hace ProveedoresRetenciones contra la base de ahora, no contra lo
+           que mando la pantalla.
+           ================================================================ */
+        case 'addImpuestoProvLocal':
+            $data = bodyJson();
+
+            require_once __DIR__ . '/../Class/ProveedoresRetenciones.php';
+
+            $r = (new ProveedoresRetenciones())->addImpuesto($data, $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['nombre'] . ' agregado'
+                    . ($r['alcance'] === ProveedoresRetenciones::ALCANCE_TODOS
+                        ? '. Hasta que le cargues una alícuota general no se retiene, y la pestaña '
+                            . 'Proveedores Locales lo avisa.'
+                        : ': se va a aplicar sólo a los proveedores a los que se lo asignes desde el '
+                            . 'Maestro.'),
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'saveImpuestoProvLocal':
+            $data = bodyJson();
+
+            if (!isset($data['id'])) {
+                throw new Exception('Falta el impuesto que hay que guardar.');
+            }
+
+            require_once __DIR__ . '/../Class/ProveedoresRetenciones.php';
+
+            $r = (new ProveedoresRetenciones())->saveImpuesto($data['id'], $data, $usuario);
+
+            $mensaje = 'Impuesto guardado.';
+
+            if ($r['alcance_cambio']) {
+                $mensaje = ($r['impuesto']['ALCANCE'] === ProveedoresRetenciones::ALCANCE_TODOS)
+                    ? $r['impuesto']['NOMBRE'] . ' se aplica ahora a todos los proveedores. '
+                        . ($r['sin_general']
+                            ? 'No tiene alícuota general vigente: hasta que se la cargues, sólo se '
+                                . 'le retiene a quien tenga alícuota propia.'
+                            : 'Vuelve a regir su alícuota general.')
+                    : $r['impuesto']['NOMBRE'] . ' se aplica ahora sólo a los proveedores asignados: '
+                        . 'su alícuota general deja de regir y queda en el historial.';
+            }
+
+            echo json_encode(['success' => true, 'message' => $mensaje, 'data' => $r],
+                JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'activarImpuestoProvLocal':
+            $data = bodyJson();
+
+            if (!isset($data['id'])) {
+                throw new Exception('Falta el impuesto.');
+            }
+
+            require_once __DIR__ . '/../Class/ProveedoresRetenciones.php';
+
+            $activo = !empty($data['activo']);
+            $r = (new ProveedoresRetenciones())->activarImpuesto($data['id'], $activo, $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $activo
+                    ? $r['impuesto']['NOMBRE'] . ' vuelve a restarse en las facturas.'
+                    : $r['impuesto']['NOMBRE'] . ' deja de restarse en todas las facturas. No se '
+                        . 'borró nada: su historial'
+                        . ($r['con_propia'] > 0
+                            ? ' y las alícuotas de ' . $r['con_propia'] . ' proveedor(es)'
+                            : '')
+                        . ' quedan, y vuelven a regir si se lo reactiva.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'addAlicuotaProvLocal':
+            $data = bodyJson();
+
+            if (!isset($data['impuesto']) || !array_key_exists('alicuota', $data)
+                || !isset($data['vigencia_desde'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/ProveedoresRetenciones.php';
+
+            // SIEMPRE INSERTA UNA VIGENCIA NUEVA: la anterior sigue rigiendo para
+            // las facturas que se pagan antes de esta fecha.
+            $r = (new ProveedoresRetenciones())->addGeneral($data['impuesto'], $data['alicuota'],
+                $data['vigencia_desde'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['impuesto']['NOMBRE'] . ' ' . Retenciones::porcentaje($r['alicuota'])
+                    . ' desde el ' . Retenciones::fechaCorta($r['vigencia']) . '. La anterior queda '
+                    . 'en el historial y sigue rigiendo para las facturas que se pagan antes. Las '
+                    . 'generales suman ' . Retenciones::porcentaje($r['tasa_total']) . ' a esa fecha.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'bajaAlicuotaProvLocal':
+            $data = bodyJson();
+
+            if (!isset($data['id'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/ProveedoresRetenciones.php';
+
+            $r = (new ProveedoresRetenciones())->bajaGeneral($data['id'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Alícuota dada de baja: vuelve a regir la anterior. No se borró, queda en '
+                    . 'el historial.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
            MODULO COBRANZAS (PPP por grupo empresario y escala de descuento)
            ================================================================ */
 

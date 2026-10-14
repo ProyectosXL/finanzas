@@ -371,8 +371,10 @@ chequear('y queda marcado', true, !empty($parcial[0]['APERTURA_DESCUADRADA']));
 
 $avisos = Aviso::textos(Proveedores::avisosPendientesConNivel($parcial));
 
+// Desde las retenciones la apertura se compara contra el NETO a pagar: sin
+// alicuotas el neto es el pendiente, y el caso es el mismo.
 chequear('la pestaña avisa, con el texto pedido', true, in_array('1 comprobante(s) abiertos en dos '
-    . 'medios ya no coinciden con su pendiente: se proyecta el saldo en la fecha más tardía. '
+    . 'medios ya no coinciden con su neto a pagar: se proyecta el saldo en la fecha más tardía. '
     . 'Reimportá para corregirlo.', $avisos, true));
 chequear('con nivel atencion', 'warning',
     Proveedores::avisosPendientesConNivel($parcial)[0]['nivel']);
@@ -508,10 +510,11 @@ chequear('aplicarImportacion() la escribe en su transaccion, junto con la fila d
 
 seccion('la conciliacion mide el desvio contra la fecha mas tardia');
 
-/* conciliar() compara la FECHA_PAGO de la tabla de pagos contra la real, y
-   para un comprobante abierto esa fecha es la mas tardia. */
+/* La conciliacion -automatica desde las retenciones: planConciliacion()-
+   compara la FECHA_PAGO de la tabla de pagos contra la real, y para un
+   comprobante abierto esa fecha es la mas tardia. */
 chequear('conciliar usa la fecha de la tabla de pagos', true,
-    strpos($cuerpoDe('conciliar'), "self::desvioDias(\$pago['FECHA_PAGO'],") !== false);
+    strpos($cuerpoDe('planConciliacion'), "self::desvioDias(\$pago['FECHA_PAGO'],") !== false);
 chequear('que para un abierto es la mas tardia de las dos', '2026-10-27',
     Proveedores::camposDeImportacion($comparar($dos)['filas'])['pago']['FECHA_PAGO']);
 chequear('asi que pagar el 30/10 da 3 dias tarde, no 10', 3,

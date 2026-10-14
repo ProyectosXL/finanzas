@@ -7,8 +7,17 @@
  * endpoint y se queda con el módulo PROV_LOCALES.
  *
  * QUÉ ADMINISTRA
- * Las cinco listas de valores con las que se clasifica a cada proveedor local.
- * Antes eran texto libre con un datalist de sugerencias.
+ * Las RETENCIONES -qué impuestos se le descuentan a una factura que se paga por
+ * orden de pago, a quién se aplica cada uno y su alícuota general con
+ * vigencias- y las cinco listas de valores con las que se clasifica a cada
+ * proveedor local. Las listas antes eran texto libre con un datalist de
+ * sugerencias.
+ *
+ * DE LAS RETENCIONES, LO QUE TIENE QUE QUEDAR A LA VISTA es lo mismo que en las
+ * listas: CUÁNTOS PROVEEDORES tienen alícuota propia de cada impuesto, para que
+ * darlo de baja no sea a ciegas, y que una alícuota general NO SE EDITA: se
+ * carga una vigencia nueva y la anterior sigue explicando las fechas de pago
+ * anteriores.
  *
  * TRES COSAS QUE ESTA PANTALLA TIENE QUE HACER VISIBLES:
  *
@@ -41,6 +50,13 @@
     /** El bloque 'prov_locales_opciones' del módulo: tipos, listas y usos */
     var datos = null;
 
+    /**
+     * El bloque 'prov_locales_retenciones': los impuestos -cada uno con su
+     * alícuota de hoy y cuántos proveedores tienen alícuota propia- y el
+     * historial de las generales. Ver Class/ProveedoresRetenciones.php.
+     */
+    var ret = null;
+
     function inicializar() {
         /* No carga al arrancar: carga cuando se abre su sub-pestaña, o ahora
            si es la primera que se ve. Ver Js/parametros-carga.js. */
@@ -71,9 +87,12 @@
 
                 datos = modulo.prov_locales_opciones
                     || { tipos: {}, listas: {}, usos: {}, tabla_creada: false };
+                ret = modulo.prov_locales_retenciones
+                    || { disponible: false, impuestos: [], generales: [], alcances: {} };
 
                 pintarDescripcion();
                 pintarAvisos();
+                pintarRetenciones();
                 pintarListas();
 
                 Cargando.ocultar('loadingParamPplo');
@@ -118,6 +137,464 @@
      */
     function pintarAvisos() {
         AvisosPanel.pintar('avisosParamPplo', modulo.avisos || []);
+    }
+
+    /* ================================================================
+       RETENCIONES
+       ================================================================ */
+
+    function pintarRetenciones() {
+        var cont = document.getElementById('retencionesPplo');
+
+        if (!cont) {
+            return;
+        }
+
+        /* SIN EL SCRIPT, LA SECCIÓN DICE QUÉ FALTA y no dibuja un ABM que
+           fallaría al guardar. Mientras tanto las facturas se proyectan por el
+           total, como antes. */
+        if (!ret.disponible) {
+            cont.innerHTML = '<div class="card mb-4"><div class="card-header"><h5 class="mb-0">'
+                + 'Retenciones</h5></div><div class="card-body text-muted">'
+                + 'Falta correr <code>sql/cashflow_prov_locales_retenciones.sql</code> contra la base '
+                + 'central. Mientras tanto las facturas se proyectan por el total, sin descontar '
+                + 'retenciones.</div></div>';
+            return;
+        }
+
+        cont.innerHTML = tarjetaImpuestos() + tarjetaGenerales();
+
+        Permisos.soloLectura(cont);
+        conectarRetenciones();
+    }
+
+    function tarjetaImpuestos() {
+        var alcances = ret.alcances || {};
+
+        var opcionesAlcance = function(actual) {
+            return Object.keys(alcances).map(function(a) {
+                return '<option value="' + escapar(a) + '"' + (a === actual ? ' selected' : '') + '>'
+                    + escapar(alcances[a]) + '</option>';
+            }).join('');
+        };
+
+        var filasImp = (ret.impuestos || []).map(function(i) {
+            return '<tr class="' + (i.ACTIVO ? '' : 'pplo-baja') + '" data-id="' + i.ID + '"'
+                + ' data-codigo="' + escapar(i.CODIGO) + '" data-nombre="' + escapar(i.NOMBRE) + '"'
+                + ' data-con-propia="' + i.con_propia + '">'
+                + '<td><strong>' + escapar(i.CODIGO) + '</strong></td>'
+                + '<td><input type="text" class="form-control form-control-sm pret-nombre" maxlength="60"'
+                +   ' value="' + escapar(i.NOMBRE) + '" data-previo="' + escapar(i.NOMBRE) + '"></td>'
+                + '<td><select class="form-select form-select-sm pret-alcance" data-previo="'
+                +   escapar(i.ALCANCE) + '" title="' + escapar('A todos: rige la alícuota general '
+                +   'salvo que el proveedor tenga la suya. Solo a los asignados: se aplica únicamente '
+                +   'a los proveedores con alícuota cargada en el Maestro.') + '">'
+                +   opcionesAlcance(i.ALCANCE) + '</select></td>'
+                + '<td><input type="number" class="form-control form-control-sm pret-orden" min="0" step="1"'
+                +   ' value="' + i.ORDEN + '" data-previo="' + i.ORDEN + '" style="width: 80px;"></td>'
+                + '<td class="text-center">' + celdaVigente(i) + '</td>'
+                + '<td class="text-center">' + celdaConPropia(i) + '</td>'
+                + '<td class="text-center">'
+                +   '<div class="form-check form-switch d-inline-block">'
+                +     '<input class="form-check-input pret-activo" type="checkbox"'
+                +       (i.ACTIVO ? ' checked' : '')
+                +       ' title="' + escapar('Dar de baja deja de restarlo en todas las facturas desde '
+                +       'ahora. No borra su historial ni las alícuotas de los proveedores: reactivarlo '
+                +       'las vuelve a poner en juego.') + '">'
+                +   '</div>'
+                + '</td>'
+                + '</tr>';
+        }).join('');
+
+        return '<div class="card mb-4" id="cardImpuestosPplo">'
+            + '<div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">'
+            +   '<div><h5 class="mb-0">Retenciones</h5>'
+            +   '<small class="text-muted">Lo que se le descuenta a una factura que se paga por orden de '
+            +   'pago —echeq o transferencia—. El cashflow proyecta el neto: la factura menos sus '
+            +   'retenciones.</small></div>'
+            +   '<button class="btn btn-sm btn-primary" id="btnNuevoImpuestoPplo">'
+            +     '<i class="fas fa-plus me-1"></i> Agregar impuesto</button>'
+            + '</div>'
+            + '<div class="card-body border-bottom" id="formImpuestoPplo" style="display: none;">'
+            +   '<div class="row g-2 align-items-end">'
+            +     '<div class="col-md-2"><label class="form-label form-label-sm">Código</label>'
+            +       '<input type="text" class="form-control form-control-sm" id="nuevoCodigoImpPplo" '
+            +       'maxlength="30" placeholder="Ej: IIBB" title="Mayúsculas, sin espacios. No se puede '
+            +       'cambiar después: es con lo que se guardan sus alícuotas."></div>'
+            +     '<div class="col-md-3"><label class="form-label form-label-sm">Nombre</label>'
+            +       '<input type="text" class="form-control form-control-sm" id="nuevoNombreImpPplo" '
+            +       'maxlength="60" placeholder="Ej: Ingresos Brutos"></div>'
+            +     '<div class="col-md-3"><label class="form-label form-label-sm">Alcance</label>'
+            +       '<select class="form-select form-select-sm" id="nuevoAlcanceImpPplo">'
+            +       opcionesAlcance(ret.alcance_todos) + '</select></div>'
+            +     '<div class="col-md-1"><label class="form-label form-label-sm">Orden</label>'
+            +       '<input type="number" class="form-control form-control-sm" id="nuevoOrdenImpPplo" '
+            +       'min="0" step="1" value="' + ((ret.impuestos || []).length + 1) + '"></div>'
+            +     '<div class="col-md-3 d-flex gap-2">'
+            +       '<button class="btn btn-sm btn-primary" id="btnAgregarImpuestoPplo">'
+            +         '<i class="fas fa-check me-1"></i> Agregar</button>'
+            +       '<button class="btn btn-sm btn-outline-secondary" id="btnCancelarImpuestoPplo">'
+            +         '<i class="fas fa-xmark"></i></button>'
+            +     '</div>'
+            +   '</div>'
+            + '</div>'
+            + '<div class="card-body p-0"><div class="table-responsive">'
+            +   '<table id="tablaImpuestosPplo" class="table table-hover mb-0" data-orden="no">'
+            +   '<thead><tr><th style="width: 140px;">Código</th><th>Nombre</th>'
+            +   '<th style="width: 200px;">Alcance</th><th style="width: 100px;">Orden</th>'
+            +   '<th class="text-center" style="width: 160px;">Alícuota hoy</th>'
+            +   '<th class="text-center" style="width: 150px;" title="Proveedores con alícuota propia '
+            +     'vigente hoy, cargada desde el Maestro">Proveedores</th>'
+            +   '<th class="text-center" style="width: 90px;">Activo</th></tr></thead>'
+            +   '<tbody>' + (filasImp || '<tr><td colspan="7" class="text-center text-muted py-4">'
+            +     'No hay impuestos cargados.</td></tr>') + '</tbody>'
+            +   '</table>'
+            + '</div></div>'
+            + '</div>';
+    }
+
+    /**
+     * La alícuota que rige hoy. "Sin alícuota" en un impuesto "a todos" NO es
+     * cero: falta el dato, no se retiene y la pestaña de Proveedores Locales lo
+     * avisa. En uno "solo a los asignados" no hay general: es por proveedor.
+     */
+    function celdaVigente(i) {
+        if (i.ALCANCE !== ret.alcance_todos) {
+            return '<span class="text-muted" title="Se aplica solo a los proveedores con alícuota '
+                + 'cargada en el Maestro.">por proveedor</span>';
+        }
+
+        if (!i.vigente) {
+            return '<span class="badge bg-warning text-dark" title="Sin alícuota general vigente '
+                + 'no se retiene, y Proveedores Locales lo avisa. Cargala abajo.">sin alícuota</span>';
+        }
+
+        return '<strong>' + porcentaje(i.vigente.alicuota) + '</strong>'
+            + '<br><small class="text-muted">desde ' + fechaLegible(i.vigente.vigencia_desde)
+            + '</small>';
+    }
+
+    function celdaConPropia(i) {
+        if (!i.con_propia) {
+            return '<span class="text-muted">—</span>';
+        }
+
+        return '<span class="badge bg-light text-dark" title="' + escapar(i.con_propia
+            + ' proveedor(es) tienen una alícuota propia de este impuesto, cargada desde el '
+            + 'Maestro.') + '">' + i.con_propia + '</span>';
+    }
+
+    function tarjetaGenerales() {
+        var todos = (ret.impuestos || []).filter(function(i) {
+            return i.ACTIVO && i.ALCANCE === ret.alcance_todos;
+        });
+
+        var nombres = {};
+
+        (ret.impuestos || []).forEach(function(i) { nombres[i.CODIGO] = i.NOMBRE; });
+
+        var filasGen = (ret.generales || []).map(function(g) {
+            var estado;
+
+            if (!g.ACTIVO) {
+                estado = '<span class="badge bg-secondary">de baja</span>';
+            } else if (g.VIGENTE_HOY) {
+                estado = '<span class="badge bg-success">vigente</span>';
+            } else if (g.VIGENCIA_DESDE > ret.hoy) {
+                estado = '<span class="badge bg-info text-dark">futura</span>';
+            } else {
+                estado = '<span class="badge bg-light text-dark">reemplazada</span>';
+            }
+
+            return '<tr class="' + (g.ACTIVO ? '' : 'pplo-baja') + '">'
+                + '<td>' + escapar(nombres[g.CONCEPTO] || g.CONCEPTO) + '</td>'
+                + '<td class="text-end">' + porcentaje(g.ALICUOTA) + '</td>'
+                + '<td class="text-center">' + fechaLegible(g.VIGENCIA_DESDE) + '</td>'
+                + '<td class="text-center">' + estado + '</td>'
+                + '<td>' + escapar(g.USUARIO || '') + (g.FECHA_ALTA
+                    ? ' <small class="text-muted">' + escapar(g.FECHA_ALTA) + '</small>' : '') + '</td>'
+                + '<td class="text-center">' + (g.ACTIVO
+                    ? '<button class="btn btn-sm btn-link text-danger pret-baja-general" data-id="'
+                      + g.ID + '" title="Dar de baja esta vigencia, si se cargó por error. No se '
+                      + 'borra: deja de regir y vuelve a regir la anterior.">'
+                      + '<i class="fas fa-ban"></i></button>'
+                    : '') + '</td>'
+                + '</tr>';
+        }).join('');
+
+        return '<div class="card mb-4" id="cardGeneralesPplo">'
+            + '<div class="card-header"><h5 class="mb-0">Alícuotas generales</h5>'
+            + '<small class="text-muted">Sólo los impuestos "a todos". Una alícuota no se edita: se '
+            + 'carga una vigencia nueva y la anterior sigue rigiendo para las facturas que se pagan '
+            + 'antes. Cada proveedor puede tener la suya —o 0, para no retenerle— desde el Maestro.'
+            + '</small></div>'
+            + '<div class="card-body border-bottom" id="formGeneralPplo">'
+            +   '<div class="row g-2 align-items-end">'
+            +     '<div class="col-md-3"><label class="form-label form-label-sm">Impuesto</label>'
+            +       '<select class="form-select form-select-sm" id="nuevaGeneralImpPplo">'
+            +       todos.map(function(i) {
+                        return '<option value="' + escapar(i.CODIGO) + '">' + escapar(i.NOMBRE)
+                            + '</option>';
+                    }).join('')
+            +       '</select></div>'
+            +     '<div class="col-md-2"><label class="form-label form-label-sm">Alícuota (%)</label>'
+            +       '<input type="number" class="form-control form-control-sm" id="nuevaGeneralPctPplo" '
+            +       'min="0" max="99.9999" step="0.0001" placeholder="Ej: 2,5"></div>'
+            +     '<div class="col-md-3"><label class="form-label form-label-sm">Vigente desde</label>'
+            +       '<input type="date" class="form-control form-control-sm" id="nuevaGeneralDesdePplo" '
+            +       'value="' + escapar(ret.hoy || '') + '"></div>'
+            +     '<div class="col-md-2">'
+            +       '<button class="btn btn-sm btn-primary" id="btnAgregarGeneralPplo"'
+            +         (todos.length ? '' : ' disabled title="No hay impuestos activos a todos"') + '>'
+            +         '<i class="fas fa-check me-1"></i> Cargar vigencia</button>'
+            +     '</div>'
+            +   '</div>'
+            + '</div>'
+            + '<div class="card-body p-0"><div class="table-responsive">'
+            +   '<table id="tablaGeneralesPplo" class="table table-hover mb-0">'
+            +   '<thead><tr><th>Impuesto</th><th class="text-end" style="width: 110px;">Alícuota</th>'
+            +   '<th class="text-center" style="width: 130px;">Vigente desde</th>'
+            +   '<th class="text-center" style="width: 120px;">Estado</th><th>Cargó</th>'
+            +   '<th style="width: 60px;"></th></tr></thead>'
+            +   '<tbody>' + (filasGen || '<tr><td colspan="6" class="text-center text-muted py-4">'
+            +     'Todavía no hay alícuotas generales cargadas: mientras tanto no se retiene y la pestaña '
+            +     'Proveedores Locales lo avisa.</td></tr>') + '</tbody>'
+            +   '</table>'
+            + '</div></div>'
+            + '</div>';
+    }
+
+    function conectarRetenciones() {
+        var nuevo = document.getElementById('btnNuevoImpuestoPplo');
+        var form = document.getElementById('formImpuestoPplo');
+
+        if (nuevo && form) {
+            nuevo.addEventListener('click', function() {
+                form.style.display = (form.style.display === 'none') ? 'block' : 'none';
+            });
+        }
+
+        conectarBoton('btnCancelarImpuestoPplo', function() { form.style.display = 'none'; });
+        conectarBoton('btnAgregarImpuestoPplo', agregarImpuesto);
+        conectarBoton('btnAgregarGeneralPplo', agregarGeneral);
+
+        document.querySelectorAll('#tablaImpuestosPplo tbody tr[data-id]').forEach(function(tr) {
+            var id = tr.dataset.id;
+            var nombre = tr.querySelector('.pret-nombre');
+            var alcance = tr.querySelector('.pret-alcance');
+            var orden = tr.querySelector('.pret-orden');
+            var activo = tr.querySelector('.pret-activo');
+
+            var guardarImp = function(campo) {
+                guardarImpuesto(id, {
+                    nombre: nombre.value.trim(),
+                    alcance: alcance.value,
+                    orden: parseInt(orden.value, 10) || 0
+                }, campo);
+            };
+
+            alGuardar(nombre, function() {
+                if (nombre.value.trim() !== nombre.getAttribute('data-previo')) { guardarImp(nombre); }
+            });
+            alGuardar(orden, function() {
+                if (orden.value !== orden.getAttribute('data-previo')) { guardarImp(orden); }
+            });
+
+            /* CAMBIAR EL ALCANCE SE CONFIRMA: mueve el neto de todas las
+               facturas. Las alícuotas de los proveedores quedan. */
+            if (alcance) {
+                alcance.addEventListener('change', function() {
+                    var aTodos = (alcance.value === ret.alcance_todos);
+
+                    Notificacion.confirmar({
+                        titulo: 'Cambiar el alcance de ' + tr.dataset.nombre,
+                        mensaje: aTodos
+                            ? '¿Aplicarlo a todos los proveedores?'
+                            : '¿Aplicarlo sólo a los proveedores asignados?',
+                        detalle: aTodos
+                            ? 'Vuelve a regir su alícuota general —si tiene una vigente— para todo '
+                              + 'proveedor sin alícuota propia. Las alícuotas de los proveedores '
+                              + 'quedan como están.'
+                            : 'Deja de aplicarse su alícuota general: sólo se le retiene a los '
+                              + 'proveedores con alícuota propia. Las vigencias generales quedan en '
+                              + 'el historial y vuelven a regir si se vuelve a "a todos".',
+                        confirmar: 'Cambiar el alcance'
+                    }).then(function(si) {
+                        if (si) {
+                            guardarImp(alcance);
+                        } else {
+                            alcance.value = alcance.getAttribute('data-previo');
+                        }
+                    });
+                });
+            }
+
+            /* DAR DE BAJA DICE CUÁNTOS PROVEEDORES LO TIENEN: es el número que
+               hace que no sea a ciegas. No borra nada. */
+            if (activo) {
+                activo.addEventListener('change', function() {
+                    var activar = activo.checked;
+                    var cuantos = parseInt(tr.dataset.conPropia, 10) || 0;
+
+                    Notificacion.confirmar({
+                        titulo: (activar ? 'Reactivar ' : 'Dar de baja ') + tr.dataset.nombre,
+                        mensaje: activar
+                            ? '¿Volver a restar ' + tr.dataset.nombre + ' en las facturas?'
+                            : '¿Dejar de restar ' + tr.dataset.nombre + ' en todas las facturas?',
+                        detalle: activar
+                            ? 'Vuelven a regir su alícuota general y las de los proveedores.'
+                            : (cuantos > 0
+                                ? cuantos + ' proveedor(es) tienen una alícuota propia de este '
+                                  + 'impuesto. '
+                                : '')
+                              + 'No se borra nada: el historial y las alícuotas de los proveedores '
+                              + 'quedan, y reactivarlo las vuelve a poner en juego.',
+                        confirmar: activar ? 'Reactivar' : 'Dar de baja',
+                        peligro: !activar
+                    }).then(function(si) {
+                        if (!si) {
+                            activo.checked = !activar;
+                            return;
+                        }
+
+                        pedirAccion('activarImpuestoProvLocal', { id: id, activo: activar })
+                            .then(function(res) {
+                                Notificacion.exito(res.message);
+                                cargar();
+                            })
+                            .catch(function(error) {
+                                activo.checked = !activar;
+                                Notificacion.error('No se pudo guardar: ' + error.message);
+                            });
+                    });
+                });
+            }
+        });
+
+        document.querySelectorAll('.pret-baja-general').forEach(function(b) {
+            b.addEventListener('click', function() {
+                Notificacion.confirmar({
+                    titulo: 'Dar de baja la vigencia',
+                    mensaje: '¿Dar de baja esta alícuota?',
+                    detalle: 'Es para una vigencia cargada por error. No se borra: deja de regir, y '
+                        + 'vuelve a regir la anterior.',
+                    confirmar: 'Dar de baja',
+                    peligro: true
+                }).then(function(si) {
+                    if (!si) { return; }
+
+                    pedirAccion('bajaAlicuotaProvLocal', { id: b.dataset.id })
+                        .then(function(res) {
+                            Notificacion.exito(res.message);
+                            cargar();
+                        })
+                        .catch(function(error) {
+                            Notificacion.error('No se pudo dar de baja: ' + error.message);
+                        });
+                });
+            });
+        });
+    }
+
+    function agregarImpuesto() {
+        var codigo = document.getElementById('nuevoCodigoImpPplo');
+        var nombre = document.getElementById('nuevoNombreImpPplo');
+
+        if (!/^[A-Za-z0-9_]{1,30}$/.test((codigo.value || '').trim())) {
+            Notificacion.campoInvalido(codigo, 'El código va sin espacios ni acentos: letras, números '
+                + 'y guion bajo.');
+            return;
+        }
+
+        if ((nombre.value || '').trim() === '') {
+            Notificacion.campoInvalido(nombre, 'Poné el nombre del impuesto.');
+            return;
+        }
+
+        pedirAccion('addImpuestoProvLocal', {
+            codigo: codigo.value.trim().toUpperCase(),
+            nombre: nombre.value.trim(),
+            alcance: document.getElementById('nuevoAlcanceImpPplo').value,
+            orden: parseInt(document.getElementById('nuevoOrdenImpPplo').value, 10) || 0
+        })
+            .then(function(res) {
+                Notificacion.exito(res.message);
+                cargar();
+            })
+            .catch(function(error) {
+                Notificacion.error('No se pudo agregar: ' + error.message);
+            });
+    }
+
+    function guardarImpuesto(id, cambios, campo) {
+        pedirAccion('saveImpuestoProvLocal', Object.assign({ id: id }, cambios))
+            .then(function(res) {
+                Notificacion.exito(res.message);
+                cargar();
+            })
+            .catch(function(error) {
+                if (campo) {
+                    campo.value = campo.getAttribute('data-previo');
+                }
+
+                Notificacion.error('No se pudo guardar: ' + error.message);
+            });
+    }
+
+    /**
+     * Carga una vigencia nueva. El porcentaje se escribe como porcentaje y
+     * viaja como fracción, igual que en Parámetros › Cheques. El rango y las
+     * sumas los valida el servidor, que conoce las alícuotas de cada proveedor.
+     */
+    function agregarGeneral() {
+        var pct = document.getElementById('nuevaGeneralPctPplo');
+        var desde = document.getElementById('nuevaGeneralDesdePplo');
+        var n = parseFloat(String(pct.value || '').replace(',', '.'));
+
+        if (isNaN(n) || n < 0 || n >= 100) {
+            Notificacion.campoInvalido(pct, 'La alícuota es un porcentaje entre 0 y 100: 2,5% se '
+                + 'carga como 2,5.');
+            return;
+        }
+
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(desde.value || '')) {
+            Notificacion.campoInvalido(desde, 'Elegí desde qué fecha rige.');
+            return;
+        }
+
+        pedirAccion('addAlicuotaProvLocal', {
+            impuesto: document.getElementById('nuevaGeneralImpPplo').value,
+            alicuota: n / 100,
+            vigencia_desde: desde.value
+        })
+            .then(function(res) {
+                Notificacion.exito(res.message);
+                cargar();
+            })
+            .catch(function(error) {
+                Notificacion.error('No se pudo cargar: ' + error.message);
+            });
+    }
+
+    function conectarBoton(id, fn) {
+        var b = document.getElementById(id);
+
+        if (b) {
+            b.addEventListener('click', fn);
+        }
+    }
+
+    /** 0.025 => '2,5%' */
+    function porcentaje(alicuota) {
+        var n = (parseFloat(alicuota) || 0) * 100;
+
+        return n.toLocaleString('es-AR', { maximumFractionDigits: 4 }) + '%';
+    }
+
+    function fechaLegible(v) {
+        var p = String(v || '').split('-');
+
+        return (p.length === 3) ? p[2].substring(0, 2) + '/' + p[1] + '/' + p[0] : (v || '');
     }
 
     /* ================================================================

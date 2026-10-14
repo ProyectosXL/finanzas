@@ -43,7 +43,10 @@ Contra `central`, en cualquier momento:
 -- 7. sql/cashflow_prov_locales_fuente_fecha.sql      (de dónde salió cada fecha de pago)
 -- 8. sql/cashflow_prov_exclusion_modulo.sql          (excluir un proveedor entero del módulo)
 -- 9. sql/cashflow_prov_locales_pago_medio.sql        (un comprobante pagado con dos medios)
+-- 10. sql/cashflow_prov_locales_retenciones.sql      (las retenciones: impuestos y alícuotas)
 ```
+
+El décimo crea las tres tablas de las retenciones —los impuestos, sus alícuotas generales y las de cada proveedor— y siembra **IIBB** y **GANANCIAS** "a todos" y **SUSS** "solo a los asignados", **sin alícuotas**: **el día que se corre el tablero no se mueve**. No depende de ningún otro. Es reejecutable: la semilla es un `MERGE` sobre el código que sólo inserta lo que falta, así que un impuesto renombrado, con otro alcance o dado de baja no se pisa ni se reactiva. **Sin él** las facturas se proyectan por el total, como antes, y la pestaña avisa qué script falta. Después de correrlo, **hasta que se carguen las alícuotas generales** en *Parámetros › Prov. Locales* tampoco se retiene nada, y la pestaña avisa cuántos comprobantes del cronograma están sin retención por eso. Ver *Las retenciones*.
 
 El noveno crea `RO_T_CASHFLOW_PROV_LOCALES_PAGO_MEDIO`, vacía: **el día que se corre el tablero no se mueve**. Va después del primero —necesita la tabla de pagos y aborta si no está— y no depende de ningún otro. **Sin él** un comprobante no se puede pagar con dos medios: la importación rechaza esas filas nombrando el script, todo lo demás funciona igual, y la pestaña avisa. Ver *Un comprobante pagado con dos medios*.
 
@@ -277,6 +280,99 @@ La columna *Fecha de pago* muestra **la fecha del cronograma** con la etiqueta *
 El input funciona igual: **elegir otra fecha la graba como MANUAL**; el botón **↺ la borra y la factura vuelve al cronograma**. El aviso de vencidos sin fecha se partió en dos —los del cronograma, que van al próximo día de pago, y los de las otras formas, que siguen en el primer día del eje— y el cartel de la pestaña lo explica arriba de la grilla.
 
 ---
+
+## Las retenciones: el flujo proyecta el neto a pagar
+
+> Esto es **nuevo**, de `feature/prov-locales-retenciones`.
+
+A una factura que se paga por **orden de pago** —echeq o transferencia, la forma vigente del cronograma— se le retienen impuestos: hoy IIBB, Ganancias y SUSS. Lo que sale de la caja es **el total menos las retenciones**, y es lo que quien arma la planilla de pagos pone como importe.
+
+**Por qué no se leen de Tango.** Tango calcula las retenciones *en* la orden de pago. Pero la orden de pago cancela la factura y la saca del pendiente, así que para el flujo ese cálculo llega tarde. Por eso las alícuotas se cargan en el cashflow.
+
+### Los impuestos son datos, no código
+
+Ningún impuesto está escrito en el código. Viven en `RO_T_CASHFLOW_PROV_LOCALES_IMPUESTO`, los siembra el script y se administran en *Parámetros › Prov. Locales*, sección **Retenciones**: alta, nombre, orden y baja. El **código no se edita**: es lo que guardan las alícuotas, y cambiarlo dejaría huérfano el historial.
+
+Cada impuesto tiene un **alcance**:
+
+| Alcance | Qué quiere decir | Alícuota |
+| --- | --- | --- |
+| **A todos** (IIBB, Ganancias) | Se aplica a todo proveedor salvo excepción | Una **general con vigencias**, y cada proveedor puede tener la suya —o 0, *no se le retiene*— |
+| **Solo a los asignados** (SUSS) | Se aplica únicamente a quien tenga una alícuota cargada | **No tiene general**: es por proveedor |
+
+**Cambiar el alcance se permite** y no borra nada. Pasar a *solo a los asignados* deja de aplicar la general —sus vigencias quedan en el historial— y volver a *a todos* la pone de nuevo en juego. Las alícuotas de los proveedores quedan.
+
+**La baja es lógica.** Un impuesto dado de baja deja de restarse en todas las facturas desde ese momento, y conserva su historial y las alícuotas de los proveedores; reactivarlo las vuelve a poner en juego. La confirmación dice **cuántos proveedores tienen alícuota propia** de ese impuesto, por lo mismo que las listas muestran sus usos: dar de baja a ciegas no.
+
+### La alícuota general no se edita
+
+Igual que en *Parámetros › Cheques*: **se carga una vigencia nueva** con su *vigente desde*, y la anterior sigue rigiendo para las facturas que se pagan antes. Una vigencia cargada por error se da de baja (baja lógica) y vuelve a regir la anterior. La tabla, `RO_T_CASHFLOW_PROV_LOCALES_ALICUOTA`, tiene **la misma forma** que las de Cob. Electrónicos y Echeqs, porque la regla de qué alícuota rige a qué fecha vive una sola vez —`Retenciones::alicuotasVigentes()`, con el desempate por `ID`— y recibe estas filas tal cual. Es una tabla propia: un cambio en la tasa del banco no puede mover el neto de una factura.
+
+**Las validaciones**, en el servidor:
+
+- la alícuota es ≥ 0 y < 100%;
+- **las generales vigentes suman menos de 100%**, a esa fecha y en cada vigencia posterior;
+- y **ningún proveedor queda con sus alícuotas efectivas sumando 100% o más** —contando las generales que le aplican y las propias—. Una general nueva también cambia la suma de quien tiene alícuotas propias en otros impuestos; si alguno se pasa, no se guarda y el mensaje lo nombra. Lo mismo vale al cambiar un alcance y al reactivar un impuesto.
+
+La suma es escalonada —sólo cambia cuando empieza a regir una vigencia—, así que se mira en cada escalón desde la fecha de la carga: una general cargada para el mes que viene que deja a alguien en 100% se rechaza hoy (`ProveedoresRetenciones::excedidos()`).
+
+La pantalla lista cada impuesto con su alcance, **su alícuota de hoy** —*sin alícuota* si es *a todos* y no tiene, *por proveedor* si es *solo a los asignados*— y **cuántos proveedores tienen alícuota propia**.
+
+**Sin general vigente no se retiene, y se avisa.** No es una retención de 0: nadie decidió que no se retenga, falta el dato. Ver *El cálculo*, más abajo.
+
+### La alícuota de cada proveedor se carga desde el Maestro
+
+Cada proveedor puede tener una alícuota **propia** por impuesto, en `RO_T_CASHFLOW_PROV_LOCALES_ALICUOTA_PROV`:
+
+| Valor | En un impuesto "a todos" | En uno "solo a los asignados" |
+| --- | --- | --- |
+| **Un número** | Reemplaza a la general | Es lo que hace que se le aplique |
+| **0** | *No se le retiene* | Lo mismo que no tenerlo asignado; se acepta igual, para que la intención quede registrada |
+| **Sin dato** (`NULL`) | Usa la general vigente | No se le aplica |
+
+**`NULL` no es 0**: cero es una decisión —*a este no se le retiene*—; `NULL` es *volvió a la general* o *dejó de estar asignado*.
+
+**Rige desde el día de la carga**, y esa fecha la pone el servidor: no se elige. El valor anterior queda en el historial y sigue rigiendo para las fechas de pago anteriores. **Volver a la general también es un registro con su fecha**, no un borrado: la tabla no tiene `UPDATE` ni `DELETE`, es su propio historial. Dos cargas el mismo día las desempata el `ID` —rige la última—, la misma regla que las generales. Y la alícuota del proveedor se resuelve contra **la fecha de pago del comprobante**, igual que la general.
+
+**Se carga de a muchos, que es el caso normal.** En la grilla del Maestro se eligen los proveedores con las casillas —el check del encabezado toma **sólo lo que dejan ver** el buscador y los filtros nuevos: rubro económico, rubro, forma de pago y retención— y **Asignar retención** abre un diálogo con el impuesto y la acción: cargar una alícuota, *no se retiene* (sólo en "a todos") o *volver a la general* / *quitar la asignación*. Antes de confirmar el servidor dice **a cuántos se aplica, cuántos ya tenían ese mismo valor** —no se tocan: una fila idéntica en el historial diría que alguien decidió algo ya decidido— **y cuántos tenían otro valor** que se reemplaza.
+
+- **Es todo o nada, en una transacción**, y el servidor vuelve a calcular el plan contra la base de ahora: lo que mostró el diálogo es un pedido, no una autorización.
+- **Si algún proveedor quedaría con sus alícuotas sumando 100% o más, no se aplica a ninguno** y el mensaje dice cuáles. Vale para cualquier acción: volver a la general también puede pasarse, si el proveedor tenía 0 y la general es alta.
+- **Sólo proveedores vigentes del maestro.** Los excluidos que no están en el maestro no llevan casilla.
+- La selección **se poda contra lo que se ve**: si después de seleccionar se cambia un filtro, lo que quedó escondido deja de estar elegido. Es el mismo criterio que la selección de *Cuentas a Pagar* contra lo que vino del servidor.
+
+**Y de a uno, desde el proveedor.** Al editarlo, el formulario tiene una sección **Retenciones** con cada impuesto activo: su valor de hoy y de dónde sale (*general*, *del proveedor*, *no se retiene*, *no asignado*), los tres gestos y el historial —valor, desde cuándo, quién y si fue masiva o individual—. Cada cambio se guarda solo y no con *Guardar*, porque no es un dato del maestro. **En un alta se habilita después de guardar**: el formulario vuelve abierto, en edición.
+
+**En la grilla**, una columna por impuesto activo con la alícuota efectiva de hoy: la general atenuada (*gral.*), la del proveedor en negrita, *no se retiene* con su rótulo, *sin alícuota* en ámbar si es "a todos" y no hay general, y vacía si es "solo a los asignados" y no le aplica. La resuelve el servidor con la misma regla del cálculo.
+
+### El cálculo: la retención y el neto de cada comprobante
+
+Escrito **una sola vez**, en `ProveedoresRetenciones::calcular()` —estática y pura—, y aplicado a cada fila por `Proveedores::conRetencion()`. Lo usan la grilla, el proveedor del tablero, la importación de la planilla de pagos y los avisos: si cada uno resolviera por su cuenta, el neto del eje y el de la planilla podrían diferir en un centavo y la planilla quedaría rechazada sin que nadie entienda por qué.
+
+**A qué comprobantes aplica:** sólo a los de **forma vigente del cronograma** —la que decide, override o maestro, con `formaDelCronograma()`—, porque son los que se pagan por orden de pago. Uno **sin forma conocida** también entra: para el cronograma ya cuenta como echeq, y si está en la fila del tablero tiene que estar en neto como los demás. El aviso de proveedores sin forma o con un typo sigue visible, y ahora además afecta el neto.
+
+| No lleva retención | Por qué |
+| --- | --- |
+| Débito automático, caja, tarjeta | No pasan por orden de pago |
+| **Notas de crédito** | Se imputan, no se pagan. Se reconocen con el mismo criterio de signos que ya usa el módulo para las imputaciones: `CPA21.CRE_DEB = 'C'` del tipo del comprobante —hoy `NCD`, `NCI`, `NCP`, `NCR`, `NIP` y `AJC`—. CPA21 se lee una vez y se cruza en PHP. Hoy ningún pendiente es de crédito —medido el 14/10/2026: los 558 son `FAC`; las NC de `CPA04` quedan `IMP` o `CTA`, nunca `PEN`—: la regla es una red |
+| Sin el script, o sin general vigente ni alícuota propia | Falta el dato: se proyecta el total y se avisa |
+
+**Cambiar la forma de una factura** —override o maestro— **cambia su neto en el momento**: se calcula al leer, como todo lo derivado en este módulo.
+
+**La base es el pendiente**, el total que se proyectaba hasta ahora; no el neto sin IVA.
+
+**La alícuota efectiva de cada impuesto activo se resuelve a la fecha de pago del comprobante** —la misma con la que cae en el eje—: la propia del proveedor vigente a esa fecha si la tiene (0 incluido); si no, en *a todos*, la general vigente a esa fecha; en *solo a los asignados*, no se aplica. Sin fecha (`SIN_FECHA`) se usa la de hoy.
+
+```
+retención de cada impuesto = base × alícuota efectiva, redondeada a 2 decimales
+neto a pagar               = base − la suma de las retenciones
+```
+
+Una orden de pago emite **un certificado por impuesto**, cada uno en pesos y centavos, y lo que sale de la caja es la factura menos esos certificados. Por eso se redondea cada impuesto y el neto se arma restando, no aplicando la tasa total: así neto + retenciones = base, al centavo. Lo hace `Retenciones::retencionesPorConcepto()`, un método nuevo; `importeNeto()` —el de Cob. Electrónicos y Echeqs, que redondea la tasa total a 4 decimales— no cambió.
+
+**Cada fila viaja con cuatro campos nuevos**: `RETENCION` (el desglose: base, cada impuesto con su alícuota y de dónde sale, el motivo si no lleva ninguno), `RETENIDO`, `RETENIDO_POR_IMPUESTO` e `IMPORTE_A_PAGAR`. **`IMPORTE_PENDIENTE` no cambia**: sigue siendo el total, y lo siguen leyendo *Tarjetas Pagos Corporativos*, la previsualización y las columnas *Importe* y *Pendiente*.
+
+**La importación del maestro no suma columnas de alícuotas y no las toca**: viven en su propia tabla, y la planilla —que es una copia reimportable con bajas— las borraría en la primera reimportación. Mismo motivo por el que la exclusión de un proveedor tampoco vive en el maestro.
 
 ## La fecha se carga de a una, o de a muchas
 
@@ -855,18 +951,35 @@ Si el archivo daría de baja **más de la mitad** del maestro, lo más probable 
 
 Campos: **cód. proveedor, número de factura, fecha de pago, forma de pago e importe**. Los tres primeros son obligatorios.
 
-**`IMPORTE` es opcional con un medio** (sinónimos `MONTO`, `IMPORTE_PAGO`): vacío quiere decir *todo lo pendiente*. Si viene, tiene que coincidir con el pendiente del comprobante **con $1 de tolerancia**; otro número es otro comprobante o un pago parcial que Tango todavía no sabe, y la fila queda en error con la diferencia. Un importe que no es un número también es un error: tomar el pendiente porque la celda decía *"mil pesos"* sería decidir por quien armó la planilla.
+**`IMPORTE` es el neto de retenciones**, que es lo que pone quien arma la planilla: lo que sale de la caja. **Es opcional con un medio** (sinónimos `MONTO`, `IMPORTE_PAGO`): vacío quiere decir *el neto a pagar*. Si viene, tiene que coincidir con **el neto a pagar del comprobante con $1 de tolerancia**; otro número es otro comprobante o un pago parcial que Tango todavía no sabe, y la fila queda en error. Un importe que no es un número también es un error: tomar el neto porque la celda decía *"mil pesos"* sería decidir por quien armó la planilla.
+
+El neto se calcula con la misma regla que la grilla (*El cálculo*, arriba), **a la `FECHA_PAGO` de la planilla** —la que va a quedar cargada— y, con dos medios, a la más tardía de las dos. Un comprobante **sin retención** —otra forma, nota de crédito, proveedor sin impuestos que le apliquen, o sin el script— tiene neto = total, y la regla es la de antes.
+
+**El motivo ayuda a corregir.** El error del primer día va a ser poner el total de la factura, así que si el importe **coincide con el total sin retenciones** (±$1) el motivo lo dice: *"El importe coincide con el total de la factura sin retenciones ($ X). El neto a pagar con retenciones es $ Y (IIBB $ a, Ganancias $ b). Si a este proveedor no se le retiene, cargale alícuota 0 en el Maestro"*. En cualquier otro desajuste muestra total, retenciones, neto y diferencia. **La previsualización** muestra, por fila, el total, las retenciones —con el desglose en el tooltip— y el neto contra el que se comparó.
 
 **El tipo de comprobante no es obligatorio**, a propósito: quien arma la planilla mira una factura y copia su número, no su tipo. Cuando falta se deduce de los pendientes del proveedor.
 
 - Un comprobante **en cuotas** aparece varias veces en los pendientes y eso **no es ambigüedad**: es un comprobante con varios vencimientos. Se resuelve solo, y el importe que se reubica es la suma de sus cuotas —la fecha se carga por comprobante, no por cuota—.
 - **Dos tipos distintos con el mismo número** sí lo son. Ahí la fila pide que se aclare con la columna `TIPO_COMP`, en lugar de elegir una.
 
-**Lo que no cruza contra ningún pendiente es un error visible con su motivo**, y los tres casos se distinguen porque se arreglan distinto: número mal tipeado, proveedor equivocado, o factura que ya se pagó.
+**Lo que no cruza contra ningún pendiente se mira en Tango**, y se distingue porque se arregla distinto —o no hay nada que arreglar—:
+
+| En Tango | Estado | Qué pasa |
+| --- | --- | --- |
+| Existe para ese proveedor, no está pendiente y tiene una cancelación (`CAN`, `PAG`) | **Ya pagada en Tango** — advertencia | Muestra la **fecha real del pago**, con el criterio de la conciliación (`MAX(CPA05.F_COMP_CAN)`). **No se carga, no frena la confirmación** y el resumen las cuenta aparte, con su propio indicador |
+| No existe para ese proveedor | **Error** | Número mal tipeado o proveedor equivocado. El motivo ya no dice *"si ya se pagó"* |
+| Existe, pero sin pago y sin estar pendiente (`***` de `CPA04`, sin imputaciones) | **Error** | *"Está en Tango pero no figura en cuenta corriente"*: no se paga con una orden de pago |
+| Sigue `PEN`, pero el listado lo deja afuera (cláusula, saldo cero) | **Error** | Como hoy |
+
+**Sin `TIPO_COMP`** vale lo mismo: si **todos** los candidatos con ese número están cancelados es advertencia, con la fecha más tardía; si alguno está pendiente, se resuelve como hoy. **Dos filas de un comprobante ya pagado** son dos advertencias, no un error del comprobante: no hay nada que cargar.
+
+**La consulta es sólo para los que no cruzaron** (`Proveedores::sinCruce()` y `estadoComprobantesEnTango()`), no para toda la historia de `CPA04`: filtra por proveedor y por número con dos `IN`, cruza el par exacto en PHP y pide la fecha real en una segunda consulta sólo para esos `ID`. Medida contra la base el 14/10/2026 con 25 comprobantes que no cruzaban —20 ya pagados, 5 inexistentes—: **unos 80 ms**. Si la consulta falla, la previsualización sigue con el motivo de siempre. `compararImportacion()` sigue siendo pura: recibe ese estado por parámetro.
+
+(Hay 50.877 `FAC` en estado `***` en `CPA04`, sin ninguna imputación: son las que nunca pasaron por cuenta corriente. Por eso "existe en Tango" no alcanza para decir "ya se pagó".)
 
 **El aviso que importa dice cuántos vencidos quedan resueltos.** Es la razón de ser de esta importación, y hay que verlo *antes* de confirmar.
 
-**Confirmar no le cree a lo que vuelve del navegador.** Cada fila de la previsualización viaja con lo que decía el archivo (`crudo`), y `aplicarImportacion()` vuelve a calcular el diff con eso contra los pendientes, los pagos y las aperturas de *ahora*. Si una sola línea da un estado distinto del que se previsualizó —se pagó una parte en Tango, alguien cargó otra fecha— **no se aplica nada** y el mensaje dice qué línea cambió. Antes se le creía al diff que se reenviaba; desde que hay una regla que depende de sumar importes contra el pendiente, eso no podía depender de la pantalla. Mismo criterio que el maestro y que Cob. Electrónicos.
+**Confirmar no le cree a lo que vuelve del navegador.** Cada fila de la previsualización viaja con lo que decía el archivo (`crudo`), y `aplicarImportacion()` vuelve a calcular el diff con eso contra los pendientes, los pagos, las aperturas **y las alícuotas** de *ahora*. Si una sola línea da un estado distinto del que se previsualizó —se pagó una parte en Tango, alguien cargó otra fecha— **o el mismo estado con otro neto** —cambió una alícuota—, **no se aplica nada** y el mensaje dice qué línea cambió. Antes se le creía al diff que se reenviaba; desde que hay una regla que depende de sumar importes contra el pendiente, eso no podía depender de la pantalla. Mismo criterio que el maestro y que Cob. Electrónicos.
 
 ### Un comprobante pagado con dos medios
 
@@ -877,8 +990,8 @@ Una factura se puede pagar parte con un echeq y parte con una transferencia, o c
 | | Un medio (una fila) | Dos medios (dos filas) |
 | --- | --- | --- |
 | `FORMA_PAGO` | opcional, como siempre | **obligatoria**, `ECHEQ` o `TRANSFERENCIA`. Puede repetirse |
-| `IMPORTE` | opcional; si viene, = pendiente ± $1 | **obligatorio en las dos**, mayor a cero |
-| La suma | — | = pendiente ± $1 |
+| `IMPORTE` | opcional; si viene, = neto a pagar ± $1 | **obligatorio en las dos**, mayor a cero, neto |
+| La suma | — | = neto a pagar ± $1 |
 | En cuotas | se carga | **error**: *"es un comprobante en cuotas: cargalo con un solo medio"* |
 
 - **Tres filas o más** dejan en error **todas**, nombrando las líneas. No hay tercer medio, y elegir cuáles dos valen sería decidir por quien armó la planilla.
@@ -903,9 +1016,11 @@ Una fila por medio, con la clave del comprobante en `Latin1_General_BIN`, `ORDEN
 
 #### En el eje y en el tablero
 
-`getPendientes()` **con el horizonte** devuelve **una fila por parte**, con `IMPORTE_PENDIENTE` = el importe de la parte y su fecha resuelta con la jerarquía de siempre, cada una por separado: una parte futura se respeta tal cual, y una que ya pasó, si la forma vigente es del cronograma, va al próximo día de pago. Lo hace `Proveedores::abrirEnMedios()`, pura.
+`getPendientes()` **con el horizonte** devuelve **una fila por parte**, con `IMPORTE_A_PAGAR` = el importe de la parte y su fecha resuelta con la jerarquía de siempre, cada una por separado: una parte futura se respeta tal cual, y una que ya pasó, si la forma vigente es del cronograma, va al próximo día de pago. Lo hace `Proveedores::abrirEnMedios()`, pura.
 
-- **Las series no ganan ni pierden un peso.** La última parte se lleva el resto —pendiente menos las anteriores—, así que la tolerancia de $1 no llega al cuadro. `IMPORTE_VTO` e `IMPUTACIONES` se reparten en la misma proporción y el pie de *Importe* tampoco se mueve. Las dos particiones de `PAGOS_TODO` siguen cerrando; lo único que cambia es en qué columna cae cada peso.
+**Las partes son importes netos.** La planilla trae lo que sale por cada medio, que es después de retenciones, así que las dos partes suman **el neto a pagar** del comprobante. La retención se calcula **sobre el comprobante entero, una sola vez**, a la **fecha más tardía** de las dos partes —una orden de pago retiene sobre la factura, no sobre cada medio— y **va entera en la primera parte**: su pendiente es su neto más la retención, y el de la segunda, su neto. Sin alícuotas, el neto es el pendiente y todo funciona como antes.
+
+- **Las series no ganan ni pierden un peso.** La última parte se lleva el resto —neto menos las anteriores—, así que la tolerancia de $1 no llega al cuadro. Los pendientes de las partes siguen sumando el pendiente del comprobante, `IMPORTE_VTO` e `IMPUTACIONES` se reparten en la misma proporción, y los pies de *Importe* y *Pendiente* tampoco se mueven. Las retenciones van en una sola parte, así que los totales por impuesto no se duplican. Las dos particiones de `PAGOS_TODO` siguen cerrando; lo único que cambia es en qué columna cae cada peso.
 - **Excluir el comprobante excluye las dos partes**, por factura o por proveedor: las dos filas llevan las mismas marcas.
 - **Sin el horizonte no se parte.** Tarjetas Pagos Corporativos arma su clave de cuota con comprobante + vencimiento y dos filas con la misma clave le romperían el circuito; la previsualización necesita el pendiente del comprobante entero.
 
@@ -913,7 +1028,7 @@ Una fila por medio, con la clave del comprobante en `Latin1_General_BIN`, `ORDEN
 
 #### Un pago parcial en Tango
 
-Si el pendiente deja de coincidir con la suma de la apertura —más de $1 de diferencia—, o el comprobante pasa a tener más de un vencimiento, **no se parte**: todo lo que queda pendiente se proyecta **en la fecha más tardía**, que es la que tiene la tabla de pagos, con la jerarquía de siempre. La pestaña avisa, en atención: *"N comprobante(s) abiertos en dos medios ya no coinciden con su pendiente: se proyecta el saldo en la fecha más tardía. Reimportá para corregirlo"*. En la grilla la marca dice *no coincide*, en naranja.
+Un pago parcial baja el pendiente, y **la retención se recalcula sobre el pendiente nuevo**. Si el neto que resulta deja de coincidir con la suma de la apertura —más de $1 de diferencia—, o el comprobante pasa a tener más de un vencimiento, **no se parte**: todo lo que queda pendiente se proyecta **en la fecha más tardía**, que es la que tiene la tabla de pagos, con la jerarquía de siempre y su neto. La pestaña avisa, en atención: *"N comprobante(s) abiertos en dos medios ya no coinciden con su neto a pagar: se proyecta el saldo en la fecha más tardía. Reimportá para corregirlo"*. En la grilla la marca dice *no coincide*, en naranja.
 
 Cuando el comprobante sale de pendientes, concilia como cualquier otro, y **el desvío en días se mide contra la fecha más tardía**.
 
@@ -951,7 +1066,7 @@ Queda marcada `CONCILIADO` con la **fecha real al lado**, sin pisar la prevista.
 
 > Es lo único que permite después contestar la pregunta por la que vale la pena guardar las dos: **¿le acertamos a la fecha?** Borrándola, esa pregunta se queda sin respuesta para siempre.
 
-Por eso el resumen informa el **desvío promedio en días** entre lo previsto y lo real —recién con cinco casos, porque con menos no significa nada—. Ese número dice si la previsión está sirviendo o si siempre se paga más tarde de lo que se dice.
+Por eso el aviso informa el **desvío promedio en días** entre lo previsto y lo real —recién con cinco casos, porque con menos no significa nada—. Ese número dice si la previsión está sirviendo o si siempre se paga más tarde de lo que se dice.
 
 **Un comprobante pagado con dos medios mide el desvío contra la fecha más tardía**: es la que guarda la tabla de pagos (ver *Un comprobante pagado con dos medios*), y es cuando termina de pagarse.
 
@@ -964,15 +1079,41 @@ Por eso el resumen informa el **desvío promedio en días** entre lo previsto y 
 
 **Un comprobante que no aparece en Tango no se toca**: pudo haberse anulado, depurado, o cargado con un código que después cambió. Marcarlo como pagado sería inventar un hecho.
 
-**Consulta sólo lo que tiene previsión**, no las 96.403 canceladas locales: la pregunta es *"de lo que tengo previsto, qué ya se pagó"*. La fecha real sale del último comprobante que canceló (`MAX(CPA05.F_COMP_CAN)`) y **no** de `CPA04`, donde no hay fecha de pago sino de emisión y de contabilización.
+La fecha real sale del último comprobante que canceló (`MAX(CPA05.F_COMP_CAN)`) y **no** de `CPA04`, donde no hay fecha de pago sino de emisión y de contabilización.
 
-Como las dos importaciones, **no escribe nada hasta confirmar**.
+### Corre sola, cada vez que se cargan los pendientes
+
+> Esto **cambió** en `feature/prov-locales-retenciones`. Antes era el botón *Conciliar*, con su previsualización y su confirmación; el botón ya no está.
+
+**No es una decisión de nadie: es copiar lo que dice Tango.** Por eso corre en el servidor cada vez que la pestaña carga los pendientes —al entrar y con *Actualizar*—, antes de devolver la grilla, **para cualquier usuario que pueda ver la pestaña, con o sin permiso de edición**. Firma con un usuario fijo, `SISTEMA:Proveedores.conciliarAutomatica` —la convención del módulo para un efecto lateral del código (`AuthCashflow::origen()`)—, y no con quien estaba mirando. `previewConciliacion` y `aplicarConciliacion` ya no existen: la conciliación no es una acción del usuario. El tablero no concilia: sólo la pestaña.
+
+**Es incremental, y por eso barata.** Usa los pendientes que la pestaña acaba de leer (`Proveedores::planConciliacion()`, pura):
+
+- una prevista cuyo comprobante **sigue en los pendientes** no cambió: no se consulta nada;
+- una conciliada que **volvió a los pendientes** se reabre sin consultar;
+- sólo las **previstas que salieron de los pendientes** van a Tango, filtradas por proveedor y número (la misma consulta acotada de las facturas ya pagadas de la importación). Eso pasa sólo cuando efectivamente se pagó algo.
+
+La versión del botón leía todo `CPA04` de los proveedores con previsión —19.869 filas de 33 proveedores— y tardaba **entre 1,6 y 1,9 s**. **Medido el 14/10/2026: la automática suma unos 30 ms** a la carga de la pestaña cuando no hay nada que conciliar, que es el caso normal, y unos 80 ms más cuando hay que consultar Tango. La carga completa del endpoint `getPendientes` dio 2,3 s.
+
+**Un caso queda afuera, a propósito:** una conciliada cuyo comprobante vuelve a `PEN` en Tango **pero queda fuera del listado** —cláusula de moneda extranjera, saldo cero— no se reabre, porque no se la consulta. Hoy no hay ninguna, y la previsión de un comprobante que el listado no muestra no mueve ningún número.
+
+**Idempotente y segura con dos usuarios a la vez.** Todo va en una transacción, y cada `UPDATE` toca la fila sólo si sigue en el estado de partida (`PREVISTO` para conciliar, `CONCILIADO` para reabrir): si otra carga ya la cambió, no afecta nada y no se cuenta. **Si no hay nada que cambiar, no escribe nada.**
+
+**Si falla, la pestaña carga igual**, con un aviso de atención que dice que no se pudo conciliar: la grilla no depende de ella, y lo ya pagado sale de los pendientes por sí solo.
+
+**Los avisos**, en el panel de la pestaña, sección *Conciliación*:
+
+| Nivel | Cuándo | Qué dice |
+| --- | --- | --- |
+| Informativo | Se concilió algo | *"Se conciliaron N previsión(es) con Tango"*, y con cinco o más, el desvío promedio en días |
+| Atención | Algo se reabrió | *"N factura(s) conciliadas volvieron a estar pendientes (orden de pago anulada)"*, con proveedor, comprobante e importe de cada una |
+| — | No cambió nada | Ningún aviso: corre en cada carga, y un *"nada cambió"* en cada una sería ruido |
 
 ---
 
 ## Integración con el tablero
 
-`ProveedoresProvider` sirve el código `PROV_LOCALES` con **siete series fijas** y **una por rubro**:
+`ProveedoresProvider` sirve el código `PROV_LOCALES` con **siete series fijas** y **una por rubro**. **Todas miden el importe a pagar**: el neto de retenciones en las facturas que se pagan por orden de pago, el pendiente en las demás (`importeAPagar()`). Ver *El tablero va en neto*, más abajo.
 
 | Serie | Qué trae |
 | --- | --- |
@@ -998,6 +1139,22 @@ PAGOS_OPERATIVOS + PAGOS_EXCLUIDOS                       = PAGOS_TODO  (por qué
 ```
 
 Eso lo fija `tests/test_proveedores.php` contra los datos reales: si una de las dos no cerrara, algún comprobante se estaría yendo a la serie equivocada.
+
+### El tablero va en neto
+
+> Esto **cambió** en `feature/prov-locales-retenciones`.
+
+La fila *Cuentas a Pagar Locales* muestra **lo que sale de la caja**: el neto de retenciones. Cada fila aporta el **mismo** importe a todas sus series, así que **las dos particiones siguen cerrando** contra `PAGOS_TODO`, ahora en neto.
+
+**La retención no se proyecta como egreso en ninguna fila**: es plata que no sale. Para auditar el corte, cada serie lleva **escalares** —no series elegibles— en `auditoria`: el `bruto` (el pendiente) y `retencion_<IMPUESTO>` de cada impuesto. El invariante, en cada serie:
+
+```
+bruto = lo que suma la serie (eje + fuera del horizonte + sin fecha) + Σ retencion_<IMPUESTO>
+```
+
+y en particular **universo en bruto = `PAGOS_TODO` + retenciones**. La auditoría cuenta exactamente lo que cuenta la serie: lo que cae fuera del horizonte se informa sólo en `PAGOS_TODO`, y su bruto también. `CashflowProvider::normalizar()` arma la serie con una lista cerrada de claves —lo que no está ahí se pierde en silencio, y ya pasó una vez con los fondos de cobertura—, así que `auditoria` se agregó a esa lista.
+
+**Medido contra la base real** (14/10/2026, 558 vencimientos), con alícuotas **simuladas en memoria** —IIBB 3% y Ganancias 2%, ilustrativas; no hay ninguna cargada—: `PAGOS` pasa de $ 292.876.379,42 a $ 278.232.560,42 y `PAGOS_TODO` de $ 2.102.534.036,32 a $ 2.006.126.682,93; se retienen $ 96.407.353,39 en 118 comprobantes; los dos cortes cierran y el invariante vale en las 34 series. Sin alícuotas —el estado el día que se corre el script— las 34 series dan idénticas a antes.
 
 ### Las dos particiones son independientes, y por eso hace falta la séptima
 
@@ -1199,6 +1356,18 @@ Tres sub-solapas, que son tres momentos del mismo circuito:
 
 Los tres filtros —el buscador y los dos interruptores— son del navegador, así que los cuatro indicadores se suman ahí, en el mismo lugar donde ya se sumaba el pie de TOTALES.
 
+### Las retenciones en la grilla, y el eje en neto
+
+> Esto **cambió** en `feature/prov-locales-retenciones`.
+
+- **Importe** y **Pendiente** quedan como estaban. Pendiente es el total de la factura y la base de las retenciones.
+- **Retenciones**: una sola columna con el total retenido y, en el tooltip, cada impuesto con su alícuota y de dónde sale —*general, vigente desde…*, *del proveedor, desde…*, *no se retiene*— y la fecha a la que se calculó. Una columna por impuesto haría la grilla demasiado ancha con tres. Vacía donde no aplica, con el motivo en el tooltip; *sin alícuota* en ámbar si falta la general.
+- **Neto a pagar**, en negrita: es el número del cashflow.
+- **El eje va en neto**: cada comprobante cae en su fecha por el neto (`EjeVista::armar(..., 'IMPORTE_A_PAGAR')`), así que los totales del eje coinciden con la fila del tablero.
+- **El pie y los indicadores** suman el neto; lo retenido va **aparte**, por impuesto: en el pie debajo del total de Retenciones, y en la tarjeta *Neto a pagar* en una línea propia. La barra de selección también suma el neto.
+- **El Excel baja una columna por impuesto.** Están en la tabla, escondidas en pantalla y marcadas `data-exportar-solo`, que `Js/tabla-export.js` respeta: exporta lo que se ve, salvo esa marca, porque un tooltip no se exporta.
+- **Dos medios**: cada parte muestra su neto; la retención va en la parte *1/2* y la *2/2* lo dice en vez de repetirla, así que los totales no la duplican.
+
 > Un número arriba de una tabla describe esa tabla.
 
 Antes salían del backend calculados sobre **todos** los vencimientos: con el filtro por forma de pago prendido —que es el default— la tarjeta decía *549 vencimientos* arriba de una tabla que mostraba **294**, y ni el buscador ni el interruptor de vencidos la movían.
@@ -1294,7 +1463,16 @@ Con base, además: que **ningún pendiente sea negativo** —el error que tenía
 - **Que el orden sea alfabético en los dos lados**, con `localeCompare` en `es` en el front y `alfabetico()` en el backend — incluido que la `Ñ` quede entre la `N` y la `O` y no al final.
 - **Que la columna `ORDEN` siga editable y que la pantalla aclare para qué sirve.**
 
-*Suite completa: 3427 OK, 0 fallas (24 archivos).*
+`tests/test_prov_locales_retenciones.php` fija las retenciones, sin base —la configuración llega armada a mano, como la leería `config()`—:
+
+- **La alícuota efectiva**: la del proveedor (incluido 0, *no se retiene*), la general vigente a la fecha de pago, nada en *solo a los asignados* sin asignación, y *sin general* marcado —no un 0 silencioso—. La vigencia del proveedor rige desde el día de la carga, una fecha anterior usa el valor anterior y dos cargas el mismo día las desempata el `ID`. Volver a la general es un registro con su fecha. La baja de un impuesto deja de aplicarlo y conserva el historial; cambiar el alcance conserva las propias.
+- **Las validaciones**: rango, suma de las generales < 100% —también contra una vigencia futura—, y ningún proveedor en 100% o más, nombrándolo. La masiva: a cuántos se aplica, cuáles ya tenían el valor y no se tocan, todo o nada, sólo proveedores del maestro, y que volver a la general también puede pasarse. Que la importación del maestro no conoce las alícuotas.
+- **El cálculo**: redondeo por impuesto a 2 decimales con el neto por diferencia; sin retención por forma, por nota de crédito (`CPA21.CRE_DEB = 'C'`, `AJC` incluido) y sin script; cambiar la forma cambia el neto; dos medios con partes netas, la última con el resto y la retención en la primera, a la fecha más tardía; el pago parcial recalcula sobre el pendiente nuevo.
+- **El tablero**: las series en neto, las dos particiones, `bruto = serie + retenciones` en cada serie, que `normalizar()` deja pasar la auditoría, y que *Pagos con Tarjetas* sigue leyendo el pendiente.
+- **La importación**: importe = neto carga, el total da el motivo que ayuda, otro importe da total-retenciones-neto-diferencia, vacío toma el neto, dos medios suman el neto, sin retención es como siempre, y una alícuota que cambia entre previsualizar y confirmar frena todo. **Las ya pagadas**: advertencia con la fecha real, sin `TIPO_COMP` todos cancelados, dos filas son dos advertencias, la inexistente es error sin *"si ya se pagó"* y el `***` tiene su motivo.
+- **La conciliación automática**, con una subclase que reemplaza la base: concilia y reabre, sólo consulta las previstas que salieron, no escribe si no hay cambios, firma con el usuario fijo, lanza sin Tango y el controller la envuelve; y la escritura condicionada al estado de partida, en una transacción.
+
+*Suite completa: 8033 OK, 0 fallas (61 archivos).*
 
 ---
 
@@ -1308,6 +1486,7 @@ sql/cashflow_prov_locales_forma_por_factura.sql  El override de forma por factur
 sql/cashflow_prov_locales_excluir_factura.sql    El tilde de exclusion por factura
 sql/cashflow_prov_locales_opciones.sql         Las cinco listas de opciones + semilla
 sql/cashflow_prov_locales_pago_medio.sql       Un comprobante pagado con dos medios
+sql/cashflow_prov_locales_retenciones.sql      Las retenciones: impuestos, generales y por proveedor
 sql/_referencia_tango_pendientes.sql           La consulta de Tango, como referencia
 cashflow/Class/Planilla.php                    El mecanismo de importacion, compartido (el servidor)
 cashflow/Js/planilla-excel.js                  El lector de Excel y las plantillas, compartido (el navegador)
@@ -1316,6 +1495,7 @@ cashflow/Class/Proveedores.php                 Cuentas a pagar, fechas de pago y
 cashflow/Class/ProveedoresCategorias.php       El maestro y el resolutor de categoria
 cashflow/Class/ProveedoresTango.php            CPA01: quien existe como proveedor. Solo lectura
 cashflow/Class/ProveedoresOpciones.php         Las cinco listas de valores validos
+cashflow/Class/ProveedoresRetenciones.php      Las retenciones y el neto a pagar de cada comprobante
 cashflow/Tabs/parametros_prov_locales.php      Su ABM, en Parametros
 cashflow/Js/Parametros-Prov_locales.js
 cashflow/Class/Providers/ProveedoresProvider.php

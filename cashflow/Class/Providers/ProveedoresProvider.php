@@ -50,6 +50,23 @@ require_once __DIR__ . '/../TarjetasCorporativas.php';
  * logistica y mercaderia -cada una en su seccion- es agregar filas desde
  * Parametros. El motor no se toca y este proveedor tampoco.
  *
+ * TODAS LAS SERIES MIDEN EL IMPORTE A PAGAR
+ * -----------------------------------------
+ * Lo que sale de la caja: el NETO de retenciones en las facturas que se pagan
+ * por orden de pago, y el pendiente en las demas. Ver importeAPagar() y
+ * ProveedoresRetenciones. Las dos particiones siguen cerrando contra PAGOS_TODO,
+ * porque cada fila aporta el mismo importe a todas sus series.
+ *
+ * Para auditar el corte, cada serie lleva ESCALARES -no series elegibles- en
+ * 'auditoria': el bruto (el pendiente) y la retencion de cada impuesto. El
+ * invariante, en cada serie:
+ *
+ *     bruto = lo que suma la serie (eje + fuera del horizonte + sin fecha)
+ *             + la suma de sus retencion_<IMPUESTO>
+ *
+ * y en particular: universo en bruto = PAGOS_TODO + retenciones. La retencion
+ * NO se proyecta como egreso en ninguna fila: es plata que no sale.
+ *
  * EL TOTAL Y SUS PARTES NO PUEDEN CONVIVIR. PAGOS trae todo y las demas son
  * aperturas suyas: activar las dos contaria dos veces el mismo importe. El
  * registro declara la relacion en 'componentes' y el validador la rechaza.
@@ -385,7 +402,8 @@ class ProveedoresProvider extends CashflowProvider {
                 continue;
             }
 
-            $total += floatval($item['IMPORTE_PENDIENTE']);
+            // Lo que sale de la fila es lo que hubiera salido de la caja: el neto.
+            $total += self::importeAPagar($item);
 
             // Las dos partes de un pago con dos medios son UNA factura.
             $cuantas += Proveedores::cuentaComoVencimiento($item) ? 1 : 0;
@@ -448,7 +466,8 @@ class ProveedoresProvider extends CashflowProvider {
                 continue;
             }
 
-            $importe = floatval($item['IMPORTE_PENDIENTE']);
+            // El neto: es lo que la serie del proveedor excluido suma.
+            $importe = self::importeAPagar($item);
             $total += $importe;
 
             // Las dos partes de un pago con dos medios son UN vencimiento.
@@ -522,7 +541,9 @@ class ProveedoresProvider extends CashflowProvider {
         }
 
         foreach ($items as $item) {
-            $importe = floatval($item['IMPORTE_PENDIENTE']);
+            /* LO QUE SALE DE LA CAJA: el neto a pagar donde hay retencion, el
+               pendiente donde no. Ver importeAPagar(). */
+            $importe = self::importeAPagar($item);
 
             if ($importe == 0) {
                 continue;
@@ -542,7 +563,17 @@ class ProveedoresProvider extends CashflowProvider {
                 // Lo que cae fuera del eje se informa, no se descarta en
                 // silencio. Solo se cuenta una vez, en PAGOS_TODO: las demas
                 // informan lo mismo y el aviso saldria repetido.
-                if (!$h->acumular($series[$destino], $item['Pago'], $importe)) {
+                $enEje = $h->acumular($series[$destino], $item['Pago'], $importe);
+
+                /* La auditoria cuenta lo MISMO que la serie: si la fila no entro
+                   en ella -cayo fuera del eje y la serie no es PAGOS_TODO-,
+                   tampoco entra su bruto. Si no, el invariante bruto = serie +
+                   retenciones no cerraria en ninguna serie salvo esa. */
+                if ($enEje || $destino === self::SERIE_TODO) {
+                    self::sumarAuditoria($series[$destino], $item);
+                }
+
+                if (!$enEje) {
                     if ($destino === self::SERIE_TODO) {
                         if ($item['Pago'] === null) {
                             $series[$destino]['sin_fecha'] += $importe;
@@ -637,8 +668,52 @@ class ProveedoresProvider extends CashflowProvider {
         $serie['tipo_cambio'] = null;
         $serie['fuera_horizonte'] = 0;
         $serie['sin_fecha'] = 0;
+        $serie['auditoria'] = ['bruto' => 0.0];
 
         return $serie;
+    }
+
+    /**
+     * Lo que una fila aporta a las series: LO QUE SALE DE LA CAJA. El neto a
+     * pagar donde hay retencion (las facturas del cronograma que se pagan por
+     * orden de pago), y el pendiente donde no. Una fila sin el campo -armada a
+     * mano, o de antes de las retenciones- aporta su pendiente.
+     *
+     * Estatica y pura.
+     *
+     * @param array $item
+     * @return float
+     */
+    public static function importeAPagar($item) {
+        return floatval(isset($item['IMPORTE_A_PAGAR']) ? $item['IMPORTE_A_PAGAR'] : $item['IMPORTE_PENDIENTE']);
+    }
+
+    /**
+     * Suma a los escalares de auditoria de una serie el BRUTO de la fila y lo
+     * que se le retiene, impuesto por impuesto.
+     *
+     * NO SON SERIES ELEGIBLES y no entran en ninguna fila del tablero: la
+     * retencion no es un egreso de la caja -es plata que no sale-, y
+     * proyectarla en otra fila la contaria como si saliera. Son escalares,
+     * para poder auditar el corte:
+     *
+     *     bruto = lo que la serie suma (eje + fuera del horizonte + sin fecha)
+     *             + la suma de sus retencion_<IMPUESTO>
+     *
+     * Viajan en 'auditoria', que CashflowProvider::normalizar() deja pasar.
+     *
+     * @param array $serie Por referencia
+     * @param array $item
+     */
+    public static function sumarAuditoria(&$serie, $item) {
+        $serie['auditoria']['bruto'] = (isset($serie['auditoria']['bruto']) ? $serie['auditoria']['bruto'] : 0.0)
+            + floatval($item['IMPORTE_PENDIENTE']);
+
+        foreach (isset($item['RETENIDO_POR_IMPUESTO']) ? $item['RETENIDO_POR_IMPUESTO'] : [] as $codigo => $r) {
+            $clave = 'retencion_' . $codigo;
+            $serie['auditoria'][$clave] = (isset($serie['auditoria'][$clave]) ? $serie['auditoria'][$clave] : 0.0)
+                + floatval($r);
+        }
     }
 
     /**
