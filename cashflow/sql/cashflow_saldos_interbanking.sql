@@ -86,7 +86,7 @@ GO
    2. RO_T_CASHFLOW_SALDOS_BANCO_MANUAL
    El saldo de una cuenta de Interbanking cargado A MANO, como respaldo.
 
-   POR QUE EXISTE: cuando Interbanking no trae el saldo contable de una cuenta
+   POR QUE EXISTE: cuando Interbanking no trae el saldo operativo de una cuenta
    por un error de la integracion (hoy, 014 Provincia), esa plata existe y el
    disponible no la tendria. Se carga desde la pestana Saldos, en la fila de
    la cuenta.
@@ -111,8 +111,15 @@ GO
    librado al orden de lectura.
 
    La cuenta se identifica igual que en el origen -NRO_BANCO, NRO_CUENTA y
-   MONEDA- y con su collation. SALDO_CONTABLE lleva el tipo de la columna de
-   BI: es el mismo dato, cargado por otra via.
+   MONEDA- y con su collation.
+
+   SALDO_CONTABLE GUARDA EL SALDO OPERATIVO. La columna nacio cuando el
+   importe de BI era SALDO_CONTABLE; hoy el importe es SALDO_OPERATIVO_ACTUAL
+   y lo que se carga aca es ese mismo saldo, cargado por otra via (lleva el
+   tipo de la columna de BI). No se renombra: seria tocar la base sin que el
+   usuario gane nada. Los respaldos cargados antes no se migran: conservan
+   importe y fecha, y se leen como saldo operativo. En el codigo es
+   SaldosInterbanking::COLUMNA_RESPALDO.
    ---------------------------------------------------------------------------- */
 IF OBJECT_ID('dbo.RO_T_CASHFLOW_SALDOS_BANCO_MANUAL', 'U') IS NULL
 BEGIN

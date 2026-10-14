@@ -128,15 +128,16 @@ Un proceso externo a este repo trae todos los días, por cuenta, lo que informa 
 
 Las reglas son helpers estáticos y puros, con hoy inyectado: `elegirRegistro()`, `nombreBanco()`, `resolverSaldo()`, `armarCuentasBancarias()`, `armarBancos()`, `esNueva()`, `resolverBancos()`, `validarAlias()` y `validarRespaldo()`. Las lecturas sólo juntan datos.
 
-### Una fila por cuenta, con el último saldo contable
+### Una fila por cuenta, con el último saldo operativo actual
 
 - **La cuenta es `NRO_BANCO` + `NRO_CUENTA` + `MONEDA`.** Una cuenta que llega **sin moneda** no se toma y el aviso es crítico: asumir pesos sería inventar el dato.
-- **El importe es `SALDO_CONTABLE`.** Los otros siete saldos de la tabla no se muestran ni se usan.
-- **Se toma el último registro con contable no nulo**, por `FECHA_OPERACION`, después `CREATED_AT` (un nulo ordena como el más viejo) y después `ID`, todos descendentes. Nada impide dos registros del mismo día, y sin desempate la cuenta mostraría uno u otro.
-- **Un registro nuevo sin contable no tapa al anterior.** Se usa el último no nulo, con aviso de atención: *"el registro del 08/10 vino sin saldo contable; se muestra el del 07/10"*.
-- **Una cuenta que nunca trajo contable**, y sin respaldo, se ve **sin dato** (guion, nunca cero), no suma, y el aviso es **crítico**: es plata que existe y el disponible no incluye.
+- **El importe es `SALDO_OPERATIVO_ACTUAL`**, el saldo que se verificó cuenta por cuenta contra el portal de Interbanking. Se define en un solo lugar, `SaldosInterbanking::COLUMNA_SALDO`, y lo usan la consulta, `elegirRegistro()`, la fila y los avisos. Los otros siete saldos de la tabla, `SALDO_CONTABLE` incluido, no se muestran ni se usan.
+- **Se toma el último registro con operativo actual no nulo**, por `FECHA_OPERACION`, después `CREATED_AT` (un nulo ordena como el más viejo) y después `ID`, todos descendentes. Nada impide dos registros del mismo día, y como el operativo cambia durante el día, el más reciente es justamente el que vale; sin desempate la cuenta mostraría uno u otro.
+- **Un registro nuevo sin operativo actual no tapa al anterior.** Se usa el último no nulo, con aviso de atención: *"el registro del 08/10 vino sin saldo operativo; se muestra el del 07/10"*.
+- **Una cuenta que nunca trajo operativo actual**, y sin respaldo, se ve **sin dato** (guion, nunca cero), no suma, y el aviso es **crítico**: es plata que existe y el disponible no incluye.
+- **El contable nunca reemplaza al operativo**, aunque el registro lo traiga: serían dos saldos distintos sumados en la misma columna. La consulta ni siquiera lo lee.
 
-**La consulta es la única con lógica, y va contra la tabla de BI sola**, sin JOIN. Usa dos `ROW_NUMBER()` y trae como máximo dos registros por cuenta: el más nuevo de todos y el más nuevo con contable. La elección final la vuelve a hacer `elegirRegistro()`, y la prueba se hace sobre él.
+**La consulta es la única con lógica, y va contra la tabla de BI sola**, sin JOIN. Usa dos `ROW_NUMBER()` y trae como máximo dos registros por cuenta: el más nuevo de todos y el más nuevo con operativo actual. La arma `consultaUltimos()`, un helper puro, para que la prueba mire el SQL con la columna ya puesta. La elección final la vuelve a hacer `elegirRegistro()`, y la prueba se hace sobre él.
 
 **Si la tabla de BI no existe o falla la lectura**, no hay filas de Interbanking y va un aviso crítico: *"no se pudieron leer los saldos bancarios de Interbanking; el disponible no los incluye"*. El efectivo, Mercado Pago, los bancos manuales y los respaldos siguen entrando.
 
@@ -161,12 +162,14 @@ Cada fila lleva su **origen**, y eso decide el aviso. Lo que sale de una carga m
 
 ### El respaldo manual
 
-Cuando Interbanking no trae el saldo contable de una cuenta por un error de la integración (hoy, 014 Provincia), se carga a mano desde su fila en Saldos › Saldos, con el ícono de saldo manual. El diálogo pide la fecha del saldo (no posterior a hoy), el importe (obligatorio, puede ser negativo) y una observación. Muestra el respaldo vigente, si lo hay, para reemplazarlo o quitarlo. El permiso es el de *Nueva carga*, `['saldos', null]`.
+Cuando Interbanking no trae el saldo operativo de una cuenta por un error de la integración (hoy, 014 Provincia), se carga a mano desde su fila en Saldos › Saldos, con el ícono de saldo manual. El diálogo pide la fecha del saldo (no posterior a hoy), el **saldo operativo** (obligatorio, puede ser negativo) y una observación. Muestra el respaldo vigente, si lo hay, para reemplazarlo o quitarlo. El permiso es el de *Nueva carga*, `['saldos', null]`.
 
-- **Gana la fecha más nueva y, a igual fecha, Interbanking**, que es la fuente oficial (`resolverSaldo()`). Cuando BI se arregla, Interbanking vuelve a mandar solo, sin quitar el respaldo. Es la regla inversa a la caja de los locales, donde gana el manual, porque acá el manual no corrige un dato: tapa uno que falta.
+**La columna del importe se sigue llamando `SALDO_CONTABLE`** en `RO_T_CASHFLOW_SALDOS_BANCO_MANUAL` (`SaldosInterbanking::COLUMNA_RESPALDO`), pero guarda el saldo cargado a mano, que es el saldo operativo actual. No se renombra: sería tocar la base sin que el usuario gane nada. Los respaldos cargados cuando el importe era el contable no se migran: conservan importe y fecha, y se leen como saldo operativo.
+
+- **Gana la fecha más nueva y, a igual fecha, Interbanking**, que es la fuente oficial (`resolverSaldo()`). La fecha de Interbanking que compite es la del último registro **con operativo actual**: uno más nuevo que sólo trae el contable no le gana al respaldo. Cuando BI se arregla, Interbanking vuelve a mandar solo, sin quitar el respaldo. Es la regla inversa a la caja de los locales, donde gana el manual, porque acá el manual no corrige un dato: tapa uno que falta.
 - **Historial sin bajas físicas.** Reemplazar da de baja el vigente (`VIGENTE = 0`, con usuario y fecha de baja) e inserta el nuevo con `ID_REEMPLAZA`, en una transacción. Quitar da de baja. Un índice único filtrado deja **un solo respaldo vigente por cuenta**.
 - **Las cuentas son las de Interbanking más las que tienen respaldo vigente.** Con la lectura caída, o con una cuenta que BI dejó de traer, el respaldo sigue entrando: existe justamente para eso.
-- Mientras se usa, la falla se acusa en **atención**: *"Interbanking no trae el saldo contable de <banco · cuenta>; se usa la carga manual del dd/mm"*. El origen dice "Manual (respaldo)", con un tooltip que cuenta quién lo cargó, cuándo, la observación y qué trae Interbanking.
+- Mientras se usa, la falla se acusa en **atención**: *"Interbanking no trae el saldo operativo de <banco · cuenta>; se usa la carga manual del dd/mm"*. El origen dice "Manual (respaldo)", con un tooltip que cuenta quién lo cargó, cuándo, la observación y qué trae Interbanking.
 - El servidor rechaza un respaldo de un banco inactivo, de una cuenta que no viene en Interbanking ni tiene respaldo, y uno cargado antes de la depuración.
 
 ### Las cuentas nuevas
@@ -437,11 +440,11 @@ El cashflow **no llama a la API de Interbanking**. La llama un proceso externo a
 | `MONEDA` | Parte de la clave. Hoy todas vienen en `ARS`. Una cuenta sin moneda no se toma (crítico) |
 | `TIPO_CUENTA` | Se muestra en Parámetros (`CC` → Cta. Cte., `CA` → Caja de Ahorro). Hoy todas vienen en `CC` |
 | `FECHA_OPERACION` | La fecha del saldo, y el primer criterio para elegir el registro |
-| `SALDO_CONTABLE` | **El importe.** El último no nulo de cada cuenta |
+| `SALDO_OPERATIVO_ACTUAL` | **El importe.** El último no nulo de cada cuenta |
 | `CREATED_AT` | *Cargado el*, y el segundo criterio de desempate |
 | `ID` | El tercer criterio de desempate |
 | `LABEL_CUENTA`, `NOMBRE_CUENTA` | No se usan: el nombre sale del alias o de Tango |
-| `SALDO_OPERATIVO_INICIAL`, `SALDO_OPERATIVO_ACTUAL`, `SALDO_PROYECTADO_24HS`, `SALDO_PROYECTADO_48HS`, `SALDO_DIA`, `TOTAL_DEBITOS`, `TOTAL_CREDITOS` | No se muestran ni se usan |
+| `SALDO_CONTABLE`, `SALDO_OPERATIVO_INICIAL`, `SALDO_PROYECTADO_24HS`, `SALDO_PROYECTADO_48HS`, `SALDO_DIA`, `TOTAL_DEBITOS`, `TOTAL_CREDITOS` | No se muestran ni se usan |
 
 **La tabla de BI no se escribe nunca**, ni para sembrar ni para marcar. Lo propio del módulo va en sus tablas, con la misma clave y la misma collation que el origen, para que el dato compare igual de los dos lados.
 
@@ -455,9 +458,9 @@ Cuando se diseñó el módulo, la idea era que el cashflow llamara a la API y gu
 
 ## Qué queda pendiente
 
-- **014 Provincia no trae saldo contable** por un error de la integración del lado de BI. Hasta que se resuelva se cubre con el respaldo manual. Cuando BI lo traiga con fecha igual o más nueva, manda solo.
+- **014 Provincia no trae saldo operativo** (ni ningún otro) por un error de la integración del lado de BI. Hasta que se resuelva se cubre con el respaldo manual. Cuando BI lo traiga con fecha igual o más nueva, manda solo.
 - **Las columnas de la API en desuso** se pueden borrar con un script aparte, cuando se confirme que nada más las lee.
-- **`BI_T_SALDOS_INTERBANKING` sólo tiene índice por `ID`.** La consulta del último saldo recorre la tabla entera, que hoy son decenas de filas y crece unas diez por día. Si algún día pesa, el índice que sirve es `(NRO_BANCO, NRO_CUENTA, MONEDA, FECHA_OPERACION DESC, CREATED_AT DESC, ID DESC) INCLUDE (SALDO_CONTABLE, TIPO_CUENTA)`. La tabla es del proceso de BI, así que lo crea quien la administra.
+- **`BI_T_SALDOS_INTERBANKING` sólo tiene índice por `ID`.** La consulta del último saldo recorre la tabla entera, que hoy son decenas de filas y crece unas diez por día. Si algún día pesa, el índice que sirve es `(NRO_BANCO, NRO_CUENTA, MONEDA, FECHA_OPERACION DESC, CREATED_AT DESC, ID DESC) INCLUDE (SALDO_OPERATIVO_ACTUAL, TIPO_CUENTA)`. La tabla es del proceso de BI, así que lo crea quien la administra.
 
 ---
 
@@ -612,12 +615,12 @@ Verificado además contra la base real: la pestaña marcó los 3 locales sin cie
 php cashflow/tests/run.php interbanking
 ```
 
-`tests/test_saldos_interbanking.php`, 209 casos sin base salvo el último, que se saltea solo. El cableado de las pantallas está en `tests/test_tablas_controles.php`.
+`tests/test_saldos_interbanking.php`, 233 casos sin base salvo el último, que se saltea solo. El cableado de las pantallas está en `tests/test_tablas_controles.php`.
 
 | Qué se verifica | Helper |
 | --- | --- |
 | El registro de hoy; sin registro de hoy, el último con su fecha; dos del mismo día desempatados por `CREATED_AT` y por `ID`; un `CREATED_AT` nulo ordena como el más viejo | `elegirRegistro()` |
-| El más nuevo sin contable toma el anterior, con aviso de atención; sin ningún contable ni respaldo, sin dato (null), no aporta y aviso crítico; un cero es un dato | `elegirRegistro()`, `armarCuentasBancarias()` |
+| El más nuevo sin operativo actual toma el anterior, con aviso de atención, aunque traiga el contable; sin ningún operativo ni respaldo, sin dato (null), no aporta y aviso crítico, aunque traiga el contable; un cero es un dato | `elegirRegistro()`, `armarCuentasBancarias()` |
 | Alias, `DESC_BANCO` sin espacios, banco fuera de Tango con aviso (que se va con alias), trim de `NRO_BANCO` | `nombreBanco()`, `armarCuentasBancarias()` |
 | Una cuenta sin moneda no se toma y avisa en crítico | `armarCuentasBancarias()` |
 | Un banco inactivo no aporta, no se lista y no avisa nada; sin fila es activo | `bancoActivo()`, `armarCuentasBancarias()` |
