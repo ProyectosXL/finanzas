@@ -347,7 +347,7 @@
             if (!f.cargada) {
                 return esInterbanking(f)
                     ? '<span class="text-muted" title="Interbanking no trajo ningún saldo ' +
-                      'contable de esta cuenta. No suma al disponible.">—</span>'
+                      'operativo de esta cuenta. No suma al disponible.">—</span>'
                     : '<span class="text-muted" title="Esta cuenta todavía no tiene ningún ' +
                       'saldo cargado. No suma al disponible.">sin cargar</span>';
             }
@@ -403,7 +403,7 @@
                 (f.respaldo.observacion ? ' · ' + f.respaldo.observacion : '') +
                 '. Interbanking: ' + (f.interbanking
                     ? importe(f.interbanking.saldo, f.moneda) + ' del ' + fecha(f.interbanking.fecha)
-                    : 'sin saldo contable') + '.';
+                    : 'sin saldo operativo') + '.';
         }
 
         return '<span class="sal-origen"' + (titulo ? ' title="' + escapar(titulo) + '"' : '') + '>' +
@@ -424,7 +424,7 @@
 
         return ' <button type="button" class="btn btn-link btn-sm p-0 ms-1 sal-btn-respaldo" ' +
                'data-clave="' + escapar(f.clave) + '" title="Cargar saldo manual: para cuando ' +
-               'Interbanking no trae el saldo contable de esta cuenta">' +
+               'Interbanking no trae el saldo operativo de esta cuenta">' +
                '<i class="fas fa-hand-holding-dollar"></i></button>';
     }
 
@@ -448,7 +448,7 @@
         texto('respaldoInterbanking', f.interbanking
             ? 'Interbanking: ' + importe(f.interbanking.saldo, f.moneda) + ' del ' +
               fecha(f.interbanking.fecha) + '.'
-            : 'Interbanking no trae ningún saldo contable de esta cuenta.');
+            : 'Interbanking no trae ningún saldo operativo de esta cuenta.');
 
         var vigente = document.getElementById('respaldoVigente');
 
@@ -531,7 +531,7 @@
             mensaje: '¿Quitar el saldo manual de ' + f.nombre + ' (' +
                 importe(f.respaldo.saldo, f.moneda) + ' del ' + fecha(f.respaldo.fecha_saldo) + ')?',
             detalle: 'No se borra: queda en el historial, dado de baja. Si Interbanking no trae ' +
-                'el saldo contable, la cuenta queda sin dato y no suma al disponible.',
+                'el saldo operativo, la cuenta queda sin dato y no suma al disponible.',
             confirmar: 'Quitar',
             peligro: true
         }).then(function(ok) {

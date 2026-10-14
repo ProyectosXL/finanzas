@@ -936,6 +936,26 @@ chequear('y no avisa que el banco no esta en Tango', false,
     ibContiene(ibAvisos($caidaConNombre['avisos']), 'no está en la tabla BANCO'));
 
 // ============================================================================
+seccion('la pantalla habla del saldo operativo');
+// ============================================================================
+
+// En estos dos archivos "contable" solo podia ser el saldo de Interbanking:
+// la cuenta contable de tesoreria vive en Parametros. Se busca la palabra
+// sola porque un texto partido en dos strings ('saldo ' + 'contable') no
+// diria "saldo contable" de corrido.
+$jsSaldos = ibFuente(__DIR__ . '/../Js/Saldos.js');
+$tabSaldos = ibFuente(__DIR__ . '/../Tabs/saldos.php');
+
+chequear('Js/Saldos.js ya no dice "contable"', false, (bool) preg_match('/contable/i', $jsSaldos));
+chequear('Tabs/saldos.php ya no dice "contable"', false, (bool) preg_match('/contable/i', $tabSaldos));
+chequear('el dialogo del respaldo pide el saldo operativo',
+    true, ibContiene($tabSaldos, 'Saldo operativo (<span id="respaldoMoneda">'));
+chequear('la cuenta sin dato lo dice con el saldo operativo',
+    true, ibContiene($jsSaldos, "'operativo de esta cuenta. No suma al disponible.\">—</span>'"));
+chequear('el boton del respaldo tambien',
+    true, ibContiene($jsSaldos, 'Interbanking no trae el saldo operativo de esta cuenta'));
+
+// ============================================================================
 seccion('contra la base: la pestana y el proveedor suman lo mismo');
 // ============================================================================
 
