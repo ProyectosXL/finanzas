@@ -24,8 +24,8 @@
  * deshace destildándolo de nuevo, y sacar plata del disponible no puede
  * dispararse con un clic suelto ni quedar sin motivo.
  *
- * EN CARTERA, LA MISMA BARRA DEPOSITA. Se eligen cheques de un banco y se
- * confirman juntos en un diálogo que muestra lo que calculó el SERVIDOR
+ * EN CARTERA, LA MISMA BARRA DEPOSITA. Se eligen cheques —de uno o de varios
+ * bancos emisores: se cobran por el clearing— y se confirman juntos en un diálogo que muestra lo que calculó el SERVIDOR
  * —acreditación, tasa, retención y neto—: acá no se calcula ninguno de esos
  * números, y al servidor viajan sólo los ids. Un cheque depositado se ubica en
  * el eje en su acreditación y por el neto, y eso también lo resolvió PHP
@@ -792,7 +792,9 @@
     /* ================================================================
        DEPOSITAR CHEQUES
 
-       Se eligen cheques de UN banco emisor y se confirman juntos. El diálogo
+       Se eligen cheques de uno o de varios bancos emisores —se cobran por el
+       clearing bancario, con un plazo y una tasa únicos— y se confirman
+       juntos. El diálogo
        muestra lo que calculó el SERVIDOR —la acreditación, la tasa vigente a
        esa fecha con su desglose, la retención y el neto— y al confirmar viajan
        sólo los ids: el servidor vuelve a calcular todo. Acá ningún número del
@@ -804,9 +806,9 @@
      * Depositar y Deshacer depósito: cuándo se pueden apretar y, si no, por qué.
      *
      *   Depositar         sin depositados ni excluidos en la selección, todos
-     *                     con banco y todos del MISMO banco, y con el circuito
-     *                     listo (script, fila del tablero y plazo). Con bancos
-     *                     mezclados el título dice cuáles hay.
+     *                     con banco, y con el circuito listo (script, fila del
+     *                     tablero y plazo). Los bancos se pueden mezclar: el
+     *                     título dice de qué banco, o de cuántos.
      *   Deshacer depósito sólo si TODOS los seleccionados están depositados.
      */
     function pintarBotonesDeposito(sel, yaExcluidos, yaDepositados, sinBanco, bancos) {
@@ -821,13 +823,15 @@
                     + 'primero hay que volver a incluirlos.'
                 : (sinBanco ? 'Hay ' + sinBanco + ' cheque(s) sin banco emisor: no se pueden '
                     + 'depositar.'
-                : (bancos.length > 1 ? 'Un depósito es de un solo banco emisor, y la selección '
-                    + 'tiene ' + bancos.length + ': ' + bancos.join(', ') + '.'
-                : ''))));
+                : '')));
 
             btnDep.disabled = (motivo !== '');
-            btnDep.title = motivo || ('Depositar ' + sel.length + ' cheque(s) de ' + bancos[0]
-                + '. Antes de confirmar se ve cuándo acreditan y por cuánto.');
+            // Sin doble punto con un banco que termina en uno ("MACRO S.A.").
+            var deQuien = (bancos.length === 1 ? bancos[0] : bancos.length + ' bancos');
+
+            btnDep.title = motivo || ('Depositar ' + sel.length + ' cheque(s) de ' + deQuien
+                + (/\.$/.test(deQuien) ? ' ' : '. ')
+                + 'Antes de confirmar se ve cuándo acreditan y por cuánto.');
         }
 
         if (btnDes) {
@@ -842,9 +846,9 @@
     /**
      * Pide al servidor lo que va a pasar y lo muestra para confirmar.
      *
-     * La vista previa NO escribe. Si el servidor no puede depositar —bancos
-     * mezclados, un cheque que ya no está en cartera, sin alícuotas a la fecha
-     * de acreditación— lo dice con el motivo, y si se arregla en Parámetros ›
+     * La vista previa NO escribe. Si el servidor no puede depositar —un cheque
+     * sin banco o que ya no está en cartera, sin alícuotas a la fecha de
+     * acreditación— lo dice con el motivo, y si se arregla en Parámetros ›
      * Cheques ofrece ir ahí.
      */
     function accionDepositar() {
@@ -900,10 +904,34 @@
     }
 
     /**
+     * El desglose por banco de una tanda mixta, tal como lo armó el servidor.
+     * Acá no se suma ni se ordena nada: cada renglón es uno de c.bancos. Va
+     * en un renglón propio, a todo el ancho del cuadro del diálogo.
+     */
+    function desgloseBancos(bancos) {
+        return '<tr><td colspan="2" class="pt-0">'
+            + '<div class="ech-dialogo-bancos"><table class="table table-sm mb-0">'
+            + '<thead><tr><th>Banco</th><th class="text-end">Cheques</th>'
+            + '<th class="text-end">Bruto</th><th class="text-end">Neto</th></tr></thead><tbody>'
+            + bancos.map(function(b) {
+                return '<tr><td>' + escapar(b.banco) + '</td>'
+                    + '<td class="text-end">' + b.cantidad + '</td>'
+                    + '<td class="text-end">' + escapar(pesosPlano(b.bruto)) + '</td>'
+                    + '<td class="text-end">' + escapar(pesosPlano(b.neto)) + '</td></tr>';
+            }).join('')
+            + '</tbody></table></div></td></tr>';
+    }
+
+    /**
      * El diálogo de confirmación: cuántos y de qué banco, el bruto, la tasa
      * vigente a la acreditación con su desglose, la retención y el neto, la
      * fecha de depósito (hoy) y la de acreditación. No tiene nada editable
      * salvo una observación opcional: la fecha de depósito es la del día.
+     *
+     * CON VARIOS BANCOS, abajo de "N cheques de K bancos" va lo de cada uno
+     * —cantidad, bruto y neto—, en el orden y con las sumas del servidor
+     * (Echeqs::desgloseBancos()). Va en una caja con scroll propio: con muchos
+     * bancos no puede empujar los totales ni el botón fuera de la pantalla.
      *
      * Si la acreditación se calculó con el respaldo de lunes a viernes porque
      * falta el calendario, lo dice: es una fecha que puede estar corrida.
@@ -915,7 +943,8 @@
         };
 
         var html = '<table class="table table-sm ech-dialogo-deposito mt-3 mb-2"><tbody>'
-            + linea('Cheques', c.cantidad + ' de ' + escapar(c.banco))
+            + linea('Cheques', escapar(c.tanda))
+            + ((c.bancos || []).length > 1 ? desgloseBancos(c.bancos) : '')
             + linea('Importe bruto', escapar(pesosPlano(c.bruto)))
             + linea('Tasa al ' + fecha(c.fecha_acreditacion), escapar(porcentaje(c.tasa))
                 + (c.desglose ? '<div class="small text-muted">' + escapar(c.desglose) + '</div>' : ''))
@@ -952,7 +981,8 @@
                 .then(function(r) {
                     seleccion = {};
 
-                    Notificacion.exito(r.depositados + ' cheque(s) depositados.', {
+                    // El mismo texto del diálogo: Echeqs::textoTanda().
+                    Notificacion.exito(r.calculo.tanda + ' depositados.', {
                         detalle: 'Acreditan el ' + fecha(r.calculo.fecha_acreditacion) + ' por '
                             + pesosPlano(r.calculo.neto) + ' netos.'
                     });

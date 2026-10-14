@@ -328,10 +328,11 @@ try {
 
             $c = $r['calculo'];
 
+            // "N cheque(s) de <banco>" o "N cheques de K bancos": el mismo
+            // texto que el dialogo, armado por Echeqs::textoTanda().
             echo json_encode([
                 'success' => true,
-                'message' => $r['depositados'] . ' cheque(s) de ' . $c['banco']
-                    . ' depositados. Acreditan el ' . date('d/m/Y', strtotime($c['fecha_acreditacion']))
+                'message' => $c['tanda'] . ' depositados. Acreditan el ' . date('d/m/Y', strtotime($c['fecha_acreditacion']))
                     . ' por $ ' . number_format($c['neto'], 2, ',', '.') . ' netos.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);

@@ -969,7 +969,8 @@ $cartera = $echeqs->getEcheqsCartera();
 
 // Todo lo que se muestra tiene que ser futuro: el tablero proyecta, no informa
 // el pasado. Y de paso cubre la trampa de FECHA_CHEQ, cuyo default es
-// '1800/01/01' y no NULL.
+// '1800/01/01' y no NULL. UN DEPOSITADO ES LA EXCEPCION: se lee aunque su fecha
+// haya pasado, porque se ubica por su acreditacion (ver sqlUniversoCartera()).
 $hoy = date('Y-m-d');
 $pasadas = 0;
 $sinFecha = 0;
@@ -977,12 +978,12 @@ $sinFecha = 0;
 foreach ($cartera as $c) {
     if ($c['FECHA_PAGO'] === null) {
         $sinFecha++;
-    } elseif ($c['FECHA_PAGO'] < $hoy) {
+    } elseif ($c['FECHA_PAGO'] < $hoy && empty($c['DEPOSITO'])) {
         $pasadas++;
     }
 }
 
-chequear('ningun cheque en cartera tiene fecha anterior a hoy', 0, $pasadas);
+chequear('ningun cheque no depositado tiene fecha anterior a hoy', 0, $pasadas);
 chequear('ni fecha nula: la centinela de 1800 la filtra el WHERE', 0, $sinFecha);
 
 /* Las dos consultas de cartera no se pueden desincronizar en silencio: la del
@@ -1028,42 +1029,78 @@ function totalReal($s) {
         + $s['fuera_horizonte'] + $s['sin_fecha'];
 }
 
+/* LA CARTERA REAL, PARTIDA CON LA MISMA REGLA QUE EL PROVEEDOR. Un depositado
+   que ya acredito -hoy o antes- no esta en ninguna serie: su plata ya esta en
+   el saldo bancario. Uno que se proyecta entra por el NETO, asi que el
+   universo en bruto se reconstruye con la retencion. La retencion se suma de
+   los depositos y no se lee de la serie: el motor descarta los escalares al
+   normalizarla. */
+$brutoProyectable = 0;
+$brutoCobrable = 0;
+$netoDepositado = 0;
+$retencionDepositada = 0;
+
+foreach ($cartera as $c) {
+    $estado = Echeqs::estadoDeposito($c['DEPOSITO'], true, $hoy);
+
+    if ($estado === Echeqs::DEPOSITO_ACREDITADO) {
+        continue;
+    }
+
+    $brutoProyectable += $c['IMPORTE'];
+
+    if ($estado === Echeqs::DEPOSITO_PROYECTA) {
+        $netoDepositado += $c['DEPOSITO']['neto'];
+        $retencionDepositada += $c['DEPOSITO']['bruto'] - $c['DEPOSITO']['neto'];
+    } elseif (empty($c['EXCLUIDO'])) {
+        $brutoCobrable += $c['IMPORTE'];
+    }
+}
+
 // EL INVARIANTE QUE IMPORTA: tildar cheques en la sub-pestana de venta cobrada
 // anticipada no puede mover estos numeros. Se verifica por construccion -el
 // universo tiene que ser exactamente el total de cartera- porque las marcas
 // viven en una tabla que esta consulta no toca. Si algun dia esto falla, o la
-// serie dejo de salir de cartera o alguien la conecto al maestro.
-chequear('A_COBRAR_TODO es exactamente el total de cheques en cartera',
-    round($sumaDetalle, 2), round(totalReal($serieReal['A_COBRAR_TODO']), 2));
+// serie dejo de salir de cartera o alguien la conecto al maestro. Desde el
+// deposito, A_COBRAR_TODO lleva los depositados en neto: el universo en bruto
+// es A_COBRAR_TODO + la retencion.
+chequear('A_COBRAR_TODO + la retencion es exactamente el bruto de la cartera que se proyecta',
+    round($brutoProyectable, 2),
+    round(totalReal($serieReal['A_COBRAR_TODO']) + $retencionDepositada, 2));
 
 /* Y ES EL MISMO NUMERO QUE DABA A_COBRAR ANTES DE QUE EXISTIERA LA EXCLUSION.
    El dia que se corre el script no hay nada excluido, asi que el tablero no se
    mueve ni un peso; el dia que alguien tilde, lo que cambia es de que serie
    sale, no cuanta plata hay. Esta prueba es la que fija esa promesa contra los
    datos reales. */
-chequear('la fila del tablero es la cartera MENOS lo excluido',
-    round($sumaDetalle - $sumaDetalleExcluida, 2),
+chequear('la fila del tablero es la cartera MENOS lo excluido y lo depositado',
+    round($brutoCobrable, 2),
     round(totalReal($serieReal['A_COBRAR']), 2));
 chequear('y lo excluido esta entero en su propia serie',
     round($sumaDetalleExcluida, 2),
     round(totalReal($serieReal['A_COBRAR_EXCLUIDOS']), 2));
+chequear('y lo depositado que se proyecta, en la suya y por el neto',
+    round($netoDepositado, 2),
+    round(totalReal($serieReal['DEPOSITADOS']), 2));
 
 /* LA PARTICION CIERRA CONTRA LOS DATOS REALES, que es lo que este circuito no
-   puede romper nunca: el importe excluido no desaparece del cuadro, cambia de
-   serie. */
-chequear('las dos partes suman el universo, con los datos de hoy',
+   puede romper nunca: el importe excluido o depositado no desaparece del
+   cuadro, cambia de serie. */
+chequear('las tres partes suman el total, con los datos de hoy',
     round(totalReal($serieReal['A_COBRAR_TODO']), 2),
     round(totalReal($serieReal['A_COBRAR'])
-        + totalReal($serieReal['A_COBRAR_EXCLUIDOS']), 2));
+        + totalReal($serieReal['A_COBRAR_EXCLUIDOS'])
+        + totalReal($serieReal['DEPOSITADOS']), 2));
 
-// Y columna por columna: una exclusion que moviera el importe de fecha daria el
-// mismo total y un cuadro distinto.
+// Y columna por columna: una exclusion o un deposito que moviera el importe de
+// fecha daria el mismo total y un cuadro distinto.
 $cierraPorColumna = true;
 
 foreach (['dias', 'meses'] as $rama) {
     foreach ($serieReal['A_COBRAR_TODO'][$rama] as $k => $v) {
         if (abs($v - ($serieReal['A_COBRAR'][$rama][$k]
-                + $serieReal['A_COBRAR_EXCLUIDOS'][$rama][$k])) > 0.001) {
+                + $serieReal['A_COBRAR_EXCLUIDOS'][$rama][$k]
+                + $serieReal['DEPOSITADOS'][$rama][$k])) > 0.001) {
             $cierraPorColumna = false;
         }
     }

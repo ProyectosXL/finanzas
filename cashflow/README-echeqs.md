@@ -4,7 +4,7 @@
 
 ## La idea en una línea
 
-Se seleccionan cheques de cartera **de un mismo banco emisor** y se marcan como depositados. Desde ese día corren **48 hs hábiles** —el plazo de Parámetros—, y el cheque **sale** de la fila *Echeqs en cartera* y **entra** en *Echeqs depositados* el día que acredita, **por el neto**: el importe menos la retención del banco.
+Se seleccionan cheques de cartera **de cualquier banco emisor** —se cobran por el **clearing bancario**, así que una misma tanda junta cheques de varios bancos— y se marcan como depositados. Desde ese día corren **48 hs hábiles** —el plazo de Parámetros—, y el cheque **sale** de la fila *Echeqs en cartera* y **entra** en *Echeqs depositados* el día que acredita, **por el neto**: el importe menos la retención del banco.
 
 ```
 neto = bruto × (1 − tasa)
@@ -97,14 +97,20 @@ En *Cheques en Cartera*, la barra de selección suma **Depositar** y **Deshacer 
 | **En cartera hoy** en Tango (`ESTADO = 'C'`) | Un id del navegador no es una autorización. Mismo criterio que `excluirCheques()` |
 | **No depositado** | Un depósito vigente no se vuelve a hacer: se deshace |
 | **No excluido** | Un cheque que se decidió que no entra no se deposita: primero hay que devolverlo |
-| **Con banco** | La tanda se arma por banco. Un `ID_BANCO` que no está en `dbo.BANCO` cuenta como sin banco |
-| **Un solo banco emisor**, comparado por `ID_BANCO` | Dos bancos con la misma descripción son dos bancos. Con bancos mezclados, el botón se apaga y su título dice cuáles hay |
+| **Con banco** | Es un control defensivo: el banco emisor es obligatorio al cargar el cheque en Tango, así que uno sin banco es un dato roto, y no se guarda un depósito sin banco. Un `ID_BANCO` que no está en `dbo.BANCO` cuenta como sin banco |
+| **Con importe** | Un depósito de cero o negativo restaría del tablero |
+
+**Los bancos se pueden mezclar.** Los cheques se cobran por el clearing bancario, así que una tanda lleva cheques de cualquier banco emisor, con **el plazo y la tasa únicos** de *Parámetros › Cheques*: ninguno de los dos depende del emisor. Cada cheque guarda **su propio banco** (ver *El modelo*).
 
 **Por qué todo o nada y no "lo que se pueda":** el depósito es una tanda real que alguien llevó al banco. Si una parte se guarda y otra no, la pantalla dice algo distinto de lo que pasó en el banco.
 
 ### El diálogo
 
-Antes de confirmar se pide una **vista previa** (`previsualizarDeposito`, que no escribe y va con el permiso de edición, como las de las importaciones). El diálogo muestra lo que calculó el servidor: cantidad y banco, bruto, **tasa vigente a la fecha de acreditación con su desglose**, retención, neto, fecha de depósito (hoy) y de acreditación. Si la acreditación se calculó con el respaldo de lunes a viernes porque falta el calendario, **lo dice**. No tiene campos editables salvo una **observación opcional**.
+Antes de confirmar se pide una **vista previa** (`previsualizarDeposito`, que no escribe y va con el permiso de edición, como las de las importaciones). El diálogo muestra lo que calculó el servidor: cuántos cheques y de qué banco —*N cheque(s) de GALICIA*, o *N cheques de K bancos*—, bruto, **tasa vigente a la fecha de acreditación con su desglose**, retención, neto, fecha de depósito (hoy) y de acreditación. Si la acreditación se calculó con el respaldo de lunes a viernes porque falta el calendario, **lo dice**. No tiene campos editables salvo una **observación opcional**.
+
+**Con varios bancos**, debajo de *N cheques de K bancos* va **el desglose por banco**: nombre, cantidad, bruto y neto de cada uno, de mayor a menor bruto, y abajo los totales de siempre. Lo arma y lo ordena el servidor (`Echeqs::desgloseBancos()`), agrupado por `ID_BANCO`; el neto de cada banco es la suma de los netos ya redondeados de sus cheques, así que los bancos suman exactamente el total. Va en una caja de altura fija con scroll propio: con muchos bancos el diálogo no pasa del alto de la pantalla.
+
+**El texto de la tanda sale de un solo lugar**, `Echeqs::textoTanda()`, y viaja armado en el cálculo: lo usan el diálogo, el mensaje del controller y el aviso de éxito (*3 cheques de 2 bancos depositados…*). El título del botón *Depositar* se arma en la pantalla —se pinta al seleccionar, sin preguntarle al servidor— con el mismo criterio.
 
 Si no se puede depositar, lo dice con el motivo; si se arregla en *Parámetros › Cheques* —faltan alícuotas o el plazo está roto— ofrece **ir ahí**. La navegación usa `window.cfSubTabDestino`, el mismo mecanismo con el que el tablero abre una sub-pestaña de Saldos, que ahora también lee `Js/parametros-carga.js`.
 
@@ -114,6 +120,7 @@ Si no se puede depositar, lo dice con el motivo; si se arregla en *Parámetros �
 
 | Dato | Regla |
 | --- | --- |
+| Banco | **El de cada cheque**, de la lectura de la cartera. No hay un banco de la tanda |
 | Fecha de depósito | **Hoy.** No se elige |
 | Acreditación | El **N-ésimo día hábil bancario posterior** al del depósito (`Echeqs::fechaAcreditacion()` → `DiasHabiles::habilesDespues()`). Con 2: lunes → miércoles; viernes, sábado o domingo → martes; un depósito hecho un feriado cuenta desde el hábil siguiente |
 | Tasa | La suma de las alícuotas **vigentes a la fecha de acreditación**, como Cob. Electrónicos: es la tasa del día en que entra la plata |
@@ -133,7 +140,7 @@ El calendario es `RO_T_CALENDARIO`, por la única lectura del módulo (`Ventas::
 | --- | --- |
 | `ID` | `IDENTITY`, PK. **No es `ID_SBA14`**: un cheque puede tener varias filas en el tiempo |
 | `ID_SBA14`, `N_CHEQUE` | El cheque. El número va como copia, para leer el historial sin depender de Tango |
-| `ID_BANCO`, `DESC_BANCO` | El banco **al momento del depósito**: es el dato que agrupó la tanda |
+| `ID_BANCO`, `DESC_BANCO` | El banco **de ese cheque al momento del depósito**, no el de la tanda: una tanda junta varios bancos. Lo arma `Echeqs::paramsInsertDeposito()`, cheque por cheque, y es el que muestra el tooltip de la marca |
 | `FECHA_DEPOSITO`, `FECHA_ACREDITACION`, `DIAS_PLAZO` | Calculados y persistidos. `CHECK` de plazo ≥ 1 y acreditación posterior al depósito |
 | `IMPORTE_BRUTO`, `TASA_APLICADA`, `DETALLE_TASA`, `IMPORTE_NETO` | Persistidos, `NOT NULL` salvo el desglose. El recálculo reescribe tasa, desglose y neto de los pendientes |
 | `OBSERVACION` | Opcional |
@@ -233,7 +240,7 @@ Con el script del depósito y **sin** la fila *Echeqs depositados*, un cheque de
 | **Ocultar depositados** | Al lado de *Ver excluidos*. **Por defecto se ven**: siguen entrando al cashflow, y son los que hay que seguir hasta que Tango los registre |
 | **Tarjetas** | Las tres de siempre muestran **la cartera cobrable sin depositados** —lo mismo que *Echeqs en cartera*—; una cuarta, **los depositados** con bruto, retención y neto. Las restas las hace PHP |
 | **Pie** | La fila *TOTALES* suma lo que se ve, y debajo se abre en las partes que tienen fila en el tablero —*En cartera*, *Depositados*— y las que no suman, para que cada renglón se compare con la suya |
-| **Selección** | La barra dice cuántos, cuánto y de qué banco. *Excluir* no se habilita con un depositado; *Depositar* se apaga explicando por qué |
+| **Selección** | La barra dice cuántos, cuánto y de qué banco —o de cuántos, si son varios—. *Excluir* no se habilita con un depositado; *Depositar* se apaga explicando por qué, y no por mezclar bancos |
 | **Avisos** | Los acreditados sin registrar y el hueco entre scripts entran al panel plegable de la pestaña |
 | **Exportar** | Sale del DOM vivo: baja las columnas nuevas con lo que se ve |
 
@@ -241,9 +248,9 @@ Con el script del depósito y **sin** la fila *Echeqs depositados*, un cheque de
 
 ## Pruebas
 
-`tests/test_echeqs_deposito.php`, sin base salvo las lecturas: el script; el plazo y su validación; las alícuotas, la tasa de hoy y "sin alícuotas"; el recálculo de los pendientes; la selección todo o nada (bancos mezclados, sin banco, excluido, ya depositado, fuera de cartera); el cálculo (acreditación, tasa a la acreditación, neto, calendario faltante, sin hábil, la fecha del cheque que no interviene); que del navegador lleguen sólo los ids; deshacer como baja lógica; qué se proyecta —acreditación futura, de hoy, pasada, fuera de cartera, y el cheque deshecho que no reaparece—; la partición del proveedor columna por columna; el validador con la combinación nueva; el script de la fila; y las tarjetas.
+`tests/test_echeqs_deposito.php`, sin base salvo las lecturas: el script; el plazo y su validación; las alícuotas, la tasa de hoy y "sin alícuotas"; el recálculo de los pendientes; la selección todo o nada (cheques de varios bancos que se depositan juntos, sin banco —también en una tanda mixta—, excluido, ya depositado, fuera de cartera); el cálculo (acreditación, tasa a la acreditación, neto, calendario faltante, sin hábil, la fecha del cheque que no interviene); el banco de cada cheque, el desglose por banco que suma la tanda y `textoTanda()`; los parámetros del INSERT, con el banco de cada cheque y no el del primero; que del navegador lleguen sólo los ids; deshacer como baja lógica; qué se proyecta —acreditación futura, de hoy, pasada, fuera de cartera, y el cheque deshecho que no reaparece—; la partición del proveedor columna por columna; el validador con la combinación nueva; el script de la fila; y las tarjetas.
 
-`tests/test_dias_habiles.php` fija `DiasHabiles::habilesDespues()` con plazo 1, 2 y 3, fin de semana, feriado y calendario faltante. `tests/test_retenciones.php`, la clase compartida y que los dos juegos de alícuotas no se mezclen. `tests/test_tablas_controles.php`, el cableado de la grilla y de *Parámetros › Cheques*, y que las columnas nuevas no corran las fijas, el orden, el export ni los totales del eje.
+`tests/test_dias_habiles.php` fija `DiasHabiles::habilesDespues()` con plazo 1, 2 y 3, fin de semana, feriado y calendario faltante. `tests/test_retenciones.php`, la clase compartida y que los dos juegos de alícuotas no se mezclen. `tests/test_tablas_controles.php`, el cableado de la grilla —el botón que no se apaga por mezclar bancos, el desglose del diálogo y su scroll— y de *Parámetros › Cheques*, que ningún archivo del circuito diga ya que un depósito es de un solo banco, y que las columnas nuevas no corran las fijas, el orden, el export ni los totales del eje.
 
 ---
 

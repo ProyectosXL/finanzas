@@ -236,14 +236,23 @@ $v = Echeqs::validarSeleccionDeposito([1, 2], $cartera);
 chequear('dos cheques del mismo banco se pueden depositar', null, $v['error']);
 chequear('y vuelven los dos', 2, count($v['filas']));
 
+// Los cheques se cobran por el clearing: una tanda junta cualquier banco emisor.
 $v = Echeqs::validarSeleccionDeposito([1, 3], $cartera);
-chequear('con bancos mezclados se rechaza entero', true, $v['error'] !== null);
-chequear('y el motivo dice que bancos hay', true,
-    strpos($v['error'], 'GALICIA') !== false && strpos($v['error'], 'MACRO S.A.') !== false);
+chequear('dos cheques de bancos distintos se pueden depositar', null, $v['error']);
+chequear('y vuelven los dos, sin rechazos', [[1, 3], []],
+    [array_column($v['filas'], 'ID_SBA14'), $v['rechazos']]);
+chequear('la seleccion ya no devuelve una lista de bancos: el desglose es del calculo', false,
+    array_key_exists('bancos', $v));
 
+// El banco es obligatorio en Tango: uno sin banco es un dato roto, y se rechaza.
 $v = Echeqs::validarSeleccionDeposito([1, 4], $cartera);
 chequear('un cheque sin banco se rechaza', 'no tiene banco emisor', $v['rechazos'][0]['motivo']);
-chequear('y con el no se deposita ninguno', true, $v['error'] !== null);
+chequear('y con el no se deposita ninguno: todo o nada', [true, 1],
+    [$v['error'] !== null, count($v['filas'])]);
+
+$v = Echeqs::validarSeleccionDeposito([1, 3, 4], $cartera);
+chequear('con bancos mezclados, uno sin banco tambien frena la tanda entera', [true, true],
+    [$v['error'] !== null, strpos((string) $v['error'], 'N° 9004 no tiene banco emisor') !== false]);
 
 $v = Echeqs::validarSeleccionDeposito([5], $cartera);
 chequear('un excluido se rechaza: primero hay que devolverlo', true,
@@ -298,9 +307,94 @@ chequear('el bruto es la suma de los cheques', 150000.0, $c['bruto']);
 chequear('el neto es bruto x (1 - tasa)', 144600.0, $c['neto']);
 chequear('la retencion, la diferencia', 5400.0, $c['retencion']);
 chequear('cada cheque con su neto', 96400.0, $c['cheques'][0]['neto']);
-chequear('el banco sale de los cheques, no del navegador', [10, 'GALICIA'],
-    [$c['id_banco'], $c['banco']]);
+chequear('el banco va en cada cheque, no en la tanda', [false, false, [10, 10]],
+    [array_key_exists('id_banco', $c), array_key_exists('banco', $c),
+     array_column($c['cheques'], 'id_banco')]);
+chequear('con un solo banco, el desglose tiene uno con todo', [[10, 'GALICIA', 2, 150000.0, 144600.0]],
+    array_map('array_values', $c['bancos']));
+chequear('y la tanda dice de que banco', '2 cheque(s) de GALICIA', $c['tanda']);
 chequear('con el calendario completo no hay avisos', [], $c['avisos']);
+
+seccion('una tanda con cheques de varios bancos');
+
+// Tres cheques de dos bancos: GALICIA 100.000 + 50.000, MACRO 120.000. Tasa 3,6%.
+$carteraMix = array_merge($cartera, [chequeCartera(7, 20, 120000.0)]);
+$selMix = Echeqs::validarSeleccionDeposito([2, 3, 1, 7], $carteraMix);
+$cMix = Echeqs::calcularDeposito($selMix['filas'], 2, $calOct, $aliTasa, '2026-10-19');
+
+chequear('cada cheque lleva su propio banco', [[2, 10, 'GALICIA'], [3, 20, 'MACRO S.A.'],
+    [1, 10, 'GALICIA'], [7, 20, 'MACRO S.A.']],
+    array_map(function ($ch) { return [$ch['id'], $ch['id_banco'], $ch['banco']]; }, $cMix['cheques']));
+chequear('el banco sale de la cartera: el pedido son solo ids', array_column($selMix['filas'], 'BANCO'),
+    array_column($cMix['cheques'], 'banco'));
+
+chequear('el desglose: un renglon por banco, de mayor a menor bruto',
+    [[20, 'MACRO S.A.', 2, 220000.0, 212080.0], [10, 'GALICIA', 2, 150000.0, 144600.0]],
+    array_map('array_values', $cMix['bancos']));
+
+$sumaBancos = ['cantidad' => 0, 'bruto' => 0.0, 'neto' => 0.0];
+
+foreach ($cMix['bancos'] as $b) {
+    foreach ($sumaBancos as $k => $v0) {
+        $sumaBancos[$k] += $b[$k];
+    }
+}
+
+chequear('los bancos suman la tanda: cantidad, bruto y neto', [4, 370000.0, 356680.0],
+    [$sumaBancos['cantidad'], round($sumaBancos['bruto'], 4), round($sumaBancos['neto'], 4)]);
+chequear('y coinciden con los totales', [$cMix['cantidad'], $cMix['bruto'], $cMix['neto']],
+    [$sumaBancos['cantidad'], round($sumaBancos['bruto'], 4), round($sumaBancos['neto'], 4)]);
+
+$porBanco = [];
+
+foreach ($cMix['cheques'] as $ch) {
+    $porBanco[$ch['id_banco']] = (isset($porBanco[$ch['id_banco']]) ? $porBanco[$ch['id_banco']] : 0)
+        + $ch['neto'];
+}
+
+chequear('el neto de cada banco es la suma de los netos redondeados de sus cheques',
+    [round($porBanco[20], 4), round($porBanco[10], 4)], array_column($cMix['bancos'], 'neto'));
+chequear('fechas, plazo y tasa son los de siempre, uno para toda la tanda',
+    ['2026-10-21', 2, 0.036, 'IIBB 3% + SICREB 0,6%'],
+    [$cMix['fecha_acreditacion'], $cMix['dias_plazo'], $cMix['tasa'], $cMix['desglose']]);
+chequear('la tanda dice cuantos bancos', '4 cheques de 2 bancos', $cMix['tanda']);
+
+$empate = Echeqs::desgloseBancos([
+    ['id_banco' => 30, 'banco' => 'NACION', 'bruto' => 100.0, 'neto' => 96.4],
+    ['id_banco' => 10, 'banco' => 'GALICIA', 'bruto' => 100.0, 'neto' => 96.4],
+    ['id_banco' => 40, 'banco' => 'GALICIA', 'bruto' => 100.0, 'neto' => 96.4]
+]);
+chequear('a igual bruto desempata el nombre, y despues el id', [10, 40, 30],
+    array_column($empate, 'id_banco'));
+chequear('dos bancos con el mismo nombre son dos bancos', 3, count($empate));
+
+$galicia = [['banco' => 'GALICIA']];
+chequear('textoTanda: un cheque de un banco', '1 cheque(s) de GALICIA', Echeqs::textoTanda(1, $galicia));
+chequear('textoTanda: varios cheques de un banco', '3 cheque(s) de GALICIA', Echeqs::textoTanda(3, $galicia));
+chequear('textoTanda: varios bancos, en plural y sin nombrarlos', '5 cheques de 3 bancos',
+    Echeqs::textoTanda(5, [['banco' => 'A'], ['banco' => 'B'], ['banco' => 'C']]));
+
+seccion('el guardado: cada fila con el banco de su cheque');
+
+$params = Echeqs::paramsInsertDeposito($cMix['cheques'], $cMix, 'boleta 1', 'rorozco');
+$filasIns = array_chunk($params, 14);
+
+chequear('14 parametros por cheque, como los ? del INSERT', [4, 56], [count($filasIns), count($params)]);
+chequear('ID_BANCO y DESC_BANCO de CADA cheque, no del primero de la tanda',
+    [[2, 10, 'GALICIA'], [3, 20, 'MACRO S.A.'], [1, 10, 'GALICIA'], [7, 20, 'MACRO S.A.']],
+    array_map(function ($p) { return [$p[0], $p[2], $p[3]]; }, $filasIns));
+chequear('bruto y neto, tambien de cada cheque', [[50000.0, 48200.0], [100000.0, 96400.0]],
+    array_map(function ($p) { return [$p[7], $p[10]]; }, array_slice($filasIns, 0, 2)));
+chequear('fechas, plazo, tasa y desglose, los de la tanda en todas las filas', 1,
+    count(array_unique(array_map(function ($p) {
+        return json_encode([$p[4], $p[5], $p[6], $p[8], $p[9], $p[11], $p[12], $p[13]]);
+    }, $filasIns))));
+
+$srcIns = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/Echeqs.php'));
+chequear('el INSERT usa esos parametros', 1, substr_count($srcIns,
+    '$params = self::paramsInsertDeposito($cheques, $calculo, $obs, $usuario);'));
+chequear('y ya nadie lee un banco de la tanda', 0,
+    preg_match("/\\\$calculo\['(id_banco|banco)'\]/", $srcIns));
 
 $c = Echeqs::calcularDeposito($sel['filas'], 2, $calOct, $aliTasa, '2026-10-23');
 chequear('un viernes acredita el martes', '2026-10-27', $c['fecha_acreditacion']);
@@ -440,7 +534,9 @@ chequear('los depositados se leen aunque su fecha haya pasado', true,
 chequear('la agregada usa el mismo universo', true,
     strpos(Echeqs::sqlCarteraTotales(true, true), '(s.FECHA_CHEQ >= CAST(GETDATE() AS DATE) OR d.ID IS NOT NULL)') !== false);
 
-$sinScript = Echeqs::sqlCartera(true, false);
+// Con core.autocrlf la copia de trabajo de Echeqs.php puede estar en CRLF, y
+// los saltos del SQL salen como \r\n: se normalizan antes de buscar.
+$sinScript = str_replace("\r\n", "\n", Echeqs::sqlCartera(true, false));
 chequear('sin el script, la consulta es la de antes: sin union ni OR', [false, true], [
     strpos($sinScript, 'ECHEQ_DEPOSITO') !== false,
     strpos($sinScript, "WHERE s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)\n                  AND s.ESTADO = ?") !== false
@@ -666,6 +762,9 @@ chequear('y el del hueco entre scripts, como critico', 1,
 
 $p = Echeqs::sinDeposito('Los cheques no tienen ninguna alícuota vigente al 21/10/2026, así que no se puede '
     . 'calcular el importe neto del depósito. Cargá sus alícuotas en Parámetros → Cheques con una '
-    . 'vigencia igual o anterior a esa fecha.', [], []);
+    . 'vigencia igual o anterior a esa fecha.', []);
 chequear('sin alicuotas, el dialogo ofrece ir a Parametros -> Cheques', 'PRECHEQUEADO', $p['ir_a']);
-chequear('con bancos mezclados, no', null, Echeqs::sinDeposito('un solo banco emisor', [], [])['ir_a']);
+chequear('con un cheque que ya no esta en cartera, no: no se arregla ahi', null,
+    Echeqs::sinDeposito('No se depositó ningún cheque: 1 de los 2 no se pueden depositar. '
+        . 'N° 999 ya no está en cartera en Tango.', [])['ir_a']);
+chequear('sinDeposito ya no lleva lista de bancos', false, array_key_exists('bancos', $p));
