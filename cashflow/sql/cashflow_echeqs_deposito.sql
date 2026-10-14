@@ -14,8 +14,9 @@
    ----------------------------------------------------------------------------
    QUE RESUELVE
 
-   Los cheques de cartera se depositan en el banco por tandas, de un mismo
-   banco emisor. Desde que se depositan, la plata ya no entra en la fecha del
+   Los cheques de cartera se depositan en el banco por tandas, que pueden
+   juntar cheques de varios bancos emisores: se cobran por el clearing
+   bancario. Desde que se depositan, la plata ya no entra en la fecha del
    cheque: entra a las 48 hs habiles del deposito, y entra NETA, porque el banco
    retiene IIBB y SICREB sobre el deposito. Hasta ahora el tablero seguia
    mostrando el cheque en su fecha y por el bruto.
@@ -44,8 +45,8 @@
    IMPORTE_NETO. DETALLE_TASA es el desglose ("IIBB 2,5% + SICREB 0,6%") con el
    que se calculo: una tasa sin desglose no se puede auditar.
 
-   EL BANCO SE GUARDA COMO ESTABA AL DEPOSITAR. Es el dato que agrupo la tanda
-   -todos los cheques de un deposito son del mismo banco emisor- y no tiene que
+   EL BANCO SE GUARDA COMO ESTABA AL DEPOSITAR, CHEQUE POR CHEQUE. Es el banco
+   emisor de ESE cheque -una tanda puede tener varios- y no tiene que
    depender de que dbo.BANCO siga diciendo lo mismo.
 
    NO HAY BAJAS FISICAS, Y EL HISTORIAL ES EL PUNTO. Deshacer un deposito marca

@@ -1488,7 +1488,8 @@ chequear('con muchos bancos, el desglose hace scroll adentro del dialogo', true,
 $textosViejos = ['un solo banco emisor', 'mismo banco', 'bancos mezclados', 'de un banco emisor',
                  'de UN banco'];
 $archivosDeposito = [
-    'Class/Echeqs.php', 'Controller/EcheqsController.php', 'Js/Ingresos-Echeqs.js', 'Tabs/echeqs.php'
+    'Class/Echeqs.php', 'Controller/EcheqsController.php', 'Js/Ingresos-Echeqs.js', 'Tabs/echeqs.php',
+    'README-echeqs.md', 'sql/cashflow_echeqs_deposito.sql'
 ];
 
 foreach ($archivosDeposito as $archivo) {
