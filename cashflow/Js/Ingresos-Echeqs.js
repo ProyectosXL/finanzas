@@ -919,7 +919,7 @@
                         ? '<span class="ech-dias-precheq">−' + dias + ' d</span>'
                         : '<span class="ech-sin-dias" title="Este cliente no tiene días de '
                           + 'pre-chequeado cargados, así que su venta estimada es la propia '
-                          + 'fecha del cheque. Se configura en Parámetros → Pre-chequeado.">0</span>')
+                          + 'fecha del cheque. Se configura en Parámetros → Cheques.">0</span>')
                  + '</td>';
 
             html += '<td class="center">' + numeroCheque(f.N_CHEQUE) + '</td>';
@@ -981,7 +981,7 @@
         if (!datosPre.filas.length) {
             return (datosPre.resumen && datosPre.resumen.cheques === 0
                     && (!datosPre.resumen.clientes || !datosPre.resumen.clientes.length))
-                ? 'No hay clientes configurados. Cargalos en Parámetros → Pre-chequeado.'
+                ? 'No hay clientes configurados. Cargalos en Parámetros → Cheques.'
                 : 'Los clientes configurados no tienen cheques vivos con fecha de hoy en adelante.';
         }
 

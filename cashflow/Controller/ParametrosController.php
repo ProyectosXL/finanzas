@@ -103,6 +103,38 @@ function mensajeRecalculo($rec) {
     return $mensaje;
 }
 
+/**
+ * Que dejo el recalculo de los depositos de cheques pendientes.
+ *
+ * Es el mismo criterio que mensajeRecalculo() -se informa SIEMPRE, incluso
+ * cuando no cambio nada- con las palabras de este circuito: depositos y no
+ * movimientos.
+ *
+ * @param array $rec Resultado de Echeqs::recalcularDepositosPendientes()
+ * @return string
+ */
+function mensajeRecalculoDepositos($rec) {
+    $cambios = isset($rec['cambios']) ? count($rec['cambios']) : 0;
+    $acreditados = isset($rec['acreditados']) ? intval($rec['acreditados']) : 0;
+
+    $mensaje = ($cambios === 0)
+        ? 'No cambió el neto de ningún depósito pendiente.'
+        : 'Se recalcularon ' . $cambios . ' depósito(s) pendiente(s), con una diferencia total '
+            . 'de $ ' . number_format(isset($rec['diferencia']) ? $rec['diferencia'] : 0, 2, ',', '.')
+            . ' en el neto.';
+
+    if ($acreditados > 0) {
+        $mensaje .= ' Los ' . $acreditados . ' depósito(s) ya acreditados no se tocaron: '
+            . 'conservan la tasa con la que se calcularon.';
+    }
+
+    foreach (isset($rec['avisos']) ? $rec['avisos'] : [] as $a) {
+        $mensaje .= ' ' . $a;
+    }
+
+    return $mensaje;
+}
+
 try {
     require_once __DIR__ . '/../Class/Parametros.php';
     require_once __DIR__ . '/../Class/MixCobro.php';
@@ -887,6 +919,86 @@ try {
                 'success' => true,
                 'message' => 'Cliente dado de baja. No se borró: queda inhabilitado, sus cheques '
                            . 'salen del listado y dejan de netear la cobranza proyectada.'
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           MODULO CHEQUES - EL DEPOSITO DE CHEQUES DE CARTERA
+
+           El plazo de acreditacion y las alicuotas de retencion con las que se
+           calcula el neto de cada deposito. Viven en Class/Echeqs.php, que es
+           la clase duena de esas tablas; la regla de la tasa es la de Cob.
+           Electronicos (Class/Retenciones.php).
+
+           Guardar o dar de baja una alicuota recalcula los depositos
+           pendientes y la respuesta dice cuantos cambiaron y por cuanto, con
+           el mismo mensaje que Cob. Electronicos.
+           ================================================================ */
+
+        case 'savePlazoDepositoEcheq':
+            $data = bodyJson();
+
+            if (!array_key_exists('dias', $data)) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/Echeqs.php';
+
+            $dias = (new Echeqs())->guardarPlazo($data['dias'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Los cheques que se depositen desde ahora acreditan a los ' . $dias
+                    . ' día(s) hábil(es). Los ya depositados conservan la fecha con la que se '
+                    . 'depositaron.',
+                'data' => ['dias' => $dias]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'addAlicuotaEcheq':
+            $data = bodyJson();
+
+            if (!isset($data['concepto']) || !array_key_exists('alicuota', $data)
+                || !isset($data['vigencia_desde'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/Echeqs.php';
+
+            // SIEMPRE INSERTA UNA VIGENCIA NUEVA: no pisa la anterior, asi los
+            // depositos ya acreditados conservan su tasa.
+            $r = (new Echeqs())->addAlicuota(
+                $data['concepto'],
+                $data['alicuota'],
+                $data['vigencia_desde'],
+                $usuario
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Alícuota guardada como vigencia nueva: la anterior queda en el '
+                    . 'histórico. La tasa total vigente de los cheques es ahora del '
+                    . number_format($r['tasa_total'] * 100, 4, ',', '.') . '%. '
+                    . mensajeRecalculoDepositos($r['recalculo']),
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'bajaAlicuotaEcheq':
+            $data = bodyJson();
+
+            if (!isset($data['id'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/Echeqs.php';
+
+            $r = (new Echeqs())->bajaAlicuota($data['id'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Alícuota dada de baja. ' . mensajeRecalculoDepositos($r['recalculo']),
+                'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
 

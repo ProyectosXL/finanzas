@@ -522,7 +522,7 @@ Con eso se cargan en *Parámetros* de una sola pasada y se vuelve a importar. Si
 
 #### La pantalla de administración muestra cuántos proveedores usan cada valor
 
-Sin ese número, dar de baja es a ciegas: no hay forma de saber si se saca una opción que no usa nadie o una que tienen doscientos proveedores, que van a quedar todos marcados como fuera de lista. Es la misma razón por la que *Pre-chequeado* muestra los cheques vivos de cada cliente.
+Sin ese número, dar de baja es a ciegas: no hay forma de saber si se saca una opción que no usa nadie o una que tienen doscientos proveedores, que van a quedar todos marcados como fuera de lista. Es la misma razón por la que *Parámetros → Cheques* muestra los cheques vivos de cada cliente.
 
 **Renombrar no propaga al maestro**, y la pantalla lo dice. El maestro guarda el **texto**, no un id: los proveedores cargados conservan el valor viejo y quedan marcados como fuera de lista hasta que alguien los edite. Propagar sería un `UPDATE` masivo que cambia de fila del tablero a cientos de proveedores desde una pantalla de configuración, sin previsualización y sin historial. En este módulo, un cambio masivo sobre el maestro es una **importación**, y las importaciones muestran el diff antes de confirmar.
 

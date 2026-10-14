@@ -1346,3 +1346,56 @@ chequear('se dibuja con el arbol', 1,
     substr_count($ventasJs, "        aplicarAperturaCobranza();\n        pintarLeyendaCobranza(arbol);"));
 chequear('con los tipos que manda el servidor y todos los nodos en juego, abiertos o no', 1,
     substr_count($ventasJs, "MixNiveles.leyenda((datosProyeccion.mix || {}).niveles,\n            arbol.map(function(n) { return n.nivel; }));"));
+
+seccion('Parametros -> Cheques: la seccion Deposito de cheques esta enganchada');
+
+$ppqTab = str_replace("\r\n", "\n", contenidoTab($TABS . '/parametros_prechequeado.php'));
+$ppqJs = str_replace("\r\n", "\n", file_get_contents($JS . '/Parametros-Prechequeado.js'));
+$paramCtrl = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Controller/ParametrosController.php'));
+
+chequear('la seccion existe, arriba del maestro', true,
+    strpos($ppqTab, 'id="seccionDepositoPpq"') !== false
+    && strpos($ppqTab, 'id="seccionDepositoPpq"') < strpos($ppqTab, 'id="tablaPpqClientes"'));
+chequear('se titula Depósito de cheques', 1, substr_count($ppqTab, '<h5 class="mb-0">Depósito de cheques</h5>'));
+chequear('y el maestro, Venta cobrada anticipada', 1,
+    substr_count($ppqTab, '<h5 class="mb-0">Venta cobrada anticipada</h5>'));
+
+foreach (['plazoDepositoPpq', 'tasaHoyPpq', 'bodyAlicuotasPpq',
+          'resultadoDepositoPpq', 'sinScriptDepositoPpq', 'cuerpoDepositoPpq'] as $id) {
+    chequear('existe #' . $id . ' y el JS lo usa', [1, true], [
+        substr_count($ppqTab, 'id="' . $id . '"'),
+        strpos($ppqJs, "'" . $id . "'") !== false
+    ]);
+}
+
+// Los controles de escritura, solo con permiso de edicion de la sub-pestana.
+foreach (['btnGuardarPlazoPpq', 'btnNuevaAlicuotaPpq', 'formAlicuotaPpq'] as $id) {
+    $pos = strpos($ppqTab, 'id="' . $id . '"');
+    $antes = substr($ppqTab, 0, $pos);
+
+    chequear('#' . $id . ' se dibuja solo con permiso de edicion', true,
+        $pos !== false && strrpos($antes, '<?php if ($edita): ?>') > strrpos($antes, '<?php endif; ?>'));
+}
+
+chequear('sin permiso el plazo se ve pero no se edita', 1,
+    substr_count($ppqTab, "<?php echo \$edita ? '' : 'disabled'; ?>"));
+
+foreach (['savePlazoDepositoEcheq' => 'guardarPlazo', 'addAlicuotaEcheq' => 'agregarAlicuota',
+          'bajaAlicuotaEcheq' => 'bajaAlicuota'] as $accion => $fn) {
+    chequear($accion . ': el JS la pide y el controller la atiende', [true, 1], [
+        strpos($ppqJs, "?action=" . $accion . "'") !== false,
+        substr_count($paramCtrl, "case '" . $accion . "':")
+    ]);
+}
+
+chequear('los botones estan conectados', 4, substr_count($ppqJs, "conectar('btnGuardarPlazoPpq', guardarPlazo);")
+    + substr_count($ppqJs, "conectar('btnNuevaAlicuotaPpq',")
+    + substr_count($ppqJs, "conectar('btnCancelarAlicuotaPpq',")
+    + substr_count($ppqJs, "conectar('btnAgregarAlicuotaPpq', agregarAlicuota);"));
+chequear('la seccion se pinta al cargar la sub-pestana', 1,
+    substr_count($ppqJs, "                pintarAvisos();\n                pintarDeposito();\n                pintarClientes();"));
+chequear('la tabla de alicuotas se exporta', 1,
+    substr_count($ppqTab, 'data-exportar="tablaPpqAlicuotas"'));
+chequear('sin alicuotas dice "sin alícuotas", no 0%', true,
+    strpos($ppqJs, "if (!t || t.tasa === null || t.tasa === undefined) {") !== false
+    && strpos($ppqJs, "'alícuotas</span>'") !== false);

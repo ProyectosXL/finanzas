@@ -415,7 +415,8 @@
     color: var(--text-muted, #8c93a8);
 }
 
-.pce-cobel .pce-num {
+.pce-cobel .pce-num,
+.ppq-prechequeado .pce-num {
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }
@@ -428,7 +429,8 @@
 
 /* El desglose de conceptos debajo de la tasa total: es lo que hace auditable de
    donde sale ese porcentaje. */
-.pce-cobel .pce-detalle {
+.pce-cobel .pce-detalle,
+.ppq-prechequeado .pce-detalle {
     font-size: 11px;
     color: var(--text-muted, #8c93a8);
 }
@@ -436,14 +438,16 @@
 /* Una procesadora sin alicuotas vigentes no puede calcular el neto de ningun
    movimiento, asi que su tasa NO se muestra como 0%: un cero se leeria como
    "no le retienen nada". */
-.pce-cobel .pce-sin-alicuota {
+.pce-cobel .pce-sin-alicuota,
+.ppq-prechequeado .pce-sin-alicuota {
     font-size: 11px;
     color: var(--danger-color, #dc3545);
     text-transform: uppercase;
     letter-spacing: 0.3px;
 }
 
-.pce-cobel .pce-badge {
+.pce-cobel .pce-badge,
+.ppq-prechequeado .pce-badge {
     display: inline-block;
     padding: 2px 8px;
     border-radius: 10px;
@@ -452,19 +456,22 @@
     color: var(--text-secondary, #5a6178);
 }
 
-.pce-cobel .pce-badge-vigente {
+.pce-cobel .pce-badge-vigente,
+.ppq-prechequeado .pce-badge-vigente {
     background: rgba(40, 167, 69, 0.12);
     color: #1e7e34;
 }
 
-.pce-cobel .pce-badge-baja {
+.pce-cobel .pce-badge-baja,
+.ppq-prechequeado .pce-badge-baja {
     background: rgba(220, 53, 69, 0.1);
     color: #b02a37;
 }
 
 /* La suma que va a quedar vigente, antes de guardar. Con suma >= 100% el neto
    saldria cero o negativo y el boton se bloquea. */
-.pce-cobel .pce-suma {
+.pce-cobel .pce-suma,
+.ppq-prechequeado .pce-suma {
     font-size: 12px;
     padding: 8px 10px;
     border-radius: 6px;
@@ -508,7 +515,8 @@
     padding: 3px 8px;
 }
 
-.pce-cobel .btn-link {
+.pce-cobel .btn-link,
+.ppq-prechequeado .btn-link {
     padding: 0 4px;
     text-decoration: none;
 }
@@ -518,7 +526,8 @@
    TABLA -que movimiento se recalculo, con que tasa antes y despues, con que
    diferencia de neto- y una tabla en un alert no se puede leer ni comparar.
    Ademas queda a la vista mientras se sigue trabajando. */
-.pce-cobel .pce-resultado {
+.pce-cobel .pce-resultado,
+.ppq-prechequeado .pce-resultado {
     border: 1px solid rgba(40, 167, 69, 0.35);
     border-left: 3px solid #28a745;
     border-radius: 6px;
@@ -527,28 +536,32 @@
     margin-bottom: 16px;
 }
 
-.pce-cobel .pce-resultado-titulo {
+.pce-cobel .pce-resultado-titulo,
+.ppq-prechequeado .pce-resultado-titulo {
     font-size: 13px;
     font-weight: 600;
     color: #1e7e34;
     line-height: 1.4;
 }
 
-.pce-cobel .pce-resultado-linea {
+.pce-cobel .pce-resultado-linea,
+.ppq-prechequeado .pce-resultado-linea {
     font-size: 12px;
     color: var(--text-secondary, #5a6178);
     margin-top: 6px;
     line-height: 1.5;
 }
 
-.pce-cobel .pce-resultado-aviso {
+.pce-cobel .pce-resultado-aviso,
+.ppq-prechequeado .pce-resultado-aviso {
     font-size: 11px;
     color: #a1670a;
     margin-top: 6px;
     line-height: 1.4;
 }
 
-.pce-cobel .pce-resultado-tabla {
+.pce-cobel .pce-resultado-tabla,
+.ppq-prechequeado .pce-resultado-tabla {
     max-height: 260px;
     overflow-y: auto;
     background: #fff;
@@ -557,18 +570,21 @@
     margin-top: 10px;
 }
 
-.pce-cobel .pce-resultado-tabla th {
+.pce-cobel .pce-resultado-tabla th,
+.ppq-prechequeado .pce-resultado-tabla th {
     font-size: 11px;
     white-space: nowrap;
 }
 
-.pce-cobel .pce-resultado-tabla td {
+.pce-cobel .pce-resultado-tabla td,
+.ppq-prechequeado .pce-resultado-tabla td {
     font-size: 12px;
 }
 
 /* La flecha del antes -> despues: es la forma mas corta de mostrar un cambio
    sin dos columnas por dato. */
-.pce-cobel .pce-flecha {
+.pce-cobel .pce-flecha,
+.ppq-prechequeado .pce-flecha {
     font-size: 9px;
     color: var(--text-muted, #8c93a8);
     margin: 0 2px;

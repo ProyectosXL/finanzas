@@ -4,6 +4,8 @@ require_once __DIR__ . '/Horizonte.php';
 require_once __DIR__ . '/Parametros.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
+require_once __DIR__ . '/Retenciones.php';
+require_once __DIR__ . '/DiasHabiles.php';
 
 /**
  * Echeqs
@@ -125,6 +127,54 @@ class Echeqs {
     /** Largo util del motivo, el mismo de la columna */
     const MOTIVO_MAX = 200;
 
+    /**
+     * Depositos de cheques de cartera. Una fila por deposito, con historial:
+     * deshacer marca VIGENTE = 0 y no borra nada.
+     */
+    const TABLA_DEPOSITO = 'RO_T_CASHFLOW_ECHEQ_DEPOSITO';
+
+    /**
+     * Las alicuotas de retencion de los cheques depositados. Es un juego PROPIO
+     * y no filas en la de Cob. Electronicos: un cambio en la tasa de Payway no
+     * puede mover el neto de un cheque ni al reves.
+     */
+    const TABLA_ALICUOTA = 'RO_T_CASHFLOW_ECHEQ_ALICUOTA';
+
+    /** Los dos scripts del circuito de deposito, para los mensajes */
+    const SCRIPT_DEPOSITO = 'sql/cashflow_echeqs_deposito.sql';
+    const SCRIPT_FILA_DEPOSITADOS = 'sql/cashflow_estructura_echeqs_depositados.sql';
+
+    /**
+     * El plazo de acreditacion, en RO_T_CASHFLOW_PARAMETROS.
+     *
+     * Lleva el prefijo del modulo, como 'exportaciones_tasky_dias_cobro': la
+     * tabla clave/valor es una sola para todo el cashflow, y una clave como
+     * 'dias_acreditacion' a secas se leeria como de cualquier pestana.
+     */
+    const CLAVE_PLAZO = 'echeqs_dias_acreditacion_deposito';
+
+    /**
+     * El plazo mas largo que se acepta. No es una regla del banco: es el tope
+     * de un error de tipeo. Coincide con DiasHabiles::MAX_CORRIMIENTO, y un
+     * plazo mas largo que eso no se distingue de un calendario roto.
+     */
+    const PLAZO_MAX = 30;
+
+    /** Largo util de la observacion de un deposito, el de la columna */
+    const OBSERVACION_MAX = 200;
+
+    /**
+     * Los textos de la tasa de los cheques, para Retenciones::resolverTasa().
+     * La regla es la de Cob. Electronicos; lo que cambia es de quien son las
+     * alicuotas y donde se cargan.
+     */
+    const TEXTOS_TASA = [
+        'sin_vigentes' => 'Los cheques no tienen',
+        'de' => 'de los cheques',
+        'que' => 'del depósito',
+        'donde' => 'Parámetros → Cheques'
+    ];
+
     /** @var bool|null Cache del chequeo de tablas creadas */
     private $tablas = null;
 
@@ -135,6 +185,13 @@ class Echeqs {
      * corrio uno solo tiene que perder unicamente esa funcion.
      */
     private $tablaExcluido = null;
+
+    /**
+     * @var bool|null Cache del chequeo de las tablas del deposito. Aparte de
+     * las otras dos por el mismo motivo: es un script independiente, y quien
+     * no lo corrio pierde solo el deposito.
+     */
+    private $tablasDeposito = null;
 
     /** @var Conexion */
     private $conn;
@@ -281,6 +338,146 @@ class Echeqs {
         }
 
         return $netos;
+    }
+
+    /* ====================================================================
+       DEPOSITO: EL PLAZO Y LAS ALICUOTAS
+
+       Puros: reciben lo ya leido de la base. El plazo y las alicuotas se
+       editan en Parametros -> Cheques; aca se decide que valor sirve.
+       ==================================================================== */
+
+    /**
+     * Valida un plazo de acreditacion. LANZA con el motivo.
+     *
+     * UN ENTERO DE 1 EN ADELANTE: con cero el cheque acreditaria el mismo dia
+     * del deposito, que es justo lo que el plazo existe para no suponer. El
+     * tope -PLAZO_MAX- no es del banco: es el de un error de tipeo, y coincide
+     * con el corrimiento maximo de DiasHabiles.
+     *
+     * @param mixed $dias
+     * @return int
+     */
+    public static function validarPlazo($dias) {
+        $texto = trim((string) $dias);
+
+        if ($texto === '' || !preg_match('/^\d+$/', $texto)) {
+            throw new Exception('El plazo de acreditación tiene que ser un número entero de días '
+                . 'hábiles: 2 son las 48 hs hábiles.');
+        }
+
+        $n = intval($texto);
+
+        if ($n < 1) {
+            throw new Exception('El plazo de acreditación tiene que ser de al menos un día hábil: '
+                . 'con cero, el cheque acreditaría el mismo día en que se deposita.');
+        }
+
+        if ($n > self::PLAZO_MAX) {
+            throw new Exception('El plazo de acreditación no puede superar los '
+                . self::PLAZO_MAX . ' días hábiles.');
+        }
+
+        return $n;
+    }
+
+    /**
+     * El plazo que sirve para depositar, a partir de lo que hay en la base.
+     *
+     * UN PLAZO QUE FALTA O ESTA ROTO ES null CON EL MOTIVO, nunca un 2 de
+     * respaldo: el plazo es un valor de negocio y vive en Parametros. Un
+     * respaldo escrito aca depositaria con un numero que nadie eligio y que en
+     * la pantalla se veria igual que uno configurado.
+     *
+     * @param string|null $valor Lo que dice la fila, o null si no existe
+     * @return array ['dias' => int|null, 'error' => string|null]
+     */
+    public static function plazoDesdeValor($valor) {
+        if ($valor === null) {
+            return ['dias' => null, 'error' => 'Falta el parámetro ' . self::CLAVE_PLAZO
+                . ': corré ' . self::SCRIPT_DEPOSITO . ' contra la base central.'];
+        }
+
+        try {
+            return ['dias' => self::validarPlazo($valor), 'error' => null];
+        } catch (Exception $e) {
+            return ['dias' => null, 'error' => 'El plazo de acreditación guardado ("'
+                . trim((string) $valor) . '") no sirve: ' . $e->getMessage()
+                . ' Corregilo en Parámetros → Cheques.'];
+        }
+    }
+
+    /**
+     * Valida el numero de una alicuota que llega del navegador. LANZA.
+     *
+     * Va aparte de Retenciones::validarAlicuota() porque aquella recibe un
+     * numero y lo convierte sin preguntar: un texto llegaria como cero, y una
+     * retencion en cero guardada por un tipeo es un neto igual al bruto que
+     * nadie eligio.
+     *
+     * @param mixed $alicuota Fraccion: 2,5% es 0,025
+     * @return float
+     */
+    public static function numeroAlicuota($alicuota) {
+        if ($alicuota === null || $alicuota === '' || is_bool($alicuota)
+            || !is_numeric($alicuota)) {
+            throw new Exception('La alícuota tiene que ser un número: 2,5% se carga como 2,5 en '
+                . 'la pantalla y viaja como 0,025.');
+        }
+
+        return floatval($alicuota);
+    }
+
+    /**
+     * Marca en cada alicuota si es la que rige HOY para su concepto.
+     *
+     * La pantalla muestra las historicas a proposito -son las que explican la
+     * tasa de un deposito de ese periodo- y tiene que distinguir cual manda. Lo
+     * decide Retenciones::alicuotasVigentes(), la misma regla que calcula la
+     * tasa: si el navegador eligiera por su cuenta, podria marcar como vigente
+     * una que el servidor no usa.
+     *
+     * @param array $alicuotas Filas de la tabla, todas
+     * @param string $hoy 'Y-m-d'
+     * @return array Las mismas filas, con 'VIGENTE_HOY'
+     */
+    public static function marcarVigentesHoy($alicuotas, $hoy) {
+        $ids = [];
+
+        foreach (Retenciones::alicuotasVigentes($alicuotas, $hoy) as $v) {
+            $ids[$v['id']] = true;
+        }
+
+        $v = [];
+
+        foreach (is_array($alicuotas) ? $alicuotas : [] as $a) {
+            $a['VIGENTE_HOY'] = isset($ids[intval($a['ID'])]);
+            $v[] = $a;
+        }
+
+        return $v;
+    }
+
+    /**
+     * La tasa de los cheques a una fecha, para la pantalla: el numero, el
+     * desglose y cuantos conceptos.
+     *
+     * SIN ALICUOTAS 'tasa' ES null, NO 0. La pantalla dice "sin alícuotas":
+     * un 0% se leeria como "el banco no retiene nada", y con eso no se puede
+     * depositar.
+     *
+     * @param array $alicuotas
+     * @param string $fecha 'Y-m-d'
+     * @return array ['tasa' => float|null, 'conceptos' => int, 'desglose' => string]
+     */
+    public static function tasaParaPantalla($alicuotas, $fecha) {
+        $r = Retenciones::tasaRetencion($alicuotas, $fecha);
+
+        return [
+            'tasa' => ($r['conceptos'] === 0) ? null : $r['tasa'],
+            'conceptos' => $r['conceptos'],
+            'desglose' => Retenciones::desglose($r['detalle'])
+        ];
     }
 
     /* ====================================================================
@@ -665,6 +862,39 @@ class Echeqs {
     }
 
     /**
+     * Si ya se corrio sql/cashflow_echeqs_deposito.sql: las dos tablas, la de
+     * depositos y la de alicuotas.
+     *
+     * SIN ELLAS LA PESTANA NO SE ROMPE: la cartera se lee como hoy, ningun
+     * cheque esta depositado, el boton Depositar queda apagado nombrando el
+     * script y Parametros -> Cheques avisa. Mismo criterio que excluirCreada().
+     *
+     * @return bool
+     */
+    public function depositoCreado() {
+        if ($this->tablasDeposito !== null) {
+            return $this->tablasDeposito;
+        }
+
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo." . self::TABLA_DEPOSITO . "', 'U') AS D,
+                    OBJECT_ID('dbo." . self::TABLA_ALICUOTA . "', 'U') AS A");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar las tablas del depósito'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->tablasDeposito = ($row && $row['D'] !== null && $row['A'] !== null);
+
+        return $this->tablasDeposito;
+    }
+
+    /**
      * Avisos de configuracion pendiente, para mostrar en la pestana.
      *
      * @return array Lista de mensajes
@@ -684,7 +914,7 @@ class Echeqs {
 
         if (empty($clientes)) {
             $avisos[] = 'No hay clientes configurados para venta cobrada anticipada. '
-                . 'Cargalos en Parámetros → Pre-chequeado: sin clientes, esa sub-pestaña se '
+                . 'Cargalos en Parámetros → Cheques: sin clientes, esa sub-pestaña se '
                 . 'muestra vacía a propósito.';
 
             return $avisos;
@@ -1231,6 +1461,435 @@ class Echeqs {
         sqlsrv_free_stmt($stmt);
 
         return $v;
+    }
+
+    /* ====================================================================
+       PARAMETROS DEL DEPOSITO: EL PLAZO Y LAS ALICUOTAS
+
+       Se editan en Parametros -> Cheques, pero viven aca porque las tablas son
+       de este modulo: es el mismo criterio con el que el maestro de
+       pre-chequeado, Saldos y Cob. Electronicos administran las suyas desde su
+       propia clase. Parametros solo las expone.
+       ==================================================================== */
+
+    /**
+     * El plazo de acreditacion: el valor que sirve, o null con el motivo, y
+     * quien lo toco por ultima vez.
+     *
+     * Se lee directo de la tabla y no por Parametros::getParametrosMap(): ese
+     * mapa trae los cuarenta parametros del modulo para usar uno.
+     *
+     * @return array ['dias' => int|null, 'error' => string|null, 'valor' => string|null,
+     *                'usuario' => string|null, 'fecha' => string|null]
+     */
+    public function getPlazo() {
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT VALOR, USUARIO_MODIF, FECHA_MODIF
+             FROM dbo.RO_T_CASHFLOW_PARAMETROS
+             WHERE CLAVE = ?",
+            [self::CLAVE_PLAZO]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer el plazo de acreditación'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $r = self::plazoDesdeValor($row ? $row['VALOR'] : null);
+
+        $r['valor'] = $row ? trim((string) $row['VALOR']) : null;
+        $r['usuario'] = $row ? $row['USUARIO_MODIF'] : null;
+        $r['fecha'] = $row ? $this->fechaHora($row['FECHA_MODIF']) : null;
+
+        return $r;
+    }
+
+    /**
+     * Guarda el plazo de acreditacion.
+     *
+     * NO MUEVE NINGUN DEPOSITO YA HECHO: la fecha de acreditacion se calcula y
+     * se guarda al depositar, porque el banco ya tomo ese cheque con el plazo
+     * de ese dia. El plazo nuevo vale para los depositos que vengan.
+     *
+     * Tiene su propio camino y no el saveParametro() generico porque ese guarda
+     * cualquier texto, y un plazo de cero o de "dos" dejaria sin poder
+     * depositar. saveParametro() rechaza esta clave por el mismo motivo.
+     *
+     * @param mixed $dias
+     * @param string $usuario
+     * @return int El plazo guardado
+     */
+    public function guardarPlazo($dias, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $dias = self::validarPlazo($dias);
+
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid,
+            "UPDATE dbo.RO_T_CASHFLOW_PARAMETROS
+             SET VALOR = ?, " . Auditoria::SET_MODIF . "
+             WHERE CLAVE = ?",
+            [(string) $dias, $usuario, self::CLAVE_PLAZO]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al guardar el plazo de acreditación'));
+        }
+
+        $filas = sqlsrv_rows_affected($stmt);
+        sqlsrv_free_stmt($stmt);
+
+        if ($filas < 1) {
+            throw new Exception('Falta el parámetro ' . self::CLAVE_PLAZO . ': corré '
+                . self::SCRIPT_DEPOSITO . ' contra la base central.');
+        }
+
+        return $dias;
+    }
+
+    /**
+     * Las alicuotas de los cheques, con el historico completo.
+     *
+     * TODAS, tambien las dadas de baja y las reemplazadas: la vigencia vieja es
+     * lo que explica la tasa de un deposito de ese periodo. Sin el script
+     * devuelve vacio: la pregunta es "que alicuotas hay", y la respuesta honesta
+     * es "ninguna".
+     *
+     * @param bool $soloActivas
+     * @return array Filas con ID, CONCEPTO, ALICUOTA, VIGENCIA_DESDE, ACTIVO y
+     *         quien la cargo
+     */
+    public function getAlicuotas($soloActivas = false) {
+        if (!$this->depositoCreado()) {
+            return [];
+        }
+
+        $cid = $this->conectar('central');
+
+        $sql = "SELECT ID, CONCEPTO, ALICUOTA, VIGENCIA_DESDE, ACTIVO,
+                       USUARIO_ALTA, FECHA_ALTA, USUARIO_BAJA, FECHA_BAJA
+                FROM dbo." . self::TABLA_ALICUOTA
+             . ($soloActivas ? " WHERE ACTIVO = 1" : "") . "
+                ORDER BY CONCEPTO, VIGENCIA_DESDE DESC, ID DESC";
+
+        $stmt = sqlsrv_query($cid, $sql);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer las alícuotas de los cheques'));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $v[] = [
+                'ID' => intval($row['ID']),
+                'CONCEPTO' => trim((string) $row['CONCEPTO']),
+                'ALICUOTA' => floatval($row['ALICUOTA']),
+                'VIGENCIA_DESDE' => Horizonte::normalizarFecha($row['VIGENCIA_DESDE']),
+                'ACTIVO' => intval($row['ACTIVO']),
+                'USUARIO' => $row['USUARIO_ALTA'],
+                'FECHA_ALTA' => $this->fechaHora($row['FECHA_ALTA']),
+                'USUARIO_BAJA' => $row['USUARIO_BAJA'],
+                'FECHA_BAJA' => $this->fechaHora($row['FECHA_BAJA'])
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $v;
+    }
+
+    /**
+     * Carga una vigencia nueva de una alicuota y recalcula los depositos
+     * pendientes.
+     *
+     * UNA ALICUOTA NO SE EDITA: se inserta una vigencia nueva con su
+     * VIGENCIA_DESDE. La anterior queda, y es lo que explica por que un deposito
+     * de la semana pasada tiene otra tasa. Las validaciones son las de Cob.
+     * Electronicos -Retenciones::validarAlicuota()-, sobre el estado resultante.
+     *
+     * @param string $concepto
+     * @param mixed $alicuota Fraccion: 2,5% es 0,025
+     * @param string $vigenciaDesde 'Y-m-d'
+     * @param string $usuario
+     * @return array ['id', 'tasa_total', 'recalculo']
+     */
+    public function addAlicuota($concepto, $alicuota, $vigenciaDesde, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
+        if (!$this->depositoCreado()) {
+            throw new Exception('Todavía no se pueden cargar alícuotas de cheques. Corré '
+                . self::SCRIPT_DEPOSITO . ' contra la base central.');
+        }
+
+        $alicuota = self::numeroAlicuota($alicuota);
+        $concepto = trim((string) $concepto);
+        $vigencia = Horizonte::normalizarFecha($vigenciaDesde);
+
+        // Valida sobre el ESTADO RESULTANTE: las vigentes con esta reemplazando
+        // a la de su concepto. Puede lanzar.
+        $tasaTotal = Retenciones::validarAlicuota(
+            $this->getAlicuotas(true), $concepto, $alicuota, $vigencia);
+
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid,
+            "INSERT INTO dbo." . self::TABLA_ALICUOTA . "
+                 (CONCEPTO, ALICUOTA, VIGENCIA_DESDE, ACTIVO, USUARIO_ALTA, USUARIO_MODIF)
+             OUTPUT INSERTED.ID
+             VALUES (?, ?, ?, 1, ?, ?)",
+            [$concepto, $alicuota, $vigencia, $usuario, $usuario]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al guardar la alícuota'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        return [
+            'id' => intval($row['ID']),
+            'tasa_total' => $tasaTotal,
+            'recalculo' => $this->recalcularDepositosPendientes($usuario)
+        ];
+    }
+
+    /**
+     * Baja LOGICA de una vigencia de alicuota.
+     *
+     * SE PUEDE DAR DE BAJA LA ULTIMA, a diferencia de Cob. Electronicos. Alla
+     * el invariante es "una procesadora ACTIVA tiene alicuotas", y aca no hay
+     * procesadora que activar. Lo que pasa sin alicuotas esta cubierto en los
+     * dos extremos: los depositos pendientes CONSERVAN el neto que tienen
+     * guardado -el recalculo no puede calcular uno nuevo y lo avisa-, y los
+     * depositos nuevos se rechazan hasta que se cargue una. Decision de
+     * Tesoreria.
+     *
+     * @param int $id
+     * @param string $usuario
+     * @return array ['recalculo' => array]
+     */
+    public function bajaAlicuota($id, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
+        if (!$this->depositoCreado()) {
+            throw new Exception('Corré ' . self::SCRIPT_DEPOSITO . ' contra la base central.');
+        }
+
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid,
+            "UPDATE dbo." . self::TABLA_ALICUOTA . "
+             SET ACTIVO = 0, " . Auditoria::SET_BAJA . "
+             WHERE ID = ? AND ACTIVO = 1",
+            [$usuario, $usuario, intval($id)]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al dar de baja la alícuota'));
+        }
+
+        $filas = sqlsrv_rows_affected($stmt);
+        sqlsrv_free_stmt($stmt);
+
+        if ($filas < 1) {
+            throw new Exception('La alícuota ' . intval($id) . ' no existe o ya estaba dada de '
+                . 'baja.');
+        }
+
+        return ['recalculo' => $this->recalcularDepositosPendientes($usuario)];
+    }
+
+    /**
+     * Recalcula el neto de los depositos PENDIENTES con las alicuotas de ahora.
+     *
+     * Corre solo al cargar o dar de baja una alicuota, igual que en Cob.
+     * Electronicos. Pendiente es VIGENTE y con acreditacion DE MANANA EN
+     * ADELANTE -Retenciones::cortePendientes(), el mismo corte de los dos
+     * modulos-: lo que ya acredito, hoy incluido, conservo su tasa, porque su
+     * plata entro con esa tasa.
+     *
+     * Que cambia lo decide Retenciones::planRecalculo(), puro y probado; aca
+     * solo se escribe lo que el plan dice, en UNA transaccion: a mitad de
+     * camino quedaria una parte de los pendientes con la tasa nueva y otra con
+     * la vieja, sin forma de saber cual es cual.
+     *
+     * QUEDA FIRMADO POR QUIEN GUARDO LA ALICUOTA: es parte de su accion, y ve en
+     * la respuesta cuantos depositos cambio y por cuanto.
+     *
+     * @param string $usuario
+     * @param string|null $hoy 'Y-m-d'. Por defecto, hoy
+     * @return array El plan aplicado, con 'aplicados', 'avisos' y 'pendientes_desde'
+     */
+    public function recalcularDepositosPendientes($usuario, $hoy = null) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $corte = Retenciones::cortePendientes($hoy === null ? date('Y-m-d') : $hoy);
+        $cid = $this->conectar('central');
+
+        // Solo los pendientes: los acreditados no se recalculan nunca, y traer
+        // el historial entero para descartarlo en PHP es al reves. Se cuentan
+        // aparte, para poder decir que no se tocaron.
+        $stmt = sqlsrv_query($cid,
+            "SELECT ID, ID_SBA14, N_CHEQUE, FECHA_ACREDITACION,
+                    CAST(IMPORTE_BRUTO AS FLOAT) AS IMPORTE_BRUTO,
+                    CAST(TASA_APLICADA AS FLOAT) AS TASA_APLICADA,
+                    CAST(IMPORTE_NETO AS FLOAT)  AS IMPORTE_NETO
+             FROM dbo." . self::TABLA_DEPOSITO . "
+             WHERE VIGENTE = 1 AND FECHA_ACREDITACION >= ?",
+            [$corte]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer los depósitos pendientes'));
+        }
+
+        $items = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            // Un solo juego de alicuotas: el de los cheques.
+            $items[] = [
+                'id' => intval($row['ID']),
+                'juego' => 0,
+                'n_cheque' => $row['N_CHEQUE'] === null ? null : intval($row['N_CHEQUE']),
+                'fecha_acreditacion' => Horizonte::normalizarFecha($row['FECHA_ACREDITACION']),
+                'importe_bruto' => floatval($row['IMPORTE_BRUTO']),
+                'tasa_aplicada' => floatval($row['TASA_APLICADA']),
+                'importe_neto' => floatval($row['IMPORTE_NETO'])
+            ];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        $plan = Retenciones::planRecalculo($items, [0 => $this->getAlicuotas(true)], $corte);
+        $plan['acreditados'] = $this->contarDepositosAcreditados($cid, $corte);
+        $plan['pendientes_desde'] = $corte;
+        $plan['aplicados'] = 0;
+        $plan['avisos'] = [];
+
+        if (!empty($plan['sin_alicuota'])) {
+            $plan['avisos'][] = count($plan['sin_alicuota'][0]) . ' depósito(s) pendiente(s) no '
+                . 'se pudieron recalcular porque los cheques no tienen alícuotas vigentes a su '
+                . 'fecha de acreditación. Conservan el neto con el que se depositaron; los '
+                . 'depósitos nuevos se rechazan hasta que se cargue una alícuota.';
+        }
+
+        // Lo que vuelve al navegador no lleva el item crudo: es lo que el
+        // panel del resultado dibuja, nada mas.
+        foreach ($plan['cambios'] as $i => $c) {
+            $plan['cambios'][$i]['n_cheque'] = $c['item']['n_cheque'];
+            unset($plan['cambios'][$i]['item']);
+        }
+
+        unset($plan['sin_alicuota']);
+
+        if (empty($plan['cambios'])) {
+            return $plan;
+        }
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción del recálculo'));
+        }
+
+        try {
+            foreach ($plan['cambios'] as $c) {
+                $stmt = sqlsrv_query($cid,
+                    "UPDATE dbo." . self::TABLA_DEPOSITO . "
+                     SET TASA_APLICADA = ?, DETALLE_TASA = ?, IMPORTE_NETO = ?, "
+                        . Auditoria::SET_MODIF . "
+                     WHERE ID = ? AND VIGENTE = 1",
+                    [$c['tasa_nueva'], $c['desglose_nuevo'], $c['neto_nuevo'], $usuario, $c['id']]);
+
+                if ($stmt === false) {
+                    throw new Exception($this->errorSql('Error al recalcular el depósito '
+                        . $c['id']));
+                }
+
+                sqlsrv_free_stmt($stmt);
+                $plan['aplicados']++;
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar el recálculo'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return $plan;
+    }
+
+    /** Cuantos depositos vigentes ya acreditaron: no se recalculan, se cuentan */
+    private function contarDepositosAcreditados($cid, $corte) {
+        $stmt = sqlsrv_query($cid,
+            "SELECT COUNT(*) AS N FROM dbo." . self::TABLA_DEPOSITO . "
+             WHERE VIGENTE = 1 AND FECHA_ACREDITACION < ?",
+            [$corte]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al contar los depósitos acreditados'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        return $row ? intval($row['N']) : 0;
+    }
+
+    /**
+     * Lo que dibuja la seccion "Deposito de cheques" de Parametros -> Cheques.
+     *
+     * LA TASA DE HOY LA CALCULA EL SERVIDOR, con la misma regla que el deposito:
+     * si la pantalla la resolviera por su cuenta, podria mostrar una tasa que el
+     * deposito no usa.
+     *
+     * @param string|null $hoy 'Y-m-d'. Por defecto, hoy
+     * @return array ['tablas_creadas', 'plazo', 'plazo_max', 'alicuotas',
+     *         'tasa_hoy', 'hoy', 'avisos']
+     */
+    public function datosParametrosDeposito($hoy = null) {
+        $hoy = ($hoy === null) ? date('Y-m-d') : $hoy;
+
+        if (!$this->depositoCreado()) {
+            return [
+                'tablas_creadas' => false,
+                'plazo' => ['dias' => null, 'error' => null, 'valor' => null,
+                            'usuario' => null, 'fecha' => null],
+                'plazo_max' => self::PLAZO_MAX,
+                'alicuotas' => [],
+                'tasa_hoy' => self::tasaParaPantalla([], $hoy),
+                'hoy' => $hoy,
+                'avisos' => ['Todavía no existen las tablas del depósito de cheques. Corré '
+                    . self::SCRIPT_DEPOSITO . ' contra la base central. Mientras tanto no se '
+                    . 'puede depositar, y la cartera se ve y se proyecta como hasta ahora.']
+            ];
+        }
+
+        $alicuotas = $this->getAlicuotas(false);
+        $plazo = $this->getPlazo();
+        $tasa = self::tasaParaPantalla($alicuotas, $hoy);
+        $avisos = [];
+
+        if ($plazo['error'] !== null) {
+            $avisos[] = $plazo['error'];
+        }
+
+        if ($tasa['tasa'] === null) {
+            $avisos[] = 'Los cheques no tienen ninguna alícuota de retención vigente hoy, así que '
+                . 'no se puede depositar: el neto saldría igual al bruto. Cargalas abajo, en '
+                . 'Depósito de cheques.';
+        }
+
+        return [
+            'tablas_creadas' => true,
+            'plazo' => $plazo,
+            'plazo_max' => self::PLAZO_MAX,
+            'alicuotas' => self::marcarVigentesHoy($alicuotas, $hoy),
+            'tasa_hoy' => $tasa,
+            'hoy' => $hoy,
+            'avisos' => $avisos
+        ];
     }
 
     /* ====================================================================
