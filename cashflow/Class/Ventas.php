@@ -1181,7 +1181,12 @@ class Ventas {
         $resultado['mix'] = [
             'origen' => $mix['origen'],
             'valido' => $arbol['valido'],
-            'errores' => $arbol['errores']
+            'errores' => $arbol['errores'],
+            // Los tipos de nivel, en orden: la leyenda de colores del arbol de
+            // Cobranza Proyectada los muestra en el orden de la jerarquia, y
+            // cada nodo ya trae su codigo en 'nivel'. La misma lista que
+            // recibe el editor de Parametros.
+            'niveles' => MixCobro::nivelesLista()
         ];
         $resultado['kpi']['cobranza_neta_tramo'] = $cobranza['neto']['total_tramo'];
         $resultado['kpi']['cobranza_neta_horizonte'] = $cobranza['neto']['total_horizonte'];

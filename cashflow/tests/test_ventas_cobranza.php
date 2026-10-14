@@ -188,6 +188,31 @@ chequear('cada hoja viaja con su camino, su % efectivo, su carga y sus dias',
         return [array_column($f['camino'], 'nombre'), round($f['porcentaje_efectivo'], 10), $f['carga'], $f['dias']];
     })(array_values(array_filter($c['arbol'], function ($f) { return $f['clave'] === 'N8'; }))[0]));
 
+seccion('cada nodo del arbol trae el codigo de su nivel');
+
+// La pantalla colorea por CODIGO (Css/mix-niveles.css), no comparando
+// rotulos: un rotulo se puede reescribir, el codigo es el del CHECK.
+chequear('todos, con un codigo de MixCobro::NIVELES', [],
+    array_values(array_filter(array_map(function ($f) {
+        return isset($f['nivel']) && isset(MixCobro::NIVELES[$f['nivel']]) ? null : $f['clave'];
+    }, $c['arbol']))));
+chequear('y el rotulo es el de ese codigo', [],
+    array_values(array_filter(array_map(function ($f) {
+        return MixCobro::rotuloNivel($f['nivel']) === $f['rotulo'] ? null : $f['clave'];
+    }, $c['arbol']))));
+chequear('Debito es tipo de tarjeta y 3 cuotas es cuotas, a cualquier profundidad', ['TIPO_TARJETA', 'CUOTAS'],
+    array_values(array_map(function ($f) { return $f['nivel']; }, array_filter($c['arbol'], function ($f) {
+        return in_array($f['clave'], ['N3', 'N8'], true);
+    }))));
+
+// La lista ordenada de tipos viaja en $resultado['mix'] de
+// getProyeccionCobranzas(), que necesita la base: se verifica en el fuente
+// que la arme el mismo helper que usa Parametros.
+$ventasPhp = (string) file_get_contents(__DIR__ . '/../Class/Ventas.php');
+
+chequear('la respuesta de Ventas manda los tipos de nivel con el mismo helper que Parametros', true,
+    preg_match("/\\\$resultado\['mix'\] = \[[^;]*'niveles' => MixCobro::nivelesLista\(\)/s", $ventasPhp) === 1);
+
 seccion('sin costos, el arbol migrado da exactamente la cobranza del mix plano');
 
 // El mix plano de la base y el arbol en el que lo deja

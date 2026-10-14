@@ -237,6 +237,30 @@
         document.getElementById('mixBody').innerHTML = html;
 
         mix.canales.forEach(pintarVistaMix);
+        pintarLeyendaMix();
+    }
+
+    /**
+     * La leyenda de colores, una para todos los canales: los tipos de los
+     * nodos que se ven —inactivos incluidos, que también llevan su color—, en
+     * el orden de NIVELES. Se recalcula al cambiar un nivel: el tipo nuevo
+     * puede no estar, y el viejo puede quedar sin uso.
+     */
+    function pintarLeyendaMix() {
+        var cont = document.getElementById('mixLeyenda');
+
+        if (!cont) {
+            return;
+        }
+
+        var codigos = [];
+
+        document.querySelectorAll('#mixBody tr.mixa-nodo').forEach(function(tr) {
+            codigos.push(tr.dataset.nivel);
+        });
+
+        cont.innerHTML = MixNiveles.leyenda(datosMix().niveles, codigos);
+        cont.style.display = cont.innerHTML ? '' : 'none';
     }
 
     /** El aviso de qué script falta, si falta */
@@ -283,17 +307,26 @@
      * El camino completo va en un texto que la pantalla no muestra
      * (visually-hidden): la exportación lo baja, así cada fila del Excel dice
      * de qué rama es.
+     *
+     * La fila lleva la clase de su TIPO de nivel (Js/mix-niveles.js): la barra
+     * del nombre y el desplegable de Nivel toman el color de ahí. Es por tipo
+     * y no por sangría porque se pueden saltear niveles. data-nivel es el
+     * nivel que se ve, y de ahí sale la leyenda.
      */
     function filaNodoMix(n, r, editable) {
         var camino = titulo(n.CANAL) + ' › ' +
             r.camino.slice(0, -1).map(function(c) { return c.nombre; }).concat(['']).join(' › ');
         var sangria = '<span class="mixa-sangria" style="width: ' + (r.profundidad * 20) + 'px"></span>';
         var pct = function(v) { return (v === null || v === undefined) ? '' : (v * 100).toFixed(2); };
-        var html = '<tr class="mixa-nodo" data-id="' + n.ID + '" data-clave="' + n.clave + '" ' +
-                   'data-canal="' + n.CANAL + '" data-padre="' + (r.padre || '') + '">';
+        var html = '<tr class="mixa-nodo ' + MixNiveles.clase(n.NIVEL) + '" data-id="' + n.ID + '" ' +
+                   'data-clave="' + n.clave + '" data-canal="' + n.CANAL + '" ' +
+                   'data-padre="' + (r.padre || '') + '" data-nivel="' + escapar(n.NIVEL) + '">';
 
         // ---- Nombre ---------------------------------------------------
-        html += '<td class="mixa-nombre"><span class="visually-hidden">' + escapar(camino) + '</span>' + sangria;
+        // La barra va después de la sangría, pegada al nombre: así se lee la
+        // jerarquía y el tipo a la vez.
+        html += '<td class="mixa-nombre"><span class="visually-hidden">' + escapar(camino) + '</span>' +
+                sangria + MixNiveles.barra();
 
         if (editable) {
             html += '<input type="text" class="form-control form-control-sm d-inline-block mixa-campo" ' +
@@ -318,18 +351,21 @@
         // ---- Nivel ----------------------------------------------------
         // Con hijos no se cambia: sus hijos quedarían con un nivel que quizás
         // ya no es posterior. Si quedó mal, se inhabilita y se crea otro.
+        // El desplegable toma el color de la fila (mix-nivel-select); sin
+        // permiso, el rótulo va en una etiqueta del mismo color. En los dos
+        // casos el rótulo se lee: el color nunca es la única señal.
         if (editable) {
             var opciones = n.niveles_permitidos.indexOf(n.NIVEL) === -1
                 ? [n.NIVEL].concat(n.niveles_permitidos) : n.niveles_permitidos;
 
-            html += '<td><select class="form-select form-select-sm mixa-campo" data-campo="nivel"' +
+            html += '<td><select class="form-select form-select-sm mixa-campo mix-nivel-select" data-campo="nivel"' +
                     (n.tiene_hijos ? ' disabled title="Tiene nodos debajo: su nivel no se cambia"' : '') + '>' +
                     opciones.map(function(cod) {
                         return '<option value="' + cod + '"' + (cod === n.NIVEL ? ' selected' : '') + '>' +
                                escapar(rotuloNivel(cod)) + '</option>';
                     }).join('') + '</select></td>';
         } else {
-            html += '<td>' + escapar(rotuloNivel(n.NIVEL)) + '</td>';
+            html += '<td>' + MixNiveles.etiqueta(n.NIVEL, rotuloNivel(n.NIVEL)) + '</td>';
         }
 
         // ---- %, costo, tasa y días --------------------------------------
@@ -582,13 +618,31 @@
     }
 
     function alCambiarMix(e) {
+        // El nivel del formulario de alta: sólo cambia su color, todavía no
+        // es un nodo y no hay nada que previsualizar.
+        var alta = e.target.closest('[data-alta="nivel"]');
+
+        if (alta) {
+            alta.className = MixNiveles.conClase(alta.className, alta.value);
+            return;
+        }
+
         var el = e.target.closest('.mixa-campo');
 
         if (!el) { return; }
 
-        var canal = el.closest('tr').dataset.canal;
+        var tr = el.closest('tr');
+        var canal = tr.dataset.canal;
 
         mixSucio[canal] = true;
+
+        // Otro nivel es otro color, en el momento: no depende de la respuesta
+        // del servidor, que dice si el árbol es válido, no de qué tipo es.
+        if (el.dataset.campo === 'nivel') {
+            tr.className = MixNiveles.conClase(tr.className, el.value);
+            tr.dataset.nivel = el.value;
+            pintarLeyendaMix();
+        }
 
         if (el.dataset.campo === 'activo' && !el.checked) {
             confirmarInhabilitar(el, canal).then(function(ok) {
@@ -672,8 +726,13 @@
                 '<div class="row g-2 align-items-end">' +
                     '<div class="col-md-3"><label class="form-label form-label-sm">Nombre</label>' +
                         '<input type="text" class="form-control form-control-sm" data-alta="nombre" maxlength="50"></div>' +
+                    // El desplegable lleva el color del tipo elegido, con su
+                    // propia clase: la fila del alta no es un nodo. Las
+                    // opciones van con su rótulo y sin color, que pintarlas
+                    // depende del navegador.
                     '<div class="col-md-2"><label class="form-label form-label-sm">Nivel</label>' +
-                        '<select class="form-select form-select-sm" data-alta="nivel">' +
+                        '<select class="form-select form-select-sm mix-nivel-select ' +
+                            MixNiveles.clase(niveles[0]) + '" data-alta="nivel">' +
                         niveles.map(function(cod) {
                             return '<option value="' + cod + '">' + escapar(rotuloNivel(cod)) + '</option>';
                         }).join('') + '</select></div>' +

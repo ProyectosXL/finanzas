@@ -463,6 +463,12 @@ $edita = AuthCashflow::puedeEditar('ventas');
                         </button>
                     </div>
                 </div>
+                <!-- La leyenda de colores de los tipos de nivel: sólo los tipos en
+                     uso, en el orden de la jerarquía, los mismos colores que el
+                     editor de Parámetros. La llena Js/Ingresos-Ventas.js con
+                     Js/mix-niveles.js. Fuera de la tabla, para que Exportar no
+                     la baje. -->
+                <div id="cobLeyenda" class="mix-niveles-leyenda px-3 pt-3 pb-2" style="display: none;"></div>
                 <div class="card-body p-0">
                     <div class="table-responsive tabla-temporal">
                         <!-- data-orden="no": es un árbol. Ordenar filas por una

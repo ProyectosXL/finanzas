@@ -1260,3 +1260,89 @@ if ($wsfExcel === false) {
         chequear('planilla_excel.wsf: sin fallas', 0, intval($mExcel[2]));
     }
 }
+
+// ============================================================================
+// LOS COLORES DE LOS TIPOS DE NIVEL DEL MIX
+//
+// La paleta y el helper se prueban en test_mix_niveles.php. Aca, el cableado:
+// que se carguen antes que las pestanas y que cada pantalla del arbol pinte
+// cada fila de nodo y la leyenda con el helper. Una clase mal armada no tira
+// error: la fila sale sin color y la pantalla se ve "bien".
+// ============================================================================
+
+seccion('los colores de los tipos de nivel se cargan en index.php');
+
+// En index.php y no en cada pestana: Parametros y Ventas llegan por AJAX, y
+// las dos tienen que ver los mismos colores, se abra primero la que sea.
+chequear('Css/mix-niveles.css y Js/mix-niveles.js se cargan en index.php', [1, 1], [
+    substr_count($index, 'href="Css/mix-niveles.css'),
+    substr_count($index, 'src="Js/mix-niveles.js')
+]);
+chequear('y ninguna pestana los vuelve a cargar', 0,
+    array_sum(array_map(function ($ruta) {
+        return preg_match_all('/(href|src)="[^"]*mix-niveles\./', contenidoTab($ruta));
+    }, $archivosTab)));
+
+seccion('Parametros: cada nodo del editor lleva el color de su tipo de nivel');
+
+$paramTab = str_replace("\r\n", "\n", contenidoTab($TABS . '/parametros.php'));
+$paramJs = str_replace("\r\n", "\n", file_get_contents($JS . '/Parametros.js'));
+
+// Por CODIGO de nivel (n.NIVEL), no por rotulo ni por profundidad.
+chequear('la fila del nodo lleva la clase de su nivel, armada por el helper', 1,
+    substr_count($paramJs, "'<tr class=\"mixa-nodo ' + MixNiveles.clase(n.NIVEL) + '\""));
+chequear('y el nivel que se ve, para la leyenda', 1,
+    substr_count($paramJs, "data-nivel=\"' + escapar(n.NIVEL) + '\">'"));
+chequear('la barra va despues de la sangria, pegada al nombre', 1,
+    substr_count($paramJs, "sangria + MixNiveles.barra();"));
+chequear('con permiso, el desplegable de nivel toma el color de la fila', 1,
+    substr_count($paramJs, 'mixa-campo mix-nivel-select" data-campo="nivel"'));
+chequear('sin permiso, el rotulo va en una etiqueta del color', 1,
+    substr_count($paramJs, "MixNiveles.etiqueta(n.NIVEL, rotuloNivel(n.NIVEL))"));
+chequear('al cambiar el nivel, la fila cambia de color y la leyenda se recalcula', true,
+    preg_match("/if \(el\.dataset\.campo === 'nivel'\) \{\s*tr\.className = MixNiveles\.conClase\(tr\.className, el\.value\);"
+        . "\s*tr\.dataset\.nivel = el\.value;\s*pintarLeyendaMix\(\);/", $paramJs) === 1);
+chequear('el desplegable del alta tambien lleva el color del tipo elegido', [1, 1], [
+    substr_count($paramJs, "'<select class=\"form-select form-select-sm mix-nivel-select ' +"),
+    substr_count($paramJs, "alta.className = MixNiveles.conClase(alta.className, alta.value);")
+]);
+
+seccion('Parametros: la leyenda de los tipos de nivel');
+
+chequear('el contenedor existe, una sola vez para todos los canales', 1,
+    substr_count($paramTab, '<div id="mixLeyenda" class="mix-niveles-leyenda'));
+chequear('y esta fuera de la tabla: Exportar no la baja', false,
+    strpos(bloqueTabla($paramTab, 'tablaMix'), 'mixLeyenda') !== false);
+chequear('se dibuja con el editor, con los tipos que manda el servidor', [1, 1], [
+    preg_match('/function generarMix\(\) \{.*?pintarLeyendaMix\(\);\n    \}/s', $paramJs),
+    substr_count($paramJs, 'MixNiveles.leyenda(datosMix().niveles, codigos)')
+]);
+chequear('con los nodos que se ven, inactivos incluidos', 1,
+    substr_count($paramJs, "document.querySelectorAll('#mixBody tr.mixa-nodo').forEach(function(tr) {\n            codigos.push(tr.dataset.nivel);"));
+
+seccion('Cobranza Proyectada: cada nodo del arbol lleva el color de su tipo de nivel');
+
+$ventasTab = str_replace("\r\n", "\n", contenidoTab($TABS . '/ventas.php'));
+$ventasJs = str_replace("\r\n", "\n", file_get_contents($JS . '/Ingresos-Ventas.js'));
+
+// Hojas y nodos con ramas debajo (fila-subtotal): todos tienen tipo. Por
+// CODIGO (n.nivel), no por el rotulo.
+chequear('la fila de cada nodo lleva la clase de su nivel, armada por el helper', 1,
+    substr_count($ventasJs, "(n.hoja ? 'fila-hoja' : 'fila-subtotal') + ' ' + MixNiveles.clase(n.nivel)"));
+chequear('la barra va despues de la sangria y del chevron, pegada al nombre', 1,
+    substr_count($ventasJs, "chevron(n.clave, conHijos[n.clave]) + MixNiveles.barra() + escapar(n.nombre)"));
+chequear('la fila del canal no lleva color: no es un nivel', 0,
+    preg_match('/<tr class="fila-canal[^"]*mix-nivel/', $ventasJs));
+chequear('el tooltip sigue empezando por el rotulo del nivel', 1,
+    substr_count($ventasJs, "var t = n.rotulo + ' · ' + titulo(n.canal)"));
+
+seccion('Cobranza Proyectada: la leyenda de los tipos de nivel');
+
+chequear('el contenedor existe, fuera de la tabla: Exportar no la baja', [1, false], [
+    substr_count($ventasTab, '<div id="cobLeyenda" class="mix-niveles-leyenda'),
+    strpos(bloqueTabla($ventasTab, 'tablaCobranza'), 'cobLeyenda') !== false
+]);
+chequear('se dibuja con el arbol', 1,
+    substr_count($ventasJs, "        aplicarAperturaCobranza();\n        pintarLeyendaCobranza(arbol);"));
+chequear('con los tipos que manda el servidor y todos los nodos en juego, abiertos o no', 1,
+    substr_count($ventasJs, "MixNiveles.leyenda((datosProyeccion.mix || {}).niveles,\n            arbol.map(function(n) { return n.nivel; }));"));

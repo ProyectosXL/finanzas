@@ -110,6 +110,12 @@
             <!-- Qué script falta, si falta: sin él, el mix se muestra sólo para consulta -->
             <div id="mixAvisos" class="px-3 pt-3"></div>
 
+            <!-- La leyenda de colores de los tipos de nivel, una para todos los
+                 canales: sólo los tipos en uso, en el orden de la jerarquía. La
+                 llena Js/Parametros.js con Js/mix-niveles.js. Va fuera de la
+                 tabla para que Exportar no la baje como una fila. -->
+            <div id="mixLeyenda" class="mix-niveles-leyenda px-3 pt-3 pb-2" style="display: none;"></div>
+
             <div class="card-body p-0">
                 <div class="table-responsive">
                     <!-- data-orden="no": es un árbol. Ordenar por una columna

@@ -74,6 +74,10 @@ $tituloInicial = Menu::tituloTab($tabInicial);
          motivo: las pestañas llegan por AJAX y el panel se tiene que ver igual
          en todas, se haya abierto antes la que sea. -->
     <link href="Css/avisos-panel.css?v=<?php echo time(); ?>" rel="stylesheet">
+    <!-- El color de cada tipo de nivel del mix de cobro (Js/mix-niveles.js).
+         Lo usan Parámetros y Ventas, que llegan por AJAX: un solo archivo con
+         los colores, cargado antes que las dos, así significan lo mismo. -->
+    <link href="Css/mix-niveles.css?v=<?php echo time(); ?>" rel="stylesheet">
     <!-- Si se pueden dibujar los controles de edición (Js/permisos.js). Va en
          el <head> y no al pie con los demás: la pestaña inicial se incluye en
          línea más abajo y su JS ya pregunta al dibujar. No depende de nada. -->
@@ -88,6 +92,9 @@ $tituloInicial = Menu::tituloTab($tabInicial);
          pestaña inicial se incluye en línea más abajo, y las demás llegan por
          AJAX. No depende de nada. -->
     <script src="Js/avisos-panel.js?v=<?php echo time(); ?>"></script>
+    <!-- Las clases y la leyenda de los tipos de nivel del mix (Css/mix-niveles.css).
+         En el <head> por lo mismo que avisos-panel.js. No depende de nada. -->
+    <script src="Js/mix-niveles.js?v=<?php echo time(); ?>"></script>
 </head>
 <body>
   

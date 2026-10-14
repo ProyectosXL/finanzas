@@ -1329,14 +1329,20 @@
 
             html += '</tr>';
 
+            // Cada nodo, hoja o con ramas debajo, lleva la clase de su TIPO de
+            // nivel (Js/mix-niveles.js): la barra de color va después de la
+            // sangría y del chevron, pegada al nombre. Por tipo y no por
+            // sangría, porque se pueden saltear niveles. El tipo también se
+            // lee en el tooltip, que empieza con su rótulo, y en la leyenda.
+            // La fila del canal y el pie no son niveles: van sin color.
             arbol.filter(function(n) { return n.canal === canal; }).forEach(function(n) {
                 var padre = n.padre || cc;
 
-                html += '<tr class="' + (n.hoja ? 'fila-hoja' : 'fila-subtotal') + '"' +
+                html += '<tr class="' + (n.hoja ? 'fila-hoja' : 'fila-subtotal') + ' ' + MixNiveles.clase(n.nivel) + '"' +
                         ' data-clave="' + n.clave + '" data-padre="' + padre + '">';
                 html += '<td class="col-concepto" title="' + escapar(tituloNodo(n)) + '">' +
                         '<span class="arbol-sangria" style="width: ' + ((n.profundidad + 1) * 16) + 'px"></span>' +
-                        chevron(n.clave, conHijos[n.clave]) + escapar(n.nombre) + '</td>';
+                        chevron(n.clave, conHijos[n.clave]) + MixNiveles.barra() + escapar(n.nombre) + '</td>';
                 html += '<td class="text-center text-muted">' + formatPercent(n.porcentaje_efectivo) + '</td>';
                 html += '<td class="text-center text-muted">' +
                         porcentajeOVacio(n.hoja ? n.carga : n.carga_ponderada) + '</td>';
@@ -1352,6 +1358,7 @@
 
         document.getElementById('cobBody').innerHTML = html;
         aplicarAperturaCobranza();
+        pintarLeyendaCobranza(arbol);
 
         // EL PIE MUESTRA LAS TRES COSAS, sea cual sea la medida elegida: es lo
         // que permite leer bruta − costos = neta sin cambiar el selector. Los
@@ -1374,6 +1381,23 @@
         });
 
         document.getElementById('cobFoot').innerHTML = foot;
+    }
+
+    /**
+     * La leyenda de colores del árbol: los tipos de TODOS los nodos en juego,
+     * también los de una rama cerrada, así no cambia al abrir y cerrar. En el
+     * orden de NIVELES, que manda el servidor en mix.niveles.
+     */
+    function pintarLeyendaCobranza(arbol) {
+        var cont = document.getElementById('cobLeyenda');
+
+        if (!cont) {
+            return;
+        }
+
+        cont.innerHTML = MixNiveles.leyenda((datosProyeccion.mix || {}).niveles,
+            arbol.map(function(n) { return n.nivel; }));
+        cont.style.display = cont.innerHTML ? '' : 'none';
     }
 
     /** El botón que abre y cierra una fila, o un espacio del mismo ancho */
