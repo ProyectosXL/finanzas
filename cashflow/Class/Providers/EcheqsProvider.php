@@ -10,12 +10,12 @@ require_once __DIR__ . '/../Echeqs.php';
  *
  * SERIES
  *   A_COBRAR            los cheques de terceros EN CARTERA (ESTADO = 'C') que
- *                       SI se van a poder cobrar y NO estan depositados, en la
- *                       fecha del cheque y por el BRUTO. Es la fila "Echeqs en
- *                       cartera".
+ *                       SI se van a poder cobrar, en la fecha del cheque y por
+ *                       el BRUTO. Es la fila "Echeqs en cartera".
  *   A_COBRAR_EXCLUIDOS  los que alguien marco como incobrables, con su motivo,
  *                       en bruto
- *   DEPOSITADOS         los depositados que se proyectan, en su fecha de
+ *   DEPOSITADOS         los que Tesoreria deposito en Tango (boleta BDE a una
+ *                       cuenta bancaria) y todavia se proyectan, en su fecha de
  *                       ACREDITACION y por el NETO de las retenciones del banco.
  *                       Es la fila "Echeqs depositados"
  *   A_COBRAR_TODO       lo que la cartera aporta al flujo: las tres juntas
@@ -24,9 +24,10 @@ require_once __DIR__ . '/../Echeqs.php';
  *
  *     A_COBRAR + A_COBRAR_EXCLUIDOS + DEPOSITADOS = A_COBRAR_TODO
  *
- * CADA CHEQUE ESTA EN UNA SOLA PARTE. Un excluido no se puede depositar y un
- * depositado no se puede excluir -lo valida Echeqs-, asi que las tres no se
- * pisan.
+ * CADA CHEQUE ESTA EN UNA SOLA PARTE. Las dos primeras salen de la cartera
+ * (ESTADO = 'C') y la tercera de los depositados (ESTADO = 'A'): un cheque no
+ * puede estar en los dos estados a la vez. Un excluido que despues se deposita
+ * deja la cartera y entra en DEPOSITADOS: la exclusion es de cartera.
  *
  * DONDE ENTRA LA RETENCION. Las dos primeras partes van en bruto y la tercera
  * en neto, asi que A_COBRAR_TODO NO ES EL UNIVERSO EN BRUTO: es lo que la
@@ -53,7 +54,7 @@ require_once __DIR__ . '/../Echeqs.php';
  * todo en bruto; ahora suma tambien los depositados, en neto. Ninguna fila lo
  * usa -verificado contra la base: la unica fila de ECHEQS es A_COBRAR- y el
  * validador sigue rechazando que se active al lado de cualquiera de sus tres
- * partes. Mientras no haya ningun cheque depositado vale lo mismo que antes.
+ * partes.
  *
  * A_COBRAR SIGNIFICABA "TODA LA CARTERA" Y HOY ES "LA CARTERA COBRABLE Y NO
  * DEPOSITADA". El codigo no cambio a proposito: es el que la fila del tablero
@@ -61,15 +62,14 @@ require_once __DIR__ . '/../Echeqs.php';
  * entraron sin repuntar ninguna fila. Ver los encabezados de
  * sql/cashflow_echeqs_excluir.sql y sql/cashflow_echeqs_deposito.sql.
  *
- * QUE DEPOSITO SE PROYECTA LO DECIDE Echeqs::estadoDeposito(), la misma
- * funcion que usa la pestana: mientras el cheque siga en cartera y acredite de
- * MANANA en adelante. Lo que acredita hoy ya esta en el saldo bancario -es el
- * corte de Cob. Electronicos- y lo que ya acredito y sigue en cartera no suma a
- * ninguna fila y AVISA, porque en Tango falta registrar el deposito. Un cheque
- * cuyo deposito ya se registro salio de cartera y no esta en la lectura: sale
- * solo, sin aviso.
+ * QUE DEPOSITO SE PROYECTA, DONDE Y POR CUANTO LO DECIDE Echeqs::resolverDeposito(),
+ * por la misma lectura que usa la pestana -Echeqs::getDepositadosTango()-: se
+ * proyecta mientras acredite de MANANA en adelante y nadie lo haya marcado "ya
+ * acredito". Lo que acredita hoy ya esta en el saldo de Interbanking -es el
+ * corte de Cob. Electronicos- y sale solo, SIN AVISO: es lo esperado. Lo que
+ * avisa es un deposito sin fecha o sin neto, que no esta en ninguna fila.
  *
- * LA SERIE SE ALIMENTA SOLO DE CARTERA. La sub-pestana Venta Cobrada Anticipada
+ * LAS SERIES SE ALIMENTAN SOLO DE CHEQUES EN CARTERA Y DEPOSITADOS. La sub-pestana Venta Cobrada Anticipada
  * NO aporta ninguna serie al tablero, y es lo primero que alguien va a querer
  * "arreglar" al ver que esa pantalla mueve plata y el proveedor no la mira.
  *
@@ -85,13 +85,13 @@ require_once __DIR__ . '/../Echeqs.php';
  *
  * EL DEPOSITO NO CAMBIA ESO: el neteo va por tilde, no por estado ni por
  * deposito. Un cheque pre-chequeado que se deposita sigue neteando la venta
- * en la fecha del cheque, y entra a esta fila en su acreditacion.
+ * en la fecha del cheque, y entra a "Echeqs depositados" en su acreditacion.
  *
  * COROLARIO QUE VALE LA PENA TENER PRESENTE: tildar o destildar cheques en la
  * segunda sub-pestana NO cambia el total de ninguna de estas series. El tilde
  * de la exclusion mueve importe de A_COBRAR a A_COBRAR_EXCLUIDOS sin cambiar
- * A_COBRAR_TODO; depositar lo mueve de A_COBRAR a DEPOSITADOS, y ahi
- * A_COBRAR_TODO baja la retencion y corre la fecha. Ver el encabezado de
+ * A_COBRAR_TODO; un deposito en Tango lo mueve de A_COBRAR a DEPOSITADOS, y
+ * ahi A_COBRAR_TODO baja la retencion y corre la fecha. Ver el encabezado de
  * Class/Echeqs.php.
  *
  * Es cobranza REAL de cheques ya recibidos, asi que no se pisa con la serie
@@ -134,52 +134,62 @@ class EcheqsProvider extends CashflowProvider {
 
         // getEcheqsCarteraTotales() y no getEcheqsCartera(): el tablero no
         // necesita banco ni cliente, y una consulta agregada no tiene por que
-        // recorrer N filas para descartarlas. Trae el corte por excluido y por
-        // deposito adentro del GROUP BY, asi que las cuatro series salen de UNA
-        // lectura y cierran por construccion.
+        // recorrer N filas para descartarlas. Trae el corte por excluido
+        // adentro del GROUP BY.
         $items = $echeqs->getEcheqsCarteraTotales();
 
         $this->avisarExcluidos($echeqs, $items);
 
-        $series = self::repartir($h, $items);
+        // Los depositados, por la MISMA lectura que la pestana: fila por fila,
+        // porque la acreditacion y el neto se calculan en PHP con el
+        // calendario y las alicuotas. Son pocos -los de las boletas de las
+        // ultimas semanas-.
+        $dep = $echeqs->getDepositadosTango($h->hoy());
 
-        $aviso = Echeqs::avisoAcreditadosSinRegistrar(
-            $series[self::SERIE_DEPOSITADOS]['acreditados_cheques'],
-            $series[self::SERIE_DEPOSITADOS]['acreditados_neto']);
+        $this->avisarTodos($dep['avisos']);
 
-        if ($aviso !== null) {
-            // ATENCION y no informativo: pide una accion en Tango.
-            $this->avisar($aviso, Aviso::WARNING);
-        }
-
-        return $series;
+        return self::repartir($h, array_merge($items, self::itemsDeDepositados($dep['filas'])));
     }
 
     /**
-     * A que series va un item de cartera. ES LA REGLA DE REPARTO, escrita una
-     * sola vez y sin tocar la base.
+     * Las filas de los depositados, como items del reparto: el bruto en
+     * IMPORTE y el deposito ya resuelto en DEPOSITO. No se recalcula nada: lo
+     * que decidio Echeqs::resolverDeposito() es lo que se reparte.
+     *
+     * @param array $filas Las de Echeqs::getDepositadosTango()['filas']
+     * @return array
+     */
+    public static function itemsDeDepositados($filas) {
+        $items = [];
+
+        foreach (is_array($filas) ? $filas : [] as $f) {
+            $items[] = ['FECHA_PAGO' => $f['FECHA_PAGO'], 'EXCLUIDO' => false,
+                        'IMPORTE' => floatval($f['IMPORTE']), 'DEPOSITO' => $f['DEPOSITO'],
+                        'CHEQUES' => 1];
+        }
+
+        return $items;
+    }
+
+    /**
+     * A que series va un item. ES LA REGLA DE REPARTO, escrita una sola vez y
+     * sin tocar la base.
      *
      * UN SOLO CORTE, de tres partes: el universo y la parte que le toca. Un
-     * deposito que ya acredito no va a ninguna serie: su plata ya esta en el
-     * saldo bancario.
+     * deposito que no se proyecta -acredito o le faltan datos- no va a
+     * ninguna serie.
      *
      * Estatica y pura por el mismo motivo que ProveedoresProvider::seriesDeItem():
      * asi se puede verificar que el corte cierra sin depender de que haya algo
      * excluido o depositado en la base.
      *
-     * @param array $item Una fila de Echeqs::getEcheqsCarteraTotales()
-     * @param string|null $hoy 'Y-m-d'. Solo hace falta si el item es un deposito
+     * @param array $item De la cartera agregada, o de itemsDeDepositados()
      * @return array Codigos de serie
      */
-    public static function seriesDeItem($item, $hoy = null) {
-        $estado = self::estadoDelItem($item, $hoy);
-
-        if ($estado === Echeqs::DEPOSITO_PROYECTA) {
-            return [self::SERIE_TODO, self::SERIE_DEPOSITADOS];
-        }
-
-        if ($estado === Echeqs::DEPOSITO_ACREDITADO) {
-            return [];
+    public static function seriesDeItem($item) {
+        if (!empty($item['DEPOSITO'])) {
+            return ($item['DEPOSITO']['estado'] === Echeqs::DEPOSITO_PROYECTA)
+                ? [self::SERIE_TODO, self::SERIE_DEPOSITADOS] : [];
         }
 
         return [
@@ -188,30 +198,19 @@ class EcheqsProvider extends CashflowProvider {
         ];
     }
 
-    /** El estado del deposito de un item agregado, con la regla de Echeqs */
-    private static function estadoDelItem($item, $hoy) {
-        if (empty($item['FECHA_ACREDITACION'])) {
-            return null;
-        }
-
-        return Echeqs::estadoDeposito(['fecha_acreditacion' => $item['FECHA_ACREDITACION']],
-            true, ($hoy === null) ? date('Y-m-d') : $hoy);
-    }
-
     /**
-     * Reparte la cartera en las cuatro series.
+     * Reparte la cartera y los depositados en las cuatro series.
      *
      * ESTATICA Y PUBLICA para poder correrla sobre filas armadas a mano: los
      * casos que importan -toda la cartera excluida, un depositado con fecha
-     * fuera del horizonte- hoy no existen en los datos y van a existir en
-     * cuanto alguien tilde o deposite. Ver tests/test_echeqs.php y
-     * tests/test_echeqs_deposito.php.
+     * fuera del horizonte- no siempre existen en los datos. Ver
+     * tests/test_echeqs.php y tests/test_echeqs_deposito.php.
      *
-     * DONDE Y CUANTO: un no depositado, en la fecha del cheque y por el bruto;
+     * DONDE Y CUANTO: uno de cartera, en la fecha del cheque y por el bruto;
      * un depositado que se proyecta, en su acreditacion y por el neto.
      *
      * @param Horizonte $h
-     * @param array $items Filas de Echeqs::getEcheqsCarteraTotales()
+     * @param array $items De getEcheqsCarteraTotales() y de itemsDeDepositados()
      * @return array Mapa codigoSerie => serie
      */
     public static function repartir($h, $items) {
@@ -225,34 +224,28 @@ class EcheqsProvider extends CashflowProvider {
         $dep = &$series[self::SERIE_DEPOSITADOS];
         $dep['bruto'] = 0;
         $dep['retencion'] = 0;
-        $dep['acreditados_cheques'] = 0;
-        $dep['acreditados_neto'] = 0;
 
         foreach ($items as $item) {
-            $estado = self::estadoDelItem($item, $h->hoy());
+            $destinos = self::seriesDeItem($item);
 
-            if ($estado === Echeqs::DEPOSITO_ACREDITADO) {
-                // No suma a ninguna fila: la plata ya esta en el saldo bancario.
-                // Se cuenta para el aviso.
-                $dep['acreditados_cheques'] += isset($item['CHEQUES']) ? intval($item['CHEQUES']) : 1;
-                $dep['acreditados_neto'] += floatval($item['NETO']);
+            if (empty($destinos)) {
                 continue;
             }
 
-            $deposito = ($estado === Echeqs::DEPOSITO_PROYECTA);
-            $importe = floatval($deposito ? $item['NETO'] : $item['IMPORTE']);
-            $fecha = $deposito ? $item['FECHA_ACREDITACION'] : $item['FECHA_PAGO'];
+            $deposito = !empty($item['DEPOSITO']);
+            $importe = floatval($deposito ? $item['DEPOSITO']['neto'] : $item['IMPORTE']);
+            $fecha = $deposito ? $item['DEPOSITO']['fecha_acreditacion'] : $item['FECHA_PAGO'];
 
             if ($deposito) {
-                $dep['bruto'] += floatval($item['BRUTO_DEPOSITO']);
-                $dep['retencion'] += floatval($item['BRUTO_DEPOSITO']) - floatval($item['NETO']);
+                $dep['bruto'] += $item['DEPOSITO']['bruto'];
+                $dep['retencion'] += $item['DEPOSITO']['bruto'] - $item['DEPOSITO']['neto'];
             }
 
             if ($importe == 0) {
                 continue;
             }
 
-            foreach (self::seriesDeItem($item, $h->hoy()) as $destino) {
+            foreach ($destinos as $destino) {
                 // Lo que cae fuera del eje se informa, no se descarta en
                 // silencio. Va en el universo y, si es un deposito, tambien en
                 // DEPOSITADOS: el tablero avisa leyendo la serie de la fila, y

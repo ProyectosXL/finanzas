@@ -243,7 +243,8 @@
         document.getElementById('bodyAlicuotasPpq').innerHTML = alicuotas.length
             ? alicuotas.map(filaAlicuota).join('')
             : '<tr><td colspan="6" class="text-center text-muted py-4">Todavía no hay alícuotas ' +
-              'cargadas. Sin alícuotas no se puede depositar ningún cheque.</td></tr>';
+              'cargadas. Sin alícuotas, los cheques depositados no tienen neto y no se ' +
+              'proyectan.</td></tr>';
 
         Permisos.soloLectura('bodyAlicuotasPpq');
 

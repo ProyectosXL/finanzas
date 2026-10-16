@@ -11,10 +11,11 @@ $edita = AuthCashflow::puedeEditar('echeqs');
     Pestaña Echeqs. Dos sub-pestañas que son dos cosas distintas:
 
       Cheques en Cartera       -> cheques de terceros con ESTADO = 'C'. Alimentan
-                                  la fila "Echeqs en cartera" de DISPONIBILIDADES,
-                                  y los depositados, "Echeqs depositados". La
-                                  barra de selección deposita, deshace el
-                                  depósito y excluye. Ver README-echeqs.md.
+                                  la fila "Echeqs en cartera" de DISPONIBILIDADES.
+                                  En la misma grilla, los que Tesorería depositó
+                                  en Tango (boleta BDE) hasta que acreditan:
+                                  alimentan "Echeqs depositados". La barra de
+                                  selección excluye. Ver README-echeqs.md.
       Venta Cobrada Anticipada -> cheques de clientes que pre-chequean. NO
                                   alimentan ninguna fila del tablero: su efecto
                                   es restar de la cobranza proyectada de Ventas.
@@ -124,7 +125,8 @@ $edita = AuthCashflow::puedeEditar('echeqs');
             <!-- Los depositados: el NETO que entra el día que acreditan, en
                  todo el horizonte. Es la fila "Echeqs depositados". El pie
                  dice el bruto y la retención, que es lo que explica la
-                 diferencia con lo que se depositó. -->
+                 diferencia con lo que se depositó, y cuántos ya acreditaron
+                 y no suman. -->
             <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
@@ -188,11 +190,11 @@ $edita = AuthCashflow::puedeEditar('echeqs');
 
                     <!-- LOS DEPOSITADOS SE VEN POR DEFECTO, al revés que los
                          excluidos: siguen entrando al cashflow —en otra
-                         fecha y por el neto— y en el trabajo de todos los días
-                         son justamente los que hay que seguir hasta que Tango
-                         registre el depósito. Esconderlos es para mirar sólo lo
-                         que falta depositar. Los acreditados sin registrar
-                         también se esconden con esto: su aviso sale siempre. -->
+                         fecha y por el neto— y son los que hay que seguir
+                         hasta que acreditan. Esconderlos es para mirar sólo
+                         la cartera. Los acreditados y los que no se proyectan
+                         también se esconden con esto: sus avisos salen
+                         siempre. -->
                     <div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" id="ocultarDepositadosEch">
                         <label class="form-check-label small text-muted" for="ocultarDepositadosEch">
@@ -266,11 +268,12 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                 Nueve columnas descriptivas y después una por
                                 cada columna del eje, que dibuja el JS.
 
-                                FECHA DE PAGO = FECHA DEL CHEQUE. Un cheque NO
-                                depositado cae en el eje en esa fecha y por el
-                                importe. Uno DEPOSITADO cae en Acredita y por el
-                                Neto: el depósito tiene su propia fecha —las 48
-                                hs hábiles— y la del cheque deja de intervenir.
+                                FECHA DE PAGO = FECHA DEL CHEQUE. Un cheque en
+                                cartera cae en el eje en esa fecha y por el
+                                importe. Uno DEPOSITADO en Tango cae en Acredita
+                                y por el Neto: el depósito tiene su propia fecha
+                                —las 48 hs hábiles desde la boleta— y la del
+                                cheque deja de intervenir.
                             -->
                             <tr>
                                 <!-- data-orden-nombre igual al rótulo: ancla el
@@ -295,9 +298,8 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                 <th rowspan="2" class="text-end"
                                     title="Lo que acredita: el importe menos la retención. Es lo que suma la fila Echeqs depositados.">Neto</th>
                                 <!-- LA COLUMNA ES DE SELECCIÓN, no de estado, y
-                                     alimenta las acciones de la barra: depositar,
-                                     deshacer el depósito, excluir y volver a
-                                     incluir. Ninguna puede dispararse con un clic
+                                     alimenta las acciones de la barra: excluir y
+                                     volver a incluir. Ninguna puede dispararse con un clic
                                      suelto —mueven plata del disponible—: se
                                      eligen los cheques y se confirman juntos,
                                      viendo cuántos son y por cuánto.

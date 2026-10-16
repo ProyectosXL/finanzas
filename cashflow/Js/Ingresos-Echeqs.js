@@ -24,12 +24,13 @@
  * deshace destildándolo de nuevo, y sacar plata del disponible no puede
  * dispararse con un clic suelto ni quedar sin motivo.
  *
- * EN CARTERA, LA MISMA BARRA DEPOSITA. Se eligen cheques —de uno o de varios
- * bancos emisores: se cobran por el clearing— y se confirman juntos en un diálogo que muestra lo que calculó el SERVIDOR
- * —acreditación, tasa, retención y neto—: acá no se calcula ninguno de esos
- * números, y al servidor viajan sólo los ids. Un cheque depositado se ubica en
- * el eje en su acreditación y por el neto, y eso también lo resolvió PHP
- * (Echeqs::ubicarEnEje(), la misma regla que usa el tablero).
+ * LOS DEPOSITADOS SE LEEN DE TANGO. Tesorería registra el depósito en Tango
+ * con una boleta (BDE) en el mismo momento en que lo hace en el banco, y el
+ * cheque sale de cartera. La grilla los muestra igual, marcados, hasta que
+ * acreditan: en su acreditación y por el neto, como los suma el tablero. La
+ * acreditación, la tasa, el neto y el estado los resolvió PHP
+ * (Echeqs::resolverDeposito(), la misma regla que usa el proveedor): acá no
+ * se calcula ninguno de esos números.
  *
  * EL GUARDADO DE LAS MARCAS NO ES OPTIMISTA EN SILENCIO. El tilde se pinta
  * enseguida para que la pantalla responda, pero si el POST falla se revierte y
@@ -193,7 +194,8 @@
         var e = datosCartera.excluidos || {};
         var d = datosCartera.depositados || {};
         var acr = d.acreditados || {};
-        var depositados = (d.cheques || 0) + (acr.cheques || 0);
+        var sinDatos = d.sin_datos || {};
+        var depositados = (d.cheques || 0) + (acr.cheques || 0) + (sinDatos.cheques || 0);
         var cobrables = (datosCartera.filas || []).length - (e.cheques || 0) - depositados;
 
         texto('detalleCarteraEch', cobrables + ' cheque(s) de terceros, por fecha de pago'
@@ -202,11 +204,14 @@
 
         // Los depositados que se proyectan: el neto, y de dónde sale. Un cero
         // con "Ninguno" no se confunde con un depósito que no retiene nada.
+        // Los acreditados se cuentan aparte: se ven en la grilla y no suman.
         texto('totalDepositadosEch', pesos(d.total_horizonte));
-        texto('detalleDepositadosEch', d.cheques
+        texto('detalleDepositadosEch', (d.cheques
             ? d.cheques + ' cheque(s) · bruto ' + pesosPlano(d.bruto) + ' · retención '
               + pesosPlano(d.retencion)
-            : 'Ninguno se proyecta');
+            : 'Ninguno se proyecta')
+            + (acr.cheques ? ' · ' + acr.cheques + ' acreditado(s), no suman' : '')
+            + (sinDatos.cheques ? ' · ' + sinDatos.cheques + ' sin proyectar' : ''));
 
         mostrar('summarySectionEch', true, 'flex');
     }
@@ -307,12 +312,12 @@
         filas.forEach(function(f) {
             // El excluido se atenúa y lleva el importe tachado: no entra al
             // cashflow, y eso tiene que verse sin leer la celda de la marca. El
-            // depositado se marca de otro color: entra, pero en otra fecha y
-            // por el neto. El acreditado sin registrar, como el excluido: ya no
-            // suma a ninguna fila.
+            // depositado que se proyecta se marca de otro color: entra, pero
+            // en otra fecha y por el neto. El acreditado y el que no tiene
+            // datos, atenuados como el excluido: no suman a ninguna fila.
             var clase = f.EXCLUIDO ? 'ech-excluido'
                 : (f.ESTADO_DEPOSITO === 'PROYECTA' ? 'ech-depositado'
-                    : (f.ESTADO_DEPOSITO === 'ACREDITADO' ? 'ech-acreditado' : ''));
+                    : (f.ESTADO_DEPOSITO ? 'ech-acreditado' : ''));
 
             html += '<tr' + (clase ? ' class="' + clase + '"' : '')
                  + ' data-id="' + f.ID_SBA14 + '">';
@@ -414,8 +419,10 @@
               filtro: function(f) { return !f.EXCLUIDO && !f.ESTADO_DEPOSITO; } },
             { rotulo: 'Depositados · fila "Echeqs depositados"',
               filtro: function(f) { return f.ESTADO_DEPOSITO === 'PROYECTA'; } },
-            { rotulo: 'Acreditados sin registrar · no suman',
+            { rotulo: 'Acreditados · no suman',
               filtro: function(f) { return f.ESTADO_DEPOSITO === 'ACREDITADO'; } },
+            { rotulo: 'Depositados sin proyectar · no suman',
+              filtro: function(f) { return f.ESTADO_DEPOSITO === 'SIN_DATOS'; } },
             { rotulo: 'Excluidos · no suman',
               filtro: function(f) { return !!f.EXCLUIDO; } }
         ];
@@ -558,8 +565,8 @@
                 return false;
             }
 
-            // Un depositado, se proyecte o ya haya acreditado: los dos tienen
-            // depósito vigente. El aviso de los acreditados sale igual.
+            // Un depositado, se proyecte, haya acreditado o le falten datos:
+            // todos traen su depósito. Los avisos salen igual.
             if (sinDep && f.DEPOSITO) {
                 return false;
             }
@@ -637,71 +644,109 @@
         return '<input type="checkbox" class="form-check-input ech-sel"'
             + (seleccion[f.ID_SBA14] ? ' checked' : '')
             + ' data-id="' + f.ID_SBA14 + '"'
-            + ' title="' + escapar('Seleccionar este cheque para depositarlo, deshacer su '
-                + 'depósito, excluirlo del cashflow o volver a incluirlo.') + '">' + marca;
+            + ' title="' + escapar('Seleccionar este cheque para excluirlo del cashflow o '
+                + 'volver a incluirlo.') + '">' + marca;
     }
 
     /**
-     * La marca del depósito, con todo lo que lo explica en el tooltip: quién y
-     * cuándo, la acreditación, el bruto, la tasa con su desglose, el neto y la
-     * observación, y el historial -los depósitos deshechos, con quién los
-     * deshizo-.
+     * La marca del depósito, con todo lo que lo explica en el tooltip: la
+     * boleta de Tango (número y fecha), la cuenta donde se depositó con su
+     * TIPO_SAL, el banco emisor, la fecha del cheque, la acreditación, el
+     * bruto, la tasa con su desglose y el neto. Si alguien lo marcó "ya
+     * acreditó": quién, cuándo, el origen y la observación, y las marcas
+     * deshechas.
      *
-     * TRES MARCAS DISTINTAS, porque son tres situaciones distintas:
-     *   depositado        entra en la fila Echeqs depositados el día que acredita
-     *   acreditado, falta registrar en Tango
-     *                     ya está en el banco y no suma a ninguna fila: hay que
-     *                     registrar el depósito en Tango
-     *   depósito deshecho un ícono chico: el cheque no está depositado, pero
-     *                     tiene historia, y el tooltip la cuenta
+     * TRES MARCAS, porque son tres situaciones distintas:
+     *   depositado     entra en la fila Echeqs depositados el día que acredita
+     *   acreditado     ya está en el saldo bancario y no suma a ninguna fila:
+     *                  por plazo (llegó su día) o marcado "ya acreditó"
+     *   sin proyectar  le falta la fecha de acreditación o el neto: no suma a
+     *                  ninguna fila y el panel de avisos dice por qué
+     *
+     * Todo lo dice el servidor (Echeqs::resolverDeposito()): acá no se calcula
+     * ninguna fecha ni ningún importe.
      */
     function marcaDeposito(f) {
         var d = f.DEPOSITO;
-        var hist = textoHistorial(f.HISTORIAL_DEPOSITO || [], d ? d.id : null);
 
         if (!d) {
-            return hist
-                ? '<div><i class="fas fa-clock-rotate-left ech-icono-historial" title="'
-                  + escapar('Depósitos deshechos de este cheque:\n' + hist) + '"></i></div>'
-                : '';
+            return '';
         }
 
-        var acreditado = (f.ESTADO_DEPOSITO === 'ACREDITADO');
-        var tip = (acreditado
-                ? 'Ya acreditó y sigue en cartera en Tango: la plata ya está en el banco y no '
-                  + 'suma a ninguna fila. Falta registrar el depósito en Tango.\n\n'
-                : 'Depositado: entra en la fila Echeqs depositados el día que acredita, por el '
-                  + 'neto.\n\n')
-            + 'Depositado por ' + (Auditoria.quien(d.usuario) || 'sin usuario registrado')
-            + (d.fecha_alta ? ' · ' + Auditoria.fecha(d.fecha_alta) : '') + '\n'
-            + 'Banco: ' + (d.banco || f.BANCO) + '\n'
-            + 'Acredita: ' + fecha(d.fecha_acreditacion) + ' (' + d.dias_plazo
-            + ' día(s) hábil(es) desde el ' + fecha(d.fecha_deposito) + ')\n'
-            + 'Bruto: ' + pesosPlano(d.bruto) + '\n'
-            + 'Tasa: ' + porcentaje(d.tasa) + (d.desglose ? ' (' + d.desglose + ')' : '') + '\n'
-            + 'Neto: ' + pesosPlano(d.neto)
-            + (d.observacion ? '\nObservación: ' + d.observacion : '')
-            + (hist ? '\n\nDepósitos anteriores:\n' + hist : '');
+        var estado = f.ESTADO_DEPOSITO;
+        var porMarca = (estado === 'ACREDITADO' && d.motivo === 'MARCA');
+        var c = d.cuenta;
 
-        return '<div><span class="' + (acreditado ? 'ech-badge-acreditado' : 'ech-badge-depositado')
-            + '" title="' + escapar(tip) + '">'
-            + (acreditado ? 'acreditado, falta registrar en Tango' : 'depositado')
-            + '</span></div>';
+        var encabezado = {
+            PROYECTA: 'Depositado en Tango: entra en la fila Echeqs depositados el día que '
+                + 'acredita, por el neto.',
+            ACREDITADO: porMarca
+                ? 'Marcado "ya acreditó": la plata ya está en el saldo bancario y no suma a '
+                  + 'ninguna fila. Se sigue viendo hasta su fecha de acreditación.'
+                : 'Acreditado por plazo: hoy es su día de acreditación, así que ya está en el '
+                  + 'saldo bancario y no suma a ninguna fila. Mañana deja de verse.',
+            SIN_DATOS: 'Sin proyectar: ' + (d.error || 'le falta la fecha de acreditación o el neto.')
+        }[estado] || '';
+
+        var tip = encabezado + '\n\n'
+            + 'Boleta de depósito ' + (d.boleta || 's/n') + ' del ' + fecha(d.fecha_deposito) + '\n'
+            + 'Cuenta: ' + (c ? c.cod_cta + ' ' + c.descripcion
+                : 'no se encontró la línea de la boleta en Tango')
+            + ' · TIPO_SAL ' + (d.tipo_sal || '—')
+            + (d.cta_destin ? ' · CTA_DESTIN ' + d.cta_destin : '') + '\n'
+            + 'Banco emisor: ' + f.BANCO + '\n'
+            + 'Fecha del cheque: ' + fecha(f.FECHA_CHEQUE) + '\n'
+            + 'Acredita: ' + (d.fecha_acreditacion
+                ? fecha(d.fecha_acreditacion) + ' (' + d.dias_plazo
+                  + ' día(s) hábil(es) desde la boleta)'
+                : 'sin fecha') + '\n'
+            + 'Bruto: ' + pesosPlano(d.bruto) + '\n'
+            + 'Tasa: ' + (d.tasa === null ? 'sin alícuotas'
+                : porcentaje(d.tasa) + (d.desglose ? ' (' + d.desglose + ')' : '')) + '\n'
+            + 'Neto: ' + (d.neto === null ? 'sin neto' : pesosPlano(d.neto))
+            + textoMarca(d.marca)
+            + textoHistorialMarcas(f.HISTORIAL_ACREDITADO || [], d.marca ? d.marca.id : null);
+
+        var rotulo = {
+            PROYECTA: 'depositado',
+            ACREDITADO: porMarca ? 'acreditado' : 'acreditado (por plazo)',
+            SIN_DATOS: 'depositado, sin proyectar'
+        }[estado] || 'depositado';
+
+        var clase = (estado === 'PROYECTA') ? 'ech-badge-depositado'
+            : (estado === 'SIN_DATOS' ? 'ech-badge-sin-datos' : 'ech-badge-acreditado');
+
+        return '<div><span class="' + clase + '" title="' + escapar(tip) + '">'
+            + escapar(rotulo) + '</span></div>';
+    }
+
+    /** Quién marcó "ya acreditó", cuándo, desde dónde y por qué */
+    function textoMarca(m) {
+        if (!m) {
+            return '';
+        }
+
+        return '\n\nYa acreditó: marcado por '
+            + (Auditoria.quien(m.usuario) || 'sin usuario registrado')
+            + (m.fecha_alta ? ' · ' + Auditoria.fecha(m.fecha_alta) : '') + '\n'
+            + 'Origen: ' + (m.origen === 'INTERBANKING' ? 'Interbanking' : 'a mano')
+            + (m.referencia ? ' (' + m.referencia + ')' : '')
+            + (m.observacion ? '\nObservación: ' + m.observacion : '');
     }
 
     /**
-     * El historial de depósitos en texto, sin el vigente: una línea por depósito
-     * deshecho, con quién lo hizo y quién lo deshizo.
+     * Las marcas "ya acreditó" deshechas, una línea por marca: quién la puso
+     * y quién la deshizo. La vigente va aparte, en textoMarca().
      */
-    function textoHistorial(historial, idVigente) {
-        return historial.filter(function(h) { return h.id !== idVigente; }).map(function(h) {
-            return '· Depositado el ' + fecha(h.fecha_deposito) + ' por '
-                + (Auditoria.quien(h.usuario) || 'sin usuario registrado')
-                + ', acreditaba el ' + fecha(h.fecha_acreditacion)
-                + (h.vigente ? '' : '; deshecho por '
-                    + (Auditoria.quien(h.usuario_baja) || 'sin usuario registrado')
-                    + (h.fecha_baja ? ' · ' + Auditoria.fecha(h.fecha_baja) : ''));
-        }).join('\n');
+    function textoHistorialMarcas(historial, idVigente) {
+        var lineas = historial.filter(function(h) { return h.id !== idVigente; }).map(function(h) {
+            return '· Marcado por ' + (Auditoria.quien(h.usuario) || 'sin usuario registrado')
+                + (h.fecha_alta ? ' · ' + Auditoria.fecha(h.fecha_alta) : '')
+                + '; deshecho por ' + (Auditoria.quien(h.usuario_baja) || 'sin usuario registrado')
+                + (h.fecha_baja ? ' · ' + Auditoria.fecha(h.fecha_baja) : '');
+        });
+
+        return lineas.length ? '\n\nMarcas "ya acreditó" deshechas:\n' + lineas.join('\n') : '';
     }
 
     /** Quién excluyó ese cheque y cuándo. Un tilde sin autor no lo explica nadie */
@@ -761,9 +806,9 @@
            todo ya excluido, o "Volver a incluir" sin ninguno excluido. Un botón
            que se puede apretar y no cambia nada es peor que uno apagado.
 
-           EXCLUIR TAMPOCO SE PUEDE CON UN DEPOSITADO en la selección: ya está
-           en el banco, y el servidor lo rechaza entero. Primero se deshace el
-           depósito.
+           EXCLUIR TAMPOCO SE PUEDE CON UN DEPOSITADO en la selección: Tango ya
+           lo sacó de cartera, y la exclusión es de cartera. El servidor lo
+           devolvería como rechazado.
 
            SIN EL SCRIPT los dos quedan apagados y lo dicen en el título: la
            pantalla sigue andando para todo lo demás, que no depende de él. */
@@ -775,7 +820,7 @@
             btnEx.disabled = !puede || (yaExcluidos === sel.length) || yaDepositados > 0;
             btnEx.title = !puede ? FALTA_EXCLUIR
                 : (yaDepositados ? 'Hay ' + yaDepositados + ' cheque(s) depositado(s) en la '
-                    + 'selección: un cheque depositado no se excluye. Primero deshacé el depósito.'
+                    + 'selección: ya salieron de cartera en Tango, y la exclusión es de cartera.'
                     : '');
         }
 

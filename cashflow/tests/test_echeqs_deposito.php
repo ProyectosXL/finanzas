@@ -1,10 +1,10 @@
 <?php
 /**
- * Echeqs: el deposito masivo de cheques de cartera.
+ * Echeqs: los cheques depositados, leidos de Tango.
  *
- * Como el resto del modulo, lo delicado son CRITERIOS y no consultas: cuando
- * acredita un deposito, con que tasa, que cheques se pueden depositar juntos,
- * cual se proyecta y en que serie cae cada peso. Viven en helpers estaticos
+ * Como el resto del modulo, lo delicado son CRITERIOS y no consultas: que es
+ * un deposito, cuando acredita, con que tasa, cual se proyecta y en que serie
+ * cae cada peso. Viven en helpers estaticos
  * puros y se verifican aca sin base, con la fecha de hoy inyectada para que
  * las pruebas no caduquen.
  *
@@ -20,27 +20,17 @@ $SQL_DEPOSITO = str_replace("\r\n", "\n",
 /* ================================================================
    El script
    ================================================================ */
-seccion('el script del deposito');
+seccion('el script del deposito: alicuotas y plazo');
 
-chequear('crea la tabla de depositos', true,
+chequear('ya no crea la tabla de depositos del circuito viejo', false,
     strpos($SQL_DEPOSITO, 'CREATE TABLE dbo.RO_T_CASHFLOW_ECHEQ_DEPOSITO') !== false);
-chequear('y la de alicuotas propia, no filas en la de Cob. Electronicos', true,
+chequear('ni la borra: no hay bajas fisicas', false,
+    stripos($SQL_DEPOSITO, 'DROP TABLE') !== false || stripos($SQL_DEPOSITO, 'DELETE ') !== false);
+chequear('y el encabezado la documenta como en desuso', true,
+    strpos($SQL_DEPOSITO, '1. RO_T_CASHFLOW_ECHEQ_DEPOSITO, EN DESUSO') !== false);
+chequear('crea la de alicuotas propia, no filas en la de Cob. Electronicos', true,
     strpos($SQL_DEPOSITO, 'CREATE TABLE dbo.RO_T_CASHFLOW_ECHEQ_ALICUOTA') !== false
     && strpos($SQL_DEPOSITO, 'INSERT INTO dbo.RO_T_CASHFLOW_COBEL') === false);
-chequear('un solo deposito vigente por cheque: indice unico filtrado', 1,
-    preg_match('/CREATE UNIQUE NONCLUSTERED INDEX UX_RO_T_CF_ECHEQDEP_VIGENTE\s+ON dbo\.RO_T_CASHFLOW_ECHEQ_DEPOSITO \(ID_SBA14\)\s+WHERE VIGENTE = 1/',
-        $SQL_DEPOSITO));
-
-foreach (['ID_SBA14', 'ID_BANCO', 'DESC_BANCO', 'FECHA_DEPOSITO', 'FECHA_ACREDITACION',
-          'DIAS_PLAZO', 'IMPORTE_BRUTO', 'TASA_APLICADA', 'IMPORTE_NETO', 'OBSERVACION',
-          'VIGENTE', 'USUARIO_ALTA', 'FECHA_ALTA', 'USUARIO_MODIF', 'FECHA_MODIF',
-          'USUARIO_BAJA', 'FECHA_BAJA'] as $col) {
-    chequear('el deposito guarda ' . $col, 1,
-        preg_match('/\n\s+' . $col . '\s+[A-Z]/', $SQL_DEPOSITO));
-}
-
-chequear('la tasa y el neto no pueden quedar en null', 2,
-    preg_match_all('/(TASA_APLICADA|IMPORTE_NETO)\s+DECIMAL\([0-9,]+\)\s+NOT NULL/', $SQL_DEPOSITO));
 chequear('no siembra ninguna alicuota: las carga Tesoreria', false,
     strpos($SQL_DEPOSITO, 'INSERT INTO dbo.RO_T_CASHFLOW_ECHEQ_ALICUOTA') !== false);
 chequear('siembra el plazo en 2', true,
@@ -51,9 +41,8 @@ chequear('en el modulo PRECHEQUEADO, que es el codigo de la sub-pestana Cheques'
 chequear('y si ya existe no le pisa el valor', true,
     strpos($SQL_DEPOSITO, "IF NOT EXISTS (SELECT 1 FROM dbo.RO_T_CASHFLOW_PARAMETROS\n               WHERE CLAVE = 'echeqs_dias_acreditacion_deposito')") !== false
     && strpos($SQL_DEPOSITO, 'UPDATE dbo.RO_T_CASHFLOW_PARAMETROS') === false);
-chequear('es reejecutable: cada tabla pregunta si existe', 2,
-    preg_match_all("/IF OBJECT_ID\('dbo\.RO_T_CASHFLOW_ECHEQ_(DEPOSITO|ALICUOTA)', 'U'\) IS NULL/", $SQL_DEPOSITO));
-chequear('no tiene bajas fisicas', false, stripos($SQL_DEPOSITO, 'DELETE ') !== false);
+chequear('es reejecutable: la tabla pregunta si existe', 1,
+    preg_match_all("/IF OBJECT_ID\('dbo\.RO_T_CASHFLOW_ECHEQ_ALICUOTA', 'U'\) IS NULL/", $SQL_DEPOSITO));
 
 /* ================================================================
    Parametros -> Cheques: el plazo
@@ -173,143 +162,345 @@ foreach (['savePlazoDepositoEcheq', 'addAlicuotaEcheq', 'bajaAlicuotaEcheq'] as 
 }
 
 /* ================================================================
-   El deposito: que cheques se pueden depositar juntos
+   Los depositos, leidos de Tango
    ================================================================ */
 
 /** Una fila de cartera como las de getEcheqsCartera(), armada a mano */
-function chequeCartera($id, $banco, $importe = 100000.0, $extra = []) {
-    $bancos = [10 => 'GALICIA', 20 => 'MACRO S.A.'];
-
-    return array_merge([
+function chequeCartera($id, $importe = 100000.0, $extra = []) {
+    return Echeqs::ubicarEnEje(array_merge([
         'ID_SBA14' => $id,
         'N_CHEQUE' => 9000 + $id,
         'FECHA_CHEQUE' => '2026-10-30',
         'FECHA_PAGO' => '2026-10-30',
-        'ID_BANCO' => $banco,
-        'BANCO' => $banco === null ? 'Sin banco' : $bancos[$banco],
+        'ID_BANCO' => 10,
+        'BANCO' => 'GALICIA',
         'IMPORTE' => $importe,
         'CLIENTE' => 'CLIENTE ' . $id,
         'COD_CLIENTE' => 'FR' . $id,
         'EXCLUIDO' => false,
         'DEPOSITO' => null
+    ], $extra));
+}
+
+/** Una fila de sqlDepositados(), normalizada, armada a mano */
+function chequeDepositado($id, $fechaSal, $importe = 100000.0, $extra = []) {
+    return array_merge([
+        'ID_SBA14' => $id,
+        'N_CHEQUE' => 9000 + $id,
+        'FECHA_CHEQUE' => '2026-10-30',
+        'FECHA_PAGO' => '2026-10-30',
+        'ID_BANCO' => 10,
+        'BANCO' => 'GALICIA',
+        'IMPORTE' => $importe,
+        'CLIENTE' => 'CLIENTE ' . $id,
+        'COD_CLIENTE' => 'FR' . $id,
+        'EXCLUIDO' => false,
+        'ESTADO' => 'A',
+        'T_COMP_SAL' => 'BDE',
+        'N_COMP_SAL' => '0200500004' . $id,
+        'TIPO_SAL' => 'D',
+        'CTA_DESTIN' => 110500,
+        'FECHA_SAL' => $fechaSal
     ], $extra);
 }
 
-$depVigente = ['id' => 77, 'fecha_deposito' => '2026-10-12', 'fecha_acreditacion' => '2026-10-14',
-               'dias_plazo' => 2, 'bruto' => 100000.0, 'tasa' => 0.031, 'desglose' => 'IIBB 2,5% + SICREB 0,6%',
-               'neto' => 96900.0, 'observacion' => null, 'banco' => 'GALICIA',
-               'usuario' => 'rorozco', 'fecha_alta' => '2026-10-12 10:00:00'];
+$ctaBanco = ['cod_cta' => 110500, 'descripcion' => 'BCO.RIO CTA.CTE. $', 'tipo' => 'B'];
+$ctaComitente = ['cod_cta' => 110530, 'descripcion' => 'BCO. RIO - CTA COMITENTE 7786', 'tipo' => 'O'];
+$ctaCaja = ['cod_cta' => 100100, 'descripcion' => 'CAJA FABRICA $', 'tipo' => 'O'];
 
-$cartera = [
-    chequeCartera(1, 10),
-    chequeCartera(2, 10, 50000.0),
-    chequeCartera(3, 20),
-    chequeCartera(4, null),
-    chequeCartera(5, 10, 100000.0, ['EXCLUIDO' => true, 'MOTIVO_EXCLUSION' => 'concurso']),
-    chequeCartera(6, 10, 100000.0, ['DEPOSITO' => $depVigente])
+seccion('que es un deposito');
+
+$bde = chequeDepositado(1, '2026-10-15');
+
+chequear('BDE con ESTADO = A a una cuenta bancaria: deposito', true,
+    Echeqs::esDepositoTango($bde, $ctaBanco));
+chequear('una orden de pago (O/P) es un endoso a un proveedor: no', false,
+    Echeqs::esDepositoTango(array_merge($bde, ['T_COMP_SAL' => 'O/P', 'TIPO_SAL' => 'P']), null));
+chequear('en cartera (C) no es un deposito', false,
+    Echeqs::esDepositoTango(array_merge($bde, ['ESTADO' => 'C']), $ctaBanco));
+chequear('rechazado (R) no se lee', false,
+    Echeqs::esDepositoTango(array_merge($bde, ['ESTADO' => 'R']), $ctaBanco));
+chequear('anulado (X) tampoco', false,
+    Echeqs::esDepositoTango(array_merge($bde, ['ESTADO' => 'X']), $ctaBanco));
+chequear('con FECHA_SAL centinela no', false,
+    Echeqs::esDepositoTango(array_merge($bde, ['FECHA_SAL' => '1800-01-01']), $ctaBanco));
+chequear('sin FECHA_SAL tampoco', false,
+    Echeqs::esDepositoTango(array_merge($bde, ['FECHA_SAL' => null]), $ctaBanco));
+chequear('fuera de [FL] -un mayorista- no', false,
+    Echeqs::esDepositoTango(array_merge($bde, ['COD_CLIENTE' => 'MAVENF']), $ctaBanco));
+chequear('un local (L) si', true,
+    Echeqs::esDepositoTango(array_merge($bde, ['COD_CLIENTE' => 'L00001']), $ctaBanco));
+chequear('la comparacion del cliente es binaria, como la columna', false,
+    Echeqs::esDepositoTango(array_merge($bde, ['COD_CLIENTE' => 'fr0001']), $ctaBanco));
+chequear('TIPO_SAL = O con CTA_DESTIN en 0 a un banco: deposito', true,
+    Echeqs::esDepositoTango(array_merge($bde, ['TIPO_SAL' => 'O', 'CTA_DESTIN' => 0]), $ctaBanco));
+chequear('a la cuenta comitente (endoso a Santander Valores): no', false,
+    Echeqs::esDepositoTango($bde, $ctaComitente));
+chequear('a la caja (una devolucion): no', false, Echeqs::esDepositoTango($bde, $ctaCaja));
+chequear('sin la linea de la boleta: cuenta como deposito', true,
+    Echeqs::esDepositoTango($bde, null));
+chequear('el comprobante es el codigo BDE, no el id de SBA02', 'BDE', Echeqs::COMPROBANTE_DEPOSITO);
+
+seccion('la fecha de acreditacion y el importe');
+
+// Octubre y noviembre de 2026 con el lunes 12/10 feriado.
+$cal = [];
+
+for ($i = 0; $i < 92; $i++) {
+    $d = date('Y-m-d', strtotime('2026-09-01 +' . $i . ' day'));
+    $cal[$d] = intval(date('N', strtotime($d))) <= 5 && $d !== '2026-10-12';
+}
+
+// IIBB 2,5% y SICREB 0,6% desde el 1/10; IIBB 3% desde el 21/10.
+$ali = [
+    ['ID' => 1, 'CONCEPTO' => 'IIBB', 'ALICUOTA' => 0.025, 'VIGENCIA_DESDE' => '2026-10-01', 'ACTIVO' => 1],
+    ['ID' => 2, 'CONCEPTO' => 'SICREB', 'ALICUOTA' => 0.006, 'VIGENCIA_DESDE' => '2026-10-01', 'ACTIVO' => 1],
+    ['ID' => 3, 'CONCEPTO' => 'IIBB', 'ALICUOTA' => 0.030, 'VIGENCIA_DESDE' => '2026-10-21', 'ACTIVO' => 1]
 ];
+$plazo2 = Echeqs::plazoDesdeValor('2');
 
-seccion('lo que queda del calculo');
+/** El deposito resuelto de una boleta, con el resto de los datos fijos */
+function depositoDe($fechaSal, $hoy, $extra = [], $marca = null) {
+    global $cal, $ali, $plazo2, $ctaBanco;
 
-chequear('el calendario se pide con margen para todo el corrimiento',
-    ['desde' => '2026-10-19', 'hasta' => '2026-12-18'],
-    Echeqs::rangoCalendarioDeposito('2026-10-19', 2));
+    return Echeqs::resolverDeposito(chequeDepositado(1, $fechaSal, 100000.0, $extra), $ctaBanco,
+        $plazo2, $cal, $ali, $marca, $hoy);
+}
 
-chequear('la observacion es opcional: vacia es null', null, Echeqs::validarObservacion('   '));
-chequear('y se recorta al largo de la columna', Echeqs::OBSERVACION_MAX,
-    mb_strlen(Echeqs::validarObservacion(str_repeat('x', 300))));
+chequear('una boleta del viernes acredita el martes', '2026-10-20',
+    depositoDe('2026-10-16', '2026-10-16')['fecha_acreditacion']);
+chequear('con el lunes feriado, se corre un dia mas: viernes -> miercoles', '2026-10-14',
+    depositoDe('2026-10-09', '2026-10-09')['fecha_acreditacion']);
+chequear('lunes -> miercoles', '2026-10-21', depositoDe('2026-10-19', '2026-10-19')['fecha_acreditacion']);
+chequear('la fecha del cheque no interviene, aunque sea posterior', '2026-10-20',
+    depositoDe('2026-10-16', '2026-10-16', ['FECHA_CHEQUE' => '2026-11-29',
+                                           'FECHA_PAGO' => '2026-11-29'])['fecha_acreditacion']);
+chequear('ni aunque sea anterior', '2026-10-20',
+    depositoDe('2026-10-16', '2026-10-16', ['FECHA_CHEQUE' => '2026-10-01',
+                                           'FECHA_PAGO' => '2026-10-01'])['fecha_acreditacion']);
 
-$srcEcheqs = str_replace("
-", "
-", file_get_contents(__DIR__ . '/../Class/Echeqs.php'));
-$bloqueExcluir = substr($srcEcheqs, strpos($srcEcheqs, 'public function excluirCheques('), 4000);
-chequear('un cheque depositado no se puede excluir', true,
-    strpos($bloqueExcluir, "if (!empty(\$excluir) && !empty(\$enPedido)) {") !== false);
+$d = depositoDe('2026-10-19', '2026-10-19');
+chequear('la tasa es la vigente a la ACREDITACION (21/10), no a la boleta', 0.036, $d['tasa']);
+chequear('con su desglose', 'IIBB 3% + SICREB 0,6%', $d['desglose']);
+chequear('el neto es bruto x (1 - tasa)', 96400.0, $d['neto']);
+chequear('y el bruto, el del cheque', 100000.0, $d['bruto']);
+chequear('dice con que plazo se calculo', 2, $d['dias_plazo']);
+chequear('y trae la boleta, su fecha, TIPO_SAL, CTA_DESTIN y la cuenta, para el tooltip',
+    ['02005000041', '2026-10-19', 'D', 110500, 110500],
+    [$d['boleta'], $d['fecha_deposito'], $d['tipo_sal'], $d['cta_destin'], $d['cuenta']['cod_cta']]);
 
-/* ================================================================
-   Que se lee y que se proyecta
-   ================================================================ */
-seccion('que depositos se proyectan');
-
-// Hoy es el 13/10.
-$depFuturo = array_merge($depVigente, ['fecha_acreditacion' => '2026-10-15']);
-$depHoy = array_merge($depVigente, ['fecha_acreditacion' => '2026-10-13']);
-$depPasado = array_merge($depVigente, ['fecha_acreditacion' => '2026-10-09']);
-
-chequear('acreditacion futura y en cartera: se proyecta', Echeqs::DEPOSITO_PROYECTA,
-    Echeqs::estadoDeposito($depFuturo, true, '2026-10-13'));
-chequear('acreditacion de HOY: no se proyecta, ya esta en el saldo bancario', Echeqs::DEPOSITO_ACREDITADO,
-    Echeqs::estadoDeposito($depHoy, true, '2026-10-13'));
-chequear('acreditacion pasada y sigue en cartera: tampoco', Echeqs::DEPOSITO_ACREDITADO,
-    Echeqs::estadoDeposito($depPasado, true, '2026-10-13'));
-chequear('ya no esta en cartera: sale solo, sin estado', null,
-    Echeqs::estadoDeposito($depFuturo, false, '2026-10-13'));
-chequear('sin deposito, sin estado', null, Echeqs::estadoDeposito(null, true, '2026-10-13'));
-
-$vencido = chequeCartera(10, 10, 100000.0, ['FECHA_CHEQUE' => '2026-10-01', 'FECHA_PAGO' => '2026-10-01',
-                                             'DEPOSITO' => $depFuturo]);
-chequear('un depositado con la fecha del cheque vencida se lee igual', true,
-    Echeqs::visibleEnCartera($vencido, '2026-10-13'));
-chequear('y se proyecta, en su acreditacion y por el neto',
-    [Echeqs::DEPOSITO_PROYECTA, '2026-10-15', 96900.0],
-    array_values(array_intersect_key(Echeqs::ubicarEnEje($vencido, '2026-10-13'),
-        array_flip(['ESTADO_DEPOSITO', 'FECHA_EJE', 'IMPORTE_EJE']))));
-
-// Depositado con fecha de hoy y deshecho al dia siguiente: el deposito ya no
-// esta vigente, la fecha del cheque ya paso, y no reaparece.
-$deshecho = chequeCartera(11, 10, 100000.0, ['FECHA_CHEQUE' => '2026-10-12', 'FECHA_PAGO' => '2026-10-12']);
-chequear('depositado el dia de su fecha y deshecho al otro dia: no aparece', false,
-    Echeqs::visibleEnCartera($deshecho, '2026-10-13'));
-
-$sql = Echeqs::sqlCartera(true, true);
-chequear('la consulta une el deposito VIGENTE en la condicion de la union', 1,
-    preg_match('/LEFT JOIN dbo\.RO_T_CASHFLOW_ECHEQ_DEPOSITO AS d\s+ON d\.ID_SBA14 = s\.ID_SBA14 AND d\.VIGENTE = 1/', $sql));
-chequear('y no en el WHERE: un deshecho no trae la fila', false,
-    strpos(substr($sql, strpos($sql, 'WHERE')), 'VIGENTE') !== false);
-chequear('los depositados se leen aunque su fecha haya pasado', true,
-    strpos($sql, '(s.FECHA_CHEQ >= CAST(GETDATE() AS DATE) OR d.ID IS NOT NULL)') !== false);
-chequear('la agregada usa el mismo universo', true,
-    strpos(Echeqs::sqlCarteraTotales(true, true), '(s.FECHA_CHEQ >= CAST(GETDATE() AS DATE) OR d.ID IS NOT NULL)') !== false);
-
-// Con core.autocrlf la copia de trabajo de Echeqs.php puede estar en CRLF, y
-// los saltos del SQL salen como \r\n: se normalizan antes de buscar.
-$sinScript = str_replace("\r\n", "\n", Echeqs::sqlCartera(true, false));
-chequear('sin el script, la consulta es la de antes: sin union ni OR', [false, true], [
-    strpos($sinScript, 'ECHEQ_DEPOSITO') !== false,
-    strpos($sinScript, "WHERE s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)\n                  AND s.ESTADO = ?") !== false
+// Un cambio de alicuota se refleja sin recalcular nada: la misma boleta con
+// otro juego da otro neto, porque no hay nada guardado.
+$aliNueva = array_merge($ali, [
+    ['ID' => 4, 'CONCEPTO' => 'SICREB', 'ALICUOTA' => 0.010, 'VIGENCIA_DESDE' => '2026-10-20', 'ACTIVO' => 1]
 ]);
-chequear('y la agregada no agrupa por una constante', false,
-    strpos(Echeqs::sqlCarteraTotales(false, false), 'GROUP BY CAST(s.FECHA_CHEQ AS DATE),') !== false);
+$d2 = Echeqs::resolverDeposito(chequeDepositado(1, '2026-10-19'), $ctaBanco, $plazo2, $cal, $aliNueva,
+    null, '2026-10-19');
+chequear('un cambio de alicuota se refleja solo, al leer', [0.04, 96000.0], [$d2['tasa'], $d2['neto']]);
+
+chequear('y el plazo tambien: con 3 dias la misma boleta acredita un dia despues', '2026-11-04',
+    Echeqs::resolverDeposito(chequeDepositado(1, '2026-10-30'), $ctaBanco, Echeqs::plazoDesdeValor('3'),
+        $cal, $ali, null, '2026-10-30')['fecha_acreditacion']);
+
+$sinCal = Echeqs::resolverDeposito(chequeDepositado(1, '2026-11-30'), $ctaBanco, $plazo2, $cal, $ali,
+    null, '2026-11-30');
+chequear('sin calendario, el respaldo de lunes a viernes', '2026-12-02', $sinCal['fecha_acreditacion']);
+chequear('y dice que mes falta', ['2026-12'], $sinCal['faltan']);
+
+$roto = [];
+
+for ($i = 0; $i < 60; $i++) {
+    $roto[date('Y-m-d', strtotime('2026-10-16 +' . $i . ' day'))] = false;
+}
+
+$d = Echeqs::resolverDeposito(chequeDepositado(1, '2026-10-15'), $ctaBanco, $plazo2, $roto, $ali, null,
+    '2026-10-16');
+chequear('sin ningun habil en el tope, la fecha es null y no se inventa', [null, null],
+    [$d['fecha_acreditacion'], $d['neto']]);
+chequear('no se proyecta: SIN_DATOS, con el motivo', [Echeqs::DEPOSITO_SIN_DATOS, true],
+    [$d['estado'], strpos((string) $d['error'], 'Revisá RO_T_CALENDARIO') !== false]);
+
+$d = Echeqs::resolverDeposito(chequeDepositado(1, '2026-10-15'), $ctaBanco, $plazo2, $cal, [], null,
+    '2026-10-16');
+chequear('sin alicuotas vigentes a la acreditacion, el neto es null, no el bruto', [null, null],
+    [$d['tasa'], $d['neto']]);
+chequear('y no se proyecta', Echeqs::DEPOSITO_SIN_DATOS, $d['estado']);
+chequear('el motivo dice donde cargarlas', true, strpos($d['error'], 'Parámetros → Cheques') !== false);
+
+$d = Echeqs::resolverDeposito(chequeDepositado(1, '2026-10-15'), $ctaBanco, Echeqs::plazoDesdeValor(null),
+    $cal, $ali, null, '2026-10-16');
+chequear('sin plazo no hay fecha: SIN_DATOS, nombrando el script', [null, Echeqs::DEPOSITO_SIN_DATOS, true],
+    [$d['fecha_acreditacion'], $d['estado'], strpos($d['error'], Echeqs::SCRIPT_DEPOSITO) !== false]);
+
+seccion('cuanto tiempo se proyecta');
+
+// Hoy es el viernes 16/10.
+$hoyP = '2026-10-16';
+
+$d = depositoDe('2026-10-15', $hoyP);
+chequear('acredita manana o despues (lunes 19): se proyecta', [Echeqs::DEPOSITO_PROYECTA, '2026-10-19', true],
+    [$d['estado'], $d['fecha_acreditacion'], $d['listar']]);
+
+$d = depositoDe('2026-10-14', $hoyP);
+chequear('acredita HOY: acreditado por plazo, se lista sin sumar',
+    [Echeqs::DEPOSITO_ACREDITADO, Echeqs::ACREDITADO_POR_PLAZO, true],
+    [$d['estado'], $d['motivo'], $d['listar']]);
+
+$d = depositoDe('2026-10-13', $hoyP);
+chequear('acredito ayer: ya no se lista', [Echeqs::DEPOSITO_ACREDITADO, false], [$d['estado'], $d['listar']]);
+
+$marcaManual = ['id' => 5, 'origen' => 'MANUAL', 'referencia' => null, 'observacion' => 'lo vi en el extracto',
+                'fecha_acreditacion' => '2026-10-16', 'usuario' => 'rorozco',
+                'fecha_alta' => '2026-10-16 11:00:00'];
+$marcaIb = array_merge($marcaManual, ['id' => 6, 'origen' => 'INTERBANKING', 'referencia' => 'IB-778899']);
+
+$d = depositoDe('2026-10-15', $hoyP, [], $marcaManual);
+chequear('marcado "ya acredito": sale aunque falten dias, y se lista hasta su fecha',
+    [Echeqs::DEPOSITO_ACREDITADO, Echeqs::ACREDITADO_POR_MARCA, true],
+    [$d['estado'], $d['motivo'], $d['listar']]);
+chequear('la marca viaja para el tooltip', 'lo vi en el extracto', $d['marca']['observacion']);
+
+$dIb = depositoDe('2026-10-15', $hoyP, [], $marcaIb);
+chequear('una marca de INTERBANKING tiene el mismo efecto que una MANUAL', [$d['estado'], $d['motivo']],
+    [$dIb['estado'], $dIb['motivo']]);
+
+chequear('deshacer la marca (sin marca vigente): vuelve a proyectarse si sigue en plazo',
+    Echeqs::DEPOSITO_PROYECTA, depositoDe('2026-10-15', $hoyP, [], null)['estado']);
+chequear('una marca sobre uno que acredito ayer no lo vuelve a listar', false,
+    depositoDe('2026-10-13', $hoyP, [], $marcaManual)['listar']);
+
+seccion('la lectura: que se lee, que se lista y que se avisa');
+
+chequear('se leen las boletas desde hoy - plazo x corrimiento, y el calendario hasta lo mismo adelante',
+    ['desde' => '2026-08-17', 'hasta' => '2026-12-15'], Echeqs::rangoDepositos('2026-10-16', 2));
+chequear('sin plazo, un solo tramo de corrimiento', ['desde' => '2026-09-16', 'hasta' => '2026-11-15'],
+    Echeqs::rangoDepositos('2026-10-16', null));
+
+$filasTango = [
+    chequeDepositado(1, '2026-10-15', 100000.0),                                     // proyecta
+    chequeDepositado(2, '2026-10-14', 50000.0),                                      // acredita hoy
+    chequeDepositado(3, '2026-10-13', 70000.0),                                      // ya acredito
+    chequeDepositado(4, '2026-10-15', 30000.0, ['N_COMP_SAL' => 'COMITENTE']),       // no es deposito
+    chequeDepositado(5, '2026-10-15', 20000.0, ['N_COMP_SAL' => 'SINLINEA']),        // falta la cuenta
+    chequeDepositado(6, '2026-10-15', 10000.0, ['T_COMP_SAL' => 'O/P']),             // endoso
+    chequeDepositado(7, '2026-10-15', 40000.0, ['EXCLUIDO' => false])                // excluido en cartera
+];
+$cuentasTango = [];
+
+foreach ($filasTango as $f) {
+    $cuentasTango[$f['N_COMP_SAL']] = $ctaBanco;
+}
+
+$cuentasTango['COMITENTE'] = $ctaComitente;
+unset($cuentasTango['SINLINEA']);
+
+$lect = Echeqs::resolverDepositos($filasTango, $cuentasTango, $plazo2, $cal, $ali, [], $hoyP);
+$porId = [];
+
+foreach ($lect['filas'] as $f) {
+    $porId[$f['ID_SBA14']] = $f;
+}
+
+chequear('se listan los depositos que todavia no vencieron', [1, 2, 5, 7], array_keys($porId));
+chequear('el endoso y la cuenta comitente no estan', [false, false], [isset($porId[4]), isset($porId[6])]);
+chequear('el que falta la cuenta se proyecta igual', Echeqs::DEPOSITO_PROYECTA, $porId[5]['ESTADO_DEPOSITO']);
+chequear('y avisa la boleta, como atencion', true, count(array_filter($lect['avisos'], function ($a) {
+    return $a['nivel'] === 'warning' && strpos($a['texto'], 'SINLINEA') !== false;
+})) === 1);
+chequear('un cheque excluido en cartera que despues se deposita se proyecta: la exclusion es de cartera',
+    [Echeqs::DEPOSITO_PROYECTA, false], [$porId[7]['ESTADO_DEPOSITO'], $porId[7]['EXCLUIDO']]);
+chequear('cada fila ya viene ubicada en el eje: acreditacion y neto',
+    ['2026-10-19', 96900.0], [$porId[1]['FECHA_EJE'], $porId[1]['IMPORTE_EJE']]);
+chequear('la de hoy, en ninguna columna', [null, 0.0], [$porId[2]['FECHA_EJE'], $porId[2]['IMPORTE_EJE']]);
+chequear('con el calendario completo y todo en orden, un solo aviso: la boleta sin cuenta', 1,
+    count($lect['avisos']));
+
+$lectSin = Echeqs::resolverDepositos($filasTango, $cuentasTango, $plazo2, $cal, [], [], $hoyP);
+$criticos = array_values(array_filter($lectSin['avisos'], function ($a) { return $a['nivel'] === 'danger'; }));
+chequear('sin alicuotas, un aviso critico con cuantos y cuanto', true,
+    count($criticos) === 1 && strpos($criticos[0]['texto'], '3 cheque(s) depositado(s) en Tango por $ 160.000,00') === 0);
+chequear('el de hoy no cuenta: ya acredito y no se proyectaria igual', true,
+    strpos($criticos[0]['texto'], '210.000') === false);
+
+$lectMarca = Echeqs::resolverDepositos($filasTango, $cuentasTango, $plazo2, $cal, $ali, [1 => $marcaManual], $hoyP);
+chequear('la marca se cruza por ID_SBA14', Echeqs::DEPOSITO_ACREDITADO, $lectMarca['filas'][0]['ESTADO_DEPOSITO']);
 
 seccion('donde cae cada fila en el eje');
 
-$normal = Echeqs::ubicarEnEje(chequeCartera(20, 10), '2026-10-13');
-chequear('un no depositado, en la fecha del cheque y por el bruto', ['2026-10-30', 100000.0],
+$normal = chequeCartera(20);
+chequear('una de cartera, en la fecha del cheque y por el bruto', ['2026-10-30', 100000.0],
     [$normal['FECHA_EJE'], $normal['IMPORTE_EJE']]);
 chequear('con Acredita, Retencion y Neto vacios, no en cero', [null, null, null],
     [$normal['ACREDITA'], $normal['RETENCION'], $normal['NETO']]);
+chequear('el acreditado hoy muestra su deposito', ['2026-10-16', 1550.0, 48450.0],
+    [$porId[2]['ACREDITA'], $porId[2]['RETENCION'], $porId[2]['NETO']]);
 
-$acreditado = Echeqs::ubicarEnEje(chequeCartera(21, 10, 100000.0, ['DEPOSITO' => $depPasado]), '2026-10-13');
-chequear('uno acreditado sin registrar no suma en ninguna columna', [null, 0.0],
-    [$acreditado['FECHA_EJE'], $acreditado['IMPORTE_EJE']]);
-chequear('pero muestra su deposito', ['2026-10-09', 3100.0, 96900.0],
-    [$acreditado['ACREDITA'], $acreditado['RETENCION'], $acreditado['NETO']]);
+$sinNeto = $lectSin['filas'][0];
+chequear('uno sin neto: Retencion y Neto vacios, y en ninguna columna', [null, null, null, 0.0],
+    [$sinNeto['RETENCION'], $sinNeto['NETO'], $sinNeto['FECHA_EJE'], $sinNeto['IMPORTE_EJE']]);
 
-$r = Echeqs::resumenDepositos([
-    array_merge(Echeqs::ubicarEnEje(chequeCartera(30, 10, 100000.0, ['DEPOSITO' => $depFuturo]), '2026-10-13'),
-        ['total_tramo' => 96900.0, 'total_meses' => 0, 'total_horizonte' => 96900.0]),
-    $acreditado,
-    $normal
-]);
+$r = Echeqs::resumenDepositos(array_merge(
+    [array_merge($porId[1], ['total_tramo' => 96900.0, 'total_meses' => 0, 'total_horizonte' => 96900.0])],
+    [$porId[2], $normal, $sinNeto]));
 chequear('el resumen cuenta los que se proyectan con bruto, retencion y neto',
     [1, 100000.0, 3100.0, 96900.0], [$r['cheques'], $r['bruto'], $r['retencion'], $r['neto']]);
 chequear('y sus totales por vista', 96900.0, $r['total_horizonte']);
-chequear('los acreditados sin registrar van aparte', 1, $r['acreditados']['cheques']);
+chequear('los acreditados van aparte', [1, 50000.0], [$r['acreditados']['cheques'], $r['acreditados']['bruto']]);
+chequear('y los sin datos, aparte tambien', [1, 100000.0], [$r['sin_datos']['cheques'], $r['sin_datos']['bruto']]);
 
-chequear('el aviso de los acreditados dice cuantos, cuanto y que hacer', true,
-    strpos(Echeqs::avisoAcreditadosSinRegistrar(2, 193800), '2 cheque(s) depositados por $ 193.800,00') === 0
-    && strpos(Echeqs::avisoAcreditadosSinRegistrar(2, 193800), 'registrá el depósito') !== false);
-chequear('sin acreditados no hay aviso', null, Echeqs::avisoAcreditadosSinRegistrar(0, 0));
+seccion('las consultas');
+
+$sqlCart = str_replace("\r\n", "\n", Echeqs::sqlCartera(true));
+chequear('la cartera es solo ESTADO = C, sin union con ningun deposito', [false, true], [
+    strpos($sqlCart, 'DEPOSITO') !== false,
+    strpos($sqlCart, "WHERE s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)\n                  AND s.ESTADO = ?") !== false
+]);
+chequear('la agregada usa el mismo universo', true,
+    strpos(str_replace("\r\n", "\n", Echeqs::sqlCarteraTotales(true)),
+        "WHERE s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)\n                  AND s.ESTADO = ?") !== false);
+chequear('y sin el script no agrupa por una constante', false,
+    strpos(Echeqs::sqlCarteraTotales(false), 'GROUP BY CAST(s.FECHA_CHEQ AS DATE),') !== false);
+
+$sqlDep = str_replace("\r\n", "\n", Echeqs::sqlDepositados());
+chequear('los depositados aplican el filtro del helper: estado, comprobante, [FL] y fecha desde', true,
+    strpos($sqlDep, "WHERE s.ESTADO = ?\n                  AND s.T_COMP_SAL = ?\n                  AND s.CLIENTE LIKE '[FL]%'\n                  AND s.FECHA_SAL >= ?") !== false);
+chequear('y traen lo que muestra el tooltip', true,
+    strpos($sqlDep, 's.N_COMP_SAL') !== false && strpos($sqlDep, 's.TIPO_SAL') !== false
+    && strpos($sqlDep, 'AS CTA_DESTIN') !== false);
+chequear('las boletas y las cuentas se cruzan en PHP: sin JOIN a SBA05 ni SBA01', false,
+    strpos($sqlDep, 'SBA05') !== false || strpos($sqlDep, 'SBA01') !== false);
+
+/* RO_T_CASHFLOW_ECHEQ_DEPOSITO NO SE LEE. Es la tabla del circuito viejo: lo
+   que tiene son pruebas, y ningun dato suyo puede entrar al tablero. Se busca
+   como se la usaria en una consulta -con dbo. o entre comillas-: un
+   comentario puede nombrarla para decir justamente que no se lee. */
+$leenDeposito = [];
+
+foreach (['Class', 'Controller', 'Js', 'Tabs'] as $dir) {
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(__DIR__ . '/../' . $dir));
+
+    foreach ($it as $archivo) {
+        if ($archivo->isFile()
+            && preg_match("/dbo\.RO_T_CASHFLOW_ECHEQ_DEPOSITO|['\"]RO_T_CASHFLOW_ECHEQ_DEPOSITO['\"]|ECHEQ_DEPOSITO'/",
+                file_get_contents($archivo->getPathname()))) {
+            $leenDeposito[] = $dir . '/' . $archivo->getFilename();
+        }
+    }
+}
+
+chequear('ningun archivo de Class, Controller, Js ni Tabs consulta RO_T_CASHFLOW_ECHEQ_DEPOSITO', [],
+    $leenDeposito);
+chequear('ni existe la constante de esa tabla', false, defined('Echeqs::TABLA_DEPOSITO'));
+
+$srcEcheqs = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/Echeqs.php'));
+chequear('el chequeo del script mira las alicuotas, no la tabla vieja', [true, false], [
+    strpos($srcEcheqs, "\"SELECT OBJECT_ID('dbo.\" . self::TABLA_ALICUOTA . \"', 'U') AS A\"") !== false,
+    method_exists('Echeqs', 'depositoCreado')
+]);
+
+$bloqueExcluir = substr($srcEcheqs, strpos($srcEcheqs, 'public function excluirCheques('), 4000);
+chequear('excluir valida contra la cartera: un depositado vuelve como rechazado', true,
+    strpos($bloqueExcluir, "foreach (\$this->getEcheqsCartera() as \$fila) {") !== false);
 
 seccion('el circuito Depositar del cashflow ya no existe');
 
@@ -320,36 +511,45 @@ foreach (['previsualizarDeposito', 'depositarCheques', 'deshacerDepositos'] as $
 
 foreach (['validarSeleccionDeposito', 'calcularDeposito', 'desgloseBancos', 'textoTanda',
           'validarDeshacer', 'estadoParaDepositar', 'previsualizarDeposito', 'sinDeposito',
-          'depositarCheques', 'paramsInsertDeposito', 'deshacerDepositos'] as $metodo) {
+          'depositarCheques', 'paramsInsertDeposito', 'deshacerDepositos', 'estadoDeposito',
+          'visibleEnCartera', 'avisoAcreditadosSinRegistrar', 'getHistorialDepositos',
+          'hayDepositos'] as $metodo) {
     chequear('Echeqs::' . $metodo . '() ya no existe', false, method_exists('Echeqs', $metodo));
 }
 
-chequear('sin la fila del tablero, la pestana lo sigue avisando', true,
-    strpos($srcEcheqs, "WHERE ORIGEN_PROVIDER = 'ECHEQS' AND ORIGEN_SERIE = 'DEPOSITADOS' AND ACTIVO = 1") !== false);
+/* NINGUN TEXTO DICE YA LA REGLA VIEJA: el registro en Tango es ahora lo
+   primero que pasa, no algo que falta. */
+$textosViejos = ['falta registrar', 'sin registrar', 'registrá el depósito', 'Depositar ',
+                 'deshacé el depósito'];
+
+foreach (['Class/Echeqs.php', 'Class/Providers/EcheqsProvider.php', 'Controller/EcheqsController.php',
+          'Js/Ingresos-Echeqs.js', 'Tabs/echeqs.php', 'Js/Parametros-Prechequeado.js',
+          'Tabs/parametros_prechequeado.php'] as $archivo) {
+    $txt = file_get_contents(__DIR__ . '/../' . $archivo);
+    $hallados = array_values(array_filter($textosViejos, function ($t) use ($txt) {
+        return mb_stripos($txt, $t) !== false;
+    }));
+
+    chequear($archivo . ' ya no habla del circuito viejo', [], $hallados);
+}
 
 /* ================================================================
-   El proveedor: la particion de la cartera
+   El proveedor: la particion
    ================================================================ */
-seccion('el proveedor: los depositados salen de A_COBRAR y entran en DEPOSITADOS');
+seccion('el proveedor: la cartera en A_COBRAR, los depositados en DEPOSITADOS');
 
 require_once __DIR__ . '/../Class/Providers/EcheqsProvider.php';
 require_once __DIR__ . '/../Class/CashflowRegistry.php';
 require_once __DIR__ . '/../Class/CashflowEstructura.php';
+require_once __DIR__ . '/../Class/EjeVista.php';
 
-/** Eje del 13/10/2026: 28 dias y 12 meses */
-$hDep = new Horizonte(28, 12, [], new DateTime('2026-10-13'));
+/** Eje del 16/10/2026: 28 dias y 12 meses */
+$hDep = new Horizonte(28, 12, [], new DateTime('2026-10-16'));
 
 /** Una fila agregada de getEcheqsCarteraTotales(), armada a mano */
 function itemCartera($fecha, $importe, $extra = []) {
     return array_merge(['FECHA_PAGO' => $fecha, 'EXCLUIDO' => false, 'IMPORTE' => $importe,
-                        'FECHA_ACREDITACION' => null, 'NETO' => null, 'BRUTO_DEPOSITO' => null,
                         'CHEQUES' => 1], $extra);
-}
-
-/** Un deposito agregado: bruto, neto y acreditacion */
-function itemDeposito($fechaCheque, $bruto, $neto, $acredita, $cheques = 1) {
-    return itemCartera($fechaCheque, $bruto, ['FECHA_ACREDITACION' => $acredita, 'NETO' => $neto,
-                                              'BRUTO_DEPOSITO' => $bruto, 'CHEQUES' => $cheques]);
 }
 
 /** El total de una serie, con lo que quedo fuera del eje */
@@ -357,31 +557,25 @@ function totalSerieDep($s) {
     return array_sum($s['dias']) + array_sum($s['meses']) + $s['fuera_horizonte'] + $s['sin_fecha'];
 }
 
-$items = [
+$items = array_merge([
     itemCartera('2026-10-20', 1000.0),                              // cobrable
-    itemCartera('2026-10-22', 400.0, ['EXCLUIDO' => true]),         // excluido
-    itemDeposito('2026-10-30', 2000.0, 1938.0, '2026-10-15'),       // se proyecta
-    itemDeposito('2026-10-01', 500.0, 484.5, '2026-10-16'),         // cheque vencido, se proyecta
-    itemDeposito('2026-10-25', 300.0, 290.7, '2026-10-13'),         // acredita hoy: no
-    itemDeposito('2026-10-02', 700.0, 678.3, '2026-10-09', 2)       // ya acredito y sigue en cartera
-];
+    itemCartera('2026-10-22', 400.0, ['EXCLUIDO' => true])          // excluido
+], EcheqsProvider::itemsDeDepositados($lect['filas']));
 
 $s = EcheqsProvider::repartir($hDep, $items);
 
-chequear('DEPOSITADOS suma netos', 1938.0 + 484.5, totalSerieDep($s['DEPOSITADOS']));
-chequear('por fecha de ACREDITACION', [1938.0, 484.5],
-    [$s['DEPOSITADOS']['dias']['2026-10-15'], $s['DEPOSITADOS']['dias']['2026-10-16']]);
+// Se proyectan el 1 (96.900), el 5 (19.380) y el 7 (38.760), todos el 19/10.
+chequear('DEPOSITADOS suma los netos de los que se proyectan', 96900.0 + 19380.0 + 38760.0,
+    totalSerieDep($s['DEPOSITADOS']));
+chequear('en su fecha de ACREDITACION', 155040.0, $s['DEPOSITADOS']['dias']['2026-10-19']);
 chequear('y no en la fecha del cheque', 0.0, $s['DEPOSITADOS']['dias']['2026-10-30']);
 chequear('A_COBRAR no incluye ningun depositado', 1000.0, totalSerieDep($s['A_COBRAR']));
 chequear('los excluidos quedan donde estaban', 400.0, totalSerieDep($s['A_COBRAR_EXCLUIDOS']));
-chequear('un deposito que acredita hoy no esta en ninguna serie', 0.0,
-    $s['A_COBRAR_TODO']['dias']['2026-10-13'] + $s['DEPOSITADOS']['dias']['2026-10-13']);
-chequear('los ya acreditados se cuentan para el aviso: hoy y antes', [3, 290.7 + 678.3],
-    [$s['DEPOSITADOS']['acreditados_cheques'], $s['DEPOSITADOS']['acreditados_neto']]);
+chequear('el que acredita hoy no esta en ninguna serie', 0.0,
+    $s['A_COBRAR_TODO']['dias']['2026-10-16'] + $s['DEPOSITADOS']['dias']['2026-10-16']);
 
 /* EL INVARIANTE: cada cheque en una sola parte, y las partes cierran contra el
-   total. Columna por columna, no solo en el total: un deposito que moviera el
-   importe de fecha daria el mismo total y un cuadro distinto. */
+   total. Columna por columna, no solo en el total. */
 $cierra = true;
 
 foreach (['dias', 'meses'] as $rama) {
@@ -394,32 +588,54 @@ foreach (['dias', 'meses'] as $rama) {
 }
 
 chequear('A_COBRAR + A_COBRAR_EXCLUIDOS + DEPOSITADOS = A_COBRAR_TODO, columna por columna', true, $cierra);
-chequear('la retencion es el bruto menos el neto de los que se proyectan', 2500.0 - 2422.5,
+chequear('A_COBRAR_TODO es cartera en bruto mas depositados en neto', 1000.0 + 400.0 + 155040.0,
+    totalSerieDep($s['A_COBRAR_TODO']));
+chequear('la retencion es el bruto menos el neto de los que se proyectan', 160000.0 - 155040.0,
     $s['DEPOSITADOS']['retencion']);
-chequear('y el universo en bruto = A_COBRAR_TODO + retencion',
-    1000.0 + 400.0 + 2000.0 + 500.0,
+chequear('y el universo en bruto = A_COBRAR_TODO + retencion', 1000.0 + 400.0 + 160000.0,
     totalSerieDep($s['A_COBRAR_TODO']) + $s['DEPOSITADOS']['retencion']);
 
+$sMarca = EcheqsProvider::repartir($hDep, EcheqsProvider::itemsDeDepositados($lectMarca['filas']));
+chequear('marcado "ya acredito", sale de DEPOSITADOS aunque falten dias', 19380.0 + 38760.0,
+    totalSerieDep($sMarca['DEPOSITADOS']));
+
+$sSin = EcheqsProvider::repartir($hDep, EcheqsProvider::itemsDeDepositados($lectSin['filas']));
+chequear('sin neto no suma nada: ni el bruto ni un cero inventado', [0.0, 0.0],
+    [floatval(totalSerieDep($sSin['DEPOSITADOS'])), floatval(totalSerieDep($sSin['A_COBRAR_TODO']))]);
+
 $sinNada = EcheqsProvider::repartir($hDep, [itemCartera('2026-10-20', 1000.0)]);
-chequear('sin depositos, A_COBRAR vale lo mismo que antes y DEPOSITADOS va en cero',
-    [1000.0, 0.0], [floatval(totalSerieDep($sinNada['A_COBRAR'])), floatval(totalSerieDep($sinNada['DEPOSITADOS']))]);
-chequear('las cuatro series existen siempre', 4, count($sinNada));
+chequear('sin depositos, DEPOSITADOS va en cero y las cuatro series existen', [0.0, 4],
+    [floatval(totalSerieDep($sinNada['DEPOSITADOS'])), count($sinNada)]);
 
-$lejos = EcheqsProvider::repartir($hDep, [itemDeposito('2026-10-20', 100.0, 96.9, '2030-01-02')]);
-chequear('una acreditacion fuera del eje se informa en la fila de depositados', 96.9,
-    $lejos['DEPOSITADOS']['fuera_horizonte']);
-chequear('y en el total', 96.9, $lejos['A_COBRAR_TODO']['fuera_horizonte']);
+$lejos = EcheqsProvider::repartir($hDep, [itemCartera('2026-10-20', 100.0, ['DEPOSITO' => [
+    'estado' => Echeqs::DEPOSITO_PROYECTA, 'fecha_acreditacion' => '2030-01-02', 'bruto' => 100.0,
+    'neto' => 96.9]])]);
+chequear('una acreditacion fuera del eje se informa en la fila de depositados y en el total',
+    [96.9, 96.9], [$lejos['DEPOSITADOS']['fuera_horizonte'], $lejos['A_COBRAR_TODO']['fuera_horizonte']]);
 
-chequear('un depositado que se proyecta va al total y a DEPOSITADOS', ['A_COBRAR_TODO', 'DEPOSITADOS'],
-    EcheqsProvider::seriesDeItem(itemDeposito('2026-10-20', 1.0, 1.0, '2026-10-15'), '2026-10-13'));
-chequear('uno que ya acredito no va a ninguna', [],
-    EcheqsProvider::seriesDeItem(itemDeposito('2026-10-20', 1.0, 1.0, '2026-10-13'), '2026-10-13'));
+seccion('la pestana y el proveedor suman lo mismo');
 
-$srcProv = file_get_contents(__DIR__ . '/../Class/Providers/EcheqsProvider.php');
-chequear('el proveedor avisa los acreditados sin registrar como atencion', true,
-    strpos($srcProv, "\$this->avisar(\$aviso, Aviso::WARNING);") !== false);
-chequear('y decide con la misma regla que la pestana', true,
-    strpos($srcProv, 'return Echeqs::estadoDeposito(') !== false);
+// La grilla arma el eje con FECHA_EJE / IMPORTE_EJE, como el controller.
+$filasGrilla = array_merge([chequeCartera(30, 1000.0, ['FECHA_PAGO' => '2026-10-20'])], $lect['filas']);
+$payload = EjeVista::armar($hDep, $filasGrilla, 'FECHA_EJE', 'IMPORTE_EJE');
+$resumen = Echeqs::resumenDepositos($payload['filas']);
+$sGrilla = EcheqsProvider::repartir($hDep, array_merge([itemCartera('2026-10-20', 1000.0)],
+    EcheqsProvider::itemsDeDepositados($lect['filas'])));
+
+chequear('"Echeqs depositados": el total de la pestana es el de la serie del proveedor',
+    round(totalSerieDep($sGrilla['DEPOSITADOS']), 2), round($resumen['total_horizonte'], 2));
+chequear('y la grilla entera es A_COBRAR_TODO', round(totalSerieDep($sGrilla['A_COBRAR_TODO']), 2),
+    round($payload['totales']['total_horizonte'], 2));
+
+$srcProv = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/Providers/EcheqsProvider.php'));
+chequear('el proveedor lee los depositados por la misma lectura que la pestana', 1,
+    substr_count($srcProv, "\$dep = \$echeqs->getDepositadosTango(\$h->hoy());"));
+chequear('y deja sus avisos con su nivel', 1, substr_count($srcProv, "\$this->avisarTodos(\$dep['avisos']);"));
+
+$ctrlCartera = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Controller/EcheqsController.php'));
+chequear('la pestana tambien', 1, substr_count($ctrlCartera, "\$dep = \$echeqs->getDepositadosTango(\$hoy);"));
+chequear('y junta las dos lecturas en una grilla', 1,
+    substr_count($ctrlCartera, "\$filas = array_merge(\$echeqs->getEcheqsCartera(), \$dep['filas']);"));
 
 /* ================================================================
    El registro y el validador
@@ -491,11 +707,9 @@ chequear('cobrable = universo - excluidos - depositados, por vista',
     ['total_tramo' => 600.0, 'total_meses' => 450.0, 'total_horizonte' => 1050.0],
     Echeqs::totalesNetos(Echeqs::totalesNetos($tot, $exc), $dep));
 
-$ctrlCartera = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Controller/EcheqsController.php'));
 chequear('el controller resta los dos con el mismo helper', 1, substr_count($ctrlCartera,
     "Echeqs::totalesNetos(\n                Echeqs::totalesNetos(\$payload['totales'], \$payload['excluidos']),\n                \$payload['depositados']);"));
-chequear('el aviso de los acreditados entra al panel como atencion', 1,
-    substr_count($ctrlCartera, "\$payload['warnings'][] = ['nivel' => 'warning', 'texto' => \$aviso];"));
-chequear('y el del hueco entre scripts, como critico', 1,
-    substr_count($ctrlCartera, "\$payload['warnings'][] = ['nivel' => 'danger', 'texto' => 'Hay cheques '"));
-
+chequear('los avisos de los depositados entran al panel con su nivel', 1,
+    substr_count($ctrlCartera, "foreach (\$dep['avisos'] as \$a) {\n                \$payload['warnings'][] = \$a;"));
+chequear('y el de la fila del tablero, como critico, solo si hay depositados que se proyectan', 1,
+    substr_count($ctrlCartera, "if (\$payload['depositados']['cheques'] > 0 && !\$echeqs->filaDepositadosActiva()) {"));

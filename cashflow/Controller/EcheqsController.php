@@ -60,27 +60,23 @@ try {
     switch ($action) {
         case 'getEcheqsCartera':
             $hoy = date('Y-m-d');
-            $filas = $echeqs->getEcheqsCartera($hoy);
 
-            /* El historial de depositos va en la fila, para el tooltip de la
-               marca: quien deposito, cuando, y quien lo deshizo. Tambien el de
-               los cheques cuyo deposito se deshizo, que ya no tienen deposito
-               vigente pero tienen historia. */
-            $historial = $echeqs->getHistorialDepositos(array_column($filas, 'ID_SBA14'));
-
-            foreach ($filas as $i => $f) {
-                $filas[$i]['HISTORIAL_DEPOSITO'] = isset($historial[$f['ID_SBA14']])
-                    ? $historial[$f['ID_SBA14']] : [];
-            }
+            /* DOS LECTURAS, UNA GRILLA. La cartera (ESTADO = 'C') y los
+               depositados en Tango (boleta BDE), que ya salieron de cartera.
+               Un cheque esta en una o en la otra, nunca en las dos. Los
+               depositados vienen de getDepositadosTango(), la misma lectura
+               que usa el proveedor: la pestana y el tablero suman lo mismo. */
+            $dep = $echeqs->getDepositadosTango($hoy);
+            $filas = array_merge($echeqs->getEcheqsCartera(), $dep['filas']);
 
             /* El eje sale de horizonte_dias y horizonte_meses, el mismo del
                tablero: los importes por columna vienen ya resueltos y el
                navegador no calcula ninguna fecha.
 
                CADA FILA SE UBICA POR FECHA_EJE E IMPORTE_EJE, que resolvio
-               Echeqs::ubicarEnEje(): un cheque no depositado en la fecha del
-               cheque y por el bruto, uno depositado en su acreditacion y por
-               el neto, y uno que ya acredito en ninguna columna. Es la misma
+               Echeqs::ubicarEnEje(): uno de cartera en la fecha del cheque y
+               por el bruto, uno depositado que se proyecta en su acreditacion
+               y por el neto, y uno acreditado o sin datos en ninguna columna. Es la misma
                regla que usa el proveedor, asi que la grilla y el tablero ponen
                cada peso en la misma columna. */
             $payload = EjeVista::armar(
@@ -112,23 +108,21 @@ try {
                 Echeqs::totalesNetos($payload['totales'], $payload['excluidos']),
                 $payload['depositados']);
 
-            $aviso = Echeqs::avisoAcreditadosSinRegistrar(
-                $payload['depositados']['acreditados']['cheques'],
-                $payload['depositados']['acreditados']['neto']);
-
-            if ($aviso !== null) {
-                $payload['warnings'][] = ['nivel' => 'warning', 'texto' => $aviso];
+            // Los de los depositados: sin plazo, sin habil o sin alicuotas
+            // son criticos -esa plata no esta en ninguna fila-.
+            foreach ($dep['avisos'] as $a) {
+                $payload['warnings'][] = $a;
             }
 
-            // EL HUECO ENTRE SCRIPTS: hay depositos vigentes y ninguna fila
-            // activa los muestra. Esa plata salio de "Echeqs en cartera" y no
-            // entro en ningun lado.
-            if (Echeqs::hayDepositos($filas) && !$echeqs->filaDepositadosActiva()) {
+            // LA FILA DEL TABLERO: hay depositados que se proyectan y ninguna
+            // fila activa los muestra. Esa plata salio de "Echeqs en cartera"
+            // en Tango y no entra en ningun lado.
+            if ($payload['depositados']['cheques'] > 0 && !$echeqs->filaDepositadosActiva()) {
                 $payload['warnings'][] = ['nivel' => 'danger', 'texto' => 'Hay cheques '
-                    . 'depositados y ninguna fila activa del tablero muestra la serie ECHEQS → '
-                    . 'DEPOSITADOS: su neto salió de "Echeqs en cartera" y no entra en ninguna '
-                    . 'fila. Corré ' . Echeqs::SCRIPT_FILA_DEPOSITADOS . ' o activá la fila en '
-                    . 'Parámetros → Cashflow.'];
+                    . 'depositados en Tango y ninguna fila activa del tablero muestra la serie '
+                    . 'ECHEQS → DEPOSITADOS: su neto no entra en ninguna fila. Corré '
+                    . Echeqs::SCRIPT_FILA_DEPOSITADOS . ' o activá la fila en Parámetros → '
+                    . 'Cashflow.'];
             }
 
             /* Si se puede excluir. La pantalla lo pregunta en vez de suponerlo:

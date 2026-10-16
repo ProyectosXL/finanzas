@@ -305,12 +305,14 @@
    ======================================== */
 
 /* Las marcas del deposito van en la misma celda que la de excluido, por el
-   mismo motivo: el estado del cheque se lee en un solo lugar. Son dos colores
-   distintos porque son dos cosas distintas: un depositado sigue entrando al
-   cashflow -en otra fecha y por el neto-; uno acreditado sin registrar ya no
-   suma a ninguna fila y pide una accion en Tango. */
+   mismo motivo: el estado del cheque se lee en un solo lugar. Son tres colores
+   porque son tres cosas distintas: un depositado sigue entrando al cashflow
+   -en otra fecha y por el neto-; uno acreditado ya esta en el saldo bancario
+   y no suma; y a uno sin proyectar le falta un dato, y es el que pide una
+   accion. */
 .tab-echeqs .ech-badge-depositado,
-.tab-echeqs .ech-badge-acreditado {
+.tab-echeqs .ech-badge-acreditado,
+.tab-echeqs .ech-badge-sin-datos {
     display: inline-block;
     margin-top: 2px;
     font-size: 0.62rem;
@@ -327,8 +329,15 @@
 }
 
 .tab-echeqs .ech-badge-acreditado {
-    color: #8a5a00;
-    background: #fdf0d5;
+    color: #4d6b3a;
+    background: #e6f2dc;
+    white-space: normal;
+    max-width: 130px;
+}
+
+.tab-echeqs .ech-badge-sin-datos {
+    color: #9b1c1c;
+    background: #fde2e2;
     white-space: normal;
     max-width: 130px;
 }
@@ -344,18 +353,10 @@
     color: #8c93a8;
 }
 
-/* El acreditado sin registrar se atenua como el excluido: no suma a ninguna
-   fila. No se tacha: no es una decision de que no entre, ya entro. */
+/* El acreditado y el sin proyectar se atenuan como el excluido: no suman a
+   ninguna fila. No se tachan: no es una decision de que no entren. */
 .tab-echeqs tr.ech-acreditado {
     opacity: 0.7;
-}
-
-/* Un cheque que tuvo un deposito y se deshizo: el icono lleva el historial en
-   el tooltip. Chico y gris, porque no es un estado, es historia. */
-.tab-echeqs .ech-icono-historial {
-    font-size: 0.7rem;
-    color: #8c93a8;
-    cursor: help;
 }
 
 /* Los renglones del pie que abren el total en las partes del tablero. */
