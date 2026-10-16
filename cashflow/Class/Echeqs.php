@@ -157,12 +157,21 @@ class Echeqs {
      */
     const TABLA_ACREDITADO = 'RO_T_CASHFLOW_ECHEQ_ACREDITADO';
 
+    /**
+     * Los movimientos de las cuentas bancarias que trae Interbanking, de los
+     * ultimos 60 dias. Es una tabla de BI, no nuestra: se lee y nunca se
+     * escribe. Ver creditoExtracto().
+     */
+    const TABLA_EXTRACTO = 'BI_T_EXTRACTOS_INTERBANKING';
+
     /** El script de la marca, para los mensajes */
     const SCRIPT_ACREDITADO = 'sql/cashflow_echeqs_acreditado.sql';
 
     /**
-     * Quien grabo una marca: una persona desde la pestana, o el proceso que lea
-     * la API de Interbanking. LA REGLA NO MIRA EL ORIGEN: lo dice el tooltip.
+     * Quien grabo una marca. Hoy solo MANUAL: una persona desde la pestana.
+     * INTERBANKING queda en el CHECK para un proceso que grabe marcas, que ya
+     * no hace falta: el extracto se lee directo (creditoExtracto()). LA REGLA
+     * NO MIRA EL ORIGEN: lo dice el tooltip.
      */
     const ORIGEN_MANUAL = 'MANUAL';
     const ORIGEN_INTERBANKING = 'INTERBANKING';
@@ -232,6 +241,9 @@ class Echeqs {
 
     /** @var bool|null Cache del chequeo de la tabla de la marca "ya acredito" */
     private $tablaAcreditado = null;
+
+    /** @var bool|null Cache del chequeo de la tabla del extracto de Interbanking */
+    private $tablaExtracto = null;
 
     /** @var Conexion */
     private $conn;
@@ -548,9 +560,10 @@ class Echeqs {
     const DEPOSITO_PROYECTA = 'PROYECTA';
 
     /**
-     * El deposito ya acredito: llego su dia (ACREDITADO_POR_PLAZO) o alguien
-     * -o un proceso- lo marco "ya acredito" (ACREDITADO_POR_MARCA). La plata
-     * ya esta en el saldo bancario y no suma a ninguna fila.
+     * El deposito ya acredito: el extracto de Interbanking trae el credito
+     * (ACREDITADO_POR_EXTRACTO), llego su dia (ACREDITADO_POR_PLAZO) o alguien
+     * lo marco "ya acredito" (ACREDITADO_POR_MARCA). La plata ya esta en el
+     * saldo bancario y no suma a ninguna fila.
      */
     const DEPOSITO_ACREDITADO = 'ACREDITADO';
 
@@ -565,6 +578,12 @@ class Echeqs {
     /** Por que un deposito cuenta como acreditado */
     const ACREDITADO_POR_PLAZO = 'PLAZO';
     const ACREDITADO_POR_MARCA = 'MARCA';
+
+    /**
+     * El extracto de Interbanking trae un credito con el numero y el importe
+     * del cheque: el banco ya lo acredito. Ver creditoExtracto().
+     */
+    const ACREDITADO_POR_EXTRACTO = 'EXTRACTO';
 
     /** El estado de dbo.SBA14 de un cheque que salio de cartera: aplicado */
     const ESTADO_APLICADO = 'A';
@@ -721,6 +740,67 @@ class Echeqs {
     }
 
     /**
+     * El credito del extracto de Interbanking que dice que el banco ya
+     * acredito este cheque, o null.
+     *
+     * EL CRUCE ES POR NUMERO E IMPORTE, y nada mas: NRO_COMPROBANTE = el numero
+     * del cheque, IMPORTE = el bruto -el banco acredita el cheque entero y
+     * debita la retencion aparte-, un credito (TIPO_MOV = 'C') y con fecha
+     * entre la boleta y hoy. Si hay varios, vale el mas viejo. El tope de hoy
+     * es el de la fecha inyectada: un credito posterior no puede decir que ya
+     * acredito.
+     *
+     * POR QUE NO POR IMPORTE SOLO. Galicia informa el numero del cheque en
+     * NRO_COMPROBANTE; Frances acredita cada cheque por el importe exacto pero
+     * con un numero del banco, y Santander no detalla los echeqs: solo trae el
+     * total del dia. Cruzar por importe solo pondria a Frances, pero tambien
+     * cualquier otro credito del mismo importe. Decision de Tesoreria: lo que
+     * no cruza sigue por plazo o con la marca manual. Verificado el 16/10/2026.
+     *
+     * LA AUSENCIA NO DICE NADA. El extracto guarda 60 dias y no todos los
+     * bancos detallan los echeqs: que no haya credito no quiere decir que no
+     * acredito. Solo un credito encontrado da el cheque por acreditado.
+     *
+     * Estatica y pura.
+     *
+     * @param array $fila Con N_CHEQUE, IMPORTE y FECHA_SAL
+     * @param array $creditos Los de leerCreditosExtracto()
+     * @param array $usados Mapa id del movimiento => true: un movimiento
+     *        acredita un solo cheque
+     * @param string|null $hoy 'Y-m-d'. Sin fecha, no hay tope
+     * @return array|null El credito: ['id', 'fecha', 'nro_banco', 'banco',
+     *         'nro_cuenta', 'comprobante', 'importe', 'descripcion']
+     */
+    public static function creditoExtracto($fila, $creditos, $usados = [], $hoy = null) {
+        $numero = isset($fila['N_CHEQUE']) ? intval($fila['N_CHEQUE']) : 0;
+        $importe = round(floatval($fila['IMPORTE']), 2);
+        $desde = Horizonte::normalizarFecha(isset($fila['FECHA_SAL']) ? $fila['FECHA_SAL'] : null);
+        $elegido = null;
+
+        if ($numero <= 0 || $desde === null) {
+            return null;
+        }
+
+        foreach (is_array($creditos) ? $creditos : [] as $c) {
+            if (isset($usados[$c['id']])
+                || (isset($c['tipo_mov']) && $c['tipo_mov'] !== 'C')
+                || intval($c['comprobante']) !== $numero
+                || abs(round(floatval($c['importe']), 2) - $importe) >= 0.005
+                || $c['fecha'] === null || $c['fecha'] < $desde
+                || ($hoy !== null && $c['fecha'] > $hoy)) {
+                continue;
+            }
+
+            if ($elegido === null || $c['fecha'] < $elegido['fecha']
+                || ($c['fecha'] === $elegido['fecha'] && $c['id'] < $elegido['id'])) {
+                $elegido = $c;
+            }
+        }
+
+        return $elegido;
+    }
+
+    /**
      * Todo lo que se sabe de un deposito, hoy: acreditacion, tasa, neto y en
      * que estado esta. ES LA REGLA QUE DECIDE DONDE CAE UN CHEQUE DEPOSITADO
      * Y POR CUANTO, y la usan la pestana y el proveedor.
@@ -735,19 +815,23 @@ class Echeqs {
      *   1. acredita ANTES de hoy        ACREDITADO por plazo, y no se lista:
      *                                   ya esta en el saldo y no hay nada que
      *                                   seguir.
-     *   2. acredita HOY                 ACREDITADO por plazo, y se lista ese
+     *   2. con credito en el extracto   ACREDITADO por EXTRACTO: el banco ya
+     *                                   lo acredito (creditoExtracto()). Se
+     *                                   lista hasta su fecha por plazo, como
+     *                                   la marca.
+     *   3. acredita HOY                 ACREDITADO por plazo, y se lista ese
      *                                   dia sin sumar. Es el corte de Cob.
      *                                   Electronicos (cortePendientes()): lo
      *                                   que acredita hoy ya esta -o va a estar
      *                                   al cierre- en el saldo de Interbanking,
      *                                   y contarlo aca lo contaria dos veces.
-     *   3. marcado "ya acredito"        ACREDITADO por marca, y se lista hasta
+     *   4. marcado "ya acredito"        ACREDITADO por marca, y se lista hasta
      *                                   su fecha de acreditacion. LA MARCA NO
      *                                   DEPENDE DEL ORIGEN: una manual y una de
      *                                   Interbanking dicen lo mismo.
-     *   4. sin fecha o sin neto         SIN_DATOS: no se proyecta, se lista y
+     *   5. sin fecha o sin neto         SIN_DATOS: no se proyecta, se lista y
      *                                   se avisa como critico.
-     *   5. lo demas                     PROYECTA, en su acreditacion y por el
+     *   6. lo demas                     PROYECTA, en su acreditacion y por el
      *                                   neto.
      *
      * Estatica y pura: recibe todo lo leido. El plazo es el de
@@ -760,9 +844,11 @@ class Echeqs {
      * @param array $alicuotas Las de los cheques
      * @param array|null $marca La marca "ya acredito" vigente, o null
      * @param string $hoy 'Y-m-d'
+     * @param array|null $credito El de creditoExtracto(), o null
      * @return array El deposito, con 'estado', 'motivo', 'listar' y 'error'
      */
-    public static function resolverDeposito($fila, $cuenta, $plazo, $habiles, $alicuotas, $marca, $hoy) {
+    public static function resolverDeposito($fila, $cuenta, $plazo, $habiles, $alicuotas, $marca, $hoy,
+                                            $credito = null) {
         $bruto = round(floatval($fila['IMPORTE']), 4);
         $d = [
             'boleta' => isset($fila['N_COMP_SAL']) ? trim((string) $fila['N_COMP_SAL']) : null,
@@ -779,6 +865,7 @@ class Echeqs {
             'desglose' => '',
             'neto' => null,
             'marca' => $marca,
+            'extracto' => $credito,
             'estado' => null,
             'motivo' => null,
             'listar' => true,
@@ -813,6 +900,9 @@ class Echeqs {
             $d['estado'] = self::DEPOSITO_ACREDITADO;
             $d['motivo'] = self::ACREDITADO_POR_PLAZO;
             $d['listar'] = false;
+        } elseif (!empty($credito)) {
+            $d['estado'] = self::DEPOSITO_ACREDITADO;
+            $d['motivo'] = self::ACREDITADO_POR_EXTRACTO;
         } elseif ($acredita !== null && $acredita < Retenciones::cortePendientes($hoy)) {
             $d['estado'] = self::DEPOSITO_ACREDITADO;
             $d['motivo'] = self::ACREDITADO_POR_PLAZO;
@@ -855,13 +945,19 @@ class Echeqs {
      * @param array $alicuotas
      * @param array $marcas Mapa ID_SBA14 => marca "ya acredito" vigente
      * @param string $hoy
+     * @param array $creditos Los del extracto de Interbanking (leerCreditosExtracto()).
+     *        Cada movimiento acredita un solo cheque: se asignan en el orden de
+     *        las filas -por fecha de boleta-, asi el deposito mas viejo toma el
+     *        credito mas viejo
      * @return array ['filas' => [...], 'avisos' => [['nivel', 'texto']]]
      */
-    public static function resolverDepositos($filas, $cuentas, $plazo, $habiles, $alicuotas, $marcas, $hoy) {
+    public static function resolverDepositos($filas, $cuentas, $plazo, $habiles, $alicuotas, $marcas, $hoy,
+                                             $creditos = []) {
         $listadas = [];
         $sinDatos = [];
         $faltan = [];
         $sinCuenta = [];
+        $usados = [];
 
         foreach (is_array($filas) ? $filas : [] as $f) {
             $boleta = isset($f['N_COMP_SAL']) ? trim((string) $f['N_COMP_SAL']) : '';
@@ -872,8 +968,14 @@ class Echeqs {
             }
 
             $id = intval($f['ID_SBA14']);
+            $credito = self::creditoExtracto($f, $creditos, $usados, $hoy);
+
+            if ($credito !== null) {
+                $usados[$credito['id']] = true;
+            }
+
             $f['DEPOSITO'] = self::resolverDeposito($f, $cuenta, $plazo, $habiles, $alicuotas,
-                isset($marcas[$id]) ? $marcas[$id] : null, $hoy);
+                isset($marcas[$id]) ? $marcas[$id] : null, $hoy, $credito);
 
             if (!$f['DEPOSITO']['listar']) {
                 continue;
@@ -1790,6 +1892,8 @@ class Echeqs {
         $boletas = array_values(array_unique(array_column($filas, 'N_COMP_SAL')));
         $marcas = $this->getMarcasAcreditado(array_column($filas, 'ID_SBA14'));
 
+        $extracto = $this->extractoCreado();
+
         $r = self::resolverDepositos(
             $filas,
             $this->leerCuentasBoletas($boletas),
@@ -1797,8 +1901,17 @@ class Echeqs {
             ($plazo['dias'] === null) ? [] : $this->diasHabiles($rango['desde'], $rango['hasta']),
             $this->getAlicuotas(true),
             $marcas['vigentes'],
-            $hoy
+            $hoy,
+            $extracto ? $this->leerCreditosExtracto(array_column($filas, 'N_CHEQUE')) : []
         );
+
+        // Sin el extracto no se rompe nada: los depositados van por plazo o
+        // con la marca manual, como antes de leerlo.
+        if (!$extracto) {
+            $r['avisos'][] = ['nivel' => 'info', 'texto' => 'No se encontró la tabla '
+                . self::TABLA_EXTRACTO . ': los cheques depositados se dan por acreditados por '
+                . 'plazo o con la marca "ya acreditó", sin confirmarlo con el banco.'];
+        }
 
         // Las marcas deshechas, para el tooltip: quien la puso y quien la
         // saco. No deciden nada.
@@ -1945,14 +2058,104 @@ class Echeqs {
        Cuando Tesoreria ve que un cheque depositado ya acredito antes de su
        plazo, lo marca y sale de "Echeqs depositados": el saldo de
        Interbanking ya lo tiene, y contarlo en la fila tambien lo contaria dos
-       veces. Se puede deshacer. Vive en RO_T_CASHFLOW_ECHEQ_ACREDITADO, con un
-       ORIGEN: hoy MANUAL; mas adelante, un proceso que lea la API de
-       Interbanking va a grabar las suyas como INTERBANKING. LA REGLA NO MIRA
-       EL ORIGEN: ver resolverDeposito().
+       veces. Se puede deshacer. Vive en RO_T_CASHFLOW_ECHEQ_ACREDITADO, con
+       ORIGEN = MANUAL. LA REGLA NO MIRA EL ORIGEN: ver resolverDeposito().
+
+       ES PARA LO QUE EL EXTRACTO NO CONFIRMA. Un cheque con su credito en el
+       extracto de Interbanking ya sale solo -ver creditoExtracto()-, sin
+       marca y sin proceso: hoy cruzan los de Galicia. Los de Frances,
+       Santander o ICBC van por plazo o con esta marca.
 
        Del navegador llegan solo los ids de los cheques, y la seleccion se
        vuelve a validar contra la lectura de la base.
        ==================================================================== */
+
+    /**
+     * Si existe la tabla del extracto de Interbanking. No es nuestra -la carga
+     * BI-, asi que puede faltar en una base de prueba: sin ella, los
+     * depositados van por plazo y la pestana lo avisa.
+     *
+     * @return bool
+     */
+    public function extractoCreado() {
+        if ($this->tablaExtracto !== null) {
+            return $this->tablaExtracto;
+        }
+
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo." . self::TABLA_EXTRACTO . "', 'U') AS T");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar el extracto de Interbanking'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->tablaExtracto = ($row && $row['T'] !== null);
+
+        return $this->tablaExtracto;
+    }
+
+    /**
+     * Los creditos del extracto de Interbanking cuyo comprobante es el numero
+     * de alguno de estos cheques. El cruce -numero, importe, fecha- lo hace
+     * creditoExtracto(), en PHP.
+     *
+     * EL LEFT JOIN DE dbo.BANCO es solo el nombre del banco para el tooltip,
+     * la misma excepcion que la cartera. Se pide TIPO_MOV = 'C' aca para no
+     * traer los debitos de la retencion, que llevan el mismo numero.
+     *
+     * @param array $numeros N_CHEQUE
+     * @return array
+     */
+    private function leerCreditosExtracto($numeros) {
+        $numeros = array_values(array_unique(array_filter(array_map('intval', $numeros),
+            function ($n) { return $n > 0; })));
+        $v = [];
+
+        if (empty($numeros)) {
+            return $v;
+        }
+
+        $cid = $this->conectar('central');
+
+        foreach (array_chunk($numeros, 500) as $tanda) {
+            $stmt = sqlsrv_query($cid,
+                "SELECT A.ID, A.FECHA_OPERACION, A.NRO_BANCO, B.DESC_BANCO, A.NRO_CUENTA,
+                        A.NRO_COMPROBANTE, CAST(A.IMPORTE AS FLOAT) AS IMPORTE, A.DESC_OPERACION,
+                        A.TIPO_MOV
+                 FROM dbo." . self::TABLA_EXTRACTO . " AS A
+                 LEFT JOIN dbo.BANCO AS B ON A.NRO_BANCO = B.NRO_BANCO
+                 WHERE A.TIPO_MOV = 'C'
+                   AND A.NRO_COMPROBANTE IN (" . implode(', ', array_fill(0, count($tanda), '?')) . ")",
+                $tanda);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al leer el extracto de Interbanking'));
+            }
+
+            while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+                $v[] = [
+                    'id' => intval($row['ID']),
+                    'fecha' => Horizonte::normalizarFecha($row['FECHA_OPERACION']),
+                    'nro_banco' => trim((string) $row['NRO_BANCO']),
+                    'banco' => trim((string) $row['DESC_BANCO']),
+                    'nro_cuenta' => trim((string) $row['NRO_CUENTA']),
+                    'comprobante' => intval($row['NRO_COMPROBANTE']),
+                    'importe' => floatval($row['IMPORTE']),
+                    'descripcion' => trim((string) $row['DESC_OPERACION']),
+                    'tipo_mov' => trim((string) $row['TIPO_MOV'])
+                ];
+            }
+
+            sqlsrv_free_stmt($stmt);
+        }
+
+        return $v;
+    }
 
     /**
      * Las marcas de una lista de cheques: la vigente de cada uno, y todas
@@ -2054,6 +2257,9 @@ class Echeqs {
             } elseif ($d === null) {
                 $motivo = 'está en cartera: todavía no se depositó en Tango';
             } elseif ($d['estado'] === self::DEPOSITO_ACREDITADO
+                && $d['motivo'] === self::ACREDITADO_POR_EXTRACTO) {
+                $motivo = 'ya acreditó según el extracto de Interbanking';
+            } elseif ($d['estado'] === self::DEPOSITO_ACREDITADO
                 && $d['motivo'] === self::ACREDITADO_POR_MARCA) {
                 $motivo = 'ya está marcado como acreditado';
             } elseif ($d['estado'] === self::DEPOSITO_ACREDITADO) {
@@ -2091,9 +2297,11 @@ class Echeqs {
      * Que marcas de un pedido se pueden deshacer. TODO O NADA: o todos los
      * cheques tienen una marca vigente, o no se deshace ninguna.
      *
-     * NO IMPORTA EL ORIGEN: una marca de Interbanking se deshace igual que una
-     * manual. El proceso no la vuelve a grabar porque su REFERENCIA queda en
-     * la tabla, dada de baja (ver sql/cashflow_echeqs_acreditado.sql).
+     * NO IMPORTA EL ORIGEN: una marca con ORIGEN = INTERBANKING se deshace
+     * igual que una manual, y un proceso no la podria volver a grabar porque
+     * su REFERENCIA queda en la tabla, dada de baja (ver
+     * sql/cashflow_echeqs_acreditado.sql). El credito del extracto no es una
+     * marca: no se deshace aca.
      *
      * @param array $ids
      * @param array $vigentes Mapa ID_SBA14 => marca vigente

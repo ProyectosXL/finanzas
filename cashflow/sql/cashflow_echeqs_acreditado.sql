@@ -22,13 +22,19 @@
    acreditacion; despues deja de leerse, como cualquier depositado.
 
    ----------------------------------------------------------------------------
-   LA REGLA NO DEPENDE DEL ORIGEN, Y LA TABLA ESTA HECHA PARA DOS
+   EL EXTRACTO DE INTERBANKING SE LEE DIRECTO, NO GRABA MARCAS
 
-   ORIGEN dice quien grabo la marca:
+   Un cheque cuyo credito aparece en BI_T_EXTRACTOS_INTERBANKING -el numero
+   del cheque en NRO_COMPROBANTE y su importe- ya sale de "Echeqs depositados"
+   sin pasar por esta tabla: lo decide Echeqs::creditoExtracto() al leer. Esta
+   marca es para lo que el extracto no confirma: Frances, Santander, ICBC.
 
-     MANUAL        una persona, desde la pestana Echeqs.
-     INTERBANKING  un proceso que lea la API de Interbanking y encuentre la
-                   acreditacion del cheque en el extracto. Todavia no existe.
+   LA REGLA NO DEPENDE DEL ORIGEN. ORIGEN dice quien grabo la marca:
+
+     MANUAL        una persona, desde la pestana Echeqs. Es el unico de hoy.
+     INTERBANKING  queda previsto para un proceso que grabe marcas desde
+                   Interbanking. Con el extracto leido directo no hace falta;
+                   si algun dia existe, vale lo de REFERENCIA, abajo.
 
    Una marca vigente saca al cheque de "Echeqs depositados" sea cual sea su
    origen: lo decide Echeqs::resolverDeposito(), que no mira esta columna. La
@@ -39,7 +45,7 @@
    a mano, o la que informe el origen.
 
    REFERENCIA es el identificador del movimiento en el origen -el de
-   Interbanking-; en una marca manual va NULL. EL PROCESO DE INTERBANKING NO
+   Interbanking-; en una marca manual va NULL. UN PROCESO DE INTERBANKING NO
    PUEDE VOLVER A GRABAR UNA REFERENCIA QUE YA EXISTE EN ESTA TABLA, AUNQUE ESTE
    DADA DE BAJA. Es lo que hace que un deshacer a mano se respete: si alguien da
    de baja una marca de Interbanking porque el proceso se equivoco de cheque,

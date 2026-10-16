@@ -864,3 +864,106 @@ chequear('sin FK contra dbo.SBA14, sin bajas fisicas', [false, false],
     [strpos($SQL_ACR, 'REFERENCES dbo.SBA14') !== false, stripos($SQL_ACR, 'DELETE ') !== false]);
 chequear('el encabezado dice que el proceso no puede volver a grabar una referencia', true,
     strpos($SQL_ACR, "NO\n   PUEDE VOLVER A GRABAR UNA REFERENCIA QUE YA EXISTE EN ESTA TABLA, AUNQUE ESTE\n   DADA DE BAJA") !== false);
+
+/* ================================================================
+   El extracto de Interbanking
+   ================================================================ */
+seccion('el extracto: el credito del cheque, por numero e importe');
+
+/** Un movimiento de BI_T_EXTRACTOS_INTERBANKING, como los de leerCreditosExtracto() */
+function credito($id, $comprobante, $importe, $fecha, $extra = []) {
+    return array_merge(['id' => $id, 'fecha' => $fecha, 'nro_banco' => '007', 'banco' => 'DE GALICIA Y BS.AS.',
+                        'nro_cuenta' => '000100491592', 'comprobante' => $comprobante, 'importe' => $importe,
+                        'descripcion' => 'GESTION DE ECHEQ', 'tipo_mov' => 'C'], $extra);
+}
+
+// El cheque 1 es el N° 9001 por 100.000, con boleta del 15/10.
+$ch1 = chequeDepositado(1, '2026-10-15');
+
+chequear('numero e importe iguales, despues de la boleta: es su credito', 50,
+    Echeqs::creditoExtracto($ch1, [credito(50, 9001, 100000.0, '2026-10-16')])['id']);
+chequear('el mismo dia de la boleta tambien', 51,
+    Echeqs::creditoExtracto($ch1, [credito(51, 9001, 100000.0, '2026-10-15')])['id']);
+chequear('el mismo numero con otro importe no', null,
+    Echeqs::creditoExtracto($ch1, [credito(52, 9001, 99999.0, '2026-10-16')]));
+chequear('el mismo importe con otro numero no: no se cruza por importe solo', null,
+    Echeqs::creditoExtracto($ch1, [credito(53, 57877, 100000.0, '2026-10-16')]));
+chequear('un credito anterior a la boleta no', null,
+    Echeqs::creditoExtracto($ch1, [credito(54, 9001, 100000.0, '2026-10-14')]));
+chequear('un debito no: es la retencion, con el mismo numero', null,
+    Echeqs::creditoExtracto($ch1, [credito(55, 9001, 100000.0, '2026-10-16', ['tipo_mov' => 'D'])]));
+chequear('el importe se compara al centavo', 56,
+    Echeqs::creditoExtracto(chequeDepositado(1, '2026-10-15', 572698.567),
+        [credito(56, 9001, 572698.57, '2026-10-16')])['id']);
+chequear('con dos creditos, vale el mas viejo', 58,
+    Echeqs::creditoExtracto($ch1, [credito(57, 9001, 100000.0, '2026-10-19'),
+                                   credito(58, 9001, 100000.0, '2026-10-16')])['id']);
+chequear('un credito posterior a hoy no: no puede decir que ya acredito', null,
+    Echeqs::creditoExtracto($ch1, [credito(63, 9001, 100000.0, '2026-10-17')], [], '2026-10-16'));
+chequear('el de hoy si', 64,
+    Echeqs::creditoExtracto($ch1, [credito(64, 9001, 100000.0, '2026-10-16')], [], '2026-10-16')['id']);
+chequear('un movimiento ya usado por otro cheque no se vuelve a usar', null,
+    Echeqs::creditoExtracto($ch1, [credito(59, 9001, 100000.0, '2026-10-16')], [59 => true]));
+
+seccion('el extracto: lo acreditado sale aunque falten dias');
+
+$d = Echeqs::resolverDeposito($ch1, $ctaBanco, $plazo2, $cal, $ali, null, $hoyP,
+    credito(60, 9001, 100000.0, '2026-10-16'));
+chequear('con su credito: ACREDITADO por EXTRACTO, aunque acredite el lunes por plazo',
+    [Echeqs::DEPOSITO_ACREDITADO, Echeqs::ACREDITADO_POR_EXTRACTO, '2026-10-19', true],
+    [$d['estado'], $d['motivo'], $d['fecha_acreditacion'], $d['listar']]);
+chequear('y trae el movimiento para el tooltip', [60, 'GESTION DE ECHEQ'],
+    [$d['extracto']['id'], $d['extracto']['descripcion']]);
+chequear('el credito pesa mas que una marca manual', Echeqs::ACREDITADO_POR_EXTRACTO,
+    Echeqs::resolverDeposito($ch1, $ctaBanco, $plazo2, $cal, $ali, $marcaManual, $hoyP,
+        credito(61, 9001, 100000.0, '2026-10-16'))['motivo']);
+chequear('vencido por plazo no se lista, tenga credito o no', false,
+    Echeqs::resolverDeposito(chequeDepositado(1, '2026-10-13'), $ctaBanco, $plazo2, $cal, $ali, null, $hoyP,
+        credito(62, 9001, 100000.0, '2026-10-14'))['listar']);
+chequear('sin credito, como siempre: se proyecta', Echeqs::DEPOSITO_PROYECTA,
+    Echeqs::resolverDeposito($ch1, $ctaBanco, $plazo2, $cal, $ali, null, $hoyP)['estado']);
+
+$credTango = [credito(70, 9001, 100000.0, '2026-10-16'),     // el del cheque 1
+              credito(71, 9007, 40000.0, '2026-10-16'),      // el del cheque 7
+              credito(72, 9005, 99.0, '2026-10-16')];        // otro importe: no cruza
+$lectExt = Echeqs::resolverDepositos($filasTango, $cuentasTango, $plazo2, $cal, $ali, [], $hoyP, $credTango);
+$porIdExt = [];
+
+foreach ($lectExt['filas'] as $f) {
+    $porIdExt[$f['ID_SBA14']] = $f;
+}
+
+chequear('en la lectura, los que tienen credito salen; los otros se proyectan',
+    [Echeqs::ACREDITADO_POR_EXTRACTO, Echeqs::ACREDITADO_POR_EXTRACTO, Echeqs::DEPOSITO_PROYECTA],
+    [$porIdExt[1]['DEPOSITO']['motivo'], $porIdExt[7]['DEPOSITO']['motivo'], $porIdExt[5]['ESTADO_DEPOSITO']]);
+
+// Dos cheques con el mismo numero e importe -de dos bancos- y un solo credito:
+// lo toma el de la boleta mas vieja, y el otro sigue por plazo.
+$gemelos = [chequeDepositado(81, '2026-10-14', 100000.0, ['N_CHEQUE' => 5555, 'N_COMP_SAL' => 'B1']),
+            chequeDepositado(82, '2026-10-15', 100000.0, ['N_CHEQUE' => 5555, 'N_COMP_SAL' => 'B2'])];
+$lectGem = Echeqs::resolverDepositos($gemelos, ['B1' => $ctaBanco, 'B2' => $ctaBanco], $plazo2, $cal, $ali, [],
+    $hoyP, [credito(90, 5555, 100000.0, '2026-10-15')]);
+chequear('un credito acredita un solo cheque: el de la boleta mas vieja',
+    [Echeqs::ACREDITADO_POR_EXTRACTO, Echeqs::DEPOSITO_PROYECTA],
+    [$lectGem['filas'][0]['DEPOSITO']['motivo'], $lectGem['filas'][1]['ESTADO_DEPOSITO']]);
+
+$sExt = EcheqsProvider::repartir($hDep, EcheqsProvider::itemsDeDepositados($lectExt['filas']));
+chequear('el proveedor no suma los acreditados por el extracto: solo el 5 (19.380)', 19380.0,
+    totalSerieDep($sExt['DEPOSITADOS']));
+
+$v = Echeqs::validarSeleccionAcreditado([1], $lectExt['filas']);
+chequear('Ya acredito rechaza uno que ya acredito segun el extracto',
+    'ya acreditó según el extracto de Interbanking', $v['rechazos'][0]['motivo']);
+
+$srcExt = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/Echeqs.php'));
+$iniLeer = strpos($srcExt, 'private function leerCreditosExtracto(');
+$bloqueLeer = substr($srcExt, $iniLeer, 2500);
+chequear('se leen solo creditos, por el numero de los cheques', true,
+    strpos($bloqueLeer, "WHERE A.TIPO_MOV = 'C'\n                   AND A.NRO_COMPROBANTE IN (") !== false);
+chequear('el extracto no se escribe nunca', 0,
+    preg_match('/(INSERT INTO|UPDATE|DELETE FROM)\s+dbo\.\" \. self::TABLA_EXTRACTO/', $srcExt));
+$iniGet = strpos($srcExt, 'public function getDepositadosTango(');
+$bloqueGet = substr($srcExt, $iniGet, strpos($srcExt, 'private function leerDepositados(') - $iniGet);
+chequear('sin la tabla del extracto, aviso y por plazo', true,
+    strpos($bloqueGet, "\$extracto ? \$this->leerCreditosExtracto(array_column(\$filas, 'N_CHEQUE')) : []") !== false
+    && strpos($bloqueGet, "'No se encontró la tabla '") !== false);

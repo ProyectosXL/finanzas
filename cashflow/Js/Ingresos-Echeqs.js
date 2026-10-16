@@ -665,7 +665,8 @@
      * TRES MARCAS, porque son tres situaciones distintas:
      *   depositado     entra en la fila Echeqs depositados el día que acredita
      *   acreditado     ya está en el saldo bancario y no suma a ninguna fila:
-     *                  por plazo (llegó su día) o marcado "ya acreditó"
+     *                  según el extracto de Interbanking, por plazo (llegó su
+     *                  día) o marcado "ya acreditó"
      *   sin proyectar  le falta la fecha de acreditación o el neto: no suma a
      *                  ninguna fila y el panel de avisos dice por qué
      *
@@ -681,12 +682,16 @@
 
         var estado = f.ESTADO_DEPOSITO;
         var porMarca = (estado === 'ACREDITADO' && d.motivo === 'MARCA');
+        var porExtracto = (estado === 'ACREDITADO' && d.motivo === 'EXTRACTO');
         var c = d.cuenta;
 
         var encabezado = {
             PROYECTA: 'Depositado en Tango: entra en la fila Echeqs depositados el día que '
                 + 'acredita, por el neto.',
-            ACREDITADO: porMarca
+            ACREDITADO: porExtracto
+                ? 'Acreditado según el extracto de Interbanking: el banco ya lo acreditó, así que '
+                  + 'no suma a ninguna fila. Se sigue viendo hasta su fecha de acreditación.'
+                : porMarca
                 ? 'Marcado "ya acreditó": la plata ya está en el saldo bancario y no suma a '
                   + 'ninguna fila. Se sigue viendo hasta su fecha de acreditación.'
                 : 'Acreditado por plazo: hoy es su día de acreditación, así que ya está en el '
@@ -710,12 +715,14 @@
             + 'Tasa: ' + (d.tasa === null ? 'sin alícuotas'
                 : porcentaje(d.tasa) + (d.desglose ? ' (' + d.desglose + ')' : '')) + '\n'
             + 'Neto: ' + (d.neto === null ? 'sin neto' : pesosPlano(d.neto))
+            + textoExtracto(d.extracto)
             + textoMarca(d.marca)
             + textoHistorialMarcas(f.HISTORIAL_ACREDITADO || [], d.marca ? d.marca.id : null);
 
         var rotulo = {
             PROYECTA: 'depositado',
-            ACREDITADO: porMarca ? 'acreditado' : 'acreditado (por plazo)',
+            ACREDITADO: porExtracto ? 'acreditado (Interbanking)'
+                : (porMarca ? 'acreditado' : 'acreditado (por plazo)'),
             SIN_DATOS: 'depositado, sin proyectar'
         }[estado] || 'depositado';
 
@@ -724,6 +731,22 @@
 
         return '<div><span class="' + clase + '" title="' + escapar(tip) + '">'
             + escapar(rotulo) + '</span></div>';
+    }
+
+    /**
+     * El crédito del extracto de Interbanking que lo dio por acreditado: el
+     * banco, la cuenta, la fecha, el comprobante y el importe, tal como los
+     * cruzó el servidor (Echeqs::creditoExtracto()).
+     */
+    function textoExtracto(c) {
+        if (!c) {
+            return '';
+        }
+
+        return '\n\nExtracto de Interbanking: crédito del ' + fecha(c.fecha) + '\n'
+            + 'Banco: ' + (c.banco || c.nro_banco) + ' · cuenta ' + c.nro_cuenta + '\n'
+            + 'Comprobante ' + c.comprobante + ' por ' + pesosPlano(c.importe)
+            + (c.descripcion ? ' (' + c.descripcion + ')' : '');
     }
 
     /** Quién marcó "ya acreditó", cuándo, desde dónde y por qué */

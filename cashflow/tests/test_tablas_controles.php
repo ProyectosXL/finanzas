@@ -1485,7 +1485,7 @@ chequear('deshacer tambien confirma', true,
 $fnMarca = cuerpoFnEch($echJs, 'marcaDeposito');
 chequear('la marca dice depositado, acreditado o sin proyectar', true,
     strpos($fnMarca, "PROYECTA: 'depositado'") !== false
-    && strpos($fnMarca, "ACREDITADO: porMarca ? 'acreditado' : 'acreditado (por plazo)'") !== false
+    && strpos($fnMarca, ": (porMarca ? 'acreditado' : 'acreditado (por plazo)'),") !== false
     && strpos($fnMarca, "SIN_DATOS: 'depositado, sin proyectar'") !== false);
 chequear('el tooltip trae la boleta, la cuenta con TIPO_SAL, el banco y las dos fechas', true,
     strpos($fnMarca, "'Boleta de depósito ' + (d.boleta || 's/n') + ' del ' + fecha(d.fecha_deposito)") !== false
@@ -1494,6 +1494,11 @@ chequear('el tooltip trae la boleta, la cuenta con TIPO_SAL, el banco y las dos 
     && strpos($fnMarca, "'Fecha del cheque: ' + fecha(f.FECHA_CHEQUE)") !== false);
 chequear('y la marca: quien, cuando, origen y observacion', true,
     strpos(cuerpoFnEch($echJs, 'textoMarca'), "'Origen: ' + (m.origen === 'INTERBANKING' ? 'Interbanking' : 'a mano')") !== false);
+chequear('el acreditado segun el extracto tiene su marca', true,
+    strpos($fnMarca, "ACREDITADO: porExtracto ? 'acreditado (Interbanking)'") !== false);
+chequear('y el tooltip dice el credito: fecha, banco, cuenta, comprobante e importe', true,
+    strpos($fnMarca, '+ textoExtracto(d.extracto)') !== false
+    && strpos(cuerpoFnEch($echJs, 'textoExtracto'), "'Comprobante ' + c.comprobante + ' por ' + pesosPlano(c.importe)") !== false);
 
 chequear('el filtro "Ocultar depositados" existe, al lado de "Ver excluidos"', true,
     strpos($echTab, 'id="ocultarDepositadosEch"') !== false

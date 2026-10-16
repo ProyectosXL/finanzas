@@ -1100,6 +1100,33 @@ foreach ($depReal['filas'] as $c) {
 
 chequear('los depositados que se listan son BDE a un banco, sin vencer', 0, $malos);
 
+/* LOS ACREDITADOS SEGUN EL EXTRACTO tienen un credito real con el numero y el
+   importe del cheque, en o despues de la boleta. */
+$malCruzados = 0;
+$porExtracto = 0;
+
+foreach ($depReal['filas'] as $c) {
+    $x = $c['DEPOSITO']['extracto'];
+
+    if ($c['DEPOSITO']['motivo'] !== Echeqs::ACREDITADO_POR_EXTRACTO) {
+        continue;
+    }
+
+    $porExtracto++;
+
+    if ($x === null || intval($x['comprobante']) !== intval($c['N_CHEQUE'])
+        || abs(round($x['importe'], 2) - round($c['IMPORTE'], 2)) >= 0.005
+        || $x['fecha'] < $c['FECHA_SAL']) {
+        $malCruzados++;
+    }
+}
+
+chequear('los acreditados por el extracto cruzan por numero, importe y fecha', 0, $malCruzados);
+
+if ($porExtracto === 0) {
+    Pruebas::saltear('hoy ningun depositado que se lista tiene su credito en el extracto');
+}
+
 // Y columna por columna: una exclusion o un deposito que moviera el importe de
 // fecha daria el mismo total y un cuadro distinto.
 $cierraPorColumna = true;
