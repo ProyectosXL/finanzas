@@ -103,38 +103,6 @@ function mensajeRecalculo($rec) {
     return $mensaje;
 }
 
-/**
- * Que dejo el recalculo de los depositos de cheques pendientes.
- *
- * Es el mismo criterio que mensajeRecalculo() -se informa SIEMPRE, incluso
- * cuando no cambio nada- con las palabras de este circuito: depositos y no
- * movimientos.
- *
- * @param array $rec Resultado de Echeqs::recalcularDepositosPendientes()
- * @return string
- */
-function mensajeRecalculoDepositos($rec) {
-    $cambios = isset($rec['cambios']) ? count($rec['cambios']) : 0;
-    $acreditados = isset($rec['acreditados']) ? intval($rec['acreditados']) : 0;
-
-    $mensaje = ($cambios === 0)
-        ? 'No cambió el neto de ningún depósito pendiente.'
-        : 'Se recalcularon ' . $cambios . ' depósito(s) pendiente(s), con una diferencia total '
-            . 'de $ ' . number_format(isset($rec['diferencia']) ? $rec['diferencia'] : 0, 2, ',', '.')
-            . ' en el neto.';
-
-    if ($acreditados > 0) {
-        $mensaje .= ' Los ' . $acreditados . ' depósito(s) ya acreditados no se tocaron: '
-            . 'conservan la tasa con la que se calcularon.';
-    }
-
-    foreach (isset($rec['avisos']) ? $rec['avisos'] : [] as $a) {
-        $mensaje .= ' ' . $a;
-    }
-
-    return $mensaje;
-}
-
 try {
     require_once __DIR__ . '/../Class/Parametros.php';
     require_once __DIR__ . '/../Class/MixCobro.php';
@@ -948,9 +916,9 @@ try {
 
             echo json_encode([
                 'success' => true,
-                'message' => 'Los cheques que se depositen desde ahora acreditan a los ' . $dias
-                    . ' día(s) hábil(es). Los ya depositados conservan la fecha con la que se '
-                    . 'depositaron.',
+                'message' => 'Los cheques depositados acreditan a los ' . $dias
+                    . ' día(s) hábil(es) de su boleta. Vale también para los que todavía no '
+                    . 'acreditaron: la fecha se calcula al leer.',
                 'data' => ['dias' => $dias]
             ], JSON_UNESCAPED_UNICODE);
             break;
@@ -965,8 +933,8 @@ try {
 
             require_once __DIR__ . '/../Class/Echeqs.php';
 
-            // SIEMPRE INSERTA UNA VIGENCIA NUEVA: no pisa la anterior, asi los
-            // depositos ya acreditados conservan su tasa.
+            // SIEMPRE INSERTA UNA VIGENCIA NUEVA: no pisa la anterior, que es la
+            // que explica la tasa de ese periodo.
             $r = (new Echeqs())->addAlicuota(
                 $data['concepto'],
                 $data['alicuota'],
@@ -978,8 +946,8 @@ try {
                 'success' => true,
                 'message' => 'Alícuota guardada como vigencia nueva: la anterior queda en el '
                     . 'histórico. La tasa total vigente de los cheques es ahora del '
-                    . number_format($r['tasa_total'] * 100, 4, ',', '.') . '%. '
-                    . mensajeRecalculoDepositos($r['recalculo']),
+                    . number_format($r['tasa_total'] * 100, 4, ',', '.') . '%. El neto de los '
+                    . 'cheques depositados que todavía no acreditaron se calcula con ella al leer.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
@@ -993,12 +961,12 @@ try {
 
             require_once __DIR__ . '/../Class/Echeqs.php';
 
-            $r = (new Echeqs())->bajaAlicuota($data['id'], $usuario);
+            (new Echeqs())->bajaAlicuota($data['id'], $usuario);
 
             echo json_encode([
                 'success' => true,
-                'message' => 'Alícuota dada de baja. ' . mensajeRecalculoDepositos($r['recalculo']),
-                'data' => $r
+                'message' => 'Alícuota dada de baja. El neto de los cheques depositados que '
+                    . 'todavía no acreditaron se calcula al leer con lo que quede vigente.'
             ], JSON_UNESCAPED_UNICODE);
             break;
 

@@ -402,8 +402,8 @@
             return pedirJson(URL_PARAM + '?action=savePlazoDepositoEcheq', { dias: dias })
                 .then(function() {
                     Notificacion.exito('Plazo de acreditación: ' + dias + ' día(s) hábil(es).', {
-                        detalle: 'Vale para los cheques que se depositen desde ahora. Los ya ' +
-                                 'depositados conservan su fecha de acreditación.'
+                        detalle: 'Vale también para los cheques depositados que todavía no ' +
+                                 'acreditaron: su fecha se calcula al leer, desde la boleta.'
                     });
 
                     cargar();
@@ -446,7 +446,7 @@
                 mostrar('formAlicuotaPpq', false);
                 setValor('nuevaAliPorcentajePpq', '');
                 mostrarResultado('Alícuota guardada como vigencia nueva: la anterior queda en el ' +
-                    'histórico y los depósitos que se calcularon con ella la conservan.', r);
+                    'histórico.', r);
                 cargar();
             });
         }, 'No se pudo guardar la alícuota');
@@ -456,9 +456,9 @@
         Notificacion.confirmar({
             titulo: 'Dar de baja la vigencia',
             mensaje: '¿Dar de baja esta alícuota?',
-            detalle: 'No se borra: deja de regir. Los depósitos ya acreditados conservan la tasa ' +
-                     'con la que se calcularon, y los pendientes se recalculan con lo que quede ' +
-                     'vigente. Si no queda ninguna, no se va a poder depositar hasta cargar otra.',
+            detalle: 'No se borra: deja de regir. Los cheques depositados que todavía no ' +
+                     'acreditaron se calculan con lo que quede vigente; si no queda ninguna, ' +
+                     'no se proyectan y la pestaña Echeqs lo avisa como crítico.',
             confirmar: 'Dar de baja',
             peligro: true
         }).then(function(confirmado) {
@@ -468,9 +468,9 @@
 
             conBotonEl(boton, function() {
                 return pedirJson(URL_PARAM + '?action=bajaAlicuotaEcheq', { id: id })
-                    .then(function(r) {
+                    .then(function() {
                         mostrarResultado('Alícuota dada de baja: deja de regir, pero la fila ' +
-                            'queda en el histórico.', r);
+                            'queda en el histórico.', null);
                         cargar();
                     });
             }, 'No se pudo dar de baja la alícuota');
@@ -478,11 +478,13 @@
     }
 
     /**
-     * Qué dejó el guardado, con el detalle del recálculo de los depósitos
-     * pendientes. Se informa SIEMPRE, incluso sin cambios: un recálculo que no
-     * se informa es un cambio de importes en silencio. Va en un panel y no en un
-     * alert porque lo que hay que mostrar es una tabla. Mismo criterio que
-     * Parámetros → Cob. Electrónicos.
+     * Qué dejó el guardado: el título y la tasa total vigente de los cheques.
+     *
+     * NO HAY RECÁLCULO QUE MOSTRAR. El neto de un cheque depositado no se
+     * guarda: se calcula al leer, con las alícuotas vigentes a su
+     * acreditación, así que los que todavía no acreditaron toman lo nuevo
+     * solos la próxima vez que se mira la pestaña o el tablero. Queda en un
+     * panel a la vista, como el de Parámetros → Cob. Electrónicos.
      */
     function mostrarResultado(titulo, r) {
         var cont = document.getElementById('resultadoDepositoPpq');
@@ -491,8 +493,6 @@
             return;
         }
 
-        var rec = (r && r.recalculo) || {};
-        var cambios = rec.cambios || [];
         var html = '<div class="card-body border-bottom"><div class="pce-resultado mb-0">';
 
         html += '<div class="pce-resultado-titulo"><i class="fas fa-circle-check me-1"></i>' +
@@ -503,58 +503,12 @@
                 'ahora del <strong>' + porcentaje(r.tasa_total) + '</strong>.</div>';
         }
 
-        if (!cambios.length) {
-            html += '<div class="pce-resultado-linea">No cambió el neto de ningún depósito ' +
-                'pendiente.' + (rec.acreditados
-                    ? ' Los ' + rec.acreditados + ' ya acreditados no se tocan.' : '') + '</div>';
-        } else {
-            html += '<div class="pce-resultado-linea">Se recalcularon <strong>' + cambios.length +
-                '</strong> depósito(s) pendiente(s), con una diferencia total de <strong>' +
-                signo(rec.diferencia) + '</strong> en el neto.' + (rec.acreditados
-                    ? ' Los ' + rec.acreditados + ' ya acreditados <strong>no se tocaron</strong>.'
-                    : '') + '</div>';
-
-            html += '<div class="table-responsive pce-resultado-tabla">' +
-                '<table class="table table-sm mb-0"><thead><tr>' +
-                '<th>N° Cheque</th><th class="text-center">Acreditación</th>' +
-                '<th class="text-end">Bruto</th><th class="text-center">Tasa</th>' +
-                '<th class="text-end">Neto</th><th class="text-end">Diferencia</th>' +
-                '</tr></thead><tbody>';
-
-            cambios.forEach(function(c) {
-                var baja = (parseFloat(c.diferencia) || 0) < 0;
-
-                html += '<tr>' +
-                    '<td>' + escapar(c.n_cheque === null ? '—' : c.n_cheque) + '</td>' +
-                    '<td class="text-center">' + fechaCorta(c.fecha_acreditacion) + '</td>' +
-                    '<td class="text-end pce-num">' + pesos(c.importe_bruto) + '</td>' +
-                    '<td class="text-center pce-num">' + porcentaje(c.tasa_anterior) +
-                        ' <i class="fas fa-arrow-right pce-flecha"></i> ' +
-                        porcentaje(c.tasa_nueva) + '</td>' +
-                    '<td class="text-end pce-num">' + pesos(c.neto_anterior) +
-                        ' <i class="fas fa-arrow-right pce-flecha"></i> <strong>' +
-                        pesos(c.neto_nuevo) + '</strong></td>' +
-                    '<td class="text-end pce-num ' + (baja ? 'text-danger' : 'text-success') +
-                        '">' + signo(c.diferencia) + '</td>' +
-                '</tr>';
-            });
-
-            html += '</tbody></table></div>';
-        }
-
-        (rec.avisos || []).forEach(function(a) {
-            html += '<div class="pce-resultado-aviso">· ' + escapar(a) + '</div>';
-        });
+        html += '<div class="pce-resultado-linea">El neto de los cheques depositados que todavía ' +
+            'no acreditaron se calcula con las alícuotas vigentes a su acreditación: cambia ' +
+            'solo, en la próxima lectura.</div>';
 
         cont.innerHTML = html + '</div></div>';
         cont.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-
-    /** '+ $ 1.000,00' / '− $ 1.000,00', para una diferencia */
-    function signo(v) {
-        var n = parseFloat(v) || 0;
-
-        return (n >= 0 ? '+ ' : '− ') + pesos(Math.abs(n));
     }
 
     function pesos(v) {

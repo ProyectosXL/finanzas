@@ -234,21 +234,6 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                 <div class="d-flex align-items-center gap-3 flex-wrap">
                     <span class="fw-semibold" id="selResumenEch"></span>
                     <div class="d-flex gap-2 ms-auto">
-                        <!-- DEPOSITAR: cheques de uno o de varios bancos
-                             emisores, que se cobran por el clearing. Del
-                             navegador viajan sólo los ids: el diálogo muestra
-                             lo que calculó el servidor —acreditación, tasa,
-                             neto— antes de confirmar. -->
-                        <?php if ($edita): ?>
-                        <button class="btn btn-sm btn-outline-primary" id="btnDepositarSelEch">
-                            <i class="fas fa-building-columns me-1"></i> Depositar
-                        </button>
-                        <?php endif; ?>
-                        <?php if ($edita): ?>
-                        <button class="btn btn-sm btn-outline-secondary" id="btnDeshacerDepSelEch">
-                            <i class="fas fa-rotate-left me-1"></i> Deshacer depósito
-                        </button>
-                        <?php endif; ?>
                         <?php if ($edita): ?>
                         <button class="btn btn-sm btn-outline-danger" id="btnExcluirSelEch">
                             <i class="fas fa-ban me-1"></i> Excluir del cashflow

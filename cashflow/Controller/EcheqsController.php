@@ -112,11 +112,6 @@ try {
                 Echeqs::totalesNetos($payload['totales'], $payload['excluidos']),
                 $payload['depositados']);
 
-            /* Si se puede depositar, y si no, por que: sin el script, sin la
-               fila del tablero o con el plazo roto, el boton queda apagado
-               diciendolo. */
-            $payload['deposito'] = $echeqs->estadoParaDepositar();
-
             $aviso = Echeqs::avisoAcreditadosSinRegistrar(
                 $payload['depositados']['acreditados']['cheques'],
                 $payload['depositados']['acreditados']['neto']);
@@ -128,8 +123,7 @@ try {
             // EL HUECO ENTRE SCRIPTS: hay depositos vigentes y ninguna fila
             // activa los muestra. Esa plata salio de "Echeqs en cartera" y no
             // entro en ningun lado.
-            if (Echeqs::hayDepositos($filas) && !$payload['deposito']['fila_activa']
-                && $echeqs->depositoCreado()) {
+            if (Echeqs::hayDepositos($filas) && !$echeqs->filaDepositadosActiva()) {
                 $payload['warnings'][] = ['nivel' => 'danger', 'texto' => 'Hay cheques '
                     . 'depositados y ninguna fila activa del tablero muestra la serie ECHEQS → '
                     . 'DEPOSITADOS: su neto salió de "Echeqs en cartera" y no entra en ninguna '
@@ -281,77 +275,6 @@ try {
             echo json_encode([
                 'success' => true,
                 'message' => $mensaje,
-                'data' => $r
-            ], JSON_UNESCAPED_UNICODE);
-            break;
-
-        /* ================================================================
-           EL DEPOSITO MASIVO
-
-           Del navegador llegan SOLO LOS IDS de los cheques -y una observacion
-           opcional-. El banco, el importe, la fecha de deposito, la
-           acreditacion, la tasa y el neto los resuelve Echeqs con las mismas
-           reglas en la vista previa y en el guardado. Ver el encabezado de la
-           seccion en Class/Echeqs.php.
-
-           LA VISTA PREVIA VA CON EL PERMISO DE EDICION, como las de las
-           importaciones: no escribe, pero es el primer paso de una escritura,
-           y la pantalla no la ofrece a quien no puede depositar.
-           ================================================================ */
-        case 'previsualizarDeposito':
-            $data = bodyJson();
-
-            if (!isset($data['ids']) || !is_array($data['ids'])) {
-                throw new Exception('Faltan parametros obligatorios');
-            }
-
-            echo json_encode([
-                'success' => true,
-                'data' => $echeqs->previsualizarDeposito($data['ids'])
-            ], JSON_UNESCAPED_UNICODE);
-            break;
-
-        case 'depositarCheques':
-            $data = bodyJson();
-
-            if (!isset($data['ids']) || !is_array($data['ids'])) {
-                throw new Exception('Faltan parametros obligatorios');
-            }
-
-            /* Cualquier otro campo que llegue -una fecha, un importe, un neto-
-               se ignora a proposito: no hay parametro por donde pasarlo. */
-            $r = $echeqs->depositarCheques(
-                $data['ids'],
-                isset($data['observacion']) ? $data['observacion'] : null,
-                $usuario
-            );
-
-            $c = $r['calculo'];
-
-            // "N cheque(s) de <banco>" o "N cheques de K bancos": el mismo
-            // texto que el dialogo, armado por Echeqs::textoTanda().
-            echo json_encode([
-                'success' => true,
-                'message' => $c['tanda'] . ' depositados. Acreditan el ' . date('d/m/Y', strtotime($c['fecha_acreditacion']))
-                    . ' por $ ' . number_format($c['neto'], 2, ',', '.') . ' netos.',
-                'data' => $r
-            ], JSON_UNESCAPED_UNICODE);
-            break;
-
-        case 'deshacerDepositos':
-            $data = bodyJson();
-
-            if (!isset($data['ids']) || !is_array($data['ids'])) {
-                throw new Exception('Faltan parametros obligatorios');
-            }
-
-            $r = $echeqs->deshacerDepositos($data['ids'], $usuario);
-
-            echo json_encode([
-                'success' => true,
-                'message' => $r['deshechos'] . ' depósito(s) deshechos. Los cheques vuelven a '
-                    . 'Echeqs en cartera en su fecha, si es de hoy en adelante. El depósito queda '
-                    . 'en el historial, dado de baja.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
