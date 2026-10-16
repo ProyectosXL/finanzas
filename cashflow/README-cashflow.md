@@ -278,7 +278,14 @@ Tesorería registra el depósito de un echeq en Tango —boleta **BDE**— en el
 
 Medido contra la base el 16/10/2026: *Echeqs en cartera* no cambia ($ 1.940.142.016,30) y *Echeqs depositados* pasa de $ 0 a **$ 37.826.439,63** el lunes 19/10 —los 5 cheques de la boleta del 15/10, que hasta ahora no estaban en ninguna fila—. Ver `README-echeqs.md`.
 
-**Cheques en Cartera incluye además a los mayoristas** (`CLIENTE LIKE '[FLM]%'`, antes `[FL]%`), en la cartera y en los depositados. No se cuentan dos veces con Cobranzas May: el cheque entra con un recibo que ya canceló la factura, y Cobranzas May proyecta sólo lo pendiente. Medido el mismo día sobre los mismos datos: *Echeqs en cartera* suma **$ 481.132.774,46** (586 cheques) y *Echeqs depositados* **$ 3.303.703,44** (6 cheques). Venta Cobrada Anticipada sigue en `[FL]%`. Ver *Los cheques de mayoristas* en `README-echeqs.md`.
+**Cheques en Cartera lee todos los cheques, sin filtro de cliente** (antes `CLIENTE LIKE '[FL]%'`), en la cartera y en los depositados. Medido el mismo día sobre los mismos datos:
+
+- los mayoristas suman **$ 481.132.774,46** a *Echeqs en cartera* (586 cheques) y **$ 3.303.703,44** a *Echeqs depositados* (6 cheques);
+- los cheques sin cliente —6 de GO SERVICIOS DIGITALES, por CAJA INGRESO— suman **$ 104.142.740,64** a *Echeqs en cartera*.
+
+No se cuentan dos veces: los de un cliente entran con un recibo que ya canceló la factura, y el medio "Go Cuotas" del mix de cobro de Ventas está inactivo. **Si alguien lo activa, los cheques de GO se contarían dos veces.** Venta Cobrada Anticipada sigue en `[FL]%`. Ver *Todos los cheques, sin filtro de cliente* en `README-echeqs.md`.
+
+**El extracto de Interbanking confirma la acreditación.** Un depositado cuyo crédito aparece en `BI_T_EXTRACTOS_INTERBANKING` —número del cheque e importe— deja de proyectarse ese mismo día. Se lee al calcular, sin proceso ni escrituras; hoy cruza Galicia. Ver *La acreditación según el extracto de Interbanking* en `README-echeqs.md`.
 ## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:

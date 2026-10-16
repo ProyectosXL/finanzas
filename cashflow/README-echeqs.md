@@ -12,7 +12,7 @@ neto         = bruto × (1 − tasa)
 tasa         = suma de las alícuotas de los cheques vigentes a la fecha de ACREDITACIÓN
 ```
 
-Deja de proyectarse solo, **sin aviso**: el día que acredita —la plata ya está en el saldo de Interbanking— o cuando alguien lo marca **ya acreditó**.
+Deja de proyectarse solo, **sin aviso**: cuando **el extracto de Interbanking trae su crédito**, el día que acredita por plazo —la plata ya está en el saldo de Interbanking— o cuando alguien lo marca **ya acreditó**.
 
 **Por qué cambió.** Antes el depósito se marcaba en el cashflow (botón *Depositar*) mientras el cheque seguía en cartera en Tango. Como Tesorería lo registra en Tango primero, el cheque salía de cartera antes de que nadie lo marcara, y **durante las 48 hs hábiles hasta que acreditaba esa plata no estaba en ninguna fila del tablero**: ni en cartera, ni en depositados, ni todavía en el saldo bancario. El botón *Depositar* se eliminó; ver *Lo que se fue*.
 
@@ -50,34 +50,35 @@ Medido contra la base el **16/10/2026** con las clases reales, el criterio viejo
 
 Los $ 37,8 M son los 5 cheques de franquicias de la boleta `02005000040735` del jueves 15/10 —$ 39.036.573,41 brutos a 3,1%—, que hasta hoy no estaban en ninguna fila. Los 3 de la boleta del miércoles 14/10 ($ 24.970.612,47) acreditan hoy: se listan *acreditado (por plazo)* y no suman. *Echeqs en cartera* no cambia: esos cheques ya habían salido de la lectura de cartera el día del depósito.
 
-### Los cheques de mayoristas
+### Todos los cheques, sin filtro de cliente
 
-**Cheques en Cartera incluye a los mayoristas**: el universo es `CLIENTE LIKE '[FLM]%'` (`Echeqs::UNIVERSO_CARTERA_SQL`) en la cartera, los depositados y el resumen de excluidos. Antes era `[FL]%`, y un mayorista que pagaba con echeq no estaba en ninguna fila del tablero: ni en cartera, ni en depositados.
+**Cheques en Cartera lee todos los cheques de terceros de `SBA14`**, sin mirar el cliente: la cartera, los depositados y el resumen de excluidos. Hasta el 16/10/2026 filtraba por el prefijo del código, y cada cheque que quedaba afuera era plata que no estaba en ninguna fila del tablero. Primero se sumaron los mayoristas (`M`) y después se sacó el filtro entero, para que entren también los cheques sin cliente.
 
-**No se cuentan dos veces con Cobranzas May.** Un cheque de mayorista entra a cartera igual que uno de franquicia, con un recibo de cobro en cuenta corriente (`T_COMP_REC = 'REC'`) que ya canceló la factura en `GVA12`; Cobranzas May proyecta sólo lo pendiente. Verificado el 16/10/2026: los 586 cheques `M` en cartera entraron por `REC`.
+**No se cuentan dos veces:**
 
-Medido el 16/10/2026 con las clases reales, sin y con el cambio sobre los mismos datos:
+- **Los de un cliente** —franquicias, locales, mayoristas— entran a cartera con un recibo de cobro en cuenta corriente (`T_COMP_REC = 'REC'`) que ya canceló la factura en `GVA12`. Cobranzas FR y Cobranzas May proyectan sólo lo pendiente. Verificado el 16/10/2026: los 586 cheques `M` en cartera entraron por `REC`.
+- **Los sin cliente** entran por CAJA INGRESO (`CAI`). Hoy son 6 de GO SERVICIOS DIGITALES (*"GO CUOTAS"*), diferidos a unos 60 días. El medio de pago **"Go Cuotas" del mix de cobro de Ventas** (LOCALES y ECOMMERCE) está **inactivo y en 0%**: **si alguien lo activa, esa plata se contaría en la cobranza proyectada de Ventas y acá**.
 
-| Serie | Sin mayoristas | Con mayoristas | Diferencia |
-| --- | --- | --- | --- |
-| `A_COBRAR` (*Echeqs en cartera*) | $ 1.973.944.870,87 | $ 2.455.077.645,33 | **+ $ 481.132.774,46**: 586 cheques |
-| `DEPOSITADOS` (*Echeqs depositados*) | $ 37.826.439,63 | $ 41.130.143,07 | **+ $ 3.303.703,44**: 6 cheques de las boletas del 15/10, el lunes 19/10 |
+Medido el 16/10/2026 con las clases reales, cada paso uno detrás del otro sobre los mismos datos:
+
+| Paso | `A_COBRAR` (*Echeqs en cartera*) | `DEPOSITADOS` (*Echeqs depositados*) |
+| --- | --- | --- |
+| Sólo franquicias y locales (`[FL]%`) | $ 1.973.944.870,87 | $ 37.826.439,63 |
+| Con mayoristas (`[FLM]%`) | $ 2.455.077.645,33 (**+ $ 481.132.774,46**, 586 cheques) | $ 41.130.143,07 (**+ $ 3.303.703,44**, 6 cheques) |
+| Sin filtro de cliente | $ 2.559.220.385,97 (**+ $ 104.142.740,64**, los 6 de GO) | $ 41.130.143,07 |
 
 **Venta Cobrada Anticipada sigue en `[FL]%`**: es otro circuito, que netea la cobranza proyectada de Ventas por canal.
-
-**Quedan afuera los cheques sin cliente** —6 en cartera por $ 104.142.740,64 al 16/10/2026, todos de GO SERVICIOS DIGITALES, que entraron por CAJA INGRESO (`CAI`) y no por un recibo— y cualquier otro prefijo: no son cobranza de un cliente del módulo.
 
 ---
 
 ## Qué es un depósito
 
-Un cheque de `dbo.SBA14` es un depósito si cumple **todo** esto (`Echeqs::esDepositoTango()`, puro):
+Un cheque de `dbo.SBA14` es un depósito si cumple **todo** esto (`Echeqs::esDepositoTango()`, puro). **El cliente no se mira**: ver *Todos los cheques, sin filtro de cliente*.
 
 | Condición | Por qué |
 | --- | --- |
 | `ESTADO = 'A'` | Salió de cartera. Uno que después se rechaza o se anula pasa a `R` o `X` y deja de leerse solo |
 | `T_COMP_SAL = 'BDE'` | Salió por una boleta de depósito. Un `O/P` es una orden de pago: el cheque se endosó a un proveedor, no entra al banco y no se toca |
-| `CLIENTE LIKE '[FLM]%'` | Franquicias, locales y mayoristas: el universo de Cheques en Cartera, con la comparación binaria de la columna. Ver *Los cheques de mayoristas* |
 | `FECHA_SAL` real | No la centinela `1800-01-01` |
 | **La cuenta que la boleta debita es un banco** | `dbo.SBA01.TIPO = 'B'`. Ver abajo |
 
@@ -90,7 +91,7 @@ Una BDE tiene en `dbo.SBA05` **una línea al debe** contra la cuenta destino y u
 - **`TIPO_SAL = 'D'`** trae la cuenta también en `CTA_DESTIN`.
 - **`TIPO_SAL = 'O'`** deja `CTA_DESTIN` en 0, pero su boleta debita una cuenta igual que la de un `D`. En 90 días eran la mayoría: 235 de 358. La boleta `02005000040735` de la muestra debita 110500 BCO.RIO CTA.CTE. $.
 
-**Lo que separa los casos es la cuenta debitada**, no el tipo. BDE de franquicias y locales en estado `A`, 90 días al 16/10/2026 —medido antes de sumar a los mayoristas—:
+**Lo que separa los casos es la cuenta debitada**, no el tipo. BDE de franquicias y locales en estado `A`, 90 días al 16/10/2026 —medido antes de sacar el filtro de cliente—:
 
 | Cuenta debitada | `SBA01.TIPO` | Cheques | Bruto | Qué es | ¿Depósito? |
 | --- | --- | --- | --- | --- | --- |
@@ -100,7 +101,7 @@ Una BDE tiene en `dbo.SBA05` **una línea al debe** contra la cuenta destino y u
 
 **Sin la línea de la boleta, el cheque cuenta como depósito** con un aviso de atención que nombra la boleta: es un dato que falta, no uno que diga que no entra al banco.
 
-**Un descuento de echeqs cuenta como depósito, con la regla general.** La boleta `…040556` del 19/08 a BBVA (*"BBVA DESCUENTO DE ECHEQS"*, 44 cheques por $ 328,6 M con fecha de noviembre) es una cuenta bancaria: se proyecta a las 48 hs de la boleta, con IIBB + SICREB. El tooltip muestra las dos fechas —boleta y cheque—; si el banco acreditó antes, se marca *Ya acreditó*. Decisión de Tesorería.
+**Un descuento de echeqs cuenta como depósito, con la regla general.** La boleta `…040556` del 19/08 a BBVA (*"BBVA DESCUENTO DE ECHEQS"*, 44 cheques por $ 328,6 M con fecha de noviembre) es una cuenta bancaria: se proyecta a las 48 hs de la boleta, con IIBB + SICREB. El tooltip muestra las dos fechas —boleta y cheque—; si el banco acreditó antes, sale por el extracto de Interbanking o se marca *Ya acreditó*. Decisión de Tesorería.
 
 **La exclusión es de cartera.** Un cheque excluido que después se deposita en Tango **se proyecta igual**: el depósito es el hecho más nuevo y dice que la plata entra. La exclusión queda en su historial, sin efecto. Si después se rechaza, pasa a `R` y sale solo.
 
@@ -128,7 +129,8 @@ El calendario es `RO_T_CALENDARIO`, por la única lectura del módulo (`Ventas::
 | --- | --- | --- |
 | Acredita **de mañana en adelante** | `PROYECTA` | Entra en *Echeqs depositados* el día que acredita, por el neto |
 | Acredita **hoy** | `ACREDITADO` (por plazo) | **No se proyecta**, sin aviso: ya está —o va a estar al cierre— en el saldo de Interbanking. Se lista ese día con la marca *acreditado (por plazo)* |
-| Acreditó **antes de hoy** | — | Deja de leerse |
+| Acreditó **antes de hoy** por plazo | — | Deja de leerse |
+| **El extracto de Interbanking trae su crédito** | `ACREDITADO` (por extracto) | No se proyecta aunque falten días. Se lista con la marca *acreditado (Interbanking)* hasta su fecha de acreditación. Ver *La acreditación según el extracto* |
 | Marcado **ya acreditó** | `ACREDITADO` (por marca) | No se proyecta aunque falten días. Se lista con la marca *acreditado* hasta su fecha de acreditación |
 | Sin fecha o sin neto | `SIN_DATOS` | No se proyecta, se lista con la marca *depositado, sin proyectar* y **avisa como crítico** |
 | Rechazado o anulado (`R`, `X`) | — | Ya no es `A`: deja de leerse solo |
@@ -150,24 +152,56 @@ Los avisos son **de lo que se lista**: un depósito que ya acreditó no se proye
 ### La lectura: sólo lo necesario
 
 ```sql
-WHERE s.ESTADO = 'A' AND s.T_COMP_SAL = 'BDE' AND s.CLIENTE LIKE '[FLM]%'
+WHERE s.ESTADO = 'A' AND s.T_COMP_SAL = 'BDE'
   AND s.FECHA_SAL >= hoy − plazo × DiasHabiles::MAX_CORRIMIENTO
 ```
 
 Una boleta anterior a esa fecha ya acreditó seguro: cada día hábil del plazo puede correrse hasta `MAX_CORRIMIENTO` días (`Echeqs::rangoDepositos()`, mismo criterio que `rangoCalendarioAcreditacion()` de Saldos). El 16/10/2026 eran 225 cheques en 60 días. Sin plazo se lee un solo tramo de corrimiento, para poder avisar cuántos quedaron sin proyectar.
 
-**Las boletas y las cuentas se cruzan en PHP**, por la regla del repo: tres lecturas chicas —los cheques de `SBA14` (con el `LEFT JOIN` de `BANCO` que ya usa la cartera, para el nombre del emisor), la línea al debe de cada boleta en `SBA05` y su cuenta en `SBA01`, y las marcas *ya acreditó*—. La consulta aplica el mismo filtro que `esDepositoTango()` como optimización; la regla que decide es la de PHP.
+**Las boletas y las cuentas se cruzan en PHP**, por la regla del repo: cuatro lecturas chicas —los cheques de `SBA14` (con el `LEFT JOIN` de `BANCO` que ya usa la cartera, para el nombre del emisor), la línea al debe de cada boleta en `SBA05` y su cuenta en `SBA01`, los créditos del extracto de Interbanking con el número de esos cheques, y las marcas *ya acreditó*—. La consulta aplica el mismo filtro que `esDepositoTango()` como optimización; la regla que decide es la de PHP.
 
 **La cartera volvió a ser sólo `ESTADO = 'C'`**, sin unión con ningún depósito: un cheque depositado no está en cartera en Tango. Ver `sqlCartera()`.
+
+### La acreditación según el extracto de Interbanking
+
+`BI_T_EXTRACTOS_INTERBANKING` (en `central`, la carga BI) trae los movimientos de las cuentas bancarias de **los últimos 60 días**. Un cheque depositado **sale de *Echeqs depositados*** cuando el extracto trae su crédito (`Echeqs::creditoExtracto()`, puro):
+
+| Condición | Por qué |
+| --- | --- |
+| `TIPO_MOV = 'C'` | Un crédito. El débito con el mismo número es la retención del banco |
+| `NRO_COMPROBANTE` = el número del cheque | Es como lo informa Galicia |
+| `IMPORTE` = el bruto, al centavo | El banco acredita el cheque entero y debita la retención aparte |
+| `FECHA_OPERACION` entre la boleta y hoy | Un crédito anterior al depósito es de otra cosa; uno posterior a hoy no puede decir que ya acreditó |
+
+Si hay varios, vale el más viejo, y **un movimiento acredita un solo cheque**: se asignan por fecha de boleta.
+
+**Se lee al calcular, no graba marcas.** No hay proceso ni job: la pestaña y el tablero miran lo último que cargó BI. Un cruce equivocado no se deshace a mano: se corrige en la regla. **El extracto no se escribe nunca.**
+
+**Sólo número + importe, decisión de Tesorería.** Verificado el 16/10/2026 sobre los depósitos desde el 01/09:
+
+| Banco | Qué trae el extracto | ¿Cruza? |
+| --- | --- | --- |
+| Galicia (007) | Un crédito por cheque con su número y el bruto (*"GESTION DE ECHEQ"* u otras descripciones), y un débito aparte por la retención | **Sí**: casi todos, con 0, 1 o 3 días de demora |
+| Francés (017) | Un crédito por cheque por el bruto (*"DEP.CH.24 HS"*, *"DEPOS.CHQ.48HS"*), pero con un número del banco | No: no se cruza por importe solo |
+| Santander (072) | Sólo el total de créditos del día (`CRED_TOTAL_DIA`), sin el detalle de los echeqs | No |
+| ICBC (015) | — | No apareció ninguno |
+
+Lo que no cruza sigue **por plazo** o con la marca **Ya acreditó**.
+
+**Que un cheque no tenga crédito no dice nada**: el extracto guarda 60 días y no todos los bancos detallan los echeqs. Sólo un crédito encontrado lo da por acreditado. La lectura de depositados mira `plazo × 30` días hacia atrás —60 con el plazo de hoy—, así que un crédito que el extracto ya borró es de un depósito que vence por plazo igual.
+
+**Sin la tabla**, la pestaña y el tablero siguen andando con un aviso informativo, y los depositados van por plazo o con la marca.
+
+**Ejemplo:** el cheque 40664466 (MACIRU, boleta del 07/10 a Galicia) tiene su crédito de $ 572.698,57 el 08/10: habría salido ese día, en lugar del 09/10 por plazo. Galicia le debitó aparte $ 4.008,88 (*"DEP CHEQ 40664466"*), un 0,7%, menos que el 3,1% de las alícuotas cargadas: conviene revisar si IIBB y SICREB se retienen por otro lado.
 
 ---
 
 ## Ya acreditó
 
-Cuando Tesorería ve que un cheque ya acreditó antes de las 48 hs, lo marca y sale de *Echeqs depositados*. Así no se cuenta dos veces con el saldo de Interbanking, que ahora se actualiza cada hora.
+Cuando Tesorería ve que un cheque ya acreditó antes de las 48 hs, lo marca y sale de *Echeqs depositados*. Así no se cuenta dos veces con el saldo de Interbanking, que ahora se actualiza cada hora. **Es para lo que el extracto no confirma**: Francés, Santander, ICBC.
 
 - **Dónde:** en la barra de selección de *Cheques en Cartera*, **Ya acreditó** y **Deshacer ya acreditó**. Se dibujan sólo con permiso de edición de Echeqs (`['echeqs', null]`), y sólo se muestran si el script de la marca está corrido.
-- **Qué se puede marcar:** sólo depositados que **todavía se proyectan**, uno o varios, **todo o nada**. Uno en cartera, uno ya marcado, uno que acredita hoy, uno sin datos o uno que no está en la lectura —endosado, rechazado, vencido— se rechazan diciendo cuál y por qué. El servidor vuelve a validar contra la lectura de la base (`Echeqs::validarSeleccionAcreditado()`).
+- **Qué se puede marcar:** sólo depositados que **todavía se proyectan**, uno o varios, **todo o nada**. Uno en cartera, uno ya marcado, uno que ya acreditó según el extracto, uno que acredita hoy, uno sin datos o uno que no está en la lectura —endosado, rechazado, vencido— se rechazan diciendo cuál y por qué. El servidor vuelve a validar contra la lectura de la base (`Echeqs::validarSeleccionAcreditado()`).
 - **El diálogo** pide confirmación, dice cuántos y por cuánto neto salen de la fila, y acepta una observación opcional.
 - **Del navegador viajan sólo los ids y la observación.** El origen (`MANUAL`) y la fecha (hoy) los pone el servidor.
 - **Deshacer** es baja lógica, con confirmación, todo o nada: el cheque vuelve a *Echeqs depositados* si su acreditación todavía es de mañana en adelante. Una marca de Interbanking se deshace igual que una manual.
@@ -189,11 +223,11 @@ Cuando Tesorería ve que un cheque ya acreditó antes de las 48 hs, lo marca y s
 - **Un solo vigente por cheque**: índice único filtrado `WHERE VIGENTE = 1`. PHP ya rechaza marcar uno marcado; el índice frena a dos pestañas —o a la pantalla y el proceso— al mismo tiempo.
 - **Una `REFERENCIA` del origen se graba una sola vez, vigente o no**: índice único sobre `(ORIGEN, REFERENCIA) WHERE REFERENCIA IS NOT NULL`.
 
-### Pensada para Interbanking
+### `ORIGEN = 'INTERBANKING'`, previsto
 
-Más adelante, un proceso que lea la API de Interbanking va a grabar ahí las acreditaciones con `ORIGEN = 'INTERBANKING'` y su `REFERENCIA`. **La regla no depende del origen**: `resolverDeposito()` sólo pregunta si hay una marca vigente, sea de quien sea.
+La tabla se diseñó para que un proceso grabara ahí las acreditaciones de Interbanking. **Con el extracto leído directo no hace falta**: el crédito no es una marca, y no pasa por esta tabla. `ORIGEN = 'INTERBANKING'` queda en el `CHECK` por si algún día existe ese proceso. **La regla no depende del origen**: `resolverDeposito()` sólo pregunta si hay una marca vigente.
 
-**El proceso futuro no puede volver a grabar una `REFERENCIA` que ya existe, aunque esté dada de baja.** Así, si alguien deshace a mano una marca de Interbanking —porque el proceso se equivocó de cheque—, el deshacer se respeta: la próxima corrida no la puede volver a poner. Lo asegura el índice único de la referencia, y lo dice el encabezado del script.
+**Un proceso así no podría volver a grabar una `REFERENCIA` que ya existe, aunque esté dada de baja.** Si alguien deshace a mano una marca de Interbanking, el deshacer se respeta. Lo asegura el índice único de la referencia, y lo dice el encabezado del script.
 
 ---
 
@@ -319,9 +353,10 @@ Era la tabla de ese circuito: un depósito por cheque, con su fecha, su tasa y s
 - las consultas, y que nada consulta `RO_T_CASHFLOW_ECHEQ_DEPOSITO`;
 - el circuito eliminado y sus textos;
 - la partición del proveedor columna por columna, `A_COBRAR_TODO` que cierra, y **la pestaña y el proveedor que suman lo mismo**;
-- *Ya acredito*: todo o nada sobre los que se proyectan, un solo vigente, deshacer, lo que se graba, los permisos y el script.
+- *Ya acredito*: todo o nada sobre los que se proyectan, un solo vigente, deshacer, lo que se graba, los permisos y el script;
+- **el extracto**: número e importe iguales cruzan; otro importe, otro número, un crédito anterior a la boleta o posterior a hoy, o un débito, no; con dos créditos gana el más viejo; un movimiento no se usa dos veces; el crédito saca al cheque aunque falten días y pesa más que una marca; *Ya acreditó* lo rechaza; el proveedor no lo suma; sin la tabla, aviso.
 
-`tests/test_echeqs.php` verifica la partición **contra los datos reales**: las tres partes suman el total y los depositados que se listan son BDE a un banco sin vencer. `tests/test_tablas_controles.php`, el cableado: no quedan botones ni acciones de *Depositar*, y están *Ya acreditó*, su acción y su permiso. `tests/test_dias_habiles.php` fija `habilesDespues()`, y `tests/test_retenciones.php` la clase compartida.
+`tests/test_echeqs.php` verifica la partición **contra los datos reales**: las tres partes suman el total, los depositados que se listan son BDE a un banco sin vencer, y los acreditados por el extracto cruzan por número, importe y fecha. `tests/test_tablas_controles.php`, el cableado: no quedan botones ni acciones de *Depositar*, y están *Ya acreditó*, su acción y su permiso. `tests/test_dias_habiles.php` fija `habilesDespues()`, y `tests/test_retenciones.php` la clase compartida.
 
 Las escrituras de la marca se verificaron contra la base con una `#temporal` con el cuerpo del script, sin tocar tablas `dbo`: marcar, rechazar la segunda marca, el índice de vigentes, deshacer con su historial, la referencia dada de baja que no vuelve a entrar y el `CHECK` del origen.
 
