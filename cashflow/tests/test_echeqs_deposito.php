@@ -226,16 +226,12 @@ chequear('con FECHA_SAL centinela no', false,
     Echeqs::esDepositoTango(array_merge($bde, ['FECHA_SAL' => '1800-01-01']), $ctaBanco));
 chequear('sin FECHA_SAL tampoco', false,
     Echeqs::esDepositoTango(array_merge($bde, ['FECHA_SAL' => null]), $ctaBanco));
-chequear('un mayorista (M) si: el universo de cartera es [FLM]', true,
-    Echeqs::esDepositoTango(array_merge($bde, ['COD_CLIENTE' => 'MAVENF']), $ctaBanco));
-chequear('un cheque sin cliente (CAJA INGRESO) no', false,
-    Echeqs::esDepositoTango(array_merge($bde, ['COD_CLIENTE' => '']), $ctaBanco));
-chequear('ni otro prefijo', false,
-    Echeqs::esDepositoTango(array_merge($bde, ['COD_CLIENTE' => 'O00001']), $ctaBanco));
-chequear('un local (L) si', true,
-    Echeqs::esDepositoTango(array_merge($bde, ['COD_CLIENTE' => 'L00001']), $ctaBanco));
-chequear('la comparacion del cliente es binaria, como la columna', false,
-    Echeqs::esDepositoTango(array_merge($bde, ['COD_CLIENTE' => 'fr0001']), $ctaBanco));
+// El cliente no se mira: Cheques en Cartera lee todos los cheques.
+foreach (['MAVENF' => 'un mayorista', 'L00001' => 'un local', '' => 'un cheque sin cliente (CAJA INGRESO)',
+          'O00001' => 'otro prefijo', 'fr0001' => 'un codigo en minuscula'] as $cod => $quien) {
+    chequear($quien . ' tambien es deposito: no hay filtro de cliente', true,
+        Echeqs::esDepositoTango(array_merge($bde, ['COD_CLIENTE' => $cod]), $ctaBanco));
+}
 chequear('TIPO_SAL = O con CTA_DESTIN en 0 a un banco: deposito', true,
     Echeqs::esDepositoTango(array_merge($bde, ['TIPO_SAL' => 'O', 'CTA_DESTIN' => 0]), $ctaBanco));
 chequear('a la cuenta comitente (endoso a Santander Valores): no', false,
@@ -466,28 +462,27 @@ chequear('y sin el script no agrupa por una constante', false,
     strpos(Echeqs::sqlCarteraTotales(false), 'GROUP BY CAST(s.FECHA_CHEQ AS DATE),') !== false);
 
 $sqlDep = str_replace("\r\n", "\n", Echeqs::sqlDepositados());
-chequear('los depositados aplican el filtro del helper: estado, comprobante, [FLM] y fecha desde', true,
-    strpos($sqlDep, "WHERE s.ESTADO = ?\n                  AND s.T_COMP_SAL = ?\n                  AND s.CLIENTE LIKE '[FLM]%'\n                  AND s.FECHA_SAL >= ?") !== false);
+chequear('los depositados aplican el filtro del helper: estado, comprobante y fecha desde', true,
+    strpos($sqlDep, "WHERE s.ESTADO = ?\n                  AND s.T_COMP_SAL = ?\n                  AND s.FECHA_SAL >= ?") !== false);
 
-/* UN SOLO UNIVERSO PARA CHEQUES EN CARTERA: la cartera, la agregada, los
-   depositados y el resumen de excluidos dicen [FLM], y el helper tambien. Si
-   uno dijera otra cosa, la pestana y el tablero mirarian dos universos. */
-chequear('el universo de cartera es franquicias, locales y mayoristas', ['[FLM]%', '/^[FLM]/'],
-    [Echeqs::UNIVERSO_CARTERA_SQL, Echeqs::UNIVERSO_CARTERA_REGEX]);
-chequear('la cartera y la agregada lo usan', [true, true], [
-    strpos(Echeqs::sqlCartera(true), "s.CLIENTE LIKE '[FLM]%'") !== false,
-    strpos(Echeqs::sqlCarteraTotales(true), "s.CLIENTE LIKE '[FLM]%'") !== false
+/* SIN FILTRO DE CLIENTE EN CHEQUES EN CARTERA: ni la cartera, ni la agregada,
+   ni los depositados, ni el resumen de excluidos miran el cliente. Si uno lo
+   mirara, la pestana y el tablero leerian dos universos. */
+chequear('ninguna consulta de cartera ni de depositados filtra el cliente', [false, false, false], [
+    strpos(Echeqs::sqlCartera(true), 's.CLIENTE LIKE') !== false,
+    strpos(Echeqs::sqlCarteraTotales(true), 's.CLIENTE LIKE') !== false,
+    strpos($sqlDep, 's.CLIENTE LIKE') !== false
 ]);
 
 $srcUniverso = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/Echeqs.php'));
 $iniExc = strpos($srcUniverso, 'public function getExclusionesEnCartera(');
-chequear('el resumen de excluidos tambien', true,
-    strpos(substr($srcUniverso, $iniExc, 1500), "s.CLIENTE LIKE '\" . self::UNIVERSO_CARTERA_SQL . \"'") !== false);
+chequear('el resumen de excluidos tampoco', false,
+    strpos(substr($srcUniverso, $iniExc, 1500), 's.CLIENTE LIKE') !== false);
 $iniPre = strpos($srcUniverso, 'private function getChequesDeClientes(');
 chequear('la venta cobrada anticipada sigue en [FL]: es otro circuito', true,
     strpos(substr($srcUniverso, $iniPre, 2500), "AND s.CLIENTE LIKE '[FL]%'") !== false);
-chequear('y ninguna consulta de cartera o depositados quedo en [FL]', 1,
-    substr_count($srcUniverso, "s.CLIENTE LIKE '[FL]%'"));
+chequear('y es el unico filtro de cliente que queda en la clase', 1,
+    substr_count($srcUniverso, 's.CLIENTE LIKE'));
 chequear('y traen lo que muestra el tooltip', true,
     strpos($sqlDep, 's.N_COMP_SAL') !== false && strpos($sqlDep, 's.TIPO_SAL') !== false
     && strpos($sqlDep, 'AS CTA_DESTIN') !== false);

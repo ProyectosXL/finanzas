@@ -97,40 +97,37 @@ require_once __DIR__ . '/DiasHabiles.php';
  *    condicion extra: quien vea el contador 'sin_fecha' siempre en cero no tiene
  *    que sospechar que esta roto.
  *
- * EL UNIVERSO: CARTERA [FLM], VENTA COBRADA ANTICIPADA [FL]
- * --------------------------------------------------------
+ * EL UNIVERSO: CARTERA SIN FILTRO DE CLIENTE, VENTA COBRADA ANTICIPADA [FL]
+ * -----------------------------------------------------------------------
  * Cheques en Cartera -la cartera, los depositados y el resumen de excluidos-
- * filtra CLIENTE LIKE '[FLM]%' (UNIVERSO_CARTERA_SQL): franquicias, locales y
- * MAYORISTAS. Los cheques de mayoristas entran igual que los de franquicias,
- * con un recibo de cobro en cuenta corriente (T_COMP_REC = 'REC') que ya
- * cancelo la factura, asi que no se cuentan dos veces con Cobranzas May, que
- * proyecta solo lo pendiente. Antes quedaban afuera, y un mayorista que pagaba
- * con echeq no estaba en ninguna fila: el 16/10/2026 eran 586 cheques en
- * cartera por $ 481.132.774,46.
+ * lee TODOS los cheques de terceros de dbo.SBA14, sin mirar el cliente. Hasta
+ * el 16/10/2026 filtraba por el prefijo del codigo, y cada cheque que quedaba
+ * afuera era plata que no estaba en ninguna fila del tablero: primero los
+ * mayoristas (586 cheques en cartera por $ 481.132.774,46) y despues los que
+ * no tienen cliente (6 por $ 104.142.740,64, de GO SERVICIOS DIGITALES).
+ *
+ * POR QUE NO SE CUENTAN DOS VECES:
+ *
+ *   Los de un cliente     entran con un recibo de cobro en cuenta corriente
+ *                         (T_COMP_REC = 'REC') que ya cancelo la factura: la
+ *                         cobranza de Cobranzas FR y Cobranzas May proyecta
+ *                         solo lo pendiente.
+ *   Los sin cliente       entran por CAJA INGRESO (CAI). Hoy son de GO
+ *                         ("GO CUOTAS"): el medio de pago "Go Cuotas" del mix
+ *                         de cobro de Ventas (LOCALES y ECOMMERCE) esta
+ *                         INACTIVO y en 0%. SI ALGUIEN LO ACTIVA, esa plata se
+ *                         contaria en la cobranza proyectada de Ventas y
+ *                         aca. Ver README-echeqs.md.
  *
  * Venta Cobrada Anticipada sigue en '[FL]%': es otro circuito, que netea la
- * cobranza proyectada de Ventas por canal (canalDeCliente()).
- *
- * Quedan afuera los cheques sin cliente -los de CAJA INGRESO, de GO SERVICIOS
- * DIGITALES- y cualquier otro prefijo: no son cobranza de un cliente.
- *
- * La columna es Latin1_General_BIN, o sea que la comparacion distingue
+ * cobranza proyectada de Ventas por canal (canalDeCliente()). La columna
+ * CLIENTE es Latin1_General_BIN, o sea que esa comparacion distingue
  * mayusculas; verificado contra la base, ningun codigo empieza en minuscula.
  */
 class Echeqs {
 
     /** Cheque de terceros todavia en cartera: es el que suma al disponible */
     const ESTADO_CARTERA = 'C';
-
-    /**
-     * Los clientes de Cheques en Cartera: franquicias (F), locales (L) y
-     * mayoristas (M). Lo usan la cartera, los depositados y el resumen de
-     * excluidos -en SQL- y esDepositoTango() -en PHP-: si dijeran cosas
-     * distintas, la pestana y el tablero mirarian dos universos. Ver el
-     * encabezado.
-     */
-    const UNIVERSO_CARTERA_SQL = '[FLM]%';
-    const UNIVERSO_CARTERA_REGEX = '/^[FLM]/';
 
     /**
      * Estados que no representan plata: 'X' anulado y 'R' rechazado.
@@ -602,14 +599,12 @@ class Echeqs {
     /**
      * Si una fila de dbo.SBA14 es un deposito.
      *
-     * LAS CINCO CONDICIONES, y por que:
+     * LAS CUATRO CONDICIONES, y por que:
      *
      *   ESTADO = 'A'          salio de cartera. Uno que despues se rechaza o se
      *                         anula pasa a 'R' o 'X' y deja de leerse solo.
      *   T_COMP_SAL = 'BDE'    salio por una boleta de deposito y no por una
      *                         orden de pago (endoso a un proveedor).
-     *   CLIENTE [FLM]         franquicias, locales y mayoristas: el universo de
-     *                         Cheques en Cartera. Ver el encabezado.
      *   FECHA_SAL real        no la centinela 1800-01-01.
      *   CUENTA BANCARIA       la cuenta que la boleta debita en dbo.SBA05 es un
      *                         banco (dbo.SBA01.TIPO = 'B'). Quedan afuera el
@@ -627,23 +622,23 @@ class Echeqs {
      * defecto es que una boleta de deposito es un deposito. Quien llama lo
      * avisa.
      *
-     * Estatica y pura. La consulta aplica las cuatro primeras como filtro; la
-     * quinta necesita la boleta, que se lee aparte.
+     * EL CLIENTE NO SE MIRA: Cheques en Cartera lee todos los cheques, tambien
+     * los que no tienen cliente. Ver el encabezado.
      *
-     * @param array $fila Con ESTADO, T_COMP_SAL, COD_CLIENTE y FECHA_SAL
+     * Estatica y pura. La consulta aplica las tres primeras como filtro; la
+     * cuarta necesita la boleta, que se lee aparte.
+     *
+     * @param array $fila Con ESTADO, T_COMP_SAL y FECHA_SAL
      * @param array|null $cuenta ['cod_cta', 'descripcion', 'tipo'] de la linea
      *        al debe de la boleta, o null si no se encontro
      * @return bool
      */
     public static function esDepositoTango($fila, $cuenta) {
         $fecha = Horizonte::normalizarFecha(isset($fila['FECHA_SAL']) ? $fila['FECHA_SAL'] : null);
-        $cliente = trim((string) (isset($fila['COD_CLIENTE']) ? $fila['COD_CLIENTE'] : ''));
 
         if (!isset($fila['ESTADO']) || trim((string) $fila['ESTADO']) !== self::ESTADO_APLICADO
             || !isset($fila['T_COMP_SAL'])
             || trim((string) $fila['T_COMP_SAL']) !== self::COMPROBANTE_DEPOSITO
-            // Binario, como la columna: ver el encabezado.
-            || !preg_match(self::UNIVERSO_CARTERA_REGEX, $cliente)
             || $fecha === null || $fecha < self::FECHA_REAL_DESDE) {
             return false;
         }
@@ -1607,8 +1602,7 @@ class Echeqs {
      */
     private static function sqlUniversoCartera() {
         return "s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)
-                  AND s.ESTADO = ?
-                  AND s.CLIENTE LIKE '" . self::UNIVERSO_CARTERA_SQL . "'";
+                  AND s.ESTADO = ?";
     }
 
     /**
@@ -1762,7 +1756,6 @@ class Echeqs {
                 LEFT JOIN dbo.BANCO AS b ON s.ID_BANCO = b.ID_BANCO
                 WHERE s.ESTADO = ?
                   AND s.T_COMP_SAL = ?
-                  AND s.CLIENTE LIKE '" . self::UNIVERSO_CARTERA_SQL . "'
                   AND s.FECHA_SAL >= ?
                 ORDER BY s.FECHA_SAL, s.ID_SBA14";
     }
@@ -2571,7 +2564,6 @@ class Echeqs {
                 WHERE x.VIGENTE = 1
                   AND s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)
                   AND s.ESTADO = ?
-                  AND s.CLIENTE LIKE '" . self::UNIVERSO_CARTERA_SQL . "'
                 GROUP BY x.MOTIVO
                 ORDER BY SUM(CAST(s.IMPORTE_CH AS FLOAT)) DESC";
 
@@ -3606,8 +3598,8 @@ class Echeqs {
                 LEFT JOIN dbo.BANCO AS b ON s.ID_BANCO = b.ID_BANCO
                 WHERE s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)
                   AND s.ESTADO NOT IN ('X', 'R')
-                  -- Venta cobrada anticipada: franquicias y locales, no
-                  -- UNIVERSO_CARTERA_SQL. Ver el encabezado de la clase.
+                  -- Venta cobrada anticipada: franquicias y locales. Cheques
+                  -- en Cartera no filtra el cliente: ver el encabezado.
                   AND s.CLIENTE LIKE '[FL]%'
                   AND s.CLIENTE IN ($marcadores)
                 ORDER BY s.RAZON_EMIS, s.FECHA_CHEQ";
