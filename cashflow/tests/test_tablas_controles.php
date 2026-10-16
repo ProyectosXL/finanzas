@@ -1400,43 +1400,11 @@ chequear('sin alicuotas dice "sin alícuotas", no 0%', true,
     strpos($ppqJs, "if (!t || t.tasa === null || t.tasa === undefined) {") !== false
     && strpos($ppqJs, "'alícuotas</span>'") !== false);
 
-seccion('Echeqs > Cheques en Cartera: el deposito esta enganchado');
+seccion('Echeqs > Cheques en Cartera: el deposito ya no se marca desde el cashflow');
 
 $echTab = str_replace("\r\n", "\n", contenidoTab($TABS . '/echeqs.php'));
 $echJs = str_replace("\r\n", "\n", file_get_contents($JS . '/Ingresos-Echeqs.js'));
 $echCtrl = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Controller/EcheqsController.php'));
-
-// Los botones de escritura, solo con permiso de edicion de Echeqs.
-foreach (['btnDepositarSelEch' => 'accionDepositar', 'btnDeshacerDepSelEch' => 'accionDeshacer'] as $id => $fn) {
-    $pos = strpos($echTab, 'id="' . $id . '"');
-    $antes = substr($echTab, 0, (int) $pos);
-
-    chequear('#' . $id . ' existe, en la barra de seleccion', true,
-        $pos !== false && $pos > strpos($echTab, 'id="barraSelEch"')
-        && $pos < strpos($echTab, 'id="btnExcluirSelEch"'));
-    chequear('#' . $id . ' se dibuja solo con permiso de edicion', true,
-        strrpos($antes, '<?php if ($edita): ?>') > strrpos($antes, '<?php endif; ?>'));
-    chequear('#' . $id . ' esta conectado a ' . $fn, 1,
-        substr_count($echJs, "conectar('" . $id . "', " . $fn . ");"));
-}
-
-chequear('el filtro "Ocultar depositados" existe, al lado de "Ver excluidos"', true,
-    strpos($echTab, 'id="ocultarDepositadosEch"') !== false
-    && strpos($echTab, 'id="ocultarDepositadosEch"') > strpos($echTab, 'id="verExcluidosEch"')
-    && strpos($echTab, 'Ocultar depositados') !== false);
-chequear('por defecto destildado: los depositados se ven', 0,
-    preg_match('/id="ocultarDepositadosEch"[^>]*checked/', $echTab));
-chequear('y redibuja la tabla al cambiar', 1,
-    substr_count($echJs, "escuchar('ocultarDepositadosEch', 'change', dibujarCartera);"));
-
-foreach (['previsualizarDeposito', 'depositarCheques', 'deshacerDepositos'] as $accion) {
-    chequear($accion . ': el JS la pide y el controller la atiende', [true, 1], [
-        strpos($echJs, "?action=" . $accion . "'") !== false,
-        substr_count($echCtrl, "case '" . $accion . "':")
-    ]);
-}
-
-seccion('Echeqs > Cheques en Cartera: un deposito junta cheques de varios bancos');
 
 /** El cuerpo de una funcion del JS de Echeqs, hasta la siguiente */
 function cuerpoFnEch($js, $nombre) {
@@ -1451,55 +1419,95 @@ function cuerpoFnEch($js, $nombre) {
     return substr($js, $ini, ($fin === false ? strlen($js) : $fin) - $ini);
 }
 
-$fnBotones = cuerpoFnEch($echJs, 'pintarBotonesDeposito');
-chequear('pintarBotonesDeposito() ya no apaga Depositar por bancos mezclados', [false, false], [
-    strpos($fnBotones, 'un solo banco emisor') !== false,
-    strpos($fnBotones, 'bancos.length > 1 ?') !== false
-]);
-chequear('pero sigue apagandolo por un cheque sin banco', true,
-    strpos($fnBotones, "(sinBanco ? 'Hay ' + sinBanco + ' cheque(s) sin banco emisor") !== false);
-chequear('y su titulo dice de que banco, o de cuantos', [1, 1], [
-    substr_count($fnBotones, "var deQuien = (bancos.length === 1 ? bancos[0] : bancos.length + ' bancos');"),
-    substr_count($fnBotones, "'Depositar ' + sel.length + ' cheque(s) de ' + deQuien")
-]);
+// Tesoreria registra el deposito en Tango: el cashflow ya no tiene boton.
+foreach (['btnDepositarSelEch', 'btnDeshacerDepSelEch'] as $id) {
+    chequear('#' . $id . ' ya no esta en la pestana ni en el JS', [false, false],
+        [strpos($echTab, $id) !== false, strpos($echJs, $id) !== false]);
+}
 
-$fnDialogo = cuerpoFnEch($echJs, 'confirmarDeposito');
-chequear('el dialogo dice la tanda que armo el servidor', 1,
-    substr_count($fnDialogo, "linea('Cheques', escapar(c.tanda))"));
-chequear('y dibuja el desglose por banco cuando hay mas de uno', 1,
-    substr_count($fnDialogo, "((c.bancos || []).length > 1 ? desgloseBancos(c.bancos) : '')"));
-chequear('el aviso de exito dice lo mismo que el dialogo', 1,
-    substr_count($fnDialogo, "Notificacion.exito(r.calculo.tanda + ' depositados.'"));
+foreach (['accionDepositar', 'accionDeshacer', 'pintarBotonesDeposito', 'confirmarDeposito',
+          'noSePuedeDepositar', 'desgloseBancos'] as $fn) {
+    chequear($fn . '() ya no existe en el JS', '', cuerpoFnEch($echJs, $fn));
+}
 
-$fnDesglose = cuerpoFnEch($echJs, 'desgloseBancos');
-chequear('el desglose muestra banco, cantidad, bruto y neto de cada uno', true,
-    strpos($fnDesglose, 'escapar(b.banco)') !== false && strpos($fnDesglose, 'b.cantidad') !== false
-    && strpos($fnDesglose, 'pesosPlano(b.bruto)') !== false && strpos($fnDesglose, 'pesosPlano(b.neto)') !== false);
-chequear('y no suma ni ordena nada: lo arma el servidor', [false, false],
-    [strpos($fnDesglose, '+=') !== false, strpos($fnDesglose, '.sort(') !== false]);
+foreach (['previsualizarDeposito', 'depositarCheques', 'deshacerDepositos'] as $accion) {
+    chequear($accion . ': ni el JS la pide ni el controller la atiende', [false, 0], [
+        strpos($echJs, "?action=" . $accion . "'") !== false,
+        substr_count($echCtrl, "case '" . $accion . "':")
+    ]);
+}
 
 $echCss = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Css/Ingresos-Echeqs.css'));
-chequear('con muchos bancos, el desglose hace scroll adentro del dialogo', true,
-    strpos($fnDesglose, 'class="ech-dialogo-bancos"') !== false
-    && preg_match('/\.ech-dialogo-bancos \{[^}]*max-height:[^}]*overflow-y: auto;/', $echCss) === 1);
+chequear('el CSS del dialogo del deposito se fue con el', false,
+    strpos($echCss, 'ech-dialogo-') !== false);
 
-/* NINGUN TEXTO DEL CIRCUITO DICE YA LA REGLA VIEJA. Limitado a los archivos
-   de echeqs: "mismo banco" es correcto en Tarjetas o en Saldos. */
-$textosViejos = ['un solo banco emisor', 'mismo banco', 'bancos mezclados', 'de un banco emisor',
-                 'de UN banco'];
-$archivosDeposito = [
-    'Class/Echeqs.php', 'Controller/EcheqsController.php', 'Js/Ingresos-Echeqs.js', 'Tabs/echeqs.php',
-    'README-echeqs.md', 'sql/cashflow_echeqs_deposito.sql'
-];
+seccion('Echeqs > Cheques en Cartera: "Ya acredito" esta enganchado');
 
-foreach ($archivosDeposito as $archivo) {
-    $txt = file_get_contents(__DIR__ . '/../' . $archivo);
-    $hallados = array_values(array_filter($textosViejos, function ($t) use ($txt) {
-        return mb_stripos($txt, $t) !== false;
-    }));
+// Los botones de escritura, solo con permiso de edicion de Echeqs, en la barra.
+foreach (['btnAcreditadoSelEch' => 'accionAcreditado',
+          'btnDeshacerAcrSelEch' => 'accionDeshacerAcreditado'] as $id => $fn) {
+    $pos = strpos($echTab, 'id="' . $id . '"');
+    $antes = substr($echTab, 0, (int) $pos);
 
-    chequear($archivo . ' ya no dice que un deposito es de un solo banco', [], $hallados);
+    chequear('#' . $id . ' existe, en la barra de seleccion', true,
+        $pos !== false && $pos > strpos($echTab, 'id="barraSelEch"')
+        && $pos < strpos($echTab, 'id="btnExcluirSelEch"'));
+    chequear('#' . $id . ' se dibuja solo con permiso de edicion', true,
+        strrpos($antes, '<?php if ($edita): ?>') > strrpos($antes, '<?php endif; ?>'));
+    chequear('#' . $id . ' nace escondido: sin el script no se muestra', 1,
+        preg_match('/id="' . $id . '"\s+style="display: none;"/', $echTab));
+    chequear('#' . $id . ' esta conectado a ' . $fn, 1,
+        substr_count($echJs, "conectar('" . $id . "', " . $fn . ");"));
 }
+
+foreach (['marcarAcreditados', 'deshacerAcreditados'] as $accion) {
+    chequear($accion . ': el JS la pide y el controller la atiende', [true, 1], [
+        strpos($echJs, "?action=" . $accion . "'") !== false,
+        substr_count($echCtrl, "case '" . $accion . "':")
+    ]);
+}
+
+$fnBotonesAcr = cuerpoFnEch($echJs, 'pintarBotonesAcreditado');
+chequear('los botones se muestran solo si el script de la marca esta corrido', true,
+    strpos($fnBotonesAcr, 'var puede = !!(datosCartera && datosCartera.acreditado);') !== false
+    && substr_count($fnBotonesAcr, "style.display = puede ? '' : 'none';") === 2);
+chequear('Ya acredito se habilita solo si todos los seleccionados se proyectan', true,
+    strpos($fnBotonesAcr, "btnAcr.disabled = (proyectan !== sel.length);") !== false);
+chequear('y se pinta con la barra', 1, substr_count($echJs, "        pintarBotonesAcreditado(sel);\n    }"));
+
+$fnAcr = cuerpoFnEch($echJs, 'accionAcreditado');
+chequear('pide confirmacion con observacion opcional, y manda solo ids y observacion', true,
+    strpos($fnAcr, 'Notificacion.pedirTexto({') !== false && strpos($fnAcr, 'opcional: true') !== false
+    && strpos($fnAcr, "{ ids: sel.map(function(f) { return f.ID_SBA14; }), observacion: observacion }") !== false);
+chequear('deshacer tambien confirma', true,
+    strpos(cuerpoFnEch($echJs, 'accionDeshacerAcreditado'), 'Notificacion.confirmar({') !== false);
+
+$fnMarca = cuerpoFnEch($echJs, 'marcaDeposito');
+chequear('la marca dice depositado, acreditado o sin proyectar', true,
+    strpos($fnMarca, "PROYECTA: 'depositado'") !== false
+    && strpos($fnMarca, ": (porMarca ? 'acreditado' : 'acreditado (por plazo)'),") !== false
+    && strpos($fnMarca, "SIN_DATOS: 'depositado, sin proyectar'") !== false);
+chequear('el tooltip trae la boleta, la cuenta con TIPO_SAL, el banco y las dos fechas', true,
+    strpos($fnMarca, "'Boleta de depósito ' + (d.boleta || 's/n') + ' del ' + fecha(d.fecha_deposito)") !== false
+    && strpos($fnMarca, "' · TIPO_SAL ' + (d.tipo_sal || '—')") !== false
+    && strpos($fnMarca, "'Banco emisor: ' + f.BANCO") !== false
+    && strpos($fnMarca, "'Fecha del cheque: ' + fecha(f.FECHA_CHEQUE)") !== false);
+chequear('y la marca: quien, cuando, origen y observacion', true,
+    strpos(cuerpoFnEch($echJs, 'textoMarca'), "'Origen: ' + (m.origen === 'INTERBANKING' ? 'Interbanking' : 'a mano')") !== false);
+chequear('el acreditado segun el extracto tiene su marca', true,
+    strpos($fnMarca, "ACREDITADO: porExtracto ? 'acreditado (Interbanking)'") !== false);
+chequear('y el tooltip dice el credito: fecha, banco, cuenta, comprobante e importe', true,
+    strpos($fnMarca, '+ textoExtracto(d.extracto)') !== false
+    && strpos(cuerpoFnEch($echJs, 'textoExtracto'), "'Comprobante ' + c.comprobante + ' por ' + pesosPlano(c.importe)") !== false);
+
+chequear('el filtro "Ocultar depositados" existe, al lado de "Ver excluidos"', true,
+    strpos($echTab, 'id="ocultarDepositadosEch"') !== false
+    && strpos($echTab, 'id="ocultarDepositadosEch"') > strpos($echTab, 'id="verExcluidosEch"')
+    && strpos($echTab, 'Ocultar depositados') !== false);
+chequear('por defecto destildado: los depositados se ven', 0,
+    preg_match('/id="ocultarDepositadosEch"[^>]*checked/', $echTab));
+chequear('y redibuja la tabla al cambiar', 1,
+    substr_count($echJs, "escuchar('ocultarDepositadosEch', 'change', dibujarCartera);"));
 
 seccion('Echeqs > Cheques en Cartera: las columnas nuevas no corren a las demas');
 

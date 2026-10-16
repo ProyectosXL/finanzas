@@ -1233,8 +1233,8 @@ class Parametros {
         }
 
         /* EL PLAZO DEL DEPOSITO DE CHEQUES TIENE SU PROPIO CAMINO. Esta funcion
-           guarda cualquier texto, y un plazo de cero o de "dos" dejaria sin
-           poder depositar. Se rechaza aca y no se valida aca para que la regla
+           guarda cualquier texto, y un plazo de cero o de "dos" dejaria a los
+           cheques depositados sin proyectar. Se rechaza aca y no se valida aca para que la regla
            viva en un solo lugar: Echeqs::guardarPlazo(). */
         if ($clave === self::CLAVE_PLAZO_ECHEQS) {
             throw new Exception('El plazo de acreditación de los cheques se guarda desde '

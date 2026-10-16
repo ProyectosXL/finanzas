@@ -57,10 +57,10 @@ $edita = AuthCashflow::puedeEditar('parametros', 'PRECHEQUEADO');
             <div class="card-header">
                 <h5 class="mb-0">Depósito de cheques</h5>
                 <small class="text-muted">
-                    Un cheque de cartera que se marca como <strong>depositado</strong> sale de
-                    <em>Echeqs en cartera</em> y entra en <em>Echeqs depositados</em> el día que
-                    acredita, por el <strong>neto</strong>: el importe menos la tasa de retención
-                    vigente a esa fecha. La fecha del cheque no interviene.
+                    Un cheque que Tesorería deposita en Tango —con una boleta de depósito— entra
+                    en <em>Echeqs depositados</em> el día que acredita, a este plazo de la boleta,
+                    por el <strong>neto</strong>: el importe menos la tasa de retención vigente a
+                    esa fecha. La fecha del cheque no interviene.
                 </small>
             </div>
 
@@ -89,8 +89,9 @@ $edita = AuthCashflow::puedeEditar('parametros', 'PRECHEQUEADO');
                             <div class="param-hint mt-1" id="plazoHintPpq">
                                 Días hábiles bancarios después del depósito: con 2, un cheque
                                 depositado el lunes acredita el miércoles y uno del viernes, el
-                                martes. Cambiarlo <strong>no mueve los depósitos ya hechos</strong>:
-                                cada uno guarda la fecha con la que se depositó.
+                                martes. Se cuenta desde la fecha de la boleta de depósito de
+                                Tango. Cambiarlo <strong>mueve también los que todavía no
+                                acreditaron</strong>: la fecha se calcula al leer, no se guarda.
                             </div>
                             <div class="ppq-subtitulo mt-1" id="plazoAuditoriaPpq"></div>
                         </div>
@@ -98,14 +99,14 @@ $edita = AuthCashflow::puedeEditar('parametros', 'PRECHEQUEADO');
                             <div class="form-label form-label-sm fw-semibold mb-1">Tasa de retención vigente hoy</div>
                             <!-- Sin alícuotas vigentes dice "sin alícuotas" y no
                                  0%: un cero se leería como "el banco no retiene
-                                 nada", y sin tasa no se puede depositar. -->
+                                 nada", y sin tasa un depositado no tiene neto. -->
                             <div id="tasaHoyPpq" ></div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Lo que dejó el último guardado de una alícuota: la tabla del
-                     recálculo de los depósitos pendientes. Queda a la vista. -->
+                <!-- Lo que dejó el último guardado de una alícuota y la tasa total
+                     vigente. Queda a la vista. -->
                 <div id="resultadoDepositoPpq"></div>
 
                 <div class="card-body border-bottom d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -191,12 +192,12 @@ $edita = AuthCashflow::puedeEditar('parametros', 'PRECHEQUEADO');
 
                 <div class="card-body border-top">
                     <div class="param-hint">
-                        <strong>Guardar o dar de baja una alícuota recalcula los depósitos
-                        pendientes</strong> —los que acreditan de mañana en adelante— y el
-                        resultado dice cuántos cambiaron y por cuánta plata. Los que ya acreditaron,
-                        hoy incluido, <strong>no se tocan</strong>: su plata entró con la tasa que
-                        entró. Sin ninguna alícuota vigente <strong>no se puede depositar</strong>;
-                        los depósitos pendientes conservan el neto con el que se hicieron.
+                        <strong>El neto de un cheque depositado no se guarda</strong>: se calcula
+                        cada vez que se mira, con las alícuotas vigentes a su acreditación. Guardar
+                        o dar de baja una alícuota cambia solo el neto de los que todavía no
+                        acreditaron; los que ya acreditaron no se proyectan más. Sin ninguna
+                        alícuota vigente a su acreditación, un cheque depositado <strong>no se
+                        proyecta</strong> y la pestaña Echeqs lo avisa como crítico.
                     </div>
                 </div>
             </div>

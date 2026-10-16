@@ -1,69 +1,43 @@
 /* ============================================================================
-   MODULO CASHFLOW - ECHEQS: DEPOSITO MASIVO DE CHEQUES DE CARTERA
-   Crea el registro de depositos, el juego de alicuotas de los cheques y el
-   plazo de acreditacion
+   MODULO CASHFLOW - ECHEQS: EL DEPOSITO DE CHEQUES DE CARTERA
+   Crea el juego de alicuotas de los cheques y el plazo de acreditacion
    ----------------------------------------------------------------------------
    Base    : central
    Prefijo : RO_T_CASHFLOW_ECHEQ_
-   Orden   : despues de sql/cashflow_auditoria_usuario.sql (las tablas nacen
-             con su esquema de auditoria) y de sql/cashflow_echeqs_excluir.sql
-             (un cheque excluido no se puede depositar, y eso se valida contra
-             esa tabla). Para que se pueda depositar hace falta ademas la fila
-             del tablero: sql/cashflow_estructura_echeqs_depositados.sql. Sin
-             ella el boton queda apagado nombrando ese script.
+   Orden   : despues de sql/cashflow_auditoria_usuario.sql (la tabla nace con
+             su esquema de auditoria). Para que los depositados tengan donde
+             mostrarse hace falta ademas la fila del tablero:
+             sql/cashflow_estructura_echeqs_depositados.sql. La marca "ya
+             acredito" es aparte: sql/cashflow_echeqs_acreditado.sql.
    ----------------------------------------------------------------------------
    QUE RESUELVE
 
-   Los cheques de cartera se depositan en el banco por tandas, que pueden
-   juntar cheques de varios bancos emisores: se cobran por el clearing
-   bancario. Desde que se depositan, la plata ya no entra en la fecha del
-   cheque: entra a las 48 hs habiles del deposito, y entra NETA, porque el banco
-   retiene IIBB y SICREB sobre el deposito. Hasta ahora el tablero seguia
-   mostrando el cheque en su fecha y por el bruto.
+   Tesoreria deposita los cheques de cartera en el banco y registra el
+   deposito en Tango en el mismo momento, con una boleta de deposito (BDE): el
+   cheque pasa a ESTADO = 'A' y sale de cartera. Desde ahi la plata no entra en
+   la fecha del cheque: entra a las 48 hs habiles de la boleta, y entra NETA,
+   porque el banco retiene IIBB y SICREB sobre el deposito.
 
-   Con esto, depositar un cheque lo saca de la fila "Echeqs en cartera" y lo
-   lleva a "Echeqs depositados", el dia que acredita y por el neto. Ver
+   El cashflow lee esos depositos de Tango y los proyecta en la fila "Echeqs
+   depositados", el dia que acreditan y por el neto. Este script crea lo que
+   hace falta para calcular las dos cosas: el plazo y las alicuotas. Ver
    README-echeqs.md.
 
    ----------------------------------------------------------------------------
-   1. RO_T_CASHFLOW_ECHEQ_DEPOSITO
+   1. RO_T_CASHFLOW_ECHEQ_DEPOSITO, EN DESUSO
 
-   Una fila por cheque depositado, con todo lo que define el deposito CALCULADO
-   POR EL SERVIDOR Y PERSISTIDO: banco, fechas, plazo, bruto, tasa y neto. El
-   navegador solo manda los ids de los cheques.
+   Este script la creaba para un circuito que ya no existe: el boton
+   "Depositar" del cashflow, que guardaba el deposito con su fecha, su tasa y
+   su neto. Tesoreria nunca lo uso -registra el deposito en Tango- y las filas
+   que tiene son pruebas.
 
-   LA FECHA DE ACREDITACION SE GUARDA, NO SE RECALCULA AL LEER. Sale del plazo
-   de Parametros vigente el dia del deposito; cambiar el plazo despues no puede
-   mover depositos ya hechos, porque el banco ya los tomo con su propio plazo.
-   DIAS_PLAZO guarda con cuantos dias se calculo, para que esa fecha se pueda
-   explicar.
+   YA NO SE CREA: una instalacion nueva no tiene por que tener una tabla que
+   nadie lee. DONDE YA EXISTE NO SE TOCA: no hay bajas fisicas, y nada del
+   modulo la lee ni la escribe (lo fija tests/test_echeqs_deposito.php). Por
+   eso tampoco hay un DROP aca.
 
-   LA TASA Y EL NETO SE GUARDAN, como en Cob. Electronicos: un deposito no puede
-   quedar sin neto, y editar una alicuota no reescribe lo ya acreditado. Los
-   pendientes -los que acreditan de manana en adelante- SI se recalculan al
-   cambiar una alicuota, y ahi se reescriben TASA_APLICADA, DETALLE_TASA e
-   IMPORTE_NETO. DETALLE_TASA es el desglose ("IIBB 2,5% + SICREB 0,6%") con el
-   que se calculo: una tasa sin desglose no se puede auditar.
-
-   EL BANCO SE GUARDA COMO ESTABA AL DEPOSITAR, CHEQUE POR CHEQUE. Es el banco
-   emisor de ESE cheque -una tanda puede tener varios- y no tiene que
-   depender de que dbo.BANCO siga diciendo lo mismo.
-
-   NO HAY BAJAS FISICAS, Y EL HISTORIAL ES EL PUNTO. Deshacer un deposito marca
-   VIGENTE = 0 con quien y cuando; volver a depositarlo inserta una fila nueva.
-   Es el mismo criterio que RO_T_CASHFLOW_ECHEQ_EXCLUIDO: la PK es un ID y no
-   ID_SBA14, porque un cheque puede tener varias filas y solo una vigente.
-
-   SIN FK CONTRA dbo.SBA14, por el mismo motivo que la exclusion: es una tabla
-   de Tango, y una FK nuestra haria fallar una depuracion de un sistema que no
-   es nuestro. Un deposito huerfano no aparece en ninguna lectura: todas parten
-   de los cheques en cartera.
-
-   QUE UN DEPOSITO ESTE VIGENTE NO QUIERE DECIR QUE SE PROYECTE. Deja de
-   proyectarse solo, sin que nadie toque la fila, cuando el cheque sale de
-   cartera en Tango -se registro el deposito, o se rechazo- o cuando llega su
-   dia de acreditacion. Eso lo decide Echeqs::estadoDeposito(), no esta tabla.
-
+   Que el script se corrio lo dice la tabla de alicuotas
+   (Echeqs::alicuotasCreadas()), no esta.
    ----------------------------------------------------------------------------
    2. RO_T_CASHFLOW_ECHEQ_ALICUOTA
 
@@ -83,128 +57,35 @@
    pasa cuando alguien se equivoca al tipearlo, y gana la insertada despues
    (desempate por ID).
 
-   NO SIEMBRA NINGUNA ALICUOTA. Los porcentajes del banco los carga Tesoreria
-   en Parametros -> Cheques. Mientras no haya ninguna vigente, el deposito se
-   rechaza diciendo que falta cargarla: un neto igual al bruto informaria de
-   mas sin decirlo.
+   LA TASA Y EL NETO NO SE GUARDAN EN NINGUN LADO. Se calculan al leer, con las
+   alicuotas vigentes a la fecha de acreditacion de cada cheque: cargar o dar
+   de baja una alicuota cambia solo el neto de los que todavia no acreditaron.
 
+   NO SIEMBRA NINGUNA ALICUOTA. Los porcentajes del banco los carga Tesoreria
+   en Parametros -> Cheques. Mientras no haya ninguna vigente, un cheque
+   depositado queda sin neto: no se proyecta y la pestana lo avisa como
+   critico. Un neto igual al bruto informaria de mas sin decirlo.
    ----------------------------------------------------------------------------
    3. EL PLAZO DE ACREDITACION
 
    'echeqs_dias_acreditacion_deposito' = 2 en RO_T_CASHFLOW_PARAMETROS, modulo
    PRECHEQUEADO -la sub-pestana que ahora se llama Cheques; el codigo no cambio
    para no perder los permisos ya asignados-. Son DIAS HABILES BANCARIOS
-   despues del deposito: con 2, lunes -> miercoles y viernes -> martes.
+   despues de la boleta de deposito: con 2, lunes -> miercoles y viernes ->
+   martes. Como el neto, la fecha se calcula al leer: cambiar el plazo mueve
+   tambien los cheques que todavia no acreditaron.
 
    Si el parametro ya existe NO se toca su VALOR: alguien pudo haberlo editado.
-
    ----------------------------------------------------------------------------
-   EL DIA QUE SE CORRA ESTO EL TABLERO NO SE MUEVE NI UN PESO: las dos tablas
-   nacen vacias, asi que no hay ningun cheque depositado.
+   EL DIA QUE SE CORRA ESTO, los cheques depositados en Tango empiezan a tener
+   neto y a proyectarse -si ya hay alicuotas cargadas- en "Echeqs depositados".
+   Antes de eso se listan en la pestana sin proyectarse, con un aviso critico
+   que nombra este script.
 
    ES REEJECUTABLE: cada paso pregunta si ya esta hecho.
    ============================================================================ */
 
 SET NOCOUNT ON;
-GO
-
-/* ----------------------------------------------------------------------------
-   1. LOS DEPOSITOS
-   ---------------------------------------------------------------------------- */
-IF OBJECT_ID('dbo.RO_T_CASHFLOW_ECHEQ_DEPOSITO', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.RO_T_CASHFLOW_ECHEQ_DEPOSITO (
-        ID                 INT IDENTITY(1,1) NOT NULL,
-        /* La PK de dbo.SBA14. N_CHEQUE NO identifica un cheque: se repite entre
-           bancos y entre anios. */
-        ID_SBA14           INT           NOT NULL,
-        /* Copia para leer el historial sin depender de Tango. Es float en
-           SBA14; aca va entero, que es lo que es. */
-        N_CHEQUE           BIGINT        NULL,
-        ID_BANCO           INT           NOT NULL,
-        DESC_BANCO         VARCHAR(60)   NULL,
-
-        FECHA_DEPOSITO     DATE          NOT NULL,
-        FECHA_ACREDITACION DATE          NOT NULL,
-        DIAS_PLAZO         INT           NOT NULL,
-
-        IMPORTE_BRUTO      DECIMAL(18,4) NOT NULL,
-        TASA_APLICADA      DECIMAL(9,6)  NOT NULL,
-        DETALLE_TASA       VARCHAR(200)  NULL,
-        IMPORTE_NETO       DECIMAL(18,4) NOT NULL,
-
-        OBSERVACION        VARCHAR(200)  NULL,
-
-        VIGENTE            BIT           NOT NULL
-            CONSTRAINT DF_RO_T_CF_ECHEQDEP_VIGENTE DEFAULT (1),
-
-        USUARIO_ALTA       VARCHAR(50)   NULL,
-        FECHA_ALTA         DATETIME      NOT NULL
-            CONSTRAINT DF_RO_T_CF_ECHEQDEP_ALTA DEFAULT (GETDATE()),
-        USUARIO_MODIF      VARCHAR(50)   NULL,
-        FECHA_MODIF        DATETIME      NOT NULL
-            CONSTRAINT DF_RO_T_CF_ECHEQDEP_MODIF DEFAULT (GETDATE()),
-        /* Quien deshizo el deposito y cuando. Con FECHA_ALTA sola no se puede
-           distinguir un deposito deshecho a los cinco minutos de uno que
-           estuvo vigente dos dias. */
-        USUARIO_BAJA       VARCHAR(50)   NULL,
-        FECHA_BAJA         DATETIME      NULL,
-
-        CONSTRAINT PK_RO_T_CASHFLOW_ECHEQ_DEPOSITO PRIMARY KEY CLUSTERED (ID),
-        /* El plazo es de al menos un dia habil: con cero el cheque acreditaria
-           el mismo dia del deposito, que es justo lo que el plazo existe para
-           no suponer. */
-        CONSTRAINT CK_RO_T_CF_ECHEQDEP_PLAZO CHECK (DIAS_PLAZO >= 1),
-        CONSTRAINT CK_RO_T_CF_ECHEQDEP_FECHAS CHECK (FECHA_ACREDITACION > FECHA_DEPOSITO),
-        CONSTRAINT CK_RO_T_CF_ECHEQDEP_BRUTO CHECK (IMPORTE_BRUTO > 0),
-        /* Una tasa de 1 o mas dejaria el neto en cero o negativo: un ingreso
-           restaria plata del tablero. La suma la valida PHP al guardar la
-           alicuota; esto es la ultima red. */
-        CONSTRAINT CK_RO_T_CF_ECHEQDEP_TASA CHECK (TASA_APLICADA >= 0 AND TASA_APLICADA < 1)
-    );
-
-    /* La lectura de cada carga de la pestana y del tablero es "el deposito
-       vigente de cada cheque". */
-    CREATE NONCLUSTERED INDEX IX_RO_T_CF_ECHEQDEP_VIGENTE
-        ON dbo.RO_T_CASHFLOW_ECHEQ_DEPOSITO (VIGENTE, ID_SBA14)
-        INCLUDE (FECHA_ACREDITACION, IMPORTE_BRUTO, IMPORTE_NETO);
-
-    /* El recalculo al cambiar una alicuota busca los vigentes que acreditan
-       de manana en adelante. */
-    CREATE NONCLUSTERED INDEX IX_RO_T_CF_ECHEQDEP_ACREDITA
-        ON dbo.RO_T_CASHFLOW_ECHEQ_DEPOSITO (VIGENTE, FECHA_ACREDITACION);
-
-    PRINT 'Creada dbo.RO_T_CASHFLOW_ECHEQ_DEPOSITO.';
-END
-ELSE
-BEGIN
-    PRINT 'dbo.RO_T_CASHFLOW_ECHEQ_DEPOSITO ya existe: no se toca.';
-END
-GO
-
-/* ----------------------------------------------------------------------------
-   UN SOLO DEPOSITO VIGENTE POR CHEQUE.
-
-   Dos depositos vigentes del mismo cheque sumarian dos veces su neto a la fila
-   del tablero. PHP ya rechaza depositar un cheque depositado, pero dos
-   pestanas abiertas pueden mandar el mismo cheque al mismo tiempo: el indice
-   es lo que hace que el segundo falle en la base.
-
-   INDICE UNICO FILTRADO y no constraint: un UNIQUE comun prohibiria tambien
-   las filas historicas repetidas, que es lo que esta tabla tiene que guardar.
-   ---------------------------------------------------------------------------- */
-IF NOT EXISTS (
-    SELECT 1 FROM sys.indexes
-    WHERE name = 'UX_RO_T_CF_ECHEQDEP_VIGENTE'
-      AND object_id = OBJECT_ID('dbo.RO_T_CASHFLOW_ECHEQ_DEPOSITO')
-)
-BEGIN
-    CREATE UNIQUE NONCLUSTERED INDEX UX_RO_T_CF_ECHEQDEP_VIGENTE
-        ON dbo.RO_T_CASHFLOW_ECHEQ_DEPOSITO (ID_SBA14)
-        WHERE VIGENTE = 1;
-
-    PRINT 'Creado el indice unico de depositos vigentes.';
-END
 GO
 
 /* ----------------------------------------------------------------------------
@@ -282,8 +163,9 @@ GO
 /* ----------------------------------------------------------------------------
    4. Control: el plazo tiene que ser un entero de 1 a 30.
 
-   Se pudo haber editado por fuera de la pantalla. Con un valor invalido la
-   pestana no deja depositar y dice por que; esto lo avisa al correr.
+   Se pudo haber editado por fuera de la pantalla. Con un valor invalido los
+   depositados no se proyectan y la pestana dice por que; esto lo avisa al
+   correr.
    ---------------------------------------------------------------------------- */
 IF EXISTS (
     SELECT 1 FROM dbo.RO_T_CASHFLOW_PARAMETROS
@@ -291,9 +173,9 @@ IF EXISTS (
       AND (TRY_CAST(VALOR AS INT) IS NULL OR TRY_CAST(VALOR AS INT) NOT BETWEEN 1 AND 30)
 )
 BEGIN
-    RAISERROR('ATENCION: echeqs_dias_acreditacion_deposito no es un entero de 1 a 30. Corregilo en Parametros -> Cheques: mientras tanto no se puede depositar.', 16, 1);
+    RAISERROR('ATENCION: echeqs_dias_acreditacion_deposito no es un entero de 1 a 30. Corregilo en Parametros -> Cheques: mientras tanto los depositados no se proyectan.', 16, 1);
 END
 GO
 
-PRINT 'Deposito de cheques de cartera listo.';
+PRINT 'Alicuotas y plazo del deposito de cheques listos.';
 GO

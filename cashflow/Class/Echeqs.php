@@ -16,8 +16,9 @@ require_once __DIR__ . '/DiasHabiles.php';
  * -------------------------------------------------
  *   Cheques en Cartera        -> ESTADO = 'C'. Es plata que va a entrar, asi que
  *                                alimenta la fila "Echeqs en cartera" de
- *                                DISPONIBILIDADES a traves de EcheqsProvider; y
- *                                los que se depositan, la fila "Echeqs
+ *                                DISPONIBILIDADES a traves de EcheqsProvider.
+ *                                Los que Tesoreria deposita en Tango (ESTADO =
+ *                                'A' con boleta BDE) alimentan "Echeqs
  *                                depositados", por el neto y el dia que
  *                                acreditan. Ver README-echeqs.md.
  *   Venta Cobrada Anticipada  -> cheques de clientes que pre-chequean. NO
@@ -96,12 +97,32 @@ require_once __DIR__ . '/DiasHabiles.php';
  *    condicion extra: quien vea el contador 'sin_fecha' siempre en cero no tiene
  *    que sospechar que esta roto.
  *
- * EL UNIVERSO ES [FL]: FRANQUICIAS Y LOCALES
- * ------------------------------------------
- * Todas las consultas filtran CLIENTE LIKE '[FL]%'. La columna es
- * Latin1_General_BIN, o sea que la comparacion distingue mayusculas; verificado
- * contra la base, los codigos empiezan en 'F' o 'M' y ninguno en minuscula. Los
- * 'M' (mayoristas) quedan fuera del modulo a proposito.
+ * EL UNIVERSO: CARTERA SIN FILTRO DE CLIENTE, VENTA COBRADA ANTICIPADA [FL]
+ * -----------------------------------------------------------------------
+ * Cheques en Cartera -la cartera, los depositados y el resumen de excluidos-
+ * lee TODOS los cheques de terceros de dbo.SBA14, sin mirar el cliente. Hasta
+ * el 16/10/2026 filtraba por el prefijo del codigo, y cada cheque que quedaba
+ * afuera era plata que no estaba en ninguna fila del tablero: primero los
+ * mayoristas (586 cheques en cartera por $ 481.132.774,46) y despues los que
+ * no tienen cliente (6 por $ 104.142.740,64, de GO SERVICIOS DIGITALES).
+ *
+ * POR QUE NO SE CUENTAN DOS VECES:
+ *
+ *   Los de un cliente     entran con un recibo de cobro en cuenta corriente
+ *                         (T_COMP_REC = 'REC') que ya cancelo la factura: la
+ *                         cobranza de Cobranzas FR y Cobranzas May proyecta
+ *                         solo lo pendiente.
+ *   Los sin cliente       entran por CAJA INGRESO (CAI). Hoy son de GO
+ *                         ("GO CUOTAS"): el medio de pago "Go Cuotas" del mix
+ *                         de cobro de Ventas (LOCALES y ECOMMERCE) esta
+ *                         INACTIVO y en 0%. SI ALGUIEN LO ACTIVA, esa plata se
+ *                         contaria en la cobranza proyectada de Ventas y
+ *                         aca. Ver README-echeqs.md.
+ *
+ * Venta Cobrada Anticipada sigue en '[FL]%': es otro circuito, que netea la
+ * cobranza proyectada de Ventas por canal (canalDeCliente()). La columna
+ * CLIENTE es Latin1_General_BIN, o sea que esa comparacion distingue
+ * mayusculas; verificado contra la base, ningun codigo empieza en minuscula.
  */
 class Echeqs {
 
@@ -131,10 +152,29 @@ class Echeqs {
     const MOTIVO_MAX = 200;
 
     /**
-     * Depositos de cheques de cartera. Una fila por deposito, con historial:
-     * deshacer marca VIGENTE = 0 y no borra nada.
+     * Las marcas "ya acredito" de los cheques depositados. Una fila por marca,
+     * con historial: deshacer marca VIGENTE = 0 y no borra nada.
      */
-    const TABLA_DEPOSITO = 'RO_T_CASHFLOW_ECHEQ_DEPOSITO';
+    const TABLA_ACREDITADO = 'RO_T_CASHFLOW_ECHEQ_ACREDITADO';
+
+    /**
+     * Los movimientos de las cuentas bancarias que trae Interbanking, de los
+     * ultimos 60 dias. Es una tabla de BI, no nuestra: se lee y nunca se
+     * escribe. Ver creditoExtracto().
+     */
+    const TABLA_EXTRACTO = 'BI_T_EXTRACTOS_INTERBANKING';
+
+    /** El script de la marca, para los mensajes */
+    const SCRIPT_ACREDITADO = 'sql/cashflow_echeqs_acreditado.sql';
+
+    /**
+     * Quien grabo una marca. Hoy solo MANUAL: una persona desde la pestana.
+     * INTERBANKING queda en el CHECK para un proceso que grabe marcas, que ya
+     * no hace falta: el extracto se lee directo (creditoExtracto()). LA REGLA
+     * NO MIRA EL ORIGEN: lo dice el tooltip.
+     */
+    const ORIGEN_MANUAL = 'MANUAL';
+    const ORIGEN_INTERBANKING = 'INTERBANKING';
 
     /**
      * Las alicuotas de retencion de los cheques depositados. Es un juego PROPIO
@@ -143,7 +183,10 @@ class Echeqs {
      */
     const TABLA_ALICUOTA = 'RO_T_CASHFLOW_ECHEQ_ALICUOTA';
 
-    /** Los dos scripts del circuito de deposito, para los mensajes */
+    /**
+     * Los scripts del deposito, para los mensajes: el de las alicuotas y el
+     * plazo, y el de la fila "Echeqs depositados" del tablero.
+     */
     const SCRIPT_DEPOSITO = 'sql/cashflow_echeqs_deposito.sql';
     const SCRIPT_FILA_DEPOSITADOS = 'sql/cashflow_estructura_echeqs_depositados.sql';
 
@@ -190,11 +233,17 @@ class Echeqs {
     private $tablaExcluido = null;
 
     /**
-     * @var bool|null Cache del chequeo de las tablas del deposito. Aparte de
-     * las otras dos por el mismo motivo: es un script independiente, y quien
-     * no lo corrio pierde solo el deposito.
+     * @var bool|null Cache del chequeo de la tabla de alicuotas. Aparte de las
+     * otras dos por el mismo motivo: es un script independiente, y quien no lo
+     * corrio pierde solo el neto de los depositados.
      */
-    private $tablasDeposito = null;
+    private $tablaAlicuota = null;
+
+    /** @var bool|null Cache del chequeo de la tabla de la marca "ya acredito" */
+    private $tablaAcreditado = null;
+
+    /** @var bool|null Cache del chequeo de la tabla del extracto de Interbanking */
+    private $tablaExtracto = null;
 
     /** @var Conexion */
     private $conn;
@@ -385,12 +434,13 @@ class Echeqs {
     }
 
     /**
-     * El plazo que sirve para depositar, a partir de lo que hay en la base.
+     * El plazo de acreditacion que sirve, a partir de lo que hay en la base.
      *
      * UN PLAZO QUE FALTA O ESTA ROTO ES null CON EL MOTIVO, nunca un 2 de
      * respaldo: el plazo es un valor de negocio y vive en Parametros. Un
-     * respaldo escrito aca depositaria con un numero que nadie eligio y que en
-     * la pantalla se veria igual que uno configurado.
+     * respaldo escrito aca proyectaria los depositados con un numero que nadie
+     * eligio y que en la pantalla se veria igual que uno configurado. Sin
+     * plazo, los depositados no se proyectan y avisan como critico.
      *
      * @param string|null $valor Lo que dice la fila, o null si no existe
      * @return array ['dias' => int|null, 'error' => string|null]
@@ -466,8 +516,8 @@ class Echeqs {
      * desglose y cuantos conceptos.
      *
      * SIN ALICUOTAS 'tasa' ES null, NO 0. La pantalla dice "sin alícuotas":
-     * un 0% se leeria como "el banco no retiene nada", y con eso no se puede
-     * depositar.
+     * un 0% se leeria como "el banco no retiene nada", y sin tasa un
+     * depositado no tiene neto.
      *
      * @param array $alicuotas
      * @param string $fecha 'Y-m-d'
@@ -486,31 +536,149 @@ class Echeqs {
     /* ====================================================================
        DEPOSITO: LAS REGLAS
 
-       Un deposito se calcula en el servidor y se guarda entero: banco, fechas,
-       plazo, bruto, tasa y neto. Del navegador llegan solo los ids de los
-       cheques. Cada regla tiene UNA funcion, y la usan la pestana, el
-       guardado, el recalculo y el proveedor: si dos caminos resolvieran la
-       acreditacion o el estado de un deposito con criterios distintos, el
-       cheque se veria en una columna y el tablero lo sumaria en otra.
+       EL DEPOSITO SE LEE DE TANGO. Tesoreria lo registra en Tango en el mismo
+       momento en que deposita el cheque en el banco -con una boleta de
+       deposito, BDE-, a proposito: asi nadie le asigna ese cheque a un pago.
+       El cheque pasa a ESTADO = 'A' y sale de la lectura de cartera. Antes el
+       cashflow esperaba que alguien marcara el deposito mientras el cheque
+       seguia en cartera, y eso no pasaba nunca: durante las 48 hs habiles
+       hasta que acreditaba, la plata no estaba en ninguna fila del tablero.
+
+       NADA DEL DEPOSITO SE GUARDA. La fecha de la boleta es la de Tango; la
+       acreditacion, la tasa y el neto se calculan AL LEER con el plazo y las
+       alicuotas de Parametros -> Cheques. Un cambio en cualquiera de los dos
+       se ve solo en los cheques que todavia no acreditaron, sin recalcular
+       nada.
+
+       Cada regla tiene UNA funcion, y la usan la pestana y el proveedor: si
+       dos caminos resolvieran la acreditacion o el estado de un deposito con
+       criterios distintos, el cheque se veria en una columna y el tablero lo
+       sumaria en otra.
        ==================================================================== */
 
-    /** El deposito se proyecta: acredita de manana en adelante y sigue en cartera */
+    /** El deposito se proyecta: acredita de manana en adelante y nadie dijo que ya acredito */
     const DEPOSITO_PROYECTA = 'PROYECTA';
 
     /**
-     * El deposito ya acredito -hoy o antes- y el cheque sigue en cartera en
-     * Tango: la plata ya esta en el banco y falta registrarlo.
+     * El deposito ya acredito: el extracto de Interbanking trae el credito
+     * (ACREDITADO_POR_EXTRACTO), llego su dia (ACREDITADO_POR_PLAZO) o alguien
+     * lo marco "ya acredito" (ACREDITADO_POR_MARCA). La plata ya esta en el
+     * saldo bancario y no suma a ninguna fila.
      */
     const DEPOSITO_ACREDITADO = 'ACREDITADO';
 
     /**
+     * Al deposito le falta la fecha de acreditacion -plazo roto o ningun habil
+     * en el tope- o el neto -sin alicuotas vigentes a su acreditacion-. No se
+     * proyecta y AVISA como critico: un dato que falta no se reemplaza por un
+     * cero ni por el bruto.
+     */
+    const DEPOSITO_SIN_DATOS = 'SIN_DATOS';
+
+    /** Por que un deposito cuenta como acreditado */
+    const ACREDITADO_POR_PLAZO = 'PLAZO';
+    const ACREDITADO_POR_MARCA = 'MARCA';
+
+    /**
+     * El extracto de Interbanking trae un credito con el numero y el importe
+     * del cheque: el banco ya lo acredito. Ver creditoExtracto().
+     */
+    const ACREDITADO_POR_EXTRACTO = 'EXTRACTO';
+
+    /** El estado de dbo.SBA14 de un cheque que salio de cartera: aplicado */
+    const ESTADO_APLICADO = 'A';
+
+    /**
+     * El comprobante de salida que es un deposito: la boleta de deposito de
+     * Tesoreria ("BANCO: DEPOSITO" en dbo.SBA02).
+     *
+     * SE IDENTIFICA POR EL CODIGO, T_COMP_SAL, y no por ID_SBA02_SAL. Las dos
+     * columnas coinciden siempre -verificado el 16/10/2026: las 27.627 filas
+     * con 'BDE' tienen ID_SBA02_SAL = 11-, pero el codigo es la misma clave
+     * con la que se lee la boleta en dbo.SBA05 (COD_COMP) y un id interno
+     * puede cambiar entre instalaciones de Tango. Un 'O/P' es una orden de
+     * pago: el cheque se endoso a un proveedor y no entra al banco.
+     */
+    const COMPROBANTE_DEPOSITO = 'BDE';
+
+    /**
+     * dbo.SBA01.TIPO de una cuenta bancaria. Una boleta de deposito tambien se
+     * usa para mover cheques a cuentas que no son un banco -la cuenta
+     * comitente de Santander Valores, la caja-; esa plata no acredita a las
+     * 48 hs en el saldo de Interbanking.
+     */
+    const TIPO_CUENTA_BANCO = 'B';
+
+    /**
+     * FECHA_SAL, como FECHA_CHEQ, trae la centinela '1800-01-01' cuando no hay
+     * fecha. Todo lo anterior a esto no es una fecha real.
+     */
+    const FECHA_REAL_DESDE = '1900-01-01';
+
+    /**
+     * Si una fila de dbo.SBA14 es un deposito.
+     *
+     * LAS CUATRO CONDICIONES, y por que:
+     *
+     *   ESTADO = 'A'          salio de cartera. Uno que despues se rechaza o se
+     *                         anula pasa a 'R' o 'X' y deja de leerse solo.
+     *   T_COMP_SAL = 'BDE'    salio por una boleta de deposito y no por una
+     *                         orden de pago (endoso a un proveedor).
+     *   FECHA_SAL real        no la centinela 1800-01-01.
+     *   CUENTA BANCARIA       la cuenta que la boleta debita en dbo.SBA05 es un
+     *                         banco (dbo.SBA01.TIPO = 'B'). Quedan afuera el
+     *                         endoso a Santander Valores -va a la cuenta
+     *                         comitente- y las devoluciones -van a la caja-.
+     *
+     * TIPO_SAL NO DECIDE NADA. 'D' trae la cuenta en CTA_DESTIN y 'O' la deja
+     * en 0, pero las boletas de los dos tienen la misma forma en dbo.SBA05:
+     * una linea al debe contra la cuenta destino y una al haber contra
+     * CHEQUES ELECTRONICOS. Verificado el 16/10/2026 sobre 120 dias de
+     * boletas: ninguna tiene dos lineas al debe.
+     *
+     * SIN LA LINEA DE LA BOLETA -$cuenta null- CUENTA COMO DEPOSITO. Es un dato
+     * que falta, no uno que diga que no entra al banco, y la regla por
+     * defecto es que una boleta de deposito es un deposito. Quien llama lo
+     * avisa.
+     *
+     * EL CLIENTE NO SE MIRA: Cheques en Cartera lee todos los cheques, tambien
+     * los que no tienen cliente. Ver el encabezado.
+     *
+     * Estatica y pura. La consulta aplica las tres primeras como filtro; la
+     * cuarta necesita la boleta, que se lee aparte.
+     *
+     * @param array $fila Con ESTADO, T_COMP_SAL y FECHA_SAL
+     * @param array|null $cuenta ['cod_cta', 'descripcion', 'tipo'] de la linea
+     *        al debe de la boleta, o null si no se encontro
+     * @return bool
+     */
+    public static function esDepositoTango($fila, $cuenta) {
+        $fecha = Horizonte::normalizarFecha(isset($fila['FECHA_SAL']) ? $fila['FECHA_SAL'] : null);
+
+        if (!isset($fila['ESTADO']) || trim((string) $fila['ESTADO']) !== self::ESTADO_APLICADO
+            || !isset($fila['T_COMP_SAL'])
+            || trim((string) $fila['T_COMP_SAL']) !== self::COMPROBANTE_DEPOSITO
+            || $fecha === null || $fecha < self::FECHA_REAL_DESDE) {
+            return false;
+        }
+
+        if ($cuenta === null) {
+            return true;
+        }
+
+        return trim((string) $cuenta['tipo']) === self::TIPO_CUENTA_BANCO;
+    }
+
+    /**
      * La fecha de acreditacion de un deposito: el N-esimo dia habil bancario
-     * POSTERIOR al del deposito, con N = el plazo de Parametros.
+     * POSTERIOR al de la boleta, con N = el plazo de Parametros.
      *
      * LA FECHA DEL CHEQUE NO INTERVIENE, y es una decision de negocio: el banco
      * acredita a las 48 hs habiles de recibir el deposito, sea cual sea la
      * fecha escrita en el cheque. Un cheque fechado dentro de veinte dias
-     * depositado hoy acredita el miercoles, no dentro de veinte dias.
+     * depositado hoy acredita el miercoles, no dentro de veinte dias. Vale
+     * tambien para un descuento de echeqs: si el banco acredita antes, se
+     * marca "ya acredito".
      *
      * Con 2: lunes -> miercoles, viernes -> martes, sabado o domingo -> martes.
      * Un deposito hecho un feriado cuenta desde el habil siguiente. La mecanica
@@ -518,9 +686,9 @@ class Echeqs {
      * resto del modulo y su aviso de calendario faltante.
      *
      * SIN NINGUN HABIL EN EL TOPE LA FECHA ES null: un deposito no puede
-     * acreditar en una fecha inventada, y quien llama lo rechaza.
+     * acreditar en una fecha inventada. Quien llama no lo proyecta y avisa.
      *
-     * @param string $fechaDeposito 'Y-m-d'
+     * @param string $fechaDeposito 'Y-m-d' de la boleta
      * @param int $plazo Dias habiles
      * @param array $habiles Mapa 'Y-m-d' => bool de RO_T_CALENDARIO
      * @return array ['fecha' => 'Y-m-d'|null, 'faltan' => ['Y-m'], 'sin_habil' => bool,
@@ -543,132 +711,342 @@ class Echeqs {
     }
 
     /**
-     * Desde y hasta que dia hay que leer el calendario para un deposito de hoy.
+     * Desde que fecha de boleta hay que leer los depositos, y hasta que dia el
+     * calendario.
      *
-     * Cada dia habil del plazo puede correrse hasta DiasHabiles::MAX_CORRIMIENTO
-     * dias. Pedir de menos haria que el respaldo de lunes a viernes se
-     * disparara por un rango corto y no por un calendario que falta, con un
-     * aviso que no describe nada real. Mismo criterio que
+     * LO NECESARIO Y NADA MAS. Cada dia habil del plazo puede correrse hasta
+     * DiasHabiles::MAX_CORRIMIENTO dias, asi que un deposito con la boleta
+     * anterior a hoy - plazo x MAX_CORRIMIENTO ya acredito seguro y no
+     * aporta nada. El calendario va de ahi hasta lo mismo para adelante: pedir
+     * de menos haria que el respaldo de lunes a viernes se disparara por un
+     * rango corto y no por un calendario que falta. Mismo criterio que
      * Saldos::rangoCalendarioAcreditacion().
      *
+     * SIN PLAZO -parametro roto o faltante- no hay acreditacion que calcular:
+     * se leen los depositos de un solo tramo de corrimiento, para poder
+     * avisar cuantos quedaron sin proyectar, y no los de treinta.
+     *
      * @param string $hoy 'Y-m-d'
-     * @param int $plazo
+     * @param int|null $plazo
      * @return array ['desde' => 'Y-m-d', 'hasta' => 'Y-m-d']
      */
-    public static function rangoCalendarioDeposito($hoy, $plazo) {
+    public static function rangoDepositos($hoy, $plazo) {
         $dias = max(1, intval($plazo)) * DiasHabiles::MAX_CORRIMIENTO;
 
         return [
-            'desde' => $hoy,
+            'desde' => date('Y-m-d', strtotime($hoy . ' -' . $dias . ' day')),
             'hasta' => date('Y-m-d', strtotime($hoy . ' +' . $dias . ' day'))
         ];
     }
 
     /**
-     * En que estado esta un deposito VIGENTE, hoy.
+     * El credito del extracto de Interbanking que dice que el banco ya
+     * acredito este cheque, o null.
      *
-     * UN DEPOSITO SE PROYECTA MIENTRAS SE CUMPLAN DOS COSAS:
+     * EL CRUCE ES POR NUMERO E IMPORTE, y nada mas: NRO_COMPROBANTE = el numero
+     * del cheque, IMPORTE = el bruto -el banco acredita el cheque entero y
+     * debita la retencion aparte-, un credito (TIPO_MOV = 'C') y con fecha
+     * entre la boleta y hoy. Si hay varios, vale el mas viejo. El tope de hoy
+     * es el de la fecha inyectada: un credito posterior no puede decir que ya
+     * acredito.
      *
-     *   1. el cheque sigue en cartera en Tango (ESTADO = 'C'), y
-     *   2. acredita DE MANANA EN ADELANTE.
+     * POR QUE NO POR IMPORTE SOLO. Galicia informa el numero del cheque en
+     * NRO_COMPROBANTE; Frances acredita cada cheque por el importe exacto pero
+     * con un numero del banco, y Santander no detalla los echeqs: solo trae el
+     * total del dia. Cruzar por importe solo pondria a Frances, pero tambien
+     * cualquier otro credito del mismo importe. Decision de Tesoreria: lo que
+     * no cruza sigue por plazo o con la marca manual. Verificado el 16/10/2026.
      *
-     * Deja de proyectarse solo, sin que nadie toque la fila:
+     * LA AUSENCIA NO DICE NADA. El extracto guarda 60 dias y no todos los
+     * bancos detallan los echeqs: que no haya credito no quiere decir que no
+     * acredito. Solo un credito encontrado da el cheque por acreditado.
      *
-     *   - SE REGISTRO EL DEPOSITO EN TANGO -el cheque salio de cartera, en
-     *     cualquier estado-: ya no esta en la lectura. Es lo esperado y no
-     *     avisa. Un rechazo ('R', 'X') sale por el mismo camino.
-     *   - LLEGO SU DIA DE ACREDITACION Y SIGUE EN CARTERA: la plata ya esta -o
-     *     va a estar al cierre- en el saldo bancario de la pestana Saldos, asi
-     *     que sumarlo tambien en esta fila la contaria dos veces. Es el corte de
-     *     Cob. Electronicos, Retenciones::cortePendientes(), y es el MISMO a
-     *     proposito: la misma acreditacion de hoy no puede contarse en una fila
-     *     y no en la otra. No suma a ninguna fila y AVISA, porque en Tango
-     *     falta registrar el deposito.
+     * Estatica y pura.
      *
-     * @param array|null $deposito Con 'fecha_acreditacion', o null si no hay
-     * @param bool $enCartera
-     * @param string $hoy 'Y-m-d'
-     * @return string|null DEPOSITO_PROYECTA, DEPOSITO_ACREDITADO, o null si no
-     *         hay deposito o el cheque ya salio de cartera
+     * @param array $fila Con N_CHEQUE, IMPORTE y FECHA_SAL
+     * @param array $creditos Los de leerCreditosExtracto()
+     * @param array $usados Mapa id del movimiento => true: un movimiento
+     *        acredita un solo cheque
+     * @param string|null $hoy 'Y-m-d'. Sin fecha, no hay tope
+     * @return array|null El credito: ['id', 'fecha', 'nro_banco', 'banco',
+     *         'nro_cuenta', 'comprobante', 'importe', 'descripcion']
      */
-    public static function estadoDeposito($deposito, $enCartera, $hoy) {
-        if (empty($deposito) || !$enCartera) {
+    public static function creditoExtracto($fila, $creditos, $usados = [], $hoy = null) {
+        $numero = isset($fila['N_CHEQUE']) ? intval($fila['N_CHEQUE']) : 0;
+        $importe = round(floatval($fila['IMPORTE']), 2);
+        $desde = Horizonte::normalizarFecha(isset($fila['FECHA_SAL']) ? $fila['FECHA_SAL'] : null);
+        $elegido = null;
+
+        if ($numero <= 0 || $desde === null) {
             return null;
         }
 
-        $acredita = Horizonte::normalizarFecha($deposito['fecha_acreditacion']);
+        foreach (is_array($creditos) ? $creditos : [] as $c) {
+            if (isset($usados[$c['id']])
+                || (isset($c['tipo_mov']) && $c['tipo_mov'] !== 'C')
+                || intval($c['comprobante']) !== $numero
+                || abs(round(floatval($c['importe']), 2) - $importe) >= 0.005
+                || $c['fecha'] === null || $c['fecha'] < $desde
+                || ($hoy !== null && $c['fecha'] > $hoy)) {
+                continue;
+            }
 
-        if ($acredita !== null && $acredita >= Retenciones::cortePendientes($hoy)) {
-            return self::DEPOSITO_PROYECTA;
+            if ($elegido === null || $c['fecha'] < $elegido['fecha']
+                || ($c['fecha'] === $elegido['fecha'] && $c['id'] < $elegido['id'])) {
+                $elegido = $c;
+            }
         }
 
-        return self::DEPOSITO_ACREDITADO;
+        return $elegido;
     }
 
     /**
-     * Si un cheque en cartera se lee en la pestana y en el tablero.
+     * Todo lo que se sabe de un deposito, hoy: acreditacion, tasa, neto y en
+     * que estado esta. ES LA REGLA QUE DECIDE DONDE CAE UN CHEQUE DEPOSITADO
+     * Y POR CUANTO, y la usan la pestana y el proveedor.
      *
-     * LOS NO DEPOSITADOS, DESDE HOY: el filtro de siempre, que deja afuera la
-     * fecha centinela 1800-01-01 sin ninguna condicion extra.
+     *   Acreditacion  fechaAcreditacion(FECHA_SAL, plazo).
+     *   Tasa          la suma de las alicuotas vigentes A LA FECHA DE
+     *                 ACREDITACION, como Cob. Electronicos.
+     *   Neto          Retenciones::importeNeto() sobre el bruto del cheque.
      *
-     * LOS DEPOSITADOS, AUNQUE SU FECHA YA HAYA PASADO. Un cheque con fecha de
-     * hoy depositado hoy acredita pasado manana: con el filtro de siempre,
-     * manana saldria de la lectura y desapareceria del flujo antes de
-     * acreditar. Mientras su deposito este VIGENTE se lee, y estadoDeposito()
-     * decide si se proyecta o avisa.
+     * EL ESTADO, en este orden:
      *
-     * UN DEPOSITO DESHECHO NO CUENTA. Deshacer da de baja la fila, y el cheque
-     * vuelve a la regla de los no depositados: si su fecha ya paso, no
-     * reaparece. Por eso la consulta une el deposito con VIGENTE = 1 EN LA
-     * CONDICION DE LA UNION y no en el WHERE -ver sqlCartera()-: en el WHERE,
-     * un deposito dado de baja seguiria trayendo la fila.
+     *   1. acredita ANTES de hoy        ACREDITADO por plazo, y no se lista:
+     *                                   ya esta en el saldo y no hay nada que
+     *                                   seguir.
+     *   2. con credito en el extracto   ACREDITADO por EXTRACTO: el banco ya
+     *                                   lo acredito (creditoExtracto()). Se
+     *                                   lista hasta su fecha por plazo, como
+     *                                   la marca.
+     *   3. acredita HOY                 ACREDITADO por plazo, y se lista ese
+     *                                   dia sin sumar. Es el corte de Cob.
+     *                                   Electronicos (cortePendientes()): lo
+     *                                   que acredita hoy ya esta -o va a estar
+     *                                   al cierre- en el saldo de Interbanking,
+     *                                   y contarlo aca lo contaria dos veces.
+     *   4. marcado "ya acredito"        ACREDITADO por marca, y se lista hasta
+     *                                   su fecha de acreditacion. LA MARCA NO
+     *                                   DEPENDE DEL ORIGEN: una manual y una de
+     *                                   Interbanking dicen lo mismo.
+     *   5. sin fecha o sin neto         SIN_DATOS: no se proyecta, se lista y
+     *                                   se avisa como critico.
+     *   6. lo demas                     PROYECTA, en su acreditacion y por el
+     *                                   neto.
      *
-     * La consulta aplica el mismo filtro como optimizacion; la regla que
-     * decide es esta, y esta probada.
+     * Estatica y pura: recibe todo lo leido. El plazo es el de
+     * plazoDesdeValor(), con su motivo si falta.
      *
-     * @param array $fila Con FECHA_CHEQUE y DEPOSITO
+     * @param array $fila Con FECHA_SAL, IMPORTE, N_COMP_SAL, TIPO_SAL y CTA_DESTIN
+     * @param array|null $cuenta La de la linea al debe de la boleta
+     * @param array $plazo ['dias' => int|null, 'error' => string|null]
+     * @param array $habiles Mapa 'Y-m-d' => bool
+     * @param array $alicuotas Las de los cheques
+     * @param array|null $marca La marca "ya acredito" vigente, o null
      * @param string $hoy 'Y-m-d'
-     * @return bool
+     * @param array|null $credito El de creditoExtracto(), o null
+     * @return array El deposito, con 'estado', 'motivo', 'listar' y 'error'
      */
-    public static function visibleEnCartera($fila, $hoy) {
-        if (!empty($fila['DEPOSITO'])) {
-            return true;
+    public static function resolverDeposito($fila, $cuenta, $plazo, $habiles, $alicuotas, $marca, $hoy,
+                                            $credito = null) {
+        $bruto = round(floatval($fila['IMPORTE']), 4);
+        $d = [
+            'boleta' => isset($fila['N_COMP_SAL']) ? trim((string) $fila['N_COMP_SAL']) : null,
+            'fecha_deposito' => Horizonte::normalizarFecha($fila['FECHA_SAL']),
+            'tipo_sal' => isset($fila['TIPO_SAL']) ? trim((string) $fila['TIPO_SAL']) : null,
+            'cta_destin' => isset($fila['CTA_DESTIN']) ? $fila['CTA_DESTIN'] : null,
+            'cuenta' => $cuenta,
+            'dias_plazo' => $plazo['dias'],
+            'fecha_acreditacion' => null,
+            'faltan' => [],
+            'sin_habil' => false,
+            'bruto' => $bruto,
+            'tasa' => null,
+            'desglose' => '',
+            'neto' => null,
+            'marca' => $marca,
+            'extracto' => $credito,
+            'estado' => null,
+            'motivo' => null,
+            'listar' => true,
+            'error' => null
+        ];
+
+        if ($plazo['dias'] === null) {
+            $d['error'] = $plazo['error'];
+        } else {
+            $acr = self::fechaAcreditacion($d['fecha_deposito'], $plazo['dias'], $habiles);
+            $d['fecha_acreditacion'] = $acr['fecha'];
+            $d['faltan'] = $acr['faltan'];
+            $d['sin_habil'] = $acr['sin_habil'];
+
+            if ($acr['fecha'] === null) {
+                $d['error'] = DiasHabiles::avisoSinHabil($d['fecha_deposito']);
+            } else {
+                try {
+                    $r = Retenciones::resolverTasa($alicuotas, $acr['fecha'], self::TEXTOS_TASA);
+                    $d['tasa'] = $r['tasa'];
+                    $d['desglose'] = Retenciones::desglose($r['detalle']);
+                    $d['neto'] = Retenciones::importeNeto($bruto, $r['tasa']);
+                } catch (Exception $e) {
+                    $d['error'] = $e->getMessage();
+                }
+            }
         }
 
-        $fecha = isset($fila['FECHA_CHEQUE']) ? $fila['FECHA_CHEQUE'] : null;
+        $acredita = $d['fecha_acreditacion'];
 
-        return $fecha !== null && $fecha >= $hoy;
+        if ($acredita !== null && $acredita < $hoy) {
+            $d['estado'] = self::DEPOSITO_ACREDITADO;
+            $d['motivo'] = self::ACREDITADO_POR_PLAZO;
+            $d['listar'] = false;
+        } elseif (!empty($credito)) {
+            $d['estado'] = self::DEPOSITO_ACREDITADO;
+            $d['motivo'] = self::ACREDITADO_POR_EXTRACTO;
+        } elseif ($acredita !== null && $acredita < Retenciones::cortePendientes($hoy)) {
+            $d['estado'] = self::DEPOSITO_ACREDITADO;
+            $d['motivo'] = self::ACREDITADO_POR_PLAZO;
+        } elseif (!empty($marca)) {
+            $d['estado'] = self::DEPOSITO_ACREDITADO;
+            $d['motivo'] = self::ACREDITADO_POR_MARCA;
+        } elseif ($acredita === null || $d['neto'] === null) {
+            $d['estado'] = self::DEPOSITO_SIN_DATOS;
+        } else {
+            $d['estado'] = self::DEPOSITO_PROYECTA;
+        }
+
+        return $d;
     }
 
     /**
-     * Donde cae una fila de cartera en el eje, y con que importe.
+     * Los depositos de una lectura de Tango, resueltos: cuales lo son, cuales
+     * se listan, y los avisos. Es lo que devuelve getDepositadosTango() a la
+     * pestana y al proveedor, para que los dos sumen lo mismo.
      *
-     *   No depositada          la fecha del cheque, por el bruto. Como siempre.
-     *   Depositada, se proyecta la fecha de ACREDITACION, por el NETO.
-     *   Acreditada sin registrar en ninguna columna: ya esta en el saldo
-     *                          bancario. Se ve en la grilla con su marca.
+     * LOS AVISOS SON DE LO QUE SE LISTA. Un deposito que ya acredito no se
+     * proyecta de todos modos, y avisar que le faltan las alicuotas a algo
+     * que ya entro al banco pediria una accion que no cambia nada.
      *
-     * Las columnas Acredita, Retencion y Neto van vacias -null- en las no
-     * depositadas: no son cero, no hay deposito.
+     *   Sin plazo, sin habil, sin alicuotas   CRITICO: el cheque no esta en
+     *                                         ninguna fila y la plata existe.
+     *   Calendario faltante                   ATENCION: la fecha se calculo
+     *                                         con el respaldo de lunes a
+     *                                         viernes y puede estar corrida.
+     *   Boleta sin cuenta                     ATENCION: se cuenta como
+     *                                         deposito, pero nadie verifico que
+     *                                         vaya a un banco.
      *
-     * @param array $fila Con FECHA_PAGO, IMPORTE y DEPOSITO
-     * @param string $hoy 'Y-m-d'
+     * Estatica y pura.
+     *
+     * @param array $filas Las de la consulta, normalizadas
+     * @param array $cuentas Mapa N_COMP_SAL => cuenta de la linea al debe
+     * @param array $plazo El de plazoDesdeValor()
+     * @param array $habiles
+     * @param array $alicuotas
+     * @param array $marcas Mapa ID_SBA14 => marca "ya acredito" vigente
+     * @param string $hoy
+     * @param array $creditos Los del extracto de Interbanking (leerCreditosExtracto()).
+     *        Cada movimiento acredita un solo cheque: se asignan en el orden de
+     *        las filas -por fecha de boleta-, asi el deposito mas viejo toma el
+     *        credito mas viejo
+     * @return array ['filas' => [...], 'avisos' => [['nivel', 'texto']]]
+     */
+    public static function resolverDepositos($filas, $cuentas, $plazo, $habiles, $alicuotas, $marcas, $hoy,
+                                             $creditos = []) {
+        $listadas = [];
+        $sinDatos = [];
+        $faltan = [];
+        $sinCuenta = [];
+        $usados = [];
+
+        foreach (is_array($filas) ? $filas : [] as $f) {
+            $boleta = isset($f['N_COMP_SAL']) ? trim((string) $f['N_COMP_SAL']) : '';
+            $cuenta = isset($cuentas[$boleta]) ? $cuentas[$boleta] : null;
+
+            if (!self::esDepositoTango($f, $cuenta)) {
+                continue;
+            }
+
+            $id = intval($f['ID_SBA14']);
+            $credito = self::creditoExtracto($f, $creditos, $usados, $hoy);
+
+            if ($credito !== null) {
+                $usados[$credito['id']] = true;
+            }
+
+            $f['DEPOSITO'] = self::resolverDeposito($f, $cuenta, $plazo, $habiles, $alicuotas,
+                isset($marcas[$id]) ? $marcas[$id] : null, $hoy, $credito);
+
+            if (!$f['DEPOSITO']['listar']) {
+                continue;
+            }
+
+            if ($f['DEPOSITO']['estado'] === self::DEPOSITO_SIN_DATOS) {
+                $sinDatos[$f['DEPOSITO']['error']][] = $f;
+            }
+
+            foreach ($f['DEPOSITO']['faltan'] as $mes) {
+                $faltan[$mes] = true;
+            }
+
+            if ($cuenta === null) {
+                $sinCuenta[$boleta] = true;
+            }
+
+            $listadas[] = self::ubicarEnEje($f);
+        }
+
+        $avisos = [];
+
+        foreach ($sinDatos as $motivo => $grupo) {
+            $avisos[] = ['nivel' => 'danger', 'texto' => count($grupo)
+                . ' cheque(s) depositado(s) en Tango por $ '
+                . number_format(array_sum(array_column($grupo, 'IMPORTE')), 2, ',', '.')
+                . ' brutos no se proyectan en "Echeqs depositados": ' . $motivo];
+        }
+
+        foreach (DiasHabiles::avisosCalendario(array_keys($faltan)) as $t) {
+            $avisos[] = ['nivel' => 'warning', 'texto' => 'Echeqs depositados: ' . $t];
+        }
+
+        if (!empty($sinCuenta)) {
+            $avisos[] = ['nivel' => 'warning', 'texto' => 'No se encontró en Tango la cuenta que '
+                . 'debita la boleta de depósito ' . implode(', ', array_keys($sinCuenta))
+                . ': sus cheques se cuentan como depositados en un banco, sin poder verificarlo.'];
+        }
+
+        return ['filas' => $listadas, 'avisos' => $avisos];
+    }
+
+    /**
+     * Donde cae una fila de la grilla en el eje, y con que importe.
+     *
+     *   De cartera              la fecha del cheque, por el bruto. Como siempre.
+     *   Depositada, PROYECTA    la fecha de ACREDITACION, por el NETO.
+     *   Acreditada o sin datos  en ninguna columna. Se ve en la grilla con su
+     *                           marca.
+     *
+     * Las columnas Acredita, Retencion y Neto van vacias -null- en las de
+     * cartera: no son cero, no hay deposito. En una sin neto, Retencion y Neto
+     * van vacias tambien.
+     *
+     * @param array $fila Con FECHA_PAGO, IMPORTE y DEPOSITO (resuelto o null)
      * @return array La fila con ESTADO_DEPOSITO, FECHA_EJE, IMPORTE_EJE,
      *         ACREDITA, RETENCION y NETO
      */
-    public static function ubicarEnEje($fila, $hoy) {
+    public static function ubicarEnEje($fila) {
         $d = isset($fila['DEPOSITO']) ? $fila['DEPOSITO'] : null;
-        $estado = self::estadoDeposito($d, true, $hoy);
+        $estado = $d ? $d['estado'] : null;
 
         $fila['ESTADO_DEPOSITO'] = $estado;
         $fila['ACREDITA'] = $d ? $d['fecha_acreditacion'] : null;
-        $fila['RETENCION'] = $d ? round($d['bruto'] - $d['neto'], 4) : null;
-        $fila['NETO'] = $d ? $d['neto'] : null;
+        $fila['NETO'] = ($d && $d['neto'] !== null) ? $d['neto'] : null;
+        $fila['RETENCION'] = ($fila['NETO'] !== null) ? round($d['bruto'] - $d['neto'], 4) : null;
 
         if ($estado === self::DEPOSITO_PROYECTA) {
             $fila['FECHA_EJE'] = $d['fecha_acreditacion'];
             $fila['IMPORTE_EJE'] = $d['neto'];
-        } elseif ($estado === self::DEPOSITO_ACREDITADO) {
+        } elseif ($d) {
             $fila['FECHA_EJE'] = null;
             $fila['IMPORTE_EJE'] = 0.0;
         } else {
@@ -680,248 +1058,8 @@ class Echeqs {
     }
 
     /**
-     * Que cheques de un pedido se pueden depositar juntos. ES TODO O NADA: con
-     * un solo cheque que no cumple, no se deposita ninguno.
-     *
-     * LAS REGLAS, en el orden en que se informan:
-     *
-     *   - EN CARTERA HOY. Se valida contra la lectura de la base, no contra lo
-     *     que manda el navegador: un id no es una autorizacion. Es el criterio
-     *     de excluirCheques().
-     *   - NO DEPOSITADO. Un deposito vigente no se vuelve a hacer: se deshace.
-     *   - NO EXCLUIDO. Un cheque que se decidio que no va a entrar no se
-     *     deposita: primero hay que devolverlo al cashflow.
-     *   - CON BANCO. El banco emisor es obligatorio al cargar el cheque en
-     *     Tango, asi que uno sin banco -o con un ID_BANCO que no esta en
-     *     dbo.BANCO- es un dato roto, y no se guarda un deposito sin banco: es
-     *     lo que el tooltip y el historial muestran de cada cheque.
-     *   - CON IMPORTE. Un deposito de cero o negativo restaria del tablero.
-     *
-     * LOS BANCOS SE PUEDEN MEZCLAR. Los cheques se cobran por el clearing
-     * bancario, asi que una misma tanda lleva cheques de cualquier banco
-     * emisor, con el plazo y la tasa unicos de Parametros -> Cheques: ninguno
-     * de los dos depende del emisor. Cada cheque guarda su propio banco.
-     *
-     * POR QUE TODO O NADA y no "se deposita lo que se puede": el deposito es una
-     * tanda real que alguien llevo al banco. Si una parte se guarda y otra no,
-     * la pantalla dice algo distinto de lo que paso en el banco.
-     *
-     * @param array $ids Ids de dbo.SBA14 pedidos
-     * @param array $cartera Filas de getEcheqsCartera()
-     * @return array ['filas' => [...], 'rechazos' => [['id', 'n_cheque', 'motivo']],
-     *         'error' => string|null]
-     */
-    public static function validarSeleccionDeposito($ids, $cartera) {
-        $porId = [];
-
-        foreach (is_array($cartera) ? $cartera : [] as $f) {
-            $porId[intval($f['ID_SBA14'])] = $f;
-        }
-
-        $filas = [];
-        $rechazos = [];
-
-        foreach (self::idsPedidos($ids) as $id) {
-            $f = isset($porId[$id]) ? $porId[$id] : null;
-            $motivo = null;
-
-            if ($f === null) {
-                $motivo = 'ya no está en cartera en Tango';
-            } elseif (!empty($f['DEPOSITO'])) {
-                $motivo = 'ya está depositado';
-            } elseif (!empty($f['EXCLUIDO'])) {
-                $motivo = 'está excluido del cashflow: primero hay que volver a incluirlo';
-            } elseif (empty($f['ID_BANCO'])) {
-                $motivo = 'no tiene banco emisor';
-            } elseif (floatval($f['IMPORTE']) <= 0) {
-                $motivo = 'no tiene importe';
-            }
-
-            if ($motivo !== null) {
-                $rechazos[] = ['id' => $id, 'n_cheque' => $f ? $f['N_CHEQUE'] : null,
-                               'motivo' => $motivo];
-                continue;
-            }
-
-            $filas[] = $f;
-        }
-
-        $error = null;
-
-        if (empty($filas) && empty($rechazos)) {
-            $error = 'No llegó ningún cheque para depositar.';
-        } elseif (!empty($rechazos)) {
-            $error = 'No se depositó ningún cheque: ' . count($rechazos) . ' de los '
-                . (count($rechazos) + count($filas)) . ' no se pueden depositar. '
-                . implode('; ', array_map(function ($r) {
-                    return 'N° ' . ($r['n_cheque'] === null ? $r['id'] : $r['n_cheque'])
-                        . ' ' . $r['motivo'];
-                }, $rechazos)) . '.';
-        }
-
-        return ['filas' => $filas, 'rechazos' => $rechazos, 'error' => $error];
-    }
-
-    /**
-     * Todo lo que define un deposito, calculado. LANZA si no se puede calcular.
-     *
-     *   Fecha de deposito   HOY. No se elige: es el dia en que se marca.
-     *   Acreditacion        fechaAcreditacion(), con el plazo de Parametros.
-     *   Tasa                la suma de las alicuotas vigentes A LA FECHA DE
-     *                       ACREDITACION, como Cob. Electronicos: es la tasa
-     *                       del dia en que la plata entra.
-     *   Neto                Retenciones::importeNeto(), cheque por cheque.
-     *
-     * UN DEPOSITO NO PUEDE QUEDAR SIN NETO: sin alicuotas vigentes a la fecha
-     * de acreditacion se rechaza con el motivo, igual que el alta de un
-     * movimiento de Cob. Electronicos. Un neto igual al bruto informaria de
-     * mas sin decirlo.
-     *
-     * EL NETO SE REDONDEA CHEQUE POR CHEQUE y el total es la suma: es lo que se
-     * guarda, y el total del dialogo tiene que coincidir con lo que despues
-     * suma el tablero.
-     *
-     * EL BANCO ES DE CADA CHEQUE, no de la tanda: una tanda junta cheques de
-     * varios bancos emisores (ver validarSeleccionDeposito()). Cada elemento
-     * de 'cheques' lleva el suyo, tomado de la lectura de la cartera y no del
-     * pedido, y es el que se guarda. 'bancos' es el desglose para el dialogo
-     * y 'tanda' el texto que lo resume (desgloseBancos(), textoTanda()).
-     *
-     * @param array $filas Las de validarSeleccionDeposito(), ya validadas
-     * @param int $plazo Dias habiles
-     * @param array $habiles Mapa 'Y-m-d' => bool
-     * @param array $alicuotas Las de los cheques
-     * @param string $hoy 'Y-m-d'
-     * @return array
-     */
-    public static function calcularDeposito($filas, $plazo, $habiles, $alicuotas, $hoy) {
-        if (empty($filas)) {
-            throw new Exception('No llegó ningún cheque para depositar.');
-        }
-
-        $acr = self::fechaAcreditacion($hoy, $plazo, $habiles);
-
-        if ($acr['fecha'] === null) {
-            throw new Exception('No se puede calcular la fecha de acreditación: '
-                . DiasHabiles::avisoSinHabil($hoy));
-        }
-
-        $r = Retenciones::resolverTasa($alicuotas, $acr['fecha'], self::TEXTOS_TASA);
-
-        $cheques = [];
-        $bruto = 0;
-        $neto = 0;
-
-        foreach ($filas as $f) {
-            $b = round(floatval($f['IMPORTE']), 4);
-            $n = Retenciones::importeNeto($b, $r['tasa']);
-
-            $cheques[] = [
-                'id' => intval($f['ID_SBA14']),
-                'n_cheque' => $f['N_CHEQUE'],
-                'cliente' => isset($f['CLIENTE']) ? $f['CLIENTE'] : '',
-                'id_banco' => intval($f['ID_BANCO']),
-                'banco' => $f['BANCO'],
-                'bruto' => $b,
-                'neto' => $n
-            ];
-
-            $bruto += $b;
-            $neto += $n;
-        }
-
-        $bancos = self::desgloseBancos($cheques);
-
-        return [
-            'fecha_deposito' => $hoy,
-            'fecha_acreditacion' => $acr['fecha'],
-            'dias_plazo' => intval($plazo),
-            'tasa' => $r['tasa'],
-            'desglose' => Retenciones::desglose($r['detalle']),
-            'cantidad' => count($cheques),
-            'bruto' => round($bruto, 4),
-            'retencion' => round($bruto - $neto, 4),
-            'neto' => round($neto, 4),
-            'bancos' => $bancos,
-            'tanda' => self::textoTanda(count($cheques), $bancos),
-            'cheques' => $cheques,
-            'avisos' => $acr['avisos']
-        ];
-    }
-
-    /**
-     * Los cheques de una tanda, agrupados por banco emisor: nombre, cantidad,
-     * bruto y neto de cada uno, de mayor a menor bruto.
-     *
-     * SE AGRUPA POR ID_BANCO y no por el nombre: dos bancos con la misma
-     * descripcion son dos bancos. A igual bruto desempata el nombre, y despues
-     * el id, para que el orden no dependa del orden en que llegaron.
-     *
-     * EL NETO DE CADA BANCO ES LA SUMA DE LOS NETOS YA REDONDEADOS cheque por
-     * cheque, como el total: los bancos suman exactamente lo que dice el pie
-     * del dialogo y lo que suma el tablero.
-     *
-     * @param array $cheques Los de calcularDeposito()['cheques']
-     * @return array [['id_banco', 'banco', 'cantidad', 'bruto', 'neto']]
-     */
-    public static function desgloseBancos($cheques) {
-        $porBanco = [];
-
-        foreach ($cheques as $c) {
-            $id = intval($c['id_banco']);
-
-            if (!isset($porBanco[$id])) {
-                $porBanco[$id] = ['id_banco' => $id, 'banco' => $c['banco'], 'cantidad' => 0,
-                                  'bruto' => 0.0, 'neto' => 0.0];
-            }
-
-            $porBanco[$id]['cantidad']++;
-            $porBanco[$id]['bruto'] += $c['bruto'];
-            $porBanco[$id]['neto'] += $c['neto'];
-        }
-
-        $bancos = array_map(function ($b) {
-            $b['bruto'] = round($b['bruto'], 4);
-            $b['neto'] = round($b['neto'], 4);
-
-            return $b;
-        }, array_values($porBanco));
-
-        usort($bancos, function ($a, $b) {
-            if (abs($a['bruto'] - $b['bruto']) > 0.00001) {
-                return ($a['bruto'] < $b['bruto']) ? 1 : -1;
-            }
-
-            return strcmp((string) $a['banco'], (string) $b['banco'])
-                ?: ($a['id_banco'] - $b['id_banco']);
-        });
-
-        return $bancos;
-    }
-
-    /**
-     * Cuantos cheques y de que banco, en una frase: "3 cheque(s) de GALICIA" o
-     * "5 cheques de 2 bancos". Lo dicen el dialogo, el mensaje del controller
-     * y el aviso de exito de la pantalla, y sale de aca para que los tres
-     * digan lo mismo.
-     *
-     * Con varios bancos no lleva "(s)": hay por lo menos dos cheques.
-     *
-     * @param int $cantidad
-     * @param array $bancos El de desgloseBancos()
-     * @return string
-     */
-    public static function textoTanda($cantidad, $bancos) {
-        if (count($bancos) === 1) {
-            return $cantidad . ' cheque(s) de ' . $bancos[0]['banco'];
-        }
-
-        return $cantidad . ' cheques de ' . count($bancos) . ' bancos';
-    }
-
-    /**
-     * La observacion de un deposito: opcional. Vacia es null, no un texto en
-     * blanco que despues se muestre como si dijera algo.
+     * La observacion de una marca "ya acredito": opcional. Vacia es null, no
+     * un texto en blanco que despues se muestre como si dijera algo.
      *
      * @param mixed $texto
      * @return string|null
@@ -933,44 +1071,13 @@ class Echeqs {
     }
 
     /**
-     * Que depositos de un pedido se pueden deshacer. TODO O NADA, como el
-     * deposito: o todos los cheques tienen un deposito vigente, o no se
-     * deshace ninguno.
+     * Cuanto hay depositado en lo que se muestra, para las tarjetas, el pie y
+     * los avisos de la pestana. Cada cheque en una sola parte:
      *
-     * @param array $ids
-     * @param array $vigentes Mapa ID_SBA14 => deposito vigente
-     * @return array ['ids' => [...], 'error' => string|null]
-     */
-    public static function validarDeshacer($ids, $vigentes) {
-        $pedidos = self::idsPedidos($ids);
-        $sin = [];
-
-        foreach ($pedidos as $id) {
-            if (!isset($vigentes[$id])) {
-                $sin[] = $id;
-            }
-        }
-
-        if (empty($pedidos)) {
-            return ['ids' => [], 'error' => 'No llegó ningún cheque para deshacer.'];
-        }
-
-        if (!empty($sin)) {
-            return ['ids' => [], 'error' => 'No se deshizo ningún depósito: ' . count($sin)
-                . ' de los ' . count($pedidos) . ' cheque(s) no tienen un depósito vigente. '
-                . 'Puede que la pantalla haya quedado vieja: actualizala y volvé a intentar.'];
-        }
-
-        return ['ids' => $pedidos, 'error' => null];
-    }
-
-    /**
-     * Cuanto hay depositado en lo que se muestra, para las tarjetas y los
-     * avisos de la pestana.
-     *
-     * LOS QUE SE PROYECTAN, con bruto, retencion y neto, y sus totales por
-     * vista: es la fila "Echeqs depositados" del tablero. LOS ACREDITADOS SIN
-     * REGISTRAR, aparte: no suman a ninguna fila, y son los del aviso.
+     *   los que se proyectan   con bruto, retencion y neto, y sus totales por
+     *                          vista: es la fila "Echeqs depositados".
+     *   los acreditados        aparte: por plazo o marcados. No suman.
+     *   los sin datos          aparte: les falta la fecha o el neto. No suman.
      *
      * Estatica y pura: recibe las filas ya armadas por EjeVista.
      *
@@ -981,7 +1088,8 @@ class Echeqs {
         $r = [
             'cheques' => 0, 'bruto' => 0, 'retencion' => 0, 'neto' => 0,
             'total_tramo' => 0, 'total_meses' => 0, 'total_horizonte' => 0,
-            'acreditados' => ['cheques' => 0, 'bruto' => 0, 'neto' => 0]
+            'acreditados' => ['cheques' => 0, 'bruto' => 0, 'neto' => 0],
+            'sin_datos' => ['cheques' => 0, 'bruto' => 0]
         ];
 
         foreach (is_array($filas) ? $filas : [] as $f) {
@@ -998,36 +1106,16 @@ class Echeqs {
             } elseif ($estado === self::DEPOSITO_ACREDITADO) {
                 $r['acreditados']['cheques']++;
                 $r['acreditados']['bruto'] += $f['DEPOSITO']['bruto'];
-                $r['acreditados']['neto'] += $f['DEPOSITO']['neto'];
+                $r['acreditados']['neto'] += floatval($f['DEPOSITO']['neto']);
+            } elseif ($estado === self::DEPOSITO_SIN_DATOS) {
+                $r['sin_datos']['cheques']++;
+                $r['sin_datos']['bruto'] += $f['DEPOSITO']['bruto'];
             }
         }
 
         $r['retencion'] = round($r['bruto'] - $r['neto'], 4);
 
         return $r;
-    }
-
-    /**
-     * El aviso de los depositos que ya acreditaron y siguen en cartera.
-     *
-     * Es de ATENCION y pide una accion: en Tango falta registrar el deposito.
-     * El importe ya esta en el saldo bancario, asi que no suma a ninguna fila;
-     * si nadie lo registra, el cheque queda en cartera para siempre. Lo usan
-     * la pestana y el proveedor, con el mismo texto.
-     *
-     * @param int $cheques
-     * @param float $importe Neto
-     * @return string|null
-     */
-    public static function avisoAcreditadosSinRegistrar($cheques, $importe) {
-        if (intval($cheques) <= 0) {
-            return null;
-        }
-
-        return intval($cheques) . ' cheque(s) depositados por $ '
-            . number_format($importe, 2, ',', '.') . ' netos ya acreditaron y siguen en cartera '
-            . 'en Tango: registrá el depósito. No suman a ninguna fila del tablero: la plata ya '
-            . 'está en el saldo bancario.';
     }
 
     /** Ids enteros, positivos y sin repetir, en el orden en que llegaron */
@@ -1427,36 +1515,70 @@ class Echeqs {
     }
 
     /**
-     * Si ya se corrio sql/cashflow_echeqs_deposito.sql: las dos tablas, la de
-     * depositos y la de alicuotas.
+     * Si ya se corrio sql/cashflow_echeqs_deposito.sql: la tabla de alicuotas.
      *
-     * SIN ELLAS LA PESTANA NO SE ROMPE: la cartera se lee como hoy, ningun
-     * cheque esta depositado, el boton Depositar queda apagado nombrando el
-     * script y Parametros -> Cheques avisa. Mismo criterio que excluirCreada().
+     * MIRA SOLO LAS ALICUOTAS, y no RO_T_CASHFLOW_ECHEQ_DEPOSITO, que es la
+     * tabla del circuito viejo: el script ya no la crea, asi que una
+     * instalacion nueva no la tiene y no le hace falta.
+     *
+     * SIN ELLA LA PESTANA NO SE ROMPE: la cartera se lee como siempre, los
+     * depositados se listan sin neto -no se proyectan- con un aviso critico
+     * que nombra el script, y Parametros -> Cheques avisa. Mismo criterio que
+     * excluirCreada().
      *
      * @return bool
      */
-    public function depositoCreado() {
-        if ($this->tablasDeposito !== null) {
-            return $this->tablasDeposito;
+    public function alicuotasCreadas() {
+        if ($this->tablaAlicuota !== null) {
+            return $this->tablaAlicuota;
         }
 
         $cid = $this->conectar('central');
 
         $stmt = sqlsrv_query($cid,
-            "SELECT OBJECT_ID('dbo." . self::TABLA_DEPOSITO . "', 'U') AS D,
-                    OBJECT_ID('dbo." . self::TABLA_ALICUOTA . "', 'U') AS A");
+            "SELECT OBJECT_ID('dbo." . self::TABLA_ALICUOTA . "', 'U') AS A");
 
         if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al verificar las tablas del depósito'));
+            throw new Exception($this->errorSql('Error al verificar la tabla de alícuotas de los cheques'));
         }
 
         $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
         sqlsrv_free_stmt($stmt);
 
-        $this->tablasDeposito = ($row && $row['D'] !== null && $row['A'] !== null);
+        $this->tablaAlicuota = ($row && $row['A'] !== null);
 
-        return $this->tablasDeposito;
+        return $this->tablaAlicuota;
+    }
+
+    /**
+     * Si ya se corrio sql/cashflow_echeqs_acreditado.sql.
+     *
+     * SIN ELLA LA PESTANA NO SE ROMPE: ningun depositado esta marcado, se
+     * proyectan hasta que vence su plazo, el boton "Ya acredito" no se dibuja
+     * y la pestana avisa que script falta. Mismo criterio que excluirCreada().
+     *
+     * @return bool
+     */
+    public function acreditadoCreado() {
+        if ($this->tablaAcreditado !== null) {
+            return $this->tablaAcreditado;
+        }
+
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo." . self::TABLA_ACREDITADO . "', 'U') AS T");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar la tabla de la marca "ya acreditó"'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->tablaAcreditado = ($row && $row['T'] !== null);
+
+        return $this->tablaAcreditado;
     }
 
     /**
@@ -1516,13 +1638,16 @@ class Echeqs {
     /* ====================================================================
        SUB-PESTANA 1 - CHEQUES EN CARTERA
 
-       Alimenta las filas "Echeqs en cartera" y "Echeqs depositados" del
-       tablero.
+       Alimenta las filas "Echeqs en cartera" -los cheques en cartera, de
+       dbo.SBA14 con ESTADO = 'C'- y "Echeqs depositados" -los que Tesoreria
+       deposito en Tango, que ya no estan en cartera-. Son dos lecturas
+       distintas porque son dos universos distintos: un cheque esta en uno o en
+       el otro, nunca en los dos.
        ==================================================================== */
 
     /**
      * La consulta de la cartera, fila por fila. Estatica y pura: arma el texto
-     * y no lo corre, para poder verificar la union con el deposito sin base.
+     * y no lo corre, para poder verificarla sin base.
      *
      * >= CAST(GETDATE() AS DATE) y no >= GETDATE(): comparar contra fecha Y
      * HORA deja fuera los cheques del dia a partir de las 00:00:01. Es el
@@ -1530,28 +1655,21 @@ class Echeqs {
      *
      * No hace falta ESTADO NOT IN ('X','R'): es redundante con ESTADO = 'C'.
      *
-     * LOS DOS LEFT JOIN SON LA EXCEPCION A "LOS CRUCES SE HACEN EN PHP", y la
-     * misma: la exclusion y el deposito son marcas nuestras SOBRE dbo.SBA14, y
-     * el deposito ademas cambia QUE FILAS SE LEEN -un cheque depositado se lee
-     * aunque su fecha ya haya pasado-. Cruzarlo en PHP obligaria a traer toda
-     * la cartera historica para quedarse con los depositados.
+     * EL LEFT JOIN DE LA EXCLUSION ES LA EXCEPCION A "LOS CRUCES SE HACEN EN
+     * PHP": es una marca nuestra SOBRE dbo.SBA14, una por cheque, y va en la
+     * misma lectura para que la pestana y el tablero repartan el mismo
+     * universo. El de dbo.BANCO es el nombre del banco emisor. Se une con
+     * VIGENTE = 1 en la condicion de la union: una exclusion dada de baja no
+     * trae nada.
      *
-     * EL DEPOSITO SE UNE CON VIGENTE = 1 EN LA CONDICION DE LA UNION, NO EN EL
-     * WHERE. Con un deposito deshecho, d.ID queda en NULL y el cheque vuelve a
-     * la regla de los no depositados: si su fecha ya paso, no aparece. En el
-     * WHERE, la fila historica seguiria trayendo el cheque. Ver
-     * visibleEnCartera(), que es la regla que decide.
-     *
-     * Cada union se arma solo si su tabla existe: sin los scripts, la consulta
-     * es la de antes. Las columnas viajan igual -en null- para que la pantalla
-     * y el proveedor no pregunten si el script se corrio antes de leer una
-     * fila.
+     * Sin el script de la exclusion, la consulta es la de antes. Las columnas
+     * viajan igual -en null- para que la pantalla y el proveedor no pregunten
+     * si el script se corrio antes de leer una fila.
      *
      * @param bool $excl Si existe la tabla de exclusiones
-     * @param bool $dep Si existen las tablas del deposito
      * @return string
      */
-    public static function sqlCartera($excl, $dep) {
+    public static function sqlCartera($excl) {
         return "SELECT s.ID_SBA14,
                        CAST(s.N_CHEQUE AS BIGINT)  AS N_CHEQUE,
                        CAST(s.FECHA_CHEQ AS DATE)  AS FECHA_CHEQUE,
@@ -1563,30 +1681,14 @@ class Echeqs {
                        CAST(s.FECHA_CHEQ AS DATE)  AS FECHA_PAGO,
                        " . ($excl ? 'x.MOTIVO' : 'CAST(NULL AS VARCHAR(200))') . " AS MOTIVO_EXCLUSION,
                        " . ($excl ? 'x.USUARIO_ALTA' : 'CAST(NULL AS VARCHAR(50))') . " AS EXCLUSION_USUARIO,
-                       " . ($excl ? 'x.FECHA_ALTA' : 'CAST(NULL AS DATETIME)') . " AS EXCLUSION_FECHA,
-                       " . ($dep ? 'd.ID' : 'CAST(NULL AS INT)') . " AS DEP_ID,
-                       " . ($dep ? 'd.FECHA_DEPOSITO' : 'CAST(NULL AS DATE)') . " AS DEP_FECHA_DEPOSITO,
-                       " . ($dep ? 'd.FECHA_ACREDITACION' : 'CAST(NULL AS DATE)') . " AS DEP_FECHA_ACREDITACION,
-                       " . ($dep ? 'd.DIAS_PLAZO' : 'CAST(NULL AS INT)') . " AS DEP_DIAS_PLAZO,
-                       " . ($dep ? 'CAST(d.IMPORTE_BRUTO AS FLOAT)' : 'CAST(NULL AS FLOAT)') . " AS DEP_BRUTO,
-                       " . ($dep ? 'CAST(d.TASA_APLICADA AS FLOAT)' : 'CAST(NULL AS FLOAT)') . " AS DEP_TASA,
-                       " . ($dep ? 'd.DETALLE_TASA' : 'CAST(NULL AS VARCHAR(200))') . " AS DEP_DESGLOSE,
-                       " . ($dep ? 'CAST(d.IMPORTE_NETO AS FLOAT)' : 'CAST(NULL AS FLOAT)') . " AS DEP_NETO,
-                       " . ($dep ? 'd.OBSERVACION' : 'CAST(NULL AS VARCHAR(200))') . " AS DEP_OBSERVACION,
-                       " . ($dep ? 'd.DESC_BANCO' : 'CAST(NULL AS VARCHAR(60))') . " AS DEP_BANCO,
-                       " . ($dep ? 'd.USUARIO_ALTA' : 'CAST(NULL AS VARCHAR(50))') . " AS DEP_USUARIO,
-                       " . ($dep ? 'd.FECHA_ALTA' : 'CAST(NULL AS DATETIME)') . " AS DEP_FECHA_ALTA
+                       " . ($excl ? 'x.FECHA_ALTA' : 'CAST(NULL AS DATETIME)') . " AS EXCLUSION_FECHA
                 FROM dbo.SBA14 AS s
                 LEFT JOIN dbo.BANCO AS b ON s.ID_BANCO = b.ID_BANCO
                 " . ($excl
                     ? 'LEFT JOIN dbo.' . self::TABLA_EXCLUIDO . ' AS x
                               ON x.ID_SBA14 = s.ID_SBA14 AND x.VIGENTE = 1'
                     : '') . "
-                " . ($dep
-                    ? 'LEFT JOIN dbo.' . self::TABLA_DEPOSITO . ' AS d
-                              ON d.ID_SBA14 = s.ID_SBA14 AND d.VIGENTE = 1'
-                    : '') . "
-                WHERE " . self::sqlUniversoCartera($dep) . "
+                WHERE " . self::sqlUniversoCartera() . "
                 ORDER BY s.FECHA_CHEQ";
     }
 
@@ -1595,38 +1697,32 @@ class Echeqs {
      * y la agregada: si dijeran cosas distintas, la pestana y el tablero
      * mirarian dos carteras.
      *
-     * @param bool $dep Si existen las tablas del deposito
+     * UN CHEQUE DEPOSITADO NO ESTA ACA: Tango lo pasa a ESTADO = 'A' en el
+     * momento del deposito. Lo trae getDepositadosTango().
+     *
      * @return string
      */
-    private static function sqlUniversoCartera($dep) {
-        return ($dep
-                ? '(s.FECHA_CHEQ >= CAST(GETDATE() AS DATE) OR d.ID IS NOT NULL)'
-                : 's.FECHA_CHEQ >= CAST(GETDATE() AS DATE)') . "
-                  AND s.ESTADO = ?
-                  AND s.CLIENTE LIKE '[FL]%'";
+    private static function sqlUniversoCartera() {
+        return "s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)
+                  AND s.ESTADO = ?";
     }
 
     /**
-     * Cheques de terceros en cartera, uno por fila, con su exclusion y su
-     * deposito vigente.
+     * Cheques de terceros en cartera, uno por fila, con su exclusion.
      *
-     * FECHA_PAGO es la fecha del cheque, y es por la que se ubica un cheque NO
-     * depositado. Uno depositado se ubica por su acreditacion y por su neto:
-     * lo resuelve ubicarEnEje(), que deja FECHA_EJE e IMPORTE_EJE para el eje.
+     * FECHA_PAGO es la fecha del cheque, y es por la que se ubica en el eje
+     * (ubicarEnEje(), que deja FECHA_EJE e IMPORTE_EJE). Los depositados no
+     * estan aca: ver getDepositadosTango().
      *
-     * LOS EXCLUIDOS Y LOS DEPOSITADOS VIENEN EN LA LISTA, MARCADOS. No se
-     * filtran aca: quien los esconde es la pantalla, con interruptores que se
-     * pueden apagar.
+     * LOS EXCLUIDOS VIENEN EN LA LISTA, MARCADOS. No se filtran aca: quien los
+     * esconde es la pantalla, con un interruptor que se puede apagar.
      *
-     * @param string|null $hoy 'Y-m-d'. Por defecto, hoy
      * @return array Filas normalizadas
      */
-    public function getEcheqsCartera($hoy = null) {
-        $hoy = ($hoy === null) ? date('Y-m-d') : $hoy;
+    public function getEcheqsCartera() {
         $cid = $this->conectar('central');
 
-        $stmt = sqlsrv_query($cid, self::sqlCartera($this->excluirCreada(), $this->depositoCreado()),
-            [self::ESTADO_CARTERA]);
+        $stmt = sqlsrv_query($cid, self::sqlCartera($this->excluirCreada()), [self::ESTADO_CARTERA]);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al leer los echeqs en cartera'));
@@ -1636,12 +1732,8 @@ class Echeqs {
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $fila = $this->filaCheque($row);
-
-            // La regla que decide; la consulta ya aplico la misma como
-            // optimizacion.
-            if (self::visibleEnCartera($fila, $hoy)) {
-                $v[] = self::ubicarEnEje($fila, $hoy);
-            }
+            $fila['DEPOSITO'] = null;
+            $v[] = self::ubicarEnEje($fila);
         }
 
         sqlsrv_free_stmt($stmt);
@@ -1660,25 +1752,16 @@ class Echeqs {
      * dos metodos dan el mismo total para que no se puedan desincronizar en
      * silencio.
      *
-     * ABRE POR EXCLUIDO Y POR DEPOSITO, y por eso la clave de agrupacion son
-     * tres campos. El proveedor reparte el mismo universo en sus series
-     * -cobrable, excluido, depositado y todo-, y resolver eso con consultas
-     * distintas seria varios WHERE que tienen que decir lo mismo para siempre.
-     * Con el corte adentro del GROUP BY, el universo se lee UNA vez y las
-     * series salen de la misma lectura, que es lo que hace que cierren por
-     * construccion.
+     * ABRE POR EXCLUIDO adentro del GROUP BY: el proveedor reparte el mismo
+     * universo en cobrable y excluido, y las dos series salen de UNA lectura.
+     * Los depositados van aparte, fila por fila: ver getDepositadosTango().
      *
-     * Un deposito trae su FECHA_ACREDITACION, su NETO y su BRUTO tal como se
-     * guardaron: el proveedor decide con estadoDeposito() si se proyecta.
-     *
-     * @return array Filas ['FECHA_PAGO', 'EXCLUIDO' => bool, 'IMPORTE',
-     *         'FECHA_ACREDITACION' => 'Y-m-d'|null, 'NETO', 'BRUTO_DEPOSITO', 'CHEQUES']
+     * @return array Filas ['FECHA_PAGO', 'EXCLUIDO' => bool, 'IMPORTE', 'CHEQUES']
      */
     public function getEcheqsCarteraTotales() {
         $cid = $this->conectar('central');
 
-        $stmt = sqlsrv_query($cid,
-            self::sqlCarteraTotales($this->excluirCreada(), $this->depositoCreado()),
+        $stmt = sqlsrv_query($cid, self::sqlCarteraTotales($this->excluirCreada()),
             [self::ESTADO_CARTERA]);
 
         if ($stmt === false) {
@@ -1688,15 +1771,10 @@ class Echeqs {
         $v = [];
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            $acredita = Horizonte::normalizarFecha($row['FECHA_ACREDITACION']);
-
             $v[] = [
                 'FECHA_PAGO' => Horizonte::normalizarFecha($row['FECHA_PAGO']),
                 'EXCLUIDO' => (intval($row['EXCLUIDO']) === 1),
                 'IMPORTE' => floatval($row['IMPORTE']),
-                'FECHA_ACREDITACION' => $acredita,
-                'NETO' => ($acredita === null) ? null : floatval($row['NETO']),
-                'BRUTO_DEPOSITO' => ($acredita === null) ? null : floatval($row['BRUTO_DEPOSITO']),
                 'CHEQUES' => intval($row['CHEQUES'])
             ];
         }
@@ -1709,41 +1787,701 @@ class Echeqs {
     /**
      * La consulta agregada de la cartera. Estatica y pura, como sqlCartera().
      *
-     * SIN LOS SCRIPTS, LAS COLUMNAS VAN EN EL SELECT PERO NO EN EL GROUP BY.
-     * SQL Server rechaza agrupar por una constante -"Each GROUP BY expression
-     * must contain at least one column that is not an outer reference"-, asi
-     * que meterlas en los dos lados sin preguntar haria fallar la pestana
-     * entera justo en la instalacion que todavia no corrio el script, que es
-     * el caso que este modulo se compromete a no romper.
+     * SIN EL SCRIPT DE LA EXCLUSION, EL FLAG VA EN EL SELECT PERO NO EN EL
+     * GROUP BY. SQL Server rechaza agrupar por una constante -"Each GROUP BY
+     * expression must contain at least one column that is not an outer
+     * reference"-, asi que meterlo en los dos lados sin preguntar haria fallar
+     * la pestana entera justo en la instalacion que todavia no corrio el
+     * script, que es el caso que este modulo se compromete a no romper.
      *
      * @param bool $excl
-     * @param bool $dep
      * @return string
      */
-    public static function sqlCarteraTotales($excl, $dep) {
+    public static function sqlCarteraTotales($excl) {
         $flag = $excl ? 'CASE WHEN x.ID IS NULL THEN 0 ELSE 1 END' : '0';
-        $grupo = 'CAST(s.FECHA_CHEQ AS DATE)' . ($excl ? ', ' . $flag : '')
-            . ($dep ? ', d.FECHA_ACREDITACION' : '');
+        $grupo = 'CAST(s.FECHA_CHEQ AS DATE)' . ($excl ? ', ' . $flag : '');
 
         return "SELECT CAST(s.FECHA_CHEQ AS DATE)       AS FECHA_PAGO,
                        " . $flag . "                    AS EXCLUIDO,
                        SUM(CAST(s.IMPORTE_CH AS FLOAT)) AS IMPORTE,
-                       " . ($dep ? 'd.FECHA_ACREDITACION' : 'CAST(NULL AS DATE)') . " AS FECHA_ACREDITACION,
-                       " . ($dep ? 'SUM(CAST(d.IMPORTE_NETO AS FLOAT))' : 'CAST(NULL AS FLOAT)') . " AS NETO,
-                       " . ($dep ? 'SUM(CAST(d.IMPORTE_BRUTO AS FLOAT))' : 'CAST(NULL AS FLOAT)') . " AS BRUTO_DEPOSITO,
                        COUNT(*)                         AS CHEQUES
                 FROM dbo.SBA14 AS s
                 " . ($excl
                     ? 'LEFT JOIN dbo.' . self::TABLA_EXCLUIDO . ' AS x
                               ON x.ID_SBA14 = s.ID_SBA14 AND x.VIGENTE = 1'
                     : '') . "
-                " . ($dep
-                    ? 'LEFT JOIN dbo.' . self::TABLA_DEPOSITO . ' AS d
-                              ON d.ID_SBA14 = s.ID_SBA14 AND d.VIGENTE = 1'
-                    : '') . "
-                WHERE " . self::sqlUniversoCartera($dep) . "
+                WHERE " . self::sqlUniversoCartera() . "
                 GROUP BY " . $grupo . "
                 ORDER BY CAST(s.FECHA_CHEQ AS DATE)";
+    }
+
+    /* ====================================================================
+       LOS DEPOSITADOS, LEIDOS DE TANGO
+
+       Tres lecturas chicas, cruzadas en PHP por la regla del repo: los
+       cheques de dbo.SBA14, la linea al debe de cada boleta en dbo.SBA05 con
+       su cuenta de dbo.SBA01, y las marcas "ya acredito". Despues, la regla
+       pura -resolverDepositos()- decide que es un deposito, donde cae y por
+       cuanto. Del 16/10/2026: 225 cheques en 60 dias.
+       ==================================================================== */
+
+    /**
+     * La consulta de los cheques depositados. Estatica y pura.
+     *
+     * APLICA EL MISMO FILTRO QUE esDepositoTango(), menos la cuenta -que esta
+     * en la boleta y se lee aparte-, como optimizacion: la regla que decide
+     * es la de PHP.
+     *
+     * SOLO LO NECESARIO: las boletas desde rangoDepositos()['desde']. Esa
+     * fecha deja afuera tambien la centinela 1800-01-01. El LEFT JOIN de
+     * dbo.BANCO es el de sqlCartera(): el nombre del banco emisor.
+     *
+     * @return string Con tres parametros: estado, comprobante y fecha desde
+     */
+    public static function sqlDepositados() {
+        return "SELECT s.ID_SBA14,
+                       CAST(s.N_CHEQUE AS BIGINT)   AS N_CHEQUE,
+                       CAST(s.FECHA_CHEQ AS DATE)   AS FECHA_CHEQUE,
+                       b.ID_BANCO                   AS ID_BANCO,
+                       b.DESC_BANCO                 AS BANCO,
+                       CAST(s.IMPORTE_CH AS FLOAT)  AS IMPORTE,
+                       s.RAZON_EMIS                 AS CLIENTE,
+                       s.CLIENTE                    AS COD_CLIENTE,
+                       CAST(s.FECHA_CHEQ AS DATE)   AS FECHA_PAGO,
+                       s.ESTADO,
+                       s.T_COMP_SAL,
+                       s.N_COMP_SAL,
+                       s.TIPO_SAL,
+                       CAST(s.CTA_DESTIN AS BIGINT) AS CTA_DESTIN,
+                       CAST(s.FECHA_SAL AS DATE)    AS FECHA_SAL
+                FROM dbo.SBA14 AS s
+                LEFT JOIN dbo.BANCO AS b ON s.ID_BANCO = b.ID_BANCO
+                WHERE s.ESTADO = ?
+                  AND s.T_COMP_SAL = ?
+                  AND s.FECHA_SAL >= ?
+                ORDER BY s.FECHA_SAL, s.ID_SBA14";
+    }
+
+    /**
+     * Los cheques depositados en Tango que hoy hay que mostrar, resueltos
+     * con la regla de resolverDepositos(), y sus avisos. ES LA UNICA LECTURA
+     * DE LOS DEPOSITADOS: la usan la pestana y el proveedor, asi que los dos
+     * suman lo mismo.
+     *
+     * NO DEPENDE DE NINGUN SCRIPT PARA LEER. Sin el de las alicuotas, los
+     * depositados no tienen neto y lo avisan como critico; sin el de la marca
+     * "ya acredito" (acreditadoCreado()), se proyectan hasta que vence el plazo.
+     *
+     * NO LEE RO_T_CASHFLOW_ECHEQ_DEPOSITO: es la tabla del circuito viejo, en
+     * desuso. Ver README-echeqs.md.
+     *
+     * @param string|null $hoy 'Y-m-d'. Por defecto, hoy
+     * @return array ['filas' => [...], 'avisos' => [['nivel', 'texto']]]
+     */
+    public function getDepositadosTango($hoy = null) {
+        $hoy = ($hoy === null) ? date('Y-m-d') : $hoy;
+        $plazo = $this->getPlazo();
+        $rango = self::rangoDepositos($hoy, $plazo['dias']);
+
+        $filas = $this->leerDepositados($rango['desde']);
+
+        if (empty($filas)) {
+            return ['filas' => [], 'avisos' => []];
+        }
+
+        $boletas = array_values(array_unique(array_column($filas, 'N_COMP_SAL')));
+        $marcas = $this->getMarcasAcreditado(array_column($filas, 'ID_SBA14'));
+
+        $extracto = $this->extractoCreado();
+
+        $r = self::resolverDepositos(
+            $filas,
+            $this->leerCuentasBoletas($boletas),
+            $plazo,
+            ($plazo['dias'] === null) ? [] : $this->diasHabiles($rango['desde'], $rango['hasta']),
+            $this->getAlicuotas(true),
+            $marcas['vigentes'],
+            $hoy,
+            $extracto ? $this->leerCreditosExtracto(array_column($filas, 'N_CHEQUE')) : []
+        );
+
+        // Sin el extracto no se rompe nada: los depositados van por plazo o
+        // con la marca manual, como antes de leerlo.
+        if (!$extracto) {
+            $r['avisos'][] = ['nivel' => 'info', 'texto' => 'No se encontró la tabla '
+                . self::TABLA_EXTRACTO . ': los cheques depositados se dan por acreditados por '
+                . 'plazo o con la marca "ya acreditó", sin confirmarlo con el banco.'];
+        }
+
+        // Las marcas deshechas, para el tooltip: quien la puso y quien la
+        // saco. No deciden nada.
+        foreach ($r['filas'] as $i => $f) {
+            $r['filas'][$i]['HISTORIAL_ACREDITADO'] = isset($marcas['historial'][$f['ID_SBA14']])
+                ? $marcas['historial'][$f['ID_SBA14']] : [];
+        }
+
+        return $r;
+    }
+
+    /** Los cheques de sqlDepositados(), normalizados */
+    private function leerDepositados($desde) {
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid, self::sqlDepositados(),
+            [self::ESTADO_APLICADO, self::COMPROBANTE_DEPOSITO, $desde]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer los echeqs depositados'));
+        }
+
+        $v = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $fila = $this->filaCheque($row);
+
+            // La exclusion es de cartera: un cheque excluido que despues se
+            // deposita se proyecta igual, porque el deposito dice que la
+            // plata entra. La exclusion queda en su historial, sin efecto.
+            $fila['EXCLUIDO'] = false;
+            $fila['MOTIVO_EXCLUSION'] = null;
+            $fila['EXCLUSION_USUARIO'] = null;
+            $fila['EXCLUSION_FECHA'] = null;
+
+            $fila['ESTADO'] = trim((string) $row['ESTADO']);
+            $fila['T_COMP_SAL'] = trim((string) $row['T_COMP_SAL']);
+            $fila['N_COMP_SAL'] = trim((string) $row['N_COMP_SAL']);
+            $fila['TIPO_SAL'] = trim((string) $row['TIPO_SAL']);
+            $fila['CTA_DESTIN'] = ($row['CTA_DESTIN'] === null) ? null : intval($row['CTA_DESTIN']);
+            $fila['FECHA_SAL'] = Horizonte::normalizarFecha($row['FECHA_SAL']);
+
+            $v[] = $fila;
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        return $v;
+    }
+
+    /**
+     * La cuenta que debita cada boleta de deposito: la linea al debe de
+     * dbo.SBA05, con su codigo, descripcion y tipo de dbo.SBA01.
+     *
+     * ES LA CUENTA REAL, Y NO CTA_DESTIN. Los cheques con TIPO_SAL = 'O' traen
+     * CTA_DESTIN en 0, pero su boleta debita una cuenta igual que la de los
+     * 'D'. La descripcion es la que muestra el tooltip, y el tipo decide si es
+     * un banco (esDepositoTango()).
+     *
+     * DOS CONSULTAS CRUZADAS EN PHP, por la regla del repo. Una boleta tiene
+     * una sola linea al debe -verificado el 16/10/2026-; si alguna trajera
+     * dos, vale la primera en el orden del renglon.
+     *
+     * @param array $boletas N_COMP_SAL
+     * @return array Mapa N_COMP_SAL => ['cod_cta', 'descripcion', 'tipo']
+     */
+    private function leerCuentasBoletas($boletas) {
+        $boletas = array_values(array_filter($boletas, function ($b) { return $b !== ''; }));
+        $lineas = [];
+
+        if (empty($boletas)) {
+            return [];
+        }
+
+        $cid = $this->conectar('central');
+
+        foreach (array_chunk($boletas, 500) as $tanda) {
+            $stmt = sqlsrv_query($cid,
+                "SELECT N_COMP, CAST(COD_CTA AS BIGINT) AS COD_CTA, ID_SBA01
+                 FROM dbo.SBA05
+                 WHERE COD_COMP = ? AND D_H = 'D'
+                   AND N_COMP IN (" . implode(', ', array_fill(0, count($tanda), '?')) . ")
+                 ORDER BY N_COMP, RENGLON",
+                array_merge([self::COMPROBANTE_DEPOSITO], $tanda));
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al leer las boletas de depósito'));
+            }
+
+            while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+                $n = trim((string) $row['N_COMP']);
+
+                if (!isset($lineas[$n])) {
+                    $lineas[$n] = ['cod_cta' => intval($row['COD_CTA']),
+                                   'id_sba01' => intval($row['ID_SBA01'])];
+                }
+            }
+
+            sqlsrv_free_stmt($stmt);
+        }
+
+        if (empty($lineas)) {
+            return [];
+        }
+
+        $ids = array_values(array_unique(array_column($lineas, 'id_sba01')));
+        $stmt = sqlsrv_query($cid,
+            "SELECT ID_SBA01, DESCRIPCIO, TIPO FROM dbo.SBA01
+             WHERE ID_SBA01 IN (" . implode(', ', array_fill(0, count($ids), '?')) . ")",
+            $ids);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer las cuentas de tesorería'));
+        }
+
+        $cuentas = [];
+
+        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $cuentas[intval($row['ID_SBA01'])] = ['descripcion' => trim((string) $row['DESCRIPCIO']),
+                                                  'tipo' => trim((string) $row['TIPO'])];
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        $v = [];
+
+        foreach ($lineas as $n => $l) {
+            $c = isset($cuentas[$l['id_sba01']]) ? $cuentas[$l['id_sba01']] : null;
+
+            // Una linea cuya cuenta no esta en dbo.SBA01 no dice a donde fue la
+            // plata: es lo mismo que no tener la linea.
+            if ($c !== null) {
+                $v[$n] = ['cod_cta' => $l['cod_cta'], 'descripcion' => $c['descripcion'],
+                          'tipo' => $c['tipo']];
+            }
+        }
+
+        return $v;
+    }
+
+    /* ====================================================================
+       LA MARCA "YA ACREDITO"
+
+       Cuando Tesoreria ve que un cheque depositado ya acredito antes de su
+       plazo, lo marca y sale de "Echeqs depositados": el saldo de
+       Interbanking ya lo tiene, y contarlo en la fila tambien lo contaria dos
+       veces. Se puede deshacer. Vive en RO_T_CASHFLOW_ECHEQ_ACREDITADO, con
+       ORIGEN = MANUAL. LA REGLA NO MIRA EL ORIGEN: ver resolverDeposito().
+
+       ES PARA LO QUE EL EXTRACTO NO CONFIRMA. Un cheque con su credito en el
+       extracto de Interbanking ya sale solo -ver creditoExtracto()-, sin
+       marca y sin proceso: hoy cruzan los de Galicia. Los de Frances,
+       Santander o ICBC van por plazo o con esta marca.
+
+       Del navegador llegan solo los ids de los cheques, y la seleccion se
+       vuelve a validar contra la lectura de la base.
+       ==================================================================== */
+
+    /**
+     * Si existe la tabla del extracto de Interbanking. No es nuestra -la carga
+     * BI-, asi que puede faltar en una base de prueba: sin ella, los
+     * depositados van por plazo y la pestana lo avisa.
+     *
+     * @return bool
+     */
+    public function extractoCreado() {
+        if ($this->tablaExtracto !== null) {
+            return $this->tablaExtracto;
+        }
+
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo." . self::TABLA_EXTRACTO . "', 'U') AS T");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar el extracto de Interbanking'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->tablaExtracto = ($row && $row['T'] !== null);
+
+        return $this->tablaExtracto;
+    }
+
+    /**
+     * Los creditos del extracto de Interbanking cuyo comprobante es el numero
+     * de alguno de estos cheques. El cruce -numero, importe, fecha- lo hace
+     * creditoExtracto(), en PHP.
+     *
+     * EL LEFT JOIN DE dbo.BANCO es solo el nombre del banco para el tooltip,
+     * la misma excepcion que la cartera. Se pide TIPO_MOV = 'C' aca para no
+     * traer los debitos de la retencion, que llevan el mismo numero.
+     *
+     * @param array $numeros N_CHEQUE
+     * @return array
+     */
+    private function leerCreditosExtracto($numeros) {
+        $numeros = array_values(array_unique(array_filter(array_map('intval', $numeros),
+            function ($n) { return $n > 0; })));
+        $v = [];
+
+        if (empty($numeros)) {
+            return $v;
+        }
+
+        $cid = $this->conectar('central');
+
+        foreach (array_chunk($numeros, 500) as $tanda) {
+            $stmt = sqlsrv_query($cid,
+                "SELECT A.ID, A.FECHA_OPERACION, A.NRO_BANCO, B.DESC_BANCO, A.NRO_CUENTA,
+                        A.NRO_COMPROBANTE, CAST(A.IMPORTE AS FLOAT) AS IMPORTE, A.DESC_OPERACION,
+                        A.TIPO_MOV
+                 FROM dbo." . self::TABLA_EXTRACTO . " AS A
+                 LEFT JOIN dbo.BANCO AS B ON A.NRO_BANCO = B.NRO_BANCO
+                 WHERE A.TIPO_MOV = 'C'
+                   AND A.NRO_COMPROBANTE IN (" . implode(', ', array_fill(0, count($tanda), '?')) . ")",
+                $tanda);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al leer el extracto de Interbanking'));
+            }
+
+            while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+                $v[] = [
+                    'id' => intval($row['ID']),
+                    'fecha' => Horizonte::normalizarFecha($row['FECHA_OPERACION']),
+                    'nro_banco' => trim((string) $row['NRO_BANCO']),
+                    'banco' => trim((string) $row['DESC_BANCO']),
+                    'nro_cuenta' => trim((string) $row['NRO_CUENTA']),
+                    'comprobante' => intval($row['NRO_COMPROBANTE']),
+                    'importe' => floatval($row['IMPORTE']),
+                    'descripcion' => trim((string) $row['DESC_OPERACION']),
+                    'tipo_mov' => trim((string) $row['TIPO_MOV'])
+                ];
+            }
+
+            sqlsrv_free_stmt($stmt);
+        }
+
+        return $v;
+    }
+
+    /**
+     * Las marcas de una lista de cheques: la vigente de cada uno, y todas
+     * -vigentes y deshechas- para el tooltip.
+     *
+     * Sin el script devuelve vacio y no lanza: la pregunta es "que cheques
+     * estan marcados", y la respuesta honesta es "ninguno".
+     *
+     * @param array $ids
+     * @return array ['vigentes' => mapa ID_SBA14 => marca,
+     *         'historial' => mapa ID_SBA14 => lista de marcas, de la mas nueva a la mas vieja]
+     */
+    public function getMarcasAcreditado($ids) {
+        $ids = self::idsPedidos($ids);
+        $r = ['vigentes' => [], 'historial' => []];
+
+        if (empty($ids) || !$this->acreditadoCreado()) {
+            return $r;
+        }
+
+        $cid = $this->conectar('central');
+
+        foreach (array_chunk($ids, 500) as $tanda) {
+            $stmt = sqlsrv_query($cid,
+                "SELECT ID, ID_SBA14, FECHA_ACREDITACION, ORIGEN, REFERENCIA, OBSERVACION,
+                        VIGENTE, ID_REEMPLAZA, USUARIO_ALTA, FECHA_ALTA, USUARIO_BAJA, FECHA_BAJA
+                 FROM dbo." . self::TABLA_ACREDITADO . "
+                 WHERE ID_SBA14 IN (" . implode(', ', array_fill(0, count($tanda), '?')) . ")
+                 ORDER BY ID DESC",
+                $tanda);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al leer las marcas "ya acreditó"'));
+            }
+
+            while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+                $id = intval($row['ID_SBA14']);
+                $m = [
+                    'id' => intval($row['ID']),
+                    'fecha_acreditacion' => Horizonte::normalizarFecha($row['FECHA_ACREDITACION']),
+                    'origen' => trim((string) $row['ORIGEN']),
+                    'referencia' => $row['REFERENCIA'],
+                    'observacion' => $row['OBSERVACION'],
+                    'vigente' => intval($row['VIGENTE']),
+                    'id_reemplaza' => ($row['ID_REEMPLAZA'] === null) ? null : intval($row['ID_REEMPLAZA']),
+                    'usuario' => $row['USUARIO_ALTA'],
+                    'fecha_alta' => $this->fechaHora($row['FECHA_ALTA']),
+                    'usuario_baja' => $row['USUARIO_BAJA'],
+                    'fecha_baja' => $this->fechaHora($row['FECHA_BAJA'])
+                ];
+
+                $r['historial'][$id][] = $m;
+
+                if ($m['vigente'] === 1) {
+                    $r['vigentes'][$id] = $m;
+                }
+            }
+
+            sqlsrv_free_stmt($stmt);
+        }
+
+        return $r;
+    }
+
+    /**
+     * Que cheques de un pedido se pueden marcar "ya acredito". ES TODO O NADA,
+     * como la exclusion: con uno solo que no cumple, no se marca ninguno.
+     *
+     * SOLO LOS DEPOSITADOS QUE SE PROYECTAN. Uno en cartera no esta en el
+     * banco; uno marcado ya esta marcado; uno que acredita hoy ya no suma; uno
+     * sin datos no suma; y uno que no esta en la lectura -endosado, rechazado o
+     * con el plazo vencido- no tiene nada que sacar. Se valida contra la
+     * lectura de la base, no contra lo que manda el navegador: un id no es una
+     * autorizacion.
+     *
+     * @param array $ids
+     * @param array $filas Las de la grilla: cartera y depositados, resueltos
+     * @return array ['ids' => [...], 'rechazos' => [['id', 'n_cheque', 'motivo']],
+     *         'error' => string|null]
+     */
+    public static function validarSeleccionAcreditado($ids, $filas) {
+        $porId = [];
+
+        foreach (is_array($filas) ? $filas : [] as $f) {
+            $porId[intval($f['ID_SBA14'])] = $f;
+        }
+
+        $validos = [];
+        $rechazos = [];
+
+        foreach (self::idsPedidos($ids) as $id) {
+            $f = isset($porId[$id]) ? $porId[$id] : null;
+            $d = ($f && !empty($f['DEPOSITO'])) ? $f['DEPOSITO'] : null;
+            $motivo = null;
+
+            if ($f === null) {
+                $motivo = 'no está entre los depositados que se proyectan: puede que ya haya vencido '
+                    . 'su plazo, o que en Tango no sea un depósito';
+            } elseif ($d === null) {
+                $motivo = 'está en cartera: todavía no se depositó en Tango';
+            } elseif ($d['estado'] === self::DEPOSITO_ACREDITADO
+                && $d['motivo'] === self::ACREDITADO_POR_EXTRACTO) {
+                $motivo = 'ya acreditó según el extracto de Interbanking';
+            } elseif ($d['estado'] === self::DEPOSITO_ACREDITADO
+                && $d['motivo'] === self::ACREDITADO_POR_MARCA) {
+                $motivo = 'ya está marcado como acreditado';
+            } elseif ($d['estado'] === self::DEPOSITO_ACREDITADO) {
+                $motivo = 'acredita hoy: ya no suma a ninguna fila';
+            } elseif ($d['estado'] !== self::DEPOSITO_PROYECTA) {
+                $motivo = 'no se proyecta: le falta la fecha de acreditación o el neto';
+            }
+
+            if ($motivo !== null) {
+                $rechazos[] = ['id' => $id, 'n_cheque' => $f ? $f['N_CHEQUE'] : null,
+                               'motivo' => $motivo];
+                continue;
+            }
+
+            $validos[] = $id;
+        }
+
+        $error = null;
+
+        if (empty($validos) && empty($rechazos)) {
+            $error = 'No llegó ningún cheque para marcar.';
+        } elseif (!empty($rechazos)) {
+            $error = 'No se marcó ningún cheque: ' . count($rechazos) . ' de los '
+                . (count($rechazos) + count($validos)) . ' no se pueden marcar como acreditados. '
+                . implode('; ', array_map(function ($r) {
+                    return 'N° ' . ($r['n_cheque'] === null ? $r['id'] : $r['n_cheque'])
+                        . ' ' . $r['motivo'];
+                }, $rechazos)) . '.';
+        }
+
+        return ['ids' => empty($rechazos) ? $validos : [], 'rechazos' => $rechazos, 'error' => $error];
+    }
+
+    /**
+     * Que marcas de un pedido se pueden deshacer. TODO O NADA: o todos los
+     * cheques tienen una marca vigente, o no se deshace ninguna.
+     *
+     * NO IMPORTA EL ORIGEN: una marca con ORIGEN = INTERBANKING se deshace
+     * igual que una manual, y un proceso no la podria volver a grabar porque
+     * su REFERENCIA queda en la tabla, dada de baja (ver
+     * sql/cashflow_echeqs_acreditado.sql). El credito del extracto no es una
+     * marca: no se deshace aca.
+     *
+     * @param array $ids
+     * @param array $vigentes Mapa ID_SBA14 => marca vigente
+     * @return array ['ids' => [...], 'error' => string|null]
+     */
+    public static function validarDeshacerAcreditado($ids, $vigentes) {
+        $pedidos = self::idsPedidos($ids);
+
+        if (empty($pedidos)) {
+            return ['ids' => [], 'error' => 'No llegó ningún cheque para deshacer.'];
+        }
+
+        $sin = array_values(array_filter($pedidos, function ($id) use ($vigentes) {
+            return !isset($vigentes[$id]);
+        }));
+
+        if (!empty($sin)) {
+            return ['ids' => [], 'error' => 'No se deshizo ninguna marca: ' . count($sin)
+                . ' de los ' . count($pedidos) . ' cheque(s) no están marcados como acreditados. '
+                . 'Puede que la pantalla haya quedado vieja: actualizala y volvé a intentar.'];
+        }
+
+        return ['ids' => $pedidos, 'error' => null];
+    }
+
+    /**
+     * Los parametros del INSERT de marcas manuales, 5 por cheque, en el orden
+     * de las columnas de marcarAcreditados().
+     *
+     * LA FECHA DE ACREDITACION ES HOY, el dia en que se marca: es cuando
+     * Tesoreria vio la plata en el banco. El ORIGEN es MANUAL y no viaja del
+     * navegador: las marcas de Interbanking las graba su proceso.
+     *
+     * Estatica y pura.
+     *
+     * @param array $ids
+     * @param string $hoy 'Y-m-d'
+     * @param string|null $obs Ya validada
+     * @param string $usuario
+     * @return array
+     */
+    public static function paramsInsertAcreditado($ids, $hoy, $obs, $usuario) {
+        $params = [];
+
+        foreach ($ids as $id) {
+            array_push($params, intval($id), $hoy, $obs, $usuario, $usuario);
+        }
+
+        return $params;
+    }
+
+    /**
+     * Marca cheques depositados como "ya acredito". TODO O NADA, EN UNA
+     * TRANSACCION.
+     *
+     * Se valida TODO antes de abrir la transaccion, contra la lectura de hoy:
+     * la cartera y los depositados, resueltos con la misma regla que la
+     * pantalla. DOS PESTANAS AL MISMO TIEMPO: el indice unico de marcas
+     * vigentes hace fallar la segunda, y la transaccion entera vuelve atras.
+     *
+     * @param array $ids Ids de dbo.SBA14. Es lo unico que llega del navegador
+     * @param string|null $observacion Opcional, la misma para todos
+     * @param string $usuario
+     * @param string|null $hoy 'Y-m-d'. Por defecto, hoy
+     * @return array ['marcados' => int]
+     */
+    public function marcarAcreditados($ids, $observacion, $usuario, $hoy = null) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $hoy = ($hoy === null) ? date('Y-m-d') : $hoy;
+
+        if (!$this->acreditadoCreado()) {
+            throw new Exception('Todavía no se puede marcar un cheque como acreditado. Corré '
+                . self::SCRIPT_ACREDITADO . ' contra la base central.');
+        }
+
+        $dep = $this->getDepositadosTango($hoy);
+        $v = self::validarSeleccionAcreditado($ids, array_merge($this->getEcheqsCartera(), $dep['filas']));
+
+        if ($v['error'] !== null) {
+            throw new Exception($v['error']);
+        }
+
+        $obs = self::validarObservacion($observacion);
+        $cid = $this->conectar('central');
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción de la marca'));
+        }
+
+        try {
+            /* 5 parametros por fila: una tanda de 300 son 1500, debajo del
+               tope de 2100. Todas dentro de la MISMA transaccion. */
+            foreach (array_chunk($v['ids'], 300) as $tanda) {
+                $stmt = sqlsrv_query($cid,
+                    "INSERT INTO dbo." . self::TABLA_ACREDITADO . "
+                         (ID_SBA14, FECHA_ACREDITACION, ORIGEN, OBSERVACION, VIGENTE,
+                          USUARIO_ALTA, USUARIO_MODIF)
+                     VALUES " . implode(', ', array_fill(0, count($tanda),
+                        "(?, ?, '" . self::ORIGEN_MANUAL . "', ?, 1, ?, ?)")),
+                    self::paramsInsertAcreditado($tanda, $hoy, $obs, $usuario));
+
+                if ($stmt === false) {
+                    throw new Exception($this->errorSql('Error al guardar la marca. Si otro usuario '
+                        . 'marcó alguno de estos cheques recién, actualizá la pantalla'));
+                }
+
+                sqlsrv_free_stmt($stmt);
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar la marca'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return ['marcados' => count($v['ids'])];
+    }
+
+    /**
+     * Deshace marcas "ya acredito" vigentes: BAJA LOGICA, con quien y cuando.
+     *
+     * El cheque vuelve a proyectarse si su acreditacion todavia es de manana
+     * en adelante; si no, sigue sin sumar, por plazo. La fila dada de baja
+     * queda, y es la que el tooltip muestra como historial.
+     *
+     * TODO O NADA, en una transaccion.
+     *
+     * @param array $ids
+     * @param string $usuario
+     * @return array ['deshechos' => int]
+     */
+    public function deshacerAcreditados($ids, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
+        if (!$this->acreditadoCreado()) {
+            throw new Exception('No hay marcas que deshacer: corré ' . self::SCRIPT_ACREDITADO
+                . ' contra la base central.');
+        }
+
+        $v = self::validarDeshacerAcreditado($ids, $this->getMarcasAcreditado($ids)['vigentes']);
+
+        if ($v['error'] !== null) {
+            throw new Exception($v['error']);
+        }
+
+        $cid = $this->conectar('central');
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción'));
+        }
+
+        try {
+            foreach (array_chunk($v['ids'], 500) as $tanda) {
+                $stmt = sqlsrv_query($cid,
+                    "UPDATE dbo." . self::TABLA_ACREDITADO . "
+                     SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
+                     WHERE VIGENTE = 1 AND ID_SBA14 IN ("
+                        . implode(', ', array_fill(0, count($tanda), '?')) . ")",
+                    array_merge([$usuario, $usuario], $tanda));
+
+                if ($stmt === false) {
+                    throw new Exception($this->errorSql('Error al deshacer la marca'));
+                }
+
+                sqlsrv_free_stmt($stmt);
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return ['deshechos' => count($v['ids'])];
     }
 
     /**
@@ -1821,27 +2559,12 @@ class Echeqs {
         // El universo permitido se vuelve a resolver en el servidor: lo que
         // manda el navegador es una lista de ids, no una autorizacion.
         $permitidos = [];
-        $depositados = [];
 
+        /* UN CHEQUE DEPOSITADO NO ESTA ACA: Tango lo saco de cartera al
+           depositarlo, asi que un id suyo vuelve en 'rechazados'. La
+           exclusion es de cartera; un deposito dice que la plata entra. */
         foreach ($this->getEcheqsCartera() as $fila) {
             $permitidos[intval($fila['ID_SBA14'])] = true;
-
-            if (!empty($fila['DEPOSITO'])) {
-                $depositados[intval($fila['ID_SBA14'])] = $fila['N_CHEQUE'];
-            }
-        }
-
-        /* UN CHEQUE DEPOSITADO NO SE EXCLUYE. Ya esta en el banco: si no se va
-           a cobrar, lo que corresponde es deshacer el deposito y despues
-           excluirlo. Las dos marcas sobre el mismo cheque lo pondrian en dos
-           series del tablero a la vez. Es todo o nada, como el deposito: con
-           uno depositado en el pedido no se excluye ninguno. */
-        $enPedido = array_intersect_key($depositados, $pedidos);
-
-        if (!empty($excluir) && !empty($enPedido)) {
-            throw new Exception('No se excluyó ningún cheque: ' . count($enPedido)
-                . ' está(n) depositado(s) (N° ' . implode(', ', $enPedido) . '). Para excluirlo, '
-                . 'primero deshacé el depósito.');
         }
 
         /* array_keys() y NO array_values(): $pedidos esta indexado por id -es
@@ -2049,7 +2772,6 @@ class Echeqs {
                 WHERE x.VIGENTE = 1
                   AND s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)
                   AND s.ESTADO = ?
-                  AND s.CLIENTE LIKE '[FL]%'
                 GROUP BY x.MOTIVO
                 ORDER BY SUM(CAST(s.IMPORTE_CH AS FLOAT)) DESC";
 
@@ -2128,66 +2850,8 @@ class Echeqs {
     }
 
     /* ====================================================================
-       EL DEPOSITO MASIVO
-
-       Se seleccionan cheques de cartera y se marcan como depositados. Una
-       tanda puede juntar cheques de varios bancos emisores: se cobran por el
-       clearing bancario, con un plazo y una tasa que no dependen del emisor.
-       Desde ese dia corren las 48 hs habiles -el plazo de Parametros-, y el
-       cheque sale de "Echeqs en cartera" y entra en "Echeqs depositados" el
-       dia que acredita, por el neto.
-
-       DEL NAVEGADOR LLEGAN SOLO LOS IDS. El banco, el importe, la fecha de
-       deposito, la acreditacion, la tasa y el neto los resuelve el servidor
-       con las reglas de arriba: un neto aceptado del cliente es la version
-       informatica del *0.969 pegado a mano en el Excel de Cob. Electronicos.
+       LA FILA DEL TABLERO Y EL CALENDARIO
        ==================================================================== */
-
-    /**
-     * Si hoy se puede depositar, y si no, por que.
-     *
-     * LA PANTALLA LO PREGUNTA en vez de suponerlo, como con la exclusion: un
-     * boton que se dibuja y despues falla contra el servidor es peor que uno
-     * apagado que dice que falta. Y el servidor lo vuelve a preguntar al
-     * depositar.
-     *
-     * HACE FALTA LA FILA DEL TABLERO. Sin "Echeqs depositados" activa, un
-     * cheque depositado saldria de "Echeqs en cartera" y no entraria en
-     * ninguna fila: el tablero informaria de menos sin avisar. Es el hueco
-     * entre los dos scripts, y se cierra aca.
-     *
-     * Las alicuotas NO se preguntan aca: dependen de la fecha de acreditacion,
-     * y el rechazo con el motivo lo da el dialogo, que la calcula.
-     *
-     * @return array ['puede' => bool, 'motivo' => string|null, 'plazo' => int|null,
-     *         'fila_activa' => bool]
-     */
-    public function estadoParaDepositar() {
-        if (!$this->depositoCreado()) {
-            return ['puede' => false, 'plazo' => null, 'fila_activa' => false,
-                    'motivo' => 'Para depositar cheques hace falta correr '
-                        . self::SCRIPT_DEPOSITO . ' contra la base central.'];
-        }
-
-        $fila = $this->filaDepositadosActiva();
-
-        if (!$fila) {
-            return ['puede' => false, 'plazo' => null, 'fila_activa' => false,
-                    'motivo' => 'Falta la fila "Echeqs depositados" del tablero (ECHEQS → '
-                        . 'DEPOSITADOS), o está inactiva: sin ella, un cheque depositado saldría '
-                        . 'del tablero sin entrar en ninguna fila. Corré '
-                        . self::SCRIPT_FILA_DEPOSITADOS . ' o activala en Parámetros → Cashflow.'];
-        }
-
-        $plazo = $this->getPlazo();
-
-        if ($plazo['dias'] === null) {
-            return ['puede' => false, 'plazo' => null, 'fila_activa' => true,
-                    'motivo' => $plazo['error']];
-        }
-
-        return ['puede' => true, 'plazo' => $plazo['dias'], 'fila_activa' => true, 'motivo' => null];
-    }
 
     /**
      * Si alguna fila ACTIVA del tablero muestra la serie ECHEQS -> DEPOSITADOS.
@@ -2213,396 +2877,6 @@ class Echeqs {
         sqlsrv_free_stmt($stmt);
 
         return $row && intval($row['N']) > 0;
-    }
-
-    /**
-     * Lo que va a pasar si se depositan estos cheques, sin escribir nada. Es lo
-     * que muestra el dialogo de confirmacion.
-     *
-     * NO LANZA POR UNA SELECCION INVALIDA: devuelve los rechazos con su motivo,
-     * porque el dialogo tiene que explicar cuales no y por que. Lo que si lanza
-     * es una falla de lectura.
-     *
-     * El deposito, despues, NO usa este resultado: vuelve a calcular todo. Si
-     * entre la vista previa y la confirmacion cambio algo -otro usuario
-     * deposito uno de los cheques, paso la medianoche- lo que se guarda es lo
-     * de ese momento.
-     *
-     * @param array $ids
-     * @param string|null $hoy 'Y-m-d'
-     * @return array ['ok' => bool, 'motivo' => string|null, 'rechazos' => [...],
-     *         'calculo' => array|null]. El desglose por banco va en el calculo
-     */
-    public function previsualizarDeposito($ids, $hoy = null) {
-        $hoy = ($hoy === null) ? date('Y-m-d') : $hoy;
-        $estado = $this->estadoParaDepositar();
-
-        if (!$estado['puede']) {
-            return self::sinDeposito($estado['motivo'], []);
-        }
-
-        $sel = self::validarSeleccionDeposito($ids, $this->getEcheqsCartera($hoy));
-
-        if ($sel['error'] !== null) {
-            return self::sinDeposito($sel['error'], $sel['rechazos']);
-        }
-
-        try {
-            $calculo = $this->calcularParaHoy($sel['filas'], $estado['plazo'], $hoy);
-        } catch (Exception $e) {
-            return self::sinDeposito($e->getMessage(), []);
-        }
-
-        return ['ok' => true, 'motivo' => null, 'ir_a' => null, 'rechazos' => [],
-                'calculo' => $calculo];
-    }
-
-    /**
-     * Una vista previa que no puede depositar, con el motivo.
-     *
-     * 'ir_a' dice si lo que falta se arregla en Parametros -> Cheques -las
-     * alicuotas o el plazo-: el dialogo ofrece ir ahi en vez de dejar al
-     * usuario buscando donde se cargan. Se decide por el texto porque es el
-     * mismo texto que arman resolverTasa() y plazoDesdeValor(), que son las
-     * dos causas.
-     *
-     * @param string $motivo
-     * @param array $rechazos
-     * @return array
-     */
-    public static function sinDeposito($motivo, $rechazos) {
-        return [
-            'ok' => false,
-            'motivo' => $motivo,
-            'ir_a' => (strpos((string) $motivo, 'Parámetros → Cheques') !== false)
-                ? 'PRECHEQUEADO' : null,
-            'rechazos' => $rechazos,
-            'calculo' => null
-        ];
-    }
-
-    /**
-     * Deposita los cheques. TODO O NADA, EN UNA TRANSACCION.
-     *
-     * Se valida y se calcula TODO antes de abrir la transaccion -la
-     * seleccion contra la cartera de hoy, el plazo, la fecha de acreditacion y
-     * la tasa-: un lote rechazado no puede descubrirse con la mitad de los
-     * depositos escritos.
-     *
-     * DOS PESTANAS AL MISMO TIEMPO: si otro usuario deposito uno de estos
-     * cheques entre la lectura y el INSERT, el indice unico de depositos
-     * vigentes hace fallar el segundo, y la transaccion entera vuelve atras.
-     *
-     * @param array $ids Ids de dbo.SBA14. Es lo unico que llega del navegador
-     * @param string|null $observacion Opcional, la misma para toda la tanda
-     * @param string $usuario
-     * @param string|null $hoy 'Y-m-d'. Por defecto, hoy: la fecha de deposito no
-     *        se elige
-     * @return array ['depositados' => int, 'calculo' => array]
-     */
-    public function depositarCheques($ids, $observacion, $usuario, $hoy = null) {
-        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
-        $hoy = ($hoy === null) ? date('Y-m-d') : $hoy;
-
-        $estado = $this->estadoParaDepositar();
-
-        if (!$estado['puede']) {
-            throw new Exception($estado['motivo']);
-        }
-
-        $sel = self::validarSeleccionDeposito($ids, $this->getEcheqsCartera($hoy));
-
-        if ($sel['error'] !== null) {
-            throw new Exception($sel['error']);
-        }
-
-        $calculo = $this->calcularParaHoy($sel['filas'], $estado['plazo'], $hoy);
-        $obs = self::validarObservacion($observacion);
-
-        $cid = $this->conectar('central');
-
-        if (sqlsrv_begin_transaction($cid) === false) {
-            throw new Exception($this->errorSql('No se pudo abrir la transacción del depósito'));
-        }
-
-        try {
-            /* 14 parametros por fila: una tanda de 100 son 1400, debajo del
-               tope de 2100. Todas dentro de la MISMA transaccion. */
-            foreach (array_chunk($calculo['cheques'], 100) as $tanda) {
-                $this->insertarDepositos($cid, $tanda, $calculo, $obs, $usuario);
-            }
-
-            if (sqlsrv_commit($cid) === false) {
-                throw new Exception($this->errorSql('No se pudo confirmar el depósito'));
-            }
-        } catch (Throwable $e) {
-            sqlsrv_rollback($cid);
-
-            throw $e;
-        }
-
-        return ['depositados' => $calculo['cantidad'], 'calculo' => $calculo];
-    }
-
-    /**
-     * Calcula un deposito de hoy: lee el calendario y las alicuotas, y llama a
-     * la regla pura. Lo usan la vista previa y el deposito, para que los dos
-     * digan lo mismo.
-     */
-    private function calcularParaHoy($filas, $plazo, $hoy) {
-        $rango = self::rangoCalendarioDeposito($hoy, $plazo);
-
-        return self::calcularDeposito($filas, $plazo,
-            $this->diasHabiles($rango['desde'], $rango['hasta']),
-            $this->getAlicuotas(true), $hoy);
-    }
-
-    /**
-     * Los parametros del INSERT de depositos, 14 por cheque, en el orden de las
-     * columnas de insertarDepositos().
-     *
-     * EL BANCO SALE DE CADA CHEQUE y no de la tanda: una tanda junta cheques de
-     * varios bancos emisores, y un banco unico grabaria el del primero en
-     * todos. Fechas, plazo, tasa y desglose si son de la tanda: son los mismos
-     * para todos sus cheques.
-     *
-     * Estatica y pura, para probar sin base que fila lleva que banco.
-     *
-     * @param array $cheques Los de calcularDeposito()['cheques']
-     * @param array $calculo
-     * @param string|null $obs
-     * @param string $usuario
-     * @return array
-     */
-    public static function paramsInsertDeposito($cheques, $calculo, $obs, $usuario) {
-        $params = [];
-
-        foreach ($cheques as $c) {
-            array_push($params,
-                $c['id'],
-                $c['n_cheque'],
-                $c['id_banco'],
-                mb_substr((string) $c['banco'], 0, 60),
-                $calculo['fecha_deposito'],
-                $calculo['fecha_acreditacion'],
-                $calculo['dias_plazo'],
-                $c['bruto'],
-                $calculo['tasa'],
-                mb_substr($calculo['desglose'], 0, 200),
-                $c['neto'],
-                $obs,
-                $usuario,
-                $usuario);
-        }
-
-        return $params;
-    }
-
-    /**
-     * Una tanda del INSERT de depositos.
-     *
-     * @param resource $cid Conexion con la transaccion ya abierta
-     * @param array $cheques Los de calcularDeposito()['cheques']
-     * @param array $calculo
-     * @param string|null $obs
-     * @param string $usuario
-     */
-    private function insertarDepositos($cid, $cheques, $calculo, $obs, $usuario) {
-        $filas = implode(', ', array_fill(0, count($cheques),
-            '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)'));
-        $params = self::paramsInsertDeposito($cheques, $calculo, $obs, $usuario);
-
-        $stmt = sqlsrv_query($cid,
-            "INSERT INTO dbo." . self::TABLA_DEPOSITO . "
-                 (ID_SBA14, N_CHEQUE, ID_BANCO, DESC_BANCO, FECHA_DEPOSITO, FECHA_ACREDITACION,
-                  DIAS_PLAZO, IMPORTE_BRUTO, TASA_APLICADA, DETALLE_TASA, IMPORTE_NETO,
-                  OBSERVACION, VIGENTE, USUARIO_ALTA, USUARIO_MODIF)
-             VALUES " . $filas,
-            $params);
-
-        if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al guardar el depósito. Si otro usuario '
-                . 'depositó alguno de estos cheques recién, actualizá la pantalla'));
-        }
-
-        sqlsrv_free_stmt($stmt);
-    }
-
-    /**
-     * Deshace depositos vigentes: BAJA LOGICA, con quien y cuando.
-     *
-     * El cheque vuelve a "Echeqs en cartera" en la fecha del cheque, si esa
-     * fecha es de hoy en adelante. Si ya paso, no reaparece: un cheque vencido
-     * no depositado no se lee, y deshacer el deposito no cambia eso. La fila
-     * dada de baja queda, y es la que el tooltip muestra como historial.
-     *
-     * TODO O NADA, en una transaccion: o todos tienen un deposito vigente o no
-     * se deshace ninguno.
-     *
-     * @param array $ids
-     * @param string $usuario
-     * @return array ['deshechos' => int]
-     */
-    public function deshacerDepositos($ids, $usuario) {
-        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
-
-        if (!$this->depositoCreado()) {
-            throw new Exception('No hay depósitos que deshacer: corré ' . self::SCRIPT_DEPOSITO
-                . ' contra la base central.');
-        }
-
-        $v = self::validarDeshacer($ids, $this->getDepositosVigentes($ids));
-
-        if ($v['error'] !== null) {
-            throw new Exception($v['error']);
-        }
-
-        $cid = $this->conectar('central');
-
-        if (sqlsrv_begin_transaction($cid) === false) {
-            throw new Exception($this->errorSql('No se pudo abrir la transacción'));
-        }
-
-        try {
-            foreach (array_chunk($v['ids'], 500) as $tanda) {
-                $stmt = sqlsrv_query($cid,
-                    "UPDATE dbo." . self::TABLA_DEPOSITO . "
-                     SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
-                     WHERE VIGENTE = 1 AND ID_SBA14 IN ("
-                        . implode(', ', array_fill(0, count($tanda), '?')) . ")",
-                    array_merge([$usuario, $usuario], $tanda));
-
-                if ($stmt === false) {
-                    throw new Exception($this->errorSql('Error al deshacer el depósito'));
-                }
-
-                sqlsrv_free_stmt($stmt);
-            }
-
-            if (sqlsrv_commit($cid) === false) {
-                throw new Exception($this->errorSql('No se pudo confirmar'));
-            }
-        } catch (Throwable $e) {
-            sqlsrv_rollback($cid);
-
-            throw $e;
-        }
-
-        return ['deshechos' => count($v['ids'])];
-    }
-
-    /**
-     * Los depositos VIGENTES de una lista de cheques, por ID_SBA14.
-     *
-     * @param array $ids
-     * @return array Mapa ID_SBA14 => ['id', 'fecha_acreditacion']
-     */
-    private function getDepositosVigentes($ids) {
-        $ids = self::idsPedidos($ids);
-        $v = [];
-
-        if (empty($ids)) {
-            return $v;
-        }
-
-        $cid = $this->conectar('central');
-
-        foreach (array_chunk($ids, 500) as $tanda) {
-            $stmt = sqlsrv_query($cid,
-                "SELECT ID, ID_SBA14, FECHA_ACREDITACION
-                 FROM dbo." . self::TABLA_DEPOSITO . "
-                 WHERE VIGENTE = 1 AND ID_SBA14 IN ("
-                    . implode(', ', array_fill(0, count($tanda), '?')) . ")",
-                $tanda);
-
-            if ($stmt === false) {
-                throw new Exception($this->errorSql('Error al leer los depósitos'));
-            }
-
-            while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-                $v[intval($row['ID_SBA14'])] = [
-                    'id' => intval($row['ID']),
-                    'fecha_acreditacion' => Horizonte::normalizarFecha($row['FECHA_ACREDITACION'])
-                ];
-            }
-
-            sqlsrv_free_stmt($stmt);
-        }
-
-        return $v;
-    }
-
-    /**
-     * El historial de depositos de una lista de cheques: los vigentes y los
-     * deshechos, del mas nuevo al mas viejo.
-     *
-     * ES LO QUE JUSTIFICA QUE NO HAYA BAJAS FISICAS: el tooltip de la marca
-     * dice quien deposito, cuando, y quien lo deshizo. Va en una consulta por
-     * tanda y no por cheque: la grilla tiene cientos.
-     *
-     * @param array $ids
-     * @return array Mapa ID_SBA14 => lista de depositos
-     */
-    public function getHistorialDepositos($ids) {
-        $ids = self::idsPedidos($ids);
-        $v = [];
-
-        if (empty($ids) || !$this->depositoCreado()) {
-            return $v;
-        }
-
-        $cid = $this->conectar('central');
-
-        foreach (array_chunk($ids, 500) as $tanda) {
-            $stmt = sqlsrv_query($cid,
-                "SELECT ID, ID_SBA14, FECHA_DEPOSITO, FECHA_ACREDITACION,
-                        CAST(IMPORTE_NETO AS FLOAT) AS IMPORTE_NETO, VIGENTE,
-                        USUARIO_ALTA, FECHA_ALTA, USUARIO_BAJA, FECHA_BAJA
-                 FROM dbo." . self::TABLA_DEPOSITO . "
-                 WHERE ID_SBA14 IN (" . implode(', ', array_fill(0, count($tanda), '?')) . ")
-                 ORDER BY ID DESC",
-                $tanda);
-
-            if ($stmt === false) {
-                throw new Exception($this->errorSql('Error al leer el historial de depósitos'));
-            }
-
-            while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-                $v[intval($row['ID_SBA14'])][] = [
-                    'id' => intval($row['ID']),
-                    'fecha_deposito' => Horizonte::normalizarFecha($row['FECHA_DEPOSITO']),
-                    'fecha_acreditacion' => Horizonte::normalizarFecha($row['FECHA_ACREDITACION']),
-                    'neto' => floatval($row['IMPORTE_NETO']),
-                    'vigente' => intval($row['VIGENTE']),
-                    'usuario' => $row['USUARIO_ALTA'],
-                    'fecha_alta' => $this->fechaHora($row['FECHA_ALTA']),
-                    'usuario_baja' => $row['USUARIO_BAJA'],
-                    'fecha_baja' => $this->fechaHora($row['FECHA_BAJA'])
-                ];
-            }
-
-            sqlsrv_free_stmt($stmt);
-        }
-
-        return $v;
-    }
-
-    /**
-     * Si hay depositos vigentes de cheques en cartera. Es lo que decide el
-     * aviso de "falta la fila": sin depositos, que falte la fila no le saca
-     * nada al tablero.
-     *
-     * @param array $filas Las de getEcheqsCartera()
-     * @return bool
-     */
-    public static function hayDepositos($filas) {
-        foreach (is_array($filas) ? $filas : [] as $f) {
-            if (!empty($f['DEPOSITO'])) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /**
@@ -2662,13 +2936,13 @@ class Echeqs {
     /**
      * Guarda el plazo de acreditacion.
      *
-     * NO MUEVE NINGUN DEPOSITO YA HECHO: la fecha de acreditacion se calcula y
-     * se guarda al depositar, porque el banco ya tomo ese cheque con el plazo
-     * de ese dia. El plazo nuevo vale para los depositos que vengan.
+     * MUEVE TAMBIEN LOS QUE TODAVIA NO ACREDITARON: la fecha de acreditacion
+     * no se guarda, se calcula al leer desde la boleta de Tango. Es la
+     * decision de Tesoreria: el plazo es el del banco hoy.
      *
      * Tiene su propio camino y no el saveParametro() generico porque ese guarda
-     * cualquier texto, y un plazo de cero o de "dos" dejaria sin poder
-     * depositar. saveParametro() rechaza esta clave por el mismo motivo.
+     * cualquier texto, y un plazo de cero o de "dos" dejaria a los depositados
+     * sin proyectar. saveParametro() rechaza esta clave por el mismo motivo.
      *
      * @param mixed $dias
      * @param string $usuario
@@ -2714,7 +2988,7 @@ class Echeqs {
      *         quien la cargo
      */
     public function getAlicuotas($soloActivas = false) {
-        if (!$this->depositoCreado()) {
+        if (!$this->alicuotasCreadas()) {
             return [];
         }
 
@@ -2754,24 +3028,28 @@ class Echeqs {
     }
 
     /**
-     * Carga una vigencia nueva de una alicuota y recalcula los depositos
-     * pendientes.
+     * Carga una vigencia nueva de una alicuota.
      *
      * UNA ALICUOTA NO SE EDITA: se inserta una vigencia nueva con su
-     * VIGENCIA_DESDE. La anterior queda, y es lo que explica por que un deposito
-     * de la semana pasada tiene otra tasa. Las validaciones son las de Cob.
-     * Electronicos -Retenciones::validarAlicuota()-, sobre el estado resultante.
+     * VIGENCIA_DESDE. La anterior queda, y es lo que explica la tasa de un
+     * deposito de ese periodo. Las validaciones son las de Cob. Electronicos
+     * -Retenciones::validarAlicuota()-, sobre el estado resultante.
+     *
+     * NO RECALCULA NADA: ningun neto de un cheque depositado esta guardado. Se
+     * calcula al leer, con las alicuotas vigentes a su acreditacion, asi que
+     * los pendientes toman la vigencia nueva en la proxima lectura y los que
+     * ya acreditaron no se leen mas.
      *
      * @param string $concepto
      * @param mixed $alicuota Fraccion: 2,5% es 0,025
      * @param string $vigenciaDesde 'Y-m-d'
      * @param string $usuario
-     * @return array ['id', 'tasa_total', 'recalculo']
+     * @return array ['id', 'tasa_total']
      */
     public function addAlicuota($concepto, $alicuota, $vigenciaDesde, $usuario) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
 
-        if (!$this->depositoCreado()) {
+        if (!$this->alicuotasCreadas()) {
             throw new Exception('Todavía no se pueden cargar alícuotas de cheques. Corré '
                 . self::SCRIPT_DEPOSITO . ' contra la base central.');
         }
@@ -2803,8 +3081,7 @@ class Echeqs {
 
         return [
             'id' => intval($row['ID']),
-            'tasa_total' => $tasaTotal,
-            'recalculo' => $this->recalcularDepositosPendientes($usuario)
+            'tasa_total' => $tasaTotal
         ];
     }
 
@@ -2813,20 +3090,18 @@ class Echeqs {
      *
      * SE PUEDE DAR DE BAJA LA ULTIMA, a diferencia de Cob. Electronicos. Alla
      * el invariante es "una procesadora ACTIVA tiene alicuotas", y aca no hay
-     * procesadora que activar. Lo que pasa sin alicuotas esta cubierto en los
-     * dos extremos: los depositos pendientes CONSERVAN el neto que tienen
-     * guardado -el recalculo no puede calcular uno nuevo y lo avisa-, y los
-     * depositos nuevos se rechazan hasta que se cargue una. Decision de
-     * Tesoreria.
+     * procesadora que activar. Sin alicuotas vigentes a su acreditacion, un
+     * cheque depositado queda con el neto en null: no se proyecta, y la
+     * pestana y el tablero lo avisan como critico. Un neto igual al bruto
+     * informaria de mas sin decirlo.
      *
      * @param int $id
      * @param string $usuario
-     * @return array ['recalculo' => array]
      */
     public function bajaAlicuota($id, $usuario) {
         $usuario = AuthCashflow::usuarioDeEscritura($usuario);
 
-        if (!$this->depositoCreado()) {
+        if (!$this->alicuotasCreadas()) {
             throw new Exception('Corré ' . self::SCRIPT_DEPOSITO . ' contra la base central.');
         }
 
@@ -2849,144 +3124,6 @@ class Echeqs {
             throw new Exception('La alícuota ' . intval($id) . ' no existe o ya estaba dada de '
                 . 'baja.');
         }
-
-        return ['recalculo' => $this->recalcularDepositosPendientes($usuario)];
-    }
-
-    /**
-     * Recalcula el neto de los depositos PENDIENTES con las alicuotas de ahora.
-     *
-     * Corre solo al cargar o dar de baja una alicuota, igual que en Cob.
-     * Electronicos. Pendiente es VIGENTE y con acreditacion DE MANANA EN
-     * ADELANTE -Retenciones::cortePendientes(), el mismo corte de los dos
-     * modulos-: lo que ya acredito, hoy incluido, conservo su tasa, porque su
-     * plata entro con esa tasa.
-     *
-     * Que cambia lo decide Retenciones::planRecalculo(), puro y probado; aca
-     * solo se escribe lo que el plan dice, en UNA transaccion: a mitad de
-     * camino quedaria una parte de los pendientes con la tasa nueva y otra con
-     * la vieja, sin forma de saber cual es cual.
-     *
-     * QUEDA FIRMADO POR QUIEN GUARDO LA ALICUOTA: es parte de su accion, y ve en
-     * la respuesta cuantos depositos cambio y por cuanto.
-     *
-     * @param string $usuario
-     * @param string|null $hoy 'Y-m-d'. Por defecto, hoy
-     * @return array El plan aplicado, con 'aplicados', 'avisos' y 'pendientes_desde'
-     */
-    public function recalcularDepositosPendientes($usuario, $hoy = null) {
-        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
-        $corte = Retenciones::cortePendientes($hoy === null ? date('Y-m-d') : $hoy);
-        $cid = $this->conectar('central');
-
-        // Solo los pendientes: los acreditados no se recalculan nunca, y traer
-        // el historial entero para descartarlo en PHP es al reves. Se cuentan
-        // aparte, para poder decir que no se tocaron.
-        $stmt = sqlsrv_query($cid,
-            "SELECT ID, ID_SBA14, N_CHEQUE, FECHA_ACREDITACION,
-                    CAST(IMPORTE_BRUTO AS FLOAT) AS IMPORTE_BRUTO,
-                    CAST(TASA_APLICADA AS FLOAT) AS TASA_APLICADA,
-                    CAST(IMPORTE_NETO AS FLOAT)  AS IMPORTE_NETO
-             FROM dbo." . self::TABLA_DEPOSITO . "
-             WHERE VIGENTE = 1 AND FECHA_ACREDITACION >= ?",
-            [$corte]);
-
-        if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al leer los depósitos pendientes'));
-        }
-
-        $items = [];
-
-        while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            // Un solo juego de alicuotas: el de los cheques.
-            $items[] = [
-                'id' => intval($row['ID']),
-                'juego' => 0,
-                'n_cheque' => $row['N_CHEQUE'] === null ? null : intval($row['N_CHEQUE']),
-                'fecha_acreditacion' => Horizonte::normalizarFecha($row['FECHA_ACREDITACION']),
-                'importe_bruto' => floatval($row['IMPORTE_BRUTO']),
-                'tasa_aplicada' => floatval($row['TASA_APLICADA']),
-                'importe_neto' => floatval($row['IMPORTE_NETO'])
-            ];
-        }
-
-        sqlsrv_free_stmt($stmt);
-
-        $plan = Retenciones::planRecalculo($items, [0 => $this->getAlicuotas(true)], $corte);
-        $plan['acreditados'] = $this->contarDepositosAcreditados($cid, $corte);
-        $plan['pendientes_desde'] = $corte;
-        $plan['aplicados'] = 0;
-        $plan['avisos'] = [];
-
-        if (!empty($plan['sin_alicuota'])) {
-            $plan['avisos'][] = count($plan['sin_alicuota'][0]) . ' depósito(s) pendiente(s) no '
-                . 'se pudieron recalcular porque los cheques no tienen alícuotas vigentes a su '
-                . 'fecha de acreditación. Conservan el neto con el que se depositaron; los '
-                . 'depósitos nuevos se rechazan hasta que se cargue una alícuota.';
-        }
-
-        // Lo que vuelve al navegador no lleva el item crudo: es lo que el
-        // panel del resultado dibuja, nada mas.
-        foreach ($plan['cambios'] as $i => $c) {
-            $plan['cambios'][$i]['n_cheque'] = $c['item']['n_cheque'];
-            unset($plan['cambios'][$i]['item']);
-        }
-
-        unset($plan['sin_alicuota']);
-
-        if (empty($plan['cambios'])) {
-            return $plan;
-        }
-
-        if (sqlsrv_begin_transaction($cid) === false) {
-            throw new Exception($this->errorSql('No se pudo abrir la transacción del recálculo'));
-        }
-
-        try {
-            foreach ($plan['cambios'] as $c) {
-                $stmt = sqlsrv_query($cid,
-                    "UPDATE dbo." . self::TABLA_DEPOSITO . "
-                     SET TASA_APLICADA = ?, DETALLE_TASA = ?, IMPORTE_NETO = ?, "
-                        . Auditoria::SET_MODIF . "
-                     WHERE ID = ? AND VIGENTE = 1",
-                    [$c['tasa_nueva'], $c['desglose_nuevo'], $c['neto_nuevo'], $usuario, $c['id']]);
-
-                if ($stmt === false) {
-                    throw new Exception($this->errorSql('Error al recalcular el depósito '
-                        . $c['id']));
-                }
-
-                sqlsrv_free_stmt($stmt);
-                $plan['aplicados']++;
-            }
-
-            if (sqlsrv_commit($cid) === false) {
-                throw new Exception($this->errorSql('No se pudo confirmar el recálculo'));
-            }
-        } catch (Throwable $e) {
-            sqlsrv_rollback($cid);
-
-            throw $e;
-        }
-
-        return $plan;
-    }
-
-    /** Cuantos depositos vigentes ya acreditaron: no se recalculan, se cuentan */
-    private function contarDepositosAcreditados($cid, $corte) {
-        $stmt = sqlsrv_query($cid,
-            "SELECT COUNT(*) AS N FROM dbo." . self::TABLA_DEPOSITO . "
-             WHERE VIGENTE = 1 AND FECHA_ACREDITACION < ?",
-            [$corte]);
-
-        if ($stmt === false) {
-            throw new Exception($this->errorSql('Error al contar los depósitos acreditados'));
-        }
-
-        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
-        sqlsrv_free_stmt($stmt);
-
-        return $row ? intval($row['N']) : 0;
     }
 
     /**
@@ -3003,7 +3140,7 @@ class Echeqs {
     public function datosParametrosDeposito($hoy = null) {
         $hoy = ($hoy === null) ? date('Y-m-d') : $hoy;
 
-        if (!$this->depositoCreado()) {
+        if (!$this->alicuotasCreadas()) {
             return [
                 'tablas_creadas' => false,
                 'plazo' => ['dias' => null, 'error' => null, 'valor' => null,
@@ -3012,9 +3149,10 @@ class Echeqs {
                 'alicuotas' => [],
                 'tasa_hoy' => self::tasaParaPantalla([], $hoy),
                 'hoy' => $hoy,
-                'avisos' => ['Todavía no existen las tablas del depósito de cheques. Corré '
-                    . self::SCRIPT_DEPOSITO . ' contra la base central. Mientras tanto no se '
-                    . 'puede depositar, y la cartera se ve y se proyecta como hasta ahora.']
+                'avisos' => ['Todavía no existe la tabla de alícuotas de los cheques. Corré '
+                    . self::SCRIPT_DEPOSITO . ' contra la base central. Mientras tanto los '
+                    . 'cheques depositados en Tango no tienen neto y no se proyectan; la cartera '
+                    . 'se ve y se proyecta como siempre.']
             ];
         }
 
@@ -3029,8 +3167,8 @@ class Echeqs {
 
         if ($tasa['tasa'] === null) {
             $avisos[] = 'Los cheques no tienen ninguna alícuota de retención vigente hoy, así que '
-                . 'no se puede depositar: el neto saldría igual al bruto. Cargalas abajo, en '
-                . 'Depósito de cheques.';
+                . 'los depositados no tienen neto y no se proyectan: un neto igual al bruto '
+                . 'informaría de más. Cargalas abajo, en Depósito de cheques.';
         }
 
         return [
@@ -3668,6 +3806,8 @@ class Echeqs {
                 LEFT JOIN dbo.BANCO AS b ON s.ID_BANCO = b.ID_BANCO
                 WHERE s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)
                   AND s.ESTADO NOT IN ('X', 'R')
+                  -- Venta cobrada anticipada: franquicias y locales. Cheques
+                  -- en Cartera no filtra el cliente: ver el encabezado.
                   AND s.CLIENTE LIKE '[FL]%'
                   AND s.CLIENTE IN ($marcadores)
                 ORDER BY s.RAZON_EMIS, s.FECHA_CHEQ";
@@ -3762,32 +3902,11 @@ class Echeqs {
         }
 
         /* EL BANCO SE COMPARA POR ID, no por el nombre: es como se agrupa el
-           desglose por banco de un deposito. Sale de dbo.BANCO y no de SBA14,
-           asi que un cheque cuyo ID_BANCO no esta en el maestro queda en null,
-           igual que uno sin banco: es un dato roto -el banco es obligatorio en
-           Tango- y ninguno de los dos se puede depositar. */
+           resto del modulo. Sale de dbo.BANCO y no de SBA14, asi que un cheque
+           cuyo ID_BANCO no esta en el maestro queda en null, igual que uno sin
+           banco: es un dato roto -el banco es obligatorio en Tango-. */
         if (array_key_exists('ID_BANCO', $row)) {
             $fila['ID_BANCO'] = ($row['ID_BANCO'] === null) ? null : intval($row['ID_BANCO']);
-        }
-
-        /* EL DEPOSITO VIGENTE, o null. Las columnas viajan siempre -en null sin
-           el script- asi que la fila siempre trae la clave y nadie tiene que
-           preguntar si el circuito existe antes de leerla. */
-        if (array_key_exists('DEP_ID', $row)) {
-            $fila['DEPOSITO'] = ($row['DEP_ID'] === null) ? null : [
-                'id' => intval($row['DEP_ID']),
-                'fecha_deposito' => Horizonte::normalizarFecha($row['DEP_FECHA_DEPOSITO']),
-                'fecha_acreditacion' => Horizonte::normalizarFecha($row['DEP_FECHA_ACREDITACION']),
-                'dias_plazo' => intval($row['DEP_DIAS_PLAZO']),
-                'bruto' => floatval($row['DEP_BRUTO']),
-                'tasa' => floatval($row['DEP_TASA']),
-                'desglose' => trim((string) $row['DEP_DESGLOSE']),
-                'neto' => floatval($row['DEP_NETO']),
-                'observacion' => $row['DEP_OBSERVACION'],
-                'banco' => trim((string) $row['DEP_BANCO']),
-                'usuario' => $row['DEP_USUARIO'],
-                'fecha_alta' => $this->fechaHora($row['DEP_FECHA_ALTA'])
-            ];
         }
 
         if (array_key_exists('FECHA_PAGO', $row)) {

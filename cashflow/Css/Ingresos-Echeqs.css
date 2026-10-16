@@ -305,12 +305,14 @@
    ======================================== */
 
 /* Las marcas del deposito van en la misma celda que la de excluido, por el
-   mismo motivo: el estado del cheque se lee en un solo lugar. Son dos colores
-   distintos porque son dos cosas distintas: un depositado sigue entrando al
-   cashflow -en otra fecha y por el neto-; uno acreditado sin registrar ya no
-   suma a ninguna fila y pide una accion en Tango. */
+   mismo motivo: el estado del cheque se lee en un solo lugar. Son tres colores
+   porque son tres cosas distintas: un depositado sigue entrando al cashflow
+   -en otra fecha y por el neto-; uno acreditado ya esta en el saldo bancario
+   y no suma; y a uno sin proyectar le falta un dato, y es el que pide una
+   accion. */
 .tab-echeqs .ech-badge-depositado,
-.tab-echeqs .ech-badge-acreditado {
+.tab-echeqs .ech-badge-acreditado,
+.tab-echeqs .ech-badge-sin-datos {
     display: inline-block;
     margin-top: 2px;
     font-size: 0.62rem;
@@ -327,8 +329,15 @@
 }
 
 .tab-echeqs .ech-badge-acreditado {
-    color: #8a5a00;
-    background: #fdf0d5;
+    color: #4d6b3a;
+    background: #e6f2dc;
+    white-space: normal;
+    max-width: 130px;
+}
+
+.tab-echeqs .ech-badge-sin-datos {
+    color: #9b1c1c;
+    background: #fde2e2;
     white-space: normal;
     max-width: 130px;
 }
@@ -344,65 +353,14 @@
     color: #8c93a8;
 }
 
-/* El acreditado sin registrar se atenua como el excluido: no suma a ninguna
-   fila. No se tacha: no es una decision de que no entre, ya entro. */
+/* El acreditado y el sin proyectar se atenuan como el excluido: no suman a
+   ninguna fila. No se tachan: no es una decision de que no entren. */
 .tab-echeqs tr.ech-acreditado {
     opacity: 0.7;
-}
-
-/* Un cheque que tuvo un deposito y se deshizo: el icono lleva el historial en
-   el tooltip. Chico y gris, porque no es un estado, es historia. */
-.tab-echeqs .ech-icono-historial {
-    font-size: 0.7rem;
-    color: #8c93a8;
-    cursor: help;
 }
 
 /* Los renglones del pie que abren el total en las partes del tablero. */
 .tab-echeqs tr.ech-fila-parte td {
     font-size: 0.78rem;
     font-weight: normal;
-}
-
-/* El cuadro del dialogo de deposito: lo que calculo el servidor. */
-.ech-dialogo-deposito td {
-    padding: 3px 6px;
-    font-size: 0.85rem;
-}
-
-/* El desglose por banco de una tanda mixta. Con muchos bancos hace scroll
-   adentro, con una altura fija de unos seis bancos: no puede empujar los
-   totales ni el boton fuera de la pantalla. Los importes no se cortan, y
-   los encabezados no toman el estilo de las grillas (.table thead th y
-   .table tbody td de main.css, de ahi la especificidad): sus mayusculas y
-   su relleno ensanchan la tabla hasta sacar el cuadro del dialogo. */
-.ech-dialogo-bancos {
-    max-height: 12rem;
-    overflow-y: auto;
-    border: 1px solid #e3e6ef;
-    border-radius: 4px;
-}
-
-.ech-dialogo-bancos table {
-    width: 100%;
-}
-
-.ech-dialogo-bancos .table thead th {
-    position: sticky;
-    top: 0;
-    background: #f6f7fb;
-    font-size: 0.75rem;
-    font-weight: 600;
-    text-transform: none;
-    letter-spacing: normal;
-    padding: 3px 6px;
-}
-
-.ech-dialogo-bancos .table tbody td {
-    font-size: 0.78rem;
-    padding: 2px 6px;
-}
-
-.ech-dialogo-bancos .text-end {
-    white-space: nowrap;
 }

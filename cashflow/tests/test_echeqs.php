@@ -969,8 +969,8 @@ $cartera = $echeqs->getEcheqsCartera();
 
 // Todo lo que se muestra tiene que ser futuro: el tablero proyecta, no informa
 // el pasado. Y de paso cubre la trampa de FECHA_CHEQ, cuyo default es
-// '1800/01/01' y no NULL. UN DEPOSITADO ES LA EXCEPCION: se lee aunque su fecha
-// haya pasado, porque se ubica por su acreditacion (ver sqlUniversoCartera()).
+// '1800/01/01' y no NULL. Los depositados no estan aca: Tango los saco de
+// cartera, y se leen aparte (getDepositadosTango()).
 $hoy = date('Y-m-d');
 $pasadas = 0;
 $sinFecha = 0;
@@ -978,13 +978,15 @@ $sinFecha = 0;
 foreach ($cartera as $c) {
     if ($c['FECHA_PAGO'] === null) {
         $sinFecha++;
-    } elseif ($c['FECHA_PAGO'] < $hoy && empty($c['DEPOSITO'])) {
+    } elseif ($c['FECHA_PAGO'] < $hoy) {
         $pasadas++;
     }
 }
 
-chequear('ningun cheque no depositado tiene fecha anterior a hoy', 0, $pasadas);
+chequear('ningun cheque de cartera tiene fecha anterior a hoy', 0, $pasadas);
 chequear('ni fecha nula: la centinela de 1800 la filtra el WHERE', 0, $sinFecha);
+chequear('ninguno trae deposito: la cartera es solo ESTADO = C', 0,
+    count(array_filter($cartera, function ($c) { return !empty($c['DEPOSITO']); })));
 
 /* Las dos consultas de cartera no se pueden desincronizar en silencio: la del
    detalle y la agregada tienen que dar el mismo total, y tienen que decir lo
@@ -1029,51 +1031,40 @@ function totalReal($s) {
         + $s['fuera_horizonte'] + $s['sin_fecha'];
 }
 
-/* LA CARTERA REAL, PARTIDA CON LA MISMA REGLA QUE EL PROVEEDOR. Un depositado
-   que ya acredito -hoy o antes- no esta en ninguna serie: su plata ya esta en
-   el saldo bancario. Uno que se proyecta entra por el NETO, asi que el
+/* LA CARTERA REAL Y LOS DEPOSITADOS REALES, CON LA MISMA LECTURA QUE EL
+   PROVEEDOR. Un depositado que se proyecta entra por el NETO, asi que el
    universo en bruto se reconstruye con la retencion. La retencion se suma de
    los depositos y no se lee de la serie: el motor descarta los escalares al
    normalizarla. */
-$brutoProyectable = 0;
+$depReal = $echeqs->getDepositadosTango($hoy);
 $brutoCobrable = 0;
 $netoDepositado = 0;
-$retencionDepositada = 0;
+$brutoDepositado = 0;
 
 foreach ($cartera as $c) {
-    $estado = Echeqs::estadoDeposito($c['DEPOSITO'], true, $hoy);
-
-    if ($estado === Echeqs::DEPOSITO_ACREDITADO) {
-        continue;
-    }
-
-    $brutoProyectable += $c['IMPORTE'];
-
-    if ($estado === Echeqs::DEPOSITO_PROYECTA) {
-        $netoDepositado += $c['DEPOSITO']['neto'];
-        $retencionDepositada += $c['DEPOSITO']['bruto'] - $c['DEPOSITO']['neto'];
-    } elseif (empty($c['EXCLUIDO'])) {
+    if (empty($c['EXCLUIDO'])) {
         $brutoCobrable += $c['IMPORTE'];
+    }
+}
+
+foreach ($depReal['filas'] as $c) {
+    if ($c['ESTADO_DEPOSITO'] === Echeqs::DEPOSITO_PROYECTA) {
+        $netoDepositado += $c['DEPOSITO']['neto'];
+        $brutoDepositado += $c['DEPOSITO']['bruto'];
     }
 }
 
 // EL INVARIANTE QUE IMPORTA: tildar cheques en la sub-pestana de venta cobrada
 // anticipada no puede mover estos numeros. Se verifica por construccion -el
-// universo tiene que ser exactamente el total de cartera- porque las marcas
-// viven en una tabla que esta consulta no toca. Si algun dia esto falla, o la
-// serie dejo de salir de cartera o alguien la conecto al maestro. Desde el
-// deposito, A_COBRAR_TODO lleva los depositados en neto: el universo en bruto
-// es A_COBRAR_TODO + la retencion.
-chequear('A_COBRAR_TODO + la retencion es exactamente el bruto de la cartera que se proyecta',
-    round($brutoProyectable, 2),
-    round(totalReal($serieReal['A_COBRAR_TODO']) + $retencionDepositada, 2));
+// universo tiene que ser exactamente la cartera mas los depositados que se
+// proyectan- porque las marcas viven en una tabla que estas consultas no
+// tocan. A_COBRAR_TODO lleva los depositados en neto: el universo en bruto es
+// A_COBRAR_TODO + la retencion.
+chequear('A_COBRAR_TODO + la retencion es el bruto de la cartera mas el de los depositados',
+    round($sumaDetalle + $brutoDepositado, 2),
+    round(totalReal($serieReal['A_COBRAR_TODO']) + ($brutoDepositado - $netoDepositado), 2));
 
-/* Y ES EL MISMO NUMERO QUE DABA A_COBRAR ANTES DE QUE EXISTIERA LA EXCLUSION.
-   El dia que se corre el script no hay nada excluido, asi que el tablero no se
-   mueve ni un peso; el dia que alguien tilde, lo que cambia es de que serie
-   sale, no cuanta plata hay. Esta prueba es la que fija esa promesa contra los
-   datos reales. */
-chequear('la fila del tablero es la cartera MENOS lo excluido y lo depositado',
+chequear('la fila del tablero es la cartera MENOS lo excluido',
     round($brutoCobrable, 2),
     round(totalReal($serieReal['A_COBRAR']), 2));
 chequear('y lo excluido esta entero en su propia serie',
@@ -1091,6 +1082,50 @@ chequear('las tres partes suman el total, con los datos de hoy',
     round(totalReal($serieReal['A_COBRAR'])
         + totalReal($serieReal['A_COBRAR_EXCLUIDOS'])
         + totalReal($serieReal['DEPOSITADOS']), 2));
+
+/* LOS DEPOSITADOS REALES CUMPLEN LA REGLA: todos son BDE a una cuenta
+   bancaria -o sin la linea de la boleta, con su aviso- y ninguno ya acreditado
+   antes de hoy se lista. */
+$malos = 0;
+
+foreach ($depReal['filas'] as $c) {
+    $d = $c['DEPOSITO'];
+
+    if ($c['ESTADO'] !== 'A' || $c['T_COMP_SAL'] !== 'BDE'
+        || ($d['cuenta'] !== null && $d['cuenta']['tipo'] !== 'B')
+        || ($d['fecha_acreditacion'] !== null && $d['fecha_acreditacion'] < $hoy)) {
+        $malos++;
+    }
+}
+
+chequear('los depositados que se listan son BDE a un banco, sin vencer', 0, $malos);
+
+/* LOS ACREDITADOS SEGUN EL EXTRACTO tienen un credito real con el numero y el
+   importe del cheque, en o despues de la boleta. */
+$malCruzados = 0;
+$porExtracto = 0;
+
+foreach ($depReal['filas'] as $c) {
+    $x = $c['DEPOSITO']['extracto'];
+
+    if ($c['DEPOSITO']['motivo'] !== Echeqs::ACREDITADO_POR_EXTRACTO) {
+        continue;
+    }
+
+    $porExtracto++;
+
+    if ($x === null || intval($x['comprobante']) !== intval($c['N_CHEQUE'])
+        || abs(round($x['importe'], 2) - round($c['IMPORTE'], 2)) >= 0.005
+        || $x['fecha'] < $c['FECHA_SAL']) {
+        $malCruzados++;
+    }
+}
+
+chequear('los acreditados por el extracto cruzan por numero, importe y fecha', 0, $malCruzados);
+
+if ($porExtracto === 0) {
+    Pruebas::saltear('hoy ningun depositado que se lista tiene su credito en el extracto');
+}
 
 // Y columna por columna: una exclusion o un deposito que moviera el importe de
 // fecha daria el mismo total y un cuadro distinto.

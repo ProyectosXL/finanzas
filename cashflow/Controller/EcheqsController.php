@@ -60,27 +60,23 @@ try {
     switch ($action) {
         case 'getEcheqsCartera':
             $hoy = date('Y-m-d');
-            $filas = $echeqs->getEcheqsCartera($hoy);
 
-            /* El historial de depositos va en la fila, para el tooltip de la
-               marca: quien deposito, cuando, y quien lo deshizo. Tambien el de
-               los cheques cuyo deposito se deshizo, que ya no tienen deposito
-               vigente pero tienen historia. */
-            $historial = $echeqs->getHistorialDepositos(array_column($filas, 'ID_SBA14'));
-
-            foreach ($filas as $i => $f) {
-                $filas[$i]['HISTORIAL_DEPOSITO'] = isset($historial[$f['ID_SBA14']])
-                    ? $historial[$f['ID_SBA14']] : [];
-            }
+            /* DOS LECTURAS, UNA GRILLA. La cartera (ESTADO = 'C') y los
+               depositados en Tango (boleta BDE), que ya salieron de cartera.
+               Un cheque esta en una o en la otra, nunca en las dos. Los
+               depositados vienen de getDepositadosTango(), la misma lectura
+               que usa el proveedor: la pestana y el tablero suman lo mismo. */
+            $dep = $echeqs->getDepositadosTango($hoy);
+            $filas = array_merge($echeqs->getEcheqsCartera(), $dep['filas']);
 
             /* El eje sale de horizonte_dias y horizonte_meses, el mismo del
                tablero: los importes por columna vienen ya resueltos y el
                navegador no calcula ninguna fecha.
 
                CADA FILA SE UBICA POR FECHA_EJE E IMPORTE_EJE, que resolvio
-               Echeqs::ubicarEnEje(): un cheque no depositado en la fecha del
-               cheque y por el bruto, uno depositado en su acreditacion y por
-               el neto, y uno que ya acredito en ninguna columna. Es la misma
+               Echeqs::ubicarEnEje(): uno de cartera en la fecha del cheque y
+               por el bruto, uno depositado que se proyecta en su acreditacion
+               y por el neto, y uno acreditado o sin datos en ninguna columna. Es la misma
                regla que usa el proveedor, asi que la grilla y el tablero ponen
                cada peso en la misma columna. */
             $payload = EjeVista::armar(
@@ -112,29 +108,21 @@ try {
                 Echeqs::totalesNetos($payload['totales'], $payload['excluidos']),
                 $payload['depositados']);
 
-            /* Si se puede depositar, y si no, por que: sin el script, sin la
-               fila del tablero o con el plazo roto, el boton queda apagado
-               diciendolo. */
-            $payload['deposito'] = $echeqs->estadoParaDepositar();
-
-            $aviso = Echeqs::avisoAcreditadosSinRegistrar(
-                $payload['depositados']['acreditados']['cheques'],
-                $payload['depositados']['acreditados']['neto']);
-
-            if ($aviso !== null) {
-                $payload['warnings'][] = ['nivel' => 'warning', 'texto' => $aviso];
+            // Los de los depositados: sin plazo, sin habil o sin alicuotas
+            // son criticos -esa plata no esta en ninguna fila-.
+            foreach ($dep['avisos'] as $a) {
+                $payload['warnings'][] = $a;
             }
 
-            // EL HUECO ENTRE SCRIPTS: hay depositos vigentes y ninguna fila
-            // activa los muestra. Esa plata salio de "Echeqs en cartera" y no
-            // entro en ningun lado.
-            if (Echeqs::hayDepositos($filas) && !$payload['deposito']['fila_activa']
-                && $echeqs->depositoCreado()) {
+            // LA FILA DEL TABLERO: hay depositados que se proyectan y ninguna
+            // fila activa los muestra. Esa plata salio de "Echeqs en cartera"
+            // en Tango y no entra en ningun lado.
+            if ($payload['depositados']['cheques'] > 0 && !$echeqs->filaDepositadosActiva()) {
                 $payload['warnings'][] = ['nivel' => 'danger', 'texto' => 'Hay cheques '
-                    . 'depositados y ninguna fila activa del tablero muestra la serie ECHEQS → '
-                    . 'DEPOSITADOS: su neto salió de "Echeqs en cartera" y no entra en ninguna '
-                    . 'fila. Corré ' . Echeqs::SCRIPT_FILA_DEPOSITADOS . ' o activá la fila en '
-                    . 'Parámetros → Cashflow.'];
+                    . 'depositados en Tango y ninguna fila activa del tablero muestra la serie '
+                    . 'ECHEQS → DEPOSITADOS: su neto no entra en ninguna fila. Corré '
+                    . Echeqs::SCRIPT_FILA_DEPOSITADOS . ' o activá la fila en Parámetros → '
+                    . 'Cashflow.'];
             }
 
             /* Si se puede excluir. La pantalla lo pregunta en vez de suponerlo:
@@ -144,6 +132,18 @@ try {
                el mismo criterio que 'excluir_factura' en
                ProveedoresController. */
             $payload['excluir_cheque'] = $echeqs->excluirCreada();
+
+            /* Si se puede marcar "ya acredito". Sin el script el boton no se
+               dibuja y la pestana dice que falta: los depositados se
+               proyectan hasta que vence su plazo. */
+            $payload['acreditado'] = $echeqs->acreditadoCreado();
+
+            if (!$payload['acreditado']) {
+                $payload['warnings'][] = ['nivel' => 'info', 'texto' => 'Para marcar un cheque '
+                    . 'depositado como "ya acreditó" hace falta correr ' . Echeqs::SCRIPT_ACREDITADO
+                    . ' contra la base central. Mientras tanto, los depositados se proyectan hasta '
+                    . 'su fecha de acreditación.'];
+            }
 
             echo json_encode([
                 'success' => true,
@@ -286,72 +286,49 @@ try {
             break;
 
         /* ================================================================
-           EL DEPOSITO MASIVO
+           LA MARCA "YA ACREDITO"
 
-           Del navegador llegan SOLO LOS IDS de los cheques -y una observacion
-           opcional-. El banco, el importe, la fecha de deposito, la
-           acreditacion, la tasa y el neto los resuelve Echeqs con las mismas
-           reglas en la vista previa y en el guardado. Ver el encabezado de la
-           seccion en Class/Echeqs.php.
-
-           LA VISTA PREVIA VA CON EL PERMISO DE EDICION, como las de las
-           importaciones: no escribe, pero es el primer paso de una escritura,
-           y la pantalla no la ofrece a quien no puede depositar.
+           Un cheque depositado que ya acredito antes de su plazo sale de
+           "Echeqs depositados": el saldo de Interbanking ya lo tiene. Del
+           navegador llegan SOLO LOS IDS -y una observacion opcional-: el
+           origen es MANUAL y la fecha, hoy. Lo valida Echeqs contra la
+           lectura de la base, todo o nada.
            ================================================================ */
-        case 'previsualizarDeposito':
+        case 'marcarAcreditados':
             $data = bodyJson();
 
             if (!isset($data['ids']) || !is_array($data['ids'])) {
                 throw new Exception('Faltan parametros obligatorios');
             }
 
-            echo json_encode([
-                'success' => true,
-                'data' => $echeqs->previsualizarDeposito($data['ids'])
-            ], JSON_UNESCAPED_UNICODE);
-            break;
-
-        case 'depositarCheques':
-            $data = bodyJson();
-
-            if (!isset($data['ids']) || !is_array($data['ids'])) {
-                throw new Exception('Faltan parametros obligatorios');
-            }
-
-            /* Cualquier otro campo que llegue -una fecha, un importe, un neto-
-               se ignora a proposito: no hay parametro por donde pasarlo. */
-            $r = $echeqs->depositarCheques(
+            $r = $echeqs->marcarAcreditados(
                 $data['ids'],
                 isset($data['observacion']) ? $data['observacion'] : null,
                 $usuario
             );
 
-            $c = $r['calculo'];
-
-            // "N cheque(s) de <banco>" o "N cheques de K bancos": el mismo
-            // texto que el dialogo, armado por Echeqs::textoTanda().
             echo json_encode([
                 'success' => true,
-                'message' => $c['tanda'] . ' depositados. Acreditan el ' . date('d/m/Y', strtotime($c['fecha_acreditacion']))
-                    . ' por $ ' . number_format($c['neto'], 2, ',', '.') . ' netos.',
+                'message' => $r['marcados'] . ' cheque(s) marcados como acreditados: salen de '
+                    . '"Echeqs depositados". Se siguen viendo hasta su fecha de acreditación.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
 
-        case 'deshacerDepositos':
+        case 'deshacerAcreditados':
             $data = bodyJson();
 
             if (!isset($data['ids']) || !is_array($data['ids'])) {
                 throw new Exception('Faltan parametros obligatorios');
             }
 
-            $r = $echeqs->deshacerDepositos($data['ids'], $usuario);
+            $r = $echeqs->deshacerAcreditados($data['ids'], $usuario);
 
             echo json_encode([
                 'success' => true,
-                'message' => $r['deshechos'] . ' depósito(s) deshechos. Los cheques vuelven a '
-                    . 'Echeqs en cartera en su fecha, si es de hoy en adelante. El depósito queda '
-                    . 'en el historial, dado de baja.',
+                'message' => $r['deshechos'] . ' marca(s) deshechas. Los cheques vuelven a '
+                    . '"Echeqs depositados" si acreditan de mañana en adelante. La marca queda en '
+                    . 'el historial, dada de baja.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;
