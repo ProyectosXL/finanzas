@@ -52,14 +52,16 @@
    -no hay que repuntar ninguna fila ni tocar Parametros- y pasa a significar
    "cartera cobrable". A_COBRAR_TODO es el total del corte.
 
-   EL CORTE SUMO DESPUES UNA TERCERA PARTE, DEPOSITADOS, con
-   sql/cashflow_echeqs_deposito.sql: los cheques depositados salen de A_COBRAR
-   y entran por el neto en su propia fila. Hoy es
+   EL CORTE SUMO DESPUES UNA TERCERA PARTE, DEPOSITADOS: los cheques que
+   Tesoreria deposita en Tango salen de cartera (ESTADO = 'A') y entran por el
+   neto en su propia fila. Hoy es
 
        A_COBRAR + A_COBRAR_EXCLUIDOS + DEPOSITADOS = A_COBRAR_TODO
 
-   y A_COBRAR_TODO ya no es el universo en bruto. Un excluido no se deposita y
-   un depositado no se excluye, asi que cada cheque sigue en una sola parte.
+   y A_COBRAR_TODO ya no es el universo en bruto. Cada cheque sigue en una sola
+   parte: la exclusion es de cartera, y un excluido que despues se deposita
+   sale de cartera y se proyecta como depositado. Su exclusion queda en el
+   historial, sin efecto.
    Ver el encabezado de cashflow/Class/Providers/EcheqsProvider.php.
 
    EL IMPORTE EXCLUIDO NO DESAPARECE: queda en su propia serie, visible y

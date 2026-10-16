@@ -166,9 +166,9 @@
             if (sinScript) {
                 sinScript.innerHTML = '<span class="pce-sin-alicuota">sin configurar</span> ' +
                     '<span class="text-muted">' + escapar(d
-                        ? 'Todavía no existen las tablas del depósito de cheques: corré ' +
+                        ? 'Todavía no existe la tabla de alícuotas de los cheques: corré ' +
                           'sql/cashflow_echeqs_deposito.sql contra la base central. Mientras ' +
-                          'tanto no se puede depositar.'
+                          'tanto los cheques depositados no tienen neto y no se proyectan.'
                         : 'No se pudo leer el depósito de cheques: el motivo está en los avisos.') +
                     '</span>';
             }
@@ -227,7 +227,7 @@
 
         if (!t || t.tasa === null || t.tasa === undefined) {
             cont.innerHTML = '<span class="pce-sin-alicuota" title="Sin alícuotas vigentes no se ' +
-                'puede calcular el neto de un depósito, así que no se puede depositar">sin ' +
+                'puede calcular el neto de un cheque depositado, así que no se proyecta">sin ' +
                 'alícuotas</span>';
 
             return;

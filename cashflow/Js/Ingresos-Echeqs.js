@@ -191,11 +191,11 @@
         texto('rotuloMesesEch', vs.meses ? vs.meses.periodo : '');
         texto('rotuloGeneralEch', vs.completo ? vs.completo.periodo : '');
 
-        /* CUENTA LOS QUE SIGUEN EN CARTERA SIN DEPOSITAR, no los que hay. Con
+        /* CUENTA LOS QUE SIGUEN EN CARTERA, no las filas que hay. Con
            los excluidos escondidos, decir "390 cheque(s)" arriba de una tabla
            con 387 filas manda a buscar tres que no están, y el número tampoco
            describiría el importe de al lado, que ya viene neto. Los
-           depositados se cuentan aparte, porque están en otra fila. */
+           depositados en Tango se cuentan aparte, porque están en otra fila. */
         var e = datosCartera.excluidos || {};
         var d = datosCartera.depositados || {};
         var acr = d.acreditados || {};

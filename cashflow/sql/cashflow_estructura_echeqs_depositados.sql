@@ -4,26 +4,27 @@
    ----------------------------------------------------------------------------
    Base   : central
    Orden  : DESPUES de sql/cashflow_estructura_disponibilidades.sql (crea la
-            seccion) y de sql/cashflow_echeqs_deposito.sql (crea el deposito).
-            Sin esta fila NO SE PUEDE DEPOSITAR: el boton queda apagado
-            nombrando este script.
+            seccion) y de sql/cashflow_echeqs_deposito.sql (las alicuotas y
+            el plazo con que se calcula el neto). Sin esta fila, los
+            depositados que se proyectan no entran en ninguna fila y la
+            pestana Echeqs lo avisa como critico.
    ----------------------------------------------------------------------------
    QUE CAMBIA Y POR QUE
 
-   Un cheque de cartera que se marca como depositado ya no entra en la fecha
-   del cheque: entra a las 48 hs habiles del deposito, y por el NETO de las
-   retenciones del banco. Ver README-echeqs.md.
+   Un cheque que Tesoreria deposita en Tango (boleta BDE) sale de cartera y ya
+   no entra en la fecha del cheque: entra a las 48 hs habiles de la boleta, y
+   por el NETO de las retenciones del banco. Ver README-echeqs.md.
 
-   Por eso sale de "Echeqs en cartera" -la serie A_COBRAR deja de traerlo- y
-   entra en esta fila, ECHEQS -> DEPOSITADOS: la suma de los netos de los
-   depositos que se proyectan, por fecha de acreditacion.
+   Por eso sale de "Echeqs en cartera" -Tango lo pasa a ESTADO = 'A' y la
+   serie A_COBRAR deja de traerlo- y entra en esta fila, ECHEQS -> DEPOSITADOS:
+   la suma de los netos de los depositos que se proyectan, por fecha de
+   acreditacion.
 
    ES CRITICO QUE LAS DOS ESTEN ACTIVAS JUNTAS. Son dos partes distintas del
    mismo universo y no se pisan: cada cheque esta en una sola. Con A_COBRAR sola,
-   lo depositado no entra en ningun lado y el tablero informa de menos SIN
-   AVISAR: cada serie es correcta por separado. Por eso Echeqs no deja depositar
-   mientras esta fila no este activa, y la pestana avisa si hay depositos y la
-   fila falta.
+   lo depositado no entra en ningun lado y el tablero informa de menos: cada
+   serie es correcta por separado. Por eso la pestana avisa como critico si hay
+   depositados que se proyectan y esta fila no esta activa.
 
    LA SERIE TOTAL A_COBRAR_TODO las incluye a las dos -y a los excluidos-, asi
    que activarla al lado de cualquiera de ellas lo rechaza el validador de
@@ -42,8 +43,9 @@
    Parametros -> Cashflow, esa edicion se respeta. Lo unico que reafirma es el
    ORIGEN, que es lo que la ata al proveedor.
 
-   EL DIA QUE SE CORRE EL TABLERO NO SE MUEVE NI UN PESO: todavia no hay ningun
-   deposito, asi que la fila nace en cero y A_COBRAR vale lo mismo que antes.
+   EL DIA QUE SE CORRE, la fila empieza a mostrar los depositados que se
+   proyectan. A_COBRAR no cambia: un cheque depositado ya habia salido de la
+   cartera en Tango.
    ============================================================================ */
 
 SET NOCOUNT ON;

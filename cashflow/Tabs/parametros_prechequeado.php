@@ -99,7 +99,7 @@ $edita = AuthCashflow::puedeEditar('parametros', 'PRECHEQUEADO');
                             <div class="form-label form-label-sm fw-semibold mb-1">Tasa de retención vigente hoy</div>
                             <!-- Sin alícuotas vigentes dice "sin alícuotas" y no
                                  0%: un cero se leería como "el banco no retiene
-                                 nada", y sin tasa no se puede depositar. -->
+                                 nada", y sin tasa un depositado no tiene neto. -->
                             <div id="tasaHoyPpq" ></div>
                         </div>
                     </div>
