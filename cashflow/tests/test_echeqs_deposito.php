@@ -713,3 +713,135 @@ chequear('los avisos de los depositados entran al panel con su nivel', 1,
     substr_count($ctrlCartera, "foreach (\$dep['avisos'] as \$a) {\n                \$payload['warnings'][] = \$a;"));
 chequear('y el de la fila del tablero, como critico, solo si hay depositados que se proyectan', 1,
     substr_count($ctrlCartera, "if (\$payload['depositados']['cheques'] > 0 && !\$echeqs->filaDepositadosActiva()) {"));
+
+/* ================================================================
+   La marca "ya acredito"
+   ================================================================ */
+seccion('ya acredito: solo sobre depositados que se proyectan, todo o nada');
+
+$grilla = array_merge([chequeCartera(40)], $lect['filas']);
+$grillaMarca = array_merge([chequeCartera(40)], $lectMarca['filas']);
+
+$v = Echeqs::validarSeleccionAcreditado([5, 7], $grilla);
+chequear('dos depositados que se proyectan se pueden marcar', [null, [5, 7]], [$v['error'], $v['ids']]);
+
+$v = Echeqs::validarSeleccionAcreditado([5, 40], $grilla);
+chequear('uno de cartera se rechaza, y con el no se marca ninguno',
+    [true, [], 'está en cartera: todavía no se depositó en Tango'],
+    [$v['error'] !== null, $v['ids'], $v['rechazos'][0]['motivo']]);
+
+$v = Echeqs::validarSeleccionAcreditado([5, 3], $grilla);
+chequear('uno vencido -ya no se lee- tambien', [true, []], [$v['error'] !== null, $v['ids']]);
+chequear('y el mensaje dice cuantos y cuales', true,
+    strpos($v['error'], '1 de los 2') !== false
+    && strpos($v['error'], 'N° 3 no está entre los depositados') !== false);
+
+$v = Echeqs::validarSeleccionAcreditado([4], $grilla);
+chequear('uno endosado o a la cuenta comitente no esta en la lectura: se rechaza', true,
+    $v['error'] !== null);
+
+$v = Echeqs::validarSeleccionAcreditado([2], $grilla);
+chequear('uno que acredita hoy ya no suma: se rechaza', 'acredita hoy: ya no suma a ninguna fila',
+    $v['rechazos'][0]['motivo']);
+
+$v = Echeqs::validarSeleccionAcreditado([1], $grillaMarca);
+chequear('uno ya marcado no se vuelve a marcar: un solo vigente por cheque',
+    'ya está marcado como acreditado', $v['rechazos'][0]['motivo']);
+
+$v = Echeqs::validarSeleccionAcreditado([1], $lectSin['filas']);
+chequear('uno sin datos no se proyecta: se rechaza', 0,
+    strpos($v['rechazos'][0]['motivo'], 'no se proyecta'));
+
+chequear('los ids se deduplican y los invalidos no cuentan', [5],
+    Echeqs::validarSeleccionAcreditado([5, '5', 0, -1], $grilla)['ids']);
+chequear('sin cheques, no hay marca', 'No llegó ningún cheque para marcar.',
+    Echeqs::validarSeleccionAcreditado([], $grilla)['error']);
+
+seccion('ya acredito: deshacer');
+
+chequear('con todos marcados, se deshacen', [1],
+    Echeqs::validarDeshacerAcreditado([1], [1 => $marcaManual])['ids']);
+chequear('una marca de Interbanking se deshace igual', [1],
+    Echeqs::validarDeshacerAcreditado([1], [1 => $marcaIb])['ids']);
+chequear('con uno sin marca vigente, ninguno', true,
+    Echeqs::validarDeshacerAcreditado([1, 5], [1 => $marcaManual])['error'] !== null);
+chequear('sin la marca, el cheque vuelve a proyectarse si sigue en plazo', Echeqs::DEPOSITO_PROYECTA,
+    $lect['filas'][0]['ESTADO_DEPOSITO']);
+
+seccion('ya acredito: lo que se graba');
+
+chequear('5 parametros por cheque: id, fecha de hoy, observacion y usuario dos veces',
+    [5, '2026-10-16', 'extracto', 'rorozco', 'rorozco', 7, '2026-10-16', 'extracto', 'rorozco', 'rorozco'],
+    Echeqs::paramsInsertAcreditado([5, 7], '2026-10-16', 'extracto', 'rorozco'));
+
+$srcEcheqs = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/Echeqs.php'));
+$iniMarcar = strpos($srcEcheqs, 'public function marcarAcreditados(');
+$bloqueMarcar = substr($srcEcheqs, $iniMarcar,
+    strpos($srcEcheqs, 'public function deshacerAcreditados(') - $iniMarcar);
+
+chequear('el origen de una marca de la pantalla es MANUAL, puesto por el servidor', 1,
+    substr_count($bloqueMarcar, "\"(?, ?, '\" . self::ORIGEN_MANUAL . \"', ?, 1, ?, ?)\""));
+chequear('con el usuario de escritura', 1,
+    substr_count($bloqueMarcar, '$usuario = AuthCashflow::usuarioDeEscritura($usuario);'));
+chequear('valida antes de abrir la transaccion, contra la lectura de hoy', true,
+    strpos($bloqueMarcar, 'validarSeleccionAcreditado(') < strpos($bloqueMarcar, 'sqlsrv_begin_transaction')
+    && strpos($bloqueMarcar, 'sqlsrv_rollback') !== false);
+chequear('sin el script, lo dice', true, strpos($bloqueMarcar, 'self::SCRIPT_ACREDITADO') !== false);
+
+$m = new ReflectionMethod('Echeqs', 'marcarAcreditados');
+chequear('del navegador llegan solo ids y observacion: ni origen ni fecha',
+    ['ids', 'observacion', 'usuario', 'hoy'],
+    array_map(function ($p) { return $p->getName(); }, $m->getParameters()));
+
+$bloqueDeshacer = substr($srcEcheqs, strpos($srcEcheqs, 'public function deshacerAcreditados('), 2500);
+chequear('deshacer marca VIGENTE = 0 con quien y cuando, sin borrar', [true, false], [
+    strpos($bloqueDeshacer, "SET VIGENTE = 0, \" . Auditoria::SET_BAJA . \"") !== false,
+    stripos($bloqueDeshacer, 'DELETE') !== false
+]);
+
+foreach (['marcarAcreditados', 'deshacerAcreditados'] as $accion) {
+    chequear($accion . ' pide editar Echeqs, como excluir', [['echeqs', null]],
+        AuthCashflow::ESCRITURAS['Echeqs'][$accion]);
+}
+
+$bloqueCtrl = substr($ctrlCartera, strpos($ctrlCartera, "case 'marcarAcreditados':"), 900);
+chequear('el controller no lee del pedido ni origen, ni fecha, ni referencia', 0,
+    preg_match("/\\\$data\['(origen|fecha|referencia|acredita)/i", $bloqueCtrl));
+chequear('sin el script de la marca, la pestana lo avisa y apaga el boton', [1, true], [
+    substr_count($ctrlCartera, "\$payload['acreditado'] = \$echeqs->acreditadoCreado();"),
+    strpos($ctrlCartera, 'Echeqs::SCRIPT_ACREDITADO') !== false
+]);
+
+$srcLect = substr($srcEcheqs, strpos($srcEcheqs, 'public function getMarcasAcreditado('), 2500);
+chequear('sin el script no hay marcas: los depositados se proyectan hasta el plazo', true,
+    strpos($srcLect, "if (empty(\$ids) || !\$this->acreditadoCreado()) {\n            return \$r;") !== false);
+
+$iniRes = strpos($srcEcheqs, 'public static function resolverDeposito(');
+$bloqueRes = substr($srcEcheqs, $iniRes, strpos($srcEcheqs, 'public static function resolverDepositos(') - $iniRes);
+chequear('la regla no mira el origen: resolverDeposito() no lee la columna', false,
+    strpos($bloqueRes, "['origen']") !== false);
+
+seccion('el script de la marca');
+
+$SQL_ACR = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../sql/cashflow_echeqs_acreditado.sql'));
+
+foreach (['ID_SBA14', 'FECHA_ACREDITACION', 'ORIGEN', 'REFERENCIA', 'OBSERVACION', 'VIGENTE',
+          'ID_REEMPLAZA', 'USUARIO_ALTA', 'FECHA_ALTA', 'USUARIO_MODIF', 'FECHA_MODIF',
+          'USUARIO_BAJA', 'FECHA_BAJA'] as $col) {
+    chequear('la marca guarda ' . $col, 1, preg_match('/\n\s+' . $col . '\s+[A-Z]/', $SQL_ACR));
+}
+
+chequear('crea la tabla si no existe: reejecutable', 1,
+    substr_count($SQL_ACR, "IF OBJECT_ID('dbo.RO_T_CASHFLOW_ECHEQ_ACREDITADO', 'U') IS NULL"));
+chequear('una sola marca vigente por cheque: indice unico filtrado', 1,
+    preg_match('/CREATE UNIQUE NONCLUSTERED INDEX UX_RO_T_CF_ECHEQACR_VIGENTE\s+ON dbo\.RO_T_CASHFLOW_ECHEQ_ACREDITADO \(ID_SBA14\)\s+WHERE VIGENTE = 1/', $SQL_ACR));
+chequear('una referencia del origen se graba una sola vez, aunque este dada de baja', 1,
+    preg_match('/CREATE UNIQUE NONCLUSTERED INDEX UX_RO_T_CF_ECHEQACR_REFERENCIA\s+ON dbo\.RO_T_CASHFLOW_ECHEQ_ACREDITADO \(ORIGEN, REFERENCIA\)\s+WHERE REFERENCIA IS NOT NULL;/', $SQL_ACR));
+chequear('los origenes son MANUAL e INTERBANKING', 1,
+    substr_count($SQL_ACR, "CHECK (ORIGEN IN ('MANUAL', 'INTERBANKING'))"));
+chequear('y son los mismos de la clase', ['MANUAL', 'INTERBANKING'],
+    [Echeqs::ORIGEN_MANUAL, Echeqs::ORIGEN_INTERBANKING]);
+chequear('sin FK contra dbo.SBA14, sin bajas fisicas', [false, false],
+    [strpos($SQL_ACR, 'REFERENCES dbo.SBA14') !== false, stripos($SQL_ACR, 'DELETE ') !== false]);
+chequear('el encabezado dice que el proceso no puede volver a grabar una referencia', true,
+    strpos($SQL_ACR, "NO\n   PUEDE VOLVER A GRABAR UNA REFERENCIA QUE YA EXISTE EN ESTA TABLA, AUNQUE ESTE\n   DADA DE BAJA") !== false);

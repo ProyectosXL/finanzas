@@ -1441,6 +1441,60 @@ $echCss = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Css/Ingreso
 chequear('el CSS del dialogo del deposito se fue con el', false,
     strpos($echCss, 'ech-dialogo-') !== false);
 
+seccion('Echeqs > Cheques en Cartera: "Ya acredito" esta enganchado');
+
+// Los botones de escritura, solo con permiso de edicion de Echeqs, en la barra.
+foreach (['btnAcreditadoSelEch' => 'accionAcreditado',
+          'btnDeshacerAcrSelEch' => 'accionDeshacerAcreditado'] as $id => $fn) {
+    $pos = strpos($echTab, 'id="' . $id . '"');
+    $antes = substr($echTab, 0, (int) $pos);
+
+    chequear('#' . $id . ' existe, en la barra de seleccion', true,
+        $pos !== false && $pos > strpos($echTab, 'id="barraSelEch"')
+        && $pos < strpos($echTab, 'id="btnExcluirSelEch"'));
+    chequear('#' . $id . ' se dibuja solo con permiso de edicion', true,
+        strrpos($antes, '<?php if ($edita): ?>') > strrpos($antes, '<?php endif; ?>'));
+    chequear('#' . $id . ' nace escondido: sin el script no se muestra', 1,
+        preg_match('/id="' . $id . '"\s+style="display: none;"/', $echTab));
+    chequear('#' . $id . ' esta conectado a ' . $fn, 1,
+        substr_count($echJs, "conectar('" . $id . "', " . $fn . ");"));
+}
+
+foreach (['marcarAcreditados', 'deshacerAcreditados'] as $accion) {
+    chequear($accion . ': el JS la pide y el controller la atiende', [true, 1], [
+        strpos($echJs, "?action=" . $accion . "'") !== false,
+        substr_count($echCtrl, "case '" . $accion . "':")
+    ]);
+}
+
+$fnBotonesAcr = cuerpoFnEch($echJs, 'pintarBotonesAcreditado');
+chequear('los botones se muestran solo si el script de la marca esta corrido', true,
+    strpos($fnBotonesAcr, 'var puede = !!(datosCartera && datosCartera.acreditado);') !== false
+    && substr_count($fnBotonesAcr, "style.display = puede ? '' : 'none';") === 2);
+chequear('Ya acredito se habilita solo si todos los seleccionados se proyectan', true,
+    strpos($fnBotonesAcr, "btnAcr.disabled = (proyectan !== sel.length);") !== false);
+chequear('y se pinta con la barra', 1, substr_count($echJs, "        pintarBotonesAcreditado(sel);\n    }"));
+
+$fnAcr = cuerpoFnEch($echJs, 'accionAcreditado');
+chequear('pide confirmacion con observacion opcional, y manda solo ids y observacion', true,
+    strpos($fnAcr, 'Notificacion.pedirTexto({') !== false && strpos($fnAcr, 'opcional: true') !== false
+    && strpos($fnAcr, "{ ids: sel.map(function(f) { return f.ID_SBA14; }), observacion: observacion }") !== false);
+chequear('deshacer tambien confirma', true,
+    strpos(cuerpoFnEch($echJs, 'accionDeshacerAcreditado'), 'Notificacion.confirmar({') !== false);
+
+$fnMarca = cuerpoFnEch($echJs, 'marcaDeposito');
+chequear('la marca dice depositado, acreditado o sin proyectar', true,
+    strpos($fnMarca, "PROYECTA: 'depositado'") !== false
+    && strpos($fnMarca, "ACREDITADO: porMarca ? 'acreditado' : 'acreditado (por plazo)'") !== false
+    && strpos($fnMarca, "SIN_DATOS: 'depositado, sin proyectar'") !== false);
+chequear('el tooltip trae la boleta, la cuenta con TIPO_SAL, el banco y las dos fechas', true,
+    strpos($fnMarca, "'Boleta de depósito ' + (d.boleta || 's/n') + ' del ' + fecha(d.fecha_deposito)") !== false
+    && strpos($fnMarca, "' · TIPO_SAL ' + (d.tipo_sal || '—')") !== false
+    && strpos($fnMarca, "'Banco emisor: ' + f.BANCO") !== false
+    && strpos($fnMarca, "'Fecha del cheque: ' + fecha(f.FECHA_CHEQUE)") !== false);
+chequear('y la marca: quien, cuando, origen y observacion', true,
+    strpos(cuerpoFnEch($echJs, 'textoMarca'), "'Origen: ' + (m.origen === 'INTERBANKING' ? 'Interbanking' : 'a mano')") !== false);
+
 chequear('el filtro "Ocultar depositados" existe, al lado de "Ver excluidos"', true,
     strpos($echTab, 'id="ocultarDepositadosEch"') !== false
     && strpos($echTab, 'id="ocultarDepositadosEch"') > strpos($echTab, 'id="verExcluidosEch"')

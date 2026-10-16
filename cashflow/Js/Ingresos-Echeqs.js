@@ -32,6 +32,9 @@
  * (Echeqs::resolverDeposito(), la misma regla que usa el proveedor): acá no
  * se calcula ninguno de esos números.
  *
+ * LA MISMA BARRA MARCA "YA ACREDITÓ" un depositado que acreditó antes de su
+ * plazo: sale de la fila, porque el saldo de Interbanking ya lo tiene.
+ *
  * EL GUARDADO DE LAS MARCAS NO ES OPTIMISTA EN SILENCIO. El tilde se pinta
  * enseguida para que la pantalla responda, pero si el POST falla se revierte y
  * se muestra el error: una marca que se ve pero no se guardó desajusta la
@@ -102,6 +105,8 @@
         conectar('btnRefreshPre', cargarPrechequeado);
 
         conectar('selTodosEch', seleccionarVisibles);
+        conectar('btnAcreditadoSelEch', accionAcreditado);
+        conectar('btnDeshacerAcrSelEch', accionDeshacerAcreditado);
         conectar('btnExcluirSelEch', function() { accionSeleccion(true); });
         conectar('btnIncluirSelEch', function() { accionSeleccion(false); });
         conectar('btnLimpiarSelEch', function() {
@@ -645,7 +650,8 @@
             + (seleccion[f.ID_SBA14] ? ' checked' : '')
             + ' data-id="' + f.ID_SBA14 + '"'
             + ' title="' + escapar('Seleccionar este cheque para excluirlo del cashflow o '
-                + 'volver a incluirlo.') + '">' + marca;
+                + 'volver a incluirlo; si está depositado, para marcar que ya acreditó o '
+                + 'deshacer esa marca.') + '">' + marca;
     }
 
     /**
@@ -828,6 +834,139 @@
             btnIn.disabled = !puede || (yaExcluidos === 0);
             btnIn.title = puede ? '' : FALTA_EXCLUIR;
         }
+
+        pintarBotonesAcreditado(sel);
+    }
+
+    /* ================================================================
+       YA ACREDITÓ
+
+       Un cheque depositado que ya acreditó antes de su plazo se marca y sale
+       de "Echeqs depositados": el saldo de Interbanking ya lo tiene. Sólo
+       sobre depositados que todavía se proyectan, todo o nada, con
+       confirmación. Se puede deshacer. Al servidor viajan sólo los ids y una
+       observación: el servidor vuelve a validar todo contra la base, y los
+       botones se apagan sólo para explicar antes lo que igual rechazaría.
+       ================================================================ */
+
+    /**
+     * Ya acreditó y Deshacer ya acreditó: cuándo se pueden apretar y, si no,
+     * por qué.
+     *
+     *   Ya acreditó          si TODOS los seleccionados son depositados que
+     *                        se proyectan.
+     *   Deshacer ya acreditó si TODOS los seleccionados están marcados.
+     *
+     * SIN EL SCRIPT DE LA MARCA no se muestran: la pestaña avisa qué falta, y
+     * los depositados se proyectan hasta su fecha.
+     */
+    function pintarBotonesAcreditado(sel) {
+        var puede = !!(datosCartera && datosCartera.acreditado);
+        var proyectan = sel.filter(function(f) { return f.ESTADO_DEPOSITO === 'PROYECTA'; }).length;
+        var marcados = sel.filter(function(f) { return !!(f.DEPOSITO && f.DEPOSITO.marca); }).length;
+        var btnAcr = document.getElementById('btnAcreditadoSelEch');
+        var btnDes = document.getElementById('btnDeshacerAcrSelEch');
+
+        if (btnAcr) {
+            btnAcr.style.display = puede ? '' : 'none';
+            btnAcr.disabled = (proyectan !== sel.length);
+            btnAcr.title = (proyectan === sel.length)
+                ? 'Marcar que ' + (sel.length === 1 ? 'este cheque ya acreditó' : 'estos '
+                    + sel.length + ' cheques ya acreditaron') + ': salen de "Echeqs depositados".'
+                : 'Se habilita cuando todos los seleccionados son cheques depositados que todavía '
+                  + 'se proyectan: ' + (sel.length - proyectan) + ' no lo son (en cartera, ya '
+                  + 'acreditados o sin proyectar).';
+        }
+
+        if (btnDes) {
+            btnDes.style.display = puede ? '' : 'none';
+            btnDes.disabled = (marcados !== sel.length);
+            btnDes.title = (marcados === sel.length) ? ''
+                : 'Se habilita cuando todos los seleccionados están marcados "ya acreditó".';
+        }
+    }
+
+    /**
+     * Marca "ya acreditó" lo seleccionado, con confirmación y una observación
+     * opcional. Dice cuántos y por cuánto neto salen de la fila: es el dato
+     * que hace notar que se seleccionó de más.
+     */
+    function accionAcreditado() {
+        var sel = filasSeleccionadas().filter(function(f) { return f.ESTADO_DEPOSITO === 'PROYECTA'; });
+
+        if (!sel.length) { return; }
+
+        var neto = 0;
+
+        sel.forEach(function(f) { neto += Number(f.DEPOSITO.neto) || 0; });
+
+        Notificacion.pedirTexto({
+            titulo: 'Ya acreditó',
+            mensaje: '¿Marcar ' + (sel.length === 1 ? 'este cheque' : 'estos ' + sel.length
+                + ' cheques') + ' como acreditado' + (sel.length === 1 ? '' : 's') + '?',
+            detalle: 'Salen de "Echeqs depositados" (' + pesosPlano(neto) + ' netos), porque el '
+                + 'saldo bancario de Interbanking ya los tiene. Se siguen viendo acá, con la marca '
+                + '"acreditado", hasta su fecha de acreditación. Se puede deshacer.',
+            etiqueta: 'Observación',
+            opcional: true,
+            maxlargo: 200,
+            placeholder: 'Ej.: lo vi acreditado en el extracto de Santander…',
+            confirmar: 'Marcar ' + sel.length + ' cheque(s)'
+        }).then(function(observacion) {
+            if (observacion === null) { return; }
+
+            pedirJson(URL_ECHEQS + '?action=marcarAcreditados',
+                    { ids: sel.map(function(f) { return f.ID_SBA14; }), observacion: observacion })
+                .then(function(r) {
+                    seleccion = {};
+                    Notificacion.exito(r.marcados + ' cheque(s) marcados como acreditados.', {
+                        detalle: 'Salen de "Echeqs depositados" por ' + pesosPlano(neto) + ' netos.'
+                    });
+                    cargarCartera();
+                })
+                .catch(function(error) {
+                    Notificacion.error('No se marcó ningún cheque: ' + error.message);
+                    cargarCartera();
+                });
+        });
+    }
+
+    /**
+     * Deshace la marca "ya acreditó" de lo seleccionado: baja lógica, con
+     * confirmación. El cheque vuelve a "Echeqs depositados" si su acreditación
+     * todavía es de mañana en adelante.
+     */
+    function accionDeshacerAcreditado() {
+        var sel = filasSeleccionadas().filter(function(f) { return !!(f.DEPOSITO && f.DEPOSITO.marca); });
+
+        if (!sel.length) { return; }
+
+        var deIb = sel.filter(function(f) { return f.DEPOSITO.marca.origen === 'INTERBANKING'; }).length;
+
+        Notificacion.confirmar({
+            titulo: 'Deshacer ya acreditó',
+            mensaje: '¿Deshacer la marca de ' + sel.length + ' cheque(s)?',
+            detalle: 'Vuelven a "Echeqs depositados" si acreditan de mañana en adelante. La marca '
+                + 'no se borra: queda en el historial, dada de baja.'
+                + (deIb ? ' ' + deIb + ' la puso Interbanking: el proceso no la va a volver a '
+                    + 'grabar.' : ''),
+            confirmar: 'Deshacer',
+            peligro: true
+        }).then(function(ok) {
+            if (!ok) { return; }
+
+            pedirJson(URL_ECHEQS + '?action=deshacerAcreditados',
+                    { ids: sel.map(function(f) { return f.ID_SBA14; }) })
+                .then(function(r) {
+                    seleccion = {};
+                    Notificacion.exito(r.deshechos + ' marca(s) deshechas.');
+                    cargarCartera();
+                })
+                .catch(function(error) {
+                    Notificacion.error('No se deshizo ninguna marca: ' + error.message);
+                    cargarCartera();
+                });
+        });
     }
 
     /**

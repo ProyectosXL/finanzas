@@ -133,6 +133,18 @@ try {
                ProveedoresController. */
             $payload['excluir_cheque'] = $echeqs->excluirCreada();
 
+            /* Si se puede marcar "ya acredito". Sin el script el boton no se
+               dibuja y la pestana dice que falta: los depositados se
+               proyectan hasta que vence su plazo. */
+            $payload['acreditado'] = $echeqs->acreditadoCreado();
+
+            if (!$payload['acreditado']) {
+                $payload['warnings'][] = ['nivel' => 'info', 'texto' => 'Para marcar un cheque '
+                    . 'depositado como "ya acreditó" hace falta correr ' . Echeqs::SCRIPT_ACREDITADO
+                    . ' contra la base central. Mientras tanto, los depositados se proyectan hasta '
+                    . 'su fecha de acreditación.'];
+            }
+
             echo json_encode([
                 'success' => true,
                 'data' => $payload
@@ -269,6 +281,54 @@ try {
             echo json_encode([
                 'success' => true,
                 'message' => $mensaje,
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           LA MARCA "YA ACREDITO"
+
+           Un cheque depositado que ya acredito antes de su plazo sale de
+           "Echeqs depositados": el saldo de Interbanking ya lo tiene. Del
+           navegador llegan SOLO LOS IDS -y una observacion opcional-: el
+           origen es MANUAL y la fecha, hoy. Lo valida Echeqs contra la
+           lectura de la base, todo o nada.
+           ================================================================ */
+        case 'marcarAcreditados':
+            $data = bodyJson();
+
+            if (!isset($data['ids']) || !is_array($data['ids'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            $r = $echeqs->marcarAcreditados(
+                $data['ids'],
+                isset($data['observacion']) ? $data['observacion'] : null,
+                $usuario
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['marcados'] . ' cheque(s) marcados como acreditados: salen de '
+                    . '"Echeqs depositados". Se siguen viendo hasta su fecha de acreditación.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'deshacerAcreditados':
+            $data = bodyJson();
+
+            if (!isset($data['ids']) || !is_array($data['ids'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            $r = $echeqs->deshacerAcreditados($data['ids'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['deshechos'] . ' marca(s) deshechas. Los cheques vuelven a '
+                    . '"Echeqs depositados" si acreditan de mañana en adelante. La marca queda en '
+                    . 'el historial, dada de baja.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

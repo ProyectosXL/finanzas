@@ -15,7 +15,8 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                   En la misma grilla, los que Tesorería depositó
                                   en Tango (boleta BDE) hasta que acreditan:
                                   alimentan "Echeqs depositados". La barra de
-                                  selección excluye. Ver README-echeqs.md.
+                                  selección excluye y marca "ya acreditó".
+                                  Ver README-echeqs.md.
       Venta Cobrada Anticipada -> cheques de clientes que pre-chequean. NO
                                   alimentan ninguna fila del tablero: su efecto
                                   es restar de la cobranza proyectada de Ventas.
@@ -236,6 +237,22 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                 <div class="d-flex align-items-center gap-3 flex-wrap">
                     <span class="fw-semibold" id="selResumenEch"></span>
                     <div class="d-flex gap-2 ms-auto">
+                        <!-- YA ACREDITÓ: sólo sobre depositados que todavía se
+                             proyectan. Los saca de "Echeqs depositados" porque
+                             el saldo de Interbanking ya los tiene. Sin el
+                             script de la marca, el JS no los muestra. -->
+                        <?php if ($edita): ?>
+                        <button class="btn btn-sm btn-outline-primary" id="btnAcreditadoSelEch"
+                                style="display: none;">
+                            <i class="fas fa-circle-check me-1"></i> Ya acreditó
+                        </button>
+                        <?php endif; ?>
+                        <?php if ($edita): ?>
+                        <button class="btn btn-sm btn-outline-secondary" id="btnDeshacerAcrSelEch"
+                                style="display: none;">
+                            <i class="fas fa-rotate-left me-1"></i> Deshacer ya acreditó
+                        </button>
+                        <?php endif; ?>
                         <?php if ($edita): ?>
                         <button class="btn btn-sm btn-outline-danger" id="btnExcluirSelEch">
                             <i class="fas fa-ban me-1"></i> Excluir del cashflow
@@ -298,8 +315,9 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                 <th rowspan="2" class="text-end"
                                     title="Lo que acredita: el importe menos la retención. Es lo que suma la fila Echeqs depositados.">Neto</th>
                                 <!-- LA COLUMNA ES DE SELECCIÓN, no de estado, y
-                                     alimenta las acciones de la barra: excluir y
-                                     volver a incluir. Ninguna puede dispararse con un clic
+                                     alimenta las acciones de la barra: excluir,
+                                     volver a incluir, "ya acreditó" y deshacerlo.
+                                     Ninguna puede dispararse con un clic
                                      suelto —mueven plata del disponible—: se
                                      eligen los cheques y se confirman juntos,
                                      viendo cuántos son y por cuánto.

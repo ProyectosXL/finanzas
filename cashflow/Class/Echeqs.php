@@ -132,6 +132,22 @@ class Echeqs {
     const MOTIVO_MAX = 200;
 
     /**
+     * Las marcas "ya acredito" de los cheques depositados. Una fila por marca,
+     * con historial: deshacer marca VIGENTE = 0 y no borra nada.
+     */
+    const TABLA_ACREDITADO = 'RO_T_CASHFLOW_ECHEQ_ACREDITADO';
+
+    /** El script de la marca, para los mensajes */
+    const SCRIPT_ACREDITADO = 'sql/cashflow_echeqs_acreditado.sql';
+
+    /**
+     * Quien grabo una marca: una persona desde la pestana, o el proceso que lea
+     * la API de Interbanking. LA REGLA NO MIRA EL ORIGEN: lo dice el tooltip.
+     */
+    const ORIGEN_MANUAL = 'MANUAL';
+    const ORIGEN_INTERBANKING = 'INTERBANKING';
+
+    /**
      * Las alicuotas de retencion de los cheques depositados. Es un juego PROPIO
      * y no filas en la de Cob. Electronicos: un cambio en la tasa de Payway no
      * puede mover el neto de un cheque ni al reves.
@@ -193,6 +209,9 @@ class Echeqs {
      * corrio pierde solo el neto de los depositados.
      */
     private $tablaAlicuota = null;
+
+    /** @var bool|null Cache del chequeo de la tabla de la marca "ya acredito" */
+    private $tablaAcreditado = null;
 
     /** @var Conexion */
     private $conn;
@@ -1411,6 +1430,37 @@ class Echeqs {
     }
 
     /**
+     * Si ya se corrio sql/cashflow_echeqs_acreditado.sql.
+     *
+     * SIN ELLA LA PESTANA NO SE ROMPE: ningun depositado esta marcado, se
+     * proyectan hasta que vence su plazo, el boton "Ya acredito" no se dibuja
+     * y la pestana avisa que script falta. Mismo criterio que excluirCreada().
+     *
+     * @return bool
+     */
+    public function acreditadoCreado() {
+        if ($this->tablaAcreditado !== null) {
+            return $this->tablaAcreditado;
+        }
+
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo." . self::TABLA_ACREDITADO . "', 'U') AS T");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar la tabla de la marca "ya acreditó"'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->tablaAcreditado = ($row && $row['T'] !== null);
+
+        return $this->tablaAcreditado;
+    }
+
+    /**
      * Avisos de configuracion pendiente, para mostrar en la pestana.
      *
      * @return array Lista de mensajes
@@ -1701,7 +1751,7 @@ class Echeqs {
      *
      * NO DEPENDE DE NINGUN SCRIPT PARA LEER. Sin el de las alicuotas, los
      * depositados no tienen neto y lo avisan como critico; sin el de la marca
-     * "ya acredito", se proyectan hasta que vence el plazo.
+     * "ya acredito" (acreditadoCreado()), se proyectan hasta que vence el plazo.
      *
      * NO LEE RO_T_CASHFLOW_ECHEQ_DEPOSITO: es la tabla del circuito viejo, en
      * desuso. Ver README-echeqs.md.
@@ -1721,16 +1771,26 @@ class Echeqs {
         }
 
         $boletas = array_values(array_unique(array_column($filas, 'N_COMP_SAL')));
+        $marcas = $this->getMarcasAcreditado(array_column($filas, 'ID_SBA14'));
 
-        return self::resolverDepositos(
+        $r = self::resolverDepositos(
             $filas,
             $this->leerCuentasBoletas($boletas),
             $plazo,
             ($plazo['dias'] === null) ? [] : $this->diasHabiles($rango['desde'], $rango['hasta']),
             $this->getAlicuotas(true),
-            $this->getMarcasAcreditado(array_column($filas, 'ID_SBA14')),
+            $marcas['vigentes'],
             $hoy
         );
+
+        // Las marcas deshechas, para el tooltip: quien la puso y quien la
+        // saco. No deciden nada.
+        foreach ($r['filas'] as $i => $f) {
+            $r['filas'][$i]['HISTORIAL_ACREDITADO'] = isset($marcas['historial'][$f['ID_SBA14']])
+                ? $marcas['historial'][$f['ID_SBA14']] : [];
+        }
+
+        return $r;
     }
 
     /** Los cheques de sqlDepositados(), normalizados */
@@ -1862,16 +1922,341 @@ class Echeqs {
         return $v;
     }
 
+    /* ====================================================================
+       LA MARCA "YA ACREDITO"
+
+       Cuando Tesoreria ve que un cheque depositado ya acredito antes de su
+       plazo, lo marca y sale de "Echeqs depositados": el saldo de
+       Interbanking ya lo tiene, y contarlo en la fila tambien lo contaria dos
+       veces. Se puede deshacer. Vive en RO_T_CASHFLOW_ECHEQ_ACREDITADO, con un
+       ORIGEN: hoy MANUAL; mas adelante, un proceso que lea la API de
+       Interbanking va a grabar las suyas como INTERBANKING. LA REGLA NO MIRA
+       EL ORIGEN: ver resolverDeposito().
+
+       Del navegador llegan solo los ids de los cheques, y la seleccion se
+       vuelve a validar contra la lectura de la base.
+       ==================================================================== */
+
     /**
-     * Las marcas "ya acredito" vigentes de una lista de cheques.
+     * Las marcas de una lista de cheques: la vigente de cada uno, y todas
+     * -vigentes y deshechas- para el tooltip.
      *
-     * Hasta que exista el circuito de la marca, ninguna.
+     * Sin el script devuelve vacio y no lanza: la pregunta es "que cheques
+     * estan marcados", y la respuesta honesta es "ninguno".
      *
      * @param array $ids
-     * @return array Mapa ID_SBA14 => marca
+     * @return array ['vigentes' => mapa ID_SBA14 => marca,
+     *         'historial' => mapa ID_SBA14 => lista de marcas, de la mas nueva a la mas vieja]
      */
     public function getMarcasAcreditado($ids) {
-        return [];
+        $ids = self::idsPedidos($ids);
+        $r = ['vigentes' => [], 'historial' => []];
+
+        if (empty($ids) || !$this->acreditadoCreado()) {
+            return $r;
+        }
+
+        $cid = $this->conectar('central');
+
+        foreach (array_chunk($ids, 500) as $tanda) {
+            $stmt = sqlsrv_query($cid,
+                "SELECT ID, ID_SBA14, FECHA_ACREDITACION, ORIGEN, REFERENCIA, OBSERVACION,
+                        VIGENTE, ID_REEMPLAZA, USUARIO_ALTA, FECHA_ALTA, USUARIO_BAJA, FECHA_BAJA
+                 FROM dbo." . self::TABLA_ACREDITADO . "
+                 WHERE ID_SBA14 IN (" . implode(', ', array_fill(0, count($tanda), '?')) . ")
+                 ORDER BY ID DESC",
+                $tanda);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al leer las marcas "ya acreditó"'));
+            }
+
+            while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+                $id = intval($row['ID_SBA14']);
+                $m = [
+                    'id' => intval($row['ID']),
+                    'fecha_acreditacion' => Horizonte::normalizarFecha($row['FECHA_ACREDITACION']),
+                    'origen' => trim((string) $row['ORIGEN']),
+                    'referencia' => $row['REFERENCIA'],
+                    'observacion' => $row['OBSERVACION'],
+                    'vigente' => intval($row['VIGENTE']),
+                    'id_reemplaza' => ($row['ID_REEMPLAZA'] === null) ? null : intval($row['ID_REEMPLAZA']),
+                    'usuario' => $row['USUARIO_ALTA'],
+                    'fecha_alta' => $this->fechaHora($row['FECHA_ALTA']),
+                    'usuario_baja' => $row['USUARIO_BAJA'],
+                    'fecha_baja' => $this->fechaHora($row['FECHA_BAJA'])
+                ];
+
+                $r['historial'][$id][] = $m;
+
+                if ($m['vigente'] === 1) {
+                    $r['vigentes'][$id] = $m;
+                }
+            }
+
+            sqlsrv_free_stmt($stmt);
+        }
+
+        return $r;
+    }
+
+    /**
+     * Que cheques de un pedido se pueden marcar "ya acredito". ES TODO O NADA,
+     * como la exclusion: con uno solo que no cumple, no se marca ninguno.
+     *
+     * SOLO LOS DEPOSITADOS QUE SE PROYECTAN. Uno en cartera no esta en el
+     * banco; uno marcado ya esta marcado; uno que acredita hoy ya no suma; uno
+     * sin datos no suma; y uno que no esta en la lectura -endosado, rechazado o
+     * con el plazo vencido- no tiene nada que sacar. Se valida contra la
+     * lectura de la base, no contra lo que manda el navegador: un id no es una
+     * autorizacion.
+     *
+     * @param array $ids
+     * @param array $filas Las de la grilla: cartera y depositados, resueltos
+     * @return array ['ids' => [...], 'rechazos' => [['id', 'n_cheque', 'motivo']],
+     *         'error' => string|null]
+     */
+    public static function validarSeleccionAcreditado($ids, $filas) {
+        $porId = [];
+
+        foreach (is_array($filas) ? $filas : [] as $f) {
+            $porId[intval($f['ID_SBA14'])] = $f;
+        }
+
+        $validos = [];
+        $rechazos = [];
+
+        foreach (self::idsPedidos($ids) as $id) {
+            $f = isset($porId[$id]) ? $porId[$id] : null;
+            $d = ($f && !empty($f['DEPOSITO'])) ? $f['DEPOSITO'] : null;
+            $motivo = null;
+
+            if ($f === null) {
+                $motivo = 'no está entre los depositados que se proyectan: puede que ya haya vencido '
+                    . 'su plazo, o que en Tango no sea un depósito';
+            } elseif ($d === null) {
+                $motivo = 'está en cartera: todavía no se depositó en Tango';
+            } elseif ($d['estado'] === self::DEPOSITO_ACREDITADO
+                && $d['motivo'] === self::ACREDITADO_POR_MARCA) {
+                $motivo = 'ya está marcado como acreditado';
+            } elseif ($d['estado'] === self::DEPOSITO_ACREDITADO) {
+                $motivo = 'acredita hoy: ya no suma a ninguna fila';
+            } elseif ($d['estado'] !== self::DEPOSITO_PROYECTA) {
+                $motivo = 'no se proyecta: le falta la fecha de acreditación o el neto';
+            }
+
+            if ($motivo !== null) {
+                $rechazos[] = ['id' => $id, 'n_cheque' => $f ? $f['N_CHEQUE'] : null,
+                               'motivo' => $motivo];
+                continue;
+            }
+
+            $validos[] = $id;
+        }
+
+        $error = null;
+
+        if (empty($validos) && empty($rechazos)) {
+            $error = 'No llegó ningún cheque para marcar.';
+        } elseif (!empty($rechazos)) {
+            $error = 'No se marcó ningún cheque: ' . count($rechazos) . ' de los '
+                . (count($rechazos) + count($validos)) . ' no se pueden marcar como acreditados. '
+                . implode('; ', array_map(function ($r) {
+                    return 'N° ' . ($r['n_cheque'] === null ? $r['id'] : $r['n_cheque'])
+                        . ' ' . $r['motivo'];
+                }, $rechazos)) . '.';
+        }
+
+        return ['ids' => empty($rechazos) ? $validos : [], 'rechazos' => $rechazos, 'error' => $error];
+    }
+
+    /**
+     * Que marcas de un pedido se pueden deshacer. TODO O NADA: o todos los
+     * cheques tienen una marca vigente, o no se deshace ninguna.
+     *
+     * NO IMPORTA EL ORIGEN: una marca de Interbanking se deshace igual que una
+     * manual. El proceso no la vuelve a grabar porque su REFERENCIA queda en
+     * la tabla, dada de baja (ver sql/cashflow_echeqs_acreditado.sql).
+     *
+     * @param array $ids
+     * @param array $vigentes Mapa ID_SBA14 => marca vigente
+     * @return array ['ids' => [...], 'error' => string|null]
+     */
+    public static function validarDeshacerAcreditado($ids, $vigentes) {
+        $pedidos = self::idsPedidos($ids);
+
+        if (empty($pedidos)) {
+            return ['ids' => [], 'error' => 'No llegó ningún cheque para deshacer.'];
+        }
+
+        $sin = array_values(array_filter($pedidos, function ($id) use ($vigentes) {
+            return !isset($vigentes[$id]);
+        }));
+
+        if (!empty($sin)) {
+            return ['ids' => [], 'error' => 'No se deshizo ninguna marca: ' . count($sin)
+                . ' de los ' . count($pedidos) . ' cheque(s) no están marcados como acreditados. '
+                . 'Puede que la pantalla haya quedado vieja: actualizala y volvé a intentar.'];
+        }
+
+        return ['ids' => $pedidos, 'error' => null];
+    }
+
+    /**
+     * Los parametros del INSERT de marcas manuales, 5 por cheque, en el orden
+     * de las columnas de marcarAcreditados().
+     *
+     * LA FECHA DE ACREDITACION ES HOY, el dia en que se marca: es cuando
+     * Tesoreria vio la plata en el banco. El ORIGEN es MANUAL y no viaja del
+     * navegador: las marcas de Interbanking las graba su proceso.
+     *
+     * Estatica y pura.
+     *
+     * @param array $ids
+     * @param string $hoy 'Y-m-d'
+     * @param string|null $obs Ya validada
+     * @param string $usuario
+     * @return array
+     */
+    public static function paramsInsertAcreditado($ids, $hoy, $obs, $usuario) {
+        $params = [];
+
+        foreach ($ids as $id) {
+            array_push($params, intval($id), $hoy, $obs, $usuario, $usuario);
+        }
+
+        return $params;
+    }
+
+    /**
+     * Marca cheques depositados como "ya acredito". TODO O NADA, EN UNA
+     * TRANSACCION.
+     *
+     * Se valida TODO antes de abrir la transaccion, contra la lectura de hoy:
+     * la cartera y los depositados, resueltos con la misma regla que la
+     * pantalla. DOS PESTANAS AL MISMO TIEMPO: el indice unico de marcas
+     * vigentes hace fallar la segunda, y la transaccion entera vuelve atras.
+     *
+     * @param array $ids Ids de dbo.SBA14. Es lo unico que llega del navegador
+     * @param string|null $observacion Opcional, la misma para todos
+     * @param string $usuario
+     * @param string|null $hoy 'Y-m-d'. Por defecto, hoy
+     * @return array ['marcados' => int]
+     */
+    public function marcarAcreditados($ids, $observacion, $usuario, $hoy = null) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $hoy = ($hoy === null) ? date('Y-m-d') : $hoy;
+
+        if (!$this->acreditadoCreado()) {
+            throw new Exception('Todavía no se puede marcar un cheque como acreditado. Corré '
+                . self::SCRIPT_ACREDITADO . ' contra la base central.');
+        }
+
+        $dep = $this->getDepositadosTango($hoy);
+        $v = self::validarSeleccionAcreditado($ids, array_merge($this->getEcheqsCartera(), $dep['filas']));
+
+        if ($v['error'] !== null) {
+            throw new Exception($v['error']);
+        }
+
+        $obs = self::validarObservacion($observacion);
+        $cid = $this->conectar('central');
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción de la marca'));
+        }
+
+        try {
+            /* 5 parametros por fila: una tanda de 300 son 1500, debajo del
+               tope de 2100. Todas dentro de la MISMA transaccion. */
+            foreach (array_chunk($v['ids'], 300) as $tanda) {
+                $stmt = sqlsrv_query($cid,
+                    "INSERT INTO dbo." . self::TABLA_ACREDITADO . "
+                         (ID_SBA14, FECHA_ACREDITACION, ORIGEN, OBSERVACION, VIGENTE,
+                          USUARIO_ALTA, USUARIO_MODIF)
+                     VALUES " . implode(', ', array_fill(0, count($tanda),
+                        "(?, ?, '" . self::ORIGEN_MANUAL . "', ?, 1, ?, ?)")),
+                    self::paramsInsertAcreditado($tanda, $hoy, $obs, $usuario));
+
+                if ($stmt === false) {
+                    throw new Exception($this->errorSql('Error al guardar la marca. Si otro usuario '
+                        . 'marcó alguno de estos cheques recién, actualizá la pantalla'));
+                }
+
+                sqlsrv_free_stmt($stmt);
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar la marca'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return ['marcados' => count($v['ids'])];
+    }
+
+    /**
+     * Deshace marcas "ya acredito" vigentes: BAJA LOGICA, con quien y cuando.
+     *
+     * El cheque vuelve a proyectarse si su acreditacion todavia es de manana
+     * en adelante; si no, sigue sin sumar, por plazo. La fila dada de baja
+     * queda, y es la que el tooltip muestra como historial.
+     *
+     * TODO O NADA, en una transaccion.
+     *
+     * @param array $ids
+     * @param string $usuario
+     * @return array ['deshechos' => int]
+     */
+    public function deshacerAcreditados($ids, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
+        if (!$this->acreditadoCreado()) {
+            throw new Exception('No hay marcas que deshacer: corré ' . self::SCRIPT_ACREDITADO
+                . ' contra la base central.');
+        }
+
+        $v = self::validarDeshacerAcreditado($ids, $this->getMarcasAcreditado($ids)['vigentes']);
+
+        if ($v['error'] !== null) {
+            throw new Exception($v['error']);
+        }
+
+        $cid = $this->conectar('central');
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción'));
+        }
+
+        try {
+            foreach (array_chunk($v['ids'], 500) as $tanda) {
+                $stmt = sqlsrv_query($cid,
+                    "UPDATE dbo." . self::TABLA_ACREDITADO . "
+                     SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
+                     WHERE VIGENTE = 1 AND ID_SBA14 IN ("
+                        . implode(', ', array_fill(0, count($tanda), '?')) . ")",
+                    array_merge([$usuario, $usuario], $tanda));
+
+                if ($stmt === false) {
+                    throw new Exception($this->errorSql('Error al deshacer la marca'));
+                }
+
+                sqlsrv_free_stmt($stmt);
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return ['deshechos' => count($v['ids'])];
     }
 
     /**
