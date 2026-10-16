@@ -48,7 +48,24 @@ Medido contra la base el **16/10/2026** con las clases reales, el criterio viejo
 | `DEPOSITADOS` (*Echeqs depositados*) | $ 0 | **$ 37.826.439,63**, todo el lunes 19/10 |
 | `A_COBRAR_TODO` | $ 1.940.142.016,30 | $ 1.977.968.455,93 |
 
-Los $ 37,8 M son los 5 cheques [FL] de la boleta `02005000040735` del jueves 15/10 —$ 39.036.573,41 brutos a 3,1%—, que hasta hoy no estaban en ninguna fila. Los 3 de la boleta del miércoles 14/10 ($ 24.970.612,47) acreditan hoy: se listan *acreditado (por plazo)* y no suman. *Echeqs en cartera* no cambia: esos cheques ya habían salido de la lectura de cartera el día del depósito.
+Los $ 37,8 M son los 5 cheques de franquicias de la boleta `02005000040735` del jueves 15/10 —$ 39.036.573,41 brutos a 3,1%—, que hasta hoy no estaban en ninguna fila. Los 3 de la boleta del miércoles 14/10 ($ 24.970.612,47) acreditan hoy: se listan *acreditado (por plazo)* y no suman. *Echeqs en cartera* no cambia: esos cheques ya habían salido de la lectura de cartera el día del depósito.
+
+### Los cheques de mayoristas
+
+**Cheques en Cartera incluye a los mayoristas**: el universo es `CLIENTE LIKE '[FLM]%'` (`Echeqs::UNIVERSO_CARTERA_SQL`) en la cartera, los depositados y el resumen de excluidos. Antes era `[FL]%`, y un mayorista que pagaba con echeq no estaba en ninguna fila del tablero: ni en cartera, ni en depositados.
+
+**No se cuentan dos veces con Cobranzas May.** Un cheque de mayorista entra a cartera igual que uno de franquicia, con un recibo de cobro en cuenta corriente (`T_COMP_REC = 'REC'`) que ya canceló la factura en `GVA12`; Cobranzas May proyecta sólo lo pendiente. Verificado el 16/10/2026: los 586 cheques `M` en cartera entraron por `REC`.
+
+Medido el 16/10/2026 con las clases reales, sin y con el cambio sobre los mismos datos:
+
+| Serie | Sin mayoristas | Con mayoristas | Diferencia |
+| --- | --- | --- | --- |
+| `A_COBRAR` (*Echeqs en cartera*) | $ 1.973.944.870,87 | $ 2.455.077.645,33 | **+ $ 481.132.774,46**: 586 cheques |
+| `DEPOSITADOS` (*Echeqs depositados*) | $ 37.826.439,63 | $ 41.130.143,07 | **+ $ 3.303.703,44**: 6 cheques de las boletas del 15/10, el lunes 19/10 |
+
+**Venta Cobrada Anticipada sigue en `[FL]%`**: es otro circuito, que netea la cobranza proyectada de Ventas por canal.
+
+**Quedan afuera los cheques sin cliente** —6 en cartera por $ 104.142.740,64 al 16/10/2026, todos de GO SERVICIOS DIGITALES, que entraron por CAJA INGRESO (`CAI`) y no por un recibo— y cualquier otro prefijo: no son cobranza de un cliente del módulo.
 
 ---
 
@@ -60,7 +77,7 @@ Un cheque de `dbo.SBA14` es un depósito si cumple **todo** esto (`Echeqs::esDep
 | --- | --- |
 | `ESTADO = 'A'` | Salió de cartera. Uno que después se rechaza o se anula pasa a `R` o `X` y deja de leerse solo |
 | `T_COMP_SAL = 'BDE'` | Salió por una boleta de depósito. Un `O/P` es una orden de pago: el cheque se endosó a un proveedor, no entra al banco y no se toca |
-| `CLIENTE LIKE '[FL]%'` | El universo del módulo, con la comparación binaria de la columna |
+| `CLIENTE LIKE '[FLM]%'` | Franquicias, locales y mayoristas: el universo de Cheques en Cartera, con la comparación binaria de la columna. Ver *Los cheques de mayoristas* |
 | `FECHA_SAL` real | No la centinela `1800-01-01` |
 | **La cuenta que la boleta debita es un banco** | `dbo.SBA01.TIPO = 'B'`. Ver abajo |
 
@@ -73,7 +90,7 @@ Una BDE tiene en `dbo.SBA05` **una línea al debe** contra la cuenta destino y u
 - **`TIPO_SAL = 'D'`** trae la cuenta también en `CTA_DESTIN`.
 - **`TIPO_SAL = 'O'`** deja `CTA_DESTIN` en 0, pero su boleta debita una cuenta igual que la de un `D`. En 90 días eran la mayoría: 235 de 358. La boleta `02005000040735` de la muestra debita 110500 BCO.RIO CTA.CTE. $.
 
-**Lo que separa los casos es la cuenta debitada**, no el tipo. BDE de [FL] en estado `A`, 90 días al 16/10/2026:
+**Lo que separa los casos es la cuenta debitada**, no el tipo. BDE de franquicias y locales en estado `A`, 90 días al 16/10/2026 —medido antes de sumar a los mayoristas—:
 
 | Cuenta debitada | `SBA01.TIPO` | Cheques | Bruto | Qué es | ¿Depósito? |
 | --- | --- | --- | --- | --- | --- |
@@ -133,7 +150,7 @@ Los avisos son **de lo que se lista**: un depósito que ya acreditó no se proye
 ### La lectura: sólo lo necesario
 
 ```sql
-WHERE s.ESTADO = 'A' AND s.T_COMP_SAL = 'BDE' AND s.CLIENTE LIKE '[FL]%'
+WHERE s.ESTADO = 'A' AND s.T_COMP_SAL = 'BDE' AND s.CLIENTE LIKE '[FLM]%'
   AND s.FECHA_SAL >= hoy − plazo × DiasHabiles::MAX_CORRIMIENTO
 ```
 
@@ -295,7 +312,7 @@ Era la tabla de ese circuito: un depósito por cheque, con su fecha, su tasa y s
 
 - el script de las alícuotas y el plazo, y que ya no crea la tabla vieja;
 - el plazo, las alícuotas y que cambiarlas no recalcula nada;
-- **qué es un depósito**: BDE `A` a un banco sí; `O/P`, cartera, `R`, `X`, la centinela, fuera de [FL], la cuenta comitente y la caja no; `TIPO_SAL = 'O'` sí; sin la línea de la boleta, sí con aviso;
+- **qué es un depósito**: BDE `A` a un banco sí; `O/P`, cartera, `R`, `X`, la centinela, sin cliente u otro prefijo, la cuenta comitente y la caja no; un mayorista sí; `TIPO_SAL = 'O'` sí; sin la línea de la boleta, sí con aviso;
 - **la fecha y el importe**: viernes → martes, el feriado en el medio, la fecha del cheque que no interviene, el neto con la alícuota vigente a la acreditación, un cambio de alícuota o de plazo que se ve sin recalcular, el calendario faltante, sin hábil, sin alícuotas y sin plazo;
 - **cuánto se proyecta**: mañana sí, hoy y antes no, marcado no, `INTERBANKING` igual que `MANUAL`, deshecha la marca vuelve;
 - la lectura, los avisos y el excluido que se deposita;

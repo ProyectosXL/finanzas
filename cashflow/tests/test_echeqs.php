@@ -1083,7 +1083,7 @@ chequear('las tres partes suman el total, con los datos de hoy',
         + totalReal($serieReal['A_COBRAR_EXCLUIDOS'])
         + totalReal($serieReal['DEPOSITADOS']), 2));
 
-/* LOS DEPOSITADOS REALES CUMPLEN LA REGLA: todos son BDE de [FL] a una cuenta
+/* LOS DEPOSITADOS REALES CUMPLEN LA REGLA: todos son BDE de [FLM] a una cuenta
    bancaria -o sin la linea de la boleta, con su aviso- y ninguno ya acreditado
    antes de hoy se lista. */
 $malos = 0;
