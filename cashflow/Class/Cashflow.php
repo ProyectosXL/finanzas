@@ -106,11 +106,7 @@ class Cashflow {
         $this->avisos = [];
 
         /* ---- 1. Eje temporal --------------------------------------------- */
-        // Si lo inyectaron, manda el inyectado: es lo que permite fijar el dia
-        // de referencia en las pruebas. En uso normal sale de los parametros.
-        $h = ($this->horizonte !== null)
-            ? $this->horizonte
-            : Horizonte::desdeParametros($this->parametros);
+        $h = $this->eje();
 
         /* ---- 2. Estructura configurada ----------------------------------- */
         // Con nivel si la estructura lo sabe dar. Una estructura inyectada en
@@ -186,6 +182,80 @@ class Cashflow {
             // solo la leia Js/Cashflow.js.
             'avisos' => $this->avisosAgrupados()
         ]);
+    }
+
+    /**
+     * El eje del pedido. Si lo inyectaron, manda el inyectado: es lo que
+     * permite fijar el dia de referencia en las pruebas. En uso normal sale de
+     * los parametros.
+     *
+     * Es un metodo y no una linea de proyectar() porque avisosDePestana()
+     * necesita EL MISMO eje: un importe que el tablero ubica fuera del
+     * horizonte tiene que ser el mismo que la pestana dice que quedo afuera.
+     *
+     * @return Horizonte
+     */
+    private function eje() {
+        return ($this->horizonte !== null)
+            ? $this->horizonte
+            : Horizonte::desdeParametros($this->parametros);
+    }
+
+    /**
+     * Los avisos que el tablero muestra en el grupo de UNA pestana, sin armar
+     * el tablero entero.
+     *
+     * POR QUE EXISTE. Cada pestana con proveedor es el detalle de una fila del
+     * tablero, y quien la abre tiene que leer ahi lo mismo que el tablero dice
+     * de ella. Hasta ahora cada controller armaba su lista a mano y las dos se
+     * habian separado: Proveedores Exterior no decia lo marcado como ya hecho,
+     * y varios textos decian lo mismo con otras palabras.
+     *
+     * CORRE EL MISMO CODIGO, NO UNA COPIA. Filtra las filas activas cuyo
+     * proveedor tiene ese 'tab' y las pasa por pedirSeries() y
+     * resolverOrigenes(), que son los que emiten los avisos propios del
+     * proveedor, los del 'warnings' de cada serie, los descartes de cada fila
+     * -con el nombre de la fila en el texto- y la falla al cargar o calcular
+     * el modulo. Una regla nueva de avisos en el motor llega sola a las dos
+     * pantallas; tests/test_avisos.php fija que el resultado es el grupo de
+     * esa pestana en proyectar(), con el mismo texto, nivel y seccion.
+     *
+     * Y SOLO ESA PESTANA: no se piden las series de los demas modulos -Ventas
+     * sola tarda varios segundos- ni se resuelve el arrastre, que no avisa
+     * nada de ninguna pestana. El grupo Tablero no sale nunca: habla del
+     * cuadro entero y su lugar es el tablero.
+     *
+     * @param string $tab Codigo de la pestana ('tab' del registro)
+     * @return array Avisos ['nivel', 'texto', 'seccion', 'grupo', 'origen'],
+     *         en el orden en que el tablero los muestra dentro del grupo
+     */
+    public function avisosDePestana($tab) {
+        $tab = trim((string) $tab);
+        $this->avisos = [];
+
+        $h = $this->eje();
+        $conf = $this->estructura->getEstructura(true);
+
+        $filas = [];
+
+        foreach ($conf['filas'] as $f) {
+            if (in_array($f['TIPO'], CashflowEstructura::TIPOS_CON_ORIGEN, true)
+                && !empty($f['ORIGEN_PROVIDER'])
+                && $this->tabDe($f['ORIGEN_PROVIDER']) === $tab) {
+                $filas[] = $f;
+            }
+        }
+
+        $series = $this->pedirSeries($h, $filas);
+        $this->resolverOrigenes($h, $filas, $series);
+
+        foreach ($this->avisosAgrupados() as $g) {
+            if ($g['grupo'] === $tab) {
+                return $g['avisos'];
+            }
+        }
+
+        return [];
     }
 
     /* ====================================================================

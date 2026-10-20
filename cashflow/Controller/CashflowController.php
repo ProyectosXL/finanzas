@@ -45,6 +45,36 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* LOS AVISOS DEL TABLERO DE UNA PESTANA, calculados con el mismo
+           codigo del motor (Cashflow::avisosDePestana()). La pestana los pide en
+           paralelo con sus datos y los junta con los suyos.
+
+           LECTURA DE ESA PESTANA, no del tablero: quien ve Proveedores
+           Exterior tiene que poder leer lo que el tablero dice de ella aunque
+           no pueda abrir el tablero. La accion esta en LECTURAS -no pide nada
+           por si sola- y el permiso lo pide autorizarLectura() con la pestana
+           ya validada contra el registro.
+
+           Y LIBERA LA SESION apenas autoriza: ver AuthCashflow::liberarSesion(). */
+        case 'getAvisosPestana':
+            $tab = isset($_GET['tab']) ? trim((string) $_GET['tab']) : '';
+
+            if (!in_array($tab, CashflowRegistry::tabsConProveedor(), true)) {
+                throw new Exception('La pestaña "' . $tab . '" no tiene avisos del tablero.');
+            }
+
+            autorizarLectura($tab);
+            AuthCashflow::liberarSesion();
+
+            echo json_encode([
+                'success' => true,
+                'data' => [
+                    'tab' => $tab,
+                    'avisos' => $cashflow->avisosDePestana($tab)
+                ]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         default:
             echo json_encode([
                 'success' => false,

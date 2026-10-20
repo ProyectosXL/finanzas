@@ -842,6 +842,30 @@ class CashflowRegistry {
         return $meta;
     }
 
+    /**
+     * Las pestanas de los proveedores construidos, no retirados y con 'tab',
+     * en el orden del registro y sin repetir: las que tienen avisos del
+     * tablero (ver Cashflow::avisosDePestana()).
+     *
+     * LEE LA LISTA CRUDA Y NO PASA POR resolverExtra(), a proposito: las
+     * series por rubro de Proveedores Locales salen del maestro, y para saber
+     * que pestanas existen no hace falta abrir una conexion.
+     *
+     * @return string[]
+     */
+    public static function tabsConProveedor() {
+        $v = [];
+
+        foreach (self::$providers as $meta) {
+            if (!empty($meta['tab']) && !empty($meta['disponible']) && empty($meta['retirado'])
+                && !in_array($meta['tab'], $v, true)) {
+                $v[] = $meta['tab'];
+            }
+        }
+
+        return $v;
+    }
+
     public static function todos() {
         $v = [];
 
