@@ -286,6 +286,21 @@ Medido contra la base el 16/10/2026: *Echeqs en cartera* no cambia ($ 1.940.142.
 No se cuentan dos veces: los de un cliente entran con un recibo que ya canceló la factura, y el medio "Go Cuotas" del mix de cobro de Ventas está inactivo. **Si alguien lo activa, los cheques de GO se contarían dos veces.** Venta Cobrada Anticipada sigue en `[FL]%`. Ver *Todos los cheques, sin filtro de cliente* en `README-echeqs.md`.
 
 **El extracto de Interbanking confirma la acreditación.** Un depositado cuyo crédito aparece en `BI_T_EXTRACTOS_INTERBANKING` —número del cheque e importe— deja de proyectarse ese mismo día. Se lee al calcular, sin proceso ni escrituras; hoy cruza Galicia. Ver *La acreditación según el extracto de Interbanking* en `README-echeqs.md`.
+
+### Avisos del tablero en cada pestaña, tarjetas plegables y Comercio Exterior (`feature/cashflow-avisos-kpis-comex-nac-parcial`)
+
+Tres cosas: cada pestaña con proveedor muestra los avisos que el tablero dice de ella (*Lo que el tablero dice de cada pestaña, también en su panel*); las tarjetas KPI se pliegan a una franja (*Las tarjetas KPI se pliegan a una franja*); Proveedores Exterior y Crono Nacionalización traen sólo los contenedores desde una fecha de movimiento (`README-comex.md`, sección 12).
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 41 | `sql/cashflow_comex_fecha_mov_desde.sql` | Siembra el parámetro *Contenedores desde (fecha de movimiento)* en 01/01/2025, en Parámetros › Compras Exterior, sin pisar un valor cargado | El corte se aplica igual, con 01/01/2025; no se puede cambiar, y sólo Parámetros dice qué script falta |
+
+**El 41 no depende de ninguno.** Los avisos y las tarjetas no necesitan scripts.
+
+#### Lo que mueve el tablero
+
+**Nada**, medido contra la base el 20/10/2026. Ninguna serie de las que tocan los avisos cambió (45 cifras de seis proveedores, ver *Un hecho, un texto*). Con el corte por fecha de movimiento, Proveedores Exterior pasa de 348 a 199 filas y Crono de 70 a 69, sin mover un peso de ninguna serie: todo lo que salió estaba sin fecha o vencido. Los avisos de *no se pudieron valuar* bajan de 255 a 106. Ver `README-comex.md` y `README-compras-proyectadas.md`.
+
 ## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
@@ -331,6 +346,7 @@ En este orden, contra `central`:
 -- 38. sql/cashflow_echeqs_deposito.sql              (Echeqs: alicuotas de los cheques y plazo de acreditacion)
 -- 39. sql/cashflow_estructura_echeqs_depositados.sql  (la fila Echeqs depositados)
 -- 40. sql/cashflow_echeqs_acreditado.sql            (Echeqs: la marca "ya acredito" de un depositado)
+-- 41. sql/cashflow_comex_fecha_mov_desde.sql        (Comex: contenedores desde una fecha de movimiento)
 ```
 
 **El 39 va después del 38**: sin las alícuotas y el plazo, los depositados no tienen neto. **El 40 no depende de ninguno de los dos.** Los depósitos se leen de Tango; ninguno de los tres crea `RO_T_CASHFLOW_ECHEQ_DEPOSITO`, que está en desuso. Ver `README-echeqs.md`.
