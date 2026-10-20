@@ -12,10 +12,10 @@ Ramas: `feature/saldos`, `feature/cuentas-inversion`, `feature/saldos-locales-di
 
 ```
 Pestaña 1 "Saldos"              Pestaña 2 "Saldos Locales"      Pestaña 3 "Fondos"
-efectivo central (SBA05)        caja de locales propios (Tango)  cuentas INVERSION / COMITENTE
+efectivo central (SBA05, vivo)  caja de locales propios (Tango)  cuentas INVERSION / COMITENTE
 + bancos (Interbanking, en vivo) − reserva de caja               saldo inicial
 + bancos sin Interbanking (man.) = neto a depositar              + suscripciones − rescates
-+ Mercado Pago y otros (manual)
++ Mercado Pago (MP_T_SALDO_DEMANDA, vivo) + otros (manual)
         │                            │                                │
         ▼                            ▼                                ▼
   serie DISPONIBLE            serie DEPOSITOS                   series STOCK
@@ -76,9 +76,10 @@ Alimenta la fila **Saldo Inicial** (`DISPONIBLE`). El saldo del Cashflow es la s
 | 1 | Efectivo de tesorería de casa central | `SBA05` en `central`, en vivo | Consulta |
 | 2 | Bancos de Interbanking | `BI_T_SALDOS_INTERBANKING`, en vivo; respaldo manual si no trae el dato | Interbanking / Manual (respaldo) |
 | 3 | Bancos sin Interbanking (hoy, BTG Uy) | Carga manual | Manual |
-| 4 | Mercado Pago y otros | Carga manual | Manual |
+| 4 | Mercado Pago | `MP_T_SALDO_DEMANDA` en `central`, en vivo (con `sql/cashflow_saldos_mp_consulta.sql`) | Consulta |
+| 5 | Otros | Carga manual | Manual |
 
-La pestaña y el tablero leen las filas por **un solo camino**, `Saldos::getFilasDisponible()`, que junta las cargas (`getSaldosActuales()`) y las cuentas de Interbanking (`SaldosInterbanking`). Si cada uno las juntara por su lado, algún día no sumarían lo mismo. Hay una prueba, contra la base, de que el total de la pestaña es el Saldo Inicial del tablero.
+La pestaña y el tablero leen las filas por **un solo camino**, `Saldos::getFilasDisponible()`, que junta las cargas (`getSaldosActuales()`), lee en vivo las cuentas por consulta (`aplicarConsultas()`, ver *Las cuentas por consulta se leen en vivo*) y suma las cuentas de Interbanking (`SaldosInterbanking`). Si cada uno las juntara por su lado, algún día no sumarían lo mismo. Hay una prueba, contra la base, de que el total de la pestaña es el Saldo Inicial del tablero.
 
 ### El efectivo central es un saldo puntual
 
@@ -88,17 +89,47 @@ FROM SBA05
 WHERE COD_CTA = ?
 ```
 
-Devuelve **un solo número**: el acumulado de movimientos de esa cuenta hasta el momento en que se pregunta. No tiene fecha propia ni histórico. Por eso la fecha del dato es la de la consulta, y **el histórico lo construye este módulo**, guardando el valor en cada carga.
+Devuelve **un solo número**: el acumulado de movimientos de esa cuenta hasta el momento en que se pregunta. Es la misma cuenta que muestra `administracion/tesoreria/saldoCaja.php`. No tiene fecha propia ni histórico. Por eso la fecha del dato es la de la consulta, y **el histórico lo construye este módulo**, guardando el valor en cada carga. La pestaña y el tablero **no** usan ese valor guardado: leen `SBA05` cada vez que se dibujan (ver la sección siguiente).
 
 `COD_CTA` sale del parámetro `saldos_cta_tesoreria` y va **parametrizado** en la consulta: es un número de cuenta del plan contable y cambiarlo no puede requerir tocar código.
 
 Ese saldo **no se acepta del navegador aunque esté en la pantalla**: al guardar, la clase lo vuelve a leer de `SBA05`. Es un dato del sistema, y tomarlo del cliente permitiría guardar cualquier cosa como si fuera lo que dice la contabilidad. Si la consulta falla en ese momento, la carga **no se guarda**: guardarla dejaría ese saldo en cero y el disponible quedaría informado de menos.
 
-### Nueva carga: Mercado Pago, otros y bancos sin Interbanking
+### Las cuentas por consulta se leen en vivo
 
-*Nueva carga* lista sólo el catálogo manual: el efectivo (que relee su consulta), Mercado Pago, los otros saldos y los bancos que no vienen por Interbanking. Las cuentas de Interbanking no son de la carga: no tienen ID en el catálogo, la pantalla no las manda y `guardarCargaSaldos()` sólo acepta cuentas del catálogo. Si una cuenta de Interbanking no trae el dato, su respaldo se carga desde su propia fila (ver *El respaldo manual*). La columna *Origen* dice de dónde salió cada saldo: Interbanking, Manual (respaldo), Manual o Consulta.
+Las cuentas con `ORIGEN_DATO = 'CONSULTA'` no se tipean: el sistema las lee, y **las lee cada vez que se dibuja la pestaña o el tablero**, no al hacer una carga. Hasta este cambio el disponible tomaba el efectivo de la última carga; el 20/10/2026 el cashflow mostraba $ 552.255,60 (la carga del 19/10) y `saldoCaja.php`, $ 338.323,60.
 
-El KPI se llama **Última carga manual**, y su detalle dice "Mercado Pago, otros y bancos manuales": la fecha de los saldos bancarios está en cada fila y no en ese KPI. `saldos_dias_alerta_carga` también habla sólo de las cargas manuales.
+| Tipo | De dónde | Fecha del dato |
+| --- | --- | --- |
+| `EFECTIVO_CENTRAL` | `SBA05`, cuenta `saldos_cta_tesoreria` (ver arriba) | Hoy |
+| `MERCADO_PAGO` | `MP_T_SALDO_DEMANDA.TOTAL_AMOUNT` del último registro por `CREATED_AT` (desempate por `ID`), en la moneda de la cuenta (`CURRENCY_ID`) | La de `CREATED_AT` |
+
+- **Un solo lector por tipo**, `Saldos::leerConsulta()`. Lo usan la pestaña y el tablero (`getFilasDisponible()`) y la carga (`guardarCargaSaldos()`), así que los tres leen lo mismo. Los tipos que se leen así están en `Saldos::TIPOS_CONSULTA`. Una cuenta nueva de esos tipos nace como `CONSULTA`.
+- **La regla es pura**, `Saldos::aplicarConsultas()`, y se prueba sin base:
+  - **Con lectura:** el saldo y la fecha son los leídos. En la columna *Cargado el* la fila dice **en vivo**, con un tooltip que nombra la fuente y el momento.
+  - **Mercado Pago con el último dato de otro día:** se usa igual, la fila dice **no es de hoy**, va a la primera columna y hay un aviso de **atención**: *"Mercado Pago: el último saldo de MP_T_SALDO_DEMANDA es del dd/mm/aaaa; se usa ése…"*.
+  - **Si la lectura falla y hay carga:** se usa el valor de la última carga, con su fecha, y un aviso de **atención** que da el motivo. Es un dato real y fechado, y es mejor que dejar la cuenta en blanco.
+  - **Si falla y nunca se cargó:** la cuenta no suma y el aviso es **crítico**.
+- **No piden "Actualizá la carga".** Un saldo en vivo de otro día no recibe ese aviso crítico de `armarSerieDisponible()`, porque una carga nueva releería la misma consulta y no arreglaría nada. El aviso que corresponde ya lo da `aplicarConsultas()`, nombrando la fuente.
+- **La carga sigue guardando la foto del día.** Al guardar, cada cuenta por consulta relee **su** fuente y guarda ese valor y su fecha. Antes toda cuenta `CONSULTA` guardaba el efectivo, y con Mercado Pago como consulta habría grabado el saldo equivocado. Si la lectura falla en ese momento, la carga no se guarda. Esas fotos son el histórico, y son también el respaldo cuando la lectura en vivo falla.
+
+**Mercado Pago pasa a consulta con `sql/cashflow_saldos_mp_consulta.sql`** (el 43 de la instalación). Sólo cambia el `ORIGEN_DATO` de la cuenta. Es reejecutable y no borra nada: las cargas manuales anteriores quedan como histórico. **Sin el script**, Mercado Pago sigue en carga manual como antes y Parámetros › Saldos dice qué script falta. El efectivo se lee en vivo con o sin el script.
+
+**Medido contra la base el 20/10/2026, sólo lectura:**
+
+| Cuenta | Antes (última carga) | Después (en vivo) |
+| --- | --- | --- |
+| Efectivo Tesorería Casa Central | $ 552.255,60 (19/10) | $ 338.323,60 (20/10) |
+| Mercado Pago | $ 13.340.255,00 (19/10, manual) | $ 2.091.049,45 (20/10 11:44) |
+| Las dos juntas, en el Saldo Inicial | $ 13.892.510,60 | $ 2.429.373,05 (− $ 11.463.137,55) |
+
+El saldo de Mercado Pago en `MP_T_SALDO_DEMANDA` se mueve mucho dentro del día. El 19/10 hay 23 registros, entre $ 728.236,37 y $ 12.488.261,07. Por eso la carga manual de ese día no se puede comparar con un único valor de la tabla.
+
+### Nueva carga: otros y bancos sin Interbanking
+
+*Nueva carga* lista sólo el catálogo manual: las cuentas por consulta (que releen su fuente y no se tipean), los otros saldos y los bancos que no vienen por Interbanking. Las cuentas de Interbanking no son de la carga: no tienen ID en el catálogo, la pantalla no las manda y `guardarCargaSaldos()` sólo acepta cuentas del catálogo. Si una cuenta de Interbanking no trae el dato, su respaldo se carga desde su propia fila (ver *El respaldo manual*). La columna *Origen* dice de dónde salió cada saldo: Interbanking, Manual (respaldo), Manual o Consulta.
+
+El KPI se llama **Última carga manual**, y su detalle dice "Las cuentas que se cargan a mano": la fecha de los saldos bancarios y de las cuentas en vivo está en cada fila y no en ese KPI. `saldos_dias_alerta_carga` también habla sólo de las cargas manuales. El KPI del efectivo dice "En vivo de SBA05" o, si la lectura falló, de qué carga es el valor.
 
 ### Monedas: dos totales, sin mezclar
 
@@ -169,7 +200,7 @@ Cuando Interbanking no trae el saldo operativo de una cuenta por un error de la 
 - **Gana la fecha más nueva y, a igual fecha, Interbanking**, que es la fuente oficial (`resolverSaldo()`). La fecha de Interbanking que compite es la del último registro **con operativo actual**: uno más nuevo que sólo trae el contable no le gana al respaldo. Cuando BI se arregla, Interbanking vuelve a mandar solo, sin quitar el respaldo. Es la regla inversa a la caja de los locales, donde gana el manual, porque acá el manual no corrige un dato: tapa uno que falta.
 - **Historial sin bajas físicas.** Reemplazar da de baja el vigente (`VIGENTE = 0`, con usuario y fecha de baja) e inserta el nuevo con `ID_REEMPLAZA`, en una transacción. Quitar da de baja. Un índice único filtrado deja **un solo respaldo vigente por cuenta**.
 - **Las cuentas son las de Interbanking más las que tienen respaldo vigente.** Con la lectura caída, o con una cuenta que BI dejó de traer, el respaldo sigue entrando: existe justamente para eso.
-- Mientras se usa, la falla se acusa en **atención**: *"Interbanking no trae el saldo operativo de <banco · cuenta>; se usa la carga manual del dd/mm"*. El origen dice "Manual (respaldo)", con un tooltip que cuenta quién lo cargó, cuándo, la observación y qué trae Interbanking.
+- **Sólo si el respaldo no es de hoy**, la falla se acusa en **atención**: *"Interbanking no trae el saldo operativo de <banco · cuenta>; se usa la carga manual del dd/mm"*. Con la carga manual del día no hay aviso: el dato está al día y quien lo cargó ya sabe por qué. El origen dice "Manual (respaldo)", con un tooltip que cuenta quién lo cargó, cuándo, la observación y qué trae Interbanking.
 - El servidor rechaza un respaldo de un banco inactivo, de una cuenta que no viene en Interbanking ni tiene respaldo, y uno cargado antes de la depuración.
 
 ### Las cuentas nuevas
