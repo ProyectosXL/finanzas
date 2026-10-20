@@ -543,12 +543,19 @@ chequear('con origen RESPALDO', 'RESPALDO', $prov['origen']);
 chequear('y suma: queda cargada', true, $prov['cargada']);
 chequear('"cargado el" es el alta del respaldo', IB_HOY . ' 09:00:00', $prov['fecha_carga']);
 chequear('y se sabe quien lo cargo', 'tesoreria', $prov['usuario_carga']);
-chequear('la falla de la integracion se acusa en atencion',
-    true, ibContiene(ibAvisos($conResp['avisos'], Aviso::WARNING),
-        'Interbanking no trae el saldo operativo de PROVINCIA DE BS.AS. · 200; se usa la carga '
-        . 'manual del 08/10'));
+/* Con la carga manual DEL DIA no se avisa: el saldo esta al dia y no hay nada
+   que hacer. Se avisa cuando el respaldo es de otro dia. */
+chequear('con el respaldo de hoy no se acusa la falla de la integracion',
+    false, ibContiene(ibAvisos($conResp['avisos']), 'no trae el saldo operativo de PROVINCIA'));
 chequear('y ya no hay critico por esa cuenta',
     false, ibContiene(ibAvisos($conResp['avisos'], Aviso::DANGER), 'PROVINCIA'));
+
+$conRespAyer = SaldosInterbanking::armarCuentasBancarias($ultimos, ['hoy' => IB_HOY, 'tango' => $tangoIb,
+    'respaldos' => ['014|200|ARS' => ibResp(9, '2026-10-07', 35000000.0)]]);
+chequear('con un respaldo de otro dia la falla se acusa en atencion, con su fecha',
+    true, ibContiene(ibAvisos($conRespAyer['avisos'], Aviso::WARNING),
+        'Interbanking no trae el saldo operativo de PROVINCIA DE BS.AS. · 200; se usa la carga '
+        . 'manual del 07/10'));
 chequear('el respaldo vigente viaja en la fila para el dialogo', 9, $prov['respaldo']['id']);
 
 // Interbanking mas nuevo: el respaldo queda en la fila pero no se usa
