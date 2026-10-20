@@ -66,7 +66,7 @@ $edita = AuthCashflow::puedeEditar('saldos');
              Js/avisos-panel.js, SUB_DE_SECCION. -->
         <div id="avisosSaldos"></div>
 
-        <div class="row g-3 mb-4">
+        <div data-kpis="kpisSaldos" class="row g-3 mb-4">
             <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
@@ -287,7 +287,7 @@ $edita = AuthCashflow::puedeEditar('saldos');
         <!-- Los de esta vista y los del tablero de la sección Caja Locales. -->
         <div id="avisosSaldosLocales"></div>
 
-        <div class="row g-3 mb-4">
+        <div data-kpis="kpisSaldosLocales" class="row g-3 mb-4">
             <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
@@ -427,7 +427,7 @@ $edita = AuthCashflow::puedeEditar('saldos');
              en pesos y otro en dólares se muestran cada uno en la suya, igual
              que en la pestaña 1. La valuación a pesos existe sólo para el
              tablero. Las tarjetas las dibuja el JS con lo que haya. -->
-        <div class="row g-3 mb-4" id="kpiFondos"></div>
+        <div data-kpis="kpiFondos" class="row g-3 mb-4" id="kpiFondos"></div>
 
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">

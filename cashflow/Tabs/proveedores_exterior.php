@@ -12,7 +12,7 @@
          Las tres tarjetas miden los tres períodos de las tres vistas, así que
          cada una se corresponde con un botón. Su rótulo lo escribe el JS con el
          período real, que depende del horizonte configurado. -->
-    <div class="row g-3 mb-4" id="summarySection" style="display: none;">
+    <div data-kpis="kpisProvExt" class="row g-3 mb-4" id="summarySection" style="display: none;">
         <div class="col-md-6 col-lg-4">
             <div class="kpi-card">
                 <div class="kpi-card-header">

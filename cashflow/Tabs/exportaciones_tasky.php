@@ -17,7 +17,7 @@
     <div id="avisosExpTasky"></div>
 
     <!-- KPI Cards Row -->
-    <div class="row g-3 mb-4" id="summarySectionExpTasky" style="display: none;">
+    <div data-kpis="summarySectionExpTasky" class="row g-3 mb-4" id="summarySectionExpTasky" style="display: none;">
         <div class="col-md-6 col-lg">
             <div class="kpi-card">
                 <div class="kpi-card-header">

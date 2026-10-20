@@ -1,0 +1,95 @@
+/* ============================================================================
+   kpis-plegables.css — la franja compacta de las tarjetas KPI
+   ----------------------------------------------------------------------------
+   Es una variante de las MISMAS tarjetas (Js/kpis-plegables.js): los valores
+   siguen siendo los elementos que cada pestaña escribe por id, con sus clases
+   de color. Acá sólo se cambia cómo se ven.
+
+   EN MÓVIL LA FRANJA PASA A VARIOS RENGLONES, nunca a scroll horizontal: las
+   columnas son flex con wrap y ninguna tiene ancho mínimo.
+   ============================================================================ */
+
+/* El botón vive adentro del bloque, así aparece y desaparece con él: las
+   pestañas esconden el bloque hasta tener datos. Va absoluto para que la grilla
+   de Bootstrap (.row > *) no lo trate como una columna más. */
+[data-kpis] {
+    position: relative;
+}
+
+/* Centrado sobre la esquina de arriba a la derecha de la última tarjeta: el
+   gutter de Bootstrap dice dónde empieza la tarjeta adentro de la fila. */
+[data-kpis] > .kpis-toggle {
+    position: absolute;
+    top: calc(var(--bs-gutter-y, 0px) - 11px);
+    right: calc(var(--bs-gutter-x, 0px) * 0.5 - 11px);
+    max-width: none;
+    padding: 0;
+    margin: 0;
+    z-index: 2;
+    width: 22px;
+    height: 22px;
+    line-height: 20px;
+    border: 1px solid var(--border-color, #dee2e6);
+    border-radius: 50%;
+    background: var(--bg-white, #fff);
+    color: var(--text-muted, #6c757d);
+    font-size: 10px;
+    text-align: center;
+    cursor: pointer;
+}
+
+[data-kpis] > .kpis-toggle:hover,
+[data-kpis] > .kpis-toggle:focus-visible {
+    color: var(--primary-color, #3366ff);
+    border-color: currentColor;
+}
+
+/* ---- La franja ------------------------------------------------------------ */
+
+[data-kpis].kpis-compacto {
+    --bs-gutter-y: 0.5rem;
+    --bs-gutter-x: 0.5rem;
+}
+
+/* Cada tarjeta, tan ancha como lo que dice: título y valor en un renglón. */
+[data-kpis].kpis-compacto > [class*="col"] {
+    flex: 1 1 auto;
+    width: auto;
+    max-width: 100%;
+}
+
+[data-kpis].kpis-compacto .kpi-card {
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 12px;
+    height: auto;
+}
+
+[data-kpis].kpis-compacto .kpi-card-header {
+    display: block;
+    min-width: 0;
+}
+
+[data-kpis].kpis-compacto .kpi-card-title {
+    white-space: nowrap;
+}
+
+/* Ni ícono ni pie: el pie pasa a ser el tooltip de la tarjeta. */
+[data-kpis].kpis-compacto .kpi-card-icon,
+[data-kpis].kpis-compacto .kpi-card-footer {
+    display: none;
+}
+
+[data-kpis].kpis-compacto .kpi-card-value,
+[data-kpis].kpis-compacto .kpi-card-value-sm {
+    font-size: 15px;
+    white-space: nowrap;
+}
+
+/* Algunas pestañas le dan margen abajo a la tarjeta en pantallas chicas; en la
+   franja el espacio lo pone el gutter. */
+[data-kpis].kpis-compacto .kpi-card {
+    margin-bottom: 0;
+}

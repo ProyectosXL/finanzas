@@ -51,7 +51,7 @@ $edita = AuthCashflow::puedeEditar('cob_electronicos');
     <!-- ============================================================
          INDICADORES
          ============================================================ -->
-    <div class="row g-3 mb-4">
+    <div data-kpis="kpisCobel" class="row g-3 mb-4">
         <div class="col-md-6 col-lg-3">
             <div class="kpi-card">
                 <div class="kpi-card-header">

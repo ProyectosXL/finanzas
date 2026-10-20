@@ -106,7 +106,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
                  el tablero dice de su sección. Ver Js/avisos-panel.js. -->
             <div id="avisosTarjSup"></div>
 
-            <div class="row g-3 mb-3">
+            <div data-kpis="kpisTarjSup" class="row g-3 mb-3">
                 <div class="col-md-6 col-lg-3">
                     <div class="kpi-card">
                         <div class="kpi-card-header">
@@ -280,7 +280,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
 
             <div id="avisosTarjCorp"></div>
 
-            <div class="row g-3 mb-3">
+            <div data-kpis="kpisTarjCorp" class="row g-3 mb-3">
                 <div class="col-md-6 col-lg-3">
                     <div class="kpi-card">
                         <div class="kpi-card-header">
@@ -633,7 +633,7 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
 
             <div id="avisosTarjSoc"></div>
 
-            <div class="row g-3 mb-3">
+            <div data-kpis="kpisTarjSoc" class="row g-3 mb-3">
                 <div class="col-md-6 col-lg-4">
                     <div class="kpi-card">
                         <div class="kpi-card-header">

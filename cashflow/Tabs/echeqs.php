@@ -80,7 +80,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
              LOS DEPOSITADOS VAN EN LA CUARTA TARJETA, con bruto, retención y
              neto: es la fila "Echeqs depositados". Las restas las hace PHP:
              acá no se calcula nada. -->
-        <div class="row g-3 mb-4" id="summarySectionEch" style="display: none;">
+        <div data-kpis="summarySectionEch" class="row g-3 mb-4" id="summarySectionEch" style="display: none;">
             <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
@@ -383,7 +383,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
             </div>
         </div>
 
-        <div class="row g-3 mb-4" id="summaryPreEch" style="display: none;">
+        <div data-kpis="summaryPreEch" class="row g-3 mb-4" id="summaryPreEch" style="display: none;">
             <div class="col-md-6 col-lg-3">
                 <div class="kpi-card kpi-card-destacada">
                     <div class="kpi-card-header">

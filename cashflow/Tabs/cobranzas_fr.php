@@ -26,7 +26,7 @@ $edita = AuthCashflow::puedeEditar('cobranzas_fr');
     </ul>
 
     <!-- KPI Cards Row -->
-    <div class="row g-3 mb-4" id="summarySectionCob" style="display: none;">
+    <div data-kpis="summarySectionCob" class="row g-3 mb-4" id="summarySectionCob" style="display: none;">
         <div class="col-md-6 col-lg-4">
             <div class="kpi-card">
                 <div class="kpi-card-header">

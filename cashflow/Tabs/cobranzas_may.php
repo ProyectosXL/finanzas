@@ -12,7 +12,7 @@ $edita = AuthCashflow::puedeEditar('cobranzas_may');
     <div id="avisosCobMay"></div>
 
     <!-- KPI Cards Row -->
-    <div class="row g-3 mb-4" id="summarySectionCobMay" style="display: none;">
+    <div data-kpis="summarySectionCobMay" class="row g-3 mb-4" id="summarySectionCobMay" style="display: none;">
         <div class="col-md-6 col-lg-4">
             <div class="kpi-card">
                 <div class="kpi-card-header">

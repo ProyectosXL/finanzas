@@ -48,7 +48,7 @@ $edita = AuthCashflow::puedeEditar('proveedores_locales');
     </div>
 
     <!-- KPI Cards -->
-    <div class="row g-3 mb-4" id="summaryProv" style="display: none;">
+    <div data-kpis="summaryProv" class="row g-3 mb-4" id="summaryProv" style="display: none;">
         <div class="col-md-6 col-lg-3">
             <div class="kpi-card">
                 <div class="kpi-card-header">

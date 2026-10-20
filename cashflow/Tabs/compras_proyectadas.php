@@ -19,7 +19,7 @@ $edita = AuthCashflow::puedeEditar('compras_proyectadas');
     <!-- Las tres tarjetas contestan las tres preguntas de la pantalla, en
          orden: cuánto se proyecta, cuánto de eso ya está comprado, y cuánto
          queda por comprometer. -->
-    <div class="row g-3 mb-4" id="summaryComprasProy" style="display: none;">
+    <div data-kpis="summaryComprasProy" class="row g-3 mb-4" id="summaryComprasProy" style="display: none;">
         <div class="col-md-6 col-lg-3">
             <div class="kpi-card">
                 <div class="kpi-card-header">
