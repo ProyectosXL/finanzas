@@ -4,6 +4,7 @@
 // llevar a 'Y-m-d' lo que devuelve sqlsrv, que para una columna DATE entrega un
 // DateTime y no un string.
 require_once __DIR__ . '/Horizonte.php';
+require_once __DIR__ . '/Aviso.php';
 require_once __DIR__ . '/Cotizacion.php';
 require_once __DIR__ . '/AuthCashflow.php';
 require_once __DIR__ . '/Auditoria.php';
@@ -1159,23 +1160,51 @@ class Ingresos {
             }
         }
 
+        return Aviso::textos(self::avisosVencidasConNivel($reubicadas, $impReubicadas,
+            $pactadas, $impPactadas));
+    }
+
+    /**
+     * Los dos avisos de facturas vencidas, a partir de los conteos, con nivel.
+     *
+     * LOS USAN LA PESTANA Y EL TABLERO. Hasta feature/cashflow-avisos-kpis-
+     * comex-nac-parcial el proveedor escribia su propio texto -"y se ubican en
+     * el primer dia del eje"- y contaba como reubicadas tambien las facturas
+     * con fecha pactada a mano, que en realidad se muestran en su fecha. Ahora
+     * la pestana muestra tambien los avisos del tablero, y el mismo hecho con
+     * dos textos saldria dos veces. Los conteos los hace cada uno sobre lo que
+     * tiene -la pestana sobre las facturas, el proveedor sobre las filas ya
+     * agrupadas por fecha-; el texto es este.
+     *
+     * Atencion los dos: es plata que esta en una columna que no es la de su
+     * cobro estimado, y se arregla cargando o corrigiendo la fecha.
+     *
+     * @param int $reubicadas
+     * @param float $impReubicadas
+     * @param int $pactadas
+     * @param float $impPactadas
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public static function avisosVencidasConNivel($reubicadas, $impReubicadas, $pactadas, $impPactadas) {
+        $reubicadas = intval($reubicadas);
+        $pactadas = intval($pactadas);
         $avisos = [];
 
         if ($reubicadas > 0) {
-            $avisos[] = $reubicadas . ' factura' . ($reubicadas === 1 ? '' : 's') . ' por '
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $reubicadas . ' factura' . ($reubicadas === 1 ? '' : 's') . ' por '
                 . self::plata($impReubicadas) . ' ' . ($reubicadas === 1 ? 'tiene' : 'tienen')
                 . ' la fecha probable de cobro ya vencida: se '
                 . ($reubicadas === 1 ? 'ubica' : 'ubican') . ' en el primer día del eje. '
                 . ($reubicadas === 1 ? 'Es una factura vencida' : 'Son facturas vencidas')
-                . ' sin cobrar, no cobranza estimada para hoy.';
+                . ' sin cobrar, no cobranza estimada para hoy.');
         }
 
         if ($pactadas > 0) {
-            $avisos[] = $pactadas . ' factura' . ($pactadas === 1 ? '' : 's') . ' por '
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $pactadas . ' factura' . ($pactadas === 1 ? '' : 's') . ' por '
                 . self::plata($impPactadas) . ' ' . ($pactadas === 1 ? 'tiene' : 'tienen')
                 . ' la fecha de cobro pactada a mano y ya vencida: se '
                 . ($pactadas === 1 ? 'muestra' : 'muestran')
-                . ' en su fecha, sin reubicar, porque la cargó una persona.';
+                . ' en su fecha, sin reubicar, porque la cargó una persona.');
         }
 
         return $avisos;
@@ -1830,7 +1859,8 @@ class Ingresos {
      *
      * @param string $origen 'todos', 'real', o 'proyectado'
      * @return array Filas ['FECHA', 'IMPORTE', 'IMPORTE_PACTADO', 'COMP_PACTADOS',
-     *                      'IMPORTE_VENCIDO', 'COMP_VENCIDOS']
+     *                      'IMPORTE_VENCIDO', 'COMP_VENCIDOS',
+     *                      'IMPORTE_VENCIDO_PACTADO', 'COMP_VENCIDOS_PACTADOS']
      */
     public function getCobranzasFRTotales($origen = 'todos') {
         $totalesPorFecha = [];
@@ -1838,6 +1868,8 @@ class Ingresos {
         $compPorFecha = [];
         $vencidoPorFecha = [];
         $compVencidosPorFecha = [];
+        $vencidoPactadoPorFecha = [];
+        $compVencidosPactadosPorFecha = [];
 
         $this->reiniciarUniversoFR();
 
@@ -1913,6 +1945,12 @@ class Ingresos {
                 if (!empty($p['VENCIDA'])) {
                     $vencidoPorFecha[$f] = ($vencidoPorFecha[$f] ?? 0.0) + $importe;
                     $compVencidosPorFecha[$f] = ($compVencidosPorFecha[$f] ?? 0) + 1;
+
+                    // Las pactadas a mano no se reubican: el aviso las cuenta aparte.
+                    if (!empty($p['FECHA_MANUAL'])) {
+                        $vencidoPactadoPorFecha[$f] = ($vencidoPactadoPorFecha[$f] ?? 0.0) + $importe;
+                        $compVencidosPactadosPorFecha[$f] = ($compVencidosPactadosPorFecha[$f] ?? 0) + 1;
+                    }
                 }
             }
         }
@@ -1927,7 +1965,10 @@ class Ingresos {
                 'IMPORTE_PACTADO' => round($pactadoPorFecha[$f] ?? 0.0, 2),
                 'COMP_PACTADOS' => $compPorFecha[$f] ?? 0,
                 'IMPORTE_VENCIDO' => round($vencidoPorFecha[$f] ?? 0.0, 2),
-                'COMP_VENCIDOS' => $compVencidosPorFecha[$f] ?? 0
+                'COMP_VENCIDOS' => $compVencidosPorFecha[$f] ?? 0,
+                // Una parte de las de arriba: las vencidas con fecha pactada a mano.
+                'IMPORTE_VENCIDO_PACTADO' => round($vencidoPactadoPorFecha[$f] ?? 0.0, 2),
+                'COMP_VENCIDOS_PACTADOS' => $compVencidosPactadosPorFecha[$f] ?? 0
             ];
         }
 
@@ -2256,13 +2297,16 @@ class Ingresos {
      * getCobranzasFRTotales(): son facturas ubicadas en hoy por tener la fecha
      * probable en el pasado, no cobranza estimada para hoy.
      *
-     * @return array Filas ['FECHA', 'IMPORTE', 'IMPORTE_VENCIDO', 'COMP_VENCIDOS']
+     * @return array Filas ['FECHA', 'IMPORTE', 'IMPORTE_VENCIDO', 'COMP_VENCIDOS',
+     *                      'IMPORTE_VENCIDO_PACTADO', 'COMP_VENCIDOS_PACTADOS']
      */
     public function getCobranzasMayTotales() {
         $items = $this->getCobranzasMay();
         $totalesPorFecha = [];
         $vencidoPorFecha = [];
         $compVencidosPorFecha = [];
+        $vencidoPactadoPorFecha = [];
+        $compVencidosPactadosPorFecha = [];
 
         foreach ($items as $item) {
             $f = $item['Cobro'];
@@ -2273,6 +2317,12 @@ class Ingresos {
             if (!empty($item['VENCIDA'])) {
                 $vencidoPorFecha[$f] = ($vencidoPorFecha[$f] ?? 0.0) + $importe;
                 $compVencidosPorFecha[$f] = ($compVencidosPorFecha[$f] ?? 0) + 1;
+
+                // Las pactadas a mano no se reubican: el aviso las cuenta aparte.
+                if (!empty($item['FECHA_MANUAL'])) {
+                    $vencidoPactadoPorFecha[$f] = ($vencidoPactadoPorFecha[$f] ?? 0.0) + $importe;
+                    $compVencidosPactadosPorFecha[$f] = ($compVencidosPactadosPorFecha[$f] ?? 0) + 1;
+                }
             }
         }
 
@@ -2283,7 +2333,10 @@ class Ingresos {
                 'FECHA' => $f,
                 'IMPORTE' => round($imp, 2),
                 'IMPORTE_VENCIDO' => round($vencidoPorFecha[$f] ?? 0.0, 2),
-                'COMP_VENCIDOS' => $compVencidosPorFecha[$f] ?? 0
+                'COMP_VENCIDOS' => $compVencidosPorFecha[$f] ?? 0,
+                // Una parte de las de arriba: las vencidas con fecha pactada a mano.
+                'IMPORTE_VENCIDO_PACTADO' => round($vencidoPactadoPorFecha[$f] ?? 0.0, 2),
+                'COMP_VENCIDOS_PACTADOS' => $compVencidosPactadosPorFecha[$f] ?? 0
             ];
         }
 
@@ -2525,23 +2578,15 @@ class Ingresos {
     }
 
     /**
-     * Los avisos de la pestana y del tablero sobre las exportaciones: lo que
-     * NO se ve en los numeros y hay que decir.
-     *
-     *   - Sin cotizacion de hoy: la columna en pesos queda vacia y la grilla
-     *     no muestra importes. Los dolares estan; lo que falta es a cuanto
-     *     valuarlos. No se asume ningun valor.
-     *   - Facturas vencidas: se ubicaron en el primer dia del eje. Son
-     *     facturas vencidas sin cobrar.
-     *
-     * Estatica y pura para que la pestana y el proveedor digan lo mismo.
+     * Los avisos de la pestana sobre las exportaciones: lo que NO se ve en los
+     * numeros y hay que decir. Cuenta sobre las facturas y le pasa los
+     * conteos a avisosExportacionesConNivel(), que es donde esta el texto.
      *
      * @param array $items Filas de proyectarExportaciones()
      * @param float|null $cotizHoy
      * @return array Lista de mensajes
      */
     public static function avisosExportaciones($items, $cotizHoy) {
-        $avisos = [];
         $usdTotal = 0.0;
         $usdVencidas = 0.0;
         $vencidas = 0;
@@ -2555,20 +2600,54 @@ class Ingresos {
             }
         }
 
-        if ($cotizHoy === null && count($items) > 0) {
-            $avisos[] = 'No hay cotización del dólar oficial BCRA para el mes en curso ('
-                . Cotizacion::VISTA . '): los ' . self::usd($usdTotal) . ' pendientes no se '
-                . 'pueden valuar, así que la columna en pesos queda vacía y no entran a la '
-                . 'grilla ni al tablero. No se asume ningún tipo de cambio.';
+        return Aviso::textos(self::avisosExportacionesConNivel($usdTotal, $cotizHoy, $vencidas,
+            $usdVencidas));
+    }
+
+    /**
+     * Los avisos de las exportaciones a partir de los conteos, con nivel.
+     *
+     *   - Sin cotizacion de hoy: la columna en pesos queda vacia, la grilla no
+     *     muestra importes y la fila del tablero va en cero. Los dolares estan;
+     *     lo que falta es a cuanto valuarlos. No se asume ningun valor.
+     *     Critico: la fila entera en cero y nadie lo decidio.
+     *   - Facturas vencidas: se ubicaron en el primer dia del eje. Son facturas
+     *     vencidas sin cobrar, no cobranza estimada para hoy. Atencion.
+     *
+     * LOS USAN LA PESTANA Y EL TABLERO. Hasta feature/cashflow-avisos-kpis-
+     * comex-nac-parcial el proveedor escribia los suyos y decian lo mismo con
+     * otras palabras; ahora la pestana muestra tambien los avisos del tablero, y
+     * el mismo hecho con dos textos saldria dos veces. Cada uno cuenta sobre lo
+     * que tiene -la pestana sobre las facturas, el proveedor sobre las filas
+     * agrupadas por fecha- y el texto es este.
+     *
+     * SIN DOLARES PENDIENTES no hay nada que valuar, y la falta de cotizacion
+     * no se avisa: no cambia ningun numero.
+     *
+     * @param float $usdTotal Dolares pendientes
+     * @param float|null $cotizHoy
+     * @param int $vencidas
+     * @param float $usdVencidas
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public static function avisosExportacionesConNivel($usdTotal, $cotizHoy, $vencidas, $usdVencidas) {
+        $avisos = [];
+        $vencidas = intval($vencidas);
+
+        if ($cotizHoy === null && floatval($usdTotal) != 0) {
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, 'No hay cotización del dólar oficial BCRA para '
+                . 'el mes en curso (' . Cotizacion::VISTA . '): los ' . self::usd($usdTotal)
+                . ' pendientes no se pueden valuar, así que la columna en pesos queda vacía y no '
+                . 'entran a la grilla ni al tablero. No se asume ningún tipo de cambio.');
         }
 
         if ($vencidas > 0) {
-            $avisos[] = $vencidas . ' factura' . ($vencidas === 1 ? '' : 's') . ' por '
-                . self::usd($usdVencidas) . ' ' . ($vencidas === 1 ? 'tiene' : 'tienen')
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $vencidas . ' factura' . ($vencidas === 1 ? '' : 's')
+                . ' por ' . self::usd($usdVencidas) . ' ' . ($vencidas === 1 ? 'tiene' : 'tienen')
                 . ' la fecha de cobro estimada ya vencida: se '
                 . ($vencidas === 1 ? 'ubica' : 'ubican') . ' en el primer día del eje. '
                 . ($vencidas === 1 ? 'Es una factura vencida' : 'Son facturas vencidas')
-                . ' sin cobrar.';
+                . ' sin cobrar, no cobranza estimada para hoy.');
         }
 
         return $avisos;

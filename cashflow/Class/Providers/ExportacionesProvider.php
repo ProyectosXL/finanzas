@@ -99,15 +99,15 @@ class ExportacionesProvider extends CashflowProvider {
             $compVencidos += intval($f['COMP_VENCIDOS']);
         }
 
-        if ($cotiz === null) {
-            if ($usdTotal != 0) {
-                // Critico: la fila entera en cero por falta de cotizacion.
-                $this->avisar('No hay cotizacion del dolar oficial BCRA para el '
-                    . 'mes en curso (' . Cotizacion::VISTA . '), asi que la fila se muestra en cero. '
-                    . 'Hay ' . self::usd($usdTotal) . ' pendientes de cobro; lo que falta es a '
-                    . 'cuanto valuarlos. No se asume ningun tipo de cambio.', Aviso::DANGER);
-            }
+        /* Los avisos son los de la pestana, escritos una sola vez en
+           Ingresos::avisosExportacionesConNivel(): la pestana muestra tambien los
+           del tablero, y el mismo hecho con dos textos saldria dos veces. Sin
+           cotizacion la fila no tiene ninguna columna, asi que de las vencidas
+           no hay nada que decir: el critico ya dice que va en cero. */
+        $this->avisarTodos(Ingresos::avisosExportacionesConNivel($usdTotal, $cotiz,
+            ($cotiz === null) ? 0 : $compVencidos, $usdVencidas));
 
+        if ($cotiz === null) {
             return [
                 'dias' => [],
                 'meses' => [],
@@ -120,17 +120,6 @@ class ExportacionesProvider extends CashflowProvider {
         $serie['moneda_origen'] = 'USD';
         $serie['tipo_cambio'] = $cotiz;
         $serie['detalle'] = $this->detalleVencidas($h, $filas, $cotiz);
-
-        if ($compVencidos > 0) {
-            // Atencion: la plata entra, pero en otro lugar -el primer dia del
-            // eje- que no es una estimacion de cobro.
-            $this->avisar($compVencidos . ' factura'
-                . ($compVencidos === 1 ? '' : 's') . ' por ' . self::usd($usdVencidas)
-                . ' ' . ($compVencidos === 1 ? 'tiene' : 'tienen') . ' la fecha de cobro estimada '
-                . 'ya vencida y se ' . ($compVencidos === 1 ? 'ubica' : 'ubican')
-                . ' en el primer dia del eje. ' . ($compVencidos === 1 ? 'Es una factura vencida' : 'Son facturas vencidas')
-                . ' sin cobrar, no cobranza estimada para hoy.', Aviso::WARNING);
-        }
 
         return $serie;
     }
@@ -179,10 +168,5 @@ class ExportacionesProvider extends CashflowProvider {
     /** Formato de importe en pesos para las notas */
     private static function plata($n) {
         return '$ ' . number_format(floatval($n), 2, ',', '.');
-    }
-
-    /** Formato de importe en dolares para los avisos */
-    private static function usd($n) {
-        return 'USD ' . number_format(floatval($n), 2, ',', '.');
     }
 }

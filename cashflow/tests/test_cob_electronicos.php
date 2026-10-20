@@ -637,7 +637,7 @@ $sinProcesadoras = proveedorConDoble(function ($f) {
 chequear('sin procesadoras la fila va en cero',
     0.0, array_sum($sinProcesadoras->series($h)['COBRANZA']['dias']));
 chequear('y el aviso dice donde cargarlas', true,
-    strpos($sinProcesadoras->warnings()[0], 'Parametros') !== false);
+    strpos($sinProcesadoras->warnings()[0], 'Parámetros') !== false);
 
 // 3. Procesadoras cargadas pero ningun movimiento: NO es lo mismo que cero.
 $sinMovimientos = proveedorConDoble(function ($f) {

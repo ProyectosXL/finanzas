@@ -223,8 +223,16 @@ seccion('el aviso de "sin gastos cargados" no se confunde con los vencidos');
    propio aviso. Por eso esa guarda pasa a medirse sobre el importe crudo. */
 $provSrc = codigoSinComentarios(__DIR__ . '/../Class/Providers/ComexProvider.php');
 
-chequear('se mide sobre el importe crudo', true,
-    strpos($provSrc, "self::totalImporte(\$filas, 'IMPORTE_EST')") !== false);
+chequear('todas vencidas pero con gastos cargados: no se avisa', [],
+    Comex::avisosSinEstimacionConNivel([
+        ['IMPORTE_EST' => 100, 'VENCIDA' => true, 'IMPORTE_EJE' => 0.0],
+        ['IMPORTE_EST' => 50, 'VENCIDA' => true, 'IMPORTE_EJE' => 0.0]
+    ]));
+chequear('ninguna con gastos: se avisa, como atencion', 'warning',
+    Comex::avisosSinEstimacionConNivel([['IMPORTE_EST' => null], ['IMPORTE_EST' => null]])[0]['nivel']);
+chequear('sin contenedores no hay nada que explicar', [], Comex::avisosSinEstimacionConNivel([]));
+chequear('el proveedor lo emite desde la lista compartida', true,
+    strpos($provSrc, '$comex->avisosNacionalizacionConNivel($filas)') !== false);
 chequear('y ya no sobre la serie', false, strpos($provSrc, 'totalSerie') !== false);
 
 /* ================================================================
@@ -954,12 +962,15 @@ chequear('todas las series declaran USD', 9, substr_count($provSrc, "'USD'"));
    El proveedor llama a la variante ConNivel, que devuelve el mismo aviso con
    su gravedad para el panel del tablero, y la llamada puede ir partida en dos
    renglones: lo que importa son los argumentos, no el espaciado. */
+$comexSrcVenc = codigoSinComentarios(__DIR__ . '/../Class/Comex.php');
 chequear('el aviso de vencidos de nacionalizacion informa pesos', 1,
-    preg_match("/Comex::avisosVencidosConNivel\\(\\\$filas,\\s*'FECHA_NAC_EFECTIVA',"
-        . "\\s*'IMPORTE_ARS'/", $provSrc));
-chequear('y el de la pestana tambien', true,
-    strpos($fuenteCtrl, "Comex::avisosVencidos(\$filasNac, 'FECHA_NAC_EFECTIVA', 'IMPORTE_ARS'")
-        !== false);
+    preg_match("/self::avisosVencidosConNivel\\(\\\$filas,\\s*'FECHA_NAC_EFECTIVA',"
+        . "\\s*'IMPORTE_ARS'/", $comexSrcVenc));
+/* La lista es una sola desde feature/cashflow-avisos-kpis-comex-nac-parcial:
+   la llaman el tablero y la pestana. */
+chequear('y el tablero y la pestana usan esa misma lista', true,
+    strpos($provSrc, '$comex->avisosNacionalizacionConNivel($filas)') !== false
+    && strpos($fuenteCtrl, '$comex->avisosNacionalizacionConNivel($filasNac)') !== false);
 
 /* Y sin curva la serie va en cero con aviso, igual que los pagos al exterior:
    un proveedor no puede tumbar el tablero, y un cero sin explicacion no se

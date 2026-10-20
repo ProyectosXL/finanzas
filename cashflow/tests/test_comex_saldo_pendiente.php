@@ -474,8 +474,9 @@ $ctrlSrc = codigoSinComentariosSP(__DIR__ . '/../Controller/ComexController.php'
 /* EL AVISO DE VALUACION TAMBIEN HABLA DEL PENDIENTE. Con VALOR_FOB_DOLAR
    diria de mas justamente en los contenedores que ya tienen pagos hechos, que
    son los unicos donde los dos numeros difieren. */
-chequear('el aviso de valuacion mide el pendiente', true,
-    strpos($ctrlSrc, "'PENDIENTE_USD'") !== false);
+chequear('el aviso de valuacion mide el pendiente', 1,
+    preg_match('/self::avisosValuacionConNivel\(\$filas,\s*\$this->dolarFuturo\(\)->ultimoMes\(\),'
+        . '\s*\'PENDIENTE_USD\'\)/', codigoSinComentariosSP(__DIR__ . '/../Class/Comex.php')));
 
 /* Y EL DEL TABLERO TAMBIEN, con el MISMO campo. Los dos consumidores describen
    las mismas filas y el texto es uno solo; si uno midiera el FOB y el otro el
@@ -485,9 +486,10 @@ chequear('el aviso de valuacion mide el pendiente', true,
 /* El tablero llama a la variante ConNivel -el mismo aviso, con su gravedad- y
    la llamada va partida en dos renglones: se comparan los argumentos, no el
    espaciado. */
-chequear('y el del tablero usa el mismo campo', 1,
-    preg_match('/avisosValuacionConNivel\(\$filas,\s*\$dolar->ultimoMes\(\),\s*\'PENDIENTE_USD\'\)/',
-        codigoSinComentariosSP(__DIR__ . '/../Class/Providers/ComexProvider.php')));
+chequear('y el tablero y la pestana usan esa misma lista', true,
+    strpos(codigoSinComentariosSP(__DIR__ . '/../Class/Providers/ComexProvider.php'),
+        '$comex->avisosExteriorConNivel($filas)') !== false
+    && strpos($ctrlSrc, '$comex->avisosExteriorConNivel($filasExt)') !== false);
 
 chequear('y el endpoint de lectura de pagos existe', true,
     strpos($ctrlSrc, 'getPagosContenedor') !== false);

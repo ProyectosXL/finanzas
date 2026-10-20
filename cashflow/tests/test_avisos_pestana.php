@@ -293,3 +293,90 @@ chequear('con el de la pestana si, aunque no se vea el tablero', true,
 $conPes = file_get_contents(__DIR__ . '/../../class/conexion.php');
 chequear('Conexion no vuelve a abrir una sesion liberada (las dos llamadas)', 2,
     substr_count($conPes, "&& !defined('CASHFLOW_SESION_LIBERADA')"));
+
+/* ================================================================
+   Un hecho, un texto
+
+   La pestana muestra sus avisos y los del tablero, y saca los repetidos por
+   texto. Eso solo funciona si el mismo hecho se escribe UNA vez: estas pruebas
+   fijan que la pestana y el proveedor llaman a la misma funcion.
+   ================================================================ */
+seccion('un hecho, un texto: Cobranzas');
+
+require_once __DIR__ . '/../Class/Ingresos.php';
+require_once __DIR__ . '/../Class/CobElectronicos.php';
+
+$itemsVenc = [
+    ['VENCIDA' => true, 'FECHA_MANUAL' => false, 'importe_neto' => 100],
+    ['VENCIDA' => true, 'FECHA_MANUAL' => false, 'importe_neto' => 50],
+    ['VENCIDA' => true, 'FECHA_MANUAL' => true, 'importe_neto' => 30],
+    ['VENCIDA' => false, 'FECHA_MANUAL' => false, 'importe_neto' => 999]
+];
+
+chequear('la pestana escribe el texto de la funcion compartida',
+    Aviso::textos(Ingresos::avisosVencidasConNivel(2, 150, 1, 30)),
+    Ingresos::avisosCobranzasVencidas($itemsVenc));
+chequear('las pactadas a mano se cuentan aparte: dos avisos', 2,
+    count(Ingresos::avisosVencidasConNivel(2, 150, 1, 30)));
+
+$srcIngProv = file_get_contents(__DIR__ . '/../Class/Providers/IngresosProvider.php');
+chequear('el proveedor de Cobranzas usa la misma funcion, con las pactadas aparte', true,
+    strpos($srcIngProv, 'Ingresos::avisosVencidasConNivel($comprobantes - $pactados,') !== false);
+
+$srcIng = file_get_contents(__DIR__ . '/../Class/Ingresos.php');
+chequear('los dos agregadores del tablero cuentan las pactadas (FR y May)', 2,
+    substr_count($srcIng, "'COMP_VENCIDOS_PACTADOS' => \$compVencidosPactadosPorFecha[\$f] ?? 0"));
+
+seccion('un hecho, un texto: Exportaciones Tasky');
+
+$itemsExp = [
+    ['IMPORTE_USD' => 100, 'VENCIDA' => true],
+    ['IMPORTE_USD' => 40, 'VENCIDA' => false]
+];
+
+chequear('con cotizacion, la pestana dice lo mismo que la funcion',
+    Aviso::textos(Ingresos::avisosExportacionesConNivel(140, 1500, 1, 100)),
+    Ingresos::avisosExportaciones($itemsExp, 1500));
+chequear('sin cotizacion tambien, y el de la cotizacion es critico',
+    ['danger', 'warning'],
+    array_column(Ingresos::avisosExportacionesConNivel(140, null, 1, 100), 'nivel'));
+chequear('sin dolares pendientes no hay cotizacion que pedir', [],
+    Ingresos::avisosExportacionesConNivel(0, null, 0, 0));
+chequear('el proveedor usa la misma funcion', true,
+    strpos(file_get_contents(__DIR__ . '/../Class/Providers/ExportacionesProvider.php'),
+        'Ingresos::avisosExportacionesConNivel($usdTotal, $cotiz,') !== false);
+
+seccion('un hecho, un texto: Cob. Electronicos');
+
+$hCob = new Horizonte(3, 3, [], new DateTime('2026-09-06'));
+$movLejos = [['fecha_acreditacion' => '2027-12-20', 'importe_neto' => 500,
+    'importe_bruto' => 510, 'procesadora' => 'P', 'id_procesadora' => 1]];
+
+chequear('lo posterior al horizonte: el mismo texto en la tabla y en el tablero',
+    CobElectronicos::armarSerie($movLejos, $hCob)['warnings'],
+    CobElectronicos::armarMovimientos($movLejos, $hCob)['avisos']);
+
+$srcCobProv = file_get_contents(__DIR__ . '/../Class/Providers/CobElectronicosProvider.php');
+chequear('el proveedor usa los textos de la clase (tablas y procesadoras)', true,
+    strpos($srcCobProv, 'CobElectronicos::avisoSinTablas()') !== false
+    && strpos($srcCobProv, 'CobElectronicos::avisoSinProcesadoras()') !== false);
+$srcCob = file_get_contents(__DIR__ . '/../Class/CobElectronicos.php');
+chequear('y la pestana tambien', true,
+    strpos($srcCob, '$avisos[] = self::avisoSinTablas();') !== false
+    && strpos($srcCob, '$avisos[] = self::avisoSinProcesadoras();') !== false);
+
+seccion('un hecho, un texto: Comercio Exterior');
+
+$srcComexCtl = file_get_contents(__DIR__ . '/../Controller/ComexController.php');
+$srcComexProv = file_get_contents(__DIR__ . '/../Class/Providers/ComexProvider.php');
+
+chequear('Proveedores Exterior: la pestana usa la lista del tablero', true,
+    strpos($srcComexCtl, '$comex->avisosExteriorConNivel($filasExt)') !== false
+    && strpos($srcComexProv, '$comex->avisosExteriorConNivel($filas)') !== false);
+chequear('Crono Nacionalizacion tambien', true,
+    strpos($srcComexCtl, '$comex->avisosNacionalizacionConNivel($filasNac)') !== false
+    && strpos($srcComexProv, '$comex->avisosNacionalizacionConNivel($filas)') !== false);
+chequear('la curva caida, con el mismo texto en las cuatro llamadas', 4,
+    substr_count($srcComexCtl . $srcComexProv, '->avisoSinCurva('));
+chequear('y la pestana ya no arma su lista con las funciones sueltas', 0,
+    preg_match_all('/Comex::avisos(Saldo|Sobrepago|Grupo|Valuacion|Vencidos)/', $srcComexCtl));

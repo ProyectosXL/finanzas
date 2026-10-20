@@ -74,42 +74,23 @@ try {
                 'IMPORTE_EJE'
             );
 
-            /* Los avisos propios van ADELANTE de los del eje: explican por qué
-               hay contenedores que no aparecen con importe, y eso se lee antes
-               que lo que quedó fuera del horizonte.
+            /* LOS AVISOS SON LOS DEL TABLERO, MÁS LOS DE ESTA PANTALLA, y van con
+               nivel. Hasta feature/cashflow-avisos-kpis-comex-nac-parcial esta
+               lista se armaba acá con las funciones sueltas de Comex y no
+               coincidía con la del proveedor: le faltaba lo marcado como ya
+               hecho y mandaba textos sin nivel. Ahora es la misma lista
+               (Comex::avisosExteriorConNivel()), así que cuando llegan los del
+               tablero (Cashflow::avisosDePestana()) el panel los junta sin
+               repetir.
 
-               El de vencidos va en el medio y no al final por el mismo motivo:
-               el aviso genérico del eje dice cuánta plata quedó fuera del
-               horizonte sin distinguir si cayó antes o después, y éste dice
-               cuánta de esa es fecha vencida, que es la que se corrige desde
-               esta misma pantalla. */
+               Lo propio de la pestaña: los scripts que apagan una edición y la
+               curva caída, que acá se lee distinto -la grilla igual muestra los
+               dólares-. Al final, lo que el eje de la grilla dejó afuera. */
             $payload['warnings'] = array_merge(
-                $comex->getAvisosExterior(),
-
-                /* LO QUE COMERCIO EXTERIOR YA PAGÓ VA ARRIBA DE TODO lo demás
-                   de esta pestaña, y no es orden de importancia genérico: es
-                   plata que salió de la proyección sin que nadie de este lado
-                   hiciera nada, así que es lo primero que hay que poder leer
-                   cuando el número de ayer no es el de hoy. El sobrepago va
-                   pegado porque es el mismo circuito mirado donde no cierra. */
-                Comex::avisosSaldoComex($filasExt),
-                Comex::avisosSobrepago($filasExt),
-                Comex::avisosGrupo($filasExt),
-
-                /* EN DÓLARES, y sobre el PENDIENTE: lo que no se pudo valuar es
-                   lo que esta pantalla proyecta, no el FOB. Con VALOR_FOB_DOLAR
-                   el aviso diría de más justamente en los contenedores que ya
-                   tienen pagos hechos. */
-                Comex::avisosValuacion($filasExt, $comex->dolarFuturo()->ultimoMes(),
-                    'PENDIENTE_USD'),
-                /* SIN EL EJE: acá no hay nada que repartir, porque ninguna
-                   vencida entra en ninguna columna —no es que su fecha caiga
-                   afuera, es que no suman por regla—. El importe que se informa
-                   es IMPORTE_ARS, que es lo que valen; informar IMPORTE_EJE
-                   daría "$ 0,00 vencidos", que no le dice nada a nadie. */
-                Comex::avisosVencidos($filasExt, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_ARS',
-                    'fecha estimada de pago'),
-                $payload['warnings']
+                $comex->avisosEdicionExteriorConNivel(),
+                array_values(array_filter([$comex->avisoSinCurva('los pagos al exterior')])),
+                $comex->avisosExteriorConNivel($filasExt),
+                Aviso::lista($payload['warnings'])
             );
 
             /* De dónde sale el dólar y hasta cuándo llega la curva. La pantalla
@@ -371,28 +352,16 @@ try {
                 'IMPORTE_EJE'
             );
 
-            /* Mismo reparto que en Proveedores Exterior: primero lo que falta
-               para poder editar, después lo que no se pudo valuar, después lo
-               que no entra en ninguna columna, y al final lo que el eje
-               descartó. */
-            $faltantes = array_values(array_filter(
-                [$comex->avisoSinHistorial(), $comex->avisoSinPagado()]));
-
+            /* Mismo reparto que en Proveedores Exterior: lo que apaga una
+               edición, la curva caída, la lista que también emite el tablero
+               (Comex::avisosNacionalizacionConNivel()) y al final lo que el eje
+               descartó. Hasta esta rama a la pestaña le faltaban lo marcado
+               como ya hecho y la estimación que falta, que el tablero sí decía. */
             $payload['warnings'] = array_merge(
-                $faltantes,
-                /* Los mismos avisos que el tablero, escritos una sola vez. El
-                   campo del importe en dólares y el nombre de la fecha son los
-                   de esta pestaña. */
-                Comex::avisosValuacion($filasNac, $comex->dolarFuturo()->ultimoMes(),
-                    'IMPORTE_EST', 'fecha de nacionalización'),
-                /* Sin el eje: ninguna vencida entra en ninguna columna, así que
-                   no hay nada que repartir. El importe que se informa es
-                   IMPORTE_ARS —lo que valen en pesos—; hasta
-                   feature/comex-nac-usd se informaba IMPORTE_EST, que es un
-                   número en dólares y salía con el signo de pesos adelante. */
-                Comex::avisosVencidos($filasNac, 'FECHA_NAC_EFECTIVA', 'IMPORTE_ARS',
-                    'fecha de nacionalización'),
-                $payload['warnings']
+                $comex->avisosEdicionNacionalizacionConNivel(),
+                array_values(array_filter([$comex->avisoSinCurva('los gastos de nacionalización')])),
+                $comex->avisosNacionalizacionConNivel($filasNac),
+                Aviso::lista($payload['warnings'])
             );
 
             /* DE DÓNDE SALE EL DÓLAR, igual que en Proveedores Exterior: un

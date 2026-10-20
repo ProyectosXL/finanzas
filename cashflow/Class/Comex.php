@@ -564,51 +564,183 @@ class Comex {
         return $this->dolar;
     }
 
+    /* ====================================================================
+       LOS AVISOS, ESCRITOS UNA SOLA VEZ
+
+       Los leen el tablero -ComexProvider- y las dos pestanas. Hasta
+       feature/cashflow-avisos-kpis-comex-nac-parcial cada controller armaba
+       su lista con las funciones sueltas de abajo, y se habian separado del
+       proveedor: la pestana no decia lo marcado como ya hecho, no mandaba
+       nivel, y la curva caida se contaba con otras palabras. Ahora la pestana
+       muestra tambien los avisos del tablero (Cashflow::avisosDePestana()), y
+       para que no salgan dos veces el texto tiene que ser el mismo: por eso la
+       lista es una, con nivel, y la pestana solo le agrega lo que es suyo
+       -los scripts que apagan una edicion-.
+       ==================================================================== */
+
     /**
-     * Avisos de configuracion pendiente de la pestana Proveedores Exterior.
+     * El aviso de que la curva no se pudo leer, o null.
      *
-     * LO QUE FALTA SE DICE, AUNQUE NO ROMPA NADA. Mismo criterio que
-     * ProveedoresCategorias::getAvisos(): una funcion que desaparece sin decir
-     * por que es indistinguible de una que no se construyo.
+     * UN TEXTO PARA LAS DOS PANTALLAS. El de la pestana decia "se muestran sin
+     * valuar en pesos" y el del tablero "van en cero": las dos cosas pasan a
+     * la vez, asi que el texto dice las dos. Critico: la fila entera en cero
+     * por falta de cotizacion, y nadie lo decidio.
      *
-     * @return array
+     * @param string $queVa 'los pagos al exterior' o 'los gastos de nacionalización'
+     * @return array|null ['nivel', 'texto', 'seccion']
      */
-    public function getAvisosExterior() {
-        $avisos = [];
+    public function avisoSinCurva($queVa) {
         $dolar = $this->dolarFuturo();
 
-        /* Lo que esta pantalla puede no tener. Se avisan por separado porque
-           cada uno apaga una cosa distinta y un solo mensaje generico no diria
-           cual falta.
-
-           EL DE LOS PAGOS VA PRIMERO, y no es orden alfabetico: los otros dos
-           apagan una funcion -editar una fecha, marcar un tilde- y ese cambia
-           LOS NUMEROS que muestra la pantalla. Ver avisoSinPagosComex(). */
-        foreach ([$this->avisoSinPagosComex(), $this->avisoSinHistorial(),
-                  $this->avisoSinPagado()] as $falta) {
-            if ($falta !== '') {
-                $avisos[] = $falta;
-            }
+        if ($dolar->disponible()) {
+            return null;
         }
 
-        if (!$dolar->disponible()) {
-            $avisos[] = 'No se pudo leer la curva de dólar futuro ROFEX ('
-                . DolarFuturo::ORIGEN . '), así que los pagos al exterior se muestran sin '
-                . 'valuar en pesos. Los importes en dólares están: lo que falta es a cuánto '
-                . 'convertirlos. '
-                . ($dolar->error() === null ? '' : $dolar->error());
+        return Aviso::nuevo(Aviso::DANGER, 'No se pudo leer la curva de dólar futuro ROFEX ('
+            . DolarFuturo::ORIGEN . '), así que ' . $queVa . ' no se pueden pasar a pesos: la '
+            . 'pestaña los muestra en dólares y la fila del tablero va en cero. Los importes en '
+            . 'dólares están: lo que falta es a cuánto convertirlos. '
+            . ($dolar->error() === null ? '' : $dolar->error()));
+    }
 
-            return $avisos;
-        }
+    /**
+     * Los avisos de los pagos al exterior, con nivel: los del tablero y de la
+     * pestana Proveedores Exterior.
+     *
+     * EL ORDEN ES EL DE EMISION DEL PROVEEDOR, y dentro de cada nivel es el
+     * orden en que se leen: el panel ordena por gravedad y respeta este orden
+     * entre los iguales.
+     *
+     * SOBRE EL PENDIENTE, no sobre el FOB: lo que no se pudo valuar es lo que
+     * esta fila proyecta. Con VALOR_FOB_DOLAR el aviso diria de mas justamente
+     * en los contenedores que ya tienen pagos hechos.
+     *
+     * Los niveles: lo vencido y lo sin fecha se arreglan cargando una fecha
+     * (atencion); lo marcado, lo pagado en Comercio Exterior y la orden que
+     * comparte contenedor son criterios ya aplicados (informativo); el
+     * sobrepago hay que ir a corregirlo a Comex (atencion); y sin la tabla de
+     * pagos se proyecta de mas sin que nadie lo decida (critico).
+     *
+     * @param array $filas Las de getProveedoresExterior()
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosExteriorConNivel($filas) {
+        $avisos = array_merge(
+            self::avisosValuacionConNivel($filas, $this->dolarFuturo()->ultimoMes(),
+                'PENDIENTE_USD'),
+            /* Sin el eje: ninguna vencida entra en ninguna columna. Se informa
+               IMPORTE_ARS -lo que valen-; IMPORTE_EJE daria "$ 0,00". */
+            self::avisosVencidosConNivel($filas, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_ARS',
+                'fecha estimada de pago'),
+            Aviso::lista(self::avisosPagados($filas, 'IMPORTE_PROYECTABLE', 'pago'), Aviso::INFO),
+            Aviso::lista(self::avisosSaldoComex($filas), Aviso::INFO),
+            Aviso::lista(self::avisosSobrepago($filas), Aviso::WARNING),
+            Aviso::lista(self::avisosGrupo($filas), Aviso::INFO)
+        );
 
-        if (!$this->tieneCotizEdit()) {
-            $avisos[] = 'La corrección manual de la cotización está apagada: falta la columna '
-                . 'COTIZ_USD_EDIT. Corré sql/cashflow_comex_cotiz_edit.sql contra la base '
-                . 'central y la columna se vuelve editable sola. Todo lo demás de esta pantalla '
-                . 'funciona igual: los pagos se valúan con la curva.';
+        if ($this->avisoSinPagosComex() !== '') {
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, $this->avisoSinPagosComex());
         }
 
         return $avisos;
+    }
+
+    /**
+     * Los avisos de la nacionalizacion, con nivel: los del tablero y de la
+     * pestana Crono Nacionalizacion. Mismo criterio que
+     * avisosExteriorConNivel().
+     *
+     * El campo del importe en dolares y el nombre de la fecha son los de esta
+     * pestana: con los de la otra, el aviso diria "U$S 0,00" y nombraria la
+     * fecha de pago.
+     *
+     * @param array $filas Las de getCronoNacionalizacion()
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosNacionalizacionConNivel($filas) {
+        return array_merge(
+            self::avisosValuacionConNivel($filas, $this->dolarFuturo()->ultimoMes(),
+                'IMPORTE_EST', 'fecha de nacionalización'),
+            self::avisosVencidosConNivel($filas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_ARS',
+                'fecha de nacionalización'),
+            Aviso::lista(self::avisosPagados($filas, 'IMPORTE_PROYECTABLE', 'nacionalización'),
+                Aviso::INFO),
+            self::avisosSinEstimacionConNivel($filas)
+        );
+    }
+
+    /**
+     * Un cero no dice si no hay contenedores o si los hay sin importe cargado.
+     *
+     * SE MIDE SOBRE EL IMPORTE DE ORIGEN Y NO SOBRE LA SERIE: la serie puede
+     * dar cero porque todos los contenedores estan vencidos, que es otra cosa
+     * completamente. Midiendo la serie, ese caso diria "ninguno tiene gastos
+     * cargados" sobre contenedores que si los tienen.
+     *
+     * Atencion: se arregla cargando la estimacion de gastos. Antes lo emitia
+     * solo el proveedor y terminaba en "Es lo mismo que muestra la pestana
+     * Crono Nacionalizacion", que no era cierto: la pestana no lo decia.
+     *
+     * @param array $filas
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public static function avisosSinEstimacionConNivel($filas) {
+        $filas = is_array($filas) ? $filas : [];
+        $total = 0.0;
+
+        foreach ($filas as $f) {
+            $total += isset($f['IMPORTE_EST']) ? floatval($f['IMPORTE_EST']) : 0.0;
+        }
+
+        if (count($filas) === 0 || $total != 0) {
+            return [];
+        }
+
+        return [Aviso::nuevo(Aviso::WARNING, 'Hay ' . count($filas) . ' contenedores en el '
+            . 'cronograma pero ninguno tiene gastos de nacionalización estimados cargados, así '
+            . 'que la fila va en cero.')];
+    }
+
+    /**
+     * Lo que apaga una edicion de la pestana Proveedores Exterior: solo de la
+     * pestana, porque el tablero no edita nada.
+     *
+     * LO QUE FALTA SE DICE, AUNQUE NO ROMPA NADA. Mismo criterio que
+     * ProveedoresCategorias::getAvisos(): una funcion que desaparece sin decir
+     * por que es indistinguible de una que no se construyo. Se avisan por
+     * separado porque cada uno apaga una cosa distinta.
+     *
+     * Atencion: un script que falta y solo apaga la edicion. La tabla de pagos
+     * de Comex -que cambia los numeros- no esta aca: es critica y la dice
+     * avisosExteriorConNivel(), igual que el tablero.
+     *
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosEdicionExteriorConNivel() {
+        $avisos = Aviso::lista(array_values(array_filter(
+            [$this->avisoSinHistorial(), $this->avisoSinPagado()])), Aviso::WARNING);
+
+        /* Sin curva no hay nada que corregir: el override pisa una cotizacion
+           que no se pudo leer. El aviso de la curva ya lo dice. */
+        if ($this->dolarFuturo()->disponible() && !$this->tieneCotizEdit()) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'La corrección manual de la cotización '
+                . 'está apagada: falta la columna COTIZ_USD_EDIT. Corré '
+                . 'sql/cashflow_comex_cotiz_edit.sql contra la base central y la columna se '
+                . 'vuelve editable sola. Todo lo demás de esta pantalla funciona igual: los pagos '
+                . 'se valúan con la curva.');
+        }
+
+        return $avisos;
+    }
+
+    /**
+     * Lo que apaga una edicion de la pestana Crono Nacionalizacion.
+     *
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosEdicionNacionalizacionConNivel() {
+        return Aviso::lista(array_values(array_filter(
+            [$this->avisoSinHistorial(), $this->avisoSinPagado()])), Aviso::WARNING);
     }
 
     /* ====================================================================
