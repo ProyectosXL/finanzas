@@ -55,7 +55,7 @@ Contra `central`, en este orden:
 | 2 | `sql/cashflow_comex_fecha_maestra.sql` | Crea `RO_T_CASHFLOW_COMEX_FECHA_EDIT` y **migra al maestro** las fechas que vivían en las columnas `EDIT` | **Las dos pestañas se leen igual** —las fechas salen del maestro, que siempre está— pero **no se pueden editar**, y las dos avisan qué script falta |
 | 3 | `sql/cashflow_comex_pagado.sql` | Crea `RO_T_CASHFLOW_COMEX_PAGADO`: qué pagos ya se hicieron, con su historial | Las dos pestañas se leen igual y **el tablero no cambia** —sin la tabla no hay nada marcado, así que proyecta todo lo pendiente—. La casilla se dibuja deshabilitada y las dos avisan qué script falta |
 | 4 | `sql/cashflow_comex_fecha_mov_desde.sql` | Siembra el parámetro `comex_fecha_mov_desde` (*Contenedores desde*) en 01/01/2025, en Parámetros › Compras Exterior. No pisa un valor ya cargado | **El corte se aplica igual**, con 01/01/2025, que el código tiene escrito. Lo único que no se puede es cambiarlo, y **sólo Parámetros** dice qué script falta: las pestañas no avisan nada |
-| 5 | `sql/cashflow_comex_nac_pago.sql` | Crea `RO_T_CASHFLOW_COMEX_NAC_PAGO` (los pagos parciales de la nacionalización) y `RO_T_CASHFLOW_COMEX_NAC_SALDO_FECHA` (la fecha del saldo, con historial) | **Crono funciona exactamente como hoy**: no hay botón *Pago parcial*, los contenedores con costos reales no se muestran, y la pestaña avisa qué script falta. El tablero no cambia |
+| 5 | `sql/cashflow_comex_nac_pago.sql` | Crea `RO_T_CASHFLOW_COMEX_NAC_PAGO` (los pagos parciales de la nacionalización) y `RO_T_CASHFLOW_COMEX_NAC_SALDO_FECHA` (la fecha del saldo, con historial) | **Crono funciona exactamente como hoy**: el tilde no ofrece el pago parcial, los contenedores con costos reales no se muestran, y la pestaña avisa qué script falta. El tablero no cambia |
 
 Los cinco son reejecutables y ninguno borra nada. El 3, el 4 y el 5 no dependen de ningún otro. En la instalación completa de `README-cashflow.md` el 4 es el 41 y el 5 el 42.
 
@@ -342,7 +342,7 @@ En los dos casos el universo (`..._TODO`) **no se movió**, el invariante cerró
 
 ### Cómo se usa
 
-- **El tilde actúa, no selecciona.** A diferencia del de Echeqs —donde el check elige filas y un botón confirma el lote con su motivo— acá cada clic guarda. La diferencia está en qué se afirma: allá es una decisión discutible que saca plata del disponible y necesita un motivo por escrito; acá es un hecho, *"este pago se hizo"*. Y se deshace con el mismo clic, que es lo que lo hace seguro.
+- **El tilde actúa, no selecciona.** A diferencia del de Echeqs —donde el check elige filas y un botón confirma el lote con su motivo— acá cada clic guarda. La diferencia está en qué se afirma: allá es una decisión discutible que saca plata del disponible y necesita un motivo por escrito; acá es un hecho, *"este pago se hizo"*. Y se deshace con el mismo clic, que es lo que lo hace seguro. **En Crono, desde la sección 13, tildar pregunta primero qué se pagó** —completa o una parte—; destildar sigue siendo un clic.
 - **La observación es opcional**, por lo mismo. Obligar a escribir algo terminaría en doscientas filas que dicen "pagado".
 - **Interruptor *Ver pagados*, apagado por defecto**, con el conteo al lado. Igual que el de vencidas y que el *Ver excluidos* de Echeqs.
 - **No hay bajas físicas.** Destildar marca `VIGENTE = 0` y sella `FECHA_BAJA`; volver a marcar inserta una fila nueva. Quién marcó y cuándo va en el `title` de la casilla.
@@ -882,7 +882,7 @@ En Comercio Exterior la estimación y los pagos son **del contenedor** y viven e
 - **El costo real es la copia de la principal**, o —si no tuviera, que no debería pasar— la de la OC del grupo con ID más chico. **Nunca la suma** (`Comex::copiaCostoReal()`).
 - **La estimación se lee de la principal.**
 - **Los pagos se graban contra la principal**, que resuelve el servidor a partir del ID de la fila, nunca el navegador. **Y se vuelve a resolver al leer**: si una OC que era principal cuando se cargó el pago pasa a ser hija de otra, el pago sigue apareciendo en la fila titular del contenedor. Ninguna consulta compara `ID_MG` contra la fila: pasan por el maestro (`Comex::pagosPorContenedor()` en PHP, `nacPagoApply()` en SQL).
-- **En la grilla**, una fila por OC: el costo, lo pagado, el saldo, la fecha del saldo, el botón y el historial van en la **fila titular** (`DUPLICA_GRUPO = 0`, el criterio de Proveedores Exterior). Las hijas muestran guiones y no suman.
+- **En la grilla**, una fila por OC: el costo, lo pagado, el saldo, la fecha del saldo, el pago parcial y el historial van en la **fila titular** (`DUPLICA_GRUPO = 0`, el criterio de Proveedores Exterior). Las hijas muestran guiones y no suman.
 
 Verificado contra la base el 20/10/2026: **no hay una sola OC hija** (0 de 408), así que en los 338 grupos con costos reales sumar por grupo o la copia de la principal da lo mismo, y las 114 estimaciones están en principales. La regla queda escrita y probada para el día que aparezca una.
 
@@ -900,18 +900,19 @@ Verificado contra la base el 20/10/2026: **no hay una sola OC hija** (0 de 408),
 - **La fecha del saldo se cambia sin cargar un pago nuevo**, con historial de quién y cuándo. Sólo con pagos vigentes: sin ninguno, el gasto entero va en la fecha de nacionalización, que se edita en su columna.
 - **Si la fecha del saldo vence**, el saldo se comporta como cualquier vencido: no suma, se avisa con los vencidos y se corrige cambiando la fecha.
 - **La validación manda en el servidor** (`Comex::validarPagoNac()`); el diálogo explica, muestra el saldo antes y después mientras se escribe, y bloquea el botón.
-- **Permisos**: los mismos que el tilde. Sin permiso de edición no se dibujan ni el botón ni la anulación.
+- **Permisos**: los mismos que el tilde. Sin permiso de edición el tilde no se puede tocar y no se dibuja la anulación: se ven lo pagado y el saldo.
 
 ### Cómo convive con el tilde
 
 - **El tilde sigue significando *pagado total*.** Tildar un contenedor con pagos parciales lo da por pagado entero: el saldo sale de la proyección. Destildar lo vuelve a proyectar.
-- Su tooltip lo dice: *"Usalo cuando la nacionalización se pagó completa. Si pagaste una parte y queda saldo, usá «Pago parcial»."* Sólo en Crono; en Proveedores Exterior el tilde queda como estaba.
+- **El tilde es la única entrada para registrar un pago.** Al tocarlo pregunta cómo se pagó: **Pagada completa** (el tilde de siempre) o **Fue un pago parcial** (abre el diálogo). Cancelar —o cerrar con la cruz, Escape o un clic afuera— no cambia nada: por eso es un diálogo propio de tres respuestas y no `Notificacion.confirmar()`, donde cerrar sería la negativa. Destildar vuelve a proyectar, como siempre. Hubo una primera versión con un botón *Pago parcial* aparte y el tilde sólo para el total; se cambió porque eran dos controles para el mismo hecho y elegir el correcto pedía leer los tooltips. Sólo en Crono; en Proveedores Exterior el tilde queda como estaba.
+- **La fecha del saldo se cambia con un click en su celda**, con el lápiz a la vista, igual que la de nacionalización. Sólo cuando hay pagos parciales: sin ellos es la de nacionalización, en gris, y se edita en su columna.
 
 ### Qué contenedores muestra Crono
 
 - **Sin costos reales**: como siempre, con su saldo.
 - **Con costos reales**, que antes se dejaban afuera: vuelven a la grilla **detrás de *Ver con costos reales***, apagado por defecto y con el conteo al lado. No suman —se toman como pagados, como siempre— y desde ahí se les puede registrar un pago parcial. **Si tienen un pago parcial vigente con saldo, suman ese saldo** en su fecha, y entonces **se ven siempre**: una fila que suma no puede estar escondida (`OCULTA_POR_COSTOS`, lo decide el servidor).
-- **Sin el script**, ninguno de los dos cambios: los contenedores con costos reales siguen afuera y el botón no se dibuja.
+- **Sin el script**, ninguno de los dos cambios: los contenedores con costos reales siguen afuera y el tilde no ofrece el pago parcial (lo dice la pregunta).
 
 ### Las series del tablero
 

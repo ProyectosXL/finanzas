@@ -387,13 +387,15 @@
 
             // El tilde de "ya se pagó". Es el otro pago del mismo contenedor:
             // marcar el del proveedor del exterior no dice nada de éste.
+            /* EL TILDE ES LA ÚNICA ENTRADA PARA REGISTRAR UN PAGO: al tocarlo
+               pregunta si se pagó completa o una parte (elegirPagoCronoNac()).
+               Se puede tocar si hay alguna de las dos cosas para ofrecer -el
+               tilde de pagado o el pago parcial-; la pregunta dice cuál falta.
+               Sólo acá: en Proveedores Exterior el tilde queda como está. */
             html += ComexFechas.celdaPagado(item, 'NAC', {
-                editable: !!datosCrono.pagado_editable,
-                alMarcar: 'marcarPagadoCronoNac',
-                /* EL TILDE ES EL PAGO TOTAL. Sólo acá: en Proveedores Exterior
-                   el tilde queda como está. */
-                tooltip: 'Usalo cuando la nacionalización se pagó completa. Si pagaste una '
-                    + 'parte y queda saldo, usá «Pago parcial».'
+                editable: !!datosCrono.pagado_editable || !!datosCrono.pago_parcial_editable,
+                alMarcar: 'elegirPagoCronoNac',
+                tooltip: 'Tocá para registrar el pago: te pregunta si se pagó completa o una parte.'
             });
 
             html += celdasPagoParcial(item, index);
@@ -738,16 +740,70 @@
     };
 
     /**
-     * Marca o desmarca la nacionalización de un contenedor como pagada.
+     * El tilde de Pagada: DESTILDAR vuelve a proyectar, como siempre; TILDAR
+     * pregunta qué se pagó.
      *
-     * SE RECARGA TODO: el tilde saca la fila de la proyección, así que cambian
-     * su columna del eje, el total, el contador del interruptor y los avisos.
+     *   - Pagada completa: el tilde de siempre (ComexFechas.marcarPagado()),
+     *     que saca la nacionalización entera de la proyección.
+     *   - Fue un pago parcial: abre el diálogo del pago parcial, y el tilde
+     *     queda sin marcar -lo que falta se sigue proyectando-.
+     *   - Cancelar, la cruz, Escape o clickear afuera: nada, el tilde vuelve a
+     *     como estaba.
+     *
+     * POR QUÉ UNA PREGUNTA Y NO DOS CONTROLES. Hasta acá había un tilde para el
+     * pago total y un botón aparte para el parcial, y elegir el correcto pedía
+     * leer los tooltips. Es el mismo hecho -"pagué la nacionalización"- y va
+     * por la misma puerta.
+     *
+     * SE RECARGA TODO después de guardar: cambian la columna del eje, el total,
+     * los contadores y los avisos.
      *
      * @param {HTMLElement} chk
      */
-    window.marcarPagadoCronoNac = function(chk) {
-        ComexFechas.marcarPagado(chk, cargarDatos);
+    window.elegirPagoCronoNac = function(chk) {
+        if (!chk.checked) {
+            if (datosCrono && datosCrono.pagado_editable) {
+                ComexFechas.marcarPagado(chk, cargarDatos);
+            } else {
+                chk.checked = true;
+            }
+
+            return;
+        }
+
+        // El tilde no queda marcado hasta que se elija "Pagada completa".
+        chk.checked = false;
+
+        var item = ((datosCrono && datosCrono.filas) || []).filter(function(f) {
+            return String(f.ID) === String(chk.dataset.id);
+        })[0];
+
+        if (!item) {
+            return;
+        }
+
+        tildePendiente = { chk: chk, item: item };
+
+        var total = !!datosCrono.pagado_editable;
+        var parcial = puedePagoParcial() && item.BASE_ARS !== null && !item.DUPLICA_GRUPO;
+
+        poner('tildeNacContenedor', (item.CONTENEDOR || '') + ' · OC ' + (item.ORDEN_COMPRA || '')
+            + ' · ' + (item.PROVEEDOR || ''));
+        document.getElementById('tildeNacTotal').disabled = !total;
+        document.getElementById('tildeNacParcial').disabled = !parcial;
+        poner('tildeNacTotalNo', total ? ''
+            : 'No disponible: falta sql/cashflow_comex_pagado.sql (ver el aviso de arriba).');
+        poner('tildeNacParcialNo', parcial ? '' : (item.DUPLICA_GRUPO
+            ? 'No disponible en esta fila: el pago parcial se registra en la fila de la OC principal del contenedor.'
+            : (item.BASE_ARS === null && datosCrono.pago_parcial_editable
+                ? 'No disponible: el contenedor no tiene costo estimado ni real, así que no hay contra qué calcular el saldo.'
+                : 'No disponible: falta sql/cashflow_comex_nac_pago.sql (ver el aviso de arriba).')));
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('modalTildeNac')).show();
     };
+
+    /** La fila cuyo tilde abrió la pregunta, mientras está abierta */
+    var tildePendiente = null;
 
     /**
      * Suma el importe en pesos de las filas que se están viendo.
@@ -912,11 +968,6 @@
                 + ' data-indice="' + index + '" title="Ver los pagos de este contenedor"></i>';
         }
 
-        if (puedePagoParcial() && item.BASE_ARS !== null) {
-            botones += ' <button type="button" class="btn btn-outline-primary btn-xs pago-nac-btn"'
-                + ' data-indice="' + index + '" title="Registrá una parte pagada; lo que falta '
-                + 'se sigue proyectando como saldo">Pago parcial</button>';
-        }
 
         var pagado = '<td class="currency" data-orden="' + (Number(item.NAC_PAGADO_ARS) || 0) + '">'
             + (item.NAC_CON_PARCIALES ? formatCurrency(item.NAC_PAGADO_ARS) : '')
@@ -937,17 +988,21 @@
                 + (item.SALDO_ARS === null ? '' : formatCurrency(item.SALDO_ARS)) + '</td>';
         }
 
+        /* LA FECHA DEL SALDO SE EDITA CON UN CLICK EN LA CELDA, igual que la
+           de nacionalización, y con el lápiz a la vista. Sólo con pagos
+           parciales: sin ellos es la de nacionalización -en gris- y se edita
+           en su columna. */
+        var editaFecha = item.NAC_CON_PARCIALES && puedePagoParcial() && !item.CUBIERTA_PARCIALES;
         var fechaSaldo = item.NAC_CON_PARCIALES
             ? (formatDate(item.FECHA_SALDO_EFECTIVA)
                 + (item.FECHA_SALDO_CARGADA ? '' : ' <small class="text-muted">(la de nac.)</small>')
-                + (puedePagoParcial() && !item.CUBIERTA_PARCIALES
-                    ? ' <i class="fas fa-pen-to-square text-primary ms-1 pago-nac-fecha" role="button"'
-                        + ' data-indice="' + index + '" title="Cambiar la fecha del saldo"></i>'
-                    : ''))
+                + (editaFecha ? ' <i class="fas fa-pen-to-square text-primary ms-1"></i>' : ''))
             : '<span class="text-muted">' + formatDate(item.FECHA_SALDO_EFECTIVA) + '</span>';
 
         return costo + pagado + saldo
-            + '<td class="center' + (item.NAC_CON_PARCIALES && item.VENCIDA_PENDIENTE ? ' text-danger' : '') + '"'
+            + '<td class="center' + (item.NAC_CON_PARCIALES && item.VENCIDA_PENDIENTE ? ' text-danger' : '')
+            + (editaFecha ? ' pago-nac-fecha' : '') + '"'
+            + (editaFecha ? ' data-indice="' + index + '" role="button" title="Click para cambiar la fecha del saldo"' : '')
             + ' data-orden="' + escaparAttrCrono(item.FECHA_SALDO_EFECTIVA || '') + '">' + fechaSaldo + '</td>';
     }
 
@@ -976,9 +1031,7 @@
             cuerpo.addEventListener('click', function(ev) {
                 var t = ev.target;
 
-                if (t.closest('.pago-nac-btn')) {
-                    abrirPagoNac(itemDe(t.closest('.pago-nac-btn')));
-                } else if (t.closest('.pago-nac-historial')) {
+                if (t.closest('.pago-nac-historial')) {
                     abrirPagosNac(itemDe(t.closest('.pago-nac-historial')));
                 } else if (t.closest('.pago-nac-fecha')) {
                     cambiarFechaSaldo(itemDe(t.closest('.pago-nac-fecha')));
@@ -995,6 +1048,39 @@
                 el.addEventListener('change', recalcularDialogo);
             }
         });
+
+        /* Las dos respuestas de la pregunta del tilde. Cerrar el diálogo de
+           cualquier otra forma no hace nada: el tilde ya volvió a su lugar. */
+        var botonTotal = document.getElementById('tildeNacTotal');
+        var botonParcial = document.getElementById('tildeNacParcial');
+        var modalTilde = document.getElementById('modalTildeNac');
+
+        if (botonTotal) {
+            botonTotal.addEventListener('click', function() {
+                var p = tildePendiente;
+
+                tildePendiente = null;
+                bootstrap.Modal.getOrCreateInstance(modalTilde).hide();
+
+                if (p) {
+                    p.chk.checked = true;
+                    ComexFechas.marcarPagado(p.chk, cargarDatos);
+                }
+            });
+        }
+
+        if (botonParcial) {
+            botonParcial.addEventListener('click', function() {
+                var p = tildePendiente;
+
+                tildePendiente = null;
+                bootstrap.Modal.getOrCreateInstance(modalTilde).hide();
+
+                if (p) {
+                    abrirPagoNac(p.item);
+                }
+            });
+        }
 
         var guardar = document.getElementById('pagoNacGuardar');
 

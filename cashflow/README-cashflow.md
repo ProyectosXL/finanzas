@@ -294,7 +294,7 @@ Cuatro cosas: cada pestaña con proveedor muestra los avisos que el tablero dice
 | # | Script | Qué hace | Si no se corre |
 | --- | --- | --- | --- |
 | 41 | `sql/cashflow_comex_fecha_mov_desde.sql` | Siembra el parámetro *Contenedores desde (fecha de movimiento)* en 01/01/2025, en Parámetros › Compras Exterior, sin pisar un valor cargado | El corte se aplica igual, con 01/01/2025; no se puede cambiar, y sólo Parámetros dice qué script falta |
-| 42 | `sql/cashflow_comex_nac_pago.sql` | Crea `RO_T_CASHFLOW_COMEX_NAC_PAGO` y `RO_T_CASHFLOW_COMEX_NAC_SALDO_FECHA`: los pagos parciales de la nacionalización y la fecha del saldo, con bajas lógicas y auditoría | Crono funciona como hoy: sin botón *Pago parcial*, sin los contenedores con costos reales, y avisa qué script falta |
+| 42 | `sql/cashflow_comex_nac_pago.sql` | Crea `RO_T_CASHFLOW_COMEX_NAC_PAGO` y `RO_T_CASHFLOW_COMEX_NAC_SALDO_FECHA`: los pagos parciales de la nacionalización y la fecha del saldo, con bajas lógicas y auditoría | Crono funciona como hoy: el tilde no ofrece el pago parcial, sin los contenedores con costos reales, y avisa qué script falta |
 
 **El 41 y el 42 no dependen de ninguno**; el 42 va después de `sql/cashflow_auditoria_usuario.sql`, como toda tabla nueva. Los avisos y las tarjetas no necesitan scripts.
 

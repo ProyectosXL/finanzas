@@ -535,23 +535,32 @@
                         </h6>
 
                         <div class="help-section mb-4">
-                            <h6 class="fw-bold mb-2">Si la pagaste completa: el tilde «Pagada»</h6>
+                            <h6 class="fw-bold mb-2">Todo empieza en el tilde «Pagada»</h6>
                             <p class="mb-0">
-                                Tildala y sale entera de la proyección. Si tenía pagos parciales, el
-                                tilde la da por pagada completa: el saldo también sale. Destildala y
-                                vuelve.
+                                Tocá el tilde de la fila y te pregunta cómo se pagó: <strong>Pagada
+                                completa</strong> o <strong>Fue un pago parcial</strong>. Cancelar, o
+                                cerrar la pregunta, no cambia nada.
                             </p>
                         </div>
 
                         <div class="help-section mb-4">
-                            <h6 class="fw-bold mb-2">Si pagaste una parte: «Pago parcial»</h6>
+                            <h6 class="fw-bold mb-2">Pagada completa</h6>
+                            <p class="mb-0">
+                                Sale entera de la proyección. Si tenía pagos parciales, la da por
+                                pagada completa: el saldo también sale. Destildala y vuelve.
+                            </p>
+                        </div>
+
+                        <div class="help-section mb-4">
+                            <h6 class="fw-bold mb-2">Fue un pago parcial</h6>
                             <p class="mb-2">
                                 Cargá lo que pagaste —en pesos, o en dólares con la cotización que
                                 usaste— y la fecha en la que esperás pagar lo que falta. Lo que falta
                                 se sigue proyectando como <strong>saldo</strong>, en esa fecha. Si la
                                 nacionalización ya venció, esa fecha es obligatoria. Podés cargar
-                                varios pagos, anular uno desde la lista de pagos y cambiar la fecha
-                                del saldo sin cargar un pago nuevo.
+                                varios pagos (tocando el tilde otra vez), verlos y anular uno desde
+                                el ícono de lista de la columna Pagado, y cambiar la fecha del saldo
+                                con un click en la columna <em>Fecha del saldo</em>.
                             </p>
                             <p class="mb-0">
                                 Si con los pagos llegás al costo, el contenedor queda «Pagado con
@@ -563,10 +572,11 @@
                             <h6 class="fw-bold mb-2">Un ejemplo</h6>
                             <p class="mb-0">
                                 Costo estimado: <strong>$ 10.000.000</strong>. El 15/10 pagaste
-                                <strong>$ 4.000.000</strong>: cargá un pago parcial con fecha del
-                                saldo 30/11 y el tablero proyecta <strong>$ 6.000.000 el 30/11</strong>.
-                                Si después pagás el resto, tildá «Pagada», o cargá el segundo pago:
-                                la fila queda «Pagado con pagos parciales».
+                                <strong>$ 4.000.000</strong>: tocá el tilde, elegí «Fue un pago
+                                parcial» y cargalo con fecha del saldo 30/11; el tablero proyecta
+                                <strong>$ 6.000.000 el 30/11</strong>. Si después pagás el resto,
+                                tocá el tilde y elegí «Pagada completa», o cargá el segundo pago: la
+                                fila queda «Pagado con pagos parciales».
                             </p>
                         </div>
 

@@ -333,16 +333,32 @@ $jsFechas = file_get_contents(__DIR__ . '/../Js/Comex-fechas.js');
 $tabCrono = file_get_contents(__DIR__ . '/../Tabs/crono_nacionalizacion.php');
 $ayuda = file_get_contents(__DIR__ . '/../Components/help_modal_comex.php');
 
-chequear('el tooltip "pagaste una parte" va en el tilde de NAC', true,
-    strpos($jsCrono, "tooltip: 'Usalo cuando la nacionalización se pagó completa. Si pagaste una '") !== false);
+/* EL TILDE ES LA ÚNICA ENTRADA: al tocarlo pregunta si se pago completa o una
+   parte. No hay un boton "Pago parcial" aparte. */
+chequear('el tilde de NAC abre la pregunta', true,
+    strpos($jsCrono, "alMarcar: 'elegirPagoCronoNac',") !== false
+    && strpos($jsCrono, 'window.elegirPagoCronoNac = function(chk) {') !== false);
+chequear('con sus tres respuestas: completa, parcial y cancelar', true,
+    strpos($tabCrono, 'id="tildeNacTotal"') !== false && strpos($tabCrono, 'id="tildeNacParcial"') !== false
+    && strpos($tabCrono, 'data-bs-dismiss="modal">Cancelar</button>') !== false);
+chequear('el tilde no queda marcado hasta elegir "Pagada completa"', true,
+    strpos($jsCrono, "// El tilde no queda marcado hasta que se elija \"Pagada completa\".\n        chk.checked = false;") !== false
+    || strpos(str_replace("\r\n", "\n", $jsCrono),
+        "// El tilde no queda marcado hasta que se elija \"Pagada completa\".\n        chk.checked = false;") !== false);
+chequear('"Fue un pago parcial" abre el dialogo del pago', true,
+    strpos($jsCrono, 'abrirPagoNac(p.item);') !== false);
+chequear('ya no hay un boton aparte', false, strpos($jsCrono, 'pago-nac-btn') !== false);
 chequear('y en Proveedores Exterior el tilde queda como esta', false,
-    strpos($jsExt, 'tooltip:') !== false);
-chequear('sin permiso de edicion no se dibuja el boton ni la anulacion', true,
+    strpos($jsExt, 'tooltip:') !== false || strpos($jsExt, 'elegirPagoCronoNac') !== false);
+chequear('sin permiso de edicion no se ofrece el parcial ni la anulacion', true,
     strpos($jsCrono, "Permisos.puedeEditar(document.querySelector('.tab-crono_nacionalizacion'))") !== false
-    && strpos($jsCrono, 'if (puedePagoParcial() && item.BASE_ARS !== null) {') !== false
+    && strpos($jsCrono, 'var parcial = puedePagoParcial() && item.BASE_ARS !== null && !item.DUPLICA_GRUPO;') !== false
     && strpos($jsCrono, '(vigente && edita') !== false);
-chequear('sin el script tampoco: el boton pide pago_parcial_editable', true,
+chequear('sin el script tampoco: el parcial pide pago_parcial_editable', true,
     strpos($jsCrono, "return !!(datosCrono && datosCrono.pago_parcial_editable)") !== false);
+chequear('la fecha del saldo se edita con un click en la celda, con el lapiz a la vista', true,
+    strpos($jsCrono, "(editaFecha ? ' pago-nac-fecha' : '')") !== false
+    && strpos($tabCrono, 'Con pagos parciales, click en la fecha para cambiarla.') !== false);
 foreach (['Costo ($)', 'Pagado ($)', 'Saldo ($)', 'Fecha del saldo'] as $col) {
     chequear('la tabla que se exporta tiene la columna ' . $col, true, strpos($tabCrono, $col) !== false);
 }

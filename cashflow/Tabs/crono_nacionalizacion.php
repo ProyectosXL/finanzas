@@ -217,7 +217,7 @@
                                 <th rowspan="2">
                                     Pagada
                                     <i class="fas fa-check-square ms-1" style="font-size: 10px;"
-                                       title="Usalo cuando la nacionalización se pagó completa. Si pagaste una parte y queda saldo, usá «Pago parcial»."></i>
+                                       title="Tocá el tilde para registrar un pago: te pregunta si se pagó completa o una parte."></i>
                                 </th>
                                 <!-- EL PAGO PARCIAL, en cuatro columnas. La base es
                                      en PESOS y es la de todo el contenedor: el
@@ -233,8 +233,8 @@
                                 <th rowspan="2">Saldo ($)</th>
                                 <th rowspan="2">
                                     Fecha del saldo
-                                    <i class="fas fa-info-circle ms-1" style="font-size: 10px;"
-                                       title="Cuándo se espera pagar lo que falta. Sin pagos parciales es la de nacionalización."></i>
+                                    <i class="fas fa-pen-to-square ms-1" style="font-size: 10px;"
+                                       title="Cuándo se espera pagar lo que falta. Con pagos parciales, click en la fecha para cambiarla. Sin pagos parciales es la de nacionalización, que se edita en su columna."></i>
                                 </th>
                                 <!-- Acá terminan las descriptivas. El resto de
                                      esta fila son los totales de cada columna
@@ -263,6 +263,49 @@
 </div>
 
 <!-- ================================================================
+     QUÉ SE PAGÓ: LA PREGUNTA DEL TILDE
+
+     El tilde de Pagada es la ÚNICA entrada para registrar un pago de la
+     nacionalización: al tocarlo pregunta si se pagó completa o una parte. Antes
+     eran dos controles -el tilde y un botón "Pago parcial"- para el mismo hecho,
+     y elegir el correcto pedía leer los tooltips.
+
+     TRES RESPUESTAS Y NO DOS, por eso no es Notificacion.confirmar(): cerrar con
+     la cruz, con Escape o clickeando afuera tiene que ser "no hice nada", y con
+     confirmar() eso sería la negativa, o sea una de las dos opciones. Acá cerrar
+     es Cancelar y el tilde vuelve a como estaba.
+     ================================================================ -->
+<div class="modal fade" id="modalTildeNac" tabindex="-1" aria-labelledby="modalTildeNacTitulo" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTildeNacTitulo">Registrar el pago de la nacionalización</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <div class="small text-muted mb-3" id="tildeNacContenedor"></div>
+                <p class="mb-3">¿Cómo se pagó?</p>
+                <div class="d-grid gap-2">
+                    <button type="button" class="btn btn-outline-success text-start" id="tildeNacTotal">
+                        <strong><i class="fas fa-check-double me-2"></i>Pagada completa</strong><br>
+                        <small>Sale entera de la proyección. Se deshace destildando.</small>
+                    </button>
+                    <div class="small text-muted" id="tildeNacTotalNo"></div>
+                    <button type="button" class="btn btn-outline-primary text-start" id="tildeNacParcial">
+                        <strong><i class="fas fa-coins me-2"></i>Fue un pago parcial</strong><br>
+                        <small>Registrás lo que pagaste; lo que falta se sigue proyectando como saldo.</small>
+                    </button>
+                    <div class="small text-muted" id="tildeNacParcialNo"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ================================================================
      EL PAGO PARCIAL DE LA NACIONALIZACIÓN
 
      Un modal y no Notificacion.pedirTexto(): son varios campos que dependen
@@ -282,8 +325,8 @@
             <div class="modal-body">
                 <p class="small mb-2">
                     Registrá lo que pagaste. Lo que falta se sigue proyectando como saldo en la
-                    fecha que indiques. <strong>Si pagaste todo, cerrá este diálogo y usá el tilde
-                    «Pagado».</strong>
+                    fecha que indiques. <strong>Si en realidad la pagaste completa, cerrá este
+                    diálogo, tocá el tilde otra vez y elegí «Pagada completa».</strong>
                 </p>
                 <div class="small text-muted mb-3" id="pagoNacContenedor"></div>
 
