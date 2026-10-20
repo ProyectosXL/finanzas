@@ -33,8 +33,6 @@ $edita = AuthCashflow::puedeEditar('saldos');
 -->
 <div class="tab-saldos"<?php echo AuthCashflow::atributoEdicion('saldos'); ?>>
 
-    <div id="avisosSaldos"></div>
-
     <ul class="nav nav-tabs mb-3" id="saldosTabs" role="tablist">
         <li class="nav-item" role="presentation">
             <button class="nav-link active" id="tabSaldosBtn" data-bs-toggle="tab"
@@ -62,6 +60,11 @@ $edita = AuthCashflow::puedeEditar('saldos');
          PESTAÑA 1 — SALDOS
          ============================================================ -->
     <div class="tab-pane fade show active" id="paneSaldos" role="tabpanel">
+
+        <!-- Un panel de avisos por sub-pestaña: los propios de esta vista y los
+             que el tablero dice de su sección (Saldo Inicial). Ver
+             Js/avisos-panel.js, SUB_DE_SECCION. -->
+        <div id="avisosSaldos"></div>
 
         <div class="row g-3 mb-4">
             <div class="col-md-6 col-lg-3">
@@ -281,6 +284,9 @@ $edita = AuthCashflow::puedeEditar('saldos');
          ============================================================ -->
     <div class="tab-pane fade" id="paneLocales" role="tabpanel">
 
+        <!-- Los de esta vista y los del tablero de la sección Caja Locales. -->
+        <div id="avisosSaldosLocales"></div>
+
         <div class="row g-3 mb-4">
             <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
@@ -413,6 +419,9 @@ $edita = AuthCashflow::puedeEditar('saldos');
          PESTAÑA 3 — FONDOS (inversión y cuenta comitente)
          ============================================================ -->
     <div class="tab-pane fade" id="paneFondos" role="tabpanel">
+
+        <!-- Los de esta vista y los del tablero de Inversión y Cuenta comitente. -->
+        <div id="avisosSaldosFondos"></div>
 
         <!-- Un KPI por clase y moneda. Los importes NO se convierten: un fondo
              en pesos y otro en dólares se muestran cada uno en la suya, igual

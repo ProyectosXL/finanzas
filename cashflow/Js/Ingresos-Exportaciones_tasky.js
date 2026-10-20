@@ -79,6 +79,10 @@
     function cargarDatos() {
         mostrarCargando(true);
 
+        // Lo que el tablero dice de esta pestaña, en paralelo con los datos:
+        // la grilla no lo espera. Ver Js/avisos-panel.js.
+        AvisosPanel.pedirTablero('exportaciones_tasky');
+
         fetch('Controller/IngresosController.php?action=getExportacionesTasky')
             .then(function(response) {
                 if (!response.ok) throw new Error('Error HTTP: ' + response.status);
@@ -110,8 +114,10 @@
      * que se pintan arriba de la tabla y no como notificación.
      */
     function pintarAvisos() {
-        // El panel plegable de todas las pestañas: ver Js/avisos-panel.js.
-        AvisosPanel.pintar('avisosExpTasky', (datos && datos.warnings) || []);
+        // Con los que el tablero dice de esta pestaña, sin repetidos: ver
+        // Js/avisos-panel.js.
+        AvisosPanel.pintarPestana('avisosExpTasky', (datos && datos.warnings) || [],
+            { tab: 'exportaciones_tasky' });
     }
 
     function generarTabla() {

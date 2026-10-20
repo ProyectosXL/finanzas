@@ -497,6 +497,20 @@ class EjeVista {
     }
 
     /**
+     * Como terminan los dos avisos de descarte de la grilla.
+     *
+     * SON CONSTANTES PORQUE LOS RECONOCE EL PANEL DE AVISOS. Cuando llegan los
+     * avisos del tablero de una pestana, el tablero ya dice lo mismo de su
+     * fila -"Fila: $ X con fecha fuera del horizonte proyectado no se muestran
+     * en el tablero."- y la pestana esconde su version para no decirlo dos
+     * veces con otras palabras (AvisosPanel.esDescarteDelEje()). El JS tiene
+     * los mismos dos textos y tests/test_avisos_pestana.php fija que no se
+     * separen.
+     */
+    const FIN_FUERA_HORIZONTE = ' con fecha fuera del horizonte no se muestran en la tabla.';
+    const FIN_SIN_FECHA = ' sin fecha asignada no se pueden ubicar en el tiempo y quedan fuera de la tabla.';
+
+    /**
      * Avisos de lo que no entro en la pantalla. Se informa SIEMPRE.
      *
      * @param array $descartes
@@ -506,13 +520,11 @@ class EjeVista {
         $avisos = [];
 
         if (!empty($descartes['fuera_horizonte'])) {
-            $avisos[] = self::plata($descartes['fuera_horizonte'])
-                . ' con fecha fuera del horizonte no se muestran en la tabla.';
+            $avisos[] = self::plata($descartes['fuera_horizonte']) . self::FIN_FUERA_HORIZONTE;
         }
 
         if (!empty($descartes['sin_fecha'])) {
-            $avisos[] = self::plata($descartes['sin_fecha'])
-                . ' sin fecha asignada no se pueden ubicar en el tiempo y quedan fuera de la tabla.';
+            $avisos[] = self::plata($descartes['sin_fecha']) . self::FIN_SIN_FECHA;
         }
 
         return $avisos;

@@ -55,11 +55,15 @@
         mostrar('logTableWrapper', false);
         mostrar('summaryLogistica', false);
 
+        // Lo que el tablero dice de esta pestaña, en paralelo con los datos:
+        // la grilla no lo espera. Ver Js/avisos-panel.js.
+        AvisosPanel.pedirTablero('logistica_local');
+
         pedir(ENDPOINT + '?action=getPlanilla')
             .then(function(d) {
                 datos = d.data;
 
-                avisar(datos.avisos || []);
+                avisar(datos.avisos || [], true);
                 vistas.usar(datos.eje);
                 pintarCrono();
                 pintarResumen();
@@ -524,9 +528,17 @@
      * El panel plegable de todas las pestañas (Js/avisos-panel.js). Los textos
      * sueltos cuentan como atención; un error de carga llega como
      * {nivel: 'danger'} y abre el panel solo.
+     *
+     * Los de la planilla van con los que el tablero dice de esta pestaña, sin
+     * repetidos (conTablero); un error de carga va solo, para que la llegada
+     * de los del tablero no lo pise.
      */
-    function avisar(lista) {
-        AvisosPanel.pintar('avisosLogistica', lista || []);
+    function avisar(lista, conTablero) {
+        if (conTablero) {
+            AvisosPanel.pintarPestana('avisosLogistica', lista || [], { tab: 'logistica_local' });
+        } else {
+            AvisosPanel.pintar('avisosLogistica', lista || []);
+        }
     }
 
     function importe(v) {

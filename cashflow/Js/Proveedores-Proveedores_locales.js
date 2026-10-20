@@ -208,6 +208,10 @@
         Cargando.mostrar('loadingProv');
         mostrar('wrapperProv', false);
 
+        // Lo que el tablero dice de esta pestaña, en paralelo con los datos:
+        // la grilla no lo espera. Ver Js/avisos-panel.js.
+        AvisosPanel.pedirTablero('proveedores_locales');
+
         pedirJson('Controller/ProveedoresController.php?action=getPendientes')
             .then(function(data) {
                 datos = data;
@@ -227,8 +231,12 @@
                 podarSeleccion();
 
                 /* Con su nivel cuando el backend lo manda: "falta la tabla
-                   de fechas" es crítico y abre el panel solo. */
-                pintarAvisos(datos.avisos_con_nivel || datos.warnings, 'avisosProv');
+                   de fechas" es crítico y abre el panel solo. Y con los que el
+                   tablero dice de esta pestaña: UN SOLO PANEL sobre las tres
+                   vistas, porque Importar y Maestro son herramientas, no otra
+                   vista de los mismos datos. */
+                AvisosPanel.pintarPestana('avisosProv',
+                    datos.avisos_con_nivel || datos.warnings || [], { tab: 'proveedores_locales' });
                 // Los indicadores los pinta pintarGrilla(): se miden sobre las
                 // filas visibles, así que cambian con cada filtro.
                 pintarGrilla();

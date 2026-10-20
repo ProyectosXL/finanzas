@@ -132,7 +132,11 @@
      */
     function cargarDatos() {
         mostrarCargando(true);
-        
+
+        // Lo que el tablero dice de esta pestaña, en paralelo con los datos:
+        // la grilla no lo espera. Ver Js/avisos-panel.js.
+        AvisosPanel.pedirTablero('crono_nacionalizacion');
+
         fetch('Controller/ComexController.php?action=getCronoNacionalizacion')
             .then(response => {
                 if (!response.ok) {
@@ -212,12 +216,13 @@
     }
 
     /**
-     * Los avisos del backend: lo que quedó fuera del horizonte o sin fecha.
-     * Antes se descartaba en silencio.
+     * Los avisos de la pestaña -con nivel, los mismos que emite el tablero más
+     * los que apagan una edición- junto con los que el tablero dice de ella,
+     * que llegan después. Sin repetidos: ver AvisosPanel.combinar().
      */
     function pintarAvisos() {
-        // El panel plegable de todas las pestañas: ver Js/avisos-panel.js.
-        AvisosPanel.pintar('avisosCronoNac', (datosCrono && datosCrono.warnings) || []);
+        AvisosPanel.pintarPestana('avisosCronoNac',
+            (datosCrono && datosCrono.warnings) || [], { tab: 'crono_nacionalizacion' });
     }
 
     /**

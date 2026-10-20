@@ -380,3 +380,105 @@ chequear('la curva caida, con el mismo texto en las cuatro llamadas', 4,
     substr_count($srcComexCtl . $srcComexProv, '->avisoSinCurva('));
 chequear('y la pestana ya no arma su lista con las funciones sueltas', 0,
     preg_match_all('/Comex::avisos(Saldo|Sobrepago|Grupo|Valuacion|Vencidos)/', $srcComexCtl));
+
+/* ================================================================
+   Cada pestana pide sus avisos al tablero
+   ================================================================ */
+seccion('cableado: cada pestana con proveedor pide sus avisos al tablero');
+
+require_once __DIR__ . '/../Class/EjeVista.php';
+require_once __DIR__ . '/../Class/Fondos.php';
+require_once __DIR__ . '/../Class/Providers/SaldosProvider.php';
+
+$jsDePestana = [
+    'ventas' => 'Ingresos-Ventas.js',
+    'cobranzas_fr' => 'Ingresos-Cobranzas_fr.js',
+    'cobranzas_may' => 'Ingresos-Cobranzas_may.js',
+    'proveedores_exterior' => 'Comex-Proveedores_exterior.js',
+    'crono_nacionalizacion' => 'Comex-Crono_nacionalizacion.js',
+    'compras_proyectadas' => 'Compras-Proyectadas.js',
+    'logistica_local' => 'Logistica-Local.js',
+    'saldos' => 'Saldos.js',
+    'cob_electronicos' => 'Cob-Electronicos.js',
+    'echeqs' => 'Ingresos-Echeqs.js',
+    'proveedores_locales' => 'Proveedores-Proveedores_locales.js',
+    'pagos_tarjetas' => 'Financiero-Pagos_tarjetas.js',
+    'exportaciones_tasky' => 'Ingresos-Exportaciones_tasky.js'
+];
+
+chequear('el mapa cubre las trece pestanas del registro', CashflowRegistry::tabsConProveedor(),
+    array_values(array_intersect(CashflowRegistry::tabsConProveedor(), array_keys($jsDePestana))));
+
+foreach ($jsDePestana as $tabJs => $archivoJs) {
+    $src = file_get_contents(__DIR__ . '/../Js/' . $archivoJs);
+
+    chequear($tabJs . ': pide sus avisos al tablero', true,
+        strpos($src, "AvisosPanel.pedirTablero('" . $tabJs . "');") !== false);
+    chequear($tabJs . ': y los pinta con los suyos', true,
+        strpos($src, "{ tab: '" . $tabJs . "'") !== false
+        && strpos($src, 'AvisosPanel.pintarPestana(') !== false);
+}
+
+$ventasJs = file_get_contents(__DIR__ . '/../Js/Ingresos-Ventas.js');
+chequear('Ventas ya no tiene su propio bloque de avisos', false,
+    strpos($ventasJs, 'function pintarWarnings(') !== false);
+chequear('y usa el panel en sus dos contenedores', true,
+    strpos($ventasJs, "AvisosPanel.pintar('warningsVentaAnual'") !== false
+    && strpos($ventasJs, "AvisosPanel.pintarPestana('warningsProyeccion'") !== false);
+chequear('el cartel del tramo estimado sigue fijo', true,
+    strpos(file_get_contents(__DIR__ . '/../Tabs/ventas.php'), 'id="avisoTramoEstimado" class="alert') !== false);
+
+seccion('un panel por sub-pestana, adentro de su sub-pestana');
+
+$panelEn = [
+    'saldos.php' => ['avisosSaldos' => 'paneSaldos', 'avisosSaldosLocales' => 'paneLocales',
+                     'avisosSaldosFondos' => 'paneFondos'],
+    'pagos_tarjetas.php' => ['avisosTarjSup' => 'paneSup', 'avisosTarjCorp' => 'paneCorp',
+                             'avisosTarjSoc' => 'paneSoc'],
+    'echeqs.php' => ['avisosEcheqs' => 'paneCartera', 'avisosEcheqsPre' => 'panePrechequeado']
+];
+
+foreach ($panelEn as $archivoTab => $paneles) {
+    $html = file_get_contents(__DIR__ . '/../Tabs/' . $archivoTab);
+    $panes = array_values($paneles);
+
+    foreach ($paneles as $idPanel => $pane) {
+        $pPanel = strpos($html, 'id="' . $idPanel . '"');
+        $pPane = strpos($html, 'id="' . $pane . '"');
+        $i = array_search($pane, $panes, true);
+        $pSiguiente = isset($panes[$i + 1]) ? strpos($html, 'id="' . $panes[$i + 1] . '"') : PHP_INT_MAX;
+
+        chequear($archivoTab . ': #' . $idPanel . ' esta adentro de #' . $pane, true,
+            $pPanel !== false && $pPane !== false && $pPanel > $pPane && $pPanel < $pSiguiente);
+    }
+}
+
+seccion('las secciones del mapa son las de los proveedores');
+
+$panelJs = file_get_contents(__DIR__ . '/../Js/avisos-panel.js');
+
+/* El JS escribe la tilde como ó para que cscript la lea igual que el
+   navegador; se compara contra el texto ya decodificado. */
+$claveJs = function ($texto) {
+    return "'" . str_replace('ó', '\u00f3', $texto) . "': ";
+};
+
+foreach ([
+    [SaldosProvider::SECCION_SALDO, 'saldos'], [SaldosProvider::SECCION_LOCALES, 'locales'],
+    [Fondos::CLASES['INVERSION'], 'fondos'], [Fondos::CLASES['COMITENTE'], 'fondos']
+] as $par) {
+    chequear('Saldos: "' . $par[0] . '" va a ' . $par[1], true,
+        strpos($panelJs, $claveJs($par[0]) . "'" . $par[1] . "'") !== false);
+}
+
+$tarjProvSrc = file_get_contents(__DIR__ . '/../Class/Providers/TarjetasProvider.php');
+
+foreach ([['Supervisoras', 'sup'], ['Corporativas', 'corp'], ['Socios', 'soc']] as $par) {
+    chequear('Tarjetas: "' . $par[0] . '" es una seccion del proveedor y va a ' . $par[1], true,
+        strpos($tarjProvSrc, "'" . $par[0] . "'),") !== false
+        && strpos($panelJs, "'" . $par[0] . "': '" . $par[1] . "'") !== false);
+}
+
+chequear('los descartes de la grilla que el panel reconoce son los de EjeVista', true,
+    strpos($panelJs, "'" . EjeVista::FIN_FUERA_HORIZONTE . "'") !== false
+    && strpos($panelJs, "'" . EjeVista::FIN_SIN_FECHA . "'") !== false);

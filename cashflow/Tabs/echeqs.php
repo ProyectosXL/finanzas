@@ -40,8 +40,6 @@ $edita = AuthCashflow::puedeEditar('echeqs');
 -->
 <div class="tab-echeqs"<?php echo AuthCashflow::atributoEdicion('echeqs'); ?>>
 
-    <div id="avisosEcheqs"></div>
-
     <ul class="nav nav-tabs mb-3" id="echeqsTabs" role="tablist">
         <li class="nav-item" role="presentation">
             <button class="nav-link active" id="tabCarteraBtn" data-bs-toggle="tab"
@@ -63,6 +61,11 @@ $edita = AuthCashflow::puedeEditar('echeqs');
          SUB-PESTAÑA 1 — CHEQUES EN CARTERA
          ============================================================ -->
     <div class="tab-pane fade show active" id="paneCartera" role="tabpanel">
+
+        <!-- Un panel de avisos por sub-pestaña: los de esta vista y los que el
+             tablero dice de Echeqs, que no tienen sección y van a las dos. Ver
+             Js/avisos-panel.js. -->
+        <div id="avisosEcheqs"></div>
 
         <!-- Las tres tarjetas miden los tres períodos de las tres vistas, así
              que cada una se corresponde con un botón. El rótulo lo escribe el JS
@@ -361,6 +364,8 @@ $edita = AuthCashflow::puedeEditar('echeqs');
          SUB-PESTAÑA 2 — VENTA COBRADA ANTICIPADA
          ============================================================ -->
     <div class="tab-pane fade" id="panePrechequeado" role="tabpanel">
+
+        <div id="avisosEcheqsPre"></div>
 
         <div class="alert alert-info d-flex align-items-start gap-2 py-2 px-3 mb-3">
             <i class="fas fa-circle-info mt-1"></i>

@@ -909,7 +909,7 @@ chequear('y el detalle aclara que es de Mercado Pago, otros y bancos manuales',
    quede una copia propia del dibujo. */
 chequear('los avisos van al panel con su nivel', true,
     ibContiene($jsSalT, "var conNivel = (datosSaldos && datosSaldos.avisos_con_nivel) ||")
-    && ibContiene($jsSalT, "AvisosPanel.pintar('avisosSaldos', conNivel"));
+    && ibContiene($jsSalT, "AvisosPanel.pintarPestana('avisosSaldos', conNivel,"));
 chequear('sin un dibujo propio de los avisos', false, ibContiene($jsSalT, 'bloqueAvisos('));
 chequear('una cuenta de Interbanking sin dato se ve con guion, no "sin cargar"', true,
     ibContiene($jsSalT, "(esInterbanking(f) ? '—' : 'sin cargar')"));

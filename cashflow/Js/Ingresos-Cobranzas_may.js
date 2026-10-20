@@ -255,6 +255,10 @@
             + '&desde=' + encodeURIComponent(f.desde)
             + '&hasta=' + encodeURIComponent(f.hasta);
 
+        // Lo que el tablero dice de esta pestaña, en paralelo con los datos:
+        // la grilla no lo espera. Ver Js/avisos-panel.js.
+        AvisosPanel.pedirTablero('cobranzas_may');
+
         fetch(url)
             .then(response => {
                 if (!response.ok) throw new Error('Error HTTP: ' + response.status);
@@ -287,11 +291,13 @@
     }
 
     /**
-     * Los avisos del backend: lo que quedó fuera del horizonte o sin fecha.
+     * Los avisos del backend -lo que quedó fuera del horizonte o sin fecha, las
+     * vencidas- junto con los que el tablero dice de esta pestaña, sin
+     * repetidos. Ver Js/avisos-panel.js.
      */
     function pintarAvisos() {
-        // El panel plegable de todas las pestañas: ver Js/avisos-panel.js.
-        AvisosPanel.pintar('avisosCobMay', (datosCobranzas && datosCobranzas.warnings) || []);
+        AvisosPanel.pintarPestana('avisosCobMay', (datosCobranzas && datosCobranzas.warnings) || [],
+            { tab: 'cobranzas_may' });
     }
 
     function generarTabla() {

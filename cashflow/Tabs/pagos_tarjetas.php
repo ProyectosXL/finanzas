@@ -42,6 +42,9 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
 -->
 <div class="tab-pagos_tarjetas"<?php echo AuthCashflow::atributoEdicion('pagos_tarjetas'); ?>>
 
+    <!-- Sólo la falla al cargar: los avisos de los datos van en el panel de
+         cada sub-pestaña, que está adentro de wrapperTarj y no se ve si la
+         carga falló. -->
     <div id="avisosTarj"></div>
 
     <!-- El lugar del indicador va EN UNA LINEA, con su id y su texto: es la forma
@@ -98,6 +101,10 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
              1 — GASTOS SUPERVISORAS
              ============================================================ -->
         <div class="tab-pane fade show active" id="paneSup" role="tabpanel">
+
+            <!-- Un panel de avisos por sub-pestaña: los de esta parte y los que
+                 el tablero dice de su sección. Ver Js/avisos-panel.js. -->
+            <div id="avisosTarjSup"></div>
 
             <div class="row g-3 mb-3">
                 <div class="col-md-6 col-lg-3">
@@ -270,6 +277,8 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
              2 — TARJETAS PAGOS CORPORATIVOS
              ============================================================ -->
         <div class="tab-pane fade" id="paneCorp" role="tabpanel">
+
+            <div id="avisosTarjCorp"></div>
 
             <div class="row g-3 mb-3">
                 <div class="col-md-6 col-lg-3">
@@ -621,6 +630,8 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
              3 — TARJETAS SOCIOS
              ============================================================ -->
         <div class="tab-pane fade" id="paneSoc" role="tabpanel">
+
+            <div id="avisosTarjSoc"></div>
 
             <div class="row g-3 mb-3">
                 <div class="col-md-6 col-lg-4">

@@ -83,6 +83,10 @@
         Cargando.mostrar('loadingCobel');
         mostrar('wrapperCobel', false);
 
+        // Lo que el tablero dice de esta pestaña, en paralelo con los datos:
+        // la grilla no lo espera. Ver Js/avisos-panel.js.
+        AvisosPanel.pedirTablero('cob_electronicos');
+
         pedirJson(URL_COBEL + '?action=getPestana' + queryFiltros())
             .then(function(data) {
                 datos = data;
@@ -1026,8 +1030,10 @@
      * el que muestra el tablero.
      */
     function pintarAvisos() {
-        // El panel plegable de todas las pestañas: ver Js/avisos-panel.js.
-        AvisosPanel.pintar('avisosCobel', (datos && datos.avisos) || []);
+        // Con los que el tablero dice de esta pestaña, sin repetidos: ver
+        // Js/avisos-panel.js.
+        AvisosPanel.pintarPestana('avisosCobel', (datos && datos.avisos) || [],
+            { tab: 'cob_electronicos' });
     }
 
     /**

@@ -328,6 +328,10 @@
             + '&desde=' + encodeURIComponent(f.desde)
             + '&hasta=' + encodeURIComponent(f.hasta);
 
+        // Lo que el tablero dice de esta pestaña, en paralelo con los datos:
+        // la grilla no lo espera. Ver Js/avisos-panel.js.
+        AvisosPanel.pedirTablero('cobranzas_fr');
+
         fetch(url)
             .then(response => {
                 if (!response.ok) throw new Error('Error HTTP: ' + response.status);
@@ -374,9 +378,11 @@
      * nivel, y van al final de su nivel, después de los del eje.
      */
     function pintarAvisos() {
-        AvisosPanel.pintar('avisosCob',
+        // Con los que el tablero dice de esta pestaña, sin repetidos.
+        AvisosPanel.pintarPestana('avisosCob',
             ((datosCobranzas && datosCobranzas.warnings) || [])
-                .concat((datosCobranzas && datosCobranzas.avisos_universo) || []));
+                .concat((datosCobranzas && datosCobranzas.avisos_universo) || []),
+            { tab: 'cobranzas_fr' });
     }
 
     /* ================================================================
