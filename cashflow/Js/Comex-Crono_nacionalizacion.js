@@ -91,6 +91,14 @@
             verPagados.addEventListener('change', filtrarTabla);
         }
 
+        var verCostos = document.getElementById('verCostosCronoNac');
+
+        if (verCostos) {
+            verCostos.addEventListener('change', filtrarTabla);
+        }
+
+        conectarDialogoPago();
+
         vistas = crearEjeVistas({
             botones: 'vistasCronoNac',
             periodo: 'periodoCronoNac',
@@ -307,12 +315,21 @@
 
             // VENCIDA_PENDIENTE: una vencida ya pagada no es una fecha a
             // corregir. Ver Comex::vencidaPendiente().
+            /* PAGADA ES EL TILDE O LOS PAGOS PARCIALES QUE CUBREN LA BASE: las
+               dos salieron de la proyección y las esconde el mismo interruptor.
+               data-costos es lo que mira "Ver con costos reales", y lo decide el
+               servidor: una fila con costos reales que suma no lo trae. */
+            var pagada = ComexFechas.esPagada(item);
+
             if (item.VENCIDA_PENDIENTE) { clases.push('fila-vencida'); }
-            if (item.PAGADO) { clases.push('fila-pagada'); }
+            if (pagada) { clases.push('fila-pagada'); }
+            if (item.OCULTA_POR_COSTOS) { clases.push('fila-costos-reales'); }
 
             html += '<tr data-buscar="' + escaparAttrCrono(textoBuscable(item)) + '"'
+                + ' data-indice="' + index + '"'
                 + (item.VENCIDA_PENDIENTE ? ' data-vencida="1"' : '')
-                + (item.PAGADO ? ' data-pagado="1"' : '')
+                + (pagada ? ' data-pagado="1"' : '')
+                + (item.OCULTA_POR_COSTOS ? ' data-costos="1"' : '')
                 + (clases.length ? (' class="' + clases.join(' ') + '"') : '') + '>';
 
             // Columnas fijas
@@ -364,8 +381,14 @@
             // marcar el del proveedor del exterior no dice nada de éste.
             html += ComexFechas.celdaPagado(item, 'NAC', {
                 editable: !!datosCrono.pagado_editable,
-                alMarcar: 'marcarPagadoCronoNac'
+                alMarcar: 'marcarPagadoCronoNac',
+                /* EL TILDE ES EL PAGO TOTAL. Sólo acá: en Proveedores Exterior
+                   el tilde queda como está. */
+                tooltip: 'Usalo cuando la nacionalización se pagó completa. Si pagaste una '
+                    + 'parte y queda saldo, usá «Pago parcial».'
             });
+
+            html += celdasPagoParcial(item, index);
 
 
             // Los importes por columna ya vienen resueltos: la regla de "día O
@@ -411,18 +434,61 @@
      */
     function filtrarTabla() {
         ComexFechas.filtrar('busquedaCronoNac', 'tableBody',
-            'verVencidasCronoNac', 'verPagadosCronoNac');
+            'verVencidasCronoNac', 'verPagadosCronoNac', idSwitchCostos());
 
         generarFilaTotales();
         pintarEstadoVencidas();
         pintarEstadoPagados();
+        pintarEstadoCostos();
+    }
+
+    /**
+     * El interruptor de costos reales, sólo si la pantalla lo muestra: sin
+     * sql/cashflow_comex_nac_pago.sql esos contenedores no vienen, el
+     * interruptor no se dibuja y no tiene que esconder nada.
+     */
+    function idSwitchCostos() {
+        return (datosCrono && datosCrono.pago_parcial_editable) ? 'verCostosCronoNac' : null;
     }
 
     /** Los items que el buscador y los interruptores dejan ver, o null si no hay filtro */
     function filasVisibles() {
         return ComexFechas.visibles('busquedaCronoNac',
             (datosCrono && datosCrono.filas) || [],
-            'verVencidasCronoNac', 'verPagadosCronoNac');
+            'verVencidasCronoNac', 'verPagadosCronoNac', idSwitchCostos());
+    }
+
+    /**
+     * Cuántas filas esconde "Ver con costos reales", al lado del interruptor.
+     *
+     * SE DICE SIEMPRE, como en los otros dos. Esconderlas no cambia ningún
+     * número: son contenedores con costos reales que no suman. Los que sí
+     * suman -con un pago parcial y saldo- no se esconden y no se cuentan.
+     */
+    function pintarEstadoCostos() {
+        var caja = document.getElementById('switchCostosCronoNac');
+        var el = document.getElementById('estadoCostosCronoNac');
+
+        if (caja) {
+            caja.style.display = (datosCrono && datosCrono.pago_parcial_editable) ? '' : 'none';
+        }
+
+        if (!el) {
+            return;
+        }
+
+        var n = ComexFechas.contarCostos((datosCrono && datosCrono.filas) || []);
+        var viendo = ComexFechas.prendido('verCostosCronoNac');
+
+        el.textContent = (n === 0)
+            ? 'ninguno'
+            : (viendo
+                ? (n === 1 ? 'se ve 1' : ('se ven los ' + n))
+                : (n + ' escondido' + (n === 1 ? '' : 's')));
+
+        el.title = 'Contenedores a los que Comercio Exterior ya les cargó los costos reales de '
+            + 'nacionalización: se toman como pagados y no suman. Prendé el interruptor para '
+            + 'registrarles un pago parcial; el que tenga saldo se ve siempre, porque suma.';
     }
 
     /**
@@ -537,6 +603,13 @@
            La del tilde tampoco totaliza: contar cuántas están tildadas en el
            pie de una tabla de importes no significaría nada, y el conteo ya
            está al lado del interruptor. */
+        var filasPie = (visibles === null) ? ((datosCrono && datosCrono.filas) || []) : visibles;
+        var sumaCampo = function(campo) {
+            return filasPie.reduce(function(a, f) {
+                return a + (f.DUPLICA_GRUPO ? 0 : (Number(f[campo]) || 0));
+            }, 0);
+        };
+
         var html = '<td colspan="7" class="total-label">TOTALES</td>'
             + '<td class="currency" title="' + escaparAttrCrono('Suma el importe en pesos de las '
                 + 'filas que se están viendo, incluidas las que caen fuera del horizonte —las '
@@ -547,6 +620,12 @@
             + formatCurrency(sumaImporteArs(visibles)) + '</td>'
             /* ETD, ETA y la fecha de nacionalización, que no suman nada. */
             + '<td></td><td></td><td></td>'
+            + '<td></td>'
+            /* Costo, pagado y saldo de los contenedores que se ven -las hijas
+               no, que repetirían el de su contenedor-; la fecha del saldo, no. */
+            + '<td class="currency">' + formatCurrency(sumaCampo('BASE_ARS')) + '</td>'
+            + '<td class="currency">' + formatCurrency(sumaCampo('NAC_PAGADO_ARS')) + '</td>'
+            + '<td class="currency">' + formatCurrency(sumaCampo('SALDO_ARS')) + '</td>'
             + '<td></td>';
 
         /* Los totales del eje se leen UNA VEZ de la fila de totales y van al
@@ -769,6 +848,467 @@
     function mostrarError(mensaje) {
         mostrarCargando(false);
         ComexFechas.errorDeCarga(mensaje);
+    }
+
+    /* ================================================================
+       EL PAGO PARCIAL
+
+       Las reglas -la base, el saldo, en qué fecha cae y qué suma- las decide
+       el servidor (Comex::repartoNacionalizacion()) y llegan resueltas en la
+       fila. Acá se dibujan, y el diálogo repite la cuenta del saldo SÓLO para
+       mostrar el antes y el después mientras se escribe: lo que se guarda lo
+       valida y lo calcula Comex::validarPagoNac().
+       ================================================================ */
+
+    /** Si el usuario puede registrar pagos parciales (tablas + permiso) */
+    function puedePagoParcial() {
+        return !!(datosCrono && datosCrono.pago_parcial_editable)
+            && Permisos.puedeEditar(document.querySelector('.tab-crono_nacionalizacion'));
+    }
+
+    /**
+     * Las cuatro celdas del pago parcial: costo, pagado, saldo y fecha del
+     * saldo. Una OC hija del contenedor muestra guiones: todo lo del
+     * contenedor está en la fila titular, y repetirlo acá lo haría sumar dos
+     * veces a la vista.
+     */
+    function celdasPagoParcial(item, index) {
+        if (item.DUPLICA_GRUPO) {
+            var t = escaparAttrCrono('OC del mismo contenedor que otra fila: el costo, los pagos '
+                + 'y el saldo van en la fila de la OC principal.');
+
+            return '<td class="center text-muted" title="' + t + '">—</td>'
+                + '<td class="center text-muted" title="' + t + '">—</td>'
+                + '<td class="center text-muted" title="' + t + '">—</td>'
+                + '<td class="center text-muted" title="' + t + '">—</td>';
+        }
+
+        var real = item.BASE_ORIGEN === 'REAL';
+        var tipCosto = real
+            ? 'Costo real cargado en Comercio Exterior. Incluye el flete internacional y no los '
+                + 'impuestos que suma la estimación: al pasar de estimado a real el saldo puede '
+                + 'cambiar por eso, no sólo por precisión.'
+            : 'Estimación de Comercio Exterior valuada con la curva del mes de nacionalización.';
+
+        var costo = '<td class="currency" data-orden="' + (Number(item.BASE_ARS) || 0) + '"'
+            + ' title="' + escaparAttrCrono(tipCosto) + '">'
+            + (item.BASE_ARS === null ? '<span class="text-muted">sin costo</span>'
+                : formatCurrency(item.BASE_ARS))
+            + ' <span class="badge ' + (real ? 'bg-dark' : 'bg-light text-dark border') + ' costo-origen">'
+            + (real ? 'real' : 'estimado') + '</span></td>';
+
+        var botones = '';
+
+        if (item.NAC_CON_PARCIALES) {
+            botones += ' <i class="fas fa-list-ul text-primary ms-1 pago-nac-historial" role="button"'
+                + ' data-indice="' + index + '" title="Ver los pagos de este contenedor"></i>';
+        }
+
+        if (puedePagoParcial() && item.BASE_ARS !== null) {
+            botones += ' <button type="button" class="btn btn-outline-primary btn-xs pago-nac-btn"'
+                + ' data-indice="' + index + '" title="Registrá una parte pagada; lo que falta '
+                + 'se sigue proyectando como saldo">Pago parcial</button>';
+        }
+
+        var pagado = '<td class="currency" data-orden="' + (Number(item.NAC_PAGADO_ARS) || 0) + '">'
+            + (item.NAC_CON_PARCIALES ? formatCurrency(item.NAC_PAGADO_ARS) : '')
+            + botones + '</td>';
+
+        var saldo;
+
+        if (item.CUBIERTA_PARCIALES) {
+            saldo = '<td class="center pagado-parcial-ok" data-orden="0"'
+                + (item.NAC_SOBREPAGO_ARS > 0
+                    ? ' title="' + escaparAttrCrono('Pagado de más: ' + formatCurrency(item.NAC_SOBREPAGO_ARS)) + '"'
+                    : '')
+                + '>Pagado con pagos parciales'
+                + (item.NAC_SOBREPAGO_ARS > 0 ? ' <i class="fas fa-triangle-exclamation text-warning"></i>' : '')
+                + '</td>';
+        } else {
+            saldo = '<td class="currency" data-orden="' + (Number(item.SALDO_ARS) || 0) + '">'
+                + (item.SALDO_ARS === null ? '' : formatCurrency(item.SALDO_ARS)) + '</td>';
+        }
+
+        var fechaSaldo = item.NAC_CON_PARCIALES
+            ? (formatDate(item.FECHA_SALDO_EFECTIVA)
+                + (item.FECHA_SALDO_CARGADA ? '' : ' <small class="text-muted">(la de nac.)</small>')
+                + (puedePagoParcial() && !item.CUBIERTA_PARCIALES
+                    ? ' <i class="fas fa-pen-to-square text-primary ms-1 pago-nac-fecha" role="button"'
+                        + ' data-indice="' + index + '" title="Cambiar la fecha del saldo"></i>'
+                    : ''))
+            : '<span class="text-muted">' + formatDate(item.FECHA_SALDO_EFECTIVA) + '</span>';
+
+        return costo + pagado + saldo
+            + '<td class="center' + (item.NAC_CON_PARCIALES && item.VENCIDA_PENDIENTE ? ' text-danger' : '') + '"'
+            + ' data-orden="' + escaparAttrCrono(item.FECHA_SALDO_EFECTIVA || '') + '">' + fechaSaldo + '</td>';
+    }
+
+    /** Hoy como 'aaaa-mm-dd', en la hora local */
+    function hoyIso() {
+        var d = new Date();
+
+        return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-'
+            + ('0' + d.getDate()).slice(-2);
+    }
+
+    /** El item de la fila de un botón o un ícono */
+    function itemDe(el) {
+        var i = Number(el.getAttribute('data-indice'));
+
+        return (datosCrono && datosCrono.filas && datosCrono.filas[i]) || null;
+    }
+
+    var itemPago = null;
+
+    /** Los listeners del diálogo y de los botones de la tabla, una vez */
+    function conectarDialogoPago() {
+        var cuerpo = document.getElementById('tableBody');
+
+        if (cuerpo) {
+            cuerpo.addEventListener('click', function(ev) {
+                var t = ev.target;
+
+                if (t.closest('.pago-nac-btn')) {
+                    abrirPagoNac(itemDe(t.closest('.pago-nac-btn')));
+                } else if (t.closest('.pago-nac-historial')) {
+                    abrirPagosNac(itemDe(t.closest('.pago-nac-historial')));
+                } else if (t.closest('.pago-nac-fecha')) {
+                    cambiarFechaSaldo(itemDe(t.closest('.pago-nac-fecha')));
+                }
+            });
+        }
+
+        ['pagoNacFecha', 'pagoNacMoneda', 'pagoNacImporte', 'pagoNacImporteUsd',
+         'pagoNacCotizacion', 'pagoNacFechaSaldo'].forEach(function(id) {
+            var el = document.getElementById(id);
+
+            if (el) {
+                el.addEventListener('input', recalcularDialogo);
+                el.addEventListener('change', recalcularDialogo);
+            }
+        });
+
+        var guardar = document.getElementById('pagoNacGuardar');
+
+        if (guardar) {
+            guardar.addEventListener('click', guardarPagoNac);
+        }
+    }
+
+    function valor(id) {
+        var el = document.getElementById(id);
+
+        return el ? el.value : '';
+    }
+
+    function poner(id, texto) {
+        var el = document.getElementById(id);
+
+        if (el) { el.textContent = texto; }
+    }
+
+    /** Si la fecha del saldo es obligatoria: nacionalización vencida o sin fecha */
+    function saldoObligatorio(item) {
+        var nac = item && item.FECHA_NAC_EFECTIVA;
+
+        return !nac || nac < hoyIso();
+    }
+
+    function abrirPagoNac(item) {
+        if (!item) { return; }
+
+        itemPago = item;
+
+        poner('pagoNacContenedor', (item.CONTENEDOR || '') + ' · OC ' + (item.ORDEN_COMPRA || '')
+            + ' · ' + (item.PROVEEDOR || '') + ' · nacionalización '
+            + formatDate(item.FECHA_NAC_EFECTIVA));
+        poner('pagoNacBaseRotulo', item.BASE_ORIGEN === 'REAL' ? 'Costo real' : 'Costo estimado');
+
+        document.getElementById('pagoNacFecha').value = hoyIso();
+        document.getElementById('pagoNacFecha').max = hoyIso();
+        document.getElementById('pagoNacMoneda').value = 'ARS';
+        document.getElementById('pagoNacImporte').value = '';
+        document.getElementById('pagoNacImporteUsd').value = '';
+        document.getElementById('pagoNacCotizacion').value = '';
+        document.getElementById('pagoNacFechaSaldo').value = item.FECHA_SALDO_CARGADA || '';
+        document.getElementById('pagoNacFechaSaldo').min = hoyIso();
+        document.getElementById('pagoNacObs').value = '';
+
+        poner('pagoNacFechaSaldoNota', saldoObligatorio(item)
+            ? '(obligatoria: la fecha de nacionalización ya venció)'
+            : '(opcional: sin ella, el saldo cae el ' + formatDate(item.FECHA_NAC_EFECTIVA) + ')');
+
+        recalcularDialogo();
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('modalPagoNac')).show();
+    }
+
+    /**
+     * El importe en pesos del pago que se está cargando: el tipeado, o los
+     * dólares por la cotización redondeado al centavo, igual que
+     * Comex::enPesos(). Es sólo para mostrar.
+     */
+    function importePesos() {
+        if (valor('pagoNacMoneda') === 'USD') {
+            var usd = Number(valor('pagoNacImporteUsd'));
+            var cot = Number(valor('pagoNacCotizacion'));
+
+            return (usd > 0 && cot > 0) ? Math.round(usd * cot * 100) / 100 : 0;
+        }
+
+        return Number(valor('pagoNacImporte')) || 0;
+    }
+
+    /** Lo que falta para poder registrar, o '' si está todo */
+    function faltaEnDialogo() {
+        var hoy = hoyIso();
+        var fecha = valor('pagoNacFecha');
+        var saldo = valor('pagoNacFechaSaldo');
+
+        if (!fecha) { return 'Falta la fecha de pago.'; }
+        if (fecha > hoy) { return 'La fecha de pago no puede ser futura: un pago que todavía no se hizo no es un pago.'; }
+        if (valor('pagoNacMoneda') === 'USD' && !(Number(valor('pagoNacCotizacion')) > 0)) {
+            return 'Falta la cotización con la que se pagaron los dólares.';
+        }
+        if (!(importePesos() > 0)) { return 'El importe tiene que ser mayor a cero.'; }
+        if (!saldo && saldoObligatorio(itemPago)) {
+            return 'La fecha de nacionalización ya venció: cargá la fecha en la que se va a pagar el saldo.';
+        }
+        if (saldo && saldo < hoy) { return 'La fecha del saldo tiene que ser hoy o posterior.'; }
+
+        return '';
+    }
+
+    function recalcularDialogo() {
+        if (!itemPago) { return; }
+
+        var usd = valor('pagoNacMoneda') === 'USD';
+
+        document.querySelectorAll('#modalPagoNac .pago-nac-usd').forEach(function(el) {
+            el.style.display = usd ? '' : 'none';
+        });
+        document.querySelectorAll('#modalPagoNac .pago-nac-ars').forEach(function(el) {
+            el.style.display = usd ? 'none' : '';
+        });
+
+        var imp = importePesos();
+        var base = Number(itemPago.BASE_ARS) || 0;
+        var antes = Number(itemPago.NAC_PAGADO_ARS) || 0;
+        var tol = Number(datosCrono.tolerancia_saldo) || 1;
+        var saldoDe = function(pagado) {
+            var dif = base - pagado;
+
+            return (pagado > 0 && dif <= tol) ? 0 : dif;
+        };
+
+        poner('pagoNacEquivalente', usd && imp > 0 ? ('Equivale a ' + formatCurrency(imp)
+            + ': es lo que se resta del saldo.') : '');
+        poner('pagoNacBase', formatCurrency(base));
+        poner('pagoNacBase2', formatCurrency(base));
+        poner('pagoNacPagadoAntes', formatCurrency(antes));
+        poner('pagoNacPagadoDespues', formatCurrency(antes + imp));
+        poner('pagoNacSaldoAntes', formatCurrency(saldoDe(antes)));
+
+        var despues = saldoDe(antes + imp);
+        var sobra = (antes + imp) - base;
+
+        poner('pagoNacSaldoDespues', despues === 0
+            ? ('$ 0,00 · pagada' + (sobra > tol ? (' · pagado de más: ' + formatCurrency(sobra)) : ''))
+            : formatCurrency(despues));
+
+        var falta = faltaEnDialogo();
+
+        poner('pagoNacError', falta);
+        document.getElementById('pagoNacGuardar').disabled = falta !== '';
+    }
+
+    function guardarPagoNac() {
+        if (!itemPago || faltaEnDialogo() !== '') { return; }
+
+        var boton = document.getElementById('pagoNacGuardar');
+        var usd = valor('pagoNacMoneda') === 'USD';
+
+        boton.disabled = true;
+
+        fetch('Controller/ComexController.php?action=registrarPagoNac', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id_mg: itemPago.ID,
+                fecha_pago: valor('pagoNacFecha'),
+                moneda: valor('pagoNacMoneda'),
+                importe: usd ? null : valor('pagoNacImporte'),
+                importe_usd: usd ? valor('pagoNacImporteUsd') : null,
+                cotizacion: usd ? valor('pagoNacCotizacion') : null,
+                fecha_saldo: valor('pagoNacFechaSaldo') || null,
+                observacion: valor('pagoNacObs')
+            })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            if (!r.success) {
+                // Lo que dice el servidor es lo que manda: se muestra en el diálogo.
+                poner('pagoNacError', r.message);
+                boton.disabled = false;
+
+                return;
+            }
+
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('modalPagoNac')).hide();
+            Notificacion.exito(r.message);
+            cargarDatos();
+        })
+        .catch(function(e) {
+            poner('pagoNacError', 'Error de conexión: no se guardó nada. ' + e.message);
+            boton.disabled = false;
+        });
+    }
+
+    /** La lista de pagos del contenedor, con su historial y la anulación */
+    function abrirPagosNac(item) {
+        if (!item) { return; }
+
+        var cuerpo = document.getElementById('pagosNacCuerpo');
+
+        cuerpo.innerHTML = '<div class="text-muted small">Cargando…</div>';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('modalPagosNac')).show();
+
+        fetch('Controller/ComexController.php?action=getPagosNac&id_mg=' + encodeURIComponent(item.ID))
+            .then(function(r) { return r.json(); })
+            .then(function(r) {
+                if (!r.success) {
+                    cuerpo.innerHTML = '<div class="text-danger small">' + escaparAttrCrono(r.message) + '</div>';
+
+                    return;
+                }
+
+                cuerpo.innerHTML = htmlPagosNac(item, r.data);
+
+                cuerpo.querySelectorAll('.pago-nac-anular').forEach(function(b) {
+                    b.addEventListener('click', function() { anularPagoNac(item, b.getAttribute('data-id')); });
+                });
+            })
+            .catch(function(e) {
+                cuerpo.innerHTML = '<div class="text-danger small">No se pudieron leer los pagos: '
+                    + escaparAttrCrono(e.message) + '</div>';
+            });
+    }
+
+    function htmlPagosNac(item, d) {
+        var edita = puedePagoParcial();
+        var html = '<div class="small text-muted mb-2">' + escaparAttrCrono((item.CONTENEDOR || '')
+            + ' · OC ' + (item.ORDEN_COMPRA || '')) + '. Un pago anulado deja de restar y queda acá.</div>'
+            + '<table class="table table-sm small"><thead><tr>'
+            + '<th>Fecha de pago</th><th>Moneda</th><th class="text-end">U$S</th>'
+            + '<th class="text-end">Cotización</th><th class="text-end">Pesos</th><th>Observación</th>'
+            + '<th>Cargado</th><th></th></tr></thead><tbody>';
+
+        (d.pagos || []).forEach(function(p) {
+            var vigente = Number(p.VIGENTE) === 1;
+
+            html += '<tr class="' + (vigente ? '' : 'text-muted text-decoration-line-through') + '">'
+                + '<td>' + formatDate(p.FECHA_PAGO) + '</td>'
+                + '<td>' + (p.MONEDA === 'USD' ? 'Dólares' : 'Pesos') + '</td>'
+                + '<td class="text-end">' + (p.IMPORTE_USD !== null ? formatUSD(p.IMPORTE_USD) : '') + '</td>'
+                + '<td class="text-end">' + (p.COTIZACION !== null ? Number(p.COTIZACION).toLocaleString('es-AR') : '') + '</td>'
+                + '<td class="text-end">' + formatCurrency(p.IMPORTE_ARS) + '</td>'
+                + '<td>' + escaparAttrCrono(p.OBSERVACION || '') + '</td>'
+                + '<td>' + escaparAttrCrono(Auditoria.quien(p.USUARIO_ALTA)) + ' · ' + Auditoria.fecha(p.FECHA_ALTA)
+                + (vigente ? '' : '<br>Anulado por ' + escaparAttrCrono(Auditoria.quien(p.USUARIO_BAJA))
+                    + ' · ' + Auditoria.fecha(p.FECHA_BAJA)) + '</td>'
+                + '<td>' + (vigente && edita
+                    ? '<button type="button" class="btn btn-outline-danger btn-xs pago-nac-anular" data-id="'
+                        + p.ID + '">Anular</button>' : '') + '</td></tr>';
+        });
+
+        html += '</tbody></table>';
+
+        if ((d.fechas_saldo || []).length) {
+            html += '<div class="fw-bold small mb-1">Fecha del saldo</div><ul class="small mb-0">';
+
+            d.fechas_saldo.forEach(function(s) {
+                html += '<li class="' + (Number(s.VIGENTE) === 1 ? '' : 'text-muted') + '">'
+                    + formatDate(s.FECHA_SALDO)
+                    + (s.FECHA_ANTERIOR ? ' (antes ' + formatDate(s.FECHA_ANTERIOR) + ')' : '')
+                    + ' · ' + escaparAttrCrono(Auditoria.quien(s.USUARIO_ALTA)) + ' · ' + Auditoria.fecha(s.FECHA_ALTA)
+                    + (Number(s.VIGENTE) === 1 ? ' · <strong>vigente</strong>' : '') + '</li>';
+            });
+
+            html += '</ul>';
+        }
+
+        return html;
+    }
+
+    function anularPagoNac(item, id) {
+        Notificacion.confirmar({
+            titulo: 'Anular el pago',
+            mensaje: '¿Anular este pago parcial?',
+            detalle: 'Deja de restar: el saldo vuelve a subir y se proyecta otra vez. El pago no se '
+                + 'borra, queda en el historial como anulado.',
+            confirmar: 'Anular',
+            peligro: true
+        }).then(function(si) {
+            if (!si) { return; }
+
+            fetch('Controller/ComexController.php?action=anularPagoNac', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: id })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(r) {
+                if (!r.success) {
+                    Notificacion.error('No se pudo anular el pago: ' + r.message);
+
+                    return;
+                }
+
+                Notificacion.exito(r.message);
+                abrirPagosNac(item);
+                cargarDatos();
+            })
+            .catch(function(e) {
+                Notificacion.error('Error de conexión al anular el pago: no se anuló. ' + e.message);
+            });
+        });
+    }
+
+    /** Cambia la fecha del saldo sin cargar un pago nuevo; queda en el historial */
+    function cambiarFechaSaldo(item) {
+        if (!item) { return; }
+
+        Notificacion.pedirFecha({
+            titulo: 'Fecha del saldo',
+            mensaje: 'Cuándo se espera pagar lo que falta de la nacionalización de ' + (item.CONTENEDOR || '') + '.',
+            etiqueta: 'Fecha estimada de pago del saldo',
+            valor: item.FECHA_SALDO_CARGADA || '',
+            min: hoyIso(),
+            antesDelMin: 'Tiene que ser hoy o posterior: es cuándo se espera pagar lo que falta.',
+            confirmar: 'Cambiar'
+        }).then(function(fecha) {
+            if (!fecha) { return; }
+
+            fetch('Controller/ComexController.php?action=cambiarFechaSaldoNac', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_mg: item.ID, fecha: fecha })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(r) {
+                if (!r.success) {
+                    Notificacion.error('No se pudo cambiar la fecha del saldo: ' + r.message);
+
+                    return;
+                }
+
+                Notificacion.exito(r.message);
+                cargarDatos();
+            })
+            .catch(function(e) {
+                Notificacion.error('Error de conexión: la fecha no se cambió. ' + e.message);
+            });
+        });
     }
 
     /* NO HAY exportarExcel(). Era una función de una línea que llamaba a

@@ -483,3 +483,37 @@
     cursor: pointer;
     margin: 0;
 }
+
+/* ---- El pago parcial de la nacionalización ---------------------------------
+   El botón va dentro de la celda de Pagado, al lado del importe: tiene que
+   ser chico para no ensanchar la columna en todas las filas. */
+.btn-xs {
+    padding: 0 6px;
+    font-size: 11px;
+    line-height: 18px;
+    border-radius: 4px;
+}
+
+/* La marca de dónde sale el costo: real (Comercio Exterior) o estimado. */
+.costo-origen {
+    font-size: 10px;
+    font-weight: 500;
+    vertical-align: middle;
+}
+
+.pagado-parcial-ok {
+    color: var(--success-color, #198754);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+/* Un contenedor con costos reales que no suma: se ve, con el interruptor
+   prendido, pero atenuado, igual que una pagada. */
+.fila-costos-reales td {
+    color: var(--text-muted, #6c757d);
+}
+
+.pago-nac-historial,
+.pago-nac-fecha {
+    cursor: pointer;
+}

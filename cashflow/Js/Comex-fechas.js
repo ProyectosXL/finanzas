@@ -302,7 +302,9 @@
      *
      * @param {Object} item Fila del payload
      * @param {string} concepto 'PAGO' o 'NAC'
-     * @param {Object} opts { editable, alMarcar }
+     * @param {Object} opts { editable, alMarcar, tooltip }. tooltip reemplaza
+     *        la explicación de una casilla sin tildar: Crono la usa para decir
+     *        que el tilde es el pago TOTAL y que una parte va por Pago parcial.
      * @returns {string}
      */
     function celdaPagado(item, concepto, opts) {
@@ -320,8 +322,8 @@
                 + (item.PAGADO_OBS ? ('. ' + item.PAGADO_OBS) : '')
                 + '. No entra en la proyección; destildalo para que vuelva.')
             : (opts.editable
-                ? 'Tildá si este pago ya se hizo: sale de la proyección y el tablero deja de '
-                    + 'contarlo.'
+                ? (opts.tooltip || ('Tildá si este pago ya se hizo: sale de la proyección y el '
+                    + 'tablero deja de contarlo.'))
                 : '');
 
         /* data-orden porque la celda es un control y no un texto: sin esto,
@@ -970,12 +972,19 @@
      * distintas: esconder una fila que el pie sigue sumando es el defecto que
      * esta función existe para hacer imposible.
      *
-     * @param {Object} estado { term, conVencidas, conPagados }
-     * @param {Object} f { texto, vencida, pagado }
+     * @param {Object} estado { term, conVencidas, conPagados, conCostos }
+     * @param {Object} f { texto, vencida, pagado, costos }
      * @returns {boolean}
      */
     function pasaFiltros(estado, f) {
         if (!estado.conVencidas && f.vencida) {
+            return false;
+        }
+
+        /* Crono: los contenedores con costos reales que no suman. Cuáles son lo
+           decide el servidor (OCULTA_POR_COSTOS): una fila que suma no se
+           esconde nunca. */
+        if (!estado.conCostos && f.costos) {
             return false;
         }
 
@@ -987,14 +996,24 @@
     }
 
     /** El estado de los tres controles, leído de la pantalla */
-    function estadoFiltros(idCampo, idSwitch, idSwitchPagados) {
+    function estadoFiltros(idCampo, idSwitch, idSwitchPagados, idSwitchCostos) {
         var campo = document.getElementById(idCampo);
 
         return {
             term: campo ? campo.value.toLowerCase() : '',
             conVencidas: prendido(idSwitch),
-            conPagados: prendido(idSwitchPagados)
+            conPagados: prendido(idSwitchPagados),
+            conCostos: prendido(idSwitchCostos)
         };
+    }
+
+    /**
+     * Si una fila cuenta como pagada para el interruptor de pagadas: el tilde,
+     * o -en Crono- los pagos parciales que cubren la base. Las dos salieron de
+     * la proyección y las dos se ven con el mismo interruptor.
+     */
+    function esPagada(item) {
+        return !!item.PAGADO || !!item.CUBIERTA_PARCIALES;
     }
 
     /**
@@ -1005,10 +1024,11 @@
      * @param {string} idCuerpo Id del tbody
      * @param {string} [idSwitch] Id del interruptor de ver vencidas
      * @param {string} [idSwitchPagados] Id del interruptor de ver pagados
+     * @param {string} [idSwitchCostos] Id del interruptor de ver con costos reales
      * @returns {number} Cuántas filas quedaron visibles
      */
-    function filtrar(idCampo, idCuerpo, idSwitch, idSwitchPagados) {
-        var estado = estadoFiltros(idCampo, idSwitch, idSwitchPagados);
+    function filtrar(idCampo, idCuerpo, idSwitch, idSwitchPagados, idSwitchCostos) {
+        var estado = estadoFiltros(idCampo, idSwitch, idSwitchPagados, idSwitchCostos);
         var filas = document.querySelectorAll('#' + idCuerpo + ' tr');
         var n = 0;
 
@@ -1016,7 +1036,8 @@
             var pasa = pasaFiltros(estado, {
                 texto: (filas[i].getAttribute('data-buscar') || '').toLowerCase(),
                 vencida: filas[i].getAttribute('data-vencida') === '1',
-                pagado: filas[i].getAttribute('data-pagado') === '1'
+                pagado: filas[i].getAttribute('data-pagado') === '1',
+                costos: filas[i].getAttribute('data-costos') === '1'
             });
 
             filas[i].style.display = pasa ? '' : 'none';
@@ -1042,12 +1063,13 @@
      * @param {Array} filas
      * @param {string} [idSwitch]
      * @param {string} [idSwitchPagados]
+     * @param {string} [idSwitchCostos]
      * @returns {Array|null}
      */
-    function visibles(idCampo, filas, idSwitch, idSwitchPagados) {
-        var estado = estadoFiltros(idCampo, idSwitch, idSwitchPagados);
+    function visibles(idCampo, filas, idSwitch, idSwitchPagados, idSwitchCostos) {
+        var estado = estadoFiltros(idCampo, idSwitch, idSwitchPagados, idSwitchCostos);
 
-        if (!estado.term && estado.conVencidas && estado.conPagados) {
+        if (!estado.term && estado.conVencidas && estado.conPagados && estado.conCostos) {
             return null;
         }
 
@@ -1055,7 +1077,8 @@
             return pasaFiltros(estado, {
                 texto: textoBuscable(item).toLowerCase(),
                 vencida: !!item.VENCIDA_PENDIENTE,
-                pagado: !!item.PAGADO
+                pagado: esPagada(item),
+                costos: !!item.OCULTA_POR_COSTOS
             });
         });
     }
@@ -1089,7 +1112,19 @@
      * @returns {number}
      */
     function contarPagadas(filas) {
-        return (filas || []).filter(function(item) { return !!item.PAGADO; }).length;
+        return (filas || []).filter(esPagada).length;
+    }
+
+    /**
+     * Cuántas filas esconde el interruptor de costos reales (Crono): las que
+     * tienen costos reales y no suman. Las que suman -con un pago parcial y
+     * saldo- no se cuentan, porque no se esconden.
+     *
+     * @param {Array} filas
+     * @returns {number}
+     */
+    function contarCostos(filas) {
+        return (filas || []).filter(function(item) { return !!item.OCULTA_POR_COSTOS; }).length;
     }
 
     window.ComexFechas = {
@@ -1110,6 +1145,8 @@
         prendido: prendido,
         contarVencidas: contarVencidas,
         contarPagadas: contarPagadas,
+        contarCostos: contarCostos,
+        esPagada: esPagada,
         formatDate: fecha,
         escapar: escapar
     };

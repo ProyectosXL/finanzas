@@ -324,3 +324,35 @@ foreach (['registrarPagoNac', 'anularPagoNac', 'cambiarFechaSaldoNac'] as $accio
         AuthCashflow::ESCRITURAS['Comex'][$accion]);
 }
 chequear('el historial es una lectura', true, in_array('getPagosNac', AuthCashflow::LECTURAS['Comex'], true));
+
+seccion('la pantalla');
+
+$jsCrono = file_get_contents(__DIR__ . '/../Js/Comex-Crono_nacionalizacion.js');
+$jsExt = file_get_contents(__DIR__ . '/../Js/Comex-Proveedores_exterior.js');
+$jsFechas = file_get_contents(__DIR__ . '/../Js/Comex-fechas.js');
+$tabCrono = file_get_contents(__DIR__ . '/../Tabs/crono_nacionalizacion.php');
+$ayuda = file_get_contents(__DIR__ . '/../Components/help_modal_comex.php');
+
+chequear('el tooltip "pagaste una parte" va en el tilde de NAC', true,
+    strpos($jsCrono, "tooltip: 'Usalo cuando la nacionalización se pagó completa. Si pagaste una '") !== false);
+chequear('y en Proveedores Exterior el tilde queda como esta', false,
+    strpos($jsExt, 'tooltip:') !== false);
+chequear('sin permiso de edicion no se dibuja el boton ni la anulacion', true,
+    strpos($jsCrono, "Permisos.puedeEditar(document.querySelector('.tab-crono_nacionalizacion'))") !== false
+    && strpos($jsCrono, 'if (puedePagoParcial() && item.BASE_ARS !== null) {') !== false
+    && strpos($jsCrono, '(vigente && edita') !== false);
+chequear('sin el script tampoco: el boton pide pago_parcial_editable', true,
+    strpos($jsCrono, "return !!(datosCrono && datosCrono.pago_parcial_editable)") !== false);
+foreach (['Costo ($)', 'Pagado ($)', 'Saldo ($)', 'Fecha del saldo'] as $col) {
+    chequear('la tabla que se exporta tiene la columna ' . $col, true, strpos($tabCrono, $col) !== false);
+}
+chequear('el pie cubre las cuatro columnas nuevas', true, strpos($tabCrono, 'colspan="16"') !== false);
+chequear('el interruptor "Ver con costos reales" pasa por el filtro compartido', true,
+    strpos($jsCrono, "'verVencidasCronoNac', 'verPagadosCronoNac', idSwitchCostos());") !== false
+    && strpos($jsFechas, 'if (!estado.conCostos && f.costos) {') !== false);
+chequear('el encabezado del dialogo explica cuando usar el tilde', true,
+    strpos($tabCrono, 'Registrá lo que pagaste. Lo que falta se sigue proyectando como saldo en la') !== false);
+chequear('la ayuda tiene "Cómo registrar un pago", con su ejemplo', true,
+    strpos($ayuda, 'Cómo registrar un pago') !== false && strpos($ayuda, '$ 6.000.000 el 30/11') !== false);
+chequear('el tooltip de la marca real dice que la composicion cambia', true,
+    strpos($jsCrono, 'Incluye el flete internacional y no los') !== false);
