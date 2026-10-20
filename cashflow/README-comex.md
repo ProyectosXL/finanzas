@@ -2,7 +2,7 @@
 
 Pestañas **Comercio Exterior → Proveedores Exterior** y **Crono Nacionalización**, y las filas *Proveedores del Exterior* y *Nacionalizaciones* del tablero de Cashflow.
 
-Ramas: `feature/comex-fecha-maestra` · `feature/comex-pagado` · `feature/comex-nac-usd` · `feature/comex-saldo-pendiente` · `feature/comex-visibilidad-saldo`
+Ramas: `feature/comex-fecha-maestra` · `feature/comex-pagado` · `feature/comex-nac-usd` · `feature/comex-saldo-pendiente` · `feature/comex-visibilidad-saldo` · `feature/cashflow-avisos-kpis-comex-nac-parcial`
 
 ---
 
@@ -12,8 +12,9 @@ Ramas: `feature/comex-fecha-maestra` · `feature/comex-pagado` · `feature/comex
 
 ```
 RO_T_IMPORTACIONES_ENCABEZADO  (maestro de Comercio Exterior)
+        │  Las dos: sólo FECHA_MOV de la OC principal >= "Contenedores desde" (sección 12)
         │  Proveedores Exterior: sale sólo con costos cargados Y el FOB pagado (sección 10)
-        │  Crono Nacionalización: sin detalle cargado, como siempre
+        │  Crono Nacionalización: sin costos reales; con ellos, detrás de un interruptor (sección 13)
         │
         ├─ FECHA_EST_PAGO ──── cuándo se le paga al proveedor del exterior
         │       │
@@ -53,8 +54,10 @@ Contra `central`, en este orden:
 | 1 | `sql/cashflow_comex_cotiz_edit.sql` | Agrega `COTIZ_USD_EDIT` a `RO_T_CASHFLOW_COMEX_CRONO_NAC`: el override de cotización por contenedor | Los pagos se valúan con la curva igual; lo único que no se puede es corregir una fila a mano, y la pantalla lo dice |
 | 2 | `sql/cashflow_comex_fecha_maestra.sql` | Crea `RO_T_CASHFLOW_COMEX_FECHA_EDIT` y **migra al maestro** las fechas que vivían en las columnas `EDIT` | **Las dos pestañas se leen igual** —las fechas salen del maestro, que siempre está— pero **no se pueden editar**, y las dos avisan qué script falta |
 | 3 | `sql/cashflow_comex_pagado.sql` | Crea `RO_T_CASHFLOW_COMEX_PAGADO`: qué pagos ya se hicieron, con su historial | Las dos pestañas se leen igual y **el tablero no cambia** —sin la tabla no hay nada marcado, así que proyecta todo lo pendiente—. La casilla se dibuja deshabilitada y las dos avisan qué script falta |
+| 4 | `sql/cashflow_comex_fecha_mov_desde.sql` | Siembra el parámetro `comex_fecha_mov_desde` (*Contenedores desde*) en 01/01/2025, en Parámetros › Compras Exterior. No pisa un valor ya cargado | **El corte se aplica igual**, con 01/01/2025, que el código tiene escrito. Lo único que no se puede es cambiarlo, y **sólo Parámetros** dice qué script falta: las pestañas no avisan nada |
+| 5 | `sql/cashflow_comex_nac_pago.sql` | Crea `RO_T_CASHFLOW_COMEX_NAC_PAGO` (los pagos parciales de la nacionalización) y `RO_T_CASHFLOW_COMEX_NAC_SALDO_FECHA` (la fecha del saldo, con historial) | **Crono funciona exactamente como hoy**: el tilde no ofrece el pago parcial, los contenedores con costos reales no se muestran, y la pestaña avisa qué script falta. El tablero no cambia |
 
-Los tres son reejecutables y ninguno borra nada. El 3 no depende de los otros dos.
+Los cinco son reejecutables y ninguno borra nada. El 3, el 4 y el 5 no dependen de ningún otro. En la instalación completa de `README-cashflow.md` el 4 es el 41 y el 5 el 42.
 
 > **El 2 es el único del módulo que escribe sobre una tabla que no es del cashflow.** Por eso su encabezado documenta el criterio de conflicto y el script lista al final lo que decidió no migrar.
 
@@ -309,7 +312,7 @@ NACIONALIZACION + NACIONALIZACION_PAGADAS      = NACIONALIZACION_TODO
 
 Mismo criterio que la exclusión de cheques de cartera: un importe que sale del tablero sin dejar rastro es un agujero que nadie puede auditar. `PAGOS` y `NACIONALIZACION` **cambian de significado y no de código** —pasan a ser *"lo que falta pagar"*—, así que **no hay que repuntar ninguna fila** ni tocar Parámetros. El día que se corre el script la tabla nace vacía y el tablero no se mueve un peso.
 
-> **`PAGOS_COMEX` es de la sección 8**, no de ésta. Aparece acá porque el invariante es uno solo: desde `feature/comex-saldo-pendiente` hay **dos formas distintas** de que un egreso salga de la proyección de Proveedores Exterior —el tilde de esta sección y un pago cargado en la otra aplicación— y el tablero tiene que poder contestar cuál de las dos fue. *Crono Nacionalización* sigue con dos partes: allá no hay pagos parciales contra un saldo.
+> **`PAGOS_COMEX` es de la sección 8**, no de ésta. Aparece acá porque el invariante es uno solo: desde `feature/comex-saldo-pendiente` hay **dos formas distintas** de que un egreso salga de la proyección de Proveedores Exterior —el tilde de esta sección y un pago cargado en la otra aplicación— y el tablero tiene que poder contestar cuál de las dos fue. *Crono Nacionalización* sigue con dos series, y desde la sección 13 `NACIONALIZACION_PAGADAS` lleva además **lo pagado parcialmente**: el tilde sigue queriendo decir *pagado total*.
 
 El proveedor informa en cada carga cuánto se marcó, con el conteo. Sin ese aviso, un egreso que el tablero debería estar proyectando desaparece y nada en pantalla lo explica.
 
@@ -339,7 +342,7 @@ En los dos casos el universo (`..._TODO`) **no se movió**, el invariante cerró
 
 ### Cómo se usa
 
-- **El tilde actúa, no selecciona.** A diferencia del de Echeqs —donde el check elige filas y un botón confirma el lote con su motivo— acá cada clic guarda. La diferencia está en qué se afirma: allá es una decisión discutible que saca plata del disponible y necesita un motivo por escrito; acá es un hecho, *"este pago se hizo"*. Y se deshace con el mismo clic, que es lo que lo hace seguro.
+- **El tilde actúa, no selecciona.** A diferencia del de Echeqs —donde el check elige filas y un botón confirma el lote con su motivo— acá cada clic guarda. La diferencia está en qué se afirma: allá es una decisión discutible que saca plata del disponible y necesita un motivo por escrito; acá es un hecho, *"este pago se hizo"*. Y se deshace con el mismo clic, que es lo que lo hace seguro. **En Crono, desde la sección 13, tildar pregunta primero qué se pagó** —completa o una parte—; destildar sigue siendo un clic.
 - **La observación es opcional**, por lo mismo. Obligar a escribir algo terminaría en doscientas filas que dicen "pagado".
 - **Interruptor *Ver pagados*, apagado por defecto**, con el conteo al lado. Igual que el de vencidas y que el *Ver excluidos* de Echeqs.
 - **No hay bajas físicas.** Destildar marca `VIGENTE = 0` y sella `FECHA_BAJA`; volver a marcar inserta una fila nueva. Quién marcó y cuándo va en el `title` de la casilla.
@@ -798,6 +801,162 @@ operación. Comercio Exterior no tiene autenticación.
 
 ---
 
+## 12. Contenedores desde una fecha de movimiento
+
+> De `feature/cashflow-avisos-kpis-comex-nac-parcial`.
+
+**Proveedores Exterior y Crono Nacionalización traen sólo los contenedores cuyo `FECHA_MOV` de la OC principal es igual o posterior a *Contenedores desde (fecha de movimiento)***, un parámetro nuevo de Parámetros › Compras Exterior, 01/01/2025 por defecto. Y lo mismo el descuento de lo ya cargado de Compras Proyectadas, porque lee el mismo padrón: ver `README-compras-proyectadas.md`.
+
+### Por qué
+
+El padrón arrastraba contenedores de 2023 y 2024 que nadie va a pagar ni nacionalizar desde el cashflow. Al 20/10/2026 eran **149 de las 348 filas** de Proveedores Exterior y **149 de los 255 contenedores "que no se pudieron valuar"**: ninguno sumaba —no tenían fecha o estaban vencidos—, y lo único que hacían era tapar los avisos que sí piden algo.
+
+### La regla
+
+- **La fecha es la de la OC principal**, `COALESCE(ID_PADRE, ID)`: es el criterio de Comercio Exterior para la ventana de Gestión de Despachos (`VisibilidadContenedor`, repo administracion). **Una OC y sus hijas entran o salen juntas.** Si la principal no está —una FK colgada—, cuenta la propia, igual que el FOB.
+- **Igual o posterior**: un contenedor del mismo día del parámetro entra.
+- **`FECHA_MOV` es obligatorio en Comercio Exterior** —al 20/10/2026 no hay un solo encabezado sin él—, así que no hay caso "sin fecha". Si apareciera, quedaría afuera, como uno anterior.
+- **Lo que queda afuera no se avisa**, ni en las pestañas ni en el tablero: esa información no se considera. Vale también para un contenedor anterior con saldo pendiente y fecha futura, que queda afuera igual.
+
+### Dónde está escrita
+
+**Una vez**, en `Comex::sqlDesdeFechaMov()`, y la usan `filtroPadron()` —o sea Proveedores Exterior y `ComprasProyectadasDatos::cargado()`, que siguen siendo el mismo padrón— y el `WHERE` de `getCronoNacionalizacion()`. Su versión pura, `Comex::entraPorFechaMov()`, existe para probar sin base los casos que la base de hoy no tiene —no hay una sola OC hija— y para comparar las dos fila por fila contra la base, como hace Comercio Exterior con `VisibilidadContenedor`: al 20/10/2026, **199 de 408** en las dos.
+
+### El parámetro
+
+- **Una fecha, editable, con auditoría**, como el resto: se guarda por `saveParametro` y queda quién y cuándo. **La validación manda en el servidor** (`Comex::validarFechaMovDesde()`): una fecha real y **no futura**, porque una futura dejaría afuera todos los contenedores. El campo de la pantalla tiene el mismo tope y lo explica.
+- **Sin el script**, el código usa 01/01/2025 (`Comex::FECHA_MOV_DESDE_INICIAL`, escrito dos veces a propósito, como los valores iniciales de Compras Proyectadas) y **sólo Parámetros** avisa qué script correr. Con un valor inválido cargado a mano en la base, también 01/01/2025.
+
+### Cuánto se movió
+
+Medido contra la base el **20/10/2026**, con el código de antes y el de ahora, sólo lectura:
+
+| | Antes | Después |
+| --- | --- | --- |
+| Filas de Proveedores Exterior | 348 | **199** |
+| Filas de Crono Nacionalización | 70 | **69** |
+| `PAGOS` en el eje | $ 5.521.845.150,95 | igual |
+| `PAGOS_COMEX` en el eje | $ 52.507.958,00 | igual |
+| `PAGOS_TODO` en el eje | $ 5.574.353.108,95 | igual |
+| `NACIONALIZACION` = `NACIONALIZACION_TODO` en el eje | $ 4.371.325.242,21 | igual |
+| Fuera del horizonte y sin fecha, las siete series | — | iguales |
+| *No se pudieron valuar* (Proveedores Exterior) | 255, U$S 16.899.107,97 | **106, U$S 6.902.424,05** |
+| Marcados como ya hechos (Proveedores Exterior / Crono) | 14 / 15 | 13 / 14 |
+| Valuados con el mes más cercano (Crono) | 6 | 5 |
+
+**El tablero no se movió un peso**: todo lo que salió estaba sin fecha o vencido, así que no sumaba en ninguna columna. Lo que cambia es la pantalla —149 filas menos— y los avisos, que ahora cuentan sólo lo que se considera.
+
+---
+
+## 13. Crono Nacionalización: pago parcial y saldo pendiente
+
+> De `feature/cashflow-avisos-kpis-comex-nac-parcial`.
+
+Hasta acá la nacionalización era **todo o nada**: el tilde *Pagada* saca el importe entero de la proyección. Pero se puede pagar una parte y quedar un saldo, y ese saldo es un egreso que el tablero tiene que seguir proyectando, en la fecha en que se lo espera pagar. **El pago parcial se registra sólo en el cashflow**: Comercio Exterior no se entera, y este módulo no escribe nada de ese lado.
+
+### Sobre qué se calcula el saldo
+
+**La base es del contenedor y está en pesos:**
+
+| | Base | Cómo se valúa |
+| --- | --- | --- |
+| **Con costos reales** (filas en `RO_T_IMPORTACIONES_DETALLE` para cualquier OC del grupo, la (A) de la sección 10) | El **Costo Total Real**: la suma de `IMPORTE_$` | Ya está en pesos: cada línea trae su tipo de cambio. Es el total que muestra Comercio Exterior |
+| **Sin costos reales** | El **Costo Total Estimado**: `IMPORTE_ARS`, los conceptos 3 a 10 | Con la curva ROFEX del mes de la **fecha de nacionalización**. La fecha del saldo **no cambia la cotización**: sólo decide en qué columna cae |
+
+**Las dos bases no tienen la misma composición.** La real incluye el **flete internacional** —es una línea del maestro de gastos de Comercio Exterior— y **no los impuestos** que calcula la estimación (IVA, IVA adicional, ganancias e IIBB, conceptos 5 a 8). La estimada, al revés. Por eso, **cuando un contenedor pasa de estimado a real, el saldo puede cambiar por composición y no sólo por precisión**: no es que la estimación se equivocó, es que mide otra cosa. El tooltip de la marca *real* de la columna Costo lo dice en una línea. Ejemplo real: el contenedor 735 (VER01-26) tiene 19 líneas de costo por **$ 53.162.889,39**, de las cuales **$ 15.453.000** son flete internacional (U$S 10.200 × 1.515).
+
+```
+saldo = base − suma de los pagos parciales vigentes      (nunca negativo)
+```
+
+- **Nunca es negativo.** Si lo pagado supera la base, el saldo es cero y la pestaña avisa el **pagado de más**, en pesos (atención). Es lo que pasa cuando se pagó sobre la estimación y el costo real resultó menor.
+- **Pagos que cubren la base**: el contenedor se comporta como pagado aunque nadie lo haya tildado. Sale de la proyección y la fila dice *Pagado con pagos parciales*.
+- **Sin base** —sin estimación ni costo real— no se puede registrar un pago: no hay contra qué calcular el saldo.
+- **La tolerancia es de $ 1, y no `TOLERANCIA_SALDO`.** Ésa es un centavo **de dólar**, copiada de Comercio Exterior para que el saldo del FOB dé el mismo número en las dos aplicaciones. Este saldo es del cashflow, está en pesos y se arma con importes que no cierran al centavo por construcción —un pago en dólares pasado a pesos contra una base que es una suma de líneas con su propio tipo de cambio, o una estimación valuada con la curva—. Con un centavo, un contenedor pagado entero quedaría proyectando *"$ 0,37"* para siempre.
+
+### Una sola clave: el contenedor
+
+En Comercio Exterior la estimación y los pagos son **del contenedor** y viven en la **OC principal**, y los costos reales se cargan desde la principal y **se copian enteros en cada OC del grupo** (`OrdenDeCompra::insertDetalleReplicado()`, repo administracion). Sumar el detalle del grupo multiplicaría el costo por la cantidad de OCs; Comercio Exterior imprime la copia de una.
+
+- **La base, los pagos y la fecha del saldo son del contenedor**: `COALESCE(ID_PADRE, ID)`.
+- **El costo real es la copia de la principal**, o —si no tuviera, que no debería pasar— la de la OC del grupo con ID más chico. **Nunca la suma** (`Comex::copiaCostoReal()`).
+- **La estimación se lee de la principal.**
+- **Los pagos se graban contra la principal**, que resuelve el servidor a partir del ID de la fila, nunca el navegador. **Y se vuelve a resolver al leer**: si una OC que era principal cuando se cargó el pago pasa a ser hija de otra, el pago sigue apareciendo en la fila titular del contenedor. Ninguna consulta compara `ID_MG` contra la fila: pasan por el maestro (`Comex::pagosPorContenedor()` en PHP, `nacPagoApply()` en SQL).
+- **En la grilla**, una fila por OC: el costo, lo pagado, el saldo, la fecha del saldo, el pago parcial y el historial van en la **fila titular** (`DUPLICA_GRUPO = 0`, el criterio de Proveedores Exterior). Las hijas muestran guiones y no suman.
+
+Verificado contra la base el 20/10/2026: **no hay una sola OC hija** (0 de 408), así que en los 338 grupos con costos reales sumar por grupo o la copia de la principal da lo mismo, y las 114 estimaciones están en principales. La regla queda escrita y probada para el día que aparezca una.
+
+### El pago parcial
+
+| Campo | |
+| --- | --- |
+| Fecha de pago | Hoy o anterior: una fecha futura no es un pago |
+| Moneda | Pesos: el importe. Dólares: el importe en dólares y la **cotización usada**; el servidor calcula y guarda el equivalente en pesos, que es lo que se resta. Los dólares y la cotización quedan guardados y se muestran |
+| Fecha estimada de pago del saldo | **Obligatoria si la nacionalización ya venció** (o si no tiene fecha), y hoy o posterior. Si no venció es opcional: sin ella, el saldo cae en la de nacionalización |
+| Observación | Opcional |
+
+- **Varios pagos por contenedor**, listados con fecha, importe, moneda, cotización, usuario y fecha de carga.
+- **Un pago se anula sin borrarlo**, con confirmación: baja lógica, queda en el historial.
+- **La fecha del saldo se cambia sin cargar un pago nuevo**, con historial de quién y cuándo. Sólo con pagos vigentes: sin ninguno, el gasto entero va en la fecha de nacionalización, que se edita en su columna.
+- **Si la fecha del saldo vence**, el saldo se comporta como cualquier vencido: no suma, se avisa con los vencidos y se corrige cambiando la fecha.
+- **La validación manda en el servidor** (`Comex::validarPagoNac()`); el diálogo explica, muestra el saldo antes y después mientras se escribe, y bloquea el botón.
+- **Permisos**: los mismos que el tilde. Sin permiso de edición el tilde no se puede tocar y no se dibuja la anulación: se ven lo pagado y el saldo.
+
+### Cómo convive con el tilde
+
+- **El tilde sigue significando *pagado total*.** Tildar un contenedor con pagos parciales lo da por pagado entero: el saldo sale de la proyección. Destildar lo vuelve a proyectar.
+- **El tilde es la única entrada para registrar un pago.** Al tocarlo pregunta cómo se pagó: **Pagada completa** (el tilde de siempre) o **Fue un pago parcial** (abre el diálogo). Cancelar —o cerrar con la cruz, Escape o un clic afuera— no cambia nada: por eso es un diálogo propio de tres respuestas y no `Notificacion.confirmar()`, donde cerrar sería la negativa. Destildar vuelve a proyectar, como siempre. Hubo una primera versión con un botón *Pago parcial* aparte y el tilde sólo para el total; se cambió porque eran dos controles para el mismo hecho y elegir el correcto pedía leer los tooltips. Sólo en Crono; en Proveedores Exterior el tilde queda como estaba.
+- **La fecha del saldo se cambia con un click en su celda**, con el lápiz a la vista, igual que la de nacionalización. Sólo cuando hay pagos parciales: sin ellos es la de nacionalización, en gris, y se edita en su columna.
+
+### Qué contenedores muestra Crono
+
+- **Sin costos reales**: como siempre, con su saldo.
+- **Con costos reales**, que antes se dejaban afuera: vuelven a la grilla **detrás de *Ver con costos reales***, apagado por defecto y con el conteo al lado. No suman —se toman como pagados, como siempre— y desde ahí se les puede registrar un pago parcial. **Si tienen un pago parcial vigente con saldo, suman ese saldo** en su fecha, y entonces **se ven siempre**: una fila que suma no puede estar escondida (`OCULTA_POR_COSTOS`, lo decide el servidor).
+- **Sin el script**, ninguno de los dos cambios: los contenedores con costos reales siguen afuera y el tilde no ofrece el pago parcial (lo dice la pregunta).
+
+### Las series del tablero
+
+Un contenedor con pagos parciales tiene dos pedazos en dos fechas: **el saldo, en la fecha del saldo**, y **lo imputado** —la parte de la base ya pagada— **en la de nacionalización**.
+
+| Serie | Lleva |
+| --- | --- |
+| `NACIONALIZACION` | El saldo en su fecha; sin pagos parciales, el estimado completo, como siempre. Cero si está tildado, cubierto o vencido |
+| `NACIONALIZACION_PAGADAS` | El saldo si está tildado, **más lo imputado** |
+| `NACIONALIZACION_TODO` | El saldo **más** lo imputado: la base entera |
+
+**`TODO` se arma sumando las dos partes y no con la base en una sola fecha**, y eso es lo que hace que `NACIONALIZACION + NACIONALIZACION_PAGADAS = NACIONALIZACION_TODO` **cierre columna por columna aunque el saldo caiga en otra fecha**: cada pedazo está en `TODO` y en una de las otras dos, en la misma columna. Cada pedazo se anula con la regla de vencidas de **su** fecha. Las sumas van por `Horizonte::sumar()`, que ahora comparte con Pagos con Tarjetas. Todo lo decide una función pura, `Comex::repartoNacionalizacion()`, y lo ubica `ComexProvider::seriesNacionalizacion()`.
+
+Los contenedores con costos reales **sin** pagos parciales no entran en ninguna serie, como siempre. **Con** pagos parciales, su base de `TODO` pasa a ser el costo real.
+
+### Avisos
+
+Los emite `ComexProvider`, así que los dicen el tablero y la pestaña:
+
+| Aviso | Nivel |
+| --- | --- |
+| *N contenedor(es) con pagos parciales: $ X pagados, $ Y de saldo pendiente.* | info |
+| *N contenedor(es) con pagado de más: $ X por encima de su costo de nacionalización…* | warning |
+| Los vencidos ya existentes incluyen los saldos con la fecha vencida, y si alguno tiene pagos parciales el texto lo nombra | warning |
+
+La pestaña suma el de *falta `sql/cashflow_comex_nac_pago.sql`* (warning), como el del tilde.
+
+### Cuánto se movió el tablero
+
+**Nada**, medido contra la base el 20/10/2026, separado del efecto de la sección 12 (que ya está aplicado en el *antes*):
+
+| | Antes | Sin el script | Con el script, sin pagos |
+| --- | --- | --- | --- |
+| Filas de Crono | 69 | 69 | **259** (69 + 190 con costos reales, las 190 escondidas) |
+| `NACIONALIZACION` en el eje | $ 4.371.325.242,21 | igual | igual |
+| `NACIONALIZACION_PAGADAS` en el eje | $ 0,00 | igual | igual |
+| `NACIONALIZACION_TODO` en el eje | $ 4.371.325.242,21 | igual | igual |
+| Fuera del horizonte y sin fecha | $ 0,00 | igual | igual |
+| Avisos del tablero | — | iguales | iguales |
+
+*Con el script, sin pagos* se midió sin escribir en la base: una copia del módulo con las dos tablas reemplazadas por subconsultas vacías. Las 190 filas con costos reales aportan $ 0 a las tres series, aunque su costo real suma $ 7.181.033.128,64.
+
+---
+
 ## Lo que no cambió
 
 - **La valuación con dólar futuro ROFEX**, fila por fila, según el mes de la fecha efectiva. Vive en `Comex::valuar()` y `DolarFuturo::resolver()`, y la leen la pestaña y el tablero: un solo `IMPORTE_ARS`. Ver el encabezado de `Class/DolarFuturo.php`.
@@ -820,12 +979,14 @@ php cashflow/tests/run.php comex
 - `tests/test_comex_fecha_maestra.php` — la fecha en el maestro, los vencidos y el tilde de pagado.
 - `tests/test_comex_fecha_pago_manual.php` — la fecha de pago fijada a mano, y de dónde sale la marca de cada fecha.
 - `tests/test_comex_saldo_pendiente.php` — lo de la sección 8.
-- `tests/test_comex_visibilidad.php` — lo de las secciones 10 y 11.
+- `tests/test_comex_visibilidad.php` — lo de las secciones 10 y 11, y contra la base que el padrón sea el de la regla pura **con el corte por fecha de movimiento**.
+- `tests/test_comex_nac_parcial.php` — lo de la sección 13: el saldo con base real y estimada, varios pagos, el anulado, el sobrepago y el pagado de más al pasar de estimado a real, el pago en dólares, la fecha de pago futura, la fecha del saldo obligatoria, el tilde con parciales, los pagos que cubren la base, los que tienen costos reales, el invariante columna por columna con saldos en otra fecha, la clave del contenedor —con el grupo de principal + hija y la OC que cambia de grupo después de cargar el pago—, que sin el script nada cambie, los permisos y la pantalla.
+- `tests/test_comex_fecha_mov.php` — lo de la sección 12: el corte con un contenedor justo en la fecha, uno anterior, uno posterior y una hija cuya principal es anterior; el valor inicial sin el parámetro; la validación al guardarlo; que los dos padrones y Crono usen el mismo ayudante; y que lo que queda afuera no se avise.
 
 De las secciones 10 y 11, lo que se fija:
 
 - **La regla pura caso por caso**, los ocho cruces de (A) × estado, y el borde del centavo pasado por `saldoPendiente()`.
-- **El SQL**: que (A) sea un `EXISTS` sobre el grupo, que castee a `FLOAT`, que Proveedores Exterior ya no tenga el `LEFT JOIN` al detalle, que `cargado()` use el mismo `filtroPadron()` y que **Crono Nacionalización conserve su criterio**.
+- **El SQL**: que (A) sea un `EXISTS` sobre el grupo, que castee a `FLOAT`, que Proveedores Exterior ya no tenga el `LEFT JOIN` al detalle, que `cargado()` use el mismo `filtroPadron()`, y que **Crono Nacionalización, sin el script del pago parcial, deje afuera a los que tienen costos con la misma (A)** (con el script los trae: ver la sección 13).
 - **Contra la base**, sólo lectura: que Proveedores Exterior liste **exactamente** lo que dice la regla pura sobre el maestro entero, sin filas repetidas y sin ninguna con costos y el FOB cubierto; que `GRUPO_FILAS` cuente OCs y no líneas de costo; que `cargado()` traiga **los mismos IDs** y el mismo pendiente; que el invariante de cuatro series cierre en todas las columnas; y que el aviso de saldo sin fecha aparezca.
 - **El disparador del recálculo**, leyendo `Comex-fechas.js`: la URL en un solo lugar, el entorno explícito, sólo para NAC que cambió, el refresco en los dos casos y la advertencia si falla.
 
@@ -877,6 +1038,8 @@ De la sección 9, lo que se fija:
 sql/cashflow_comex_fecha_maestra.sql   La tabla del rastro y la migracion al maestro
 sql/cashflow_comex_cotiz_edit.sql      El override de cotizacion por contenedor
 sql/cashflow_comex_pagado.sql          Que pagos ya se hicieron, con su historial
+sql/cashflow_comex_fecha_mov_desde.sql El parametro "Contenedores desde (fecha de movimiento)"
+sql/cashflow_comex_nac_pago.sql        Los pagos parciales de la nacionalizacion y la fecha del saldo
 cashflow/Class/Comex.php               Las dos consultas, el guardado y las reglas puras
 cashflow/Class/DolarFuturo.php         La curva ROFEX y que cotizacion le toca a cada fila
 cashflow/Class/Providers/ComexProvider.php   Las dos filas del tablero y sus siete series
@@ -898,6 +1061,8 @@ tests/test_comex_saldo_pendiente.php    La regla del saldo, el invariante de cua
 tests/test_comex_visibilidad.php        Cuando un contenedor deja de verse, los dos padrones
                                         iguales y el disparador del recalculo en Comex
 tests/test_comex_dolar_futuro.php
+tests/test_comex_fecha_mov.php          El corte por la fecha de movimiento de la OC principal
+tests/test_comex_nac_parcial.php        El pago parcial, el saldo y las tres series
 ```
 
 **La tabla de pagos NO tiene script**: es de Comercio Exterior y ya existe. Lo

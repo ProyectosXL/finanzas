@@ -172,7 +172,11 @@
      */
     function cargarDatos() {
         mostrarCargando(true);
-        
+
+        // Lo que el tablero dice de esta pestaña, en paralelo con los datos:
+        // la grilla no lo espera. Ver Js/avisos-panel.js.
+        AvisosPanel.pedirTablero('proveedores_exterior');
+
         fetch('Controller/ComexController.php?action=getProveedoresExterior')
             .then(response => {
                 if (!response.ok) {
@@ -253,14 +257,13 @@
     }
 
     /**
-     * Los avisos del backend: lo que quedó fuera del horizonte o sin fecha.
-     *
-     * Antes esos importes se descartaban en silencio, así que la tabla podía
-     * mostrar de menos sin que nadie se enterara.
+     * Los avisos de la pestaña -con nivel, los mismos que emite el tablero más
+     * los que apagan una edición- junto con los que el tablero dice de ella,
+     * que llegan después. Sin repetidos: ver AvisosPanel.combinar().
      */
     function pintarAvisos() {
-        // El panel plegable de todas las pestañas: ver Js/avisos-panel.js.
-        AvisosPanel.pintar('avisosProvExt', (datosProveedores && datosProveedores.warnings) || []);
+        AvisosPanel.pintarPestana('avisosProvExt',
+            (datosProveedores && datosProveedores.warnings) || [], { tab: 'proveedores_exterior' });
     }
 
     /**

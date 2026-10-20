@@ -123,7 +123,12 @@ class AuthCashflow {
         'Comex' => [
             'updateCotizacion' => [['proveedores_exterior', null]],
             'updateFecha' => [['proveedores_exterior', null], ['crono_nacionalizacion', null]],
-            'marcarPagado' => [['proveedores_exterior', null], ['crono_nacionalizacion', null]]
+            'marcarPagado' => [['proveedores_exterior', null], ['crono_nacionalizacion', null]],
+            /* El pago parcial de la nacionalizacion pide lo mismo que el tilde:
+               es el mismo dato -cuanto falta pagar- mirado en partes. */
+            'registrarPagoNac' => [['proveedores_exterior', null], ['crono_nacionalizacion', null]],
+            'anularPagoNac' => [['proveedores_exterior', null], ['crono_nacionalizacion', null]],
+            'cambiarFechaSaldoNac' => [['proveedores_exterior', null], ['crono_nacionalizacion', null]]
         ],
         'ComprasProyectadas' => [
             'actualizarInsumo' => [['compras_proyectadas', null]],
@@ -253,12 +258,12 @@ class AuthCashflow {
 
     /** Las acciones que solo leen. Ver ESCRITURAS. */
     const LECTURAS = [
-        'Cashflow' => ['getTablero'],
+        'Cashflow' => ['getTablero', 'getAvisosPestana'],
         'CashflowEstructura' => ['getEstructura'],
         'CobElectronicos' => ['getPestana'],
         'Cobertura' => ['getAplicaciones', 'getHistorialCobertura'],
         'Comex' => ['getProveedoresExterior', 'getPagosContenedor', 'getProveedoresExteriorRaw',
-            'getHistorialPagado', 'getHistorialFecha', 'getCronoNacionalizacion'],
+            'getHistorialPagado', 'getHistorialFecha', 'getCronoNacionalizacion', 'getPagosNac'],
         'ComprasProyectadas' => ['getGrilla', 'getDetalleVersion', 'getHistorialAjustes'],
         'Echeqs' => ['getEcheqsCartera', 'getEcheqsPrechequeado', 'getHistorialExclusion'],
         'Ingresos' => ['getCobranzasFR', 'getCobranzasMay', 'getExportacionesTasky'],
@@ -277,6 +282,30 @@ class AuthCashflow {
     private static $usuario = null;
     private static $permisos = [];
     private static $esAdmin = false;
+
+    /**
+     * Cierra la sesion para que el resto del pedido no la tenga bloqueada.
+     *
+     * POR QUE HACE FALTA. Las sesiones de PHP en archivos se bloquean mientras
+     * dura el pedido que las abrio: dos pedidos del mismo usuario se atienden
+     * de a uno. Los avisos del tablero de una pestana se piden EN PARALELO con
+     * sus datos y tardan lo que tarda el proveedor; sin esto, si salian
+     * primero, la grilla esperaba a que terminaran.
+     *
+     * SE LLAMA DESPUES DE AUTORIZAR, nunca antes: el usuario y sus permisos ya
+     * estan leidos. $_SESSION sigue leible en memoria -Conexion la usa para
+     * elegir el servidor- y la constante le dice a Conexion que no la vuelva a
+     * abrir. Solo para pedidos que no escriben nada en la sesion.
+     */
+    public static function liberarSesion() {
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+
+        if (!defined('CASHFLOW_SESION_LIBERADA')) {
+            define('CASHFLOW_SESION_LIBERADA', true);
+        }
+    }
 
     public static function init() {
         if (self::$inicializado) {

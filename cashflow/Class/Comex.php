@@ -564,51 +564,213 @@ class Comex {
         return $this->dolar;
     }
 
+    /* ====================================================================
+       LOS AVISOS, ESCRITOS UNA SOLA VEZ
+
+       Los leen el tablero -ComexProvider- y las dos pestanas. Hasta
+       feature/cashflow-avisos-kpis-comex-nac-parcial cada controller armaba
+       su lista con las funciones sueltas de abajo, y se habian separado del
+       proveedor: la pestana no decia lo marcado como ya hecho, no mandaba
+       nivel, y la curva caida se contaba con otras palabras. Ahora la pestana
+       muestra tambien los avisos del tablero (Cashflow::avisosDePestana()), y
+       para que no salgan dos veces el texto tiene que ser el mismo: por eso la
+       lista es una, con nivel, y la pestana solo le agrega lo que es suyo
+       -los scripts que apagan una edicion-.
+       ==================================================================== */
+
     /**
-     * Avisos de configuracion pendiente de la pestana Proveedores Exterior.
+     * El aviso de que la curva no se pudo leer, o null.
      *
-     * LO QUE FALTA SE DICE, AUNQUE NO ROMPA NADA. Mismo criterio que
-     * ProveedoresCategorias::getAvisos(): una funcion que desaparece sin decir
-     * por que es indistinguible de una que no se construyo.
+     * UN TEXTO PARA LAS DOS PANTALLAS. El de la pestana decia "se muestran sin
+     * valuar en pesos" y el del tablero "van en cero": las dos cosas pasan a
+     * la vez, asi que el texto dice las dos. Critico: la fila entera en cero
+     * por falta de cotizacion, y nadie lo decidio.
      *
-     * @return array
+     * @param string $queVa 'los pagos al exterior' o 'los gastos de nacionalización'
+     * @return array|null ['nivel', 'texto', 'seccion']
      */
-    public function getAvisosExterior() {
-        $avisos = [];
+    public function avisoSinCurva($queVa) {
         $dolar = $this->dolarFuturo();
 
-        /* Lo que esta pantalla puede no tener. Se avisan por separado porque
-           cada uno apaga una cosa distinta y un solo mensaje generico no diria
-           cual falta.
-
-           EL DE LOS PAGOS VA PRIMERO, y no es orden alfabetico: los otros dos
-           apagan una funcion -editar una fecha, marcar un tilde- y ese cambia
-           LOS NUMEROS que muestra la pantalla. Ver avisoSinPagosComex(). */
-        foreach ([$this->avisoSinPagosComex(), $this->avisoSinHistorial(),
-                  $this->avisoSinPagado()] as $falta) {
-            if ($falta !== '') {
-                $avisos[] = $falta;
-            }
+        if ($dolar->disponible()) {
+            return null;
         }
 
-        if (!$dolar->disponible()) {
-            $avisos[] = 'No se pudo leer la curva de dólar futuro ROFEX ('
-                . DolarFuturo::ORIGEN . '), así que los pagos al exterior se muestran sin '
-                . 'valuar en pesos. Los importes en dólares están: lo que falta es a cuánto '
-                . 'convertirlos. '
-                . ($dolar->error() === null ? '' : $dolar->error());
+        return Aviso::nuevo(Aviso::DANGER, 'No se pudo leer la curva de dólar futuro ROFEX ('
+            . DolarFuturo::ORIGEN . '), así que ' . $queVa . ' no se pueden pasar a pesos: la '
+            . 'pestaña los muestra en dólares y la fila del tablero va en cero. Los importes en '
+            . 'dólares están: lo que falta es a cuánto convertirlos. '
+            . ($dolar->error() === null ? '' : $dolar->error()));
+    }
 
-            return $avisos;
-        }
+    /**
+     * Los avisos de los pagos al exterior, con nivel: los del tablero y de la
+     * pestana Proveedores Exterior.
+     *
+     * EL ORDEN ES EL DE EMISION DEL PROVEEDOR, y dentro de cada nivel es el
+     * orden en que se leen: el panel ordena por gravedad y respeta este orden
+     * entre los iguales.
+     *
+     * SOBRE EL PENDIENTE, no sobre el FOB: lo que no se pudo valuar es lo que
+     * esta fila proyecta. Con VALOR_FOB_DOLAR el aviso diria de mas justamente
+     * en los contenedores que ya tienen pagos hechos.
+     *
+     * Los niveles: lo vencido y lo sin fecha se arreglan cargando una fecha
+     * (atencion); lo marcado, lo pagado en Comercio Exterior y la orden que
+     * comparte contenedor son criterios ya aplicados (informativo); el
+     * sobrepago hay que ir a corregirlo a Comex (atencion); y sin la tabla de
+     * pagos se proyecta de mas sin que nadie lo decida (critico).
+     *
+     * @param array $filas Las de getProveedoresExterior()
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosExteriorConNivel($filas) {
+        $avisos = array_merge(
+            self::avisosValuacionConNivel($filas, $this->dolarFuturo()->ultimoMes(),
+                'PENDIENTE_USD'),
+            /* Sin el eje: ninguna vencida entra en ninguna columna. Se informa
+               IMPORTE_ARS -lo que valen-; IMPORTE_EJE daria "$ 0,00". */
+            self::avisosVencidosConNivel($filas, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_ARS',
+                'fecha estimada de pago'),
+            Aviso::lista(self::avisosPagados($filas, 'IMPORTE_PROYECTABLE', 'pago'), Aviso::INFO),
+            Aviso::lista(self::avisosSaldoComex($filas), Aviso::INFO),
+            Aviso::lista(self::avisosSobrepago($filas), Aviso::WARNING),
+            Aviso::lista(self::avisosGrupo($filas), Aviso::INFO)
+        );
 
-        if (!$this->tieneCotizEdit()) {
-            $avisos[] = 'La corrección manual de la cotización está apagada: falta la columna '
-                . 'COTIZ_USD_EDIT. Corré sql/cashflow_comex_cotiz_edit.sql contra la base '
-                . 'central y la columna se vuelve editable sola. Todo lo demás de esta pantalla '
-                . 'funciona igual: los pagos se valúan con la curva.';
+        if ($this->avisoSinPagosComex() !== '') {
+            $avisos[] = Aviso::nuevo(Aviso::DANGER, $this->avisoSinPagosComex());
         }
 
         return $avisos;
+    }
+
+    /**
+     * Los avisos de la nacionalizacion, con nivel: los del tablero y de la
+     * pestana Crono Nacionalizacion. Mismo criterio que
+     * avisosExteriorConNivel().
+     *
+     * El campo del importe en dolares y el nombre de la fecha son los de esta
+     * pestana: con los de la otra, el aviso diria "U$S 0,00" y nombraria la
+     * fecha de pago.
+     *
+     * @param array $filas Las de getCronoNacionalizacion()
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosNacionalizacionConNivel($filas) {
+        $filas = is_array($filas) ? $filas : [];
+
+        /* LA VALUACION Y LA ESTIMACION QUE FALTA SON DE LAS FILAS ESTIMADAS, y
+           de las titulares. Las que tienen costos reales -que desde el pago
+           parcial vuelven a la lista- no se valuan con la curva: su base ya esta
+           en pesos. Contarlas cambiaria estos avisos sin que nada haya cambiado.
+           Lo marcado, lo mismo: un contenedor con costos reales y sin pagos
+           parciales no suma con o sin tilde. */
+        $estimadas = array_values(array_filter($filas, function ($f) {
+            return empty($f['TIENE_COSTOS']) && empty($f['DUPLICA_GRUPO']);
+        }));
+        $proyectables = array_values(array_filter($filas, function ($f) {
+            return empty($f['NAC_SIN_PROYECCION']) && empty($f['DUPLICA_GRUPO']);
+        }));
+
+        /* LO VENCIDO ES EL SALDO: su fecha es la de nacionalizacion, salvo que
+           tenga pagos parciales y una fecha del saldo cargada. Sin pagos
+           parciales el aviso dice exactamente lo de antes; si alguno de los
+           vencidos tiene pagos parciales, lo nombra. */
+        $conSaldo = false;
+
+        foreach ($proyectables as $f) {
+            if (!empty($f['NAC_CON_PARCIALES']) && self::vencidaPendiente($f)) {
+                $conSaldo = true;
+            }
+        }
+
+        return array_merge(
+            self::avisosValuacionConNivel($estimadas, $this->dolarFuturo()->ultimoMes(),
+                'IMPORTE_EST', 'fecha de nacionalización'),
+            self::avisosVencidosConNivel($proyectables, 'FECHA_SALDO_EFECTIVA', 'SALDO_ARS',
+                $conSaldo ? 'fecha de nacionalización —o la del saldo, si tienen pagos parciales—'
+                          : 'fecha de nacionalización'),
+            Aviso::lista(self::avisosPagados($proyectables, 'IMPORTE_PROYECTABLE', 'nacionalización'),
+                Aviso::INFO),
+            self::avisosPagosParcialesConNivel($filas),
+            self::avisosSinEstimacionConNivel($estimadas)
+        );
+    }
+
+    /**
+     * Un cero no dice si no hay contenedores o si los hay sin importe cargado.
+     *
+     * SE MIDE SOBRE EL IMPORTE DE ORIGEN Y NO SOBRE LA SERIE: la serie puede
+     * dar cero porque todos los contenedores estan vencidos, que es otra cosa
+     * completamente. Midiendo la serie, ese caso diria "ninguno tiene gastos
+     * cargados" sobre contenedores que si los tienen.
+     *
+     * Atencion: se arregla cargando la estimacion de gastos. Antes lo emitia
+     * solo el proveedor y terminaba en "Es lo mismo que muestra la pestana
+     * Crono Nacionalizacion", que no era cierto: la pestana no lo decia.
+     *
+     * @param array $filas
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public static function avisosSinEstimacionConNivel($filas) {
+        $filas = is_array($filas) ? $filas : [];
+        $total = 0.0;
+
+        foreach ($filas as $f) {
+            $total += isset($f['IMPORTE_EST']) ? floatval($f['IMPORTE_EST']) : 0.0;
+        }
+
+        if (count($filas) === 0 || $total != 0) {
+            return [];
+        }
+
+        return [Aviso::nuevo(Aviso::WARNING, 'Hay ' . count($filas) . ' contenedores en el '
+            . 'cronograma pero ninguno tiene gastos de nacionalización estimados cargados, así '
+            . 'que la fila va en cero.')];
+    }
+
+    /**
+     * Lo que apaga una edicion de la pestana Proveedores Exterior: solo de la
+     * pestana, porque el tablero no edita nada.
+     *
+     * LO QUE FALTA SE DICE, AUNQUE NO ROMPA NADA. Mismo criterio que
+     * ProveedoresCategorias::getAvisos(): una funcion que desaparece sin decir
+     * por que es indistinguible de una que no se construyo. Se avisan por
+     * separado porque cada uno apaga una cosa distinta.
+     *
+     * Atencion: un script que falta y solo apaga la edicion. La tabla de pagos
+     * de Comex -que cambia los numeros- no esta aca: es critica y la dice
+     * avisosExteriorConNivel(), igual que el tablero.
+     *
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosEdicionExteriorConNivel() {
+        $avisos = Aviso::lista(array_values(array_filter(
+            [$this->avisoSinHistorial(), $this->avisoSinPagado()])), Aviso::WARNING);
+
+        /* Sin curva no hay nada que corregir: el override pisa una cotizacion
+           que no se pudo leer. El aviso de la curva ya lo dice. */
+        if ($this->dolarFuturo()->disponible() && !$this->tieneCotizEdit()) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, 'La corrección manual de la cotización '
+                . 'está apagada: falta la columna COTIZ_USD_EDIT. Corré '
+                . 'sql/cashflow_comex_cotiz_edit.sql contra la base central y la columna se '
+                . 'vuelve editable sola. Todo lo demás de esta pantalla funciona igual: los pagos '
+                . 'se valúan con la curva.');
+        }
+
+        return $avisos;
+    }
+
+    /**
+     * Lo que apaga una edicion de la pestana Crono Nacionalizacion.
+     *
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public function avisosEdicionNacionalizacionConNivel() {
+        return Aviso::lista(array_values(array_filter(
+            [$this->avisoSinHistorial(), $this->avisoSinPagado(), $this->avisoSinNacPago()])),
+            Aviso::WARNING);
     }
 
     /* ====================================================================
@@ -968,6 +1130,173 @@ class Comex {
                      AND " . $fob . " - CAST(" . $pagadoExpr . " AS FLOAT) <= " . self::TOLERANCIA_SALDO . ")";
     }
 
+    /* ====================================================================
+       DESDE QUE FECHA DE MOVIMIENTO SE CONSIDERA UN CONTENEDOR
+
+       Desde feature/cashflow-avisos-kpis-comex-nac-parcial los dos padrones
+       -Proveedores Exterior y lo ya cargado que descuenta Compras
+       Proyectadas- y Crono Nacionalizacion traen solo los contenedores cuyo
+       FECHA_MOV DE LA OC PRINCIPAL es igual o posterior a un parametro,
+       comex_fecha_mov_desde (Parametros > Compras Exterior, 01/01/2025 por
+       defecto).
+
+       POR QUE. El padron arrastraba contenedores de 2023 y 2024 que nadie
+       va a pagar ni nacionalizar desde el cashflow: al 20/10/2026 eran 149
+       de las 348 filas de Proveedores Exterior, y 149 de los 255 avisos de
+       "no se pudieron valuar". Ninguno sumaba en el eje -no tenian fecha o
+       estaban vencidos-; lo unico que hacian era tapar los avisos que si
+       piden algo.
+
+       LA FECHA ES LA DE LA OC PRINCIPAL, COALESCE(ID_PADRE, ID), que es el
+       criterio de Comercio Exterior para la ventana de Gestion de Despachos
+       (VisibilidadContenedor, repo administracion). Una OC y sus hijas
+       entran o salen juntas. Si la principal no esta -una FK colgada-, cuenta
+       la propia, igual que el FOB en saldoSelect().
+
+       FECHA_MOV ES OBLIGATORIO EN COMERCIO EXTERIOR: la pantalla de alta lo
+       pide y al 20/10/2026 no hay un solo encabezado sin el. Por eso no hay
+       caso "sin fecha": si apareciera, la comparacion con NULL lo dejaria
+       afuera, que es lo mismo que pasa con un contenedor anterior al corte.
+
+       LO QUE QUEDA AFUERA NO SE AVISA, a proposito: esa informacion no se
+       considera, y un aviso que la cuente seria justamente el ruido que este
+       corte viene a sacar. Vale tambien para un contenedor anterior con
+       saldo pendiente y fecha futura.
+       ==================================================================== */
+
+    /** La clave del parametro, en RO_T_CASHFLOW_PARAMETROS */
+    const PARAM_FECHA_MOV_DESDE = 'comex_fecha_mov_desde';
+
+    /**
+     * El valor con el que se trabaja sin el parametro. Esta escrito dos veces
+     * -aca y en sql/cashflow_comex_fecha_mov_desde.sql-, como los de Compras
+     * Proyectadas: el script lo siembra, y el codigo no depende de que se haya
+     * corrido.
+     */
+    const FECHA_MOV_DESDE_INICIAL = '2025-01-01';
+
+    /** @var string|null Cache del parametro, una lectura por instancia */
+    private $fechaMovDesde = null;
+
+    /**
+     * La fecha de corte a partir del valor del parametro. Un valor que no es
+     * una fecha 'aaaa-mm-dd' real -o que no esta- vale la inicial: el
+     * parametro lo valida validarFechaMovDesde() al guardarlo, asi que esto
+     * solo pasa sin el script o con un valor cargado a mano en la base.
+     *
+     * @param mixed $valor
+     * @return string 'Y-m-d'
+     */
+    public static function fechaMovDesde($valor) {
+        $v = trim((string) $valor);
+
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $v, $m)
+            && checkdate(intval($m[2]), intval($m[3]), intval($m[1]))) {
+            return $v;
+        }
+
+        return self::FECHA_MOV_DESDE_INICIAL;
+    }
+
+    /**
+     * La validacion del parametro al guardarlo, en el servidor: una fecha real
+     * y no futura. Una fecha futura dejaria los dos padrones vacios -ningun
+     * contenedor se movio todavia- y el tablero sin pagos al exterior.
+     *
+     * @param mixed $valor
+     * @param string $hoy 'Y-m-d'
+     * @return string La fecha normalizada
+     * @throws Exception Si no es una fecha o es futura
+     */
+    public static function validarFechaMovDesde($valor, $hoy) {
+        $v = trim((string) $valor);
+
+        if (self::fechaMovDesde($v) !== $v) {
+            throw new Exception('"Contenedores desde" tiene que ser una fecha (aaaa-mm-dd).');
+        }
+
+        if ($v > substr((string) $hoy, 0, 10)) {
+            throw new Exception('"Contenedores desde" no puede ser una fecha futura: dejaría afuera '
+                . 'todos los contenedores.');
+        }
+
+        return $v;
+    }
+
+    /**
+     * La regla del corte, pura: si un contenedor entra.
+     *
+     * Es sqlDesdeFechaMov() escrita en PHP, para poder probar sin base los
+     * casos que la base de hoy no tiene -no hay una sola OC hija- y para
+     * comparar una contra la otra fila por fila cuando hay base, igual que
+     * VisibilidadContenedor en Comercio Exterior.
+     *
+     * @param mixed $fechaMovPrincipal FECHA_MOV de COALESCE(ID_PADRE, ID), o null si no esta
+     * @param mixed $fechaMovPropia FECHA_MOV de la fila
+     * @param mixed $desde El parametro
+     * @return bool
+     */
+    public static function entraPorFechaMov($fechaMovPrincipal, $fechaMovPropia, $desde) {
+        $f = Horizonte::normalizarFecha($fechaMovPrincipal);
+
+        if ($f === null) {
+            $f = Horizonte::normalizarFecha($fechaMovPropia);
+        }
+
+        return $f !== null && $f >= self::fechaMovDesde($desde);
+    }
+
+    /**
+     * El corte en SQL, para la fila de alias A. Lo usan filtroPadron() -o sea
+     * los dos padrones- y getCronoNacionalizacion(): la regla esta escrita una
+     * vez.
+     *
+     * La fecha va como literal porque los WHERE de este modulo se arman como
+     * texto y se reusan en otras consultas (ComprasProyectadasDatos::cargado()),
+     * sin parametros; pasa antes por fechaMovDesde(), que solo deja salir
+     * 'aaaa-mm-dd'.
+     *
+     * @param mixed $desde
+     * @return string
+     */
+    public static function sqlDesdeFechaMov($desde) {
+        return "ISNULL((SELECT FMV.FECHA_MOV FROM " . self::TABLA_MAESTRO . " FMV
+                        WHERE FMV.ID = " . self::OC_PRINCIPAL . "), A.FECHA_MOV)
+                >= '" . self::fechaMovDesde($desde) . "'";
+    }
+
+    /**
+     * El parametro vigente. Sin la fila -no se corrio el script- o sin poder
+     * leerla, la inicial: el corte se aplica igual. El aviso de que falta el
+     * script va solo en Parametros, no en las pestanas.
+     *
+     * @return string 'Y-m-d'
+     */
+    public function fechaMovDesdeVigente() {
+        if ($this->fechaMovDesde !== null) {
+            return $this->fechaMovDesde;
+        }
+
+        $valor = null;
+        $cid = $this->conn->conectar('central');
+
+        if ($cid) {
+            $stmt = @sqlsrv_query($cid,
+                "SELECT VALOR FROM RO_T_CASHFLOW_PARAMETROS WHERE CLAVE = ?",
+                [self::PARAM_FECHA_MOV_DESDE]);
+
+            if ($stmt !== false) {
+                $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+                $valor = $row ? $row['VALOR'] : null;
+                sqlsrv_free_stmt($stmt);
+            }
+        }
+
+        $this->fechaMovDesde = self::fechaMovDesde($valor);
+
+        return $this->fechaMovDesde;
+    }
+
     /**
      * El WHERE del padron de Proveedores Exterior, sobre los alias de
      * saldoApply(): OC para el FOB de la principal y PG para sus pagos.
@@ -981,12 +1310,17 @@ class Comex {
      * esta cubierto y todo contenedor con FOB sigue en el padron. Es la misma
      * degradacion -proyectar de mas- que avisoSinPagosComex() ya avisa.
      *
+     * Y EL CORTE POR FECHA DE MOVIMIENTO VA ACA, no en cada consulta: asi los
+     * dos padrones siguen siendo el mismo. Ver sqlDesdeFechaMov().
+     *
      * @return string
      */
     public function filtroPadron() {
         return self::sqlSigueVisible(
             'ISNULL(OC.VALOR_FOB_DOLAR, A.VALOR_FOB_DOLAR)',
-            $this->tienePagosComex() ? 'ISNULL(PG.MONTO, 0)' : 'CAST(0 AS DECIMAL(18,2))');
+            $this->tienePagosComex() ? 'ISNULL(PG.MONTO, 0)' : 'CAST(0 AS DECIMAL(18,2))')
+            . "
+                AND " . self::sqlDesdeFechaMov($this->fechaMovDesdeVigente());
     }
 
     /**
@@ -1497,6 +1831,15 @@ class Comex {
             return false;
         }
 
+        /* En Crono, otras dos formas de "ya se pago": los pagos parciales que
+           cubren la base, y los costos reales cargados sin pagos parciales
+           -que como siempre se toman como pagados-. Ninguna de las dos tiene
+           una fecha que corregir. Las filas de Proveedores Exterior no traen
+           estos campos. Ver repartoNacionalizacion(). */
+        if (!empty($fila['CUBIERTA_PARCIALES']) || !empty($fila['NAC_SIN_PROYECCION'])) {
+            return false;
+        }
+
         return !(isset($fila['ESTADO_PAGO']) && $fila['ESTADO_PAGO'] === self::ESTADO_CANCELADO);
     }
 
@@ -1538,11 +1881,13 @@ class Comex {
      * fila viaja igual -se ve en la grilla, marcada- por la misma razon por la
      * que viajan las vencidas: esconder una fila no explica nada.
      *
-     * EL FLAG SE PREGUNTA CON !empty() Y NO AL REVES, y eso es lo que hace que
-     * Crono Nacionalizacion siga andando: esa pestana no trae DUPLICA_GRUPO
-     * -no comparte pagos con nadie- y un campo ausente es falso, o sea que
-     * todas sus filas suman. Con la condicion invertida -"suma solo si es
-     * titular"- esa pestana se habria ido entera a cero.
+     * EL FLAG SE PREGUNTA CON !empty() Y NO AL REVES: una fila que no trae
+     * DUPLICA_GRUPO suma. Con la condicion invertida -"suma solo si es
+     * titular"- cualquier consulta que se olvidara de pedirlo se iria entera a
+     * cero. Crono Nacionalizacion lo trae desde feature/cashflow-avisos-kpis-
+     * comex-nac-parcial -la base y los pagos parciales son del contenedor-,
+     * pero ya no pasa por aca: sus importes los decide
+     * repartoNacionalizacion().
      *
      * @param array $fila Fila ya valuada, con VENCIDA resuelta
      * @param string $campoImporte De donde sale el importe de esa pestana
@@ -2431,11 +2776,15 @@ class Comex {
      * @param string $contexto
      * @return void
      */
-    private function ejecutar($cid, $sql, $params, $contexto) {
+    private function ejecutar($cid, $sql, $params, $contexto, $tabla = null) {
         $stmt = sqlsrv_query($cid, $sql, $params);
 
+        /* El error nombra la tabla contra la que fallo: con el pago parcial esta
+           clase escribe en seis, y uno que nombrara siempre la del override
+           mandaria a mirar la equivocada. */
         if ($stmt === false) {
-            throw new Exception($this->errorSql($contexto));
+            throw new Exception($tabla === null
+                ? $this->errorSql($contexto) : $this->errorSqlEn($tabla, $contexto));
         }
 
         sqlsrv_free_stmt($stmt);
@@ -2837,6 +3186,22 @@ class Comex {
      * devolviendo en IMPORTE_EST -la grilla lo muestra- y lo que entra al eje
      * es IMPORTE_ARS.
      *
+     * Y DESDE feature/cashflow-avisos-kpis-comex-nac-parcial:
+     *
+     *   - SOLO LOS CONTENEDORES DESDE "Contenedores desde", por la fecha de
+     *     movimiento de la OC principal: sqlDesdeFechaMov(), el mismo corte de
+     *     los dos padrones.
+     *   - LOS CONTENEDORES CON COSTOS REALES VUELVEN A LA LISTA, que antes los
+     *     dejaba afuera (LEFT JOIN al detalle ... WHERE ID_MG IS NULL). Siguen
+     *     sin sumar -se toman como ya pagados- salvo que tengan un pago parcial
+     *     con saldo: ahi suman ese saldo. La grilla los esconde detras de "Ver
+     *     con costos reales". SIN sql/cashflow_comex_nac_pago.sql siguen
+     *     afuera, como siempre: sin pagos parciales no tienen nada que ofrecer.
+     *   - CADA FILA TRAE LA BASE, LO PAGADO Y EL SALDO DE SU CONTENEDOR, y lo
+     *     que aporta a cada serie: repartoNacionalizacion(). La estimacion se
+     *     lee de la OC principal, que es donde la guarda Comercio Exterior, y
+     *     las hijas no suman (DUPLICA_GRUPO).
+     *
      * @param string|null $hoy Para poder probar el corte de vencidos sin
      *                         depender de que dia es. Por defecto, hoy.
      * @return array Listado de importaciones con fechas de nacionalización
@@ -2869,19 +3234,30 @@ class Comex {
                        muestra en las dos grillas. */
                     " . $this->confPagoSelect() . ",
                     " . $this->rastroSelect('NAC') . ",
-                    " . $this->pagadoSelect() . "
+                    " . $this->pagadoSelect() . ",
+                    " . self::OC_PRINCIPAL . " GRUPO_ID,
+                    " . self::duplicaGrupoSelect() . ",
+                    CASE WHEN " . self::sqlTieneCostos() . " THEN 1 ELSE 0 END TIENE_COSTOS,
+                    CR.COSTO_REAL_ARS,
+                    " . $this->nacPagoSelect() . "
                 FROM " . self::TABLA_MAESTRO . " A
-                LEFT JOIN RO_T_IMPORTACIONES_DETALLE B ON A.ID = B.ID_MG
+                /* LA ESTIMACION ES DEL CONTENEDOR y Comercio Exterior la guarda en
+                   la OC principal: se lee de ahi. Una hija lee la misma y no suma
+                   (DUPLICA_GRUPO). Al 20/10/2026, 114 estimaciones y ninguna en
+                   una hija. */
                 LEFT JOIN
                 (
                     SELECT ID_MG, SUM(IMPORTE) IMPORTE_EST
                     FROM RO_T_IMPORTACIONES_ESTIMACION_DETALLE
                     WHERE ID_CE BETWEEN 3 AND 10
                     GROUP BY ID_MG
-                ) C ON A.ID = C.ID_MG
+                ) C ON C.ID_MG = " . self::OC_PRINCIPAL . "
+                " . self::costoRealApply() . "
+                " . $this->nacPagoApply() . "
                 " . $this->rastroJoin('NAC') . "
                 " . $this->pagadoJoin('NAC') . "
-                WHERE B.ID_MG IS NULL
+                WHERE " . ($this->tieneNacPago() ? '1 = 1' : 'NOT ' . self::sqlTieneCostos()) . "
+                  AND " . self::sqlDesdeFechaMov($this->fechaMovDesdeVigente()) . "
                 ORDER BY CASE WHEN A.FECHA_DESP_ADU IS NULL THEN 1 ELSE 0 END,
                          A.FECHA_DESP_ADU,
                          ISNULL(A.FECHA_EMB, A.FECHA_EST_EMB)";
@@ -2908,7 +3284,22 @@ class Comex {
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $row = self::aTexto($row, ['FECHA_EST_EMB', 'ETD', 'ETA', 'FECHA_NAC',
                 'EDIT_ANTERIOR', 'EDIT_VALOR', 'EDIT_FECHA', 'PAGADO_FECHA',
-                'FECHA_PAGO_CONF_FECHA']);
+                'FECHA_PAGO_CONF_FECHA', 'NAC_FECHA_SALDO']);
+
+            if (isset($row['NAC_FECHA_SALDO_ALTA']) && $row['NAC_FECHA_SALDO_ALTA'] instanceof DateTime) {
+                $row['NAC_FECHA_SALDO_ALTA'] = $row['NAC_FECHA_SALDO_ALTA']->format('Y-m-d H:i:s');
+            }
+
+            /* Un BIT de SQL Server llega como '1'/'0', y la base y los pagos como
+               texto: se normalizan aca, una sola vez, porque de ellos depende lo
+               que la fila aporta a cada serie. */
+            $row['TIENE_COSTOS'] = !empty($row['TIENE_COSTOS']) && $row['TIENE_COSTOS'] != '0';
+            $row['DUPLICA_GRUPO'] = !empty($row['DUPLICA_GRUPO']) && $row['DUPLICA_GRUPO'] != '0';
+            $row['GRUPO_ID'] = intval($row['GRUPO_ID']);
+            $row['GRUPO_FILAS'] = isset($row['GRUPO_FILAS']) ? intval($row['GRUPO_FILAS']) : 1;
+            $row['COSTO_REAL_ARS'] = ($row['COSTO_REAL_ARS'] === null) ? null : floatval($row['COSTO_REAL_ARS']);
+            $row['NAC_PAGADO_ARS'] = floatval($row['NAC_PAGADO_ARS']);
+            $row['NAC_PAGOS_CANT'] = intval($row['NAC_PAGOS_CANT']);
 
             $row = self::conFechaEfectiva($row, 'FECHA_NAC', 'FECHA_NAC_EFECTIVA', $hoy);
 
@@ -2918,15 +3309,11 @@ class Comex {
                muestra-. */
             $row = self::valuar($row, $curva, 'IMPORTE_EST', 'FECHA_NAC_EFECTIVA');
 
-            /* Mismas dos reglas que en Proveedores Exterior: al cashflow entra
-               lo que se mueve de hoy en adelante y lo que todavia no se pago.
-               Ver aporteAlEje().
-
-               SOBRE IMPORTE_ARS -el default- y ya no sobre IMPORTE_EST: lo que
-               se ubica en el eje es el importe en PESOS. Mientras se ubicaba el
-               de dolares, la fila del tablero sumaba dolares contra pesos. */
-            $row['IMPORTE_PROYECTABLE'] = self::importeProyectable($row);
-            $row['IMPORTE_EJE'] = self::aporteAlEje($row);
+            /* LA BASE, EL SALDO Y LO QUE APORTA A CADA SERIE, en una sola
+               funcion pura: repartoNacionalizacion(). Sin pagos parciales da lo
+               mismo que las dos reglas de Proveedores Exterior -lo vencido y lo
+               tildado no suman- sobre IMPORTE_ARS, el importe en PESOS. */
+            $row = self::repartoNacionalizacion($row, $hoy);
 
             // Solo decide lo que se muestra: ver vencidaPendiente().
             $row['VENCIDA_PENDIENTE'] = self::vencidaPendiente($row);
@@ -2937,6 +3324,922 @@ class Comex {
         sqlsrv_free_stmt($stmt);
 
         return $v;
+    }
+
+    /* ====================================================================
+       EL PAGO PARCIAL DE LA NACIONALIZACION
+
+       Desde feature/cashflow-avisos-kpis-comex-nac-parcial. Hasta ahi la
+       nacionalizacion era todo o nada: el tilde "Pagado" saca el importe entero
+       de la proyeccion. Pero se puede pagar una parte y quedar un saldo, y ese
+       saldo es un egreso que el tablero tiene que seguir proyectando, en la
+       fecha en que se lo espera pagar.
+
+       EL DATO ES DEL CASHFLOW. Los pagos parciales y la fecha del saldo viven en
+       RO_T_CASHFLOW_COMEX_NAC_PAGO y RO_T_CASHFLOW_COMEX_NAC_SALDO_FECHA
+       (sql/cashflow_comex_nac_pago.sql). Comercio Exterior no se entera, y este
+       modulo no escribe nada del otro lado.
+
+       LA BASE, EN PESOS, Y POR QUE HAY DOS
+       ------------------------------------
+         - CON COSTOS REALES (filas en RO_T_IMPORTACIONES_DETALLE para cualquier
+           OC del grupo, la (A) de sqlTieneCostos()): el Costo Total Real, la
+           suma de IMPORTE_$ de esas filas. Ya esta en pesos: cada fila trae su
+           tipo de cambio. Es el total que muestra Comercio Exterior.
+         - SIN COSTOS REALES: el Costo Total Estimado, IMPORTE_ARS, o sea los
+           conceptos 3 a 10 de la estimacion valuados con la curva ROFEX del mes
+           de la fecha de NACIONALIZACION. La fecha del saldo NO cambia la
+           cotizacion: solo decide en que columna cae.
+
+       LAS DOS BASES NO TIENEN LA MISMA COMPOSICION, y hay que saberlo para leer
+       un saldo. La real incluye el FLETE INTERNACIONAL (es una linea del maestro
+       de gastos de Comex) y no los impuestos que la estimacion calcula (IVA,
+       IVA adicional, ganancias, IIBB: conceptos 5 a 8); la estimada, al reves.
+       Por eso, cuando un contenedor pasa de estimado a real, EL SALDO PUEDE
+       CAMBIAR POR COMPOSICION Y NO SOLO POR PRECISION: no es que la estimacion
+       erro, es que mide otra cosa. Y puede quedar pagado de mas: ver
+       saldoNacionalizacion().
+
+       UNA SOLA CLAVE: EL CONTENEDOR, O SEA LA OC PRINCIPAL
+       ----------------------------------------------------
+       En Comercio Exterior la estimacion y los pagos son del contenedor y viven
+       en la OC principal, y los costos reales se cargan desde la principal y se
+       COPIAN ENTEROS en cada OC del grupo (OrdenDeCompra::insertDetalleReplicado,
+       repo administracion). Sumar el detalle del grupo multiplicaria el costo
+       por la cantidad de OCs; Comex imprime la copia de UNA.
+
+       Asi que la base, los pagos y la fecha del saldo son del contenedor:
+       COALESCE(ID_PADRE, ID). Se graba contra la principal -la resuelve el
+       servidor, nunca el navegador- y SE VUELVE A RESOLVER AL LEER: si una OC
+       que era principal pasa a ser hija de otra, sus pagos siguen apareciendo
+       en el contenedor. En la grilla, una fila por OC: todo lo del contenedor
+       va en la fila titular (DUPLICA_GRUPO = 0, el mismo criterio que
+       Proveedores Exterior) y las hijas no suman. Al 20/10/2026 no hay una sola
+       OC hija, asi que hoy esto no cambia ninguna fila.
+       ==================================================================== */
+
+    /** Los pagos parciales de la nacionalizacion. Ver el bloque de arriba */
+    const TABLA_NAC_PAGO = 'RO_T_CASHFLOW_COMEX_NAC_PAGO';
+
+    /** La fecha del saldo de cada contenedor, con historial */
+    const TABLA_NAC_SALDO_FECHA = 'RO_T_CASHFLOW_COMEX_NAC_SALDO_FECHA';
+
+    /**
+     * UN PESO, y no TOLERANCIA_SALDO.
+     *
+     * TOLERANCIA_SALDO es un centavo DE DOLAR, copiada de Comercio Exterior
+     * para que el saldo del FOB de las dos aplicaciones de el mismo numero.
+     * Este saldo es otro: es del cashflow, esta en PESOS y se arma con
+     * importes que no cierran al centavo por construccion -un pago en dolares
+     * pasado a pesos con su cotizacion, contra una base que es una suma de
+     * lineas con su propio tipo de cambio, o una estimacion valuada con la
+     * curva-. Con un centavo, un contenedor pagado entero quedaria
+     * proyectando "$ 0,37" para siempre; un peso no mueve ningun numero del
+     * tablero y cierra esos casos.
+     */
+    const TOLERANCIA_SALDO_NAC = 1.0;
+
+    /** @var bool|null Cache de si existen las tablas del pago parcial */
+    private $nacPago = null;
+
+    /**
+     * El saldo de la nacionalizacion de un contenedor. PURA.
+     *
+     *     saldo = base - suma de los pagos parciales vigentes
+     *
+     *   - NUNCA NEGATIVO. Si lo pagado supera la base, el saldo es cero y lo
+     *     que sobra va en 'sobrepago', para que la pestana lo avise en pesos:
+     *     un egreso negativo seria un ingreso que nadie afirmo. Pasa sobre todo
+     *     cuando el contenedor pasa de estimado a real y el costo baja.
+     *   - CUBIERTO: hay pagos y cubren la base, con la tolerancia de un peso.
+     *     El contenedor se comporta como pagado aunque nadie lo haya tildado.
+     *   - SIN BASE (sin estimacion ni costo real, o sin curva), el saldo es null
+     *     y no cero: null es "no se sabe", y el aviso de valuacion lo dice.
+     *   - 'imputado' es la parte de la base que los pagos ya cubrieron, y se
+     *     devuelve calculada -base menos saldo- para que las series cierren al
+     *     centavo, igual que saldoPendiente().
+     *
+     * @param mixed $base En pesos, o null
+     * @param mixed $pagado Suma de los pagos vigentes, en pesos
+     * @return array ['base','pagado','saldo','imputado','sobrepago','cubierto']
+     */
+    public static function saldoNacionalizacion($base, $pagado) {
+        $p = max(0.0, floatval($pagado));
+
+        if ($base === null) {
+            return ['base' => null, 'pagado' => $p, 'saldo' => null, 'imputado' => null,
+                    'sobrepago' => 0.0, 'cubierto' => false];
+        }
+
+        $b = max(0.0, floatval($base));
+        $dif = $b - $p;
+        $cubierto = ($p > 0 && $dif <= self::TOLERANCIA_SALDO_NAC);
+        $saldo = $cubierto ? 0.0 : round($dif, 2);
+
+        return [
+            'base' => $b,
+            'pagado' => $p,
+            'saldo' => $saldo,
+            'imputado' => round($b - $saldo, 2),
+            'sobrepago' => (-$dif > self::TOLERANCIA_SALDO_NAC) ? round(-$dif, 2) : 0.0,
+            'cubierto' => $cubierto
+        ];
+    }
+
+    /**
+     * El contenedor de una OC: COALESCE(ID_PADRE, ID). PURA.
+     *
+     * Es la clave de la base, de los pagos y de la fecha del saldo, y se
+     * resuelve AL GRABAR y AL LEER: un pago grabado contra una OC que despues
+     * paso a ser hija de otra pertenece al contenedor nuevo. El SQL hace lo
+     * mismo con COALESCE(NE.ID_PADRE, NE.ID) en nacPagoApply(); esta version
+     * es la que se prueba sin base.
+     *
+     * @param int $idMg
+     * @param array $padrePorId id => ID_PADRE (null si es principal)
+     * @return int
+     */
+    public static function contenedorDe($idMg, $padrePorId) {
+        $id = intval($idMg);
+
+        return (isset($padrePorId[$id]) && $padrePorId[$id] !== null)
+            ? intval($padrePorId[$id]) : $id;
+    }
+
+    /**
+     * Lo pagado y la cantidad de pagos de cada contenedor, a partir de los
+     * pagos vigentes. PURA: es nacPagoApply() escrita en PHP, para probar el
+     * caso que la base de hoy no tiene -una OC que cambio de grupo-.
+     *
+     * @param array $pagos Lista de ['ID_MG', 'IMPORTE_ARS', 'VIGENTE']
+     * @param array $padrePorId id => ID_PADRE
+     * @return array contenedor => ['ars' => float, 'cant' => int]
+     */
+    public static function pagosPorContenedor($pagos, $padrePorId) {
+        $v = [];
+
+        foreach (is_array($pagos) ? $pagos : [] as $p) {
+            if (isset($p['VIGENTE']) && empty($p['VIGENTE'])) {
+                continue;
+            }
+
+            $c = self::contenedorDe($p['ID_MG'], $padrePorId);
+
+            if (!isset($v[$c])) {
+                $v[$c] = ['ars' => 0.0, 'cant' => 0];
+            }
+
+            $v[$c]['ars'] += floatval($p['IMPORTE_ARS']);
+            $v[$c]['cant']++;
+        }
+
+        return $v;
+    }
+
+    /**
+     * De que OC del grupo se lee el costo real. PURA.
+     *
+     * De LA PRINCIPAL: Comex carga los costos desde ahi y los copia en cada
+     * OC. Si la principal no tuviera copia -no deberia pasar- la de ID mas
+     * chico que la tenga. Nunca la suma de las copias. El SQL de
+     * costoRealApply() ordena igual.
+     *
+     * @param int $principal
+     * @param int[] $conDetalle IDs del grupo con filas en el detalle
+     * @return int|null
+     */
+    public static function copiaCostoReal($principal, $conDetalle) {
+        $ids = array_map('intval', is_array($conDetalle) ? $conDetalle : []);
+
+        if (in_array(intval($principal), $ids, true)) {
+            return intval($principal);
+        }
+
+        if (empty($ids)) {
+            return null;
+        }
+
+        sort($ids);
+
+        return $ids[0];
+    }
+
+    /**
+     * Le pone a una fila de Crono la base, el saldo y lo que aporta a cada
+     * serie del tablero. PURA, y la unica que decide esos numeros: la grilla,
+     * el tablero y los avisos leen los campos que deja.
+     *
+     * LAS TRES SERIES Y EN QUE COLUMNA VA CADA PARTE
+     * ---------------------------------------------
+     * Un contenedor con pagos parciales tiene dos pedazos en dos fechas:
+     *
+     *   el SALDO, en la fecha del saldo (la cargada, o la de nacionalizacion)
+     *   lo IMPUTADO -la parte de la base ya pagada-, en la de nacionalizacion
+     *
+     *   NACIONALIZACION         el saldo, salvo que este tildado o cubierto
+     *   NACIONALIZACION_PAGADAS el saldo si esta tildado, MAS lo imputado
+     *   NACIONALIZACION_TODO    el saldo MAS lo imputado: la base entera
+     *
+     * TODO se arma con las dos partes y no con la base en una sola fecha, y
+     * eso es lo que hace que NACIONALIZACION + NACIONALIZACION_PAGADAS =
+     * NACIONALIZACION_TODO cierre COLUMNA POR COLUMNA aunque el saldo caiga en
+     * otra fecha: cada pedazo esta en las dos series, en la misma columna.
+     * Cada pedazo se anula con la regla de vencidas de SU fecha: el saldo con
+     * la del saldo, lo imputado con la de nacionalizacion.
+     *
+     * SIN PAGOS PARCIALES es exactamente lo de antes: el saldo es la base, la
+     * fecha del saldo es la de nacionalizacion y no hay nada imputado.
+     *
+     * Y NO ENTRAN EN NINGUNA SERIE: las OC hijas (DUPLICA_GRUPO: el contenedor
+     * lo proyecta la titular) y los contenedores con costos reales SIN pagos
+     * parciales, que como siempre se toman como ya pagados. Con pagos
+     * parciales, su base de TODO pasa a ser el costo real.
+     *
+     * @param array $fila Con IMPORTE_ARS, TIENE_COSTOS, COSTO_REAL_ARS,
+     *        NAC_PAGADO_ARS, NAC_PAGOS_CANT, NAC_FECHA_SALDO,
+     *        FECHA_NAC_EFECTIVA, PAGADO y DUPLICA_GRUPO resueltos
+     * @param string $hoy 'Y-m-d'
+     * @return array La fila con la base, el saldo y los aportes
+     */
+    public static function repartoNacionalizacion($fila, $hoy) {
+        $real = !empty($fila['TIENE_COSTOS']);
+        $parciales = isset($fila['NAC_PAGOS_CANT']) && intval($fila['NAC_PAGOS_CANT']) > 0;
+        $duplica = !empty($fila['DUPLICA_GRUPO']);
+        $tilde = !empty($fila['PAGADO']);
+
+        $base = $real
+            ? (isset($fila['COSTO_REAL_ARS']) && $fila['COSTO_REAL_ARS'] !== null
+                ? floatval($fila['COSTO_REAL_ARS']) : 0.0)
+            : (isset($fila['IMPORTE_ARS']) && $fila['IMPORTE_ARS'] !== null
+                ? floatval($fila['IMPORTE_ARS']) : null);
+
+        $s = self::saldoNacionalizacion($base,
+            $parciales ? (isset($fila['NAC_PAGADO_ARS']) ? $fila['NAC_PAGADO_ARS'] : 0) : 0);
+
+        $fechaNac = isset($fila['FECHA_NAC_EFECTIVA']) ? $fila['FECHA_NAC_EFECTIVA'] : null;
+        $fechaCargada = ($parciales && !empty($fila['NAC_FECHA_SALDO']))
+            ? Horizonte::normalizarFecha($fila['NAC_FECHA_SALDO']) : null;
+        $fechaSaldo = ($fechaCargada !== null) ? $fechaCargada : $fechaNac;
+        $saldoVencido = self::estaVencida($fechaSaldo, $hoy);
+
+        // Con costos reales y sin pagos parciales: ya pagado, como siempre.
+        $sinProyeccion = $real && !$parciales;
+
+        if ($duplica || $sinProyeccion || $saldoVencido) {
+            $saldoProy = 0.0;
+        } else {
+            $saldoProy = $s['saldo'];
+        }
+
+        $imputadoProy = ($duplica || !$parciales || self::estaVencida($fechaNac, $hoy))
+            ? 0.0 : floatval($s['imputado']);
+
+        $fila['BASE_ORIGEN'] = $real ? 'REAL' : 'ESTIMADO';
+        $fila['BASE_ARS'] = $s['base'];
+        $fila['NAC_CON_PARCIALES'] = $parciales;
+        $fila['NAC_PAGADO_ARS'] = $parciales ? $s['pagado'] : 0.0;
+        $fila['SALDO_ARS'] = $s['saldo'];
+        $fila['NAC_IMPUTADO_ARS'] = $parciales ? $s['imputado'] : 0.0;
+        $fila['NAC_SOBREPAGO_ARS'] = $s['sobrepago'];
+        $fila['CUBIERTA_PARCIALES'] = $s['cubierto'];
+        $fila['FECHA_SALDO_CARGADA'] = $fechaCargada;
+        $fila['FECHA_SALDO_EFECTIVA'] = $fechaSaldo;
+        $fila['NAC_SIN_PROYECCION'] = $sinProyeccion;
+
+        /* LA FECHA QUE VENCE ES LA DEL SALDO: es la que decide si el importe
+           que falta entra. Sin pagos parciales es la de nacionalizacion, o sea
+           lo de siempre. Un saldo vencido no suma, se avisa con los vencidos y
+           se corrige cambiando la fecha. */
+        $fila['VENCIDA'] = $saldoVencido;
+
+        /* Una fila con costos reales se esconde detras de "Ver con costos
+           reales", SALVO que sume: con un pago parcial y saldo mayor a cero
+           se ve siempre. Una fila que suma no puede estar escondida. */
+        $fila['OCULTA_POR_COSTOS'] = $real
+            && !($parciales && $s['saldo'] !== null && $s['saldo'] > 0);
+
+        $fila['IMPORTE_EJE'] = ($tilde || $s['cubierto'])
+            ? 0.0 : (($saldoProy === null) ? null : floatval($saldoProy));
+        $fila['NAC_PAGADAS_SALDO'] = $tilde ? $saldoProy : 0.0;
+        $fila['NAC_TODO_SALDO'] = $saldoProy;
+        $fila['NAC_IMPUTADO_PROY'] = $imputadoProy;
+
+        // Lo que el tilde saca de la proyeccion: el saldo. Lo lee avisosPagados().
+        $fila['IMPORTE_PROYECTABLE'] = $saldoProy;
+
+        return $fila;
+    }
+
+    /**
+     * La validacion de un pago parcial, en el servidor. PURA.
+     *
+     *   - fecha de pago: una fecha real, hoy o anterior. Una fecha futura no
+     *     es un pago.
+     *   - moneda ARS o USD. En pesos, el importe. En dolares, el importe en
+     *     dolares y la cotizacion usada: el equivalente en pesos lo calcula
+     *     esto, con enPesos(), y es lo que se resta.
+     *   - importe mayor a cero.
+     *   - fecha del saldo: OBLIGATORIA si la nacionalizacion ya vencio o no
+     *     tiene fecha -sin ella el saldo no tendria donde caer-, y siempre hoy o
+     *     posterior. Si la nacionalizacion no vencio es opcional: sin ella el
+     *     saldo cae en la de nacionalizacion.
+     *
+     * El dialogo valida lo mismo para explicar y bloquear el boton; esto es lo
+     * que decide.
+     *
+     * @param array $datos fecha_pago, moneda, importe, importe_usd, cotizacion,
+     *        fecha_saldo, observacion
+     * @param string $hoy 'Y-m-d'
+     * @param string|null $fechaNac La fecha de nacionalizacion efectiva
+     * @return array ['fecha_pago','moneda','importe_usd','cotizacion','importe_ars','fecha_saldo','observacion']
+     * @throws Exception Con el motivo, para mostrar tal cual
+     */
+    public static function validarPagoNac($datos, $hoy, $fechaNac) {
+        $hoy = substr((string) $hoy, 0, 10);
+        $fecha = self::fechaValida(isset($datos['fecha_pago']) ? $datos['fecha_pago'] : null);
+
+        if ($fecha === null) {
+            throw new Exception('Falta la fecha de pago, o no es una fecha.');
+        }
+
+        if ($fecha > $hoy) {
+            throw new Exception('La fecha de pago no puede ser futura: un pago que todavía no se '
+                . 'hizo no es un pago. Lo que falta se proyecta como saldo.');
+        }
+
+        $moneda = strtoupper(trim((string) (isset($datos['moneda']) ? $datos['moneda'] : '')));
+
+        if ($moneda !== 'ARS' && $moneda !== 'USD') {
+            throw new Exception('La moneda tiene que ser pesos o dólares.');
+        }
+
+        $usd = null;
+        $cotiz = null;
+
+        if ($moneda === 'USD') {
+            $usd = self::numeroPositivo(isset($datos['importe_usd']) ? $datos['importe_usd'] : null);
+            $cotiz = self::numeroPositivo(isset($datos['cotizacion']) ? $datos['cotizacion'] : null);
+
+            if ($usd === null) {
+                throw new Exception('El importe en dólares tiene que ser mayor a cero.');
+            }
+
+            if ($cotiz === null) {
+                throw new Exception('Falta la cotización con la que se pagaron los dólares.');
+            }
+
+            $ars = self::enPesos($usd, $cotiz);
+        } else {
+            $ars = self::numeroPositivo(isset($datos['importe']) ? $datos['importe'] : null);
+        }
+
+        if ($ars === null || $ars <= 0) {
+            throw new Exception('El importe tiene que ser mayor a cero.');
+        }
+
+        $saldoCrudo = isset($datos['fecha_saldo']) ? trim((string) $datos['fecha_saldo']) : '';
+        $fechaSaldo = self::fechaValida($saldoCrudo);
+
+        if ($saldoCrudo !== '' && $fechaSaldo === null) {
+            throw new Exception('La fecha del saldo no es una fecha.');
+        }
+
+        $nac = Horizonte::normalizarFecha($fechaNac);
+
+        if ($fechaSaldo === null && ($nac === null || $nac < $hoy)) {
+            throw new Exception($nac === null
+                ? 'El contenedor no tiene fecha de nacionalización: cargá la fecha en la que se '
+                    . 'va a pagar el saldo.'
+                : 'La fecha de nacionalización ya venció: cargá la fecha en la que se va a pagar '
+                    . 'el saldo, si no lo que falta no entra en ninguna columna.');
+        }
+
+        if ($fechaSaldo !== null && $fechaSaldo < $hoy) {
+            throw new Exception('La fecha del saldo tiene que ser hoy o posterior: es cuándo se '
+                . 'espera pagar lo que falta.');
+        }
+
+        $obs = trim((string) (isset($datos['observacion']) ? $datos['observacion'] : ''));
+
+        return [
+            'fecha_pago' => $fecha,
+            'moneda' => $moneda,
+            'importe_usd' => $usd,
+            'cotizacion' => $cotiz,
+            'importe_ars' => round($ars, 2),
+            'fecha_saldo' => $fechaSaldo,
+            'observacion' => ($obs === '') ? null : mb_substr($obs, 0, 200)
+        ];
+    }
+
+    /** Una fecha 'aaaa-mm-dd' real, o null */
+    private static function fechaValida($valor) {
+        $v = trim((string) $valor);
+
+        return (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $v, $m)
+            && checkdate(intval($m[2]), intval($m[3]), intval($m[1]))) ? $v : null;
+    }
+
+    /** Un numero mayor a cero, o null. Acepta coma decimal */
+    private static function numeroPositivo($valor) {
+        $v = str_replace(',', '.', trim((string) $valor));
+
+        if ($v === '' || !is_numeric($v) || floatval($v) <= 0) {
+            return null;
+        }
+
+        return floatval($v);
+    }
+
+    /**
+     * Los avisos de los pagos parciales, con nivel. Los emite ComexProvider
+     * -y por eso los dice tambien la pestana, que muestra los del tablero-.
+     *
+     *   - Informativo: cuantos contenedores tienen pagos parciales, cuanto se
+     *     pago y cuanto saldo falta. Es un criterio ya aplicado que explica por
+     *     que la fila del tablero proyecta menos que la estimacion.
+     *   - Atencion: el pagado de mas, en pesos. El saldo se toma como cero y la
+     *     diferencia no se ve en ninguna columna; hay que revisar los pagos.
+     *
+     * @param array $filas Las de getCronoNacionalizacion()
+     * @return array Lista de ['nivel', 'texto', 'seccion']
+     */
+    public static function avisosPagosParcialesConNivel($filas) {
+        $cuantos = 0;
+        $pagado = 0.0;
+        $saldo = 0.0;
+        $conSobrepago = 0;
+        $sobrepago = 0.0;
+
+        foreach (is_array($filas) ? $filas : [] as $f) {
+            if (empty($f['NAC_CON_PARCIALES']) || !empty($f['DUPLICA_GRUPO'])) {
+                continue;
+            }
+
+            $cuantos++;
+            $pagado += floatval($f['NAC_PAGADO_ARS']);
+
+            // Lo que falta, salvo que el tilde lo haya dado por pagado entero.
+            if (empty($f['PAGADO'])) {
+                $saldo += floatval($f['SALDO_ARS']);
+            }
+
+            if (!empty($f['NAC_SOBREPAGO_ARS'])) {
+                $conSobrepago++;
+                $sobrepago += floatval($f['NAC_SOBREPAGO_ARS']);
+            }
+        }
+
+        $avisos = [];
+
+        if ($cuantos > 0) {
+            $avisos[] = Aviso::nuevo(Aviso::INFO, $cuantos . ' contenedor(es) con pagos parciales: '
+                . self::plata($pagado) . ' pagados, ' . self::plata($saldo) . ' de saldo pendiente.');
+        }
+
+        if ($conSobrepago > 0) {
+            $avisos[] = Aviso::nuevo(Aviso::WARNING, $conSobrepago . ' contenedor(es) con pagado de '
+                . 'más: ' . self::plata($sobrepago) . ' por encima de su costo de nacionalización. '
+                . 'El saldo se toma como cero —el cashflow no proyecta egresos negativos— así que la '
+                . 'diferencia no se ve en ninguna columna. Pasa cuando el costo real resulta menor '
+                . 'que el estimado sobre el que se pagó, o con un pago cargado de más: revisá los '
+                . 'pagos del contenedor.');
+        }
+
+        return $avisos;
+    }
+
+    /**
+     * Si existen las tablas del pago parcial, de sql/cashflow_comex_nac_pago.sql.
+     *
+     * SE PREGUNTA en vez de darla por hecha, mismo patron que tienePagado():
+     * sin ellas Crono funciona exactamente como hoy -no hay pagos parciales,
+     * asi que nada cambia- y lo unico que no se puede es registrarlos.
+     *
+     * @return bool
+     */
+    public function tieneNacPago() {
+        if ($this->nacPago !== null) {
+            return $this->nacPago;
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo." . self::TABLA_NAC_PAGO . "', 'U') AS P,
+                    OBJECT_ID('dbo." . self::TABLA_NAC_SALDO_FECHA . "', 'U') AS F");
+
+        if ($stmt === false) {
+            throw new Exception('Error al verificar las tablas del pago parcial');
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->nacPago = ($row && $row['P'] !== null && $row['F'] !== null);
+
+        return $this->nacPago;
+    }
+
+    /**
+     * El aviso de que el pago parcial esta apagado, o cadena vacia. Solo de la
+     * pestana, igual que el del tilde: el tablero no edita nada.
+     *
+     * @return string
+     */
+    public function avisoSinNacPago() {
+        if ($this->tieneNacPago()) {
+            return '';
+        }
+
+        return 'El pago parcial de la nacionalización está apagado: faltan las tablas '
+            . self::TABLA_NAC_PAGO . ' y ' . self::TABLA_NAC_SALDO_FECHA . '. Corré '
+            . 'sql/cashflow_comex_nac_pago.sql contra la base central y el botón aparece solo. '
+            . 'Todo lo demás de esta pantalla funciona igual: sin pagos parciales, se proyecta la '
+            . 'nacionalización entera, y los contenedores con costos reales no se muestran.';
+    }
+
+    /**
+     * Lo pagado, la cantidad de pagos y la fecha del saldo vigente del
+     * contenedor, listos para el SELECT. SIN LAS TABLAS, literales con el
+     * mismo nombre: ningun pago y ninguna fecha, que es exactamente lo que
+     * significa. Mismo truco que pagadoSelect().
+     *
+     * @return string
+     */
+    private function nacPagoSelect() {
+        if (!$this->tieneNacPago()) {
+            return "CAST(0 AS DECIMAL(18,2))   NAC_PAGADO_ARS,
+                    CAST(0 AS INT)             NAC_PAGOS_CANT,
+                    CAST(NULL AS DATE)         NAC_FECHA_SALDO,
+                    CAST(NULL AS VARCHAR(50))  NAC_FECHA_SALDO_USUARIO,
+                    CAST(NULL AS DATETIME)     NAC_FECHA_SALDO_ALTA";
+        }
+
+        return "ISNULL(NPG.ARS, 0)    NAC_PAGADO_ARS,
+                ISNULL(NPG.CANT, 0)   NAC_PAGOS_CANT,
+                NSF.FECHA_SALDO       NAC_FECHA_SALDO,
+                NSF.USUARIO_ALTA      NAC_FECHA_SALDO_USUARIO,
+                NSF.FECHA_ALTA        NAC_FECHA_SALDO_ALTA";
+    }
+
+    /**
+     * Los APPLY de los pagos y de la fecha del saldo del contenedor.
+     *
+     * POR EL MAESTRO, NUNCA POR ID_MG A SECAS: cada pago se atribuye al
+     * contenedor de SU OC hoy, COALESCE(NE.ID_PADRE, NE.ID). Si la OC contra la
+     * que se grabo paso a ser hija de otra, el pago sigue en el contenedor. Es
+     * pagosPorContenedor() en SQL. La fecha del saldo, igual; si quedaran dos
+     * vigentes en un contenedor -dos principales que se juntaron-, manda la
+     * mas reciente.
+     *
+     * @return string
+     */
+    private function nacPagoApply() {
+        if (!$this->tieneNacPago()) {
+            return '';
+        }
+
+        return "OUTER APPLY (SELECT SUM(NP.IMPORTE_ARS) ARS, COUNT(NP.ID) CANT
+                             FROM " . self::TABLA_NAC_PAGO . " NP
+                             INNER JOIN " . self::TABLA_MAESTRO . " NE ON NE.ID = NP.ID_MG
+                             WHERE NP.VIGENTE = 1
+                               AND COALESCE(NE.ID_PADRE, NE.ID) = " . self::OC_PRINCIPAL . ") NPG
+                OUTER APPLY (SELECT TOP 1 SF.FECHA_SALDO, SF.USUARIO_ALTA, SF.FECHA_ALTA
+                             FROM " . self::TABLA_NAC_SALDO_FECHA . " SF
+                             INNER JOIN " . self::TABLA_MAESTRO . " SE ON SE.ID = SF.ID_MG
+                             WHERE SF.VIGENTE = 1
+                               AND COALESCE(SE.ID_PADRE, SE.ID) = " . self::OC_PRINCIPAL . "
+                             ORDER BY SF.FECHA_ALTA DESC, SF.ID DESC) NSF";
+    }
+
+    /**
+     * El costo real del contenedor: la copia de UNA OC del grupo, la que elige
+     * copiaCostoReal() -la principal, o la de ID mas chico con detalle-.
+     * Nunca la suma del grupo: Comex copia el detalle entero en cada OC.
+     *
+     * @return string
+     */
+    private static function costoRealApply() {
+        return 'OUTER APPLY (SELECT SUM(DR.[IMPORTE_$]) COSTO_REAL_ARS
+                             FROM RO_T_IMPORTACIONES_DETALLE DR
+                             WHERE DR.ID_MG = (
+                                 SELECT TOP 1 GX.ID
+                                 FROM ' . self::TABLA_MAESTRO . ' GX
+                                 WHERE COALESCE(GX.ID_PADRE, GX.ID) = ' . self::OC_PRINCIPAL . '
+                                   AND EXISTS (SELECT 1 FROM RO_T_IMPORTACIONES_DETALLE DX
+                                               WHERE DX.ID_MG = GX.ID)
+                                 ORDER BY CASE WHEN GX.ID = ' . self::OC_PRINCIPAL . ' THEN 0 ELSE 1 END,
+                                          GX.ID)) CR';
+    }
+
+    /**
+     * El contenedor de una OC, leido del maestro: COALESCE(ID_PADRE, ID).
+     * Lo resuelve el servidor, nunca el navegador.
+     *
+     * @param int $idMg
+     * @return int
+     * @throws Exception Si la OC no esta en el maestro
+     */
+    public function principalDe($idMg) {
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $stmt = sqlsrv_query($cid, "SELECT COALESCE(ID_PADRE, ID) AS P FROM "
+            . self::TABLA_MAESTRO . " WHERE ID = ?", [intval($idMg)]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSqlEn(self::TABLA_MAESTRO, 'No se pudo leer el contenedor'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        if (!$row) {
+            throw new Exception('Ese contenedor no está en el maestro de Comercio Exterior.');
+        }
+
+        return intval($row['P']);
+    }
+
+    /**
+     * La fila titular de un contenedor en Crono, con su base y su saldo
+     * resueltos POR LA MISMA CONSULTA que dibuja la grilla: el dialogo, el
+     * servidor y el tablero no pueden calcular el saldo de dos maneras.
+     *
+     * @param int $principal
+     * @param string $hoy
+     * @return array
+     * @throws Exception Si el contenedor no esta en el cronograma
+     */
+    private function filaTitular($principal, $hoy) {
+        foreach ($this->getCronoNacionalizacion($hoy) as $f) {
+            if (intval($f['GRUPO_ID']) === intval($principal) && empty($f['DUPLICA_GRUPO'])) {
+                return $f;
+            }
+        }
+
+        throw new Exception('Ese contenedor no está en el cronograma de nacionalización (puede '
+            . 'tener la fecha de movimiento anterior a "Contenedores desde").');
+    }
+
+    /**
+     * Registra un pago parcial de la nacionalizacion.
+     *
+     * TODO EN UNA TRANSACCION: el pago y, si vino, la fecha del saldo. Si se
+     * grabara el pago y fallara la fecha, el saldo de una nacionalizacion
+     * vencida quedaria sin columna donde caer.
+     *
+     * @param array $datos id_mg y lo que valida validarPagoNac()
+     * @param string $usuario
+     * @param string|null $hoy
+     * @return array ['contenedor', 'antes', 'despues', 'moneda', 'importe_ars']
+     */
+    public function registrarPagoNac($datos, $usuario, $hoy = null) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $hoy = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+
+        if (!$this->tieneNacPago()) {
+            throw new Exception($this->avisoSinNacPago());
+        }
+
+        $principal = $this->principalDe(isset($datos['id_mg']) ? $datos['id_mg'] : 0);
+        $fila = $this->filaTitular($principal, $hoy);
+
+        if ($fila['BASE_ARS'] === null) {
+            throw new Exception('Este contenedor no tiene costo de nacionalización estimado ni real: '
+                . 'no hay contra qué calcular el saldo. Cargá la estimación en Comercio Exterior.');
+        }
+
+        $v = self::validarPagoNac($datos, $hoy, $fila['FECHA_NAC_EFECTIVA']);
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid || !sqlsrv_begin_transaction($cid)) {
+            throw new Exception('No se pudo abrir la transacción para registrar el pago.');
+        }
+
+        try {
+            $this->ejecutar($cid,
+                "INSERT INTO " . self::TABLA_NAC_PAGO . "
+                    (ID_MG, FECHA_PAGO, MONEDA, IMPORTE_USD, COTIZACION, IMPORTE_ARS, OBSERVACION,
+                     VIGENTE, USUARIO_ALTA, FECHA_ALTA)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, GETDATE())",
+                [$principal, $v['fecha_pago'], $v['moneda'], $v['importe_usd'], $v['cotizacion'],
+                 $v['importe_ars'], $v['observacion'], $usuario],
+                'No se pudo registrar el pago', self::TABLA_NAC_PAGO);
+
+            if ($v['fecha_saldo'] !== null && $v['fecha_saldo'] !== $fila['FECHA_SALDO_CARGADA']) {
+                $this->grabarFechaSaldo($cid, $principal, $v['fecha_saldo'],
+                    $fila['FECHA_SALDO_CARGADA'], $usuario);
+            }
+
+            sqlsrv_commit($cid);
+        } catch (Exception $e) {
+            sqlsrv_rollback($cid);
+            throw $e;
+        }
+
+        return [
+            'contenedor' => $principal,
+            'antes' => self::saldoNacionalizacion($fila['BASE_ARS'], $fila['NAC_PAGADO_ARS']),
+            'despues' => self::saldoNacionalizacion($fila['BASE_ARS'],
+                floatval($fila['NAC_PAGADO_ARS']) + $v['importe_ars']),
+            'moneda' => $v['moneda'],
+            'importe_ars' => $v['importe_ars']
+        ];
+    }
+
+    /**
+     * Da de baja la fecha del saldo vigente del contenedor -todas, si quedaron
+     * dos por una reagrupacion- e inserta la nueva. Dentro de la transaccion
+     * de quien llama.
+     */
+    private function grabarFechaSaldo($cid, $principal, $fecha, $anterior, $usuario) {
+        $this->ejecutar($cid,
+            "UPDATE SF SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
+             FROM " . self::TABLA_NAC_SALDO_FECHA . " SF
+             INNER JOIN " . self::TABLA_MAESTRO . " SE ON SE.ID = SF.ID_MG
+             WHERE SF.VIGENTE = 1 AND COALESCE(SE.ID_PADRE, SE.ID) = ?",
+            [$usuario, $usuario, $principal],
+            'No se pudo dar de baja la fecha del saldo anterior', self::TABLA_NAC_SALDO_FECHA);
+
+        $this->ejecutar($cid,
+            "INSERT INTO " . self::TABLA_NAC_SALDO_FECHA . "
+                (ID_MG, FECHA_SALDO, FECHA_ANTERIOR, VIGENTE, USUARIO_ALTA, FECHA_ALTA)
+             VALUES (?, ?, ?, 1, ?, GETDATE())",
+            [$principal, $fecha, $anterior, $usuario],
+            'No se pudo grabar la fecha del saldo', self::TABLA_NAC_SALDO_FECHA);
+    }
+
+    /**
+     * Cambia la fecha del saldo sin cargar un pago nuevo, con historial.
+     *
+     * SOLO CON PAGOS PARCIALES VIGENTES: sin ninguno, el gasto entero se
+     * proyecta en la fecha de nacionalizacion, que se edita en su columna. Una
+     * fecha del saldo sin saldo no la leeria nadie.
+     *
+     * @return array ['contenedor', 'fecha', 'anterior', 'sin_cambios']
+     */
+    public function cambiarFechaSaldoNac($idMg, $fecha, $usuario, $hoy = null) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $hoy = ($hoy === null) ? date('Y-m-d') : substr((string) $hoy, 0, 10);
+
+        if (!$this->tieneNacPago()) {
+            throw new Exception($this->avisoSinNacPago());
+        }
+
+        $f = self::fechaValida($fecha);
+
+        if ($f === null) {
+            throw new Exception('La fecha del saldo no es una fecha.');
+        }
+
+        if ($f < $hoy) {
+            throw new Exception('La fecha del saldo tiene que ser hoy o posterior: es cuándo se '
+                . 'espera pagar lo que falta.');
+        }
+
+        $principal = $this->principalDe($idMg);
+        $fila = $this->filaTitular($principal, $hoy);
+
+        if (empty($fila['NAC_CON_PARCIALES'])) {
+            throw new Exception('Este contenedor no tiene pagos parciales: su nacionalización se '
+                . 'proyecta entera en la fecha de nacionalización, que se edita en su columna.');
+        }
+
+        if ($fila['FECHA_SALDO_CARGADA'] === $f) {
+            return ['contenedor' => $principal, 'fecha' => $f, 'anterior' => $f, 'sin_cambios' => true];
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid || !sqlsrv_begin_transaction($cid)) {
+            throw new Exception('No se pudo abrir la transacción para cambiar la fecha.');
+        }
+
+        try {
+            $this->grabarFechaSaldo($cid, $principal, $f, $fila['FECHA_SALDO_CARGADA'], $usuario);
+            sqlsrv_commit($cid);
+        } catch (Exception $e) {
+            sqlsrv_rollback($cid);
+            throw $e;
+        }
+
+        return ['contenedor' => $principal, 'fecha' => $f,
+                'anterior' => $fila['FECHA_SALDO_CARGADA'], 'sin_cambios' => false];
+    }
+
+    /**
+     * Anula un pago parcial: baja logica, queda en el historial.
+     *
+     * @param int $id
+     * @param string $usuario
+     * @return array ['id', 'importe_ars']
+     */
+    public function anularPagoNac($id, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
+        if (!$this->tieneNacPago()) {
+            throw new Exception($this->avisoSinNacPago());
+        }
+
+        $cid = $this->conn->conectar('central');
+
+        if (!$cid) {
+            throw new Exception('No se pudo conectar a la base de datos');
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "UPDATE " . self::TABLA_NAC_PAGO . " SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
+             OUTPUT INSERTED.ID, INSERTED.IMPORTE_ARS
+             WHERE ID = ? AND VIGENTE = 1",
+            [$usuario, $usuario, intval($id)]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSqlEn(self::TABLA_NAC_PAGO, 'No se pudo anular el pago'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        if (!$row) {
+            throw new Exception('Ese pago no existe o ya estaba anulado.');
+        }
+
+        return ['id' => intval($row['ID']), 'importe_ars' => floatval($row['IMPORTE_ARS'])];
+    }
+
+    /**
+     * Los pagos del contenedor -vigentes y anulados- y el historial de la
+     * fecha del saldo. Por el contenedor de HOY de cada pago, igual que la
+     * grilla.
+     *
+     * @param int $idMg Cualquier OC del contenedor
+     * @return array ['contenedor', 'pagos', 'fechas_saldo']
+     */
+    public function getPagosNac($idMg) {
+        $principal = $this->principalDe($idMg);
+
+        if (!$this->tieneNacPago()) {
+            return ['contenedor' => $principal, 'pagos' => [], 'fechas_saldo' => []];
+        }
+
+        $cid = $this->conn->conectar('central');
+        $leer = function ($sql, $fechas) use ($cid, $principal) {
+            $stmt = sqlsrv_query($cid, $sql, [$principal]);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSqlEn(self::TABLA_NAC_PAGO,
+                    'No se pudo leer el historial del pago parcial'));
+            }
+
+            $v = [];
+
+            while ($r = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+                // Las de auditoria, con hora: es lo que dice quien y cuando.
+                foreach ($fechas as $c) {
+                    if (isset($r[$c]) && $r[$c] instanceof DateTime) {
+                        $r[$c] = $r[$c]->format(
+                            in_array($c, ['FECHA_ALTA', 'FECHA_BAJA'], true) ? 'Y-m-d H:i:s' : 'Y-m-d');
+                    }
+                }
+
+                $v[] = $r;
+            }
+
+            sqlsrv_free_stmt($stmt);
+
+            return $v;
+        };
+
+        return [
+            'contenedor' => $principal,
+            'pagos' => $leer(
+                "SELECT NP.ID, NP.ID_MG, NP.FECHA_PAGO, NP.MONEDA, NP.IMPORTE_USD, NP.COTIZACION,
+                        NP.IMPORTE_ARS, NP.OBSERVACION, NP.VIGENTE, NP.USUARIO_ALTA, NP.FECHA_ALTA,
+                        NP.USUARIO_BAJA, NP.FECHA_BAJA
+                 FROM " . self::TABLA_NAC_PAGO . " NP
+                 INNER JOIN " . self::TABLA_MAESTRO . " NE ON NE.ID = NP.ID_MG
+                 WHERE COALESCE(NE.ID_PADRE, NE.ID) = ?
+                 ORDER BY NP.FECHA_PAGO, NP.ID",
+                ['FECHA_PAGO', 'FECHA_ALTA', 'FECHA_BAJA']),
+            'fechas_saldo' => $leer(
+                "SELECT SF.ID, SF.FECHA_SALDO, SF.FECHA_ANTERIOR, SF.VIGENTE, SF.USUARIO_ALTA,
+                        SF.FECHA_ALTA, SF.USUARIO_BAJA, SF.FECHA_BAJA
+                 FROM " . self::TABLA_NAC_SALDO_FECHA . " SF
+                 INNER JOIN " . self::TABLA_MAESTRO . " SE ON SE.ID = SF.ID_MG
+                 WHERE COALESCE(SE.ID_PADRE, SE.ID) = ?
+                 ORDER BY SF.FECHA_ALTA, SF.ID",
+                ['FECHA_SALDO', 'FECHA_ANTERIOR', 'FECHA_ALTA', 'FECHA_BAJA'])
+        ];
     }
 
     /**

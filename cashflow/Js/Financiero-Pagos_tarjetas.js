@@ -67,6 +67,10 @@
     function cargar() {
         Cargando.mostrar('loadingTarj');
 
+        // Lo que el tablero dice de esta pestaña, en paralelo con los datos:
+        // la grilla no lo espera. Ver Js/avisos-panel.js.
+        AvisosPanel.pedirTablero('pagos_tarjetas');
+
         pedir(ENDPOINT + '?action=getDatos')
             .then(function(d) {
                 datos = d.data;
@@ -74,7 +78,8 @@
                 mostrar('wrapperTarj', true);
 
                 vistas.usar(datos.eje);
-                avisar(datos.avisos);
+                avisar([]);
+                avisarPartes();
                 llenarTarjetasDelSelect();
                 dibujar();
             })
@@ -1562,6 +1567,28 @@
      */
     function avisar(lista) {
         AvisosPanel.pintar('avisosTarj', lista || []);
+    }
+
+    /**
+     * Un panel por sub-pestaña. Cada uno lleva los avisos generales de la
+     * pestaña, los de su parte y los que el tablero dice de su sección
+     * (Supervisoras, Corporativas o Socios); los del tablero sin sección van a
+     * las tres. Hasta feature/cashflow-avisos-kpis-comex-nac-parcial la
+     * pestaña mostraba sólo los generales, en un bloque arriba: los de cada
+     * parte los decía sólo el tablero.
+     */
+    function avisarPartes() {
+        var generales = datos.avisos || [];
+        var parte = function(clave) {
+            return generales.concat((datos[clave] && datos[clave].avisos) || []);
+        };
+
+        AvisosPanel.pintarPestana('avisosTarjSup', parte('supervisoras'),
+            { tab: 'pagos_tarjetas', sub: 'sup' });
+        AvisosPanel.pintarPestana('avisosTarjCorp', parte('corporativas'),
+            { tab: 'pagos_tarjetas', sub: 'corp' });
+        AvisosPanel.pintarPestana('avisosTarjSoc', parte('socios'),
+            { tab: 'pagos_tarjetas', sub: 'soc' });
     }
 
     function filaVacia(cols, mensaje) {

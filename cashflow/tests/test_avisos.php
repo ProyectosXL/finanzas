@@ -574,6 +574,10 @@ $contenedores = [
     'avisosExpTasky' => 'Ingresos-Exportaciones_tasky.js', 'avisosLogistica' => 'Logistica-Local.js',
     'avisosTarj' => 'Financiero-Pagos_tarjetas.js', 'avisosProvExt' => 'Comex-Proveedores_exterior.js',
     'avisosSaldos' => 'Saldos.js', 'avisosParametros' => 'parametros-carga.js',
+    // Un panel por sub-pestana, desde feature/cashflow-avisos-kpis-comex-nac-parcial
+    'avisosSaldosLocales' => 'Saldos.js', 'avisosSaldosFondos' => 'Saldos.js',
+    'avisosTarjSup' => 'Financiero-Pagos_tarjetas.js', 'avisosTarjCorp' => 'Financiero-Pagos_tarjetas.js',
+    'avisosTarjSoc' => 'Financiero-Pagos_tarjetas.js', 'avisosEcheqsPre' => 'Ingresos-Echeqs.js',
     'pgenAvisos' => 'Parametros-Generales.js', 'avisosParamSaldos' => 'Parametros-Saldos.js',
     'avisosParamCobel' => 'Parametros-Cob-Electronicos.js', 'avisosParamPpq' => 'Parametros-Prechequeado.js',
     'avisosParamCob' => 'Parametros-Cobranzas.js', 'plogAvisos' => 'Parametros-Logistica.js',
@@ -581,9 +585,12 @@ $contenedores = [
     'pcprAvisos' => 'Parametros-Compras_proy.js', 'cfeAvisos' => 'Parametros-Estructura.js'
 ];
 
+/* Con pintar() o con pintarPestana(), que es pintar() mas los avisos del
+   tablero de esa pestana (ver tests/test_avisos_pestana.php). */
 foreach ($contenedores as $id => $archivo) {
     chequear('#' . $id . ' usa el panel', true,
-        strpos($leerJs($archivo), "AvisosPanel.pintar('" . $id . "'") !== false);
+        strpos($leerJs($archivo), "AvisosPanel.pintar('" . $id . "'") !== false
+        || strpos($leerJs($archivo), "AvisosPanel.pintarPestana('" . $id . "'") !== false);
 }
 
 // Los que se pasan por variable: el elemento ya buscado, o el id de un parametro.
@@ -599,7 +606,7 @@ $provJsPanel = $leerJs('Proveedores-Proveedores_locales.js');
 chequear('#avisosProv y #avisosMaestroProv usan el panel', true,
     strpos($provJsPanel, 'AvisosPanel.pintar(id, avisos || []);') !== false
     && strpos($provJsPanel, "pintarAvisos(maestro.avisos, 'avisosMaestroProv')") !== false
-    && strpos($provJsPanel, "pintarAvisos(datos.avisos_con_nivel || datos.warnings, 'avisosProv')") !== false);
+    && strpos($provJsPanel, "AvisosPanel.pintarPestana('avisosProv',") !== false);
 
 /* Que no falte ninguno: cada contenedor de avisos de las pestañas -id con
    "avisos" o "Avisos"- esta cubierto, salvo los que quedan afuera a proposito:

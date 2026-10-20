@@ -35,6 +35,13 @@
                             <i class="fas fa-dollar-sign me-1"></i> El dólar
                         </button>
                     </li>
+                    <!-- Crono Nacionalización: la diferencia entre el tilde
+                         y el pago parcial, que es lo que más se confunde. -->
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="tab-pago" data-bs-toggle="tab" data-bs-target="#content-pago" type="button">
+                            <i class="fas fa-money-bill-wave me-1"></i> Cómo registrar un pago
+                        </button>
+                    </li>
                 </ul>
 
                 <div class="tab-content" id="ayudaTabContent">
@@ -517,6 +524,72 @@
                                 paga"—, y el aviso de arriba de la tabla dice cuántos son y cuánto
                                 suman <strong>en dólares</strong>. Cargales la fecha y el importe
                                 aparece solo.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Tab: Cómo registrar un pago (Crono Nacionalización) -->
+                    <div class="tab-pane fade" id="content-pago" role="tabpanel">
+                        <h6 class="mb-3">
+                            <i class="fas fa-money-bill-wave text-primary me-2"></i>Cómo registrar un pago de la nacionalización
+                        </h6>
+
+                        <div class="help-section mb-4">
+                            <h6 class="fw-bold mb-2">Todo empieza en el tilde «Pagada»</h6>
+                            <p class="mb-0">
+                                Tocá el tilde de la fila y te pregunta cómo se pagó: <strong>Pagada
+                                completa</strong> o <strong>Fue un pago parcial</strong>. Cancelar, o
+                                cerrar la pregunta, no cambia nada.
+                            </p>
+                        </div>
+
+                        <div class="help-section mb-4">
+                            <h6 class="fw-bold mb-2">Pagada completa</h6>
+                            <p class="mb-0">
+                                Sale entera de la proyección. Si tenía pagos parciales, la da por
+                                pagada completa: el saldo también sale. Destildala y vuelve.
+                            </p>
+                        </div>
+
+                        <div class="help-section mb-4">
+                            <h6 class="fw-bold mb-2">Fue un pago parcial</h6>
+                            <p class="mb-2">
+                                Cargá lo que pagaste —en pesos, o en dólares con la cotización que
+                                usaste— y la fecha en la que esperás pagar lo que falta. Lo que falta
+                                se sigue proyectando como <strong>saldo</strong>, en esa fecha. Si la
+                                nacionalización ya venció, esa fecha es obligatoria. Podés cargar
+                                varios pagos (tocando el tilde otra vez), verlos y anular uno desde
+                                el ícono de lista de la columna Pagado, y cambiar la fecha del saldo
+                                con un click en la columna <em>Fecha del saldo</em>.
+                            </p>
+                            <p class="mb-0">
+                                Si con los pagos llegás al costo, el contenedor queda «Pagado con
+                                pagos parciales» y sale de la proyección, aunque nadie lo tilde.
+                            </p>
+                        </div>
+
+                        <div class="help-section mb-4">
+                            <h6 class="fw-bold mb-2">Un ejemplo</h6>
+                            <p class="mb-0">
+                                Costo estimado: <strong>$ 10.000.000</strong>. El 15/10 pagaste
+                                <strong>$ 4.000.000</strong>: tocá el tilde, elegí «Fue un pago
+                                parcial» y cargalo con fecha del saldo 30/11; el tablero proyecta
+                                <strong>$ 6.000.000 el 30/11</strong>. Si después pagás el resto,
+                                tocá el tilde y elegí «Pagada completa», o cargá el segundo pago: la
+                                fila queda «Pagado con pagos parciales».
+                            </p>
+                        </div>
+
+                        <div class="help-section">
+                            <h6 class="fw-bold mb-2">Costo real o estimado</h6>
+                            <p class="mb-0">
+                                Mientras Comercio Exterior no cargó los costos reales, el saldo se
+                                calcula sobre la estimación. Cuando los carga, sobre el costo real.
+                                <strong>Los dos no se componen igual</strong>: el real incluye el
+                                flete internacional y no los impuestos que suma la estimación. Por
+                                eso el saldo puede cambiar, y si el real resulta menor que lo pagado,
+                                el saldo queda en cero y un aviso dice cuánto se pagó de más. Los
+                                contenedores con costos reales se ven con «Ver con costos reales».
                             </p>
                         </div>
                     </div>

@@ -42,6 +42,9 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
 -->
 <div class="tab-pagos_tarjetas"<?php echo AuthCashflow::atributoEdicion('pagos_tarjetas'); ?>>
 
+    <!-- Sólo la falla al cargar: los avisos de los datos van en el panel de
+         cada sub-pestaña, que está adentro de wrapperTarj y no se ve si la
+         carga falló. -->
     <div id="avisosTarj"></div>
 
     <!-- El lugar del indicador va EN UNA LINEA, con su id y su texto: es la forma
@@ -99,7 +102,11 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
              ============================================================ -->
         <div class="tab-pane fade show active" id="paneSup" role="tabpanel">
 
-            <div class="row g-3 mb-3">
+            <!-- Un panel de avisos por sub-pestaña: los de esta parte y los que
+                 el tablero dice de su sección. Ver Js/avisos-panel.js. -->
+            <div id="avisosTarjSup"></div>
+
+            <div data-kpis="kpisTarjSup" class="row g-3 mb-3">
                 <div class="col-md-6 col-lg-3">
                     <div class="kpi-card">
                         <div class="kpi-card-header">
@@ -271,7 +278,9 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
              ============================================================ -->
         <div class="tab-pane fade" id="paneCorp" role="tabpanel">
 
-            <div class="row g-3 mb-3">
+            <div id="avisosTarjCorp"></div>
+
+            <div data-kpis="kpisTarjCorp" class="row g-3 mb-3">
                 <div class="col-md-6 col-lg-3">
                     <div class="kpi-card">
                         <div class="kpi-card-header">
@@ -622,7 +631,9 @@ $edita = AuthCashflow::puedeEditar('pagos_tarjetas');
              ============================================================ -->
         <div class="tab-pane fade" id="paneSoc" role="tabpanel">
 
-            <div class="row g-3 mb-3">
+            <div id="avisosTarjSoc"></div>
+
+            <div data-kpis="kpisTarjSoc" class="row g-3 mb-3">
                 <div class="col-md-6 col-lg-4">
                     <div class="kpi-card">
                         <div class="kpi-card-header">

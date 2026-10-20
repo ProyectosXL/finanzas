@@ -31,6 +31,16 @@
  * ordenados del backend (Aviso::agrupar())— y su título de siempre. Las demás
  * pestañas, con una sola lista.
  *
+ * LAS PESTAÑAS CON PROVEEDOR MUESTRAN TAMBIÉN LO QUE EL TABLERO DICE DE ELLAS:
+ *
+ *     AvisosPanel.pedirTablero('saldos');                  // en paralelo con los datos
+ *     AvisosPanel.pintarPestana('avisosSaldos', propios, { tab: 'saldos', sub: 'saldos' });
+ *
+ * Pinta primero los propios y, cuando llegan los del tablero, redibuja con los
+ * dos juntos y sin repetidos (combinar()). En las pestañas con un panel por
+ * sub-pestaña, cada aviso del tablero va a la de su sección (SUB_DE_SECCION) y
+ * los que no tienen sección van a todas.
+ *
  * LO QUE NO VA ACÁ: los carteles explicativos fijos de cada pestaña, los
  * bloqueos de una importación, los avisos de la previsualización, los
  * resúmenes de filtro y las notificaciones de una acción. Esos se tienen que
@@ -142,6 +152,184 @@ var AvisosPanel = (function() {
         return 'Avisos (' + total + ')';
     }
 
+    /* ----------------------------------------------------------------
+       LOS AVISOS DEL TABLERO, TAMBIÉN EN SU PESTAÑA
+
+       Cada pestaña con proveedor le pide al tablero los avisos de su grupo
+       (Cashflow::avisosDePestana(), que corre el mismo código del motor) y
+       los junta con los suyos. Lo puro está acá y se prueba en
+       tests/js/avisos_panel.wsf.
+       ---------------------------------------------------------------- */
+
+    /** Lo que llegó del tablero por pestaña: {estado, avisos} */
+    var tableros = {};
+
+    /** Los paneles que muestran avisos del tablero: id -> {cont, propios, opciones} */
+    var conTablero = {};
+
+    /** El aviso que se suma si el pedido al tablero falla */
+    var TEXTO_SIN_TABLERO = 'No se pudieron traer los avisos del tablero para esta pestaña.';
+
+    /**
+     * Cómo terminan los dos descartes de la grilla de una pestaña. SON LOS
+     * DE EjeVista::FIN_FUERA_HORIZONTE y FIN_SIN_FECHA, letra por letra:
+     * tests/test_avisos_pestana.php lo verifica.
+     */
+    var FINES_DESCARTE_EJE = [
+        ' con fecha fuera del horizonte no se muestran en la tabla.',
+        ' sin fecha asignada no se pueden ubicar en el tiempo y quedan fuera de la tabla.'
+    ];
+
+    /**
+     * A qué sub-pestaña va cada sección, en las pestañas con un panel por
+     * sub-pestaña. Las secciones son las que ponen los proveedores
+     * (SaldosProvider, FondosProvider con Fondos::CLASES, TarjetasProvider);
+     * tests/test_avisos_pestana.php verifica que coincidan. Echeqs no tiene
+     * secciones: todo va a sus dos sub-pestañas. Proveedores Locales tiene un
+     * solo panel sobre sus tres vistas, y no necesita mapa.
+     */
+    var SUB_DE_SECCION = {
+        saldos: {
+            'Saldo Inicial': 'saldos',
+            'Caja Locales': 'locales',
+            // 'Inversi\u00f3n' es 'Inversión': escrito así, cscript -que lee el
+            // archivo como ANSI- y el navegador ven la misma clave.
+            'Inversi\u00f3n': 'fondos',
+            'Cuenta comitente': 'fondos'
+        },
+        pagos_tarjetas: {
+            'Supervisoras': 'sup',
+            'Corporativas': 'corp',
+            'Socios': 'soc'
+        }
+    };
+
+    /**
+     * La clave con la que se comparan dos textos: sin espacios de más y sin
+     * el punto final. NO se normalizan tildes ni mayúsculas: dos textos que
+     * difieren en eso no son el mismo texto, y la regla es escribir cada
+     * hecho una sola vez en el origen (ver Aviso.php), no adivinarlo acá.
+     */
+    function claveTexto(texto) {
+        return String(texto === null || texto === undefined ? '' : texto)
+            .replace(/\s+/g, ' ')
+            .replace(/^ | $/g, '')
+            .replace(/\.$/, '');
+    }
+
+    /** Si un texto es uno de los dos descartes de la grilla (EjeVista) */
+    function esDescarteDelEje(texto) {
+        var t = String(texto === null || texto === undefined ? '' : texto);
+
+        for (var i = 0; i < FINES_DESCARTE_EJE.length; i++) {
+            var fin = FINES_DESCARTE_EJE[i];
+
+            if (t.length >= fin.length && t.substring(t.length - fin.length) === fin) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Los avisos de una sub-pestaña: los de su sección, más los que no tienen
+     * sección -o tienen una que el mapa no conoce-, que van a todas. Sin sub
+     * (una pestaña con un solo panel), todos.
+     *
+     * @param {Array} avisos Normalizados
+     * @param {Object|null} mapa sección -> sub-pestaña
+     * @param {string|null} sub
+     */
+    function deSubPestana(avisos, mapa, sub) {
+        if (!sub || !mapa) {
+            return avisos;
+        }
+
+        var salida = [];
+
+        for (var i = 0; i < avisos.length; i++) {
+            var s = avisos[i].seccion;
+            var destino = (s && mapa.hasOwnProperty(s)) ? mapa[s] : null;
+
+            if (destino === null || destino === sub) {
+                salida.push(avisos[i]);
+            }
+        }
+
+        return salida;
+    }
+
+    /**
+     * Los avisos propios de la pestaña junto con los del tablero, sin
+     * repetidos.
+     *
+     *  - Si un aviso propio tiene el mismo texto que uno del tablero, queda
+     *    UNO, con el nivel y la sección del tablero: el del tablero es el que
+     *    calcula el motor, y es el que se ve igual en las dos pantallas.
+     *  - Con los del tablero a la vista, la pestaña ESCONDE SUS DESCARTES DE
+     *    LA GRILLA: el tablero ya dice lo mismo de su fila, con el nombre de la
+     *    fila. Si el pedido falló, se queda con los suyos.
+     *  - Si el pedido falló, se suma un aviso de atención que lo dice.
+     *
+     * Orden: los propios en su lugar -reemplazados por el del tablero si es
+     * el mismo- y después los del tablero que la pestaña no tenía. El panel
+     * después ordena por nivel y respeta este orden entre iguales.
+     *
+     * @param {Array} propios Textos u objetos
+     * @param {Object|null} tablero {estado: 'cargando'|'ok'|'error', avisos}
+     * @returns {Array} Normalizados
+     */
+    function combinar(propios, tablero) {
+        var mios = normalizar(propios);
+        var estado = tablero ? tablero.estado : null;
+        var delTablero = (estado === 'ok') ? normalizar(tablero.avisos) : [];
+        var porClave = {};
+        var usado = {};
+        var salida = [];
+        var i, k;
+
+        for (i = 0; i < delTablero.length; i++) {
+            k = claveTexto(delTablero[i].texto);
+
+            if (!porClave.hasOwnProperty(k)) {
+                porClave[k] = i;
+            }
+        }
+
+        for (i = 0; i < mios.length; i++) {
+            if (estado === 'ok' && esDescarteDelEje(mios[i].texto)) {
+                continue;
+            }
+
+            k = claveTexto(mios[i].texto);
+
+            if (porClave.hasOwnProperty(k)) {
+                if (!usado.hasOwnProperty(k)) {
+                    usado[k] = true;
+                    salida.push(delTablero[porClave[k]]);
+                }
+            } else {
+                salida.push(mios[i]);
+            }
+        }
+
+        for (i = 0; i < delTablero.length; i++) {
+            k = claveTexto(delTablero[i].texto);
+
+            if (!usado.hasOwnProperty(k)) {
+                usado[k] = true;
+                salida.push(delTablero[i]);
+            }
+        }
+
+        if (estado === 'error') {
+            salida.push({ nivel: 'warning', texto: TEXTO_SIN_TABLERO, seccion: null });
+        }
+
+        return salida;
+    }
+
     /* ================================================================
        EN EL NAVEGADOR
        ================================================================ */
@@ -234,6 +422,18 @@ var AvisosPanel = (function() {
         var cont = (typeof contenedor === 'string')
             ? document.getElementById(contenedor) : contenedor;
 
+        /* Quien pinta a mano -un error de carga, otra lista- deja de mostrar
+           los avisos del tablero en ese panel: si no, cuando llegaran, el
+           redibujo de pedirTablero() pisaría lo que se acaba de pintar. */
+        if (cont && cont.id && conTablero.hasOwnProperty(cont.id)) {
+            delete conTablero[cont.id];
+        }
+
+        dibujar(cont, avisos, opciones);
+    }
+
+    /** El dibujo del panel: lo comparten pintar() y pintarPestana() */
+    function dibujar(cont, avisos, opciones) {
         if (!cont) {
             return;
         }
@@ -297,8 +497,93 @@ var AvisosPanel = (function() {
         }
     }
 
+    /* ================================================================
+       LOS AVISOS DEL TABLERO, EN EL NAVEGADOR
+       ================================================================ */
+
+    /**
+     * Pinta los avisos propios de una pestaña junto con los del tablero.
+     *
+     * Es pintar() con dos opciones más: 'tab' (la pestaña del registro) y
+     * 'sub' (la sub-pestaña, en las que tienen un panel por sub-pestaña). Si
+     * los del tablero todavía no llegaron pinta los propios; cuando llegan,
+     * pedirTablero() lo vuelve a pintar con los mismos propios.
+     */
+    function pintarPestana(contenedor, propios, opciones) {
+        var cont = (typeof contenedor === 'string')
+            ? document.getElementById(contenedor) : contenedor;
+
+        if (!cont) {
+            return;
+        }
+
+        opciones = opciones || {};
+        conTablero[cont.id] = { cont: cont, propios: propios || [], opciones: opciones };
+
+        var mapa = SUB_DE_SECCION.hasOwnProperty(opciones.tab) ? SUB_DE_SECCION[opciones.tab] : null;
+        var tablero = tableros[opciones.tab] || null;
+        var delTablero = (tablero && tablero.estado === 'ok')
+            ? { estado: 'ok', avisos: deSubPestana(normalizar(tablero.avisos), mapa, opciones.sub || null) }
+            : tablero;
+
+        dibujar(cont, combinar(propios || [], delTablero), opciones);
+    }
+
+    /**
+     * Pide al tablero los avisos de una pestaña. Se llama EN PARALELO con el
+     * pedido de datos de la pestaña, nunca antes ni encadenado: la grilla no
+     * espera por esto. El servidor libera la sesión apenas autoriza, así que
+     * tampoco la frena del otro lado (AuthCashflow::liberarSesion()).
+     *
+     * Cuando la respuesta llega, vuelve a pintar todos los paneles de esa
+     * pestaña con sus propios avisos de siempre. Si falla, la pestaña sigue
+     * igual y el panel suma un aviso de atención.
+     *
+     * @param {string} tab
+     * @returns {Promise}
+     */
+    function pedirTablero(tab) {
+        tableros[tab] = { estado: 'cargando', avisos: [] };
+
+        return fetch('Controller/CashflowController.php?action=getAvisosPestana&tab='
+                + encodeURIComponent(tab), { credentials: 'same-origin' })
+            .then(function(r) { return r.json(); })
+            .then(function(r) {
+                if (!r || !r.success || !r.data) {
+                    throw new Error((r && r.message) || 'Respuesta inválida');
+                }
+
+                tableros[tab] = { estado: 'ok', avisos: r.data.avisos || [] };
+            })
+            // ['catch'] y no .catch: el archivo entero se carga en cscript
+            // (ES3) para probar la parte pura, y ahí catch es palabra reservada.
+            ['catch'](function() {
+                tableros[tab] = { estado: 'error', avisos: [] };
+            })
+            .then(function() {
+                for (var id in conTablero) {
+                    if (conTablero.hasOwnProperty(id)
+                        && conTablero[id].opciones.tab === tab
+                        && document.body.contains(conTablero[id].cont)) {
+                        pintarPestana(conTablero[id].cont, conTablero[id].propios,
+                            conTablero[id].opciones);
+                    }
+                }
+            });
+    }
+
     return {
         pintar: pintar,
+        pintarPestana: pintarPestana,
+        pedirTablero: pedirTablero,
+
+        // La parte pura de los avisos del tablero, para tests/js/avisos_panel.wsf
+        claveTexto: claveTexto,
+        esDescarteDelEje: esDescarteDelEje,
+        deSubPestana: deSubPestana,
+        combinar: combinar,
+        SUB_DE_SECCION: SUB_DE_SECCION,
+        TEXTO_SIN_TABLERO: TEXTO_SIN_TABLERO,
 
         // La parte pura, expuesta para tests/js/avisos_panel.wsf
         normalizar: normalizar,

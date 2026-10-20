@@ -435,6 +435,41 @@ class Horizonte {
     }
 
     /**
+     * Varias series de este eje sumadas columna por columna, con sus
+     * escalares: lo que una parte informa fuera del horizonte o sin fecha, el
+     * total tambien lo informa.
+     *
+     * Existe para armar un total SUMANDO SUS PARTES y no reagrupando las filas
+     * otra vez: es lo unico que garantiza que un invariante entre series cierre
+     * columna por columna. La usan Pagos con Tarjetas (TOTAL = SUPERVISORAS +
+     * CORPORATIVAS + SOCIOS) y Nacionalizaciones, donde una serie tiene dos
+     * pedazos en dos fechas distintas (ComexProvider::nacionalizaciones()).
+     *
+     * @param array $series Series con 'dias', 'meses', 'fuera_horizonte' y 'sin_fecha'
+     * @return array
+     */
+    public function sumar($series) {
+        $total = $this->serieVacia();
+        $total['fuera_horizonte'] = 0;
+        $total['sin_fecha'] = 0;
+
+        foreach (is_array($series) ? $series : [] as $s) {
+            foreach ($s['dias'] as $k => $v) {
+                $total['dias'][$k] += $v;
+            }
+
+            foreach ($s['meses'] as $k => $v) {
+                $total['meses'][$k] += $v;
+            }
+
+            $total['fuera_horizonte'] += $s['fuera_horizonte'];
+            $total['sin_fecha'] += $s['sin_fecha'];
+        }
+
+        return $total;
+    }
+
+    /**
      * Lleva a 'Y-m-d' lo que devuelve sqlsrv, que para una columna de fecha
      * entrega un DateTime y no un string.
      *

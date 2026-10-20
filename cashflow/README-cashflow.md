@@ -286,6 +286,24 @@ Medido contra la base el 16/10/2026: *Echeqs en cartera* no cambia ($ 1.940.142.
 No se cuentan dos veces: los de un cliente entran con un recibo que ya canceló la factura, y el medio "Go Cuotas" del mix de cobro de Ventas está inactivo. **Si alguien lo activa, los cheques de GO se contarían dos veces.** Venta Cobrada Anticipada sigue en `[FL]%`. Ver *Todos los cheques, sin filtro de cliente* en `README-echeqs.md`.
 
 **El extracto de Interbanking confirma la acreditación.** Un depositado cuyo crédito aparece en `BI_T_EXTRACTOS_INTERBANKING` —número del cheque e importe— deja de proyectarse ese mismo día. Se lee al calcular, sin proceso ni escrituras; hoy cruza Galicia. Ver *La acreditación según el extracto de Interbanking* en `README-echeqs.md`.
+
+### Avisos del tablero en cada pestaña, tarjetas plegables y Comercio Exterior (`feature/cashflow-avisos-kpis-comex-nac-parcial`)
+
+Cuatro cosas: cada pestaña con proveedor muestra los avisos que el tablero dice de ella (*Lo que el tablero dice de cada pestaña, también en su panel*); las tarjetas KPI se pliegan a una franja (*Las tarjetas KPI se pliegan a una franja*); Proveedores Exterior y Crono Nacionalización traen sólo los contenedores desde una fecha de movimiento (`README-comex.md`, sección 12); y Crono registra pagos parciales de la nacionalización y proyecta el saldo (`README-comex.md`, sección 13).
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 41 | `sql/cashflow_comex_fecha_mov_desde.sql` | Siembra el parámetro *Contenedores desde (fecha de movimiento)* en 01/01/2025, en Parámetros › Compras Exterior, sin pisar un valor cargado | El corte se aplica igual, con 01/01/2025; no se puede cambiar, y sólo Parámetros dice qué script falta |
+| 42 | `sql/cashflow_comex_nac_pago.sql` | Crea `RO_T_CASHFLOW_COMEX_NAC_PAGO` y `RO_T_CASHFLOW_COMEX_NAC_SALDO_FECHA`: los pagos parciales de la nacionalización y la fecha del saldo, con bajas lógicas y auditoría | Crono funciona como hoy: el tilde no ofrece el pago parcial, sin los contenedores con costos reales, y avisa qué script falta |
+
+**El 41 y el 42 no dependen de ninguno**; el 42 va después de `sql/cashflow_auditoria_usuario.sql`, como toda tabla nueva. Los avisos y las tarjetas no necesitan scripts.
+
+#### Lo que mueve el tablero
+
+**Nada**, medido contra la base el 20/10/2026. Ninguna serie de las que tocan los avisos cambió (45 cifras de seis proveedores, ver *Un hecho, un texto*). Con el corte por fecha de movimiento, Proveedores Exterior pasa de 348 a 199 filas y Crono de 70 a 69, sin mover un peso de ninguna serie: todo lo que salió estaba sin fecha o vencido. Los avisos de *no se pudieron valuar* bajan de 255 a 106. Ver `README-comex.md` y `README-compras-proyectadas.md`.
+
+El pago parcial tampoco mueve nada el día que se publica, medido aparte: sin el 42 y con el 42 sin pagos cargados, las tres series de nacionalización quedan iguales al centavo, y los 190 contenedores con costos reales que vuelven a Crono aportan $ 0. Ver `README-comex.md`, sección 13.
+
 ## Ejecución de los scripts — la instalación completa
 
 En este orden, contra `central`:
@@ -331,6 +349,8 @@ En este orden, contra `central`:
 -- 38. sql/cashflow_echeqs_deposito.sql              (Echeqs: alicuotas de los cheques y plazo de acreditacion)
 -- 39. sql/cashflow_estructura_echeqs_depositados.sql  (la fila Echeqs depositados)
 -- 40. sql/cashflow_echeqs_acreditado.sql            (Echeqs: la marca "ya acredito" de un depositado)
+-- 41. sql/cashflow_comex_fecha_mov_desde.sql        (Comex: contenedores desde una fecha de movimiento)
+-- 42. sql/cashflow_comex_nac_pago.sql               (Comex: pago parcial de la nacionalizacion y fecha del saldo)
 ```
 
 **El 39 va después del 38**: sin las alícuotas y el plazo, los depositados no tienen neto. **El 40 no depende de ninguno de los dos.** Los depósitos se leen de Tango; ninguno de los tres crea `RO_T_CASHFLOW_ECHEQ_DEPOSITO`, que está en desuso. Ver `README-echeqs.md`.
@@ -1615,6 +1635,73 @@ AvisosPanel.pintar('avisosSaldos', avisos);   // textos o {nivel, texto, seccion
 
 **Las confirmaciones de Cob. Electrónicos van aparte**, en `#notifCobel`: compartían el contenedor de los avisos, y adentro de un panel que se redibuja entero y se pliega se borrarían con la próxima carga o quedarían escondidas.
 
+### Lo que el tablero dice de cada pestaña, también en su panel
+
+> Es de `feature/cashflow-avisos-kpis-comex-nac-parcial`. Hasta ahí cada pestaña armaba su lista a mano y se había separado de lo que el tablero decía de ella: Proveedores Exterior no decía lo marcado como ya hecho, Crono no decía que faltaba la estimación, y varios textos decían lo mismo con otras palabras.
+
+Las trece pestañas con proveedor —las que tienen `'tab'` en `CashflowRegistry`— muestran en su panel **todos los avisos que el tablero muestra en su grupo**, con el mismo texto, nivel y sección, **más los suyos** (un script que falta y apaga una edición, lo que la grilla dejó afuera). El grupo *Tablero* sigue sólo en el tablero.
+
+```js
+AvisosPanel.pedirTablero('saldos');                   // en paralelo con los datos
+AvisosPanel.pintarPestana('avisosSaldosLocales', propios, { tab: 'saldos', sub: 'locales' });
+```
+
+- **Una sola fuente.** `CashflowController?action=getAvisosPestana&tab=…` corre `Cashflow::avisosDePestana()`, que pasa **por el mismo `pedirSeries()` y `resolverOrigenes()` del tablero** sólo las filas cuyo proveedor es de esa pestaña: los avisos propios del proveedor, los del `'warnings'` de sus series, los descartes de cada fila con el nombre de la fila, y la falla al cargar o calcular el módulo. `tests/test_avisos_pestana.php` corre el motor con proveedores falsos y fija, pestaña por pestaña, que el resultado es el grupo de `proyectar()`.
+- **Permiso de lectura de esa pestaña**, no del tablero: quien ve Proveedores Exterior lee lo que el tablero dice de ella aunque no pueda abrir el tablero.
+- **No frena la grilla.** La pestaña lo pide en paralelo con sus datos, pinta primero los suyos y redibuja cuando llegan. Y el servidor **libera la sesión apenas autoriza** (`AuthCashflow::liberarSesion()`): las sesiones de PHP en archivos se bloquean mientras dura el pedido, y sin esto, si el pedido de avisos salía primero, la grilla esperaba a que el motor terminara. `class/conexion.php` no la vuelve a abrir.
+- **Sin repetidos.** Si un aviso propio tiene el mismo texto que uno del tablero —sin contar espacios de más ni el punto final—, queda **uno, con el nivel y la sección del tablero**. No se normalizan tildes ni palabras: la regla es que cada hecho se escriba una vez en el origen (ver *Un hecho, un texto*, abajo).
+- **Lo que quedó fuera de la grilla.** Con los del tablero a la vista, la pestaña esconde sus dos descartes de `EjeVista` (*"… con fecha fuera del horizonte no se muestran en la tabla."*): el tablero dice lo mismo de su fila, con el nombre de la fila. Si el pedido falla, se queda con los suyos.
+- **Si el pedido falla**, la pestaña funciona igual y el panel suma un aviso de atención: *"No se pudieron traer los avisos del tablero para esta pestaña."*
+- **Un error de carga no se pisa.** Quien pinta con `pintar()` —un error, otra lista— saca ese panel del redibujo: los avisos del tablero que llegan después no lo tapan.
+
+**Un panel por sub-pestaña** en Saldos, Pagos con Tarjetas y Echeqs, cada uno adentro de su sub-pestaña. Cada aviso del tablero va a la de su sección y **los que no tienen sección van a todas**:
+
+| Pestaña | Sección | Sub-pestaña |
+| --- | --- | --- |
+| Saldos | `Saldo Inicial` | Saldos (`#avisosSaldos`) |
+| Saldos | `Caja Locales` | Saldos Locales (`#avisosSaldosLocales`) |
+| Saldos | `Inversión`, `Cuenta comitente` | Fondos (`#avisosSaldosFondos`) |
+| Pagos con Tarjetas | `Supervisoras` / `Corporativas` / `Socios` | la suya (`#avisosTarjSup` / `Corp` / `Soc`) |
+| Echeqs | — (ningún aviso trae sección) | Cartera y Venta Cobrada Anticipada |
+
+Proveedores Locales queda con **un panel sobre sus tres vistas**: *Importar* y *Maestro* son herramientas, no otra vista de los mismos datos, y su única sección (`Cronograma`) es de la vista principal. En Pagos con Tarjetas el panel de arriba (`#avisosTarj`) queda sólo para la falla al cargar, que se tiene que ver aunque las sub-pestañas no se dibujen; y cada sub-pestaña muestra ahora también los avisos de su parte, que antes decía sólo el tablero. En Ventas los del tablero van a *Proyección*, que es lo que alimenta la fila; *Análisis* muestra sólo los suyos. Ventas dejó su bloque propio de carteles siempre abiertos y usa este panel en los dos lugares; el cartel `#avisoTramoEstimado` sigue fijo.
+
+El mapa sección → sub-pestaña está en `Js/avisos-panel.js` (`SUB_DE_SECCION`), y la prueba verifica que sus claves sean las secciones que ponen los proveedores (`SaldosProvider::SECCION_*`, `Fondos::CLASES`, `TarjetasProvider`).
+
+#### Un hecho, un texto
+
+Sacar los repetidos por texto sólo funciona si el mismo hecho tiene un solo texto. Donde el proveedor y la pestaña lo decían con otras palabras, el texto pasó a escribirse una vez y lo llaman los dos:
+
+| Pestaña | Función compartida |
+| --- | --- |
+| Proveedores Exterior | `Comex::avisosExteriorConNivel()`, `avisoSinCurva()` |
+| Crono Nacionalización | `Comex::avisosNacionalizacionConNivel()`, `avisoSinCurva()` |
+| Cobranzas FR / May | `Ingresos::avisosVencidasConNivel()` |
+| Exportaciones Tasky | `Ingresos::avisosExportacionesConNivel()` |
+| Cob. Electrónicos | `CobElectronicos::avisoSinTablas()`, `avisoSinProcesadoras()`, `avisoPosteriores()` |
+
+Ningún número cambió: medido contra la base el 20/10/2026 con el código de antes y el de ahora, las 45 cifras de las seis series de esos proveedores (eje, fuera del horizonte y sin fecha) son iguales. Con los datos de ese día, el único texto del tablero que cambió es el de las vencidas de Cobranzas FR, y en una cosa además de la redacción: **el tablero contaba como "ubicadas en el primer día del eje" también las vencidas con fecha pactada a mano**, que en realidad se muestran en su fecha. Ahora las cuenta aparte, como la pestaña.
+
+### Las tarjetas KPI se pliegan a una franja: `Js/kpis-plegables.js`
+
+> Es de `feature/cashflow-avisos-kpis-comex-nac-parcial`. Las tarjetas ocupaban casi un tercio de la pantalla en cada pestaña, y quien vuelve todos los días a la misma ya sabe qué mide cada una: necesita el número, no el ícono ni el pie.
+
+Cada bloque de tarjetas tiene un botón chico, un chevron en la esquina de la última tarjeta, que lo pasa a una **franja compacta** —por cada tarjeta, su título y su valor en un renglón— y lo vuelve a expandir.
+
+```html
+<div data-kpis="kpisCronoNac" class="row g-3 mb-4" id="summarySection" style="display: none;">
+```
+
+- **Es una variante de CSS sobre las mismas tarjetas**, y es la decisión que importa. Cada pestaña escribe sus valores por id (`total4semanas`, `cfKpiApertura`…) y les pone sus clases de color (`cf-negativo`, rojo en negativo). Una franja aparte con copias de los valores mostraría un número viejo la primera vez que alguien se olvidara de actualizarla. Acá no hay copia: la clase `.kpis-compacto` esconde el ícono y el pie y pone la tarjeta en un renglón. Tocar *Actualizar* con la franja puesta cambia los valores igual que expandidos.
+- **El pie pasa a ser el tooltip** de la tarjeta, leído del pie en el momento de pasar el mouse: el pie también lo escribe la pestaña (el período que mide) y cambia con cada recarga. Va en la tarjeta y no en el valor, así un `title` que la pestaña le ponga al valor sigue mandando.
+- **Por defecto, expandido**, y **se recuerda por bloque** en `localStorage` (`kpis_plegables_<clave>`) con `try/catch`. La clave es el valor de `data-kpis` y no el id, porque hay ids repetidos entre pestañas: `summarySection` está en Proveedores Exterior y en Crono, y una plegaría la otra.
+- **No toca la visibilidad del bloque.** Las pestañas lo esconden hasta tener datos (`display: none` en el HTML); el botón vive adentro y aparece y desaparece con él.
+- **Se conecta solo**, al cargar la página y cada vez que cambia `#tabContent` (un `MutationObserver`): sirve para la pestaña que llega por AJAX y para las tarjetas que una pestaña dibuja por JS, como las de Fondos. Si la pestaña reescribe el bloque entero, el botón se repone.
+- **En móvil la franja pasa a varios renglones**, nunca a scroll horizontal: las columnas son flex con wrap y ninguna tiene ancho mínimo.
+- **En el tablero** *Disponible Inicial* conserva su borde (`cf-kpi-fijo`): en la franja también se lee aparte de los que miden el período.
+
+Lo usan los dieciocho bloques de las catorce pestañas con tarjetas, más `kpiFondos`: en las pestañas con sub-pestañas —Saldos, Pagos con Tarjetas, Echeqs— cada sub-pestaña tiene su bloque y se pliega por separado. `tests/test_kpis_plegables.php` verifica con un `grep` sobre `Tabs/` que ningún bloque con `.kpi-card` quede sin `data-kpis` y que las claves no se repitan; las reglas puras están en `tests/js/kpis_plegables.wsf`.
+
 ### Mientras algo carga: `Js/cargando.js`
 
 Un solo indicador para las diecinueve pestañas y para `loadTab()`, cargado una vez en `index.php` con su hoja `Css/cargando.css`. Antes había diecinueve copias del marcado `.loading-spinner` y diez del CSS, y las pestañas sin copia propia —el tablero, *Proyección*, *Proveedores Locales* y las sub-pestañas de *Parámetros*— se veían bien sólo si antes se había abierto otra cuyo CSS definía la regla sin prefijo.
@@ -1663,7 +1750,7 @@ Los avisos no son decoración: son lo que evita leer un cero como si fuera un da
 
 Desde `feature/cashflow-avisos-agrupados` cada aviso tiene **gravedad** y sabe **a qué pestaña pertenece**. El panel *Sobre estos números* los muestra agrupados por pestaña, contraíbles y con el color y el ícono de su nivel, con el patrón del Informe Económico (`informe_economico/Js/ie-comun.js`, `IE.pintarAvisos()`). Antes eran una lista plana de más de treinta textos, y el que decía *"el número está mal"* se veía igual que el que decía *"esto lo excluyó alguien a mano"*.
 
-**Solo cambió el panel del tablero.** Los paneles de cada pestaña siguen recibiendo `string[]`, con los mismos textos. Ningún número, regla de cálculo ni serie cambió, y no hay scripts.
+En esa rama sólo cambió el panel del tablero, y ningún número, regla de cálculo ni serie. Desde `feature/cashflow-avisos-kpis-comex-nac-parcial` **cada pestaña con proveedor muestra también los avisos de su grupo**, con el mismo texto, nivel y sección: ver *Lo que el tablero dice de cada pestaña, también en su panel*, más arriba.
 
 ### Tres niveles, los mismos del Informe Económico
 
@@ -1691,7 +1778,7 @@ El agrupamiento y el orden están en **una función pura del backend**, `Aviso::
 
 El texto **no repite el nombre de la pestaña**: "Proveedores Exterior: 255 contenedor(es)…" pasó a "255 contenedor(es)…". Se sacó **en el origen** —el provider o la clase—, no se recorta en pantalla.
 
-Cuando la pestaña sola no dice de qué parte habla el aviso, el aviso lleva **`seccion`**, que el panel muestra en negrita antes del texto. Es un campo aparte y no un prefijo, porque es presentación: los paneles de cada pestaña reciben solo el texto.
+Cuando la pestaña sola no dice de qué parte habla el aviso, el aviso lleva **`seccion`**, que el panel muestra en negrita antes del texto. Es un campo aparte y no un prefijo, porque es presentación y porque decide algo más: en las pestañas con un panel por sub-pestaña, **la sección dice a qué sub-pestaña va el aviso** (Caja Locales → Saldos Locales, Corporativas → Tarjetas Pagos Corporativos).
 
 | Grupo | Secciones |
 | --- | --- |
@@ -1705,12 +1792,13 @@ Crono Nacionalización **no lleva sección**: tiene su propia pestaña, así que
 
 De paso se arreglaron dos cosas que el agrupamiento dejó a la vista: los avisos de inflación de Supervisoras y Socios salían con el prefijo **duplicado** ("Tarjetas Socios: Tarjetas Socios: …", lo ponían la clase y el provider), y tres textos decían *"los avisos de arriba"*, que dejó de ser cierto al ordenar por gravedad: ahora dicen *"los otros avisos de esta pestaña"*.
 
-Los paneles de las pestañas quedan bien sin el prefijo: ahí el usuario ya está en la pestaña. El único que pierde algo de contexto es el aviso del calendario bancario dentro del cronograma de Proveedores Locales (*"RO_T_CALENDARIO no tiene datos para 2026-12…"*), que antes decía "Cronograma de Proveedores Locales:" adelante; se entiende igual.
+Los paneles de las pestañas quedan bien sin el prefijo: ahí el usuario ya está en la pestaña, y la sección se muestra igual que en el tablero. El único que pierde algo de contexto es el aviso del calendario bancario dentro del cronograma de Proveedores Locales (*"RO_T_CALENDARIO no tiene datos para 2026-12…"*), que antes decía "Cronograma de Proveedores Locales:" adelante; se entiende igual.
 
 ### El contrato
 
 - `CashflowProvider::avisar($mensaje, $nivel = 'warning', $seccion = null)` guarda `['nivel', 'texto', 'seccion']`.
-- `warnings()` sigue devolviendo **solo los textos**; ningún consumidor actual cambia. `avisos()` devuelve la lista con nivel, y es lo que lee el motor.
+- `warnings()` devuelve **solo los textos**, para el controller que todavía los lea así; `avisos()` devuelve la lista con nivel, y es lo que lee el motor —para el tablero y para `Cashflow::avisosDePestana()`—.
+- **Un hecho se escribe una vez**, en una función `…ConNivel()` que llaman el proveedor y la pestaña. La pestaña saca los repetidos por texto: dos redacciones del mismo hecho saldrían dos veces.
 - `avisarTodos($lista, $nivel, $seccion)` levanta una lista entera: los textos sueltos con el nivel que se pase, los avisos con nivel con el suyo.
 - El `'warnings'` de una serie acepta **textos y avisos con nivel**; un texto suelto es `warning`, así una serie vieja o armada a mano en una prueba sigue andando. `normalizar()` lo deja siempre con nivel.
 - La **falla atrapada** en `series()` es crítica y **ya no empieza con el código** del módulo: en el tablero lo dicen el grupo y el `origen`.
@@ -1860,7 +1948,9 @@ Texto resumido. "Sección" vacía es sin sección. Para revisar.
 | Sobrepago (Proveedores Exterior) | warning |
 | Órdenes del mismo contenedor (Proveedores Exterior) | info |
 | Falta la tabla de pagos de Comercio Exterior: proyecta de más (Proveedores Exterior) | danger |
-| Contenedores sin gastos de nacionalización estimados (Crono Nacionalización) | warning |
+| Contenedores sin gastos de nacionalización estimados (Crono Nacionalización; desde esta rama también en la pestaña) | warning |
+| Contenedores con pagos parciales: lo pagado y el saldo pendiente (Crono Nacionalización) | info |
+| Pagado de más: los pagos parciales superan el costo, en pesos (Crono Nacionalización) | warning |
 
 **Comercio Exterior › Proyección**
 
@@ -2160,6 +2250,8 @@ Y del **saldo de cobertura**: que se mida sobre todo el horizonte y no sobre la 
 
 Del **panel de avisos**, `tests/test_avisos.php` fija el nivel por defecto y el inválido; que `warnings()` siga devolviendo solo textos; que el `'warnings'` de una serie acepte las dos formas; que el motor mande cada aviso a su grupo —el del proveedor, el de la serie, los descartes, el módulo que falla o no carga, el proveedor sin `'tab'` y los del motor a *Tablero*— y junte en uno a dos proveedores con la misma pestaña; el orden de grupos y de avisos; que cada envoltorio devuelva los mismos textos que su lista con nivel; y que cada `avisar()` de cada proveedor del registro diga su nivel, y —con base— que todo lo que emiten tenga un nivel válido. Las pruebas que leían la lista plana del tablero la leen con `textosTablero()` (`tests/lib.php`), y las que filtraban por el prefijo "Cobertura:" ahora filtran por la sección.
 
+De **los avisos del tablero en cada pestaña**, `tests/test_avisos_pestana.php` corre el motor con un proveedor falso por cada proveedor con `'tab'` del registro y fija, para las trece pestañas, que `avisosDePestana()` devuelve **el mismo grupo de `proyectar()`** —texto, nivel, sección y orden—, que no trae nada del grupo *Tablero* y que no le pide nada a los módulos de otras pestañas. Fija también que la acción pida la lectura de esa pestaña y libere la sesión entre autorizar y calcular; que cada una de las trece pestañas pida sus avisos y los pinte con los suyos; que los paneles por sub-pestaña estén adentro de su sub-pestaña; que el mapa sección → sub-pestaña use las secciones de los proveedores; y, de *Un hecho, un texto*, que el proveedor y la pestaña llamen a la misma función. Lo puro del panel —sin repetidos con el nivel del tablero, el aviso de la falla, los descartes de la grilla, el reparto por sub-pestaña— está en `tests/js/avisos_panel.wsf`.
+
 De `FLUJO_NETO`, `tests/test_cashflow.php` fija que incluya el saldo **mostrado** arriba y que no lo arrastre, y que `SALDO_FINAL` no lo cuente dos veces.
 
 Y de la **presentación de Cobertura** —una fila por tipo de fondo—, el mismo archivo fija que el front esconda las filas de stock **filtrando antes de recorrer** (con un salteo adentro del bucle, una sección sin filas visibles igual dibujaría su encabezado y quedaría un título sin nada debajo); que el motor las siga leyendo y siga sacando de ahí los topes por fondo; que el disponible se arme con los fondos **de la fila** y no con el total; que una fila sin fondos no escriba nada; que el caso excedido se siga marcando; que el desglose *calculado / a mano* haya quedado en el tooltip y no en pantalla; y que el aviso del fondo sin fila de uso siga llegando, porque pasó a ser la única forma de enterarse.
@@ -2235,7 +2327,7 @@ Class/CashflowProvider.php                  Contrato de proveedor
 Class/Aviso.php                             Nivel de cada aviso y el orden del panel del tablero
 Class/CashflowRegistry.php                  Registro de orígenes de datos
 Class/CashflowEstructura.php                Configuración: lectura, validación y CRUD
-Class/Cashflow.php                          El motor
+Class/Cashflow.php                          El motor, y avisosDePestana(): los avisos del tablero de una pestana
 Class/Providers/VentasProvider.php
 Class/Providers/ComexProvider.php
 Class/Providers/IngresosProvider.php
@@ -2245,7 +2337,12 @@ Class/Providers/EcheqsProvider.php          Las cuatro series de cartera: ver su
 Controller/EcheqsController.php             Listados, marcado, exclusion y "ya acredito"
 Tabs/echeqs.php                             Las dos sub-pestanas
 Tabs/parametros_prechequeado.php            Parametros > Cheques: deposito y maestro pre-chequeado
-Controller/CashflowController.php           getTablero
+Controller/CashflowController.php           getTablero y getAvisosPestana
+Js/avisos-panel.js                          El panel de avisos de todas las pestanas, y los del tablero en cada una
+Js/kpis-plegables.js                        Las tarjetas KPI plegables a una franja (cargado en index.php)
+Css/kpis-plegables.css
+tests/test_kpis_plegables.php               Que ningun bloque de tarjetas quede sin el componente
+tests/test_avisos_pestana.php               Que cada pestana reciba exactamente su grupo del tablero
 Controller/CashflowEstructuraController.php  CRUD de la estructura
 Tabs/cashflow.php                           La pantalla
 Tabs/parametros_estructura.php              El editor

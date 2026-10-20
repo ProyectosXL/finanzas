@@ -187,6 +187,23 @@ Eso **no** significa que el mecanismo esté dormido. Los meses 2027-02, 03 y 04 
 
 Con la fecha de corte de la versión anterior de invierno (23/07/2026), el mecanismo descontaría 28 contenedores por U$S 1.636.696.
 
+### El padrón de lo ya cargado también corta por fecha de movimiento
+
+Desde `feature/cashflow-avisos-kpis-comex-nac-parcial`, lo ya cargado que se descuenta son **sólo los contenedores cuyo `FECHA_MOV` de la OC principal es igual o posterior a *Contenedores desde***, el parámetro de Comercio Exterior que vive en esta misma sub-pestaña de Parámetros (01/01/2025 por defecto). No es una regla de esta proyección: `cargado()` arma su consulta con `Comex::filtroPadron()`, y el corte va adentro, así que **sigue siendo exactamente el padrón de Proveedores Exterior**. Si los dos se separaran, el tablero contaría dos veces el mismo saldo. La regla y su porqué están en `README-comex.md`, sección 12.
+
+Medido contra la base el **20/10/2026**, con el código de antes y el de ahora:
+
+| | Antes | Después |
+| --- | ---: | ---: |
+| Contenedores en el padrón de `cargado()` | 348 | **199** |
+| Su pendiente | U$S 21.764.241,31 | U$S 11.767.557,39 |
+| Con fecha de pago —los únicos que pueden descontar— | 93, U$S 4.865.133,34 | **iguales** |
+| `PAGOS_PROYECTADOS` en el eje | $ 7.446.922.508,07 | igual |
+| `NACIONALIZACION_PROYECTADA` en el eje | $ 1.913.032.369,80 | igual |
+| Aviso *contenedores sin fecha estimada de pago* | 254, U$S 16.899.107,97 | **106, U$S 6.902.424,05** |
+
+**El descuento no cambió**: los 149 que salen no tienen fecha de pago, así que no descontaban en ningún mes (ver *Lo que no se puede ubicar, no descuenta*, arriba). Lo que baja es el aviso, que deja de contar contenedores de 2023 y 2024.
+
 ---
 
 ## 3. La nacionalización no usa `inc_fob`, y es la decisión más discutible del módulo
@@ -297,6 +314,7 @@ Módulo **`COMPRAS_PROY`** en *Parámetros*, sub-pestaña *Compras Exterior*.
 | `compras_proy_dia_llegada` | 15 | Día del mes en que se ubica la recepción |
 | `compras_proy_dias_pago` | 47 | Días entre el pago del FOB y la recepción |
 | `compras_proy_dias_nac` | 2 | Días entre la nacionalización y la recepción |
+| `comex_fecha_mov_desde` | 2025-01-01 | **De Comercio Exterior, no de esta proyección**: desde qué fecha de movimiento de la OC principal se consideran los contenedores de Proveedores Exterior, de Crono Nacionalización y de lo ya cargado que se descuenta acá. Lo siembra `sql/cashflow_comex_fecha_mov_desde.sql`; sin él vale el inicial y esta pantalla dice qué script falta. Una fecha, no futura, validada en el servidor. Ver `README-comex.md`, sección 12 |
 
 ### Los tres de días son del cashflow, y no leen la cadena de Comex
 

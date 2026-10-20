@@ -66,6 +66,66 @@ igual('con un critico arranca abierto aunque la preferencia diga cerrado', true,
     P.abiertoAlInicio({ danger: 1 }, false));
 igual('y aunque nunca lo hayan tocado', true, P.abiertoAlInicio({ danger: 2 }, null));
 
+/* ---- los avisos del tablero, junto con los de la pestana ---- */
+function textos(lista) {
+    var p = [];
+    for (var i = 0; i < lista.length; i++) {
+        p.push(lista[i].nivel + ':' + lista[i].texto + (lista[i].seccion ? '@' + lista[i].seccion : ''));
+    }
+    return p.join('|');
+}
+
+igual('la clave ignora espacios de mas y el punto final', P.claveTexto('Hay  3 cheques.'),
+    P.claveTexto(' Hay 3 cheques '));
+igual('pero no las tildes', false, P.claveTexto('Todavía') === P.claveTexto('Todavia'));
+
+var tableroOk = { estado: 'ok', avisos: [
+    { nivel: 'danger', texto: 'Hay 3 cheques.', seccion: 'Sub' },
+    { nivel: 'info', texto: 'solo del tablero' }
+] };
+
+igual('un aviso propio igual a uno del tablero queda una vez, con el nivel del tablero',
+    'danger:Hay 3 cheques.@Sub|warning:solo mio|info:solo del tablero',
+    textos(P.combinar(['Hay 3 cheques', 'solo mio'], tableroOk)));
+igual('mientras no llegan, solo los propios', 'warning:Hay 3 cheques|warning:solo mio',
+    textos(P.combinar(['Hay 3 cheques', 'solo mio'], { estado: 'cargando', avisos: [] })));
+igual('si el pedido falla, los propios y el aviso de la falla',
+    'warning:solo mio|warning:' + P.TEXTO_SIN_TABLERO,
+    textos(P.combinar(['solo mio'], { estado: 'error', avisos: [] })));
+igual('un aviso repetido en el tablero no sale dos veces', 'info:x',
+    textos(P.combinar([], { estado: 'ok', avisos: [{ nivel: 'info', texto: 'x' }, { nivel: 'info', texto: 'x.' }] })));
+
+var descartes = ['$ 10,00 con fecha fuera del horizonte no se muestran en la tabla.',
+    '$ 5,00 sin fecha asignada no se pueden ubicar en el tiempo y quedan fuera de la tabla.',
+    'otro'];
+
+igual('reconoce los dos descartes de la grilla', 'true|true|false',
+    P.esDescarteDelEje(descartes[0]) + '|' + P.esDescarteDelEje(descartes[1]) + '|'
+    + P.esDescarteDelEje(descartes[2]));
+igual('con los del tablero a la vista, la pestana esconde sus descartes', 'warning:otro',
+    textos(P.combinar(descartes, { estado: 'ok', avisos: [] })));
+igual('si el pedido falla, se queda con los suyos', 3,
+    P.combinar(descartes, { estado: 'error', avisos: [] }).length - 1);
+
+/* ---- cada aviso a su sub-pestana ---- */
+var tarj = P.normalizar([
+    { nivel: 'info', texto: 'corp', seccion: 'Corporativas' },
+    { nivel: 'info', texto: 'sup', seccion: 'Supervisoras' },
+    { nivel: 'info', texto: 'general' },
+    { nivel: 'info', texto: 'rara', seccion: 'Otra cosa' }
+]);
+var mapaTarj = P.SUB_DE_SECCION.pagos_tarjetas;
+
+igual('Corporativas va solo a su sub-pestana, y lo que no tiene seccion a todas',
+    'info:corp@Corporativas|info:general|info:rara@Otra cosa',
+    textos(P.deSubPestana(tarj, mapaTarj, 'corp')));
+igual('en Socios no esta Corporativas', 'info:general|info:rara@Otra cosa',
+    textos(P.deSubPestana(tarj, mapaTarj, 'soc')));
+igual('sin sub-pestana, todos', 4, P.deSubPestana(tarj, mapaTarj, null).length);
+igual('Caja Locales va a Locales', 'locales', P.SUB_DE_SECCION.saldos['Caja Locales']);
+igual('Inversion y Cuenta comitente van a Fondos', 'fondos|fondos',
+    P.SUB_DE_SECCION.saldos['Inversi\u00f3n'] + '|' + P.SUB_DE_SECCION.saldos['Cuenta comitente']);
+
 WScript.Echo('OK: ' + ok + '   FALLAS: ' + mal);
 ]]>
 </script>

@@ -109,8 +109,13 @@ if (!class_exists('Conexion')) {
 
                    Y acá el camino sin sesión ya está resuelto abajo: sin
                    'conexion_dns' se cae a central, que es exactamente lo que pasaba
-                   igual. Mismo criterio y mismo comentario que AuthCashflow::init(). */
-                if (session_status() === PHP_SESSION_NONE && !headers_sent()) {
+                   igual. Mismo criterio y mismo comentario que AuthCashflow::init().
+
+                   NI SI EL PEDIDO YA LIBERÓ LA SESIÓN (AuthCashflow::liberarSesion()):
+                   $_SESSION sigue leíble en memoria, y volver a abrirla la bloquearía
+                   otra vez para todos los pedidos del mismo usuario. */
+                if (session_status() === PHP_SESSION_NONE && !headers_sent()
+                    && !defined('CASHFLOW_SESION_LIBERADA')) {
                     session_start();
                 }
 
@@ -173,8 +178,11 @@ if (!class_exists('Conexion')) {
 
                    Sin sesión, la línea de abajo escribe en $_SESSION como si fuera
                    un array común y no persiste, que es exactamente lo que ya
-                   ocurría. */
-                if (session_status() === PHP_SESSION_NONE && !headers_sent()) {
+                   ocurría.
+
+                   Tampoco si el pedido ya la liberó: ver la nota de servidor(). */
+                if (session_status() === PHP_SESSION_NONE && !headers_sent()
+                    && !defined('CASHFLOW_SESION_LIBERADA')) {
                     session_start();
                 }
 

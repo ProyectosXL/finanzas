@@ -17,7 +17,7 @@
 <div class="tab-cashflow"<?php echo AuthCashflow::atributoEdicion('cashflow'); ?>>
 
     <!-- Indicadores -->
-    <div class="row g-3 mb-3" id="cfKpis" style="display: none;">
+    <div data-kpis="cfKpis" class="row g-3 mb-3" id="cfKpis" style="display: none;">
         <!-- El Disponible Inicial es el ÚNICO que no cambia con la vista: es con
              cuánto se arranca hoy, un hecho del presente y no del período que se
              elige mirar. Lleva un ícono de ancla y el pie lo aclara. -->

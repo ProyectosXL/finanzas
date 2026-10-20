@@ -183,6 +183,11 @@
         Cargando.mostrar('loadingSaldos');
         mostrar('wrapperSaldos', false);
 
+        // Lo que el tablero dice de esta pestaña, en paralelo con los datos:
+        // la grilla no lo espera. Va con la sub-pestaña 1 porque es la que se
+        // pide siempre; los avisos de las otras dos llegan en el mismo pedido.
+        AvisosPanel.pedirTablero('saldos');
+
         pedirJson(URL_SALDOS + '?action=getSaldos')
             .then(function(data) {
                 datosSaldos = data;
@@ -1473,21 +1478,31 @@
 
     /**
      * Los avisos no son decoración: son lo que evita leer un cero como si fuera
-     * un dato. Se juntan los de las tres sub-pestañas en un solo bloque arriba.
+     * un dato.
+     *
+     * UN PANEL POR SUB-PESTAÑA, cada uno con los avisos de su vista y los que
+     * el tablero dice de su sección -Saldo Inicial, Caja Locales, Inversión o
+     * Cuenta comitente-; los del tablero sin sección van a las tres. Hasta
+     * feature/cashflow-avisos-kpis-comex-nac-parcial era un solo bloque arriba
+     * con los de las tres juntos, y un aviso de la caja de un local se leía
+     * mirando los saldos bancarios.
+     *
+     * Se pintan los tres siempre: una sub-pestaña que todavía no se pidió
+     * muestra igual lo que el tablero dice de ella.
      */
     function pintarAvisos() {
         /* La pestaña 1 trae los avisos con nivel; las otras dos, textos, que el
            panel cuenta como atención. "Esta cuenta no suma" no puede leerse
            igual que "este saldo es de ayer": los críticos van primero, en rojo,
-           y abren el panel solos. Antes eran dos carteles, uno rojo y otro
-           amarillo; ahora es el panel plegable de todas las pestañas
-           (Js/avisos-panel.js), que ordena por nivel. */
+           y abren el panel solos (Js/avisos-panel.js ordena por nivel). */
         var conNivel = (datosSaldos && datosSaldos.avisos_con_nivel) ||
             (datosSaldos && datosSaldos.avisos) || [];
 
-        AvisosPanel.pintar('avisosSaldos', conNivel
-            .concat((datosLocales && datosLocales.avisos) || [])
-            .concat((datosFondos && datosFondos.avisos) || []));
+        AvisosPanel.pintarPestana('avisosSaldos', conNivel, { tab: 'saldos', sub: 'saldos' });
+        AvisosPanel.pintarPestana('avisosSaldosLocales', (datosLocales && datosLocales.avisos) || [],
+            { tab: 'saldos', sub: 'locales' });
+        AvisosPanel.pintarPestana('avisosSaldosFondos', (datosFondos && datosFondos.avisos) || [],
+            { tab: 'saldos', sub: 'fondos' });
     }
 
     /** Corre una acción mostrando el estado en el botón */

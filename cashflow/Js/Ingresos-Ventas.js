@@ -549,13 +549,18 @@
                '<i class="fas fa-info-circle ms-1" title="' + TIP_BALANCE + '"></i>';
     }
 
-    /** Warnings de la vista anual activa, con el mismo bloque de siempre */
+    /**
+     * Los avisos de la vista anual activa, en el panel plegable de todas las
+     * pestañas (Js/avisos-panel.js). SIN los del tablero: la fila del tablero
+     * la alimenta la proyección, así que lo que el tablero dice de Ventas va
+     * en el panel de Proyección.
+     */
     function pintarWarningsAnuales() {
         var datos = (vistaAnual === 'acumulada')
             ? datosAcumulada
             : ((vistaAnual === 'balance') ? datosBalance : null);
 
-        pintarWarnings('warningsVentaAnual', datos ? datos.warnings : []);
+        AvisosPanel.pintar('warningsVentaAnual', datos ? (datos.warnings || []) : []);
     }
 
     /* ---------------------------------------------------------------
@@ -910,6 +915,10 @@
         mostrar('cardCobranza', false);
         mostrar('cardParticipacion', false);
         mostrar('summaryProyeccion', false);
+
+        // Lo que el tablero dice de Ventas, en paralelo con los datos: la
+        // grilla no lo espera. Ver Js/avisos-panel.js.
+        AvisosPanel.pedirTablero('ventas');
 
         // Venta y cobranza se piden en paralelo: son dos acciones distintas del
         // controller y ninguna depende del resultado de la otra.
@@ -1540,46 +1549,18 @@
         document.getElementById('kpiCobranzaNetaHorizonte').textContent = formatCurrency(kpi.cobranza_neta_horizonte || 0);
     }
 
-    function generarWarnings() {
-        pintarWarnings('warningsProyeccion', datosProyeccion.warnings);
-    }
-
     /**
-     * Bloque de avisos no fatales, compartido por la proyección y por las
-     * vistas anuales: un origen de datos que todavía no existe en el entorno no
-     * tiene que caer la pantalla, pero sí decirse.
+     * Los avisos de la proyección, junto con los que el tablero dice de Ventas,
+     * en el panel plegable de todas las pestañas (Js/avisos-panel.js). Hasta
+     * feature/cashflow-avisos-kpis-comex-nac-parcial Ventas tenía su propio
+     * bloque, siempre abierto, con un cartel por aviso.
+     *
+     * El cartel del tramo estimado (#avisoTramoEstimado) NO entra: es fijo,
+     * explica una marca de la tabla que está justo debajo.
      */
-    function pintarWarnings(idContenedor, warnings) {
-        var cont = document.getElementById(idContenedor);
-
-        if (!cont) {
-            return;
-        }
-
-        var lista = warnings || [];
-
-        if (!lista.length) {
-            cont.innerHTML = '';
-            return;
-        }
-
-        var html = '';
-
-        // Un aviso es un texto suelto o {nivel, texto}: el crítico se pinta en
-        // rojo, el informativo en celeste y el resto como advertencia.
-        var clases = { danger: 'alert-danger', info: 'alert-info', warning: 'alert-warning' };
-        var iconos = { danger: 'fa-circle-exclamation', info: 'fa-circle-info',
-                       warning: 'fa-triangle-exclamation' };
-
-        lista.forEach(function(w) {
-            var nivel = (w && typeof w === 'object' && clases[w.nivel]) ? w.nivel : 'warning';
-            var texto = (w && typeof w === 'object') ? w.texto : w;
-
-            html += '<div class="alert ' + clases[nivel] + ' py-2 px-3 mb-2">' +
-                    '<i class="fas ' + iconos[nivel] + ' me-1"></i><small>' + escapar(texto) + '</small></div>';
-        });
-
-        cont.innerHTML = html;
+    function generarWarnings() {
+        AvisosPanel.pintarPestana('warningsProyeccion', datosProyeccion.warnings || [],
+            { tab: 'ventas' });
     }
 
     /* ================================================================

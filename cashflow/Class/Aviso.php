@@ -36,13 +36,17 @@
  * pegado al texto porque es un dato de presentacion: las pestanas que muestran
  * el mismo texto en su propio panel no lo necesitan.
  *
- * LAS PESTANAS SIGUEN RECIBIENDO TEXTOS
- * -------------------------------------
- * Los paneles de cada pestana leen string[] y no cambian. Una funcion que arma
- * avisos de niveles distintos devuelve la lista con nivel, y la version que
- * usan las pestanas es un envoltorio de una linea con Aviso::textos(): asi el
- * texto se escribe una sola vez y las dos pantallas no pueden decir cosas
- * distintas sobre los mismos datos.
+ * EL TEXTO SE ESCRIBE UNA SOLA VEZ, Y LAS DOS PANTALLAS LO MUESTRAN
+ * ----------------------------------------------------------------
+ * Cada pestana con proveedor muestra sus avisos Y los que el tablero dice de
+ * ella (Cashflow::avisosDePestana() y Js/avisos-panel.js), y saca los
+ * repetidos comparando el texto. Eso exige que un mismo hecho tenga un solo
+ * texto: una funcion que arma avisos devuelve la lista con nivel
+ * (...ConNivel()), la llaman el proveedor y el controller de la pestana, y si
+ * alguna pestana todavia lee textos, el envoltorio es una linea con
+ * Aviso::textos(). Dos textos para el mismo hecho saldrian dos veces en la
+ * pestana; feature/cashflow-avisos-kpis-comex-nac-parcial unifico los que
+ * habian divergido (Comex, Cobranzas, Exportaciones, Cob. Electronicos).
  */
 class Aviso {
 

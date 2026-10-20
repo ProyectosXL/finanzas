@@ -33,8 +33,6 @@ $edita = AuthCashflow::puedeEditar('saldos');
 -->
 <div class="tab-saldos"<?php echo AuthCashflow::atributoEdicion('saldos'); ?>>
 
-    <div id="avisosSaldos"></div>
-
     <ul class="nav nav-tabs mb-3" id="saldosTabs" role="tablist">
         <li class="nav-item" role="presentation">
             <button class="nav-link active" id="tabSaldosBtn" data-bs-toggle="tab"
@@ -63,7 +61,12 @@ $edita = AuthCashflow::puedeEditar('saldos');
          ============================================================ -->
     <div class="tab-pane fade show active" id="paneSaldos" role="tabpanel">
 
-        <div class="row g-3 mb-4">
+        <!-- Un panel de avisos por sub-pestaña: los propios de esta vista y los
+             que el tablero dice de su sección (Saldo Inicial). Ver
+             Js/avisos-panel.js, SUB_DE_SECCION. -->
+        <div id="avisosSaldos"></div>
+
+        <div data-kpis="kpisSaldos" class="row g-3 mb-4">
             <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
@@ -281,7 +284,10 @@ $edita = AuthCashflow::puedeEditar('saldos');
          ============================================================ -->
     <div class="tab-pane fade" id="paneLocales" role="tabpanel">
 
-        <div class="row g-3 mb-4">
+        <!-- Los de esta vista y los del tablero de la sección Caja Locales. -->
+        <div id="avisosSaldosLocales"></div>
+
+        <div data-kpis="kpisSaldosLocales" class="row g-3 mb-4">
             <div class="col-md-6 col-lg-3">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
@@ -414,11 +420,14 @@ $edita = AuthCashflow::puedeEditar('saldos');
          ============================================================ -->
     <div class="tab-pane fade" id="paneFondos" role="tabpanel">
 
+        <!-- Los de esta vista y los del tablero de Inversión y Cuenta comitente. -->
+        <div id="avisosSaldosFondos"></div>
+
         <!-- Un KPI por clase y moneda. Los importes NO se convierten: un fondo
              en pesos y otro en dólares se muestran cada uno en la suya, igual
              que en la pestaña 1. La valuación a pesos existe sólo para el
              tablero. Las tarjetas las dibuja el JS con lo que haya. -->
-        <div class="row g-3 mb-4" id="kpiFondos"></div>
+        <div data-kpis="kpiFondos" class="row g-3 mb-4" id="kpiFondos"></div>
 
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">

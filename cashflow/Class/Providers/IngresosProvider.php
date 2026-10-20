@@ -119,27 +119,30 @@ class IngresosProvider extends CashflowProvider {
      * notas compitiendo por la misma celda dejarian ver sola una, y cual de las
      * dos dependeria del orden en que se escribieron.
      *
-     * @param array $filas Filas con 'IMPORTE_VENCIDO' y 'COMP_VENCIDOS'
+     * EL TEXTO ES EL DE LA PESTANA (Ingresos::avisosVencidasConNivel()), y
+     * con el la separacion: las vencidas con fecha pactada a mano NO se
+     * reubican -se muestran en su fecha- y antes este aviso las contaba como
+     * si estuvieran en el primer dia. La pestana muestra tambien los avisos
+     * del tablero; con dos textos, el mismo hecho saldria dos veces.
+     *
+     * @param array $filas Filas con 'IMPORTE_VENCIDO', 'COMP_VENCIDOS' y su
+     *        parte pactada a mano
      */
     private function avisarVencidas($filas) {
         $importe = 0.0;
         $comprobantes = 0;
+        $impPactado = 0.0;
+        $pactados = 0;
 
         foreach ($filas as $f) {
             $importe += floatval(isset($f['IMPORTE_VENCIDO']) ? $f['IMPORTE_VENCIDO'] : 0);
             $comprobantes += intval(isset($f['COMP_VENCIDOS']) ? $f['COMP_VENCIDOS'] : 0);
+            $impPactado += floatval(isset($f['IMPORTE_VENCIDO_PACTADO']) ? $f['IMPORTE_VENCIDO_PACTADO'] : 0);
+            $pactados += intval(isset($f['COMP_VENCIDOS_PACTADOS']) ? $f['COMP_VENCIDOS_PACTADOS'] : 0);
         }
 
-        if ($comprobantes === 0) {
-            return;
-        }
-
-        $this->avisar($comprobantes . ' factura'
-            . ($comprobantes === 1 ? '' : 's') . ' por ' . self::plata($importe) . ' '
-            . ($comprobantes === 1 ? 'tiene' : 'tienen') . ' la fecha probable de cobro ya '
-            . 'vencida y se ' . ($comprobantes === 1 ? 'ubica' : 'ubican') . ' en el primer dia '
-            . 'del eje. ' . ($comprobantes === 1 ? 'Es una factura vencida' : 'Son facturas vencidas')
-            . ' sin cobrar, no cobranza estimada para hoy.', Aviso::WARNING);
+        $this->avisarTodos(Ingresos::avisosVencidasConNivel($comprobantes - $pactados,
+            $importe - $impPactado, $pactados, $impPactado));
     }
 
     /**

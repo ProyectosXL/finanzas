@@ -12,7 +12,7 @@
 
     <!-- Las tres tarjetas contestan las tres preguntas de la pantalla: cuánto
          se proyecta, con cuántos fleteros, y cuántos no se pueden proyectar. -->
-    <div class="row g-3 mb-4" id="summaryLogistica" style="display: none;">
+    <div data-kpis="summaryLogistica" class="row g-3 mb-4" id="summaryLogistica" style="display: none;">
         <div class="col-md-4">
             <div class="kpi-card">
                 <div class="kpi-card-header">

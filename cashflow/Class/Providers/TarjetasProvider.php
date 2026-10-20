@@ -237,30 +237,16 @@ class TarjetasProvider extends CashflowProvider {
      *
      * LOS ESCALARES TAMBIEN SE SUMAN: si una parte informa $ 1.000 fuera del
      * horizonte, el total tiene que informarlos tambien, porque es la fila que se
-     * dibuja y es donde el aviso tiene que poder explicarse.
+     * dibuja y es donde el aviso tiene que poder explicarse. La cuenta vive en
+     * Horizonte::sumar(), que comparte con Nacionalizaciones.
      *
      * @param Horizonte $h
      * @param array $series
      * @return array
      */
     private function sumar($h, $series) {
-        $total = $h->serieVacia();
+        $total = $h->sumar($series);
         $total['moneda_origen'] = 'ARS';
-        $total['fuera_horizonte'] = 0;
-        $total['sin_fecha'] = 0;
-
-        foreach ($series as $s) {
-            foreach ($s['dias'] as $k => $v) {
-                $total['dias'][$k] += $v;
-            }
-
-            foreach ($s['meses'] as $k => $v) {
-                $total['meses'][$k] += $v;
-            }
-
-            $total['fuera_horizonte'] += $s['fuera_horizonte'];
-            $total['sin_fecha'] += $s['sin_fecha'];
-        }
 
         return $total;
     }

@@ -188,6 +188,10 @@
             indicador({ titulo: 'Calculando la proyección…' });
         }
 
+        // Lo que el tablero dice de esta pestaña, en paralelo con los datos:
+        // la grilla no lo espera. Ver Js/avisos-panel.js.
+        AvisosPanel.pedirTablero('compras_proyectadas');
+
         return fetch(ENDPOINT + '?action=getGrilla')
             .then(function(r) { return r.json(); })
             .then(function(d) {
@@ -238,11 +242,21 @@
      * de carga entra como CRÍTICO: el panel se abre solo, y no se lo puede
      * esconder recordando "cerrado". Los avisos sin nivel cuentan como
      * atención.
+     *
+     * Los de la grilla van con los que el tablero dice de esta pestaña, sin
+     * repetidos; un error de carga va solo, para que la llegada de los del
+     * tablero no lo pise.
      */
     function pintarAvisos(lista, tipo) {
-        AvisosPanel.pintar('avisosComprasProy', (lista || []).map(function(a) {
-            return (tipo === 'error') ? { nivel: 'danger', texto: a } : a;
-        }));
+        if (tipo === 'error') {
+            AvisosPanel.pintar('avisosComprasProy', (lista || []).map(function(a) {
+                return { nivel: 'danger', texto: a };
+            }));
+
+            return;
+        }
+
+        AvisosPanel.pintarPestana('avisosComprasProy', lista || [], { tab: 'compras_proyectadas' });
     }
 
     /**

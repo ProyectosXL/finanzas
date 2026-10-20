@@ -93,8 +93,8 @@ class CobElectronicosProvider extends CashflowProvider {
      */
     private function cobranza($h, $modulo) {
         if (!$modulo->tablasCreadas()) {
-            $this->avisar('Todavia no existen las tablas del modulo, asi que la fila se '
-                . 'muestra en cero. Corre sql/cashflow_cob_electronicos.sql.', Aviso::DANGER);
+            // El mismo texto que la pestana: ver CobElectronicos::avisoSinTablas().
+            $this->avisar(CobElectronicos::avisoSinTablas(), Aviso::DANGER);
 
             return $this->vacia();
         }
@@ -102,8 +102,7 @@ class CobElectronicosProvider extends CashflowProvider {
         $procesadoras = $modulo->getProcesadoras(false);
 
         if (empty($procesadoras)) {
-            $this->avisar('Todavia no hay ninguna procesadora cargada, asi que la fila va en '
-                . 'cero. Cargalas en Parametros -> Cob. Electronicos.', Aviso::WARNING);
+            $this->avisar(CobElectronicos::avisoSinProcesadoras(), Aviso::WARNING);
 
             return $this->vacia();
         }

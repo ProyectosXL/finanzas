@@ -150,6 +150,10 @@
         Cargando.mostrar('loadingEch');
         mostrar('wrapperEch', false);
 
+        // Lo que el tablero dice de esta pestaña, en paralelo con los datos:
+        // la grilla no lo espera. Ver Js/avisos-panel.js.
+        AvisosPanel.pedirTablero('echeqs');
+
         pedirJson(URL_ECHEQS + '?action=getEcheqsCartera')
             .then(function(data) {
                 datosCartera = data;
@@ -1622,15 +1626,18 @@
 
     /**
      * Los avisos no son decoración: son lo que evita leer un cero como si fuera
-     * un dato. Se juntan los de las dos sub-pestañas en un solo bloque arriba.
+     * un dato.
+     *
+     * UN PANEL POR SUB-PESTAÑA, cada uno con los avisos de su vista y los que
+     * el tablero dice de Echeqs. Esos no traen sección, así que van a las dos.
+     * Hasta feature/cashflow-avisos-kpis-comex-nac-parcial era un solo bloque
+     * arriba con los de las dos sub-pestañas juntos.
      */
     function pintarAvisos() {
-        var avisos = []
-            .concat((datosCartera && datosCartera.warnings) || [])
-            .concat((datosPre && datosPre.avisos) || []);
-
-        // El panel plegable de todas las pestañas: ver Js/avisos-panel.js.
-        AvisosPanel.pintar('avisosEcheqs', avisos);
+        AvisosPanel.pintarPestana('avisosEcheqs', (datosCartera && datosCartera.warnings) || [],
+            { tab: 'echeqs', sub: 'cartera' });
+        AvisosPanel.pintarPestana('avisosEcheqsPre', (datosPre && datosPre.avisos) || [],
+            { tab: 'echeqs', sub: 'prechequeado' });
     }
 
     function badgeEstado(estado) {

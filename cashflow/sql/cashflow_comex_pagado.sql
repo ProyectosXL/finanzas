@@ -62,8 +62,10 @@
    uno solo: desde feature/comex-saldo-pendiente hay DOS formas distintas de que
    un egreso de Proveedores Exterior salga de la proyeccion -este tilde, y un
    pago cargado en la app de Comercio Exterior- y el tablero tiene que poder
-   contestar cual de las dos fue. Crono Nacionalizacion sigue con dos partes:
-   alla no hay pagos parciales contra un saldo. Ver README-comex.md, seccion 8.
+   contestar cual de las dos fue. Crono Nacionalizacion sigue con dos series,
+   y desde sql/cashflow_comex_nac_pago.sql NACIONALIZACION_PAGADAS lleva ademas
+   lo pagado parcialmente: este tilde sigue diciendo "pagado TOTAL". Ver
+   README-comex.md, secciones 8 y 13.
 
    La fila del tablero ya esta apuntada a PAGOS y a NACIONALIZACION, asi que NO
    HAY QUE REPUNTAR NADA: esos dos codigos pasan a significar "lo que falta

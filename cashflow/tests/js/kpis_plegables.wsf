@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<!--
+    Las reglas puras de Js/kpis-plegables.js, verificadas sin navegador.
+
+    Mismo criterio que avisos_panel.wsf: el proyecto no tiene node, pero Windows
+    trae cscript, que ejecuta JScript (ES3). La parte pura del componente esta
+    escrita sin nada posterior a ES3 justamente para poder correrla aca.
+
+        cscript //nologo cashflow\tests\js\kpis_plegables.wsf
+
+    La corre test_kpis_plegables.php cuando cscript esta disponible, y espera
+    "FALLAS: 0" en la ultima linea.
+-->
+<job>
+<script language="JScript" src="../../Js/kpis-plegables.js"/>
+<script language="JScript">
+<![CDATA[
+var ok = 0, mal = 0;
+var K = KpisPlegables;
+
+function igual(nombre, esperado, obtenido) {
+    if (esperado === obtenido) {
+        ok++;
+        WScript.Echo('OK    ' + nombre);
+    } else {
+        mal++;
+        WScript.Echo('FALLA ' + nombre + ' | esperado: ' + esperado + ' | obtenido: ' + obtenido);
+    }
+}
+
+/* ---- la clave es por bloque ---- */
+igual('la clave de localStorage es la del bloque', 'kpis_plegables_kpisCronoNac', K.clave('kpisCronoNac'));
+igual('dos bloques, dos claves', false, K.clave('kpisCronoNac') === K.clave('kpisProvExt'));
+
+/* ---- por defecto, expandido ---- */
+igual('sin preferencia arranca expandido', false, K.compactoAlInicio(null));
+igual('recuerda si lo dejaron compacto', true, K.compactoAlInicio(true));
+igual('y si lo dejaron expandido', false, K.compactoAlInicio(false));
+
+/* ---- el pie como tooltip ---- */
+igual('sin espacios de mas', 'Del 20/10 al 16/11', K.textoPie('  Del 20/10\n   al 16/11 '));
+igual('un pie con solo un espacio duro no dice nada', '', K.textoPie(' '));
+igual('ni uno vacio', '', K.textoPie(null));
+
+WScript.Echo('OK: ' + ok + '   FALLAS: ' + mal);
+]]>
+</script>
+</job>

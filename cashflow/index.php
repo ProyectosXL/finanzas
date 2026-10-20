@@ -74,6 +74,9 @@ $tituloInicial = Menu::tituloTab($tabInicial);
          motivo: las pestañas llegan por AJAX y el panel se tiene que ver igual
          en todas, se haya abierto antes la que sea. -->
     <link href="Css/avisos-panel.css?v=<?php echo time(); ?>" rel="stylesheet">
+    <!-- La franja compacta de las tarjetas KPI (Js/kpis-plegables.js). Mismo
+         motivo: las tarjetas de todas las pestañas se pliegan igual. -->
+    <link href="Css/kpis-plegables.css?v=<?php echo time(); ?>" rel="stylesheet">
     <!-- El color de cada tipo de nivel del mix de cobro (Js/mix-niveles.js).
          Lo usan Parámetros y Ventas, que llegan por AJAX: un solo archivo con
          los colores, cargado antes que las dos, así significan lo mismo. -->
@@ -92,6 +95,10 @@ $tituloInicial = Menu::tituloTab($tabInicial);
          pestaña inicial se incluye en línea más abajo, y las demás llegan por
          AJAX. No depende de nada. -->
     <script src="Js/avisos-panel.js?v=<?php echo time(); ?>"></script>
+    <!-- Las tarjetas KPI de todas las pestañas, plegables a una franja
+         (Js/kpis-plegables.js). En el <head> por lo mismo: se conecta solo al
+         cargar la página y cada vez que cambia #tabContent. No depende de nada. -->
+    <script src="Js/kpis-plegables.js?v=<?php echo time(); ?>"></script>
     <!-- Las clases y la leyenda de los tipos de nivel del mix (Css/mix-niveles.css).
          En el <head> por lo mismo que avisos-panel.js. No depende de nada. -->
     <script src="Js/mix-niveles.js?v=<?php echo time(); ?>"></script>

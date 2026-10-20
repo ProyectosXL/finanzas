@@ -74,42 +74,23 @@ try {
                 'IMPORTE_EJE'
             );
 
-            /* Los avisos propios van ADELANTE de los del eje: explican por qué
-               hay contenedores que no aparecen con importe, y eso se lee antes
-               que lo que quedó fuera del horizonte.
+            /* LOS AVISOS SON LOS DEL TABLERO, MÁS LOS DE ESTA PANTALLA, y van con
+               nivel. Hasta feature/cashflow-avisos-kpis-comex-nac-parcial esta
+               lista se armaba acá con las funciones sueltas de Comex y no
+               coincidía con la del proveedor: le faltaba lo marcado como ya
+               hecho y mandaba textos sin nivel. Ahora es la misma lista
+               (Comex::avisosExteriorConNivel()), así que cuando llegan los del
+               tablero (Cashflow::avisosDePestana()) el panel los junta sin
+               repetir.
 
-               El de vencidos va en el medio y no al final por el mismo motivo:
-               el aviso genérico del eje dice cuánta plata quedó fuera del
-               horizonte sin distinguir si cayó antes o después, y éste dice
-               cuánta de esa es fecha vencida, que es la que se corrige desde
-               esta misma pantalla. */
+               Lo propio de la pestaña: los scripts que apagan una edición y la
+               curva caída, que acá se lee distinto -la grilla igual muestra los
+               dólares-. Al final, lo que el eje de la grilla dejó afuera. */
             $payload['warnings'] = array_merge(
-                $comex->getAvisosExterior(),
-
-                /* LO QUE COMERCIO EXTERIOR YA PAGÓ VA ARRIBA DE TODO lo demás
-                   de esta pestaña, y no es orden de importancia genérico: es
-                   plata que salió de la proyección sin que nadie de este lado
-                   hiciera nada, así que es lo primero que hay que poder leer
-                   cuando el número de ayer no es el de hoy. El sobrepago va
-                   pegado porque es el mismo circuito mirado donde no cierra. */
-                Comex::avisosSaldoComex($filasExt),
-                Comex::avisosSobrepago($filasExt),
-                Comex::avisosGrupo($filasExt),
-
-                /* EN DÓLARES, y sobre el PENDIENTE: lo que no se pudo valuar es
-                   lo que esta pantalla proyecta, no el FOB. Con VALOR_FOB_DOLAR
-                   el aviso diría de más justamente en los contenedores que ya
-                   tienen pagos hechos. */
-                Comex::avisosValuacion($filasExt, $comex->dolarFuturo()->ultimoMes(),
-                    'PENDIENTE_USD'),
-                /* SIN EL EJE: acá no hay nada que repartir, porque ninguna
-                   vencida entra en ninguna columna —no es que su fecha caiga
-                   afuera, es que no suman por regla—. El importe que se informa
-                   es IMPORTE_ARS, que es lo que valen; informar IMPORTE_EJE
-                   daría "$ 0,00 vencidos", que no le dice nada a nadie. */
-                Comex::avisosVencidos($filasExt, 'FECHA_PAGO_EFECTIVA', 'IMPORTE_ARS',
-                    'fecha estimada de pago'),
-                $payload['warnings']
+                $comex->avisosEdicionExteriorConNivel(),
+                array_values(array_filter([$comex->avisoSinCurva('los pagos al exterior')])),
+                $comex->avisosExteriorConNivel($filasExt),
+                Aviso::lista($payload['warnings'])
             );
 
             /* De dónde sale el dólar y hasta cuándo llega la curva. La pantalla
@@ -364,35 +345,27 @@ try {
                ahora de IMPORTE_ARS —el importe YA CONVERTIDO—, que es el cambio
                que hace que el eje deje de ubicar dólares en columnas de pesos.
                La grilla sigue mostrando IMPORTE_EST en su columna, en dólares. */
+            /* POR LA FECHA DEL SALDO desde el pago parcial: es la de
+               nacionalizacion salvo que el contenedor tenga pagos parciales y
+               una fecha cargada para lo que falta. IMPORTE_EJE es ese saldo. Ver
+               Comex::repartoNacionalizacion(). */
             $payload = EjeVista::armar(
                 ejeDelModulo(),
                 $filasNac,
-                'FECHA_NAC_EFECTIVA',
+                'FECHA_SALDO_EFECTIVA',
                 'IMPORTE_EJE'
             );
 
-            /* Mismo reparto que en Proveedores Exterior: primero lo que falta
-               para poder editar, después lo que no se pudo valuar, después lo
-               que no entra en ninguna columna, y al final lo que el eje
-               descartó. */
-            $faltantes = array_values(array_filter(
-                [$comex->avisoSinHistorial(), $comex->avisoSinPagado()]));
-
+            /* Mismo reparto que en Proveedores Exterior: lo que apaga una
+               edición, la curva caída, la lista que también emite el tablero
+               (Comex::avisosNacionalizacionConNivel()) y al final lo que el eje
+               descartó. Hasta esta rama a la pestaña le faltaban lo marcado
+               como ya hecho y la estimación que falta, que el tablero sí decía. */
             $payload['warnings'] = array_merge(
-                $faltantes,
-                /* Los mismos avisos que el tablero, escritos una sola vez. El
-                   campo del importe en dólares y el nombre de la fecha son los
-                   de esta pestaña. */
-                Comex::avisosValuacion($filasNac, $comex->dolarFuturo()->ultimoMes(),
-                    'IMPORTE_EST', 'fecha de nacionalización'),
-                /* Sin el eje: ninguna vencida entra en ninguna columna, así que
-                   no hay nada que repartir. El importe que se informa es
-                   IMPORTE_ARS —lo que valen en pesos—; hasta
-                   feature/comex-nac-usd se informaba IMPORTE_EST, que es un
-                   número en dólares y salía con el signo de pesos adelante. */
-                Comex::avisosVencidos($filasNac, 'FECHA_NAC_EFECTIVA', 'IMPORTE_ARS',
-                    'fecha de nacionalización'),
-                $payload['warnings']
+                $comex->avisosEdicionNacionalizacionConNivel(),
+                array_values(array_filter([$comex->avisoSinCurva('los gastos de nacionalización')])),
+                $comex->avisosNacionalizacionConNivel($filasNac),
+                Aviso::lista($payload['warnings'])
             );
 
             /* DE DÓNDE SALE EL DÓLAR, igual que en Proveedores Exterior: un
@@ -417,9 +390,96 @@ try {
                dice qué script falta. */
             $payload['pagado_editable'] = $comex->tienePagado();
 
+            /* Y lo mismo para el pago parcial: sin sus tablas el botón no se
+               dibuja, los contenedores con costos reales no vienen, y el aviso
+               de arriba dice qué script falta. */
+            $payload['pago_parcial_editable'] = $comex->tieneNacPago();
+            $payload['tolerancia_saldo'] = Comex::TOLERANCIA_SALDO_NAC;
+
             echo json_encode([
                 'success' => true,
                 'data' => $payload
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           EL PAGO PARCIAL DE LA NACIONALIZACION
+
+           Se registra SOLO del lado del cashflow: Comercio Exterior no se
+           entera. El contenedor lo resuelve el servidor -la OC principal- a
+           partir del ID de la fila, y las reglas las valida Comex: el dialogo
+           explica y bloquea el boton, esto decide. Ver Comex.php, "EL PAGO
+           PARCIAL DE LA NACIONALIZACION".
+           ================================================================ */
+        case 'registrarPagoNac':
+            $data = json_decode(file_get_contents('php://input'), true);
+
+            if (!is_array($data) || !isset($data['id_mg'])) {
+                throw new Exception('Falta el contenedor al que corresponde el pago.');
+            }
+
+            $r = $comex->registrarPagoNac($data, $usuario);
+
+            /* SE DICE CUÁNTO QUEDA, y en qué se convirtió un pago en dólares:
+               son los dos números que el usuario no tipeó. */
+            $d = $r['despues'];
+            $mensaje = 'Pago registrado por $ ' . number_format($r['importe_ars'], 2, ',', '.')
+                . ($r['moneda'] === 'USD' ? ' (el equivalente en pesos de los dólares)' : '') . '. '
+                . ($d['cubierto']
+                    ? 'Con esto la nacionalización queda pagada: sale de la proyección.'
+                    : 'Queda un saldo de $ ' . number_format($d['saldo'], 2, ',', '.')
+                        . ', que se sigue proyectando.')
+                . ($d['sobrepago'] > 0
+                    ? ' Atención: hay $ ' . number_format($d['sobrepago'], 2, ',', '.')
+                        . ' pagados de más.'
+                    : '');
+
+            echo json_encode(['success' => true, 'message' => $mensaje, 'data' => $r],
+                JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'anularPagoNac':
+            $data = json_decode(file_get_contents('php://input'), true);
+
+            if (!is_array($data) || !isset($data['id'])) {
+                throw new Exception('Falta el pago a anular.');
+            }
+
+            $r = $comex->anularPagoNac($data['id'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Pago anulado: deja de restar y el saldo vuelve a subir $ '
+                    . number_format($r['importe_ars'], 2, ',', '.')
+                    . '. Queda en el historial del contenedor.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'cambiarFechaSaldoNac':
+            $data = json_decode(file_get_contents('php://input'), true);
+
+            if (!is_array($data) || !isset($data['id_mg']) || !isset($data['fecha'])) {
+                throw new Exception('Faltan el contenedor y la fecha nueva del saldo.');
+            }
+
+            $r = $comex->cambiarFechaSaldoNac($data['id_mg'], $data['fecha'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['sin_cambios']
+                    ? 'La fecha del saldo ya era ésa: no se cambió nada.'
+                    : 'El saldo se proyecta ahora en la fecha nueva. La anterior queda en el historial.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* Los pagos del contenedor, vigentes y anulados, y el historial de la
+           fecha del saldo. */
+        case 'getPagosNac':
+            echo json_encode([
+                'success' => true,
+                'data' => $comex->getPagosNac(isset($_GET['id_mg']) ? $_GET['id_mg'] : 0)
             ], JSON_UNESCAPED_UNICODE);
             break;
 

@@ -146,9 +146,13 @@ require_once __DIR__ . '/Aviso.php';
  *
  * Hay dos formas de leerlos, y las dos existen a proposito:
  *
- *   avisos()    la lista con nivel. La lee el motor para el panel del tablero.
- *   warnings()  solo los textos. La leen los controllers de las pestanas, cuyo
- *               panel sigue siendo una lista de textos y no cambia.
+ *   avisos()    la lista con nivel. La lee el motor, para el panel del tablero
+ *               y para Cashflow::avisosDePestana(), que es lo que cada
+ *               pestana muestra junto con los suyos.
+ *   warnings()  solo los textos, para el controller que todavia los lea asi
+ *               (Compras Proyectadas, por ejemplo). Un texto suelto cuenta
+ *               como atencion en el panel; si el del tablero es el mismo,
+ *               queda el del tablero con su nivel.
  *
  * El 'warnings' de una serie acepta las dos formas: un texto suelto se toma
  * como 'warning', asi una serie vieja o armada a mano en una prueba sigue

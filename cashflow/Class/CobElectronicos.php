@@ -312,6 +312,7 @@ class CobElectronicos {
         ];
 
         $fueraPosterior = 0;
+        $posteriorMasNueva = null;
         $duplicados = [];
         $vistos = [];
 
@@ -343,6 +344,10 @@ class CobElectronicos {
                 $totales['fuera_eje'] += $neto;
                 $totales['fuera_eje_movimientos']++;
                 $fueraPosterior += $neto;
+
+                if ($posteriorMasNueva === null || $fecha > $posteriorMasNueva) {
+                    $posteriorMasNueva = $fecha;
+                }
             }
 
             $nombre = (string) (isset($m['procesadora']) ? $m['procesadora'] : '');
@@ -381,9 +386,7 @@ class CobElectronicos {
         // Lo YA ACREDITADO no genera aviso: ya paso, ya entro a la cuenta y ya
         // esta informado en el saldo bancario. La fila igual queda marcada.
         if ($fueraPosterior != 0) {
-            $avisos[] = 'Hay ' . self::plata($fueraPosterior) . ' de acreditaciones con fecha '
-                . 'posterior al final del horizonte: se ven en la tabla pero el tablero todavía '
-                . 'no las muestra, porque su fecha no tiene columna.';
+            $avisos[] = self::avisoPosteriores($fueraPosterior, $posteriorMasNueva);
         }
 
         if (!empty($duplicados)) {
@@ -565,10 +568,7 @@ class CobElectronicos {
         }
 
         if ($posterior != 0) {
-            $serie['warnings'][] = self::plata($posterior)
-                . ' netos tienen fecha de acreditacion posterior al final del horizonte (la mas '
-                . 'lejana, del ' . self::fechaCorta($fechaMasNueva) . '), asi que no tienen '
-                . 'columna donde mostrarse. Se ven igual en la pestana Cob. Electronicos.';
+            $serie['warnings'][] = self::avisoPosteriores($posterior, $fechaMasNueva);
         }
 
         return $serie;
@@ -1395,6 +1395,42 @@ class CobElectronicos {
         return $this->tablas;
     }
 
+    /* LOS TRES AVISOS QUE DICEN LA PESTANA Y EL TABLERO, escritos una vez.
+       Hasta feature/cashflow-avisos-kpis-comex-nac-parcial el proveedor tenia
+       los suyos -sin tildes, y cada uno decia solo la consecuencia de su
+       pantalla-. Ahora la pestana muestra tambien los avisos del tablero, y el
+       mismo hecho con dos textos saldria dos veces: el texto dice las dos
+       consecuencias. */
+
+    /** Faltan las tablas: la pestana no tiene nada y la fila va en cero */
+    public static function avisoSinTablas() {
+        return 'Todavía no existen las tablas del módulo Cob. Electrónicos, así que la fila del '
+            . 'tablero va en cero. Corré sql/cashflow_cob_electronicos.sql contra la base central.';
+    }
+
+    /** Sin procesadoras no se carga ningun movimiento, y la fila va en cero */
+    public static function avisoSinProcesadoras() {
+        return 'Todavía no hay ninguna procesadora cargada, así que la fila del tablero va en cero '
+            . 'y no se puede dar de alta ningún movimiento. Cargalas en Parámetros → Cob. '
+            . 'Electrónicos.';
+    }
+
+    /**
+     * Lo pendiente que cae despues del horizonte: se ve en la tabla, no tiene
+     * columna en el tablero.
+     *
+     * @param float $importe Neto
+     * @param string|null $fechaMasNueva 'Y-m-d' de la mas lejana
+     * @return string
+     */
+    public static function avisoPosteriores($importe, $fechaMasNueva) {
+        return 'Hay ' . self::plata($importe) . ' netos de acreditaciones con fecha posterior '
+            . 'al final del horizonte'
+            . ($fechaMasNueva === null ? '' : ' (la más lejana, del ' . self::fechaCorta($fechaMasNueva) . ')')
+            . ': se ven en la tabla de la pestaña, pero el tablero todavía no los muestra porque '
+            . 'su fecha no tiene columna.';
+    }
+
     /**
      * Avisos de configuracion pendiente.
      *
@@ -1404,8 +1440,7 @@ class CobElectronicos {
         $avisos = [];
 
         if (!$this->tablasCreadas()) {
-            $avisos[] = 'Todavía no existen las tablas del módulo Cob. Electrónicos. '
-                . 'Corré sql/cashflow_cob_electronicos.sql contra la base central.';
+            $avisos[] = self::avisoSinTablas();
 
             return $avisos;
         }
@@ -1413,9 +1448,7 @@ class CobElectronicos {
         $procesadoras = $this->getProcesadoras(false);
 
         if (empty($procesadoras)) {
-            $avisos[] = 'Todavía no hay ninguna procesadora cargada. Cargalas en '
-                . 'Parámetros → Cob. Electrónicos: sin procesadora no se puede dar de alta '
-                . 'ningún movimiento.';
+            $avisos[] = self::avisoSinProcesadoras();
 
             return $avisos;
         }
