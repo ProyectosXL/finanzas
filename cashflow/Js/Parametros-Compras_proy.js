@@ -33,6 +33,16 @@
         'compras_proy_dias_nac'
     ];
 
+    /**
+     * El de Comercio Exterior que vive en este módulo: desde qué fecha de
+     * movimiento se consideran los contenedores. No es de la proyección, pero
+     * corta el padrón cuyo pendiente la proyección descuenta, así que se mira
+     * acá. Va aparte de ORDEN porque lo siembra otro script
+     * (sql/cashflow_comex_fecha_mov_desde.sql) y el aviso de que falta tiene
+     * que nombrar ése.
+     */
+    var CLAVE_FECHA_MOV = 'comex_fecha_mov_desde';
+
     /** Como se dibuja y se valida cada uno */
     var FORMATO = {
         compras_proy_meses: { tipo: 'entero', sufijo: 'meses', min: 1, max: 60 },
@@ -41,7 +51,8 @@
         compras_proy_nac_pct: { tipo: 'decimal', sufijo: '%', paso: '0.01', min: 0, max: 300 },
         compras_proy_dia_llegada: { tipo: 'entero', sufijo: 'del mes', min: 1, max: 31 },
         compras_proy_dias_pago: { tipo: 'entero', sufijo: 'días antes', min: 0, max: 365 },
-        compras_proy_dias_nac: { tipo: 'entero', sufijo: 'días antes', min: 0, max: 365 }
+        compras_proy_dias_nac: { tipo: 'entero', sufijo: 'días antes', min: 0, max: 365 },
+        comex_fecha_mov_desde: { tipo: 'fecha' }
     };
 
     var ETIQUETAS = {
@@ -51,7 +62,8 @@
         compras_proy_nac_pct: 'Nacionalización sobre el FOB',
         compras_proy_dia_llegada: 'Día de llegada dentro del mes',
         compras_proy_dias_pago: 'Días entre el pago del FOB y la recepción',
-        compras_proy_dias_nac: 'Días entre la nacionalización y la recepción'
+        compras_proy_dias_nac: 'Días entre la nacionalización y la recepción',
+        comex_fecha_mov_desde: 'Contenedores desde (fecha de movimiento)'
     };
 
     /**
@@ -81,6 +93,11 @@
             'Subirlo corre el egreso HACIA ATRÁS en el eje, no hacia adelante: el pago va ANTES ' +
             'de la recepción. Y alarga la ventana, porque entran meses de recepción más lejanos ' +
             'cuyo pago sigue cayendo adentro.',
+        comex_fecha_mov_desde:
+            'Proveedores Exterior y Crono Nacionalización traen sólo los contenedores cuya OC ' +
+            'principal tiene fecha de movimiento desde este día, y lo mismo vale para lo ya ' +
+            'cargado que descuenta la proyección. Lo anterior no se muestra ni se avisa. No puede ' +
+            'ser una fecha futura.',
         compras_proy_dias_nac:
             'Es el más chico de los dos, así que los últimos meses de la ventana aportan su FOB ' +
             'y no su nacionalización: ésa cae fuera del horizonte. El tablero lo avisa con su ' +
@@ -122,12 +139,25 @@
                    iniciales que el proveedor tiene escritos. */
                 var faltan = ORDEN.filter(function(c) { return !valores[c]; });
 
-                avisar(faltan.length
+                var avisos = faltan.length
                     ? ['Faltan ' + faltan.length + ' parámetro' + (faltan.length === 1 ? '' : 's') +
                        ' de este módulo. Corré sql/cashflow_compras_proyectadas.sql contra la ' +
                        'base central. Mientras tanto la proyección usa los valores iniciales y ' +
                        'la pestaña Comercio Exterior › Proyección lo avisa.']
-                    : []);
+                    : [];
+
+                /* SIN EL PARÁMETRO DE LA FECHA EL CORTE SE APLICA IGUAL, con el
+                   valor inicial que tiene el código (Comex::FECHA_MOV_DESDE_INICIAL).
+                   Lo único que falta es poder cambiarlo, y eso se dice SÓLO acá: las
+                   pestañas no avisan nada. */
+                if (!valores[CLAVE_FECHA_MOV]) {
+                    avisos.push('Falta el parámetro "Contenedores desde (fecha de movimiento)". ' +
+                        'Corré sql/cashflow_comex_fecha_mov_desde.sql contra la base central. ' +
+                        'Mientras tanto Proveedores Exterior y Crono Nacionalización traen los ' +
+                        'contenedores desde el 01/01/2025, y no se puede cambiar.');
+                }
+
+                avisar(avisos);
 
                 pintar();
                 pintarCadena();
@@ -138,6 +168,14 @@
                 // Falló: que volver a la sub-pestaña lo reintente.
                 return false;
             });
+    }
+
+    /** Hoy como 'aaaa-mm-dd', en la hora local: toISOString() daría UTC */
+    function hoyIso() {
+        var d = new Date();
+
+        return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' +
+            ('0' + d.getDate()).slice(-2);
     }
 
     function buscarModulo(data, codigo) {
@@ -163,7 +201,7 @@
 
         if (!grid) { return; }
 
-        grid.innerHTML = ORDEN.map(function(clave) {
+        grid.innerHTML = ORDEN.concat([CLAVE_FECHA_MOV]).map(function(clave) {
             var p = valores[clave];
 
             if (!p) { return ''; }
@@ -180,6 +218,12 @@
                             '</option>';
                     }).join('') +
                 '</select>';
+            } else if (fmt.tipo === 'fecha') {
+                // El tope es hoy: una fecha futura dejaría afuera todos los
+                // contenedores. El servidor lo valida igual (Comex::validarFechaMovDesde()).
+                input = '<input type="date" class="form-control pcpr-input" ' +
+                    'data-clave="' + clave + '" max="' + hoyIso() + '" ' +
+                    'value="' + esc(p.VALOR) + '">';
             } else {
                 input = '<input type="number" class="form-control pcpr-input" ' +
                     'data-clave="' + clave + '" ' +
@@ -217,7 +261,20 @@
         var fmt = FORMATO[clave];
         var valor = input.value;
 
-        if (fmt.tipo !== 'opciones') {
+        if (fmt.tipo === 'fecha') {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(valor)) {
+                Notificacion.campoInvalido(input, ETIQUETAS[clave] + ' tiene que ser una fecha.');
+
+                return;
+            }
+
+            if (valor > hoyIso()) {
+                Notificacion.campoInvalido(input, ETIQUETAS[clave] + ' no puede ser una fecha ' +
+                    'futura: dejaría afuera todos los contenedores.');
+
+                return;
+            }
+        } else if (fmt.tipo !== 'opciones') {
             var n = Number(valor);
 
             /* SE VALIDA ANTES DE MANDAR, y el mensaje dice el rango: un día 45

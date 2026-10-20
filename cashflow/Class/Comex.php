@@ -1100,6 +1100,173 @@ class Comex {
                      AND " . $fob . " - CAST(" . $pagadoExpr . " AS FLOAT) <= " . self::TOLERANCIA_SALDO . ")";
     }
 
+    /* ====================================================================
+       DESDE QUE FECHA DE MOVIMIENTO SE CONSIDERA UN CONTENEDOR
+
+       Desde feature/cashflow-avisos-kpis-comex-nac-parcial los dos padrones
+       -Proveedores Exterior y lo ya cargado que descuenta Compras
+       Proyectadas- y Crono Nacionalizacion traen solo los contenedores cuyo
+       FECHA_MOV DE LA OC PRINCIPAL es igual o posterior a un parametro,
+       comex_fecha_mov_desde (Parametros > Compras Exterior, 01/01/2025 por
+       defecto).
+
+       POR QUE. El padron arrastraba contenedores de 2023 y 2024 que nadie
+       va a pagar ni nacionalizar desde el cashflow: al 20/10/2026 eran 149
+       de las 348 filas de Proveedores Exterior, y 149 de los 255 avisos de
+       "no se pudieron valuar". Ninguno sumaba en el eje -no tenian fecha o
+       estaban vencidos-; lo unico que hacian era tapar los avisos que si
+       piden algo.
+
+       LA FECHA ES LA DE LA OC PRINCIPAL, COALESCE(ID_PADRE, ID), que es el
+       criterio de Comercio Exterior para la ventana de Gestion de Despachos
+       (VisibilidadContenedor, repo administracion). Una OC y sus hijas
+       entran o salen juntas. Si la principal no esta -una FK colgada-, cuenta
+       la propia, igual que el FOB en saldoSelect().
+
+       FECHA_MOV ES OBLIGATORIO EN COMERCIO EXTERIOR: la pantalla de alta lo
+       pide y al 20/10/2026 no hay un solo encabezado sin el. Por eso no hay
+       caso "sin fecha": si apareciera, la comparacion con NULL lo dejaria
+       afuera, que es lo mismo que pasa con un contenedor anterior al corte.
+
+       LO QUE QUEDA AFUERA NO SE AVISA, a proposito: esa informacion no se
+       considera, y un aviso que la cuente seria justamente el ruido que este
+       corte viene a sacar. Vale tambien para un contenedor anterior con
+       saldo pendiente y fecha futura.
+       ==================================================================== */
+
+    /** La clave del parametro, en RO_T_CASHFLOW_PARAMETROS */
+    const PARAM_FECHA_MOV_DESDE = 'comex_fecha_mov_desde';
+
+    /**
+     * El valor con el que se trabaja sin el parametro. Esta escrito dos veces
+     * -aca y en sql/cashflow_comex_fecha_mov_desde.sql-, como los de Compras
+     * Proyectadas: el script lo siembra, y el codigo no depende de que se haya
+     * corrido.
+     */
+    const FECHA_MOV_DESDE_INICIAL = '2025-01-01';
+
+    /** @var string|null Cache del parametro, una lectura por instancia */
+    private $fechaMovDesde = null;
+
+    /**
+     * La fecha de corte a partir del valor del parametro. Un valor que no es
+     * una fecha 'aaaa-mm-dd' real -o que no esta- vale la inicial: el
+     * parametro lo valida validarFechaMovDesde() al guardarlo, asi que esto
+     * solo pasa sin el script o con un valor cargado a mano en la base.
+     *
+     * @param mixed $valor
+     * @return string 'Y-m-d'
+     */
+    public static function fechaMovDesde($valor) {
+        $v = trim((string) $valor);
+
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $v, $m)
+            && checkdate(intval($m[2]), intval($m[3]), intval($m[1]))) {
+            return $v;
+        }
+
+        return self::FECHA_MOV_DESDE_INICIAL;
+    }
+
+    /**
+     * La validacion del parametro al guardarlo, en el servidor: una fecha real
+     * y no futura. Una fecha futura dejaria los dos padrones vacios -ningun
+     * contenedor se movio todavia- y el tablero sin pagos al exterior.
+     *
+     * @param mixed $valor
+     * @param string $hoy 'Y-m-d'
+     * @return string La fecha normalizada
+     * @throws Exception Si no es una fecha o es futura
+     */
+    public static function validarFechaMovDesde($valor, $hoy) {
+        $v = trim((string) $valor);
+
+        if (self::fechaMovDesde($v) !== $v) {
+            throw new Exception('"Contenedores desde" tiene que ser una fecha (aaaa-mm-dd).');
+        }
+
+        if ($v > substr((string) $hoy, 0, 10)) {
+            throw new Exception('"Contenedores desde" no puede ser una fecha futura: dejaría afuera '
+                . 'todos los contenedores.');
+        }
+
+        return $v;
+    }
+
+    /**
+     * La regla del corte, pura: si un contenedor entra.
+     *
+     * Es sqlDesdeFechaMov() escrita en PHP, para poder probar sin base los
+     * casos que la base de hoy no tiene -no hay una sola OC hija- y para
+     * comparar una contra la otra fila por fila cuando hay base, igual que
+     * VisibilidadContenedor en Comercio Exterior.
+     *
+     * @param mixed $fechaMovPrincipal FECHA_MOV de COALESCE(ID_PADRE, ID), o null si no esta
+     * @param mixed $fechaMovPropia FECHA_MOV de la fila
+     * @param mixed $desde El parametro
+     * @return bool
+     */
+    public static function entraPorFechaMov($fechaMovPrincipal, $fechaMovPropia, $desde) {
+        $f = Horizonte::normalizarFecha($fechaMovPrincipal);
+
+        if ($f === null) {
+            $f = Horizonte::normalizarFecha($fechaMovPropia);
+        }
+
+        return $f !== null && $f >= self::fechaMovDesde($desde);
+    }
+
+    /**
+     * El corte en SQL, para la fila de alias A. Lo usan filtroPadron() -o sea
+     * los dos padrones- y getCronoNacionalizacion(): la regla esta escrita una
+     * vez.
+     *
+     * La fecha va como literal porque los WHERE de este modulo se arman como
+     * texto y se reusan en otras consultas (ComprasProyectadasDatos::cargado()),
+     * sin parametros; pasa antes por fechaMovDesde(), que solo deja salir
+     * 'aaaa-mm-dd'.
+     *
+     * @param mixed $desde
+     * @return string
+     */
+    public static function sqlDesdeFechaMov($desde) {
+        return "ISNULL((SELECT FMV.FECHA_MOV FROM " . self::TABLA_MAESTRO . " FMV
+                        WHERE FMV.ID = " . self::OC_PRINCIPAL . "), A.FECHA_MOV)
+                >= '" . self::fechaMovDesde($desde) . "'";
+    }
+
+    /**
+     * El parametro vigente. Sin la fila -no se corrio el script- o sin poder
+     * leerla, la inicial: el corte se aplica igual. El aviso de que falta el
+     * script va solo en Parametros, no en las pestanas.
+     *
+     * @return string 'Y-m-d'
+     */
+    public function fechaMovDesdeVigente() {
+        if ($this->fechaMovDesde !== null) {
+            return $this->fechaMovDesde;
+        }
+
+        $valor = null;
+        $cid = $this->conn->conectar('central');
+
+        if ($cid) {
+            $stmt = @sqlsrv_query($cid,
+                "SELECT VALOR FROM RO_T_CASHFLOW_PARAMETROS WHERE CLAVE = ?",
+                [self::PARAM_FECHA_MOV_DESDE]);
+
+            if ($stmt !== false) {
+                $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+                $valor = $row ? $row['VALOR'] : null;
+                sqlsrv_free_stmt($stmt);
+            }
+        }
+
+        $this->fechaMovDesde = self::fechaMovDesde($valor);
+
+        return $this->fechaMovDesde;
+    }
+
     /**
      * El WHERE del padron de Proveedores Exterior, sobre los alias de
      * saldoApply(): OC para el FOB de la principal y PG para sus pagos.
@@ -1113,12 +1280,17 @@ class Comex {
      * esta cubierto y todo contenedor con FOB sigue en el padron. Es la misma
      * degradacion -proyectar de mas- que avisoSinPagosComex() ya avisa.
      *
+     * Y EL CORTE POR FECHA DE MOVIMIENTO VA ACA, no en cada consulta: asi los
+     * dos padrones siguen siendo el mismo. Ver sqlDesdeFechaMov().
+     *
      * @return string
      */
     public function filtroPadron() {
         return self::sqlSigueVisible(
             'ISNULL(OC.VALOR_FOB_DOLAR, A.VALOR_FOB_DOLAR)',
-            $this->tienePagosComex() ? 'ISNULL(PG.MONTO, 0)' : 'CAST(0 AS DECIMAL(18,2))');
+            $this->tienePagosComex() ? 'ISNULL(PG.MONTO, 0)' : 'CAST(0 AS DECIMAL(18,2))')
+            . "
+                AND " . self::sqlDesdeFechaMov($this->fechaMovDesdeVigente());
     }
 
     /**
@@ -3014,6 +3186,7 @@ class Comex {
                 " . $this->rastroJoin('NAC') . "
                 " . $this->pagadoJoin('NAC') . "
                 WHERE B.ID_MG IS NULL
+                  AND " . self::sqlDesdeFechaMov($this->fechaMovDesdeVigente()) . "
                 ORDER BY CASE WHEN A.FECHA_DESP_ADU IS NULL THEN 1 ELSE 0 END,
                          A.FECHA_DESP_ADU,
                          ISNULL(A.FECHA_EMB, A.FECHA_EST_EMB)";

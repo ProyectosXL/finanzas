@@ -140,7 +140,9 @@ if (!Pruebas::hayBase()) {
         "SELECT A.ID,
                 CASE WHEN " . Comex::sqlTieneCostos() . " THEN 1 ELSE 0 END TIENE_COSTOS,
                 ISNULL(P.VALOR_FOB_DOLAR, A.VALOR_FOB_DOLAR) FOB,
-                " . $pagado . " PAGADO
+                " . $pagado . " PAGADO,
+                P.FECHA_MOV FECHA_MOV_PRINCIPAL,
+                A.FECHA_MOV
          FROM " . Comex::TABLA_MAESTRO . " A
          LEFT JOIN " . Comex::TABLA_MAESTRO . " P ON P.ID = COALESCE(A.ID_PADRE, A.ID)");
 
@@ -149,7 +151,12 @@ if (!Pruebas::hayBase()) {
     while ($r = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
         $todas++;
         $estado = Comex::saldoPendiente($r['FOB'], $r['PAGADO'])['estado'];
-        if (Comex::sigueEnProveedores(intval($r['TIENE_COSTOS']) === 1, $estado)) {
+        /* Y desde feature/cashflow-avisos-kpis-comex-nac-parcial, el corte por
+           la fecha de movimiento de la OC principal: la misma regla pura,
+           con el parametro vigente. */
+        if (Comex::sigueEnProveedores(intval($r['TIENE_COSTOS']) === 1, $estado)
+            && Comex::entraPorFechaMov($r['FECHA_MOV_PRINCIPAL'], $r['FECHA_MOV'],
+                $comex->fechaMovDesdeVigente())) {
             $esperados[] = intval($r['ID']);
         }
     }

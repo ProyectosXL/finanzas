@@ -146,7 +146,8 @@ class Parametros {
                 . 'mensual, en qué día del mes llega la mercadería y cuántos días antes se paga '
                 . 'el FOB y se nacionaliza. Alimentan la pestaña Comercio Exterior › Proyección y las dos '
                 . 'filas proyectadas del tablero, dentro de los grupos Proveedores Exterior y '
-                . 'Nacionalizaciones',
+                . 'Nacionalizaciones. Y desde qué fecha de movimiento se consideran los contenedores '
+                . 'de Proveedores Exterior y Crono Nacionalización',
             'secciones' => ['generales']
         ],
         /* Va PEGADA a Prov. Locales, y no es casual: un fletero es un proveedor
@@ -1239,6 +1240,19 @@ class Parametros {
         if ($clave === self::CLAVE_PLAZO_ECHEQS) {
             throw new Exception('El plazo de acreditación de los cheques se guarda desde '
                 . 'Parámetros → Cheques, que valida que sea un entero de días hábiles.');
+        }
+
+        /* LA FECHA DESDE LA QUE SE CONSIDERAN LOS CONTENEDORES SE VALIDA ACA, y
+           con la regla de Comex: una fecha real y no futura. Esta funcion
+           guarda cualquier texto, y "01/01/2025" o una fecha que todavia no
+           llego dejarian los padrones de Comercio Exterior con un corte que
+           nadie pidio -o vacios-. El JS explica; esto decide. Se carga recien
+           aca: Comex arrastra la curva de dolar futuro, que no hace falta para
+           guardar ningun otro parametro. */
+        require_once __DIR__ . '/Comex.php';
+
+        if ($clave === Comex::PARAM_FECHA_MOV_DESDE) {
+            $valor = Comex::validarFechaMovDesde($valor, date('Y-m-d'));
         }
 
         $sql = "UPDATE RO_T_CASHFLOW_PARAMETROS
