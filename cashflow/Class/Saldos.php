@@ -140,6 +140,25 @@ class Saldos {
      */
     const ORIGEN_CARGA = 'CARGA';
 
+    /**
+     * Origen de una fila del disponible que se LEE EN VIVO de su consulta de
+     * sistema cada vez que se dibuja: el efectivo de tesoreria (SBA05) y
+     * Mercado Pago (MP_T_SALDO_DEMANDA). Ver aplicarConsultas().
+     */
+    const ORIGEN_CONSULTA = 'CONSULTA';
+
+    /**
+     * Los tipos de cuenta cuyo saldo no se tipea: lo resuelve una consulta del
+     * sistema. Decide el ORIGEN_DATO al dar de alta una cuenta y de donde se
+     * lee cada una (leerConsulta()). Mercado Pago se sumo en
+     * feature/saldos-efectivo-mp-en-vivo; las cuentas que ya existian pasan a
+     * CONSULTA con sql/cashflow_saldos_mp_consulta.sql.
+     */
+    const TIPOS_CONSULTA = ['EFECTIVO_CENTRAL', 'MERCADO_PAGO'];
+
+    /** El saldo de Mercado Pago: el ultimo registro por CREATED_AT */
+    const TABLA_MP = 'MP_T_SALDO_DEMANDA';
+
     /** Cuenta contable de SBA05 con el efectivo de tesoreria de casa central */
     const PARAM_CTA_TESORERIA = 'saldos_cta_tesoreria';
 
@@ -1337,6 +1356,17 @@ class Saldos {
                 && in_array($f['origen'], SaldosInterbanking::ORIGENES_DEL_DIA, true);
             $viejo = ($destino !== $fecha);
 
+            /* Lo leido en vivo (efectivo, Mercado Pago) con una fecha vieja va a
+               la primera columna como todo, pero no entra en ninguno de los dos
+               avisos de abajo: "actualiza la carga" no lo arregla -la carga
+               relee la misma consulta- y su aviso, con la fuente y la fecha, ya
+               lo dio aplicarConsultas(). */
+            $enVivo = isset($f['origen']) && $f['origen'] === self::ORIGEN_CONSULTA;
+
+            if ($enVivo) {
+                $viejo = false;
+            }
+
             if ($viejo && !$delDia) {
                 $reubicado += $importe;
 
@@ -1763,8 +1793,14 @@ class Saldos {
      *
      * ES UN SALDO PUNTUAL: la consulta devuelve un solo numero, el acumulado de
      * movimientos de esa cuenta hasta el momento en que se pregunta. No tiene
-     * fecha propia ni historico. Por eso la fecha del dato es la de la consulta
-     * y el historico lo construye este modulo, guardando el valor en cada carga.
+     * fecha propia ni historico. Por eso la fecha del dato es la de la consulta.
+     *
+     * SE LEE EN VIVO desde feature/saldos-efectivo-mp-en-vivo: la pestana y el
+     * tablero lo piden cada vez que se dibujan (getFilasDisponible()). Antes
+     * mostraban el valor guardado en la ultima carga, y quedaba atrasado
+     * respecto de Tesoreria (administracion/tesoreria/saldoCaja.php, que hace
+     * la misma cuenta con RO_SP_MAYOR_CTA_100101) desde el primer movimiento
+     * posterior. Cada carga sigue guardando el valor del dia: es el historico.
      *
      * La cuenta contable sale del parametro saldos_cta_tesoreria y va como
      * PARAMETRO de la consulta: es un numero de cuenta del plan contable y
@@ -1807,6 +1843,193 @@ class Saldos {
             'cuenta' => $cuenta,
             'fecha' => date('Y-m-d')
         ];
+    }
+
+    /**
+     * El saldo de Mercado Pago: TOTAL_AMOUNT del ultimo registro de
+     * MP_T_SALDO_DEMANDA por CREATED_AT, en la moneda de la cuenta.
+     *
+     * TOTAL_AMOUNT Y NO AVAILABLE_BALANCE: es la plata de la cuenta, la
+     * disponible y la que esta por liberarse, que es lo que el disponible del
+     * cashflow cuenta como saldo de apertura. Lo pidio Tesoreria.
+     *
+     * LA FECHA ES LA DEL REGISTRO, no la de hoy: la tabla la alimenta un proceso
+     * y puede atrasarse. Un saldo de ayer se usa igual, con su fecha, y
+     * aplicarConsultas() lo avisa.
+     *
+     * Sin la tabla, o sin ningun registro de esa moneda, lanza con el motivo:
+     * quien llama decide que hacer (ver aplicarConsultas()).
+     *
+     * @param string $moneda 'ARS' o 'USD'
+     * @return array ['saldo' => float, 'fecha' => 'Y-m-d', 'momento' => 'Y-m-d H:i:s']
+     */
+    public function getSaldoMercadoPago($moneda) {
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid, "SELECT OBJECT_ID('dbo." . self::TABLA_MP . "', 'U') AS T");
+        $row = ($stmt === false) ? null : sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+
+        if (!$row || $row['T'] === null) {
+            throw new Exception('no existe la tabla ' . self::TABLA_MP);
+        }
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT TOP 1 TOTAL_AMOUNT, CREATED_AT
+             FROM " . self::TABLA_MP . "
+             WHERE CURRENCY_ID = ?
+             ORDER BY CREATED_AT DESC, ID DESC",
+            [strtoupper(trim((string) $moneda))]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer el saldo de Mercado Pago'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        if (!$row) {
+            throw new Exception(self::TABLA_MP . ' no tiene ningún saldo en ' . $moneda);
+        }
+
+        $creado = ($row['CREATED_AT'] instanceof DateTime)
+            ? $row['CREATED_AT']->format('Y-m-d H:i:s') : substr((string) $row['CREATED_AT'], 0, 19);
+
+        return [
+            'saldo' => floatval($row['TOTAL_AMOUNT']),
+            'fecha' => substr($creado, 0, 10),
+            'momento' => $creado
+        ];
+    }
+
+    /**
+     * El saldo en vivo de una cuenta "por consulta", segun su tipo. Es el UNICO
+     * lugar que sabe de donde sale cada una: lo usan la pestana y el tablero
+     * (getFilasDisponible()) y la carga (guardarCargaSaldos()), asi que los
+     * tres leen lo mismo.
+     *
+     * @param string $tipo Uno de TIPOS_CONSULTA
+     * @param string $moneda
+     * @param array|null $map Parametros ya leidos
+     * @return array ['saldo', 'fecha', 'fuente', 'momento']
+     * @throws Exception Si el tipo no se resuelve por consulta, o la lectura falla
+     */
+    public function leerConsulta($tipo, $moneda, $map = null) {
+        if ($tipo === 'EFECTIVO_CENTRAL') {
+            $e = $this->getEfectivoCentral($map);
+
+            return ['saldo' => $e['saldo'], 'fecha' => $e['fecha'], 'fuente' => 'SBA05',
+                    'momento' => date('Y-m-d H:i:s')];
+        }
+
+        if ($tipo === 'MERCADO_PAGO') {
+            $m = $this->getSaldoMercadoPago($moneda);
+
+            return ['saldo' => $m['saldo'], 'fecha' => $m['fecha'], 'fuente' => self::TABLA_MP,
+                    'momento' => $m['momento']];
+        }
+
+        throw new Exception('el tipo de cuenta ' . $tipo . ' no tiene consulta de saldo');
+    }
+
+    /**
+     * Pone el saldo en vivo en las filas de las cuentas "por consulta". PURA.
+     *
+     *   - CON LECTURA: el saldo y la fecha leidos, 'en_vivo' y cargada. Si la
+     *     fecha no es de hoy -Mercado Pago, cuando su proceso se atraso- la fila
+     *     queda 'no_es_de_hoy' y se avisa en atencion con la fecha del dato.
+     *   - SIN LECTURA Y CON CARGA: el valor guardado en la ultima carga, con su
+     *     fecha, y un aviso de atencion que dice que no es en vivo. Es un dato
+     *     real y fechado; mejor que dejar la cuenta en blanco.
+     *   - SIN LECTURA Y SIN CARGA: no suma, y el aviso es critico.
+     *
+     * TODAS SALEN CON 'origen' = CONSULTA, y no CARGA: armarSerieDisponible()
+     * le pide a un saldo viejo DE UNA CARGA que se actualice la carga, y aca eso
+     * no arregla nada -la carga relee la misma consulta-. El aviso de un saldo
+     * de otro dia lo da esta funcion, con la fuente.
+     *
+     * @param array $filas Las de getSaldosActuales()
+     * @param array $lecturas id_cuenta => leerConsulta(), o ['error' => texto]
+     * @param string $hoy 'Y-m-d'
+     * @return array ['filas' => [...], 'avisos' => [Aviso]]
+     */
+    public static function aplicarConsultas($filas, $lecturas, $hoy) {
+        $avisos = [];
+        $out = [];
+        $hoy = substr((string) $hoy, 0, 10);
+
+        foreach ((is_array($filas) ? $filas : []) as $f) {
+            if (!isset($f['origen_cuenta']) || $f['origen_cuenta'] !== self::ORIGEN_CONSULTA) {
+                $out[] = $f;
+                continue;
+            }
+
+            $id = isset($f['id_cuenta']) ? $f['id_cuenta'] : null;
+            $l = isset($lecturas[$id]) ? $lecturas[$id] : ['error' => 'no se leyó'];
+            $f['origen'] = self::ORIGEN_CONSULTA;
+
+            if (!isset($l['error'])) {
+                $f['saldo'] = floatval($l['saldo']);
+                $f['fecha_saldo'] = $l['fecha'];
+                $f['cargada'] = true;
+                $f['en_vivo'] = true;
+                $f['fuente_vivo'] = $l['fuente'];
+                $f['momento_vivo'] = isset($l['momento']) ? $l['momento'] : null;
+                $f['no_es_de_hoy'] = ($l['fecha'] < $hoy);
+
+                if ($f['no_es_de_hoy']) {
+                    $avisos[] = Aviso::nuevo(Aviso::WARNING, $f['nombre'] . ': el último saldo de '
+                        . $l['fuente'] . ' es del ' . self::fechaCorta($l['fecha']) . '; se usa ése '
+                        . 'y va en la primera columna. Revisá el proceso que alimenta esa tabla.',
+                        'Saldo Inicial');
+                }
+
+                $out[] = $f;
+                continue;
+            }
+
+            $f['en_vivo'] = false;
+
+            if (!empty($f['cargada'])) {
+                $avisos[] = Aviso::nuevo(Aviso::WARNING, 'No se pudo leer en vivo el saldo de '
+                    . $f['nombre'] . ' (' . $l['error'] . '); se usa el de la carga del '
+                    . self::fechaCorta($f['fecha_saldo']) . '.', 'Saldo Inicial');
+            } else {
+                $avisos[] = Aviso::nuevo(Aviso::DANGER, 'No se pudo leer en vivo el saldo de '
+                    . $f['nombre'] . ' (' . $l['error'] . ') y no tiene ninguna carga guardada, '
+                    . 'así que no suma al disponible.', 'Saldo Inicial');
+            }
+
+            $out[] = $f;
+        }
+
+        return ['filas' => $out, 'avisos' => $avisos];
+    }
+
+    /**
+     * El aviso de Parametros cuando una cuenta de Mercado Pago sigue en carga
+     * manual porque falta sql/cashflow_saldos_mp_consulta.sql, o cadena vacia.
+     * Sin el script todo funciona como antes: Mercado Pago se tipea en la carga.
+     *
+     * @return string
+     */
+    public function avisoSinMpConsulta() {
+        if (!$this->tablasCreadas()) {
+            return '';
+        }
+
+        $cid = $this->conectar('central');
+        $stmt = sqlsrv_query($cid,
+            "SELECT COUNT(*) AS N FROM RO_T_CASHFLOW_SALDOS_CUENTA
+             WHERE TIPO = 'MERCADO_PAGO' AND ACTIVO = 1 AND ORIGEN_DATO <> 'CONSULTA'");
+        $row = ($stmt === false) ? null : sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+
+        if (!$row || intval($row['N']) === 0) {
+            return '';
+        }
+
+        return 'Mercado Pago sigue cargándose a mano: corré sql/cashflow_saldos_mp_consulta.sql '
+            . 'contra la base central y su saldo pasa a leerse en vivo de ' . self::TABLA_MP
+            . ' (el último TOTAL_AMOUNT por CREATED_AT).';
     }
 
     /**
@@ -1912,11 +2135,36 @@ class Saldos {
     public function getFilasDisponible($hoy) {
         $filas = $this->tablasCreadas() ? $this->getSaldosActuales() : [];
 
+        /* LAS CUENTAS "POR CONSULTA" SE LEEN EN VIVO: el efectivo de tesoreria
+           de SBA05 y Mercado Pago de MP_T_SALDO_DEMANDA. Cada lectura va en su
+           try: una que falla no tumba la otra ni la pestana, y
+           aplicarConsultas() decide que se muestra y que se avisa. */
+        $lecturas = [];
+        $map = null;
+
+        foreach ($filas as $f) {
+            if ($f['origen_cuenta'] !== self::ORIGEN_CONSULTA) {
+                continue;
+            }
+
+            try {
+                if ($map === null) {
+                    $map = (new Parametros())->getParametrosMap();
+                }
+
+                $lecturas[$f['id_cuenta']] = $this->leerConsulta($f['tipo'], $f['moneda'], $map);
+            } catch (Throwable $e) {
+                $lecturas[$f['id_cuenta']] = ['error' => $e->getMessage()];
+            }
+        }
+
+        $enVivo = self::aplicarConsultas($filas, $lecturas, $hoy);
+
         $bancarias = $this->interbanking()->getCuentasBancarias($hoy);
 
         return [
-            'filas' => array_merge($filas, $bancarias['filas']),
-            'avisos' => $bancarias['avisos'],
+            'filas' => array_merge($enVivo['filas'], $bancarias['filas']),
+            'avisos' => array_merge($enVivo['avisos'], $bancarias['avisos']),
             'respaldo_creado' => !empty($bancarias['respaldo_creado']),
             'depurado' => !empty($bancarias['depurado'])
         ];
@@ -2523,11 +2771,12 @@ class Saldos {
                 . (intval($existe['ACTIVO']) === 1 ? 'activa' : 'inhabilitada') . ')');
         }
 
-        // El origen del dato se deduce del tipo: el efectivo de tesoreria lo
-        // resuelve una consulta y el resto lo tipea una persona. Un BANCO del
+        // El origen del dato se deduce del tipo: el efectivo de tesoreria y
+        // Mercado Pago los resuelve una consulta (TIPOS_CONSULTA) y el resto lo
+        // tipea una persona. Un BANCO del
         // catalogo es un banco SIN Interbanking: los que vienen por la
         // integracion no estan en el catalogo, los lee SaldosInterbanking.
-        $origen = ($tipo === 'EFECTIVO_CENTRAL') ? 'CONSULTA' : 'MANUAL';
+        $origen = in_array($tipo, self::TIPOS_CONSULTA, true) ? self::ORIGEN_CONSULTA : 'MANUAL';
 
         // Sin el script de fondos la tabla no tiene CLASE: se inserta como
         // antes, y la cuenta es una cuenta a la vista porque no hay otra cosa.
@@ -2673,14 +2922,8 @@ class Saldos {
         $cargas = $this->getCargas(self::CARGA_SALDOS);
         $ultima = self::ultimaCarga($cargas);
 
-        $efectivo = null;
-
-        try {
-            $efectivo = $this->getEfectivoCentral($map);
-        } catch (Throwable $e) {
-            $avisos[] = 'No se pudo leer el efectivo de tesorería de casa central ('
-                . $e->getMessage() . '). El resto de la pestaña se muestra igual.';
-        }
+        // El efectivo y Mercado Pago ya vienen leidos en vivo en las filas, con
+        // su aviso si la lectura fallo: ver getFilasDisponible().
 
         $diasAlerta = isset($map[self::PARAM_DIAS_ALERTA])
             ? intval($map[self::PARAM_DIAS_ALERTA]) : 0;
@@ -2696,7 +2939,11 @@ class Saldos {
         }
 
         // Las cuentas bancarias cuyo saldo no es de hoy, cada una con su fecha.
-        $noEsDeHoy = SaldosInterbanking::avisoNoEsDeHoy($filas);
+        // Sin las leidas en vivo: Mercado Pago de otro dia ya tiene su aviso,
+        // con la fuente (aplicarConsultas()).
+        $noEsDeHoy = SaldosInterbanking::avisoNoEsDeHoy(array_filter($filas, function ($f) {
+            return !isset($f['origen']) || $f['origen'] !== self::ORIGEN_CONSULTA;
+        }));
 
         if ($noEsDeHoy !== null) {
             $avisos[] = $noEsDeHoy;
@@ -2730,7 +2977,6 @@ class Saldos {
                     'usuario' => $c['USUARIO']
                 ];
             }, $cargas),
-            'efectivo_central' => $efectivo,
             'respaldo_creado' => $disponible['respaldo_creado'],
             // Los textos, como siempre, y la misma lista con nivel: la pestana
             // pinta los criticos aparte. Un texto suelto es atencion.
@@ -2906,10 +3152,13 @@ class Saldos {
      * El detalle NO pisa nada: inserta filas nuevas colgadas de una cabecera
      * nueva. Las cargas anteriores quedan enteras.
      *
-     * El saldo del efectivo central no viene del cliente aunque este en la
-     * pantalla: se vuelve a leer de SBA05 en el momento de guardar. Es un dato
-     * del sistema, y aceptarlo del navegador permitiria guardar cualquier cosa
-     * como si fuera lo que dice la contabilidad.
+     * El saldo de las cuentas "por consulta" -el efectivo central y Mercado
+     * Pago- no viene del cliente aunque este en la pantalla: se vuelve a leer
+     * de SU consulta (leerConsulta(), por tipo) en el momento de guardar. Es un
+     * dato del sistema, y aceptarlo del navegador permitiria guardar cualquier
+     * cosa como si fuera lo que dice la contabilidad. La pantalla y el tablero
+     * ya muestran ese valor en vivo; lo que guarda la carga es la foto del dia,
+     * para el historico.
      *
      * @param array $filas [['id_cuenta' => int, 'saldo' => float, 'fecha_saldo' => 'Y-m-d'], ...]
      * @param string|null $observaciones
@@ -2930,14 +3179,11 @@ class Saldos {
 
         $cuentas = $this->cuentasPorId();
 
-        // El efectivo central lo resuelve el sistema, no el navegador.
-        $efectivo = null;
-
-        try {
-            $efectivo = $this->getEfectivoCentral();
-        } catch (Throwable $e) {
-            $efectivo = null;
-        }
+        /* Las cuentas por consulta las resuelve el sistema, no el navegador, y
+           CADA UNA CON LA SUYA: antes cualquier cuenta de origen CONSULTA
+           guardaba el efectivo de tesoreria, que era la unica. Se lee una vez
+           por cuenta. */
+        $map = null;
 
         $aInsertar = [];
         $hoy = date('Y-m-d');
@@ -2950,20 +3196,32 @@ class Saldos {
             }
 
             $cuenta = $cuentas[$id];
-            $esConsulta = ($cuenta['ORIGEN_DATO'] === 'CONSULTA');
+            $esConsulta = ($cuenta['ORIGEN_DATO'] === self::ORIGEN_CONSULTA);
+            $lectura = null;
 
-            if ($esConsulta && $efectivo === null) {
-                throw new Exception('No se pudo leer el saldo de "' . $cuenta['NOMBRE'] . '" de '
-                    . 'su consulta de origen, así que la carga no se guarda: guardarla dejaría '
-                    . 'ese saldo en cero y el disponible quedaría informado de menos.');
+            if ($esConsulta) {
+                try {
+                    if ($map === null) {
+                        $map = (new Parametros())->getParametrosMap();
+                    }
+
+                    $lectura = $this->leerConsulta($cuenta['TIPO'], $cuenta['MONEDA'], $map);
+                } catch (Throwable $e) {
+                    throw new Exception('No se pudo leer el saldo de "' . $cuenta['NOMBRE'] . '" de '
+                        . 'su consulta de origen (' . $e->getMessage() . '), así que la carga no se '
+                        . 'guarda: guardarla dejaría ese saldo en cero y el disponible quedaría '
+                        . 'informado de menos.');
+                }
             }
 
             $saldo = $esConsulta
-                ? $efectivo['saldo']
+                ? $lectura['saldo']
                 : floatval(isset($f['saldo']) ? $f['saldo'] : 0);
 
+            /* La fecha de lo leido es la del dato: hoy para el efectivo, la del
+               ultimo registro para Mercado Pago. */
             $fecha = $esConsulta
-                ? $hoy
+                ? $lectura['fecha']
                 : Horizonte::normalizarFecha(isset($f['fecha_saldo']) ? $f['fecha_saldo'] : null);
 
             if ($fecha === null) {

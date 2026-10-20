@@ -298,6 +298,22 @@ Cuatro cosas: cada pestaña con proveedor muestra los avisos que el tablero dice
 
 **El 41 y el 42 no dependen de ninguno**; el 42 va después de `sql/cashflow_auditoria_usuario.sql`, como toda tabla nueva. Los avisos y las tarjetas no necesitan scripts.
 
+### Saldos: el efectivo y Mercado Pago en vivo (`feature/saldos-efectivo-mp-en-vivo`)
+
+Antes, el Saldo Inicial tomaba el efectivo de tesorería de la última *Nueva carga*. Ahora la pestaña y el tablero leen `SBA05` cada vez que se dibujan, igual que `saldoCaja.php`. Mercado Pago pasa a leerse de `MP_T_SALDO_DEMANDA` (`TOTAL_AMOUNT` del último `CREATED_AT`). Si la lectura falla, se usa la última carga con un aviso de atención; si no hay carga, la cuenta no suma y el aviso es crítico. El aviso del respaldo manual de Interbanking aparece sólo si la carga manual no es del día. Ver *Las cuentas por consulta se leen en vivo* en `README-saldos.md`.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 43 | `sql/cashflow_saldos_mp_consulta.sql` | Pasa la cuenta de Mercado Pago de `MANUAL` a `CONSULTA` y muestra el último registro de `MP_T_SALDO_DEMANDA` | Mercado Pago sigue en carga manual, como hoy, y Parámetros › Saldos dice qué script falta. El efectivo se lee en vivo igual |
+
+**El 43 va después del 3** (`sql/cashflow_saldos.sql`). Si falta la tabla del catálogo, lo dice y no hace nada.
+
+**Sí mueve el tablero, desde el primer día.** Medido contra la base el 20/10/2026, en el Saldo Inicial:
+
+- **Efectivo:** de $ 552.255,60 a $ 338.323,60.
+- **Mercado Pago:** de $ 13.340.255,00 (manual del 19/10) a $ 2.091.049,45.
+- **Total:** − $ 11.463.137,55.
+
 #### Lo que mueve el tablero
 
 **Nada**, medido contra la base el 20/10/2026. Ninguna serie de las que tocan los avisos cambió (45 cifras de seis proveedores, ver *Un hecho, un texto*). Con el corte por fecha de movimiento, Proveedores Exterior pasa de 348 a 199 filas y Crono de 70 a 69, sin mover un peso de ninguna serie: todo lo que salió estaba sin fecha o vencido. Los avisos de *no se pudieron valuar* bajan de 255 a 106. Ver `README-comex.md` y `README-compras-proyectadas.md`.
@@ -351,6 +367,7 @@ En este orden, contra `central`:
 -- 40. sql/cashflow_echeqs_acreditado.sql            (Echeqs: la marca "ya acredito" de un depositado)
 -- 41. sql/cashflow_comex_fecha_mov_desde.sql        (Comex: contenedores desde una fecha de movimiento)
 -- 42. sql/cashflow_comex_nac_pago.sql               (Comex: pago parcial de la nacionalizacion y fecha del saldo)
+-- 43. sql/cashflow_saldos_mp_consulta.sql           (Saldos: Mercado Pago en vivo de MP_T_SALDO_DEMANDA)
 ```
 
 **El 39 va después del 38**: sin las alícuotas y el plazo, los depositados no tienen neto. **El 40 no depende de ninguno de los dos.** Los depósitos se leen de Tango; ninguno de los tres crea `RO_T_CASHFLOW_ECHEQ_DEPOSITO`, que está en desuso. Ver `README-echeqs.md`.

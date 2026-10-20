@@ -343,6 +343,14 @@ class Parametros {
                             $modulo['clases_fondo'] = Fondos::CLASES_FONDO;
                             $modulo['fondos_creados'] = $this->saldos()->fondosCreados();
 
+                            // Mercado Pago se lee en vivo sólo con su script
+                            // corrido; sin él sigue en carga manual, y se dice.
+                            $sinMp = $this->saldos()->avisoSinMpConsulta();
+
+                            if ($sinMp !== '') {
+                                $modulo['avisos'][] = $sinMp;
+                            }
+
                             if (!$modulo['fondos_creados'] && $this->saldos()->tablasCreadas()) {
                                 $modulo['avisos'][] = 'Todavía no existen las clases de cuenta ni '
                                     . 'los fondos de inversión: corré '

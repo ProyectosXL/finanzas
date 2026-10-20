@@ -712,10 +712,15 @@ class SaldosInterbanking {
                 $avisos[] = Aviso::nuevo(Aviso::DANGER, $nombre . ': Interbanking nunca trajo su '
                     . self::NOMBRE_SALDO . ' y no tiene carga manual de respaldo, así que no suma al '
                     . 'disponible. Cargalo desde Saldos › Saldos.', self::SECCION);
-            } elseif ($fuente === self::ORIGEN_RESPALDO && $leido) {
-                // Se acusa la falla de la integracion mientras se usa el
-                // respaldo: es atencion, porque la plata esta, pero alguien
-                // tiene que ver por que BI no la trae.
+            } elseif ($fuente === self::ORIGEN_RESPALDO && $leido
+                && Horizonte::normalizarFecha($respaldo['FECHA_SALDO']) !== $hoy) {
+                /* Se acusa la falla de la integracion mientras se usa el
+                   respaldo, PERO SOLO SI EL RESPALDO NO ES DE HOY. Con la carga
+                   manual del dia el saldo esta al dia y no hay nada que hacer:
+                   el aviso se repetia todos los dias sobre una cuenta que
+                   alguien ya habia actualizado. Con un respaldo viejo si es
+                   atencion: la plata esta, pero es de otro dia y alguien tiene
+                   que cargarla o ver por que BI no la trae. */
                 $avisos[] = Aviso::nuevo(Aviso::WARNING, 'Interbanking no trae el '
                     . self::NOMBRE_SALDO . ' de ' . $nombre . '; se usa la carga manual del '
                     . self::diaMes($respaldo['FECHA_SALDO']) . '.', self::SECCION);
