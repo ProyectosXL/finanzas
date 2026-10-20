@@ -1662,6 +1662,26 @@ Sacar los repetidos por texto sólo funciona si el mismo hecho tiene un solo tex
 
 Ningún número cambió: medido contra la base el 20/10/2026 con el código de antes y el de ahora, las 45 cifras de las seis series de esos proveedores (eje, fuera del horizonte y sin fecha) son iguales. Con los datos de ese día, el único texto del tablero que cambió es el de las vencidas de Cobranzas FR, y en una cosa además de la redacción: **el tablero contaba como "ubicadas en el primer día del eje" también las vencidas con fecha pactada a mano**, que en realidad se muestran en su fecha. Ahora las cuenta aparte, como la pestaña.
 
+### Las tarjetas KPI se pliegan a una franja: `Js/kpis-plegables.js`
+
+> Es de `feature/cashflow-avisos-kpis-comex-nac-parcial`. Las tarjetas ocupaban casi un tercio de la pantalla en cada pestaña, y quien vuelve todos los días a la misma ya sabe qué mide cada una: necesita el número, no el ícono ni el pie.
+
+Cada bloque de tarjetas tiene un botón chico, un chevron en la esquina de la última tarjeta, que lo pasa a una **franja compacta** —por cada tarjeta, su título y su valor en un renglón— y lo vuelve a expandir.
+
+```html
+<div data-kpis="kpisCronoNac" class="row g-3 mb-4" id="summarySection" style="display: none;">
+```
+
+- **Es una variante de CSS sobre las mismas tarjetas**, y es la decisión que importa. Cada pestaña escribe sus valores por id (`total4semanas`, `cfKpiApertura`…) y les pone sus clases de color (`cf-negativo`, rojo en negativo). Una franja aparte con copias de los valores mostraría un número viejo la primera vez que alguien se olvidara de actualizarla. Acá no hay copia: la clase `.kpis-compacto` esconde el ícono y el pie y pone la tarjeta en un renglón. Tocar *Actualizar* con la franja puesta cambia los valores igual que expandidos.
+- **El pie pasa a ser el tooltip** de la tarjeta, leído del pie en el momento de pasar el mouse: el pie también lo escribe la pestaña (el período que mide) y cambia con cada recarga. Va en la tarjeta y no en el valor, así un `title` que la pestaña le ponga al valor sigue mandando.
+- **Por defecto, expandido**, y **se recuerda por bloque** en `localStorage` (`kpis_plegables_<clave>`) con `try/catch`. La clave es el valor de `data-kpis` y no el id, porque hay ids repetidos entre pestañas: `summarySection` está en Proveedores Exterior y en Crono, y una plegaría la otra.
+- **No toca la visibilidad del bloque.** Las pestañas lo esconden hasta tener datos (`display: none` en el HTML); el botón vive adentro y aparece y desaparece con él.
+- **Se conecta solo**, al cargar la página y cada vez que cambia `#tabContent` (un `MutationObserver`): sirve para la pestaña que llega por AJAX y para las tarjetas que una pestaña dibuja por JS, como las de Fondos. Si la pestaña reescribe el bloque entero, el botón se repone.
+- **En móvil la franja pasa a varios renglones**, nunca a scroll horizontal: las columnas son flex con wrap y ninguna tiene ancho mínimo.
+- **En el tablero** *Disponible Inicial* conserva su borde (`cf-kpi-fijo`): en la franja también se lee aparte de los que miden el período.
+
+Lo usan los dieciocho bloques de las catorce pestañas con tarjetas, más `kpiFondos`: en las pestañas con sub-pestañas —Saldos, Pagos con Tarjetas, Echeqs— cada sub-pestaña tiene su bloque y se pliega por separado. `tests/test_kpis_plegables.php` verifica con un `grep` sobre `Tabs/` que ningún bloque con `.kpi-card` quede sin `data-kpis` y que las claves no se repitan; las reglas puras están en `tests/js/kpis_plegables.wsf`.
+
 ### Mientras algo carga: `Js/cargando.js`
 
 Un solo indicador para las diecinueve pestañas y para `loadTab()`, cargado una vez en `index.php` con su hoja `Css/cargando.css`. Antes había diecinueve copias del marcado `.loading-spinner` y diez del CSS, y las pestañas sin copia propia —el tablero, *Proyección*, *Proveedores Locales* y las sub-pestañas de *Parámetros*— se veían bien sólo si antes se había abierto otra cuyo CSS definía la regla sin prefijo.
@@ -2297,6 +2317,9 @@ Tabs/echeqs.php                             Las dos sub-pestanas
 Tabs/parametros_prechequeado.php            Parametros > Cheques: deposito y maestro pre-chequeado
 Controller/CashflowController.php           getTablero y getAvisosPestana
 Js/avisos-panel.js                          El panel de avisos de todas las pestanas, y los del tablero en cada una
+Js/kpis-plegables.js                        Las tarjetas KPI plegables a una franja (cargado en index.php)
+Css/kpis-plegables.css
+tests/test_kpis_plegables.php               Que ningun bloque de tarjetas quede sin el componente
 tests/test_avisos_pestana.php               Que cada pestana reciba exactamente su grupo del tablero
 Controller/CashflowEstructuraController.php  CRUD de la estructura
 Tabs/cashflow.php                           La pantalla
