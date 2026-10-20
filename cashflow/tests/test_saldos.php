@@ -562,6 +562,86 @@ chequear('y son la misma clase servida bajo dos codigos',
 chequear('cada instancia conoce su codigo', 'CAJA_LOCALES', $provLocales->codigo());
 
 /* ================================================================
+   El efectivo y Mercado Pago, en vivo
+   ================================================================ */
+seccion('las cuentas por consulta se leen en vivo');
+
+$hoyVivo = '2026-10-20';
+$filaConsulta = function ($id, $tipo, $nombre, $cargada, $saldo, $fecha) {
+    return ['id_cuenta' => $id, 'origen' => Saldos::ORIGEN_CARGA, 'tipo' => $tipo,
+            'nombre' => $nombre, 'moneda' => 'ARS', 'origen_cuenta' => 'CONSULTA',
+            'cargada' => $cargada, 'saldo' => $saldo, 'fecha_saldo' => $fecha];
+};
+$manual = ['id_cuenta' => 9, 'origen' => Saldos::ORIGEN_CARGA, 'tipo' => 'OTRO', 'nombre' => 'Otra',
+           'moneda' => 'ARS', 'origen_cuenta' => 'MANUAL', 'cargada' => true, 'saldo' => 10.0,
+           'fecha_saldo' => '2026-10-19'];
+
+$vivo = Saldos::aplicarConsultas([
+    $filaConsulta(1, 'EFECTIVO_CENTRAL', 'Efectivo', true, 552255.60, '2026-10-19'),
+    $filaConsulta(3, 'MERCADO_PAGO', 'Mercado Pago', true, 100.0, '2026-10-10'),
+    $manual
+], [
+    1 => ['saldo' => 338323.60, 'fecha' => $hoyVivo, 'fuente' => 'SBA05', 'momento' => $hoyVivo . ' 10:00:00'],
+    3 => ['saldo' => 2091049.45, 'fecha' => $hoyVivo, 'fuente' => Saldos::TABLA_MP,
+          'momento' => $hoyVivo . ' 11:43:48']
+], $hoyVivo);
+
+// El caso que origino el cambio: la carga del 19/10 decia 552.255,60 y SBA05,
+// leido como lo lee saldoCaja.php, 338.323,60.
+chequear('el efectivo en vivo reemplaza al de la ultima carga', 338323.60, $vivo['filas'][0]['saldo']);
+chequear('con la fecha de hoy', $hoyVivo, $vivo['filas'][0]['fecha_saldo']);
+chequear('y queda marcado en vivo, con origen CONSULTA', [true, 'CONSULTA'],
+    [$vivo['filas'][0]['en_vivo'], $vivo['filas'][0]['origen']]);
+chequear('Mercado Pago toma el ultimo TOTAL_AMOUNT, con su fecha', [2091049.45, $hoyVivo],
+    [$vivo['filas'][1]['saldo'], $vivo['filas'][1]['fecha_saldo']]);
+chequear('una cuenta manual no se toca', $manual, $vivo['filas'][2]);
+chequear('todo al dia: sin avisos', [], $vivo['avisos']);
+
+$mpAyer = Saldos::aplicarConsultas([$filaConsulta(3, 'MERCADO_PAGO', 'Mercado Pago', false, 0, null)],
+    [3 => ['saldo' => 1355896.24, 'fecha' => '2026-10-19', 'fuente' => Saldos::TABLA_MP]], $hoyVivo);
+chequear('Mercado Pago de ayer se usa igual', 1355896.24, $mpAyer['filas'][0]['saldo']);
+chequear('queda "no es de hoy"', true, $mpAyer['filas'][0]['no_es_de_hoy']);
+chequear('y se avisa en atencion, con la fuente y la fecha', ['warning', 0],
+    [$mpAyer['avisos'][0]['nivel'],
+     strpos($mpAyer['avisos'][0]['texto'], 'Mercado Pago: el último saldo de MP_T_SALDO_DEMANDA es del 19/10/2026')]);
+
+$fallaConCarga = Saldos::aplicarConsultas(
+    [$filaConsulta(1, 'EFECTIVO_CENTRAL', 'Efectivo', true, 552255.60, '2026-10-19')],
+    [1 => ['error' => 'la base no responde']], $hoyVivo);
+chequear('si la lectura falla, queda el de la ultima carga', [552255.60, '2026-10-19', false],
+    [$fallaConCarga['filas'][0]['saldo'], $fallaConCarga['filas'][0]['fecha_saldo'],
+     $fallaConCarga['filas'][0]['en_vivo']]);
+chequear('y se avisa en atencion, con el motivo y la fecha', ['warning', true],
+    [$fallaConCarga['avisos'][0]['nivel'], strpos($fallaConCarga['avisos'][0]['texto'],
+        '(la base no responde); se usa el de la carga del 19/10/2026') !== false]);
+
+$fallaSinCarga = Saldos::aplicarConsultas(
+    [$filaConsulta(3, 'MERCADO_PAGO', 'Mercado Pago', false, 0, null)],
+    [3 => ['error' => 'no existe la tabla MP_T_SALDO_DEMANDA']], $hoyVivo);
+chequear('si falla y nunca se cargo, no suma', false, $fallaSinCarga['filas'][0]['cargada']);
+chequear('y el aviso es critico', 'danger', $fallaSinCarga['avisos'][0]['nivel']);
+
+seccion('un saldo en vivo de otro dia no pide "actualiza la carga"');
+
+$hVivo = new Horizonte(5, 2, [], new DateTime($hoyVivo));
+$serieMp = Saldos::armarSerieDisponible($mpAyer['filas'], $hVivo);
+chequear('va a la primera columna, como todo saldo viejo', 1355896.24, $serieMp['serie']['dias'][$hoyVivo]);
+// Su aviso ya lo dio aplicarConsultas(), con la fuente: "actualiza la carga"
+// no arreglaria nada, porque la carga relee la misma consulta.
+chequear('pero sin el critico de la carga ni el de Interbanking', [], $serieMp['avisos_con_nivel']);
+
+seccion('la carga y el alta usan la misma regla');
+
+$srcSaldos = file_get_contents(__DIR__ . '/../Class/Saldos.php');
+chequear('la carga lee cada consulta por su tipo', true,
+    strpos($srcSaldos, '$this->leerConsulta($cuenta[\'TIPO\'], $cuenta[\'MONEDA\'], $map)') !== false);
+chequear('el alta deduce CONSULTA con la lista de tipos', true,
+    strpos($srcSaldos, 'in_array($tipo, self::TIPOS_CONSULTA, true) ? self::ORIGEN_CONSULTA') !== false);
+chequear('y Mercado Pago esta en la lista', true, in_array('MERCADO_PAGO', Saldos::TIPOS_CONSULTA, true));
+chequear('la pestana y el tablero pasan por aplicarConsultas()', true,
+    strpos($srcSaldos, 'self::aplicarConsultas($filas, $lecturas, $hoy)') !== false);
+
+/* ================================================================
    Contra datos reales
    ================================================================ */
 seccion('el proveedor contra la base');
@@ -589,3 +669,30 @@ foreach (['SALDOS' => 'DISPONIBLE', 'CAJA_LOCALES' => 'DEPOSITOS'] as $codigo =>
 
     chequear("$codigo devuelve solo numeros", 0, count($noNumericos));
 }
+require_once __DIR__ . '/../../class/conexion.php';
+/* ================================================================
+   Las consultas en vivo, contra la base (solo SELECT)
+   ================================================================ */
+seccion('las consultas en vivo contra la base');
+
+$sv = new Saldos();
+$cidV = (new Conexion)->conectar('central');
+$mpTabla = sqlsrv_fetch_array(sqlsrv_query($cidV,
+    "SELECT OBJECT_ID('dbo.MP_T_SALDO_DEMANDA', 'U') AS T"), SQLSRV_FETCH_ASSOC);
+
+if ($mpTabla['T'] === null) {
+    Pruebas::saltear('no existe MP_T_SALDO_DEMANDA en esta base');
+} else {
+    $ultimoMp = sqlsrv_fetch_array(sqlsrv_query($cidV,
+        "SELECT TOP 1 TOTAL_AMOUNT FROM MP_T_SALDO_DEMANDA WHERE CURRENCY_ID = 'ARS'
+         ORDER BY CREATED_AT DESC, ID DESC"), SQLSRV_FETCH_ASSOC);
+    chequear('Mercado Pago es el ultimo TOTAL_AMOUNT por CREATED_AT',
+        floatval($ultimoMp['TOTAL_AMOUNT']), $sv->getSaldoMercadoPago('ARS')['saldo']);
+}
+
+$mapV = (new Parametros())->getParametrosMap();
+$sumaSba = sqlsrv_fetch_array(sqlsrv_query($cidV,
+    "SELECT COALESCE(SUM(CASE WHEN D_H = 'D' THEN MONTO ELSE -MONTO END), 0) AS S
+     FROM SBA05 WHERE COD_CTA = ?", [$mapV[Saldos::PARAM_CTA_TESORERIA]]), SQLSRV_FETCH_ASSOC);
+chequear('el efectivo es la suma de SBA05 de la cuenta de tesoreria',
+    round(floatval($sumaSba['S']), 2), round($sv->leerConsulta('EFECTIVO_CENTRAL', 'ARS', $mapV)['saldo'], 2));

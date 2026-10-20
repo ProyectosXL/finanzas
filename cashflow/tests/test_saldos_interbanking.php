@@ -907,8 +907,11 @@ chequear('y manda los avisos con nivel', true, ibContiene($pestana, "'avisos_con
 $tabSalPhp = ibFuente(__DIR__ . '/../Tabs/saldos.php');
 $jsSalT = ibFuente(__DIR__ . '/../Js/Saldos.js');
 chequear('el KPI dice "Ultima carga manual"', true, ibContiene($tabSalPhp, '>Última carga manual<'));
-chequear('y el detalle aclara que es de Mercado Pago, otros y bancos manuales',
-    true, ibContiene($jsSalT, "'Mercado Pago, otros y bancos manuales · '"));
+/* Mercado Pago ya no se carga a mano desde feature/saldos-efectivo-mp-en-vivo
+   (con su script corrido): el detalle habla de las cuentas manuales, sin
+   nombrarlas. */
+chequear('y el detalle aclara que es de las cuentas que se cargan a mano',
+    true, ibContiene($jsSalT, "'Las cuentas que se cargan a mano · '"));
 /* Los criticos ya no van en un bloque rojo aparte: van al panel plegable de
    todas las pestanas (Js/avisos-panel.js), que los pone primero, en rojo, y
    abre el panel solo. Lo que se fija aca es que la pestaña le pase los avisos

@@ -266,17 +266,21 @@
         // cargan, y su fecha está en cada fila.
         texto('ultimaCargaSaldos', uc ? fechaHora(uc.fecha_carga) : 'Sin cargas');
         texto('ultimaCargaSaldosDetalle', uc
-            ? ('Mercado Pago, otros y bancos manuales · ' +
+            ? ('Las cuentas que se cargan a mano · ' +
                (uc.usuario ? 'Cargado por ' + Auditoria.quien(uc.usuario) : 'Sin usuario registrado') +
                ' · ' + (uc.observaciones || 'sin observaciones'))
-            : 'Mercado Pago, otros y bancos manuales: todavía no se cargó ninguno');
+            : 'Las cuentas que se cargan a mano: todavía no se cargó ninguna');
 
-        var ec = datosSaldos.efectivo_central;
+        /* EL EFECTIVO SALE DE SU FILA, que el servidor ya leyó en vivo de SBA05
+           (Saldos::getFilasDisponible()). Si la lectura falló, la fila trae el
+           de la última carga y lo dice. */
+        var ec = datosSaldos.filas.filter(function(f) { return f.tipo === 'EFECTIVO_CENTRAL'; })[0];
 
-        texto('efectivoCentral', ec ? pesos(ec.saldo) : 'No disponible');
-        texto('efectivoCentralDetalle', ec
-            ? ('Cuenta ' + ec.cuenta + ' · consultado el ' + fecha(ec.fecha))
-            : 'No se pudo leer la consulta de tesorería');
+        texto('efectivoCentral', ec && ec.cargada ? pesos(ec.saldo) : 'No disponible');
+        texto('efectivoCentralDetalle', !ec ? 'No hay cuenta de efectivo de tesorería'
+            : (ec.en_vivo ? ('En vivo de SBA05 · ' + fecha(ec.fecha_saldo))
+                : (ec.cargada ? ('No se pudo leer en vivo: es el de la carga del ' + fecha(ec.fecha_saldo))
+                    : 'No se pudo leer la consulta de tesorería')));
     }
 
     function pintarTablaSaldos() {
@@ -313,8 +317,12 @@
 
             // La fecha de carga de CADA dato, que es la regla transversal del
             // relevamiento: sirve para ver cuál es la última actualización.
+            // Lo leído en vivo no tiene carga: dice "en vivo" y de dónde.
             html += '<td class="text-center sal-fecha-carga">' +
-                    (f.fecha_carga ? fechaHora(f.fecha_carga) : (esInterbanking(f) ? '—' : 'sin cargar')) +
+                    (f.en_vivo
+                        ? '<span title="' + escapar('Leído en vivo de ' + f.fuente_vivo +
+                            (f.momento_vivo ? ' · ' + fechaHora(f.momento_vivo) : '')) + '">en vivo</span>'
+                        : (f.fecha_carga ? fechaHora(f.fecha_carga) : (esInterbanking(f) ? '—' : 'sin cargar'))) +
                     '</td>';
             html += '</tr>';
         });
@@ -361,13 +369,11 @@
         }
 
         if (consulta) {
-            // El efectivo de tesorería no se tipea: lo resuelve el sistema al
-            // guardar, releyendo su consulta de origen.
-            var ec = datosSaldos.efectivo_central;
-
+            // El efectivo y Mercado Pago no se tipean: el sistema relee SU
+            // consulta al guardar. Se muestra lo que la fila trae en vivo.
             return '<span class="sal-consulta" title="Lo resuelve la consulta del sistema al ' +
                    'guardar, no se carga a mano">' +
-                   (ec ? pesos(ec.saldo) : 'no disponible') + '</span>';
+                   (f.cargada ? importe(f.saldo, f.moneda) : 'no disponible') + '</span>';
         }
 
         return '<input type="number" step="0.01" class="form-control form-control-sm ' +
@@ -384,8 +390,9 @@
         var html = f.fecha_saldo ? fecha(f.fecha_saldo) : '—';
 
         if (f.no_es_de_hoy) {
-            html += '<div class="sal-subtitulo sal-error" title="Interbanking no trajo el saldo ' +
-                    'de hoy de esta cuenta: se muestra el último que hay.">no es de hoy</div>';
+            html += '<div class="sal-subtitulo sal-error" title="' + escapar((f.en_vivo
+                        ? f.fuente_vivo : 'Interbanking') + ' no tiene el saldo de hoy de esta ' +
+                    'cuenta: se muestra el último que hay.') + '">no es de hoy</div>';
         }
 
         return html;
@@ -645,8 +652,9 @@
 
         datosSaldos.filas.forEach(function(f) {
             if (f.origen_cuenta === 'CONSULTA') {
-                var ec = datosSaldos.efectivo_central;
-                totales[f.moneda] = (totales[f.moneda] || 0) + (ec ? parseFloat(ec.saldo) : 0);
+                // Cada consulta con su saldo: antes se sumaba el efectivo por
+                // cada fila de consulta, y había una sola.
+                totales[f.moneda] = (totales[f.moneda] || 0) + (f.cargada ? (parseFloat(f.saldo) || 0) : 0);
             } else if (esInterbanking(f) && f.cargada) {
                 totales[f.moneda] = (totales[f.moneda] || 0) + (parseFloat(f.saldo) || 0);
             }
