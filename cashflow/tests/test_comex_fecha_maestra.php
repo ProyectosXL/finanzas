@@ -1314,15 +1314,21 @@ if (!Pruebas::hayBase()) {
        feature/comex-visibilidad-saldo las dos pestanas cortaban igual -"sin
        detalle cargado"- y esta prueba lo exigia. Ahora Proveedores Exterior
        retiene los contenedores con costos cargados mientras les quede saldo
-       -ver Comex::sigueEnProveedores()- y Crono Nacionalizacion no cambio su
-       criterio.
+       -ver Comex::sigueEnProveedores()-. Y desde
+       feature/cashflow-avisos-kpis-comex-nac-parcial, con
+       sql/cashflow_comex_nac_pago.sql corrido, Crono tambien trae los que
+       tienen costos -para el pago parcial-, incluidos los que ya tienen el FOB
+       pagado y por eso salieron de Proveedores.
 
-       Lo que si tiene que valer: todo lo de Crono esta en Proveedores -un
-       contenedor sin costos nunca sale de Proveedores-, y lo que Proveedores
-       tiene de mas son, TODAS, filas con costos cargados. Si aparece una de mas
-       sin costos, alguna de las dos volvio a filtrar por su cuenta. */
+       Lo que si tiene que valer: todo lo de Crono SIN COSTOS esta en
+       Proveedores -un contenedor sin costos nunca sale de Proveedores-, y lo
+       que Proveedores tiene de mas son, TODAS, filas con costos cargados. Si
+       aparece una de mas sin costos, alguna de las dos volvio a filtrar por su
+       cuenta. */
     $idsExt = array_map('intval', array_column($ext, 'ID'));
-    $idsNac = array_map('intval', array_column($nac, 'ID'));
+    $idsNac = array_map('intval', array_column(array_filter($nac, function ($f) {
+        return empty($f['TIENE_COSTOS']);
+    }), 'ID'));
 
     chequear('todo lo de Crono Nacionalizacion esta en Proveedores Exterior', [],
         array_values(array_diff($idsNac, $idsExt)));
