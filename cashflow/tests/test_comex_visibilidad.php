@@ -80,9 +80,16 @@ chequear('Proveedores Exterior ya no hace LEFT JOIN al detalle', false,
     stripos($cuerpoExt[0], 'LEFT JOIN RO_T_IMPORTACIONES_DETALLE') !== false);
 chequear('y filtra con filtroPadron()', true, strpos($cuerpoExt[0], '$this->filtroPadron()') !== false);
 chequear('y trae TIENE_COSTOS para la etiqueta', true, strpos($cuerpoExt[0], 'TIENE_COSTOS') !== false);
-chequear('Crono Nacionalizacion NO cambio su criterio', true,
-    strpos($cuerpoNac[0], 'LEFT JOIN RO_T_IMPORTACIONES_DETALLE B ON A.ID = B.ID_MG') !== false
-    && strpos($cuerpoNac[0], 'WHERE B.ID_MG IS NULL') !== false);
+/* Crono cambio su criterio con el pago parcial
+   (feature/cashflow-avisos-kpis-comex-nac-parcial): sin las tablas deja afuera
+   a los que tienen costos -por grupo, con la misma (A) que Proveedores
+   Exterior-, y con ellas los trae para poder registrarles un pago parcial. Ver
+   README-comex.md, seccion 13. */
+chequear('Crono sin el pago parcial deja afuera los que tienen costos, con la misma (A)', true,
+    strpos($cuerpoNac[0], "'NOT ' . self::sqlTieneCostos()") !== false
+    && strpos($cuerpoNac[0], '$this->tieneNacPago()') !== false);
+chequear('y ya no hace LEFT JOIN al detalle por la fila', false,
+    strpos($cuerpoNac[0], 'LEFT JOIN RO_T_IMPORTACIONES_DETALLE B ON A.ID = B.ID_MG') !== false);
 
 $codigoCP = codigoSinComentariosVIS(__DIR__ . '/../Class/ComprasProyectadasDatos.php');
 preg_match('/function cargado\(.*?\n    \}/s', $codigoCP, $cuerpoCargado);

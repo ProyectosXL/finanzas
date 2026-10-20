@@ -345,10 +345,14 @@ try {
                ahora de IMPORTE_ARS —el importe YA CONVERTIDO—, que es el cambio
                que hace que el eje deje de ubicar dólares en columnas de pesos.
                La grilla sigue mostrando IMPORTE_EST en su columna, en dólares. */
+            /* POR LA FECHA DEL SALDO desde el pago parcial: es la de
+               nacionalizacion salvo que el contenedor tenga pagos parciales y
+               una fecha cargada para lo que falta. IMPORTE_EJE es ese saldo. Ver
+               Comex::repartoNacionalizacion(). */
             $payload = EjeVista::armar(
                 ejeDelModulo(),
                 $filasNac,
-                'FECHA_NAC_EFECTIVA',
+                'FECHA_SALDO_EFECTIVA',
                 'IMPORTE_EJE'
             );
 
@@ -386,9 +390,96 @@ try {
                dice qué script falta. */
             $payload['pagado_editable'] = $comex->tienePagado();
 
+            /* Y lo mismo para el pago parcial: sin sus tablas el botón no se
+               dibuja, los contenedores con costos reales no vienen, y el aviso
+               de arriba dice qué script falta. */
+            $payload['pago_parcial_editable'] = $comex->tieneNacPago();
+            $payload['tolerancia_saldo'] = Comex::TOLERANCIA_SALDO_NAC;
+
             echo json_encode([
                 'success' => true,
                 'data' => $payload
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           EL PAGO PARCIAL DE LA NACIONALIZACION
+
+           Se registra SOLO del lado del cashflow: Comercio Exterior no se
+           entera. El contenedor lo resuelve el servidor -la OC principal- a
+           partir del ID de la fila, y las reglas las valida Comex: el dialogo
+           explica y bloquea el boton, esto decide. Ver Comex.php, "EL PAGO
+           PARCIAL DE LA NACIONALIZACION".
+           ================================================================ */
+        case 'registrarPagoNac':
+            $data = json_decode(file_get_contents('php://input'), true);
+
+            if (!is_array($data) || !isset($data['id_mg'])) {
+                throw new Exception('Falta el contenedor al que corresponde el pago.');
+            }
+
+            $r = $comex->registrarPagoNac($data, $usuario);
+
+            /* SE DICE CUÁNTO QUEDA, y en qué se convirtió un pago en dólares:
+               son los dos números que el usuario no tipeó. */
+            $d = $r['despues'];
+            $mensaje = 'Pago registrado por $ ' . number_format($r['importe_ars'], 2, ',', '.')
+                . ($r['moneda'] === 'USD' ? ' (el equivalente en pesos de los dólares)' : '') . '. '
+                . ($d['cubierto']
+                    ? 'Con esto la nacionalización queda pagada: sale de la proyección.'
+                    : 'Queda un saldo de $ ' . number_format($d['saldo'], 2, ',', '.')
+                        . ', que se sigue proyectando.')
+                . ($d['sobrepago'] > 0
+                    ? ' Atención: hay $ ' . number_format($d['sobrepago'], 2, ',', '.')
+                        . ' pagados de más.'
+                    : '');
+
+            echo json_encode(['success' => true, 'message' => $mensaje, 'data' => $r],
+                JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'anularPagoNac':
+            $data = json_decode(file_get_contents('php://input'), true);
+
+            if (!is_array($data) || !isset($data['id'])) {
+                throw new Exception('Falta el pago a anular.');
+            }
+
+            $r = $comex->anularPagoNac($data['id'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Pago anulado: deja de restar y el saldo vuelve a subir $ '
+                    . number_format($r['importe_ars'], 2, ',', '.')
+                    . '. Queda en el historial del contenedor.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'cambiarFechaSaldoNac':
+            $data = json_decode(file_get_contents('php://input'), true);
+
+            if (!is_array($data) || !isset($data['id_mg']) || !isset($data['fecha'])) {
+                throw new Exception('Faltan el contenedor y la fecha nueva del saldo.');
+            }
+
+            $r = $comex->cambiarFechaSaldoNac($data['id_mg'], $data['fecha'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['sin_cambios']
+                    ? 'La fecha del saldo ya era ésa: no se cambió nada.'
+                    : 'El saldo se proyecta ahora en la fecha nueva. La anterior queda en el historial.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* Los pagos del contenedor, vigentes y anulados, y el historial de la
+           fecha del saldo. */
+        case 'getPagosNac':
+            echo json_encode([
+                'success' => true,
+                'data' => $comex->getPagosNac(isset($_GET['id_mg']) ? $_GET['id_mg'] : 0)
             ], JSON_UNESCAPED_UNICODE);
             break;
 

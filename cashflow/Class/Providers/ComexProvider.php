@@ -326,14 +326,6 @@ class ComexProvider extends CashflowProvider {
 
         $filas = $comex->getCronoNacionalizacion();
 
-        /* Sobre IMPORTE_EJE, igual que los pagos al exterior: una
-           nacionalizacion con la fecha ya vencida no suma. Ver
-           Comex::aporteAlEje(). Y ese campo sale ahora de IMPORTE_ARS, o sea
-           del importe YA CONVERTIDO. */
-        $serie = $h->agrupar($filas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_EJE');
-
-        $serie['moneda_origen'] = 'USD';
-
         /* CON QUE COTIZACION SE CONVIRTIO: mismo criterio que pagosExterior().
            El contrato de la serie tiene UN escalar y la valuacion es por fila,
            asi que solo se informa cuando todas se valuaron con el mismo numero;
@@ -341,29 +333,66 @@ class ComexProvider extends CashflowProvider {
            curva". */
         $usadas = [];
 
+        /* Solo las filas que se valuan con la curva: una con costos reales ya
+           esta en pesos, y su cotizacion no dice como se convirtio nada. */
         foreach ($filas as $f) {
-            if ($f['COTIZ_USD'] !== null) {
+            if ($f['COTIZ_USD'] !== null && empty($f['TIENE_COSTOS'])) {
                 $usadas[(string) $f['COTIZ_USD']] = floatval($f['COTIZ_USD']);
             }
         }
 
-        $serie['tipo_cambio'] = (count($usadas) === 1) ? reset($usadas) : null;
-
         /* Los mismos avisos que la pestana, escritos una sola vez en
            Comex::avisosNacionalizacionConNivel(): la valuacion, lo vencido, lo
-           marcado y la estimacion que falta. Sin prefijo y sin seccion: esta
-           serie tiene su propia pestana, Crono Nacionalizacion, y el grupo del
-           tablero ya lo dice. */
+           marcado, los pagos parciales -y lo pagado de mas- y la estimacion que
+           falta. Sin prefijo y sin seccion: esta serie tiene su propia pestana,
+           Crono Nacionalizacion, y el grupo del tablero ya lo dice. */
         $this->avisarTodos($comex->avisosNacionalizacionConNivel($filas));
 
-        $marcadas = self::soloPagadas($filas);
+        /* LO QUE FALTA PAGAR, EN LA FECHA DEL SALDO. Sin pagos parciales es lo
+           de siempre: el importe en pesos en la fecha de nacionalizacion, cero
+           si esta vencida o tildada. Con pagos parciales, el saldo en la fecha
+           que se cargo para el. Lo decide Comex::repartoNacionalizacion(),
+           fila por fila; aca solo se ubica en el eje. */
+        $series = self::seriesNacionalizacion($h, $filas);
+        $series['NACIONALIZACION']['tipo_cambio'] = (count($usadas) === 1) ? reset($usadas) : null;
+
+        return $series;
+    }
+
+    /**
+     * Las tres series de la nacionalizacion a partir de las filas de Crono ya
+     * repartidas (Comex::repartoNacionalizacion()). ESTATICA Y PURA, para
+     * probar el invariante sin base.
+     *
+     * LAS DOS ULTIMAS SE ARMAN CON LOS DOS PEDAZOS DE CADA FILA, y no con la
+     * base en una sola fecha: el saldo en la fecha del saldo y lo imputado -lo
+     * ya pagado parcialmente- en la de nacionalizacion. Cada pedazo esta en
+     * TODO y en una de las otras dos, en la misma columna, asi que
+     *
+     *     NACIONALIZACION + NACIONALIZACION_PAGADAS = NACIONALIZACION_TODO
+     *
+     * cierra columna por columna aunque el saldo caiga en otra fecha. Las
+     * sumas van por Horizonte::sumar(), no reagrupando.
+     *
+     * @param Horizonte $h
+     * @param array $filas
+     * @return array Las tres series
+     */
+    public static function seriesNacionalizacion($h, $filas) {
+        $imputado = $h->agrupar($filas, 'FECHA_NAC_EFECTIVA', 'NAC_IMPUTADO_PROY');
+        $nac = $h->agrupar($filas, 'FECHA_SALDO_EFECTIVA', 'IMPORTE_EJE');
+        $nac['moneda_origen'] = 'USD';
+
+        $pagadas = $h->sumar([$h->agrupar($filas, 'FECHA_SALDO_EFECTIVA', 'NAC_PAGADAS_SALDO'), $imputado]);
+        $pagadas['moneda_origen'] = 'USD';
+
+        $todo = $h->sumar([$h->agrupar($filas, 'FECHA_SALDO_EFECTIVA', 'NAC_TODO_SALDO'), $imputado]);
+        $todo['moneda_origen'] = 'USD';
 
         return [
-            'NACIONALIZACION' => $serie,
-            'NACIONALIZACION_PAGADAS' => $this->conMoneda(
-                $h->agrupar($marcadas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_PROYECTABLE'), 'USD'),
-            'NACIONALIZACION_TODO' => $this->conMoneda(
-                $h->agrupar($filas, 'FECHA_NAC_EFECTIVA', 'IMPORTE_PROYECTABLE'), 'USD')
+            'NACIONALIZACION' => $nac,
+            'NACIONALIZACION_PAGADAS' => $pagadas,
+            'NACIONALIZACION_TODO' => $todo
         ];
     }
 

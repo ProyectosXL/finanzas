@@ -963,9 +963,11 @@ chequear('todas las series declaran USD', 9, substr_count($provSrc, "'USD'"));
    su gravedad para el panel del tablero, y la llamada puede ir partida en dos
    renglones: lo que importa son los argumentos, no el espaciado. */
 $comexSrcVenc = codigoSinComentarios(__DIR__ . '/../Class/Comex.php');
+/* Desde el pago parcial lo que vence es el SALDO -en pesos, igual que antes
+   IMPORTE_ARS: sin pagos parciales son el mismo numero- en su fecha. */
 chequear('el aviso de vencidos de nacionalizacion informa pesos', 1,
-    preg_match("/self::avisosVencidosConNivel\\(\\\$filas,\\s*'FECHA_NAC_EFECTIVA',"
-        . "\\s*'IMPORTE_ARS'/", $comexSrcVenc));
+    preg_match("/self::avisosVencidosConNivel\\(\\\$proyectables,\\s*'FECHA_SALDO_EFECTIVA',"
+        . "\\s*'SALDO_ARS'/", $comexSrcVenc));
 /* La lista es una sola desde feature/cashflow-avisos-kpis-comex-nac-parcial:
    la llaman el tablero y la pestana. */
 chequear('y el tablero y la pestana usan esa misma lista', true,

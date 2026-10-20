@@ -123,7 +123,12 @@ class AuthCashflow {
         'Comex' => [
             'updateCotizacion' => [['proveedores_exterior', null]],
             'updateFecha' => [['proveedores_exterior', null], ['crono_nacionalizacion', null]],
-            'marcarPagado' => [['proveedores_exterior', null], ['crono_nacionalizacion', null]]
+            'marcarPagado' => [['proveedores_exterior', null], ['crono_nacionalizacion', null]],
+            /* El pago parcial de la nacionalizacion pide lo mismo que el tilde:
+               es el mismo dato -cuanto falta pagar- mirado en partes. */
+            'registrarPagoNac' => [['proveedores_exterior', null], ['crono_nacionalizacion', null]],
+            'anularPagoNac' => [['proveedores_exterior', null], ['crono_nacionalizacion', null]],
+            'cambiarFechaSaldoNac' => [['proveedores_exterior', null], ['crono_nacionalizacion', null]]
         ],
         'ComprasProyectadas' => [
             'actualizarInsumo' => [['compras_proyectadas', null]],
@@ -258,7 +263,7 @@ class AuthCashflow {
         'CobElectronicos' => ['getPestana'],
         'Cobertura' => ['getAplicaciones', 'getHistorialCobertura'],
         'Comex' => ['getProveedoresExterior', 'getPagosContenedor', 'getProveedoresExteriorRaw',
-            'getHistorialPagado', 'getHistorialFecha', 'getCronoNacionalizacion'],
+            'getHistorialPagado', 'getHistorialFecha', 'getCronoNacionalizacion', 'getPagosNac'],
         'ComprasProyectadas' => ['getGrilla', 'getDetalleVersion', 'getHistorialAjustes'],
         'Echeqs' => ['getEcheqsCartera', 'getEcheqsPrechequeado', 'getHistorialExclusion'],
         'Ingresos' => ['getCobranzasFR', 'getCobranzasMay', 'getExportacionesTasky'],
