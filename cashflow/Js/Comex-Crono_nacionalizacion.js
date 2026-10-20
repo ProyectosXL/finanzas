@@ -45,6 +45,14 @@
  * contenedor; acá no, y es una decisión: ese override vive en una tabla con UNA
  * fila por contenedor, y las dos pestañas valúan el mismo contenedor en dos
  * fechas que caen en meses distintos de la curva. Ver Comex::valuar().
+ *
+ * EL PAGO PARCIAL (feature/cashflow-avisos-kpis-comex-nac-parcial)
+ * ----------------------------------------------------------------
+ * Una parte de la nacionalización se puede pagar y dejar un saldo, que se
+ * sigue proyectando en su fecha. El tilde sigue siendo el pago TOTAL. La base,
+ * el saldo y lo que suma cada fila llegan resueltos del servidor
+ * (Comex::repartoNacionalizacion()); acá se dibujan las cuatro columnas, el
+ * diálogo y el historial. Ver README-comex.md, sección 13.
  */
 
 (function() {

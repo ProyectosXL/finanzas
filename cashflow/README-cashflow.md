@@ -289,17 +289,20 @@ No se cuentan dos veces: los de un cliente entran con un recibo que ya canceló 
 
 ### Avisos del tablero en cada pestaña, tarjetas plegables y Comercio Exterior (`feature/cashflow-avisos-kpis-comex-nac-parcial`)
 
-Tres cosas: cada pestaña con proveedor muestra los avisos que el tablero dice de ella (*Lo que el tablero dice de cada pestaña, también en su panel*); las tarjetas KPI se pliegan a una franja (*Las tarjetas KPI se pliegan a una franja*); Proveedores Exterior y Crono Nacionalización traen sólo los contenedores desde una fecha de movimiento (`README-comex.md`, sección 12).
+Cuatro cosas: cada pestaña con proveedor muestra los avisos que el tablero dice de ella (*Lo que el tablero dice de cada pestaña, también en su panel*); las tarjetas KPI se pliegan a una franja (*Las tarjetas KPI se pliegan a una franja*); Proveedores Exterior y Crono Nacionalización traen sólo los contenedores desde una fecha de movimiento (`README-comex.md`, sección 12); y Crono registra pagos parciales de la nacionalización y proyecta el saldo (`README-comex.md`, sección 13).
 
 | # | Script | Qué hace | Si no se corre |
 | --- | --- | --- | --- |
 | 41 | `sql/cashflow_comex_fecha_mov_desde.sql` | Siembra el parámetro *Contenedores desde (fecha de movimiento)* en 01/01/2025, en Parámetros › Compras Exterior, sin pisar un valor cargado | El corte se aplica igual, con 01/01/2025; no se puede cambiar, y sólo Parámetros dice qué script falta |
+| 42 | `sql/cashflow_comex_nac_pago.sql` | Crea `RO_T_CASHFLOW_COMEX_NAC_PAGO` y `RO_T_CASHFLOW_COMEX_NAC_SALDO_FECHA`: los pagos parciales de la nacionalización y la fecha del saldo, con bajas lógicas y auditoría | Crono funciona como hoy: sin botón *Pago parcial*, sin los contenedores con costos reales, y avisa qué script falta |
 
-**El 41 no depende de ninguno.** Los avisos y las tarjetas no necesitan scripts.
+**El 41 y el 42 no dependen de ninguno**; el 42 va después de `sql/cashflow_auditoria_usuario.sql`, como toda tabla nueva. Los avisos y las tarjetas no necesitan scripts.
 
 #### Lo que mueve el tablero
 
 **Nada**, medido contra la base el 20/10/2026. Ninguna serie de las que tocan los avisos cambió (45 cifras de seis proveedores, ver *Un hecho, un texto*). Con el corte por fecha de movimiento, Proveedores Exterior pasa de 348 a 199 filas y Crono de 70 a 69, sin mover un peso de ninguna serie: todo lo que salió estaba sin fecha o vencido. Los avisos de *no se pudieron valuar* bajan de 255 a 106. Ver `README-comex.md` y `README-compras-proyectadas.md`.
+
+El pago parcial tampoco mueve nada el día que se publica, medido aparte: sin el 42 y con el 42 sin pagos cargados, las tres series de nacionalización quedan iguales al centavo, y los 190 contenedores con costos reales que vuelven a Crono aportan $ 0. Ver `README-comex.md`, sección 13.
 
 ## Ejecución de los scripts — la instalación completa
 
@@ -347,6 +350,7 @@ En este orden, contra `central`:
 -- 39. sql/cashflow_estructura_echeqs_depositados.sql  (la fila Echeqs depositados)
 -- 40. sql/cashflow_echeqs_acreditado.sql            (Echeqs: la marca "ya acredito" de un depositado)
 -- 41. sql/cashflow_comex_fecha_mov_desde.sql        (Comex: contenedores desde una fecha de movimiento)
+-- 42. sql/cashflow_comex_nac_pago.sql               (Comex: pago parcial de la nacionalizacion y fecha del saldo)
 ```
 
 **El 39 va después del 38**: sin las alícuotas y el plazo, los depositados no tienen neto. **El 40 no depende de ninguno de los dos.** Los depósitos se leen de Tango; ninguno de los tres crea `RO_T_CASHFLOW_ECHEQ_DEPOSITO`, que está en desuso. Ver `README-echeqs.md`.
@@ -1945,6 +1949,8 @@ Texto resumido. "Sección" vacía es sin sección. Para revisar.
 | Órdenes del mismo contenedor (Proveedores Exterior) | info |
 | Falta la tabla de pagos de Comercio Exterior: proyecta de más (Proveedores Exterior) | danger |
 | Contenedores sin gastos de nacionalización estimados (Crono Nacionalización; desde esta rama también en la pestaña) | warning |
+| Contenedores con pagos parciales: lo pagado y el saldo pendiente (Crono Nacionalización) | info |
+| Pagado de más: los pagos parciales superan el costo, en pesos (Crono Nacionalización) | warning |
 
 **Comercio Exterior › Proyección**
 
