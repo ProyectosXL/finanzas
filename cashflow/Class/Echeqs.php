@@ -66,7 +66,9 @@ require_once __DIR__ . '/DiasHabiles.php';
  *                     Ventas::repartirNeteo().
  *
  *   FECHA_CHEQUE      decide DONDE cae el importe, en la grilla y en el
- *                     tablero. Es cuando entra la plata.
+ *                     tablero: su DIA HABIL, corrida al habil siguiente si
+ *                     cae un fin de semana o un feriado (correrAHabil()). Es
+ *                     cuando entra la plata.
  *
  * ANTES LAS DOS COSAS LAS HACIA LA FECHA TEORICA. El criterio era que el neteo
  * cayera donde esta la cobranza proyectada de esa venta; se cambio porque lo que
@@ -74,11 +76,15 @@ require_once __DIR__ . '/DiasHabiles.php';
  * en la fila y sigue siendo columna visible: es el dato que explica por que ese
  * cheque esta en la lista.
  *
- * LA PANTALLA Y EL NETEO SE MUEVEN JUNTOS. EcheqsController arma el eje de la
- * sub-pestana con 'FECHA_CHEQUE' y Ventas::repartirNeteo() ubica con
- * $fila['FECHA_CHEQUE']. Si solo cambiara uno, el usuario tildaria un cheque en
+ * LA PANTALLA Y EL NETEO SE MUEVEN JUNTOS, Y CON LA CARTERA. EcheqsController
+ * arma el eje de la sub-pestana con 'FECHA_EJE' -la fecha del cheque corrida
+ * por ubicarPrechequeado()- y Ventas::repartirNeteo() ubica con
+ * correrAHabil($fila['FECHA_CHEQUE']): el MISMO helper que corre el cheque en
+ * "Echeqs en cartera". Si solo cambiara uno, el usuario tildaria un cheque en
  * una columna y el tablero lo restaria en otra, sin ninguna pantalla donde
- * notarlo. Es el mismo motivo por el que ventaYaCobrada() es una sola funcion.
+ * notarlo; y si la cartera se corriera y el neteo no, el tablero sumaria el
+ * cheque un lunes y restaria su venta el sabado anterior. Es el mismo motivo
+ * por el que ventaYaCobrada() es una sola funcion.
  *
  * CONSECUENCIA: la fecha del cheque es siempre POSTERIOR O IGUAL a la teorica,
  * asi que un cheque puede tener su venta adentro del eje y su fecha afuera. Ese
@@ -2107,6 +2113,77 @@ class Echeqs {
         });
 
         return $filas;
+    }
+
+    /**
+     * Donde cae cada cheque de la sub-pestana: su fecha corrida al habil
+     * siguiente (correrAHabil(), el helper de la cartera), en FECHA_EJE, con
+     * el corrimiento en CORRIMIENTO para la marca.
+     *
+     * ES EL MISMO HELPER QUE USA Ventas::repartirNeteo(): la sub-pestana y el
+     * neteo ubican cada cheque en la misma columna, y esa columna es la del
+     * cheque en "Echeqs en cartera". FECHA_VENTA_EST no cambia: decide QUE se
+     * muestra, no donde cae.
+     *
+     * Estatica y pura.
+     *
+     * @param array $filas Las de cruzarPrechequeado()
+     * @param array $habiles
+     * @param string|null $tope El fin del eje
+     * @return array Las mismas filas, con FECHA_EJE y CORRIMIENTO
+     */
+    public static function ubicarPrechequeado($filas, $habiles, $tope) {
+        $v = [];
+
+        foreach (is_array($filas) ? $filas : [] as $f) {
+            $f['CORRIMIENTO'] = self::correrAHabil($f['FECHA_CHEQUE'], $habiles, $tope);
+            $f['FECHA_EJE'] = $f['CORRIMIENTO']['fecha'];
+            $v[] = $f;
+        }
+
+        return $v;
+    }
+
+    /**
+     * Los avisos del corrimiento de la sub-pestana: el calendario faltante
+     * (atencion) y la falta de un habil en el tope (critico: el cheque quedo
+     * en su fecha). Los mismos textos que los de la cartera.
+     *
+     * @param array $filas Las de ubicarPrechequeado()
+     * @return array [['nivel', 'texto']]
+     */
+    public static function avisosPrechequeado($filas) {
+        $faltan = [];
+        $sinHabil = [];
+
+        foreach (is_array($filas) ? $filas : [] as $f) {
+            if (empty($f['CORRIMIENTO'])) {
+                continue;
+            }
+
+            foreach ($f['CORRIMIENTO']['faltan'] as $mes) {
+                $faltan[$mes] = true;
+            }
+
+            if ($f['CORRIMIENTO']['sin_habil']) {
+                $sinHabil[$f['FECHA_CHEQUE']] = true;
+            }
+        }
+
+        $avisos = [];
+
+        foreach (array_keys($sinHabil) as $fecha) {
+            $avisos[] = ['nivel' => 'danger', 'texto' => 'Venta cobrada anticipada: '
+                . DiasHabiles::avisoSinHabil($fecha) . ' Esos cheques quedan en su fecha.'];
+        }
+
+        ksort($faltan);
+
+        foreach (DiasHabiles::avisosCalendario(array_keys($faltan)) as $t) {
+            $avisos[] = ['nivel' => 'warning', 'texto' => 'Venta cobrada anticipada: ' . $t];
+        }
+
+        return $avisos;
     }
 
     /**
@@ -4560,9 +4637,13 @@ class Echeqs {
      * unico paso caro es la lectura de dbo.SBA14, y va acotada por los codigos
      * del maestro para no traer el universo y descartarlo despues.
      *
+     * Cada fila sale ubicada -FECHA_EJE- con ubicarPrechequeado(): la fecha del
+     * cheque corrida al habil siguiente, como en la cartera y en el neteo.
+     *
+     * @param Horizonte|null $h El eje del pedido: hasta donde se corre
      * @return array Filas listas para la pantalla, vacio si el maestro esta vacio
      */
-    public function getEcheqsPrechequeado() {
+    public function getEcheqsPrechequeado($h = null) {
         if (!$this->tablasCreadas()) {
             return [];
         }
@@ -4573,11 +4654,19 @@ class Echeqs {
             return [];
         }
 
-        return self::cruzarPrechequeado(
+        $filas = self::cruzarPrechequeado(
             $this->getChequesDeClientes(array_column($clientes, 'CLIENTE')),
             $clientes,
             $this->getExcepciones()
         );
+
+        if (empty($filas)) {
+            return [];
+        }
+
+        $ctx = $this->contextoCartera($h);
+
+        return self::ubicarPrechequeado($filas, $ctx['habiles'], $ctx['tope']);
     }
 
     /**

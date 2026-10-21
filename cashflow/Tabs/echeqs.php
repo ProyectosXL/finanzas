@@ -573,7 +573,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
 
             <!-- Lo que queda MÁS ALLÁ del horizonte se avisa: son cheques que
                  están en la tabla pero cuya fecha no tiene columna donde
-                 ubicarse. Desde que el importe se ubica por la fecha del
+                 ubicarse. Desde que el importe se ubica por el día hábil del
                  cheque, ese caso es plata que el tablero DEBERÍA restar y no
                  resta: la venta que prepagaron sí puede estar proyectada
                  adentro del cuadro. Ventas::repartirNeteo() informa el mismo
@@ -601,9 +601,16 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                 el orden y el peso visual son los que son:
 
                                   FECHA DEL CHEQUE     decide DÓNDE cae el
-                                                       importe en la grilla. Es
-                                                       cuando entra la plata.
-                                                       Va primera y destacada.
+                                                       importe en la grilla: su
+                                                       día hábil, corrido al
+                                                       siguiente si cae un fin
+                                                       de semana o un feriado
+                                                       —marca "corrida"—, como
+                                                       en Echeqs en cartera y
+                                                       en el neteo de Ventas.
+                                                       Es cuando entra la
+                                                       plata. Va primera y
+                                                       destacada.
 
                                   FECHA VENTA ESTIMADA decide QUÉ cheques se
                                   (cheque − días)      muestran: si ya pasó, esa
@@ -635,7 +642,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                      de fecha al lado, el nombre del dato es lo
                                      único que las distingue de un vistazo. -->
                                 <th rowspan="2"
-                                    title="Fecha del cheque. Es la que ubica el importe en la grilla: es cuando entra la plata.">
+                                    title="Fecha del cheque. Su día hábil —el siguiente, si cae un fin de semana o un feriado— es el que ubica el importe en la grilla: es cuando entra la plata.">
                                     Fecha del cheque
                                 </th>
                                 <th rowspan="2" class="text-muted"

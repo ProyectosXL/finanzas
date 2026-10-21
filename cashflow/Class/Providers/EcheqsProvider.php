@@ -110,7 +110,9 @@ require_once __DIR__ . '/../Echeqs.php';
  *
  * EL DEPOSITO NO CAMBIA ESO: el neteo va por tilde, no por estado ni por
  * deposito. Un cheque pre-chequeado que se deposita sigue neteando la venta
- * en la fecha del cheque, y entra a "Echeqs depositados" en su acreditacion.
+ * en el dia habil del cheque, y entra a "Echeqs depositados" en su
+ * acreditacion. Mientras esta en cartera, el cheque y su neteo caen en la
+ * misma columna: los dos se corren con Echeqs::correrAHabil().
  *
  * COROLARIO QUE VALE LA PENA TENER PRESENTE: tildar o destildar cheques en la
  * segunda sub-pestana NO cambia el total de ninguna de estas series. El tilde

@@ -776,3 +776,89 @@ if (!Pruebas::hayBase()) {
 
     sqlsrv_query($cidF, 'DROP TABLE #FECHA_ACREDITACION_PRUEBA');
 }
+
+/* ================================================================
+   Venta Cobrada Anticipada y el neteo de Ventas: el mismo corrimiento
+   ================================================================ */
+require_once __DIR__ . '/../Class/Ventas.php';
+
+seccion('venta cobrada anticipada: el cheque y su neteo en la misma columna corrida');
+
+$preV = Echeqs::ubicarPrechequeado([
+    ['ID_SBA14' => 1, 'FECHA_CHEQUE' => '2026-10-24', 'COD_CLIENTE' => 'FRCAST', 'ESTADO' => 'C',
+     'IMPORTE' => 100.0, 'MARCADO' => 1, 'FECHA_VENTA_EST' => '2026-10-24'],
+    ['ID_SBA14' => 2, 'FECHA_CHEQUE' => '2026-11-20', 'COD_CLIENTE' => 'LMDQ01', 'ESTADO' => 'A',
+     'IMPORTE' => 250.0, 'MARCADO' => 1, 'FECHA_VENTA_EST' => '2026-11-10'],
+    ['ID_SBA14' => 3, 'FECHA_CHEQUE' => '2026-10-22', 'COD_CLIENTE' => 'FRCAST', 'ESTADO' => 'C',
+     'IMPORTE' => 40.0, 'MARCADO' => 1, 'FECHA_VENTA_EST' => '2026-10-22']
+], $CAL, $hV->fin());
+
+chequear('el sabado cae el lunes, con la marca', ['2026-10-26', true, Echeqs::CORRIDA_FIN_DE_SEMANA],
+    [$preV[0]['FECHA_EJE'], $preV[0]['CORRIMIENTO']['corrida'], $preV[0]['CORRIMIENTO']['motivo']]);
+chequear('el viernes feriado cae el lunes siguiente', ['2026-11-23', Echeqs::CORRIDA_FERIADO],
+    [$preV[1]['FECHA_EJE'], $preV[1]['CORRIMIENTO']['motivo']]);
+chequear('el habil no se corre', ['2026-10-22', false], [$preV[2]['FECHA_EJE'], $preV[2]['CORRIMIENTO']['corrida']]);
+chequear('FECHA_VENTA_EST no cambia: decide que se muestra, no donde cae', '2026-10-24',
+    $preV[0]['FECHA_VENTA_EST']);
+
+$cartV = filaCarteraV(1, '2026-10-24', 100.0, $HOYV);
+chequear('y es la misma columna que el cheque en "Echeqs en cartera"', $cartV['FECHA_EJE'], $preV[0]['FECHA_EJE']);
+
+$ejeDiasV = array_column($hV->dias(), 'fecha');
+$ejeMesesV = array_column($hV->meses(), 'clave');
+$netV = Ventas::repartirNeteo(array_map(function ($f) {
+    return ['FECHA_CHEQUE' => $f['FECHA_CHEQUE'], 'COD_CLIENTE' => $f['COD_CLIENTE'], 'ESTADO' => $f['ESTADO'],
+            'IMPORTE' => $f['IMPORTE'], 'CHEQUES' => 1];
+}, $preV), $ejeDiasV, $ejeMesesV, [], $CAL);
+$pPre = EjeVista::armar($hV, $preV, 'FECHA_EJE', 'IMPORTE');
+
+chequear('el neteo resta el sabado el lunes, no el sabado', [100.0, 0],
+    [$netV['dias']['2026-10-26'], $netV['dias']['2026-10-24']]);
+chequear('el feriado de noviembre, en la columna de noviembre', 250.0, $netV['meses']['2026-11']);
+
+$mismaColumna = true;
+
+foreach ($pPre['filas'] as $fp) {
+    $col = Horizonte::ubicar($netV, $fp['FECHA_EJE']);
+
+    if ($col === null || $netV[$col[0]][$col[1]] < $fp['IMPORTE']) {
+        $mismaColumna = false;
+    }
+}
+
+chequear('la sub-pestana y el neteo ponen cada cheque en la misma columna', true, $mismaColumna);
+chequear('y suman lo mismo', round($netV['total'], 2), round($pPre['totales']['total_horizonte'], 2));
+
+chequearLanza('el neteo sin calendario no se reparte: no hay un respaldo escrito', function () use ($ejeDiasV, $ejeMesesV) {
+    Ventas::repartirNeteo([], $ejeDiasV, $ejeMesesV, [], null);
+});
+
+$netFalta = Ventas::repartirNeteo([['FECHA_CHEQUE' => '2027-03-06', 'COD_CLIENTE' => 'FRCAST', 'ESTADO' => 'C',
+    'IMPORTE' => 10.0, 'CHEQUES' => 1]], $ejeDiasV, $ejeMesesV, [], $CAL);
+chequear('sin calendario para un mes, el neteo usa el respaldo y lo avisa', [10.0, true],
+    [$netFalta['meses']['2027-03'],
+     strpos(implode(' ', Ventas::avisosNeteo($netFalta)), 'RO_T_CALENDARIO no tiene datos para 2027-03') !== false]);
+
+$netSin = Ventas::repartirNeteo([['FECHA_CHEQUE' => '2027-01-09', 'COD_CLIENTE' => 'FRCAST', 'ESTADO' => 'C',
+    'IMPORTE' => 10.0, 'CHEQUES' => 1]], $ejeDiasV, $ejeMesesV, [], $ningunHabil);
+chequear('sin habil en el tope netea en su fecha y lo deja para el aviso critico', [10.0, ['2027-01-09' => true]],
+    [$netSin['meses']['2027-01'], $netSin['sin_habil']]);
+$srcVentasV = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/Ventas.php'));
+chequear('ese aviso es critico', true, strpos($srcVentasV,
+    "\$this->warnings[] = Aviso::nuevo(Aviso::DANGER, 'Neteo de cheques adelantados: '\n                . DiasHabiles::avisoSinHabil(\$fecha)") !== false);
+chequear('el neteo y la sub-pestana corren con el mismo helper que la cartera', [1, 1], [
+    substr_count($srcVentasV, '$c = Echeqs::correrAHabil($fila[\'FECHA_CHEQUE\'], $habiles, $tope);'),
+    substr_count($srcEcheqsV, "\$f['CORRIMIENTO'] = self::correrAHabil(\$f['FECHA_CHEQUE'], \$habiles, \$tope);")
+]);
+chequear('el neteo lee el calendario por la unica lectura del modulo', 1,
+    substr_count($srcVentasV, '$habiles = $this->getDiasHabiles(min($fechas),'));
+chequear('la sub-pestana arma su eje con FECHA_EJE', 1,
+    substr_count($ctrlV, "\$filas,\n                'FECHA_EJE',\n                'IMPORTE'\n            );"));
+
+$aPre = Echeqs::avisosPrechequeado(Echeqs::ubicarPrechequeado([['FECHA_CHEQUE' => '2027-01-09'],
+    ['FECHA_CHEQUE' => '2027-02-06']], $ningunHabil + calendarioV('2027-04-01', '2027-04-30'), '2027-09-30'));
+chequear('los avisos de la sub-pestana: sin habil critico', 'danger', $aPre[0]['nivel']);
+
+$jsV = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Js/Ingresos-Echeqs.js'));
+chequear('la grilla de la sub-pestana muestra la marca corrida con su tooltip', true,
+    strpos($jsV, "+ (cor.corrida\n                     ? '<div><span class=\"ech-badge-corrida\" title=\"' + escapar(textoCorrida({") !== false);

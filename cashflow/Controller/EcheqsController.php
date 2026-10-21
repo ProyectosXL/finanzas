@@ -171,24 +171,29 @@ try {
             break;
 
         case 'getEcheqsPrechequeado':
-            $filas = $echeqs->getEcheqsPrechequeado();
+            $h = Horizonte::desdeParametros(new Parametros());
+            $filas = $echeqs->getEcheqsPrechequeado($h);
 
             // DOS FECHAS, DOS FUNCIONES DISTINTAS:
             //
             //   FECHA_VENTA_EST  decide QUE cheques se muestran
-            //   FECHA_CHEQUE     decide DONDE cae cada importe en el eje
+            //   FECHA_EJE        decide DONDE cae cada importe en el eje: la
+            //                    fecha del cheque, corrida al habil siguiente
+            //                    si cae un fin de semana o un feriado
             //
-            // Cada cheque se ubica en la fecha del CHEQUE, que es cuando entra
-            // la plata. Antes se ubicaba en la fecha estimada de venta, porque
-            // el criterio era caer donde esta la cobranza proyectada de esa
-            // venta; ese razonamiento quedo superado. La fecha estimada sigue
-            // siendo columna visible: es lo que explica por que ese cheque esta
-            // en la lista.
+            // Cada cheque se ubica en el dia habil del CHEQUE, que es cuando
+            // entra la plata. Antes se ubicaba en la fecha estimada de venta,
+            // porque el criterio era caer donde esta la cobranza proyectada de
+            // esa venta; ese razonamiento quedo superado. La fecha estimada
+            // sigue siendo columna visible: es lo que explica por que ese
+            // cheque esta en la lista.
             //
-            // ESTA LINEA Y Ventas::repartirNeteo() SE MUEVEN JUNTAS. El modulo
-            // esta construido para que la pantalla y el neteo no se puedan
-            // desalinear: si solo cambiara una, el usuario tildaria un cheque
-            // en una columna y el tablero lo restaria en otra.
+            // ESTA LINEA Y Ventas::repartirNeteo() SE MUEVEN JUNTAS, y con el
+            // mismo helper: Echeqs::correrAHabil(). El modulo esta construido
+            // para que la pantalla y el neteo no se puedan desalinear: si solo
+            // cambiara una, el usuario tildaria un cheque en una columna y el
+            // tablero lo restaria en otra. Y es la columna del cheque en
+            // "Echeqs en cartera".
             //
             // Los cheques cuya fecha ESTIMADA cae antes de hoy no llegan hasta
             // aca: los descarta Echeqs::cruzarPrechequeado() con
@@ -201,9 +206,9 @@ try {
             // neteo informa el mismo importe en 'fuera_horizonte', asi que las
             // dos pantallas dicen lo mismo.
             $payload = EjeVista::armar(
-                Horizonte::desdeParametros(new Parametros()),
+                $h,
                 $filas,
-                'FECHA_CHEQUE',
+                'FECHA_EJE',
                 'IMPORTE'
             );
 
@@ -212,6 +217,11 @@ try {
             // y "esta pantalla no anda".
             $payload['resumen'] = Echeqs::resumenPrechequeado($filas);
             $payload['avisos'] = $echeqs->getAvisos();
+
+            // Los del corrimiento: calendario faltante y sin habil.
+            foreach (Echeqs::avisosPrechequeado($filas) as $a) {
+                $payload['warnings'][] = $a;
+            }
 
             echo json_encode([
                 'success' => true,

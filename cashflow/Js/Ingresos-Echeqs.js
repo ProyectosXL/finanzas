@@ -1800,11 +1800,22 @@
                  + '</td>';
 
             // LA DEL CHEQUE ES LA QUE UBICA EL IMPORTE EN LA GRILLA, así que va
-            // primera y destacada. Es cuando entra la plata.
+            // primera y destacada. Es cuando entra la plata: si cae un fin de
+            // semana o un feriado, el importe va al hábil siguiente —el mismo
+            // día que en "Echeqs en cartera" y en el neteo de Ventas— y la
+            // marca "corrida" lo dice.
+            var cor = f.CORRIMIENTO || {};
+
             html += '<td class="center"><span class="ech-fecha-cheque" '
-                 + 'title="Fecha del cheque. Es la que ubica este importe en la grilla y en '
-                 + 'el tablero: es cuando entra la plata.">'
-                 + fecha(f.FECHA_CHEQUE) + '</span></td>';
+                 + 'title="Fecha del cheque. Su día hábil es el que ubica este importe en la '
+                 + 'grilla y en el tablero: es cuando entra la plata.">'
+                 + fecha(f.FECHA_CHEQUE) + '</span>'
+                 + (cor.corrida
+                     ? '<div><span class="ech-badge-corrida" title="' + escapar(textoCorrida({
+                           fecha_cheque: f.FECHA_CHEQUE, fecha_corrida: cor.fecha,
+                           motivo_corrida: cor.motivo })) + '">corrida</span></div>'
+                     : '')
+                 + '</td>';
 
             // La estimada queda en gris, como informativa: explica POR QUÉ este
             // cheque está en la lista -su venta todavía no ocurrió- y no dónde
