@@ -210,6 +210,30 @@ class Echeqs {
     const OBSERVACION_MAX = 200;
 
     /**
+     * Las fechas de acreditacion internas de los cheques vencidos en cartera.
+     * Una fila por fecha, con historial: reasignar o deshacer marca VIGENTE = 0
+     * y no borra nada. Solo vive en el cashflow: no se escribe en Tango.
+     */
+    const TABLA_FECHA_ACREDITACION = 'RO_T_CASHFLOW_ECHEQ_FECHA_ACREDITACION';
+
+    /** El script de los vencidos -la tabla y la ventana-, para los mensajes */
+    const SCRIPT_VENCIDOS = 'sql/cashflow_echeqs_vencidos.sql';
+
+    /**
+     * La ventana de los vencidos, en RO_T_CASHFLOW_PARAMETROS: cuantos dias
+     * corridos hacia atras, desde la fecha del cheque, un vencido en cartera
+     * se sigue mostrando. Con el prefijo del modulo, como CLAVE_PLAZO.
+     */
+    const CLAVE_VENTANA = 'echeqs_dias_vencidos_cartera';
+
+    /**
+     * La ventana mas larga que se acepta: 30 dias, el plazo legal para
+     * presentar un cheque al cobro. Un cheque mas viejo ya no se puede
+     * depositar, asi que mostrarlo pediria una fecha que no puede llegar.
+     */
+    const VENTANA_MAX = 30;
+
+    /**
      * Los textos de la tasa de los cheques, para Retenciones::resolverTasa().
      * La regla es la de Cob. Electronicos; lo que cambia es de quien son las
      * alicuotas y donde se cargan.
@@ -244,6 +268,9 @@ class Echeqs {
 
     /** @var bool|null Cache del chequeo de la tabla del extracto de Interbanking */
     private $tablaExtracto = null;
+
+    /** @var bool|null Cache del chequeo de la tabla de fechas de los vencidos */
+    private $tablaFechaVencidos = null;
 
     /** @var Conexion */
     private $conn;
@@ -457,6 +484,64 @@ class Echeqs {
             return ['dias' => null, 'error' => 'El plazo de acreditación guardado ("'
                 . trim((string) $valor) . '") no sirve: ' . $e->getMessage()
                 . ' Corregilo en Parámetros → Cheques.'];
+        }
+    }
+
+    /**
+     * Valida la ventana de los vencidos. LANZA con el motivo.
+     *
+     * UN ENTERO DE 1 A VENTANA_MAX. Con cero no habria vencidos que mostrar, y
+     * eso se dice apagando la funcion, no con un parametro que la deja muda.
+     * El tope es el plazo legal para presentar un cheque: despues de eso el
+     * cheque no se puede depositar.
+     *
+     * @param mixed $dias
+     * @return int
+     */
+    public static function validarVentana($dias) {
+        $texto = trim((string) $dias);
+
+        if ($texto === '' || !preg_match('/^\d+$/', $texto)) {
+            throw new Exception('Los días hacia atrás para los cheques vencidos tienen que ser un '
+                . 'número entero de días corridos.');
+        }
+
+        $n = intval($texto);
+
+        if ($n < 1 || $n > self::VENTANA_MAX) {
+            throw new Exception('Los días hacia atrás para los cheques vencidos tienen que ir de 1 '
+                . 'a ' . self::VENTANA_MAX . ': ' . self::VENTANA_MAX . ' es el plazo legal para '
+                . 'presentar un cheque al cobro.');
+        }
+
+        return $n;
+    }
+
+    /**
+     * La ventana que sirve, a partir de lo que hay en la base.
+     *
+     * UNA VENTANA QUE FALTA O ESTA ROTA ES null CON EL MOTIVO, nunca un 30 de
+     * respaldo, por lo mismo que plazoDesdeValor(): un respaldo escrito aca
+     * mostraria vencidos con un numero que nadie eligio. Sin ventana no se
+     * leen vencidos, y quien llama avisa.
+     *
+     * @param string|null $valor Lo que dice la fila, o null si no existe
+     * @return array ['dias' => int|null, 'error' => string|null]
+     */
+    public static function ventanaDesdeValor($valor) {
+        if ($valor === null) {
+            return ['dias' => null, 'error' => 'Falta el parámetro ' . self::CLAVE_VENTANA
+                . ': corré ' . self::SCRIPT_VENCIDOS . ' contra la base central. Mientras tanto '
+                . 'los cheques vencidos en cartera no se leen.'];
+        }
+
+        try {
+            return ['dias' => self::validarVentana($valor), 'error' => null];
+        } catch (Exception $e) {
+            return ['dias' => null, 'error' => 'Los días hacia atrás para los cheques vencidos ("'
+                . trim((string) $valor) . '") no sirven: ' . $e->getMessage()
+                . ' Mientras tanto los cheques vencidos en cartera no se leen. Corregilo en '
+                . 'Parámetros → Cheques.'];
         }
     }
 
@@ -1579,6 +1664,39 @@ class Echeqs {
         $this->tablaAcreditado = ($row && $row['T'] !== null);
 
         return $this->tablaAcreditado;
+    }
+
+    /**
+     * Si ya se corrio sql/cashflow_echeqs_vencidos.sql: la tabla de las fechas
+     * asignadas.
+     *
+     * SIN ELLA LA PESTANA NO SE ROMPE: los vencidos no se leen -la ventana
+     * tampoco existe-, la pestana avisa que script falta, y la cartera de hoy
+     * en adelante, el corrimiento y los depositados andan igual. Mismo
+     * criterio que excluirCreada().
+     *
+     * @return bool
+     */
+    public function fechaVencidosCreada() {
+        if ($this->tablaFechaVencidos !== null) {
+            return $this->tablaFechaVencidos;
+        }
+
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT OBJECT_ID('dbo." . self::TABLA_FECHA_ACREDITACION . "', 'U') AS T");
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al verificar la tabla de fechas de los vencidos'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $this->tablaFechaVencidos = ($row && $row['T'] !== null);
+
+        return $this->tablaFechaVencidos;
     }
 
     /**
@@ -2976,6 +3094,80 @@ class Echeqs {
     }
 
     /**
+     * La ventana de los vencidos: el valor que sirve, o null con el motivo, y
+     * quien la toco por ultima vez. Se lee directo, como getPlazo().
+     *
+     * @return array ['dias' => int|null, 'error' => string|null, 'valor' => string|null,
+     *                'usuario' => string|null, 'fecha' => string|null]
+     */
+    public function getVentana() {
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid,
+            "SELECT VALOR, USUARIO_MODIF, FECHA_MODIF
+             FROM dbo.RO_T_CASHFLOW_PARAMETROS
+             WHERE CLAVE = ?",
+            [self::CLAVE_VENTANA]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al leer los días de los cheques vencidos'));
+        }
+
+        $row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC);
+        sqlsrv_free_stmt($stmt);
+
+        $r = self::ventanaDesdeValor($row ? $row['VALOR'] : null);
+
+        $r['valor'] = $row ? trim((string) $row['VALOR']) : null;
+        $r['usuario'] = $row ? $row['USUARIO_MODIF'] : null;
+        $r['fecha'] = $row ? $this->fechaHora($row['FECHA_MODIF']) : null;
+
+        return $r;
+    }
+
+    /**
+     * Guarda la ventana de los vencidos.
+     *
+     * Tiene su propio camino y no el saveParametro() generico por lo mismo que
+     * guardarPlazo(): ese guarda cualquier texto, y una ventana de cero o de
+     * "treinta" dejaria de leer los vencidos. saveParametro() rechaza la clave.
+     *
+     * ACHICARLA SACA VENCIDOS DE LA LECTURA, sin aviso: un cheque fuera de la
+     * ventana sale solo, y su fecha asignada deja de aplicar y queda en el
+     * historial.
+     *
+     * @param mixed $dias
+     * @param string $usuario
+     * @return int La ventana guardada
+     */
+    public function guardarVentana($dias, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+        $dias = self::validarVentana($dias);
+
+        $cid = $this->conectar('central');
+
+        $stmt = sqlsrv_query($cid,
+            "UPDATE dbo.RO_T_CASHFLOW_PARAMETROS
+             SET VALOR = ?, " . Auditoria::SET_MODIF . "
+             WHERE CLAVE = ?",
+            [(string) $dias, $usuario, self::CLAVE_VENTANA]);
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al guardar los días de los cheques vencidos'));
+        }
+
+        $filas = sqlsrv_rows_affected($stmt);
+        sqlsrv_free_stmt($stmt);
+
+        if ($filas < 1) {
+            throw new Exception('Falta el parámetro ' . self::CLAVE_VENTANA . ': corré '
+                . self::SCRIPT_VENCIDOS . ' contra la base central.');
+        }
+
+        return $dias;
+    }
+
+    /**
      * Las alicuotas de los cheques, con el historico completo.
      *
      * TODAS, tambien las dadas de baja y las reemplazadas: la vigencia vieja es
@@ -3134,8 +3326,8 @@ class Echeqs {
      * deposito no usa.
      *
      * @param string|null $hoy 'Y-m-d'. Por defecto, hoy
-     * @return array ['tablas_creadas', 'plazo', 'plazo_max', 'alicuotas',
-     *         'tasa_hoy', 'hoy', 'avisos']
+     * @return array ['tablas_creadas', 'plazo', 'plazo_max', 'vencidos_creada', 'ventana',
+     *         'ventana_max', 'alicuotas', 'tasa_hoy', 'hoy', 'avisos']
      */
     public function datosParametrosDeposito($hoy = null) {
         $hoy = ($hoy === null) ? date('Y-m-d') : $hoy;
@@ -3159,10 +3351,22 @@ class Echeqs {
         $alicuotas = $this->getAlicuotas(false);
         $plazo = $this->getPlazo();
         $tasa = self::tasaParaPantalla($alicuotas, $hoy);
+        $vencidos = $this->fechaVencidosCreada();
+        $ventana = $this->getVentana();
         $avisos = [];
 
         if ($plazo['error'] !== null) {
             $avisos[] = $plazo['error'];
+        }
+
+        // Sin el script de los vencidos, el motivo de la ventana ya nombra el
+        // script: es un solo aviso y no dos.
+        if ($ventana['error'] !== null) {
+            $avisos[] = $ventana['error'];
+        } elseif (!$vencidos) {
+            $avisos[] = 'Falta la tabla ' . self::TABLA_FECHA_ACREDITACION . ': corré '
+                . self::SCRIPT_VENCIDOS . ' contra la base central. Mientras tanto los cheques '
+                . 'vencidos en cartera no se leen.';
         }
 
         if ($tasa['tasa'] === null) {
@@ -3175,6 +3379,9 @@ class Echeqs {
             'tablas_creadas' => true,
             'plazo' => $plazo,
             'plazo_max' => self::PLAZO_MAX,
+            'vencidos_creada' => $vencidos,
+            'ventana' => $ventana,
+            'ventana_max' => self::VENTANA_MAX,
             'alicuotas' => self::marcarVigentesHoy($alicuotas, $hoy),
             'tasa_hoy' => $tasa,
             'hoy' => $hoy,

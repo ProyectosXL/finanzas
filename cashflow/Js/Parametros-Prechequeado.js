@@ -46,6 +46,7 @@
         conectar('btnAgregarClientePpq', agregar);
 
         conectar('btnGuardarPlazoPpq', guardarPlazo);
+        conectar('btnGuardarVentanaPpq', guardarVentana);
         conectar('btnNuevaAlicuotaPpq', function() {
             alternar('formAlicuotaPpq');
             pintarSuma();
@@ -183,6 +184,7 @@
         mostrar('cuerpoDepositoPpq', true);
 
         pintarPlazo(d);
+        pintarVentana(d);
         pintarTasaHoy(d.tasa_hoy);
         pintarAlicuotas(d.alicuotas || []);
         pintarConceptos(d.alicuotas || []);
@@ -210,6 +212,47 @@
             aud.textContent = p.fecha
                 ? 'Último cambio: ' + (Auditoria.quien(p.usuario) || 'sin usuario registrado') +
                   ' · ' + Auditoria.fecha(p.fecha)
+                : '';
+        }
+    }
+
+    /**
+     * Los días hacia atrás de los cheques vencidos. Sin el script la fila no
+     * existe y el campo queda apagado: el aviso de arriba dice qué correr.
+     */
+    function pintarVentana(d) {
+        var inp = document.getElementById('ventanaVencidosPpq');
+        var v = d.ventana || {};
+        var hayFila = (v.valor !== null && v.valor !== undefined);
+
+        if (inp) {
+            inp.max = d.ventana_max;
+            // Una ventana rota se muestra tal cual está guardada, para poder
+            // corregirla: el motivo lo dice el aviso de arriba.
+            inp.value = (v.dias !== null && v.dias !== undefined) ? v.dias : (v.valor || '');
+            inp.setAttribute('data-previo', inp.value);
+
+        }
+
+        // El botón existe sólo con permiso de edición: es lo que dice si el
+        // campo se puede tocar.
+        var btn = document.getElementById('btnGuardarVentanaPpq');
+
+        if (inp && btn) {
+            inp.disabled = !hayFila;
+        }
+
+        if (btn) {
+            btn.disabled = !hayFila;
+            btn.title = hayFila ? '' : 'Falta correr sql/cashflow_echeqs_vencidos.sql.';
+        }
+
+        var aud = document.getElementById('ventanaAuditoriaPpq');
+
+        if (aud) {
+            aud.textContent = v.fecha
+                ? 'Último cambio: ' + (Auditoria.quien(v.usuario) || 'sin usuario registrado') +
+                  ' · ' + Auditoria.fecha(v.fecha)
                 : '';
         }
     }
@@ -410,6 +453,42 @@
                     cargar();
                 });
         }, 'No se pudo guardar el plazo');
+    }
+
+    function guardarVentana() {
+        var inp = document.getElementById('ventanaVencidosPpq');
+        var previo = inp.getAttribute('data-previo');
+        var maximo = (modulo.deposito && modulo.deposito.ventana_max) || 30;
+        var texto = String(inp.value).trim();
+        var dias = parseInt(texto, 10);
+
+        // Espejo de Echeqs::validarVentana(), sólo para no mandar algo que el
+        // servidor va a rechazar. El que vale es el del servidor.
+        if (!/^\d+$/.test(texto) || dias < 1 || dias > maximo) {
+            Notificacion.campoInvalido(inp, 'Tienen que ser entre 1 y ' + maximo +
+                ' días corridos.', {
+                detalle: maximo + ' días es el plazo legal para presentar un cheque al cobro.'
+            });
+
+            return;
+        }
+
+        if (texto === previo) {
+            return;
+        }
+
+        conBotonEl(document.getElementById('btnGuardarVentanaPpq'), function() {
+            return pedirJson(URL_PARAM + '?action=saveDiasVencidosEcheq', { dias: dias })
+                .then(function() {
+                    Notificacion.exito('Cheques vencidos: se muestran hasta ' + dias +
+                        ' día(s) después de su fecha.', {
+                        detalle: 'Un vencido que queda fuera sale de Echeqs, y si tenía fecha de ' +
+                                 'acreditación asignada, deja de aplicar.'
+                    });
+
+                    cargar();
+                });
+        }, 'No se pudieron guardar los días de los cheques vencidos');
     }
 
     function agregarAlicuota() {

@@ -94,6 +94,32 @@ $edita = AuthCashflow::puedeEditar('parametros', 'PRECHEQUEADO');
                                 acreditaron</strong>: la fecha se calcula al leer, no se guarda.
                             </div>
                             <div class="ppq-subtitulo mt-1" id="plazoAuditoriaPpq"></div>
+
+                            <!-- LA VENTANA DE LOS VENCIDOS. Un cheque que sigue en
+                                 cartera después de su fecha se muestra en Echeqs
+                                 hasta estos días después; sin fecha de
+                                 acreditación asignada no suma. Tiene su propio
+                                 guardado, como el plazo: valida de 1 a 30. -->
+                            <label class="form-label form-label-sm fw-semibold mt-3" for="ventanaVencidosPpq">
+                                Días hacia atrás para cheques vencidos
+                            </label>
+                            <div class="input-group input-group-sm" style="max-width: 260px;">
+                                <input type="number" id="ventanaVencidosPpq" class="form-control text-center"
+                                       min="1" step="1"
+                                       <?php echo $edita ? '' : 'disabled'; ?>>
+                                <span class="input-group-text">días corridos</span>
+                                <?php if ($edita): ?>
+                                <button class="btn btn-outline-primary" id="btnGuardarVentanaPpq" type="button">
+                                    Guardar
+                                </button>
+                                <?php endif; ?>
+                            </div>
+                            <div class="param-hint mt-1">
+                                Días hacia atrás desde la fecha del cheque en que un cheque vencido en
+                                cartera se sigue mostrando. 30 es el plazo legal para presentar un
+                                cheque al cobro.
+                            </div>
+                            <div class="ppq-subtitulo mt-1" id="ventanaAuditoriaPpq"></div>
                         </div>
                         <div class="col-md-7">
                             <div class="form-label form-label-sm fw-semibold mb-1">Tasa de retención vigente hoy</div>

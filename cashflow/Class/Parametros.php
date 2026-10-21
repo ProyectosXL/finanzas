@@ -58,6 +58,12 @@ class Parametros {
     const CLAVE_PLAZO_ECHEQS = 'echeqs_dias_acreditacion_deposito';
 
     /**
+     * La clave de los dias hacia atras de los cheques vencidos en cartera. Es
+     * Echeqs::CLAVE_VENTANA, repetida por el mismo motivo que la del plazo.
+     */
+    const CLAVE_VENTANA_ECHEQS = 'echeqs_dias_vencidos_cartera';
+
+    /**
      * Modulos que expone la pestana Parametros, en el orden de las sub-pestanas.
      *
      * Cada parametro declara a que MODULO pertenece, asi se ve de un vistazo que
@@ -1248,6 +1254,14 @@ class Parametros {
         if ($clave === self::CLAVE_PLAZO_ECHEQS) {
             throw new Exception('El plazo de acreditación de los cheques se guarda desde '
                 . 'Parámetros → Cheques, que valida que sea un entero de días hábiles.');
+        }
+
+        /* LA VENTANA DE LOS CHEQUES VENCIDOS, TAMBIEN: una de cero o de
+           "treinta" dejaria de leer los vencidos. La regla vive en
+           Echeqs::guardarVentana(). */
+        if ($clave === self::CLAVE_VENTANA_ECHEQS) {
+            throw new Exception('Los días hacia atrás para los cheques vencidos se guardan desde '
+                . 'Parámetros → Cheques, que valida que sea un entero de 1 a 30.');
         }
 
         /* LA FECHA DESDE LA QUE SE CONSIDERAN LOS CONTENEDORES SE VALIDA ACA, y

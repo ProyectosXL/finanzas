@@ -185,6 +185,7 @@ class AuthCashflow {
             'saveDiasPrecheq' => [['parametros', 'PRECHEQUEADO']],
             'bajaClientePrecheq' => [['parametros', 'PRECHEQUEADO']],
             'savePlazoDepositoEcheq' => [['parametros', 'PRECHEQUEADO']],
+            'saveDiasVencidosEcheq' => [['parametros', 'PRECHEQUEADO']],
             'addAlicuotaEcheq' => [['parametros', 'PRECHEQUEADO']],
             'bajaAlicuotaEcheq' => [['parametros', 'PRECHEQUEADO']],
             'addOpcionProvLocal' => [['parametros', 'PROV_LOCALES']],

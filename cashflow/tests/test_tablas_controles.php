@@ -1360,7 +1360,7 @@ chequear('se titula Depósito de cheques', 1, substr_count($ppqTab, '<h5 class="
 chequear('y el maestro, Venta cobrada anticipada', 1,
     substr_count($ppqTab, '<h5 class="mb-0">Venta cobrada anticipada</h5>'));
 
-foreach (['plazoDepositoPpq', 'tasaHoyPpq', 'bodyAlicuotasPpq',
+foreach (['plazoDepositoPpq', 'ventanaVencidosPpq', 'ventanaAuditoriaPpq', 'tasaHoyPpq', 'bodyAlicuotasPpq',
           'resultadoDepositoPpq', 'sinScriptDepositoPpq', 'cuerpoDepositoPpq'] as $id) {
     chequear('existe #' . $id . ' y el JS lo usa', [1, true], [
         substr_count($ppqTab, 'id="' . $id . '"'),
@@ -1369,7 +1369,7 @@ foreach (['plazoDepositoPpq', 'tasaHoyPpq', 'bodyAlicuotasPpq',
 }
 
 // Los controles de escritura, solo con permiso de edicion de la sub-pestana.
-foreach (['btnGuardarPlazoPpq', 'btnNuevaAlicuotaPpq', 'formAlicuotaPpq'] as $id) {
+foreach (['btnGuardarPlazoPpq', 'btnGuardarVentanaPpq', 'btnNuevaAlicuotaPpq', 'formAlicuotaPpq'] as $id) {
     $pos = strpos($ppqTab, 'id="' . $id . '"');
     $antes = substr($ppqTab, 0, $pos);
 
@@ -1377,10 +1377,18 @@ foreach (['btnGuardarPlazoPpq', 'btnNuevaAlicuotaPpq', 'formAlicuotaPpq'] as $id
         $pos !== false && strrpos($antes, '<?php if ($edita): ?>') > strrpos($antes, '<?php endif; ?>'));
 }
 
-chequear('sin permiso el plazo se ve pero no se edita', 1,
+chequear('sin permiso el plazo y la ventana se ven pero no se editan', 2,
     substr_count($ppqTab, "<?php echo \$edita ? '' : 'disabled'; ?>"));
 
-foreach (['savePlazoDepositoEcheq' => 'guardarPlazo', 'addAlicuotaEcheq' => 'agregarAlicuota',
+// La ventana de los vencidos va DEBAJO del plazo de acreditacion.
+chequear('la ventana va debajo del plazo, con su explicacion', true,
+    strpos($ppqTab, 'id="ventanaVencidosPpq"') > strpos($ppqTab, 'id="plazoDepositoPpq"')
+    && strpos($ppqTab, 'Días hacia atrás desde la fecha del cheque en que un cheque vencido en') !== false);
+chequear('y su boton esta conectado', 1,
+    substr_count($ppqJs, "conectar('btnGuardarVentanaPpq', guardarVentana);"));
+
+foreach (['savePlazoDepositoEcheq' => 'guardarPlazo', 'saveDiasVencidosEcheq' => 'guardarVentana',
+          'addAlicuotaEcheq' => 'agregarAlicuota',
           'bajaAlicuotaEcheq' => 'bajaAlicuota'] as $accion => $fn) {
     chequear($accion . ': el JS la pide y el controller la atiende', [true, 1], [
         strpos($ppqJs, "?action=" . $accion . "'") !== false,

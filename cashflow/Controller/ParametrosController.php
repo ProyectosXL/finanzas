@@ -923,6 +923,28 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* Los dias hacia atras en que un cheque vencido en cartera se sigue
+           mostrando. Valida Echeqs::guardarVentana(): saveParametro() rechaza
+           esta clave, como la del plazo. */
+        case 'saveDiasVencidosEcheq':
+            $data = bodyJson();
+
+            if (!array_key_exists('dias', $data)) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/Echeqs.php';
+
+            $dias = (new Echeqs())->guardarVentana($data['dias'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Los cheques vencidos en cartera se siguen mostrando hasta ' . $dias
+                    . ' día(s) después de su fecha.',
+                'data' => ['dias' => $dias]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         case 'addAlicuotaEcheq':
             $data = bodyJson();
 
