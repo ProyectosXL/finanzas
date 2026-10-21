@@ -664,7 +664,9 @@ require_once __DIR__ . '/../Class/Horizonte.php';
 
 seccion('el tablero: cada serie mide el importe a pagar');
 
-$hTab = new Horizonte(30, 3, [], $hoy);
+// El dia de referencia va como DateTime: Horizonte ignora un texto y arma el
+// eje desde el reloj, y con eso la prueba caducaba el 21/10/2026.
+$hTab = new Horizonte(30, 3, [], new DateTime($hoy));
 $filaTab = function ($n, $importe, $extra) use ($base, $hoy) {
     return Proveedores::conRetencion(array_merge([
         'COD_PROVEE' => 'CUALQU', 'T_COMP' => 'FAC', 'N_COMP' => $n, 'IMPORTE_PENDIENTE' => $importe,
