@@ -66,21 +66,25 @@ try {
                Un cheque esta en una o en la otra, nunca en las dos. Los
                depositados vienen de getDepositadosTango(), la misma lectura
                que usa el proveedor: la pestana y el tablero suman lo mismo. */
+            $h = Horizonte::desdeParametros(new Parametros());
             $dep = $echeqs->getDepositadosTango($hoy);
-            $filas = array_merge($echeqs->getEcheqsCartera(), $dep['filas']);
+            $cartera = $echeqs->getEcheqsCartera($h);
+            $filas = array_merge($cartera, $dep['filas']);
 
             /* El eje sale de horizonte_dias y horizonte_meses, el mismo del
                tablero: los importes por columna vienen ya resueltos y el
                navegador no calcula ninguna fecha.
 
                CADA FILA SE UBICA POR FECHA_EJE E IMPORTE_EJE, que resolvio
-               Echeqs::ubicarEnEje(): uno de cartera en la fecha del cheque y
-               por el bruto, uno depositado que se proyecta en su acreditacion
-               y por el neto, y uno acreditado o sin datos en ninguna columna. Es la misma
-               regla que usa el proveedor, asi que la grilla y el tablero ponen
-               cada peso en la misma columna. */
+               Echeqs::ubicarEnEje(): uno de cartera en su dia habil -la fecha
+               del cheque, corrida si cae un fin de semana o un feriado- y por
+               el bruto, uno depositado que se proyecta en su acreditacion y
+               por el neto, y uno acreditado o sin datos en ninguna columna.
+               Es la misma regla que usa el proveedor, asi que la grilla y el
+               tablero ponen cada peso en la misma columna. El mismo eje $h
+               decide hasta donde se corre. */
             $payload = EjeVista::armar(
-                Horizonte::desdeParametros(new Parametros()),
+                $h,
                 $filas,
                 'FECHA_EJE',
                 'IMPORTE_EJE'
@@ -111,6 +115,12 @@ try {
             // Los de los depositados: sin plazo, sin habil o sin alicuotas
             // son criticos -esa plata no esta en ninguna fila-.
             foreach ($dep['avisos'] as $a) {
+                $payload['warnings'][] = $a;
+            }
+
+            // Los del corrimiento de la cartera: calendario faltante y sin
+            // habil. Los mismos que deja el proveedor en el tablero.
+            foreach (Echeqs::avisosCartera($cartera) as $a) {
                 $payload['warnings'][] = $a;
             }
 

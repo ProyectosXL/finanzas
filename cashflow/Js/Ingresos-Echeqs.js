@@ -340,8 +340,10 @@
                  + escapar(f.CLIENTE) + subtituloCodigo(f.COD_CLIENTE) + '</td>';
             html += '<td class="currency">' + pesos(f.IMPORTE) + '</td>';
 
-            // Las tres del depósito, vacías -no en cero- si no hay depósito.
-            // data-orden con la fecha cruda, como la fecha de pago.
+            // Acredita es dónde cae el importe: el día hábil de uno de cartera
+            // o la acreditación de un depositado. Retención y Neto, vacías -no
+            // en cero- si no hay depósito. data-orden con la fecha cruda, como
+            // la fecha de pago.
             html += '<td class="center" data-orden="' + escapar(String(f.ACREDITA || '').slice(0, 10)) + '">'
                 + (f.ACREDITA ? fecha(f.ACREDITA) : '') + '</td>';
             html += '<td class="currency">' + (f.RETENCION !== null && f.RETENCION !== undefined
@@ -643,7 +645,7 @@
               + escapar('Excluido del cashflow: ' + (f.MOTIVO_EXCLUSION || 'sin motivo registrado')
                   + '\n' + detalleExclusion(f))
               + '">excluido</span></div>'
-            : '') + marcaDeposito(f);
+            : '') + marcaDeposito(f) + marcaCartera(f);
 
         // Sin permiso no hay que seleccionar: queda la marca de excluido
         if (!Permisos.puedeEditar('bodyEch')) {
@@ -735,6 +737,60 @@
 
         return '<div><span class="' + clase + '" title="' + escapar(tip) + '">'
             + escapar(rotulo) + '</span></div>';
+    }
+
+    /**
+     * Las marcas de un cheque de cartera: dónde cae y por qué.
+     *
+     *   corrida  la fecha del cheque cae un fin de semana o un feriado, y el
+     *            importe está en el día hábil siguiente: "sáb 25/10 → lun
+     *            27/10 · fin de semana". La columna Fecha de pago sigue
+     *            diciendo la del cheque, y Acredita la corrida.
+     *
+     * Lo resolvió el servidor (Echeqs::resolverFechaCartera(), la misma regla
+     * del tablero): acá no se calcula ninguna fecha, sólo se escribe.
+     */
+    function marcaCartera(f) {
+        var c = f.CARTERA;
+
+        if (!c) {
+            return '';
+        }
+
+        var html = '';
+
+        if (c.corrida) {
+            html += '<div><span class="ech-badge-corrida" title="' + escapar(textoCorrida(c)) + '">'
+                + 'corrida</span></div>';
+        }
+
+        return html;
+    }
+
+    /**
+     * "sáb 25/10 → lun 27/10 · fin de semana": de qué fecha a cuál y por qué.
+     * Un feriado que cae en fin de semana lo dice como fin de semana: lo
+     * decide el servidor.
+     */
+    function textoCorrida(c) {
+        return fechaConDia(c.fecha_cheque) + ' → ' + fechaConDia(c.fecha_corrida) + ' · '
+            + (c.motivo_corrida === 'FERIADO' ? 'feriado' : 'fin de semana')
+            + '\nEl banco no acredita ese día: el importe cae en el día hábil siguiente, en la '
+            + 'grilla y en el tablero.';
+    }
+
+    var DIAS_SEMANA = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+
+    /** 'aaaa-mm-dd' -> 'sáb 25/10', sin pasar por new Date(string) */
+    function fechaConDia(v) {
+        if (!v) {
+            return '—';
+        }
+
+        var p = String(v).slice(0, 10).split('-');
+        var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+
+        return DIAS_SEMANA[d.getDay()] + ' ' + p[2] + '/' + p[1];
     }
 
     /**

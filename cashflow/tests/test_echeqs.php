@@ -760,7 +760,8 @@ require_once __DIR__ . '/../Class/Providers/EcheqsProvider.php';
 
 /** Una fila agregada de las que devuelve Echeqs::getEcheqsCarteraTotales() */
 function carteraTotal($fecha, $importe, $excluido = false) {
-    return ['FECHA_PAGO' => $fecha, 'EXCLUIDO' => $excluido, 'IMPORTE' => $importe];
+    return ['FECHA_PAGO' => $fecha, 'EXCLUIDO' => $excluido, 'IMPORTE' => $importe,
+            'CARTERA' => ['estado' => Echeqs::CARTERA_VIGENTE, 'fecha_eje' => $fecha]];
 }
 
 /** El total de una serie, incluyendo lo que quedo fuera del eje */
@@ -975,16 +976,32 @@ $hoy = date('Y-m-d');
 $pasadas = 0;
 $sinFecha = 0;
 
+/* Lo que cuenta es el DIA HABIL -ACREDITA, la fecha corrida-: un cheque del
+   sabado leido el lunes tiene fecha anterior a hoy y cae hoy. */
 foreach ($cartera as $c) {
-    if ($c['FECHA_PAGO'] === null) {
+    if ($c['FECHA_PAGO'] === null || $c['FECHA_PAGO'] < Echeqs::FECHA_REAL_DESDE) {
         $sinFecha++;
-    } elseif ($c['FECHA_PAGO'] < $hoy) {
+    } elseif ($c['ESTADO_CARTERA'] === Echeqs::CARTERA_VIGENTE && $c['ACREDITA'] < $hoy) {
         $pasadas++;
     }
 }
 
-chequear('ningun cheque de cartera tiene fecha anterior a hoy', 0, $pasadas);
-chequear('ni fecha nula: la centinela de 1800 la filtra el WHERE', 0, $sinFecha);
+chequear('ningun cheque vigente de cartera cae antes de hoy', 0, $pasadas);
+chequear('ni fecha nula: la centinela de 1800 no se lee', 0, $sinFecha);
+
+$corridasMal = 0;
+
+foreach ($cartera as $c) {
+    $cc = $c['CARTERA'];
+
+    // Corrido: la fecha nueva es posterior. No corrido: es la del cheque.
+    if (($cc['corrida'] && !($cc['fecha_corrida'] > $cc['fecha_cheque']))
+        || (!$cc['corrida'] && $cc['fecha_corrida'] !== $cc['fecha_cheque'])) {
+        $corridasMal++;
+    }
+}
+
+chequear('cada corrimiento va hacia adelante, y lo que no se corre queda en su fecha', 0, $corridasMal);
 chequear('ninguno trae deposito: la cartera es solo ESTADO = C', 0,
     count(array_filter($cartera, function ($c) { return !empty($c['DEPOSITO']); })));
 

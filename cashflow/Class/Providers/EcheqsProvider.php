@@ -10,10 +10,12 @@ require_once __DIR__ . '/../Echeqs.php';
  *
  * SERIES
  *   A_COBRAR            los cheques de terceros EN CARTERA (ESTADO = 'C') que
- *                       SI se van a poder cobrar, en la fecha del cheque y por
- *                       el BRUTO. Es la fila "Echeqs en cartera".
+ *                       SI se van a poder cobrar, en su DIA HABIL -la fecha
+ *                       del cheque, corrida al habil siguiente si cae un fin
+ *                       de semana o un feriado- y por el BRUTO. Es la fila
+ *                       "Echeqs en cartera".
  *   A_COBRAR_EXCLUIDOS  los que alguien marco como incobrables, con su motivo,
- *                       en bruto
+ *                       en bruto y en el mismo dia habil
  *   DEPOSITADOS         los que Tesoreria deposito en Tango (boleta BDE a una
  *                       cuenta bancaria) y todavia se proyectan, en su fecha de
  *                       ACREDITACION y por el NETO de las retenciones del banco.
@@ -28,6 +30,13 @@ require_once __DIR__ . '/../Echeqs.php';
  * (ESTADO = 'C') y la tercera de los depositados (ESTADO = 'A'): un cheque no
  * puede estar en los dos estados a la vez. Un excluido que despues se deposita
  * deja la cartera y entra en DEPOSITADOS: la exclusion es de cartera.
+ *
+ * EL CORRIMIENTO AL DIA HABIL ES DE LA CARTERA, y lo decide
+ * Echeqs::resolverFechaCartera(), la misma regla de la grilla: el banco no
+ * acredita un sabado, un domingo ni un feriado. NO se aplica a los
+ * depositados, que ya cuentan dias habiles desde la boleta
+ * (DiasHabiles::habilesDespues()). La agregada se corre fecha por fecha
+ * despues del GROUP BY: el corrimiento depende solo de la fecha.
  *
  * DONDE ENTRA LA RETENCION. Las dos primeras partes van en bruto y la tercera
  * en neto, asi que A_COBRAR_TODO NO ES EL UNIVERSO EN BRUTO: es lo que la
@@ -135,10 +144,13 @@ class EcheqsProvider extends CashflowProvider {
         // getEcheqsCarteraTotales() y no getEcheqsCartera(): el tablero no
         // necesita banco ni cliente, y una consulta agregada no tiene por que
         // recorrer N filas para descartarlas. Trae el corte por excluido
-        // adentro del GROUP BY.
-        $items = $echeqs->getEcheqsCarteraTotales();
+        // adentro del GROUP BY, y cada grupo resuelto con la regla de la
+        // grilla (Echeqs::resolverFechaCartera()): su dia habil.
+        $items = $echeqs->getEcheqsCarteraTotales($h);
 
-        $this->avisarExcluidos($echeqs, $items);
+        // Calendario faltante y sin habil: los mismos avisos que la pestana.
+        $this->avisarTodos(Echeqs::avisosCartera($items));
+        $this->avisarExcluidos($echeqs, $items, $h);
 
         // Los depositados, por la MISMA lectura que la pestana: fila por fila,
         // porque la acreditacion y el neto se calculan en PHP con el
@@ -206,8 +218,11 @@ class EcheqsProvider extends CashflowProvider {
      * fuera del horizonte- no siempre existen en los datos. Ver
      * tests/test_echeqs.php y tests/test_echeqs_deposito.php.
      *
-     * DONDE Y CUANTO: uno de cartera, en la fecha del cheque y por el bruto;
-     * un depositado que se proyecta, en su acreditacion y por el neto.
+     * DONDE Y CUANTO: uno de cartera, en su dia habil -lo que dejo
+     * Echeqs::resolverFechaCartera() en CARTERA- y por el bruto; un
+     * depositado que se proyecta, en su acreditacion y por el neto. Un item
+     * de cartera sin resolver no tiene fecha: va a 'sin_fecha' del total, que
+     * el tablero informa, y no a una fecha de respaldo.
      *
      * @param Horizonte $h
      * @param array $items De getEcheqsCarteraTotales() y de itemsDeDepositados()
@@ -234,7 +249,8 @@ class EcheqsProvider extends CashflowProvider {
 
             $deposito = !empty($item['DEPOSITO']);
             $importe = floatval($deposito ? $item['DEPOSITO']['neto'] : $item['IMPORTE']);
-            $fecha = $deposito ? $item['DEPOSITO']['fecha_acreditacion'] : $item['FECHA_PAGO'];
+            $fecha = $deposito ? $item['DEPOSITO']['fecha_acreditacion']
+                : (isset($item['CARTERA']) ? $item['CARTERA']['fecha_eje'] : null);
 
             if ($deposito) {
                 $dep['bruto'] += $item['DEPOSITO']['bruto'];
@@ -292,8 +308,9 @@ class EcheqsProvider extends CashflowProvider {
      *
      * @param Echeqs $echeqs
      * @param array $items Filas de getEcheqsCarteraTotales()
+     * @param Horizonte $h El eje: el resumen lee el mismo universo
      */
-    private function avisarExcluidos($echeqs, $items) {
+    private function avisarExcluidos($echeqs, $items, $h) {
         $total = 0;
 
         foreach ($items as $item) {
@@ -306,7 +323,7 @@ class EcheqsProvider extends CashflowProvider {
             return;
         }
 
-        $r = $echeqs->getExclusionesEnCartera();
+        $r = $echeqs->getExclusionesEnCartera($h);
         $motivos = $r['motivos'];
         $detalle = '';
 

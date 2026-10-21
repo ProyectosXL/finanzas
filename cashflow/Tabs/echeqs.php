@@ -288,12 +288,15 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                 Nueve columnas descriptivas y después una por
                                 cada columna del eje, que dibuja el JS.
 
-                                FECHA DE PAGO = FECHA DEL CHEQUE. Un cheque en
-                                cartera cae en el eje en esa fecha y por el
-                                importe. Uno DEPOSITADO en Tango cae en Acredita
-                                y por el Neto: el depósito tiene su propia fecha
-                                —las 48 hs hábiles desde la boleta— y la del
-                                cheque deja de intervenir.
+                                FECHA DE PAGO = FECHA DEL CHEQUE, la escrita.
+                                El importe cae en ACREDITA: en cartera, el día
+                                hábil del cheque —su fecha, o el hábil
+                                siguiente si cae un fin de semana o un feriado,
+                                con la marca "corrida"—, por el importe. Uno
+                                DEPOSITADO en Tango cae en su acreditación y por
+                                el Neto: el depósito tiene su propia fecha —las
+                                48 hs hábiles desde la boleta— y la del cheque
+                                deja de intervenir.
                             -->
                             <tr>
                                 <!-- data-orden-nombre igual al rótulo: ancla el
@@ -305,14 +308,15 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                 <th rowspan="2">Banco</th>
                                 <th rowspan="2" class="col-texto">Cliente</th>
                                 <th rowspan="2" class="text-end">Importe</th>
-                                <!-- Las tres del depósito. VAN SIEMPRE, vacías
-                                     en los no depositados —no en cero: no hay
+                                <!-- Acredita y las dos del depósito. VAN
+                                     SIEMPRE; Retención y Neto, vacías en los no
+                                     depositados —no en cero: no hay
                                      depósito—. Aparecer y desaparecer según
                                      haya depositados movería los índices de
                                      las columnas fijas, el orden guardado y lo
                                      que baja el export. -->
                                 <th rowspan="2" class="text-center"
-                                    title="Fecha de acreditación del depósito: la que ubica el neto en la grilla y en el tablero.">Acredita</th>
+                                    title="Dónde cae el importe, en la grilla y en el tablero. En cartera, el día hábil del cheque: su fecha, o el hábil siguiente si cae un fin de semana o un feriado. En un depositado, su acreditación.">Acredita</th>
                                 <th rowspan="2" class="text-end"
                                     title="Lo que retiene el banco sobre el depósito: el bruto por la tasa vigente a la acreditación.">Retención</th>
                                 <th rowspan="2" class="text-end"

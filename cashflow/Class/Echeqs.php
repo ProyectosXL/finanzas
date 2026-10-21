@@ -272,6 +272,9 @@ class Echeqs {
     /** @var bool|null Cache del chequeo de la tabla de fechas de los vencidos */
     private $tablaFechaVencidos = null;
 
+    /** @var array|null Cache de contextoCartera(): el calendario se lee una vez */
+    private $ctxCartera = null;
+
     /** @var Conexion */
     private $conn;
 
@@ -616,6 +619,226 @@ class Echeqs {
             'conceptos' => $r['conceptos'],
             'desglose' => Retenciones::desglose($r['detalle'])
         ];
+    }
+
+    /* ====================================================================
+       CARTERA: DONDE CAE UN CHEQUE
+
+       UNA SOLA REGLA, resolverFechaCartera(), para la grilla y el tablero: si
+       la pestana ubicara un cheque con un criterio y el proveedor con otro, el
+       cheque se veria en una columna y el tablero lo sumaria en otra. La parte
+       del corrimiento -correrAHabil()- la usan tambien Venta Cobrada
+       Anticipada y el neteo de Ventas, por el mismo motivo.
+
+       Puros: el calendario y la fecha de hoy se inyectan.
+       ==================================================================== */
+
+    /** El cheque esta en cartera y su dia habil es de hoy en adelante: suma ahi */
+    const CARTERA_VIGENTE = 'VIGENTE';
+
+    /**
+     * Quedo afuera de la lectura: su dia habil ya paso. Quien llama no lo
+     * lista ni lo suma.
+     */
+    const CARTERA_FUERA_VENTANA = 'FUERA_VENTANA';
+
+    /** Por que se corrio la fecha de un cheque */
+    const CORRIDA_FIN_DE_SEMANA = 'FIN_DE_SEMANA';
+    const CORRIDA_FERIADO = 'FERIADO';
+
+    /**
+     * La fecha de un cheque corrida al primer dia habil igual o posterior: es
+     * donde entra la plata, porque el banco no acredita un sabado, un domingo
+     * ni un feriado.
+     *
+     * EL MOTIVO SALE DE LA FECHA ORIGINAL: sabado o domingo es fin de semana,
+     * cualquier otro dia no habil es feriado. Un feriado que cae en fin de
+     * semana se informa como fin de semana: es lo que alcanza para explicar
+     * el corrimiento, y "feriado" ahi se leeria como un dato de mas.
+     *
+     * DESPUES DEL TOPE NO SE CORRE: mas alla del fin del eje la fecha no
+     * cambia nada -el importe va a 'fuera_horizonte' igual- y correrla
+     * pediria calendario de meses que RO_T_CALENDARIO puede no tener, con su
+     * aviso de calendario faltante por nada.
+     *
+     * SIN HABIL EN EL TOPE LA FECHA NO SE CORRE: queda la original con
+     * 'sin_habil', y quien llama avisa como critico (DiasHabiles::avisoSinHabil()).
+     * Nunca se inventa una fecha.
+     *
+     * La mecanica es DiasHabiles::siguiente(), con el respaldo de lunes a
+     * viernes y sus meses faltantes.
+     *
+     * @param string|null $fecha 'Y-m-d'
+     * @param array $habiles Mapa 'Y-m-d' => bool de RO_T_CALENDARIO
+     * @param string|null $tope 'Y-m-d'. Lo posterior no se corre; null, sin tope
+     * @return array ['fecha' => 'Y-m-d'|null, 'corrida' => bool, 'motivo' => string|null,
+     *                'faltan' => ['Y-m'], 'sin_habil' => bool]
+     */
+    public static function correrAHabil($fecha, $habiles, $tope = null) {
+        $f = Horizonte::normalizarFecha($fecha);
+        $r = ['fecha' => $f, 'corrida' => false, 'motivo' => null, 'faltan' => [], 'sin_habil' => false];
+
+        if ($f === null || ($tope !== null && $f > $tope)) {
+            return $r;
+        }
+
+        $s = DiasHabiles::siguiente($f, $habiles);
+        $r['faltan'] = $s['faltan'];
+
+        if ($s['sin_habil']) {
+            $r['sin_habil'] = true;
+
+            return $r;
+        }
+
+        if ($s['corrida']) {
+            $r['fecha'] = $s['fecha'];
+            $r['corrida'] = true;
+            $r['motivo'] = (intval(date('N', strtotime($f))) >= 6)
+                ? self::CORRIDA_FIN_DE_SEMANA : self::CORRIDA_FERIADO;
+        }
+
+        return $r;
+    }
+
+    /**
+     * La fecha de cheque mas vieja cuyo dia habil todavia es hoy o despues: el
+     * dia siguiente al ultimo habil antes de hoy.
+     *
+     * Un lunes es el sabado: un cheque del sabado o del domingo cae hoy, como
+     * uno fechado hoy. Despues de un viernes feriado, el viernes. Cualquier
+     * otro dia, hoy. Es desde donde se lee la cartera que suma sin fecha
+     * asignada.
+     *
+     * @param string $hoy 'Y-m-d'
+     * @param array $habiles
+     * @return string 'Y-m-d'
+     */
+    public static function primerDiaCartera($hoy, $habiles) {
+        $cursor = $hoy;
+
+        for ($i = 0; $i < DiasHabiles::MAX_CORRIMIENTO; $i++) {
+            $antes = date('Y-m-d', strtotime($cursor . ' -1 day'));
+            $s = DiasHabiles::siguiente($antes, $habiles);
+
+            // Habil: siguiente() lo devuelve sin correrlo.
+            if (!$s['corrida'] && !$s['sin_habil']) {
+                break;
+            }
+
+            $cursor = $antes;
+        }
+
+        return $cursor;
+    }
+
+    /**
+     * Donde cae un cheque de cartera, y por que. ES LA REGLA, y la usan la
+     * grilla (ubicarEnEje()) y el proveedor del tablero.
+     *
+     *   Su dia habil -la fecha del cheque corrida con correrAHabil()- es de
+     *   hoy en adelante: VIGENTE, y suma en ese dia, por el bruto.
+     *   Si no: FUERA_VENTANA, no se lista.
+     *
+     * EL DIA HABIL DECIDE, no la fecha escrita: un cheque del sabado leido el
+     * lunes cae hoy, como uno fechado hoy, porque es el dia en que se puede
+     * depositar.
+     *
+     * @param string|null $fechaCheque 'Y-m-d'
+     * @param string $hoy 'Y-m-d'
+     * @param array $habiles
+     * @param string|null $tope El fin del eje: ver correrAHabil()
+     * @return array ['fecha_cheque', 'fecha_eje', 'estado', 'fecha_corrida', 'corrida',
+     *                'motivo_corrida', 'faltan', 'sin_habil']
+     */
+    public static function resolverFechaCartera($fechaCheque, $hoy, $habiles, $tope) {
+        $f = Horizonte::normalizarFecha($fechaCheque);
+        $r = [
+            'fecha_cheque' => $f,
+            'fecha_eje' => null,
+            'estado' => self::CARTERA_FUERA_VENTANA,
+            'fecha_corrida' => null,
+            'corrida' => false,
+            'motivo_corrida' => null,
+            'faltan' => [],
+            'sin_habil' => false
+        ];
+
+        if ($f === null || $f < self::FECHA_REAL_DESDE) {
+            return $r;
+        }
+
+        $c = self::correrAHabil($f, $habiles, $tope);
+
+        $r['fecha_corrida'] = $c['fecha'];
+        $r['corrida'] = $c['corrida'];
+        $r['motivo_corrida'] = $c['motivo'];
+        $r['faltan'] = $c['faltan'];
+        $r['sin_habil'] = $c['sin_habil'];
+
+        if ($c['fecha'] >= $hoy) {
+            $r['estado'] = self::CARTERA_VIGENTE;
+            $r['fecha_eje'] = $c['fecha'];
+        }
+
+        return $r;
+    }
+
+    /**
+     * Los avisos del corrimiento de la cartera, de lo que se lista: el
+     * calendario faltante (atencion: el dia se calculo con el respaldo de
+     * lunes a viernes) y la falta de un habil en el tope (critico: el cheque
+     * quedo en su fecha, que no es habil).
+     *
+     * Recibe filas de la grilla o items del tablero: los dos traen CARTERA,
+     * IMPORTE y, los agregados, CHEQUES. Asi la pestana y el tablero dicen lo
+     * mismo.
+     *
+     * @param array $items
+     * @return array [['nivel', 'texto']]
+     */
+    public static function avisosCartera($items) {
+        $faltan = [];
+        $sinHabil = [];
+
+        foreach (is_array($items) ? $items : [] as $it) {
+            $c = isset($it['CARTERA']) ? $it['CARTERA'] : null;
+
+            if (!$c || $c['estado'] === self::CARTERA_FUERA_VENTANA) {
+                continue;
+            }
+
+            foreach ($c['faltan'] as $mes) {
+                $faltan[$mes] = true;
+            }
+
+            if ($c['sin_habil']) {
+                $k = $c['fecha_cheque'];
+
+                if (!isset($sinHabil[$k])) {
+                    $sinHabil[$k] = [0, 0.0];
+                }
+
+                $sinHabil[$k][0] += isset($it['CHEQUES']) ? intval($it['CHEQUES']) : 1;
+                $sinHabil[$k][1] += floatval($it['IMPORTE']);
+            }
+        }
+
+        $avisos = [];
+
+        foreach ($sinHabil as $fecha => $x) {
+            $avisos[] = ['nivel' => 'danger', 'texto' => $x[0] . ' cheque(s) en cartera por $ '
+                . number_format($x[1], 2, ',', '.') . ' quedan en su fecha sin correrse a un día '
+                . 'hábil: ' . DiasHabiles::avisoSinHabil($fecha)];
+        }
+
+        ksort($faltan);
+
+        foreach (DiasHabiles::avisosCalendario(array_keys($faltan)) as $t) {
+            $avisos[] = ['nivel' => 'warning', 'texto' => 'Echeqs en cartera: ' . $t];
+        }
+
+        return $avisos;
     }
 
     /* ====================================================================
@@ -1106,37 +1329,47 @@ class Echeqs {
     /**
      * Donde cae una fila de la grilla en el eje, y con que importe.
      *
-     *   De cartera              la fecha del cheque, por el bruto. Como siempre.
+     *   De cartera              donde lo dejo resolverFechaCartera() -su dia
+     *                           habil-, por el bruto. Es la misma regla del
+     *                           proveedor.
      *   Depositada, PROYECTA    la fecha de ACREDITACION, por el NETO.
      *   Acreditada o sin datos  en ninguna columna. Se ve en la grilla con su
      *                           marca.
      *
-     * Las columnas Acredita, Retencion y Neto van vacias -null- en las de
-     * cartera: no son cero, no hay deposito. En una sin neto, Retencion y Neto
-     * van vacias tambien.
+     * ACREDITA es donde cae el importe: en uno de cartera, su dia habil -la
+     * fecha del cheque, o la corrida si cae un fin de semana o un feriado-; en
+     * un depositado, su acreditacion. Retencion y Neto van vacias -null- en
+     * las de cartera: no son cero, no hay deposito. En una sin neto, van
+     * vacias tambien.
      *
-     * @param array $fila Con FECHA_PAGO, IMPORTE y DEPOSITO (resuelto o null)
-     * @return array La fila con ESTADO_DEPOSITO, FECHA_EJE, IMPORTE_EJE,
-     *         ACREDITA, RETENCION y NETO
+     * UNA FILA DE CARTERA SIN RESOLVER NO CAE EN NINGUNA COLUMNA: no hay una
+     * fecha de respaldo. Toda lectura de cartera la resuelve antes.
+     *
+     * @param array $fila Con IMPORTE, y DEPOSITO (resuelto o null) o CARTERA
+     *        (la de resolverFechaCartera())
+     * @return array La fila con ESTADO_DEPOSITO, ESTADO_CARTERA, FECHA_EJE,
+     *         IMPORTE_EJE, ACREDITA, RETENCION y NETO
      */
     public static function ubicarEnEje($fila) {
         $d = isset($fila['DEPOSITO']) ? $fila['DEPOSITO'] : null;
+        $c = (!$d && isset($fila['CARTERA'])) ? $fila['CARTERA'] : null;
         $estado = $d ? $d['estado'] : null;
 
         $fila['ESTADO_DEPOSITO'] = $estado;
-        $fila['ACREDITA'] = $d ? $d['fecha_acreditacion'] : null;
+        $fila['ESTADO_CARTERA'] = $c ? $c['estado'] : null;
+        $fila['ACREDITA'] = $d ? $d['fecha_acreditacion'] : ($c ? $c['fecha_eje'] : null);
         $fila['NETO'] = ($d && $d['neto'] !== null) ? $d['neto'] : null;
         $fila['RETENCION'] = ($fila['NETO'] !== null) ? round($d['bruto'] - $d['neto'], 4) : null;
 
         if ($estado === self::DEPOSITO_PROYECTA) {
             $fila['FECHA_EJE'] = $d['fecha_acreditacion'];
             $fila['IMPORTE_EJE'] = $d['neto'];
-        } elseif ($d) {
+        } elseif ($c && $c['fecha_eje'] !== null) {
+            $fila['FECHA_EJE'] = $c['fecha_eje'];
+            $fila['IMPORTE_EJE'] = floatval($fila['IMPORTE']);
+        } else {
             $fila['FECHA_EJE'] = null;
             $fila['IMPORTE_EJE'] = 0.0;
-        } else {
-            $fila['FECHA_EJE'] = isset($fila['FECHA_PAGO']) ? $fila['FECHA_PAGO'] : null;
-            $fila['IMPORTE_EJE'] = floatval($fila['IMPORTE']);
         }
 
         return $fila;
@@ -1767,9 +2000,9 @@ class Echeqs {
      * La consulta de la cartera, fila por fila. Estatica y pura: arma el texto
      * y no lo corre, para poder verificarla sin base.
      *
-     * >= CAST(GETDATE() AS DATE) y no >= GETDATE(): comparar contra fecha Y
-     * HORA deja fuera los cheques del dia a partir de las 00:00:01. Es el
-     * criterio del resto del modulo, ver Ingresos::getCobranzasFRTotales().
+     * DESDE UNA FECHA QUE CALCULA PHP, y no desde GETDATE(): un cheque del
+     * sabado leido el lunes todavia cae hoy -ver primerDiaCartera()-, y el
+     * motor no sabe de dias habiles. Por eso la fecha viaja como parametro.
      *
      * No hace falta ESTADO NOT IN ('X','R'): es redundante con ESTADO = 'C'.
      *
@@ -1811,9 +2044,13 @@ class Echeqs {
     }
 
     /**
-     * El WHERE del universo de cartera, el mismo para la lectura fila por fila
-     * y la agregada: si dijeran cosas distintas, la pestana y el tablero
-     * mirarian dos carteras.
+     * El WHERE del universo de cartera, el mismo para la lectura fila por fila,
+     * la agregada y el resumen de excluidos: si dijeran cosas distintas, la
+     * pestana y el tablero mirarian dos carteras.
+     *
+     * Dos parametros: la fecha desde (contextoCartera()) y el estado. Lo que
+     * entra lo decide despues resolverFechaCartera(), cheque por cheque o
+     * fecha por fecha: la consulta solo no trae lo que seguro queda afuera.
      *
      * UN CHEQUE DEPOSITADO NO ESTA ACA: Tango lo pasa a ESTADO = 'A' en el
      * momento del deposito. Lo trae getDepositadosTango().
@@ -1821,26 +2058,72 @@ class Echeqs {
      * @return string
      */
     private static function sqlUniversoCartera() {
-        return "s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)
+        return "s.FECHA_CHEQ >= ?
                   AND s.ESTADO = ?";
     }
 
+    /** Los parametros de sqlUniversoCartera() */
+    private static function paramsUniversoCartera($ctx) {
+        return [$ctx['desde'], self::ESTADO_CARTERA];
+    }
+
     /**
-     * Cheques de terceros en cartera, uno por fila, con su exclusion.
+     * Lo que necesita la regla de la cartera, leido una vez por pedido: hoy,
+     * el fin del eje, el calendario y desde que fecha se lee.
      *
-     * FECHA_PAGO es la fecha del cheque, y es por la que se ubica en el eje
-     * (ubicarEnEje(), que deja FECHA_EJE e IMPORTE_EJE). Los depositados no
-     * estan aca: ver getDepositadosTango().
+     * EL CALENDARIO, POR LA UNICA LECTURA DEL MODULO (diasHabiles() ->
+     * Ventas::getDiasHabiles()), desde un tramo de corrimiento antes de hoy
+     * -para saber cual fue el ultimo habil- hasta un tramo despues del fin del
+     * eje -donde se corre lo ultimo que se corre-.
+     *
+     * @param Horizonte|null $h El eje del pedido. Sin eje, el de Parametros
+     * @return array ['hoy', 'tope', 'habiles', 'desde']
+     */
+    private function contextoCartera($h = null) {
+        $h = ($h === null) ? Horizonte::desdeParametros(new Parametros()) : $h;
+        $hoy = $h->hoy();
+        $tope = $h->fin();
+
+        if ($this->ctxCartera !== null && $this->ctxCartera['hoy'] === $hoy
+            && $this->ctxCartera['tope'] === $tope) {
+            return $this->ctxCartera;
+        }
+
+        $habiles = $this->diasHabiles(
+            date('Y-m-d', strtotime($hoy . ' -' . DiasHabiles::MAX_CORRIMIENTO . ' day')),
+            date('Y-m-d', strtotime($tope . ' +' . DiasHabiles::MAX_CORRIMIENTO . ' day')));
+
+        $this->ctxCartera = [
+            'hoy' => $hoy,
+            'tope' => $tope,
+            'habiles' => $habiles,
+            'desde' => self::primerDiaCartera($hoy, $habiles)
+        ];
+
+        return $this->ctxCartera;
+    }
+
+    /**
+     * Cheques de terceros en cartera, uno por fila, con su exclusion y donde
+     * cae cada uno.
+     *
+     * CADA FILA SE RESUELVE CON resolverFechaCartera() -CARTERA- y se ubica
+     * con ubicarEnEje(), que deja FECHA_EJE e IMPORTE_EJE: la misma regla del
+     * proveedor. Lo que queda fuera de la ventana no se lista. Los depositados
+     * no estan aca: ver getDepositadosTango().
      *
      * LOS EXCLUIDOS VIENEN EN LA LISTA, MARCADOS. No se filtran aca: quien los
      * esconde es la pantalla, con un interruptor que se puede apagar.
      *
+     * @param Horizonte|null $h El eje del pedido: da hoy y el fin del corrimiento
      * @return array Filas normalizadas
      */
-    public function getEcheqsCartera() {
+    public function getEcheqsCartera($h = null) {
+        $ctx = $this->contextoCartera($h);
         $cid = $this->conectar('central');
 
-        $stmt = sqlsrv_query($cid, self::sqlCartera($this->excluirCreada()), [self::ESTADO_CARTERA]);
+        $stmt = sqlsrv_query($cid, self::sqlCartera($this->excluirCreada()),
+            self::paramsUniversoCartera($ctx));
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al leer los echeqs en cartera'));
@@ -1851,6 +2134,13 @@ class Echeqs {
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $fila = $this->filaCheque($row);
             $fila['DEPOSITO'] = null;
+            $fila['CARTERA'] = self::resolverFechaCartera($fila['FECHA_CHEQUE'], $ctx['hoy'],
+                $ctx['habiles'], $ctx['tope']);
+
+            if ($fila['CARTERA']['estado'] === self::CARTERA_FUERA_VENTANA) {
+                continue;
+            }
+
             $v[] = self::ubicarEnEje($fila);
         }
 
@@ -1874,13 +2164,19 @@ class Echeqs {
      * universo en cobrable y excluido, y las dos series salen de UNA lectura.
      * Los depositados van aparte, fila por fila: ver getDepositadosTango().
      *
-     * @return array Filas ['FECHA_PAGO', 'EXCLUIDO' => bool, 'IMPORTE', 'CHEQUES']
+     * EL CORRIMIENTO SE APLICA DESPUES DEL GROUP BY, fecha por fecha: depende
+     * solo de la fecha, asi que todos los cheques de un grupo se corren al
+     * mismo dia. Es resolverFechaCartera(), la misma regla de la grilla.
+     *
+     * @param Horizonte|null $h El eje del pedido
+     * @return array Filas ['FECHA_PAGO', 'EXCLUIDO' => bool, 'IMPORTE', 'CHEQUES', 'CARTERA']
      */
-    public function getEcheqsCarteraTotales() {
+    public function getEcheqsCarteraTotales($h = null) {
+        $ctx = $this->contextoCartera($h);
         $cid = $this->conectar('central');
 
         $stmt = sqlsrv_query($cid, self::sqlCarteraTotales($this->excluirCreada()),
-            [self::ESTADO_CARTERA]);
+            self::paramsUniversoCartera($ctx));
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al leer el total de echeqs en cartera'));
@@ -1889,11 +2185,19 @@ class Echeqs {
         $v = [];
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+            $fecha = Horizonte::normalizarFecha($row['FECHA_PAGO']);
+            $c = self::resolverFechaCartera($fecha, $ctx['hoy'], $ctx['habiles'], $ctx['tope']);
+
+            if ($c['estado'] === self::CARTERA_FUERA_VENTANA) {
+                continue;
+            }
+
             $v[] = [
-                'FECHA_PAGO' => Horizonte::normalizarFecha($row['FECHA_PAGO']),
+                'FECHA_PAGO' => $fecha,
                 'EXCLUIDO' => (intval($row['EXCLUIDO']) === 1),
                 'IMPORTE' => floatval($row['IMPORTE']),
-                'CHEQUES' => intval($row['CHEQUES'])
+                'CHEQUES' => intval($row['CHEQUES']),
+                'CARTERA' => $c
             ];
         }
 
@@ -2871,15 +3175,21 @@ class Echeqs {
      * cientos de filas y las exclusiones son un punado: traer las primeras para
      * filtrar las segundas es al reves.
      *
+     * EL MISMO UNIVERSO QUE LA CARTERA: sqlUniversoCartera(), con la fecha
+     * desde de contextoCartera(). Con otro WHERE el aviso contaria cheques que
+     * la serie no tiene.
+     *
+     * @param Horizonte|null $h El eje del pedido
      * @return array ['cheques' => int, 'importe' => float, 'motivos' => [...]]
      */
-    public function getExclusionesEnCartera() {
+    public function getExclusionesEnCartera($h = null) {
         $vacio = ['cheques' => 0, 'importe' => 0.0, 'motivos' => []];
 
         if (!$this->excluirCreada()) {
             return $vacio;
         }
 
+        $ctx = $this->contextoCartera($h);
         $cid = $this->conectar('central');
 
         $sql = "SELECT x.MOTIVO,
@@ -2888,12 +3198,11 @@ class Echeqs {
                 FROM dbo." . self::TABLA_EXCLUIDO . " AS x
                 INNER JOIN dbo.SBA14 AS s ON s.ID_SBA14 = x.ID_SBA14
                 WHERE x.VIGENTE = 1
-                  AND s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)
-                  AND s.ESTADO = ?
+                  AND " . self::sqlUniversoCartera() . "
                 GROUP BY x.MOTIVO
                 ORDER BY SUM(CAST(s.IMPORTE_CH AS FLOAT)) DESC";
 
-        $stmt = sqlsrv_query($cid, $sql, [self::ESTADO_CARTERA]);
+        $stmt = sqlsrv_query($cid, $sql, self::paramsUniversoCartera($ctx));
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al resumir las exclusiones'));

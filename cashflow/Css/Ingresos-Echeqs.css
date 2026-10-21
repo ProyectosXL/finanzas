@@ -342,6 +342,22 @@
     max-width: 130px;
 }
 
+/* CORRIDA: la fecha del cheque cae un fin de semana o un feriado y el importe
+   esta en el habil siguiente. Es informativa -el cheque suma igual-, asi que
+   va en gris, con la misma forma que las del deposito. */
+.tab-echeqs .ech-badge-corrida {
+    display: inline-block;
+    margin-top: 2px;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-radius: 3px;
+    padding: 0 4px;
+    cursor: help;
+    color: #495057;
+    background: #e9ecef;
+}
+
 /* El depositado NO se atenua: entra al cashflow. Se tine apenas, para que la
    fila se distinga sin leer la marca, y su importe bruto queda en gris porque
    lo que cae en el eje es el neto. */
