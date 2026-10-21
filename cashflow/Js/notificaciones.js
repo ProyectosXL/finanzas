@@ -229,8 +229,16 @@ var Notificacion = (function() {
          *        Se VALIDA al confirmar, no sólo se pone en el input: el `min`
          *        del input limita el calendario pero deja tipear cualquier cosa.
          * @param {string} [opciones.antesDelMin] Qué decir si es anterior a `min`
+         * @param {string} [opciones.max] Fecha máxima aceptada, 'aaaa-mm-dd'. Se
+         *        valida al confirmar, igual que `min`.
+         * @param {string} [opciones.despuesDelMax] Qué decir si es posterior a `max`
          * @param {string} [opciones.invalido] Qué decir si quedó vacía
-         * @returns {Promise<string|null>} 'aaaa-mm-dd', o null si canceló
+         * @param {Object} [opciones.texto] Un texto opcional junto a la fecha
+         *        —una observación—: {etiqueta, placeholder, maxlargo}. CON ESTO
+         *        DEVUELVE {fecha, texto} en lugar de la fecha sola: la fecha y su
+         *        porqué se piden en el mismo diálogo, no en dos seguidos.
+         * @returns {Promise<string|Object|null>} 'aaaa-mm-dd' (o {fecha, texto}),
+         *          o null si canceló
          */
         pedirFecha: pedirFecha,
 
@@ -500,11 +508,19 @@ var Notificacion = (function() {
 
             previo = String(previo).trim();
 
-            return Promise.resolve(esFecha(previo) && !(opciones.min && previo < opciones.min)
-                ? previo : null);
+            var sirve = esFecha(previo) && !(opciones.min && previo < opciones.min)
+                && !(opciones.max && previo > opciones.max);
+
+            if (!sirve) {
+                return Promise.resolve(null);
+            }
+
+            return Promise.resolve(opciones.texto ? { fecha: previo, texto: '' } : previo);
         }
 
         var id = 'cf-dlg-fecha-' + Math.random().toString(36).slice(2);
+        var t = opciones.texto || null;
+        var maxTexto = (t && t.maxlargo) || 200;
 
         var cuerpo =
             '<div class="mt-3">' +
@@ -514,9 +530,21 @@ var Notificacion = (function() {
                 '<input type="date" id="' + id + '" ' +
                     'class="form-control form-control-sm cf-dlg-fecha" ' +
                     (opciones.min ? 'min="' + escapar(opciones.min) + '" ' : '') +
+                    (opciones.max ? 'max="' + escapar(opciones.max) + '" ' : '') +
                     'value="' + escapar(opciones.valor || '') + '">' +
                 '<small class="invalid-feedback d-block cf-dlg-error"></small>' +
-            '</div>';
+            '</div>' +
+            (t
+                ? '<div class="mt-2">' +
+                      '<label class="form-label form-label-sm" for="' + id + '-t">' +
+                          escapar(t.etiqueta || 'Observación') +
+                          ' <span class="text-muted">(opcional)</span>' +
+                      '</label>' +
+                      '<textarea id="' + id + '-t" class="form-control form-control-sm cf-dlg-texto" ' +
+                          'rows="2" maxlength="' + maxTexto + '" ' +
+                          'placeholder="' + escapar(t.placeholder || '') + '"></textarea>' +
+                  '</div>'
+                : '');
 
         return abrirDialogo(opciones, {
             cuerpo: cuerpo,
@@ -559,6 +587,24 @@ var Notificacion = (function() {
                     campo.focus();
 
                     return undefined;
+                }
+
+                // El `max`, igual que el `min`: el atributo limita el
+                // calendario y deja tipear cualquier cosa.
+                if (opciones.max && v > opciones.max) {
+                    var q = String(opciones.max).split('-');
+
+                    campo.classList.add('is-invalid');
+                    modal.querySelector('.cf-dlg-error').textContent =
+                        opciones.despuesDelMax || ('La fecha no puede ser posterior al '
+                            + q[2] + '/' + q[1] + '/' + q[0] + '.');
+                    campo.focus();
+
+                    return undefined;
+                }
+
+                if (t) {
+                    return { fecha: v, texto: String(modal.querySelector('.cf-dlg-texto').value || '').trim() };
                 }
 
                 return v;

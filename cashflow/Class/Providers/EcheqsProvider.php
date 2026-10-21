@@ -12,8 +12,9 @@ require_once __DIR__ . '/../Echeqs.php';
  *   A_COBRAR            los cheques de terceros EN CARTERA (ESTADO = 'C') que
  *                       SI se van a poder cobrar, en su DIA HABIL -la fecha
  *                       del cheque, corrida al habil siguiente si cae un fin
- *                       de semana o un feriado- y por el BRUTO. Es la fila
- *                       "Echeqs en cartera".
+ *                       de semana o un feriado- o, si estan vencidos, en la
+ *                       fecha de acreditacion asignada, y por el BRUTO. Es la
+ *                       fila "Echeqs en cartera".
  *   A_COBRAR_EXCLUIDOS  los que alguien marco como incobrables, con su motivo,
  *                       en bruto y en el mismo dia habil
  *   DEPOSITADOS         los que Tesoreria deposito en Tango (boleta BDE a una
@@ -30,6 +31,21 @@ require_once __DIR__ . '/../Echeqs.php';
  * (ESTADO = 'C') y la tercera de los depositados (ESTADO = 'A'): un cheque no
  * puede estar en los dos estados a la vez. Un excluido que despues se deposita
  * deja la cartera y entra en DEPOSITADOS: la exclusion es de cartera.
+ *
+ * LA CARTERA INCLUYE LOS VENCIDOS CON FECHA. Un cheque que sigue en cartera
+ * despues de su dia habil -un vencido, dentro de la ventana de Parametros ->
+ * Cheques- entra en A_COBRAR -o en A_COBRAR_EXCLUIDOS, si esta excluido- en
+ * la FECHA DE ACREDITACION INTERNA que le asigno Tesoreria, por el bruto.
+ *
+ * LOS VENCIDOS SIN FECHA NO ESTAN EN NINGUNA PARTE, NI EN A_COBRAR_TODO, Y A
+ * PROPOSITO. Nadie dijo cuando entra esa plata: ponerla en la fecha del cheque
+ * -que ya paso- la sacaria del eje, y en cualquier otra seria una fecha
+ * inventada. Tampoco es un importe "fuera del horizonte" o "sin fecha" del
+ * total: esos dicen plata que el tablero deberia mostrar y no puede, y aca el
+ * tablero no sabe donde va. Lo que hace es AVISAR cuantos son y por cuanto,
+ * para que alguien les asigne una fecha. Lo mismo uno cuya fecha asignada ya
+ * paso sin que se depositara. La particion sigue cerrando, porque no entran
+ * en ninguna de las partes ni en el total.
  *
  * EL CORRIMIENTO AL DIA HABIL ES DE LA CARTERA, y lo decide
  * Echeqs::resolverFechaCartera(), la misma regla de la grilla: el banco no
@@ -148,8 +164,11 @@ class EcheqsProvider extends CashflowProvider {
         // grilla (Echeqs::resolverFechaCartera()): su dia habil.
         $items = $echeqs->getEcheqsCarteraTotales($h);
 
-        // Calendario faltante y sin habil: los mismos avisos que la pestana.
+        // Vencidos sin fecha o con la fecha pasada, calendario faltante y sin
+        // habil: los mismos avisos que la pestana. Y la ventana rota, que es
+        // critica; sin el script de los vencidos el tablero no dice nada.
         $this->avisarTodos(Echeqs::avisosCartera($items));
+        $this->avisarTodos($echeqs->avisosVentana($h, true));
         $this->avisarExcluidos($echeqs, $items, $h);
 
         // Los depositados, por la MISMA lectura que la pestana: fila por fila,
@@ -189,7 +208,7 @@ class EcheqsProvider extends CashflowProvider {
      *
      * UN SOLO CORTE, de tres partes: el universo y la parte que le toca. Un
      * deposito que no se proyecta -acredito o le faltan datos- no va a
-     * ninguna serie.
+     * ninguna serie, y un vencido sin fecha o con la fecha pasada tampoco.
      *
      * Estatica y pura por el mismo motivo que ProveedoresProvider::seriesDeItem():
      * asi se puede verificar que el corte cierra sin depender de que haya algo
@@ -202,6 +221,13 @@ class EcheqsProvider extends CashflowProvider {
         if (!empty($item['DEPOSITO'])) {
             return ($item['DEPOSITO']['estado'] === Echeqs::DEPOSITO_PROYECTA)
                 ? [self::SERIE_TODO, self::SERIE_DEPOSITADOS] : [];
+        }
+
+        // Un vencido sin fecha -o con la fecha pasada- no va a ninguna serie,
+        // ni al total: ver el encabezado. Excluido o no.
+        if (isset($item['CARTERA'])
+            && !in_array($item['CARTERA']['estado'], Echeqs::CARTERA_SUMAN, true)) {
+            return [];
         }
 
         return [
@@ -313,8 +339,10 @@ class EcheqsProvider extends CashflowProvider {
     private function avisarExcluidos($echeqs, $items, $h) {
         $total = 0;
 
+        // Lo que esta en A_COBRAR_EXCLUIDOS: un vencido excluido sin fecha no
+        // esta en ninguna serie, y getExclusionesEnCartera() tampoco lo cuenta.
         foreach ($items as $item) {
-            if (!empty($item['EXCLUIDO'])) {
+            if (in_array(self::SERIE_EXCLUIDOS, self::seriesDeItem($item), true)) {
                 $total += floatval($item['IMPORTE']);
             }
         }

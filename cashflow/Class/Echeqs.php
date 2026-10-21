@@ -92,10 +92,14 @@ require_once __DIR__ . '/DiasHabiles.php';
  * 2. N_CHEQUE es ENTEROXL_TG, un alias de float(53). Sin CAST(... AS BIGINT) el
  *    numero de cheque sale en notacion cientifica en la pantalla.
  * 3. FECHA_CHEQ es nullable pero su default es '1800/01/01' y no NULL, asi que
- *    los cheques sin fecha real traen esa fecha centinela. El filtro
- *    >= CAST(GETDATE() AS DATE) ya los deja afuera y por eso no hay ninguna
- *    condicion extra: quien vea el contador 'sin_fecha' siempre en cero no tiene
- *    que sospechar que esta roto.
+ *    los cheques sin fecha real traen esa fecha centinela. La cartera se lee
+ *    hacia atras -los vencidos, hasta N dias- desde una fecha que calcula PHP,
+ *    asi que el universo la deja afuera EXPLICITAMENTE (FECHA_CHEQ >=
+ *    FECHA_REAL_DESDE, en sqlUniversoCartera()), y resolverFechaCartera() la
+ *    vuelve a rechazar. Antes alcanzaba con >= hoy; con una ventana que algun
+ *    dia se agrande, dejaria de alcanzar sin que nadie lo note. Quien vea el
+ *    contador 'sin_fecha' siempre en cero no tiene que sospechar que esta
+ *    roto.
  *
  * EL UNIVERSO: CARTERA SIN FILTRO DE CLIENTE, VENTA COBRADA ANTICIPADA [FL]
  * -----------------------------------------------------------------------
@@ -637,10 +641,37 @@ class Echeqs {
     const CARTERA_VIGENTE = 'VIGENTE';
 
     /**
-     * Quedo afuera de la lectura: su dia habil ya paso. Quien llama no lo
-     * lista ni lo suma.
+     * Vencido -su dia habil ya paso y sigue en cartera- con una fecha de
+     * acreditacion interna de hoy en adelante: suma en esa fecha, por el bruto.
+     */
+    const CARTERA_VENCIDO_CON_FECHA = 'VENCIDO_CON_FECHA';
+
+    /**
+     * Vencido sin fecha asignada: NO SUMA. Nadie dijo cuando entra esa plata,
+     * y ponerla en una fecha inventada seria informar de mas. Avisa.
+     */
+    const CARTERA_VENCIDO_SIN_FECHA = 'VENCIDO_SIN_FECHA';
+
+    /**
+     * Vencido cuya fecha asignada ya paso y sigue en cartera: la fecha no se
+     * cumplio. No suma, como uno sin fecha, y avisa aparte: hay que
+     * reasignarla.
+     */
+    const CARTERA_FECHA_PASADA = 'FECHA_PASADA';
+
+    /**
+     * Quedo afuera de la lectura: vencido mas alla de la ventana -o sin
+     * ventana-, o con la centinela. Quien llama no lo lista ni lo suma, y no
+     * avisa: un cheque mas viejo que la ventana ya no se puede depositar.
      */
     const CARTERA_FUERA_VENTANA = 'FUERA_VENTANA';
+
+    /** Los estados de cartera que suman en el tablero */
+    const CARTERA_SUMAN = [self::CARTERA_VIGENTE, self::CARTERA_VENCIDO_CON_FECHA];
+
+    /** Los estados de un vencido: los que aceptan una fecha asignada */
+    const CARTERA_VENCIDOS = [self::CARTERA_VENCIDO_CON_FECHA, self::CARTERA_VENCIDO_SIN_FECHA,
+                              self::CARTERA_FECHA_PASADA];
 
     /** Por que se corrio la fecha de un cheque */
     const CORRIDA_FIN_DE_SEMANA = 'FIN_DE_SEMANA';
@@ -738,20 +769,38 @@ class Echeqs {
      *
      *   Su dia habil -la fecha del cheque corrida con correrAHabil()- es de
      *   hoy en adelante: VIGENTE, y suma en ese dia, por el bruto.
-     *   Si no: FUERA_VENTANA, no se lista.
      *
-     * EL DIA HABIL DECIDE, no la fecha escrita: un cheque del sabado leido el
-     * lunes cae hoy, como uno fechado hoy, porque es el dia en que se puede
-     * depositar.
+     *   Si no, es un VENCIDO, y solo se lista dentro de la ventana: con la
+     *   fecha del cheque desde hoy - N dias corridos (N, el parametro). Fuera
+     *   de la ventana, o sin ventana, FUERA_VENTANA: no se lista ni avisa.
+     *   Dentro:
+     *     sin fecha asignada            VENCIDO_SIN_FECHA, no suma.
+     *     con una fecha anterior a hoy  FECHA_PASADA, no suma: no se cumplio.
+     *     con una de hoy en adelante    VENCIDO_CON_FECHA, suma en esa fecha,
+     *                                   por el bruto. Hoy cae hoy, como un
+     *                                   cheque fechado hoy.
+     *
+     * EL DIA HABIL DECIDE QUE ES UN VENCIDO, no la fecha escrita: un cheque del
+     * sabado leido el lunes cae hoy, como uno fechado hoy, porque es el dia en
+     * que se puede depositar. LA VENTANA SE CUENTA DESDE LA FECHA ESCRITA: es
+     * el plazo para presentar el cheque.
+     *
+     * LA FECHA ASIGNADA NO SE CORRE: ya se exige habil al asignarla
+     * (validarFechaAsignada()). Y a un vigente no se le aplica: solo un
+     * vencido acepta una fecha.
      *
      * @param string|null $fechaCheque 'Y-m-d'
      * @param string $hoy 'Y-m-d'
      * @param array $habiles
      * @param string|null $tope El fin del eje: ver correrAHabil()
+     * @param string|null $asignada La fecha de acreditacion interna vigente, o null
+     * @param int|null $ventana Dias corridos hacia atras; null, sin vencidos
      * @return array ['fecha_cheque', 'fecha_eje', 'estado', 'fecha_corrida', 'corrida',
-     *                'motivo_corrida', 'faltan', 'sin_habil']
+     *                'motivo_corrida', 'faltan', 'sin_habil', 'fecha_asignada',
+     *                'muestra_hasta', 'dias_vencido']
      */
-    public static function resolverFechaCartera($fechaCheque, $hoy, $habiles, $tope) {
+    public static function resolverFechaCartera($fechaCheque, $hoy, $habiles, $tope, $asignada = null,
+                                                $ventana = null) {
         $f = Horizonte::normalizarFecha($fechaCheque);
         $r = [
             'fecha_cheque' => $f,
@@ -761,7 +810,10 @@ class Echeqs {
             'corrida' => false,
             'motivo_corrida' => null,
             'faltan' => [],
-            'sin_habil' => false
+            'sin_habil' => false,
+            'fecha_asignada' => null,
+            'muestra_hasta' => null,
+            'dias_vencido' => null
         ];
 
         if ($f === null || $f < self::FECHA_REAL_DESDE) {
@@ -779,20 +831,55 @@ class Echeqs {
         if ($c['fecha'] >= $hoy) {
             $r['estado'] = self::CARTERA_VIGENTE;
             $r['fecha_eje'] = $c['fecha'];
+
+            return $r;
+        }
+
+        // Vencido. Fuera de la ventana -o sin ella- no se lista.
+        if ($ventana === null || $f < self::sumarDias($hoy, -intval($ventana))) {
+            return $r;
+        }
+
+        $r['muestra_hasta'] = self::sumarDias($f, intval($ventana));
+        $r['dias_vencido'] = intval(round((strtotime($hoy) - strtotime($f)) / 86400));
+        $a = Horizonte::normalizarFecha($asignada);
+        $r['fecha_asignada'] = $a;
+
+        if ($a === null) {
+            $r['estado'] = self::CARTERA_VENCIDO_SIN_FECHA;
+        } elseif ($a < $hoy) {
+            $r['estado'] = self::CARTERA_FECHA_PASADA;
+        } else {
+            $r['estado'] = self::CARTERA_VENCIDO_CON_FECHA;
+            $r['fecha_eje'] = $a;
         }
 
         return $r;
     }
 
+    /** 'Y-m-d' mas (o menos) N dias corridos */
+    private static function sumarDias($fecha, $dias) {
+        return date('Y-m-d', strtotime($fecha . ' ' . (($dias < 0) ? '' : '+') . intval($dias) . ' day'));
+    }
+
     /**
-     * Los avisos del corrimiento de la cartera, de lo que se lista: el
-     * calendario faltante (atencion: el dia se calculo con el respaldo de
-     * lunes a viernes) y la falta de un habil en el tope (critico: el cheque
-     * quedo en su fecha, que no es habil).
+     * Los avisos de la cartera, de lo que se lista:
+     *
+     *   Vencidos sin fecha       ATENCION: esa plata no esta en ninguna fila
+     *                            hasta que alguien diga cuando entra.
+     *   Fecha asignada pasada    ATENCION: la fecha no se cumplio y el cheque
+     *                            sigue en cartera; hay que reasignarla.
+     *   Sin habil en el tope     CRITICO: el cheque quedo en su fecha, que no
+     *                            es habil.
+     *   Calendario faltante      ATENCION: el dia se calculo con el respaldo
+     *                            de lunes a viernes.
+     *
+     * UN VENCIDO EXCLUIDO NO AVISA: ya se decidio que esa plata no entra, asi
+     * que no se le pide una fecha.
      *
      * Recibe filas de la grilla o items del tablero: los dos traen CARTERA,
-     * IMPORTE y, los agregados, CHEQUES. Asi la pestana y el tablero dicen lo
-     * mismo.
+     * IMPORTE, EXCLUIDO y, los agregados, CHEQUES. Asi la pestana y el tablero
+     * dicen lo mismo.
      *
      * @param array $items
      * @return array [['nivel', 'texto']]
@@ -800,12 +887,24 @@ class Echeqs {
     public static function avisosCartera($items) {
         $faltan = [];
         $sinHabil = [];
+        $sinFecha = [0, 0.0];
+        $pasada = [0, 0.0];
 
         foreach (is_array($items) ? $items : [] as $it) {
             $c = isset($it['CARTERA']) ? $it['CARTERA'] : null;
 
             if (!$c || $c['estado'] === self::CARTERA_FUERA_VENTANA) {
                 continue;
+            }
+
+            $n = isset($it['CHEQUES']) ? intval($it['CHEQUES']) : 1;
+
+            if (empty($it['EXCLUIDO']) && $c['estado'] === self::CARTERA_VENCIDO_SIN_FECHA) {
+                $sinFecha[0] += $n;
+                $sinFecha[1] += floatval($it['IMPORTE']);
+            } elseif (empty($it['EXCLUIDO']) && $c['estado'] === self::CARTERA_FECHA_PASADA) {
+                $pasada[0] += $n;
+                $pasada[1] += floatval($it['IMPORTE']);
             }
 
             foreach ($c['faltan'] as $mes) {
@@ -826,6 +925,18 @@ class Echeqs {
 
         $avisos = [];
 
+        if ($sinFecha[0] > 0) {
+            $avisos[] = ['nivel' => 'warning', 'texto' => $sinFecha[0] . ' cheque(s) vencidos en '
+                . 'cartera sin fecha de acreditación por $ ' . number_format($sinFecha[1], 2, ',', '.')
+                . ' no se proyectan. Asignales una fecha en Ingresos › Echeqs.'];
+        }
+
+        if ($pasada[0] > 0) {
+            $avisos[] = ['nivel' => 'warning', 'texto' => $pasada[0] . ' cheque(s) vencidos por $ '
+                . number_format($pasada[1], 2, ',', '.') . ' tenían fecha de acreditación ya pasada '
+                . 'y siguen en cartera: reasignales la fecha en Ingresos › Echeqs.'];
+        }
+
         foreach ($sinHabil as $fecha => $x) {
             $avisos[] = ['nivel' => 'danger', 'texto' => $x[0] . ' cheque(s) en cartera por $ '
                 . number_format($x[1], 2, ',', '.') . ' quedan en su fecha sin correrse a un día '
@@ -839,6 +950,306 @@ class Echeqs {
         }
 
         return $avisos;
+    }
+
+    /** Los dias de la semana, para decir por que una fecha no es habil */
+    const DIAS_SEMANA = [1 => 'lunes', 2 => 'martes', 3 => 'miércoles', 4 => 'jueves',
+                         5 => 'viernes', 6 => 'sábado', 7 => 'domingo'];
+
+    /**
+     * Valida la fecha de acreditacion interna de un vencido. LANZA con el
+     * motivo.
+     *
+     *   De MANANA en adelante  hoy ya esta -o va a estar al cierre- en el saldo
+     *                          si se acredita; y una fecha pasada no dice
+     *                          cuando entra la plata.
+     *   Hasta el TOPE          el menor entre el fin del horizonte -mas alla no
+     *                          hay columna- y el ultimo dia en que el cheque se
+     *                          sigue mostrando, su fecha + N: despues sale de
+     *                          la lectura y la fecha nunca llegaria a sumar. El
+     *                          motivo dice cual de los dos aplico.
+     *   Un dia HABIL           la fecha asignada NUNCA SE CORRE SOLA: un sabado
+     *                          o un feriado se rechazan diciendo por que. Un
+     *                          mes que no esta en RO_T_CALENDARIO usa el
+     *                          respaldo de lunes a viernes, y el mes vuelve en
+     *                          'faltan' para avisarlo.
+     *
+     * Estatica y pura: el calendario y hoy se inyectan.
+     *
+     * @param mixed $fecha Lo que llega del navegador, 'Y-m-d'
+     * @param string $fechaCheque 'Y-m-d'
+     * @param string $hoy 'Y-m-d'
+     * @param string $fin El fin del horizonte, 'Y-m-d'
+     * @param int $ventana Los dias de la ventana de vencidos
+     * @param array $habiles
+     * @return array ['fecha' => 'Y-m-d', 'faltan' => ['Y-m']]
+     */
+    public static function validarFechaAsignada($fecha, $fechaCheque, $hoy, $fin, $ventana, $habiles) {
+        $t = trim((string) $fecha);
+        $f = preg_match('/^\d{4}-\d{2}-\d{2}$/', $t) ? Horizonte::normalizarFecha($t) : null;
+
+        if ($f === null || $f !== $t) {
+            throw new Exception('La fecha de acreditación no es una fecha válida.');
+        }
+
+        if ($f <= $hoy) {
+            throw new Exception('La fecha de acreditación tiene que ser de mañana en adelante: el '
+                . self::ddmm($f) . ($f === $hoy ? ' es hoy.' : ' ya pasó.'));
+        }
+
+        $hasta = self::sumarDias($fechaCheque, intval($ventana));
+
+        if ($hasta < $fin && $f > $hasta) {
+            throw new Exception('El ' . self::ddmm($f) . ' es posterior al ' . self::ddmm($hasta)
+                . ', el último día en que el cheque se sigue mostrando (su fecha más ' . intval($ventana)
+                . ' días): después sale de Echeqs y esa fecha no llegaría a sumar.');
+        }
+
+        if ($f > $fin) {
+            throw new Exception('El ' . self::ddmm($f) . ' es posterior al fin del horizonte ('
+                . self::ddmm($fin) . '): no hay columna donde sumarlo.');
+        }
+
+        $s = DiasHabiles::siguiente($f, $habiles);
+
+        if ($s['corrida'] || $s['sin_habil']) {
+            $dia = intval(date('N', strtotime($f)));
+
+            throw new Exception('El ' . self::ddmm($f) . ' es '
+                . ($dia >= 6 ? self::DIAS_SEMANA[$dia] : 'feriado') . ': elegí un día hábil.');
+        }
+
+        return ['fecha' => $f, 'faltan' => $s['faltan']];
+    }
+
+    /** 'Y-m-d' -> 'dd/mm' */
+    private static function ddmm($fecha) {
+        return substr($fecha, 8, 2) . '/' . substr($fecha, 5, 2);
+    }
+
+    /**
+     * Que cheques de un pedido aceptan una fecha de acreditacion. ES TODO O
+     * NADA, como la exclusion y "ya acredito": con uno solo que no cumple, no
+     * se graba ninguno.
+     *
+     * SOLO LOS VENCIDOS EN CARTERA -con o sin fecha, o con la fecha pasada-.
+     * Uno vigente ya tiene su dia; uno depositado entra con la regla de los
+     * depositados; uno que no esta en la lectura -rechazado, anulado, fuera
+     * de la ventana- no tiene donde sumar. Se valida contra la lectura de la
+     * base, no contra lo que manda el navegador: un id no es una autorizacion.
+     *
+     * @param array $ids
+     * @param array $filas Las de la grilla: cartera y depositados, resueltos
+     * @return array ['filas' => [...], 'rechazos' => [['id', 'n_cheque', 'motivo']],
+     *         'error' => string|null]
+     */
+    public static function validarSeleccionVencidos($ids, $filas) {
+        $porId = [];
+
+        foreach (is_array($filas) ? $filas : [] as $f) {
+            $porId[intval($f['ID_SBA14'])] = $f;
+        }
+
+        $validas = [];
+        $rechazos = [];
+
+        foreach (self::idsPedidos($ids) as $id) {
+            $f = isset($porId[$id]) ? $porId[$id] : null;
+            $motivo = null;
+
+            if ($f === null) {
+                $motivo = 'no está en cartera: puede que se haya depositado, rechazado o anulado, o '
+                    . 'que haya salido de la ventana de vencidos';
+            } elseif (!empty($f['DEPOSITO'])) {
+                $motivo = 'está depositado en Tango: entra en "Echeqs depositados" con su propia regla';
+            } elseif (!isset($f['CARTERA']) || !in_array($f['CARTERA']['estado'], self::CARTERA_VENCIDOS, true)) {
+                $motivo = 'no está vencido: su día hábil es de hoy en adelante y ya suma ahí';
+            }
+
+            if ($motivo !== null) {
+                $rechazos[] = ['id' => $id, 'n_cheque' => $f ? $f['N_CHEQUE'] : null, 'motivo' => $motivo];
+                continue;
+            }
+
+            $validas[] = $f;
+        }
+
+        $error = null;
+
+        if (empty($validas) && empty($rechazos)) {
+            $error = 'No llegó ningún cheque.';
+        } elseif (!empty($rechazos)) {
+            $error = 'No se asignó ninguna fecha: ' . count($rechazos) . ' de los '
+                . (count($rechazos) + count($validas)) . ' cheques no son vencidos en cartera. '
+                . self::textoRechazos($rechazos) . '.';
+        }
+
+        return ['filas' => empty($rechazos) ? $validas : [], 'rechazos' => $rechazos, 'error' => $error];
+    }
+
+    /** 'N° 123 motivo; N° 456 motivo' */
+    private static function textoRechazos($rechazos) {
+        return implode('; ', array_map(function ($r) {
+            return 'N° ' . ($r['n_cheque'] === null ? $r['id'] : $r['n_cheque']) . ' ' . $r['motivo'];
+        }, $rechazos));
+    }
+
+    /**
+     * Valida la fecha para cada cheque de una seleccion ya aceptada. TODO O
+     * NADA: el tope depende de cada cheque -su fecha + N-, asi que una fecha
+     * puede servir para unos y no para otros, y entonces no se graba ninguna.
+     *
+     * @param mixed $fecha
+     * @param array $filas Las de validarSeleccionVencidos()
+     * @param string $hoy
+     * @param string $fin
+     * @param int $ventana
+     * @param array $habiles
+     * @return array ['fecha' => 'Y-m-d'|null, 'faltan' => [...], 'error' => string|null]
+     */
+    public static function validarFechaParaSeleccion($fecha, $filas, $hoy, $fin, $ventana, $habiles) {
+        $rechazos = [];
+        $faltan = [];
+        $ok = null;
+
+        foreach ($filas as $f) {
+            try {
+                $v = self::validarFechaAsignada($fecha, $f['FECHA_CHEQUE'], $hoy, $fin, $ventana, $habiles);
+                $ok = $v['fecha'];
+                $faltan = array_values(array_unique(array_merge($faltan, $v['faltan'])));
+            } catch (Exception $e) {
+                $rechazos[] = ['id' => intval($f['ID_SBA14']), 'n_cheque' => $f['N_CHEQUE'],
+                               'motivo' => rtrim($e->getMessage(), '.')];
+            }
+        }
+
+        if (empty($rechazos)) {
+            return ['fecha' => $ok, 'faltan' => $faltan, 'error' => null];
+        }
+
+        // Si la fecha no sirve para ninguno por el mismo motivo -es hoy, es
+        // sabado-, se dice una vez y no una por cheque.
+        $motivos = array_values(array_unique(array_column($rechazos, 'motivo')));
+
+        return ['fecha' => null, 'faltan' => [], 'error' => 'No se asignó ninguna fecha: '
+            . ((count($motivos) === 1 && count($rechazos) === count($filas))
+                ? $motivos[0]
+                : count($rechazos) . ' de los ' . count($filas) . ' cheques no la aceptan. '
+                  . self::textoRechazos($rechazos)) . '.'];
+    }
+
+    /**
+     * Que fechas de un pedido se pueden deshacer. TODO O NADA: o todos los
+     * cheques tienen una fecha vigente, o no se deshace ninguna.
+     *
+     * @param array $ids
+     * @param array $vigentes Mapa ID_SBA14 => fecha vigente
+     * @return array ['ids' => [...], 'error' => string|null]
+     */
+    public static function validarDeshacerFecha($ids, $vigentes) {
+        $pedidos = self::idsPedidos($ids);
+
+        if (empty($pedidos)) {
+            return ['ids' => [], 'error' => 'No llegó ningún cheque.'];
+        }
+
+        $sin = array_values(array_filter($pedidos, function ($id) use ($vigentes) {
+            return !isset($vigentes[$id]);
+        }));
+
+        if (!empty($sin)) {
+            return ['ids' => [], 'error' => 'No se deshizo ninguna fecha: ' . count($sin) . ' de los '
+                . count($pedidos) . ' cheque(s) no tienen fecha de acreditación asignada. Puede que la '
+                . 'pantalla haya quedado vieja: actualizala y volvé a intentar.'];
+        }
+
+        return ['ids' => $pedidos, 'error' => null];
+    }
+
+    /**
+     * Los parametros del INSERT de fechas asignadas, 6 por cheque, en el orden
+     * de las columnas de asignarFechaVencidos(): id, fecha, observacion, la
+     * fecha que reemplaza -o null- y el usuario dos veces.
+     *
+     * Estatica y pura.
+     *
+     * @param array $ids
+     * @param string $fecha 'Y-m-d', ya validada
+     * @param string|null $obs Ya validada
+     * @param array $reemplaza Mapa ID_SBA14 => ID de la fecha vigente que se da de baja
+     * @param string $usuario
+     * @return array
+     */
+    public static function paramsInsertFecha($ids, $fecha, $obs, $reemplaza, $usuario) {
+        $params = [];
+
+        foreach ($ids as $id) {
+            $id = intval($id);
+            array_push($params, $id, $fecha, $obs, isset($reemplaza[$id]) ? intval($reemplaza[$id]) : null,
+                $usuario, $usuario);
+        }
+
+        return $params;
+    }
+
+    /**
+     * Cuanto hay vencido en lo que se muestra, para la tarjeta, el pie y el
+     * interruptor de la pestana. SIN LOS EXCLUIDOS: esos tienen su propio
+     * resumen, y no se les pide una fecha.
+     *
+     *   con_fecha   suman en su fecha asignada: estan DENTRO de "Echeqs en
+     *               cartera". Con sus totales por vista.
+     *   sin_fecha   no suman: los sin fecha y los de fecha pasada.
+     *   pasada      de esos, los de fecha pasada.
+     *   ocultables  los que esconde el interruptor: los sin fecha. Los de
+     *               fecha pasada se ven siempre, porque piden una accion.
+     *
+     * Estatica y pura: recibe las filas ya armadas por EjeVista.
+     *
+     * @param array $filas
+     * @return array
+     */
+    public static function resumenVencidos($filas) {
+        $r = [
+            'cheques' => 0, 'bruto' => 0,
+            'con_fecha' => ['cheques' => 0, 'bruto' => 0, 'total_tramo' => 0, 'total_meses' => 0,
+                            'total_horizonte' => 0],
+            'sin_fecha' => ['cheques' => 0, 'bruto' => 0],
+            'pasada' => ['cheques' => 0, 'bruto' => 0],
+            'ocultables' => ['cheques' => 0, 'bruto' => 0]
+        ];
+
+        foreach (is_array($filas) ? $filas : [] as $f) {
+            $estado = isset($f['ESTADO_CARTERA']) ? $f['ESTADO_CARTERA'] : null;
+
+            if (!empty($f['EXCLUIDO']) || !in_array($estado, self::CARTERA_VENCIDOS, true)) {
+                continue;
+            }
+
+            $importe = floatval($f['IMPORTE']);
+            $r['cheques']++;
+            $r['bruto'] += $importe;
+
+            if ($estado === self::CARTERA_VENCIDO_CON_FECHA) {
+                $r['con_fecha']['cheques']++;
+                $r['con_fecha']['bruto'] += $importe;
+
+                foreach (['total_tramo', 'total_meses', 'total_horizonte'] as $t) {
+                    $r['con_fecha'][$t] += isset($f[$t]) ? floatval($f[$t]) : 0;
+                }
+
+                continue;
+            }
+
+            $r['sin_fecha']['cheques']++;
+            $r['sin_fecha']['bruto'] += $importe;
+
+            $k = ($estado === self::CARTERA_FECHA_PASADA) ? 'pasada' : 'ocultables';
+            $r[$k]['cheques']++;
+            $r[$k]['bruto'] += $importe;
+        }
+
+        return $r;
     }
 
     /* ====================================================================
@@ -2017,10 +2428,15 @@ class Echeqs {
      * viajan igual -en null- para que la pantalla y el proveedor no pregunten
      * si el script se corrio antes de leer una fila.
      *
+     * CON $soloAnteriores, SOLO LA FECHA ANTERIOR A HOY (un parametro mas): es
+     * la parte del universo que el tablero lee fila por fila, porque los
+     * vencidos tienen cada uno su fecha asignada. Ver getEcheqsCarteraTotales().
+     *
      * @param bool $excl Si existe la tabla de exclusiones
+     * @param bool $soloAnteriores
      * @return string
      */
-    public static function sqlCartera($excl) {
+    public static function sqlCartera($excl, $soloAnteriores = false) {
         return "SELECT s.ID_SBA14,
                        CAST(s.N_CHEQUE AS BIGINT)  AS N_CHEQUE,
                        CAST(s.FECHA_CHEQ AS DATE)  AS FECHA_CHEQUE,
@@ -2039,7 +2455,8 @@ class Echeqs {
                     ? 'LEFT JOIN dbo.' . self::TABLA_EXCLUIDO . ' AS x
                               ON x.ID_SBA14 = s.ID_SBA14 AND x.VIGENTE = 1'
                     : '') . "
-                WHERE " . self::sqlUniversoCartera() . "
+                WHERE " . self::sqlUniversoCartera()
+                    . ($soloAnteriores ? "\n                  AND s.FECHA_CHEQ < ?" : '') . "
                 ORDER BY s.FECHA_CHEQ";
     }
 
@@ -2048,9 +2465,13 @@ class Echeqs {
      * la agregada y el resumen de excluidos: si dijeran cosas distintas, la
      * pestana y el tablero mirarian dos carteras.
      *
-     * Dos parametros: la fecha desde (contextoCartera()) y el estado. Lo que
-     * entra lo decide despues resolverFechaCartera(), cheque por cheque o
-     * fecha por fecha: la consulta solo no trae lo que seguro queda afuera.
+     * Dos parametros: la fecha desde (contextoCartera(): el primer dia que
+     * todavia cae hoy, o hoy - N para los vencidos) y el estado. Lo que entra
+     * lo decide despues resolverFechaCartera(), cheque por cheque o fecha por
+     * fecha: la consulta solo no trae lo que seguro queda afuera.
+     *
+     * LA CENTINELA 1800-01-01 SE DEJA AFUERA EXPLICITAMENTE: ver la trampa 3
+     * del encabezado.
      *
      * UN CHEQUE DEPOSITADO NO ESTA ACA: Tango lo pasa a ESTADO = 'A' en el
      * momento del deposito. Lo trae getDepositadosTango().
@@ -2059,6 +2480,7 @@ class Echeqs {
      */
     private static function sqlUniversoCartera() {
         return "s.FECHA_CHEQ >= ?
+                  AND s.FECHA_CHEQ >= '" . self::FECHA_REAL_DESDE . "'
                   AND s.ESTADO = ?";
     }
 
@@ -2069,15 +2491,22 @@ class Echeqs {
 
     /**
      * Lo que necesita la regla de la cartera, leido una vez por pedido: hoy,
-     * el fin del eje, el calendario y desde que fecha se lee.
+     * el fin del eje, el calendario, la ventana de los vencidos y desde que
+     * fecha se lee.
+     *
+     * LA VENTANA SOLO SI EL SCRIPT DE LOS VENCIDOS ESTA CORRIDO. Sin la tabla
+     * de fechas no hay vencidos: no se leen -la ventana tampoco existe- y la
+     * cartera es la de hoy en adelante, con el corrimiento. Con la tabla y la
+     * ventana rota, tampoco: 'ventana' trae el motivo y avisosVentana() lo
+     * dice como critico.
      *
      * EL CALENDARIO, POR LA UNICA LECTURA DEL MODULO (diasHabiles() ->
-     * Ventas::getDiasHabiles()), desde un tramo de corrimiento antes de hoy
-     * -para saber cual fue el ultimo habil- hasta un tramo despues del fin del
-     * eje -donde se corre lo ultimo que se corre-.
+     * Ventas::getDiasHabiles()), desde lo mas viejo que se lee -la ventana, o
+     * un tramo de corrimiento para saber cual fue el ultimo habil- hasta un
+     * tramo despues del fin del eje -donde se corre lo ultimo que se corre-.
      *
      * @param Horizonte|null $h El eje del pedido. Sin eje, el de Parametros
-     * @return array ['hoy', 'tope', 'habiles', 'desde']
+     * @return array ['hoy', 'tope', 'habiles', 'desde', 'tabla', 'ventana' => ['dias', 'error']]
      */
     private function contextoCartera($h = null) {
         $h = ($h === null) ? Horizonte::desdeParametros(new Parametros()) : $h;
@@ -2089,18 +2518,76 @@ class Echeqs {
             return $this->ctxCartera;
         }
 
-        $habiles = $this->diasHabiles(
-            date('Y-m-d', strtotime($hoy . ' -' . DiasHabiles::MAX_CORRIMIENTO . ' day')),
-            date('Y-m-d', strtotime($tope . ' +' . DiasHabiles::MAX_CORRIMIENTO . ' day')));
+        $tabla = $this->fechaVencidosCreada();
+        $ventana = $tabla ? $this->getVentana() : ['dias' => null, 'error' => null];
+        $atras = max(DiasHabiles::MAX_CORRIMIENTO, intval($ventana['dias']));
+
+        $habiles = $this->diasHabiles(self::sumarDias($hoy, -$atras),
+            self::sumarDias($tope, DiasHabiles::MAX_CORRIMIENTO));
+
+        $desde = self::primerDiaCartera($hoy, $habiles);
+
+        if ($ventana['dias'] !== null) {
+            $desde = min($desde, self::sumarDias($hoy, -$ventana['dias']));
+        }
 
         $this->ctxCartera = [
             'hoy' => $hoy,
             'tope' => $tope,
             'habiles' => $habiles,
-            'desde' => self::primerDiaCartera($hoy, $habiles)
+            'desde' => $desde,
+            'tabla' => $tabla,
+            'ventana' => ['dias' => $ventana['dias'], 'error' => $ventana['error']]
         ];
 
         return $this->ctxCartera;
+    }
+
+    /**
+     * Los avisos de la configuracion de los vencidos, que no dependen de
+     * ningun cheque:
+     *
+     *   sin el script   ATENCION, y SOLO EN LA PESTANA: los vencidos no se
+     *                   leen y todo lo demas anda como siempre; el tablero no
+     *                   tiene nada que decir.
+     *   ventana rota    CRITICO, en la pestana y en el tablero: el script esta
+     *   o faltante      corrido y los vencidos no se leen por un dato roto.
+     *
+     * @param Horizonte|null $h
+     * @param bool $paraTablero
+     * @return array [['nivel', 'texto']]
+     */
+    public function avisosVentana($h = null, $paraTablero = false) {
+        $ctx = $this->contextoCartera($h);
+
+        if (!$ctx['tabla']) {
+            return $paraTablero ? [] : [['nivel' => 'warning', 'texto' => 'Los cheques vencidos en '
+                . 'cartera no se leen: falta correr ' . self::SCRIPT_VENCIDOS . ' contra la base '
+                . 'central. Lo demás de la pestaña funciona igual.']];
+        }
+
+        return ($ctx['ventana']['error'] !== null)
+            ? [['nivel' => 'danger', 'texto' => $ctx['ventana']['error']]] : [];
+    }
+
+    /**
+     * Para la pantalla: si se pueden asignar fechas, hasta cuando se muestra
+     * un vencido, y los extremos del selector de fecha. El servidor valida
+     * igual: esto solo explica.
+     *
+     * @param Horizonte|null $h
+     * @return array ['creada', 'ventana', 'hoy', 'manana', 'fin']
+     */
+    public function datosVencidos($h = null) {
+        $ctx = $this->contextoCartera($h);
+
+        return [
+            'creada' => $ctx['tabla'],
+            'ventana' => $ctx['ventana']['dias'],
+            'hoy' => $ctx['hoy'],
+            'manana' => self::sumarDias($ctx['hoy'], 1),
+            'fin' => $ctx['tope']
+        ];
     }
 
     /**
@@ -2112,39 +2599,81 @@ class Echeqs {
      * proveedor. Lo que queda fuera de la ventana no se lista. Los depositados
      * no estan aca: ver getDepositadosTango().
      *
+     * LOS VENCIDOS TRAEN SU FECHA ASIGNADA VIGENTE -FECHA_VENCIDO- Y LAS
+     * ANTERIORES -HISTORIAL_FECHA-, para la marca y su tooltip. La fecha se
+     * cruza en PHP, por la regla del repo.
+     *
      * LOS EXCLUIDOS VIENEN EN LA LISTA, MARCADOS. No se filtran aca: quien los
-     * esconde es la pantalla, con un interruptor que se puede apagar.
+     * esconde es la pantalla, con un interruptor que se puede apagar. Lo mismo
+     * los vencidos sin fecha.
      *
      * @param Horizonte|null $h El eje del pedido: da hoy y el fin del corrimiento
      * @return array Filas normalizadas
      */
     public function getEcheqsCartera($h = null) {
-        $ctx = $this->contextoCartera($h);
-        $cid = $this->conectar('central');
+        return $this->leerCartera($this->contextoCartera($h), false);
+    }
 
-        $stmt = sqlsrv_query($cid, self::sqlCartera($this->excluirCreada()),
-            self::paramsUniversoCartera($ctx));
+    /**
+     * La lectura fila por fila: toda la cartera, o solo lo anterior a hoy.
+     *
+     * @param array $ctx El de contextoCartera()
+     * @param bool $soloAnteriores
+     * @return array Filas resueltas y ubicadas, sin las de fuera de la ventana
+     */
+    private function leerCartera($ctx, $soloAnteriores) {
+        $cid = $this->conectar('central');
+        $params = self::paramsUniversoCartera($ctx);
+
+        if ($soloAnteriores) {
+            $params[] = $ctx['hoy'];
+        }
+
+        $stmt = sqlsrv_query($cid, self::sqlCartera($this->excluirCreada(), $soloAnteriores), $params);
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al leer los echeqs en cartera'));
         }
 
-        $v = [];
+        $filas = [];
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
             $fila = $this->filaCheque($row);
             $fila['DEPOSITO'] = null;
+            $filas[] = $fila;
+        }
+
+        sqlsrv_free_stmt($stmt);
+
+        // Las fechas asignadas, solo de los que pueden ser vencidos: los de
+        // fecha anterior a hoy. Son pocos.
+        $anteriores = [];
+
+        foreach ($filas as $f) {
+            if ($f['FECHA_CHEQUE'] < $ctx['hoy']) {
+                $anteriores[] = $f['ID_SBA14'];
+            }
+        }
+
+        $fechas = $this->getFechasAsignadas($anteriores);
+        $v = [];
+
+        foreach ($filas as $fila) {
+            $id = $fila['ID_SBA14'];
+            $vig = isset($fechas['vigentes'][$id]) ? $fechas['vigentes'][$id] : null;
+
             $fila['CARTERA'] = self::resolverFechaCartera($fila['FECHA_CHEQUE'], $ctx['hoy'],
-                $ctx['habiles'], $ctx['tope']);
+                $ctx['habiles'], $ctx['tope'], $vig ? $vig['fecha'] : null, $ctx['ventana']['dias']);
 
             if ($fila['CARTERA']['estado'] === self::CARTERA_FUERA_VENTANA) {
                 continue;
             }
 
+            $fila['FECHA_VENCIDO'] = $vig;
+            $fila['HISTORIAL_FECHA'] = isset($fechas['historial'][$id]) ? $fechas['historial'][$id] : [];
+
             $v[] = self::ubicarEnEje($fila);
         }
-
-        sqlsrv_free_stmt($stmt);
 
         return $v;
     }
@@ -2168,6 +2697,18 @@ class Echeqs {
      * solo de la fecha, asi que todos los cheques de un grupo se corren al
      * mismo dia. Es resolverFechaCartera(), la misma regla de la grilla.
      *
+     * LA LECTURA VA PARTIDA EN DOS, sobre el MISMO universo:
+     *
+     *   de hoy en adelante  agregada, por fecha y excluido. Son casi todos, y
+     *                       ninguno puede tener una fecha asignada.
+     *   antes de hoy        fila por fila (leerCartera()): los que todavia
+     *                       caen hoy por el corrimiento y los vencidos, cada
+     *                       uno con su fecha asignada. Son pocos.
+     *
+     * Las dos pasan por resolverFechaCartera(), la regla de la grilla, y la
+     * prueba con datos reales verifica que juntas suman lo mismo que
+     * getEcheqsCartera().
+     *
      * @param Horizonte|null $h El eje del pedido
      * @return array Filas ['FECHA_PAGO', 'EXCLUIDO' => bool, 'IMPORTE', 'CHEQUES', 'CARTERA']
      */
@@ -2176,7 +2717,7 @@ class Echeqs {
         $cid = $this->conectar('central');
 
         $stmt = sqlsrv_query($cid, self::sqlCarteraTotales($this->excluirCreada()),
-            self::paramsUniversoCartera($ctx));
+            array_merge(self::paramsUniversoCartera($ctx), [$ctx['hoy']]));
 
         if ($stmt === false) {
             throw new Exception($this->errorSql('Error al leer el total de echeqs en cartera'));
@@ -2203,6 +2744,16 @@ class Echeqs {
 
         sqlsrv_free_stmt($stmt);
 
+        foreach ($this->leerCartera($ctx, true) as $f) {
+            $v[] = [
+                'FECHA_PAGO' => $f['FECHA_PAGO'],
+                'EXCLUIDO' => !empty($f['EXCLUIDO']),
+                'IMPORTE' => floatval($f['IMPORTE']),
+                'CHEQUES' => 1,
+                'CARTERA' => $f['CARTERA']
+            ];
+        }
+
         return $v;
     }
 
@@ -2215,6 +2766,9 @@ class Echeqs {
      * reference"-, asi que meterlo en los dos lados sin preguntar haria fallar
      * la pestana entera justo en la instalacion que todavia no corrio el
      * script, que es el caso que este modulo se compromete a no romper.
+     *
+     * SOLO DE HOY EN ADELANTE (un parametro mas, hoy): lo anterior va fila por
+     * fila. Ver getEcheqsCarteraTotales().
      *
      * @param bool $excl
      * @return string
@@ -2233,6 +2787,7 @@ class Echeqs {
                               ON x.ID_SBA14 = s.ID_SBA14 AND x.VIGENTE = 1'
                     : '') . "
                 WHERE " . self::sqlUniversoCartera() . "
+                  AND s.FECHA_CHEQ >= ?
                 GROUP BY " . $grupo . "
                 ORDER BY CAST(s.FECHA_CHEQ AS DATE)";
     }
@@ -2906,6 +3461,274 @@ class Echeqs {
         return ['deshechos' => count($v['ids'])];
     }
 
+    /* ====================================================================
+       LA FECHA DE ACREDITACION INTERNA DE UN VENCIDO
+
+       Solo vive en el cashflow: no se escribe nada en Tango. Del navegador
+       llegan los ids, la fecha y una observacion; todo se vuelve a validar
+       contra la lectura de la base, todo o nada. Sin bajas fisicas:
+       reasignar da de baja la vigente e inserta la nueva con ID_REEMPLAZA, y
+       deshacer marca VIGENTE = 0.
+       ==================================================================== */
+
+    /** La tabla de las fechas, con el esquema. Protected: las pruebas la cambian por una #temporal */
+    protected function tablaFechas() {
+        return 'dbo.' . self::TABLA_FECHA_ACREDITACION;
+    }
+
+    /** La conexion de las fechas. Protected por el mismo motivo */
+    protected function conexionFechas() {
+        return $this->conectar('central');
+    }
+
+    /**
+     * Las fechas asignadas de una lista de cheques: la vigente de cada uno, y
+     * todas -vigentes y dadas de baja- para el tooltip.
+     *
+     * Sin el script devuelve vacio y no lanza: la pregunta es "que cheques
+     * tienen fecha", y la respuesta honesta es "ninguno".
+     *
+     * @param array $ids
+     * @return array ['vigentes' => mapa ID_SBA14 => fecha,
+     *         'historial' => mapa ID_SBA14 => lista, de la mas nueva a la mas vieja]
+     */
+    public function getFechasAsignadas($ids) {
+        $ids = self::idsPedidos($ids);
+        $r = ['vigentes' => [], 'historial' => []];
+
+        if (empty($ids) || !$this->fechaVencidosCreada()) {
+            return $r;
+        }
+
+        $cid = $this->conexionFechas();
+
+        foreach (array_chunk($ids, 500) as $tanda) {
+            $stmt = sqlsrv_query($cid,
+                "SELECT ID, ID_SBA14, FECHA_ACREDITACION, OBSERVACION, VIGENTE, ID_REEMPLAZA,
+                        USUARIO_ALTA, FECHA_ALTA, USUARIO_BAJA, FECHA_BAJA
+                 FROM " . $this->tablaFechas() . "
+                 WHERE ID_SBA14 IN (" . implode(', ', array_fill(0, count($tanda), '?')) . ")
+                 ORDER BY ID DESC",
+                $tanda);
+
+            if ($stmt === false) {
+                throw new Exception($this->errorSql('Error al leer las fechas de acreditación de los vencidos'));
+            }
+
+            while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
+                $id = intval($row['ID_SBA14']);
+                $f = [
+                    'id' => intval($row['ID']),
+                    'fecha' => Horizonte::normalizarFecha($row['FECHA_ACREDITACION']),
+                    'observacion' => $row['OBSERVACION'],
+                    'vigente' => intval($row['VIGENTE']),
+                    'id_reemplaza' => ($row['ID_REEMPLAZA'] === null) ? null : intval($row['ID_REEMPLAZA']),
+                    'usuario' => $row['USUARIO_ALTA'],
+                    'fecha_alta' => $this->fechaHora($row['FECHA_ALTA']),
+                    'usuario_baja' => $row['USUARIO_BAJA'],
+                    'fecha_baja' => $this->fechaHora($row['FECHA_BAJA'])
+                ];
+
+                $r['historial'][$id][] = $f;
+
+                if ($f['vigente'] === 1) {
+                    $r['vigentes'][$id] = $f;
+                }
+            }
+
+            sqlsrv_free_stmt($stmt);
+        }
+
+        return $r;
+    }
+
+    /**
+     * Asigna una fecha de acreditacion interna a uno o varios vencidos. TODO O
+     * NADA, EN UNA TRANSACCION.
+     *
+     * Se valida TODO antes de abrir la transaccion, contra la lectura de hoy
+     * -la cartera y los depositados, resueltos con la misma regla que la
+     * pantalla-: que todos sean vencidos en cartera
+     * (validarSeleccionVencidos()) y que la fecha sirva para cada uno
+     * (validarFechaParaSeleccion(): de manana en adelante, habil, y hasta el
+     * menor entre el fin del eje y su fecha + N).
+     *
+     * REASIGNAR ES DAR DE BAJA LA VIGENTE E INSERTAR LA NUEVA, con
+     * ID_REEMPLAZA. DOS PESTANAS AL MISMO TIEMPO: el indice unico de fechas
+     * vigentes hace fallar la segunda, y la transaccion entera vuelve atras.
+     *
+     * @param array $ids Ids de dbo.SBA14
+     * @param mixed $fecha 'Y-m-d'
+     * @param string|null $observacion Opcional, la misma para todos
+     * @param string $usuario
+     * @param Horizonte|null $h El eje: da hoy y el fin del horizonte
+     * @return array ['asignados', 'reemplazados', 'fecha', 'avisos']
+     */
+    public function asignarFechaVencidos($ids, $fecha, $observacion, $usuario, $h = null) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
+        if (!$this->fechaVencidosCreada()) {
+            throw new Exception('Todavía no se pueden asignar fechas a los cheques vencidos. Corré '
+                . self::SCRIPT_VENCIDOS . ' contra la base central.');
+        }
+
+        $ctx = $this->contextoCartera($h);
+
+        if ($ctx['ventana']['dias'] === null) {
+            throw new Exception($ctx['ventana']['error']);
+        }
+
+        $dep = $this->getDepositadosTango($ctx['hoy']);
+        $v = self::validarSeleccionVencidos($ids, array_merge($this->getEcheqsCartera($h), $dep['filas']));
+
+        if ($v['error'] !== null) {
+            throw new Exception($v['error']);
+        }
+
+        $vf = self::validarFechaParaSeleccion($fecha, $v['filas'], $ctx['hoy'], $ctx['tope'],
+            $ctx['ventana']['dias'], $ctx['habiles']);
+
+        if ($vf['error'] !== null) {
+            throw new Exception($vf['error']);
+        }
+
+        $elegidos = array_column($v['filas'], 'ID_SBA14');
+        $reemplaza = [];
+
+        foreach ($this->getFechasAsignadas($elegidos)['vigentes'] as $id => $vig) {
+            $reemplaza[$id] = $vig['id'];
+        }
+
+        $this->escribirFechas($elegidos, $vf['fecha'], self::validarObservacion($observacion),
+            $reemplaza, $usuario);
+
+        return [
+            'asignados' => count($elegidos),
+            'reemplazados' => count($reemplaza),
+            'fecha' => $vf['fecha'],
+            'avisos' => DiasHabiles::avisosCalendario($vf['faltan'])
+        ];
+    }
+
+    /**
+     * La escritura de asignarFechaVencidos(), ya validada: da de baja las
+     * vigentes de esos cheques e inserta las nuevas, en una transaccion.
+     *
+     * @param array $ids
+     * @param string $fecha
+     * @param string|null $obs
+     * @param array $reemplaza Mapa ID_SBA14 => ID de la vigente
+     * @param string $usuario Ya resuelto por usuarioDeEscritura()
+     */
+    protected function escribirFechas($ids, $fecha, $obs, $reemplaza, $usuario) {
+        $cid = $this->conexionFechas();
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción de la fecha'));
+        }
+
+        try {
+            /* 6 parametros por fila: una tanda de 300 son 1800, debajo del
+               tope de 2100. Todas dentro de la MISMA transaccion. */
+            foreach (array_chunk($ids, 300) as $tanda) {
+                $this->bajaFechas($cid, $tanda, $usuario);
+
+                $stmt = sqlsrv_query($cid,
+                    "INSERT INTO " . $this->tablaFechas() . "
+                         (ID_SBA14, FECHA_ACREDITACION, OBSERVACION, ID_REEMPLAZA, VIGENTE,
+                          USUARIO_ALTA, USUARIO_MODIF)
+                     VALUES " . implode(', ', array_fill(0, count($tanda), "(?, ?, ?, ?, 1, ?, ?)")),
+                    self::paramsInsertFecha($tanda, $fecha, $obs, $reemplaza, $usuario));
+
+                if ($stmt === false) {
+                    throw new Exception($this->errorSql('Error al guardar la fecha. Si otro usuario '
+                        . 'le asignó una fecha a alguno de estos cheques recién, actualizá la pantalla'));
+                }
+
+                sqlsrv_free_stmt($stmt);
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar la fecha'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Deshace la fecha asignada de uno o varios vencidos: BAJA LOGICA, con
+     * quien y cuando. El cheque vuelve a "vencido sin fecha" y deja de sumar.
+     * TODO O NADA: todos tienen que tener una fecha vigente.
+     *
+     * NO EXIGE QUE EL CHEQUE SIGA VENCIDO: tambien es como se limpia una fecha
+     * que quedo sin efecto. Lo que se valida es que la fecha exista.
+     *
+     * @param array $ids
+     * @param string $usuario
+     * @return array ['deshechos' => int]
+     */
+    public function deshacerFechaVencidos($ids, $usuario) {
+        $usuario = AuthCashflow::usuarioDeEscritura($usuario);
+
+        if (!$this->fechaVencidosCreada()) {
+            throw new Exception('No hay fechas que deshacer: corré ' . self::SCRIPT_VENCIDOS
+                . ' contra la base central.');
+        }
+
+        $v = self::validarDeshacerFecha($ids, $this->getFechasAsignadas($ids)['vigentes']);
+
+        if ($v['error'] !== null) {
+            throw new Exception($v['error']);
+        }
+
+        $cid = $this->conexionFechas();
+
+        if (sqlsrv_begin_transaction($cid) === false) {
+            throw new Exception($this->errorSql('No se pudo abrir la transacción'));
+        }
+
+        try {
+            foreach (array_chunk($v['ids'], 500) as $tanda) {
+                $this->bajaFechas($cid, $tanda, $usuario);
+            }
+
+            if (sqlsrv_commit($cid) === false) {
+                throw new Exception($this->errorSql('No se pudo confirmar'));
+            }
+        } catch (Throwable $e) {
+            sqlsrv_rollback($cid);
+
+            throw $e;
+        }
+
+        return ['deshechos' => count($v['ids'])];
+    }
+
+    /**
+     * Da de baja las fechas vigentes de una tanda: VIGENTE = 0 con quien y
+     * cuando. No borra: la fila dada de baja es el historial del tooltip.
+     *
+     * @param resource $cid Con la transaccion abierta
+     * @param array $ids
+     * @param string $usuario
+     */
+    private function bajaFechas($cid, $ids, $usuario) {
+        $stmt = sqlsrv_query($cid,
+            "UPDATE " . $this->tablaFechas() . "
+             SET VIGENTE = 0, " . Auditoria::SET_BAJA . "
+             WHERE VIGENTE = 1 AND ID_SBA14 IN (" . implode(', ', array_fill(0, count($ids), '?')) . ")",
+            array_merge([$usuario, $usuario], array_map('intval', $ids)));
+
+        if ($stmt === false) {
+            throw new Exception($this->errorSql('Error al dar de baja la fecha anterior'));
+        }
+
+        sqlsrv_free_stmt($stmt);
+    }
+
     /**
      * Excluye cheques de cartera del cashflow, o los vuelve a incluir.
      *
@@ -3171,13 +3994,16 @@ class Echeqs {
      * aviso del tablero diria "8 cheques excluidos" donde el importe que falta
      * es el de 5.
      *
-     * Va en una consulta y no cruzando en PHP porque el universo de cartera son
-     * cientos de filas y las exclusiones son un punado: traer las primeras para
-     * filtrar las segundas es al reves.
+     * Va desde la tabla de exclusiones y no desde la cartera porque el universo
+     * de cartera son cientos de filas y las exclusiones son un punado: traer
+     * las primeras para filtrar las segundas es al reves.
      *
      * EL MISMO UNIVERSO QUE LA CARTERA: sqlUniversoCartera(), con la fecha
-     * desde de contextoCartera(). Con otro WHERE el aviso contaria cheques que
-     * la serie no tiene.
+     * desde de contextoCartera(). Y LA MISMA REGLA: cada cheque se resuelve
+     * con resolverFechaCartera() y cuenta solo si suma en una serie. Un
+     * vencido excluido SIN fecha no esta en A_COBRAR_EXCLUIDOS -no esta en
+     * ninguna serie-, asi que no cuenta: con otra regla el aviso diria un
+     * importe y la serie otro.
      *
      * @param Horizonte|null $h El eje del pedido
      * @return array ['cheques' => int, 'importe' => float, 'motivos' => [...]]
@@ -3192,15 +4018,14 @@ class Echeqs {
         $ctx = $this->contextoCartera($h);
         $cid = $this->conectar('central');
 
-        $sql = "SELECT x.MOTIVO,
-                       COUNT(*)                         AS CHEQUES,
-                       SUM(CAST(s.IMPORTE_CH AS FLOAT)) AS IMPORTE
+        $sql = "SELECT s.ID_SBA14,
+                       x.MOTIVO,
+                       CAST(s.FECHA_CHEQ AS DATE)  AS FECHA_CHEQUE,
+                       CAST(s.IMPORTE_CH AS FLOAT) AS IMPORTE
                 FROM dbo." . self::TABLA_EXCLUIDO . " AS x
                 INNER JOIN dbo.SBA14 AS s ON s.ID_SBA14 = x.ID_SBA14
                 WHERE x.VIGENTE = 1
-                  AND " . self::sqlUniversoCartera() . "
-                GROUP BY x.MOTIVO
-                ORDER BY SUM(CAST(s.IMPORTE_CH AS FLOAT)) DESC";
+                  AND " . self::sqlUniversoCartera();
 
         $stmt = sqlsrv_query($cid, $sql, self::paramsUniversoCartera($ctx));
 
@@ -3208,22 +4033,45 @@ class Echeqs {
             throw new Exception($this->errorSql('Error al resumir las exclusiones'));
         }
 
-        $r = $vacio;
+        $filas = [];
 
         while ($row = sqlsrv_fetch_array($stmt, SQLSRV_FETCH_ASSOC)) {
-            $r['cheques'] += intval($row['CHEQUES']);
-            $r['importe'] += floatval($row['IMPORTE']);
-
-            $m = trim((string) $row['MOTIVO']);
-
-            // Ordenados por importe, que es como el aviso tiene que nombrarlos:
-            // los tres primeros son los tres que mas plata explican.
-            if ($m !== '') {
-                $r['motivos'][] = $m;
-            }
+            $filas[] = [
+                'ID_SBA14' => intval($row['ID_SBA14']),
+                'MOTIVO' => trim((string) $row['MOTIVO']),
+                'FECHA_CHEQUE' => Horizonte::normalizarFecha($row['FECHA_CHEQUE']),
+                'IMPORTE' => floatval($row['IMPORTE'])
+            ];
         }
 
         sqlsrv_free_stmt($stmt);
+
+        $fechas = $this->getFechasAsignadas(array_column($filas, 'ID_SBA14'));
+        $r = $vacio;
+        $porMotivo = [];
+
+        foreach ($filas as $f) {
+            $vig = isset($fechas['vigentes'][$f['ID_SBA14']]) ? $fechas['vigentes'][$f['ID_SBA14']] : null;
+            $c = self::resolverFechaCartera($f['FECHA_CHEQUE'], $ctx['hoy'], $ctx['habiles'], $ctx['tope'],
+                $vig ? $vig['fecha'] : null, $ctx['ventana']['dias']);
+
+            if (!in_array($c['estado'], self::CARTERA_SUMAN, true)) {
+                continue;
+            }
+
+            $r['cheques']++;
+            $r['importe'] += $f['IMPORTE'];
+
+            if ($f['MOTIVO'] !== '') {
+                $porMotivo[$f['MOTIVO']] = (isset($porMotivo[$f['MOTIVO']]) ? $porMotivo[$f['MOTIVO']] : 0)
+                    + $f['IMPORTE'];
+            }
+        }
+
+        // Ordenados por importe, que es como el aviso tiene que nombrarlos:
+        // los tres primeros son los tres que mas plata explican.
+        arsort($porMotivo);
+        $r['motivos'] = array_keys($porMotivo);
 
         return $r;
     }
@@ -3308,9 +4156,10 @@ class Echeqs {
 
     /**
      * El calendario bancario, por la unica lectura de RO_T_CALENDARIO del
-     * modulo: Ventas::getDiasHabiles().
+     * modulo: Ventas::getDiasHabiles(). Protected: las pruebas inyectan uno
+     * armado a mano.
      */
-    private function diasHabiles($desde, $hasta) {
+    protected function diasHabiles($desde, $hasta) {
         require_once __DIR__ . '/Ventas.php';
 
         return (new Ventas())->getDiasHabiles($desde, $hasta);

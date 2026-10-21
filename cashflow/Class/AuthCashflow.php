@@ -139,7 +139,9 @@ class AuthCashflow {
             'marcarCheques' => [['echeqs', null]],
             'excluirCheques' => [['echeqs', null]],
             'marcarAcreditados' => [['echeqs', null]],
-            'deshacerAcreditados' => [['echeqs', null]]
+            'deshacerAcreditados' => [['echeqs', null]],
+            'asignarFechaVencidos' => [['echeqs', null]],
+            'deshacerFechaVencidos' => [['echeqs', null]]
         ],
         'Ingresos' => [
             'saveFechaCobroManual' => [['cobranzas_fr', null], ['cobranzas_may', null]],

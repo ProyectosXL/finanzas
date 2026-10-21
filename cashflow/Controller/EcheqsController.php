@@ -103,6 +103,13 @@ try {
             $payload['excluidos'] = Echeqs::resumenExcluidos($payload['filas']);
             $payload['depositados'] = Echeqs::resumenDepositos($payload['filas']);
 
+            /* LOS VENCIDOS: cuantos tienen fecha -y suman, adentro de "Echeqs
+               en cartera"- y cuantos no. Y lo que la pantalla necesita para
+               el selector de fecha: si se puede asignar y entre que fechas.
+               El servidor valida igual al guardar. */
+            $payload['vencidos'] = Echeqs::resumenVencidos($payload['filas']);
+            $payload['fecha_vencidos'] = $echeqs->datosVencidos($h);
+
             /* LAS TRES TARJETAS SON LA CARTERA COBRABLE SIN DEPOSITADOS: lo
                mismo que la fila "Echeqs en cartera" del tablero. Los
                depositados van en su propia tarjeta, con bruto, retencion y
@@ -118,9 +125,11 @@ try {
                 $payload['warnings'][] = $a;
             }
 
-            // Los del corrimiento de la cartera: calendario faltante y sin
-            // habil. Los mismos que deja el proveedor en el tablero.
-            foreach (Echeqs::avisosCartera($cartera) as $a) {
+            // Los de la cartera: vencidos sin fecha o con la fecha pasada,
+            // calendario faltante y sin habil. Los mismos que deja el
+            // proveedor en el tablero. Y los de la ventana: sin el script,
+            // solo aca; con la ventana rota, critico aca y en el tablero.
+            foreach (array_merge(Echeqs::avisosCartera($cartera), $echeqs->avisosVentana($h)) as $a) {
                 $payload['warnings'][] = $a;
             }
 
@@ -339,6 +348,58 @@ try {
                 'message' => $r['deshechos'] . ' marca(s) deshechas. Los cheques vuelven a '
                     . '"Echeqs depositados" si acreditan de mañana en adelante. La marca queda en '
                     . 'el historial, dada de baja.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           LA FECHA DE ACREDITACION INTERNA DE UN VENCIDO
+
+           Solo vive en el cashflow. Del navegador llegan SOLO LOS IDS, LA
+           FECHA Y UNA OBSERVACION: Echeqs vuelve a validar todo contra la
+           lectura de la base -que sean vencidos en cartera y que la fecha
+           sea de manana en adelante, habil y dentro del tope-, todo o nada.
+           Una sola accion para uno -la celda Acredita- y para varios -la
+           barra de seleccion-.
+           ================================================================ */
+        case 'asignarFechaVencidos':
+            $data = bodyJson();
+
+            if (!isset($data['ids']) || !is_array($data['ids']) || !isset($data['fecha'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            $r = $echeqs->asignarFechaVencidos(
+                $data['ids'],
+                $data['fecha'],
+                isset($data['observacion']) ? $data['observacion'] : null,
+                $usuario,
+                Horizonte::desdeParametros(new Parametros())
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['asignados'] . ' cheque(s) vencidos acreditan el '
+                    . date('d/m/Y', strtotime($r['fecha']))
+                    . ($r['reemplazados'] ? ' (' . $r['reemplazados'] . ' reemplazan una fecha anterior, '
+                        . 'que queda en el historial)' : '') . '.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'deshacerFechaVencidos':
+            $data = bodyJson();
+
+            if (!isset($data['ids']) || !is_array($data['ids'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            $r = $echeqs->deshacerFechaVencidos($data['ids'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['deshechos'] . ' fecha(s) deshechas: esos cheques vuelven a vencidos sin '
+                    . 'fecha y dejan de sumar. La fecha queda en el historial, dada de baja.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

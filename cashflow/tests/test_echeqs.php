@@ -1002,6 +1002,38 @@ foreach ($cartera as $c) {
 }
 
 chequear('cada corrimiento va hacia adelante, y lo que no se corre queda en su fecha', 0, $corridasMal);
+
+/* LOS VENCIDOS LEIDOS ESTAN TODOS EN LA VENTANA Y EN CARTERA: su dia habil ya
+   paso, su fecha es de hoy - N en adelante, y solo suman los que tienen una
+   fecha de hoy en adelante. */
+$ventanaReal = $echeqs->getVentana()['dias'];
+$vencidosMal = 0;
+$vencidosReales = 0;
+
+foreach ($cartera as $c) {
+    $cc = $c['CARTERA'];
+
+    if (!in_array($cc['estado'], Echeqs::CARTERA_VENCIDOS, true)) {
+        continue;
+    }
+
+    $vencidosReales++;
+
+    if ($ventanaReal === null || !$echeqs->fechaVencidosCreada()
+        || $c['FECHA_CHEQUE'] < date('Y-m-d', strtotime($hoy . ' -' . $ventanaReal . ' day'))
+        || $cc['fecha_corrida'] >= $hoy
+        || ($cc['estado'] === Echeqs::CARTERA_VENCIDO_CON_FECHA && $cc['fecha_asignada'] < $hoy)
+        || ($cc['estado'] !== Echeqs::CARTERA_VENCIDO_CON_FECHA && $c['IMPORTE_EJE'] != 0)) {
+        $vencidosMal++;
+    }
+}
+
+chequear('los vencidos leidos estan en la ventana, en cartera, y suman solo con fecha', 0, $vencidosMal);
+
+if ($vencidosReales === 0) {
+    Pruebas::saltear('hoy no hay ningun cheque vencido en cartera'
+        . ($echeqs->fechaVencidosCreada() ? '' : ': falta correr ' . Echeqs::SCRIPT_VENCIDOS));
+}
 chequear('ninguno trae deposito: la cartera es solo ESTADO = C', 0,
     count(array_filter($cartera, function ($c) { return !empty($c['DEPOSITO']); })));
 
@@ -1013,11 +1045,24 @@ chequear('ninguno trae deposito: la cartera es solo ESTADO = C', 0,
 $sumaDetalle = 0;
 $sumaDetalleExcluida = 0;
 
+// Lo que SUMA: un vencido sin fecha -o con la fecha pasada- se lee y no esta
+// en ninguna serie, excluido o no.
+$sumaQueSuma = 0;
+$excluidaQueSuma = 0;
+
 foreach ($cartera as $c) {
     $sumaDetalle += $c['IMPORTE'];
 
     if (!empty($c['EXCLUIDO'])) {
         $sumaDetalleExcluida += $c['IMPORTE'];
+    }
+
+    if (in_array($c['ESTADO_CARTERA'], Echeqs::CARTERA_SUMAN, true)) {
+        $sumaQueSuma += $c['IMPORTE'];
+
+        if (!empty($c['EXCLUIDO'])) {
+            $excluidaQueSuma += $c['IMPORTE'];
+        }
     }
 }
 
@@ -1058,8 +1103,9 @@ $brutoCobrable = 0;
 $netoDepositado = 0;
 $brutoDepositado = 0;
 
+// Lo que suma: un vencido sin fecha no esta en ninguna serie.
 foreach ($cartera as $c) {
-    if (empty($c['EXCLUIDO'])) {
+    if (empty($c['EXCLUIDO']) && in_array($c['ESTADO_CARTERA'], Echeqs::CARTERA_SUMAN, true)) {
         $brutoCobrable += $c['IMPORTE'];
     }
 }
@@ -1078,14 +1124,14 @@ foreach ($depReal['filas'] as $c) {
 // tocan. A_COBRAR_TODO lleva los depositados en neto: el universo en bruto es
 // A_COBRAR_TODO + la retencion.
 chequear('A_COBRAR_TODO + la retencion es el bruto de la cartera mas el de los depositados',
-    round($sumaDetalle + $brutoDepositado, 2),
+    round($sumaQueSuma + $brutoDepositado, 2),
     round(totalReal($serieReal['A_COBRAR_TODO']) + ($brutoDepositado - $netoDepositado), 2));
 
 chequear('la fila del tablero es la cartera MENOS lo excluido',
     round($brutoCobrable, 2),
     round(totalReal($serieReal['A_COBRAR']), 2));
 chequear('y lo excluido esta entero en su propia serie',
-    round($sumaDetalleExcluida, 2),
+    round($excluidaQueSuma, 2),
     round(totalReal($serieReal['A_COBRAR_EXCLUIDOS']), 2));
 chequear('y lo depositado que se proyecta, en la suya y por el neto',
     round($netoDepositado, 2),
@@ -1165,7 +1211,7 @@ chequear('y cierran columna por columna', true, $cierraPorColumna);
    motivo- y si dejaran de coincidir, el aviso diria un importe y el cuadro
    mostraria otro. */
 chequear('el resumen de exclusiones coincide con la serie',
-    round($sumaDetalleExcluida, 2),
+    round($excluidaQueSuma, 2),
     round($echeqs->getExclusionesEnCartera()['importe'], 2));
 
 if ($sumaDetalleExcluida == 0) {

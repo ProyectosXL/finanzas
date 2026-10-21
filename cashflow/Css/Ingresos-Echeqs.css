@@ -342,6 +342,47 @@
     max-width: 130px;
 }
 
+/* LOS VENCIDOS. Sin fecha, en ambar: no suman y piden una fecha. Con fecha,
+   en azul como el depositado: suman, en otra fecha que la del cheque. La de
+   fecha pasada usa la roja de "sin proyectar": pide una accion. */
+.tab-echeqs .ech-badge-vencido,
+.tab-echeqs .ech-badge-vencido-fecha {
+    display: inline-block;
+    margin-top: 2px;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-radius: 3px;
+    padding: 0 4px;
+    cursor: help;
+    white-space: normal;
+    max-width: 130px;
+}
+
+.tab-echeqs .ech-badge-vencido {
+    color: #7a4b00;
+    background: #fff1d6;
+}
+
+.tab-echeqs .ech-badge-vencido-fecha {
+    color: #1d4f91;
+    background: #e3edfb;
+}
+
+/* El selector de la fecha de un vencido, en la celda Acredita */
+.tab-echeqs .ech-fecha-venc {
+    min-width: 130px;
+    font-size: 0.78rem;
+    padding: 0 4px;
+}
+
+/* La apertura de "En cartera" en el pie: indentada y en cursiva, porque ya
+   esta sumada en el renglon de arriba. */
+.tab-echeqs tr.ech-fila-subparte td {
+    font-style: italic;
+    font-size: 0.85em;
+}
+
 /* CORRIDA: la fecha del cheque cae un fin de semana o un feriado y el importe
    esta en el habil siguiente. Es informativa -el cheque suma igual-, asi que
    va en gris, con la misma forma que las del deposito. */

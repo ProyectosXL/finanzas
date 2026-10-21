@@ -14,9 +14,11 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                   la fila "Echeqs en cartera" de DISPONIBILIDADES.
                                   En la misma grilla, los que Tesorería depositó
                                   en Tango (boleta BDE) hasta que acreditan:
-                                  alimentan "Echeqs depositados". La barra de
-                                  selección excluye y marca "ya acreditó".
-                                  Ver README-echeqs.md.
+                                  alimentan "Echeqs depositados". Y los
+                                  vencidos en cartera, que suman sólo con una
+                                  fecha de acreditación asignada. La barra de
+                                  selección excluye, marca "ya acreditó" y
+                                  asigna esa fecha. Ver README-echeqs.md.
       Venta Cobrada Anticipada -> cheques de clientes que pre-chequean. NO
                                   alimentan ninguna fila del tablero: su efecto
                                   es restar de la cobranza proyectada de Ventas.
@@ -145,6 +147,26 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                     </div>
                 </div>
             </div>
+
+            <!-- LOS VENCIDOS EN CARTERA: el bruto de los que siguen en cartera
+                 después de su día hábil, sin los excluidos. Los que tienen
+                 fecha asignada YA ESTÁN en las tres primeras tarjetas —suman
+                 en su fecha—; los que no, no suman en ningún lado. Las cuentas
+                 las hace PHP (Echeqs::resumenVencidos()). -->
+            <div class="col-md-6 col-lg-3">
+                <div class="kpi-card">
+                    <div class="kpi-card-header">
+                        <span class="kpi-card-title">Vencidos en cartera</span>
+                        <div class="kpi-card-icon red">
+                            <i class="fas fa-calendar-xmark"></i>
+                        </div>
+                    </div>
+                    <div class="kpi-card-value" id="totalVencidosEch">$ 0,00</div>
+                    <div class="kpi-card-footer">
+                        <span class="text-muted" id="detalleVencidosEch">Ninguno</span>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- LO EXCLUIDO SE DICE AUNQUE NO SE VEA, y sobre todo por eso: los
@@ -205,6 +227,20 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                             Ocultar depositados
                         </label>
                     </div>
+
+                    <!-- LOS VENCIDOS SIN FECHA NO SE VEN POR DEFECTO: no suman, y
+                         en el trabajo normal —mirar qué se va a cobrar— son
+                         ruido. Al lado se dice cuántos esconde y por cuánto,
+                         como con los excluidos, y el panel de avisos los pide.
+                         Los vencidos CON fecha se ven siempre, porque suman; y
+                         los de fecha pasada también, porque piden reasignarla. -->
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="verVencidosEch">
+                        <label class="form-check-label small text-muted" for="verVencidosEch">
+                            Ver vencidos sin fecha
+                        </label>
+                        <div class="small text-muted" id="vencidosOcultosEch"></div>
+                    </div>
                 </div>
                 <div class="d-flex gap-2">
                     <!-- No hay Resumen / Detalle Facturas: el grano natural de esta
@@ -254,6 +290,21 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                         <button class="btn btn-sm btn-outline-secondary" id="btnDeshacerAcrSelEch"
                                 style="display: none;">
                             <i class="fas fa-rotate-left me-1"></i> Deshacer ya acreditó
+                        </button>
+                        <?php endif; ?>
+                        <!-- LA FECHA DE ACREDITACIÓN DE LOS VENCIDOS: sólo sobre
+                             vencidos en cartera, todo o nada. Sin el script de
+                             los vencidos, el JS no los muestra. -->
+                        <?php if ($edita): ?>
+                        <button class="btn btn-sm btn-outline-primary" id="btnAsignarFechaSelEch"
+                                style="display: none;">
+                            <i class="fas fa-calendar-check me-1"></i> Asignar fecha
+                        </button>
+                        <?php endif; ?>
+                        <?php if ($edita): ?>
+                        <button class="btn btn-sm btn-outline-secondary" id="btnDeshacerFechaSelEch"
+                                style="display: none;">
+                            <i class="fas fa-calendar-minus me-1"></i> Deshacer fecha
                         </button>
                         <?php endif; ?>
                         <?php if ($edita): ?>

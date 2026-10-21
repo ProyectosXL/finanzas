@@ -456,11 +456,13 @@ seccion('las consultas');
 $sqlCart = str_replace("\r\n", "\n", Echeqs::sqlCartera(true));
 chequear('la cartera es solo ESTADO = C, sin union con ningun deposito', [false, true], [
     strpos($sqlCart, 'DEPOSITO') !== false,
-    strpos($sqlCart, "WHERE s.FECHA_CHEQ >= ?\n                  AND s.ESTADO = ?") !== false
+    strpos($sqlCart, "WHERE s.FECHA_CHEQ >= ?\n                  AND s.FECHA_CHEQ >= '1900-01-01'\n"
+        . "                  AND s.ESTADO = ?") !== false
 ]);
 chequear('la agregada usa el mismo universo', true,
     strpos(str_replace("\r\n", "\n", Echeqs::sqlCarteraTotales(true)),
-        "WHERE s.FECHA_CHEQ >= ?\n                  AND s.ESTADO = ?") !== false);
+        "WHERE s.FECHA_CHEQ >= ?\n                  AND s.FECHA_CHEQ >= '1900-01-01'\n"
+        . "                  AND s.ESTADO = ?") !== false);
 chequear('y sin el script no agrupa por una constante', false,
     strpos(Echeqs::sqlCarteraTotales(false), 'GROUP BY CAST(s.FECHA_CHEQ AS DATE),') !== false);
 
