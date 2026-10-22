@@ -80,10 +80,14 @@ $edita = AuthCashflow::puedeEditar('echeqs');
              tilde niega.
 
              LOS DEPOSITADOS VAN EN LA CUARTA TARJETA, con bruto, retención y
-             neto: es la fila "Echeqs depositados". Las restas las hace PHP:
-             acá no se calcula nada. -->
-        <div data-kpis="summarySectionEch" class="row g-3 mb-4" id="summarySectionEch" style="display: none;">
-            <div class="col-md-6 col-lg-3">
+             neto: es la fila "Echeqs depositados". Los vencidos, en la quinta.
+             Las restas las hace PHP: acá no se calcula nada.
+
+             LAS CINCO EN UNA FILA en pantalla ancha (row-cols-lg-5): una sola
+             tarjeta abajo se leía como un bloque aparte. De a dos en tablet y
+             una por renglón en celular. -->
+        <div data-kpis="summarySectionEch" class="row row-cols-1 row-cols-md-2 row-cols-lg-5 g-3 mb-4" id="summarySectionEch" style="display: none;">
+            <div class="col">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Vista Días</span>
@@ -98,7 +102,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                 </div>
             </div>
 
-            <div class="col-md-6 col-lg-3">
+            <div class="col">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Vista Meses</span>
@@ -113,7 +117,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                 </div>
             </div>
 
-            <div class="col-md-6 col-lg-3">
+            <div class="col">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Período Completo</span>
@@ -133,7 +137,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                  dice el bruto y la retención, que es lo que explica la
                  diferencia con lo que se depositó, y cuántos ya acreditaron
                  y no suman. -->
-            <div class="col-md-6 col-lg-3">
+            <div class="col">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Depositados (neto)</span>
@@ -153,7 +157,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                  fecha asignada YA ESTÁN en las tres primeras tarjetas —suman
                  en su fecha—; los que no, no suman en ningún lado. Las cuentas
                  las hace PHP (Echeqs::resumenVencidos()). -->
-            <div class="col-md-6 col-lg-3">
+            <div class="col">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Vencidos en cartera</span>

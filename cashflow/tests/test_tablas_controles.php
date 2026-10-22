@@ -1586,6 +1586,12 @@ chequear('Ya acredito sigue sin habilitarse con un vencido: solo con depositados
 chequear('la barra dice cuantos vencidos hay en la seleccion', 1,
     substr_count($echJs, "(vencidos ? ' · ' + vencidos + ' vencido(s)' : '')"));
 
+$filaKpis = substr($echTab, strpos($echTab, 'id="summarySectionEch"') - 120,
+    strpos($echTab, 'id="excluidosEch"') - strpos($echTab, 'id="summarySectionEch"'));
+chequear('las cinco tarjetas de cartera van en una sola fila en pantalla ancha', [1, 5], [
+    substr_count($filaKpis, 'class="row row-cols-1 row-cols-md-2 row-cols-lg-5 g-3 mb-4"'),
+    substr_count($filaKpis, '<div class="col">')
+]);
 chequear('la tarjeta "Vencidos en cartera" existe y el JS la pinta', [1, true, true], [
     substr_count($echTab, '<span class="kpi-card-title">Vencidos en cartera</span>'),
     strpos($echJs, "texto('totalVencidosEch', pesos(v.bruto));") !== false,
