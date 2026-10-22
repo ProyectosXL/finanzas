@@ -95,31 +95,35 @@ $edita = AuthCashflow::puedeEditar('parametros', 'PRECHEQUEADO');
                             </div>
                             <div class="ppq-subtitulo mt-1" id="plazoAuditoriaPpq"></div>
 
-                            <!-- LA VENTANA DE LOS VENCIDOS. Un cheque que sigue en
-                                 cartera después de su fecha se muestra en Echeqs
-                                 hasta estos días después; sin fecha de
-                                 acreditación asignada no suma. Tiene su propio
-                                 guardado, como el plazo: valida de 1 a 30. -->
-                            <label class="form-label form-label-sm fw-semibold mt-3" for="ventanaVencidosPpq">
-                                Días hacia atrás para cheques vencidos
+                            <!-- EL PLAZO DE PRESENTACIÓN. Un cheque que sigue en
+                                 cartera después de su fecha está EN PLAZO hasta
+                                 estos días —se puede presentar al cobro y, con una fecha
+                                 de acreditación asignada, suma—; después está
+                                 VENCIDO. Tiene su propio guardado, como el plazo
+                                 de acreditación: valida de 1 a 30. La clave en
+                                 la base dice "vencidos" por historia. -->
+                            <label class="form-label form-label-sm fw-semibold mt-3" for="plazoPresentacionPpq">
+                                Plazo de presentación de los cheques
                             </label>
                             <div class="input-group input-group-sm" style="max-width: 260px;">
-                                <input type="number" id="ventanaVencidosPpq" class="form-control text-center"
+                                <input type="number" id="plazoPresentacionPpq" class="form-control text-center"
                                        min="1" step="1"
                                        <?php echo $edita ? '' : 'disabled'; ?>>
                                 <span class="input-group-text">días corridos</span>
                                 <?php if ($edita): ?>
-                                <button class="btn btn-outline-primary" id="btnGuardarVentanaPpq" type="button">
+                                <button class="btn btn-outline-primary" id="btnGuardarPlazoPresPpq" type="button">
                                     Guardar
                                 </button>
                                 <?php endif; ?>
                             </div>
                             <div class="param-hint mt-1">
-                                Días hacia atrás desde la fecha del cheque en que un cheque vencido en
-                                cartera se sigue mostrando. 30 es el plazo legal para presentar un
-                                cheque al cobro.
+                                Días corridos desde la fecha del cheque para presentarlo al cobro: 30
+                                por la Ley de Cheques. Dentro del plazo, un cheque que sigue en cartera
+                                está <strong>en plazo de presentación</strong>: se puede presentar al cobro y,
+                                con una fecha de acreditación asignada, suma. Pasado el plazo, está
+                                <strong>vencido</strong> y no suma.
                             </div>
-                            <div class="ppq-subtitulo mt-1" id="ventanaAuditoriaPpq"></div>
+                            <div class="ppq-subtitulo mt-1" id="plazoPresAuditoriaPpq"></div>
                         </div>
                         <div class="col-md-7">
                             <div class="form-label form-label-sm fw-semibold mb-1">Tasa de retención vigente hoy</div>

@@ -38,11 +38,13 @@
  * DÓNDE CAE UN CHEQUE DE CARTERA LO DECIDE EL SERVIDOR
  * (Echeqs::resolverFechaCartera(), la regla del tablero): su día hábil —la
  * fecha, corrida al hábil siguiente si cae un fin de semana o un feriado, con
- * la marca "corrida"— o, si está VENCIDO (su día hábil ya pasó y sigue en
- * cartera), la fecha de acreditación que le asignó Tesorería. Un vencido sin
- * fecha no suma, y el interruptor "Ver vencidos sin fecha" lo esconde por
- * defecto. La fecha se asigna en la celda Acredita o desde la barra, todo o
- * nada.
+ * la marca "corrida"— o, si está EN PLAZO DE PRESENTACIÓN (su día hábil ya
+ * pasó, sigue en cartera y no superó los 30 días que da la Ley de Cheques: NO
+ * está vencido, se puede depositar), la fecha de acreditación que le asignó
+ * Tesorería. Uno en plazo sin fecha no suma, y el interruptor "Ver valores en
+ * plazo de presentación sin fecha" lo esconde por defecto. La fecha se asigna
+ * en la celda Acredita o desde la barra, todo o nada. VENCIDO es sólo el que
+ * superó el plazo: no suma, no acepta fecha y se ve siempre.
  *
  * EL GUARDADO DE LAS MARCAS NO ES OPTIMISTA EN SILENCIO. El tilde se pinta
  * enseguida para que la pantalla responda, pero si el POST falla se revierte y
@@ -128,7 +130,7 @@
 
         escuchar('verExcluidosEch', 'change', dibujarCartera);
         escuchar('ocultarDepositadosEch', 'change', dibujarCartera);
-        escuchar('verVencidosEch', 'change', dibujarCartera);
+        escuchar('verEnPlazoEch', 'change', dibujarCartera);
         escuchar('busquedaEch', 'keyup', dibujarCartera);
         escuchar('busquedaPre', 'keyup', dibujarPrechequeado);
         escuchar('filtroClientePre', 'change', dibujarPrechequeado);
@@ -217,24 +219,26 @@
         var d = datosCartera.depositados || {};
         var acr = d.acreditados || {};
         var sinDatos = d.sin_datos || {};
-        var v = datosCartera.vencidos || {};
+        var v = datosCartera.en_plazo || {};
         var vCon = v.con_fecha || {};
         var vSin = v.sin_fecha || {};
+        var vVen = v.vencidos || {};
         var depositados = (d.cheques || 0) + (acr.cheques || 0) + (sinDatos.cheques || 0);
         var cobrables = (datosCartera.filas || []).length - (e.cheques || 0) - depositados
-            - (vSin.cheques || 0);
+            - (vSin.cheques || 0) - (vVen.cheques || 0);
 
         texto('detalleCarteraEch', cobrables + ' cheque(s) de terceros que suman, por fecha de pago'
-            + (vCon.cheques ? ' (' + vCon.cheques + ' vencido(s) con fecha asignada)' : '')
-            + (vSin.cheques ? ' · ' + vSin.cheques + ' vencido(s) sin fecha aparte' : '')
+            + (vCon.cheques ? ' (' + vCon.cheques + ' en plazo de presentación con fecha asignada)' : '')
+            + (vSin.cheques ? ' · ' + vSin.cheques + ' en plazo de presentación sin fecha aparte' : '')
+            + (vVen.cheques ? ' · ' + vVen.cheques + ' vencido(s) aparte' : '')
             + (depositados ? ' · ' + depositados + ' depositado(s) aparte' : '')
             + (e.cheques ? ' · ' + e.cheques + ' excluido(s) aparte' : ''));
 
-        /* LAS TRES TARJETAS INCLUYEN LOS VENCIDOS CON FECHA: suman en su fecha,
+        /* LAS TRES TARJETAS INCLUYEN LOS EN PLAZO CON FECHA: suman en su fecha,
            igual que en la fila "Echeqs en cartera". El rótulo lo dice, para que
            nadie los busque afuera. */
         if (vCon.cheques) {
-            var incluye = ' · incluye ' + vCon.cheques + ' vencido(s) con fecha';
+            var incluye = ' · incluye ' + vCon.cheques + ' en plazo de presentación con fecha';
 
             ['rotuloDiasEch', 'rotuloMesesEch', 'rotuloGeneralEch'].forEach(function(id) {
                 var el = document.getElementById(id);
@@ -243,13 +247,17 @@
             });
         }
 
-        // Los vencidos, sin los excluidos: cuánto suma —ya adentro de las tres
-        // de arriba— y cuánto no. Las cuentas son de PHP.
-        texto('totalVencidosEch', pesos(v.bruto));
-        texto('detalleVencidosEch', v.cheques
+        // Los en plazo de presentación, sin los excluidos: cuánto suma —ya
+        // adentro de las tres de arriba— y cuánto no. Los vencidos, al pie:
+        // no son de esta tarjeta, pero son cheques en cartera que no suman.
+        // Las cuentas son de PHP.
+        texto('totalEnPlazoEch', pesos(v.bruto));
+        texto('detalleEnPlazoEch', (v.cheques
             ? (vCon.cheques || 0) + ' con fecha · ' + pesosPlano(vCon.bruto) + ' (suman) · '
               + (vSin.cheques || 0) + ' sin fecha · ' + pesosPlano(vSin.bruto) + ' (no suman)'
-            : textoSinVencidos());
+            : textoSinEnPlazo())
+            + (vVen.cheques ? ' · ' + vVen.cheques + ' vencido(s) · ' + pesosPlano(vVen.bruto)
+                + ' (no suman)' : ''));
 
         // Los depositados que se proyectan: el neto, y de dónde sale. Un cero
         // con "Ninguno" no se confunde con un depósito que no retiene nada.
@@ -266,18 +274,18 @@
     }
 
     /**
-     * Por qué no hay vencidos: no hay ninguno, o no se leen. Un cero sin
-     * explicar se leería como "no hay vencidos" cuando lo que falta es el
-     * script o la ventana; el motivo está en el panel de avisos.
+     * Por qué no hay cheques en plazo de presentación: no hay ninguno, o no se
+     * leen. Un cero sin explicar se leería como "no hay ninguno" cuando lo que
+     * falta es el script o el plazo; el motivo está en el panel de avisos.
      */
-    function textoSinVencidos() {
-        var fv = datosCartera.fecha_vencidos || {};
+    function textoSinEnPlazo() {
+        var fv = datosCartera.fecha_en_plazo || {};
 
         if (!fv.creada) {
             return 'No se leen: falta correr el script';
         }
 
-        return (fv.ventana === null || fv.ventana === undefined)
+        return (fv.plazo_presentacion === null || fv.plazo_presentacion === undefined)
             ? 'No se leen: revisá los avisos' : 'Ninguno';
     }
 
@@ -335,42 +343,42 @@
         pintarFilasCartera(filas, cols);
         pintarTotalesCartera(filas, cols);
         pintarExcluidos();
-        pintarVencidosOcultos();
+        pintarEnPlazoOcultos();
         pintarSeleccion();
     }
 
     /**
-     * Al lado del interruptor: cuántos vencidos sin fecha esconde y por cuánto,
+     * Al lado del interruptor: cuántos en plazo sin fecha esconde y por cuánto,
      * como "Ver excluidos". Con el buscador puesto, si alguno escondido
      * coincide, lo dice: LO ESCONDIDO GANA SOBRE LA BÚSQUEDA —como con "Ocultar
      * depositados"—, y sin esto la búsqueda parecería no encontrarlo.
      */
-    function pintarVencidosOcultos() {
-        var cont = document.getElementById('vencidosOcultosEch');
+    function pintarEnPlazoOcultos() {
+        var cont = document.getElementById('enPlazoOcultosEch');
 
         if (!cont) {
             return;
         }
 
-        var o = (datosCartera.vencidos || {}).ocultables || {};
+        var o = (datosCartera.en_plazo || {}).ocultables || {};
         var term = valor('busquedaEch').toLowerCase();
 
-        if (!o.cheques || verVencidos()) {
+        if (!o.cheques || verEnPlazo()) {
             cont.textContent = '';
             return;
         }
 
-        var coinciden = term ? vencidosOcultos().filter(function(f) { return coincide(f, term); }).length : 0;
+        var coinciden = term ? enPlazoOcultos().filter(function(f) { return coincide(f, term); }).length : 0;
 
         cont.textContent = coinciden
-            ? coinciden + ' vencido(s) sin fecha coinciden: prendé el switch'
+            ? coinciden + ' en plazo de presentación sin fecha coinciden: prendé el switch'
             : o.cheques + ' escondido(s) · ' + pesosPlano(o.bruto);
     }
 
-    /** Los vencidos sin fecha que el interruptor esconde: no excluidos */
-    function vencidosOcultos() {
+    /** Los en plazo de presentación sin fecha que el interruptor esconde: no excluidos */
+    function enPlazoOcultos() {
         return datosCartera.filas.filter(function(f) {
-            return f.ESTADO_CARTERA === 'VENCIDO_SIN_FECHA' && !f.EXCLUIDO;
+            return f.ESTADO_CARTERA === 'EN_PLAZO_SIN_FECHA' && !f.EXCLUIDO;
         });
     }
 
@@ -467,14 +475,14 @@
         document.getElementById('bodyEch').innerHTML = html;
 
         conectarSeleccion();
-        conectarFechasVencidos();
+        conectarFechasEnPlazo();
     }
 
-    /** Los estados de un vencido: los que aceptan una fecha asignada */
-    var VENCIDOS = ['VENCIDO_CON_FECHA', 'VENCIDO_SIN_FECHA', 'FECHA_PASADA'];
+    /** Los estados en plazo de presentación: los que aceptan una fecha asignada */
+    var EN_PLAZO = ['EN_PLAZO_CON_FECHA', 'EN_PLAZO_SIN_FECHA', 'FECHA_PASADA'];
 
-    function esVencido(f) {
-        return VENCIDOS.indexOf(f.ESTADO_CARTERA) !== -1;
+    function esEnPlazo(f) {
+        return EN_PLAZO.indexOf(f.ESTADO_CARTERA) !== -1;
     }
 
     /**
@@ -482,38 +490,39 @@
      *
      *   cartera vigente       su día hábil (la fecha, o la corrida).
      *   depositado            su acreditación.
-     *   vencido con fecha     la asignada, editable.
-     *   vencido sin fecha     el selector para asignarla, o un guion sin
+     *   en plazo con fecha    la asignada, editable.
+     *   en plazo sin fecha    el selector para asignarla, o un guion sin
      *   o con fecha pasada    permiso.
      *
      * EL SELECTOR SE DIBUJA SÓLO CON PERMISO DE EDICIÓN de Echeqs y con el
-     * script de los vencidos corrido. Sus extremos —mañana y el menor entre el
+     * script corrido. Un vencido no tiene selector: ya no se puede depositar.
+     * Sus extremos —mañana y el menor entre el
      * fin del eje y el último día en que se muestra el cheque— sólo explican:
      * el servidor valida igual, y también que sea hábil.
      */
     function celdaAcredita(f) {
         var orden = String(f.ACREDITA || '').slice(0, 10);
 
-        if (!esVencido(f)) {
+        if (!esEnPlazo(f)) {
             return '<td class="center" data-orden="' + escapar(orden) + '">'
                 + (f.ACREDITA ? fecha(f.ACREDITA) : '') + '</td>';
         }
 
         var c = f.CARTERA || {};
-        var asignada = (f.ESTADO_CARTERA === 'VENCIDO_CON_FECHA') ? c.fecha_asignada : '';
-        var fv = datosCartera.fecha_vencidos || {};
-        var puede = Permisos.puedeEditar('bodyEch') && fv.creada && fv.ventana !== null
-            && fv.ventana !== undefined;
+        var asignada = (f.ESTADO_CARTERA === 'EN_PLAZO_CON_FECHA') ? c.fecha_asignada : '';
+        var fv = datosCartera.fecha_en_plazo || {};
+        var puede = Permisos.puedeEditar('bodyEch') && fv.creada && fv.plazo_presentacion !== null
+            && fv.plazo_presentacion !== undefined;
 
         if (!puede) {
             return '<td class="center" data-orden="' + escapar(asignada || '') + '">'
                 + (asignada ? fecha(asignada) : '—') + '</td>';
         }
 
-        var max = (c.muestra_hasta && c.muestra_hasta < fv.fin) ? c.muestra_hasta : fv.fin;
+        var max = (c.plazo_hasta && c.plazo_hasta < fv.fin) ? c.plazo_hasta : fv.fin;
 
         return '<td class="center" data-orden="' + escapar(asignada || '') + '">'
-            + '<input type="date" class="form-control form-control-sm ech-fecha-venc"'
+            + '<input type="date" class="form-control form-control-sm ech-fecha-asignada"'
             + ' data-id="' + f.ID_SBA14 + '" data-previo="' + escapar(asignada || '') + '"'
             + ' min="' + escapar(fv.manana) + '" max="' + escapar(max) + '"'
             + ' value="' + escapar(asignada || '') + '"'
@@ -523,8 +532,8 @@
     }
 
     /** El selector de la celda Acredita guarda al cambiar: de a uno */
-    function conectarFechasVencidos() {
-        document.querySelectorAll('#bodyEch .ech-fecha-venc').forEach(function(inp) {
+    function conectarFechasEnPlazo() {
+        document.querySelectorAll('#bodyEch .ech-fecha-asignada').forEach(function(inp) {
             inp.addEventListener('change', function() { guardarFechaCelda(inp); });
         });
     }
@@ -553,12 +562,12 @@
 
         var term = valor('busquedaEch').toLowerCase();
 
-        if (!verVencidos()) {
-            var ocultos = vencidosOcultos().filter(function(f) { return !term || coincide(f, term); });
+        if (!verEnPlazo()) {
+            var ocultos = enPlazoOcultos().filter(function(f) { return !term || coincide(f, term); });
 
             if (ocultos.length) {
-                return ocultos.length + ' vencido(s) sin fecha coinciden: prendé el switch '
-                     + '"Ver vencidos sin fecha".';
+                return ocultos.length + ' en plazo de presentación sin fecha coinciden: prendé el '
+                     + 'switch "Ver valores en plazo de presentación sin fecha".';
             }
         }
 
@@ -587,23 +596,26 @@
         // entran en ninguna.
         var html = '<tr id="totalesEch">' + filaPie('TOTALES', filas, cols, tot, 'fw-bold') + '</tr>';
 
-        /* LOS VENCIDOS CON FECHA ESTÁN ADENTRO DE "En cartera": suman en la
+        /* LOS EN PLAZO CON FECHA ESTÁN ADENTRO DE "En cartera": suman en la
            misma fila del tablero. Van en un renglón indentado y en cursiva,
            debajo, que dice "ya sumados arriba", para que nadie los sume dos
            veces. Los sin fecha —y los de fecha pasada— no están en ninguna
-           fila: van aparte, como los acreditados. */
+           fila: van aparte, como los acreditados. Los vencidos también. */
         var partes = [
             { rotulo: 'En cartera · fila "Echeqs en cartera"',
               filtro: function(f) {
                   return !f.EXCLUIDO && !f.ESTADO_DEPOSITO
-                      && (f.ESTADO_CARTERA === 'VIGENTE' || f.ESTADO_CARTERA === 'VENCIDO_CON_FECHA');
+                      && (f.ESTADO_CARTERA === 'VIGENTE' || f.ESTADO_CARTERA === 'EN_PLAZO_CON_FECHA');
               } },
-            { rotulo: '↳ de esos, vencidos con fecha · ya sumados arriba', clase: 'ech-fila-subparte',
-              filtro: function(f) { return !f.EXCLUIDO && f.ESTADO_CARTERA === 'VENCIDO_CON_FECHA'; } },
-            { rotulo: 'Vencidos sin fecha · no suman',
+            { rotulo: '↳ de esos, en plazo de presentación con fecha · ya sumados arriba',
+              clase: 'ech-fila-subparte',
+              filtro: function(f) { return !f.EXCLUIDO && f.ESTADO_CARTERA === 'EN_PLAZO_CON_FECHA'; } },
+            { rotulo: 'Vencidos · no suman',
+              filtro: function(f) { return !f.EXCLUIDO && f.ESTADO_CARTERA === 'VENCIDO'; } },
+            { rotulo: 'En plazo de presentación sin fecha · no suman',
               filtro: function(f) {
                   return !f.EXCLUIDO
-                      && (f.ESTADO_CARTERA === 'VENCIDO_SIN_FECHA' || f.ESTADO_CARTERA === 'FECHA_PASADA');
+                      && (f.ESTADO_CARTERA === 'EN_PLAZO_SIN_FECHA' || f.ESTADO_CARTERA === 'FECHA_PASADA');
               } },
             { rotulo: 'Depositados · fila "Echeqs depositados"',
               filtro: function(f) { return f.ESTADO_DEPOSITO === 'PROYECTA'; } },
@@ -623,7 +635,7 @@
 
             if (!sub.length) { return; }
 
-            // El renglón de los vencidos con fecha es una apertura de otro: no
+            // El renglón de los en plazo con fecha es una apertura de otro: no
             // cuenta como una parte más.
             if (!p.clase) { conFilas++; }
 
@@ -738,9 +750,9 @@
         return !!(chk && chk.checked);
     }
 
-    /** Si el interruptor de ver vencidos sin fecha está prendido. Por defecto, no */
-    function verVencidos() {
-        var chk = document.getElementById('verVencidosEch');
+    /** Si el interruptor de ver los en plazo sin fecha está prendido. Por defecto, no */
+    function verEnPlazo() {
+        var chk = document.getElementById('verEnPlazoEch');
 
         return !!(chk && chk.checked);
     }
@@ -757,17 +769,18 @@
         var term = valor('busquedaEch').toLowerCase();
         var verEx = verExcluidos();
         var sinDep = ocultarDepositados();
-        var verVen = verVencidos();
+        var verVen = verEnPlazo();
 
         return datosCartera.filas.filter(function(f) {
             if (!verEx && f.EXCLUIDO) {
                 return false;
             }
 
-            // Sólo los vencidos SIN fecha: los que tienen fecha suman, y los
+            // Sólo los en plazo SIN fecha: los que tienen fecha suman, los
+            // vencidos piden resolverse en Tango, y los
             // de fecha pasada piden reasignarla. Un excluido lo maneja el
             // interruptor de los excluidos.
-            if (!verVen && f.ESTADO_CARTERA === 'VENCIDO_SIN_FECHA' && !f.EXCLUIDO) {
+            if (!verVen && f.ESTADO_CARTERA === 'EN_PLAZO_SIN_FECHA' && !f.EXCLUIDO) {
                 return false;
             }
 
@@ -942,11 +955,15 @@
      *            27/10 · fin de semana". La columna Fecha de pago sigue
      *            diciendo la del cheque, y Acredita la corrida.
      *
-     *   vencido · sin fecha      su día hábil ya pasó y sigue en cartera; no
-     *                            suma hasta que se le asigne una fecha.
-     *   vencido · fecha asignada suma en la fecha asignada, por el bruto.
-     *   fecha asignada pasada    la fecha llegó y el cheque sigue en cartera:
-     *                            no suma, y el aviso pide reasignarla.
+     *   en plazo · sin fecha       su día hábil ya pasó y sigue en cartera,
+     *                              dentro del plazo de presentación; no suma
+     *                              hasta que se le asigne una fecha.
+     *   en plazo · fecha asignada  suma en la fecha asignada, por el bruto.
+     *   fecha asignada pasada      la fecha llegó y el cheque sigue en
+     *                              cartera: no suma, y el aviso pide
+     *                              reasignarla.
+     *   vencido                    superó el plazo de presentación: ya no se
+     *                              puede presentar al cobro y no suma.
      *
      * Lo resolvió el servidor (Echeqs::resolverFechaCartera(), la misma regla
      * del tablero): acá no se calcula ninguna fecha, sólo se escribe.
@@ -960,19 +977,20 @@
 
         var html = '';
         var venc = {
-            VENCIDO_SIN_FECHA: ['ech-badge-vencido', 'vencido · sin fecha'],
-            VENCIDO_CON_FECHA: ['ech-badge-vencido-fecha', 'vencido · fecha asignada'],
-            FECHA_PASADA: ['ech-badge-sin-datos', 'fecha asignada pasada']
+            EN_PLAZO_SIN_FECHA: ['ech-badge-en-plazo', 'en plazo · sin fecha'],
+            EN_PLAZO_CON_FECHA: ['ech-badge-en-plazo-fecha', 'en plazo · fecha asignada'],
+            FECHA_PASADA: ['ech-badge-sin-datos', 'fecha asignada pasada'],
+            VENCIDO: ['ech-badge-vencido', 'vencido']
         }[f.ESTADO_CARTERA];
 
         if (venc) {
-            html += '<div><span class="' + venc[0] + '" title="' + escapar(textoVencido(f)) + '">'
+            html += '<div><span class="' + venc[0] + '" title="' + escapar(textoEnPlazo(f)) + '">'
                 + escapar(venc[1]) + '</span></div>';
         }
 
-        // Sólo en un vigente: es el que cae en el día corrido. A un vencido el
-        // corrimiento le dice que su día hábil ya pasó, y eso lo explica su
-        // propia marca.
+        // Sólo en un vigente: es el que cae en el día corrido. A uno en plazo
+        // o vencido el corrimiento le dice que su día hábil ya pasó, y eso lo
+        // explica su propia marca.
         if (c.corrida && f.ESTADO_CARTERA === 'VIGENTE') {
             html += '<div><span class="ech-badge-corrida" title="' + escapar(textoCorrida(c)) + '">'
                 + 'corrida</span></div>';
@@ -994,26 +1012,31 @@
     }
 
     /**
-     * El tooltip de un vencido: la fecha del cheque, cuántos días lleva
-     * vencido y hasta cuándo se sigue mostrando; la fecha asignada con quién
-     * la dio, cuándo y por qué; y las anteriores, con quién las dio de baja.
+     * El tooltip de un cheque en plazo de presentación o vencido: la fecha del
+     * cheque, cuántos días pasaron y hasta cuándo va el plazo; la fecha
+     * asignada con quién la dio, cuándo y por qué; y las anteriores, con quién
+     * las dio de baja.
      */
-    function textoVencido(f) {
+    function textoEnPlazo(f) {
         var c = f.CARTERA;
-        var vig = f.FECHA_VENCIDO;
+        var vig = f.FECHA_ASIGNADA;
         var cab = {
-            VENCIDO_SIN_FECHA: 'Vencido en cartera, sin fecha de acreditación: no suma en ninguna '
-                + 'columna hasta que se le asigne una.',
-            VENCIDO_CON_FECHA: 'Vencido en cartera, con fecha de acreditación asignada: suma el '
-                + fecha(c.fecha_asignada) + ', por el importe.',
-            FECHA_PASADA: 'La fecha de acreditación asignada (' + fecha(c.fecha_asignada) + ') ya '
-                + 'pasó y el cheque sigue en cartera: no suma. Reasignale la fecha.'
+            EN_PLAZO_SIN_FECHA: 'En plazo de presentación, sin fecha de acreditación: se puede '
+                + 'depositar, pero no suma en ninguna columna hasta que se le asigne una.',
+            EN_PLAZO_CON_FECHA: 'En plazo de presentación, con fecha de acreditación asignada: suma '
+                + 'el ' + fecha(c.fecha_asignada) + ', por el importe.',
+            FECHA_PASADA: 'En plazo de presentación, pero la fecha de acreditación asignada ('
+                + fecha(c.fecha_asignada) + ') ya pasó y el cheque sigue en cartera: no suma. '
+                + 'Reasignale la fecha.',
+            VENCIDO: 'Vencido: superó el plazo de presentación y ya no se puede depositar. No suma. '
+                + 'Resolvelo en Tango —rechazo o baja— o excluilo.'
         }[f.ESTADO_CARTERA] || '';
 
         var tip = cab + '\n\n'
-            + 'Fecha del cheque: ' + fecha(c.fecha_cheque) + ' · ' + c.dias_vencido + ' día(s) vencido\n'
-            + 'Se sigue mostrando hasta el ' + fecha(c.muestra_hasta)
-            + ' (su fecha más ' + ((datosCartera.fecha_vencidos || {}).ventana || '?') + ' días)';
+            + 'Fecha del cheque: ' + fecha(c.fecha_cheque) + ' · hace ' + c.dias_desde_fecha + ' día(s)\n'
+            + (f.ESTADO_CARTERA === 'VENCIDO' ? 'Plazo de presentación vencido el ' : 'En plazo de presentación hasta el ')
+            + fecha(c.plazo_hasta) + ' (su fecha más '
+            + ((datosCartera.fecha_en_plazo || {}).plazo_presentacion || '?') + ' días)';
 
         if (vig) {
             tip += '\n\nFecha asignada por ' + (Auditoria.quien(vig.usuario) || 'sin usuario registrado')
@@ -1116,6 +1139,7 @@
         var total = 0;
         var yaExcluidos = 0;
         var yaDepositados = 0;
+        var enPlazo = 0;
         var vencidos = 0;
         var sinBanco = 0;
         var bancos = {};
@@ -1124,7 +1148,8 @@
             total += Number(f.IMPORTE) || 0;
             if (f.EXCLUIDO) { yaExcluidos++; }
             if (f.DEPOSITO) { yaDepositados++; }
-            if (esVencido(f)) { vencidos++; }
+            if (esEnPlazo(f)) { enPlazo++; }
+            if (f.ESTADO_CARTERA === 'VENCIDO') { vencidos++; }
 
             // Por ID_BANCO y no por el nombre: es como compara el servidor.
             if (f.ID_BANCO) {
@@ -1147,6 +1172,7 @@
             + (nombres.length === 1 ? ' · ' + nombres[0]
                 : (nombres.length > 1 ? ' · ' + nombres.length + ' bancos' : ''))
             + (yaDepositados ? ' · ' + yaDepositados + ' depositado(s)' : '')
+            + (enPlazo ? ' · ' + enPlazo + ' en plazo de presentación' : '')
             + (vencidos ? ' · ' + vencidos + ' vencido(s)' : '')
             + (yaExcluidos ? ' · ' + yaExcluidos + ' ya excluido(s)' : ''));
 
@@ -1182,13 +1208,13 @@
     }
 
     /* ================================================================
-       LA FECHA DE ACREDITACIÓN DE LOS VENCIDOS
+       LA FECHA DE ACREDITACIÓN DE LOS CHEQUES EN PLAZO DE PRESENTACIÓN
 
-       Un cheque que sigue en cartera después de su día hábil no suma hasta
-       que alguien diga cuándo entra. Se le asigna una fecha de a uno —en la
+       Un cheque que sigue en cartera después de su día hábil, dentro del
+       plazo de presentación, no suma hasta que alguien diga cuándo entra. Se le asigna una fecha de a uno —en la
        celda Acredita— o de a varios —desde la barra—, todo o nada. Sólo vive
        en el cashflow. Al servidor viajan los ids, la fecha y la observación:
-       el servidor valida todo de nuevo —que sean vencidos, que la fecha sea
+       el servidor valida todo de nuevo —que estén en plazo, que la fecha sea
        de mañana en adelante, hábil y dentro del tope—, y los botones se
        apagan sólo para explicar antes lo que igual rechazaría.
        ================================================================ */
@@ -1197,27 +1223,28 @@
      * Asignar fecha y Deshacer fecha: cuándo se pueden apretar y, si no, por
      * qué.
      *
-     *   Asignar fecha   si TODOS los seleccionados son vencidos en cartera.
+     *   Asignar fecha   si TODOS los seleccionados están en plazo de
+     *                   presentación. Un vencido no: ya no se puede depositar.
      *   Deshacer fecha  si TODOS tienen una fecha vigente (también la pasada).
      *
-     * SIN EL SCRIPT, o con la ventana rota, no se muestran: la pestaña avisa
+     * SIN EL SCRIPT, o con el plazo roto, no se muestran: la pestaña avisa
      * qué falta.
      */
     function pintarBotonesFecha(sel) {
-        var fv = (datosCartera && datosCartera.fecha_vencidos) || {};
-        var puede = !!fv.creada && fv.ventana !== null && fv.ventana !== undefined;
-        var vencidos = sel.filter(esVencido).length;
-        var conFecha = sel.filter(function(f) { return !!f.FECHA_VENCIDO; }).length;
+        var fv = (datosCartera && datosCartera.fecha_en_plazo) || {};
+        var puede = !!fv.creada && fv.plazo_presentacion !== null && fv.plazo_presentacion !== undefined;
+        var enPlazo = sel.filter(esEnPlazo).length;
+        var conFecha = sel.filter(function(f) { return !!f.FECHA_ASIGNADA; }).length;
         var btnAs = document.getElementById('btnAsignarFechaSelEch');
         var btnDe = document.getElementById('btnDeshacerFechaSelEch');
 
         if (btnAs) {
             btnAs.style.display = puede ? '' : 'none';
-            btnAs.disabled = (vencidos !== sel.length);
-            btnAs.title = (vencidos === sel.length)
+            btnAs.disabled = (enPlazo !== sel.length);
+            btnAs.title = (enPlazo === sel.length)
                 ? 'Asignarles una fecha de acreditación: suman ese día, por el importe.'
-                : 'Se habilita cuando todos los seleccionados son cheques vencidos en cartera: '
-                  + (sel.length - vencidos) + ' no lo son.';
+                : 'Se habilita cuando todos los seleccionados están en plazo de presentación: '
+                  + (sel.length - enPlazo) + ' no lo están (vigentes, vencidos o depositados).';
         }
 
         if (btnDe) {
@@ -1229,16 +1256,16 @@
     }
 
     /**
-     * Asigna una fecha a los vencidos seleccionados. El diálogo dice cuántos y
+     * Asigna una fecha a los cheques en plazo seleccionados. El diálogo dice cuántos y
      * por cuánto, cuántos ya tenían fecha —y se reemplazan—, y pide la fecha
      * y una observación opcional.
      */
     function accionAsignarFecha() {
-        var sel = filasSeleccionadas().filter(esVencido);
+        var sel = filasSeleccionadas().filter(esEnPlazo);
 
         if (!sel.length) { return; }
 
-        var fv = datosCartera.fecha_vencidos || {};
+        var fv = datosCartera.fecha_en_plazo || {};
         var total = 0;
         var max = fv.fin;
         var reemplazan = 0;
@@ -1246,18 +1273,18 @@
         sel.forEach(function(f) {
             total += Number(f.IMPORTE) || 0;
 
-            // El tope de cada cheque es su último día a la vista: el del
+            // El tope de cada cheque es el último día de su plazo: el del
             // diálogo es el menor de todos. Lo que vale es el del servidor.
-            if (f.CARTERA.muestra_hasta && f.CARTERA.muestra_hasta < max) {
-                max = f.CARTERA.muestra_hasta;
+            if (f.CARTERA.plazo_hasta && f.CARTERA.plazo_hasta < max) {
+                max = f.CARTERA.plazo_hasta;
             }
 
-            if (f.FECHA_VENCIDO) { reemplazan++; }
+            if (f.FECHA_ASIGNADA) { reemplazan++; }
         });
 
         Notificacion.pedirFecha({
             titulo: 'Asignar fecha de acreditación',
-            mensaje: sel.length + ' cheque(s) vencido(s) por ' + pesosPlano(total) + '.',
+            mensaje: sel.length + ' cheque(s) en plazo de presentación por ' + pesosPlano(total) + '.',
             detalle: 'Suman ese día en "Echeqs en cartera", por el importe. Tiene que ser un día hábil, '
                 + 'de mañana en adelante.'
                 + (reemplazan ? ' ' + reemplazan + ' ya tenían fecha: se reemplaza, y la anterior '
@@ -1267,7 +1294,7 @@
             antesDelMin: 'Tiene que ser de mañana en adelante.',
             max: max,
             despuesDelMax: 'No puede ser posterior al ' + fecha(max) + ': después alguno de estos cheques '
-                + 'deja de mostrarse, o termina el horizonte.',
+                + 'vence su plazo de presentación, o termina el horizonte.',
             texto: { etiqueta: 'Observación', maxlargo: 200,
                      placeholder: 'Ej.: el cliente pidió depositarlo la semana que viene…' },
             confirmar: 'Asignar a ' + sel.length + ' cheque(s)'
@@ -1299,11 +1326,11 @@
      * el servidor graba todo o nada.
      */
     function guardarFecha(ids, fechaElegida, observacion, alFallar) {
-        pedirJson(URL_ECHEQS + '?action=asignarFechaVencidos',
+        pedirJson(URL_ECHEQS + '?action=asignarFechaEnPlazo',
                 { ids: ids, fecha: fechaElegida, observacion: observacion })
             .then(function(r) {
                 seleccion = {};
-                Notificacion.exito(r.asignados + ' cheque(s) vencido(s) acreditan el '
+                Notificacion.exito(r.asignados + ' cheque(s) en plazo de presentación acreditan el '
                     + fecha(r.fecha) + '.', {
                     detalle: 'Su importe suma ese día en "Echeqs en cartera".'
                         + ((r.avisos || []).length ? ' ' + r.avisos.join(' ') : '')
@@ -1318,7 +1345,7 @@
 
     /** Deshace la fecha de lo seleccionado: baja lógica, con confirmación */
     function accionDeshacerFecha() {
-        var sel = filasSeleccionadas().filter(function(f) { return !!f.FECHA_VENCIDO; });
+        var sel = filasSeleccionadas().filter(function(f) { return !!f.FECHA_ASIGNADA; });
 
         if (!sel.length) { return; }
 
@@ -1328,16 +1355,16 @@
 
         Notificacion.confirmar({
             titulo: 'Deshacer fecha de acreditación',
-            mensaje: '¿Deshacer la fecha de ' + sel.length + ' cheque(s) vencido(s) por '
+            mensaje: '¿Deshacer la fecha de ' + sel.length + ' cheque(s) por '
                 + pesosPlano(total) + '?',
-            detalle: 'Vuelven a "vencido sin fecha" y dejan de sumar. La fecha no se borra: queda en '
+            detalle: 'Vuelven a "en plazo, sin fecha" y dejan de sumar. La fecha no se borra: queda en '
                 + 'el historial, dada de baja.',
             confirmar: 'Deshacer',
             peligro: true
         }).then(function(ok) {
             if (!ok) { return; }
 
-            pedirJson(URL_ECHEQS + '?action=deshacerFechaVencidos',
+            pedirJson(URL_ECHEQS + '?action=deshacerFechaEnPlazo',
                     { ids: sel.map(function(f) { return f.ID_SBA14; }) })
                 .then(function(r) {
                     seleccion = {};

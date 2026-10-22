@@ -1,9 +1,12 @@
 <?php
 /**
- * Echeqs: los cheques vencidos en cartera y el corrimiento al dia habil.
+ * Echeqs: los cheques en plazo de presentacion, los vencidos y el corrimiento
+ * al dia habil.
  *
- * Lo delicado son CRITERIOS: que es un vencido, cuanto dura la ventana, que
- * fecha se puede asignar, donde cae cada cheque y en que serie. Viven en
+ * Lo delicado son CRITERIOS: que esta en plazo de presentacion y que esta
+ * vencido -la Ley de Cheques da 30 dias para presentar un cheque: uno cuyo
+ * dia paso NO esta vencido-, que fecha se puede asignar, donde cae cada cheque
+ * y en que serie. Viven en
  * helpers estaticos puros y se verifican aca sin base, con la fecha de hoy y
  * el calendario inyectados para que las pruebas no caduquen.
  *
@@ -22,7 +25,7 @@ $srcEcheqsV = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/E
 /* ================================================================
    El script
    ================================================================ */
-seccion('el script de los vencidos');
+seccion('el script de la fecha asignada y el plazo de presentacion');
 
 foreach (['ID_SBA14', 'FECHA_ACREDITACION', 'OBSERVACION', 'VIGENTE', 'ID_REEMPLAZA',
           'USUARIO_ALTA', 'FECHA_ALTA', 'USUARIO_MODIF', 'FECHA_MODIF',
@@ -38,58 +41,58 @@ chequear('sin FK contra dbo.SBA14: es de Tango', false,
     strpos($SQL_VENC, 'REFERENCES dbo.SBA14') !== false);
 chequear('ni bajas fisicas', false,
     stripos($SQL_VENC, 'DROP TABLE') !== false || stripos($SQL_VENC, 'DELETE ') !== false);
-chequear('siembra la ventana en 30, en el modulo PRECHEQUEADO', true,
+chequear('siembra el plazo de presentacion en 30, en el modulo PRECHEQUEADO', true,
     strpos($SQL_VENC, "''echeqs_dias_vencidos_cartera'', ''30''") !== false
     && strpos($SQL_VENC, "('echeqs_dias_vencidos_cartera', '30'") !== false
     && strpos($SQL_VENC, "''DEPOSITO'', ''PRECHEQUEADO''") !== false);
 chequear('y si ya existe no le pisa el valor', true,
     strpos($SQL_VENC, "IF NOT EXISTS (SELECT 1 FROM dbo.RO_T_CASHFLOW_PARAMETROS\n               WHERE CLAVE = 'echeqs_dias_vencidos_cartera')") !== false
     && strpos($SQL_VENC, 'UPDATE dbo.RO_T_CASHFLOW_PARAMETROS') === false);
-chequear('controla que la ventana sea de 1 a 30', 1,
+chequear('controla que el plazo sea de 1 a 30', 1,
     substr_count($SQL_VENC, 'NOT BETWEEN 1 AND 30'));
 chequear('Echeqs nombra la tabla y el script del archivo', [true, true], [
     strpos($SQL_VENC, Echeqs::TABLA_FECHA_ACREDITACION) !== false,
-    file_exists(__DIR__ . '/../' . Echeqs::SCRIPT_VENCIDOS)
+    file_exists(__DIR__ . '/../' . Echeqs::SCRIPT_PLAZO_PRESENTACION)
 ]);
 
 /* ================================================================
-   La ventana: Parametros -> Cheques
+   El plazo de presentacion: Parametros -> Cheques
    ================================================================ */
-seccion('la ventana de los vencidos');
+seccion('el plazo de presentacion');
 
-chequear('1 es una ventana valida', 1, Echeqs::validarVentana('1'));
-chequear('30 tambien: el plazo legal', 30, Echeqs::validarVentana(30));
-chequearLanza('cero no', function () { Echeqs::validarVentana(0); });
-chequearLanza('31 no', function () { Echeqs::validarVentana('31'); });
-chequearLanza('vacia no', function () { Echeqs::validarVentana(''); });
-chequearLanza('un texto no', function () { Echeqs::validarVentana('treinta'); });
-chequearLanza('ni un decimal', function () { Echeqs::validarVentana('10.5'); });
+chequear('1 es un plazo valido', 1, Echeqs::validarPlazoPresentacion('1'));
+chequear('30 tambien: el plazo legal', 30, Echeqs::validarPlazoPresentacion(30));
+chequearLanza('cero no', function () { Echeqs::validarPlazoPresentacion(0); });
+chequearLanza('31 no', function () { Echeqs::validarPlazoPresentacion('31'); });
+chequearLanza('vacia no', function () { Echeqs::validarPlazoPresentacion(''); });
+chequearLanza('un texto no', function () { Echeqs::validarPlazoPresentacion('treinta'); });
+chequearLanza('ni un decimal', function () { Echeqs::validarPlazoPresentacion('10.5'); });
 
-$v = Echeqs::ventanaDesdeValor(null);
-chequear('sin el parametro, la ventana es null: no hay un 30 de respaldo', null, $v['dias']);
-chequear('y el motivo nombra el script', true, strpos($v['error'], Echeqs::SCRIPT_VENCIDOS) !== false);
+$v = Echeqs::plazoPresentacionDesdeValor(null);
+chequear('sin el parametro, el plazo es null: no hay un 30 de respaldo', null, $v['dias']);
+chequear('y el motivo nombra el script', true, strpos($v['error'], Echeqs::SCRIPT_PLAZO_PRESENTACION) !== false);
 
-$v = Echeqs::ventanaDesdeValor('40');
-chequear('una ventana rota en la base tambien es null', null, $v['dias']);
+$v = Echeqs::plazoPresentacionDesdeValor('40');
+chequear('un plazo roto en la base tambien es null', null, $v['dias']);
 chequear('y dice donde corregirla', true, strpos($v['error'], 'Parámetros → Cheques') !== false);
 
-chequear('una ventana bien guardada se usa', 10, Echeqs::ventanaDesdeValor('10')['dias']);
+chequear('un plazo bien guardado se usa', 10, Echeqs::plazoPresentacionDesdeValor('10')['dias']);
 
-chequear('Parametros y Echeqs nombran la misma clave de la ventana',
-    Echeqs::CLAVE_VENTANA, Parametros::CLAVE_VENTANA_ECHEQS);
+chequear('Parametros y Echeqs nombran la misma clave del plazo de presentacion',
+    Echeqs::CLAVE_PLAZO_PRESENTACION, Parametros::CLAVE_PLAZO_PRESENTACION_ECHEQS);
 
 $srcParametrosV = file_get_contents(__DIR__ . '/../Class/Parametros.php');
-chequear('saveParametro() no guarda la ventana: tiene su propio camino, que valida', true,
-    strpos($srcParametrosV, 'if ($clave === self::CLAVE_VENTANA_ECHEQS)') !== false);
+chequear('saveParametro() no guarda el plazo de presentacion: tiene su propio camino, que valida', true,
+    strpos($srcParametrosV, 'if ($clave === self::CLAVE_PLAZO_PRESENTACION_ECHEQS)') !== false);
 
-$bloqueGuardarV = substr($srcEcheqsV, strpos($srcEcheqsV, 'public function guardarVentana('), 1400);
-chequear('guardarVentana() valida y escribe con el usuario de escritura', true,
+$bloqueGuardarV = substr($srcEcheqsV, strpos($srcEcheqsV, 'public function guardarPlazoPresentacion('), 1400);
+chequear('guardarPlazoPresentacion() valida y escribe con el usuario de escritura', true,
     strpos($bloqueGuardarV, '$usuario = AuthCashflow::usuarioDeEscritura($usuario);') !== false
-    && strpos($bloqueGuardarV, '$dias = self::validarVentana($dias);') !== false
+    && strpos($bloqueGuardarV, '$dias = self::validarPlazoPresentacion($dias);') !== false
     && strpos($bloqueGuardarV, 'Auditoria::SET_MODIF') !== false);
 
-chequear('saveDiasVencidosEcheq pide editar Parametros -> Cheques', [['parametros', 'PRECHEQUEADO']],
-    AuthCashflow::ESCRITURAS['Parametros']['saveDiasVencidosEcheq']);
+chequear('savePlazoPresentacionEcheq pide editar Parametros -> Cheques', [['parametros', 'PRECHEQUEADO']],
+    AuthCashflow::ESCRITURAS['Parametros']['savePlazoPresentacionEcheq']);
 
 /* ================================================================
    El corrimiento al dia habil
@@ -186,7 +189,7 @@ $r = Echeqs::resolverFechaCartera('2026-10-21', '2026-10-21', $CAL, '2027-09-30'
 chequear('el cheque de hoy es VIGENTE y cae hoy', [Echeqs::CARTERA_VIGENTE, '2026-10-21', false],
     [$r['estado'], $r['fecha_eje'], $r['corrida']]);
 $r = Echeqs::resolverFechaCartera('1800-01-01', '2026-10-21', $CAL, '2027-09-30');
-chequear('la centinela nunca es vigente', [Echeqs::CARTERA_FUERA_VENTANA, null], [$r['estado'], $r['fecha_eje']]);
+chequear('la centinela nunca es vigente', [Echeqs::CARTERA_NO_SE_LEE, null], [$r['estado'], $r['fecha_eje']]);
 
 seccion('la grilla: Fecha de pago la original, Acredita la corrida');
 
@@ -310,38 +313,57 @@ $srcProvV = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Class/Pro
 $ctrlV = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Controller/EcheqsController.php'));
 chequear('el proveedor y la pestana dejan los mismos avisos del corrimiento', [1, 1], [
     substr_count($srcProvV, '$this->avisarTodos(Echeqs::avisosCartera($items));'),
-    substr_count($ctrlV, 'foreach (array_merge(Echeqs::avisosCartera($cartera), $echeqs->avisosVentana($h)) as $a) {')
+    substr_count($ctrlV, 'foreach (array_merge(Echeqs::avisosCartera($cartera), $echeqs->avisosPlazoPresentacion($h)) as $a) {')
 ]);
 chequear('el calendario se lee por la unica lectura del modulo', true,
     strpos($srcEcheqsV, 'return (new Ventas())->getDiasHabiles($desde, $hasta);') !== false);
 
 /* ================================================================
-   Los vencidos en cartera
+   En plazo de presentacion y vencidos
    ================================================================ */
 $HOYV = '2026-10-21';   // miercoles
 $FINV = '2027-09-30';
 
-seccion('que es un vencido: la ventana');
+seccion('en plazo de presentacion o vencido: el plazo');
 
+/* NO ESTA VENCIDO UN CHEQUE CUYO DIA PASO: la Ley de Cheques da 30 dias
+   corridos desde su fecha para presentarlo. "Vencido" es solo el que supero
+   el plazo. */
 $r = Echeqs::resolverFechaCartera('2026-10-20', $HOYV, $CAL, $FINV, null, 30);
-chequear('un cheque de ayer es vencido, sin fecha', [Echeqs::CARTERA_VENCIDO_SIN_FECHA, null, 1],
-    [$r['estado'], $r['fecha_eje'], $r['dias_vencido']]);
+chequear('un cheque de ayer esta en plazo de presentacion, sin fecha', [Echeqs::CARTERA_EN_PLAZO_SIN_FECHA, null, 1],
+    [$r['estado'], $r['fecha_eje'], $r['dias_desde_fecha']]);
 $r = Echeqs::resolverFechaCartera('2026-09-21', $HOYV, $CAL, $FINV, null, 30);
-chequear('uno de hace N dias entra', [Echeqs::CARTERA_VENCIDO_SIN_FECHA, '2026-10-21'],
-    [$r['estado'], $r['muestra_hasta']]);
+chequear('uno de hace exactamente N dias sigue en plazo: el plazo vence hoy', [Echeqs::CARTERA_EN_PLAZO_SIN_FECHA, '2026-10-21'],
+    [$r['estado'], $r['plazo_hasta']]);
 $r = Echeqs::resolverFechaCartera('2026-09-20', $HOYV, $CAL, $FINV, null, 30);
-chequear('uno de hace N + 1 dias no entra', Echeqs::CARTERA_FUERA_VENTANA, $r['estado']);
+chequear('uno de hace N + 1 dias es VENCIDO: supero el plazo', [Echeqs::CARTERA_VENCIDO, null, '2026-10-20'],
+    [$r['estado'], $r['fecha_eje'], $r['plazo_hasta']]);
 $r = Echeqs::resolverFechaCartera('1800-01-01', $HOYV, $CAL, $FINV, null, 30);
-chequear('la centinela no entra', Echeqs::CARTERA_FUERA_VENTANA, $r['estado']);
+chequear('la centinela no se lee: no es un vencido de 1800', Echeqs::CARTERA_NO_SE_LEE, $r['estado']);
 $r = Echeqs::resolverFechaCartera($HOYV, $HOYV, $CAL, $FINV, null, 30);
-chequear('el de hoy no es vencido: cae hoy', [Echeqs::CARTERA_VIGENTE, $HOYV], [$r['estado'], $r['fecha_eje']]);
+chequear('el de hoy no esta en plazo: es vigente y cae hoy', [Echeqs::CARTERA_VIGENTE, $HOYV], [$r['estado'], $r['fecha_eje']]);
 $r = Echeqs::resolverFechaCartera('2026-10-20', $HOYV, $CAL, $FINV, null, null);
-chequear('sin ventana -sin el script o con el parametro roto- un vencido no se lee',
-    Echeqs::CARTERA_FUERA_VENTANA, $r['estado']);
+chequear('sin plazo -sin el script o con el parametro roto- no se puede clasificar: no se lee',
+    Echeqs::CARTERA_NO_SE_LEE, $r['estado']);
 $r = Echeqs::resolverFechaCartera('2026-10-20', $HOYV, $CAL, $FINV, null, 10);
-chequear('con una ventana de 10, el de ayer entra', Echeqs::CARTERA_VENCIDO_SIN_FECHA, $r['estado']);
+chequear('con un plazo de 10, el de ayer esta en plazo', Echeqs::CARTERA_EN_PLAZO_SIN_FECHA, $r['estado']);
 $r = Echeqs::resolverFechaCartera('2026-10-10', $HOYV, $CAL, $FINV, null, 10);
-chequear('y uno de hace 11 dias, no', Echeqs::CARTERA_FUERA_VENTANA, $r['estado']);
+chequear('y uno de hace 11 dias, vencido', Echeqs::CARTERA_VENCIDO, $r['estado']);
+
+seccion('los vencidos se leen sin limite, y no se corren');
+
+$r = Echeqs::resolverFechaCartera('2024-03-02', $HOYV, $CAL, $FINV, null, 30);
+chequear('un sabado de 2024 que sigue en cartera es VENCIDO', Echeqs::CARTERA_VENCIDO, $r['estado']);
+chequear('sin correrse ni pedir calendario de 2024: no avisa un calendario faltante', [false, []],
+    [$r['corrida'], $r['faltan']]);
+chequear('un vencido no suma ni avisa calendario', [], array_filter(Echeqs::avisosCartera([
+    ['IMPORTE' => 10.0, 'CARTERA' => $r]]), function ($a) { return strpos($a['texto'], 'RO_T_CALENDARIO') !== false; }));
+$r = Echeqs::resolverFechaCartera('2026-09-15', $HOYV, $CAL, $FINV, '2026-10-23', 30);
+chequear('a un vencido no le aplica la fecha asignada: no suma, y la fecha queda para el tooltip',
+    [Echeqs::CARTERA_VENCIDO, null, '2026-10-23'], [$r['estado'], $r['fecha_eje'], $r['fecha_asignada']]);
+$srcCtxV = substr($srcEcheqsV, strpos($srcEcheqsV, 'private function contextoCartera('), 1800);
+chequear('con plazo, la lectura arranca en la centinela: sin limite hacia atras', true,
+    strpos($srcCtxV, ": self::FECHA_REAL_DESDE;") !== false);
 
 seccion('el sabado leido el lunes, el martes, y el sabado con lunes feriado');
 
@@ -349,40 +371,40 @@ $r = Echeqs::resolverFechaCartera('2026-10-24', '2026-10-26', $CAL, $FINV, null,
 chequear('el sabado leido el lunes cae hoy: VIGENTE', [Echeqs::CARTERA_VIGENTE, '2026-10-26'],
     [$r['estado'], $r['fecha_eje']]);
 $r = Echeqs::resolverFechaCartera('2026-10-24', '2026-10-27', $CAL, $FINV, null, 30);
-chequear('leido el martes es VENCIDO_SIN_FECHA', [Echeqs::CARTERA_VENCIDO_SIN_FECHA, null],
+chequear('leido el martes esta en plazo de presentacion, sin fecha', [Echeqs::CARTERA_EN_PLAZO_SIN_FECHA, null],
     [$r['estado'], $r['fecha_eje']]);
-chequear('y lleva 3 dias vencido, contados desde la fecha escrita', 3, $r['dias_vencido']);
+chequear('y pasaron 3 dias, contados desde la fecha escrita', 3, $r['dias_desde_fecha']);
 $r = Echeqs::resolverFechaCartera('2026-10-10', '2026-10-12', $CAL, $FINV, null, 30);
-chequear('el sabado con lunes feriado, leido el lunes, no es vencido: cae el martes',
+chequear('el sabado con lunes feriado, leido el lunes, sigue vigente: cae el martes',
     [Echeqs::CARTERA_VIGENTE, '2026-10-13'], [$r['estado'], $r['fecha_eje']]);
 $r = Echeqs::resolverFechaCartera('2026-10-10', '2026-10-14', $CAL, $FINV, null, 30);
-chequear('y leido el miercoles, si', Echeqs::CARTERA_VENCIDO_SIN_FECHA, $r['estado']);
-chequear('la lectura de un martes despues de un sabado arranca en la ventana', '2026-09-27',
-    min(Echeqs::primerDiaCartera('2026-10-27', $CAL), date('Y-m-d', strtotime('2026-10-27 -30 day'))));
+chequear('y leido el miercoles, si', Echeqs::CARTERA_EN_PLAZO_SIN_FECHA, $r['estado']);
+chequear('sin plazo, la lectura de un martes arranca en el martes: el sabado ya no cae hoy', '2026-10-27',
+    Echeqs::primerDiaCartera('2026-10-27', $CAL));
 
 seccion('la fecha asignada: cuando suma y cuando no');
 
 $r = Echeqs::resolverFechaCartera('2026-10-15', $HOYV, $CAL, $FINV, '2026-10-23', 30);
-chequear('con fecha de manana en adelante suma en esa fecha', [Echeqs::CARTERA_VENCIDO_CON_FECHA, '2026-10-23'],
+chequear('con fecha de manana en adelante suma en esa fecha', [Echeqs::CARTERA_EN_PLAZO_CON_FECHA, '2026-10-23'],
     [$r['estado'], $r['fecha_eje']]);
 $r = Echeqs::resolverFechaCartera('2026-10-15', $HOYV, $CAL, $FINV, $HOYV, 30);
-chequear('una fecha asignada igual a hoy suma hoy', [Echeqs::CARTERA_VENCIDO_CON_FECHA, $HOYV],
+chequear('una fecha asignada igual a hoy suma hoy', [Echeqs::CARTERA_EN_PLAZO_CON_FECHA, $HOYV],
     [$r['estado'], $r['fecha_eje']]);
 $r = Echeqs::resolverFechaCartera('2026-10-15', $HOYV, $CAL, $FINV, '2026-10-20', 30);
 chequear('una fecha asignada anterior a hoy no suma: FECHA_PASADA', [Echeqs::CARTERA_FECHA_PASADA, null],
     [$r['estado'], $r['fecha_eje']]);
 $r = Echeqs::resolverFechaCartera('2026-09-15', $HOYV, $CAL, $FINV, '2026-10-23', 30);
-chequear('fuera de la ventana la fecha asignada deja de aplicar: sale solo', Echeqs::CARTERA_FUERA_VENTANA,
+chequear('pasado el plazo la fecha asignada deja de aplicar: es vencido', Echeqs::CARTERA_VENCIDO,
     $r['estado']);
 $r = Echeqs::resolverFechaCartera('2026-10-28', $HOYV, $CAL, $FINV, '2026-10-23', 30);
 chequear('a un vigente no se le aplica una fecha asignada', [Echeqs::CARTERA_VIGENTE, '2026-10-28'],
     [$r['estado'], $r['fecha_eje']]);
 
-$fv = filaCarteraVenc(30, '2026-10-15', 900.0, $HOYV, '2026-10-24');
+$fv = filaCarteraEnPlazo(30, '2026-10-15', 900.0, $HOYV, '2026-10-24');
 chequear('la fecha asignada no se corre: si llegara un sabado, queda el sabado', '2026-10-24', $fv['FECHA_EJE']);
 
-/** Una fila de cartera con fecha asignada, resuelta con el calendario de prueba y ventana 30 */
-function filaCarteraVenc($id, $fecha, $importe, $hoy, $asignada = null, $extra = []) {
+/** Una fila de cartera con fecha asignada, resuelta con el calendario de prueba y plazo 30 */
+function filaCarteraEnPlazo($id, $fecha, $importe, $hoy, $asignada = null, $extra = []) {
     global $CAL;
 
     $f = array_merge(['ID_SBA14' => $id, 'N_CHEQUE' => 8000 + $id, 'FECHA_CHEQUE' => $fecha,
@@ -412,11 +434,11 @@ chequearLanza('un feriado no', function () use ($HOYV, $FINV, $CAL) {
 chequearLanza('posterior al fin del horizonte no, y dice que tope aplico', function () use ($HOYV, $CAL) {
     Echeqs::validarFechaAsignada('2026-12-02', '2026-11-15', $HOYV, '2026-11-30', 30, $CAL);
 }, 'El 02/12 es posterior al fin del horizonte (30/11): no hay columna donde sumarlo.');
-chequearLanza('posterior al ultimo dia en que se muestra no, y dice que tope aplico',
+chequearLanza('posterior al ultimo dia del plazo de presentacion no, y dice que tope aplico',
     function () use ($HOYV, $FINV, $CAL) {
         Echeqs::validarFechaAsignada('2026-11-16', '2026-10-15', $HOYV, $FINV, 30, $CAL);
-    }, 'El 16/11 es posterior al 14/11, el último día en que el cheque se sigue mostrando (su fecha '
-        . 'más 30 días): después sale de Echeqs y esa fecha no llegaría a sumar.');
+    }, 'El 16/11 es posterior al 14/11, el último día del plazo de presentación del cheque (su fecha '
+        . 'más 30 días): después está vencido, ya no se puede depositar, y esa fecha no llegaría a sumar.');
 chequear('el ultimo dia en que se muestra si se acepta, si es habil', '2026-11-13',
     Echeqs::validarFechaAsignada('2026-11-13', '2026-10-14', $HOYV, $FINV, 30, $CAL)['fecha']);
 chequearLanza('un texto no es una fecha', function () use ($HOYV, $FINV, $CAL) {
@@ -436,32 +458,36 @@ chequearLanza('y con el respaldo, un sabado sigue sin servir', function () use (
 seccion('asignar en masa es todo o nada');
 
 $filasSel = [
-    filaCarteraVenc(1, '2026-10-15', 100.0, $HOYV),                     // vencido sin fecha
-    filaCarteraVenc(2, '2026-10-16', 200.0, $HOYV, '2026-10-23'),       // vencido con fecha
-    filaCarteraVenc(3, '2026-10-28', 300.0, $HOYV),                     // vigente
-    filaCarteraVenc(4, '2026-10-01', 400.0, $HOYV, '2026-10-20'),       // fecha pasada
+    filaCarteraEnPlazo(1, '2026-10-15', 100.0, $HOYV),                     // en plazo sin fecha
+    filaCarteraEnPlazo(2, '2026-10-16', 200.0, $HOYV, '2026-10-23'),       // en plazo con fecha
+    filaCarteraEnPlazo(3, '2026-10-28', 300.0, $HOYV),                     // vigente
+    filaCarteraEnPlazo(4, '2026-10-01', 400.0, $HOYV, '2026-10-20'),       // fecha pasada
     ['ID_SBA14' => 5, 'N_CHEQUE' => 8005, 'IMPORTE' => 500.0,
-     'DEPOSITO' => ['estado' => Echeqs::DEPOSITO_PROYECTA]]              // depositado
+     'DEPOSITO' => ['estado' => Echeqs::DEPOSITO_PROYECTA]],             // depositado
+    filaCarteraEnPlazo(6, '2026-09-01', 600.0, $HOYV)                      // vencido
 ];
 
-$v = Echeqs::validarSeleccionVencidos([1, 2, 4], $filasSel);
+$v = Echeqs::validarSeleccionEnPlazo([1, 2, 4], $filasSel);
 chequear('sin fecha, con fecha y fecha pasada se aceptan', [null, [1, 2, 4]],
     [$v['error'], array_column($v['filas'], 'ID_SBA14')]);
 
-$v = Echeqs::validarSeleccionVencidos([1, 3], $filasSel);
+$v = Echeqs::validarSeleccionEnPlazo([1, 3], $filasSel);
 chequear('con un vigente en la seleccion no se acepta ninguno', [], $v['filas']);
 chequear('y el mensaje dice cual y por que', true,
-    strpos($v['error'], 'N° 8003 no está vencido') !== false);
-$v = Echeqs::validarSeleccionVencidos([1, 5], $filasSel);
+    strpos($v['error'], 'N° 8003 no está en plazo de presentación') !== false);
+$v = Echeqs::validarSeleccionEnPlazo([1, 6], $filasSel);
+chequear('con un vencido tampoco: ya no se puede depositar', [[], true],
+    [$v['filas'], strpos($v['error'], 'N° 8006 está vencido: superó su plazo de presentación') !== false]);
+$v = Echeqs::validarSeleccionEnPlazo([1, 5], $filasSel);
 chequear('con un depositado tampoco', [[], true],
     [$v['filas'], strpos($v['error'], 'N° 8005 está depositado en Tango') !== false]);
-$v = Echeqs::validarSeleccionVencidos([1, 99], $filasSel);
+$v = Echeqs::validarSeleccionEnPlazo([1, 99], $filasSel);
 chequear('ni con uno que no esta en la lectura', [[], true],
     [$v['filas'], strpos($v['error'], 'N° 99 no está en cartera') !== false]);
-chequear('vacio, tampoco', 'No llegó ningún cheque.', Echeqs::validarSeleccionVencidos([], $filasSel)['error']);
+chequear('vacio, tampoco', 'No llegó ningún cheque.', Echeqs::validarSeleccionEnPlazo([], $filasSel)['error']);
 
 // El tope de cada cheque es SU fecha + N: una fecha puede servir a uno y no a otro.
-$dos = [filaCarteraVenc(6, '2026-10-01', 10.0, $HOYV), filaCarteraVenc(7, '2026-10-19', 20.0, $HOYV)];
+$dos = [filaCarteraEnPlazo(6, '2026-10-01', 10.0, $HOYV), filaCarteraEnPlazo(7, '2026-10-19', 20.0, $HOYV)];
 $vf = Echeqs::validarFechaParaSeleccion('2026-11-02', $dos, $HOYV, $FINV, 30, $CAL);
 chequear('una fecha que no sirve para uno no se graba para ninguno', null, $vf['fecha']);
 chequear('y el mensaje nombra al cheque', true, strpos($vf['error'], 'N° 8006 El 02/11 es posterior al 31/10') !== false);
@@ -483,9 +509,9 @@ chequear('6 parametros por cheque: id, fecha, observacion, la que reemplaza y el
     [1, '2026-10-29', 'obs', null, 'rorozco', 'rorozco', 2, '2026-10-29', 'obs', 50, 'rorozco', 'rorozco'],
     Echeqs::paramsInsertFecha([1, 2], '2026-10-29', 'obs', [2 => 50], 'rorozco'));
 
-$srcAsignar = substr($srcEcheqsV, strpos($srcEcheqsV, 'public function asignarFechaVencidos('), 2600);
+$srcAsignar = substr($srcEcheqsV, strpos($srcEcheqsV, 'public function asignarFechaEnPlazo('), 2600);
 chequear('asignar valida todo antes de escribir, contra la lectura de hoy', true,
-    strpos($srcAsignar, 'validarSeleccionVencidos($ids, array_merge($this->getEcheqsCartera($h), $dep[\'filas\']))') !== false
+    strpos($srcAsignar, 'validarSeleccionEnPlazo($ids, array_merge($this->getEcheqsCartera($h), $dep[\'filas\']))') !== false
     && strpos($srcAsignar, 'validarFechaParaSeleccion(') < strpos($srcAsignar, '$this->escribirFechas(')
     && strpos($srcAsignar, '$usuario = AuthCashflow::usuarioDeEscritura($usuario);') !== false);
 $srcEscribir = substr($srcEcheqsV, strpos($srcEcheqsV, 'protected function escribirFechas('), 2000);
@@ -498,16 +524,16 @@ chequear('la baja es logica, con quien y cuando', [true, false], [
     strpos($srcBaja, 'SET VIGENTE = 0, " . Auditoria::SET_BAJA . "') !== false,
     stripos($srcBaja, 'DELETE') !== false
 ]);
-$m = new ReflectionMethod('Echeqs', 'asignarFechaVencidos');
+$m = new ReflectionMethod('Echeqs', 'asignarFechaEnPlazo');
 chequear('del navegador llegan solo ids, fecha y observacion', ['ids', 'fecha', 'observacion', 'usuario', 'h'],
     array_map(function ($p) { return $p->getName(); }, $m->getParameters()));
 
-foreach (['asignarFechaVencidos', 'deshacerFechaVencidos'] as $accion) {
+foreach (['asignarFechaEnPlazo', 'deshacerFechaEnPlazo'] as $accion) {
     chequear($accion . ' pide editar Echeqs, como excluir', [['echeqs', null]],
         AuthCashflow::ESCRITURAS['Echeqs'][$accion]);
 }
 
-seccion('el tablero: los vencidos en la particion');
+seccion('el tablero: en plazo y vencidos en la particion');
 
 $itemsVenc = [
     ['FECHA_PAGO' => '2026-10-15', 'EXCLUIDO' => false, 'IMPORTE' => 1000.0, 'CHEQUES' => 1,
@@ -520,7 +546,9 @@ $itemsVenc = [
      'CARTERA' => Echeqs::resolverFechaCartera('2026-10-18', $HOYV, $CAL, $FINV, '2026-10-26', 30)],
     ['FECHA_PAGO' => '2026-10-02', 'EXCLUIDO' => false, 'IMPORTE' => 30.0, 'CHEQUES' => 1,
      'CARTERA' => Echeqs::resolverFechaCartera('2026-10-02', $HOYV, $CAL, $FINV, '2026-10-20', 30)],
-    itemV('2026-10-22', 200.0, false, $HOYV)
+    itemV('2026-10-22', 200.0, false, $HOYV),
+    ['FECHA_PAGO' => '2026-09-01', 'EXCLUIDO' => false, 'IMPORTE' => 900.0, 'CHEQUES' => 1,
+     'CARTERA' => Echeqs::resolverFechaCartera('2026-09-01', $HOYV, $CAL, $FINV, null, 30)]
 ];
 $sVe = EcheqsProvider::repartir($hV, $itemsVenc);
 
@@ -530,6 +558,7 @@ chequear('vencido excluido sin fecha: ninguna serie', [], EcheqsProvider::series
 chequear('vencido excluido con fecha: A_COBRAR_EXCLUIDOS en esa fecha', 80.0,
     $sVe['A_COBRAR_EXCLUIDOS']['dias']['2026-10-26']);
 chequear('fecha pasada: ninguna serie', [], EcheqsProvider::seriesDeItem($itemsVenc[4]));
+chequear('vencido: ninguna serie, ni A_COBRAR_TODO', [], EcheqsProvider::seriesDeItem($itemsVenc[6]));
 chequear('el total es lo que suma: 1000 + 80 + 200', 1280.0,
     array_sum($sVe['A_COBRAR_TODO']['dias']) + array_sum($sVe['A_COBRAR_TODO']['meses'])
     + $sVe['A_COBRAR_TODO']['fuera_horizonte'] + $sVe['A_COBRAR_TODO']['sin_fecha']);
@@ -543,27 +572,35 @@ chequear('una fecha asignada fuera del eje -se achico el horizonte- va a fuera_h
 
 $aV = Echeqs::avisosCartera($itemsVenc);
 $textosV = implode(' | ', array_column($aV, 'texto'));
-chequear('el aviso de vencidos sin fecha: atencion, cuantos y por cuanto, sin el excluido', true,
-    strpos($textosV, '1 cheque(s) vencidos en cartera sin fecha de acreditación por $ 700,00 no se '
+chequear('el aviso de en plazo sin fecha: atencion, cuantos y por cuanto, sin el excluido', true,
+    strpos($textosV, '1 cheque(s) en plazo de presentación sin fecha de acreditación por $ 700,00 no se '
         . 'proyectan. Asignales una fecha en Ingresos › Echeqs.') !== false);
 chequear('el de la fecha pasada, aparte', true,
-    strpos($textosV, '1 cheque(s) vencidos por $ 30,00 tenían fecha de acreditación ya pasada y siguen '
-        . 'en cartera: reasignales la fecha') !== false);
-chequear('los dos son de atencion', ['warning', 'warning'], array_column(array_slice($aV, 0, 2), 'nivel'));
+    strpos($textosV, '1 cheque(s) en plazo de presentación por $ 30,00 tenían fecha de acreditación ya '
+        . 'pasada y siguen en cartera: reasignales la fecha') !== false);
+chequear('el de los vencidos, aparte: no se pueden presentar y hay que resolverlos en Tango', true,
+    strpos($textosV, '1 cheque(s) vencidos por $ 900,00 superaron el plazo de presentación y siguen en '
+        . 'cartera en Tango') !== false);
+chequear('los tres son de atencion', ['warning', 'warning', 'warning'], array_column(array_slice($aV, 0, 3), 'nivel'));
+chequear('ningun aviso llama vencido a un cheque en plazo', 0,
+    substr_count($textosV, 'vencidos en cartera sin fecha'));
 
-seccion('la pestana y el proveedor suman lo mismo, con vencidos');
+seccion('la pestana y el proveedor suman lo mismo, con cheques en plazo y vencidos');
 
 $filasVe = [
-    filaCarteraVenc(11, '2026-10-15', 1000.0, $HOYV, '2026-10-23'),
-    filaCarteraVenc(12, '2026-10-16', 700.0, $HOYV),
-    filaCarteraVenc(13, '2026-10-17', 50.0, $HOYV, null, ['EXCLUIDO' => true]),
-    filaCarteraVenc(14, '2026-10-18', 80.0, $HOYV, '2026-10-26', ['EXCLUIDO' => true]),
-    filaCarteraVenc(15, '2026-10-02', 30.0, $HOYV, '2026-10-20'),
-    filaCarteraV(16, '2026-10-22', 200.0, $HOYV)
+    filaCarteraEnPlazo(11, '2026-10-15', 1000.0, $HOYV, '2026-10-23'),
+    filaCarteraEnPlazo(12, '2026-10-16', 700.0, $HOYV),
+    filaCarteraEnPlazo(13, '2026-10-17', 50.0, $HOYV, null, ['EXCLUIDO' => true]),
+    filaCarteraEnPlazo(14, '2026-10-18', 80.0, $HOYV, '2026-10-26', ['EXCLUIDO' => true]),
+    filaCarteraEnPlazo(15, '2026-10-02', 30.0, $HOYV, '2026-10-20'),
+    filaCarteraV(16, '2026-10-22', 200.0, $HOYV),
+    filaCarteraEnPlazo(17, '2026-09-01', 900.0, $HOYV)
 ];
 $pVe = EjeVista::armar($hV, $filasVe, 'FECHA_EJE', 'IMPORTE_EJE');
 
-chequear('el vencido sin fecha no cae en ninguna columna', [null, 0.0],
+chequear('el vencido no cae en ninguna columna, ni tiene Acredita', [null, 0.0, null],
+    [$filasVe[6]['FECHA_EJE'], $filasVe[6]['IMPORTE_EJE'], $filasVe[6]['ACREDITA']]);
+chequear('el en plazo sin fecha no cae en ninguna columna', [null, 0.0],
     [$filasVe[1]['FECHA_EJE'], $filasVe[1]['IMPORTE_EJE']]);
 chequear('el con fecha cae en su fecha y la muestra en Acredita', ['2026-10-23', '2026-10-23'],
     [$filasVe[0]['FECHA_EJE'], $filasVe[0]['ACREDITA']]);
@@ -572,50 +609,52 @@ chequear('la grilla entera es A_COBRAR_TODO', round(array_sum($sVe['A_COBRAR_TOD
     + array_sum($sVe['A_COBRAR_TODO']['meses']), 2), round($pVe['totales']['total_horizonte'], 2));
 chequear('y los avisos son los mismos', Echeqs::avisosCartera($itemsVenc), Echeqs::avisosCartera($filasVe));
 
-$rv = Echeqs::resumenVencidos($pVe['filas']);
-chequear('la tarjeta: vencidos sin los excluidos, con y sin fecha', [3, 1730.0, 1, 1000.0, 2, 730.0],
+$rv = Echeqs::resumenEnPlazo($pVe['filas']);
+chequear('la tarjeta: en plazo sin los excluidos, con y sin fecha', [3, 1730.0, 1, 1000.0, 2, 730.0],
     [$rv['cheques'], $rv['bruto'], $rv['con_fecha']['cheques'], $rv['con_fecha']['bruto'],
      $rv['sin_fecha']['cheques'], $rv['sin_fecha']['bruto']]);
 chequear('los con fecha traen lo que suman en la vista', 1000.0, $rv['con_fecha']['total_horizonte']);
 chequear('el interruptor esconde los sin fecha, no los de fecha pasada', [1, 700.0, 1, 30.0],
     [$rv['ocultables']['cheques'], $rv['ocultables']['bruto'], $rv['pasada']['cheques'], $rv['pasada']['bruto']]);
+chequear('los vencidos van aparte, fuera de los en plazo', [1, 900.0],
+    [$rv['vencidos']['cheques'], $rv['vencidos']['bruto']]);
 
 $netosVe = Echeqs::totalesNetos(Echeqs::totalesNetos($pVe['totales'], Echeqs::resumenExcluidos($pVe['filas'])),
     Echeqs::resumenDepositos($pVe['filas']));
-chequear('las tres tarjetas de cartera son "Echeqs en cartera": incluyen los vencidos con fecha',
+chequear('las tres tarjetas de cartera son "Echeqs en cartera": incluyen los en plazo con fecha',
     round(array_sum($sVe['A_COBRAR']['dias']) + array_sum($sVe['A_COBRAR']['meses']), 2),
     round($netosVe['total_horizonte'], 2));
 
 seccion('un vencido con fecha que se deposita en Tango');
 
-$depVe = Echeqs::ubicarEnEje(array_merge(filaCarteraVenc(20, '2026-10-15', 1000.0, $HOYV, '2026-10-29'), [
+$depVe = Echeqs::ubicarEnEje(array_merge(filaCarteraEnPlazo(20, '2026-10-15', 1000.0, $HOYV, '2026-10-29'), [
     'DEPOSITO' => ['estado' => Echeqs::DEPOSITO_PROYECTA, 'fecha_acreditacion' => '2026-10-23',
                    'bruto' => 1000.0, 'neto' => 969.0]]));
 chequear('entra en depositados con la regla de las 48 hs: la fecha asignada no interviene',
     ['2026-10-23', 969.0, null], [$depVe['FECHA_EJE'], $depVe['IMPORTE_EJE'], $depVe['ESTADO_CARTERA']]);
 chequear('y el proveedor lo pone en DEPOSITADOS', ['A_COBRAR_TODO', 'DEPOSITADOS'],
     EcheqsProvider::seriesDeItem(['DEPOSITO' => ['estado' => Echeqs::DEPOSITO_PROYECTA],
-        'CARTERA' => ['estado' => Echeqs::CARTERA_VENCIDO_CON_FECHA, 'fecha_eje' => '2026-10-29']]));
+        'CARTERA' => ['estado' => Echeqs::CARTERA_EN_PLAZO_CON_FECHA, 'fecha_eje' => '2026-10-29']]));
 
 /* ================================================================
-   Sin el script, y con la ventana rota
+   Sin el script, y con el plazo de presentacion roto
    ================================================================ */
-seccion('sin el script: no hay vencidos, y el resto anda igual');
+seccion('sin el script: no se leen, y el resto anda igual');
 
 /**
- * Echeqs con la tabla y la ventana inyectadas, y el calendario de prueba: no
+ * Echeqs con la tabla y el plazo de presentacion inyectados, y el calendario de prueba: no
  * lee ni escribe nada.
  */
 class EcheqsSinScriptPrueba extends Echeqs {
     public $tabla = false;
-    public $ventana = ['dias' => null, 'error' => null];
+    public $plazoPres = ['dias' => null, 'error' => null];
 
-    public function fechaVencidosCreada() {
+    public function fechaAcreditacionCreada() {
         return $this->tabla;
     }
 
-    public function getVentana() {
-        return $this->ventana;
+    public function getPlazoPresentacion() {
+        return $this->plazoPres;
     }
 
     protected function diasHabiles($desde, $hasta) {
@@ -626,36 +665,36 @@ class EcheqsSinScriptPrueba extends Echeqs {
 }
 
 $sinScript = new EcheqsSinScriptPrueba();
-$aSin = $sinScript->avisosVentana($hV);
+$aSin = $sinScript->avisosPlazoPresentacion($hV);
 chequear('la pestana avisa con nivel de atencion y nombra el script', [1, 'warning', true],
-    [count($aSin), $aSin[0]['nivel'], strpos($aSin[0]['texto'], Echeqs::SCRIPT_VENCIDOS) !== false]);
-chequear('el tablero no dice nada', [], $sinScript->avisosVentana($hV, true));
+    [count($aSin), $aSin[0]['nivel'], strpos($aSin[0]['texto'], Echeqs::SCRIPT_PLAZO_PRESENTACION) !== false]);
+chequear('el tablero no dice nada', [], $sinScript->avisosPlazoPresentacion($hV, true));
 chequear('no se pueden asignar fechas: el selector no se dibuja', [false, null],
-    [$sinScript->datosVencidos($hV)['creada'], $sinScript->datosVencidos($hV)['ventana']]);
+    [$sinScript->datosEnPlazo($hV)['creada'], $sinScript->datosEnPlazo($hV)['plazo_presentacion']]);
 chequear('y getFechasAsignadas() no lee nada', ['vigentes' => [], 'historial' => []],
     $sinScript->getFechasAsignadas([1, 2]));
 
 $rota = new EcheqsSinScriptPrueba();
 $rota->tabla = true;
-$rota->ventana = Echeqs::ventanaDesdeValor(null);
-$aRota = $rota->avisosVentana($hV, true);
+$rota->plazoPres = Echeqs::plazoPresentacionDesdeValor(null);
+$aRota = $rota->avisosPlazoPresentacion($hV, true);
 chequear('con la tabla y el parametro faltante: critico en el tablero', ['danger', true],
-    [$aRota[0]['nivel'], strpos($aRota[0]['texto'], 'Falta el parámetro ' . Echeqs::CLAVE_VENTANA) !== false]);
-chequear('y en la pestana', 'danger', $rota->avisosVentana($hV)[0]['nivel']);
+    [$aRota[0]['nivel'], strpos($aRota[0]['texto'], 'Falta el parámetro ' . Echeqs::CLAVE_PLAZO_PRESENTACION) !== false]);
+chequear('y en la pestana', 'danger', $rota->avisosPlazoPresentacion($hV)[0]['nivel']);
 
 $bien = new EcheqsSinScriptPrueba();
 $bien->tabla = true;
-$bien->ventana = ['dias' => 30, 'error' => null];
-chequear('con todo en orden no avisa nada', [], $bien->avisosVentana($hV));
+$bien->plazoPres = ['dias' => 30, 'error' => null];
+chequear('con todo en orden no avisa nada', [], $bien->avisosPlazoPresentacion($hV));
 chequear('y el selector va de manana al fin del eje', ['2026-10-22', $hV->fin(), 30],
-    [$bien->datosVencidos($hV)['manana'], $bien->datosVencidos($hV)['fin'], $bien->datosVencidos($hV)['ventana']]);
+    [$bien->datosEnPlazo($hV)['manana'], $bien->datosEnPlazo($hV)['fin'], $bien->datosEnPlazo($hV)['plazo_presentacion']]);
 
 $srcGetF = substr($srcEcheqsV, strpos($srcEcheqsV, 'public function getFechasAsignadas('), 900);
 chequear('sin la tabla, getFechasAsignadas() devuelve vacio sin lanzar', true,
-    strpos($srcGetF, "if (empty(\$ids) || !\$this->fechaVencidosCreada()) {\n            return \$r;") !== false);
+    strpos($srcGetF, "if (empty(\$ids) || !\$this->fechaAcreditacionCreada()) {\n            return \$r;") !== false);
 $srcCtx = substr($srcEcheqsV, strpos($srcEcheqsV, 'private function contextoCartera('), 1800);
-chequear('sin la tabla no se lee la ventana: sin vencidos', true,
-    strpos($srcCtx, "\$ventana = \$tabla ? \$this->getVentana() : ['dias' => null, 'error' => null];") !== false);
+chequear('sin la tabla no se lee el plazo: no se leen los de dia habil pasado', true,
+    strpos($srcCtx, "\$plazoPres = \$tabla ? \$this->getPlazoPresentacion() : ['dias' => null, 'error' => null];") !== false);
 
 seccion('el universo es uno solo');
 
@@ -686,7 +725,7 @@ chequear('ninguna lectura de cartera filtra contra GETDATE()', 0,
 /**
  * Las escrituras reales de Echeqs con la tabla y la conexion cambiadas por una
  * #temporal de la sesion de la prueba. NO ESCRIBE EN NINGUNA TABLA REAL: corre
- * escribirFechas() y deshacerFechaVencidos() de produccion contra la
+ * escribirFechas() y deshacerFechaEnPlazo() de produccion contra la
  * temporal, y se verifica a si misma abajo.
  */
 class EcheqsFechasPrueba extends Echeqs {
@@ -700,7 +739,7 @@ class EcheqsFechasPrueba extends Echeqs {
         return $this->cid;
     }
 
-    public function fechaVencidosCreada() {
+    public function fechaAcreditacionCreada() {
         return true;
     }
 
@@ -759,13 +798,13 @@ if (!Pruebas::hayBase()) {
     chequear('y la anterior queda en el historial, dada de baja con quien', [2, 'pruebas2'],
         [count($f2['historial'][101]), $f2['historial'][101][1]['usuario_baja']]);
 
-    $d = $ef->deshacerFechaVencidos([101, 102], 'pruebas3');
+    $d = $ef->deshacerFechaEnPlazo([101, 102], 'pruebas3');
     $f3 = $ef->getFechasAsignadas([101, 102]);
     chequear('deshacer deja los dos sin fecha', [2, []], [$d['deshechos'], $f3['vigentes']]);
     chequear('y conserva el historial entero', [2, 1], [count($f3['historial'][101]), count($f3['historial'][102])]);
 
     chequearLanza('deshacer otra vez no puede: ya no tienen fecha', function () use ($ef) {
-        $ef->deshacerFechaVencidos([101], 'pruebas');
+        $ef->deshacerFechaEnPlazo([101], 'pruebas');
     });
 
     // El indice unico: una segunda vigente para el mismo cheque falla en la base.

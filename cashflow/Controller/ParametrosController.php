@@ -923,10 +923,10 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
-        /* Los dias hacia atras en que un cheque vencido en cartera se sigue
-           mostrando. Valida Echeqs::guardarVentana(): saveParametro() rechaza
+        /* El plazo de presentacion de los cheques: hasta cuantos dias desde
+           su fecha un cheque en cartera esta en plazo; despues, vencido. Valida Echeqs::guardarPlazoPresentacion(): saveParametro() rechaza
            esta clave, como la del plazo. */
-        case 'saveDiasVencidosEcheq':
+        case 'savePlazoPresentacionEcheq':
             $data = bodyJson();
 
             if (!array_key_exists('dias', $data)) {
@@ -935,12 +935,12 @@ try {
 
             require_once __DIR__ . '/../Class/Echeqs.php';
 
-            $dias = (new Echeqs())->guardarVentana($data['dias'], $usuario);
+            $dias = (new Echeqs())->guardarPlazoPresentacion($data['dias'], $usuario);
 
             echo json_encode([
                 'success' => true,
-                'message' => 'Los cheques vencidos en cartera se siguen mostrando hasta ' . $dias
-                    . ' día(s) después de su fecha.',
+                'message' => 'Plazo de presentación: ' . $dias . ' día(s) corridos desde la fecha del '
+                    . 'cheque. Después, el cheque en cartera figura como vencido.',
                 'data' => ['dias' => $dias]
             ], JSON_UNESCAPED_UNICODE);
             break;

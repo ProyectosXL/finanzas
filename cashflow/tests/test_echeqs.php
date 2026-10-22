@@ -1017,36 +1017,55 @@ foreach ($cartera as $c) {
 
 chequear('cada corrimiento va hacia adelante, y lo que no se corre queda en su fecha', 0, $corridasMal);
 
-/* LOS VENCIDOS LEIDOS ESTAN TODOS EN LA VENTANA Y EN CARTERA: su dia habil ya
-   paso, su fecha es de hoy - N en adelante, y solo suman los que tienen una
-   fecha de hoy en adelante. */
-$ventanaReal = $echeqs->getVentana()['dias'];
+/* LOS DE DIA HABIL PASADO, CONTRA LOS DATOS DE HOY. Los EN PLAZO DE
+   PRESENTACION tienen su fecha dentro del plazo -hoy - N en adelante- y solo
+   suman con una fecha asignada de hoy en adelante. Los VENCIDOS superaron el
+   plazo y no suman nunca. */
+$plazoPresReal = $echeqs->getPlazoPresentacion()['dias'];
+$desdePlazo = ($plazoPresReal === null) ? null : date('Y-m-d', strtotime($hoy . ' -' . $plazoPresReal . ' day'));
+$enPlazoMal = 0;
 $vencidosMal = 0;
+$enPlazoReales = 0;
 $vencidosReales = 0;
 
 foreach ($cartera as $c) {
     $cc = $c['CARTERA'];
 
-    if (!in_array($cc['estado'], Echeqs::CARTERA_VENCIDOS, true)) {
+    if ($cc['estado'] === Echeqs::CARTERA_VENCIDO) {
+        $vencidosReales++;
+
+        if ($desdePlazo === null || $c['FECHA_CHEQUE'] >= $desdePlazo || $c['IMPORTE_EJE'] != 0) {
+            $vencidosMal++;
+        }
+
         continue;
     }
 
-    $vencidosReales++;
+    if (!in_array($cc['estado'], Echeqs::CARTERA_EN_PLAZO, true)) {
+        continue;
+    }
 
-    if ($ventanaReal === null || !$echeqs->fechaVencidosCreada()
-        || $c['FECHA_CHEQUE'] < date('Y-m-d', strtotime($hoy . ' -' . $ventanaReal . ' day'))
+    $enPlazoReales++;
+
+    if ($desdePlazo === null || !$echeqs->fechaAcreditacionCreada()
+        || $c['FECHA_CHEQUE'] < $desdePlazo
         || $cc['fecha_corrida'] >= $hoy
-        || ($cc['estado'] === Echeqs::CARTERA_VENCIDO_CON_FECHA && $cc['fecha_asignada'] < $hoy)
-        || ($cc['estado'] !== Echeqs::CARTERA_VENCIDO_CON_FECHA && $c['IMPORTE_EJE'] != 0)) {
-        $vencidosMal++;
+        || ($cc['estado'] === Echeqs::CARTERA_EN_PLAZO_CON_FECHA && $cc['fecha_asignada'] < $hoy)
+        || ($cc['estado'] !== Echeqs::CARTERA_EN_PLAZO_CON_FECHA && $c['IMPORTE_EJE'] != 0)) {
+        $enPlazoMal++;
     }
 }
 
-chequear('los vencidos leidos estan en la ventana, en cartera, y suman solo con fecha', 0, $vencidosMal);
+chequear('los en plazo de presentacion estan dentro del plazo, en cartera, y suman solo con fecha', 0, $enPlazoMal);
+chequear('los vencidos superaron el plazo y no suman', 0, $vencidosMal);
+
+if ($enPlazoReales === 0) {
+    Pruebas::saltear('hoy no hay ningun cheque en plazo de presentacion en cartera'
+        . ($echeqs->fechaAcreditacionCreada() ? '' : ': falta correr ' . Echeqs::SCRIPT_PLAZO_PRESENTACION));
+}
 
 if ($vencidosReales === 0) {
-    Pruebas::saltear('hoy no hay ningun cheque vencido en cartera'
-        . ($echeqs->fechaVencidosCreada() ? '' : ': falta correr ' . Echeqs::SCRIPT_VENCIDOS));
+    Pruebas::saltear('hoy no hay ningun cheque vencido en cartera');
 }
 chequear('ninguno trae deposito: la cartera es solo ESTADO = C', 0,
     count(array_filter($cartera, function ($c) { return !empty($c['DEPOSITO']); })));

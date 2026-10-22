@@ -103,12 +103,12 @@ try {
             $payload['excluidos'] = Echeqs::resumenExcluidos($payload['filas']);
             $payload['depositados'] = Echeqs::resumenDepositos($payload['filas']);
 
-            /* LOS VENCIDOS: cuantos tienen fecha -y suman, adentro de "Echeqs
-               en cartera"- y cuantos no. Y lo que la pantalla necesita para
+            /* LOS EN PLAZO DE PRESENTACION: cuantos tienen fecha -y suman,
+               adentro de "Echeqs en cartera"- y cuantos no; y los vencidos. Y lo que la pantalla necesita para
                el selector de fecha: si se puede asignar y entre que fechas.
                El servidor valida igual al guardar. */
-            $payload['vencidos'] = Echeqs::resumenVencidos($payload['filas']);
-            $payload['fecha_vencidos'] = $echeqs->datosVencidos($h);
+            $payload['en_plazo'] = Echeqs::resumenEnPlazo($payload['filas']);
+            $payload['fecha_en_plazo'] = $echeqs->datosEnPlazo($h);
 
             /* LAS TRES TARJETAS SON LA CARTERA COBRABLE SIN DEPOSITADOS: lo
                mismo que la fila "Echeqs en cartera" del tablero. Los
@@ -125,11 +125,11 @@ try {
                 $payload['warnings'][] = $a;
             }
 
-            // Los de la cartera: vencidos sin fecha o con la fecha pasada,
-            // calendario faltante y sin habil. Los mismos que deja el
-            // proveedor en el tablero. Y los de la ventana: sin el script,
-            // solo aca; con la ventana rota, critico aca y en el tablero.
-            foreach (array_merge(Echeqs::avisosCartera($cartera), $echeqs->avisosVentana($h)) as $a) {
+            // Los de la cartera: en plazo sin fecha o con la fecha pasada,
+            // vencidos, calendario faltante y sin habil. Los mismos que deja
+            // el proveedor en el tablero. Y los del plazo de presentacion: sin
+            // el script, solo aca; roto, critico aca y en el tablero.
+            foreach (array_merge(Echeqs::avisosCartera($cartera), $echeqs->avisosPlazoPresentacion($h)) as $a) {
                 $payload['warnings'][] = $a;
             }
 
@@ -363,23 +363,23 @@ try {
             break;
 
         /* ================================================================
-           LA FECHA DE ACREDITACION INTERNA DE UN VENCIDO
+           LA FECHA DE ACREDITACION INTERNA DE UN CHEQUE EN PLAZO DE PRESENTACION
 
            Solo vive en el cashflow. Del navegador llegan SOLO LOS IDS, LA
            FECHA Y UNA OBSERVACION: Echeqs vuelve a validar todo contra la
-           lectura de la base -que sean vencidos en cartera y que la fecha
+           lectura de la base -que esten en plazo de presentacion y que la fecha
            sea de manana en adelante, habil y dentro del tope-, todo o nada.
            Una sola accion para uno -la celda Acredita- y para varios -la
            barra de seleccion-.
            ================================================================ */
-        case 'asignarFechaVencidos':
+        case 'asignarFechaEnPlazo':
             $data = bodyJson();
 
             if (!isset($data['ids']) || !is_array($data['ids']) || !isset($data['fecha'])) {
                 throw new Exception('Faltan parametros obligatorios');
             }
 
-            $r = $echeqs->asignarFechaVencidos(
+            $r = $echeqs->asignarFechaEnPlazo(
                 $data['ids'],
                 $data['fecha'],
                 isset($data['observacion']) ? $data['observacion'] : null,
@@ -389,7 +389,7 @@ try {
 
             echo json_encode([
                 'success' => true,
-                'message' => $r['asignados'] . ' cheque(s) vencidos acreditan el '
+                'message' => $r['asignados'] . ' cheque(s) en plazo de presentación acreditan el '
                     . date('d/m/Y', strtotime($r['fecha']))
                     . ($r['reemplazados'] ? ' (' . $r['reemplazados'] . ' reemplazan una fecha anterior, '
                         . 'que queda en el historial)' : '') . '.',
@@ -397,19 +397,19 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
-        case 'deshacerFechaVencidos':
+        case 'deshacerFechaEnPlazo':
             $data = bodyJson();
 
             if (!isset($data['ids']) || !is_array($data['ids'])) {
                 throw new Exception('Faltan parametros obligatorios');
             }
 
-            $r = $echeqs->deshacerFechaVencidos($data['ids'], $usuario);
+            $r = $echeqs->deshacerFechaEnPlazo($data['ids'], $usuario);
 
             echo json_encode([
                 'success' => true,
-                'message' => $r['deshechos'] . ' fecha(s) deshechas: esos cheques vuelven a vencidos sin '
-                    . 'fecha y dejan de sumar. La fecha queda en el historial, dada de baja.',
+                'message' => $r['deshechos'] . ' fecha(s) deshechas: esos cheques vuelven a en plazo de '
+                    . 'presentación sin fecha y dejan de sumar. La fecha queda en el historial, dada de baja.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

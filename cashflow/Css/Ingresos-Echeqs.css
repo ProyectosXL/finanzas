@@ -342,11 +342,14 @@
     max-width: 130px;
 }
 
-/* LOS VENCIDOS. Sin fecha, en ambar: no suman y piden una fecha. Con fecha,
-   en azul como el depositado: suman, en otra fecha que la del cheque. La de
-   fecha pasada usa la roja de "sin proyectar": pide una accion. */
-.tab-echeqs .ech-badge-vencido,
-.tab-echeqs .ech-badge-vencido-fecha {
+/* EN PLAZO DE PRESENTACION. Sin fecha, en ambar: no suman y piden una fecha.
+   Con fecha, en azul como el depositado: suman, en otra fecha que la del
+   cheque. La de fecha pasada usa la roja de "sin proyectar": pide una
+   accion. El VENCIDO, en gris oscuro: ya no se puede depositar, y lo que pide
+   es resolverlo en Tango. */
+.tab-echeqs .ech-badge-en-plazo,
+.tab-echeqs .ech-badge-en-plazo-fecha,
+.tab-echeqs .ech-badge-vencido {
     display: inline-block;
     margin-top: 2px;
     font-size: 0.62rem;
@@ -359,18 +362,23 @@
     max-width: 130px;
 }
 
-.tab-echeqs .ech-badge-vencido {
+.tab-echeqs .ech-badge-en-plazo {
     color: #7a4b00;
     background: #fff1d6;
 }
 
-.tab-echeqs .ech-badge-vencido-fecha {
+.tab-echeqs .ech-badge-en-plazo-fecha {
     color: #1d4f91;
     background: #e3edfb;
 }
 
-/* El selector de la fecha de un vencido, en la celda Acredita */
-.tab-echeqs .ech-fecha-venc {
+.tab-echeqs .ech-badge-vencido {
+    color: #ffffff;
+    background: #6c757d;
+}
+
+/* El selector de la fecha de un cheque en plazo, en la celda Acredita */
+.tab-echeqs .ech-fecha-asignada {
     min-width: 130px;
     font-size: 0.78rem;
     padding: 0 4px;

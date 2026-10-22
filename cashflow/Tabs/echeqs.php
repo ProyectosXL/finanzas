@@ -14,9 +14,11 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                   la fila "Echeqs en cartera" de DISPONIBILIDADES.
                                   En la misma grilla, los que Tesorería depositó
                                   en Tango (boleta BDE) hasta que acreditan:
-                                  alimentan "Echeqs depositados". Y los
-                                  vencidos en cartera, que suman sólo con una
-                                  fecha de acreditación asignada. La barra de
+                                  alimentan "Echeqs depositados". Y los que
+                                  están en plazo de presentación —su día pasó
+                                  y la ley da 30 días para depositarlos—, que
+                                  suman sólo con una fecha de acreditación
+                                  asignada, y los vencidos, que no suman. La barra de
                                   selección excluye, marca "ya acreditó" y
                                   asigna esa fecha. Ver README-echeqs.md.
       Venta Cobrada Anticipada -> cheques de clientes que pre-chequean. NO
@@ -80,7 +82,8 @@ $edita = AuthCashflow::puedeEditar('echeqs');
              tilde niega.
 
              LOS DEPOSITADOS VAN EN LA CUARTA TARJETA, con bruto, retención y
-             neto: es la fila "Echeqs depositados". Los vencidos, en la quinta.
+             neto: es la fila "Echeqs depositados". Los en plazo de
+             presentación y los vencidos, en la quinta.
              Las restas las hace PHP: acá no se calcula nada.
 
              LAS CINCO EN UNA FILA en pantalla ancha (row-cols-lg-5): una sola
@@ -152,22 +155,25 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                 </div>
             </div>
 
-            <!-- LOS VENCIDOS EN CARTERA: el bruto de los que siguen en cartera
-                 después de su día hábil, sin los excluidos. Los que tienen
-                 fecha asignada YA ESTÁN en las tres primeras tarjetas —suman
-                 en su fecha—; los que no, no suman en ningún lado. Las cuentas
-                 las hace PHP (Echeqs::resumenVencidos()). -->
+            <!-- EN PLAZO DE PRESENTACIÓN: el bruto de los que siguen en
+                 cartera después de su día hábil y dentro del plazo —la Ley de
+                 Cheques da 30 días corridos para depositarlos: NO están
+                 vencidos—, sin los excluidos. Los que tienen fecha asignada YA
+                 ESTÁN en las tres primeras tarjetas —suman en su fecha—; los
+                 que no, no suman en ningún lado. Los vencidos —pasado el
+                 plazo— van aparte, en el pie de la tarjeta. Las cuentas las
+                 hace PHP (Echeqs::resumenEnPlazo()). -->
             <div class="col">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
-                        <span class="kpi-card-title">Vencidos en cartera</span>
-                        <div class="kpi-card-icon red">
-                            <i class="fas fa-calendar-xmark"></i>
+                        <span class="kpi-card-title">En plazo de presentación</span>
+                        <div class="kpi-card-icon orange">
+                            <i class="fas fa-hourglass-half"></i>
                         </div>
                     </div>
-                    <div class="kpi-card-value" id="totalVencidosEch">$ 0,00</div>
+                    <div class="kpi-card-value" id="totalEnPlazoEch">$ 0,00</div>
                     <div class="kpi-card-footer">
-                        <span class="text-muted" id="detalleVencidosEch">Ninguno</span>
+                        <span class="text-muted" id="detalleEnPlazoEch">Ninguno</span>
                     </div>
                 </div>
             </div>
@@ -232,18 +238,20 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                         </label>
                     </div>
 
-                    <!-- LOS VENCIDOS SIN FECHA NO SE VEN POR DEFECTO: no suman, y
-                         en el trabajo normal —mirar qué se va a cobrar— son
-                         ruido. Al lado se dice cuántos esconde y por cuánto,
-                         como con los excluidos, y el panel de avisos los pide.
-                         Los vencidos CON fecha se ven siempre, porque suman; y
-                         los de fecha pasada también, porque piden reasignarla. -->
+                    <!-- LOS EN PLAZO DE PRESENTACIÓN SIN FECHA NO SE VEN POR
+                         DEFECTO: no suman, y en el trabajo normal —mirar qué
+                         se va a cobrar— son ruido. Al lado se dice cuántos
+                         esconde y por cuánto, como con los excluidos, y el
+                         panel de avisos los pide. Los que tienen fecha se ven
+                         siempre, porque suman; los de fecha pasada también,
+                         porque piden reasignarla; y los vencidos también,
+                         porque hay que resolverlos en Tango. -->
                     <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="verVencidosEch">
-                        <label class="form-check-label small text-muted" for="verVencidosEch">
-                            Ver vencidos sin fecha
+                        <input class="form-check-input" type="checkbox" id="verEnPlazoEch">
+                        <label class="form-check-label small text-muted" for="verEnPlazoEch">
+                            Ver valores en plazo de presentación sin fecha
                         </label>
-                        <div class="small text-muted" id="vencidosOcultosEch"></div>
+                        <div class="small text-muted" id="enPlazoOcultosEch"></div>
                     </div>
                 </div>
                 <div class="d-flex gap-2">
@@ -296,9 +304,10 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                             <i class="fas fa-rotate-left me-1"></i> Deshacer ya acreditó
                         </button>
                         <?php endif; ?>
-                        <!-- LA FECHA DE ACREDITACIÓN DE LOS VENCIDOS: sólo sobre
-                             vencidos en cartera, todo o nada. Sin el script de
-                             los vencidos, el JS no los muestra. -->
+                        <!-- LA FECHA DE ACREDITACIÓN: sólo sobre cheques en plazo
+                             de presentación —no sobre un vencido: ya no se
+                             puede depositar—, todo o nada. Sin el script, el
+                             JS no los muestra. -->
                         <?php if ($edita): ?>
                         <button class="btn btn-sm btn-outline-primary" id="btnAsignarFechaSelEch"
                                 style="display: none;">
