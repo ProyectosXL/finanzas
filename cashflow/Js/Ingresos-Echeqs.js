@@ -970,7 +970,10 @@
                 + escapar(venc[1]) + '</span></div>';
         }
 
-        if (c.corrida) {
+        // Sólo en un vigente: es el que cae en el día corrido. A un vencido el
+        // corrimiento le dice que su día hábil ya pasó, y eso lo explica su
+        // propia marca.
+        if (c.corrida && f.ESTADO_CARTERA === 'VIGENTE') {
             html += '<div><span class="ech-badge-corrida" title="' + escapar(textoCorrida(c)) + '">'
                 + 'corrida</span></div>';
         }

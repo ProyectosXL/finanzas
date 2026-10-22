@@ -1594,6 +1594,8 @@ chequear('la tarjeta "Vencidos en cartera" existe y el JS la pinta', [1, true, t
 chequear('el pie abre los vencidos con fecha sin sumarlos dos veces, y los sin fecha aparte', true,
     strpos($echJs, "'↳ de esos, vencidos con fecha · ya sumados arriba'") !== false
     && strpos($echJs, "'Vencidos sin fecha · no suman'") !== false);
+chequear('la marca corrida va solo en un vigente: a un vencido no le dice donde cae', 1,
+    substr_count(cuerpoFnEch($echJs, 'marcaCartera'), "if (c.corrida && f.ESTADO_CARTERA === 'VIGENTE') {"));
 chequear('las marcas de los vencidos y la corrida', true,
     strpos($echJs, "'vencido · sin fecha'") !== false && strpos($echJs, "'vencido · fecha asignada'") !== false
     && strpos($echJs, "'fecha asignada pasada'") !== false && strpos($echJs, "+ 'corrida</span></div>'") !== false);
