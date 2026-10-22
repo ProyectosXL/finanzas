@@ -1,6 +1,6 @@
-# Echeqs — los cheques depositados, leídos de Tango
+# Echeqs — la cartera, los vencidos y los depositados
 
-*Ingresos › Echeqs › Cheques en Cartera* y *Parámetros › Cheques*. Lo demás de Echeqs —las dos sub-pestañas, la exclusión de cartera y la venta cobrada anticipada— está en `README-cashflow.md` (*Excluir un cheque que no se va a poder cobrar*) y en `README-ventas.md` (el neteo de cheques adelantados).
+*Ingresos › Echeqs › Cheques en Cartera* y *Parámetros › Cheques*: dónde cae un cheque de cartera —su **día hábil**, ver *El corrimiento al día hábil*—, los **cheques vencidos en cartera** y su fecha de acreditación interna, y los **depositados**, leídos de Tango. Lo demás de Echeqs —la exclusión de cartera y la venta cobrada anticipada— está en `README-cashflow.md` (*Excluir un cheque que no se va a poder cobrar*) y en `README-ventas.md` (el neteo de cheques adelantados).
 
 ## La idea en una línea
 
@@ -27,16 +27,18 @@ Contra `central`, reejecutables y sin borrar nada.
 | 1 | `sql/cashflow_echeqs_deposito.sql` | Crea `RO_T_CASHFLOW_ECHEQ_ALICUOTA` (las alícuotas de los cheques, con vigencias) y siembra el plazo `echeqs_dias_acreditacion_deposito` en **2** sin pisarlo si ya existe. **No siembra alícuotas.** Ya no crea `RO_T_CASHFLOW_ECHEQ_DEPOSITO` | Los depositados se listan **sin neto y sin proyectarse**, con un aviso crítico que nombra el script. *Parámetros › Cheques* avisa |
 | 2 | `sql/cashflow_estructura_echeqs_depositados.sql` | Crea la fila **Echeqs depositados** (`ECHEQS_DEPOSITADOS`) en *Disponibilidades*, `ORDEN = 25`, `ECHEQS → DEPOSITADOS`, `INGRESO`, `COMPUTA = 1`. `MERGE` sobre `CODIGO`: no pisa nombre ni orden editados | Los depositados que se proyectan no entran en ninguna fila: la pestaña lo avisa como **crítico** |
 | 3 | `sql/cashflow_echeqs_acreditado.sql` | Crea `RO_T_CASHFLOW_ECHEQ_ACREDITADO`: las marcas **ya acreditó**, con su origen e historial | El botón *Ya acreditó* no se dibuja, la pestaña avisa qué script falta y los depositados **se proyectan hasta su fecha de acreditación** |
+| 4 | `sql/cashflow_echeqs_vencidos.sql` | Crea `RO_T_CASHFLOW_ECHEQ_FECHA_ACREDITACION` —la fecha de acreditación interna de los vencidos, con historial— y siembra `echeqs_dias_vencidos_cartera` en **30** sin pisarlo | Los vencidos **no se leen**, la pestaña avisa qué script falta (atención; el tablero no dice nada) y todo lo demás —el corrimiento incluido— anda igual |
 
-**El 1 y el 2 ya están corridos en producción** —verificado el 16/10/2026: las alícuotas (IIBB 2,5% y SICREB 0,6%), el plazo en 2 y las dos filas de `ECHEQS` activas—; volver a correr el 1 no cambia nada. **El 3 es el único nuevo**, va después de `sql/cashflow_auditoria_usuario.sql` y no depende de los otros dos.
+**El 1 y el 2 ya están corridos en producción** —verificado el 16/10/2026: las alícuotas (IIBB 2,5% y SICREB 0,6%), el plazo en 2 y las dos filas de `ECHEQS` activas—; volver a correr el 1 no cambia nada. **El 3 y el 4 son los nuevos**: van después de `sql/cashflow_auditoria_usuario.sql`, en cualquier orden entre ellos, y no dependen de los otros.
 
-**El código se puede publicar antes que el 3**: sin la marca, la pestaña y el tablero ya leen los depósitos de Tango.
+**El código se puede publicar antes que el 3 y el 4**: sin la marca, la pestaña y el tablero ya leen los depósitos de Tango; sin el 4, el corrimiento al día hábil ya rige y los vencidos esperan al script.
 
 ### Después de correrlos, verificar
 
 - *Echeqs en cartera* (`A_COBRAR`) y *Echeqs depositados* (`DEPOSITADOS`) **activas las dos**, en los órdenes 20 y 25. Son dos partes distintas: activas juntas es lo correcto.
 - **Ninguna fila activa con `ECHEQS → A_COBRAR_TODO`**: es el total, incluye a las dos, y el validador lo rechaza al lado de cualquiera.
 - En la pestaña Echeqs aparecen los botones *Ya acreditó* y *Deshacer ya acreditó* al seleccionar un depositado, y el aviso del script de la marca ya no está.
+- Después del 4: en *Parámetros › Cheques* aparece *Días hacia atrás para cheques vencidos* en 30, y en la pestaña Echeqs ya no está el aviso del script de los vencidos. Si hay vencidos, aparecen el aviso de *vencidos sin fecha* y la tarjeta *Vencidos en cartera*.
 
 ### Lo que mueve el tablero
 
@@ -68,6 +70,143 @@ Medido el 16/10/2026 con las clases reales, cada paso uno detrás del otro sobre
 | Sin filtro de cliente | $ 2.559.220.385,97 (**+ $ 104.142.740,64**, los 6 de GO) | $ 41.130.143,07 |
 
 **Venta Cobrada Anticipada sigue en `[FL]%`**: es otro circuito, que netea la cobranza proyectada de Ventas por canal.
+
+---
+
+## Dónde cae un cheque de cartera: una sola regla
+
+`Echeqs::resolverFechaCartera()`, pura, decide dónde cae cada cheque en cartera (`ESTADO = 'C'`) y en qué estado está. La usan la grilla (`ubicarEnEje()`), el proveedor del tablero y el resumen de excluidos: **la pestaña y el tablero ponen cada peso en la misma columna**, y lo fijan las pruebas, también contra los datos reales.
+
+| Estado | Cuándo | Dónde cae |
+| --- | --- | --- |
+| `VIGENTE` | Su **día hábil** es de hoy en adelante | En su día hábil, por el bruto |
+| `VENCIDO_CON_FECHA` | Su día hábil ya pasó, está dentro de la ventana, y tiene una fecha asignada de hoy en adelante | En la fecha asignada, por el bruto |
+| `VENCIDO_SIN_FECHA` | Su día hábil ya pasó, está dentro de la ventana, y no tiene fecha | **En ninguna columna** |
+| `FECHA_PASADA` | Vencido con una fecha asignada que ya pasó | **En ninguna columna** |
+| `FUERA_VENTANA` | Vencido más allá de la ventana, sin ventana, o con la centinela `1800-01-01` | No se lista ni avisa |
+
+**El día hábil** es la fecha del cheque corrida al hábil siguiente si cae un fin de semana o un feriado: ver *El corrimiento al día hábil*. **La ventana** se cuenta desde la fecha escrita: ver *Los cheques vencidos en cartera*.
+
+### El corrimiento al día hábil
+
+Un cheque en cartera cuya fecha cae un **sábado, un domingo o un feriado** de `RO_T_CALENDARIO` se ubica en el **primer día hábil siguiente** (`Echeqs::correrAHabil()` → `DiasHabiles::siguiente()`): el banco no acredita ese día. Es la misma regla para la pestaña y el tablero, en *Echeqs en cartera* y en *Echeqs excluidos*, y para **Venta Cobrada Anticipada y el neteo de Ventas**, con el mismo helper: el cheque y su neteo caen en la misma columna. Ver `README-ventas.md`.
+
+| Caso | Ejemplo |
+| --- | --- |
+| Sábado o domingo | sáb 24/10 → lun 26/10 · *fin de semana* |
+| Feriado | mar 08/12 → mié 09/12 · *feriado* |
+| Viernes feriado | vie 20/11 → lun 23/11 · *feriado* |
+| Feriado que cae en fin de semana | se informa como *fin de semana*: es lo que explica el corrimiento |
+| Día hábil | no se corre |
+
+- **El motivo sale de la fecha original**: sábado o domingo es fin de semana; cualquier otro día no hábil, feriado.
+- **No se aplica** a la fecha asignada a un vencido —ya se exige hábil— ni a los depositados, que cuentan hábiles desde la boleta (`habilesDespues()`).
+- **Después del fin del eje no se corre** (`Horizonte::fin()`, hoy 30/09/2027): ahí la fecha no cambia nada —el importe va a `fuera_horizonte` igual— y correrla pediría calendario de meses que `RO_T_CALENDARIO` no tiene (llega al 31/12/2027), con un aviso de calendario faltante por nada.
+- **El calendario** se lee una vez por la única lectura del módulo (`Ventas::getDiasHabiles()`). Un mes que no está usa el respaldo de lunes a viernes, con el aviso de siempre (atención). **Sin hábil en el tope**, el cheque queda en su fecha con el aviso crítico de `avisoSinHabil()`: nunca se inventa una fecha.
+- **El agregado del tablero se corre después del `GROUP BY`**, fecha por fecha: el corrimiento depende sólo de la fecha, así que todos los cheques de un grupo caen en el mismo día.
+- **Un cheque del sábado leído el lunes cae hoy**, como uno fechado hoy: su día hábil es hoy. Por eso la lectura de cartera arranca en `primerDiaCartera()` —el día siguiente al último hábil— y no en `GETDATE()`. Leído el martes, ya es vencido.
+
+En la grilla, *Fecha de pago* sigue siendo la del cheque; *Acredita* dice dónde cae el importe, y la marca **corrida** lo explica con un tooltip: *"sáb 24/10 → lun 26/10 · fin de semana"*. La marca va sólo en los vigentes: a un vencido no le dice dónde cae.
+
+#### Lo que mueve el tablero
+
+Medido contra la base el **21/10/2026** con las clases reales, `develop` y esta rama uno detrás del otro sobre los mismos datos:
+
+| Serie | Antes | Ahora |
+| --- | --- | --- |
+| `A_COBRAR` (*Echeqs en cartera*) | $ 2.652.842.059,56 | $ 2.652.842.059,56 |
+| `A_COBRAR_EXCLUIDOS` | $ 0,00 | $ 0,00 |
+| `DEPOSITADOS` (*Echeqs depositados*) | $ 32.509.122,08 | $ 32.509.122,08 |
+| `A_COBRAR_TODO` | $ 2.685.351.181,64 | $ 2.685.351.181,64 |
+| *Echeqs en cartera* en sábados y domingos del tramo diario | $ 189.286.088,72 | **$ 0,00** |
+| Neteo de Ventas (`NETEO_PRECHEQUEADO`) | $ 1.154.425.881,01 | $ 1.154.425.881,01 |
+
+**El total no cambia: cambia la columna.** De los 1.013 cheques en cartera, 224 por $ 396.572.917,00 caen en fin de semana y 29 por $ 32.505.933,27 en feriado (20/11, 08/12, 25/12 y 01/01). En Venta Cobrada Anticipada, 28 cheques marcados por $ 168.434.285,84.
+
+**Cambiar de día puede cambiar de mes.** Hoy son **25 cheques por $ 45.922.967,96**, todos del **sábado 31/10**, que caen el **lunes 02/11**. Por ejemplo, el cheque N° 9 de MARIA FLORENCIA VALLONE (CONCORDIA) por $ 6.775.631,04, fechado el sábado 31/10, acredita el lunes 02/11: el total de **octubre** de la vista *Meses* y de cualquier corte por mes baja $ 45,9 M y el de **noviembre** sube lo mismo. Ninguno sale del eje.
+
+---
+
+## Los cheques vencidos en cartera
+
+Un cheque que sigue en cartera **después de su día hábil** es un **vencido**: Tesorería todavía no lo depositó. Hasta esta rama desaparecía del tablero sin aviso —la cartera se leía desde hoy—, aunque se fuera a depositar en unos días. Medido el 21/10/2026 sobre 180 días: **163 cheques salieron por boleta de depósito después de su fecha**, 15 de ellos con 4 a 26 días de atraso, y 86 por orden de pago; 108 eran de fin de semana y salieron a 1 o 2 días, que con el corrimiento ya no son vencidos.
+
+**Ahora se leen dentro de una ventana, y sólo suman con una fecha.** Tesorería les asigna una **fecha de acreditación interna**, que sólo vive en el cashflow —no se escribe nada en Tango—. Sin fecha no suman en ningún lado: nadie dijo cuándo entra esa plata, y ponerla en una fecha inventada sería informar de más.
+
+**El 21/10/2026 no hay ningún cheque en cartera con su día hábil antes de hoy**: el día que se corra el script el tablero no se mueve ni un peso.
+
+### La ventana
+
+`echeqs_dias_vencidos_cartera`, en *Parámetros › Cheques › Depósito de cheques*, debajo del plazo de acreditación: **días corridos hacia atrás desde la fecha del cheque** en que un vencido se sigue mostrando. Un entero de **1 a 30**; el script lo siembra en **30**, el plazo legal para presentar un cheque al cobro.
+
+- Entra un cheque con fecha de **hoy − N en adelante**; el de hoy − N − 1, no. Se cuenta **desde la fecha escrita**, no desde la corrida: es el plazo para presentarlo.
+- **Tiene su propio camino de guardado**, como el plazo: `Echeqs::guardarVentana()`, acción `saveDiasVencidosEcheq`, permiso `['parametros', 'PRECHEQUEADO']`. `Parametros::saveParametro()` **rechaza esa clave**.
+- **Si falta o está rota es `null` con el motivo, nunca un 30 de respaldo** (`ventanaDesdeValor()`): no se leen vencidos, y la pestaña y el tablero avisan como **crítico**, diciendo dónde cargarla.
+- **Fuera de la ventana el cheque sale solo, sin aviso**: ya no se puede depositar. Si tenía fecha asignada, deja de aplicar y queda en el historial.
+
+### La fecha de acreditación interna
+
+**Sólo a vencidos en cartera.** Se acepta (`Echeqs::validarFechaAsignada()`, pura):
+
+| Regla | Si no |
+| --- | --- |
+| De **mañana** en adelante | *"…tiene que ser de mañana en adelante: el 21/10 es hoy"* o *"…ya pasó"* |
+| Hasta el **menor** entre el fin del horizonte y el último día en que el cheque se muestra (su fecha + N) | El rechazo dice **qué tope aplicó**: *"…es posterior al 14/11, el último día en que el cheque se sigue mostrando (su fecha más 30 días)…"* o *"…es posterior al fin del horizonte (30/09)…"* |
+| **Un día hábil** | *"El 24/10 es sábado: elegí un día hábil"*, *"El 20/11 es feriado: elegí un día hábil"*. **La fecha asignada nunca se corre sola** |
+
+Un mes que no está en `RO_T_CALENDARIO` usa el respaldo de lunes a viernes, y el mensaje de éxito lo avisa.
+
+**El tope de la ventana evita una fecha que no puede llegar**: sin él, un cheque podía salir de la ventana antes de su fecha asignada, y esa plata se habría proyectado en un día al que nunca llega.
+
+**Cómo se carga:**
+
+- **De a uno**, en la celda **Acredita** del vencido, con un selector de fecha. Sólo con permiso de edición de Echeqs (`['echeqs', null]`); sin permiso se ve la fecha o un guion. Vaciar la celda no deshace: eso va por la barra, con confirmación.
+- **En masa**, con **Asignar fecha** en la barra de selección: se habilita sólo si **todos** los seleccionados son vencidos en cartera. El diálogo dice cuántos son y por cuánto, cuántos ya tenían fecha —se reemplazan—, y pide la fecha y una observación opcional.
+- **Deshacer fecha**, en la barra, con confirmación: se habilita sólo si todos tienen una fecha vigente —también la pasada—. Baja lógica.
+
+**Todo o nada**, en una transacción. El servidor vuelve a validar contra la lectura de la base —la cartera y los depositados, resueltos con la regla de la pantalla—: con un cheque que no es vencido, uno depositado o uno que no está en la lectura (`validarSeleccionVencidos()`), o una fecha que no sirve para alguno —el tope es de cada cheque— (`validarFechaParaSeleccion()`), no se graba ninguno y el mensaje dice cuál y por qué. **Del navegador viajan sólo los ids, la fecha y la observación.**
+
+### Qué pasa con el tiempo
+
+| Caso | Qué pasa |
+| --- | --- |
+| La fecha llega **hoy** y el cheque sigue en cartera | Cae en la columna de hoy, como un cheque fechado hoy |
+| La fecha **ya pasó** y el cheque sigue en cartera | `FECHA_PASADA`: no suma, y la pestaña y el tablero avisan con nivel **atención**: *"N cheque(s) vencidos por $ X tenían fecha de acreditación ya pasada y siguen en cartera: reasignales la fecha"*. Se ve siempre, aunque el switch esté apagado, y en la tarjeta cuenta entre los sin fecha |
+| Tesorería **lo deposita** en Tango | Pasa a `A` y entra en *Echeqs depositados* con la regla de las 48 hs. La fecha asignada deja de aplicar sin aviso y queda en el historial |
+| Se **rechaza o se anula** | Sale solo |
+| Sale de la **ventana** | Sale solo, sin aviso |
+
+### El modelo: `RO_T_CASHFLOW_ECHEQ_FECHA_ACREDITACION`
+
+| Columna | Qué guarda |
+| --- | --- |
+| `ID` | `IDENTITY`, PK: un cheque puede tener varias fechas en el tiempo |
+| `ID_SBA14` | El cheque. **Sin FK contra `dbo.SBA14`**: es una tabla de Tango |
+| `FECHA_ACREDITACION` | La fecha asignada |
+| `OBSERVACION` | Opcional, 200 |
+| `VIGENTE`, `ID_REEMPLAZA` | La vigente, y la que reemplaza al reasignar |
+| Las seis de auditoría | Alta, modificación y baja |
+
+**Una sola vigente por cheque**: índice único filtrado `WHERE VIGENTE = 1`. Reasignar da de baja la vigente e inserta la nueva en la misma transacción; dos pestañas al mismo tiempo chocan contra el índice y la segunda vuelve atrás entera.
+
+### En el tablero
+
+| Caso | Serie |
+| --- | --- |
+| Vencido con fecha | `A_COBRAR` en la fecha asignada, por el bruto. Fuera del eje —se achicó el horizonte—, a `fuera_horizonte` con el aviso de siempre |
+| Vencido sin fecha, o con la fecha pasada | **Ninguna**, ni `A_COBRAR_TODO`. Aviso de **atención**: *"N cheque(s) vencidos en cartera sin fecha de acreditación por $ X no se proyectan. Asignales una fecha en Ingresos › Echeqs"* |
+| Vencido excluido sin fecha | Ninguna, **y no cuenta en el aviso**: ya se decidió que esa plata no entra. Tampoco en el aviso de excluidos, que cuenta lo que está en `A_COBRAR_EXCLUIDOS` |
+| Vencido excluido con fecha | `A_COBRAR_EXCLUIDOS` en esa fecha |
+
+**La partición sigue cerrando** columna por columna: un vencido sin fecha no está en ninguna parte ni en el total.
+
+**La lectura agregada va partida en dos, sobre el mismo universo**: lo de hoy en adelante sigue en el `GROUP BY` por fecha y excluido; lo anterior a hoy —los que todavía caen hoy por el corrimiento y los vencidos, cada uno con su fecha— va fila por fila y se cruza en PHP con las fechas asignadas. Las dos partes pasan por `resolverFechaCartera()`, y la prueba con datos reales fija que juntas suman lo mismo que la grilla.
+
+**El universo es uno solo**: la lectura fila por fila, la agregada y `getExclusionesEnCartera()` usan el mismo `WHERE` (`sqlUniversoCartera()`), con la centinela `1800-01-01` afuera **explícitamente** —`>= hoy` ya no la filtra—. Venta Cobrada Anticipada no cambia de universo: sigue con `>= hoy`.
+
+### Sin el script
+
+Los vencidos **no se leen** —la ventana tampoco existe—, la pestaña avisa qué script falta (atención) y **el tablero no dice nada**. Todo lo demás funciona como antes, incluido el corrimiento. Con la tabla y la ventana rota o faltante, el aviso es **crítico** en la pestaña y en el tablero.
 
 ---
 
@@ -107,7 +246,7 @@ Una BDE tiene en `dbo.SBA05` **una línea al debe** contra la cuenta destino y u
 
 ---
 
-## Dónde cae y por cuánto: una sola regla
+## Dónde cae un depositado y por cuánto: una sola regla
 
 `Echeqs::resolverDeposito()`, pura, decide la acreditación, la tasa, el neto y el estado. La usan la pestaña y el proveedor **por la misma lectura**, `Echeqs::getDepositadosTango()`: la pestaña y el tablero suman lo mismo, y lo fija una prueba.
 
@@ -237,8 +376,8 @@ La tabla se diseñó para que un proceso grabara ahí las acreditaciones de Inte
 
 | Serie | Qué trae | Fila |
 | --- | --- | --- |
-| `A_COBRAR` | La cartera (`ESTADO = 'C'`) **cobrable**, en **bruto** y en la fecha del cheque | *Echeqs en cartera* |
-| `A_COBRAR_EXCLUIDOS` | Lo excluido a mano, en bruto | — |
+| `A_COBRAR` | La cartera (`ESTADO = 'C'`) **cobrable**, en **bruto**, en su **día hábil** —o, un vencido, en su fecha asignada— | *Echeqs en cartera* |
+| `A_COBRAR_EXCLUIDOS` | Lo excluido a mano, en bruto, con la misma regla de fecha | — |
 | `DEPOSITADOS` | Los depositados en Tango que se proyectan, en **neto** y en la fecha de **acreditación** | *Echeqs depositados* |
 | `A_COBRAR_TODO` | Las tres juntas: lo que la cartera aporta al flujo | — |
 
@@ -247,9 +386,9 @@ A_COBRAR + A_COBRAR_EXCLUIDOS + DEPOSITADOS = A_COBRAR_TODO
 universo en bruto = A_COBRAR_TODO + retención de los depositados
 ```
 
-**Cada cheque está en una sola parte**: las dos primeras salen de la cartera (`C`) y la tercera de los depositados (`A`), y un cheque no puede estar en los dos estados. Las partes cierran contra el total **columna por columna**; lo fijan las pruebas, también contra los datos reales.
+**Cada cheque está en una sola parte**: las dos primeras salen de la cartera (`C`) y la tercera de los depositados (`A`), y un cheque no puede estar en los dos estados. Un vencido sin fecha **no está en ninguna** ni en el total, a propósito: ver *Los cheques vencidos en cartera*. Las partes cierran contra el total **columna por columna**; lo fijan las pruebas, también contra los datos reales.
 
-**La cartera sigue agregada** (`getEcheqsCarteraTotales()`, un `GROUP BY` por fecha y excluido). **Los depositados van fila por fila**, porque la acreditación y el neto se calculan en PHP con el calendario y las alícuotas; son pocos. `EcheqsProvider::itemsDeDepositados()` los convierte en ítems del reparto sin recalcular nada.
+**La cartera de hoy en adelante sigue agregada** (`getEcheqsCarteraTotales()`, un `GROUP BY` por fecha y excluido, corrido fecha por fecha al día hábil); **lo anterior a hoy va fila por fila**, porque cada vencido tiene su fecha asignada. **Los depositados van fila por fila**, porque la acreditación y el neto se calculan en PHP con el calendario y las alícuotas; son pocos. `EcheqsProvider::itemsDeDepositados()` los convierte en ítems del reparto sin recalcular nada.
 
 **La retención viaja como escalar de `DEPOSITADOS`** —`bruto` y `retencion`, como `fuera_horizonte`—, y no como series: una serie se puede elegir para una fila, y `DEPOSITADOS_BRUTO` al lado de `DEPOSITADOS` contaría dos veces el mismo cheque. Los escalares se auditan en `EcheqsProvider::repartir()`; el motor los descarta al normalizar la serie.
 
@@ -260,7 +399,8 @@ universo en bruto = A_COBRAR_TODO + retención de los depositados
 - Una acreditación **fuera del eje** va a `fuera_horizonte`, en `DEPOSITADOS` y en el total, y el tablero avisa.
 - Los avisos de los depositados —sin plazo, sin hábil, sin alícuotas, calendario faltante, boleta sin cuenta— salen en el tablero y en la pestaña con su nivel.
 - Si hay depositados que se proyectan y **ninguna fila activa muestra `ECHEQS → DEPOSITADOS`**, la pestaña lo avisa como **crítico**: esa plata no está en ninguna fila. Se pregunta por la serie y no por el código de la fila (`Echeqs::filaDepositadosActiva()`).
-- **Venta Cobrada Anticipada no cambia**: el neteo va por tilde, no por estado ni por depósito. Un cheque pre-chequeado que se deposita sigue neteando la venta en la fecha del cheque.
+- **Venta Cobrada Anticipada no depende del depósito**: el neteo va por tilde, no por estado ni por depósito. Un cheque pre-chequeado que se deposita sigue neteando la venta en el día hábil del cheque —el mismo corrimiento que la cartera—.
+- Los avisos de la cartera —vencidos sin fecha o con la fecha pasada, ventana rota, calendario faltante, sin hábil— salen en el tablero y en la pestaña con su nivel. El de *falta el script de los vencidos* sale sólo en la pestaña.
 
 ---
 
@@ -270,16 +410,19 @@ universo en bruto = A_COBRAR_TODO + retención de los depositados
 
 | Qué | Cómo |
 | --- | --- |
-| **Dónde cae el importe en el eje** | Uno de cartera, en la fecha del cheque y por el bruto; un depositado que se proyecta, en su acreditación y por el neto; uno acreditado o sin datos, en ninguna columna. El eje se arma con `FECHA_EJE` / `IMPORTE_EJE` |
-| **Columnas Acredita, Retención y Neto** | **Siempre visibles**, vacías —no en cero— en los de cartera, entre *Importe* y la de selección. Aparecer y desaparecer movería los índices de las columnas fijas, el orden guardado y lo que baja el export |
-| **Marcas** | **depositado** (se proyecta), **acreditado (por plazo)** (acredita hoy), **acreditado** (marcado) y **depositado, sin proyectar** (le falta un dato) |
-| **Tooltip de la marca** | La boleta de Tango —número y fecha—, la cuenta donde se depositó con su descripción, `TIPO_SAL` y `CTA_DESTIN`, el banco emisor, la fecha del cheque, la acreditación con el plazo, el bruto, la tasa con su desglose y el neto. Si está marcado: quién, cuándo, el origen y la observación, y las marcas deshechas |
+| **Dónde cae el importe en el eje** | Uno de cartera, en su día hábil —o, un vencido, en su fecha asignada— y por el bruto (`resolverFechaCartera()`); un depositado que se proyecta, en su acreditación y por el neto; un vencido sin fecha, uno acreditado o uno sin datos, en ninguna columna (`FECHA_EJE` null, `IMPORTE_EJE` 0). El eje se arma con `FECHA_EJE` / `IMPORTE_EJE` |
+| **Fecha de pago** | La fecha del cheque, la escrita. Conserva su nombre: es la que ancla el orden guardado |
+| **Acredita** | **Dónde cae el importe**: el día hábil de uno de cartera —la fecha corrida, si se corrió—, la acreditación de un depositado, la fecha asignada de un vencido. En un vencido es un **selector de fecha**, sólo con permiso de edición; sin permiso, la fecha o un guion |
+| **Retención y Neto** | **Siempre visibles**, vacías —no en cero— en los de cartera. Aparecer y desaparecer movería los índices de las columnas fijas, el orden guardado y lo que baja el export |
+| **Marcas** | **corrida** (cae en el hábil siguiente; sólo en los vigentes), **vencido · sin fecha**, **vencido · fecha asignada**, **fecha asignada pasada**, **depositado** (se proyecta), **acreditado (por plazo)** (acredita hoy), **acreditado** (marcado) y **depositado, sin proyectar** (le falta un dato) |
+| **Tooltip de la marca** | *Corrida*: de qué día a cuál y por qué. *Vencido*: la fecha del cheque, los días que lleva vencido y hasta cuándo se sigue mostrando; la fecha asignada con quién la dio, cuándo y la observación, y las anteriores con quién las dio de baja. *Depositado*: la boleta de Tango —número y fecha—, la cuenta donde se depositó con su descripción, `TIPO_SAL` y `CTA_DESTIN`, el banco emisor, la fecha del cheque, la acreditación con el plazo, el bruto, la tasa con su desglose y el neto; si está marcado, quién, cuándo, el origen y la observación, y las marcas deshechas |
 | **Ocultar depositados** | Al lado de *Ver excluidos*. **Por defecto se ven**: siguen entrando al cashflow hasta que acreditan. Esconde también los acreditados y los sin proyectar; sus avisos salen siempre |
-| **Tarjetas** | Las tres de siempre muestran **la cartera cobrable** —lo mismo que *Echeqs en cartera*—; la cuarta, **los depositados que se proyectan** con bruto, retención y neto, y cuántos acreditados o sin proyectar hay aparte. Las restas las hace PHP |
-| **Pie** | La fila *TOTALES* suma lo que se ve, y debajo se abre en *En cartera*, *Depositados*, *Acreditados · no suman*, *Depositados sin proyectar · no suman* y *Excluidos · no suman* |
-| **Selección** | La barra dice cuántos, cuánto y de qué banco. *Excluir* no se habilita con un depositado —ya salió de cartera—; *Ya acreditó* sólo si todos se proyectan; *Deshacer ya acreditó* sólo si todos están marcados |
-| **Avisos** | Los de los depositados, el de la fila del tablero y el del script de la marca entran al panel plegable de la pestaña |
-| **Exportar** | Sale del DOM vivo: baja las columnas nuevas con lo que se ve |
+| **Ver vencidos sin fecha** | Al lado, **apagado por defecto**, y dice cuántos esconde y por cuánto. **Esconde sólo los vencidos sin fecha**: los de fecha asignada se ven siempre —suman— y los de fecha pasada también —piden reasignarla—. **Lo escondido gana sobre la búsqueda**, como en *Ocultar depositados*: si el buscador coincide con uno escondido, dice *"N vencidos sin fecha coinciden: prendé el switch"* |
+| **Tarjetas** | Las tres de siempre muestran **la cartera cobrable** —lo mismo que *Echeqs en cartera*—, **con los vencidos con fecha adentro**, y el rótulo lo dice. La cuarta, **los depositados que se proyectan** con bruto, retención y neto. La quinta, **Vencidos en cartera** —sin los excluidos—: el bruto, cuántos y cuánto tienen fecha (suman) y cuántos y cuánto no. Las restas las hace PHP |
+| **Pie** | La fila *TOTALES* suma lo que se ve, y debajo se abre en *En cartera* —con un renglón indentado y en cursiva, *↳ de esos, vencidos con fecha · ya sumados arriba*, para que no parezca sumado dos veces—, *Vencidos sin fecha · no suman*, *Depositados*, *Acreditados · no suman*, *Depositados sin proyectar · no suman* y *Excluidos · no suman* |
+| **Selección** | La barra dice cuántos, cuánto, de qué banco y cuántos vencidos. *Excluir* no se habilita con un depositado —ya salió de cartera— y sí con un vencido; *Ya acreditó* sólo si todos se proyectan; *Asignar fecha* sólo si todos son vencidos; *Deshacer fecha* sólo si todos tienen fecha; *Deshacer ya acreditó* sólo si todos están marcados |
+| **Avisos** | Los de la cartera, los de los depositados, el de la fila del tablero y los de los scripts entran al panel plegable de la pestaña |
+| **Exportar** | Sale del DOM vivo: baja lo que se ve, con Acredita —la fecha corrida o la asignada; el selector baja como `dd/mm/aaaa`— y las marcas |
 
 ---
 
@@ -295,6 +438,10 @@ La sub-pestaña **Pre-chequeado pasó a llamarse Cheques**. Cambió sólo el nom
 - **El tope de 30 no es del banco**: es el de un error de tipeo, y coincide con `DiasHabiles::MAX_CORRIMIENTO`.
 - **Un plazo que falta o está roto es `null` con el motivo, nunca un 2 de respaldo** (`Echeqs::plazoDesdeValor()`): los depositados no se proyectan y avisan como crítico.
 - **Cambiarlo mueve también los que todavía no acreditaron**: la fecha se calcula al leer, desde la boleta.
+
+### Los días hacia atrás para cheques vencidos
+
+`echeqs_dias_vencidos_cartera`, en la misma sección, debajo del plazo: *"Días hacia atrás desde la fecha del cheque en que un cheque vencido en cartera se sigue mostrando"*. Un entero de **1 a 30**, con su propio camino de guardado (`Echeqs::guardarVentana()`, acción `saveDiasVencidosEcheq`); `saveParametro()` rechaza la clave. Sin el script, el campo queda apagado y la sección avisa qué correr. Ver *Los cheques vencidos en cartera*.
 
 ### Las alícuotas de retención de los cheques
 
@@ -356,7 +503,21 @@ Era la tabla de ese circuito: un depósito por cheque, con su fecha, su tasa y s
 - *Ya acredito*: todo o nada sobre los que se proyectan, un solo vigente, deshacer, lo que se graba, los permisos y el script;
 - **el extracto**: número e importe iguales cruzan; otro importe, otro número, un crédito anterior a la boleta o posterior a hoy, o un débito, no; con dos créditos gana el más viejo; un movimiento no se usa dos veces; el crédito saca al cheque aunque falten días y pesa más que una marca; *Ya acreditó* lo rechaza; el proveedor no lo suma; sin la tabla, aviso.
 
-`tests/test_echeqs.php` verifica la partición **contra los datos reales**: las tres partes suman el total, los depositados que se listan son BDE a un banco sin vencer, y los acreditados por el extracto cruzan por número, importe y fecha. `tests/test_tablas_controles.php`, el cableado: no quedan botones ni acciones de *Depositar*, y están *Ya acreditó*, su acción y su permiso. `tests/test_dias_habiles.php` fija `habilesDespues()`, y `tests/test_retenciones.php` la clase compartida.
+`tests/test_echeqs_vencidos.php`, sin base salvo las escrituras sobre una `#temporal`:
+
+- **el script y la ventana**: la tabla con su índice único filtrado, el parámetro en 30 sin pisarlo, de 1 a 30, `null` sin respaldo, `saveParametro()` que rechaza la clave, y los permisos;
+- **el corrimiento**: sábado y domingo → lunes, feriado → el hábil siguiente, viernes feriado → lunes, un hábil no se corre, el motivo —un feriado en sábado es fin de semana—, el respaldo con aviso, sin hábil en el tope queda en su fecha con aviso crítico, el tope del eje, y que no se aplica a depositados ni a fechas asignadas;
+- **el sábado leído el lunes** cae hoy (`VIGENTE`), leído el martes es `VENCIDO_SIN_FECHA`, y un sábado con lunes feriado leído el lunes cae el martes;
+- **la ventana**: el de ayer y el de hace N días entran, el de hace N + 1 y la centinela no, el de hoy no es vencido;
+- **la fecha a asignar**: mañana hábil sí; hoy, ayer, un sábado, un feriado, más allá del horizonte o del último día a la vista no, cada uno con su motivo y su tope; un mes sin calendario usa el respaldo con aviso;
+- **todo o nada**: con un vigente, un depositado o uno que no está en la lectura no se graba ninguno, y una fecha que no sirve para uno no sirve para ninguno;
+- **la fecha en el tiempo**: igual a hoy suma hoy, anterior no suma y avisa, fuera de la ventana sale, depositado entra por las 48 hs;
+- **el reparto**: con fecha a `A_COBRAR`, sin fecha a ninguna serie con su aviso, excluido sin fecha a ninguna y sin aviso, excluido con fecha a `A_COBRAR_EXCLUIDOS`; la partición cierra columna por columna, y **la pestaña y el proveedor suman lo mismo**;
+- **sin el script**: no hay vencidos, aviso de atención sólo en la pestaña con el nombre del script; con la ventana rota, crítico en los dos;
+- **las escrituras**, sobre una `#temporal` con el cuerpo del script: reasignar deja un solo vigente que apunta al reemplazado, deshacer vuelve a sin fecha y conserva el historial, y el índice frena una segunda vigente. La subclase de la prueba se verifica a sí misma: no nombra ninguna tabla real;
+- **Venta Cobrada Anticipada y el neteo**: el cheque y su neteo en la misma columna corrida, la misma que en *Echeqs en cartera*, y el neteo sin calendario no se reparte.
+
+`tests/test_echeqs.php` verifica la partición **contra los datos reales**: las tres partes suman el total, los depositados que se listan son BDE a un banco sin vencer, los acreditados por el extracto cruzan por número, importe y fecha, la agregada y la fila por fila suman lo mismo, ningún vigente cae antes de hoy, los vencidos leídos están en la ventana y en cartera y suman sólo con fecha, la sub-pestaña y el neteo ponen cada marcado en la misma columna, y el neteo no deja nada en un sábado ni en un domingo. `tests/test_tablas_controles.php`, el cableado: no quedan botones ni acciones de *Depositar*, y están *Ya acreditó*, su acción y su permiso; el switch *Ver vencidos sin fecha*, la celda Acredita editable sólo con permiso, *Asignar fecha* y *Deshacer fecha* con sus acciones y permisos, la tarjeta, el pie y las marcas; y el campo de la ventana en *Parámetros › Cheques*. `tests/test_dias_habiles.php` fija `habilesDespues()`, y `tests/test_retenciones.php` la clase compartida.
 
 Las escrituras de la marca se verificaron contra la base con una `#temporal` con el cuerpo del script, sin tocar tablas `dbo`: marcar, rechazar la segunda marca, el índice de vigentes, deshacer con su historial, la referencia dada de baja que no vuelve a entrar y el `CHECK` del origen.
 
@@ -368,16 +529,22 @@ Las escrituras de la marca se verificaron contra la base con una `#temporal` con
 sql/cashflow_echeqs_deposito.sql                Alicuotas de cheques y plazo (la tabla de depositos, en desuso)
 sql/cashflow_estructura_echeqs_depositados.sql  La fila Echeqs depositados
 sql/cashflow_echeqs_acreditado.sql              La marca "ya acredito"
+sql/cashflow_echeqs_vencidos.sql                La fecha de acreditacion de los vencidos y la ventana
 Class/Retenciones.php                           La tasa de retencion, compartida con Cob. Electronicos
-Class/DiasHabiles.php                           habilesDespues(): N habiles despues de una fecha
-Class/Echeqs.php                                Que es un deposito, donde cae y por cuanto, la lectura, la marca
+Class/DiasHabiles.php                           siguiente() y habilesDespues(): el corrimiento y el plazo
+Class/Echeqs.php                                Donde cae un cheque de cartera (resolverFechaCartera, correrAHabil),
+                                                los vencidos y su fecha, que es un deposito, la lectura, la marca
 Class/Providers/EcheqsProvider.php              La particion: A_COBRAR, EXCLUIDOS, DEPOSITADOS, TODO
+Class/Ventas.php                                repartirNeteo(): el neteo, con el mismo corrimiento
 Class/CashflowRegistry.php                      La serie DEPOSITADOS y su componente
 Class/Parametros.php                            Sub-pestana Cheques: seccion deposito
-Controller/EcheqsController.php                 getEcheqsCartera, marcarAcreditados, deshacerAcreditados
-Controller/ParametrosController.php             savePlazoDepositoEcheq, addAlicuotaEcheq, bajaAlicuotaEcheq
+Controller/EcheqsController.php                 getEcheqsCartera, getEcheqsPrechequeado, marcarAcreditados,
+                                                deshacerAcreditados, asignarFechaVencidos, deshacerFechaVencidos
+Controller/ParametrosController.php             savePlazoDepositoEcheq, saveDiasVencidosEcheq, addAlicuotaEcheq,
+                                                bajaAlicuotaEcheq
 Tabs/echeqs.php, Js/Ingresos-Echeqs.js          La grilla
+Js/notificaciones.js                            pedirFecha(): con max y observacion
 Tabs/parametros_prechequeado.php                Parametros > Cheques
 Js/Parametros-Prechequeado.js
-tests/test_echeqs_deposito.php, tests/test_retenciones.php
+tests/test_echeqs_deposito.php, tests/test_echeqs_vencidos.php, tests/test_retenciones.php
 ```

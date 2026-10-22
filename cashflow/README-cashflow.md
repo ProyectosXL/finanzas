@@ -287,6 +287,23 @@ No se cuentan dos veces: los de un cliente entran con un recibo que ya canceló 
 
 **El extracto de Interbanking confirma la acreditación.** Un depositado cuyo crédito aparece en `BI_T_EXTRACTOS_INTERBANKING` —número del cheque e importe— deja de proyectarse ese mismo día. Se lee al calcular, sin proceso ni escrituras; hoy cruza Galicia. Ver *La acreditación según el extracto de Interbanking* en `README-echeqs.md`.
 
+### Echeqs: vencidos en cartera y corrimiento al día hábil (`feature/echeqs-vencidos-dias-habiles`)
+
+Dos cambios en *Ingresos › Echeqs* y su tablero. El circuito entero está en `README-echeqs.md`.
+
+- **Corrimiento al día hábil.** Un cheque en cartera que cae un sábado, un domingo o un feriado se ubica en el hábil siguiente, con la marca **corrida**; lo mismo en Venta Cobrada Anticipada y en el neteo de Ventas, con el mismo helper (`Echeqs::correrAHabil()`), para que el cheque y su neteo caigan en la misma columna. No necesita ningún script.
+- **Cheques vencidos en cartera.** Un cheque que sigue en cartera después de su día hábil se lee hasta N días hacia atrás (`echeqs_dias_vencidos_cartera`, 30) y suma sólo con una **fecha de acreditación interna** que le asigna Tesorería. Sin fecha no suma en ningún lado y avisa.
+
+| # | Script | Qué hace | Si no se corre |
+| --- | --- | --- | --- |
+| 1 | `sql/cashflow_echeqs_vencidos.sql` | **Nuevo.** Crea `RO_T_CASHFLOW_ECHEQ_FECHA_ACREDITACION` (con historial e índice único filtrado de vigentes) y siembra `echeqs_dias_vencidos_cartera` en **30** sin pisarlo | Los vencidos no se leen y la pestaña avisa qué script falta; todo lo demás, el corrimiento incluido, anda igual |
+
+Va después de `sql/cashflow_auditoria_usuario.sql` y no depende de ningún otro. **El código se puede publicar antes.**
+
+#### Lo que mueve el tablero
+
+Medido contra la base el 21/10/2026, `develop` y la rama sobre los mismos datos: **ninguna serie cambia de total** —*Echeqs en cartera* $ 2.652.842.059,56, *Echeqs depositados* $ 32.509.122,08, el neteo $ 1.154.425.881,01—; cambian las columnas. Los $ 189.286.088,72 que caían en sábados y domingos del tramo diario pasan al hábil siguiente, y 25 cheques por $ 45.922.967,96 del sábado 31/10 pasan al lunes 02/11: octubre baja y noviembre sube lo mismo. Ese día no había ningún vencido: el script no mueve un peso hasta que aparezca uno y alguien le asigne fecha.
+
 ### Avisos del tablero en cada pestaña, tarjetas plegables y Comercio Exterior (`feature/cashflow-avisos-kpis-comex-nac-parcial`)
 
 Cuatro cosas: cada pestaña con proveedor muestra los avisos que el tablero dice de ella (*Lo que el tablero dice de cada pestaña, también en su panel*); las tarjetas KPI se pliegan a una franja (*Las tarjetas KPI se pliegan a una franja*); Proveedores Exterior y Crono Nacionalización traen sólo los contenedores desde una fecha de movimiento (`README-comex.md`, sección 12); y Crono registra pagos parciales de la nacionalización y proyecta el saldo (`README-comex.md`, sección 13).
@@ -2127,7 +2144,7 @@ La crea `sql/cashflow_estructura_costos_cobro.sql`. Ver `README-ventas.md`.
 
 ### Excluir un cheque que no se va a poder cobrar
 
-La fila *Echeqs en cartera* trae lo que en Tango está en estado `C` con fecha de hoy en adelante. Un cheque depositado ya no está en `C`: va en *Echeqs depositados*, ver `README-echeqs.md`. Un cheque que ya se sabe que no entra —el cliente avisó que no lo cubre, quedó judicializado, está en gestión de cambio— sumaba igual al disponible y no había dónde decir que no.
+La fila *Echeqs en cartera* trae lo que en Tango está en estado `C` con su día hábil de hoy en adelante —la fecha del cheque, corrida al hábil siguiente si cae un fin de semana o un feriado—, más los vencidos a los que Tesorería les asignó una fecha de acreditación. Un cheque depositado ya no está en `C`: va en *Echeqs depositados*. Ver `README-echeqs.md`. Un cheque que ya se sabe que no entra —el cliente avisó que no lo cubre, quedó judicializado, está en gestión de cambio— sumaba igual al disponible y no había dónde decir que no.
 
 Ahora se lo tilda en *Echeqs → Cheques en Cartera*, con un motivo. **Aplica sólo a cartera: el pre-chequeado no se toca.**
 
@@ -2139,8 +2156,8 @@ A_COBRAR + A_COBRAR_EXCLUIDOS + DEPOSITADOS = A_COBRAR_TODO
 
 | Serie | Qué trae |
 | --- | --- |
-| `A_COBRAR` | La cartera (`ESTADO = 'C'`) **cobrable**, en bruto. Es la de *Echeqs en cartera* |
-| `A_COBRAR_EXCLUIDOS` | Sólo lo excluido a mano, uno por uno |
+| `A_COBRAR` | La cartera (`ESTADO = 'C'`) **cobrable**, en bruto, en su día hábil o, un vencido, en su fecha asignada. Es la de *Echeqs en cartera* |
+| `A_COBRAR_EXCLUIDOS` | Sólo lo excluido a mano, uno por uno, con la misma regla de fecha. Un vencido excluido sin fecha no está acá ni en ninguna otra |
 | `DEPOSITADOS` | Los depositados en Tango (boleta BDE) que se proyectan, por el **neto** y en la fecha de acreditación. Es la de *Echeqs depositados*. Ver `README-echeqs.md` |
 | `A_COBRAR_TODO` | Las tres juntas. Desde el depósito **no es el universo en bruto**: los depositados entran por el neto, y el bruto se reconstruye con la retención |
 
