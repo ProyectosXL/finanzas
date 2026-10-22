@@ -58,6 +58,13 @@ class Parametros {
     const CLAVE_PLAZO_ECHEQS = 'echeqs_dias_acreditacion_deposito';
 
     /**
+     * La clave del plazo de presentacion de los cheques (la clave dice
+     * "vencidos" por historia: ver Echeqs::CLAVE_PLAZO_PRESENTACION). Es
+     * Echeqs::CLAVE_PLAZO_PRESENTACION, repetida por el mismo motivo que la del plazo.
+     */
+    const CLAVE_PLAZO_PRESENTACION_ECHEQS = 'echeqs_dias_vencidos_cartera';
+
+    /**
      * Modulos que expone la pestana Parametros, en el orden de las sub-pestanas.
      *
      * Cada parametro declara a que MODULO pertenece, asi se ve de un vistazo que
@@ -1248,6 +1255,14 @@ class Parametros {
         if ($clave === self::CLAVE_PLAZO_ECHEQS) {
             throw new Exception('El plazo de acreditación de los cheques se guarda desde '
                 . 'Parámetros → Cheques, que valida que sea un entero de días hábiles.');
+        }
+
+        /* EL PLAZO DE PRESENTACION DE LOS CHEQUES, TAMBIEN: uno de cero o de
+           "treinta" dejaria de leer la cartera de dia habil pasado. La regla vive en
+           Echeqs::guardarPlazoPresentacion(). */
+        if ($clave === self::CLAVE_PLAZO_PRESENTACION_ECHEQS) {
+            throw new Exception('El plazo de presentación de los cheques se guarda desde '
+                . 'Parámetros → Cheques, que valida que sea un entero de 1 a 30.');
         }
 
         /* LA FECHA DESDE LA QUE SE CONSIDERAN LOS CONTENEDORES SE VALIDA ACA, y

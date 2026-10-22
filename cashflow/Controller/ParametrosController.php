@@ -923,6 +923,28 @@ try {
             ], JSON_UNESCAPED_UNICODE);
             break;
 
+        /* El plazo de presentacion de los cheques: hasta cuantos dias desde
+           su fecha un cheque en cartera esta en plazo; despues, vencido. Valida Echeqs::guardarPlazoPresentacion(): saveParametro() rechaza
+           esta clave, como la del plazo. */
+        case 'savePlazoPresentacionEcheq':
+            $data = bodyJson();
+
+            if (!array_key_exists('dias', $data)) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            require_once __DIR__ . '/../Class/Echeqs.php';
+
+            $dias = (new Echeqs())->guardarPlazoPresentacion($data['dias'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Plazo de presentación: ' . $dias . ' día(s) corridos desde la fecha del '
+                    . 'cheque. Después, el cheque en cartera figura como vencido.',
+                'data' => ['dias' => $dias]
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         case 'addAlicuotaEcheq':
             $data = bodyJson();
 

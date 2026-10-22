@@ -46,6 +46,7 @@
         conectar('btnAgregarClientePpq', agregar);
 
         conectar('btnGuardarPlazoPpq', guardarPlazo);
+        conectar('btnGuardarPlazoPresPpq', guardarPlazoPresentacion);
         conectar('btnNuevaAlicuotaPpq', function() {
             alternar('formAlicuotaPpq');
             pintarSuma();
@@ -183,6 +184,7 @@
         mostrar('cuerpoDepositoPpq', true);
 
         pintarPlazo(d);
+        pintarPlazoPresentacion(d);
         pintarTasaHoy(d.tasa_hoy);
         pintarAlicuotas(d.alicuotas || []);
         pintarConceptos(d.alicuotas || []);
@@ -210,6 +212,47 @@
             aud.textContent = p.fecha
                 ? 'Último cambio: ' + (Auditoria.quien(p.usuario) || 'sin usuario registrado') +
                   ' · ' + Auditoria.fecha(p.fecha)
+                : '';
+        }
+    }
+
+    /**
+     * El plazo de presentación de los cheques. Sin el script la fila no existe
+     * y el campo queda apagado: el aviso de arriba dice qué correr.
+     */
+    function pintarPlazoPresentacion(d) {
+        var inp = document.getElementById('plazoPresentacionPpq');
+        var v = d.plazo_presentacion || {};
+        var hayFila = (v.valor !== null && v.valor !== undefined);
+
+        if (inp) {
+            inp.max = d.plazo_presentacion_max;
+            // Un plazo roto se muestra tal cual está guardado, para poder
+            // corregirla: el motivo lo dice el aviso de arriba.
+            inp.value = (v.dias !== null && v.dias !== undefined) ? v.dias : (v.valor || '');
+            inp.setAttribute('data-previo', inp.value);
+
+        }
+
+        // El botón existe sólo con permiso de edición: es lo que dice si el
+        // campo se puede tocar.
+        var btn = document.getElementById('btnGuardarPlazoPresPpq');
+
+        if (inp && btn) {
+            inp.disabled = !hayFila;
+        }
+
+        if (btn) {
+            btn.disabled = !hayFila;
+            btn.title = hayFila ? '' : 'Falta correr sql/cashflow_echeqs_vencidos.sql.';
+        }
+
+        var aud = document.getElementById('plazoPresAuditoriaPpq');
+
+        if (aud) {
+            aud.textContent = v.fecha
+                ? 'Último cambio: ' + (Auditoria.quien(v.usuario) || 'sin usuario registrado') +
+                  ' · ' + Auditoria.fecha(v.fecha)
                 : '';
         }
     }
@@ -410,6 +453,42 @@
                     cargar();
                 });
         }, 'No se pudo guardar el plazo');
+    }
+
+    function guardarPlazoPresentacion() {
+        var inp = document.getElementById('plazoPresentacionPpq');
+        var previo = inp.getAttribute('data-previo');
+        var maximo = (modulo.deposito && modulo.deposito.plazo_presentacion_max) || 30;
+        var texto = String(inp.value).trim();
+        var dias = parseInt(texto, 10);
+
+        // Espejo de Echeqs::validarPlazoPresentacion(), sólo para no mandar algo que el
+        // servidor va a rechazar. El que vale es el del servidor.
+        if (!/^\d+$/.test(texto) || dias < 1 || dias > maximo) {
+            Notificacion.campoInvalido(inp, 'El plazo de presentación tiene que ser de 1 a ' + maximo +
+                ' días corridos.', {
+                detalle: maximo + ' días es el plazo que da la Ley de Cheques para presentar un cheque al cobro.'
+            });
+
+            return;
+        }
+
+        if (texto === previo) {
+            return;
+        }
+
+        conBotonEl(document.getElementById('btnGuardarPlazoPresPpq'), function() {
+            return pedirJson(URL_PARAM + '?action=savePlazoPresentacionEcheq', { dias: dias })
+                .then(function() {
+                    Notificacion.exito('Plazo de presentación: ' + dias +
+                        ' día(s) corridos desde la fecha del cheque.', {
+                        detalle: 'Un cheque en cartera que lo supera figura como vencido: deja de ' +
+                                 'sumar, y si tenía fecha de acreditación asignada, deja de aplicar.'
+                    });
+
+                    cargar();
+                });
+        }, 'No se pudo guardar el plazo de presentación');
     }
 
     function agregarAlicuota() {

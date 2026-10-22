@@ -10,10 +10,14 @@ require_once __DIR__ . '/../Echeqs.php';
  *
  * SERIES
  *   A_COBRAR            los cheques de terceros EN CARTERA (ESTADO = 'C') que
- *                       SI se van a poder cobrar, en la fecha del cheque y por
- *                       el BRUTO. Es la fila "Echeqs en cartera".
+ *                       SI se van a poder cobrar, en su DIA HABIL -la fecha
+ *                       del cheque, corrida al habil siguiente si cae un fin
+ *                       de semana o un feriado- o, si estan en plazo de
+ *                       presentacion, en la fecha de acreditacion
+ *                       asignada, y por el BRUTO. Es la
+ *                       fila "Echeqs en cartera".
  *   A_COBRAR_EXCLUIDOS  los que alguien marco como incobrables, con su motivo,
- *                       en bruto
+ *                       en bruto y en el mismo dia habil
  *   DEPOSITADOS         los que Tesoreria deposito en Tango (boleta BDE a una
  *                       cuenta bancaria) y todavia se proyectan, en su fecha de
  *                       ACREDITACION y por el NETO de las retenciones del banco.
@@ -28,6 +32,35 @@ require_once __DIR__ . '/../Echeqs.php';
  * (ESTADO = 'C') y la tercera de los depositados (ESTADO = 'A'): un cheque no
  * puede estar en los dos estados a la vez. Un excluido que despues se deposita
  * deja la cartera y entra en DEPOSITADOS: la exclusion es de cartera.
+ *
+ * LA CARTERA INCLUYE LOS CHEQUES EN PLAZO DE PRESENTACION CON FECHA. Un
+ * cheque que sigue en cartera despues de su dia habil y dentro del plazo de
+ * presentacion -la Ley de Cheques da 30 dias corridos; es el parametro de
+ * Parametros -> Cheques- NO ESTA VENCIDO: se puede depositar. Entra en A_COBRAR -o en A_COBRAR_EXCLUIDOS, si esta excluido- en
+ * la FECHA DE ACREDITACION INTERNA que le asigno Tesoreria, por el bruto.
+ *
+ * LOS EN PLAZO SIN FECHA NO ESTAN EN NINGUNA PARTE, NI EN A_COBRAR_TODO, Y A
+ * PROPOSITO. Nadie dijo cuando entra esa plata: ponerla en la fecha del cheque
+ * -que ya paso- la sacaria del eje, y en cualquier otra seria una fecha
+ * inventada. Tampoco es un importe "fuera del horizonte" o "sin fecha" del
+ * total: esos dicen plata que el tablero deberia mostrar y no puede, y aca el
+ * tablero no sabe donde va. Lo que hace es AVISAR cuantos son y por cuanto,
+ * para que alguien les asigne una fecha. Lo mismo uno cuya fecha asignada ya
+ * paso sin que se depositara.
+ *
+ * LOS VENCIDOS -los que superaron el plazo de presentacion- TAMPOCO: ya no se
+ * pueden depositar, asi que esa plata no va a entrar por ese cheque. Se ven
+ * en la pestana y avisan, para que alguien los resuelva en Tango.
+ *
+ * La particion sigue cerrando, porque ninguno de esos entra en las partes ni
+ * en el total.
+ *
+ * EL CORRIMIENTO AL DIA HABIL ES DE LA CARTERA, y lo decide
+ * Echeqs::resolverFechaCartera(), la misma regla de la grilla: el banco no
+ * acredita un sabado, un domingo ni un feriado. NO se aplica a los
+ * depositados, que ya cuentan dias habiles desde la boleta
+ * (DiasHabiles::habilesDespues()). La agregada se corre fecha por fecha
+ * despues del GROUP BY: el corrimiento depende solo de la fecha.
  *
  * DONDE ENTRA LA RETENCION. Las dos primeras partes van en bruto y la tercera
  * en neto, asi que A_COBRAR_TODO NO ES EL UNIVERSO EN BRUTO: es lo que la
@@ -85,7 +118,9 @@ require_once __DIR__ . '/../Echeqs.php';
  *
  * EL DEPOSITO NO CAMBIA ESO: el neteo va por tilde, no por estado ni por
  * deposito. Un cheque pre-chequeado que se deposita sigue neteando la venta
- * en la fecha del cheque, y entra a "Echeqs depositados" en su acreditacion.
+ * en el dia habil del cheque, y entra a "Echeqs depositados" en su
+ * acreditacion. Mientras esta en cartera, el cheque y su neteo caen en la
+ * misma columna: los dos se corren con Echeqs::correrAHabil().
  *
  * COROLARIO QUE VALE LA PENA TENER PRESENTE: tildar o destildar cheques en la
  * segunda sub-pestana NO cambia el total de ninguna de estas series. El tilde
@@ -135,10 +170,17 @@ class EcheqsProvider extends CashflowProvider {
         // getEcheqsCarteraTotales() y no getEcheqsCartera(): el tablero no
         // necesita banco ni cliente, y una consulta agregada no tiene por que
         // recorrer N filas para descartarlas. Trae el corte por excluido
-        // adentro del GROUP BY.
-        $items = $echeqs->getEcheqsCarteraTotales();
+        // adentro del GROUP BY, y cada grupo resuelto con la regla de la
+        // grilla (Echeqs::resolverFechaCartera()): su dia habil.
+        $items = $echeqs->getEcheqsCarteraTotales($h);
 
-        $this->avisarExcluidos($echeqs, $items);
+        // En plazo sin fecha o con la fecha pasada, vencidos, calendario
+        // faltante y sin habil: los mismos avisos que la pestana. Y el plazo de
+        // presentacion roto, que es critico; sin el script el tablero no dice
+        // nada.
+        $this->avisarTodos(Echeqs::avisosCartera($items));
+        $this->avisarTodos($echeqs->avisosPlazoPresentacion($h, true));
+        $this->avisarExcluidos($echeqs, $items, $h);
 
         // Los depositados, por la MISMA lectura que la pestana: fila por fila,
         // porque la acreditacion y el neto se calculan en PHP con el
@@ -177,7 +219,8 @@ class EcheqsProvider extends CashflowProvider {
      *
      * UN SOLO CORTE, de tres partes: el universo y la parte que le toca. Un
      * deposito que no se proyecta -acredito o le faltan datos- no va a
-     * ninguna serie.
+     * ninguna serie, y uno en plazo sin fecha, con la fecha pasada o vencido
+     * tampoco.
      *
      * Estatica y pura por el mismo motivo que ProveedoresProvider::seriesDeItem():
      * asi se puede verificar que el corte cierra sin depender de que haya algo
@@ -190,6 +233,13 @@ class EcheqsProvider extends CashflowProvider {
         if (!empty($item['DEPOSITO'])) {
             return ($item['DEPOSITO']['estado'] === Echeqs::DEPOSITO_PROYECTA)
                 ? [self::SERIE_TODO, self::SERIE_DEPOSITADOS] : [];
+        }
+
+        // En plazo sin fecha, con la fecha pasada o vencido: a ninguna serie,
+        // ni al total. Ver el encabezado. Excluido o no.
+        if (isset($item['CARTERA'])
+            && !in_array($item['CARTERA']['estado'], Echeqs::CARTERA_SUMAN, true)) {
+            return [];
         }
 
         return [
@@ -206,8 +256,11 @@ class EcheqsProvider extends CashflowProvider {
      * fuera del horizonte- no siempre existen en los datos. Ver
      * tests/test_echeqs.php y tests/test_echeqs_deposito.php.
      *
-     * DONDE Y CUANTO: uno de cartera, en la fecha del cheque y por el bruto;
-     * un depositado que se proyecta, en su acreditacion y por el neto.
+     * DONDE Y CUANTO: uno de cartera, en su dia habil -lo que dejo
+     * Echeqs::resolverFechaCartera() en CARTERA- y por el bruto; un
+     * depositado que se proyecta, en su acreditacion y por el neto. Un item
+     * de cartera sin resolver no tiene fecha: va a 'sin_fecha' del total, que
+     * el tablero informa, y no a una fecha de respaldo.
      *
      * @param Horizonte $h
      * @param array $items De getEcheqsCarteraTotales() y de itemsDeDepositados()
@@ -234,7 +287,8 @@ class EcheqsProvider extends CashflowProvider {
 
             $deposito = !empty($item['DEPOSITO']);
             $importe = floatval($deposito ? $item['DEPOSITO']['neto'] : $item['IMPORTE']);
-            $fecha = $deposito ? $item['DEPOSITO']['fecha_acreditacion'] : $item['FECHA_PAGO'];
+            $fecha = $deposito ? $item['DEPOSITO']['fecha_acreditacion']
+                : (isset($item['CARTERA']) ? $item['CARTERA']['fecha_eje'] : null);
 
             if ($deposito) {
                 $dep['bruto'] += $item['DEPOSITO']['bruto'];
@@ -292,12 +346,15 @@ class EcheqsProvider extends CashflowProvider {
      *
      * @param Echeqs $echeqs
      * @param array $items Filas de getEcheqsCarteraTotales()
+     * @param Horizonte $h El eje: el resumen lee el mismo universo
      */
-    private function avisarExcluidos($echeqs, $items) {
+    private function avisarExcluidos($echeqs, $items, $h) {
         $total = 0;
 
+        // Lo que esta en A_COBRAR_EXCLUIDOS: un excluido en plazo sin fecha, o
+        // vencido, no esta en ninguna serie, y getExclusionesEnCartera() tampoco lo cuenta.
         foreach ($items as $item) {
-            if (!empty($item['EXCLUIDO'])) {
+            if (in_array(self::SERIE_EXCLUIDOS, self::seriesDeItem($item), true)) {
                 $total += floatval($item['IMPORTE']);
             }
         }
@@ -306,7 +363,7 @@ class EcheqsProvider extends CashflowProvider {
             return;
         }
 
-        $r = $echeqs->getExclusionesEnCartera();
+        $r = $echeqs->getExclusionesEnCartera($h);
         $motivos = $r['motivos'];
         $detalle = '';
 

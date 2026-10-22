@@ -14,9 +14,13 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                   la fila "Echeqs en cartera" de DISPONIBILIDADES.
                                   En la misma grilla, los que Tesorería depositó
                                   en Tango (boleta BDE) hasta que acreditan:
-                                  alimentan "Echeqs depositados". La barra de
-                                  selección excluye y marca "ya acreditó".
-                                  Ver README-echeqs.md.
+                                  alimentan "Echeqs depositados". Y los que
+                                  están en plazo de presentación —su día pasó
+                                  y la ley da 30 días para depositarlos—, que
+                                  suman sólo con una fecha de acreditación
+                                  asignada, y los vencidos, que no suman. La barra de
+                                  selección excluye, marca "ya acreditó" y
+                                  asigna esa fecha. Ver README-echeqs.md.
       Venta Cobrada Anticipada -> cheques de clientes que pre-chequean. NO
                                   alimentan ninguna fila del tablero: su efecto
                                   es restar de la cobranza proyectada de Ventas.
@@ -78,10 +82,15 @@ $edita = AuthCashflow::puedeEditar('echeqs');
              tilde niega.
 
              LOS DEPOSITADOS VAN EN LA CUARTA TARJETA, con bruto, retención y
-             neto: es la fila "Echeqs depositados". Las restas las hace PHP:
-             acá no se calcula nada. -->
-        <div data-kpis="summarySectionEch" class="row g-3 mb-4" id="summarySectionEch" style="display: none;">
-            <div class="col-md-6 col-lg-3">
+             neto: es la fila "Echeqs depositados". Los en plazo de
+             presentación y los vencidos, en la quinta.
+             Las restas las hace PHP: acá no se calcula nada.
+
+             LAS CINCO EN UNA FILA en pantalla ancha (row-cols-lg-5): una sola
+             tarjeta abajo se leía como un bloque aparte. De a dos en tablet y
+             una por renglón en celular. -->
+        <div data-kpis="summarySectionEch" class="row row-cols-1 row-cols-md-2 row-cols-lg-5 g-3 mb-4" id="summarySectionEch" style="display: none;">
+            <div class="col">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Vista Días</span>
@@ -96,7 +105,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                 </div>
             </div>
 
-            <div class="col-md-6 col-lg-3">
+            <div class="col">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Vista Meses</span>
@@ -111,7 +120,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                 </div>
             </div>
 
-            <div class="col-md-6 col-lg-3">
+            <div class="col">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Período Completo</span>
@@ -131,7 +140,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                  dice el bruto y la retención, que es lo que explica la
                  diferencia con lo que se depositó, y cuántos ya acreditaron
                  y no suman. -->
-            <div class="col-md-6 col-lg-3">
+            <div class="col">
                 <div class="kpi-card">
                     <div class="kpi-card-header">
                         <span class="kpi-card-title">Depositados (neto)</span>
@@ -142,6 +151,29 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                     <div class="kpi-card-value" id="totalDepositadosEch">$ 0,00</div>
                     <div class="kpi-card-footer">
                         <span class="text-muted" id="detalleDepositadosEch">Ninguno</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- EN PLAZO DE PRESENTACIÓN: el bruto de los que siguen en
+                 cartera después de su día hábil y dentro del plazo —la Ley de
+                 Cheques da 30 días corridos para depositarlos: NO están
+                 vencidos—, sin los excluidos. Los que tienen fecha asignada YA
+                 ESTÁN en las tres primeras tarjetas —suman en su fecha—; los
+                 que no, no suman en ningún lado. Los vencidos —pasado el
+                 plazo— van aparte, en el pie de la tarjeta. Las cuentas las
+                 hace PHP (Echeqs::resumenEnPlazo()). -->
+            <div class="col">
+                <div class="kpi-card">
+                    <div class="kpi-card-header">
+                        <span class="kpi-card-title">En plazo de presentación</span>
+                        <div class="kpi-card-icon orange">
+                            <i class="fas fa-hourglass-half"></i>
+                        </div>
+                    </div>
+                    <div class="kpi-card-value" id="totalEnPlazoEch">$ 0,00</div>
+                    <div class="kpi-card-footer">
+                        <span class="text-muted" id="detalleEnPlazoEch">Ninguno</span>
                     </div>
                 </div>
             </div>
@@ -205,6 +237,22 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                             Ocultar depositados
                         </label>
                     </div>
+
+                    <!-- LOS EN PLAZO DE PRESENTACIÓN SIN FECHA NO SE VEN POR
+                         DEFECTO: no suman, y en el trabajo normal —mirar qué
+                         se va a cobrar— son ruido. Al lado se dice cuántos
+                         esconde y por cuánto, como con los excluidos, y el
+                         panel de avisos los pide. Los que tienen fecha se ven
+                         siempre, porque suman; los de fecha pasada también,
+                         porque piden reasignarla; y los vencidos también,
+                         porque hay que resolverlos en Tango. -->
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="verEnPlazoEch">
+                        <label class="form-check-label small text-muted" for="verEnPlazoEch">
+                            Ver valores en plazo de presentación sin fecha
+                        </label>
+                        <div class="small text-muted" id="enPlazoOcultosEch"></div>
+                    </div>
                 </div>
                 <div class="d-flex gap-2">
                     <!-- No hay Resumen / Detalle Facturas: el grano natural de esta
@@ -256,6 +304,22 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                             <i class="fas fa-rotate-left me-1"></i> Deshacer ya acreditó
                         </button>
                         <?php endif; ?>
+                        <!-- LA FECHA DE ACREDITACIÓN: sólo sobre cheques en plazo
+                             de presentación —no sobre un vencido: ya no se
+                             puede depositar—, todo o nada. Sin el script, el
+                             JS no los muestra. -->
+                        <?php if ($edita): ?>
+                        <button class="btn btn-sm btn-outline-primary" id="btnAsignarFechaSelEch"
+                                style="display: none;">
+                            <i class="fas fa-calendar-check me-1"></i> Asignar fecha
+                        </button>
+                        <?php endif; ?>
+                        <?php if ($edita): ?>
+                        <button class="btn btn-sm btn-outline-secondary" id="btnDeshacerFechaSelEch"
+                                style="display: none;">
+                            <i class="fas fa-calendar-minus me-1"></i> Deshacer fecha
+                        </button>
+                        <?php endif; ?>
                         <?php if ($edita): ?>
                         <button class="btn btn-sm btn-outline-danger" id="btnExcluirSelEch">
                             <i class="fas fa-ban me-1"></i> Excluir del cashflow
@@ -288,12 +352,15 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                 Nueve columnas descriptivas y después una por
                                 cada columna del eje, que dibuja el JS.
 
-                                FECHA DE PAGO = FECHA DEL CHEQUE. Un cheque en
-                                cartera cae en el eje en esa fecha y por el
-                                importe. Uno DEPOSITADO en Tango cae en Acredita
-                                y por el Neto: el depósito tiene su propia fecha
-                                —las 48 hs hábiles desde la boleta— y la del
-                                cheque deja de intervenir.
+                                FECHA DE PAGO = FECHA DEL CHEQUE, la escrita.
+                                El importe cae en ACREDITA: en cartera, el día
+                                hábil del cheque —su fecha, o el hábil
+                                siguiente si cae un fin de semana o un feriado,
+                                con la marca "corrida"—, por el importe. Uno
+                                DEPOSITADO en Tango cae en su acreditación y por
+                                el Neto: el depósito tiene su propia fecha —las
+                                48 hs hábiles desde la boleta— y la del cheque
+                                deja de intervenir.
                             -->
                             <tr>
                                 <!-- data-orden-nombre igual al rótulo: ancla el
@@ -305,14 +372,15 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                 <th rowspan="2">Banco</th>
                                 <th rowspan="2" class="col-texto">Cliente</th>
                                 <th rowspan="2" class="text-end">Importe</th>
-                                <!-- Las tres del depósito. VAN SIEMPRE, vacías
-                                     en los no depositados —no en cero: no hay
+                                <!-- Acredita y las dos del depósito. VAN
+                                     SIEMPRE; Retención y Neto, vacías en los no
+                                     depositados —no en cero: no hay
                                      depósito—. Aparecer y desaparecer según
                                      haya depositados movería los índices de
                                      las columnas fijas, el orden guardado y lo
                                      que baja el export. -->
                                 <th rowspan="2" class="text-center"
-                                    title="Fecha de acreditación del depósito: la que ubica el neto en la grilla y en el tablero.">Acredita</th>
+                                    title="Dónde cae el importe, en la grilla y en el tablero. En cartera, el día hábil del cheque: su fecha, o el hábil siguiente si cae un fin de semana o un feriado. En un depositado, su acreditación.">Acredita</th>
                                 <th rowspan="2" class="text-end"
                                     title="Lo que retiene el banco sobre el depósito: el bruto por la tasa vigente a la acreditación.">Retención</th>
                                 <th rowspan="2" class="text-end"
@@ -518,7 +586,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
 
             <!-- Lo que queda MÁS ALLÁ del horizonte se avisa: son cheques que
                  están en la tabla pero cuya fecha no tiene columna donde
-                 ubicarse. Desde que el importe se ubica por la fecha del
+                 ubicarse. Desde que el importe se ubica por el día hábil del
                  cheque, ese caso es plata que el tablero DEBERÍA restar y no
                  resta: la venta que prepagaron sí puede estar proyectada
                  adentro del cuadro. Ventas::repartirNeteo() informa el mismo
@@ -546,9 +614,16 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                 el orden y el peso visual son los que son:
 
                                   FECHA DEL CHEQUE     decide DÓNDE cae el
-                                                       importe en la grilla. Es
-                                                       cuando entra la plata.
-                                                       Va primera y destacada.
+                                                       importe en la grilla: su
+                                                       día hábil, corrido al
+                                                       siguiente si cae un fin
+                                                       de semana o un feriado
+                                                       —marca "corrida"—, como
+                                                       en Echeqs en cartera y
+                                                       en el neteo de Ventas.
+                                                       Es cuando entra la
+                                                       plata. Va primera y
+                                                       destacada.
 
                                   FECHA VENTA ESTIMADA decide QUÉ cheques se
                                   (cheque − días)      muestran: si ya pasó, esa
@@ -580,7 +655,7 @@ $edita = AuthCashflow::puedeEditar('echeqs');
                                      de fecha al lado, el nombre del dato es lo
                                      único que las distingue de un vistazo. -->
                                 <th rowspan="2"
-                                    title="Fecha del cheque. Es la que ubica el importe en la grilla: es cuando entra la plata.">
+                                    title="Fecha del cheque. Su día hábil —el siguiente, si cae un fin de semana o un feriado— es el que ubica el importe en la grilla: es cuando entra la plata.">
                                     Fecha del cheque
                                 </th>
                                 <th rowspan="2" class="text-muted"

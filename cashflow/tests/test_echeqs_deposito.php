@@ -178,7 +178,9 @@ function chequeCartera($id, $importe = 100000.0, $extra = []) {
         'CLIENTE' => 'CLIENTE ' . $id,
         'COD_CLIENTE' => 'FR' . $id,
         'EXCLUIDO' => false,
-        'DEPOSITO' => null
+        'DEPOSITO' => null,
+        'CARTERA' => ['estado' => Echeqs::CARTERA_VIGENTE,
+                      'fecha_eje' => isset($extra['FECHA_PAGO']) ? $extra['FECHA_PAGO'] : '2026-10-30']
     ], $extra));
 }
 
@@ -428,9 +430,10 @@ chequear('la marca se cruza por ID_SBA14', Echeqs::DEPOSITO_ACREDITADO, $lectMar
 seccion('donde cae cada fila en el eje');
 
 $normal = chequeCartera(20);
-chequear('una de cartera, en la fecha del cheque y por el bruto', ['2026-10-30', 100000.0],
+chequear('una de cartera, en su dia habil y por el bruto', ['2026-10-30', 100000.0],
     [$normal['FECHA_EJE'], $normal['IMPORTE_EJE']]);
-chequear('con Acredita, Retencion y Neto vacios, no en cero', [null, null, null],
+// Acredita dice donde cae el importe: en cartera, su dia habil.
+chequear('con Acredita en su dia habil, y Retencion y Neto vacios, no en cero', ['2026-10-30', null, null],
     [$normal['ACREDITA'], $normal['RETENCION'], $normal['NETO']]);
 chequear('el acreditado hoy muestra su deposito', ['2026-10-16', 1550.0, 48450.0],
     [$porId[2]['ACREDITA'], $porId[2]['RETENCION'], $porId[2]['NETO']]);
@@ -453,11 +456,13 @@ seccion('las consultas');
 $sqlCart = str_replace("\r\n", "\n", Echeqs::sqlCartera(true));
 chequear('la cartera es solo ESTADO = C, sin union con ningun deposito', [false, true], [
     strpos($sqlCart, 'DEPOSITO') !== false,
-    strpos($sqlCart, "WHERE s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)\n                  AND s.ESTADO = ?") !== false
+    strpos($sqlCart, "WHERE s.FECHA_CHEQ >= ?\n                  AND s.FECHA_CHEQ >= '1900-01-01'\n"
+        . "                  AND s.ESTADO = ?") !== false
 ]);
 chequear('la agregada usa el mismo universo', true,
     strpos(str_replace("\r\n", "\n", Echeqs::sqlCarteraTotales(true)),
-        "WHERE s.FECHA_CHEQ >= CAST(GETDATE() AS DATE)\n                  AND s.ESTADO = ?") !== false);
+        "WHERE s.FECHA_CHEQ >= ?\n                  AND s.FECHA_CHEQ >= '1900-01-01'\n"
+        . "                  AND s.ESTADO = ?") !== false);
 chequear('y sin el script no agrupa por una constante', false,
     strpos(Echeqs::sqlCarteraTotales(false), 'GROUP BY CAST(s.FECHA_CHEQ AS DATE),') !== false);
 
@@ -568,7 +573,8 @@ $hDep = new Horizonte(28, 12, [], new DateTime('2026-10-16'));
 /** Una fila agregada de getEcheqsCarteraTotales(), armada a mano */
 function itemCartera($fecha, $importe, $extra = []) {
     return array_merge(['FECHA_PAGO' => $fecha, 'EXCLUIDO' => false, 'IMPORTE' => $importe,
-                        'CHEQUES' => 1], $extra);
+                        'CHEQUES' => 1, 'CARTERA' => ['estado' => Echeqs::CARTERA_VIGENTE,
+                                                      'fecha_eje' => $fecha]], $extra);
 }
 
 /** El total de una serie, con lo que quedo fuera del eje */
@@ -654,7 +660,7 @@ chequear('y deja sus avisos con su nivel', 1, substr_count($srcProv, "\$this->av
 $ctrlCartera = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../Controller/EcheqsController.php'));
 chequear('la pestana tambien', 1, substr_count($ctrlCartera, "\$dep = \$echeqs->getDepositadosTango(\$hoy);"));
 chequear('y junta las dos lecturas en una grilla', 1,
-    substr_count($ctrlCartera, "\$filas = array_merge(\$echeqs->getEcheqsCartera(), \$dep['filas']);"));
+    substr_count($ctrlCartera, "\$filas = array_merge(\$cartera, \$dep['filas']);"));
 
 /* ================================================================
    El registro y el validador

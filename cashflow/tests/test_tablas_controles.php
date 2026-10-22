@@ -1360,7 +1360,7 @@ chequear('se titula Depósito de cheques', 1, substr_count($ppqTab, '<h5 class="
 chequear('y el maestro, Venta cobrada anticipada', 1,
     substr_count($ppqTab, '<h5 class="mb-0">Venta cobrada anticipada</h5>'));
 
-foreach (['plazoDepositoPpq', 'tasaHoyPpq', 'bodyAlicuotasPpq',
+foreach (['plazoDepositoPpq', 'plazoPresentacionPpq', 'plazoPresAuditoriaPpq', 'tasaHoyPpq', 'bodyAlicuotasPpq',
           'resultadoDepositoPpq', 'sinScriptDepositoPpq', 'cuerpoDepositoPpq'] as $id) {
     chequear('existe #' . $id . ' y el JS lo usa', [1, true], [
         substr_count($ppqTab, 'id="' . $id . '"'),
@@ -1369,7 +1369,7 @@ foreach (['plazoDepositoPpq', 'tasaHoyPpq', 'bodyAlicuotasPpq',
 }
 
 // Los controles de escritura, solo con permiso de edicion de la sub-pestana.
-foreach (['btnGuardarPlazoPpq', 'btnNuevaAlicuotaPpq', 'formAlicuotaPpq'] as $id) {
+foreach (['btnGuardarPlazoPpq', 'btnGuardarPlazoPresPpq', 'btnNuevaAlicuotaPpq', 'formAlicuotaPpq'] as $id) {
     $pos = strpos($ppqTab, 'id="' . $id . '"');
     $antes = substr($ppqTab, 0, $pos);
 
@@ -1377,10 +1377,19 @@ foreach (['btnGuardarPlazoPpq', 'btnNuevaAlicuotaPpq', 'formAlicuotaPpq'] as $id
         $pos !== false && strrpos($antes, '<?php if ($edita): ?>') > strrpos($antes, '<?php endif; ?>'));
 }
 
-chequear('sin permiso el plazo se ve pero no se edita', 1,
+chequear('sin permiso los dos plazos se ven pero no se editan', 2,
     substr_count($ppqTab, "<?php echo \$edita ? '' : 'disabled'; ?>"));
 
-foreach (['savePlazoDepositoEcheq' => 'guardarPlazo', 'addAlicuotaEcheq' => 'agregarAlicuota',
+// El plazo de presentacion va DEBAJO del plazo de acreditacion.
+chequear('el plazo de presentacion va debajo del de acreditacion, con su explicacion', true,
+    strpos($ppqTab, 'id="plazoPresentacionPpq"') > strpos($ppqTab, 'id="plazoDepositoPpq"')
+    && strpos($ppqTab, 'Plazo de presentación de los cheques') !== false
+    && strpos($ppqTab, 'Días corridos desde la fecha del cheque para presentarlo al cobro: 30') !== false);
+chequear('y su boton esta conectado', 1,
+    substr_count($ppqJs, "conectar('btnGuardarPlazoPresPpq', guardarPlazoPresentacion);"));
+
+foreach (['savePlazoDepositoEcheq' => 'guardarPlazo', 'savePlazoPresentacionEcheq' => 'guardarPlazoPresentacion',
+          'addAlicuotaEcheq' => 'agregarAlicuota',
           'bajaAlicuotaEcheq' => 'bajaAlicuota'] as $accion => $fn) {
     chequear($accion . ': el JS la pide y el controller la atiende', [true, 1], [
         strpos($ppqJs, "?action=" . $accion . "'") !== false,
@@ -1473,7 +1482,8 @@ chequear('los botones se muestran solo si el script de la marca esta corrido', t
     && substr_count($fnBotonesAcr, "style.display = puede ? '' : 'none';") === 2);
 chequear('Ya acredito se habilita solo si todos los seleccionados se proyectan', true,
     strpos($fnBotonesAcr, "btnAcr.disabled = (proyectan !== sel.length);") !== false);
-chequear('y se pinta con la barra', 1, substr_count($echJs, "        pintarBotonesAcreditado(sel);\n    }"));
+chequear('y se pinta con la barra, con los de la fecha de los en plazo', 1,
+    substr_count($echJs, "        pintarBotonesAcreditado(sel);\n        pintarBotonesFecha(sel);\n    }"));
 
 $fnAcr = cuerpoFnEch($echJs, 'accionAcreditado');
 chequear('pide confirmacion con observacion opcional, y manda solo ids y observacion', true,
@@ -1509,6 +1519,110 @@ chequear('por defecto destildado: los depositados se ven', 0,
 chequear('y redibuja la tabla al cambiar', 1,
     substr_count($echJs, "escuchar('ocultarDepositadosEch', 'change', dibujarCartera);"));
 
+seccion('Echeqs > Cheques en Cartera: en plazo de presentacion y vencidos, enganchados');
+
+/* UN CHEQUE CUYO DIA PASO NO ESTA VENCIDO: esta en plazo de presentacion
+   -la Ley de Cheques da 30 dias-. Ningun texto de la pestana lo llama
+   vencido; vencido es solo el que supero el plazo. */
+chequear('el switch "Ver valores en plazo de presentación sin fecha" existe, al lado de los otros dos', true,
+    strpos($echTab, 'id="verEnPlazoEch"') > strpos($echTab, 'id="ocultarDepositadosEch"')
+    && strpos($echTab, 'Ver valores en plazo de presentación sin fecha') !== false);
+chequear('ya no dice "Ver vencidos" ni "Vencidos en cartera"', [false, false], [
+    stripos($echTab, 'Ver vencidos') !== false, stripos($echTab, 'Vencidos en cartera') !== false]);
+chequear('apagado por defecto', 0, preg_match('/id="verEnPlazoEch"[^>]*checked/', $echTab));
+chequear('redibuja al cambiar, y al lado dice cuantos esconde', [1, 1, true], [
+    substr_count($echJs, "escuchar('verEnPlazoEch', 'change', dibujarCartera);"),
+    substr_count($echTab, 'id="enPlazoOcultosEch"'),
+    strpos($echJs, "document.getElementById('enPlazoOcultosEch')") !== false
+]);
+$fnVisibles = cuerpoFnEch($echJs, 'filasCarteraVisibles');
+chequear('esconde solo los en plazo SIN fecha: no los de fecha asignada, ni los de fecha pasada, ni los vencidos', true,
+    strpos($fnVisibles, "if (!verVen && f.ESTADO_CARTERA === 'EN_PLAZO_SIN_FECHA' && !f.EXCLUIDO) {") !== false
+    && strpos($fnVisibles, 'FECHA_PASADA') === false && strpos($fnVisibles, 'EN_PLAZO_CON_FECHA') === false
+    && strpos($fnVisibles, "'VENCIDO'") === false);
+chequear('lo escondido gana sobre la busqueda, y lo dice', true,
+    strpos(cuerpoFnEch($echJs, 'pintarEnPlazoOcultos'), "' en plazo de presentación sin fecha coinciden: prendé el switch'") !== false
+    && strpos(cuerpoFnEch($echJs, 'mensajeVacioCartera'), "' en plazo de presentación sin fecha coinciden: prendé el '") !== false);
+
+$fnAcredita = cuerpoFnEch($echJs, 'celdaAcredita');
+chequear('la celda Acredita es editable solo con permiso de edicion y con el script', true,
+    strpos($fnAcredita, "var puede = Permisos.puedeEditar('bodyEch') && fv.creada && fv.plazo_presentacion !== null") !== false
+    && strpos($fnAcredita, '<input type="date" class="form-control form-control-sm ech-fecha-asignada"') !== false
+    && strpos($fnAcredita, "(asignada ? fecha(asignada) : '—')") !== false);
+chequear('y guarda al cambiar, por la misma accion que la barra', true,
+    strpos(cuerpoFnEch($echJs, 'conectarFechasEnPlazo'), "inp.addEventListener('change', function() { guardarFechaCelda(inp); });") !== false
+    && strpos(cuerpoFnEch($echJs, 'guardarFecha'), "URL_ECHEQS + '?action=asignarFechaEnPlazo'") !== false);
+
+foreach (['btnAsignarFechaSelEch' => 'accionAsignarFecha',
+          'btnDeshacerFechaSelEch' => 'accionDeshacerFecha'] as $id => $fn) {
+    $pos = strpos($echTab, 'id="' . $id . '"');
+    $antes = substr($echTab, 0, (int) $pos);
+
+    chequear('#' . $id . ' existe, en la barra de seleccion', true,
+        $pos !== false && $pos > strpos($echTab, 'id="barraSelEch"')
+        && $pos < strpos($echTab, 'id="btnExcluirSelEch"'));
+    chequear('#' . $id . ' se dibuja solo con permiso de edicion', true,
+        strrpos($antes, '<?php if ($edita): ?>') > strrpos($antes, '<?php endif; ?>'));
+    chequear('#' . $id . ' nace escondido: sin el script no se muestra', 1,
+        preg_match('/id="' . $id . '"\s+style="display: none;"/', $echTab));
+    chequear('#' . $id . ' esta conectado a ' . $fn, 1,
+        substr_count($echJs, "conectar('" . $id . "', " . $fn . ");"));
+}
+
+foreach (['asignarFechaEnPlazo', 'deshacerFechaEnPlazo'] as $accion) {
+    chequear($accion . ': el JS la pide y el controller la atiende', [true, 1], [
+        strpos($echJs, "?action=" . $accion . "'") !== false,
+        substr_count($echCtrl, "case '" . $accion . "':")
+    ]);
+    chequear($accion . ' pide editar Echeqs', [['echeqs', null]], AuthCashflow::ESCRITURAS['Echeqs'][$accion]);
+}
+
+$fnBotFecha = cuerpoFnEch($echJs, 'pintarBotonesFecha');
+chequear('Asignar fecha solo si todos estan en plazo; Deshacer fecha solo si todos tienen fecha', true,
+    strpos($fnBotFecha, 'btnAs.disabled = (enPlazo !== sel.length);') !== false
+    && strpos($fnBotFecha, 'btnDe.disabled = (conFecha !== sel.length);') !== false);
+chequear('el dialogo pide la fecha y una observacion, con el tope, y dice cuantos se reemplazan', true,
+    strpos(cuerpoFnEch($echJs, 'accionAsignarFecha'), 'Notificacion.pedirFecha({') !== false
+    && strpos(cuerpoFnEch($echJs, 'accionAsignarFecha'), 'texto: { etiqueta: \'Observación\'') !== false
+    && strpos(cuerpoFnEch($echJs, 'accionAsignarFecha'), 'max: max,') !== false
+    && strpos(cuerpoFnEch($echJs, 'accionAsignarFecha'), "' ya tenían fecha: se reemplaza") !== false);
+chequear('del navegador viajan los ids, la fecha y la observacion', 1,
+    substr_count($echJs, '{ ids: ids, fecha: fechaElegida, observacion: observacion }'));
+chequear('Ya acredito sigue sin habilitarse con un vencido: solo con depositados que se proyectan', true,
+    strpos($fnBotonesAcr, "btnAcr.disabled = (proyectan !== sel.length);") !== false);
+chequear('la barra dice cuantos en plazo y cuantos vencidos hay en la seleccion', [1, 1], [
+    substr_count($echJs, "(enPlazo ? ' · ' + enPlazo + ' en plazo de presentación' : '')"),
+    substr_count($echJs, "(vencidos ? ' · ' + vencidos + ' vencido(s)' : '')")]);
+
+$filaKpis = substr($echTab, strpos($echTab, 'id="summarySectionEch"') - 120,
+    strpos($echTab, 'id="excluidosEch"') - strpos($echTab, 'id="summarySectionEch"'));
+chequear('las cinco tarjetas de cartera van en una sola fila en pantalla ancha', [1, 5], [
+    substr_count($filaKpis, 'class="row row-cols-1 row-cols-md-2 row-cols-lg-5 g-3 mb-4"'),
+    substr_count($filaKpis, '<div class="col">')
+]);
+chequear('la tarjeta "En plazo de presentación" existe y el JS la pinta, con los vencidos al pie', [1, true, true, true], [
+    substr_count($echTab, '<span class="kpi-card-title">En plazo de presentación</span>'),
+    strpos($echJs, "texto('totalEnPlazoEch', pesos(v.bruto));") !== false,
+    strpos($echJs, "texto('detalleEnPlazoEch'") !== false,
+    strpos($echJs, "' vencido(s) · ' + pesosPlano(vVen.bruto)") !== false
+]);
+chequear('el pie abre los en plazo con fecha sin sumarlos dos veces, y los sin fecha y los vencidos aparte', true,
+    strpos($echJs, "'↳ de esos, en plazo de presentación con fecha · ya sumados arriba'") !== false
+    && strpos($echJs, "'En plazo de presentación sin fecha · no suman'") !== false
+    && strpos($echJs, "'Vencidos · no suman'") !== false);
+chequear('la marca corrida va solo en un vigente: a un vencido no le dice donde cae', 1,
+    substr_count(cuerpoFnEch($echJs, 'marcaCartera'), "if (c.corrida && f.ESTADO_CARTERA === 'VIGENTE') {"));
+chequear('las marcas: en plazo, fecha pasada, vencido y corrida', true,
+    strpos($echJs, "'en plazo · sin fecha'") !== false && strpos($echJs, "'en plazo · fecha asignada'") !== false
+    && strpos($echJs, "VENCIDO: ['ech-badge-vencido', 'vencido']") !== false
+    && strpos($echJs, "'vencido · sin fecha'") === false
+    && strpos($echJs, "'fecha asignada pasada'") !== false && strpos($echJs, "+ 'corrida</span></div>'") !== false);
+chequear('el tooltip dice hasta cuando va el plazo de presentacion, quien asigno y las anteriores', true,
+    strpos(cuerpoFnEch($echJs, 'textoEnPlazo'), "'En plazo de presentación hasta el '") !== false
+    && strpos(cuerpoFnEch($echJs, 'textoEnPlazo'), "'Plazo de presentación vencido el '") !== false
+    && strpos(cuerpoFnEch($echJs, 'textoEnPlazo'), "'\\n\\nFecha asignada por '") !== false
+    && strpos(cuerpoFnEch($echJs, 'textoEnPlazo'), "'; dada de baja por '") !== false);
+
 seccion('Echeqs > Cheques en Cartera: las columnas nuevas no corren a las demas');
 
 /* LOS ENCABEZADOS DE LA PRIMERA FILA, EN ORDEN. Las columnas fijas se eligen
@@ -1539,9 +1653,14 @@ chequear('la de seleccion sigue sin ordenarse', 1,
 $cuerpoFila = substr($echJs, strpos($echJs, 'function pintarFilasCartera('),
     strpos($echJs, 'cols.forEach(function(col) {', strpos($echJs, 'function pintarFilasCartera('))
         - strpos($echJs, 'function pintarFilasCartera('));
-chequear('cada fila dibuja nueve celdas antes del eje', 9, substr_count($cuerpoFila, "html += '<td"));
-chequear('Acredita se ordena por la fecha cruda, como la fecha de pago', 1,
-    substr_count($cuerpoFila, "data-orden=\"' + escapar(String(f.ACREDITA || '').slice(0, 10)) + '\""));
+chequear('cada fila dibuja nueve celdas antes del eje: ocho y Acredita, en su lugar', [8, 1, true],
+    [substr_count($cuerpoFila, "html += '<td"), substr_count($cuerpoFila, 'html += celdaAcredita(f);'),
+     strpos($cuerpoFila, 'html += celdaAcredita(f);') > strpos($cuerpoFila, 'pesos(f.IMPORTE)')
+     && strpos($cuerpoFila, 'html += celdaAcredita(f);') < strpos($cuerpoFila, 'f.RETENCION')]);
+$fnAcredita = cuerpoFnEch($echJs, 'celdaAcredita');
+chequear('Acredita dibuja UNA celda en cada caso, y se ordena por la fecha cruda', [3, true],
+    [substr_count($fnAcredita, "return '<td class=\"center\" data-orden=\"'"),
+     strpos($fnAcredita, "var orden = String(f.ACREDITA || '').slice(0, 10);") !== false]);
 
 // El pie: un rotulo de cuatro columnas y cinco celdas mas, antes del eje.
 $cuerpoPie = substr($echJs, strpos($echJs, 'function filaPie('),

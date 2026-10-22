@@ -94,6 +94,36 @@ $edita = AuthCashflow::puedeEditar('parametros', 'PRECHEQUEADO');
                                 acreditaron</strong>: la fecha se calcula al leer, no se guarda.
                             </div>
                             <div class="ppq-subtitulo mt-1" id="plazoAuditoriaPpq"></div>
+
+                            <!-- EL PLAZO DE PRESENTACIÓN. Un cheque que sigue en
+                                 cartera después de su fecha está EN PLAZO hasta
+                                 estos días —se puede presentar al cobro y, con una fecha
+                                 de acreditación asignada, suma—; después está
+                                 VENCIDO. Tiene su propio guardado, como el plazo
+                                 de acreditación: valida de 1 a 30. La clave en
+                                 la base dice "vencidos" por historia. -->
+                            <label class="form-label form-label-sm fw-semibold mt-3" for="plazoPresentacionPpq">
+                                Plazo de presentación de los cheques
+                            </label>
+                            <div class="input-group input-group-sm" style="max-width: 260px;">
+                                <input type="number" id="plazoPresentacionPpq" class="form-control text-center"
+                                       min="1" step="1"
+                                       <?php echo $edita ? '' : 'disabled'; ?>>
+                                <span class="input-group-text">días corridos</span>
+                                <?php if ($edita): ?>
+                                <button class="btn btn-outline-primary" id="btnGuardarPlazoPresPpq" type="button">
+                                    Guardar
+                                </button>
+                                <?php endif; ?>
+                            </div>
+                            <div class="param-hint mt-1">
+                                Días corridos desde la fecha del cheque para presentarlo al cobro: 30
+                                por la Ley de Cheques. Dentro del plazo, un cheque que sigue en cartera
+                                está <strong>en plazo de presentación</strong>: se puede presentar al cobro y,
+                                con una fecha de acreditación asignada, suma. Pasado el plazo, está
+                                <strong>vencido</strong> y no suma.
+                            </div>
+                            <div class="ppq-subtitulo mt-1" id="plazoPresAuditoriaPpq"></div>
                         </div>
                         <div class="col-md-7">
                             <div class="form-label form-label-sm fw-semibold mb-1">Tasa de retención vigente hoy</div>

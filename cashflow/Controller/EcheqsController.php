@@ -66,21 +66,25 @@ try {
                Un cheque esta en una o en la otra, nunca en las dos. Los
                depositados vienen de getDepositadosTango(), la misma lectura
                que usa el proveedor: la pestana y el tablero suman lo mismo. */
+            $h = Horizonte::desdeParametros(new Parametros());
             $dep = $echeqs->getDepositadosTango($hoy);
-            $filas = array_merge($echeqs->getEcheqsCartera(), $dep['filas']);
+            $cartera = $echeqs->getEcheqsCartera($h);
+            $filas = array_merge($cartera, $dep['filas']);
 
             /* El eje sale de horizonte_dias y horizonte_meses, el mismo del
                tablero: los importes por columna vienen ya resueltos y el
                navegador no calcula ninguna fecha.
 
                CADA FILA SE UBICA POR FECHA_EJE E IMPORTE_EJE, que resolvio
-               Echeqs::ubicarEnEje(): uno de cartera en la fecha del cheque y
-               por el bruto, uno depositado que se proyecta en su acreditacion
-               y por el neto, y uno acreditado o sin datos en ninguna columna. Es la misma
-               regla que usa el proveedor, asi que la grilla y el tablero ponen
-               cada peso en la misma columna. */
+               Echeqs::ubicarEnEje(): uno de cartera en su dia habil -la fecha
+               del cheque, corrida si cae un fin de semana o un feriado- y por
+               el bruto, uno depositado que se proyecta en su acreditacion y
+               por el neto, y uno acreditado o sin datos en ninguna columna.
+               Es la misma regla que usa el proveedor, asi que la grilla y el
+               tablero ponen cada peso en la misma columna. El mismo eje $h
+               decide hasta donde se corre. */
             $payload = EjeVista::armar(
-                Horizonte::desdeParametros(new Parametros()),
+                $h,
                 $filas,
                 'FECHA_EJE',
                 'IMPORTE_EJE'
@@ -99,6 +103,13 @@ try {
             $payload['excluidos'] = Echeqs::resumenExcluidos($payload['filas']);
             $payload['depositados'] = Echeqs::resumenDepositos($payload['filas']);
 
+            /* LOS EN PLAZO DE PRESENTACION: cuantos tienen fecha -y suman,
+               adentro de "Echeqs en cartera"- y cuantos no; y los vencidos. Y lo que la pantalla necesita para
+               el selector de fecha: si se puede asignar y entre que fechas.
+               El servidor valida igual al guardar. */
+            $payload['en_plazo'] = Echeqs::resumenEnPlazo($payload['filas']);
+            $payload['fecha_en_plazo'] = $echeqs->datosEnPlazo($h);
+
             /* LAS TRES TARJETAS SON LA CARTERA COBRABLE SIN DEPOSITADOS: lo
                mismo que la fila "Echeqs en cartera" del tablero. Los
                depositados van en su propia tarjeta, con bruto, retencion y
@@ -111,6 +122,14 @@ try {
             // Los de los depositados: sin plazo, sin habil o sin alicuotas
             // son criticos -esa plata no esta en ninguna fila-.
             foreach ($dep['avisos'] as $a) {
+                $payload['warnings'][] = $a;
+            }
+
+            // Los de la cartera: en plazo sin fecha o con la fecha pasada,
+            // vencidos, calendario faltante y sin habil. Los mismos que deja
+            // el proveedor en el tablero. Y los del plazo de presentacion: sin
+            // el script, solo aca; roto, critico aca y en el tablero.
+            foreach (array_merge(Echeqs::avisosCartera($cartera), $echeqs->avisosPlazoPresentacion($h)) as $a) {
                 $payload['warnings'][] = $a;
             }
 
@@ -152,24 +171,29 @@ try {
             break;
 
         case 'getEcheqsPrechequeado':
-            $filas = $echeqs->getEcheqsPrechequeado();
+            $h = Horizonte::desdeParametros(new Parametros());
+            $filas = $echeqs->getEcheqsPrechequeado($h);
 
             // DOS FECHAS, DOS FUNCIONES DISTINTAS:
             //
             //   FECHA_VENTA_EST  decide QUE cheques se muestran
-            //   FECHA_CHEQUE     decide DONDE cae cada importe en el eje
+            //   FECHA_EJE        decide DONDE cae cada importe en el eje: la
+            //                    fecha del cheque, corrida al habil siguiente
+            //                    si cae un fin de semana o un feriado
             //
-            // Cada cheque se ubica en la fecha del CHEQUE, que es cuando entra
-            // la plata. Antes se ubicaba en la fecha estimada de venta, porque
-            // el criterio era caer donde esta la cobranza proyectada de esa
-            // venta; ese razonamiento quedo superado. La fecha estimada sigue
-            // siendo columna visible: es lo que explica por que ese cheque esta
-            // en la lista.
+            // Cada cheque se ubica en el dia habil del CHEQUE, que es cuando
+            // entra la plata. Antes se ubicaba en la fecha estimada de venta,
+            // porque el criterio era caer donde esta la cobranza proyectada de
+            // esa venta; ese razonamiento quedo superado. La fecha estimada
+            // sigue siendo columna visible: es lo que explica por que ese
+            // cheque esta en la lista.
             //
-            // ESTA LINEA Y Ventas::repartirNeteo() SE MUEVEN JUNTAS. El modulo
-            // esta construido para que la pantalla y el neteo no se puedan
-            // desalinear: si solo cambiara una, el usuario tildaria un cheque
-            // en una columna y el tablero lo restaria en otra.
+            // ESTA LINEA Y Ventas::repartirNeteo() SE MUEVEN JUNTAS, y con el
+            // mismo helper: Echeqs::correrAHabil(). El modulo esta construido
+            // para que la pantalla y el neteo no se puedan desalinear: si solo
+            // cambiara una, el usuario tildaria un cheque en una columna y el
+            // tablero lo restaria en otra. Y es la columna del cheque en
+            // "Echeqs en cartera".
             //
             // Los cheques cuya fecha ESTIMADA cae antes de hoy no llegan hasta
             // aca: los descarta Echeqs::cruzarPrechequeado() con
@@ -182,9 +206,9 @@ try {
             // neteo informa el mismo importe en 'fuera_horizonte', asi que las
             // dos pantallas dicen lo mismo.
             $payload = EjeVista::armar(
-                Horizonte::desdeParametros(new Parametros()),
+                $h,
                 $filas,
-                'FECHA_CHEQUE',
+                'FECHA_EJE',
                 'IMPORTE'
             );
 
@@ -193,6 +217,11 @@ try {
             // y "esta pantalla no anda".
             $payload['resumen'] = Echeqs::resumenPrechequeado($filas);
             $payload['avisos'] = $echeqs->getAvisos();
+
+            // Los del corrimiento: calendario faltante y sin habil.
+            foreach (Echeqs::avisosPrechequeado($filas) as $a) {
+                $payload['warnings'][] = $a;
+            }
 
             echo json_encode([
                 'success' => true,
@@ -329,6 +358,58 @@ try {
                 'message' => $r['deshechos'] . ' marca(s) deshechas. Los cheques vuelven a '
                     . '"Echeqs depositados" si acreditan de mañana en adelante. La marca queda en '
                     . 'el historial, dada de baja.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        /* ================================================================
+           LA FECHA DE ACREDITACION INTERNA DE UN CHEQUE EN PLAZO DE PRESENTACION
+
+           Solo vive en el cashflow. Del navegador llegan SOLO LOS IDS, LA
+           FECHA Y UNA OBSERVACION: Echeqs vuelve a validar todo contra la
+           lectura de la base -que esten en plazo de presentacion y que la fecha
+           sea de manana en adelante, habil y dentro del tope-, todo o nada.
+           Una sola accion para uno -la celda Acredita- y para varios -la
+           barra de seleccion-.
+           ================================================================ */
+        case 'asignarFechaEnPlazo':
+            $data = bodyJson();
+
+            if (!isset($data['ids']) || !is_array($data['ids']) || !isset($data['fecha'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            $r = $echeqs->asignarFechaEnPlazo(
+                $data['ids'],
+                $data['fecha'],
+                isset($data['observacion']) ? $data['observacion'] : null,
+                $usuario,
+                Horizonte::desdeParametros(new Parametros())
+            );
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['asignados'] . ' cheque(s) en plazo de presentación acreditan el '
+                    . date('d/m/Y', strtotime($r['fecha']))
+                    . ($r['reemplazados'] ? ' (' . $r['reemplazados'] . ' reemplazan una fecha anterior, '
+                        . 'que queda en el historial)' : '') . '.',
+                'data' => $r
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'deshacerFechaEnPlazo':
+            $data = bodyJson();
+
+            if (!isset($data['ids']) || !is_array($data['ids'])) {
+                throw new Exception('Faltan parametros obligatorios');
+            }
+
+            $r = $echeqs->deshacerFechaEnPlazo($data['ids'], $usuario);
+
+            echo json_encode([
+                'success' => true,
+                'message' => $r['deshechos'] . ' fecha(s) deshechas: esos cheques vuelven a en plazo de '
+                    . 'presentación sin fecha y dejan de sumar. La fecha queda en el historial, dada de baja.',
                 'data' => $r
             ], JSON_UNESCAPED_UNICODE);
             break;

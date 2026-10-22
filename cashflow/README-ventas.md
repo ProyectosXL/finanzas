@@ -452,21 +452,25 @@ FECHA_VENTA_ESTIMADA = FECHA_CHEQUE − días del CLIENTE
 | Fecha | Qué decide | Con qué |
 | --- | --- | --- |
 | `FECHA_VENTA_EST` | **QUÉ** se muestra y qué netea | `Echeqs::ventaYaCobrada()` |
-| `FECHA_CHEQUE` | **DÓNDE** cae el importe | `Horizonte::ubicar()` |
+| `FECHA_CHEQUE` | **DÓNDE** cae el importe: su **día hábil**, corrida al hábil siguiente si cae un fin de semana o un feriado | `Echeqs::correrAHabil()` y `Horizonte::ubicar()` |
 
-El argumento viejo era que el neteo tenía que caer donde está la cobranza proyectada de esa venta. **Ese razonamiento quedó superado:** lo que interesa es cuándo entra la plata del cheque, y eso lo dice la fecha del cheque. La fecha teórica sigue existiendo, pero sólo como argumento del filtro.
+El argumento viejo era que el neteo tenía que caer donde está la cobranza proyectada de esa venta. **Ese razonamiento quedó superado:** lo que interesa es cuándo entra la plata del cheque, y eso lo dice la fecha del cheque —corrida a su día hábil: el banco no acredita un sábado, un domingo ni un feriado—. La fecha teórica sigue existiendo, pero sólo como argumento del filtro.
 
 **`FECHA_VENTA_EST` sigue viajando en la fila y sigue siendo columna visible**: es el dato que explica *por qué ese cheque está en la lista*, aunque ya no sea el que lo ubica. En la grilla la del cheque va primera y destacada y la estimada queda en gris, como informativa —el mismo idioma que *Importe Factura* en Cobranzas May—.
 
-**La pantalla y el neteo se mueven juntos.** `EcheqsController` arma el eje de la sub-pestaña con `'FECHA_CHEQUE'` y `Ventas::repartirNeteo()` ubica con `$fila['FECHA_CHEQUE']`. Si sólo cambiara uno, el usuario tildaría un cheque en una columna y el tablero lo restaría en otra, **sin ninguna pantalla donde notarlo**. Es el mismo motivo por el que `ventaYaCobrada()` es una sola función.
+**La pantalla y el neteo se mueven juntos, y con la cartera.** `EcheqsController` arma el eje de la sub-pestaña con `'FECHA_EJE'` —la fecha del cheque corrida por `Echeqs::ubicarPrechequeado()`— y `Ventas::repartirNeteo()` ubica con `Echeqs::correrAHabil($fila['FECHA_CHEQUE'])`: **el mismo helper que corre el cheque en *Echeqs en cartera***. Si sólo cambiara uno, el usuario tildaría un cheque en una columna y el tablero lo restaría en otra, **sin ninguna pantalla donde notarlo**; y si la cartera se corriera y el neteo no, el tablero sumaría el cheque un lunes y restaría su venta el sábado anterior. Es el mismo motivo por el que `ventaYaCobrada()` es una sola función. La sub-pestaña muestra la marca **corrida** junto a la fecha del cheque.
 
-El importe cae en el bucket diario de esa fecha, o en el mensual si quedó fuera del tramo diario: es la misma regla de `Horizonte::ubicar()` que usa el resto del módulo, no una copia.
+El importe cae en el bucket diario de ese día hábil, o en el mensual si quedó fuera del tramo diario: es la misma regla de `Horizonte::ubicar()` que usa el resto del módulo, no una copia.
+
+**El calendario es obligatorio.** `repartirNeteo()` lo recibe como parámetro —`getNeteoPrechequeado()` lo lee por `getDiasHabiles()`, la única lectura del módulo— y sin él lanza: un respaldo escrito ahí dejaría los feriados en su fecha sin decirlo. Un mes que no está en `RO_T_CALENDARIO` usa el respaldo de lunes a viernes con el aviso de siempre; sin hábil en el tope, el cheque netea en su fecha con un aviso crítico. Después del fin del eje no se corre, como en la cartera.
+
+**La vista `RO_V_CASHFLOW_VENTAS_PRECHEQ` no cambió**: sigue agrupando por la fecha del cheque, y el corrimiento se hace en PHP. El total no cambia —medido el 21/10/2026: $ 1.154.425.881,01 antes y después—, así que la vista y el cruce de PHP siguen dando el mismo total. Ese día, 28 cheques marcados por $ 168.434.285,84 caían en fin de semana o feriado y cambiaron de columna. Ver *El corrimiento al día hábil* en `README-echeqs.md`.
 
 ### Los días son por cliente, y no hay valor global
 
 Antes eran **uno solo para todos**: el parámetro `dias_prechequeado`. Cada cliente negocia su propio adelanto, así que un único número obliga a elegir cuál de todos queda bien calculado.
 
-**Para qué sirven los días, ahora.** Ya **no corren el importe** a ninguna columna: el importe cae en la fecha del cheque, con días o sin ellos. Lo que los días deciden es **si ese cheque entra o no**. Un cliente que adelanta mucho tiene ventas teóricas más viejas, y las que ya pasaron salen del cashflow.
+**Para qué sirven los días, ahora.** Ya **no corren el importe** a ninguna columna: el importe cae en el día hábil del cheque, con días o sin ellos. Lo que los días deciden es **si ese cheque entra o no**. Un cliente que adelanta mucho tiene ventas teóricas más viejas, y las que ya pasaron salen del cashflow.
 
 - **No hay respaldo global.** Un cliente en cero tiene su venta estimada en la propia fecha del cheque. Un respaldo sería peor que el cero: un cliente sin configurar heredaría un adelanto que nadie eligió para él, y en pantalla sería indistinguible de uno configurado.
 - **Los días se piden en el alta.** Son parte de configurar al cliente, no un dato que se descubre después. Cero es una respuesta válida; que falte, no.

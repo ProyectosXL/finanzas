@@ -342,6 +342,71 @@
     max-width: 130px;
 }
 
+/* EN PLAZO DE PRESENTACION. Sin fecha, en ambar: no suman y piden una fecha.
+   Con fecha, en azul como el depositado: suman, en otra fecha que la del
+   cheque. La de fecha pasada usa la roja de "sin proyectar": pide una
+   accion. El VENCIDO, en gris oscuro: ya no se puede depositar, y lo que pide
+   es resolverlo en Tango. */
+.tab-echeqs .ech-badge-en-plazo,
+.tab-echeqs .ech-badge-en-plazo-fecha,
+.tab-echeqs .ech-badge-vencido {
+    display: inline-block;
+    margin-top: 2px;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-radius: 3px;
+    padding: 0 4px;
+    cursor: help;
+    white-space: normal;
+    max-width: 130px;
+}
+
+.tab-echeqs .ech-badge-en-plazo {
+    color: #7a4b00;
+    background: #fff1d6;
+}
+
+.tab-echeqs .ech-badge-en-plazo-fecha {
+    color: #1d4f91;
+    background: #e3edfb;
+}
+
+.tab-echeqs .ech-badge-vencido {
+    color: #ffffff;
+    background: #6c757d;
+}
+
+/* El selector de la fecha de un cheque en plazo, en la celda Acredita */
+.tab-echeqs .ech-fecha-asignada {
+    min-width: 130px;
+    font-size: 0.78rem;
+    padding: 0 4px;
+}
+
+/* La apertura de "En cartera" en el pie: indentada y en cursiva, porque ya
+   esta sumada en el renglon de arriba. */
+.tab-echeqs tr.ech-fila-subparte td {
+    font-style: italic;
+    font-size: 0.85em;
+}
+
+/* CORRIDA: la fecha del cheque cae un fin de semana o un feriado y el importe
+   esta en el habil siguiente. Es informativa -el cheque suma igual-, asi que
+   va en gris, con la misma forma que las del deposito. */
+.tab-echeqs .ech-badge-corrida {
+    display: inline-block;
+    margin-top: 2px;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-radius: 3px;
+    padding: 0 4px;
+    cursor: help;
+    color: #495057;
+    background: #e9ecef;
+}
+
 /* El depositado NO se atenua: entra al cashflow. Se tine apenas, para que la
    fila se distinga sin leer la marca, y su importe bruto queda en gris porque
    lo que cae en el eje es el neto. */

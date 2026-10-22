@@ -627,13 +627,29 @@ class Ventas {
             $this->warnings[] = Aviso::nuevo(Aviso::DANGER, 'No se pudo leer el neteo de cheques adelantados ('
                 . $e->getMessage() . '). La cobranza se muestra sin netear.');
 
-            return self::repartirNeteo([], $dias, $meses, []);
+            return self::repartirNeteo([], $dias, $meses, [], []);
         }
 
-        $neteo = self::repartirNeteo($filas, $dias, $meses, $diasPorCliente);
+        // El calendario para correr cada cheque al habil siguiente, por esta
+        // misma lectura -la unica del modulo-: de lo mas viejo que se lee hasta
+        // un tramo de corrimiento despues de lo mas lejano.
+        $habiles = [];
+        $fechas = array_filter(array_column($filas, 'FECHA_CHEQUE'));
+
+        if (!empty($fechas)) {
+            $habiles = $this->getDiasHabiles(min($fechas),
+                date('Y-m-d', strtotime(max($fechas) . ' +' . DiasHabiles::MAX_CORRIMIENTO . ' day')));
+        }
+
+        $neteo = self::repartirNeteo($filas, $dias, $meses, $diasPorCliente, $habiles);
 
         foreach (self::avisosNeteo($neteo) as $aviso) {
             $this->warnings[] = $aviso;
+        }
+
+        foreach (array_keys($neteo['sin_habil']) as $fecha) {
+            $this->warnings[] = Aviso::nuevo(Aviso::DANGER, 'Neteo de cheques adelantados: '
+                . DiasHabiles::avisoSinHabil($fecha) . ' Esos cheques netean en su fecha.');
         }
 
         return $neteo;
@@ -651,7 +667,17 @@ class Ventas {
      * DOS FECHAS, DOS FUNCIONES DISTINTAS. Es la regla entera de este metodo:
      *
      *     FECHA_VENTA_EST  decide QUE se muestra y que netea  -> ventaYaCobrada()
-     *     FECHA_CHEQUE     decide DONDE cae                   -> Horizonte::ubicar()
+     *     FECHA_CHEQUE     decide DONDE cae, corrida al dia   -> Echeqs::correrAHabil()
+     *                      habil siguiente si cae un fin de      y Horizonte::ubicar()
+     *                      semana o un feriado
+     *
+     * EL CORRIMIENTO ES EL DE LA CARTERA, Y CON EL MISMO HELPER: el cheque en
+     * "Echeqs en cartera" se corre al habil siguiente, y si el neteo quedara en
+     * la fecha escrita el tablero sumaria el cheque un lunes y restaria su venta
+     * el sabado anterior. La sub-pestana Venta Cobrada Anticipada usa el mismo
+     * helper. El calendario se inyecta -es la lectura de getDiasHabiles()- y
+     * es OBLIGATORIO: un neteo sin calendario no tiene donde correrse, y un
+     * respaldo escrito aca dejaria los feriados en su fecha sin decirlo.
      *
      * Antes las dos las hacia la fecha teorica de venta, y el argumento escrito
      * aca era que el neteo tenia que caer donde esta la cobranza proyectada de
@@ -717,9 +743,15 @@ class Ventas {
      * @param array $dias Lista de fechas 'Y-m-d' del tramo diario
      * @param array $meses Lista de claves 'Y-m' del tramo mensual
      * @param array $diasPorCliente Mapa codigo de cliente => dias
+     * @param array $habiles Mapa 'Y-m-d' => bool de RO_T_CALENDARIO. Obligatorio
      * @return array
      */
-    public static function repartirNeteo($filas, $dias, $meses, $diasPorCliente = []) {
+    public static function repartirNeteo($filas, $dias, $meses, $diasPorCliente, $habiles) {
+        if (!is_array($habiles)) {
+            throw new InvalidArgumentException('El neteo de cheques adelantados necesita el '
+                . 'calendario bancario para correr los cheques al día hábil.');
+        }
+
         $neteo = [
             'dias' => [],
             'meses' => [],
@@ -730,7 +762,12 @@ class Ventas {
             // Cheques que sobreviven al filtro -su venta todavia no ocurrio- y
             // cuya fecha cae mas alla del ultimo mes del eje. Es plata que el
             // tablero deberia restar y no resta. Ver el encabezado.
-            'fuera_horizonte' => 0
+            'fuera_horizonte' => 0,
+            // Del corrimiento: los meses que se corrieron con el respaldo de
+            // lunes a viernes, y las fechas sin habil en el tope -quedaron en
+            // su fecha-. Los avisa avisosNeteo().
+            'calendario_faltante' => [],
+            'sin_habil' => []
         ];
 
         foreach (is_array($dias) ? $dias : [] as $fecha) {
@@ -755,6 +792,15 @@ class Ventas {
         // horizonte solo mensual- se cae a hoy, que es donde arranca el eje de
         // todos modos.
         $inicio = !empty($neteo['dias']) ? min(array_keys($neteo['dias'])) : date('Y-m-d');
+
+        // El fin del eje: lo posterior no se corre, como en la cartera
+        // (Echeqs::correrAHabil()).
+        $tope = empty($neteo['meses']) ? null
+            : date('Y-m-t', strtotime(max(array_keys($neteo['meses'])) . '-01'));
+
+        if (!empty($neteo['dias']) && ($tope === null || max(array_keys($neteo['dias'])) > $tope)) {
+            $tope = max(array_keys($neteo['dias']));
+        }
 
         foreach (is_array($filas) ? $filas : [] as $fila) {
             $importe = floatval($fila['IMPORTE']);
@@ -788,9 +834,21 @@ class Ventas {
                 continue;
             }
 
-            // UBICACION: la fecha del CHEQUE decide en que columna cae. Es
-            // cuando entra la plata, que es lo que el cuadro describe.
-            $destino = Horizonte::ubicar($neteo, $fila['FECHA_CHEQUE']);
+            // UBICACION: la fecha del CHEQUE, corrida al habil siguiente,
+            // decide en que columna cae. Es cuando entra la plata, que es lo
+            // que el cuadro describe, y es la columna del cheque en "Echeqs en
+            // cartera": el mismo helper.
+            $c = Echeqs::correrAHabil($fila['FECHA_CHEQUE'], $habiles, $tope);
+
+            foreach ($c['faltan'] as $mes) {
+                $neteo['calendario_faltante'][$mes] = true;
+            }
+
+            if ($c['sin_habil']) {
+                $neteo['sin_habil'][$c['fecha']] = true;
+            }
+
+            $destino = Horizonte::ubicar($neteo, $c['fecha']);
 
             // Sin columna, el cheque vence mas alla del ultimo mes del eje. Su
             // venta SI puede estar adentro -la fecha del cheque es posterior o
@@ -873,6 +931,17 @@ class Ventas {
                 . 'ningún canal y sólo se restan del total. La fila total de cobranza y su '
                 . 'apertura por canal no reconcilian por ese importe.';
         }
+
+        // Los del corrimiento al dia habil, con el texto de siempre.
+        $faltan = isset($neteo['calendario_faltante']) ? array_keys($neteo['calendario_faltante']) : [];
+        sort($faltan);
+
+        foreach (DiasHabiles::avisosCalendario($faltan) as $t) {
+            $avisos[] = 'Neteo de cheques adelantados: ' . $t;
+        }
+
+        // Los de 'sin_habil' no van aca: son criticos, y esta lista es de
+        // atencion. Los agrega getNeteoPrechequeado() con su nivel.
 
         return $avisos;
     }
