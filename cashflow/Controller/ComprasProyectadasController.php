@@ -98,10 +98,10 @@ try {
             $datos = $provider->datos();
             $avisos = [];
 
+            /* El control de la vista y los del % importado llegan con los del
+               proveedor, abajo: los calcula series(). */
             foreach ([$datos->avisoFaltaJob(), $datos->avisoSinPagos(),
-                      $datos->avisoSinAjustes(),
-                      ComprasProyectadasDatos::avisoContraste(
-                          $datos->contrasteVista(ComprasProyectadasProvider::PAIS))] as $a) {
+                      $datos->avisoSinAjustes()] as $a) {
                 if ($a !== '') {
                     $avisos[] = $a;
                 }
