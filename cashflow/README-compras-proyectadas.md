@@ -54,9 +54,10 @@ Contra `central`:
 | --- | --- | --- | --- |
 | 1 | `sql/cashflow_estructura_grupos.sql` | *(ya existía)* Agrega `GRUPO`, `NATURALEZA` y `GRUPO_NOMBRE` | Las dos filas nuevas se crean igual, **sueltas**, y el script lo avisa. El tablero muestra cuatro filas en vez de dos renglones que se abren. **Ningún importe cambia**: la agrupación es presentación |
 | 2 | `sql/cashflow_compras_proyectadas.sql` | Crea las dos filas del tablero, asigna los dos grupos, crea `RO_T_CASHFLOW_COMPRAS_PROY_AJUSTE` y siembra los siete parámetros | La pestaña avisa y no rompe. Las dos filas no existen, así que **el tablero queda exactamente como hoy**, sin parte proyectada y sin ningún número cambiado |
-| 3 | `sql/cashflow_comex_materializado.sql` | Crea `RO_T_CASHFLOW_JOB_LOG`, `RO_T_CASHFLOW_COMEX_RECEP_HIST`, `RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN` y `RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE` | **Las dos filas van en CERO** y el primer aviso dice qué job falta. Ver la sección 10 |
+| 3 | `sql/cashflow_comex_materializado.sql` | Crea `RO_T_CASHFLOW_JOB_LOG`, `RO_T_CASHFLOW_COMEX_RECEP_HIST`, `RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN`, `RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE` y `RO_T_CASHFLOW_COMEX_PRESUP_RUBRO`, y agrega `FOB_PRESUPUESTO_USD` al resumen. En una base que ya lo tenía corrido, volver a correrlo agrega sólo esas dos cosas | **Las dos filas van en CERO** y el primer aviso dice qué job falta. Ver la sección 10 |
+| 3b | `sql/cashflow_compras_proy_rubro_pct.sql` | Crea `RO_T_CASHFLOW_COMPRAS_PROY_RUBRO_PCT` y siembra los 20 rubros. Ver la sección 7 | El SP del presupuesto **no recalcula** y deja el último cálculo; Parámetros y la pestaña dicen qué script falta |
 | 4 | `sql/RO_SP_CASHFLOW_COMEX_RECEP_HIST.sql` | El SP de la historia de recepciones, con la programación sugerida al pie | Historia vacía: filas en cero, avisando |
-| 5 | `sql/RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN.sql` | El SP del presupuesto oficial y el contraste, por `[XL-APPS]`, con la programación sugerida al pie | Presupuesto vacío: filas en cero, avisando |
+| 5 | `sql/RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN.sql` | El SP del presupuesto oficial —con el % importado aplicado—, el presupuesto por rubro y el contraste, por `[XL-APPS]`, con la programación sugerida al pie. **Sin el script 3 vuelto a correr, no se crea**: nombra `FOB_PRESUPUESTO_USD` | Presupuesto vacío: filas en cero, avisando |
 
 Después de los scripts 4 y 5 hay que **correr los dos SP una vez** (o apretar *Actualizar ahora* en la pestaña) y **crear los jobs** del SQL Agent. Los jobs no los crea ningún script.
 
@@ -314,6 +315,7 @@ Módulo **`COMPRAS_PROY`** en *Parámetros*, sub-pestaña *Compras Exterior*.
 | `compras_proy_dia_llegada` | 15 | Día del mes en que se ubica la recepción |
 | `compras_proy_dias_pago` | 47 | Días entre el pago del FOB y la recepción |
 | `compras_proy_dias_nac` | 2 | Días entre la nacionalización y la recepción |
+| **% importado por rubro** | ver sección 7 | Qué parte de cada rubro del presupuesto se compra en el exterior y entra en la proyección: 100 % entra completo, 0 % queda excluido, 60 % proyecta el 60 % de su FOB. **No es una clave de `RO_T_CASHFLOW_PARAMETROS`**: es una tabla propia, `RO_T_CASHFLOW_COMPRAS_PROY_RUBRO_PCT`, con historial. Se edita en la sección *% importado por rubro* de esta misma sub-pestaña. De 0 a 100 con hasta dos decimales, validado en el servidor |
 | `comex_fecha_mov_desde` | 2025-01-01 | **De Comercio Exterior, no de esta proyección**: desde qué fecha de movimiento de la OC principal se consideran los contenedores de Proveedores Exterior, de Crono Nacionalización y de lo ya cargado que se descuenta acá. Lo siembra `sql/cashflow_comex_fecha_mov_desde.sql`; sin él vale el inicial y esta pantalla dice qué script falta. Una fecha, no futura, validada en el servidor. Ver `README-comex.md`, sección 12 |
 
 ### Los tres de días son del cashflow, y no leen la cadena de Comex
@@ -330,27 +332,100 @@ En el script y en `ComprasProyectadasProvider::DEFAULTS`. Sin el script, la fila
 
 ---
 
-## 7. El filtro de la vista, que el cashflow no controla
+## 7. El % importado por rubro, que decide el cashflow
 
-`RO_V_COMPRA_PROYECTADA_VIGENTE` tiene hoy un `WHERE` que el script del repo **compras** no tiene:
+Rama: `feature/proyeccion-pct-importado-rubro`.
 
-```sql
-AND d.rubro NOT LIKE '%cuero%'
+### De dónde viene
+
+`RO_V_COMPRA_PROYECTADA_VIGENTE` tenía un `WHERE` propio, `d.rubro NOT LIKE '%cuero%'`, que el script del repo **compras** no tenía y que desde el cashflow era invisible. **Ese filtro se sacó: la vista devuelve hoy todos los rubros**, igual que su definición en el repo. Qué parte de cada rubro entra en la proyección lo decide ahora el cashflow.
+
+### La regla
+
+Cada rubro del presupuesto tiene un **% importado**: la parte que se compra en el exterior. El resto se compra o se fabrica en el país, y no entra.
+
+| % | Qué pasa |
+| ---: | --- |
+| 100 | El rubro entra completo |
+| 0 | El rubro queda excluido |
+| 60 | Se proyecta el 60 % de su FOB |
+
+Es **sólo por rubro**, sin apertura por categoría, y se aplica **en el job, fila por fila, antes de sumar** por temporada:
+
+```
+FOB del rubro × % importado / 100
 ```
 
-Es **deliberado** —decisión del área— y deja afuera, sobre el tramo objetivo de las dos oficiales, **34 filas por U$S 2.196.094,90 de FOB**: carteras, cintos, billeteras y accesorios de cuero.
+`RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN` lee la vista **una sola vez** a `#FILAS`, cruza en local cada fila con su % y multiplica `FOB_USD`, `UNIDADES`, `UNIDADES_SIN_COSTO`, `NAC_SEGUN_INC_FOB` y `DEFICIT_COBERTURA`, para que todos los totales describan la misma mercadería. `FILAS` y `FILAS_SIN_COSTO` cuentan sólo las filas con % mayor a 0: una fila sin costo de un rubro en 0 % no le quita nada a la proyección.
 
-Desde el cashflow ese filtro es **invisible**: la vista devuelve 55 filas y nada dice que en las tablas hay 72. Por eso `ComprasProyectadasDatos::contrasteVista()` compara la vista contra sus tablas de origen y la pestaña lo informa. El control no opina sobre el filtro; hace que la diferencia se vea.
+- **La nacionalización proyectada baja sola, en la misma proporción.** No sale del SP: el cashflow la calcula como `estimación × compras_proy_nac_pct`, y la estimación parte del `fob_usd` del resumen, que ya viene reducido (`ComprasProyectadas.php`, `proyectado_usd` y `conNacionalizacion()`).
+- **El descuento de lo ya comprado y el reparto por mes no cambian**: trabajan sobre el FOB resultante.
+- **El ajuste manual por mes no se toca**: reemplaza la estimación, así que el % no lo afecta.
 
-> **Pendiente del lado del repo compras**: el filtro vive **sólo en la base**. El bloque 4 del `05_baja_logica_versiones.sql` usa `CREATE OR ALTER`, así que la próxima corrida de ese script lo borra en silencio y el tablero empieza a proyectar esos U$S 2,2 M sin que nadie lo decida. Hay que bajarlo al script allá.
+### La tabla
+
+`RO_T_CASHFLOW_COMPRAS_PROY_RUBRO_PCT`, en central, la crea `sql/cashflow_compras_proy_rubro_pct.sql`: `RUBRO`, `PCT_IMPORTADO` (`DECIMAL(5,2)`, `CHECK` de 0 a 100), `VIGENTE` y las seis columnas de auditoría.
+
+- **Sin bajas físicas.** Cambiar un % marca `VIGENTE = 0` la fila anterior e inserta una nueva, en la misma transacción (`ComprasProyectadasRubros::guardar()`). El índice único filtrado `UX_RO_T_CF_CPRUB_RUBRO_VIGENTE` (`RUBRO` con `VIGENTE = 1`) impide dos vigentes del mismo rubro.
+- **El rubro se guarda normalizado**: en mayúsculas, sin espacios en las puntas y con los repetidos colapsados a uno. El SP normaliza igual el rubro de la vista antes de cruzarlos, así que *"Cosmetica "* encuentra a *COSMETICA*. Las dos normalizaciones —`ComprasProyectadasRubros::normalizar()` y la cadena de `REPLACE` del SP— están fijadas por una prueba que las compara.
+- **Un rubro que no está en el presupuesto ni en la tabla no se puede cargar**: el servidor lo rechaza, porque se guardaría bien y no aplicaría a nada.
+
+**Valores iniciales**, sembrados por el script sin pisar un rubro que ya tenga % vigente:
+
+| % | Rubros |
+| ---: | --- |
+| 0 | Accesorios, billeteras, carteras y cintos de cuero; cosmética; lentes; relojes |
+| 100 | Accesorios, billeteras y carteras de vinílico; bijou; calzados; camperas; chalinas; equipajes; home; indumentaria; llaveros; paraguas; toallas |
+
+Los 20 son **exactamente** los rubros que devuelve hoy la vista, verificado contra la base el 25/10/2026, y ya vienen en mayúsculas y sin espacios de más.
+
+### Un rubro nuevo entra al 100 %, avisando
+
+Un rubro que aparece en el presupuesto y no está en la tabla **entra al 100 %** (`ISNULL(pct, 100)`), y se avisa en la pestaña Proyección, en el tablero y en Parámetros:
+
+> *Rubro nuevo sin configurar: X. Se está proyectando al 100%. Asignale su % importado en Parámetros › Compras Exterior.*
+
+Ni el job ni el cashflow lo dan de alta: sigue sin configurar hasta que alguien le asigne un %. El aviso se arma contra los % de **ahora**, así que desaparece apenas se guarda uno, aunque el job todavía no haya corrido.
+
+### Un cambio rige desde que se guarda, y se ve al recalcular
+
+No hay vigencias por temporada. La proyección toma el % nuevo en la próxima corrida del job, o antes con **Recalcular la proyección** (en la misma sección de Parámetros, corre sólo el SP del presupuesto) o con *Actualizar ahora* en la pestaña Proyección. Mientras tanto, las tres pantallas avisan:
+
+> *Hay cambios de % importado del dd/mm hh:mm, posteriores al último cálculo del presupuesto (…): todavía no se ven en la proyección.*
+
+El guardado **no dispara** el recálculo: el SP pasa por el linked server, que es lo más frágil, y quien edita cinco rubros dispararía cinco corridas.
+
+### Lo que queda fuera, a la vista
+
+Informativo, en las tres pantallas, sobre el FOB **completo** de las versiones oficiales —el mismo que muestran Parámetros y el detalle de cada versión—, no sólo sobre la parte de la ventana:
+
+> *Por el % importado quedan fuera de la proyección U$S X de FOB (N rubros en 0% y M con % parcial).*
+
+Sale de `RO_T_CASHFLOW_COMEX_PRESUP_RUBRO`, que el SP llena en la misma corrida que el resumen: describe exactamente el % que se aplicó. Un rubro en las dos temporadas cuenta una vez.
+
+Con los valores iniciales y el presupuesto del 25/10/2026:
+
+| Temporada | FOB presupuesto | En 0 % | FOB proyectado |
+| --- | ---: | ---: | ---: |
+| INV 27 | 1.244.457,70 | 916.001,70 | 328.456,00 |
+| VER 27-28 | 5.720.928,04 | 1.186.760,30 | 4.534.167,74 |
+| **Total** | **6.965.385,74** | **2.102.762,00** | **4.862.623,74** |
+
+> **Hasta que se corran los scripts, producción está proyectando el cuero.** El job de las 06:30 del 25/10/2026 ya leyó la vista sin filtro: el resumen tiene los U$S 6.965.385,74 completos, cosmética, lentes y relojes incluidos.
+
+### El control de la vista se queda, como control
+
+`RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE` **se reutiliza tal cual**. Ya no explica un filtro deliberado: controla que no aparezca uno nuevo. La vista y la consulta del contraste usan el mismo criterio —`es_oficial = 1 AND eliminada = 0` y los mismos tres JOIN—, así que sin filtro tienen que dar lo mismo, y dan: **144 filas y U$S 6.965.385,74** de los dos lados, el 25/10/2026.
+
+Si la vista vuelve a devolver menos filas que sus tablas, `ComprasProyectadasDatos::avisoControlVista()` avisa en **crítico**: alguien le puso un filtro en la base que el cashflow no ve, y la proyección sale de menos. El aviso viejo —*"La vista del presupuesto deja afuera N filas…"*— ya no existe.
 
 ---
 
 ## 8. Qué se ve en la pestaña
 
 - **La grilla de cobertura**: un renglón por mes de recepción, con su temporada, su versión, su **estado**, la cuota, lo proyectado, lo ya comprado, la estimación, y las dos fechas con su cotización y su importe en pesos.
-- **Las versiones oficiales**, con el `inc_fob` del presupuesto al lado del porcentaje que el cashflow aplica, fila por fila.
-- **El detalle por rubro** de cada versión, en un modal. Las filas **sin costo** se marcan en vez de multiplicarse por cero: un `NULL` tratado como cero es una afirmación —*"esa mercadería no cuesta nada"*— que nadie hizo. En la base hay dos por versión.
+- **Las versiones oficiales**, con el `inc_fob` del presupuesto al lado del porcentaje que el cashflow aplica, fila por fila. El FOB es el **proyectado**, ya con el % importado de cada rubro; al lado, en gris, el **FOB del presupuesto** sin ajustar, que es el que muestra la app de compras.
+- **El detalle por rubro** de cada versión, en un modal, con el **% importado** y el **FOB proyectado** de cada fila. Los rubros en 0 % se ven atenuados y los sin configurar, marcados *"sin configurar (100%)"*. El % es el vigente hoy; si cambió después del último cálculo, el aviso de cambios sin recalcular lo dice. Las filas **sin costo** se marcan en vez de multiplicarse por cero: un `NULL` tratado como cero es una afirmación —*"esa mercadería no cuesta nada"*— que nadie hizo. En la base hay dos por versión.
 - **Cuatro KPIs**. El exceso se dice en el pie de *Ya comprado* y no se resta de ningún lado.
 - **"Ya comprado" no es la parte real.** Es sólo lo comprado **después** de calcular el presupuesto oficial de la temporada; lo anterior ya está adentro del presupuesto. Se leía al revés —un mes con contenedores reales mostraba "—"—, así que el encabezado lo explica, la celda muestra en gris las OC **previas** que se pagan ese mes con su importe, y una nota al pie las suma. Al 24/09/2026, con 8 meses de ventana: **18 contenedores por U$S 1.120.365,00**, todos con OC del 13/08/2026, contra versiones calculadas el 22 y el 23/09. Su pago está en *Proveedores Exterior*.
 - **El ajuste manual** por mes, con su historial completo.
@@ -432,7 +507,8 @@ Una sola consulta era el 95 % del tiempo. STA20 tiene 11,9 millones de filas, y 
 | --- | --- | --- |
 | Historia de recepciones | `RO_T_CASHFLOW_COMEX_RECEP_HIST`, por `RO_SP_CASHFLOW_COMEX_RECEP_HIST` | Es historia de años cerrados. Se guardan **diez años**: cambiar `compras_proy_anios_cuota` no obliga a correr nada, PHP filtra los que usa |
 | Presupuesto oficial por temporada | `RO_T_CASHFLOW_COMEX_PRESUP_RESUMEN`, por `RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN` | Cambia cuando alguien marca una versión, no en cada pedido |
-| Contraste de la vista | `RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE`, mismo SP | Sale de las mismas tablas y en el mismo momento |
+| Contraste de la vista | `RO_T_CASHFLOW_COMEX_PRESUP_CONTRASTE`, mismo SP | Sale de las mismas tablas y en el mismo momento. Hoy es un control: ver la sección 7 |
+| Presupuesto por rubro, con el % aplicado | `RO_T_CASHFLOW_COMEX_PRESUP_RUBRO`, mismo SP | Los avisos del % y el FOB por rubro de Parámetros tienen que describir lo que el job aplicó, no un presupuesto más nuevo |
 | Detalle por rubro de una versión | **en vivo** | Sólo se pide al abrir el modal |
 | Lo ya comprado, los ajustes, la curva | **en vivo** | Un contenedor cargado tiene que descontar en el momento. Y juntos tardan menos de medio segundo |
 
@@ -476,7 +552,7 @@ Lo ideal para el presupuesto es que la app de compras arranque el job (`sp_start
 
 ### Cómo lo lee el cashflow
 
-`ComprasProyectadasDatos` lee las tres tablas en vez de las fuentes: `historiaRecepciones()` filtra de la tabla los años que pide la cuota, `versionesOficiales()` y `contrasteVista()` leen el resumen y el contraste. La consulta en vivo de la historia **no se borró**: quedó como `historiaRecepcionesEnVivo()`, la definición contra la que una prueba verifica el SP. El proveedor no la llama.
+`ComprasProyectadasDatos` lee las tres tablas en vez de las fuentes: `historiaRecepciones()` filtra de la tabla los años que pide la cuota, `versionesOficiales()`, `presupuestoPorRubro()` y `contrasteVista()` leen el resumen, el presupuesto por rubro y el contraste. La consulta en vivo de la historia **no se borró**: quedó como `historiaRecepcionesEnVivo()`, la definición contra la que una prueba verifica el SP. El proveedor no la llama.
 
 El estado de los insumos —qué tablas existen, cuánto tienen y cómo salieron las últimas corridas— se lee **una vez por pedido** (`estadoInsumos()`), y **la pestaña usa las mismas lecturas que el proveedor** (`$provider->datos()`). Antes el controller creaba otra instancia y volvía a preguntar todo: el contraste y la existencia de la vista se leían dos veces por pedido.
 
@@ -520,7 +596,7 @@ El **después** se midió con las tablas creadas y vacías: las lecturas de la h
 
 ## Lo que este módulo no hace
 
-- **No escribe en tablas de compras, de Tango ni de Comercio Exterior.** Las tres se leen y se dejan como están. Hay una prueba que busca `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `DROP` y `TRUNCATE` sobre `ComprasProyectadas.php` y `ComprasProyectadasDatos.php` y exige cero en las seis. Lo único que escribe es del cashflow: la tabla de ajustes y, desde *Actualizar ahora*, las tablas materializadas —corriendo los mismos SP que el job—. Las dos cosas viven en clases aparte (`ComprasProyectadasAjustes` y `ComprasProyectadasJob`) **para que esa prueba siga siendo posible**.
+- **No escribe en tablas de compras, de Tango ni de Comercio Exterior.** Las tres se leen y se dejan como están. Hay una prueba que busca `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `DROP` y `TRUNCATE` sobre `ComprasProyectadas.php` y `ComprasProyectadasDatos.php` y exige cero en las seis. Lo único que escribe es del cashflow: la tabla de ajustes, la del % importado por rubro y, desde *Actualizar ahora* o *Recalcular la proyección*, las tablas materializadas —corriendo los mismos SP que el job—. Las tres cosas viven en clases aparte (`ComprasProyectadasAjustes`, `ComprasProyectadasRubros` y `ComprasProyectadasJob`) **para que esa prueba siga siendo posible**.
 - **No toca las filas existentes del tablero.** *Proveedores Exterior* y *Nacionalizaciones* siguen trayendo exactamente lo que traían: los contenedores cargados, ubicados por sus fechas del maestro. El script sólo les declara su `NATURALEZA`.
 - **No proyecta flete ni seguro.** Son costos logísticos y quedaron fuera de alcance. Es el mismo pendiente que anota `README-comex.md`: al 21/09/2026 son U$S 208.560,00 y U$S 5.353,05 sobre 60 contenedores.
 - **Sólo Argentina.** Uruguay tiene su propia base (`POWER_BI_CONTROL_URUGUAY`) y su propio presupuesto.
@@ -540,7 +616,8 @@ php cashflow/tests/run.php compras_proyectadas
 | `tests/test_compras_proyectadas_provider.php` | El proveedor, el registro, el script y el cableado de la pantalla. 112 |
 | `tests/test_compras_proyectadas_ajustes.php` | El ajuste manual y su descarte. 64 |
 | `tests/test_compras_proyectadas_materializado.php` | Los scripts del job, la lectura de las tablas, los avisos de insumos faltantes o viejos, y —contra la base, con los SP corridos— que el SP de historia dé lo mismo que la lectura en vivo para 2023–2025 y que la pestaña tarde menos de 2 s |
-| | **459 en total** |
+| `tests/test_compras_proyectadas_rubros.php` | El % importado: se aplica antes de sumar (0, 100 y 60 %), el rubro sin configurar entra al 100 % y avisa, la normalización de PHP y la del SP dan lo mismo, la baja y el alta van en una transacción con un solo vigente, el rango y el usuario se validan en el servidor, la semilla no pisa lo editado, y el aviso de lo excluido es la suma de los rubros. 118, todas sin escritura en la base |
+| | **606 en total** |
 
 Lo que necesita SQL Server se saltea solo, y **es todo de lectura**: ninguna prueba da de alta ni de baja un ajuste contra la base real.
 
@@ -573,10 +650,12 @@ Dos cosas que las pruebas fijan **porque ya fallaron de verdad** en la primera c
 sql/cashflow_compras_proyectadas.sql          Las dos filas, los grupos, la tabla y los parametros
 sql/cashflow_comex_materializado.sql          El log de corridas y las tres tablas materializadas
 sql/RO_SP_CASHFLOW_COMEX_RECEP_HIST.sql       El SP de la historia de recepciones
-sql/RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN.sql   El SP del presupuesto oficial y el contraste
+sql/cashflow_compras_proy_rubro_pct.sql       La tabla del % importado por rubro y su semilla
+sql/RO_SP_CASHFLOW_COMEX_PRESUP_RESUMEN.sql   El SP del presupuesto oficial, con el %, por rubro y el contraste
 cashflow/Class/ComprasProyectadas.php         Las reglas PURAS: temporada, cuota, ventana y la estimacion
 cashflow/Class/ComprasProyectadasDatos.php    Las lecturas y el estado de los insumos. NO escribe nada
 cashflow/Class/ComprasProyectadasAjustes.php  Escribe el ajuste manual
+cashflow/Class/ComprasProyectadasRubros.php   La regla del % importado y su guardado con historial
 cashflow/Class/ComprasProyectadasJob.php      Corre los dos SP desde "Actualizar ahora"
 cashflow/Class/Providers/ComprasProyectadasProvider.php   Las dos series del tablero
 cashflow/Class/CashflowRegistry.php           El modulo y sus dos series
@@ -591,6 +670,7 @@ tests/test_compras_proyectadas_estimacion.php
 tests/test_compras_proyectadas_provider.php
 tests/test_compras_proyectadas_ajustes.php
 tests/test_compras_proyectadas_materializado.php
+tests/test_compras_proyectadas_rubros.php
 ```
 
 Lo que se lee y **nunca** se escribe, de tres duenios distintos:
@@ -610,7 +690,7 @@ central (Comex)    RO_T_IMPORTACIONES_ENCABEZADO      lo ya comprado
 
 ## Pendientes conocidos
 
-- **El filtro de cuero vive sólo en la base.** Hay que bajarlo al `05_baja_logica_versiones.sql` del repo compras o la próxima corrida lo borra. Ver la sección 7.
+- **El % importado no tiene vigencias por temporada.** Un cambio rige desde que se guarda para todas las temporadas. Si algún día un rubro pasa a fabricarse en el país a partir de una temporada, hoy se resuelve cambiando el % cuando empieza a regir.
 - **La nacionalización de los últimos meses de la ventana cae fuera del eje.** Es estructural, está avisado con su importe, y se corrige subiendo `horizonte_meses`. Ver la sección 9.
 - **El ajuste se firma con el usuario de la sesión** (`USUARIO_ALTA`, y `USUARIO_BAJA` al sacarlo), y *Actualizar ahora* deja en `RO_T_CASHFLOW_JOB_LOG` a la persona que lo apretó. El job del SQL Agent pasa `JOB:COMEX_RECEP_HIST` / `JOB:COMEX_PRESUP`, y los SP ya no caen en `SUSER_SNAME()`. Ver *Auditoría y permisos de escritura* en `README-cashflow.md`.
 - **El ajuste manual no tiene una pantalla propia de historial global.** Se ve por mes, desde el modal. `getHistorialAjustes` sin `mes` ya devuelve todo; falta la pantalla. Mismo estado que el historial de fechas de Comex.
